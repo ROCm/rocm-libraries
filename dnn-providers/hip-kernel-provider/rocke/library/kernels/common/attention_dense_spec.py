@@ -580,36 +580,94 @@ class AttentionDenseSpec:
         return kernel_name_join(*parts)
 
 
-#: The one dtype an fp8 KV loader decodes. The K/V pointers are declared OCP
-#: fp8e4m3, so a bf16 or FNUZ tensor is read as OCP and silently produces wrong
-#: output. Compared by name so no torch import is needed, which also rejects
-#: ``torch.float8_e4m3fnuz``.
+#: KV-cache storage formats a dense spec may declare. ``None`` (the default)
+#: keeps KV at the compute dtype. Shared by every arch's dense spec so the two
+#: ``__post_init__`` validations cannot admit different sets.
+KV_STORAGE_DTYPES = frozenset({"fp8e4m3"})
+
+#: The two e4m3 encodings an fp8 KV loader can be handed. Compared by name so
+#: no torch import is needed (torch is optional in this tree), which also makes
+#: the two spellings distinguishable without a dtype object.
 OCP_FP8_KV_DTYPE = "torch.float8_e4m3fn"
+FNUZ_FP8_KV_DTYPE = "torch.float8_e4m3fnuz"
 
 
-def require_ocp_fp8_kv(named_tensors) -> None:
-    """Raise unless every ``(name, tensor)`` is OCP fp8 K/V.
+def fp8_kv_dtype_for_arch(arch: str) -> str:
+    """The one e4m3 encoding an fp8 KV loader decodes correctly on ``arch``.
+
+    The dequant chain the loaders emit (``cvt_pk_f32_fp8x4``) is *identical IR*
+    on every target, but the hardware decodes the byte as its own native fp8
+    format: e4m3fnuz (bias 8, no inf/nan) on the ``gfx9_mfma`` family, OCP
+    e4m3fn (bias 7, with inf/nan) on gfx950 and gfx11. Handing a kernel the
+    other encoding is not an error the kernel can detect -- it silently decodes
+    to different numbers -- so the dtype is checked on the host instead.
+
+    ``ArchTarget.target_family`` against ``_FNUZ_FP8_TARGET_FAMILIES`` is the
+    SSOT discriminator, the same one ``fmha_fwd_fp8.is_valid_spec``,
+    ``attention_unified._reject_fp8_format_arch_mismatch`` and
+    ``dispatch.attention.tuning_specs.validate_explicit_fp8_encoding`` use. See
+    the G3 note in ``kernels.common.fmha_fwd_fp8`` for the full statement.
+    """
+    from rocke.core.arch import ArchTarget, base_arch_from_target_id
+
+    from .fmha_fwd_fp8 import _FNUZ_FP8_TARGET_FAMILIES
+
+    if not arch or not arch.strip():
+        raise ValueError(
+            "fp8 KV dtype check needs an explicit arch; the correct encoding "
+            "differs per target (FNUZ on gfx9_mfma, OCP on gfx950) and "
+            "guessing it would defeat the check"
+        )
+    # Accept a decorated target ID ("gfx942:sramecc+") and mixed case: it is
+    # what a HIP device query returns, and ArchTarget.from_gfx does not take it.
+    #
+    # FOLLOW-UP: _FNUZ_FP8_TARGET_FAMILIES is a single source of
+    # truth, but this two-line derivation off it is now repeated at five
+    # independent sites -- here, dispatch/attention/tuning_specs.py,
+    # attention_unified.py, and two benchmarks under benchmarks/. The other four
+    # pass `arch` to ArchTarget.from_gfx raw, so each one raises KeyError on the
+    # decorated or upper-case string a HIP device query actually returns. They
+    # are reached with already-normalised arch names today, which is why this is
+    # latent rather than broken. Folding all five into one arch_fp8_is_fnuz(arch)
+    # next to _FNUZ_FP8_TARGET_FAMILIES fixes that in one place.
+    target = ArchTarget.from_gfx(base_arch_from_target_id(arch.strip().lower()))
+    if target.target_family in _FNUZ_FP8_TARGET_FAMILIES:
+        return FNUZ_FP8_KV_DTYPE
+    return OCP_FP8_KV_DTYPE
+
+
+def require_fp8_kv_dtype(named_tensors, *, arch: str) -> None:
+    """Raise unless every ``(name, tensor)`` carries ``arch``'s native fp8 e4m3.
 
     The single home of the fp8 K/V dtype rule. It lives beside
     :attr:`AttentionDenseSpec.kv_elem_bytes`, which is what makes the rule
     load-bearing, so the dispatch binding and the runner enforce one wording
     instead of two. ``kernels`` may not import ``dispatch``, so a checker that
     both layers share has to live here.
+
+    Parametrised by ``arch`` rather than pinned to OCP: gfx950 dense wants OCP
+    and gfx942 dense wants FNUZ, and a second copy of the rule for the second
+    arch is how the two wordings drift. A bf16 tensor, or the *other* e4m3
+    spelling, is rejected either way -- both are read as the native encoding
+    and silently produce wrong output.
     """
+    expected = fp8_kv_dtype_for_arch(arch)
+    label = "FNUZ" if expected == FNUZ_FP8_KV_DTYPE else "OCP"
     for name, tensor in named_tensors:
         dtype = getattr(tensor, "dtype", None)
-        if str(dtype) != OCP_FP8_KV_DTYPE:
+        if str(dtype) != expected:
             raise ValueError(
-                f"fp8 dense expects OCP fp8 {name} ({OCP_FP8_KV_DTYPE}), got "
-                f"{dtype!r}; a bf16 or FNUZ tensor is read as OCP fp8 and "
-                "silently produces wrong output"
+                f"fp8 dense on {arch} expects {label} fp8 {name} ({expected}), "
+                f"got {dtype!r}; {arch} decodes the fp8 byte as {label}, so a "
+                "bf16 tensor or the other e4m3 encoding is read as "
+                f"{label} and silently produces wrong output"
             )
 
 
 def require_fp8_kv_scale(name: str, value, label: str) -> float:
     """Return one per-tensor fp8 dequant scale as a float, or raise.
 
-    The companion of :func:`require_ocp_fp8_kv`, and the single home of the
+    The companion of :func:`require_fp8_kv_dtype`, and the single home of the
     missing-scale rule. Both the dispatch binding and the runner enforce it, so
     it lives here for the same reason the dtype rule does: ``kernels`` may not
     import ``dispatch``. Defaulting a missing scale to 1.0 would silently

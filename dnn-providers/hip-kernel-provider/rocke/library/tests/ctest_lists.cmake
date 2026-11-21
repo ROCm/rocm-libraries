@@ -272,6 +272,7 @@ set(_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS
     "tests/library/tests/oracle_free/test_contracts.py"
     "tests/library/tests/oracle_free/test_permutation_contracts.py"
     "tests/library/tests/test_attention_dense_gfx942.py"
+    "tests/library/tests/test_attention_fp8_kv_load_helper.py"
     "tests/library/tests/test_attention_combo_sweep_fp8.py"
     "tests/library/tests/test_dense_prefill_emit_shapes.py"
     "tests/library/tests/dispatch/attention/test_review_followups.py"

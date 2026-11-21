@@ -341,6 +341,9 @@ _PRIVATE_PERTURBATIONS = {
     "window_wave_skip": (True,),  # legal only with a causal window -> the *_swa base
     "emit_lse": (True, False),
     "kv_segments": (2, 4),  # default grid only; skipped on the persistent base
+    # fp8 KV: legal only on the naive-V (non-cfvst) bases -- _fp8_kv_refusal
+    # rejects the transposed V^T path, paged/varlen, persistent and sinks.
+    "kv_storage_dtype": ("fp8e4m3",),
 }
 
 _PERTURBATIONS = {**_SPEC_PERTURBATIONS, **_PRIVATE_PERTURBATIONS}
@@ -1753,6 +1756,17 @@ _CONTRACT_GRID = [
     dict(dtype="fp16", use_cfvst=False),  # accepted: OFF is always legal
     dict(head_size=64, use_cfvst=True),  # REJECTED: policy says off at D64
     dict(dtype="bf16", head_size=128, use_cfvst=True),  # accepted: policy on at D128
+    # --- private: kv_storage_dtype (fp8 KV; the sync-dequant loader replaces the DMA)
+    # accepted: D64, where cfvst is off, so V_lds is the natural [token, dim]
+    # layout the loader fills. block_m=128 makes block_n*head_size divisible by
+    # threads*8.
+    dict(head_size=64, block_m=128, kv_storage_dtype="fp8e4m3"),
+    # accepted at D128 too, once cfvst is off: the refusal below is about the
+    # transposed V layout, not the head size.
+    dict(block_m=128, use_cfvst=False, kv_storage_dtype="fp8e4m3"),
+    # REJECTED: the D128 base puts cfvst on, and the loader cannot fill a
+    # transposed V^T V_lds.
+    dict(kv_storage_dtype="fp8e4m3"),
     # --- private: use_v_swizzle (independent of the pad; cfvst-gated) ---
     dict(dtype="fp16", use_v_swizzle=False),  # accepted: OFF is always legal
     dict(head_size=64, use_v_swizzle=True),  # REJECTED: no V^T path at D64

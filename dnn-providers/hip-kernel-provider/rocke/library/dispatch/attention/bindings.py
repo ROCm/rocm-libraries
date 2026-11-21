@@ -327,7 +327,7 @@ def _resolve_fp8_scale(name: str, kwargs: Mapping[str, Any], label: str) -> floa
 
     Resolving at bind time host-syncs a device-tensor scale once, not on every
     launch, which keeps graph capture intact. The missing-scale rule itself lives
-    in ``require_fp8_kv_scale`` beside ``require_ocp_fp8_kv``, so this binding
+    in ``require_fp8_kv_scale`` beside ``require_fp8_kv_dtype``, so this binding
     and the runner refuse with one wording.
     """
     from kernels.common.attention_dense_spec import require_fp8_kv_scale
@@ -359,9 +359,12 @@ def bind_dense_attention_torch(
         tuning_spec = tuning_spec.with_num_kv_blocks(int(tensors["k"].shape[0]))
     spec = tuning_spec.kernel_spec
     if getattr(spec, "kv_storage_dtype", None) == "fp8e4m3":
-        from kernels.common.attention_dense_spec import require_ocp_fp8_kv
+        from kernels.common.attention_dense_spec import require_fp8_kv_dtype
 
-        require_ocp_fp8_kv((name, tensors[name]) for name in ("k", "v"))
+        require_fp8_kv_dtype(
+            ((name, tensors[name]) for name in ("k", "v")),
+            arch=str(getattr(request, "arch", "")),
+        )
     scale = kwargs.get("scale")
     if scale is None:
         scale = 1.0 / math.sqrt(int(getattr(request, "hdim_q", spec.head_size)))

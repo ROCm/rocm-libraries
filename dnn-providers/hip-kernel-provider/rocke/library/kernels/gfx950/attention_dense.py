@@ -90,18 +90,19 @@ from rocke.core.ir import IRBuilder, KernelDef, PtrType, F32, I32, I64, FP8E4M3
 from rocke.helpers.attention import (
     mfma_32x32x16_for_dtype,
     pv32_v_load_paired,
-    dequant_fp8x8_to_dtype,
 )
 from rocke.helpers.schedule import MFMA, VALU, TRANS, DS_READ
 from rocke.helpers.spec import align_up as _align_up
+from kernels.common._attention_fp8_kv_load import issue_fp8_kv_dequant_tile_load
 from kernels.common.attention_dense_spec import (
     AttentionDenseSpec as _AttentionDenseSpecBase,
     DENSE_TILE_GEOMETRIES,
+    KV_STORAGE_DTYPES,
     attention_dense_cache_key,
     check_dense_scale,
     check_dense_spec_preflight,
+    require_fp8_kv_dtype,
     require_fp8_kv_scale,
-    require_ocp_fp8_kv,
 )
 from kernels.common.attention_dense_decode import (
     NONPERSIST_DECODES,
@@ -162,8 +163,10 @@ _DEFAULT_LDS_K_ROW_PAD = 8
 
 # KV-cache storage formats this body can dequantize on load. ``None`` keeps the
 # KV at the compute ``dtype`` (2 bytes); ``"fp8e4m3"`` stores K/V as 1-byte
-# float8_e4m3fn in HBM and dequants to bf16/fp16 in the loader.
-_KV_STORAGE_DTYPES = frozenset({"fp8e4m3"})
+# e4m3 in HBM and dequants to bf16/fp16 in the loader. The *encoding* of that
+# byte is per-target (OCP here, FNUZ on gfx9_mfma) and is checked on the host
+# by ``require_fp8_kv_dtype``, not named here.
+_KV_STORAGE_DTYPES = KV_STORAGE_DTYPES
 # lds_v_row_pad: bf16 elements of V-row padding for the transposed PV read
 #   (ds_read_b64_tr_b16). The transpose read has a stricter bank pattern than
 #   K's ds_read_b128, so it needs a LARGER pad than the K pad (8): a measured
@@ -1316,44 +1319,32 @@ def build_attention_dense(
 
     def _sync_fp8_load(ptr, lds, buf_val, tile_key0, scale_p, packed_k):
         """Aligned fp8 KV: flat n=8 global load -> unfused-scale dequant -> bf16 LDS
-        store, into the same K_lds/V_lds layout the bf16 path fills. The global
-        load is unbounded, so OOB keys are clamped below (the pipeline
-        over-prefetches one tile past the last consumed KV tile)."""
-        total = BN * D
-        assert total % (THREADS * 8) == 0, (
-            f"fp8 sync loader: BN*D={total} must be divisible by THREADS*8="
-            f"{THREADS * 8}"
+        store, into the same K_lds/V_lds layout the bf16 path fills.
+
+        The loop itself is the shared loader in
+        ``kernels.common._attention_fp8_kv_load``; this closure only binds the
+        tile geometry and the addressing this kernel captures. The OOB clamp,
+        the per-chunk ``_stride_k()`` call (runtime-shape cache-key safety) and
+        the emission order all live with the helper, so the gfx942 dense call
+        site cannot drift from this one."""
+        issue_fp8_kv_dequant_tile_load(
+            b,
+            ptr=ptr,
+            lds=lds,
+            buf_val=buf_val,
+            tile_key0=tile_key0,
+            scale=scale_p,
+            kv_base=k_base,
+            kv_row_stride=_stride_k,
+            seqlen_kv=seqlen_kv_p,
+            tid=tid,
+            threads=THREADS,
+            block_n=BN,
+            head_size=D,
+            kv_dtype=kv_dtype,
+            dtype=dtype,
+            packed_group=K_GROUP if packed_k else 1,
         )
-        for it in range(total // (THREADS * 8)):
-            e0 = b.mul(b.add(b.const_i32(it * THREADS), tid), b.const_i32(8))
-            key = b.div(e0, b.const_i32(D))
-            d0 = b.mod(e0, b.const_i32(D))
-            # The software pipeline prefetches tile j+1 at the end of iter j; on the
-            # last iteration that tile can fall past seqlen_kv (its data is never
-            # consumed). Clamp OOB keys to row 0 so the unbounded global load stays
-            # in-bounds instead of faulting -- the bf16 path gets this for free from
-            # its bounds-checked buffer resource.
-            kv_row = b.add(tile_key0, key)
-            kv_row = b.select(b.cmp_lt(kv_row, seqlen_kv_p), kv_row, b.const_i32(0))
-            # _stride_k(), not the baked constant: on the runtime-shape path the
-            # head counts are kernargs, so two specs differing only in heads share
-            # a cache key and a symbol. Baking Hkv*D here made them lower to
-            # different IR under that one key, and the launcher cache then served
-            # whichever fp8 binary compiled first to both.
-            addr = b.add(
-                b.add(k_base, b.mul(kv_row, _stride_k())),
-                d0,
-            )
-            deq = dequant_fp8x8_to_dtype(
-                b, b.global_load_vN(ptr, addr, kv_dtype, 8), scale_p, dtype
-            )
-            if packed_k:
-                row = b.div(key, b.const_i32(K_GROUP))
-                col = b.add(b.mul(b.mod(key, b.const_i32(K_GROUP)), b.const_i32(D)), d0)
-            else:
-                row = key
-                col = d0
-            b.smem_store_vN(lds, [buf_val, row, col], deq, 8)
 
     def load_tile(buf_val, tile_idx):
         tk0 = b.mul(tile_idx, b.const_i32(BN))
@@ -3328,7 +3319,7 @@ def run_attention_dense_torch(
         # Validate here too, not only in the dispatch binding: direct callers of
         # this runner bypass that guard. Both call the same checker, so the two
         # entry points cannot drift apart.
-        require_ocp_fp8_kv((("k", k), ("v", v)))
+        require_fp8_kv_dtype((("k", k), ("v", v)), arch=arch)
         # Same checker the dispatch binding uses, so a direct caller of this
         # runner gets the identical refusal rather than a second wording.
         for name, s in (("k_scale", k_scale), ("v_scale", v_scale)):
