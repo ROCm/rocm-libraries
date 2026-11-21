@@ -7,10 +7,21 @@ include("${CMAKE_CURRENT_LIST_DIR}/../../../cmake/HkpSourceDigest.cmake")
 # ============================================================================
 # hkp_asm_sdpa_fwd_revision(<out-revision> <engine-dir> [CONFIGURE_DEPENDS] [MANIFEST <file>])
 # ============================================================================
-# The ASM SDPA forward selector revision: 16 hex digits over everything that decides which
-# forward kernel runs and how it is launched. L1 models record it and the loader refuses
-# a mismatch, so it must hash exactly those inputs: a missing input lets a stale model
-# silently pick the wrong engine; an extra one expires models for unrelated changes.
+# The ASM SDPA forward selector revision: the engine's prefix and 16 hex digits over
+# everything that decides which forward kernel runs and how it is launched.
+# L1 models record it and the loader refuses a mismatch, so it must hash exactly those
+# inputs: a missing input lets a stale model silently pick the wrong engine; an extra one
+# expires models for unrelated changes.
+#
+# The revision is a digest of the source text, so any edit to an input moves it, a
+# behavior-neutral one included, and expires both shipped L1 models
+# (descriptors/predict_engine/<arch>/asm_sdpa_engine_tflops.uhd.json). A change that moves
+# it must, in the same PR, retrain both: the UHD pipeline's uhd-engine-build for
+# ASM_SDPA_ENGINE on gfx942-mi300x and gfx950-mi355x at the new revision, carrying the old
+# measurements forward only for kernels and applicability shown to be unchanged. Until it
+# does, the loader refuses both models, the engine gives no estimate, and
+# TestAsmSdpaEngineDeclaration.ShippedL1ModelsRecordTheRevisionThisBuildComputes
+# (ShippedL1ModelGate.hpp) fails.
 #
 # CONFIGURE_DEPENDS makes every input a configure dependency so an edit or a new kernel
 # reconfigures. Test fixture trees omit it: they are rewritten on each configure.
