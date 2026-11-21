@@ -573,10 +573,6 @@ if(ROCKE_INSTALL_TESTS)
               "rocKE: top-level run_checks.py not found; skipping its test-only install")
     endif()
 
-    # The per-entry time check judges the installed registration against the CI
-    # shard budgets, from the entry times recorded beside it. Staged with the
-    # other test tools when the top-level tools/ sibling exists; the entry that
-    # runs it is registered below on the same condition.
     # The golden tool and its index: tests/tools/test_golden_tool.py checks the
     # installed tree's goldens with them.
     set(_ROCKE_GOLDEN_TOOL "${CMAKE_CURRENT_SOURCE_DIR}/../tools/golden.py")
@@ -586,6 +582,10 @@ if(ROCKE_INSTALL_TESTS)
               DESTINATION "${ROCKE_TEST_INSTALL_DIR}/tests/tools")
     endif()
 
+    # The per-entry time check judges the installed registration against the CI
+    # shard budgets, from the entry times recorded beside it. Staged with the
+    # other test tools when the top-level tools/ sibling exists; the entry that
+    # runs it is registered below on the same condition.
     set(_ROCKE_ENTRY_TIME_CHECK "${CMAKE_CURRENT_SOURCE_DIR}/../tools/check_entry_times.py")
     if(EXISTS "${_ROCKE_ENTRY_TIME_CHECK}")
       install(FILES "${_ROCKE_ENTRY_TIME_CHECK}"
