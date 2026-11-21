@@ -352,7 +352,7 @@ def test_every_entry_sets_a_resource_class_timeout(tmp_path, provider_subdir):
     )
     limits = set(resource_class_timeouts().values())
     for tree in (ctest_dir, build):
-        tests = list_installed_ctests(tree)
+        tests = list_ctest_entries(tree)
         assert tests, tree
         timeouts = {
             test["name"]: next(
@@ -912,7 +912,7 @@ def test_every_installed_entry_runs_in_a_ci_tier(tmp_path):
     _, ctest_dir = configure_installed_ctest(
         tmp_path, "-DROCKE_INSTALL_PROVIDER_CTEST_SUBDIR=hip_kernel_provider"
     )
-    names = [test["name"] for test in list_installed_ctests(ctest_dir)]
+    names = [test["name"] for test in list_ctest_entries(ctest_dir)]
     labels = provider_category_labels(names, tmp_path)
     untiered = sorted(
         name
