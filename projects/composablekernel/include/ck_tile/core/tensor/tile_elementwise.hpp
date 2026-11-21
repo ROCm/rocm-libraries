@@ -180,6 +180,20 @@ CK_TILE_DEVICE void clear_tile(DstrTensors& dstr_tensor)
 }
 
 namespace impl {
+#if defined(__gfx94__) || defined(__gfx12__)
+// Converts a and b to OutDataType (fp8_t: E4M3, bf8_t: E5M2) and packs them into one half of old:
+// the high half if Word1, else the low half. Word1 must be a constant for the builtins.
+template <typename OutDataType, bool Word1>
+CK_TILE_DEVICE uint32_t cvt_pk_f8_f32(float a, float b, int old)
+{
+    static_assert(std::is_same_v<OutDataType, fp8_t> || std::is_same_v<OutDataType, bf8_t>);
+    if constexpr(std::is_same_v<OutDataType, bf8_t>)
+        return __builtin_amdgcn_cvt_pk_bf8_f32(a, b, old, Word1);
+    else
+        return __builtin_amdgcn_cvt_pk_fp8_f32(a, b, old, Word1);
+}
+#endif
+
 // TODO: this is ugly
 template <typename OutDataType, typename InTensor>
 CK_TILE_DEVICE auto cast_tile_pk_fp8_fp32(const InTensor& in_dstr_tensors)
@@ -197,22 +211,20 @@ CK_TILE_DEVICE auto cast_tile_pk_fp8_fp32(const InTensor& in_dstr_tensors)
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wuninitialized"
 #endif
-    // __builtin_amdgcn_cvt_pk_fp8_f32() this builtin requires the old value, and
+    // __builtin_amdgcn_cvt_pk_fp8_f32() (and _bf8_) requires the old value, and
     // will generate a v_mov_b32 vxxx [old] before cvt, which result in unwanted ISA
     // so we prepare an uninitialized variable purposely, and turn off the warning
     int dummy_old;
     static_for<0, thread_buffer_size_pk, 1>{}([&](auto i) {
-        uint32_t x = __builtin_amdgcn_cvt_pk_fp8_f32(
+        uint32_t x = cvt_pk_f8_f32<OutDataType, false>( // false -> WORD0
             in_dstr_tensors.get_thread_buffer()[number<4 * i + 0>{}],
             in_dstr_tensors.get_thread_buffer()[number<4 * i + 1>{}],
-            dummy_old,
-            false); // false -> WORD0
+            dummy_old);
 
-        uint32_t y = __builtin_amdgcn_cvt_pk_fp8_f32(
+        uint32_t y = cvt_pk_f8_f32<OutDataType, true>( // true -> WORD1
             in_dstr_tensors.get_thread_buffer()[number<4 * i + 2>{}],
             in_dstr_tensors.get_thread_buffer()[number<4 * i + 3>{}],
-            x,
-            true); // true -> WORD1
+            static_cast<int>(x));
 
         using vec_t = array<OutDataType, 4>;
 
