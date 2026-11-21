@@ -41,9 +41,13 @@ jobs:
             .github/scripts/ci_utils.py
             .github/scripts/component_ci.py
             .github/scripts/tests/test_component_ci_paths.py
+            .github/scripts/check_component_inputs.py
+            .github/scripts/tests/test_check_component_inputs.py
           fetch-depth: 2
       - name: Check literal component CI paths
         run: python .github/scripts/tests/test_component_ci_paths.py
+      - name: Test the build-input coverage check
+        run: python .github/scripts/tests/test_check_component_inputs.py
       - uses: ./.github/actions/ci-env
         id: env
       - name: Detect changed components

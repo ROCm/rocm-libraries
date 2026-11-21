@@ -196,7 +196,7 @@ guidance documents that followed it.
 
 **Suite size.** The characterization half and the pure-unit half are roughly comparable in size, and
 together they run into the thousands of tests; a small minority are GPU-guarded and skip on a
-CPU-only runner. All of them run in four separate CI lanes (see
+CPU-only runner. All of them run in five separate CI lanes (see
 [Where these tests actually run](#where-these-tests-actually-run)).
 
 **Coverage expectation.** The enforced whole-project floor is `fail_under = 82` in
@@ -575,8 +575,9 @@ than the commit you are looking at.
 ([`component-ci-tensilelite-gtest.yml`](../../../.github/workflows/component-ci-tensilelite-gtest.yml))
 builds `tensilelite-tests` ([`tests/`](tests/)) and runs `ctest --no-tests=error`, gating through the
 required `Component CI Summary`. Tests that need a HIP device call `SKIP_IF_NO_DEVICE()`
-([`tests/include/DeviceTestUtils.hpp`](tests/include/DeviceTestUtils.hpp)) and skip there; they run on a
-GPU in TheRock's `standard` tier.
+([`tests/include/DeviceTestUtils.hpp`](tests/include/DeviceTestUtils.hpp)): they skip in this lane,
+which sets `TENSILE_SKIP_IF_NO_DEVICE=1`, and fail anywhere else that has no device, so a
+broken driver on a GPU runner is not reported as skips. They run on a GPU in TheRock's `standard` tier.
 
 ### How Multi-Arch CI decides whether TensileLite runs at all
 
@@ -638,8 +639,8 @@ laying out once.
 | TheRock `Test tensilelite` | [`pytest_runner.py`](https://github.com/ROCm/TheRock/blob/main/build_tools/github_actions/test_executable_scripts/pytest_runner.py) in TheRock, driven by [`test_categories.yaml`](test_categories.yaml) | GPU runner, Linux | **Yes**, via the required `Multi-Arch CI Summary` |
 | `tensilelite-unit-codecov` | Math CI (internal) | gfx950 | No |
 
-A fifth lane, `Component CI: hipBLASLt Logic Corpus`, runs only the `@needs_logic_corpus` subset, on
-logic-only changes that trigger none of the four above (see
+A sixth lane, `Component CI: hipBLASLt Logic Corpus`, runs only the `@needs_logic_corpus` subset, on
+logic-only changes that trigger none of the five above (see
 [Logic-corpus consistency regression tests](#logic-corpus-consistency-regression-tests)). It gates
 through the required `Component CI Summary`.
 
@@ -832,7 +833,7 @@ testing there (AIHPBLAS-3354) rather than at changes to Math CI itself.
 | `preliminary` is dropped from hipBLASLt's gating list whenever a PR also touches rocroller, and a rocroller-only PR gets no hipBLASLt Math CI jobs at all, so a rocroller change gets no TensileLite functional testing from Math CI | High | High if hit | Multi-Arch CI's native selector selects hipBLASLt's own client suite for a rocroller-only change, exercising rocRoller-backed dispatch at runtime (see [How Multi-Arch CI decides whether TensileLite runs at all](#how-multi-arch-ci-decides-whether-tensilelite-runs-at-all)), but it does not select the `tensilelite` job. TensileLite's own Python unit/characterization suite has no coverage for this path | AIHPBLAS-3354 |
 | As of the Aug-26 2026 reorder, `unit` runs before `common` in `preliminary`, so an unrelated unit-test failure on one architecture prevents `common` from running at all that PR. This already let a StreamK register-pool bug ([#11335](https://github.com/ROCm/rocm-libraries/pull/11335), fixed in [#11471](https://github.com/ROCm/rocm-libraries/pull/11471)) merge with no `common`-stage signal, two days after the reorder landed | High | High if hit | On gfx942 and gfx950, TheRock's `tensilelite-common` runs `common` as its own job on every pull request, so a unit failure there no longer hides it; gfx90a and gfx12 still depend on `preliminary`'s ordering | AIHPBLAS-3354 |
 | `Tests/common` (real codegen, build, execution) runs in TheRock only on gfx90a/gfx942/gfx950/gfx120X, and only gfx942 and gfx950 on the pull-request path. gfx1250 and any family whose configs declare no `skip-gfxNNNN` for it (gfx1103, gfx115X) get none (see [Pre-submit / CI Gates](#pre-submit--ci-gates)) | Medium | High if hit | Math CI's `preliminary` runs it per PR on `gfx90a`/`gfx942`/`gfx950`/`gfx12`; TheRock's `tensilelite-common` adds installed-artifact coverage on the same families | [#12491](https://github.com/ROCm/rocm-libraries/issues/12491) |
-| The same TensileLite test suite runs in four lanes, three holding a GPU only one of them needs | Low | Low | Expensive in runner capacity; the redundancy does buy independent confirmation | AIHPBLAS-3354 |
+| The same TensileLite test suite runs in five lanes, three holding a GPU only one of them needs | Low | Low | Expensive in runner capacity; the redundancy does buy independent confirmation | AIHPBLAS-3354 |
 | A change only to the library logic YAML runs nothing in Math CI's `preliminary`, since the logic lives outside `tensilelite/`, and Math CI is configured outside this repository | Low | Medium | The logic-corpus component lane runs `TensileLogic --check-all` on the changed architectures and every `@needs_logic_corpus` test on any change under `Tensile/Logic/`, and gates through `Component CI Summary` | [ROCM-33834](https://amd-hub.atlassian.net/browse/ROCM-33834) |
 | The `@needs_logic_corpus` tests (see [Logic-corpus consistency regression tests](#logic-corpus-consistency-regression-tests)) always skip in TheRock CI, because the installed tree does not ship the corpus | Low | Low | Every run prints `needs_logic_corpus: N ran, M skipped`, so the skip is visible; the cross-file checks run in `TensileLogic --check-all` and the chip-ID-arch lock walks the architecture registry, so neither depends on the corpus being present | [#14887](https://github.com/ROCm/rocm-libraries/issues/14887) |
 | gfx1250 gets no TheRock Test stage at all: the CI configuration overlay leaves its runner empty, and the `tensilelite` and `hipblaslt` test jobs exclude gfx125X because of hangs. That includes pytest coverage for corpus-dependent checks; the logic-corpus lane still checks changed gfx1250 logic, and `TensileLogic --check-all` runs as a build step | Medium | Medium | `TensileLogic --check-all` runs as a build step, unaffected by the missing runner | [#7481](https://github.com/ROCm/rocm-libraries/issues/7481) |

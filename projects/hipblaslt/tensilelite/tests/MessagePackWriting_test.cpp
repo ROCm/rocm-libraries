@@ -648,9 +648,22 @@ TEST(MessagePackWritingTest, FixtureRoundTripIsStable)
     auto row = outline(reloaded->library);
     EXPECT_NE(row.find("Problem[EqualityMatching"), std::string::npos) << row;
     EXPECT_NE(row.find("Equality)["), std::string::npos) << row;
+}
 
+TEST(MessagePackWritingTest, FixtureRoundTripSelectsTheSameSolutions)
+{
     // Selection evaluates WorkgroupMappingXCCCheck, which queries the current device.
     SKIP_IF_NO_DEVICE();
+    auto lib = loadKernelsLite();
+    if(lib == nullptr)
+    {
+        if(!HasFailure())
+            GTEST_SKIP() << "KernelsLite.dat did not load";
+        return;
+    }
+    auto reloaded = roundTrip(*lib);
+    ASSERT_NE(reloaded, nullptr);
+
     auto hardware = mi300();
     int  selected = 0;
     for(size_t n : {16, 2048, 8192})

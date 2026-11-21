@@ -65,6 +65,15 @@ COMPONENTS = {
         "shared/mxdatagenerator/**",
         "shared/stinkytofu/**",
         "cmake/**",
+        # The lane configures through projects/hipblaslt (--preset tensilelite -S ../), and
+        # tensilelite-tests compiles clients/common sources and includes hipBLASLt's headers.
+        # check_component_inputs.py fails the lane if its build reads a file not covered here.
+        "projects/hipblaslt/CMakeLists.txt",
+        "projects/hipblaslt/CMakePresets.json",
+        "projects/hipblaslt/cmake/**",
+        "projects/hipblaslt/clients/common/**",
+        "projects/hipblaslt/library/include/**",
+        ".github/scripts/check_component_inputs.py",
         ".github/workflows/component-ci-tensilelite-gtest.yml",
     ],
     # The logic corpus is tuning data outside tensilelite/, so a change to it

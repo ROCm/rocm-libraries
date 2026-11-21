@@ -631,6 +631,15 @@ suites:
         notes: "Also enforces the coverage floor and per-file ratchet."
         evidence: ["repo:.github/workflows/component-ci-tensilelite-coverage.yml", "doc:tensilelite/TESTING.md#where-these-tests-actually-run"]
         action: keep
+      - system: github_actions
+        lane: "Component CI: TensileLite unit"
+        cadence: presubmit
+        archs: [linux-cpu]
+        gates: true
+        required_check: Component CI Summary
+        notes: "tox -e unit-host: the tests not marked gpu, under pytest-xdist. Outlasts the coverage lane."
+        evidence: ["repo:.github/workflows/component-ci-tensilelite-unit.yml", "doc:tensilelite/TESTING.md#where-these-tests-actually-run"]
+        action: keep
       - system: math_ci
         lane: "preliminary (unit stage)"
         cadence: presubmit
@@ -787,6 +796,15 @@ suites:
         required_check: Multi-Arch CI Summary
         notes: "Appended to the tensilelite job for every tier except quick."
         evidence: ["therock:build_tools/github_actions/fetch_test_configurations.py", "repo:projects/hipblaslt/tensilelite/tests/test_categories.yaml"]
+        action: keep
+      - system: github_actions
+        lane: "Component CI: TensileLite gtest"
+        cadence: presubmit
+        archs: [linux-cpu]
+        gates: true
+        required_check: Component CI Summary
+        notes: "Builds tensilelite-tests from source; device tests skip (TENSILE_SKIP_IF_NO_DEVICE=1) and run in TheRock's lane."
+        evidence: ["repo:.github/workflows/component-ci-tensilelite-gtest.yml", "doc:tensilelite/TESTING.md#where-these-tests-actually-run"]
         action: keep
     target:
       - {system: therock, cadence: presubmit, tier: quick}
