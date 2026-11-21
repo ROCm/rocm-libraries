@@ -35,14 +35,20 @@ def runTestCommand (platform, project, gfilter)
         hmmTestCommand = """
                             HSA_XNACK=0 GTEST_LISTENER=NO_PASS_LINE_IN_LOG  ./rocalution-test --gtest_output=xml:test_detail_hmm_xnack_off.xml --gtest_color=yes --gtest_filter=**
                             HSA_XNACK=1 GTEST_LISTENER=NO_PASS_LINE_IN_LOG  ./rocalution-test --gtest_output=xml:test_detail_hmm_xnack_on.xml --gtest_color=yes --gtest_filter=**
+                            HSA_XNACK=0 ./rocalution-unit-test --gtest_output=xml:test_detail_unit_hmm_xnack_off.xml --gtest_color=yes
+                            HSA_XNACK=1 ./rocalution-unit-test --gtest_output=xml:test_detail_unit_hmm_xnack_on.xml --gtest_color=yes
+                            HSA_XNACK=0 ./rocalution-unit-test-lifecycle --gtest_output=xml:test_detail_lifecycle_hmm_xnack_off.xml --gtest_color=yes
+                            HSA_XNACK=1 ./rocalution-unit-test-lifecycle --gtest_output=xml:test_detail_lifecycle_hmm_xnack_on.xml --gtest_color=yes
                          """
     }
 
     String sudo = auxiliary.sudo(platform.jenkinsLabel)
     def command = """#!/usr/bin/env bash
-                    set -x
+                    set -ex
                     cd ${project.paths.project_build_prefix}/build/release/clients/staging
                     ${sudo} LD_LIBRARY_PATH=/opt/rocm/hcc/lib GTEST_LISTENER=NO_PASS_LINE_IN_LOG ./rocalution-test --gtest_output=xml --gtest_color=yes #--gtest_filter=${gfilter}-*known_bug*
+                    ${sudo} LD_LIBRARY_PATH=/opt/rocm/hcc/lib ./rocalution-unit-test --gtest_output=xml:test_detail_unit.xml --gtest_color=yes
+                    ${sudo} LD_LIBRARY_PATH=/opt/rocm/hcc/lib ./rocalution-unit-test-lifecycle --gtest_output=xml:test_detail_lifecycle.xml --gtest_color=yes
                     ${hmmTestCommand}
                 """
 
