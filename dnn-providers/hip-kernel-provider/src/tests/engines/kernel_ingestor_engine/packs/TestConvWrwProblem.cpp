@@ -1622,6 +1622,14 @@ TEST(TestConvWrwKernelMatch, SmallCRowsOfEveryFilterRowServeFiltersWithThatManyR
     // A 2-D 3x3 stem has three filter rows: fr 9 declines it, fr 3 (its height) serves it.
     EXPECT_FALSE(admits(all, "gfx942", stemShape()));
     EXPECT_TRUE(admits(three, "gfx942", stemShape()));
+    // A 1 x 3 filter has one filter row: fr 3 (its width) still serves it, fr 9 does not.
+    auto row = stemShape();
+    row.input = {1, 64};
+    row.filter = {1, 3};
+    row.prePadding = {0, 1};
+    row.postPadding = {0, 1};
+    EXPECT_TRUE(admits(three, "gfx942", row));
+    EXPECT_FALSE(admits(all, "gfx942", row));
 }
 
 TEST(TestConvWrwKernelMatch, SmallCRowsServeFewChannelsFirstChannels)

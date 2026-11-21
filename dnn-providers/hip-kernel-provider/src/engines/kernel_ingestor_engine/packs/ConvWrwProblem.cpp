@@ -1335,8 +1335,9 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
         return std::nullopt;
     }
     // Small-C rows take filter rows of the (depth, height) rows flattened: a block of more rows
-    // than the filter height serves only filters with at least that many rows.
-    if(smallc && config.fr > a.filter[1] && config.fr > a.filter[0] * a.filter[1])
+    // than its own filter width (fr 9 of 3-wide filters) serves only filters with at least that
+    // many rows. Blocks of at most their filter width serve any filter height, 1-D included.
+    if(smallc && config.fr > config.s && config.fr > a.filter[0] * a.filter[1])
     {
         return std::nullopt;
     }
