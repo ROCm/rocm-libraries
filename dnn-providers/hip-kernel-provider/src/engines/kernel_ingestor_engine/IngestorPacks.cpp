@@ -23,6 +23,9 @@ const std::vector<IngestorPack>& ingestorPacks()
         {"hipkernel:hip_conv_fwd_bias_fma_igemm_rdna",
          &registerHipConvFwdBiasFmaIgemmRdnaSymbols,
          &resetHipConvFwdBiasFmaIgemmRdnaModuleCache},
+        {"hipkernel:hip_conv_fwd_bias_act_fma_igemm_rdna",
+         &registerHipConvFwdBiasActFmaIgemmRdnaSymbols,
+         &resetHipConvFwdBiasActFmaIgemmRdnaModuleCache},
 #ifdef HIPDNN_ENGINE_FLYDSL
         // Compiled only when FlyDSL staged a shard; see the gate in this directory's
         // CMakeLists.txt.
