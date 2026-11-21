@@ -94,7 +94,6 @@ BenchmarkProblems:
         - InitCIterWmma: [0]
         - SwInstructionPrefetch: [0]
         - ClusterDim: [[4,4]]
-        - ClusterAIDMapping: [-2]
         - LDSSegmentInterleave: [1]
         - LDSSegmentBRotate: [1]
         - WorkGroupMapping: [1]
