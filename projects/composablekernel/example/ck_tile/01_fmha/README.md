@@ -464,3 +464,27 @@ b64x128 tile runs a shallower Q/dO ring up to `seqlen_q` 2048 and the deeper one
 architectures.
 
 Pass `-kname=1` to print which instance was dispatched.
+
+## fp8 decode over the 5D paged KV cache (gfx125)
+
+`tile_example_fmha_decode_paged5d` runs `FmhaDecodePaged5dKernel`
+(`ck_tile/ops/fmha/kernel/fmha_fwd_decode_paged5d_kernel.hpp`): one query token per sequence over
+sglang's SHUFFLE 5D paged cache, K `[num_blocks][nhead_k][d / 16][16][16 B]` and
+V `[num_blocks][nhead_k][1][d][16]`, page 16, d 128, fp8 e4m3 K/V with per-tensor descales, bf16
+Q and output, at most 16 query heads per kv head, an optional sliding window. It needs no codegen.
+
+```
+ninja tile_example_fmha_decode_paged5d
+./bin/tile_example_fmha_decode_paged5d -b=8 -h=16 -h_k=1 -s_k=8192 -window=0
+```
+
+`-s_k` takes one length per batch (comma separated), `-max_s_k` sizes the launch for a longer
+bound than the lengths (as a captured graph does), `-splits` / `-pages_per_split` / `-layout`
+override the heuristic. The run validates against a CPU reference and reports stream and
+HIP-graph times.
+
+`ck_fmha_decode_paged5d` builds `libck_fmha_decode_paged5d.so`, a C API that
+`fmha_decode_paged5d.py` wraps for PyTorch with the arguments of aiter's FlyDSL `pa_decode`.
+The launch depends on the batch, the kv heads, the window and `max_context_length` (default:
+block-table width x 16), not on the context lengths, so one call can be captured in a graph and
+replayed for every decode step.

@@ -33,6 +33,7 @@
 #include "ck_tile/ops/fmha/kernel/fmha_bwd_kernel.hpp"
 #include "ck_tile/ops/fmha/kernel/fmha_fwd_appendkv_kernel.hpp"
 #include "ck_tile/ops/fmha/kernel/fmha_fwd_appendkv_tile_partitioner.hpp"
+#include "ck_tile/ops/fmha/kernel/fmha_fwd_decode_paged5d_kernel.hpp"
 #include "ck_tile/ops/fmha/kernel/fmha_fwd_kernel.hpp"
 #include "ck_tile/ops/fmha/kernel/fmha_fwd_pagedkv_kernel.hpp"
 #include "ck_tile/ops/fmha/kernel/fmha_fwd_splitkv_combine_kernel.hpp"

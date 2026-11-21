@@ -365,6 +365,20 @@ target_link_libraries(${EXAMPLE_FMHA_BWD} ${FMHA_BWD_INSTANCES})
 target_include_directories(${EXAMPLE_FMHA_BWD} PRIVATE ${CMAKE_CURRENT_LIST_DIR})
 set_property(TARGET ${EXAMPLE_FMHA_BWD} PROPERTY HIP_ARCHITECTURES ${INST_TARGETS})
 
+# gfx125 fp8 decode over the sglang SHUFFLE 5D paged KV cache; self-contained, no codegen
+set(FMHA_DECODE_PAGED5D_TARGETS ${INST_TARGETS})
+list(FILTER FMHA_DECODE_PAGED5D_TARGETS INCLUDE REGEX "^gfx125")
+if(FMHA_DECODE_PAGED5D_TARGETS)
+  set(EXAMPLE_FMHA_DECODE_PAGED5D "tile_example_fmha_decode_paged5d")
+  add_executable(${EXAMPLE_FMHA_DECODE_PAGED5D} EXCLUDE_FROM_ALL example_fmha_decode_paged5d.cpp)
+  set_property(TARGET ${EXAMPLE_FMHA_DECODE_PAGED5D} PROPERTY HIP_ARCHITECTURES
+    ${FMHA_DECODE_PAGED5D_TARGETS})
+  # C API loaded by fmha_decode_paged5d.py
+  add_library(ck_fmha_decode_paged5d SHARED EXCLUDE_FROM_ALL fmha_decode_paged5d_api.cpp)
+  set_property(TARGET ck_fmha_decode_paged5d PROPERTY HIP_ARCHITECTURES
+    ${FMHA_DECODE_PAGED5D_TARGETS})
+endif()
+
 # TODO: we have to turn off this global prop, otherwise the progress bar generated
 # by cmake will print too many files, execvp: /bin/sh: Argument list too long
 # however, this property may affect global
