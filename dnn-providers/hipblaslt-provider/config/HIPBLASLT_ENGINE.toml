@@ -41,3 +41,21 @@ rtol = 0.02
 #   filters: array of GTest globs matched against the full GTest name
 #   reason:  human-readable string surfaced in the GTEST_SKIP message
 # First matching entry wins.
+
+# dnn-benchmarking: the batched fp16 gemm b96 x 8640^3 has 7.2e9 elements per
+# operand (> 2^32). Device input fill fails to launch (hipModuleLaunchKernel:
+# invalid argument), and with HIPDNN_TEST_HOST_INPUT_FILL=1 it ran past 15 min
+# on gfx90a. Every other hipblaslt workload verifies on the GPU reference.
+[[test_skips]]
+filters = ["workloads_hipblaslt_gemm.fp16_b96_m8640_n8640_k8640"]
+reason  = "7.2e9 elements per operand: device input fill cannot launch"
+
+# dnn-benchmarking fp32 gemm workloads. hipBLASLt and the GPU reference accumulate
+# K terms in different orders, so large-K fp32 results differ by more than the
+# default atol=rtol=1e-5 (135 of 141 fail at the default). Observed max abs diff
+# grows with K: 7.1e-5 at K=6656 (fp32_m96_n6656_k6656) and 1.3e-3 at K=24576
+# (fp32_m32_n8192_k24576). atol=2e-3 leaves ~1.5x over the worst.
+[[tolerance_overrides]]
+filters = ["workloads_hipblaslt_gemm.fp32_*"]
+atol = 2e-3
+rtol = 1e-4
