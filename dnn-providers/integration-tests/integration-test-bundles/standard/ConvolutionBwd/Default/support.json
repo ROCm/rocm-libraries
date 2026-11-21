@@ -120,6 +120,30 @@
           ]
         }
       }
+    ],
+    "hipkernel:hip_conv_dgrad_fma_2d_rdna": [
+      {
+        "cases": [
+          "1_16_16_16_bfp16_nchw_dil1x1_postpad1x1_prepad1x1_02611b",
+          "1_16_16_16_bfp16_nchw_dil2x2_postpad2x2_prepad2x2",
+          "1_16_16_16_bfp16_nhwc_dil1x1_postpad0x0_prepad0x0_e102d9",
+          "1_16_16_16_fp16_nhwc_dil1x1_postpad0x0_prepad0x0_f58fc0",
+          "1_16_16_16_fp16_nhwc_dil1x1_postpad1x1_prepad1x1_a1b633",
+          "1_16_16_16_fp32_nchw_dil1x1_postpad0x0_prepad0x0_a81097",
+          "1_16_16_16_fp32_nchw_dil1x1_postpad1x1_prepad1x1_b48ad0",
+          "1_16_16_8_bfp16_nhwc_dil1x1_postpad1x1_prepad1x1",
+          "2_32_16_16_fp32_nhwc_dil2x2_postpad1x1_prepad1x1",
+          "2_8_3_3_fp32_nchw_dil1x1_postpad1x1_prepad1x1",
+          "8_16_16_16_bfp16_nhwc_dil1x1_postpad0x0_prepad0x0",
+          "8_16_16_16_fp16_nchw_dil1x1_postpad0x0_prepad0x0",
+          "8_16_16_16_fp32_nchw_dil1x1_postpad0x0_prepad0x0"
+        ],
+        "support": {
+          "gfx1151": [
+            "linux"
+          ]
+        }
+      }
     ]
   },
   "version": 1
