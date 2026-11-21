@@ -59,12 +59,19 @@ from tensilelite import run
 from artifact_helpers import artifact_name_for_config, artifact_timing, extract_artifact
 
 
-def _require_verified_reuse(log) -> None:
+def _require_verification(log, verify_reuse: bool, verify_upload: bool) -> None:
     log.seek(0)
     output = log.read()
     print(output, end="")
-    counts = re.findall(r"^REFERENCE_REUSE_VERIFIED:(\d+)$", output, re.MULTILINE)
-    assert sum(map(int, counts)) > 0, "No CPU reference reuse verification executed"
+    if verify_reuse:
+        counts = re.findall(r"^REFERENCE_REUSE_VERIFIED:(\d+)$", output, re.MULTILINE)
+        assert sum(map(int, counts)) > 0, "No CPU reference reuse verification executed"
+    if verify_upload:
+        for kind in ("input", "batched-pointer"):
+            counts = re.findall(
+                rf"^Verified (\d+) skipped GPU {kind} uploads(?: against the host data)?\.$",
+                output, re.MULTILINE)
+            assert sum(map(int, counts)) > 0, f"No GPU {kind} upload-skip verification executed"
 
 
 def _run_client_process(args: list[str], env: dict[str, str], log) -> None:
@@ -90,16 +97,19 @@ def _run(config: str, output_dir: str, artifact_dir: str, tensile_args: list[str
         parameters = yaml.safe_load(source).get("TestParameters", {})
     schedules = parameters.get("streamk_schedules", [])
     verify_reuse = parameters.get("verify_reference_reuse", False)
+    verify_upload = parameters.get("verify_upload_skip", False)
     env = {**os.environ, "PYTHONPATH": os.pathsep.join(sys.path)}
     if verify_reuse:
         env["TENSILELITE_VERIFY_REFERENCE_REUSE"] = "1"
+    if verify_upload:
+        env["TENSILELITE_VERIFY_UPLOAD_SKIP"] = "1"
     if not schedules:
-        if verify_reuse:
+        if verify_reuse or verify_upload:
             # A separate process scopes verification to this config and captures the
             # client's count even when it inherits its stdout file descriptor.
-            with open(os.path.join(output_dir, "reference-reuse.log"), "w+") as log:
+            with open(os.path.join(output_dir, "reuse-verification.log"), "w+") as log:
                 _run_client_process(args, env, log)
-                _require_verified_reuse(log)
+                _require_verification(log, verify_reuse, verify_upload)
         else:
             run.main(args)
         return
@@ -117,8 +127,8 @@ def _run(config: str, output_dir: str, artifact_dir: str, tensile_args: list[str
         # Each client run uses a fresh process and the same compiled artifact.
         with open(log_path, "w+") as log:
             _run_client_process(run_args, schedule_env, log)
-            if verify_reuse:
-                _require_verified_reuse(log)
+            if verify_reuse or verify_upload:
+                _require_verification(log, verify_reuse, verify_upload)
             log.seek(0)
             records = {}
             for block in log.read().split("TensileLite::"):
