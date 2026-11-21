@@ -1222,6 +1222,77 @@ TEST(host_vector_random_bool, uniform_values_stay_in_and_cover_the_range)
     EXPECT_LT(ones, n);
 }
 
+template <typename P>
+class host_vector_amax : public TypedVectorTest<P>
+{
+};
+
+TYPED_TEST_SUITE(host_vector_amax, HostOnly<RealTypes>, TypedName);
+
+// With two threads, each scans one half of the vector, and the halves are merged in
+// either order. Ties resolve to the smallest index, as on one thread. Without
+// OpenMP this checks the tie rule on one thread.
+TYPED_TEST(host_vector_amax, ties_resolve_to_the_smallest_index_on_several_threads)
+{
+    using T = typename TypeParam::value_type;
+    DescriptorGuard guard;
+#ifdef _OPENMP
+    // A dynamic team may scan on one thread
+    const int dynamic = omp_get_dynamic();
+    omp_set_dynamic(0);
+#endif
+
+    rocalution::Rocalution_Backend_Descriptor d = descriptor();
+    d.OpenMP_threads                            = 2;
+    d.OpenMP_threshold                          = 0;
+
+    const int64_t n         = 1 << 16;
+    const int64_t half      = n / 2;
+    auto          with_pair = [&](T before, T after) {
+        std::vector<T> a(n, T(1));
+        a[half - 1] = before;
+        a[half]     = after;
+        return a;
+    };
+    const struct
+    {
+        const char*    name;
+        std::vector<T> a;
+        int64_t        index;
+        T              value;
+    } cases[] = {
+        {"all entries equal", std::vector<T>(n, T(1)), 0, T(1)},
+        {"equal on both sides of the halves", with_pair(T(2), T(2)), half - 1, T(2)},
+        {"negative before the second half", with_pair(T(-2), T(2)), half - 1, T(2)},
+        {"negative at the start of the second half", with_pair(T(2), T(-2)), half - 1, T(2)},
+    };
+
+    for(const auto& c : cases)
+    {
+        SCOPED_TRACE(c.name);
+        HostVector<T> v(d);
+        v.Allocate(n);
+        v.CopyFromData(c.a.data());
+
+        // The order of the merge changes from call to call
+        for(int call = 0; call < 20; ++call)
+        {
+            T             value = T(0);
+            const int64_t index = v.Amax(value);
+            if(index != c.index || value != c.value)
+            {
+                ADD_FAILURE() << "call " << call << " returned index " << index << " and " << value
+                              << ", expected index " << c.index << " and " << c.value;
+                break;
+            }
+        }
+    }
+
+#ifdef _OPENMP
+    omp_set_dynamic(dynamic);
+#endif
+}
+
 template <typename T>
 std::vector<T> file_values()
 {

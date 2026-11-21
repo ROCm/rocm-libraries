@@ -30,10 +30,13 @@
 #include <cmath>
 #include <complex>
 #include <cstdio>
+#include <cstdlib>
+#include <fstream>
 #include <functional>
 #include <limits>
 #include <memory>
 #include <numeric>
+#include <sstream>
 #include <string>
 #include <type_traits>
 #include <utility>
@@ -460,6 +463,51 @@ TYPED_TEST(local_vector_data, ascii_files_round_trip_and_keep_the_backend)
     std::remove(file.c_str());
 }
 
+// The text of ASCII files, which the round trip cannot see
+
+template <typename P>
+class local_vector_ascii_files : public LocalVectorTest<P>
+{
+};
+
+TYPED_TEST_SUITE(local_vector_ascii_files, WithBackends<RealTypes>, TypedName);
+
+// One entry per line, in scientific notation with six digits after the point
+TYPED_TEST(local_vector_ascii_files, ascii_files_are_written_in_scientific_notation)
+{
+    using T = typename TypeParam::value_type;
+
+    const std::string file = temp_file("txt");
+    const auto        v    = this->vec(
+        std::vector<T>{T(1), T(2), T(3), T(4), T(5), T(1.234567), T(-0.03125), T(2.5e7)});
+    logged([&] { v->WriteFileASCII(file); });
+
+    std::ifstream     in(file);
+    std::stringstream text;
+    text << in.rdbuf();
+    EXPECT_EQ(text.str(),
+              "1.000000e+00\n2.000000e+00\n3.000000e+00\n4.000000e+00\n5.000000e+00\n"
+              "1.234567e+00\n-3.125000e-02\n2.500000e+07\n");
+    std::remove(file.c_str());
+}
+
+TYPED_TEST(local_vector_ascii_files, ascii_files_written_by_hand_are_read_one_value_per_line)
+{
+    using T = typename TypeParam::value_type;
+
+    const std::string file = temp_file("txt");
+    {
+        std::ofstream out(file);
+        out << "1\n2\n3\n-4\n0.5\n6.25\n7e1\n-8.125E-1\n";
+    }
+
+    auto v = this->vec(from_ints<T>({9, 9, 9}));
+    logged([&] { v->ReadFileASCII(file); });
+    EXPECT_EQ(backend_of(*v), this->here());
+    EXPECT_EQ(values_of(*v), (std::vector<T>{1, 2, 3, -4, 0.5, 6.25, 70, -0.8125}));
+    std::remove(file.c_str());
+}
+
 // The accelerator checks a host copy
 TYPED_TEST(local_vector_data, check_accepts_finite_values_and_rejects_nan_and_infinity)
 {
@@ -673,6 +721,31 @@ TYPED_TEST(local_vector, restriction_sums_and_prolongation_copies_back)
     e->Restriction(*this->vec(std::vector<T>()), *none);
     e->Prolongation(*this->vec(std::vector<T>()), *none);
     EXPECT_EQ(e->GetSize(), 0);
+}
+
+// A coarse vector longer than the number of aggregates keeps its size, and its
+// entries without fine entries become zero
+TYPED_TEST(local_vector, restriction_keeps_the_size_of_a_longer_coarse_vector)
+{
+    using T = typename TypeParam::value_type;
+
+    const std::vector<T>   fine = x<T>();
+    const std::vector<int> map  = {0, 2, -1, 1, 0, 2, 3, -1, 1, 0, 3, 2};
+
+    std::vector<T> coarse(6, T(0));
+    for(size_t i = 0; i < fine.size(); ++i)
+    {
+        if(map[i] >= 0)
+        {
+            coarse[map[i]] += fine[i];
+        }
+    }
+
+    auto c = this->vec(std::vector<T>(6, from_int<T>(7)));
+    logged([&] { c->Restriction(*this->vec(fine), *this->vec(map)); });
+    EXPECT_EQ(backend_of(*c), this->here());
+    EXPECT_EQ(c->GetSize(), 6);
+    EXPECT_EQ(values_of(*c), coarse);
 }
 
 TYPED_TEST(local_vector, add_index_values_adds_at_the_indices)
@@ -1121,6 +1194,11 @@ TYPED_TEST(local_vector_coarse, extract_coarse_mapping_numbers_the_aggregates)
     EXPECT_EQ(map, (std::vector<int>{0, -1, 0, 1, 2}));
     EXPECT_EQ(backend_of(*aggregates), this->here());
     expect_host_fallback(log, "ExtractCoarseMapping", this->backend());
+
+    std::vector<int> whole(7, -7);
+    aggregates->ExtractCoarseMapping(0, 7, index.data(), 4, &size, whole.data());
+    EXPECT_EQ(size, 7);
+    EXPECT_EQ(whole, (std::vector<int>{0, 1, -1, 1, 2, 0, 3}));
 }
 
 // Appends the aggregates of index[start, end), each once, skipping -1
@@ -1139,50 +1217,295 @@ TYPED_TEST(local_vector_coarse, extract_coarse_boundary_appends_each_aggregate_o
     expect_host_fallback(log, "ExtractCoarseBoundary", this->backend());
 }
 
-// Moves and allocation, independent of the value type
+// Moves and allocation
+
+namespace
+{
+    // A vector that has lost both backend objects ends the program in its destructor,
+    // so it is leaked instead
+    template <typename T>
+    bool expect_location(std::unique_ptr<LocalVector<T>>& v, Backend b)
+    {
+        const std::string where = location_of(*v);
+        EXPECT_EQ(where, backend_name(b));
+        if(where != backend_name(Backend::Host) && where != backend_name(Backend::Accelerator))
+        {
+            static_cast<void>(v.release());
+        }
+        return where == backend_name(b);
+    }
+
+    // The entries through the mutable operator[], which must give the same as the const one
+    template <typename T>
+    std::vector<T> entries_of(LocalVector<T>& v)
+    {
+        const LocalVector<T>& c = v;
+        std::vector<T>        e(v.GetSize());
+        for(int64_t i = 0; i < v.GetSize(); ++i)
+        {
+            e[i] = v[i];
+            EXPECT_EQ(c[i], e[i]) << "entry " << i;
+        }
+        return e;
+    }
+}
 
 TEST(local_vector_moves, without_an_accelerator_moves_stay_on_the_host)
 {
     DescriptorGuard guard;
     rocalution::_get_backend_descriptor()->accelerator = false;
 
-    const std::vector<double> a = x<double>();
-    auto                      v = make_local_vector(Backend::Host, a);
+    for_each_type<RealTypes>([&](auto type) {
+        using T = typename decltype(type)::type;
 
-    v->MoveToAccelerator();
-    EXPECT_EQ(backend_of(*v), backend_name(Backend::Host));
-    v->MoveToAcceleratorAsync();
-    v->Sync();
-    EXPECT_EQ(backend_of(*v), backend_name(Backend::Host));
-    v->MoveToHostAsync();
-    v->Sync();
-    v->MoveToHost();
-    EXPECT_EQ(backend_of(*v), backend_name(Backend::Host));
-    EXPECT_EQ(values_of(*v), a);
+        const std::vector<T> a = x<T>();
+        auto                 v = make_local_vector(Backend::Host, a);
+
+        v->MoveToAccelerator();
+        EXPECT_EQ(location_of(*v), backend_name(Backend::Host));
+        v->MoveToAcceleratorAsync();
+        v->Sync();
+        EXPECT_EQ(location_of(*v), backend_name(Backend::Host));
+        v->MoveToHostAsync();
+        v->Sync();
+        v->MoveToHost();
+        EXPECT_EQ(location_of(*v), backend_name(Backend::Host));
+        EXPECT_EQ(values_of(*v), a);
+    });
 }
 
 TEST(local_vector_moves, async_move_of_a_host_vector_to_the_host_changes_nothing)
 {
     REQUIRE_BACKEND(Backend::Accelerator);
+    for_each_type<RealTypes>([&](auto type) {
+        using T = typename decltype(type)::type;
 
-    const std::vector<double> a = x<double>();
-    auto                      v = make_local_vector(Backend::Host, a);
-    v->MoveToHostAsync();
-    v->Sync();
-    EXPECT_EQ(backend_of(*v), backend_name(Backend::Host));
-    EXPECT_EQ(values_of(*v), a);
+        const std::vector<T> a = x<T>();
+        auto                 v = make_local_vector(Backend::Host, a);
+        v->MoveToHostAsync();
+        v->Sync();
+        EXPECT_EQ(location_of(*v), backend_name(Backend::Host));
+        EXPECT_EQ(values_of(*v), a);
+    });
 }
 
+// The vector changes its backend in Sync(), not before
 TEST(local_vector_moves, sync_after_move_to_host_async_ends_on_the_host)
 {
     REQUIRE_BACKEND(Backend::Accelerator);
+    for_each_type<RealTypes>([&](auto type) {
+        using T = typename decltype(type)::type;
 
-    const std::vector<double> a = x<double>();
-    auto                      v = make_local_vector(Backend::Accelerator, a);
-    v->MoveToHostAsync();
-    v->Sync();
-    EXPECT_EQ(backend_of(*v), backend_name(Backend::Host));
-    EXPECT_EQ(values_of(*v), a);
+        const std::vector<T> a = x<T>();
+        auto                 v = make_local_vector(Backend::Accelerator, a);
+        v->MoveToHostAsync();
+        EXPECT_EQ(location_of(*v), backend_name(Backend::Accelerator));
+        v->Sync();
+        if(!expect_location(v, Backend::Host))
+        {
+            return;
+        }
+        EXPECT_TRUE(logged_check(*v));
+        EXPECT_EQ(values_of(*v), a);
+    });
+}
+
+TEST(local_vector_moves, sync_after_move_to_accelerator_async_ends_on_the_accelerator)
+{
+    REQUIRE_BACKEND(Backend::Accelerator);
+    for_each_type<RealTypes>([&](auto type) {
+        using T = typename decltype(type)::type;
+
+        const std::vector<T> a = x<T>();
+        auto                 v = make_local_vector(Backend::Host, a);
+        v->MoveToAcceleratorAsync();
+        EXPECT_EQ(location_of(*v), backend_name(Backend::Host));
+        v->Sync();
+        if(!expect_location(v, Backend::Accelerator))
+        {
+            return;
+        }
+        EXPECT_TRUE(logged_check(*v));
+        EXPECT_EQ(values_of(*v), a);
+    });
+}
+
+namespace
+{
+    // The destruction follows the device synchronization, so the transfer has ended and
+    // only the backend switch of Sync() is missing. This does not destroy a vector during a
+    // pending transfer.
+    template <typename T>
+    void destroy_after_async_moves(const std::vector<T>& a)
+    {
+        auto to_accelerator = make_local_vector(Backend::Host, a);
+        to_accelerator->MoveToAcceleratorAsync();
+        rocalution::_rocalution_sync();
+        to_accelerator.reset();
+
+        auto to_host = make_local_vector(Backend::Accelerator, a);
+        to_host->MoveToHostAsync();
+        rocalution::_rocalution_sync();
+        to_host.reset();
+    }
+}
+
+// The destructor leaks the other backend object (see the next test), so the destruction
+// runs in a child that ends with _Exit, where the leak does not reach LeakSanitizer
+TEST(local_vector_moves, a_vector_can_be_destroyed_after_an_async_move_without_sync)
+{
+    REQUIRE_BACKEND(Backend::Accelerator);
+    for_each_type<RealTypes>([&](auto type) {
+        using T = typename decltype(type)::type;
+
+        const std::vector<T> a = x<T>();
+        EXPECT_EXIT(
+            {
+                death_test_watchdog();
+                destroy_after_async_moves(a);
+                std::_Exit(0);
+            },
+            testing::ExitedWithCode(0),
+            "");
+    });
+}
+
+// Only LeakSanitizer shows the leak, at the exit of the child. The child stops rocALUTION
+// first, as LeakSanitizer can hang at the exit of a process whose HIP backend still runs.
+// LeakSanitizer reports every leak of the child, so the case also fails on a HIP runtime
+// that leaks at exit, whatever the destructor does.
+TEST(local_vector_moves, a_vector_destroyed_after_an_async_move_without_sync_frees_both_objects)
+{
+    REQUIRE_BACKEND(Backend::Accelerator);
+#ifndef __SANITIZE_ADDRESS__
+    GTEST_SKIP() << "only an ASAN build shows whether the destructor frees both backend objects";
+#endif
+    KNOWN_BUG("~LocalVector frees only the current backend object, so a vector destroyed after "
+              "an async move without Sync() leaks the other one");
+    for_each_type<RealTypes>([&](auto type) {
+        using T = typename decltype(type)::type;
+
+        const std::vector<T> a = x<T>();
+        expect_in_child(
+            [&] {
+                destroy_after_async_moves(a);
+                rocalution::stop_rocalution();
+            },
+            120);
+    });
+}
+
+// After the device synchronization and before Sync(), reads through operator[] give the
+// entries, and Sync() then leaves the vector on the target backend. Some of these calls
+// copy synchronously, so a missing device synchronization need not fail here.
+TEST(local_vector_moves, entries_are_readable_after_an_async_move_and_a_device_sync)
+{
+    REQUIRE_BACKEND(Backend::Accelerator);
+    for_each_type<RealTypes>([&](auto type) {
+        using T = typename decltype(type)::type;
+
+        const std::vector<T> a = x<T>();
+        {
+            SCOPED_TRACE("MoveToHostAsync");
+            auto v = make_local_vector(Backend::Accelerator, a);
+            v->MoveToHostAsync();
+            rocalution::_rocalution_sync();
+            EXPECT_EQ(entries_of(*v), a);
+            v->Sync();
+            if(!expect_location(v, Backend::Host))
+            {
+                return;
+            }
+        }
+        {
+            SCOPED_TRACE("MoveToAcceleratorAsync");
+            auto v = make_local_vector(Backend::Host, a);
+            v->MoveToAcceleratorAsync();
+            rocalution::_rocalution_sync();
+            EXPECT_EQ(entries_of(*v), a);
+            v->Sync();
+            if(!expect_location(v, Backend::Accelerator))
+            {
+                return;
+            }
+            EXPECT_EQ(values_of(*v), a);
+        }
+        {
+            SCOPED_TRACE("CopyFromAsync");
+            auto src = make_local_vector(Backend::Host, a);
+            auto v   = std::make_unique<LocalVector<T>>();
+            v->CopyFromAsync(*src);
+            rocalution::_rocalution_sync();
+            EXPECT_EQ(entries_of(*v), a);
+            v->Sync();
+            expect_location(v, Backend::Host);
+        }
+    });
+}
+
+TEST(local_vector_moves, without_an_accelerator_async_calls_keep_the_entries_readable)
+{
+    DescriptorGuard guard;
+    rocalution::_get_backend_descriptor()->accelerator = false;
+
+    for_each_type<RealTypes>([&](auto type) {
+        using T = typename decltype(type)::type;
+
+        const std::vector<T> a = x<T>();
+        for(const std::string call : {"MoveToHostAsync", "MoveToAcceleratorAsync"})
+        {
+            SCOPED_TRACE(call);
+            auto v = make_local_vector(Backend::Host, a);
+            if(call == "MoveToHostAsync")
+            {
+                v->MoveToAccelerator();
+                v->MoveToHostAsync();
+            }
+            else
+            {
+                v->MoveToAcceleratorAsync();
+            }
+            rocalution::_rocalution_sync();
+            EXPECT_EQ(entries_of(*v), a);
+            v->Sync();
+            EXPECT_EQ(location_of(*v), backend_name(Backend::Host));
+            EXPECT_EQ(values_of(*v), a);
+        }
+        {
+            SCOPED_TRACE("CopyFromAsync");
+            auto src = make_local_vector(Backend::Host, a);
+            auto v   = std::make_unique<LocalVector<T>>();
+            v->CopyFromAsync(*src);
+            rocalution::_rocalution_sync();
+            EXPECT_EQ(entries_of(*v), a);
+            v->Sync();
+            EXPECT_EQ(location_of(*v), backend_name(Backend::Host));
+            EXPECT_EQ(values_of(*v), a);
+        }
+    });
+}
+
+// The destruction runs in a child, so a destructor that rejects the pending Sync() fails
+// this case rather than the whole binary. It also runs in builds without an accelerator.
+TEST(local_vector_moves, a_copy_from_async_destination_can_be_destroyed_without_sync)
+{
+    for_each_type<RealTypes>([&](auto type) {
+        using T = typename decltype(type)::type;
+
+        const std::vector<T> a = x<T>();
+        EXPECT_EXIT(
+            {
+                death_test_watchdog();
+                auto src = make_local_vector(Backend::Host, a);
+                auto v   = std::make_unique<LocalVector<T>>();
+                v->CopyFromAsync(*src);
+                rocalution::_rocalution_sync();
+                v.reset();
+                std::_Exit(0);
+            },
+            testing::ExitedWithCode(0),
+            "");
+    });
 }
 
 TEST(local_vector_allocation, allocate_with_size_zero_empties_the_vector)
@@ -1221,4 +1544,55 @@ TEST(local_vector_preconditions, violations_end_the_program)
         EXPECT_ASSERT_DEATH(a->AddScale(*d, 1.0), "x.vector_ == x.vector_host_");
         EXPECT_ASSERT_DEATH(static_cast<void>((*d)[0]), "vector_host_ != NULL");
     }
+}
+
+// The data calls on an empty vector, the others on an allocated one. Several functions
+// assert the same expression, so the patterns name the function.
+TEST(local_vector_preconditions, null_pointer_arguments_end_the_program)
+{
+    for_each_type<RealTypes>([&](auto type) {
+        using T = typename decltype(type)::type;
+
+        LocalVector<T> e;
+        T*             null = nullptr;
+        EXPECT_ASSERT_DEATH(e.SetDataPtr(nullptr, "v", 3),
+                            "local_vector\\.cpp:[0-9]+: .*SetDataPtr.*[^*]ptr != NULL");
+        EXPECT_ASSERT_DEATH(e.SetDataPtr(&null, "v", 3),
+                            "local_vector\\.cpp:[0-9]+: .*SetDataPtr.*\\*ptr != NULL");
+        std::vector<T> data(3, T(1));
+        T*             ptr = data.data();
+        EXPECT_ASSERT_DEATH(e.LeaveDataPtr(&ptr),
+                            "local_vector\\.cpp:[0-9]+: .*LeaveDataPtr.*\\*ptr == NULL");
+        EXPECT_ASSERT_DEATH(e.CopyFromData(null),
+                            "local_vector\\.cpp:[0-9]+: .*CopyFromData.*data != NULL");
+        EXPECT_ASSERT_DEATH(e.CopyToData(null),
+                            "local_vector\\.cpp:[0-9]+: .*CopyToData.*data != NULL");
+
+        auto v = make_local_vector(Backend::Host, std::vector<T>(4, T(1)));
+        EXPECT_ASSERT_DEATH(v->GetContinuousValues(0, 4, null),
+                            "local_vector\\.cpp:[0-9]+: .*GetContinuousValues.*values != NULL");
+
+        int  ints[4] = {};
+        int* none    = nullptr;
+        for(const std::string f : {"ExtractCoarseMapping", "ExtractCoarseBoundary"})
+        {
+            SCOPED_TRACE(f);
+            const bool mapping = f == "ExtractCoarseMapping";
+            auto       extract = [&](const int* index, int* size, int* out) {
+                if(mapping)
+                {
+                    v->ExtractCoarseMapping(0, 0, index, 0, size, out);
+                }
+                else
+                {
+                    v->ExtractCoarseBoundary(0, 0, index, 0, size, out);
+                }
+            };
+            const std::string at = "local_vector\\.cpp:[0-9]+: .*" + f + ".*";
+            EXPECT_ASSERT_DEATH(extract(none, ints, ints), at + "index != NULL");
+            EXPECT_ASSERT_DEATH(extract(ints, none, ints), at + "size != NULL");
+            EXPECT_ASSERT_DEATH(extract(ints, ints, none),
+                                at + (mapping ? "map != NULL" : "boundary != NULL"));
+        }
+    });
 }
