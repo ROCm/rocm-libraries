@@ -13,7 +13,6 @@
     ]
   },
   "predict_engine": {
-    "default": "45cce86c-2f2d-5c0f-a1df-77bff9d5d92a",
     "gfx90a": [
       "9e81c792-26ad-43ef-8a0d-98a056e02afa"
     ],

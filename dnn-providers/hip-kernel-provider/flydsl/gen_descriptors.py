@@ -382,33 +382,31 @@ def knob_fields(op: str, fields: Any) -> list[str]:
     ]
 
 
-# Every engine carries an engine estimate (RFC 0019 §3.1 `predict_engine`, L1); the slotted
-# split engine's (`sdpa_bwd_split`) is engine-level and models the whole program (RFC 0021),
-# like its UED. The estimate is the expected tflops of the engine's own pick, which engine
-# selection reads before any catalog is enumerated. An engine without one is ordered by
-# static rules whatever the graph, and FlyDSL's engines compete for graphs: on gfx1201
-# sdpa_rdna, sdpa_rdna_decode and sdpa_aiw each match nearly every graph of the others'
-# corpora.
+# Every engine's UED binds the engine estimate (RFC 0019 §3.1 `predict_engine`, L1) only
+# under the arches that have a trained model installed (below); the slotted split engine's
+# (`sdpa_bwd_split`) is engine-level and models the whole program (RFC 0021), like its UED.
+# The estimate is the expected tflops of the engine's own pick, which engine selection reads
+# before any catalog is enumerated. An engine with no model installed has no `predict_engine`
+# at all: no placeholder document stands in for it, and an arch without a model reports the
+# estimate unavailable when it is asked for one. A new engine gets its first L1 through the
+# UHD pipeline's request (`add_l1`), whose `uhd_gen promote` then creates the role. FlyDSL's
+# engines compete for graphs: on gfx1201 sdpa_rdna, sdpa_rdna_decode and sdpa_aiw each match
+# nearly every graph of the others' corpora, so an arch with a trained estimate orders them
+# by it and one without orders them by static rules.
 #
-# The estimate's `default` slot. No scorer is registered under its symbol, so the loader
-# disables the estimate and keeps the engine (RFC 0019 §11.2), exactly as an engine with no
-# estimate behaves; a trained model installed for an arch (below) is bound under that
-# arch's key and takes precedence there.
-ENGINE_ESTIMATE_METRIC = "tflops"
-
 # Trained models live beside the op's descriptors where `uhd_gen promote` installs them,
 # `heuristics/<ued-id>/<role>/<arch>/<metric>/` (a metric-less model directly under
 # `<role>/<arch>/`), and the UED binds each under its role and arch key. The generator owns
 # the UED, so it derives those bindings from what is installed: a regeneration keeps every
 # trained model, and `--check` accepts a tree with models in it. A model under a gfx key
-# wins over `default` on that arch (RFC 0020 §4.6), so the native ranker and the estimate
-# slot stay the fallback everywhere else.
+# wins over `default` on that arch (RFC 0020 §4.6), so the native ranker stays the fallback
+# everywhere else.
 #
 # `uhd_gen promote` is the reference for every binding: the roles it accepts, where it
 # installs, and the form it writes (uhd_gen/promote.py `_rebind`). A key a trained model is
 # bound under holds a list, one UHD per ranking metric, for every role --
 # `predict_applicable_kernels`, the candidate generators for future JIT spaces, included; a
-# key only this generator fills (the native ranker, the estimate's slot) stays a bare id.
+# key only this generator fills (the native ranker) stays a bare id.
 # The IngestorGenerator emits the same form from its `engine.heuristics` config (#15101).
 HEURISTICS_DIR = "heuristics"
 _ARCH_KEY = re.compile(r"default|gfx[0-9a-f]+")
@@ -491,8 +489,8 @@ def role_maps(
     Promoting into the UED and regenerating then bind the same values (promote appends a new
     arch key; this sorts, `default` first): a key a trained model is bound under is a list (one
     UHD per metric) in promote's order, the metric-less UHD first and then by metric name
-    (promote.binding_order); a key only the generator fills (the native ranker, the estimate's
-    slot) stays the bare id it writes.
+    (promote.binding_order); a key only the generator fills (the native ranker) stays the bare
+    id it writes.
     """
     trained = {
         model
@@ -516,25 +514,6 @@ def role_maps(
             )
         }
         for role, by_arch in roles.items()
-    }
-
-
-def estimate_document(uhd_id: str, name: str, symbol: str) -> dict[str, Any]:
-    """The engine estimate's `default` slot: a native UHD no scorer is registered under."""
-    return {
-        "version": DESCRIPTOR_VERSION,
-        "id": uhd_id,
-        "name": f"flydsl {name} engine estimate",
-        "provenance": (
-            "Default slot for the engine estimate: a trained model installed "
-            "under heuristics/ for an arch takes precedence there. No scorer is "
-            "registered under this symbol, so on any other arch the loader "
-            "disables the estimate and keeps the engine."
-        ),
-        "adapter": "native",
-        "objective": "max",
-        "score": {"metric": ENGINE_ESTIMATE_METRIC},
-        "native": {"symbol": symbol},
     }
 
 
@@ -961,7 +940,6 @@ class OpDescriptors:
             ued = ued_id(op, fields)
         self.ued_id = ued
         self.umd_id = _uuid(f"umd/{op}/kernel")
-        self.estimate_uhd_id = _uuid(f"uhd/{op}/predict_engine")
 
     def documents(self) -> dict[str, dict[str, Any]]:
         documents = self._documents()
@@ -1002,30 +980,11 @@ class OpDescriptors:
             "graph_match": {"native": f"{self.symbols}.graph_match"},
         }
         # Role -> arch key -> [(metric, UHD id)]: the UHD that orders the engine's kernel
-        # catalog on every arch, and the engine estimate's slot.
-        roles: RoleMaps = {
-            "sort_kernel_catalog": {"default": [(None, self.uhd_id)]},
-            "predict_engine": {
-                "default": [(ENGINE_ESTIMATE_METRIC, self.estimate_uhd_id)]
-            },
-        }
+        # catalog on every arch. `predict_engine` is bound only under the arches with a
+        # trained model installed, and the UED has no such role while none is.
+        roles: RoleMaps = {"sort_kernel_catalog": {"default": [(None, self.uhd_id)]}}
         bind_installed(roles, self.installed)
-        # The UHD pipeline keys every role of an engine one way: once a ranker is bound for
-        # an arch, it trains an estimate for that arch only if `predict_engine` binds the
-        # arch too. So each such arch gets the estimate's slot, which the loader disables
-        # just as it does under `default`. The ranker map is left alone: it is an input of
-        # the selector revision every trained estimate is checked against, and this role
-        # is not.
-        for arch in roles["sort_kernel_catalog"]:
-            roles["predict_engine"].setdefault(
-                arch, [(ENGINE_ESTIMATE_METRIC, self.estimate_uhd_id)]
-            )
         engine.update(role_maps(roles, self.installed))
-        estimate = {
-            f"{self.stem}_engine_estimate.uhd.json": estimate_document(
-                self.estimate_uhd_id, self.op, f"{self.symbols}.engine_estimate"
-            )
-        }
         engine["metadata"] = self.kmd_id
         engine["knobs"] = knob_fields(self.op, self.fields)
         if self.op in GRAPH_CAPTURE_OPS:
@@ -1056,7 +1015,6 @@ class OpDescriptors:
                 "dispatch_symbol": f"{self.symbols}.dispatch",
             },
             f"{self.stem}.ued.json": engine,
-            **estimate,
             f"{self.stem}_kernel_match.umd.json": {
                 "version": DESCRIPTOR_VERSION,
                 "id": self.umd_id,
@@ -1365,15 +1323,16 @@ def _require_disjoint_ids(slots: dict[str, list[dict[str, Any]]]) -> None:
 
 
 class SplitEngine:
-    """The split engine's descriptor-only content: its UED 1.1 and engine estimate.
+    """The split engine's descriptor-only content: its UED 1.1.
 
     Each slot names its own KMD and carries only the tuning fields of its own schema as
     knobs. The engine has no ranker (the loader falls back to priority, then id), no
     top-level ``metadata``, ``sort_kernel_catalog``, ``knobs`` or
     ``predict_applicable_kernels``, and does not author the serialization note: a slotted
     engine's plans cannot be saved. Its estimate is engine-level and models the whole
-    program (RFC 0021): like every engine's, the `default` slot plus each trained model
-    installed under ``sdpa_bwd_split/heuristics/``.
+    program (RFC 0021): its UED binds ``predict_engine`` under each arch with a trained
+    model installed under ``sdpa_bwd_split/heuristics/``, and has no ``predict_engine``
+    while none is installed.
     """
 
     def __init__(
@@ -1386,7 +1345,6 @@ class SplitEngine:
         self.slot_ops = slot_ops
         self.stem = f"flydsl_{SPLIT_ENGINE}"
         self.symbols = f"hipkernel.{self.stem}"
-        self.estimate_uhd_id = _uuid(f"uhd/{SPLIT_ENGINE}/predict_engine")
         self.installed = installed or {}
         # A slot ranker belongs to one slot (RFC 0021), which the installed layout has no
         # level for; binding one engine-wide would order every slot's catalog with it.
@@ -1397,11 +1355,7 @@ class SplitEngine:
             )
 
     def documents(self) -> dict[str, dict[str, Any]]:
-        roles: RoleMaps = {
-            "predict_engine": {
-                "default": [(ENGINE_ESTIMATE_METRIC, self.estimate_uhd_id)]
-            },
-        }
+        roles: RoleMaps = {}
         bind_installed(roles, self.installed)
         ued: dict[str, Any] = {
             "version": SLOTTED_VERSION,
@@ -1424,12 +1378,7 @@ class SplitEngine:
         }
         if SPLIT_ENGINE in GRAPH_CAPTURE_OPS:
             ued["behavior_notes"] = ["supports_graph_capture"]
-        return {
-            f"{self.stem}.ued.json": ued,
-            f"{self.stem}_engine_estimate.uhd.json": estimate_document(
-                self.estimate_uhd_id, SPLIT_ENGINE, f"{self.symbols}.engine_estimate"
-            ),
-        }
+        return {f"{self.stem}.ued.json": ued}
 
 
 def build_documents(

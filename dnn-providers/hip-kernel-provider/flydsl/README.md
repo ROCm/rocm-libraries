@@ -214,7 +214,8 @@ slotted, three launches in order -- prep, dK/dV, dQ -- and so is not plan-serial
 split engine's slot ops are `sdpa_bwd_prep`, `sdpa_bwd_dkdv` and `sdpa_bwd_dq`;
 `sdpa_bwd_split` is descriptor-only (no objects): its UED, and its engine estimate, which is
 engine-level (it models the whole program); trained estimates install under
-`sdpa_bwd_split/heuristics/`, and the slots have no rankers. The dBias and dSink reduce kernels have no
+`sdpa_bwd_split/heuristics/` and are bound under their arch keys in its UED (no model, no
+`predict_engine`), and the slots have no rankers. The dBias and dSink reduce kernels have no
 op of their own: on gfx950 they ride inside the objects that launch them (and in the fp32 combined bias rows of gfx942 and gfx90a); on
 gfx11-generic, gfx942 and gfx90a the three dBias reduce objects are companions of the dQ op. A graph with `padding_mask` also launches a
 tail-zero object (`sdpa_bwd_tailzero`, one per arch family and dtype) after the gradient launches: it
@@ -321,7 +322,7 @@ provider tree; everything else is relative to this directory.
 | Path | |
 |---|---|
 | `<content>/<op>/*.json` | descriptors shared by every target of an op: KMD (metadata schema), UED (engine), UHD (heuristic), UDD (dispatch), UMD (matcher) |
-| `<content>/<op>/flydsl_<op>_engine_estimate.uhd.json` | (every op that owns its engine, the split engine's descriptor-only folder included: its models install under `sdpa_bwd_split/heuristics/<ued-id>/predict_engine/<arch>/tflops/`) the engine estimate's (`predict_engine`, L1) `default` slot: a native UHD no scorer registers, so the loader disables it and keeps the engine until a trained model is installed for an arch |
+| `<content>/<op>/heuristics/<ued-id>/predict_engine/<arch>/<metric>/` | the engine estimate (`predict_engine`, L1), which the op's UED binds only for an arch with a trained model installed here (the split engine's descriptor-only folder included: its models install under `sdpa_bwd_split/heuristics/<ued-id>/predict_engine/<arch>/tflops/`). An engine with no model installed (today `sdpa_dropout_mask` and `sdpa_head_pad`, which serve no graph) has no `predict_engine` in its UED and no estimate document; an arch without a model reports the estimate UNAVAILABLE when one is requested, and the SDK logs it once per arch. A new engine gets its first L1 through the UHD pipeline's `add_l1`, whose promotion creates the role |
 | `<content>/<op>/heuristics/<ued-id>/<role>/<arch>/[<metric>/]` | a trained UHD as `uhd_gen promote` installs it (a metric-less one directly under `<arch>/`): `heuristic.uhd.json` and the `model.bin` it names (in DVC). `gen_descriptors.py` binds each under its role and arch key in the op's UED, with the value promote writes: a list per key for every role (one UHD per metric; `predict_applicable_kernels` holds the candidate generators for future JIT spaces). Promote appends a new arch key where the generator sorts them, so regenerate after promoting; the bindings are unchanged by it. The IngestorGenerator binds the same values from its `engine.heuristics` config. The UED id is the op's name plus a fingerprint of its KMD fields (`ued_id`; the split engine's fingerprints its slots' fields in slot order, `split_ued_id`), so it changes exactly when an engine's kernel fields do: the UHD pipeline then files that engine's measurements in new datasets, and a model left under the old id stops `gen_descriptors.py` and `--check` with an error naming the id change (retrain it, or move it under the new id with its `trained_against` UED id and selector revision updated). The UED UUID is therefore not a stable key for an engine: `HIPDNN_DISABLE_ENGINES` should name the engine or its 64-bit id, and `uhd_gen --engine` the engine's name |
 | `<content>/<op>/<target>.SOURCE.md` | the target's readable summary: toolchain, input digest, one row per object |
 | `<content>/<op>/<target>/*.hsaco` | the committed code objects |
@@ -353,8 +354,7 @@ it is generated output inside the per-target folders.**
 
 ```
 <content>/<op>/
-  flydsl_<op>.{kmd,ued,uhd,udd}.json, flydsl_<op>_kernel_match.umd.json,
-  flydsl_<op>_engine_estimate.uhd.json
+  flydsl_<op>.{kmd,ued,uhd,udd}.json, flydsl_<op>_kernel_match.umd.json
                               a fixed handful per op -- however many objects,
                               knobs, targets or arches it gains
   heuristics/                 trained UHDs, one folder per role, arch and

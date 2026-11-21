@@ -62,29 +62,35 @@ def _ued(op_dir: Path) -> dict:
     return docs[f"flydsl_{OP}.ued.json"]
 
 
-def test_an_arch_model_binds_under_its_arch_and_keeps_the_default(
-    tmp_path: Path,
-) -> None:
+def test_an_arch_model_binds_under_its_arch_alone(tmp_path: Path) -> None:
     _install(tmp_path, "predict_engine", "gfx950", "model-950")
     _install(tmp_path, "sort_kernel_catalog", "gfx942", "ranker-942")
     ops = gen_descriptors.OpDescriptors(OP, FIELDS)
     ued = _ued(tmp_path)
-    # gfx942's ranker gives the estimate a gfx942 slot, so the pipeline can train one there;
-    # gfx950's estimate adds no ranker key, which would change the selector revision.
-    assert ued["predict_engine"] == {
-        "default": ops.estimate_uhd_id,
-        "gfx942": ops.estimate_uhd_id,
-        "gfx950": ["model-950"],
-    }
+    # The estimate binds only the arch with an installed model: no `default`, and no key for
+    # gfx942, which has a ranker but no model.
+    assert ued["predict_engine"] == {"gfx950": ["model-950"]}
     assert ued["sort_kernel_catalog"] == {
         "default": ops.uhd_id,
         "gfx942": ["ranker-942"],
     }
 
 
-def test_a_default_model_replaces_only_its_own_metric(tmp_path: Path) -> None:
-    # The estimate slot declares tflops, so a tflops estimate takes its place; the native
-    # ranker declares no metric, so a tflops ranker joins it.
+def test_the_estimate_binds_exactly_the_arches_with_a_model(tmp_path: Path) -> None:
+    _install(tmp_path, "predict_engine", "gfx950", "model-950")
+    _install(tmp_path, "predict_engine", "gfx1100", "model-1100")
+    _install(tmp_path, "predict_engine", "gfx942", "model-942")
+    # Sorted with `default` first, one list per key, and no key for an arch without a model.
+    assert _ued(tmp_path)["predict_engine"] == {
+        "gfx1100": ["model-1100"],
+        "gfx942": ["model-942"],
+        "gfx950": ["model-950"],
+    }
+
+
+def test_a_default_model_joins_the_native_ranker_only_by_metric(tmp_path: Path) -> None:
+    # The native ranker declares no metric, so a tflops ranker joins it; the estimate has no
+    # native entry, so its `default` is the model alone.
     _install(tmp_path, "predict_engine", "default", "model")
     _install(tmp_path, "sort_kernel_catalog", "default", "ranker")
     ued = _ued(tmp_path)
@@ -93,13 +99,34 @@ def test_a_default_model_replaces_only_its_own_metric(tmp_path: Path) -> None:
     assert ued["sort_kernel_catalog"] == {"default": [native, "ranker"]}
 
 
-def test_no_installed_model_leaves_the_engine_as_generated(tmp_path: Path) -> None:
-    assert (
-        _ued(tmp_path)
-        == gen_descriptors.OpDescriptors(OP, FIELDS).documents()[
-            f"flydsl_{OP}.ued.json"
-        ]
-    )
+def test_no_installed_model_leaves_no_estimate(tmp_path: Path) -> None:
+    ops = gen_descriptors.OpDescriptors(OP, FIELDS)
+    documents = ops.documents()
+    ued = _ued(tmp_path)
+    assert ued == documents[f"flydsl_{OP}.ued.json"]
+    assert "predict_engine" not in ued
+    assert ued["sort_kernel_catalog"] == {"default": ops.uhd_id}
+    assert not [name for name in documents if "engine_estimate" in name]
+
+
+def test_a_ranker_alone_gives_the_estimate_no_key(tmp_path: Path) -> None:
+    _install(tmp_path, "sort_kernel_catalog", "gfx942", "ranker-942")
+    assert "predict_engine" not in _ued(tmp_path)
+
+
+def test_a_leftover_engine_estimate_file_is_stale(tmp_path: Path) -> None:
+    documents = gen_descriptors.OpDescriptors(OP, FIELDS).documents()
+    folders = {Path(OP): documents}
+    gen_descriptors._write(tmp_path, folders)
+    assert gen_descriptors._check(tmp_path, folders) == []
+
+    leftover = tmp_path / OP / f"flydsl_{OP}_engine_estimate.uhd.json"
+    leftover.write_text("{}\n", encoding="utf-8")
+    assert gen_descriptors._check(tmp_path, folders) == [
+        f"{Path(OP) / leftover.name}: names no object in the manifest"
+    ]
+    gen_descriptors._write(tmp_path, folders)
+    assert not leftover.exists()
 
 
 def test_a_metric_less_model_binds_from_its_arch_folder(tmp_path: Path) -> None:
@@ -240,18 +267,14 @@ def _promote():
 @pytest.mark.parametrize(
     ("role", "arch", "metric"),
     [
-        ("predict_engine", "gfx950", "tflops"),  # a new key
-        ("predict_engine", "default", "tflops"),  # replaces the estimate slot
+        ("predict_engine", "gfx950", "tflops"),  # a new role and key
+        ("predict_engine", "default", "tflops"),  # a new role, bound under `default`
         ("sort_kernel_catalog", "gfx942", "tflops"),  # a new key
         (
             "sort_kernel_catalog",
             "default",
             "tflops",
         ),  # joins the metric-less native ranker
-        # Joins the estimate slot's tflops UHD and sorts before it: the generator lists
-        # its own entries first, so only the fixed order puts a new metric (RFC 0019 §4.4
-        # anticipates more than tflops and time) where promote does.
-        ("predict_engine", "default", "accuracy"),
         ("sort_kernel_catalog", "default", None),  # replaces the native ranker
         ("predict_applicable_kernels", "gfx950", None),  # the candidate generators
     ],
