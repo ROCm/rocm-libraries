@@ -180,8 +180,10 @@ namespace rocsparse
                 // Compute hash
                 J hash = (key * 103) & (WFSIZE * HASH - 1);
 
-                // Hash operation
-                while(true)
+                // Hash operation. The kernel selection keeps an empty slot; the bound
+                // still stops a lookup after one pass should the table be full.
+#pragma unroll 4
+                for(uint32_t h = 0; h < WFSIZE * HASH; ++h)
                 {
                     if(table[hash] == -1)
                     {
@@ -453,33 +455,38 @@ namespace rocsparse
         THROW_IF_ROCSPARSE_ERROR(rocsparse_status_internal_error);
     }
 
-    template <uint32_t... V, typename... P>
+    // The table of a wavefront has WF_SIZE * HASH slots and must keep at least one empty
+    // slot, so on a wavefront of 32 a row of exactly 32 * HASH entries takes the next size.
+    template <uint32_t BLOCKSIZE, uint32_t WF_SIZE, typename... P>
     static csric0_kernel_launch_t transform_mxnnz(const int32_t max_nnz, P... p)
     {
-        if(max_nnz <= 32)
+        const auto fits = [max_nnz](int32_t hash) {
+            return max_nnz <= 32 * hash && max_nnz < int32_t(WF_SIZE) * hash;
+        };
+        if(fits(1))
         {
-            return rocsparse::transform_t_type<V..., 1>(std::forward<P>(p)...);
+            return rocsparse::transform_t_type<BLOCKSIZE, WF_SIZE, 1>(std::forward<P>(p)...);
         }
-        else if(max_nnz <= 64)
+        else if(fits(2))
         {
-            return rocsparse::transform_t_type<V..., 2>(std::forward<P>(p)...);
+            return rocsparse::transform_t_type<BLOCKSIZE, WF_SIZE, 2>(std::forward<P>(p)...);
         }
-        else if(max_nnz <= 128)
+        else if(fits(4))
         {
-            return rocsparse::transform_t_type<V..., 4>(std::forward<P>(p)...);
+            return rocsparse::transform_t_type<BLOCKSIZE, WF_SIZE, 4>(std::forward<P>(p)...);
         }
-        else if(max_nnz <= 256)
+        else if(fits(8))
         {
-            return rocsparse::transform_t_type<V..., 8>(std::forward<P>(p)...);
+            return rocsparse::transform_t_type<BLOCKSIZE, WF_SIZE, 8>(std::forward<P>(p)...);
         }
-        else if(max_nnz <= 512)
+        else if(fits(16))
         {
-            return rocsparse::transform_t_type<V..., 16>(std::forward<P>(p)...);
+            return rocsparse::transform_t_type<BLOCKSIZE, WF_SIZE, 16>(std::forward<P>(p)...);
         }
         else
         {
             THROW_WITH_MESSAGE_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value,
-                                                  "max_nnz > 512 is not supported");
+                                                  "max_nnz is too large for the hash kernel");
         }
     }
 
