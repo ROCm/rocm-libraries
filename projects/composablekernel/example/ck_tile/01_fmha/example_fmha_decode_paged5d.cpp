@@ -16,6 +16,7 @@ int main(int argc, char* argv[])
         .insert("h", "16", "number of query heads")
         .insert("h_k", "1", "number of kv heads (h / h_k <= 16)")
         .insert("s_k", "8192", "context length; comma separated for one per batch")
+        .insert("max_s_k", "0", "context length bound the launch is sized for; 0 = longest s_k")
         .insert("window", "2048", "keys attended, the query's own included; 0 = no window")
         .insert("splits", "0", "workgroups per (batch, kv head); 0 = heuristic")
         .insert("pages_per_split", "0", "pages per split; 0 = heuristic")
@@ -38,6 +39,7 @@ int main(int argc, char* argv[])
     c.splits            = arg_parser.get_int("splits");
     c.pages_per_split   = arg_parser.get_int("pages_per_split");
     c.layout            = arg_parser.get_str("layout");
+    c.max_seqlen_k      = arg_parser.get_int("max_s_k");
     c.seed              = arg_parser.get_int("seed");
     const bool validate = arg_parser.get_bool("v");
 

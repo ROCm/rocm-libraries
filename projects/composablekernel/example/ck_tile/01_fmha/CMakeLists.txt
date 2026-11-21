@@ -370,6 +370,9 @@ if("gfx1250" IN_LIST INST_TARGETS)
   set(EXAMPLE_FMHA_DECODE_PAGED5D "tile_example_fmha_decode_paged5d")
   add_executable(${EXAMPLE_FMHA_DECODE_PAGED5D} EXCLUDE_FROM_ALL example_fmha_decode_paged5d.cpp)
   set_property(TARGET ${EXAMPLE_FMHA_DECODE_PAGED5D} PROPERTY HIP_ARCHITECTURES gfx1250)
+  # C API loaded by fmha_decode_paged5d.py
+  add_library(ck_fmha_decode_paged5d SHARED EXCLUDE_FROM_ALL fmha_decode_paged5d_api.cpp)
+  set_property(TARGET ck_fmha_decode_paged5d PROPERTY HIP_ARCHITECTURES gfx1250)
 endif()
 
 # TODO: we have to turn off this global prop, otherwise the progress bar generated

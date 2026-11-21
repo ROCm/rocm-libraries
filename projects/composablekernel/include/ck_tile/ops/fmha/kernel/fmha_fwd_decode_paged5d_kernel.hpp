@@ -15,7 +15,9 @@
 //
 // Grid (kNumSplits * groups, nhead_k, batch). Each kNumSplits consecutive splits are one workgroup
 // cluster; each stores O / l in bf16 and (m, l), and after a cluster barrier every split merges
-// its share of the rows (with several groups, see MergeGroups). K and V pages are copied to LDS
+// its share of the rows (with several groups, see MergeGroups). The grid is sized for
+// max_seqlen_k; each (batch, kv head) spreads its own key range over it, and clusters left
+// without pages exit at once. K and V pages are copied to LDS
 // byte for byte: in this layout the LDS bytes are WMMA operands as they are (S^T = K Q^T and O^T +=
 // V^T P^T, no transposed reads).
 
@@ -31,16 +33,17 @@ struct FmhaDecodePaged5dHostArgs
     const float* k_descale_ptr;  // one float
     const float* v_descale_ptr;  // one float
     void* o_ptr;                 // [batch][nhead_q][hdim] bf16
-    // fmha_decode_paged5d_workspace_bytes; zero it once before first use (the counters of the
-    // cluster groups reset themselves)
-    void* workspace_ptr;
+    void* workspace_ptr;         // fmha_decode_paged5d_workspace_bytes, no initialization needed
+    // fmha_decode_paged5d_num_counters int32; zero them once, every launch leaves them zero, so
+    // launches of any shape can share them as long as they do not run concurrently
+    int32_t* counters_ptr;
     index_t batch;
     index_t nhead_q;
     index_t nhead_k;
     index_t max_blocks_per_seq;
-    index_t window; // keys attended, the query's own included; 0 = no window
-    index_t pages_per_split;
-    index_t num_groups; // clusters per (batch, kv head)
+    index_t window;          // keys attended, the query's own included; 0 = no window
+    index_t pages_per_split; // the most a split takes
+    index_t num_groups;      // clusters per (batch, kv head)
     float scale_s;
 };
 
@@ -95,12 +98,17 @@ CK_TILE_HOST size_t fmha_decode_paged5d_workspace_bytes(index_t batch,
                                                         index_t num_groups = 1)
 {
     // per split: bf16 O / l [batch][nhead_k][groups][splits][16][128] and fp32 (m, l) [..][16][2];
-    // per group the same with one split, then int32 counters [batch][nhead_k][splits]
+    // per group the same with one split
     const size_t heads = static_cast<size_t>(batch) * nhead_k;
     const size_t rows  = heads * num_groups * num_splits * 16;
     const size_t grows = num_groups > 1 ? heads * num_groups * 16 : 0;
-    const size_t cnt   = num_groups > 1 ? heads * num_splits : 0;
-    return (rows + grows) * (128 * 2 + 2 * sizeof(float)) + cnt * sizeof(int32_t);
+    return (rows + grows) * (128 * 2 + 2 * sizeof(float));
+}
+
+// one per (batch, kv head, row block) for any configuration
+CK_TILE_HOST size_t fmha_decode_paged5d_num_counters(index_t batch, index_t nhead_k)
+{
+    return static_cast<size_t>(batch) * nhead_k * 15;
 }
 
 template <bool kWaveSplit_, index_t kNumSplits_, bool kGroups_ = false>
@@ -139,9 +147,12 @@ struct FmhaDecodePaged5dKernel
         index_t max_blocks_per_seq;
         index_t window;
         index_t pages_per_split;
+        index_t num_groups; // read with kGroups only
+        // ceil(2^32 / (kNumSplits * num_groups)), for kGroups: the high half of a product with it
+        // divides by the split count
+        uint32_t splits_rcp;
         float scale_s;
         // used with kGroups only; last, so that the arguments the prologue needs come first
-        index_t num_groups;
         uint16_t* gws_o;
         float* gws_ml;
         int32_t* counters; // per (batch, kv head, row block)
@@ -170,12 +181,13 @@ struct FmhaDecodePaged5dKernel
                 h.max_blocks_per_seq,
                 h.window,
                 h.pages_per_split,
-                h.scale_s,
                 h.num_groups,
+                static_cast<uint32_t>(((uint64_t{1} << 32) + kNumSplits * h.num_groups - 1) /
+                                      (kNumSplits * h.num_groups)),
+                h.scale_s,
                 reinterpret_cast<uint16_t*>(gws),
                 gws == nullptr ? nullptr : reinterpret_cast<float*>(gws + grows * kHdim * 2),
-                gws == nullptr ? nullptr
-                               : reinterpret_cast<int32_t*>(gws + grows * (kHdim * 2 + 8))};
+                h.counters_ptr};
     }
 
     CK_TILE_HOST static constexpr dim3 GridSize(index_t batch, index_t nhead_k, index_t groups = 1)
@@ -265,13 +277,28 @@ struct FmhaDecodePaged5dKernel
         const index_t sg  = gi * kNumSplits + s; // split index within the (batch, kv head)
         const index_t gqa = a.gqa;
 
-        const index_t ctx = a.seqlen_k[b];
-        const index_t lo  = a.window > 0 ? max(0, ctx - a.window) : 0;
-        const index_t pg0 = lo / kPage + sg * a.pages_per_split;
-        const index_t pend =
-            min((ctx + kPage - 1) / kPage, lo / kPage + (sg + 1) * a.pages_per_split);
         constexpr index_t kStepPages = kNumWaves * kWavePages;
-        const index_t steps          = pend > pg0 ? (pend - pg0 + kStepPages - 1) / kStepPages : 0;
+        const index_t ctx            = a.seqlen_k[b];
+        const index_t lo             = a.window > 0 ? max(0, ctx - a.window) : 0;
+        const index_t pg_hi          = (ctx + kPage - 1) / kPage;
+        const index_t span           = max(pg_hi - lo / kPage, 1);
+        // this range over all splits of the grid, in whole steps and at most the configured size
+        constexpr index_t kMinPages = kWaveSplit ? 16 : (kGroups ? 8 : 4);
+        index_t per_split;
+        if constexpr(kGroups)
+            per_split =
+                __umulhi(static_cast<uint32_t>(span + kNumSplits * a.num_groups - 1), a.splits_rcp);
+        else
+            per_split = (span + kNumSplits - 1) / kNumSplits;
+        const index_t pps =
+            min(a.pages_per_split,
+                max(kMinPages, (per_split + kStepPages - 1) / kStepPages * kStepPages));
+        // groups without pages take no part in the merge
+        if(gi > 0 && gi * kNumSplits * pps >= span)
+            return;
+        const index_t pg0   = lo / kPage + sg * pps;
+        const index_t pend  = min(pg_hi, lo / kPage + (sg + 1) * pps);
+        const index_t steps = pend > pg0 ? (pend - pg0 + kStepPages - 1) / kStepPages : 0;
 
         // block ids of the split's pages, 32 per register (lane = page), picked with readlane
         const int32_t* bt  = a.block_table + static_cast<long_index_t>(b) * a.max_blocks_per_seq;
@@ -280,6 +307,8 @@ struct FmhaDecodePaged5dKernel
         };
         int32_t bt_cur = load_bt(0), bt_next = load_bt(1);
         index_t cur_chunk = 0;
+        // loads return in order: the block ids, which the first copies wait for, go out first
+        __builtin_amdgcn_sched_barrier(0);
 
         // Q^T operand of row n: 16-byte d chunks 2i + h, after a per-row absmax quantization
         float qv[64];
@@ -716,7 +745,7 @@ struct FmhaDecodePaged5dKernel
                 }
             }
             if constexpr(kGroups)
-                MergeGroups(a, head, b, g, gqa, s, vd);
+                MergeGroups(a, head, b, g, gqa, s, (span - 1) / (kNumSplits * pps) + 1, vd);
         }
     }
 
@@ -729,6 +758,7 @@ struct FmhaDecodePaged5dKernel
                                     index_t g,
                                     index_t gqa,
                                     index_t s,
+                                    index_t groups,
                                     float vd) const
     {
         constexpr index_t kRowsPer = (kRows + kNumSplits - 1) / kNumSplits;
@@ -740,7 +770,7 @@ struct FmhaDecodePaged5dKernel
             int32_t* counter = a.counters + head * kNumSplits + s;
             const bool is_last =
                 __scoped_atomic_fetch_add(counter, 1, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE) ==
-                a.num_groups - 1;
+                groups - 1;
             if(is_last) // zeroed again for the next launch; every group has counted
                 __scoped_atomic_store_n(counter, 0, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
             last = is_last ? 1 : 0;
@@ -761,13 +791,13 @@ struct FmhaDecodePaged5dKernel
             const long_index_t row0  = head * a.num_groups * kRows + mrow;
             const auto ml_res        = make_wave_buffer_resource(a.gws_ml, 0x7ffffffe);
             const auto o_res         = make_wave_buffer_resource(a.gws_o, 0x7ffffffe);
-            for(index_t i0 = 0; i0 < a.num_groups; i0 += kChunk)
+            for(index_t i0 = 0; i0 < groups; i0 += kChunk)
             {
                 float2 mli[kChunk];
                 uint32_t oi[kChunk];
                 for(index_t j = 0; j < kChunk; ++j)
                 {
-                    const long_index_t grow = row0 + min(i0 + j, a.num_groups - 1) * kRows;
+                    const long_index_t grow = row0 + min(i0 + j, groups - 1) * kRows;
                     const auto ml2 =
                         amd_buffer_load_impl<float, 2, amd_buffer_coherence_enum::DEVICE>(
                             ml_res, static_cast<index_t>(grow * 2 * sizeof(float)), 0);
@@ -779,7 +809,7 @@ struct FmhaDecodePaged5dKernel
                 for(index_t j = 0; j < kChunk; ++j)
                 {
                     const float mi = mli[j].x, li = mli[j].y;
-                    if(i0 + j >= a.num_groups || !(li > 0.f))
+                    if(i0 + j >= groups || !(li > 0.f))
                         continue;
                     // online merge: the running sums follow the largest max seen so far
                     const float mn = fmaxf(mm, mi);

@@ -90,6 +90,7 @@ struct Case
     index_t splits          = 0;         // 0 = heuristic
     index_t pages_per_split = 0;         // 0 = heuristic
     std::string layout      = "auto";    // auto, coop, wave
+    index_t max_seqlen_k    = 0;         // the bound the grid is sized for; 0 = longest seqlen_k
     unsigned seed           = 1;
 };
 
@@ -103,8 +104,8 @@ struct Result
 };
 
 // Runs one case: random Q (bf16), K/V (finite fp8 in [-1, 1], pages in a random order, the
-// unused tail of each sequence's last page filled with NaN codes), then validates against a CPU
-// reference and/or times stream and HIP-graph launches.
+// unused tail of each sequence's last page filled with NaN codes), a workspace filled with NaN
+// codes, then validates against a CPU reference and/or times stream and HIP-graph launches.
 inline Result run(const Case& c, bool validate, int warmup = 0, int repeat = 0)
 {
     Result res;
@@ -112,7 +113,8 @@ inline Result run(const Case& c, bool validate, int warmup = 0, int repeat = 0)
     std::vector<index_t> seqlens(batch);
     for(index_t b = 0; b < batch; ++b)
         seqlens[b] = c.seqlen_k[std::min<size_t>(b, c.seqlen_k.size() - 1)];
-    const index_t max_seqlen = *std::max_element(seqlens.begin(), seqlens.end());
+    const index_t max_seqlen =
+        std::max(c.max_seqlen_k, *std::max_element(seqlens.begin(), seqlens.end()));
     if(c.nhead % c.nhead_k != 0 || c.nhead / c.nhead_k > 16)
     {
         res.error = "h / h_k must be an integer <= 16";
@@ -191,7 +193,9 @@ inline Result run(const Case& c, bool validate, int warmup = 0, int repeat = 0)
     ck_tile::DeviceMem o_buf(q.size() * 2), scale_buf(8);
     ck_tile::DeviceMem ws_buf(ck_tile::fmha_decode_paged5d_workspace_bytes(
         batch, c.nhead_k, cfg.num_splits, cfg.num_groups));
-    ws_buf.SetZero();
+    ck_tile::DeviceMem cnt_buf(ck_tile::fmha_decode_paged5d_num_counters(batch, c.nhead_k) * 4);
+    HIP_CHECK_ERROR(hipMemset(ws_buf.GetDeviceBuffer(), 0xff, ws_buf.GetBufferSize()));
+    cnt_buf.SetZero();
     q_buf.ToDevice(q.data());
     k_buf.ToDevice(k.data());
     v_buf.ToDevice(v.data());
@@ -210,6 +214,7 @@ inline Result run(const Case& c, bool validate, int warmup = 0, int repeat = 0)
         static_cast<const float*>(scale_buf.GetDeviceBuffer()) + 1,
         o_buf.GetDeviceBuffer(),
         ws_buf.GetDeviceBuffer(),
+        static_cast<int32_t*>(cnt_buf.GetDeviceBuffer()),
         batch,
         c.nhead,
         c.nhead_k,

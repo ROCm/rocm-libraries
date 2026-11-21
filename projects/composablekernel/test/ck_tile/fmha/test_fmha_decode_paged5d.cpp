@@ -48,6 +48,13 @@ std::vector<Param> params()
     add("gqa_16_2", {2, 16, 2, {4000}, 2048});
     add("gqa_32_4_wave", {2, 32, 4, {999}, 2048, 0, 0, "wave"});
     add("gqa_6_3", {2, 6, 3, {1500}, 512});
+    // launches sized for a longer bound than the contexts (graph replay): the ranges spread over
+    // the grid, clusters without pages exit
+    add("bound_full_b8", {8, 16, 1, {8192}, 0, 0, 0, "auto", 131072});
+    add("bound_groups_mixed", {3, 16, 1, {40000, 5000, 70}, 0, 0, 0, "auto", 131072});
+    add("bound_coop_groups", {2, 16, 1, {2000}, 0, 0, 0, "auto", 30000});
+    add("bound_one_cluster", {2, 16, 1, {300}, 0, 0, 0, "auto", 3840});
+    add("bound_swa_gqa", {4, 16, 2, {100, 7000}, 2048, 0, 0, "auto", 65536});
     return p;
 }
 
