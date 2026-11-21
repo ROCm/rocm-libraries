@@ -166,7 +166,8 @@ class TestFwdWmmaSpec(unittest.TestCase):
         for knobs, needle in (
             (dict(pingpong=True, prefetch=True), "pingpong replaces"),
             (dict(pingpong=True, split_barrier=True), "pingpong replaces"),
-            (dict(pingpong=True, row_ring=True), "pingpong replaces"),
+            (dict(pingpong=True, row_ring=True, prefetch=True), "pingpong replaces"),
+            (dict(pingpong=True, tap_ring=True, split_barrier=True), "pingpong replaces"),
             (dict(pingpong=True, wave_epilogue=True), "block epilogue"),
             (dict(pingpong=True, waves_k=1, waves_p=3), "even wave count"),
             (dict(pingpong=True, tile_w=8, tile_n=4), "rank 0"),
@@ -181,6 +182,13 @@ class TestFwdWmmaSpec(unittest.TestCase):
                 DirectFwdWmmaSpec(problem=_problem(), pingpong=True, pp_group=3)
             )
         )
+        # The weight rings run inside the ping-pong schedule.
+        for ring in ("row_ring", "tap_ring"):
+            self.assertIsNone(
+                fwd_wmma_reason(
+                    DirectFwdWmmaSpec(problem=_problem(), pingpong=True, **{ring: True})
+                )
+            )
 
     def test_rejects_bad_knobs_without_raising(self):
         """Bad knobs are reasons, not exceptions (validate_direct_spec only
@@ -748,6 +756,60 @@ _CASES = (
     (
         dict(N=2, H=9, W=12, C=32, K=32, groups=8),
         dict(waves_k=1, tiles_k=2, pack_groups=8, pingpong=True),
+    ),
+    # Ping-pong with a weight ring: several chunks and ring steps, a 3-deep
+    # ring, ragged channels, phase groups that do not divide a ring step,
+    # several images, stride 2 with split halos, fp16, and 256-channel
+    # blocks (ragged K, and 8x8 maps under a 16-wide tile).
+    (
+        dict(N=1, H=18, W=33, C=256, K=128),
+        dict(tiles_k=2, tiles_p=2, ck=128, tap_ring=True, pingpong=True),
+    ),
+    (
+        dict(N=2, H=17, W=20, C=200, K=96),
+        dict(tiles_k=2, tiles_p=2, stages=3, row_ring=True, pingpong=True, pp_group=2),
+    ),
+    (
+        dict(N=2, H=13, W=21, C=96, K=64, stride=2),
+        dict(tiles_k=1, phase_split=True, row_ring=True, pingpong=True),
+    ),
+    (
+        dict(N=5, H=7, W=9, C=64, K=64, dtype="fp16"),
+        dict(
+            tiles_k=2,
+            tiles_p=2,
+            tile_w=8,
+            tile_n=2,
+            tap_ring=True,
+            pingpong=True,
+            pp_group=3,
+        ),
+    ),
+    (
+        dict(N=2, H=16, W=16, C=192, K=320),
+        dict(
+            waves_k=2,
+            waves_p=4,
+            tiles_k=8,
+            tiles_p=4,
+            ck=64,
+            stages=3,
+            tap_ring=True,
+            pingpong=True,
+        ),
+    ),
+    (
+        dict(N=2, H=8, W=8, C=512, K=512, dtype="fp16"),
+        dict(
+            waves_k=4,
+            waves_p=2,
+            tiles_k=4,
+            tiles_p=4,
+            ck=128,
+            tap_ring=True,
+            pingpong=True,
+            pp_group=2,
+        ),
     ),
     (
         dict(N=2, H=13, W=11, C=64, K=32, PAD=1, dil_h=3),

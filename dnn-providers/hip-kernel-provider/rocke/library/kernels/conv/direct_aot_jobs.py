@@ -678,6 +678,56 @@ FWD_WMMA_KNOBS = (
     (2, 4, 6, 8, 16, 1, 32, 2, False, False, False, False, True),
     (2, 4, 8, 6, 16, 1, 32, 2, False, False, False, False, True),
 )
+# 256-channel output blocks on the dense stride-1 3x3 grid (hipconv's tile
+# width on gfx1250): (waves_k, waves_p, tiles_k, tiles_p, tile_w, ck, stages,
+# prefetch, ring), ring 1 = row_ring, 2 = tap_ring. Only the weight rings fit
+# 256 channels in LDS (all nine taps of a stage need 390-750 KB); tap_ring
+# also takes 128-channel chunks. 128- to 384-pixel blocks of 8 or 16 waves;
+# the deepest chunk of each ring (row ck 64, tap ck 128) exceeds 320 KB of
+# LDS on 384-pixel blocks and on 64-wide 256-pixel ones.
+FWD_WMMA_WIDE_KNOBS = tuple(
+    (wk, wp, tk, tp, tw, ck, st, pf, ring)
+    for wk, wp, tk, tp in (
+        (2, 4, 8, 4),
+        (4, 2, 4, 8),
+        (2, 8, 8, 2),
+        (4, 4, 4, 4),
+        (2, 4, 8, 2),
+        (4, 2, 4, 4),
+        (4, 2, 4, 6),
+        (4, 4, 4, 6),
+    )
+    for ring, ck, st in ((1, 32, 3), (1, 64, 2), (2, 32, 3), (2, 64, 3), (2, 128, 2))
+    for pf in (False, True)
+    for tw in (16, 32, 64)
+    if (ring, ck) not in ((1, 64), (2, 128))
+    or wp * tp * 16 < 256
+    or (wp * tp * 16 == 256 and tw < 64)
+)
+# Ping-pong with a weight ring on the dense stride-1 3x3 grid: (waves_k,
+# waves_p, tiles_k, tiles_p, tile_w, ck, stages, ring, pp_group), ring 1 =
+# row_ring, 2 = tap_ring, all with the iterative-ilp scheduler. The
+# FWD_WMMA_WIDE_KNOBS blocks (256 channels) plus a 128 x 512 block; the ring
+# fits them in LDS and the ping-pong phases carry its steps, so it costs no
+# barriers of its own. The deepest chunks are left out on 384-pixel blocks
+# and wider (LDS).
+FWD_WMMA_PP_RING_KNOBS = tuple(
+    (wk, wp, tk, tp, tw, ck, st, ring, pg)
+    for wk, wp, tk, tp in (
+        (2, 4, 8, 4),
+        (4, 2, 4, 8),
+        (2, 8, 8, 2),
+        (4, 4, 4, 4),
+        (2, 4, 8, 2),
+        (4, 2, 4, 4),
+        (4, 4, 4, 6),
+        (2, 4, 4, 8),
+    )
+    for ring, ck, st in ((1, 32, 2), (1, 64, 2), (2, 64, 2), (2, 64, 3), (2, 128, 2))
+    for pg in (1, 2)
+    for tw in (16, 32)
+    if (ring, ck) not in ((1, 64), (2, 128)) or wp * tp * 16 < 384
+)
 # Ping-pong (two wave ranks a barrier apart) on the dense stride-1 grid:
 # (waves_k, waves_p, tiles_k, tiles_p, tile_w, tile_n, ck, pp_group, sched).
 # Measured winners on gfx1250: the 240-block SDXL 40x40 layer (c#122) and the
@@ -2557,6 +2607,26 @@ def _knob_grid(
             for knobs in _fwd_wmma_knobs(FWD_WMMA_KNOBS):
                 if knobs["tile_n"] == 1 and not knobs.get("row_ring"):
                     yield dict(knobs, tap_reuse=True)
+            for *shape, ck, st, ring, pg in FWD_WMMA_PP_RING_KNOBS:
+                yield _wmma_fwd_knob_row(
+                    *shape,
+                    ck=ck,
+                    stages=st,
+                    row_ring=ring == 1,
+                    tap_ring=ring == 2,
+                    pingpong=True,
+                    pp_group=pg if pg > 1 else None,
+                    sched="iterative-ilp",
+                )
+            for *shape, ck, st, pf, ring in FWD_WMMA_WIDE_KNOBS:
+                yield _wmma_fwd_knob_row(
+                    *shape,
+                    ck=ck,
+                    stages=st,
+                    row_ring=ring == 1,
+                    tap_ring=ring == 2,
+                    prefetch=pf,
+                )
             for *shape, tn, ck, pg, sched in FWD_WMMA_PP_KNOBS:
                 yield _wmma_fwd_knob_row(
                     *shape,
