@@ -220,7 +220,8 @@ def test_write_benchmark_files_results_policy(
         asmToolchain=types.SimpleNamespace(
             assembler=types.SimpleNamespace(path="/bin/assembler")
         ),
-        srcToolchain=None, sourcePath=stepDir / "source", debugConfig=DebugConfig(),
+        srcToolchain=types.SimpleNamespace(compiler=types.SimpleNamespace(default_args=[])),
+        sourcePath=stepDir / "source", debugConfig=DebugConfig(),
         gateTypeArgs=None, deviceId=0, gfxName="gfx950", isaInfoMap={}, probSolMap={},
         writeResultsFile=writeResultsFile,
     )
