@@ -514,7 +514,7 @@ static bool batchLseOffsetsFitU32(int64_t batch, int64_t heads, int64_t headStri
 // declined. Group mode writes AITER's varlen layout [H, total_q]: one FP32 per Q token at
 // h * s_lse_Hs + seqstart_q[b] + s, with no per-token stride, so the stats tensor must be
 // ragged on the Q/O offset table in token units with a sequence stride of 1 and, with more
-// than one head, a head stride of at least Sq. Q must already be known to be rank 4.
+// than one head, a head stride of at least B * Sq. Q must already be known to be rank 4.
 static bool
     isSupportedStatsTensor(const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& stats,
                            const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& q,
@@ -593,21 +593,26 @@ static bool
     else
     {
         // Heads write disjoint slots only when the head stride covers every physical Q token
-        // row, which hipDNN's ragged layout rule requires of any non-zero stride. That row count
-        // lives in the device-resident offset table, so the check takes Sq, the longest batch
-        // the graph allows, as a conservative bound. Heads overlap whenever a batch reaches Sq
-        // rows; the check also declines valid layouts whose physical rows are fewer than Sq,
-        // which fall back to another engine. B * Sq would decline AITER's packed [H, total_q]
-        // layout whenever batches are shorter than Sq. It also declines a zero (broadcast) head
-        // stride, which the layout rule exempts but which makes every head write the same
-        // slots. A single head is never stepped.
+        // row: seqstart_q[b] + len_b <= head stride for every batch. That row count lives in the
+        // device-resident offset table, so the check takes B * Sq, the Q token capacity of a
+        // packed table. Sq is only a necessary lower bound: the frontend's default stats strides
+        // [H * Sq, Sq, 1, 1] meet it, yet with B > 1 a batch at offset Sq or later writes the
+        // next head's slots. B * Sq declines AITER's packed [H, total_q] layout whenever
+        // total_q < B * Sq. Such a graph is not guaranteed a fallback: on gfx942 and gfx950 no
+        // other engine may take it. A table whose rows reach past B * Sq stays the caller's
+        // precondition (SdpaFwdArgsBuilder.hpp). The check also declines a zero (broadcast)
+        // head stride, which the layout rule exempts but which makes every head write the
+        // same slots. A single head is never stepped.
+        const int64_t batch = stats.dims()->Get(0);
         const int64_t heads = stats.dims()->Get(1);
         const int64_t seqLenQ = stats.dims()->Get(2);
         const int64_t headStride = stats.strides()->Get(1);
-        HIP_KERNEL_RETURN_FALSE_IF(heads != 1 && headStride < seqLenQ,
-                                   "group-mode stats head stride must be at least Sq when H > 1 "
-                                   "(head stride: "
+        // headStride / batch < Sq is headStride < B * Sq without forming the product.
+        HIP_KERNEL_RETURN_FALSE_IF(heads != 1 && (batch < 1 || headStride / batch < seqLenQ),
+                                   "group-mode stats head stride must be at least B * Sq when "
+                                   "H > 1 (head stride: "
                                        + std::to_string(headStride)
+                                       + ", B: " + std::to_string(batch)
                                        + ", Sq: " + std::to_string(seqLenQ) + ")");
     }
     return true;

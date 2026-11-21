@@ -419,7 +419,7 @@ batch when `seq_len_q/kv` are set).
   The ASM SDPA forward engine (gfx942, gfx950; AITER group mode) serves ragged Q, K, V and O whose offsets are in
   token units (multiplier equal to the sequence stride), Q and O on one INT32 `[B+1, 1, 1, 1]` table and K and V on
   another, with an optional stats tensor laid out as AITER's `[H, total_q]` LSE (ragged on the Q/O table, sequence
-  stride 1, head stride at least `S_q` when `H > 1`), and optional `cu_seq_len_q/kv` with `padding_mask`. It writes
+  stride 1, head stride at least `B * S_q` when `H > 1`), and optional `cu_seq_len_q/kv` with `padding_mask`. It writes
   only each batch's rows, so gap rows of O and the LSE between or after batches are left unwritten. It reads the
   table values only on the device, so the caller must also keep: each length at most its side's `S_max` (the kernel
   takes the raw offset difference, not `min(diff, S_max)`, when there is no `cu_seq_len`); each Q origin plus its

@@ -849,7 +849,7 @@ TEST_P(TestSdpaFwdPlanBuilderOnArch, IsApplicableCuSeqLenContract)
 // kernel takes only the head stride and steps batches by H * s_h, even when H == 1. Group
 // mode writes AITER's head-major [H, total_q] LSE, so its stats tensor must be ragged on the
 // Q/O offset tensor in token units with a sequence stride of 1 and, with H > 1, a head stride
-// of at least Sq.
+// of at least B * Sq.
 TEST_P(TestSdpaFwdPlanBuilderOnArch, IsApplicableStatsLayoutFollowsBatchMode)
 {
     const std::vector<int64_t> dims = {4, 8, 256, 128};
@@ -1007,8 +1007,8 @@ TEST_P(TestSdpaFwdPlanBuilderOnArch, IsApplicableStatsLayoutFollowsBatchMode)
          false},
         // With H > 1, heads write disjoint slots only when the head stride is at least the
         // physical Q token count, which only the device-resident offsets give. The engine takes
-        // Sq, the longest batch, as its bound; B * Sq would decline AITER's packed [H, total_q]
-        // layout whenever the batches are shorter than Sq.
+        // B * Sq, the Q token capacity of a packed table, as its bound: a head stride of Sq
+        // (the frontend's default) lets a B > 1 graph's heads overwrite each other's LSE.
         {GraphTest{withOneBatchGroupStats([](GraphT& /*graph*/) {}),
                    "Group mode one-batch stats with the packed head stride Sq"},
          true},
@@ -1017,9 +1017,14 @@ TEST_P(TestSdpaFwdPlanBuilderOnArch, IsApplicableStatsLayoutFollowsBatchMode)
                    "Group mode stats with a head stride below Sq"},
          false},
         {GraphTest{withGroupStats(
-                       [&](GraphT& graph) { findTensor(graph, "stats").strides[1] = 2 * seqLenQ; }),
-                   "Group mode B = 4 stats with a head stride between Sq and B * Sq"},
-         true},
+                       [&](GraphT& graph) { findTensor(graph, "stats").strides[1] = seqLenQ; }),
+                   "Group mode B = 4 stats with the head stride Sq"},
+         false},
+        {GraphTest{withGroupStats([&](GraphT& graph) {
+                       findTensor(graph, "stats").strides[1] = (dims[0] * seqLenQ) - 1;
+                   }),
+                   "Group mode B = 4 stats with a head stride of B * Sq - 1"},
+         false},
         {GraphTest{withGroupStats([](GraphT& graph) { findTensor(graph, "stats").strides[1] = 0; }),
                    "Group mode stats with a zero head stride"},
          false},
