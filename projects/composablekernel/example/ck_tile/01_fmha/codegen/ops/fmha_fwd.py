@@ -1765,6 +1765,9 @@ GFX125_QR_TDM_BM0_CROSSOVER_MAX_SEQLEN_Q = {
     (192, 128): 128,
 }
 
+# Measured M64 preference for dropout.
+GFX125_QR_TDM_DROPOUT_M64_DIMS = {(64, 64), (128, 128)}
+
 # Paired gfx1250 measurements favor N128 for long K within one Q-workgroup
 # wave. Above one wave, its larger LDS/register footprint can regress.
 # This is a tuning threshold shared by the gfx125 family, not an ISA restriction.
@@ -1787,9 +1790,10 @@ GFX125_QR_TDM_PINGPONG_RANGE = (
 
 
 def _gfx125_qr_tdm_crossover_constraint(hdim):
-    return CppConstraint(
-        f"a.max_seqlen_q < {GFX125_QR_TDM_BM0_CROSSOVER_MAX_SEQLEN_Q[hdim]}"
-    )
+    condition = f"a.max_seqlen_q < {GFX125_QR_TDM_BM0_CROSSOVER_MAX_SEQLEN_Q[hdim]}"
+    if hdim in GFX125_QR_TDM_DROPOUT_M64_DIMS:
+        condition += " || t.has_dropout"
+    return CppConstraint(condition)
 
 
 def _validate_qr_tdm_bm0_crossover_pairs(tile_dict):
@@ -1939,20 +1943,32 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
                 return kernel_ctx.pipeline.tag == owner
             return kernel_ctx.pipeline.tag not in cls._PIPELINES_WITH_OWN_TILES
 
+        def check_causal_lse_tile(
+            problem_ctx: ProblemContext, kernel_ctx: KernelContext
+        ) -> bool:
+            p = kernel_ctx.pipeline
+            if kernel_ctx.mask_impl == "simplified" and p.tag == "qr_tdm":
+                if p.F_mask == "causal" and p.F_lse == "t":
+                    return kernel_ctx.tile.F_bm0 == 64
+            return True
+
         rules.extend(
-            [check_gemm0_k, check_tile_owner, check_qr_tdm_sched_codegen_compatibility]
+            [
+                check_gemm0_k,
+                check_tile_owner,
+                check_causal_lse_tile,
+                check_qr_tdm_sched_codegen_compatibility,
+            ]
         )
         return rules
 
     @classmethod
     def get_hdim_tile_size_dict(cls, dtype: str) -> Optional[dict]:
         if dtype in cls._DT_FP16_BF16:
-            # Short causal grids benefit from twice as many Q workgroups. Keep the
-            # d128 causal override while retaining develop's per-head-dim M64/M128
-            # crossover table for every other configuration.
+            # Short causal grids benefit from more Q workgroups.
             m64_d128_constraint = (
-                f"a.max_seqlen_q < {GFX125_QR_TDM_BM0_CROSSOVER_MAX_SEQLEN_Q[(128, 128)]}"
-                " || (!t.is_group_mode && t.is_v_rowmajor"
+                _gfx125_qr_tdm_crossover_constraint((128, 128)).bool_expr
+                + " || (!t.is_group_mode && t.is_v_rowmajor"
                 " && !t.has_logits_soft_cap && !t.has_dropout"
                 " && (t.mask_type == mask_enum::mask_top_left || t.mask_type == mask_enum::mask_bottom_right)"
                 " && a.window_size_left < 0 && a.window_size_right == 0"
@@ -2092,7 +2108,12 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
                         continue
                     mask_constraint = CppConstraint()
                     if mask_impl == "simplified" and mask == "causal":
-                        if bias != "no" or lse != "f" or sink != "f":
+                        if bias != "no" or sink != "f" or dropout != "f":
+                            continue
+                        # LSE uses this fast mask only for short D64 queries.
+                        if lse == "t" and (
+                            (hdim, hdim_v) != (64, 64) or logits != "f" or skip != "f"
+                        ):
                             continue
                         # Top-left/bottom-right also describe finite windows;
                         # the causal kernel has no lower-bound mask check.
@@ -2662,6 +2683,17 @@ def get_fwd_blobs(
                 kernel = create_kernel(factory.arch, problem_ctx, kernel_ctx)
                 if kernel_filter and not fnmatch.fnmatch(kernel.name, kernel_filter):
                     continue
+                if (
+                    factory is KernelComponentFactoryGfx125
+                    and (hdim, hdim_v) in GFX125_QR_TDM_DROPOUT_M64_DIMS
+                    and pipeline.tag == "qr_tdm"
+                    and pipeline.F_dropout == "t"
+                    and tile.F_bm0 == 128
+                ):
+                    # M64 covers this dropout tile; preserve explicit M128-only filters.
+                    m64 = replace(kernel, F_tile=replace(tile, F_bm0=64))
+                    if m64.filename in generated_names:
+                        continue
                 if (
                     pipeline.tag == "qr_tdm_pingpong"
                     and mode == "batch"

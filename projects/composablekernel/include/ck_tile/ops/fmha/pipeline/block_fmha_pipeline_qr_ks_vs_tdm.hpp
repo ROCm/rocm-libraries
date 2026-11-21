@@ -1508,6 +1508,10 @@ struct BlockFmhaPipelineQRKSVSTdm
 
                 // Note: here occ are all cleard, return it
                 // Note: q loaded but no fence, ignore it.
+                // Keep empty-K zeros off the D64 decode output path.
+                if constexpr(kQKHeaddim == 64 && kN1 == 64 && kM0 == 64 && kPadHeadDimV &&
+                             !kHasDropout)
+                    tile_elementwise_inout([](auto& x) { asm volatile("" : "+v"(x)); }, o_acc);
                 return o_acc;
             }
         }

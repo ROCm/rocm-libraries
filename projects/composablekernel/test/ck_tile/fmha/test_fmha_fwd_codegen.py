@@ -2042,6 +2042,99 @@ class TestCompiledGfx125V128Dispatch(unittest.TestCase):
 
 
 class TestGfx125QrReplacement(unittest.TestCase):
+    @unittest.skipUnless(_HOST_CXX, "a C++17 host compiler is required")
+    def test_short_d64_causal_lse_dispatch(self):
+        pool, kernels = get_fwd_blobs(
+            ["gfx1250"],
+            "fmha_fwd_d64_bf16_*_nlogits_nbias_*_lse_ndropout_nskip_*_nsink",
+            0,
+            [64],
+            "simplified",
+        )
+        causal = [k for k in kernels if k.F_pipeline.F_mask == "causal"]
+        self.assertTrue(causal)
+        self.assertTrue(all(k.F_tile.F_bm0 == 64 for k in causal))
+        dispatch = _CompiledDispatcher(self, pool, kernels)
+        by_id = {index: kernel for kernel, index in dispatch.kernel_ids}
+        for group, mask, sq, window in product(
+            (0, 1), (1, 2), (71, 127, 128, 200), (-1, 16)
+        ):
+            with self.subTest(group=group, mask=mask, sq=sq, window=window):
+                selected = dispatch.run(
+                    hdim_q=48,
+                    hdim_v=48,
+                    seqlen_q=sq,
+                    seqlen_k=137,
+                    group=group,
+                    mask=mask,
+                    window_size_left=window,
+                    window_size_right=0,
+                    lse=1,
+                )
+                self.assertEqual(len(selected), 1)
+                kernel = by_id[selected[0]]
+                self.assertEqual(kernel.F_pipeline.tag, "qr_tdm")
+                self.assertEqual(kernel.F_tile.F_bm0, 64 if sq < 128 else 128)
+                self.assertEqual(
+                    kernel.F_pipeline.F_mask,
+                    "causal" if sq < 128 and window < 0 else "s_mask",
+                )
+
+    @unittest.skipUnless(_HOST_CXX, "a C++17 host compiler is required")
+    def test_dropout_m64_dispatch_and_filtered_m128_fallback(self):
+        kernel_filter = (
+            "fmha_fwd_d*_bf16_*_nlogits_nbias_*_lse_dropout_nskip_nqscale_*_nsink"
+        )
+        pool, kernels = get_fwd_blobs(
+            ["gfx1250"], kernel_filter, 0, [64, 128], "simplified"
+        )
+        self.assertTrue(kernels)
+        self.assertTrue(all(k.F_tile.F_bm0 == 64 for k in kernels))
+        dispatch = _CompiledDispatcher(self, pool, kernels)
+        for dim, group, mask, (sq, sk) in product(
+            (63, 64, 127, 128),
+            (0, 1),
+            (0, 1, 2),
+            ((71, 137), (128, 128), (512, 1024), (8192, 8192)),
+        ):
+            selected = dispatch.run(
+                hdim_q=dim,
+                hdim_v=dim,
+                group=group,
+                mask=mask,
+                window_size_right=0 if mask else -1,
+                seqlen_q=sq,
+                seqlen_k=sk,
+                lse=1,
+                dropout=1,
+            )
+            self.assertEqual(len(selected), 1)
+
+        pool, kernels = get_fwd_blobs(
+            ["gfx1250"],
+            kernel_filter.replace("_bf16_*", "_bf16_batch_b128x*"),
+            0,
+            [64, 128],
+            "simplified",
+        )
+        self.assertTrue(kernels)
+        self.assertTrue(all(k.F_tile.F_bm0 == 128 for k in kernels))
+        dispatch = _CompiledDispatcher(self, pool, kernels)
+        for dim in (64, 128):
+            self.assertEqual(
+                len(
+                    dispatch.run(
+                        hdim_q=dim,
+                        hdim_v=dim,
+                        seqlen_q=8192,
+                        seqlen_k=8192,
+                        lse=1,
+                        dropout=1,
+                    )
+                ),
+                1,
+            )
+
     def test_explicit_pingpong_padding_filter(self):
         _, kernels = get_fwd_blobs(
             ["gfx1250"],
@@ -2083,6 +2176,18 @@ class TestGfx125QrReplacement(unittest.TestCase):
                 self.assertLessEqual(len(kernels), total)
                 for kernel in kernels:
                     p = kernel.F_pipeline
+                    if mask == "simplified" and p.F_mask == "causal" and p.F_lse == "t":
+                        self.assertEqual(p.tag, "qr_tdm", kernel.name)
+                        self.assertEqual(
+                            (kernel.F_hdim, kernel.F_tile.F_bn1, kernel.F_tile.F_bm0),
+                            (64, 64, 64),
+                            kernel.name,
+                        )
+                        self.assertEqual(
+                            (p.F_bias, p.F_sink, p.F_logits, p.F_skip, p.F_dropout),
+                            ("no", "f", "f", "f", "f"),
+                            kernel.name,
+                        )
                     if p.F_dropout == "t":
                         self.assertEqual(p.F_lse, "t", kernel.name)
                     if kernel.F_hdim == 512:
