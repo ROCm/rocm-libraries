@@ -150,10 +150,10 @@ extern "C" __global__ void __launch_bounds__(DW_BLOCK_SIZE)
     const int wtiles = (Wo + DW_TW - 1) / DW_TW;
     const int htiles = (Ho + DW_TH - 1) / DW_TH;
     const int dtiles = (Do + DW_TD - 1) / DW_TD;
-    long idx = static_cast<long>(blockIdx.x) * DW_BLOCK_SIZE + threadIdx.x;
+    long long idx = static_cast<long long>(blockIdx.x) * DW_BLOCK_SIZE + threadIdx.x;
 #if DW_NDHWC
     // idx = (((n * dtiles + dt) * htiles + ht) * wtiles + wt) * K + k
-    if(idx >= static_cast<long>(N) * dtiles * htiles * wtiles * K)
+    if(idx >= static_cast<long long>(N) * dtiles * htiles * wtiles * K)
         return;
     const int k = static_cast<int>(idx % K);
     idx /= K;
@@ -163,11 +163,11 @@ extern "C" __global__ void __launch_bounds__(DW_BLOCK_SIZE)
     idx /= htiles;
     const int dt = static_cast<int>(idx % dtiles);
     const int n = static_cast<int>(idx / dtiles);
-    const long w_stride = C;
+    const long long w_stride = C;
 #elif DW_UK
     // One (n, k) output volume per blockIdx.y, so k is wave-uniform and the weights are read
     // through the scalar unit. idx = (dt * htiles + ht) * wtiles + wt
-    if(idx >= static_cast<long>(dtiles) * htiles * wtiles)
+    if(idx >= static_cast<long long>(dtiles) * htiles * wtiles)
         return;
     const int wt = static_cast<int>(idx % wtiles);
     idx /= wtiles;
@@ -175,10 +175,10 @@ extern "C" __global__ void __launch_bounds__(DW_BLOCK_SIZE)
     const int dt = static_cast<int>(idx / htiles);
     const int k = static_cast<int>(blockIdx.y % K);
     const int n = static_cast<int>(blockIdx.y / K);
-    const long w_stride = 1;
+    const long long w_stride = 1;
 #else
     // idx = (((n * K + k) * dtiles + dt) * htiles + ht) * wtiles + wt
-    if(idx >= static_cast<long>(N) * K * dtiles * htiles * wtiles)
+    if(idx >= static_cast<long long>(N) * K * dtiles * htiles * wtiles)
         return;
     const int wt = static_cast<int>(idx % wtiles);
     idx /= wtiles;
@@ -188,7 +188,7 @@ extern "C" __global__ void __launch_bounds__(DW_BLOCK_SIZE)
     idx /= dtiles;
     const int k = static_cast<int>(idx % K);
     const int n = static_cast<int>(idx / K);
-    const long w_stride = 1;
+    const long long w_stride = 1;
 #endif
     const int c = k / mult;
     const int wo0 = wt * DW_TW;
@@ -204,7 +204,7 @@ extern "C" __global__ void __launch_bounds__(DW_BLOCK_SIZE)
             for(int t = 0; t < DW_TW; ++t)
                 acc[o][a][t] = 0.f;
 
-    const data_t* w_k = wei + static_cast<long>(k) * (DW_KZ * DW_KY * DW_KX);
+    const data_t* w_k = wei + static_cast<long long>(k) * (DW_KZ * DW_KY * DW_KX);
     // Input plane p feeds output depth o through filter depth z = p - o. With DW_TD == 1 this is
     // one plane per filter tap along D (any depth stride / dilation); DW_TD > 1 needs both to be 1.
     // Only the multi-depth loop is unrolled: unrolling the one-depth loop made it 1.15x to 1.2x
@@ -229,7 +229,7 @@ extern "C" __global__ void __launch_bounds__(DW_BLOCK_SIZE)
 #if DW_UK && DW_DTYPE != 0
             // Scalar loads are 32-bit: read the 16-bit weights as words from the even element at
             // or below the slice start (the buffer is 4-byte aligned) and pick the halves.
-            const long e0 = (static_cast<long>(k) * DW_KZ + z) * (DW_KY * DW_KX);
+            const long long e0 = (static_cast<long long>(k) * DW_KZ + z) * (DW_KY * DW_KX);
             const unsigned int* w32 = reinterpret_cast<const unsigned int*>(wei) + (e0 >> 1);
             const int par = static_cast<int>(e0 & 1);
 #pragma unroll
@@ -248,10 +248,11 @@ extern "C" __global__ void __launch_bounds__(DW_BLOCK_SIZE)
         }
 #if DW_NDHWC
         const data_t* plane
-            = in + (static_cast<long>(n) * Di + di) * Hi * static_cast<long>(Wi) * C + c;
+            = in + (static_cast<long long>(n) * Di + di) * Hi * static_cast<long long>(Wi) * C + c;
 #else
         const data_t* plane
-            = in + ((static_cast<long>(n) * C + c) * Di + di) * Hi * static_cast<long>(Wi);
+            = in
+              + ((static_cast<long long>(n) * C + c) * Di + di) * Hi * static_cast<long long>(Wi);
 #endif
 #pragma unroll
         for(int r = 0; r < DW_ROWS; ++r)
@@ -259,7 +260,7 @@ extern "C" __global__ void __launch_bounds__(DW_BLOCK_SIZE)
             const int hi = hi0 + r;
             if(hi < 0 || hi >= Hi)
                 continue;
-            const data_t* row = plane + static_cast<long>(hi) * Wi * w_stride;
+            const data_t* row = plane + static_cast<long long>(hi) * Wi * w_stride;
             float v[DW_SPAN];
             if(inside)
             {
@@ -319,10 +320,10 @@ extern "C" __global__ void __launch_bounds__(DW_BLOCK_SIZE)
                 if(wo >= Wo)
                     break;
 #if DW_NDHWC
-                out[(((static_cast<long>(n) * Do + d_o) * Ho + ho) * Wo + wo) * K + k]
+                out[(((static_cast<long long>(n) * Do + d_o) * Ho + ho) * Wo + wo) * K + k]
                     = from_float(acc[o][a][t]);
 #else
-                out[(((static_cast<long>(n) * K + k) * Do + d_o) * Ho + ho) * Wo + wo]
+                out[(((static_cast<long long>(n) * K + k) * Do + d_o) * Ho + ho) * Wo + wo]
                     = from_float(acc[o][a][t]);
 #endif
             }
@@ -410,10 +411,10 @@ extern "C" __global__ void __launch_bounds__(DWG_BLOCK_SIZE)
 {
     const int mult = K / C;
     const int wtiles = (Wo + DWG_TW - 1) / DWG_TW;
-    long idx = static_cast<long>(blockIdx.x) * DWG_BLOCK_SIZE + threadIdx.x;
+    long long idx = static_cast<long long>(blockIdx.x) * DWG_BLOCK_SIZE + threadIdx.x;
 #if DW_NDHWC
     // idx = (((n * Do + d_o) * Ho + ho) * wtiles + wt) * K + k
-    if(idx >= static_cast<long>(N) * Do * Ho * wtiles * K)
+    if(idx >= static_cast<long long>(N) * Do * Ho * wtiles * K)
         return;
     const int k = static_cast<int>(idx % K);
     idx /= K;
@@ -423,10 +424,10 @@ extern "C" __global__ void __launch_bounds__(DWG_BLOCK_SIZE)
     idx /= Ho;
     const int d_o = static_cast<int>(idx % Do);
     const int n = static_cast<int>(idx / Do);
-    const long w_stride = C;
+    const long long w_stride = C;
 #else
     // idx = (((n * K + k) * Do + d_o) * Ho + ho) * wtiles + wt
-    if(idx >= static_cast<long>(N) * K * Do * Ho * wtiles)
+    if(idx >= static_cast<long long>(N) * K * Do * Ho * wtiles)
         return;
     const int wt = static_cast<int>(idx % wtiles);
     idx /= wtiles;
@@ -436,7 +437,7 @@ extern "C" __global__ void __launch_bounds__(DWG_BLOCK_SIZE)
     idx /= Do;
     const int k = static_cast<int>(idx % K);
     const int n = static_cast<int>(idx / K);
-    const long w_stride = 1;
+    const long long w_stride = 1;
 #endif
     const int c = k / mult;
     const int wo0 = wt * DWG_TW;
@@ -445,7 +446,7 @@ extern "C" __global__ void __launch_bounds__(DWG_BLOCK_SIZE)
     for(int t = 0; t < DWG_TW; ++t)
         acc[t] = 0.f;
 
-    const data_t* w_k = wei + static_cast<long>(k) * Z * Y * X;
+    const data_t* w_k = wei + static_cast<long long>(k) * Z * Y * X;
     for(int z = 0; z < Z; ++z)
     {
         const int di = d_o * sd - pd + z * dd;
@@ -453,17 +454,18 @@ extern "C" __global__ void __launch_bounds__(DWG_BLOCK_SIZE)
             continue;
 #if DW_NDHWC
         const data_t* plane
-            = in + (static_cast<long>(n) * Di + di) * Hi * static_cast<long>(Wi) * C + c;
+            = in + (static_cast<long long>(n) * Di + di) * Hi * static_cast<long long>(Wi) * C + c;
 #else
         const data_t* plane
-            = in + ((static_cast<long>(n) * C + c) * Di + di) * Hi * static_cast<long>(Wi);
+            = in
+              + ((static_cast<long long>(n) * C + c) * Di + di) * Hi * static_cast<long long>(Wi);
 #endif
         for(int y = 0; y < Y; ++y)
         {
             const int hi = ho * sh - ph + y * dh;
             if(hi < 0 || hi >= Hi)
                 continue;
-            const data_t* row = plane + static_cast<long>(hi) * Wi * w_stride;
+            const data_t* row = plane + static_cast<long long>(hi) * Wi * w_stride;
             for(int x = 0; x < X; ++x)
             {
                 const float wv = to_float(w_k[(z * Y + y) * X + x]);
@@ -484,9 +486,11 @@ extern "C" __global__ void __launch_bounds__(DWG_BLOCK_SIZE)
         if(wo >= Wo)
             break;
 #if DW_NDHWC
-        out[(((static_cast<long>(n) * Do + d_o) * Ho + ho) * Wo + wo) * K + k] = from_float(acc[t]);
+        out[(((static_cast<long long>(n) * Do + d_o) * Ho + ho) * Wo + wo) * K + k]
+            = from_float(acc[t]);
 #else
-        out[(((static_cast<long>(n) * K + k) * Do + d_o) * Ho + ho) * Wo + wo] = from_float(acc[t]);
+        out[(((static_cast<long long>(n) * K + k) * Do + d_o) * Ho + ho) * Wo + wo]
+            = from_float(acc[t]);
 #endif
     }
 }
