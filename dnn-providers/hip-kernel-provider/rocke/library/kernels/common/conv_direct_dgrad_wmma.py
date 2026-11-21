@@ -50,6 +50,11 @@ has read the chunk's last fragments (and, as the issuer, once its next
 transfer has landed), and waits at the top of the next chunk, so its last
 tap's WMMAs run while the slower waves catch up.
 
+With ``pingpong`` (the forward kernel's schedule) the waves form two ranks
+one barrier apart: each group of ``pp_group`` steps reads its fragments, meets
+a barrier, multiplies and meets another, so one rank's LDS reads overlap the
+other rank's WMMAs. The TDM issuers are all in rank 0.
+
 Every lane of the accumulator holds one pixel and 8 consecutive dX channels.
 The epilogue stages the dX tile in LDS as [image][row][col][channel] and
 stores it with one TDM transfer per image, which clips it to the image and to
@@ -203,6 +208,14 @@ class DirectDgradWmmaSpec:
     # between the staging and the store (needs whole rows of one image per
     # wave: tiles_p * 16 a multiple of tile_w that divides tile_h * tile_w).
     wave_epilogue: bool = False
+    # Ping-pong schedule (as direct_fwd_wmma's): the waves form two ranks
+    # that run one barrier apart, and every step group is "read the
+    # fragments | barrier | WMMAs | barrier", so one rank reads LDS while the
+    # other multiplies. Replaces the per-chunk barrier, split_barrier and the
+    # in-wave fragment prefetch; every TDM issuer sits in rank 0.
+    pingpong: bool = False
+    # Steps (k-step, halo shift) per ping-pong phase: one barrier pair per group.
+    pp_group: int = 1
 
     @property
     def block_c(self) -> int:
@@ -287,6 +300,8 @@ class DirectDgradWmmaSpec:
             (f"pg{self.pack_groups}c{p.cpg}k{p.kpg}" if self.pack_groups > 1 else ""),
             "sb" if self.split_barrier else "",
             "we" if self.wave_epilogue else "",
+            "pp" if self.pingpong else "",
+            f"pg{self.pp_group}" if self.pp_group > 1 else "",
             flags={"bf16": p.dtype == "bf16"},
         )
 
@@ -392,6 +407,18 @@ def dgrad_wmma_reason(spec: DirectDgradWmmaSpec, arch: str = "gfx1250") -> str |
         wpx = spec.tiles_p * 16
         if wpx % tw or (spec.tile_h * tw) % wpx:
             return "wave_epilogue needs whole rows of one image per wave"
+    if spec.pingpong:
+        nw = spec.waves_c * spec.waves_p
+        if spec.split_barrier or spec.prefetch:
+            return "pingpong replaces split_barrier and prefetch"
+        if p.stride > 1 or G > 1:
+            return "pingpong serves stride-1 unpacked tiles only"
+        if nw % 2 or spec.tile_n + 1 > nw // 2:
+            return "pingpong needs an even wave count with every issuer in rank 0"
+        if spec.wave_epilogue:
+            return "pingpong uses the block epilogue"
+    if spec.pp_group < 1 or (spec.pp_group > 1 and not spec.pingpong):
+        return f"pp_group {spec.pp_group}: >= 1, and > 1 only with pingpong"
     if spec.threads_per_block > target.limits.max_threads_per_block:
         return f"{spec.threads_per_block} threads per block"
     if spec.waves_c * spec.waves_p < 2:
@@ -404,7 +431,7 @@ def dgrad_wmma_reason(spec: DirectDgradWmmaSpec, arch: str = "gfx1250") -> str |
     # kernel addresses the upper VGPR banks (s_set_vgpr_msb).
     vgprs = 8 * spec.phases * spec.tiles_c * spec.tiles_p + 8 * (
         spec.tiles_c + spec.tiles_p
-    ) * (2 if spec.prefetch else 1)
+    ) * (2 if spec.prefetch else spec.pp_group)
     if vgprs > DGRAD_WMMA_VGPR_BUDGET:
         return f"~{vgprs} VGPRs of accumulators and fragments"
     why = scheduler_strategy_reason(spec.sched)
@@ -799,6 +826,63 @@ def build_direct_dgrad_wmma(
         b.s_setprio(0)
         return accs
 
+    PP = spec.pingpong
+    if PP:
+        rank = b.div(wave_id, b.const_i32((WC * WP) // 2))
+
+    def _pp_bar() -> None:
+        b.s_barrier_bare(fence="compiler")
+        b.sched_barrier(0)
+
+    def _chunk_pp(kc: Value, accs: list[Value]) -> list[Value]:
+        """``pingpong``: multiply chunk ``kc``, which has landed (the issuers
+        waited for it before the barrier that starts it). Rank 1 runs this a
+        barrier behind rank 0."""
+        # Ring slot (kc + NS - 1) % NS held chunk kc - 1, whose last reads
+        # (rank 1's) drained before the barrier rank 0 just passed.
+        nxt = b.add(kc, b.const_i32(NS - 1))
+        with b.scf_if(b.cmp_lt(nxt, n_chunks)):
+            _issue(nxt)
+        stage = b.mod(kc, b.const_i32(NS))
+        halo_base = b.mul(stage, b.const_i32(HALO_STAGE))
+        wei_base = b.mul(stage, b.const_i32(WEI))
+        accs = list(accs)
+        PG = spec.pp_group
+        groups = [steps[i : i + PG] for i in range(0, len(steps), PG)]
+        for j, grp in enumerate(groups):
+            frags = []
+            for ks, (dh, dw), tl in grp:
+                tap_off = (dh * HALO_W + dw) * XP + ks * WMMA_K
+                bf = [_read_b(halo_base, tn, tap_off) for tn in range(TN)]
+                af = [
+                    [
+                        _read_a(wei_base, m, (tap * CK + ks * WMMA_K) * WPITCH)
+                        for m in range(TM)
+                    ]
+                    for tap, _ in tl
+                ]
+                frags.append((tl, af, bf))
+            last = j == len(groups) - 1
+            if last:
+                # The other rank reads this slot one barrier later, and the
+                # ring refill after the next barrier must not overtake ours.
+                b.s_waitcnt(lgkmcnt=0)
+            _pp_bar()
+            b.s_setprio(1)
+            for tl, af, bf in frags:
+                for (_, ph), aft in zip(tl, af):
+                    for m in range(TM):
+                        for tn in range(TN):
+                            i = (ph * TM + m) * TN + tn
+                            accs[i] = b.mma(wmma_op, aft[m], bf[tn], accs[i])
+            b.s_setprio(0)
+            if last:
+                # The issuers wait for chunk kc + 1 before the barrier that
+                # starts it.
+                _wait_landed(b.add(kc, c1))
+            _pp_bar()
+        return accs
+
     def _epilogue(accs: list[Value]) -> None:
         """Stage the dX tile in LDS as [image][row][col][channel] and store it
         with one TDM transfer per image; the transfer clips the tile to the
@@ -982,6 +1066,11 @@ def build_direct_dgrad_wmma(
         b.s_waitcnt(lgkmcnt=0)  # the edge zeroing
         _wait_landed(c0)
         b.s_barrier_signal(0xFFFFFFFF)
+    if PP:
+        _wait_landed(c0)
+        b.sync_lds_only()  # chunk 0 and the edge zeroing are visible
+        with b.scf_if(b.cmp_eq(rank, c1)):
+            _pp_bar()  # rank 1 runs one barrier behind
     zero_acc = b.zero_vec_f32(8)
     loop = b.scf_for_iter(
         c0,
@@ -991,9 +1080,12 @@ def build_direct_dgrad_wmma(
         iv_name="kc",
     )
     with loop as (kc, carried):
-        b.scf_yield(*_chunk(kc, list(carried)))
+        b.scf_yield(*(_chunk_pp if PP else _chunk)(kc, list(carried)))
     if SB:
         b.s_barrier_wait(0xFFFF)
+    if PP:
+        with b.scf_if(b.cmp_eq(rank, c0)):
+            _pp_bar()  # rank 0 catches up with rank 1's lead barrier
     if spec.wave_epilogue:
         _epilogue_wave(list(loop.results))
     else:

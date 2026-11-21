@@ -684,6 +684,41 @@ _CASES = (
         dict(tiles_c=1, tiles_p=2, tile_w=8, wave_epilogue=True),
     ),
 )
+# Ping-pong (two wave ranks a barrier apart): one and several chunks, step
+# groups of 1-3 (the last group short), a 3-deep ring, two images per block,
+# PAD 0, grouped, and the 50-wide tile on a ragged map.
+_PP_CASES = (
+    (dict(), dict(waves_c=1, waves_p=4, tiles_c=1, tiles_p=1, pingpong=True)),
+    (
+        dict(N=1, H=18, W=33, C=256, K=160, dtype="fp16"),
+        dict(tiles_c=2, tiles_p=2, pingpong=True, pp_group=2),
+    ),
+    (
+        dict(N=1, H=18, W=33, C=128, K=192),
+        dict(tiles_c=2, tiles_p=2, stages=3, pingpong=True, pp_group=3),
+    ),
+    (
+        dict(N=3, H=7, W=9, C=64, K=96, PAD=0),
+        dict(tiles_c=2, tiles_p=2, tile_w=8, tile_n=2, pingpong=True),
+    ),
+    (
+        dict(N=2, H=9, W=12, C=96, K=64, groups=2),
+        dict(tiles_c=1, tiles_p=2, pingpong=True, sched="iterative-ilp"),
+    ),
+    (
+        dict(N=2, H=19, W=57, C=128, K=96),
+        dict(
+            waves_c=2,
+            waves_p=5,
+            tiles_c=4,
+            tiles_p=5,
+            tile_w=50,
+            pingpong=True,
+            pp_group=2,
+            sched="iterative-ilp",
+        ),
+    ),
+)
 
 # Packed small groups at stride 2 with the widest pack: 8 groups of 4
 # channels per super-group (cpg = kpg = 4, pack_groups 8), one case per dtype
@@ -708,6 +743,36 @@ _PACK8_STRIDED_CASES = (
         ),
     ),
 )
+
+
+class TestDgradWmmaPingpong(unittest.TestCase):
+    def test_cases_validate_and_lower(self):
+        for pkw, knobs in _PP_CASES:
+            with self.subTest(problem=pkw, knobs=knobs):
+                spec = DirectDgradWmmaSpec(problem=_problem(**pkw), **knobs)
+                self.assertIsNone(dgrad_wmma_reason(spec, "gfx1250"))
+                self.assertIn("_pp", spec.kernel_name())
+                build_direct_dgrad_wmma(spec, "gfx1250")
+
+    def test_rejects(self):
+        pp = dict(pingpong=True)
+        for pkw, knobs, needle in (
+            ({}, dict(pp, split_barrier=True), "replaces"),
+            ({}, dict(pp, prefetch=True), "replaces"),
+            (dict(stride=2), dict(pp, tiles_c=2), "stride-1"),
+            (dict(C=32, K=32, groups=8), dict(pp, pack_groups=4), "stride-1"),
+            ({}, dict(pp, waves_c=1, waves_p=3), "even wave count"),
+            ({}, dict(pp, tile_w=8, tile_n=4), "rank 0"),
+            ({}, dict(pp, wave_epilogue=True), "block epilogue"),
+            ({}, dict(pp_group=2), "pp_group"),
+            ({}, dict(pp, pp_group=0), "pp_group"),
+            ({}, dict(pp, tiles_c=4, tiles_p=8, pp_group=3), "VGPRs"),
+        ):
+            why = dgrad_wmma_reason(
+                DirectDgradWmmaSpec(problem=_problem(**pkw), **knobs)
+            )
+            self.assertIsNotNone(why, (pkw, knobs))
+            self.assertIn(needle, why)
 
 
 class TestDgradWmmaPack8Strided(unittest.TestCase):
@@ -751,6 +816,11 @@ class TestDgradWmmaGpu(unittest.TestCase):
 
     def test_cases(self):
         for pkw, knobs in _CASES:
+            with self.subTest(problem=pkw, knobs=knobs):
+                self._check(pkw, knobs)
+
+    def test_pingpong_cases(self):
+        for pkw, knobs in _PP_CASES:
             with self.subTest(problem=pkw, knobs=knobs):
                 self._check(pkw, knobs)
 
