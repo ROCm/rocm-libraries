@@ -397,27 +397,53 @@ def test_hip_f32_mfma_reinterprets_only_the_one_element_vector(
 
 
 @pytest.mark.parametrize(
-    ("op_id", "elem", "builtin"),
+    ("op_id", "elem", "builtin", "accumulator_count", "operand"),
     [
-        ("mfma_f32_4x4x4_f16", F16, "mfma_f32_4x4x4f16"),
-        ("mfma_f32_4x4x4_bf16", BF16, "mfma_f32_4x4x4bf16_1k"),
+        ("mfma_f32_4x4x4_f16", F16, "mfma_f32_4x4x4f16", 4, r"\w+"),
+        # The bf16 ``_1k`` builtins take A and B as i16x4.
+        (
+            "mfma_f32_4x4x4_bf16",
+            BF16,
+            "mfma_f32_4x4x4bf16_1k",
+            4,
+            r"__builtin_bit_cast\(i16x4, \w+\)",
+        ),
+        (
+            "mfma_f32_16x16x16_bf16",
+            BF16,
+            "mfma_f32_16x16x16bf16_1k",
+            4,
+            r"__builtin_bit_cast\(i16x4, \w+\)",
+        ),
+        (
+            "mfma_f32_32x32x8_bf16",
+            BF16,
+            "mfma_f32_32x32x8bf16_1k",
+            16,
+            r"__builtin_bit_cast\(i16x4, \w+\)",
+        ),
     ],
 )
 @pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
-def test_hip_batched_4x4x4_mfma_lowers_in_both_engines(
-    arch, op_id, elem, builtin, tmp_path
+def test_hip_16_bit_mfma_lowers_in_both_engines(
+    arch, op_id, elem, builtin, accumulator_count, operand, tmp_path
 ):
     # The kernels emit these atoms by op_id, so the op_id goes to b.mma as it is.
     b = IRBuilder(f"mma_operand_{op_id}")
     out = b.param("D", PtrType(F32, "global"))
     a_value, b_value, c_value = (
-        make(b) for make in (_loaded(elem, 4), _loaded(elem, 4), _loaded(F32, 4))
+        make(b)
+        for make in (
+            _loaded(elem, 4),
+            _loaded(elem, 4),
+            _loaded(F32, accumulator_count),
+        )
     )
     result = b.mma(op_id, a_value, b_value, c_value)
     b.global_store(out, b.thread_id_x(), b.vec_extract(result, 0))
     source = lower_hip_with_both_engines(b.kernel, arch)
     assert re.search(
-        rf"= __builtin_amdgcn_{builtin}\(\w+, \w+, \w+, 0, 0, 0\);",
+        rf"= __builtin_amdgcn_{builtin}\({operand}, {operand}, \w+, 0, 0, 0\);",
         _mma_builtin_call(source),
     )
     _assert_hipcc_accepts(source, arch, tmp_path)

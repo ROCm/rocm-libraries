@@ -27,6 +27,7 @@ from .ir import (
     I64,
     F32,
     I1,
+    I16,
     I32,
     _FENCE_ORDERINGS,
     _FENCE_SCOPES,
@@ -1018,12 +1019,22 @@ class _Lowerer:
             f"{_name(a)}, {_name(b)}, {_name(c)}, 0, 0, 0);"
         )
 
-    def _op_tile_mfma_f32_32x32x8_bf16(self, op: Op) -> None:
+    def _emit_bf16_1k_mfma(self, op: Op, op_id: str, *, builtin: str) -> None:
+        """Lower the bf16 MFMA ``op_id`` through its ``_1k`` builtin, which
+        takes A and B as ``i16x4``: each reaches that register type through
+        :meth:`_mma_operand`."""
         validate_mfma(op)
-        a, b, c = op.operands
+        a = self._mma_operand(op, op_id, "a", VectorType(I16, 4))
+        b = self._mma_operand(op, op_id, "b", VectorType(I16, 4))
         self._emit(
-            f"f32x16 {_name(op.result)} = __builtin_amdgcn_mfma_f32_32x32x8bf16_1k("
-            f"{_name(a)}, {_name(b)}, {_name(c)}, 0, 0, 0);"
+            f"{_type_to_hip(op.result.type)} {_name(op.result)} = "
+            f"__builtin_amdgcn_{builtin}("
+            f"{a}, {b}, {_name(op.operands[2])}, 0, 0, 0);"
+        )
+
+    def _op_tile_mfma_f32_32x32x8_bf16(self, op: Op) -> None:
+        self._emit_bf16_1k_mfma(
+            op, "mfma_f32_32x32x8_bf16", builtin="mfma_f32_32x32x8bf16_1k"
         )
 
     def _op_tile_mfma_f32_32x32x8_f16(self, op: Op) -> None:
@@ -1051,11 +1062,8 @@ class _Lowerer:
         )
 
     def _op_tile_mfma_f32_4x4x4_bf16(self, op: Op) -> None:
-        validate_mfma(op)
-        a, b, c = op.operands
-        self._emit(
-            f"f32x4 {_name(op.result)} = __builtin_amdgcn_mfma_f32_4x4x4bf16_1k("
-            f"{_name(a)}, {_name(b)}, {_name(c)}, 0, 0, 0);"
+        self._emit_bf16_1k_mfma(
+            op, "mfma_f32_4x4x4_bf16", builtin="mfma_f32_4x4x4bf16_1k"
         )
 
     # ---- WMMA f16 (RDNA3/3.5, gfx11, wave32) ----
@@ -2811,11 +2819,8 @@ class _Lowerer:
         self._emit(f"{vec_prefix}4 {nice}; __builtin_memcpy(&{nice}, &{raw_tmp}, 8);")
 
     def _op_tile_mfma_f32_16x16x16_bf16(self, op: Op) -> None:
-        validate_mfma(op)
-        a, b, c = op.operands
-        self._emit(
-            f"f32x4 {_name(op.result)} = __builtin_amdgcn_mfma_f32_16x16x16bf16_1k("
-            f"{_name(a)}, {_name(b)}, {_name(c)}, 0, 0, 0);"
+        self._emit_bf16_1k_mfma(
+            op, "mfma_f32_16x16x16_bf16", builtin="mfma_f32_16x16x16bf16_1k"
         )
 
     def _op_tile_mfma_f32_16x16x32_bf16(self, op: Op) -> None:

@@ -107,15 +107,21 @@ typedef struct h_mma_builtin
  * (Python _op_tile_mfma_f32_* handlers that unpack `a, b, c = op.operands`). */
 static const h_mma_builtin_t H_MFMA_OPERANDS_AS_IS[] = {
     {"mfma_f32_4x4x4_f16", "mfma_f32_4x4x4f16"},
-    {"mfma_f32_4x4x4_bf16", "mfma_f32_4x4x4bf16_1k"},
     {"mfma_f32_16x16x16_f16", "mfma_f32_16x16x16f16"},
-    {"mfma_f32_16x16x16_bf16", "mfma_f32_16x16x16bf16_1k"},
     {"mfma_f32_16x16x32_f16", "mfma_f32_16x16x32_f16"},
     {"mfma_f32_16x16x32_bf16", "mfma_f32_16x16x32_bf16"},
     {"mfma_f32_32x32x8_f16", "mfma_f32_32x32x8f16"},
-    {"mfma_f32_32x32x8_bf16", "mfma_f32_32x32x8bf16_1k"},
     {"mfma_f32_32x32x16_f16", "mfma_f32_32x32x16_f16"},
     {"mfma_f32_32x32x16_bf16", "mfma_f32_32x32x16_bf16"},
+};
+
+/* bf16 MFMA atoms whose `_1k` builtin takes A and B as i16x4 (Python
+ * _emit_bf16_1k_mfma): each reaches that register type through
+ * h_mma_operand. */
+static const h_mma_builtin_t H_MFMA_BF16_1K[] = {
+    {"mfma_f32_4x4x4_bf16", "mfma_f32_4x4x4bf16_1k"},
+    {"mfma_f32_16x16x16_bf16", "mfma_f32_16x16x16bf16_1k"},
+    {"mfma_f32_32x32x8_bf16", "mfma_f32_32x32x8bf16_1k"},
 };
 
 /* FP8 / BF8 MFMA atoms (Python _emit_fp8_mfma): the packed 8-byte operands are
@@ -217,6 +223,25 @@ static const rocke_type_t* h_packed_i32(rocke_h_lowerer_t* lw, int words)
  * operand, as the Python handler does: IR read through the serialized-IR entry
  * point is not verified. */
 
+/* The result of MFMA `op` as `builtin` applied to A and B (`a_arg`, `b_arg`,
+ * each a HIP expression) and the accumulator C as the IR carries it. */
+static void h_emit_mfma_call(rocke_h_lowerer_t* lw,
+                             const rocke_op_t* op,
+                             const char* op_id,
+                             const char* builtin,
+                             const char* a_arg,
+                             const char* b_arg)
+{
+    rocke_h_emitf(lw,
+                  "f32x%d %s = __builtin_amdgcn_%s(%s, %s, %s, 0, 0, 0);",
+                  rocke_arch_mma_dst_frag_len(op_id),
+                  rocke_h_name(lw, op->results[0]),
+                  builtin,
+                  a_arg,
+                  b_arg,
+                  rocke_h_name(lw, op->operands[2]));
+}
+
 static bool
     h_emit_mfma_operands_as_is(rocke_h_lowerer_t* lw, const rocke_op_t* op, const char* op_id)
 {
@@ -229,14 +254,30 @@ static bool
     {
         return true;
     }
-    rocke_h_emitf(lw,
-                  "f32x%d %s = __builtin_amdgcn_%s(%s, %s, %s, 0, 0, 0);",
-                  rocke_arch_mma_dst_frag_len(op_id),
-                  rocke_h_name(lw, op->results[0]),
-                  atom->builtin,
-                  rocke_h_name(lw, op->operands[0]),
-                  rocke_h_name(lw, op->operands[1]),
-                  rocke_h_name(lw, op->operands[2]));
+    h_emit_mfma_call(lw,
+                     op,
+                     op_id,
+                     atom->builtin,
+                     rocke_h_name(lw, op->operands[0]),
+                     rocke_h_name(lw, op->operands[1]));
+    return true;
+}
+
+static bool h_emit_mfma_bf16_1k(rocke_h_lowerer_t* lw, const rocke_op_t* op, const char* op_id)
+{
+    const h_mma_builtin_t* atom = h_find_mma_builtin(H_MFMA_BF16_1K, op_id);
+    if(!atom)
+    {
+        return false;
+    }
+    if(h_validate_mfma(lw, op, op_id) != ROCKE_OK)
+    {
+        return true;
+    }
+    const rocke_type_t* register_type = rocke_vector_type(lw->b, rocke_i16(), 4);
+    const char* a_arg = h_mma_operand(lw, op, op_id, ROCKE_MMA_ROLE_SRC0, register_type);
+    const char* b_arg = h_mma_operand(lw, op, op_id, ROCKE_MMA_ROLE_SRC1, register_type);
+    h_emit_mfma_call(lw, op, op_id, atom->builtin, a_arg, b_arg);
     return true;
 }
 
@@ -399,9 +440,9 @@ static bool h_emit_wmma_integer(rocke_h_lowerer_t* lw, const rocke_op_t* op, con
  * handlers. Returns false when `op_id` is none of them. */
 static bool h_emit_mma_atom(rocke_h_lowerer_t* lw, const rocke_op_t* op, const char* op_id)
 {
-    return h_emit_mfma_operands_as_is(lw, op, op_id) || h_emit_mfma_fp8(lw, op, op_id)
-           || h_emit_wmma_operands_as_is(lw, op, op_id) || h_emit_wmma_gfx1250_fp8(lw, op, op_id)
-           || h_emit_wmma_integer(lw, op, op_id);
+    return h_emit_mfma_operands_as_is(lw, op, op_id) || h_emit_mfma_bf16_1k(lw, op, op_id)
+           || h_emit_mfma_fp8(lw, op, op_id) || h_emit_wmma_operands_as_is(lw, op, op_id)
+           || h_emit_wmma_gfx1250_fp8(lw, op, op_id) || h_emit_wmma_integer(lw, op, op_id);
 }
 
 /* Python _emit_wmma_gfx1250_scaled: a scaled WMMA atom, checked against its
