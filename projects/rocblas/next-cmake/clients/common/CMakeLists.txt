@@ -46,6 +46,13 @@ endif()
 if(amd_smi_FOUND)
   target_link_libraries(rocblas-clients-common PUBLIC amd_smi)
 endif()
+
+# As in the legacy build, the clients see the library's hipBLASLt backend: the emulation tests
+# read hipBLASLt's headers (library/src/include/hipblaslt_emulation.hpp).
+if(ROCBLAS_ENABLE_HIPBLASLT)
+  target_compile_definitions(rocblas-clients-common PUBLIC BUILD_WITH_HIPBLASLT)
+  target_link_libraries(rocblas-clients-common PUBLIC roc::hipblaslt)
+endif()
 target_link_libraries(
   rocblas-clients-common
   PUBLIC roc::rocblas
