@@ -25,6 +25,18 @@
  *******************************************************************************/
 
 #include "unit_conv_solver.hpp"
+#include "get_handle.hpp"
+#include "../lib_env_var.hpp"
+
+#include <miopen/conv/data_invoke_params.hpp>
+#include <miopen/errors.hpp>
+
+#include <cstdint>
+#include <limits>
+
+MIOPEN_LIB_ENV_VAR(MIOPEN_COMPILE_PARALLEL_LEVEL)
+MIOPEN_LIB_ENV_VAR(MIOPEN_TUNING_TIME_MS_MAX)
+MIOPEN_LIB_ENV_VAR(MIOPEN_TUNING_PATIENCE)
 
 namespace {
 
@@ -50,10 +62,35 @@ const auto& GetTestParams()
     return params;
 }
 
+const auto& GetParallelCompileTestParams()
+{
+    static const auto params = [] {
+        auto p = GetTestParams();
+        p.Tunable(16);
+        return p;
+    }();
+    return params;
+}
+
+const auto& GetFullSearchTestParams()
+{
+    static const auto params = [] {
+        auto p = GetTestParams();
+        p.Tunable(std::numeric_limits<std::size_t>::max());
+        return p;
+    }();
+    return params;
+}
+
 } // namespace
 
-using GPU_UnitTestConvSolverHipDirectFwdFwd_FP16 = GPU_UnitTestConvSolverFwd_FP16;
-using GPU_UnitTestConvSolverHipDirectFwdBwd_FP16 = GPU_UnitTestConvSolverBwd_FP16;
+using GPU_UnitTestConvSolverHipDirectFwdFwd_FP16                = GPU_UnitTestConvSolverFwd_FP16;
+using GPU_UnitTestConvSolverHipDirectFwdBwd_FP16                = GPU_UnitTestConvSolverBwd_FP16;
+using GPU_UnitTestConvSolverHipDirectFwdParallelCompileFwd_FP16 = GPU_UnitTestConvSolverFwd_FP16;
+using GPU_UnitTestConvSolverHipDirectFwdTimeBudgetFwd_FP16      = GPU_UnitTestConvSolverFwd_FP16;
+using GPU_UnitTestConvSolverHipDirectFwdPatienceFwd_FP16        = GPU_UnitTestConvSolverFwd_FP16;
+using GPU_UnitTestConvSolverHipDirectFwdFailedMeasureFwd_FP16   = GPU_UnitTestConvSolverFwd_FP16;
+using GPU_UnitTestConvSolverHipDirectFwdHugeTimeBudgetFwd_FP16  = GPU_UnitTestConvSolverFwd_FP16;
 
 using GPU_UnitTestConvSolverHipDirectFwdFwd_BFP16 = GPU_UnitTestConvSolverFwd_BFP16;
 using GPU_UnitTestConvSolverHipDirectFwdBwd_BFP16 = GPU_UnitTestConvSolverBwd_BFP16;
@@ -72,6 +109,94 @@ TEST_P(GPU_UnitTestConvSolverHipDirectFwdFwd_FP16, ConvHipDirectFwd)
 TEST_P(GPU_UnitTestConvSolverHipDirectFwdBwd_FP16, ConvHipDirectFwd)
 {
     this->RunTest(miopen::solver::conv::ConvHipDirectFwd{});
+};
+
+// Candidate kernels are built on several threads before they are timed.
+TEST_P(GPU_UnitTestConvSolverHipDirectFwdParallelCompileFwd_FP16, ConvHipDirectFwd)
+{
+    ScopedEnvironment<int> compile_parallel_level(MIOPEN_COMPILE_PARALLEL_LEVEL, 4);
+    this->RunTest(miopen::solver::conv::ConvHipDirectFwd{});
+};
+
+// The search stops when MIOPEN_TUNING_TIME_MS_MAX is exceeded and still returns a valid config.
+TEST_P(GPU_UnitTestConvSolverHipDirectFwdTimeBudgetFwd_FP16, ConvHipDirectFwd)
+{
+    ScopedEnvironment<int> tuning_time_max(MIOPEN_TUNING_TIME_MS_MAX, 1);
+    ScopedEnvironment<int> log_level(MIOPEN_LOG_LEVEL, 4);
+    testing::internal::CaptureStderr();
+    this->RunTest(miopen::solver::conv::ConvHipDirectFwd{});
+    const auto log = testing::internal::GetCapturedStderr();
+    EXPECT_NE(log.find("tuning time budget"), std::string::npos) << log;
+};
+
+// The search stops after MIOPEN_TUNING_PATIENCE runs without improvement and still returns a
+// valid config.
+TEST_P(GPU_UnitTestConvSolverHipDirectFwdPatienceFwd_FP16, ConvHipDirectFwd)
+{
+    // The time budget is far away, so only the patience can end the search.
+    ScopedEnvironment<int> tuning_time_max(MIOPEN_TUNING_TIME_MS_MAX, 3600000);
+    ScopedEnvironment<int> tuning_patience(MIOPEN_TUNING_PATIENCE, 1);
+    ScopedEnvironment<int> log_level(MIOPEN_LOG_LEVEL, 4);
+    testing::internal::CaptureStderr();
+    this->RunTest(miopen::solver::conv::ConvHipDirectFwd{});
+    const auto log = testing::internal::GetCapturedStderr();
+    EXPECT_NE(log.find("no improvement in 1 runs"), std::string::npos) << log;
+    EXPECT_EQ(log.find("tuning time budget"), std::string::npos) << log;
+};
+
+// A budget too large for a nanosecond count must not end the search early.
+TEST_P(GPU_UnitTestConvSolverHipDirectFwdHugeTimeBudgetFwd_FP16, ConvHipDirectFwd)
+{
+    ScopedEnvironment<std::uint64_t> tuning_time_max(MIOPEN_TUNING_TIME_MS_MAX, 10'000'000'000'000);
+    ScopedEnvironment<int> tuning_patience(MIOPEN_TUNING_PATIENCE, 1);
+    ScopedEnvironment<int> log_level(MIOPEN_LOG_LEVEL, 4);
+    testing::internal::CaptureStderr();
+    this->RunTest(miopen::solver::conv::ConvHipDirectFwd{});
+    const auto log = testing::internal::GetCapturedStderr();
+    EXPECT_NE(log.find("no improvement in 1 runs"), std::string::npos) << log;
+    EXPECT_EQ(log.find("tuning time budget"), std::string::npos) << log;
+};
+
+// The search stops when MIOPEN_TUNING_TIME_MS_MAX is exceeded even if no measurement succeeds.
+// The search gets no bias buffer, so it fails to measure every candidate of a problem with bias.
+TEST_P(GPU_UnitTestConvSolverHipDirectFwdFailedMeasureFwd_FP16, ConvHipDirectFwd)
+{
+    // The first batch of kernels takes longer to build than the budget.
+    ScopedEnvironment<int> compile_parallel_level(MIOPEN_COMPILE_PARALLEL_LEVEL, 4);
+    ScopedEnvironment<int> tuning_time_max(MIOPEN_TUNING_TIME_MS_MAX, 1);
+    ScopedEnvironment<int> log_level(MIOPEN_LOG_LEVEL, 4);
+
+    const auto& conv_config = std::get<2>(GetParam());
+    const auto x_desc       = conv_config.GetXTensorDescriptor();
+    const auto w_desc       = conv_config.GetWTensorDescriptor();
+    const auto conv_desc    = conv_config.GetConv();
+    const auto y_desc =
+        conv_desc.GetForwardOutputTensor(x_desc, w_desc, conv_config.GetYDataType());
+    const auto problem = miopen::conv::ProblemDescription(
+        x_desc, w_desc, y_desc, conv_desc, miopen::conv::Direction::Forward, 1);
+
+    auto&& handle = get_handle();
+    auto ctx      = miopen::ExecutionContext{&handle};
+    problem.SetupFloats(ctx);
+    problem.SetupComputeType(ctx);
+
+    const miopen::solver::conv::ConvHipDirectFwd solver{};
+    ASSERT_TRUE(solver.IsApplicable(ctx, problem));
+
+    // The search never launches a kernel here, so the buffers stay uninitialized.
+    const auto x_dev = handle.Create(x_desc.GetNumBytes());
+    const auto w_dev = handle.Create(w_desc.GetNumBytes());
+    const auto y_dev = handle.Create(y_desc.GetNumBytes());
+    const auto tensors =
+        miopen::ConvFwdTensors{x_desc, x_dev.get(), w_desc, w_dev.get(), y_desc, y_dev.get()};
+    const auto invoke_params = miopen::conv::DataInvokeParams{
+        tensors, nullptr, 0, conv_desc.attribute.gfx90aFp16alt.GetFwd()};
+
+    testing::internal::CaptureStderr();
+    EXPECT_THROW(solver.FindSolutionSimple(ctx, problem, invoke_params), miopen::Exception);
+    const auto log = testing::internal::GetCapturedStderr();
+    EXPECT_NE(log.find("Bias buffer required"), std::string::npos) << log;
+    EXPECT_NE(log.find("tuning time budget"), std::string::npos) << log;
 };
 
 TEST_P(GPU_UnitTestConvSolverHipDirectFwdFwd_BFP16, ConvHipDirectFwd)
@@ -109,6 +234,36 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_UnitTestConvSolverHipDirectFwdBwd_FP16,
                          testing::Combine(testing::Values(GetTestParams()),
+                                          testing::Values(miopenConvolutionAlgoDirect),
+                                          testing::ValuesIn(GetConvTestCases(miopenHalf))));
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_UnitTestConvSolverHipDirectFwdParallelCompileFwd_FP16,
+                         testing::Combine(testing::Values(GetParallelCompileTestParams()),
+                                          testing::Values(miopenConvolutionAlgoDirect),
+                                          testing::ValuesIn(GetConvTestCases(miopenHalf))));
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_UnitTestConvSolverHipDirectFwdTimeBudgetFwd_FP16,
+                         testing::Combine(testing::Values(GetFullSearchTestParams()),
+                                          testing::Values(miopenConvolutionAlgoDirect),
+                                          testing::ValuesIn(GetConvTestCases(miopenHalf))));
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_UnitTestConvSolverHipDirectFwdPatienceFwd_FP16,
+                         testing::Combine(testing::Values(GetFullSearchTestParams()),
+                                          testing::Values(miopenConvolutionAlgoDirect),
+                                          testing::ValuesIn(GetConvTestCases(miopenHalf))));
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_UnitTestConvSolverHipDirectFwdHugeTimeBudgetFwd_FP16,
+                         testing::Combine(testing::Values(GetFullSearchTestParams()),
+                                          testing::Values(miopenConvolutionAlgoDirect),
+                                          testing::ValuesIn(GetConvTestCases(miopenHalf))));
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_UnitTestConvSolverHipDirectFwdFailedMeasureFwd_FP16,
+                         testing::Combine(testing::Values(GetFullSearchTestParams()),
                                           testing::Values(miopenConvolutionAlgoDirect),
                                           testing::ValuesIn(GetConvTestCases(miopenHalf))));
 
