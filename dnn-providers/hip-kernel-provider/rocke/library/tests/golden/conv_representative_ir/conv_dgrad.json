@@ -125,10 +125,10 @@
         },
         "conv_dgrad/gfx950/n2h16c32k32r3_s2_sk4_cshuffle": {
           "arch": "gfx950",
-          "bytes": 110572,
+          "bytes": 114918,
           "family": "conv_dgrad",
           "kernel_name": "irhash_dgrad_950_s2_sk4_cshuffle_N2H16W16C32_K32Y3X3_t64x64x64_w2x2_a32x32x16_mem_cshuffle_spk4",
-          "sha256": "eb4f248ab6c65b937a4b29d12289ac4517ad6fd807a2fe555577f5157a4a7b5c",
+          "sha256": "35727311f3bd377373c66ddc681396492519ff82281ad5e34737c3a3d25f784a",
           "status": "ok"
         }
       },
@@ -258,10 +258,10 @@
         },
         "conv_dgrad/gfx950/n2h16c32k32r3_s2_sk4_cshuffle": {
           "arch": "gfx950",
-          "bytes": 110711,
+          "bytes": 115057,
           "family": "conv_dgrad",
           "kernel_name": "irhash_dgrad_950_s2_sk4_cshuffle_N2H16W16C32_K32Y3X3_t64x64x64_w2x2_a32x32x16_mem_cshuffle_spk4",
-          "sha256": "1a97d4a467d64dbf18d1dc0f992764caaae2d19f75003f9451b613fbb0802e3c",
+          "sha256": "c497be05244ed0598361ccdc19de37a605294326abdf4ac5f2faf42210a97be8",
           "status": "ok"
         }
       },
@@ -391,10 +391,10 @@
         },
         "conv_dgrad/gfx950/n2h16c32k32r3_s2_sk4_cshuffle": {
           "arch": "gfx950",
-          "bytes": 110775,
+          "bytes": 115121,
           "family": "conv_dgrad",
           "kernel_name": "irhash_dgrad_950_s2_sk4_cshuffle_N2H16W16C32_K32Y3X3_t64x64x64_w2x2_a32x32x16_mem_cshuffle_spk4",
-          "sha256": "6f2052ffd8fca089d04ad6997fc0e08eb1e8210b8360ad37406c11187b25a97f",
+          "sha256": "4ac619632a89cfbc4636eb3d778cc637e351540537299ac2938e42ae2992ecb6",
           "status": "ok"
         }
       },
@@ -524,10 +524,10 @@
         },
         "conv_dgrad/gfx950/n2h16c32k32r3_s2_sk4_cshuffle": {
           "arch": "gfx950",
-          "bytes": 110775,
+          "bytes": 115121,
           "family": "conv_dgrad",
           "kernel_name": "irhash_dgrad_950_s2_sk4_cshuffle_N2H16W16C32_K32Y3X3_t64x64x64_w2x2_a32x32x16_mem_cshuffle_spk4",
-          "sha256": "6f2052ffd8fca089d04ad6997fc0e08eb1e8210b8360ad37406c11187b25a97f",
+          "sha256": "4ac619632a89cfbc4636eb3d778cc637e351540537299ac2938e42ae2992ecb6",
           "status": "ok"
         }
       },
