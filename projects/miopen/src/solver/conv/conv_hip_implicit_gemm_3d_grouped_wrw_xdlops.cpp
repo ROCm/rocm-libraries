@@ -86,7 +86,7 @@ constexpr SolverHeuristicConfig k3DWrwSolverConfig = {
     /* uses_split_k                */ true,
     /* split_k_min                 */ 1,
     /* split_k_max                 */ 128,
-    /* supports_split_k_autodeduce */ false,
+    /* supports_split_k_autodeduce */ true,
     /* supports_ktn                */ false,
 };
 // clang-format on
@@ -424,3 +424,4 @@ ConvSolution ConvHipImplicitGemm3DGroupWrwXdlops::GetSolution(
 } // namespace conv
 } // namespace solver
 } // namespace miopen
+
