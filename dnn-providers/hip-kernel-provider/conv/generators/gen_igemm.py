@@ -40,7 +40,6 @@ FIELDS = [
     "split_policy",
     "cfx",
     "flex",
-    "box",
 ]
 # Every field that tells two configs of one graph apart is a knob (the candidate enumeration
 # identifies a config by its knob tuple).
@@ -79,7 +78,6 @@ def C(
     split_policy=0,
     cfx=0,
     flex=0,
-    box=0,
 ):
     return dict(
         atom=atom,
@@ -105,7 +103,6 @@ def C(
         split_policy=split_policy,
         cfx=cfx,
         flex=flex,
-        box=box,
     )
 
 
@@ -754,7 +751,7 @@ def kernels_for(catalog, direction, tag, priority=1000):
         # Forward's 16-bit 256 x 256 register-staged tile on 64-byte steps (32 channels): a
         # third fewer operand bytes per MMA than 256 x 128, for wide-channel layers over few
         # positions. (fp32's 16x16x4 form of it spills.)
-        if catalog is CATALOG and dtype in ("HALF", "BFLOAT16") and tag == "fwd":
+        if catalog is CATALOG and dtype in ("HALF", "BFLOAT16"):
             atom, eb = FLEX_REG_ATOMS[dtype]
             cfgs += withSplitPolicy(
                 [C(atom, 256, 256, 64 // eb, 4, 2, vec=16 // eb, xcd=1, flex=1)]
@@ -780,30 +777,6 @@ def kernels_for(catalog, direction, tag, priority=1000):
                     )
                 ]
             )
-        # Backward data's register-staged flex tiles with their rows in box order (box 1): the dx
-        # pixels grouped by the filter taps that reach them (the interior first, then the border
-        # runs of each axis), so a block's steps skip the taps its rows' classes cannot use. Twins
-        # of the two configs above, with the no-split twin. Appended after them.
-        if catalog is CATALOG and dtype in FLEX_REG_ATOMS and tag == "bwd":
-            atom, eb = FLEX_REG_ATOMS[dtype]
-            cfgs += [
-                C(
-                    atom,
-                    256,
-                    128,
-                    128 // eb,
-                    4,
-                    2,
-                    vec=16 // eb,
-                    xcd=1,
-                    wdirect=wd,
-                    flex=1,
-                    box=1,
-                    split_policy=sp,
-                )
-                for wd in (0, 1)
-                for sp in (0, 1)
-            ]
         # patch 3: col2im backward data (withCol2imView), one GEMM over dy's positions whose
         # T R S C columns a second launch sums into dx, for layers whose dx rows mostly multiply
         # padding ("valid" small 3-D maps). Twins of the plain direct-filter configs (the filter
@@ -889,8 +862,6 @@ def kernels_for(catalog, direction, tag, priority=1000):
                 else f".split{c['split_policy']}" if c["split_policy"] else ""
             ) + (
                 ".flex" if c["flex"] else ""
-            ) + (
-                ".box" if c["box"] else ""
             )
             kernels.append(
                 {

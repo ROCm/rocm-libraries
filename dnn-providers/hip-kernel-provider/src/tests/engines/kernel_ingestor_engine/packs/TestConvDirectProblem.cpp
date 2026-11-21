@@ -1324,7 +1324,7 @@ TEST(TestConvDirectKernelMatch, RunTilesTakeRegisterPathNonRingHaloTiles)
 {
     auto shape = filterShape({3, 3, 3}, {1, 1, 1});
     shape.input = {5, 6, 7};
-    EXPECT_TRUE(admits(runFields(256), "gfx942", shape));
+    EXPECT_TRUE(admits(runFields(264), "gfx942", shape));
     // Each field one at a time: the knob's range, ring, LDS weights, channels-first, other kinds.
     const std::vector<std::pair<std::string, std::function<void(ConfigFields&)>>> mutations{
         {"negative", [](ConfigFields& g) { g.run = -1; }},
@@ -1334,15 +1334,15 @@ TEST(TestConvDirectKernelMatch, RunTilesTakeRegisterPathNonRingHaloTiles)
     };
     for(const auto& [name, mutate] : mutations)
     {
-        auto g = runFields(256);
+        auto g = runFields(264);
         mutate(g);
         EXPECT_FALSE(admits(g, "gfx942", shape)) << name;
     }
     auto rows = rowsFields();
-    rows.run = 256;
+    rows.run = 264;
     EXPECT_FALSE(admits(rows, "gfx950"));
     auto fma = fmaFields(8);
-    fma.run = 256;
+    fma.run = 264;
     EXPECT_FALSE(admits(fma, "gfx942"));
 }
 
@@ -1360,29 +1360,34 @@ std::optional<conv_direct::Plan>
 
 TEST(TestConvDirectPlan, RunTilesCoverStripsOfTheOutputRowsOverPlanes)
 {
-    // Backward data of an unpadded layer, dx 6 x 9 x 130: strips whose stage fits, 9 rows a
-    // plane (the output's), each strip's planes x rows x columns in runs of 128 pixels.
+    // Backward data of an unpadded layer, dx 6 x 9 x 130: eight 16-column strips and a 2-column
+    // one, 9 rows a plane (the output's), each strip's planes x rows x columns in runs of 128.
     auto shape = filterShape({3, 3, 3}, {0, 0, 0});
     shape.dataType = DataType::HALF;
     shape.channelsLast = true;
     shape.input = {6, 9, 130};
-    const auto bwd = planOfDirection(shape, runFields(256), ConvDirection::BACKWARD_DATA);
+    const auto bwd = planOfDirection(shape, runFields(264), ConvDirection::BACKWARD_DATA);
     ASSERT_TRUE(bwd.has_value());
     EXPECT_EQ(bwd->args.th, 9);
-    EXPECT_LE(k2RunHalo(128, 3, 3, bwd->args.tw), 256);
-    EXPECT_EQ(bwd->args.tilesH, (130 + bwd->args.tw - 1) / bwd->args.tw);
-    EXPECT_EQ(bwd->args.tilesW, (6 * 9 * bwd->args.tw + 127) / 128);
+    EXPECT_EQ(bwd->args.tw, 16);
+    EXPECT_EQ(bwd->args.ds, (6 * 9 * 16 + 127) / 128);
+    EXPECT_EQ(bwd->args.tilesW, 8 * bwd->args.ds + (6 * 9 * 2 + 127) / 128);
+    EXPECT_EQ(bwd->args.tilesH, 1);
     EXPECT_EQ(bwd->args.tilesD, 1);
-    EXPECT_EQ(bwd->grid[0], static_cast<unsigned>(bwd->args.tilesW * bwd->args.tilesH * shape.n));
+    EXPECT_EQ(bwd->grid[0], static_cast<unsigned>(bwd->args.tilesW * shape.n));
+    // A run of a 16-wide strip is 8 whole rows; the 2-wide strip's runs are 64.
+    EXPECT_EQ(k2RunHalo(128, 3, 3, 16), 10 * 18);
+    EXPECT_EQ(k2RunHalo(128, 3, 3, 2), 66 * 4);
     // "Same" padding: a plane takes one virtual row past the output's (a filter row's reach past
     // the last row must read the padding, not the next plane).
     auto same = shape;
     same.prePadding = same.postPadding = {1, 1, 1};
-    const auto padded = planOfDirection(same, runFields(256), ConvDirection::FORWARD);
+    const auto padded = planOfDirection(same, runFields(264), ConvDirection::FORWARD);
     ASSERT_TRUE(padded.has_value());
     EXPECT_EQ(padded->args.th, 10);
-    // A stage too small for any strip declines.
-    EXPECT_FALSE(planOfDirection(shape, runFields(100), ConvDirection::BACKWARD_DATA).has_value());
+    // A last strip of one column stages 130 rows: past the stage, so the config declines.
+    shape.input = {6, 9, 129};
+    EXPECT_FALSE(planOfDirection(shape, runFields(264), ConvDirection::BACKWARD_DATA).has_value());
 }
 
 TEST(TestConvDirectPlan, HaloTilesTakeXcdRunsOfTwoBlocksAComputeUnit)

@@ -326,46 +326,43 @@ std::optional<Tile>
     return best;
 }
 
-/// Run tiles (RUN configs): the output is cut into strips of Ws columns; a block owns BM
-/// consecutive pixels of a strip's raster of rows over the planes, so tiles span rows and planes
-/// and leave no pixel slot idle where Ws divides the width. A plane has Hv virtual rows: at least
-/// the output's, and enough that a filter row's reach past a plane's last row lands on the
-/// input's zero padding on both readings (max(out, in + max(leading pad, trailing pad))). Ws is
-/// the width whose tiles cost least (pixel slots plus half the staged halo, as tileFor), among
-/// those whose stage fits the config's; ties go to the wider strip.
+/// Run tiles (RUN configs): the output is cut into strips of 16 columns (the last one the columns
+/// left over); a block owns BM consecutive pixels of a strip's raster of rows over the planes, so
+/// tiles span rows and planes and no pixel slot idles. Every run of a 16-wide strip starts a row,
+/// so a 16-lane fragment reads 16 consecutive pixels of one staged row. A plane has Hv virtual
+/// rows: at least the output's, and enough that a filter row's reach past a plane's last row lands
+/// on the input's zero padding on both readings (max(out, in + max(leading pad, trailing pad))).
+/// Declines strips whose stage would outgrow the config's.
 std::optional<Tile> runTileFor(const K2Args& a, const Config& config, long long columnBlocks)
 {
+    constexpr int STRIP = 16;
     const long long trailH = static_cast<long long>(a.ho) + config.r - 1 - a.hi - a.ph;
     const long long hv = std::max<long long>(a.ho, a.hi + std::max<long long>(a.ph, trailH));
     const long long raster = static_cast<long long>(a.dout) * hv;
-    std::optional<Tile> best;
-    double bestCost = 0.0;
-    for(int ws = 1; ws <= a.wo; ++ws)
+    const int ws = std::min(a.wo, STRIP);
+    const int full = a.wo / ws;
+    const int rest = a.wo - full * ws;
+    if(k2RunHalo(config.bm, config.r, config.s, ws) > config.run
+       || (rest > 0 && k2RunHalo(config.bm, config.r, config.s, rest) > config.run)
+       || raster * ws + config.bm > INT_LIMIT)
     {
-        if(k2RunHalo(config.bm, config.r, config.s, ws) > config.run
-           || raster * ws + config.bm > INT_LIMIT)
-        {
-            continue;
-        }
-        const long long strips = divUp(a.wo, ws);
-        const long long tiles = strips * divUp(raster * ws, config.bm);
-        const double halo = (static_cast<double>(config.bm) / ws + config.r) * (ws + config.s - 1);
-        const double cost = static_cast<double>(tiles) * (config.bm + 0.5 * halo);
-        if(!best.has_value() || cost <= bestCost)
-        {
-            Tile t;
-            t.th = static_cast<int>(hv);
-            t.tw = ws;
-            t.ds = a.dout;
-            t.tilesW = static_cast<int>(divUp(raster * ws, config.bm));
-            t.tilesH = static_cast<int>(strips);
-            t.tilesD = 1;
-            t.blocks = static_cast<long long>(t.tilesW) * t.tilesH * a.n * columnBlocks;
-            best = t;
-            bestCost = cost;
-        }
+        return std::nullopt;
     }
-    return best;
+    const long long perStrip = divUp(raster * ws, config.bm);
+    const long long tiles = full * perStrip + (rest > 0 ? divUp(raster * rest, config.bm) : 0);
+    if(tiles > INT_LIMIT || perStrip > INT_LIMIT)
+    {
+        return std::nullopt;
+    }
+    Tile t;
+    t.th = static_cast<int>(hv);
+    t.tw = ws;
+    t.ds = static_cast<int>(perStrip);
+    t.tilesW = static_cast<int>(tiles);
+    t.tilesH = 1;
+    t.tilesD = 1;
+    t.blocks = tiles * a.n * columnBlocks;
+    return t;
 }
 
 } // namespace

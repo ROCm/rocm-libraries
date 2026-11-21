@@ -373,25 +373,39 @@ struct K2Block
         hp = (a.th + R - 1) * hw;
     }
 
-    /// Run tiles (RUN configs): the output is cut into strips of a.tw = Ws columns, and a
-    /// strip's pixels are a raster of its rows over the planes, a.th = Hv rows a plane (Hv at
-    /// least the output's height, chosen by the planner so a filter row's reach past a plane's
-    /// last row lands on a zero of the input on both readings). A block owns BM consecutive
-    /// pixels of one strip's raster, from column c0 of virtual row r0 (they may span rows and
-    /// planes); per depth tap it stages the rows they cover plus R - 1, each Ws + S - 1 pixels
+    /// Run tiles (RUN configs): the output is cut into strips of a.tw = Ws columns (the last
+    /// one the a.wo % Ws columns left over), and a strip's pixels are a raster of its rows over
+    /// the planes, a.th = Hv rows a plane (Hv at least the output's height, chosen by the planner
+    /// so a filter row's reach past a plane's last row lands on a zero of the input on both
+    /// readings). A block owns BM consecutive pixels of one strip's raster (a.ds tiles a full
+    /// strip, a.tilesW tiles an image), from column c0 of virtual row r0 (they may span rows and
+    /// planes); per depth tap it stages the rows they cover plus R - 1, each ws + S - 1 pixels
     /// from the strip's first column. dF / dL: the first and last output planes the tile touches.
-    int u0, dF, dL, r0, c0, sx;
+    int u0, dF, dL, r0, c0, sx, ws;
     __device__ void initRun(const K2Args& a, int R, int S, int bm)
     {
         init(a, R, S);
-        // a.tilesW tiles a strip, a.tilesH strips an image (tilesD 1): the decode above left the
-        // tile in ow0 and the strip in oh0.
-        const int tile = ow0 / a.tw;
-        sx = (oh0 / a.th) * a.tw;
+        // a.tilesW tiles an image (tilesH = tilesD = 1): the decode above left it in ow0.
+        const int t = ow0 / a.tw;
+        const int full = a.wo / a.tw;
+        int tile;
+        if(t < full * a.ds)
+        {
+            const int strip = t / a.ds;
+            tile = t - strip * a.ds;
+            sx = strip * a.tw;
+            ws = a.tw;
+        }
+        else
+        {
+            tile = t - full * a.ds;
+            sx = full * a.tw;
+            ws = a.wo - sx;
+        }
         u0 = tile * bm;
-        r0 = u0 / a.tw;
-        c0 = u0 - r0 * a.tw;
-        const int rows = (c0 + bm + a.tw - 1) / a.tw;
+        r0 = u0 / ws;
+        c0 = u0 - r0 * ws;
+        const int rows = (c0 + bm + ws - 1) / ws;
         dF = r0 / a.th;
         const int last = (r0 + rows - 1) / a.th;
         dL = last < a.dout - 1 ? last : a.dout - 1;
@@ -399,7 +413,7 @@ struct K2Block
         ow0 = 0;
         od0 = 0;
         dsEff = 1;
-        hw = a.tw + S - 1;
+        hw = ws + S - 1;
         hp = (rows + R - 1) * hw;
     }
 };
@@ -444,10 +458,12 @@ struct K2HaloLoad
         }
     }
     // Run tiles (K2Block::initRun): pass pixel p is pixel (p / hw, p % hw) of the staged rows,
-    // virtual row r0 + p / hw (output plane dv[p]) and column sx + p % hw - pw; hOff its
-    // in-plane input offset (or -1 outside the input's rows and columns). The plane is checked
-    // per depth tap (loadRun).
-    int dv[PASSES];
+    // virtual row r0 + p / hw (output plane d) and column sx + p % hw - pw. hOff is its input
+    // element offset at depth tap 0 (plane d - pd, the tap's planes adding whole planes), and bit
+    // t of taps whether depth tap t reaches an input plane (none outside the input's rows and
+    // columns, or past the stage).
+    unsigned taps[PASSES];
+    template <int KD>
     __device__ void initRun(const K2Args& a, const K2Block& b, int tid)
     {
         kv = (tid % PT) * VEC;
@@ -465,29 +481,32 @@ struct K2HaloLoad
             const int pix = prow + p * PPP;
             const int hh = pix / b.hw;
             const int vr = b.r0 + hh;
-            dv[p] = vr / a.th;
-            const int ih = vr - dv[p] * a.th - a.ph, iw = b.sx + pix - hh * b.hw - a.pw;
-            hOff[p] = pix < b.hp && static_cast<unsigned>(ih) < static_cast<unsigned>(a.hi)
-                              && static_cast<unsigned>(iw) < static_cast<unsigned>(a.wi)
-                          ? (ih * a.wi + iw) * a.c
-                          : -1;
+            const int d = vr / a.th;
+            const int ih = vr - d * a.th - a.ph, iw = b.sx + pix - hh * b.hw - a.pw;
+            const bool in = pix < b.hp && static_cast<unsigned>(ih) < static_cast<unsigned>(a.hi)
+                            && static_cast<unsigned>(iw) < static_cast<unsigned>(a.wi);
+            unsigned bits = 0;
+#pragma unroll
+            for(int t = 0; t < KD; ++t)
+                bits |= static_cast<unsigned>(
+                            in && static_cast<unsigned>(d + t - a.pd) < static_cast<unsigned>(a.di))
+                        << t;
+            taps[p] = bits;
+            hOff[p] = in ? ((d - a.pd) * a.hi + ih) * a.wi * a.c + iw * a.c : 0;
         }
     }
-    // Run tiles, depth tap t, channel chunk c0: pass p reads input plane dv[p] + t - pd.
-    __device__ void loadRun(int t, int pd, int di, int c0)
+    // Run tiles, depth tap t, channel chunk c0: pass p reads input plane d + t - pd.
+    __device__ void loadRun(int t, int c0)
     {
         const int c = c0 + kv;
         const unsigned live = 0u - static_cast<unsigned>(c < cIn);
+        const int base = t * planeElems + c;
 #pragma unroll
         for(int p = 0; p < PASSES; ++p)
         {
-            const int id = dv[p] + t - pd;
-            const unsigned m = live & ~static_cast<unsigned>(hOff[p] >> 31)
-                               & (0u
-                                  - static_cast<unsigned>(static_cast<unsigned>(id)
-                                                          < static_cast<unsigned>(di)));
-            const unsigned in = static_cast<unsigned>((id * planeElems + c + hOff[p])
-                                                      * static_cast<int>(sizeof(T)));
+            const unsigned m = live & (0u - ((taps[p] >> t) & 1u));
+            const unsigned in
+                = static_cast<unsigned>((base + hOff[p]) * static_cast<int>(sizeof(T)));
             r[p] = k1BufferLoad<Raw>(rsrc, (in & m) | (K1_OUT_OF_RANGE & ~m));
         }
         asm volatile("" ::: "memory");
@@ -1012,7 +1031,7 @@ __device__ __attribute__((always_inline)) void k2ConvMma(const K2Args& a CONV_EP
 
     Loader ld;
     if constexpr(RUN != 0)
-        ld.initRun(a, b, tid);
+        ld.template initRun<KD>(a, b, tid);
     else
         ld.init(a, b, tid);
     // Split-C: this block's channel chunks [cb, cb + nChL).
@@ -1030,8 +1049,8 @@ __device__ __attribute__((always_inline)) void k2ConvMma(const K2Args& a CONV_EP
         {
             // A run tile's pixel m is column (c0 + m) % Ws of staged row (c0 + m) / Ws.
             const int q = b.c0 + m;
-            const int row = q / a.tw;
-            aOff[i] = (row * b.hw + q - row * a.tw) * LDC + kb;
+            const int row = q / b.ws;
+            aOff[i] = (row * b.hw + q - row * b.ws) * LDC + kb;
         }
         else
         {
@@ -1588,11 +1607,11 @@ __device__ __attribute__((always_inline)) void k2ConvMma(const K2Args& a CONV_EP
                         // Strip pixel u0 + m: its plane, row and column (junk past the
                         // output's extents).
                         const int q = b.c0 + m;
-                        const int row = q / a.tw;
+                        const int row = q / b.ws;
                         const int vr = b.r0 + row;
                         odp = vr / a.th;
                         oh = vr - odp * a.th;
-                        ow = b.sx + q - row * a.tw;
+                        ow = b.sx + q - row * b.ws;
                         if(odp >= a.dout)
                             continue;
                     }
@@ -1637,7 +1656,7 @@ __device__ __attribute__((always_inline)) void k2ConvMma(const K2Args& a CONV_EP
             a.pd,
             a.di + b.dL - b.dF,
             nChL,
-            [&](int plane, int cc) { ld.loadRun(plane - first, a.pd, a.di, (cb + cc) * BC); },
+            [&](int plane, int cc) { ld.loadRun(plane - first, (cb + cc) * BC); },
             [&](int stage) { ld.template storePixels<LDC>(lds + stage * SLOT); },
             ring,
             tap,
