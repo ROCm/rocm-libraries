@@ -131,6 +131,23 @@ target_link_libraries(tensilelite-client PRIVATE tensilelite-client-common)
 add_executable(cpu-gemm-driver "${CMAKE_CURRENT_SOURCE_DIR}/cpu_gemm_driver.cpp")
 target_link_libraries(cpu-gemm-driver PRIVATE tensilelite-client-common)
 
+# The client is installed to
+# <prefix>/${CMAKE_INSTALL_LIBEXECDIR}/hipblaslt/tensilelite (see
+# projects/hipblaslt/CMakeLists.txt) while libtensilelite-host installs to
+# <prefix>/${CMAKE_INSTALL_LIBDIR}. The project-wide CMAKE_INSTALL_RPATH,
+# $ORIGIN/../lib:$ORIGIN/../llvm/lib, is written for a binary in <prefix>/bin;
+# from the libexec directory it resolves to <prefix>/libexec/hipblaslt/lib, so
+# an installed client cannot find its own host library and exits with
+# "libtensilelite-host.so.1: cannot open shared object file". Add the directory
+# the installed client actually needs, using CMAKE_INSTALL_LIBDIR so a lib64
+# distribution keeps working. Only tensilelite-client is installed;
+# cpu-gemm-driver is a build-tree tool.
+set_property(
+    TARGET tensilelite-client
+    APPEND
+    PROPERTY INSTALL_RPATH "$ORIGIN/../../../${CMAKE_INSTALL_LIBDIR}"
+)
+
 # rocprofiler-sdk is only used by tensilelite-client (in-process counters).
 if(TENSILELITE_CLIENT_ENABLE_ROCPROFSDK)
     target_link_libraries(tensilelite-client PRIVATE rocprofiler-sdk)
