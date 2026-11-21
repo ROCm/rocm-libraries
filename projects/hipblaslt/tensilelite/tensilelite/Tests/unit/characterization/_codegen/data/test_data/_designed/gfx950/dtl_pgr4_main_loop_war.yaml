@@ -1,0 +1,59 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+# Minimal CPU-only code-generation input for the main-loop barrier of
+# DirectToLds kernels with five LDS buffers (PrefetchGlobalRead 4): the
+# DirectToLds loads after the barrier refill a buffer read before it. Modelled
+# on a gfx950 BF16 kernel whose race rocjitsu reports; both
+# ScheduleGROverBarrier paths.
+
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  NumElementsToValidate: 0
+  NumWarmups: 0
+  NumBenchmarks: 1
+  EnqueuesPerSync: 1
+  Device: 0
+
+BenchmarkProblems:
+  - - OperationType: GEMM
+      DataType: B
+      DestDataType: B
+      ComputeDataType: S
+      HighPrecisionAccumulate: True
+      UseBeta: True
+      Batched: True
+      TransposeA: True
+      TransposeB: False
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: [Assembly]
+      ForkParameters:
+        - MatrixInstruction:
+            - [16, 16, 32, 1, 1, 2, 6, 4, 1]
+        - WorkGroup:
+            - [64, 4, 1]
+        - DepthU: [64]
+        - PrefetchGlobalRead: [4]
+        - PrefetchLocalRead: [1]
+        - ScheduleIterAlg: [3]
+        - ScheduleGROverBarrier: [0, 1]
+        - DirectToLds: [1]
+        - DtlPlusLdsBuf: [1]
+        - TransposeLDS: [2]
+        - LdsPadA: [32]
+        - LdsPadB: [32]
+        - LdsBlockSizePerPadA: [1024]
+        - LdsBlockSizePerPadB: [1024]
+        - GlobalReadVectorWidthA: [8]
+        - GlobalReadVectorWidthB: [8]
+        - LocalReadVectorWidth: [8]
+        - VectorWidthA: [2]
+        - VectorWidthB: [2]
+        - SourceSwap: [True]
+        - ExpandPointerSwap: [False]
+        - UnrollLoopSwapGlobalReadOrder: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+            - Exact: [512, 384, 1, 1024]
