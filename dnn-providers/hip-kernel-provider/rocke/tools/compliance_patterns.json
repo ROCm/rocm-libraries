@@ -1,0 +1,55 @@
+{
+  "description": "Compliance patterns that must never appear in tracked files of the public tree or in text posted to pull requests. The one pattern file: the compliance hook and the compliance lint both read it through compliance_patterns.py. The policy itself lives in platform/AGENTS.md, section Compliance. Changing this file is a privileged change.",
+  "rules": [
+    {
+      "id": "issue-tracker-link",
+      "pattern": "\\b[a-z0-9-]+\\.atlassian\\.net\\b",
+      "ignore_case": true,
+      "message": "link to an internal issue tracker or wiki: write the plain-text issue id instead (for example AICK-1234)",
+      "allowed": []
+    },
+    {
+      "id": "internal-document-host",
+      "pattern": "\\b[a-z0-9-]+\\.sharepoint\\.com\\b",
+      "ignore_case": true,
+      "message": "link to an internal document store: describe the content instead of linking it",
+      "allowed": []
+    },
+    {
+      "id": "editor-local-link",
+      "pattern": "vscode-webview:/{2}\\S*",
+      "ignore_case": true,
+      "message": "editor-local link: it points into one developer's session and leaks local state",
+      "allowed": []
+    },
+    {
+      "id": "internal-company-host",
+      "pattern": "\\b(?:[a-z0-9-]+\\.)*amd\\.com\\b",
+      "ignore_case": true,
+      "message": "company host that is not on the public allowlist: remove it, or add the host to 'allowed' in this file if it is publicly reachable",
+      "allowed": [
+        "amd.com",
+        "www.amd.com",
+        "docs.amd.com",
+        "rocm.docs.amd.com",
+        "rocm.blogs.amd.com",
+        "instinct.docs.amd.com",
+        "community.amd.com"
+      ]
+    },
+    {
+      "id": "cluster-job-id",
+      "pattern": "\\bslurm\\s+job\\s+`?\\d+",
+      "ignore_case": true,
+      "message": "cluster job id: it identifies internal infrastructure; say which device ran the test instead",
+      "allowed": []
+    },
+    {
+      "id": "device-bus-id",
+      "pattern": "\\bbus\\s+(?:id\\s+)?0x[0-9a-f]+",
+      "ignore_case": true,
+      "message": "device bus id: it identifies one internal machine; name the device id (gfx942 and so on) instead",
+      "allowed": []
+    }
+  ]
+}
