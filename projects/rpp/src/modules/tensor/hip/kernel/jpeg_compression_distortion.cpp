@@ -227,9 +227,8 @@ __device__ inline void dct_inv_8x8_1d(float* vec, bool offset128) {
 // Quantization
 __device__ inline void quantize(float* value, float* coeff, float qScale) {
     for (int i = 0; i < 8; i++) {
-        float qCoeff = coeff[i] * qScale;               // Runtime multiplication (matches HOST)
-        value[i] = qCoeff * roundf(value[i] / qCoeff);  // Uses roundf; HOST AVX2 uses std::round
-                                                        // with equivalent behavior (no clamping)
+        float qCoeff = fminf(fmaxf(roundf(coeff[i] * qScale), 1.0f), 255.0f);
+        value[i] = qCoeff * roundf(value[i] / qCoeff);
     }
 }
 
