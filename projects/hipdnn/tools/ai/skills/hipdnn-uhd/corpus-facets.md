@@ -63,9 +63,20 @@ from the set is a regime the report cannot warn about.
 
 An enum parameter may declare `weights` (value -> relative weight; unlisted values weigh 1): a
 combination's share of the set scales with its values' weights, raked over the combinations
-that can hold a problem (the excluded pairings above do not take a share). The SDPA files keep
-the common configuration (the `plain` form, BSHD, `1/sqrt(head_dim)`, no window) at about half
-of each facet; `--form-floor` tops each other form up to its count regardless. Because the
+that can hold a problem (the excluded pairings above do not take a share). The SDPA files
+weight `layout`, `scale` and `window`, keeping the common configuration (BSHD, `1/sqrt(head_dim)`,
+no window) at about half of each facet; they do not weight `form`, so each form is a stratum of
+its own and counts toward the first pass's budget like `dtype` does. That budget is
+`--per-combination` (default 50) for each live combination of the unweighted parameters
+(`is_causal`, `alignment`, `dtype`, `form`, and on `sdpa_fwd` `generate_stats`), not of the
+weighted ones: without `--count`, `sdpa_fwd` is about 8,900 problems and `sdpa_bwd` about 2,700.
+The pipeline passes `--count 2000` per operation. At `--count 2000` the forms come out about
+even, not exactly: `sdpa_fwd` holds some 300 each of `plain`, `dropout`, `padded`, `bias` and
+`sink` and 130 to 175 each of `scale_unset`, `scale_tensor` and `ragged`, and `sdpa_bwd` 400 to
+430 each of `plain`, `dropout`, `padded` and `bias` and 160 each of `scale_unset` and
+`scale_tensor`, because those forms are declared with one scale (`scale_unset`,
+`scale_tensor`) or one layout (`ragged`) only, so fewer combinations can hold a problem.
+`--form-floor` tops each form up to its count regardless. Because the
 product of sdpa_fwd's facets (6912 combinations) is past the 1024 bound, the forward explores a
 scattered sample of the combinations that can hold a problem, every declared value present.
 A `--keep` on an enum or bool facet narrows the combinations before that bound applies, so the

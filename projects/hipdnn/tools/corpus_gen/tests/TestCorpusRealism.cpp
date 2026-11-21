@@ -411,14 +411,13 @@ TEST_P(TestShippedSdpaRealism, CorpusCoversHeadDimsLayoutsAndSequenceRelationsAM
     // cross attention (seqlen_q > seqlen_k) never appeared.
     const auto metadata = test::shippedOperation(GetParam());
 
+    // The default first pass: 50 points for each live combination of the unweighted parameters
+    // (is_causal, alignment, dtype, form and, in the forward, generate_stats), about 8900 rows in
+    // the forward and 2700 in the backward, enough that the shares below are not noise.
     ExplorationRequest request;
-    request.pointsPerCombination = 30;
     request.seed = 9;
     const auto problems = exploreProblemSpace(metadata, request, ACCEPT_EVERYTHING).problems();
-    // 30 points for each live combination of the unweighted parameters (24 in the forward, 12 in
-    // the backward, which has no generate_stats): 720 and 270 rows for this seed, enough that the
-    // shares below are not noise.
-    ASSERT_GT(problems.size(), GetParam() == "sdpa_fwd" ? 500U : 200U);
+    ASSERT_GT(problems.size(), GetParam() == "sdpa_fwd" ? 5000U : 1500U);
 
     size_t wide = 0;
     size_t square = 0;
@@ -445,9 +444,14 @@ TEST_P(TestShippedSdpaRealism, CorpusCoversHeadDimsLayoutsAndSequenceRelationsAM
         return static_cast<double>(count) / static_cast<double>(problems.size());
     };
 
-    // Measured for this seed at 0.84 and 0.14 (sdpa_fwd) and 0.83 and 0.14 (sdpa_bwd), and over
-    // seeds 0 to 40 no lower than 0.82 and 0.11 for either, so one pair of floors holds for both.
-    constexpr double SDPA_WIDE_SHARE = 0.8;
+    // Measured over seeds 0 to 20 no lower than 0.82 and 0.16 (sdpa_fwd) and 0.78 and 0.27
+    // (sdpa_bwd), so one pair of floors holds for both. The wide floor is set well above the 0.57
+    // a log-uniform head_dim from 1 would leave at most and below the measured shares. It was 0.84 and
+    // 0.83 at 30 points for each combination while the form was weighted; with it unweighted the
+    // first pass spreads over about 180 combinations of a few points each, whose anchored quota
+    // (the mixture's share of a combination's own count, the archetypes' D of 64 and 128 among
+    // it) is small, so the share is lower for the same declared mixture.
+    constexpr double SDPA_WIDE_SHARE = 0.7;
     constexpr double SDPA_SQUARE_SHARE = 0.1;
     EXPECT_GE(narrowest, 8) << "the declared head_dim range";
     EXPECT_GT(share(wide), SDPA_WIDE_SHARE) << "most rows should be heads of D >= 32";

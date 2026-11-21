@@ -1307,8 +1307,8 @@ TEST(TestProblemSpace, SizesAreRakedOverTheCombinationsThatCanHoldAProblem)
     // constraints, while its windowed twins are not, so sizes taken as a product of weights over
     // every combination leave window none under its declared 50%. The forms empty more: a scale
     // the form does not state (scale_unset, scale_tensor) other than inv_sqrt_d, and a ragged
-    // form over a layout that is not token-major. The raking has to hold all four weighted
-    // facets at once over what is left.
+    // form over a layout that is not token-major. The raking has to hold all three weighted
+    // facets (layout, scale, window) at once over what is left. The form is not weighted.
     std::ifstream file(hipdnn_corpus_gen::test::operationsDir() + "/sdpa_fwd.opmeta.json");
     ASSERT_TRUE(file.good());
     const auto parsed = parseOperationMetadata(nlohmann::json::parse(file));
@@ -1361,9 +1361,17 @@ TEST(TestProblemSpace, SizesAreRakedOverTheCombinationsThatCanHoldAProblem)
     EXPECT_NEAR(layout["bshd"] / all, 0.5, 1e-6);
     EXPECT_NEAR(layout["kv_bhsd"] / all, 0.25, 1e-6);
     EXPECT_NEAR(scale["inv_sqrt_d"] / all, 0.5, 1e-6);
-    // plain 7 of 7 + 7 forms of 1.
-    EXPECT_NEAR(form["plain"] / all, 0.5, 1e-6);
-    EXPECT_NEAR(form["sink"] / all, 1.0 / 14.0, 1e-6);
+    // The form carries no weight: a form's share is its share of the combinations that can hold
+    // a problem, less for the three that the declaration's constraints leave fewer of than the
+    // other five (those hold 810 of their 864 combinations each; scale_unset, scale_tensor and
+    // ragged 270), and no form is left out.
+    EXPECT_TRUE(metadata.find("form")->weights.empty());
+    for(const auto& [name, held] : form)
+    {
+        EXPECT_GT(held / all, 0.04) << name;
+    }
+    EXPECT_GT(form["sink"], form["scale_unset"]);
+    EXPECT_GT(form["sink"], form["ragged"]);
     // The mean over combinations that can hold a problem is 1, as it is for unweighted ones.
     EXPECT_NEAR(all, static_cast<double>(combinations.size() - empty), 1e-6);
 }
@@ -1548,9 +1556,9 @@ TEST_P(TestShippedFirstPass, TheShippedSdpaDeclarationsKeepTheDefaultFirstPassNe
 {
     // Weighted axes split a budget; they do not multiply it. The budget is pointsPerCombination
     // for each distinct live combination of the unweighted parameters (is_causal, alignment,
-    // dtype, and for the forward generate_stats), not for each of the thousands of weighted
-    // combinations: crossing four weighted axes in made the forward first pass fifty times the
-    // size it was before they were declared.
+    // dtype, form, and for the forward generate_stats), not for each of the thousands of
+    // weighted combinations: crossing three weighted axes (layout, scale, window) in would multiply
+    // it by their 36 value combinations in the forward.
     const auto metadata = test::shippedOperation(GetParam());
     const ExplorationRequest request;
     size_t total = 0;
@@ -1597,7 +1605,9 @@ TEST_P(TestShippedFirstPass, TheShippedSdpaDeclarationsKeepTheDefaultFirstPassNe
         sum += target;
     }
     EXPECT_EQ(sum, request.pointsPerCombination * distinct);
-    EXPECT_LT(sum, int64_t{5} * 24 * request.pointsPerCombination);
+    EXPECT_LT(sum * 4, request.pointsPerCombination * live)
+        << "the weighted axes split the budget; one budget for each combination would be "
+        << request.pointsPerCombination * live;
 
     // Every declared value that some live combination holds is drawn, weighted or not, and each
     // weighted value holds its declared share of the first pass.

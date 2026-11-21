@@ -380,10 +380,10 @@ class TestShippedValueWeights : public ::testing::TestWithParam<std::string>
 TEST_P(TestShippedValueWeights,
        AFocusedSearchRealisesTheDeclaredValueWeightsAndProbesOnlyTheLanesItNeeds)
 {
-    // layout 2:1:1 and scale 2:1:1 in both, window 3:1:1:1 in sdpa_fwd, which alone declares one,
-    // and form plain 7 of 14 in sdpa_fwd, 5 of 10 in sdpa_bwd. The regime quota and floor path
-    // splits its need over categorical lanes, so a lane-even split would make every value 1/3
-    // (window none 1/4, plain 1/8 or 1/6) however the main search is weighted.
+    // layout 2:1:1 and scale 2:1:1 in both, window 3:1:1:1 in sdpa_fwd, which alone declares one;
+    // the form is unweighted. The regime quota and floor path splits its need over categorical
+    // lanes, so a lane-even split would make every value 1/3 (window none 1/4) however the main
+    // search is weighted.
     const bool forward = GetParam() == "sdpa_fwd";
     const auto metadata = test::shippedOperation(GetParam());
     std::string error;
@@ -403,13 +403,17 @@ TEST_P(TestShippedValueWeights,
     // scale_tensor take inv_sqrt_d, a constraint holds it there. The declared 1/2 is realised
     // over every point, so over every point the weighted and the unweighted share both fall
     // within the tolerance of 0.5 (about 0.5 and 0.47 in sdpa_bwd). Among the points whose form states
-    // the scale the weight is what remains once the forced share is taken out, and the unweighted
-    // 1/3 is further from it than the tolerance.
+    // the scale the weight is what remains once the forced share, the rows of those two forms,
+    // is taken out, and the unweighted 1/3 is further from it than the tolerance.
     const auto* formParameter = metadata.find("form");
     ASSERT_NE(formParameter, nullptr);
-    const auto forced = (formParameter->relativeWeight("scale_unset")
-                         + formParameter->relativeWeight("scale_tensor"))
-                        / static_cast<double>(formParameter->values.size());
+    EXPECT_TRUE(formParameter->weights.empty()) << "the forms are even strata, not weighted";
+    const auto forcedRows = static_cast<double>(
+        std::count_if(found.problems.begin(), found.problems.end(), [](const ProblemPoint& point) {
+            const auto& form = std::get<std::string>(point.at("form"));
+            return form == "scale_unset" || form == "scale_tensor";
+        }));
+    const auto forced = forcedRows / static_cast<double>(found.problems.size());
     const auto statedInvSqrtD = (0.5 - forced) / (1.0 - forced);
     const auto shareOf
         = [&found](const std::string& parameter, const std::string& value, bool statesScale) {
@@ -431,7 +435,14 @@ TEST_P(TestShippedValueWeights,
     EXPECT_NEAR(shareOf("layout", "bhsd", false), 0.25, 0.05);
     EXPECT_NEAR(shareOf("scale", "inv_sqrt_d", false), 0.5, 0.1);
     EXPECT_NEAR(shareOf("scale", "inv_sqrt_d", true), statedInvSqrtD, 0.03);
-    EXPECT_NEAR(shareOf("form", "plain", false), 0.5, 0.05);
+    // No form is starved: each holds at least 0.4 of an even share, though the three that fewer
+    // combinations can hold (scale_unset, scale_tensor, ragged) hold less than the others.
+    for(const auto& form : formParameter->values)
+    {
+        EXPECT_GE(shareOf("form", form, false),
+                  0.4 / static_cast<double>(formParameter->values.size()))
+            << form;
+    }
     if(forward)
     {
         EXPECT_NEAR(shareOf("window", "none", false), 0.5, 0.1);

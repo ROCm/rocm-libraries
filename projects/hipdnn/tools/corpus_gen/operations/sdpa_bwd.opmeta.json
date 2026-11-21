@@ -92,15 +92,7 @@
         "padded",
         "bias"
       ],
-      "weights": {
-        "plain": 5,
-        "scale_unset": 1,
-        "scale_tensor": 1,
-        "dropout": 1,
-        "padded": 1,
-        "bias": 1
-      },
-      "description": "Which optional attributes and tensors the graph binds (RFC 0019 \u00a76.7, absent is not zero, and \u00a76.8 rule 9: a model must tolerate any optional feature a valid graph leaves unbound). One aspect varies per graph from the plain baseline, so every optional input appears both present and absent without crossing them all. Only the forms built for the backward: its schema has no sink token, and no ragged form is built for it yet. plain states the scale and binds nothing optional; scale_unset leaves the scale unstated; scale_tensor gives it as a pass-by-value tensor; dropout adds Philox dropout with an INT64 seed and offset; padded adds per-batch seq_len_q and seq_len_kv; bias adds an additive [1, 1, seqlen_q, seqlen_k] bias (attn_mask only: no dbias is written). A --model-shapes file with no `q.form` column reads every row as plain; a column left empty in a row is refused. plain carries half of the weight, the common configuration, as bshd, inv_sqrt_d and no window do for their facets; --form-floor tops each other form up to its count. Interactions: the form decides whether the `scale` facet applies (scale_unset and scale_tensor ignore it, so they are held at inv_sqrt_d). Every other pairing with layout and scale is a valid graph; an engine that serves only some of them is filtered by the oracle."
+      "description": "Which optional attributes and tensors the graph binds (RFC 0019 \u00a76.7, absent is not zero, and \u00a76.8 rule 9: a model must tolerate any optional feature a valid graph leaves unbound). One aspect varies per graph from the plain baseline, so every optional input appears both present and absent without crossing them all. Only the forms built for the backward: its schema has no sink token, and no ragged form is built for it yet. plain states the scale and binds nothing optional; scale_unset leaves the scale unstated; scale_tensor gives it as a pass-by-value tensor; dropout adds Philox dropout with an INT64 seed and offset; padded adds per-batch seq_len_q and seq_len_kv; bias adds an additive [1, 1, seqlen_q, seqlen_k] bias (attn_mask only: no dbias is written). A --model-shapes file with no `q.form` column reads every row as plain; a column left empty in a row is refused. Every form is an even stratum, so a corpus holds each in equal measure (the forms are not weighted, unlike layout, scale and window); --form-floor tops each form up to its count. Interactions: the form decides whether the `scale` facet applies (scale_unset and scale_tensor ignore it, so they are held at inv_sqrt_d). Every other pairing with layout and scale is a valid graph; an engine that serves only some of them is filtered by the oracle."
     }
   },
   "stratification_axis": "arithmetic_intensity",

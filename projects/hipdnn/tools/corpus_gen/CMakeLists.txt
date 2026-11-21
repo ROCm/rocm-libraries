@@ -71,11 +71,15 @@ if(HIPDNN_BUILD_FRONTEND AND HIPDNN_BUILD_BACKEND)
                 # No --operations: the declarations staged beside the tool.
                 "default_operations|--without-engine,--operation,matmul,--count,4|0|4"
                 "empty|--without-engine,--operations,${_operations_dir},--operation,matmul,--count,4,--keep,q.M=-7|2|0"
-                # With quotas and no --count, the corpus is the quotas alone.
-                "regime_quota|--without-engine,--operations,${_operations_dir},--operation,sdpa_fwd,--regime-quota,decode_short_mha=3|0|3"
+                # With quotas and no --count, the corpus is the quotas alone. The first pass still
+                # runs before the quota is filled, and the forward's default one is about 9000
+                # problems (50 for each of about 180 live combinations of the unweighted
+                # parameters, the form among them), 20 s: --per-combination 10 shortens it.
+                "regime_quota|--without-engine,--operations,${_operations_dir},--operation,sdpa_fwd,--per-combination,10,--regime-quota,decode_short_mha=3|0|3"
                 # One form axis of eight labels: one graph under each, and nothing else. Each
-                # label is a value of the manifest's own `form` column and a reported quota.
-                "form_floor|--without-engine,--operations,${_operations_dir},--operation,sdpa_fwd,--form-floor,1|0|8|plain,scale_unset,scale_tensor,dropout,padded,ragged,bias,sink"
+                # label is a value of the manifest's own `form` column and a reported quota. The
+                # small --per-combination is as for regime_quota.
+                "form_floor|--without-engine,--operations,${_operations_dir},--operation,sdpa_fwd,--per-combination,10,--form-floor,1|0|8|plain,scale_unset,scale_tensor,dropout,padded,ragged,bias,sink"
                 # The backward declares six of them: no sink token, and no ragged form.
                 "form_floor_sdpa_bwd|--without-engine,--operations,${_operations_dir},--operation,sdpa_bwd,--form-floor,1|0|6|plain,scale_unset,scale_tensor,dropout,padded,bias"
                 # Both floors at once, narrowed to one form so that the seven other forms are
