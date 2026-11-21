@@ -17,7 +17,10 @@ import pytest
 def _load_patterns_module() -> ModuleType:
     path = Path(__file__).resolve().parents[3] / "tools" / "compliance_patterns.py"
     if not path.is_file():
-        pytest.skip("rocke/tools/compliance_patterns.py is absent from this tree")
+        pytest.skip(
+            "rocke/tools/compliance_patterns.py is absent from this tree",
+            allow_module_level=True,
+        )
     spec = importlib.util.spec_from_file_location(
         "compliance_patterns_under_test", path
     )
