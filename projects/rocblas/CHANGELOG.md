@@ -17,10 +17,6 @@ rocBLAS documentation is available at
 * `rocblas_clients_readme.txt` is installed under the rocBLAS data directory (`share/rocblas`) instead of `bin`.
 * A failed device-memory free in `rocblas_device_malloc` now prints the status to `stderr`.
 
-### Optimized
-
-* Improved the performance of Level 2 transposed `gemv` (`TransA != N`) when `n` fits in the launch grid. The fix for a large `n` walks several columns from each block, and that kernel was used for every `n`, including problems where each column already has its own block. Those problems now use the original single-column kernel again. The striding kernel is still used when the clamped grid cannot cover `n`.
-
 ### Resolved issues
 
 * Fix wrong results from `gemm_strided_batched_ex` when `batch_count > 1` and a batch stride is 2^32 elements or more (for example `int8` with `m = n = 65536` and `stride_c = m * n`). Tensile and hipBLASLt kernels receive batch strides as 32-bit values, so every batch after the first was read from or written to the wrong place while the call returned `rocblas_status_success`. Such problems are now issued one batch at a time.
