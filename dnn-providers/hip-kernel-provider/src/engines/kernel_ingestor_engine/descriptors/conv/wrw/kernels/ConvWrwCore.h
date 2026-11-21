@@ -3075,6 +3075,24 @@ __device__ K3_LOOP_INLINE void k3WrwRowsSmallC(const K3Args& a)
     });
 }
 
+/// Register sets of loaded steps for the matrix-core ring: 2 (the loads run two steps ahead of
+/// the multiply) for gfx942's 16-bit channels-last four-wave one-fragment tiles of 32-position
+/// steps at one step a stage over undilated rows, whose multiply alone did not cover a load's
+/// latency (about a fifth of a wave's time waited on its loads; the second set fits their
+/// registers); 1 elsewhere (channels-first rows measured slower with two sets on MI325X).
+template <class T, int LAYOUT, int WAVES, int FK, int FC, int KK, int ALIGN, int P, int DW>
+__device__ constexpr int k3RingLoadSets()
+{
+#if defined(__gfx942__)
+    return sizeof(T) == 2 && LAYOUT == K3_NHWC && WAVES == 4 && FK == 1 && FC == 1 && KK == 4
+                   && ALIGN == 0 && P == 1 && DW == 1
+               ? 2
+               : 1;
+#else
+    return 1;
+#endif
+}
+
 // ---------------------------------------------------------------------------------------------
 // Row-ring kernel (height stride 1). A block owns BK output channels, BC input channels, one
 // depth tap t and all R x S taps of it. The reduction runs along tracks (image, output depth,
@@ -3121,7 +3139,9 @@ __device__ K3_LOOP_INLINE void k3WrwRing(const K3Args& a)
     constexpr int FB = 0;
 #endif
     constexpr int P = WQ > 1 ? WQ : 1; // steps a stage
-    typedef K3Tiles<T, LAYOUT, BK, BC, BQ, 1, S, SW, DW, VEC, THREADS, 1, ALIGN, FB> Tiles;
+    // Register sets of loaded steps (k3RingLoadSets): two where the loads run two steps ahead.
+    constexpr int PF = k3RingLoadSets<T, LAYOUT, WK * WC, FK, FC, KK, ALIGN, P, DW>();
+    typedef K3Tiles<T, LAYOUT, BK, BC, BQ, 1, S, SW, DW, VEC, THREADS, PF, ALIGN, FB> Tiles;
     static_assert(
         k3LdsBytes(
             1, LAYOUT, sizeof(T), BK, BC, BQ, R, S, SW, DW, WK, WC, 0, 0, VEC, ALIGN, 0, WQ, FB)
@@ -3281,6 +3301,18 @@ __device__ K3_LOOP_INLINE void k3WrwRing(const K3Args& a)
         tiles[I].template loadRs<0>(
             a, yr, xr, q0c, static_cast<bool>(live & (oh < a.ho)), yRow, xOk, xRows);
     };
+    // PF 2: the one step a stage into register set RS (the step's parity).
+    auto issueTo = [&](auto rc) {
+        constexpr int RS = decltype(rc)::value;
+        const bool live = leftI != 0ull;
+        const bool xOk[1] = {static_cast<bool>(
+            live & (replayI == 0) & (static_cast<unsigned>(ih) < static_cast<unsigned>(a.hi)))};
+        const int xRows[1] = {xRow};
+        if constexpr(!KEEP_RSRC)
+            tiles[0].rsrcOf(a, nC, yr, xr);
+        tiles[0].template loadRs<RS>(
+            a, yr, xr, q0c, static_cast<bool>(live & (oh < a.ho)), yRow, xOk, xRows);
+    };
     auto next = [&]() {
         advance();
         leftI = leftI != 0ull ? leftI - 1ull : 0ull;
@@ -3298,20 +3330,36 @@ __device__ K3_LOOP_INLINE void k3WrwRing(const K3Args& a)
     };
 
     // Pipeline: LDS buffer j % 2 holds stage j; the registers carry stage j + 1, loaded while
-    // stage j multiplies.
+    // stage j multiplies. PF 2: register set j % 2 carries step j + 2 as well, so a load has
+    // two steps to land; the cursor runs two steps ahead and each step's meta is taken when it
+    // is issued (mPf, by parity).
     Meta mCur[P];
+    Meta mPf[2];
     if(begin < end)
     {
         startTrack();
-        k3ForEach<P>([&](auto ic) {
-            constexpr int I = decltype(ic)::value;
-            if constexpr(I > 0)
-                next();
-            mCur[I] = metaOf();
-            issue(ic);
-        });
-        waitAll();
-        storeAll(lds);
+        if constexpr(PF == 2)
+        {
+            mPf[0] = metaOf();
+            issueTo(K3Int<0>{});
+            next();
+            mPf[1] = metaOf();
+            issueTo(K3Int<1>{});
+            tiles[0].template wait<0, Tiles::LOADS>();
+            tiles[0].template store<0>(a, lds, lds + Tiles::A_ELEMS, tid);
+        }
+        else
+        {
+            k3ForEach<P>([&](auto ic) {
+                constexpr int I = decltype(ic)::value;
+                if constexpr(I > 0)
+                    next();
+                mCur[I] = metaOf();
+                issue(ic);
+            });
+            waitAll();
+            storeAll(lds);
+        }
         k1LdsBarrier();
     }
     const int kb = Atom::template kBase<KPL>(lane);
@@ -3319,24 +3367,36 @@ __device__ K3_LOOP_INLINE void k3WrwRing(const K3Args& a)
     auto body = [&](auto pc) {
         constexpr int J = decltype(pc)::value; // stage parity
         Meta mt[P];
-        k3ForEach<P>([&](auto ic) {
-            constexpr int I = decltype(ic)::value;
-            if constexpr(P == 1)
-            {
-                // One step a stage: the cursor is still on the computed step, so its multiply's
-                // meta is taken here. Carried across the loop as at several steps a stage, it
-                // pushed the large channels-first tiles' multiplies into VGPR spills.
-                mt[I] = metaOf();
-                next();
-            }
-            else
-            {
-                mt[I] = mCur[I];
-                next();
-                mCur[I] = metaOf();
-            }
-            issue(ic);
-        });
+        if constexpr(PF == 2)
+        {
+            // Step j's meta, taken when it was issued; the cursor moves to step j + 2.
+            mt[0] = mPf[J];
+            next();
+            mPf[J] = metaOf();
+            issueTo(K3Int<J>{});
+        }
+        else
+        {
+            k3ForEach<P>([&](auto ic) {
+                constexpr int I = decltype(ic)::value;
+                if constexpr(P == 1)
+                {
+                    // One step a stage: the cursor is still on the computed step, so its
+                    // multiply's meta is taken here. Carried across the loop as at several steps a
+                    // stage, it pushed the large channels-first tiles' multiplies into VGPR
+                    // spills.
+                    mt[I] = metaOf();
+                    next();
+                }
+                else
+                {
+                    mt[I] = mCur[I];
+                    next();
+                    mCur[I] = metaOf();
+                }
+                issue(ic);
+            });
+        }
         // The loads above stay ahead of the multiplies.
         __builtin_amdgcn_sched_barrier(0);
         k3ForEach<P>([&](auto ic) {
@@ -3379,8 +3439,19 @@ __device__ K3_LOOP_INLINE void k3WrwRing(const K3Args& a)
                     acc, ring, bBase, mt[I].rows);
         });
         __builtin_amdgcn_sched_barrier(0);
-        waitAll();
-        storeAll(lds + (J ^ 1) * BUF);
+        if constexpr(PF == 2)
+        {
+            // Step j + 1 (register set J ^ 1, issued a step ago) into the other buffer; step
+            // j + 2's loads stay in flight.
+            tiles[0].template wait<J ^ 1, Tiles::LOADS>();
+            tiles[0].template store<J ^ 1>(
+                a, lds + (J ^ 1) * BUF, lds + (J ^ 1) * BUF + Tiles::A_ELEMS, tid);
+        }
+        else
+        {
+            waitAll();
+            storeAll(lds + (J ^ 1) * BUF);
+        }
         k1LdsBarrier();
         left = left > static_cast<unsigned long long>(P) ? left - P : 0ull;
     };
@@ -3395,6 +3466,673 @@ __device__ K3_LOOP_INLINE void k3WrwRing(const K3Args& a)
     // Filter rows of this phase: t fr + r0 + phases i (the ring's rows of filter depth t).
     k3StorePartials<T, Atom, R, S, FK, FC, WTK, WTC, K3_INTERIOR_STORE<Atom, BQ>>(
         a, acc, g, t * a.fr + r0, a.ft * a.fr, k0, c0, wk, wc, lane, bz, phases, (t + 1) * a.fr);
+}
+
+/// A workgroup barrier the scheduler moves nothing across (the ping-pong loops' phases).
+__device__ inline void k3PhaseBarrier()
+{
+    __builtin_amdgcn_sched_barrier(0);
+    asm volatile("" ::: "memory");
+    __builtin_amdgcn_s_barrier();
+    asm volatile("" ::: "memory");
+    __builtin_amdgcn_sched_barrier(0);
+}
+
+/// Waits for the wave's LDS operations.
+__device__ inline void k3WaitLds()
+{
+    asm volatile("s_waitcnt lgkmcnt(0)" ::: "memory");
+}
+
+/// The matrix-core ring (k3WrwRing, one step a stage) as an 8-wave ping-pong: two groups of four
+/// waves, the BC / 2-channel halves of the block (wc < WC / 2 and the rest). A step is four
+/// phases, each ended by a barrier, and the second group runs one phase behind:
+///   [mem A]     the new dy row's fragments (the ring's row 0) and the window's fragments at
+///               every width tap;
+///   [compute A] the first half of the step's k-atoms;
+///   [mem B]     this thread's share of step j + 1 from registers into LDS, then the loads of
+///               step j + 2;
+///   [compute B] the second half.
+/// So on every SIMD one wave multiplies while the other reads or writes LDS. (The plain ring's
+/// waves of one block load, store and multiply in step: on gfx942 a 32 x 32 nine-tap wave's
+/// multiply, about 580 cycles of MMA a step, did not cover the step's own loads, stores and
+/// cursor, about 400 cycles of issue, and a fifth of its time waited on global loads; ConvWrw.cpp
+/// selects this form for gfx942's 16-bit 8-wave tiles.) The other group writes LDS in the phases
+/// next to each of a group's compute phases, so the stage is double-buffered: step j reads stage
+/// j % 2 while step j + 1 is written into the other (the ring's two stages). At 8 k-atoms a step
+/// (64 positions) the window's fragments are read a half at a time, the second half in
+/// [compute A].
+template <class T,
+          class Atom,
+          int LAYOUT,
+          int BK,
+          int BC,
+          int BQ,
+          int R,
+          int S,
+          int SW,
+          int DW,
+          int WK,
+          int WC,
+          int VEC,
+          int ALIGN = 0>
+__device__ K3_LOOP_INLINE void k3WrwRingPP(const K3Args& a)
+{
+    constexpr int WAVE = Atom::WAVE;
+    constexpr int THREADS = WK * WC * WAVE;
+    constexpr int DIM = Atom::DIM, KA = Atom::KA, KPL = Atom::KPL;
+    constexpr int WTK = BK / WK, WTC = BC / WC;
+    constexpr int FK = WTK / DIM, FC = WTC / DIM;
+    constexpr int KK = BQ / KA;
+    static_assert(FK * DIM * WK == BK && FC * DIM * WC == BC && BQ % KA == 0, "K3 tile");
+    static_assert(WK * WC == 8 && WC % 2 == 0 && (KK == 4 || KK == 8),
+                  "K3 ring ping-pong: two groups of four waves, two halves of the k-atoms");
+    static_assert(LAYOUT != K3_NHWC_TR, "K3 ring ping-pong: fragments by plain LDS reads");
+    constexpr int FB = KPL * static_cast<int>(sizeof(T));
+    typedef K3Tiles<T, LAYOUT, BK, BC, BQ, 1, S, SW, DW, VEC, THREADS, 1, ALIGN, FB> Tiles;
+    constexpr int LDA = Tiles::LDA, LDB = Tiles::LDB;
+    constexpr bool HALF = KK == 8;
+    constexpr int STAGE = Tiles::A_ELEMS + Tiles::B_ELEMS;
+    static_assert(
+        k3LdsBytes(
+            1, LAYOUT, sizeof(T), BK, BC, BQ, R, S, SW, DW, WK, WC, 0, 0, VEC, ALIGN, 0, 0, FB)
+            == 2 * STAGE * static_cast<long long>(sizeof(T)),
+        "K3 LDS arithmetic (ConvWrwGeom.h)");
+
+    __shared__ __attribute__((aligned(16))) T lds[2 * STAGE];
+
+    const int tid = threadIdx.x;
+    const int lane = tid % WAVE, wave = tid / WAVE;
+    const int wk = wave % WK, wc = wave / WK;
+    const int grp = wc / (WC / 2);
+    const int kg = a.k / a.groups, cg = a.c / a.groups;
+    unsigned bx, by, bz;
+    k3BlockIds<1>(bx, by, bz, a.xcds);
+    const int kTiles = (kg + BK - 1) / BK;
+    const int k0 = (bx % kTiles) * BK;
+    const int c0 = (bx / kTiles) * BC;
+    // Height phases, tracks and the cursor as in k3WrwRing.
+    const int sh = a.sh;
+    const int phases = sh > 1 ? sh : 1;
+    const int p = static_cast<int>(by % phases);
+    const int g = static_cast<int>(by / phases) / a.ft;
+    const int t = static_cast<int>(by / phases) % a.ft;
+    const int r0 = sh > 1 ? (p + a.ph) % sh : 0;
+    const int q0 = sh > 1 ? (p + a.ph - r0) / sh : 0;
+    unsigned phaseRows = 0;
+#pragma unroll
+    for(int i = 0; i < R; ++i)
+        phaseRows |= (r0 + phases * i < a.fr) ? 1u << i : 0u;
+    const long long begin = bz * a.stepsPerSplit;
+    const long long end = begin + a.stepsPerSplit < a.steps ? begin + a.stepsPerSplit : a.steps;
+
+    typename Atom::acc acc[R * S][FK][FC];
+#pragma unroll
+    for(int i = 0; i < R * S; ++i)
+#pragma unroll
+        for(int x = 0; x < FK; ++x)
+#pragma unroll
+            for(int y = 0; y < FC; ++y)
+                acc[i][x][y] = typename Atom::acc{};
+    typename Atom::frag ring[R][KK][FK];
+#pragma unroll
+    for(int r = 0; r < R; ++r)
+#pragma unroll
+        for(int kk = 0; kk < KK; ++kk)
+#pragma unroll
+            for(int x = 0; x < FK; ++x)
+                ring[r][kk][x] = typename Atom::frag{};
+
+    const int ys2 = static_cast<int>(a.ys[2]), ys3 = static_cast<int>(a.ys[3]);
+    const int xs2 = static_cast<int>(a.xs[2]), xs3 = static_cast<int>(a.xs[3]);
+    K3Track cur;
+    long long first = begin;
+    if(begin < end)
+        first = cur.seek(a, begin, R - 1);
+    unsigned long long left = begin < end ? static_cast<unsigned long long>(end - first) : 0ull;
+    Tiles tiles;
+    tiles.init(a, tid, g, k0, c0, kg, cg);
+    const int ihStep = sh > 1 ? sh : a.dh;
+    const int yRowStep = a.dh * ys3, xRowStep = ihStep * xs3;
+    int oh = 0, ih = 0, yRow = 0, xRow = 0, u = 0, q0c = 0;
+    unsigned rowsC = 0;
+    k3i4 yr, xr;
+    auto startTrack = [&]() {
+        const int m = cur.m;
+        const bool nOk = cur.n < a.n;
+        const int id = cur.od * a.sd + t * a.dd - a.pd;
+        u = cur.rho < a.ho ? (a.ho - cur.rho + a.dh - 1) / a.dh : 0;
+        oh = nOk ? cur.rho + m * a.dh : a.ho;
+        ih = sh > 1 ? sh * (m - q0) + p : cur.rho - a.ph + m * a.dh;
+        yRow = cur.od * ys2 + oh * ys3;
+        xRow = id * xs2 + ih * xs3;
+        ih = nOk && id >= 0 && id < a.di ? ih : -(1 << 30);
+        rowsC = k3RowsOf(m, u, R);
+        q0c = cur.chunk * BQ;
+        tiles.rsrcOf(a, nOk ? cur.n : 0, yr, xr);
+    };
+    auto advance = [&]() {
+        cur.advance(a);
+        if(cur.m != 0)
+        {
+            oh += a.dh;
+            ih += ihStep;
+            yRow += yRowStep;
+            xRow += xRowStep;
+            rowsC = ((rowsC << 1) | (cur.m < u ? 1u : 0u)) & ((1u << R) - 1u);
+        }
+        else
+        {
+            startTrack();
+        }
+    };
+    // The newest issued step's steps left (replayed ones included) and replayed steps left.
+    unsigned long long leftI = left;
+    int replayI = static_cast<int>(begin - first);
+    // A step's meta, packed: its tap rows (bits 0 .. R - 1), track start (bit 8) and whether it
+    // multiplies (bit 9), taken when the step is issued.
+    auto metaOf = [&]() {
+        const bool math
+            = static_cast<bool>((replayI == 0) & (leftI != 0ull)
+                                & (static_cast<unsigned>(ih) < static_cast<unsigned>(a.hi)));
+        return (rowsC & phaseRows) | (cur.m == 0 ? 1u << 8 : 0u) | (math ? 1u << 9 : 0u);
+    };
+    auto issue = [&]() {
+        const bool live = leftI != 0ull;
+        const bool xOk[1] = {static_cast<bool>(
+            live & (replayI == 0) & (static_cast<unsigned>(ih) < static_cast<unsigned>(a.hi)))};
+        const int xRows[1] = {xRow};
+        tiles.template loadRs<0>(
+            a, yr, xr, q0c, static_cast<bool>(live & (oh < a.ho)), yRow, xOk, xRows);
+    };
+    auto next = [&]() {
+        advance();
+        leftI = leftI != 0ull ? leftI - 1ull : 0ull;
+        replayI = replayI > 0 ? replayI - 1 : 0;
+    };
+    // The metas of the computed step and of the one issued after it.
+    unsigned mq0 = 0, mq1 = 0;
+
+    const int kb = Atom::template kBase<KPL>(lane);
+    const int aOff = (wk * WTK + lane % DIM) * LDA + kb;
+    const int bOff = Tiles::A_ELEMS + (wc * WTC + lane % DIM) * LDB + kb;
+
+    // Prologue: step 0 into stage 0, step 1 issued; the second group starts a phase behind.
+    if(begin < end)
+    {
+        startTrack();
+        mq0 = metaOf();
+        issue();
+        tiles.template wait<0, 0>();
+        tiles.template store<0>(a, lds, lds + Tiles::A_ELEMS, tid);
+        next();
+        mq1 = metaOf();
+        issue();
+    }
+    k3WaitLds();
+    k3PhaseBarrier();
+    if(grp == 1)
+        k3PhaseBarrier();
+
+    constexpr int KB2 = HALF ? KK / 2 : KK; // window fragments held at once
+    typename Atom::frag af[HALF ? 1 : KK][FK];
+    typename Atom::frag bf[KB2][S][FC];
+    auto readB = [&](auto kbc, auto kec, const T* bb) {
+        constexpr int KB = decltype(kbc)::value, KE = decltype(kec)::value;
+#pragma unroll
+        for(int kk = KB; kk < KE; ++kk)
+            k3ForEach<S>([&](auto scc) {
+                constexpr int s = decltype(scc)::value;
+                constexpr int ph = (s * DW) % SW, off = (s * DW) / SW;
+#pragma unroll
+                for(int y = 0; y < FC; ++y)
+                    bf[kk % KB2][s][y]
+                        = k3FragAt<Atom, T, off>(bb + (ph * BC + y * DIM) * LDB + kk * KA);
+            });
+    };
+    // Tap row r's multiplies of k-atoms KB .. KE - 1.
+    auto mmaRow = [&](auto rc, auto kbc, auto kec) {
+        constexpr int r = decltype(rc)::value, KB = decltype(kbc)::value, KE = decltype(kec)::value;
+#pragma unroll
+        for(int kk = KB; kk < KE; ++kk)
+#pragma unroll
+            for(int s = 0; s < S; ++s)
+#pragma unroll
+                for(int y = 0; y < FC; ++y)
+#pragma unroll
+                    for(int x = 0; x < FK; ++x)
+                        acc[r * S + s][x][y]
+                            = Atom::mma(ring[r][kk][x], bf[kk % KB2][s][y], acc[r * S + s][x][y]);
+    };
+    // The ring moves down one row (a new track starts with an empty ring) for k-atoms KB .. KE - 1
+    // and takes the new row from `fresh`.
+    auto moveRing = [&](bool trackStart, auto kbc, auto kec, auto&& fresh) {
+        constexpr int KB = decltype(kbc)::value, KE = decltype(kec)::value;
+#pragma unroll
+        for(int r = R - 1; r > 0; --r)
+#pragma unroll
+            for(int kk = KB; kk < KE; ++kk)
+#pragma unroll
+                for(int x = 0; x < FK; ++x)
+                    ring[r][kk][x] = trackStart ? typename Atom::frag{} : ring[r - 1][kk][x];
+#pragma unroll
+        for(int kk = KB; kk < KE; ++kk)
+#pragma unroll
+            for(int x = 0; x < FK; ++x)
+                ring[0][kk][x] = fresh(kk, x);
+    };
+    auto multiply = [&](unsigned mt, auto kbc, auto kec) {
+        if((mt >> 9) & 1u)
+        {
+            const unsigned rows = mt & ((1u << R) - 1u);
+            __builtin_amdgcn_s_setprio(1);
+            if(rows == (1u << R) - 1u)
+            {
+                k3ForEach<R>([&](auto rc) { mmaRow(rc, kbc, kec); });
+            }
+            else
+            {
+                k3ForEach<R>([&](auto rc) {
+                    if((rows >> decltype(rc)::value) & 1u)
+                        mmaRow(rc, kbc, kec);
+                });
+            }
+            __builtin_amdgcn_s_setprio(0);
+        }
+    };
+    auto step = [&](auto pc) {
+        constexpr int PAR = decltype(pc)::value; // the step's parity: its stage
+        const T* const rd = lds + PAR * STAGE;
+        T* const wr = lds + (PAR ^ 1) * STAGE;
+        const unsigned mt = mq0;
+        const bool trackStart = (mt >> 8) & 1u;
+        // [mem A]
+        if constexpr(HALF)
+        {
+            moveRing(trackStart, K3Int<0>{}, K3Int<KK>{}, [&](int kk, int x) {
+                return k3FragAt<Atom, T, 0>(rd + aOff + x * DIM * LDA + kk * KA);
+            });
+            readB(K3Int<0>{}, K3Int<KK / 2>{}, rd + bOff);
+        }
+        else
+        {
+#pragma unroll
+            for(int kk = 0; kk < KK; ++kk)
+#pragma unroll
+                for(int x = 0; x < FK; ++x)
+                    af[kk][x] = k3FragAt<Atom, T, 0>(rd + aOff + x * DIM * LDA + kk * KA);
+            readB(K3Int<0>{}, K3Int<KK>{}, rd + bOff);
+        }
+        k3WaitLds();
+        k3PhaseBarrier();
+        // [compute A]
+        if constexpr(!HALF)
+            moveRing(
+                trackStart, K3Int<0>{}, K3Int<KK / 2>{}, [&](int kk, int x) { return af[kk][x]; });
+        multiply(mt, K3Int<0>{}, K3Int<KK / 2>{});
+        if constexpr(HALF)
+        {
+            readB(K3Int<KK / 2>{}, K3Int<KK>{}, rd + bOff);
+            k3WaitLds();
+        }
+        k3PhaseBarrier();
+        // [mem B]
+        tiles.template wait<0, 0>();
+        tiles.template store<0>(a, wr, wr + Tiles::A_ELEMS, tid);
+        mq0 = mq1;
+        next();
+        mq1 = metaOf();
+        issue();
+        k3WaitLds();
+        k3PhaseBarrier();
+        // [compute B]
+        if constexpr(!HALF)
+            moveRing(
+                trackStart, K3Int<KK / 2>{}, K3Int<KK>{}, [&](int kk, int x) { return af[kk][x]; });
+        multiply(mt, K3Int<KK / 2>{}, K3Int<KK>{});
+        k3PhaseBarrier();
+        left = left > 1ull ? left - 1ull : 0ull;
+    };
+    while(left != 0ull)
+    {
+        step(K3Int<0>{});
+        if(left == 0ull)
+            break;
+        step(K3Int<1>{});
+    }
+    if(grp == 0)
+        k3PhaseBarrier();
+    k3WaitLoads<0>();
+    k3StorePartials<T, Atom, R, S, FK, FC, WTK, WTC, K3_INTERIOR_STORE<Atom, BQ>>(
+        a, acc, g, t * a.fr + r0, a.ft * a.fr, k0, c0, wk, wc, lane, bz, phases, (t + 1) * a.fr);
+}
+
+/// The generic loop's flattened positions as an 8-wave ping-pong (flat 2): one tap a block, BK
+/// output by BC input channels (channels-last x and dy, 16-bit) over BQ consecutive positions of
+/// the flattened (image, depth, row, column) order a step. Two groups of four waves (the BC / 2
+/// input-channel halves) share one LDS stage; a step is four phases, the second group a phase
+/// behind:
+///   [mem A]     the step's fragment reads;
+///   [compute A] the first half of the k-atoms; step j + 1's loaded units (two steps of loads in
+///               flight) packed into LDS words;
+///   [mem B]     the packed words written into the stage;
+///   [compute B] the second half; the positions of step j + 3 and their loads.
+/// A thread keeps the same KV positions of every step: they advance by the step's fixed digits
+/// in the (image, depth, row, column) radix with carries, so the loop divides nothing.
+template <class T, class Atom, int BK, int BC, int BQ, int WK, int WC, int VEC, int XCD>
+__device__ K3_LOOP_INLINE void k3WrwFlatPP(const K3Args& a)
+{
+    constexpr int WAVE = Atom::WAVE;
+    constexpr int THREADS = WK * WC * WAVE;
+    constexpr int DIM = Atom::DIM, KA = Atom::KA, KPL = Atom::KPL;
+    constexpr int WTK = BK / WK, WTC = BC / WC;
+    constexpr int FK = WTK / DIM, FC = WTC / DIM;
+    constexpr int KK = BQ / KA;
+    static_assert(FK * DIM * WK == BK && FC * DIM * WC == BC && BQ % KA == 0, "K3 tile");
+    static_assert(WK * WC == 8 && WC % 2 == 0 && KK % 2 == 0,
+                  "K3 flat ping-pong: two groups of four waves, two halves of the k-atoms");
+    static_assert(sizeof(T) == 2 && VEC * sizeof(T) == 16, "K3 flat ping-pong: 16-bit vectors");
+    typedef typename K1Raw<16>::type Raw;
+    constexpr int KV = 2; // positions a 32-bit LDS word
+    constexpr int QP = BQ / KV; // position words a step
+    static_assert(THREADS % QP == 0, "K3 flat ping-pong: a thread keeps its positions");
+    constexpr int A_UNITS = QP * (BK / VEC), B_UNITS = QP * (BC / VEC);
+    constexpr int AP = (A_UNITS + THREADS - 1) / THREADS, BP = (B_UNITS + THREADS - 1) / THREADS;
+    constexpr int LOADS = (AP + BP) * KV;
+    constexpr int FB = KPL * static_cast<int>(sizeof(T));
+    constexpr int LD = k3ClPitch(BQ, static_cast<int>(sizeof(T)), FB);
+
+    __shared__ __attribute__((aligned(16))) T lds[(BK + BC) * LD];
+    T* const As = lds;
+    T* const Bs = lds + BK * LD;
+
+    const int tid = threadIdx.x;
+    const int lane = tid % WAVE, wave = tid / WAVE;
+    const int wk = wave % WK, wc = wave / WK;
+    const int grp = wc / (WC / 2);
+    const int kg = a.k / a.groups, cg = a.c / a.groups;
+    unsigned bx, by, bz;
+    k3BlockIds<XCD>(bx, by, bz, a.xcds);
+    const int kTiles = (kg + BK - 1) / BK;
+    const int k0 = (bx % kTiles) * BK;
+    const int c0 = (bx / kTiles) * BC;
+    const int taps = a.ft * a.fr * a.fs;
+    const int g = static_cast<int>(by) / taps;
+    const int tap = static_cast<int>(by) % taps;
+    const int ts = tap % a.fs, tr = (tap / a.fs) % a.fr, tt = tap / (a.fs * a.fr);
+    const int tD = tt * a.dd - a.pd, tH = tr * a.dh - a.ph, tW = ts * a.dw - a.pw;
+    const long long begin = bz * a.stepsPerSplit;
+    const long long end = begin + a.stepsPerSplit < a.steps ? begin + a.stepsPerSplit : a.steps;
+
+    typename Atom::acc acc[1][FK][FC];
+#pragma unroll
+    for(int x = 0; x < FK; ++x)
+#pragma unroll
+        for(int y = 0; y < FC; ++y)
+            acc[0][x][y] = typename Atom::acc{};
+
+    // The thread's units: position word qp of every step, channel vectors kv (dy) and cv (x).
+    const int qp = tid % QP;
+    const int ys0 = static_cast<int>(a.ys[0]), ys2 = static_cast<int>(a.ys[2]),
+              ys3 = static_cast<int>(a.ys[3]), ys4 = static_cast<int>(a.ys[4]);
+    const int xs0 = static_cast<int>(a.xs[0]), xs2 = static_cast<int>(a.xs[2]),
+              xs3 = static_cast<int>(a.xs[3]), xs4 = static_cast<int>(a.xs[4]);
+    int aCh[AP], bCh[BP], aLds[AP], bLds[BP];
+    unsigned aOk = 0, bOk = 0;
+#pragma unroll
+    for(int p = 0; p < AP; ++p)
+    {
+        const int u = tid + p * THREADS, kv = u / QP;
+        const int k = k0 + kv * VEC;
+        aCh[p] = g * kg + k;
+        aLds[p] = kv * VEC * LD + qp * KV;
+        aOk |= (u < A_UNITS && k < kg) ? 1u << p : 0u;
+    }
+#pragma unroll
+    for(int p = 0; p < BP; ++p)
+    {
+        const int u = tid + p * THREADS, cv = u / QP;
+        const int c = c0 + cv * VEC;
+        bCh[p] = g * cg + c;
+        bLds[p] = cv * VEC * LD + qp * KV;
+        bOk |= (u < B_UNITS && c < cg) ? 1u << p : 0u;
+    }
+    // Flattened positions: the whole tensors are the buffers (xImage, yImage their elements).
+    const k3i4 yr = k3Rsrc4(a.dy, a.yImage * static_cast<long long>(sizeof(T)));
+    const k3i4 xr = k3Rsrc4(a.x, a.xImage * static_cast<long long>(sizeof(T)));
+
+    // The thread's positions in the newest issued step: their flattened index, output depth, row
+    // and column, and their dy and x element offsets (x at the block's tap before its offset).
+    // A step adds the fixed digits of BQ in the (image, depth, row, column) radix with carries,
+    // and the offsets add those digits' strides plus each carry's correction: no multiply or
+    // division in the loop.
+    int pq[KV], pd[KV], ph[KV], pw[KV], yb[KV], xb[KV];
+    const int positions = a.n * a.dout * a.ho * a.wo;
+    const int dW = BQ % a.wo, dH = (BQ / a.wo) % a.ho, dD = (BQ / (a.wo * a.ho)) % a.dout;
+    const int dN = BQ / (a.wo * a.ho * a.dout);
+    const int xsD = a.sd * xs2, xsH = a.sh * xs3, xsW = a.sw * xs4;
+    const int yStep = dN * ys0 + dD * ys2 + dH * ys3 + dW * ys4;
+    const int yCW = ys3 - a.wo * ys4, yCH = ys2 - a.ho * ys3, yCD = ys0 - a.dout * ys2;
+    const int xStep = dN * xs0 + dD * xsD + dH * xsH + dW * xsW;
+    const int xCW = xsH - a.wo * xsW, xCH = xsD - a.ho * xsH, xCD = xs0 - a.dout * xsD;
+    const int xTap = tD * xs2 + tH * xs3 + tW * xs4;
+    // Output positions whose input at this tap lies inside x: d in [dLo, dHi), and so on.
+    auto rangeOf = [](int t, int stride, int extent, int out, int& lo, int& hi) {
+        lo = t >= 0 ? 0 : (-t + stride - 1) / stride;
+        hi = extent - 1 - t < 0 ? 0 : (extent - 1 - t) / stride + 1;
+        hi = hi < out ? hi : out;
+        lo = lo < hi ? lo : hi;
+    };
+    int dLo, dHi, hLo, hHi, wLo, wHi;
+    rangeOf(tD, a.sd, a.di, a.dout, dLo, dHi);
+    rangeOf(tH, a.sh, a.hi, a.ho, hLo, hHi);
+    rangeOf(tW, a.sw, a.wi, a.wo, wLo, wHi);
+    long long sI = begin; // the newest issued step
+    if(begin < end)
+    {
+        const K3Magic mWo = k3MagicOf(a.wo), mHo = k3MagicOf(a.ho), mDo = k3MagicOf(a.dout);
+#pragma unroll
+        for(int j = 0; j < KV; ++j)
+        {
+            const int q = static_cast<int>(begin * BQ) + qp * KV + j;
+            const int r = k3MagicDiv(q, mWo);
+            const int w = q - r * a.wo;
+            const int r2 = k3MagicDiv(r, mHo);
+            const int h = r - r2 * a.ho;
+            const int n = k3MagicDiv(r2, mDo);
+            const int d = r2 - n * a.dout;
+            pq[j] = q;
+            pd[j] = d;
+            ph[j] = h;
+            pw[j] = w;
+            yb[j] = n * ys0 + d * ys2 + h * ys3 + w * ys4;
+            xb[j] = n * xs0 + d * xsD + h * xsH + w * xsW + xTap;
+        }
+    }
+    auto advance = [&]() {
+#pragma unroll
+        for(int j = 0; j < KV; ++j)
+        {
+            int w = pw[j] + dW;
+            const bool cW = w >= a.wo;
+            pw[j] = cW ? w - a.wo : w;
+            int h = ph[j] + dH + (cW ? 1 : 0);
+            const bool cH = h >= a.ho;
+            ph[j] = cH ? h - a.ho : h;
+            int d = pd[j] + dD + (cH ? 1 : 0);
+            const bool cD = d >= a.dout;
+            pd[j] = cD ? d - a.dout : d;
+            yb[j] += yStep + (cW ? yCW : 0) + (cH ? yCH : 0) + (cD ? yCD : 0);
+            xb[j] += xStep + (cW ? xCW : 0) + (cH ? xCH : 0) + (cD ? xCD : 0);
+            pq[j] += BQ;
+        }
+        ++sI;
+    };
+
+    Raw ra[2][AP * KV], rb[2][BP * KV];
+    // Loads the newest issued step's units into register set RS.
+    auto issue = [&](auto rc) {
+        constexpr int RS = decltype(rc)::value;
+        const bool live = sI < end;
+#pragma unroll
+        for(int j = 0; j < KV; ++j)
+        {
+            const bool in = live & (pq[j] < positions);
+            const bool xin
+                = in & (static_cast<unsigned>(pd[j] - dLo) < static_cast<unsigned>(dHi - dLo))
+                  & (static_cast<unsigned>(ph[j] - hLo) < static_cast<unsigned>(hHi - hLo))
+                  & (static_cast<unsigned>(pw[j] - wLo) < static_cast<unsigned>(wHi - wLo));
+#pragma unroll
+            for(int p = 0; p < AP; ++p)
+            {
+                const bool ok = in & (((aOk >> p) & 1u) != 0u);
+                k3Load(ra[RS][p * KV + j],
+                       yr,
+                       ok ? static_cast<unsigned>(yb[j] + aCh[p]) * sizeof(T) : K1_OUT_OF_RANGE);
+            }
+#pragma unroll
+            for(int p = 0; p < BP; ++p)
+            {
+                const bool ok = xin & (((bOk >> p) & 1u) != 0u);
+                k3Load(rb[RS][p * KV + j],
+                       xr,
+                       ok ? static_cast<unsigned>(xb[j] + bCh[p]) * sizeof(T) : K1_OUT_OF_RANGE);
+            }
+        }
+    };
+    // Register set RS's units as LDS words in place, then written.
+    auto pack = [&](auto rc) {
+        constexpr int RS = decltype(rc)::value;
+        auto one = [](Raw* v) {
+            unsigned w[VEC];
+            // Word e: channel e's half of position 0 (low) and of position 1 (high).
+#pragma unroll
+            for(int e = 0; e < VEC; ++e)
+                w[e] = __builtin_amdgcn_perm(static_cast<unsigned>(v[1][e / 2]),
+                                             static_cast<unsigned>(v[0][e / 2]),
+                                             e % 2 == 0 ? 0x05040100u : 0x07060302u);
+#pragma unroll
+            for(int e = 0; e < VEC; ++e)
+                v[e / 4][e % 4] = static_cast<int>(w[e]);
+        };
+#pragma unroll
+        for(int p = 0; p < AP; ++p)
+            one(&ra[RS][p * KV]);
+#pragma unroll
+        for(int p = 0; p < BP; ++p)
+            one(&rb[RS][p * KV]);
+    };
+    auto write = [&](auto rc) {
+        constexpr int RS = decltype(rc)::value;
+#pragma unroll
+        for(int p = 0; p < AP; ++p)
+        {
+            if(A_UNITS % THREADS != 0 && tid + p * THREADS >= A_UNITS)
+                continue;
+#pragma unroll
+            for(int e = 0; e < VEC; ++e)
+                *reinterpret_cast<unsigned*>(As + aLds[p] + e * LD)
+                    = static_cast<unsigned>(ra[RS][p * KV + e / 4][e % 4]);
+        }
+#pragma unroll
+        for(int p = 0; p < BP; ++p)
+        {
+            if(B_UNITS % THREADS != 0 && tid + p * THREADS >= B_UNITS)
+                continue;
+#pragma unroll
+            for(int e = 0; e < VEC; ++e)
+                *reinterpret_cast<unsigned*>(Bs + bLds[p] + e * LD)
+                    = static_cast<unsigned>(rb[RS][p * KV + e / 4][e % 4]);
+        }
+    };
+
+    // Prologue: steps 0 and 1 in flight, step 0 written, step 2 issued; group 1 a phase behind.
+    unsigned long long left = begin < end ? static_cast<unsigned long long>(end - begin) : 0ull;
+    if(begin < end)
+    {
+        issue(K3Int<0>{});
+        advance();
+        issue(K3Int<1>{});
+        k3WaitLoads<LOADS>();
+        pack(K3Int<0>{});
+        write(K3Int<0>{});
+        advance();
+        issue(K3Int<0>{});
+    }
+    k3WaitLds();
+    k3PhaseBarrier();
+    if(grp == 1)
+        k3PhaseBarrier();
+
+    const int kb = Atom::template kBase<KPL>(lane);
+    const T* const aBase = As + (wk * WTK + lane % DIM) * LD + kb;
+    const T* const bBase = Bs + (wc * WTC + lane % DIM) * LD + kb;
+    // Every fragment of a step is read in [mem A]: the other group writes the one stage in the
+    // phases next to each compute phase.
+    static_assert(FK * FC * KK <= 16, "K3 flat ping-pong: a step's fragments in registers");
+    typename Atom::frag af[KK][FK], bf[KK][FC];
+    auto read = [&](auto kbc, auto kec) {
+        constexpr int KB = decltype(kbc)::value, KE = decltype(kec)::value;
+#pragma unroll
+        for(int kk = KB; kk < KE; ++kk)
+        {
+#pragma unroll
+            for(int x = 0; x < FK; ++x)
+                af[kk][x] = k3FragAt<Atom, T, 0>(aBase + x * DIM * LD + kk * KA);
+#pragma unroll
+            for(int y = 0; y < FC; ++y)
+                bf[kk][y] = k3FragAt<Atom, T, 0>(bBase + y * DIM * LD + kk * KA);
+        }
+    };
+    auto mma = [&](auto kbc, auto kec) {
+        constexpr int KB = decltype(kbc)::value, KE = decltype(kec)::value;
+        __builtin_amdgcn_s_setprio(1);
+#pragma unroll
+        for(int kk = KB; kk < KE; ++kk)
+#pragma unroll
+            for(int y = 0; y < FC; ++y)
+#pragma unroll
+                for(int x = 0; x < FK; ++x)
+                    acc[0][x][y] = Atom::mma(af[kk][x], bf[kk][y], acc[0][x][y]);
+        __builtin_amdgcn_s_setprio(0);
+    };
+    // Step j: J = (j + 1) % 2 is the register set of step j + 1 (packed and written here) and of
+    // step j + 3 (issued here).
+    auto step = [&](auto jc) {
+        constexpr int J = decltype(jc)::value;
+        // [mem A]
+        read(K3Int<0>{}, K3Int<KK>{});
+        k3WaitLds();
+        k3PhaseBarrier();
+        // [compute A]
+        mma(K3Int<0>{}, K3Int<KK / 2>{});
+        k3WaitLoads<LOADS>();
+        pack(K3Int<J>{});
+        k3WaitLds();
+        k3PhaseBarrier();
+        // [mem B]
+        write(K3Int<J>{});
+        k3WaitLds();
+        k3PhaseBarrier();
+        // [compute B]
+        mma(K3Int<KK / 2>{}, K3Int<KK>{});
+        advance();
+        issue(K3Int<J>{});
+        k3PhaseBarrier();
+        left = left > 1ull ? left - 1ull : 0ull;
+    };
+    while(left != 0ull)
+    {
+        step(K3Int<1>{});
+        if(left == 0ull)
+            break;
+        step(K3Int<0>{});
+    }
+    if(grp == 0)
+        k3PhaseBarrier();
+    k3WaitLoads<0>();
+    k3StorePartials<T, Atom, 1, 1, FK, FC, WTK, WTC>(
+        a, acc, g, tap, taps, k0, c0, wk, wc, lane, bz, 1, taps);
 }
 
 /// An FMA thread's run of TC (a multiple of 4) input channels' partials from channel c of the

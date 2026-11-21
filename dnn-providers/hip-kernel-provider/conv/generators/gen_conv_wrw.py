@@ -216,6 +216,9 @@ def lds_bytes(c, e):  # ConvWrwGeom.h k3LdsBytes
     if loop == 11:
         return (bk + bc) * (bq + 16 // e) * e
     if loop == 8:  # generic taps: a bk-row dy chunk and fr bc-row x tiles, two buffers
+        # flat 2, the flattened ping-pong: one stage at the channels-last pitch
+        if c["flat"] == 2:
+            return (bk + bc) * cl_pitch(bq, e, SHAPE[c["atom"]][2] * e) * e
         if c["tk"]:  # the FMA form: [position][channel] rows of bk / bc + 16 bytes
             u = 16 // e
             return 2 * (bq * (bk + u) + (bq + dw if dw > 0 else fr * bq) * (bc + u)) * e
@@ -1065,7 +1068,7 @@ def with_bpu(c):
     if c["loop"] == 5:
         return [c]
     if c["loop"] == 8:
-        return [dict(c, bpu=2)]
+        return [dict(c, bpu=b) for b in ((1, 2) if c["flat"] == 2 else (2,))]
     if c["loop"] in (3, 4):
         threads = (c["bk"] // c["tk"]) * (c["bc"] // c["tc"])
     else:
@@ -1217,6 +1220,20 @@ STAGE_RING_LATE = {
         ((128, 64, 4, 2, 8), 4),
     ]
 }
+# gfx942's ping-pong ring tiles (eight waves, 32-position steps, XCD order, which the host admits
+# on gfx942 only): 3x3 and 3x3x3 rows, channels-last, on the 16-bit 32 x 32 atoms.
+PP_RING_LATE = {
+    ("mfma32_f16", "mfma32_bf16"): [(128, 64, 4, 2, 32), (64, 128, 2, 4, 32)],
+}
+# The flattened positions as an 8-wave ping-pong (generic loop, flat 2): one tap a block, wide
+# channel tiles, for small-spatial wide-channel layers (the host admits it on gfx942 only).
+FLAT_PP_LATE = {
+    ("mfma32_f16", "mfma32_bf16"): [
+        (256, 128, 4, 2, 32),
+        (128, 256, 2, 4, 32),
+        (128, 128, 2, 4, 32),
+    ],
+}
 
 
 def build_late():
@@ -1254,6 +1271,24 @@ def build_late():
             dtype = "BFLOAT16" if atom.endswith("bf16") else "HALF"
             for t, wq in extra:
                 c = dict(C(atom, 1, CL, t, 3, 1, 1, 3, 8, 0, 0, 0), wq=wq)
+                if valid(c, dtype):
+                    LATE[dtype].extend(with_bpu(c))
+                else:
+                    dropped += 1
+    for atoms, tiles in PP_RING_LATE.items():
+        for atom in atoms:
+            dtype = "BFLOAT16" if atom.endswith("bf16") else "HALF"
+            for t in tiles:
+                c = C(atom, 1, CL, t, 3, 1, 1, 3, 8, 1, 0, 0)
+                if valid(c, dtype):
+                    LATE[dtype].extend(with_bpu(c))
+                else:
+                    dropped += 1
+    for atoms, tiles in FLAT_PP_LATE.items():
+        for atom in atoms:
+            dtype = "BFLOAT16" if atom.endswith("bf16") else "HALF"
+            for t in tiles:
+                c = dict(C(atom, 8, CL, t, 0, 0, 0, 1, 8, 1, 0, 0), flat=2)
                 if valid(c, dtype):
                     LATE[dtype].extend(with_bpu(c))
                 else:
@@ -2207,7 +2242,7 @@ def emit():
                 f".{thr}.fr{c['fr']}s{c['s']}sw{c['sw']}dw{c['dw']}"
                 f".v{c['vec']}.x{c['xcd']}a{c['align']}n{c['ns']}b{c['bpu']}"
                 + (".pb" if c["pb"] else "")
-                + (".flat" if c["flat"] else "")
+                + {0: "", 1: ".flat", 2: ".flatpp"}[c["flat"]]
             )
             if native:
                 name += f".dws{c['dws']}"

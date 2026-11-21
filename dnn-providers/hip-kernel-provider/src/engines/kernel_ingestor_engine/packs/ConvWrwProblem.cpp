@@ -340,6 +340,17 @@ int64_t ldsBytesOf(const WrwConfig& config, int elementBytes)
     const bool cdna = config.atom.rfind("mfma", 0) == 0;
     const int fragmentBytes
         = cdna ? static_cast<int>(atomShapeOf(config.atom).kpl) * elementBytes : 0;
+    // The flattened-position ping-pong (loop 8, flat 2): one stage of bk dy and bc x rows of bq
+    // positions at the channels-last pitch (k3WrwFlatPP).
+    if(config.loop == LOOP_GENERIC && config.flat == 2)
+    {
+        if(!cdna || config.bq < 1)
+        {
+            return std::numeric_limits<int64_t>::max();
+        }
+        return (config.bk + config.bc) * k3ClPitch(i(config.bq), elementBytes, fragmentBytes)
+               * static_cast<int64_t>(elementBytes);
+    }
     return k3LdsBytes(i(config.loop),
                       i(config.layout),
                       elementBytes,
@@ -1486,9 +1497,34 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
     // buffers, where an output row is shorter than a step (row chunks would run part empty);
     // x and dy each one buffer, and the positions within 32 bits.
     if(config.flat != 0
-       && (config.flat != 1 || !generic || config.dw != 0 || config.pb != 0
+       && ((config.flat != 1 && config.flat != 2) || !generic || config.dw != 0 || config.pb != 0
            || a.outSpatial[2] >= config.bq || flatPositions > INT_LIMIT - config.bq
            || xTensor > INT_LIMIT / eb || yTensor > INT_LIMIT / eb))
+    {
+        return std::nullopt;
+    }
+    // flat 2 (k3WrwFlatPP): an 8-wave ping-pong of two four-wave halves of the input channels,
+    // one tap a block, 16-bit channel vectors (channels-last) on gfx942's 32 x 32 x 8 atoms,
+    // steps of two halves of k-atoms whose position words a thread keeps, and a step's fragments
+    // within 16 per wave (all read in its first phase).
+    const bool gfx942 = hipdnn_plugin_sdk::stripArchFeatures(arch) == "gfx942";
+    if(config.flat == 2
+       && (!gfx942 || !cl || tr || eb != 2 || config.vec * eb != 16 || config.fr != 1
+           || config.wk * config.wc != 8 || config.wc % 2 != 0 || shape.dim != 32 || shape.ka != 8
+           || config.bq % (2 * shape.ka) != 0 || (config.wk * config.wc * 64) % (config.bq / 2) != 0
+           || config.bk % (config.wk * 32) != 0 || config.bc % (config.wc * 32) != 0
+           || (config.bk / (config.wk * 32)) * (config.bc / (config.wc * 32))
+                      * (config.bq / shape.ka)
+                  > 16
+           || config.tk != 0 || config.tc != 0))
+    {
+        return std::nullopt;
+    }
+    // The ring's 8-wave tiles of 32-position steps in XCD order on the 32 x 32 x 8 atoms run its
+    // ping-pong form (k3WrwRingPP) on undilated 3x3 rows, which only gfx942 compiles: admitted
+    // there only.
+    if(config.loop == LOOP_RING && config.xcd != 0 && config.wk * config.wc == 8 && shape.dim == 32
+       && shape.ka == 8 && config.bq == 4 * shape.ka && !gfx942)
     {
         return std::nullopt;
     }

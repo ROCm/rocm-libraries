@@ -32,7 +32,8 @@
 //   CONV_K3_NS       LDS stages (loop 2); ring slots (loop 5)
 //   CONV_K3_WQ       loop 5: items side by side (waves_q; wk x wc x wq = 8 waves); loop 1:
 //                    steps a stage (0 one)
-//   CONV_K3_FLAT     loop 8: 1 steps over BQ consecutive flattened output positions (default 0)
+//   CONV_K3_FLAT     loop 8: 1 steps over BQ consecutive flattened output positions; 2 the same
+//                    as an 8-wave ping-pong of one tap a block (k3WrwFlatPP) (default 0)
 //   CONV_K3_DWS      1: the epilogue can write dw itself at one split (K3Args::dwStore); 0:
 //                    fp32 partials only (default)
 // Loop 5 (gfx950, 16-bit, channels-last kept, ConvWrwDirect.h) also takes CONV_K3_PP and
@@ -120,6 +121,22 @@ extern "C" __global__ void __launch_bounds__(256) ConvWrwSplit(K3SplitArgs a)
 #endif
 #ifndef CONV_K3_SWZ
 #define CONV_K3_SWZ 1
+#endif
+
+// The matrix-core ring as the 8-wave ping-pong (k3WrwRingPP): gfx942's 16-bit (16-byte vectors of
+// 8 elements, the 32 x 32 x 8 atoms) tiles of two groups of four one-fragment waves at one step a
+// stage of 32 positions, or of 64 where the window is no wider in channels than dy (the window's
+// loads beside a step's fragments spilled registers otherwise), over undilated unit-stride 3 x 3
+// rows (where it measured faster; 1 x N, pointwise and dilated rows ran 5-15% slower on MI325X);
+// not the three-bf16 form.
+#if CONV_K3_LOOP == 1 && defined(__gfx942__) && !defined(CONV_K3_MATH) && CONV_K3_LAYOUT != 2     \
+    && CONV_K3_WQ == 0 && CONV_K3_VEC == 8 && CONV_K3_WK * CONV_K3_WC == 8 && CONV_K3_WC % 2 == 0 \
+    && CONV_K3_BK == 32 * CONV_K3_WK && CONV_K3_BC == 32 * CONV_K3_WC                             \
+    && (CONV_K3_BQ == 32 || (CONV_K3_BQ == 64 && CONV_K3_BC <= CONV_K3_BK)) && CONV_K3_S == 3     \
+    && CONV_K3_FR == 3 && CONV_K3_SW == 1 && CONV_K3_DW == 1
+#define K3_RING_PINGPONG 1
+#else
+#define K3_RING_PINGPONG 0
 #endif
 
 #if CONV_K3_LOOP == 5
@@ -235,6 +252,22 @@ extern "C" __global__ void __launch_bounds__(CONV_K3_THREADS) ConvWrw(K3Args a)
                  CONV_K3_WC,
                  CONV_K3_NS,
                  CONV_K3_XCD>(a);
+#elif CONV_K3_LOOP == 1 && K3_RING_PINGPONG
+    // gfx942's 16-bit 8-wave ring tiles: the ping-pong form (k3WrwRingPP).
+    k3WrwRingPP<CONV_K3_T,
+                CONV_K3_ATOM,
+                CONV_K3_LAYOUT,
+                CONV_K3_BK,
+                CONV_K3_BC,
+                CONV_K3_BQ,
+                CONV_K3_FR,
+                CONV_K3_S,
+                CONV_K3_SW,
+                CONV_K3_DW,
+                CONV_K3_WK,
+                CONV_K3_WC,
+                CONV_K3_VEC,
+                CONV_K3_ALIGN>(a);
 #elif CONV_K3_LOOP == 1
     k3WrwRing<CONV_K3_T,
               CONV_K3_ATOM,
@@ -267,6 +300,17 @@ extern "C" __global__ void __launch_bounds__(CONV_K3_THREADS) ConvWrw(K3Args a)
               CONV_K3_VEC,
               CONV_K3_XCD,
               1>(a);
+#elif CONV_K3_LOOP == 8 && CONV_K3_FLAT == 2
+    // Flattened positions as an 8-wave ping-pong: one tap a block, channels-last 16-bit.
+    k3WrwFlatPP<CONV_K3_T,
+                CONV_K3_ATOM,
+                CONV_K3_BK,
+                CONV_K3_BC,
+                CONV_K3_BQ,
+                CONV_K3_WK,
+                CONV_K3_WC,
+                CONV_K3_VEC,
+                CONV_K3_XCD>(a);
 #elif CONV_K3_LOOP == 8 && CONV_K3_TK > 0
     // The generic loop's FMA form: TK x TC channels a thread, no matrix atom.
     k3WrwGeneric<CONV_K3_T,
