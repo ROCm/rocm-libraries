@@ -474,6 +474,14 @@ std::vector<DeviceCase> deviceCases()
         {"PointOutput1x7", conv(24, 40, {7}, {7}, {0}, {0}, {1}, {1}, false, 1, 8)},
         {"PaddingPastTheFilter", conv(8, 16, {6, 9}, {3, 3}, {3, 4}, {3, 4}, {1, 1}, {1, 1})},
         {"ManySteps", conv(64, 96, {20, 70}, {3, 3}, {1, 1}, {1, 1}, {1, 1}, {1, 1}, false, 1, 4)},
+        // The ping-pong forms (gfx942, 16-bit): several steps a split with both four-wave groups
+        // multiplying, so a stage written while the other group still reads it shows. The ring's
+        // 8-wave tiles (one stage at 32 positions, two at 64) over 66-wide rows; the flattened
+        // positions' tiles over 8 x 8 rows of both images.
+        {"PingPongRingNhwc3x3",
+         conv(64, 128, {34, 66}, {3, 3}, {1, 1}, {1, 1}, {1, 1}, {1, 1}, true)},
+        {"PingPongFlatNhwc3x3x3",
+         conv(128, 128, {4, 10, 10}, {3, 3, 3}, {0, 0, 0}, {0, 0, 0}, {1, 1, 1}, {1, 1, 1}, true)},
     };
     // Small-C window tiles: a partial BC8 tile, two tiles with a channel tail, and the
     // Cg16 admission boundary, independently of batch and group count. Restrict the loop

@@ -3134,7 +3134,7 @@ TEST(TestConvWrwKernelMatch, FlatPositionsServeRowsShorterThanAStep)
     // Each field one at a time: the knob's range, the generic loop, no window, no block-based
     // buffers.
     const std::vector<std::pair<std::string, std::function<void(ConfigFields&)>>> mutations{
-        {"flat", [](ConfigFields& g) { g.flat = 2; }},
+        {"flat", [](ConfigFields& g) { g.flat = 3; }},
         {"loop",
          [](ConfigFields& g) {
              g = ConfigFields{};
@@ -3161,6 +3161,111 @@ TEST(TestConvWrwKernelMatch, FlatPositionsServeRowsShorterThanAStep)
     EXPECT_EQ(a.steps, (2 * 10 * 12 + 31) / 32);
     EXPECT_EQ(a.xImage, int64_t{2} * 24 * 10 * 12);
     EXPECT_EQ(a.yImage, int64_t{2} * 40 * 10 * 12);
+}
+
+/// A small-spatial wide-channel 3-D layer, channels-last 16-bit: 8 x 8 output rows.
+ConvShape smallMapShape()
+{
+    auto shape = baseShape();
+    shape.c = 128;
+    shape.k = 128;
+    shape.input = {4, 10, 10};
+    shape.filter = {3, 3, 3};
+    shape.prePadding = shape.postPadding = {0, 0, 0};
+    shape.stride = shape.dilation = {1, 1, 1};
+    shape.channelsLast = true;
+    return shape;
+}
+
+/// The flattened positions' 8-wave ping-pong (flat 2): 256 output by 128 input channels, one
+/// tap a block, 32 positions a step.
+ConfigFields flatPingPongFields()
+{
+    auto f = genericClFields();
+    f.bk = 256;
+    f.bc = 128;
+    f.wk = 4;
+    f.wc = 2;
+    f.fr = 1;
+    f.xcd = 1;
+    f.bpu = 1;
+    f.flat = 2;
+    return f;
+}
+
+TEST(TestConvWrwKernelMatch, FlatPingPongServesGfx942SixteenBitChannelsLastOnly)
+{
+    const auto f = flatPingPongFields();
+    const auto shape = smallMapShape();
+    EXPECT_TRUE(admits(f, "gfx942", shape));
+    auto bf16 = shape;
+    bf16.dataType = DataType::BFLOAT16;
+    auto fb = f;
+    fb.atom = "mfma32_bf16";
+    fb.atomId = 5;
+    EXPECT_TRUE(admits(fb, "gfx942", bf16));
+    // gfx942 only (the arches whose catalogs the configs also reach admit none).
+    EXPECT_FALSE(admits(f, "gfx950", shape));
+    EXPECT_FALSE(admits(f, "gfx90a", shape));
+    // Each field one at a time: 16-bit channels-last, one tap a block, two groups of four
+    // waves of 32 x 32 x 8 atoms, whole waves of the channel tile, steps of two halves of
+    // k-atoms, and at most 16 fragment pairs a wave a step.
+    auto floats = shape;
+    floats.dataType = DataType::FLOAT;
+    auto ff = f;
+    ff.atom = "mfma32_f32";
+    ff.atomId = 7;
+    ff.vec = 4;
+    EXPECT_FALSE(admits(ff, "gfx942", floats));
+    auto cf = shape;
+    cf.channelsLast = false;
+    auto fcf = f;
+    fcf.layout = 0;
+    EXPECT_FALSE(admits(fcf, "gfx942", cf));
+    const std::vector<std::pair<std::string, std::function<void(ConfigFields&)>>> mutations{
+        {"fr", [](ConfigFields& g) { g.fr = 2; }},
+        {"wk", [](ConfigFields& g) { g.wk = 2; }},
+        {"wc", [](ConfigFields& g) { g.wk = 8, g.wc = 1, g.bk = 256; }},
+        {"atom",
+         [](ConfigFields& g) {
+             g.atom = "mfma16_f16";
+             g.atomId = 0;
+         }},
+        {"bq", [](ConfigFields& g) { g.bq = 24; }},
+        {"bc", [](ConfigFields& g) { g.bc = 96; }},
+        {"fragments", [](ConfigFields& g) { g.bc = 256; }},
+        {"tk", [](ConfigFields& g) { g.tk = 4; }},
+    };
+    for(const auto& [name, mutate] : mutations)
+    {
+        auto g = f;
+        mutate(g);
+        EXPECT_FALSE(admits(g, "gfx942", shape)) << name;
+    }
+    // One grid row a tap, steps of 32 flattened positions, one stage of 256 + 128 rows of 36
+    // elements (the channels-last pitch of 32 positions: 9 odd 8-byte groups).
+    const auto launch = launchOf(f, shape);
+    ASSERT_TRUE(launch.has_value());
+    EXPECT_EQ(launch->gridY, 27u);
+    EXPECT_EQ(launch->args.steps, (2 * 2 * 8 * 8 + 31) / 32);
+    EXPECT_EQ(conv_wrw::ldsBytesOf(configOf(f), 2), (256 + 128) * 36 * 2);
+}
+
+TEST(TestConvWrwKernelMatch, PingPongRingTilesServeGfx942Only)
+{
+    // The ring's 8-wave tiles of 32-position steps in XCD order (its ping-pong form) on the
+    // 16-bit 32 x 32 atoms: gfx942 only; the same tiles without XCD order keep every arch.
+    auto f = channelsLastFields();
+    f.bk = 128;
+    f.bc = 64;
+    f.wk = 4;
+    f.wc = 2;
+    f.xcd = 1;
+    EXPECT_TRUE(admits(f, "gfx942", channelsLastShape()));
+    EXPECT_FALSE(admits(f, "gfx950", channelsLastShape()));
+    f.xcd = 0;
+    EXPECT_TRUE(admits(f, "gfx950", channelsLastShape()));
+    EXPECT_TRUE(admits(f, "gfx90a", channelsLastShape()));
 }
 
 TEST(TestConvWrwLaunch, TheGenericLoopReadsTheGraphsStridesAndSpans)
