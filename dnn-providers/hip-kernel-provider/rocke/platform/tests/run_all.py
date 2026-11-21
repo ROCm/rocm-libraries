@@ -215,6 +215,20 @@ def _ctest_command_index(
     return commands
 
 
+def _export_native_executable(
+    env: dict[str, str], var: str, executable: str | Path | None, label: str
+) -> None:
+    """Set ``var`` in ``env`` to ``executable``, resolved, or report the skip."""
+    if not executable:
+        print(f"\n== {label}: SKIPPED (no configured build or {var}) ==")
+        return
+    path = Path(executable).resolve()
+    if not path.is_file():
+        raise ValueError(f"{label} test executable does not exist: {path}")
+    env[var] = str(path)
+    print(f"\n== {label}: {path} ==")
+
+
 def _native_executable(
     env: dict[str, str],
     ctest_commands: dict[str, list[str]] | None,
@@ -326,14 +340,20 @@ def native_pytest_env(build_root: Path, config: str) -> dict[str, str]:
     )
     for var, ctest_name, label in NATIVE_PARITY_TESTS:
         executable = _native_executable(env, ctest_commands, var, ctest_name)
-        if executable:
-            path = Path(executable).resolve()
-            if not path.is_file():
-                raise ValueError(f"{label} test executable does not exist: {path}")
-            env[var] = str(path)
-            print(f"\n== {label}: {path} ==")
-        else:
-            print(f"\n== {label}: SKIPPED (no configured build or {var}) ==")
+        _export_native_executable(env, var, executable, label)
+
+    # The C++ HIP lowering program, which is not a CTest: the both-engine HIP
+    # checks run it where the binding is not built, and one test holds it to the
+    # binding where it is. The installed rocke_hip_source_identity and
+    # rocke_hip_lowering_parity CTests supply the same variable.
+    from rocke.tests.engines import IR_LOWER_CLI_ENV
+
+    ir_lower_cli = env.get(IR_LOWER_CLI_ENV) or _built_test_program(
+        build_root, config, "rocke_ir_lower_cli"
+    )
+    _export_native_executable(
+        env, IR_LOWER_CLI_ENV, ir_lower_cli, "native HIP lowering program"
+    )
 
     # Keep every portable-IR binary on this one configured source snapshot.
     # In the ordinary run_all flow check_byte_identity configured the shared
