@@ -12,7 +12,7 @@ minimal authored source root.
 and archive (`arch: [<G>]`) into each selected member's folder; no generic-named folder is
 installed. Disk use grows with the number of members.
 
-Copies depend only on the source tree, the generic's spelling, hipcc and the table, so they are
+Copies depend only on the source tree, the generic's spelling, the HIP compiler and the table, so they are
 identical across member folders and separate per-arch builds, and the loader collapses them to
 one entry. Copies from different compilers differ in `provenance`, and the loader drops both.
 
@@ -415,7 +415,7 @@ still validates a packed `sources`, so a shipped tree can be checked.
 - **Provenance (`hip`, `hsaco`).** `origin_kind` is the shared kind and
   `provenance.sources` is keyed by launch name with each launch's authored identity:
   `{source, entry, build}` for `hip` and `{file, sha256, symbol}` for `hsaco`. The toolchain
-  field is top level as for a single launch (`hipcc_version` for `hip`, none for `hsaco`).
+  field is top level as for a single launch (`hip_version` for `hip`, none for `hsaco`).
   No compiler observed these kernels, so there is **no `effective_spec`** and no consumer
   agreement evidence. A declaration with `metadata_fields` over a `hip` or `hsaco`
   `sources` UKD is refused, exactly as for a single launch; one without them leaves the
@@ -950,10 +950,10 @@ PYTHONPATH=descriptor-packaging/python:/opt/rocm-kpack/python \
 `HIPKERNELPROVIDER_ROCM_KPACK_DIR`) is the kpack archive reader/writer most of the suite
 round-trips through. Its absence is diagnosed once by the `rocm_kpack_dir` fixture in
 `tests/conftest.py`: every test needing it skips with one message naming the dependency.
-Set `HIPKERNELPROVIDER_KPACK_REQUIRE_ROCM_KPACK=1` (mirroring `_REQUIRE_HIPCC` /
+Set `HIPKERNELPROVIDER_KPACK_REQUIRE_ROCM_KPACK=1` (mirroring `_REQUIRE_HIP_COMPILER` /
 `_REQUIRE_COMGR`) to turn that skip into a hard failure, e.g. in CI.
 
-`-m quick` selects the load-time/pure-unit subset needing neither `hipcc` nor
+`-m quick` selects the load-time/pure-unit subset needing neither the HIP compiler nor
 `rocm_kpack`/comgr.
 
 Every rocKE test lives in `tests/rocke/`, whose own `conftest.py` owns the rocKE
