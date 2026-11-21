@@ -237,10 +237,10 @@
         },
         "conv_wgrad/gfx950/n2h16c32k32r1": {
           "arch": "gfx950",
-          "bytes": 17731,
+          "bytes": 17699,
           "family": "conv_wgrad",
           "kernel_name": "irhash_wgrad_950_b_N2H16W16C32_K32Y1X1_t64x32x16_w2x2_a16x16x16_mem_cshuffle",
-          "sha256": "43bc577fe76d8e82599584a123b0a3e7eb4d09d1e911ab454bd0a2d1e2aaf88c",
+          "sha256": "878fc5b0e551b987fc0c46f0c5c0bbc331dcd2337d1408629c3a7d3fd069d205",
           "status": "ok"
         }
       },
@@ -482,10 +482,10 @@
         },
         "conv_wgrad/gfx950/n2h16c32k32r1": {
           "arch": "gfx950",
-          "bytes": 17866,
+          "bytes": 17834,
           "family": "conv_wgrad",
           "kernel_name": "irhash_wgrad_950_b_N2H16W16C32_K32Y1X1_t64x32x16_w2x2_a16x16x16_mem_cshuffle",
-          "sha256": "04498ab117aa88fe7d8b4e6e7e15334266440372f25b845ecec44c615f1f7c22",
+          "sha256": "ecd9d3de1621983d00cf13c95875bd5dbf17a7132feba33fbb21a945e2c43cc7",
           "status": "ok"
         }
       },
@@ -727,10 +727,10 @@
         },
         "conv_wgrad/gfx950/n2h16c32k32r1": {
           "arch": "gfx950",
-          "bytes": 17930,
+          "bytes": 17898,
           "family": "conv_wgrad",
           "kernel_name": "irhash_wgrad_950_b_N2H16W16C32_K32Y1X1_t64x32x16_w2x2_a16x16x16_mem_cshuffle",
-          "sha256": "0016936a10cefd9ae568c5af68d5e3e4b833c4ad04ca35a8bdb392672da623df",
+          "sha256": "d602b1f732564226ad54fa1b371866a3b8dd14f97f8bc2e9c85e61bf7590e41c",
           "status": "ok"
         }
       },
@@ -972,10 +972,10 @@
         },
         "conv_wgrad/gfx950/n2h16c32k32r1": {
           "arch": "gfx950",
-          "bytes": 17930,
+          "bytes": 17898,
           "family": "conv_wgrad",
           "kernel_name": "irhash_wgrad_950_b_N2H16W16C32_K32Y1X1_t64x32x16_w2x2_a16x16x16_mem_cshuffle",
-          "sha256": "0016936a10cefd9ae568c5af68d5e3e4b833c4ad04ca35a8bdb392672da623df",
+          "sha256": "d602b1f732564226ad54fa1b371866a3b8dd14f97f8bc2e9c85e61bf7590e41c",
           "status": "ok"
         }
       },
