@@ -92,6 +92,7 @@ const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS[] = {
      "declare void @llvm.amdgcn.tensor.store.from.lds(<4 x i32>, <8 x i32>, <4 x i32>, <4 x i32>, "
      "<8 x i32>, i32 immarg)"},
     {"exp2.f32", "declare float @llvm.exp2.f32(float)"},
+    {"ldexp.f32.i32", "declare float @llvm.ldexp.f32.i32(float, i32)"},
     {"amdgcn.exp2.f32", "declare float @llvm.amdgcn.exp2.f32(float)"},
     {"log2.f32", "declare float @llvm.log2.f32(float)"},
     {"sqrt.f32", "declare float @llvm.sqrt.f32(float)"},
@@ -241,9 +242,6 @@ const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS[] = {
     {"update.dpp.i32",
      "declare i32 @llvm.amdgcn.update.dpp.i32(i32, i32, i32 immarg, i32 immarg, i32 immarg, i1 "
      "immarg)"},
-    {"global.atomic.fadd.v2f16",
-     "declare <2 x half> @llvm.amdgcn.global.atomic.fadd.v2f16.p1("
-     "ptr addrspace(1), <2 x half>)"},
     {"mbcnt.lo", "declare i32 @llvm.amdgcn.mbcnt.lo(i32, i32)"},
     {"mbcnt.hi", "declare i32 @llvm.amdgcn.mbcnt.hi(i32, i32)"},
     {"ds.read.tr16.b64", "declare <4 x i16> @llvm.amdgcn.ds.read.tr16.b64(ptr addrspace(3))"},
@@ -292,6 +290,9 @@ const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS[] = {
     {"raw.ptr.buffer.store.i32",
      "declare void @llvm.amdgcn.raw.ptr.buffer.store.i32(i32, ptr addrspace(8) nocapture "
      "writeonly, i32, i32, i32 immarg)"},
+    {"raw.ptr.buffer.atomic.fadd.f32",
+     "declare float @llvm.amdgcn.raw.ptr.buffer.atomic.fadd.f32(float, ptr addrspace(8) "
+     "nocapture, i32, i32, i32 immarg)"},
     {"raw.ptr.buffer.store.v2i32",
      "declare void @llvm.amdgcn.raw.ptr.buffer.store.v2i32(<2 x i32>, ptr addrspace(8) nocapture "
      "writeonly, i32, i32, i32 immarg)"},

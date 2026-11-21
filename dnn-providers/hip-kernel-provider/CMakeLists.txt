@@ -286,6 +286,7 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
     fetch_gtest_dependency()
 endif()
 include(Tests)
+include(LongPathManifest)
 
 if(NOT HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR)
     message(FATAL_ERROR
@@ -377,11 +378,21 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     # producer, warn when one is missing or differs from its pointer (file size, or folder
     # file count) so the shipped bundle is not silently left out; tests still configure
     # and run. REQUIRE_DVC_DESCRIPTORS turns the warning into an error for release builds.
-    # Only the root this build packs from is checked.
+    # The root this build packs from is checked, and the integration test root, whose
+    # rocKE seed catalog (gfx950_conv_fwd_aot_seed) keeps its KDPs in DVC too.
+    #
+    # A rocKE bundle with any such output is left out of its root's pack whole
+    # (HKP_PRODUCT_EXCLUDED_BUNDLES, HKP_INTEGRATION_EXCLUDED_BUNDLES): its git-tracked
+    # descriptors may name one that lives in the missing output (a UED naming a trained UHD
+    # under heuristics/), and the packer refuses a dangling reference. The tests of an
+    # integration bundle left out are then not registered. FlyDSL's per-target directories
+    # are handled by flydsl/CMakeLists.txt, which ships the targets that were pulled.
+    set(HKP_PRODUCT_EXCLUDED_BUNDLES "")
+    set(HKP_INTEGRATION_EXCLUDED_BUNDLES "")
     if(HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT)
-        set(_dvc_root "${HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT}")
+        set(_dvc_product_root "${HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT}")
     else()
-        set(_dvc_root "${HIPKERNELPROVIDER_PRODUCTION_DESCRIPTOR_SOURCE_ROOT}")
+        set(_dvc_product_root "${HIPKERNELPROVIDER_PRODUCTION_DESCRIPTOR_SOURCE_ROOT}")
     endif()
     set(_dvc_producers "")
     if(HIPKERNELPROVIDER_ENABLE_ROCKE)
@@ -390,7 +401,24 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     if(HIPKERNELPROVIDER_ENABLE_FLYDSL)
         list(APPEND _dvc_producers FlyDSL)
     endif()
+    # <root label>|<producer> pairs: the test root holds no FlyDSL content.
+    set(_dvc_checks "")
     foreach(_producer IN LISTS _dvc_producers)
+        list(APPEND _dvc_checks "PRODUCT|${_producer}")
+    endforeach()
+    if(HIPKERNELPROVIDER_ENABLE_ROCKE)
+        list(APPEND _dvc_checks "INTEGRATION|rocKE")
+    endif()
+    foreach(_check IN LISTS _dvc_checks)
+        string(REPLACE "|" ";" _check "${_check}")
+        list(GET _check 0 _label)
+        list(GET _check 1 _producer)
+        if(_label STREQUAL "PRODUCT")
+            set(_dvc_root "${_dvc_product_root}")
+        else()
+            set(_dvc_root
+                "${HIPKERNELPROVIDER_TEST_DESCRIPTOR_SOURCE_ROOT}/${HIPKERNELPROVIDER_TEST_SET_INTEGRATION}")
+        endif()
         file(GLOB_RECURSE _dvc_pointers "${_dvc_root}/${_producer}/*.dvc")
         foreach(_pointer IN LISTS _dvc_pointers)
             string(REGEX REPLACE "\\.dvc$" "" _output "${_pointer}")
@@ -415,14 +443,24 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
                 else()
                     set(_level WARNING)
                 endif()
+                set(_skipped "What it holds will NOT be packed.")
+                if(_producer STREQUAL "rocKE")
+                    # <producer>/<bundle>: a bundle sits one level under its producer.
+                    file(RELATIVE_PATH _rel "${_dvc_root}" "${_output}")
+                    string(REGEX MATCH "^[^/]+/[^/]+" _bundle "${_rel}")
+                    list(APPEND HKP_${_label}_EXCLUDED_BUNDLES "${_bundle}")
+                    set(_skipped "The bundle ${_bundle} will NOT be packed.")
+                endif()
                 message(${_level}
                     "hip-kernel-provider: ${_producer} DVC output ${_output} is missing or "
                     "incomplete (found ${_actual}, expected ${_expected}; bytes for a "
-                    "file, file count for a folder). What it holds will NOT be packed. "
+                    "file, file count for a folder). ${_skipped} "
                     "Run: dvc pull -r ingestor ${_pointer}")
             endif()
         endforeach()
     endforeach()
+    list(REMOVE_DUPLICATES HKP_PRODUCT_EXCLUDED_BUNDLES)
+    list(REMOVE_DUPLICATES HKP_INTEGRATION_EXCLUDED_BUNDLES)
 
     # The name of each authored set, which is also the name it stages under. Named here
     # only because the test subdirectories compile these same segments into their binaries
@@ -482,6 +520,13 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
     set(HIPKERNELPROVIDER_INTEGRATION_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/HIP_MLOPS_ENGINE_test_categories_integration.yaml")
     set(HIPKERNELPROVIDER_ASM_SDPA_INTEGRATION_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/ASM_SDPA_ENGINE_test_categories_integration.yaml")
     set(HIPKERNELPROVIDER_GFX950_ATTENTION_INTEGRATION_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/hipkernel_Gfx950Attention_test_categories_integration.yaml")
+    set(HIPKERNELPROVIDER_FLYDSL_SDPA_BWD_SPLIT_INTEGRATION_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/hipkernel_flydsl_sdpa_bwd_split_test_categories_integration.yaml")
+    set(HIPKERNELPROVIDER_FLYDSL_SDPA_BWD_MERGED_INTEGRATION_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/hipkernel_flydsl_sdpa_bwd_merged_test_categories_integration.yaml")
+    set(HIPKERNELPROVIDER_GFX942_ATTENTION_UNIFIED_3D_INTEGRATION_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/hipkernel_Gfx942AttentionUnified3d_test_categories_integration.yaml")
+    set(HIPKERNELPROVIDER_GFX942_ATTENTION_UNIFIED_2D_INTEGRATION_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/hipkernel_Gfx942AttentionUnified2D_test_categories_integration.yaml")
+    set(HIPKERNELPROVIDER_GFX942_ATTENTION_DENSE_INTEGRATION_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/hipkernel_Gfx942AttentionDense_test_categories_integration.yaml")
+    set(HIPKERNELPROVIDER_GFX950_CONV_FWD_AOT_INTEGRATION_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/hipkernel_Gfx950ConvFwdAot_test_categories_integration.yaml")
+    set(HIPKERNELPROVIDER_GRAPH_CAPTURE_INTEGRATION_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/GRAPH_CAPTURE_test_categories_integration.yaml")
     set(ROCKE_ENGINE_CTEST_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/ROCKE_ENGINE_test_categories_external.yaml")
     set(HKP_PACK_CTEST_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/HKP_PACK_test_categories_external.yaml")
     set(HIPKERNELPROVIDER_CTEST_INSTALL_FILE "")
@@ -491,6 +536,13 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
        AND EXISTS "${HIPKERNELPROVIDER_INTEGRATION_CATEGORIES_YAML}"
        AND EXISTS "${HIPKERNELPROVIDER_ASM_SDPA_INTEGRATION_CATEGORIES_YAML}"
        AND EXISTS "${HIPKERNELPROVIDER_GFX950_ATTENTION_INTEGRATION_CATEGORIES_YAML}"
+       AND EXISTS "${HIPKERNELPROVIDER_FLYDSL_SDPA_BWD_SPLIT_INTEGRATION_CATEGORIES_YAML}"
+       AND EXISTS "${HIPKERNELPROVIDER_FLYDSL_SDPA_BWD_MERGED_INTEGRATION_CATEGORIES_YAML}"
+       AND EXISTS "${HIPKERNELPROVIDER_GFX942_ATTENTION_UNIFIED_3D_INTEGRATION_CATEGORIES_YAML}"
+       AND EXISTS "${HIPKERNELPROVIDER_GFX942_ATTENTION_UNIFIED_2D_INTEGRATION_CATEGORIES_YAML}"
+       AND EXISTS "${HIPKERNELPROVIDER_GFX942_ATTENTION_DENSE_INTEGRATION_CATEGORIES_YAML}"
+       AND EXISTS "${HIPKERNELPROVIDER_GFX950_CONV_FWD_AOT_INTEGRATION_CATEGORIES_YAML}"
+       AND EXISTS "${HIPKERNELPROVIDER_GRAPH_CAPTURE_INTEGRATION_CATEGORIES_YAML}"
        AND EXISTS "${ROCKE_ENGINE_CTEST_CATEGORIES_YAML}"
        AND EXISTS "${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake")
         include("${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake")
@@ -500,6 +552,13 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
             "${HIPKERNELPROVIDER_INTEGRATION_CATEGORIES_YAML}"
             "${HIPKERNELPROVIDER_ASM_SDPA_INTEGRATION_CATEGORIES_YAML}"
             "${HIPKERNELPROVIDER_GFX950_ATTENTION_INTEGRATION_CATEGORIES_YAML}"
+            "${HIPKERNELPROVIDER_FLYDSL_SDPA_BWD_SPLIT_INTEGRATION_CATEGORIES_YAML}"
+            "${HIPKERNELPROVIDER_FLYDSL_SDPA_BWD_MERGED_INTEGRATION_CATEGORIES_YAML}"
+            "${HIPKERNELPROVIDER_GFX942_ATTENTION_UNIFIED_3D_INTEGRATION_CATEGORIES_YAML}"
+            "${HIPKERNELPROVIDER_GFX942_ATTENTION_UNIFIED_2D_INTEGRATION_CATEGORIES_YAML}"
+            "${HIPKERNELPROVIDER_GFX942_ATTENTION_DENSE_INTEGRATION_CATEGORIES_YAML}"
+            "${HIPKERNELPROVIDER_GFX950_CONV_FWD_AOT_INTEGRATION_CATEGORIES_YAML}"
+            "${HIPKERNELPROVIDER_GRAPH_CAPTURE_INTEGRATION_CATEGORIES_YAML}"
             "${ROCKE_ENGINE_CTEST_CATEGORIES_YAML}"
             "${HIPKERNELPROVIDER_CTEST_CATEGORIES_YAML}"
         )
@@ -509,6 +568,72 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
         message(STATUS "hip-kernel-provider: shared/ctest or test category YAML not found, using legacy CTest labels")
     endif()
 endif()
+
+# The architectures the FlyDSL SDPA backward engines can ship for: gfx950, gfx90a, gfx942 and every
+# gfx11 member the gfx11-generic content expands to, as flydsl/ expands it. The backward test
+# registrations in src/ and src/integration_tests/ both iterate this list.
+include(${CMAKE_CURRENT_LIST_DIR}/flydsl/FlydslArchFamilies.cmake)
+_flydsl_target_members(gfx11-generic HKP_FLYDSL_SDPA_BWD_ARCHS _hkp_bwd_gfx11_members)
+set(HKP_FLYDSL_SDPA_BWD_ARCHS gfx950 gfx90a gfx942 ${_hkp_bwd_gfx11_members})
+
+# hkp_flydsl_arch_toml(<toml> ENGINE <engine> ARCH <arch> GENERATED_BY <file>
+#                      [STATIC_TOML <file>] [ARCHS <arch>...] [TRAILER <text>])
+#
+# Writes <toml>, the integration-test config for <engine> on the <arch> shard: a header naming
+# GENERATED_BY and the engine, then STATIC_TOML (an empty [meta] table without one), then, when
+# ARCHS holds another architecture, one [[test_skips]] entry naming every other architecture in
+# ARCHS (the harness has no "only on" form), then TRAILER. On any runner, only the entries for
+# its own architecture run. The file is rewritten only when its content changes.
+function(hkp_flydsl_arch_toml toml)
+    cmake_parse_arguments(PARSE_ARGV 1 _arg "" "ENGINE;ARCH;GENERATED_BY;STATIC_TOML;TRAILER" "ARCHS")
+    if(_arg_STATIC_TOML)
+        set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_arg_STATIC_TOML}")
+        file(READ "${_arg_STATIC_TOML}" _static_text)
+    else()
+        set(_static_text "[meta]\nversion = 1\n")
+    endif()
+
+    set(_others "${_arg_ARCHS}")
+    list(REMOVE_ITEM _others "${_arg_ARCH}")
+    list(TRANSFORM _others PREPEND "\"")
+    list(TRANSFORM _others APPEND "\"")
+    list(JOIN _others ", " _others_toml)
+
+    string(CONCAT _text
+        "# Generated by ${_arg_GENERATED_BY} for ${_arg_ENGINE}, ${_arg_ARCH} shard.\n"
+        "${_static_text}")
+    if(_others_toml)
+        string(APPEND _text
+            "\n[[test_skips]]\narchs = [${_others_toml}]\nfilters = [\"*\"]\n"
+            "reason = \"${_arg_ENGINE}: this entry runs on ${_arg_ARCH} only\"\n")
+    endif()
+    string(APPEND _text "${_arg_TRAILER}")
+
+    set(_current "")
+    if(EXISTS "${toml}")
+        file(READ "${toml}" _current)
+    endif()
+    if(NOT _current STREQUAL _text)
+        file(WRITE "${toml}" "${_text}")
+    endif()
+endfunction()
+
+# hkp_flydsl_sdpa_bwd_arch_toml(<out_var> <engine> <arch>)
+#
+# Sets <out_var> to the hkp_flydsl_arch_toml() config for hipkernel:flydsl_sdpa_bwd_<engine> on
+# the <arch> shard. config/hipkernel_flydsl_sdpa_bwd.toml (shared by both engines) leads it, and it
+# skips every other architecture in HKP_FLYDSL_SDPA_BWD_ARCHS. Every registration for the
+# (engine, arch) pair shares the file.
+function(hkp_flydsl_sdpa_bwd_arch_toml out_var engine arch)
+    set(_toml "${PROJECT_BINARY_DIR}/flydsl_integration/hipkernel_flydsl_sdpa_bwd_${engine}_${arch}.toml")
+    hkp_flydsl_arch_toml("${_toml}"
+        ENGINE "hipkernel:flydsl_sdpa_bwd_${engine}"
+        ARCH "${arch}"
+        GENERATED_BY "hip-kernel-provider/CMakeLists.txt"
+        STATIC_TOML "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/config/hipkernel_flydsl_sdpa_bwd.toml"
+        ARCHS ${HKP_FLYDSL_SDPA_BWD_ARCHS})
+    set(${out_var} "${_toml}" PARENT_SCOPE)
+endfunction()
 
 if(HIPKERNELPROVIDER_ENABLE_ROCKE)
     message(STATUS "rocKE features enabled")
@@ -728,3 +853,4 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
                 REGEX "/census/[^/]+/Testing$" EXCLUDE)
     endif()
 endif()
+hipdnn_apply_long_path_manifest()

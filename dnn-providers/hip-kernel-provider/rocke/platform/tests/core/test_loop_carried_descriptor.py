@@ -98,10 +98,17 @@ def test_builder_refuses_a_descriptor_as_an_iter_arg_init():
         b.scf_for_iter(*_bounds(b), [("count", count), ("r", descriptor)])
 
 
-def test_builder_refuses_a_yielded_descriptor():
+@pytest.mark.parametrize(
+    "op_after_handle", [False, True], ids=["body_entered_at_once", "op_after_handle"]
+)
+def test_builder_refuses_a_yielded_descriptor(op_after_handle):
+    """Also when an op is emitted after the loop handle is created and before
+    its body is entered, so the loop is not the last op of its region."""
     b = IRBuilder("descriptor_yield")
     x = b.param("X", PtrType(F16, "global"))
     loop = b.scf_for_iter(*_bounds(b), [("carry", b.vector_splat(b.const_i32(0), 4))])
+    if op_after_handle:
+        b.const_i32(7)
     with loop, pytest.raises(ValueError, match=re.escape(_message(0))):
         b.scf_yield(b.buffer_rsrc(x, b.const_i32(32)))
 

@@ -14,17 +14,17 @@
 /**
  * @file Gfx950AttentionUnified2DGeometry.hpp
  * @brief What gfx950 unified-attention 2D restates from its Python builder: the geometry
- *        rules, and the launch grid, batch capacity and paged-KV metadata of
- *        UnifiedAttentionGeometry.hpp bound to the gfx950 traits.
+ *        rules, and the launch grid and paged-KV metadata of UnifiedAttentionGeometry.hpp
+ *        bound to the gfx950 traits.
  *
  * A rocKE kernel is launched from Python; an ingestor engine relaunches the same binary
  * from C++. Nothing compares the two halves, and a mismatch does not fault: the kernel
  * computes something else. Everything here is a pure function of a candidate's KMD fields
  * and the graph's dimensions, so it is testable with no HIP context.
  *
- * The arch-neutral contract (identity block table over a contiguous BSHD K/V, the batch
- * capacity a baked `num_seqs` gives, the grid) lives in UnifiedAttentionGeometry.hpp; this
- * header adds only what gfx950's builder fixes: its traits and its geometry legality.
+ * The arch-neutral contract (identity block table over a contiguous BSHD K/V, the grid)
+ * lives in UnifiedAttentionGeometry.hpp; this header adds only what gfx950's builder fixes:
+ * its traits and its geometry legality.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine
 {
@@ -35,12 +35,6 @@ inline constexpr const UnifiedAttentionArchTraits& GFX950_UNIFIED_2D_TRAITS
 /// Lanes per wave64 wave: a CTA has `num_warps * 64` threads
 /// (`AttentionTuningSpec.launch_block`).
 inline constexpr int64_t GFX950_UNIFIED_2D_WAVE_LANES = GFX950_UNIFIED_ATTENTION_TRAITS.waveLanes;
-
-/// The kernel indexes K/V with a 32-bit byte offset when `use_i64_kv_addr` is off, and
-/// bounds its buffer loads at this size (`_I32_KV_BUFFER_BYTES`); past it loads return
-/// zeros. Every shipped kernel is built i32.
-inline constexpr int64_t GFX950_UNIFIED_2D_KV_BUFFER_BYTES
-    = GFX950_UNIFIED_ATTENTION_TRAITS.kvBufferBytes;
 
 /// `block_size` values the tiled 2D kernel is built for (`supports_tiled_2d`).
 inline constexpr int64_t GFX950_UNIFIED_2D_BLOCK_SIZE_SMALL
@@ -135,18 +129,6 @@ inline bool isSupportedGfx950Unified2DGeometry(const Gfx950Unified2DGeometryFiel
         return false;
     }
     return !g.useTransposedQk32x32 || g.useMfma32x32;
-}
-
-/// `unifiedAttentionBinarySearchIters`, named for this pack.
-inline int64_t gfx950Unified2DBinarySearchIters(int64_t numSeqs)
-{
-    return unifiedAttentionBinarySearchIters(numSeqs);
-}
-
-/// `unifiedAttentionBatchCapacity`: 511 -> 9 iterations -> 511 sequences.
-inline int64_t gfx950Unified2DBatchCapacity(int64_t numSeqs)
-{
-    return unifiedAttentionBatchCapacity(numSeqs);
 }
 
 using Gfx950Unified2DLaunchGeometry = UnifiedAttentionLaunchGeometry;

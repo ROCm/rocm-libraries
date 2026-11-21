@@ -140,9 +140,11 @@ struct Gfx950AttentionDenseGeometry
 /**
  * @brief The launch geometry for one selected candidate over one graph.
  *
- * Mirrors `attention_dense_grid` for the qb_minor non-persistent block order:
+ * Mirrors `attention_dense_grid` for the grid every shipped variant launches: the
+ * qb_minor decode (`NonpersistQbMinor.grid`) at kv_segments 1, the only value a gfx950
+ * variant is built at, so the decode's x extent is not multiplied:
  *
- *     nqb = (spec.seqlen_q + spec.block_m - 1) // spec.block_m
+ *     nqb = (spec.seqlen_q + spec.block_m - 1) // spec.block_m      # _spec_nqb
  *     return (nqb, spec.num_query_heads, spec.batch)
  *
  * and `attention_dense_block`, `(spec.num_waves * 64, 1, 1)`.
@@ -180,7 +182,9 @@ inline Gfx950AttentionDenseGeometry gfx950AttentionDenseGeometry(int64_t blockM,
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
             "gfx950 attention_dense: kernel '" + kernelName
-                + "' declares a non-positive seqlen_q, num_query_heads or batch");
+                + "' cannot launch over a graph with a non-positive extent: seqlen_q "
+                + std::to_string(seqLenQ) + ", num_query_heads " + std::to_string(numQueryHeads)
+                + ", batch " + std::to_string(batch));
     }
 
     Gfx950AttentionDenseGeometry geometry;

@@ -3,6 +3,8 @@
 
 #include <array>
 #include <cmath>
+#include <cstdint>
+#include <cstring>
 #include <functional>
 #include <gtest/gtest.h>
 #include <hipdnn_data_sdk/types.hpp>
@@ -10,8 +12,10 @@
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceSdpa.hpp>
 #include <hipdnn_test_sdk/utilities/detail/CpuFpReferenceUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/detail/GradientCheckUtilities.hpp>
+#include <limits>
 #include <optional>
 #include <string>
+#include <vector>
 
 using namespace hipdnn_test_sdk::utilities;
 using namespace hipdnn_data_sdk::utilities;
@@ -1894,6 +1898,193 @@ TEST(TestCpuFpReferenceSdpaBwd, DBiasZeroOnBandMaskedPositions)
                      dV,
                      SdpaBwdOptions<float>{}.setMask(noMask).setDBias(&dBias).setBand(-1, 0, true)),
                  std::invalid_argument);
+}
+
+// Keys no row sees (outside every row's window, past seq_len_kv) never reach a gradient: NaN and
+// infinity in K and V there give dQ, dK, dV and dBias bit-identical to zeros there, and dK and
+// dV at those keys are exactly 0. O and dO stay finite, so the check isolates the backward.
+TEST(TestCpuFpReferenceSdpaBwd, KeysNoRowSeesDoNotLeak)
+{
+    constexpr int64_t B = 2;
+    constexpr int64_t H = 2;
+    constexpr int64_t SQ = 3;
+    constexpr int64_t SKV = 10;
+    constexpr int64_t D = 4;
+    struct Case
+    {
+        const char* name;
+        int64_t left;
+        int64_t right;
+        bool topLeft;
+        bool withSeqLens;
+        // Whether key j of batch b is seen by no row.
+        std::function<bool(int64_t, int64_t)> removed;
+    };
+    const std::vector<Case> cases{
+        {"CausalTopLeftPastTheQueries",
+         -1,
+         0,
+         true,
+         false,
+         [](int64_t, int64_t j) { return j >= SQ; }},
+        // Row i sees keys [i + 6, i + 7]: keys 0..5 are in no window.
+        {"BottomRightWindowBelowEveryRow",
+         2,
+         0,
+         false,
+         false,
+         [](int64_t, int64_t j) { return j < 6; }},
+        {"SeqLenKvTail",
+         -1,
+         -1,
+         false,
+         true,
+         [](int64_t b, int64_t j) { return b == 1 && j >= 7; }},
+    };
+    const std::array<float, 3> poisons{std::numeric_limits<float>::quiet_NaN(),
+                                       std::numeric_limits<float>::infinity(),
+                                       -std::numeric_limits<float>::infinity()};
+    const auto sameBits = [](float x, float y) {
+        uint32_t xBits = 0;
+        uint32_t yBits = 0;
+        std::memcpy(&xBits, &x, sizeof(float));
+        std::memcpy(&yBits, &y, sizeof(float));
+        return xBits == yBits;
+    };
+    const auto bitsEqual = [&](const Tensor<float>& x, const Tensor<float>& y) {
+        bool equal = true;
+        for(int64_t b = 0; b < x.dims()[0]; ++b)
+        {
+            for(int64_t h = 0; h < x.dims()[1]; ++h)
+            {
+                for(int64_t s = 0; s < x.dims()[2]; ++s)
+                {
+                    for(int64_t d = 0; d < x.dims()[3]; ++d)
+                    {
+                        equal = equal
+                                && sameBits(x.getHostValue(b, h, s, d), y.getHostValue(b, h, s, d));
+                    }
+                }
+            }
+        }
+        return equal;
+    };
+    const auto fillRemoved = [&](Tensor<float>& t, const Case& c, float value) {
+        for(int64_t b = 0; b < B; ++b)
+        {
+            for(int64_t h = 0; h < H; ++h)
+            {
+                for(int64_t j = 0; j < SKV; ++j)
+                {
+                    if(!c.removed(b, j))
+                    {
+                        continue;
+                    }
+                    for(int64_t d = 0; d < D; ++d)
+                    {
+                        t.setHostValue(value, b, h, j, d);
+                    }
+                }
+            }
+        }
+    };
+
+    for(const auto& c : cases)
+    {
+        SCOPED_TRACE(c.name);
+        Tensor<float> q({B, H, SQ, D});
+        Tensor<float> o({B, H, SQ, D});
+        Tensor<float> dO({B, H, SQ, D});
+        Tensor<float> mask({SQ, SKV});
+        Tensor<int32_t> seqLenQ({B, 1, 1, 1});
+        Tensor<int32_t> seqLenKv({B, 1, 1, 1});
+        q.fillWithRandomValues(-1.0F, 1.0F, 9200);
+        dO.fillWithRandomValues(-1.0F, 1.0F, 9203);
+        mask.fillWithRandomValues(-0.5F, 0.5F, 9204);
+        seqLenQ.fillWithValue(static_cast<int32_t>(SQ));
+        seqLenKv.setHostValue(static_cast<int32_t>(SKV), 0, 0, 0, 0);
+        seqLenKv.setHostValue(7, 1, 0, 0, 0);
+
+        // K or V with @p removedValue at every removed key and the same live values otherwise.
+        const auto makeKv = [&](unsigned int seed, float removedValue) {
+            Tensor<float> t({B, H, SKV, D});
+            t.fillWithRandomValues(-1.0F, 1.0F, seed);
+            fillRemoved(t, c, removedValue);
+            return t;
+        };
+        const auto k = makeKv(9201, 0.0F);
+        const auto v = makeKv(9202, 0.0F);
+
+        auto fwdOptions
+            = SdpaFwdOptions<float>{}.setMask(&mask).setBand(c.left, c.right, c.topLeft);
+        if(c.withSeqLens)
+        {
+            fwdOptions.setSeqLens(&seqLenQ, &seqLenKv);
+        }
+        CpuFpReferenceSdpa::forward(q, k, v, o, fwdOptions);
+
+        const auto run = [&](const Tensor<float>& kIn,
+                             const Tensor<float>& vIn,
+                             Tensor<float>& dQ,
+                             Tensor<float>& dK,
+                             Tensor<float>& dV,
+                             Tensor<float>& dBias) {
+            auto opts = SdpaBwdOptions<float>{}.setMask(&mask).setDBias(&dBias).setBand(
+                c.left, c.right, c.topLeft);
+            if(c.withSeqLens)
+            {
+                opts.setSeqLens(&seqLenQ, &seqLenKv);
+            }
+            CpuFpReferenceSdpa::backward(q, kIn, vIn, o, dO, dQ, dK, dV, opts);
+        };
+
+        Tensor<float> cleanDq({B, H, SQ, D});
+        Tensor<float> cleanDk({B, H, SKV, D});
+        Tensor<float> cleanDv({B, H, SKV, D});
+        Tensor<float> cleanDbias({SQ, SKV});
+        run(k, v, cleanDq, cleanDk, cleanDv, cleanDbias);
+
+        for(const float poison : poisons)
+        {
+            SCOPED_TRACE("poison = " + std::to_string(poison));
+            const auto kBad = makeKv(9201, poison);
+            const auto vBad = makeKv(9202, poison);
+            Tensor<float> dQ({B, H, SQ, D});
+            Tensor<float> dK({B, H, SKV, D});
+            Tensor<float> dV({B, H, SKV, D});
+            Tensor<float> dBias({SQ, SKV});
+            run(kBad, vBad, dQ, dK, dV, dBias);
+            EXPECT_TRUE(bitsEqual(dQ, cleanDq));
+            EXPECT_TRUE(bitsEqual(dK, cleanDk));
+            EXPECT_TRUE(bitsEqual(dV, cleanDv));
+            for(int64_t i = 0; i < SQ; ++i)
+            {
+                for(int64_t j = 0; j < SKV; ++j)
+                {
+                    EXPECT_TRUE(sameBits(dBias.getHostValue(i, j), cleanDbias.getHostValue(i, j)))
+                        << "dBias(" << i << ", " << j << ")";
+                }
+            }
+            for(int64_t b = 0; b < B; ++b)
+            {
+                for(int64_t h = 0; h < H; ++h)
+                {
+                    for(int64_t j = 0; j < SKV; ++j)
+                    {
+                        if(!c.removed(b, j))
+                        {
+                            continue;
+                        }
+                        for(int64_t d = 0; d < D; ++d)
+                        {
+                            EXPECT_EQ(dK.getHostValue(b, h, j, d), 0.0F);
+                            EXPECT_EQ(dV.getHostValue(b, h, j, d), 0.0F);
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 // Dropout with an explicit mask (cuDNN custom dropout): O = (P * scale * mask) V. With

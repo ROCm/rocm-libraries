@@ -51,13 +51,11 @@ def max_kv_segments_for_extent(
     return s
 
 
-def check_kv_segments(spec) -> tuple[bool, str]:
-    """Shared admission for ``spec.kv_segments``: the default grid only, without a
-    sliding window, sinks or LSE output (each would need its own segment rule)."""
-    s = spec.kv_segments
-    if type(s) is not int or not 1 <= s <= MAX_KV_SEGMENTS:
-        return False, f"kv_segments must be an int in [1, {MAX_KV_SEGMENTS}], got {s!r}"
-    if s > 1 and (
+def kv_split_admits(spec) -> bool:
+    """Whether ``spec``'s grid and features admit ``kv_segments > 1``: the default
+    grid only, without a sliding window, sinks or LSE output (each would need its
+    own segment rule), ragged, varlen or paged."""
+    return not (
         spec.persistent
         or spec.sliding_window
         or spec.use_sinks
@@ -65,7 +63,15 @@ def check_kv_segments(spec) -> tuple[bool, str]:
         or spec.ragged
         or spec.varlen
         or spec.paged
-    ):
+    )
+
+
+def check_kv_segments(spec) -> tuple[bool, str]:
+    """Shared admission for ``spec.kv_segments`` (see :func:`kv_split_admits`)."""
+    s = spec.kv_segments
+    if type(s) is not int or not 1 <= s <= MAX_KV_SEGMENTS:
+        return False, f"kv_segments must be an int in [1, {MAX_KV_SEGMENTS}], got {s!r}"
+    if s > 1 and not kv_split_admits(spec):
         return False, (
             "kv_segments > 1 runs on the default grid only, without sliding window, "
             "sinks, LSE output, ragged, varlen or paged"
@@ -188,29 +194,49 @@ def combine_spec(spec, arch: str):
     )
 
 
+def combine_launch_abi(spec, arch: str):
+    """The combine's reduce spec, launch signature and runtime scalar values.
+
+    The reduce reads its runtime shape fields (``num_query_heads``) as kernargs,
+    so the signature carries them after the pointers and the values supply them.
+    Host only: no torch and no compile.
+    """
+    from kernels.common.attention_unified import (
+        _reduce_signature,
+        _runtime_kernarg_fields,
+    )
+
+    red = combine_spec(spec, arch)
+    spec_type, _ = _combine_impl(arch)
+    runtime_fields = _runtime_kernarg_fields(spec_type)
+    signature = _reduce_signature(spec.dtype, runtime_fields=runtime_fields)
+    scalars = {name: int(getattr(red, name)) for name in runtime_fields}
+    return red, signature, scalars
+
+
 def launch_segment_combine(spec, arch: str, out, workspace, stream: int) -> None:
     """Merge the segments in ``workspace`` into ``out`` ([B, Sq, Hq, D])."""
-    from kernels.common.attention_unified import _reduce_signature
     from rocke.helpers.compile import compile_kernel
     from rocke.runtime import KernelLauncher, LaunchConfig
 
-    red = combine_spec(spec, arch)
+    red, signature, scalars = combine_launch_abi(spec, arch)
+    _, build = _combine_impl(arch)
     key = (arch, red)
     launcher = _COMBINE_LAUNCHER_CACHE.get(key)
     if launcher is None:
-        _, build = _combine_impl(arch)
         art = compile_kernel(
             build(red, arch=arch), arch=arch, backend="python", capture_ir_text=False
         )
         launcher = KernelLauncher(
             hsaco=art.hsaco,
             kernel_name=art.kernel_name,
-            signature=_reduce_signature(spec.dtype),
+            signature=signature,
         )
         _COMBINE_LAUNCHER_CACHE[key] = launcher
     import torch
 
     vals = dict(workspace)
+    vals.update(scalars)
     vals["output_ptr"] = out
     # Unused by the combine body; any int32 buffer satisfies the ABI.
     vals["seq_lens_ptr"] = workspace["segm_max_ptr"].view(torch.int32)

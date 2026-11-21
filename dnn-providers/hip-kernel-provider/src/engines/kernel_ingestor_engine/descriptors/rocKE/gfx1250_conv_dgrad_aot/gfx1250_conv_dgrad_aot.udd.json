@@ -1,0 +1,6 @@
+{
+  "version": "1.0",
+  "id": "432c6411-1db3-40f4-a4cd-61b78859f2ce",
+  "name": "Gfx1250ConvDgradAot dispatch",
+  "dispatch_symbol": "hipkernel.gfx1250_conv_dgrad_aot.dispatch"
+}

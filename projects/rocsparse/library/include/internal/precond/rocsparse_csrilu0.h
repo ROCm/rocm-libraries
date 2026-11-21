@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2023-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the Software), to deal
@@ -91,6 +91,7 @@ rocsparse_status rocsparse_csrilu0_zero_pivot(rocsparse_handle   handle,
 *  \retval     rocsparse_status_success the operation completed successfully.
 *  \retval     rocsparse_status_invalid_handle the library context was not initialized.
 *  \retval     rocsparse_status_invalid_pointer \p info pointer is invalid.
+*  \retval     rocsparse_status_invalid_value \p tolerance is negative.
 *  \retval     rocsparse_status_internal_error an internal error occurred.
 */
 ROCSPARSE_EXPORT

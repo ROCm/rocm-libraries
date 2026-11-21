@@ -13,7 +13,7 @@
 
 name: TheRock Multi-Arch CI
 
-# TheRock ref: pinned to ROCm/TheRock commit 9ac57b128762037858f93b4478544e53afadf575.
+# TheRock ref: pinned to ROCm/TheRock commit ddecad3a9050c0ed1136de8b68af1781307bd1c4.
 # NOTE: update all `@<ref>` refs and `ref:` inputs together when switching.
 
 on:
@@ -26,6 +26,12 @@ on:
       - opened
       - synchronize
       - reopened
+      # Draft pull requests skip builds and tests, so run CI as soon as one is
+      # marked ready for review instead of waiting for the next push.
+      - ready_for_review
+      # Converting back to draft starts a run that skips the build and test
+      # jobs, which cancels any in-flight run through the concurrency group.
+      - converted_to_draft
       - labeled
       - unlabeled
   workflow_dispatch:
@@ -70,6 +76,10 @@ on:
         type: boolean
         default: false
         description: "Build native Linux packages and run install tests"
+      build_native_windows:
+        type: boolean
+        default: false
+        description: "Build native Windows MSI packages and run install tests"
 permissions:
   contents: read
   actions: read
@@ -132,7 +142,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: ROCm/TheRock
-          ref: 9ac57b128762037858f93b4478544e53afadf575 # 2026-11-03
+          ref: ddecad3a9050c0ed1136de8b68af1781307bd1c4 # 2026-11-20
           path: _therock
           sparse-checkout: build_tools/github_actions
           sparse-checkout-cone-mode: true
@@ -174,7 +184,7 @@ jobs:
 
   setup:
     needs: [ci-env, configure]
-    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@9ac57b128762037858f93b4478544e53afadf575 # 2026-11-03
+    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@ddecad3a9050c0ed1136de8b68af1781307bd1c4 # 2026-11-20
     with:
       build_variant: "release"
       # Limit GPU families for rocm-libraries CI.
@@ -208,6 +218,7 @@ jobs:
       # Preserve manual workflow_dispatch control and enable native package
       # builds for pull requests carrying the opt-in label.
       build_native_linux: ${{ inputs.build_native_linux || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ci:native-linux-packages')) }}
+      build_native_windows: ${{ inputs.build_native_windows || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ci:native-windows-packages')) }}
       # A missing baseline disables artifact reuse and causes TheRock to
       # perform a full stage build.
       stage_reuse_mode: >-
@@ -217,16 +228,8 @@ jobs:
           'off'
         }}
       repository: ROCm/TheRock
-      ref: 9ac57b128762037858f93b4478544e53afadf575 # 2026-11-03
+      ref: ddecad3a9050c0ed1136de8b68af1781307bd1c4 # 2026-11-20
       # Pass external repo info for stage-impact analysis.
-      # extra_cmake_options is appended to the cmake configure line of every
-      # build stage, scoped to this repository's CI runs. TheRock keeps
-      # HIPKERNELPROVIDER_ENABLE_ROCKE OFF by default; enabling it here is what
-      # gives rocKE build and test signal while it is still in development.
-      # Keep the value constant: the flag state file participates in every
-      # subproject's configure fingerprint, and stage reuse does not key on
-      # flags (TheRock#3399), so a per-PR value would churn fingerprints and
-      # let baselines built with the opposite value look reusable.
       external_repo: >-
         {
           "repository": "${{ github.repository }}",
@@ -236,8 +239,7 @@ jobs:
           "pr_number": ${{ github.event.pull_request.number || 'null' }},
           "event_name": "${{ github.event_name }}",
           "skip_ci_config": ".github/skip-ci-config.toml",
-          "family_overrides": ${{ needs.configure.outputs.family_overrides }},
-          "extra_cmake_options": "-DTHEROCK_FLAG_HIPKERNELPROVIDER_ENABLE_ROCKE=ON"
+          "family_overrides": ${{ needs.configure.outputs.family_overrides }}
         }
 
   linux_build_and_test:
@@ -248,7 +250,7 @@ jobs:
         needs.setup.outputs.linux_build_config != '' &&
         needs.setup.outputs.enable_build_jobs == 'true'
       }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@9ac57b128762037858f93b4478544e53afadf575 # 2026-11-03
+    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@ddecad3a9050c0ed1136de8b68af1781307bd1c4 # 2026-11-20
     secrets: inherit
     with:
       build_config: ${{ needs.setup.outputs.linux_build_config }}
@@ -256,13 +258,13 @@ jobs:
       rocm_package_version: ${{ needs.setup.outputs.rocm_package_version }}
       rocm_deb_package_version: ${{ needs.setup.outputs.rocm_deb_package_version }}
       rocm_rpm_package_version: ${{ needs.setup.outputs.rocm_rpm_package_version }}
-      test_type: ${{ needs.configure.outputs.test_type }}
+      test_type: ${{ needs.setup.outputs.test_type }}
       external_repo_config: ${{ needs.setup.outputs.external_repo_config }}
       # Empty string when run_all_tests=true triggers full test run in downstream workflow
       changed_projects: ${{ needs.configure.outputs.run_all_tests == 'true' && '' || needs.configure.outputs.test_projects }}
       repository: ROCm/TheRock
       # Concrete SHA resolved once by setup; do not re-resolve main here.
-      ref: 9ac57b128762037858f93b4478544e53afadf575 # 2026-11-03
+      ref: ddecad3a9050c0ed1136de8b68af1781307bd1c4 # 2026-11-20
     permissions:
       contents: read
       id-token: write
@@ -275,59 +277,23 @@ jobs:
         needs.setup.outputs.windows_build_config != '' &&
         needs.setup.outputs.enable_build_jobs == 'true'
       }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_windows.yml@9ac57b128762037858f93b4478544e53afadf575 # 2026-11-03
+    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_windows.yml@ddecad3a9050c0ed1136de8b68af1781307bd1c4 # 2026-11-20
     secrets: inherit
     with:
       build_config: ${{ needs.setup.outputs.windows_build_config }}
       test_labels: ${{ needs.setup.outputs.windows_test_labels }}
       rocm_package_version: ${{ needs.setup.outputs.rocm_package_version }}
       rocm_msi_package_version: ${{ needs.setup.outputs.rocm_msi_package_version }}
-      test_type: ${{ needs.configure.outputs.test_type }}
+      test_type: ${{ needs.setup.outputs.test_type }}
       external_repo_config: ${{ needs.setup.outputs.external_repo_config }}
       # Empty string when run_all_tests=true triggers full test run in downstream workflow
       changed_projects: ${{ needs.configure.outputs.run_all_tests == 'true' && '' || needs.configure.outputs.test_projects }}
       repository: ROCm/TheRock
       # Concrete SHA resolved once by setup; do not re-resolve main here.
-      ref: 9ac57b128762037858f93b4478544e53afadf575 # 2026-11-03
+      ref: ddecad3a9050c0ed1136de8b68af1781307bd1c4 # 2026-11-20
     permissions:
       contents: read
       id-token: write
-
-  rocjitsu_race_check:
-    name: rocjitsu race check (${{ matrix.amdgpu_families }})
-    # A caller cannot depend on an individual job inside a reusable workflow,
-    # so start after the Linux workflow has finished publishing its artifacts.
-    # This sidecar remains advisory and is not part of the required summary.
-    needs: [ci-env, configure, linux_build_and_test]
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - amdgpu_families: gfx94X-dcgpu
-            amdgpu_targets: gfx942
-          - amdgpu_families: gfx950-dcgpu
-            amdgpu_targets: gfx950
-    # Temporarily disabled due to artifact setup flakes. Re-enable after
-    # https://github.com/ROCm/TheRock-Infra/issues/1160 is resolved.
-    if: >-
-      ${{
-        false &&
-        !cancelled() &&
-        github.event_name == 'pull_request' &&
-        (
-          contains(format(',{0},', needs.configure.outputs.changed_projects), ',projects/hipblaslt,') ||
-          contains(format(',{0},', needs.configure.outputs.changed_projects), ',projects/hipblaslt/tensilelite,') ||
-          contains(github.event.pull_request.labels.*.name, 'test:hipblaslt')
-        ) &&
-        needs.linux_build_and_test.result != 'skipped'
-      }}
-    uses: ./.github/workflows/therock-rocjitsu-race-check-linux.yml
-    with:
-      therock_ref: ${{ needs.ci-env.outputs.therock-ref }}
-      build_runs_on: ${{ needs.ci-env.outputs.linux-runner }}
-      amdgpu_families: ${{ matrix.amdgpu_families }}
-      amdgpu_targets: ${{ matrix.amdgpu_targets }}
-      # TODO(newling): Add gfx1151 after validating a target-specific workload.
 
   notify_teams_on_failure:
     name: Notify Teams Channel on Failure
@@ -396,7 +362,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           # Concrete SHA resolved once by setup; do not re-resolve main here.
-          ref: 9ac57b128762037858f93b4478544e53afadf575 # 2026-11-03
+          ref: ddecad3a9050c0ed1136de8b68af1781307bd1c4 # 2026-11-20
           sparse-checkout: build_tools/github_actions
           sparse-checkout-cone-mode: true
 

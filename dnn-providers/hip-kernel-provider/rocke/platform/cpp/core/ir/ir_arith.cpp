@@ -128,7 +128,8 @@ rocke_value_t* rocke_b_zero_vec(rocke_ir_builder_t* b, const rocke_type_t* elem,
     if(rocke_type_eq(elem, rocke_f16()) || rocke_type_eq(elem, rocke_bf16())
        || rocke_type_eq(elem, rocke_f64()) || rocke_type_eq(elem, rocke_fp8e4m3())
        || rocke_type_eq(elem, rocke_bf8e5m2()) || rocke_type_eq(elem, rocke_i8())
-       || rocke_type_eq(elem, rocke_i16()) || rocke_type_eq(elem, rocke_i32()))
+       || rocke_type_eq(elem, rocke_u8()) || rocke_type_eq(elem, rocke_i16())
+       || rocke_type_eq(elem, rocke_i32()))
     {
         hint = cz_hint(b, n);
         if(!hint)
@@ -564,6 +565,20 @@ rocke_value_t* rocke_b_exp2(rocke_ir_builder_t* b, rocke_value_t* a)
 rocke_value_t* rocke_b_exp2_fast(rocke_ir_builder_t* b, rocke_value_t* a)
 {
     return rocke_i_unop(b, ROCKE_OP_MATH_EXP2_FAST, a, "exp2f");
+}
+
+rocke_value_t* rocke_b_ldexp(rocke_ir_builder_t* b, rocke_value_t* value, rocke_value_t* exponent)
+{
+    char err[256];
+    if(!rocke_i_live(b))
+        return NULL;
+    if(!value || !exponent)
+        return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "ldexp: NULL operand");
+    if(const char* error
+       = rocke_i_ldexp_types_error(value->type, exponent->type, rocke_f32(), err, sizeof err))
+        return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "%s", error);
+    rocke_value_t* ops[2] = {value, exponent};
+    return rocke_i_op1(b, ROCKE_OP_MATH_LDEXP, ops, 2, rocke_f32(), NULL, "ldexp");
 }
 
 rocke_value_t* rocke_b_log2(rocke_ir_builder_t* b, rocke_value_t* a)

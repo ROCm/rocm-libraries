@@ -27,7 +27,7 @@ function display_help()
   echo "    [--compiler] compiler to build with"
   echo "    [--verbose] print additional cmake build information"
   echo "    [--address-sanitizer] Build with address sanitizer enabled. Uses amdclang++ as compiler"
-  echo "    [--codecoverage] build with code coverage profiling enabled"
+  echo "    [--codecoverage] build with code coverage profiling enabled. Uses amdclang++ as compiler"
 }
 
 # This function is helpful for dockerfiles that do not have sudo installed, but the default user is root
@@ -344,6 +344,7 @@ while true; do
         shift ;;
     --codecoverage)
         build_codecoverage=true
+        compiler=amdclang++
         shift ;;
     --mpi)
         mpi_dir=${2}
@@ -506,7 +507,11 @@ pushd .
           echo "Code coverage is disabled in Release mode, to enable code coverage select either Debug mode (-g | --debug) or RelWithDebInfo mode (-k | --relwithdebinfo); aborting";
           exit 1
       fi
-      cmake_common_options="${cmake_common_options} -DBUILD_CODE_COVERAGE=ON -DBUILD_SUPPORT_COMPLEX=OFF"
+      if [[ "${build_static}" == true ]]; then
+          echo "Code coverage requires the shared library, it cannot be combined with --static; aborting";
+          exit 1
+      fi
+      cmake_common_options="${cmake_common_options} -DBUILD_CODE_COVERAGE=ON"
   fi
 
   # Verbose cmake
@@ -527,7 +532,6 @@ pushd .
       -DCMAKE_INSTALL_PREFIX="${install_prefix}" \
       -DCMAKE_SHARED_LINKER_FLAGS="${rocm_rpath}" \
       -DCMAKE_PREFIX_PATH="${rocm_path} ${rocm_path}/hcc ${rocm_path}/hip" \
-      -DCMAKE_MODULE_PATH="${rocm_path}/lib/cmake/hip ${rocm_path}/hip/cmake" \
       -DCMAKE_EXE_LINKER_FLAGS=" -Wl,--enable-new-dtags -Wl,--rpath,${rocm_path}/lib:${rocm_path}/lib64" \
       -DROCM_DISABLE_LDCONFIG=ON \
       -DROCM_PATH="${rocm_path}" ../.. || exit

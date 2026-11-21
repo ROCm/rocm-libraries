@@ -386,7 +386,7 @@ def test_split_counts_drop_the_g4_terms():
         assert len(a4) == 4 and len(s3) == 3
         assert [s.stage for s in s3] == list(SPLIT_STAGES)
         assert s3[0] == a4[0]
-        tile = at._frags("g0")[0] * at._frags("g0")[1] * at.c_frag_len
+        tile = at._frags("g0")[0] * at._frags("g0")[1] * at.dst_frag_len
         drop = 0 if pt == "lds" else tile
         assert s3[1].ds_write == a4[1].ds_write - drop
         kt = at._frags("g4")[1] * at._frags("g4")[2] * at._transposed_reads("g4")

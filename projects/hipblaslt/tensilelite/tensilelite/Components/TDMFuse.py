@@ -498,15 +498,15 @@ def tdmHalfPlrMaskedIncs(ks):
 
     Parity and shared sets advance through a shadow increment, which the mask zeroes instead. A
     tensor that advances by its own increment loses it, while removeStagger still needs it to
-    rebase that tensor's descriptor for the K tail: every live tensor on one wave, where each
-    keeps its own Group0, and on more waves both members of an every-wave pair, the data
-    tensor beside a shared scale set and a stashed scale there, and a lone scale on
-    a parity row. Empty for HalfPLR 0.
+    rebase that tensor's descriptor for the K tail: on more waves both members of an every-wave
+    pair, the data tensor beside a shared scale set and a stashed scale there, and a lone scale
+    on a parity row. One wave masks its increments in a temporary and keeps GlobalReadIncs, except
+    on the subtile path, which zeroes every live tensor's own. Empty for HalfPLR 0.
     """
     if not ks.get("HalfPLR"):
         return ()
     if ks.get("NumWaves", 1) <= 1:
-        return ("A", "B") + tdmLiveScales(ks)
+        return ("A", "B") + tdmLiveScales(ks) if ks.get("UseSubtileImpl") else ()
     if tdmSharedScaleSetActive(ks):
         return ("B" if tdmSharedScaleSetOwner(ks) == "A" else "A",) + tdmStashedMembers(ks)
     if tdmPairOnEveryWave(ks, "A", "B"):

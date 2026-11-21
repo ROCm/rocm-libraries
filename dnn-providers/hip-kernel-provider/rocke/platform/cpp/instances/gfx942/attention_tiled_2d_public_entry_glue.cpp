@@ -40,7 +40,9 @@
 
 #include "rocke/helper_helper_rocke.instances.common.attention_unified_selectors.h" /* rocke_unified_attn_tiled_2d_lds_bytes */
 #include "rocke/helper_rocke.helpers.spec.h" /* rocke_kernel_name_join */
+#include "rocke/helper_rocke.instances.common._fmha_common.h" /* rocke_attention_check_head_counts */
 
+#include "rocke/arena.h" /* rocke_arena_strdup */
 #include "rocke/error_boundary.hpp" /* ckc::guard_builder boundary shim */
 #include <stdio.h>
 #include <string.h>
@@ -514,7 +516,7 @@ static rocke_status_t
     /* Value-carrying optionals become conditional strings; value-less flags
      * are passed as positional parts (kernel_name_join drops empties), exactly
      * as the Python kernel_name does. */
-    char d_buf[32], b_buf[32], t_buf[32], hkv_buf[64], kv_buf[64];
+    char d_buf[32], b_buf[32], t_buf[32], hkv_buf[64], fhkv_buf[64], kv_buf[64];
     char sw_buf[32], w_buf[32], wpe_buf[32], mw_buf[32], kvcp_buf[64];
     char rd_buf[32], ks_buf[32];
     int nqh, nkv;
@@ -524,6 +526,9 @@ static rocke_status_t
 
     nqh = s->num_query_heads;
     nkv = s->num_kv_heads;
+    /* The name carries the GQA ratio; reject a spec it cannot be formed for. */
+    if(nkv <= 0)
+        return ROCKE_ERR_VALUE;
 
     snprintf(d_buf, sizeof(d_buf), "d%d", s->head_size);
     snprintf(b_buf, sizeof(b_buf), "b%d", s->block_size);
@@ -531,13 +536,20 @@ static rocke_status_t
         snprintf(t_buf, sizeof(t_buf), "t%d", rocke_attention_tiled_2d_spec_tile_size_eff(s));
     else
         t_buf[0] = '\0';
-    snprintf(hkv_buf, sizeof(hkv_buf), "h%dkv%d", nqh, nkv);
+    /* Head counts are kernargs; only the GQA ratio is baked. */
+    snprintf(hkv_buf, sizeof(hkv_buf), "g%d", nqh / nkv);
+    /* Except on the fast paged-KV descriptor path, whose shifts bake them. */
+    if(s->use_fast_paged_kv_desc)
+        snprintf(fhkv_buf, sizeof(fhkv_buf), "h%dkv%d", nqh, nkv);
+    else
+        fhkv_buf[0] = '\0';
     if(s->kv_storage_dtype)
         snprintf(kv_buf, sizeof(kv_buf), "kv%s", s->kv_storage_dtype);
     else
         kv_buf[0] = '\0';
+    /* The window size is a kernarg; only whether the body masks one is baked. */
     if(s->sliding_window > 0)
-        snprintf(sw_buf, sizeof(sw_buf), "sw%d", s->sliding_window);
+        snprintf(sw_buf, sizeof(sw_buf), "sw");
     else
         sw_buf[0] = '\0';
     if(s->num_warps != 1)
@@ -579,11 +591,14 @@ static rocke_status_t
             b_buf,
             t_buf,
             hkv_buf,
+            fhkv_buf,
             s->dtype ? s->dtype : "",
             kv_buf,
             /* Python emits "fnuz" under the *same* condition as the kv part,
              * not under a format test, so it keys off kv_buf being non-empty. */
             kv_buf[0] ? "fnuz" : "",
+            /* i64 K/V addressing changes the loaders, so it is a distinct kernel. */
+            s->use_i64_kv_addr ? "i64" : "",
             s->use_sinks ? "sinks" : "",
             sw_buf,
             s->has_softcap ? "softcap" : "",
@@ -639,12 +654,21 @@ rocke_kernel_def_t* rocke_build_unified_attention_2d_tiled_scalar_new(
 {
     return ckc::guard_builder(b, [&]() -> rocke_kernel_def_t* {
         char kname[1024];
+        char why[160];
         if(b == NULL || spec == NULL)
             return NULL;
+        /* Init before anything can fail: the lower convenience reads and frees
+         * `b` whatever this returns. */
+        if(rocke_ir_builder_init(b, "") != ROCKE_OK)
+            return NULL;
+        if(!rocke_attention_check_head_counts(
+               spec->num_query_heads, spec->num_kv_heads, why, sizeof(why)))
+            ckc::raise_status(ROCKE_ERR_VALUE, why);
         if(rocke__attn2d_kernel_name(spec, kname, sizeof(kname)) != ROCKE_OK)
-            return NULL;
-        if(rocke_ir_builder_init(b, kname) != ROCKE_OK)
-            return NULL;
+            ckc::raise_status(ROCKE_ERR_VALUE, "tiled 2D kernel_name encode failed");
+        b->kernel->name = rocke_arena_strdup(&b->arena, kname);
+        if(b->kernel->name == NULL)
+            ckc::raise_status(ROCKE_ERR_OOM, "tiled 2D kernel name OOM");
         return rocke_build_unified_attention_2d_tiled_scalar(b, spec, arch);
     });
 }

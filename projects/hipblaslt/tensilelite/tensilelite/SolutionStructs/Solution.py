@@ -43,6 +43,7 @@ from ..Common import assignParameterWithDefault, IsaInfo, \
                     deriveWaveParams, \
                     swizzleGeometry
 from ..Common.DataType import DataType
+from ..Common.ScaleAlphaVec import scaleAlphaSupportsDeviceScalar, scaleAlphaVectorMode
 from ..Common.LdsPaddingLimits import B128_PAD_STEP_BYTES, LDS_PAD_STEP_BYTES, \
                                        ldsBlockError, ldsPadError
 from ..Components.DecouplePGR import pgrLevelsForTensors, ldsBlocksForPgrLevel, \
@@ -68,7 +69,7 @@ from ..SolutionStructs.LdsPadding import get_fp4_mt_config, get_fp8_mt_config, g
 from ..Common.GlobalParameters import defaultSolution, \
                                             defaultInternalSupportParams, \
                                             globalParameters
-from ..Common.MxScaleLayout import mxFreePhase, mxFreeTile, mxLdsAlign, mxLdsNumBytes, mxTdmTileM
+from ..Common.MxScaleLayout import mxFreePhase, mxFreeTile, mxLdsAlign, mxLdsNumBytes, mxReadVectorWidth, mxTdmTileM
 from ..Common.ValidParameters import validParameters, \
                                             _getExpectedTypes, \
                                             _expectedParamTypes, \
@@ -91,7 +92,7 @@ from ..Components.CustomSchedule import hasCustomSchedule
 from ..Component import TensorDataMover
 from ..Components.TensorDataMover import TensorDataMoverLoad
 from .Utilities import TDM_PAD_INTERVAL_LIMIT, isSubtileIterateMode, reject, roundupRatio, pvar
-from .Validators.MXScaleFormat import validateMXScaleFormatCombination
+from .Validators.MXScaleFormat import validateHostPreSwizzle128x4, validateMXScaleFormatCombination
 from .Validators.Subtile import (subtileStackForTLU1, subtileTLU1StackReason,
                                  validateSubtileGRKPartition)
 from ..Common.Utilities import isMxf4SubtilePath, isSubtileSwizzledTensor, plsinDataTypes, swizzleTensorMaxDepthU
@@ -144,6 +145,9 @@ def _deriveAndValidateMXScaleLayoutAndTransport(state, asmCaps, archCaps, printR
   hasMXBlock   = bool(state["ProblemType"]["MXBlockA"] or state["ProblemType"]["MXBlockB"])
   hasMxSwizCap = bool(archCaps.get("HasMXScaleSwizzle", False))
   isGfx950     = state["ISA"] == (9, 5, 0)
+
+  if not validateHostPreSwizzle128x4(state, False, printRejectionReason):
+    return False
 
   # MXLoadInst default: TDM iff TDMInst != 0; otherwise BufferLoad.
   if state["MXLoadInst"] == "Auto":
@@ -911,6 +915,16 @@ def isExtractableIndex(ks, index, tc='x'):
 ################################################################################
 _stinkyTuneAnnounced = set()  # print the StinkyTofuParameters notice once per distinct value
 
+def _usesFp8LdsConfig(dtype, state):
+    """True when the LDS pad / block config of an 8-bit tensor follows the fp8 rules.
+
+    Sparse int8 kernels read LDS through the same LDS-transpose and TDM path as
+    fp8, so they share its pad and block sizes. Dense int8 keeps its existing
+    path: this module is shared with hipBLASLt, whose int8 kernels must not move.
+    """
+    return dtype.is8bitFloat() or (bool(state["ProblemType"]["Sparse"]) and dtype.isInt8())
+
+
 class Solution(collections.abc.Mapping):
   MAX_NUM_DS_LOAD_VGPRS: int = 4
   MAX_NUM_DS_LOAD_BYTES: int = 4 * MAX_NUM_DS_LOAD_VGPRS
@@ -1033,13 +1047,25 @@ class Solution(collections.abc.Mapping):
     pre_records = validateParameterTypes(self._state, srcFile=srcName)
     mergeMismatchRecords(pre_records)
 
+    # Check before either derivation path, including pre-derived/custom kernels.
+    if (scaleAlphaSupportsDeviceScalar(self["ProblemType"]["UseScaleAlphaVec"])
+        and tuple(self["ISA"]) != (12, 5, 0)):
+      reject(self._state, printSolutionRejectionReason,
+             "UseScaleAlphaVec device scalar alpha (5/6/7) is only supported on gfx1250")
+      self["Valid"] = False
+      return
+
     isHandwrittenCustomKernel = ("CustomKernel" in self._state
         and self._state["CustomKernel"].get("name", "")
         and not self._state["CustomKernel"].get("generated", False))
     if isHandwrittenCustomKernel:
       Solution._assignCustomKernelParameters(self._state)
       self._name = self._state["CustomKernel"]["name"]
+      validateHostPreSwizzle128x4(self._state, True, printSolutionRejectionReason)
     else:
+      # Pre-derived states skip assignDerivedParameters' own check.
+      if not validateHostPreSwizzle128x4(self._state, False, printSolutionRejectionReason):
+        return
       savedCustomKernel = self._state.pop("CustomKernel", None) if "CustomKernel" in self._state else None
       Solution.assignDerivedParameters(
         self._state,
@@ -1283,6 +1309,9 @@ class Solution(collections.abc.Mapping):
         reject(state, printRejectionReason, f"size of WorkGroup {state['NumThreads']} should be multiple of WavefrontSize {state['WavefrontSize']}")
 
       state["NumWaves"] = state["NumThreads"] // state['WavefrontSize']
+      numWaves = state["NumWaves"]
+      if state["ProblemType"].get("OutputAmaxD", False) and numWaves & (numWaves - 1):
+        reject(state, printRejectionReason, f"OutputAmaxD needs a power-of-two NumWaves ({numWaves}): the inter-wave amax reduction halves it each step")
 
     # macro tile sizes
     if "SubGroup0" in state and "ThreadTile0" in state:
@@ -2330,6 +2359,11 @@ class Solution(collections.abc.Mapping):
     if "PostLoopStoreInNll" not in state:
       state["PostLoopStoreInNll"] = True
 
+    # The fused post-loop store has no peer D store (OutputPeerD adds it to the regular epilogue).
+    if state["ProblemType"].get("OutputPeerD", False):
+      state["PostLoopStoreInNll"] = False
+      return
+
     isa = tuple(state["ISA"])
 
     if state["PostLoopStoreInNll"]:
@@ -2406,6 +2440,33 @@ class Solution(collections.abc.Mapping):
       state["PostLoopStoreInNll"] = False
 
   ########################################
+  # OutputPeerD feasibility: what a solution with a second D store must not use
+  @staticmethod
+  def outputPeerDUnmet(state):
+    """The limits of OutputPeerD that `state` does not meet (empty when it is allowed).
+
+    The second D store is added to the plain buffer-store epilogue only (addStore, tc 'D'),
+    and it is a system-scope store, which only gfx1250 is validated for.
+    """
+    problemType = state["ProblemType"]
+    limits = (
+      (tuple(state.get("ISA", (0, 0, 0))) == (12, 5, 0), "gfx1250"),
+      (state.get("BufferStore", 1) == 1, "BufferStore=1"),
+      # SCOPE_SYS with the LU/WB hint is not accepted by the assembler.
+      (state.get("TemporalHintD", 0) != 3, "TemporalHintD != 3"),
+      (state.get("GlobalSplitU", 1) == 1, "GlobalSplitU=1"),
+      (not isPersistent(state), "no StreamK / persistent kernel"),
+      (not state.get("StoreRemapVectorWidth", 0), "StoreRemapVectorWidth=0"),
+      (not state.get("UseSubtileImpl", False), "UseSubtileImpl=False"),
+      (state.get("WorkGroup", [0, 0, 1])[2] == 1, "no LocalSplitU"),
+      (not problemType.get("GroupedGemm", False), "no GroupedGemm"),
+      (not problemType.get("OutputAmaxD", False), "no OutputAmaxD"),
+      (not problemType.get("UseE", False), "no UseE"),
+      (problemType.get("FusedA2A", "Disabled") == "Disabled", "FusedA2A=Disabled"),
+    )
+    return [what for ok, what in limits if not ok]
+
+  ########################################
   # assign all derived parameters
   @staticmethod
   def assignDerivedParameters(
@@ -2418,6 +2479,11 @@ class Solution(collections.abc.Mapping):
     dcpAutoSkip=None
   ):
     """Derive, stepping auto's pair ranking past a pair the LDS check refuses."""
+    if state["ProblemType"].get("OutputPeerD", False):
+      unmet = Solution.outputPeerDUnmet(state)
+      if unmet:
+        reject(state, printRejectionReason, "OutputPeerD needs: " + ", ".join(unmet))
+        return
     if isPersistent(state) and state["ProblemType"].get("OutputAmaxD", False):
       reject(state, printRejectionReason,
              "StreamK with OutputAmaxD is unsupported: amax reduction requires one "
@@ -2668,30 +2734,65 @@ class Solution(collections.abc.Mapping):
       reject(state, printRejectionReason, "Either GlobalSplitU or a persistent TileProcessingStrategy must be enabled")
       return
 
-    if state["ProblemType"]["FusedGemmA2A"]:
+    fusedA2A = state["ProblemType"]["FusedA2A"]
+    if fusedA2A != "Disabled":
       if isa[:2] not in ((9, 4), (9, 5)):
         reject(state, printRejectionReason,
-               "FusedGemmA2A requires a gfx94x/gfx95x ISA (the SdmaPacketEmitter "
-               "packet layout is gfx9 only)")
-        return
-      if not state["ProblemType"]["DestDataType"].isBFloat16():
-        reject(state, printRejectionReason, "FusedGemmA2A only supports a bf16 D")
+               "FusedA2A=%s requires a gfx94x/gfx95x ISA (the SdmaPacketEmitter "
+               "packet layout is gfx9 only)" % fusedA2A)
         return
       if isPersistent(state):
-        reject(state, printRejectionReason, "FusedGemmA2A requires TileProcessingStrategy=None")
-        return
-      mt0, mt1 = state["MacroTile0"], state["MacroTile1"]
-      if mt0 not in (128, 256) or mt1 not in (128, 256):
-        reject(state, printRejectionReason, "FusedGemmA2A supports MacroTile0/1 in {128, 256}")
+        reject(state, printRejectionReason,
+               "FusedA2A=%s requires TileProcessingStrategy=None" % fusedA2A)
         return
       if state["GlobalSplitU"] != 1:
         reject(state, printRejectionReason,
-               "FusedGemmA2A requires GlobalSplitU=1 (the DRAIN owner is elected "
+               "FusedA2A=%s requires GlobalSplitU=1 (the last work-group is elected "
                "against NumWorkGroups0*NumWorkGroups1; any other GSU can multiply "
                "the arriving work-group count -- GSU=-1 resolves at runtime -- so "
-               "the election may fire early)")
+               "the election may fire early)" % fusedA2A)
+        return
+      mt0, mt1 = state["MacroTile0"], state["MacroTile1"]
+      if mt0 not in (128, 256) or mt1 not in (128, 256):
+        reject(state, printRejectionReason,
+               "FusedA2A=%s requires MacroTile0/1 in {128, 256}" % fusedA2A)
         return
       state["InternalSupportParams"]["SupportUserGSU"] = False # Disable UserGSU for the last-WG election
+
+    if fusedA2A == "GemmA2A":
+      if not state["ProblemType"]["DestDataType"].isBFloat16():
+        reject(state, printRejectionReason, "FusedA2A=GemmA2A requires a bf16 D")
+        return
+
+    if state["A2ASubRounds"] != 1 and fusedA2A != "A2AGemm":
+      reject(state, printRejectionReason, "A2ASubRounds > 1 requires FusedA2A=A2AGemm")
+      return
+
+    if fusedA2A == "A2AGemm":
+      _disableRuntimeStaggerU(state)
+      if not state["ProblemType"]["DataTypeB"].isBFloat16():
+        reject(state, printRejectionReason, "FusedA2A=A2AGemm requires a bf16 B")
+        return
+      if state["UseSubtileImpl"]:
+        reject(state, printRejectionReason, "FusedA2A=A2AGemm requires UseSubtileImpl=0")
+        return
+      if state["DirectToVgprA"] or state["DirectToVgprB"]:
+        reject(state, printRejectionReason,
+               "FusedA2A=A2AGemm requires DirectToVgprA=DirectToVgprB=0")
+        return
+      if not state["BufferLoad"]:
+        reject(state, printRejectionReason, "FusedA2A=A2AGemm requires BufferLoad=1")
+        return
+      if state["WorkGroupMapping"] < 0:
+        reject(state, printRejectionReason, "FusedA2A=A2AGemm requires WorkGroupMapping >= 0")
+        return
+      if state["WorkGroupMappingXCC"] != 1:
+        reject(state, printRejectionReason, "FusedA2A=A2AGemm requires WorkGroupMappingXCC=1")
+        return
+      if state["SpaceFillingAlgo"]:
+        reject(state, printRejectionReason, "FusedA2A=A2AGemm requires SpaceFillingAlgo=[]")
+        return
+      state["OptNoLoadLoop"] = 0
 
     if state["GlobalSplitU"] == 0 and state["AdaptiveGemmGSUA"] == 1:
       reject(state, printRejectionReason, "AdaptiveGemmGSUA requires GSU enablement")
@@ -2714,6 +2815,14 @@ class Solution(collections.abc.Mapping):
               or (hasStaticAssignment(state) and not state["ProblemType"]["Gradient"]
                   and not state["ProblemType"]["Sparse"] and not state.get("UseSubtileImpl", False))))
     state["InternalSupportParams"]["SupportOccupancyProbe"] = _supportOccupancyProbe(state)
+
+    if (scaleAlphaSupportsDeviceScalar(state["ProblemType"]["UseScaleAlphaVec"])
+          and not isCustomKernelConfig(state)
+          and not (state["ProblemType"]["ComputeDataType"].isSingle()
+                   and state["KernelLanguage"] == "Assembly")):
+      reject(state, printRejectionReason,
+             "UseScaleAlphaVec scalar support requires an Assembly kernel with FP32 compute")
+      return
 
     if isPersistent(state):
       #state["AssertSummationElementMultiple"] = 1 # Cannot keep ASEM with Stream-K
@@ -3432,15 +3541,74 @@ class Solution(collections.abc.Mapping):
       and ((numBytesB == 1 and isaInfoMap[isa].asmCaps["HasGLTr8B64"]) \
         or (numBytesB == 2 and isaInfoMap[isa].asmCaps["HasGLTr16B128"]) \
       )
-	  
-    if state["enableLDSTrA"] or state["enableGLTrA"]:
+    if state["ProblemType"]["Sparse"]:
+      # ON/OFF the sourceswap according to the sparse type automatically
+      state["SourceSwap"] = False if state["ProblemType"]["Sparse"] == 1 else True
+    # Normalise LDSTrStoreShuffle to 0 where the shuffle could not run regardless of what the
+    # yaml asked for: without enableLDSTrA there is no layout to bridge, and storeRemap is the
+    # alternative bridge rather than a companion. 1 and 2 would emit the same assembly as 0 in
+    # those cases, so collapsing them keeps one kernel name instead of three.
+    # VectorWidthA == 1 lands here too: the shuffle is a no-op at 1, so an explicit
+    # VectorWidthA: 1 with LDSTrStoreShuffle 1 or 2 must not get its own kernel name.
+    # Checked here rather than with the other VectorWidthA preconditions because
+    # StoreRemapVectorWidth is not final until the block just above.
+    if not (state["enableLDSTrA"] and state["VectorWidthA"] > 1 and state["SourceSwap"] \
+      and not state["ProblemType"]["MXBlockA"]) or state["StoreRemapVectorWidth"] > 0:
+      # Say why, but only when the yaml actually asked for the shuffle. The default is 0, so
+      # warning unconditionally would fire for every kernel that never wanted it.
+      if state["LDSTrStoreShuffle"]:
+        if not state["enableLDSTrA"]:
+          _ssWhy = "enableLDSTrA is off (needs LDSTrInst, a 1- or 2-byte MacDataTypeA, " \
+                   "UnrollMajorLDSA off and DirectToVgprA off)"
+        elif state["VectorWidthA"] <= 1:
+          _ssWhy = "VectorWidthA is %u -- the shuffle is a no-op at 1" % state["VectorWidthA"]
+        elif not state["SourceSwap"]:
+          _ssWhy = "SourceSwap is off (the store takes vectorWidth0 = VectorWidthA only in " \
+                   "SourceSwap mode)"
+        elif state["ProblemType"]["MXBlockA"]:
+          _ssWhy = "MXBlockA is set: A would be read in the ds_read_tr VW=1 row order while " \
+                   "VectorWidthMXSA inherits VectorWidthA and the scale reads stay " \
+                   "VW-interleaved (enableLDSTrMXSA is always False), so rows would be " \
+                   "scaled wrongly and the epilogue shuffle cannot undo it"
+        elif state["StoreRemapVectorWidth"] > 0:
+          _ssWhy = "StoreRemapVectorWidth is %u -- storeRemap is the alternative bridge, " \
+                   "not a companion" % state["StoreRemapVectorWidth"]
+        else:
+          _ssWhy = "UnKnown"
+        # The clamp below only moves VectorWidthA when it is currently > 1; saying so when the
+        # reason IS that it is already 1 would be nonsense.
+        _ssClamp = " VectorWidthA %u will be clamped to 1." % state["VectorWidthA"] \
+                   if (state["enableLDSTrA"] and state["VectorWidthA"] > 1) else ""
+        printWarning("LDSTrStoreShuffle %u requested but disabled: %s.%s"
+                     % (state["LDSTrStoreShuffle"], _ssWhy, _ssClamp))
+      state["LDSTrStoreShuffle"] = 0
+
+    # enableLDSTrA used to clamp VectorWidthA unconditionally: ds_read_tr fixes the lane->row
+    # stride at 1, so a wider store had nothing to read. storeShuffleForLDSTrVW lifts that by
+    # re-ordering the accumulators in the epilogue, but only when asked -- LDSTrStoreShuffle 0
+    # keeps the old clamp so kernels that predate the shuffle are unaffected, including the
+    # ones that leave VectorWidthA at -1 and would otherwise be auto-promoted to 2/4/8 (which
+    # changes both their performance and, at VectorWidthA > 8, whether they build at all).
+    # The clamp is silent rather than a rejection because that is what it did before.
+    if state["enableGLTrA"] or (state["enableLDSTrA"] and state["LDSTrStoreShuffle"] == 0):
       state["VectorWidthA"] = 1
 
     if state["enableLDSTrB"] or state["enableGLTrB"]:
       state["VectorWidthB"] = 1
 
+    if state["ProblemType"]["Sparse"]:
+      if not state["DirectToVgprSparseMetadata"]:
+        state["VectorWidthMetadata"] = state["VectorWidthA"] if state["ProblemType"]["Sparse"] == 1 else state["VectorWidthB"]
+
     if state["enableLDSTrMetadata"]:
       state["VectorWidthMetadata"] = 1
+      # The metadata read and the sparse operand's read used to be required to share a
+      # VectorWidth, which forced VectorWidthA=1 for Sparse==1 and VectorWidthB=1 for
+      # Sparse==2. That coupling is gone on the A side: ds_read_tr fixes the metadata read at
+      # VW=1 in the tile direction regardless (lrvwTileMetadata, KernelWriter.py), and A's
+      # VW>1 is now expressed in the epilogue by storeShuffleForLDSTrVW rather than in the
+      # read geometry, so the two no longer have to agree. Sparse==2 still clamps B, but for
+      # an unrelated reason -- see the enableLDSTrB clamp: N is the strided direction of C/D.
       if state["ProblemType"]["Sparse"] == 1:
         state["VectorWidthA"] = 1
       elif state["ProblemType"]["Sparse"] == 2:
@@ -3551,11 +3719,53 @@ class Solution(collections.abc.Mapping):
         while state["MIWaveTile"][1] % (state["VectorWidthB"] * state["numSubTiles"]) != 0:
           state["VectorWidthB"] //= state["numSubTiles"]
 
-    if state["ProblemType"]["Sparse"]:
-      if not state["DirectToVgprSparseMetadata"]:
-        state["VectorWidthMetadata"] = state["VectorWidthA"] if state["ProblemType"]["Sparse"] == 1 else state["VectorWidthB"]
-      # ON/OFF the sourceswap according to the sparse type automatically
-      state["SourceSwap"] = False if state["ProblemType"]["Sparse"] == 1 else True
+    # ds_read_tr hands lane L the tile row (m_base + L), so the A read is laid out VW=1 in
+    # the tile direction whatever VectorWidthA is (see mTileOffset in Components/LocalRead.py).
+    # VectorWidthA runs along M, which is contiguous in C/D, so VWA > 1 still pays for itself:
+    # the accumulators are shuffled from the read's VW=1 row order into the store's
+    # VW-interleaved order once in the epilogue (storeShuffleForLDSTrVW in KernelWriterAssembly).
+    # The shuffle handles VectorWidthA 2, 4 and 8 and any MIWaveTile[0] that is a multiple of
+    # it; its cost grows as VW*VW per group of VW tiles, so the wider settings want a
+    # benchmark before use. Placed after the sparse block above because SourceSwap is not
+    # final until then.
+    if state["LDSTrStoreShuffle"]:
+      vwA = state["VectorWidthA"]
+      if vwA not in (2, 4, 8):
+        reject(state, printRejectionReason, \
+            "enableLDSTrA with VectorWidthA=%u: only 1, 2, 4 and 8 are implemented" % vwA)
+        return
+      if vwA > state["MatrixInstM"]:
+        # lane = ((L << log2VW) & (MI-1)) | s needs the VW slots to fit inside one MI lane group.
+        reject(state, printRejectionReason, \
+            "enableLDSTrA with VectorWidthA(%u) > MatrixInstM(%u)" % (vwA, state["MatrixInstM"]))
+        return
+      if state["MIWaveTile"][0] % vwA != 0:
+        reject(state, printRejectionReason, \
+            "enableLDSTrA with VectorWidthA=%u requires MIWaveTile[0](%u) to be a multiple " \
+            "of VectorWidthA" % (vwA, state["MIWaveTile"][0]))
+        return
+      # MIWaveGroup[0] > 1 is supported: the wave offset keeps the real VectorWidth
+      # (strideWave in Components/LraTileAssignment.py) and the tile offset splits into
+      # group/tile-in-group (mTileOffset in Components/LocalRead.py), so each wave still owns
+      # exactly the VW*MatrixInstM rows the store assigns it and the shuffle stays within the
+      # wave. MatrixInstBM > 1 has not been derived.
+      if state["MatrixInstBM"] != 1:
+        reject(state, printRejectionReason, \
+            "enableLDSTrA with VectorWidthA>1 requires MatrixInstBM(%u) == 1" \
+            % state["MatrixInstBM"])
+        return
+      if state["LocalSplitU"] > 1:
+        reject(state, printRejectionReason, \
+            "enableLDSTrA with VectorWidthA>1 does not support LocalSplitU>1 (LSU reduces " \
+            "through LDS with its own element layout)")
+        return
+      if state["WavefrontSize"] != 32:
+        # The shuffle's ds_bpermute addressing assumes one N group per MI_M lanes within a
+        # 32-lane wave; wave64 has not been derived or validated.
+        reject(state, printRejectionReason, \
+            "enableLDSTrA with VectorWidthA>1 is only implemented for WavefrontSize 32 (got %u)" \
+            % state["WavefrontSize"])
+        return
 
     # The real value of "1LDSBuffer" will be determined later (when it is -1), not here
 
@@ -3570,6 +3780,11 @@ class Solution(collections.abc.Mapping):
       if (state["MIWaveTile"][1] % state["VectorWidthB"]) != 0:
         reject(state, printRejectionReason, "MIWaveTile0(%u) should be multiple of VectorWidthB(%u)" % (state["MIWaveTile"][1], state["VectorWidthB"]))
         return
+
+      # A full-wave vector already stays in one M half. Keep its original path,
+      # including any later TDM width fallback.
+      if state.get("WaveTileContiguousA") and state["VectorWidthA"] == state["MIWaveTile"][0]:
+        state["WaveTileContiguousA"] = False
 
     if len(problemType["IndicesSummation"]) > 1:
       # not supported with multiple summations, bug is maybe something with
@@ -3652,10 +3867,9 @@ class Solution(collections.abc.Mapping):
         return
 
     if state["CompactLoopStore"]:
-      state["CompactLoopStore"] = False
       if not isaInfoMap[isa].asmCaps["HasMovRelsD2B32"]:
-        reject(state, printRejectionReason, "This arch does not support CompactLoopStore (no v_movrelsd_2_b32)")
-        return
+        state["CompactLoopStore"] = False
+        print("WARNING: This arch does not support CompactLoopStore (no v_movrelsd_2_b32) CompactLoopStore->false")
       # The CLS store reads acc VGPRs through M0-relative v_movrelsd_2_b32 and turns
       # the per-batch row advance into a delayed primer chain; both are defined only
       # by the MFMA acc->arch mapping, so there is nothing to compact on a VALU
@@ -3767,11 +3981,11 @@ class Solution(collections.abc.Mapping):
       if numWaves > 1 and (numWaves & (numWaves - 1)) != 0:
         reject(state, printRejectionReason, f"Wave-separated TDM requires NumWaves={numWaves} to be a power of two")
         return
-      if state["1LDSBuffer"] == -1:
-        state["1LDSBuffer"] = 0
-      if state["1LDSBuffer"] and state["PrefetchGlobalRead"] == 2:
-        reject(state, printRejectionReason, "TDM requires at least 2 LDS buffers for PGR2")
-        return
+
+    # TDM needs at least 2 LDS buffers, so auto (-1) resolves to 0 here.
+    # An explicit or forced 1LDSBuffer=1 is rejected once its value is final.
+    if (state["enableTDMA"] or state["enableTDMB"]) and state["1LDSBuffer"] == -1:
+      state["1LDSBuffer"] = 0
 
     # TDMLoadWaveSync needs the StinkyTofu backend (ScheduleIterAlg=4); reject
     # otherwise. It only matters with TDM in flight and >1 wave; else turn it off.
@@ -3908,6 +4122,12 @@ class Solution(collections.abc.Mapping):
     if "ValidDepthU" in state:
       del state["ValidDepthU"]
 
+    if state["A2ASubRounds"] > 1 \
+        and state["DepthU"] * state["ProblemType"]["DataTypeB"].numBytes() % 128 != 0:
+      reject(state, printRejectionReason,
+             "A2ASubRounds > 1 requires DepthU*bpeB %% 128 == 0; got DepthU=%d" % state["DepthU"])
+      return
+
     # Some restrictions for float4 and 6bitFloat:
     # TODO: remove this if edge and tail are supported for fp4/fp6/bf6
     isFloat4 = state["ProblemType"]["DataTypeA"].isFloat4() or state["ProblemType"]["DataTypeB"].isFloat4()
@@ -3954,6 +4174,15 @@ class Solution(collections.abc.Mapping):
 
     state["AssertSummationElementMultiple"] = max(state["ProblemType"]["MXBlockA"], state["AssertSummationElementMultiple"])
     state["AssertSummationElementMultiple"] = max(state["ProblemType"]["MXBlockB"], state["AssertSummationElementMultiple"])
+
+    if state["ProblemType"]["FusedA2A"] == "A2AGemm":
+      asem = state["AssertSummationElementMultiple"]
+      if asem not in (1, state["DepthU"]):
+        reject(state, printRejectionReason,
+               "FusedA2A=A2AGemm requires AssertSummationElementMultiple 1 or DepthU (%u), got %u"
+               % (state["DepthU"], asem))
+        return
+      state["AssertSummationElementMultiple"] = state["DepthU"]
 
     # NoTailLoop parameter initialization.
     # If ASEM is multiple of DepthU TailLoop will not be used.
@@ -4198,6 +4427,12 @@ class Solution(collections.abc.Mapping):
       reject(state, printRejectionReason, "Current LDSTrInst implementation does not support 1LDSBuffer=0")
       return
 
+    # TDM requires 1LDSBuffer=0. With a single LDS buffer, the next tile's tensor
+    # loads would write the only buffer while other waves are still reading it.
+    if (state["enableTDMA"] or state["enableTDMB"]) and state["1LDSBuffer"]:
+      reject(state, printRejectionReason, "1LDSBuffer must be 0 for TDM")
+      return
+
   @staticmethod
   def rapMaxResidentKTiles(state, problemType, isa, isaInfoMap, packedC0, packedC1):
     """Most k-tiles ReuseAcrossPersistent can hold without splitting the store.
@@ -4264,13 +4499,13 @@ class Solution(collections.abc.Mapping):
       vgprsPerElement += vgprsPerAddr  # addrGSUSyncVgprs
 
     # One buffer set per resident k-tile: a ValuA block plus its MX scale block,
-    # numVgprBuffer blocks of each. Mirrors vgprAllocationImplClassic, including
-    # its ceil: at MXBlock 128 a WaveTile's single e8 still takes a whole VGPR,
-    # which flooring the product would price at none. The MX TileSpan halving is
-    # deliberately not modelled: leaving it out overstates R, which understates
-    # k, and only the understating direction is safe here.
-    numVgprBuffer = state["LoopIters"] if state["ClusterLocalRead"] \
-                    else state["PrefetchLocalRead"] + 1
+    # LoopIters blocks of each, one per iteration whatever the prefetch slots.
+    # Mirrors vgprAllocationImplClassic, including its ceil: at MXBlock 128 a
+    # WaveTile's single e8 still takes a whole VGPR, which flooring the product
+    # would price at none. The MX TileSpan halving is deliberately not modelled:
+    # leaving it out overstates R, which understates k, and only the
+    # understating direction is safe here.
+    numVgprBuffer = state["LoopIters"]
     macA = problemType.get("MacDataTypeA") or problemType["DataType"]
     bpeA = bpr * macA.numRegisters()
     mxsaPerBlock = 0
@@ -4443,11 +4678,20 @@ class Solution(collections.abc.Mapping):
       iterModeMask = state["TDMIterateMode"]
       autoTdmIterateMode = iterModeMask == -1
       if state["TDMInst"] and state["EnableMatrixInstruction"]:
+        contiguousA = state.get("WaveTileContiguousA", False)
+        if contiguousA:
+          # A uses row padding through pad_interval; only B may iterate.
+          state.pop("_TDMIterateModeA", None)
+          if iterModeMask != -1:
+            iterModeMask &= ~1
+            state["TDMIterateMode"] = iterModeMask
         # Stage 1: decide iterate-mode per tensor.
         if iterModeMask == -1:
           state.pop("_TDMIterateModeA", None)
           state.pop("_TDMIterateModeB", None)
           for tc in ["A", "B"]:
+            if tc == "A" and contiguousA:
+              continue
             if not state["UnrollMajorLDS%s" % tc]:
               continue
             vw = state["VectorWidth%s" % tc]
@@ -4484,6 +4728,8 @@ class Solution(collections.abc.Mapping):
         # fits the pad_interval 1024 B limit.
         multiple = 256
         for tc in ["A", "B"]:
+          if tc == "A" and contiguousA:
+            continue
           if state.get("_TDMIterateMode%s" % tc, False):
             continue
           if not state.get("_inputVW%s_was_auto" % tc, False):
@@ -4637,7 +4883,7 @@ class Solution(collections.abc.Mapping):
                       mt, "pad", miwt, miwg, state["MatrixInstK"], tdm,
                       tdmComponentBytes=tdmComponentBytes,
                       tdmNumComponents=tdmNumComponents)
-                elif macDtype.is8bitFloat() and ldstr:
+                elif _usesFp8LdsConfig(macDtype, state) and ldstr:
                   ldsPad = get_fp8_mt_config(
                       mt, "pad", miwt, miwg, state["MatrixInstK"], tdm,
                       tdmComponentBytes=tdmComponentBytes,
@@ -4751,9 +4997,10 @@ class Solution(collections.abc.Mapping):
           if not state["ProblemType"][f"MXBlock{sub}"]:
             return 0
           if wmmaV3:
+            vectorWidth = mxReadVectorWidth(state, tc) if state.get("WaveTileContiguousA") and tc == "MXSA" else state[f"VectorWidth{sub}"]
             return get_mxs_mt_config(state["MatrixInstK"],
                                       state["ProblemType"][f"MXBlock{sub}"],
-                                      state[f"VectorWidth{sub}"], "pad")
+                                      vectorWidth, "pad")
           return 0
 
         ldsPadMXSA = calcLdsPadPerMxOperand("MXSA")
@@ -4804,9 +5051,12 @@ class Solution(collections.abc.Mapping):
             if val == 0: continue
             err = ldsBlockError(val)
             if err:
+              hint = ("WaveTileContiguousA disables A iterate; reduce DepthU or disable WaveTileContiguousA."
+                      if tc == "A" and state.get("WaveTileContiguousA")
+                      else "Set TDMIterateMode or reduce DepthU / VectorWidth.")
               reject(state, printRejectionReason,
                      f"LdsBlockSizePerPad{tc}={val}: {err} for the TDM pad_interval "
-                     f"field. Set TDMIterateMode or reduce DepthU / VectorWidth.")
+                     f"field. {hint}")
               return
 
       def calcMXSLdsBlockSizePerPad(tc: str, lrvw: int) -> int:
@@ -4818,8 +5068,9 @@ class Solution(collections.abc.Mapping):
           mxBlock = state["ProblemType"]["MXBlock%s"%subTc]
           if not mxBlock:
             return 0
+          vectorWidth = mxReadVectorWidth(state, tc) if state.get("WaveTileContiguousA") and tc == "MXSA" else state["VectorWidth%s"%subTc]
           return get_mxs_mt_config(state["MatrixInstK"], mxBlock,
-                                   state["VectorWidth%s"%subTc], "perBlock")
+                                   vectorWidth, "perBlock")
         return 0
 
       def calcMetadataLdsBlockSizePerPad() -> int:
@@ -4870,9 +5121,10 @@ class Solution(collections.abc.Mapping):
         if LdsBlockSizePerPad == -1:
           if state["EnableMatrixInstruction"] and tmpBpe != 0.75:
             if state["UnrollMajorLDS%s"%tc]:
+              rowStride = 1 if tc == "A" and state.get("WaveTileContiguousA") else state["VectorWidth%s"%tc]
               LdsBlockSizePerPad = roundUpToNearestMultiple(int(state["_DepthU%s"%tc] * tmpBpe), multiple)
-              if state["_DepthU%s"%tc] * tmpBpe * state["VectorWidth%s"%tc] > multiple:
-                LdsBlockSizePerPad = roundUpToNearestMultiple(int(state["_DepthU%s"%tc] * tmpBpe * state["VectorWidth%s"%tc]), multiple)
+              if state["_DepthU%s"%tc] * tmpBpe * rowStride > multiple:
+                LdsBlockSizePerPad = roundUpToNearestMultiple(int(state["_DepthU%s"%tc] * tmpBpe * rowStride), multiple)
             else:
               if state["MatrixInstB"] == 1 and state["MatrixInstM"] == 16:
                 LdsBlockSizePerPad = int(mt * tmpBpe * lrvw)
@@ -4888,7 +5140,7 @@ class Solution(collections.abc.Mapping):
                                             state.get(f"enableTDM{tc}", False),
                                             tdmComponentBytes=tdmComponentBytes,
                                             tdmNumComponents=tdmNumComponents)
-                  elif tmpBpe == 1 and ldsType.is8bitFloat() and state.get("enableLDSTr%s"%tc, False):
+                  elif tmpBpe == 1 and _usesFp8LdsConfig(ldsType, state) and state.get("enableLDSTr%s"%tc, False):
                     LdsBlockSizePerPad = get_fp8_mt_config(mt, "perBlock", miwt, miwg, state["MatrixInstK"],
                                             state.get(f"enableTDM{tc}", False),
                                             tdmComponentBytes=tdmComponentBytes,
@@ -5750,7 +6002,10 @@ class Solution(collections.abc.Mapping):
 
     # Default GlobalStoreVectorWidth
     if state["StoreVectorWidth"] == -1:
-      if state["SourceSwap"]:
+      if state.get("WaveTileContiguousA") and state["EnableMatrixInstruction"]:
+        # Wider stores would need results from another lane.
+        state["StoreVectorWidth"] = 1 if state["SourceSwap"] else state["MIOutputVectorWidth"]
+      elif state["SourceSwap"]:
         state["StoreVectorWidth"] = state["VectorWidthA"]
       else:
         if state["EnableMatrixInstruction"]:
@@ -5771,6 +6026,14 @@ class Solution(collections.abc.Mapping):
       # own its free0 elements in pairs. The divisibility check below turns an
       # incompatible VectorWidthA into a rejection.
       state["StoreVectorWidth"] = max(state["StoreVectorWidth"], 2)
+
+    if state.get("WaveTileContiguousA") and state["EnableMatrixInstruction"]:
+      nativeStoreWidth = 1 if state["SourceSwap"] else state["MIOutputVectorWidth"]
+      if state["StoreVectorWidth"] > nativeStoreWidth:
+        reject(state, printRejectionReason,
+               "WaveTileContiguousA requires StoreVectorWidth <= %u for direct stores; requested %u"
+               % (nativeStoreWidth, state["StoreVectorWidth"]))
+        return
 
     if state["EnableMatrixInstruction"] and not state["UseSubtileImpl"]:
       if state["SourceSwap"]:
@@ -6545,7 +6808,7 @@ class Solution(collections.abc.Mapping):
             mt, miwt, miwg, k, tdm,
             tdmComponentBytes=tdmComponentBytes,
             tdmNumComponents=tdmNumComponents)
-      if dtype.numBytes() == 1 and dtype.is8bitFloat() and ldstr:
+      if dtype.numBytes() == 1 and _usesFp8LdsConfig(dtype, state) and ldstr:
         return get_fp8_valid_blocks(
             mt, miwt, miwg, k, tdm,
             tdmComponentBytes=tdmComponentBytes,
@@ -6911,7 +7174,8 @@ class Solution(collections.abc.Mapping):
       offsetBlk = state["LdsOffsetB"] + ldsNumBytesAlignedB
       # Aligned interleave grows the per-buffer block; keep it only if it still double-buffers
       # within MaxLDS, else disable (a too-tight forced kernel is rejected below, not run baseline).
-      if _segAligned:
+      # Contiguous A uses the paired-buffer budget checked below.
+      if _segAligned and not state.get("WaveTileContiguousA"):
         _ok, _inflated = segAlignedBudget(_segRes["blockSpan"], numLdsBlk, offsetBlk, state["MaxLDS"])
         if _ok:
           offsetBlk = _inflated   # already a power of two -> roundup below is a no-op
@@ -7065,7 +7329,7 @@ class Solution(collections.abc.Mapping):
     # Tight layouts pair each component's ping/pong buffers when supported. Persistent
     # kernels retain their existing unpaired interleave if pairing is unavailable;
     # those that cannot afford the swap-mask SGPRs skip the attempt entirely.
-    if state["LDSSegmentInterleave"] == 1 and not state["TDMSplit"] and not _segAligned \
+    if state["LDSSegmentInterleave"] == 1 and not state["TDMSplit"] and (not _segAligned or state.get("WaveTileContiguousA")) \
         and not (isPersistent(state) and segPersistentKeepsUnpaired(state)):
       _pairedReason = None if state["LDSSegmentBRotate"] else segPairedReason(state)
       if _pairedReason is None:
@@ -7340,7 +7604,7 @@ class Solution(collections.abc.Mapping):
     # Calc the required LDS
     vecDT = VectorDataTypes()
     biasDim = state["ProblemType"]["UseBias"]
-    savDim = state["ProblemType"]["UseScaleAlphaVec"]
+    savDim = scaleAlphaVectorMode(state["ProblemType"]["UseScaleAlphaVec"])
     sAB = state["ProblemType"]["UseScaleAB"] == "Vector"
     # Calc LDS for Bias
     maxTurn = 0
@@ -7421,6 +7685,39 @@ class Solution(collections.abc.Mapping):
       ldsAmaxDBytes = 4 * (num_workItems // half_wave_size) * amaxBPE
       ldsNumBytes += ldsAmaxDBytes
 
+    if state.get("WaveTileContiguousA"):
+      pt = state["ProblemType"]
+      supported = (tuple(state["ISA"]) == (12, 5, 0)
+                   and (state["MatrixInstM"], state["MatrixInstN"]) in
+                       ((16, 16), (16, 32) if state["SourceSwap"] else (32, 16))
+                   and state["MatrixInstBM"] == state["MatrixInstBN"] == 1
+                   and state["WavefrontSize"] == 32 and state["MIWaveGroup"] == [2, 2]
+                   and state["MIArchVgpr"] and state["LocalSplitU"] == 1
+                   and state["TDMInst"] == 3 and not state["TDMSplit"] and not state.get("TDMFuse")
+                   and state["UnrollMajorLDSA"] and state["UnrollMajorLDSB"]
+                   and not state["LDSTrInst"] and not pt["Sparse"]
+                   and not state["StoreRemapVectorWidth"]
+                   and not state.get("UseSubtileImpl"))
+      if pt.get("MXBlockA"):
+        width = mxReadVectorWidth(state, "MXSA")
+        # LRA and DS immediates apply padding separately; their phases must agree.
+        scaleBlock = state["LdsBlockSizePerPadMXSA"]
+        if scaleBlock and state["LdsPadMXSA"]:
+          matrixDim = state["MatrixInstM"]
+          scaleTile = matrixDim * (state["MatrixInstK"] // pt["MXBlockA"])
+          vectors = state["MIWaveTile"][0] // width
+          tileSpan = matrixDim == state["WavefrontSize"] // 2 and vectors >= 2 and vectors % 2 == 0
+          groupTiles = width * (2 if tileSpan else 1)
+          supported &= (scaleTile > 0 and (scaleTile % scaleBlock == 0 or scaleBlock % scaleTile == 0)
+                        and scaleTile * groupTiles % scaleBlock == 0
+                        and scaleTile * state["MIWaveTile"][0] % scaleBlock == 0)
+        supported &= (state["MXScaleFormat"] == "InMemorySwizzle"
+                      and pt.get("MXBlockFreeA", 1) == 1
+                      and not state.get("DirectToVgprMXSA"))
+      if not supported:
+        reject(state, printRejectionReason, "WaveTileContiguousA: unsupported read/store layout or padding phase")
+        return
+
     state["LdsNumBytes"] = ldsNumBytes
     ldsSize = ldsNumBytes
     if ldsSize > state["MaxLDS"]:
@@ -7498,7 +7795,7 @@ class Solution(collections.abc.Mapping):
       # Multiple = WLR-size / input-size = how many iters could be covered by one WLR ?
       wlrMultiple = state["LocalReadVectorWidthA"]//state["MIInputPerThreadA"]
       # NOTE: wlrmultiple can be 0 for new MFMA
-      if not state["ProblemType"]["Sparse"] and not state["UseF32XEmulation"] and not(state["ProblemType"]["DataType"].is8bitFloat() and (state["MatrixInstK"] in [64, 128,])) and (not isaInfoMap[isa].asmCaps["HasWMMA_V3"]):
+      if not state["ProblemType"]["Sparse"] and not state["UseF32XEmulation"] and not((state["ProblemType"]["DataType"].is8bitFloat() or state["ProblemType"]["DataTypeA"].is8bitFloat()) and (state["MatrixInstK"] in [64, 128,])) and (not isaInfoMap[isa].asmCaps["HasWMMA_V3"]):
         if wlrMultiple == 0:
           reject(state, printRejectionReason, "LocalReadVectorWidthA %u is less than MIInputA" % (state["LocalReadVectorWidthA"]))
           return
@@ -7517,7 +7814,7 @@ class Solution(collections.abc.Mapping):
       # Multiple = WLR-size / input-size = how many iters could be covered by one WLR ?
       wlrMultiple = state["LocalReadVectorWidthB"]//state["MIInputPerThreadB"]
       # NOTE: wlrmultiple can be 0 for new MFMA
-      if not state["ProblemType"]["Sparse"] and not state["UseF32XEmulation"] and not(state["ProblemType"]["DataType"].is8bitFloat() and (state["MatrixInstK"] in [64, 128,])) and (not isaInfoMap[isa].asmCaps["HasWMMA_V3"]):
+      if not state["ProblemType"]["Sparse"] and not state["UseF32XEmulation"] and not((state["ProblemType"]["DataType"].is8bitFloat() or state["ProblemType"]["DataTypeB"].is8bitFloat()) and (state["MatrixInstK"] in [64, 128,])) and (not isaInfoMap[isa].asmCaps["HasWMMA_V3"]):
         if wlrMultiple == 0:
           reject(state, printRejectionReason, "LocalReadVectorWidthB %u is less than MIInputB" % (state["LocalReadVectorWidthB"]))
           return
@@ -7533,6 +7830,9 @@ class Solution(collections.abc.Mapping):
         reject(state, printRejectionReason, "with PrefetchLocalRead %u LoopIters %u LocalReadVectorWidthB %u, not enough LoopIters to prefetch %ux%u iterations, " \
           % (state["PrefetchLocalRead"],state["LoopIters"],state["LocalReadVectorWidthB"], state["PrefetchLocalRead"] , wlrMultiple) )
 
+    if state["PrefetchGL2"] == 0:
+      state["PrefetchGL2Inc64Bit"] = False
+      state["PrefetchGL2SAddr"] = False
     if state["PrefetchGL2"] > 0:
       if not isaInfoMap[isa].asmCaps["HasGlobalPrefetch"]:
         reject(state, printRejectionReason, "ISA %s does not support global prefetch" % isa)
@@ -7855,7 +8155,7 @@ class Solution(collections.abc.Mapping):
         reject(state, printRejectionReason, "Bias reduction does not support GroupLoadStore.")
 
     # Bias and ScaleAlphaVec
-    if state["ProblemType"]["UseBias"] != 0 and state["ProblemType"]["UseScaleAlphaVec"] != 0 and state["ProblemType"]["UseBias"] != state["ProblemType"]["UseScaleAlphaVec"]:
+    if state["ProblemType"]["UseBias"] != 0 and state["ProblemType"]["UseScaleAlphaVec"] != 0 and state["ProblemType"]["UseBias"] != scaleAlphaVectorMode(state["ProblemType"]["UseScaleAlphaVec"]):
       reject(state, printRejectionReason, "When both UseBias and UseScaleAlphaVec are enabled then UseBias and UseScaleAlphaVec must have same settings.")
 
     # ScaleAB or ScaleABVec

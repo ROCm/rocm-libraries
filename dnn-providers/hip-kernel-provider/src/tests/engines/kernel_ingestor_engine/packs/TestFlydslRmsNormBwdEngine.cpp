@@ -136,7 +136,9 @@ bool findStagedBwdKernel(
                                    kernel.originDirectory,
                                    kernel.name,
                                    kernel.treeRoot,
-                                   kernel.sources};
+                                   kernel.sources,
+                                   nullptr,
+                                   nullptr};
             return true;
         }
     }
@@ -233,6 +235,14 @@ INSTANTIATE_TEST_SUITE_P(
                     RmsNormBwdGraphSpec spec;
                     spec.dataType = DataType::FLOAT;
                     spec.xDims = {256999, 2089};
+                    return spec;
+                }},
+        // inv_rms is one f32 per row, so its bytes reach 2^31 - 1 before x's do when x is
+        // 16-bit and the width is 1: 2^29 - 1 rows are 2^31 - 4 bytes of inv_rms.
+        BwdCase{"InvRmsAtThirtyTwoBitAddressing",
+                [] {
+                    RmsNormBwdGraphSpec spec;
+                    spec.xDims = {(1 << 29) - 1, 1};
                     return spec;
                 }}),
     bwdCaseName);
@@ -552,6 +562,14 @@ INSTANTIATE_TEST_SUITE_P(
                 [] {
                     RmsNormBwdGraphSpec spec;
                     spec.xDims = {1 << 20, 1 << 10};
+                    return spec;
+                }},
+        // x, dy and dx fit (2^30 bytes of bf16) but inv_rms, one f32 per row, is 2^31 bytes:
+        // one past the 32-bit byte offsets of its buffer view.
+        BwdCase{"InvRmsPastThirtyTwoBitAddressing",
+                [] {
+                    RmsNormBwdGraphSpec spec;
+                    spec.xDims = {1 << 29, 1};
                     return spec;
                 }}),
     bwdCaseName);

@@ -174,12 +174,11 @@ which is blocking, not advisory.
 > raise as "unsupported target" — that is the two-namespace defect, not a verdict.
 > Read the served-group size from `ArchLDS.HALF`; ✗ never derive it from the wave size.
 
-> **The two registries key on DIFFERENT namespaces and a raw string will match at most one** — measured per
-> target, with the `target_family` non-bridge, in `dsl_docs/architecture/gfx_support_audit.md` → *Known issues*
-> items 6-7. **Resolve ONCE into a target object and query both with that object, never a raw string.** Two
-> consequences to carry: a lookup miss in one namespace is **not** "this target is unsupported", and a
-> **capability flag is never sufficient to emit a primitive** — authority is the row carrying the layout
-> parameters the gate consumes.
+> **The arch registry and the MMA catalog share one target namespace**: the catalog lists real target ids
+> only, each one an arch-registry target (`dsl_docs/architecture/gfx_support_audit.md` → *Known issues*
+> item 6, resolved). A catalog with no row for a shape and dtype on a target is a missing instruction, not a
+> namespace miss. A **capability flag is never sufficient to emit a primitive**, and neither is a catalog
+> row: authority is the backend coverage record, which `TileMmaPlan.emit_op` reads (item 7).
 >
 > **The target you resolve may not be the target the lowering path uses** — there is a live silent default
 > beneath this skill, tracked as AICK-1541 / AICK-1546. Assert the two agree; do not re-derive the finding.

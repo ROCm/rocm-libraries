@@ -16,16 +16,16 @@
 /**
  * @file UnifiedAttentionGeometry.hpp
  * @brief The arch-neutral half of the unified-attention (vLLM `unified_attention`) packs:
- *        launch grid, batch capacity and the identity paged-KV metadata a contiguous K/V
- *        graph is served with, parameterized by the target's UnifiedAttentionArchTraits.
+ *        launch grid and the identity paged-KV metadata a contiguous K/V graph is served
+ *        with, parameterized by the target's UnifiedAttentionArchTraits.
  *
  * rocKE builds the unified-attention kernels per architecture, but the host contract around
  * them is shared: the kernel reads a paged K/V cache through `block_tables`, per-sequence
  * lengths from `seq_lens` and ragged Q offsets from `query_start_len`, and a contiguous BSHD
  * K/V tensor IS that cache with an identity block table. What differs per architecture is
  * the wave width, whether the grid is kv-major or q-major, and the geometry the builder
- * accepts. Those are the traits; a pack for another architecture (e.g. a future gfx942
- * pack) supplies its own traits and its own builder-legality check and reuses everything here.
+ * accepts. Those are the traits; each architecture's pack supplies its own traits and its
+ * own builder-legality check and reuses everything here.
  *
  * Pure functions of KMD fields and graph dimensions: testable with no HIP context.
  */
@@ -54,10 +54,25 @@ struct UnifiedAttentionArchTraits
     /// `num_warps` and `block_m_per_warp` values the 2D builder takes.
     std::array<int64_t, 4> numWarps = {1, 2, 4, 8};
     std::array<int64_t, 2> blockMPerWarp = {16, 32};
+    /// Whether the architecture ships LSE-on kernels, so a graph asking for the stats output
+    /// can be served. When false, the graph match declines every softmax statistics output.
+    bool servesStats = true;
 };
 
-/// gfx950 (CDNA4): wave64, kv-major grid.
+/// gfx950 (CDNA4): wave64, kv-major grid. Ships LSE-on kernels.
 inline constexpr UnifiedAttentionArchTraits GFX950_UNIFIED_ATTENTION_TRAITS{"gfx950"};
+
+/// gfx942 (CDNA3): wave64, kv-major grid. The 2D builder takes the same block sizes, warp
+/// counts and rows per warp as gfx950; the q-major grid (`use_q_major_grid`) is a codegen
+/// stack no shipped kernel enables. No LSE-on kernel ships, so a stats output is declined.
+constexpr UnifiedAttentionArchTraits gfx942UnifiedAttentionTraits()
+{
+    UnifiedAttentionArchTraits traits{"gfx942"};
+    traits.servesStats = false;
+    return traits;
+}
+inline constexpr UnifiedAttentionArchTraits GFX942_UNIFIED_ATTENTION_TRAITS
+    = gfx942UnifiedAttentionTraits();
 
 /// Each workspace section starts on this boundary.
 inline constexpr std::size_t UNIFIED_ATTENTION_WORKSPACE_ALIGNMENT = 256;
@@ -92,42 +107,24 @@ inline std::size_t alignWorkspaceSection(std::size_t bytes)
 inline bool isSupportedUnifiedAttentionBlockSize(const UnifiedAttentionArchTraits& traits,
                                                  int64_t blockSize)
 {
-    return detail::isOneOf(traits.blockSizes, blockSize);
+    // `blockSizes` is fixed-size, so an architecture listing fewer sizes leaves zero slots.
+    // A slot is not a block size, and a caller must never divide by one.
+    return blockSize > 0 && detail::isOneOf(traits.blockSizes, blockSize);
 }
 
-/**
- * @brief Binary-search trip count a kernel was compiled with for a baked `num_seqs`.
- *
- * `binary_search_seq_idx_iters`: `max(1, ceil(log2(num_seqs + 1)))`, and 32 for a spec that
- * declares no `num_seqs`. The same on every architecture.
- */
-inline int64_t unifiedAttentionBinarySearchIters(int64_t numSeqs)
+/// The smallest `block_size` any candidate of the architecture is built with. `blockSizes` is
+/// fixed-size, so an architecture listing fewer sizes leaves zero slots; those are skipped.
+constexpr int64_t unifiedAttentionSmallestBlockSize(const UnifiedAttentionArchTraits& traits)
 {
-    constexpr int64_t UNSPECIALIZED_ITERS = 32;
-    if(numSeqs <= 0)
+    int64_t smallest = 0;
+    for(const auto blockSize : traits.blockSizes)
     {
-        return UNSPECIALIZED_ITERS;
+        if(blockSize > 0 && (smallest == 0 || blockSize < smallest))
+        {
+            smallest = blockSize;
+        }
     }
-    int64_t iters = 1;
-    // Smallest iters with 2^iters >= numSeqs + 1; bounded by the shift width anyway.
-    while(iters < UNSPECIALIZED_ITERS && (int64_t{1} << iters) < numSeqs + 1)
-    {
-        ++iters;
-    }
-    return iters;
-}
-
-/**
- * @brief The most sequences one launch of a kernel baked with @p numSeqs can address.
- *
- * The kernel bisects `[0, num_seqs_runtime]` in a fixed number of iterations (an unrolled
- * scf.for), which resolves at most `2^iters - 1` sequences. A larger batch leaves the search
- * unfinished: the last blocks read the wrong sequence's lengths and the launch still
- * succeeds. 511 -> 9 iterations -> 511.
- */
-inline int64_t unifiedAttentionBatchCapacity(int64_t numSeqs)
-{
-    return (int64_t{1} << unifiedAttentionBinarySearchIters(numSeqs)) - 1;
+    return smallest;
 }
 
 /// The grid and block a candidate must launch with.
@@ -158,7 +155,7 @@ struct UnifiedAttentionLaunchGeometry
  *             = (qblocks, num_kv_heads, 1)      q-major (traits.qMajorGrid)
  *
  * and `launch_block`, `(waveLanes * num_warps, 1, 1)`. `total_q` is `batch * seqLenQ` and
- * `num_seqs` the RUNTIME batch, not the baked capacity.
+ * `num_seqs` the runtime batch.
  *
  * Throws instead of returning a degenerate grid: an empty launch returns cleanly having
  * written nothing, and prepare() is the last place a named failure is cheap.
@@ -340,6 +337,47 @@ inline std::optional<std::vector<unsigned char>> unifiedAttentionWorkspaceImage(
     return image;
 }
 
+/// Where the three f32 split-KV segment scratch sections sit, in bytes.
+struct UnifiedAttentionSegmentScratchLayout
+{
+    std::size_t segmOutputOffset = 0;
+    std::size_t segmOutputBytes = 0;
+    std::size_t segmMaxOffset = 0;
+    std::size_t segmMaxBytes = 0;
+    std::size_t segmExpsumOffset = 0;
+    std::size_t segmExpsumBytes = 0;
+    /// The 256-byte boundary after `segm_expsum`: where the next section, or the end, goes.
+    std::size_t endOffset = 0;
+};
+
+/**
+ * @brief The split-KV segment scratch every unified 3D (segment + reduce) pack lays out,
+ *        starting at @p base.
+ *
+ * Restates `kernels/common/attention_unified.py::_attention_3d_workspace_specs`:
+ *
+ *     segm_output  f32 [total_q, Hq, num_segments, D]
+ *     segm_max     f32 [total_q, Hq, num_segments]
+ *     segm_expsum  f32 [total_q, Hq, num_segments]
+ *
+ * with @p rows = `total_q * Hq * num_segments`. Each section starts on a 256-byte boundary,
+ * so @p base must be one. The caller validates the dimensions (positive, and `rows * D`
+ * representable); this only places the sections.
+ */
+inline UnifiedAttentionSegmentScratchLayout
+    unifiedAttentionSegmentScratchLayout(std::size_t base, std::size_t rows, std::size_t headSize)
+{
+    UnifiedAttentionSegmentScratchLayout s;
+    s.segmOutputOffset = base;
+    s.segmOutputBytes = rows * headSize * UNIFIED_ATTENTION_SCRATCH_ELEMENT;
+    s.segmMaxOffset = s.segmOutputOffset + detail::alignWorkspaceSection(s.segmOutputBytes);
+    s.segmMaxBytes = rows * UNIFIED_ATTENTION_SCRATCH_ELEMENT;
+    s.segmExpsumOffset = s.segmMaxOffset + detail::alignWorkspaceSection(s.segmMaxBytes);
+    s.segmExpsumBytes = s.segmMaxBytes;
+    s.endOffset = s.segmExpsumOffset + detail::alignWorkspaceSection(s.segmExpsumBytes);
+    return s;
+}
+
 /// Where each workspace section sits, in bytes: the identity paged-KV metadata (exactly
 /// the 2D layout), then the three split-KV segment scratch arrays.
 struct UnifiedAttention3DWorkspaceLayout
@@ -409,19 +447,17 @@ inline std::optional<UnifiedAttention3DWorkspaceLayout>
         return std::nullopt;
     }
 
+    const auto scratch = unifiedAttentionSegmentScratchLayout(
+        identity->totalBytes, static_cast<std::size_t>(rows), static_cast<std::size_t>(headSize));
     UnifiedAttention3DWorkspaceLayout layout;
     layout.identity = *identity;
-    layout.segmOutputOffset = identity->totalBytes;
-    layout.segmOutputBytes
-        = static_cast<std::size_t>(outputElements) * UNIFIED_ATTENTION_SCRATCH_ELEMENT;
-    layout.segmMaxOffset
-        = layout.segmOutputOffset + detail::alignWorkspaceSection(layout.segmOutputBytes);
-    layout.segmMaxBytes = static_cast<std::size_t>(rows) * UNIFIED_ATTENTION_SCRATCH_ELEMENT;
-    layout.segmExpsumOffset
-        = layout.segmMaxOffset + detail::alignWorkspaceSection(layout.segmMaxBytes);
-    layout.segmExpsumBytes = layout.segmMaxBytes;
-    layout.totalBytes
-        = layout.segmExpsumOffset + detail::alignWorkspaceSection(layout.segmExpsumBytes);
+    layout.segmOutputOffset = scratch.segmOutputOffset;
+    layout.segmOutputBytes = scratch.segmOutputBytes;
+    layout.segmMaxOffset = scratch.segmMaxOffset;
+    layout.segmMaxBytes = scratch.segmMaxBytes;
+    layout.segmExpsumOffset = scratch.segmExpsumOffset;
+    layout.segmExpsumBytes = scratch.segmExpsumBytes;
+    layout.totalBytes = scratch.endOffset;
     return layout;
 }
 

@@ -168,7 +168,11 @@ _CASES = {
 }  # fmt: skip
 
 # Every instruction this file covers except f32 16x16x4, which keeps its maps.
-_UNMAPPED = sorted(set(_CASES) - {_F32_OP_ID})
+# fp8 x fp8 -> f32 at K 128 is the atom the gfx1250 fp8 GEMM runs on: it
+# carries the GEMM's A/B maps, so its fragments count the 16 dword slots of the
+# <16 x i32> carrier rather than 64 logical values.
+_GEMM_MAPPED = _F32_K128_OP_IDS["fp8", "fp8"]
+_UNMAPPED = sorted(set(_CASES) - {_F32_OP_ID, _GEMM_MAPPED})
 
 
 def _op(op_id: str):
@@ -198,8 +202,9 @@ def _kernel(op_id: str):
     op = _op(op_id)
     b = IRBuilder(f"gfx1250_{op_id}")
     b.kernel.attrs["max_workgroup_size"] = op.wave_size
-    a = _operand(b, "A", op.a_dtype, op.a_frag_len)
-    bv = _operand(b, "B", op.b_dtype, op.b_frag_len)
+    per_lane = _CASES[op_id].k_per_lane  # logical values, whatever the row counts
+    a = _operand(b, "A", op.a_dtype, per_lane)
+    bv = _operand(b, "B", op.b_dtype, per_lane)
     c_elem = dtype_to_ir_type(op.c_dtype)
     out = b.param("D", PtrType(c_elem, "global"))
     d = b.mma(op, a, bv, b.zero_vec(c_elem, op.c_frag_len))
@@ -237,12 +242,26 @@ def test_gfx1250_lists_the_instruction(op_id):
         case.c,
     )
     assert (op.m, op.n, op.k) == (16, 16, case.k)
+    frag = case.k_per_lane // 4 if op_id == _GEMM_MAPPED else case.k_per_lane
     assert (op.a_frag_len, op.b_frag_len, op.c_frag_len, op.wave_size) == (
-        case.k_per_lane,
-        case.k_per_lane,
+        frag,
+        frag,
         8,
         32,
     )
+
+
+def test_fp8_k128_carries_the_gemm_maps():
+    """Every (lane, slot) of A and of B has a placement, and the two maps
+    give each byte the same K, which is all a dot product needs."""
+    op = _op(_GEMM_MAPPED)
+    a = lane_placements(op.a_layout(), 32)
+    b = lane_placements(op.b_layout(), 32)
+    assert len(a) == len(b) == 32 * 16
+    for i, ((row, k_a), (k_b, col)) in enumerate(zip(a, b)):
+        lane, slot = divmod(i, 16)
+        assert (row, k_a) == (lane % 16, (lane // 16) * 64 + slot * 4)
+        assert (k_b, col) == (k_a, lane % 16)
 
 
 @pytest.mark.parametrize("flavor", LLVM_FLAVORS)

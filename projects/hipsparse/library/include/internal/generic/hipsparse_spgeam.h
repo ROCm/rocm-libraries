@@ -32,6 +32,11 @@
 extern "C" {
 #endif
 
+// clang-format 19 (math-ci) rewrites "#if(" to "#if (", which clang-format
+// 18 (the repo pre-commit hook) reverts; disable so both formatters agree.
+// clang-format off
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 13030)
+// clang-format on
 /*! \ingroup generic_module
 *  \brief Create a sparse matrix sparse matrix addition descriptor.
 *
@@ -39,15 +44,13 @@ extern "C" {
 *  \p hipsparseSpGEAM_createDescr creates a sparse matrix sparse matrix addition descriptor. It should be
 *  destroyed at the end using \ref hipsparseSpGEAM_destroyDescr().
 */
-// clang-format 19 (math-ci) rewrites "#if(" to "#if (", which clang-format
-// 18 (the repo pre-commit hook) reverts; disable so both formatters agree.
-// clang-format off
-#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 13030)
-// clang-format on
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSpGEAM_createDescr(hipsparseSpGEAMDescr_t* descr);
 #endif
 
+// clang-format off
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 13030)
+// clang-format on
 /*! \ingroup generic_module
 *  \brief Destroy a sparse matrix sparse matrix addition descriptor.
 *
@@ -55,13 +58,13 @@ hipsparseStatus_t hipsparseSpGEAM_createDescr(hipsparseSpGEAMDescr_t* descr);
 *  \p hipsparseSpGEAM_destroyDescr destroys a sparse matrix sparse matrix addition descriptor and releases all
 *  resources used by the descriptor.
 */
-// clang-format off
-#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 13030)
-// clang-format on
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSpGEAM_destroyDescr(hipsparseSpGEAMDescr_t descr);
 #endif
 
+// clang-format off
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 13030)
+// clang-format on
 /*! \ingroup generic_module
 *  \brief Buffer size step of the sparse matrix sparse matrix addition:
 *  \f[
@@ -81,11 +84,11 @@ hipsparseStatus_t hipsparseSpGEAM_destroyDescr(hipsparseSpGEAMDescr_t descr);
 *  @param[in]
 *  opB              sparse matrix \f$B\f$ operation type.
 *  @param[in]
-*  alpha            scalar \f$\alpha\f$.
+*  alpha            scalar \f$\alpha\f$, which can be in host or device memory.
 *  @param[in]
 *  matA             sparse matrix \f$A\f$ descriptor.
 *  @param[in]
-*  beta             scalar \f$\beta\f$.
+*  beta             scalar \f$\beta\f$, which can be in host or device memory.
 *  @param[in]
 *  matB             sparse matrix \f$B\f$ descriptor.
 *  @param[in]
@@ -98,6 +101,7 @@ hipsparseStatus_t hipsparseSpGEAM_destroyDescr(hipsparseSpGEAMDescr_t descr);
 *  spgeamDescr      SpGEAM descriptor.
 *  @param[out]
 *  bufferSize       number of bytes of the temporary storage buffer.
+*                   \p bufferSize is always a host variable, regardless of the pointer mode.
 *
 *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
@@ -106,9 +110,6 @@ hipsparseStatus_t hipsparseSpGEAM_destroyDescr(hipsparseSpGEAMDescr_t descr);
 *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p opA != \ref HIPSPARSE_OPERATION_NON_TRANSPOSE or
 *          \p opB != \ref HIPSPARSE_OPERATION_NON_TRANSPOSE.
 */
-// clang-format off
-#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 13030)
-// clang-format on
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSpGEAM_bufferSize(hipsparseHandle_t          handle,
                                              hipsparseOperation_t       opA,
@@ -124,6 +125,9 @@ hipsparseStatus_t hipsparseSpGEAM_bufferSize(hipsparseHandle_t          handle,
                                              size_t*                    bufferSize);
 #endif
 
+// clang-format off
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 13030)
+// clang-format on
 /*! \ingroup generic_module
 *  \brief Computes the number of non-zero elements of \f$C\f$ for the sparse matrix-sparse matrix addition:
 *  \f[
@@ -146,11 +150,11 @@ hipsparseStatus_t hipsparseSpGEAM_bufferSize(hipsparseHandle_t          handle,
 *  @param[in]
 *  opB              sparse matrix \f$B\f$ operation type.
 *  @param[in]
-*  alpha            scalar \f$\alpha\f$.
+*  alpha            scalar \f$\alpha\f$, which can be in host or device memory.
 *  @param[in]
 *  matA             sparse matrix \f$A\f$ descriptor.
 *  @param[in]
-*  beta             scalar \f$\beta\f$.
+*  beta             scalar \f$\beta\f$, which can be in host or device memory.
 *  @param[in]
 *  matB             sparse matrix \f$B\f$ descriptor.
 *  @param[out]
@@ -170,9 +174,6 @@ hipsparseStatus_t hipsparseSpGEAM_bufferSize(hipsparseHandle_t          handle,
 *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p opA != \ref HIPSPARSE_OPERATION_NON_TRANSPOSE or
 *          \p opB != \ref HIPSPARSE_OPERATION_NON_TRANSPOSE.
 */
-// clang-format off
-#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 13030)
-// clang-format on
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSpGEAM_nnz(hipsparseHandle_t          handle,
                                       hipsparseOperation_t       opA,
@@ -188,6 +189,9 @@ hipsparseStatus_t hipsparseSpGEAM_nnz(hipsparseHandle_t          handle,
                                       void*                      externalBuffer);
 #endif
 
+// clang-format off
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 13030)
+// clang-format on
 /*! \ingroup generic_module
 *  \brief Compute step of the sparse matrix sparse matrix addition:
 *  \f[
@@ -227,11 +231,11 @@ hipsparseStatus_t hipsparseSpGEAM_nnz(hipsparseHandle_t          handle,
 *  @param[in]
 *  opB              sparse matrix \f$B\f$ operation type.
 *  @param[in]
-*  alpha            scalar \f$\alpha\f$.
+*  alpha            scalar \f$\alpha\f$, which can be in host or device memory.
 *  @param[in]
 *  matA             sparse matrix \f$A\f$ descriptor.
 *  @param[in]
-*  beta             scalar \f$\beta\f$.
+*  beta             scalar \f$\beta\f$, which can be in host or device memory.
 *  @param[in]
 *  matB             sparse matrix \f$B\f$ descriptor.
 *  @param[out]
@@ -251,9 +255,6 @@ hipsparseStatus_t hipsparseSpGEAM_nnz(hipsparseHandle_t          handle,
 *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p opA != \ref HIPSPARSE_OPERATION_NON_TRANSPOSE or
 *          \p opB != \ref HIPSPARSE_OPERATION_NON_TRANSPOSE.
 */
-// clang-format off
-#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 13030)
-// clang-format on
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSpGEAM(hipsparseHandle_t          handle,
                                   hipsparseOperation_t       opA,

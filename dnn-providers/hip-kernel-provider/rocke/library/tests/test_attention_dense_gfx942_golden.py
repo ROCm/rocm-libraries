@@ -33,12 +33,11 @@ There is NO cpp/python byte-identity companion test: ``library/kernels/`` has no
 engine mirror (settled when the port was scoped), so the dual-engine parity gate does
 not apply to this kernel. The Python lowering IS the ground truth here.
 
-COLLECTION: this is a CPU lane (pure text lowering), collected by the library
-runner ``library/tests/run_all.py`` (default, non-``gpu`` lane) -- NOT by
-``platform/tests/run_all.py``, which cannot reach the library tree (the one-way
-library -> platform dependency rule). The actual CI pipeline invoking that runner
-is a CI-team registration step, tracked as a follow-up. Run it and
-re-bless manually:
+COLLECTION: this is a CPU lane (pure text lowering). CI runs it in the installed attention
+CPU lane (``rocke_library_attention_cpu_pytest``, listed in ``platform/CMakeLists.txt``).
+By hand it is collected by the library runner ``library/tests/run_all.py`` (default,
+non-``gpu`` lane) -- NOT by ``platform/tests/run_all.py``, which cannot reach the library
+tree (the one-way library -> platform dependency rule). Run it and re-bless manually:
 
     cd rocke/library
     python tests/run_all.py --only dense_gfx942          # runs this + the build lane
@@ -247,7 +246,7 @@ def _cases():
         # --- sinks: m/l seeded from sink_ptr[hq] once per work item, before the KV
         #     loop. Default and persistent grids (both decodes), full and causal,
         #     both head sizes, SWA-sink, and a dispatch case that guards the
-        #     gfx942_dense._base_spec use_sinks threading end to end. ---
+        #     gfx942_dense.tuned_base_spec use_sinks threading end to end. ---
         "attention_dense_gfx942/sink_d128_bf16_causal": mk(use_sinks=True),
         "attention_dense_gfx942/sink_d128_fp16_full": mk(
             dtype="fp16", causal=False, use_sinks=True

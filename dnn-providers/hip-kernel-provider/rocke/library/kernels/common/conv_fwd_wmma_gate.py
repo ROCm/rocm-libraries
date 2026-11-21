@@ -23,9 +23,10 @@ What each family reads from here:
   ``conv_fwd_small_wmma``, ``conv_direct_fwd_gstream_wmma`` and
   ``conv_direct_fwd_tapouter_wmma``;
 - the WMMA atom (``WMMA_M`` / ``WMMA_N`` / ``WMMA_K``, :func:`wmma_ab_dtype`,
-  :func:`wmma_fwd_op`): all of the above and ``conv_direct_dw_fwd_wmma``
-  (depthwise), which uses neither the gate nor the validator tail: it checks
-  its arch and shapes itself;
+  :func:`wmma_fwd_op`): all of the above. ``conv_direct_dw_fwd_wmma``
+  (depthwise) uses none of this module: it checks its arch and shapes
+  itself and builds on the windowed depthwise Toeplitz builder, which picks
+  the same 16x16x32 atom;
 - ``CH_PAD``, ``WMMA_K``, ``I32_MAX`` and :func:`wmma_fwd_op` also serve the
   dgrad WMMA families that stage like the forward ones
   (``conv_direct_dgrad_wmma``, ``conv_dgrad_patch_wmma`` and
@@ -34,7 +35,7 @@ What each family reads from here:
 The other shape rules of each family stay in its own ``*_reason``.
 
 The C++ engine mirrors this module in
-``platform/cpp/instances/common/conv_fwd_wmma_gate.cpp`` with the same checks
+``library/cpp/instances/common/conv_fwd_wmma_gate.cpp`` with the same checks
 in the same order and the same rejection messages.
 """
 
