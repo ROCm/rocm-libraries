@@ -104,6 +104,7 @@ def test_a_safe_signature_wraps_operands_a_first_round_of_wrapping_exposes(evalu
     assert lint(rewritten, "tflops", evaluator) == []
     assert {item["reference"] for item in wrapped} == set(signature)
 
+
 # The rank the absent-attribute rows bind for their node's input, from which an unset
 # BlockScaleQuantize axis (the last one) is read.
 X_RANK = 4
