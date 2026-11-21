@@ -96,6 +96,13 @@ def validate_provenance(snapshot: object) -> dict:
     """
     if not isinstance(snapshot, dict):
         raise ProvenanceError("trained_against must be an object")
+    # `x-` and `_` members are free-form extensions the loader ignores (e.g. `x-restamps`);
+    # what is compared never includes them.
+    snapshot = {
+        key: value
+        for key, value in snapshot.items()
+        if not (isinstance(key, str) and key.startswith(("x-", "_")))
+    }
     unknown = set(snapshot) - {
         "ued",
         "kmd",

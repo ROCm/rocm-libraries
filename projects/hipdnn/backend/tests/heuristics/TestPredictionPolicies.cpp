@@ -458,6 +458,43 @@ TEST_F(TestPredictionPolicies, DeclineNamesTheMetricAndTheLevelsAsked)
     gPredictionLogLines = nullptr;
 }
 
+// A refused L1 must not hide behind an engine id: the warning carries the provider's own
+// reason, which for a stale model names both selector revisions. Said once per process,
+// since every graph's ranking meets the same refusal.
+TEST_F(TestPredictionPolicies, UnscoredEngineIsNamedWithTheProvidersReasonOnce)
+{
+    auto abi = hipdnn_backend::heuristics::prediction::populateFunctionTable();
+    std::vector<std::string> lines;
+    gPredictionLogLines = &lines;
+    ASSERT_EQ(abi.setLoggingCallback(&capturePredictionLog), HIPDNN_PLUGIN_STATUS_SUCCESS);
+    ASSERT_EQ(abi.setLogLevel(HIPDNN_SEV_INFO), HIPDNN_PLUGIN_STATUS_SUCCESS);
+
+    // Unique to this case: the once-per-process memory outlives the fixture.
+    const std::string refusal = "model was trained against generic-untuned-v1/aaaa, engine "
+                                "reports generic-untuned-v1/bbbb (UnscoredEngineIsNamed)";
+    const auto said = [&lines, &refusal] {
+        return std::count_if(lines.begin(), lines.end(), [&refusal](const std::string& line) {
+            return line.find("engine 7024 has no usable") != std::string::npos
+                   && line.find("UNAVAILABLE: " + refusal) != std::string::npos;
+        });
+    };
+    selectMode(MODE_A_POLICY_NAME, {1, 7024});
+    estimate(1, HIPDNN_ENGINE_PREDICTION_ENGINE, 100);
+    auto& refused = estimate(7024, HIPDNN_ENGINE_PREDICTION_ENGINE, 0);
+    refused.status = PredictionStatus::UNAVAILABLE;
+    refused.reason = refusal;
+    const auto services = host();
+
+    ASSERT_TRUE(_plugin->finalizeWithHost(_descriptor.get(), &services));
+    EXPECT_EQ(_plugin->getSortedEngineIds(_descriptor.get()), (std::vector<int64_t>{1, 7024}));
+    EXPECT_EQ(said(), 1);
+    ASSERT_TRUE(_plugin->finalizeWithHost(_descriptor.get(), &services));
+    EXPECT_EQ(said(), 1);
+
+    abi.setLoggingCallback(nullptr);
+    gPredictionLogLines = nullptr;
+}
+
 TEST_F(TestPredictionPolicies, RejectsIncompatibleScopedHostBeforeInvokingCallbacks)
 {
     selectMode(MODE_A_POLICY_NAME, {1});

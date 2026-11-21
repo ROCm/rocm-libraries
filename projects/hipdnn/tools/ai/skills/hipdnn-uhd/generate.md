@@ -199,6 +199,40 @@ candidate is every slot's pick, named `prep=<id>|dkdv=<id>|dq=<id>`, and a knob 
   slot). Alternatively, the slot's native handler launches a dependent kernel of the same
   code object by a symbol name its KMD records, with no `sources` entry (RFC 0021 §3).
 
+## Derived features
+
+A tree splits on one feature at a time and cannot multiply two, so from raw tensor dims alone
+it cannot see the quantities a kernel's speed follows: a convolution's implicit-GEMM sizes,
+its groups, its work tiles. When no recipe is authored, `generate` adds them itself, from
+`projects/hipdnn/tools/uhd_gen/physics.py`, for every operation family the corpus holds
+(today: convolution in all three directions, batchnorm, and scaled dot-product attention).
+They are expressions over fields the graphs already publish, so the runtime computes the
+same values and a stored dataset needs no new collection. Measured on the same held-out
+graphs as the shipped models:
+
+| Engine | Without | With |
+|---|---|---|
+| gfx950 `MIOPEN_ENGINE`, conv + batchnorm | 10.7% median | 10.1% |
+| gfx950 `ASM_SDPA_ENGINE` | 2.54% median, 93.9% within 10% | 2.16%, 96.7% |
+| gfx942 `ASM_SDPA_ENGINE` | 3.15% median, 90.4% within 10% | 2.51%, 95.4% |
+
+**Recommend a family for any operation that has none** (matmul, the norms, ...) when
+onboarding or retraining its engine:
+
+- **What to derive.** The problem's GEMM or reduction shape and its parallelism, as the
+  existing families do: for matmul `M`, `N`, `K`, batch; work tiles and how full the last
+  one is; channel or head-dim alignment.
+- **How.** A function in `physics.py` returning `name -> expression`, guarded so a graph of
+  another operation reads `ABSENT`, plus its detection in `_FAMILIES`. Read the operation's
+  own tensor roles (`graph.nodes[0].<role>.dims[i]`); never a `device.*` field (a one-SKU
+  corpus has no variation, and generation refuses the expression).
+- **Proof.** A test in `uhd_gen/tests/test_physics.py` checking hand-worked values through
+  the real evaluator, and a held-out comparison: the same dataset and held-out graphs
+  (`--eval-benchmarks`) trained with and without the family. Land it only if it helps.
+
+An authored recipe (`--features` / `--feature-signature`) gets no derived features; add the
+family's expressions to it by hand.
+
 ## Decision rules
 
 - **One device.** Every set, collection, dataset and model is one product of one arch.

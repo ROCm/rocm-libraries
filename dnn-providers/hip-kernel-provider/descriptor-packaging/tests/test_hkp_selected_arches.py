@@ -19,15 +19,16 @@ pytestmark = pytest.mark.quick
 
 
 def _select(cmake, tmp_path, targets, variable="GPU_TARGETS"):
-    """Return (selected arches, ignored entries, source variable) for a target list."""
+    """Return (selected arches, ignored entries, source variable, rejected entries) for a
+    target list."""
     script = tmp_path / "select.cmake"
     script.write_text(
         f'list(APPEND CMAKE_MODULE_PATH "{_CMAKE_DIR.as_posix()}" '
         f'"{_PROVIDER_CMAKE_DIR.as_posix()}")\n'
         "include(HkpPackaging)\n"
         f'set({variable} "{targets}")\n'
-        "hkp_selected_arches(_arches _source)\n"
-        'message(STATUS "SELECTED=[${_arches}] SOURCE=[${_source}]")\n'
+        "hkp_selected_arches(_arches _source _rejected)\n"
+        'message(STATUS "SELECTED=[${_arches}] SOURCE=[${_source}] REJECTED=[${_rejected}]")\n'
     )
     result = subprocess.run(
         [cmake, "-P", str(script)], capture_output=True, text=True, check=True
@@ -37,10 +38,17 @@ def _select(cmake, tmp_path, targets, variable="GPU_TARGETS"):
         "SELECTED=["
     )[1]
     arches, _, rest = selected.partition("] SOURCE=[")
+    source, _, rejected = rest.partition("] REJECTED=[")
     ignored = [
         line.split("'")[1] for line in out.splitlines() if "hkp: ignoring" in line
     ]
-    return (arches.split(";") if arches else []), ignored, rest.rstrip("]")
+    rejected = rejected.rstrip("]")
+    return (
+        (arches.split(";") if arches else []),
+        ignored,
+        source,
+        (rejected.split(";") if rejected else []),
+    )
 
 
 CONCRETE = [
@@ -101,7 +109,8 @@ def test_concrete_target_is_selected_whole(cmake, tmp_path, target):
 
 @pytest.mark.parametrize("target", NOT_CONCRETE)
 def test_non_concrete_name_is_dropped_with_a_warning(cmake, tmp_path, target):
-    assert _select(cmake, tmp_path, target)[:2] == ([], [target])
+    selected, ignored, _, rejected = _select(cmake, tmp_path, target)
+    assert (selected, ignored, rejected) == ([], [target], [target])
 
 
 def test_strict_and_base_arch_stay_separate_entries(cmake, tmp_path):
@@ -112,7 +121,7 @@ def test_strict_and_base_arch_stay_separate_entries(cmake, tmp_path):
 
 
 def test_feature_suffix_is_stripped_before_the_check(cmake, tmp_path):
-    arches, ignored, _ = _select(
+    arches, ignored, _, _ = _select(
         cmake, tmp_path, "gfx942:xnack-;gfx1250-strict:sramecc+;gfx950-dcgpu:xnack-"
     )
     assert arches == ["gfx942", "gfx1250-strict"]
@@ -120,7 +129,7 @@ def test_feature_suffix_is_stripped_before_the_check(cmake, tmp_path):
 
 
 def test_mixed_list_keeps_only_concrete_targets(cmake, tmp_path):
-    arches, ignored, _ = _select(
+    arches, ignored, _, _ = _select(
         cmake, tmp_path, "gfx94X-dcgpu;gfx11-generic;gfx950;gfx1250-strict"
     )
     assert arches == ["gfx950", "gfx1250-strict"]
@@ -132,7 +141,7 @@ def test_duplicates_collapse(cmake, tmp_path):
 
 
 def test_amdgpu_targets_is_the_fallback_source(cmake, tmp_path):
-    arches, _, source = _select(
+    arches, _, source, _ = _select(
         cmake, tmp_path, "gfx1250-strict", variable="AMDGPU_TARGETS"
     )
     assert (arches, source) == (["gfx1250-strict"], "AMDGPU_TARGETS")

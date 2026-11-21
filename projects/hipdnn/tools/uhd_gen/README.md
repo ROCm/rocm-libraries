@@ -681,6 +681,20 @@ but "work unknown" stays absent and is never silently 0. Whether a signature is 
 a corpus is therefore the evaluator's answer over the published feature maps
 (`check_signature_evaluates`), not a check that every referenced name is published.
 
+An automatic proposal reads a field every row publishes as a bare `$name`. A numeric field
+that some operations always publish and others never do (a convolution's stride beside a
+batchnorm, which has none) is proposed as `{"value_or_default": ["$name", -1]}`, so one
+engine-level model over several operations keeps each one's own fields. An operation is the
+row's `regime.operation`, or its graph's node types where rows carry no regime. A field
+missing from only some rows of an operation is not proposed.
+
+It then adds the derived features of each operation family the corpus holds
+(`physics.py`: convolution in all three directions, batchnorm, and attention). A tree cannot multiply
+two features, so it cannot form a convolution's implicit-GEMM sizes, groups or work tiles
+from raw dims; these expressions do, over fields the graphs already publish, each guarded
+so a graph of another operation reads -1. None reads a device field. An authored recipe gets
+none of them. Adding a family for another operation is described in the `hipdnn-uhd` skill
+(`generate.md`, "Derived features").
 ### Optional features are read through a default
 
 Some published features are absent on perfectly valid graphs: an optional attribute the graph
@@ -1023,6 +1037,36 @@ revision are repeats of each other. A model recording a different revision, or n
 refused -- the engine stays applicable and reports UNAVAILABLE naming both revisions.
 Start a fresh consumer process after installing a model: a compiled model is cached
 for the lifetime of the engine that owns it.
+
+**Re-stamping a model.** Any edit to an engine's selector inputs changes its revision and
+expires its shipped models, including edits that cannot move a prediction. When the engine
+changed only in such ways, `restamp` rebinds the model instead of a retrain, and refuses
+unless it can prove it. It reads the selector dump of the build that trained the model and
+of the build to bind (`HIPDNN_UHD_SELECTOR_DUMP_DIR=<dir>` makes a build write one
+`<engine>.selector.json` per engine) and diffs the two descriptions:
+
+```bash
+python -m uhd_gen restamp <model .uhd.json> \
+    --selector-before <dump at the training build> --selector-after <dump at this build> \
+    [--rows-before <L1 corpus at the old revision> --rows-after <L1 corpus at the new revision>] \
+    --write
+```
+
+A change is **hard**, and refused ("retrain"), if it can change what the engine runs: any
+generic-engine change beyond a kernel's `source_file` (its `sha256` still pins the bytes; with
+only those moves the proof is `path-only` and needs no measurement), and, for a native
+source-digest engine, any changed `.co`, `.csv`, `.hip`, `codegen.py` or `kernels/` input, a
+changed selector kind, or an unknown kind. Other native source changes are **soft** and need
+`measured-parity`: the engine's own L1 corpora at the two revisions (each collected at the
+revision it is paired with, over the same graphs) must agree per graph (`|ln(after/before)|`
+of the model's label, by default median <= 0.03, at most 5% of graphs over 0.10, at least 30
+graphs), and no graph may be served at the new revision that was not at the old. A graph
+served before and declined after is allowed and counted. A pass sets
+`trained_against.selector_revision` and appends `{from, to, proof, changes, parity}` to the
+ignored `trained_against["x-restamps"]`, `parity` including the thresholds it was judged
+against, so a limit loosened on the command line stays visible in the model; without `--write` it only judges, and `--report`
+writes the verdict as `uhd_gen.restamp_report/1`. The runtime rule is unchanged: the loaded
+model must still match the engine's revision exactly.
 
 Install the intended catalog-ranking model before collecting L1 measurements.
 Changing that model changes the descriptor engine's immediate selector and can

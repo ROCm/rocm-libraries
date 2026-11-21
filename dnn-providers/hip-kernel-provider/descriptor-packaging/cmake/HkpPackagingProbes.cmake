@@ -313,7 +313,7 @@ function(_hkp_probe_automatic_arches out_var)
                           "${HKP_PKG_DIR}/tools/hkp_probe_derive_root.py"
                           "${HKP_PKG_DIR}/tools/hkp_probe_kinds.py"
                           "${HIPDNN_PLUGIN_SDK_GPU_GENERIC_TARGETS_JSON}")
-    hkp_selected_arches(_targets _targets_source)
+    hkp_selected_arches(_targets _targets_source _targets_rejected)
     set(_exclude_args "")
     foreach(_target IN LISTS _targets)
         list(APPEND _exclude_args --exclude "${_target}")
