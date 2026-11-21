@@ -9,6 +9,8 @@ test_categories:
       - "RoiTest.*"
       - "DescriptorTest.*"
       - "GoldenLayoutTest.*"
+      - "AudioSetupTest.*"
+      - "AudioSignalTest.*"
       - "Sample*Test.*"
       - "SrcTexelTest.*"
       - "BorderIndexTest.*"
@@ -18,6 +20,7 @@ test_categories:
       - "Image_Filter/SobelFilterTest.*_U8toU8_PLN1_FullRoi_*"
       - "Misc_*/*_2D_*2x24x32"
       - "Voxel_*/*_NCDHW1_FullRoi_XYZWHD_*"
+      - "Audio_*/*_1ch_Ragged_*"
     labels:
       - "quick"
       - "smoke"

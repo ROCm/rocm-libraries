@@ -30,6 +30,7 @@ SOFTWARE.
 #include <cstddef>
 #include <cstdlib>
 #include <cstring>
+#include <memory>
 #include <stdexcept>
 #include <string>
 
@@ -81,7 +82,8 @@ class RppHandle {
 };
 
 // Host-accessible parameter array (alpha/beta/ROI tensors). Plain host memory for the
-// HOST backend; pinned (device-accessible) host memory for HIP. Written/read directly.
+// HOST backend; pinned (device-accessible) host memory for HIP. Written/read directly. Elements
+// are constructed on both, so T may own memory (RpptResamplingWindow holds a std::vector).
 template <typename T>
 class PinnedArray {
    public:
@@ -89,6 +91,7 @@ class PinnedArray {
         if (backend_ == RPP_HIP_BACKEND) {
 #if RPP_BACKEND_HIP
             RPP_TEST_CHECK_HIP(hipHostMalloc(reinterpret_cast<void**>(&data_), count_ * sizeof(T)));
+            std::uninitialized_default_construct_n(data_, count_);
 #endif
         } else {
             data_ = new T[count_];
@@ -97,6 +100,7 @@ class PinnedArray {
     ~PinnedArray() {
         if (backend_ == RPP_HIP_BACKEND) {
 #if RPP_BACKEND_HIP
+            std::destroy_n(data_, count_);
             (void)hipHostFree(data_);
 #endif
         } else {
