@@ -52,9 +52,6 @@ endif()
 # Configure the version header (version numbers only) and the config header
 # (build-time feature flags). Variables referenced via #cmakedefine in the
 # .h.in must be set (or unset) prior to the configure_file() calls.
-set(ROCSPARSE_WITH_TRSM_REFACTORING ${BUILD_WITH_TRSM_REFACTORING})
-set(ROCSPARSE_WITH_SPSORT ${BUILD_WITH_SPSORT})
-
 configure_file("${CMAKE_CURRENT_SOURCE_DIR}/include/rocsparse-version.h.in"
                "${PROJECT_BINARY_DIR}/include/rocsparse/rocsparse-version.h"
 )

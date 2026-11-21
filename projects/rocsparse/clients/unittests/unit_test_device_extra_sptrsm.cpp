@@ -37,8 +37,6 @@
 
 using namespace extra_ut;
 
-#ifdef ROCSPARSE_WITH_TRSM_REFACTORING
-
 namespace
 {
     struct SptrsmDescrH
@@ -784,5 +782,3 @@ TEST_F(ExtraSptrsm, unsupported_formats)
             handle, descr.d, A.p, X.p, Y.p, rocsparse_sptrsm_stage_analysis, 0, nullptr, nullptr),
         rocsparse_status_success);
 }
-
-#endif // ROCSPARSE_WITH_TRSM_REFACTORING

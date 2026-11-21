@@ -1998,7 +1998,6 @@ _rocsparse_spmat_descr::_rocsparse_spmat_descr(rocsparse_format     format_,
 {
 }
 
-#ifdef ROCSPARSE_WITH_TRSM_REFACTORING
 _rocsparse_spmat_descr::_rocsparse_spmat_descr(rocsparse_const_spmat_descr that,
                                                rocsparse_format            format,
                                                rocsparse_mat_descr         descr,
@@ -2047,8 +2046,6 @@ _rocsparse_spmat_descr::_rocsparse_spmat_descr(rocsparse_const_spmat_descr that,
     }
     }
 }
-
-#endif
 
 _rocsparse_dnvec_descr::_rocsparse_dnvec_descr(int64_t                batch_count_,
                                                int64_t                nitems_,
@@ -4670,10 +4667,8 @@ try
                        (rows_values_batch_stride < 0),
                        rocsparse_status_invalid_value);
 
-    descr->batch_count = batch_count;
-#ifdef ROCSPARSE_WITH_TRSM_REFACTORING
-    descr->batch_stride = rows_values_batch_stride;
-#endif
+    descr->batch_count                 = batch_count;
+    descr->batch_stride                = rows_values_batch_stride;
     descr->offsets_batch_stride        = offsets_batch_stride;
     descr->columns_values_batch_stride = rows_values_batch_stride;
     return rocsparse_status_success;
