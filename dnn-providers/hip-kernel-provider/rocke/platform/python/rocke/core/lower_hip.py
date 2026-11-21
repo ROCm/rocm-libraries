@@ -3179,7 +3179,7 @@ def _find_enclosing_for(region: Region, target: Op) -> Optional[Op]:
     for op in region.ops:
         if op.name == "scf.for":
             for r in op.regions:
-                if target in r.ops:
+                if any(body_op is target for body_op in r.ops):
                     return op
                 found = _find_enclosing_for(r, target)
                 if found is not None:

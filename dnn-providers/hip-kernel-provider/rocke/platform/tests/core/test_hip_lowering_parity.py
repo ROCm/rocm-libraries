@@ -438,6 +438,32 @@ def test_malformed_inline_asm_is_refused_the_same_way(attr_changes, error, messa
     _assert_both_refuse(_inline_asm_kernel(**attr_changes), "gfx942", error, message)
 
 
+def test_each_loop_yield_assigns_its_own_loop_iter_args():
+    """Two sibling loops that yield the same outer value hold equal scf.yield
+    ops. Each yield must assign the iter-args of the loop that holds it, not
+    of the first loop whose yield compares equal."""
+    builder = IRBuilder("equal_yields")
+    data = builder.param("X", PtrType(F32, "global"))
+    seed = builder.const_f32(1.0)
+    results = []
+    for name in ("first", "second"):
+        loop = builder.scf_for_iter(
+            builder.const_i32(0),
+            builder.const_i32(4),
+            builder.const_i32(1),
+            [(name, seed)],
+            iv_name=f"k_{name}",
+        )
+        with loop:
+            builder.scf_yield(seed)
+        results.append(loop.results[0])
+    builder.global_store(data, builder.const_i32(0), builder.fadd(*results))
+    builder.ret()
+    source = lower_hip_with_both_engines(builder.kernel, "gfx942")
+    loop_bodies = re.findall(r"for\(int k_(\w+) .*\n\s*(\w+) = ", source)
+    assert loop_bodies == [("first", "first"), ("second", "second")]
+
+
 def _report_cpp_outcome(monkeypatch, outcome: str | HipRefusal) -> None:
     """Make the C++ HIP lowering report ``outcome`` for every kernel, so the
     helpers below see a C++ engine that disagrees with the Python one."""
