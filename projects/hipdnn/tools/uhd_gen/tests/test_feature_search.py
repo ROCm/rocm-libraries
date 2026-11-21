@@ -1148,6 +1148,48 @@ def test_a_template_over_an_optional_dim_reads_it_guarded_and_matches_the_evalua
     assert lint([c.entry for c in pool.candidates], "tflops", _evaluator_path()) == []
 
 
+def test_the_standalone_search_publishes_the_columns_any_row_binds(tmp_path):
+    frame = _optional_rows()
+    # The first row leaves the optional bias and dropout unbound; other rows bind them.
+    frame.loc[0, [BIAS_UID, BIAS_DIM, DROPOUT]] = np.nan
+    assert frame[BIAS_DIM].notna().any() and frame[DROPOUT].notna().any()
+    names = [c for c in frame.columns if c not in ("benchmark", "device", "tflops")]
+    # A row's `features` map lists only the keys it binds.
+    frame["features"] = [
+        json.dumps({name: row[name] for name in names if pd.notna(row[name])})
+        for _, row in frame.iterrows()
+    ]
+    assert set(json.loads(frame["features"].iloc[0])) == {
+        "graph.nodes[0].x.dims[0]",
+        "graph.nodes[0].x.dims[1]",
+    }
+    frame.to_csv(tmp_path / "train.csv", index=False)
+    output = tmp_path / "out"
+    code = main(
+        [
+            "feature-search",
+            "--input",
+            str(tmp_path / "train.csv"),
+            "--output-dir",
+            str(output),
+            "--seed",
+            *SEEDS,
+            "--feature-evaluator",
+            _evaluator_path(),
+        ]
+    )
+    assert code == 0
+    report = json.loads((output / "feature_search_report.json").read_text("utf-8"))
+    # The columns only some rows bind reach the search, each read through value_or_default:
+    # two bound columns and the bias dim and dropout probability.
+    assert report["candidates"]["by_template"]["base"]["generated"] == 4
+    searched_text = json.dumps(report["rounds"][0]["kept"])
+    assert BIAS_DIM in searched_text and DROPOUT in searched_text
+    assert all(
+        _unguarded_reads(entry, {BIAS_DIM, DROPOUT}) == [] for entry in report["recipe"]
+    ), report["recipe"]
+
+
 def test_an_optional_column_that_holds_strings_cannot_take_a_default_and_is_left_out():
     frame = _optional_rows()
     # An optional attribute published as a string: its default is a number, which the

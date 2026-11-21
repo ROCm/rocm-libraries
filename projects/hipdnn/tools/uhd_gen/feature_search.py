@@ -1312,7 +1312,8 @@ def run_feature_search(args: argparse.Namespace) -> int:
         frame = frame.reset_index(drop=True)
         published = set(args.columns or ())
         if not published and "features" in frame.columns:
-            published = set(json.loads(frame["features"].iloc[0]))
+            # A row publishes only the features it binds: the union over the rows.
+            published = set().union(*map(json.loads, frame["features"]))
         if not published:
             raise ValueError(
                 "the rows name no published columns: pass --columns, or rows with a "
