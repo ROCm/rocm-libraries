@@ -1213,8 +1213,9 @@ TEST_F(HostInternalBranches, copy_csrmv_info)
     _rocsparse_csrmv_info empty_src;
     EXPECT_EQ(rocsparse::copy_csrmv_info(&empty_dest, &empty_src), rocsparse_status_success);
 
-    // n_rows_bins is copied as J_size * 32, which is 256 bytes for 64-bit indices.
-    auto alloc = [](void** ptr) { ASSERT_EQ(hipMalloc(ptr, 256), hipSuccess); };
+    // n_rows_bins is copied as J_size * lrb_num_bin_counters, the largest copy for 64-bit indices.
+    const size_t n_rows_bins_bytes = sizeof(int64_t) * rocsparse::lrb_num_bin_counters;
+    auto alloc = [&](void** ptr) { ASSERT_EQ(hipMalloc(ptr, n_rows_bins_bytes), hipSuccess); };
 
     auto fill
         = [&](_rocsparse_csrmv_info& info, rocsparse_indextype itype, rocsparse_indextype jtype) {
@@ -1311,15 +1312,15 @@ TEST_F(HostInternalBranches, copy_csrmv_info)
     _rocsparse_csrmv_info dest64;
     fill(src64, rocsparse_indextype_i64, rocsparse_indextype_i64);
     // The last 4 bytes of each 64-bit-sized copy: row_blocks is I_size * size,
-    // n_rows_bins is J_size * 32.
+    // n_rows_bins is J_size * lrb_num_bin_counters.
     write(src64.adaptive.row_blocks, pattern, 4);
-    write(src64.lrb.n_rows_bins, pattern, 252);
+    write(src64.lrb.n_rows_bins, pattern, n_rows_bins_bytes - sizeof(pattern));
     EXPECT_EQ(rocsparse::copy_csrmv_info(&dest64, &src64), rocsparse_status_success);
     expect_scalars(dest64, src64);
     ASSERT_NE(dest64.adaptive.row_blocks, nullptr);
     ASSERT_NE(dest64.lrb.n_rows_bins, nullptr);
     EXPECT_EQ(read(dest64.adaptive.row_blocks, 4), pattern);
-    EXPECT_EQ(read(dest64.lrb.n_rows_bins, 252), pattern);
+    EXPECT_EQ(read(dest64.lrb.n_rows_bins, n_rows_bins_bytes - sizeof(pattern)), pattern);
 }
 
 // Each debug switch is a full hit only when the value both changes and does not.

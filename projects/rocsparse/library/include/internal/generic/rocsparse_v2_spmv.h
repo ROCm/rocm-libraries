@@ -224,7 +224,8 @@ rocsparse_status rocsparse_v2_spmv_buffer_size(rocsparse_handle            handl
 *  \retval      rocsparse_status_invalid_pointer \p alpha, \p mat, \p x, \p beta, \p y, or
 *               \p buffer pointer is invalid.
 *  \retval      rocsparse_status_invalid_value the value of \p stage is invalid.
-*  \retval      rocsparse_status_not_implemented if \p alg is not supported or if the mixed precision configuration is not supported.
+*  \retval      rocsparse_status_not_implemented if \p alg is not supported, if the mixed precision configuration is not supported,
+*               or if \p alg is \ref rocsparse_spmv_alg_csr_lrb and a row of a CSR matrix or a column of a CSC matrix has more than 2^31 non-zeros.
 *
 *  \par Example
 *  \snippet example_rocsparse_v2_spmv.cpp doc example

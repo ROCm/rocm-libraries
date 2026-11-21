@@ -34,6 +34,8 @@
 
 #include "csrmv_device.h"
 
+#include <algorithm>
+
 #define BLOCK_MULTIPLIER 3
 #define WG_SIZE 256
 // RDNA4/gfx12 launch tuning. The 256-thread workgroup used throughout LRB is a wave64-era
@@ -78,15 +80,16 @@ rocsparse_status rocsparse::csrmv_analysis_lrb_template_dispatch(rocsparse_handl
         rocsparse_hipMallocAsync(&csrmv_info->lrb.rows_offsets_scratch, sizeof(J) * m, stream));
     RETURN_IF_HIP_ERROR(
         rocsparse_hipMallocAsync(&csrmv_info->lrb.rows_bins, sizeof(J) * m, stream));
-    RETURN_IF_HIP_ERROR(
-        rocsparse_hipMallocAsync(&csrmv_info->lrb.n_rows_bins, sizeof(J) * 32, stream));
+    // Counters past lrb_num_bins exist only so that phase 1 stays in bounds for rows LRB rejects.
+    RETURN_IF_HIP_ERROR(rocsparse_hipMallocAsync(
+        &csrmv_info->lrb.n_rows_bins, sizeof(J) * rocsparse::lrb_num_bin_counters, stream));
 
     RETURN_IF_HIP_ERROR(
         rocsparse_hipMemsetAsync(csrmv_info->lrb.rows_offsets_scratch, 0, sizeof(J) * m, stream));
     RETURN_IF_HIP_ERROR(
         rocsparse_hipMemsetAsync(csrmv_info->lrb.rows_bins, 0, sizeof(J) * m, stream));
-    RETURN_IF_HIP_ERROR(
-        rocsparse_hipMemsetAsync(csrmv_info->lrb.n_rows_bins, 0, sizeof(J) * 32, stream));
+    RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(
+        csrmv_info->lrb.n_rows_bins, 0, sizeof(J) * rocsparse::lrb_num_bin_counters, stream));
 
     dim3 blocks(256);
     dim3 threads(WG_SIZE);
@@ -106,12 +109,26 @@ rocsparse_status rocsparse::csrmv_analysis_lrb_template_dispatch(rocsparse_handl
     // n_rows_bins as both input and output, we can make the memcpy async and parallelize it
     // with the phase-2 and phase-3 kernels. Alternatively, we could always launch a fixed grid
     // size and then do more in the (SpMV) kernels to compute intra-kernel iteration bounds.
-    J temp[32];
-    RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
-        temp, csrmv_info->lrb.n_rows_bins, sizeof(J) * 32, hipMemcpyDeviceToHost, stream));
+    J temp[rocsparse::lrb_num_bin_counters];
+    RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(temp,
+                                                 csrmv_info->lrb.n_rows_bins,
+                                                 sizeof(J) * rocsparse::lrb_num_bin_counters,
+                                                 hipMemcpyDeviceToHost,
+                                                 stream));
     RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(stream));
 
-    for(int i = 0; i < 32; i++)
+    if(std::any_of(temp + rocsparse::lrb_num_bins,
+                   temp + rocsparse::lrb_num_bin_counters,
+                   [](J count) { return count != 0; }))
+    {
+        delete csrmv_info;
+        p_csrmv_info[0] = nullptr;
+        RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(
+            rocsparse_status_not_implemented,
+            "the LRB algorithm does not support rows with more than 2^31 non-zeros");
+    }
+
+    for(int i = 0; i < rocsparse::lrb_num_bins; i++)
     {
         csrmv_info->lrb.nRowsBins[i] = temp[i];
     }
@@ -207,7 +224,7 @@ rocsparse_status rocsparse::csrmv_analysis_lrb_template_dispatch(rocsparse_handl
     // to avoid wrap-around. This buffer must be sized for the *true* (unclamped) grid because the
     // kernel's grid-stride loop indexes wg_flags by the full logical workgroup id.
     int64_t max_required_grid = 0;
-    for(int j = LR_THRESHOLD; j < 32; j++)
+    for(int j = LR_THRESHOLD; j < rocsparse::lrb_num_bins; j++)
     {
         uint32_t block_size      = WG_SIZE;
         uint32_t bin_max_row_len = (1 << j);
