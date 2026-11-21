@@ -158,6 +158,7 @@ Measured with autotune (fresh cache), our engines only, against MIOpen in search
   - Wan VAE 3x3x3 bf16 (fwd 0.54-0.85x of MIOpen's time, bwd 0.36-0.47x on gfx90a-gfx950);
   - SD/SDXL/Flux VAE and UNet NHWC 3x3 on CDNA2/3 and RDNA;
   - nnU-Net fp32 NCHW 3-D on RDNA (50-100x, against MIOpen's naive kernels).
+  - nnU-Net fp32 3x3x3 K = 32 layers on gfx942: the 256 x 32 tile at 8-channel chunks and the streaming twin of its 16-channel form, 1.02x forward on MI325X (1.00-1.04x per layer; 34 fp32 3-D layers, all engines, autotuned, two interleaved rounds, none repeatably slower).
   - `rows` measured 1.28x over the halo tile on gfx950 (Flux c256 768²), and its gfx90a ping-pong tiles 1.04-1.12x over the halo tile from 256 channels.
 - **Weak:**
   - gfx950's largest-map VAE bf16 layers against `ConvHipConv` (384²-1024², c256-c512, 4-8 images, 1.01-1.03x);
