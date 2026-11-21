@@ -149,7 +149,11 @@ def test_parse_library_logic_data_custom_kernel(assembler, isa_info_map, monkeyp
     # runs; getCustomKernelConfig is monkeypatched so no real kernel is needed.
     # readCustomKernelConfig is patched too because the synthetic kernel has no
     # file; an empty config declares no Features.
-    monkeypatch.setattr(L, "getCustomKernelConfig", lambda name, isp, kernelConfig=None: {})
+    monkeypatch.setattr(
+        L,
+        "getCustomKernelConfig",
+        lambda name, isp, directory=None, kernelConfig=None, *, problemType=None: {},
+    )
     monkeypatch.setattr(L, "readCustomKernelConfig", lambda name: {})
     data = _raw_dict()
     data["Solutions"][0]["CustomKernelName"] = "synthetic_kernel"
@@ -166,7 +170,9 @@ def test_parse_library_logic_data_custom_kernel_bad_mi(assembler, isa_info_map, 
     # before Solution construction (so MI consistency is irrelevant).
     monkeypatch.setattr(L, "readCustomKernelConfig", lambda name: {})
     monkeypatch.setattr(
-        L, "getCustomKernelConfig", lambda name, isp, kernelConfig=None: {"MatrixInstruction": [1, 2, 3]}
+        L,
+        "getCustomKernelConfig",
+        lambda name, isp, directory=None, kernelConfig=None, *, problemType=None: {"MatrixInstruction": [1, 2, 3]},
     )
     data = _raw_dict()
     data["Solutions"][0]["CustomKernelName"] = "synthetic_kernel"

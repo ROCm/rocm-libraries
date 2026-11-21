@@ -54,7 +54,7 @@ def handleCustomKernel(sol: dict, isaInfoMap: Dict[IsaVersion, IsaInfo]) -> Tupl
     else:
         name = sol.get("CustomKernelName", "")
     try:
-        config = getCustomKernelConfig(name, {})
+        config = getCustomKernelConfig(name, {}, problemType=sol.get("ProblemType"))
     except (RuntimeError, KeyError, TypeError) as e:
         printWarning(f"Skipping custom kernel '{name}': missing or invalid custom.config ({e})")
         return sol, False
