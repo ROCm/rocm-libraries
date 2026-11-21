@@ -48,10 +48,14 @@ from kernels.common.attention_unified import (
     run_unified_attention_torch,
 )
 from rocke.core.arch.target import known_arches
-from rocke.numeric.bf16 import bf16_to_f32, f32_to_bf16
 from rocke.runtime.hip_module import get_device_arch
 
 from ._attention_device_array import DeviceArray
+from ._attention_paged_reference import (
+    decode_half,
+    encode_half,
+    paged_attention_reference,
+)
 
 # The launches compile for the device's own target id, which the builders must
 # know (gfx11 devices are only known through their generic target).
@@ -78,16 +82,6 @@ def rt():
     from rocke.runtime.hip_module import Runtime
 
     return Runtime()
-
-
-def _encode(x, dtype):
-    """fp32 values as the kernel's fp16 or bf16 (raw uint16) host array."""
-    x = np.asarray(x, dtype=np.float32)
-    return x.astype(np.float16) if dtype == "fp16" else f32_to_bf16(x)
-
-
-def _decode(x, dtype):
-    return x.astype(np.float32) if dtype == "fp16" else bf16_to_f32(x)
 
 
 def _nan_filled(like):
@@ -129,9 +123,9 @@ def _inputs(dtype, q_len, kv_len):
     perm = rng.permutation(num_blocks)[:max_blocks]
     return dict(
         dtype=dtype,
-        q=_encode(np.ones((q_len, _HQ, _D)), dtype),
-        k=_encode(np.full(shape, b), dtype),
-        v=_encode(rng.standard_normal(shape), dtype),
+        q=encode_half(np.ones((q_len, _HQ, _D)), dtype),
+        k=encode_half(np.full(shape, b), dtype),
+        v=encode_half(rng.standard_normal(shape), dtype),
         block_table=perm.reshape(1, max_blocks).astype(np.int32),
         cu=np.array([0, q_len], dtype=np.int32),
         seqused=np.array([kv_len], dtype=np.int32),
@@ -143,30 +137,16 @@ def _inputs(dtype, q_len, kv_len):
 def _reference(data, kv_len, top_left, window=_WINDOW):
     """FP32 O for one sequence, causal + sliding window (0: none); keyless rows give 0."""
     dtype = data["dtype"]
-    q = _decode(data["q"], dtype)
-    q_len = q.shape[0]
-    nblk = (kv_len + _BS - 1) // _BS
-    blocks = data["block_table"][0, :nblk]
-    k = _decode(data["k"], dtype)[blocks].reshape(-1, _HKV, _D)[:kv_len]
-    v = _decode(data["v"], dtype)[blocks].reshape(-1, _HKV, _D)[:kv_len]
-    k = np.repeat(k.transpose(1, 0, 2), _HQ // _HKV, axis=0)
-    v = np.repeat(v.transpose(1, 0, 2), _HQ // _HKV, axis=0)
-    s = np.matmul(q.transpose(1, 0, 2), k.transpose(0, 2, 1)) * np.float32(
-        data["scale"]
+    return paged_attention_reference(
+        decode_half(data["q"], dtype),
+        decode_half(data["k"], dtype),
+        decode_half(data["v"], dtype),
+        kv_len,
+        data["block_table"][0],
+        data["scale"],
+        sliding_window=window,
+        top_left=top_left,
     )
-    p = np.arange(q_len).reshape(-1, 1)
-    kk = np.arange(kv_len).reshape(1, -1)
-    diag = p + (0 if top_left else kv_len - q_len)
-    visible = kk <= diag
-    if window:
-        visible &= diag - kk < window
-    has_key = visible.any(axis=-1)
-    s = np.where(visible, s, -np.inf)
-    m = np.where(has_key[:, None], s.max(axis=-1, keepdims=True), 0.0)
-    e = np.exp(s - m)
-    total = e.sum(axis=-1, keepdims=True)
-    probs = np.divide(e, total, out=np.zeros_like(e), where=total > 0)
-    return np.matmul(probs, v).transpose(1, 0, 2), has_key
 
 
 def _run_scalar_2d(rt, problem, data):
@@ -184,7 +164,7 @@ def _run_scalar_2d(rt, problem, data):
         softcap=0.0,
         backend="scalar",
     )
-    return _decode(out.read(), data["dtype"])
+    return decode_half(out.read(), data["dtype"])
 
 
 def _run_scalar_3d(rt, problem, data, between=None):
@@ -304,7 +284,7 @@ def _run_scalar_3d(rt, problem, data, between=None):
         },
         config=LaunchConfig(grid=(q_len, _HQ, _D), block=(64, 1, 1)),
     )
-    return _decode(out.read(), data["dtype"])
+    return decode_half(out.read(), data["dtype"])
 
 
 def _check(out, ref, has_key, dtype):
@@ -397,7 +377,7 @@ def test_scalar_2d_propagates_nan_query_row(rt, case, dtype):
     problem = _problem(dtype, q_len, kv_len, data["num_blocks"], top_left)
     ref, has_key = _reference(data, kv_len, top_left)
     assert bool(has_key[row])
-    data["q"][row, head] = _encode(np.nan, dtype)
+    data["q"][row, head] = encode_half(np.nan, dtype)
     out = _run_scalar_2d(rt, problem, data)
     _check_nan_slot(
         out, ref, row, head, dtype, f"row {row} head {head}: NaN query did not reach O"

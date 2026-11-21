@@ -425,7 +425,7 @@ bool rocke_gfx942_attention_tiled_2d_supports(
  *  -> SSA constants -> KV-loop bounds + iter-arg carry), then run the phase
  *  functions in Python execution order and return b->kernel from the epilogue.
  * ===================================================================== */
-rocke_kernel_def_t* rocke_build_unified_attention_2d_tiled_scalar(
+rocke_kernel_def_t* rocke_gfx942_attn2d_build_without_spec_checks(
     rocke_ir_builder_t* b, const rocke_attention_tiled_2d_spec_t* spec, const char* arch)
 {
     return ckc::guard_builder(b, [&]() -> rocke_kernel_def_t* {
@@ -504,6 +504,20 @@ rocke_kernel_def_t* rocke_build_unified_attention_2d_tiled_scalar(
         kernel = rocke_gfx942_attn2d_emit_epilogue(&ctx);
 
         return rocke_ir_builder_ok(b) ? kernel : NULL;
+    });
+}
+
+rocke_kernel_def_t* rocke_build_unified_attention_2d_tiled_scalar(
+    rocke_ir_builder_t* b, const rocke_attention_tiled_2d_spec_t* spec, const char* arch)
+{
+    return ckc::guard_builder(b, [&]() -> rocke_kernel_def_t* {
+        if(b == NULL || spec == NULL)
+            return NULL;
+        /* The Python gfx942 spec runs these checks when it is constructed,
+         * whatever target it is later built for, so check every target here. */
+        if(!rocke_attention_tiled_2d_spec_validate(b, spec))
+            return NULL;
+        return rocke_gfx942_attn2d_build_without_spec_checks(b, spec, arch);
     });
 }
 
@@ -620,6 +634,8 @@ static rocke_status_t
             s->use_fast_paged_kv_desc ? "fastkvdesc" : "",
             s->use_early_v_schedule ? "earlyv" : "",
             s->use_q_direct_global ? "qdir" : "",
+            s->use_v_hbm_direct ? "vhbm" : "",
+            s->use_k_hbm_direct ? "khbm" : "",
             s->use_qk_pv_sched_group_barrier ? "qsgb" : "",
             kvcp_buf,
             s->use_global_load_lds_k ? "gldlds" : "",

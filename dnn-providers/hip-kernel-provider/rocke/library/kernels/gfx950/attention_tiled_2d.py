@@ -55,6 +55,12 @@ from kernels.common._lse_store import (
 )
 from kernels.common._spec_checks import require_bool
 from kernels.common.attention_mask_type import band_mask_type
+from kernels.common.attention_tiled_2d_rules import (
+    validate_grouped_kv2_and_early_v,
+    validate_skip_legacy_qreg,
+    validate_transposed_softmax_valu_opts,
+    validate_transposed_sub_knobs,
+)
 
 from rocke.core.ir import (
     BF16,
@@ -593,65 +599,41 @@ class UnifiedAttention2DTiledSpec:
         if self.use_mfma_32x32:
             if self.block_m_per_warp != 32:
                 raise ValueError(
-                    "use_mfma_32x32 requires block_m_per_warp=32: "
-                    "one 32-row MFMA atom per warp"
+                    "use_mfma_32x32 requires one 32-row MFMA atom per warp - "
+                    f"block_m_per_warp={self.block_m_per_warp}, expected 32"
                 )
             if self.tile_size_eff % 32 != 0:
                 raise ValueError(
-                    "use_mfma_32x32 requires tile_size to be a multiple of 32"
+                    "use_mfma_32x32 requires whole 32-row tiles - "
+                    f"tile_size={self.tile_size_eff} (block_size when unset), "
+                    "expected a multiple of 32"
                 )
             if self.head_size % 16 != 0:
                 raise ValueError(
-                    "use_mfma_32x32 requires head_size to be a multiple of 16"
+                    "use_mfma_32x32 requires whole 16-element head steps - "
+                    f"head_size={self.head_size}, expected a multiple of 16"
                 )
         if self.use_transposed_qk_32x32 and not self.use_mfma_32x32:
-            raise ValueError("use_transposed_qk_32x32 requires use_mfma_32x32")
-        if self.use_transposed_scalar_state and not self.use_transposed_qk_32x32:
             raise ValueError(
-                "use_transposed_scalar_state requires use_transposed_qk_32x32"
+                "use_transposed_qk_32x32 requires the 32x32 MFMA atom - "
+                "use_mfma_32x32=False, expected True"
             )
-        if self.use_transposed_invariant_hoist and not self.use_transposed_qk_32x32:
+        ok, reason = validate_transposed_sub_knobs(self)
+        if not ok:
+            raise ValueError(reason)
+        ok, reason = validate_skip_legacy_qreg(self)
+        if not ok:
+            raise ValueError(reason)
+        ok, reason = validate_transposed_softmax_valu_opts(self)
+        if not ok:
+            raise ValueError(reason)
+        # Checked after the shared rules: the C++ spec has no additive-bias
+        # field, so both engines then report the same first refusal.
+        if self.use_transposed_mask_limit and self.use_additive_bias:
             raise ValueError(
-                "use_transposed_invariant_hoist requires use_transposed_qk_32x32"
+                "transposed softmax VALU opts do not support additive bias - "
+                "use_additive_bias=True, expected False"
             )
-        if self.use_transposed_mask_once and not self.use_transposed_qk_32x32:
-            raise ValueError(
-                "use_transposed_mask_once requires use_transposed_qk_32x32"
-            )
-        if self.use_transposed_half_local_pv and not self.use_transposed_qk_32x32:
-            raise ValueError(
-                "use_transposed_half_local_pv requires use_transposed_qk_32x32"
-            )
-        if self.use_mfma32_skip_legacy_qreg and not self.use_mfma_32x32:
-            raise ValueError("use_mfma32_skip_legacy_qreg requires use_mfma_32x32")
-        if self.use_transposed_mask_limit:
-            if not (
-                self.use_mfma_32x32
-                and self.use_transposed_qk_32x32
-                and self.use_transposed_scalar_state
-                and self.use_transposed_mask_once
-            ):
-                raise ValueError(
-                    "transposed softmax VALU opts require the R4_s1mask path"
-                )
-            if self.sliding_window > 0:
-                raise ValueError(
-                    "transposed softmax VALU opts require no sliding window"
-                )
-            if (
-                self.has_softcap
-                or self.use_alibi
-                or self.use_qq_bias
-                or self.use_additive_bias
-            ):
-                raise ValueError(
-                    "transposed softmax VALU opts do not support softcap, ALiBi, "
-                    "QQ bias, or additive bias"
-                )
-            if self.use_grouped_kv2_softmax:
-                raise ValueError(
-                    "transposed softmax VALU opts do not support grouped_kv2"
-                )
         # Additive bias is emitted only on the score paths the selectors route a
         # bias problem to (16x16 and the plain transposed 32x32 path); the hoisted
         # and mask-once query-head variants and non-transposed 32x32 are not.
@@ -664,38 +646,16 @@ class UnifiedAttention2DTiledSpec:
                 "use_additive_bias does not support use_transposed_invariant_hoist, "
                 "use_transposed_mask_once, or the non-transposed 32x32 path"
             )
-        if self.use_grouped_kv2_softmax:
-            if self.dtype != "bf16":
-                raise ValueError(
-                    "use_grouped_kv2_softmax v1 is restricted to dtype='bf16'"
-                )
-            if not (self.use_mfma_32x32 and self.use_transposed_qk_32x32):
-                raise ValueError(
-                    "use_grouped_kv2_softmax requires the transposed 32x32 R4 path"
-                )
-            if self.block_m_per_warp != 32:
-                raise ValueError("use_grouped_kv2_softmax requires block_m_per_warp=32")
-            if self.sliding_window > 0:
-                raise ValueError(
-                    "use_grouped_kv2_softmax v1 requires no sliding window"
-                )
-            if (
-                self.has_softcap
-                or self.use_alibi
-                or self.use_qq_bias
-                or self.use_additive_bias
-            ):
-                raise ValueError(
-                    "use_grouped_kv2_softmax v1 does not support softcap, ALiBi, "
-                    "QQ bias, or additive bias"
-                )
-            if self.kv_storage_dtype is not None:
-                raise ValueError("use_grouped_kv2_softmax v1 does not support FP8 KV")
-        if self.use_early_v_schedule:
-            if self.use_grouped_kv2_softmax:
-                raise ValueError("use_early_v_schedule does not support grouped_kv2")
-            if self.kv_storage_dtype is not None:
-                raise ValueError("use_early_v_schedule v1 does not support FP8 KV")
+        ok, reason = validate_grouped_kv2_and_early_v(self)
+        if not ok:
+            raise ValueError(reason)
+        # Checked after the shared rules: the C++ spec has no additive-bias
+        # field, so both engines then report the same first refusal.
+        if self.use_grouped_kv2_softmax and self.use_additive_bias:
+            raise ValueError(
+                "use_grouped_kv2_softmax v1 does not support additive bias - "
+                "use_additive_bias=True, expected False"
+            )
         if self.use_v_double_buffer:
             # v1 wires the V[i+1] prefetch through both the early-V and the
             # post-QK issue sites + the 2x partial-wait before PV. Grouped-KV2
