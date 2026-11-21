@@ -190,8 +190,12 @@ def _ctest_command_index(
     build_root: Path, config: str, requested: set[str]
 ) -> dict[str, list[str]]:
     """Read one CTest listing and index the requested test commands by name."""
+    # Imported here, not at the top: the runner must start where rocke is not
+    # importable (an isolated `--help`).
+    from rocke.tests.ctest_listing import list_ctest_entries
+
     commands: dict[str, list[str]] = {}
-    for test in ctest_tests(build_root, config):
+    for test in list_ctest_entries(build_root, config=config):
         name = test["name"]
         if name not in requested:
             continue

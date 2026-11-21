@@ -16,6 +16,7 @@ import shutil
 import sys
 
 import pytest
+from rocke.tests import ctest_listing
 from rocke.tests.ctest_listing import list_ctest_entries
 
 from rocke.tests.engines import IR_LOWER_CLI_ENV
@@ -429,9 +430,9 @@ def test_corpus_selectors_label_the_overall_result_focused(
 
 def test_ctest_command_index_rejects_duplicate_names(runner, monkeypatch, tmp_path):
     monkeypatch.setattr(
-        runner,
-        "ctest_tests",
-        lambda *_args: [
+        ctest_listing,
+        "list_ctest_entries",
+        lambda *_args, **_kwargs: [
             {"name": "rocke_storage", "command": ["first"]},
             {"name": "rocke_storage", "command": ["second"]},
         ],
@@ -445,9 +446,9 @@ def test_ctest_command_index_ignores_unrequested_duplicate_names(
     runner, monkeypatch, tmp_path
 ):
     monkeypatch.setattr(
-        runner,
-        "ctest_tests",
-        lambda *_args: [
+        ctest_listing,
+        "list_ctest_entries",
+        lambda *_args, **_kwargs: [
             {"name": "other", "command": ["first"]},
             {"name": "rocke_storage", "command": ["storage"]},
             {"name": "other", "command": ["second"]},
