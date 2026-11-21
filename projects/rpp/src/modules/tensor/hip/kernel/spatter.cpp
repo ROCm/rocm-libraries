@@ -228,7 +228,7 @@ RppStatus hip_exec_spatter_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* dstPtr,
 
     int globalThreads_x = (dstDescPtr->strides.hStride + 7) >> 3;
     int globalThreads_y = dstDescPtr->h;
-    int globalThreads_z = handle.GetBatchSize();
+    int globalThreads_z = dstDescPtr->n;
 
     float3 spatterColor_f3;
     if (dstDescPtr->c == 3) {

@@ -415,7 +415,7 @@ RppStatus hip_exec_histogram_equalize_tensor(Rpp8u* srcPtr, RpptDescPtr srcDescP
         if (srcDescPtr->layout == RpptLayout::NHWC) {
             int globalThreads_x = (srcDescPtr->w + 7) >> 3;
             int globalThreads_y = dstDescPtr->h;
-            int globalThreads_z = handle.GetBatchSize();
+            int globalThreads_z = dstDescPtr->n;
 
             // Compute YCbCr buffer strides using 64-bit types to prevent overflow for large images
             size_t yuvNStride =
@@ -464,7 +464,7 @@ RppStatus hip_exec_histogram_equalize_tensor(Rpp8u* srcPtr, RpptDescPtr srcDescP
 
             globalThreads_x = (dstDescPtr->w + 7) >> 3;
             globalThreads_y = dstDescPtr->h;
-            globalThreads_z = handle.GetBatchSize();
+            globalThreads_z = dstDescPtr->n;
 
             if (dstDescPtr->layout == RpptLayout::NHWC) {
                 hipLaunchKernelGGL(
