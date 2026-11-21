@@ -61,8 +61,10 @@ struct Generic2dBlockShape
 
         if constexpr(is_warp_per_row)
         {
+            // each warp holds warp_size / ThreadPerBlock_N rows, so the warps along M are all of
+            // the block's warps
             static_assert(warp_size % ThreadPerBlock_N == 0);
-            return total_warps * (warp_size / ThreadPerBlock_N);
+            return total_warps;
         }
         else
         {
@@ -108,6 +110,11 @@ struct Generic2dBlockShape
     // num of threads along seq<M, N>, within each warp
     static constexpr index_t ThreadPerWarp_M = Warp_M / Vector_M;
     static constexpr index_t ThreadPerWarp_N = Warp_N / Vector_N;
+
+    // every lane of a warp owns one thread of its warp tile, and the block has exactly the
+    // threads of the shape, so no lane covers rows past the block tile
+    static_assert(ThreadPerWarp_M * ThreadPerWarp_N == get_warp_size());
+    static_assert(BlockSize == ThreadPerBlock_M * ThreadPerBlock_N);
 
     template <bool isHostWave32>
     static constexpr index_t GetBlockSize()
