@@ -1464,17 +1464,25 @@ std::optional<Tile> tileOf(const KernelDefinition& kernel)
     const bool flexReg
         = tile.atom == "mfma16_f16" || tile.atom == "mfma16_bf16" || tile.atom == "mfma16_f32";
     const int64_t flexElem = tile.atom == "mfma16_f32" ? 4 : 2;
+    const auto flexStepMismatch = [&] {
+        if(flexReg && tile.bn == 128)
+        {
+            return tile.bk != 128 / flexElem;
+        }
+        if(flexReg && tile.bn == 256)
+        {
+            return tile.bk != 32 || flexElem != 2 || tile.wdirect != 0;
+        }
+        return flexReg || tile.bk != 128 / flexElem;
+    };
     if(tile.flex != 0
        && (tile.flex != 1
            || (tile.atom != "mfma16x32_f16" && tile.atom != "mfma16x32_bf16" && !flexReg)
            || tile.split || tile.bm != 256 || (tile.bn != 256 && tile.bn != 192 && tile.bn != 128)
-           || (flexReg && tile.bn == 128   ? tile.bk != 128 / flexElem
-               : flexReg && tile.bn == 256 ? tile.bk != 32 || flexElem != 2 || tile.wdirect != 0
-                                           : flexReg || tile.bk != 128 / flexElem)
-           || tile.wm != 4 || tile.wn != 2 || tile.vec != 16 / flexElem || tile.stages != 1
-           || tile.xcd != 1 || tile.halo != 0 || (tile.wdirect != 0 && !flexReg) || tile.pack != 0
-           || tile.cf != 0 || tile.swz != 0 || tile.dma != 0 || tile.fuse != 0 || tile.large != 0
-           || tile.patch != 0 || tile.cfx != 0))
+           || flexStepMismatch() || tile.wm != 4 || tile.wn != 2 || tile.vec != 16 / flexElem
+           || tile.stages != 1 || tile.xcd != 1 || tile.halo != 0 || (tile.wdirect != 0 && !flexReg)
+           || tile.pack != 0 || tile.cf != 0 || tile.swz != 0 || tile.dma != 0 || tile.fuse != 0
+           || tile.large != 0 || tile.patch != 0 || tile.cfx != 0))
     {
         return std::nullopt;
     }
