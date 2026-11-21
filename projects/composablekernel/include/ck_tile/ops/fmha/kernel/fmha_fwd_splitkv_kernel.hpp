@@ -1002,65 +1002,96 @@ struct FmhaFwdSplitKVKernel
         const auto lse_acc_res = make_wave_buffer_resource(lse_acc, 0x7ffffffe);
         const auto o_acc_res   = make_wave_buffer_resource(o_acc, 0x7ffffffe);
 
-        const index_t per   = integer_divide_ceil(kVecs, num_splits);
-        const index_t v_end = min((i_split + 1) * per, kVecs);
-        for(index_t vid = i_split * per + static_cast<index_t>(threadIdx.x); vid < v_end;
-            vid += FmhaPipeline::kBlockSize)
-        {
-            const index_t r   = vid / (kN1 / kVec);
-            const index_t g   = i_m0 + r;
-            const index_t col = i_n1 + vid % (kN1 / kVec) * kVec;
-            if(total_rows <= g || kargs.hdim_v <= col)
-                continue;
-            const long_index_t src =
-                row_offset(g, kargs.nhead_stride_o_acc, kargs.stride_o_acc) + col;
-            const long_index_t lse_src = row_offset(g, kargs.nhead_stride_lse_acc, 1);
+        // the common split counts get their own copy with the split loops unrolled and
+        // unguarded; kNs = 0 is the guarded copy for any count up to kMaxClusterSplits
+        const auto merge = [&](auto ns_c) {
+            constexpr index_t kNs = decltype(ns_c)::value;
+            constexpr index_t kN  = kNs != 0 ? kNs : kMaxClusterSplits;
+            const auto has        = [&](auto i) { return kNs != 0 || i < num_splits; };
+            const index_t per     = integer_divide_ceil(kVecs, kNs != 0 ? kNs : num_splits);
+            const index_t v_end   = min((i_split + 1) * per, kVecs);
+            for(index_t vid = i_split * per + static_cast<index_t>(threadIdx.x); vid < v_end;
+                vid += FmhaPipeline::kBlockSize)
+            {
+                const index_t r   = vid / (kN1 / kVec);
+                const index_t g   = i_m0 + r;
+                const index_t col = i_n1 + vid % (kN1 / kVec) * kVec;
+                if(total_rows <= g || kargs.hdim_v <= col)
+                    continue;
+                const long_index_t src =
+                    row_offset(g, kargs.nhead_stride_o_acc, kargs.stride_o_acc) + col;
+                const long_index_t lse_src = row_offset(g, kargs.nhead_stride_lse_acc, 1);
 
-            LSEDataType lse_in[kMaxClusterSplits];
-            vec_t part[kMaxClusterSplits];
-            static_for<0, kMaxClusterSplits, 1>{}([&](auto i) {
-                if(num_splits <= i)
-                    return;
-                const long_index_t s = i;
-                lse_in[i]            = amd_buffer_load_impl<LSEDataType, 1, kAccCoherence>(
-                    lse_acc_res,
-                    static_cast<index_t>((s * kargs.split_stride_lse_acc + lse_src) *
-                                         sizeof(LSEDataType)),
-                    0)[number<0>{}];
-                part[i] = bit_cast<vec_t>(amd_buffer_load_impl<OaccDataType, kVec, kAccCoherence>(
-                    o_acc_res,
-                    static_cast<index_t>((s * kargs.split_stride_o_acc + src) *
-                                         sizeof(OaccDataType)),
-                    0));
-            });
-            LSEDataType lse_max = -numeric<LSEDataType>::infinity();
-            static_for<0, kMaxClusterSplits, 1>{}([&](auto i) {
-                if(i < num_splits)
-                    lse_max = max(lse_max, lse_in[i]);
-            });
-            LSEDataType lse_sum = 0;
-            if(lse_max != -numeric<LSEDataType>::infinity())
-                static_for<0, kMaxClusterSplits, 1>{}([&](auto i) {
-                    if(i < num_splits)
-                        lse_sum += ck_tile::exp(lse_in[i] - lse_max);
+                LSEDataType lse_in[kN];
+                vec_t part[kN];
+                static_for<0, kN, 1>{}([&](auto i) {
+                    if(!has(i))
+                        return;
+                    const long_index_t s = i;
+                    lse_in[i]            = amd_buffer_load_impl<LSEDataType, 1, kAccCoherence>(
+                        lse_acc_res,
+                        static_cast<index_t>((s * kargs.split_stride_lse_acc + lse_src) *
+                                             sizeof(LSEDataType)),
+                        0)[number<0>{}];
+                    part[i] =
+                        bit_cast<vec_t>(amd_buffer_load_impl<OaccDataType, kVec, kAccCoherence>(
+                            o_acc_res,
+                            static_cast<index_t>((s * kargs.split_stride_o_acc + src) *
+                                                 sizeof(OaccDataType)),
+                            0));
                 });
-            const LSEDataType logsum =
-                lse_sum == 0 ? -numeric<LSEDataType>::infinity() : ck_tile::log(lse_sum) + lse_max;
-            vec_t acc{0.f, 0.f, 0.f, 0.f};
-            if(logsum != -numeric<LSEDataType>::infinity())
-                static_for<0, kMaxClusterSplits, 1>{}([&](auto i) {
-                    if(i < num_splits)
-                        acc += ck_tile::exp(lse_in[i] - logsum) * part[i];
+                // weights exp(lse_i - logsum) = e_i / sum e_j with e_i = exp(lse_i - lse_max)
+                LSEDataType lse_max = -numeric<LSEDataType>::infinity();
+                static_for<0, kN, 1>{}([&](auto i) {
+                    if(has(i))
+                        lse_max = max(lse_max, lse_in[i]);
                 });
-            const long_index_t dst = row_offset(g, kargs.nhead_stride_o, kargs.stride_o) + col;
-            static_for<0, kVec, 1>{}([&](auto v) {
-                if(col + v < kargs.hdim_v)
-                    o[dst + v] = type_convert<CombineODataType>(acc[v.value]);
-            });
-            if(lse != nullptr && col == 0)
-                lse[static_cast<long_index_t>(i_batch) * kargs.batch_stride_lse +
-                    i_nhead_q0 * kargs.nhead_stride_lse +
-                    row_offset(g, kargs.nhead_stride_lse, 1)] = logsum;
+                const bool empty = lse_max == -numeric<LSEDataType>::infinity();
+                LSEDataType e[kN];
+                LSEDataType e_sum = 0;
+                static_for<0, kN, 1>{}([&](auto i) {
+                    if(has(i))
+                    {
+                        e[i] =
+                            empty ? 0.f : exp2(static_cast<float>(C_LOG2E) * (lse_in[i] - lse_max));
+                        e_sum += e[i];
+                    }
+                });
+                const LSEDataType inv = empty ? 0.f : 1.f / e_sum;
+                vec_t acc{0.f, 0.f, 0.f, 0.f};
+                static_for<0, kN, 1>{}([&](auto i) {
+                    if(has(i))
+                        acc += (e[i] * inv) * part[i];
+                });
+                const long_index_t dst = row_offset(g, kargs.nhead_stride_o, kargs.stride_o) + col;
+                if(col + kVec <= kargs.hdim_v && dst % kVec == 0)
+                {
+                    ext_vector_t<CombineODataType, kVec> out;
+                    static_for<0, kVec, 1>{}([&](auto v) {
+                        out[v.value] = type_convert<CombineODataType>(acc[v.value]);
+                    });
+                    *static_cast<ext_vector_t<CombineODataType, kVec>*>(
+                        static_cast<void*>(o + dst)) = out;
+                }
+                else
+                    static_for<0, kVec, 1>{}([&](auto v) {
+                        if(col + v < kargs.hdim_v)
+                            o[dst + v] = type_convert<CombineODataType>(acc[v.value]);
+                    });
+                if(lse != nullptr && col == 0)
+                    lse[static_cast<long_index_t>(i_batch) * kargs.batch_stride_lse +
+                        i_nhead_q0 * kargs.nhead_stride_lse +
+                        row_offset(g, kargs.nhead_stride_lse, 1)] =
+                        empty ? -numeric<LSEDataType>::infinity() : lse_max + ck_tile::log(e_sum);
+            }
+        };
+        switch(num_splits)
+        {
+        case 2: merge(number<2>{}); break;
+        case 4: merge(number<4>{}); break;
+        case 8: merge(number<8>{}); break;
+        case 16: merge(number<16>{}); break;
+        default: merge(number<0>{}); break;
         }
     }
 #endif
