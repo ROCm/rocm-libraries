@@ -35,7 +35,8 @@ from codegen.ops.fmha_fwd import (
 
 
 FMHA_FWD_PAGEDKV_PIPELINE_MAP = {
-    "qr_pagedkv": "ck_tile::BlockFmhaFwdPagedKVPipelineQRKSVS"
+    "qr_pagedkv": "ck_tile::BlockFmhaFwdPagedKVPipelineQRKSVS",
+    "qr_pagedkv_tdm_sched": "ck_tile::BlockFmhaFwdPagedKVPipelineQRKSVSTdmSched",
 }
 
 FMHA_FWD_KERNEL_BODY = """
@@ -90,7 +91,7 @@ using fmha_pipeline_problem_{F_idx} = ck_tile::BlockFmhaFwdPagedKVPipelineProble
     fmha_trait_{F_idx}>;
 
 using fmha_pipeline_{F_idx} = {F_pipeline}<
-    fmha_pipeline_problem_{F_idx}>;
+    fmha_pipeline_problem_{F_idx}{F_gappy_targ}>;
 
 using fmha_epilogue_{F_idx} =
     ck_tile::Default2DEpilogue<ck_tile::Default2DEpilogueProblem<typename FmhaFwdTypeConfig<{F_dtype}>::OaccDataType,
@@ -101,7 +102,7 @@ using fmha_kernel_{F_idx} =
     ck_tile::FmhaFwdPagedKVKernel<fmha_pipeline_{F_idx}, fmha_epilogue_{F_idx}>;
 
 using trait_{F_idx} = fmha_fwd_pagedkv_traits_<{F_hdim}, {F_dtype}, {F_mode},{F_bm0}, {F_bn0}, {F_bk0}, {F_bn1}, {F_bk1}, {F_bk0max}, {F_vlayout},
-                        {F_pipeline_enum}, {F_logits}, fmha_mask_{F_idx}, {F_bias}, {F_lse}, {F_pagedkv}, {F_squant}, {F_spad}, {F_skpad}, {F_dpad}, {F_dvpad}, {F_skip}, {F_sink}, {F_occupancy}>;
+                        {F_pipeline_enum}, {F_logits}, fmha_mask_{F_idx}, {F_bias}, {F_lse}, {F_pagedkv}, {F_squant}, {F_spad}, {F_skpad}, {F_dpad}, {F_dvpad}, {F_skip}, {F_sink}, {F_occupancy}{F_gappy_targ}>;
 
 template<>
 float fmha_fwd_pagedkv_<trait_{F_idx}, {F_arch.tag}>(const ck_tile::stream_config& s, fmha_fwd_pagedkv_args a)
@@ -131,11 +132,17 @@ float fmha_fwd_pagedkv(fmha_fwd_pagedkv_traits& t, fmha_fwd_pagedkv_args& a, con
 """
 
 FMHA_FWD_API_INNER_DISPATCH = """{F_if}((t.is_group_mode == {F_mode}) && (t.is_v_rowmajor == {F_vlayout}) && (t.has_logits_soft_cap == {F_logits}) && ({F_mask_check}) && (t.bias_type == {F_bias_check}) && (t.has_lse == {F_lse})  && (t.use_pagedkv == {F_pagedkv}) && (t.do_fp8_static_quant == {F_squant}) && (t.skip_min_seqlen_q == {F_skip}) && (t.has_sink == {F_sink}) &&
-        ({F_scheck}) && ({F_skcheck}) && ({F_dcheck}) && ({F_dvcheck})) {{
-    using trait_ = fmha_fwd_pagedkv_traits_<{F_hdim}, {F_dtype}, {F_mode}, {F_bm0}, {F_bn0}, {F_bk0}, {F_bn1}, {F_bk1}, {F_bk0max}, {F_vlayout}, {F_pipeline_enum}, {F_logits}, {F_mask}, {F_bias}, {F_lse}, {F_pagedkv}, {F_squant}, {F_spad}, {F_skpad}, {F_dpad}, {F_dvpad}, {F_skip},{F_sink}, {F_occupancy}>;
+        ({F_scheck}) && ({F_skcheck}) && ({F_dcheck}) && ({F_dvcheck}){F_tdm_sched_gate}) {{
+    using trait_ = fmha_fwd_pagedkv_traits_<{F_hdim}, {F_dtype}, {F_mode}, {F_bm0}, {F_bn0}, {F_bk0}, {F_bn1}, {F_bk1}, {F_bk0max}, {F_vlayout}, {F_pipeline_enum}, {F_logits}, {F_mask}, {F_bias}, {F_lse}, {F_pagedkv}, {F_squant}, {F_spad}, {F_skpad}, {F_dpad}, {F_dvpad}, {F_skip},{F_sink}, {F_occupancy}{F_gappy_targ}>;
     return fmha_fwd_pagedkv_<trait_, {F_arch.tag}>(s, a);
 }}
 """
+
+
+def gappy_targ(gappy: str) -> str:
+    # Trailing template argument for the gappy variant; omitted (default false) otherwise
+    # so the generated code of every other instance stays unchanged.
+    return ", true" if gappy == "t" else ""
 
 
 @dataclass
@@ -168,6 +175,8 @@ class FmhaFwdApiTrait:
     # Metadata-only hint (occupancy of the pagedkv kernel), see
     # fmha_fwd_traits_::kOccupancy for rationale.
     occupancy: int = -1
+    # "t" for the qr_pagedkv_tdm_sched variant that serves gappy group mode.
+    gappy: str = "f"
 
     @property
     def name(self) -> str:
@@ -186,7 +195,7 @@ class FmhaFwdApiTrait:
                 return "true"  # always support
             else:
                 return "true"
-        elif self.pipeline_tag in ["qr_pagedkv", "qs"]:
+        elif self.pipeline_tag in ["qr_pagedkv", "qr_pagedkv_tdm_sched", "qs"]:
             if self.spad == "t":
                 return f"true /*a.seqlen_q % {self.bm0} != 0*/"  # TODO: order of get_pipelines() matters! (ugly)
             else:
@@ -203,7 +212,7 @@ class FmhaFwdApiTrait:
                 return f"a.seqlen_k == 0 || a.seqlen_k % {self.bn0} != 0"
             else:
                 return f"a.seqlen_k != 0 && a.seqlen_k % {self.bn0} == 0"
-        elif self.pipeline_tag in ["qr_pagedkv", "qs"]:
+        elif self.pipeline_tag in ["qr_pagedkv", "qr_pagedkv_tdm_sched", "qs"]:
             if self.skpad == "t":
                 return f"true /*a.seqlen_k_ptr != nullptr || a.seqlen_k % {self.bn0} != 0*/"  # TODO: order of get_pipelines() matters! (ugly)
             else:
@@ -219,7 +228,7 @@ class FmhaFwdApiTrait:
                 return f"a.hdim_q % {vec} == 0"
             else:
                 assert False
-        elif self.pipeline_tag in ["qr_pagedkv", "qs"]:
+        elif self.pipeline_tag in ["qr_pagedkv", "qr_pagedkv_tdm_sched", "qs"]:
             bk0submax = K0_MAX_SUBMAX_MAP[self.bk0max]
             if self.dpad == "t":
                 return f"true /*a.hdim_q % {bk0submax} != 0*/"  # TODO: order of get_pipelines() matters! (ugly)
@@ -236,7 +245,7 @@ class FmhaFwdApiTrait:
                 return f"a.hdim_v % {vec} == 0"
             else:
                 assert False
-        elif self.pipeline_tag in ["qr_pagedkv", "qs"]:
+        elif self.pipeline_tag in ["qr_pagedkv", "qr_pagedkv_tdm_sched", "qs"]:
             bk0submax = K0_MAX_SUBMAX_MAP[self.bk0max]
             if self.dvpad == "t":
                 return f"true /*a.hdim_v % {bk0submax} != 0*/"  # TODO: order of get_pipelines() matters! (ugly)
@@ -244,6 +253,15 @@ class FmhaFwdApiTrait:
                 return f"a.hdim_v % {bk0submax} == 0"
         else:
             assert False
+
+    @property
+    def tdm_sched_gate(self) -> str:
+        # Runtime check so dispatch falls back to the next (non-tdm_sched)
+        # matching trait when the page layout does not suit qr_pagedkv_tdm_sched;
+        # see fmha_fwd_pagedkv_tdm_sched_applicable in fmha_fwd.hpp.
+        if self.pipeline_tag == "qr_pagedkv_tdm_sched":
+            return f" && fmha_fwd_pagedkv_tdm_sched_applicable(a.page_block_size, a.is_gappy, {BOOL_MAP[self.gappy]}, {self.bn0})"
+        return ""
 
 
 @dataclass
@@ -263,6 +281,8 @@ class FmhaFwdPipeline:
     F_mask: str  # value from MASK_MAP
     F_skip: str  # true/false
     F_sink: str  # true/false
+    # t: the qr_pagedkv_tdm_sched variant that accepts any kv_l2p_offset (gappy group mode)
+    F_gappy: str = "f"
 
     @property
     def name(self) -> str:
@@ -281,7 +301,7 @@ class FmhaFwdPipeline:
             return n
 
         pn = pad_name()
-        n = f"{self.tag}_v{self.F_vlayout[0]}"
+        n = f"{self.tag}{'_gappy' if self.F_gappy == 't' else ''}_v{self.F_vlayout[0]}"
         if pn != "":
             n += f"_{pn}"
         else:
@@ -380,6 +400,7 @@ class FmhaFwdApiPool:
                             F_skcheck=trait.skcheck,
                             F_dcheck=trait.dcheck,
                             F_dvcheck=trait.dvcheck,
+                            F_tdm_sched_gate=trait.tdm_sched_gate,
                             F_spad=BOOL_MAP[trait.spad],
                             F_skpad=BOOL_MAP[trait.skpad],
                             F_dpad=BOOL_MAP[trait.dpad],
@@ -391,6 +412,7 @@ class FmhaFwdApiPool:
                             F_bk1=trait.bk1,
                             F_bk0max=trait.bk0max,
                             F_occupancy=trait.occupancy,
+                            F_gappy_targ=gappy_targ(trait.gappy),
                             F_hdim=hdim,
                             F_dtype=FWD_DTYPE_MAP[dtype],
                         )
@@ -495,6 +517,7 @@ class FmhaFwdKernel:
             F_skip=BOOL_MAP[self.F_pipeline.F_skip],
             F_sink=BOOL_MAP[self.F_pipeline.F_sink],
             F_occupancy=self.F_tile.F_occupancy,
+            F_gappy_targ=gappy_targ(self.F_pipeline.F_gappy),
             F_pipeline_enum=PIPELINE_ENUM_MAP[self.F_pipeline.tag],
             F_mask=get_mask_map(self.mask_impl)[self.F_pipeline.F_mask],
             F_mode=MODE_MAP[self.F_mode],
@@ -542,6 +565,7 @@ class FmhaFwdKernel:
             skip=self.F_pipeline.F_skip,
             sink=self.F_pipeline.F_sink,
             occupancy=int(self.F_tile.F_occupancy),
+            gappy=self.F_pipeline.F_gappy,
         )
 
 
@@ -577,6 +601,11 @@ class KernelComponentFactoryBase:
         else:
             assert False
         return pipelines
+
+    @staticmethod
+    def get_pipeline_tile(pipeline, hdim, tile, mode) -> Optional[FmhaFwdTileSize]:
+        """Tile to instantiate `pipeline` with in `mode`, or None to skip it."""
+        return tile
 
 
 class KernelComponentFactoryGfx9(KernelComponentFactoryBase):
@@ -653,6 +682,47 @@ class KernelComponentFactoryGfx117(KernelComponentFactoryGfx12):
 class KernelComponentFactoryGfx125(KernelComponentFactoryBase):
     arch = ArchTrait("gfx125")
 
+    # Geometries qr_pagedkv_tdm_sched is instantiated for, keyed by (hdim, hdim_v).
+    # Field order: bm0, bn0, bk0, bn1, bk1, bk0blocklength, ...
+    _QR_PAGEDKV_TDM_SCHED_TILES = {
+        (128, 128): (
+            FmhaFwdTileSize(128, 128, 32, 128, 32, 128, 4, 1, 1, 4, 1, 1, 16, 16, 32, 16, 16, 32, 1),
+        ),
+    }  # fmt: skip
+
+    @staticmethod
+    def get_pipelines(dtype, hdim, mask_impl) -> List[FmhaFwdPipeline]:
+        # qr_pagedkv_tdm_sched: fp16/bf16, no bias / logits soft cap / lse / quant. Its
+        # dispatch predicate overlaps qr_pagedkv's for the same traits, so it is listed
+        # first: the generated API checks traits in list order.
+        pipelines = []
+        if dtype in ["fp16", "bf16"]:
+            for mask, sink in itertools.product(
+                get_mask_map(mask_impl).keys(), ["t", "f"]
+            ):
+                # Paged KV always sets seqlen_k_ptr, which fails the skpad "f" check in
+                # batch mode, so the skpad "t" variant is the one that dispatches.
+                pipelines.append(FmhaFwdPipeline("qr_pagedkv_tdm_sched", "row", "t", "f", "f", "f", "f", "no", "f", "t", "f", mask, "f", sink))  # fmt: skip
+                pipelines.append(FmhaFwdPipeline("qr_pagedkv_tdm_sched", "row", "t", "t", "f", "f", "f", "no", "f", "t", "f", mask, "f", sink))  # fmt: skip
+            # Gappy group mode (any kv_l2p_offset) has its own variant so the default one
+            # keeps the offset a compile-time zero. Group mode only, no sink.
+            for mask in get_mask_map(mask_impl).keys():
+                pipelines.append(FmhaFwdPipeline("qr_pagedkv_tdm_sched", "row", "t", "t", "f", "f", "f", "no", "f", "t", "f", mask, "f", "f", F_gappy="t"))  # fmt: skip
+        return pipelines + KernelComponentFactoryBase.get_pipelines(
+            dtype, hdim, mask_impl
+        )
+
+    @classmethod
+    def get_pipeline_tile(cls, pipeline, hdim, tile, mode) -> Optional[FmhaFwdTileSize]:
+        # qr_pagedkv_tdm_sched uses its own tile and only the geometries in the table;
+        # the generic qr_pagedkv instances cover the rest.
+        if pipeline.tag != "qr_pagedkv_tdm_sched":
+            return tile
+        if pipeline.F_gappy == "t" and mode != "group":
+            return None
+        tiles = cls._QR_PAGEDKV_TDM_SCHED_TILES.get((hdim, tile.F_bn1))
+        return tiles[0] if tiles else None
+
     @staticmethod
     def get_hdim_tile_size_dict(dtype: str) -> Optional[dict]:
         if dtype in ["fp16", "bf16"]:
@@ -708,6 +778,9 @@ def get_fwd_blobs(
             tile = d[hdim_str]
             hdim = int(hdim_str)
             for pipeline in factory.get_pipelines(dtype, hdim, mask_impl):
+                kernel_tile = factory.get_pipeline_tile(pipeline, hdim, tile, mode)
+                if kernel_tile is None:
+                    continue
                 # if pipeline.F_pagedkv == "f":
                 #     continue
                 if mode == "group":
@@ -730,7 +803,7 @@ def get_fwd_blobs(
                     F_hdim=hdim,
                     F_dtype=dtype,
                     F_mode=mode,
-                    F_tile=tile,
+                    F_tile=kernel_tile,
                     F_pipeline=pipeline,
                     mask_impl=mask_impl,
                 )

@@ -415,11 +415,14 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVS
                 store_tile(k_lds_window, tile_elementwise_in(k_element_func, k_block_tile));
                 k_block_tile = load_tile(k_dram_window);
             }
-            const bool is_sink_tile = ((num_sink_loop - 1) == i_total_loops);
+            // Every sink tile is exempt from the paged head check below; only the last
+            // one jumps the windows from the sink to the ordinary range.
+            const bool is_sink_tile      = (i_total_loops < num_sink_loop);
+            const bool is_last_sink_tile = ((num_sink_loop - 1) == i_total_loops);
 
             const auto k_move_offset = [&]() {
                 if constexpr(kHasSink)
-                    return is_sink_tile ? logical_seqlen_k_start - sink_seq_end + kN0 : kN0;
+                    return is_last_sink_tile ? logical_seqlen_k_start - sink_seq_end + kN0 : kN0;
                 else
                     return kN0;
             }();

@@ -159,6 +159,7 @@ PIPELINE_ENUM_MAP = {
     "qr_nwarp_sshuffle": "ck_tile::BlockFmhaPipelineEnum::QRKSVS",
     "qs": "ck_tile::BlockFmhaPipelineEnum::QSKSVS",
     "qr_pagedkv": "ck_tile::BlockFmhaPipelineEnum::QRKSVS",
+    "qr_pagedkv_tdm_sched": "ck_tile::BlockFmhaPipelineEnum::QRKSVS_TDM_SCHED",
     "qr_async_trload": "ck_tile::BlockFmhaPipelineEnum::QRKSVS_ASYNC_TRLOAD",
     "qr_async_trload_v3": "ck_tile::BlockFmhaPipelineEnum::QRKSVS_ASYNC_TRLOAD_V3",
     "qr_tdm": "ck_tile::BlockFmhaPipelineEnum::QRKSVS_TDM",
