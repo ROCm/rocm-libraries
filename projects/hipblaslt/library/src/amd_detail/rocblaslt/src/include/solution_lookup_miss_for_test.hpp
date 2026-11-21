@@ -18,6 +18,9 @@ enum rocblaslt_testing_solution_lookup_miss
     rocblaslt_testing_solution_lookup_miss_none = 0,
     // getBestSolutions and getAllSolutions both return no solutions.
     rocblaslt_testing_solution_lookup_miss_all = 1,
+    // Only getBestSolutions returns no solutions, as for a problem no ranked library row
+    // covers. The size-independent lookup still finds them.
+    rocblaslt_testing_solution_lookup_miss_ranked = 2,
 };
 
 // Sets the lookups that miss, for every handle, until set back to _none.
