@@ -326,6 +326,45 @@ std::optional<Tile>
     return best;
 }
 
+/// Run tiles (RUN configs): the output is cut into strips of 16 columns (the last one the columns
+/// left over); a block owns BM consecutive pixels of a strip's raster of rows over the planes, so
+/// tiles span rows and planes and no pixel slot idles. Every run of a 16-wide strip starts a row,
+/// so a 16-lane fragment reads 16 consecutive pixels of one staged row. A plane has Hv virtual
+/// rows: at least the output's, and enough that a filter row's reach past a plane's last row lands
+/// on the input's zero padding on both readings (max(out, in + max(leading pad, trailing pad))).
+/// Declines strips whose stage would outgrow the config's.
+std::optional<Tile> runTileFor(const K2Args& a, const Config& config, long long columnBlocks)
+{
+    constexpr int STRIP = 16;
+    const long long trailH = static_cast<long long>(a.ho) + config.r - 1 - a.hi - a.ph;
+    const long long hv = std::max<long long>(a.ho, a.hi + std::max<long long>(a.ph, trailH));
+    const long long raster = static_cast<long long>(a.dout) * hv;
+    const int ws = std::min(a.wo, STRIP);
+    const int full = a.wo / ws;
+    const int rest = a.wo - full * ws;
+    if(k2RunHalo(config.bm, config.r, config.s, ws) > config.run
+       || (rest > 0 && k2RunHalo(config.bm, config.r, config.s, rest) > config.run)
+       || raster * ws + config.bm > INT_LIMIT)
+    {
+        return std::nullopt;
+    }
+    const long long perStrip = divUp(raster * ws, config.bm);
+    const long long tiles = full * perStrip + (rest > 0 ? divUp(raster * rest, config.bm) : 0);
+    if(tiles > INT_LIMIT || perStrip > INT_LIMIT)
+    {
+        return std::nullopt;
+    }
+    Tile t;
+    t.th = static_cast<int>(hv);
+    t.tw = ws;
+    t.ds = static_cast<int>(perStrip);
+    t.tilesW = static_cast<int>(tiles);
+    t.tilesH = 1;
+    t.tilesD = 1;
+    t.blocks = tiles * a.n * columnBlocks;
+    return t;
+}
+
 } // namespace
 
 std::optional<DirectProblem> parseDirectProblem(const MatchContext& context,
@@ -607,6 +646,15 @@ std::optional<Config> configOf(const KernelDefinition& kernel)
     {
         return std::nullopt;
     }
+    // Run tiles (absent: 0): halo tiles, matrix-core, register-path weights, channels-last,
+    // non-ring; the value is the stage's pixels.
+    config.run = intField(kernel, "run").value_or(0);
+    if(config.run != 0
+       && (config.run < 1 || config.rows || config.fma || config.ring != 0 || config.bl != 0
+           || config.cf != 0))
+    {
+        return std::nullopt;
+    }
     config.math = math == 1;
     const bool known
         = std::any_of(FILTERS.begin(),
@@ -813,7 +861,8 @@ std::optional<Plan>
         {
             return std::nullopt;
         }
-        tile = tileFor(a, config, columnBlocks, computeUnits);
+        tile = config.run != 0 ? runTileFor(a, config, columnBlocks)
+                               : tileFor(a, config, columnBlocks, computeUnits);
     }
     if(!tile.has_value())
     {
@@ -1311,6 +1360,10 @@ public:
             if(config.xpf != 0)
             {
                 options.add("CONV_DIRECT_XPF", std::to_string(config.xpf));
+            }
+            if(config.run != 0)
+            {
+                options.add("CONV_DIRECT_RUN", std::to_string(config.run));
             }
         }
 

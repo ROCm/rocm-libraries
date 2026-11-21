@@ -104,8 +104,12 @@ extern "C" __global__ void __launch_bounds__(CONV_IGEMM_BLOCK) CONV_IGEMM_OCCUPA
                CONV_IGEMM_WD>(a CONV_EPI_ARG);
 #elif CONV_IGEMM_FLEX
 #if CONV_IGEMM_FLEX == 2
-    k1ConvFlexReg<CONV_IGEMM_T, CONV_IGEMM_ATOM, CONV_IGEMM_DIR, CONV_IGEMM_BN, CONV_IGEMM_WD>(
-        a CONV_EPI_ARG);
+    k1ConvFlexReg<CONV_IGEMM_T,
+                  CONV_IGEMM_ATOM,
+                  CONV_IGEMM_DIR,
+                  CONV_IGEMM_BN,
+                  CONV_IGEMM_WD,
+                  CONV_IGEMM_BK* static_cast<int>(sizeof(CONV_IGEMM_T))>(a CONV_EPI_ARG);
 #else
     k1ConvFlex<CONV_IGEMM_T, CONV_IGEMM_ATOM, CONV_IGEMM_DIR, CONV_IGEMM_BN>(a CONV_EPI_ARG);
 #endif

@@ -76,6 +76,7 @@ INTS = [
     "dil",
     "line",
     "bpu",
+    "run",
 ]
 ROWS0 = dict(
     rows=0, pw=0, fn=0, wp=0, wq=0, wk=0, pp=0, epi=0, un=0, cf=0, dil=1, line=0, bpu=1
@@ -93,10 +94,14 @@ F33, F55, F77, F17, F71, F333, F555 = (
 FILTERS2D = [F33, F55, F77, F17, F71]
 
 
-def M(atom, f, bm, bn, bc, wm, wn, vec, ring=1, bl=0, split=0, math=0, cf=0, xpf=0):
+def M(
+    atom, f, bm, bn, bc, wm, wn, vec, ring=1, bl=0, split=0, math=0, cf=0, xpf=0, run=0
+):
     """Halo-tile matrix-core kernel; cf 1 (16-bit): packed channels-first activations in place.
     xpf 1 (register-path weights, channels-last): weight fragments prefetched across channel
-    chunks, ring sets skipped by scalar branches, 16-bit halo rows padded by 8 bytes."""
+    chunks, ring sets skipped by scalar branches, 16-bit halo rows padded by 8 bytes. run > 0
+    (ring 0, channels-last): run tiles of bm consecutive pixels of a strip of the output, rows
+    over planes, a stage of run pixels."""
     c = dict(
         kind="mma",
         atom=atom,
@@ -123,6 +128,7 @@ def M(atom, f, bm, bn, bc, wm, wn, vec, ring=1, bl=0, split=0, math=0, cf=0, xpf
     )
     c["cf"] = cf
     c["xpf"] = xpf
+    c["run"] = run
     return c
 
 
@@ -151,6 +157,7 @@ def F(f, bc, tm, tn, nt, vec, ring=1, pipe=0):
         pipe=pipe,
         **ROWS0,
         xpf=0,
+        run=0,
     )
 
 
@@ -218,6 +225,7 @@ def RW(
         dil=dil,
         line=line,
         bpu=bpu,
+        run=0,
     )
 
 
@@ -319,6 +327,12 @@ for dt in ("HALF", "BFLOAT16"):
             M(f"mfma16_{e}", F333, 128, 64, 32, 1, 4, 8, ring=1, xpf=1),
             M(f"mfma16_{e}", F333, 128, 192, 16, 1, 4, 8, ring=0, xpf=1),
             M(f"mfma16_{e}", F333, 128, 256, 16, 1, 8, 8, ring=0, xpf=1),
+            # 256-pixel tiles of 128 x 32 wave tiles: a wave's weight fragment serves 128 pixels,
+            # half the weight loads per MMA of the 128-pixel tiles, whose weight-load issue
+            # stalls took a third of the wave time on 128-channel large 3-D layers
+            # (1.10x there, MI300A).
+            M(f"mfma16_{e}", F333, 256, 64, 16, 2, 2, 8, ring=0, xpf=1),
+            M(f"mfma16_{e}", F333, 256, 128, 16, 2, 4, 8, ring=0, xpf=1),
             # Split-C twins for under-filled grids (the planner splits the channel chunks only
             # below two blocks a CU): the 512 / 1024-channel layers on small 3-D and smaller
             # outputs run 64-192 blocks on 228-304 CUs unsplit.
@@ -344,6 +358,34 @@ for dt in ("HALF", "BFLOAT16"):
             RW(f"mfma16_{e}", F33, 8, 4, 2, 2, 2, 16, 8),
             RW(f"mfma16_{e}", F33, 8, 4, 1, 2, 4, 16, 8, un=4),
             RW(f"mfma16_{e}", F33, 5, 4, 4, 1, 2, 16, 8),
+        ],
+    )
+    # gfx942 3x3x3 run tiles (backward data of unpadded layers, whose 130-, 66- and 34-wide
+    # outputs the th x tw tiles fit with 6-16% of their pixel slots idle): the register-path
+    # halo tiles over 16-column strips of the output, a block 128 consecutive pixels of a
+    # strip's rows over the planes, a 264-pixel stage (a 2-column last strip's runs).
+    add(
+        dt,
+        ["gfx942"],
+        [
+            M(f"mfma16_{e}", F333, 128, bn, 16, wm, wn, 8, ring=0, xpf=1, run=264)
+            for bn, wm, wn in ((128, 2, 2), (64, 2, 2), (128, 1, 4), (256, 1, 8))
+        ]
+        + [
+            M(
+                f"mfma16_{e}",
+                F333,
+                128,
+                128,
+                16,
+                1,
+                4,
+                8,
+                ring=0,
+                split=1,
+                xpf=1,
+                run=264,
+            )
         ],
     )
     # Packed channels-first activations in place on the dword-DMA parts (gather transpose in
@@ -1089,7 +1131,14 @@ for direction, tag in (("FWD", "fwd"), ("BWD", "bwd")):
                     f".v{c['vec']}.ring{c['ring']}.bl{c['bl']}.split{c['split']}.pipe{c['pipe']}"
                     + (".cf" if c["cf"] else "")
                     + (".xpf" if c["xpf"] else "")
+                    + (f".run{c['run']}" if c["run"] else "")
                 )
+                if c["run"]:
+                    # The two stages of the run tile's halo (rows padded by 8 bytes under xpf)
+                    # fit the device's LDS; the pack's planner keeps the strips within them.
+                    eb = 4 if c["atom"].endswith("f32") else 2
+                    ldc = c["bc"] + (4 if c["xpf"] and eb == 2 else 16 // eb)
+                    assert 2 * c["run"] * ldc * eb <= 64 * 1024, (c, archs)
             kernels.append(
                 {
                     "version": "1.0",

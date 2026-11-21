@@ -134,6 +134,11 @@ struct Config
     /// fragments across channel chunks, skips ring sets by scalar branches and pads 16-bit halo
     /// rows by 8 bytes (CONV_DIRECT_XPF); 0 elsewhere.
     int xpf = 0;
+    /// Run tiles (halo tile, ring 0, register-path weights, channels-last): a block owns BM
+    /// consecutive pixels of a 16-column strip of the output, its rows over the planes, instead of
+    /// a th x tw tile, so widths the 2-D tiles fit badly (130, 66, 34) pad no pixel slots. The
+    /// value is the stage's pixels (CONV_DIRECT_RUN); 0 elsewhere.
+    int run = 0;
     /// Filter dilation (2-D rows configs; 1 elsewhere): the config serves exactly this dilation of
     /// the axes its filter spans.
     int dil = 1;
