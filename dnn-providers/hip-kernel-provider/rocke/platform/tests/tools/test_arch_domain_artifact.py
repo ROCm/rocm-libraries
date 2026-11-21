@@ -1997,6 +1997,90 @@ except KeyboardInterrupt:
         self.assertEqual(len(self._started(pids)), 4, "stubs did not start")
         self.assertEqual(self._survivors(pids), [], "outlived the interrupt")
 
+    _PROBES_UNTIL_KILLED = """
+import sys
+sys.path.insert(0, {tools!r})
+import gen_arch_domain as G
+from _bounded_run import run_bounded
+with G._probe_pool(1) as ex:
+    ex.submit(run_bounded, [{tool!r}], timeout=120).result()
+"""
+
+    @unittest.skipUnless(
+        sys.platform.startswith("linux"),
+        "a probe dies with its sweep only on Linux (PR_SET_PDEATHSIG)",
+    )
+    def test_killing_the_sweep_ends_its_running_probe(self):
+        """A sweep killed outright -- a CTest timeout, an outer `timeout`, a
+        SIGKILL -- gets no chance to clean up, and each probe runs in its own
+        session, out of reach of anything sent to the sweep's process group.
+        The probe must still end, compiler child included, instead of running
+        on as an orphan. The sweep is a child process probing from a worker
+        thread, as the generator does."""
+        tool, pids = self._stub("clang")
+        script = self._PROBES_UNTIL_KILLED.format(
+            tools=str(_ROCKE / "tools"), tool=tool
+        )
+        sweep = subprocess.Popen([sys.executable, "-c", script])
+        self.addCleanup(sweep.wait)
+        self.addCleanup(sweep.kill)
+        deadline = time.monotonic() + 30
+        while not pids.exists() or len(self._started(pids)) < 2:
+            self.assertIsNone(sweep.poll(), "the sweep exited before probing")
+            self.assertLess(time.monotonic(), deadline, "the probe did not start")
+            time.sleep(0.05)
+        sweep.kill()
+        sweep.wait()
+        self.assertEqual(self._survivors(pids), [], "outlived the killed sweep")
+
+    @unittest.skipUnless(
+        sys.platform.startswith("linux"),
+        "only Linux runs commands under a session leader",
+    )
+    def test_the_session_leader_passes_the_command_through(self):
+        """What makes a probe die with its sweep is a session leader between
+        `run_bounded` and the command. Callers must not see it: the probes read
+        a negative return code as a toolchain crash, and a missing tool must
+        still raise. A leader that cannot start must fail loudly instead of
+        passing for the command's result."""
+        scratch = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, scratch, True)
+        python = [sys.executable, "-c"]
+        finished = B.run_bounded(
+            python + ["import sys; print('out'); sys.exit('err')"], timeout=60
+        )
+        self.assertEqual(
+            (finished.returncode, finished.stdout, finished.stderr),
+            (1, "out\n", "err\n"),
+        )
+        killed = B.run_bounded(
+            python + ["import os, signal; os.kill(os.getpid(), signal.SIGTERM)"],
+            timeout=60,
+        )
+        self.assertEqual(killed.returncode, -signal.SIGTERM)
+
+        missing = str(scratch / "no-such-tool")
+        with self.assertRaises(FileNotFoundError) as caught:
+            B.run_bounded([missing], timeout=60)
+        self.assertEqual(caught.exception.filename, missing)
+        not_executable = scratch / "not-executable"
+        not_executable.write_text("")
+        with self.assertRaises(PermissionError):
+            B.run_bounded([str(not_executable)], timeout=60)
+
+        broken_python = scratch / "python"
+        broken_python.write_text(
+            f"#!{sys.executable}\nimport sys\nsys.exit('the leader cannot start')\n"
+        )
+        broken_python.chmod(0o755)
+        with (
+            mock.patch.object(B.sys, "executable", str(broken_python)),
+            self.assertRaisesRegex(
+                RuntimeError, r"exited with status 1 .*the leader cannot start"
+            ),
+        ):
+            B.run_bounded(python + ["pass"], timeout=60)
+
 
 class ProbeTimeoutGfx950Test(ProbeTimeoutTest):
     ARCH = "gfx950"

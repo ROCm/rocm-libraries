@@ -194,7 +194,10 @@ PROBE_CFLAGS = ("-O0", "-nogpulib")
 
 # Bounds the sweep, not any one probe: a probe module is one declare and one
 # call, so a healthy probe is quick. Without a budget a single non-terminating
-# probe hangs the run and `--check` never returns.
+# probe hangs the run and `--check` never returns. Keep it far below the
+# TIMEOUT of the `rocke_arch_domain_reproducibility` CTest, so that a hanging
+# probe is recorded as a timeout instead of CTest killing the whole sweep; only
+# on Linux does a probe die with a killed sweep (see `_bounded_run`).
 PROBE_TIMEOUT_S = 60
 
 # Each worker owns an external compiler process, and successful probes briefly
