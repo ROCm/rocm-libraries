@@ -157,10 +157,10 @@
         },
         "gemm/gfx942/f64_t64x64x16/dtl_prefetch_swizzle": {
           "arch": "gfx942",
-          "bytes": 72522,
+          "bytes": 72458,
           "family": "gemm",
           "kernel_name": "irhash_gemm_942_f64_dtl_fp64_t64x64x16_w2x2x1_wt16x16x4_compv4_intrawave_default_pad_dtl_pref",
-          "sha256": "ee051c197329850f0c9a9db7277479bcdf5f7b0e99a39e8824d1429107360520",
+          "sha256": "ba735af0ce0e8930f9510abe895c12722f58ba8b0f482c5cf7adcd2fd6c4dde8",
           "status": "ok"
         },
         "gemm/gfx942/t128x128x16": {
@@ -395,10 +395,10 @@
         },
         "gemm/gfx942/f64_t64x64x16/dtl_prefetch_swizzle": {
           "arch": "gfx942",
-          "bytes": 72618,
+          "bytes": 72554,
           "family": "gemm",
           "kernel_name": "irhash_gemm_942_f64_dtl_fp64_t64x64x16_w2x2x1_wt16x16x4_compv4_intrawave_default_pad_dtl_pref",
-          "sha256": "846b4d34dc734e6a963b8c6a55e10a96af160b337aa8871d51abacab87c64224",
+          "sha256": "a10206afbd3291e419d09d8030599891162aef8d06e8597298d545c0215cc44c",
           "status": "ok"
         },
         "gemm/gfx942/t128x128x16": {
@@ -697,10 +697,10 @@
         },
         "gemm/gfx942/f64_t64x64x16/dtl_prefetch_swizzle": {
           "arch": "gfx942",
-          "bytes": 72682,
+          "bytes": 72618,
           "family": "gemm",
           "kernel_name": "irhash_gemm_942_f64_dtl_fp64_t64x64x16_w2x2x1_wt16x16x4_compv4_intrawave_default_pad_dtl_pref",
-          "sha256": "1f409a70cf37f72a6ef044f4c4ad56ec5a2e7c84d1cde1c9750cf45bddfe8a86",
+          "sha256": "e8c2ebfbd61ee6de010cf1448e867d7e894ac8be083dc913fa4426f46e0d77e4",
           "status": "ok"
         },
         "gemm/gfx942/t128x128x16": {
@@ -966,10 +966,10 @@
         },
         "gemm/gfx942/f64_t64x64x16/dtl_prefetch_swizzle": {
           "arch": "gfx942",
-          "bytes": 72682,
+          "bytes": 72618,
           "family": "gemm",
           "kernel_name": "irhash_gemm_942_f64_dtl_fp64_t64x64x16_w2x2x1_wt16x16x4_compv4_intrawave_default_pad_dtl_pref",
-          "sha256": "1f409a70cf37f72a6ef044f4c4ad56ec5a2e7c84d1cde1c9750cf45bddfe8a86",
+          "sha256": "e8c2ebfbd61ee6de010cf1448e867d7e894ac8be083dc913fa4426f46e0d77e4",
           "status": "ok"
         },
         "gemm/gfx942/t128x128x16": {

@@ -141,6 +141,24 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/instances/gemm_universal_spec_guards.cpp"
                rocke_gemm_universal_spec_guards)
 endif()
 
+# TDM source type validation before descriptor preparation emits IR.
+if(BUILD_TESTING AND
+   EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/instances/test_tdm_tile_loader.cpp")
+  add_executable(rocke_test_tdm_tile_loader instances/test_tdm_tile_loader.cpp)
+  target_link_libraries(rocke_test_tdm_tile_loader PRIVATE rocke_core)
+  add_test(NAME rocke_test_tdm_tile_loader COMMAND rocke_test_tdm_tile_loader)
+  set_tests_properties(rocke_test_tdm_tile_loader
+                       PROPERTIES LABELS "ckc;unit;host")
+  rocke_cxx_test_installed_name(
+    _rocke_installed_name rocke_test_tdm_tile_loader)
+  set_target_properties(rocke_test_tdm_tile_loader
+                        PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+  install(TARGETS rocke_test_tdm_tile_loader
+          RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+  set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
+               rocke_test_tdm_tile_loader)
+endif()
+
 # The MX GEMM's C grid for an unset workgroup tile, which no Python caller
 # reaches.
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/instances/mx_gemm_host.cpp")

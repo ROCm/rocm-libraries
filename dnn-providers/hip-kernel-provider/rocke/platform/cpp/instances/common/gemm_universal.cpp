@@ -1188,12 +1188,26 @@ rocke_kernel_def_t* rocke_build_universal_gemm(rocke_ir_builder_t* b,
             def_w = 1;
             def_l = 4;
         }
-        ctx.swz_r = rocke_gemm_env_int("CK_SWZ_R", def_r);
-        ctx.swz_w = rocke_gemm_env_int("CK_SWZ_W", def_w);
-        ctx.swz_l = rocke_gemm_env_int("CK_SWZ_L", def_l);
-        ctx.c_swr = rocke_b_const_i32(b, ctx.swz_r);
-        ctx.c_swmod = rocke_b_const_i32(b, (int64_t)1 << ctx.swz_w);
-        ctx.c_swl = rocke_b_const_i32(b, ctx.swz_l);
+        const int row_shift = rocke_gemm_env_int("CK_SWZ_R", def_r);
+        const int row_bits = rocke_gemm_env_int("CK_SWZ_W", def_w);
+        const int elem_shift = rocke_gemm_env_int("CK_SWZ_L", def_l);
+        const int elem_bytes = rocke_gemm_elem_bytes(spec);
+        ctx.lds_xor = ctx.swz ? rocke_lds_column_xor_t{row_shift,
+                                                       row_bits,
+                                                       elem_shift + rocke_gemm_ilog2(elem_bytes),
+                                                       -1}
+                              : rocke_lds_no_swizzle;
+        int shift = ctx.swz ? rocke_lds_column_xor_shift_for(&ctx.lds_xor, elem_bytes) : elem_shift;
+        if(shift < 0 && ctx.swz)
+        {
+            rocke_i_set_err(b, ROCKE_ERR_VALUE, "invalid GEMM LDS column XOR layout");
+            return NULL;
+        }
+        ctx.c_swr = rocke_b_const_i32(b, row_shift);
+        /* Retain legacy unused SSA immediates in the disabled kernel path. */
+        ctx.c_swmask = rocke_b_const_i32(
+            b, ctx.swz ? rocke_lds_column_xor_chunk_mask(&ctx.lds_xor) : (int64_t)1 << row_bits);
+        ctx.c_swl = rocke_b_const_i32(b, shift);
     }
 
     /* ---- batch-axis pointer offsets (SSA) -- */
@@ -1389,12 +1403,6 @@ rocke_kernel_def_t* rocke_build_universal_gemm(rocke_ir_builder_t* b,
                         spec->block_size);
         return NULL;
     }
-    ctx.a_total = ctx.block_m * ctx.block_k;
-    ctx.b_total = ctx.block_n * ctx.block_k;
-    ctx.a_vec_total = ctx.a_total / ctx.load_vec;
-    ctx.b_vec_total = ctx.b_total / ctx.load_vec;
-    ctx.a_vecs_per_thread = ctx.a_vec_total / ctx.threads;
-    ctx.b_vecs_per_thread = ctx.b_vec_total / ctx.threads;
     ctx.c_threads = rocke_b_const_i32(b, ctx.threads);
     ctx.c_load_vec = rocke_b_const_i32(b, ctx.load_vec);
     ctx.c_block_k_div_vec = rocke_b_const_i32(b, ctx.block_k / ctx.load_vec);
@@ -1407,7 +1415,15 @@ rocke_kernel_def_t* rocke_build_universal_gemm(rocke_ir_builder_t* b,
         gstride[1] = rocke_stride_value(ctx.K);
         gstride[2] = rocke_stride_imm(1);
         rocke_make_global_view(&ctx.a_view, ctx.A, gshape, 3, ctx.storage_dtype, gstride);
-        rocke_make_global_view(&ctx.b_view, ctx.Bp, gshape, 3, ctx.storage_dtype, gstride);
+        if(spec->trait.preshuffle_b)
+        {
+            const int packed_shape[2] = {1, ctx.block_n * ctx.block_k};
+            const rocke_stride_t packed_stride[2] = {rocke_stride_imm(1), rocke_stride_imm(1)};
+            rocke_make_global_view(
+                &ctx.b_view, ctx.Bp, packed_shape, 2, ctx.storage_dtype, packed_stride);
+        }
+        else
+            rocke_make_global_view(&ctx.b_view, ctx.Bp, gshape, 3, ctx.storage_dtype, gstride);
     }
     {
         int a2[2] = {ctx.block_m, ctx.block_k};
@@ -1450,11 +1466,6 @@ rocke_kernel_def_t* rocke_build_universal_gemm(rocke_ir_builder_t* b,
         }
         ctx.dtl_bytes_per_lane = ctx.dtl_dwords * 4;
         ctx.dtl_elem_bytes = rocke_gemm_elem_bytes(spec);
-        ctx.dtl_elem_log2 = 0;
-        while((1 << ctx.dtl_elem_log2) < ctx.dtl_elem_bytes)
-        {
-            ++ctx.dtl_elem_log2;
-        }
         ctx.dtl_sub_elem = ctx.dtl_elem_bytes > ctx.dtl_bytes_per_lane;
         ctx.dtl_halves = ctx.dtl_sub_elem ? 0 : ctx.dtl_bytes_per_lane / ctx.dtl_elem_bytes;
         if(!ctx.dtl_sub_elem && (ctx.block_k % ctx.dtl_halves) != 0)
@@ -1468,7 +1479,6 @@ rocke_kernel_def_t* rocke_build_universal_gemm(rocke_ir_builder_t* b,
             = (ctx.block_n * ctx.block_k * ctx.dtl_elem_bytes) / ctx.dtl_bytes_per_lane;
         ctx.dtl_a_passes = (ctx.dtl_a_chunks + spec->block_size - 1) / spec->block_size;
         ctx.dtl_b_passes = (ctx.dtl_b_chunks + spec->block_size - 1) / spec->block_size;
-        ctx.dtl_pass_bytes = spec->block_size * ctx.dtl_bytes_per_lane;
         ctx.dtl_chunks_per_row = ctx.block_k * ctx.dtl_elem_bytes / ctx.dtl_bytes_per_lane;
 
         ctx.dtl_big_bytes = rocke_b_const_i32(b, 0x7FFF0000);

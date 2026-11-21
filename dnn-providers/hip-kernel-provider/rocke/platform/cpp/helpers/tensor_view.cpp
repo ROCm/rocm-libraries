@@ -776,6 +776,18 @@ static int rocke_tile_window_global_indices(rocke_ir_builder_t* b,
     return 1;
 }
 
+rocke_value_t* rocke_tile_window_element_offset(rocke_ir_builder_t* b,
+                                                const rocke_tile_window_t* w,
+                                                rocke_value_t* const* local_indices,
+                                                int num_indices)
+{
+    rocke_value_t* global[ROCKE_TV_MAX_RANK];
+    if(b == NULL || w == NULL || w->view == NULL
+       || !rocke_tile_window_global_indices(b, w, local_indices, num_indices, global))
+        return NULL;
+    return rocke_tensor_descriptor_offset(b, &w->view->desc, global, num_indices);
+}
+
 rocke_value_t* rocke_tile_window_load_vec(rocke_ir_builder_t* b,
                                           const rocke_tile_window_t* w,
                                           rocke_value_t* const* local_indices,

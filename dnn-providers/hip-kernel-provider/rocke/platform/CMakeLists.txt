@@ -748,6 +748,24 @@ if(ROCKE_INSTALL_TESTS)
       set(_ROCKE_PLATFORM_PYTEST_GROUP_instances_dispatch instances dispatch)
       set(_ROCKE_PLATFORM_PYTEST_GROUP_runtime_tools
           runtime portable_ir tools analysis in_tree)
+      # Compile-and-launch regressions are separate from quick pytest discovery.
+      string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+             "set(_rocke_gemm_gpu_environment "
+             "\"PYTHONPATH=${_ROCKE_INSTALLED_PYTHONPATH}\")\n"
+             "list(APPEND _rocke_gemm_gpu_environment "
+             "\${_rocke_compiler_tool_environment})\n")
+      foreach(gemm_arch gfx942 gfx950 gfx1250)
+        set(_gemm_gate "rocke_universal_gemm_numerics_${gemm_arch}")
+        string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+               "add_test(${_gemm_gate} python -u"
+               " -m rocke.tests.universal_gemm_gpu_gate --arch ${gemm_arch})\n"
+               "set_tests_properties(${_gemm_gate} PROPERTIES\n"
+               "  LABELS \"ckc\\;python\\;gpu\\;comprehensive\\;full\"\n"
+               "  ENVIRONMENT \"\${_rocke_gemm_gpu_environment}\"\n"
+               "  RESOURCE_LOCK rocke_universal_gemm_gpu\n"
+               "  SKIP_RETURN_CODE 77\n"
+               "  TIMEOUT 300)\n")
+      endforeach()
       # The tests of the rocke.tests.ctest_shard plugin start many child pytest
       # and CTest runs. They run in rocke_ctest_shard_pytest, which the provider
       # categories tier as standard, so the quick tier does not run them.

@@ -263,6 +263,9 @@ from .loads import (
     AsyncTileLoaderSlot,
     CoalescedTileLoader,
     DescriptorFn,
+    TdmSourceWindow2D,
+    TdmTileLoad,
+    TdmTileLoader2D,
     lane_contiguous_descriptor,
 )
 from .persistent import (
@@ -512,6 +515,9 @@ __all__ = [
     "AsyncTileLoaderSlot",
     "CoalescedTileLoader",
     "DescriptorFn",
+    "TdmSourceWindow2D",
+    "TdmTileLoad",
+    "TdmTileLoader2D",
     "lane_contiguous_descriptor",
     "SchedulePolicy",
     "SoftwarePipeline",

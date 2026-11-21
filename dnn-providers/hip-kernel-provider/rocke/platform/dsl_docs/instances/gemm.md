@@ -202,9 +202,35 @@ LDS allocations are part of the algorithm. They control:
 
 ## Data Movement
 
-`pipeline in ("mem", "compv3")`: sync path via `CoalescedTileLoader` (`buffer/global load -> VGPR -> LDS store`).
+Synchronous GEMM uses `CoalescedTileLoader.visit_chunks` for both operands.
+In [`emit_load_phase`](../../python/rocke/instances/common/gemm_universal.py),
+the A/B `TileWindow`s select the sources. A preshuffled B window is one
+contiguous packed tile and uses the visitor's linear chunk ID; ordinary B uses
+logical row/column coordinates and the runtime K stride. Both feed the same
+chunk visitor and LDS mapping. The K loop still owns workgroup barriers.
 
-`pipeline = "compv4"`: async path via `AsyncTileLoader` (`raw_ptr_buffer_load_lds`), double-buffered, with `s_waitcnt(vmcnt=0)` before each MFMA phase consumes the freshly-loaded slab.
+For synchronous copies with `pad_k`, A and B use the same masked scalar loads
+as `load_fragment`. The tile window computes a physical offset with runtime
+strides; the logical K coordinate determines which elements to zero-fill.
+Preshuffled B uses the same clipping with its packed source offset. The LDS
+placement, including padding, swizzles, and slots, is independent of clipping.
+`LdsColumnXor` describes the column swizzle in byte units. `NO_SWIZZLE` is
+an identity layout; presets such as `ROW_XOR_8x16B` select common bit patterns.
+GEMM derives a layout from its geometry and binds the selector once for MFMA
+reads and synchronous stores. Direct-to-LDS swizzles source coordinates so
+LDS writes remain wave-contiguous; FP64 sub-element chunks use a byte column.
+
+The `compv4` name is not an async switch: `direct_to_lds` selects gfx9 async
+copies through `AsyncTileLoaderSlot.issue_bytes`. GEMM supplies the source
+byte offsets (including source swizzles and FP64 sub-element chunks) and
+binds the LDS wave/slot bases. `dtl_prefetch` selects the ping-pong schedule.
+
+The gfx1250 `tdm` path uses [`TdmTileLoader2D`](../../python/rocke/helpers/loads.py)
+for A/B fills. It prepares a descriptor from a `TdmSourceWindow2D` and a bound
+LDS byte address, then issues one whole-tile load. Keeping `prepare` separate
+from `issue` lets the schedule insert its synchronization hook between them.
+The caller still selects the issuing wave, rotates slots, and waits for
+completion through `TdmKLoop`. The C epilogue does not use TDM stores.
 
 GEMM descriptor (`make_global_view + make_tile_window`):
 
@@ -215,33 +241,38 @@ B_view.tile(origin=(block_n0, k0)).load_vec(...)
 
 Tail predicates guard `block_m0 + row < M`, `block_n0 + row < N`, `k0 + col < K`. The buffer-resource path routes invalid lanes to `INT32_MAX` so the DW3-bounds-checked load returns zero.
 
-## Compute Loop
+## Compute and K Schedules
 
-```text
-acc = zero f32 accumulators (one vector per warp's MFMA fragment)
+The non-TDM [`GemmKLoop`](../../python/rocke/instances/common/_gemm_kloop.py)
+composes two callbacks: `issue(k, slot)` stages both operands at a K element
+offset, and `compute(accs, slot)` consumes that LDS slot. The loop chooses the
+slot and carries the accumulators across a runtime `scf_for_iter`.
 
-for k0 in scf_for(0, K, tile_k):
- load A tile (sync or async)
- load B tile (sync or async)
- s_waitcnt + sync as needed
+- **Single-buffered:** issue, publish, compute, retire the readers before the
+  next issue into the same slot.
+- **Synchronous ping-pong:** issue tile zero into slot zero. Each loop step
+  publishes the current tile and retires earlier reads, issues the next tile
+  into the other slot, and computes from the current slot. Drain and compute
+  the final tile without another issue.
+- **Direct-to-LDS ping-pong:** use the same runtime loop shape with a full VMEM
+  and LDS wait followed by a workgroup barrier *before* issuing the next copy.
+  TDM retains a separate loop and completion policy.
 
- for kk in static_for(0, tile_k, atom.k):
- for warp_m fragment in static_for(...):
- A_frag = smem_load_vN_f16(A_smem, ...)
- for warp_n fragment in static_for(...):
- B_frag = smem_load_vN_f16(B_smem, ...)
- for output fragment in static_for(...):
- acc = atom.emit(b, A_frag, B_frag, acc)
- schedule_policy.emit_after_mfma_step(b, atom_idx)
-
- yield updated acc
-```
-
-`scf_for_iter` carries the per-lane accumulators across the K loop. `static_for` (Python-time unrolling) is used inside the K tile to keep the MFMA / DS_READ schedule visible to the scheduler.
+Inside one K tile, [`TileMmaDriver.accumulate_staged`](../../python/rocke/helpers/tiling/mma/driver.py)
+uses the same atom-grid walker as `TileMma`. It reads each A atom row and B
+atom column once per K atom, then reuses them across N and M respectively.
+UniversalGemm binds the lane and LDS addresses and supplies its row priority
+hints. Both engines unroll the atom traversal at build time. WMMA uses the same
+walker with its own fragment readers. Split-barrier TDM signals after the
+last K atom’s reads are issued; early refill starts after its first MMA row.
 
 `scheduler in ("intrawave", "interwave")` selects the `SchedulePolicy` flavor (intra-wave or inter-wave overlap groups).
 
 ## Epilogue
+
+Split-K and direct MFMA output use the same accumulator scatter. Split-K
+atomically adds each guarded cell to the caller’s FP32 workspace without an
+intermediate conversion.
 
 `epilogue = "default"` (`DirectEpilogue`):
 
@@ -256,7 +287,9 @@ for each acc vector:
  C[g_m, g_n] = v
 ```
 
-`epilogue = "cshuffle"` (`CShuffleEpilogue`):
+`epilogue = "cshuffle"` (`CShuffleEpilogue`): the LDS-to-global writeback
+uses the coalesced chunk visitor. GEMM still owns its raw-pointer stores,
+output bounds and fused transforms.
 
 ```text
 1. truncate each accumulator slot to f16 (vec_trunc_f32_to_f16 packs 4 floats -> 4 halves)

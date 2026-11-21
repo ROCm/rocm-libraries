@@ -25,6 +25,15 @@ from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
 from rocke.helpers.loads import CoalescedTileLoader
 
 
+@pytest.mark.parametrize("load_vec,block_size", [(0, 64), (2, 0), (-1, 64), (2, -1)])
+def test_coalesced_loader_refuses_invalid_geometry(load_vec, block_size):
+    loader = CoalescedTileLoader(
+        tile_rows=16, tile_cols=16, block_size=block_size, load_vec=load_vec
+    )
+    with pytest.raises(ValueError, match="load_vec and block_size must be positive"):
+        _ = loader.vecs_per_thread
+
+
 def _build(dtype):
     b = IRBuilder("load_async_to_lds_check")
     src = b.param("src", PtrType(dtype, "global"), readonly=True, align=16)

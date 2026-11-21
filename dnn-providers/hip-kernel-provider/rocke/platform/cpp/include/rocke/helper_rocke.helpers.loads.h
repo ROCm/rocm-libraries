@@ -67,6 +67,47 @@
 extern "C" {
 #endif
 
+/* TdmSourceWindow2D: contiguous columns; all coordinates and strides are
+ * i32 elements except the i64 base_offset. cols_remaining may be shared by
+ * multiple operands; row_extent is the tensor's full extent, not tile_rows. */
+typedef struct rocke_tdm_source_window_2d
+{
+    rocke_value_t* ptr;
+    rocke_value_t* base_offset;
+    rocke_value_t* row_origin;
+    rocke_value_t* col_origin;
+    rocke_value_t* row_extent;
+    rocke_value_t* cols_remaining;
+    rocke_value_t* row_stride;
+} rocke_tdm_source_window_2d_t;
+
+typedef struct rocke_tdm_tile_loader_2d
+{
+    int tile_rows;
+    int tile_cols;
+    int elem_bytes;
+    int pad_interval; /* -1 disables hardware LDS padding */
+    int pad_amount;
+} rocke_tdm_tile_loader_2d_t;
+
+typedef struct rocke_tdm_tile_load
+{
+    rocke_value_t* groups[5];
+} rocke_tdm_tile_load_t;
+
+/* Prepare a descriptor for a bound LDS byte address. The source must be a
+ * global pointer with a pointee width matching elem_bytes. The caller owns wave
+ * selection and waits; it may insert a hook before issuing the descriptor. */
+bool rocke_tdm_tile_loader_2d_prepare(rocke_ir_builder_t* b,
+                                      const rocke_tdm_tile_loader_2d_t* loader,
+                                      const rocke_tdm_source_window_2d_t* source,
+                                      rocke_value_t* lds_addr,
+                                      rocke_value_t* zero,
+                                      rocke_tdm_tile_load_t* out);
+void rocke_tdm_tile_load_issue(rocke_ir_builder_t* b,
+                               const rocke_tdm_tile_load_t* load,
+                               int cachepolicy);
+
 /* ------------------------------------------------------------ DescriptorFn *
  *
  * Python:
@@ -132,6 +173,36 @@ typedef struct rocke_coalesced_tile_loader
     int col_xor[4];
 } rocke_coalesced_tile_loader_t;
 
+typedef void (*rocke_coalesced_chunk_prepare_fn)(rocke_ir_builder_t* b,
+                                                 rocke_value_t* chunk_id,
+                                                 void* user);
+
+typedef struct rocke_coalesced_chunk_grid
+{
+    rocke_value_t* threads;
+    rocke_value_t* width; /* NULL materializes the width per vector chunk. */
+    rocke_value_t* span;
+    /* Optional linear addressing hook before decoding the logical row/col. */
+    rocke_coalesced_chunk_prepare_fn before_decode;
+} rocke_coalesced_chunk_grid_t;
+
+typedef void (*rocke_coalesced_chunk_fn)(rocke_ir_builder_t* b,
+                                         rocke_value_t* row,
+                                         rocke_value_t* col,
+                                         rocke_value_t* chunk_id,
+                                         void* user);
+
+/* Visit coalesced chunks; the emitter owns source and destination addressing.
+ * Reject invalid or uneven geometry before emitting any traversal IR. The
+ * vector width must divide the vectorized axis. `grid` may be NULL to
+ * materialize the tile's iteration constants here. */
+void rocke_coalesced_tile_loader_visit_chunks(rocke_ir_builder_t* b,
+                                              const rocke_coalesced_tile_loader_t* self,
+                                              rocke_value_t* tid,
+                                              const rocke_coalesced_chunk_grid_t* grid,
+                                              rocke_coalesced_chunk_fn emit,
+                                              void* user);
+
 /* lds_col_xor_params(tile_cols, chunk=8): the conflict-free XOR swizzle of an
  * unpadded [rows][tile_cols] LDS tile of 16-bit elements read in chunk-element
  * (16-byte) runs. Writes {row_shift, chunk_mask, chunk_log2, flip_shift} to
@@ -143,6 +214,40 @@ typedef struct rocke_coalesced_tile_loader
  * byte-offset XOR_SWIZZLE_TABLE of rocke.helpers.layouts is the separate,
  * fixed-shape form; see the Python docstring. */
 rocke_status_t rocke_lds_col_xor_params(int tile_cols, int chunk, int out[4]);
+
+/* Byte-based layout. A flip_row_bit of -1 disables the extra row-bit flip. */
+typedef struct rocke_lds_column_xor
+{
+    int row_shift;
+    int row_bits;
+    int chunk_log2_bytes;
+    int flip_row_bit;
+} rocke_lds_column_xor_t;
+
+extern const rocke_lds_column_xor_t rocke_lds_no_swizzle;
+extern const rocke_lds_column_xor_t rocke_lds_row_xor_2x16b;
+extern const rocke_lds_column_xor_t rocke_lds_row_xor_4x16b;
+extern const rocke_lds_column_xor_t rocke_lds_row_xor_8x16b;
+
+bool rocke_lds_column_xor_is_identity(const rocke_lds_column_xor_t* layout);
+int rocke_lds_column_xor_chunk_mask(const rocke_lds_column_xor_t* layout);
+/* Returns -1 for invalid parameters; identity returns 0 before unit checks. */
+int rocke_lds_column_xor_shift_for(const rocke_lds_column_xor_t* layout, int unit_bytes);
+rocke_value_t* rocke_lds_column_xor_emit(rocke_ir_builder_t* b,
+                                         rocke_value_t* row,
+                                         rocke_value_t* col,
+                                         const rocke_lds_column_xor_t* layout,
+                                         int unit_bytes);
+
+/* Bound no-flip form: col ^ (((row >> row_shift) & chunk_mask) << chunk_log2).
+ * Pass NULL row_shift to skip the right shift. The column and chunk shift
+ * can be in either element or byte coordinates, as chosen by the caller. */
+rocke_value_t* rocke_emit_lds_col_xor(rocke_ir_builder_t* b,
+                                      rocke_value_t* row,
+                                      rocke_value_t* col,
+                                      rocke_value_t* row_shift,
+                                      rocke_value_t* chunk_mask,
+                                      rocke_value_t* chunk_log2);
 
 /* swizzle_lds_col(b, row, col, col_xor):
  *   col ^ ((((row >> row_shift) & chunk_mask) ^ ((row >> flip_shift) & 1))
@@ -428,6 +533,26 @@ void rocke_async_tile_loader_slot_issue(rocke_ir_builder_t* b,
                                         void* descriptor_user,
                                         int oob_sentinel,
                                         int coherency);
+
+typedef rocke_value_t* (*rocke_loads_byte_descriptor_fn)(rocke_ir_builder_t* b,
+                                                         rocke_value_t* row,
+                                                         rocke_value_t* col,
+                                                         void* user);
+
+/* AsyncTileLoaderSlot.issue_bytes: caller binds the wave base and coordinate
+ * grid and owns validity of each chunk (may return an OOB buffer offset).
+ * Static slot displacement is in bytes. Waits remain with the caller. */
+void rocke_async_tile_loader_slot_issue_bytes(rocke_ir_builder_t* b,
+                                              const rocke_async_tile_loader_slot_t* self,
+                                              rocke_value_t* tid,
+                                              rocke_value_t* rsrc,
+                                              rocke_loads_byte_descriptor_fn descriptor,
+                                              void* descriptor_user,
+                                              rocke_value_t* chunks_per_row,
+                                              rocke_value_t* cols_per_chunk,
+                                              rocke_value_t* zero_soff,
+                                              int slot_bytes,
+                                              int coherency);
 
 /* AsyncTileLoaderSlot.required_lds_bytes method: passes * pass_bytes. */
 int rocke_async_tile_loader_slot_required_lds_bytes(const rocke_async_tile_loader_slot_t* self);

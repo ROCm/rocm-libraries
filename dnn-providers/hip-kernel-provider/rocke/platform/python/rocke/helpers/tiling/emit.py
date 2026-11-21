@@ -32,6 +32,8 @@ from ...core.storage import (
     storage_group,
     storage_to_elements,
 )
+from ..io import iter_global_fragment_scalars
+from ..loads import ROW_XOR_8x16B
 from ..mma_io import storage_element_type, storage_vector_type
 from .descriptors import TensorDesc, TensorWindow
 from .encoding import WarpDistributionEncoding
@@ -727,10 +729,8 @@ def _is_lds(source: Any) -> bool:
 
 # The built-in swizzle (``lds_swizzle=True``) XORs block bits [3:6) of the last position: it moves
 # blocks of 8 elements, 8 blocks per 64-element group, and never splits a block.
-_SWIZZLE_BLOCK_BITS = 3
-_SWIZZLE_BLOCK = 1 << _SWIZZLE_BLOCK_BITS
-_SWIZZLE_BLOCKS = 8
-_SWIZZLE_GROUP = _SWIZZLE_BLOCK * _SWIZZLE_BLOCKS
+_SWIZZLE_BLOCK = 1 << ROW_XOR_8x16B.shift_for(unit_bytes=2)
+_SWIZZLE_GROUP = _SWIZZLE_BLOCK << ROW_XOR_8x16B.row_bits
 
 
 def _swizzle_lds_positions(b: Any, positions: list) -> list:
@@ -746,13 +746,12 @@ def _swizzle_lds_positions(b: Any, positions: list) -> list:
     if len(positions) < 2:
         return positions
     outer, m = positions[-2], positions[-1]
-    # m ^ ((outer & 7) << 3): flips m's block bits [3:6] by (K&7), leaving the low-3 (8-f16 b128 run)
-    # intact -> identical bank mapping to a block XOR, in 3 VALU ops (mod, shl, xor) not 6.
+    # Keep the built-in tiling IR and numeric address-map builder on remainder.
     m_swz = b.xor(
         m,
         b.shl(
-            b.mod(outer, b.const_i32(_SWIZZLE_BLOCKS)),
-            b.const_i32(_SWIZZLE_BLOCK_BITS),
+            b.mod(outer, b.const_i32(1 << ROW_XOR_8x16B.row_bits)),
+            b.const_i32(ROW_XOR_8x16B.shift_for(unit_bytes=2)),
         ),
     )
     return positions[:-1] + [m_swz]
@@ -1062,14 +1061,10 @@ def load_fragment(
                 )
             if zero is None:
                 zero = _zero_scalar(b, dtype)
-        for i, slot in enumerate(slots):
-            unit_address = address if i == 0 else b.add(address, b.const_i32(i))
-            if mask is None:
-                loaded = b.global_load(ptr, unit_address, unit, align=align)
-            else:
-                loaded = b.masked_global_load(
-                    ptr, unit_address, mask, zero, unit, align=align
-                )
+        scalars = iter_global_fragment_scalars(
+            b, ptr, address, dtype=unit, n=len(slots), align=align, mask=mask, pad=zero
+        )
+        for slot, loaded in zip(slots, scalars):
             value = b.vec_insert(value, loaded, slot)
     return Fragment(tile_desc, dtype, value)
 

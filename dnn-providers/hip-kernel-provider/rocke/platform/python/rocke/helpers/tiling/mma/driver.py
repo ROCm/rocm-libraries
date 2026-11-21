@@ -12,7 +12,10 @@ never instance state -- so the same driver drives every wave-tile call. The fron
 
 from __future__ import annotations
 
-from ....core.ir import F32, TF32
+from collections.abc import Callable, Sequence
+from itertools import product
+
+from ....core.ir import F32, TF32, Value
 from ...mma_io import mma_operand_ir_type, storage_vector_type
 from ..fragments import Fragment, TileDesc, fragment_length, storage_slots
 from ..register_mapper import RegisterMapper
@@ -222,22 +225,68 @@ class TileMmaDriver:
         sub = self._read_subvector(b, fragment.value, slots.start, len(slots))
         return self._as_operand(b, sub, math_dtype, length)
 
-    def _subtile_triples(self):
-        """The (mi, nj, ki) atom visitation order, per ``tiling.order`` (right-most fastest)."""
-        plan = self._plan
-        ranges = {
-            "M": range(plan._m_subtiles),
-            "N": range(plan._n_subtiles),
-            "K": range(plan._k_subtiles),
-        }
-        order = plan.tiling.order
-        triples = []
-        for x0 in ranges[order[0]]:
-            for x1 in ranges[order[1]]:
-                for x2 in ranges[order[2]]:
-                    axis = {order[0]: x0, order[1]: x1, order[2]: x2}
-                    triples.append((axis["M"], axis["N"], axis["K"]))
-        return triples
+    @staticmethod
+    def _subtile_triples(subtiles, order):
+        """Visit (M, N, K) atom coordinates, with the last ordered axis fastest."""
+        ranges = dict(zip("MNK", map(range, subtiles)))
+        for coords in product(*(ranges[axis] for axis in order)):
+            by_axis = dict(zip(order, coords))
+            yield by_axis["M"], by_axis["N"], by_axis["K"]
+
+    @classmethod
+    def _accumulate_atoms(cls, subtiles, order, accs, emit):
+        out = list(accs)
+        n_sub = subtiles[1]
+        for i, (mi, ni, ki) in enumerate(cls._subtile_triples(subtiles, order)):
+            idx = mi * n_sub + ni
+            out[idx] = emit(i, mi, ni, ki, out[idx])
+        return out
+
+    @classmethod
+    def accumulate_staged(
+        cls,
+        *,
+        subtiles: tuple[int, int, int],
+        accs: Sequence[Value],
+        read_a: Callable[[int, int], Value],
+        read_b: Callable[[int, int], Value],
+        mma: Callable[[Value, Value, Value], Value],
+        after_reads: Callable[[int], None] | None = None,
+        before_row: Callable[[int, int], None] | None = None,
+        after_row: Callable[[int, int], None] | None = None,
+    ) -> list[Value]:
+        """Drive a staged atom grid without materializing A/B/C wave fragments.
+
+        The caller supplies compatible atom readers and accumulator vectors.
+        For each K atom, ``read_a(ki, mi)`` and ``read_b(ki, ni)`` load every A
+        row and B column once, before issuing the row-major output grid.
+        ``after_reads(ki)`` runs after issuing that K atom's reads; row hooks
+        receive ``(ki, mi)``. Callers own priority, waits, and slot reuse.
+        Unlike the Fragment path, the readers own layout checks.
+        """
+        m_sub, n_sub, k_sub = subtiles
+        if min(subtiles) <= 0 or len(accs) != m_sub * n_sub:
+            raise ValueError(
+                "staged MMA needs a positive grid and one accumulator per output atom"
+            )
+        a_rows: list[Value] = []
+        b_cols: list[Value] = []
+
+        def emit(_, mi, ni, ki, acc):
+            nonlocal a_rows, b_cols
+            if mi == 0 and ni == 0:
+                a_rows = [read_a(ki, row) for row in range(m_sub)]
+                b_cols = [read_b(ki, col) for col in range(n_sub)]
+                if after_reads is not None:
+                    after_reads(ki)
+            if ni == 0 and before_row is not None:
+                before_row(ki, mi)
+            acc = mma(a_rows[mi], b_cols[ni], acc)
+            if ni == n_sub - 1 and after_row is not None:
+                after_row(ki, mi)
+            return acc
+
+        return cls._accumulate_atoms((m_sub, n_sub, k_sub), ("K", "M", "N"), accs, emit)
 
     @staticmethod
     def _result_base(b, accumulator: Fragment, d_dtype):
@@ -381,17 +430,20 @@ class TileMmaDriver:
         # placement. Reorders issue, not the math -- bit-exact. This branch always has >= 2 atoms (the
         # 1-atom case returns above), so the elevated window is non-empty; `mac_prio=0` emits nothing.
         mac_prio = plan.tiling.mac_prio
-        for i, (mi, nj, ki) in enumerate(self._subtile_triples()):
-            idx = mi * n_sub + nj
+
+        def emit(i, mi, nj, ki, acc):
             a_sub = self._read_operand_atom(
                 b, a_fragment, (mi * k_sub + ki) * a_atom, a_atom, plan.a_dtype
             )
             b_sub = self._read_operand_atom(
                 b, b_fragment, (nj * k_sub + ki) * b_atom, b_atom, plan.b_dtype
             )
-            accs[idx] = b.mma(op, a_sub, b_sub, accs[idx])
+            result = b.mma(op, a_sub, b_sub, acc)
             if mac_prio and i == 0:
                 b.s_setprio(mac_prio)
+            return result
+
+        accs = self._accumulate_atoms(plan.subtiles, plan.tiling.order, accs, emit)
         if mac_prio:
             b.s_setprio(0)
         # Each subtile's result goes back to its contiguous C slice; the accumulator is a

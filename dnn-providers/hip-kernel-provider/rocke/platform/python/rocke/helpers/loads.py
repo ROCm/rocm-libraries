@@ -51,7 +51,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable, List, Optional, Sequence, Tuple
 
-from ..core.ir import F16, I64, IRBuilder, Type, Value
+from ..core.ir import F16, I64, IRBuilder, PtrType, Type, Value, type_bits
 
 
 # A descriptor callback maps (row, col) in the tile-local coordinate
@@ -105,18 +105,189 @@ def lds_col_xor_params(tile_cols: int, chunk: int = 8) -> Tuple[int, int, int, i
     return rows_per_cycle.bit_length() - 1, c - 1, chunk.bit_length() - 1, 3
 
 
+def emit_lds_col_xor(
+    b: IRBuilder,
+    row: Value,
+    col: Value,
+    *,
+    row_shift: int | Value = 0,
+    chunk_mask: int | Value,
+    chunk_log2: int | Value,
+    flip_shift: int | None = None,
+) -> Value:
+    """XOR selected row bits into a chunk-aligned column.
+
+    The caller chooses the layout and whether the column is in elements or
+    bytes. A byte column uses a chunk shift measured in bytes. Parameters
+    may be prebound SSA values to hoist their construction out of a loop.
+    With ``flip_shift``, the selected row bit also flips the lowest chunk bit.
+    """
+    r = row
+    if isinstance(row_shift, int):
+        if row_shift:
+            r = b.lshr(row, b.const_i32(row_shift))
+    else:
+        r = b.lshr(row, row_shift)
+    mask = b.const_i32(chunk_mask) if isinstance(chunk_mask, int) else chunk_mask
+    sel = b.land(r, mask)
+    if flip_shift is not None:
+        flip = b.land(b.lshr(row, b.const_i32(flip_shift)), b.const_i32(1))
+        sel = b.xor(sel, flip)
+    step = b.const_i32(chunk_log2) if isinstance(chunk_log2, int) else chunk_log2
+    return b.xor(col, b.shl(sel, step))
+
+
+@dataclass(frozen=True)
+class LdsColumnXor:
+    """Row-bit XOR layout specified in bytes, independent of the column units."""
+
+    row_shift: int
+    row_bits: int
+    chunk_log2_bytes: int
+    flip_row_bit: int | None = None
+
+    def __post_init__(self) -> None:
+        terms = (self.row_shift, self.row_bits, self.chunk_log2_bytes)
+        if self.flip_row_bit is not None:
+            terms += (self.flip_row_bit,)
+        if any(type(term) is not int or not 0 <= term <= 31 for term in terms):
+            raise ValueError("LDS column XOR terms must be integers in [0, 31]")
+
+    @property
+    def is_identity(self) -> bool:
+        return self.row_bits == 0 and self.flip_row_bit is None
+
+    @property
+    def chunk_mask(self) -> int:
+        return (1 << self.row_bits) - 1
+
+    def shift_for(self, unit_bytes: int) -> int:
+        """Chunk shift for columns measured in units of ``unit_bytes`` bytes."""
+        if self.is_identity:
+            return 0
+        if unit_bytes <= 0 or unit_bytes & (unit_bytes - 1):
+            raise ValueError("LDS column units must be a positive power of two bytes")
+        shift = self.chunk_log2_bytes - (unit_bytes.bit_length() - 1)
+        if shift < 0:
+            raise ValueError("LDS column unit is larger than a swizzle chunk")
+        return shift
+
+    def emit(
+        self, b: IRBuilder, row: Value, col: Value, *, unit_bytes: int = 1
+    ) -> Value:
+        """Apply this layout, or return ``col`` without emitting IR for identity."""
+        if self.is_identity:
+            return col
+        return emit_lds_col_xor(
+            b,
+            row,
+            col,
+            row_shift=self.row_shift,
+            chunk_mask=self.chunk_mask,
+            chunk_log2=self.shift_for(unit_bytes),
+            flip_shift=self.flip_row_bit,
+        )
+
+
+NO_SWIZZLE = LdsColumnXor(0, 0, 0)
+ROW_XOR_2x16B = LdsColumnXor(0, 1, 4)
+ROW_XOR_4x16B = LdsColumnXor(0, 2, 4)
+ROW_XOR_8x16B = LdsColumnXor(0, 3, 4)
+
+
 def swizzle_lds_col(b: IRBuilder, row: Value, col: Value, col_xor) -> Value:
-    """``col ^ ((((row >> row_shift) & chunk_mask) ^ ((row >> flip_shift) & 1))
-    << chunk_log2)``: the physical LDS column of logical column ``col`` of tile
-    row ``row`` (both i32). ``col_xor`` is a :func:`lds_col_xor_params` tuple.
-    Writers (:attr:`CoalescedTileLoader.col_xor`) and readers must use the same
-    tuple."""
+    """Apply the loader's :func:`lds_col_xor_params` layout to a column."""
     row_shift, chunk_mask, chunk_log2, flip_shift = col_xor
-    r = b.lshr(row, b.const_i32(row_shift)) if row_shift else row
-    sel = b.land(r, b.const_i32(chunk_mask))
-    flip = b.land(b.lshr(row, b.const_i32(flip_shift)), b.const_i32(1))
-    sel = b.xor(sel, flip)
-    return b.xor(col, b.shl(sel, b.const_i32(chunk_log2)))
+    return emit_lds_col_xor(
+        b,
+        row,
+        col,
+        row_shift=row_shift,
+        chunk_mask=chunk_mask,
+        chunk_log2=chunk_log2,
+        flip_shift=flip_shift,
+    )
+
+
+@dataclass(frozen=True)
+class TdmSourceWindow2D:
+    """Runtime window into a global tensor with contiguous columns.
+
+    The global pointer's pointee width must match the loader's element size.
+    Coordinates, extents, and strides are i32 elements. ``base_offset`` is
+    an i64 element offset for selecting a batch or suballocation. The caller
+    can hoist ``cols_remaining`` when several windows share a column interval;
+    it must be the number of source columns left after ``col_origin`` (or zero).
+    ``row_extent`` is the source tensor's full row count, not the tile height.
+    """
+
+    ptr: Value
+    base_offset: Value
+    row_origin: Value
+    col_origin: Value
+    row_extent: Value
+    cols_remaining: Value
+    row_stride: Value
+
+
+@dataclass(frozen=True)
+class TdmTileLoad:
+    """A prepared descriptor. Issuing it neither waits nor selects a wave."""
+
+    groups: tuple[Value, Value, Value, Value, Value]
+
+    def issue(self, b: IRBuilder, *, cachepolicy: int = 0) -> None:
+        b.tensor_load_to_lds(*self.groups, cachepolicy=cachepolicy)
+
+
+@dataclass(frozen=True)
+class TdmTileLoader2D:
+    """Prepare a wave-level global-to-LDS tile load for one source window.
+
+    The destination is a bound LDS byte address. TDM writes row-major with
+    optional hardware padding; ``pad_interval`` and ``pad_amount`` are the
+    encoded descriptor fields. The schedule owns issuer selection and all
+    waits, and may emit a synchronization hook between prepare and issue.
+    """
+
+    tile_rows: int
+    tile_cols: int
+    elem_bytes: int
+    pad_interval: int | None = None
+    pad_amount: int = 0
+
+    def prepare(
+        self, b: IRBuilder, source: TdmSourceWindow2D, lds_addr: Value, *, zero: Value
+    ) -> TdmTileLoad:
+        ptr_ty = source.ptr.type
+        if not isinstance(ptr_ty, PtrType) or ptr_ty.space != "global":
+            raise ValueError("TDM source must be a global pointer")
+        if (
+            self.elem_bytes not in (1, 2, 4, 8)
+            or type_bits(ptr_ty.pointee) != 8 * self.elem_bytes
+        ):
+            raise ValueError(
+                "TDM source pointee width must match elem_bytes (1, 2, 4, or 8)"
+            )
+        # Widen before multiplying so large tensor offsets do not wrap at i32.
+        row64 = b.mul(b.zext(source.row_origin, I64), b.zext(source.row_stride, I64))
+        origin = b.add(source.base_offset, b.add(row64, b.zext(source.col_origin, I64)))
+        addr = b.global_addr_of(source.ptr, origin)
+        rows_remaining = b.smax(b.sub(source.row_extent, source.row_origin), zero)
+        return TdmTileLoad(
+            b.tdm_descriptor_2d(
+                addr,
+                lds_addr,
+                elem_bytes=self.elem_bytes,
+                tensor_dim0=source.cols_remaining,
+                tensor_dim1=rows_remaining,
+                row_stride=source.row_stride,
+                tile_dim0=self.tile_cols,
+                tile_dim1=self.tile_rows,
+                pad_interval=self.pad_interval,
+                pad_amount=self.pad_amount,
+            )
+        )
 
 
 # The two admissible ``vector_axis`` values.  Kept as a module constant so the
@@ -231,7 +402,9 @@ class CoalescedTileLoader:
                     f"chunks of {chunk} columns, but a {self.tile_cols}-column "
                     "row does not hold whole groups"
                 )
-            if self.vector_axis == "col" and chunk % self.load_vec:
+            if self.vector_axis == "col" and (
+                self.load_vec <= 0 or chunk % self.load_vec
+            ):
                 raise ValueError(
                     f"CoalescedTileLoader: col_xor needs load_vec ({self.load_vec}) "
                     f"to divide its {chunk}-column chunk"
@@ -315,7 +488,21 @@ class CoalescedTileLoader:
 
     @property
     def vecs_per_thread(self) -> int:
+        if self.load_vec <= 0 or self.block_size <= 0:
+            raise ValueError(
+                "CoalescedTileLoader: load_vec and block_size must be positive"
+            )
+        if self.tile_rows <= 0 or self.tile_cols <= 0:
+            raise ValueError("CoalescedTileLoader: tile dimensions must be positive")
+        axis = self.tile_rows if self.vector_axis == "row" else self.tile_cols
+        if axis % self.load_vec:
+            raise ValueError(
+                "CoalescedTileLoader: load_vec must divide the vector axis"
+            )
         total_vecs = (self.tile_rows * self.tile_cols) // self.load_vec
+        i32_max = (1 << 31) - 1
+        if max(total_vecs, self.tile_rows, self.tile_cols, self.block_size) > i32_max:
+            raise ValueError("CoalescedTileLoader: chunk geometry exceeds i32")
         if total_vecs % self.block_size:
             raise ValueError(
                 f"tile {self.tile_rows}x{self.tile_cols} / {self.load_vec} = "
@@ -333,7 +520,7 @@ class CoalescedTileLoader:
         return self.tile_rows // self.load_vec
 
     def _decode_row_col(
-        self, b: IRBuilder, vec_idx: Value, *, c_span: Value, c_load_vec: Value
+        self, b: IRBuilder, vec_idx: Value, *, c_span: Value, c_load_vec: Value | None
     ) -> Tuple[Value, Value]:
         """Map a per-thread ``vec_idx`` to tile-local ``(row, col)``.
 
@@ -345,10 +532,52 @@ class CoalescedTileLoader:
         """
         idx0 = b.div(vec_idx, c_span)
         idx1 = b.mod(vec_idx, c_span)
-        chunk = b.mul(idx1, c_load_vec) if self.load_vec > 1 else idx1
+        chunk = idx1
+        if self.load_vec > 1:
+            width = b.const_i32(self.load_vec) if c_load_vec is None else c_load_vec
+            chunk = b.mul(idx1, width)
         if self.vector_axis == "row":
             return chunk, idx0  # row = idx1*load_vec, col = idx0
         return idx0, chunk  # row = idx0, col = idx1*load_vec
+
+    def visit_chunks(
+        self,
+        b: IRBuilder,
+        *,
+        tid: Value,
+        emit: Callable[[Value, Value, Value], None],
+        grid: tuple[Value, Value | None, Value] | None = None,
+        before_decode: Callable[[Value], None] | None = None,
+    ) -> None:
+        """Visit each lane's coalesced chunks without imposing an address layout.
+
+        ``emit(row, col, chunk_id)`` can bind a logical window or use the
+        linear chunk ID in packed storage. The optional prebound ``grid`` is
+        (threads, vector width, chunks per row or column), in that order.
+        A ``None`` width lets the decoder materialize it per vector chunk.
+        ``before_decode(chunk_id)`` can emit linear address arithmetic in the
+        same order as an existing packed copy.
+        """
+        count = self.vecs_per_thread
+        if grid is None:
+            grid = (
+                b.const_i32(self.block_size),
+                b.const_i32(self.load_vec),
+                b.const_i32(
+                    self.rows_per_vec
+                    if self.vector_axis == "row"
+                    else self.cols_per_vec
+                ),
+            )
+        c_threads, c_load_vec, c_span = grid
+        for e in range(count):
+            vec_idx = b.add(b.mul(b.const_i32(e), c_threads), tid)
+            if before_decode is not None:
+                before_decode(vec_idx)
+            row, col = self._decode_row_col(
+                b, vec_idx, c_span=c_span, c_load_vec=c_load_vec
+            )
+            emit(row, col, vec_idx)
 
     def _store_tile(
         self, b: IRBuilder, smem_dst: Value, row: Value, col: Value, v: Value
@@ -406,6 +635,7 @@ class CoalescedTileLoader:
                 f"CoalescedTileLoader: unsupported elem_dtype {dtype.name!r}"
             )
 
+        count = self.vecs_per_thread
         c_threads = b.const_i32(self.block_size)
         c_load_vec = b.const_i32(self.load_vec)
         c_span = b.const_i32(
@@ -416,7 +646,7 @@ class CoalescedTileLoader:
         c_oob = b.const_i32(self.oob_sentinel)
 
         staged = []
-        for e in range(self.vecs_per_thread):
+        for e in range(count):
             vec_idx = b.add(b.mul(b.const_i32(e), c_threads), tid)
             row, col = self._decode_row_col(
                 b, vec_idx, c_span=c_span, c_load_vec=c_load_vec
@@ -477,13 +707,14 @@ class CoalescedTileLoader:
         The decode depends only on ``tid``, so a K loop can emit it once ahead
         of the loop and reuse the slots in every iteration.
         """
+        count = self.vecs_per_thread
         c_threads = b.const_i32(self.block_size)
         c_load_vec = b.const_i32(self.load_vec)
         c_span = b.const_i32(
             self.rows_per_vec if self.vector_axis == "row" else self.cols_per_vec
         )
         slots: List[Tuple[Value, Value]] = []
-        for e in range(self.vecs_per_thread):
+        for e in range(count):
             vec_idx = b.add(b.mul(b.const_i32(e), c_threads), tid)
             slots.append(
                 self._decode_row_col(b, vec_idx, c_span=c_span, c_load_vec=c_load_vec)
@@ -581,6 +812,8 @@ class CoalescedTileLoader:
                 f"CoalescedTileLoader: unsupported elem_dtype {dtype.name!r}"
             )
 
+        # This caller prebinds a grid to preserve the order of emitted constants.
+        _ = self.vecs_per_thread
         c_threads = b.const_i32(self.block_size)
         c_load_vec = b.const_i32(self.load_vec)
         c_span = b.const_i32(
@@ -590,37 +823,26 @@ class CoalescedTileLoader:
         c0 = b.const_i32(0)
         c_oob = b.const_i32(self.oob_sentinel)
 
-        for e in range(self.vecs_per_thread):
-            vec_idx = b.add(b.mul(b.const_i32(e), c_threads), tid)
-            row, col = self._decode_row_col(
-                b, vec_idx, c_span=c_span, c_load_vec=c_load_vec
-            )
-
+        def emit(row, col, _chunk_id):
             off_elems, valid = descriptor(b, row, col)
-
             if self.use_buffer_rsrc:
                 off_bytes = b.mul(off_elems, c_elem_bytes)
-                if valid is not None:
-                    safe = b.select(valid, off_bytes, c_oob)
-                else:
-                    safe = off_bytes
+                safe = (
+                    b.select(valid, off_bytes, c_oob)
+                    if valid is not None
+                    else off_bytes
+                )
                 if self.load_vec == 1:
                     v = b.buffer_load(rsrc, safe, c0, dtype)
-                    if self.col_xor is not None:
-                        col = self._swizzle(b, row, col)
-                    b.smem_store_vN(smem_dst, [row, col], v, 1)
                 else:
                     v = b.buffer_load_vN(rsrc, safe, c0, dtype, self.load_vec)
-                    self._store_tile(b, smem_dst, row, col, v)
+            elif self.load_vec == 1:
+                v = b.global_load(ptr, off_elems, dtype)
             else:
-                if self.load_vec == 1:
-                    v = b.global_load(ptr, off_elems, dtype)
-                    if self.col_xor is not None:
-                        col = self._swizzle(b, row, col)
-                    b.smem_store_vN(smem_dst, [row, col], v, 1)
-                else:
-                    v = b.global_load_vN(ptr, off_elems, dtype, self.load_vec)
-                    self._store_tile(b, smem_dst, row, col, v)
+                v = b.global_load_vN(ptr, off_elems, dtype, self.load_vec)
+            self._store_tile(b, smem_dst, row, col, v)
+
+        self.visit_chunks(b, tid=tid, emit=emit, grid=(c_threads, c_load_vec, c_span))
 
     def load_async_to_lds(
         self,
@@ -717,6 +939,7 @@ class CoalescedTileLoader:
                 f"CoalescedTileLoader: unsupported elem_dtype {dtype.name!r}"
             )
 
+        count = self.vecs_per_thread
         c_threads = b.const_i32(self.block_size)
         c_load_vec = b.const_i32(self.load_vec)
         c_span = b.const_i32(
@@ -729,7 +952,7 @@ class CoalescedTileLoader:
         # Each entry is (row, col, reg_value) so store_fetched can reconstruct
         # the LDS address without re-running the descriptor.
         fetched = []
-        for e in range(self.vecs_per_thread):
+        for e in range(count):
             vec_idx = b.add(b.mul(b.const_i32(e), c_threads), tid)
             row, col = self._decode_row_col(
                 b, vec_idx, c_span=c_span, c_load_vec=c_load_vec
@@ -1010,6 +1233,64 @@ class AsyncTileLoaderSlot:
     smem_dst: Value
     per_wave_lds_base: Value  # i64; lane 0 of the wave writes here
 
+    def _pass_coordinates(
+        self,
+        b: IRBuilder,
+        tid: Value,
+        chunks_per_row: Value,
+        cols_per_chunk: Value | None = None,
+        slot_bytes: int = 0,
+    ):
+        loader = self.loader
+        for p in range(loader.passes):
+            byte_off = slot_bytes + p * loader.pass_bytes
+            base = self.per_wave_lds_base
+            if byte_off:
+                base = b.smem_ptr_add(base, b.zext(b.const_i32(byte_off), I64))
+            chunk = b.add(tid, b.const_i32(p * loader.block_size))
+            row = b.div(chunk, chunks_per_row)
+            col_in_chunks = b.mod(chunk, chunks_per_row)
+            step = (
+                cols_per_chunk
+                if cols_per_chunk is not None
+                else b.const_i32(loader.elems_per_chunk)
+            )
+            yield base, chunk, row, b.mul(col_in_chunks, step)
+
+    def issue_bytes(
+        self,
+        b: IRBuilder,
+        *,
+        tid: Value,
+        rsrc: Value,
+        descriptor: Callable[[Value, Value], Value],
+        chunks_per_row: Value,
+        cols_per_chunk: Value,
+        zero_soff: Value,
+        slot_bytes: int = 0,
+        coherency: int = 0,
+    ) -> None:
+        """Issue a prebound slot with a descriptor returning byte offsets.
+
+        The caller binds the per-wave LDS base, precomputes the chunk grid,
+        and guarantees each issued chunk has a valid destination and source
+        (or an out-of-bounds buffer offset for zero-fill). Columns can be
+        expressed in bytes when a hardware chunk is smaller than one element.
+        ``slot_bytes`` handles a static slot offset; a dynamic one belongs in
+        the bound LDS base. The caller still owns VMEM waits and barriers.
+        """
+        for base, _, row, col in self._pass_coordinates(
+            b, tid, chunks_per_row, cols_per_chunk, slot_bytes
+        ):
+            b.async_buffer_load_lds_addr(
+                rsrc,
+                base,
+                descriptor(row, col),
+                zero_soff,
+                self.loader.dwords,
+                coherency=coherency,
+            )
+
     def issue(
         self,
         b: IRBuilder,
@@ -1041,26 +1322,9 @@ class AsyncTileLoaderSlot:
         c0 = b.const_i32(0)
         c_chunks_per_row = b.const_i32(L.chunks_per_row)
 
-        for p in range(L.passes):
-            # Per-pass LDS base = per_wave_lds_base + p * pass_bytes.
-            # Each lane in the wave writes at its own lane*bytes_per_chunk
-            # offset *from that base*, which the intrinsic supplies.
-            pass_byte_off = p * L.pass_bytes
-            pass_base = (
-                b.smem_ptr_add(
-                    self.per_wave_lds_base,
-                    b.zext(b.const_i32(pass_byte_off), I64),
-                )
-                if p > 0
-                else self.per_wave_lds_base
-            )
-
-            # chunk_idx = tid + p * block_size
-            chunk_idx = b.add(tid, b.const_i32(p * L.block_size))
-            row = b.div(chunk_idx, c_chunks_per_row)
-            col_v = b.mod(chunk_idx, c_chunks_per_row)
-            col = b.mul(col_v, b.const_i32(L.elems_per_chunk))
-
+        for pass_base, chunk_idx, row, col in self._pass_coordinates(
+            b, tid, c_chunks_per_row
+        ):
             off_elems, valid = descriptor(b, row, col)
             off_bytes = b.mul(off_elems, c_elem_bytes)
             # Threads whose chunk_idx >= chunks_total still issue an

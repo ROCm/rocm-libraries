@@ -312,6 +312,13 @@ def _specs():
         TraitSpec(pipeline="compv4", epilogue="cshuffle"),
         block_size=1024,
     )
+    # Same spec as the preshuffled_tail GPU case, built independently here.
+    add(
+        "universal_gemm_tile_copy",
+        (64, 64, 32, 2, 2, 1, 16, 16, 16),
+        TraitSpec(pipeline="mem", epilogue="default", pad_k=True, preshuffle_b=True),
+        block_size=256,
+    )
     return S
 
 

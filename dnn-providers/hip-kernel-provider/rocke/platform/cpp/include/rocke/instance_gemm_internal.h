@@ -51,6 +51,7 @@
 #include <stdint.h>
 
 #include "rocke/helper_rocke.core.arch.h" /* rocke_mmaop_t, rocke_archtarget_t */
+#include "rocke/helper_rocke.helpers.loads.h" /* rocke_lds_column_xor_t */
 #include "rocke/helper_rocke.helpers.schedule.h" /* rocke_hotloop_inst_list_t, policy */
 #include "rocke/helper_rocke.helpers.tensor_view.h" /* rocke_tensor_view_t, descriptors */
 #include "rocke/instance_gemm_universal.h"
@@ -150,11 +151,9 @@ typedef struct rocke_gemm_build_ctx
 
     /* ---- LDS XOR swizzle (lds_swizzle) -- */
     bool swz; /* _SWZ = spec.trait.lds_swizzle             */
-    int swz_r; /* CK_SWZ_R   (resolved)                     */
-    int swz_w; /* CK_SWZ_W                                  */
-    int swz_l; /* CK_SWZ_L                                  */
+    rocke_lds_column_xor_t lds_xor; /* Resolved layout in byte units. */
     rocke_value_t* c_swr; /* const_i32(swz_r)         (_c_swr)         */
-    rocke_value_t* c_swmod; /* const_i32(1 << swz_w)    (_c_swmod)       */
+    rocke_value_t* c_swmask; /* low swz_w bits, when swizzling is enabled */
     rocke_value_t* c_swl; /* const_i32(swz_l)         (_c_swl)         */
 
     /* ---- batch-axis pointer offsets (SSA; c0 in non-batched mode) -- */
@@ -198,19 +197,13 @@ typedef struct rocke_gemm_build_ctx
     /* ---- global -> LDS coalesced copy plan -- */
     int threads; /* spec.block_size                           */
     int load_vec; /* _choose_load_vec(spec)                    */
-    int a_total; /* block_m * block_k                         */
-    int b_total; /* block_n * block_k                         */
-    int a_vec_total; /* a_total / load_vec                        */
-    int b_vec_total; /* b_total / load_vec                        */
-    int a_vecs_per_thread; /* a_vec_total / threads                     */
-    int b_vecs_per_thread; /* b_vec_total / threads                     */
     rocke_value_t* c_threads; /* const_i32(threads)                */
     rocke_value_t* c_load_vec; /* const_i32(load_vec)               */
     rocke_value_t* c_block_k_div_vec; /* const_i32(block_k / load_vec)     */
 
     /* ---- CK-Tile data views (host-side; hold SSA bases) -- */
     rocke_tensor_view_t a_view; /* make_global_view(A, (1,K,1))      */
-    rocke_tensor_view_t b_view; /* make_global_view(Bp,(1,K,1))      */
+    rocke_tensor_view_t b_view; /* B row stride K or packed block_k */
     rocke_tensor_descriptor_t a_lds_desc; /* packed or with_strides         */
     rocke_tensor_descriptor_t b_lds_desc;
     rocke_tensor_view_t a_lds_view; /* LDS view over A_smem              */
@@ -222,13 +215,11 @@ typedef struct rocke_gemm_build_ctx
     int dtl_halves; /* _DTL_HALVES (0 when a chunk is under one element) */
     int dtl_bytes_per_lane; /* _DTL_BYTES_PER_LANE = dtl_dwords*4        */
     int dtl_elem_bytes; /* _dtl_elem_bytes                           */
-    int dtl_elem_log2; /* log2(dtl_elem_bytes)                      */
     bool dtl_sub_elem; /* _dtl_sub_elem: chunk smaller than an element */
     int dtl_a_chunks; /* (block_m*block_k*elem_bytes)/bytes_per_lane */
     int dtl_b_chunks; /* (block_n*block_k*elem_bytes)/bytes_per_lane */
     int dtl_a_passes; /* ceil(dtl_a_chunks / block_size)          */
     int dtl_b_passes; /* ceil(dtl_b_chunks / block_size)          */
-    int dtl_pass_bytes; /* block_size * dtl_bytes_per_lane           */
     int dtl_chunks_per_row; /* block_k*elem_bytes / bytes_per_lane       */
     rocke_value_t* dtl_big_bytes; /* const_i32(0x7FFF0000)        */
     rocke_value_t* dtl_a_rsrc; /* buffer_rsrc(A, big_bytes)    */
