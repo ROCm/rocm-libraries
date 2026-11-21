@@ -6,22 +6,26 @@
 
 Usage: run_rocjitsu.py -- <command...>
 TheRock's tensilelite-rocjitsu job runs ``-- python pytest_runner.py`` with
-TEST_CATEGORY=emu-pr. This script:
-- picks the emulator profile and device config for AMDGPU_TARGETS (or the
-  AMDGPU_FAMILIES family), from the rocjitsu/mirage installed with ROCm;
-- splits the host's CPUs between pytest-xdist workers and each worker's
-  emulator threads, and passes the worker count, per-test timeout and stall-dump
-  time to pytest_runner.py / the rocjitsu_pytest plugin through the environment;
-- runs ``mirage run ... -- <command>`` as a child subreaper with a suite
-  timeout, so timed-out tests' clients never outlive the job step;
+TEST_CATEGORY=rocjitsu-quick. This script:
+- picks the device config for AMDGPU_TARGETS (or the AMDGPU_FAMILIES family)
+  from the rocjitsu installed with ROCm;
+- splits the CPUs it may use (affinity, capped by a cgroup CPU quota) between
+  pytest-xdist workers and each worker's emulator threads, with no more workers
+  than the memory (cgroup limit, else physical) holds, and passes the worker
+  count, per-test timeout and stall-dump time to pytest_runner.py / the
+  rocjitsu_pytest plugin through the environment;
+- runs ``rocjitsu --config ... -- <command>`` (in-process simulation) as a
+  child subreaper with a suite timeout, so timed-out tests' clients never
+  outlive the job step;
 - fails a run that finished no passing test, and prints the result summary and
-  any stall dumps (the CI job uploads no files).
+  any stall dumps (the CI job uploads no files); with GITHUB_STEP_SUMMARY set,
+  also lists the failed, timed-out and unfinished tests in the job summary.
 
 Environment: THEROCK_BIN_DIR (its parent is the ROCm install; else ROCM_PATH,
 else this install tree),
 AMDGPU_TARGETS / AMDGPU_FAMILIES, optional ROCJITSU_REPORT_DIR,
 ROCJITSU_SUITE_TIMEOUT / ROCJITSU_SUITE_GRACE (seconds), PYTEST_TEST_TIMEOUT,
-PYTEST_NUM_WORKERS.
+PYTEST_NUM_WORKERS, SHARD_INDEX / TOTAL_SHARDS, GITHUB_STEP_SUMMARY.
 """
 
 import contextlib
@@ -37,16 +41,18 @@ import time
 
 HERE = Path(__file__).resolve().parent
 
-# Emulated target -> (mirage profile, device config under share/rocjitsu/configs).
+# Emulated target -> device config under share/rocjitsu/configs.
 TARGETS = {
-    "gfx942": ("mi300x", "gfx942_cdna3_kmd.json"),
-    "gfx950": ("mi350x", "gfx950_mi355x_kmd.json"),
-    "gfx1250": ("mi450x", "gfx1250_mi455x.json"),
+    "gfx942": "gfx942_cdna3_kmd.json",
+    "gfx950": "gfx950_mi355x_kmd.json",
+    "gfx1250": "gfx1250_mi455x.json",
 }
 FAMILY_TARGETS = {"gfx94": "gfx942", "gfx950": "gfx950", "gfx125": "gfx1250"}
 
 MAX_WORKERS = 16
 THREADS_PER_WORKER = 6
+# 16 workers peaked at 151 GB on a 96-core host, about 9.4 GiB each.
+MEMORY_PER_WORKER = 10 * 2**30
 # Leaves time inside a 150-minute job step to reap, summarize and exit.
 DEFAULT_SUITE_TIMEOUT = 140 * 60
 DEFAULT_TEST_TIMEOUT = 2 * 60 * 60
@@ -79,9 +85,41 @@ def emulated_target(env):
     return target
 
 
-def split_cpus(cores):
-    """(xdist workers, emulator threads per worker) for this many CPUs."""
-    workers = max(1, min(MAX_WORKERS, cores // THREADS_PER_WORKER))
+def cgroup_limits(root=Path("/sys/fs/cgroup")):
+    """(CPUs, memory bytes) a cgroup v2 or v1 quota allows; None where unlimited.
+
+    A container's CPU quota does not show in its CPU affinity, so sizing by
+    affinity alone oversubscribes a quota-limited runner.
+    """
+
+    def read(name):
+        try:
+            return (root / name).read_text().split()
+        except OSError:
+            return None
+
+    cpus = memory = None
+    if cpu_max := read("cpu.max"):
+        if cpu_max[0] != "max":
+            cpus = max(1, int(cpu_max[0]) // int(cpu_max[1]))
+    elif (quota := read("cpu/cpu.cfs_quota_us")) and (
+        period := read("cpu/cpu.cfs_period_us")
+    ):
+        if int(quota[0]) > 0:
+            cpus = max(1, int(quota[0]) // int(period[0]))
+    limit = read("memory.max") or read("memory/memory.limit_in_bytes")
+    # cgroup v1 reports "unlimited" as a value near 2**63.
+    if limit and limit[0] != "max" and int(limit[0]) < 2**60:
+        memory = int(limit[0])
+    return cpus, memory
+
+
+def split_cpus(cores, memory=None):
+    """(xdist workers, emulator threads per worker) for these CPUs and memory."""
+    workers = min(MAX_WORKERS, cores // THREADS_PER_WORKER)
+    if memory:
+        workers = min(workers, memory // MEMORY_PER_WORKER)
+    workers = max(1, workers)
     return workers, max(1, cores // workers)
 
 
@@ -89,8 +127,8 @@ def write_config(source, destination, budget):
     """Copy the device config with this host's thread budget; return its CU count."""
     config = json.loads(Path(source).read_text())
     config["cpu_thread_budget"] = budget
-    # With more than one engine thread, a StreamK ready flag is sometimes left
-    # set after the kernel (caught by the Synchronizer check), so pin one.
+    # One engine thread per emulator: the only setting validated on the full
+    # gfx1250 set.
     config["num_threads"] = 1
     Path(destination).write_text(json.dumps(config, indent=2))
     device = config["vm"]["gpu"]["device"]
@@ -108,18 +146,17 @@ def prepend(env, name, *paths):
     env[name] = os.pathsep.join([*paths, *filter(None, [env.get(name)])])
 
 
-def emulation_setup(env, cores, report_dir):
-    """Return (mirage command prefix, environment) for running a test command."""
+def emulation_setup(env, cores, report_dir, memory=None):
+    """Return (rocjitsu command prefix, environment) for running a test command."""
     rocm = rocm_root(env)
     target = emulated_target(env)
-    profile, config_name = TARGETS[target]
-    mirage = rocm / "bin" / "mirage"
-    config = rocm / "share" / "rocjitsu" / "configs" / config_name
-    for required in (mirage, config):
+    rocjitsu = rocm / "bin" / "rocjitsu"
+    config = rocm / "share" / "rocjitsu" / "configs" / TARGETS[target]
+    for required in (rocjitsu, config):
         if not required.exists():
             raise SystemExit(f"missing from the ROCm install: {required}")
 
-    workers, budget = split_cpus(cores)
+    workers, budget = split_cpus(cores, memory)
     report_dir.mkdir(parents=True, exist_ok=True)
     run_config = report_dir / "rocjitsu-config.json"
     compute_units = write_config(config, run_config, budget)
@@ -138,9 +175,8 @@ def emulation_setup(env, cores, report_dir):
         PYTEST_TEST_TIMEOUT=str(test_timeout),
         ROCJITSU_REPORT_DIR=str(report_dir),
         ROCJITSU_STALL_DUMP_AFTER=str(max(1, test_timeout - STALL_LEAD)),
-        # mirage refuses a control-socket directory it does not own; use a
-        # fresh private one rather than one derived from a shared TMPDIR.
-        MIRAGE_RUNTIME=tempfile.mkdtemp(prefix="mirage-"),
+        # Private dir for rocjitsu's per-process files (it reaps stale ones).
+        ROCJITSU_RUNTIME_DIR=tempfile.mkdtemp(prefix="rocjitsu-"),
     )
     prepend(env, "PYTHONPATH", str(HERE))
     prepend(env, "PATH", str(rocm / "bin"), str(rocm / "lib" / "llvm" / "bin"))
@@ -152,13 +188,14 @@ def emulation_setup(env, cores, report_dir):
         *llvm_lib_dirs(rocm),
     )
     print(
-        f"rocjitsu: target={target} profile={profile} cores={cores} "
+        f"rocjitsu: target={target} config={TARGETS[target]} cores={cores} "
+        f"memory_gib={memory // 2**30 if memory else None} "
         f"workers={env['PYTEST_NUM_WORKERS']} threads_per_worker={budget} "
         f"cu={compute_units} shard={env.get('SHARD_INDEX', 1)}/{env.get('TOTAL_SHARDS', 1)}",
         flush=True,
     )
-    prefix = [str(mirage), "run", "--profile", profile, "--in-process"]
-    return [*prefix, "--config", str(run_config), "--"], env
+    # Without --daemon, rocjitsu preloads the simulator into the command itself.
+    return [str(rocjitsu), "--config", str(run_config), "--"], env
 
 
 def reap_descendants():
@@ -229,8 +266,51 @@ def supervise(command, env, timeout, grace):
     )
 
 
-def summarize(report_dir, result):
-    """Fail runs that passed nothing; print the summary and any stall dumps."""
+def not_passed(progress):
+    """{"failed" | "timed out" | "incomplete": [node ids]} from progress.json."""
+    groups = {"failed": [], "timed out": [], "incomplete": []}
+    for nodeid, test in progress.get("tests", {}).items():
+        if test["outcome"] == "failed":
+            detail = str(test["phases"].get("call", {}).get("detail"))
+            # pytest-timeout ends its failure message with this.
+            groups["timed out" if "from pytest-timeout" in detail else "failed"].append(nodeid)
+        elif test["outcome"] == "incomplete":
+            groups["incomplete"].append(nodeid)
+    return groups
+
+
+def step_summary(title, progress, result, groups):
+    """Markdown for the CI job summary: counts, then every test that did not pass."""
+    status = "passed" if result["exit_code"] == 0 else "failed"
+    lines = [
+        f"### {title}: {status}",
+        "",
+        "| selected | passed | failed | timed out | skipped | incomplete | minutes |",
+        "|---|---|---|---|---|---|---|",
+        "| {} | {} | {} | {} | {} | {} | {:.0f} |".format(
+            progress.get("selected", 0),
+            progress.get("passed", 0),
+            len(groups["failed"]),
+            len(groups["timed out"]),
+            progress.get("skipped", 0),
+            len(groups["incomplete"]),
+            result.get("wall_seconds", 0) / 60,
+        ),
+    ]
+    if result.get("error"):
+        lines += ["", f"Error: {result['error']}"]
+    for name, nodeids in groups.items():
+        if nodeids:
+            lines += ["", f"{name.capitalize()}:", *(f"- `{nodeid}`" for nodeid in nodeids)]
+    return "\n".join(lines) + "\n"
+
+
+def summarize(report_dir, result, title="rocjitsu", summary_path=None):
+    """Fail runs that passed nothing; print the summary and any stall dumps.
+
+    With summary_path (the job's GITHUB_STEP_SUMMARY), also append the counts
+    and the tests that failed, timed out or never finished.
+    """
     progress_path = report_dir / "progress.json"
     progress = json.loads(progress_path.read_text()) if progress_path.exists() else {}
     result["complete"] = bool(progress.get("selected")) and (
@@ -244,12 +324,19 @@ def summarize(report_dir, result):
     (report_dir / "execution.json").write_text(json.dumps(result, indent=2) + "\n")
     counts = {key: value for key, value in progress.items() if key != "tests"}
     print(f"rocjitsu pytest results: {counts}", flush=True)
-    for nodeid, test in progress.get("tests", {}).items():
-        if test["outcome"] in ("failed", "incomplete"):
-            print(f"  {test['outcome']}: {nodeid}", flush=True)
+    groups = not_passed(progress)
+    for name, nodeids in groups.items():
+        for nodeid in nodeids:
+            print(f"  {name}: {nodeid}", flush=True)
     for stall in sorted((report_dir / "stalls").glob("*.txt")):
         print(f"--- stall dump {stall.name} ---\n{stall.read_text()}", flush=True)
     print(f"rocjitsu pytest execution: {result}", flush=True)
+    if summary_path:
+        try:
+            with open(summary_path, "a") as summary:
+                summary.write(step_summary(title, progress, result, groups))
+        except OSError as error:
+            print(f"rocjitsu: could not write the job summary: {error}", flush=True)
     return result["exit_code"]
 
 
@@ -264,14 +351,23 @@ def main(argv=None, env=None):
     # A reused report directory must never turn an interrupted run into a pass.
     for name in ("progress.json", "execution.json"):
         (report_dir / name).unlink(missing_ok=True)
-    prefix, run_env = emulation_setup(env, len(os.sched_getaffinity(0)), report_dir)
+    cores = len(os.sched_getaffinity(0))
+    quota_cpus, memory = cgroup_limits()
+    if quota_cpus:
+        cores = min(cores, quota_cpus)
+    if not memory:
+        memory = os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES")
+    prefix, run_env = emulation_setup(env, cores, report_dir, memory)
     timeout = float(env.get("ROCJITSU_SUITE_TIMEOUT") or DEFAULT_SUITE_TIMEOUT)
     try:
         grace = float(env.get("ROCJITSU_SUITE_GRACE") or 30)
         result = supervise([*prefix, *command], run_env, timeout, grace)
     except (OSError, RuntimeError, subprocess.TimeoutExpired) as error:
         result = dict(exit_code=1, timed_out=False, error=str(error))
-    return summarize(report_dir, result)
+    title = "rocjitsu {} shard {}/{}".format(
+        emulated_target(env), env.get("SHARD_INDEX", 1), env.get("TOTAL_SHARDS", 1)
+    )
+    return summarize(report_dir, result, title, env.get("GITHUB_STEP_SUMMARY"))
 
 
 if __name__ == "__main__":
