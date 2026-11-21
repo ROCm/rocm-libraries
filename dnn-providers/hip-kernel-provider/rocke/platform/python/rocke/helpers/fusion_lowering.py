@@ -37,8 +37,9 @@ explainable plan through it without ever touching the GPU.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Mapping, Optional, Protocol, Tuple
+from typing import Any, Optional, Protocol
 
 from .autotune import AutotuneConfig
 from .fusion_ir import FusionGraph, FusionRegion
@@ -71,7 +72,7 @@ class BuiltRegion:
     launcher: Any
     spec: Any
     block_size: int
-    extra: Dict[str, Any] = field(default_factory=dict)
+    extra: dict[str, Any] = field(default_factory=dict)
 
 
 class RegionLowerer(Protocol):
@@ -81,7 +82,7 @@ class RegionLowerer(Protocol):
 
     def candidates(
         self, graph: FusionGraph, region: FusionRegion
-    ) -> List[AutotuneConfig]: ...
+    ) -> list[AutotuneConfig]: ...
 
     def build(self, config: AutotuneConfig) -> BuiltRegion: ...
 
@@ -89,16 +90,16 @@ class RegionLowerer(Protocol):
         self,
         graph: FusionGraph,
         region: FusionRegion,
-        runtime_args: Dict[str, Any],
+        runtime_args: dict[str, Any],
         built: BuiltRegion,
-    ) -> Tuple[Dict[str, Any], Tuple[int, int, int]]: ...
+    ) -> tuple[dict[str, Any], tuple[int, int, int]]: ...
 
 
 @dataclass
 class LoweringRegistry:
     """Map scheduled region kinds to lowerers."""
 
-    _lowerers: Dict[str, RegionLowerer]
+    _lowerers: dict[str, RegionLowerer]
 
     def __init__(self) -> None:
         self._lowerers = {}
@@ -139,7 +140,7 @@ class ExplainOnlyLowerer:
 
     def candidates(
         self, graph: FusionGraph, region: FusionRegion
-    ) -> List[AutotuneConfig]:
+    ) -> list[AutotuneConfig]:
         return []
 
     def build(self, config: AutotuneConfig) -> BuiltRegion:
@@ -149,9 +150,9 @@ class ExplainOnlyLowerer:
         self,
         graph: FusionGraph,
         region: FusionRegion,
-        runtime_args: Dict[str, Any],
+        runtime_args: dict[str, Any],
         built: BuiltRegion,
-    ) -> Tuple[Dict[str, Any], Tuple[int, int, int]]:
+    ) -> tuple[dict[str, Any], tuple[int, int, int]]:
         return dict(runtime_args), (1, 1, 1)
 
 
@@ -200,7 +201,7 @@ def _dtype_str_for_tensor(graph: FusionGraph, name: str) -> str:
 
 def _region_inputs_outputs(
     graph: FusionGraph, region: FusionRegion
-) -> Tuple[List[str], List[str]]:
+) -> tuple[list[str], list[str]]:
     return list(region.inputs), list(region.outputs)
 
 
@@ -235,7 +236,7 @@ class GemmEpilogueLowerer:
     def __init__(self, arch: Optional[str] = None) -> None:
         self.arch = arch
 
-    def _target_arch(self) -> Tuple[str, str]:
+    def _target_arch(self) -> tuple[str, str]:
         """Return the target arch and how it was chosen, for error messages."""
         from ..core.arch import validate_arch
         from ..runtime.hip_module import get_device_arch
@@ -249,12 +250,12 @@ class GemmEpilogueLowerer:
 
     # Default sweep tile choices for fp16. bf16 currently only supports
     # 16x16x{16,32} atoms on gfx950 so we fall back to a smaller set.
-    _FP16_TILES: Tuple[Tuple[str, int, int, int, int, int, int, int, int], ...] = (
+    _FP16_TILES: tuple[tuple[str, int, int, int, int, int, int, int, int], ...] = (
         ("t128x128x32", 128, 128, 32, 2, 2, 32, 32, 16),
         ("t128x128x64", 128, 128, 64, 2, 2, 32, 32, 16),
         ("t256x128x32", 256, 128, 32, 4, 2, 32, 32, 16),
     )
-    _BF16_TILES: Tuple[Tuple[str, int, int, int, int, int, int, int, int], ...] = (
+    _BF16_TILES: tuple[tuple[str, int, int, int, int, int, int, int, int], ...] = (
         ("t64x64x32", 64, 64, 32, 2, 2, 16, 16, 32),
         ("t128x64x32", 128, 64, 32, 4, 2, 16, 16, 32),
         ("t64x128x32", 64, 128, 32, 2, 4, 16, 16, 32),
@@ -264,7 +265,7 @@ class GemmEpilogueLowerer:
     # epilogue (see ``is_valid_spec``'s WMMA gate in ``gemm_universal``), so the
     # warp tile is fixed at 16x16 and the block tiles are kept modest. Used for
     # both fp16 and bf16 (the catalog carries the WMMA atom per dtype).
-    _WMMA_TILES: Tuple[Tuple[str, int, int, int, int, int, int, int, int], ...] = (
+    _WMMA_TILES: tuple[tuple[str, int, int, int, int, int, int, int, int], ...] = (
         ("t32x32x16", 32, 32, 16, 2, 2, 16, 16, 16),
         ("t64x64x16", 64, 64, 16, 2, 2, 16, 16, 16),
         ("t64x32x16", 64, 32, 16, 2, 2, 16, 16, 16),
@@ -293,7 +294,7 @@ class GemmEpilogueLowerer:
 
     def _epilogue_for_region(
         self, graph: FusionGraph, region: FusionRegion
-    ) -> Tuple[Any, Optional[str], Tuple[str, ...]]:
+    ) -> tuple[Any, Optional[str], tuple[str, ...]]:
         """Build a :class:`FusedEpilogue` reflecting the region's ops.
 
         Also returns ``(bias_name, residual_names)`` so the runtime
@@ -311,9 +312,9 @@ class GemmEpilogueLowerer:
             SiLU,
         )
 
-        ops_list: List[Any] = []
+        ops_list: list[Any] = []
         bias_name: Optional[str] = None
-        residual_names: List[str] = []
+        residual_names: list[str] = []
         # Skip the leading matmul.
         for op_name in region.op_names[1:]:
             op = graph.ops[op_name]
@@ -355,14 +356,14 @@ class GemmEpilogueLowerer:
 
     def _tile_choices(
         self, dtype: str
-    ) -> Tuple[Tuple[str, int, int, int, int, int, int, int, int], ...]:
+    ) -> tuple[tuple[str, int, int, int, int, int, int, int, int], ...]:
         if dtype in ("bf16", "bfloat16"):
             return self._BF16_TILES
         return self._FP16_TILES
 
     def candidates(
         self, graph: FusionGraph, region: FusionRegion
-    ) -> List[AutotuneConfig]:
+    ) -> list[AutotuneConfig]:
         from ..instances.common.gemm_universal import (
             DataSpec,
             TileSpec,
@@ -408,14 +409,14 @@ class GemmEpilogueLowerer:
             tile_table = self._WMMA_TILES
             pipeline = "mem"
             epilogue_kind = "default"
-            wgm_choices: Tuple[int, ...] = (0,)
+            wgm_choices: tuple[int, ...] = (0,)
         else:
             tile_table = self._tile_choices(dtype)
             pipeline = "compv4"
             epilogue_kind = "cshuffle"
             wgm_choices = (4, 8)
 
-        configs: List[AutotuneConfig] = []
+        configs: list[AutotuneConfig] = []
         for tile_name, tm, tn, tk, wm, wn, wtm, wtn, _wtk in tile_table:
             atom = target.mma.select_largest_k(
                 family=family,
@@ -498,7 +499,7 @@ class GemmEpilogueLowerer:
         kernel = build_universal_gemm(spec, arch=arch)
         hsaco = _build_region_hsaco(kernel, explicit_arch=arch)
         ptr_ty = f"ptr<{ir_dtype.name}, global>"
-        sig: List[Mapping[str, Any]] = [
+        sig: list[Mapping[str, Any]] = [
             {"name": "A", "type": ptr_ty, "size_bytes": 8},
             {"name": "B", "type": ptr_ty, "size_bytes": 8},
             {"name": "C", "type": ptr_ty, "size_bytes": 8},
@@ -529,9 +530,9 @@ class GemmEpilogueLowerer:
         self,
         graph: FusionGraph,
         region: FusionRegion,
-        runtime_args: Dict[str, Any],
+        runtime_args: dict[str, Any],
         built: BuiltRegion,
-    ) -> Tuple[Dict[str, Any], Tuple[int, int, int]]:
+    ) -> tuple[dict[str, Any], tuple[int, int, int]]:
         spec = built.spec
         head = graph.ops[region.op_names[0]]
         a_name, b_name = head.inputs
@@ -542,7 +543,7 @@ class GemmEpilogueLowerer:
         M = int(runtime_args.get("M", A.shape[0]))
         N = int(runtime_args.get("N", C.shape[1]))
         K = int(runtime_args.get("K", A.shape[1]))
-        args: Dict[str, Any] = {"A": A, "B": B, "C": C, "M": M, "N": N, "K": K}
+        args: dict[str, Any] = {"A": A, "B": B, "C": C, "M": M, "N": N, "K": K}
         # bias + residual plumbing reads names from BuiltRegion.extra.
         bias_name = built.extra.get("bias")
         residual_names = built.extra.get("residuals") or ()
@@ -603,7 +604,7 @@ class ElementwiseLowerer:
 
     def candidates(
         self, graph: FusionGraph, region: FusionRegion
-    ) -> List[AutotuneConfig]:
+    ) -> list[AutotuneConfig]:
         from ..instances.common.elementwise import ElementwiseSpec, is_valid_spec
 
         op = graph.ops[region.op_names[0]]
@@ -611,7 +612,7 @@ class ElementwiseLowerer:
         ew_dtype = "f16" if dtype in ("fp16", "f16", "float16") else "bf16"
         # The elementwise instance maps gelu via ``gelu_tanh``.
         op_kind = "gelu_tanh" if op.kind == "gelu" else op.kind
-        cfgs: List[AutotuneConfig] = []
+        cfgs: list[AutotuneConfig] = []
         for block_size in (256, 512):
             for vec in (8, 4, 2):
                 spec = ElementwiseSpec(
@@ -646,13 +647,13 @@ class ElementwiseLowerer:
         self,
         graph: FusionGraph,
         region: FusionRegion,
-        runtime_args: Dict[str, Any],
+        runtime_args: dict[str, Any],
         built: BuiltRegion,
-    ) -> Tuple[Dict[str, Any], Tuple[int, int, int]]:
+    ) -> tuple[dict[str, Any], tuple[int, int, int]]:
         spec = built.spec
         op = graph.ops[region.op_names[0]]
         out_name = region.outputs[0]
-        args: Dict[str, Any] = {}
+        args: dict[str, Any] = {}
         if op.kind in self._BINARY:
             args["A"] = runtime_args[op.inputs[0]]
             args["B"] = runtime_args[op.inputs[1]]
@@ -707,7 +708,7 @@ class ReductionLowerer:
 
     def candidates(
         self, graph: FusionGraph, region: FusionRegion
-    ) -> List[AutotuneConfig]:
+    ) -> list[AutotuneConfig]:
         from ..instances.common.reduce import Reduce2DSpec, is_valid_spec
 
         op = graph.ops[region.op_names[0]]
@@ -717,7 +718,7 @@ class ReductionLowerer:
         n_per_block = int(in_t.shape[-1] or 0)
         if n_per_block <= 0:
             return []
-        cfgs: List[AutotuneConfig] = []
+        cfgs: list[AutotuneConfig] = []
         # Only emit configs that satisfy ``Reduce2DSpec``'s divisibility
         # constraint (n_per_block % (block_size * vec) == 0). For row
         # extents that don't divide cleanly into any of the canonical
@@ -758,9 +759,9 @@ class ReductionLowerer:
         self,
         graph: FusionGraph,
         region: FusionRegion,
-        runtime_args: Dict[str, Any],
+        runtime_args: dict[str, Any],
         built: BuiltRegion,
-    ) -> Tuple[Dict[str, Any], Tuple[int, int, int]]:
+    ) -> tuple[dict[str, Any], tuple[int, int, int]]:
         op = graph.ops[region.op_names[0]]
         out_name = region.outputs[0]
         X = runtime_args[op.inputs[0]]

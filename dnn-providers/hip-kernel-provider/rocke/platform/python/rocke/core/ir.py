@@ -29,10 +29,10 @@ import operator
 import os
 import re
 import sys
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from math import gcd as _gcd
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Optional
 
 from .arch import target as _arch
 from .cxx_keywords import CXX_KEYWORDS
@@ -1287,7 +1287,7 @@ def _sync_attr(op: "Op", key: str, allowed: Sequence[str]) -> str:
 # purely ir-side SSA naming (not arch data), kept here so the emitted value
 # numbering stays byte-identical. Most atoms used "acc"; a handful used distinct
 # hints that must be preserved verbatim.
-_MMA_RESULT_HINT: Dict[str, str] = {
+_MMA_RESULT_HINT: dict[str, str] = {
     "mfma_f32_32x32x16_bf16": "acc32",
     "mfma_f32_16x16x128_fp8": "acc128",
     "mfma_f32_16x16x128_fp4fp6fp8": "acc128",
@@ -1382,7 +1382,7 @@ MAX_CLUSTER_DIM = 15
 MAX_CLUSTER_WORKGROUPS = 16
 
 
-def check_cluster_dims(value: object) -> Tuple[int, int, int]:
+def check_cluster_dims(value: object) -> tuple[int, int, int]:
     """Validate a kernel ``cluster_dims`` attr and return it as ``(x, y, z)``.
 
     Accepts a list or tuple (the serializer round-trips tuples as lists). The
@@ -1445,7 +1445,7 @@ TDM_PAD_INTERVAL_MAX = 7
 TDM_PAD_AMOUNT_MAX = 127
 
 
-def encode_tdm_padding(interval_bytes: int, pad_bytes: int) -> Tuple[int, int]:
+def encode_tdm_padding(interval_bytes: int, pad_bytes: int) -> tuple[int, int]:
     """Encode an LDS row pad as :meth:`IRBuilder.tdm_descriptor_2d`'s
     ``(pad_interval, pad_amount)``.
 
@@ -1571,7 +1571,7 @@ class PtrType(Type):
 @dataclass(frozen=True)
 class SmemType(Type):
     elem: Type
-    shape: Tuple[int, ...]
+    shape: tuple[int, ...]
     # When True, the smem-pool packer must give this allocation its own
     # byte range (never reuse another allocation's slot, and never be reused).
     # Used by the cshuffle "no-alias" mode so the C tile does not overlap the
@@ -2658,10 +2658,10 @@ class Value:
 @dataclass
 class Op:
     name: str
-    operands: List[Value] = field(default_factory=list)
-    results: List[Value] = field(default_factory=list)
-    attrs: Dict[str, Any] = field(default_factory=dict)
-    regions: List["Region"] = field(default_factory=list)
+    operands: list[Value] = field(default_factory=list)
+    results: list[Value] = field(default_factory=list)
+    attrs: dict[str, Any] = field(default_factory=dict)
+    regions: list["Region"] = field(default_factory=list)
     loc: Optional[str] = None
 
     @property
@@ -2680,14 +2680,14 @@ class Op:
 @dataclass
 class Region:
     label: str
-    ops: List[Op] = field(default_factory=list)
+    ops: list[Op] = field(default_factory=list)
 
 
 @dataclass
 class Param:
     name: str
     type: Type
-    attrs: Dict[str, Any] = field(default_factory=dict)
+    attrs: dict[str, Any] = field(default_factory=dict)
     # The kernel's parameters declared before this one, the only ones a
     # relation in ``attrs`` may name. Set wherever a Param is declared
     # (``IRBuilder.param``, ``ir_serialize.parse``).
@@ -2697,9 +2697,9 @@ class Param:
 @dataclass
 class KernelDef:
     name: str
-    params: List[Param]
+    params: list[Param]
     body: Region
-    attrs: Dict[str, Any] = field(default_factory=dict)
+    attrs: dict[str, Any] = field(default_factory=dict)
 
     @property
     def max_workgroup_size(self) -> int:
@@ -2719,7 +2719,7 @@ class KernelDef:
         return int(self.attrs.get("max_workgroup_size", 256))
 
     @property
-    def cluster_dims(self) -> Optional[Tuple[int, int, int]]:
+    def cluster_dims(self) -> Optional[tuple[int, int, int]]:
         """The gfx1250 workgroup-cluster shape ``(x, y, z)`` the kernel must be
         launched with, or ``None`` for a kernel without one."""
         value = self.attrs.get("cluster_dims")
@@ -2757,9 +2757,9 @@ _STDLIB_DIR = os.path.dirname(os.path.abspath(os.__file__))
 # only there so a pathological recursion cannot produce unbounded metadata.
 _MAX_LOC_FRAMES = 16
 
-_ABSPATH: Dict[str, str] = {}
-_FRAME_ROLE: Dict[str, str] = {}  # abs path -> "core" | "runner" | "user"
-_CODE_POSITIONS: Dict[Any, List[Any]] = {}
+_ABSPATH: dict[str, str] = {}
+_FRAME_ROLE: dict[str, str] = {}  # abs path -> "core" | "runner" | "user"
+_CODE_POSITIONS: dict[Any, list[Any]] = {}
 
 # Frames are joined innermost-first; each is "<abs path>:<line>:<column>:<func>".
 # Packing the whole chain into the existing ``Op.loc`` string keeps the IR schema
@@ -2781,7 +2781,7 @@ def join_loc(frame_texts: Sequence[str]) -> str:
     )
 
 
-def split_loc(loc: str) -> List[str]:
+def split_loc(loc: str) -> list[str]:
     """Split an ``Op.loc`` on unescaped ``;`` and unescape each frame.
 
     A loc written without escaping (no ``;`` in any path) is unchanged, so
@@ -2790,8 +2790,8 @@ def split_loc(loc: str) -> List[str]:
     kept as a literal.
     """
 
-    parts: List[str] = []
-    buf: List[str] = []
+    parts: list[str] = []
+    buf: list[str] = []
     i = 0
     n = len(loc)
     while i < n:
@@ -2908,7 +2908,7 @@ def current_source_loc() -> Optional[str]:
     locations a trace viewer can resolve later.
     """
 
-    frames: List[str] = []
+    frames: list[str] = []
     frame = sys._getframe()
     while frame is not None and len(frames) < _MAX_LOC_FRAMES:
         filename = frame.f_code.co_filename
@@ -3147,9 +3147,9 @@ class IRBuilder:
         # emission of every other kernel.
         self.fence_barriers: Optional[str] = None
         self._counter = 0
-        self._region_stack: List[Region] = []
-        self._params: List[Param] = []
-        self._param_values: Dict[str, Value] = {}
+        self._region_stack: list[Region] = []
+        self._params: list[Param] = []
+        self._param_values: dict[str, Value] = {}
         self.kernel = KernelDef(
             name=kernel_name,
             params=self._params,
@@ -3407,7 +3407,7 @@ class IRBuilder:
         name: str,
         operands: Sequence[Value] = (),
         result_types: Sequence[Type] = (),
-        attrs: Optional[Dict[str, Any]] = None,
+        attrs: Optional[dict[str, Any]] = None,
         regions: Optional[Sequence[Region]] = None,
         result_name_hint: str = "v",
         loc: Optional[str] = None,
@@ -3665,7 +3665,7 @@ class IRBuilder:
         """
         if v.type not in (I32, I64):
             raise ValueError(f"_assume_range: v must be i32 or i64, got {v.type.name}")
-        attrs: Dict[str, Any] = {"multiple_of": multiple_of, "residue": residue}
+        attrs: dict[str, Any] = {"multiple_of": multiple_of, "residue": residue}
         operands = [v]
         for word, end, plus in (("ge", ge, ge_plus), ("lt", lt, lt_plus)):
             if isinstance(end, Value):
@@ -5333,7 +5333,7 @@ class IRBuilder:
         b: Value,
         c: Value,
         *extra: Value,
-        attrs: Optional[Dict[str, Any]] = None,
+        attrs: Optional[dict[str, Any]] = None,
     ) -> Value:
         """Target-neutral matrix-multiply-accumulate: ``D = A * B + C``.
 
@@ -5830,7 +5830,7 @@ class IRBuilder:
 
     def _f8f6f4_16x16x128_attrs(
         self, a: Value, b: Value, a_format: str, b_format: str
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Check the formats and operand widths; return the op attributes.
 
         The attributes are empty for the default formats, so existing serialized
@@ -5880,7 +5880,7 @@ class IRBuilder:
     def smem_store_distributed(
         self,
         smem: Value,
-        layout_attrs: Dict[str, Any],
+        layout_attrs: dict[str, Any],
         values: Value,
     ) -> None:
         """CShuffle-style distributed LDS store (P42).
@@ -7097,7 +7097,7 @@ class IRBuilder:
 
     # ----- scheduler / synchronisation hints -----
 
-    def _barrier_attrs(self, fence: Optional[str]) -> Optional[Dict[str, Any]]:
+    def _barrier_attrs(self, fence: Optional[str]) -> Optional[dict[str, Any]]:
         mode = self.fence_barriers if fence is None else fence
         if mode in (None, "none"):
             return None
@@ -7635,20 +7635,22 @@ class IRBuilder:
             )
         if lds_addr.type is not I64 and lds_addr.type is not I32:
             raise TypeError(f"{name} lds_addr must be i64 or i32, got {lds_addr.type}")
-        for field, value in (
+        for operand_name, value in (
             ("tensor_dim0", tensor_dim0),
             ("tensor_dim1", tensor_dim1),
             ("row_stride", row_stride),
         ):
-            self._check_i32_value(name, field, value)
+            self._check_i32_value(name, operand_name, value)
         data_size = {1: 0, 2: 1, 4: 2, 8: 3}.get(elem_bytes)
         if data_size is None:
             raise ValueError(
                 f"{name} elem_bytes must be 1, 2, 4, or 8 (got {elem_bytes})"
             )
-        for field, value in (("tile_dim0", tile_dim0), ("tile_dim1", tile_dim1)):
+        for operand_name, value in (("tile_dim0", tile_dim0), ("tile_dim1", tile_dim1)):
             if not 1 <= value <= 0xFFFF:
-                raise ValueError(f"{name} {field} must be in 1..65535 (got {value})")
+                raise ValueError(
+                    f"{name} {operand_name} must be in 1..65535 (got {value})"
+                )
         if not 0 <= workgroup_mask <= 0xFFFF:
             raise ValueError(
                 f"{name} workgroup_mask must be in 0..65535 (got {workgroup_mask})"
@@ -8413,7 +8415,7 @@ class IRBuilder:
         """
         if idx is None:
             idx = self.const_i32(0)
-        attrs: Dict[str, Any] = {}
+        attrs: dict[str, Any] = {}
         if align is not None:
             attrs["align"] = _checked_align("memref.global_store_typed", align)
         self._op("memref.global_store_typed", [ptr, idx, value], attrs=attrs)
@@ -8497,7 +8499,7 @@ class IRBuilder:
         lower: Value,
         upper: Value,
         step: Value,
-        iter_args: Sequence[Tuple[str, Value]],
+        iter_args: Sequence[tuple[str, Value]],
         iv_name: str = "k0",
         unroll: bool = False,
         elide_trailing_barrier: bool = True,
@@ -8535,9 +8537,9 @@ class IRBuilder:
         )
         body = Region("body")
         iv = Value(name=f"%{iv_name}", type=lower.type)
-        iter_vars: List[Value] = []
-        iter_inits: List[Value] = []
-        iter_meta: List[Dict[str, Any]] = []
+        iter_vars: list[Value] = []
+        iter_inits: list[Value] = []
+        iter_meta: list[dict[str, Any]] = []
         for arg_name, init in iter_args:
             v = Value(name=f"%{arg_name}", type=init.type)
             iter_vars.append(v)
@@ -8837,7 +8839,7 @@ class _ForBuilder:
         op: Op,
         iv: Value,
         body: Region,
-        iter_vars: List[Value],
+        iter_vars: list[Value],
     ) -> None:
         self._parent = parent
         self.op = op
@@ -8855,7 +8857,7 @@ class _ForBuilder:
         self._parent.pop_region()
 
     @property
-    def results(self) -> List[Value]:
+    def results(self) -> list[Value]:
         return list(self.op.results)
 
 
@@ -8926,6 +8928,6 @@ class _IfElseBuilder:
                 raise refusal
 
     @property
-    def results(self) -> List[Value]:
+    def results(self) -> list[Value]:
         """The values the branch that ran yields, one per result type."""
         return list(self.op.results)
