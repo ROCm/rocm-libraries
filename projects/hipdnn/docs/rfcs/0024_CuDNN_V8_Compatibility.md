@@ -8,7 +8,7 @@
   legacy-sample corpus. The backend descriptor C API is not provided. No CI builds PyTorch against the compatibility layer
   yet (planned for TheRock's PyTorch CI), and CI does not yet run the matmul, layer-norm and resample samples
   numerically (see the Roadmap).
-- **Last verified**: 2026-10-30 against `develop` (d730d16216b)
+- **Last verified**: 2026-11-10 against `develop` (1c63e26254a)
 - **Follows**: [RFC 0012: cuDNN shim for hipDNN](./0012_CuDNN_Shim.md) §9
 - **Amends**: RFC 0012 §1 ("Not"), §4.2 (v9-only translation units), §4.3 (aliasing of
   `DescriptorType_t`, `NormMode_t`, `RngDistribution_t`), §4.7 (v9-only umbrella)
@@ -149,7 +149,7 @@ finalized operation descriptors, so the control flow maps one to one. The data d
 - pointwise slots differ (X/B/T/Y/DX/DY vs IN_0/IN_1/IN_2/OUT_0);
 - hipDNN's heuristic descriptor has one mode, FALLBACK; cuDNN's modes A and B correspond to hipDNN
   prediction policies, set as a policy order;
-- hipDNN has no numerical notes, JSON plans, alpha/beta or unified norm operation; knobs are strings and
+- hipDNN has no JSON plans, alpha/beta or unified norm operation, and reports numerical notes only per engine ([RFC 0025](./0025_NumericalNotes.md)); knobs are strings and
   engine IDs are 64-bit hashes;
 - hipDNN allocates new descriptors on get, where cuDNN fills the caller's.
 
@@ -264,10 +264,10 @@ runs no heuristics and needs no GPU.
   `NOT_SUPPORTED`, as in cuDNN; a negative one is `BAD_PARAM`. Only plan tags and `setGlobalEngineIdx`
   use the index; plan JSON identifies the engine by ID, so a saved plan still loads after the set
   changes.
-- **Notes.** Behavior notes map by name. `NONDETERMINISTIC` is reported for every engine not known to be
-  deterministic, so deterministic filtering works; hipDNN's numerical-note attribute is never queried.
-  No other numerical notes are reported. The allowlist is the v9 API's (`isDeterminismClaimed`), so both
-  APIs keep the same engines. v0.x filtering runs in the caller, so an empty result reaches it as an
+- **Notes.** Behavior notes map by name. Numerical notes are read from hipDNN's per-engine
+  numerical-note attribute ([RFC 0025](./0025_NumericalNotes.md)): an engine that declares none is reported
+  `NONDETERMINISTIC`, so deterministic filtering keeps only engines that claim determinism
+  ([RFC 0025](./0025_NumericalNotes.md)). No in-tree engine reports another numerical note. v0.x filtering runs in the caller, so an empty result reaches it as an
   empty list where the v9 API returns `GRAPH_NOT_SUPPORTED`.
 - **Knobs.** hipDNN knobs that map onto a cuDNN knob type are shown; others are hidden, and choosing a
   hidden knob is `NOT_SUPPORTED`. A choice of `-1` is upstream's "unset" and is ignored unless the knob
@@ -285,7 +285,7 @@ runs no heuristics and needs no GPU.
   another device than the plan's with `BAD_PARAM`. The hipDNN variant pack is built in
   `VariantPackBuilder::build()`.
 - JSON plans: `getJsonRepresentation` always returns a valid JSON object with engine index, ID (as a
-  string), name, notes, knobs, the requested knob choices when they differ from the applied ones (so a
+  string), name, behavior and numerical notes, knobs, the requested knob choices when they differ from the applied ones (so a
   loaded plan's tag keeps its `-1` entries) and, when hipDNN can serialize the plan, a base64 payload.
   `loadFromJson` accepts only this format and requires the payload. Neither direction needs nlohmann.
 - Kernel cache → `NOT_SUPPORTED`.
@@ -469,7 +469,7 @@ Each phase builds and is tested on its own. Each adds its own `KNOWN_DIVERGENCES
 ## 8. Future Considerations
 
 - Alpha / beta, once a provider accepts scalar operands in pointwise fusions.
-- Numerical notes, if providers start declaring them.
+- Precision numerical notes, if providers start declaring them.
 - More operations (gen-stats, BN finalize, RNG, reshape, instance / group norm) as hipDNN gains them.
 - A split umbrella if compile time becomes a problem.
 - A read-only descriptor query for raw C callers such as XLA, only on a concrete request.

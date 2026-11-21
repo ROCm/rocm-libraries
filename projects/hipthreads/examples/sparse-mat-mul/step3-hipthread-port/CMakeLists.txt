@@ -39,9 +39,11 @@ find_package(rocthrust REQUIRED CONFIG)
 target_link_libraries(spmm PRIVATE hipthreads::hipthreads)
 target_link_libraries(spmm PRIVATE roc::rocthrust)
 
-# If you haven't already, pull the matrices from git lfs:
+# The matrices are Git LFS files and are not downloaded on clone (see .lfsconfig at
+# the repo root). To fetch them, run this from the repo root:
 # sudo apt install git-lfs
-# git lfs pull examples/sparse-mat-mul/data/*
+# git lfs pull -I "projects/hipthreads/examples/sparse-mat-mul/data" -X ""
+# cd projects/hipthreads
 
 # then build & run:
 # LINUX:

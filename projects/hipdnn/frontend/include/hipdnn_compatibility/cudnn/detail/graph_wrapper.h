@@ -38,6 +38,7 @@
 #include <hipdnn_compatibility/cudnn/detail/knob_wrapper.h>
 #include <hipdnn_compatibility/cudnn/detail/node_wrappers/unsupported_nodes.h>
 #include <hipdnn_compatibility/cudnn/detail/note_triage.h>
+#include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_frontend/Graph.hpp>
 
 namespace hipdnn_frontend::compatibility::cudnn_frontend::graph
@@ -82,6 +83,8 @@ static_assert(CUDNN_FRONTEND_VERSION == 12400,
 
 /// @brief cuDNN FE graph::Graph that builds and runs a wrapped hipDNN graph.
 /// @note Copies share the native hipDNN graph and its tensors; build progress is tracked per copy.
+/// Copies share one plan set and active plan, and the copy that pushes its filters last decides
+/// the native filter list (https://github.com/ROCm/rocm-libraries/issues/16330).
 class Graph : public ErrorRecorder<Graph>
 {
 public:
@@ -160,8 +163,8 @@ public:
         }
 
         _planCreationModes = modes;
-        CHECK_CUDNN_FRONTEND_ERROR(applyPendingPlanFilters(_planCreationModes));
         _stage = Stage::PlansCreated;
+        CHECK_CUDNN_FRONTEND_ERROR(applyPendingPlanFilters(_planCreationModes));
         return err;
     }
 
@@ -217,22 +220,15 @@ public:
 
         HIPDNN_CUDNN_SHIM_RETURN_OK_IF_NO_NATIVE_GRAPH();
 
-        CHECK_CUDNN_FRONTEND_ERROR(applyPendingFiltersForCreatedPlans());
-
-        // Native HEURISTICS_CHOICE moves off a failing active plan for any failure, but never
-        // off a barred active plan; cuDNN narrows the candidates, so retarget onto the
-        // top-ranked plan this shim's filters did not bar. build_plan_at_index does not walk
-        // that fallback, so a failing retarget target returns its error.
-        int64_t activeEngineId = -1;
-        if(policy == BuildPlanPolicy_t::HEURISTICS_CHOICE && !_shimBarredEngineIds.empty()
-           && _graph->get_execution_plan_engine_id(activeEngineId).is_good()
-           && isShimBarred(activeEngineId))
+        // A repeat build leaves the built plan in place, so only the filters are pushed and
+        // native decides; a survivor check would fail a repeat build that cuDNN accepts.
+        if(_stage == Stage::PlansBuilt)
         {
-            int64_t survivingIndex = -1;
-            CHECK_CUDNN_FRONTEND_ERROR(findTopSurvivingPlanIndex(survivingIndex));
-            CHECK_CUDNN_FRONTEND_ERROR(_graph->build_plan_at_index(survivingIndex));
-            _stage = Stage::PlansBuilt;
-            return {};
+            CHECK_CUDNN_FRONTEND_ERROR(pushPlanFilters(_planCreationModes));
+        }
+        else
+        {
+            CHECK_CUDNN_FRONTEND_ERROR(applyPendingFiltersForCreatedPlans());
         }
 
         auto err = _graph->build_plans(policy);
@@ -340,8 +336,8 @@ public:
         }
 
         CHECK_CUDNN_FRONTEND_ERROR(_graph->create_execution_plan_ext(nativeEngineId, settings));
-        CHECK_CUDNN_FRONTEND_ERROR(applyPendingPlanFilters());
         _stage = Stage::PlansCreated;
+        CHECK_CUDNN_FRONTEND_ERROR(applyPendingPlanFilters());
         return {};
     }
 
@@ -583,8 +579,8 @@ public:
 
     // Per-note dispositions live in detail/note_triage.h.
 
-    /// @brief Logged and ignored; hipDNN has no numerical-note metadata.
-    /// @note STRICT_NAN_PROP records GRAPH_NOT_SUPPORTED.
+    /// @brief NONDETERMINISTIC restricts plans to engines that report it.
+    /// @note STRICT_NAN_PROP records GRAPH_NOT_SUPPORTED; other notes are logged and ignored.
     Graph& select_numeric_notes(const std::vector<NumericalNote_t>& notes)
     {
         for(const auto note : notes)
@@ -592,12 +588,20 @@ public:
             applyNote("select_numeric_notes",
                       note,
                       cudnn_frontend::detail::triageSelect(note),
-                      [](NumericalNote_t) { return false; });
+                      [this](NumericalNote_t mapped) {
+                          if(mapped != NumericalNote_t::NONDETERMINISTIC)
+                          {
+                              return false;
+                          }
+                          _selectedNumericalNotes.push_back(mapped);
+                          return true;
+                      });
         }
         return *this;
     }
 
-    /// @brief NONDETERMINISTIC restricts plans to engines that claim deterministic results.
+    /// @brief NONDETERMINISTIC excludes engines that report it, so only engines that claim
+    /// deterministic results remain.
     /// @note DOWN_CONVERT_INPUTS and REDUCED_PRECISION_REDUCTION record GRAPH_NOT_SUPPORTED;
     /// other notes are logged and ignored.
     Graph& deselect_numeric_notes(const std::vector<NumericalNote_t>& notes)
@@ -612,7 +616,7 @@ public:
                           {
                               return false;
                           }
-                          _requireDeterministic = true;
+                          _deselectedNumericalNotes.push_back(mapped);
                           return true;
                       });
         }
@@ -673,22 +677,25 @@ public:
         return *this;
     }
 
-    /// @brief Excludes engines by name.
+    /// @brief Excludes engines by name; replaces the list, and an empty list clears it.
     /// @note Names are hipDNN engine names, not cuDNN engine names.
     Graph& deselect_engines(const std::vector<std::string>& engineNames)
     {
-        _barredEngineNames.insert(_barredEngineNames.end(), engineNames.begin(), engineNames.end());
+        _barredEngineNames = engineNames;
+        _barredEngineIndices.clear();
         _graph->deselect_engines(engineNames);
         return *this;
     }
 
     /// @brief hipDNN extension: excludes engines by index, as counted by get_engine_count().
+    /// @note Replaces the list it shares with the name overload: the last call of either kind
+    /// wins, and an empty list clears it.
     Graph& deselect_engines(const std::vector<int64_t>& engineIndices)
     {
         // Indices resolve to native engine IDs only after the operation graph is built;
-        // applyPendingPlanFilters() does the translation.
-        _barredEngineIndices.insert(
-            _barredEngineIndices.end(), engineIndices.begin(), engineIndices.end());
+        // pushPlanFilters() does the translation.
+        _barredEngineIndices = engineIndices;
+        _barredEngineNames.clear();
         return *this;
     }
 
@@ -1368,6 +1375,7 @@ public:
     {
         HIPDNN_CUDNN_SHIM_RETURN_RECORDED_ERROR();
         HIPDNN_CUDNN_SHIM_RETURN_NO_PLAN_IF_NO_NATIVE_GRAPH();
+        CHECK_CUDNN_FRONTEND_ERROR(pushFiltersForCreatedPlans());
         return _graph->autotune(handle, tensorUidToPointerMap, workspace, userImpl);
     }
 
@@ -1379,6 +1387,7 @@ public:
     {
         HIPDNN_CUDNN_SHIM_RETURN_RECORDED_ERROR();
         HIPDNN_CUDNN_SHIM_RETURN_NO_PLAN_IF_NO_NATIVE_GRAPH();
+        CHECK_CUDNN_FRONTEND_ERROR(pushFiltersForCreatedPlans());
         return _graph->autotune(handle, tensorMap, workspace, userImpl);
     }
 
@@ -1647,7 +1656,8 @@ private:
     std::vector<int64_t> _engineIndexToNativeEngineId;
     std::vector<BehaviorNote_t> _selectedBehaviorNotes;
     std::vector<BehaviorNote_t> _deselectedBehaviorNotes;
-    bool _requireDeterministic = false;
+    std::vector<NumericalNote_t> _selectedNumericalNotes;
+    std::vector<NumericalNote_t> _deselectedNumericalNotes;
     std::unordered_set<int64_t> _shimBarredEngineIds;
 
     Mode _mode = Mode::Empty;
@@ -1703,8 +1713,8 @@ private:
         return {};
     }
 
-    // Filters set after plan creation take effect here, on the next
-    // check_support(), build_plans() or build_plan_at_index().
+    // Filters set after plan creation take effect here, on the next check_support(),
+    // build_plans() (before a plan is built) or build_plan_at_index().
     error_t applyPendingFiltersForCreatedPlans()
     {
         if(!stageAtLeast(Stage::PlansCreated))
@@ -1714,33 +1724,21 @@ private:
         return applyPendingPlanFilters(_planCreationModes);
     }
 
+    // Pushes the filters without the survivor check; autotune() uses it so its native
+    // evaluation sees the current filters.
+    error_t pushFiltersForCreatedPlans()
+    {
+        if(!stageAtLeast(Stage::PlansCreated))
+        {
+            return {};
+        }
+        return pushPlanFilters(_planCreationModes);
+    }
+
+    // Pushes the filters, then fails when none of the created plans survives them.
     error_t applyPendingPlanFilters(const std::vector<HeurMode_t>& modes = {HeurMode_t::FALLBACK})
     {
-        // create_execution_plans() clears the native graph's filter state, so the
-        // shim's record of what it barred is rebuilt on every pass rather than
-        // accumulated.
-        _shimBarredEngineIds.clear();
-
-        if(_maxWorkspaceAllowed.has_value())
-        {
-            _graph->deselect_workspace_greater_than(*_maxWorkspaceAllowed);
-        }
-        if(!_barredEngineNames.empty())
-        {
-            _graph->deselect_engines(_barredEngineNames);
-            for(const auto& name : _barredEngineNames)
-            {
-                _shimBarredEngineIds.insert(hipdnn_data_sdk::utilities::engineNameOrIdToId(name));
-            }
-        }
-        if(!_barredEngineIndices.empty())
-        {
-            std::vector<int64_t> nativeEngineIds;
-            CHECK_CUDNN_FRONTEND_ERROR(mapEngineIndices(_barredEngineIndices, nativeEngineIds));
-            _graph->deselect_engines(nativeEngineIds);
-            _shimBarredEngineIds.insert(nativeEngineIds.begin(), nativeEngineIds.end());
-        }
-        CHECK_CUDNN_FRONTEND_ERROR(applyEngineMetadataFilters(modes));
+        CHECK_CUDNN_FRONTEND_ERROR(pushPlanFilters(modes));
 
         if(_shimBarredEngineIds.empty() || _graph->get_execution_plan_count() == 0)
         {
@@ -1750,12 +1748,45 @@ private:
         return findTopSurvivingPlanIndex(survivingIndex);
     }
 
-    // Behavior-note and determinism filters bar engines by per-engine metadata.
+    // Makes the native graph's filters equal the ones this shim holds. The native
+    // deselect_engines() replaces its list, so one call carries the union of the names or
+    // mapped indices and the engines the note filters bar, even when that union is empty:
+    // that is how a cleared filter reaches native. The shim's record of what it barred is
+    // rebuilt on every pass. Nothing is written to native until every mapping and note read
+    // has succeeded.
+    error_t pushPlanFilters(const std::vector<HeurMode_t>& modes)
+    {
+        _shimBarredEngineIds.clear();
+
+        for(const auto& name : _barredEngineNames)
+        {
+            _shimBarredEngineIds.insert(hipdnn_data_sdk::utilities::engineNameOrIdToId(name));
+        }
+        if(!_barredEngineIndices.empty())
+        {
+            std::vector<int64_t> nativeEngineIds;
+            CHECK_CUDNN_FRONTEND_ERROR(mapEngineIndices(_barredEngineIndices, nativeEngineIds));
+            _shimBarredEngineIds.insert(nativeEngineIds.begin(), nativeEngineIds.end());
+        }
+        CHECK_CUDNN_FRONTEND_ERROR(applyEngineMetadataFilters(modes));
+
+        _graph->deselect_engines(
+            std::vector<int64_t>(_shimBarredEngineIds.begin(), _shimBarredEngineIds.end()));
+        if(_maxWorkspaceAllowed.has_value())
+        {
+            _graph->deselect_workspace_greater_than(*_maxWorkspaceAllowed);
+        }
+        return {};
+    }
+
+    // Behavior-note and numerical-note filters bar engines by per-engine metadata.
     error_t applyEngineMetadataFilters(const std::vector<HeurMode_t>& modes)
     {
         const bool filterBehavior
             = !_selectedBehaviorNotes.empty() || !_deselectedBehaviorNotes.empty();
-        if(!filterBehavior && !_requireDeterministic)
+        const bool filterNumerical
+            = !_selectedNumericalNotes.empty() || !_deselectedNumericalNotes.empty();
+        if(!filterBehavior && !filterNumerical)
         {
             return {};
         }
@@ -1772,29 +1803,31 @@ private:
             {
                 continue;
             }
-            if(_requireDeterministic && !cudnn_frontend::detail::isDeterminismClaimed(engineId))
+            bool bar = false;
+            if(filterNumerical)
             {
-                enginesToBar.push_back(engineId);
-                continue;
+                std::vector<NumericalNote_t> engineNotes;
+                CHECK_CUDNN_FRONTEND_ERROR(
+                    _graph->get_numerical_notes_for_engine(engineId, engineNotes));
+                bar = !cudnn_frontend::detail::numericalNotesMatch(
+                    _selectedNumericalNotes, _deselectedNumericalNotes, engineNotes);
             }
-            if(filterBehavior)
+            if(!bar && filterBehavior)
             {
                 std::vector<BehaviorNote_t> engineNotes;
                 CHECK_CUDNN_FRONTEND_ERROR(
                     _graph->get_behavior_notes_for_engine(engineId, engineNotes));
-                if(!cudnn_frontend::detail::behaviorNotesMatch(
-                       _selectedBehaviorNotes, _deselectedBehaviorNotes, engineNotes))
-                {
-                    enginesToBar.push_back(engineId);
-                }
+                bar = !cudnn_frontend::detail::behaviorNotesMatch(
+                    _selectedBehaviorNotes, _deselectedBehaviorNotes, engineNotes);
+            }
+            if(bar)
+            {
+                enginesToBar.push_back(engineId);
             }
         }
 
-        if(!enginesToBar.empty())
-        {
-            _graph->deselect_engines(enginesToBar);
-            _shimBarredEngineIds.insert(enginesToBar.begin(), enginesToBar.end());
-        }
+        // The pass pushes these to native together with the other bars.
+        _shimBarredEngineIds.insert(enginesToBar.begin(), enginesToBar.end());
         return {};
     }
 
@@ -1849,7 +1882,11 @@ private:
         {
             append("behavior notes");
         }
-        if(_requireDeterministic)
+        if(!_selectedNumericalNotes.empty())
+        {
+            append("select_numeric_notes(NONDETERMINISTIC)");
+        }
+        if(!_deselectedNumericalNotes.empty())
         {
             append("deselect_numeric_notes(NONDETERMINISTIC)");
         }
@@ -1969,11 +2006,12 @@ private:
         _maxWorkspaceAllowed.reset();
         _barredEngineIndices.clear();
         _planCreationModes = {HeurMode_t::FALLBACK};
-        _barredEngineNames.clear();
+        // _barredEngineNames survives, as cuDNN keeps barred_engine_names across deserialize.
         _engineIndexToNativeEngineId.clear();
         _selectedBehaviorNotes.clear();
         _deselectedBehaviorNotes.clear();
-        _requireDeterministic = false;
+        _selectedNumericalNotes.clear();
+        _deselectedNumericalNotes.clear();
         _shimBarredEngineIds.clear();
         _recordedError.reset();
         _mode = Mode::Empty;

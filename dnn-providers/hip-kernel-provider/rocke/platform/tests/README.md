@@ -72,8 +72,8 @@ for what is actually exercised vs. manual/diagnostic/demo.
 | `dispatch/` | `dispatch_tests/{gemm,attention,conv,moe,norm}` | - |
 | `analysis/` | (covered via `test_rocke.py`) | - |
 | `benchmark/` | `test_occupancy_targets.py` (the occupancy model on every target rocKE lowers for; gfx908 checked against llc) | - |
-| `support/` | tests of the `rocke.tests` helpers: `test_gpu.py`, `test_ir_validity.py`, `test_arch_marks.py`, `test_universal_gemm.py` | - |
-| `tools/` | `test_arch_domain_artifact.py` (source-only structure/generator units), `test_run_all.py`, tool-sidecar units | `rocke_arch_domain_reproducibility` (**CTest**, artifact reproduction through the host toolchain) |
+| `support/` | tests of the `rocke.tests` helpers: `test_gpu.py`, `test_ir_validity.py`, `test_arch_marks.py`, `test_universal_gemm.py`, `test_llc.py`, `test_engines.py` | - |
+| `tools/` | `test_arch_domain_artifact.py` (source-only generator/probe units), `test_arch_domain_support.py` (source + installed column-structure and support-policy checks), `test_run_all.py`, tool-sidecar units | `rocke_arch_domain_reproducibility` (**CTest**, artifact reproduction through the host toolchain) |
 | (root) | `test_rocke.py` (multi-layer monolith), `test_rocke_ci_static.py` | - |
 
 > Notes: `instances/rocke_ir_parity_harness.py` supplies the representative corpus
@@ -97,7 +97,9 @@ do not all edit one central file:
 | `tests/cmake/PortableIrTests.cmake` | Portable-IR native tests and the replay CLI |
 | `tests/cmake/InstanceTests.cmake` | Instance-layer native tests |
 | `tests/cmake/TestCategoryLabels.cmake` | Provider YAML category application after every test is registered |
-| `platform/CMakeLists.txt` | Installed Python and library CTest entries; not build-tree C++ ownership |
+| `platform/CMakeLists.txt` | Installed Python CTest entries; includes `library/tests/ctest_lists.cmake`; not build-tree C++ ownership |
+| `library/tests/ctest_lists.cmake` | Installed library CTest entries (each library suite enrols its own pytest files) |
+| `library/cpp/tests/CMakeLists.txt` | Library C++ mirror host tests (`rocke_wgrad_streamk_host`, `rocke_conv_direct_dw_dgrad_host`) |
 
 Add a native target to its concern-owned fragment. Do not put registration back
 in the orchestrator, and do not create a generic catch-all fragment. Keep unusual
@@ -135,7 +137,10 @@ artifact path.
 
 ## Execution categories
 
-Four distinct things run here; don't conflate them:
+Four platform-runner categories run here; don't conflate them. Installed
+library CTests add the explicit host-gate category described below. To choose
+the tier and CTest entry of a new test, see
+[`TESTING.md` §5.0.3](../../TESTING.md#503-choosing-a-tier-and-an-entry-for-a-test).
 
 1. **Default developer pre-merge runner** (`python tests/run_all.py`):
    relative-path guard -> byte-identity gate (`tools/check_byte_identity.py`) ->
@@ -167,7 +172,14 @@ Four distinct things run here; don't conflate them:
 `rocke_arch_domain_reproducibility` owns the full
 `tools/gen_arch_domain.py --check` sweep. It is deliberately not collected by
 pytest: the sweep starts external compiler/linker processes, has its own timeout
-and resource contract, and is independent of `ROCKE_BACKEND`.
+and resource contract, and is independent of `ROCKE_BACKEND`. The separate
+`tools/test_arch_domain_support.py` units validate every imported package column's
+records, provenance, wired architecture inventory, declaration coverage, and
+single-line contract layout, including flavors this host cannot re-probe. They
+also pin recorded probe witnesses and `global.load.lds` availability, and
+exercise the comparison policy with synthetic records. These checks run without
+real compiler processes in source pytest and installed `rocke_pytest_runtime_tools`,
+using the source or staged generator respectively.
 
 The same logical gate has two registrations: the build-tree entry invokes the
 source tool and committed source column, while the installed entry invokes a
@@ -190,23 +202,47 @@ expected crash or timeout whose normalized evidence still matches is not rerun
 serially; changed evidence, changed verdicts, unclassified results, and otherwise
 transient-looking results are.
 
-The artifact records the exact compiler build that measured it. LLVM development
-builds with the same major can disagree about intrinsic availability and ABI, so
-exact reproduction is applicable only when the host identity matches that
-provenance. A mismatch is reported with both identities and is an explicit
-unvalidated result, not a pass.
+The artifact records the compiler build that measured it as provenance. The
+check runs with a compatible LLVM flavor and probe method even when that compiler
+identity differs. It requires monotonic support: every formerly working cell and
+accepted processor name must still work. Gains and improved classifications are
+reported, not failures. Remaining no-data cells and degraded negative measurements
+are reported without claiming their qualification. Both documents must carry
+complete processor answers and explicit matching per-cell `verified_on` values.
+Both `ok` and `arch_absent` require accepted processors. Every key with an `ok`
+cell carries a versioned `probe_contracts` record for the effective return and
+operand types, sources, and constants. Retained positives require matching
+contracts, including default immediate zero when `probe_imm` is absent. The
+single/batch/split/retry routes share one operand-plan owner. Generation and
+pruning also share the canonical column serializer: one named contract per line,
+with ordinary measurements left pretty-printed. Host-only controls cover format
+round-trips, ordering, legacy/empty records, and persistence through both writers.
+Independent column assertions and appended-positive controls require contracts
+for newly introduced keys as well as the existing set.
+
+These comparison-only records do not change runtime v1 lookup. The
+[historical positive-probe contract recovery policy](../../TESTING.md#historical-positive-probe-contract-recovery)
+owns the evidence requirements and the distinction between metadata recovery and
+support qualification.
 
 | Condition | CTest result |
 |---|---|
-| Recorded compiler identity matches and measurements reproduce cell-for-cell | Pass |
-| Host compiler identity differs from the recorded identity | Skip |
+| Compatible flavor/method and baseline working support retained | Pass |
+| Different compiler identity within the same flavor | Run the comparison; identity is not a pass/fail criterion |
+| Support gain or unknown-to-unavailable classification improvement | Pass, report changes |
+| Negative measurement degrades to unknown, or no-data remains | Report without qualifying those cells; not support loss |
+| Previously working support or accepted processor name is lost | Fail |
+| Missing/invalid comparison records, historical positive contracts, or incompatible scope/probe method | Fail |
+| Retained positive uses different effective operand/signature constraints | Fail; the questions are not comparable |
+| Live clang/opt identity is blank or `(unknown)` | Fail before probing |
+| Generated column is invalid | Fail before writing or comparing |
 | No clang | Skip |
 | Clang flavor differs from rocKE's resolved flavor | Skip |
 | No committed column for the host flavor | Skip |
 | Clang exists but `opt` is absent | Fail |
 | Clang and `opt` report different flavors | Fail |
 | Flavor auto-detection fails, including unavailable COMGR evidence | Fail |
-| Measurements drift or a probe is unclassified | Fail |
+| Probe is unclassified (`probe_error`) | Fail |
 
 Run it from a configured platform build with:
 
@@ -257,6 +293,35 @@ builds and installed provider CI.
   unavailable; this preserves existing behavior for the migration.
 - Probe batching, worker tuning, caching, and timeout/retry policy remain future
   efficiency work now that CI supplies execution evidence for the standalone gate.
+### Library unit and explicit host gates
+
+For new or migrated library cohorts, affordable `test_*.py` discovery is the
+source-runner default; the CTest tier follows
+[`TESTING.md` §5.0.3](../../TESTING.md#503-choosing-a-tier-and-an-entry-for-a-test).
+Exhaustive or compiler-dependent matrices use non-discovered modules, explicit
+stages in `library/tests/run_all.py`, and separately categorized installed
+CTests. Legacy violations remain tracked as TESTING.md gap G9.
+
+| CTest entry | Scope | Tier / resources |
+|---|---|---|
+| `rocke_library_attention_cpu_pytest` | Existing attention host units; new counted/resource contracts remain source-only until CI enrollment has capacity | quick and higher |
+| `rocke_library_runner_contract_pytest` | Affordable-lane selection, resource defaults, and gate verdict policy | comprehensive and full; excluded from quick/standard pre-merge and post-merge runs |
+| `rocke_library_worker_integration_pytest` | Real file-worker subprocess, timeout, signal, package-identity, and process-ownership lifecycle | comprehensive and full; excluded from quick/standard pre-merge and post-merge runs |
+| `rocke_library_counted_structural_gate` | Exhaustive counted-wait IR model, LDS hazards, step equivalence, lowering and mirror-edge refusal coverage | comprehensive and full; host-only structural gate |
+| `rocke_library_counted_compiler_gate` | Pinned representative compile/final-ISA/resource subset and canonical full-barrier twins on the LLVM 22/reference-comgr toolchain | comprehensive and full; compiler preflight required |
+
+The compiler gate preserves the resource table's existing qualification contract:
+LLVM 22 with the reference ROCm 7.2 comgr. LLVM 23 and LLVM 24 are emission/parity
+profiles, not qualified code-object resource lanes; their scheduling and register
+allocation cannot be judged against thresholds calibrated on the reference compiler.
+The two counted gates share the `rocke_counted_sync_gate` CTest resource
+lock. The installed compiler gate forces required mode; a mismatched compiler,
+missing target support, or missing `llvm-objdump` fails once at preflight. The
+source runner treats that gate as optional unless passed
+`--require-compiler-gate`; an accepted optional skip reports `INCOMPLETE`, never
+plain `GREEN`.
+See [TESTING.md §5.0.1](../../TESTING.md#501-unit-discovery-versus-explicit-resource-gates)
+for the reusable placement contract.
 
 ## Multi-arch coverage (don't be blindsided by gfx950)
 
@@ -411,6 +476,9 @@ and the [convolution guide](../../library/tests/conv_reference/docs/conv-test-re
 publication requirements, and coverage limits.
 
 The convolution gradient host contract joins `rocke_library_conv_pytest`.
+The conv IR golden, platform-regression, split-K, `ceil_div` and conv
+doc-example (`test_verify_dsl_docs_conv.py`) host tests run as their own entry,
+`rocke_library_conv_ir_pytest`.
 `rocke_library_gpu_pytest` also runs the dgrad and wgrad cases in
 `conv_reference/gradient_cases.py` on each of gfx942/gfx950 against live NumPy
 oracles, with three executions per case.

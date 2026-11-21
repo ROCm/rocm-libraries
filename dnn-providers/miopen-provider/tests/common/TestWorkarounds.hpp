@@ -34,14 +34,16 @@
 // Do NOT use in non-CBA tests — `GRAPH_NOT_SUPPORTED` outside the CBA path
 // would indicate a real regression, not a known capability gap.
 //
-// To remove after the fix: delete this header alongside the production-side
-// `Workarounds.hpp`, drop includes, and remove all macro call sites.
-// `git grep WORKAROUND_ISSUE_6979` finds them all.
+// To remove after the fix: delete the issue-6979 helpers and their call sites when that issue is
+// resolved. `git grep WORKAROUND_ISSUE_6979` finds them all. The production `Workarounds.hpp` is
+// removed independently: it holds issues 5409 and 16024.
 //
 // `<hipdnn_frontend.hpp>` is header-only, so this header has no linkage
 // dependency on the provider's compiled object files — it remains usable from
 // integration_tests, which only loads the plugin via dlopen.
 // ----------------------------------------------------------------------------
+
+#include <type_traits>
 
 #include <hipdnn_frontend.hpp>
 
@@ -74,27 +76,28 @@ inline bool IS_WORKAROUND_ISSUE_6979(const hipdnn_frontend::Error& result)
     } while(0)
 
 // SKIP_IF_NO_APPLICABLE_CBA_ENGINE(handle, planBuilder, graph) -- for unit
-// tests that build a CBA plan directly. Queries `isApplicable()` on the
-// caller's actual test graph and emits `GTEST_SKIP()` when no solver is
-// available on the current device -- before any state is mutated by
-// `buildPlan()` or the plan constructor.
+// tests that build a CBA plan directly. First asserts that the host-side checks
+// (`isGraphApplicable()`, a static member of the builder's type) accept the
+// caller's test graph, so a graph the provider declines fails the test instead
+// of skipping it. Then queries `isApplicable()` on the same graph and emits
+// `GTEST_SKIP()` when no solver is available on the current device -- before
+// any state is mutated by `buildPlan()` or the plan constructor.
 //
-// IMPORTANT: this macro assumes the caller passes a known-VALID CBA graph
+// IMPORTANT: the caller passes a graph the test expects to be served
 // (typically built via `createValidConvFwdActivGraph` /
-// `createValidConvFwdBiasActivGraph` from FlatbufferGraphTestUtils). An
-// invalid graph also reports `isApplicable() == false` and would skip
-// silently rather than fail. Validity is the caller's responsibility; the
-// macro does not (and intentionally cannot) distinguish "device cannot run
-// this CBA" from "this graph is malformed."
+// `createValidConvFwdBiasActivGraph` from FlatbufferGraphTestUtils). Only the
+// device search is skipped; a graph the host-side checks decline fails.
 //
 // In parametric tests where some cases expect non-applicability (e.g.
 // "Unsupported layout WHCN"), guard the call with `if(<expected applicable>)`
 // so negative cases still run and validate the rejection assertion.
-#define SKIP_IF_NO_APPLICABLE_CBA_ENGINE(handle, planBuilder, graph) \
-    do                                                               \
-    {                                                                \
-        if(!(planBuilder).isApplicable((handle), (graph)))           \
-        {                                                            \
-            GTEST_SKIP() << WORKAROUND_ISSUE_6979_SKIP_MSG;          \
-        }                                                            \
+#define SKIP_IF_NO_APPLICABLE_CBA_ENGINE(handle, planBuilder, graph)               \
+    do                                                                             \
+    {                                                                              \
+        ASSERT_TRUE(std::decay_t<decltype(planBuilder)>::isGraphApplicable(graph)) \
+            << "host-side checks declined a graph the test expects to be served";  \
+        if(!(planBuilder).isApplicable((handle), (graph)))                         \
+        {                                                                          \
+            GTEST_SKIP() << WORKAROUND_ISSUE_6979_SKIP_MSG;                        \
+        }                                                                          \
     } while(0)

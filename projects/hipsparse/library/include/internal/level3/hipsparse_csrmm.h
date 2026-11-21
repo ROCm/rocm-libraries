@@ -87,7 +87,7 @@ extern "C" {
 *  @param[in]
 *  nnz                 number of non-zero entries of the sparse CSR matrix \f$A\f$. Must be non-negative.
 *  @param[in]
-*  alpha               scalar \f$\alpha\f$.
+*  alpha               scalar \f$\alpha\f$, which can be in host or device memory.
 *  @param[in]
 *  descrA              descriptor of the sparse CSR matrix \f$A\f$. Currently, only
 *                      \ref HIPSPARSE_MATRIX_TYPE_GENERAL is supported.
@@ -106,7 +106,7 @@ extern "C" {
 *  ldb                 leading dimension of \f$B\f$, must be at least \f$\max{(1, k)}\f$
 *                      (\f$op(B) == B\f$), \f$\max{(1, n)}\f$ otherwise.
 *  @param[in]
-*  beta                scalar \f$\beta\f$.
+*  beta                scalar \f$\beta\f$, which can be in host or device memory.
 *  @param[inout]
 *  C                   array of dimension \p ldc*n.
 *  @param[in]
@@ -199,7 +199,7 @@ hipsparseStatus_t hipsparseScsrmm(hipsparseHandle_t         handle,
 *  @param[in]
 *  nnz                 number of non-zero entries of the sparse CSR matrix \f$A\f$. Must be non-negative.
 *  @param[in]
-*  alpha               scalar \f$\alpha\f$.
+*  alpha               scalar \f$\alpha\f$, which can be in host or device memory.
 *  @param[in]
 *  descrA              descriptor of the sparse CSR matrix \f$A\f$. Currently, only
 *                      \ref HIPSPARSE_MATRIX_TYPE_GENERAL is supported.
@@ -218,7 +218,7 @@ hipsparseStatus_t hipsparseScsrmm(hipsparseHandle_t         handle,
 *  ldb                 leading dimension of \f$B\f$, must be at least \f$\max{(1, k)}\f$
 *                      (\f$op(B) == B\f$), \f$\max{(1, n)}\f$ otherwise.
 *  @param[in]
-*  beta                scalar \f$\beta\f$.
+*  beta                scalar \f$\beta\f$, which can be in host or device memory.
 *  @param[inout]
 *  C                   array of dimension \p ldc*n.
 *  @param[in]
@@ -310,7 +310,7 @@ hipsparseStatus_t hipsparseDcsrmm(hipsparseHandle_t         handle,
 *  @param[in]
 *  nnz                 number of non-zero entries of the sparse CSR matrix \f$A\f$. Must be non-negative.
 *  @param[in]
-*  alpha               scalar \f$\alpha\f$.
+*  alpha               scalar \f$\alpha\f$, which can be in host or device memory.
 *  @param[in]
 *  descrA              descriptor of the sparse CSR matrix \f$A\f$. Currently, only
 *                      \ref HIPSPARSE_MATRIX_TYPE_GENERAL is supported.
@@ -329,7 +329,7 @@ hipsparseStatus_t hipsparseDcsrmm(hipsparseHandle_t         handle,
 *  ldb                 leading dimension of \f$B\f$, must be at least \f$\max{(1, k)}\f$
 *                      (\f$op(B) == B\f$), \f$\max{(1, n)}\f$ otherwise.
 *  @param[in]
-*  beta                scalar \f$\beta\f$.
+*  beta                scalar \f$\beta\f$, which can be in host or device memory.
 *  @param[inout]
 *  C                   array of dimension \p ldc*n.
 *  @param[in]
@@ -421,7 +421,7 @@ hipsparseStatus_t hipsparseCcsrmm(hipsparseHandle_t         handle,
 *  @param[in]
 *  nnz                 number of non-zero entries of the sparse CSR matrix \f$A\f$. Must be non-negative.
 *  @param[in]
-*  alpha               scalar \f$\alpha\f$.
+*  alpha               scalar \f$\alpha\f$, which can be in host or device memory.
 *  @param[in]
 *  descrA              descriptor of the sparse CSR matrix \f$A\f$. Currently, only
 *                      \ref HIPSPARSE_MATRIX_TYPE_GENERAL is supported.
@@ -440,7 +440,7 @@ hipsparseStatus_t hipsparseCcsrmm(hipsparseHandle_t         handle,
 *  ldb                 leading dimension of \f$B\f$, must be at least \f$\max{(1, k)}\f$
 *                      (\f$op(B) == B\f$), \f$\max{(1, n)}\f$ otherwise.
 *  @param[in]
-*  beta                scalar \f$\beta\f$.
+*  beta                scalar \f$\beta\f$, which can be in host or device memory.
 *  @param[inout]
 *  C                   array of dimension \p ldc*n.
 *  @param[in]
@@ -544,7 +544,7 @@ hipsparseStatus_t hipsparseZcsrmm(hipsparseHandle_t         handle,
 *  @param[in]
 *  nnz         number of non-zero entries of the sparse CSR matrix \f$A\f$.
 *  @param[in]
-*  alpha       scalar \f$\alpha\f$.
+*  alpha       scalar \f$\alpha\f$, which can be in host or device memory.
 *  @param[in]
 *  descrA      descriptor of the sparse CSR matrix \f$A\f$. Currently, only
 *              \ref HIPSPARSE_MATRIX_TYPE_GENERAL is supported.
@@ -563,7 +563,7 @@ hipsparseStatus_t hipsparseZcsrmm(hipsparseHandle_t         handle,
 *  ldb         leading dimension of \f$B\f$. Must be at least \f$\max{(1, k)}\f$
 *              (\f$op(B) == B\f$), \f$\max{(1, n)}\f$ otherwise.
 *  @param[in]
-*  beta        scalar \f$\beta\f$.
+*  beta        scalar \f$\beta\f$, which can be in host or device memory.
 *  @param[inout]
 *  C           array of dimension \p ldc*n.
 *  @param[in]
@@ -664,7 +664,7 @@ hipsparseStatus_t hipsparseScsrmm2(hipsparseHandle_t         handle,
 *  @param[in]
 *  nnz         number of non-zero entries of the sparse CSR matrix \f$A\f$.
 *  @param[in]
-*  alpha       scalar \f$\alpha\f$.
+*  alpha       scalar \f$\alpha\f$, which can be in host or device memory.
 *  @param[in]
 *  descrA      descriptor of the sparse CSR matrix \f$A\f$. Currently, only
 *              \ref HIPSPARSE_MATRIX_TYPE_GENERAL is supported.
@@ -683,7 +683,7 @@ hipsparseStatus_t hipsparseScsrmm2(hipsparseHandle_t         handle,
 *  ldb         leading dimension of \f$B\f$. Must be at least \f$\max{(1, k)}\f$
 *              (\f$op(B) == B\f$), \f$\max{(1, n)}\f$ otherwise.
 *  @param[in]
-*  beta        scalar \f$\beta\f$.
+*  beta        scalar \f$\beta\f$, which can be in host or device memory.
 *  @param[inout]
 *  C           array of dimension \p ldc*n.
 *  @param[in]
@@ -783,7 +783,7 @@ hipsparseStatus_t hipsparseDcsrmm2(hipsparseHandle_t         handle,
 *  @param[in]
 *  nnz         number of non-zero entries of the sparse CSR matrix \f$A\f$.
 *  @param[in]
-*  alpha       scalar \f$\alpha\f$.
+*  alpha       scalar \f$\alpha\f$, which can be in host or device memory.
 *  @param[in]
 *  descrA      descriptor of the sparse CSR matrix \f$A\f$. Currently, only
 *              \ref HIPSPARSE_MATRIX_TYPE_GENERAL is supported.
@@ -802,7 +802,7 @@ hipsparseStatus_t hipsparseDcsrmm2(hipsparseHandle_t         handle,
 *  ldb         leading dimension of \f$B\f$. Must be at least \f$\max{(1, k)}\f$
 *              (\f$op(B) == B\f$), \f$\max{(1, n)}\f$ otherwise.
 *  @param[in]
-*  beta        scalar \f$\beta\f$.
+*  beta        scalar \f$\beta\f$, which can be in host or device memory.
 *  @param[inout]
 *  C           array of dimension \p ldc*n.
 *  @param[in]
@@ -902,7 +902,7 @@ hipsparseStatus_t hipsparseCcsrmm2(hipsparseHandle_t         handle,
 *  @param[in]
 *  nnz         number of non-zero entries of the sparse CSR matrix \f$A\f$.
 *  @param[in]
-*  alpha       scalar \f$\alpha\f$.
+*  alpha       scalar \f$\alpha\f$, which can be in host or device memory.
 *  @param[in]
 *  descrA      descriptor of the sparse CSR matrix \f$A\f$. Currently, only
 *              \ref HIPSPARSE_MATRIX_TYPE_GENERAL is supported.
@@ -921,7 +921,7 @@ hipsparseStatus_t hipsparseCcsrmm2(hipsparseHandle_t         handle,
 *  ldb         leading dimension of \f$B\f$. Must be at least \f$\max{(1, k)}\f$
 *              (\f$op(B) == B\f$), \f$\max{(1, n)}\f$ otherwise.
 *  @param[in]
-*  beta        scalar \f$\beta\f$.
+*  beta        scalar \f$\beta\f$, which can be in host or device memory.
 *  @param[inout]
 *  C           array of dimension \p ldc*n.
 *  @param[in]

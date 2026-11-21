@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2016-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2016-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -84,58 +84,60 @@ rocblas_dgmm_gfx942_kernel(rocblas_int    m,
                            TPtr           Ca,
                            rocblas_stride offset_C,
                            int64_t        ldc,
-                           rocblas_stride stride_C)
+                           rocblas_stride stride_C,
+                           rocblas_int    batch_count)
 {
 // gfx942 kernels
 #if defined(__SPIRV__) || defined(__gfx942__)
 
     rocblas_int tx = (blockIdx.x * DIM_X + threadIdx.x) * 2;
-    rocblas_int ty = blockIdx.y * DIM_Y + threadIdx.y;
 
-    const auto* A = load_ptr_batch(Aa, blockIdx.z, offset_A, stride_A);
-    const auto* x = load_ptr_batch(Xa, blockIdx.z, shift_x, stride_x);
-    auto*       C = load_ptr_batch(Ca, blockIdx.z, offset_C, stride_C);
-
-    if constexpr(side_right)
+    // Grid Y and Z are capped at c_YZ_grid_launch_limit. Stride the rest.
+    uint32_t batch = blockIdx.z;
+    for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
     {
-        if(ty < n)
+        const auto* A = load_ptr_batch(Aa, batch, offset_A, stride_A);
+        const auto* x = load_ptr_batch(Xa, batch, shift_x, stride_x);
+        auto*       C = load_ptr_batch(Ca, batch, offset_C, stride_C);
+
+        for(uint32_t ty = blockIdx.y * DIM_Y + threadIdx.y; ty < n; ty += DIM_Y * gridDim.y)
         {
-            const auto reg_x = x[ty * incx];
-
-            const auto reg_A_1 = (tx < m) ? A[tx + ty * lda] : 0;
-            const auto reg_A_2 = ((tx + 1) < m) ? A[(tx + 1) + ty * lda] : 0;
-
-            //scalar-Matrix-vector product and put the result to the last element of 'C'.
-            if((m & 1) != 0 && (tx + 1) == m)
-                C[tx + ldc * ty] = A[tx + ty * lda] * reg_x;
-
-            //scalar-Matrix-vector product and put the result to the matrix 'C'.
-            if((tx + 1) < m)
+            if constexpr(side_right)
             {
-                C[tx + ldc * ty]       = A[tx + ty * lda] * reg_x;
-                C[(tx + 1) + ldc * ty] = A[(tx + 1) + ty * lda] * reg_x;
+                const auto reg_x = x[ty * incx];
+
+                const auto reg_A_1 = (tx < m) ? A[tx + ty * lda] : 0;
+                const auto reg_A_2 = ((tx + 1) < m) ? A[(tx + 1) + ty * lda] : 0;
+
+                //scalar-Matrix-vector product and put the result to the last element of 'C'.
+                if((m & 1) != 0 && (tx + 1) == m)
+                    C[tx + ldc * ty] = reg_A_1 * reg_x;
+
+                //scalar-Matrix-vector product and put the result to the matrix 'C'.
+                if((tx + 1) < m)
+                {
+                    C[tx + ldc * ty]       = reg_A_1 * reg_x;
+                    C[(tx + 1) + ldc * ty] = reg_A_2 * reg_x;
+                }
             }
-        }
-    }
-    else
-    {
-        if(ty < n)
-        {
-            const auto reg_x_1 = (tx < m) ? x[tx * incx] : 0;
-            const auto reg_x_2 = ((tx + 1) < m) ? x[(tx + 1) * incx] : 0;
-
-            const auto reg_A_1 = (tx < m) ? A[tx + ty * lda] : 0;
-            const auto reg_A_2 = ((tx + 1) < m) ? A[(tx + 1) + ty * lda] : 0;
-
-            //scalar-matrix-vector product and put the result to the last element of 'C'.
-            if((m & 1) != 0 && (tx + 1) == m)
-                C[tx + ldc * ty] = reg_A_1 * reg_x_1;
-
-            //scalar-matrix-vector product and put the result to the matrix 'C'.
-            if((tx + 1) < m)
+            else
             {
-                C[tx + ldc * ty]       = reg_A_1 * reg_x_1;
-                C[(tx + 1) + ldc * ty] = reg_A_2 * reg_x_2;
+                const auto reg_x_1 = (tx < m) ? x[tx * incx] : 0;
+                const auto reg_x_2 = ((tx + 1) < m) ? x[(tx + 1) * incx] : 0;
+
+                const auto reg_A_1 = (tx < m) ? A[tx + ty * lda] : 0;
+                const auto reg_A_2 = ((tx + 1) < m) ? A[(tx + 1) + ty * lda] : 0;
+
+                //scalar-matrix-vector product and put the result to the last element of 'C'.
+                if((m & 1) != 0 && (tx + 1) == m)
+                    C[tx + ldc * ty] = reg_A_1 * reg_x_1;
+
+                //scalar-matrix-vector product and put the result to the matrix 'C'.
+                if((tx + 1) < m)
+                {
+                    C[tx + ldc * ty]       = reg_A_1 * reg_x_1;
+                    C[(tx + 1) + ldc * ty] = reg_A_2 * reg_x_2;
+                }
             }
         }
     }
@@ -201,7 +203,7 @@ rocblas_status rocblas_internal_dgmm_launcher(rocblas_handle handle,
 
 #define dgmm_gfx942_KARGS                                                                     \
     dgmm_grid, dgmm_threads, 0, rocblas_stream, m, n, A, offset_A, lda, stride_A, x, shift_x, \
-        incx, stride_x, C, offset_C, ldc, stride_C
+        incx, stride_x, C, offset_C, ldc, stride_C, batch_count
 
     if(rocblas_side_left == side)
     {
@@ -213,9 +215,10 @@ rocblas_status rocblas_internal_dgmm_launcher(rocblas_handle handle,
             static constexpr int DGMM_DIM_Y = 32;
 
             rocblas_int blocksX = (m - 1) / (DGMM_DIM_X * 2) + 1;
-            rocblas_int blocksY = (n - 1) / DGMM_DIM_Y + 1;
+            // keep blocksY less than or equal to grid launch limit
+            rocblas_int blocksY = std::min(c_YZ_grid_launch_limit, (n - 1) / DGMM_DIM_Y + 1);
 
-            dim3 dgmm_grid(blocksX, blocksY, batch_count);
+            dim3 dgmm_grid(blocksX, blocksY, batches);
             dim3 dgmm_threads(DGMM_DIM_X, DGMM_DIM_Y);
 
             ROCBLAS_LAUNCH_KERNEL((rocblas_dgmm_gfx942_kernel<DGMM_DIM_X, DGMM_DIM_Y, false>),
@@ -227,7 +230,7 @@ rocblas_status rocblas_internal_dgmm_launcher(rocblas_handle handle,
             static constexpr int DGMM_DIM_Y = 16;
 
             rocblas_int blocksX = (m - 1) / DGMM_DIM_X + 1;
-            //blocksY should be <= 2^16 (65536) to avoid overflow as grid y and z block indices support only 16-bit values on some gfx
+            // keep blocksY less than or equal to grid launch limit
             rocblas_int blocksY = std::min(c_YZ_grid_launch_limit, (n - 1) / DGMM_DIM_Y + 1);
 
             dim3 dgmm_grid(blocksX, blocksY, batches);
@@ -246,9 +249,10 @@ rocblas_status rocblas_internal_dgmm_launcher(rocblas_handle handle,
             static constexpr int DGMM_DIM_Y = 32;
 
             rocblas_int blocksX = (m - 1) / (DGMM_DIM_X * 2) + 1;
-            rocblas_int blocksY = (n - 1) / DGMM_DIM_Y + 1;
+            // keep blocksY less than or equal to grid launch limit
+            rocblas_int blocksY = std::min(c_YZ_grid_launch_limit, (n - 1) / DGMM_DIM_Y + 1);
 
-            dim3 dgmm_grid(blocksX, blocksY, batch_count);
+            dim3 dgmm_grid(blocksX, blocksY, batches);
             dim3 dgmm_threads(DGMM_DIM_X, DGMM_DIM_Y);
 
             ROCBLAS_LAUNCH_KERNEL((rocblas_dgmm_gfx942_kernel<DGMM_DIM_X, DGMM_DIM_Y, true>),
@@ -260,7 +264,7 @@ rocblas_status rocblas_internal_dgmm_launcher(rocblas_handle handle,
             static constexpr int DGMM_DIM_Y = 16;
 
             rocblas_int blocksX = (m - 1) / DGMM_DIM_X + 1;
-            //blocksY should be <= 2^16 (65536) to avoid overflow as grid y and z block indices support only 16-bit values on some gfx
+            // keep blocksY less than or equal to grid launch limit
             rocblas_int blocksY = std::min(c_YZ_grid_launch_limit, (n - 1) / DGMM_DIM_Y + 1);
 
             dim3 dgmm_grid(blocksX, blocksY, batches);

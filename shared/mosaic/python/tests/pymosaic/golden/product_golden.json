@@ -1,0 +1,83 @@
+[
+  {
+    "name": "lp_flat_2x3",
+    "op": "logical_product",
+    "block_shape": 2,
+    "block_stride": 1,
+    "tiler": {"layout": [3, 1]},
+    "result_shape": [2,3],
+    "result_stride": [1,2]
+  },
+  {
+    "name": "lp_nonunit",
+    "op": "logical_product",
+    "block_shape": 2,
+    "block_stride": 2,
+    "tiler": {"layout": [2, 1]},
+    "result_shape": [2,2],
+    "result_stride": [2,1]
+  },
+  {
+    "name": "lp_multi",
+    "op": "logical_product",
+    "block_shape": [2,2],
+    "block_stride": [1,8],
+    "tiler": {"layout": [[2,2], [1,2]]},
+    "result_shape": [[2,2],[2,2]],
+    "result_stride": [[1,8],[2,4]]
+  },
+  {
+    "name": "lp_int_2_3",
+    "op": "logical_product",
+    "block_shape": 2,
+    "block_stride": 1,
+    "tiler": {"int": 3},
+    "result_shape": [2,3],
+    "result_stride": [1,2]
+  },
+  {
+    "name": "lp_tuple",
+    "op": "logical_product",
+    "block_shape": [2,2],
+    "block_stride": [1,2],
+    "tiler": {"tuple": [2, 2]},
+    "result_shape": [[2,2],[2,2]],
+    "result_stride": [[1,2],[2,1]]
+  },
+  {
+    "name": "zp_tuple",
+    "op": "zipped_product",
+    "block_shape": [2,2],
+    "block_stride": [1,2],
+    "tiler": {"tuple": [2, 2]},
+    "result_shape": [[2,2],[2,2]],
+    "result_stride": [[1,2],[2,1]]
+  },
+  {
+    "name": "tp_tuple",
+    "op": "tiled_product",
+    "block_shape": [2,2],
+    "block_stride": [1,2],
+    "tiler": {"tuple": [2, 2]},
+    "result_shape": [[2,2],2,2],
+    "result_stride": [[1,2],2,1]
+  },
+  {
+    "name": "fp_tuple",
+    "op": "flat_product",
+    "block_shape": [2,2],
+    "block_stride": [1,2],
+    "tiler": {"tuple": [2, 2]},
+    "result_shape": [2,2,2,2],
+    "result_stride": [1,2,2,1]
+  },
+  {
+    "name": "lp_block_gt_tiler",
+    "op": "logical_product",
+    "block_shape": [2,2,3],
+    "block_stride": [1,2,24],
+    "tiler": {"tuple": [2, 2]},
+    "result_shape": [[2,2],[2,2],3],
+    "result_stride": [[1,2],[2,1],24]
+  }
+]

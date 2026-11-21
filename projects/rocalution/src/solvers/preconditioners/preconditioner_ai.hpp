@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2021 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -53,7 +53,7 @@ namespace rocalution
         ROCALUTION_EXPORT
         virtual void Solve(const VectorType& rhs, VectorType* x);
 
-        /** \brief Set order, min and max eigenvalues */
+        /** \brief Set order, min and max eigenvalues; the series has degree p + 1 */
         ROCALUTION_EXPORT
         void Set(int p, ValueType lambda_min, ValueType lambda_max);
         ROCALUTION_EXPORT

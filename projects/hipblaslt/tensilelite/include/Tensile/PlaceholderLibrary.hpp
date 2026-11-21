@@ -36,6 +36,8 @@
 #include <map>
 #include <mutex>
 #include <set>
+#include <stdexcept>
+#include <string>
 
 #include <tensilelitehost/export.h>
 
@@ -158,6 +160,20 @@ namespace TensileLite
         return "";
     }
 
+    inline std::string loadFailureMessage(std::string const& path)
+    {
+        std::string message = "Failed to load TensileLite library shard " + path;
+#ifdef _WIN32
+        // Without long-path support, Windows cannot open a path of MAX_PATH
+        // (260) characters or more, and the open fails the same way as for a
+        // missing file.
+        if(path.size() >= 260)
+            message += " (the path is " + std::to_string(path.size())
+                       + " characters, at or over the Windows MAX_PATH limit of 260)";
+#endif
+        return message;
+    }
+
     template <typename MyProblem, typename MySolution = typename MyProblem::Solution>
     struct PlaceholderLibrary : public SolutionLibrary<MyProblem, MySolution>
     {
@@ -192,7 +208,19 @@ namespace TensileLite
                 std::string path       = (libraryDirectory + "/" + filePrefix + suffix).c_str();
                 auto        newLibrary = LoadLibraryFile<MyProblem, MySolution>(path);
                 auto        mLibrary
-                    = static_cast<MasterSolutionLibrary<MyProblem, MySolution>*>(newLibrary.get());
+                    = dynamic_cast<MasterSolutionLibrary<MyProblem, MySolution>*>(newLibrary.get());
+
+                // Throwing leaves lazyLoadOnce unset, so the next lookup retries
+                // the load instead of using a library that is not there.
+                if(mLibrary == nullptr || mLibrary->library == nullptr)
+                {
+                    // The public API reports this as an internal error and drops
+                    // the message, so it is printed here too.
+                    auto message = loadFailureMessage(path);
+                    if(Debug::Instance().printDataInit())
+                        std::cout << message << std::endl;
+                    throw std::runtime_error(message);
+                }
 
                 // Indexed shards publish solutions later; stamp the name on
                 // the cache so it is applied as each one is parsed.

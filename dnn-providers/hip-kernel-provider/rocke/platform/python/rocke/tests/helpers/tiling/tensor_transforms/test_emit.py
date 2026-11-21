@@ -57,7 +57,6 @@ from rocke.helpers.tiling.tensor_transforms.ranges import (
 )
 from rocke.helpers.tiling.tensor_transforms.walk import split_coordinate
 from rocke.tests.engines import lower_with_both_engines
-from rocke.tests.gpu import current_device_arch
 
 GOLDEN_DIR = Path(__file__).parent / "golden"
 WAVE = 64
@@ -1047,8 +1046,9 @@ def test_every_malformed_access_is_refused_before_anything_is_emitted():
 # --- GPU: each lane's parts against the golden ----------------------------------------------------
 
 
-def _lane_addresses(build, n_blocks: int, params: dict[str, int]):
-    """Run a kernel whose lanes store each access's parts; return ``(addresses, sums)`` where
+def _lane_addresses(arch: str, build, n_blocks: int, params: dict[str, int]):
+    """Run a kernel compiled for ``arch`` (the ``any_gpu`` fixture's value) whose lanes store
+    each access's parts; return ``(addresses, sums)`` where
     ``sums[block][tid][i]`` is access ``i``'s address that lane computed (its parts summed on
     the host in Python integers, plus the constant)."""
     import numpy as np
@@ -1069,7 +1069,7 @@ def _lane_addresses(build, n_blocks: int, params: dict[str, int]):
         b.param(name, I32)
     addresses = build(b)
     slots = _store_parts(b, addresses)
-    artifact = compile_kernel(b.kernel, arch=current_device_arch())
+    artifact = compile_kernel(b.kernel, arch=arch)
     signature = SignatureBuilder()
     for name in params:
         signature = signature.scalar(name, "i32")
@@ -1104,10 +1104,9 @@ def _lane_addresses(build, n_blocks: int, params: dict[str, int]):
     return addresses, sums
 
 
-def test_gpu_conv_addresses_at_the_halo_tile_and_an_interior_tile():
+def test_gpu_conv_addresses_at_the_halo_tile_and_an_interior_tile(any_gpu: str):
     """Block 0 is the tile at the image corner (negative halo constants, origin 0); blocks 1
     and 2 are interior tiles."""
-    current_device_arch()
     graph, tensor = _conv(2, 6, 6, 3)
     constants = (0, 1, 26)
 
@@ -1119,15 +1118,16 @@ def test_gpu_conv_addresses_at_the_halo_tile_and_an_interior_tile():
         ]
         return emit_addresses(b, graph, tensor, accesses)
 
-    _, sums = _lane_addresses(build, 3, {})
+    _, sums = _lane_addresses(any_gpu, build, 3, {})
     for blk, t in itertools.product(range(3), range(WAVE)):
         m, k = blk * 16 + t // 4, (t % 4) * 8
         for i, c in enumerate(constants):
             assert sums[blk][t][i] == transform_address_of(graph, tensor, (m, k + c))
 
 
-def test_gpu_an_address_past_two_to_the_31_is_carried_by_the_wide_uniform_term():
-    current_device_arch()
+def test_gpu_an_address_past_two_to_the_31_is_carried_by_the_wide_uniform_term(
+    any_gpu: str,
+):
     rows, cols = 1 << 20, 4096
     tensor = TensorDesc((rows, cols), (cols, 1), F16)
     graph = identity_graph((rows, cols))
@@ -1142,7 +1142,7 @@ def test_gpu_an_address_past_two_to_the_31_is_carried_by_the_wide_uniform_term()
         )
         return emit_addresses(b, graph, tensor, [(row, col)])
 
-    (address,), sums = _lane_addresses(build, 2, {"row0": start})
+    (address,), sums = _lane_addresses(any_gpu, build, 2, {"row0": start})
     assert address.uniform[0].value.type == I64
     for blk, t in itertools.product(range(2), range(WAVE)):
         coords = (start + t // 4, blk * 32 + (t % 4) * 8)
@@ -1150,11 +1150,12 @@ def test_gpu_an_address_past_two_to_the_31_is_carried_by_the_wide_uniform_term()
         assert expected >= 2**31 and sums[blk][t][0] == expected
 
 
-def test_gpu_conv_over_more_than_two_to_the_31_elements_keeps_the_lane_part_in_one_image():
+def test_gpu_conv_over_more_than_two_to_the_31_elements_keeps_the_lane_part_in_one_image(
+    any_gpu: str,
+):
     """The input holds more than 2^31 elements but one image far fewer: only n's quotient
     reaches a uniform term, and the per-lane part stays below one image plus the carry.
     """
-    current_device_arch()
     n, h, w, c = 131080, 16, 16, 64
     y_len = x_len = 3
     graph, tensor = _conv(n, h, w, c, y=y_len, x=x_len)
@@ -1171,7 +1172,7 @@ def test_gpu_conv_over_more_than_two_to_the_31_elements_keeps_the_lane_part_in_o
         return emit_addresses(b, graph, tensor, accesses)
 
     m0 = m_length - 32
-    addresses, sums = _lane_addresses(build, 2, {"m0": m0})
+    addresses, sums = _lane_addresses(any_gpu, build, 2, {"m0": m0})
     # The bound re-derived from the pieces: n's per-lane part is at most the carry 1, ho and wo
     # at most H - 1 and W - 1 (inner pieces), y at most its carry 1, x at most X - 1 and c at
     # most C - 1; each times its stride.

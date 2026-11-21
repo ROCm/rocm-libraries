@@ -98,6 +98,7 @@
 #include <hipblaslt/hipblaslt-ext.hpp>
 #include <hipblaslt/hipblaslt.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <vector>
 
@@ -343,6 +344,47 @@ TEST(CachingLibraryCollision, smoke_FindTopSolutionsGroupedGemmDistinguishesColl
         << "ROCM-25647 (preventive): CachingLibrary::findTopSolutionsGroupedGemm returned the "
            "wrong, hash-colliding problem group's cached solutions. The grouped-GEMM cache must "
            "stay keyed on the full std::vector<MyProblem>, not a lossy hash.";
+}
+
+namespace
+{
+    // Ranks three solutions and returns the first count of them.
+    struct RankedGroupSubLibrary : public MockSubLibrary
+    {
+        SolutionVector<MockSolution> findTopSolutionsGroupedGemm(std::vector<MockProblem> const&,
+                                                                 Hardware const&,
+                                                                 int count) const override
+        {
+            ++findTopGroupCalls;
+            SolutionVector<MockSolution> ranked;
+            for(int id = 1; id <= std::min(count, 3); ++id)
+                ranked.push_back(makeSolution(id));
+            return ranked;
+        }
+    };
+}
+
+// A caller that drops cached candidates widens its request. The grouped cache must answer a
+// larger request from the sub-library, as the single-GEMM cache does, and still serve a short
+// list once the sub-library has returned everything it has.
+TEST(CachingLibraryCollision, smoke_FindTopSolutionsGroupedGemmWidensPastTheCachedList)
+{
+    std::vector<MockProblem> group{MockProblem{1}};
+
+    auto                                      sub = std::make_shared<RankedGroupSubLibrary>();
+    CachingLibrary<MockProblem, MockSolution> library(sub);
+    auto                                      gpu = makeGpu();
+
+    EXPECT_EQ(library.findTopSolutionsGroupedGemm(group, gpu, 1).size(), 1u);
+    EXPECT_EQ(library.findTopSolutionsGroupedGemm(group, gpu, 1).size(), 1u);
+    EXPECT_EQ(sub->findTopGroupCalls, 1);
+
+    EXPECT_EQ(library.findTopSolutionsGroupedGemm(group, gpu, 2).size(), 2u);
+    EXPECT_EQ(sub->findTopGroupCalls, 2);
+
+    EXPECT_EQ(library.findTopSolutionsGroupedGemm(group, gpu, 5).size(), 3u);
+    EXPECT_EQ(library.findTopSolutionsGroupedGemm(group, gpu, 8).size(), 3u);
+    EXPECT_EQ(sub->findTopGroupCalls, 3);
 }
 
 // The tests below use the real ContractionProblemGemm key. Two problems that the key treats as

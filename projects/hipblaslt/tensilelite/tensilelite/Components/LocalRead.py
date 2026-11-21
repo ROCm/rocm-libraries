@@ -32,7 +32,7 @@ from rocisa.instruction import SMovB32, SWaitCnt, VOrB32, VPermB32, VLShiftLeftO
                             ECvtPkFP8toF32, ECvtF32toF16, DSLoadU8
 
 from ..Component import LocalRead
-from ..Common.MxScaleLayout import mxFreePhase, mxFreeTile
+from ..Common.MxScaleLayout import mxFreePhase, mxFreeTile, mxReadVectorWidth
 
 from math import ceil
 
@@ -168,7 +168,7 @@ class LocalReadMFMA(LocalRead):
         tileSpanInfo = cls.getMxsTileSpanInfo(kernel, tc, tile01, asmCaps)
         if tileSpanInfo is not None:
             return tileSpanInfo["numGroups"]
-        return kernel["MIWaveTile"][tile01] // kernel["VectorWidth%s" % tc]
+        return kernel["MIWaveTile"][tile01] // mxReadVectorWidth(kernel, tc)
 
     @staticmethod
     def getMxsTileSpanInfo(kernel, tc, tile01, asmCaps):
@@ -205,7 +205,7 @@ class LocalReadMFMA(LocalRead):
                 or not asmCaps.get("HasWMMA_V3", False) \
                 or kernel.get("MXScaleFormat") != "InMemorySwizzle":
             return None
-        vectorWidth = kernel["VectorWidth%s" % tc]
+        vectorWidth = mxReadVectorWidth(kernel, tc)
         miWaveTile = kernel["MIWaveTile"][tile01]
         miWaveTileVectors = miWaveTile // vectorWidth
         # The tile is handled as (miWaveTileVectors // 2) independent ratio-2 groups. Each
@@ -662,7 +662,7 @@ class LocalReadMFMA(LocalRead):
         instruction      = tP["localReadInstruction"]
         bpr              = 4 # bytes/register
 
-        vectorWidth      = kernel["VectorWidth%s"%tc]
+        vectorWidth      = mxReadVectorWidth(kernel, tc)
         mxBlock: int     = kernel["ProblemType"][f"MXBlock{mxTc}"]
         mxUnit: int      = kernel["MatrixInstK"] // mxBlock
         mxTile           = mxFreeTile(kernel, tc)
@@ -672,6 +672,7 @@ class LocalReadMFMA(LocalRead):
                 "localReadMX: invalid MX scale unit for tc=%s "
                 "(MatrixInstK=%s < MXBlock%s=%s => mxUnit=%s)"
                 % (tc, kernel["MatrixInstK"], mxTc, mxBlock, mxUnit))
+        contiguousA = kernel.get("WaveTileContiguousA", False) and mxTc == "A"
         stridePerRead    = instruction.blockWidth * bpr
         tilePerRead      = stridePerRead // mxUnit
         if tilePerRead == 0:
@@ -750,6 +751,9 @@ class LocalReadMFMA(LocalRead):
                 # wave-split), so the per-group stride is twice the per-vector stride.
                 blockStep = (2 * vIdx) if mxsTileSpan else vIdx
                 mStep = MIWaveGroupShape[tile01]
+                if contiguousA:
+                    offset_val *= kernel["MatrixInstM"]
+                    mStep = kernel["MatrixInstM"] * vectorWidth
                 if mxPhase:
                     pass
                 elif mx2d:
@@ -969,6 +973,38 @@ class LocalReadMFMA(LocalRead):
         halfPLR = (tP["isA"] or tP["isB"]) and kernel["HalfPLR%c"%tc]
         if enableLDSTr:
             numberMTilesPerWave = kernel["MIWaveTile"][tile01]
+
+            # ds_read_tr hands lane L the tile row (m_base + L): a transpose group reads
+            # NUM_CONT_READ_ELEMENTS *contiguous* rows and all lanes in the group share one
+            # m_base, so the lane->row stride is locked at 1 and cannot be widened to VW.
+            # Wave tiles are therefore always MatrixInstM*MatrixInstBM*MIWaveGroup apart,
+            # never VW-interleaved. MIWaveGroupShape[tile01] carries VectorWidth{A,B} in its
+            # definition above, so divide it back out to get that spacing.
+            #
+            # When VW > 1 the store still wants the VW-interleaved row order; that is
+            # restored once in the epilogue by storeShuffleForLDSTrVW (KernelWriterAssembly),
+            # not here.
+            #
+            # A group of VW consecutive wave tiles covers one MIWaveGroupShape-wide block of
+            # the macro tile, and within that block the wave's VW tiles sit MI*MIB apart --
+            # the waves of the group interleave at that granularity. So the group index steps
+            # by MIWaveGroupShape and the tile-within-group steps by MI*MIB, recovered from
+            # MIWaveGroupShape (= MI*MIB*MIWaveGroup*VW) rather than re-derived.
+            #
+            # With MIWaveGroup[tile01] == 1 this collapses to (MIWaveGroupShape//VW) * tIdx,
+            # and at VW == 1 to MIWaveGroupShape * tIdx.
+            #
+            # tileVW must be the REAL VectorWidth -- never the LDSTr clamp of 1. It is not a
+            # "how wide is one read" value; it is the divisor that recovers MI*MIB from
+            # MIWaveGroupShape[tile01], which is itself built with the real VectorWidthA.
+            # Clamping it collapses mTileOffset to MIWaveGroupShape*tIdx, a tile stride VW
+            # times too large. Use the tile01-indexed VectorWidth so it matches exactly what
+            # is baked into MIWaveGroupShape[tile01] (not the tc-aliased VectorWidth%s).
+            tileVW = kernel["VectorWidthA"] if tile01 == 0 else kernel["VectorWidthB"]
+            tileStep = MIWaveGroupShape[tile01] // (tileVW * kernel["MIWaveGroup"][tile01])
+            def mTileOffset(tIdx):
+                return MIWaveGroupShape[tile01] * (tIdx // tileVW) + tileStep * (tIdx % tileVW)
+
             if writer.states.asmCaps["HasWMMA_V3"]:
                 if tP["bpeDS"] == 0.5:
                     LocalReadX = instruction.getInst(0)
@@ -979,7 +1015,7 @@ class LocalReadMFMA(LocalRead):
 
                     for tIdx in range(numberMTilesPerWave):
                         for ti in range(0, numTilePerInst):
-                            constOffset = int((tP["localReadOffset"] + matrixInstTO * ti + MIWaveGroupShape[tile01] * tIdx) * tP["bpeDS"])
+                            constOffset = int((tP["localReadOffset"] + matrixInstTO * ti + mTileOffset(tIdx)) * tP["bpeDS"])
                             for outerIdx in range(MIInputPerThUnroll//kernel[f"LocalReadVectorWidth{tc if('MXS' not in tc) else 'MXS'}"]):
                                 for innerIdx in range(kernel[f"LocalReadVectorWidth{tc if('MXS' not in tc) else 'MXS'}"]//vwTrLoad):
                                     paddedOffset = constOffset
@@ -1004,7 +1040,7 @@ class LocalReadMFMA(LocalRead):
                     numVgprsPerLoad = 4 #use 3 for upcoming compiler change
 
                     for tIdx in range(numberMTilesPerWave):
-                        constOffset = int((tP["localReadOffset"] + MIWaveGroupShape[tile01] * tIdx) * tP["bpeDS"])
+                        constOffset = int((tP["localReadOffset"] + mTileOffset(tIdx)) * tP["bpeDS"])
                         for outerIdx in range(MIInputPerThUnroll//kernel[f"LocalReadVectorWidth{tc if('MXS' not in tc) else 'MXS'}"]):
                             for innerIdx in range(kernel[f"LocalReadVectorWidth{tc if('MXS' not in tc) else 'MXS'}"]//vwTrLoad):
                                 paddedOffset = constOffset
@@ -1029,7 +1065,7 @@ class LocalReadMFMA(LocalRead):
                     vwTrLoad = 8
                     numberLRVWPerMIInput = MIInputPerThUnroll // kernel[f"LocalReadVectorWidth{tc if('MXS' not in tc) else 'MXS'}"]
                     for tIdx in range(numberMTilesPerWave):
-                        offset = int((tP["localReadOffset"] + MIWaveGroupShape[tile01] * tIdx) * tP["bpeDS"])
+                        offset = int((tP["localReadOffset"] + mTileOffset(tIdx)) * tP["bpeDS"])
                         if tP["isM"]:
                             numLoadTrPerMetadata = max(MIInputPerThUnroll // vwTrLoad, 1)
                             for v in range(numLoadTrPerMetadata):
@@ -1075,7 +1111,7 @@ class LocalReadMFMA(LocalRead):
                 elif tP["bpeDS"] == 2:
                     numberLRVWPerMIInput = MIInputPerThUnroll // kernel[f"LocalReadVectorWidth{tc if('MXS' not in tc) else 'MXS'}"]
                     for tIdx in range(0, numberMTilesPerWave):
-                        offset_val = int((tP["localReadOffset"]+MIWaveGroupShape[tile01]*tIdx) * tP["bpeDS"])
+                        offset_val = int((tP["localReadOffset"]+mTileOffset(tIdx)) * tP["bpeDS"])
                         unpaddedOffset = offset_val
                         if (kernel["LdsBlockSizePerPad%s"%tc] != 0) and (kernel["LdsPad%s"%tc] != 0):
                             offset_val += int((offset_val // kernel["LdsBlockSizePerPad%s"%tc]) * kernel["LdsPad%s"%tc] * tP["bpeDS"])
@@ -1144,7 +1180,7 @@ class LocalReadMFMA(LocalRead):
                     valuiIdx = int(valufIdx)
                     LocalReadX = instruction.getInst(highBits)
 
-                    offset_val = (tP["localReadOffset"]+MIWaveGroupShape[tile01]*tIdx) * tP["bpeDS"] + tP["localReadSwapByteOffset"]
+                    offset_val = (tP["localReadOffset"]+mTileOffset(tIdx)) * tP["bpeDS"] + tP["localReadSwapByteOffset"]
 
                     def applyPad(offset_val):
                         if (kernel["LdsBlockSizePerPad%s"%tc] != 0) and (kernel["LdsPad%s"%tc] != 0):
@@ -1752,7 +1788,8 @@ class LocalReadMFMA(LocalRead):
                                     incOffset = rIdx * numElementPerRead * UnrollStride
                                 elif kernel["UnrollMajorLDS%s" % tP["tensorChar"]]:
                                     incOffset = rIdx * numElementPerRead * UnrollStride * 2
-                                    incOffset += tiIdx * matrixInstTO * vectorWidth * tileStride
+                                    tileWidth = 1 if kernel.get("WaveTileContiguousA") and tc == "A" else vectorWidth
+                                    incOffset += tiIdx * matrixInstTO * tileWidth * tileStride
                                 else:
                                     vw = kernel[f"LocalReadVectorWidth{tc if('MXS' not in tc) else 'MXS'}"]
                                     incOffset = (rIdx // vw) * UnrollStride * vw
@@ -1776,7 +1813,9 @@ class LocalReadMFMA(LocalRead):
                                 _componentSplit = (_segOff.get("componentSplit", False)
                                              and _segOff.get("activeTC") == tc
                                              and numVectorsPerTile > 1)
-                                if _portSplit:
+                                if kernel.get("WaveTileContiguousA") and tc == "A":
+                                    vCols = (vIdx * numOffsets + oIdx) * matrixInstT * vectorWidth
+                                elif _portSplit:
                                     # Drop the wave-group factor from the per-vIdx column stride so the
                                     # two vIdx stay within this port's segment; the A0->A1 segment jump
                                     # is on the wave stride, not here.
@@ -1807,7 +1846,8 @@ class LocalReadMFMA(LocalRead):
                                     perpStrideInv = permBlock // perpStride
                                     offset_val = (eIdx * (perpStrideInv) + vCols) * tileStride
                                 else:
-                                    offset_val = (eIdx + vCols) * tileStride
+                                    freeStep = matrixInstT if kernel.get("WaveTileContiguousA") and tc == "A" else 1
+                                    offset_val = (eIdx * freeStep + vCols) * tileStride
 
                                 if kernel["ProblemType"]["Sparse"] != 0:
                                     if blocksPerTGroupSMFMA > 1:

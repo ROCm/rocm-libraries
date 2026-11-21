@@ -752,6 +752,28 @@ Tests:
   api: [ C_64 ]
   os_flags: LINUX
 
+# Output batch strides of 2^32 elements or more: Tensile and hipBLASLt kernels take 32-bit strides, so every batch
+# after the first used to be written to the wrong place while returning success (2^32 + 1 truncates to 1, so
+# batch 1 overwrites batch 0).
+# Small matrices keep the reference cheap; the large C/D stride needs about 128 GB of host and 32 GB of device
+# memory (int8 in, int32 out) or 64 GB host and 16 GB device (f16). Only the device pointer mode is run because
+# the reference and both modes' checks are computed inside its branch of testing_gemm_strided_batched_ex.
+- name: gemm_strided_batched_ex_stride_2e32
+  category: stress
+  function:
+    - gemm_strided_batched_ex: *int8_precision
+    - gemm_strided_batched_ex: *hpa_half_precision
+  matrix_size:
+    - { M: 64, N: 64, K: 64, lda: 64, ldb: 64, ldc: 64, ldd: 64, stride_a: 4096, stride_b: 4096, stride_c: 4294967297, stride_d: 4294967297 }
+  pointer_mode_host: false
+  transA: [ N ]
+  transB: [ N ]
+  alpha: 1
+  beta: 1
+  batch_count: [ 2 ]
+  use_hipblaslt: [ 0, 1 ]
+  os_flags: LINUX
+
 - name: gemm_strided_batched_repeatability_check
   category: stress
   function:

@@ -47,8 +47,8 @@ cmake_dependent_option(TENSILELITE_ENABLE_MXDATAGENERATOR
 set(BUILD_SHARED_LIBS "${TENSILELITE_BUILD_SHARED_LIBS}")
 
 if(TENSILELITE_STANDALONE)
-    if(TENSILELITE_ENABLE_CLIENT OR TENSILELITE_BUILD_TESTING OR TENSILELITE_ENABLE_AUTOBUILD OR BUILD_TESTING)
-        message(FATAL_ERROR "The TensileLite client, tests, and autobuild scripts require the hipBLASLt build.")
+    if(TENSILELITE_ENABLE_CLIENT OR TENSILELITE_BUILD_TESTING OR BUILD_TESTING)
+        message(FATAL_ERROR "The TensileLite client and tests require the hipBLASLt build.")
     endif()
 
     find_package(hip REQUIRED)
@@ -106,6 +106,7 @@ set(TENSILELITE_HOST_SOURCES
     "${CMAKE_CURRENT_LIST_DIR}/src/MLPNet.cpp"
     "${CMAKE_CURRENT_LIST_DIR}/src/PerformanceMetricTypes.cpp"
     "${CMAKE_CURRENT_LIST_DIR}/src/ScalarValueTypes.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/src/StreamK.cpp"
     "${CMAKE_CURRENT_LIST_DIR}/src/TensorDescriptor.cpp"
     "${CMAKE_CURRENT_LIST_DIR}/src/TensorOps.cpp"
     "${CMAKE_CURRENT_LIST_DIR}/src/Tensile.cpp"
@@ -115,15 +116,11 @@ set(TENSILELITE_HOST_SOURCES
 )
 set(TENSILELITE_HOST_MSGPACK_SOURCES
     "${CMAKE_CURRENT_LIST_DIR}/src/msgpack/MessagePack.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/src/msgpack/SolutionState.cpp"
     "${CMAKE_CURRENT_LIST_DIR}/src/msgpack/Writing.cpp"
 )
 
 add_subdirectory(rocisa)
-
-if(TENSILELITE_ENABLE_AUTOBUILD)
-    list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
-    include(tensilelite_auto_build)
-endif()
 
 if(TENSILELITE_ENABLE_HOST)
     find_package(ZLIB REQUIRED)
@@ -143,7 +140,7 @@ if(TENSILELITE_ENABLE_HOST)
         target_link_options(tensilelite-host PRIVATE "LINKER:--exclude-libs,ALL")
     endif()
 
-    target_compile_features(tensilelite-host PUBLIC cxx_std_17)
+    target_compile_features(tensilelite-host PUBLIC cxx_std_20)
 
     include(GenerateExportHeader)
     generate_export_header(tensilelite-host

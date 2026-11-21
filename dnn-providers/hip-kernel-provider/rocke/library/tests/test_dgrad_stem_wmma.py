@@ -192,8 +192,8 @@ class TestStemEngines(unittest.TestCase):
                     self.assertEqual(tuple(grid), spec.grid())
 
     def test_patch_engines_agree_on_specs(self):
-        eng = pytest.importorskip("rocke_engine")
-        from rocke.core.backend import conv_dgrad_patch_wmma_spec_to_dict
+        eng = pytest.importorskip("rocke_library_engine")
+        from kernels.conv.engine_bridge import conv_dgrad_patch_wmma_spec_to_dict
 
         specs = _aot_specs("direct_dgrad_patch_wmma")
         self.assertTrue(any(dgrad_patch_reason(s) is None for s in specs))
@@ -210,8 +210,8 @@ class TestStemEngines(unittest.TestCase):
         )
 
     def test_smallc_engines_agree_on_specs(self):
-        eng = pytest.importorskip("rocke_engine")
-        from rocke.core.backend import conv_dgrad_smallc_wmma_spec_to_dict
+        eng = pytest.importorskip("rocke_library_engine")
+        from kernels.conv.engine_bridge import conv_dgrad_smallc_wmma_spec_to_dict
 
         specs = _aot_specs("direct_dgrad_smallc_wmma")
         self.assertTrue(any(dgrad_smallc_reason(s) is None for s in specs))
@@ -230,8 +230,8 @@ class TestStemEngines(unittest.TestCase):
     def test_binding_rejects_bad_input(self):
         """A rejected spec returns the rejection (no grid is computed from its
         zero tile extents); a missing, mistyped or partial problem raises."""
-        eng = pytest.importorskip("rocke_engine")
-        from rocke.core.backend import (
+        eng = pytest.importorskip("rocke_library_engine")
+        from kernels.conv.engine_bridge import (
             conv_dgrad_patch_wmma_spec_to_dict,
             conv_dgrad_smallc_wmma_spec_to_dict,
         )

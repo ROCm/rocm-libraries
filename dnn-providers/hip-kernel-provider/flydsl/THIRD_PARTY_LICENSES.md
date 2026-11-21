@@ -275,7 +275,18 @@ SOFTWARE.
 - **Use:** The gfx12 attention kernel sources under
   `flydsl/kernels_src/kernels/attention_rdna4/` are vendored from AOTriton's
   `modules/flash/flyc/`, with the modifications that directory's `README.md` lists. The
-  `hipkernel:flydsl_sdpa_aiw` code objects are compiled from them.
+  `hipkernel:flydsl_sdpa_aiw` code objects are compiled from them. Two modules there,
+  `fmha_common_gfx1201.py` and `fmha_abi_gfx1201.py`, are also copied into
+  `flydsl/kernels_src/kernels/attention_bwd_cdna/`, and `fmha_common_gfx1201.py` a third
+  time into `attention_bwd_rdna/` (differences in those directories' `README.md`); the
+  `hipkernel:flydsl_sdpa_bwd_*` code objects are compiled from the copies. The gfx950
+  backward kernels `fmha_bwd_prep_gfx950.py`, `fmha_bwd_dkdv_gfx950.py`,
+  `fmha_bwd_dq_gfx950.py` and `fmha_bwd_merged_gfx950.py` in `attention_bwd_cdna/` are
+  ports of AOTriton's `bwd_preprocess`, `bwd_kernel_dk_dv`, `bwd_kernel_dq` and
+  `bwd_kernel_fuse`. The gfx11 kernels in `attention_bwd_rdna/` follow AOTriton too: the
+  dK/dV kernel and its tuning module its gfx1201 dK/dV kernel and tuning for the transposed loop, the dQ kernel and its
+  tuning module its `bwd_kernel_dq`, and the fp32 dK/dV and dQ kernels and their tuning
+  modules AOTriton's fp32 `bwd_kernel_dk_dv` and `bwd_kernel_dq`; each header says so.
 
 ```
 Copyright (C) 2024-2025 Advanced Micro Devices, Inc.

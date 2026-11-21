@@ -38,6 +38,7 @@
 #include <string>
 #include <vector>
 
+#include <Tensile/AMDGPUPredicates.hpp>
 #include <Tensile/ContractionLibrary.hpp>
 #include <Tensile/ContractionSolution.hpp>
 #include <Tensile/MasterSolutionLibrary.hpp>
@@ -329,6 +330,41 @@ TEST(PredictionLibraryTest, UnmappedTemporalHintsStayCached)
     }
 }
 
+// gfx1250 kernel knobs the latency model reads: tensor DMA, GL2 prefetch, local-read prefetch,
+// the solution's own workgroup mapping, cluster sharing, and the store cache hint.
+TEST(PredictionLibraryTest, Gfx1250KnobsReachOrigamiConfig)
+{
+    auto solution                                  = makeMappedSolution(42);
+    solution->sizeMapping.TDMInst                  = 3;
+    solution->sizeMapping.PrefetchGL2              = 2;
+    solution->sizeMapping.PrefetchLocalRead        = 1;
+    solution->sizeMapping.HalfPLR                  = 3;
+    solution->sizeMapping.Multicast                = 1;
+    solution->sizeMapping.workGroupMappingXCC      = 8;
+    solution->sizeMapping.workGroupMappingXCCGroup = -1;
+    solution->sizeMapping.hasTemporalHint          = true;
+    solution->sizeMapping.temporalHintD            = 1;
+    solution->sizeMapping.NonTemporalD             = 2;
+
+    SolutionMap<ContractionSolution> solutions;
+    solutions.emplace(42, solution);
+
+    ContractionProblemPredictionLibrary lib;
+    loadPredictionLibrary({42}, solutions, lib);
+    ASSERT_EQ(lib.origami_config_list.size(), 1u);
+    auto const& config = lib.origami_config_list[0];
+    auto const& tp     = config.tensile();
+    EXPECT_EQ(tp.tdm_inst, 3);
+    EXPECT_EQ(tp.prefetch_gl2, 2);
+    EXPECT_EQ(tp.prefetch_local_read, 1);
+    EXPECT_EQ(tp.half_plr, 3);
+    EXPECT_TRUE(tp.multicast);
+    EXPECT_EQ(tp.workgroup_mapping_xcc, 8);
+    EXPECT_EQ(tp.workgroup_mapping_xcc_group, -1);
+    // On TemporalHint archs NonTemporalD is a scope selector; TemporalHintD carries the hint.
+    EXPECT_EQ(config.cache_hints_d, 4);
+}
+
 // The per-tile flags are written once while the library is loaded.
 // An NT-B solution at 128x256 must not mark the 256x256 solution.
 TEST(PredictionLibraryTest, NonTemporalAvailabilityIsMemoizedPerMacroTile)
@@ -351,4 +387,45 @@ TEST(PredictionLibraryTest, NonTemporalAvailabilityIsMemoizedPerMacroTile)
     EXPECT_TRUE(lib.origami_config_list[0].non_temporal_b_available);
     EXPECT_FALSE(lib.origami_config_list[1].non_temporal_a_available);
     EXPECT_FALSE(lib.origami_config_list[1].non_temporal_b_available);
+}
+
+namespace
+{
+    std::shared_ptr<ContractionSolution> makeArchSolution(int index, AMDGPU::Processor processor)
+    {
+        auto solution               = makeMappedSolution(index);
+        solution->hardwarePredicate = std::make_shared<Predicates::IsSubclass<Hardware, AMDGPU>>(
+            std::make_shared<Predicates::GPU::ProcessorEqual>(processor));
+        return solution;
+    }
+
+    // Loads each solution into a library of its own and returns its effective config.
+    origami::config_t effectiveConfig(std::shared_ptr<ContractionSolution> const& solution)
+    {
+        SolutionMap<ContractionSolution> solutions;
+        solutions.emplace(solution->index, solution);
+        ContractionProblemPredictionLibrary lib;
+        loadPredictionLibrary({solution->index}, solutions, lib);
+        EXPECT_EQ(lib.origami_config_list.size(), 1u);
+        return lib.origami_config_list.at(0);
+    }
+}
+
+// Configs keep every declared value; nothing is rewritten.
+TEST(PredictionLibraryTest, Gfx950ConfigsKeepTheirDeclaredValues)
+{
+    auto solution                                  = makeArchSolution(1, AMDGPU::Processor::gfx950);
+    solution->sizeMapping.tileProcessingStrategy   = TileProcessingStrategy::StreamK;
+    solution->sizeMapping.workGroupMapping         = -8;
+    solution->sizeMapping.workGroupMappingXCC      = 8;
+    solution->sizeMapping.workGroupMappingXCCGroup = 64;
+    solution->sizeMapping.nonTemporalA             = 4;
+    solution->sizeMapping.TDMInst                  = 3;
+    solution->sizeMapping.waveNum                  = 4;
+    auto const config                              = effectiveConfig(solution);
+    EXPECT_EQ(config.workgroup_mapping, -8);
+    EXPECT_EQ(config.tensile().workgroup_mapping_xcc, 8);
+    EXPECT_EQ(config.tensile().workgroup_mapping_xcc_group, 64);
+    EXPECT_EQ(config.cache_hints_a, 4);
+    EXPECT_EQ(config.cache_hints_b, 0);
 }

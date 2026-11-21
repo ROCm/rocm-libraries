@@ -48,6 +48,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
 #include <random>
 #include <string>
 #include <thread>
@@ -57,6 +58,7 @@
 
 #include "ck_tile/core.hpp"
 #include "ck_tile/host/device_memory.hpp"
+#include "ck_tile/host/device_prop.hpp"
 #include "ck_tile/host/kernel_launch.hpp"
 #include "ck_tile/ops/epilogue.hpp"
 #include "ck_tile/ops/gemm.hpp"
@@ -120,7 +122,8 @@ template <ck_tile::index_t TileM_,
           typename BLayout_           = ColumnMajor,
           bool PadMN_                 = false,
           ck_tile::index_t VectorC_   = 0,
-          bool TdmEpilogue_           = false>
+          bool TdmEpilogue_           = false,
+          ck_tile::index_t Cluster_   = 1>
 struct V3Config
 {
     using ADataType                             = ADataType_;
@@ -145,6 +148,10 @@ struct V3Config
     // store, which clips to the real M x N in hardware.
     static constexpr bool TdmEpilogue = TdmEpilogue_;
     using Policy                      = Policy_;
+    // Cluster x Cluster workgroup clusters (ClusterTileGemmShape, GemmClusterTilePartitioner,
+    // cluster launch): each A and B tile is loaded once by TDM and multicast to the two
+    // workgroups that share it. 1: no cluster.
+    static constexpr ck_tile::index_t Cluster = Cluster_;
 };
 
 // bf16 instance: warp tile 16x16x32 and the given K tile and A/B layouts.
@@ -179,13 +186,23 @@ using V3Bf16Config = V3Config<TileM,
 template <typename Config>
 struct V3KernelOf
 {
-    using ADataType = typename Config::ADataType;
-    using BDataType = typename Config::BDataType;
-    using TileShape = ck_tile::TileGemmShape<
-        ck_tile::sequence<Config::TileM, Config::TileN, Config::TileK>,
-        ck_tile::sequence<Config::WarpsM, Config::WarpsN, 1>,
-        ck_tile::sequence<Config::WarpTileM, Config::WarpTileN, Config::WarpTileK>>;
-    using Partitioner = ck_tile::GemmTile1DPartitioner<TileShape>;
+    using ADataType                = typename Config::ADataType;
+    using BDataType                = typename Config::BDataType;
+    static constexpr bool kCluster = Config::Cluster > 1;
+    using TileShape                = std::conditional_t<
+                       kCluster,
+                       ck_tile::ClusterTileGemmShape<
+                           ck_tile::sequence<Config::Cluster, Config::Cluster, 1>,
+                           ck_tile::sequence<Config::TileM, Config::TileN, Config::TileK>,
+                           ck_tile::sequence<Config::WarpsM, Config::WarpsN, 1>,
+                           ck_tile::sequence<Config::WarpTileM, Config::WarpTileN, Config::WarpTileK>>,
+                       ck_tile::TileGemmShape<
+                           ck_tile::sequence<Config::TileM, Config::TileN, Config::TileK>,
+                           ck_tile::sequence<Config::WarpsM, Config::WarpsN, 1>,
+                           ck_tile::sequence<Config::WarpTileM, Config::WarpTileN, Config::WarpTileK>>>;
+    using Partitioner = std::conditional_t<kCluster,
+                                           ck_tile::GemmClusterTilePartitioner<TileShape>,
+                                           ck_tile::GemmTile1DPartitioner<TileShape>>;
     using Traits      = ck_tile::TileGemmUniversalTraits<Config::PadMN,
                                                          Config::PadMN,
                                                          false,
@@ -240,8 +257,13 @@ float run_v3_gemm(const ck_tile::GemmHostArgs& args)
     EXPECT_TRUE(Kernel::IsSupportedArgument(kargs));
     const dim3 grids  = Kernel::GridSize(args.M, args.N, args.k_batch);
     const dim3 blocks = Kernel::BlockSize();
-    return ck_tile::launch_kernel(ck_tile::stream_config{nullptr, false},
-                                  ck_tile::make_kernel<1>(Kernel{}, grids, blocks, 0, kargs));
+    if constexpr(Config::Cluster > 1)
+        return ck_tile::launch_kernel(
+            ck_tile::stream_config{nullptr, false},
+            ck_tile::make_kernel<1>(Kernel{}, Kernel::ClusterSize(), grids, blocks, 0, kargs));
+    else
+        return ck_tile::launch_kernel(ck_tile::stream_config{nullptr, false},
+                                      ck_tile::make_kernel<1>(Kernel{}, grids, blocks, 0, kargs));
 }
 
 uint16_t bf16_rne(float f)
@@ -261,6 +283,27 @@ template <typename Config>
 class TestCkTileGemmPipelineCompTDMV3 : public ::testing::Test
 {
     protected:
+    // comp_tdm_v3 is gfx1250-only: this binary carries no other target's code object, and
+    // UniversalGemmKernel::IsSupportedArgument rejects every TDM pipeline elsewhere before any
+    // argument check, so off gfx1250 the negative checks would pass for the wrong reason. The
+    // runs and ExpectSupported's host-side checks, positive and negative, therefore all skip.
+    void SetUp() override
+    {
+        if(!ck_tile::is_gfx125_supported())
+        {
+            // CTest reports a skip as PASS. Set CK_TILE_REQUIRE_GFX125=1 on runners that are
+            // meant to be gfx1250 to make it a failure instead.
+            const char* required = std::getenv("CK_TILE_REQUIRE_GFX125");
+            if(required != nullptr && required[0] == '1')
+            {
+                FAIL() << "CK_TILE_REQUIRE_GFX125=1 but the device reports '"
+                       << ck_tile::get_device_name() << "'";
+            }
+            GTEST_SKIP() << "TDM requires gfx1250; device reports '" << ck_tile::get_device_name()
+                         << "'";
+        }
+    }
+
     void Run(ck_tile::index_t M,
              ck_tile::index_t N,
              ck_tile::index_t K,
@@ -469,7 +512,26 @@ using V3Configs =
                      V3Config<256, 256, 4, 4, DefaultPolicy, ck_tile::bf8_t, ck_tile::bf8_t>,
                      V3Config<128, 128, 2, 2, DefaultPolicy, ck_tile::bf8_t, ck_tile::bf8_t>,
                      V3Config<256, 256, 4, 4, DefaultPolicy, ck_tile::fp8_t, ck_tile::bf8_t>,
-                     V3Config<256, 256, 4, 4, DefaultPolicy, ck_tile::bf8_t, ck_tile::fp8_t>>;
+                     V3Config<256, 256, 4, 4, DefaultPolicy, ck_tile::bf8_t, ck_tile::fp8_t>,
+                     // 2x2 cluster launch (TDM multicast); 256x256 is a cluster with one
+                     // workgroup in range, 512x512 a full one.
+                     V3Config<256,
+                              256,
+                              4,
+                              4,
+                              DefaultPolicy,
+                              ck_tile::fp8_t,
+                              ck_tile::fp8_t,
+                              256,
+                              32,
+                              32,
+                              128,
+                              RowMajor,
+                              ColumnMajor,
+                              false,
+                              0,
+                              false,
+                              2>>;
 
 // The long-K set: the fp8 instances and 16-wave bf8 x bf8.
 using V3LongKConfigs =

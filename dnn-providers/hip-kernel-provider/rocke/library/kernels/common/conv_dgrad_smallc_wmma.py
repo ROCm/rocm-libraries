@@ -175,6 +175,9 @@ class DgradSmallcWmmaSpec:
             1,
         )
 
+    def launch_geometry(self) -> tuple[tuple[int, int, int], tuple[int, int, int]]:
+        return self.grid(), (self.threads_per_block, 1, 1)
+
 
 def dgrad_smallc_tile_efficiency(spec: DgradSmallcWmmaSpec) -> float:
     p = spec.problem
