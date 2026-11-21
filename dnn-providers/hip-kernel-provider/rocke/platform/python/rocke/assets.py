@@ -64,6 +64,20 @@ def platform_tools_dir() -> Path:
     return Path(override) if override else platform_root() / "tools"
 
 
+def platform_parity_dir() -> Path:
+    """The platform parity-emitter tree, home of the shared emitter driver
+    ``_emit_common.py`` that the library emitters re-export.
+
+    Override with ``ROCKE_PLATFORM_PARITY_DIR``. The installed test payload has
+    no platform root; its ``conftest.py`` points the override at its staged
+    ``tests/instances/parity``.
+    """
+    override = os.environ.get("ROCKE_PLATFORM_PARITY_DIR")
+    if override:
+        return Path(override)
+    return platform_root() / "tests" / "instances" / "parity"
+
+
 def shape_utils_dir() -> Path:
     """Directory containing the loose ``_ua_shape_utils`` benchmark helper module."""
     return dsl_docs_dir() / "optimization" / "utilities" / "tools" / "stage1_benchmark"

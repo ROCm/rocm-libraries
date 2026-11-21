@@ -105,3 +105,11 @@ for _lib_root in (_HERE / "library", _HERE.parents[1] / "library"):
 _STAGED_TOOLS = _HERE / "arch_domain"
 if _STAGED_TOOLS.is_dir():
     os.environ.setdefault("ROCKE_PLATFORM_TOOLS_DIR", str(_STAGED_TOOLS))
+
+# The library parity emitters re-export the platform emitter driver, found
+# through rocke.assets.platform_parity_dir(). An install has no platform root
+# but stages the parity tree here, so point the locator at it the same way (in
+# a checkout this is the directory the default already names).
+_STAGED_PARITY = _HERE / "instances" / "parity"
+if _STAGED_PARITY.is_dir():
+    os.environ.setdefault("ROCKE_PLATFORM_PARITY_DIR", str(_STAGED_PARITY))
