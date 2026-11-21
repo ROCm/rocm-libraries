@@ -35,10 +35,8 @@ __device__ void rmn_hip_compute(uchar* srcPtr, uchar* dstPtr, d_float8* pix_f8,
 
 __device__ void rmn_hip_compute(float* srcPtr, float* dstPtr, d_float8* pix_f8,
                                 d_float8* rmnParamsf8) {
-    pix_f8->f4[0] = rpp_hip_pixel_check_0to1(
-        (pix_f8->f4[0] - rmnParamsf8->f4[0] * FLOAT4_ONE_OVER_255) * rmnParamsf8->f4[1]);
-    pix_f8->f4[1] = rpp_hip_pixel_check_0to1(
-        (pix_f8->f4[1] - rmnParamsf8->f4[0] * FLOAT4_ONE_OVER_255) * rmnParamsf8->f4[1]);
+    pix_f8->f4[0] = (pix_f8->f4[0] - rmnParamsf8->f4[0] * FLOAT4_ONE_OVER_255) * rmnParamsf8->f4[1];
+    pix_f8->f4[1] = (pix_f8->f4[1] - rmnParamsf8->f4[0] * FLOAT4_ONE_OVER_255) * rmnParamsf8->f4[1];
 }
 
 __device__ void rmn_hip_compute(schar* srcPtr, schar* dstPtr, d_float8* pix_f8,
@@ -53,10 +51,8 @@ __device__ void rmn_hip_compute(schar* srcPtr, schar* dstPtr, d_float8* pix_f8,
 
 __device__ void rmn_hip_compute(half* srcPtr, half* dstPtr, d_float8* pix_f8,
                                 d_float8* rmnParamsf8) {
-    pix_f8->f4[0] = rpp_hip_pixel_check_0to1(
-        (pix_f8->f4[0] - rmnParamsf8->f4[0] * FLOAT4_ONE_OVER_255) * rmnParamsf8->f4[1]);
-    pix_f8->f4[1] = rpp_hip_pixel_check_0to1(
-        (pix_f8->f4[1] - rmnParamsf8->f4[0] * FLOAT4_ONE_OVER_255) * rmnParamsf8->f4[1]);
+    pix_f8->f4[0] = (pix_f8->f4[0] - rmnParamsf8->f4[0] * FLOAT4_ONE_OVER_255) * rmnParamsf8->f4[1];
+    pix_f8->f4[1] = (pix_f8->f4[1] - rmnParamsf8->f4[0] * FLOAT4_ONE_OVER_255) * rmnParamsf8->f4[1];
 }
 
 __device__ void rmn_hip_compute(uchar* srcPtr, float* dstPtr, d_float8* pix_f8,
