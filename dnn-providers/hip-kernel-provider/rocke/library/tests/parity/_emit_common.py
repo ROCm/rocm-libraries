@@ -1,96 +1,63 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 #
-# tests/parity/_emit_common.py -- shared driver for the Python reference
-# emitters. Every <family>_emit.py parses the same argv (config index in
-# argv[1], optional mode in argv[2] defaulting to "ll"), then dispatches on the
-# mode: "ll" prints lower_kernel_to_llvm, "ir" prints the ck.dsl.ir/v1
-# serialization, "verify" prints verifier diagnostics, "hip-case" prints the
-# kernel's HIP source identity case (see hip_case), and any other mode is a
-# usage error. run_emit() centralizes that boilerplate so each emitter only has
-# to provide its config selector and kernel builder.
+# library/tests/parity/_emit_common.py -- the library emitters' handle on the
+# platform parity driver (platform/tests/instances/parity/_emit_common.py),
+# the one home of run_emit, hip_case and MODES.
+#
+# The library emitters import it the way the platform emitters do,
+# `from _emit_common import ...`, and this directory comes first on their path,
+# so this module stands in under that name and re-exports the platform driver.
+# Both files are named _emit_common, so the platform one is loaded from its
+# file under another module name. It is found where the emitter runners put it,
+# on sys.path (run_diff.py, in a source checkout and in the installed test
+# tree, lists the platform parity directory after this one); outside those
+# runners it is taken from the source checkout through rocke.assets.
 from __future__ import annotations
 
+import importlib.util
 import sys
-from typing import TYPE_CHECKING
+from importlib.machinery import PathFinder
+from pathlib import Path
 
-from rocke.core.ir_serialize import serialize
-from rocke.core.verify import verify
-
-if TYPE_CHECKING:
-    from rocke.core.ir import KernelDef
-
-# The "ll" mode must emit the NATIVE Python engine's .ll regardless of the
-# package-default backend (this driver is the python reference oracle). On
-# trees that expose the native lowerer directly (post-flip), use it; on older
-# reference trees that lack it, the public lower_kernel_to_llvm IS the native
-# lowerer (no backend dispatch there), so fall back to it.
-try:
-    from rocke.core.lower_llvm import _lower_kernel_to_llvm_python as _native_lower
-except ImportError:  # pragma: no cover - older reference tree
-    from rocke import lower_kernel_to_llvm as _native_lower
+_HERE = Path(__file__).resolve().parent
+_PLATFORM_MODULE_NAME = "_rocke_platform_emit_common"
 
 
-# The emitter modes run_emit accepts. A bespoke emitter that parses its own argv
-# accepts the same names.
-MODES = ("ll", "ir", "verify", "hip-case")
+def _platform_driver_path() -> Path:
+    """The platform ``_emit_common.py``: the first one on ``sys.path`` outside
+    this directory, else the source checkout's."""
+    other_entries = [
+        entry for entry in sys.path if entry and Path(entry).resolve() != _HERE
+    ]
+    spec = PathFinder.find_spec("_emit_common", other_entries)
+    if spec is not None and spec.origin is not None:
+        return Path(spec.origin)
+    from rocke.assets import platform_root
+
+    return platform_root() / "tests" / "instances" / "parity" / "_emit_common.py"
 
 
-def hip_case(kernel: KernelDef, arch: str) -> str:
-    """The "hip-case" text for one kernel: its HIP source identity case
-    (``rocke.tests.hip_identity_cases``). An emitter that builds several kernels
-    for one config prints one case per kernel, back to back.
+def _load_platform_driver():
+    """The platform driver module, loaded once under its own name."""
+    if _PLATFORM_MODULE_NAME in sys.modules:
+        return sys.modules[_PLATFORM_MODULE_NAME]
+    path = _platform_driver_path()
+    if not path.is_file():
+        raise ImportError(
+            f"_emit_common failed - path={str(path)!r}, expected the platform "
+            "parity driver; put platform/tests/instances/parity on PYTHONPATH"
+        )
+    spec = importlib.util.spec_from_file_location(_PLATFORM_MODULE_NAME, path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[_PLATFORM_MODULE_NAME] = module
+    spec.loader.exec_module(module)
+    return module
 
-    ``hip_case_text`` is imported here rather than at the top so that the other
-    modes still run against a reference Python root (``run_diff.py --pyroot``)
-    that predates its module."""
-    from rocke.tests.hip_identity_cases import hip_case_text
 
-    return hip_case_text(kernel, arch)
+_platform_driver = _load_platform_driver()
+MODES = _platform_driver.MODES
+hip_case = _platform_driver.hip_case
+run_emit = _platform_driver.run_emit
 
-
-def run_emit(spec_fn, build_fn, *, usage=None, arch="gfx950"):
-    """Drive one parity emitter and return its process exit code.
-
-    spec_fn(idx) returns either a spec or a (spec, arch) tuple; a bare spec uses
-    the `arch` argument (default "gfx950"), while a tuple supplies its own arch.
-    build_fn(spec, arch=arch) returns the kernel. The selected mode (argv[2], default
-    "ll") chooses the native Python lowerer, serialize, verifier-diagnostic or
-    hip_case output; an unrecognized mode is rejected.
-
-    The "ll" mode deliberately uses the NATIVE Python lowerer
-    (``_lower_kernel_to_llvm_python``) rather than the backend-dispatching
-    ``lower_kernel_to_llvm``: this driver is the differential gate's PYTHON
-    REFERENCE oracle, so it must produce the Python engine's .ll regardless of
-    the package-default backend (which may now be the C++ engine). Pinning the
-    native lowerer keeps the gate a true python-vs-cpp comparison after the
-    default flip.
-    """
-    if len(sys.argv) < 2:
-        sys.stderr.write(usage or "usage: <config_index> [ll|ir|verify|hip-case]\n")
-        return 2
-    idx = int(sys.argv[1])
-    mode = sys.argv[2] if len(sys.argv) > 2 else "ll"
-    if mode not in MODES:
-        sys.stderr.write(f"unknown mode {mode}\n")
-        return 2
-    selected = spec_fn(idx)
-    if isinstance(selected, tuple):
-        # A config either uses the default arch or pins its own (an arch-specific
-        # kernel). Byte-identity is a property of this exact (spec, arch): both
-        # engines must agree, including agreeing to reject a (spec, arch) that
-        # the target does not support. There is no global arch override.
-        spec, arch = selected
-    else:
-        spec = selected
-    kernel = build_fn(spec, arch=arch)
-    if mode == "ll":
-        text = _native_lower(kernel, arch=arch)
-        sys.stdout.write(text)
-    elif mode == "ir":
-        sys.stdout.write(serialize(kernel))
-    elif mode == "hip-case":
-        sys.stdout.write(hip_case(kernel, arch))
-    else:  # verify
-        sys.stdout.write("".join(str(d) + "\n" for d in verify(kernel)))
-    return 0
+__all__ = ["MODES", "hip_case", "run_emit"]
