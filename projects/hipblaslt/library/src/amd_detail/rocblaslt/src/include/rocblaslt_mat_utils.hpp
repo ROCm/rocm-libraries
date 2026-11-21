@@ -184,6 +184,20 @@ inline rocblaslt_status validateDeviceScalarAlphaType(const rocblaslt_matmul_des
     return rocblaslt_status_continue;
 }
 
+// Complex GEMMs read alpha and beta as complex scalars of the matrix precision, so the
+// descriptor must declare that scale type.
+inline rocblaslt_status validateComplexScaleType(const rocblaslt_matmul_desc descriptor,
+                                                 hipDataType                 a_type)
+{
+    if((a_type == HIP_C_32F || a_type == HIP_C_64F) && descriptor->scale_type != a_type)
+    {
+        log_error(
+            __func__, "complex matrices require a complex scale type", descriptor->scale_type);
+        return rocblaslt_status_invalid_value;
+    }
+    return rocblaslt_status_continue;
+}
+
 inline bool isFp6Datatype(hipDataType datatype)
 {
     return datatype == static_cast<hipDataType>(HIP_R_6F_E2M3)
@@ -979,6 +993,10 @@ inline rocblaslt_status rocblaslt_matmul_valid_args(const rocblaslt_matmul_desc 
     auto alphaTypeStatus = validateDeviceScalarAlphaType(matmul_descr);
     if(alphaTypeStatus != rocblaslt_status_continue)
         return alphaTypeStatus;
+
+    auto scaleTypeStatus = validateComplexScaleType(matmul_descr, matA->type);
+    if(scaleTypeStatus != rocblaslt_status_continue)
+        return scaleTypeStatus;
 
     if(matmul_status != rocblaslt_status_continue)
         return matmul_status;
