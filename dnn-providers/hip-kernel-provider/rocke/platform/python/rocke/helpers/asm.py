@@ -26,6 +26,7 @@ unaffected.
 from __future__ import annotations
 
 
+from ..core.arch import ArchTarget
 from ..core.ir import I32, IRBuilder, Value, VectorType
 
 
@@ -229,3 +230,39 @@ def mfma_f8f6f4_agpr_cluster(
 def s_nop(b: IRBuilder, n: int = 0) -> None:
     """Emit ``s_nop <n>`` (no result). Handy as a scheduling spacer."""
     b.inline_asm(f"s_nop {int(n)}", "", [])
+
+
+# Inline-asm bodies of :func:`lds_barrier_keep_vmem` (CK's ``block_sync_lds``)
+# per target family: drain the LDS counter, then the workgroup barrier. gfx12
+# RDNA splits both the wait counters (``s_wait_dscnt``) and the barrier
+# (signal + wait).
+_LDS_BARRIER_ASM = {
+    "gfx12_rdna": "s_wait_dscnt 0x0\ns_barrier_signal -1\ns_barrier_wait -1",
+}
+
+
+def lds_barrier_keep_vmem(b: IRBuilder, arch: str) -> None:
+    """Workgroup barrier that waits for LDS but leaves global loads in flight.
+
+    :meth:`IRBuilder.sync_lds_only` asks for exactly this, and on CDNA and
+    gfx1250 it is what the backend emits. On gfx12 RDNA the AMDGPU wait-count
+    pass may drain every counter in front of an ``s_barrier`` it emits itself
+    (those targets have no back-off barrier), ``vmcnt`` / ``loadcnt``
+    included, so a register prefetch issued before the barrier can be waited
+    for at the barrier instead of where it is used. Whether it does depends on
+    the compiler version; some builds emit no such drain. To make the result
+    independent of that, the barrier is emitted as inline asm there instead: the LDS wait plus the
+    barrier, with a memory clobber so the compiler keeps every LDS access on
+    its side of it. The asm is passed ``convergent=True`` at the IR level
+    (advisory); the LLVM lowerer intentionally does not render ``convergent``
+    as a keyword on the asm call expression because comgr rejects that syntax
+    — convergence is carried by the enclosing function's convergence tokens
+    instead. The asm is opaque to the wait-count pass, which therefore adds no
+    wait of its own. Every other target takes :meth:`IRBuilder.sync_lds_only`
+    unchanged.
+    """
+    body = _LDS_BARRIER_ASM.get(ArchTarget.from_gfx(arch).target_family)
+    if body is None:
+        b.sync_lds_only()
+        return
+    b.inline_asm(body, "~{memory}", convergent=True)

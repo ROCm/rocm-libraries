@@ -432,6 +432,16 @@ class TestTapOuterKIdentity(unittest.TestCase):
         ):
             del fields[name]
         del fields["streamk"], fields["streamk_reduction"]
+        # The RDNA4 wgrad knobs, off (regt_prefetch is shared with the
+        # forward conv).
+        for name in (
+            "reg_transpose",
+            "regt_prefetch",
+            "regt_addr_step",
+            "wmma_atomic_pair",
+            "x_run",
+        ):
+            fields.pop(name, None)
         legacy = hashlib.sha1(
             json.dumps(fields, sort_keys=True, separators=(",", ":")).encode()
         ).hexdigest()

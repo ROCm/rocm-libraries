@@ -2313,9 +2313,10 @@ class TestWgradTwoStageOnWmma(unittest.TestCase):
             wgrad_two_stage_available,
         )
 
-        for arch in ("gfx942", "gfx950", "gfx1250"):
+        # gfx12 RDNA (gfx1200 / gfx1201) has the float global atomics too.
+        for arch in ("gfx942", "gfx950", "gfx1250", "gfx1201", "gfx1200"):
             self.assertTrue(wgrad_two_stage_available(arch), arch)
-        for arch in ("gfx1151", "gfx1201"):
+        for arch in ("gfx1151", "gfx11-generic"):
             self.assertFalse(wgrad_two_stage_available(arch), arch)
 
     def test_16bit_split_k_atomic_arch_scope(self):
@@ -2328,8 +2329,10 @@ class TestWgradTwoStageOnWmma(unittest.TestCase):
         )
         from rocke.core.arch import ArchTarget
 
-        self.assertTrue(wgrad_wmma_split_k_available("gfx1250"))
-        for arch in ("gfx1151", "gfx1201"):
+        # gfx12 RDNA (gfx1200 / gfx1201) has the packed 16-bit forms too.
+        for arch in ("gfx1250", "gfx1201", "gfx1200", "gfx12-generic"):
+            self.assertTrue(wgrad_wmma_split_k_available(arch), arch)
+        for arch in ("gfx1151", "gfx11-generic"):
             self.assertFalse(wgrad_wmma_split_k_available(arch), arch)
             self.assertFalse(
                 ArchTarget.from_gfx(arch).memory.has_global_float_atomic_add, arch
@@ -2340,8 +2343,8 @@ class TestWgradTwoStageOnWmma(unittest.TestCase):
             spec.validate()
             ok, why = is_valid_wgrad_spec(spec, "gfx1250")
             self.assertTrue(ok, f"{dtype} split-K on gfx1250 must be valid: {why}")
-            # Other wave32 arches: split-K stays off for every dW dtype.
-            for arch in ("gfx1151", "gfx1201"):
+            # gfx11 RDNA: split-K stays off for every dW dtype.
+            for arch in ("gfx1151", "gfx11-generic"):
                 other = self._gfx1250_spec(data=data, split_k=4, warp_tile_k=16)
                 ok, why = is_valid_wgrad_spec(other, arch)
                 self.assertFalse(ok, f"{dtype} split-K on {arch} must stay rejected")
@@ -3532,6 +3535,178 @@ class TestConvWgradTf32(unittest.TestCase):
                 p, f"3d/sk_{red}", streamk="dp_sk", streamk_ctas=6,
                 streamk_reduction=red,
             )  # fmt: skip
+
+
+# ---------------------------------------------------------------------------
+# gfx120X (RDNA4) register-transpose knobs
+# ---------------------------------------------------------------------------
+
+_RDNA4_ARCHES = ("gfx1200", "gfx1201")
+
+
+def _rdna4_skip_reason() -> str:
+    if not GPU_ARCH:
+        return "no ROCm GPU detected"
+    if not _HAS_TORCH:
+        return "torch not importable"
+    if GPU_ARCH not in _RDNA4_ARCHES:
+        return f"needs a gfx120X GPU ({'/'.join(_RDNA4_ARCHES)}); got {GPU_ARCH}"
+    return ""
+
+
+def _regt_spec(dtype: str, problem=None, **kw):
+    """A WgradConvSpec on the wgrad register-transpose loader (wave32 WMMA)."""
+    from kernels.common._conv_implicit_gemm_common import ConvDataSpec, ConvProblem
+    from kernels.common.conv_implicit_gemm_wgrad import WgradConvSpec
+
+    base = dict(
+        problem=problem
+        or ConvProblem(N=2, Hi=14, Wi=14, C=64, K=64, Y=3, X=3, pH=1, pW=1),
+        data=ConvDataSpec(dtype_a=dtype, dtype_b=dtype, dtype_d=dtype),
+        tile_m=64,
+        tile_n=64,
+        tile_k=32,
+        warp_m=2,
+        warp_n=2,
+        warp_tile_m=16,
+        warp_tile_n=16,
+        warp_tile_k=16,
+        wave_size=32,
+        vector_size_a=4,
+        vector_size_b=4,
+        vector_size_c=1,
+        reg_transpose=True,
+    )
+    base.update(kw)
+    return WgradConvSpec(**base)
+
+
+@unittest.skipIf(_rdna4_skip_reason(), _rdna4_skip_reason() or "")
+class TestWgradRegTransposeKnobNumerics(unittest.TestCase):
+    """GPU numerics for the gfx120X register-transpose knobs (``regt``,
+    ``rtp3``, ``ras``, ``apr``, ``xrun``) against the CPU reference.
+
+    Skipped without a gfx120X GPU, so they do not run in CI; they guard the
+    kernels on any gfx1200 / gfx1201 run. Each case goes through ``_run_one``
+    with the exact spec (``spec_override``). Several ``_SHAPES`` reductions are
+    not a multiple of tile_k, so the masked tail of the register loads is
+    covered too.
+    """
+
+    def _run(self, dtype, **kw):
+        spec = _regt_spec(dtype, **kw)
+        _assert_case_ran(
+            self,
+            *_run_one(
+                GPU_ARCH,
+                _SHAPES[0],
+                dtype,
+                spec.pipeline,
+                spec.epilogue,
+                spec_override=spec,
+            ),
+        )
+
+    def _run_two_stage(self, dtype, **kw):
+        """A two-stage spec through the stage-1 + stage-2 pipeline
+        (``_run_two_stage_ts``: stage 1 needs its workspace, which ``_run_one``
+        does not allocate), against the CPU reference."""
+        import torch
+        from kernels.common.conv_implicit_gemm_wgrad import is_valid_wgrad_spec
+        from rocke.runtime.hip_module import Runtime
+
+        spec = _regt_spec(dtype, two_stage=True, **kw)
+        ok, why = is_valid_wgrad_spec(spec, arch=GPU_ARCH)
+        self.assertTrue(ok, f"two_stage spec invalid: {why}")
+        p = spec.problem
+        torch_dtype = torch.float16 if dtype == "fp16" else torch.bfloat16
+        torch.manual_seed(0)
+        X_f32 = torch.empty(p.N, p.Hi, p.Wi, p.C).uniform_(-1.0, 1.0)
+        dY_f32 = torch.empty(p.N, p.Ho, p.Wo, p.K).uniform_(-1.0, 1.0)
+        dW = _run_two_stage_ts(
+            spec,
+            GPU_ARCH,
+            Runtime(),
+            dY_f32.to(torch_dtype),
+            X_f32.to(torch_dtype),
+        )
+        ref = _cpu_wgrad_ref_ts(X_f32, dY_f32, p)
+        scale = ref.abs().max().item()
+        self.assertGreater(scale, 1e-6, "reference is zero: nothing was compared")
+        rel_err = (dW - ref).abs().max().item() / scale
+        self.assertLess(rel_err, _TOL[dtype], f"rel_err={rel_err:.3e}")
+
+    def test_regt(self):
+        for dtype in _DTYPES:
+            for split_k in (1, 2):
+                two_stage_axis = (False, True) if split_k > 1 else (False,)
+                for two_stage in two_stage_axis:
+                    with self.subTest(
+                        dtype=dtype, split_k=split_k, two_stage=two_stage
+                    ):
+                        if two_stage:
+                            self._run_two_stage(dtype, split_k=split_k)
+                        else:
+                            self._run(dtype, split_k=split_k)
+
+    def test_rtp3(self):
+        for dtype in _DTYPES:
+            for split_k in (1, 2):
+                with self.subTest(dtype=dtype, split_k=split_k):
+                    self._run(dtype, regt_prefetch=3, split_k=split_k)
+
+    def test_ras(self):
+        # Wo = 16 (a multiple of REGT_K_RUN = 8) so the stepped run path
+        # (Wo % 8 == 0) runs; the default shape's Wo of 14 never takes it.
+        from kernels.common._conv_implicit_gemm_common import ConvProblem
+
+        stepped = ConvProblem(N=2, Hi=16, Wi=16, C=64, K=64, Y=3, X=3, pH=1, pW=1)
+        self.assertEqual(stepped.Wo % 8, 0)
+        for dtype in _DTYPES:
+            for prefetch in (0, 3):
+                with self.subTest(dtype=dtype, regt_prefetch=prefetch):
+                    self._run(
+                        dtype,
+                        problem=stepped,
+                        regt_addr_step=True,
+                        regt_prefetch=prefetch,
+                    )
+
+    def test_apr(self):
+        for dtype in _DTYPES:
+            for prefetch in (0, 3):
+                with self.subTest(dtype=dtype, regt_prefetch=prefetch):
+                    self._run(
+                        dtype,
+                        split_k=2,
+                        wmma_atomic_pair=True,
+                        regt_prefetch=prefetch,
+                    )
+
+    def test_xrun(self):
+        # The strided patch-stem problem (stride == filter, no padding) whose
+        # per-channel run otherwise forces scalar X loads.
+        from kernels.common._conv_implicit_gemm_common import ConvProblem
+
+        stem = ConvProblem(N=2, Hi=64, Wi=64, C=3, K=64, Y=16, X=16, sH=16, sW=16)
+        for dtype in _DTYPES:
+            for split_k, apr in ((1, False), (2, True)):
+                for prefetch in (0, 3):
+                    with self.subTest(
+                        dtype=dtype, split_k=split_k, regt_prefetch=prefetch
+                    ):
+                        self._run(
+                            dtype,
+                            problem=stem,
+                            tile_m=128,
+                            tile_n=128,
+                            vector_size_a=8,
+                            vector_size_b=8,
+                            x_run=True,
+                            split_k=split_k,
+                            wmma_atomic_pair=apr,
+                            regt_prefetch=prefetch,
+                        )
 
 
 if __name__ == "__main__":

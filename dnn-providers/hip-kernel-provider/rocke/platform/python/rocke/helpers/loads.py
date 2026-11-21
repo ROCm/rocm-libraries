@@ -51,7 +51,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable, List, Optional, Sequence, Tuple
 
-from ..core.ir import F16, I64, IRBuilder, Type, Value
+from ..core.ir import F16, I32, I64, IRBuilder, Type, Value, VectorType
 
 
 # A descriptor callback maps (row, col) in the tile-local coordinate
@@ -60,6 +60,12 @@ from ..core.ir import F16, I64, IRBuilder, Type, Value
 # size in bytes when feeding it to a buffer_load voffset. `valid` is an
 # i1 Value (or `None` to mean "always in-bounds").
 DescriptorFn = Callable[[IRBuilder, Value, Value], Tuple[Value, Optional[Value]]]
+
+# RegTransposeTileLoader's run descriptor: (row, first K column) -> the
+# (offset, valid) pairs of the REGT_K_RUN consecutive K columns of a unit.
+RunDescriptorFn = Callable[
+    [IRBuilder, Value, Value], List[Tuple[Value, Optional[Value]]]
+]
 
 # Bytes per element for the dtypes CoalescedTileLoader / AsyncTileLoader support.
 _ELEM_BYTES: dict = {"f16": 2, "bf16": 2, "f32": 4, "i32": 4}
@@ -756,6 +762,469 @@ class CoalescedTileLoader:
         """Store a register tile (returned by :meth:`fetch`) into LDS."""
         for row, col, v in fetched:
             self._store_tile(b, smem_dst, row, col, v)
+
+
+# ---------------------------------------------------------------------
+# Register-transpose loader (free-axis global vectors -> K-contiguous LDS)
+# ---------------------------------------------------------------------
+
+# K elements of one register-transposed micro-tile: 16 bytes of 16-bit data,
+# i.e. one ds_store_b128 per free-axis row.
+REGT_K_RUN = 8
+# Free-axis load widths the register transpose is written for, widest first.
+REGT_VECS = (8, 4, 2, 1)
+# Hard cap on micro-tiles per thread; mirrors C++ ROCKE_REGT_MAX_UNITS in
+# helper_rocke.helpers.loads.h (the staged heap has exactly that many slots).
+REGT_MAX_UNITS = 256
+
+
+class _RegTransposeStaged(list):
+    """``RegTransposeTileLoader.load_global`` result: the staged units plus
+    the wave-uniform participation predicate (``None`` when every thread
+    loads), so :meth:`RegTransposeTileLoader.store_lds` can guard the stores
+    with the same signature as :meth:`CoalescedTileLoader.store_lds`."""
+
+    active: Optional[Value] = None
+
+
+@dataclass(frozen=True)
+class RegTransposeTileLoader:
+    """Sync global -> LDS load that transposes in registers, not on the store.
+
+    Same authoring contract as :class:`CoalescedTileLoader` in
+    ``vector_axis="row"`` mode: a ``(tile_rows, tile_cols)`` tile whose *rows*
+    are the free (M/N) axis, contiguous in global memory, and whose *columns*
+    are the reduction (K) axis, strided in global memory; it fills the same
+    row-major ``LDS[row][col]`` tile, so the MMA consumer is unchanged.
+
+    The difference is the unit of work. ``vector_axis="row"`` loads
+    ``load_vec`` free-axis elements at one K column and scatters them with one
+    16-bit LDS store each. This loader gives each thread a *micro-tile* of
+    ``vec`` free-axis rows x ``REGT_K_RUN`` (8) K columns: it issues 8
+    ``vec``-wide global loads (one per K column, each a contiguous free-axis
+    run), regroups the 8 x ``vec`` elements in registers into ``vec`` vectors
+    of 8 K-contiguous elements, and writes each with one 16-byte LDS store.
+    Per 8 x ``vec`` elements that is ``vec`` ``ds_store_b128`` instead of
+    ``8 * vec`` ``ds_store_b16``. The regrouping is plain element extracts and
+    packs; the backend turns them into ``v_perm_b32`` / ``v_pack_b32_f16``
+    (one per output dword).
+
+    Thread mapping. The tile holds ``(tile_rows / vec) * (tile_cols / 8)``
+    micro-tiles; micro-tile ``u`` is K chunk ``u % kc`` (``kc = tile_cols /
+    8``) of row group ``u // kc``. Consecutive lanes therefore walk the K
+    chunks of one row group first and then the row groups: a load instruction
+    still reads ``32 / kc`` contiguous free-axis runs per K column, and the
+    ``kc`` K chunks a lane group writes sit side by side in an LDS row, which
+    spreads the 16-byte stores over the banks.
+
+    Participation. When the micro-tiles divide evenly over ``block_size``
+    threads every thread does ``micro_tiles / block_size`` of them. When there
+    are fewer micro-tiles than threads (a large workgroup on a thin tile) and
+    their count is a multiple of ``wave_size``, the first
+    ``micro_tiles / wave_size`` waves do one each and the rest skip the load
+    behind a wave-uniform branch: the K tile is simply too small to give every
+    thread an 8-deep run. Any other count is rejected by :meth:`plan` (the
+    caller narrows ``vec`` or rejects the configuration), never silently
+    loaded some other way.
+
+    Correctness. Each global load reads ``vec`` free-axis elements starting at
+    a ``vec``-aligned row; the caller guarantees (as for
+    ``vector_axis="row"``) that ``vec`` divides the stride-1 run the free axis
+    lives in, so a vector never crosses it and the descriptor's validity at
+    its first element holds for all ``vec``. Invalid vectors use the buffer
+    resource's out-of-range sentinel and read zero.
+    """
+
+    tile_rows: int
+    tile_cols: int
+    block_size: int
+    wave_size: int
+    vec: int
+    elem_dtype: Type = F16
+    oob_sentinel: int = (1 << 31) - 1
+    # Optional LDS column swizzle ``(b, row, col) -> col``: the K column a
+    # 16-byte unit starting at (``row``, ``col``) is written to. ``None`` (the
+    # default) writes it at ``col`` and emits exactly the unswizzled IR. The
+    # consumer must read through the same map.
+    col_swizzle: Optional[Callable] = None
+
+    @staticmethod
+    def plan(
+        *,
+        tile_rows: int,
+        tile_cols: int,
+        block_size: int,
+        wave_size: int,
+        vec: int,
+    ) -> Tuple[int, int, str]:
+        """``(micro_tiles, active_threads, reason)`` for one width.
+
+        ``reason`` is ``""`` when the width is usable, else why not.
+        """
+        if vec not in REGT_VECS:
+            return 0, 0, f"vec {vec} not in {REGT_VECS}"
+        if tile_cols % REGT_K_RUN:
+            return (
+                0,
+                0,
+                (f"tile K extent {tile_cols} is not a multiple of {REGT_K_RUN}"),
+            )
+        if tile_rows % vec:
+            return 0, 0, f"tile free extent {tile_rows} not divisible by vec {vec}"
+        units = (tile_rows // vec) * (tile_cols // REGT_K_RUN)
+        if units % block_size == 0:
+            per_thread = units // block_size
+            if per_thread > REGT_MAX_UNITS:
+                return (
+                    0,
+                    0,
+                    f"RegTransposeTileLoader: {per_thread} micro-tiles per thread "
+                    f"> REGT_MAX_UNITS {REGT_MAX_UNITS}",
+                )
+            return units, block_size, ""
+        if units < block_size and units % wave_size == 0:
+            # Active threads each handle exactly one micro-tile.
+            return units, units, ""
+        return (
+            0,
+            0,
+            (
+                f"{units} micro-tiles ({tile_rows}x{tile_cols} at {vec}x{REGT_K_RUN}) "
+                f"neither divide over {block_size} threads nor fill whole waves of "
+                f"{wave_size}"
+            ),
+        )
+
+    @classmethod
+    def choose_vec(
+        cls,
+        *,
+        tile_rows: int,
+        tile_cols: int,
+        block_size: int,
+        wave_size: int,
+        max_vec: int = 8,
+    ) -> Optional[int]:
+        """The widest usable width ``<= max_vec``, or ``None`` if there is none."""
+        for v in REGT_VECS:
+            if v > max_vec:
+                continue
+            _, _, why = cls.plan(
+                tile_rows=tile_rows,
+                tile_cols=tile_cols,
+                block_size=block_size,
+                wave_size=wave_size,
+                vec=v,
+            )
+            if not why:
+                return v
+        return None
+
+    def __post_init__(self) -> None:
+        if _ELEM_BYTES.get(self.elem_dtype.name) != 2:
+            raise ValueError(
+                "RegTransposeTileLoader: 16-bit element types only (one 16-byte "
+                f"LDS store is {REGT_K_RUN} elements); got {self.elem_dtype.name!r}"
+            )
+        _, _, why = self.plan(
+            tile_rows=self.tile_rows,
+            tile_cols=self.tile_cols,
+            block_size=self.block_size,
+            wave_size=self.wave_size,
+            vec=self.vec,
+        )
+        if why:
+            raise ValueError(f"RegTransposeTileLoader: {why}")
+
+    @property
+    def micro_tiles(self) -> int:
+        return (self.tile_rows // self.vec) * (self.tile_cols // REGT_K_RUN)
+
+    @property
+    def active_threads(self) -> int:
+        return self.plan(
+            tile_rows=self.tile_rows,
+            tile_cols=self.tile_cols,
+            block_size=self.block_size,
+            wave_size=self.wave_size,
+            vec=self.vec,
+        )[1]
+
+    @property
+    def partial(self) -> bool:
+        """Whether only the first ``active_threads`` threads load."""
+        return self.active_threads < self.block_size
+
+    @property
+    def units_per_thread(self) -> int:
+        return self.micro_tiles // self.active_threads
+
+    @property
+    def guard_applies(self) -> bool:
+        """Whether :meth:`load_global` can take ``guard=True``: partial
+        participation and ``vec > 1`` (it also needs ``masked``)."""
+        return self.partial and self.vec > 1
+
+    def _unit_row_col(
+        self, b: IRBuilder, tid: Value, e: int, c_kc, c_vec, c_k_run, *, clamp: bool
+    ):
+        """``(row, col)`` of this thread's ``e``-th unit, the decode both read
+        paths share. ``clamp``: idle waves decode the last unit so every
+        address they form stays inside the tile."""
+        u = b.add(b.mul(b.const_i32(e), b.const_i32(self.active_threads)), tid)
+        if clamp:
+            u = b.select(
+                b.cmp_lt(u, b.const_i32(self.micro_tiles)),
+                u,
+                b.const_i32(self.micro_tiles - 1),
+            )
+        return b.mul(b.div(u, c_kc), c_vec), b.mul(b.mod(u, c_kc), c_k_run)
+
+    def _active(self, b: IRBuilder, tid: Value) -> Value:
+        """Wave-uniform predicate: this thread's wave carries a micro-tile."""
+        wave = b.to_sgpr_u32(b.div(tid, b.const_i32(self.wave_size)))
+        return b.cmp_lt(wave, b.const_i32(self.active_threads // self.wave_size))
+
+    def load_global(
+        self,
+        b: IRBuilder,
+        *,
+        tid: Value,
+        descriptor: DescriptorFn,
+        rsrc: Value,
+        masked: bool = True,
+        run_descriptor: Optional[RunDescriptorFn] = None,
+        guard: bool = False,
+    ) -> list:
+        """Emit the global reads; returns ``(row, col, [v_0 .. v_7])`` per unit.
+
+        ``masked`` (partial participation only): send the reads of the idle
+        waves to the out-of-range sentinel, for callers that issue the reads
+        outside the :meth:`store_lds` guard (the returned list carries that
+        guard). :meth:`load` puts both under one branch and passes ``False``.
+
+        ``guard`` (partial participation, ``masked``, ``vec > 1`` only; a
+        ``ValueError`` elsewhere, see :attr:`guard_applies`): issue the reads inside their own wave-uniform
+        if/else on the same predicate, the idle waves yielding zeros, instead
+        of masking them. For register-prefetch loops: with the reads in the
+        loop body and their only use in the :meth:`store_lds` branch that
+        immediately follows the MMAs, LLVM's IR sinking pass (run before
+        instruction selection on AMDGPU) moves the reads into that branch,
+        behind the MMAs they were meant to overlap; reads in a branch of their
+        own stay where they are issued.
+
+        ``run_descriptor(b, row, col)``, when given, returns the
+        ``(offset, valid)`` pairs of all ``REGT_K_RUN`` K columns
+        ``col .. col+7`` of a unit at once, so the caller can decode the run's
+        first position once and step the rest instead of calling
+        ``descriptor`` per column. It must return exactly what ``descriptor``
+        would for each column.
+        """
+        elem_bytes = _ELEM_BYTES[self.elem_dtype.name]
+        kc = self.tile_cols // REGT_K_RUN
+        c_kc = b.const_i32(kc)
+        c_vec = b.const_i32(self.vec)
+        c_k_run = b.const_i32(REGT_K_RUN)
+        c_elem_bytes = b.const_i32(elem_bytes)
+        c_oob = b.const_i32(self.oob_sentinel)
+        c0 = b.const_i32(0)
+        if guard and not (self.guard_applies and masked):
+            raise ValueError(
+                "RegTransposeTileLoader.load_global: guard needs partial "
+                f"participation, masked reads and vec > 1 (partial={self.partial}, "
+                f"masked={masked}, vec={self.vec})"
+            )
+        active = None
+        if self.partial and masked:
+            active = self._active(b, tid)
+        if active is not None and guard:
+            return self._load_global_guarded(
+                b,
+                tid=tid,
+                descriptor=descriptor,
+                rsrc=rsrc,
+                active=active,
+                run_descriptor=run_descriptor,
+            )
+        staged = _RegTransposeStaged()
+        staged.active = active
+        for e in range(self.units_per_thread):
+            # Idle waves decode a clamped unit so every address they form stays
+            # inside the tile; their reads are masked or skipped.
+            row, col = self._unit_row_col(
+                b, tid, e, c_kc, c_vec, c_k_run, clamp=self.partial
+            )
+            vs = []
+            run = run_descriptor(b, row, col) if run_descriptor is not None else None
+            for j in range(REGT_K_RUN):
+                if run is not None:
+                    off_elems, valid = run[j]
+                else:
+                    cj = b.add(col, b.const_i32(j)) if j else col
+                    off_elems, valid = descriptor(b, row, cj)
+                off_bytes = b.mul(off_elems, c_elem_bytes)
+                if active is not None:
+                    valid = active if valid is None else b.land(valid, active)
+                safe = off_bytes if valid is None else b.select(valid, off_bytes, c_oob)
+                if self.vec == 1:
+                    vs.append(b.buffer_load(rsrc, safe, c0, self.elem_dtype))
+                else:
+                    vs.append(
+                        b.buffer_load_vN(rsrc, safe, c0, self.elem_dtype, self.vec)
+                    )
+            staged.append((row, col, vs))
+        return staged
+
+    def _load_global_guarded(
+        self,
+        b: IRBuilder,
+        *,
+        tid: Value,
+        descriptor: DescriptorFn,
+        rsrc: Value,
+        active: Value,
+        run_descriptor: Optional[RunDescriptorFn],
+    ) -> list:
+        """:meth:`load_global` with ``guard``: the units' addresses in the
+        enclosing block, only the reads in an if/else on ``active`` (the idle
+        waves yield an undefined value, which :meth:`store_lds` never
+        writes)."""
+        elem_bytes = _ELEM_BYTES[self.elem_dtype.name]
+        kc = self.tile_cols // REGT_K_RUN
+        c_kc = b.const_i32(kc)
+        c_vec = b.const_i32(self.vec)
+        c_k_run = b.const_i32(REGT_K_RUN)
+        c_elem_bytes = b.const_i32(elem_bytes)
+        c_oob = b.const_i32(self.oob_sentinel)
+        c0 = b.const_i32(0)
+        units = []
+        for e in range(self.units_per_thread):
+            row, col = self._unit_row_col(b, tid, e, c_kc, c_vec, c_k_run, clamp=True)
+            run = run_descriptor(b, row, col) if run_descriptor is not None else None
+            offs = []
+            for j in range(REGT_K_RUN):
+                if run is not None:
+                    off_elems, valid = run[j]
+                else:
+                    cj = b.add(col, b.const_i32(j)) if j else col
+                    off_elems, valid = descriptor(b, row, cj)
+                off_bytes = b.mul(off_elems, c_elem_bytes)
+                offs.append(
+                    off_bytes if valid is None else b.select(valid, off_bytes, c_oob)
+                )
+            units.append((row, col, offs))
+        vt = VectorType(self.elem_dtype, self.vec)
+        n = len(units) * REGT_K_RUN
+        branch = b.scf_if_else(active, result_types=[vt] * n)
+        with branch as (then_ctx, else_ctx):
+            with then_ctx:
+                b.scf_yield(
+                    *[
+                        b.buffer_load_vN(rsrc, off, c0, self.elem_dtype, self.vec)
+                        for _, _, offs in units
+                        for off in offs
+                    ]
+                )
+            with else_ctx:
+                idle = b.undef_vec(self.elem_dtype, self.vec)
+                b.scf_yield(*([idle] * n))
+        res = list(branch.results)
+        staged = _RegTransposeStaged()
+        staged.active = active
+        for i, (row, col, _) in enumerate(units):
+            staged.append((row, col, res[i * REGT_K_RUN : (i + 1) * REGT_K_RUN]))
+        return staged
+
+    def _store_unit(self, b: IRBuilder, smem_dst: Value, row, col, vs) -> None:
+        """Regroup one unit's 8 x ``vec`` registers and write ``vec`` rows.
+
+        ``vs[j]`` holds free-axis rows ``row .. row+vec-1`` of K column
+        ``col + j``; LDS row ``row + i`` wants ``vs[0][i] .. vs[7][i]``. Each
+        output dword pairs K columns ``2p`` and ``2p + 1``, which sit in the same
+        16-bit half of dword ``i // 2`` of their two loads: one ``v_perm_b32``
+        (low halves: selector 0x05040100, high halves: 0x07060302). A scalar
+        unit (``vec == 1``) is already one element per load and is packed as is.
+        """
+        swz = self.col_swizzle
+        if self.vec == 1:
+            packed = b.vec_pack(list(vs), self.elem_dtype)
+            c = col if swz is None else swz(b, row, col)
+            b.smem_store_vN(smem_dst, [row, c], packed, REGT_K_RUN)
+            return
+        n_dw = self.vec // 2
+        words = []
+        for v in vs:
+            if n_dw == 1:
+                words.append([b.vec_bitcast(v, I32)])
+            else:
+                w = b.vec_bitcast(v, VectorType(I32, n_dw))
+                words.append([b.vec_extract(w, d) for d in range(n_dw)])
+        out_t = VectorType(self.elem_dtype, REGT_K_RUN)
+        for i in range(self.vec):
+            d = i // 2
+            sel = 0x07060302 if i % 2 else 0x05040100
+            dwords = [
+                b.byte_perm(words[2 * p + 1][d], words[2 * p][d], sel)
+                for p in range(REGT_K_RUN // 2)
+            ]
+            packed = b.vec_bitcast(b.vec_pack(dwords, I32), out_t)
+            r = b.add(row, b.const_i32(i)) if i else row
+            c = col if swz is None else swz(b, r, col)
+            b.smem_store_vN(smem_dst, [r, c], packed, REGT_K_RUN)
+
+    def store_lds(self, b: IRBuilder, *, smem_dst: Value, staged: list) -> None:
+        """Transpose and write units returned by :meth:`load_global`.
+
+        Under partial participation the idle waves skip the stores behind the
+        wave-uniform predicate ``load_global`` recorded on ``staged``.
+        """
+        active = getattr(staged, "active", None)
+        if self.partial:
+            if active is None:
+                raise ValueError(
+                    "RegTransposeTileLoader.store_lds: partial participation "
+                    "needs the staged list of a masked load_global"
+                )
+            with b.scf_if(active):
+                for row, col, vs in staged:
+                    self._store_unit(b, smem_dst, row, col, vs)
+            return
+        for row, col, vs in staged:
+            self._store_unit(b, smem_dst, row, col, vs)
+
+    def load(
+        self,
+        b: IRBuilder,
+        *,
+        tid: Value,
+        smem_dst: Value,
+        descriptor: DescriptorFn,
+        rsrc: Value,
+        run_descriptor: Optional[RunDescriptorFn] = None,
+    ) -> None:
+        """Read, transpose and write one tile (the ``CoalescedTileLoader.load``
+        counterpart). Idle waves skip the whole body."""
+        if self.partial:
+            with b.scf_if(self._active(b, tid)):
+                staged = self.load_global(
+                    b,
+                    tid=tid,
+                    descriptor=descriptor,
+                    rsrc=rsrc,
+                    masked=False,
+                    run_descriptor=run_descriptor,
+                )
+                for row, col, vs in staged:
+                    self._store_unit(b, smem_dst, row, col, vs)
+            return
+        staged = self.load_global(
+            b,
+            tid=tid,
+            descriptor=descriptor,
+            rsrc=rsrc,
+            run_descriptor=run_descriptor,
+        )
+        self.store_lds(b, smem_dst=smem_dst, staged=staged)
 
 
 # ---------------------------------------------------------------------

@@ -48,9 +48,10 @@
  *  49  N8H56W56C64_K64Y3X3 pad1, t32x32x32, w1x1, a16x16x32, mem/default, gfx1250, split_k=4 bf16 out
  *  50  N8H56W56C64_K64Y3X3 pad1, t32x32x32, w1x1, a16x16x32, mem/default, gfx1250, split_k=4 fp32 out, lds_k_outer
  *  51  N4H12W12C24_K32Y3X3 pad1, t32x32x32, w1x1, a16x16x32, mem/default, gfx1250, split_k=2 fp16 out
- *  52-54  WMMA split-K: gfx1201 bf16 out and gfx1151 fp32 out, which both
- *         engines must reject, and gfx1250 bf16 out with the cshuffle
- *         epilogue, which both admit. Must match the Python emitter's 52-54.
+ *  52-54  WMMA split-K: gfx1201 bf16 out (admitted since gfx12 RDNA has
+ *         float global atomics), gfx1151 fp32 out, which both engines must
+ *         reject, and gfx1250 bf16 out with the cshuffle epilogue, which both
+ *         admit. Must match the Python emitter's 52-54.
  *  55-57,67-70  gfx1250 WMMA async K loop (global_load_async_to_lds
  *         ping-pong): split-K fp32 out small/big (55/56), C=3 rejected by
  *         both engines (57), bf16 operands (67), explicit vector_size_a
@@ -58,8 +59,8 @@
  *         explicit A/B load-width caps, K-outer/M-outer (69-70). Must match
  *         the Python emitter's 55-57,67-70.
  *  58-61  WMMA cshuffle epilogue: direct fp16 out, split-K bf16 out,
- *         async_dma split-K, and gfx1201 (WMMA split-K enabled only on
- *         gfx1250, rejected). Must match the Python emitter's 58-61.
+ *         async_dma split-K, and split-K on gfx1201 (float global atomics).
+ *         Must match the Python emitter's 58-61.
  *  62  both engines must reject: WMMA cshuffle split-K fp16 out with an odd
  *      store vector. Must match the Python emitter's 62.
  *  63-66  two-stage (f32 workspace) split-K on WMMA: fp16/bf16 out variants,
@@ -89,6 +90,19 @@
  *  108    the same base at split_k = 1 with vector_size_c = 2: the cshuffle
  *         store epilogue honours the explicit dW width (C = 64 alone would
  *         pick 8). Must match the Python _ATOMIC_VEC_C_BASES.
+ *  109-113 reg_transpose on the gfx1201 WMMA base (config 6): auto widths,
+ *         bf16 at widths 4 / 2, scalar loads, split-K on gfx1200, and gfx950
+ *         (rejected). Must match the Python _REGT_CFGS.
+ *  114-116 regt_prefetch: mode 3, mode 3 bf16 at width 2 on gfx12-generic;
+ *         mode 2 (rejected). Must match the Python _REGT_CFGS.
+ *  117-118 regt_addr_step on a stride-2 problem with Wo = 8: the plain loop
+ *         and regt_prefetch mode 3. Must match the Python _REGT_CFGS.
+ *  119-121 wmma_atomic_pair: fp16 dW with reg_transpose, bf16 dW on the
+ *         default loader, and two-stage (rejected). Must match the Python
+ *         _REGT_CFGS.
+ *  122-124 x_run on the stem probe N1 16x16 C8 K64 4x4 stride 4: the
+ *         regt_prefetch mode-3 loop, bf16 on the default loader, and a W
+ *         padded problem (rejected). Must match the Python _REGT_CFGS.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -309,10 +323,119 @@ static int make_cfg_tf32(int idx, rocke_implicit_gemm_conv_wgrad_spec_t* spec, c
     return 0;
 }
 
+/* The register-transpose knobs on the gfx1201 WMMA base (config 6). Must
+ * match _REGT_CFGS in the Python emitter. */
+static int make_regt_cfg(int idx, rocke_implicit_gemm_conv_wgrad_spec_t* spec, const char** arch)
+{
+    if(make_base_cfg(6, spec, arch) != 0)
+        return -1;
+    spec->reg_transpose = true;
+    *arch = "gfx1201";
+    switch(idx)
+    {
+    case 109:
+        break;
+    case 110:
+        spec->dtype_a = "bf16";
+        spec->dtype_b = "bf16";
+        spec->dtype_d = "bf16";
+        spec->has_vector_size_a = true;
+        spec->vector_size_a = 4;
+        spec->has_vector_size_b = true;
+        spec->vector_size_b = 2;
+        break;
+    case 111:
+        spec->has_vector_size_a = true;
+        spec->vector_size_a = 1;
+        spec->has_vector_size_b = true;
+        spec->vector_size_b = 1;
+        break;
+    case 112:
+        spec->split_k = 2;
+        *arch = "gfx1200";
+        break;
+    case 113:
+        /* rejected: a wave64 target */
+        spec->wave_size = 64;
+        spec->warp_tile_m = 32;
+        spec->warp_tile_n = 32;
+        *arch = "gfx950";
+        break;
+    case 114:
+        spec->regt_prefetch = 3;
+        break;
+    case 115:
+        spec->regt_prefetch = 3;
+        spec->dtype_a = "bf16";
+        spec->dtype_b = "bf16";
+        spec->dtype_d = "bf16";
+        spec->has_vector_size_a = true;
+        spec->vector_size_a = 2;
+        spec->has_vector_size_b = true;
+        spec->vector_size_b = 2;
+        *arch = "gfx12-generic";
+        break;
+    case 116:
+        /* rejected: no mode 2 */
+        spec->regt_prefetch = 2;
+        break;
+    case 117:
+    case 118:
+        /* Python _P_S2: N2 16x16 C32 K64 3x3, stride 2, pad 1 (Wo = 8). */
+        spec->problem = rocke_conv_problem_make(2, 16, 16, 32, 64, 3, 3, 2, 2, 1, 1, 1, 1);
+        spec->regt_addr_step = true;
+        spec->regt_prefetch = idx == 118 ? 3 : 0;
+        break;
+    case 119:
+        spec->split_k = 2;
+        spec->wmma_atomic_pair = true;
+        break;
+    case 120:
+        spec->reg_transpose = false;
+        spec->split_k = 2;
+        spec->wmma_atomic_pair = true;
+        spec->dtype_d = "bf16";
+        break;
+    case 121:
+        /* rejected: the two-stage scratch has no packed atomics */
+        spec->reg_transpose = false;
+        spec->split_k = 2;
+        spec->two_stage = true;
+        spec->wmma_atomic_pair = true;
+        break;
+    case 122:
+    case 123:
+    case 124:
+        /* Python _P_XR: N1 16x16 C8 K64 4x4, stride 4, no padding. */
+        spec->problem = rocke_conv_problem_make(1, 16, 16, 8, 64, 4, 4, 4, 4, 0, 0, 1, 1);
+        spec->x_run = true;
+        if(idx == 122)
+            spec->regt_prefetch = 3;
+        if(idx == 123)
+        {
+            spec->reg_transpose = false;
+            spec->dtype_a = "bf16";
+            spec->dtype_b = "bf16";
+            spec->dtype_d = "bf16";
+        }
+        if(idx == 124)
+        {
+            /* rejected: W padding (the filter-row run leaves the image) */
+            spec->problem = rocke_conv_problem_make(1, 16, 16, 8, 64, 4, 4, 4, 4, 1, 1, 1, 1);
+        }
+        break;
+    default:
+        return -1;
+    }
+    return 0;
+}
+
 /* Fill the config for index `idx`. Returns 0 on success, -1 if unknown.
  * On success sets *spec and *arch. */
 static int make_cfg(int idx, rocke_implicit_gemm_conv_wgrad_spec_t* spec, const char** arch)
 {
+    if(idx >= 109 && idx <= 124)
+        return make_regt_cfg(idx, spec, arch);
     if(idx >= 73 && idx <= 88)
         return make_cfg_tf32(idx, spec, arch);
     if(idx >= 89 && idx <= 105)

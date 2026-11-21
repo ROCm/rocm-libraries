@@ -31,7 +31,7 @@ compile_kernel, KernelArtifact
 MfmaAtom, mfma_atom
 MFMA_ATOMS, MFMA_F16_ATOMS, MFMA_FP8_ATOMS # : fp8 + bf8 atoms
 WarpGrid
-CoalescedTileLoader, AsyncTileLoader, AsyncTileLoaderSlot
+CoalescedTileLoader, RegTransposeTileLoader, AsyncTileLoader, AsyncTileLoaderSlot
 DirectEpilogue, CShuffleEpilogue
 LdsLayout
 SchedulePolicy

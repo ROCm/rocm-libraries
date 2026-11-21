@@ -1950,6 +1950,93 @@ def cases():
         ),
     )
 
+    # Register-transpose operand loads (8 K x 4 free micro-tiles, partial participation).
+    add(
+        "conv_wgrad",
+        "conv_wgrad/gfx1201/n1h8c16k32r3_regt",
+        "gfx1201",
+        build_conv_wgrad(
+            "irhash_wgrad_1201_regt",
+            "gfx1201",
+            wgrad1,
+            wave_size=32,
+            wtm=16,
+            wtn=16,
+            wtk=16,
+            tile_m=32,
+            tile_n=32,
+            tile_k=32,
+            dtype_d="fp16",
+            reg_transpose=True,
+        ),
+    )
+
+    # Stepped micro-tile address decode over the register-transpose loads.
+    add(
+        "conv_wgrad",
+        "conv_wgrad/gfx1201/n1h8c16k32r3_regt_ras",
+        "gfx1201",
+        build_conv_wgrad(
+            "irhash_wgrad_1201_regt_ras",
+            "gfx1201",
+            wgrad1,
+            wave_size=32,
+            wtm=16,
+            wtn=16,
+            wtk=16,
+            tile_m=32,
+            tile_n=32,
+            tile_k=32,
+            dtype_d="fp16",
+            reg_transpose=True,
+            regt_addr_step=True,
+        ),
+    )
+
+    # WMMA split-K (zero-partner packed bf16 atomics) on gfx12 RDNA.
+    add(
+        "conv_wgrad",
+        "conv_wgrad/gfx1201/n1h8c16k32r3_spk2",
+        "gfx1201",
+        build_conv_wgrad(
+            "irhash_wgrad_1201_spk2",
+            "gfx1201",
+            wgrad1,
+            wave_size=32,
+            wtm=16,
+            wtn=16,
+            wtk=16,
+            tile_m=32,
+            tile_n=32,
+            tile_k=32,
+            split_k=2,
+            dtype_d="bf16",
+        ),
+    )
+
+    # Paired-lane WMMA split-K atomics (one DPP swap per two rows).
+    add(
+        "conv_wgrad",
+        "conv_wgrad/gfx1201/n1h8c16k32r3_regt_spk2_apr",
+        "gfx1201",
+        build_conv_wgrad(
+            "irhash_wgrad_1201_regt_spk2_apr",
+            "gfx1201",
+            wgrad1,
+            wave_size=32,
+            wtm=16,
+            wtn=16,
+            wtk=16,
+            tile_m=32,
+            tile_n=32,
+            tile_k=32,
+            split_k=2,
+            dtype_d="fp16",
+            reg_transpose=True,
+            wmma_atomic_pair=True,
+        ),
+    )
+
     # Dgrad: backward-data implicit-GEMM.  Problem args match the forward conv
     # set; atoms chosen to be valid on each arch.  Stride=2 exercises the tiled
     # (multi-sub-GEMM) path; stride=1 exercises the direct-store epilogue.

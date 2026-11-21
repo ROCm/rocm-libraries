@@ -54,3 +54,9 @@ def test_never_drops_only_the_two_stage_candidates():
 def test_never_leaves_an_all_atomic_candidate_list_untouched():
     candidates = [(_FakeIdent(two_stage=False), None, None)]
     assert _filter_wgrad_two_stage_candidates(candidates, "never") == candidates
+
+
+def test_only_keeps_just_the_two_stage_candidates():
+    candidates = _candidates()
+    filtered = _filter_wgrad_two_stage_candidates(candidates, "only")
+    assert filtered == [candidates[1]]

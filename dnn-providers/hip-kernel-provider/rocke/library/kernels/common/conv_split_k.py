@@ -139,13 +139,14 @@ WGRAD_ASSUMED_WAVES_PER_CU = 2
 # round-robin by flat workgroup id, so this is the modulus a grouped launch has
 # to stay aligned to -- see the snap in select_split_k_wgrad. RDNA parts have a
 # single shader-engine group and want no snap at all.
+# The gfx12 RDNA targets (wave32, WMMA): the one place the list is spelled.
+_GFX12_RDNA_ARCHS: tuple[str, ...] = ("gfx1200", "gfx1201", "gfx12-generic")
+
 _ARCH_NUM_XCDS: dict[str, int] = {
     "gfx942": 8,
     "gfx950": 8,
     "gfx1151": 1,
-    "gfx1201": 1,
-    "gfx1200": 1,
-    "gfx12-generic": 1,
+    **dict.fromkeys(_GFX12_RDNA_ARCHS, 1),
     "gfx1100": 1,
     "gfx11-generic": 1,
 }
@@ -174,6 +175,13 @@ class WgradSplitPolicy:
       A cap of 1 turns the automatic split off for that dtype; an explicit
       degree still launches it. The general cap is for fp32 dW, whose atomic
       rounding is negligible at any degree here.
+    * ``small_grid_tiles`` / ``small_grid_target_ctas`` -- an ungrouped launch
+      of fewer than ``small_grid_tiles`` CTAs at split_k = 1 fills to
+      ``small_grid_target_ctas`` instead of ``target_ctas`` (0: off).
+    * ``grouped_ck_formula`` -- a grouped launch takes the grouped CK formula
+      of :func:`select_split_k_wgrad` (a waves-per-CU target, then the XCD
+      snap) instead of ``grouped_target_ctas``, under this policy's degree
+      cap.
     """
 
     target_ctas: int
@@ -181,6 +189,9 @@ class WgradSplitPolicy:
     min_slice_k: int
     max_degree: int
     max_degree_by_dtype: tuple[tuple[str, int], ...] = ()
+    small_grid_tiles: int = 0
+    small_grid_target_ctas: int = 0
+    grouped_ck_formula: bool = False
     grouped_min_slice_k: int | None = None
 
     def degree_cap(self, dtype_d: str) -> int:
@@ -235,6 +246,39 @@ _WGRAD_SPLIT_POLICY: dict[str, WgradSplitPolicy] = {
         max_degree_by_dtype=(("bf16", atomic_rounding_degree_cap(7)),),
     ),
 }
+
+
+def _gfx12_rdna_wgrad_split_policy(arch: str) -> WgradSplitPolicy:
+    """The gfx12 RDNA (gfx1200 / gfx1201) wgrad split-K policy.
+
+    The CK formula (two CTAs per CU, no slice-depth floor) for an ungrouped
+    launch, except that a launch of fewer than ``num_cus / 4`` tiles fills to
+    one CTA per CU: measured on gfx1201 over the swept split-K degree curves
+    of ungrouped wgrad rows, one CTA per CU lands nearer the best degree on
+    small base grids, while from 16 tiles up halving the degree lost (deep-K,
+    narrow-dW rows). Grouped launches keep the grouped CK formula. The 16-bit
+    packed-atomic accuracy caps are those of every policy
+    (:func:`atomic_rounding_degree_cap`); the f32 workspace has none.
+    """
+    cus = arch_num_cus(arch)
+    return WgradSplitPolicy(
+        target_ctas=WGRAD_ASSUMED_WAVES_PER_CU * cus,
+        grouped_target_ctas=0,
+        min_slice_k=1,
+        max_degree=MAX_GRID_DIM_Z,
+        max_degree_by_dtype=(
+            ("bf16", atomic_rounding_degree_cap(7)),
+            ("fp16", atomic_rounding_degree_cap(10)),
+        ),
+        small_grid_tiles=cus // 4,
+        small_grid_target_ctas=cus,
+        grouped_ck_formula=True,
+    )
+
+
+_WGRAD_SPLIT_POLICY.update(
+    {arch: _gfx12_rdna_wgrad_split_policy(arch) for arch in _GFX12_RDNA_ARCHS}
+)
 
 # Per-dtype overrides of _WGRAD_SPLIT_POLICY, keyed by (arch, dW dtype).
 #
@@ -437,9 +481,17 @@ def select_split_k_wgrad(
     if policy is not None:
         if isinstance(groups, bool) or not isinstance(groups, int) or groups < 1:
             raise ValueError(f"groups must be a positive integer (got {groups!r})")
+    # A policy that keeps the grouped CK formula caps it below instead.
+    policy_cap = None
+    if policy is not None and groups > 1 and policy.grouped_ck_formula:
+        policy_cap = min(wg_K // policy.min_slice_k, policy.degree_cap(dtype_d))
+        policy = None
+    if policy is not None:
         n_groups = groups
         target = policy.grouped_target_ctas if n_groups > 1 else policy.target_ctas
         grid_no_split = base_grid * n_groups
+        if n_groups == 1 and grid_no_split < policy.small_grid_tiles:
+            target = policy.small_grid_target_ctas
         min_slice = (
             policy.grouped_min_slice_k
             if n_groups > 1 and policy.grouped_min_slice_k is not None
@@ -489,6 +541,8 @@ def select_split_k_wgrad(
     # group count against the z limit, pulls the snapped value straight back
     # down to an arbitrary number.
     cap = max(1, min(wg_K, MAX_GRID_DIM_Z // int(groups)))
+    if policy_cap is not None:
+        cap = max(1, min(cap, policy_cap))
     split_k = min(split_k, cap)
 
     xcds = _ARCH_NUM_XCDS.get(base_arch, _DEFAULT_NUM_XCDS)

@@ -800,6 +800,53 @@ static int make_cfg_tf32_split_k(int idx, rocke_implicit_gemm_conv_spec_t* spec,
     return 0;
 }
 
+/* The RDNA4 forward knobs (gfx1201 WMMA 16x16x16, wave32), configs 86..:
+ * make_cfg_rdna4 mirrors _RDNA4_CFGS / _rdna4_spec() in
+ * conv_implicit_gemm_emit.py. Base: a 64x64x32 tile over 2x2 waves, mem
+ * pipeline, cshuffle epilogue, on the cpg-64 problem. Returns -1 past the
+ * last config. */
+static void rdna4_base(rocke_implicit_gemm_conv_spec_t* spec, const char** arch)
+{
+    *spec = rocke_implicit_gemm_conv_spec_default();
+    spec->problem = rocke_conv_problem_make(2, 14, 14, 64, 128, 3, 3, 1, 1, 1, 1, 1, 1);
+    spec->tile_m = 64;
+    spec->tile_n = 64;
+    spec->tile_k = 32;
+    spec->warp_m = 2;
+    spec->warp_n = 2;
+    spec->warp_tile_m = 16;
+    spec->warp_tile_n = 16;
+    spec->warp_tile_k = 16;
+    spec->wave_size = 32;
+    spec->pipeline = "mem";
+    spec->epilogue = "cshuffle";
+    *arch = "gfx1201";
+}
+
+static void rdna4_bf16(rocke_implicit_gemm_conv_spec_t* spec)
+{
+    spec->dtype_a = "bf16";
+    spec->dtype_b = "bf16";
+    spec->dtype_d = "bf16";
+}
+
+static int make_cfg_rdna4(int idx, rocke_implicit_gemm_conv_spec_t* spec, const char** arch)
+{
+    rdna4_base(spec, arch);
+    switch(idx)
+    {
+    case 86: /* tile_k 128 */
+        spec->tile_k = 128;
+        return 0;
+    case 87:
+        spec->tile_k = 128;
+        rdna4_bf16(spec);
+        return 0;
+    default:
+        return -1;
+    }
+}
+
 /* The default epilogue stores one element per lane, so the validator rejects
  * it with the vec_c the spec would auto-derive from kpg (8 here). Configs that
  * leave vector_size_c unset get vector_size_c=1 -- otherwise they do not build
@@ -830,6 +877,11 @@ static int make_cfg(int idx, rocke_implicit_gemm_conv_spec_t* spec, const char**
     else if(idx >= 82 && idx <= 85)
     {
         if(make_cfg_tf32_split_k(idx, spec, arch) != 0)
+            return -1;
+    }
+    else if(idx >= 86)
+    {
+        if(make_cfg_rdna4(idx, spec, arch) != 0)
             return -1;
     }
     else if(make_cfg_raw(idx, spec, arch) != 0)

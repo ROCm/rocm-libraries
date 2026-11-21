@@ -610,6 +610,8 @@ def _spec_raw(idx: int):
         return _mfma_gate_spec(idx)
     if 82 <= idx <= 85:
         return _tf32_split_k_spec(idx)
+    if idx in _RDNA4_CFGS:
+        return _rdna4_spec(idx)
     raise SystemExit(f"unknown config index {idx}")
 
 
@@ -927,6 +929,38 @@ def _tf32_split_k_spec(idx: int):
         )
     spec, arch = _tf32_spec({82: 54, 83: 56}[idx])
     return replace(spec, split_k=2), arch
+
+
+# The RDNA4 forward knobs (gfx1201 WMMA 16x16x16, wave32). Base: a 64x64x32
+# tile over 2x2 waves, mem pipeline, cshuffle epilogue, on _RDNA4 (cpg 64, a
+# multiple of every tile_k below). Keep in lockstep with make_cfg_rdna4() in
+# conv_implicit_gemm_emit.c.
+#   86: tile_k 128 (the RDNA4 tile_k axis), fp16
+#   87: config 86 in bf16
+_RDNA4 = dict(N=2, Hi=14, Wi=14, C=64, K=128, fy=3, fx=3, pH=1, pW=1)
+_BF16 = ConvDataSpec("bf16", "bf16", "bf16")
+_RDNA4_CFGS = {
+    86: (_RDNA4, dict(tile_k=128), "gfx1201"),
+    87: (_RDNA4, dict(tile_k=128, data=_BF16), "gfx1201"),
+}
+
+
+def _rdna4_spec(idx: int):
+    base = dict(
+        tile_m=64,
+        tile_n=64,
+        tile_k=32,
+        warp_m=2,
+        warp_n=2,
+        warp_tile_m=16,
+        warp_tile_n=16,
+        warp_tile_k=16,
+        wave_size=32,
+        pipeline="mem",
+        epilogue="cshuffle",
+    )
+    prob, kw, arch = _RDNA4_CFGS[idx]
+    return ImplicitGemmConvSpec(problem=_cp(**prob), **dict(base, **kw)), arch
 
 
 def main() -> int:
