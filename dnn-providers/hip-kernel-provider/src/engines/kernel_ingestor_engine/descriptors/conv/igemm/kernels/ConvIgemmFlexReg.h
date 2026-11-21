@@ -446,10 +446,12 @@ __device__ __attribute__((always_inline)) void k1ConvFlexReg(const K1Args& a CON
     // Forward spreads the loads of the step after next over [compute B]: their offsets in
     // [mem B], then one load per PSF MMAs (backward data issues them in [mem B]).
     constexpr bool SPREAD = DIR == K1_FORWARD;
-    // Splits of four or fewer spread the loads (1.03-1.10x on MI300A's and MI325X's 3-D and
-    // UNet layers); deeper splits (a few k-steps a block over few tiles) issue them in [mem B],
-    // where their latency has more of a step to hide (the spread measured 0.94-0.96x there).
-    const bool spread = SPREAD && splits <= 4;
+    // Blocks of splits of four or fewer, or of at least 32 k-steps, spread the loads (1.03-1.11x
+    // on MI300A's and MI325X's 3-D and UNet layers, deep splits of 60-120 steps a block among
+    // them). Short blocks of deep splits (under 32 steps over few tiles) issue them in [mem B],
+    // where their latency has more of a step to hide: the spread measured 0.94-0.96x there
+    // (7-10 splits of 18-26 steps).
+    const bool spread = SPREAD && (splits <= 4 || vEnd - vFirst >= 32);
     constexpr int PSF = 5;
     unsigned off[XL + WL];
     auto offsets = [&]() __attribute__((always_inline))
