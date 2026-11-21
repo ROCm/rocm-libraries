@@ -161,9 +161,6 @@ test_categories:
       - "rocke_differential_golden_ll"
       - "rocke_differential_golden_canonical"
       - "rocke_oracle_free_pytest"
-      # Not registered on Windows (see rocke/platform/CMakeLists.txt).
-      - "rocke_hip_source_identity"
-      - "rocke_hip_lowering_parity"
       - "rocke_library_dsa_pytest"
       - "rocke_reference_common_pytest"
       - "rocke_[a-z0-9_]+_reference_unit_pytest"
@@ -313,6 +310,9 @@ test_categories:
       - "rocke_library_gdn_pytest"
       # Compiles kernels to check the backend's access widths: a performance check.
       - "rocke_tiling_backend_width_pytest"
+      # Not registered on Windows (see rocke/platform/CMakeLists.txt).
+      - "rocke_hip_source_identity"
+      - "rocke_hip_lowering_parity"
     labels:
       - "standard"
       - "comprehensive"

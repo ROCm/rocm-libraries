@@ -753,7 +753,7 @@ if(ROCKE_INSTALL_TESTS)
       string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
              "add_test(rocke_hip_source_identity ${_ROCKE_INSTALLED_PYTEST} \"${ROCKE_TEST_CTEST_REL}tests/${_ROCKE_HIP_SOURCE_IDENTITY_TEST}\" -v -rs --timeout=120)\n")
       string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-             "set_tests_properties(rocke_hip_source_identity PROPERTIES LABELS \"ckc;python;host;quick\" ENVIRONMENT \"PYTHONPATH=${_ROCKE_INSTALLED_PYTHONPATH};${_ROCKE_IR_LOWER_CLI_ENVIRONMENT}\" TIMEOUT 300)\n")
+             "set_tests_properties(rocke_hip_source_identity PROPERTIES LABELS \"ckc;python;host;standard\" ENVIRONMENT \"PYTHONPATH=${_ROCKE_INSTALLED_PYTHONPATH};${_ROCKE_IR_LOWER_CLI_ENVIRONMENT}\" TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})\n")
     endif()
 
     # Both engines lower each MMA atom and operand register type to the same HIP
@@ -777,9 +777,9 @@ if(ROCKE_INSTALL_TESTS)
              "list(APPEND _rocke_hip_lowering_parity_environment \${_rocke_compiler_tool_environment})\n"
              "add_test(rocke_hip_lowering_parity ${_ROCKE_INSTALLED_PYTEST} ${_rocke_parity_paths} -v -rs --timeout=60)\n"
              "set_tests_properties(rocke_hip_lowering_parity PROPERTIES\n"
-             "  LABELS \"ckc\\;python\\;host\\;quick\"\n"
+             "  LABELS \"ckc\\;python\\;host\\;standard\"\n"
              "  ENVIRONMENT \"\${_rocke_hip_lowering_parity_environment}\"\n"
-             "  TIMEOUT 120)\n")
+             "  TIMEOUT ${ROCKE_TEST_TIMEOUT_TOOLCHAIN})\n")
     endif()
 
     if(ROCKE_INSTALL_PLATFORM_PYTEST)
@@ -955,7 +955,7 @@ if(ROCKE_INSTALL_TESTS)
              "set_tests_properties(rocke_tiling_backend_width_pytest PROPERTIES\n"
              "  LABELS \"ckc\\;python\\;standard\"\n"
              "  ENVIRONMENT \"\${_rocke_tiling_backend_width_pytest_environment}\"\n"
-             "  TIMEOUT 120)\n")
+             "  TIMEOUT ${ROCKE_TEST_TIMEOUT_TOOLCHAIN})\n")
     endif()
 
     # Library suites enrol themselves: library/tests/ctest_lists.cmake appends
