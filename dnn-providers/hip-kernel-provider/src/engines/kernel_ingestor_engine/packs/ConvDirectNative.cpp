@@ -326,32 +326,46 @@ std::optional<Tile>
     return best;
 }
 
-/// Linear tiles (LIN configs): BM consecutive pixels of the image's virtual raster, whose rows
-/// and planes are at least the output's and wide enough that a tap's reach past a virtual row
-/// (or plane) lands on the input's zero padding on both readings: per axis max(out, in +
-/// max(leading pad, trailing pad)). Backward data of an unpadded layer gets exactly the output's
-/// extents (no junk pixels); "same" padding one junk column and row. Declines rows wider than
-/// the config's stage holds.
-std::optional<Tile> linTileFor(const K2Args& a, const Config& config, long long columnBlocks)
+/// Run tiles (RUN configs): the output is cut into strips of Ws columns; a block owns BM
+/// consecutive pixels of a strip's raster of rows over the planes, so tiles span rows and planes
+/// and leave no pixel slot idle where Ws divides the width. A plane has Hv virtual rows: at least
+/// the output's, and enough that a filter row's reach past a plane's last row lands on the
+/// input's zero padding on both readings (max(out, in + max(leading pad, trailing pad))). Ws is
+/// the width whose tiles cost least (pixel slots plus half the staged halo, as tileFor), among
+/// those whose stage fits the config's; ties go to the wider strip.
+std::optional<Tile> runTileFor(const K2Args& a, const Config& config, long long columnBlocks)
 {
-    const long long trailW = static_cast<long long>(a.wo) + config.s - 1 - a.wi - a.pw;
     const long long trailH = static_cast<long long>(a.ho) + config.r - 1 - a.hi - a.ph;
-    const long long wv = std::max<long long>(a.wo, a.wi + std::max<long long>(a.pw, trailW));
     const long long hv = std::max<long long>(a.ho, a.hi + std::max<long long>(a.ph, trailH));
-    const long long pixels = static_cast<long long>(a.dout) * hv * wv;
-    if(wv > config.lin || pixels + config.bm > INT_LIMIT)
+    const long long raster = static_cast<long long>(a.dout) * hv;
+    std::optional<Tile> best;
+    double bestCost = 0.0;
+    for(int ws = 1; ws <= a.wo; ++ws)
     {
-        return std::nullopt;
+        if(k2RunHalo(config.bm, config.r, config.s, ws) > config.run
+           || raster * ws + config.bm > INT_LIMIT)
+        {
+            continue;
+        }
+        const long long strips = divUp(a.wo, ws);
+        const long long tiles = strips * divUp(raster * ws, config.bm);
+        const double halo = (static_cast<double>(config.bm) / ws + config.r) * (ws + config.s - 1);
+        const double cost = static_cast<double>(tiles) * (config.bm + 0.5 * halo);
+        if(!best.has_value() || cost <= bestCost)
+        {
+            Tile t;
+            t.th = static_cast<int>(hv);
+            t.tw = ws;
+            t.ds = a.dout;
+            t.tilesW = static_cast<int>(divUp(raster * ws, config.bm));
+            t.tilesH = static_cast<int>(strips);
+            t.tilesD = 1;
+            t.blocks = static_cast<long long>(t.tilesW) * t.tilesH * a.n * columnBlocks;
+            best = t;
+            bestCost = cost;
+        }
     }
-    Tile t;
-    t.th = static_cast<int>(hv);
-    t.tw = static_cast<int>(wv);
-    t.ds = a.dout;
-    t.tilesW = static_cast<int>(divUp(pixels, config.bm));
-    t.tilesH = 1;
-    t.tilesD = 1;
-    t.blocks = static_cast<long long>(t.tilesW) * a.n * columnBlocks;
-    return t;
+    return best;
 }
 
 } // namespace
@@ -635,11 +649,11 @@ std::optional<Config> configOf(const KernelDefinition& kernel)
     {
         return std::nullopt;
     }
-    // Linear tiles (absent: 0): halo tiles, matrix-core, register-path weights, channels-last,
-    // non-ring; the value is the widest virtual row (pixels) their stage holds.
-    config.lin = intField(kernel, "lin").value_or(0);
-    if(config.lin != 0
-       && (config.lin < 1 || config.rows || config.fma || config.ring != 0 || config.bl != 0
+    // Run tiles (absent: 0): halo tiles, matrix-core, register-path weights, channels-last,
+    // non-ring; the value is the stage's pixels.
+    config.run = intField(kernel, "run").value_or(0);
+    if(config.run != 0
+       && (config.run < 1 || config.rows || config.fma || config.ring != 0 || config.bl != 0
            || config.cf != 0))
     {
         return std::nullopt;
@@ -850,7 +864,7 @@ std::optional<Plan>
         {
             return std::nullopt;
         }
-        tile = config.lin != 0 ? linTileFor(a, config, columnBlocks)
+        tile = config.run != 0 ? runTileFor(a, config, columnBlocks)
                                : tileFor(a, config, columnBlocks, computeUnits);
     }
     if(!tile.has_value())
@@ -1350,9 +1364,9 @@ public:
             {
                 options.add("CONV_DIRECT_XPF", std::to_string(config.xpf));
             }
-            if(config.lin != 0)
+            if(config.run != 0)
             {
-                options.add("CONV_DIRECT_LIN", std::to_string(config.lin));
+                options.add("CONV_DIRECT_RUN", std::to_string(config.run));
             }
         }
 

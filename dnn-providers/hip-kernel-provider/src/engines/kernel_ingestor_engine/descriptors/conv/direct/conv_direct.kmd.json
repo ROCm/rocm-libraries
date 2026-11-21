@@ -156,7 +156,7 @@
       "type": "int"
     },
     {
-      "name": "lin",
+      "name": "run",
       "type": "int"
     }
   ]

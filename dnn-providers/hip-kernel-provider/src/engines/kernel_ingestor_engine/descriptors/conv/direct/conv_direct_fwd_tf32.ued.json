@@ -40,7 +40,7 @@
     "dil",
     "line",
     "bpu",
-    "lin"
+    "run"
   ],
   "behavior_notes": [
     "runtime_compilation"

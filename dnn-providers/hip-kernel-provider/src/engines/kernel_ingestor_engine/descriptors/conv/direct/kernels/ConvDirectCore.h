@@ -373,29 +373,34 @@ struct K2Block
         hp = (a.th + R - 1) * hw;
     }
 
-    /// Linear tiles (LIN configs): the output is the virtual raster of an image, rows of
-    /// a.tw = Wv and planes of a.th = Hv rows (virtual extents at least the output's, chosen by the
-    /// planner so a tap offset (r Wv + s) that runs past a virtual row lands on a zero of the
-    /// input). A block owns BM consecutive virtual pixels from u0 (they may span rows and
-    /// planes); per depth tap it stages the BM + (R - 1) Wv + S - 1 virtual pixels from u0 plus
-    /// the tap's planes. dF / dL: the first and last output planes the tile touches.
-    int u0, dF, dL;
-    __device__ void initLin(const K2Args& a, int R, int S, int bm)
+    /// Run tiles (RUN configs): the output is cut into strips of a.tw = Ws columns, and a
+    /// strip's pixels are a raster of its rows over the planes, a.th = Hv rows a plane (Hv at
+    /// least the output's height, chosen by the planner so a filter row's reach past a plane's
+    /// last row lands on a zero of the input on both readings). A block owns BM consecutive
+    /// pixels of one strip's raster, from column c0 of virtual row r0 (they may span rows and
+    /// planes); per depth tap it stages the rows they cover plus R - 1, each Ws + S - 1 pixels
+    /// from the strip's first column. dF / dL: the first and last output planes the tile touches.
+    int u0, dF, dL, r0, c0, sx;
+    __device__ void initRun(const K2Args& a, int R, int S, int bm)
     {
         init(a, R, S);
-        // a.tilesW tiles an image (tilesH = tilesD = 1): the decode above left the tile in ow0.
+        // a.tilesW tiles a strip, a.tilesH strips an image (tilesD 1): the decode above left the
+        // tile in ow0 and the strip in oh0.
         const int tile = ow0 / a.tw;
-        const int plane = a.th * a.tw;
+        sx = (oh0 / a.th) * a.tw;
         u0 = tile * bm;
-        dF = u0 / plane;
-        const int last = u0 + bm - 1;
-        dL = last / plane < a.dout - 1 ? last / plane : a.dout - 1;
+        r0 = u0 / a.tw;
+        c0 = u0 - r0 * a.tw;
+        const int rows = (c0 + bm + a.tw - 1) / a.tw;
+        dF = r0 / a.th;
+        const int last = (r0 + rows - 1) / a.th;
+        dL = last < a.dout - 1 ? last : a.dout - 1;
         oh0 = 0;
         ow0 = 0;
         od0 = 0;
         dsEff = 1;
-        hw = a.tw;
-        hp = bm + (R - 1) * a.tw + S - 1;
+        hw = a.tw + S - 1;
+        hp = (rows + R - 1) * hw;
     }
 };
 
@@ -438,11 +443,12 @@ struct K2HaloLoad
                           : -1;
         }
     }
-    // Linear tiles (K2Block::initLin): pass pixel p is virtual pixel u0 + p of the image, at
-    // output plane dv[p]; hOff its in-plane input offset (or -1 outside the input's rows and
-    // columns). The plane is checked per depth tap (loadLin).
+    // Run tiles (K2Block::initRun): pass pixel p is pixel (p / hw, p % hw) of the staged rows,
+    // virtual row r0 + p / hw (output plane dv[p]) and column sx + p % hw - pw; hOff its
+    // in-plane input offset (or -1 outside the input's rows and columns). The plane is checked
+    // per depth tap (loadRun).
     int dv[PASSES];
-    __device__ void initLin(const K2Args& a, const K2Block& b, int tid)
+    __device__ void initRun(const K2Args& a, const K2Block& b, int tid)
     {
         kv = (tid % PT) * VEC;
         prow = tid / PT;
@@ -453,24 +459,22 @@ struct K2HaloLoad
             = static_cast<const T*>(a.x) + static_cast<long long>(b.img) * a.di * planeElems;
         rsrc = k1Rsrc(
             img, static_cast<long long>(a.di) * planeElems * static_cast<long long>(sizeof(T)));
-        const int plane = a.th * a.tw;
 #pragma unroll
         for(int p = 0; p < PASSES; ++p)
         {
             const int pix = prow + p * PPP;
-            const int q = b.u0 + pix;
-            dv[p] = q / plane;
-            const int rest = q - dv[p] * plane;
-            const int hh = rest / a.tw;
-            const int ih = hh - a.ph, iw = rest - hh * a.tw - a.pw;
+            const int hh = pix / b.hw;
+            const int vr = b.r0 + hh;
+            dv[p] = vr / a.th;
+            const int ih = vr - dv[p] * a.th - a.ph, iw = b.sx + pix - hh * b.hw - a.pw;
             hOff[p] = pix < b.hp && static_cast<unsigned>(ih) < static_cast<unsigned>(a.hi)
                               && static_cast<unsigned>(iw) < static_cast<unsigned>(a.wi)
                           ? (ih * a.wi + iw) * a.c
                           : -1;
         }
     }
-    // Depth tap t, channel chunk c0: pass p reads input plane dv[p] + t - pd.
-    __device__ void loadLin(int t, int pd, int di, int c0)
+    // Run tiles, depth tap t, channel chunk c0: pass p reads input plane dv[p] + t - pd.
+    __device__ void loadRun(int t, int pd, int di, int c0)
     {
         const int c = c0 + kv;
         const unsigned live = 0u - static_cast<unsigned>(c < cIn);
@@ -946,7 +950,7 @@ template <class T,
           int CF = 0,
           int CF_RUN = 2,
           int XPF = 0,
-          int LIN = 0>
+          int RUN = 0>
 __device__ __attribute__((always_inline)) void k2ConvMma(const K2Args& a CONV_EPI_FN_PARAM)
 {
     constexpr int WAVE = Atom::WAVE;
@@ -973,9 +977,9 @@ __device__ __attribute__((always_inline)) void k2ConvMma(const K2Args& a CONV_EP
     static_assert(WTM % DIM == 0 && WTN % DIM == 0 && BC % KA == 0 && WTN % VO == 0, "tile");
     // CF 1: packed channels-first activations in place (K2HaloLoadCf in, channel-major stores out).
     static_assert(CF == 0 || (SPLIT == 0 && sizeof(T) == 2), "channels-first tile");
-    // LIN (the widest virtual row the stage holds): linear tiles over the image's virtual
-    // raster (K2Block::initLin), channels-last, depth taps restaged per tap, weights by register.
-    static_assert(LIN == 0 || (CF == 0 && RING == 0 && BL == 0), "linear tile");
+    // RUN (the stage's pixels, HALO): run tiles over strips of the output (K2Block::initRun),
+    // channels-last, depth taps restaged per tap, weights by register.
+    static_assert(RUN == 0 || (CF == 0 && RING == 0 && BL == 0), "run tile");
     typedef typename K1If<CF != 0,
                           K2HaloLoadCf<T, BC, THREADS, k2CfTasks(BM, R, S, BC, CF_RUN), CF_RUN>,
                           K2HaloLoad<T, BC, VEC, THREADS, HALO>>::type Loader;
@@ -995,8 +999,8 @@ __device__ __attribute__((always_inline)) void k2ConvMma(const K2Args& a CONV_EP
     T* const bls = lds + 2 * SLOT;
 
     K2Block b;
-    if constexpr(LIN != 0)
-        b.initLin(a, R, S, BM);
+    if constexpr(RUN != 0)
+        b.initRun(a, R, S, BM);
     else
         b.init(a, R, S);
     const int n0 = b.col * BN;
@@ -1004,11 +1008,11 @@ __device__ __attribute__((always_inline)) void k2ConvMma(const K2Args& a CONV_EP
     const int lane = tid % WAVE, wave = tid / WAVE;
     const int wm = wave % WM, wn = wave / WM;
     const int kb = Atom::template kBase<Atom::KPL>(lane);
-    const int tilePix = LIN != 0 ? BM : a.th * a.tw;
+    const int tilePix = RUN != 0 ? BM : a.th * a.tw;
 
     Loader ld;
-    if constexpr(LIN != 0)
-        ld.initLin(a, b, tid);
+    if constexpr(RUN != 0)
+        ld.initRun(a, b, tid);
     else
         ld.init(a, b, tid);
     // Split-C: this block's channel chunks [cb, cb + nChL).
@@ -1022,10 +1026,12 @@ __device__ __attribute__((always_inline)) void k2ConvMma(const K2Args& a CONV_EP
     for(int i = 0; i < FM; ++i)
     {
         const int m = wm * WTM + i * DIM + lane % DIM;
-        if constexpr(LIN != 0)
+        if constexpr(RUN != 0)
         {
-            // A linear tile's pixel m reads stage row m at tap (0, 0, 0).
-            aOff[i] = m * LDC + kb;
+            // A run tile's pixel m is column (c0 + m) % Ws of staged row (c0 + m) / Ws.
+            const int q = b.c0 + m;
+            const int row = q / a.tw;
+            aOff[i] = (row * b.hw + q - row * a.tw) * LDC + kb;
         }
         else
         {
@@ -1577,16 +1583,16 @@ __device__ __attribute__((always_inline)) void k2ConvMma(const K2Args& a CONV_EP
                     if(m >= tilePix || nn >= a.k)
                         continue;
                     int oh, ow, odp = od;
-                    if constexpr(LIN != 0)
+                    if constexpr(RUN != 0)
                     {
-                        // Virtual pixel u0 + m: its plane, row and column (junk past the
+                        // Strip pixel u0 + m: its plane, row and column (junk past the
                         // output's extents).
-                        const int plane = a.th * a.tw;
-                        const int q = b.u0 + m;
-                        odp = q / plane;
-                        const int rest = q - odp * plane;
-                        oh = rest / a.tw;
-                        ow = rest - oh * a.tw;
+                        const int q = b.c0 + m;
+                        const int row = q / a.tw;
+                        const int vr = b.r0 + row;
+                        odp = vr / a.th;
+                        oh = vr - odp * a.th;
+                        ow = b.sx + q - row * a.tw;
                         if(odp >= a.dout)
                             continue;
                     }
@@ -1619,7 +1625,7 @@ __device__ __attribute__((always_inline)) void k2ConvMma(const K2Args& a CONV_EP
         }
     };
 
-    if constexpr(LIN != 0)
+    if constexpr(RUN != 0)
     {
         // One step per (depth tap, chunk): the driver's plane is dL - pd + t, and depth tap t is
         // live when it reaches the input for some plane dF..dL of the tile.
@@ -1631,7 +1637,7 @@ __device__ __attribute__((always_inline)) void k2ConvMma(const K2Args& a CONV_EP
             a.pd,
             a.di + b.dL - b.dF,
             nChL,
-            [&](int plane, int cc) { ld.loadLin(plane - first, a.pd, a.di, (cb + cc) * BC); },
+            [&](int plane, int cc) { ld.loadRun(plane - first, a.pd, a.di, (cb + cc) * BC); },
             [&](int stage) { ld.template storePixels<LDC>(lds + stage * SLOT); },
             ring,
             tap,

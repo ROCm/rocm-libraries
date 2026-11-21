@@ -325,9 +325,9 @@ std::vector<DeviceCase> deviceCases()
     auto deep = dense(64, 64, {9, 8, 8}, {3, 3, 3}, {1, 1, 1}, true);
     deep.n = 1;
     cases.push_back({"Ndhwc3x3x3Deep", deep});
-    // Linear tiles (lin configs): planes smaller than a tile, so a tile spans planes and its
-    // taps' reach wraps rows and planes onto the padding; and 130-wide rows (the widest stage),
-    // where backward data's virtual rows are the output's and forward's carry two junk columns.
+    // Run tiles (run configs): planes smaller than a tile, so a tile spans rows and planes and a
+    // filter row's reach past a plane lands on the padding; and 130-wide rows cut into strips,
+    // whose halos reach into the neighbouring strips' columns.
     cases.push_back({"Ndhwc3x3x3Pad0Spans", dense(40, 24, {7, 9, 10}, {3, 3, 3}, {0, 0, 0}, true)});
     auto wideRows = dense(24, 40, {4, 5, 130}, {3, 3, 3}, {0, 0, 0}, true);
     wideRows.n = 1;
