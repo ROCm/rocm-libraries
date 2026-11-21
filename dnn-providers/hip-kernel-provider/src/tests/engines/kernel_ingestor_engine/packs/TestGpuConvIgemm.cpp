@@ -3085,6 +3085,7 @@ TEST(TestConvIgemmCatalog, FlexWideRegisterTileDeclinesGridsOfFewerTilesThanUnit
 {
     // 320 row tiles of one 256-wide column tile: served on 304 and 320 units, declined on 400.
     auto wide = dense(32, 48, {5, 64, 256}, {3, 3, 3}, {1, 1, 1}, true);
+    wide.n = 1;
     wide.dataType = DataType::HALF;
     const auto pack = packFor(ConvDirection::FORWARD);
     int checked = 0;
