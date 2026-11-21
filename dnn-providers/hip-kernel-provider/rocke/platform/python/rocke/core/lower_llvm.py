@@ -655,9 +655,8 @@ _INTRINSIC_DECLS: Dict[str, str] = {
     ),
     # 2-byte buffer load. Returns i16 (vs the i32 4-byte load), so the
     # AMDGPU OOB clamp fires per-element instead of clamping a 4-byte
-    # window. Required by P10 to bit-fix the trailing-element corruption
-    # in ``img2col vec_k=1`` and ``pooling vec=1 avg`` (see
-    # ``PROPOSALS_PLAN.md::P10`` for the LLVM bug pattern).
+    # window. Required to bit-fix the trailing-element corruption
+    # in ``img2col vec_k=1`` and ``pooling vec=1 avg``.
     "raw.ptr.buffer.load.i16": (
         "declare i16 @llvm.amdgcn.raw.ptr.buffer.load.i16("
         "ptr addrspace(8) nocapture readonly, i32, i32, i32 immarg)"

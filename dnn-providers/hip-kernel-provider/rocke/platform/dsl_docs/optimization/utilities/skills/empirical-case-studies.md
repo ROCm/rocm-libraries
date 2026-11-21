@@ -178,9 +178,9 @@ From empirical LDS studies on MI350X:
 
 **Critical asymmetry**: Swizzle layouts tuned for reads may not protect the write path. Read and write conflict behavior on the same LDS region can differ and may need separate swizzle strategies.
 
-**For deeper analysis**, see companion documents:
-- **LDS_a.md**: "Four Things to Know About LDS Bank Conflicts on MI350X"
-- **LDS_b.md**: "Empirically Characterizing LDS Bank Conflicts on AMD MI350X"
+**For deeper analysis**, see two out-of-tree articles:
+- "Four Things to Know About LDS Bank Conflicts on MI350X"
+- "Empirically Characterizing LDS Bank Conflicts on AMD MI350X"
 
 ---
 

@@ -148,7 +148,7 @@ swizzled LDS store/load pairing here is specific to `a_per_lane == 4`.
 - `seqlen` a multiple of `chunk`. **No varlen path**: a ragged batch must be
   padded by the caller
 - this page covers gfx942 prefill only. The shared gfx950 GDN/KDA single-token
-  decode emitter is documented in [`gdn_decode.md`](gdn_decode.md)
+  decode emitter is documented in [`gdn.md`](gdn.md)
 
 ## Host drivers
 

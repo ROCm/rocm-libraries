@@ -6,7 +6,7 @@ forward (router → sort → gather → gate/up GEMM → SiLU → down GEMM →
 weighted reduce, as `5 + 3·E` launches on one HIP stream). It is the
 canonical performance harness for the CK DSL MoE work, and is distinct
 from the single-launch mega-kernel in
-[`examples/gfx950/fused_mega_moe/`](../../fused_mega_moe/) (same math,
+[`examples/gfx950/fused_mega_moe/`](../fused_mega_moe/) (same math,
 opposite kernel structure).
 
 > **New to fused MoE, or want the kernel strategy?**

@@ -620,7 +620,7 @@ coupled B-column)*. Two equivalent readings — **fixed-physical**: the C physic
 canonical machine layout, only the `(M,N)` labels move onto it; **fixed-logical**: a result `C[m,n]`
 lands wherever the machine canonically calls `(Mc,Nc)`, i.e. *off* canonical `(m,n)`. It is a clean
 DERIVATION because a register shuffle is a permutation of the free dim (each canonical row → exactly one
-actual row), so it composes as pure encoding arithmetic. See `../mma_is_machinery.md` (§"machine
+actual row), so it composes as pure encoding arithmetic. See `mma_is_machinery.md` (§"machine
 mapping is a fixed PHYSICAL coupling") for the `reg0/tid0` worked example.
 
 > **The canonical trap — do not miss this.** The store-friendly interleaved C ownership is a

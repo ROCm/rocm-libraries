@@ -1,7 +1,7 @@
 # gemm_perf_skinny_decode — Runbook-driven walkthrough
 
 A self-contained example of the
-[CK DSL Optimization Runbook](../../../dsl_docs/optimization/optimization_runbook.md)
+[CK DSL Optimization Runbook](../../../../../dsl_docs/optimization/optimization_runbook.md)
 applied to one concrete problem: a Qwen3-8B **`o_proj` decode** matmul
 (`bf16`, `M=2`, `N=4096`, `K=4096`) — a low-utilization, HBM-bound GEMM
 typical of the decode phase (the same kind of projection the

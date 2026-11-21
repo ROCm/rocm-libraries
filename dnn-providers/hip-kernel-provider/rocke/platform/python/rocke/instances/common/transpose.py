@@ -32,8 +32,8 @@ LDS column at adjacent rows. With a row-major LDS the addresses are
 ``(row + i) * stride_r + col`` for ``i in 0..vec-1``, so they cannot
 collapse to a single ``ds_read_b{N*16}`` op -- the only way to fuse
 them is an "in-LDS transpose" instruction (``ds_read_b{64,96,128}_tr_b16``
-on gfx950, see the CDNA4 chapter of the LDS optimisation skill in
-``FlyDSL/.claude/skills/lds-optimization/SKILL.md``). The DSL's IR
+on gfx950, see the CDNA4 chapter of the LDS optimisation skill in the
+FlyDSL repository, ``.claude/skills/lds-optimization/SKILL.md``). The DSL's IR
 builder does not yet expose those primitives -- the proposal to add
 them lives at the bottom of this docstring.
 

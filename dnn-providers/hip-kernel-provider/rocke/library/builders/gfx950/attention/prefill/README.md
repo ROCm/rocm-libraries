@@ -351,7 +351,7 @@ by representative cases in `platform/tests/golden/rocke_representative_ir_sha256
 Every alias above (causal kinds fix the right bound at 0, full attention ignores the
 alignment, single-token full attention is causal, equal-length top-left folds for the
 dense kernel only) is resolved in one place, `normalize_band` in
-[common.py](dispatch/attention/common.py), into a frozen `AttentionBand(left_bound,
+[common.py](../../../../dispatch/attention/common.py), into a frozen `AttentionBand(left_bound,
 right_bound, alignment)`. The unified problem fields, the feature set and the dense
 band all read that value. The feature vocabulary is `causal`, `full_attention`
 (no bound on either side), and `band` (a lookahead or non-causal window); a candidate

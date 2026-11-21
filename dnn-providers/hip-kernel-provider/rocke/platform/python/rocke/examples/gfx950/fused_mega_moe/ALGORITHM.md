@@ -160,8 +160,7 @@ each fp8 `Hidden` value at the logical `(m, inter)` cell, and the down GEMM read
 its A operand from that *same* `(m, inter)` cell of the LDS buffer — the quant
 write address equals the down-MFMA A-read address. The reshape from the gate/up
 MFMA C-output layout into the down-GEMM A-input layout is therefore *implicit* in
-the addressing (BUILD_SPEC_FP8 §3.5), accomplished by the write/read addressing
-itself rather than by a separate swizzled write/read pair.
+the shared write/read address, not a separate swizzled write/read pair.
 
 ### 5.6 — Down GEMM (contract the I-slice this block owns)
 For each 128-block `c` along this threadgroup's `tile_n` slice of `I`:

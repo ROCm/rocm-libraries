@@ -372,9 +372,8 @@ def build_topk_softmax(spec: TopkSoftmaxSpec, arch: str = "gfx950") -> KernelDef
     #   race-write argmax for these block sizes; the multi-wave
     #   wave-shuffle implementation lives in git history as
     #   reference but isn't built into the current production path.
-    #   See ``notes/instances/moe_sorting_topk.md`` for the
-    #   measured comparison and the v2 plan (per-warp registers +
-    #   smaller cross-wave merge is the path forward).
+    #   A v2 design (per-warp registers + smaller cross-wave
+    #   merge) is the path forward.
     # Single-wave rows (``BS <= wave_size``) can run the cross-lane
     # wave-XOR butterfly; multi-wave rows fall back to the wave-agnostic
     # LDS reduce + LDS race-write argmax. On wave32 a ``BS == 64`` row is

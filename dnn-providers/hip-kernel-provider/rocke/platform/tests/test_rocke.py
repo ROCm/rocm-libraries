@@ -8498,7 +8498,7 @@ class TestMfmaGemm(unittest.TestCase):
         Phase-1 ``mfma_flatmm`` worker switched ``mfma_gemm`` /
         ``flatmm`` from the legacy ``16x16x16`` atom to the K-packed
         ``16x16x32`` (and the ``32x32x16`` hero for larger tiles) on
-        gfx950+ — see ``notes/instances/mfma_flatmm.md`` (1.33×–2.78×
+        gfx950+ (1.33×–2.78×
         speedup, bit-exact parity). The test now guards the *MFMA-ness*
         of the kernel without pinning the atom shape.
         """

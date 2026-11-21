@@ -857,7 +857,7 @@ From empirical measurements (ResNet50 conv3_1, gfx950):
 
 ## See Also
 
-- `.claude/OPTIMIZATION_RUNBOOK.md` Section 6.3-6.4 - LDS theory and swizzle patterns
+- `dsl_docs/optimization/optimization_runbook.md` Section 6.3-6.4 - LDS theory and swizzle patterns
 - `/empirical-case-studies` Case Study 2 - XOR vs Padding performance data (gfx950)
 - `/capture-kernel-trace-rocke` - Profiling with rocprofv3
 - `/kernel-trace-analysis` - ATT trace bottleneck analysis

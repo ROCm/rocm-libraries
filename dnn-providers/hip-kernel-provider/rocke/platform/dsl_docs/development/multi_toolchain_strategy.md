@@ -7,8 +7,7 @@ strategy** for scaling to more toolchains and more targets.
 
 > **Lifecycle.** This is a design/working note, not reference documentation.
 > Fold §1–§2 into `dsl_docs/architecture/` once they stop changing, and delete
-> the rest as §4's items land. Related: the decl-table half of this problem is
-> tracked in [`f8f6f4_and_decl_validation_plan.md`](f8f6f4_and_decl_validation_plan.md).
+> the rest as §4's items land.
 
 > **Historical survey environment.** The original probes used AMD clang
 > 23.0.0git and COMGR package metadata reporting ROCm 7.13. That recorded
@@ -197,7 +196,7 @@ flavor axis alone. `_need()` (`:1536`) sets a flag and validates nothing.
 
 This is the structural cause of two already-diagnosed bugs: B9 (`ds.read.tr16.b128`,
 fictional on the gfx950 path, real-but-different on the gfx1250 path, one table
-row for both) and the tiled-3D arch-routing bug (`f8f6f4_..._plan.md` §4.10).
+row for both) and the tiled-3D arch-routing bug (§4.10 of the out-of-tree f8f6f4 and declaration-validation plan).
 
 The `arch or "gfx950"` default makes it worse: a caller that forgets `arch=`
 silently gets gfx950 rather than an error. Several such call sites were found and
@@ -396,7 +395,7 @@ state entirely: a flavor with no column is absent, and absence skips rather than
 reds.
 
 Catches B3, B4 and B9 immediately, and unlike the module gate does **not** depend
-on a corpus case happening to emit them (`f8f6f4_..._plan.md` §4.8 admits that
+on a corpus case happening to emit them (§4.8 of the out-of-tree f8f6f4 plan admits that
 limitation explicitly).
 
 **R2 — make `_need()` arch-aware; land it warn-only.**

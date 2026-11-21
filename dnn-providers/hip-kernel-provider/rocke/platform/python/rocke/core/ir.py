@@ -5310,8 +5310,8 @@ class IRBuilder:
         2 instructions (vgpr address compute + ds_bpermute). Measured on
         the long-prefill ``bf16 n=16 q=1000 k=1050`` workload: ds_swizzle
         cut the inner-loop ds-unit ops from 64 → 16 and shaved 30+ µs
-        per call. See the ISA op-by-op comparison in
-        ``ck/dsl/unified_attention_results.md``.
+        per call (the ISA op-by-op comparison is in out-of-tree
+        unified-attention results notes).
         """
         if addr.type.name != "i32" or data.type.name != "i32":
             raise ValueError("ds_bpermute requires i32 addr + i32 data")

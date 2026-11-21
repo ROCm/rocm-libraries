@@ -9,7 +9,7 @@ Worked implementation mirroring :mod:`rocke.dispatch.gemm.bf16_rcr`, backed by
 
 SCOPE -- what this dispatcher decides
 -------------------------------------
-The fused-MoE mega-kernel has a STATIC tile geometry (locked by BUILD_SPEC:
+The fused-MoE mega-kernel has a STATIC tile geometry (locked:
 ``tile_m=16, tile_n_inter=256, tile_k_gu=32``); the MoE problem dims
 (num_tokens / hidden / intermediate / num_experts / top_k) are RUNTIME kernel
 args, not selection knobs. The load-bearing dispatch decision is therefore the

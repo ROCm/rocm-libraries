@@ -5,7 +5,7 @@
 gfx1250 is a CDNA multi-chip device on the GFX12 programming model (wave32,
 WMMA, no MFMA). The primary fp16/bf16 WMMA atom is 16x16x32 (K=32), distinct
 from the RDNA4 gfx1201 16x16x16. See
-``examples/gfx1250/attention/gfx1250_universal_attention_plan.md``.
+``library/builders/gfx1250/attention/gfx1250_universal_attention_plan.md``.
 """
 
 # Only the KV-cache-side kernels remain as dedicated gfx1250 builders.

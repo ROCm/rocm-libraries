@@ -96,7 +96,7 @@ here: the `ATOM_USE_DSL_GEMM` / `ATOM_USE_DSL_ATTENTION` / `ATOM_DSL_GEMM_MAX_M`
 / `ATOM_DSL_GEMM_DEBUG` torch.compile-routing flags live in
 `examples/gfx950/qwen3_30b_a3b/README.md`, and `AITER_PATH` (an external-baseline
 checkout) is documented in the example READMEs that use it (e.g.
-`examples/gfx950/attention/README.md`, `examples/gfx950/moe/README.md`).
+`library/builders/gfx950/attention/README.md`, `examples/gfx950/moe/README.md`).
 
 ## Experimental kernel-development knobs (off by default)
 

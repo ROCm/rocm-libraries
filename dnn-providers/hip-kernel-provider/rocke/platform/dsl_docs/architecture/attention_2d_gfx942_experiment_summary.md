@@ -482,7 +482,7 @@ transpose still collides (19.4% conflicts), driving LdsLatency to 3× L4, so MFM
 — the earlier "L4 = 2 wg/CU" belief does not hold here. (c) ruled out (VALU idle). **The decisive
 re-frame:** single-wave-per-WG kernels cannot hide latency *regardless of V layout*; flash is WG=256
 (4 waves). This pointed at the **wave-slot fill** (cfv 2.4% / L4 4.3% / flash much higher) as the
-dominant lever — and seeded wide4. (Full: `WIP-flash-async/VERDICT_ROCPROF.md`.)
+dominant lever — and seeded wide4. (The full verdict is in out-of-tree experiment notes.)
 
 ### 5b — wide4: more waves per WG [SHIPPED — the peak, +19.7%]
 
@@ -571,7 +571,7 @@ register layout for the `32×32×8` atom may require a **lane-interleaved** toke
 (a)'s store happens to satisfy but the cfvst store (tokens laid 0,1,2,3… strictly contiguous per dim
 row) does not. **Concrete next probe:** dump `V_lds` for a tiny single-tile case (S=64) from BOTH
 vehicle (a) and cfvst and diff slot-by-slot — the 1/8 of slots that differ name the exact `(dim,token)`
-the store mis-fills. (Full: `gfx942-cfv-store/{CFV_VERDICT.md,HANDOFF.md}`; diagnostic env knobs
+the store mis-fills. (The full write-up is in out-of-tree experiment notes; diagnostic env knobs
 `CFV_STORE_{SCALAR_LOAD,SCATTER,PREZERO,SEPOFF}` left gated-off in the kernel.)
 
 **Why this is PARKED, not killed-as-ceiling:** the vehicle is the right shape (playbook + CK

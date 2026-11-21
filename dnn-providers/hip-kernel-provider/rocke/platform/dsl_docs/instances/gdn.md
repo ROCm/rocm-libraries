@@ -37,8 +37,6 @@ Sections below cover both decode gate kinds:
 - [Thread mapping](#thread-mapping)
 - [Registry and tile selection](#registry-and-tile-selection)
 - [Dispatch](#dispatch)
-- [Coverage](#coverage)
-- [Failure modes](#failure-modes)
 
 The gated delta rule itself -- the four-line recurrence, why the `v_new` term
 makes it a *delta* rule, the precision and cross-lane reduction choices, and

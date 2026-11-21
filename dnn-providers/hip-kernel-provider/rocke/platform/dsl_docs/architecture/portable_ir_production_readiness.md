@@ -95,7 +95,7 @@ control that makes the other two columns meaningful. Every kernel that compiles
 produces byte-identical HSACO on both backend paths.
 
 The shortfall from 46 is not a parity failure — it is kernels that no path can
-compile, discussed in [Compilability](#ll-parity-overstates-what-is-shippable).
+compile, discussed in [Compilability](#ll-parity-overstates-what-is-shippable--p1).
 
 ### 2. The rolled path, proven at the HSACO level
 

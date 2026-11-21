@@ -787,8 +787,8 @@ bandwidth = 100.7 MB / 0.264 ms = 381 GB/s (7% of 5.2 TB/s peak)
 
 ## 17. See Also
 
-- `.claude/OPTIMIZATION_RUNBOOK.md` Section 7.1-7.2 - MFMA instruction details
-- `.claude/OPTIMIZATION_RUNBOOK.md` Section 8 - Pipeline theory
+- `dsl_docs/optimization/optimization_runbook.md` Section 7.1-7.2 - MFMA instruction details
+- `dsl_docs/optimization/optimization_runbook.md` Section 8 - Pipeline theory
 - `/empirical-case-studies` - Real-world performance data
 - `/capture-kernel-trace-rocke` - Profiling with rocprofv3
 - `/kernel-trace-analysis` - ATT trace bottleneck analysis

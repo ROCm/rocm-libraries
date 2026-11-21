@@ -218,7 +218,7 @@ Decide what the kernel computes before deciding how it should run.
 - For non-trivial mappings (paged KV, im2col), the coordinate
   transform DAG lives in `transforms.py`. Operators are
   `pass_through`, `pad`, `pad_dynamic`, `embed`, `unmerge`, `merge`,
-  `indirect`. Walkthrough: `architecture/TRANSFORM_DAG.md`.
+  `indirect`. Walkthrough: `architecture/transform_dag.md`.
 - State alignment and contiguity at the descriptor: `TensorDescriptor`
   in `transforms.py` and the legacy `TensorView` / `TileWindow` in
   `helpers/tensor_view.py`.
@@ -239,8 +239,7 @@ Decide what the kernel computes before deciding how it should run.
 - Always set a tolerance policy. The `examples/common/ck_tile_parity.py`
   harness encodes the per-op tolerances we currently believe in
   (elementwise linear ops bit-exact, silu/gelu `<= 2e-4`, layer/rms
-  norm `<= 5e-3` (was 2.5e-3 before noise widening, see
-  `notes/PROPOSALS_IMPLEMENTATION_REPORT.md::F2`), reduce `<= 1.5e-3`,
+  norm `<= 5e-3` (was 2.5e-3 before noise widening), reduce `<= 1.5e-3`,
   gemm `<= 7e-2`).
 - fp64 kernels compute natively in f64 and are checked against a float64
   reference (`tests/instances/differential/numeric.py`: elementwise
@@ -2392,9 +2391,8 @@ sweep CSVs.
 - Coalesced V/O stores.
 - LSE output.
 - 2D vs 3D selection heuristic (`select_2d_config`, `use_2d_kernel`).
-- ALiBi / QQ-bias paths exercised (per
-  `notes/ATTENTION_PARITY_REPORT.md` 2D path was failing C9/C10/C11
-  until the score-block fix landed).
+- ALiBi / QQ-bias paths exercised (an out-of-tree attention parity report
+  found the 2D path failing C9/C10/C11 until the score-block fix landed).
 
 ### 13.4 Reduction Checklist
 

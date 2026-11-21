@@ -29,7 +29,7 @@
   - [3.1 The two regimes](#31-the-two-regimes)
   - [3.2 Why decode is not prefill at C = 1](#32-why-decode-is-not-prefill-at-c--1)
   - [3.3 Why decode also needs serving infrastructure](#33-why-decode-also-needs-serving-infrastructure)
-- [4. Decode kernel](#4-decode-kernel)
+- [4. Decode kernel shared by GDN and KDA](#4-decode-kernel-shared-by-gdn-and-kda)
   - [4.1 Tensor contract](#41-tensor-contract)
   - [4.2 Parallel decomposition](#42-parallel-decomposition)
   - [4.3 Dataflow and pipeline](#43-dataflow-and-pipeline)
@@ -47,7 +47,7 @@
   - [5.4 Split and fused schedules](#54-split-and-fused-schedules)
   - [5.5 value_splits](#55-value_splits)
   - [5.6 GDN-mode deltas, all in prep](#56-gdn-mode-deltas-all-in-prep)
-- [6. Reuse in the other direction: KDA on GDN](#6-reuse-in-the-other-direction-kda-on-gdn)
+- [6. Reuse in both directions](#6-reuse-in-both-directions)
 - [7. Validation strategy](#7-validation-strategy)
 - [8. Known limits and follow-ups](#8-known-limits-and-follow-ups)
 

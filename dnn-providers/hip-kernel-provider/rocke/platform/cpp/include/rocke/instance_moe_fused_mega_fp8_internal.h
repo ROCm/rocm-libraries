@@ -141,7 +141,7 @@ typedef struct rocke_moe_fp8_build_ctx
      * env default). Mirrors the Python local `cadence = spec.sched_cadence`. */
     const char* cadence;
 
-    /* ---- kernel param Values (BUILD_SPEC_FP8 Section 2.7) ---------------- *
+    /* ---- kernel param Values ------------------------------------------------- *
      * Immutable kernel params (b.param order). The per-expert REBASED weight /
      * scale pointers are the *0 immutable bases below; the rebased Values live in
      * the per-work-item selected-state block. */
