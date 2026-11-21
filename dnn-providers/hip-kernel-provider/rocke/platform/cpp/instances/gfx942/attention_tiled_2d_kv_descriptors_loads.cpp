@@ -645,10 +645,15 @@ static void rocke__emit_page_copy_setup(rocke_gfx942_attn2d_build_ctx_t* ctx)
     rocke_ir_builder_t* b = ctx->b;
     ctx->page_kv_head_b_v = NULL;
     ctx->lane_within_b_v = NULL;
+    ctx->page_limit_v = NULL;
     if(!rocke__page_copies(ctx))
         return;
     rocke_value_t* c_h = rocke_b_const_i32(b, ctx->HD * ctx->KV_BYTES);
     ctx->page_kv_head_b_v = rocke_b_mul(b, ctx->kv_head_idx, c_h);
+    /* i32: pages wholly below the whole-cache bound (Python page_limit). */
+    if(!ctx->I64_KV_ADDR)
+        ctx->page_limit_v
+            = rocke_b_div(b, rocke_b_const_i32(b, 0x7FFF0000), ctx->kv_stride_blk_b_v);
     if(!rocke__split_copy(ctx))
         return;
     rocke_value_t* lane_half_base = rocke__lane_half_base(ctx);
@@ -775,7 +780,20 @@ static rocke_value_t** rocke__tile_page_bases(rocke_gfx942_attn2d_build_ctx_t* c
         rocke_value_t* stride64 = rocke_b_zext(b, ctx->kv_stride_blk_b_v, rocke_i64());
         rocke_value_t* base = rocke_b_mul(b, page_i64, stride64);
         rocke_value_t* ptr = rocke_b_global_ptr_add(b, src, base);
-        bases[page] = ptrs ? ptr : rocke_b_buffer_rsrc(b, ptr, rocke__kv_block_bytes_c(ctx));
+        if(ptrs)
+        {
+            bases[page] = ptr;
+            continue;
+        }
+        rocke_value_t* num_records = rocke__kv_block_bytes_c(ctx);
+        if(ctx->page_limit_v != NULL)
+        {
+            /* A page at or past the i32 bound gets an empty resource, so its
+             * copies read zeros as the whole-cache resource did. */
+            rocke_value_t* in_bound = rocke_b_cmp_ult(b, pages[page], ctx->page_limit_v);
+            num_records = rocke_b_select(b, in_bound, num_records, rocke_b_const_i32(b, 0));
+        }
+        bases[page] = rocke_b_buffer_rsrc(b, ptr, num_records);
     }
     return bases;
 }

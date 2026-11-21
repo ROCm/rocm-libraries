@@ -310,6 +310,7 @@ typedef struct rocke_gfx942_attn2d_build_ctx
      * Emitted once after the paged-KV descriptor when page copies are on. */
     rocke_value_t* page_kv_head_b_v; /* kv_head_idx * HD * KV_BYTES     */
     rocke_value_t* lane_within_b_v; /* the lane's part of a copy offset */
+    rocke_value_t* page_limit_v; /* i32: pages below the whole-cache bound */
     /* Page ids the loop carries, by the tile index value they belong to (the
      * Python tile_pages dict). NULL tiles mean nothing is carried. */
     rocke_value_t* page_start_tile;

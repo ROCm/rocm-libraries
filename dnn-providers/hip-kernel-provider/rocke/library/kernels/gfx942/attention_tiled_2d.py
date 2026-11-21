@@ -2796,6 +2796,13 @@ def build_unified_attention_2d_tiled(
         # one warp) each copy builds its whole offset within the page.
         SPLIT_COPY = KV_HALVES_PER_CALL % HD == 0 or HD % KV_HALVES_PER_CALL == 0
         page_kv_head_b = b.mul(kv_head_idx, b.const_i32(kv_stride_h_b))
+        # i32: pages that lie wholly below the whole-cache bound. The
+        # whole-cache resource read zeros past it; a page id at or above this
+        # (a corrupt or padding id, negative ones included) gets an empty
+        # resource instead of a fault.
+        page_limit = (
+            None if I64_KV_ADDR else b.div(b.const_i32(0x7FFF0000), kv_stride_blk_b)
+        )
         if SPLIT_COPY:
             lane_within_b = b.add(
                 b.add(
@@ -2858,10 +2865,19 @@ def build_unified_attention_2d_tiled(
                 pages = _tile_page_ids(kv_tile_idx)
             bases = []
             for page in pages:
-                ptr = b.global_ptr_add(
-                    src, b.mul(b.zext(page, I64), b.zext(kv_stride_blk_b, I64))
-                )
-                bases.append(ptr if ptrs else b.buffer_rsrc(ptr, kv_block_bytes_c))
+                page64 = b.zext(page, I64)
+                stride64 = b.zext(kv_stride_blk_b, I64)
+                page_off = b.mul(page64, stride64)
+                ptr = b.global_ptr_add(src, page_off)
+                if ptrs:
+                    bases.append(ptr)
+                    continue
+                num_records = kv_block_bytes_c
+                if page_limit is not None:
+                    num_records = b.select(
+                        b.cmp_ult(page, page_limit), num_records, b.const_i32(0)
+                    )
+                bases.append(b.buffer_rsrc(ptr, num_records))
             return bases
 
         def _page_copy(rsrcs: list, call: int):
