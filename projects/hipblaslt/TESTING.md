@@ -248,7 +248,7 @@ sits at the opposite, much weaker end.
 #### C++ library and clients (weak, and structurally blocked)
 
 Most of the host-only tests that exist are compiled into `hipblaslt-test` alongside the GPU tests,
-in [`clients/tests/src/`](clients/tests/src/). The last three rows are in
+in [`clients/tests/src/`](clients/tests/src/). The last four rows are in
 [`clients/tests/unit/`](clients/tests/unit/), described after the table:
 
 | File | Suites | What it covers |
@@ -265,6 +265,7 @@ in [`clients/tests/src/`](clients/tests/src/). The last three rows are in
 | `unit/parser_gtest.cpp` | `HostUnitInitParser`, `HostUnitActivationParser`, `HostUnitBiasSourceParser`, `HostUnitComputeInputType`, `HostUnitBiasType` | The client's string parsers for initialization, activation and bias source, with round-trips through their `*_to_string` helpers; independent validation and defaulting of A and B compute-input types; bias-type validation only when bias is enabled |
 | `unit/scaling_format_gtest.cpp` | `HostUnitScalingFormat` | Scaling-format helpers, including the two independent paddings in scale-buffer sizing |
 | `unit/yaml_conversion_gtest.cpp` | `HostUnitYamlConversionDeathTest` | `--yaml` conversion through `hipblaslt_gentest.py`: the client exits with failure on malformed input and accepts a valid empty test list. Needs Python with PyYAML |
+| `unit/exception_logging_gtest.cpp` | `HostUnitExceptionLoggingDeathTest` | A public call that fails with a C++ exception (an unparsable `HIPBLASLT_OVERRIDE_COMPUTE_TYPE_XF32` makes `hipblasLtMatmulDescCreate` throw) returns `HIPBLAS_STATUS_INTERNAL_ERROR` and writes the API name and exception text to the error log at `HIPBLASLT_LOG_LEVEL=1`. Runs in a child process because the logger reads its environment once |
 
 The sources in `clients/tests/unit/` also build a second, CPU-only client, `hipblaslt-test-hostunit`
 ([PR #9733](https://github.com/ROCm/rocm-libraries/pull/9733)), so they can run on a machine with no
@@ -342,7 +343,11 @@ kernels on CPU and hands an artifact to a GPU stage for the run phase.
 | `standard` | smoke + quick + pre_checkin | ~30 min | 3600 s |
 | `comprehensive` | standard + nightly | ~2 h | 7200 s |
 | `full` | comprehensive + HMM (needs a managed-memory capable host) | up to 24 h | 86400 s |
-| `stress` | stress only: size-threshold and address-overflow cases needing up to about 33 GiB of device memory (the 2^32 C and D batch-stride case) and, for the unit_check cases, up to about 48 GiB of host memory on gfx90a; for large-memory runners or a weekly run. A case that does not fit skips with the amounts (see below). The fast_check cases among them skip in a run with no gtest filter, such as TheRock's | ~10 min on gfx90a for the fast_check cases, longer with more solutions; the older stress cases add their host-reference time | 14400 s |
+| `stress` | stress only: size-threshold and address-overflow cases needing up to about 33 GiB of device memory (the 2^32 C and D batch-stride case) and, for the unit_check cases, up to about 48 GiB of host memory on gfx90a; for large-memory runners or a weekly run. A case that does not fit skips with the amounts (see below). The fast_check cases among them skip in a run whose gtest filter selects nothing in particular (no filter, `*`, or exclusions only), such as Math CI's unfiltered `precheckin`. No CI lane runs the ctest `stress` tier today. Math CI's `precheckin` and the gfx1250 workflow run the older unit_check stress cases but skip the fast_check ones; outside CI, a weekly QA suite that runs `--gtest_filter=*matmul*` runs the fast_check cases | ~10 min on gfx90a for the fast_check cases, longer with more solutions; the older stress cases add their host-reference time | 14400 s |
+
+The `sdc_hunt` cases are in no tier. Their fast_check cases run only when a positive pattern of the
+gtest filter contains `sdc_hunt`, so a broad filter such as `*matmul*` skips them; see
+[`clients/scripts/sdc_hunt/README.md`](clients/scripts/sdc_hunt/README.md).
 
 The clients check host memory before pinning a host buffer, against the smaller of `MemAvailable`
 and the headroom under the container's memory limit. On a machine with no container limit, set

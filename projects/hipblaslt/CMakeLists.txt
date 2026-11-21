@@ -461,6 +461,19 @@ configure_file(
     "${CMAKE_CURRENT_BINARY_DIR}/library/include/hipblaslt/hipblaslt-opt-in-features.h"
 )
 
+# Experimental API registry: fails configure once a feature is past its deadline, and
+# generates hipblaslt-experimental-features.h and the library's private feature list.
+# Sets HIPBLASLT_EXPERIMENTAL_FRAGMENTS.
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/rocm_feature_releases.cmake")
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/hipblaslt_experimental.cmake")
+set(HIPBLASLT_EXPERIMENTAL_HEADER_DIR "${CMAKE_CURRENT_SOURCE_DIR}/library/include/hipblaslt")
+include("${CMAKE_CURRENT_SOURCE_DIR}/library/experimental/features.cmake")
+hipblaslt_experimental_finalize(
+    TEMPLATE "${CMAKE_CURRENT_SOURCE_DIR}/library/include/hipblaslt-experimental-features.h.in"
+    OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/library/include/hipblaslt/hipblaslt-experimental-features.h"
+    REGISTRY "${CMAKE_CURRENT_BINARY_DIR}/library/src/hipblaslt-experimental-registry.inc"
+)
+
 # Configure the Windows version resource (PE VERSIONINFO) embedded into
 # libhipblaslt.dll. This mirrors the sibling rocBLAS/hipBLAS libraries so the
 # DLL reports file/product version metadata in its Windows file properties.
@@ -555,6 +568,15 @@ if(HIPBLASLT_ENABLE_HOST)
     endif()
     rocm_set_soversion(hipblaslt "${hipblaslt_SOVERSION}")
     add_library(roc::hipblaslt ALIAS hipblaslt)
+
+    # roc::hipblaslt plus ROCM_ENABLE_EXPERIMENTAL_APIS=1, the ROCm-wide switch that makes
+    # hipblaslt/hipblaslt-experimental.h declare the experimental API. Installed and exported
+    # with roc::hipblaslt, but not listed in hipblaslt_LIBRARIES, so nobody opts in by accident.
+    add_library(hipblaslt-experimental INTERFACE)
+    target_link_libraries(hipblaslt-experimental INTERFACE hipblaslt)
+    target_compile_definitions(hipblaslt-experimental INTERFACE ROCM_ENABLE_EXPERIMENTAL_APIS=1)
+    set_target_properties(hipblaslt-experimental PROPERTIES EXPORT_NAME hipblaslt_experimental)
+    add_library(roc::hipblaslt_experimental ALIAS hipblaslt-experimental)
 
     target_link_libraries(hipblaslt
         PUBLIC
@@ -662,7 +684,7 @@ if(HIPBLASLT_ENABLE_HOST)
         message(WARNING "llvm-strip not found, using default strip tool. This may cause stripping to fail during packaging.")
     endif()
 
-    rocm_install_targets(TARGETS hipblaslt)
+    rocm_install_targets(TARGETS hipblaslt hipblaslt-experimental)
 
     get_target_property(hipblaslt_public_headers roc::hipblaslt INTERFACE_SOURCES)
 

@@ -26,6 +26,13 @@
 
 #pragma once
 
+// --partitions runs through the experimental PartitionedGemm, so a target that includes this
+// header links roc::hipblaslt_experimental (hipblaslt-clients-common does).
+#if !defined(ROCM_ENABLE_EXPERIMENTAL_APIS) || !ROCM_ENABLE_EXPERIMENTAL_APIS
+#error "testing_matmul.hpp needs roc::hipblaslt_experimental (ROCM_ENABLE_EXPERIMENTAL_APIS=1)"
+#endif
+#include <hipblaslt/hipblaslt-experimental.h>
+
 #include "allclose.hpp"
 #include "candidate_search.hpp"
 #include "cblas_interface.hpp"
@@ -1294,7 +1301,7 @@ inline std::string fast_check_unsupported_reason(const Arguments&     arg,
 }
 
 // Returns why --partitions cannot run this configuration, or an empty string when it can.
-// hipblaslt_ext::experimental::PartitionedGemm runs a plain GEMM, so whatever it has no input for is refused.
+// hipblaslt_experimental::PartitionedGemm runs a plain GEMM, so whatever it has no input for is refused.
 inline std::string partitioned_unsupported_reason(const Arguments& arg,
                                                   hipDataType      TiA,
                                                   hipDataType      TiB,
@@ -2295,7 +2302,7 @@ private:
     hipStream_t m_stream = nullptr;
 };
 
-// --partitions N: one GEMM run as N slices with hipblaslt_ext::experimental::PartitionedGemm. The slices run on the
+// --partitions N: one GEMM run as N slices with hipblaslt_experimental::PartitionedGemm. The slices run on the
 // partitions of a GPU in DPX mode when the current device is one of them (see partition_devices.hpp),
 // and all on the current device otherwise (SPX: the same result, only for checking results, not for speed).
 // Partition 0 runs on the caller's handle and stream; this holds the others (handle, stream,
@@ -2313,9 +2320,9 @@ public:
                    hipStream_t        stream0,
                    hipblasOperation_t transA,
                    hipblasOperation_t transB)
-        : m_dim(arg.split_dim == 'M'   ? hipblaslt_ext::experimental::SplitDim::M
-                : arg.split_dim == 'B' ? hipblaslt_ext::experimental::SplitDim::Batch
-                                       : hipblaslt_ext::experimental::SplitDim::N)
+        : m_dim(arg.split_dim == 'M'   ? hipblaslt_experimental::SplitDim::M
+                : arg.split_dim == 'B' ? hipblaslt_experimental::SplitDim::Batch
+                                       : hipblaslt_experimental::SplitDim::N)
         , m_dElem(realDataTypeSize(arg.d_type))
     {
         for(int t = 0; t < 4; t++)
@@ -2361,14 +2368,14 @@ public:
                 }
             }
             check(hipSetDevice(previous), "hipSetDevice");
-            m_gemm = std::make_unique<hipblaslt_ext::experimental::PartitionedGemm>(handles,
-                                                                      transA,
-                                                                      transB,
-                                                                      arg.a_type,
-                                                                      arg.b_type,
-                                                                      arg.c_type,
-                                                                      arg.d_type,
-                                                                      arg.compute_type);
+            m_gemm = std::make_unique<hipblaslt_experimental::PartitionedGemm>(handles,
+                                                                               transA,
+                                                                               transB,
+                                                                               arg.a_type,
+                                                                               arg.b_type,
+                                                                               arg.c_type,
+                                                                               arg.d_type,
+                                                                               arg.compute_type);
         }
         catch(...)
         {
@@ -2499,7 +2506,7 @@ public:
         if(!m_replicated[3])
             return;
         check(hipStreamSynchronize(m_streams[0]), "hipStreamSynchronize");
-        const bool   splitM = m_dim == hipblaslt_ext::experimental::SplitDim::M;
+        const bool   splitM = m_dim == hipblaslt_experimental::SplitDim::M;
         const size_t pitch  = size_t(m_ldd) * m_dElem;
         for(size_t i = 1; i < m_streams.size(); i++)
         {
@@ -2508,7 +2515,7 @@ public:
                 throw std::runtime_error("getSlice failed");
             // A column-major D: an M slice is `size` rows of every column, an N slice is `size`
             // whole columns, and a batch slice is `size` whole matrices.
-            if(m_dim == hipblaslt_ext::experimental::SplitDim::Batch)
+            if(m_dim == hipblaslt_experimental::SplitDim::Batch)
             {
                 for(int64_t b = offset; b < offset + size; b++)
                 {
@@ -2613,7 +2620,7 @@ private:
             throw std::runtime_error(std::string(what) + ": " + hipGetErrorString(e));
     }
 
-    hipblaslt_ext::experimental::SplitDim                                m_dim;
+    hipblaslt_experimental::SplitDim                       m_dim;
     size_t                                                 m_dElem = 0;
     bool                                                   m_replicated[4] = {};
     std::vector<void*>                                     m_replica[4]; // partitions 1..N-1
@@ -2626,7 +2633,7 @@ private:
     std::vector<void*>                                     m_workspaces; // partitions 1..N-1
     std::vector<uint64_t*>                                 m_counters; // per partition, host memory
     uint64_t                                               m_launch = 0;
-    std::unique_ptr<hipblaslt_ext::experimental::PartitionedGemm>        m_gemm;
+    std::unique_ptr<hipblaslt_experimental::PartitionedGemm> m_gemm;
 };
 
 void testing_matmul_with_bias(const Arguments& arg,
