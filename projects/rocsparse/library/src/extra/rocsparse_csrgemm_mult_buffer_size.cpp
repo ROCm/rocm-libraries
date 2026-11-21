@@ -127,7 +127,11 @@ rocsparse_status rocsparse::csrgemm_mult_buffer_size_core(rocsparse_handle      
     // Group arrays
     *buffer_size += sizeof(J) * 256 * CSRGEMM_MAXGROUPS;
     *buffer_size += sizeof(J) * 256;
-    *buffer_size += ((sizeof(J) * m - 1) / 256 + 1) * 256;
+
+    // Row lengths of C in the nnz stage, a fourth array of m entries in the
+    // compute and symbolic stages
+    *buffer_size += rocsparse::max(((sizeof(J) * m - 1) / 256 + 1) * 256,
+                                   ((sizeof(I) * (m + 1) - 1) / 256 + 1) * 256);
 
     // Permutation arrays
     *buffer_size += ((sizeof(J) * m - 1) / 256 + 1) * 256;

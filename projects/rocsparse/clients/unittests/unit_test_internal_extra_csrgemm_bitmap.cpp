@@ -876,11 +876,13 @@ namespace
                             const host_c<I, J, T> initial = make_c(p, ref, false);
                             const host_c<I, J, T> want    = make_c(p, ref, true);
 
+                            const auto& ind_C
+                                = stage == value_stage::numeric ? want.ind : initial.ind;
+
                             device_csr<I, J, T> A(p.A), B(p.B), D(p.D);
                             device_vector<J>    d_perm(p.perm), d_offset(std::vector<J>{p.offset});
                             device_vector<I>    d_ptr_C(initial.ptr);
-                            device_vector<J>    d_ind_C(stage == value_stage::numeric ? want.ind
-                                                                                      : initial.ind);
+                            device_vector<J>    d_ind_C(ind_C);
                             device_vector<T>    d_val_C(initial.val);
                             auto                workspace = make_workspace<I, J>(handle, s, p.n);
                             ASSERT_TRUE(d_ptr_C.ptr && d_ind_C.ptr && d_val_C.ptr);
@@ -917,6 +919,111 @@ namespace
                             expect_same(to_host(d_ind_C), want.ind, "columns of C");
                             expect_same(to_host(d_val_C), want.val, "values of C");
                         }
+                    }
+                }
+            }
+        }
+    }
+
+    // The problem with D widened in every row to the pattern of A * B + D, so that C can be D. Each
+    // entry of the new D holds col % 7 + 1; D takes the index base of C.
+    template <typename I, typename J, typename T>
+    problem<I, J, T> make_alias_problem(const problem<I, J, T>& p)
+    {
+        const auto ref = reference(p, true, value<T>(1, 0), value<T>(1, 0));
+
+        entries rows_D(static_cast<size_t>(p.m));
+        for(J r = 0; r < p.m; ++r)
+        {
+            for(const int64_t col : ref[r].cols)
+            {
+                rows_D[r].push_back({col, static_cast<int>(col % 7) + 1});
+            }
+        }
+
+        problem<I, J, T> q = p;
+        q.D                = make_csr<I, J, T>(rows_D, p.b.C);
+        q.b.D              = p.b.C;
+        return q;
+    }
+
+    // C is D: the drivers get the arrays of D as those of C. The group rows have to come out as
+    // alpha * A * B + beta * D, the other rows as D.
+    template <typename I, typename J, typename T>
+    void check_values_alias(rocsparse_handle handle, value_stage stage, bool tiled = false)
+    {
+        const T alpha = value<T>(2, 1);
+        const T beta  = value<T>(3, -1);
+
+        device_vector<T> d_alpha(std::vector<T>{alpha}), d_beta(std::vector<T>{beta});
+        ASSERT_TRUE(d_alpha.ptr && d_beta.ptr);
+
+        for(const bases& b : base_cases)
+        {
+            for(const problem<I, J, T>& p0 : make_problems<I, J, T>(b))
+            {
+                const problem<I, J, T>  p     = make_alias_problem(p0);
+                const auto              ref   = reference(p, true, alpha, beta);
+                const std::vector<bool> group = p.in_group();
+
+                std::vector<T> want = p.D.val;
+                for(J r = 0; r < p.m; ++r)
+                {
+                    const I begin = p.D.ptr[r] - p.D.base;
+                    const I end   = p.D.ptr[r + 1] - p.D.base;
+                    ASSERT_EQ(static_cast<size_t>(end - begin), ref[r].cols.size());
+                    if(group[r])
+                    {
+                        for(I k = begin; k < end; ++k)
+                        {
+                            want[k] = ref[r].vals[k - begin];
+                        }
+                    }
+                }
+
+                for(const pass_setting& s : pass_settings(tiled, p.n))
+                {
+                    for(const rocsparse_pointer_mode mode :
+                        {rocsparse_pointer_mode_host, rocsparse_pointer_mode_device})
+                    {
+                        SCOPED_TRACE("n " + std::to_string(p.n) + ", " + to_string(s) + ", "
+                                     + to_string(p.b)
+                                     + (mode == rocsparse_pointer_mode_host ? ", host scalars"
+                                                                            : ", device scalars"));
+
+                        device_csr<I, J, T> A(p.A), B(p.B), D(p.D);
+                        device_vector<J>    d_perm(p.perm), d_offset(std::vector<J>{p.offset});
+                        auto                workspace = make_workspace<I, J>(handle, s, p.n);
+
+                        const bool on_device = mode == rocsparse_pointer_mode_device;
+
+                        ASSERT_EQ(rocsparse_set_pointer_mode(handle, mode),
+                                  rocsparse_status_success);
+
+                        const rocsparse_status status = run_values(handle,
+                                                                   workspace,
+                                                                   p,
+                                                                   stage,
+                                                                   true,
+                                                                   on_device ? d_alpha.ptr : &alpha,
+                                                                   on_device ? d_beta.ptr : &beta,
+                                                                   d_offset,
+                                                                   d_perm,
+                                                                   A,
+                                                                   B,
+                                                                   D,
+                                                                   D.ptr.ptr,
+                                                                   D.ind.ptr,
+                                                                   D.val.ptr);
+
+                        ASSERT_EQ(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_host),
+                                  rocsparse_status_success);
+                        ASSERT_EQ(status, rocsparse_status_success);
+                        ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+                        expect_tiles(workspace, s);
+
+                        expect_same(to_host(D.ind), p.D.ind, "columns of C = D");
+                        expect_same(to_host(D.val), want, "values of C = D");
                     }
                 }
             }
@@ -1084,6 +1191,23 @@ TEST_F(internal_extra_csrgemm_bitmap, numeric_f64_i64_i64)
     check_values<int64_t, int64_t, double>(handle, value_stage::numeric);
 }
 
+TEST_F(internal_extra_csrgemm_bitmap, calc_alias_f32)
+{
+    check_values_alias<int32_t, int32_t, float>(handle, value_stage::calc);
+}
+TEST_F(internal_extra_csrgemm_bitmap, calc_alias_c64_i64_i32)
+{
+    check_values_alias<int64_t, int32_t, rocsparse_double_complex>(handle, value_stage::calc);
+}
+TEST_F(internal_extra_csrgemm_bitmap, numeric_alias_f64_i64_i64)
+{
+    check_values_alias<int64_t, int64_t, double>(handle, value_stage::numeric);
+}
+TEST_F(internal_extra_csrgemm_bitmap, numeric_alias_c32)
+{
+    check_values_alias<int32_t, int32_t, rocsparse_float_complex>(handle, value_stage::numeric);
+}
+
 TEST_F(internal_extra_csrgemm_bitmap, pass_sizing_i32_i32)
 {
     check_pass_sizing<int32_t, int32_t>(handle);
@@ -1141,6 +1265,15 @@ TEST_F(internal_extra_csrgemm_bitmap, numeric_tiled_c64)
 TEST_F(internal_extra_csrgemm_bitmap, numeric_tiled_f64_i64_i64)
 {
     check_values<int64_t, int64_t, double>(handle, value_stage::numeric, true);
+}
+TEST_F(internal_extra_csrgemm_bitmap, calc_alias_tiled_f32)
+{
+    check_values_alias<int32_t, int32_t, float>(handle, value_stage::calc, true);
+}
+TEST_F(internal_extra_csrgemm_bitmap, numeric_alias_tiled_c64_i64_i64)
+{
+    check_values_alias<int64_t, int64_t, rocsparse_double_complex>(
+        handle, value_stage::numeric, true);
 }
 
 // One row through the first, middle and last of 2^36 columns: a span of 2^31 words, past a

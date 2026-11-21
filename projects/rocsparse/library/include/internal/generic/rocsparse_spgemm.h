@@ -126,7 +126,14 @@ extern "C" {
 *  CSR matrix format is currently supported.
 *  \note \f$\alpha == beta == 0\f$ is invalid.
 *  \note It is permissible to pass the same sparse matrix for \f$C\f$ and \f$D\f$ if both
-*  matrices have the same sparsity pattern.
+*  matrices have the same sparsity pattern, i.e. if the sparsity pattern of
+*  \f$op(A) \cdot op(B)\f$ is contained in the sparsity pattern of \f$D\f$. If \p alpha and
+*  \p beta are not null and \f$D\f$ has non-zero entries, \ref rocsparse_spgemm_stage_nnz
+*  checks this condition: if it does not hold, it returns
+*  \ref rocsparse_status_invalid_value and leaves the matrix unchanged. The other stages do
+*  not check it. If \p beta is not null, \f$D\f$ has non-zero entries, and \f$C\f$ and
+*  \f$D\f$ share their row pointer array but have different index bases, every stage
+*  returns \ref rocsparse_status_invalid_value.
 *  \note Currently, only \p trans_A == \ref rocsparse_operation_none is supported.
 *  \note Currently, only \p trans_B == \ref rocsparse_operation_none is supported.
 *  \note This function is non-blocking and executed asynchronously with respect to the
@@ -177,6 +184,12 @@ extern "C" {
 *  \retval rocsparse_status_invalid_handle the library context was not initialized.
 *  \retval rocsparse_status_invalid_pointer \p alpha and \p beta are invalid, or the
 *          \p A, \p B, \p D, \p C, or \p buffer_size pointer is invalid.
+*  \retval rocsparse_status_invalid_value in the \ref rocsparse_spgemm_stage_nnz stage, the
+*          same sparse matrix is passed for \f$C\f$ and \f$D\f$, \p alpha and \p beta are
+*          not null, \f$D\f$ has non-zero entries, and the sparsity pattern of
+*          \f$op(A) \cdot op(B)\f$ is not contained in that of \f$D\f$; or, in any stage,
+*          \p beta is not null, \f$D\f$ has non-zero entries, and \f$C\f$ and \f$D\f$ share
+*          their row pointer array but have different index bases.
 *  \retval rocsparse_status_memory_error additional buffer for long rows could not be
 *          allocated.
 *  \retval rocsparse_status_requires_sorted_storage \f$B\f$ or \f$D\f$ is unsorted, or

@@ -39,6 +39,7 @@
 #include "unit_test_extra_common.hpp"
 
 #include <memory>
+#include <sstream>
 
 using namespace extra_ut;
 
@@ -578,4 +579,578 @@ TEST_F(ExtraSpgemm, mixed_index_bases)
                 if(HasFatalFailure())
                     return;
             }
+}
+
+// One descriptor passed as both C and D, which the documentation allows when C
+// and D have the same sparsity pattern, i.e. when the pattern of A * B is
+// contained in the pattern of D. The nnz stage then has to leave the row
+// pointer of D as it is, and compute / numeric have to read the values of D
+// before they overwrite them.
+namespace
+{
+    enum class Stages
+    {
+        nnz_compute,
+        compute, // the nnz stage is skipped, the pattern of C being known
+        symbolic_numeric
+    };
+
+    struct AliasCase
+    {
+        bool                 bsr    = false;
+        rocsparse_direction  dir    = rocsparse_direction_row;
+        rocsparse_index_base bAB    = rocsparse_index_base_zero;
+        rocsparse_index_base bCD    = rocsparse_index_base_zero;
+        cplx                 alpha  = cplx(1.0, 0.0);
+        cplx                 beta   = cplx(1.0, 0.0);
+        bool                 device = false;
+        Stages               stages = Stages::nnz_compute;
+    };
+
+    std::string describe(const AliasCase& c)
+    {
+        std::ostringstream s;
+        s << (c.bsr ? "bsr" : "csr") << " dir=" << int(c.dir) << " bases=" << int(c.bAB)
+          << int(c.bCD) << " alpha=" << c.alpha << " beta=" << c.beta << " dev=" << c.device
+          << " stages=" << int(c.stages);
+        return s.str();
+    }
+
+    Bsr bsr_of(int64_t                    mb,
+               int64_t                    nb,
+               int64_t                    bd,
+               std::vector<int64_t>       ptr,
+               std::vector<int64_t>       col,
+               const std::vector<double>& val)
+    {
+        Bsr M;
+        M.mb  = mb;
+        M.nb  = nb;
+        M.bd  = bd;
+        M.ptr = std::move(ptr);
+        M.col = std::move(col);
+        for(double v : val)
+            M.val.push_back(cplx(v, 0.0));
+        return M;
+    }
+
+    // A D whose pattern is the pattern of A * B plus up to extra_row_nnzb random
+    // blocks per row, with random values.
+    template <typename T>
+    Bsr alias_d(const Bsr& A, const Bsr& B, int64_t extra_row_nnzb, Rng& rng)
+    {
+        const Bsr P = bsr_gemm(true,
+                               cplx(1.0, 0.0),
+                               A,
+                               B,
+                               false,
+                               cplx(0.0, 0.0),
+                               empty_bsr(A.mb, B.nb, A.bd),
+                               A.mb,
+                               B.nb);
+        const Bsr X = random_bsr<T>(A.mb, B.nb, A.bd, extra_row_nnzb, rng);
+        Bsr       D = bsr_geam(cplx(0.0, 0.0), P, cplx(1.0, 0.0), X);
+        for(auto& v : D.val)
+            v = round_to<T>(rand_val<T>(rng));
+        return D;
+    }
+
+    template <typename T, typename I, typename J>
+    void run_alias(
+        rocsparse_handle handle, const AliasCase& c, const Bsr& A, const Bsr& B, const Bsr& D)
+    {
+        SCOPED_TRACE(describe(c));
+        const Bsr want = bsr_gemm(true, c.alpha, A, B, true, c.beta, D, D.mb, D.nb);
+        ASSERT_EQ(want.ptr, D.ptr) << "the case does not satisfy the precondition of the alias";
+        ASSERT_EQ(want.col, D.col) << "the case does not satisfy the precondition of the alias";
+
+        Operand<T, I, J> oA, oB, oCD;
+        ASSERT_NO_FATAL_FAILURE(oA.create(A, c.bsr, c.dir, c.bAB));
+        ASSERT_NO_FATAL_FAILURE(oB.create(B, c.bsr, c.dir, c.bAB));
+        ASSERT_NO_FATAL_FAILURE(oCD.create(D, c.bsr, c.dir, c.bCD));
+
+        PointerModeGuard mode(handle, mode_of(c.device));
+        const Scalar<T>  alpha(c.alpha, c.device), beta(c.beta, c.device);
+        auto             call = [&](rocsparse_spgemm_stage stage, size_t* bs, void* tmp) {
+            return spgemm_call<T>(
+                handle, alpha.get(), oA.d.p, oB.d.p, beta.get(), oCD.d.p, oCD.d.p, stage, bs, tmp);
+        };
+
+        size_t bsz = 0;
+        ASSERT_EQ(call(rocsparse_spgemm_stage_buffer_size, &bsz, nullptr),
+                  rocsparse_status_success);
+        DevBuf<char> buffer(bsz);
+        ASSERT_TRUE(buffer.ptr);
+
+        if(c.stages != Stages::compute)
+        {
+            ASSERT_EQ(call(rocsparse_spgemm_stage_nnz, &bsz, buffer.ptr), rocsparse_status_success);
+            int64_t rows = 0, cols = 0, nnz = -1;
+            ASSERT_EQ(rocsparse_spmat_get_size(oCD.d.p, &rows, &cols, &nnz),
+                      rocsparse_status_success);
+            ASSERT_EQ(nnz, D.nnzb());
+            ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+            // Fatal: with a wrong row pointer, compute writes past the arrays of D.
+            const std::vector<I> ptr = oCD.p.host();
+            for(size_t i = 0; i < D.ptr.size(); ++i)
+                ASSERT_EQ(static_cast<int64_t>(ptr[i]) - c.bCD, D.ptr[i])
+                    << "row pointer entry " << i << " after the nnz stage";
+        }
+
+        if(c.stages == Stages::symbolic_numeric)
+        {
+            ASSERT_EQ(call(rocsparse_spgemm_stage_symbolic, &bsz, buffer.ptr),
+                      rocsparse_status_success);
+            ASSERT_EQ(call(rocsparse_spgemm_stage_numeric, &bsz, buffer.ptr),
+                      rocsparse_status_success);
+        }
+        else
+        {
+            ASSERT_EQ(call(rocsparse_spgemm_stage_compute, &bsz, buffer.ptr),
+                      rocsparse_status_success);
+        }
+        ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+        expect_bsr_equal<T, I, J>(
+            oCD.p.host(), oCD.c.host(), oCD.v.host(), want, c.dir, static_cast<int64_t>(c.bCD));
+    }
+
+    const std::vector<Stages> kCsrStages
+        = {Stages::nnz_compute, Stages::compute, Stages::symbolic_numeric};
+    const std::vector<Stages> kBsrStages = {Stages::nnz_compute, Stages::compute};
+}
+
+// pattern(A * B) = {(0,0), (0,2)}; D adds (0,1) and (1,3), so C = D in pattern.
+TEST_F(ExtraSpgemm, alias_c_d)
+{
+    const Bsr A = bsr_of(2, 3, 1, {0, 2, 2}, {0, 1}, {1, 1});
+    const Bsr B = bsr_of(3, 4, 1, {0, 2, 3, 3}, {0, 2, 0}, {1, 1, 1});
+    const Bsr D = bsr_of(2, 4, 1, {0, 3, 4}, {0, 1, 2, 3}, {1, 1, 1, 1});
+
+    const rocsparse_index_base Z = rocsparse_index_base_zero, O = rocsparse_index_base_one;
+    const rocsparse_index_base bases[][2] = {{Z, Z}, {O, O}, {O, Z}, {Z, O}};
+    for(Stages s : kCsrStages)
+        for(bool dev : {false, true})
+            for(const auto& b : bases)
+            {
+                AliasCase c;
+                c.stages = s;
+                c.device = dev;
+                c.bAB    = b[0];
+                c.bCD    = b[1];
+                run_alias<float, int32_t, int32_t>(handle, c, A, B, D);
+                if(HasFatalFailure())
+                    return;
+                run_alias<double, int64_t, int32_t>(handle, c, A, B, D);
+                if(HasFatalFailure())
+                    return;
+                run_alias<float, int64_t, int64_t>(handle, c, A, B, D);
+                if(HasFatalFailure())
+                    return;
+            }
+
+    // Zero passed as a non-null scalar still takes the multiply-add path.
+    const double scalars[][2] = {{2, -1}, {1, 0}, {0, 1}};
+    // D with an empty last row.
+    const Bsr D2 = bsr_of(2, 4, 1, {0, 3, 3}, {0, 1, 2}, {1, 2, 3});
+    for(Stages s : kCsrStages)
+    {
+        for(const auto& ab : scalars)
+        {
+            AliasCase c;
+            c.stages = s;
+            c.alpha  = cplx(ab[0], 0.0);
+            c.beta   = cplx(ab[1], 0.0);
+            run_alias<float, int32_t, int32_t>(handle, c, A, B, D);
+            if(HasFatalFailure())
+                return;
+        }
+        AliasCase c;
+        c.stages = s;
+        run_alias<float, int32_t, int32_t>(handle, c, A, B, D2);
+        if(HasFatalFailure())
+            return;
+    }
+}
+
+TEST_F(ExtraSpgemm, alias_c_d_random)
+{
+    const rocsparse_index_base Z = rocsparse_index_base_zero, O = rocsparse_index_base_one;
+    const rocsparse_index_base bases[][2] = {{Z, Z}, {O, O}, {O, Z}};
+    for(uint64_t seed = 1; seed <= 3; ++seed)
+        for(int64_t bd : {1, 2, 3})
+        {
+            Rng        rng(seed * 131 + static_cast<uint64_t>(bd));
+            const Bsr  A   = random_bsr<float>(7, 6, bd, 3, rng);
+            const Bsr  B   = random_bsr<float>(6, 9, bd, 3, rng);
+            const Bsr  D   = alias_d<float>(A, B, 2, rng);
+            const bool bsr = bd > 1;
+            for(Stages s : bsr ? kBsrStages : kCsrStages)
+                for(rocsparse_direction dir : {rocsparse_direction_row, rocsparse_direction_column})
+                    for(const auto& b : bases)
+                    {
+                        if(!bsr && dir == rocsparse_direction_column)
+                            continue;
+                        AliasCase c;
+                        c.bsr    = bsr;
+                        c.dir    = dir;
+                        c.bAB    = b[0];
+                        c.bCD    = b[1];
+                        c.alpha  = cplx(2.0, 0.0);
+                        c.beta   = cplx(-1.0, 0.0);
+                        c.device = (seed == 2);
+                        c.stages = s;
+                        run_alias<float, int32_t, int32_t>(handle, c, A, B, D);
+                        if(HasFatalFailure())
+                            return;
+                        run_alias<double, int64_t, int64_t>(handle, c, A, B, D);
+                        if(HasFatalFailure())
+                            return;
+                    }
+        }
+}
+
+// The CSR witness of alias_c_d with 2 x 2 identity blocks.
+TEST_F(ExtraSpgemm, alias_c_d_bsr)
+{
+    auto identity = [](int64_t nnzb) {
+        std::vector<double> v;
+        for(int64_t p = 0; p < nnzb; ++p)
+            v.insert(v.end(), {1, 0, 0, 1});
+        return v;
+    };
+    const Bsr A = bsr_of(2, 3, 2, {0, 2, 2}, {0, 1}, identity(2));
+    const Bsr B = bsr_of(3, 4, 2, {0, 2, 3, 3}, {0, 2, 0}, identity(3));
+    const Bsr D = bsr_of(2, 4, 2, {0, 3, 4}, {0, 1, 2, 3}, identity(4));
+    for(Stages s : kBsrStages)
+        for(rocsparse_direction dir : {rocsparse_direction_row, rocsparse_direction_column})
+        {
+            AliasCase c;
+            c.bsr    = true;
+            c.dir    = dir;
+            c.stages = s;
+            run_alias<float, int32_t, int32_t>(handle, c, A, B, D);
+            if(HasFatalFailure())
+                return;
+            run_alias<rocsparse_double_complex, int64_t, int32_t>(handle, c, A, B, D);
+            if(HasFatalFailure())
+                return;
+        }
+}
+
+// One row of C with n + extra entries: A = [1], B is a row of n ones, D holds
+// j % 7 + 1 at the n columns of B and at extra more. A row with more entries
+// than the hash table of its group fits in shared memory goes through the
+// bitmap algorithm (with 64 KiB and 32-bit column indices, beyond 4096 entries
+// for float and 2048 for double complex; on every device beyond 32768; in the
+// nnz stage, which counts products and entries of D, beyond 8192 with 64 KiB
+// and 65536 on every device); the shorter rows stay in the hash groups.
+namespace
+{
+    template <typename T>
+    void alias_long_row(rocsparse_handle handle, int64_t n, int64_t extra, cplx alpha, cplx beta)
+    {
+        const int64_t        w = n + extra;
+        std::vector<int64_t> colB(static_cast<size_t>(n)), colD(static_cast<size_t>(w));
+        std::vector<double>  valB(static_cast<size_t>(n), 1.0), valD(static_cast<size_t>(w));
+        for(int64_t j = 0; j < w; ++j)
+        {
+            colD[static_cast<size_t>(j)] = j;
+            valD[static_cast<size_t>(j)] = static_cast<double>(j % 7 + 1);
+            if(j < n)
+                colB[static_cast<size_t>(j)] = j;
+        }
+        const Bsr A = bsr_of(1, 1, 1, {0, 1}, {0}, {1});
+        const Bsr B = bsr_of(1, w, 1, {0, n}, colB, valB);
+        const Bsr D = bsr_of(1, w, 1, {0, w}, colD, valD);
+        for(Stages s : kCsrStages)
+            for(bool dev : {false, true})
+            {
+                AliasCase c;
+                c.alpha  = alpha;
+                c.beta   = beta;
+                c.device = dev;
+                c.stages = s;
+                run_alias<T, int32_t, int32_t>(handle, c, A, B, D);
+                if(::testing::Test::HasFatalFailure())
+                    return;
+            }
+    }
+}
+
+TEST_F(ExtraSpgemm, alias_c_d_long_row)
+{
+    const cplx one(1.0, 0.0), two(2.0, 0.0);
+    alias_long_row<float>(handle, 1000, 0, one, two);
+    if(HasFatalFailure())
+        return;
+    alias_long_row<float>(handle, 5000, 0, one, two);
+    if(HasFatalFailure())
+        return;
+    alias_long_row<float>(handle, 4000, 1000, one, two);
+    if(HasFatalFailure())
+        return;
+    alias_long_row<float>(handle, 33000, 0, one, two);
+    if(HasFatalFailure())
+        return;
+    alias_long_row<rocsparse_double_complex>(handle, 2048, 0, one, cplx(2.0, -1.0));
+    if(HasFatalFailure())
+        return;
+    alias_long_row<rocsparse_double_complex>(handle, 2049, 0, one, cplx(2.0, -1.0));
+}
+
+// D misses (0,2) of the pattern of A * B, so C cannot have the pattern of D: the
+// nnz stage rejects the alias and leaves D as it is.
+TEST_F(ExtraSpgemm, alias_c_d_pattern_mismatch)
+{
+    for(int64_t bd : {1, 2})
+    {
+        const int64_t       bb = bd * bd;
+        std::vector<double> blk(static_cast<size_t>(bb), 0.0);
+        for(int64_t r = 0; r < bd; ++r)
+            blk[static_cast<size_t>(r * bd + r)] = 1.0;
+        auto vals = [&](int64_t nnzb) {
+            std::vector<double> v;
+            for(int64_t p = 0; p < nnzb; ++p)
+                v.insert(v.end(), blk.begin(), blk.end());
+            return v;
+        };
+        const Bsr  A   = bsr_of(2, 3, bd, {0, 2, 2}, {0, 1}, vals(2));
+        const Bsr  B   = bsr_of(3, 4, bd, {0, 2, 3, 3}, {0, 2, 0}, vals(3));
+        const Bsr  D   = bsr_of(2, 4, bd, {0, 2, 3}, {0, 1, 3}, vals(3));
+        const bool bsr = bd > 1;
+        SCOPED_TRACE(bsr ? "bsr" : "csr");
+
+        Operand<float, int32_t, int32_t> oA, oB, oCD;
+        ASSERT_NO_FATAL_FAILURE(
+            oA.create(A, bsr, rocsparse_direction_row, rocsparse_index_base_zero));
+        ASSERT_NO_FATAL_FAILURE(
+            oB.create(B, bsr, rocsparse_direction_row, rocsparse_index_base_zero));
+        ASSERT_NO_FATAL_FAILURE(
+            oCD.create(D, bsr, rocsparse_direction_row, rocsparse_index_base_zero));
+
+        const float alpha = 1.0f, beta = 1.0f;
+        size_t      bsz = 0;
+        ASSERT_EQ(spgemm_call<float>(handle,
+                                     &alpha,
+                                     oA.d.p,
+                                     oB.d.p,
+                                     &beta,
+                                     oCD.d.p,
+                                     oCD.d.p,
+                                     rocsparse_spgemm_stage_buffer_size,
+                                     &bsz,
+                                     nullptr),
+                  rocsparse_status_success);
+        DevBuf<char> buffer(bsz);
+        ASSERT_TRUE(buffer.ptr);
+        EXPECT_EQ(spgemm_call<float>(handle,
+                                     &alpha,
+                                     oA.d.p,
+                                     oB.d.p,
+                                     &beta,
+                                     oCD.d.p,
+                                     oCD.d.p,
+                                     rocsparse_spgemm_stage_nnz,
+                                     &bsz,
+                                     buffer.ptr),
+                  rocsparse_status_invalid_value);
+
+        int64_t rows = 0, cols = 0, nnz = -1;
+        ASSERT_EQ(rocsparse_spmat_get_size(oCD.d.p, &rows, &cols, &nnz), rocsparse_status_success);
+        EXPECT_EQ(nnz, D.nnzb());
+        ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+        expect_idx_equal<int32_t>(oCD.p.host(), D.ptr, 0, "row pointer of D");
+    }
+}
+
+// Without beta, or with an empty D, D does not take part and the pattern of C
+// is not checked against it: C comes out as alpha * A * B. hipSPARSE SpGEMM
+// relies on this, passing its C as D with a null beta.
+TEST_F(ExtraSpgemm, alias_c_d_without_d)
+{
+    const Bsr A = bsr_of(2, 3, 1, {0, 2, 2}, {0, 1}, {1, 1});
+    const Bsr B = bsr_of(3, 4, 1, {0, 2, 3, 3}, {0, 2, 0}, {1, 2, 3});
+    const Bsr want
+        = bsr_gemm(true, cplx(2.0, 0.0), A, B, false, cplx(0.0, 0.0), empty_bsr(2, 4, 1), 2, 4);
+
+    Operand<float, int32_t, int32_t> oA, oB;
+    ASSERT_NO_FATAL_FAILURE(
+        oA.create(A, false, rocsparse_direction_row, rocsparse_index_base_zero));
+    ASSERT_NO_FATAL_FAILURE(
+        oB.create(B, false, rocsparse_direction_row, rocsparse_index_base_zero));
+
+    const float alpha = 2.0f, beta = 1.0f;
+    for(bool null_beta : {true, false})
+    {
+        SCOPED_TRACE(null_beta ? "beta null" : "D empty");
+
+        // Without beta, the pattern of D is one that A * B does not fit in.
+        const Bsr D = null_beta ? bsr_of(2, 4, 1, {0, 1, 1}, {3}, {5}) : empty_bsr(2, 4, 1);
+        Operand<float, int32_t, int32_t> oCD;
+        ASSERT_NO_FATAL_FAILURE(
+            oCD.create(D, false, rocsparse_direction_row, rocsparse_index_base_zero));
+
+        auto call = [&](rocsparse_spgemm_stage stage, size_t* bs, void* tmp) {
+            return spgemm_call<float>(handle,
+                                      &alpha,
+                                      oA.d.p,
+                                      oB.d.p,
+                                      null_beta ? nullptr : &beta,
+                                      oCD.d.p,
+                                      oCD.d.p,
+                                      stage,
+                                      bs,
+                                      tmp);
+        };
+
+        size_t bsz = 0;
+        ASSERT_EQ(call(rocsparse_spgemm_stage_buffer_size, &bsz, nullptr),
+                  rocsparse_status_success);
+        DevBuf<char> buffer(bsz);
+        ASSERT_TRUE(buffer.ptr);
+        ASSERT_EQ(call(rocsparse_spgemm_stage_nnz, &bsz, buffer.ptr), rocsparse_status_success);
+
+        int64_t rows = 0, cols = 0, nnz = -1;
+        ASSERT_EQ(rocsparse_spmat_get_size(oCD.d.p, &rows, &cols, &nnz), rocsparse_status_success);
+        ASSERT_EQ(nnz, want.nnzb());
+        ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+        expect_idx_equal<int32_t>(oCD.p.host(), want.ptr, 0, "row pointer of C");
+
+        DevBuf<int32_t> cC(static_cast<size_t>(nnz));
+        DevBuf<float>   vC(static_cast<size_t>(nnz));
+        ASSERT_TRUE(cC.ptr && vC.ptr);
+        ASSERT_EQ(rocsparse_csr_set_pointers(oCD.d.p, oCD.p.ptr, cC.ptr, vC.ptr),
+                  rocsparse_status_success);
+        ASSERT_EQ(call(rocsparse_spgemm_stage_compute, &bsz, buffer.ptr), rocsparse_status_success);
+        ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+        expect_bsr_equal<float, int32_t, int32_t>(
+            oCD.p.host(), cC.host(), vC.host(), want, rocsparse_direction_row, 0);
+    }
+}
+
+// The arrays of D passed as C through a second descriptor with the other index
+// base. A row pointer cannot be in both bases, so every stage rejects the call
+// and leaves D as it is, although the patterns match. Without beta, or with an
+// empty D, D does not take part and the call is accepted.
+TEST_F(ExtraSpgemm, alias_c_d_base_mismatch)
+{
+    const rocsparse_index_base Z = rocsparse_index_base_zero, O = rocsparse_index_base_one;
+    const rocsparse_index_base bases[][2] = {{Z, O}, {O, Z}};
+    for(int64_t bd : {1, 2})
+        for(const auto& b : bases)
+        {
+            const int64_t       bb = bd * bd;
+            std::vector<double> blk(static_cast<size_t>(bb), 0.0);
+            for(int64_t r = 0; r < bd; ++r)
+                blk[static_cast<size_t>(r * bd + r)] = 1.0;
+            auto vals = [&](int64_t nnzb) {
+                std::vector<double> v;
+                for(int64_t p = 0; p < nnzb; ++p)
+                    v.insert(v.end(), blk.begin(), blk.end());
+                return v;
+            };
+            const Bsr  A   = bsr_of(2, 3, bd, {0, 2, 2}, {0, 1}, vals(2));
+            const Bsr  B   = bsr_of(3, 4, bd, {0, 2, 3, 3}, {0, 2, 0}, vals(3));
+            const Bsr  D   = bsr_of(2, 4, bd, {0, 3, 4}, {0, 1, 2, 3}, vals(4));
+            const bool bsr = bd > 1;
+            SCOPED_TRACE(std::string(bsr ? "bsr" : "csr") + " bases=" + std::to_string(int(b[0]))
+                         + std::to_string(int(b[1])));
+
+            Operand<float, int32_t, int32_t> oA, oB, oD, oE;
+            ASSERT_NO_FATAL_FAILURE(oA.create(A, bsr, rocsparse_direction_row, Z));
+            ASSERT_NO_FATAL_FAILURE(oB.create(B, bsr, rocsparse_direction_row, Z));
+            ASSERT_NO_FATAL_FAILURE(oD.create(D, bsr, rocsparse_direction_row, b[1]));
+            ASSERT_NO_FATAL_FAILURE(
+                oE.create(empty_bsr(2, 4, bd), bsr, rocsparse_direction_row, b[1]));
+
+            // C over the arrays of M, in the base of C.
+            auto alias = [&](SpmatH& C, const Operand<float, int32_t, int32_t>& M) {
+                if(bsr)
+                    ASSERT_EQ(rocsparse_create_bsr_descr(&C.p,
+                                                         M.h.mb,
+                                                         M.h.nb,
+                                                         M.h.nnzb(),
+                                                         rocsparse_direction_row,
+                                                         bd,
+                                                         M.p.ptr,
+                                                         M.c.ptr,
+                                                         M.v.ptr,
+                                                         rocsparse_indextype_i32,
+                                                         rocsparse_indextype_i32,
+                                                         b[0],
+                                                         rocsparse_datatype_f32_r),
+                              rocsparse_status_success);
+                else
+                    ASSERT_EQ(rocsparse_create_csr_descr(&C.p,
+                                                         M.h.mb,
+                                                         M.h.nb,
+                                                         M.h.nnzb(),
+                                                         M.p.ptr,
+                                                         M.c.ptr,
+                                                         M.v.ptr,
+                                                         rocsparse_indextype_i32,
+                                                         rocsparse_indextype_i32,
+                                                         b[0],
+                                                         rocsparse_datatype_f32_r),
+                              rocsparse_status_success);
+            };
+            SpmatH C, CE;
+            ASSERT_NO_FATAL_FAILURE(alias(C, oD));
+            ASSERT_NO_FATAL_FAILURE(alias(CE, oE));
+
+            const float alpha = 1.0f, beta = 1.0f;
+            auto        call = [&](const void*                 be,
+                            rocsparse_const_spmat_descr Dd,
+                            rocsparse_spmat_descr       Cd,
+                            rocsparse_spgemm_stage      stage,
+                            size_t*                     bs,
+                            void*                       tmp) {
+                return spgemm_call<float>(
+                    handle, &alpha, oA.d.p, oB.d.p, be, Dd, Cd, stage, bs, tmp);
+            };
+
+            // The buffer of the documented alias, so that a missing check cannot overrun it.
+            size_t bsz = 0;
+            ASSERT_EQ(
+                call(&beta, oD.d.p, oD.d.p, rocsparse_spgemm_stage_buffer_size, &bsz, nullptr),
+                rocsparse_status_success);
+            DevBuf<char> buffer(bsz);
+            ASSERT_TRUE(buffer.ptr);
+
+            const std::vector<int32_t> ptr = oD.p.host(), col = oD.c.host();
+            const std::vector<float>   val = oD.v.host();
+
+            std::vector<rocsparse_spgemm_stage> stages = {rocsparse_spgemm_stage_buffer_size,
+                                                          rocsparse_spgemm_stage_nnz,
+                                                          rocsparse_spgemm_stage_compute};
+            if(!bsr)
+            {
+                stages.push_back(rocsparse_spgemm_stage_symbolic);
+                stages.push_back(rocsparse_spgemm_stage_numeric);
+            }
+            for(rocsparse_spgemm_stage s : stages)
+            {
+                size_t bs = bsz;
+                EXPECT_EQ(call(&beta,
+                               oD.d.p,
+                               C.p,
+                               s,
+                               &bs,
+                               s == rocsparse_spgemm_stage_buffer_size ? nullptr : buffer.ptr),
+                          rocsparse_status_invalid_value)
+                    << "stage " << int(s);
+            }
+            ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+            EXPECT_EQ(oD.p.host(), ptr) << "row pointer of D";
+            EXPECT_EQ(oD.c.host(), col) << "column indices of D";
+            EXPECT_EQ(oD.v.host(), val) << "values of D";
+
+            size_t bs = 0;
+            EXPECT_EQ(call(nullptr, oD.d.p, C.p, rocsparse_spgemm_stage_buffer_size, &bs, nullptr),
+                      rocsparse_status_success)
+                << "beta null";
+            EXPECT_EQ(call(&beta, oE.d.p, CE.p, rocsparse_spgemm_stage_buffer_size, &bs, nullptr),
+                      rocsparse_status_success)
+                << "D empty";
+        }
 }
