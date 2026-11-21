@@ -47,6 +47,7 @@
 #include "testing_potrf.hpp"
 #include "testing_potri.hpp"
 #include "testing_potrs.hpp"
+#include "testing_stedc.hpp"
 #include "testing_syev_heev.hpp"
 #include "testing_syevd_heevd.hpp"
 #include "testing_syevdx_heevdx.hpp"
@@ -118,6 +119,7 @@ class hipsolver_dispatcher
             {"sytrf", testing_sytrf<API_NORMAL, false, false, T>},
             {"sytrs_64", testing_sytrs<API_COMPAT, false, false, T, int64_t, size_t>},
             {"trtri_64", testing_trtri<API_COMPAT, false, false, T, int64_t, size_t>},
+            {"stedc_64", testing_stedc<API_COMPAT, false, false, T, int64_t, size_t>},
         };
 
         // Grab function from the map and execute

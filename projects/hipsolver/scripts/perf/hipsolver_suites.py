@@ -713,19 +713,19 @@ def xxgbr_suite(*, suite, precision, case):
         yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --side R -m {s} --lda {ld}')
 
 
-#def stedc_suite(*, suite, precision, case):
-#    """
-#    STEDC tests are run, for the given precision and sizes, with vectors and without vectors
-#    """
-#    fn = 'stedc_64'
-#    mode = 'normal'
-#    size = get_size_configurations(case, mode)
-#    for s_evect in ['vect', 'novect']:
-#        evect = get_evect(s_evect, 'tridiag')
-#        for s in size:
-#            ld = get_ld(s)
-#            row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'evect': s_evect, 'n': s}
-#            yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --compz {evect} -n {s} --ldc {ld}')
+def stedc_suite(*, suite, precision, case):
+   """
+   STEDC tests are run, for the given precision and sizes, with vectors and without vectors
+   """
+   fn = 'stedc_64'
+   mode = 'normal'
+   size = get_size_configurations(case, mode)
+   for s_evect in ['vect', 'novect']:
+       evect = get_evect(s_evect, 'tridiag')
+       for s in size:
+           ld = get_ld(s)
+           row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'evect': s_evect, 'n': s}
+           yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --jobz {evect} -n {s} --ldc {ld}')
 
 
 def xxevd_suite(*, suite, precision, case):
@@ -940,7 +940,7 @@ SUITES = {
     'xxgbr': xxgbr_suite,
 
     # Symmetric Eigenvalue problem
-#    'stedc': stedc_suite,
+    'stedc': stedc_suite,
     'xxevd': xxevd_suite,
     'xxgvd': xxgvd_suite,
     'xxevBatch': xxevBatch_suite,
