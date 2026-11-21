@@ -405,8 +405,8 @@ def test_emulation_setup(tmp_path, rocm):
     assert prefix == [str(rocm / "bin" / "rocjitsu"), "--config", run_config, "--"]
     assert run_env["CU"] == "256"
     assert (run_env["PYTEST_NUM_WORKERS"], run_env["OMP_THREAD_LIMIT"]) == ("16", "6")
-    assert run_env["PYTEST_TEST_TIMEOUT"] == "7200"
-    assert run_env["ROCJITSU_STALL_DUMP_AFTER"] == "6900"
+    assert run_env["PYTEST_TEST_TIMEOUT"] == "2700"
+    assert run_env["ROCJITSU_STALL_DUMP_AFTER"] == "2400"
     assert run_env["PYTHONPATH"] == f"{EMULATION.resolve()}{os.pathsep}/keep"
     runtime = Path(run_env["ROCJITSU_RUNTIME_DIR"])
     assert runtime.is_dir() and runtime.stat().st_mode & 0o777 == 0o700

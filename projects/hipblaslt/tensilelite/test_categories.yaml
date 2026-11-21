@@ -212,7 +212,7 @@ test_categories:
       - "--dist=worksteal"
       - "--client-lock-scope=worker"
       - "-o"
-      - "faulthandler_timeout=6600"
+      - "faulthandler_timeout=2400"
       - "--prebuilt-client={ROCM_PATH}/libexec/hipblaslt/tensilelite/tensilelite-client"
       - "--global-parameters=LibraryFormat='msgpack'"
       - "--tensile-options=--cxx-compiler,{ROCM_PATH}/bin/amdclang++,--gpu-targets,{AMDGPU_TARGETS}"
