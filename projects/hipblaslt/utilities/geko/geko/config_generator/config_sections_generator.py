@@ -24,17 +24,38 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 DUCTILE_COST_SCALE = 0.25
 
 
-def _cluster_variant_cost_offsets(mi_groups: Sequence[Dict[str, Any]]) -> np.ndarray:
-    """Cost offsets that keep each MI's sampling mass independent of its ClusterDim shapes.
+# MI group fields a post-processor expands one MI into several entries over:
+# ClusterDim shapes (gfx1250 _GFX1250ClusterDimCoupling), the
+# LDSSegmentInterleave / TDMFuse pairs of gfx1250
+# _GFX1250SegmentInterleaveLayout and the TemporalHintA / TemporalHintB pairs
+# of gfx1250 _GFX1250TemporalHintCoupling. SourceSwap is not one of them, so an
+# MI split per SourceSwap value keeps one share per value, as before.
+_MI_VARIANT_FIELDS = frozenset(
+    {"ClusterDim", "LDSSegmentInterleave", "TDMFuse", "TemporalHintA", "TemporalHintB"}
+)
 
-    An MI group entry repeated once per ClusterDim shape would otherwise be
-    drawn as many times more often as it has shapes. Adding ln(n) / scale to
-    each of the n variants divides each variant's probability by n, so the MI
-    as a whole keeps the probability its cost gives it.
+
+def _cluster_variant_cost_offsets(mi_groups: Sequence[Dict[str, Any]]) -> np.ndarray:
+    """Cost offsets that keep each MI's sampling mass independent of its variants.
+
+    An MI group entry repeated once per ClusterDim shape, or per
+    LDSSegmentInterleave / TDMFuse or TemporalHintA / TemporalHintB pair,
+    would otherwise be drawn as many
+    times more often as it has variants. Adding ln(n) / scale to each of the
+    n variants divides each variant's probability by n, so the MI as a whole
+    keeps the probability its cost gives it.
+
+    SourceSwap stays in the key. The gfx1250 SourceSwap split gives every MI
+    one entry per SourceSwap value, and keeping SourceSwap in the key gives
+    each value an equal share, as a flat SourceSwap would, however many
+    variants each value's tile keeps. Every MI is split alike, so the MIs'
+    relative sampling mass does not change.
     """
     keys: List[Optional[tuple]] = [
-        tuple((name, repr(fp.values)) for name, fp in entry.items() if name != "ClusterDim")
-        if "ClusterDim" in entry else None
+        tuple(
+            (name, repr(fp.values)) for name, fp in entry.items() if name not in _MI_VARIANT_FIELDS
+        )
+        if any(name in entry for name in _MI_VARIANT_FIELDS) else None
         for entry in mi_groups
     ]
     counts = Counter(key for key in keys if key is not None)
