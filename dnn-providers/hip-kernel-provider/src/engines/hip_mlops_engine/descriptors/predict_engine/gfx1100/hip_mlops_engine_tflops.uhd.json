@@ -2516,7 +2516,7 @@
   ],
   "features_hash": "sha256:45395cb6a8e37bb9",
   "trained_against": {
-    "selector_revision": "hip-kernel-provider/hip-mlops/f0af15194aa55e9e",
+    "selector_revision": "hip-kernel-provider/hip-mlops/865f2933d8f9d323",
     "feature_semantics_revision": 1
   },
   "objective": "max",
@@ -2527,6 +2527,6 @@
   },
   "mlp_data": {
     "artifact": "hip_mlops_engine_tflops.bin",
-    "hash": "7b32173760292b8b82eb54ce83ddee474f1a139da9f534d59fc9f44e63655847"
+    "hash": "2bba61ea7eb89bc69956635dc38ad1c90e39020c79f82eb3fdfc41aa0308508b"
   }
 }
