@@ -80,6 +80,7 @@ const char* const ROCKE_HIP_PROLOGUE
       "_ROCKE_VEC(double, f64x, 1); _ROCKE_VEC(double, f64x, 2); _ROCKE_VEC(double, f64x, 4);\n"
       "_ROCKE_VEC(int, i32x, 1); _ROCKE_VEC(int, i32x, 2); _ROCKE_VEC(int, i32x, 3);\n"
       "_ROCKE_VEC(int, i32x, 4); _ROCKE_VEC(int, i32x, 8); _ROCKE_VEC(int, i32x, 16);\n"
+      "_ROCKE_VEC(unsigned int, u32x, 2); _ROCKE_VEC(unsigned int, u32x, 4);\n"
       "_ROCKE_VEC(int16_t, i16x, 1); _ROCKE_VEC(int16_t, i16x, 2);\n"
       "_ROCKE_VEC(int16_t, i16x, 4); _ROCKE_VEC(int16_t, i16x, 8);\n"
       "_ROCKE_VEC(int8_t, i8x, 1); _ROCKE_VEC(int8_t, i8x, 2);\n"

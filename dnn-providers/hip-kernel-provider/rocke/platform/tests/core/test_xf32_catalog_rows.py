@@ -145,6 +145,7 @@ class TestSelection(unittest.TestCase):
         self.assertEqual(
             {op.op_id for op in got},
             {
+                "mfma_f32_4x4x4_bf16",
                 "mfma_f32_16x16x16_bf16",
                 "mfma_f32_16x16x32_bf16",
                 "mfma_f32_32x32x8_bf16",
