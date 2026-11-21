@@ -375,7 +375,8 @@ RppStatus hip_exec_slice_tensor(T* srcPtr, RpptGenericDescPtr srcGenericDescPtr,
             } else if (dstGenericDescPtr->layout == RpptLayout::NDHWC) {
                 T* srcPtrTemp = srcPtr + (batchCount * srcGenericDescPtr->strides[0]) +
                                 anchor[0] * srcGenericDescPtr->strides[1] +
-                                anchor[1] * srcGenericDescPtr->strides[2] + anchor[2];
+                                anchor[1] * srcGenericDescPtr->strides[2] +
+                                anchor[2] * srcGenericDescPtr->strides[3];
                 T* dstPtrTemp = dstPtr + (batchCount * dstGenericDescPtr->strides[0]);
                 hipLaunchKernelGGL(
                     slice_ndhwc_hip_tensor,
@@ -437,7 +438,8 @@ RppStatus hip_exec_slice_tensor(T* srcPtr, RpptGenericDescPtr srcGenericDescPtr,
                 HIP_CHECK_LAUNCH_RETURN();
             } else if (dstGenericDescPtr->layout == RpptLayout::NHWC) {
                 T* srcPtrTemp = srcPtr + (batchCount * srcGenericDescPtr->strides[0]) +
-                                anchor[0] * srcGenericDescPtr->strides[1] + anchor[1];
+                                anchor[0] * srcGenericDescPtr->strides[1] +
+                                anchor[1] * srcGenericDescPtr->strides[2];
                 T* dstPtrTemp = dstPtr + (batchCount * dstGenericDescPtr->strides[0]);
                 hipLaunchKernelGGL(
                     slice_ndhwc_hip_tensor,
@@ -465,7 +467,7 @@ RppStatus hip_exec_slice_tensor(T* srcPtr, RpptGenericDescPtr srcGenericDescPtr,
             Rpp32u maxHeight = std::min(shape[0], length[0] - anchor[0]);
             Rpp32u maxWidth = std::min(shape[1], length[1] - anchor[1]);
             T* srcPtrTemp = srcPtr + (batchCount * srcGenericDescPtr->strides[0]) +
-                            anchor[0] * srcGenericDescPtr->strides[2] + anchor[1];
+                            anchor[0] * srcGenericDescPtr->strides[1] + anchor[1];
             T* dstPtrTemp = dstPtr + (batchCount * dstGenericDescPtr->strides[0]);
 
             hipLaunchKernelGGL(slice_ncdhw_hip_tensor,
