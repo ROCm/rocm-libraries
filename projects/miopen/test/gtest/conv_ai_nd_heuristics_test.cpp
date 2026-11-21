@@ -1158,6 +1158,92 @@ TEST(GPU_ConvAIModelLoad_FP32, BundledFdeepModelsLoad)
                                   << models.size() << " bundled model(s):" << oss.str();
 }
 
+// CPU (no-Handle) run of the gfx1250 TunaNet ND solver-selection models (2D and 3D). The
+// GPU_ConvNDAIHeuristics_FP32 suite skips unless the device is gfx942/gfx950, and gfx125X CI is
+// build-only, so the gfx1250 num_cu/arch feature path is otherwise only loaded
+// (BundledFdeepModelsLoad) and never run. GetNDModel builds the model and Forward() runs fdeep,
+// which throws if the engineered input width disagrees with the model's trained input -- the exact
+// failure this guards against.
+TEST(CPU_ConvNDTunaNet_NONE, Gfx1250ModelRunsAndWidthMatches)
+{
+    // Gate on the actual shipped files at GetSystemDbPath(), not HasBundledTunaNetModels (an
+    // arch-support predicate that is true for gfx1250 even on a runner that deploys only the host
+    // arch's models, where GetNDModel would then return a model whose metadata failed to load).
+    // Mirrors the candidate-selection CPU suite: run a dim only if its assets ship here, skip the
+    // whole test if neither does.
+    const auto db          = miopen::GetSystemDbPath();
+    const auto dim_present = [&](int dim) {
+        const std::string sfx = (dim == 3) ? "_3d" : "";
+        return miopen::fs::exists(db / ("gfx1250" + sfx + ".tn.model")) &&
+               miopen::fs::exists(db / ("gfx1250" + sfx + "_metadata.tn.model"));
+    };
+
+    // dtype/direction/dilation vary so the metadata's precision and direction one-hots and the
+    // dilation feature are all exercised (TunaNet picks across all directions, so cover all three).
+    // pad == dilation on a 3-tap filter keeps the output spatial size equal to the input.
+    const auto make_problem =
+        [](int dim, miopenDataType_t dtype, miopen::conv::Direction dir, int dilation) {
+            const int p = dilation;
+            if(dim == 3)
+            {
+                miopen::TensorDescriptor in(dtype, std::vector<int>{1, 64, 8, 56, 56});
+                miopen::TensorDescriptor wei(dtype, std::vector<int>{64, 64, 3, 3, 3});
+                miopen::TensorDescriptor out(dtype, std::vector<int>{1, 64, 8, 56, 56});
+                miopen::ConvolutionDescriptor conv(3,
+                                                   miopenConvolution,
+                                                   miopenPaddingDefault,
+                                                   {p, p, p},
+                                                   {1, 1, 1},
+                                                   {dilation, dilation, dilation},
+                                                   {0, 0, 0});
+                return miopen::conv::ProblemDescription(in, wei, out, conv, dir);
+            }
+            miopen::TensorDescriptor in(dtype, std::vector<int>{1, 64, 56, 56});
+            miopen::TensorDescriptor wei(dtype, std::vector<int>{64, 64, 3, 3});
+            miopen::TensorDescriptor out(dtype, std::vector<int>{1, 64, 56, 56});
+            miopen::ConvolutionDescriptor conv(2,
+                                               miopenConvolution,
+                                               miopenPaddingDefault,
+                                               {p, p},
+                                               {1, 1},
+                                               {dilation, dilation},
+                                               {0, 0});
+            return miopen::conv::ProblemDescription(in, wei, out, conv, dir);
+        };
+
+    int ran = 0;
+    for(int dim : {2, 3})
+    {
+        if(!dim_present(dim))
+            continue;
+        ++ran;
+        auto model = immed_mode::GetNDModel("gfx1250", dim);
+        ASSERT_NE(model, nullptr) << "GetNDModel returned null for gfx1250 " << dim << "D";
+        for(const auto dtype : {miopenFloat, miopenHalf, miopenBFloat16})
+        {
+            for(const auto dir : {miopen::conv::Direction::Forward,
+                                  miopen::conv::Direction::BackwardData,
+                                  miopen::conv::Direction::BackwardWeights})
+            {
+                for(const int dilation : {1, 2})
+                {
+                    const auto problem = make_problem(dim, dtype, dir, dilation);
+                    std::vector<float> probs;
+                    ASSERT_NO_THROW({ probs = model->Forward(problem); })
+                        << "gfx1250 " << dim << "D TunaNet Forward threw for dtype " << dtype
+                        << " dilation " << dilation
+                        << ": engineered input width disagrees with the model input.";
+                    EXPECT_EQ(probs.size(), model->GetSolverMap().size())
+                        << "gfx1250 " << dim << "D: expected one probability per solver";
+                    EXPECT_FALSE(probs.empty());
+                }
+            }
+        }
+    }
+    if(ran == 0)
+        GTEST_SKIP() << "gfx1250 TunaNet model assets not installed at " << db;
+}
+
 } // namespace
 
 #endif // MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK

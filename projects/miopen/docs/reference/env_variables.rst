@@ -255,9 +255,9 @@ For more information, see :doc:`Logging and debugging <../how-to/debug-log>`.
         | 1: Enable
 
     * - | ``MIOPEN_DEBUG_AI_DISABLE_PRECOMPUTED_CONFIG_EMB``
-        | Disables the precomputed config-embedding table used by the gfx942/gfx950 two-tower
-        | candidate selection, so kernel-config selection falls through to the solver's non-AI
-        | heuristic.
+        | Disables the precomputed config-embedding table used by the gfx942/gfx950/gfx1250
+        | two-tower candidate selection, so kernel-config selection falls through to the solver's
+        | non-AI heuristic.
       - | 0: Disable (default)
         | 1: Enable
 

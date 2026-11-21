@@ -95,6 +95,10 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   unchanged.
 
 ### Added
+* [Conv] Added gfx1250 (`gfx1250`/`gfx1250-strict`) conv AI heuristic support on the precomputed
+  config-tower runtime: TunaNet solver-selection and KTN candidate-selection model assets plus the
+  precomputed config-embedding tables for the grouped xdlops forward, backward-data, and
+  backward-weights solvers (2D and 3D).
 * [Build] ROCm builds now enable `MIOPEN_ENABLE_HIPDNN_WRAPPER` by default. MIOpen is built as a
   thin public `libMIOpen.so` over the new `libMIOpen_private.so`; set it to `Off` for the previous
   single-library build. Programs that link a hand-written `-lMIOpen` and call functions not
