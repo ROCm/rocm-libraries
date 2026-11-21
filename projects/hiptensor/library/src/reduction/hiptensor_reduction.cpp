@@ -354,10 +354,26 @@ hiptensorStatus_t hiptensorReduce(const hiptensorHandle_t handle,
     hiptensorTensorDescriptor sortedDescC    = *descC;
     std::vector<int>          sortingIndices = {};
 
-    CHECK_HIPTENSOR_ERROR(hiptensor::getSortingIndices(
-        modeA, descA->mLengths.size(), modeC, sortedDescC.mLengths.size(), sortingIndices));
-    CHECK_HIPTENSOR_ERROR(hiptensor::applySortingIndices(sortingIndices, sortedDescC.mLengths));
-    CHECK_HIPTENSOR_ERROR(hiptensor::applySortingIndices(sortingIndices, sortedDescC.mStrides));
+    auto sortStatus = hiptensor::getSortingIndices(
+        modeA, descA->mLengths.size(), modeC, sortedDescC.mLengths.size(), sortingIndices);
+    if(sortStatus == HIPTENSOR_STATUS_SUCCESS)
+    {
+        sortStatus = hiptensor::applySortingIndices(sortingIndices, sortedDescC.mLengths);
+    }
+    if(sortStatus == HIPTENSOR_STATUS_SUCCESS)
+    {
+        sortStatus = hiptensor::applySortingIndices(sortingIndices, sortedDescC.mStrides);
+    }
+    if(sortStatus != HIPTENSOR_STATUS_SUCCESS)
+    {
+        snprintf(msg,
+                 sizeof(msg),
+                 "Invalid Argument Error : Failed to sort the modes of C and D by the modes of "
+                 "A (%s)",
+                 hiptensorGetErrorString(sortStatus));
+        logger->logError("hiptensorReduce", msg);
+        return sortStatus;
+    }
 
     for(auto pSolution : solutions)
     {
