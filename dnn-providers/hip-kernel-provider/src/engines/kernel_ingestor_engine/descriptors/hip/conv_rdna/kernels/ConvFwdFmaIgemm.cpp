@@ -31,6 +31,9 @@
 //   CONV_HAS_BIAS       1 = add bias[k] (one value per output channel, the dtype of the data)
 //                       to every output before it is stored; the kernel then takes the bias
 //                       pointer after `out`
+//   CONV_HAS_ACT        1 = apply an activation to every output, after the bias, before it is
+//                       stored; the kernel then takes the activation (ACT_* below) and its three
+//                       parameters after `groups`
 
 #ifndef CONV_DTYPE
 #define CONV_DTYPE 0
@@ -46,6 +49,9 @@
 #endif
 #ifndef CONV_HAS_BIAS
 #define CONV_HAS_BIAS 0
+#endif
+#ifndef CONV_HAS_ACT
+#define CONV_HAS_ACT 0
 #endif
 
 #define TILE_M 128
@@ -93,6 +99,54 @@ __device__ static inline data_t from_float(float v)
 }
 #endif
 
+#if CONV_HAS_ACT
+// The activations, numbered as conv_rdna::fma_igemm::ActivationMode.
+#define ACT_RELU 0
+#define ACT_SIGMOID 1
+#define ACT_TANH 2
+#define ACT_ELU 3
+#define ACT_GELU 4
+#define ACT_GELU_APPROX_TANH 5
+#define ACT_SWISH 6
+#define ACT_SOFTPLUS 7
+#define ACT_IDENTITY 8
+
+// The forward activations of hipDNN's pointwise reference, in fp32. `act` is a kernel argument,
+// so every thread takes the same branch.
+//   ACT_RELU      p0 lower clip, p1 upper clip, p2 slope below the lower clip
+//   ACT_ELU       p0 alpha
+//   ACT_SWISH     p0 beta
+//   ACT_SOFTPLUS  p0 beta
+__device__ static inline float activate(float v, int act, float p0, float p1, float p2)
+{
+    switch(act)
+    {
+    case ACT_RELU:
+        return v <= p0 ? p2 * (v - p0) + p0 : (v >= p1 ? p1 : v);
+    case ACT_SIGMOID:
+        return 1.f / (1.f + expf(-v));
+    case ACT_TANH:
+        return tanhf(v);
+    case ACT_ELU:
+        return v > 0.f ? v : p0 * expm1f(v);
+    case ACT_GELU:
+        return 0.5f * v * (1.f + erff(v * 0.70710678118654752f));
+    case ACT_GELU_APPROX_TANH:
+        return 0.5f * v * (1.f + tanhf(0.79788456080286536f * (v + 0.044715f * v * v * v)));
+    case ACT_SWISH:
+        return v / (1.f + expf(-p0 * v));
+    case ACT_SOFTPLUS:
+    {
+        // Linear above 20, where log1p(exp(s)) / beta equals v in fp32 and exp would overflow.
+        const float s = p0 * v;
+        return s > 20.f ? v : log1pf(expf(s)) / p0;
+    }
+    default:
+        return v;
+    }
+}
+#endif
+
 extern "C" __global__ void __launch_bounds__(BLOCK_SIZE)
     ConvFwdFmaIgemm(const data_t* __restrict__ in,
                     const data_t* __restrict__ wei,
@@ -121,7 +175,15 @@ extern "C" __global__ void __launch_bounds__(BLOCK_SIZE)
                     int dd,
                     int dh,
                     int dw,
-                    int groups)
+                    int groups
+#if CONV_HAS_ACT
+                    ,
+                    int act,
+                    float act_p0,
+                    float act_p1,
+                    float act_p2
+#endif
+    )
 {
     __shared__ float as[2][TILE_C][TILE_M + 4];
     __shared__ float bs[2][TILE_C][TILE_N + 4];
@@ -324,9 +386,12 @@ extern "C" __global__ void __launch_bounds__(BLOCK_SIZE)
         {
             const int k = k0 + tn + j * (TILE_N / MICRO_N);
 #if CONV_HAS_BIAS
-            const float v = acc[i][j] + bv[j];
+            float v = acc[i][j] + bv[j];
 #else
-            const float v = acc[i][j];
+            float v = acc[i][j];
+#endif
+#if CONV_HAS_ACT
+            v = activate(v, act, act_p0, act_p1, act_p2);
 #endif
             if(k < Kg)
                 out_m[k * out_kstride] = from_float(v);

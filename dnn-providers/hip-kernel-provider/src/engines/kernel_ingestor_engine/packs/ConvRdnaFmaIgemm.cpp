@@ -135,25 +135,38 @@ bool isVariantOf(const KernelDefinition& kernel, const ConvProblem& problem)
            && kernel.getIntMetadata(std::string(TILE_N_FIELD)) == tileN(problem);
 }
 
-const std::vector<KernelArgument>& kernelSignature(bool hasBias)
+const std::vector<KernelArgument>& kernelSignature(bool hasBias, bool hasActivation)
 {
     static const KernelArgument s_buffer{
         "global_buffer", static_cast<uint32_t>(sizeof(void*)), 0, ""};
     static const KernelArgument s_scalar{"by_value", static_cast<uint32_t>(sizeof(int)), 0, ""};
-    const auto make = [](size_t buffers) {
+    static const KernelArgument s_float{"by_value", static_cast<uint32_t>(sizeof(float)), 0, ""};
+    const auto make = [](size_t buffers, bool activation) {
         std::vector<KernelArgument> signature(buffers, s_buffer);
         // N, C, Di, Hi, Wi, K, Z, Y, X, Do, Ho, Wo, sd, sh, sw, pd, ph, pw, dd, dh, dw, groups.
         signature.insert(signature.end(), 22, s_scalar);
+        if(activation)
+        {
+            // The activation, then its three parameters.
+            signature.push_back(s_scalar);
+            signature.insert(signature.end(), 3, s_float);
+        }
         return signature;
     };
-    static const std::vector<KernelArgument> s_plain = make(3);
-    static const std::vector<KernelArgument> s_bias = make(4);
+    static const std::vector<KernelArgument> s_plain = make(3, false);
+    static const std::vector<KernelArgument> s_bias = make(4, false);
+    static const std::vector<KernelArgument> s_biasActivation = make(4, true);
+    if(hasActivation)
+    {
+        return s_biasActivation;
+    }
     return hasBias ? s_bias : s_plain;
 }
 
 void addCompileOptions(compilation::KernelCompileOptions& options,
                        const ConvProblem& problem,
-                       bool hasBias)
+                       bool hasBias,
+                       bool hasActivation)
 {
     const int channelsLast = problem.layout == Layout::CHANNELS_LAST ? 1 : 0;
     options.add("CONV_DTYPE", dtypeCode(problem.dtype));
@@ -165,6 +178,10 @@ void addCompileOptions(compilation::KernelCompileOptions& options,
     {
         options.add("CONV_HAS_BIAS", 1);
     }
+    if(hasActivation)
+    {
+        options.add("CONV_HAS_ACT", 1);
+    }
 }
 
 void launch(const compilation::IRunnableKernel& kernel,
@@ -174,36 +191,49 @@ void launch(const compilation::IRunnableKernel& kernel,
             void* y,
             const void* bias,
             bool hasBias,
-            const ConvProblem& p)
+            const ConvProblem& p,
+            const Activation* activation)
 {
     // A 2-D problem carries depth 1, depth stride and dilation 1 and depth padding 0.
     const auto run = [&](auto&&... buffers) {
-        kernel.launch(stream,
-                      buffers...,
-                      p.n,
-                      p.c,
-                      p.in[0],
-                      p.in[1],
-                      p.in[2],
-                      p.k,
-                      p.filter[0],
-                      p.filter[1],
-                      p.filter[2],
-                      p.out[0],
-                      p.out[1],
-                      p.out[2],
-                      p.stride[0],
-                      p.stride[1],
-                      p.stride[2],
-                      p.pad[0],
-                      p.pad[1],
-                      p.pad[2],
-                      p.dilation[0],
-                      p.dilation[1],
-                      p.dilation[2],
-                      p.groups);
+        const auto withEpilogue = [&](auto&&... epilogue) {
+            kernel.launch(stream,
+                          buffers...,
+                          p.n,
+                          p.c,
+                          p.in[0],
+                          p.in[1],
+                          p.in[2],
+                          p.k,
+                          p.filter[0],
+                          p.filter[1],
+                          p.filter[2],
+                          p.out[0],
+                          p.out[1],
+                          p.out[2],
+                          p.stride[0],
+                          p.stride[1],
+                          p.stride[2],
+                          p.pad[0],
+                          p.pad[1],
+                          p.pad[2],
+                          p.dilation[0],
+                          p.dilation[1],
+                          p.dilation[2],
+                          p.groups,
+                          epilogue...);
+        };
+        if(activation != nullptr)
+        {
+            withEpilogue(
+                static_cast<int>(activation->mode), activation->p0, activation->p1, activation->p2);
+        }
+        else
+        {
+            withEpilogue();
+        }
     };
-    if(hasBias)
+    if(hasBias || activation != nullptr)
     {
         run(x, w, y, bias);
     }

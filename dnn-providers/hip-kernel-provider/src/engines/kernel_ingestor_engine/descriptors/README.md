@@ -21,6 +21,7 @@ under `HIPKERNELPROVIDER_ENABLE_TESTS`. It holds the rocKE and hip bundles below
 | `rocKE/gfx1250_conv_dgrad_aot/` | `hipkernel:Gfx1250ConvDgradAot` | `packs/ConvDgradAotNative.cpp` (shared with gfx950) |
 | `hip/conv_rdna/` | `hipkernel:hip_conv_fwd_fma_igemm_rdna` | `packs/HipConvFwdFmaIgemmRdnaNative.cpp` (shares `packs/ConvRdnaCommon.cpp`, `packs/ConvRdnaFmaIgemm.cpp`) |
 | `hip/conv_bias_rdna/` | `hipkernel:hip_conv_fwd_bias_fma_igemm_rdna` | `packs/HipConvFwdBiasFmaIgemmRdnaNative.cpp` (shares `packs/ConvRdnaCommon.cpp`, `packs/ConvRdnaFmaIgemm.cpp`) |
+| `hip/conv_bias_act_rdna/` | `hipkernel:hip_conv_fwd_bias_act_fma_igemm_rdna` | `packs/HipConvFwdBiasActFmaIgemmRdnaNative.cpp` (shares `packs/ConvRdnaCommon.cpp`, `packs/ConvRdnaFmaIgemm.cpp`) |
 
 The `gfx950_attention_dense`, `gfx950_attention_unified_2d`, `gfx950_attention_unified_3d`,
 `gfx942_attention_unified_2d`, `gfx942_attention_unified_3d`, `gfx942_attention_dense`,
@@ -51,6 +52,11 @@ regenerate rather than editing the JSON.
 `../conv_rdna/kernels/ConvFwdFmaIgemm.cpp`, built with the bias epilogue (`CONV_HAS_BIAS`).
 Its descriptors are generated from
 `projects/hipdnn/tools/IngestorGenerator/configs/hip_conv_fwd_bias_fma_igemm_rdna.yaml`.
+
+`hip/conv_bias_act_rdna/` holds no kernel source of its own either: its UKDs name the same
+file, built with the bias and activation epilogues (`CONV_HAS_BIAS`, `CONV_HAS_ACT`). Its
+descriptors are generated from
+`projects/hipdnn/tools/IngestorGenerator/configs/hip_conv_fwd_bias_act_fma_igemm_rdna.yaml`.
 
 `FlyDSL/<op>/`, one bundle per op, whose kernels are **pre-built** and stored beside
 their descriptors under `FlyDSL/<op>/<target>/`, as `kind: "hsaco"` UKDs inline in

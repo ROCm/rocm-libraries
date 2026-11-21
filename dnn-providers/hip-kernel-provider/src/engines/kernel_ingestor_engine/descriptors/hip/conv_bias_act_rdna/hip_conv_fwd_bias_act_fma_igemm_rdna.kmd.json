@@ -1,0 +1,23 @@
+{
+  "version": "1.0",
+  "id": "7a116557-23e2-44f0-9f1e-ac491a2fddc4",
+  "name": "hip_conv_fwd_bias_act_fma_igemm_rdna variant fields",
+  "fields": [
+    {
+      "name": "kernel_family",
+      "type": "string"
+    },
+    {
+      "name": "dtype",
+      "type": "string"
+    },
+    {
+      "name": "layout",
+      "type": "string"
+    },
+    {
+      "name": "tile_n",
+      "type": "int"
+    }
+  ]
+}
