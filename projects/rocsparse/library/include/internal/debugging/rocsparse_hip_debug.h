@@ -136,7 +136,8 @@ ROCSPARSE_EXPORT int32_t rocsparse_hip_debug_state(void);
    * \details Start HIP debug.
    *  @param[in]
    *  handle      the pointer to the handle to the rocSPARSE library context, this pointer is allowed to be null.
-   *  p_error        error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if the user does not require an error descriptor.
+   *  @param[out]
+   *  p_error     error descriptor, reserved for future use. A null pointer can be passed.
  *  \retval rocsparse_status_success if the operation completed successfully, otherwise see \ref rocsparse_status.
  */
 ROCSPARSE_EXPORT rocsparse_status rocsparse_hip_debug_start(rocsparse_handle handle,
@@ -147,7 +148,7 @@ ROCSPARSE_EXPORT rocsparse_status rocsparse_hip_debug_start(rocsparse_handle han
    *  @param[in]
    *  handle the pointer to the handle to the rocSPARSE library context, this pointer is allowed to be null.
    *  @param[out]
-   *  p_error error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if the user does not require an error descriptor.
+   *  p_error error descriptor, reserved for future use. A null pointer can be passed.
  *  \retval rocsparse_status_success if the operation completed successfully, otherwise see \ref rocsparse_status.
    */
 ROCSPARSE_EXPORT rocsparse_status rocsparse_hip_debug_print(rocsparse_handle handle,
@@ -166,7 +167,7 @@ ROCSPARSE_EXPORT rocsparse_status rocsparse_hip_debug_print(rocsparse_handle han
  *  @param[in]
  *  data_size_in_bytes size in bytes of the fetched data.
  *  @param[out]
- *  p_error        error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if the user does not require an error descriptor.
+ *  p_error        error descriptor, reserved for future use. A null pointer can be passed.
  *
  *  \retval rocsparse_status_success the operation completed successfully.
  *  \retval rocsparse_status_invalid_pointer if \p data is invalid.
@@ -195,7 +196,7 @@ ROCSPARSE_EXPORT rocsparse_status
  *  @param[in]
  *  data_size_in_bytes size in bytes of the fetched data.
  *  @param[out]
- *  p_error        error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if the user does not require an error descriptor.
+ *  p_error        error descriptor, reserved for future use. A null pointer can be passed.
  *
  *  \retval rocsparse_status_success the operation completed successfully.
  *  \retval rocsparse_status_invalid_pointer if \p data is invalid.
