@@ -39,7 +39,8 @@
     "xpf",
     "dil",
     "line",
-    "bpu"
+    "bpu",
+    "lin"
   ],
   "behavior_notes": [
     "runtime_compilation"

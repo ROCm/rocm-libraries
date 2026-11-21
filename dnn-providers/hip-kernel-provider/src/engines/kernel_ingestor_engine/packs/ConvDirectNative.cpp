@@ -326,6 +326,34 @@ std::optional<Tile>
     return best;
 }
 
+/// Linear tiles (LIN configs): BM consecutive pixels of the image's virtual raster, whose rows
+/// and planes are at least the output's and wide enough that a tap's reach past a virtual row
+/// (or plane) lands on the input's zero padding on both readings: per axis max(out, in +
+/// max(leading pad, trailing pad)). Backward data of an unpadded layer gets exactly the output's
+/// extents (no junk pixels); "same" padding one junk column and row. Declines rows wider than
+/// the config's stage holds.
+std::optional<Tile> linTileFor(const K2Args& a, const Config& config, long long columnBlocks)
+{
+    const long long trailW = static_cast<long long>(a.wo) + config.s - 1 - a.wi - a.pw;
+    const long long trailH = static_cast<long long>(a.ho) + config.r - 1 - a.hi - a.ph;
+    const long long wv = std::max<long long>(a.wo, a.wi + std::max<long long>(a.pw, trailW));
+    const long long hv = std::max<long long>(a.ho, a.hi + std::max<long long>(a.ph, trailH));
+    const long long pixels = static_cast<long long>(a.dout) * hv * wv;
+    if(wv > config.lin || pixels + config.bm > INT_LIMIT)
+    {
+        return std::nullopt;
+    }
+    Tile t;
+    t.th = static_cast<int>(hv);
+    t.tw = static_cast<int>(wv);
+    t.ds = a.dout;
+    t.tilesW = static_cast<int>(divUp(pixels, config.bm));
+    t.tilesH = 1;
+    t.tilesD = 1;
+    t.blocks = static_cast<long long>(t.tilesW) * a.n * columnBlocks;
+    return t;
+}
+
 } // namespace
 
 std::optional<DirectProblem> parseDirectProblem(const MatchContext& context,
@@ -607,6 +635,15 @@ std::optional<Config> configOf(const KernelDefinition& kernel)
     {
         return std::nullopt;
     }
+    // Linear tiles (absent: 0): halo tiles, matrix-core, register-path weights, channels-last,
+    // non-ring; the value is the widest virtual row (pixels) their stage holds.
+    config.lin = intField(kernel, "lin").value_or(0);
+    if(config.lin != 0
+       && (config.lin < 1 || config.rows || config.fma || config.ring != 0 || config.bl != 0
+           || config.cf != 0))
+    {
+        return std::nullopt;
+    }
     config.math = math == 1;
     const bool known
         = std::any_of(FILTERS.begin(),
@@ -813,7 +850,8 @@ std::optional<Plan>
         {
             return std::nullopt;
         }
-        tile = tileFor(a, config, columnBlocks, computeUnits);
+        tile = config.lin != 0 ? linTileFor(a, config, columnBlocks)
+                               : tileFor(a, config, columnBlocks, computeUnits);
     }
     if(!tile.has_value())
     {
@@ -1311,6 +1349,10 @@ public:
             if(config.xpf != 0)
             {
                 options.add("CONV_DIRECT_XPF", std::to_string(config.xpf));
+            }
+            if(config.lin != 0)
+            {
+                options.add("CONV_DIRECT_LIN", std::to_string(config.lin));
             }
         }
 

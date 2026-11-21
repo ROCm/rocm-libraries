@@ -24,7 +24,9 @@ struct K2Args
     int dout, ho, wo;
     int pd, ph, pw; ///< leading padding of the forward form
     int kpad, ca; ///< formatted weight columns; reduction chunks of `ka` in the formatted weights
-    int th, tw, ds; ///< block tile: output rows, columns, depth planes
+    /// Block tile: output rows, columns, depth planes. Linear-tile configs (LIN): th, tw are the
+    /// image's virtual plane height and row width, the tile BM consecutive virtual pixels.
+    int th, tw, ds;
     int tilesW, tilesH, tilesD;
     /// Split-C (SPLIT configs): grid.z = splits, each block reduces `cps` channel chunks and
     /// writes fp32 partials ws[z][output element] for ConvDirectReduce to add in order.
@@ -102,6 +104,13 @@ constexpr int k2HaloMax(int bm, int r, int s)
         }
     }
     return best;
+}
+
+/// Linear tiles (LIN configs): the stage of a block of `bm` virtual pixels, for virtual rows of
+/// up to `wv` pixels: the block's pixels plus (r - 1) rows and s - 1 pixels of reach.
+constexpr int k2LinHaloMax(int bm, int r, int s, int wv)
+{
+    return bm + (r - 1) * wv + s - 1;
 }
 
 /// Channels-first halo tiles (CF 1) are at least K2_CF_MIN_TW columns wide where the output is,
