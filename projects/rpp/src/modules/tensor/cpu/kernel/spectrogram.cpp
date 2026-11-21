@@ -70,6 +70,9 @@ RppStatus spectrogram_host_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr, Rpp32f
     const Rpp32s numBins = nfft / 2 + 1;
     const Rpp32u hStride = dstDescPtr->strides.hStride;
     const Rpp32s alignedWindowLength = windowLength & ~7;
+    // Where the window sits inside the (possibly longer) transform. Loop invariant, and the
+    // windowing loop below applies it so the samples land straight in their transform slot.
+    const Rpp32s inWindowStart = windowLength < nfft ? (nfft - windowLength) / 2 : 0;
     const Rpp32s maxNumWindows = (vertical) ? dstDescPtr->w : dstDescPtr->h;
     const Rpp32u windowOutputStride = maxNumWindows * nfft;
     if (windowOutputStride > 99532800) return RPP_ERROR_OUT_OF_BOUND_SCRATCH_MEMORY_SIZE;
@@ -77,7 +80,7 @@ RppStatus spectrogram_host_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr, Rpp32f
     // One read-only plan is shared across OpenMP threads (nfft is constant across the batch).
     RppCpuFftPlan fftPlan;
     rpp_cpu_fft_plan_init(fftPlan, nfft);
-    const Rpp32s fftScratchLen = fftPlan.isPow2 ? nfft : fftPlan.m;
+    const Rpp32s fftScratchLen = fftPlan.isPow2 ? ((nfft / 2) > 0 ? nfft / 2 : 1) : fftPlan.m;
 
     Rpp32f* windowFn = static_cast<Rpp32f*>(calloc(windowLength, sizeof(Rpp32f)));
     Rpp32f* scratchMem = handle.GetInitHandle()->mem.mcpu.scratchBufferHost;
@@ -100,7 +103,7 @@ RppStatus spectrogram_host_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr, Rpp32f
         std::fill_n(windowOutput, numWindows * nfft, 0);
         for (Rpp32s w = 0; w < numWindows; w++) {
             Rpp32s windowStart = w * windowStep - windowCenterOffset;
-            Rpp32f* windowOutputTemp = windowOutput + (w * nfft);
+            Rpp32f* windowOutputTemp = windowOutput + (w * nfft) + inWindowStart;
             // Pad when either windowStart less than zero or length greater than input srclength
             if (windowStart < 0 || (windowStart + windowLength) > bufferLength) {
                 for (Rpp32s t = 0; t < windowLength; t++) {
@@ -138,38 +141,77 @@ RppStatus spectrogram_host_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr, Rpp32f
         // Per-thread scratch/output buffers (the plan itself is read-only and shared).
         std::vector<RppFftComplex> fftScratch(fftScratchLen);
         std::vector<RppFftComplex> fftBins(numBins);
-        std::vector<Rpp32f> fftInReal(nfft);
+        // Four windows are transformed together, bin k of lane l landing at [k * 4 + l].
+        const Rpp32s simdScratchLen = fftPlan.isPow2 ? fftScratchLen * 4 : 0;
+        const Rpp32s simdOutLen = fftPlan.isPow2 ? numBins * 4 : 0;
+        std::vector<Rpp64f> fftSimdScratchRe(simdScratchLen), fftSimdScratchIm(simdScratchLen);
+        std::vector<Rpp64f> fftSimdOutRe(simdOutLen), fftSimdOutIm(simdOutLen);
 
-        for (Rpp32s w = 0; w < numWindows; w++) {
+        Rpp32s w = 0;
+        if (fftPlan.isPow2) {
+            const Rpp32s alignedNumWindows = numWindows & ~3;
+            for (; w < alignedNumWindows; w += 4) {
+                const Rpp32f* fftIn[4];
+                for (Rpp32s l = 0; l < 4; l++) fftIn[l] = windowOutput + ((w + l) * nfft);
+                rpp_simd_fft_forward_real(fftPlan, fftIn, nfft, fftSimdOutRe.data(),
+                                          fftSimdOutIm.data(), fftSimdScratchRe.data(),
+                                          fftSimdScratchIm.data());
+                // Bins are double; the magnitude is formed in double and narrowed once on store.
+                for (Rpp32s l = 0; l < 4; l++) {
+                    const Rpp64f* binRe = fftSimdOutRe.data() + l;
+                    const Rpp64f* binIm = fftSimdOutIm.data() + l;
+                    if (vertical) {
+                        Rpp32s outIdx = w + l;
+                        if (power == 1)
+                            for (int i = 0; i < numBins; i++, outIdx += hStride)
+                                dstPtrTemp[outIdx] = static_cast<Rpp32f>(
+                                    std::abs(RppFftComplex(binRe[i * 4], binIm[i * 4])));
+                        else
+                            for (int i = 0; i < numBins; i++, outIdx += hStride)
+                                dstPtrTemp[outIdx] = static_cast<Rpp32f>(
+                                    binRe[i * 4] * binRe[i * 4] + binIm[i * 4] * binIm[i * 4]);
+                    } else {
+                        Rpp32f* dstPtrBinTemp = dstPtrTemp + ((w + l) * hStride);
+                        if (power == 1)
+                            for (int i = 0; i < numBins; i++)
+                                *dstPtrBinTemp++ = static_cast<Rpp32f>(
+                                    std::abs(RppFftComplex(binRe[i * 4], binIm[i * 4])));
+                        else
+                            for (int i = 0; i < numBins; i++)
+                                *dstPtrBinTemp++ = static_cast<Rpp32f>(binRe[i * 4] * binRe[i * 4] +
+                                                                       binIm[i * 4] * binIm[i * 4]);
+                    }
+                }
+            }
+        }
+
+        // Any leftover windows, and every window when nfft is not a power of two.
+        for (; w < numWindows; w++) {
             Rpp32f* dstPtrBinTemp = dstPtrTemp + (w * hStride);
-            Rpp32f* windowOutputTemp = windowOutput + (w * nfft);
-            Rpp32s inWindowStart = windowLength < nfft ? (nfft - windowLength) / 2 : 0;
-
-            std::fill(fftInReal.begin(), fftInReal.end(), 0.0f);
-            for (int i = 0; i < windowLength; i++)
-                fftInReal[inWindowStart + i] = windowOutputTemp[i];
-            rpp_cpu_fft_forward_real(fftPlan, fftInReal.data(), nfft, fftBins.data(),
+            rpp_cpu_fft_forward_real(fftPlan, windowOutput + (w * nfft), nfft, fftBins.data(),
                                      fftScratch.data());
-            std::complex<Rpp32f>* complexFft = fftBins.data();
+            // Bins are double; the magnitude is formed in double and narrowed once on store.
+            const RppFftComplex* complexFft = fftBins.data();
             Rpp32s outIdx = w;
             if (vertical) {
                 if (power == 1) {
                     for (int i = 0; i < numBins; i++, outIdx += hStride)
-                        dstPtrTemp[outIdx] = std::abs(complexFft[i]);
+                        dstPtrTemp[outIdx] = static_cast<Rpp32f>(std::abs(complexFft[i]));
                 } else {
                     for (int i = 0; i < numBins; i++, outIdx += hStride)
-                        dstPtrTemp[outIdx] =
+                        dstPtrTemp[outIdx] = static_cast<Rpp32f>(
                             complexFft[i].real() * complexFft[i].real() +
-                            complexFft[i].imag() * complexFft[i].imag();  // Magnitude computation
+                            complexFft[i].imag() * complexFft[i].imag());  // Magnitude computation
                 }
             } else {
                 if (power == 1) {
-                    for (int i = 0; i < numBins; i++) *dstPtrBinTemp++ = std::abs(complexFft[i]);
+                    for (int i = 0; i < numBins; i++)
+                        *dstPtrBinTemp++ = static_cast<Rpp32f>(std::abs(complexFft[i]));
                 } else {
                     for (int i = 0; i < numBins; i++)
-                        *dstPtrBinTemp++ =
+                        *dstPtrBinTemp++ = static_cast<Rpp32f>(
                             complexFft[i].real() * complexFft[i].real() +
-                            complexFft[i].imag() * complexFft[i].imag();  // Magnitude computation
+                            complexFft[i].imag() * complexFft[i].imag());  // Magnitude computation
                 }
             }
         }
