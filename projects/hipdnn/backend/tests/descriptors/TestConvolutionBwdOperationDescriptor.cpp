@@ -11,6 +11,7 @@
 #include "hipdnn_backend.h"
 
 #include <gtest/gtest.h>
+#include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/convolution_bwd_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_test_sdk/constants/ConvDgradConstants.hpp>
@@ -18,6 +19,8 @@
 
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 
+#include <cstdint>
+#include <limits>
 #include <memory>
 #include <string>
 #include <vector>
@@ -117,6 +120,100 @@ protected:
         _unfinalizedTensor.reset();
     }
 };
+
+namespace
+{
+
+// Tensor dims and convolution parameters of one dgrad descriptor. An empty padding vector means
+// zeros and an empty dilation vector means ones, one entry per stride entry. The default
+// initializers let a test name only the leading members without -Wmissing-field-initializers.
+struct DgradShape
+{
+    // NOLINTBEGIN(readability-redundant-member-init) - the initializers are load-bearing, see above
+    std::vector<int64_t> dy;
+    std::vector<int64_t> w;
+    std::vector<int64_t> dx;
+    std::vector<int64_t> stride;
+    std::vector<int64_t> dilation = {};
+    std::vector<int64_t> prePadding = {};
+    std::vector<int64_t> postPadding = {};
+    // NOLINTEND(readability-redundant-member-init)
+};
+
+// Finalizes a dgrad descriptor built from packed tensors with the dims and parameters of @p shape.
+void finalizeDgrad(DgradShape shape)
+{
+    using hipdnn_data_sdk::utilities::generateStrides;
+
+    if(shape.dilation.empty())
+    {
+        shape.dilation.assign(shape.stride.size(), 1);
+    }
+    if(shape.prePadding.empty())
+    {
+        shape.prePadding.assign(shape.stride.size(), 0);
+    }
+    if(shape.postPadding.empty())
+    {
+        shape.postPadding.assign(shape.stride.size(), 0);
+    }
+
+    auto dyTensor
+        = createFinalizedTensor(K_DGRAD_TENSOR_DY_UID, shape.dy, generateStrides(shape.dy));
+    auto wTensor = createFinalizedTensor(K_DGRAD_TENSOR_W_UID, shape.w, generateStrides(shape.w));
+    auto dxTensor
+        = createFinalizedTensor(K_DGRAD_TENSOR_DX_UID, shape.dx, generateStrides(shape.dx));
+    HipdnnBackendDescriptor* dyPtr = dyTensor.get();
+    HipdnnBackendDescriptor* wPtr = wTensor.get();
+    HipdnnBackendDescriptor* dxPtr = dxTensor.get();
+
+    auto wrapper = createDescriptor<ConvolutionBwdOperationDescriptor>();
+    auto desc = wrapper->asDescriptor<ConvolutionBwdOperationDescriptor>();
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_CONVOLUTION_BWD_DATA_DY,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       static_cast<const void*>(&dyPtr));
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_CONVOLUTION_BWD_DATA_W,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       static_cast<const void*>(&wPtr));
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_CONVOLUTION_BWD_DATA_DX,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       static_cast<const void*>(&dxPtr));
+
+    desc->setAttribute(HIPDNN_ATTR_CONVOLUTION_PRE_PADDINGS,
+                       HIPDNN_TYPE_INT64,
+                       static_cast<int64_t>(shape.prePadding.size()),
+                       shape.prePadding.data());
+    desc->setAttribute(HIPDNN_ATTR_CONVOLUTION_POST_PADDINGS,
+                       HIPDNN_TYPE_INT64,
+                       static_cast<int64_t>(shape.postPadding.size()),
+                       shape.postPadding.data());
+    desc->setAttribute(HIPDNN_ATTR_CONVOLUTION_FILTER_STRIDES,
+                       HIPDNN_TYPE_INT64,
+                       static_cast<int64_t>(shape.stride.size()),
+                       shape.stride.data());
+    desc->setAttribute(HIPDNN_ATTR_CONVOLUTION_DILATIONS,
+                       HIPDNN_TYPE_INT64,
+                       static_cast<int64_t>(shape.dilation.size()),
+                       shape.dilation.data());
+    auto computeType = HIPDNN_DATA_FLOAT;
+    desc->setAttribute(HIPDNN_ATTR_CONVOLUTION_COMP_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
+    auto convMode = HIPDNN_CROSS_CORRELATION;
+    desc->setAttribute(
+        HIPDNN_ATTR_CONVOLUTION_CONV_MODE, HIPDNN_TYPE_CONVOLUTION_MODE, 1, &convMode);
+
+    desc->finalize();
+}
+
+// A consistent shape: (4 + 1 + 1 - 3) / 1 + 1 = 4 in both spatial dimensions.
+DgradShape paddedBaselineShape()
+{
+    return {{1, 1, 4, 4}, {1, 1, 3, 3}, {1, 1, 4, 4}, {1, 1}, {1, 1}, {1, 1}, {1, 1}};
+}
+
+} // namespace
 
 // =============================================================================
 // Lifecycle Tests
@@ -257,6 +354,151 @@ TEST_F(TestConvolutionBwdOperationDescriptor, FinalizeFailsWithoutConvMode)
     getDescriptor()->setAttribute(
         HIPDNN_ATTR_CONVOLUTION_COMP_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
     ASSERT_THROW_HIPDNN_STATUS(getDescriptor()->finalize(), HIPDNN_STATUS_BAD_PARAM);
+}
+
+// =============================================================================
+// Finalize Tests - Spatial Shape Consistency
+// =============================================================================
+
+TEST_F(TestConvolutionBwdOperationDescriptor, FinalizeFailsWithHugeStrideInconsistentWithDims)
+{
+    // dy width must be (4 - 1) / stride + 1 = 1 for any stride > 3, not 4.
+    ASSERT_THROW_HIPDNN_STATUS(
+        finalizeDgrad({{4, 4, 4, 4}, {4, 4, 1, 1}, {4, 4, 4, 4}, {1, 100000}}),
+        HIPDNN_STATUS_BAD_PARAM);
+    ASSERT_THROW_HIPDNN_STATUS(
+        finalizeDgrad({{4, 4, 4, 4}, {4, 4, 1, 1}, {4, 4, 4, 4}, {1, 1048577}}),
+        HIPDNN_STATUS_BAD_PARAM);
+}
+
+TEST_F(TestConvolutionBwdOperationDescriptor, FinalizeAcceptsUnitStrideOnSameShape)
+{
+    ASSERT_NO_THROW(finalizeDgrad({{4, 4, 4, 4}, {4, 4, 1, 1}, {4, 4, 4, 4}, {1, 1}}));
+}
+
+TEST_F(TestConvolutionBwdOperationDescriptor, FinalizeAcceptsPaddedBaselineShape)
+{
+    ASSERT_NO_THROW(finalizeDgrad(paddedBaselineShape()));
+}
+
+TEST_F(TestConvolutionBwdOperationDescriptor, FinalizeAcceptsStrideThatFloorsTheOutput)
+{
+    // H: (6 - 1) / 2 + 1 = 3 (floored), W: (5 - 1) / 2 + 1 = 3 (exact).
+    ASSERT_NO_THROW(finalizeDgrad({{1, 1, 3, 3}, {1, 1, 1, 1}, {1, 1, 6, 5}, {2, 2}}));
+}
+
+// Each test below changes one parameter so that only the check it names can reject the shape:
+// with that check absent or loosened, the rest of the arithmetic accepts it.
+
+TEST_F(TestConvolutionBwdOperationDescriptor, FinalizeFailsWithZeroStride)
+{
+    // Without the stride bound, 0 / 0 is evaluated.
+    ASSERT_THROW_HIPDNN_STATUS(finalizeDgrad({{1, 1, 1, 1}, {1, 1, 3, 3}, {1, 1, 3, 3}, {0, 0}}),
+                               HIPDNN_STATUS_BAD_PARAM);
+}
+
+TEST_F(TestConvolutionBwdOperationDescriptor, FinalizeFailsWithNegativeStride)
+{
+    // (3 - 3) / -1 + 1 = 1 matches dy, so only the stride bound rejects it.
+    ASSERT_THROW_HIPDNN_STATUS(finalizeDgrad({{1, 1, 1, 1}, {1, 1, 3, 3}, {1, 1, 3, 3}, {-1, -1}}),
+                               HIPDNN_STATUS_BAD_PARAM);
+}
+
+TEST_F(TestConvolutionBwdOperationDescriptor, FinalizeFailsWithZeroDilation)
+{
+    // Without the dilation bound, the multiply overflow guard divides by the dilation 0.
+    ASSERT_THROW_HIPDNN_STATUS(
+        finalizeDgrad({{1, 1, 4, 4}, {1, 1, 3, 3}, {1, 1, 4, 4}, {1, 1}, {0, 0}}),
+        HIPDNN_STATUS_BAD_PARAM);
+}
+
+TEST_F(TestConvolutionBwdOperationDescriptor, FinalizeFailsWhenInputIsOneSmallerThanDilatedKernel)
+{
+    // numerator = 2 - 3 = -1, and -1 / 2 truncates to 0, giving the dy extent 1.
+    ASSERT_THROW_HIPDNN_STATUS(finalizeDgrad({{1, 1, 1, 1}, {1, 1, 3, 3}, {1, 1, 2, 2}, {2, 2}}),
+                               HIPDNN_STATUS_BAD_PARAM);
+}
+
+TEST_F(TestConvolutionBwdOperationDescriptor, FinalizeFailsWhenDilatedKernelMultiplyOverflows)
+{
+    // (5 - 1) * 2^62 = 2^64 wraps to 0, which gives a dilated kernel of 1 and a matching dy.
+    const int64_t dilation = int64_t{1} << 62;
+    ASSERT_THROW_HIPDNN_STATUS(
+        finalizeDgrad({{1, 1, 4, 4}, {1, 1, 5, 5}, {1, 1, 4, 4}, {1, 1}, {dilation, dilation}}),
+        HIPDNN_STATUS_BAD_PARAM);
+}
+
+TEST_F(TestConvolutionBwdOperationDescriptor, FinalizeFailsWhenPaddedInputAddOverflows)
+{
+    // 4 + INT64_MAX + INT64_MAX wraps to 2, and (2 - 1) / 1 + 1 = 2 matches dy.
+    const int64_t maxPad = std::numeric_limits<int64_t>::max();
+    ASSERT_THROW_HIPDNN_STATUS(finalizeDgrad({{1, 1, 2, 2},
+                                              {1, 1, 1, 1},
+                                              {1, 1, 4, 4},
+                                              {1, 1},
+                                              {1, 1},
+                                              {maxPad, maxPad},
+                                              {maxPad, maxPad}}),
+                               HIPDNN_STATUS_BAD_PARAM);
+}
+
+TEST_F(TestConvolutionBwdOperationDescriptor, FinalizeFailsWhenWeightRankDiffers)
+{
+    // The spatial extents the check reads (indices 2 and 3) are consistent.
+    ASSERT_THROW_HIPDNN_STATUS(finalizeDgrad({{1, 1, 4, 4}, {1, 1, 1, 1, 7}, {1, 1, 4, 4}, {1, 1}}),
+                               HIPDNN_STATUS_BAD_PARAM);
+}
+
+TEST_F(TestConvolutionBwdOperationDescriptor, FinalizeFailsWhenInputRankDiffers)
+{
+    // The spatial extents the check reads (indices 2 and 3) are consistent.
+    ASSERT_THROW_HIPDNN_STATUS(finalizeDgrad({{1, 1, 4, 4}, {1, 1, 1, 1}, {1, 1, 4, 4, 7}, {1, 1}}),
+                               HIPDNN_STATUS_BAD_PARAM);
+}
+
+TEST_F(TestConvolutionBwdOperationDescriptor, FinalizeFailsWhenPrePaddingCountDiffers)
+{
+    auto shape = paddedBaselineShape();
+    shape.prePadding = {1, 1, 0};
+    ASSERT_THROW_HIPDNN_STATUS(finalizeDgrad(shape), HIPDNN_STATUS_BAD_PARAM);
+}
+
+TEST_F(TestConvolutionBwdOperationDescriptor, FinalizeFailsWhenPostPaddingCountDiffers)
+{
+    auto shape = paddedBaselineShape();
+    shape.postPadding = {1, 1, 0};
+    ASSERT_THROW_HIPDNN_STATUS(finalizeDgrad(shape), HIPDNN_STATUS_BAD_PARAM);
+}
+
+TEST_F(TestConvolutionBwdOperationDescriptor, FinalizeFailsWhenStrideCountDiffers)
+{
+    auto shape = paddedBaselineShape();
+    shape.stride = {1, 1, 1};
+    ASSERT_THROW_HIPDNN_STATUS(finalizeDgrad(shape), HIPDNN_STATUS_BAD_PARAM);
+}
+
+TEST_F(TestConvolutionBwdOperationDescriptor, FinalizeFailsWhenDilationCountDiffers)
+{
+    auto shape = paddedBaselineShape();
+    shape.dilation = {1, 1, 1};
+    ASSERT_THROW_HIPDNN_STATUS(finalizeDgrad(shape), HIPDNN_STATUS_BAD_PARAM);
+}
+
+TEST_F(TestConvolutionBwdOperationDescriptor, FinalizeRejectsRankTwoTensorsForTooFewDimensions)
+{
+    // A rank-2 shape is also rejected by the parameter-count checks, so the message tells
+    // which check fired.
+    try
+    {
+        finalizeDgrad({{4, 4}, {4, 4}, {4, 4}, {1}});
+        FAIL() << "Finalizing rank-2 tensors did not throw";
+    }
+    catch(const HipdnnException& e)
+    {
+        EXPECT_EQ(e.getStatus(), HIPDNN_STATUS_BAD_PARAM);
+        EXPECT_NE(e.getMessage().find("at least 3 dimensions"), std::string::npos)
+            << e.getMessage();
+    }
 }
 
 // =============================================================================

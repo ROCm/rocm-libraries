@@ -380,8 +380,8 @@ The root directory hipDNN writes its on-disk caches to. Two features share it to
 | (unset)    | A per-user default is used: `~/.cache/hipdnn/` on Linux, `%USERPROFILE%\.hipdnn\cache\` on Windows (the default) |
 | `<path>`   | Use the given directory as the cache root instead       |
 
-A leading `~` (and, on Windows, a leading `%USERPROFILE%`) is expanded;
-every other character is left alone, so an embedded `~` is never substituted. If the relevant home variable is unset or empty, the value is used verbatim rather than being redirected somewhere unexpected. Relative paths resolve against the current working directory. The directory is created if it does not exist.
+A leading `~` alone or followed by a path separator (and, on Windows, a leading `%USERPROFILE%`) is expanded to the home directory (`HOME`, or `USERPROFILE` on Windows);
+every other character is left alone, so an embedded `~` is never substituted and a `~user` form is not expanded. If the value still starts with `~` or `%USERPROFILE%` after expansion, because the home variable is unset or empty or because the value uses a `~user` form, hipDNN logs a warning once and disables on-disk caching instead of creating a directory with that literal name. Relative paths resolve against the current working directory. The directory is created if it does not exist.
 
 Each feature owns a child directory beneath the root, so caches never collide: the ingestor's winner cache lives under `ingestor-winners/`, further split per hipDNN version, per engine, and per GPU architecture; the autotune exact-match ranking cache lives under `autotune-rankings/`, further split per `data_sdk` library version (see below).
 
@@ -521,6 +521,8 @@ messages at that level and all higher severities.
 
 Specifies the file path where logs will be **appended**. If not set, logs are written to `stderr`.
 
+hipDNN reads this variable and opens the file the first time logging is enabled, by `HIPDNN_LOG_LEVEL` or by `setGlobalLogLevel()`; while the level is `off`, no file is created. The destination then stays fixed for the process. If the file cannot be opened (for example, the path is a directory or its parent cannot be created), hipDNN prints one warning naming `HIPDNN_LOG_FILE` on `stderr` and writes the logs to `stderr` instead.
+
 **Example:**
 ```bash
 export HIPDNN_LOG_FILE=/path/to/hipdnn.log
@@ -536,6 +538,8 @@ Controls graph structure logging. When set to a non-empty directory path, graphs
 | `<path>`   | Write graph structures as JSON files to the given directory |
 
 Graph JSON files are written to the directory specified by `HIPDNN_LOG_GRAPH_DIR`. If the directory does not exist, it is created automatically. Relative paths are resolved against the current working directory. Files are named `graph_<id>.json` after the graph's own ID, so finalizing a graph again, or replaying a serialized one, reuses a single file. A graph rebuilt from scratch is a new graph with a new ID and is written separately; point the variable at a per-process directory if many processes share one output location.
+
+Names that are not valid UTF-8 are written with the invalid bytes replaced by U+FFFD. A graph that cannot be written is reported as a warning in the log; finalization succeeds regardless.
 
 This variable is independent of `HIPDNN_LOG_LEVEL` and `HIPDNN_LOG_FILE`.
 
@@ -576,11 +580,13 @@ Controls the random number generator seed used across hipDNN tests. This allows 
 | Value        | Description                                                |
 |--------------|------------------------------------------------------------|
 | (not set)    | Uses default seed value of `1` (default behavior)         |
-| `<number>`   | Uses the specified numeric seed (e.g., `42`, `12345`)     |
+| `<number>`   | Uses the specified decimal seed, from `0` to `4294967295` (e.g., `42`, `12345`) |
 | `RANDOM`     | Generates a random seed using `std::random_device`        |
 
 > [!NOTE]
 > The `RANDOM` value is case-insensitive (`random`, `Random`, `RANDOM` all work).
+>
+> Any other value that is not a plain decimal number in the accepted range uses the default seed `1`. This includes an empty value, a sign (`-1`, `+42`), surrounding whitespace, trailing characters (`12abc`) and values above `4294967295`.
 
 **Examples:**
 ```bash

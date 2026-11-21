@@ -1326,6 +1326,27 @@ def test_packaging_admits_every_ued_field_the_loader_reads(tmp_path, main_fixtur
 
 
 @pytest.mark.parametrize(
+    "version",
+    [
+        pytest.param("1.2.3.abc1234", id="git_hash_tweak"),
+        pytest.param("1.2.3.unknown", id="unknown_tweak"),
+        pytest.param("1.2.2147483647", id="int_max_component"),
+        pytest.param("1.2." + "0" * 5000 + "3", id="zero_padded_past_4300_digits"),
+    ],
+)
+def test_packaging_admits_every_sdk_version_the_loader_parses(
+    tmp_path, main_fixture, version
+):
+    """Version(text) ignores a letters-and-digits tweak and reads each component with
+    std::from_chars, which takes any number of leading zeros."""
+    load_flat_input(
+        _root_with_ued(tmp_path, main_fixture, _set("sdk_version", version)),
+        GENERIC_TARGETS,
+        log=lambda *_: None,
+    )
+
+
+@pytest.mark.parametrize(
     "mutate, message",
     [
         pytest.param(_set("id", "ued-pointwise"), "requires a UUID", id="id_not_uuid"),
@@ -1390,6 +1411,61 @@ def test_packaging_admits_every_ued_field_the_loader_reads(tmp_path, main_fixtur
             _set("sdk_version", "1.2.4294967296"),
             "MAJOR.MINOR.PATCH",
             id="sdk_version_over_int",
+        ),
+        pytest.param(
+            _set("sdk_version", "-1.2.0"),
+            "MAJOR.MINOR.PATCH",
+            id="sdk_version_signed",
+        ),
+        pytest.param(
+            _set("sdk_version", "+1.2.0"),
+            "MAJOR.MINOR.PATCH",
+            id="sdk_version_plus_sign",
+        ),
+        pytest.param(
+            _set("sdk_version", " 1. 2 .0"),
+            "MAJOR.MINOR.PATCH",
+            id="sdk_version_whitespace",
+        ),
+        pytest.param(
+            _set("sdk_version", "1.2.0junk"),
+            "MAJOR.MINOR.PATCH",
+            id="sdk_version_trailing_text",
+        ),
+        pytest.param(
+            _set("sdk_version", "1.2.0-rc1"),
+            "MAJOR.MINOR.PATCH",
+            id="sdk_version_prerelease_suffix",
+        ),
+        pytest.param(
+            _set("sdk_version", "1.2.3."),
+            "MAJOR.MINOR.PATCH",
+            id="sdk_version_empty_tweak",
+        ),
+        pytest.param(
+            _set("sdk_version", "1.2.3.a.b"),
+            "MAJOR.MINOR.PATCH",
+            id="sdk_version_dotted_tweak",
+        ),
+        pytest.param(
+            _set("sdk_version", "1.-2.3"),
+            "MAJOR.MINOR.PATCH",
+            id="sdk_version_signed_minor",
+        ),
+        pytest.param(
+            _set("sdk_version", "1.2.-3"),
+            "MAJOR.MINOR.PATCH",
+            id="sdk_version_signed_patch",
+        ),
+        pytest.param(
+            _set("sdk_version", "1.2.2147483648"),
+            "MAJOR.MINOR.PATCH",
+            id="sdk_version_one_past_int_max",
+        ),
+        pytest.param(
+            _set("sdk_version", "1.2." + "9" * 5000),
+            "MAJOR.MINOR.PATCH",
+            id="sdk_version_past_4300_digits",
         ),
         pytest.param(
             _set("graph_match", {"nodes": []}),

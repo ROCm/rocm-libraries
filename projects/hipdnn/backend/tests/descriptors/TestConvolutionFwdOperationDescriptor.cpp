@@ -12,6 +12,7 @@
 #include "hipdnn_backend.h"
 
 #include <gtest/gtest.h>
+#include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/convolution_fwd_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_test_sdk/constants/ConvFpropConstants.hpp>
@@ -19,6 +20,7 @@
 
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 
+#include <cstdint>
 #include <memory>
 #include <vector>
 
@@ -117,6 +119,62 @@ protected:
         _unfinalizedTensor.reset();
     }
 };
+
+namespace
+{
+
+// Finalizes a fprop descriptor built from packed tensors with the given dims, zero padding,
+// unit dilation and the given stride.
+void finalizeFpropWithShape(const std::vector<int64_t>& xDims,
+                            const std::vector<int64_t>& wDims,
+                            const std::vector<int64_t>& yDims,
+                            const std::vector<int64_t>& stride)
+{
+    using hipdnn_data_sdk::utilities::generateStrides;
+
+    auto xTensor = createFinalizedTensor(K_FPROP_TENSOR_X_UID, xDims, generateStrides(xDims));
+    auto wTensor = createFinalizedTensor(K_FPROP_TENSOR_W_UID, wDims, generateStrides(wDims));
+    auto yTensor = createFinalizedTensor(K_FPROP_TENSOR_Y_UID, yDims, generateStrides(yDims));
+    HipdnnBackendDescriptor* xPtr = xTensor.get();
+    HipdnnBackendDescriptor* wPtr = wTensor.get();
+    HipdnnBackendDescriptor* yPtr = yTensor.get();
+
+    auto wrapper = createDescriptor<ConvolutionFwdOperationDescriptor>();
+    auto desc = wrapper->asDescriptor<ConvolutionFwdOperationDescriptor>();
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_X,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       static_cast<const void*>(&xPtr));
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_W,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       static_cast<const void*>(&wPtr));
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_Y,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       static_cast<const void*>(&yPtr));
+
+    const auto count = static_cast<int64_t>(stride.size());
+    const std::vector<int64_t> padding(stride.size(), 0);
+    const std::vector<int64_t> dilation(stride.size(), 1);
+    desc->setAttribute(
+        HIPDNN_ATTR_CONVOLUTION_PRE_PADDINGS, HIPDNN_TYPE_INT64, count, padding.data());
+    desc->setAttribute(
+        HIPDNN_ATTR_CONVOLUTION_POST_PADDINGS, HIPDNN_TYPE_INT64, count, padding.data());
+    desc->setAttribute(
+        HIPDNN_ATTR_CONVOLUTION_FILTER_STRIDES, HIPDNN_TYPE_INT64, count, stride.data());
+    desc->setAttribute(
+        HIPDNN_ATTR_CONVOLUTION_DILATIONS, HIPDNN_TYPE_INT64, count, dilation.data());
+    auto computeType = HIPDNN_DATA_FLOAT;
+    desc->setAttribute(HIPDNN_ATTR_CONVOLUTION_COMP_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
+    auto convMode = HIPDNN_CROSS_CORRELATION;
+    desc->setAttribute(
+        HIPDNN_ATTR_CONVOLUTION_CONV_MODE, HIPDNN_TYPE_CONVOLUTION_MODE, 1, &convMode);
+
+    desc->finalize();
+}
+
+} // namespace
 
 // =============================================================================
 // Lifecycle Tests
@@ -257,6 +315,24 @@ TEST_F(TestConvolutionFwdOperationDescriptor, FinalizeFailsWithoutConvMode)
     getDescriptor()->setAttribute(
         HIPDNN_ATTR_CONVOLUTION_COMP_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
     ASSERT_THROW_HIPDNN_STATUS(getDescriptor()->finalize(), HIPDNN_STATUS_BAD_PARAM);
+}
+
+// =============================================================================
+// Finalize Tests - Spatial Shape Consistency
+// =============================================================================
+
+TEST_F(TestConvolutionFwdOperationDescriptor, FinalizeFailsWithHugeStrideInconsistentWithDims)
+{
+    // The output width must be (4 - 1) / stride + 1 = 1 for any stride > 3, not 4.
+    ASSERT_THROW_HIPDNN_STATUS(
+        finalizeFpropWithShape({4, 4, 4, 4}, {4, 4, 1, 1}, {4, 4, 4, 4}, {1, 100000}),
+        HIPDNN_STATUS_BAD_PARAM);
+}
+
+TEST_F(TestConvolutionFwdOperationDescriptor, FinalizeAcceptsStrideThatFloorsTheOutput)
+{
+    // (5 - 1) / 2 + 1 = 3.
+    ASSERT_NO_THROW(finalizeFpropWithShape({1, 1, 5, 5}, {1, 1, 1, 1}, {1, 1, 3, 3}, {2, 2}));
 }
 
 // =============================================================================

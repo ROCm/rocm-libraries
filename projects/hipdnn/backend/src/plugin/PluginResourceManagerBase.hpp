@@ -4,6 +4,7 @@
 #pragma once
 
 #include <atomic>
+#include <cstdlib>
 #include <filesystem>
 #include <memory>
 #include <mutex>
@@ -49,7 +50,7 @@ struct PluginLoadingConfig
  * - static PluginLoadingConfig& getConfig()
  * - static std::weak_ptr<PluginManagerType>& getWeakPtr()
  * - static std::shared_ptr<PluginManagerType>& getPersistentPtr()
- * - static std::atomic<bool>& getShutdownFlag()
+ * - static std::atomic<bool>& getShutdownFlag() (constant-initialized; set at process exit)
  * - static const char* getPluginTypeName()
  *
  * MT-safety: Static methods are thread-safe. Instance methods are NOT thread-safe
@@ -203,6 +204,22 @@ public:
      */
     void getLoadedPluginFiles(size_t* numPlugins, char** pluginPaths, size_t* maxStringLen) const;
 
+    /**
+     * @brief True once process exit has begun (static, MT-safe).
+     *
+     * Set by an exit handler that getOrCreatePluginManager() registers when it first creates
+     * a plugin manager, during main. On Linux the handler therefore runs before the destructors
+     * of the program's namespace-scope objects, so a handle or descriptor released by such a
+     * destructor finds it set and is left to the operating system instead of calling into
+     * plugin state that may already be torn down. On Windows the handler belongs to the backend
+     * DLL and runs when that DLL detaches, after the executable's static destructors, so those
+     * destructors find it unset and release normally while the plugins are still loaded.
+     */
+    static bool isShuttingDown()
+    {
+        return Derived::getShutdownFlag().load(std::memory_order_acquire);
+    }
+
 protected:
     /**
      * @brief Get or create the shared plugin manager (static, MT-safe).
@@ -261,6 +278,13 @@ std::shared_ptr<PluginManagerType>
         auto& config = Derived::getConfig();
         pm->loadPlugins(config.paths, config.mode);
         Derived::getWeakPtr() = pm;
+
+        static bool s_shutdownHandlerRegistered = false;
+        if(!s_shutdownHandlerRegistered)
+        {
+            std::atexit([] { Derived::getShutdownFlag().store(true, std::memory_order_release); });
+            s_shutdownHandlerRegistered = true;
+        }
 
         // In lazy mode, keep the plugin manager alive by storing in persistent pointer
         if(config.unloadingMode == HIPDNN_PLUGIN_UNLOAD_LAZY)

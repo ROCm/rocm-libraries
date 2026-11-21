@@ -3,7 +3,9 @@
 
 #pragma once
 
+#include <atomic>
 #include <cstdint>
+#include <cstdlib>
 #include <memory>
 #include <mutex>
 #include <utility>
@@ -174,6 +176,7 @@ public:
         if(!instance)
         {
             instance = std::forward<BackendFactory>(factory)();
+            registerShutdownHandler();
         }
 
         return instance;
@@ -191,6 +194,15 @@ public:
         backendInstance().reset();
     }
 
+    /// True once process exit has begun (the exit handler registered when the backend
+    /// instance was first created has run). Destroy paths check it before looking up the
+    /// backend: an object released during static destruction may outlive the backend instance
+    /// and the loaded plugins, so its backend resources are left to the operating system.
+    HIPDNN_HIDDEN static bool isShutdown() noexcept
+    {
+        return shutdownFlag().load(std::memory_order_acquire);
+    }
+
 private:
     HIPDNN_HIDDEN static std::shared_ptr<IHipdnnBackend>& backendInstance()
     {
@@ -202,6 +214,27 @@ private:
     {
         static std::mutex s_mtx;
         return s_mtx;
+    }
+
+    // Constant-initialized and trivially destructible, so it stays readable for the whole of
+    // static destruction, unlike backendInstance() and backendMutex().
+    HIPDNN_HIDDEN static std::atomic<bool>& shutdownFlag() noexcept
+    {
+        static std::atomic<bool> s_shutdown{false};
+        return s_shutdown;
+    }
+
+    // Called with backendMutex() held. The instance is first created during main, after the
+    // program's namespace-scope objects registered their destructors, so the handler runs
+    // before those destructors.
+    HIPDNN_HIDDEN static void registerShutdownHandler()
+    {
+        static bool s_registered = false;
+        if(!s_registered)
+        {
+            std::atexit([] { shutdownFlag().store(true, std::memory_order_release); });
+            s_registered = true;
+        }
     }
 };
 
