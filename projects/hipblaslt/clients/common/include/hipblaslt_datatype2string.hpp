@@ -314,6 +314,14 @@ inline hipblaslt_internal_ostream& operator<<(hipblaslt_internal_ostream& os,
     return os;
 }
 
+// The MAF inits define GEMM A/B/C data (block-scaled operands included), so only the GEMM clients
+// (hipblaslt-bench, hipblaslt-test) support them; the other clients reject them.
+constexpr bool hipblaslt_initialization_is_gemm_only(hipblaslt_initialization init)
+{
+    return init == hipblaslt_initialization::maf1_0 || init == hipblaslt_initialization::maf2_0
+           || init == hipblaslt_initialization::maf2_0_unit_scale;
+}
+
 constexpr auto hipblaslt_initialization2string(hipblaslt_initialization init)
 {
     switch(init)
