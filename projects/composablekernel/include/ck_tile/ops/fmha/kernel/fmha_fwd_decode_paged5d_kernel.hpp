@@ -48,22 +48,23 @@ struct FmhaDecodePaged5dConfig
 };
 
 // As many splits as the range allows (at most 15: the cluster size is a 4-bit compile-time field),
-// each a whole number of 64-token steps. Splits longer than 16 pages take the wave-split layout,
-// whose waves run their own pages without per-step barriers.
+// each a whole number of 64-token steps, but at least 16 pages per split once the grid would
+// exceed about 640 workgroups. Splits longer than 16 pages take the wave-split layout, whose
+// waves run their own pages without per-step barriers.
 CK_TILE_HOST FmhaDecodePaged5dConfig fmha_decode_paged5d_config(index_t batch,
                                                                 index_t nhead_k,
                                                                 index_t max_seqlen_k,
                                                                 index_t window)
 {
-    ignore                  = batch;
-    ignore                  = nhead_k;
     constexpr index_t kPage = 16;
     const index_t lo_pages  = window > 0 ? std::max<index_t>(0, max_seqlen_k - window) / kPage : 0;
     const index_t span      = std::max<index_t>(1, (max_seqlen_k + kPage - 1) / kPage - lo_pages);
     const auto round_up     = [](index_t x, index_t m) { return (x + m - 1) / m * m; };
     const index_t splits    = std::min<index_t>(15, (span + 3) / 4);
     index_t pps             = round_up((span + splits - 1) / splits, 4);
-    const bool wave_split   = pps > 16;
+    if(batch * nhead_k * ((span + pps - 1) / pps) > 640)
+        pps = std::max<index_t>(pps, 16);
+    const bool wave_split = pps > 16;
     if(wave_split)
         pps = round_up(pps, 16);
     return {(span + pps - 1) / pps, pps, wave_split};
