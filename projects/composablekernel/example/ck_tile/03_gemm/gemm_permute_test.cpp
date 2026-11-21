@@ -3,8 +3,11 @@
 
 #include "gemm_permute.hpp"
 #include "ck_tile/host/device_memory.hpp"
+#include "ck_tile/host/kernel_launch.hpp"
+#include "ck_tile/host/reference/reference_gemm.hpp"
 #include "ck_tile/host/timer.hpp"
-#include <rocblas/rocblas.h>
+#include "ck_tile/ops/elementwise.hpp"
+#include "ck_tile/ops/epilogue.hpp"
 
 #include <algorithm>
 #include <array>
@@ -14,14 +17,28 @@
 namespace {
 using namespace gemm_permute;
 
-void check_blas(rocblas_status status)
-{
-    if(status != rocblas_status_success)
-    {
-        std::fprintf(stderr, "rocBLAS: %s\n", rocblas_status_to_string(status));
-        std::exit(EXIT_FAILURE);
-    }
-}
+// Unfused baseline: the two existing CK-Tile ops the fused kernel replaces, launched back to back.
+// The GEMM op is tuned for this shape and shares the fused kernel's tile, mainloop, epilogue and
+// tile order; it writes the dense intermediate C[t*B+b, d*H+h].
+using DenseTraits =
+    ck_tile::TileGemmUniversalTraits<true, false, false, false, Row, Row, Row, true>;
+using DenseProblem = ck_tile::UniversalGemmPipelineProblem<Bf16, Bf16, float, Shape, DenseTraits>;
+using GemmOp =
+    ck_tile::GemmKernel<Partitioner, ck_tile::GemmPipelineAgBgCrCompV3<DenseProblem>, Epilogue>;
+// Best existing CK-Tile op for the permute: ElementWiseKernel as a strided PassThrough copy that
+// walks C order [t,b,d,h]; 16 B loads of the 8 heads, BF16 stores coalesced over d per wave.
+// 4 warps x 64 lanes x 8 elements x 4 repeats = one 8192-element block tile.
+using PermuteOp = ck_tile::ElementWiseKernel<
+    ck_tile::ElementWisePipelineProblem<Bf16,
+                                        Bf16,
+                                        Bf16,
+                                        ck_tile::ElementWiseShape<ck_tile::sequence<4>,
+                                                                  ck_tile::sequence<8192>,
+                                                                  ck_tile::sequence<512>,
+                                                                  Bf16>,
+                                        ck_tile::element_wise::PassThrough,
+                                        true>,
+    ck_tile::ElementWiseDefaultPolicy>;
 
 // Dyadic inputs keep every product and partial sum exact in FP32 regardless of reduction order.
 __global__ void fill(Bf16* x, int n, uint32_t seed)
@@ -58,13 +75,13 @@ __global__ void compare(const Bf16* got, const Bf16* want, int n, unsigned* firs
 
 Bf16* data(const ck_tile::DeviceMem& mem) { return static_cast<Bf16*>(mem.GetDeviceBuffer()); }
 
-bool run(rocblas_handle blas, hipStream_t stream, int time, int batch, bool benchmark)
+bool run(hipStream_t stream, int time, int batch, bool benchmark)
 {
     const int m = time * batch, n = m * N;
     const size_t bytes = size_t(n) * sizeof(Bf16);
     ck_tile::DeviceMem a(size_t(m) * K * sizeof(Bf16)), w(size_t(K) * N * sizeof(Bf16));
     std::array<uint16_t, D> guard{};
-    ck_tile::DeviceMem dense(bytes), ref(bytes), out(bytes + 2 * sizeof(guard)),
+    ck_tile::DeviceMem dense(bytes), two_op_y(bytes), ref(bytes), out(bytes + 2 * sizeof(guard)),
         first(sizeof(unsigned));
     Bf16* y = data(out) + guard.size();
     fill<<<512, 256, 0, stream>>>(data(a), m * K, 13);
@@ -72,53 +89,81 @@ bool run(rocblas_handle blas, hipStream_t stream, int time, int batch, bool benc
     fill<<<512, 256, 0, stream>>>(data(w), K * N, 79);
     HIP_CHECK_ERROR(hipGetLastError());
 
-    auto fused   = [&] { HIP_CHECK_ERROR(launch(data(a), data(w), y, time, batch, stream)); };
-    auto unfused = [&] {
-        const float one = 1, zero = 0;
-        constexpr auto bf = rocblas_datatype_bf16_r;
-        // rocBLAS uses column-major storage: C^T = W^T A^T needs no input copies.
-        check_blas((rocblas_gemm_ex)(blas,
-                                     rocblas_operation_none,
-                                     rocblas_operation_none,
-                                     N,
-                                     m,
-                                     K,
-                                     &one,
-                                     data(w),
-                                     bf,
-                                     N,
-                                     data(a),
-                                     bf,
-                                     K,
-                                     &zero,
-                                     data(dense),
-                                     bf,
-                                     N,
-                                     data(dense),
-                                     bf,
-                                     N,
-                                     rocblas_datatype_f32_r,
-                                     rocblas_gemm_algo_standard,
-                                     0,
-                                     0));
-        permute_reference<<<m, D, 0, stream>>>(data(dense), data(ref), time, batch);
+    const ck_tile::stream_config config{stream};
+    const auto gemm_args = GemmOp::MakeKernelArgs(
+        ck_tile::GemmHostArgs(data(a), data(w), data(dense), 1, m, N, K, K, N, N));
+    if(!GemmOp::IsSupportedArgument(gemm_args))
+    {
+        std::fprintf(stderr, "T=%d B=%d: CK-Tile GEMM op rejects the problem\n", time, batch);
+        return false;
+    }
+    // Dense C[t,b,d,h] -> Y[h,b,t,d], as torch.permute(3, 1, 0, 2): lengths in C order, C strides
+    // in, Y strides out.
+    const auto permute_lens        = ck_tile::make_tuple(time, batch, D, H);
+    const auto permute_in_strides  = ck_tile::make_tuple(batch * D * H, D * H, H, 1);
+    const auto permute_out_strides = ck_tile::make_tuple(D, time * D, 1, batch * time * D);
+    const int permute_grid =
+        ck_tile::integer_divide_ceil(n, PermuteOp::Problem::BlockShape::kBlockM);
+
+    // The fused path includes the weight reorder on every call, so both paths take the same inputs.
+    ck_tile::DeviceMem wp(size_t(K) * N * sizeof(Bf16));
+    auto fused = [&] {
+        HIP_CHECK_ERROR(prepermute_weight(data(w), data(wp), stream));
+        HIP_CHECK_ERROR(launch(data(a), data(wp), y, time, batch, stream));
+    };
+    auto gemm_op = [&] {
+        ck_tile::launch_kernel(
+            config,
+            ck_tile::make_kernel<1>(
+                GemmOp{}, GemmOp::GridSize(m, N, 1), GemmOp::BlockSize(), 0, gemm_args));
         HIP_CHECK_ERROR(hipGetLastError());
     };
-    HIP_CHECK_ERROR(hipMemsetAsync(data(out), 0xff, out.GetBufferSize(), stream));
-    HIP_CHECK_ERROR(hipMemsetAsync(data(ref), 0, bytes, stream));
-    HIP_CHECK_ERROR(hipMemsetAsync(first.GetDeviceBuffer(), 0xff, sizeof(unsigned), stream));
-    unfused();
-    fused();
-    compare<<<512, 256, 0, stream>>>(
-        y, data(ref), n, static_cast<unsigned*>(first.GetDeviceBuffer()));
-    HIP_CHECK_ERROR(hipGetLastError());
+    auto two_ops = [&] {
+        gemm_op();
+        ck_tile::launch_kernel(config,
+                               ck_tile::make_kernel<1>(PermuteOp{},
+                                                       permute_grid,
+                                                       PermuteOp::BlockSize(),
+                                                       0,
+                                                       permute_lens,
+                                                       permute_in_strides,
+                                                       permute_out_strides,
+                                                       ck_tile::make_tuple(data(dense)),
+                                                       data(two_op_y)));
+        HIP_CHECK_ERROR(hipGetLastError());
+    };
+
+    // The reference GEMM runs on the null stream, which does not order with `stream`.
     HIP_CHECK_ERROR(hipStreamSynchronize(stream));
-    unsigned mismatch;
-    first.FromDevice(&mismatch);
-    if(mismatch != UINT32_MAX)
+    ck_tile::reference_gemm_gpu<Bf16, Bf16, float, Bf16, Row, Row, Row>(
+        data(a), data(w), data(dense), m, N, K, K, N, N);
+    HIP_CHECK_ERROR(hipDeviceSynchronize());
+    permute_reference<<<m, D, 0, stream>>>(data(dense), data(ref), time, batch);
+    HIP_CHECK_ERROR(hipGetLastError());
+    HIP_CHECK_ERROR(hipMemsetAsync(data(out), 0xff, out.GetBufferSize(), stream));
+    HIP_CHECK_ERROR(hipMemsetAsync(data(two_op_y), 0xff, bytes, stream));
+    HIP_CHECK_ERROR(hipMemsetAsync(data(dense), 0xff, bytes, stream));
+    fused();
+    two_ops();
+    for(const auto& [got, path] : {std::pair{y, "fused"}, std::pair{data(two_op_y), "two-op"}})
     {
-        std::fprintf(stderr, "T=%d B=%d: first BF16 mismatch at Y[%u]\n", time, batch, mismatch);
-        return false;
+        HIP_CHECK_ERROR(hipMemsetAsync(first.GetDeviceBuffer(), 0xff, sizeof(unsigned), stream));
+        compare<<<512, 256, 0, stream>>>(
+            got, data(ref), n, static_cast<unsigned*>(first.GetDeviceBuffer()));
+        HIP_CHECK_ERROR(hipGetLastError());
+        HIP_CHECK_ERROR(hipStreamSynchronize(stream));
+        unsigned mismatch;
+        first.FromDevice(&mismatch);
+        if(mismatch != UINT32_MAX)
+        {
+            std::fprintf(stderr,
+                         "T=%d B=%d: %s first BF16 mismatch at Y[%u]\n",
+                         time,
+                         batch,
+                         path,
+                         mismatch);
+            return false;
+        }
     }
     for(const Bf16* border : {data(out), y + n})
     {
@@ -129,11 +174,15 @@ bool run(rocblas_handle blas, hipStream_t stream, int time, int batch, bool benc
             return false;
         }
     }
-    std::printf("T=%d B=%d: %d BF16 elements match bit-for-bit; guards intact\n", time, batch, n);
+    std::printf("T=%d B=%d: fused and two-op outputs (%d BF16) match the reference bit-for-bit; "
+                "guards intact\n",
+                time,
+                batch,
+                n);
     if(!benchmark)
         return true;
 
-    // Back-to-back launches keep host enqueue cost (larger for rocBLAS) off the timed span.
+    // Back-to-back launches keep host enqueue cost off the timed span.
     constexpr int Launches = 20;
     ck_tile::gpu_timer timer;
     auto measure = [&](auto&& fn) {
@@ -146,25 +195,29 @@ bool run(rocblas_handle blas, hipStream_t stream, int time, int batch, bool benc
     for(int i = 0; i < 3; ++i)
     {
         fused();
-        unfused();
+        two_ops();
     }
-    std::array<float, 11> f{}, u{};
-    for(size_t i = 0; i < f.size(); ++i)
-    {
-        if(i % 2 == 0)
-            f[i] = measure(fused);
-        u[i] = measure(unfused);
-        if(i % 2 != 0)
-            f[i] = measure(fused);
-    }
-    std::sort(f.begin(), f.end());
-    std::sort(u.begin(), u.end());
-    const auto mid = f.size() / 2;
-    std::printf("Median of %zu samples (%d launches each): fused %.2f us; rocBLAS + copy %.2f us\n",
-                f.size(),
+    // Rotate the order so no path always runs first in a sample.
+    std::array<std::array<float, 11>, 3> t{};
+    for(size_t i = 0; i < t[0].size(); ++i)
+        for(size_t j = 0; j < t.size(); ++j)
+            switch((i + j) % 3)
+            {
+            case 0: t[0][i] = measure(fused); break;
+            case 1: t[1][i] = measure(two_ops); break;
+            default: t[2][i] = measure(gemm_op); break;
+            }
+    for(auto& v : t)
+        std::sort(v.begin(), v.end());
+    const auto mid = t[0].size() / 2;
+    std::printf("Median of %zu samples (%d launches each): fused %.1f us; CK-Tile GEMM + permute "
+                "%.1f us (%.2fx); CK-Tile GEMM alone %.1f us\n",
+                t[0].size(),
                 Launches,
-                f[mid],
-                u[mid]);
+                t[0][mid],
+                t[1][mid],
+                t[1][mid] / t[0][mid],
+                t[2][mid]);
     return true;
 }
 } // namespace
@@ -188,13 +241,9 @@ int main(int argc, char** argv)
         return EXIT_FAILURE;
     }
     hipStream_t stream;
-    rocblas_handle blas;
     HIP_CHECK_ERROR(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
-    check_blas(rocblas_create_handle(&blas));
-    check_blas(rocblas_set_stream(blas, stream));
-    const bool ok = run(blas, stream, 1, 1, false) && run(blas, stream, BM + 3, 5, false) &&
-                    (!benchmark || run(blas, stream, MaxT, MaxB, true));
-    check_blas(rocblas_destroy_handle(blas));
+    const bool ok = run(stream, 1, 1, false) && run(stream, 67, 5, false) &&
+                    run(stream, BM + 3, 5, false) && (!benchmark || run(stream, MaxT, MaxB, true));
     HIP_CHECK_ERROR(hipStreamDestroy(stream));
     return ok ? EXIT_SUCCESS : EXIT_FAILURE;
 }

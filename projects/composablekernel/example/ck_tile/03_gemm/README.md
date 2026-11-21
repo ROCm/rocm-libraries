@@ -59,25 +59,28 @@ make tile_example_gemm_tdm_data_cache_prefetch_staged -j`nproc`
 ```
 This will result in an executable `build/bin/tile_example_gemm_basic` & `build/bin/tile_example_gemm_universal`
 
-### BF16 GEMM with a permuted output store (gfx950)
+### Fused GEMM + permute (gfx950)
 
-`tile_example_gemm_permute` computes `A[t,b,k] * W[k,d,h]` (summed over `k`) and writes
-`Y[h,b,t,d]` directly. It splits the dense GEMM column as `n = d * H + h`, accumulates in
-FP32, then uses the mainloop's LDS to regroup rounded BF16 values into 16-byte stores.
-There is no global intermediate and no change to library dispatch.
+`tile_example_gemm_permute` fuses two ops into one CK-Tile kernel:
+`C[t*B+b, d*H+h] = A[t,b,:] * W[:,d,h]` (BF16, FP32 accumulation) followed by
+`Y[h,b,t,d] = C[t,b,d,h]`, at T=768, B=512, K=384, D=256, H=8.
 
-Configure with `GPU_TARGETS=gfx950`, CK examples enabled, and the rocBLAS development package
-available for the reference. From the CK build directory:
+The kernel consumes the weight reordered once to `Wp[k,h,d]` (1.5 MiB, `prepermute_weight`).
+Each 128x256 output tile then covers one head and 256 contiguous `d` at a fixed `b`, so it is a
+plain strided window of `Y` and the stock `CShuffleEpilogue` stores it. Tiles are ordered with
+`GemmSpatiallyLocalTilePartitioner`, as in the stock GEMM. No intermediate tensor is written.
 
 ```sh
 cmake --build . --target tile_example_gemm_permute
-./bin/tile_example_gemm_permute               # one row and a partial second time tile
-./bin/tile_example_gemm_permute --benchmark   # also check and time a larger synthetic case
+./bin/tile_example_gemm_permute               # bit-exact checks at four shapes
+./bin/tile_example_gemm_permute --benchmark   # also time the trace shape
 ```
 
-The driver compares every output bit with a dense rocBLAS GEMM followed by a separate layout copy
-and checks output guards. The benchmark reports both medians; eliminating the copy does not
-guarantee a speedup.
+The driver compares every output bit of both paths with `reference_gemm_gpu` followed by an
+independent permute, and checks guard regions around the fused output. The benchmark times the
+fused path (weight reorder included on every call) against the two existing CK-Tile ops launched
+back to back: the stock `GemmKernel`, tuned for this shape, and `ElementWiseKernel` as a strided
+copy. It also reports the GEMM op alone.
 
 ## example
 ```
