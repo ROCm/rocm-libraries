@@ -644,6 +644,7 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         "${CMAKE_CURRENT_SOURCE_DIR}/engines/kernel_ingestor_engine/packs/TestGfx942AttentionDenseModelBinding.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/engines/kernel_ingestor_engine/packs/TestGfx1250ConvDgradAotModelBinding.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/engines/kernel_ingestor_engine/packs/TestFlydslModelBinding.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/engines/kernel_ingestor_engine/packs/TestShippedEnginePredictors.cpp"
         PROPERTIES COMPILE_DEFINITIONS
             "HKP_REQUIRE_DVC_DESCRIPTORS=$<BOOL:${HIPKERNELPROVIDER_REQUIRE_DVC_DESCRIPTORS}>")
     set(_hkp_catalog_tiles_cases_gfx950_dense EveryShippedKernelsTileIsOneTheEngineLaunches)
@@ -903,6 +904,23 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         message(STATUS
             "hkp: this configuration does not ship hipkernel:Gfx1250ConvDgradAot for "
             "gfx1250, so its census is not registered.")
+    endif()
+
+    # Every engine-prediction (L1) model the product shard ships, whatever its engine, must
+    # load and record the selector revision this build computes: GenericEngine otherwise
+    # refuses it at runtime with one log line and ranks the engine without an estimate. One
+    # entry per wired architecture, since each shard binds its own models; a shard that binds
+    # none has nothing to refuse. Only where the product pack is wired, as its dependency
+    # above is.
+    if(TARGET hkp_packaging_product)
+        hkp_register_census_tests(
+            TARGET hip_kernel_provider_census_tests
+            PACK_NAME product
+            SUITES TestShippedEnginePredictors
+            EXPECTED_CASES
+                EveryBoundEnginePredictorForThisArchLoads
+                EveryServedEnginePredictorMatchesThisBuildsSelector
+        )
     endif()
 
 endif()
