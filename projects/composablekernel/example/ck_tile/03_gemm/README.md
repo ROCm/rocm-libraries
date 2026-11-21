@@ -59,6 +59,29 @@ make tile_example_gemm_tdm_data_cache_prefetch_staged -j`nproc`
 ```
 This will result in an executable `build/bin/tile_example_gemm_basic` & `build/bin/tile_example_gemm_universal`
 
+### Fused GEMM + permute (gfx950)
+
+`tile_example_gemm_permute` fuses two ops into one CK-Tile kernel:
+`C[t*B+b, d*H+h] = A[t,b,:] * W[:,d,h]` (BF16, FP32 accumulation) followed by
+`Y[h,b,t,d] = C[t,b,d,h]`, at T=768, B=512, K=384, D=256, H=8.
+
+The kernel consumes the weight reordered once to `Wp[k,h,d]` (1.5 MiB, `prepermute_weight`).
+Each 128x256 output tile then covers one head and 256 contiguous `d` at a fixed `b`, so it is a
+plain strided window of `Y` and the stock `CShuffleEpilogue` stores it. Tiles are ordered with
+`GemmSpatiallyLocalTilePartitioner`, as in the stock GEMM. No intermediate tensor is written.
+
+```sh
+cmake --build . --target tile_example_gemm_permute
+./bin/tile_example_gemm_permute               # bit-exact checks at four shapes
+./bin/tile_example_gemm_permute --benchmark   # also time the trace shape
+```
+
+The driver compares every output bit of both paths with `reference_gemm_gpu` followed by an
+independent permute, and checks guard regions around the fused output. The benchmark times the
+fused path (weight reorder included on every call) against the two existing CK-Tile ops launched
+back to back: the stock `GemmKernel`, tuned for this shape, and `ElementWiseKernel` as a strided
+copy. It also reports the GEMM op alone.
+
 ## example
 ```
 args:
