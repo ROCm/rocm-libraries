@@ -23,9 +23,13 @@ from __future__ import annotations
 
 import contextlib
 import functools
+from typing import TYPE_CHECKING
 
-import torch
-import torch.nn.functional as F
+# torch is optional for the library: each reference imports it when called, so
+# the torch-free helpers here (batch slicing, tolerances) and the modules that
+# import this one load without it.
+if TYPE_CHECKING:
+    import torch
 
 # torch's GPU convolutions mis-compute an fp32 operand larger than 2^32 bytes:
 # the batch images past that offset come back wrong (measured with MIOpen on a
@@ -72,6 +76,8 @@ def ieee_fp32():
     convolutions alike -- mixing it with the legacy ``allow_tf32`` flag makes
     torch raise -- and the previous settings are restored on exit.
     """
+    import torch
+
     cudnn = torch.backends.cudnn
     convs = [
         conv
@@ -120,6 +126,8 @@ def tf32_reference_inputs(t: torch.Tensor, arch: str, dtype: str = "tf32"):
     the full payload, so every other case returns ``t`` unchanged. The arch
     question is the catalog's (``tf32_is_emulated``).
     """
+    import torch
+
     if dtype != "tf32" or not _tf32_native(arch):
         return t
     return (t.view(torch.int32) & -0x2000).view(torch.float32)
@@ -157,6 +165,8 @@ def wgrad_reference(X: torch.Tensor, dY: torch.Tensor, p) -> torch.Tensor:
     Returns:
         Weight gradient as a float32 torch.Tensor in KYXC / KZYXC layout.
     """
+    import torch
+
     if not p.is_3d:
         X_t = X.float().cuda().permute(0, 3, 1, 2).contiguous()  # NHWC -> NCHW
         dY_t = dY.float().cuda().permute(0, 3, 1, 2).contiguous()  # NHWK -> NKHW
@@ -203,6 +213,8 @@ def dgrad_reference(dY: torch.Tensor, W: torch.Tensor, p) -> torch.Tensor:
     Returns:
         Input gradient as a float32 torch.Tensor in NHWC layout.
     """
+    import torch
+
     slices = _batch_slices(p, dY.shape[0])
     if len(slices) > 1:
         return torch.cat([dgrad_reference(dY[n0 : n0 + n], W, p) for n0, n in slices])
@@ -241,6 +253,9 @@ def conv_reference(
     Returns:
         Reference output as a float32 torch.Tensor.
     """
+    import torch
+    import torch.nn.functional as F
+
     # The backend's conv produces garbage once an fp32 operand passes 2**31
     # bytes (seen on an 8x768x768x256 batch: the last image is wrong). The
     # batch slices keep each call under that; an image past it on its own
@@ -330,6 +345,7 @@ def conv_reference_gfx1250(
         Float32 torch.Tensor of shape ``(N, Ho, Wo, K)`` on CPU.
     """
     import numpy as np
+    import torch
 
     A_np = A.float().cpu().numpy()  # (N, Hi, Wi, C)
     B_np = B.float().cpu().numpy()  # (K, Y, X, C)
@@ -395,6 +411,7 @@ def dgrad_reference_gfx1250(
         Float32 torch.Tensor of shape ``(N, Hi, Wi, C)`` on CPU.
     """
     import numpy as np
+    import torch
 
     dY_np = dY.float().cpu().numpy()  # (N, Ho, Wo, K)
     W_np = W.float().cpu().numpy()  # (K, Y, X, C)
@@ -467,6 +484,7 @@ def wgrad_reference_gfx1250(
         ``Cg = C // groups`` (per-group input channels).
     """
     import numpy as np
+    import torch
 
     X_np = X.float().cpu().numpy()  # (N, Hi, Wi, C)
     dY_np = dY.float().cpu().numpy()  # (N, Ho, Wo, K)

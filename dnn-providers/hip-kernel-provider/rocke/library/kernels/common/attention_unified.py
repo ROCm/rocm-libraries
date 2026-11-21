@@ -5492,8 +5492,6 @@ def _run_2d_graphed(
     ok_t, _reason = supports_native_unified_attention_tiled(problem, _launch_arch_2dg)
     if not ok_t:
         return _GRAPH_FALLBACK
-    import torch
-
     key = _tiled_cache_key(problem, _launch_arch_2dg)
     launcher = _get_2d_launcher(problem, key, arch=_launch_arch_2dg)
     meta = _get_2d_launch_meta(problem, key, arch=_launch_arch_2dg)
@@ -5534,6 +5532,10 @@ def _run_2d_graphed(
     # primes the module + produces the correct `out`).
     with no_fence():
         _do()
+    # torch is needed only to capture the graph; everything above, including
+    # the kernarg guards, runs without it.
+    import torch
+
     graph = torch.cuda.CUDAGraph()
     with torch.cuda.graph(graph):
         with no_fence():

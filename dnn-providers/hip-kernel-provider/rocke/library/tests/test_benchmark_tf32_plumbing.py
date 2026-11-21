@@ -509,7 +509,7 @@ def test_conv_reference_pins_ieee_and_restores():
 def test_conv_reference_legacy_torch_uses_allow_tf32(monkeypatch):
     """A torch without the per-operator API (< 2.9) gets the legacy flag only:
     the helper must not touch an attribute that version lacks."""
-    pytest.importorskip("torch")
+    torch = pytest.importorskip("torch")
     from builders.common import conv_reference
 
     class _Cudnn:
@@ -518,7 +518,7 @@ def test_conv_reference_legacy_torch_uses_allow_tf32(monkeypatch):
     class _Backends:
         cudnn = _Cudnn()
 
-    monkeypatch.setattr(conv_reference.torch, "backends", _Backends())
+    monkeypatch.setattr(torch, "backends", _Backends())
     with conv_reference.ieee_fp32():
         assert _Backends.cudnn.allow_tf32 is False
     assert _Backends.cudnn.allow_tf32 is True
