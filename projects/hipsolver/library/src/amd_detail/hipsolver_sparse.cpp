@@ -565,6 +565,11 @@ try
 
     // factorize A (symbolic)
     cholmod_factor* c_L = cholmod_analyze(c_A, &sp->c_handle);
+    if(!c_L)
+    {
+        cholmod_free_sparse(&c_A, &sp->c_handle);
+        return HIPSOLVER_STATUS_INTERNAL_ERROR;
+    }
 
     CHECK_HIPSOLVER_ERROR(sp->malloc_host(n));
     int status = cholmod_analyze_ordering(c_A,
@@ -578,6 +583,12 @@ try
                                           sp->hWork2,
                                           sp->hWork3,
                                           &sp->c_handle);
+    if(status != TRUE)
+    {
+        cholmod_free_sparse(&c_A, &sp->c_handle);
+        cholmod_free_factor(&c_L, &sp->c_handle);
+        return HIPSOLVER_STATUS_INTERNAL_ERROR;
+    }
 
     std::vector<int> hIndA;
     sp->gen_sparsity_pattern(n,
@@ -751,6 +762,11 @@ try
 
     // factorize A (symbolic)
     cholmod_factor* c_L = cholmod_analyze(c_A, &sp->c_handle);
+    if(!c_L)
+    {
+        cholmod_free_sparse(&c_A, &sp->c_handle);
+        return HIPSOLVER_STATUS_INTERNAL_ERROR;
+    }
 
     CHECK_HIPSOLVER_ERROR(sp->malloc_host(n));
     int status = cholmod_analyze_ordering(c_A,
@@ -764,6 +780,12 @@ try
                                           sp->hWork2,
                                           sp->hWork3,
                                           &sp->c_handle);
+    if(status != TRUE)
+    {
+        cholmod_free_sparse(&c_A, &sp->c_handle);
+        cholmod_free_factor(&c_L, &sp->c_handle);
+        return HIPSOLVER_STATUS_INTERNAL_ERROR;
+    }
 
     std::vector<int> hIndA;
     sp->gen_sparsity_pattern(n,

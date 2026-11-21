@@ -540,17 +540,21 @@ rocblas_status rocsolver_gesvd_template(rocblas_handle handle,
 
             //*** STAGE 5: Compute singular values and vectors from the bidiagonal form ***//
             if(row)
-                rocsolver_bdsqr_template<T>(handle, rocblas_fill_upper, k, nv, nu, 0, S, strideS, E,
-                                            strideE, A, shiftA, lda, strideA, U, shiftU, ldu,
-                                            strideU, (W) nullptr, 0, 1, 1, info, batch_count,
-                                            (rocblas_int*)tau_splits, (TT*)work_workArr,
-                                            (rocblas_int*)Abyx_norms_tmptr_cmplt);
+            {
+                THROW_IF_ROCBLAS_ERROR(rocsolver_bdsqr_template<T>(
+                    handle, rocblas_fill_upper, k, nv, nu, 0, S, strideS, E, strideE, A, shiftA,
+                    lda, strideA, U, shiftU, ldu, strideU, (W) nullptr, 0, 1, 1, info, batch_count,
+                    (rocblas_int*)tau_splits, (TT*)work_workArr,
+                    (rocblas_int*)Abyx_norms_tmptr_cmplt));
+            }
             else
-                rocsolver_bdsqr_template<T>(handle, rocblas_fill_upper, k, nv, nu, 0, S, strideS, E,
-                                            strideE, V, shiftV, ldv, strideV, A, shiftA, lda,
-                                            strideA, (W) nullptr, 0, 1, 1, info, batch_count,
-                                            (rocblas_int*)tau_splits, (TT*)work_workArr,
-                                            (rocblas_int*)Abyx_norms_tmptr_cmplt);
+            {
+                THROW_IF_ROCBLAS_ERROR(rocsolver_bdsqr_template<T>(
+                    handle, rocblas_fill_upper, k, nv, nu, 0, S, strideS, E, strideE, V, shiftV,
+                    ldv, strideV, A, shiftA, lda, strideA, (W) nullptr, 0, 1, 1, info, batch_count,
+                    (rocblas_int*)tau_splits, (TT*)work_workArr,
+                    (rocblas_int*)Abyx_norms_tmptr_cmplt));
+            }
 
             //*** STAGE 6: update vectors with orthonormal/unitary matrices ***//
             if(othervS || othervA)
@@ -630,17 +634,21 @@ rocblas_status rocsolver_gesvd_template(rocblas_handle handle,
 
             //*** STAGE 5: Compute singular values and vectors from the bidiagonal form ***//
             if(row)
-                rocsolver_bdsqr_template<T>(handle, rocblas_fill_upper, k, nv, nu, 0, S, strideS, E,
-                                            strideE, bufferC, shiftC, ldc, strideC, bufferT, shiftT,
-                                            ldt, strideT, (T*)nullptr, 0, 1, 1, info, batch_count,
-                                            (rocblas_int*)tau_splits, (TT*)work_workArr,
-                                            (rocblas_int*)Abyx_norms_tmptr_cmplt);
+            {
+                THROW_IF_ROCBLAS_ERROR(rocsolver_bdsqr_template<T>(
+                    handle, rocblas_fill_upper, k, nv, nu, 0, S, strideS, E, strideE, bufferC,
+                    shiftC, ldc, strideC, bufferT, shiftT, ldt, strideT, (T*)nullptr, 0, 1, 1, info,
+                    batch_count, (rocblas_int*)tau_splits, (TT*)work_workArr,
+                    (rocblas_int*)Abyx_norms_tmptr_cmplt));
+            }
             else
-                rocsolver_bdsqr_template<T>(handle, rocblas_fill_upper, k, nv, nu, 0, S, strideS, E,
-                                            strideE, bufferT, shiftT, ldt, strideT, bufferC, shiftC,
-                                            ldc, strideC, (T*)nullptr, 0, 1, 1, info, batch_count,
-                                            (rocblas_int*)tau_splits, (TT*)work_workArr,
-                                            (rocblas_int*)Abyx_norms_tmptr_cmplt);
+            {
+                THROW_IF_ROCBLAS_ERROR(rocsolver_bdsqr_template<T>(
+                    handle, rocblas_fill_upper, k, nv, nu, 0, S, strideS, E, strideE, bufferT,
+                    shiftT, ldt, strideT, bufferC, shiftC, ldc, strideC, (T*)nullptr, 0, 1, 1, info,
+                    batch_count, (rocblas_int*)tau_splits, (TT*)work_workArr,
+                    (rocblas_int*)Abyx_norms_tmptr_cmplt));
+            }
 
             //*** STAGE 6: update vectors with orthonormal/unitary matrices ***//
             if(leadvO)
@@ -817,27 +825,27 @@ rocblas_status rocsolver_gesvd_template(rocblas_handle handle,
             uplo = rocblas_fill_upper;
             if(!leftvO && !rightvO)
             {
-                rocsolver_bdsqr_template<T>(handle, uplo, k, nv, nu, 0, S, strideS, E, strideE, V,
-                                            shiftV, ldv, strideV, U, shiftU, ldu, strideU,
-                                            (T*)nullptr, 0, 1, 1, info, batch_count,
-                                            (rocblas_int*)tau_splits, (TT*)work_workArr,
-                                            (rocblas_int*)Abyx_norms_tmptr_cmplt);
+                THROW_IF_ROCBLAS_ERROR(rocsolver_bdsqr_template<T>(
+                    handle, uplo, k, nv, nu, 0, S, strideS, E, strideE, V, shiftV, ldv, strideV, U,
+                    shiftU, ldu, strideU, (T*)nullptr, 0, 1, 1, info, batch_count,
+                    (rocblas_int*)tau_splits, (TT*)work_workArr,
+                    (rocblas_int*)Abyx_norms_tmptr_cmplt));
             }
             else if(leftvO && !rightvO)
             {
-                rocsolver_bdsqr_template<T>(handle, uplo, k, nv, nu, 0, S, strideS, E, strideE, V,
-                                            shiftV, ldv, strideV, A, shiftA, lda, strideA,
-                                            (W) nullptr, 0, 1, 1, info, batch_count,
-                                            (rocblas_int*)tau_splits, (TT*)work_workArr,
-                                            (rocblas_int*)Abyx_norms_tmptr_cmplt);
+                THROW_IF_ROCBLAS_ERROR(rocsolver_bdsqr_template<T>(
+                    handle, uplo, k, nv, nu, 0, S, strideS, E, strideE, V, shiftV, ldv, strideV, A,
+                    shiftA, lda, strideA, (W) nullptr, 0, 1, 1, info, batch_count,
+                    (rocblas_int*)tau_splits, (TT*)work_workArr,
+                    (rocblas_int*)Abyx_norms_tmptr_cmplt));
             }
             else
             {
-                rocsolver_bdsqr_template<T>(handle, uplo, k, nv, nu, 0, S, strideS, E, strideE, A,
-                                            shiftA, lda, strideA, U, shiftU, ldu, strideU,
-                                            (W) nullptr, 0, 1, 1, info, batch_count,
-                                            (rocblas_int*)tau_splits, (TT*)work_workArr,
-                                            (rocblas_int*)Abyx_norms_tmptr_cmplt);
+                THROW_IF_ROCBLAS_ERROR(rocsolver_bdsqr_template<T>(
+                    handle, uplo, k, nv, nu, 0, S, strideS, E, strideE, A, shiftA, lda, strideA, U,
+                    shiftU, ldu, strideU, (W) nullptr, 0, 1, 1, info, batch_count,
+                    (rocblas_int*)tau_splits, (TT*)work_workArr,
+                    (rocblas_int*)Abyx_norms_tmptr_cmplt));
             }
 
             //*** STAGE 6: update vectors with orthonormal/unitary matrices ***//
@@ -911,26 +919,26 @@ rocblas_status rocsolver_gesvd_template(rocblas_handle handle,
         //*** STAGE 5: Compute singular values and vectors from the bidiagonal form ***//
         if(!leftvO && !rightvO)
         {
-            rocsolver_bdsqr_template<T>(handle, uplo, k, nv, nu, 0, S, strideS, E, strideE, V,
-                                        shiftV, ldv, strideV, U, shiftU, ldu, strideU, (T*)nullptr,
-                                        0, 1, 1, info, batch_count, (rocblas_int*)tau_splits,
-                                        (TT*)work_workArr, (rocblas_int*)Abyx_norms_tmptr_cmplt);
+            THROW_IF_ROCBLAS_ERROR(rocsolver_bdsqr_template<T>(
+                handle, uplo, k, nv, nu, 0, S, strideS, E, strideE, V, shiftV, ldv, strideV, U,
+                shiftU, ldu, strideU, (T*)nullptr, 0, 1, 1, info, batch_count,
+                (rocblas_int*)tau_splits, (TT*)work_workArr, (rocblas_int*)Abyx_norms_tmptr_cmplt));
         }
 
         else if(leftvO && !rightvO)
         {
-            rocsolver_bdsqr_template<T>(handle, uplo, k, nv, nu, 0, S, strideS, E, strideE, V,
-                                        shiftV, ldv, strideV, A, shiftA, lda, strideA, (W) nullptr,
-                                        0, 1, 1, info, batch_count, (rocblas_int*)tau_splits,
-                                        (TT*)work_workArr, (rocblas_int*)Abyx_norms_tmptr_cmplt);
+            THROW_IF_ROCBLAS_ERROR(rocsolver_bdsqr_template<T>(
+                handle, uplo, k, nv, nu, 0, S, strideS, E, strideE, V, shiftV, ldv, strideV, A,
+                shiftA, lda, strideA, (W) nullptr, 0, 1, 1, info, batch_count,
+                (rocblas_int*)tau_splits, (TT*)work_workArr, (rocblas_int*)Abyx_norms_tmptr_cmplt));
         }
 
         else
         {
-            rocsolver_bdsqr_template<T>(handle, uplo, k, nv, nu, 0, S, strideS, E, strideE, A,
-                                        shiftA, lda, strideA, U, shiftU, ldu, strideU, (W) nullptr,
-                                        0, 1, 1, info, batch_count, (rocblas_int*)tau_splits,
-                                        (TT*)work_workArr, (rocblas_int*)Abyx_norms_tmptr_cmplt);
+            THROW_IF_ROCBLAS_ERROR(rocsolver_bdsqr_template<T>(
+                handle, uplo, k, nv, nu, 0, S, strideS, E, strideE, A, shiftA, lda, strideA, U,
+                shiftU, ldu, strideU, (W) nullptr, 0, 1, 1, info, batch_count,
+                (rocblas_int*)tau_splits, (TT*)work_workArr, (rocblas_int*)Abyx_norms_tmptr_cmplt));
         }
 
         //*** STAGE 6: update vectors with orthonormal/unitary matrices ***//

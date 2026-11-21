@@ -494,7 +494,7 @@ void rocsolver_sytd2_hetd2_getMemorySize(const rocblas_int n,
         *size_workArr = 0;
 
     // extra requirements to call larfg
-    rocsolver_larfg_getMemorySize<T>(n, batch_count, &w1, &n1);
+    THROW_IF_ROCBLAS_ERROR(rocsolver_larfg_getMemorySize<T>(n, batch_count, &w1, &n1));
 
     // extra requirements for calling symv/hemv
     rocblasCall_symv_hemv_mem<BATCHED, T>(n, batch_count, &w2);

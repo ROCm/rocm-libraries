@@ -55,3 +55,19 @@ inline rocblas_status
     else
         return rocblas_status_internal_error;
 }
+
+// Ends a rocBLAS device memory size query that is still in progress when the
+// enclosing scope exits (e.g. an argument-conversion exception between the
+// start and stop calls), so the handle is never left in size-query mode.
+// Normal paths stop the query explicitly; the guard is then a no-op.
+struct hipsolverSizeQueryGuard
+{
+    rocblas_handle handle;
+
+    ~hipsolverSizeQueryGuard()
+    {
+        size_t unused;
+        if(rocblas_is_device_memory_size_query(handle))
+            (void)rocblas_stop_device_memory_size_query(handle, &unused);
+    }
+};

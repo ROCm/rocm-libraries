@@ -261,3 +261,50 @@ INSTANTIATE_TEST_SUITE_P(checkin_lapack,
 INSTANTIATE_TEST_SUITE_P(checkin_lapack,
                          POTRF_COMPAT,
                          Combine(ValuesIn(matrix_size_range), ValuesIn(uplo_range)));
+
+// An invalid enum passed to a bufferSize function must not leave the handle in a state where a
+// later computation is skipped. The factorization below reuses the workspace obtained before
+// the invalid call, so it performs no new size query that could hide such a state.
+TEST(checkin_misc_BUFFERSIZE, potrf_after_invalid_enum)
+{
+    hipsolver_local_handle    handle;
+    const int                 n    = 4;
+    const hipsolverFillMode_t uplo = HIPSOLVER_FILL_MODE_UPPER;
+
+    // A = diag(4, 9, 16, 25), so its Cholesky factor is diag(2, 3, 4, 5)
+    vector<float> hA(n * n, 0.0f);
+    for(int i = 0; i < n; ++i)
+        hA[i + i * n] = float((i + 2) * (i + 2));
+
+    float* dA;
+    int*   dInfo;
+    CHECK_HIP_ERROR(hipMalloc(&dA, sizeof(float) * n * n));
+    CHECK_HIP_ERROR(hipMalloc(&dInfo, sizeof(int)));
+    CHECK_HIP_ERROR(hipMemcpy(dA, hA.data(), sizeof(float) * n * n, hipMemcpyHostToDevice));
+
+    int lwork = 0;
+    EXPECT_ROCBLAS_STATUS(hipsolverSpotrf_bufferSize(handle, uplo, n, dA, n, &lwork),
+                          HIPSOLVER_STATUS_SUCCESS);
+    // pass a non-empty user workspace so hipsolverSpotrf does not run its own size query
+    lwork = std::max(lwork, 1);
+    float* dWork;
+    CHECK_HIP_ERROR(hipMalloc(&dWork, sizeof(float) * lwork));
+
+    int lwork_bad = 0;
+    EXPECT_NE(hipsolverSpotrf_bufferSize(handle, hipsolverFillMode_t(-1), n, dA, n, &lwork_bad),
+              HIPSOLVER_STATUS_SUCCESS);
+
+    EXPECT_ROCBLAS_STATUS(hipsolverSpotrf(handle, uplo, n, dA, n, dWork, lwork, dInfo),
+                          HIPSOLVER_STATUS_SUCCESS);
+
+    int hInfo = -1;
+    CHECK_HIP_ERROR(hipMemcpy(hA.data(), dA, sizeof(float) * n * n, hipMemcpyDeviceToHost));
+    CHECK_HIP_ERROR(hipMemcpy(&hInfo, dInfo, sizeof(int), hipMemcpyDeviceToHost));
+    EXPECT_EQ(hInfo, 0);
+    for(int i = 0; i < n; ++i)
+        EXPECT_FLOAT_EQ(hA[i + i * n], float(i + 2));
+
+    CHECK_HIP_ERROR(hipFree(dWork));
+    CHECK_HIP_ERROR(hipFree(dInfo));
+    CHECK_HIP_ERROR(hipFree(dA));
+}
