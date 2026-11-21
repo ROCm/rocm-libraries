@@ -223,6 +223,20 @@ the strategy's biggest holes live (see
   leave that bound in every head. The lane needs NumPy and HIP only; its CPU
   contracts run in `rocke_library_attention_cpu_pytest`.
 
+- The [structured-logit check](library/tests/oracle_free/README_structured.md)
+  (`rocke_oracle_free_structured_logit_pytest`, standard tier) launches the
+  shipped gfx942 dense kernel with structured Q and K, so the QK contraction,
+  the scale, the softmax, the mask, the online rescale and the per-head Q and K
+  reads reach the output. Its prediction and analyzer are its own; the exact
+  FP16/BF16 helpers, the raw-bit observation and the buffer checks are those
+  of the uniform-probability check above.
+  Each stored value must lie in the set the kernel's pinned floating-point
+  path can store, derived on the CPU from named assumptions and without an
+  attention reference; no tolerance is calibrated from runs. Its CPU contracts
+  (`rocke_oracle_free_structured_logit_cpu_pytest`, standard tier) pin that
+  path in the lowered IR and the compiled code objects and prove that every
+  claimed mutation is rejected.
+
 - **Nothing else in this document proves the math is right.** Byte-identity
   ([§4.3](#43-do-the-two-implementations-agree-the-migration-gate)) and golden IR
   ([§4.2](#42-does-the-platforms-output-stay-stable)) are both blind to a
