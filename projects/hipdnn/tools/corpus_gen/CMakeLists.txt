@@ -71,20 +71,33 @@ if(HIPDNN_BUILD_FRONTEND AND HIPDNN_BUILD_BACKEND)
                 # No --operations: the declarations staged beside the tool.
                 "default_operations|--without-engine,--operation,matmul,--count,4|0|4"
                 "empty|--without-engine,--operations,${_operations_dir},--operation,matmul,--count,4,--keep,q.M=-7|2|0"
-                # With quotas and no --count, the corpus is the quotas alone.
-                "regime_quota|--without-engine,--operations,${_operations_dir},--operation,sdpa_fwd,--regime-quota,decode_short_mha=3|0|3"
+                # With quotas and no --count, the corpus is the quotas alone. The first pass still
+                # runs before the quota is filled, and the forward's default one is about 9000
+                # problems (50 for each of about 180 live combinations of the unweighted
+                # parameters, the form among them), 20 s: --per-combination 10 shortens it.
+                "regime_quota|--without-engine,--operations,${_operations_dir},--operation,sdpa_fwd,--per-combination,10,--regime-quota,decode_short_mha=3|0|3"
                 # One form axis of eight labels: one graph under each, and nothing else. Each
-                # label is a value of the manifest's own `form` column and a reported quota.
-                "form_floor|--without-engine,--operations,${_operations_dir},--operation,sdpa_fwd,--form-floor,1|0|8|plain,scale_unset,scale_tensor,dropout,padded,ragged,bias,sink"
+                # label is a value of the manifest's own `form` column and a reported quota. The
+                # small --per-combination is as for regime_quota.
+                "form_floor|--without-engine,--operations,${_operations_dir},--operation,sdpa_fwd,--per-combination,10,--form-floor,1|0|8|plain,scale_unset,scale_tensor,dropout,padded,ragged,bias,sink"
                 # The backward declares six of them: no sink token, and no ragged form.
                 "form_floor_sdpa_bwd|--without-engine,--operations,${_operations_dir},--operation,sdpa_bwd,--form-floor,1|0|6|plain,scale_unset,scale_tensor,dropout,padded,bias"
-                # Both floors at once, narrowed to one form so that the six regimes the constraints
-                # exclude and the seven other forms are short: one graph fills a regime's floor
-                # and the form's, so `requested` is the graphs plus the larger of the two
-                # shortfalls (CorpusGenRun.cmake), not the floors' sum.
-                "regime_and_form_floor|--without-engine,--operations,${_operations_dir},--operation,sdpa_fwd,--regime-floor,1,--form-floor,1,--keep,q.form=padded|0|18|padded"
+                # Both floors at once, narrowed to one form so that the seven other forms are
+                # short: one graph fills a regime's floor and the form's, so `requested` is the
+                # graphs plus the larger of the two shortfalls (CorpusGenRun.cmake), 24 + 7, not
+                # the floors' sum, 24 + 8. All 24 regimes are served, cross attention (more
+                # queries than keys) among them. cross_long_gqa is a sliver (more than 2048 keys,
+                # then more queries): the focused search draws its combinations from the 864 the
+                # keep admits, and found it only so, not from a sample of the 6912 taken before the
+                # keep (23 of 24). It was 18 while the declaration forced seqlen_q <= seqlen_k and
+                # all six cross regimes were excluded.
+                "regime_and_form_floor|--without-engine,--operations,${_operations_dir},--operation,sdpa_fwd,--regime-floor,1,--form-floor,1,--keep,q.form=padded|0|24|padded"
                 # A sweep with no share still delivers the regimes the quotas name.
                 "regime_quota_without_sweep|--without-engine,--operations,${_operations_dir},--operation,sdpa_fwd,--regime-quota,decode_short_mha=3,--sweep-share,0|0|3"
+                # A keep on enum facets narrows the categorical combinations before the search's
+                # bound: of sdpa_fwd's 6912, the 8 of is_causal x alignment x generate_stats, none
+                # left unexplored, as manifest.json reports them (total:not_explored).
+                "keep_narrows_combinations|--without-engine,--operations,${_operations_dir},--operation,sdpa_fwd,--count,20,--keep,q.form=plain,--keep,q.layout=bshd,--keep,q.scale=inv_sqrt_d,--keep,q.window=none,--keep,q.dtype=fp16|0|20||8:0"
                 "model_shapes|--without-engine,--operations,${_operations_dir},--operation,sdpa_fwd,--model-shapes,${_model_shapes},--count,1,--model-share,1,--sweep-share,0|0|1"
                 # The engine path, host-only: every problem is offered to the test plugin's
                 # engine, which serves matmul without a device.
@@ -99,11 +112,16 @@ if(HIPDNN_BUILD_FRONTEND AND HIPDNN_BUILD_BACKEND)
             if(_field_count GREATER 4)
                 list(GET _fields 4 _forms)
             endif()
+            set(_combinations "")
+            if(_field_count GREATER 5)
+                list(GET _fields 5 _combinations)
+            endif()
             set(_test hipdnn_corpus_gen_cli_run_${_name})
             add_test(NAME ${_test}
                 COMMAND ${CMAKE_COMMAND} "-DTOOL=$<TARGET_FILE:hipdnn_corpus_gen_tool>"
                         "-DCLI_ARGS=${_args}" "-DEXPECTED_EXIT=${_exit}"
                         "-DEXPECTED_GRAPHS=${_graphs}" "-DEXPECTED_FORMS=${_forms}"
+                        "-DEXPECTED_COMBINATIONS=${_combinations}"
                         "-DOUTPUT_DIR=${CMAKE_CURRENT_BINARY_DIR}/${_test}"
                         -P "${CMAKE_CURRENT_SOURCE_DIR}/../cmake/CorpusGenRun.cmake")
             set_tests_properties(${_test} PROPERTIES TIMEOUT 120)

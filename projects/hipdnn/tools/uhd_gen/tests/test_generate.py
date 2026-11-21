@@ -1010,6 +1010,393 @@ def test_generation_offers_kernel_features_only_for_the_shipping_knobs():
     ]
 
 
+def test_a_proposed_tensor_uid_reads_only_whether_the_tensor_is_bound(evaluator):
+    """A matcher binds an optional tensor's uid (-1 when absent) so dispatch can find its
+    buffer; a corpus fixes that uid, so a model reading the number learns the corpus's label
+    for the tensor. The proposal reads it as a presence flag: two graphs that differ only in
+    the uid they gave the bias get the same feature, and a graph without one does not.
+    """
+    from uhd_gen.features import evaluate_feature_maps
+
+    frame = _attention_frame()
+    frame["gfx950_attention_dense.bias.uid"] = [-1, 7, -1, 0]
+    signature, omitted = feature_recipe(
+        frame, set(frame.columns), None, _KMD_FIELDS, _SHIPPING_KNOBS, []
+    )
+
+    assert "$gfx950_attention_dense.bias.uid" not in signature
+    flag = {"!=": ["$gfx950_attention_dense.bias.uid", -1]}
+    assert flag in signature
+    assert {
+        "expression": "$gfx950_attention_dense.bias.uid",
+        "reason": "tensor_identifier",
+        "read_instead": flag,
+    } in omitted
+    rows = [{"gfx950_attention_dense.bias.uid": uid} for uid in (7, 3, 0, -1)]
+    _, values = evaluate_feature_maps(rows, [flag], executable=evaluator)
+    assert [row[0] for row in values] == [1.0, 1.0, 1.0, 0.0]
+
+
+def _rule_frame():
+    """One column per exclusion rule, and the columns the audit decided to keep."""
+    return pd.DataFrame(
+        {
+            "graph.nodes[0].q.dims[0]": [2, 4, 8, 16],
+            "graph.tensors[1].dims[0]": [2, 4, 8, 16],
+            "graph.tensors[0].strides[2]": [8, 8, 8, 8],
+            "graph.nodes[0].q.numel": [16, 32, 64, 128],
+            "graph.nodes[0].attn_scale_value": [0.5, 0.25, 0.125, 0.0625],
+            "flydsl_sdpa_rdna.scale": [1056964608, 1048576000, 1040187392, 1031798784],
+            "gfx1151_wmma_attention.scale_bits": [7, 8, 9, 10],
+            "flydsl_sdpa_rdna.scale_source": [0, 1, 0, 1],
+            "device.total_global_mem": [2**36] * 4,
+            "graph.nodes[0].q.strides[1]": [8, 8, 8, 8],
+            "flydsl_sdpa_rdna.dropout_p": [0, 0, 1036831949, 1036831949],
+            "graph.nodes[0].dropout_probability": [0.0, 0.0, 0.1, 0.1],
+            "graph.nodes[0].q.virtual": [False, False, True, False],
+            "graph.nodes[0].scale.dims[0]": [1, 1, 2, 2],
+            "flydsl_sdpa_rdna.scale.uid": [-1, 11, -1, 11],
+        }
+    )
+
+
+@pytest.mark.parametrize(
+    ("column", "reason"),
+    [
+        ("graph.tensors[1].dims[0]", "positional_tensor"),
+        ("graph.tensors[0].strides[2]", "positional_tensor"),
+        ("graph.nodes[0].q.numel", "derived_numel"),
+        ("graph.nodes[0].attn_scale_value", "caller_value"),
+        ("flydsl_sdpa_rdna.scale", "caller_value"),
+        ("gfx1151_wmma_attention.scale_bits", "caller_value"),
+        ("device.total_global_mem", "board_identity"),
+    ],
+)
+def test_a_proposal_leaves_out_each_excluded_column_and_records_why(column, reason):
+    frame = _rule_frame()
+    signature, omitted = feature_recipe(frame, set(frame.columns), None, None, [], [])
+    assert "$" + column not in signature
+    assert {"expression": "$" + column, "reason": reason} in omitted
+
+
+def test_a_proposal_keeps_strides_dropout_virtual_and_the_columns_the_rules_resemble():
+    """The corpus never varies strides, dropout or `virtual`, which is why they look
+    neutral; the audit kept them. A scale tensor's uid is an identifier, read as presence,
+    not a caller value, and a node's `scale` tensor dims are dims."""
+    frame = _rule_frame()
+    signature, omitted = feature_recipe(frame, set(frame.columns), None, None, [], [])
+    for kept in (
+        "graph.nodes[0].q.dims[0]",
+        "graph.nodes[0].q.strides[1]",
+        "flydsl_sdpa_rdna.dropout_p",
+        "graph.nodes[0].dropout_probability",
+        "graph.nodes[0].q.virtual",
+        "graph.nodes[0].scale.dims[0]",
+        "flydsl_sdpa_rdna.scale_source",
+    ):
+        assert "$" + kept in signature
+        assert kept not in [e["expression"][1:] for e in omitted]
+    assert {"!=": ["$flydsl_sdpa_rdna.scale.uid", -1]} in signature
+    assert [
+        entry["reason"]
+        for entry in omitted
+        if entry["expression"] == "$flydsl_sdpa_rdna.scale.uid"
+    ] == ["tensor_identifier"]
+
+
+def test_an_authored_recipe_is_never_filtered_by_the_exclusion_rules():
+    frame = _rule_frame()
+    authored = [
+        "$graph.tensors[1].dims[0]",
+        "$graph.nodes[0].attn_scale_value",
+        "$device.total_global_mem",
+    ]
+    signature, omitted = feature_recipe(
+        frame, set(frame.columns), authored, None, [], []
+    )
+    assert (signature, omitted) == (authored, [])
+
+
+def _search_args(*args, **keywords):
+    """`_l1_args` without its authored `--features`."""
+    common = _l1_args(*args, **keywords)
+    position = common.index("--features")
+    return common[:position] + common[position + 2 :]
+
+
+def _bench_publishing_excluded_columns(monkeypatch, provenance):
+    """The L1 stand-in, publishing a positional copy, a scale value and a board field too."""
+    import uhd_gen.generate
+
+    requested = _immediate_bench(monkeypatch, provenance)
+    bench = uhd_gen.generate._run_json
+
+    def publishing(*arguments, **keywords):
+        response = bench(*arguments, **keywords)
+        size = response["features"]["graph.nodes[0].dy.dims[0]"]
+        response["features"].update(
+            {
+                "graph.tensors[0].dims[0]": size,
+                "graph.nodes[0].attn_scale_value": 1 / size,
+                "device.total_global_mem": 2**36,
+            }
+        )
+        return response
+
+    monkeypatch.setattr("uhd_gen.generate._run_json", publishing)
+    return requested
+
+
+@pytest.mark.parametrize("authored", ["--features", "--feature-signature"])
+def test_feature_search_with_an_authored_recipe_is_refused_naming_both(
+    monkeypatch, tmp_path, evaluator, caplog, authored
+):
+    main = _cli()
+    tree = _ued_tree(tmp_path / "descriptors")
+    requested = _bench_publishing_excluded_columns(
+        monkeypatch, snapshot_provenance(tree)
+    )
+    recipe = tmp_path / "recipe.json"
+    recipe.write_text(json.dumps(["$graph.flops"]), encoding="utf-8")
+    command = _search_args(
+        _graphs(tmp_path / "graphs"), tree, tmp_path / "out", evaluator
+    )
+    value = ["graph.flops"] if authored == "--features" else [str(recipe)]
+    assert main([*command, authored, *value, "--feature-search"]) == 1
+    assert "--feature-search" in caplog.text and authored in caplog.text
+    # Refused before anything was measured.
+    assert not requested
+
+
+@pytest.mark.parametrize("authored", ["--features", "--feature-signature"])
+def test_an_authored_recipe_skips_the_search_and_trains_as_written(
+    monkeypatch, tmp_path, evaluator, authored
+):
+    main = _cli()
+    tree = _ued_tree(tmp_path / "descriptors")
+    _bench_publishing_excluded_columns(monkeypatch, snapshot_provenance(tree))
+
+    def searched(*arguments, **keywords):
+        raise AssertionError("an authored recipe must not be searched")
+
+    monkeypatch.setattr("uhd_gen.feature_search.search_features", searched)
+    recipe = tmp_path / "recipe.json"
+    recipe.write_text(
+        json.dumps(["$graph.flops", "$graph.nodes[0].attn_scale_value"]),
+        encoding="utf-8",
+    )
+    output = tmp_path / "out"
+    command = _search_args(_graphs(tmp_path / "graphs"), tree, output, evaluator)
+    value = (
+        ["graph.flops", "graph.nodes[0].attn_scale_value"]
+        if authored == "--features"
+        else [str(recipe)]
+    )
+    assert main([*command, authored, *value]) == 0
+    manifest = json.loads(
+        (output / "generation_manifest.json").read_text(encoding="utf-8")
+    )
+    # Taken as written, the excluded column included.
+    assert manifest["features_signature"] == [
+        "$graph.flops",
+        "$graph.nodes[0].attn_scale_value",
+    ]
+    assert manifest["feature_search"] is None
+    assert not (output / "feature_search").exists()
+
+
+def test_the_search_never_sees_the_evaluation_benchmarks(
+    monkeypatch, tmp_path, evaluator
+):
+    import uhd_gen.feature_search as feature_search
+
+    main = _cli()
+    tree = _ued_tree(tmp_path / "descriptors")
+    _bench_publishing_excluded_columns(monkeypatch, snapshot_provenance(tree))
+    held = [f"graph-{index}" for index in range(4)]
+    listing = tmp_path / "eval.json"
+    listing.write_text(json.dumps(held), encoding="utf-8")
+    seen = []
+    real = feature_search.search_features
+
+    def spy(frame, **options):
+        seen.append((frame, options["groups"]))
+        return real(frame, **options)
+
+    monkeypatch.setattr("uhd_gen.feature_search.search_features", spy)
+    command = _search_args(
+        _graphs(tmp_path / "graphs"),
+        tree,
+        tmp_path / "out",
+        evaluator,
+        "--eval-benchmarks",
+        str(listing),
+    )
+    assert main([*command, "--feature-search"]) == 0
+    [(frame, groups)] = seen
+    trained = set(frame["benchmark"])
+    assert trained and not trained & set(held)
+    # Folds hold whole graphs: the group of a row is its benchmark.
+    assert groups.tolist() == frame["benchmark"].astype(str).tolist()
+
+
+def _spied_feature_search(monkeypatch, tmp_path, evaluator, *extra):
+    """`generate --feature-search` over a tree whose KDP kernels carry tile values, with a
+    bench that also publishes two tensor uids (one optional) and an optional attribute, and
+    a stub MLP that scores every set alike. Returns what `search_features` was called with
+    (its frame and keywords), the columns the bench published and the metric asked for.
+    """
+    import numpy as np
+    import uhd_gen.feature_search as feature_search
+    import uhd_gen.generate
+    from uhd_gen.tests.kdp_stub import kdp
+
+    main = _cli()
+    tree = _ued_tree(tmp_path / "descriptors")
+    (tree / "engine.kdp.json").write_text(
+        json.dumps(kdp("33333333-3333-4333-8333-333333333330", UED, [64, 128, 64])),
+        encoding="utf-8",
+    )
+    requested = _immediate_bench(monkeypatch, snapshot_provenance(tree))
+    bench = uhd_gen.generate._run_json
+    published = {
+        "graph.nodes[0].dy.dims[0]",
+        "device.cu_count",
+        "graph.flops",
+        "graph.nodes[0].in_1.uid",
+        "graph.nodes[0].swish_beta",
+        "engine7.bias.uid",
+    }
+
+    def publishing(*arguments, **keywords):
+        response = bench(*arguments, **keywords)
+        size = response["features"]["graph.nodes[0].dy.dims[0]"]
+        response["features"].update(
+            {
+                # The matcher binds -1 to an absent optional tensor.
+                "graph.nodes[0].in_1.uid": -1 if size % 2 else 5,
+                "graph.nodes[0].swish_beta": 1.0 + size / 10,
+                "engine7.bias.uid": 3,
+            }
+        )
+        return response
+
+    monkeypatch.setattr("uhd_gen.generate._run_json", publishing)
+    monkeypatch.setattr(
+        feature_search._MlpScorer,
+        "cells",
+        lambda self, columns, folds: np.full(len(self.scorer.seeds) * len(folds), 0.5),
+    )
+    seen = []
+    real = feature_search.search_features
+
+    def spy(frame, **options):
+        seen.append((frame, options))
+        return real(frame, **options)
+
+    monkeypatch.setattr("uhd_gen.feature_search.search_features", spy)
+    command = _search_args(
+        _graphs(tmp_path / "graphs"), tree, tmp_path / "out", evaluator, *extra
+    )
+    assert main([*command, "--feature-search"]) == 0
+    [(frame, options)] = seen
+    assert published <= set(frame.columns)
+    return frame, options, published, requested[0], tree
+
+
+def test_feature_search_forwards_the_callers_options_to_the_search(
+    monkeypatch, tmp_path, evaluator
+):
+    from uhd_gen.feature_search import catalog_values_from_tree
+    from uhd_gen.generate import search_inputs
+
+    frame, options, published, metric, tree = _spied_feature_search(
+        monkeypatch,
+        tmp_path,
+        evaluator,
+        "--adapter",
+        "mlp_data",
+        "--adapter-pass-budget",
+        "7",
+        "--seed",
+        "5",
+        "--mlp-hidden",
+        "8",
+        "--mlp-epochs",
+        "3",
+        "--mlp-max-rows",
+        "50",
+    )
+    assert options["seeds"] == [5, 6, 7]
+    assert options["adapter"] == "mlp_data"
+    assert options["adapter_pass_budget"] == 7
+    assert options["mlp_options"] == {"hidden": (8,), "epochs": 3, "max_rows": 50}
+    assert options["catalog_values"] == {"tile": [64, 128]}
+    assert options["catalog_values"] == catalog_values_from_tree(tree, None)
+    assert options["catalog_source"] == str(tree)
+    # What the search may read is what the proposal rules leave: the identifiers only as
+    # presence flags, the optional ones with the default an unbound row takes.
+    columns, identifiers, guards, omitted = search_inputs(
+        frame, published, None, [], metric, evaluator
+    )
+    assert identifiers == ["engine7.bias.uid", "graph.nodes[0].in_1.uid"]
+    assert guards == {"graph.nodes[0].in_1.uid": -1, "graph.nodes[0].swish_beta": 1.0}
+    assert options["columns"] == columns
+    assert options["presence_columns"] == identifiers
+    assert options["guards"] == guards
+    assert options["omitted"] == omitted
+
+
+def test_feature_search_without_options_searches_as_the_tree_over_three_seeds(
+    monkeypatch, tmp_path, evaluator
+):
+    from uhd_gen.feature_search import ADAPTER_PASS_BUDGET
+
+    _, options, _, _, _ = _spied_feature_search(monkeypatch, tmp_path, evaluator)
+    assert options["seeds"] == [0, 1, 2]
+    assert options["adapter"] == "tree"
+    assert options["adapter_pass_budget"] == ADAPTER_PASS_BUDGET
+    assert options["mlp_options"] == {}
+    assert options["catalog_values"] == {"tile": [64, 128]}
+
+
+def test_feature_search_trains_on_its_recipe_and_records_the_report(
+    monkeypatch, tmp_path, evaluator
+):
+    main = _cli()
+    tree = _ued_tree(tmp_path / "descriptors")
+    _bench_publishing_excluded_columns(monkeypatch, snapshot_provenance(tree))
+    output = tmp_path / "out"
+    command = _search_args(_graphs(tmp_path / "graphs"), tree, output, evaluator)
+    assert main([*command, "--feature-search"]) == 0
+
+    manifest = json.loads(
+        (output / "generation_manifest.json").read_text(encoding="utf-8")
+    )
+    searched = manifest["feature_search"]
+    assert Path(searched["report"]) == (
+        output.resolve() / "feature_search" / "feature_search_report.json"
+    )
+    recipe = json.loads(
+        (output / "feature_search" / "recipe.json").read_text(encoding="utf-8")
+    )
+    assert manifest["features_signature"] == recipe
+    assert searched["features"] == len(recipe)
+    # The model trained on the searched recipe, and nothing a rule excludes entered it.
+    assert json.loads((output / "features.json").read_text(encoding="utf-8")) == recipe
+    assert not {
+        "$graph.tensors[0].dims[0]",
+        "$graph.nodes[0].attn_scale_value",
+        "$device.total_global_mem",
+    } & set(json.dumps(recipe).replace('"', " ").split())
+    reasons = {
+        entry["expression"]: entry["reason"] for entry in manifest["omitted_proposals"]
+    }
+    assert reasons["$graph.tensors[0].dims[0]"] == "positional_tensor"
+    assert reasons["$graph.nodes[0].attn_scale_value"] == "caller_value"
+    assert reasons["$device.total_global_mem"] == "board_identity"
+
+
 @pytest.mark.parametrize(
     "authored",
     [

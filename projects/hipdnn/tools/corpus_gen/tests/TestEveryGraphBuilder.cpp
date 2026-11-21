@@ -407,6 +407,9 @@ ProblemPoint formPoint(const std::string& form, bool stats = true)
                         {"alignment", std::string("top_left")},
                         {"generate_stats", stats},
                         {"dtype", std::string("fp16")},
+                        {"layout", std::string("bshd")},
+                        {"scale", std::string("inv_sqrt_d")},
+                        {"window", std::string("none")},
                         {"form", form}};
 }
 
