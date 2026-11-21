@@ -349,16 +349,29 @@ def run(
                 env["CU"] = str(cu_count)
 
             with open(self.build_dir / f"{self.config_name}-tensilelite.log", "w") as f:
+                tensile_cmd = [
+                    hipblaslt_path / "tensilelite/tensilelite/bin/Tensile",
+                    self.config,
+                    self.build_dir,
+                    "--prebuilt-client",
+                    client_build_dir / "tensilelite/client/tensilelite-client",
+                    "--client-lock",
+                    (tuning_dir / f"gpulock_{self.device}").resolve(),
+                ]
+                # Tensile sizes its pool from this process's CPU affinity.
+                # GEKO_CPU_SLICES is a comma-separated list of taskset ranges,
+                # one per visible device, so concurrent jobs do not each inherit
+                # the full mask. taskset is Linux-only.
+                cpu_slices = [
+                    s.strip()
+                    for s in os.environ.get("GEKO_CPU_SLICES", "").split(",")
+                    if s.strip()
+                ]
+                if cpu_slices and os.name != "nt":
+                    cpu_slice = cpu_slices[self.device % len(cpu_slices)]
+                    tensile_cmd = ["taskset", "-c", cpu_slice, *tensile_cmd]
                 proc = subprocess.Popen(
-                    [
-                        hipblaslt_path / "tensilelite/tensilelite/bin/Tensile",
-                        self.config,
-                        self.build_dir,
-                        "--prebuilt-client",
-                        client_build_dir / "tensilelite/client/tensilelite-client",
-                        "--client-lock",
-                        (tuning_dir / f"gpulock_{self.device}").resolve(),
-                    ],
+                    tensile_cmd,
                     env=os.environ | env,
                     stdout=f,
                     stderr=subprocess.STDOUT,
