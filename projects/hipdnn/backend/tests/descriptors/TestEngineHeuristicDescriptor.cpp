@@ -798,12 +798,13 @@ protected:
         ASSERT_NO_THROW(heur->finalize());
 
         using hipdnn_data_sdk::utilities::policyNameToId;
-        std::vector<int64_t> expected{policyNameToId("SelectionHeuristic::Config")};
+        std::vector<int64_t> expected{
+            policyNameToId(hipdnn_data_sdk::utilities::CONFIG_POLICY_NAME)};
         if(predictionPolicy != nullptr)
         {
             expected.push_back(policyNameToId(predictionPolicy));
         }
-        expected.push_back(policyNameToId("SelectionHeuristic::StaticOrdering"));
+        expected.push_back(policyNameToId(hipdnn_data_sdk::utilities::STATIC_ORDERING_POLICY_NAME));
 
         int64_t count = 999;
         ASSERT_NO_THROW(heur->getAttribute(
@@ -847,9 +848,9 @@ TEST_F(TestGpuEngineHeuristicDescriptor, PolicyOrderAttributeOverridesTheModeLis
 
     using hipdnn_data_sdk::utilities::policyNameToId;
     const std::vector<int64_t> requested{
-        policyNameToId("SelectionHeuristic::Config"),
+        policyNameToId(hipdnn_data_sdk::utilities::CONFIG_POLICY_NAME),
         policyNameToId(hipdnn_data_sdk::utilities::MODE_B_POLICY_NAME),
-        policyNameToId("SelectionHeuristic::StaticOrdering"),
+        policyNameToId(hipdnn_data_sdk::utilities::STATIC_ORDERING_POLICY_NAME),
     };
     ASSERT_NO_THROW(heur->setAttribute(HIPDNN_ATTR_ENGINEHEUR_POLICY_ORDER_EXT,
                                        HIPDNN_TYPE_INT64,

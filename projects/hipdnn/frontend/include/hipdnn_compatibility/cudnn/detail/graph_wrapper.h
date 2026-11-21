@@ -163,9 +163,8 @@ public:
             return err;
         }
 
-        _planCreationModes = modes;
         _stage = Stage::PlansCreated;
-        CHECK_CUDNN_FRONTEND_ERROR(applyPendingPlanFilters(_planCreationModes));
+        CHECK_CUDNN_FRONTEND_ERROR(applyPendingPlanFilters());
         return err;
     }
 
@@ -225,7 +224,7 @@ public:
         // native decides; a survivor check would fail a repeat build that cuDNN accepts.
         if(_stage == Stage::PlansBuilt)
         {
-            CHECK_CUDNN_FRONTEND_ERROR(pushPlanFilters(_planCreationModes));
+            CHECK_CUDNN_FRONTEND_ERROR(pushPlanFilters());
         }
         else
         {
@@ -1652,7 +1651,6 @@ private:
     std::vector<std::shared_ptr<Tensor_attributes>> _ownedTensors;
     std::optional<int64_t> _maxWorkspaceAllowed;
     std::vector<int64_t> _barredEngineIndices;
-    std::vector<HeurMode_t> _planCreationModes = {HeurMode_t::FALLBACK};
     std::vector<std::string> _barredEngineNames;
     std::vector<int64_t> _engineIndexToNativeEngineId;
     std::vector<BehaviorNote_t> _selectedBehaviorNotes;
@@ -1722,7 +1720,7 @@ private:
         {
             return {};
         }
-        return applyPendingPlanFilters(_planCreationModes);
+        return applyPendingPlanFilters();
     }
 
     // Pushes the filters without the survivor check; autotune() uses it so its native
@@ -1733,13 +1731,13 @@ private:
         {
             return {};
         }
-        return pushPlanFilters(_planCreationModes);
+        return pushPlanFilters();
     }
 
     // Pushes the filters, then fails when none of the created plans survives them.
-    error_t applyPendingPlanFilters(const std::vector<HeurMode_t>& modes = {HeurMode_t::FALLBACK})
+    error_t applyPendingPlanFilters()
     {
-        CHECK_CUDNN_FRONTEND_ERROR(pushPlanFilters(modes));
+        CHECK_CUDNN_FRONTEND_ERROR(pushPlanFilters());
 
         if(_shimBarredEngineIds.empty() || _graph->get_execution_plan_count() == 0)
         {
@@ -1755,7 +1753,7 @@ private:
     // that is how a cleared filter reaches native. The shim's record of what it barred is
     // rebuilt on every pass. Nothing is written to native until every mapping and note read
     // has succeeded.
-    error_t pushPlanFilters(const std::vector<HeurMode_t>& modes)
+    error_t pushPlanFilters()
     {
         _shimBarredEngineIds.clear();
 
@@ -1769,7 +1767,7 @@ private:
             CHECK_CUDNN_FRONTEND_ERROR(mapEngineIndices(_barredEngineIndices, nativeEngineIds));
             _shimBarredEngineIds.insert(nativeEngineIds.begin(), nativeEngineIds.end());
         }
-        CHECK_CUDNN_FRONTEND_ERROR(applyEngineMetadataFilters(modes));
+        CHECK_CUDNN_FRONTEND_ERROR(applyEngineMetadataFilters());
 
         _graph->deselect_engines(
             std::vector<int64_t>(_shimBarredEngineIds.begin(), _shimBarredEngineIds.end()));
@@ -1780,8 +1778,11 @@ private:
         return {};
     }
 
-    // Behavior-note and numerical-note filters bar engines by per-engine metadata.
-    error_t applyEngineMetadataFilters(const std::vector<HeurMode_t>& modes)
+    // Behavior-note and numerical-note filters bar engines by per-engine metadata. The
+    // engines are enumerated through FALLBACK, as engine indices are (refreshEngineIndexMap),
+    // whatever heuristic modes created the plans: ids are all the filters need, so no
+    // mode-specific prediction runs.
+    error_t applyEngineMetadataFilters()
     {
         const bool filterBehavior
             = !_selectedBehaviorNotes.empty() || !_deselectedBehaviorNotes.empty();
@@ -1794,7 +1795,8 @@ private:
         HIPDNN_CUDNN_SHIM_RETURN_OK_IF_NO_NATIVE_GRAPH();
 
         std::vector<int64_t> engineIds;
-        CHECK_CUDNN_FRONTEND_ERROR(_graph->get_ranked_engine_ids(engineIds, modes));
+        CHECK_CUDNN_FRONTEND_ERROR(
+            _graph->get_ranked_engine_ids(engineIds, {HeurMode_t::FALLBACK}));
 
         std::vector<int64_t> enginesToBar;
         enginesToBar.reserve(engineIds.size());
@@ -2006,7 +2008,6 @@ private:
         _ownedTensors.clear();
         _maxWorkspaceAllowed.reset();
         _barredEngineIndices.clear();
-        _planCreationModes = {HeurMode_t::FALLBACK};
         // _barredEngineNames survives, as cuDNN keeps barred_engine_names across deserialize.
         _engineIndexToNativeEngineId.clear();
         _selectedBehaviorNotes.clear();

@@ -10,6 +10,12 @@
 namespace hipdnn_data_sdk::utilities
 {
 
+/// Built-in policy that applies the file-driven engine override rules and the exact-match
+/// autotune cache; declines when neither decides. Added in hipdnn_data_sdk 0.3.0.
+inline constexpr const char* CONFIG_POLICY_NAME = "SelectionHeuristic::Config";
+/// Built-in policy that applies the deterministic engine ordering (MIOPEN first, deterministic
+/// variants last). Added in hipdnn_data_sdk 0.3.0.
+inline constexpr const char* STATIC_ORDERING_POLICY_NAME = "SelectionHeuristic::StaticOrdering";
 /// Quick policy: ranks by the engine-level (L1) prediction in the request's ranking metric
 /// only; never asks for a configuration-level prediction (RFC 0019 §11.2).
 inline constexpr const char* MODE_A_POLICY_NAME = "SelectionHeuristic::ModeA";

@@ -2,7 +2,7 @@
 
 - Contributors: Jason Campbell, Chris Erb
 - **Status**: In progress
-- **Status notes**: The UHD runtime ships (#13028): the UHD parser, the UED role maps, feature extraction, the `static_order`, `native`, `tree_data`, `table`, `linear_data`, `mlp_data`, and `custom_library` adapters, ranking metrics, engine estimates, and the winner cache (`plugin_sdk/include/hipdnn_plugin_sdk/heuristics/`, `ingestor/DescriptorLoader.hpp`, `ingestor/UhdKernelHeuristic.hpp`). The `onnx` adapter, a consumer for `predict_applicable_kernels`, a persistent cache of model rankings, and the generation tool are not built. Every in-tree engine ships a `native` UHD; none ships a trained model.
+- **Status notes**: The UHD runtime ships (#13028): the UHD parser, the UED role maps, feature extraction, the `static_order`, `native`, `tree_data`, `table`, `linear_data`, `mlp_data`, and `custom_library` adapters, ranking metrics, engine estimates, and the winner cache (`plugin_sdk/include/hipdnn_plugin_sdk/heuristics/`, `ingestor/DescriptorLoader.hpp`, `ingestor/UhdKernelHeuristic.hpp`). The `onnx` adapter, a consumer for `predict_applicable_kernels`, a persistent cache of model rankings, and the generation tool are not built. Every in-tree engine ships a `native` UHD, and several FlyDSL engines also bind trained `predict_engine` models for some architectures ([§11.3](#113-cross-engine-comparison)).
 - **Last verified**: 2026-10-15 against `develop` (2501d0b28cc)
 - Parent: [RFC 0017 Universal Kernel Descriptor](0017_UniversalKernelDescriptor.md) — the "UHD + kernel selection" follow-up named in [RFC 0017 §14.2](0017_UniversalKernelDescriptor.md#142-follow-up-rfcs).
 - Siblings:
@@ -2734,7 +2734,7 @@ is model-free. A caller names the metric through
 `HIPDNN_HEUR_RANKING_METRIC` ([Environment variables](../Environment.md)). Item 3 is the models' to meet.
 Which in-tree engines bind trained L1 models changes as models land: an engine has one for an
 architecture and metric when its descriptor set holds
-`heuristics/<uhd id>/predict_engine/<arch>/<metric>/heuristic.uhd.json` (today several FlyDSL engines in
+`heuristics/<ued-id>/predict_engine/<arch>/<metric>/heuristic.uhd.json`, where the folder is the engine's UED id (today several FlyDSL engines in
 hip-kernel-provider, on architectures that differ per engine). An engine with none for the device ranks
 after those that have one, in static order. Calibration across engines stays the models' obligation: an engine's
 estimate may only outrank another's if both are in the metric's real units.

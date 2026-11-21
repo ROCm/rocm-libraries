@@ -235,6 +235,18 @@ public:
         return ids;
     }
 
+    /// Get the engine config descriptors of all compiled plans (for assertions).
+    std::vector<hipdnnBackendDescriptor_t> getCompiledPlanEngineConfigDescs() const
+    {
+        std::vector<hipdnnBackendDescriptor_t> descs;
+        descs.reserve(_compiledPlans.size());
+        for(const auto& p : _compiledPlans)
+        {
+            descs.push_back(p.engineConfigDesc ? p.engineConfigDesc->get() : nullptr);
+        }
+        return descs;
+    }
+
     /// Get barred flags for all compiled plans (for assertions).
     std::vector<bool> getCompiledPlanBarredFlags() const
     {
@@ -536,6 +548,8 @@ protected:
     std::map<hipdnnBackendHeurMode_t, std::vector<int64_t>> _rankedEngineIdsByMode;
     std::unordered_map<hipdnnBackendDescriptor_t, hipdnnBackendHeurMode_t> _heuristicModes;
     std::vector<hipdnnBackendHeurMode_t> _queriedModes;
+    // The policy order each heuristic descriptor was sent, if any.
+    std::unordered_map<hipdnnBackendDescriptor_t, std::vector<int64_t>> _policyOrders;
     std::unordered_map<hipdnnBackendDescriptor_t, int64_t> _engineIdByDesc;
     std::unordered_map<int64_t, std::vector<hipdnnBackendNumericalNote_t>> _numericalNotes;
     std::unordered_map<int64_t, std::vector<hipdnnBackendBehaviorNote_t>> _behaviorNotes;
@@ -690,7 +704,7 @@ protected:
             .WillByDefault([this](hipdnnBackendDescriptor_t descriptor,
                                   hipdnnBackendAttributeName_t attribute,
                                   hipdnnBackendAttributeType_t,
-                                  int64_t,
+                                  int64_t elementCount,
                                   const void* elements) {
                 if(attribute == HIPDNN_ATTR_ENGINE_GLOBAL_INDEX)
                 {
@@ -706,6 +720,11 @@ protected:
                     const auto mode = *static_cast<const hipdnnBackendHeurMode_t*>(elements);
                     _heuristicModes[descriptor] = mode;
                     _queriedModes.push_back(mode);
+                }
+                else if(attribute == HIPDNN_ATTR_ENGINEHEUR_POLICY_ORDER_EXT)
+                {
+                    const auto* ids = static_cast<const int64_t*>(elements);
+                    _policyOrders[descriptor].assign(ids, ids + elementCount);
                 }
                 return HIPDNN_STATUS_SUCCESS;
             });
@@ -17549,46 +17568,63 @@ TEST_F(TestGraph, HeuristicModeTravelsAsTheBackendMode)
     }
 }
 
+using BackendVersion = hipdnn_data_sdk::utilities::Version;
+
+// What createEngineHeuristicDescriptorForGraph sends to a backend that reports one version.
+class TestGraphBackendVersion : public TestGraph,
+                                public ::testing::WithParamInterface<BackendVersion>
+{
+protected:
+    void SetUp() override
+    {
+        TestGraph::SetUp();
+        installEngineFilterMocks();
+        _versionString = GetParam().str();
+        EXPECT_CALL(*_mockBackend, version()).WillRepeatedly(Return(GetParam()));
+        EXPECT_CALL(*_mockBackend, versionString()).WillRepeatedly(Return(_versionString.c_str()));
+    }
+
+    // Creates the heuristic descriptor for `mode` and returns the policy order it was sent,
+    // empty when none was. The backend modes sent are left in _queriedModes.
+    std::vector<int64_t> createHeuristicDescriptor(HeuristicMode mode)
+    {
+        _queriedModes.clear();
+        _policyOrders.clear();
+        detail::ScopedHipdnnBackendDescriptor heuristicDesc;
+        const auto error = detail::createEngineHeuristicDescriptorForGraph(
+            heuristicDesc,
+            // NOLINTNEXTLINE(performance-no-int-to-ptr)
+            reinterpret_cast<hipdnnBackendDescriptor_t>(0x4242),
+            mode);
+        EXPECT_TRUE(error.is_good()) << error.get_message();
+        const auto order = _policyOrders.find(heuristicDesc.get());
+        return order == _policyOrders.end() ? std::vector<int64_t>{} : order->second;
+    }
+
+    std::string _versionString;
+};
+
+static std::string backendVersionName(const ::testing::TestParamInfo<BackendVersion>& info)
+{
+    return "v" + std::to_string(info.param.major) + "_" + std::to_string(info.param.minor) + "_"
+           + std::to_string(info.param.patch);
+}
+
+class TestGraphOlderBackend : public TestGraphBackendVersion
+{
+};
+
 // A backend older than 0.5.0 rejects modes A and B, so the frontend sends what that backend
-// accepts (RFC 0005 §4.6.3): mode FALLBACK, plus the mode's policy order for A and B.
-TEST_F(TestGraph, OlderBackendGetsFallbackModeWithThePolicyOrder)
+// accepts (RFC 0005 §4.6.3): mode FALLBACK, plus the mode's policy order for A and B. 0.4.99
+// is the version just below the threshold.
+TEST_P(TestGraphOlderBackend, GetsFallbackModeWithThePolicyOrder)
 {
     using hipdnn_data_sdk::utilities::policyNameToId;
-    EXPECT_CALL(*_mockBackend, version())
-        .WillRepeatedly(Return(hipdnn_data_sdk::utilities::Version{0, 4, 0}));
-    EXPECT_CALL(*_mockBackend, versionString()).WillRepeatedly(Return("0.4.0"));
-    EXPECT_CALL(*_mockBackend,
-                backendSetAttribute(_, HIPDNN_ATTR_ENGINEHEUR_OPERATION_GRAPH, _, _, _))
-        .Times(AnyNumber());
-    std::vector<hipdnnBackendHeurMode_t> sentModes;
-    EXPECT_CALL(*_mockBackend,
-                backendSetAttribute(_, HIPDNN_ATTR_ENGINEHEUR_MODE, HIPDNN_TYPE_HEUR_MODE, 1, _))
-        .WillRepeatedly([&sentModes](hipdnnBackendDescriptor_t,
-                                     hipdnnBackendAttributeName_t,
-                                     hipdnnBackendAttributeType_t,
-                                     int64_t,
-                                     const void* arrayOfElements) {
-            sentModes.push_back(*static_cast<const hipdnnBackendHeurMode_t*>(arrayOfElements));
-            return HIPDNN_STATUS_SUCCESS;
-        });
-    std::vector<int64_t> sentOrder;
-    EXPECT_CALL(
-        *_mockBackend,
-        backendSetAttribute(_, HIPDNN_ATTR_ENGINEHEUR_POLICY_ORDER_EXT, HIPDNN_TYPE_INT64, _, _))
-        .WillRepeatedly([&sentOrder](hipdnnBackendDescriptor_t,
-                                     hipdnnBackendAttributeName_t,
-                                     hipdnnBackendAttributeType_t,
-                                     int64_t elementCount,
-                                     const void* arrayOfElements) {
-            const auto* ids = static_cast<const int64_t*>(arrayOfElements);
-            sentOrder.assign(ids, ids + elementCount);
-            return HIPDNN_STATUS_SUCCESS;
-        });
-
     const auto orderFor = [](const char* predictionPolicy) {
-        return std::vector<int64_t>{policyNameToId("SelectionHeuristic::Config"),
-                                    policyNameToId(predictionPolicy),
-                                    policyNameToId("SelectionHeuristic::StaticOrdering")};
+        return std::vector<int64_t>{
+            policyNameToId(hipdnn_data_sdk::utilities::CONFIG_POLICY_NAME),
+            policyNameToId(predictionPolicy),
+            policyNameToId(hipdnn_data_sdk::utilities::STATIC_ORDERING_POLICY_NAME)};
     };
     const std::vector<std::pair<HeuristicMode, std::vector<int64_t>>> cases{
         {HeuristicMode::A, orderFor(hipdnn_data_sdk::utilities::MODE_A_POLICY_NAME)},
@@ -17597,20 +17633,44 @@ TEST_F(TestGraph, OlderBackendGetsFallbackModeWithThePolicyOrder)
         {HeuristicMode::OPENSOURCE, {}}};
     for(const auto& [mode, expectedOrder] : cases)
     {
-        sentModes.clear();
-        sentOrder.clear();
-        detail::ScopedHipdnnBackendDescriptor heuristicDesc;
-        const auto error = detail::createEngineHeuristicDescriptorForGraph(
-            heuristicDesc,
-            // NOLINTNEXTLINE(performance-no-int-to-ptr)
-            reinterpret_cast<hipdnnBackendDescriptor_t>(0x4242),
-            mode);
-        ASSERT_TRUE(error.is_good()) << error.get_message();
-        EXPECT_EQ(sentModes, std::vector<hipdnnBackendHeurMode_t>{HIPDNN_HEUR_MODE_FALLBACK})
-            << to_string(mode);
-        EXPECT_EQ(sentOrder, expectedOrder) << to_string(mode);
+        SCOPED_TRACE(to_string(mode));
+        EXPECT_EQ(createHeuristicDescriptor(mode), expectedOrder);
+        EXPECT_EQ(_queriedModes, std::vector<hipdnnBackendHeurMode_t>{HIPDNN_HEUR_MODE_FALLBACK});
     }
 }
+
+INSTANTIATE_TEST_SUITE_P(BelowTheThreshold,
+                         TestGraphOlderBackend,
+                         ::testing::Values(hipdnn_data_sdk::utilities::Version{0, 4, 0},
+                                           hipdnn_data_sdk::utilities::Version{0, 4, 99}),
+                         backendVersionName);
+
+class TestGraphModeCapableBackend : public TestGraphBackendVersion
+{
+};
+
+// A backend at 0.5.0 or newer accepts modes A and B itself: each travels as its own backend
+// mode with no policy order. 0.5.0 is the threshold itself.
+TEST_P(TestGraphModeCapableBackend, GetsModesAAndBWithNoPolicyOrder)
+{
+    const std::vector<std::pair<HeuristicMode, hipdnnBackendHeurMode_t>> cases{
+        {HeuristicMode::A, HIPDNN_HEUR_MODE_A},
+        {HeuristicMode::B, HIPDNN_HEUR_MODE_B},
+        {HeuristicMode::FALLBACK, HIPDNN_HEUR_MODE_FALLBACK},
+        {HeuristicMode::OPENSOURCE, HIPDNN_HEUR_MODE_FALLBACK}};
+    for(const auto& [mode, expectedMode] : cases)
+    {
+        SCOPED_TRACE(to_string(mode));
+        EXPECT_TRUE(createHeuristicDescriptor(mode).empty());
+        EXPECT_EQ(_queriedModes, std::vector<hipdnnBackendHeurMode_t>{expectedMode});
+    }
+}
+
+INSTANTIATE_TEST_SUITE_P(AtOrAboveTheThreshold,
+                         TestGraphModeCapableBackend,
+                         ::testing::Values(hipdnn_data_sdk::utilities::Version{0, 5, 0},
+                                           hipdnn_data_sdk::utilities::Version{0, 6, 0}),
+                         backendVersionName);
 
 // The Graph entry points that query heuristics. A null `modes` calls the entry point without a
 // mode list, so its default applies. `ids` receives the engine IDs the call produced, in order,
@@ -17785,6 +17845,57 @@ TEST_F(TestGraphHeuristicEntryPoints, EveryEntryPointQueriesEachModeOnceAndConca
         {
             EXPECT_EQ(_queriedModes, std::vector<hipdnnBackendHeurMode_t>{HIPDNN_HEUR_MODE_B});
         }
+    }
+}
+
+// Modes that select the same backend mode are queried once, so {FALLBACK, OPENSOURCE} sends one
+// FALLBACK query to every entry point that reports engines (is_supported_ext() queries its
+// first mode alone).
+TEST_F(TestGraphHeuristicEntryPoints, EveryEntryPointQueriesModesSharingABackendModeOnce)
+{
+    _rankedEngineIds = {10, 20};
+    const std::vector<HeuristicMode> modes{HeuristicMode::FALLBACK, HeuristicMode::OPENSOURCE};
+    for(const auto& entry : heuristicEntryPoints())
+    {
+        SCOPED_TRACE(entry.name);
+        std::vector<int64_t> ids;
+        const auto error = callOnFreshGraph(entry, &modes, ids);
+        ASSERT_TRUE(error.is_good()) << error.get_message();
+        EXPECT_EQ(_queriedModes, std::vector<hipdnnBackendHeurMode_t>{HIPDNN_HEUR_MODE_FALLBACK});
+        if(entry.reportsEngines)
+        {
+            EXPECT_EQ(ids, (std::vector<int64_t>{10, 20}));
+        }
+    }
+}
+
+// Each plan keeps the engine configuration of the engine it is labelled with when a later mode's
+// results are merged behind an earlier mode's: B ranks {200, 100}, A ranks {100, 300}, FALLBACK
+// ranks {300, 100, 200, 400}. Engine 300 takes A's second configuration, and 400 FALLBACK's
+// fourth.
+TEST_F(TestGraphHeuristicEntryPoints, MergedPlansPairEachConfigWithItsEngine)
+{
+    _rankedEngineIdsByMode = {{HIPDNN_HEUR_MODE_B, {200, 100}},
+                              {HIPDNN_HEUR_MODE_A, {100, 300}},
+                              {HIPDNN_HEUR_MODE_FALLBACK, {300, 100, 200, 400}}};
+    GraphTestUtils graph;
+    createBasicBatchnormGraph(graph);
+    const auto built = graph.build_operation_graph(_handle);
+    ASSERT_TRUE(built.is_good()) << built.get_message();
+
+    const auto error = graph.create_execution_plans(
+        {HeuristicMode::B, HeuristicMode::A, HeuristicMode::FALLBACK});
+    ASSERT_TRUE(error.is_good()) << error.get_message();
+
+    const auto engineIds = graph.getCompiledPlanEngineIds();
+    ASSERT_EQ(engineIds, (std::vector<int64_t>{200, 100, 300, 400}));
+    const auto configDescs = graph.getCompiledPlanEngineConfigDescs();
+    ASSERT_EQ(configDescs.size(), engineIds.size());
+    for(size_t i = 0; i < configDescs.size(); ++i)
+    {
+        SCOPED_TRACE(engineIds[i]);
+        ASSERT_EQ(_engineIdByDesc.count(configDescs[i]), 1U);
+        EXPECT_EQ(_engineIdByDesc.at(configDescs[i]), engineIds[i]);
     }
 }
 

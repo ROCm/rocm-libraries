@@ -20,7 +20,10 @@
  * control how engines are ranked. Every mode returns the same applicable
  * engines; the mode selects the heuristic policy list that orders them,
  * unless HIPDNN_HEUR_POLICY_ORDER or HIPDNN_ATTR_ENGINEHEUR_POLICY_ORDER_EXT
- * overrides that list.
+ * overrides that list. When HIPDNN_HEUR_FALLBACK_ENGINE_ORDER is set,
+ * StaticOrdering and the prediction policies return only the engines it names,
+ * in every mode; an engine chosen by a Config rule or the autotune cache is
+ * not restricted.
  * @see HIPDNN_ATTR_ENGINEHEUR_MODE
  * @see hipdnnBackendSetAttribute()
  */
@@ -31,8 +34,10 @@ typedef enum
      *
      * Ranks the applicable engines without a trained model: policy list
      * [SelectionHeuristic::Config, SelectionHeuristic::StaticOrdering].
-     * Every applicable engine is returned. Use it for a deterministic order
-     * that no installed model can change.
+     * Every applicable engine is returned (only those named in
+     * HIPDNN_HEUR_FALLBACK_ENGINE_ORDER when it is set and no Config rule or
+     * cached winner applies). Use it for a
+     * deterministic order that no installed model can change.
      */
     HIPDNN_HEUR_MODE_FALLBACK = 0,
 

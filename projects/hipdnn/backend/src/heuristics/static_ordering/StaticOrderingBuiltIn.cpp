@@ -48,7 +48,6 @@ namespace
 
 constexpr const char* PLUGIN_NAME = "BuiltInStaticOrderingHeuristic";
 constexpr const char* PLUGIN_VERSION = "1.0.0";
-constexpr const char* POLICY_NAME = "SelectionHeuristic::StaticOrdering";
 
 // File-scope logging callback / level, set via the C-ABI-shaped
 // SetLoggingCallback / SetLogLevel below. The backend supplies its own
@@ -71,7 +70,8 @@ hipdnnSeverity_t g_logLevel = HIPDNN_SEV_INFO; // NOLINT(readability-identifier-
 
 int64_t policyId()
 {
-    static const int64_t s_id = hipdnn_data_sdk::utilities::policyNameToId(POLICY_NAME);
+    static const int64_t s_id = hipdnn_data_sdk::utilities::policyNameToId(
+        hipdnn_data_sdk::utilities::STATIC_ORDERING_POLICY_NAME);
     return s_id;
 }
 
@@ -179,7 +179,7 @@ hipdnnPluginStatus_t getPolicyName(int64_t id, const char** name)
         STATIC_ORDERING_LOG(HIPDNN_SEV_ERROR, "getPolicyName: unknown policy ID");
         return HIPDNN_PLUGIN_STATUS_BAD_PARAM;
     }
-    *name = POLICY_NAME;
+    *name = hipdnn_data_sdk::utilities::STATIC_ORDERING_POLICY_NAME;
     return HIPDNN_PLUGIN_STATUS_SUCCESS;
 }
 
