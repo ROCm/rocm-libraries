@@ -204,6 +204,7 @@ from kernels.common.attention_dense_decode import (
     PersistHkvMajor,
     PersistHqMinorSwz,
     PersistQbMajor,
+    PersistXcdLocal,
     fastdiv_kernargs,
     make_fastdiv,
 )
@@ -283,6 +284,9 @@ _PV_LOOP_ORDERS = ("d_major", "k_major")
 _O_STORE_WIDTHS = (1, 2, 4)
 # sched_barrier mask: 11 instruction-class bits (__builtin_amdgcn_sched_barrier).
 _SCHED_BARRIER_MASK_MAX = 0x7FF
+
+
+_GFX942_PERSIST_DECODES = {**PERSIST_DECODES, PersistXcdLocal.name: PersistXcdLocal()}
 
 
 @dataclass(frozen=True)
@@ -511,6 +515,25 @@ class Gfx942AttentionDenseSpec(AttentionDenseSpec):
     #   count for short query lengths over long KV (chunked prefill), where one CTA
     #   per (query block, head) leaves most CUs idle. 1 (default) emits nothing new.
     kv_segments: int = field(default=1, kw_only=True)
+    # qk_lookahead: a software-pipelined tile body that keeps the MFMA pipe and the
+    #   VALU busy together. Pipeline step j carries tile j's scaled scores S(j) and
+    #   runs QK(j+1) under tile j's softmax head (row max, alpha, O rescale, the
+    #   first P packs); PV(j) then carries the remaining P packs, S(j+1)'s scale and
+    #   the K(j+2) DMA. Every MFMA is followed by one fenced chunk of VALU/LDS work,
+    #   sized by an issue-cycle estimate. Two K slots and two V^T slots leave one
+    #   barrier per tile. K rows are XOR-swizzled and read 16 B at a time, Q is
+    #   transposed into the MFMA layout through LDS, and O is stored through LDS as
+    #   whole lines. Needs bf16 D128 top-left causal on the persistent grid with
+    #   the xcd_local decode, block_m 256, block_n 64, lds_num_buffers=2,
+    #   v_reg_prefetch, causal_diag_split, lds_row_pad=0 and the default
+    #   o_store_width; no window, sinks, LSE, paging, KV segments, iglp or PV
+    #   priority/fence. Off by default.
+    qk_lookahead: bool = field(default=False, kw_only=True)
+
+    @classmethod
+    def persist_decode_registry(cls) -> dict:
+        # The shared decodes plus gfx942's own xcd_local.
+        return _GFX942_PERSIST_DECODES
 
     @classmethod
     def supported_persist_decodes(cls) -> frozenset[str]:
@@ -523,6 +546,7 @@ class Gfx942AttentionDenseSpec(AttentionDenseSpec):
                 PersistHkvMajor.name,
                 PersistBtHkvMinor.name,
                 PersistHqMinorSwz.name,
+                PersistXcdLocal.name,
             }
         )
 
@@ -545,6 +569,7 @@ class Gfx942AttentionDenseSpec(AttentionDenseSpec):
                 "v_reg_prefetch must be a bool, got "
                 f"{type(self.v_reg_prefetch).__name__}"
             )
+        require_bool("qk_lookahead", self.qk_lookahead)
 
     def resolved_use_cfvst(self) -> bool:
         """Resolved conflict-free-V decision (``None`` -> :func:`default_use_cfvst`)."""
@@ -792,6 +817,8 @@ def _tuning_name_tags(spec: "Gfx942AttentionDenseSpec") -> str:
         parts.append("lse")
     if spec.kv_segments != 1:
         parts.append(f"kvs{spec.kv_segments}")
+    if spec.qk_lookahead:
+        parts.append("qkla")
     return "".join(f"_{p}" for p in parts)
 
 
@@ -907,14 +934,23 @@ def _pack_p_bf16(b: IRBuilder, elems):
     """
     words = []
     for h in range(0, len(elems), 2):
-        rounded = []
-        for e in elems[h : h + 2]:
-            bits = b.bitcast(e, I32)
-            lsb = b.land(b.lshr(bits, b.const_i32(16)), b.const_i32(1))
-            rounded.append(b.add(b.add(bits, b.const_i32(0x7FFF)), lsb))
-        # Bytes 2-3 of each operand: low half <- first element, high <- second.
-        words.append(b.perm_b32(rounded[0], rounded[1], b.const_i32(0x03020706)))
+        rounded = [_bf16_round_bits(b, e) for e in elems[h : h + 2]]
+        words.append(_bf16_pair_word(b, rounded[0], rounded[1]))
     return b.bitcast(b.vec_pack(words, I32), VectorType(BF16, len(elems)))
+
+
+def _bf16_round_bits(b: IRBuilder, e):
+    """``e`` (finite f32) rounded to bf16, nearest-even, in the high half of an i32:
+    ``bits + 0x7FFF + ((bits >> 16) & 1)``. The low half is discarded."""
+    bits = b.bitcast(e, I32)
+    lsb = b.land(b.lshr(bits, b.const_i32(16)), b.const_i32(1))
+    return b.add(b.add(bits, b.const_i32(0x7FFF)), lsb)
+
+
+def _bf16_pair_word(b: IRBuilder, r0, r1):
+    """One i32 of two bf16: the high halves of two :func:`_bf16_round_bits` results
+    (bytes 2-3 of each operand; low half <- ``r0``, high half <- ``r1``)."""
+    return b.perm_b32(r0, r1, b.const_i32(0x03020706))
 
 
 def _use_kdb(spec: "Gfx942AttentionDenseSpec") -> bool:
@@ -1120,6 +1156,8 @@ def _lds_bytes(spec: "Gfx942AttentionDenseSpec") -> int:
     if spec.resolved_use_cfvst():
         # V transposed to [dim, token+pad] for the conflict-free store (D128).
         v_bytes = spec.head_size * (spec.block_n + spec.resolved_v_row_pad()) * 2
+        if spec.qk_lookahead:
+            v_bytes *= 2  # two V^T slots
     else:
         # V keeps the natural [token, dim] async-DMA layout (D64, naive read).
         v_bytes = spec.block_n * _lds_row_stride(spec) * 2
@@ -1363,6 +1401,54 @@ def supports_attention_dense(
             "causal_diag_split applies only to causal attention without a sliding "
             "window"
         )
+    if spec.qk_lookahead and not (
+        spec.dtype == "bf16"
+        and spec.head_size == 128
+        and spec.block_m == 256
+        and spec.block_n == 64
+        and spec.causal
+        and spec.causal_diag_split
+        and not spec.causal_bottom_right
+        and spec.persistent
+        and _use_kdb(spec)
+        and _use_vpf(spec)
+        and spec.lds_row_pad == 0
+        and spec.resolved_use_cfvst()
+        and spec.resolved_use_v_swizzle()
+        and not spec.sliding_window
+        and not spec.window_wave_skip
+        and not spec.use_sinks
+        and not spec.emit_lse
+        and not spec.paged
+        and spec.kv_segments == 1
+        and not spec.iglp
+        and spec.pv_priority == 0
+        and spec.pv_sched_fence_mask is None
+    ):
+        return False, (
+            "NOT_YET_IMPLEMENTED: qk_lookahead needs bf16 D128 top-left causal on the "
+            "persistent grid with "
+            "block_m 256, block_n 64, lds_num_buffers=2, v_reg_prefetch, "
+            "causal_diag_split, lds_row_pad=0, the cfvst V path with its swizzle, and "
+            "no sliding window, sinks, LSE, paging, KV segments, iglp or PV "
+            "priority/fence"
+        )
+    # qk_lookahead runs only on the xcd_local decode (which is legal without it).
+    if spec.qk_lookahead and not (
+        spec.persistent and spec.resolved_persist_decode == PersistXcdLocal.name
+    ):
+        return False, (
+            f"NOT_YET_IMPLEMENTED: qk_lookahead runs only on the "
+            f"{PersistXcdLocal.name} persistent decode, "
+            f"got persist_decode={spec.persist_decode!r}"
+        )
+    # qk_lookahead stores O through LDS, so the store width is a no-op there;
+    # reject an explicit width rather than silently ignoring it.
+    if spec.qk_lookahead and spec.o_store_width != _DEFAULT_O_STORE_WIDTH:
+        return False, (
+            f"o_store_width={spec.o_store_width} is rejected with qk_lookahead: "
+            f"it stores O through LDS and does not read o_store_width"
+        )
     ok, why = check_kv_segments(spec)
     if not ok:
         return False, why
@@ -1533,6 +1619,10 @@ def _build_attention_dense_single_buffer(
     # name above are the same number by construction (a name/binary mismatch here is
     # what makes the name-keyed launcher cache serve a stale HSACO).
     b.kernel.attrs["waves_per_eu"] = spec.resolved_waves_per_eu()
+    if spec.qk_lookahead:
+        # One LDS alias scope per allocation: a V read or store does not wait
+        # vmcnt(0) on an in-flight K DMA (buffer_load ... lds) into K_lds.
+        b.kernel.attrs["lds_alias_scopes"] = True
 
     q = b.param(
         "q_ptr", PtrType(dtype, "global"), noalias=True, readonly=True, align=16
@@ -1638,6 +1728,10 @@ def _build_attention_dense_single_buffer(
     # whose register budget it was sized for); D64 keeps the generic conversion.
     PACK_P_BF16 = USE_CFVST and spec.dtype == "bf16"
     USE_KDB = _use_kdb(spec)
+    # qk_lookahead: K rows XOR-swizzled in LDS (no row pad) and read 16 B at a
+    # time, Q loaded row-contiguous and transposed through LDS.
+    QKLA = spec.qk_lookahead
+    KSWZ = QKLA
     USE_VPF = _use_vpf(spec)
     USE_PIPELINE = USE_KDB or USE_VPF
     K_BUFS = spec.lds_num_buffers
@@ -1661,7 +1755,7 @@ def _build_attention_dense_single_buffer(
         # the other is the _lds_bytes budget -- and both take it from the same
         # resolver on the same spec, so the budget cannot under-count this allocation.
         V_LDROW = BN + spec.resolved_v_row_pad()
-        V_lds = b.smem_alloc(dtype, [1, D, V_LDROW], name_hint="VldsT")
+        V_lds = b.smem_alloc(dtype, [2 if QKLA else 1, D, V_LDROW], name_hint="VldsT")
         # V^T bank-conflict swizzle (col' = key ^ ((dim & V_SWZ_MASK) << 2)). Whether it
         # is emitted is an independent spec decision (resolved_use_v_swizzle), NOT
         # derived from the row width, so the pad-value sweep cannot silently toggle it;
@@ -1670,6 +1764,16 @@ def _build_attention_dense_single_buffer(
         # in-bounds here. 4 bits (15) saturate the 32-bank field at width 64, 31 at 128.
         SWZ_V = spec.resolved_use_v_swizzle()
         V_SWZ_MASK = V_LDROW // 4 - 1
+
+        def vswz_key(dim):
+            """V^T swizzle key: dim & V_SWZ_MASK. qk_lookahead (two V^T slots, BN64)
+            also XORs in (dim >> 4) & 1, which takes the V(j+1) ds_write_b32 from
+            4-way to 2-way bank conflicts."""
+            m_ = b.land(dim, b.const_i32(V_SWZ_MASK))
+            if QKLA:
+                m_ = b.xor(m_, b.land(b.lshr(dim, b.const_i32(4)), b.const_i32(1)))
+            return m_
+
     else:
         # V keeps the natural [token, dim] async-DMA layout (D64: VGPR-bound, cfvst
         # regresses it -- see default_use_cfvst); read element-wise in read_v. No V^T
@@ -1778,6 +1882,9 @@ def _build_attention_dense_single_buffer(
     else:
         V_TOK_PAIRS = V_DIM_PAIRS = V_BLOCKS = V_ITEMS = 0
 
+    # qk_lookahead: the current read / write V^T slot (V(j) is in slot j % 2).
+    V_SLOT = {"r": None, "w": None}
+
     def _cfvst_store_v(payload):
         """perm_b32 2x2 transpose + contiguous ds_write publishing V_lds[dim, token].
 
@@ -1795,23 +1902,23 @@ def _build_attention_dense_single_buffer(
                 # instead of nesting sub-expressions inside b.shl/b.xor argument lists: a
                 # C++ builder mirror may evaluate call arguments in a different order and
                 # renumber SSA, tripping a parity gate. Same order here = same IR.
-                m0 = b.land(d0, b.const_i32(V_SWZ_MASK))
+                m0 = vswz_key(d0)
                 s0 = b.shl(m0, b.const_i32(2))
                 c0 = b.xor(t0, s0)
-                m1 = b.land(d1, b.const_i32(V_SWZ_MASK))
+                m1 = vswz_key(d1)
                 s1 = b.shl(m1, b.const_i32(2))
                 c1 = b.xor(t0, s1)
             else:
                 c0, c1 = t0, t0
             b.smem_store_vN(
                 V_lds,
-                [b.const_i32(0), d0, c0],
+                [b.const_i32(0) if V_SLOT["w"] is None else V_SLOT["w"], d0, c0],
                 b.bitcast(row_d0, VectorType(dtype, 2)),
                 2,
             )
             b.smem_store_vN(
                 V_lds,
-                [b.const_i32(0), d1, c1],
+                [b.const_i32(0) if V_SLOT["w"] is None else V_SLOT["w"], d1, c1],
                 b.bitcast(row_d1, VectorType(dtype, 2)),
                 2,
             )
@@ -1832,15 +1939,42 @@ def _build_attention_dense_single_buffer(
         belongs there, not on this read.
         naive (D64): element-wise from V_lds[key, dim] (bank-heavy, but D64 is
         VGPR-bound under cfvst, not LDS-read-bound)."""
+        if USE_CFVST and V_SLOT["r"] is not None and SWZ_V:
+            # qkla_vdb: one per-tile base (slot + row lane_m + (d_base ^ swizzle)),
+            # then (kk*8) by XOR (kk*8 and d_base use disjoint bits, so
+            # (kk*8 + d) ^ M == (kk*8) ^ (d ^ M)); dt rows fold into immediates.
+            if V_SLOT.get("rb") is None:
+                m = vswz_key(lane_m)
+                sw = b.shl(m, b.const_i32(2))
+                V_SLOT["rb"] = b.add(
+                    b.add(
+                        b.mul(V_SLOT["r"], b.const_i32(D * V_LDROW)),
+                        b.mul(lane_m, b.const_i32(V_LDROW)),
+                    ),
+                    b.xor(d_base, sw),
+                )
+            vb = V_SLOT["rb"]
+            vx = vb if kk == 0 else b.xor(vb, b.const_i32(kk * 8))
+            e = b.add(vx, b.const_i32(dt * 32 * V_LDROW))
+            return b.smem_load_vN(
+                V_lds, b.const_i32(0), b.const_i32(0), e, dtype=dtype, n=4
+            )
         if USE_CFVST:
             dim_row = b.add(b.const_i32(dt * 32), lane_m)
             key0 = b.add(b.const_i32(kk * 8), d_base)
             col = key0
             if SWZ_V:
-                m = b.land(dim_row, b.const_i32(V_SWZ_MASK))
+                m = vswz_key(dim_row)
                 s = b.shl(m, b.const_i32(2))
                 col = b.xor(key0, s)
-            return b.smem_load_vN(V_lds, b.const_i32(0), dim_row, col, dtype=dtype, n=4)
+            return b.smem_load_vN(
+                V_lds,
+                b.const_i32(0) if V_SLOT["r"] is None else V_SLOT["r"],
+                dim_row,
+                col,
+                dtype=dtype,
+                n=4,
+            )
         dim_col = b.add(b.const_i32(dt * 32), lane_m)
         elems = []
         for j in range(4):
@@ -1909,12 +2043,59 @@ def _build_attention_dense_single_buffer(
         # with the scale.
         q_tok = b.add(q_tok0, lane_m)
         q_packs = []
-        for ks in range(K_STEPS):
-            col = b.add(b.const_i32(ks * 8), d_base)
-            addr = b.add(b.add(q_base, b.mul(q_tok, _stride_q())), col)
-            q_packs.append(b.global_load_vN(q, addr, dtype, 4, align=8))
+        if QKLA:
+            # Row-contiguous Q: lane = (row i*16 + lane/4, 8 dims at quarter p,
+            # chunk lane%4) -> 16 rows x 64 B per load. _stage_q transposes it.
+            q_raw = []
+            q_lrow = b.div(lane, b.const_i32(4))
+            q_lcol = b.mul(b.mod(lane, b.const_i32(4)), b.const_i32(8))
+            for p in range(4):
+                for i in range(2):
+                    row = b.add(b.add(q_tok0, b.const_i32(i * 16)), q_lrow)
+                    col = b.add(b.const_i32(p * 32), q_lcol)
+                    addr = b.add(b.add(q_base, b.mul(row, _stride_q())), col)
+                    q_raw.append(b.global_load_vN(q, addr, dtype, 8, align=16))
+        else:
+            for ks in range(K_STEPS):
+                col = b.add(b.const_i32(ks * 8), d_base)
+                addr = b.add(b.add(q_base, b.mul(q_tok, _stride_q())), col)
+                q_packs.append(b.global_load_vN(q, addr, dtype, 4, align=8))
 
-        def _async_load(rsrc, lds_base, tile_key0, group_pad=False, kbuf=None):
+        def _async_load_rows(rsrc, lds_base, tile_key0, buf_off, kswz, wphys_base=None):
+            """D128 async DMA, one K row per instruction; yields after each row so a
+            caller can spread the issue (tile_interleave). _async_load drains it, so
+            the default emission is op-for-op unchanged. ``wphys_base`` is the
+            wave's paged row base (paged K/V only)."""
+            for r in range(ROWS_PER_WAVE):
+                row = b.add(b.mul(wave, b.const_i32(ROWS_PER_WAVE)), b.const_i32(r))
+                row_lds_off = b.zext(b.mul(row, b.const_i32(K_LDROW_BYTES)), I64)
+                if buf_off is not None:
+                    row_lds_off = b.add(buf_off, row_lds_off)
+                row_base = b.smem_ptr_add(lds_base, row_lds_off)
+                gkey = b.add(tile_key0, row)
+                gcol = b.mul(lane, b.const_i32(2))
+                if wphys_base is not None:
+                    kv_row = paged_kv_row(b, wphys_base, gkey, spec.block_size)
+                else:
+                    kv_row = gkey
+                voff = b.add(b.add(k_base, b.mul(kv_row, _stride_k())), gcol)
+                if kswz:
+                    # Lane writes LDS col 2*lane; fetch the logical col that the
+                    # 16 B-chunk XOR swizzle maps there (XOR is its own inverse).
+                    # Applied to the whole per-tile offset (its row/tile part is a
+                    # multiple of the 128-elem row, so only the lane col changes),
+                    # which keeps one lane base instead of 8 hoisted per-row ones.
+                    km = b.land(row, b.const_i32(7))
+                    ks_ = b.shl(km, b.const_i32(3))
+                    voff = b.xor(voff, ks_)
+                b.async_buffer_load_lds_addr(
+                    rsrc, row_base, b.mul(voff, b.const_i32(2)), zero_soff, 1
+                )
+                yield
+
+        def _async_load(
+            rsrc, lds_base, tile_key0, group_pad=False, kbuf=None, kswz=False
+        ):
             # Only the pipelined K path passes kbuf; the default emission is
             # unchanged (no extra IR operations and the same LDS addresses).
             buf_off = (
@@ -1934,22 +2115,15 @@ def _build_attention_dense_single_buffer(
                     spec.block_size,
                 )
             if ROWS_PER_INSTR == 1:
-                for r in range(ROWS_PER_WAVE):
-                    row = b.add(b.mul(wave, b.const_i32(ROWS_PER_WAVE)), b.const_i32(r))
-                    row_lds_off = b.zext(b.mul(row, b.const_i32(K_LDROW_BYTES)), I64)
-                    if buf_off is not None:
-                        row_lds_off = b.add(buf_off, row_lds_off)
-                    row_base = b.smem_ptr_add(lds_base, row_lds_off)
-                    gkey = b.add(tile_key0, row)
-                    gcol = b.mul(lane, b.const_i32(2))
-                    if spec.paged:
-                        kv_row = paged_kv_row(b, _wphys_base, gkey, spec.block_size)
-                    else:
-                        kv_row = gkey
-                    voff = b.add(b.add(k_base, b.mul(kv_row, _stride_k())), gcol)
-                    b.async_buffer_load_lds_addr(
-                        rsrc, row_base, b.mul(voff, b.const_i32(2)), zero_soff, 1
-                    )
+                for _ in _async_load_rows(
+                    rsrc,
+                    lds_base,
+                    tile_key0,
+                    buf_off,
+                    kswz,
+                    wphys_base=_wphys_base if spec.paged else None,
+                ):
+                    pass
             else:
                 lanes_per_row = D // 2
                 sub_row = b.div(lane, b.const_i32(lanes_per_row))
@@ -2001,7 +2175,13 @@ def _build_attention_dense_single_buffer(
         def load_pipeline_k(kbuf, tile_idx):
             """Issue K(tile_idx) DMA into the selected K LDS slot."""
             tk0 = b.mul(tile_idx, b.const_i32(BN))
-            _async_load(k_rsrc, K_lds_addr, tk0, kbuf=kbuf)
+            _async_load(k_rsrc, K_lds_addr, tk0, kbuf=kbuf, kswz=KSWZ)
+
+        def load_pipeline_k_steps(kbuf, tile_idx):
+            """load_pipeline_k one DMA row per step (D128), for tile_interleave."""
+            tk0 = b.mul(tile_idx, b.const_i32(BN))
+            buf_off = b.zext(b.mul(kbuf, b.const_i32(BN * LDROW * 2)), I64)
+            return _async_load_rows(k_rsrc, K_lds_addr, tk0, buf_off, KSWZ)
 
         def _cfvst_load_v(tile_idx):
             """Issue the cfvst VMEM loads and keep each thread's V tile in VGPRs.
@@ -2035,6 +2215,12 @@ def _build_attention_dense_single_buffer(
             return payload
 
         def _cfvst_load_v_pipeline(tile_idx):
+            values = []
+            for _ in _cfvst_load_v_pipeline_steps(tile_idx, values):
+                pass
+            return values
+
+        def _cfvst_load_v_pipeline_steps(tile_idx, values):
             """Load packed V with one SGPR tile/wave base and a VGPR lane offset.
 
             For BF16 D128 / BN64, V_DIM_PAIRS=64 and
@@ -2059,7 +2245,6 @@ def _build_attention_dense_single_buffer(
             )
             stride_bytes = b.mul(_stride_k(), b.const_i32(2))
             lane_byte = b.mul(lane, b.const_i32(4))
-            values = []
             for it in range(V_ITEMS):
                 soff_it = (
                     soff0
@@ -2074,7 +2259,7 @@ def _build_attention_dense_single_buffer(
                     v_rsrc, lane_byte, b.add(soff_it, stride_bytes), dtype, 2
                 )
                 values.append((b.bitcast(x0, I32), b.bitcast(x1, I32)))
-            return values
+                yield
 
         def do_qk(kbuf=None):
             """S^T = K@Q^T via the 32x32x8 atom (K-doubled)."""
@@ -2302,6 +2487,414 @@ def _build_attention_dense_single_buffer(
                 b.s_setprio(0)
             return m_new, l_new, o_acc
 
+        QK_READ_AHEAD = 3  # qk_lookahead: K ds_reads in flight ahead of their MFMA
+
+        def qk_raw_steps(kbuf, out, preyield=False):
+            """qk_lookahead: unscaled QK chain as a generator that yields after each
+            (K ds_read, MFMA) pair. The two key subtiles alternate, so consecutive
+            MFMAs never depend on each other; each still accumulates ks in order, so
+            the scores match do_qk exactly. One ds_read_b128 per (t, nsub) feeds
+            steps ks = 2t, 2t+1 (the paired-step D map Q is loaded with). With
+            ``preyield`` the first K reads issue before the first yield, ahead of any
+            MFMA. Appends the N_SUB accumulators to ``out`` when exhausted."""
+            accs = [b.zero_vec_f32(16) for _ in range(N_SUB)]
+            order = [(ks, nsub) for ks in range(K_STEPS) for nsub in range(N_SUB)]
+            # One lane base; the swizzle's chunk offset (t % 4) * 16 goes in by XOR.
+            k_h8 = b.mul(lane_h, b.const_i32(8))
+            k_swz = b.shl(b.land(lane_m, b.const_i32(7)), b.const_i32(3))
+            k_a = b.add(b.mul(lane_m, b.const_i32(LDROW)), b.xor(k_h8, k_swz))
+            k_a = b.add(b.mul(kbuf, b.const_i32(BN * LDROW)), k_a)
+            k8s = {}
+
+            def read8(t, nsub):
+                k_x = k_a if t % 4 == 0 else b.xor(k_a, b.const_i32((t % 4) * 16))
+                col = b.add(k_x, b.const_i32(nsub * 32 * LDROW + (t // 4) * 64))
+                return b.smem_load_vN(
+                    K_lds, b.const_i32(0), b.const_i32(0), col, dtype=dtype, n=8
+                )
+
+            def read(i):
+                ks, nsub = order[i]
+                key = (ks // 2, nsub)
+                if ks % 2 == 0:
+                    k8s[key] = read8(*key)
+                return key, ks % 2
+
+            def pack_of(entry):
+                key, half = entry
+                k8 = k8s[key]
+                return b.vec_pack(
+                    [b.vec_extract(k8, half * 4 + i) for i in range(4)], dtype
+                )
+
+            packs = [read(i) for i in range(min(QK_READ_AHEAD, len(order)))]
+            if preyield:
+                yield
+            for i, (ks, nsub) in enumerate(order):
+                if i + QK_READ_AHEAD < len(order):
+                    packs.append(read(i + QK_READ_AHEAD))
+                accs[nsub] = mfma_32x32x8_for_dtype(
+                    b, dtype, pack_of(packs[i]), q_packs[ks], accs[nsub]
+                )
+                yield
+            out.extend(accs)
+
+        # qk_lookahead chunk sizing: estimated VALU issue cycles per unit of work.
+        # They only decide how much work goes after each MFMA; the work is the same.
+        C_MX, C_MSK, C_ALPHA, C_RS = 2, 4, 28, 4  # max, mask, alpha, O rescale (each)
+        C_EXP, C_PACK = 24, 40  # per P exp, per P pack (as costed in Region B)
+        C_VST_B, C_VLD_B = 16, 4  # per V(j+1) store item, per V(j+1) load item
+        N_KDMA = 8  # K DMA rows per wave per tile (D128 / BN64)
+        PA = 2  # P packs 0..PA built in Region B, the rest in PV(j)
+
+        def tile_lookahead(
+            j,
+            m_i,
+            l_i,
+            o_acc,
+            s_sc,
+            qk_next,
+            s_out,
+            masked,
+            make_v_steps,
+            make_k_steps,
+            v_pub,
+        ):
+            """qk_lookahead: pipeline step j from its carried scaled scores ``s_sc``.
+
+            Region B (the 32 QK(j+1) MFMAs from ``qk_next``) carries tile j's head:
+            the row max (and the causal mask on a diagonal tile), alpha, the O
+            rescale and P packs 0..PA, paced evenly over the MFMAs by estimated cost;
+            plus V(j+1)'s global loads and, in its second half, their transposed
+            stores into V^T slot (j+1) % 2. Region PV (the 32 PV(j) MFMAs) carries P
+            packs PA+1.., the row sum, S(j+1)'s scale and the K(j+2) DMA rows, placed
+            by pv_even. Every MFMA heads its own fenced chunk. There is no barrier
+            between the regions: V(j) is in slot j % 2 since the previous end barrier.
+            Returns (m_new, l_new, o_acc, v_next, s_next) with S(j+1) scaled."""
+            exp2 = b.exp2_fast if spec.resolved_use_exp2_fast() else b.exp2
+
+            def fence():
+                # A hard scheduling boundary between chunks.
+                b.sched_barrier(0)
+
+            def lds_after_mfma():
+                # This chunk's region: VALU (addresses, perms), SALU (M0, offsets), the
+                # MFMA, then its LDS and VMEM ops. An LDS op right after an MFMA issues
+                # with no gap; after a VALU op it waits 8 cycles.
+                b.sched_group_barrier(0x002, 64, 0)
+                b.sched_group_barrier(0x004, 32, 0)
+                b.sched_group_barrier(0x008, 1, 0)
+                b.sched_group_barrier(0x080, 16, 0)
+                b.sched_group_barrier(0x010, 8, 0)
+
+            o_acc = list(o_acc)
+            st = {}
+            # This lane half's partial row sum; the halves are added once after the
+            # KV loops (alpha is the same on both halves, so this is exact).
+            l_acc = [b.const_f32(0.0)]
+            vals = []
+            v_steps = make_v_steps(vals)
+            k_steps = make_k_steps()
+
+            def head():
+                """Tile j's head as units of work; yields each unit's estimated cost.
+                A -1 ends the current chunk."""
+                sv = [
+                    [b.vec_extract(s_sc[n], i) for i in range(16)] for n in range(N_SUB)
+                ]
+                mx = neg_inf
+                MSK = masked and causal
+                if MSK:
+                    # do_mask's causal bound, one element at a time (same selects).
+                    tile_key0 = b.mul(j, b.const_i32(BN))
+                    query_tok = b.add(q_tok0, _mfma_32x32_c_col(b, lane, 0))
+                for n in range(N_SUB):
+                    if MSK:
+                        sub_base = b.add(tile_key0, b.const_i32(n * 32))
+                    for i in range(16):
+                        if MSK:
+                            ktok = b.add(sub_base, _mfma_32x32_c_row(b, lane, i))
+                            sv[n][i] = b.select(
+                                b.cmp_le(ktok, query_tok), sv[n][i], neg_inf
+                            )
+                        mx = b.fmax(mx, sv[n][i])
+                        if i % 2 == 1:
+                            # Two elements per unit (one v_max3).
+                            yield 2 * (C_MX + (C_MSK if MSK else 0))
+                # The cross-half ds_bpermute starts its own chunk and its consumer
+                # waits one more, so its LDS round trip sits under MFMAs.
+                yield -1
+                sh_ = b.warp_shuffle_xor(mx, 32)
+                yield -1
+                tile_max = b.fmax(mx, sh_)
+                m_new = b.fmax(m_i, tile_max)
+                alpha = exp2(b.fsub(m_i, m_new))
+                st.update(s=sv, m=m_new, alpha=alpha)
+                yield C_ALPHA
+                o = list(o_acc)
+                for dt in range(D_TILES):
+                    elems = []
+                    for i in range(16):
+                        # Opaque to SLP: plain v_mul_f32. A v_pk_mul_f32 cannot issue
+                        # within NumPasses + 2 issue slots of an XDL MFMA, which every
+                        # chunk of this region follows.
+                        elems.append(
+                            b.optimization_barrier(
+                                b.fmul(b.vec_extract(o[dt], i), alpha)
+                            )
+                        )
+                        yield C_RS
+                    o[dt] = b.vec_pack(elems, F32)
+                st["o"] = o
+                packs = []
+                for kk in range(PA + 1):
+                    # Each stage over the pack's 4 elements before the next stage, so
+                    # no exp result is read right after it issues.
+                    ds = []
+                    for j2 in range(4):
+                        ds.append(
+                            b.optimization_barrier(
+                                b.fsub(sv[kk // 4][(kk % 4) * 4 + j2], st["m"])
+                            )
+                        )
+                        yield 4
+                    ps = []
+                    for j2 in range(4):
+                        ps.append(b.optimization_barrier(exp2(ds[j2])))
+                        yield 16
+                    rr = []
+                    for j2 in range(4):
+                        l_acc[0] = b.fadd(l_acc[0], ps[j2])
+                        yield 4
+                    for j2 in range(4):
+                        rr.append(b.optimization_barrier(_bf16_round_bits(b, ps[j2])))
+                        yield 8
+                    words = []
+                    for h2 in range(2):
+                        words.append(_bf16_pair_word(b, rr[2 * h2], rr[2 * h2 + 1]))
+                        yield 4
+                    packs.append(b.bitcast(b.vec_pack(words, I32), VectorType(BF16, 4)))
+                st["packs"] = packs
+
+            def pv_even():
+                """PV(j) with the rest of the tile's VALU work spread over its MFMAs.
+
+                The work is cut into units (cost, deadline chunk, dependencies): per
+                P element of packs PA+1.. a subtract (4), exp (16), row-sum add (4)
+                and bf16 round (8), per pack half a word (4), and per S(j+1) element
+                its scale (4). Pack pk must be complete in chunk 4 * pk - 1, the one
+                before its first MFMA. Each chunk takes ready units earliest deadline
+                first up to (remaining cost) / (remaining chunks), plus any unit at
+                its deadline; a unit is ready once its dependencies sit in an earlier
+                chunk, so no result is read right after it issues."""
+                o = st["o"]
+                packs = st["packs"] + [None] * (KK_STEPS - PA - 1)
+                n_s = KK_STEPS * D_TILES
+                vr = {0: st.pop("vr0")}
+                next(qk_next, None)  # flush: QK(j+1) finished above
+                s_raw = list(s_out)
+                sv = st["s"]
+                s_flat = [None] * (N_SUB * 16)
+                U = []  # units: dict(cost, dead, deps, fn, slot)
+
+                def add_u(cost, dead, deps, fn):
+                    U.append(
+                        {
+                            "cost": cost,
+                            "dead": dead,
+                            "deps": deps,
+                            "fn": fn,
+                            "slot": None,
+                        }
+                    )
+                    return len(U) - 1
+
+                val = {}
+                for pk in range(PA + 1, KK_STEPS):
+                    dl = D_TILES * pk - 1
+                    rid = []
+                    for j2 in range(4):
+                        key = (pk, j2)
+
+                        def f_sub(key=key):
+                            pk_, j_ = key
+                            val[("d",) + key] = b.optimization_barrier(
+                                b.fsub(sv[pk_ // 4][(pk_ % 4) * 4 + j_], st["m"])
+                            )
+
+                        def f_exp(key=key):
+                            val[("p",) + key] = b.optimization_barrier(
+                                exp2(val[("d",) + key])
+                            )
+
+                        def f_add(key=key):
+                            l_acc[0] = b.fadd(l_acc[0], val[("p",) + key])
+
+                        def f_rnd(key=key):
+                            val[("r",) + key] = b.optimization_barrier(
+                                _bf16_round_bits(b, val[("p",) + key])
+                            )
+
+                        u_sub = add_u(4, dl - 3, [], f_sub)
+                        u_exp = add_u(16, dl - 2, [u_sub], f_exp)
+                        add_u(4, n_s - 1, [u_exp], f_add)
+                        rid.append(add_u(8, dl - 1, [u_exp], f_rnd))
+                    for h2 in range(2):
+
+                        def f_word(pk=pk, h2=h2):
+                            val[("w", pk, h2)] = _bf16_pair_word(
+                                b, val[("r", pk, 2 * h2)], val[("r", pk, 2 * h2 + 1)]
+                            )
+                            if ("w", pk, 1 - h2) in val:
+                                ws = [val[("w", pk, 0)], val[("w", pk, 1)]]
+                                packs[pk] = b.bitcast(
+                                    b.vec_pack(ws, I32), VectorType(BF16, 4)
+                                )
+
+                        add_u(4, dl, [rid[2 * h2], rid[2 * h2 + 1]], f_word)
+                # K(j+2) DMA rows right after PV MFMAs 2, 4, .., 2 * N_KDMA.
+                dma_slots = {2 * r + 2 for r in range(N_KDMA)}
+                for e in range(N_SUB * 16):
+
+                    def f_ssc(e=e):
+                        n, i = divmod(e, 16)
+                        s_flat[e] = b.optimization_barrier(
+                            b.fmul(b.vec_extract(s_raw[n], i), qk_scale)
+                        )
+
+                    add_u(4, n_s - 1, [], f_ssc)
+                for si in range(n_s):
+                    kk, dt = divmod(si, D_TILES)
+                    if packs[kk] is None:
+                        raise AssertionError(f"qk_lookahead: P pack {kk} late")
+                    o[dt] = mfma_32x32x8_for_dtype(
+                        b, dtype, vr[kk][dt], packs[kk], o[dt]
+                    )
+                    gb = False
+                    if dt == 0 and kk + 1 < KK_STEPS:
+                        # V reads for the next pack, one pack ahead.
+                        vr[kk + 1] = [read_v(d, kk + 1) for d in range(D_TILES)]
+                        gb = True
+                    if si in dma_slots:
+                        next(k_steps, None)
+                        gb = True
+                    if gb:
+                        lds_after_mfma()
+                    fence()
+                    rem = sum(u["cost"] for u in U if u["slot"] is None)
+                    cap = rem / (n_s - si)
+                    ready = [
+                        i
+                        for i, u in enumerate(U)
+                        if u["slot"] is None
+                        and all(
+                            U[d]["slot"] is not None and U[d]["slot"] < si
+                            for d in u["deps"]
+                        )
+                    ]
+                    ready.sort(key=lambda i: (U[i]["dead"], i))
+                    took = 0
+                    for i in ready:
+                        u = U[i]
+                        must = u["dead"] <= si
+                        if (
+                            must
+                            or (took < cap and took + u["cost"] / 2 <= cap)
+                            or took == 0
+                        ):
+                            u["fn"]()
+                            u["slot"] = si
+                            took += u["cost"]
+                    fence()
+                left = [i for i, u in enumerate(U) if u["slot"] is None]
+                guard = 0
+                while left and guard < 8:
+                    for i in left:
+                        u = U[i]
+                        if all(U[d]["slot"] is not None for d in u["deps"]):
+                            u["fn"]()
+                            u["slot"] = n_s
+                    left = [i for i, u in enumerate(U) if u["slot"] is None]
+                    guard += 1
+                if left:
+                    raise AssertionError("qk_lookahead: unscheduled PV(j) units")
+                for _ in k_steps:
+                    pass
+                s_next = [
+                    b.vec_pack(s_flat[16 * n : 16 * n + 16], F32) for n in range(N_SUB)
+                ]
+                l_new = b.fadd(b.fmul(l_i, st["alpha"]), l_acc[0])
+                return st["m"], l_new, o, vals, s_next
+
+            # ---- Region B: the head paced over the QK(j+1) MFMAs ----
+            n_b = K_STEPS * N_SUB
+            vst_b = v_pub(vals)
+            tot_b = (
+                (N_SUB * 16 * C_MSK if masked and causal else 0)
+                + N_SUB * 16 * C_MX
+                + C_ALPHA
+                + D_TILES * 16 * C_RS
+                + (PA + 1) * (4 * C_EXP + C_PACK)
+                + V_ITEMS * C_VLD_B
+                + V_ITEMS * C_VST_B
+            )
+            hv = head()
+            done = 0
+            # head() units: max pairs, alpha, rescale elements, pack stages
+            n_units = N_SUB * 8 + 1 + D_TILES * 16 + (PA + 1) * 18
+            used = 0
+            # Tile start: the first K reads, then row-max VALU (S(j) is already in
+            # registers), then MFMA #1.
+            next(qk_next)
+            fence()
+            while done < 32:
+                c = next(hv, None)
+                if c is None or c == -1:
+                    break
+                done += c
+                used += 1
+            fence()
+            VLD_STRIDE = 4  # V(j+1) load item k after QK MFMA 4 * k
+            for i in range(n_b):
+                next(qk_next)
+                vld_here = i % VLD_STRIDE == 0
+                if i >= 1:
+                    # V(j+1) stores (B's second half, after their loads landed) and
+                    # loads join the MFMA's region; pack 0's V reads go out after
+                    # MFMA n_b - 1 so they land before PV(j)'s first MFMA.
+                    if i >= n_b // 2 and next(vst_b, "end") != "end":
+                        done += C_VST_B
+                    if i == n_b - 2:
+                        st["vr0"] = [read_v(dt, 0) for dt in range(D_TILES)]
+                    if vld_here:
+                        vld_here = False
+                        if next(v_steps, "end") != "end":
+                            done += C_VLD_B
+                    lds_after_mfma()
+                fence()  # the MFMA stays at the head of its chunk
+                if vld_here and next(v_steps, "end") != "end":
+                    done += C_VLD_B
+                # At least one unit per chunk, and never so many that fewer units
+                # remain than MFMAs still to cover.
+                first = True
+                while first or (
+                    done < (i + 1) * tot_b / n_b and n_units - used > n_b - i - 1
+                ):
+                    first = False
+                    c = next(hv, None)
+                    if c is None or c == -1:
+                        break
+                    done += c
+                    used += 1
+                fence()
+            for _ in hv:
+                pass
+            for _ in vst_b:
+                pass
+            b.sched_barrier(0)
+            # ---- Region PV ----
+            return pv_even()
+
         def tile_compute(j, carry, masked):
             """Score, mask, online-softmax and PV for one staged tile; returns
             ``(m, l, *O)``."""
@@ -2440,14 +3033,112 @@ def _build_attention_dense_single_buffer(
                     payload.append((d0, t0, x0, x1))
                 _cfvst_store_v(payload)
 
+            def v_store_steps(values):
+                """qk_lookahead: store V(j+1) (``values``, its register payload) into
+                V^T slot V_SLOT["w"], one item per step. Per tile 2 bases (rows d0,
+                d0+1 with slot and swizzle folded in), then each item's token offset
+                it*2*WAVES by XOR (disjoint from wave*2's bits, so
+                (wave*2 + c) ^ s == c ^ (wave*2 ^ s))."""
+                d0 = b.mul(lane, b.const_i32(2))
+                w2 = b.mul(wave, b.const_i32(2))
+                slot_e = b.mul(V_SLOT["w"], b.const_i32(D * V_LDROW))
+                bases = []
+                for r in range(2):
+                    dr = d0 if r == 0 else b.add(d0, b.const_i32(1))
+                    sw = b.shl(vswz_key(dr), b.const_i32(2))
+                    bases.append(
+                        b.add(
+                            b.add(slot_e, b.mul(dr, b.const_i32(V_LDROW))),
+                            b.xor(w2, sw),
+                        )
+                    )
+                for it, (x0, x1) in enumerate(values):
+                    rows = (
+                        b.perm_b32(x0, x1, b.const_i32(0x01000504)),
+                        b.perm_b32(x0, x1, b.const_i32(0x03020706)),
+                    )
+                    c = it * 2 * WAVES
+                    for r in range(2):
+                        e = bases[r] if c == 0 else b.xor(bases[r], b.const_i32(c))
+                        b.smem_store_vN(
+                            V_lds,
+                            [b.const_i32(0), b.const_i32(0), e],
+                            b.bitcast(rows[r], VectorType(dtype, 2)),
+                            2,
+                        )
+                    yield
+
             # Prologue: prepare K[0] and publish V[0]. All waves rendezvous
             # after draining their VMEM and after V's LDS writes complete.
             zero = b.const_i32(0)
             load_pipeline_k(zero, zero)
+            if QKLA:
+                # K[1] -> slot 1 (clamped); QK(0) runs here, S(0) is carried.
+                la_last = b.sub(n_up, b.const_i32(1))
+                one = b.const_i32(1)
+                load_pipeline_k(one, b.smin(one, la_last))
             v0 = _cfvst_load_v_pipeline(zero)
             b.s_waitcnt(vmcnt=0)
-            publish_prefetched_v(v0)
-            b.sync_lds_only()
+            if QKLA:
+                # Transpose Q into the MFMA layout through V^T slot 1, which is free
+                # until V(1) is stored in tile 0. Paired b128 layout: lane (row
+                # lane_m, half h) needs dims 16t + 8h .. +7 for t = 0..7. Per quarter
+                # p (t = 2p, 2p+1) the 64 B row holds four 16 B chunks, XORed with
+                # (row >> 1) & 3 so the ds_read_b128 (8 lanes = 8 rows per pass)
+                # hits 8 distinct slots.
+                q_base_e = b.mul(wave, b.const_i32(1024))
+                q_base_e = b.add(q_base_e, b.const_i32(D * V_LDROW))
+                q_lrow = b.div(lane, b.const_i32(4))
+                q_lc = b.mod(lane, b.const_i32(4))
+                r_sw = b.land(b.lshr(lane_m, b.const_i32(1)), b.const_i32(3))
+                for p in range(4):
+                    for i in range(2):
+                        row = b.add(b.const_i32(i * 16), q_lrow)
+                        w_sw = b.land(b.lshr(row, b.const_i32(1)), b.const_i32(3))
+                        e = b.add(
+                            b.add(q_base_e, b.mul(row, b.const_i32(32))),
+                            b.mul(b.xor(q_lc, w_sw), b.const_i32(8)),
+                        )
+                        b.smem_store_vN(
+                            V_lds,
+                            [b.const_i32(0), b.const_i32(0), e],
+                            q_raw[p * 2 + i],
+                            8,
+                        )
+                    for tt in range(2):
+                        ch = b.xor(b.add(b.const_i32(tt * 2), lane_h), r_sw)
+                        e = b.add(
+                            b.add(q_base_e, b.mul(lane_m, b.const_i32(32))),
+                            b.mul(ch, b.const_i32(8)),
+                        )
+                        v8 = b.smem_load_vN(
+                            V_lds, b.const_i32(0), b.const_i32(0), e, dtype=dtype, n=8
+                        )
+                        for half in range(2):
+                            q_packs.append(
+                                b.vec_pack(
+                                    [b.vec_extract(v8, half * 4 + k) for k in range(4)],
+                                    dtype,
+                                )
+                            )
+                publish_prefetched_v(v0)  # V(0) -> slot 0
+                b.sync_lds_only()
+                s_acc0 = []
+                for _ in qk_raw_steps(zero, s_acc0):
+                    pass
+                # S is carried already scaled.
+                s_acc0 = [
+                    b.vec_pack(
+                        [b.fmul(b.vec_extract(a, i), qk_scale) for i in range(16)], F32
+                    )
+                    for a in s_acc0
+                ]
+                iter_args = iter_args + [
+                    (f"sa{nsub}", s_acc0[nsub]) for nsub in range(N_SUB)
+                ]
+            else:
+                publish_prefetched_v(v0)
+                b.sync_lds_only()
 
             # Main loop deliberately excludes the final KV tile. n_up=1 makes
             # this a zero-trip loop; its prologue and epilogue still execute.
@@ -2466,6 +3157,40 @@ def _build_attention_dense_single_buffer(
                 # or the preceding iteration. With one K slot, do not overwrite
                 # it until *all* waves have completed current-tile LDS reads.
                 kbuf = b.mod(j, b.const_i32(K_BUFS))
+                if QKLA:
+                    # S(j) arrives in the carry. QK(j+1) reads K slot (j+1) % 2 (its
+                    # DMA landed before the previous end barrier); K(j+2) (clamped: a
+                    # harmless reload into the idle slot) goes to slot j % 2, last
+                    # read by QK(j) in the previous step. PV(j) reads V^T slot j % 2;
+                    # V(j+1) goes to slot (j+1) % 2, whose last readers (PV(j-1)) are
+                    # past the previous end barrier. The end barrier below publishes
+                    # both.
+                    s_acc = list(carry[2 + D_TILES : 2 + D_TILES + N_SUB])
+                    next_j = b.add(j, b.const_i32(1))
+                    next_kbuf = b.mod(next_j, b.const_i32(K_BUFS))
+                    s_next = []
+                    k2 = b.smin(b.add(j, b.const_i32(2)), last_j)
+                    V_SLOT["r"] = b.mod(j, b.const_i32(2))
+                    V_SLOT["w"] = b.mod(next_j, b.const_i32(2))
+                    V_SLOT["rb"] = None
+                    m_new, l_new, o_acc, _, s_next = tile_lookahead(
+                        j,
+                        m_i,
+                        l_i,
+                        o_acc,
+                        s_acc,
+                        qk_raw_steps(next_kbuf, s_next, preyield=True),
+                        s_next,
+                        masked,
+                        lambda vals: _cfvst_load_v_pipeline_steps(next_j, vals),
+                        lambda: load_pipeline_k_steps(kbuf, k2),
+                        v_store_steps,
+                    )
+                    V_SLOT["r"] = V_SLOT["w"] = V_SLOT["rb"] = None
+                    b.s_waitcnt(vmcnt=0)
+                    b.sync_lds_only()
+                    b.scf_yield(m_new, l_new, *o_acc, *s_next)
+                    return
                 s = do_qk(kbuf)
                 next_j = b.add(j, b.const_i32(1))
                 next_kbuf = b.mod(next_j, b.const_i32(K_BUFS))
@@ -2547,10 +3272,25 @@ def _build_attention_dense_single_buffer(
             loop_res = loop.results
             m_i = loop_res[0]
             l_i = loop_res[1]
+            if QKLA:
+                # The loops kept each lane half's partial row sum; add the halves.
+                l_i = b.fadd(l_i, b.warp_shuffle_xor(l_i, 32))
             o_acc = list(loop_res[2 : 2 + D_TILES])
             last_kbuf = b.mod(last_j, b.const_i32(K_BUFS))
-            s = do_qk(last_kbuf)
+            if QKLA:
+                # The last tile's S was computed (and scaled) by the last step;
+                # its V is in slot last_j % 2.
+                sbase = 2 + D_TILES
+                s = [
+                    [b.vec_extract(acc, i) for i in range(16)]
+                    for acc in loop_res[sbase : sbase + N_SUB]
+                ]
+                V_SLOT["r"] = b.mod(last_j, b.const_i32(2))
+                V_SLOT["rb"] = None
+            else:
+                s = do_qk(last_kbuf)
             m_i, l_i, o_acc = softmax_pv(s, last_j, m_i, l_i, o_acc, True)
+            V_SLOT["r"] = V_SLOT["rb"] = None
             b.sync_lds_only()
 
         elif causal and not SW and DIAG_SPLIT:
@@ -2738,6 +3478,75 @@ def _build_attention_dense_single_buffer(
             # Both half-waves hold the same query row; one of them writes its LSE.
             with b.scf_if(b.cmp_eq(lane_h, b.const_i32(0))):
                 lse_store(b, lse, lse_index, m_i, l_i, row_has_mass=row_has_mass)
+        if QKLA:
+            # All waves past their last V/K reads and K DMAs, then O goes through
+            # the K buffer: per wave 32 rows x 64 dims per half, 8 B chunks XORed
+            # with row & 15; read back row-contiguous, 16 B per lane (whole 128 B
+            # lines). qk_lookahead is top-left causal without a window, so every
+            # query row sees key 0 and row_has_key is always true here.
+            b.s_waitcnt(vmcnt=0)
+            b.sync_lds_only()
+            o_base_e = b.mul(wave, b.const_i32(2048))
+            # Opaque lane: the staging addresses are computed here, after the
+            # loops, instead of being CSE'd with pre-loop values and kept live.
+            lane_o = b.optimization_barrier(lane)
+            rr = _mfma_32x32_c_col(b, lane_o, 0)
+            lane_ho = b.div(lane_o, b.const_i32(32))
+            w_sw = b.land(rr, b.const_i32(15))
+            o_lrow = b.div(lane_o, b.const_i32(8))
+            o_lk = b.mod(lane_o, b.const_i32(8))
+            o_lk2 = b.mul(o_lk, b.const_i32(2))
+            for hf in range(2):
+                for dtl in range(2):
+                    dt = hf * 2 + dtl
+                    for g in range(4):
+                        vals = [
+                            b.cast_f32_to(
+                                b.fmul(b.vec_extract(o_acc[dt], g * 4 + kk), rcp_l),
+                                dtype,
+                            )
+                            for kk in range(4)
+                        ]
+                        ch = b.xor(b.add(b.const_i32(dtl * 8 + g * 2), lane_ho), w_sw)
+                        e = b.add(
+                            b.add(o_base_e, b.mul(rr, b.const_i32(64))),
+                            b.mul(ch, b.const_i32(4)),
+                        )
+                        b.smem_store_vN(
+                            K_lds,
+                            [b.const_i32(0), b.const_i32(0), e],
+                            b.vec_pack(vals, dtype),
+                            4,
+                        )
+                for i in range(4):
+                    row = b.add(b.const_i32(i * 8), o_lrow)
+                    r_sw = b.land(row, b.const_i32(15))
+                    halves = []
+                    for hh in range(2):
+                        ch = b.xor(b.add(o_lk2, b.const_i32(hh)), r_sw)
+                        e = b.add(
+                            b.add(o_base_e, b.mul(row, b.const_i32(64))),
+                            b.mul(ch, b.const_i32(4)),
+                        )
+                        halves.append(
+                            b.smem_load_vN(
+                                K_lds,
+                                b.const_i32(0),
+                                b.const_i32(0),
+                                e,
+                                dtype=dtype,
+                                n=4,
+                            )
+                        )
+                    v8 = b.vec_pack(
+                        [b.vec_extract(halves[t // 4], t % 4) for t in range(8)], dtype
+                    )
+                    addr = b.add(
+                        b.add(o_base, b.mul(b.add(q_tok0, row), _stride_q())),
+                        b.add(b.const_i32(hf * 64), b.mul(o_lk, b.const_i32(8))),
+                    )
+                    b.global_store_vN(o, addr, v8, 8, align=16)
+            return
         _emit_o_store(
             b,
             o,
@@ -2793,11 +3602,10 @@ def _build_attention_dense_single_buffer(
             # barrier suffices because there is no pending lgkm to sink here.
             b.s_waitcnt(vmcnt=0)
             b.s_barrier_bare()
-            d = PERSIST_DECODES[spec.resolved_persist_decode].emit_decode(
-                work_shape, wi
-            )
-            # The kv head from the decode where it is a digit, else hq // gqa through
-            # the gqa fastdiv pair: no runtime division in the grid-stride loop.
+            decode = spec.persist_decode_registry()[spec.resolved_persist_decode]
+            d = decode.emit_decode(work_shape, wi)
+            # The kv head from the decode where it is a digit, else hq // gqa
+            # through the gqa fastdiv pair: no runtime division in the loop.
             hkv_v = d.hkv if d.hkv is not None else work_shape.div(d.hq, "gqa")
             _run_work_item(d.qb, d.hq, d.bt, hkv=hkv_v)
     elif KVS > 1:

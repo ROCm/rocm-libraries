@@ -292,7 +292,9 @@ _GFX950_DENSE_AXES: Tuple[KnobAxis, ...] = (
 # policy reads persistent, v_row_pad policy reads
 # block_n, a non-derived v_row_pad needs the swizzle off, interleave is read
 # only on the resolved qb_major decode, nonpersist_decode only on the
-# non-persistent grid, and iglp_mode / the PV fence follow iglp.
+# non-persistent grid, iglp_mode / the PV fence follow iglp, and qk_lookahead
+# comes last: it needs KDB, VPF, the diagonal split, lds_row_pad 0, block_m 256
+# and the xcd_local persist_decode.
 _GFX942_DENSE_AXES: Tuple[KnobAxis, ...] = (
     _values("use_cfvst", None, (True, False), enabler=True),
     _values("lds_row_pad", 8, _GFX942_LDS_ROW_PADS, enabler=True),
@@ -305,7 +307,7 @@ _GFX942_DENSE_AXES: Tuple[KnobAxis, ...] = (
     _num_persistent_axis(_GFX942_NUM_PERSISTENT_POLICIES),
     _decode_axis(
         "persist_decode",
-        PERSIST_DECODES,
+        Gfx942AttentionDenseSpec.persist_decode_registry(),
         Gfx942AttentionDenseSpec.supported_persist_decodes(),
     ),
     _flag("interleave"),
@@ -326,6 +328,7 @@ _GFX942_DENSE_AXES: Tuple[KnobAxis, ...] = (
     _values("causal_diag_split", False, (True,)),
     _values("kv_segments", 1, _DENSE_KV_SEGMENTS),
     _values("window_wave_skip", False, (True,)),
+    _values("qk_lookahead", False, (True,)),
 )
 
 # RDNA WMMA (gfx11/gfx12) prefill (``WmmaFmhaFwdV2Spec``) fields the space never

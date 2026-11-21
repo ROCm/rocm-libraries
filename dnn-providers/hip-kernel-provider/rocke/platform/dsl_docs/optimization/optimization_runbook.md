@@ -2630,6 +2630,16 @@ An optimization is done when:
   only and prefetch next-tile V into registers (`lds_num_buffers=2`,
   `v_reg_prefetch=True`). Each is independent; see the
   [gfx942 bf16 D128 case study](../../../library/builders/gfx942/attention/prefill/gfx942_dense_cfvst_kdb_vprefetch_case_study.md).
+- If the MFMA pipe idles during softmax and the VALU idles during QK and
+  PV even with K/V latency hidden, pipeline one tile deep: issue QK of
+  the next tile under the current tile's softmax, and follow each MFMA
+  with one chunk of independent VALU/LDS work so no two MFMAs issue back
+  to back (`qk_lookahead` on gfx942 bf16 D128). A deeper pipeline needs
+  more LDS slots; with two K and two V^T slots it keeps one barrier per
+  tile. It runs on a persistent decode that keeps each kv head's work on
+  one XCD and hands out the longest causal query blocks first
+  (`xcd_local`); see the
+  [gfx942 QK lookahead case study](../../../library/builders/gfx942/attention/prefill/gfx942_dense_qk_lookahead_case_study.md).
 - If the HIP-debug backend disagrees with LLVM-direct on a kernel,
   one of the two is missing an op lowering — file the issue,
   don't ignore it.

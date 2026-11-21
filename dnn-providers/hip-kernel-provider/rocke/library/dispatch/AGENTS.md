@@ -202,8 +202,12 @@ spec. The gfx942 dense knobs include the K and V row pads, the D64 K group
 pad, conflict-free V store (`use_cfvst`) and its swizzle, K LDS buffering
 (`lds_num_buffers`), V register prefetch (`v_reg_prefetch`), the persistent
 and non-persistent block orders, exp2, `iglp` / `iglp_mode`, the PV fence
-mask, `pv_priority`, `pv_loop_order`, the bf16 O store width, and
-`causal_diag_split`. LDS-saving and prerequisite axes lead as enablers so
+mask, `pv_priority`, `pv_loop_order`, the bf16 O store width,
+`causal_diag_split`, and `qk_lookahead`. The `persist_decode` axis takes its
+values from the gfx942 spec's own registry
+(`Gfx942AttentionDenseSpec.persist_decode_registry()`), which adds the
+gfx942-only `xcd_local` decode to the shared ones. LDS-saving and
+prerequisite axes lead as enablers so
 an otherwise invalid configuration can become valid before later knobs
 are considered. Only `lazy_rescale` is untunable on gfx942, because the
 kernel body does not read it.
@@ -229,14 +233,39 @@ default or make the opt-in dense candidate an automatic dispatch winner.
 Bare `tuning_id` replay searches production points only; replay a
 full-space-only combination with its recorded knob dictionary.
 
-**Tuning-id migration for `gfx942_dense`.** Adding the defaulted
-`v_reg_prefetch` field changes the defaults fingerprint in `config_key`, so
-every `gfx942_dense` `tuning_id` recorded before it is rekeyed: replaying one
-raises `PinRefused` instead of rebuilding a different kernel. No such id is
-stored in this tree. A downstream tuning store must drop its old
-`gfx942_dense` ids and re-sweep. `TUNING_ID_VERSION` is not bumped: the
-defaults fingerprint already separates the old and new ids, and
-`lds_num_buffers` was untunable on gfx942 before, so no stored id names it.
+`qk_lookahead=True` is the software-pipelined tile body (QK of the next tile
+under the current tile's softmax, one LDS barrier per tile). It needs BF16 D128
+top-left causal on the persistent grid with `block_m=256`, `block_n=64`,
+`lds_num_buffers=2`, `v_reg_prefetch=True`, `causal_diag_split=True`,
+`lds_row_pad=0`, the CFVST V path with its swizzle and
+`persist_decode="xcd_local"`. It refuses windows, sinks, LSE, paging, KV
+segments, iglp and the PV priority/fence knobs (`NOT_YET_IMPLEMENTED:` in the
+kernel's validator), and it rejects a non-default `o_store_width`, because it
+stores O through LDS and never reads that field. Setting it does not turn the
+prerequisites on. It has no candidate of its own and the `gfx942_dense`
+defaults are unchanged. Like the triple combination above, it is more than the
+one prerequisite a production point pairs, so it is reached through an
+explicit seven-knob pin on `gfx942_dense` (`qk_lookahead`, `block_m=256`,
+`lds_num_buffers=2`, `v_reg_prefetch`, `causal_diag_split`, `lds_row_pad=0`,
+`persist_decode="xcd_local"`) or through the full tuning space.
+`use_exp2_fast` and `pv_loop_order` stay free under it.
+
+`xcd_local` is a gfx942-only persistent decode: XCD-local load balance at 304
+CTAs over 8 XCDs, Hq 32 and Hkv 8 or 16. It is not in the shared
+`PERSIST_DECODES`, so the shared spec and gfx950 never accept it. Its IR (with
+and without `qk_lookahead`) is in the gfx942 golden and the C++/Python
+byte-identity check (`tests/test_attention_ir_cpp_parity.py`). The restriction is one-way: `qk_lookahead` requires `xcd_local`, and
+`xcd_local` is legal without `qk_lookahead`.
+
+**Tuning-id migration for `gfx942_dense`.** Adding a defaulted field
+(`v_reg_prefetch`, then `qk_lookahead`) changes the defaults fingerprint in
+`config_key`, so every `gfx942_dense` `tuning_id` recorded before it is
+rekeyed: replaying one raises `PinRefused` instead of rebuilding a different
+kernel. No such id is stored in this tree. A downstream tuning store must drop
+its old `gfx942_dense` ids and re-sweep. `TUNING_ID_VERSION` is not bumped:
+the defaults fingerprint already separates the old and new ids, and no stored
+id can name a knob that was untunable (`lds_num_buffers`) or did not exist
+(`qk_lookahead`) when it was recorded.
 
 **Tuning-id migration for gfx950 2D fp8 K and the zero-width KQ pad.** Two
 gfx950 2D changes touch stored ids; no such id is stored in this tree.

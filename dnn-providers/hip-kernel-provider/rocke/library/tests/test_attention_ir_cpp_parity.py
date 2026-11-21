@@ -199,16 +199,18 @@ def test_attention_ir_cpp_python_byte_identity():
         )
 
     # Opt-in K LDS double buffering / V register prefetch (bf16 D128 persistent
-    # CFVST): the gfx942 golden's pipeline cases, which the harness and the LSE
-    # cases above build with both levers off.
+    # CFVST), the QK-lookahead body and the xcd_local decode: the gfx942 golden's
+    # pipeline cases, which the harness and the LSE cases above build with every
+    # lever off.
     import test_attention_dense_gfx942_golden as gfx942_golden
 
     pipeline = {
         cid: build
         for cid, build in gfx942_golden._cases().items()
-        if "_kdb" in cid or "_vpf" in cid
+        if "_kdb" in cid or "_vpf" in cid or "_xcdlocal" in cid
     }
     assert pipeline, "gfx942 golden declares no KDB/VPF cases"
+    assert any("_qkla" in cid for cid in pipeline), "no qk_lookahead case"
     for cid, build in pipeline.items():
         cases.append(
             {

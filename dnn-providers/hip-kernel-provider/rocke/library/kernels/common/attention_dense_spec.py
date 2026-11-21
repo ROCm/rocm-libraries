@@ -145,6 +145,13 @@ class AttentionDenseSpec:
     chiplet_num_xcds: int = field(default=8, kw_only=True)
 
     @classmethod
+    def persist_decode_registry(cls) -> dict:
+        """``persist_decode`` name -> decode object, for every lookup the spec and
+        the body make. The shared :data:`PERSIST_DECODES`; an arch with a decode of
+        its own extends it."""
+        return PERSIST_DECODES
+
+    @classmethod
     def supported_persist_decodes(cls) -> frozenset[str]:
         """``persist_decode`` values the concrete kernel type can emit. The shared
         spec accepts every known decode; each arch's spec lists its own."""
@@ -261,7 +268,7 @@ class AttentionDenseSpec:
                     f"num_persistent must be positive, got {self.num_persistent}"
                 )
             if self.persist_decode != "auto":
-                why = PERSIST_DECODES[self.persist_decode].check(self)
+                why = self.persist_decode_registry()[self.persist_decode].check(self)
                 if why:
                     raise ValueError(why)
         elif self.nonpersist_decode != "auto":
@@ -489,7 +496,9 @@ class AttentionDenseSpec:
         grid (``attention_dense_cache_key``)."""
         if not (self.persistent and self.runtime_shape):
             return ()
-        return PERSIST_DECODES[self.resolved_persist_decode].fastdiv_divisors
+        return self.persist_decode_registry()[
+            self.resolved_persist_decode
+        ].fastdiv_divisors
 
     @property
     def runtime_kernarg_fields(self) -> tuple[str, ...]:
@@ -530,7 +539,7 @@ class AttentionDenseSpec:
         return ()
 
     def _persist_decode_name_part(self) -> str:
-        return PERSIST_DECODES[self.resolved_persist_decode].tag
+        return self.persist_decode_registry()[self.resolved_persist_decode].tag
 
     def kernel_name(self) -> str:
         parts = [

@@ -107,6 +107,23 @@ def _lds_pool_bytes(spec) -> int:
 # live) and a block_m variant (the footprint is block_m-invariant; that invariance is
 # itself worth pinning, since a builder that started sizing LDS from block_m would
 # silently escape the budget check).
+# The qk_lookahead scope on the _spec() base: BF16 D128 persistent KDB + VPF + diag
+# split, K row pad 0, on the xcd_local decode (NP 304, Hq 32, Hkv 8).
+_QKLA = dict(
+    use_cfvst=True,
+    persistent=True,
+    num_persistent=304,
+    persist_decode="xcd_local",
+    num_query_heads=32,
+    num_kv_heads=8,
+    block_m=256,
+    lds_num_buffers=2,
+    v_reg_prefetch=True,
+    causal_diag_split=True,
+    lds_row_pad=0,
+    qk_lookahead=True,
+)
+
 _TUNING_VARIANTS = (
     dict(),
     dict(lds_row_pad=0),
@@ -122,6 +139,8 @@ _TUNING_VARIANTS = (
     dict(use_cfvst=True, persistent=True, lds_num_buffers=2),
     dict(use_cfvst=True, persistent=True, v_reg_prefetch=True),
     dict(use_cfvst=True, persistent=True, lds_num_buffers=2, v_reg_prefetch=True),
+    # qk_lookahead (two K and two V^T slots), in its scope on the xcd_local decode.
+    dict(_QKLA),
     dict(use_cfvst=False, v_row_pad=32),
     dict(block_m=128),
 )
@@ -235,6 +254,9 @@ def test_cohort_is_not_vacuous():
         and sp.block_n == 64
         for sp in specs
     ), "cohort must exercise the combined KDB + VPF pipeline"
+    assert any(
+        sp.qk_lookahead and sp.dtype == "bf16" and sp.head_size == 128 for sp in specs
+    ), "cohort must exercise the qk_lookahead two-V^T-slot allocation"
     assert {s.lds_row_pad for s in specs} > {_DEFAULT_LDS_ROW_PAD}
     # v_row_pad is tri-state: None ("ask the policy") is its shipped default.
     assert {s.v_row_pad for s in specs} > {None}
@@ -366,3 +388,20 @@ def test_bf16_d128_kdb_and_vpf_have_independent_lds_footprints():
     assert _lds_pool_bytes(both) - _lds_pool_bytes(vpf) == extra_k_slot
     assert _lds_pool_bytes(vpf) == _lds_pool_bytes(cfvst)
     assert _lds_pool_bytes(both) == _lds_pool_bytes(kdb)
+
+
+def test_qk_lookahead_adds_one_v_slot_over_kdb_vpf():
+    """qk_lookahead keeps KDB's two K slots and adds a second V^T slot: exactly one
+    V^T slot over the same KDB + VPF spec without it, filling the 64 KiB LDS."""
+    qkla = _spec(dtype="bf16", head_size=128, block_n=64, **_QKLA)
+    kdbvpf = dataclasses.replace(
+        qkla, qk_lookahead=False, persist_decode="bt_hkv_minor"
+    )
+    for spec in (qkla, kdbvpf):
+        ok, why = supports_attention_dense(spec, arch="gfx942")
+        assert ok, why
+    k_slot = 64 * (128 + 0) * 2  # block_n rows of D + lds_row_pad 0, bf16
+    v_slot = 128 * (64 + qkla.resolved_v_row_pad()) * 2  # D rows of block_n + pad
+    assert _lds_bytes(kdbvpf) == _lds_pool_bytes(kdbvpf) == 2 * k_slot + v_slot
+    assert _lds_bytes(qkla) == _lds_pool_bytes(qkla) == 2 * k_slot + 2 * v_slot
+    assert _lds_bytes(qkla) == 64 * 1024
