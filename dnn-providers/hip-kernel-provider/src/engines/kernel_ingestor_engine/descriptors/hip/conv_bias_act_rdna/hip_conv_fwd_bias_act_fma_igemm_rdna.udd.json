@@ -1,0 +1,6 @@
+{
+  "version": "1.0",
+  "id": "1aa29ab7-533e-4a7d-8ec5-e438c6c00cd3",
+  "name": "hip_conv_fwd_bias_act_fma_igemm_rdna dispatch",
+  "dispatch_symbol": "hipkernel.hip_conv_fwd_bias_act_fma_igemm_rdna.dispatch"
+}
