@@ -34,6 +34,7 @@
 
 #include "rocsparse_csritilu0x_buffer_size.hpp"
 #include "rocsparse_csritilu0x_compute.hpp"
+#include "rocsparse_csritilu0x_history.hpp"
 #include "rocsparse_csritilu0x_preprocess.hpp"
 
 #include <algorithm>
@@ -328,14 +329,14 @@ namespace
         const std::vector<T> u0 = gather(a.val, split.upos);
         const std::vector<T> d0 = gather(a.val, split.dpos);
 
-        device_vector<I> dptr{std::vector<I>(a.ptr.begin(), a.ptr.end())};
-        device_vector<J> dind{std::vector<J>(a.ind.begin(), a.ind.end())};
+        device_vector<I> dptr{as_rocsparse_int(a.ptr)};
+        device_vector<J> dind{as_rocsparse_int(a.ind)};
         device_vector<T> dval{a.val};
-        device_vector<I> dlptr{split.lptr};
-        device_vector<J> dlind{split.lind};
+        device_vector<I> dlptr{as_rocsparse_int(split.lptr)};
+        device_vector<J> dlind{as_rocsparse_int(split.lind)};
         device_vector<T> dlval{l0};
-        device_vector<I> duptr{split.uptr};
-        device_vector<J> duind{split.uind};
+        device_vector<I> duptr{as_rocsparse_int(split.uptr)};
+        device_vector<J> duind{as_rocsparse_int(split.uind)};
         device_vector<T> duval{u0};
         device_vector<T> ddval{d0};
         ASSERT_TRUE(dptr.ptr && dind.ptr && dval.ptr && dlptr.ptr && dlind.ptr && dlval.ptr
@@ -456,6 +457,26 @@ namespace
                 at        = log_text.find("residual", at + 1))
                 ++headers;
             EXPECT_EQ(headers, static_cast<size_t>(nsweeps));
+        }
+
+        if((opt.options & rocsparse_itilu0_option_convergence_history) != 0)
+        {
+            // The history reports the sweep count. Without a norm option nothing is
+            // logged, so the history array keeps its content.
+            rocsparse_int           niter = -1;
+            std::vector<real_of<T>> hist(2 * static_cast<size_t>(opt.nmaxiter), real_of<T>(-1));
+            ASSERT_EQ((rocsparse::csritilu0x_history_template<real_of<T>, J>(
+                          handle, alg, &niter, hist.data(), buffer_size, buffer.ptr)),
+                      rocsparse_status_success);
+            EXPECT_EQ(niter, nsweeps);
+            if((opt.options
+                & (rocsparse_itilu0_option_compute_nrm_residual
+                   | rocsparse_itilu0_option_compute_nrm_correction))
+               == 0)
+            {
+                for(size_t i = 0; i < hist.size(); ++i)
+                    EXPECT_EQ(hist[i], real_of<T>(-1)) << "history[" << i << "]";
+            }
         }
 
         const std::vector<T> ref = host_ilu0(a);
@@ -1517,4 +1538,21 @@ TEST_F(PrecondItilu0, extended_interface_with_the_unimplemented_algorithms)
                                                                     nullptr)),
                   rocsparse_status_success);
     }
+}
+
+TEST_F(PrecondItilu0, x_async_split_without_residual_norm)
+{
+    x_options opt; // 80 sweeps
+    opt.options = 0;
+    check_async_split_x<double>(handle, make_band_matrix<double>(48, 3), opt, "no options");
+    check_async_split_x<float>(handle, make_band_matrix<float>(48, 2), opt, "no options float");
+    check_async_split_x<double>(handle, make_band_matrix<double>(100, 100), opt, "dense");
+
+    opt.nfreeiter = 2;
+    check_async_split_x<double>(handle, make_band_matrix<double>(48, 2), opt, "free sweeps");
+
+    // The history option without the residual norm has nothing to log.
+    opt.nfreeiter = 0;
+    opt.options   = rocsparse_itilu0_option_convergence_history;
+    check_async_split_x<double>(handle, make_band_matrix<double>(48, 3), opt, "history");
 }

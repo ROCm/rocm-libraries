@@ -88,7 +88,7 @@ _REJECTIONS = [
     # siblings, and the allow-list is what holds that line.
     ("dtype_fp8", dict(dtype="fp8"), ["'fp8'"], _ARCH),
     ("dtype_int8", dict(dtype="int8"), ["'int8'"], _ARCH),
-    ("dtype_fp32", dict(dtype="fp32"), ["'fp32'"], _ARCH),
+    ("dtype_fp64", dict(dtype="fp64"), ["'fp64'"], _ARCH),
     ("dtype_empty", dict(dtype=""), ["''"], _ARCH),
     ("dtype_none", dict(dtype=None), ["None"], _ARCH),
     # --- block geometry ----------------------------------------------------
@@ -208,7 +208,7 @@ def test_col_rejection_reasons_are_distinct():
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("dtype", ["fp16", "bf16"])
+@pytest.mark.parametrize("dtype", ["fp16", "bf16", "fp32", "tf32"])
 @pytest.mark.parametrize("stride", [1, 2, 3])
 def test_col_spec_accepted_across_dtype_and_stride(dtype, stride):
     spec = _spec(dtype=dtype, stride=stride)

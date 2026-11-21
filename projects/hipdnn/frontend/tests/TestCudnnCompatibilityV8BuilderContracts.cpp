@@ -466,6 +466,7 @@ TEST_F(TestCudnnCompatibilityV8BuilderContracts, DeterministicFilterKeepsOnlyCla
 {
     const std::int64_t deterministic = hipdnn_data_sdk::utilities::MIOPEN_ENGINE_DETERMINISTIC_ID;
     installHeuristicResults({deterministic + 3, deterministic, -4, deterministic + 1, 0});
+    installNumericalNotes(deterministic, {});
     fe::OperationGraph_v8 graph = convGraph();
     fe::EngineConfigList candidates = engineConfigs(graph);
     ASSERT_EQ(candidates.size(), 5U);
@@ -489,6 +490,7 @@ TEST_F(TestCudnnCompatibilityV8BuilderContracts, NotesReadOnKnobConfig)
 {
     installKnobEngine();
     installBehaviorNotes(KNOB_ENGINE, {HIPDNN_BEHAVIOR_NOTE_RUNTIME_COMPILATION});
+    installNumericalNotes(KNOB_ENGINE, {HIPDNN_NUMERICAL_NOTE_TENSOR_CORE});
     const fe::OperationGraph_v8 graph = convGraph();
     fe::Engine_v8 built = engine(graph, KNOB_ENGINE);
     choose(built, CUDNN_KNOB_TYPE_TILE_SIZE, 16);
@@ -498,10 +500,8 @@ TEST_F(TestCudnnCompatibilityV8BuilderContracts, NotesReadOnKnobConfig)
 
     EXPECT_TRUE(fe::hasBehaviorNote<CUDNN_BEHAVIOR_NOTE_RUNTIME_COMPILATION>(raw));
     EXPECT_FALSE(fe::hasBehaviorNote<CUDNN_BEHAVIOR_NOTE_REQUIRES_FILTER_INT8x32_REORDER>(raw));
-    EXPECT_TRUE(fe::hasNumericalNote<CUDNN_NUMERICAL_NOTE_NONDETERMINISTIC>(raw));
-    // The numerical note is decided by engine id; hipDNN's NUMERICAL_NOTE is never read.
-    const std::vector<hipdnnBackendAttributeName_t> gets = getAttributeNames();
-    EXPECT_EQ(std::count(gets.begin(), gets.end(), HIPDNN_ATTR_ENGINE_NUMERICAL_NOTE), 0);
+    EXPECT_TRUE(fe::hasNumericalNote<CUDNN_NUMERICAL_NOTE_TENSOR_CORE>(raw));
+    EXPECT_FALSE(fe::hasNumericalNote<CUDNN_NUMERICAL_NOTE_NONDETERMINISTIC>(raw));
 }
 
 // ---- hipDNN's last error never reaches a later builder message ----
@@ -552,7 +552,7 @@ TEST_F(TestCudnnCompatibilityV8BuilderContracts, FailedFilterGetLeavesNoHipdnnTe
     EXPECT_EQ(failure.what.find("hipDNN rejected"), std::string::npos) << failure.what;
 }
 
-// The config's engine resolves, but the engine's own GET (GLOBAL_INDEX for the numerical
+// The config's engine resolves, but the engine's own GET (NUMERICAL_NOTE for the numerical
 // filter, BEHAVIOR_NOTE for the behavior filter) fails: each filter answers false and drains
 // the hipDNN text that failure left.
 TEST_F(TestCudnnCompatibilityV8BuilderContracts, FailedEngineGetInFilterLeavesNoHipdnnText)
@@ -592,7 +592,7 @@ TEST_F(TestCudnnCompatibilityV8BuilderContracts, FailedEngineGetInFilterLeavesNo
 
     EXPECT_FALSE(fe::hasNumericalNote<CUDNN_NUMERICAL_NOTE_NONDETERMINISTIC>(config));
     EXPECT_EQ(failedGets,
-              std::vector<hipdnnBackendAttributeName_t>{HIPDNN_ATTR_ENGINE_GLOBAL_INDEX});
+              std::vector<hipdnnBackendAttributeName_t>{HIPDNN_ATTR_ENGINE_NUMERICAL_NOTE});
     EXPECT_TRUE(pending.empty()) << pending;
 
     failedGets.clear();

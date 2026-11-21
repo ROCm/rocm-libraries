@@ -13,10 +13,8 @@ from rocisa.instruction import SEndpgm
 
 from gpu_test_helpers import init_rocisa
 from tensilelite.Common.Architectures import gfxToIsa
+from tensilelite._extops import amax_generator, layer_norm_generator, softmax_generator
 
-import AMaxGenerator
-import LayerNormGenerator
-import SoftmaxGenerator
 import config_harness
 
 
@@ -78,7 +76,7 @@ def test_converted_gfx1250_gemm_preserves_wave32_without_reserved_selector():
     assert "s_endpgm" in source
 
 
-@pytest.mark.parametrize("generator", [AMaxGenerator, LayerNormGenerator, SoftmaxGenerator])
+@pytest.mark.parametrize("generator", [amax_generator, layer_norm_generator, softmax_generator])
 @pytest.mark.parametrize(
     "target,wave_size,expected",
     [
@@ -93,7 +91,7 @@ def test_converted_gfx1250_gemm_preserves_wave32_without_reserved_selector():
 )
 def test_extop_descriptor_omits_reserved_selector(generator, target, wave_size, expected):
     init_rocisa(target=target, wavesize=wave_size)
-    if generator is SoftmaxGenerator:
+    if generator is softmax_generator:
         source = generator.kernel_rodata("wavefront_probe", gfxToIsa(target))
     else:
         source = generator.kernel_header("wavefront_probe", target, 8, 8, 0)

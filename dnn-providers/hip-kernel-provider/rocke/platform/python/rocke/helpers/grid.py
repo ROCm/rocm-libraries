@@ -272,6 +272,136 @@ def chiplet_transform_chunked_runtime(
     return b.select(in_full_block, new_wgid, wgid)
 
 
+def _as_i32(b: IRBuilder, v: Value | int) -> Value:
+    return b.const_i32(v) if isinstance(v, int) else v
+
+
+def _xcd_remap_gated(
+    b: IRBuilder,
+    wgid: Value,
+    *,
+    num_wgs: Value | int,
+    n: Value | int,
+    chunk: Value | int,
+) -> Value:
+    """Chunked remap with runtime ``n`` / ``chunk``; identity when either is <= 0."""
+    num_wgs, n, chunk = _as_i32(b, num_wgs), _as_i32(b, n), _as_i32(b, chunk)
+    zero, one = b.const_i32(0), b.const_i32(1)
+    on = b.land(b.cmp_gt(n, zero), b.cmp_gt(chunk, zero))
+    n1 = b.select(on, n, one)
+    c1 = b.select(on, chunk, one)
+    block = b.mul(n1, c1)
+    limit = b.mul(b.div(num_wgs, block), block)
+    xcd = b.mod(wgid, n1)
+    local = b.div(wgid, n1)
+    new = b.add(b.add(b.mul(b.div(local, c1), block), b.mul(xcd, c1)), b.mod(local, c1))
+    return b.select(b.land(on, b.cmp_lt(wgid, limit)), new, wgid)
+
+
+def _xcd_remap_contiguous(
+    b: IRBuilder, pid: Value, npid: Value | int, num_xcds: int
+) -> Value:
+    """One contiguous ``ceil(npid / num_xcds)`` range per XCD (a bijection of ``[0, npid)``).
+
+    The hardware hands workgroup ``pid`` to XCD ``pid % num_xcds``. XCD ``x``
+    gets the range starting at ``x * ceil(npid / num_xcds)``, minus one slot
+    for each earlier XCD that received one fewer workgroup when ``npid`` is
+    not a multiple of ``num_xcds``. Unlike the chunked forms no workgroup past
+    a block boundary keeps its hardware order.
+    """
+    if num_xcds <= 0:
+        raise ValueError(f"xcd_remap(mode='contiguous'): invalid num_xcds={num_xcds}")
+    npid = _as_i32(b, npid)
+    n = b.const_i32(num_xcds)
+    xcd = b.mod(pid, n)
+    tall = b.add(b.mod(b.sub(npid, b.const_i32(1)), n), b.const_i32(1))
+    per = b.div(b.add(npid, b.const_i32(num_xcds - 1)), n)
+    short = b.smax(b.sub(xcd, tall), b.const_i32(0))
+    return b.sub(b.add(b.div(pid, n), b.mul(xcd, per)), short)
+
+
+def xcd_remap(
+    b: IRBuilder,
+    wgid: Value,
+    *,
+    num_wgs: Value | int,
+    num_xcds: Value | int,
+    chunk: Value | int | None = None,
+    mode: str = "chunked",
+) -> Value:
+    """The one XCD workgroup-remap entry point: logical id for hardware id ``wgid``.
+
+    ``mode="chunked"``: every ``chunk`` consecutive logical ids share an XCD;
+    ids past the last full ``num_xcds * chunk`` block keep their id. An ``int``
+    is a compile-time constant, anything else an SSA Value:
+      * ``num_wgs`` / ``num_xcds`` / ``chunk`` all ints: :func:`chiplet_transform_chunked`.
+      * ``num_xcds`` and ``chunk`` ints, ``num_wgs`` a Value:
+        :func:`chiplet_transform_chunked_dynamic`.
+      * ``num_xcds`` an int, ``chunk`` a Value or ``None`` (``num_wgs / num_xcds``):
+        :func:`chiplet_transform_chunked_runtime`.
+
+    ``mode="gated"``: the chunked remap with ``num_xcds`` and ``chunk`` both
+    runtime Values (kernargs); the identity when either is <= 0, so one kernel
+    serves both remapped and plain launches.
+
+    ``mode="contiguous"``: one contiguous ``ceil(num_wgs / num_xcds)`` range per
+    XCD (``num_xcds`` an int, ``chunk`` unused).
+
+    Every form is a bijection of ``[0, num_wgs)``; use :func:`xcd_remap_plane`
+    for a per-batch-plane remap. :func:`python_xcd_remap` is the host evaluator.
+    """
+    if mode == "gated":
+        if chunk is None:
+            raise TypeError("xcd_remap(mode='gated') needs a chunk")
+        return _xcd_remap_gated(b, wgid, num_wgs=num_wgs, n=num_xcds, chunk=chunk)
+    if mode == "contiguous":
+        if not isinstance(num_xcds, int) or chunk is not None:
+            raise TypeError(
+                "xcd_remap(mode='contiguous') takes an int num_xcds and no chunk"
+            )
+        return _xcd_remap_contiguous(b, wgid, num_wgs, num_xcds)
+    if mode != "chunked":
+        raise ValueError(f"xcd_remap: unknown mode {mode!r}")
+    if not isinstance(num_xcds, int):
+        raise TypeError(
+            "xcd_remap(mode='chunked') takes an int num_xcds; use mode='gated'"
+        )
+    if chunk is None or not isinstance(chunk, int):
+        return chiplet_transform_chunked_runtime(
+            b, wgid, num_wgs=_as_i32(b, num_wgs), num_xcds=num_xcds, chunk_size=chunk
+        )
+    if isinstance(num_wgs, int):
+        return chiplet_transform_chunked(
+            b, wgid, num_wgs=num_wgs, num_xcds=num_xcds, chunk_size=chunk
+        )
+    return chiplet_transform_chunked_dynamic(
+        b, wgid, num_wgs=num_wgs, num_xcds=num_xcds, chunk_size=chunk
+    )
+
+
+def xcd_remap_plane(
+    b: IRBuilder,
+    x: Value,
+    y: Value,
+    *,
+    gx: Value,
+    gy: Value,
+    num_xcds: Value,
+    chunk: Value,
+) -> tuple[Value, Value]:
+    """Gated :func:`xcd_remap` of one ``gx * gy`` batch plane; returns the remapped ``(x, y)``.
+
+    The plane id ``x + gx * y`` is remapped with ``num_wgs = gx * gy`` and split
+    back, so a kernel whose ABI carries no batch count still gets a bijection of
+    each plane. ``num_xcds`` / ``chunk`` are kernarg Values (identity when
+    either is <= 0); ``gx`` must be >= 1.
+    """
+    plane = _xcd_remap_gated(
+        b, b.add(x, b.mul(gx, y)), num_wgs=b.mul(gx, gy), n=num_xcds, chunk=chunk
+    )
+    return b.mod(plane, gx), b.div(plane, gx)
+
+
 def super_tile_swizzle_dynamic(
     b: IRBuilder,
     wgid: Value,
@@ -410,6 +540,45 @@ def python_chiplet_transform_chunked_runtime(
     chunk = num_wgs // num_xcds if chunk_size is None else chunk_size
     return python_chiplet_transform_chunked(
         wgid, num_wgs=num_wgs, num_xcds=num_xcds, chunk_size=max(1, chunk)
+    )
+
+
+def python_xcd_remap(
+    wgid: int,
+    *,
+    num_wgs: int,
+    num_xcds: int,
+    chunk: int | None = None,
+    mode: str = "chunked",
+) -> int:
+    """Pure-Python reference for :func:`xcd_remap`.
+
+    ``mode="gated"``: needs a ``chunk``; the identity when ``num_xcds <= 0`` or
+    ``chunk <= 0``. ``mode="contiguous"``: takes ``num_xcds >= 1`` and no
+    ``chunk``. Both refuse what :func:`xcd_remap` refuses. ``mode="chunked"``: a missing chunk is ``num_wgs //
+    num_xcds`` and every chunk is clamped to ``>= 1``, as
+    :func:`chiplet_transform_chunked_runtime` does.
+    """
+    if mode == "contiguous":
+        if chunk is not None:
+            raise TypeError("python_xcd_remap(mode='contiguous') takes no chunk")
+        if num_xcds <= 0:
+            raise ValueError(
+                f"python_xcd_remap(mode='contiguous'): invalid num_xcds={num_xcds}"
+            )
+        xcd = wgid % num_xcds
+        tall = (num_wgs - 1) % num_xcds + 1
+        per = (num_wgs + num_xcds - 1) // num_xcds
+        return wgid // num_xcds + xcd * per - max(xcd - tall, 0)
+    if mode not in ("chunked", "gated"):
+        raise ValueError(f"python_xcd_remap: unknown mode {mode!r}")
+    if mode == "gated":
+        if chunk is None:
+            raise TypeError("python_xcd_remap(mode='gated') needs a chunk")
+        if num_xcds <= 0 or chunk <= 0:
+            return wgid
+    return python_chiplet_transform_chunked_runtime(
+        wgid, num_wgs=num_wgs, num_xcds=num_xcds, chunk_size=chunk
     )
 
 

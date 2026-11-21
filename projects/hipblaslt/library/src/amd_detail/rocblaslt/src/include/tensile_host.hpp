@@ -161,6 +161,8 @@ rocblaslt_status rocblaslt_local_kernel_register(rocblaslt_handle  handle,
 rocblaslt_status rocblaslt_local_kernel_set_exact_match(
     rocblaslt_handle handle, int kernelIndex, size_t m, size_t n, size_t batch, size_t k);
 
+rocblaslt_status rocblaslt_local_kernel_refresh(rocblaslt_handle handle, size_t* registered);
+
 rocblaslt_status
     rocblaslt_local_kernel_counts(rocblaslt_handle handle, size_t* registered, size_t* selectable);
 
@@ -257,20 +259,25 @@ std::vector<std::shared_ptr<TensileLite::ContractionSolution>>
  * getBestSolutions() calls finTopSolutions from Tensile and converts to       *
  * rocblaslt_matmul_heuristic_result                                           *
  *******************************************************************************/
+// In both getBestSolutions overloads, layoutRuledOut, if given, is set when no
+// solution is returned and the MX scale layout rule refused a candidate, or the
+// scale modes accept no layout.
 rocblaslt_status getBestSolutions(RocblasltContractionProblem const& prob,
                                   rocblaslt_handle                   handle,
                                   std::shared_ptr<void>              gemmData,
                                   int                                requestedAlgoCount,
                                   rocblaslt_matmul_heuristic_result  heuristicResultsArray[],
                                   int*                               returnAlgoCount,
-                                  size_t                             maxWorkSpaceBytes);
+                                  size_t                             maxWorkSpaceBytes,
+                                  bool*                              layoutRuledOut = nullptr);
 
 rocblaslt_status getBestSolutions(rocblaslt_handle       handle,
                                   rocblaslt::RocGemmType gemmType,
                                   std::shared_ptr<void>  gemmData,
                                   const size_t           workspaceBytes,
                                   const int              requestedAlgoCount,
-                                  std::vector<rocblaslt_matmul_heuristic_result>& heuristicResults);
+                                  std::vector<rocblaslt_matmul_heuristic_result>& heuristicResults,
+                                  bool* layoutRuledOut = nullptr);
 
 /**
  * Tops heuristicResultsArray up to requestedAlgoCount from the size-independent
@@ -350,7 +357,8 @@ int tuningLastLaunchedIndexForTest();
  * Make later tuning attempts go wrong at one stage: 1 fails setup, 2 fails
  * enumeration, 3 throws after the first measured candidate, 4 stops the search
  * after the first measured candidate the way an expiring budget does, 5 makes
- * a configured budget read as already spent; 0 restores normal behaviour.
+ * a configured budget read as already spent, 6 makes the device refuse the
+ * scratch allocation; 0 restores normal behaviour.
  */
 void tuningInjectFailureForTest(int stage);
 

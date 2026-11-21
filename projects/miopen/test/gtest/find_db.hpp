@@ -16,6 +16,7 @@
 
 #include <chrono>
 #include <functional>
+#include <optional>
 
 namespace miopen {
 
@@ -27,6 +28,41 @@ struct TestRordbEmbedFsOverrideLock
     }
 
     ~TestRordbEmbedFsOverrideLock() { debug::rordb_embed_fs_override() = cached; }
+
+private:
+    bool cached;
+};
+
+// Points the user and installed find-db at one file for the lifetime of the object.
+struct FindDbPathOverride
+{
+    explicit FindDbPathOverride(const fs::path& path)
+        : cached(debug::testing_find_db_path_override())
+    {
+        debug::testing_find_db_path_override() = path;
+    }
+
+    ~FindDbPathOverride() { debug::testing_find_db_path_override() = cached; }
+
+    FindDbPathOverride(const FindDbPathOverride&)            = delete;
+    FindDbPathOverride& operator=(const FindDbPathOverride&) = delete;
+
+private:
+    std::optional<fs::path> cached;
+    TestRordbEmbedFsOverrideLock rordb_embed_fs_override;
+};
+
+// Disables find-db lookups and records for the lifetime of the object.
+struct ScopedFindDb
+{
+    ScopedFindDb() : cached(debug::testing_find_db_enabled)
+    {
+        debug::testing_find_db_enabled = false;
+    }
+    ~ScopedFindDb() { debug::testing_find_db_enabled = cached; }
+
+    ScopedFindDb(const ScopedFindDb&)            = delete;
+    ScopedFindDb& operator=(const ScopedFindDb&) = delete;
 
 private:
     bool cached;

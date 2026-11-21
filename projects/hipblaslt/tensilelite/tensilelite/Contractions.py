@@ -33,6 +33,12 @@ from .Common import state, state_key_ordering, IsaInfo
 from .Common.Architectures import gfxToIsa
 from .Common.DataType import DataType
 from .Common.GlobalParameters import internalParameters
+from .Common.ValidParameters import (
+    ASSERT_DIM_MULTIPLE_PARAMETERS,
+    checkAssertAnySizeLessThanIsValid,
+    checkAssertMultipleMapIsValid,
+    checkAssertSizeMapIsValid,
+)
 from .SolutionStructs import Solution as OriginalSolution
 from .SolutionStructs.Problem import getBiasDataTypeListDefault, getGateResidualDataTypeListDefault
 from .Toolchain.Component import Assembler
@@ -106,8 +112,8 @@ class ProblemType:
                  'useBeta', 'useBias', 'biasSrcWhiteList', 'useE', 'useGateResidual', 'gateResidualDataTypeWhiteList', 'useScaleAB', 'useScaleCD', 'useScaleAlphaVec', 'biasDataTypeWhiteList',
                  'highPrecisionAccumulate', 'useInitialStridesAB', 'useInitialStridesCD', 'stridedBatched', 'groupedGemm',
                  'useGradient', 'activationType', 'activationArgLength', 'activationComputeDataType', 'activationNoGuard',
-                 'sparse', 'f32XdlMathOp', 'supportDeviceUserArguments', 'outputAmaxD', 'swizzleTensorA', 'swizzleTensorB', 'metadataLayout',
-                 'mxBlockA', 'mxBlockB', 'mxBlockFreeA', 'mxBlockFreeB', 'mxTypeA', 'mxTypeB', 'mxScaleFormat', 'fusedGemmA2A', 'stochasticRounding']
+                 'sparse', 'f32XdlMathOp', 'supportDeviceUserArguments', 'outputAmaxD', 'outputPeerD', 'swizzleTensorA', 'swizzleTensorB', 'metadataLayout',
+                 'mxBlockA', 'mxBlockB', 'mxBlockFreeA', 'mxBlockFreeB', 'mxTypeA', 'mxTypeB', 'mxScaleFormat', 'fusedA2A', 'stochasticRounding']
     @classmethod
     def FromOriginalState(cls, d):
         indices = [None]*d['TotalIndices']
@@ -296,6 +302,10 @@ class ProblemType:
         if 'OutputAmaxD' in d:
             rv.outputAmaxD = d['OutputAmaxD']
 
+        rv.outputPeerD = False
+        if 'OutputPeerD' in d:
+            rv.outputPeerD = d['OutputPeerD']
+
         rv.useScaleAB = ""
         if 'UseScaleAB' in d:
             rv.useScaleAB = d['UseScaleAB']
@@ -345,7 +355,7 @@ class ProblemType:
         rv.swizzleTensorA = d.get('SwizzleTensorA', False)
         rv.swizzleTensorB = d.get('SwizzleTensorB', False)
 
-        rv.fusedGemmA2A = d.get('FusedGemmA2A', False)
+        rv.fusedA2A = d.get('FusedA2A', 'Disabled')
 
         rv.mxBlockA = d.get('MXBlockA', 0)
         rv.mxBlockB = d.get('MXBlockB', 0)
@@ -455,6 +465,7 @@ class ProblemType:
             predicates.append(ProblemPredicate("GateResidualDataTypeWhiteList", value=self.gateResidualDataTypeWhiteList))
             predicates.append(ProblemPredicate("BiasSrcWhiteList", value=self.biasSrcWhiteList))
             predicates.append(ProblemPredicate("AmaxDCheck", value=self.outputAmaxD))
+            predicates.append(ProblemPredicate("PeerDCheck", value=self.outputPeerD))
             if self.activationType in ['all', 'hipblaslt_all']:
                 exportType = ActivationType.Export.GRADONLY if self.useGradient else ActivationType.Export.NORMAL
                 supportedBy = ActivationType.SupportedBy.ALL if self.activationType == 'all' else ActivationType.SupportedBy.HIPBLASLT
@@ -493,8 +504,8 @@ class ProblemType:
             predicates.append(ProblemPredicate("SupportDeviceUserArguments", value=self.supportDeviceUserArguments))
             predicates.append(ProblemPredicate("SwizzleTensorA", value=self.swizzleTensorA))
             predicates.append(ProblemPredicate("SwizzleTensorB", value=self.swizzleTensorB))
-            predicates.append(ProblemPredicate("FusedGemmA2A", value=self.fusedGemmA2A))
-            if self.fusedGemmA2A and self.batched:
+            predicates.append(ProblemPredicate("FusedA2A", value=self.fusedA2A))
+            if self.fusedA2A != 'Disabled' and self.batched:
                 predicates.append(ProblemPredicate("BatchSizeEqual", index=0, value=1))
             predicates.append(ProblemPredicate("MXBlockA", value=self.mxBlockA))
             if self.mxBlockA:
@@ -513,9 +524,26 @@ ASSERT_DIM_MAP_PREDICATES = {
     "AssertSizeLessThan": "SizeLessThan",
     "AssertStrideAEqual": "StrideAEqual",
     "AssertStrideBEqual": "StrideBEqual",
+    "AssertStrideAMultiple": "StrideAMultiple",
+    "AssertStrideBMultiple": "StrideBMultiple",
     "AssertStrideCEqual": "StrideCEqual",
     "AssertStrideDEqual": "StrideDEqual",
 }
+
+# Integer ids of the MXScaleFormat values, as the C++ ProblemType and the
+# MXScaleFormatEquals predicate read them. Append only.
+MX_SCALE_FORMAT_IDS = {
+    "NoSwizzle": 0,
+    "HostPreSwizzle": 1,
+    "InMemorySwizzle": 2,
+    "HostPreSwizzle128x4": 3,
+}
+
+def mxScaleFormatId(state):
+    return MX_SCALE_FORMAT_IDS.get(state.get("MXScaleFormat", "NoSwizzle"), 0)
+
+# Serialized names of the C++ ScalarValue enum, keyed by AssertAlphaValue values.
+ASSERT_ALPHA_VALUE_NAMES = {1: "1"}
 
 def extractDimPredicate(cls, value, predicateName):
     """
@@ -566,12 +594,59 @@ class ProblemPredicate(Properties.Predicate):
             return cls("AIGreaterThanEqual", value=value) if value > 0 else None
         if key == "AssertAILessThanEqual":
             return cls("AILessThanEqual", value=value) if value > 0 else None
+        if key == "AssertAnySizeLessThan":
+            if value == -1:
+                return None
+            if not isinstance(value, dict):
+                raise RuntimeError(
+                    "{} must be a dict of {{index: value}}, got {!r}".format(key, value)
+                )
+            try:
+                checkAssertAnySizeLessThanIsValid(key, value)
+            except Exception as e:
+                raise RuntimeError(str(e)) from e
+            predicates = [
+                cls("SizeLessThan", index=pos, value=val) for pos, val in value.items() if val != -1
+            ]
+            return cls.Or(predicates) if predicates else None
         if key in ASSERT_DIM_MAP_PREDICATES:
             if not isinstance(value, dict):
                 raise RuntimeError(
                     "{} must be a dict of {{index: value}}, got {!r}".format(key, value)
                 )
+            if key in ASSERT_DIM_MULTIPLE_PARAMETERS:
+                # Checked here as well as on the YAML inputs because logic-file
+                # and custom.config values reach the predicate without that gate.
+                try:
+                    checkAssertSizeMapIsValid(key, value)
+                    checkAssertMultipleMapIsValid(key, value)
+                except Exception as e:
+                    raise RuntimeError(str(e)) from e
             return extractDimPredicate(cls, value, ASSERT_DIM_MAP_PREDICATES[key])
+        if key == "AssertAlphaValue":
+            if value not in ASSERT_ALPHA_VALUE_NAMES:
+                raise RuntimeError(
+                    "AssertAlphaValue must be one of {}, got {!r}".format(
+                        sorted(ASSERT_ALPHA_VALUE_NAMES), value))
+            return cls("AlphaValue", value=ASSERT_ALPHA_VALUE_NAMES[value])
+
+        if key == "AssertTensorBytesLessThan":
+            if value == -1:
+                return None
+            if type(value) is not int or value <= 0:
+                raise RuntimeError(
+                    "{} must be a positive int or -1, got {!r}".format(key, value)
+                )
+            return cls("TensorBytesLessThan", value=value)
+
+        if key == "AssertMXScalesPreSwizzled":
+            if value == -1:
+                return None
+            if value is not True:
+                raise RuntimeError(
+                    "{} must be True or -1, got {!r}".format(key, value)
+                )
+            return cls("MXScalesPreSwizzled")
 
         if key.endswith('Multiple'):
             if value == 1:
@@ -678,6 +753,33 @@ class ProblemPredicate(Properties.Predicate):
         if 'BufferStore' in state and state['BufferStore'] == True:
             rv += [cls('BufferStoreOffsetLimitCheck', value=state['MacroTile1'])]
 
+        # PrefetchGL2SAddr keeps each lane's prefetch offset in 32 bits. The cluster
+        # prefetches all ClusterDim tiles it consumes, so the free extent is
+        # MacroTile * ClusterDim. See Components/GL2Prefetch.py for the footprint.
+        if state.get('PrefetchGL2', 0) > 0 and state.get('PrefetchGL2SAddr', False):
+            pt = state['ProblemType']
+            clusterDim = state.get('ClusterDim', [1, 1])
+            metadataIdx = 1 if pt.get('Sparse', 0) == 2 else 0
+            metadata = bool(state.get('enableTDMMetadata', False))
+            rv += [cls('GL2PrefetchSAddrOffsetLimitCheck', value={
+                'TLUA': bool(pt['TLUA']),
+                'TLUB': bool(pt['TLUB']),
+                'DepthUA': state.get('_DepthUA', state['DepthU']),
+                'DepthUB': state.get('_DepthUB', state['DepthU']),
+                'ClusterMT0': state['MacroTile0'] * clusterDim[0],
+                'ClusterMT1': state['MacroTile1'] * clusterDim[1],
+                'DepthU': state['DepthU'],
+                'MatrixInstK': state.get('MatrixInstK', 0),
+                'MXBlockA': pt.get('MXBlockA', 0) or 0,
+                'MXBlockB': pt.get('MXBlockB', 0) or 0,
+                'MXBlockFreeA': max(1, pt.get('MXBlockFreeA', 1) or 1),
+                'MXBlockFreeB': max(1, pt.get('MXBlockFreeB', 1) or 1),
+                'Metadata': metadata,
+                'TLUMetadata': bool(pt.get('TLUMetadata', False)) if metadata else False,
+                'DepthUMetadata': state.get('_DepthUMetadata', state['DepthU']) if metadata else 0,
+                'ClusterMTMetadata': state['MacroTileMetadata'] * clusterDim[metadataIdx] if metadata else 0,
+            })]
+
         if '_GlobalAccumulation' in state and state['_GlobalAccumulation'] != None and not isPersistent(state):
             value = MIN_K_FOR_GSU
             rv += [cls('GlobalSplitUCheckMinK', value=[value, state["GlobalSplitU"]])]
@@ -691,7 +793,12 @@ class ProblemPredicate(Properties.Predicate):
         if state['ProblemType']['SwizzleTensorB']:
             rv += [cls('SwizzleTensorB', value=state['ProblemType']['SwizzleTensorB'])]
 
-        if state['ProblemType']['FusedGemmA2A']:
+        # The host scale modes do not tell NoSwizzle, HostPreSwizzle and InMemorySwizzle
+        # apart, so the predicate matches those loosely and only pins the later formats.
+        if problemType.mxBlockA or problemType.mxBlockB:
+            rv += [cls('MXScaleFormatEquals', value=mxScaleFormatId(state))]
+
+        if state['ProblemType']['FusedA2A'] == 'GemmA2A':
             rv += [cls('GemmA2AShape', value=state['MacroTile0'])]
 
         # Exact-size custom kernels record the M/N/K window they won. Without
@@ -719,6 +826,9 @@ class ProblemPredicate(Properties.Predicate):
             rv += [cls('SizeGreaterThan', index=kIdx, value=0)]
             rv += [cls('SizeLessThan', index=kIdx,
                        value=kTiles * state['DepthU'] + 1)]
+
+        if state['ProblemType']['FusedA2A'] == 'A2AGemm':
+            rv += [cls('A2AGemmShape', value=state['DepthU'] * state['A2ASubRounds'])]
 
         return rv
 
@@ -761,75 +871,83 @@ class CustomKernel:
             setattr(self, key, value)
 
 class SizeMapping:
-    StateKeys = ['waveNum',
-                 'WavefrontSize',
-                 'workGroup',
-                 'macroTile',
-                 'threadTile',
-                 'matrixInstruction',
+    StateKeys = ['a2aSubRounds',
+                 'activationFused',
+                 'adaptiveGemm',
+                 'adaptiveGemmGSUA',
+                 'adaptiveGemmNTAB',
+                 'BufferLoad',
+                 'BufferStore',
+                 'clusterDim',
+                 'CUOccupancy',
+                 'customMainLoopScheduling',
+                 'depthU',
+                 'DirectToLdsA',
+                 'DirectToLdsB',
+                 'DirectToVgprA',
+                 'DirectToVgprB',
+                 'enableLDSTrA',
+                 'enableLDSTrB',
+                 'ExpertSchedulingMode',
+                 'globalAccumulation',
+                 'globalSplitU',
+                 'globalSplitUCoalesced',
+                 'globalSplitUPGR',
+                 'globalSplitUWorkGroupMappingRoundRobin',
                  'grvwA',
                  'grvwB',
                  'gwvwC',
                  'gwvwD',
-                 'depthU',
-                 'staggerU',
-                 'staggerUMapping',
-                 'globalSplitUPGR',
-                 'globalSplitU',
-                 'staggerStrideShift',
-                 'workGroupMapping',
-                 'packBatchDims',
+                 'HalfPLR',
+                 'hasTemporalHint',
+                 'LocalSplitU',
+                 'macroTile',
                  'magicDivAlg',
-                 'tileProcessingStrategy',
-                 'workAssignment',
-                 'streamKAtomic',
-                 'prefetchAcrossPersistent',
-                 'sourceKernel',
-                 'globalAccumulation',
-                 'adaptiveGemmGSUA',
-                 'workspaceSizePerElemC',
-                 'workspaceSizePerElemBias',
-                 'activationFused',
-                 'workGroupMappingXCC',
-                 'workGroupMappingXCCGroup',
-                 'globalSplitUCoalesced',
-                 'globalSplitUWorkGroupMappingRoundRobin',
-                 'CUOccupancy',
-                 'PrefetchGlobalRead',
                  'MathClocksUnrolledLoop',
-                 'synchronizerSizePerWG',
+                 'matrixInstruction',
+                 'Multicast',
                  'nonTemporalA',
                  'nonTemporalB',
-                 'temporalHintA',
-                 'temporalHintB',
-                 'hasTemporalHint',
-                 'adaptiveGemmNTAB',
-                 'customMainLoopScheduling',
-                 'useSubtileImpl',
                  'NonTemporalD',
-                 'WaveSeparateGlobalReadA',
-                 'WaveSeparateGlobalReadB',
-                 'UnrollLoopSwapGlobalReadOrder',
-                 'DirectToVgprA',
-                 'DirectToVgprB',
                  'NumLoadsCoalescedA',
                  'NumLoadsCoalescedB',
-                 'WaveGroup',
-                 'VectorWidthA',
-                 'VectorWidthB',
-                 'LocalSplitU',
-                 'DirectToLdsA',
-                 'DirectToLdsB',
                  'OneLDSBuffer',
+                 'packBatchDims',
+                 'prefetchAcrossPersistent',
+                 'PrefetchGL2',
+                 'PrefetchGlobalRead',
+                 'PrefetchLocalRead',
+                 'sourceKernel',
                  'SourceSwap',
+                 'staggerStrideShift',
+                 'staggerU',
+                 'staggerUMapping',
+                 'streamKAtomic',
+                 'synchronizerSizePerWG',
+                 'TDMInst',
+                 'temporalHintA',
+                 'temporalHintB',
+                 'temporalHintD',
+                 'threadTile',
+                 'tileProcessingStrategy',
+                 'UnrollLoopSwapGlobalReadOrder',
                  'UnrollMajorLDSA',
                  'UnrollMajorLDSB',
-                 'enableLDSTrA',
-                 'enableLDSTrB',
-                 'ExpertSchedulingMode',
-                 'clusterDim',
-                 'BufferLoad',
-                 'BufferStore'
+                 'useSubtileImpl',
+                 'VectorWidthA',
+                 'VectorWidthB',
+                 'WavefrontSize',
+                 'WaveGroup',
+                 'waveNum',
+                 'WaveSeparateGlobalReadA',
+                 'WaveSeparateGlobalReadB',
+                 'workAssignment',
+                 'workGroup',
+                 'workGroupMapping',
+                 'workGroupMappingXCC',
+                 'workGroupMappingXCCGroup',
+                 'workspaceSizePerElemBias',
+                 'workspaceSizePerElemC'
                  ]
 
     @classmethod
@@ -870,73 +988,11 @@ class SizeMapping:
         dtlA = bool(d['DirectToLdsA'])
         dtlB = bool(d['DirectToLdsB'])
 
-        return cls(waveNum                  = d['NumThreads'] // d['WavefrontSize'],
-                   WavefrontSize            = d['WavefrontSize'],
-                   workGroup                = d['WorkGroup'],
-                   macroTile                = cls.ReadOriginalMacroTile(d),
-                   threadTile               = d['ThreadTile'],
-                   matrixInstruction        = d['MatrixInstruction'],
-                   grvwA                    = d['GlobalReadVectorWidthA'],
-                   grvwB                    = d['GlobalReadVectorWidthB'],
-                   gwvwC                    = d['StoreVectorWidth'],
-                   gwvwD                    = d['StoreVectorWidth'],
-                   workGroupMapping         = d['WorkGroupMapping'] if len(d['SpaceFillingAlgo']) == 0 else convertSFCWGMListToHex(d['SFCWGM']),
-                   staggerU                 = d['StaggerU'] if 'StaggerU' in d else 0,
-                   staggerUMapping          = d['StaggerUMapping'] if 'StaggerUMapping' in d else 0,
-                   depthU                   = d['DepthU'],
-                   globalSplitUPGR          = internalParameters["GlobalSplitUPGR"],
-                   globalSplitU             = d['GlobalSplitU'],
-                   staggerStrideShift       = d['_staggerStrideShift'] if '_staggerStrideShift' in d else 0,
-                   packBatchDims            = 0,
-                   tileProcessingStrategy   = d['TileProcessingStrategy'],
-                   workAssignment           = d['WorkAssignment'],
-                   streamKAtomic            = d['StreamKAtomic'] if 'StreamKAtomic' in d else 0,
-                   prefetchAcrossPersistent = d.get('PrefetchAcrossPersistent', 0),
-                   magicDivAlg              = d.get('MagicDivAlg', 1),
-                   sourceKernel             = d['KernelLanguage'] == 'Source',
-                   globalAccumulation       = globalAccum,
-                   adaptiveGemmGSUA         = d['AdaptiveGemmGSUA'] if 'AdaptiveGemmGSUA' in d else 0,
-                   workspaceSizePerElemC    = d['_WorkspaceSizePerElemC'],
-                   workspaceSizePerElemBias = d['_WorkspaceSizePerElemBias'],
+        return cls(a2aSubRounds             = d.get('A2ASubRounds', 1),
                    activationFused          = d['ActivationFused'],
-                   workGroupMappingXCC      = d['WorkGroupMappingXCC'],
-                   workGroupMappingXCCGroup = d['WorkGroupMappingXCCGroup'],
-                   globalSplitUCoalesced    = d['GlobalSplitUCoalesced'],
-                   globalSplitUWorkGroupMappingRoundRobin = d['GlobalSplitUWorkGroupMappingRoundRobin'],
-                   CUOccupancy              = d['CUOccupancy'],
-                   PrefetchGlobalRead       = pgr,
-                   MathClocksUnrolledLoop   = d['MathClocksUnrolledLoop'],
-                   synchronizerSizePerWG    = synchronizerSizePerWG,
-                   nonTemporalA             = d['NonTemporalA'],
-                   nonTemporalB             = d['NonTemporalB'],
-                   temporalHintA            = d.get('TemporalHintA', 0),
-                   temporalHintB            = d.get('TemporalHintB', 0),
-                   hasTemporalHint          = bool(d.get('_HasTemporalHint', False)),
+                   adaptiveGemm             = int(d.get('AdaptiveGemm', 0)),
+                   adaptiveGemmGSUA         = d['AdaptiveGemmGSUA'] if 'AdaptiveGemmGSUA' in d else 0,
                    adaptiveGemmNTAB         = d['AdaptiveGemmNTAB'] if 'AdaptiveGemmNTAB' in d else 0,
-                   customMainLoopScheduling = d['UseCustomMainLoopSchedule'],
-                   useSubtileImpl           = bool(d.get('UseSubtileImpl', False)),
-                   NonTemporalD             = d['NonTemporalD'],
-                   WaveSeparateGlobalReadA  = d['WaveSeparateGlobalReadA'],
-                   WaveSeparateGlobalReadB  = d['WaveSeparateGlobalReadB'],
-                   UnrollLoopSwapGlobalReadOrder = d['UnrollLoopSwapGlobalReadOrder'],
-                   DirectToVgprA            = dtva,
-                   DirectToVgprB            = dtvb,
-                   NumLoadsCoalescedA       = d['NumLoadsCoalescedA'],
-                   NumLoadsCoalescedB       = d['NumLoadsCoalescedB'],
-                   WaveGroup                = d["MIWaveGroup"],
-                   VectorWidthA             = d["VectorWidthA"],
-                   VectorWidthB             = d["VectorWidthB"],
-                   LocalSplitU              = d["LocalSplitU"],
-                   DirectToLdsA             = dtlA,
-                   DirectToLdsB             = dtlB,
-                   OneLDSBuffer             = d.get('1LDSBuffer', 0) == 1,
-                   SourceSwap               = bool(d.get('SourceSwap', False)),
-                   UnrollMajorLDSA          = int(bool(d['UnrollMajorLDSA'])) if 'UnrollMajorLDSA' in d else -1,
-                   UnrollMajorLDSB          = int(bool(d['UnrollMajorLDSB'])) if 'UnrollMajorLDSB' in d else -1,
-                   enableLDSTrA             = bool(d.get('enableLDSTrA', False)),
-                   enableLDSTrB             = bool(d.get('enableLDSTrB', False)),
-                   ExpertSchedulingMode     = d.get('ExpertSchedulingMode', 0),
-                   clusterDim               = d['ClusterDim'],
                    # BufferLoad/BufferStore were only added to SizeMapping's
                    # serialized state by this change, so libraries built before
                    # it won't have these keys; default to True (the prior,
@@ -944,7 +1000,77 @@ class SizeMapping:
                    # the other newly-added-but-optional fields above (e.g.
                    # PrefetchAcrossPersistent, TemporalHintA/B).
                    BufferLoad               = bool(d.get('BufferLoad', True)),
-                   BufferStore              = bool(d.get('BufferStore', True))
+                   BufferStore              = bool(d.get('BufferStore', True)),
+                   clusterDim               = d['ClusterDim'],
+                   CUOccupancy              = d['CUOccupancy'],
+                   customMainLoopScheduling = d['UseCustomMainLoopSchedule'],
+                   depthU                   = d['DepthU'],
+                   DirectToLdsA             = dtlA,
+                   DirectToLdsB             = dtlB,
+                   DirectToVgprA            = dtva,
+                   DirectToVgprB            = dtvb,
+                   enableLDSTrA             = bool(d.get('enableLDSTrA', False)),
+                   enableLDSTrB             = bool(d.get('enableLDSTrB', False)),
+                   ExpertSchedulingMode     = d.get('ExpertSchedulingMode', 0),
+                   globalAccumulation       = globalAccum,
+                   globalSplitU             = d['GlobalSplitU'],
+                   globalSplitUCoalesced    = d['GlobalSplitUCoalesced'],
+                   globalSplitUPGR          = internalParameters["GlobalSplitUPGR"],
+                   globalSplitUWorkGroupMappingRoundRobin = d['GlobalSplitUWorkGroupMappingRoundRobin'],
+                   grvwA                    = d['GlobalReadVectorWidthA'],
+                   grvwB                    = d['GlobalReadVectorWidthB'],
+                   gwvwC                    = d['StoreVectorWidth'],
+                   gwvwD                    = d['StoreVectorWidth'],
+                   HalfPLR                  = int(d.get('HalfPLR', 0)),
+                   hasTemporalHint          = bool(d.get('_HasTemporalHint', False)),
+                   LocalSplitU              = d["LocalSplitU"],
+                   macroTile                = cls.ReadOriginalMacroTile(d),
+                   magicDivAlg              = d.get('MagicDivAlg', 1),
+                   MathClocksUnrolledLoop   = d['MathClocksUnrolledLoop'],
+                   matrixInstruction        = d['MatrixInstruction'],
+                   Multicast                = int(bool(d.get('Multicast', False))),
+                   nonTemporalA             = d['NonTemporalA'],
+                   nonTemporalB             = d['NonTemporalB'],
+                   NonTemporalD             = d['NonTemporalD'],
+                   NumLoadsCoalescedA       = d['NumLoadsCoalescedA'],
+                   NumLoadsCoalescedB       = d['NumLoadsCoalescedB'],
+                   OneLDSBuffer             = d.get('1LDSBuffer', 0) == 1,
+                   packBatchDims            = 0,
+                   prefetchAcrossPersistent = d.get('PrefetchAcrossPersistent', 0),
+                   PrefetchGL2              = int(d.get('PrefetchGL2', 0)),
+                   PrefetchGlobalRead       = pgr,
+                   PrefetchLocalRead        = int(d.get('PrefetchLocalRead', 1)),
+                   sourceKernel             = d['KernelLanguage'] == 'Source',
+                   SourceSwap               = bool(d.get('SourceSwap', False)),
+                   staggerStrideShift       = d['_staggerStrideShift'] if '_staggerStrideShift' in d else 0,
+                   staggerU                 = d['StaggerU'] if 'StaggerU' in d else 0,
+                   staggerUMapping          = d['StaggerUMapping'] if 'StaggerUMapping' in d else 0,
+                   streamKAtomic            = d['StreamKAtomic'] if 'StreamKAtomic' in d else 0,
+                   synchronizerSizePerWG    = synchronizerSizePerWG,
+                   TDMInst                  = int(d.get('TDMInst', 0)),
+                   temporalHintA            = d.get('TemporalHintA', 0),
+                   temporalHintB            = d.get('TemporalHintB', 0),
+                   temporalHintD            = d.get('TemporalHintD', 0),
+                   threadTile               = d['ThreadTile'],
+                   tileProcessingStrategy   = d['TileProcessingStrategy'],
+                   UnrollLoopSwapGlobalReadOrder = d['UnrollLoopSwapGlobalReadOrder'],
+                   UnrollMajorLDSA          = int(bool(d['UnrollMajorLDSA'])) if 'UnrollMajorLDSA' in d else -1,
+                   UnrollMajorLDSB          = int(bool(d['UnrollMajorLDSB'])) if 'UnrollMajorLDSB' in d else -1,
+                   useSubtileImpl           = bool(d.get('UseSubtileImpl', False)),
+                   VectorWidthA             = d["VectorWidthA"],
+                   VectorWidthB             = d["VectorWidthB"],
+                   WavefrontSize            = d['WavefrontSize'],
+                   WaveGroup                = d["MIWaveGroup"],
+                   waveNum                  = d['NumThreads'] // d['WavefrontSize'],
+                   WaveSeparateGlobalReadA  = d['WaveSeparateGlobalReadA'],
+                   WaveSeparateGlobalReadB  = d['WaveSeparateGlobalReadB'],
+                   workAssignment           = d['WorkAssignment'],
+                   workGroup                = d['WorkGroup'],
+                   workGroupMapping         = d['WorkGroupMapping'] if len(d['SpaceFillingAlgo']) == 0 else convertSFCWGMListToHex(d['SFCWGM']),
+                   workGroupMappingXCC      = d['WorkGroupMappingXCC'],
+                   workGroupMappingXCCGroup = d['WorkGroupMappingXCCGroup'],
+                   workspaceSizePerElemBias = d['_WorkspaceSizePerElemBias'],
+                   workspaceSizePerElemC    = d['_WorkspaceSizePerElemC']
                    )
     @classmethod
     def ReadOriginalMacroTile(cls, d):
@@ -1048,6 +1174,28 @@ class Solution:
             *,
             raiseProblemTypeOnTypeMismatch: bool = True,
         ):
+        rv = cls.RecordFromOriginalState(d, srcName, deviceInfo)
+        rv.originalSolution = OriginalSolution(
+                                  d,
+                                  splitGSU,
+                                  printSolutionRejectionReason,
+                                  printIndexAssignmentInfo,
+                                  assembler,
+                                  isaInfoMap,
+                                  srcName,
+                                  raiseProblemTypeOnTypeMismatch=raiseProblemTypeOnTypeMismatch,
+                              )
+        rv.srcName = srcName
+
+        return rv
+
+    @classmethod
+    def RecordFromOriginalState(cls, d, srcName="", deviceInfo=None):
+        """The library record FromOriginalState writes, without the OriginalSolution.
+
+        Fills in d['ISA'] and d['CUCount'] as FromOriginalState does, so the
+        OriginalSolution built from d afterwards sees the same state.
+        """
         rv = cls()
 
         if 'SolutionNameMin' in d:
@@ -1062,9 +1210,8 @@ class Solution:
         # but it describes the in-device MX scale layout the kernel expects, which
         # the host (DataInitialization) needs to know to pick an upload layout.
         # Plumb it onto problemType so the host can read it post-solution-pick.
-        rv.problemType.mxScaleFormat = {"NoSwizzle": 0,
-                                        "HostPreSwizzle": 1,
-                                        "InMemorySwizzle": 2}.get(d.get("MXScaleFormat", "NoSwizzle"), 0)
+        # The values are TensileLite::MXScaleFormat (include/Tensile/MXScaleFormat.hpp).
+        rv.problemType.mxScaleFormat = mxScaleFormatId(d)
 
         rv.problemPredicate = ProblemPredicate.FromOriginalState(d, rv.problemType)
         rv.taskPredicate = TaskPredicate.FromOriginalState(d, rv.problemType)
@@ -1106,18 +1253,6 @@ class Solution:
         rv.hardwarePredicate = Hardware.HardwarePredicate.FromHardware(
             d['ISA'], d['CUCount'], d.get('DeviceNames', None), logicFile=srcName
         )
-        rv.originalSolution = OriginalSolution(
-                                  d,
-                                  splitGSU,
-                                  printSolutionRejectionReason,
-                                  printIndexAssignmentInfo,
-                                  assembler,
-                                  isaInfoMap,
-                                  srcName,
-                                  raiseProblemTypeOnTypeMismatch=raiseProblemTypeOnTypeMismatch,
-                              )
-        rv.srcName = srcName
-
         return rv
 
     @classmethod

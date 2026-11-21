@@ -74,6 +74,7 @@ from kernels.common.attention_bwd import (
     validate_attn_bwd_spec,
 )
 
+from ._attention_bwd_lds_model import is_lds_access as _is_lds
 from ._attention_bwd_test_utils import distinct_configs
 from .test_attention_bwd_ir import (
     HEADS,
@@ -594,8 +595,6 @@ def traced_ring(spec, arch):
     from kernels.common import _attention_bwd_ring as ringmod
     from kernels.common._attention_bwd_frag import LdsView
 
-    from .test_attention_bwd_ir import _is_lds
-
     tags, state = {}, {"private": False, "views": None, "site": 0}
     orig = {n: getattr(LdsView, n) for n in ("load", "store", "tr16_load")}
     orig_acc = {n: getattr(body.BwdTileStep, n) for n in ("_load_lds_acc", "_store_lds_acc")}  # fmt: skip
@@ -687,8 +686,6 @@ def _ring_events(ops, tags, *, trips, env=None, in_branch=False):
     (each with its counter bound): ``("sync",)``, ``("wait", vmcnt)``,
     ``("lds", op, lo, hi, batch)`` with the span shifted by the evaluated
     slot (``batch``: the DMA batch, its issue site and loop counters)."""
-    from .test_attention_bwd_ir import _is_lds
-
     env = env or {}
     out = []
     for op in ops:
@@ -721,7 +718,7 @@ def _ring_events(ops, tags, *, trips, env=None, in_branch=False):
 
 def ring_lds_hazards(kernel, tags, depth):
     """Pairs of LDS accesses that can race across waves (the rule of
-    :func:`test_attention_bwd_ir.lds_hazards` on the evaluated slot spans).
+    :func:`_attention_bwd_lds_model.lds_hazards` on the evaluated slot spans).
     A DMA copy stays a pending write from its issue until a wait retires it
     (``vmcnt(0)``: every copy; otherwise all but the newest ``R - 2``
     batches, the ring's wait model) and the next barrier passes: it races

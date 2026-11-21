@@ -26,14 +26,13 @@
 
 set(HIPTENSOR_CONTRACTION_SOURCES
    ${CMAKE_CURRENT_SOURCE_DIR}/hiptensor_contraction.cpp
-   ${CMAKE_CURRENT_SOURCE_DIR}/contraction_cpu_reference.cpp
    ${CMAKE_CURRENT_SOURCE_DIR}/contraction_selection.cpp
    ${CMAKE_CURRENT_SOURCE_DIR}/contraction_solution_instances.cpp
    ${CMAKE_CURRENT_SOURCE_DIR}/contraction_solution_registry.cpp
-   ${CMAKE_CURRENT_SOURCE_DIR}/contraction_cpu_reference_instances.cpp
    ${CMAKE_CURRENT_SOURCE_DIR}/contraction_solution.cpp
 )
 
+hiptensor_set_host_only_sources(${HIPTENSOR_CONTRACTION_SOURCES})
 add_hiptensor_component(hiptensor_contraction ${HIPTENSOR_CONTRACTION_SOURCES})
 
 add_subdirectory(device)

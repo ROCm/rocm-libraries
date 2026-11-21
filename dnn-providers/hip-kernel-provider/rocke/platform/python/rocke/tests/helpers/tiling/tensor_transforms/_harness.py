@@ -26,7 +26,6 @@ from typing import Any
 import pytest
 
 from rocke.core.ir import I1, I32, I64, IRBuilder, PtrType, Value
-from rocke.tests.gpu import current_device_arch
 
 WAVE = 64
 
@@ -126,6 +125,7 @@ def isa_count(isa: str, pattern: str) -> int:
 
 
 def run_lanes(
+    arch: str,
     build: Callable[[IRBuilder], Sequence[Value]],
     *,
     scalars: Mapping[str, int] | None = None,
@@ -133,9 +133,10 @@ def run_lanes(
     n_blocks: int = 1,
     per_block: bool = False,
 ):
-    """Run a kernel whose lanes store the values ``build`` returns, compiled for the GPU
-    present; return them as an int64 array ``[block, lane, slot]`` (``[block, slot]`` with
-    ``per_block``). A block is ``WAVE`` (64) threads whatever the GPU's wave size.
+    """Run a kernel whose lanes store the values ``build`` returns, compiled for ``arch``, the
+    current GPU's arch (the ``any_gpu`` fixture's value, which marks the test ``gpu``); return
+    them as an int64 array ``[block, lane, slot]`` (``[block, slot]`` with ``per_block``). A
+    block is ``WAVE`` (64) threads whatever the GPU's wave size.
 
     ``scalars`` are i32 kernel parameters (declared by the test with ``runtime_length`` or
     ``b.param``, in this order, before ``build`` returns); ``buffers`` are read-only i32 arrays,
@@ -164,9 +165,7 @@ def run_lanes(
     values = build(b)
     slots = store_values(b, values, per_block=per_block)
     # The artifact door checks every parameter fact before the launch.
-    launcher = KernelLauncher.from_artifact(
-        compile_kernel(b.kernel, arch=current_device_arch())
-    )
+    launcher = KernelLauncher.from_artifact(compile_kernel(b.kernel, arch=arch))
     rows = n_blocks if per_block else n_blocks * WAVE
     host = np.zeros(rows * slots, dtype=np.int64)
     rt = Runtime()

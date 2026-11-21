@@ -76,7 +76,9 @@ hipsparseStatus_t
  *  \note The boost value is enabled by setting \p enable_boost to 1 or disabled by
  *  setting \p enable_boost to 0.
  *
- *  \note \p tol and \p boost_val can be in host or device memory.
+ *  \note \p tol and \p boost_val can be in host or device memory. The pointers are only
+ *  read by \ref hipsparseScsrilu02 "hipsparseXcsrilu02()", using the pointer mode set when
+ *  calling this function, so they must remain valid until then.
  *
  *  \deprecated
  *  This function is deprecated when using the CUDA backend (CUDA 12.0+) and will be
@@ -90,8 +92,10 @@ hipsparseStatus_t
  *  enable_boost    enable/disable numeric boost.
  *  @param[in]
  *  tol             tolerance to determine whether a numerical value is replaced or not.
+ *                  \p tol can be in host or device memory.
  *  @param[in]
  *  boost_val       boost value to replace a numerical value.
+ *                  \p boost_val can be in host or device memory.
  *
  *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
  *  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
@@ -114,7 +118,9 @@ hipsparseStatus_t hipsparseScsrilu02_numericBoost(
  *  \note The boost value is enabled by setting \p enable_boost to 1 or disabled by
  *  setting \p enable_boost to 0.
  *
- *  \note \p tol and \p boost_val can be in host or device memory.
+ *  \note \p tol and \p boost_val can be in host or device memory. The pointers are only
+ *  read by \ref hipsparseScsrilu02 "hipsparseXcsrilu02()", using the pointer mode set when
+ *  calling this function, so they must remain valid until then.
  *
  *  \deprecated
  *  This function is deprecated when using the CUDA backend (CUDA 12.0+) and will be
@@ -128,8 +134,10 @@ hipsparseStatus_t hipsparseScsrilu02_numericBoost(
  *  enable_boost    enable/disable numeric boost.
  *  @param[in]
  *  tol             tolerance to determine whether a numerical value is replaced or not.
+ *                  \p tol can be in host or device memory.
  *  @param[in]
  *  boost_val       boost value to replace a numerical value.
+ *                  \p boost_val can be in host or device memory.
  *
  *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
  *  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
@@ -154,7 +162,9 @@ hipsparseStatus_t hipsparseDcsrilu02_numericBoost(hipsparseHandle_t handle,
  *  \note The boost value is enabled by setting \p enable_boost to 1 or disabled by
  *  setting \p enable_boost to 0.
  *
- *  \note \p tol and \p boost_val can be in host or device memory.
+ *  \note \p tol and \p boost_val can be in host or device memory. The pointers are only
+ *  read by \ref hipsparseScsrilu02 "hipsparseXcsrilu02()", using the pointer mode set when
+ *  calling this function, so they must remain valid until then.
  *
  *  \deprecated
  *  This function is deprecated when using the CUDA backend (CUDA 12.0+) and will be
@@ -168,8 +178,10 @@ hipsparseStatus_t hipsparseDcsrilu02_numericBoost(hipsparseHandle_t handle,
  *  enable_boost    enable/disable numeric boost.
  *  @param[in]
  *  tol             tolerance to determine whether a numerical value is replaced or not.
+ *                  \p tol can be in host or device memory.
  *  @param[in]
  *  boost_val       boost value to replace a numerical value.
+ *                  \p boost_val can be in host or device memory.
  *
  *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
  *  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
@@ -194,7 +206,9 @@ hipsparseStatus_t hipsparseCcsrilu02_numericBoost(hipsparseHandle_t handle,
  *  \note The boost value is enabled by setting \p enable_boost to 1 or disabled by
  *  setting \p enable_boost to 0.
  *
- *  \note \p tol and \p boost_val can be in host or device memory.
+ *  \note \p tol and \p boost_val can be in host or device memory. The pointers are only
+ *  read by \ref hipsparseScsrilu02 "hipsparseXcsrilu02()", using the pointer mode set when
+ *  calling this function, so they must remain valid until then.
  *
  *  \deprecated
  *  This function is deprecated when using the CUDA backend (CUDA 12.0+) and will be
@@ -208,8 +222,10 @@ hipsparseStatus_t hipsparseCcsrilu02_numericBoost(hipsparseHandle_t handle,
  *  enable_boost    enable/disable numeric boost.
  *  @param[in]
  *  tol             tolerance to determine whether a numerical value is replaced or not.
+ *                  \p tol can be in host or device memory.
  *  @param[in]
  *  boost_val       boost value to replace a numerical value.
+ *                  \p boost_val can be in host or device memory.
  *
  *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
  *  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
@@ -256,6 +272,7 @@ hipsparseStatus_t hipsparseZcsrilu02_numericBoost(hipsparseHandle_t handle,
 *  pBufferSizeInBytes number of bytes of the temporary storage buffer required by
 *                     \ref hipsparseScsrilu02_analysis "hipsparseXcsrilu02_analysis()" and
 *                     \ref hipsparseScsrilu02 "hipsparseXcsrilu02()".
+*                     \p pBufferSizeInBytes is always a host variable, regardless of the pointer mode.
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p nnz, \p descrA, \p csrSortedValA,
@@ -304,6 +321,7 @@ hipsparseStatus_t hipsparseScsrilu02_bufferSize(hipsparseHandle_t         handle
 *  pBufferSizeInBytes number of bytes of the temporary storage buffer required by
 *                     \ref hipsparseScsrilu02_analysis "hipsparseXcsrilu02_analysis()" and
 *                     \ref hipsparseScsrilu02 "hipsparseXcsrilu02()".
+*                     \p pBufferSizeInBytes is always a host variable, regardless of the pointer mode.
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p nnz, \p descrA, \p csrSortedValA,
@@ -351,6 +369,7 @@ hipsparseStatus_t hipsparseDcsrilu02_bufferSize(hipsparseHandle_t         handle
 *  pBufferSizeInBytes number of bytes of the temporary storage buffer required by
 *                     \ref hipsparseScsrilu02_analysis "hipsparseXcsrilu02_analysis()" and
 *                     \ref hipsparseScsrilu02 "hipsparseXcsrilu02()".
+*                     \p pBufferSizeInBytes is always a host variable, regardless of the pointer mode.
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p nnz, \p descrA, \p csrSortedValA,
@@ -398,6 +417,7 @@ hipsparseStatus_t hipsparseCcsrilu02_bufferSize(hipsparseHandle_t         handle
 *  pBufferSizeInBytes number of bytes of the temporary storage buffer required by
 *                     \ref hipsparseScsrilu02_analysis "hipsparseXcsrilu02_analysis()" and
 *                     \ref hipsparseScsrilu02 "hipsparseXcsrilu02()".
+*                     \p pBufferSizeInBytes is always a host variable, regardless of the pointer mode.
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p nnz, \p descrA, \p csrSortedValA,
@@ -448,6 +468,7 @@ hipsparseStatus_t hipsparseZcsrilu02_bufferSize(hipsparseHandle_t         handle
 *  pBufferSizeInBytes number of bytes of the temporary storage buffer required by
 *                     \ref hipsparseScsrilu02_analysis "hipsparseXcsrilu02_analysis()" and
 *                     \ref hipsparseScsrilu02 "hipsparseXcsrilu02()".
+*                     \p pBufferSizeInBytes is always a host variable, regardless of the pointer mode.
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p nnz, \p descrA, \p csrSortedValA,
@@ -495,6 +516,7 @@ hipsparseStatus_t hipsparseScsrilu02_bufferSizeExt(hipsparseHandle_t         han
 *  pBufferSizeInBytes number of bytes of the temporary storage buffer required by
 *                     \ref hipsparseScsrilu02_analysis "hipsparseXcsrilu02_analysis()" and
 *                     \ref hipsparseScsrilu02 "hipsparseXcsrilu02()".
+*                     \p pBufferSizeInBytes is always a host variable, regardless of the pointer mode.
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p nnz, \p descrA, \p csrSortedValA,
@@ -541,6 +563,7 @@ hipsparseStatus_t hipsparseDcsrilu02_bufferSizeExt(hipsparseHandle_t         han
 *  pBufferSizeInBytes number of bytes of the temporary storage buffer required by
 *                     \ref hipsparseScsrilu02_analysis "hipsparseXcsrilu02_analysis()" and
 *                     \ref hipsparseScsrilu02 "hipsparseXcsrilu02()".
+*                     \p pBufferSizeInBytes is always a host variable, regardless of the pointer mode.
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p nnz, \p descrA, \p csrSortedValA,
@@ -587,6 +610,7 @@ hipsparseStatus_t hipsparseCcsrilu02_bufferSizeExt(hipsparseHandle_t         han
 *  pBufferSizeInBytes number of bytes of the temporary storage buffer required by
 *                     \ref hipsparseScsrilu02_analysis "hipsparseXcsrilu02_analysis()" and
 *                     \ref hipsparseScsrilu02 "hipsparseXcsrilu02()".
+*                     \p pBufferSizeInBytes is always a host variable, regardless of the pointer mode.
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p nnz, \p descrA, \p csrSortedValA,

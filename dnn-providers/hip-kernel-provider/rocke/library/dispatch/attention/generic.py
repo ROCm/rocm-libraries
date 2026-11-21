@@ -21,8 +21,8 @@ from typing import Tuple
 from kernels.common.attention_unified import (
     select_auto_path,
     supports_native_unified_attention,
-    supports_native_unified_attention_3d_tiled,
-    supports_native_unified_attention_tiled,
+    supports_native_unified_attention_coverage,
+    unified_lse_path_gate,
 )
 from rocke.core.arch import arches_with_own_facts
 from rocke.dispatch.core import (
@@ -42,7 +42,7 @@ from .common import (
     AttentionRequest,
     AttentionSpec,
     FAMILY,
-    _problem,
+    attention_problem,
     _request_errors,
     _selector_matches,
 )
@@ -78,6 +78,16 @@ _UNIFIED_LSE_CAPABILITY = dataclasses.replace(
     _UNIFIED_CAPABILITY, supports_features=ATTENTION_FEATURES | {"lse"}
 )
 
+# The two generic unified-path algorithms this module registers, named so a
+# caller outside this package (the SDPA gate) does not have to reconstruct
+# ``f"unified_{path}"`` itself.
+UNIFIED_2D_ALGORITHM = "unified_2d"
+UNIFIED_3D_ALGORITHM = "unified_3d"
+_UNIFIED_PATH_ALGORITHMS = {"2d": UNIFIED_2D_ALGORITHM, "3d": UNIFIED_3D_ALGORITHM}
+
+# The D256 bf16 decode candidate's algorithm (see _make_d256_decode_candidate).
+D256_DECODE_ALGORITHM = "d256_decode"
+
 
 def _make_candidate(*, path: str, priority: int) -> KernelCandidate:
     spec_id = f"unified_{path}"
@@ -91,16 +101,10 @@ def _make_candidate(*, path: str, priority: int) -> KernelCandidate:
         ok, why = _selector_matches(req, candidate)
         if not ok:
             return False, why
-        problem = _problem(req)
-        # The scalar gate is the coverage check; it refuses LSE (the scalar
-        # kernel writes none), so ask it about the LSE-off problem and let the
-        # path's own gate rule on LSE below.
-        coverage = (
-            dataclasses.replace(problem, emit_lse=False)
-            if problem.emit_lse
-            else problem
-        )
-        ok, why = supports_native_unified_attention(coverage, arch=req.arch)
+        problem = attention_problem(req)
+        # The scalar gate refuses LSE (the scalar kernel writes none), so coverage
+        # is asked with LSE off; the path's own gate rules on LSE below.
+        ok, why = supports_native_unified_attention_coverage(problem, arch=req.arch)
         if not ok:
             return False, why
         # Split-KV also takes the LSE requests that ``select_path(arch)`` sends
@@ -114,12 +118,7 @@ def _make_candidate(*, path: str, priority: int) -> KernelCandidate:
             )
         if problem.emit_lse:
             # The path's own gate owns which arches and features can write LSE.
-            gate = (
-                supports_native_unified_attention_3d_tiled
-                if path == "3d"
-                else supports_native_unified_attention_tiled
-            )
-            ok, why = gate(problem, arch=req.arch)
+            ok, why = unified_lse_path_gate(path)(problem, arch=req.arch)
             if not ok:
                 return False, why
         return True, "ok"
@@ -129,7 +128,7 @@ def _make_candidate(*, path: str, priority: int) -> KernelCandidate:
         if not ok:
             raise ValueError(f"{name} does not support request: {why}")
         assert isinstance(req, AttentionRequest)
-        problem = _problem(req)
+        problem = attention_problem(req)
         return AttentionSpec(
             path=path,
             head_size=problem.head_size,
@@ -148,7 +147,7 @@ def _make_candidate(*, path: str, priority: int) -> KernelCandidate:
     candidate = KernelCandidate(
         name=name,
         family=FAMILY,
-        algorithm=f"unified_{path}",
+        algorithm=_UNIFIED_PATH_ALGORITHMS[path],
         spec_id=spec_id,
         abi_version=ATTENTION_ABI_VERSION,
         priority=priority,
@@ -186,7 +185,7 @@ def _make_d256_decode_candidate() -> KernelCandidate:
         ok, why = _selector_matches(req, candidate)
         if not ok:
             return False, why
-        problem = _problem(req)
+        problem = attention_problem(req)
         ok, why = supports_native_unified_attention(problem, arch=req.arch)
         if not ok:
             return False, why
@@ -203,7 +202,7 @@ def _make_d256_decode_candidate() -> KernelCandidate:
         if not ok:
             raise ValueError(f"{name} does not support request: {why}")
         assert isinstance(req, AttentionRequest)
-        problem = _problem(req)
+        problem = attention_problem(req)
         return AttentionSpec(
             path="3d",
             head_size=problem.head_size,
@@ -220,7 +219,7 @@ def _make_d256_decode_candidate() -> KernelCandidate:
     candidate = KernelCandidate(
         name=name,
         family=FAMILY,
-        algorithm="d256_decode",
+        algorithm=D256_DECODE_ALGORITHM,
         spec_id=spec_id,
         abi_version=ATTENTION_ABI_VERSION,
         priority=5,
