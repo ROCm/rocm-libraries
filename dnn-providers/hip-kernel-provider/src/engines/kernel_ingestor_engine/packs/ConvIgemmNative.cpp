@@ -1856,7 +1856,8 @@ bool kernelMatches(const MatchContext& context,
     if(tile->box != 0
        && (*direction != ConvDirection::BACKWARD_DATA
            || !conv_igemm::boxArgsFor(*problem).has_value()
-           || a.m * a.k * static_cast<long long>(problem->elementBytes) >= BUFFER_LIMIT))
+           || a.m * a.k * static_cast<long long>(problem->elementBytes) >= BUFFER_LIMIT
+           || static_cast<long long>(a.n) * a.di * a.hi * a.wi >= conv_igemm::INT_LIMIT))
     {
         return false;
     }

@@ -50,46 +50,47 @@
 #pragma once
 
 // Box-ordered rows (BOX 1): row m's dx pixel. The rows run class by class (K1BoxArgs), then
-// image, then the class box's (d, h, w); cls gets the class's run per axis.
+// image, then the class box's (d, h, w); cls gets the class's run per axis. 32-bit arithmetic:
+// the pack serves box configs only where the rows stay below 2^31.
 struct K1BoxPos
 {
-    long long pix; // linear dx pixel (n, d, h, w)
+    int pix; // linear dx pixel (n, d, h, w)
     int img, d, h, w;
 };
-__device__ inline K1BoxPos k1BoxDecode(
-    const K1BoxArgs& box, long long m, int images, int dd, int hh, int ww, int (&cls)[3])
+__device__ inline K1BoxPos
+    k1BoxDecode(const K1BoxArgs& box, int m, int images, int dd, int hh, int ww, int (&cls)[3])
 {
-    long long rem = m;
-    long long unit = static_cast<long long>(images) * hh * ww; // rows a d coordinate
+    int rem = m;
+    int unit = images * hh * ww; // rows a d coordinate
     int j0 = 0;
 #pragma unroll
     for(int j = 0; j < K1_BOX_RUNS - 1; ++j)
     {
-        const long long rows = unit * box.size[0][j0];
+        const int rows = unit * box.size[0][j0];
         if(j0 + 1 < box.runs[0] && rem >= rows)
         {
             rem -= rows;
             ++j0;
         }
     }
-    unit = static_cast<long long>(images) * box.size[0][j0] * ww; // rows an h coordinate
+    unit = images * box.size[0][j0] * ww; // rows an h coordinate
     int j1 = 0;
 #pragma unroll
     for(int j = 0; j < K1_BOX_RUNS - 1; ++j)
     {
-        const long long rows = unit * box.size[1][j1];
+        const int rows = unit * box.size[1][j1];
         if(j1 + 1 < box.runs[1] && rem >= rows)
         {
             rem -= rows;
             ++j1;
         }
     }
-    unit = static_cast<long long>(images) * box.size[0][j0] * box.size[1][j1]; // a w coordinate
+    unit = images * box.size[0][j0] * box.size[1][j1]; // rows a w coordinate
     int j2 = 0;
 #pragma unroll
     for(int j = 0; j < K1_BOX_RUNS - 1; ++j)
     {
-        const long long rows = unit * box.size[2][j2];
+        const int rows = unit * box.size[2][j2];
         if(j2 + 1 < box.runs[2] && rem >= rows)
         {
             rem -= rows;
@@ -100,15 +101,16 @@ __device__ inline K1BoxPos k1BoxDecode(
     cls[1] = j1;
     cls[2] = j2;
     const int sd = box.size[0][j0], sh = box.size[1][j1], sw = box.size[2][j2];
-    const long long boxPix = static_cast<long long>(sd) * sh * sw;
+    const int boxPix = sd * sh * sw;
     K1BoxPos p;
-    p.img = static_cast<int>(rem / boxPix);
-    int r = static_cast<int>(rem - p.img * boxPix);
-    p.w = box.begin[2][j2] + r % sw;
-    r /= sw;
-    p.h = box.begin[1][j1] + r % sh;
-    p.d = box.begin[0][j0] + r / sh;
-    p.pix = ((static_cast<long long>(p.img) * dd + p.d) * hh + p.h) * ww + p.w;
+    p.img = rem / boxPix;
+    int r = rem - p.img * boxPix;
+    const int rq = r / sw;
+    p.w = box.begin[2][j2] + r - rq * sw;
+    const int rr = rq / sh;
+    p.h = box.begin[1][j1] + rq - rr * sh;
+    p.d = box.begin[0][j0] + rr;
+    p.pix = ((p.img * dd + p.d) * hh + p.h) * ww + p.w;
     return p;
 }
 
@@ -189,8 +191,10 @@ __device__ __attribute__((always_inline)) void k1ConvFlexReg(const K1Args& a CON
     {
         const long long last = (m0 + BM < gather.rows ? m0 + BM : gather.rows) - 1;
         int cf[3], cl[3];
-        k1BoxDecode(*box, m0, a.n, gather.out[0], gather.out[1], gather.out[2], cf);
-        k1BoxDecode(*box, last, a.n, gather.out[0], gather.out[1], gather.out[2], cl);
+        k1BoxDecode(
+            *box, static_cast<int>(m0), a.n, gather.out[0], gather.out[1], gather.out[2], cf);
+        k1BoxDecode(
+            *box, static_cast<int>(last), a.n, gather.out[0], gather.out[1], gather.out[2], cl);
         int lo[3], hi[3];
 #pragma unroll
         for(int ax = 0; ax < 3; ++ax)
@@ -301,8 +305,13 @@ __device__ __attribute__((always_inline)) void k1ConvFlexReg(const K1Args& a CON
             if constexpr(BOX != 0)
             {
                 int cls[3];
-                const K1BoxPos p
-                    = k1BoxDecode(*box, m, a.n, gather.out[0], gather.out[1], gather.out[2], cls);
+                const K1BoxPos p = k1BoxDecode(*box,
+                                               static_cast<int>(m),
+                                               a.n,
+                                               gather.out[0],
+                                               gather.out[1],
+                                               gather.out[2],
+                                               cls);
                 img = p.img;
                 od = p.d;
                 oh = p.h;
@@ -707,7 +716,13 @@ __device__ __attribute__((always_inline)) void k1ConvFlexReg(const K1Args& a CON
             if constexpr(BOX != 0)
             {
                 int cls[3];
-                pm = k1BoxDecode(*box, m, a.n, gather.out[0], gather.out[1], gather.out[2], cls)
+                pm = k1BoxDecode(*box,
+                                 static_cast<int>(m),
+                                 a.n,
+                                 gather.out[0],
+                                 gather.out[1],
+                                 gather.out[2],
+                                 cls)
                          .pix;
             }
 #pragma unroll
@@ -749,7 +764,14 @@ __device__ __attribute__((always_inline)) void k1ConvFlexReg(const K1Args& a CON
         if constexpr(BOX != 0)
         {
             int cls[3];
-            pm = k1BoxDecode(*box, m, a.n, gather.out[0], gather.out[1], gather.out[2], cls).pix;
+            pm = k1BoxDecode(*box,
+                             static_cast<int>(m),
+                             a.n,
+                             gather.out[0],
+                             gather.out[1],
+                             gather.out[2],
+                             cls)
+                     .pix;
         }
 #pragma unroll
         for(int j = 0; j < FN; ++j)
