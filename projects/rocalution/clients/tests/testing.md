@@ -77,7 +77,7 @@ HIP_VISIBLE_DEVICES=0 gpu-run ./rocalution-unit-test
 ```
 
 > When any `ROCALUTION_EMULATION_*` var is set, GPU-heavy infrastructure suites (`local_matrix_*`,
-> `local_vector`, `local_stencil`, `backend`, `preconditioner` except its repeated-move test, MPI infra) call `GTEST_SKIP()`, and
+> `local_vector`, `backend`, `preconditioner` except its repeated-move test, MPI infra) call `GTEST_SKIP()`, and
 > solver suites shrink their parameter lists. If no emulation variables are set, the full set of parameter combinations is exercised.
 
 **3. Add the right kind of test:** see [Choosing the Right Test Type](#choosing-the-right-test-type).
@@ -251,7 +251,7 @@ transfers and multi-node communication behave as expected.
 | Direct solvers | LU, QR, inversion |
 | Algebraic multigrid | pairwise AMG, Ruge–Stüben AMG, smoothed-aggregation (SA-AMG), unsmoothed-aggregation (UA-AMG) |
 | Preconditioners | Jacobi, GS/SGS, ILU/ILUT/IC, ItILU0, (AI)Chebyshev, FSAI, SPAI, TNS, AS/RAS, multi-colored GS/SGS/ILU, multi-elimination, variable |
-| Structures (GPU) | `local_matrix` ops / conversions / itsolve / solve, `local_vector`, `local_stencil` |
+| Structures (GPU) | `local_matrix` ops / conversions, `local_vector` |
 | Other | Chebyshev iteration, mixed precision, iterative-solver integration (`test_itersolver`, coverage-only) |
 | MPI (`SUPPORT_MPI`) | `global_matrix`, `global_vector`, `parallel_manager`, `global_amg` (multi-rank AMG setup, and `ReBuildNumeric()` with host levels) |
 
@@ -296,15 +296,14 @@ mpirun -np 2 ./rocalution-test --gtest_filter='global_amg/*:global_matrix/*'
 Laplacian) across backends and both precisions; the emulation tiers shrink parameter lists rather than
 running exhaustive size sweeps. The strategy prefers cross-backend correctness over large problem sizes.
 
-**Overlap with the unit tests:** the `local_matrix*`, `local_vector`, `local_stencil` and `backend`
-suites skip in the `quick`, `standard` and `comprehensive` categories and run in `full`, except
+**Overlap with the unit tests:** the `local_matrix*`, `local_vector` and `backend` suites skip in the `quick`, `standard` and `comprehensive` categories and run in `full`, except
 `backend_omp_parallel_region` and `backend_omp_restore_state`, which run in every category. They
 test operations that the unit tests now check against independent references. They are kept until
 a review of each suite confirms that the unit tests cover all of its checks, on every platform and
 in every CI job that runs the suite. A suite that is covered is then deleted, not maintained next to
-the unit tests. The `local_matrix_allocations`, `local_matrix_zero`, `local_matrix_set_data_ptr`
-and `local_matrix_multicoloring` suites and the ItLUSolve case of `local_matrix_itsolve` have been
-deleted on that basis. The Jenkins test command runs both unit-test binaries after
+the unit tests. The `local_matrix_allocations`, `local_matrix_zero`, `local_matrix_set_data_ptr`,
+`local_matrix_multicoloring`, `local_matrix_itsolve`, `local_matrix_solve` and `local_stencil_bad_args`
+suites have been deleted on that basis. The Jenkins test command runs both unit-test binaries after
 `rocalution-test`, so the Jenkins lanes still run these checks. A clients-only build (`install.sh
 --clients-only`) doesn't build the unit tests, and the `rtest.xml` sets run only
 `rocalution-test`, so clients-only builds and `rtest.xml` runs no longer run these checks. The
@@ -365,7 +364,7 @@ The presubmit gate is the monorepo **TheRock CI** GitHub Actions workflow
 (`.github/scripts/therock_configure_ci.py`) and tests only changed projects
 (`-DTHEROCK_ENABLE_ROCALUTION=ON` + sparse + rand). By default it runs the CTest **`standard`**
 category, which sets `ROCALUTION_EMULATION_REGRESSION=1` — the regression subset in which GPU-heavy
-infrastructure suites (`local_matrix_*`, `local_vector`, `local_stencil`, `backend`, MPI infra) skip
+infrastructure suites (`local_matrix_*`, `local_vector`, `backend`, MPI infra) skip
 themselves and solver suites use reduced parameter sets. The other categories map to the emulation
 vars: `quick` → `ROCALUTION_EMULATION_SMOKE=1`, `comprehensive` → `ROCALUTION_EMULATION_EXTENDED=1`,
 `full` → complete parameter sweep (no emulation var). Scope widens per PR via labels
