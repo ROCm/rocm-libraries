@@ -17,10 +17,10 @@
 
 /**
  * @file ConvRdnaCommon.hpp
- * @brief What the RDNA convolution packs (descriptors/hip/conv_rdna/ and hip/conv_dw3d_rdna/)
- *        share: operand validation, layout detection, the convolution geometry, and the
- *        features a ranker reads. Node-type specific matching and the dispatch stay in each
- *        pack.
+ * @brief What the RDNA convolution packs (descriptors/hip/conv_rdna/, hip/conv_dw3d_rdna/ and
+ *        hip/conv_dw2d_rdna/) share: operand validation, layout detection, the convolution
+ *        geometry, and the features a ranker reads. Node-type specific matching and the
+ *        dispatch stay in each pack.
  *
  * Every problem is described in the forward view: x is (N, C, spatial), w is
  * (K, C / groups, filter), y is (N, K, out). A backward-data pack passes dx as x and dy as y.

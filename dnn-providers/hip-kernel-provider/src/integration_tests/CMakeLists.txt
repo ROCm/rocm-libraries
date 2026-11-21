@@ -197,6 +197,16 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
             PRIVATE HKP_TEST_HIP_CONV_FWD_DW3D_RDNA=1
         )
     endif()
+    # The RDNA depthwise 2-D conv forward engine ships from descriptors/hip/conv_dw2d_rdna/.
+    hkp_product_offers_engine(_hkp_hip_conv_fwd_dw2d_rdna_bundle "hipkernel:hip_conv_fwd_dw2d_rdna")
+    if(_hkp_hip_conv_fwd_dw2d_rdna_bundle)
+        target_sources(hip_kernel_provider_integration_tests PRIVATE
+            kernel_ingestor_engine/IntegrationGpuHipConvFwdDw2dRdna.cpp
+        )
+        target_compile_definitions(hip_kernel_provider_integration_tests
+            PRIVATE HKP_TEST_HIP_CONV_FWD_DW2D_RDNA=1
+        )
+    endif()
     # The paged-K/V suite of the RDNA prefill engine, gated like the knob suites; it
     # GTEST_SKIPs on devices the engine's objects are not built for.
     hkp_product_offers_engine(_hkp_rdna_attention_bundle "hipkernel:Gfx1151WmmaAttention")
