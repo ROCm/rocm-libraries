@@ -5,6 +5,7 @@
 
 #include "ck_tile/core.hpp"
 #include "ck_tile/core/arch/amd_cluster_load.hpp"
+#include "ck_tile/core/arch/amd_tdm_descriptor.hpp"
 
 // gfx1250 fp8 decode attention over the SHUFFLE 5D paged KV cache (sglang layout):
 //   K [num_blocks][nhead_k][hdim / 16][16 tokens][16 B]
@@ -249,6 +250,35 @@ struct FmhaDecodePaged5dKernel
         return f32_to_bf16(a) | (f32_to_bf16(b) << 16);
     }
     CK_TILE_DEVICE static float exp2(float x) { return __builtin_amdgcn_exp2f(x); }
+
+    // TDM gather of kWavePages pages to consecutive LDS pages: rows of kPageBytes, row index
+    // block * nhead_k + kv head
+    CK_TILE_DEVICE static void
+    tdm_pages(const uint8_t* base, uint8_t* lds, const int32_t (&rows)[kWavePages])
+    {
+        static_assert(kWavePages <= 4);
+        TDM_GROUP0 g0{static_cast<uint32_t>(reinterpret_cast<uintptr_t>(to_lds(lds))),
+                      reinterpret_cast<uintptr_t>(base),
+                      static_cast<uint32_t>(TDMGatherIndexSize::Row32bit_Index),
+                      1};
+        TDM_GROUP1 g1;
+        g1.data_size = 3; // 8-byte units
+        g1.tensorDim0(kPageBytes / 8);
+        g1.tensorDim1(0x7fffffff);
+        g1.tensorDim0Stride(kPageBytes / 8);
+        g1.tile_dim0 = kPageBytes / 8;
+        g1.tile_dim1 = kWavePages; // row indices
+        TDM_GROUP2 g2;
+        for(index_t i = 0; i < kWavePages; ++i)
+            g2.mode1.setRowIndex32(i, static_cast<uint32_t>(rows[i]));
+        __builtin_amdgcn_tensor_load_to_lds(
+            bit_cast<uint32x4_t>(amd_wave_read_first_lane(g0.bitfield)),
+            amd_wave_read_first_lane(g1.bitfield),
+            amd_wave_read_first_lane(g2.bitfield),
+            int32x4_t{},
+            int32x8_t{},
+            0);
+    }
     // pairwise: shorter dependency chains than a running max or sum
     template <index_t N>
     CK_TILE_DEVICE static float tree_max(const float* x)
@@ -373,6 +403,22 @@ struct FmhaDecodePaged5dKernel
         };
         const auto issue = [&](index_t t) {
             const index_t st = t % kStages;
+            if constexpr(kWaveSplit)
+            {
+                // one TDM gather each for K and V; a page past the split repeats the last one
+                // (its V is zeroed once it lands)
+                int32_t rows[kWavePages];
+                for(index_t q = 0; q < kWavePages; ++q)
+                {
+                    const index_t idx = min(page_idx(t, q), pend - 1 - pg0);
+                    const int32_t blk = __builtin_amdgcn_readlane(
+                        (idx >> 5) == cur_chunk ? bt_cur : bt_next, idx & 31);
+                    rows[q] = blk * a.nhead_k + g;
+                }
+                tdm_pages(a.k, kbuf(st, 0), rows);
+                tdm_pages(a.v, vbuf(st, 0), rows);
+                return;
+            }
             for(index_t q = 0; q < kWavePages; ++q)
             {
                 // a page past the split copies the last one (its V is zeroed once it lands): every
@@ -423,7 +469,14 @@ struct FmhaDecodePaged5dKernel
 
         // step t's copies of this wave are in LDS; zero the V bytes of tokens past the context
         const auto land = [&](index_t t) {
-            if(issued > t + 2)
+            if constexpr(kWaveSplit)
+            {
+                if(issued > t + 1)
+                    __builtin_amdgcn_s_wait_tensorcnt(2);
+                else
+                    __builtin_amdgcn_s_wait_tensorcnt(0);
+            }
+            else if(issued > t + 2)
                 __builtin_amdgcn_s_wait_asynccnt(16 * kWavePages);
             else if(issued > t + 1)
                 __builtin_amdgcn_s_wait_asynccnt(8 * kWavePages);
