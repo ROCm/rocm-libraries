@@ -348,6 +348,44 @@ def main():
             if target_hash not in algs[alg]:
                 algs[alg][target_hash] = {}
 
+            max_threads_per_block = data["max_threads_per_block"]
+            warp_size = data["warp_size"]
+            upper_bound_exceptions = data["upper_bound_exceptions"]
+            lower_bound_exceptions = data["lower_bound_exceptions"]
+
+            # These get custom bound checks below, so skip them in the generic loop
+            lower_bound_exceptions.append("ipt")
+            lower_bound_exceptions.append("block_size_x")
+
+            upper_bound_exceptions.append("block_size_x")
+
+            tune_params = data["tune_params"]
+            chosen_ipt = config_data["ipt"]
+            chosen_block_size_x = config_data["block_size_x"]
+
+            # ipt can't go below 1
+            if chosen_ipt > 1 and chosen_ipt == min(tune_params["ipt"]):
+                log.warning(f"The chosen ipt was at the lower bound of ipt at {chosen_ipt}, consider expanding the ipt range down to 1")
+            
+            # block_size_x shouldn't go below warp_size
+            if chosen_block_size_x > warp_size and chosen_block_size_x == min(tune_params["block_size_x"]):
+                log.warning(f"The chosen block_size_x was at the lower bound of block_size_x at {chosen_block_size_x}, consider expanding the block_size_x range down to `self.warp_size`")
+
+            # block_size_x can't exceed max_threads_per_block
+            if chosen_block_size_x < max_threads_per_block and chosen_block_size_x == max(tune_params["block_size_x"]):
+                log.warning(f"The chosen block_size_x was at the upper bound of block_size_x at {chosen_block_size_x}, consider expanding the block_size_x range up to `self.max_threads_per_block`")
+
+            for param in config_data:
+                # Skip non-numeric params (e.g. enums), as they have no meaningful bounds
+                if not all(isinstance(x, (int, float)) for x in tune_params[param]):
+                    continue
+                if param not in upper_bound_exceptions:
+                    if config_data[param] == max(tune_params[param]):
+                        log.warning(f"The chosen {param} was at the upper bound of {param} at {config_data[param]}, consider expanding the {param} range up, or ignore this by adding it to `_get_upper_bound_param_exceptions(self) -> List[str]`")
+                if param not in lower_bound_exceptions:
+                    if config_data[param] == min(tune_params[param]):
+                        log.warning(f"The chosen {param} was at the lower bound of {param} at {config_data[param]}, consider expanding the {param} range down, or ignore this by adding it to `_get_lower_bound_param_exceptions(self) -> List[str]`")
+
             type_hash, config = make_config(data, config_data)
 
             # Add config entry
