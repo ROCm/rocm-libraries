@@ -556,4 +556,3 @@ ConvSolution ConvHipImplicitGemmGroupWrwXdlops::GetSolution(
 } // namespace conv
 } // namespace solver
 } // namespace miopen
-
