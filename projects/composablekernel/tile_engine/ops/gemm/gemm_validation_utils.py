@@ -577,6 +577,7 @@ GEMM_MX_PIPELINES_BY_ARCH = {
     "gfx1250": (
         "comp_tdm",
         "comp_tdm_v2",
+        "comp_tdm_scheduled",
         "comp_async",
         "comp_async_eight_waves",
         "weight_preshuffle",
@@ -587,6 +588,85 @@ GEMM_MX_PIPELINES = list(
         p for pipelines in GEMM_MX_PIPELINES_BY_ARCH.values() for p in pipelines
     )
 )
+# comp_tdm_scheduled: K-major scales, its own tuning knobs and the "tdm" epilogue
+# (MxTdmStoreEpilogue: TdmEpilogue, E through LDS).
+MX_TDM_SCHEDULED_PIPELINE = "comp_tdm_scheduled"
+MX_TDM_SCHEDULED_EPILOGUES = ("tdm",)
+MX_TDM_SCHEDULED_EPILOGUE = "tdm"
+
+
+def load_mx_tdm_scheduled():
+    """The mx_gemm/mx_tdm_scheduled.py module (the Python form of the comp_tdm_scheduled spec)."""
+    import importlib.util
+    import os
+    import sys
+
+    name = "mx_tdm_scheduled"
+    if name not in sys.modules:
+        path = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "mx_gemm", "mx_tdm_scheduled.py"
+        )
+        spec = importlib.util.spec_from_file_location(name, path)
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[name] = module
+        spec.loader.exec_module(module)
+    return sys.modules[name]
+
+
+def mx_tdm_scheduled_reject_reason(
+    tile_m: int,
+    tile_n: int,
+    tile_k: int,
+    warp_m: int,
+    warp_n: int,
+    warp_k: int,
+    warp_tile_m: int,
+    warp_tile_n: int,
+    warp_tile_k: int,
+    a_datatype: str,
+    b_datatype: str,
+    c_datatype: str,
+    gpu_target: str,
+    tuning=None,
+) -> str:
+    """Why a comp_tdm_scheduled instance is invalid ("" if valid). With tuning None, why the tile is
+    invalid under every schedule (the tuning_config product is checked per instance later).
+    """
+    if _base_gfx_arch(gpu_target) != "gfx1250":
+        return f"{MX_TDM_SCHEDULED_PIPELINE} requires gfx1250"
+    sched = load_mx_tdm_scheduled()
+    out = sched.TE_OUT_DTYPES.get(c_datatype)
+    if (
+        out is None
+        or a_datatype not in sched.MX_DTYPES
+        or b_datatype not in sched.MX_DTYPES
+    ):
+        return f"{MX_TDM_SCHEDULED_PIPELINE} does not support {a_datatype}x{b_datatype}->{c_datatype}"
+    tile = {
+        "tile_m": tile_m,
+        "tile_n": tile_n,
+        "tile_k": tile_k,
+        "warp_m": warp_m,
+        "warp_n": warp_n,
+        "warp_k": warp_k,
+        "warp_tile_m": warp_tile_m,
+        "warp_tile_n": warp_tile_n,
+        "warp_tile_k": warp_tile_k,
+    }
+    candidates = [tuning] if tuning is not None else sched.schedule_tunings()
+    first = None
+    for candidate in candidates:
+        try:
+            spec = sched.spec_from_tile(tile, candidate, a_datatype, b_datatype, out)
+            reason = sched.validate_instance(spec, candidate)
+        except ValueError as e:
+            return str(e)
+        if reason == "ok":
+            return ""
+        first = first or reason
+    return f"{MX_TDM_SCHEDULED_PIPELINE}: {first}"
+
+
 GEMM_BQUANT_PIPELINES = ["compv3"]
 
 GEMM_ABQUANT_PIPELINES = ["compv3"]
@@ -885,6 +965,12 @@ def is_trait_combination_valid(
                 pipeline in ("comp_tdm", "comp_tdm_v2")
                 and epilogue == "tdm"
                 and not persistent_or_preshuffle_quant
+            )
+            or (
+                pipeline == MX_TDM_SCHEDULED_PIPELINE
+                and epilogue in MX_TDM_SCHEDULED_EPILOGUES
+                and not persistent_or_preshuffle_quant
+                and not any((pad_m, pad_n, pad_k))
             )
         )
     if kernel_name_prefix == "gemm_preshuffle" and preshuffle_pipeline_reject_reason(
@@ -1667,6 +1753,27 @@ def is_tile_config_valid(
         return False
     if warp_tile_m <= 0 or warp_tile_n <= 0 or warp_tile_k <= 0:
         return False
+
+    if pipeline == MX_TDM_SCHEDULED_PIPELINE:
+        # The comp_tdm_scheduled spec owns its wave groups, atoms and LDS layout.
+        reason = mx_tdm_scheduled_reject_reason(
+            tile_m,
+            tile_n,
+            tile_k,
+            warp_m,
+            warp_n,
+            warp_k,
+            warp_tile_m,
+            warp_tile_n,
+            warp_tile_k,
+            a_datatype,
+            b_datatype,
+            c_datatype,
+            gpu_target,
+        )
+        if reason:
+            logging.debug(f"comp_tdm_scheduled validation failed: {reason}")
+        return not reason
 
     # Check that warp tiles fit within block tiles
     if warp_m * warp_tile_m > tile_m:

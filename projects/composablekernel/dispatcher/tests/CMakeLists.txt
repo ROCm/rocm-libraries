@@ -483,9 +483,9 @@ foreach(_search_test ck_search_core adaptive_search_coordinator gemm_search_adap
     )
 endforeach()
 
-# MX bridge host tests and CMake configuration tests. Report missing host build
+# MX bridge host tests, CMake configuration tests and comp_tdm_scheduled. Report missing host build
 # tools as a skipped CMake test rather than an all-skipped pass.
-foreach(_mx_test bridge cmake)
+foreach(_mx_test bridge cmake tdm_scheduled)
     add_test(
         NAME dispatcher_test_mx_gemm_${_mx_test}
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/run_unittest_77.py test_mx_gemm_${_mx_test}.py
