@@ -800,6 +800,613 @@ static int make_cfg_tf32_split_k(int idx, rocke_implicit_gemm_conv_spec_t* spec,
     return 0;
 }
 
+/* gfx942 (wave64 MFMA) 3-D NDHWC configs: the 3x3x3 / pad-1 problem the
+ * AOT cache builds its 3-D binaries against. Keep in lockstep with
+ * _gfx942_3d_spec() in conv_implicit_gemm_emit.py (the index table is there).
+ * make_cfg_3d numbers them from 54; parity config N is its config
+ * N - GFX942_3D_OFFSET (they follow the TF32 and MFMA split-K configs 54-85). */
+#define GFX942_3D_OFFSET 32
+
+static rocke_conv_problem_t problem_3d(int groups, int f, int s)
+{
+    int pad = (f - 1) / 2;
+    rocke_conv_problem_t p = rocke_conv_problem_make_3d(
+        1, 16, 16, 16, 128, 128, f, f, f, s, s, s, pad, pad, pad, 1, 1, 1);
+    p.groups = groups;
+    return p;
+}
+
+static void set_dtype(rocke_implicit_gemm_conv_spec_t* spec, const char* dt)
+{
+    spec->dtype_a = dt;
+    spec->dtype_b = dt;
+    spec->dtype_d = dt;
+}
+
+static void set_t256(rocke_implicit_gemm_conv_spec_t* spec)
+{
+    spec->tile_m = 256;
+    spec->tile_n = 64;
+    spec->tile_k = 32;
+    spec->warp_m = 4;
+    spec->warp_n = 1;
+    spec->warp_tile_m = 16;
+    spec->warp_tile_n = 16;
+    spec->warp_tile_k = 16;
+    spec->has_vector_size_a = true;
+    spec->vector_size_a = 8;
+    spec->has_vector_size_b = true;
+    spec->vector_size_b = 8;
+    spec->has_vector_size_c = true;
+    spec->vector_size_c = 8;
+    spec->pipeline = "mem";
+    spec->epilogue = "cshuffle";
+}
+
+static int make_cfg_3d_base(int idx, rocke_implicit_gemm_conv_spec_t* spec, const char** arch);
+
+/* Knob configs 58+: a base 3-D config with opt-in knobs layered on. */
+static int make_cfg_3d(int idx, rocke_implicit_gemm_conv_spec_t* spec, const char** arch)
+{
+    switch(idx)
+    {
+    case 58:
+    case 59:
+    case 61:
+    case 62:
+        if(make_cfg_3d_base(55, spec, arch) != 0)
+            return -1;
+        spec->xcd_remap = idx == 62 ? 0 : 6;
+        spec->m_band = (idx == 59 || idx == 62) ? 32 : 0;
+        spec->chiplet_swizzle = idx == 61;
+        return 0;
+    case 60:
+        if(make_cfg_3d_base(54, spec, arch) != 0)
+            return -1;
+        spec->xcd_remap = 8;
+        spec->has_waves_per_eu = true;
+        spec->waves_per_eu = 2;
+        return 0;
+    case 63:
+    case 65:
+        if(make_cfg_3d_base(55, spec, arch) != 0)
+            return -1;
+        spec->split_k = 2;
+        spec->xcd_remap = idx == 65 ? 6 : 0;
+        spec->m_band = idx == 65 ? 32 : 0;
+        return 0;
+    case 64:
+        if(make_cfg_3d_base(54, spec, arch) != 0)
+            return -1;
+        spec->split_k = 4;
+        return 0;
+    case 66:
+        if(make_cfg_3d_base(56, spec, arch) != 0)
+            return -1;
+        spec->split_k = 2;
+        return 0;
+    case 67:
+    case 68:
+    case 69:
+    case 70:
+    case 71:
+    case 73:
+    case 74:
+        if(make_cfg_3d_base(55, spec, arch) != 0)
+            return -1;
+        spec->reg_prefetch = idx == 73 ? 0 : idx == 68 ? 2 : 1;
+        spec->lds_xor = idx >= 69;
+        spec->lds_kpack_read = idx == 70 || idx == 71;
+        spec->lds_xor_rowkey = idx == 70 || idx == 74;
+        spec->xcd_remap = idx == 70 ? 6 : 0;
+        spec->m_band = idx == 70 ? 32 : 0;
+        spec->split_k = idx == 71 ? 2 : 1;
+        return 0;
+    case 75:
+    case 76:
+    case 77:
+    case 78:
+    case 79:
+    case 82:
+        if(make_cfg_3d(idx == 75 ? 70 : (idx == 78 || idx == 82) ? 71 : 55, spec, arch) != 0)
+            return -1;
+        spec->uniform_k_decode = true;
+        if(idx == 77)
+            spec->reg_prefetch = 2;
+        if(idx == 79)
+        {
+            spec->reg_prefetch = 1;
+            spec->lds_xor = true;
+        }
+        spec->uk_tap_fast = idx >= 77;
+        spec->uk_nopad = idx >= 77 && idx <= 79;
+        spec->fb_skip_empty = idx == 77 || idx == 78;
+        spec->uk_chunk_group = (idx == 79 || idx == 82) ? 2 : 0;
+        if(idx == 78)
+            spec->xcd_remap = 6;
+        return 0;
+    case 83:
+    case 84:
+    case 85:
+    case 86:
+    case 87:
+    case 88:
+    case 89:
+    case 91:
+        if(make_cfg_3d_base(55, spec, arch) != 0)
+            return -1;
+        spec->tile_n = 128;
+        spec->tile_k = 64;
+        spec->warp_n = 2;
+        spec->split_k = 2;
+        spec->uniform_k_decode = true;
+        spec->reg_prefetch = 1;
+        spec->lds_xor = true;
+        spec->lds_kpack_read = true;
+        spec->uk_tap_fast = true;
+        spec->uk_nopad = true;
+        spec->fb_skip_empty = true;
+        spec->xcd_remap = 6;
+        switch(idx)
+        {
+        case 84:
+        case 85:
+            spec->rpf_pingpong = 5;
+            spec->vmem_interleave = idx == 84 ? 5 : 6;
+            spec->pp_b_double = true;
+            spec->pp_split_fetch = idx == 84 ? 3 : 4;
+            break;
+        case 86:
+            spec->rpf_pingpong = 4;
+            spec->rpf_setprio = 1;
+            spec->pp_pre_mfma = 2;
+            break;
+        case 87:
+            spec->rpf_pingpong = 1;
+            break;
+        case 88:
+            spec->rpf_pingpong = 3;
+            spec->pp_b_double = true;
+            break;
+        case 89:
+            spec->rpf_pingpong = 5;
+            spec->vmem_interleave = 5;
+            spec->pp_split_fetch = 10;
+            break;
+        case 91:
+            spec->rpf_pingpong = 5;
+            break;
+        default:
+            break;
+        }
+        return 0;
+    case 92:
+    case 93:
+    case 94:
+    case 95:
+    case 96:
+    case 97:
+        if(make_cfg_3d(idx == 94 ? 85 : (idx == 95 || idx == 96) ? 83 : 84, spec, arch) != 0)
+            return -1;
+        spec->split_tail = idx == 92 || idx == 93 || idx == 96;
+        spec->split_atomic_pairs = idx == 92 || idx == 93 || idx == 95;
+        spec->split_det = (idx == 92 || idx == 96) ? 2 : idx == 94 ? 1 : 0;
+        if(idx == 96)
+            spec->m_band = 32;
+        if(idx == 97)
+            spec->uk_chunk_group = 2;
+        return 0;
+    case 99:
+    case 100:
+    case 101:
+        if(make_cfg_3d(idx == 99 ? 92 : idx == 100 ? 93 : 83, spec, arch) != 0)
+            return -1;
+        spec->cshuffle_m_chunks = idx == 100 ? 4 : 2;
+        spec->epi_lds_barriers = idx == 99;
+        return 0;
+    case 104:
+    case 105:
+    case 106:
+    case 107:
+        if(make_cfg_3d(idx == 104 ? 85 : idx == 106 ? 84 : 83, spec, arch) != 0)
+            return -1;
+        if(idx == 104 || idx == 106)
+        {
+            spec->xcd_remap = 0;
+            spec->split_xcd_remap = 6;
+        }
+        spec->split_atomic_pairs = idx == 104;
+        spec->split_det = idx == 106 ? 0 : 3;
+        spec->cshuffle_m_chunks = idx == 105 ? 2 : 1;
+        spec->split_tail = idx == 107;
+        return 0;
+    case 108:
+    case 109:
+    case 113:
+        if(make_cfg_3d_base(55, spec, arch) != 0)
+            return -1;
+        spec->tile_n = 256;
+        spec->tile_k = 32;
+        spec->warp_n = 2;
+        spec->split_k = 2;
+        spec->uniform_k_decode = true;
+        spec->reg_prefetch = 1;
+        spec->lds_xor = true;
+        spec->uk_tap_fast = true;
+        spec->cshuffle_m_chunks = 4;
+        spec->uk_nopad = true;
+        spec->vmem_interleave = 5;
+        spec->lds_kpack_read = true;
+        spec->uk_chunk_group = 2;
+        spec->rpf_pingpong = 5;
+        spec->lds_xor_rowkey = true;
+        spec->split_atomic_pairs = true;
+        spec->pp_split_fetch = 10;
+        spec->fb_skip_empty = true;
+        spec->split_hybrid = idx == 108 ? 16 : idx == 109 ? 8 : 0;
+        spec->split_det = idx == 108 ? 3 : idx == 109 ? 2 : 0;
+        spec->split_streamk = idx == 113;
+        return 0;
+    case 110:
+    case 111:
+    case 112:
+        if(make_cfg_3d(idx == 111 ? 83 : 84, spec, arch) != 0)
+            return -1;
+        spec->xcd_remap = 0;
+        spec->split_streamk = idx != 111;
+        spec->split_hybrid = idx == 111 ? 4 : 0;
+        spec->split_det = idx == 111 ? 1 : idx == 112 ? 2 : 0;
+        return 0;
+    case 114:
+    case 115:
+    case 116:
+    case 117:
+        if(make_cfg_3d_base(55, spec, arch) != 0)
+            return -1;
+        spec->uniform_k_decode = true;
+        spec->reg_prefetch = 1;
+        spec->xcd_remap = 6;
+        spec->lds_xor = true;
+        spec->uk_xhalo = idx == 115 ? 4 : 8;
+        spec->rpf_setprio = idx == 115 ? 1 : 2;
+        spec->lds_xor_rowkey = true;
+        spec->xh_wait_smem = true;
+        spec->epi_quad_xpose = idx == 117 ? 3 : 4;
+        spec->xh_stride_m = true;
+        spec->fxh_dma = idx == 115 ? 2016 : 1036;
+        spec->lds_kpack_read = true;
+        spec->no_agpr = idx == 115;
+        spec->m_band = idx == 115 ? 32 : 0;
+        spec->uk_tap_fast = idx == 116;
+        return 0;
+    case 119:
+    case 120:
+        if(make_cfg_3d(116, spec, arch) != 0)
+            return -1;
+        spec->xh_yring = idx == 119 ? 14 : 2;
+        return 0;
+    case 118:
+        if(make_cfg_3d_base(55, spec, arch) != 0)
+            return -1;
+        spec->xh_stride_m = true;
+        return 0;
+    case 121:
+    case 122:
+    case 123:
+        if(make_cfg_3d_base(55, spec, arch) != 0)
+            return -1;
+        spec->reg_prefetch = 1;
+        spec->uniform_k_decode = idx == 122;
+        spec->rpf_lds_barrier = idx != 122;
+        spec->rpf_fetch_late = idx != 121;
+        spec->sched_strategy = idx == 123 ? 2 : 0;
+        return 0;
+    case 124:
+    case 125:
+    case 126:
+        if(make_cfg_3d_base(56, spec, arch) != 0)
+            return -1;
+        spec->lds_ahead = true;
+        if(idx == 124)
+        {
+            spec->pipeline = "compv4";
+            spec->uniform_k_decode = true;
+            spec->reg_prefetch = 1;
+            spec->xcd_remap = 6;
+            spec->lds_xor = true;
+            spec->uk_tap_fast = true;
+            spec->lds_kpack_read = true;
+            spec->defer_mfma = 3;
+            spec->vmem_interleave = 4;
+            return 0;
+        }
+        spec->pipeline = "compv3";
+        spec->reg_prefetch = idx == 125 ? 1 : 2;
+        spec->defer_mfma = idx == 125 ? 2 : 0;
+        spec->defer_mfma_per_write = idx == 125 ? 3 : 0;
+        return 0;
+    case 154:
+    case 157:
+        /* 57 + epi_quad_xpose=1 (the pointwise D address) / + split_k=2:
+         * rejected (pointwise atomic split) */
+        if(make_cfg_3d_base(57, spec, arch) != 0)
+            return -1;
+        if(idx == 154)
+            spec->epi_quad_xpose = 1;
+        else
+            spec->split_k = 2;
+        return 0;
+    case 155:
+    case 156:
+        /* 114 with warp_m=1 / tile_n=128: the x-halo B DMA list without the
+         * 4-wave form (155: a 65-segment wave range) */
+        if(make_cfg_3d(114, spec, arch) != 0)
+            return -1;
+        if(idx == 155)
+            spec->warp_m = 1;
+        else
+            spec->tile_n = 128;
+        return 0;
+    case 158:
+        /* 111 with split_det=0 + split_zero_first: rejected (split_hybrid
+         * runs the stream-K loop) */
+        if(make_cfg_3d(111, spec, arch) != 0)
+            return -1;
+        spec->split_det = 0;
+        spec->split_zero_first = true;
+        return 0;
+    case 159:
+        /* 94 without xcd_remap + split_xcd_remap=6: rejected (the split_det 1
+         * owner dispatched before its slices) */
+        if(make_cfg_3d(94, spec, arch) != 0)
+            return -1;
+        spec->xcd_remap = 0;
+        spec->split_xcd_remap = 6;
+        return 0;
+    case 152:
+        /* 55 + split_k=2, split_atomic: rejected (a 3-D split is atomic already) */
+        if(make_cfg_3d_base(55, spec, arch) != 0)
+            return -1;
+        spec->split_k = 2;
+        spec->split_atomic = true;
+        return 0;
+    case 148:
+    case 149:
+    case 150:
+        /* 115 / 119 / 114 + xh_pad (the padded-input x-halo DMA loop) */
+        if(make_cfg_3d(idx == 148 ? 115 : idx == 149 ? 119 : 114, spec, arch) != 0)
+            return -1;
+        spec->xh_pad = true;
+        return 0;
+    case 146:
+    case 147:
+        /* 55 / 54 + split_addr_k_decode */
+        if(make_cfg_3d_base(idx == 146 ? 55 : 54, spec, arch) != 0)
+            return -1;
+        spec->split_addr_k_decode = true;
+        return 0;
+    case 144:
+    case 145:
+        /* 84 / 87 + pp_end_guard */
+        if(make_cfg_3d(idx == 144 ? 84 : 87, spec, arch) != 0)
+            return -1;
+        spec->pp_end_guard = true;
+        return 0;
+    case 142:
+    case 143:
+        if(make_cfg_3d_base(55, spec, arch) != 0)
+            return -1;
+        spec->split_k = 2;
+        spec->split_tail = true;
+        spec->split_tail_compact = true;
+        spec->split_zero_first = idx == 143;
+        return 0;
+    case 138:
+    case 139:
+    case 140:
+    case 141:
+        if(make_cfg_3d_base(55, spec, arch) != 0)
+            return -1;
+        spec->split_k = 2;
+        spec->split_flag_store = idx == 138 || idx == 141;
+        spec->split_zero_first = idx == 139 || idx == 140;
+        spec->split_tail = idx == 140;
+        if(idx == 141)
+        {
+            spec->reg_prefetch = 1;
+            spec->split_atomic_pairs = true;
+        }
+        return 0;
+    case 136:
+    case 137:
+        if(make_cfg_3d_base(55, spec, arch) != 0)
+            return -1;
+        spec->epi_store_fast = true;
+        if(idx == 137)
+        {
+            spec->reg_prefetch = 1;
+            spec->split_k = 2;
+            spec->split_atomic_pairs = true;
+        }
+        return 0;
+    case 133:
+    case 134:
+    case 135:
+        if(make_cfg_3d_base(55, spec, arch) != 0)
+            return -1;
+        spec->split_k = 2;
+        spec->split_atomic_agent = idx != 135;
+        spec->split_atomic_pairs = idx != 133;
+        spec->split_atomic_fast = idx == 135;
+        return 0;
+    case 131:
+    case 132:
+        if(make_cfg_3d(130, spec, arch) != 0)
+            return -1;
+        spec->epi_quad_xpose = idx == 131 ? 4 : 3;
+        spec->xh_stride_m = true;
+        if(idx == 131)
+        {
+            spec->defer_mfma = 2;
+            spec->vmem_interleave = 2;
+        }
+        else
+        {
+            spec->uk_xhalo = 4;
+            spec->uk_tap_fast = true;
+            spec->uk_chunk_group = 2;
+            spec->lds_ahead = true;
+        }
+        return 0;
+    case 128:
+    case 129:
+    case 130:
+        if(make_cfg_3d_base(55, spec, arch) != 0)
+            return -1;
+        spec->uniform_k_decode = true;
+        spec->reg_prefetch = 1;
+        spec->xcd_remap = 6;
+        spec->lds_xor = true;
+        spec->uk_xhalo = idx == 129 ? 4 : 8;
+        spec->rpf_setprio = idx == 129 ? 0 : 2;
+        spec->lds_xor_rowkey = true;
+        spec->xh_wait_smem = true;
+        spec->epi_quad_xpose = idx == 130 ? 0 : 4;
+        spec->lds_kpack_read = true;
+        if(idx == 128)
+        {
+            spec->defer_mfma = 2;
+            spec->vmem_interleave = 2;
+            spec->no_agpr = true;
+            spec->m_band = 32;
+        }
+        if(idx == 129)
+        {
+            spec->uk_tap_fast = true;
+            spec->uk_chunk_group = 2;
+            spec->lds_ahead = true;
+            spec->defer_mfma = 2;
+            spec->vmem_interleave = 2;
+        }
+        return 0;
+    case 127:
+        if(make_cfg_3d_base(55, spec, arch) != 0)
+            return -1;
+        spec->reg_prefetch = 1;
+        spec->defer_mfma = 1;
+        spec->rpf_setprio = 2;
+        return 0;
+    case 102:
+        if(make_cfg_3d_base(55, spec, arch) != 0)
+            return -1;
+        spec->reg_prefetch = 1;
+        spec->cshuffle_m_chunks = 2;
+        spec->epi_lds_barriers = true;
+        return 0;
+    case 103:
+        if(make_cfg_3d_base(54, spec, arch) != 0)
+            return -1;
+        spec->cshuffle_m_chunks = 2;
+        return 0;
+    case 98:
+        if(make_cfg_3d_base(54, spec, arch) != 0)
+            return -1;
+        spec->split_k = 2;
+        spec->split_det = 2;
+        return 0;
+    case 90:
+        if(make_cfg_3d_base(54, spec, arch) != 0)
+            return -1;
+        spec->pipeline = "compv3";
+        spec->reg_prefetch = 1;
+        spec->vmem_interleave = 2;
+        spec->rpf_setprio = 1;
+        return 0;
+    case 80:
+        if(make_cfg_3d_base(56, spec, arch) != 0)
+            return -1;
+        spec->uniform_k_decode = true;
+        spec->reg_prefetch = 1;
+        spec->lds_kpack_read = true;
+        return 0;
+    case 81:
+        if(make_cfg_3d_base(57, spec, arch) != 0)
+            return -1;
+        spec->uniform_k_decode = true;
+        return 0;
+    case 72:
+        if(make_cfg_3d_base(54, spec, arch) != 0)
+            return -1;
+        spec->pipeline = "compv3";
+        spec->reg_prefetch = 2;
+        spec->lds_kpack_read = true;
+        return 0;
+    default:
+        return make_cfg_3d_base(idx, spec, arch);
+    }
+}
+
+static int make_cfg_3d_base(int idx, rocke_implicit_gemm_conv_spec_t* spec, const char** arch)
+{
+    *spec = rocke_implicit_gemm_conv_spec_default();
+    *arch = "gfx942";
+    switch(idx)
+    {
+    case 54:
+        spec->problem = problem_3d(1, 3, 1);
+        set_dtype(spec, "fp16");
+        set_t256(spec);
+        return 0;
+    case 55:
+        spec->problem = problem_3d(2, 3, 1);
+        set_dtype(spec, "bf16");
+        set_t256(spec);
+        return 0;
+    case 56:
+        spec->problem = problem_3d(1, 3, 2);
+        set_dtype(spec, "bf16");
+        spec->tile_m = 128;
+        spec->tile_n = 128;
+        spec->tile_k = 32;
+        spec->warp_m = 2;
+        spec->warp_n = 2;
+        spec->warp_tile_m = 32;
+        spec->warp_tile_n = 32;
+        spec->warp_tile_k = 8;
+        spec->pipeline = "mem";
+        spec->epilogue = "default";
+        return 0;
+    case 57:
+        spec->problem = problem_3d(2, 1, 1);
+        set_dtype(spec, "bf16");
+        set_t256(spec);
+        spec->tile_m = 128;
+        spec->warp_m = 2;
+        spec->warp_n = 2;
+        return 0;
+    case 151:
+        /* 55 on the 2-D 16x16 problem + split_k=2, split_atomic: the wave64
+         * MFMA atomic split-K on a 2-D problem */
+        spec->problem = rocke_conv_problem_make(1, 16, 16, 128, 128, 3, 3, 1, 1, 1, 1, 1, 1);
+        spec->problem.groups = 2;
+        set_dtype(spec, "bf16");
+        set_t256(spec);
+        spec->split_k = 2;
+        spec->split_atomic = true;
+        return 0;
+    case 153:
+        /* 151 without split_atomic (the two-stage workspace split) +
+         * uniform_k_decode: rejected (an atomic-split K loop) */
+        if(make_cfg_3d_base(151, spec, arch) != 0)
+            return -1;
+        spec->split_atomic = false;
+        spec->uniform_k_decode = true;
+        return 0;
+    default:
+        return -1;
+    }
+}
+
 /* The default epilogue stores one element per lane, so the validator rejects
  * it with the vec_c the spec would auto-derive from kpg (8 here). Configs that
  * leave vector_size_c unset get vector_size_c=1 -- otherwise they do not build
@@ -830,6 +1437,11 @@ static int make_cfg(int idx, rocke_implicit_gemm_conv_spec_t* spec, const char**
     else if(idx >= 82 && idx <= 85)
     {
         if(make_cfg_tf32_split_k(idx, spec, arch) != 0)
+            return -1;
+    }
+    else if(idx >= 54 + GFX942_3D_OFFSET)
+    {
+        if(make_cfg_3d(idx - GFX942_3D_OFFSET, spec, arch) != 0)
             return -1;
     }
     else if(make_cfg_raw(idx, spec, arch) != 0)

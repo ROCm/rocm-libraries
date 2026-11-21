@@ -1244,6 +1244,8 @@ def _spec(idx: int):
         return _tf32_spec(idx)
     if 67 <= idx <= 70:
         return _split_k_cshuffle_spec(idx)
+    if idx >= 57 + _GFX942_3D_OFFSET:
+        return _gfx942_3d_any(idx - _GFX942_3D_OFFSET)
 
     raise SystemExit(f"unknown config index {idx}")
 
@@ -1391,6 +1393,597 @@ def _split_k_cshuffle_spec(idx: int):
     )
     base.update(kw)
     return DgradConvSpec(**base), "gfx950"
+
+
+# gfx942 3-D (NDHWC) tap-outer configs on the grouped 3x3x3 / pad-1 problem
+# the AOT cache builds its dgrad binaries against: (tile, overrides). Keep in
+# lockstep with make_cfg_3d() in conv_implicit_gemm_dgrad_emit.c. The numbers
+# below are _gfx942_3d_any's own; it serves parity config N as its config
+# N - _GFX942_3D_OFFSET (they follow the split-K cshuffle configs, which end
+# at 70).
+#   57: t128x256x64 w2x4 cshuffle, the plain tap-outer loop
+#   58: 57 + tapk_prefetch 1, b_kpack 4, xcd_remap 6
+#   59: 57 + tapk_prefetch 3, b_kpack 4
+#   60: t256x64x32 w4x1 + tapk_prefetch 3, b_kpack 2, xcd_remap 6, wpe2
+#   61: 60 with tapk_prefetch 2 (two LDS buffers)
+#   62: 60 with tapk_prefetch 1, no b_kpack, fp16
+#   63: 58 on the 2-D problem
+#   64: 58 ungrouped (groups 1; xcd_remap also serves it)
+#   65: 57 with pad (0, 1, 1)
+#   66-70: 58 + tapk_pingpong (see the table)
+_GFX942_3D = {
+    57: ("s6", {}),
+    58: ("s6", dict(tapk_prefetch=1, b_kpack=4, xcd_remap=6)),
+    59: ("s6", dict(tapk_prefetch=3, b_kpack=4)),
+    60: ("s1", dict(tapk_prefetch=3, b_kpack=2, xcd_remap=6, waves_per_eu=2)),
+    61: ("s1", dict(tapk_prefetch=2, b_kpack=2, xcd_remap=6, waves_per_eu=2)),
+    62: ("s1", dict(tapk_prefetch=1, xcd_remap=6, waves_per_eu=2)),
+    63: ("s6", dict(tapk_prefetch=1, b_kpack=4, xcd_remap=6)),
+    64: ("s6", dict(tapk_prefetch=1, b_kpack=4, xcd_remap=6)),
+    65: ("s6", {}),
+    # 66-70: the tapk_pingpong block ping-pong (8 waves) on 58
+    66: (
+        "s6",
+        dict(
+            tapk_prefetch=1,
+            b_kpack=4,
+            xcd_remap=6,
+            tapk_pingpong=4,
+            tapk_pp_sched=2,
+            lds_xor=True,
+        ),
+    ),
+    67: (
+        "s6",
+        dict(
+            tapk_prefetch=1,
+            b_kpack=4,
+            xcd_remap=6,
+            tapk_pingpong=4,
+            tapk_pp_sched=5,
+            lds_xor=True,
+            tapk_pp_bslab=3,
+        ),
+    ),
+    68: (
+        "s6",
+        dict(
+            tapk_prefetch=1,
+            b_kpack=4,
+            xcd_remap=6,
+            tapk_pingpong=4,
+            tapk_pp_sched=12,
+            lds_xor=True,
+            tapk_pp_bslab=2,
+        ),
+    ),
+    69: (
+        "s6",
+        dict(
+            tapk_prefetch=1,
+            b_kpack=4,
+            xcd_remap=6,
+            tapk_pingpong=5,
+            tapk_pp_sched=1,
+            lds_xor=True,
+        ),
+    ),
+    70: (
+        "s6",
+        dict(
+            tapk_prefetch=1,
+            b_kpack=4,
+            xcd_remap=6,
+            tapk_pingpong=3,
+            tapk_pp_sched=2,
+            lds_xor=True,
+        ),
+    ),
+}
+
+
+# 71-76: the ping-pong / box record kernels (tapk_pingpong 4 over pp_boxes 7 /
+# 77 records, split-K with pp_box_det 1, tapk_pp_epi 2, cshuffle_m_chunks) on
+# the 3-D grouped problem; keep in lockstep with make_cfg_3d_pp() in
+# conv_implicit_gemm_dgrad_emit.c.
+_PP_COMMON = dict(
+    warp_tile_m=16,
+    warp_tile_n=16,
+    warp_tile_k=16,
+    vector_size_a=8,
+    vector_size_b=8,
+    vector_size_c=8,
+    lds_k_pad=0,
+    pipeline="mem",
+    epilogue="cshuffle",
+    tap_outer_k=True,
+    tapk_prefetch=1,
+    b_kpack=4,
+    tapk_pingpong=4,
+    lds_xor=True,
+    xcd_remap=6,
+)
+_T256 = dict(tile_m=256, tile_n=256, tile_k=32, warp_m=4, warp_n=2)
+_T128 = dict(tile_m=128, tile_n=256, tile_k=64, warp_m=2, warp_n=4)
+_GFX942_3D_PP = {
+    71: dict(
+        _T256,
+        tapk_pp_sched=5,
+        tapk_pp_bslab=3,
+        cshuffle_m_chunks=2,
+        split_k=8,
+        pp_boxes=7,
+        pp_box_order=2,
+        pp_box_det=1,
+    ),
+    72: dict(
+        _T256,
+        tapk_pp_sched=5,
+        cshuffle_m_chunks=4,
+        split_k=8,
+        pp_boxes=7,
+        pp_box_order=2,
+        pp_box_det=1,
+    ),
+    73: dict(
+        _T128,
+        tapk_pp_sched=2,
+        tapk_pp_epi=2,
+        tapk_pp_bslab=3,
+        pp_boxes=77,
+        pp_box_order=2,
+        epi_lds_barriers=True,
+    ),
+    74: dict(
+        _T256,
+        tapk_pp_sched=12,
+        tapk_pp_bslab=3,
+        cshuffle_m_chunks=2,
+        split_k=3,
+        pp_boxes=77,
+        pp_box_det=1,
+    ),
+    75: dict(
+        _T128, tapk_pp_sched=5, split_k=4, pp_boxes=77, pp_box_order=3, pp_box_det=1
+    ),
+    76: dict(
+        _T128, tapk_pp_sched=2, split_k=8, pp_boxes=7, pp_box_order=1, pp_box_det=1
+    ),
+    # 84: no boxes -- tapk_ztrim, the partial dY tile (224 rows) and the
+    # stride-1 pp_epi 2 epilogue.
+    84: dict(
+        tile_m=224,
+        tile_n=256,
+        tile_k=32,
+        warp_m=2,
+        warp_n=4,
+        tapk_pp_sched=5,
+        tapk_pp_epi=2,
+        tapk_ztrim=1,
+        tapk_pp_bslab=3,
+        cshuffle_m_chunks=7,
+    ),
+    # 85-87: split_atomic_pairs on pixel-list boxes (the packed-atomic box
+    # store: pair lanes, batched row map, LDS-only barriers).
+    85: dict(
+        _T128,
+        tapk_pp_sched=2,
+        split_k=8,
+        pp_boxes=7,
+        pp_box_order=1,
+        split_atomic_pairs=True,
+    ),
+    86: dict(
+        _T256,
+        tapk_pp_sched=12,
+        tapk_pp_bslab=3,
+        cshuffle_m_chunks=2,
+        split_k=8,
+        pp_boxes=77,
+        split_atomic_pairs=True,
+        epi_lds_barriers=True,
+    ),
+    87: dict(
+        _T256,
+        tapk_pp_sched=12,
+        tapk_pp_bslab=3,
+        cshuffle_m_chunks=4,
+        split_k=8,
+        pp_boxes=7,
+        pp_box_cus=456,
+        pp_box_order=2,
+        split_atomic_pairs=True,
+        epi_lds_barriers=True,
+    ),
+    # 88-92: the other two-ahead schedules (pps 4 / 3 / 6 / 11) and m_band on
+    # the non-box ping-pong.
+    88: dict(
+        tile_m=256,
+        tile_n=128,
+        tile_k=64,
+        warp_m=4,
+        warp_n=2,
+        tapk_pp_sched=4,
+        tapk_pp_epi=2,
+        tapk_ztrim=1,
+    ),
+    89: dict(_T128, tapk_pp_sched=3),
+    90: dict(_T128, tapk_pp_sched=6),
+    91: dict(_T128, tapk_pp_sched=11),
+    92: dict(
+        tile_m=512,
+        tile_n=128,
+        tile_k=32,
+        warp_m=4,
+        warp_n=2,
+        tapk_pp_sched=1,
+        tapk_pp_epi=2,
+        tapk_pp_bslab=1,
+        m_band=11,
+        cshuffle_m_chunks=2,
+    ),
+    # 93-94: the non-box ping-pong through the plain cshuffle store in m_chunks
+    # (93) and the pp_box_det 2 (bf16 slot) split box store (94).
+    93: dict(_T128, tapk_pp_sched=5, cshuffle_m_chunks=2),
+    94: dict(
+        _T128, tapk_pp_sched=2, split_k=8, pp_boxes=7, pp_box_order=1, pp_box_det=2
+    ),
+    # 97-98: tapk_pp_sched 7 (three tiles ahead), split boxes and plain.
+    97: dict(
+        _T128, tapk_pp_sched=7, split_k=8, pp_boxes=7, pp_box_order=2, pp_box_det=1
+    ),
+    98: dict(_T128, tapk_pp_sched=7),
+    # 99-100: split-K ping-pong without boxes (the plain packed-atomic store;
+    # 100: pair lanes).
+    99: dict(_T128, tapk_pp_sched=5, split_k=4),
+    100: dict(_T128, tapk_pp_sched=2, split_k=3, split_atomic_pairs=True),
+    # 101-105: pp_zskip (plain, split boxes) and the split box stores through
+    # the record's (n, h, w) decode (plain atomics, sapl) and the pixel list.
+    101: dict(_T128, tapk_pp_sched=5, pp_zskip=True),
+    102: dict(
+        _T128,
+        tapk_pp_sched=2,
+        split_k=3,
+        pp_boxes=5,
+        pp_box_order=2,
+        pp_box_det=2,
+        pp_zskip=True,
+    ),
+    103: dict(
+        _T128,
+        tapk_pp_sched=2,
+        split_k=4,
+        pp_boxes=3,
+        pp_box_order=2,
+        epi_lds_barriers=True,
+    ),
+    104: dict(
+        _T128,
+        tapk_pp_sched=7,
+        split_k=8,
+        pp_boxes=113,
+        pp_box_order=1,
+        split_atomic_pairs=True,
+        pp_zskip=True,
+    ),
+    105: dict(
+        _T256,
+        tapk_pp_sched=12,
+        tapk_pp_bslab=3,
+        cshuffle_m_chunks=2,
+        split_k=4,
+        pp_boxes=7,
+        pp_box_order=2,
+    ),
+    # 106: xh_epi_lin on the dense pp_epi 2 store (+ epi_lds_barriers).
+    106: dict(
+        _T128, tapk_pp_sched=5, tapk_pp_epi=2, xh_epi_lin=True, epi_lds_barriers=True
+    ),
+    # 107-109: tapk_pingpong 1 / 2 / 3 with the plain loop (tapk_pp_sched 0;
+    # 109 split-K).
+    107: dict(_T128, tapk_pingpong=1),
+    108: dict(_T128, tapk_pingpong=2, lds_xor=False),
+    109: dict(_T128, tapk_pingpong=3, split_k=4),
+}
+# 116-117: pp_boxes 8 (the pixel-list binary of pp_boxes 7; the records come
+# from the host-side makespan plan) on 105 and on 76 (pp_box_det 1).
+_GFX942_3D_PP[116] = dict(_GFX942_3D_PP[105], pp_boxes=8)
+_GFX942_3D_PP[117] = dict(_GFX942_3D_PP[76], pp_boxes=8)
+
+
+# 77-80: the x-halo (tapk_xhalo) record kernel family on the W-extended
+# pW = 0 view of the grouped 3-D problem; keep in lockstep with
+# make_cfg_3d_xh() in conv_implicit_gemm_dgrad_emit.c.
+_XH_COMMON = dict(
+    tile_m=256,
+    tile_n=64,
+    tile_k=32,
+    warp_m=4,
+    warp_n=1,
+    warp_tile_m=16,
+    warp_tile_n=16,
+    warp_tile_k=16,
+    vector_size_a=8,
+    vector_size_b=8,
+    vector_size_c=8,
+    lds_k_pad=0,
+    pipeline="mem",
+    epilogue="cshuffle",
+    tap_outer_k=True,
+    tapk_xhalo=True,
+    b_kpack=2,
+    xhalo_exact=True,
+    xh_a_k4=True,
+    xh_b_wide=True,
+    xh_b_kpad=4,
+    lds_xor=True,
+    waves_per_eu=2,
+)
+_XH_FULL = dict(
+    tapk_prefetch=3,
+    tapk_ilv=4,
+    tapk_lds_ahead=1,
+    tapk_lds_barrier=True,
+    xh_order=6,
+    xh_defer=4,
+    xh_fast_a=1,
+    xh_epi=1,
+    tapk_setprio=1,
+    xcd_remap=6,
+    m_band=11,
+    xh_stride_m=True,
+    xh_epi_lin=True,
+    epi_lds_barriers=True,
+    xh_tap_rsrc=True,
+    tapk_ztrim=2,
+    cshuffle_m_chunks=2,
+)
+_GFX942_3D_XH = {
+    77: dict(_XH_FULL),
+    78: dict(
+        tapk_prefetch=3, xh_order=1, tapk_setprio=1, tapk_lds_barrier=True, tapk_ilv=4
+    ),
+    79: dict(
+        tapk_prefetch=1,
+        tapk_ztrim=1,
+        xh_fast_a=1,
+        xh_tap_rsrc=True,
+        xh_epi=1,
+        tapk_lds_ahead=1,
+        xh_defer=2,
+    ),
+    80: dict(_XH_FULL, tapk_ztrim=0),
+    # 81-83: the y-ring (xh_yring) forms
+    81: dict(_XH_FULL, xh_order=7, xh_yring=130, tapk_ztrim=1, no_agpr=True),
+    82: dict(_XH_FULL, xh_yring=66, tapk_ztrim=1, no_agpr=True, xh_defer=0),
+    83: dict(_XH_FULL, xh_yring=66, tapk_ztrim=1, xh_order=1, xh_defer=2),
+}
+# 95-96: xh_fast_a without xh_tap_rsrc (the tap offset per load) on 77 and 79.
+_GFX942_3D_XH[95] = dict(_GFX942_3D_XH[77], xh_tap_rsrc=False)
+_GFX942_3D_XH[96] = dict(_GFX942_3D_XH[79], xh_tap_rsrc=False)
+# 110: tapk_setprio 2 (phase-clustered loads / LDS reads / MFMAs) on 77's loop
+# without tapk_ilv / tapk_lds_ahead / xh_defer / xh_stride_m.
+_XH_PLAIN = dict(tapk_ilv=0, tapk_lds_ahead=0, xh_defer=0, xh_stride_m=False)
+_GFX942_3D_XH[110] = dict(_GFX942_3D_XH[77], tapk_setprio=2, **_XH_PLAIN)
+# 111: the y-ring (82) through the per-tap MFMA phase (no lds_ahead / defer).
+_GFX942_3D_XH[111] = dict(_GFX942_3D_XH[82], **_XH_PLAIN)
+# 112: 77 with the B tiles swizzled under lds_xor instead of padded (xh_b_kpad 0).
+_GFX942_3D_XH[112] = dict(_GFX942_3D_XH[77], xh_b_kpad=0)
+# 113-115: the W-column store mask (xh_dx_wmask) on 77 (linear store with row
+# and plane gaps), on 77 without xh_epi_lin (masked descriptor store) and on
+# the y-ring 81.
+_GFX942_3D_XH[113] = dict(_GFX942_3D_XH[77], xh_dx_wmask=True)
+_GFX942_3D_XH[114] = dict(_GFX942_3D_XH[77], xh_dx_wmask=True, xh_epi_lin=False)
+_GFX942_3D_XH[115] = dict(_GFX942_3D_XH[81], xh_dx_wmask=True)
+# 118-121: the direct x-halo epilogues on 77's loop: xh_epi 2 (8-byte
+# stores; no xh_stride_m), xh_epi 3 (16-byte stores through the xor-16 lane
+# exchange), and both with xh_dx_wmask.
+_GFX942_3D_XH[118] = dict(
+    _GFX942_3D_XH[77], xh_epi=2, xh_epi_lin=False, xh_stride_m=False
+)
+_GFX942_3D_XH[119] = dict(_GFX942_3D_XH[77], xh_epi=3, xh_epi_lin=False)
+_GFX942_3D_XH[120] = dict(_GFX942_3D_XH[118], xh_dx_wmask=True)
+_GFX942_3D_XH[121] = dict(_GFX942_3D_XH[119], xh_dx_wmask=True)
+
+
+# 122-124: knob combinations of the shipped gfx942 x-halo pins on 77's loop:
+# m_band 8 with xh_dx_wmask; the y-ring 81 with xh_order 6, xh_defer 3 and
+# xh_dx_wmask; the t256x128x16 tile with b_kpack 4, tapk_prefetch 1,
+# xh_order 2 and m_band 16.
+_GFX942_3D_XH[122] = dict(_GFX942_3D_XH[77], xh_dx_wmask=True, m_band=8)
+_GFX942_3D_XH[123] = dict(_GFX942_3D_XH[81], xh_order=6, xh_defer=3, xh_dx_wmask=True)
+_GFX942_3D_XH[124] = dict(
+    _GFX942_3D_XH[77],
+    tile_n=128,
+    tile_k=16,
+    b_kpack=4,
+    tapk_prefetch=1,
+    xh_order=2,
+    xh_defer=0,
+    m_band=16,
+    xh_dx_wmask=True,
+)
+# 125-127: the shipped box forms: pp_boxes 8 split-K with pp_box_det 1, the
+# pp_box_cus budget and epi_lds_barriers; pp_boxes 77 split-K with pp_box_det
+# 1 and epi_lds_barriers; pp_boxes 8 unsplit with tapk_pp_epi 2.
+_GFX942_3D_PP[125] = dict(
+    _T128,
+    tapk_pp_sched=2,
+    split_k=8,
+    pp_boxes=8,
+    pp_box_cus=684,
+    pp_box_order=1,
+    pp_box_det=1,
+    epi_lds_barriers=True,
+)
+_GFX942_3D_PP[126] = dict(
+    _T128,
+    tapk_pp_sched=2,
+    split_k=4,
+    pp_boxes=77,
+    pp_box_order=1,
+    pp_box_det=1,
+    epi_lds_barriers=True,
+)
+_GFX942_3D_PP[127] = dict(
+    _T128,
+    tapk_pp_sched=5,
+    tapk_pp_epi=2,
+    pp_boxes=8,
+    pp_box_order=2,
+    epi_lds_barriers=True,
+)
+# 128-132: knob values both validators refuse (the C++ builder would divide
+# by b_kpack 3, or build a kernel whose preconditions do not hold): (config,
+# knob overrides, problem overrides).
+_GFX942_3D_BAD = {
+    128: (57, dict(b_kpack=3), {}),
+    129: (58, dict(tap_outer_k=False), {}),
+    130: (77, {}, dict(pW=1)),
+    131: (57, dict(tapk_prefetch=2), {}),
+    132: (77, dict(xh_defer=128), {}),
+}
+
+
+def _gfx942_3d_xh_spec(idx: int):
+    from kernels.common._conv_implicit_gemm_common import ConvDataSpec
+
+    if idx == 80:
+        p = ConvProblem(N=1, Hi=16, Wi=16, C=128, K=128, Y=3, X=3, pH=1, pW=0, groups=2)
+    else:
+        p = ConvProblem(
+            N=1,
+            Di=16,
+            Hi=16,
+            Wi=16,
+            C=128,
+            K=128,
+            Z=3,
+            Y=3,
+            X=3,
+            sD=1,
+            sH=1,
+            sW=1,
+            pD=1,
+            pH=1,
+            pW=0,
+            dD=1,
+            dH=1,
+            dW=1,
+            groups=2,
+        )
+    data = ConvDataSpec(dtype_a="bf16", dtype_b="bf16", dtype_d="bf16")
+    return (
+        DgradConvSpec(problem=p, data=data, **{**_XH_COMMON, **_GFX942_3D_XH[idx]}),
+        "gfx942",
+    )
+
+
+def _gfx942_3d_pp_spec(idx: int):
+    from kernels.common._conv_implicit_gemm_common import ConvDataSpec
+
+    p = ConvProblem(
+        N=1,
+        Di=16,
+        Hi=16,
+        Wi=16,
+        C=128,
+        K=128,
+        Z=3,
+        Y=3,
+        X=3,
+        sD=1,
+        sH=1,
+        sW=1,
+        pD=1,
+        pH=1,
+        pW=1,
+        dD=1,
+        dH=1,
+        dW=1,
+        groups=2,
+    )
+    data = ConvDataSpec(dtype_a="bf16", dtype_b="bf16", dtype_d="bf16")
+    return (
+        DgradConvSpec(problem=p, data=data, **{**_PP_COMMON, **_GFX942_3D_PP[idx]}),
+        "gfx942",
+    )
+
+
+def _gfx942_3d_spec(idx: int):
+    from kernels.common._conv_implicit_gemm_common import ConvDataSpec
+
+    tile, kw = _GFX942_3D[idx]
+    groups = 1 if idx == 64 else 2
+    pad_d = 0 if idx == 65 else 1
+    if idx == 63:
+        p = ConvProblem(
+            N=1, Hi=16, Wi=16, C=128, K=128, Y=3, X=3, pH=1, pW=1, groups=groups
+        )
+    else:
+        p = ConvProblem(
+            N=1,
+            Di=16,
+            Hi=16,
+            Wi=16,
+            C=128,
+            K=128,
+            Z=3,
+            Y=3,
+            X=3,
+            sD=1,
+            sH=1,
+            sW=1,
+            pD=pad_d,
+            pH=1,
+            pW=1,
+            dD=1,
+            dH=1,
+            dW=1,
+            groups=groups,
+        )
+    dt = "fp16" if idx == 62 else "bf16"
+    base = dict(
+        warp_tile_m=16,
+        warp_tile_n=16,
+        warp_tile_k=16,
+        vector_size_a=8,
+        vector_size_b=8,
+        vector_size_c=8,
+        lds_k_pad=0,
+        pipeline="mem",
+        epilogue="cshuffle",
+        tap_outer_k=True,
+    )
+    if tile == "s6":
+        base.update(tile_m=128, tile_n=256, tile_k=64, warp_m=2, warp_n=4)
+    else:
+        base.update(tile_m=256, tile_n=64, tile_k=32, warp_m=4, warp_n=1)
+    base.update(kw)
+    data = ConvDataSpec(dtype_a=dt, dtype_b=dt, dtype_d=dt)
+    return DgradConvSpec(problem=p, data=data, **base), "gfx942"
+
+
+_GFX942_3D_OFFSET = 14
+
+
+def _gfx942_3d_any(idx: int):
+    """The gfx942 3-D configs below by their own number (from 57)."""
+    if idx in _GFX942_3D_BAD:
+        import dataclasses
+
+        base, kw, pkw = _GFX942_3D_BAD[idx]
+        spec, arch = _gfx942_3d_any(base)
+        if pkw:
+            kw = dict(kw, problem=dataclasses.replace(spec.problem, **pkw))
+        return dataclasses.replace(spec, **kw), arch
+    if idx in _GFX942_3D:
+        return _gfx942_3d_spec(idx)
+    if idx in _GFX942_3D_PP:
+        return _gfx942_3d_pp_spec(idx)
+    if idx in _GFX942_3D_XH:
+        return _gfx942_3d_xh_spec(idx)
+    raise SystemExit(f"unknown config index {idx + _GFX942_3D_OFFSET}")
 
 
 def main() -> int:

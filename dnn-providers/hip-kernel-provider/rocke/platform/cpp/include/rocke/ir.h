@@ -510,6 +510,11 @@ typedef enum rocke_opcode
      * existing index shifts. */
     ROCKE_OP_MATH_LDEXP,
 
+    /* gpu.grid_dim: workgroups launched along an axis, read from the dispatch
+     * packet (Python IRBuilder.grid_dim). Appended so no existing index
+     * shifts. */
+    ROCKE_OP_GPU_GRID_DIM,
+
     ROCKE_OP__COUNT
 } rocke_opcode_t;
 
@@ -654,6 +659,12 @@ typedef struct rocke_ir_builder
     /* Sticky error state. */
     rocke_status_t status;
     char err[ROCKE_ERR_MSG_CAP];
+
+    /* block_id_{x,y,z} overrides (NULL = the hardware id): a kernel that
+     * decodes its own grid (Python rebinds b.block_id_* for the rest of the
+     * build, e.g. the fwd split_tail_compact grid) serves every later
+     * rocke_b_block_id_* from these. Zeroed by rocke_ir_builder_init. */
+    rocke_value_t* block_id_override[3];
 } rocke_ir_builder_t;
 
 /* For-loop handle: the C analog of the _ForBuilder context manager. The caller
@@ -1078,6 +1089,14 @@ void rocke_b_global_flag_wait_eq(rocke_ir_builder_t* b,
                                  rocke_value_t* idx,
                                  rocke_value_t* expect,
                                  const char* scope);
+/* global_flag_wait_eq(..., ordering=): "acquire" (default, NULL) or
+ * "monotonic" (relaxed spin; the caller places one acquire fence after). */
+void rocke_b_global_flag_wait_eq_ord(rocke_ir_builder_t* b,
+                                     rocke_value_t* ptr,
+                                     rocke_value_t* idx,
+                                     rocke_value_t* expect,
+                                     const char* scope,
+                                     const char* ordering);
 
 /* ----- atomics ----- */
 rocke_value_t* rocke_b_global_atomic_add(rocke_ir_builder_t* b,
@@ -1096,6 +1115,14 @@ rocke_value_t* rocke_b_global_atomic_add_pk_bf16(rocke_ir_builder_t* b,
                                                  rocke_value_t* idx,
                                                  rocke_value_t* value,
                                                  const char* ordering);
+/* global_atomic_add_pk_bf16(..., syncscope=) (Python IRBuilder): an optional
+ * LLVM syncscope attr ("agent", "workgroup", ...; NULL = none). */
+rocke_value_t* rocke_b_global_atomic_add_pk_bf16_ex(rocke_ir_builder_t* b,
+                                                    rocke_value_t* ptr,
+                                                    rocke_value_t* idx,
+                                                    rocke_value_t* value,
+                                                    const char* ordering,
+                                                    const char* syncscope);
 rocke_value_t* rocke_b_global_atomic_add_pk_f16(rocke_ir_builder_t* b,
                                                 rocke_value_t* ptr,
                                                 rocke_value_t* idx,
@@ -1107,6 +1134,11 @@ rocke_value_t* rocke_b_thread_id_x(rocke_ir_builder_t* b);
 rocke_value_t* rocke_b_block_id_x(rocke_ir_builder_t* b);
 rocke_value_t* rocke_b_block_id_y(rocke_ir_builder_t* b);
 rocke_value_t* rocke_b_block_id_z(rocke_ir_builder_t* b);
+/* Workgroups launched along `axis` ("x", "y" or "z"; gridDim): the dispatch
+ * packet's grid size in work-items divided by block_size, the kernel's
+ * workgroup size along that axis (a build-time constant, >= 1). Python
+ * IRBuilder.grid_dim. */
+rocke_value_t* rocke_b_grid_dim(rocke_ir_builder_t* b, const char* axis, int block_size);
 
 /* gfx1250 workgroup clusters. `axis` is "x", "y" or "z". Without a cluster
  * launch every id and max id inside the cluster reads 0 and the cluster id
@@ -1703,6 +1735,14 @@ rocke_value_t* rocke_b_buffer_load_vN(rocke_ir_builder_t* b,
                                       rocke_value_t* soffset,
                                       const rocke_type_t* dtype,
                                       int n);
+/* buffer_load_vN(..., aux=): cache-policy bits of a >= 8-byte load (0 = none). */
+rocke_value_t* rocke_b_buffer_load_vN_aux(rocke_ir_builder_t* b,
+                                          rocke_value_t* rsrc,
+                                          rocke_value_t* voffset,
+                                          rocke_value_t* soffset,
+                                          const rocke_type_t* dtype,
+                                          int n,
+                                          int aux);
 rocke_value_t* rocke_b_buffer_load_f16(rocke_ir_builder_t* b,
                                        rocke_value_t* rsrc,
                                        rocke_value_t* voffset,
@@ -1811,6 +1851,14 @@ void rocke_b_buffer_store_vN_f32(rocke_ir_builder_t* b,
                                  rocke_value_t* soffset,
                                  rocke_value_t* value,
                                  int n);
+/* buffer_store_vN_f32(..., aux=): cache-policy bits (n >= 2; 0 = none). */
+void rocke_b_buffer_store_vN_f32_aux(rocke_ir_builder_t* b,
+                                     rocke_value_t* rsrc,
+                                     rocke_value_t* voffset,
+                                     rocke_value_t* soffset,
+                                     rocke_value_t* value,
+                                     int n,
+                                     int aux);
 /* Dtype-generic vectorised buffer store (Python IRBuilder.buffer_store_vN),
  * the store twin of rocke_b_buffer_load_vN: `value` is a vector of any scalar
  * whose width is whole bytes, 1, 2, 4, 8 or 16 bytes in all. Out-of-range

@@ -69,6 +69,20 @@ typedef struct rocke_wgrad_reduce_spec
      * spec's ws_replicas: folding fewer than Stage 1 wrote silently drops part
      * of the sum, folding more reads past the buffer. */
     int ws_replicas;
+    /* vec (> 1): vec consecutive N elements per thread (wg_N % vec == 0): one
+     * vec-wide f32 load per slab, the fold, one vec-wide store. Default 1. */
+    int vec;
+    /* rezero (vec > 1): the fold also stores zeros over the slabs it read, so
+     * the next launch needs no clear. Default 0. */
+    int rezero;
+    /* ws_bf16 (vec > 1): the scratch slabs hold bf16 partials. Default false. */
+    bool ws_bf16;
+    /* fold_loop (vec > 1, ungrouped): a looped, slab-parallel ordered fold of
+     * fold_loop slabs per thread group and iteration; slab_par thread groups
+     * fold slabs p, p + P, ... and add their partials in p order (LDS).
+     * Default 0 / 1. */
+    int fold_loop;
+    int slab_par;
 } rocke_wgrad_reduce_spec_t;
 
 /* Default-constructed spec.  Caller must set wg_M, wg_N, problem_short. */

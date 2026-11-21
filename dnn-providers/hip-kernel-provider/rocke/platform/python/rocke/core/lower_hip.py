@@ -744,6 +744,21 @@ class _Lowerer:
         axis = op.attrs.get("axis", "x")
         self._emit(f"int {_name(op.result)} = (int)blockIdx.{axis};")
 
+    def _op_gpu_grid_dim(self, op: Op) -> None:
+        # The LLVM lowering's value: the dispatch packet's u32 grid size
+        # (work-items; u32 words 3/4/5 of hsa_kernel_dispatch_packet_t) over
+        # the op's block_size, not HIP's gridDim, so both lowerings agree for
+        # any launch.
+        axis = op.attrs.get("axis", "x")
+        word = {"x": 3, "y": 4, "z": 5}.get(axis)
+        if word is None:
+            raise ValueError(f"grid_dim axis must be x, y, or z, got {axis!r}")
+        bs = int(op.attrs.get("block_size", 1))
+        size = f"((const unsigned int*)__builtin_amdgcn_dispatch_ptr())[{word}]"
+        if bs > 1:
+            size = f"({size} / {bs}u)"
+        self._emit(f"int {_name(op.result)} = (int){size};")
+
     # -------------------- memory --------------------
 
     def _op_tile_smem_alloc(self, op: Op) -> None:

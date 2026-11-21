@@ -194,14 +194,14 @@ typedef struct rocke_implicit_gemm_conv_wgrad_spec
      *                     to the per-arch default pool of the arch they are
      *                     given (rocke_wgrad_conv_streamk_default_pool).
      * "off" keeps every existing config byte-identical.  Stream-K folds the
-     * conv groups into GEMM-M, so it is the one path on which this port
-     * accepts groups > 1. */
+     * conv groups into GEMM-M; with "off", groups > 1 runs grid-per-group
+     * (the group index on block_id_z), as in Python. */
     const char* streamk; /* default "off" */
     const char* streamk_reduction; /* default "linear" */
     int streamk_ctas; /* default -1 */
 
-    /* WgradConvSpec.group_merge.  Only 1 is ported: stream-K folds the
-     * groups into GEMM-M itself, and the grid-per-group path is Python-only. */
+    /* WgradConvSpec.group_merge.  Only 1 is ported off the stream-K path
+     * (grid-per-group); stream-K folds the groups into GEMM-M itself. */
     int group_merge; /* default 1 */
     /* prefetch_addr: carry each A/B chunk's global byte offset across K
      * iterations, so every iteration issues its buffer loads first and derives
@@ -231,6 +231,38 @@ typedef struct rocke_implicit_gemm_conv_wgrad_spec
      * existing aggregate initialisers keep their layout.
      * Default false: every existing config emits byte-identical IR. */
     bool prefetch_global_regs; /* default false */
+    /* Branch knobs, 1:1 with the WgradConvSpec fields of the same name. All
+     * default to 0 (off) and leave the emitted IR byte-identical when off.
+     * Fields the C++ engine does not implement yet are rejected by
+     * rocke_implicit_gemm_conv_wgrad_is_valid_spec. */
+    int prefetch_regs; /* 0..3: register-prefetch K loop */
+    int lds_kpack; /* default 1: k-packed transpose-on-store */
+    int xcd_remap; /* 0/1 off; >1: XCD-contiguous tile order */
+    int m_band; /* split-K slice band order (with xcd_remap) */
+    int sep_addr; /* 0..2: separable / carried address decode */
+    int pfr_sched; /* prefetch_regs read schedule */
+    int lds_bswz; /* 0 only (not ported) */
+    int kp_line; /* line-major k-packed lane decode */
+    int xwin;
+    int xwin_rows;
+    int xwin_groups;
+    int xwin_mrow;
+    int xwin_gn;
+    int xwin_pp;
+    int ws_fuse; /* 0 only (not ported) */
+    int ws_store; /* 0..2: per-slice workspace slab store */
+    int ws_tree; /* 0 only (not ported) */
+    int epi_quad_xpose; /* 0 only (not ported) */
+    bool epi_store_fast;
+    int xwin_kband;
+    int plain_pp; /* 0..4: 8-wave block ping-pong of the prefetch_regs loop */
+    int xwin_bq;
+    int xwin_aq;
+    int xwin_pps;
+    int xwin_rot;
+    int xwin_kord;
+    int ws_lc; /* 0 only (not ported) */
+    int ws_gred; /* 0 only (not ported) */
 } rocke_implicit_gemm_conv_wgrad_spec_t;
 
 /* Default-constructed spec (every field == Python dataclass default). */

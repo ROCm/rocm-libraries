@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import collections
 import ctypes
+import dataclasses
 import importlib.util
 import os
 import unittest
@@ -131,6 +132,67 @@ class TestSplitKGate(unittest.TestCase):
         ok, why = is_valid_spec(_mfma_spec(split_k=2, async_dma=True), "gfx950")
         self.assertFalse(ok)
         self.assertIn("async_dma", why)
+
+    def test_mfma_split_atomic_is_the_atomic_split(self):
+        # split_atomic selects the atomic split-K forward on a 2-D wave64 MFMA
+        # problem (the slices add into the zeroed D; fwd_split_k_conflict)
+        # instead of this workspace split: the cshuffle spec is valid, the
+        # default epilogue is not, and it is refused off a 2-D split.
+        spec = _spec(
+            split_k=2,
+            wave_size=64,
+            pipeline="mem",
+            warp_tile_m=32,
+            warp_tile_n=32,
+            warp_tile_k=16,
+            tile_m=64,
+            tile_n=64,
+            split_atomic=True,
+        )
+        ok, why = is_valid_spec(spec, "gfx950")
+        self.assertTrue(ok, why)
+        self.assertIn("satom", spec.kernel_name())
+        ok, why = is_valid_spec(
+            dataclasses.replace(spec, epilogue="default", vector_size_c=1), "gfx950"
+        )
+        self.assertFalse(ok)
+        self.assertIn("cshuffle epilogue", why)
+        ok, why = is_valid_spec(dataclasses.replace(spec, split_k=1), "gfx950")
+        self.assertFalse(ok)
+        self.assertIn("split_atomic", why)
+
+    def test_workspace_split_refuses_the_atomic_split_knobs(self):
+        # The two-stage workspace split runs the plain K loop over its slice;
+        # the atomic split's K-loop, tile-order and epilogue knobs drive their
+        # own loops over the atomic slice bounds, so they are refused there
+        # (and an auto degree falls back to the unsplit kernel), while the
+        # atomic form (split_atomic) still takes them.
+        from kernels.common.conv_implicit_gemm import resolve_fwd_split_k_spec
+
+        base = dict(
+            wave_size=64,
+            pipeline="mem",
+            warp_tile_m=32,
+            warp_tile_n=32,
+            warp_tile_k=16,
+            tile_m=64,
+            tile_n=64,
+        )
+        plain = _spec(split_k=-1, **base)
+        self.assertGreater(resolve_fwd_split_k_spec(plain, "gfx950").split_k, 1)
+        for knob in (dict(uniform_k_decode=True), dict(reg_prefetch=1)):
+            spec = _spec(split_k=2, **base, **knob)
+            ok, why = is_valid_spec(spec, "gfx950")
+            self.assertFalse(ok)
+            self.assertIn("two-stage workspace split", why)
+            ok, why = is_valid_spec(
+                dataclasses.replace(spec, split_atomic=True), "gfx950"
+            )
+            self.assertTrue(ok, why)
+            ok, why = is_valid_spec(dataclasses.replace(spec, split_k=1), "gfx950")
+            self.assertTrue(ok, why)
+            auto = dataclasses.replace(spec, split_k=-1)
+            self.assertEqual(resolve_fwd_split_k_spec(auto, "gfx950").split_k, 1)
 
     def test_fp32_output_two_stage_is_rejected(self):
         # Stage 2 casts to fp16 / bf16 only, on every family, so fp32 storage
@@ -888,8 +950,21 @@ class TestSplitKAotScope(unittest.TestCase):
         from kernels.conv import aot_jobs as aj
 
         target = ArchTarget.from_gfx("gfx942")
+        # The split-K binaries come from the per-arch split generator, which
+        # gfx942 does not run, and from the K-loop variants of every geometry;
+        # a third of the geometries (every pipeline / epilogue among them)
+        # walks each variant rule while keeping the walk well inside the
+        # per-test budget of the wave64 grid.
+        self.assertFalse(aj._fwd_split_target("gfx942"))
+        geos = aj._geometry_list(target, "fp16", "fwd")[::3]
         jobs = aj._fwd_jobs(
-            "gfx942", "fp16", target.wave_size, "mma", target, llvm_flavor="llvm22"
+            "gfx942",
+            "fp16",
+            target.wave_size,
+            "mma",
+            target,
+            geometries=geos,
+            llvm_flavor="llvm22",
         )
         self.assertFalse(any(j.identity.split_k > 1 for j in jobs))
 

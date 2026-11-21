@@ -480,6 +480,44 @@ static rocke_status_t rocke_h_op_gpu_block_id(rocke_h_lowerer_t* lw, const rocke
     return lw->status;
 }
 
+/* def _op_gpu_grid_dim(self, op): the LLVM lowering's value, the dispatch
+ * packet's u32 grid size (u32 words 3/4/5) over the op's block_size (not
+ * HIP's gridDim). */
+static rocke_status_t rocke_h_op_gpu_grid_dim(rocke_h_lowerer_t* lw, const rocke_op_t* op)
+{
+    const rocke_value_t* r = h_res(op);
+    const char* axis = rocke_attr_get_str(&op->attrs, "axis");
+    if(!axis)
+    {
+        axis = "x";
+    }
+    int word = -1;
+    if(strcmp(axis, "x") == 0)
+        word = 3;
+    else if(strcmp(axis, "y") == 0)
+        word = 4;
+    else if(strcmp(axis, "z") == 0)
+        word = 5;
+    if(word < 0)
+        return rocke_h_fail(
+            lw, ROCKE_ERR_VALUE, "grid_dim axis must be x, y, or z, got '%s'", axis);
+    int64_t bs = 1;
+    rocke_attr_get_int(&op->attrs, "block_size", &bs);
+    if(bs > 1)
+        rocke_h_emitf(
+            lw,
+            "int %s = (int)(((const unsigned int*)__builtin_amdgcn_dispatch_ptr())[%d] / %lldu);",
+            rocke_h_name(lw, r),
+            word,
+            (long long)bs);
+    else
+        rocke_h_emitf(lw,
+                      "int %s = (int)((const unsigned int*)__builtin_amdgcn_dispatch_ptr())[%d];",
+                      rocke_h_name(lw, r),
+                      word);
+    return lw->status;
+}
+
 /* ----------------------------- registration table -------------------------- */
 
 const rocke_h_handler_entry_t* rocke_h_handlers_cast(void)
@@ -511,6 +549,7 @@ const rocke_h_handler_entry_t* rocke_h_handlers_cast(void)
         {ROCKE_OP_ARITH_CVT_PK_I8_F32X4, rocke_h_op_arith_cvt_pk_i8_f32x4},
         {ROCKE_OP_GPU_THREAD_ID, rocke_h_op_gpu_thread_id},
         {ROCKE_OP_GPU_BLOCK_ID, rocke_h_op_gpu_block_id},
+        {ROCKE_OP_GPU_GRID_DIM, rocke_h_op_gpu_grid_dim},
         {ROCKE_OP_INVALID, NULL}, /* terminator */
     };
     return table;

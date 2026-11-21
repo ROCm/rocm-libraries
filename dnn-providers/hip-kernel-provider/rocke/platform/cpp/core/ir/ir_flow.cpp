@@ -1229,6 +1229,17 @@ rocke_value_t* rocke_b_buffer_load_vN(rocke_ir_builder_t* b,
                                       const rocke_type_t* dtype,
                                       int n)
 {
+    return rocke_b_buffer_load_vN_aux(b, rsrc, voffset, soffset, dtype, n, 0);
+}
+
+rocke_value_t* rocke_b_buffer_load_vN_aux(rocke_ir_builder_t* b,
+                                          rocke_value_t* rsrc,
+                                          rocke_value_t* voffset,
+                                          rocke_value_t* soffset,
+                                          const rocke_type_t* dtype,
+                                          int n,
+                                          int aux)
+{
     rocke_value_t* ops[3];
     rocke_attr_map_t attrs;
     int nbytes;
@@ -1245,6 +1256,14 @@ rocke_value_t* rocke_b_buffer_load_vN(rocke_ir_builder_t* b,
     if(nbytes >= 4)
         rocke_attr_set_int(b, &attrs, "dwords", (int64_t)(nbytes / 4));
     rocke_attr_set_str(b, &attrs, "elem_type", dtype->name);
+    if(aux)
+    {
+        /* Cache-policy (AUX) bits of a load of 8 bytes or more (16 = SC1). */
+        if(nbytes < 8)
+            return (rocke_value_t*)rocke_i_set_err(
+                b, ROCKE_ERR_VALUE, "buffer_load_vN: aux needs dwords >= 2");
+        rocke_attr_set_int(b, &attrs, "aux", (int64_t)aux);
+    }
     /* result_name_hint = f"bl{n}" */
     snprintf(hint, sizeof(hint), "bl%d", n);
     ops[0] = rsrc;
@@ -1570,6 +1589,17 @@ void rocke_b_buffer_store_vN_f32(rocke_ir_builder_t* b,
                                  rocke_value_t* value,
                                  int n)
 {
+    rocke_b_buffer_store_vN_f32_aux(b, rsrc, voffset, soffset, value, n, 0);
+}
+
+void rocke_b_buffer_store_vN_f32_aux(rocke_ir_builder_t* b,
+                                     rocke_value_t* rsrc,
+                                     rocke_value_t* voffset,
+                                     rocke_value_t* soffset,
+                                     rocke_value_t* value,
+                                     int n,
+                                     int aux)
+{
     rocke_value_t* ops[4];
     rocke_attr_map_t attrs;
     if(!rocke_i_live(b))
@@ -1581,6 +1611,16 @@ void rocke_b_buffer_store_vN_f32(rocke_ir_builder_t* b,
     }
     attrs = rocke_i_attrs(b);
     rocke_attr_set_int(b, &attrs, "dwords", (int64_t)n);
+    if(aux)
+    {
+        /* Cache-policy (AUX) bits of the n >= 2 store (16 = SC1 on gfx942). */
+        if(n == 1)
+        {
+            rocke_i_set_err(b, ROCKE_ERR_VALUE, "buffer_store_vN_f32: aux needs n >= 2");
+            return;
+        }
+        rocke_attr_set_int(b, &attrs, "aux", (int64_t)aux);
+    }
     ops[0] = rsrc;
     ops[1] = voffset;
     ops[2] = soffset;

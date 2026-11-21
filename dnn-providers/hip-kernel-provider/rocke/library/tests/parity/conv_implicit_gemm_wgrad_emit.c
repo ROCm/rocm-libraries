@@ -89,6 +89,14 @@
  *  108    the same base at split_k = 1 with vector_size_c = 2: the cshuffle
  *         store epilogue honours the explicit dW width (C = 64 alone would
  *         pick 8). Must match the Python _ATOMIC_VEC_C_BASES.
+ *  109-142 gfx942 3-D grid-per-group configs (make_cfg_3d_any, numbered 55-88
+ *         there): bf16 grouped tiles (112, the split_k=2 bf16 atomics on a
+ *         1-wide dW store, both engines must reject), the register-prefetch,
+ *         addressing, workspace and xwin knobs on them, and the grouped
+ *         cshuffle epilogues. Must match the Python _gfx942_3d_any.
+ *  143-153 make_gate_cfg: the grouped cshuffle store and split-K atomic at an
+ *         explicit dW width (143-144), then specs both engines must reject
+ *         (145-153). Must match the Python _GATE_CFGS.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -311,8 +319,334 @@ static int make_cfg_tf32(int idx, rocke_implicit_gemm_conv_wgrad_spec_t* spec, c
 
 /* Fill the config for index `idx`. Returns 0 on success, -1 if unknown.
  * On success sets *spec and *arch. */
+/* gfx942 3-D grouped configs; mirrors _gfx942_3d_spec() in the Python
+ * emitter (the index table is there). make_cfg_3d numbers them from 55; parity
+ * config N is its config N - GFX942_3D_OFFSET (they follow the TF32 configs,
+ * which end at 108). */
+#define GFX942_3D_OFFSET 54
+
+static int make_cfg_3d(int idx, rocke_implicit_gemm_conv_wgrad_spec_t* spec, const char** arch)
+{
+    *spec = rocke_implicit_gemm_conv_wgrad_spec_default();
+    *arch = "gfx942";
+    const int groups = idx == 57 ? 1 : 2;
+    const char* dt = idx == 57 ? "fp16" : "bf16";
+    spec->problem
+        = rocke_conv_problem_make_3d(1, 16, 16, 16, 128, 128, 3, 3, 3, 1, 1, 1, 1, 1, 1, 1, 1, 1);
+    spec->problem.groups = groups;
+    spec->dtype_a = dt;
+    spec->dtype_b = dt;
+    spec->dtype_d = dt;
+    spec->warp_tile_m = 16;
+    spec->warp_tile_n = 16;
+    spec->warp_tile_k = 16;
+    spec->has_vector_size_a = true;
+    spec->vector_size_a = 8;
+    spec->has_vector_size_b = true;
+    spec->vector_size_b = 8;
+    spec->has_vector_size_c = true;
+    spec->vector_size_c = 1;
+    spec->has_lds_k_pad = true;
+    spec->lds_k_pad = 4;
+    spec->pipeline = "mem";
+    spec->epilogue = "default";
+    if(idx == 55 || idx == 57)
+    {
+        spec->tile_m = 256;
+        spec->tile_n = 256;
+        spec->tile_k = 32;
+        spec->warp_m = 2;
+        spec->warp_n = 4;
+    }
+    else
+    {
+        spec->tile_m = 128;
+        spec->tile_n = 192;
+        spec->tile_k = 32;
+        spec->warp_m = 1;
+        spec->warp_n = 4;
+        spec->split_k = 2;
+        spec->has_waves_per_eu = true;
+        spec->waves_per_eu = 2;
+        if(idx == 56)
+        {
+            spec->two_stage = true;
+            spec->ws_replicas = 1024;
+        }
+    }
+    return 0;
+}
+
+/* Register-prefetch / addressing / workspace knobs on the 3-D grouped configs
+ * 59-69; mirrors _GFX942_3D_KNOBS in the Python emitter (the table is there). */
+static int
+    make_cfg_3d_knobs(int idx, rocke_implicit_gemm_conv_wgrad_spec_t* spec, const char** arch)
+{
+    const bool on56 = idx == 59 || idx == 60 || idx == 68;
+    make_cfg_3d(on56 || idx == 64 ? 56 : 55, spec, arch);
+    spec->prefetch_regs = idx == 64 ? 2 : idx == 65 ? 3 : 1;
+    spec->lds_kpack = idx == 65 ? 1 : 2;
+    if(idx == 64)
+        return 0;
+    if(on56)
+    {
+        spec->xcd_remap = 6;
+        spec->pfr_sched = 1;
+        spec->ws_store = idx == 68 ? 2 : 1;
+        if(idx == 60)
+        {
+            spec->warp_m = 2;
+            spec->warp_n = 2;
+            spec->waves_per_eu = 3;
+            spec->m_band = 1;
+        }
+        return 0;
+    }
+    switch(idx)
+    {
+    case 61:
+    case 62:
+    case 63:
+    case 66:
+        spec->sep_addr = 2;
+        spec->kp_line = 8;
+        spec->plain_pp = idx == 66 ? 1 : 3;
+        if(idx == 62 || idx == 63)
+        {
+            spec->warp_m = 4;
+            spec->warp_n = 2;
+        }
+        if(idx == 62)
+        {
+            spec->split_k = 2;
+            spec->two_stage = true;
+            spec->xcd_remap = 6;
+            spec->ws_store = 1;
+        }
+        if(idx == 63)
+            spec->epi_store_fast = true;
+        break;
+    case 65:
+        spec->sep_addr = 1;
+        spec->pfr_sched = 4;
+        break;
+    case 67:
+        spec->sep_addr = 2;
+        spec->plain_pp = 2;
+        break;
+    case 69:
+        spec->sep_addr = 1;
+        spec->plain_pp = 4;
+        break;
+    default:
+        break;
+    }
+    return 0;
+}
+
+/* xwin configs 70-78; mirrors _GFX942_3D_KNOBS in the Python emitter. */
+static int make_cfg_3d_xwin(int idx, rocke_implicit_gemm_conv_wgrad_spec_t* spec, const char** arch)
+{
+    make_cfg_3d(56, spec, arch);
+    spec->prefetch_regs = idx == 74 ? 2 : idx == 75 ? 3 : 1;
+    spec->lds_kpack = 2;
+    spec->xwin = 3;
+    if(idx != 74 && idx != 75 && idx != 76)
+        spec->xcd_remap = 6;
+    if(idx != 75)
+        spec->ws_store = 1;
+    if(idx == 70 || idx == 71)
+        spec->pfr_sched = 1;
+    if(idx == 75)
+        spec->pfr_sched = 2;
+    if(idx == 71 || idx == 72 || idx == 77)
+    {
+        spec->warp_m = 2;
+        spec->warp_n = 2;
+    }
+    if(idx == 71)
+    {
+        spec->waves_per_eu = 3;
+        spec->m_band = 1;
+    }
+    if(idx == 72)
+    {
+        spec->xwin_groups = 2;
+        spec->xwin_pp = 8;
+        spec->xwin_gn = 2;
+    }
+    if(idx == 73 || idx == 78)
+    {
+        spec->tile_m = 64;
+        spec->warp_m = 1;
+        spec->warp_n = 2;
+        spec->xwin_groups = 4;
+        spec->xwin_pp = 8;
+        spec->xwin_gn = 2;
+        spec->xwin_pps = 1;
+        spec->xwin_rot = 1;
+    }
+    if(idx == 76)
+    {
+        spec->warp_m = 2;
+        spec->warp_n = 4;
+        spec->xwin_pp = 8;
+        spec->xwin_pps = 3;
+    }
+    if(idx == 77)
+    {
+        spec->xwin_groups = 2;
+        spec->xwin_gn = 1;
+    }
+    if(idx == 78)
+    {
+        spec->problem = rocke_conv_problem_make(1, 16, 16, 128, 128, 3, 3, 1, 1, 1, 1, 1, 1);
+        spec->problem.groups = 2;
+    }
+    return 0;
+}
+
+/* Grouped (grid-per-group) cshuffle epilogues 86-88 on gfx942; mirrors
+ * _grouped_cshuffle_spec() in the Python emitter (the index table is there). */
+static int make_cfg_grouped_cshuffle(int idx,
+                                     rocke_implicit_gemm_conv_wgrad_spec_t* spec,
+                                     const char** arch)
+{
+    *spec = rocke_implicit_gemm_conv_wgrad_spec_default();
+    *arch = "gfx942";
+    spec->problem = rocke_conv_problem_make(2, 10, 10, 24, 48, 3, 3, 1, 1, 1, 1, 1, 1);
+    spec->problem.groups = 2;
+    spec->dtype_a = "fp16";
+    spec->dtype_b = "fp16";
+    spec->dtype_d = idx == 88 ? "fp32" : "fp16";
+    spec->tile_m = 64;
+    spec->tile_n = 64;
+    spec->tile_k = 32;
+    spec->warp_m = 2;
+    spec->warp_n = 2;
+    spec->warp_tile_m = 16;
+    spec->warp_tile_n = 16;
+    spec->warp_tile_k = 16;
+    spec->pipeline = "mem";
+    spec->epilogue = "cshuffle";
+    spec->split_k = idx == 86 ? 1 : 2;
+    return 0;
+}
+
+/* The gfx942 3-D configs by their own number (from 55); mirrors
+ * _gfx942_3d_any() in the Python emitter. */
+static int make_cfg_3d_any(int idx, rocke_implicit_gemm_conv_wgrad_spec_t* spec, const char** arch)
+{
+    if(idx >= 86 && idx <= 88)
+        return make_cfg_grouped_cshuffle(idx, spec, arch);
+    if(idx >= 79 && idx <= 81)
+    {
+        /* xwin_kord on 73 (ping-pong), 70 (plain loop) and 78 (2-D) */
+        static const int kb[3] = {73, 70, 78};
+        make_cfg_3d_xwin(kb[idx - 79], spec, arch);
+        spec->xwin_kord = 1;
+        return 0;
+    }
+    if(idx == 84 || idx == 85)
+    {
+        /* xwin_bq 1 on 72, 2 on 83 */
+        make_cfg_3d_any(idx == 84 ? 72 : 83, spec, arch);
+        spec->xwin_bq = idx == 84 ? 1 : 2;
+        return 0;
+    }
+    if(idx == 82 || idx == 83)
+    {
+        /* xwin_aq 1 on 72, 2 on 73 */
+        make_cfg_3d_xwin(idx == 82 ? 72 : 73, spec, arch);
+        spec->xwin_aq = idx == 82 ? 1 : 2;
+        return 0;
+    }
+    if(idx >= 70 && idx <= 78)
+        return make_cfg_3d_xwin(idx, spec, arch);
+    if(idx >= 55 && idx <= 58)
+        return make_cfg_3d(idx, spec, arch);
+    if(idx >= 59 && idx <= 69)
+        return make_cfg_3d_knobs(idx, spec, arch);
+    return -1;
+}
+
+static int make_cfg(int idx, rocke_implicit_gemm_conv_wgrad_spec_t* spec, const char** arch);
+
+/* Configs 143-153 (Python _GATE_CFGS): an explicit dW width on the grouped
+ * cshuffle epilogues (143-144), then specs both engines must reject. */
+static int make_gate_cfg(int idx, rocke_implicit_gemm_conv_wgrad_spec_t* spec, const char** arch)
+{
+    static const int base[11] = {140, 141, 109, 110, 21, 11, 16, 111, 127, 5, 16};
+    if(make_cfg(base[idx - 143], spec, arch) != 0)
+        return -1;
+    switch(idx)
+    {
+    case 143:
+    case 144:
+        spec->has_vector_size_c = true;
+        spec->vector_size_c = 2;
+        return 0;
+    case 145: /* prefetch_regs=2: two stacked A/B tiles over the LDS cap */
+        spec->prefetch_regs = 2;
+        return 0;
+    case 146: /* xwin_gn 2's three shared dY slots over the LDS cap */
+        spec->tile_m = 256;
+        spec->warp_m = 4;
+        spec->warp_n = 1;
+        spec->xwin = 3;
+        spec->xwin_groups = 2;
+        spec->xwin_pp = 8;
+        spec->xwin_gn = 2;
+        spec->prefetch_regs = 1;
+        spec->lds_kpack = 2;
+        return 0;
+    case 147: /* stream-K never reaches the prefetch_regs K loop */
+        spec->prefetch_regs = 1;
+        return 0;
+    case 148: /* prefetch_regs carrying 64 scalar loads per thread */
+        spec->tile_k = 256;
+        spec->has_vector_size_a = true;
+        spec->vector_size_a = 1;
+        spec->has_vector_size_b = true;
+        spec->vector_size_b = 1;
+        spec->prefetch_regs = 1;
+        return 0;
+    case 149: /* two-stage stores through the f32 scratch, not cshuffle */
+        spec->epilogue = "cshuffle";
+        return 0;
+    case 150: /* an xwin sub-knob without xwin */
+        spec->xwin_kord = 1;
+        return 0;
+    case 151: /* pfr_sched does not schedule the xwin_pp ping-pong */
+        spec->pfr_sched = 1;
+        return 0;
+    case 152: /* the fast dW store is a wave64 MFMA epilogue */
+        spec->epi_store_fast = true;
+        return 0;
+    case 153: /* kp_line its k-packed operand cannot decode */
+        spec->tile_m = 32;
+        spec->tile_n = 64;
+        spec->warp_m = 1;
+        spec->warp_n = 2;
+        spec->has_vector_size_a = true;
+        spec->vector_size_a = 4;
+        spec->has_vector_size_b = true;
+        spec->vector_size_b = 4;
+        spec->prefetch_regs = 1;
+        spec->lds_kpack = 2;
+        spec->kp_line = 8;
+        spec->split_k = 1;
+        spec->two_stage = false;
+        return 0;
+    default:
+        return -1;
+    }
+}
+
 static int make_cfg(int idx, rocke_implicit_gemm_conv_wgrad_spec_t* spec, const char** arch)
 {
+    if(idx >= 143 && idx <= 153)
+        return make_gate_cfg(idx, spec, arch);
     if(idx >= 73 && idx <= 88)
         return make_cfg_tf32(idx, spec, arch);
     if(idx >= 89 && idx <= 105)
@@ -340,6 +674,8 @@ static int make_cfg(int idx, rocke_implicit_gemm_conv_wgrad_spec_t* spec, const 
             spec->dtype_d = "bf16";
         return 0;
     }
+    if(idx >= 55 + GFX942_3D_OFFSET)
+        return make_cfg_3d_any(idx - GFX942_3D_OFFSET, spec, arch);
     int base = pfa_base(idx);
     if(idx == 71 || idx == 72)
         base = idx == 71 ? 11 : 15;

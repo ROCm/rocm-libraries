@@ -891,7 +891,8 @@ class TestConvDgradGfx1250Emit(unittest.TestCase):
 
 
 def _dgrad_run_inprocess(spec, dtype, seed=0, poison=False, problem=None):
-    """Launch one dgrad kernel and return dX as a torch tensor (NHWC).
+    """Launch one dgrad kernel and return dX as a torch tensor (NHWC; NDHWC
+    for a 3-D problem).
 
     The kernel is built from ``spec`` (its problem is the build probe) and
     launched on ``problem`` (default: the spec's own), as an AOT binary is:
@@ -924,9 +925,8 @@ def _dgrad_run_inprocess(spec, dtype, seed=0, poison=False, problem=None):
     td = {"fp16": torch.float16, "bf16": torch.bfloat16, "fp32": torch.float32}[dtype]
     p = spec.problem if problem is None else problem
     torch.manual_seed(seed)
-    dY = torch.empty(p.N, p.Ho, p.Wo, p.K).uniform_(-1.0, 1.0).to(td)
-    W = torch.empty(p.K, p.Y, p.X, p.cpg).uniform_(-1.0, 1.0).to(td)
-    dX = torch.zeros(p.N, p.Hi, p.Wi, p.C, dtype=td)
+    dY, W = _dgrad_inputs(p, td)
+    dX = torch.zeros(p.N, *((p.Di,) if p.is_3d else ()), p.Hi, p.Wi, p.C, dtype=td)
 
     rt = Runtime()
     dY_d, W_d, dX_d = rt.alloc(dY.nbytes), rt.alloc(W.nbytes), rt.alloc(dX.nbytes)
@@ -942,7 +942,7 @@ def _dgrad_run_inprocess(spec, dtype, seed=0, poison=False, problem=None):
     rt.memcpy_h2d(sg_d, raw, ctypes.sizeof(raw))
 
     # The tilde record buffer is part of the dgrad ABI, not an extension.
-    sig = conv_args_signature(dtype, direction="dgrad")
+    sig = conv_args_signature(dtype, direction="dgrad", is_3d=p.is_3d)
     launcher = KernelLauncher(
         hsaco=artifact.hsaco, kernel_name=artifact.kernel_name, signature=sig
     )
@@ -972,16 +972,36 @@ def _dgrad_run_inprocess(spec, dtype, seed=0, poison=False, problem=None):
     return out
 
 
+def _dgrad_inputs(p, td):
+    """dY (NHWK / NDHWK) and W (KYXC / KZYXC) drawn from the current seed."""
+    import torch
+
+    d_o, z = ((p.Do,), (p.Z,)) if p.is_3d else ((), ())
+    dY = torch.empty(p.N, *d_o, p.Ho, p.Wo, p.K).uniform_(-1.0, 1.0).to(td)
+    W = torch.empty(p.K, *z, p.Y, p.X, p.cpg).uniform_(-1.0, 1.0).to(td)
+    return dY, W
+
+
 def _dgrad_reference(problem, dtype, seed=0):
-    """fp32 torch reference dX (NHWC) for the inputs _dgrad_run_inprocess draws."""
+    """fp32 torch reference dX (NHWC; NDHWC for a 3-D problem) for the inputs
+    _dgrad_run_inprocess draws."""
     import torch
 
     td = {"fp16": torch.float16, "bf16": torch.bfloat16}[dtype]
     p = problem
     torch.manual_seed(seed)
     # Same draw order as _dgrad_run_inprocess, so the inputs match.
-    dY = torch.empty(p.N, p.Ho, p.Wo, p.K).uniform_(-1.0, 1.0).to(td)
-    W = torch.empty(p.K, p.Y, p.X, p.cpg).uniform_(-1.0, 1.0).to(td)
+    dY, W = _dgrad_inputs(p, td)
+    if p.is_3d:
+        return torch.nn.grad.conv3d_input(
+            (p.N, p.C, p.Di, p.Hi, p.Wi),
+            W.float().permute(0, 4, 1, 2, 3).contiguous(),
+            dY.float().permute(0, 4, 1, 2, 3).contiguous(),
+            stride=(p.sD, p.sH, p.sW),
+            padding=(p.pD, p.pH, p.pW),
+            dilation=(p.dD, p.dH, p.dW),
+            groups=p.groups,
+        ).permute(0, 2, 3, 4, 1)
     return torch.nn.grad.conv2d_input(
         (p.N, p.C, p.Hi, p.Wi),
         W.float().permute(0, 3, 1, 2).contiguous(),
@@ -2247,6 +2267,128 @@ class TestConvDgradSplitKCshuffle(unittest.TestCase):
     def test_fp16_width8_split16(self):
         # Four packed pairs per lane; tiles past the channel run are masked.
         self._check("fp16", split_k=16, vec_c=8, C=72, tile_m=64, tile_n=64)
+
+
+@unittest.skipUnless(
+    ARCH == "gfx942" and _HAS_TORCH, "the x-halo / ping-pong dgrad knobs are gfx942"
+)
+class TestConvDgradTapkSplitKGrouped(unittest.TestCase):
+    """Split-K on the x-halo and ping-pong tap-outer loops: the cshuffle
+    packed-atomic store of a grouped problem lands in each group's channel
+    slab of dX (the GEMM columns are the group's channels), and an
+    ungrouped problem is unchanged."""
+
+    _COMMON = dict(
+        warp_tile_m=16,
+        warp_tile_n=16,
+        wave_size=64,
+        epilogue="cshuffle",
+        lds_k_pad=0,
+        vector_size_a=8,
+        vector_size_b=8,
+        vector_size_c=8,
+        tap_outer_k=True,
+        lds_xor=True,
+    )
+
+    def _check(self, problem, **kw):
+        import torch
+
+        from kernels.common.conv_implicit_gemm import ConvDataSpec
+        from kernels.common.conv_implicit_gemm_dgrad import (
+            DgradConvSpec,
+            is_valid_dgrad_spec,
+        )
+
+        spec = DgradConvSpec(
+            problem=problem,
+            name="rocke_test_dgrad_tapk_sk_grouped",
+            data=ConvDataSpec(dtype_a="bf16", dtype_b="bf16", dtype_d="bf16"),
+            **self._COMMON,
+            **kw,
+        )
+        ok, reason = is_valid_dgrad_spec(spec, ARCH)
+        self.assertTrue(ok, reason)
+        got = _dgrad_run_inprocess(spec, "bf16")
+        ref = _dgrad_reference(problem, "bf16")
+        self.assertFalse(torch.isnan(got.float()).any(), "dX contains NaN")
+        delta = (got.float() - ref).abs().max().item()
+        self.assertLess(delta / max(ref.abs().max().item(), 1e-6), 2e-2)
+
+    def _xhalo(self, groups):
+        from benchmarks.common.benchmark_implicit_gemm_conv import parse_miopen_cmd
+
+        p = parse_miopen_cmd(
+            "./MIOpenDriver convbfp16 -n 2 -c 128 -H 14 -W 17 -k 128 -y 3 -x 3 "
+            f"-p 1 -q 0 -u 1 -v 1 -l 1 -j 1 -m conv -g {groups} -F 2 -t 1"
+        )[0]
+        self._check(
+            p,
+            tile_m=256,
+            tile_n=64,
+            tile_k=32,
+            warp_m=4,
+            warp_n=1,
+            warp_tile_k=16,
+            waves_per_eu=2,
+            split_k=2,
+            tapk_prefetch=3,
+            tapk_xhalo=True,
+            b_kpack=2,
+            tapk_ilv=4,
+            xhalo_exact=True,
+            tapk_lds_barrier=True,
+            tapk_setprio=1,
+            xh_b_wide=True,
+            xh_b_kpad=4,
+            xh_a_k4=True,
+            xh_order=1,
+        )
+
+    def _pingpong(self, groups):
+        from kernels.common._conv_implicit_gemm_common import ConvProblem
+
+        p = ConvProblem(
+            N=1,
+            Hi=16,
+            Wi=16,
+            C=128,
+            K=128,
+            Y=3,
+            X=3,
+            pH=1,
+            pW=1,
+            groups=groups,
+            Di=16,
+            Z=3,
+            sD=1,
+            pD=1,
+            dD=1,
+        )
+        self._check(
+            p,
+            tile_m=128,
+            tile_n=256,
+            tile_k=64,
+            warp_m=2,
+            warp_n=4,
+            warp_tile_k=16,
+            split_k=4,
+            tapk_prefetch=1,
+            b_kpack=4,
+            xcd_remap=6,
+            tapk_pingpong=4,
+            tapk_pp_sched=5,
+        )
+
+    def test_xhalo_split2_grouped(self):
+        self._xhalo(groups=2)
+
+    def test_xhalo_split2_ungrouped(self):
+        self._xhalo(groups=1)
+
+    def test_pingpong_3d_split4_grouped(self):
+        self._pingpong(groups=2)
 
 
 if __name__ == "__main__":

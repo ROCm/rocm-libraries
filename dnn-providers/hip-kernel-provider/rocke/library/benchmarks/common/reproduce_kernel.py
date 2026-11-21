@@ -66,7 +66,9 @@ def artifact_stem(name: str) -> str:
 
 
 def job_and_builder(identity: KernelIdentity):
-    """``(job, build)``: the job ``--compile-all`` builds ``identity`` from
+    """``(job, build)``: the job that builds ``identity`` (the one
+    ``--compile-all`` builds when its grid walks ``identity``, else the job
+    read off the identity's fields, so no ``ROCKE_AOT_*`` scoping is needed)
     and the family's ``build(job, arch, dtype)``."""
     if identity.is_direct:
         from kernels.conv.direct_aot_jobs import (
@@ -75,9 +77,9 @@ def job_and_builder(identity: KernelIdentity):
         )
 
         return direct_job_for_identity(identity), direct_kernel_for_job
-    from kernels.conv.aot_jobs import job_for_identity, kernel_for_job
+    from kernels.conv.aot_jobs import kernel_for_job, rebuild_job_for_identity
 
-    return job_for_identity(identity), kernel_for_job
+    return rebuild_job_for_identity(identity), kernel_for_job
 
 
 def reproduce(

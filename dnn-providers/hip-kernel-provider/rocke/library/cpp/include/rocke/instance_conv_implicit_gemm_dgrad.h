@@ -194,6 +194,56 @@ typedef struct rocke_dgrad_conv_spec
     int dy_halo_setprio;
     int dy_halo_kouter_pad;
     int halo_max_wo;
+    /* Branch knobs, 1:1 with the DgradConvSpec fields of the same name. All
+     * default to off and leave the emitted IR byte-identical when off; the
+     * ones the C++ engine does not implement yet are rejected by
+     * rocke_dgrad_conv_is_valid_spec. */
+    int tapk_prefetch;
+    bool tapk_xhalo;
+    int b_kpack;
+    int tapk_ilv;
+    bool xhalo_exact;
+    int xcd_remap;
+    int m_band;
+    bool xh_stride_m;
+    int xh_dlds;
+    bool xh_epi_lin;
+    bool epi_lds_barriers;
+    bool xh_tap_rsrc;
+    int xh_yring;
+    bool no_agpr;
+    int cshuffle_m_chunks; /* default 1 */
+    int tapk_lds_ahead;
+    bool tapk_lds_barrier;
+    int tapk_setprio;
+    bool lds_xor;
+    bool xh_b_wide;
+    int xh_b_kpad;
+    int tapk_pingpong;
+    int tapk_pp_sched;
+    int tapk_pp_epi;
+    bool split_atomic_pairs;
+    int tapk_pp_persist;
+    int tapk_pp_xhalo;
+    int tapk_ztrim;
+    int tapk_pp_bslab;
+    bool xh_a_k4;
+    int xh_order;
+    int xh_defer;
+    int xh_fast_a;
+    int xh_epi;
+    int xh_persist;
+    int pp_streamk;
+    int pp_sk_mode;
+    bool pp_zskip;
+    int pp_boxes;
+    int pp_box_cus;
+    int pp_box_order;
+    int pp_box_det;
+    /* DgradConvSpec.xh_dx_wmask: the x-halo cshuffle epilogue (xh_epi 1, 3-D)
+     * stores only the dX pixels with (X-1)/2 <= wi < Wi - (X-1)/2; with
+     * xh_epi_lin the linear store offset accepts row and plane gaps. */
+    bool xh_dx_wmask;
 } rocke_dgrad_conv_spec_t;
 
 /* Default-constructed spec (every field == Python dataclass default). */

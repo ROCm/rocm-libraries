@@ -114,10 +114,23 @@
 #   108 -- the same base at split_k = 1 with vector_size_c = 2: the cshuffle
 #         store epilogue must honour the explicit dW width (C = 64 alone
 #         would pick 8) in both engines.
-#   (Grouped wgrad reaches the C++ engine only through stream-K. The
-#    async loop's copy carries no element type, only its zero-fill does. The stream-K
-#    partition and CTA pool are kernargs, so no case varies them. async_dma is
-#    rejected with stream-K, and so is prefetch_addr.)
+#   109-142 -- gfx942 3-D grid-per-group configs, numbered 55-88 by
+#         _gfx942_3d_spec (_GFX942_3D_OFFSET = 54): bf16 grouped tiles
+#         (109-112; 112 is 110 with split_k=2 bf16 atomics on a 1-wide dW
+#         store, which both engines must reject), the register-prefetch,
+#         addressing, workspace and xwin knobs on them (113-139, see
+#         _GFX942_3D_KNOBS) and the grouped cshuffle epilogues (140-142).
+#   143-153 -- see _GATE_CFGS: the grouped cshuffle store and split-K atomic
+#         at an explicit dW width (143-144), then specs both engines must
+#         reject (145-153): LDS over the cap with prefetch_regs=2 and with
+#         xwin_gn 2, prefetch_regs with stream-K or past the staged-load
+#         limit, two-stage with cshuffle, an xwin sub-knob without xwin,
+#         pfr_sched with xwin_pp, the fast store on wave32, and kp_line on a
+#         tile its k-packed operand cannot decode.
+#   (The async loop's copy carries no element type, only its zero-fill does.
+#    The stream-K partition and CTA pool are kernargs, so no case varies them.
+#    async_dma is rejected with stream-K, and so are prefetch_addr and
+#    prefetch_regs.)
 #
 # Negative cases (configs 200+) verify that invalid specs are rejected:
 #   200 -- odd C with fp16 split-K (must raise ValueError)
@@ -129,7 +142,7 @@
 #   207 -- streamk with unroll_k (must raise ValueError)
 #   208 -- streamk atomic reduction into fp16 dW (must raise ValueError)
 # (These illustrate the validator contract. The C emitter defines only cases
-# 0-108, so run_diff.py stops at the shared END before reaching 200+; these
+# 0-153, so run_diff.py stops at the shared END before reaching 200+; these
 # configs are not exercised by the differential gate.)
 from kernels.common.conv_implicit_gemm_wgrad import (
     WgradConvSpec,
@@ -234,6 +247,67 @@ _ATOMIC_VEC_C_BASES = {
 }
 
 
+# Configs 143-153 (index -> (base, overrides)): an explicit dW width on the
+# grouped cshuffle epilogues, then specs both engines must reject. Keep in
+# lockstep with make_gate_cfg() in conv_implicit_gemm_wgrad_emit.c.
+_GATE_CFGS = {
+    # grouped (cpg = 12) cshuffle store, and its packed fp16 split-K atomic,
+    # at an explicit dW width 2 (the channel run alone would pick 4)
+    143: (140, {"vector_size_c": 2}),
+    144: (141, {"vector_size_c": 2}),
+    # must reject: prefetch_regs=2 stacks two A/B tiles, 73728 LDS bytes
+    145: (109, {"prefetch_regs": 2}),
+    # must reject: xwin_gn 2's three shared dY slots overrun the LDS
+    146: (
+        110,
+        {
+            "tile_m": 256,
+            "warp_m": 4,
+            "warp_n": 1,
+            "xwin": 3,
+            "xwin_groups": 2,
+            "xwin_pp": 8,
+            "xwin_gn": 2,
+            "prefetch_regs": 1,
+            "lds_kpack": 2,
+        },
+    ),
+    # must reject: stream-K never reaches the prefetch_regs K loop
+    147: (21, {"prefetch_regs": 1}),
+    # must reject: prefetch_regs carrying 64 scalar loads per thread
+    148: (
+        11,
+        {"tile_k": 256, "vector_size_a": 1, "vector_size_b": 1, "prefetch_regs": 1},
+    ),
+    # must reject: two-stage stores through the f32 scratch, not cshuffle
+    149: (16, {"epilogue": "cshuffle"}),
+    # must reject: an xwin sub-knob without xwin
+    150: (111, {"xwin_kord": 1}),
+    # must reject: pfr_sched does not schedule the xwin_pp ping-pong
+    151: (127, {"pfr_sched": 1}),
+    # must reject: the fast dW store is a wave64 MFMA epilogue
+    152: (5, {"epi_store_fast": True}),
+    # must reject: kp_line on a tile whose k-packed operand cannot take the
+    # line decode (2 waves, 4 column-group blocks)
+    153: (
+        16,
+        {
+            "tile_m": 32,
+            "tile_n": 64,
+            "warp_m": 1,
+            "warp_n": 2,
+            "vector_size_a": 4,
+            "vector_size_b": 4,
+            "prefetch_regs": 1,
+            "lds_kpack": 2,
+            "kp_line": 8,
+            "split_k": 1,
+            "two_stage": False,
+        },
+    ),
+}
+
+
 def _spec(idx: int):
     """Return (spec, arch) for config index `idx`.
 
@@ -242,6 +316,13 @@ def _spec(idx: int):
     illustrative of the validator contract; no differential harness consumes
     them (see the module header).
     """
+    if idx in _GATE_CFGS:
+        from dataclasses import replace
+
+        base_idx, extra = _GATE_CFGS[idx]
+        spec, arch = _spec(base_idx)
+        return replace(spec, **extra), arch
+
     if idx in _ATOMIC_VEC_C_BASES:
         from dataclasses import replace
 
@@ -1086,6 +1167,8 @@ def _spec(idx: int):
         return replace(base, **bad[0]), bad[1]
     if 73 <= idx <= 88:
         return _tf32_spec(idx)
+    if idx >= 55 + _GFX942_3D_OFFSET:
+        return _gfx942_3d_any(idx - _GFX942_3D_OFFSET)
     raise SystemExit(f"unknown config index {idx}")
 
 
@@ -1159,6 +1242,343 @@ def _tf32_spec(idx: int):
         ),
         arch,
     )
+
+
+_GFX942_3D_OFFSET = 54
+
+
+def _gfx942_3d_any(idx: int):
+    """The gfx942 3-D configs below by their own number (from 55)."""
+    if 55 <= idx <= 58:
+        return _gfx942_3d_spec(idx)
+    if idx in _GFX942_3D_KNOBS:
+        return _gfx942_3d_knob_spec(idx)
+    if 86 <= idx <= 88:
+        return _grouped_cshuffle_spec(idx)
+    raise SystemExit(f"unknown config index {idx + _GFX942_3D_OFFSET}")
+
+
+# Grouped (grid-per-group) cshuffle epilogues on gfx942: cpg=12 (store width 4,
+# while C=24 alone would give 8), group*kpg folded into the dW row. Keep in
+# lockstep with make_cfg_grouped_cshuffle() in conv_implicit_gemm_wgrad_emit.c.
+#   86: split_k=1 cshuffle store, fp16
+#   87: split_k=2 cshuffle packed fp16 atomics (block_m_off + group*kpg,
+#       M bound group*kpg + kpg)
+#   88: 87 with fp32 dW (scalar f32 atomics)
+def _grouped_cshuffle_spec(idx: int):
+    from kernels.common._conv_implicit_gemm_common import ConvDataSpec
+
+    p = ConvProblem(N=2, Hi=10, Wi=10, C=24, K=48, Y=3, X=3, pH=1, pW=1, groups=2)
+    dt_d = "fp32" if idx == 88 else "fp16"
+    spec = WgradConvSpec(
+        problem=p,
+        data=ConvDataSpec(dtype_a="fp16", dtype_b="fp16", dtype_d=dt_d),
+        tile_m=64,
+        tile_n=64,
+        tile_k=32,
+        warp_m=2,
+        warp_n=2,
+        warp_tile_m=16,
+        warp_tile_n=16,
+        warp_tile_k=16,
+        pipeline="mem",
+        epilogue="cshuffle",
+        split_k=1 if idx == 86 else 2,
+    )
+    return spec, "gfx942"
+
+
+# gfx942 3-D grouped (grid-per-group) configs on the 3x3x3 / pad-1 problem the
+# AOT cache builds its grouped wgrad binaries against. Keep in lockstep with
+# make_cfg_3d() in conv_implicit_gemm_wgrad_emit.c. The numbers below are
+# _gfx942_3d_spec's own; it serves parity config N as its config
+# N - _GFX942_3D_OFFSET (they follow the TF32 configs, which end at 108).
+#   55: bf16, groups=2, t256x256x32 w2x4 a16x16x16, lds_k_pad=4, mem/default
+#   56: bf16, groups=2, t128x192x32 w1x4, split_k=2 two-stage (1024 slabs),
+#       lds_k_pad=4, waves_per_eu=2
+#   57: 55 with fp16 operands, groups=1
+#   58: 56 with split_k=2 atomics (no two-stage), ws_replicas default: both
+#       engines must reject it (bf16 dW atomics on the 1-wide dW store leave
+#       no pair partner)
+def _gfx942_3d_spec(idx: int):
+    from kernels.common._conv_implicit_gemm_common import ConvDataSpec
+
+    groups = 1 if idx == 57 else 2
+    dt = "fp16" if idx == 57 else "bf16"
+    p = ConvProblem(
+        N=1,
+        Di=16,
+        Hi=16,
+        Wi=16,
+        C=128,
+        K=128,
+        Z=3,
+        Y=3,
+        X=3,
+        sD=1,
+        sH=1,
+        sW=1,
+        pD=1,
+        pH=1,
+        pW=1,
+        dD=1,
+        dH=1,
+        dW=1,
+        groups=groups,
+    )
+    kw = dict(
+        warp_tile_m=16,
+        warp_tile_n=16,
+        warp_tile_k=16,
+        vector_size_a=8,
+        vector_size_b=8,
+        vector_size_c=1,
+        lds_k_pad=4,
+        pipeline="mem",
+        epilogue="default",
+    )
+    if idx in (55, 57):
+        kw.update(tile_m=256, tile_n=256, tile_k=32, warp_m=2, warp_n=4)
+    else:
+        kw.update(
+            tile_m=128,
+            tile_n=192,
+            tile_k=32,
+            warp_m=1,
+            warp_n=4,
+            split_k=2,
+            waves_per_eu=2,
+        )
+        if idx == 56:
+            kw.update(two_stage=True, ws_replicas=1024)
+    data = ConvDataSpec(dtype_a=dt, dtype_b=dt, dtype_d=dt)
+    return WgradConvSpec(problem=p, data=data, **kw), "gfx942"
+
+
+# Register-prefetch / addressing / workspace knobs on the 3-D grouped configs:
+# (base index, overrides). Keep in lockstep with make_cfg_3d_knobs() in
+# conv_implicit_gemm_wgrad_emit.c.
+_GFX942_3D_KNOBS = {
+    # 59: 56 + pfr1 kp2 xcd6 pfs1 wss1
+    59: (56, dict(prefetch_regs=1, lds_kpack=2, xcd_remap=6, pfr_sched=1, ws_store=1)),
+    # 60: 59 on w2x2 (wpe3) + m_band 1
+    60: (
+        56,
+        dict(
+            prefetch_regs=1,
+            lds_kpack=2,
+            xcd_remap=6,
+            pfr_sched=1,
+            ws_store=1,
+            warp_m=2,
+            warp_n=2,
+            waves_per_eu=3,
+            m_band=1,
+        ),
+    ),
+    # 61: 55 + pfr1 kp2 sepa2 kpl8 ppp3
+    61: (55, dict(prefetch_regs=1, lds_kpack=2, sep_addr=2, kp_line=8, plain_pp=3)),
+    # 62: 61 on w4x2, split_k=2 two-stage (8 slabs) + xcd6 wss1
+    62: (
+        55,
+        dict(
+            prefetch_regs=1,
+            lds_kpack=2,
+            sep_addr=2,
+            kp_line=8,
+            plain_pp=3,
+            warp_m=4,
+            warp_n=2,
+            split_k=2,
+            two_stage=True,
+            xcd_remap=6,
+            ws_store=1,
+        ),
+    ),
+    # 63: 61 on w4x2 + epi_store_fast
+    63: (
+        55,
+        dict(
+            prefetch_regs=1,
+            lds_kpack=2,
+            sep_addr=2,
+            kp_line=8,
+            plain_pp=3,
+            warp_m=4,
+            warp_n=2,
+            epi_store_fast=True,
+        ),
+    ),
+    # 64: 56 + pfr2 (double-buffered tile) kp2
+    64: (56, dict(prefetch_regs=2, lds_kpack=2)),
+    # 65: 55 + pfr3 (two tiles in flight) sepa1 ilv4
+    65: (55, dict(prefetch_regs=3, sep_addr=1, pfr_sched=4)),
+    # 66: 61 with plain_pp=1
+    66: (55, dict(prefetch_regs=1, lds_kpack=2, sep_addr=2, kp_line=8, plain_pp=1)),
+    # 67: 61 with plain_pp=2, no kp_line
+    67: (55, dict(prefetch_regs=1, lds_kpack=2, sep_addr=2, plain_pp=2)),
+    # 68: 59 with ws_store=2 (bf16 slabs)
+    68: (56, dict(prefetch_regs=1, lds_kpack=2, xcd_remap=6, pfr_sched=1, ws_store=2)),
+    # 69: 61 with plain_pp=4, pfr3-free sepa1
+    69: (55, dict(prefetch_regs=1, lds_kpack=2, sep_addr=1, plain_pp=4)),
+    # 70: 59 + xwin 3 (the X window B tile)
+    70: (
+        56,
+        dict(
+            prefetch_regs=1, lds_kpack=2, xcd_remap=6, pfr_sched=1, ws_store=1, xwin=3
+        ),
+    ),
+    # 71: 70 on w2x2 (wpe3) + m_band 1
+    71: (
+        56,
+        dict(
+            prefetch_regs=1,
+            lds_kpack=2,
+            xcd_remap=6,
+            pfr_sched=1,
+            ws_store=1,
+            xwin=3,
+            warp_m=2,
+            warp_n=2,
+            waves_per_eu=3,
+            m_band=1,
+        ),
+    ),
+    # 72: w2x2 xwin 3, 2 groups ping-pong sharing the dY tile (xgn2 xpp8)
+    72: (
+        56,
+        dict(
+            prefetch_regs=1,
+            lds_kpack=2,
+            xcd_remap=6,
+            ws_store=1,
+            xwin=3,
+            warp_m=2,
+            warp_n=2,
+            xwin_groups=2,
+            xwin_pp=8,
+            xwin_gn=2,
+        ),
+    ),
+    # 73: t64x192 w1x2, 4 groups ping-pong (xgn2 xpp8 xps1 xrot1)
+    73: (
+        56,
+        dict(
+            prefetch_regs=1,
+            lds_kpack=2,
+            xcd_remap=6,
+            ws_store=1,
+            xwin=3,
+            tile_m=64,
+            warp_m=1,
+            warp_n=2,
+            xwin_groups=4,
+            xwin_pp=8,
+            xwin_gn=2,
+            xwin_pps=1,
+            xwin_rot=1,
+        ),
+    ),
+    # 74: 70 with prefetch_regs=2 (two LDS buffers), no xcd_remap
+    74: (56, dict(prefetch_regs=2, lds_kpack=2, ws_store=1, xwin=3)),
+    # 75: 70 with prefetch_regs=3 (two tiles in flight) and pfr_sched 2
+    75: (56, dict(prefetch_regs=3, lds_kpack=2, pfr_sched=2, xwin=3)),
+    # 76: one 8-wave tile ping-pong (w2x4, xpp8 xps3)
+    76: (
+        56,
+        dict(
+            prefetch_regs=1,
+            lds_kpack=2,
+            ws_store=1,
+            xwin=3,
+            warp_m=2,
+            warp_n=4,
+            xwin_pp=8,
+            xwin_pps=3,
+        ),
+    ),
+    # 77: 2 groups, plain loop, xgn1
+    77: (
+        56,
+        dict(
+            prefetch_regs=1,
+            lds_kpack=2,
+            xcd_remap=6,
+            ws_store=1,
+            xwin=3,
+            warp_m=2,
+            warp_n=2,
+            xwin_groups=2,
+            xwin_gn=1,
+        ),
+    ),
+    # 78: 73 on the 2-D problem
+    78: (
+        56,
+        dict(
+            prefetch_regs=1,
+            lds_kpack=2,
+            xcd_remap=6,
+            ws_store=1,
+            xwin=3,
+            tile_m=64,
+            warp_m=1,
+            warp_n=2,
+            xwin_groups=4,
+            xwin_pp=8,
+            xwin_gn=2,
+            xwin_pps=1,
+            xwin_rot=1,
+        ),
+    ),
+}
+
+
+# 79-81: xwin_kord (row-fastest K tiles of a plane) on 73 (ping-pong),
+# 70 (plain loop) and 78 (2-D).
+for _i, _b in ((79, 73), (80, 70), (81, 78)):
+    _GFX942_3D_KNOBS[_i] = (
+        _GFX942_3D_KNOBS[_b][0],
+        dict(_GFX942_3D_KNOBS[_b][1], xwin_kord=1),
+    )
+# 82-83: xwin_aq (only a slot's leader group stores the shared dY tile) 1 on
+# 72 and 2 (pinned packs, exec-masked idle B units) on 73.
+for _i, _b, _aq in ((82, 72, 1), (83, 73, 2)):
+    _GFX942_3D_KNOBS[_i] = (
+        _GFX942_3D_KNOBS[_b][0],
+        dict(_GFX942_3D_KNOBS[_b][1], xwin_aq=_aq),
+    )
+# 84-85: xwin_bq (B load units of 4 voxels) 1 on 72 and 2 on 83.
+for _i, _b, _bq in ((84, 72, 1), (85, 83, 2)):
+    _GFX942_3D_KNOBS[_i] = (
+        _GFX942_3D_KNOBS[_b][0],
+        dict(_GFX942_3D_KNOBS[_b][1], xwin_bq=_bq),
+    )
+
+
+def _gfx942_3d_knob_spec(idx: int):
+    from dataclasses import replace
+
+    base, kw = _GFX942_3D_KNOBS[idx]
+    spec, arch = _gfx942_3d_spec(base)
+    if idx in (78, 81):
+        # the 2-D twin of the 3-D grouped probe
+        kw = dict(
+            kw,
+            problem=ConvProblem(
+                N=1,
+                Hi=16,
+                Wi=16,
+                C=128,
+                K=128,
+                Y=3,
+                X=3,
+                pH=1,
+                pW=1,
+                groups=2,
+            ),
+        )
+    return replace(spec, **kw), arch
 
 
 # (problem kwargs, data dtypes (a/b, d), atom edge, streamk, reduction, ctas, arch)

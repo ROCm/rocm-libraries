@@ -296,9 +296,20 @@ def test_implicit_job_for_identity_rejects_what_the_grid_cannot_build():
         dict(dtype_d="fp16"),
         dict(warp_tile_n=ident.warp_tile_m * 2),
         dict(lds_k_pad=4),
+        dict(tapk_pingpong=4),
     ):
         with pytest.raises(LookupError):
             ks.job_for_identity(dataclasses.replace(ident, **bad))
+
+
+def test_implicit_rebuild_reads_an_off_grid_identity_off_its_fields():
+    """A knob the grid never sets still rebuilds: the label alone is enough."""
+    ident = dataclasses.replace(
+        next(iter(_implicit_jobs("fwd", n_geometries=1))).identity, lds_k_pad=4
+    )
+    job = ks.rebuild_job_for_identity(ident)
+    assert job.identity == ident
+    assert job.spec_kwargs["lds_k_pad"] == 4
 
 
 def test_direct_job_for_identity_is_the_compile_all_job():
