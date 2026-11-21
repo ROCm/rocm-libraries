@@ -444,6 +444,103 @@ struct FmhaBatchPrefillFp8PageTileM64Softmax
     }
 };
 
+// The softmax of the M128 page tile: the forward FP8 policy's, except that the row maxima reduce
+// score pairs (c, c + 1) as two-wide vectors before one horizontal max per row. On scalars, the
+// clang 24 SLP vectorizer pairs the two row halves' max trees into maxnum.v2f32 (gfx1250 has no
+// packed FP32 max, so the ISA keeps the same v_max3 count) and carries that row pairing into the
+// score PHIs and the mask selects, whose lane masks then spill: 346 VGPRs and 28 bytes of scratch
+// instead of 330 and 0. Score pairs are adjacent WMMA registers, as in the exp stream.
+template <typename Geometry, typename Tuning>
+struct FmhaBatchPrefillFp8PageTileM128Softmax
+    : BlockFmhaPipelineQRKSVSTdmSchedFp8Policy<Geometry, Tuning>
+{
+    using Base         = BlockFmhaPipelineQRKSVSTdmSchedFp8Policy<Geometry, Tuning>;
+    using ScoreSoftmax = typename Base::ScoreSoftmax;
+    using ScorePair    = typename ScoreSoftmax::Mapping::Pair;
+
+    // Base::TreeMax on two-wide vectors: max3 levels, lane by lane.
+    template <index_t N>
+    CK_TILE_DEVICE static ScorePair PairTreeMax(const array<ScorePair, N>& v)
+    {
+        if constexpr(N == 1)
+            return v[number<0>{}];
+        else if constexpr(N == 2)
+            return __builtin_elementwise_max(v[number<0>{}], v[number<1>{}]);
+        else
+        {
+            constexpr index_t kTriples = N / 3;
+            constexpr index_t kRest    = N % 3;
+            array<ScorePair, kTriples + kRest> next{};
+            static_for<0, kTriples, 1>{}([&](auto i) {
+                constexpr index_t k = 3 * decltype(i)::value;
+                next(i)             = __builtin_elementwise_max(
+                    __builtin_elementwise_max(v[number<k>{}], v[number<k + 1>{}]),
+                    v[number<k + 2>{}]);
+            });
+            static_for<0, kRest, 1>{}([&](auto i) {
+                constexpr index_t k          = decltype(i)::value;
+                next(number<kTriples + k>{}) = v[number<3 * kTriples + k>{}];
+            });
+            return PairTreeMax<kTriples + kRest>(next);
+        }
+    }
+
+    template <typename Problem, typename ScoreTensor, typename RowTensor>
+    CK_TILE_DEVICE static void RunSplitSoftmaxPart01(
+        ScoreTensor& score, RowTensor& row_max, float log2e_scale, float& delta_m0, float& delta_m1)
+    {
+        // Sink tiles keep the forward policy's row max (its chained form).
+        if constexpr(Problem::kHasSink)
+        {
+            Base::template RunSplitSoftmaxPart01<Problem>(
+                score, row_max, log2e_scale, delta_m0, delta_m1);
+        }
+        else
+        {
+            using Softmax = ScoreSoftmax;
+            using Mapping = typename Softmax::Mapping;
+            static_assert(Problem::BiasEnum != BlockAttentionBiasEnum::ALIBI);
+            static_assert(!Problem::kHasLogitsSoftCap);
+            static_assert(ScoreTensor::get_thread_buffer_size() == Mapping::kThreadBufferSize);
+            static_assert(RowTensor::get_thread_buffer_size() == 2);
+
+            // An elementwise bias may carry -inf, like a mask.
+            constexpr bool kValidateMax =
+                Problem::FmhaMask::IsMasking ||
+                Problem::BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS;
+            const float old_max_m0 = row_max.get_thread_buffer()[number<0>{}];
+            const float old_max_m1 = row_max.get_thread_buffer()[number<1>{}];
+            auto row_part          = [&](auto half, float old_max) {
+                constexpr index_t kHalf = decltype(half)::value;
+                array<ScorePair, Mapping::kNumSu * 2 * Mapping::kPairsPerFragment> pairs{};
+                static_for<0, Mapping::kNumSu, 1>{}([&](auto su) {
+                    static_for<0, 2, 1>{}([&](auto h) {
+                        static_for<0, Mapping::kPairsPerFragment, 1>{}([&](auto p) {
+                            constexpr index_t at   = (su * 2 + h) * Mapping::kPairsPerFragment + p;
+                            constexpr index_t msb  = kHalf * 2 + h;
+                            constexpr index_t pair = su * Mapping::kPairsPerFragment + p;
+                            pairs(number<at>{})    = Mapping::template LoadPair<msb, pair>(score);
+                        });
+                    });
+                });
+                const ScorePair pair_max = PairTreeMax(pairs);
+                const float lane_max     = max(max(pair_max[0], pair_max[1]), old_max);
+                return Softmax::template RunPart1<kValidateMax>(lane_max,
+                                                                Softmax::PermuteLaneX16(lane_max),
+                                                                old_max * log2e_scale,
+                                                                log2e_scale);
+            };
+            const auto p1_m0 = row_part(number<0>{}, old_max_m0);
+            const auto p1_m1 = row_part(number<1>{}, old_max_m1);
+
+            row_max.get_thread_buffer()[number<0>{}] = p1_m0.row_max;
+            row_max.get_thread_buffer()[number<1>{}] = p1_m1.row_max;
+            delta_m0                                 = p1_m0.delta;
+            delta_m1                                 = p1_m1.delta;
+        }
+    }
+};
+
 // Policy of the gfx1250 FP8 (fp8bf16) batch-prefill page tile: FP8 Q / K / V / P with the FP8
 // WMMAs (16x16x64 QK, 16x16x128 PV), the vectorized KV layout with x = 16 and the page-tile window.
 // The data path: the LDS arena, the K / V LDS layouts the window writes, the operand reads
@@ -820,9 +917,13 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedFp8PageTilePolicy
         {
             // Four FP8 ones in a word that an empty volatile asm takes and returns: the compiler
             // cannot treat the word as loop invariant, so it builds the operand from it here.
+            // The word is a constant (1.0 = exponent bias, mantissa 0), not a converted value, so
+            // the allocator rematerializes it at the asm instead of keeping it through the loop.
             using Word = uint32_t;
             static_assert(sizeof(fp8_t) == 1 && sizeof(BBuffer) % sizeof(Word) == 0);
-            Word word = 0x01010101u * bit_cast<uint8_t>(type_convert<fp8_t>(1.0f));
+            constexpr Word kOneBits = static_cast<Word>(numeric_traits<fp8_t>::bias)
+                                      << numeric_traits<fp8_t>::mant;
+            Word word = 0x01010101u * kOneBits;
             asm volatile("" : "+v"(word));
             array<Word, sizeof(BBuffer) / sizeof(Word)> words;
             static_for<0, sizeof(BBuffer) / sizeof(Word), 1>{}([&](auto w) { words(w) = word; });
@@ -894,12 +995,13 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedFp8PageTilePolicy
                   Geometry::kPvWmmasPerStage == OutputFragments::kNumFragments);
 
     // The softmax of the M128 tiles is the forward FP8 pipeline's: the static entry points
-    // RunSplitSoftmaxPart01 and RunSplitSoftmaxPart2AndGetScale of its policy on this geometry.
+    // RunSplitSoftmaxPart01 and RunSplitSoftmaxPart2AndGetScale of its policy on this geometry,
+    // with the pair row maxima of FmhaBatchPrefillFp8PageTileM128Softmax.
     // They read the geometry and the problem, no LDS layout and no tuning member. The M64 tile,
     // which that policy does not take, has the same entry points for its one M iteration.
     using SoftmaxPolicy =
         std::conditional_t<Geometry::kQkMIter == 2,
-                           BlockFmhaPipelineQRKSVSTdmSchedFp8Policy<Geometry, Tuning>,
+                           FmhaBatchPrefillFp8PageTileM128Softmax<Geometry, Tuning>,
                            FmhaBatchPrefillFp8PageTileM64Softmax<Geometry>>;
     using ScoreSoftmax = typename SoftmaxPolicy::ScoreSoftmax;
     static_assert(std::is_same_v<typename SoftmaxPolicy::OutputFragments, OutputFragments>);
