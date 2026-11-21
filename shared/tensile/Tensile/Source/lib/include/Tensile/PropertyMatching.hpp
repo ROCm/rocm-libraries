@@ -621,9 +621,14 @@ namespace Tensile
                 auto comp = [](Entry const& e, Key const& key) { return e.key < key; };
                 auto iter = std::lower_bound(table.begin(), table.end(), key, comp);
 
-                return (iter->key == key)
-                           ? std::make_tuple(transform(iter->value), 0.0)
-                           : std::make_tuple(this->nullValue, std::numeric_limits<double>::max());
+                for(; iter != table.end() && iter->key == key; ++iter)
+                {
+                    auto match = transform(iter->value);
+                    if(match)
+                        return std::make_tuple(match, 0.0);
+                }
+
+                return std::make_tuple(this->nullValue, std::numeric_limits<double>::max());
             }
         };
 

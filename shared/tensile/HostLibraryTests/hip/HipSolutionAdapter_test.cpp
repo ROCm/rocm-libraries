@@ -84,7 +84,7 @@ TEST(HipSolutionAdapterTest, BetaOnlyKernel_Zero)
     k.args.append<float>("beta", 0.0f);
 
     hip::SolutionAdapter adapter(false);
-    adapter.loadEmbeddedCodeObjects("kernels_lite_mixed");
+    adapter.loadEmbeddedCodeObjects("beta_only");
 
     HIP_CHECK_EXC(adapter.launchKernel(k));
 
@@ -157,7 +157,7 @@ TEST(HipSolutionAdapterTest, BetaOnlyKernel_Nonzero)
     k.args.append<float>("beta", beta);
 
     hip::SolutionAdapter adapter(false);
-    adapter.loadEmbeddedCodeObjects("kernels_lite_mixed");
+    adapter.loadEmbeddedCodeObjects("beta_only");
 
     HIP_CHECK_EXC(adapter.launchKernel(k));
 
