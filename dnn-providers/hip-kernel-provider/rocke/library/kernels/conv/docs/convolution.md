@@ -1647,7 +1647,7 @@ handles any filter, stride, dilation and padding. The arch gate reads
 `mfma_f32_16x16x32`), which of the known targets only gfx950 has.
 
 A workgroup of 8 waves owns a tile of 256 flattened output pixels (N x Ho x Wo)
-and `bk` (128 or 256) output channels. The reduction is over taps x 64-channel
+and `block_k` (128 or 256) output channels. The reduction is over taps x 64-channel
 chunks in a persistent grid of up to 256 blocks:
 
 - the im2col mapping is a per-lane pixel base (tile constant) plus a scalar
@@ -1667,7 +1667,7 @@ chunks in a persistent grid of up to 256 blocks:
   into the output.
 
 Runtime (kernargs, the direct-conv block): batch, extents and both channel
-counts. Build-time: the filter, padding, stride, dilation, `bk`, `split_c`
+counts. Build-time: the filter, padding, stride, dilation, `block_k`, `split_c`
 and dtype. Constraints: `groups == 1`, `C` a multiple of 64, `K` a multiple
 of 8, stride and dilation both at least 1, at most 32 taps, every extent at
 least 1, the input image, output image, weight tensor and workspace slab

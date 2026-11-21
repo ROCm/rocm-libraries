@@ -33,7 +33,7 @@ namespace
 constexpr int kCK = 64; /* channels per chunk */
 constexpr int kBX = 256; /* pixels per block tile */
 constexpr int kXT = 4; /* 16-pixel MFMA tiles per wave */
-constexpr int kPersist = 256; /* blocks of the persistent grid */
+constexpr int kPersist = ROCKE_DIRECT_PERSISTENT_BLOCKS; /* blocks of the persistent grid */
 constexpr int kRot = 97; /* per-round rotation of the item walk */
 constexpr int kWaves = 8;
 constexpr int64_t kOob = ((int64_t)1 << 31) - 1;
@@ -93,7 +93,7 @@ extern "C" rocke_fwd_flex_mfma_spec_t rocke_fwd_flex_mfma_spec_default(void)
     rocke_fwd_flex_mfma_spec_t s;
     memset(&s, 0, sizeof(s));
     s.problem = rocke_direct_conv_problem_default();
-    s.bk = 256;
+    s.block_k = 256;
     s.split_c = 1;
     s.name = "fwd_flex_mfma";
     s.wave_size = 64;
@@ -102,7 +102,7 @@ extern "C" rocke_fwd_flex_mfma_spec_t rocke_fwd_flex_mfma_spec_default(void)
 
 extern "C" int rocke_fwd_flex_mfma_kt(const rocke_fwd_flex_mfma_spec_t* s)
 {
-    return s->bk == 256 ? 8 : 4;
+    return s->block_k == 256 ? 8 : 4;
 }
 
 extern "C" int rocke_fwd_flex_mfma_threads_per_block(const rocke_fwd_flex_mfma_spec_t* s)
@@ -113,14 +113,14 @@ extern "C" int rocke_fwd_flex_mfma_threads_per_block(const rocke_fwd_flex_mfma_s
 extern "C" long long rocke_fwd_flex_mfma_items(const rocke_fwd_flex_mfma_spec_t* s)
 {
     const rocke_direct_conv_problem_t* p = &s->problem;
-    if(s->bk <= 0)
+    if(s->block_k <= 0)
     {
         return 0;
     }
     const long long nx
         = (long long)p->N * rocke_direct_conv_problem_Ho(p) * rocke_direct_conv_problem_Wo(p);
-    const long long tiles
-        = rocke_ceil_div(nx, kBX) * rocke_ceil_div(rocke_direct_conv_problem_total_k(p), s->bk);
+    const long long tiles = rocke_ceil_div(nx, kBX)
+                            * rocke_ceil_div(rocke_direct_conv_problem_total_k(p), s->block_k);
     return tiles * s->split_c;
 }
 
@@ -156,7 +156,7 @@ extern "C" rocke_status_t
     snprintf(p_buf, sizeof p_buf, "p%dx%d", p->PAD, rocke_direct_conv_problem_pad_w(p));
     snprintf(s_buf, sizeof s_buf, "s%d", p->stride);
     snprintf(d_buf, sizeof d_buf, "d%dx%d", p->dil_h, p->dil_w);
-    snprintf(k_buf, sizeof k_buf, "k%d", s->bk);
+    snprintf(k_buf, sizeof k_buf, "bk%d", s->block_k);
     snprintf(sc_buf, sizeof sc_buf, "sc%d", s->split_c);
     const char* parts[6] = {f_buf, p_buf, s_buf, d_buf, k_buf, sc_buf};
     int on[1] = {problem_is_bf16(p) ? 1 : 0};
@@ -186,35 +186,29 @@ extern "C" bool rocke_fwd_flex_mfma_is_valid_spec(const rocke_fwd_flex_mfma_spec
         return false;
     }
     const rocke_direct_conv_problem_t* p = &s->problem;
-    const long long stage = ((long long)kBX + s->bk) * kCK * 2;
+    const long long stage = ((long long)kBX + s->block_k) * kCK * 2;
     const long long tc = rocke_direct_conv_problem_total_c(p);
     const long long tk = rocke_direct_conv_problem_total_k(p);
-    const char* ab = problem_is_bf16(p) ? "bf16" : "f16";
     const char* why = NULL;
-    if(target->wave_size != 64 || s->wave_size != 64)
+    if(!problem_dtype_ok(p))
     {
-        why = "fwd_flex_mfma is a wave64 MFMA kernel";
+        why = "fp16/bf16 only";
     }
-    else if(rocke_archtarget_async_lds_max_dwords(target) < 4)
+    else if(rocke_direct_lds_dma_mfma_caps_reason(target,
+                                                  arch,
+                                                  "fwd_flex_mfma",
+                                                  s->wave_size,
+                                                  false,
+                                                  problem_is_bf16(p),
+                                                  msg,
+                                                  sizeof msg))
     {
-        ROCKE_ERR_SNPRINTF(
-            msg, sizeof msg, "fwd_flex_mfma needs the 16-byte LDS DMA (absent on %s)", arch);
         why = msg;
     }
     else if(!rocke_arch_fits_lds(target, (long)(2 * stage)))
     {
         ROCKE_ERR_SNPRINTF(
             msg, sizeof msg, "LDS %lld B > %d", 2 * stage, (int)target->lds_capacity_bytes);
-        why = msg;
-    }
-    else if(!problem_dtype_ok(p))
-    {
-        why = "fp16/bf16 only";
-    }
-    else if(!rocke_mma_catalog_has_shape(
-                rocke_archtarget_mma(target), "mma", ab, ab, "fp32", 16, 16, 32))
-    {
-        ROCKE_ERR_SNPRINTF(msg, sizeof msg, "missing mfma_f32_16x16x32_%s on %s", ab, arch);
         why = msg;
     }
     else if(rocke_direct_problem_dims_reason(p, msg, sizeof msg))
@@ -239,9 +233,9 @@ extern "C" bool rocke_fwd_flex_mfma_is_valid_spec(const rocke_fwd_flex_mfma_spec
     {
         why = msg;
     }
-    else if(s->bk != 128 && s->bk != 256)
+    else if(s->block_k != 128 && s->block_k != 256)
     {
-        why = "bk must be 128 or 256";
+        why = "block_k must be 128 or 256";
     }
     else if(tc % kCK)
     {
@@ -321,7 +315,7 @@ rocke_kernel_def_t*
     const rocke_direct_conv_problem_t& p = spec->problem;
     const bool bf16 = problem_is_bf16(&p);
     const rocke_type_t* io_type = bf16 ? rocke_bf16() : rocke_f16();
-    const int BK = spec->bk, KT = rocke_fwd_flex_mfma_kt(spec), SP = spec->split_c;
+    const int BK = spec->block_k, KT = rocke_fwd_flex_mfma_kt(spec), SP = spec->split_c;
     const int WKN = BK / (KT * 16); /* waves of a group along K */
     const int NXI = kBX / 64, NWI = BK / 64; /* DMA instructions per wave per step */
     const int R = p.KH, S = p.KW;

@@ -10,7 +10,7 @@
  * refusals of rocke_fwd_flex_mfma_is_valid_spec are pinned here to the texts
  * of Python's fwd_flex_mfma_reason: the wave64 gate and the 16-byte LDS DMA
  * capability gate, the dtype, the extents, groups, stride-and-dilation, the
- * channel granules, the bk and split_c knobs, the tap-count limit, the i32
+ * channel granules, the block_k and split_c knobs, the tap-count limit, the i32
  * limits of the buffer descriptors, the workspace slab and the workspace size.
  */
 #include <stdio.h>
@@ -78,9 +78,9 @@ static void expect_refused(const char* what,
 static void test_accepted(void)
 {
     rocke_fwd_flex_mfma_spec_t s = base_spec();
-    expect_ok("base (bk=256 split_c=1)", &s);
-    s.bk = 128;
-    expect_ok("bk 128", &s);
+    expect_ok("base (block_k=256 split_c=1)", &s);
+    s.block_k = 128;
+    expect_ok("block_k 128", &s);
     s = base_spec();
     s.split_c = 2;
     expect_ok("split_c 2 (C=192, C/64=3)", &s);
@@ -197,11 +197,11 @@ static void test_problem_refusals(void)
 static void test_knob_refusals(void)
 {
     rocke_fwd_flex_mfma_spec_t s = base_spec();
-    s.bk = 64;
-    expect_refused("bk 64", &s, "gfx950", "bk must be 128 or 256");
+    s.block_k = 64;
+    expect_refused("block_k 64", &s, "gfx950", "block_k must be 128 or 256");
     s = base_spec();
-    s.bk = 192;
-    expect_refused("bk 192", &s, "gfx950", "bk must be 128 or 256");
+    s.block_k = 192;
+    expect_refused("block_k 192", &s, "gfx950", "block_k must be 128 or 256");
     // split_c out of range: C=192, C/64=3, so split_c=4 is too large
     s = base_spec();
     s.split_c = 4;

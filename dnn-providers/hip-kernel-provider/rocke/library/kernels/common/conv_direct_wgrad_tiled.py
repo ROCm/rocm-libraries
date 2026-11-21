@@ -46,6 +46,7 @@ from rocke.core.ir import I64, IRBuilder, KernelDef, Value
 from rocke.helpers.spec import ceil_div
 
 from kernels.common.conv_direct_grouped import (
+    direct_lds_dma_mfma_caps_reason,
     DirectConvProblem,
     _io_type,
     _mfma,
@@ -236,15 +237,15 @@ def is_valid_wgrad_tiled_spec(spec: DirectWgradTiledSpec, arch: str = "gfx950"):
         return False, f"unsupported dtype {p.dtype!r}"
     if p.stride != 1:
         return False, f"stride-1 algorithm (got stride={p.stride})"
-    if target.wave_size != 64 or not target.memory.has_ds_read_tr:
-        return False, f"needs wave64 + ds_read_b64_tr_b16 (absent on {arch})"
-    if target.async_lds_max_dwords < 4:
-        return False, f"needs 16-byte buffer_load_lds (absent on {arch})"
-    ab = "bf16" if p.dtype == "bf16" else "f16"
-    if not target.mma.has_shape(
-        a_dtype=ab, b_dtype=ab, c_dtype="fp32", m=16, n=16, k=32
-    ):
-        return False, f"missing mfma_f32_16x16x32_{ab} on {arch}"
+    why = direct_lds_dma_mfma_caps_reason(
+        target,
+        arch,
+        family="wgrad_tiled",
+        bf16=p.dtype == "bf16",
+        needs_ds_read_tr=True,
+    )
+    if why is not None:
+        return False, why
     if spec.wave_k16 not in (1, 2, 4) or spec.wave_c16 not in (1, 2, 4):
         return False, "wave_k16 / wave_c16 must be 1, 2 or 4"
     for n, v in (("waves_k", spec.waves_k), ("waves_c", spec.waves_c)):

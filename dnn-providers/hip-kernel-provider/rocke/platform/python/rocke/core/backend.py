@@ -657,19 +657,43 @@ def lower_universal_gemm(
     return GemmLowerResult(BACKEND_BOTH, py_ll, py_ir if want_ir else "")
 
 
-def _lower_python(spec: Any, arch: str, want_ir: bool) -> Tuple[str, str]:
-    """Native Python lowering of a universal-GEMM spec."""
-    from ..instances.common.gemm_universal import build_universal_gemm
-    from .lower_llvm import lower_kernel_to_llvm
+def lower_kernel_python(
+    kernel: Any, *, arch: Optional[str] = None, llvm_flavor: Optional[str] = None
+) -> str:
+    """Lower a built kernel with the Python lowerer, never the C++ engine.
 
-    kernel = build_universal_gemm(spec, arch=arch)
-    ll = lower_kernel_to_llvm(kernel, arch=arch)
+    The ``py_fn`` of :func:`lower_family` (and :func:`lower_universal_gemm`'s
+    Python path) is the Python side of the ``python`` / ``both`` selection, so
+    it must not re-resolve the backend: the public ``lower_kernel_to_llvm``
+    dispatches on ``ROCKE_BACKEND`` and would run the C++ lowerer, labelling
+    its output ``python`` and making ``"both"`` compare C++ against C++.
+    Every family's Python path, here and in library bridges, lowers through
+    this function."""
+    from .lower_llvm import _lower_kernel_to_llvm_python
+
+    return _lower_kernel_to_llvm_python(kernel, arch=arch, llvm_flavor=llvm_flavor)
+
+
+def lower_kernel_python_ll_ir(kernel: Any, arch: str, want_ir: bool) -> Tuple[str, str]:
+    """``(ll, ir)`` of a built kernel from the Python engine alone: the whole
+    body of a ``py_fn`` once the kernel is built (``ir`` is ``""`` unless
+    ``want_ir``).  Shared by the universal GEMM path and the library bridges."""
+    ll = lower_kernel_python(kernel, arch=arch)
     ir = ""
     if want_ir:
         from .ir_serialize import serialize
 
         ir = serialize(kernel)
     return ll, ir
+
+
+def _lower_python(spec: Any, arch: str, want_ir: bool) -> Tuple[str, str]:
+    """Native Python lowering of a universal-GEMM spec."""
+    from ..instances.common.gemm_universal import build_universal_gemm
+
+    return lower_kernel_python_ll_ir(
+        build_universal_gemm(spec, arch=arch), arch, want_ir
+    )
 
 
 def _lower_cpp(spec: Any, arch: str, want_ir: bool) -> Tuple[str, str]:
@@ -900,8 +924,9 @@ def lower_family(
 ) -> "GemmLowerResult":
     """The family-agnostic python/cpp/both driver.
 
-    ``py_fn(want_ir) -> (ll, ir)`` runs the native Python engine.
-    ``cpp_ll_fn() -> ll`` / ``cpp_ir_fn() -> ir`` reach the C++ binding for
+    ``py_fn(want_ir) -> (ll, ir)`` runs the native Python engine; it lowers
+    with :func:`lower_kernel_python`, never the backend-resolving
+    ``lower_kernel_to_llvm``. ``cpp_ll_fn() -> ll`` / ``cpp_ir_fn() -> ir`` reach the C++ binding for
     this family. ``family`` and ``spec_name`` only label a mismatch report.
     The selection precedence and the differential comparison are identical to
     :func:`lower_universal_gemm`.
@@ -945,16 +970,8 @@ def lower_batched_gemm(
 
     def py_fn(wi: bool) -> Tuple[str, str]:
         from ..instances.common.batched_gemm import build_batched_gemm
-        from .lower_llvm import lower_kernel_to_llvm
 
-        k = build_batched_gemm(spec, arch=arch)
-        ll = lower_kernel_to_llvm(k, arch=arch)
-        ir = ""
-        if wi:
-            from .ir_serialize import serialize
-
-            ir = serialize(k)
-        return ll, ir
+        return lower_kernel_python_ll_ir(build_batched_gemm(spec, arch=arch), arch, wi)
 
     eng = import_engine()
     sd = batched_gemm_spec_to_dict(spec)
@@ -981,16 +998,8 @@ def lower_grouped_gemm(
 
     def py_fn(wi: bool) -> Tuple[str, str]:
         from ..instances.common.grouped_gemm import build_grouped_gemm
-        from .lower_llvm import lower_kernel_to_llvm
 
-        k = build_grouped_gemm(spec, arch=arch)
-        ll = lower_kernel_to_llvm(k, arch=arch)
-        ir = ""
-        if wi:
-            from .ir_serialize import serialize
-
-            ir = serialize(k)
-        return ll, ir
+        return lower_kernel_python_ll_ir(build_grouped_gemm(spec, arch=arch), arch, wi)
 
     eng = import_engine()
     sd = grouped_gemm_spec_to_dict(spec)
@@ -1017,16 +1026,8 @@ def lower_flatmm(
 
     def py_fn(wi: bool) -> Tuple[str, str]:
         from ..instances.common.flatmm import build_flatmm
-        from .lower_llvm import lower_kernel_to_llvm
 
-        k = build_flatmm(spec, arch=arch)
-        ll = lower_kernel_to_llvm(k, arch=arch)
-        ir = ""
-        if wi:
-            from .ir_serialize import serialize
-
-            ir = serialize(k)
-        return ll, ir
+        return lower_kernel_python_ll_ir(build_flatmm(spec, arch=arch), arch, wi)
 
     eng = import_engine()
     sd = flatmm_spec_to_dict(spec)
@@ -1053,16 +1054,8 @@ def lower_streamk_gemm(
 
     def py_fn(wi: bool) -> Tuple[str, str]:
         from ..instances.common.streamk_gemm import build_streamk_gemm
-        from .lower_llvm import lower_kernel_to_llvm
 
-        k = build_streamk_gemm(spec, arch=arch)
-        ll = lower_kernel_to_llvm(k, arch=arch)
-        ir = ""
-        if wi:
-            from .ir_serialize import serialize
-
-            ir = serialize(k)
-        return ll, ir
+        return lower_kernel_python_ll_ir(build_streamk_gemm(spec, arch=arch), arch, wi)
 
     eng = import_engine()
     sd = streamk_gemm_spec_to_dict(spec)
@@ -1089,16 +1082,10 @@ def lower_block_scale_gemm(
 
     def py_fn(wi: bool) -> Tuple[str, str]:
         from ..instances.common.block_scale_gemm import build_block_scale_gemm
-        from .lower_llvm import lower_kernel_to_llvm
 
-        k = build_block_scale_gemm(spec, arch=arch)
-        ll = lower_kernel_to_llvm(k, arch=arch)
-        ir = ""
-        if wi:
-            from .ir_serialize import serialize
-
-            ir = serialize(k)
-        return ll, ir
+        return lower_kernel_python_ll_ir(
+            build_block_scale_gemm(spec, arch=arch), arch, wi
+        )
 
     eng = import_engine()
     sd = block_scale_gemm_spec_to_dict(spec)
@@ -1125,16 +1112,8 @@ def lower_mx_gemm(
 
     def py_fn(wi: bool) -> Tuple[str, str]:
         from ..instances.common.mx_gemm import build_mx_gemm
-        from .lower_llvm import lower_kernel_to_llvm
 
-        k = build_mx_gemm(spec, arch=arch)
-        ll = lower_kernel_to_llvm(k, arch=arch)
-        ir = ""
-        if wi:
-            from .ir_serialize import serialize
-
-            ir = serialize(k)
-        return ll, ir
+        return lower_kernel_python_ll_ir(build_mx_gemm(spec, arch=arch), arch, wi)
 
     eng = import_engine()
     sd = mx_gemm_spec_to_dict(spec)
@@ -1161,16 +1140,8 @@ def lower_mfma_gemm(
 
     def py_fn(wi: bool) -> Tuple[str, str]:
         from ..instances.common.mfma_gemm import build_mfma_gemm
-        from .lower_llvm import lower_kernel_to_llvm
 
-        k = build_mfma_gemm(spec, arch=arch)
-        ll = lower_kernel_to_llvm(k, arch=arch)
-        ir = ""
-        if wi:
-            from .ir_serialize import serialize
-
-            ir = serialize(k)
-        return ll, ir
+        return lower_kernel_python_ll_ir(build_mfma_gemm(spec, arch=arch), arch, wi)
 
     eng = import_engine()
     sd = mfma_gemm_spec_to_dict(spec)
@@ -1198,16 +1169,8 @@ def lower_matmul_nbits(
 
     def py_fn(wi: bool) -> Tuple[str, str]:
         from ..instances.common.matmul_nbits import build_matmul_nbits
-        from .lower_llvm import lower_kernel_to_llvm
 
-        k = build_matmul_nbits(spec, arch=arch)
-        ll = lower_kernel_to_llvm(k, arch=arch)
-        ir = ""
-        if wi:
-            from .ir_serialize import serialize
-
-            ir = serialize(k)
-        return ll, ir
+        return lower_kernel_python_ll_ir(build_matmul_nbits(spec, arch=arch), arch, wi)
 
     eng = import_engine()
     sd = matmul_nbits_spec_to_dict(spec)
@@ -1234,16 +1197,8 @@ def lower_gemm_multi_d(
 
     def py_fn(wi: bool) -> Tuple[str, str]:
         from ..instances.common.gemm_multi_d import build_gemm_multi_d
-        from .lower_llvm import lower_kernel_to_llvm
 
-        k = build_gemm_multi_d(spec, arch=arch)
-        ll = lower_kernel_to_llvm(k, arch=arch)
-        ir = ""
-        if wi:
-            from .ir_serialize import serialize
-
-            ir = serialize(k)
-        return ll, ir
+        return lower_kernel_python_ll_ir(build_gemm_multi_d(spec, arch=arch), arch, wi)
 
     eng = import_engine()
     sd = gemm_multi_d_spec_to_dict(spec)
@@ -1270,16 +1225,10 @@ def lower_gemm_multi_abd(
 
     def py_fn(wi: bool) -> Tuple[str, str]:
         from ..instances.common.gemm_multi_abd import build_gemm_multi_abd
-        from .lower_llvm import lower_kernel_to_llvm
 
-        k = build_gemm_multi_abd(spec, arch=arch)
-        ll = lower_kernel_to_llvm(k, arch=arch)
-        ir = ""
-        if wi:
-            from .ir_serialize import serialize
-
-            ir = serialize(k)
-        return ll, ir
+        return lower_kernel_python_ll_ir(
+            build_gemm_multi_abd(spec, arch=arch), arch, wi
+        )
 
     eng = import_engine()
     sd = gemm_multi_abd_spec_to_dict(spec)

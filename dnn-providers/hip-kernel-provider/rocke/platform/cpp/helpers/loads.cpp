@@ -311,8 +311,10 @@ static int loads_elem_bytes(const rocke_type_t* dtype)
 }
 
 /* True on the historical fp16 path (elem_dtype None/F16), which keeps its
- * f16-specific builder calls; any other element type takes the dtype-generic
- * builder calls the Python loader makes. */
+ * f16-specific LDS-store builder calls (they build the same tile.smem_store /
+ * smem_store_vN ops as the generic ones); any other element type takes the
+ * dtype-generic calls the Python loader makes. Buffer and global reads take
+ * the dtype-generic calls for every element type, as in Python. */
 static bool ctl_is_f16(const rocke_coalesced_tile_loader_t* self)
 {
     return self->elem_dtype == NULL || self->elem_dtype == rocke_f16();
@@ -340,13 +342,9 @@ static rocke_value_t* ctl_buffer_read(rocke_ir_builder_t* b,
                                       rocke_value_t* safe,
                                       rocke_value_t* c0)
 {
-    if(ctl_is_f16(self))
-        return (self->load_vec == 1)
-                   ? rocke_b_buffer_load_f16(b, rsrc, safe, c0)
-                   : rocke_b_buffer_load_vN_f16(b, rsrc, safe, c0, self->load_vec / 2);
-    return (self->load_vec == 1)
-               ? rocke_b_buffer_load(b, rsrc, safe, c0, self->elem_dtype)
-               : rocke_b_buffer_load_vN(b, rsrc, safe, c0, self->elem_dtype, self->load_vec);
+    const rocke_type_t* dtype = self->elem_dtype ? self->elem_dtype : rocke_f16();
+    return (self->load_vec == 1) ? rocke_b_buffer_load(b, rsrc, safe, c0, dtype)
+                                 : rocke_b_buffer_load_vN(b, rsrc, safe, c0, dtype, self->load_vec);
 }
 
 /* One chunk read through a raw global pointer: Python
@@ -356,13 +354,10 @@ static rocke_value_t* ctl_global_read(rocke_ir_builder_t* b,
                                       rocke_value_t* ptr,
                                       rocke_value_t* off_elems)
 {
-    if(ctl_is_f16(self))
-        return (self->load_vec == 1)
-                   ? rocke_b_global_load_f16(b, ptr, off_elems, 0)
-                   : rocke_b_global_load_vN_f16(b, ptr, off_elems, self->load_vec, 0);
+    const rocke_type_t* dtype = self->elem_dtype ? self->elem_dtype : rocke_f16();
     return (self->load_vec == 1)
-               ? rocke_b_global_load(b, ptr, off_elems, self->elem_dtype, 0)
-               : rocke_b_global_load_vN(b, ptr, off_elems, self->elem_dtype, self->load_vec, 0);
+               ? rocke_b_global_load(b, ptr, off_elems, dtype, 0)
+               : rocke_b_global_load_vN(b, ptr, off_elems, dtype, self->load_vec, 0);
 }
 
 /* Python CoalescedTileLoader._decode_row_col: map vec_idx -> (row, col).

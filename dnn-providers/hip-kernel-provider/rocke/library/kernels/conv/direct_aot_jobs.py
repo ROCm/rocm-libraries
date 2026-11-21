@@ -2608,7 +2608,7 @@ def _knob_grid(
         if arch != "gfx950":
             return  # 16-byte LDS DMA and the 160 KiB LDS: gfx950 only
         for bk, sc in FWD_FLEX_KNOBS:
-            yield dict(bk=bk, split_c=sc)
+            yield dict(block_k=bk, split_c=sc)
     elif variant == _FWD_SMALLK_MFMA:
         from rocke.core.arch import ArchTarget
 

@@ -204,7 +204,7 @@ def test_lds_dma_kernels_need_wave64_and_16_byte_dma(spec, valid, arch):
     gfx942 DMAs one dword per lane, the RDNA targets are wave32."""
     assert valid(spec, "gfx950")[0]
     ok, why = valid(spec, arch)
-    assert not ok and arch in why
+    assert not ok and (arch in why or "wave64" in why)
 
 
 @pytest.mark.parametrize("spec,valid", _LDS_DMA_SPECS)

@@ -2821,16 +2821,14 @@ static rocke_kernel_def_t*
 
     // split_k>1 uses atomic_add (multiple blocks accumulate into same dX elements).
     // Tilde sub-GEMMs with split_k=1 use direct buffer_store (disjoint writes), so writeonly.
+    // Python passes writeonly= either way, so the IR records writeonly = false too.
     bool uses_atomic_store = (spec->split_k > 1);
     rocke_param_opts_t d_opts;
     memset(&d_opts, 0, sizeof(d_opts));
     d_opts.noalias = true;
     d_opts.noalias_set = true;
-    if(!uses_atomic_store)
-    {
-        d_opts.writeonly = true;
-        d_opts.writeonly_set = true;
-    }
+    d_opts.writeonly = !uses_atomic_store;
+    d_opts.writeonly_set = true;
     d_opts.align = 16;
     d_opts.align_set = true;
 
