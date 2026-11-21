@@ -13,7 +13,7 @@ using fmha_decode_paged5d::Case;
 
 struct Param
 {
-    const char* name;
+    std::string name;
     Case c;
     // layout the case must run with: "coop" or "wave", "+groups" for several clusters per
     // (batch, kv head); empty: not checked
@@ -23,7 +23,7 @@ struct Param
 std::vector<Param> params()
 {
     std::vector<Param> p;
-    const auto add = [&](const char* name, Case c, const char* layout = "") {
+    const auto add = [&](const std::string& name, Case c, const char* layout = "") {
         p.push_back({name, c, layout});
     };
     // window 2048 at short, medium and long contexts
@@ -63,6 +63,23 @@ std::vector<Param> params()
     add("bound_coop_groups", {2, 16, 1, {2000}, 0, 0, 0, "auto", 30000}, "coop+groups");
     add("bound_one_cluster", {2, 16, 1, {300}, 0, 0, 0, "auto", 3840}, "coop");
     add("bound_swa_gqa", {4, 16, 2, {100, 7000}, 2048, 0, 0, "auto", 65536}, "coop");
+    // cache pages of 64 and 128 tokens: windows starting inside a cache page, partial last
+    // cache pages, both layouts, several clusters, a longer launch bound
+    for(const ck_tile::index_t ps : {64, 128})
+    {
+        const auto name = [&](const char* n) { return "p" + std::to_string(ps) + "_" + n; };
+        add(name("swa_b2_s8192"), {2, 16, 1, {8192}, 2048, 0, 0, "auto", 0, ps}, "coop");
+        add(name("swa_b3_s1000_w300"), {3, 16, 1, {1000}, 300, 0, 0, "auto", 0, ps});
+        add(name("swa_b1_s5"), {1, 16, 1, {5}, 2048, 0, 0, "auto", 0, ps});
+        add(name("swa_mixed"), {4, 16, 1, {9000, 100, 2048, 3333}, 2048, 0, 0, "auto", 0, ps});
+        add(name("swa_wave"), {2, 16, 1, {5000}, 2048, 0, 0, "wave", 0, ps}, "wave");
+        add(name("full_b8_s8192"), {8, 16, 1, {8192}, 0, 0, 0, "auto", 0, ps}, "wave");
+        add(name("full_b1_s20000"), {1, 16, 1, {20000}, 0, 0, 0, "auto", 0, ps}, "coop+groups");
+        add(name("groups_forced"), {2, 16, 2, {6000}, 2048, 30, 0, "auto", 0, ps}, "coop+groups");
+        add(name("gqa_16_2"), {2, 16, 2, {4000}, 2048, 0, 0, "auto", 0, ps});
+        add(name("gqa_32_4_wave"), {2, 32, 4, {999}, 2048, 0, 0, "wave", 0, ps}, "wave");
+        add(name("bound_full_b8"), {8, 16, 1, {8192}, 0, 0, 0, "auto", 131072, ps}, "wave+groups");
+    }
     return p;
 }
 
@@ -90,6 +107,6 @@ TEST_P(DecodePaged5d, MatchesReference)
 INSTANTIATE_TEST_SUITE_P(Gfx125,
                          DecodePaged5d,
                          ::testing::ValuesIn(params()),
-                         [](const auto& test_info) { return std::string(test_info.param.name); });
+                         [](const auto& test_info) { return test_info.param.name; });
 
 } // namespace

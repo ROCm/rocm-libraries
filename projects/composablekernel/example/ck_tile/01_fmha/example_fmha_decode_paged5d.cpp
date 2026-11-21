@@ -18,6 +18,7 @@ int main(int argc, char* argv[])
         .insert("s_k", "8192", "context length; comma separated for one per batch")
         .insert("max_s_k", "0", "context length bound the launch is sized for; 0 = longest s_k")
         .insert("window", "2048", "keys attended, the query's own included; 0 = no window")
+        .insert("page_size", "16", "tokens per cache page: 16, 64 or 128")
         .insert("splits", "0", "workgroups per (batch, kv head); 0 = heuristic")
         .insert("pages_per_split", "0", "pages per split; 0 = heuristic")
         .insert("layout", "auto", "auto, coop or wave")
@@ -40,6 +41,7 @@ int main(int argc, char* argv[])
     c.pages_per_split   = arg_parser.get_int("pages_per_split");
     c.layout            = arg_parser.get_str("layout");
     c.max_seqlen_k      = arg_parser.get_int("max_s_k");
+    c.page_size         = arg_parser.get_int("page_size");
     c.seed              = arg_parser.get_int("seed");
     const bool validate = arg_parser.get_bool("v");
 
@@ -53,20 +55,22 @@ int main(int argc, char* argv[])
     if(validate)
         std::printf(
             "max abs err %.4g (max |ref| %.4g), cos %.6f, ", r.max_err, r.max_ref, r.cosine);
-    std::printf("b:%d h:%d/%d s_k:%d window:%d layout:%s groups:%d splits:%d pages/split:%d, "
-                "stream %.2f us, graph %.2f us%s\n",
-                c.batch,
-                c.nhead,
-                c.nhead_k,
-                c.seqlen_k.front(),
-                c.window,
-                r.config.wave_split ? "wave" : "coop",
-                r.config.num_groups,
-                r.config.num_splits,
-                r.config.pages_per_split,
-                r.us_stream,
-                r.us_graph,
-                validate ? (r.valid ? ", valid:y" : ", valid:n") : "");
+    std::printf(
+        "b:%d h:%d/%d s_k:%d page:%d window:%d layout:%s groups:%d splits:%d pages/split:%d, "
+        "stream %.2f us, graph %.2f us%s\n",
+        c.batch,
+        c.nhead,
+        c.nhead_k,
+        c.seqlen_k.front(),
+        c.page_size,
+        c.window,
+        r.config.wave_split ? "wave" : "coop",
+        r.config.num_groups,
+        r.config.num_splits,
+        r.config.pages_per_split,
+        r.us_stream,
+        r.us_graph,
+        validate ? (r.valid ? ", valid:y" : ", valid:n") : "");
     if(!r.graph_same)
         std::printf("graph replay output differs from a stream launch\n");
     return (!validate || r.valid) && r.graph_same ? 0 : 1;

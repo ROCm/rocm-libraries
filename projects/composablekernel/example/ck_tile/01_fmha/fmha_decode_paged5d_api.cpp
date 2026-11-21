@@ -12,9 +12,11 @@
 extern "C" {
 
 // Bytes of scratch workspace for these sizes.
-size_t ck_fmha_decode_paged5d_workspace_bytes(int batch, int nhead_k, int max_seqlen_k, int window)
+size_t ck_fmha_decode_paged5d_workspace_bytes(
+    int batch, int nhead_k, int max_seqlen_k, int window, int page_size)
 {
-    const auto c = ck_tile::fmha_decode_paged5d_config(batch, nhead_k, max_seqlen_k, window);
+    const auto c =
+        ck_tile::fmha_decode_paged5d_config(batch, nhead_k, max_seqlen_k, window, page_size);
     return ck_tile::fmha_decode_paged5d_workspace_bytes(batch, nhead_k, c.num_splits, c.num_groups);
 }
 
@@ -24,9 +26,9 @@ size_t ck_fmha_decode_paged5d_num_counters(int batch, int nhead_k)
     return ck_tile::fmha_decode_paged5d_num_counters(batch, nhead_k);
 }
 
-// q, o: [batch][nhead_q][128] bf16; k, v: SHUFFLE 5D fp8 e4m3 caches; block_table: int32 rows
-// of block_table_stride entries; seqlen_k: int32 [batch], each <= max_seqlen_k; k/v descale:
-// one float each. Returns a hipError_t.
+// q, o: [batch][nhead_q][128] bf16; k, v: SHUFFLE 5D fp8 e4m3 caches of page_size (16, 64 or
+// 128) tokens per page; block_table: int32 rows of block_table_stride entries; seqlen_k: int32
+// [batch], each <= max_seqlen_k; k/v descale: one float each. Returns a hipError_t.
 int ck_fmha_decode_paged5d(const void* q,
                            const void* k,
                            const void* v,
@@ -43,12 +45,14 @@ int ck_fmha_decode_paged5d(const void* q,
                            int nhead_k,
                            int max_seqlen_k,
                            int window,
+                           int page_size,
                            float scale_s,
                            hipStream_t stream)
 {
     if(nhead_k <= 0 || nhead_q % nhead_k != 0 || nhead_q / nhead_k > 16)
         return hipErrorInvalidValue;
-    const auto c = ck_tile::fmha_decode_paged5d_config(batch, nhead_k, max_seqlen_k, window);
+    const auto c =
+        ck_tile::fmha_decode_paged5d_config(batch, nhead_k, max_seqlen_k, window, page_size);
     const ck_tile::FmhaDecodePaged5dHostArgs args{q,
                                                   k,
                                                   v,
@@ -63,6 +67,7 @@ int ck_fmha_decode_paged5d(const void* q,
                                                   nhead_q,
                                                   nhead_k,
                                                   block_table_stride,
+                                                  page_size,
                                                   window,
                                                   c.pages_per_split,
                                                   c.num_groups,

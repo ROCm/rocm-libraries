@@ -4,8 +4,8 @@
 """PyTorch wrapper of the gfx125 CK fp8 decode kernel over the SHUFFLE 5D paged KV cache.
 
 pa_decode takes the arguments of aiter's FlyDSL pa_decode for the case it covers: one query
-token, bf16 Q/O, head dim 128, fp8 e4m3 K/V with per-tensor scales, page 16, at most 16 query
-heads per kv head. Load libck_fmha_decode_paged5d.so (target ck_fmha_decode_paged5d) from
+token, bf16 Q/O, head dim 128, fp8 e4m3 K/V with per-tensor scales, pages of 16, 64 or 128
+tokens, at most 16 query heads per kv head. Load libck_fmha_decode_paged5d.so (target ck_fmha_decode_paged5d) from
 CK_FMHA_DECODE_PAGED5D_LIB or the library search path.
 """
 
@@ -15,7 +15,7 @@ import os
 import torch
 
 HDIM = 128
-PAGE = 16
+PAGE_SIZES = (16, 64, 128)
 
 _lib = None
 _buffers = {}
@@ -29,7 +29,7 @@ def _load():
             os.environ.get("CK_FMHA_DECODE_PAGED5D_LIB", "libck_fmha_decode_paged5d.so")
         )
         lib.ck_fmha_decode_paged5d_workspace_bytes.restype = ctypes.c_size_t
-        lib.ck_fmha_decode_paged5d_workspace_bytes.argtypes = [ctypes.c_int] * 4
+        lib.ck_fmha_decode_paged5d_workspace_bytes.argtypes = [ctypes.c_int] * 5
         lib.ck_fmha_decode_paged5d_num_counters.restype = ctypes.c_size_t
         lib.ck_fmha_decode_paged5d_num_counters.argtypes = [ctypes.c_int] * 2
         lib.ck_fmha_decode_paged5d.restype = ctypes.c_int
@@ -37,7 +37,7 @@ def _load():
             [ctypes.c_void_p] * 4
             + [ctypes.c_int]
             + [ctypes.c_void_p] * 6
-            + [ctypes.c_int] * 5
+            + [ctypes.c_int] * 6
             + [ctypes.c_float, ctypes.c_void_p]
         )
         _lib = lib
@@ -86,8 +86,8 @@ def _scale_ptr(scale, device):
 def pa_decode(
     output,  # [num_seqs, num_query_heads, 128] bf16
     query,  # [num_seqs, num_query_heads, 128] bf16
-    key_cache,  # [num_blocks, num_kv_heads, 128 // 16, 16, 16] fp8 e4m3
-    value_cache,  # [num_blocks, num_kv_heads, 1, 128, 16] fp8 e4m3
+    key_cache,  # [num_blocks, num_kv_heads, 128 // 16, page_size, 16] fp8 e4m3
+    value_cache,  # [num_blocks, num_kv_heads, page_size // 16, 128, 16] fp8 e4m3
     context_lengths,  # [num_seqs] int32
     block_tables,  # [num_seqs, max_num_blocks_per_seq] int32
     softmax_scale,
@@ -103,7 +103,7 @@ def pa_decode(
     """Decode attention of one query token per sequence.
 
     The launch configuration depends on the batch, the kv heads, sliding_window and
-    max_context_length (default: block_tables.shape[1] * 16), not on context_lengths, so the
+    max_context_length (default: block_tables.shape[1] * page_size), not on context_lengths, so the
     call can be captured in a HIP graph. max_context_length must bound every context length.
     """
     for name, value in unsupported.items():
@@ -113,16 +113,27 @@ def pa_decode(
         raise NotImplementedError("CK pa_decode supports query_length 1 only")
     batch, nhead_q, hdim = query.shape
     num_blocks, nhead_k = key_cache.shape[:2]
+    page = key_cache.shape[3] if key_cache.dim() == 5 else 0
     if hdim != HDIM or output.shape != query.shape:
         raise ValueError("query and output must be [num_seqs, num_query_heads, 128]")
     if query.dtype != torch.bfloat16 or output.dtype != torch.bfloat16:
         raise ValueError("query and output must be bf16")
     if key_cache.element_size() != 1 or value_cache.element_size() != 1:
         raise ValueError("key_cache and value_cache must be fp8 e4m3")
-    if tuple(key_cache.shape) != (num_blocks, nhead_k, HDIM // 16, PAGE, 16):
-        raise ValueError("key_cache must be [num_blocks, num_kv_heads, 8, 16, 16]")
-    if tuple(value_cache.shape) != (num_blocks, nhead_k, 1, HDIM, 16):
-        raise ValueError("value_cache must be [num_blocks, num_kv_heads, 1, 128, 16]")
+    if page not in PAGE_SIZES or tuple(key_cache.shape) != (
+        num_blocks,
+        nhead_k,
+        HDIM // 16,
+        page,
+        16,
+    ):
+        raise ValueError(
+            "key_cache must be [num_blocks, num_kv_heads, 8, page_size, 16], page_size 16, 64 or 128"
+        )
+    if tuple(value_cache.shape) != (num_blocks, nhead_k, page // 16, HDIM, 16):
+        raise ValueError(
+            "value_cache must be [num_blocks, num_kv_heads, page_size // 16, 128, 16]"
+        )
     if nhead_q % nhead_k != 0 or nhead_q // nhead_k > 16:
         raise ValueError(
             "num_query_heads must be a multiple of num_kv_heads, at most 16 times"
@@ -137,13 +148,13 @@ def pa_decode(
     if block_tables.stride(1) != 1 or block_tables.shape[0] < batch:
         raise ValueError("block_tables must have unit column stride and num_seqs rows")
     if max_context_length is None:
-        max_context_length = block_tables.shape[1] * PAGE
+        max_context_length = block_tables.shape[1] * page
 
     lib = _load()
     device = query.device
     stream = torch.cuda.current_stream(device).cuda_stream
     nbytes = lib.ck_fmha_decode_paged5d_workspace_bytes(
-        batch, nhead_k, max_context_length, sliding_window
+        batch, nhead_k, max_context_length, sliding_window, page
     )
     ws = _buffer("workspace", nbytes, device)
     counters = _buffer(
@@ -166,6 +177,7 @@ def pa_decode(
         nhead_k,
         max_context_length,
         sliding_window,
+        page,
         float(softmax_scale),
         stream,
     )
