@@ -291,7 +291,17 @@ FmhaKernelInstancePtr FmhaDispatcher::select_heuristic(const FmhaProblem& proble
 
 FmhaProblem FmhaDispatcher::with_family(const FmhaProblem& base, FmhaKernelFamily family) const
 {
-    auto copy             = base;
+    auto copy = base;
+
+    // The combine kernel only merges O (shape [seqlen, hdim_v]) and is generated
+    // at hdim_v x hdim_v, so for asymmetric attention (hdim_q != hdim_v) its key
+    // carries hdim_q == hdim_v. Align the derived problem or selection rejects it.
+    // The split-stage features (mask, bias, soft cap, sink, paged KV) are left
+    // as they are: fmha_signature_matches() does not compare them for the combine.
+    if(family == FmhaKernelFamily::FwdSplitKvCombine)
+    {
+        copy.hdim_q = copy.hdim_v;
+    }
     copy.requested_family = family;
     return copy;
 }
