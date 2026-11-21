@@ -18,10 +18,12 @@ usage error (exit 4) before collection. A gtest pair with only one variable
 set is also a usage error, when it is that source.
 
 The plugin hashes a shard key per test and keeps the tests whose hash falls in
-this shard. The key is the module path plus the parameter id, so all tests of
-one parameter set run in the same shard. The plugin filters after ``-k``,
-``-m``, ``--deselect`` and the conftest filters. Thus every shard divides the
-same set of tests, and each test runs in exactly one shard.
+this shard. The shard sources and this rule live in ``rocke.tests.ci_shard``,
+which runners that are not pytest share. The key is the module path plus the
+parameter id, so all tests of one parameter set run in the same shard. The
+plugin filters after ``-k``, ``-m``, ``--deselect`` and the conftest filters.
+Thus every shard divides the same set of tests, and each test runs in exactly
+one shard.
 
 A header line names the shard and its source, for example
 ``rocke-ctest-shard: 1/4 (GTEST_SHARD_INDEX=1, GTEST_TOTAL_SHARDS=4)``, or
@@ -41,41 +43,41 @@ when it is true, the plugin does the selection.
 from __future__ import annotations
 
 import dataclasses
-import hashlib
 import os
-from collections.abc import Mapping
 
 import pytest
 
-PLUGIN_NAME = "rocke.tests.ctest_shard"
-SHARD_ENV = "ROCKE_TEST_SHARD"
-GTEST_INDEX_ENV = "GTEST_SHARD_INDEX"
-GTEST_TOTAL_ENV = "GTEST_TOTAL_SHARDS"
-ACTIVATION_FLAG = "--rocke-shard-from-gtest-env"
-# A child pytest that must run unsharded, with only the plugins that it names,
-# must not inherit these variables. SHARD_INDEX and TOTAL_SHARDS are
-# TheRock's 1-based pair.
-CHILD_ENV_EXCLUDED = (
-    SHARD_ENV,
+from .ci_shard import (
+    ACTIVATION_FLAG,
+    CHILD_ENV_EXCLUDED,
     GTEST_INDEX_ENV,
     GTEST_TOTAL_ENV,
-    "SHARD_INDEX",
-    "TOTAL_SHARDS",
-    "PYTEST_ADDOPTS",
-    "PYTEST_PLUGINS",
+    SHARD_ENV,
+    Shard,
+    header_line,
+    parse_shard,
+    resolve_shard,
+    shard_of,
+    unsharded_environment,
 )
 
+__all__ = [
+    "ACTIVATION_FLAG",
+    "CHILD_ENV_EXCLUDED",
+    "GTEST_INDEX_ENV",
+    "GTEST_TOTAL_ENV",
+    "PLUGIN_NAME",
+    "SHARD_ENV",
+    "owns_selection",
+    "parse_shard",
+    "resolve_shard",
+    "select_items",
+    "shard_key",
+    "shard_of",
+    "unsharded_environment",
+]
 
-def parse_shard(text: str) -> tuple[frozenset[int], int]:
-    """``"i/n"`` or ``"i,j,.../n"`` -> ``({i, j, ...}, n)``."""
-    picks, sep, total = text.strip().partition("/")
-    if not sep:
-        raise ValueError(f"shard {text!r} is not i/n")
-    n = int(total)
-    idx = frozenset(int(p) for p in picks.split(",") if p.strip())
-    if n < 1 or not idx or any(not 0 <= i < n for i in idx):
-        raise ValueError(f"shard {text!r} out of range")
-    return idx, n
+PLUGIN_NAME = "rocke.tests.ctest_shard"
 
 
 def shard_key(item) -> str:
@@ -88,103 +90,33 @@ def shard_key(item) -> str:
     return f"{item.nodeid.split('::', 1)[0]}[{callspec.id}]"
 
 
-def shard_of(key: str, n: int) -> int:
-    return int(hashlib.sha256(key.encode()).hexdigest()[:8], 16) % n
-
-
 def select_items(config, items: list, spec: str | None = None) -> None:
     """``pytest_collection_modifyitems`` body: keep the items of shard
     ``spec`` (default: ``ROCKE_TEST_SHARD``; blank keeps every item)."""
     text = (os.environ.get(SHARD_ENV, "") if spec is None else spec).strip()
     if not text:
         return
-    picks, n = parse_shard(text)
+    shard = Shard(text)
     keep, drop = [], []
-    for it in items:
-        (keep if shard_of(shard_key(it), n) in picks else drop).append(it)
+    for item in items:
+        (keep if shard.owns(shard_key(item)) else drop).append(item)
     if drop:
         config.hook.pytest_deselected(items=drop)
         items[:] = keep
 
 
-def _count(name: str, raw: str) -> int:
-    if not (raw.isascii() and raw.isdigit()):
-        raise ValueError(f"{name}={raw!r} is not a non-negative integer")
-    return int(raw)
-
-
-def _gtest_shard(env: Mapping[str, str]) -> str | None:
-    """``"<index>/<total>"`` from the gtest pair; ``None`` when both are
-    blank."""
-    index_text = env.get(GTEST_INDEX_ENV, "").strip()
-    total_text = env.get(GTEST_TOTAL_ENV, "").strip()
-    if not index_text and not total_text:
-        return None
-    if not index_text:
-        raise ValueError(f"{GTEST_TOTAL_ENV}={total_text} needs {GTEST_INDEX_ENV}")
-    if not total_text:
-        raise ValueError(f"{GTEST_INDEX_ENV}={index_text} needs {GTEST_TOTAL_ENV}")
-    total = _count(GTEST_TOTAL_ENV, total_text)
-    if total < 1:
-        raise ValueError(f"{GTEST_TOTAL_ENV}={total_text!r} is not at least 1")
-    index = _count(GTEST_INDEX_ENV, index_text)
-    if index >= total:
-        raise ValueError(
-            f"{GTEST_INDEX_ENV}={index_text!r} is not in 0..{total - 1} "
-            f"({GTEST_TOTAL_ENV}={total_text})"
-        )
-    return f"{index}/{total}"
-
-
-def _gtest_source(env: Mapping[str, str]) -> str:
-    index = env.get(GTEST_INDEX_ENV, "").strip()
-    total = env.get(GTEST_TOTAL_ENV, "").strip()
-    return f"{GTEST_INDEX_ENV}={index}, {GTEST_TOTAL_ENV}={total}"
-
-
-def unsharded_environment(env: Mapping[str, str] | None = None) -> dict[str, str]:
-    """A copy of ``env`` (default ``os.environ``) without the variables in
-    ``CHILD_ENV_EXCLUDED``, for a child pytest that runs every test."""
-    env = os.environ if env is None else env
-    return {k: v for k, v in env.items() if k not in CHILD_ENV_EXCLUDED}
-
-
-def resolve_shard(
-    env: Mapping[str, str] | None = None, from_gtest: bool = False
-) -> tuple[str, str] | None:
-    """``(spec, source)`` of this run, or ``None`` when there is no shard.
-
-    ``spec`` is ``i/n`` or ``i,j,.../n``. ``source`` names the variables
-    that give the shard. A non-blank ``ROCKE_TEST_SHARD`` gives the shard,
-    and then the gtest pair is not read. When ``from_gtest`` is true, the
-    gtest pair gives the shard if ``ROCKE_TEST_SHARD`` is blank. The 1-based
-    ``SHARD_INDEX`` and ``TOTAL_SHARDS`` are not read. Raises ``ValueError``
-    for a malformed or out-of-range value of the source that gives the
-    shard, and for a half-set gtest pair when that pair is the source."""
-    env = os.environ if env is None else env
-    text = env.get(SHARD_ENV, "").strip()
-    if text:
-        parse_shard(text)
-        return text, f"{SHARD_ENV}={text}"
-    if not from_gtest:
-        return None
-    spec = _gtest_shard(env)
-    return None if spec is None else (spec, _gtest_source(env))
-
-
 @dataclasses.dataclass
 class _ShardState:
-    spec: str | None
-    source: str = ""
+    shard: Shard | None
     before: int | None = None
-    split: list[int] | None = None
+    split_line: str | None = None
     kept: int | None = None
 
     def empty_share(self, exitstatus) -> bool:
         """True when the selection had tests, none fell in this shard, and
         pytest found no other problem."""
         return (
-            self.spec is not None
+            self.shard is not None
             and exitstatus == pytest.ExitCode.NO_TESTS_COLLECTED
             and bool(self.before)
             and self.kept == 0
@@ -217,51 +149,40 @@ def pytest_configure(config):
         resolved = resolve_shard(from_gtest=config.getoption(ACTIVATION_FLAG))
     except ValueError as error:
         raise pytest.UsageError(f"rocke-ctest-shard: {error}") from error
-    if resolved is None:
-        config.stash[_STATE] = _ShardState(spec=None)
-    else:
-        config.stash[_STATE] = _ShardState(spec=resolved[0], source=resolved[1])
+    shard = None if resolved is None else Shard(*resolved)
+    config.stash[_STATE] = _ShardState(shard=shard)
 
 
-def _header_line(state: _ShardState | None) -> str:
-    if state is None or state.spec is None:
-        return "rocke-ctest-shard: off"
-    return f"rocke-ctest-shard: {state.spec} ({state.source})"
+def _shard_of_run(config) -> Shard | None:
+    state = config.stash.get(_STATE, None)
+    return None if state is None else state.shard
 
 
 def pytest_report_header(config):
-    return _header_line(config.stash.get(_STATE, None))
+    return header_line(_shard_of_run(config))
 
 
 # trylast: the split must see the final selection of every other hook.
 @pytest.hookimpl(trylast=True)
 def pytest_collection_modifyitems(config, items):
     state = config.stash.get(_STATE, None)
-    if state is None or state.spec is None:
+    if state is None or state.shard is None:
         return
-    _picks, n = parse_shard(state.spec)
-    split = [0] * n
-    for item in items:
-        split[shard_of(shard_key(item), n)] += 1
     state.before = len(items)
-    state.split = split
-    select_items(config, items, state.spec)
+    state.split_line = state.shard.split_line(shard_key(item) for item in items)
+    select_items(config, items, state.shard.spec)
     state.kept = len(items)
 
 
 def pytest_terminal_summary(terminalreporter, exitstatus, config):
     state = config.stash.get(_STATE, None)
-    terminalreporter.write_line(_header_line(state))
-    if state is None or state.split is None:
+    terminalreporter.write_line(header_line(_shard_of_run(config)))
+    if state is None or state.split_line is None:
         return
-    counts = "/".join(str(c) for c in state.split)
-    terminalreporter.write_line(
-        f"rocke-ctest-shard {state.spec}: split {counts} of {state.before}; "
-        f"kept {state.kept}"
-    )
+    terminalreporter.write_line(state.split_line)
     if state.empty_share(exitstatus):
         terminalreporter.write_line(
-            f"rocke-ctest-shard {state.spec}: no test of this entry falls in "
+            f"rocke-ctest-shard {state.shard.spec}: no test of this entry falls in "
             "this shard; the entry passes"
         )
 

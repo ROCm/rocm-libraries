@@ -25,7 +25,7 @@ from xml.etree import ElementTree
 
 import pytest
 
-from rocke.tests import ctest_shard
+from rocke.tests import ci_shard, ctest_shard
 
 PACKAGE_ROOT = Path(ctest_shard.__file__).resolve().parents[2]
 FLAG = ctest_shard.ACTIVATION_FLAG
@@ -147,6 +147,41 @@ GOLDEN_SHARDS = {
 @pytest.mark.parametrize("key, shards", GOLDEN_SHARDS.items())
 def test_the_shard_of_a_key_does_not_change(key, shards):
     assert tuple(ctest_shard.shard_of(key, n) for n in (2, 3, 4, 8)) == shards
+
+
+def test_the_shards_of_one_run_split_any_keys_between_them():
+    # The rule the golden runners share with the plugin (rocke.tests.ci_shard).
+    keys = [f"family{index}" for index in range(40)]
+    shards = [ci_shard.Shard(f"{index}/4") for index in range(4)]
+    owned = [[key for key in keys if shard.owns(key)] for shard in shards]
+    every_owned = [key for keys_of_shard in owned for key in keys_of_shard]
+    assert sorted(every_owned) == sorted(keys)
+    counts = "/".join(str(len(keys_of_shard)) for keys_of_shard in owned)
+    for shard, keys_of_shard in zip(shards, owned):
+        assert shard.split_line(keys) == (
+            f"rocke-ctest-shard {shard.spec}: split {counts} of 40; "
+            f"kept {len(keys_of_shard)}"
+        )
+
+
+def test_a_shard_names_its_source_in_the_header_line():
+    assert ci_shard.header_line(None) == "rocke-ctest-shard: off"
+    shard = ci_shard.current_shard(_gtest(1), from_gtest=True)
+    assert ci_shard.header_line(shard) == (
+        "rocke-ctest-shard: 1/4 (GTEST_SHARD_INDEX=1, GTEST_TOTAL_SHARDS=4)"
+    )
+    assert ci_shard.current_shard(_gtest(1)) is None
+    with pytest.raises(ValueError, match="out of range"):
+        ci_shard.Shard("4/4")
+
+
+def test_an_import_of_the_shard_rule_needs_no_pytest():
+    code = "import sys, rocke.tests.ci_shard; sys.exit('pytest' in sys.modules)"
+    environment = {
+        **ctest_shard.unsharded_environment(),
+        "PYTHONPATH": str(PACKAGE_ROOT),
+    }
+    subprocess.run([sys.executable, "-c", code], env=environment, check=True)
 
 
 @pytest.mark.parametrize("dtype", ["fp16-64"])
