@@ -11,8 +11,13 @@
 
 #include <Tensile/SolutionLibrary.hpp>
 
+#include <algorithm>
+#include <array>
+#include <chrono>
 #include <cstdint>
+#include <iomanip>
 #include <limits>
+#include <sstream>
 #include <tuple>
 #include <vector>
 
@@ -296,5 +301,132 @@ namespace
         ASSERT_LT(results.size(), static_cast<size_t>(kMany));
         EXPECT_EQ(rocblaslt_testing_last_get_all_search_type_for_test(), kNoRank)
             << "rocblaslt_algo_get_heuristic_cpp top-up did not pass a no-ranking search";
+    }
+} // namespace
+
+namespace
+{
+    // ROCM-34680: query time is CPU work and is invisible to GPU-event timing.
+    class SmallGemmHeuristic : public ::testing::Test
+    {
+    protected:
+        static constexpr int        size           = 16;
+        static constexpr uint64_t   workspaceBytes = 32 * 1024 * 1024;
+        hipblasLtHandle_t           handle         = nullptr;
+        hipblasLtMatmulDesc_t       desc           = nullptr;
+        hipblasLtMatrixLayout_t     layout         = nullptr;
+        hipblasLtMatmulPreference_t pref           = nullptr;
+        void*                       a              = nullptr;
+        void*                       b              = nullptr;
+        void*                       c              = nullptr;
+        void*                       d              = nullptr;
+        void*                       workspace      = nullptr;
+
+        void SetUp() override
+        {
+            ASSERT_EQ(hipblasLtCreate(&handle), HIPBLAS_STATUS_SUCCESS);
+            ASSERT_EQ(hipblasLtMatmulDescCreate(&desc, HIPBLAS_COMPUTE_32F, HIP_R_32F),
+                      HIPBLAS_STATUS_SUCCESS);
+            ASSERT_EQ(hipblasLtMatrixLayoutCreate(&layout, HIP_R_32F, size, size, size),
+                      HIPBLAS_STATUS_SUCCESS);
+            ASSERT_EQ(hipblasLtMatmulPreferenceCreate(&pref), HIPBLAS_STATUS_SUCCESS);
+            ASSERT_EQ(
+                hipblasLtMatmulPreferenceSetAttribute(pref,
+                                                      HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES,
+                                                      &workspaceBytes,
+                                                      sizeof(workspaceBytes)),
+                HIPBLAS_STATUS_SUCCESS);
+            for(void** buffer : {&a, &b, &c, &d})
+                ASSERT_EQ(hipMalloc(buffer, size * size * sizeof(float)), hipSuccess);
+            ASSERT_EQ(hipMalloc(&workspace, workspaceBytes), hipSuccess);
+        }
+
+        void TearDown() override
+        {
+            for(void* buffer : {a, b, c, d, workspace})
+                if(buffer)
+                    EXPECT_EQ(hipFree(buffer), hipSuccess);
+            if(pref)
+                EXPECT_EQ(hipblasLtMatmulPreferenceDestroy(pref), HIPBLAS_STATUS_SUCCESS);
+            if(layout)
+                EXPECT_EQ(hipblasLtMatrixLayoutDestroy(layout), HIPBLAS_STATUS_SUCCESS);
+            if(desc)
+                EXPECT_EQ(hipblasLtMatmulDescDestroy(desc), HIPBLAS_STATUS_SUCCESS);
+            if(handle)
+                EXPECT_EQ(hipblasLtDestroy(handle), HIPBLAS_STATUS_SUCCESS);
+        }
+    };
+
+    TEST_F(SmallGemmHeuristic, smoke_Fp32CorrectnessAndHostQueryTime)
+    {
+        std::array<float, size * size>  hostA, hostB, actual;
+        std::array<double, size * size> expected{};
+        for(int i = 0; i < size * size; ++i)
+        {
+            hostA[i] = (i % 11 - 5) * 0.25f;
+            hostB[i] = (i % 7 - 3) * 0.5f;
+        }
+        // Column-major NN product, accumulated independently in CPU double precision.
+        for(int col = 0; col < size; ++col)
+            for(int row = 0; row < size; ++row)
+                for(int k = 0; k < size; ++k)
+                    expected[row + col * size]
+                        += double(hostA[row + k * size]) * double(hostB[k + col * size]);
+        ASSERT_EQ(hipMemcpy(a, hostA.data(), sizeof(hostA), hipMemcpyHostToDevice), hipSuccess);
+        ASSERT_EQ(hipMemcpy(b, hostB.data(), sizeof(hostB), hipMemcpyHostToDevice), hipSuccess);
+        ASSERT_EQ(hipMemset(c, 0, sizeof(hostA)), hipSuccess);
+        const float         alpha = 1.0f, beta = 0.0f;
+        std::vector<double> samples;
+        // Preserve the single-result query from the original 16x16x16 reproducer.
+        for(int trial = 0; trial < 24; ++trial)
+        {
+            SCOPED_TRACE(trial);
+            hipblasLtMatmulHeuristicResult_t result{};
+            int                              count  = 0;
+            const auto                       start  = std::chrono::steady_clock::now();
+            const auto                       status = hipblasLtMatmulAlgoGetHeuristic(
+                handle, desc, layout, layout, layout, layout, pref, 1, &result, &count);
+            const auto end = std::chrono::steady_clock::now();
+            samples.push_back(std::chrono::duration<double, std::micro>(end - start).count());
+            ASSERT_EQ(status, HIPBLAS_STATUS_SUCCESS);
+            ASSERT_EQ(count, 1);
+            ASSERT_EQ(result.state, HIPBLAS_STATUS_SUCCESS);
+            ASSERT_LE(result.workspaceSize, workspaceBytes);
+            // NaN poison prevents an earlier successful call from hiding a missing write.
+            ASSERT_EQ(hipMemset(d, 0xff, sizeof(hostA)), hipSuccess);
+            ASSERT_EQ(hipblasLtMatmul(handle,
+                                      desc,
+                                      &alpha,
+                                      a,
+                                      layout,
+                                      b,
+                                      layout,
+                                      &beta,
+                                      c,
+                                      layout,
+                                      d,
+                                      layout,
+                                      &result.algo,
+                                      workspace,
+                                      result.workspaceSize,
+                                      nullptr),
+                      HIPBLAS_STATUS_SUCCESS);
+            ASSERT_EQ(hipStreamSynchronize(nullptr), hipSuccess);
+            ASSERT_EQ(hipMemcpy(actual.data(), d, sizeof(actual), hipMemcpyDeviceToHost),
+                      hipSuccess);
+            for(int i = 0; i < size * size; ++i)
+                // These small dyadic inputs and sums are exactly representable in FP32.
+                ASSERT_EQ(double(actual[i]), expected[i]) << "element " << i;
+        }
+        std::ostringstream raw;
+        raw << std::setprecision(17);
+        for(size_t i = 0; i < samples.size(); ++i)
+            raw << (i ? "," : "") << samples[i];
+        RecordProperty("heuristic_host_us", raw.str());
+        RecordProperty("first_query_host_us", std::to_string(samples.front()));
+        // First query + three warmups precede the twenty steady-state samples.
+        std::vector<double> warm(samples.begin() + 4, samples.end());
+        std::sort(warm.begin(), warm.end());
+        RecordProperty("warm_median_host_us", std::to_string((warm[9] + warm[10]) / 2));
     }
 } // namespace
