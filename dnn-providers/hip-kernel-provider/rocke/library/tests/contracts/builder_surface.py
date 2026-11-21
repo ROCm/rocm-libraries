@@ -56,6 +56,7 @@ __all__ = [
     "find_breaking_changes",
     "load_snapshot",
     "pinned_builders",
+    "required_spec_fields",
     "write_snapshot",
 ]
 
@@ -350,6 +351,22 @@ def pinned_builders(snapshot: dict) -> list[BuilderRef]:
     return [
         BuilderRef(entry["module"], entry["builder"]) for entry in snapshot["builders"]
     ]
+
+
+def required_spec_fields(surface: dict) -> dict[str, tuple[str, ...]]:
+    """``{spec: sorted names of its required fields}`` for every spec of
+    ``surface`` (a snapshot or a capture): the fields a stored spec cannot omit.
+    """
+    return {
+        spec: tuple(
+            sorted(
+                field
+                for field, (_, requirement) in fields.items()
+                if requirement == REQUIRED
+            )
+        )
+        for spec, fields in surface["specs"].items()
+    }
 
 
 def write_snapshot(surface: dict, path: Path = SNAPSHOT_PATH) -> None:

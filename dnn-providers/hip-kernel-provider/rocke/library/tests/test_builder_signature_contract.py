@@ -54,7 +54,11 @@ import typing
 import kernels
 import pytest
 
-from .contracts.builder_surface import REQUIRED, UPDATE_COMMAND, load_snapshot
+from .contracts.builder_surface import (
+    UPDATE_COMMAND,
+    load_snapshot,
+    required_spec_fields,
+)
 
 ALLOWED_PARAMS = {"spec", "arch"}
 
@@ -401,16 +405,7 @@ def _discover_specs():
 
 def _snapshot_required_fields() -> dict[str, tuple[str, ...]]:
     """The required-field set of every spec the builder-surface snapshot pins."""
-    return {
-        spec: tuple(
-            sorted(
-                field
-                for field, (_, requirement) in fields.items()
-                if requirement == REQUIRED
-            )
-        )
-        for spec, fields in load_snapshot()["specs"].items()
-    }
+    return required_spec_fields(load_snapshot())
 
 
 def _frozen_required_fields(found_specs) -> dict[str, tuple[str, ...]]:

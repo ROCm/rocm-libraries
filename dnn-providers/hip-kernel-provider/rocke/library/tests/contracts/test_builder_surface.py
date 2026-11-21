@@ -10,6 +10,8 @@ snapshot, a real capture of the surface, so they hold whatever state the code is
 from __future__ import annotations
 
 import copy
+import dataclasses
+import importlib
 
 import pytest
 
@@ -23,6 +25,7 @@ from .builder_surface import (
     find_breaking_changes,
     load_snapshot,
     pinned_builders,
+    required_spec_fields,
     write_snapshot,
 )
 
@@ -164,3 +167,22 @@ def test_write_snapshot_refuses_an_unresolved_builder(tmp_path) -> None:
     with pytest.raises(ValueError, match=r"write_snapshot failed - .*no builder"):
         write_snapshot(unresolved, target)
     assert not target.exists()
+
+
+def test_required_spec_fields_are_the_fields_without_a_default(
+    live_surface: dict,
+) -> None:
+    """Each captured spec's required fields are its dataclass fields that carry
+    neither a default nor a default factory."""
+    for spec, required in required_spec_fields(live_surface).items():
+        module_name, _, class_name = spec.rpartition(".")
+        spec_class = getattr(importlib.import_module(module_name), class_name)
+        no_default = tuple(
+            sorted(
+                field.name
+                for field in dataclasses.fields(spec_class)
+                if field.default is dataclasses.MISSING
+                and field.default_factory is dataclasses.MISSING
+            )
+        )
+        assert required == no_default, spec
