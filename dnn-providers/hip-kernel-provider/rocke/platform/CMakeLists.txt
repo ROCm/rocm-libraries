@@ -185,7 +185,7 @@ function(rocke_platform_pytest_entry out_var part)
   string(CONCAT _entry
          "add_test(${_test_name} ${_ROCKE_INSTALLED_PYTEST}${_pytest_arguments} -m \"not integration\" -v -rs --timeout=60)\n"
          "set_tests_properties(${_test_name} PROPERTIES\n"
-         "  LABELS \"ckc\\;python\\;standard\"\n"
+         "  LABELS \"ckc;python;standard\"\n"
          "  ENVIRONMENT \"\${_rocke_platform_pytest_environment}\"\n"
          "  TIMEOUT ${ROCKE_TEST_TIMEOUT_TOOLCHAIN})\n")
   set(${out_var} "${_entry}" PARENT_SCOPE)
@@ -691,7 +691,7 @@ if(ROCKE_INSTALL_TESTS)
       string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
              "add_test(rocke_entry_time_check python \"${ROCKE_TEST_CTEST_REL}tests/tools/check_entry_times.py\" check --ctest-dir .)\n"
              "set_tests_properties(rocke_entry_time_check PROPERTIES\n"
-             "  LABELS \"ckc\\;python\\;host\\;quick\"\n"
+             "  LABELS \"ckc;python;host;quick\"\n"
              "  ENVIRONMENT \"PYTHONPATH=${_ROCKE_INSTALLED_PYTHONPATH}\"\n"
              "  TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})\n")
     endif()
@@ -808,7 +808,7 @@ if(ROCKE_INSTALL_TESTS)
              "list(APPEND _rocke_hip_lowering_parity_environment \${_rocke_compiler_tool_environment})\n"
              "add_test(rocke_hip_lowering_parity ${_ROCKE_INSTALLED_PYTEST} ${_rocke_parity_paths} -v -rs --timeout=60)\n"
              "set_tests_properties(rocke_hip_lowering_parity PROPERTIES\n"
-             "  LABELS \"ckc\\;python\\;host\\;standard\"\n"
+             "  LABELS \"ckc;python;host;standard\"\n"
              "  ENVIRONMENT \"\${_rocke_hip_lowering_parity_environment}\"\n"
              "  TIMEOUT ${ROCKE_TEST_TIMEOUT_TOOLCHAIN})\n")
     endif()
@@ -896,7 +896,7 @@ if(ROCKE_INSTALL_TESTS)
       string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
              "add_test(rocke_ctest_shard_pytest ${_ROCKE_INSTALLED_PYTEST} \"${ROCKE_TEST_CTEST_REL}tests/test_ctest_shard.py\" -m \"not integration\" -v -rs --timeout=60)\n"
              "set_tests_properties(rocke_ctest_shard_pytest PROPERTIES\n"
-             "  LABELS \"ckc\\;python\\;standard\"\n"
+             "  LABELS \"ckc;python;standard\"\n"
              "  ENVIRONMENT \"\${_rocke_platform_pytest_environment}\"\n"
              "  TIMEOUT ${ROCKE_TEST_TIMEOUT_TOOLCHAIN})\n")
       set(_rocke_pytest_other_arguments
@@ -958,17 +958,17 @@ if(ROCKE_INSTALL_TESTS)
              "list(APPEND _rocke_tiling_pytest_environment \${_rocke_compiler_tool_environment})\n"
              "add_test(rocke_tiling_pytest ${_rocke_tiling_pytest_launcher} \"${_ROCKE_TILING_TESTS}\" --ignore \"${_ROCKE_TILING_VISUALIZATION_TESTS}\" ${_rocke_tiling_pytest_options} -m \"not gpu\")\n"
              "set_tests_properties(rocke_tiling_pytest PROPERTIES\n"
-             "  LABELS \"ckc\\;python\\;standard\"\n"
+             "  LABELS \"ckc;python;standard\"\n"
              "  ENVIRONMENT \"\${_rocke_tiling_pytest_environment}\"\n"
              "  TIMEOUT ${ROCKE_TEST_TIMEOUT_TOOLCHAIN})\n"
              "add_test(rocke_tiling_visualization_pytest ${_rocke_tiling_pytest_launcher} \"${_ROCKE_TILING_VISUALIZATION_TESTS}\" ${_rocke_tiling_pytest_options} -m \"not gpu\")\n"
              "set_tests_properties(rocke_tiling_visualization_pytest PROPERTIES\n"
-             "  LABELS \"ckc\\;python\"\n"
+             "  LABELS \"ckc;python\"\n"
              "  ENVIRONMENT \"\${_rocke_tiling_pytest_environment}\"\n"
              "  TIMEOUT ${ROCKE_TEST_TIMEOUT_TOOLCHAIN})\n"
              "add_test(rocke_tiling_gpu_pytest ${_rocke_tiling_pytest_launcher} \"${_ROCKE_TILING_TESTS}\" ${_rocke_tiling_pytest_options} -m gpu)\n"
              "set_tests_properties(rocke_tiling_gpu_pytest PROPERTIES\n"
-             "  LABELS \"ckc\\;python\\;gpu\"\n"
+             "  LABELS \"ckc;python;gpu\"\n"
              "  ENVIRONMENT \"\${_rocke_tiling_pytest_environment}\"\n"
              "  TIMEOUT ${ROCKE_TEST_TIMEOUT_GPU})\n")
       # check_backend_access_width.py compiles a few copy kernels through COMGR
@@ -984,7 +984,7 @@ if(ROCKE_INSTALL_TESTS)
              "list(APPEND _rocke_tiling_backend_width_pytest_environment \${_rocke_compiler_requirement_environment})\n"
              "add_test(rocke_tiling_backend_width_pytest ${_rocke_tiling_pytest_launcher} \"${_ROCKE_TILING_TESTS}/check_backend_access_width.py\" ${_rocke_tiling_pytest_options})\n"
              "set_tests_properties(rocke_tiling_backend_width_pytest PROPERTIES\n"
-             "  LABELS \"ckc\\;python\\;standard\"\n"
+             "  LABELS \"ckc;python;standard\"\n"
              "  ENVIRONMENT \"\${_rocke_tiling_backend_width_pytest_environment}\"\n"
              "  TIMEOUT ${ROCKE_TEST_TIMEOUT_TOOLCHAIN})\n")
     endif()
@@ -1005,7 +1005,7 @@ if(ROCKE_INSTALL_TESTS)
              "add_test(rocke_${_operation}_reference_unit_pytest ${_ROCKE_INSTALLED_PYTEST} \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_${_operation}_reference_contract.py\" -v -rs --timeout=30)\n")
       string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
              "set_tests_properties(rocke_${_operation}_reference_unit_pytest PROPERTIES\n"
-             "  LABELS \"ckc\\;python\\;${_operation}\\;host\\;quick\"\n"
+             "  LABELS \"ckc;python;${_operation};host;quick\"\n"
              "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
              "  TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})\n")
 
@@ -1019,7 +1019,7 @@ if(ROCKE_INSTALL_TESTS)
                "add_test(rocke_${_operation}_gpu_${_arch}_pytest ${_ROCKE_INSTALLED_PYTEST} \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_${_operation}_pinned_reference.py\" --rocke-reference-operation ${_operation} --rocke-reference-arch ${_arch} -v -rs)\n")
         string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
                "set_tests_properties(rocke_${_operation}_gpu_${_arch}_pytest PROPERTIES\n"
-               "  LABELS \"ckc\\;python\\;${_operation}\\;gpu\\;quick\"\n"
+               "  LABELS \"ckc;python;${_operation};gpu;quick\"\n"
                "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
                "  SKIP_RETURN_CODE 77\n"
                "  TIMEOUT ${ROCKE_TEST_TIMEOUT_GPU})\n")

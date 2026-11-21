@@ -23,7 +23,7 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "add_test(rocke_oracle_free_pytest ${_ROCKE_INSTALLED_PYTEST} \"${ROCKE_TEST_CTEST_REL}tests/library/tests/oracle_free/test_analytical_dense.py\" \"${ROCKE_TEST_CTEST_REL}tests/library/tests/oracle_free/test_permutation_dense.py\" -v -rs)\n")
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "set_tests_properties(rocke_oracle_free_pytest PROPERTIES\n"
-       "  LABELS \"ckc\\;python\\;gpu\\;quick\"\n"
+       "  LABELS \"ckc;python;gpu;quick\"\n"
        "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
        "  TIMEOUT ${ROCKE_TEST_TIMEOUT_GPU})\n")
 
@@ -96,7 +96,7 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "add_test(rocke_library_conv_pytest ${_ROCKE_INSTALLED_PYTEST}${_ROCKE_LIBRARY_CONV_TESTS} -v -rs --timeout=30)\n")
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "set_tests_properties(rocke_library_conv_pytest PROPERTIES\n"
-       "  LABELS \"ckc\\;python\\;conv\\;host\\;standard\"\n"
+       "  LABELS \"ckc;python;conv;host;standard\"\n"
        "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
         "  TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})\n")
 
@@ -111,7 +111,7 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "-v -rs --timeout=600)\n")
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "set_tests_properties(rocke_library_conv_fwd_aot_packaging_pytest PROPERTIES\n"
-       "  LABELS \"ckc\\;python\\;conv\\;host\"\n"
+       "  LABELS \"ckc;python;conv;host\"\n"
        "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
         "  TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})\n")
 
@@ -137,7 +137,7 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "add_test(rocke_library_conv_ir_pytest ${_ROCKE_INSTALLED_PYTEST}${_ROCKE_LIBRARY_CONV_IR_TESTS} -v -rs --timeout=30)\n")
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "set_tests_properties(rocke_library_conv_ir_pytest PROPERTIES\n"
-       "  LABELS \"ckc\\;python\\;conv\\;host\\;standard\"\n"
+       "  LABELS \"ckc;python;conv;host;standard\"\n"
        "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
        "  TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})\n")
 
@@ -192,7 +192,7 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "add_test(rocke_library_conv_tf32_pytest ${_ROCKE_INSTALLED_PYTEST}${_ROCKE_LIBRARY_CONV_TF32_TESTS} -k \"not Gpu and not (${_ROCKE_LIBRARY_CONV_TF32_LOWERING_K})\" -v -rs --timeout=60)\n")
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "set_tests_properties(rocke_library_conv_tf32_pytest PROPERTIES\n"
-       "  LABELS \"ckc\\;python\\;conv\\;host\\;standard\"\n"
+       "  LABELS \"ckc;python;conv;host;standard\"\n"
        "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
        "  TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})\n")
 if(WIN32)
@@ -202,7 +202,7 @@ else()
          "add_test(rocke_library_conv_tf32_lowering_pytest ${_ROCKE_INSTALLED_PYTEST}${_ROCKE_LIBRARY_CONV_TF32_TESTS} -k \"not Gpu and (${_ROCKE_LIBRARY_CONV_TF32_LOWERING_K})\" -v -rs --timeout=120)\n")
   string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
          "set_tests_properties(rocke_library_conv_tf32_lowering_pytest PROPERTIES\n"
-         "  LABELS \"ckc\\;python\\;conv\\;host\\;standard\"\n"
+         "  LABELS \"ckc;python;conv;host;standard\"\n"
          "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
          "  TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})\n")
 endif()
@@ -293,7 +293,7 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "add_test(rocke_library_attention_cpu_pytest ${_ROCKE_INSTALLED_PYTEST}${_ROCKE_LIBRARY_ATTENTION_CPU_TESTS} -v -rs --timeout=30)\n")
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "set_tests_properties(rocke_library_attention_cpu_pytest PROPERTIES\n"
-       "  LABELS \"ckc\\;python\\;attention\\;host\\;standard\"\n"
+       "  LABELS \"ckc;python;attention;host;standard\"\n"
        "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
        "  TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})\n")
 
@@ -302,12 +302,12 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "add_test(rocke_library_runner_contract_pytest ${_ROCKE_INSTALLED_PYTEST} \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_library_test_tiers.py\" -m \"not worker_integration\" -v -rs --timeout=30)\n"
        "set_tests_properties(rocke_library_runner_contract_pytest PROPERTIES\n"
-       "  LABELS \"ckc\\;python\\;host\\;runner\\;comprehensive\\;full\"\n"
+       "  LABELS \"ckc;python;host;runner;comprehensive;full\"\n"
        "  ENVIRONMENT \"PYTHONPATH=${_ROCKE_LIBRARY_PYTHONPATH}\"\n"
        "  TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})\n"
        "add_test(rocke_library_worker_integration_pytest ${_ROCKE_INSTALLED_PYTEST} \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_library_test_tiers.py\" -m worker_integration -v -rs --timeout=30)\n"
        "set_tests_properties(rocke_library_worker_integration_pytest PROPERTIES\n"
-       "  LABELS \"ckc\\;python\\;host\\;runner\\;integration\\;comprehensive\\;full\"\n"
+       "  LABELS \"ckc;python;host;runner;integration;comprehensive;full\"\n"
        "  ENVIRONMENT \"PYTHONPATH=${_ROCKE_LIBRARY_PYTHONPATH}\"\n"
        "  TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})\n")
 
@@ -319,14 +319,14 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "add_test(rocke_library_attention_cache_key_pytest ${_ROCKE_INSTALLED_PYTEST} \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_attention_tiled_cache_key.py\" -k \"not test_key_matches_build_identity\" -v -rs --timeout=30)\n")
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "set_tests_properties(rocke_library_attention_cache_key_pytest PROPERTIES\n"
-       "  LABELS \"ckc\\;python\\;attention\\;host\\;standard\"\n"
+       "  LABELS \"ckc;python;attention;host;standard\"\n"
        "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
        "  TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})\n")
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "add_test(rocke_library_attention_cache_key_sweep_pytest ${_ROCKE_INSTALLED_PYTEST} \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_attention_tiled_cache_key.py\" -k test_key_matches_build_identity -v -rs --timeout=240)\n")
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "set_tests_properties(rocke_library_attention_cache_key_sweep_pytest PROPERTIES\n"
-       "  LABELS \"ckc\\;python\\;attention\\;host\\;standard\"\n"
+       "  LABELS \"ckc;python;attention;host;standard\"\n"
        "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
        "  TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})\n")
 
@@ -343,7 +343,7 @@ set(_ROCKE_EXPLICIT_PYTEST_GATES
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "add_test(rocke_library_counted_structural_gate python -m pytest -p pytest_timeout \"${ROCKE_TEST_CTEST_REL}tests/library/tests/gates/attention_bwd_counted_structural_gate.py\" -v -rs --timeout=60)\n"
        "set_tests_properties(rocke_library_counted_structural_gate PROPERTIES\n"
-       "  LABELS \"ckc\\;python\\;attention\\;host\\;structural\\;comprehensive\\;full\\;hip-kernel-provider\"\n"
+       "  LABELS \"ckc;python;attention;host;structural;comprehensive;full;hip-kernel-provider\"\n"
        "  ENVIRONMENT \"PYTHONPATH=${_ROCKE_LIBRARY_PYTHONPATH};PYTEST_ADDOPTS=;PYTEST_PLUGINS=;PYTEST_DISABLE_PLUGIN_AUTOLOAD=1;ROCKE_EXPLICIT_GATE_RUN=1;ROCKE_EXPLICIT_GATE_PARTIAL=0;ROCKE_EXPLICIT_GATE_PREFLIGHT=\"\n"
        "  PROCESSORS 4\n"
        "  RESOURCE_LOCK rocke_counted_sync_gate\n"
@@ -364,7 +364,7 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "     \${_rocke_compiler_tool_environment})\n"
        "add_test(rocke_library_counted_compiler_gate python -m pytest -p pytest_timeout \"${ROCKE_TEST_CTEST_REL}tests/library/tests/gates/attention_bwd_counted_compiler_gate.py\" -v -rs --timeout=1200)\n"
        "set_tests_properties(rocke_library_counted_compiler_gate PROPERTIES\n"
-       "  LABELS \"ckc\\;python\\;attention\\;host\\;compiler\\;comprehensive\\;full\\;hip-kernel-provider\"\n"
+       "  LABELS \"ckc;python;attention;host;compiler;comprehensive;full;hip-kernel-provider\"\n"
        "  ENVIRONMENT \"\${_rocke_counted_isa_environment}\"\n"
        "  PROCESSORS 4\n"
        "  RESOURCE_LOCK rocke_counted_sync_gate\n"
@@ -387,7 +387,7 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "add_test(rocke_library_dsa_pytest ${_ROCKE_INSTALLED_PYTEST}${_ROCKE_LIBRARY_DSA_TESTS} -v -rs --timeout=30)\n")
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "set_tests_properties(rocke_library_dsa_pytest PROPERTIES\n"
-       "  LABELS \"ckc\\;python\\;dsa\\;host\\;quick\"\n"
+       "  LABELS \"ckc;python;dsa;host;quick\"\n"
        "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
        "  TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})\n")
 
@@ -421,7 +421,7 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "add_test(rocke_library_mla_pytest ${_ROCKE_INSTALLED_PYTEST}${_ROCKE_LIBRARY_MLA_TESTS} -v -rs --timeout=120)\n")
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "set_tests_properties(rocke_library_mla_pytest PROPERTIES\n"
-       "  LABELS \"ckc\\;python\\;mla\\;host\\;standard\"\n"
+       "  LABELS \"ckc;python;mla;host;standard\"\n"
        "  ENVIRONMENT \"\${_rocke_library_mla_pytest_environment}\"\n"
        "  TIMEOUT ${ROCKE_TEST_TIMEOUT_TOOLCHAIN})\n")
 
@@ -430,7 +430,7 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "add_test(rocke_contracts_pytest ${_ROCKE_INSTALLED_PYTEST} \"${ROCKE_TEST_CTEST_REL}tests/library/tests/contracts/test_builder_surface.py\" -v -rs --timeout=60)\n"
        "set_tests_properties(rocke_contracts_pytest PROPERTIES\n"
-       "  LABELS \"ckc\\;python\\;host\\;quick\"\n"
+       "  LABELS \"ckc;python;host;quick\"\n"
        "  ENVIRONMENT \"PYTHONPATH=${_ROCKE_LIBRARY_PYTHONPATH}\"\n"
        "  TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})\n")
 
@@ -438,7 +438,7 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "add_test(rocke_reference_common_pytest ${_ROCKE_INSTALLED_PYTEST} \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_reference_common.py\" -v -rs --timeout=30)\n")
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "set_tests_properties(rocke_reference_common_pytest PROPERTIES\n"
-       "  LABELS \"ckc\\;python\\;host\\;quick\"\n"
+       "  LABELS \"ckc;python;host;quick\"\n"
        "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
        "  TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})\n")
 
@@ -464,7 +464,7 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        " -v -rs --timeout=60)\n")
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "set_tests_properties(rocke_library_attention_pytest PROPERTIES\n"
-       "  LABELS \"ckc\\;python\\;attention\\;dispatch\\;host\\;standard\"\n"
+       "  LABELS \"ckc;python;attention;dispatch;host;standard\"\n"
        "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
        "  TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})\n")
 
@@ -488,7 +488,7 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "${_ROCKE_SDPA_PYTEST_ARGS} -v -rs --timeout=30)\n")
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "set_tests_properties(rocke_library_sdpa_pytest PROPERTIES\n"
-       "  LABELS \"ckc\\;python\\;sdpa\\;host\\;standard\"\n"
+       "  LABELS \"ckc;python;sdpa;host;standard\"\n"
        "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
        "  TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})\n")
 
@@ -538,18 +538,16 @@ else()
          "add_test(rocke_library_gdn_pytest ${_ROCKE_INSTALLED_PYTEST}${_ROCKE_LIBRARY_GDN_TESTS} -v -rs --timeout=60)\n")
   string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
          "set_tests_properties(rocke_library_gdn_pytest PROPERTIES\n"
-         "  LABELS \"ckc\\;python\\;gdn\\;host\\;standard\"\n"
+         "  LABELS \"ckc;python;gdn;host;standard\"\n"
          "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
          "  TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})\n")
 endif()
 
 # Library attention GPU numeric tests (gfx950-specific; require a GPU).
 # Separate from the omnibus GPU suite so it can be targeted on its own when only
-# attention hardware is available. Select it by name (`ctest -R
-# rocke_library_attention_gpu_pytest`), not by label: the ROCKE_ENGINE YAML
-# category pass replaces the "ckc;python;attention;gpu" labels below with its
-# own, so `-L gpu` and `-L attention` do not match it in a YAML-categorized
-# install tree.
+# attention hardware is available: select it by name (`ctest -R
+# rocke_library_attention_gpu_pytest`), as `-L gpu` and `-L attention` also
+# match other entries.
 set(_ROCKE_LIBRARY_ATTENTION_GPU_TEST_RELPATHS
     "tests/library/tests/test_attention_dense_gfx950_numeric.py"
     "tests/library/tests/test_attn_tiled_2d_gfx950_fp8_k_lds_numeric.py"
@@ -563,7 +561,7 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "add_test(rocke_library_attention_gpu_pytest ${_ROCKE_INSTALLED_PYTEST}${_ROCKE_LIBRARY_ATTENTION_GPU_TESTS} -v -rs)\n")
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "set_tests_properties(rocke_library_attention_gpu_pytest PROPERTIES\n"
-       "  LABELS \"ckc\\;python\\;attention\\;gpu\"\n"
+       "  LABELS \"ckc;python;attention;gpu\"\n"
        "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
        "  TIMEOUT ${ROCKE_TEST_TIMEOUT_GPU})\n")
 
@@ -573,7 +571,7 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "add_test(rocke_library_attention_bias_gpu_pytest ${_ROCKE_INSTALLED_PYTEST} \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_attention_additive_bias_gfx950_numeric.py\" -v -rs)\n")
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "set_tests_properties(rocke_library_attention_bias_gpu_pytest PROPERTIES\n"
-       "  LABELS \"ckc\\;python\\;attention\\;gpu\"\n"
+       "  LABELS \"ckc;python;attention;gpu\"\n"
        "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
        "  TIMEOUT ${ROCKE_TEST_TIMEOUT_GPU})\n")
 
@@ -655,6 +653,6 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "add_test(rocke_library_gpu_pytest ${_ROCKE_INSTALLED_PYTEST}${_ROCKE_LIBRARY_GPU_TESTS} -v -rs)\n")
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "set_tests_properties(rocke_library_gpu_pytest PROPERTIES\n"
-       "  LABELS \"ckc\\;python\\;gpu\"\n"
+       "  LABELS \"ckc;python;gpu\"\n"
        "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
        "  TIMEOUT ${ROCKE_TEST_TIMEOUT_GPU})\n")

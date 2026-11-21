@@ -751,9 +751,8 @@ def test_installed_platform_pytest_parts_partition_the_suite(
             6 : -len(suite_options)
         ]
         properties = {prop["name"]: prop["value"] for prop in part["properties"]}
-        # One label string, as the single entry had: the generated CTest text
-        # escapes the semicolons.
-        assert properties["LABELS"] == ["ckc;python;standard"], name
+        # Three labels, as the single entry had.
+        assert properties["LABELS"] == ["ckc", "python", "standard"], name
         assert properties["TIMEOUT"] == resource_class_timeouts()["TOOLCHAIN"], name
 
     other_paths, other_ignored = split_ignored_files(selection_by_part.pop("other"))
@@ -806,7 +805,7 @@ def test_installed_platform_pytest_parts_partition_the_suite(
         *suite_options,
     ]
     properties = {prop["name"]: prop["value"] for prop in plugin_tests["properties"]}
-    assert properties["LABELS"] == ["ckc;python;standard"]
+    assert properties["LABELS"] == ["ckc", "python", "standard"]
     assert properties["TIMEOUT"] == resource_class_timeouts()["TOOLCHAIN"]
     assert plugin_tests_file in ignored_by_part["other"]
 
