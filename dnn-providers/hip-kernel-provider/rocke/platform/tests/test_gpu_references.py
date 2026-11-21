@@ -419,8 +419,8 @@ def test_required_reference_prerequisites_fail_configuration(project, problem, r
 def test_an_architecture_installs_each_published_variant(project):
     """Each variant's lock publishes its own archive below the same architecture.
 
-    The architecture is still installed once, so it keeps one GPU CTest, whose
-    timeout scales with the variants installed for it.
+    The architecture is still installed once, so it keeps one GPU CTest that
+    runs every variant installed for it.
     """
     tests = project / "library/tests"
     variants = tests / "conv_reference/architectures/gfx942"

@@ -257,11 +257,46 @@ def test_installed_pytest_entries_run_the_ctest_shard_plugin(
         assert command[1:5] == ["-m", "pytest", "-p", "pytest_timeout"], name
 
 
-@requires_cmake
-@pytest.mark.skipif(
+requires_library_lists = pytest.mark.skipif(
     not (PLATFORM.parent / "library" / "tests" / "ctest_lists.cmake").is_file(),
     reason="needs the rocKE library test lists",
 )
+
+
+def configure_error_after_library_lists_edit(tmp_path, before, after):
+    """Configure a copy of the platform and library trees whose
+    library/tests/ctest_lists.cmake has its one ``before`` replaced by
+    ``after``. Assert that the configure fails; return its error output with
+    the line wrapping removed."""
+    rocke = tmp_path / "rocke"
+    skip = shutil.ignore_patterns("__pycache__", ".pytest_cache")
+    shutil.copytree(PLATFORM, rocke / "platform", ignore=skip)
+    shutil.copytree(PLATFORM.parent / "library", rocke / "library", ignore=skip)
+    lists = rocke / "library" / "tests" / "ctest_lists.cmake"
+    text = lists.read_text()
+    assert text.count(before) == 1, before
+    lists.write_text(text.replace(before, after))
+
+    configured = subprocess.run(
+        [
+            "cmake",
+            "-S",
+            str(rocke / "platform"),
+            "-B",
+            str(tmp_path / "build"),
+            "-DBUILD_TESTING=ON",
+            "-DROCKE_INSTALL_TEST_GPU_REFERENCES=OFF",
+        ],
+        capture_output=True,
+        text=True,
+    )
+
+    assert configured.returncode != 0, configured.stdout
+    return " ".join(configured.stderr.split())
+
+
+@requires_cmake
+@requires_library_lists
 @pytest.mark.parametrize(
     ("before", "after", "reported"),
     [
@@ -292,33 +327,77 @@ def test_configure_stops_on_an_installed_pytest_entry_that_breaks_the_shard_rule
     does not start with ${_ROCKE_INSTALLED_PYTEST}, so that the entry would run
     whole on every CI shard, or when an explicit gate loads the shard plugin.
     The check runs in the build job's configure; CI does not run this file."""
-    rocke = tmp_path / "rocke"
-    skip = shutil.ignore_patterns("__pycache__", ".pytest_cache")
-    shutil.copytree(PLATFORM, rocke / "platform", ignore=skip)
-    shutil.copytree(PLATFORM.parent / "library", rocke / "library", ignore=skip)
-    lists = rocke / "library" / "tests" / "ctest_lists.cmake"
-    text = lists.read_text()
-    assert text.count(before) == 1, before
-    lists.write_text(text.replace(before, after))
-
-    configured = subprocess.run(
-        [
-            "cmake",
-            "-S",
-            str(rocke / "platform"),
-            "-B",
-            str(tmp_path / "build"),
-            "-DBUILD_TESTING=ON",
-            "-DROCKE_INSTALL_TEST_GPU_REFERENCES=OFF",
-        ],
-        capture_output=True,
-        text=True,
-    )
-
-    assert configured.returncode != 0, configured.stdout
-    message = " ".join(configured.stderr.split())
+    message = configure_error_after_library_lists_edit(tmp_path, before, after)
     assert "must start its command with ${_ROCKE_INSTALLED_PYTEST}" in message
     assert reported in message
+
+
+def resource_class_timeouts():
+    """The CTest limits that tests/cmake/TestTimeouts.cmake sets, in seconds, by
+    the name after ROCKE_TEST_TIMEOUT_ (CPU, TOOLCHAIN, GPU and the named
+    exceptions)."""
+    text = (PLATFORM / "tests" / "cmake" / "TestTimeouts.cmake").read_text()
+    limits = {
+        name: float(seconds)
+        for name, seconds in re.findall(
+            r"^set\(ROCKE_TEST_TIMEOUT_(\w+) (\d+)\)$", text, re.MULTILINE
+        )
+    }
+    assert {"CPU", "TOOLCHAIN", "GPU"} <= limits.keys(), limits
+    return limits
+
+
+@requires_cmake
+@pytest.mark.parametrize(
+    "provider_subdir",
+    ["", "hip_kernel_provider"],
+    ids=["standalone", "provider"],
+)
+def test_every_entry_sets_a_resource_class_timeout(tmp_path, provider_subdir):
+    """CI runs ctest with a default timeout above its step limit, so an entry
+    without a TIMEOUT that hangs ends the whole CI step. Every rocKE entry, in
+    the build tree and in the installed CTestTestfile, sets a TIMEOUT, and each
+    TIMEOUT is one of the limits of TestTimeouts.cmake rather than a number
+    tuned for one entry."""
+    build, ctest_dir = configure_installed_ctest(
+        tmp_path, f"-DROCKE_INSTALL_PROVIDER_CTEST_SUBDIR={provider_subdir}"
+    )
+    limits = set(resource_class_timeouts().values())
+    for tree in (ctest_dir, build):
+        tests = list_installed_ctests(tree)
+        assert tests, tree
+        timeouts = {
+            test["name"]: next(
+                (
+                    prop["value"]
+                    for prop in test.get("properties", [])
+                    if prop["name"] == "TIMEOUT"
+                ),
+                None,
+            )
+            for test in tests
+        }
+        untimed = sorted(name for name, seconds in timeouts.items() if seconds is None)
+        assert not untimed, (tree.name, untimed)
+        off_limit = {
+            name: seconds for name, seconds in timeouts.items() if seconds not in limits
+        }
+        assert not off_limit, (tree.name, off_limit)
+
+
+@requires_cmake
+@requires_library_lists
+def test_configure_stops_on_an_installed_entry_without_a_timeout(tmp_path):
+    """platform/CMakeLists.txt stops the configure when an installed entry sets
+    no TIMEOUT, and names the entry. The check runs in the build job's
+    configure; CI does not run this file."""
+    message = configure_error_after_library_lists_edit(
+        tmp_path,
+        '"  TIMEOUT ${ROCKE_TEST_TIMEOUT_COUNTED_COMPILER_GATE})\\n")',
+        '")\\n")',
+    )
+    assert "must set a CTest TIMEOUT" in message
+    assert "rocke_library_counted_compiler_gate" in message
 
 
 @requires_cmake
@@ -687,7 +766,7 @@ def test_installed_platform_pytest_parts_partition_the_suite(
         # One label string, as the single entry had: the generated CTest text
         # escapes the semicolons.
         assert properties["LABELS"] == ["ckc;python;quick"], name
-        assert properties["TIMEOUT"] == 300, name
+        assert properties["TIMEOUT"] == resource_class_timeouts()["TOOLCHAIN"], name
 
     other_paths, other_ignored = split_ignored_files(selection_by_part.pop("other"))
     assert other_paths == [tests_root]
@@ -740,7 +819,7 @@ def test_installed_platform_pytest_parts_partition_the_suite(
     ]
     properties = {prop["name"]: prop["value"] for prop in plugin_tests["properties"]}
     assert properties["LABELS"] == ["ckc;python;standard"]
-    assert properties["TIMEOUT"] == 300
+    assert properties["TIMEOUT"] == resource_class_timeouts()["TOOLCHAIN"]
     assert plugin_tests_file in ignored_by_part["other"]
 
     # A file is ignored by the part that would collect it: a named part, for a

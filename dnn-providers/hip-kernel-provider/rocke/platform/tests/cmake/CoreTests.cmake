@@ -29,7 +29,7 @@ if(BUILD_TESTING)
         LABELS "ckc;python;host;integration;toolchain;generated-artifact;standard"
         RUN_SERIAL TRUE
         SKIP_RETURN_CODE 77
-        TIMEOUT 1800
+        TIMEOUT ${ROCKE_TEST_TIMEOUT_TOOLCHAIN}
         WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/..")
 
     # The committed column of compiler_options.json for the loaded compiler,
@@ -43,7 +43,7 @@ if(BUILD_TESTING)
       rocke_compiler_options_reproducibility
       PROPERTIES
         LABELS "ckc;python;host;toolchain;generated-artifact;standard"
-        TIMEOUT 600
+        TIMEOUT ${ROCKE_TEST_TIMEOUT_TOOLCHAIN}
         WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/..")
 
     # The arch-table parity test reads cpp/core/arch/data.cpp, which the
@@ -57,6 +57,7 @@ if(BUILD_TESTING)
       rocke_arch_table_engine_parity
       PROPERTIES
         LABELS "ckc;python;host"
+        TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU}
         ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python")
 
     # The GEMM spec-dict parity test reads cpp/bindings/rocke_engine.cpp, which
@@ -71,6 +72,7 @@ if(BUILD_TESTING)
       rocke_gemm_spec_dict_binding_parity
       PROPERTIES
         LABELS "ckc;python;host"
+        TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU}
         ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python")
   else()
     message(WARNING
@@ -114,7 +116,8 @@ if(BUILD_TESTING)
               "${_rocke_parity_dir}/optimization_barrier_emit.py"
               --count 17)
     set_tests_properties(rocke_optimization_barrier_hip_pair
-                         PROPERTIES LABELS "ckc;python;host;quick" TIMEOUT 120)
+                         PROPERTIES LABELS "ckc;python;host;quick"
+                                    TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})
   endif()
 
   add_executable(rocke_optimization_barrier core/test_optimization_barrier.cpp)

@@ -580,8 +580,10 @@ gets `rocke_<operation>_reference_unit_pytest`. The provider's
 selects both by pattern for a lowercase operation name and a `gfx` processor, so
 it needs no edit; verify that the real provider selector includes the new
 entries. An architecture's entry runs every variant installed for it, with test
-ids `<arch>-<variant>-<case>` and a timeout of five minutes per installed
-variant, so adding cases to a published architecture uses its existing entry.
+ids `<arch>-<variant>-<case>` and the CTest limit of the `gpu` resource class
+(`platform/tests/cmake/TestTimeouts.cmake`), which covers two variants at the
+worker's five-minute request timeout, so adding cases to a published
+architecture uses its existing entry.
 
 One entry per architecture is a trade-off. It keeps the CTest names, and the
 name shape that the provider category patterns match, as they were before
@@ -591,9 +593,8 @@ nothing. With two or more, it gives up isolation at the CTest level: one
 variant's failure fails the whole entry; a variant whose kernel hangs reaches
 the worker's five-minute request timeout case after case, so it can use the
 entry's whole timeout and leave the other variants unrun; and a CTest exclusion
-or category can select only the whole architecture. The scaled timeout only
-keeps an entry that runs several variants from timing out before they finish.
-So an architecture's entry runs at most two variants of an operation. Before an
+or category can select only the whole architecture. So an architecture's
+entry runs at most two variants of an operation. Before an
 architecture publishes a third, or as soon as one variant needs its own
 exclusion or category, give each installed variant its own
 `rocke_<operation>_gpu_<arch>_<variant>_pytest` entry that passes

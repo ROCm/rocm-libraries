@@ -187,7 +187,7 @@ function(rocke_platform_pytest_entry out_var part)
          "set_tests_properties(${_test_name} PROPERTIES\n"
          "  LABELS \"ckc\\;python\\;quick\"\n"
          "  ENVIRONMENT \"\${_rocke_platform_pytest_environment}\"\n"
-         "  TIMEOUT 300)\n")
+         "  TIMEOUT ${ROCKE_TEST_TIMEOUT_TOOLCHAIN})\n")
   set(${out_var} "${_entry}" PARENT_SCOPE)
 endfunction()
 
@@ -342,6 +342,10 @@ if(ROCKE_BUILD_SHARED_ENGINE)
 endif()
 
 include(CTest)
+
+# The CTest TIMEOUT of every test entry, one limit per resource class. Outside
+# BUILD_TESTING: the installed test text below uses the limits too.
+include("${CMAKE_CURRENT_SOURCE_DIR}/tests/cmake/TestTimeouts.cmake")
 
 # C++ test targets are orchestrated from tests/CMakeLists.txt and registered in
 # concern-owned tests/cmake/*.cmake fragments.
@@ -604,7 +608,7 @@ if(ROCKE_INSTALL_TESTS)
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
            "add_test(${_test_target} \"${ROCKE_CXX_TEST_CTEST_REL}${_rocke_installed_name}\")\n")
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-           "set_tests_properties(${_test_target} PROPERTIES LABELS \"ckc;unit;host;quick\")\n")
+           "set_tests_properties(${_test_target} PROPERTIES LABELS \"ckc;unit;host;quick\" TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})\n")
   endforeach()
 
   if(ROCKE_INSTALL_PYTHON_TESTS)
@@ -637,7 +641,7 @@ if(ROCKE_INSTALL_TESTS)
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
            "add_test(rocke_python_import_smoke python \"${ROCKE_TEST_CTEST_REL}rocke_installed_smoke.py\")\n")
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-           "set_tests_properties(rocke_python_import_smoke PROPERTIES LABELS \"ckc;python;quick\")\n")
+           "set_tests_properties(rocke_python_import_smoke PROPERTIES LABELS \"ckc;python;quick\" TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})\n")
 
     set(_rocke_barrier_parity_entries "")
     if(TARGET rocke_optimization_barrier_emit)
@@ -653,12 +657,12 @@ if(ROCKE_INSTALL_TESTS)
              "\"${ROCKE_TEST_CTEST_REL}tests/instances/parity/"
              "optimization_barrier_emit.py\" --count 17)\n"
              "set_tests_properties(rocke_optimization_barrier_hip_pair "
-             "PROPERTIES LABELS \"ckc;python;host;quick\" TIMEOUT 120)\n")
+             "PROPERTIES LABELS \"ckc;python;host;quick\" TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})\n")
     endif()
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
            "add_test(rocke_golden_static python \"${ROCKE_TEST_CTEST_REL}rocke_installed_golden_test.py\")\n")
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-           "set_tests_properties(rocke_golden_static PROPERTIES LABELS \"ckc;python;golden;host;quick\")\n"
+           "set_tests_properties(rocke_golden_static PROPERTIES LABELS \"ckc;python;golden;host;quick\" TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})\n"
            "${_rocke_barrier_parity_entries}")
 
     # Compiler tool locations for Python entries that compile and disassemble
@@ -691,7 +695,7 @@ if(ROCKE_INSTALL_TESTS)
            "  ENVIRONMENT \"PYTHONPATH=${_ROCKE_INSTALLED_PYTHONPATH}\"\n"
            "  RUN_SERIAL TRUE\n"
            "  SKIP_RETURN_CODE 77\n"
-           "  TIMEOUT 1800)\n")
+           "  TIMEOUT ${ROCKE_TEST_TIMEOUT_TOOLCHAIN})\n")
 
     # Re-measure which -mllvm options the loaded compiler accepts and fail when
     # its committed column in compiler_options.json differs or is missing. The
@@ -705,7 +709,7 @@ if(ROCKE_INSTALL_TESTS)
            "set_tests_properties(rocke_compiler_options_reproducibility PROPERTIES\n"
            "  LABELS \"ckc;python;host;toolchain;generated-artifact;standard\"\n"
            "  ENVIRONMENT \"PYTHONPATH=${_ROCKE_INSTALLED_PYTHONPATH}\"\n"
-           "  TIMEOUT 600)\n")
+           "  TIMEOUT ${ROCKE_TEST_TIMEOUT_TOOLCHAIN})\n")
 
     # The differential golden: every parity family's Python reference output,
     # LLVM IR at each LLVM flavor (the flavor is a lowering argument, so one host
@@ -714,11 +718,11 @@ if(ROCKE_INSTALL_TESTS)
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
            "add_test(rocke_differential_golden_ll python \"${_ROCKE_RUN_DIFF}\" --mode ll --python-only --check-golden --flavor llvm20,llvm22,llvm23,llvm24)\n")
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-           "set_tests_properties(rocke_differential_golden_ll PROPERTIES LABELS \"ckc;python;golden;host;quick\" ENVIRONMENT \"PYTHONPATH=${_ROCKE_INSTALLED_PYTHONPATH}\" TIMEOUT 300)\n")
+           "set_tests_properties(rocke_differential_golden_ll PROPERTIES LABELS \"ckc;python;golden;host;quick\" ENVIRONMENT \"PYTHONPATH=${_ROCKE_INSTALLED_PYTHONPATH}\" TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})\n")
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
            "add_test(rocke_differential_golden_canonical python \"${_ROCKE_RUN_DIFF}\" --mode ir --canonical --python-only --check-golden)\n")
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-           "set_tests_properties(rocke_differential_golden_canonical PROPERTIES LABELS \"ckc;python;golden;host;quick\" ENVIRONMENT \"PYTHONPATH=${_ROCKE_INSTALLED_PYTHONPATH}\" TIMEOUT 300)\n")
+           "set_tests_properties(rocke_differential_golden_canonical PROPERTIES LABELS \"ckc;python;golden;host;quick\" ENVIRONMENT \"PYTHONPATH=${_ROCKE_INSTALLED_PYTHONPATH}\" TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})\n")
 
     # The installed tests compare the C++ HIP lowering with the Python one
     # through rocke_ir_lower_cli, as the wheel has no rocke_engine binding:
@@ -863,7 +867,7 @@ if(ROCKE_INSTALL_TESTS)
              "set_tests_properties(rocke_ctest_shard_pytest PROPERTIES\n"
              "  LABELS \"ckc\\;python\\;standard\"\n"
              "  ENVIRONMENT \"\${_rocke_platform_pytest_environment}\"\n"
-             "  TIMEOUT 300)\n")
+             "  TIMEOUT ${ROCKE_TEST_TIMEOUT_TOOLCHAIN})\n")
       set(_rocke_pytest_other_arguments
           "${ROCKE_TEST_CTEST_REL}tests" --ignore "${ROCKE_TEST_CTEST_REL}tests/library")
       foreach(_rocke_pytest_group IN LISTS _ROCKE_PLATFORM_PYTEST_GROUPS)
@@ -896,15 +900,12 @@ if(ROCKE_INSTALL_TESTS)
       # visualization/ run in rocke_tiling_visualization_pytest, which the
       # provider categories tier for scheduled CI only (TESTING.md, section
       # 5.1.2), and every other directory runs in rocke_tiling_pytest. None of
-      # the three is one of the parts, so none takes their name prefix. Each
-      # budget keeps the entry's time on the slowest runners under half its
-      # CTest limit. The CPU tests build and check many kernels, so
-      # rocke_tiling_pytest has a longer limit than a part; the visualization
-      # and GPU tests are fewer. Four kinds of test skip here and pass: the GPU
-      # tests, without a usable GPU; the C++-engine cases of the IR tests, as
-      # the installed tree has no rocke_engine binding (their Python-engine
-      # cases run); the source scans of the dsl_docs and library trees, which
-      # the installed tree does not hold (rocke.tests.source_tree); and every
+      # the three is one of the parts, so none takes their name prefix. Four
+      # kinds of test skip here and pass: the GPU tests, without a usable GPU;
+      # the C++-engine cases of the IR tests, as the installed tree has no
+      # rocke_engine binding (their Python-engine cases run); the source scans
+      # of the dsl_docs and library trees, which the installed tree does not
+      # hold (rocke.tests.source_tree); and every
       # test that loads platform/tools/, which it does not hold either. The last
       # kind runs only from a source checkout: the backend coverage
       # re-measurement, the compile of every issued MMA instruction and the
@@ -928,17 +929,17 @@ if(ROCKE_INSTALL_TESTS)
              "set_tests_properties(rocke_tiling_pytest PROPERTIES\n"
              "  LABELS \"ckc\\;python\\;quick\"\n"
              "  ENVIRONMENT \"\${_rocke_tiling_pytest_environment}\"\n"
-             "  TIMEOUT 600)\n"
+             "  TIMEOUT ${ROCKE_TEST_TIMEOUT_TOOLCHAIN})\n"
              "add_test(rocke_tiling_visualization_pytest ${_rocke_tiling_pytest_launcher} \"${_ROCKE_TILING_VISUALIZATION_TESTS}\" ${_rocke_tiling_pytest_options} -m \"not gpu\")\n"
              "set_tests_properties(rocke_tiling_visualization_pytest PROPERTIES\n"
              "  LABELS \"ckc\\;python\"\n"
              "  ENVIRONMENT \"\${_rocke_tiling_pytest_environment}\"\n"
-             "  TIMEOUT 300)\n"
+             "  TIMEOUT ${ROCKE_TEST_TIMEOUT_TOOLCHAIN})\n"
              "add_test(rocke_tiling_gpu_pytest ${_rocke_tiling_pytest_launcher} \"${_ROCKE_TILING_TESTS}\" ${_rocke_tiling_pytest_options} -m gpu)\n"
              "set_tests_properties(rocke_tiling_gpu_pytest PROPERTIES\n"
              "  LABELS \"ckc\\;python\\;gpu\"\n"
              "  ENVIRONMENT \"\${_rocke_tiling_pytest_environment}\"\n"
-             "  TIMEOUT 300)\n")
+             "  TIMEOUT ${ROCKE_TEST_TIMEOUT_GPU})\n")
       # check_backend_access_width.py compiles a few copy kernels through COMGR
       # and reads their disassembly. A host module that does that is kept out of
       # ordinary test discovery (TESTING.md, section 5.0.1), so this entry names
@@ -975,15 +976,14 @@ if(ROCKE_INSTALL_TESTS)
              "set_tests_properties(rocke_${_operation}_reference_unit_pytest PROPERTIES\n"
              "  LABELS \"ckc\\;python\\;${_operation}\\;host\\;quick\"\n"
              "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
-             "  TIMEOUT 180)\n")
+             "  TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})\n")
 
       # Each installed architecture retains its own GPU CTest result, which
-      # covers every variant installed for it, so its timeout scales with them.
+      # covers every variant installed for it; the gpu limit covers the at most
+      # two variants one entry runs, each at its five-minute request timeout.
       # library/tests/reference_common/docs/gpu-reference-workflow.md records
       # this trade-off and when to register one CTest per variant instead.
       foreach(_arch IN LISTS _ROCKE_${_operation_upper}_INSTALLED_ARCHITECTURES)
-        list(LENGTH _ROCKE_${_operation_upper}_${_arch}_INSTALLED_VARIANTS _variant_count)
-        math(EXPR _timeout "300 * ${_variant_count}")
         string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
                "add_test(rocke_${_operation}_gpu_${_arch}_pytest ${_ROCKE_INSTALLED_PYTEST} \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_${_operation}_pinned_reference.py\" --rocke-reference-operation ${_operation} --rocke-reference-arch ${_arch} -v -rs)\n")
         string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
@@ -991,7 +991,7 @@ if(ROCKE_INSTALL_TESTS)
                "  LABELS \"ckc\\;python\\;${_operation}\\;gpu\\;quick\"\n"
                "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
                "  SKIP_RETURN_CODE 77\n"
-               "  TIMEOUT ${_timeout})\n")
+               "  TIMEOUT ${ROCKE_TEST_TIMEOUT_GPU})\n")
       endforeach()
     endforeach()
 
@@ -1032,6 +1032,25 @@ if(ROCKE_INSTALL_TESTS)
             "\${_ROCKE_INSTALLED_PYTEST}, so that each hipkernelprovider CI shard "
             "runs only its share of the entry's tests (see rocke/TESTING.md):\n"
             "  ${_rocke_bad_pytest_entries}")
+  endif()
+
+  # CI runs ctest with a default timeout far above its step limit, so an
+  # installed entry without a TIMEOUT that hangs ends the whole CI step instead
+  # of failing alone. Stop the configure for such an entry.
+  set(_rocke_untimed_entries "")
+  foreach(_rocke_add IN LISTS _rocke_adds)
+    string(REGEX REPLACE "^add_test\\(([A-Za-z0-9_]+) .*" "\\1" _rocke_name "${_rocke_add}")
+    if(NOT _ROCKE_INSTALLED_CTEST_ENTRIES MATCHES
+       "set_tests_properties\\(${_rocke_name} PROPERTIES[^)]*TIMEOUT [0-9]+")
+      list(APPEND _rocke_untimed_entries "${_rocke_name}")
+    endif()
+  endforeach()
+  if(_rocke_untimed_entries)
+    list(JOIN _rocke_untimed_entries "\n  " _rocke_untimed_entries)
+    message(FATAL_ERROR
+            "Each installed rocKE test entry must set a CTest TIMEOUT, the limit "
+            "of its resource class in tests/cmake/TestTimeouts.cmake:\n"
+            "  ${_rocke_untimed_entries}")
   endif()
 
   if(ROCKE_INSTALL_PROVIDER_CTEST_SUBDIR)

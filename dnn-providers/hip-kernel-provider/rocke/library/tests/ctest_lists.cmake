@@ -25,7 +25,7 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "set_tests_properties(rocke_oracle_free_pytest PROPERTIES\n"
        "  LABELS \"ckc\\;python\\;gpu\\;quick\"\n"
        "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
-       "  TIMEOUT 300)\n")
+       "  TIMEOUT ${ROCKE_TEST_TIMEOUT_GPU})\n")
 
 # Library conv CPU tests (no GPU required; dispatch selection + signature guards).
 # The test environment installs the platform wheel. PYTHONPATH puts the staged
@@ -98,13 +98,13 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "set_tests_properties(rocke_library_conv_pytest PROPERTIES\n"
        "  LABELS \"ckc\\;python\\;conv\\;host\\;quick\"\n"
        "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
-        "  TIMEOUT 180)\n")
+        "  TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})\n")
 
 # The forward AOT-packaging cross-check gets its own entry: it samples far more of
 # the sweep's identity space than the other conv files above, so its slowest cases
-# (building and comparing IR for a sampled instance) exceed both the shared entry's
-# per-test pytest-timeout and its cumulative CTest TIMEOUT, the dgrad twin above gets
-# the same shared budget only because its own sample is smaller.
+# (building and comparing IR for a sampled instance) exceed the shared entry's
+# per-test pytest-timeout; the dgrad twin above stays in the shared entry only
+# because its own sample is smaller.
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "add_test(rocke_library_conv_fwd_aot_packaging_pytest ${_ROCKE_INSTALLED_PYTEST} "
        "\"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_convolution_forward_aot_packaging.py\" "
@@ -113,13 +113,13 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "set_tests_properties(rocke_library_conv_fwd_aot_packaging_pytest PROPERTIES\n"
        "  LABELS \"ckc\\;python\\;conv\\;host\"\n"
        "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
-        "  TIMEOUT 900)\n")
+        "  TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})\n")
 
 # Library conv IR golden, platform-regression, split-K planner, ceil_div and
 # conv doc-example (the conv part of dsl_docs' verify_dsl_docs.py) CPU tests
 # (no GPU). Their own entry, with the conv entry's arguments, labels and
-# PYTHONPATH, so they do not share rocke_library_conv_pytest's CTest budget,
-# which is already close to its limit on Windows runners.
+# PYTHONPATH, so they do not add to rocke_library_conv_pytest's time, which is
+# already long on Windows runners.
 set(_ROCKE_LIBRARY_CONV_IR_TEST_RELPATHS
     "tests/library/tests/test_conv_ir_golden.py"
     "tests/library/tests/test_conv_platform_regressions.py"
@@ -139,7 +139,7 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "set_tests_properties(rocke_library_conv_ir_pytest PROPERTIES\n"
        "  LABELS \"ckc\\;python\\;conv\\;host\\;quick\"\n"
        "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
-       "  TIMEOUT 180)\n")
+       "  TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})\n")
 
 # Library conv TF32 tests (no GPU required), as two entries:
 #
@@ -194,7 +194,7 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "set_tests_properties(rocke_library_conv_tf32_pytest PROPERTIES\n"
        "  LABELS \"ckc\\;python\\;conv\\;host\\;quick\"\n"
        "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
-       "  TIMEOUT 300)\n")
+       "  TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})\n")
 if(WIN32)
   message(STATUS "rocKE: rocke_library_conv_tf32_lowering_pytest not registered on Windows (CI shard time; see comment above)")
 else()
@@ -204,7 +204,7 @@ else()
          "set_tests_properties(rocke_library_conv_tf32_lowering_pytest PROPERTIES\n"
          "  LABELS \"ckc\\;python\\;conv\\;host\\;quick\"\n"
          "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
-         "  TIMEOUT 600)\n")
+         "  TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})\n")
 endif()
 
 # Library attention CPU tests (no GPU required): gfx942 Q staging when K is
@@ -295,7 +295,7 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "set_tests_properties(rocke_library_attention_cpu_pytest PROPERTIES\n"
        "  LABELS \"ckc\\;python\\;attention\\;host\\;quick\"\n"
        "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
-       "  TIMEOUT 180)\n")
+       "  TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})\n")
 
 # The pure runner policy and the real subprocess/process-tree contracts run as
 # two entries, each with its own whole-entry budget.
@@ -304,12 +304,12 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "set_tests_properties(rocke_library_runner_contract_pytest PROPERTIES\n"
        "  LABELS \"ckc\\;python\\;host\\;runner\\;comprehensive\\;full\"\n"
        "  ENVIRONMENT \"PYTHONPATH=${_ROCKE_LIBRARY_PYTHONPATH}\"\n"
-       "  TIMEOUT 180)\n"
+       "  TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})\n"
        "add_test(rocke_library_worker_integration_pytest ${_ROCKE_INSTALLED_PYTEST} \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_library_test_tiers.py\" -m worker_integration -v -rs --timeout=30)\n"
        "set_tests_properties(rocke_library_worker_integration_pytest PROPERTIES\n"
        "  LABELS \"ckc\\;python\\;host\\;runner\\;integration\\;comprehensive\\;full\"\n"
        "  ENVIRONMENT \"PYTHONPATH=${_ROCKE_LIBRARY_PYTHONPATH}\"\n"
-       "  TIMEOUT 180)\n")
+       "  TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})\n")
 
 # Tiled attention cache-key contract (no GPU). The targeted share/split
 # checks take seconds and run in the quick tier. The invariant sweep compares
@@ -322,14 +322,14 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "set_tests_properties(rocke_library_attention_cache_key_pytest PROPERTIES\n"
        "  LABELS \"ckc\\;python\\;attention\\;host\\;quick\"\n"
        "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
-       "  TIMEOUT 180)\n")
+       "  TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})\n")
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "add_test(rocke_library_attention_cache_key_sweep_pytest ${_ROCKE_INSTALLED_PYTEST} \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_attention_tiled_cache_key.py\" -k test_key_matches_build_identity -v -rs --timeout=240)\n")
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "set_tests_properties(rocke_library_attention_cache_key_sweep_pytest PROPERTIES\n"
        "  LABELS \"ckc\\;python\\;attention\\;host\\;standard\"\n"
        "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
-       "  TIMEOUT 900)\n")
+       "  TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})\n")
 
 # Exhaustive counted-sync gates are intentionally outside normal pytest
 # discovery. The structural gate is host-only; the compiler gate additionally
@@ -348,7 +348,7 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "  ENVIRONMENT \"PYTHONPATH=${_ROCKE_LIBRARY_PYTHONPATH};PYTEST_ADDOPTS=;PYTEST_PLUGINS=;PYTEST_DISABLE_PLUGIN_AUTOLOAD=1;ROCKE_EXPLICIT_GATE_RUN=1;ROCKE_EXPLICIT_GATE_PARTIAL=0;ROCKE_EXPLICIT_GATE_PREFLIGHT=\"\n"
        "  PROCESSORS 4\n"
        "  RESOURCE_LOCK rocke_counted_sync_gate\n"
-       "  TIMEOUT 1800)\n"
+       "  TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})\n"
        "set(_rocke_counted_isa_environment\n"
        "    \"PYTHONPATH=${_ROCKE_LIBRARY_PYTHONPATH}\"\n"
        "    \"ROCKE_COUNTED_ISA_OPTIONAL=0\"\n"
@@ -369,7 +369,7 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "  ENVIRONMENT \"\${_rocke_counted_isa_environment}\"\n"
        "  PROCESSORS 4\n"
        "  RESOURCE_LOCK rocke_counted_sync_gate\n"
-       "  TIMEOUT 7200)\n")
+       "  TIMEOUT ${ROCKE_TEST_TIMEOUT_COUNTED_COMPILER_GATE})\n")
 
 # DSA lightning-indexer CPU tests (no GPU: validator, dispatch wiring, and the
 # Python-lowered IR-sha golden). Same staged-library PYTHONPATH as the conv
@@ -390,7 +390,7 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "set_tests_properties(rocke_library_dsa_pytest PROPERTIES\n"
        "  LABELS \"ckc\\;python\\;dsa\\;host\\;quick\"\n"
        "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
-       "  TIMEOUT 180)\n")
+       "  TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})\n")
 
 # Library MLA CPU tests (no GPU required): kernel lowering/admission, dispatch
 # wiring, the IR golden, the fp32 oracle, the benchmark shape loader, the
@@ -424,7 +424,7 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "set_tests_properties(rocke_library_mla_pytest PROPERTIES\n"
        "  LABELS \"ckc\\;python\\;mla\\;host\\;quick\"\n"
        "  ENVIRONMENT \"\${_rocke_library_mla_pytest_environment}\"\n"
-       "  TIMEOUT 900)\n")
+       "  TIMEOUT ${ROCKE_TEST_TIMEOUT_TOOLCHAIN})\n")
 
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "add_test(rocke_reference_common_pytest ${_ROCKE_INSTALLED_PYTEST} \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_reference_common.py\" -v -rs --timeout=30)\n")
@@ -432,7 +432,7 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "set_tests_properties(rocke_reference_common_pytest PROPERTIES\n"
        "  LABELS \"ckc\\;python\\;host\\;quick\"\n"
        "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
-       "  TIMEOUT 180)\n")
+       "  TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})\n")
 
 # Library attention dispatch and RDNA WMMA CPU tests: dispatcher selection,
 # signature guards, spec validation and the tuned-candidate contract. Pointed at the
@@ -458,7 +458,7 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "set_tests_properties(rocke_library_attention_pytest PROPERTIES\n"
        "  LABELS \"ckc\\;python\\;attention\\;dispatch\\;host\\;quick\"\n"
        "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
-       "  TIMEOUT 300)\n")
+       "  TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})\n")
 
 # Library SDPA CPU tests (no GPU): the hipDNN SDPA request contract and
 # from_hipdnn, the request-driven and array oracles, and the forward/backward
@@ -482,7 +482,7 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "set_tests_properties(rocke_library_sdpa_pytest PROPERTIES\n"
        "  LABELS \"ckc\\;python\\;sdpa\\;host\\;quick\"\n"
        "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
-       "  TIMEOUT 180)\n")
+       "  TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})\n")
 
 # GDN/KDA decode CPU tests: spec validation, IR emission and load order,
 # the golden IR hashes, the performance knobs, dispatch selection, and the
@@ -532,7 +532,7 @@ else()
          "set_tests_properties(rocke_library_gdn_pytest PROPERTIES\n"
          "  LABELS \"ckc\\;python\\;gdn\\;host\\;standard\"\n"
          "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
-         "  TIMEOUT 600)\n")
+         "  TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})\n")
 endif()
 
 # Library attention GPU numeric tests (gfx950-specific; require a GPU).
@@ -557,7 +557,7 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "set_tests_properties(rocke_library_attention_gpu_pytest PROPERTIES\n"
        "  LABELS \"ckc\\;python\\;attention\\;gpu\"\n"
        "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
-       "  TIMEOUT 1800)\n")
+       "  TIMEOUT ${ROCKE_TEST_TIMEOUT_GPU})\n")
 
 # gfx950 additive-bias numeric lane. Its own entry (selected by name, like the
 # one above) so its runtime does not eat into that entry's timeout.
@@ -567,7 +567,7 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "set_tests_properties(rocke_library_attention_bias_gpu_pytest PROPERTIES\n"
        "  LABELS \"ckc\\;python\\;attention\\;gpu\"\n"
        "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
-       "  TIMEOUT 1200)\n")
+       "  TIMEOUT ${ROCKE_TEST_TIMEOUT_GPU})\n")
 
 # Library GPU numeric suites: convolution, attention, KDA, and GDN. The gfx950
 # dense numeric and extended-parity attention tests run only in
@@ -649,4 +649,4 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "set_tests_properties(rocke_library_gpu_pytest PROPERTIES\n"
        "  LABELS \"ckc\\;python\\;gpu\"\n"
        "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
-       "  TIMEOUT 1800)\n")
+       "  TIMEOUT ${ROCKE_TEST_TIMEOUT_GPU})\n")
