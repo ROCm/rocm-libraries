@@ -32,7 +32,8 @@ from .Common import state, IsaInfo
 from .Common.Architectures import gfxToIsa, supportsChipIdPredicate
 from .SolutionStructs.Naming import getSolutionNameMin, getKernelNameMin
 from .SolutionStructs.CompactSolution import hydrateSolution
-from .MatchingTable import MatchingTable
+from .MatchingTable import MatchingTable, NotExactlyRepresentable
+from .Common.Utilities import printWarning
 from .SolutionStructs.Problem import isFusedA2A, splitFusedA2ARow
 
 class SingleSolutionLibrary:
@@ -129,8 +130,8 @@ class MatchingLibrary:
             properties += [Properties.Property("World"), Properties.Property("FusedA2AExtent")]
 
         # Build the columns directly: an int64 key matrix, a float64 speed
-        # vector and solution references are about a tenth of the memory of
-        # one dict per row, and the parent keeps every table from logic
+        # vector and solution references are a fifth to a sixth of the memory
+        # of one dict per row, and the parent keeps every table from logic
         # loading until the libraries are written. The row dicts are built
         # only when the columns cannot hold a value exactly (or NumPy is not
         # installed), in which case the legacy form is kept.
@@ -153,7 +154,20 @@ class MatchingLibrary:
             sols.append(solution)
             if hasSpeed:
                 speeds.append(speed)
-        table = MatchingTable.fromColumns(keys, sols, speeds)
+        try:
+            table = MatchingTable.fromColumns(keys, sols, speeds)
+        except NotExactlyRepresentable as reason:
+            # Logic files hold int keys and numeric speeds, so this is rare by
+            # construction; say so when it happens, because this table and
+            # every table merged with it then stay row dicts in the parent.
+            source = next(
+                (getattr(s, "srcName", "") for s in sols if getattr(s, "srcName", "")),
+                "unknown logic file",
+            )
+            printWarning(
+                f"{distance} matching table from {source} kept as row dicts: {reason}"
+            )
+            table = None
         if table is None:
             # Rows typically outnumber solutions by orders of magnitude; the
             # wrapper is immutable, so share one per solution.

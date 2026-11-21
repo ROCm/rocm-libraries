@@ -9,7 +9,7 @@ import numpy as np
 import pytest
 
 from tensilelite.Common.Utilities import state
-from tensilelite.MatchingTable import MatchingTable
+from tensilelite.MatchingTable import MatchingTable, NotExactlyRepresentable, numpyAvailable
 from tensilelite.SolutionLibrary import IndexSolutionLibrary, MatchingLibrary
 
 
@@ -118,27 +118,37 @@ def test_mixed_int_and_float_speeds_keep_their_types():
 
 
 def test_values_that_cannot_round_trip_exactly_are_refused():
+    def refused(rows, match):
+        with pytest.raises(NotExactlyRepresentable, match=match):
+            MatchingTable.fromRows(rows)
+
     rows = _legacyRows(5)
     rows[2]["key"][0] = True
-    assert MatchingTable.fromRows(rows) is None
+    refused(rows, "bool, not int")
     rows = _legacyRows(5)
     rows[3]["speed"] = "fast"
-    assert MatchingTable.fromRows(rows) is None
+    refused(rows, "str, not int or float")
     rows = _legacyRows(5)
     rows[3]["speed"] = 2**60 + 1  # not exact in float64
-    assert MatchingTable.fromRows(rows) is None
+    refused(rows, "not exact in float64")
     rows = _legacyRows(5)
     rows[0]["key"] = rows[0]["key"][:-1]
-    assert MatchingTable.fromRows(rows) is None
+    refused(rows, "elements")
     rows = _legacyRows(5)
     rows[1]["key"][1] = 2**70
-    assert MatchingTable.fromRows(rows) is None
+    refused(rows, "int64")
+    rows = _legacyRows(5)
+    del rows[2]["speed"]
+    refused(rows, "some rows have a speed")
     rows = _legacyRows(5)
     for r in rows:
         r["speed"] = 3  # all ints is fine
     table = MatchingTable.fromRows(rows)
     assert table is not None and type(table[0]["speed"]) is int
     assert table.state() == state(_legacySorted(rows))
+    # Nothing to store: silently a legacy list, not an error.
+    assert MatchingTable.fromRows([]) is None
+    assert MatchingTable.fromColumns([[], []], [_Sol(0), _Sol(1)], None) is None
 
 
 def test_rows_of_one_solution_share_a_wrapper():
@@ -280,3 +290,39 @@ def test_merging_into_empty_library_does_not_share_table(numpy_available, monkey
 
     assert [row["index"] for row in state(source.table)] == [0, 2]
     assert [row["index"] for row in state(receiver.table)] == [1, 0]
+
+
+def test_unrepresentable_values_warn_and_keep_legacy_rows(capsys):
+    sols = [_Sol(i) for i in range(2)]
+    sols[1].srcName = "/logic/gfx942/Equality/odd_file.yaml"
+    d = {
+        "indexOrder": [2, 3, 0, 1],
+        "distance": "Equality",
+        "table": [
+            [[64, 64, 1, 64], [0, 1.0]],
+            [[True, 32, 1, 32], [1, 2.0]],
+        ],
+    }
+    lib = MatchingLibrary.FromOriginalState(d, sols)
+    assert isinstance(lib.table, list) and len(lib.table) == 2
+    out = capsys.readouterr().out
+    assert "WARNING" in out
+    assert "Equality matching table from /logic/gfx942/Equality/odd_file.yaml" in out
+    assert "kept as row dicts" in out and "bool, not int" in out
+
+
+def test_representable_tables_and_missing_numpy_do_not_warn_here(capsys, monkeypatch):
+    sols = [_Sol(i) for i in range(2)]
+    d = {
+        "indexOrder": [2, 3, 0, 1],
+        "distance": "Equality",
+        "table": [[[64, 64, 1, 64], [0, 1.0]], [[32, 32, 1, 32], [1, 2.0]]],
+    }
+    assert isinstance(MatchingLibrary.FromOriginalState(d, sols).table, MatchingTable)
+    import tensilelite.MatchingTable as MT
+
+    monkeypatch.setattr(MT, "_numpy", lambda: None)
+    assert not numpyAvailable()
+    # Without NumPy the driver warns once in the parent; the per-table path stays quiet.
+    assert isinstance(MatchingLibrary.FromOriginalState(d, sols).table, list)
+    assert capsys.readouterr().out == ""

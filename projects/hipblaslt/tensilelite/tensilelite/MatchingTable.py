@@ -4,12 +4,14 @@
 
 A matching library maps a problem-size key to a solution (plus a measured
 speed for Equality/Range tables). The logic files for one architecture hold
-tens of millions of such rows (42M for gfx942), and TensileCreateLibrary's
-parent keeps all of them from logic loading until the library files are
-written. As a list of ``{"key": [...], "index": IndexSolutionLibrary,
-"speed": f}`` dicts each row costs about 600 bytes of Python objects; stored
-by column (an int64 key matrix, a float64 speed vector, and a list of
-solution references) it costs under 50.
+tens of millions of such rows (about 40M for gfx942), and
+TensileCreateLibrary's parent keeps all of them from logic loading until the
+library files are written. As a list of ``{"key": [...], "index":
+IndexSolutionLibrary, "speed": f}`` dicts each row costs roughly 300 to 400
+bytes of Python objects (280 measured with shared key ints, about 370 in a
+full gfx942 build where every row owns its ints); stored by column (an int64
+key matrix, a float64 speed vector, and a list of solution references) it
+costs under 60.
 
 Everything the library code does with a table is supported on the column
 form: ``len``, indexing (which materializes one legacy row dict), iteration,
@@ -18,10 +20,12 @@ list of dicts the legacy form serializes to. A speed is a float or an int in
 the logic files (``0`` marks an unmeasured size), and msgpack encodes the two
 differently, so each row remembers which it was. Values that cannot be
 stored exactly (a key element that is not a plain int, a speed that is
-neither, an int speed beyond float64's exact range) make ``fromRows`` return
-None and the caller keeps the legacy list. So does an interpreter without
-NumPy: a build environment that imports the source tree without installing
-``requirements.txt`` then loses the memory saving but still builds.
+neither, an int speed beyond float64's exact range) make ``fromColumns``
+raise ``NotExactlyRepresentable``; the caller warns and keeps the legacy
+list. ``fromColumns`` returns None, silently, for an empty table and for an
+interpreter without NumPy: a build environment that imports the source tree
+without installing ``requirements.txt`` then loses the memory saving but
+still builds (the driver warns about that once, in the parent).
 """
 
 _numpyModule = None
@@ -38,6 +42,15 @@ def _numpy():
         except ImportError:
             _numpyModule = False
     return _numpyModule or None
+
+
+def numpyAvailable() -> bool:
+    """Whether column storage is possible in this interpreter."""
+    return _numpy() is not None
+
+
+class NotExactlyRepresentable(ValueError):
+    """A table value that the column form cannot hold without changing it."""
 
 
 class MatchingTable:
@@ -66,11 +79,12 @@ class MatchingTable:
     def fromColumns(cls, keys, solutions, speeds):
         """A MatchingTable for parallel lists of key lists, solutions and speeds, or None.
 
-        ``speeds`` is None for a table without a speed column. None is
-        returned when a value cannot be stored exactly or NumPy is missing;
-        the caller then keeps the legacy row dicts. The result is sorted by
-        key, like the legacy table after construction. An empty table has no
-        key width to store, so it stays a legacy list.
+        ``speeds`` is None for a table without a speed column. The result is
+        sorted by key, like the legacy table after construction. None is
+        returned when NumPy is missing or the table is empty (no key width to
+        store); the caller then keeps the legacy row dicts. A value that the
+        columns cannot hold exactly raises ``NotExactlyRepresentable`` so the
+        caller can say why it fell back to row dicts.
         """
         np = _numpy()
         if np is None or not keys:
@@ -80,44 +94,51 @@ class MatchingTable:
             return None
         for key in keys:
             if len(key) != keyLen:
-                return None
+                raise NotExactlyRepresentable(
+                    f"key {key!r} has {len(key)} elements, the first key has {keyLen}"
+                )
             for v in key:
                 if type(v) is not int:
-                    return None
+                    raise NotExactlyRepresentable(
+                        f"key element {v!r} is {type(v).__name__}, not int"
+                    )
         try:
             keyArray = np.array(keys, dtype=np.int64)
-        except (OverflowError, ValueError, TypeError):
-            return None
+        except (OverflowError, ValueError, TypeError) as e:
+            raise NotExactlyRepresentable(f"a key element does not fit int64: {e}")
         speedArray = speedIsInt = None
         if speeds is not None:
             isInt = [type(v) is int for v in speeds]
-            if not all(isInt[i] or type(v) is float for i, v in enumerate(speeds)):
-                return None
+            for i, v in enumerate(speeds):
+                if not (isInt[i] or type(v) is float):
+                    raise NotExactlyRepresentable(
+                        f"speed {v!r} is {type(v).__name__}, not int or float"
+                    )
             try:
                 speedArray = np.array(speeds, dtype=np.float64)
-            except (OverflowError, ValueError, TypeError):
-                return None
+            except (OverflowError, ValueError, TypeError) as e:
+                raise NotExactlyRepresentable(f"a speed does not fit float64: {e}")
             if any(isInt):
                 speedIsInt = np.array(isInt, dtype=bool)
                 # An int must survive the trip through float64 unchanged.
                 intValues = [v for v, i in zip(speeds, isInt) if i]
-                if any(
-                    int(f) != v
-                    for v, f in zip(intValues, speedArray[speedIsInt].tolist())
-                ):
-                    return None
+                for v, f in zip(intValues, speedArray[speedIsInt].tolist()):
+                    if int(f) != v:
+                        raise NotExactlyRepresentable(
+                            f"int speed {v} is not exact in float64"
+                        )
         table = cls(keyArray, list(solutions), speedArray, speedIsInt)
         table.sort()
         return table
 
     @classmethod
     def fromRows(cls, rows):
-        """A MatchingTable holding ``rows`` (legacy row dicts), or None if not representable exactly."""
+        """A MatchingTable holding ``rows`` (legacy row dicts); see ``fromColumns`` for None and errors."""
         if not rows:
             return None
         hasSpeed = "speed" in rows[0]
         if any(("speed" in row) != hasSpeed for row in rows):
-            return None
+            raise NotExactlyRepresentable("some rows have a speed and some do not")
         return cls.fromColumns(
             [row["key"] for row in rows],
             [row["index"].solution for row in rows],
