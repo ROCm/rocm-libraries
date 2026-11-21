@@ -41,6 +41,7 @@ from collections.abc import Callable, Iterable, Mapping
 from pathlib import Path
 from typing import Any
 
+from .golden_file import golden_json_text
 from .llvm_profile import LLVM_EMISSION_ALIASES, LLVM_EMISSION_FLAVORS, LLVM_FLAVORS
 from .lower_llvm import _lower_kernel_to_llvm_python
 
@@ -339,6 +340,10 @@ def write_golden_shards(
 ) -> None:
     """Write ``doc`` to ``golden_dir`` as one ``<shard>.json`` per family.
 
+    Each shard records its fingerprint
+    (:func:`rocke.core.golden_file.stamp_fingerprint`), so two changes that
+    re-record the same family conflict in git instead of merging.
+
     With ``shards``, only those files are rewritten (a shard left with no cases
     is deleted); the rest are untouched. Without it every shard is rewritten
     and shard files for families that no longer exist are deleted.
@@ -367,9 +372,7 @@ def write_golden_shards(
     for name in sorted(stale):
         (golden_dir / f"{name}.json").unlink()
     for name, shard in sorted(by_shard.items()):
-        (golden_dir / f"{name}.json").write_text(
-            json.dumps(shard, indent=2, sort_keys=True) + "\n"
-        )
+        (golden_dir / f"{name}.json").write_text(golden_json_text(shard))
 
 
 def golden_main(

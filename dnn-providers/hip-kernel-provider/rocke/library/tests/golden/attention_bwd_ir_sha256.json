@@ -1,5 +1,6 @@
 {
  "schema": "attention_bwd.ir_golden_sha256/v1",
+ "fingerprint": "42685b40810026ed329bb1c3210adfdc82bcc4d48d5d86cd90653a57c80d58c6",
  "uncovered": {
   "aux/gfx1151": [],
   "aux/gfx1201": [],

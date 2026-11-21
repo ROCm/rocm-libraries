@@ -71,6 +71,7 @@ from kernels.common.attention_dense_spec import (
 )
 from kernels.gfx942.attention_dense import Gfx942AttentionDenseSpec
 from kernels.gfx950.attention_dense import Gfx950AttentionDenseSpec
+from rocke.core.golden_file import stamp_fingerprint
 
 # Source tree: rocke/platform/tests/golden. Installed tree (library tests under
 # tests/library/tests, platform tests under tests/): tests/golden.
@@ -1053,7 +1054,7 @@ def test_hook_tables_exercise_every_hook():
 
 if __name__ == "__main__":
     if sys.argv[1:] == ["--regenerate"]:
-        VECTORS.write_text(_dump(_build()), encoding="utf-8")
+        VECTORS.write_text(_dump(stamp_fingerprint(_build())), encoding="utf-8")
         print(f"wrote {VECTORS}")
     else:
         sys.exit("usage: test_attention_dense_spec_vectors.py --regenerate")

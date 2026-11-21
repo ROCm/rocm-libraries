@@ -1,5 +1,6 @@
 {
   "aliases": {},
+  "fingerprint": "1687f0c5f5e6bc5b766c10cc39aea8b720e918ed9b1e162fb82f6345c0a6c88d",
   "flavors": {
     "llvm20": {
       "cases": {

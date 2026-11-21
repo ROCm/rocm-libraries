@@ -53,6 +53,11 @@ _LIB_ROOT = str(_TESTS.parent)
 if sys.path and sys.path[0] != _LIB_ROOT:
     sys.path.insert(0, _LIB_ROOT)
 
+from rocke.core.golden_file import (  # noqa: E402 -- library root pinned above
+    FINGERPRINT_KEY,
+    stamp_fingerprint,
+)
+
 GOLDEN = _TESTS / "golden" / "attention_bwd_ir_sha256.json"
 SCHEMA = "attention_bwd.ir_golden_sha256/v1"
 FLAVORS = ("llvm20", "llvm22", "llvm23")
@@ -557,8 +562,13 @@ def test_uncovered_values_are_exactly_the_recorded_ones(kind, arch):
 
 
 def _write() -> None:
-    doc = _build_doc()
-    lines = ["{", f' "schema": {json.dumps(SCHEMA)},', ' "uncovered": {']
+    doc = stamp_fingerprint(_build_doc())
+    lines = [
+        "{",
+        f' "schema": {json.dumps(SCHEMA)},',
+        f' "{FINGERPRINT_KEY}": {json.dumps(doc[FINGERPRINT_KEY])},',
+        ' "uncovered": {',
+    ]
     unc = sorted(doc["uncovered"].items())
     for i, (k, v) in enumerate(unc):
         comma = "," if i + 1 < len(unc) else ""

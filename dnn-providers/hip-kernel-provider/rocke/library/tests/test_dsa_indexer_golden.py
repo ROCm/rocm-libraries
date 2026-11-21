@@ -169,8 +169,9 @@ def test_dsa_indexer_ir_matches_golden(arch: str, flavor: str):
 
 if __name__ == "__main__":
     if "--write" in sys.argv:
-        _GOLDEN.parent.mkdir(parents=True, exist_ok=True)
-        _GOLDEN.write_text(json.dumps(_build_doc(), indent=2, sort_keys=True) + "\n")
+        from rocke.core.golden_file import write_golden_json
+
+        write_golden_json(_GOLDEN, _build_doc())
         print(f"wrote {_GOLDEN}")
     else:
         for _arch in _ARCHES:

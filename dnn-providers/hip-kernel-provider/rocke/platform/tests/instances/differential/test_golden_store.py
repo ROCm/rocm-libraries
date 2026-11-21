@@ -26,6 +26,8 @@ from golden_store import (  # noqa: E402 -- after the sys.path line above
     GoldenStore,
     compare,
 )
+from rocke.core.golden_file import fingerprint  # noqa: E402
+from rocke.tests.git_merge import merges_cleanly  # noqa: E402
 
 
 def _write(path: Path, text: str) -> Path:
@@ -160,3 +162,74 @@ def test_configs_are_reported_in_numeric_order():
     blessed = {"conv": {str(i): "x" for i in (10, 2, 1)}}
     result = compare(blessed, {"conv": {}})
     assert [idx for _, idx in result.missing] == ["1", "2", "10"]
+
+
+# --- the per-family fingerprint --------------------------------------------------
+
+
+def _store(first: str = "a", last: str = "z", gemm: str = "g") -> GoldenStore:
+    conv = {"0": first, "1": "b", "2": last}
+    return GoldenStore(
+        ll={"llvm20": {"conv": dict(conv), "gemm": {"0": gemm}}},
+        ir_canonical={"conv": {"0": "c"}},
+    )
+
+
+def test_save_records_one_fingerprint_per_family_over_its_sections(tmp_path):
+    _store().save(tmp_path / "g.json")
+    document = json.loads((tmp_path / "g.json").read_text())
+    conv = {
+        "ll": {"llvm20": {"0": "a", "1": "b", "2": "z"}},
+        "ir_canonical": {"0": "c"},
+    }
+    assert document["fingerprint"] == {
+        "conv": {"sha256": fingerprint(conv)},
+        "gemm": {"sha256": fingerprint({"ll": {"llvm20": {"0": "g"}}})},
+    }
+    assert GoldenStore.load(tmp_path / "g.json").stale_fingerprints() == []
+
+
+def test_a_hash_edited_without_a_rerecord_makes_its_family_stale(tmp_path):
+    _store().save(tmp_path / "g.json")
+    document = json.loads((tmp_path / "g.json").read_text())
+    document["ll"]["llvm20"]["conv"]["1"] = "edited"
+    _write(tmp_path / "g.json", json.dumps(document))
+    store = GoldenStore.load(tmp_path / "g.json")
+    assert store.stale_fingerprints() == ["conv"]
+    assert store.stale_fingerprints(["gemm"]) == []
+
+
+def test_a_family_without_its_fingerprint_is_stale():
+    store = _store()
+    store.recorded_fingerprints = {"gemm": store.fingerprints()["gemm"], "gone": "x"}
+    assert store.stale_fingerprints() == ["conv", "gone"]
+
+
+def test_a_malformed_fingerprint_section_is_refused(tmp_path):
+    golden = _write(
+        tmp_path / "g.json", '{"schema": 2, "ll": {}, "fingerprint": {"conv": "x"}}'
+    )
+    with pytest.raises(GoldenFormatError, match="must map each family to"):
+        GoldenStore.load(golden)
+
+
+def _saved(tmp_path: Path, store: GoldenStore) -> dict[str, str]:
+    path = tmp_path / f"{len(list(tmp_path.glob('*.json')))}.json"
+    store.save(path)
+    return {"llvm_gfx_all.json": path.read_text()}
+
+
+def test_two_rerecords_of_one_family_conflict(tmp_path):
+    # The two changes rewrite different, non-adjacent configs of one family:
+    # without the fingerprint git would merge them into a file neither tree made.
+    base = _saved(tmp_path, _store())
+    first = _saved(tmp_path, _store(first="a2"))
+    last = _saved(tmp_path, _store(last="z2"))
+    assert not merges_cleanly(tmp_path / "merge", base, first, last)
+
+
+def test_rerecords_of_two_neighbouring_families_merge(tmp_path):
+    base = _saved(tmp_path, _store())
+    conv = _saved(tmp_path, _store(first="a2"))
+    gemm = _saved(tmp_path, _store(gemm="g2"))
+    assert merges_cleanly(tmp_path / "merge", base, conv, gemm)

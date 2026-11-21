@@ -19,12 +19,23 @@ Format (schema 2)::
       },
       "ir_canonical": {            # canonical ck.dsl.ir: the same in every flavor
         "<family>": {"<config index>": "<sha256>", ...}
+      },
+      "fingerprint": {             # one per family, written by save()
+        "<family>": {"sha256": "<fingerprint>"}
       }
     }
 
 LLVM IR text depends on the flavor it is written for, so each flavor has its
 own section and a hash is only ever compared with one recorded for the same
 flavor. Canonical IR is produced before lowering and has one section.
+
+A family's fingerprint (`rocke.core.golden_file.fingerprint`) covers its entries
+`{"ll": {<flavor>: <its configs>, ...}, "ir_canonical": <its configs>}`, each
+section present only when the family is in it. Two changes that re-record one
+family from different trees both rewrite its fingerprint line, so git reports a
+conflict instead of merging their hashes. Each fingerprint sits in its own JSON
+object so neighbouring families' lines are never adjacent, and re-recording one
+family never conflicts with re-recording another.
 
 Recording or checking a subset of families touches only those families: a
 partial record replaces exactly the families it ran, and a partial check
@@ -40,10 +51,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable, Mapping
 
+from rocke.core.golden_file import FINGERPRINT_KEY, fingerprint
+
 SCHEMA = 2
 LL = "ll"
 IR_CANONICAL = "ir_canonical"
 KINDS = (LL, IR_CANONICAL)
+# The key of a family's fingerprint inside its FINGERPRINT_KEY entry.
+_FINGERPRINT_SHA = "sha256"
 
 # {family: {config index (as a string): sha256}}
 FamilyShas = dict[str, dict[str, str]]
@@ -82,6 +97,8 @@ class GoldenStore:
     aliases: dict[str, str] = field(default_factory=dict)
     ll: dict[str, FamilyShas] = field(default_factory=dict)
     ir_canonical: FamilyShas = field(default_factory=dict)
+    # The fingerprint the file records per family (see the module docstring).
+    recorded_fingerprints: dict[str, str] = field(default_factory=dict)
 
     # ---- file I/O ---------------------------------------------------------
 
@@ -100,7 +117,7 @@ class GoldenStore:
                 "format stored no LLVM flavor -- re-record it with run_diff.py "
                 "--record-golden for each flavor"
             )
-        unknown = sorted(set(document) - {"schema", "aliases", *KINDS})
+        unknown = sorted(set(document) - {"schema", "aliases", FINGERPRINT_KEY, *KINDS})
         if unknown:
             raise GoldenFormatError(
                 f"golden file {path} has unknown sections {unknown}"
@@ -128,17 +145,53 @@ class GoldenStore:
             aliases=aliases,
             ll=ll,
             ir_canonical=document.get(IR_CANONICAL, {}),
+            recorded_fingerprints=_recorded_fingerprints(
+                document.get(FINGERPRINT_KEY, {})
+            ),
         )
 
     def save(self, path: Path) -> None:
+        """Write the store with a fresh fingerprint for every family."""
         document = {
             "schema": SCHEMA,
             "aliases": self.aliases,
             LL: self.ll,
             IR_CANONICAL: self.ir_canonical,
+            FINGERPRINT_KEY: {
+                family: {_FINGERPRINT_SHA: value}
+                for family, value in self.fingerprints().items()
+            },
         }
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(document, indent=2, sort_keys=True) + "\n")
+
+    # ---- fingerprints -----------------------------------------------------
+
+    def fingerprints(self) -> dict[str, str]:
+        """The fingerprint of every family, computed from its hashes."""
+        entries: dict[str, dict] = {}
+        for flavor, families in self.ll.items():
+            for family, configs in families.items():
+                entries.setdefault(family, {}).setdefault(LL, {})[flavor] = configs
+        for family, configs in self.ir_canonical.items():
+            entries.setdefault(family, {})[IR_CANONICAL] = configs
+        return {family: fingerprint(entries[family]) for family in sorted(entries)}
+
+    def stale_fingerprints(self, families: Iterable[str] | None = None) -> list[str]:
+        """Families (all, or those in `families`) whose recorded fingerprint is
+        missing or no longer matches their hashes, sorted. A family recorded
+        only in the fingerprint map (its hashes are gone) is stale too."""
+        computed = self.fingerprints()
+        scope = (
+            set(computed) | set(self.recorded_fingerprints)
+            if families is None
+            else set(families)
+        )
+        return sorted(
+            family
+            for family in scope
+            if self.recorded_fingerprints.get(family) != computed.get(family)
+        )
 
     # ---- sections ---------------------------------------------------------
 
@@ -225,6 +278,21 @@ def compare(
         missing=tuple(missing),
         new=tuple(new),
     )
+
+
+def _recorded_fingerprints(recorded: object) -> dict[str, str]:
+    """The `fingerprint` section as {family: fingerprint}; refuses any other shape."""
+    if not isinstance(recorded, dict) or not all(
+        isinstance(entry, dict)
+        and set(entry) == {_FINGERPRINT_SHA}
+        and isinstance(entry[_FINGERPRINT_SHA], str)
+        for entry in recorded.values()
+    ):
+        raise GoldenFormatError(
+            f"golden {FINGERPRINT_KEY!r} must map each family to "
+            f'{{"{_FINGERPRINT_SHA}": "<fingerprint>"}}; re-record the file'
+        )
+    return {family: entry[_FINGERPRINT_SHA] for family, entry in recorded.items()}
 
 
 def _index_order(idx: str) -> tuple[int, str]:
