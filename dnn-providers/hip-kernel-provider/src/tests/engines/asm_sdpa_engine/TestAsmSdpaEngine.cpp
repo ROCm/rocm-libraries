@@ -4,12 +4,22 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include <algorithm>
+#include <cmath>
+#include <cstring>
+#include <optional>
+#include <set>
+#include <string>
+#include <string_view>
+#include <vector>
+
 #include <hip_kernel_provider_common/HipDeviceUtils.hpp>
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/engine_config_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineDetailsWrapper.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_flatbuffers_sdk/utilities/Uuid.hpp>
 #include <hipdnn_frontend/Types.hpp>
 #include <hipdnn_plugin_sdk/BehaviorNote.h>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
@@ -19,6 +29,7 @@
 #include <hipdnn_test_sdk/utilities/SdpaGraphMutators.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
+#include "AsmSdpaSelectorRevisionFixtures.hpp"
 #include "core/Context.hpp"
 #include "core/Handle.hpp"
 #include "core/Settings.hpp"
@@ -26,11 +37,19 @@
 #include "engines/asm_sdpa_engine/plans/SdpaBwdPlanBuilder.hpp"
 #include "engines/asm_sdpa_engine/plans/SdpaFwdPlanBuilder.hpp"
 #include "mocks/MockPlanBuilder.hpp"
+#include "tests/engines/ShippedL1ModelGate.hpp"
 #include "tests/engines/asm_sdpa_engine/AsmSdpaTestSupport.hpp"
+#include "version.h"
 
-#include <optional>
-#include <string>
-#include <vector>
+#ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
+#include <hipdnn_plugin_sdk/heuristics/EngineFeatures.hpp>
+#include <hipdnn_plugin_sdk/heuristics/uhd/EnginePredictor.hpp>
+#include <hipdnn_plugin_sdk/ingestor/DescriptorLoader.hpp>
+#include <hipdnn_plugin_sdk/ingestor/UhdKernelHeuristic.hpp>
+
+#include "AsmSdpaShippedModels.hpp"
+#include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
+#endif
 
 namespace asm_sdpa_engine
 {
@@ -39,11 +58,22 @@ namespace
 namespace sdpa = hipdnn_test_sdk::utilities::sdpa;
 
 using hip_kernel_provider::MockPlanBuilder;
+using hipdnn_flatbuffers_sdk::data_objects::PredictionKind;
+using hipdnn_flatbuffers_sdk::data_objects::PredictionStatus;
 using hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper;
 using hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineDetailsWrapper;
 using hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper;
 
 constexpr const char* K_ACC_KNOB = "hipkernel.sdpa.bwd.accumulator_type";
+
+/// An engine configuration for this engine that names @p metric (RFC 0019 §11.4).
+flatbuffers::FlatBufferBuilder engineConfigNaming(const char* metric)
+{
+    flatbuffers::FlatBufferBuilder builder;
+    builder.Finish(hipdnn_flatbuffers_sdk::data_objects::CreateEngineConfigDirect(
+        builder, AsmSdpaEngine::staticId(), nullptr, metric));
+    return builder;
+}
 
 // An engine config for this engine carrying one accumulator knob setting.
 flatbuffers::FlatBufferBuilder createAccumulatorKnobConfig(const std::string& value)
@@ -200,6 +230,347 @@ TEST_F(TestAsmSdpaEngine, IsApplicableReturnsTrueForRaggedSdpaGraph)
         builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_TRUE(_engine.isApplicable(_handle, graphWrapper));
+}
+
+/// RFC 0019 §11.2: with no declared model deployed, the engine answers UNAVAILABLE rather
+/// than throwing, whether or not a descriptor tree exists.
+TEST_F(TestAsmSdpaEngine, ReportsNoEstimateWhenNoDeclaredModelIsDeployed)
+{
+    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper config(nullptr, 0);
+
+    hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT prediction;
+    ASSERT_NO_THROW(prediction = _engine.getPrediction(
+                        _handle, graph, config, HIPDNN_ENGINE_PREDICTION_ENGINE, true));
+    EXPECT_EQ(prediction.status,
+              hipdnn_flatbuffers_sdk::data_objects::PredictionStatus::UNAVAILABLE);
+    EXPECT_EQ(prediction.engine_id, AsmSdpaEngine::staticId());
+    EXPECT_EQ(prediction.kind, hipdnn_flatbuffers_sdk::data_objects::PredictionKind::ENGINE);
+}
+
+/// The L1 models are trained on forward SDPA only; a backward graph binds every feature they
+/// read, so the engine must refuse it rather than answer with a forward model.
+TEST(TestAsmSdpaEngineDeclaration, ModelsCoverForwardSdpaOnly)
+{
+    using hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper;
+    auto forward = hipdnn_test_sdk::utilities::createValidSdpaFwdGraph();
+    auto backward = hipdnn_test_sdk::utilities::createValidSdpaBwdGraph();
+    auto batchnorm = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
+
+    EXPECT_TRUE(
+        AsmSdpaEngine::modelsCover(GraphWrapper(forward.GetBufferPointer(), forward.GetSize())));
+    EXPECT_FALSE(
+        AsmSdpaEngine::modelsCover(GraphWrapper(backward.GetBufferPointer(), backward.GetSize())));
+    EXPECT_FALSE(AsmSdpaEngine::modelsCover(
+        GraphWrapper(batchnorm.GetBufferPointer(), batchnorm.GetSize())));
+}
+
+TEST(TestAsmSdpaEngineDeclaration, DeclaredModelIdsAreDistinctWellFormedUuids)
+{
+    std::set<std::string> seenArch;
+    std::set<std::string> seenId;
+    EXPECT_FALSE(AsmSdpaEngine::L1_MODEL_IDS.empty());
+    for(const auto& [arch, id] : AsmSdpaEngine::L1_MODEL_IDS)
+    {
+        EXPECT_FALSE(arch.empty());
+        EXPECT_NO_THROW(static_cast<void>(hipdnn_flatbuffers_sdk::utilities::parseUuid(id))) << id;
+        EXPECT_TRUE(seenArch.insert(std::string(arch)).second) << arch;
+        EXPECT_TRUE(seenId.insert(std::string(id)).second) << "two architectures declare " << id;
+    }
+}
+
+/// A model whose recorded revision mismatches is refused, so the revision must track the
+/// forward kernels and selection sources, not the provider release.
+TEST(TestAsmSdpaEngineDeclaration, TheSelectorRevisionNamesTheForwardSurfaceAndNotTheRelease)
+{
+    const std::string revision = AsmSdpaEngine::selectorRevision();
+    // "undetermined" here means the CMake wiring that computes the revision was dropped.
+    const auto slash = revision.rfind('/');
+    ASSERT_NE(slash, std::string::npos) << revision;
+
+    // Shipped models record the revision verbatim, so its form is a contract.
+    const std::string digest = revision.substr(slash + 1);
+    EXPECT_EQ(digest.size(), 16u) << revision;
+    EXPECT_TRUE(std::all_of(digest.begin(), digest.end(), [](unsigned char character) {
+        return (character >= '0' && character <= '9') || (character >= 'a' && character <= 'f');
+    })) << revision;
+
+    // No provider version component, in any form.
+    EXPECT_EQ(revision.find(HIP_KERNEL_PROVIDER_VERSION_STRING), std::string::npos) << revision;
+    EXPECT_EQ(revision.find("0.2."), std::string::npos) << revision;
+}
+
+#ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
+/// A shipped model that records another revision is refused at load and the engine reports
+/// no estimate, silently; this is where that fails the build.
+TEST(TestAsmSdpaEngineDeclaration, ShippedL1ModelsRecordTheRevisionThisBuildComputes)
+{
+    EXPECT_TRUE(hip_kernel_provider::shipped_model_gate::shippedL1ModelsBindThisBuild(
+        AsmSdpaEngine::engineName(),
+        "asm_sdpa_fwd",
+        shipped_models::MODELS,
+        AsmSdpaEngine::L1_MODEL_IDS,
+        AsmSdpaEngine::selectorRevision()));
+}
+
+/// What hipGetDeviceProperties reports, for the fields the L1 models read, on the device
+/// each architecture's model was measured on: MI300X for gfx942, MI355X for gfx950.
+hipDeviceProp_t measuredDevice(std::string_view arch)
+{
+    hipDeviceProp_t device{};
+    const std::string name = std::string(arch) + ":sramecc+:xnack-";
+    std::strncpy(device.gcnArchName, name.c_str(), sizeof(device.gcnArchName) - 1);
+    const bool mi300x = arch == "gfx942";
+    device.multiProcessorCount = mi300x ? 304 : 256;
+    device.clockRate = mi300x ? 2100000 : 2400000;
+    device.memoryClockRate = mi300x ? 1300000 : 2000000;
+    device.memoryBusWidth = 8192;
+    device.totalGlobalMem = (mi300x ? size_t{192} : size_t{288}) << 30;
+    device.l2CacheSize = 4 << 20;
+    device.warpSize = 64;
+    device.maxThreadsPerBlock = 1024;
+    device.sharedMemPerBlock = mi300x ? 65536 : 163840;
+    return device;
+}
+
+/// What the loader decides for the model @p arch declares under @p revision.
+hipdnn_plugin_sdk::ingestor::DeclaredEnginePredictions
+    resolveDeclared(std::string_view arch, std::string_view id, const std::string& revision)
+{
+    return hipdnn_plugin_sdk::ingestor::resolveDeclaredEnginePredictions(
+        hip_kernel_provider::kernel_ingestor_engine::descriptorCatalog(),
+        AsmSdpaEngine::engineName(),
+        revision,
+        {{std::string(arch), {hipdnn_flatbuffers_sdk::utilities::parseUuid(id)}}});
+}
+
+/// Every declared id names a model the provider installs, shipped for the architecture
+/// that declares it, which passes every load check and estimates a forward graph. The
+/// shipped-model gate owns the revision check, so each model is resolved under the revision
+/// it records: this case holds while a retrain is pending.
+TEST(TestAsmSdpaEngineDeclaration, EachDeclaredModelShipsForItsArchitectureAndEstimates)
+{
+    namespace ingestor = hipdnn_plugin_sdk::ingestor;
+    const auto& catalog = hip_kernel_provider::kernel_ingestor_engine::descriptorCatalog();
+    auto graphBuilder = createSdpaFwdGraph();
+    const GraphWrapper graph(graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
+    auto configBuilder = engineConfigNaming("tflops");
+    const EngineConfigWrapper config(configBuilder.GetBufferPointer(), configBuilder.GetSize());
+
+    for(const auto& [arch, id] : AsmSdpaEngine::L1_MODEL_IDS)
+    {
+        SCOPED_TRACE(std::string(arch) + " declares " + std::string(id));
+        const auto shipped
+            = catalog.heuristics.find(hipdnn_flatbuffers_sdk::utilities::parseUuid(id));
+        ASSERT_NE(shipped, catalog.heuristics.end()) << "no installed descriptor defines it";
+        const std::string recorded = shipped->second.descriptor.trainedAgainstSelectorRevision;
+
+        const auto resolved = resolveDeclared(arch, id, recorded);
+        for(const auto& [metric, byArch] : resolved.refused)
+        {
+            for(const auto& [refusedArch, refusal] : byArch)
+            {
+                ADD_FAILURE() << "refused for " << refusedArch << " in " << metric << ": "
+                              << refusal.reason;
+            }
+        }
+        const auto tflops = resolved.byMetric.find("tflops");
+        ASSERT_NE(tflops, resolved.byMetric.end());
+        const auto bound = tflops->second.find(std::string(arch));
+        ASSERT_NE(bound, tflops->second.end());
+        EXPECT_EQ(bound->second.baseDir.filename().string(), arch)
+            << "it ships in " << bound->second.baseDir.string();
+
+        // Compiled and evaluated as the engine's binding does.
+        hipdnn_plugin_sdk::uhd::EngineModelBinding binding;
+        binding.bind(
+            "tflops", std::string(arch), ingestor::UhdKernelHeuristic::configFrom(bound->second));
+        const auto device = measuredDevice(arch);
+        const auto prediction
+            = binding.predict(AsmSdpaEngine::staticId(),
+                              AsmSdpaEngine::engineName(),
+                              recorded,
+                              "tflops",
+                              device.gcnArchName,
+                              hipdnn_plugin_sdk::heuristics::engineFeatures(graph, config, device),
+                              true);
+        EXPECT_EQ(prediction.status, PredictionStatus::AVAILABLE) << prediction.reason;
+        EXPECT_TRUE(std::isfinite(prediction.value) && prediction.value > 0.0) << prediction.value;
+    }
+}
+
+/// The engine answers from the model it declares for the device's architecture: the
+/// estimate when that model binds this build, else the loader's own refusal of it.
+TEST_F(TestAsmSdpaEngine, EstimatesComeFromTheModelDeclaredForTheDeviceArchitecture)
+{
+    auto graphBuilder = createSdpaFwdGraph();
+    const GraphWrapper graph(graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
+    auto configBuilder = engineConfigNaming("tflops");
+    const EngineConfigWrapper config(configBuilder.GetBufferPointer(), configBuilder.GetSize());
+
+    for(const auto& [arch, id] : AsmSdpaEngine::L1_MODEL_IDS)
+    {
+        SCOPED_TRACE(std::string(arch) + " declares " + std::string(id));
+        const auto device = measuredDevice(arch);
+        const auto prediction
+            = _engine.getPredictionOn([&device]() -> const hipDeviceProp_t& { return device; },
+                                      graph,
+                                      config,
+                                      HIPDNN_ENGINE_PREDICTION_ENGINE,
+                                      true);
+        EXPECT_EQ(prediction.metric, "tflops");
+
+        const auto expected = resolveDeclared(arch, id, AsmSdpaEngine::selectorRevision());
+        if(const auto refused = expected.refused.find("tflops");
+           refused != expected.refused.end() && refused->second.count(std::string(arch)) != 0)
+        {
+            const auto& refusal = refused->second.at(std::string(arch));
+            EXPECT_EQ(prediction.status, refusal.status);
+            EXPECT_EQ(prediction.reason, refusal.reason);
+            continue;
+        }
+        const auto bound = expected.byMetric.find("tflops");
+        ASSERT_TRUE(bound != expected.byMetric.end() && bound->second.count(std::string(arch)) != 0)
+            << "the loader neither binds nor refuses the declared model: nothing deploys it";
+        EXPECT_EQ(prediction.status, PredictionStatus::AVAILABLE) << prediction.reason;
+        EXPECT_TRUE(std::isfinite(prediction.value) && prediction.value > 0.0) << prediction.value;
+    }
+}
+
+/// A backward graph binds every feature the forward models read, so the engine must decline
+/// it before reaching them: no estimate, no binding description to train against, and no
+/// device asked for.
+TEST_F(TestAsmSdpaEngine, BackwardSdpaReachesNoModel)
+{
+    auto graphBuilder = createSdpaBwdGraph();
+    const GraphWrapper graph(graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
+    auto configBuilder = engineConfigNaming("tflops");
+    const EngineConfigWrapper config(configBuilder.GetBufferPointer(), configBuilder.GetSize());
+
+    for(const auto& [arch, id] : AsmSdpaEngine::L1_MODEL_IDS)
+    {
+        SCOPED_TRACE(std::string(arch));
+        const auto device = measuredDevice(arch);
+        bool asked = false;
+        for(const bool evaluate : {true, false})
+        {
+            const auto prediction = _engine.getPredictionOn(
+                [&]() -> const hipDeviceProp_t& {
+                    asked = true;
+                    return device;
+                },
+                graph,
+                config,
+                HIPDNN_ENGINE_PREDICTION_ENGINE,
+                evaluate);
+            EXPECT_EQ(prediction.status, PredictionStatus::UNAVAILABLE) << evaluate;
+            EXPECT_TRUE(prediction.binding_json.empty()) << prediction.binding_json;
+            EXPECT_TRUE(prediction.features_json.empty()) << prediction.features_json;
+        }
+        EXPECT_FALSE(asked);
+    }
+}
+
+TEST_F(TestAsmSdpaEngine, EstimatesForwardSdpaInTflopsOnTheDevice)
+{
+    SKIP_IF_NO_DEVICES();
+
+    const auto deviceString = hip_kernel_provider_common::getDeviceString(_handle.getStream());
+    if(deviceString != "gfx942" && deviceString != "gfx950")
+    {
+        GTEST_SKIP() << "no ASM L1 model is declared for " << deviceString;
+    }
+
+    auto graphBuilder = createSdpaFwdGraph();
+    const GraphWrapper graph(graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
+    auto configBuilder = engineConfigNaming("tflops");
+    const EngineConfigWrapper config(configBuilder.GetBufferPointer(), configBuilder.GetSize());
+
+    const auto prediction
+        = _engine.getPrediction(_handle, graph, config, HIPDNN_ENGINE_PREDICTION_ENGINE, true);
+    EXPECT_EQ(prediction.status, PredictionStatus::AVAILABLE) << prediction.reason;
+    EXPECT_EQ(prediction.metric, "tflops");
+    EXPECT_TRUE(std::isfinite(prediction.value) && prediction.value > 0.0) << prediction.value;
+}
+#endif // HIPDNN_ENABLE_KERNEL_INGESTOR
+
+/// The backend rejects a response whose metric differs from the request, so even a decline
+/// must carry the requested metric.
+TEST_F(TestAsmSdpaEngine, ConfigurationDeclineCarriesTheRequestedMetric)
+{
+    auto graphBuilder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
+    const GraphWrapper graph(graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
+
+    auto configBuilder = engineConfigNaming("time");
+    const EngineConfigWrapper timeConfig(configBuilder.GetBufferPointer(), configBuilder.GetSize());
+    const auto inTime = _engine.getPrediction(
+        _handle, graph, timeConfig, HIPDNN_ENGINE_PREDICTION_CONFIGURATION, true);
+    EXPECT_EQ(inTime.status, PredictionStatus::UNAVAILABLE);
+    EXPECT_EQ(inTime.kind, PredictionKind::CONFIGURATION);
+    EXPECT_EQ(inTime.metric, "time");
+
+    // A configuration that names nothing asks in the default metric.
+    const EngineConfigWrapper unnamed(nullptr, 0);
+    EXPECT_EQ(
+        _engine.getPrediction(_handle, graph, unnamed, HIPDNN_ENGINE_PREDICTION_CONFIGURATION, true)
+            .metric,
+        "tflops");
+}
+
+/// RFC 0019 §4.4: no metric substitution. Only `tflops` models ship, so `time` stays
+/// unanswered even where a `tflops` model is deployed.
+TEST_F(TestAsmSdpaEngine, NoModelForTheRequestedMetricIsUnavailableNotSubstituted)
+{
+    SKIP_IF_NO_DEVICES();
+
+    auto graphBuilder = createSdpaFwdGraph();
+    const GraphWrapper graph(graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
+    auto configBuilder = engineConfigNaming("time");
+    const EngineConfigWrapper config(configBuilder.GetBufferPointer(), configBuilder.GetSize());
+
+    const auto prediction
+        = _engine.getPrediction(_handle, graph, config, HIPDNN_ENGINE_PREDICTION_ENGINE, true);
+    EXPECT_EQ(prediction.status, PredictionStatus::UNAVAILABLE) << prediction.reason;
+    EXPECT_EQ(prediction.metric, "time");
+}
+
+/// An unregistered metric is a bad request, not a missing model, so it throws rather than
+/// returning UNAVAILABLE.
+TEST_F(TestAsmSdpaEngine, UnregisteredMetricIsABadRequest)
+{
+    auto graphBuilder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
+    const GraphWrapper graph(graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
+    auto configBuilder = engineConfigNaming("bandwidth");
+    const EngineConfigWrapper config(configBuilder.GetBufferPointer(), configBuilder.GetSize());
+
+    EXPECT_THROW(static_cast<void>(_engine.getPrediction(
+                     _handle, graph, config, HIPDNN_ENGINE_PREDICTION_ENGINE, true)),
+                 hipdnn_plugin_sdk::HipdnnPluginException);
+}
+
+namespace fixtures = selector_revision_fixtures;
+
+/// The fixtures are this engine's tree written with LF and with CRLF; both must report the
+/// build's own revision, or Windows and Linux builds refuse each other's models.
+TEST(TestAsmSdpaSelectorRevision, CrlfAndLfCheckoutsReportTheBuiltRevision)
+{
+    EXPECT_EQ(std::string_view(fixtures::REVISION_CRLF), std::string_view(fixtures::REVISION_LF));
+    EXPECT_EQ(std::string_view(AsmSdpaEngine::selectorRevision()),
+              std::string_view(fixtures::REVISION_LF));
+}
+
+/// Each forward selection input must move the revision; everything else must not.
+TEST(TestAsmSdpaSelectorRevision, MovesForEveryForwardSelectionInputAndNothingElse)
+{
+    const std::string_view base(fixtures::REVISION_LF);
+    for(const auto& probe : fixtures::PROBES)
+    {
+        EXPECT_EQ(std::string_view(probe.revision) != base, probe.mustExpire)
+            << probe.change << (probe.mustExpire ? " must" : " must not")
+            << " change the forward selector revision";
+    }
 }
 
 TEST_F(TestAsmSdpaEngine, GetDetailsReportsKnobsOfApplicableBuilderOnly)
