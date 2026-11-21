@@ -1364,6 +1364,14 @@ def test_mxfp6_scale_thread_broadcast_across_k_blocks() -> None: ...
 
 The helper lives in `platform/python/rocke/tests/arch_marks.py`. Both `platform/tests` and `library/tests` import it as `rocke.tests.arch_marks`.
 
+### 5.3 After merging: develop breaks
+
+A deterministic failure on develop (it fails again on re-run, or on two develop
+runs) is reverted or fixed within **1 working day** by the CODEOWNERS team of the
+change that caused it. Reverting is the default when no fix is ready: re-run the
+failure once, name the suspect change, revert it or merge the fix, and post in
+the suspect's PR.
+
 ## 6. Invariants & contracts
 
 Cross-cutting properties every change must preserve:

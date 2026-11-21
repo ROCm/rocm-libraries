@@ -170,6 +170,8 @@ See [installed CTest environment contracts](../TESTING.md#514-installed-ctest-en
 The ownership map and inventory-comparison recipe are in
 [`tests/README.md`](tests/README.md#cmake-registration-ownership).
 
+### Pull requests
+
 Before updating a PR, run the top-level pre-commit hooks over the PR range from
 the repository root:
 
@@ -185,11 +187,18 @@ review:
 - Put a standalone issue reference in the PR description, e.g.
   `ISSUE ID : AICK-1470`, `JIRA ID : TESTAUTO-6039`, `Fixes #123`, or another
   bot-accepted GitHub issue reference.
-- If any source/code file changes, include an accompanying test file named like
-  `test_<name>.py`, `test_<name>.cpp`, or `<name>_test.*`. For compatibility
-  wrappers or wiring-only Python changes, add a lightweight CPU-only delegation
-  or import test rather than relying on an existing differently named test.
-- Keep the Test plan checklist current and mention any deferred lane explicitly.
+- No tests for the sake of tests. In the PR's Testing section, list the existing
+  tests your change affects and their result. Rank the risks the change carries;
+  a risk's importance decides how much testing it gets. Add or extend a test
+  only for a risk no existing test or case covers, and say why nothing covers
+  it. Show the evidence (log excerpt, run record, GPU output), or say why no
+  test is needed. A PR that changes no code writes
+  `Testing: none needed: no code changed`.
+- Do not add an import-only test to satisfy the PR bot: its "Unit Test" check is
+  a warning, and the Testing section answers it.
+- Keep the Testing section current and mention any deferred lane explicitly.
+
+### Virtualenv for GPU and numeric lanes
 
 Requirements: use a virtualenv outside the `rocke/platform/` tree for GPU/numeric lanes
 so torch, numpy, and pytest resolve from the same interpreter without the

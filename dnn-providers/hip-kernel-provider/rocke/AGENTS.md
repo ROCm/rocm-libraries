@@ -107,10 +107,9 @@ Non-package assets resolve through `rocke.assets` (`platform_root()`,
 - **Helpers** — reuse them, write the missing ones, fix the broken ones, each
   with a test, in the kernel's PR. New families too; the C++ mirror is not a
   reason to inline. Rule: [`platform/AGENTS.md`](platform/AGENTS.md#helpers-placement).
-- **Test placement** — place each new or moved test by
-  [`TESTING.md` §5.0.3](TESTING.md#503-choosing-a-tier-and-an-entry-for-a-test),
-  at the tier and in the entry it gives: standard by default, quick only for
-  smoke.
+- **Tests** — PR test-evidence [rule](platform/AGENTS.md#pull-requests); placement:
+  [`TESTING.md` §5.0.3](TESTING.md#503-choosing-a-tier-and-an-entry-for-a-test).
+- **Develop breaks** — [rule](TESTING.md#53-after-merging-develop-breaks).
 - **Relative paths only** — no file under `platform/` may hardcode an absolute repo
   path or escape the tree; `tests/run_all.py` enforces this. Anchor on `__file__` /
   `CMAKE_CURRENT_SOURCE_DIR` / `rocke.assets`.
@@ -124,8 +123,7 @@ Non-package assets resolve through `rocke.assets` (`platform_root()`,
 - **No build artifacts in git** — never commit `build*/`, `_deps/`, `*.a`/`*.o`/`*.so`,
   `*.egg-info/`, `__pycache__/`. Always build out-of-tree on a local filesystem.
 
-Full rationale + build/test/GPU setup + `helpers/` placement + env-flag table:
-[`platform/AGENTS.md`](platform/AGENTS.md).
+Full rationale: [`platform/AGENTS.md`](platform/AGENTS.md).
 
 ## Definition of Done
 
