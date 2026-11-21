@@ -146,8 +146,12 @@ class KernelIdentity:
     # wgrad only (WgradConvSpec.prefetch_global_regs): the register-prefetch K loop.
     # Left out of the hash while False, like prefetch_addr.
     prefetch_global_regs: bool = False
-    # dgrad only (DgradConvSpec.uniform_k_decode): the per-tile reduction
-    # decode K loop. Left out of the hash while False, like prefetch_addr.
+    # fwd ImplicitGemmConvSpec.regt_prefetch: the register-prefetch K loop
+    # mode (0 off, 1 single LDS buffer). Left out of the hash at 0.
+    regt_prefetch: int = 0
+    # dgrad / fwd (DgradConvSpec / ImplicitGemmConvSpec.uniform_k_decode): the
+    # per-tile reduction decode K loop. Left out of the hash while False, like
+    # prefetch_addr.
     uniform_k_decode: bool = False
     # dgrad only (DgradConvSpec.patch): a patch embedding as one GEMM over the
     # filter's (y, x, c). Changes the store and the problems served (see
@@ -166,6 +170,13 @@ class KernelIdentity:
     dy_halo_kouter_pad: int = 0
     num_load_waves: int = 0
     cshuffle_no_alias: bool = False
+    # fwd ImplicitGemmConvSpec.lds_swizzle: the XOR-swizzled unpadded A/B LDS
+    # tiles. Left out of the hash while False.
+    lds_swizzle: bool = False
+    # fwd ImplicitGemmConvSpec.group_fast_raster: the group on blockIdx.y and
+    # the M tile on blockIdx.z (launch grid (N tiles, groups, M tiles)). It
+    # serves grouped problems only. Left out of the hash while False.
+    group_fast_raster: bool = False
     # ---- capability: bounds which problems this binary can serve ----
     is_3d: bool = False
     is_pointwise: bool = False
@@ -255,6 +266,8 @@ class KernelIdentity:
             del fields["prefetch_addr"]
         if not fields["prefetch_global_regs"]:
             del fields["prefetch_global_regs"]
+        if not fields["regt_prefetch"]:
+            del fields["regt_prefetch"]
         if not fields["uniform_k_decode"]:
             del fields["uniform_k_decode"]
         if not fields["patch"]:
@@ -266,6 +279,10 @@ class KernelIdentity:
                 del fields[name]
         if not fields["split_k_cluster"]:
             del fields["split_k_cluster"]
+        if not fields["lds_swizzle"]:
+            del fields["lds_swizzle"]
+        if not fields["group_fast_raster"]:
+            del fields["group_fast_raster"]
         # Same for the stream-K pair at "no stream-K".
         if fields["streamk"] == "off" and not fields["streamk_reduction"]:
             del fields["streamk"], fields["streamk_reduction"]
@@ -499,6 +516,9 @@ def identity_supports_problem(
         C, X, Y = int(problem.C), int(problem.X), int(problem.Y)
         run = math.gcd(X * C, int(problem.sW) * C, int(problem.Wi) * C)
         extents = ((kpg, "kpg"), (Y * X * C, "Y*X*C"), (run, "dX run"))
+    if identity.group_fast_raster and int(getattr(problem, "groups", 1)) <= 1:
+        # group_fast_raster only reorders the group axis of the launch.
+        return False, "group_fast_raster serves grouped problems only"
     gm = max(1, int(identity.group_merge))
     if gm > 1:
         ok, why = _group_merge_fits(identity, problem, gm)
@@ -739,6 +759,7 @@ IDENTITY_CAPABILITY_FIELDS = (
     "is_pointwise",
     "grouped",
     "patch",
+    "group_fast_raster",
     "group_merge",
     "tile_m",
     "tile_n",

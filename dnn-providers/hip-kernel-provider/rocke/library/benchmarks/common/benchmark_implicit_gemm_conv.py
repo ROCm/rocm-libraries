@@ -429,12 +429,11 @@ def _grid_for_spec(spec, p):
     and ``Gm x`` redundant CTAs raced on the same outputs. All three are equal
     to the unmerged value when ``group_merge == 1``.
     """
-    M = spec.grid_M
-    N_gemm = spec.grid_N_gemm
-    gx = (N_gemm + spec.tile_n - 1) // spec.tile_n
-    gy = (M + spec.tile_m - 1) // spec.tile_m
-    # grid_order="NM": x=N-tile, y=M-tile (mirrors bake_off_implicit_gemm)
-    return (gx, gy, spec.grid_groups)
+    # grid_order="NM": x=N-tile, y=M-tile (mirrors bake_off_implicit_gemm);
+    # group_fast_raster swaps the group and M-tile axes.
+    from kernels.common.conv_implicit_gemm import implicit_gemm_conv_grid
+
+    return implicit_gemm_conv_grid(spec)
 
 
 def _grid_for_wgrad_spec(spec, split_k: int):
@@ -6769,13 +6768,17 @@ def _grid_for(direction, problem, ident, split_k=None):
         return ConvArgs.from_problem(
             problem, direction="dgrad", tile_m=tm, tile_n=tn
         ).grid()
-    gx, gy, gz = ConvArgs.from_problem(problem, tile_m=tm, tile_n=tn).grid()
+    args = ConvArgs.from_problem(problem, tile_m=tm, tile_n=tn)
     if getattr(ident, "two_stage", False):
         # Split-K forward: the group and the K slice share z.
+        gx, gy, gz = args.grid()
         return gx, gy, gz * (split_k or 1)
     # A group-merged fwd kernel runs one workgroup per Gm groups. Its merged
     # GEMM-N (Gm) fits one tile, as the true one (kpg = 1) does, so gx agrees.
-    return gx, gy, gz // max(1, ident.group_merge)
+    return args.grid(
+        group_merge=ident.group_merge,
+        group_fast_raster=getattr(ident, "group_fast_raster", False),
+    )
 
 
 if __name__ == "__main__":

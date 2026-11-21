@@ -429,6 +429,9 @@ class TestTapOuterKIdentity(unittest.TestCase):
             "dy_halo_kouter_pad",
             "halo_max_wo",
             "split_k_cluster",
+            "regt_prefetch",
+            "lds_swizzle",
+            "group_fast_raster",
         ):
             del fields[name]
         del fields["streamk"], fields["streamk_reduction"]

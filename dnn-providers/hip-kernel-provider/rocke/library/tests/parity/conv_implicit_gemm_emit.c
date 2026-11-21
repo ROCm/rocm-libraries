@@ -800,6 +800,143 @@ static int make_cfg_tf32_split_k(int idx, rocke_implicit_gemm_conv_spec_t* spec,
     return 0;
 }
 
+/* The RDNA4 forward knobs (gfx1201 WMMA 16x16x16, wave32), configs 86..:
+ * make_cfg_rdna4 mirrors _RDNA4_CFGS / _rdna4_spec() in
+ * conv_implicit_gemm_emit.py. Base: a 64x64x32 tile over 2x2 waves, mem
+ * pipeline, cshuffle epilogue, on the cpg-64 problem. Returns -1 past the
+ * last config. */
+static void rdna4_base(rocke_implicit_gemm_conv_spec_t* spec, const char** arch)
+{
+    *spec = rocke_implicit_gemm_conv_spec_default();
+    spec->problem = rocke_conv_problem_make(2, 14, 14, 64, 128, 3, 3, 1, 1, 1, 1, 1, 1);
+    spec->tile_m = 64;
+    spec->tile_n = 64;
+    spec->tile_k = 32;
+    spec->warp_m = 2;
+    spec->warp_n = 2;
+    spec->warp_tile_m = 16;
+    spec->warp_tile_n = 16;
+    spec->warp_tile_k = 16;
+    spec->wave_size = 32;
+    spec->pipeline = "mem";
+    spec->epilogue = "cshuffle";
+    *arch = "gfx1201";
+}
+
+static void rdna4_bf16(rocke_implicit_gemm_conv_spec_t* spec)
+{
+    spec->dtype_a = "bf16";
+    spec->dtype_b = "bf16";
+    spec->dtype_d = "bf16";
+}
+
+/* Mirrors _RDNA4_GROUPED in conv_implicit_gemm_emit.py. */
+static void rdna4_grouped(rocke_implicit_gemm_conv_spec_t* spec)
+{
+    spec->problem = rocke_conv_problem_make(1, 10, 10, 128, 128, 3, 3, 1, 1, 1, 1, 1, 1);
+    spec->problem.groups = 2;
+}
+
+static int make_cfg_rdna4(int idx, rocke_implicit_gemm_conv_spec_t* spec, const char** arch)
+{
+    rdna4_base(spec, arch);
+    switch(idx)
+    {
+    case 86: /* tile_k 128 */
+        spec->tile_k = 128;
+        return 0;
+    case 87:
+        spec->tile_k = 128;
+        rdna4_bf16(spec);
+        return 0;
+    case 88: /* uniform_k_decode */
+        spec->uniform_k_decode = true;
+        return 0;
+    case 89:
+        rdna4_grouped(spec);
+        spec->uniform_k_decode = true;
+        rdna4_bf16(spec);
+        return 0;
+    case 90: /* split_k=2 */
+        spec->uniform_k_decode = true;
+        spec->split_k = 2;
+        return 0;
+    case 91: /* pointwise: rejected */
+        spec->problem = rocke_conv_problem_make(2, 14, 14, 64, 128, 1, 1, 1, 1, 0, 0, 1, 1);
+        spec->uniform_k_decode = true;
+        return 0;
+    case 92: /* regt_prefetch */
+        spec->regt_prefetch = 1;
+        return 0;
+    case 93:
+        spec->regt_prefetch = 1;
+        spec->uniform_k_decode = true;
+        rdna4_bf16(spec);
+        return 0;
+    case 94:
+        rdna4_grouped(spec);
+        spec->regt_prefetch = 1;
+        return 0;
+    case 95: /* gfx1250: rejected */
+        if(make_cfg_split_k(41, spec, arch) != 0)
+            return -1;
+        spec->split_k = 1;
+        spec->regt_prefetch = 1;
+        return 0;
+    case 96: /* lds_swizzle */
+        spec->lds_swizzle = true;
+        return 0;
+    case 97:
+        spec->lds_swizzle = true;
+        spec->tile_k = 64;
+        rdna4_bf16(spec);
+        return 0;
+    case 98:
+        spec->tile_m = 128;
+        spec->lds_swizzle = true;
+        spec->regt_prefetch = 1;
+        spec->uniform_k_decode = true;
+        return 0;
+    case 99: /* grouped */
+        rdna4_grouped(spec);
+        spec->lds_swizzle = true;
+        return 0;
+    case 100: /* lds_k_pad: rejected */
+        spec->lds_swizzle = true;
+        spec->has_lds_k_pad = true;
+        spec->lds_k_pad = 0;
+        return 0;
+    case 101:
+        spec->tile_k = 128;
+        spec->lds_swizzle = true;
+        spec->regt_prefetch = 1;
+        spec->uniform_k_decode = true;
+        return 0;
+    case 102: /* group_fast_raster */
+        rdna4_grouped(spec);
+        spec->group_fast_raster = true;
+        return 0;
+    case 103:
+        rdna4_grouped(spec);
+        spec->group_fast_raster = true;
+        spec->uniform_k_decode = true;
+        spec->lds_swizzle = true;
+        spec->regt_prefetch = 1;
+        rdna4_bf16(spec);
+        return 0;
+    case 104: /* ungrouped */
+        spec->group_fast_raster = true;
+        return 0;
+    case 105: /* split-K: rejected */
+        if(make_cfg_split_k(41, spec, arch) != 0)
+            return -1;
+        spec->group_fast_raster = true;
+        return 0;
+    default:
+        return -1;
+    }
+}
+
 /* The default epilogue stores one element per lane, so the validator rejects
  * it with the vec_c the spec would auto-derive from kpg (8 here). Configs that
  * leave vector_size_c unset get vector_size_c=1 -- otherwise they do not build
@@ -830,6 +967,11 @@ static int make_cfg(int idx, rocke_implicit_gemm_conv_spec_t* spec, const char**
     else if(idx >= 82 && idx <= 85)
     {
         if(make_cfg_tf32_split_k(idx, spec, arch) != 0)
+            return -1;
+    }
+    else if(idx >= 86)
+    {
+        if(make_cfg_rdna4(idx, spec, arch) != 0)
             return -1;
     }
     else if(make_cfg_raw(idx, spec, arch) != 0)

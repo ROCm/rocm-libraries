@@ -217,6 +217,32 @@ typedef struct rocke_implicit_gemm_conv_spec
      * gets its own LDS bytes (pool = ab+c) and the barrier is elided -> lower
      * small-tile latency, more LDS. Only affects epilogue == "cshuffle". */
     bool cshuffle_no_alias; /* default false */
+
+    /* Uniform per-tile reduction decode (kernel-name flag ukd): when cpg is a
+     * multiple of tile_k the K loop carries the tile's (c0, x, y) as scalar
+     * iteration arguments; the plain loop serves the other problems from the
+     * same binary. WMMA mem pipeline, 2-D. Default false: byte-identical.
+     * Mirrors ImplicitGemmConvSpec.uniform_k_decode. */
+    bool uniform_k_decode; /* default false */
+    /* Register-prefetch K loop (kernel-name flag rtp<N>; gfx12 RDNA, WMMA mem
+     * pipeline, sync loaders): 0 off, 1 = each K step issues the next tile's
+     * global loads into registers before the current tile's MMAs and stores
+     * them to the single LDS buffer after them. Default 0: byte-identical.
+     * Mirrors ImplicitGemmConvSpec.regt_prefetch. */
+    int regt_prefetch; /* default 0 */
+    /* XOR-swizzled, unpadded A/B LDS tiles (kernel-name flag lxs; WMMA mem
+     * pipeline, sync loaders, tile_k 16..128): the rows are packed (no K pad)
+     * and each row's 8-element chunks are permuted by the row-dependent XOR of
+     * rocke_lds_col_xor_params, on the tile stores and the fragment reads
+     * alike. Default false: byte-identical. Mirrors
+     * ImplicitGemmConvSpec.lds_swizzle. */
+    bool lds_swizzle; /* default false */
+    /* Group-fast launch raster (kernel-name flag gfr): the conv group rides on
+     * blockIdx.y and the M tile on blockIdx.z, so the launch grid is
+     * (N tiles, groups, M tiles). Not with split-K, chiplet_swizzle or the
+     * wavelet pipeline. Default false: byte-identical. Mirrors
+     * ImplicitGemmConvSpec.group_fast_raster. */
+    bool group_fast_raster; /* default false */
 } rocke_implicit_gemm_conv_spec_t;
 
 /* Default-constructed spec (every field == Python dataclass default). The caller

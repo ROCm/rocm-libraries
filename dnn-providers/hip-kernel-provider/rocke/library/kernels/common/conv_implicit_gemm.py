@@ -68,10 +68,15 @@ from rocke.core.ir import (
     Value,
 )
 from rocke.helpers.atoms import MfmaAtom, mfma_atom
+from rocke.helpers.asm import lds_barrier_keep_vmem
 from rocke.helpers.epilogues import CShuffleEpilogue, DirectEpilogue
 from rocke.helpers.geometry import WarpGrid
 from rocke.helpers.layouts import LdsLayout
-from rocke.helpers.loads import AsyncTileLoader, CoalescedTileLoader
+from rocke.helpers.loads import (
+    AsyncTileLoader,
+    CoalescedTileLoader,
+    lds_col_xor_params,
+)
 from rocke.helpers.mfma_gemm_inner import decode_mfma_lanes
 from rocke.helpers.pipeline import SoftwarePipeline
 from rocke.helpers.schedule import SchedulePolicy
@@ -355,6 +360,52 @@ class ImplicitGemmConvSpec:
     # tile's rows across the S slabs and stores them cast into D. No Stage 2
     # launch. Bakes the degree: the launch passes ks_count == S.
     split_k_cluster: int = 0
+    # Uniform per-tile reduction decode ("ukd"; the forward twin of
+    # DgradConvSpec.uniform_k_decode). When cpg is a multiple of tile_k every
+    # K tile lies inside one filter tap, so the tile's (c0, x, y) is uniform:
+    # this K loop carries it as scalar iteration arguments (advanced with a
+    # compare-and-wrap per tile) and splits each load offset into the hoisted
+    # row part plus a uniform per-tile part; the (hi, wi) bounds compare the
+    # row's invariant pixel against uniform per-tap limits. No magic division
+    # per load. Problems whose cpg is not a multiple of tile_k run the plain
+    # loop, which the binary also carries, so it serves the same problems.
+    # WMMA mem pipeline, 2-D, not group-merged. Default False: byte-identical.
+    uniform_k_decode: bool = False
+    # Register-prefetch K loop ("rtp<mode>"; gfx12 RDNA, WMMA ``mem``
+    # pipeline, the sync coalesced loaders). Each K step issues the NEXT
+    # tile's global loads into registers (the loaders' load_global) and runs
+    # the current tile's MMAs out of LDS while they are in flight; only then
+    # is the prefetched tile stored (store_lds), so the global latency hides
+    # behind the MMAs instead of stalling every tile.
+    #   0 -- off (the plain load / barrier / MMA / barrier loop).
+    #   1 -- single LDS buffer: MMA, barrier, store, barrier.
+    # A tile at or past the reduction (or split-K slice) end -- the prefetch
+    # issued on the last step -- is masked to the buffer resource's
+    # out-of-range sentinel and reads zero.
+    # Default 0: every existing config emits byte-identical IR and keeps its
+    # kernel name.
+    regt_prefetch: int = 0
+    # XOR-swizzled, unpadded A/B LDS tiles ("lxs"; WMMA ``mem`` pipeline, sync
+    # loaders). The default layout pads every K row by 8 elements so the
+    # 16-byte fragment reads of 16 consecutive rows hit distinct banks; that
+    # pad is 25% of the A/B LDS at tile_k 32 (12.5% at 64) and caps how many
+    # workgroups a WGP holds. Here the rows are packed and each row's 8-element
+    # chunks are permuted by a row-dependent XOR
+    # (rocke.helpers.loads.lds_col_xor_params), which keeps both the
+    # fragment reads and the row-major tile stores conflict-free.
+    # Default False: byte-identical, same kernel names.
+    lds_swizzle: bool = False
+    # Group-fast launch raster ("gfr"; grouped problems): the group index
+    # rides on blockIdx.y and the M tile on blockIdx.z, so the workgroups
+    # dispatched one after another are the groups of one pixel tile. They read
+    # adjacent channel slices of the same input pixels (and write adjacent
+    # slices of the same output pixels) while those cache lines and DRAM pages
+    # are open, instead of every group sweeping all pixels on its own: with
+    # the default (M tiles, groups) order a group's slices are a strided
+    # pattern of 2 * cpg-byte pieces, re-fetched once per group when the
+    # input does not stay in the caches. The launch grid becomes
+    # (N tiles, groups, M tiles). Default False: byte-identical.
+    group_fast_raster: bool = False
 
     @property
     def block_size(self) -> int:
@@ -458,6 +509,10 @@ class ImplicitGemmConvSpec:
                 # a kernarg, so only the variant reaches the name.
                 "splitk": self.split_k > 1,
                 f"skc{self.split_k_cluster}": self.split_k_cluster > 0,
+                "ukd": self.uniform_k_decode,
+                f"rtp{self.regt_prefetch}": self.regt_prefetch > 0,
+                "lxs": self.lds_swizzle,
+                "gfr": self.group_fast_raster,
                 # TF32 compute keeps fp32 storage, so nothing else in the name
                 # tells it from an fp32 kernel with the same atom shape. Last,
                 # and only when set, so every existing name is unchanged.
@@ -521,6 +576,9 @@ class ImplicitGemmConvSpec:
             layout = self.lds_layout
         elif self.lds_k_pad is not None:
             layout = LdsLayout.padded_k(self.tile_k, self.lds_k_pad)
+        elif self.lds_swizzle:
+            # Packed rows; the XOR swizzle replaces the bank-conflict pad.
+            layout = LdsLayout.padded_k(self.tile_k, 0)
         elif self.async_dma:
             layout = LdsLayout.packed_async(self.tile_k)
         else:
@@ -841,6 +899,79 @@ def is_valid_spec_for_problem(
     return True, "ok"
 
 
+def fwd_regt_prefetch_reason(spec: ImplicitGemmConvSpec) -> Optional[str]:
+    """Why ``spec.regt_prefetch`` cannot be built, or ``None``.
+
+    The register-prefetch K loop replaces the plain ``mem`` loop of the sync
+    coalesced loaders. It is written for (and only built on) the gfx12 RDNA
+    targets, whose in-loop LDS-only barrier keeps the prefetch in flight;
+    the arch restriction is :func:`fwd_rdna4_knob_reason`'s.
+    """
+    if not spec.regt_prefetch:
+        return None
+    if spec.regt_prefetch != 1:
+        return f"regt_prefetch (fwd) must be 0 or 1 (got {spec.regt_prefetch})"
+    if spec.pipeline != "mem":
+        return f"regt_prefetch is the 'mem' pipeline's K loop (got {spec.pipeline!r})"
+    if spec.split_k_cluster:
+        return "regt_prefetch does not combine with split_k_cluster"
+    return None
+
+
+def fwd_rdna4_knob_reason(spec: ImplicitGemmConvSpec, target=None) -> Optional[str]:
+    """Why a gfx12-RDNA-only forward knob cannot be built on ``target``, or ``None``.
+
+    ``uniform_k_decode``, ``regt_prefetch``, ``lds_swizzle`` and
+    ``group_fast_raster`` are written for, and only checked on, the gfx12 RDNA
+    targets (gfx1200 / gfx1201 / gfx12-generic). Other WMMA targets
+    (gfx11, gfx1250) and the MFMA targets are refused. ``target`` (an
+    ``ArchTarget``) gates that when given.
+    """
+    if target is None or target.target_family == "gfx12_rdna":
+        return None
+    for flag, label in (
+        (spec.uniform_k_decode, "uniform_k_decode"),
+        (spec.regt_prefetch, "regt_prefetch (fwd)"),
+        (spec.lds_swizzle, "lds_swizzle"),
+        (spec.group_fast_raster, "group_fast_raster"),
+    ):
+        if flag:
+            return (
+                f"{label} is enabled only on the gfx12 RDNA targets "
+                f"(got {target.target_family})"
+            )
+    return None
+
+
+def fwd_lds_swizzle_reason(spec: ImplicitGemmConvSpec, family: str) -> Optional[str]:
+    """Why ``spec.lds_swizzle`` cannot be built, or ``None``."""
+    if not spec.lds_swizzle:
+        return None
+    if family != "wmma" or spec.pipeline != "mem":
+        return "lds_swizzle is wired for the WMMA mem pipeline only"
+    if spec.lds_layout is not None or spec.lds_k_pad is not None:
+        return "lds_swizzle sets the LDS layout itself (no lds_layout / lds_k_pad)"
+    if spec.tile_k not in (16, 32, 64, 128):
+        return f"lds_swizzle needs tile_k in 16/32/64/128 (got {spec.tile_k})"
+    return None
+
+
+def fwd_group_fast_raster_reason(spec: ImplicitGemmConvSpec) -> Optional[str]:
+    """Why ``spec.group_fast_raster`` cannot be built, or ``None``. (Its M
+    tiles ride on gridDim.z, under the same 65535 cap
+    :func:`is_valid_spec_for_problem` and the cache's ``_grid_fits`` apply to
+    every grid axis.)"""
+    if not spec.group_fast_raster:
+        return None
+    for flag, label in (
+        (spec.split_k > 1 or spec.split_k_cluster > 0, "split-K (z carries the slice)"),
+        (spec.pipeline == "wavelet", "the wavelet pipeline"),
+    ):
+        if flag:
+            return f"group_fast_raster does not support {label}"
+    return None
+
+
 def implicit_gemm_lds_bytes(spec: ImplicitGemmConvSpec) -> Tuple[int, int, int, bool]:
     """LDS a forward spec allocates: ``(total, a_b_bytes, c_bytes, double)``.
 
@@ -1071,6 +1202,32 @@ def is_valid_spec(spec: ImplicitGemmConvSpec, arch: str = "gfx950") -> Tuple[boo
             if flag:
                 return False, f"WMMA conv does not support {label} on {arch}"
 
+    _why = fwd_rdna4_knob_reason(spec, target)
+    if _why is not None:
+        return False, _why
+    if spec.uniform_k_decode:
+        if family != "wmma" or spec.pipeline != "mem":
+            return False, "uniform_k_decode is wired for the WMMA mem pipeline only"
+        for flag, label in (
+            (spec.problem.is_3d, "3-D convolution"),
+            (spec.problem.is_pointwise, "the pointwise fast path"),
+            (spec.group_merge > 1, "group_merge"),
+        ):
+            if flag:
+                return False, f"uniform_k_decode does not support {label}"
+    _why = fwd_regt_prefetch_reason(spec)
+    if _why is not None:
+        return False, _why
+    if spec.lds_swizzle:
+        _why = fwd_lds_swizzle_reason(spec, family)
+        if _why is not None:
+            return False, _why
+
+    if spec.group_fast_raster:
+        _why = fwd_group_fast_raster_reason(spec)
+        if _why is not None:
+            return False, _why
+
     if spec.split_k != 1 or spec.split_k_cluster:
         _why = fwd_split_k_reason(spec, family, target)
         if _why is not None:
@@ -1185,6 +1342,9 @@ def implicit_gemm_conv_grid(spec: ImplicitGemmConvSpec) -> Tuple[int, int, int]:
     """
     gm = (spec.grid_M + spec.tile_m - 1) // spec.tile_m
     gn = (spec.grid_N_gemm + spec.tile_n - 1) // spec.tile_n
+    if spec.group_fast_raster:
+        # Group-fast raster: (N tiles, groups, M tiles).
+        return (gn, spec.grid_groups, gm)
     return (gn, gm, spec.grid_groups)
 
 
@@ -1518,7 +1678,7 @@ def _build_implicit_gemm_conv_impl(
         warp_m=spec.warp_m,
         warp_n=spec.warp_n,
         wave_size=spec.wave_size,
-    ).bind(b, block_m_axis="y", block_n_axis="x")
+    ).bind(b, block_m_axis="z" if spec.group_fast_raster else "y", block_n_axis="x")
     tid = grid.tid
     lane = grid.lane
     warp_id = grid.warp_id
@@ -1608,7 +1768,11 @@ def _build_implicit_gemm_conv_impl(
         split_k_lo = b.to_sgpr_u32(b.mul(slice_id, p_ks))
         split_k_hi = b.to_sgpr_u32(b.add(split_k_lo, p_ks))
     if grouped:
-        group_idx = group_z if split else b.block_id_z()
+        if split:
+            group_idx = group_z
+        else:
+            # group_fast_raster: the group rides on y, the M tile on z.
+            group_idx = b.block_id_y() if spec.group_fast_raster else b.block_id_z()
         # Merged: the base advances by the merged kpg, which is Gm exactly
         # (depthwise only), so it is the build-time constant, not p_kpg.
         k_out_group_base = b.mul(group_idx, c_gm if merged else p_kpg)
@@ -1632,6 +1796,13 @@ def _build_implicit_gemm_conv_impl(
     lds_layout = spec.effective_lds_layout()
     if spec.async_dma:
         lds_layout.validate_for_async()
+    # lds_swizzle: the XOR parameters (lds_col_xor_params) shared by the tile
+    # stores (CoalescedTileLoader.col_xor) and the fragment reads.
+    lds_col_xor = lds_col_xor_params(block_k) if spec.lds_swizzle else None
+    if lds_col_xor is not None and (
+        a_load_override is not None or a_operand_override is not None
+    ):
+        raise ValueError("lds_swizzle does not support loader / operand overrides")
     A_smem = b.smem_alloc(
         ir_dtype_a, lds_layout.storage_shape(block_m), name_hint="A_smem"
     )
@@ -1842,12 +2013,14 @@ def _build_implicit_gemm_conv_impl(
         # routing via the descriptor's ``valid`` predicate) is centralised
         # so a future tile-shape sweep picks it up uniformly across
         # GEMM, conv, and attention loads.
+        _xor_kw = {"col_xor": lds_col_xor} if lds_col_xor is not None else {}
         a_sync_loader = CoalescedTileLoader(
             tile_rows=block_m,
             tile_cols=block_k,
             block_size=threads,
             load_vec=load_vec_a,
             elem_dtype=ir_dtype_a,
+            **_xor_kw,
         )
         b_sync_loader = CoalescedTileLoader(
             tile_rows=block_n,
@@ -1855,6 +2028,7 @@ def _build_implicit_gemm_conv_impl(
             block_size=threads,
             load_vec=load_vec_b,
             elem_dtype=ir_dtype_b,
+            **_xor_kw,
         )
         # Wavelet pipeline: load waves use a separate loader sized to the
         # number of load threads (num_load_waves * wave_size), not to
@@ -2081,6 +2255,7 @@ def _build_implicit_gemm_conv_impl(
         """
         a_map = op.a_layout()
         b_map = op.b_layout()
+        _frag_xor_kw = {"col_xor": lds_col_xor} if lds_col_xor is not None else {}
         a_row_in_atom, a_k_in_atom = a_map.coord(b, lane, 0)
         b_k_in_atom, b_col_in_atom = b_map.coord(b, lane, 0)
         warp_m_off = grid.warp_m_off(b)
@@ -2101,6 +2276,7 @@ def _build_implicit_gemm_conv_impl(
                         k_tile_base,
                         a_per_lane,
                         smem_dtype=_smem_dtype,
+                        **_frag_xor_kw,
                     )
                 )
             b_cols = []
@@ -2116,6 +2292,7 @@ def _build_implicit_gemm_conv_impl(
                         k_tile_base,
                         b_per_lane,
                         smem_dtype=_smem_dtype,
+                        **_frag_xor_kw,
                     )
                 )
             flat = 0
@@ -2280,7 +2457,10 @@ def _build_implicit_gemm_conv_impl(
         # Merged: g is the merged group and the merged kpg is Gm, so the same
         # expression yields k_out = merged_group*Gm + g_n.
         _k_out_grp_base = (
-            b.mul(group_idx if split else b.block_id_z(), c_gm if merged else p_kpg)
+            b.mul(
+                group_idx if split or spec.group_fast_raster else b.block_id_z(),
+                c_gm if merged else p_kpg,
+            )
             if grouped
             else None
         )
@@ -2542,6 +2722,231 @@ def _build_implicit_gemm_conv_impl(
             b.scf_yield(*accs_b)
 
         final_accs = for_op.results
+    elif spec.uniform_k_decode:
+        # Uniform per-tile reduction decode (ImplicitGemmConvSpec.uniform_k_decode).
+        # Loop 1 runs when cpg is a multiple of tile_k and carries the tile's
+        # (c0, x, y); loop 2 is the plain loop and runs otherwise. Exactly one
+        # of the two has a non-empty range, chosen per problem from kernargs.
+        if a_load_override is not None or m_index_fn is not None or not split_ab:
+            raise ValueError(
+                "uniform_k_decode takes the split A/B addressing without loader "
+                "overrides"
+            )
+        _uk_lo = split_k_lo if split else c0
+        _uk_hi = split_k_hi if split else c_K_gemm
+        c1 = b.const_i32(1)
+        uk_ok = b.cmp_eq(b.mod(p_cpg, c_block_k), c0)
+        _uk_q = b.div(_uk_lo, p_cpg)
+        uk_c0 = b.mod(_uk_lo, p_cpg)
+        uk_x0 = b.mod(_uk_q, p_X)
+        uk_y0 = b.div(_uk_q, p_X)
+        uk_end = b.select(uk_ok, _uk_hi, _uk_lo)
+        uk_cap: List[Optional[Tuple[Value, ...]]] = [None]
+
+        def _uk_tile(ct: Value, xd: Value, yd: Value) -> Tuple[Value, ...]:
+            hd = b.mul(yd, p_dH)
+            wd = b.mul(xd, p_dW)
+            a_off = b.add(b.add(b.mul(yd, a_ystep), b.mul(xd, a_xstep)), ct)
+            b_off = b.add(b.add(b.mul(yd, p_B_stride_y), b.mul(xd, p_B_stride_x)), ct)
+            return (
+                b.sub(c0, hd),
+                b.sub(p_Hi, hd),
+                b.sub(c0, wd),
+                b.sub(p_Wi, wd),
+                b.cmp_lt(yd, p_Y),
+                a_off,
+                b_off,
+            )
+
+        def _a_uk(b_: IRBuilder, row: Value, col: Value):
+            h_lo, h_hi, w_lo, w_hi, y_ok, a_off, _ = uk_cap[0]
+            m_val = b_.add(block_m_off_v, row)
+            q_wo, wo = magic_divmod(
+                b_,
+                m_val,
+                params["p_magic_m_Wo_mult"],
+                params["p_magic_m_Wo_shift"],
+                p_Wo,
+            )
+            n, ho = magic_divmod(
+                b_,
+                q_wo,
+                params["p_magic_m_Ho_mult"],
+                params["p_magic_m_Ho_shift"],
+                p_Ho,
+            )
+            hi0 = b_.add(b_.mul(ho, p_sH), neg_pH)
+            wi0 = b_.add(b_.mul(wo, p_sW), neg_pW)
+            base = b_.add(
+                b_.add(b_.mul(n, params["p_A_stride_n"]), b_.mul(hi0, s_hi)),
+                b_.mul(wi0, s_wi),
+            )
+            if grouped:
+                base = b_.add(base, a_group_base)
+            ok = b_.land(
+                b_.land(b_.cmp_ge(hi0, h_lo), b_.cmp_lt(hi0, h_hi)),
+                b_.land(b_.cmp_ge(wi0, w_lo), b_.cmp_lt(wi0, w_hi)),
+            )
+            return b_.add(b_.add(base, a_off), col), b_.land(ok, y_ok)
+
+        def _b_uk(b_: IRBuilder, row: Value, col: Value):
+            y_ok, _, b_off = uk_cap[0][4:]
+            n_val = b_.add(block_n_off_v, row)
+            k_out = b_.add(k_out_group_base, n_val) if grouped else n_val
+            off = b_.add(b_.add(b_.mul(k_out, p_B_stride_k), b_off), col)
+            return off, y_ok
+
+        def _uk_next(ct: Value, xd: Value, yd: Value) -> Tuple[Value, ...]:
+            # Next tile: c0 wraps into the next filter tap.
+            nc = b.add(ct, c_block_k)
+            wrap_c = b.cmp_ge(nc, p_cpg)
+            nc = b.select(wrap_c, c0, nc)
+            nx = b.add(xd, b.select(wrap_c, c1, c0))
+            wrap_x = b.cmp_ge(nx, p_X)
+            nx = b.select(wrap_x, c0, nx)
+            ny = b.add(yd, b.select(wrap_x, c1, c0))
+            return nc, nx, ny
+
+        n_acc = len(accs)
+        uk_iter = list(accs) + [("uk_c", uk_c0), ("uk_x", uk_x0), ("uk_y", uk_y0)]
+        if spec.regt_prefetch:
+            # Mode-1 register prefetch over the uniform decode (regt_prefetch):
+            # the next tile's (c0, x, y) is advanced and its loads issued
+            # before the MMAs; a tile at or past uk_end is masked to the
+            # out-of-range sentinel and reads zero.
+            def _uk_masked(fn, tile_ok):
+                def desc(b_, row, col):
+                    off, ok = fn(b_, row, col)
+                    return off, b_.land(ok, tile_ok)
+
+                return desc
+
+            def _uk_fetch(k_tile: Value, ct: Value, xd: Value, yd: Value):
+                uk_cap[0] = _uk_tile(ct, xd, yd)
+                k_off_capture[0] = k_tile
+                tile_ok = b.cmp_lt(k_tile, uk_end)
+                return (
+                    a_sync_loader.load_global(
+                        b, tid=tid, descriptor=_uk_masked(_a_uk, tile_ok), rsrc=a_rsrc
+                    ),
+                    b_sync_loader.load_global(
+                        b, tid=tid, descriptor=_uk_masked(_b_uk, tile_ok), rsrc=b_rsrc
+                    ),
+                )
+
+            def _uk_store(staged) -> None:
+                a_sync_loader.store_lds(b, smem_dst=A_smem, staged=staged[0])
+                b_sync_loader.store_lds(b, smem_dst=B_smem, staged=staged[1])
+
+            _uk_store(_uk_fetch(_uk_lo, uk_c0, uk_x0, uk_y0))
+            b.sync()
+            for_uk = b.scf_for_iter(
+                _uk_lo,
+                uk_end,
+                c_block_k,
+                uk_iter,
+                iv_name="k_uk",
+                elide_trailing_barrier=False,
+            )
+            with for_uk as (k_uk, iter_vars):
+                nxt = _uk_next(*iter_vars[n_acc:])
+                _st = _uk_fetch(b.add(k_uk, c_block_k), *nxt)
+                b.sched_barrier(0)
+                k_off_capture[0] = k_uk
+                new_accs = emit_mfma_phase(A_smem, B_smem, list(iter_vars[:n_acc]))
+                lds_barrier_keep_vmem(b, arch)
+                _uk_store(_st)
+                lds_barrier_keep_vmem(b, arch)
+                b.scf_yield(*new_accs, *nxt)
+        else:
+            for_uk = b.scf_for_iter(_uk_lo, uk_end, c_block_k, uk_iter, iv_name="k_uk")
+            with for_uk as (k_uk, iter_vars):
+                ct, xd, yd = iter_vars[n_acc:]
+                uk_cap[0] = _uk_tile(ct, xd, yd)
+                k_off_capture[0] = k_uk
+                a_staged = a_sync_loader.load_global(
+                    b, tid=tid, descriptor=_a_uk, rsrc=a_rsrc
+                )
+                b_staged = b_sync_loader.load_global(
+                    b, tid=tid, descriptor=_b_uk, rsrc=b_rsrc
+                )
+                a_sync_loader.store_lds(b, smem_dst=A_smem, staged=a_staged)
+                b_sync_loader.store_lds(b, smem_dst=B_smem, staged=b_staged)
+                b.sync()
+                new_accs = emit_mfma_phase(A_smem, B_smem, list(iter_vars[:n_acc]))
+                b.sync()
+                b.scf_yield(*new_accs, *_uk_next(ct, xd, yd))
+        uk_accs = list(for_uk.results)[:n_acc]
+
+        fb_iter = [(f"fb_{name}", v) for (name, _), v in zip(accs, uk_accs)]
+        for_fb = b.scf_for_iter(uk_end, _uk_hi, c_block_k, fb_iter, iv_name="k0")
+        with for_fb as (k0, iter_vars):
+            emit_load_phase(k0, A_smem, B_smem)
+            b.sync()
+            new_accs = emit_mfma_phase(A_smem, B_smem, iter_vars)
+            b.sync()
+            b.scf_yield(*new_accs)
+        final_accs = list(for_fb.results)
+    elif spec.regt_prefetch:
+        # Register-prefetch K loop (regt_prefetch): see the spec field.
+        #   prologue: tile k_lo -> buf; barrier
+        #   per tile: regs <- tile k+1; MMA(buf); barrier; buf <- regs; barrier
+        # The buffer is rewritten only after the barrier that follows the last
+        # MMA reading it. Every tile at or past _k_upper is masked to the
+        # out-of-range sentinel, so it reads zero and adds nothing.
+        if a_load_override is not None:
+            raise ValueError("regt_prefetch does not support an a_load_override")
+        _k_lo = split_k_lo if split else c0
+        _k_upper = split_k_hi if split else c_K_gemm
+
+        def _masked(fn, tile_ok):
+            def desc(b_, row, col):
+                off, ok = fn(b_, row, col)
+                return off, (tile_ok if ok is None else b_.land(ok, tile_ok))
+
+            return desc
+
+        def _fetch(k_tile):
+            k_off_capture[0] = k_tile
+            tile_ok = b.cmp_lt(k_tile, _k_upper)
+            return (
+                a_sync_loader.load_global(
+                    b, tid=tid, descriptor=_masked(a_descriptor, tile_ok), rsrc=a_rsrc
+                ),
+                b_sync_loader.load_global(
+                    b, tid=tid, descriptor=_masked(b_descriptor, tile_ok), rsrc=b_rsrc
+                ),
+            )
+
+        def _store(staged):
+            a_sync_loader.store_lds(b, smem_dst=A_smem, staged=staged[0])
+            b_sync_loader.store_lds(b, smem_dst=B_smem, staged=staged[1])
+
+        _store(_fetch(_k_lo))
+        b.sync()
+        for_op = b.scf_for_iter(
+            _k_lo,
+            _k_upper,
+            c_block_k,
+            accs,
+            iv_name="k_rpf",
+            elide_trailing_barrier=False,
+        )
+        with for_op as (k_rp, iter_accs):
+            _st = _fetch(b.add(k_rp, c_block_k))
+            # Pin the prefetch ahead of the MMAs: the machine scheduler
+            # otherwise sinks the loads (and their address math) to the
+            # end of the WMMA block, leaving nothing to overlap.
+            b.sched_barrier(0)
+            k_off_capture[0] = k_rp
+            new_accs = emit_mfma_phase(A_smem, B_smem, list(iter_accs))
+            # The in-loop barriers order LDS only (lds_barrier_keep_vmem); each
+            # ds_store already waits for its own load's data.
+            lds_barrier_keep_vmem(b, arch)
+            _store(_st)
+            lds_barrier_keep_vmem(b, arch)
+            b.scf_yield(*new_accs)
+        final_accs = list(for_op.results)
     elif not spec.async_dma:
         # mem / compv3 / compv4 / basic: all use scf_for_iter — only bound changes to runtime.
         for_op = (

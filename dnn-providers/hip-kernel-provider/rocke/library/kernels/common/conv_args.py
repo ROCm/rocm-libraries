@@ -534,14 +534,42 @@ class ConvArgs:
         """N-axis tile count; the kernel reads this as ``p_num_pid_n``."""
         return ceil_div(self.gemm_n, self.tile_n)
 
-    def grid(self, split_k: int = 1) -> Tuple[int, int, int]:
+    def grid(
+        self,
+        split_k: int = 1,
+        *,
+        group_merge: int = 1,
+        group_fast_raster: bool = False,
+    ) -> Tuple[int, int, int]:
         """``(gx, gy, gz)``: N tiles by M tiles by groups (times the split).
 
         ``split_k`` is a launch parameter, so it stays an argument. The dgrad
         tilde path overrides this with the sub-GEMM tile total; see the
         benchmark's grid helper.
+
+        ``group_merge`` > 1 divides the group axis (one workgroup owns that
+        many conv groups; it must be a positive integer dividing the group
+        count, else ``ValueError``). ``group_fast_raster`` (forward ``gfr`` kernels)
+        puts the group on ``y`` and the M tile on ``z``: the one place the
+        launch-grid swap is stated for the dispatcher and the benchmarks.
         """
-        return (self.num_pid_n, self.num_pid_m, self.geom.groups * split_k)
+        if (
+            isinstance(group_merge, bool)
+            or not isinstance(group_merge, int)
+            or group_merge < 1
+        ):
+            raise ValueError(
+                f"group_merge must be a positive integer (got {group_merge!r})"
+            )
+        if self.geom.groups % group_merge != 0:
+            raise ValueError(
+                f"group_merge {group_merge} does not divide groups "
+                f"{self.geom.groups}: a workgroup would own a partial group"
+            )
+        groups = self.geom.groups // group_merge * split_k
+        if group_fast_raster:
+            return (self.num_pid_n, groups, self.num_pid_m)
+        return (self.num_pid_n, self.num_pid_m, groups)
 
     # ---- stream-K (implicit-GEMM wgrad only) ----
 

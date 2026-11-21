@@ -13,9 +13,9 @@
  * scales to 0 leaves srcA/srcB placement to the register allocator. The `a`
  * inline-asm constraint forces them into the AGPR file.
  *
- * Scope of THIS file: only `mfma_f8f6f4_agpr` and `mfma_f8f6f4_agpr_cluster`
- * are ported (the trivial `s_nop` helper in helpers/asm.py is out of scope for
- * this phase).
+ * Scope of THIS file: `mfma_f8f6f4_agpr`, `mfma_f8f6f4_agpr_cluster` and
+ * `lds_barrier_keep_vmem` are ported (the trivial `s_nop` helper in
+ * helpers/asm.py is out of scope for this phase).
  *
  * AMDGPU inline-asm constraint cheatsheet:
  *   `v` = VGPR input, `a` = AGPR input, `s` = SGPR input;
@@ -112,6 +112,24 @@ int rocke_mfma_f8f6f4_agpr_cluster(rocke_ir_builder_t* b,
                                    int inter_nop,
                                    bool convergent,
                                    rocke_value_t** out_accs);
+
+/* Workgroup barrier that waits for LDS but leaves global loads in flight
+ * (Python `lds_barrier_keep_vmem`).
+ *
+ * On gfx12 RDNA (target_family gfx12_rdna) the AMDGPU wait-count pass may
+ * drain every counter, vmcnt / loadcnt included, in front of an `s_barrier`
+ * it emits itself (compiler-version dependent), in which case
+ * `rocke_b_sync_lds_only` still waits for a register prefetch. There the
+ * barrier is always a side-effecting inline asm with a memory clobber (CK's
+ * `block_sync_lds`):
+ *
+ *   gfx12_rdna: "s_wait_dscnt 0x0\ns_barrier_signal -1\ns_barrier_wait -1"
+ *
+ * with constraints "~{memory}", no operands, no result, convergent. Every
+ * other target emits `rocke_b_sync_lds_only`. An unknown `arch` records
+ * ROCKE_ERR_VALUE on the builder (Python's ArchTarget.from_gfx raises). No-op
+ * if `b` is already in error. */
+void rocke_lds_barrier_keep_vmem(rocke_ir_builder_t* b, const char* arch);
 
 #ifdef __cplusplus
 }

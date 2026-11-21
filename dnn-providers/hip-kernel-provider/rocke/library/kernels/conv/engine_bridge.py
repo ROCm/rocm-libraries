@@ -92,7 +92,25 @@ def _conv_acc_epilogue_to_dict(epi: Any) -> Dict[str, Any]:
 def conv_implicit_gemm_spec_to_dict(spec: Any) -> Dict[str, Any]:
     """:class:`ImplicitGemmConvSpec` -> flat dict (problem nested). Optional
     fields (lds_k_pad/waves_per_eu/vector_size_*) are forwarded when set; the
-    binding leaves them at the engine default (Python ``None``) otherwise."""
+    binding leaves them at the engine default (Python ``None``) otherwise.
+
+    Raises :class:`ValueError` for combinations that cannot be represented in
+    the flat dict because one member of the pair is not forwarded:
+
+    * ``lds_swizzle=True`` with an explicit ``lds_layout``: the bridge drops
+      ``lds_layout``, so C++ would silently ignore it.  Python already rejects
+      this pair via :func:`~kernels.common.conv_implicit_gemm.fwd_lds_swizzle_reason`;
+      the bridge re-checks so that callers bypassing Python validation also
+      get a clear error.
+    """
+    if (
+        getattr(spec, "lds_swizzle", False)
+        and getattr(spec, "lds_layout", None) is not None
+    ):
+        raise ValueError(
+            f"lds_swizzle (lxs) cannot be used with an explicit lds_layout: "
+            f"the bridge does not forward lds_layout to the C++ engine"
+        )
     d = dict(
         problem=_conv_problem_to_dict(spec.problem),
         name=spec.name,
@@ -124,6 +142,14 @@ def conv_implicit_gemm_spec_to_dict(spec: Any) -> Dict[str, Any]:
         # directly: a spec without them is malformed, not unsplit.
         split_k=spec.split_k,
         split_k_cluster=spec.split_k_cluster,
+        # The uniform per-tile reduction decode K loop.
+        uniform_k_decode=spec.uniform_k_decode,
+        # The register-prefetch K loop mode.
+        regt_prefetch=spec.regt_prefetch,
+        # The XOR-swizzled unpadded A/B LDS tiles (layout and fragment reads).
+        lds_swizzle=spec.lds_swizzle,
+        # The group-fast launch raster (the group on blockIdx.y, M tile on z).
+        group_fast_raster=spec.group_fast_raster,
         # The wavelet load-wave count changes the launch block and the loaders.
         num_load_waves=spec.num_load_waves,
         # The fused accumulator epilogue changes the emitted epilogue (and
