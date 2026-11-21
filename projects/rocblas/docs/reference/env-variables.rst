@@ -56,6 +56,27 @@ tables.
       - | **0**: Disable
         | **1**: Enable
 
+    * - | ``ROCBLAS_BENCH_FREQ``
+        | rocblas-bench reports the engine clock of the slowest XCD and the memory clock measured during each result.
+      - Unset by default.
+      - :ref:`rocblas_bench_freq`
+      - | **Unset**: Disable
+        | **Set**: Enable
+
+    * - | ``ROCBLAS_BENCH_FREQ_ALL``
+        | rocblas-bench reports the engine clock of every XCD and the memory clock measured during each result.
+      - Unset by default.
+      - :ref:`rocblas_bench_freq`
+      - | **Unset**: Disable
+        | **Set**: Enable
+
+    * - | ``ROCBLAS_BENCH_PERF``
+        | rocblas-bench reports the clocks and, for GEMM functions, the efficiency against the matrix-core peak at the measured clock.
+      - Unset by default.
+      - :ref:`rocblas_bench_freq`
+      - | **Unset**: Disable
+        | **Set**: Enable
+
 Logging environment variables
 --------------------------------------------------------------------------------
 

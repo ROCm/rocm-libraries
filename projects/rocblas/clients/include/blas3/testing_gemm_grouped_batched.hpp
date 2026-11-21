@@ -687,13 +687,13 @@ void testing_gemm_grouped_batched(const Arguments& arg)
         hipStream_t stream;
         CHECK_ROCBLAS_ERROR(rocblas_get_stream(handle, &stream));
 
-        FrequencyMonitor& freq_monitor = getFrequencyMonitor();
-        freq_monitor.start();
-
         for(int i = 0; i < total_calls; i++)
         {
             if(i == number_cold_calls)
+            {
+                getFrequencyMonitor().start();
                 gpu_time_used = get_time_us_sync(stream); // in microseconds
+            }
 
             if(arg.api & c_API_64)
             {
@@ -736,8 +736,7 @@ void testing_gemm_grouped_batched(const Arguments& arg)
         }
 
         gpu_time_used = get_time_us_sync(stream) - gpu_time_used;
-
-        freq_monitor.stop();
+        getFrequencyMonitor().stop();
 
         double gflop_count = 0.0;
         for(int64_t g = 0; g < group_count; ++g)

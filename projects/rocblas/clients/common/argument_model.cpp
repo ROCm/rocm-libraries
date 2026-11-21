@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -23,17 +23,32 @@
 #include "argument_model.hpp"
 #include "frequency_monitor.hpp"
 
-// FLOPS/CLOCK/CU values for gfx942
-auto rocblas_get_flops_per_clock_per_cu_gfx942(rocblas_datatype type)
+#include <cstring>
+
+// Matrix-core FLOPS/CLOCK/CU; 0 when the type has no entry
+static int rocblas_get_flops_per_clock_per_cu(const std::string& arch, rocblas_datatype type)
 {
-    if(type == rocblas_datatype_f32_r || type == rocblas_datatype_f64_r)
-        return 256;
-    else if(type == rocblas_datatype_f16_r || type == rocblas_datatype_bf16_r)
-        return 2048;
-    else if(type == rocblas_datatype_i8_r)
-        return 4096;
-    else
-        return 0;
+    if(arch == "gfx942")
+    {
+        if(type == rocblas_datatype_f32_r || type == rocblas_datatype_f64_r)
+            return 256;
+        else if(type == rocblas_datatype_f16_r || type == rocblas_datatype_bf16_r)
+            return 2048;
+        else if(type == rocblas_datatype_i8_r)
+            return 4096;
+    }
+    else if(arch == "gfx950")
+    {
+        if(type == rocblas_datatype_f64_r)
+            return 128;
+        else if(type == rocblas_datatype_f32_r)
+            return 256;
+        else if(type == rocblas_datatype_f16_r || type == rocblas_datatype_bf16_r)
+            return 4096;
+        else if(type == rocblas_datatype_i8_r)
+            return 8192;
+    }
+    return 0;
 }
 
 // this should have been a member variable but due to the complex variadic template this singleton allows global control
@@ -67,15 +82,18 @@ void ArgumentModel_log_efficiency(rocblas_internal_ostream& name_line,
                                   double                    rocblas_gflops)
 {
     FrequencyMonitor& frequency_monitor = getFrequencyMonitor();
-    if(!frequency_monitor.enabled())
+    if(!frequency_monitor.efficiencyReport())
         return;
 
-    if(rocblas_internal_get_arch_name() == "gfx942"
-       && rocblas_get_flops_per_clock_per_cu_gfx942(arg.a_type) != 0)
+    // The peaks are matrix-core GEMM peaks, so only GEMM functions are compared with them
+    if(!strstr(arg.function, "gemm"))
+        return;
+
+    double theoretical_gflops
+        = rocblas_get_flops_per_clock_per_cu(rocblas_internal_get_arch_name(), arg.a_type)
+          * frequency_monitor.getCuCount() * frequency_monitor.getLowestAverageSYSCLK() * 0.001;
+    if(theoretical_gflops > 0)
     {
-        double theoretical_gflops = rocblas_get_flops_per_clock_per_cu_gfx942(arg.a_type)
-                                    * frequency_monitor.getCuCount()
-                                    * frequency_monitor.getLowestAverageSYSCLK() * 0.001;
         name_line << ",efficiency";
         val_line << "," << (rocblas_gflops / theoretical_gflops) * 100;
     }

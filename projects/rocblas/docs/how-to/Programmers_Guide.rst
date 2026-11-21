@@ -1528,6 +1528,27 @@ rocblas-bench timing
 rocblas-bench uses ``hipEvent_t`` recording to time API calls and ignore the overhead of any ``hipStreamSynchronize`` call.
 To switch back to the earlier timing approach that uses ``hipStreamSynchronize`` to ensure work completion, set the environment variable ``ROCBLAS_BENCH_STREAM_SYNC=1``.
 
+.. _rocblas_bench_freq:
+
+rocblas-bench clock frequencies
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+GPU clocks vary with power and thermal limits, which affects the measured performance.
+rocblas-bench can sample the clocks with AMD SMI every 50 ms while the timed iterations of each function run
+and report them with each result, in MHz. The first sample is taken 5 ms after the timed iterations start,
+so a result whose timed iterations take less than that reports 0:
+
+*  ``ROCBLAS_BENCH_FREQ=1``: ``lowest-avg-freq`` and ``lowest-median-freq``, the average and median engine clock of the slowest XCD,
+   and ``avg-MCLK`` and ``median-MCLK``, the average and median memory clock.
+*  ``ROCBLAS_BENCH_FREQ_ALL=1``: the engine clock of every XCD in the ``avg-freq_<i>`` and ``median-freq_<i>`` columns
+   instead of the two ``lowest`` columns.
+*  ``ROCBLAS_BENCH_PERF=1``: the clock columns plus, for GEMM functions on gfx942 and gfx950, an ``efficiency`` column with the
+   achieved GFLOP/s as a percentage of the matrix-core peak at the lowest average engine clock.
+
+.. code-block:: bash
+
+   ROCBLAS_BENCH_FREQ=1 ./rocblas-bench -f gemm -r f32_r -m 4096 -n 4096 -k 4096
+
 rocblas-gemm-tune
 -----------------
 

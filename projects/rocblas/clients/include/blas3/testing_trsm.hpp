@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -561,13 +561,17 @@ void testing_trsm(const Arguments& arg)
         for(int i = 0; i < total_calls; i++)
         {
             if(i == number_cold_calls)
+            {
+                getFrequencyMonitor().start();
                 gpu_time_used = get_time_us_sync(stream); // in microseconds
+            }
 
             DAPI_DISPATCH(rocblas_trsm_fn,
                           (handle, side, uplo, transA, diag, M, N, &alpha_h, dA, lda, dXorB, ldb));
         }
 
         gpu_time_used = get_time_us_sync(stream) - gpu_time_used;
+        getFrequencyMonitor().stop();
 
         // CPU cblas
         copy_matrix_with_different_leading_dimensions(hB, hXorB_1);
