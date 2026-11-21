@@ -533,6 +533,7 @@ _CONFIG_OPTIONAL_COMMON = {
     "SIZE_OPTION": 0,
     "ONE_SIZE_PER_CONFIG": True,
     "MI_FILTER": 2,
+    "BUILDABLE_MIS": False,
     "EPILOGUES": True,
     # Give each MI group the GlobalSplitU that MIDesign picks for it (the smallest GSU that
     # fills the CUs at this size), with or without StreamK. False leaves the gfx1250 generic
@@ -551,6 +552,7 @@ ENV_UPDATABLE_KEYS = {
     "StreamK",
     "MI_FILTER",
     "DUCTILE_VALIDATION_PROFILE",
+    "BUILDABLE_MIS",
 }
 
 # Input-config keys that ``geko --tune --list`` carries into optim.configure.
@@ -571,6 +573,7 @@ LIST_FORWARDED_KEYS = (
     "DATA_INIT",
     "CLUSTER",
     "DUCTILE_VALIDATION_PROFILE",
+    "BUILDABLE_MIS",
 )
 
 _CMS_DEFAULTS_GFX950 = {"CMS": True, "CMS_PRIORITY": False}

@@ -1,0 +1,399 @@
+# Buildable MatrixInstructions for CCC_TN on gfx950:
+# MIs with at least one kernel TensileLite builds within geko's generic (GA) ranges.
+# MI Designer proposes only these, each only at the DepthUs it builds at (DepthUs the search did
+# not try stay allowed).
+# 379 of 385 candidates buildable; the rest are at the end.
+# From scripts/generate_buildable_mis.py; rerun when TensileLite or geko changes.
+
+Architecture: gfx950
+GemmType: CCC_TN
+Source: rocm-libraries 501708505c, 2026-10-26
+DepthU: [16, 32, 64, 128, 256]  # searched
+MatrixInstructions:
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 1, 1, 4, 1], DepthU: [16, 32, 64, 128, 256]}  # MT64x16
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 1, 2, 4, 1], DepthU: [16, 32, 64, 128]}  # MT64x32
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 1, 3, 4, 1], DepthU: [16, 32, 64, 128]}  # MT64x48
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 1, 4, 4, 1], DepthU: [16, 32, 64, 128]}  # MT64x64
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 1, 5, 4, 1], DepthU: [16, 32, 64, 128]}  # MT64x80
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 1, 6, 4, 1], DepthU: [16, 32, 64]}  # MT64x96
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 1, 7, 4, 1], DepthU: [16, 32, 64]}  # MT64x112
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 1, 8, 4, 1], DepthU: [16, 32, 64]}  # MT64x128
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 1, 9, 4, 1], DepthU: [16, 32, 64]}  # MT64x144
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 1, 10, 4, 1], DepthU: [16, 32, 64]}  # MT64x160
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 1, 11, 4, 1], DepthU: [16, 32, 64]}  # MT64x176
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 1, 12, 4, 1], DepthU: [16, 32, 64]}  # MT64x192
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 1, 13, 4, 1], DepthU: [16, 32, 64]}  # MT64x208
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 1, 14, 4, 1], DepthU: [16, 32, 64]}  # MT64x224
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 1, 15, 4, 1], DepthU: [16, 32]}  # MT64x240
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 1, 16, 4, 1], DepthU: [16, 32]}  # MT64x256
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 1, 17, 4, 1], DepthU: [16, 32]}  # MT64x272
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 1, 18, 4, 1], DepthU: [16, 32]}  # MT64x288
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 1, 19, 4, 1], DepthU: [16, 32]}  # MT64x304
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 1, 20, 4, 1], DepthU: [16, 32]}  # MT64x320
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 1, 21, 4, 1], DepthU: [16, 32]}  # MT64x336
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 1, 22, 4, 1], DepthU: [16, 32]}  # MT64x352
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 1, 23, 4, 1], DepthU: [16, 32]}  # MT64x368
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 1, 24, 4, 1], DepthU: [16, 32]}  # MT64x384
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 1, 25, 4, 1], DepthU: [16, 32]}  # MT64x400
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 1, 26, 4, 1], DepthU: [16, 32]}  # MT64x416
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 1, 27, 4, 1], DepthU: [16, 32]}  # MT64x432
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 1, 28, 4, 1], DepthU: [16, 32]}  # MT64x448
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 1, 29, 4, 1], DepthU: [16]}  # MT64x464
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 1, 30, 4, 1], DepthU: [16]}  # MT64x480
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 1, 31, 4, 1], DepthU: [16]}  # MT64x496
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 1, 32, 4, 1], DepthU: [16]}  # MT64x512
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 2, 1, 4, 1], DepthU: [16, 32, 64, 128]}  # MT128x16
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 2, 2, 4, 1], DepthU: [16, 32, 64]}  # MT128x32
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 2, 3, 4, 1], DepthU: [16, 32, 64]}  # MT128x48
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 2, 4, 4, 1], DepthU: [16, 32, 64]}  # MT128x64
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 2, 5, 4, 1], DepthU: [16, 32, 64]}  # MT128x80
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 2, 6, 4, 1], DepthU: [16, 32, 64]}  # MT128x96
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 2, 7, 4, 1], DepthU: [16, 32, 64]}  # MT128x112
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 2, 8, 4, 1], DepthU: [16, 32, 64]}  # MT128x128
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 2, 9, 4, 1], DepthU: [16, 32, 64]}  # MT128x144
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 2, 10, 4, 1], DepthU: [16, 32, 64]}  # MT128x160
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 2, 11, 4, 1], DepthU: [16, 32, 64]}  # MT128x176
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 2, 12, 4, 1], DepthU: [16, 32]}  # MT128x192
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 2, 13, 4, 1], DepthU: [16, 32]}  # MT128x208
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 2, 14, 4, 1], DepthU: [16, 32]}  # MT128x224
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 2, 15, 4, 1], DepthU: [16, 32]}  # MT128x240
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 2, 16, 4, 1], DepthU: [16, 32]}  # MT128x256
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 3, 1, 4, 1], DepthU: [16, 32, 64]}  # MT192x16
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 3, 2, 4, 1], DepthU: [16, 32, 64]}  # MT192x32
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 3, 3, 4, 1], DepthU: [16, 32, 64]}  # MT192x48
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 3, 4, 4, 1], DepthU: [16, 32, 64]}  # MT192x64
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 3, 5, 4, 1], DepthU: [16, 32, 64]}  # MT192x80
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 3, 6, 4, 1], DepthU: [16, 32, 64]}  # MT192x96
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 3, 7, 4, 1], DepthU: [16, 32, 64]}  # MT192x112
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 3, 8, 4, 1], DepthU: [16, 32]}  # MT192x128
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 3, 9, 4, 1], DepthU: [16, 32]}  # MT192x144
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 3, 10, 4, 1], DepthU: [16, 32]}  # MT192x160
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 4, 1, 4, 1], DepthU: [16, 32, 64]}  # MT256x16
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 4, 2, 4, 1], DepthU: [16, 32, 64]}  # MT256x32
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 4, 3, 4, 1], DepthU: [16, 32]}  # MT256x48
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 4, 4, 4, 1], DepthU: [16, 32]}  # MT256x64
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 4, 5, 4, 1], DepthU: [16, 32]}  # MT256x80
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 4, 6, 4, 1], DepthU: [16, 32]}  # MT256x96
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 4, 7, 4, 1], DepthU: [16, 32]}  # MT256x112
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 4, 8, 4, 1], DepthU: [16, 32]}  # MT256x128
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 5, 1, 4, 1], DepthU: [16, 32]}  # MT320x16
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 5, 2, 4, 1], DepthU: [16, 32]}  # MT320x32
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 5, 3, 4, 1], DepthU: [16, 32]}  # MT320x48
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 5, 4, 4, 1], DepthU: [16, 32]}  # MT320x64
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 5, 5, 4, 1], DepthU: [16, 32]}  # MT320x80
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 5, 6, 4, 1], DepthU: [16, 32]}  # MT320x96
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 6, 1, 4, 1], DepthU: [16, 32]}  # MT384x16
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 6, 2, 4, 1], DepthU: [16, 32]}  # MT384x32
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 6, 3, 4, 1], DepthU: [16, 32]}  # MT384x48
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 6, 4, 4, 1], DepthU: [16, 32]}  # MT384x64
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 6, 5, 4, 1], DepthU: [16, 32]}  # MT384x80
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 7, 1, 4, 1], DepthU: [16, 32]}  # MT448x16
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 7, 2, 4, 1], DepthU: [16, 32]}  # MT448x32
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 7, 3, 4, 1], DepthU: [16, 32]}  # MT448x48
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 7, 4, 4, 1], DepthU: [16, 32]}  # MT448x64
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 8, 1, 4, 1], DepthU: [16, 32]}  # MT512x16
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 8, 2, 4, 1], DepthU: [16, 32]}  # MT512x32
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 8, 3, 4, 1], DepthU: [16, 32]}  # MT512x48
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 8, 4, 4, 1], DepthU: [16, 32]}  # MT512x64
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 9, 1, 4, 1], DepthU: [16, 32]}  # MT576x16
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 9, 2, 4, 1], DepthU: [16, 32]}  # MT576x32
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 9, 3, 4, 1], DepthU: [16, 32]}  # MT576x48
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 10, 1, 4, 1], DepthU: [16]}  # MT640x16
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 10, 2, 4, 1], DepthU: [16]}  # MT640x32
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 10, 3, 4, 1], DepthU: [16]}  # MT640x48
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 11, 1, 4, 1], DepthU: [16]}  # MT704x16
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 11, 2, 4, 1], DepthU: [16]}  # MT704x32
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 12, 1, 4, 1], DepthU: [16]}  # MT768x16
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 12, 2, 4, 1], DepthU: [16]}  # MT768x32
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 13, 1, 4, 1], DepthU: [16]}  # MT832x16
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 13, 2, 4, 1], DepthU: [16]}  # MT832x32
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 14, 1, 4, 1], DepthU: [16]}  # MT896x16
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 14, 2, 4, 1], DepthU: [16]}  # MT896x32
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 15, 1, 4, 1], DepthU: [16]}  # MT960x16
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 15, 2, 4, 1], DepthU: [16]}  # MT960x32
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 16, 1, 4, 1], DepthU: [16]}  # MT1024x16
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 16, 2, 4, 1], DepthU: [16]}  # MT1024x32
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 1, 1, 2, 2], DepthU: [16, 32, 64, 128, 256]}  # MT32x32
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 1, 2, 2, 2], DepthU: [16, 32, 64, 128]}  # MT32x64
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 1, 3, 2, 2], DepthU: [16, 32, 64, 128]}  # MT32x96
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 1, 4, 2, 2], DepthU: [16, 32, 64]}  # MT32x128
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 1, 5, 2, 2], DepthU: [16, 32, 64]}  # MT32x160
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 1, 6, 2, 2], DepthU: [16, 32, 64]}  # MT32x192
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 1, 7, 2, 2], DepthU: [16, 32, 64]}  # MT32x224
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 1, 8, 2, 2], DepthU: [16, 32, 64]}  # MT32x256
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 1, 9, 2, 2], DepthU: [16, 32]}  # MT32x288
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 1, 10, 2, 2], DepthU: [16, 32]}  # MT32x320
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 1, 11, 2, 2], DepthU: [16, 32]}  # MT32x352
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 1, 12, 2, 2], DepthU: [16, 32]}  # MT32x384
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 1, 13, 2, 2], DepthU: [16, 32]}  # MT32x416
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 1, 14, 2, 2], DepthU: [16, 32]}  # MT32x448
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 1, 15, 2, 2], DepthU: [16, 32]}  # MT32x480
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 1, 16, 2, 2], DepthU: [16, 32]}  # MT32x512
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 1, 17, 2, 2], DepthU: [16, 32]}  # MT32x544
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 1, 18, 2, 2], DepthU: [16]}  # MT32x576
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 1, 19, 2, 2], DepthU: [16]}  # MT32x608
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 1, 20, 2, 2], DepthU: [16]}  # MT32x640
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 1, 21, 2, 2], DepthU: [16]}  # MT32x672
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 1, 22, 2, 2], DepthU: [16]}  # MT32x704
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 1, 23, 2, 2], DepthU: [16]}  # MT32x736
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 1, 24, 2, 2], DepthU: [16]}  # MT32x768
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 1, 25, 2, 2], DepthU: [16]}  # MT32x800
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 1, 26, 2, 2], DepthU: [16]}  # MT32x832
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 1, 27, 2, 2], DepthU: [16]}  # MT32x864
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 1, 28, 2, 2], DepthU: [16]}  # MT32x896
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 1, 29, 2, 2], DepthU: [16]}  # MT32x928
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 2, 1, 2, 2], DepthU: [16, 32, 64, 128]}  # MT64x32
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 2, 2, 2, 2], DepthU: [16, 32, 64, 128]}  # MT64x64
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 2, 3, 2, 2], DepthU: [16, 32, 64]}  # MT64x96
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 2, 4, 2, 2], DepthU: [16, 32, 64]}  # MT64x128
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 2, 5, 2, 2], DepthU: [16, 32, 64]}  # MT64x160
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 2, 6, 2, 2], DepthU: [16, 32, 64]}  # MT64x192
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 2, 7, 2, 2], DepthU: [16, 32, 64]}  # MT64x224
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 2, 8, 2, 2], DepthU: [16, 32]}  # MT64x256
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 2, 9, 2, 2], DepthU: [16, 32]}  # MT64x288
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 2, 10, 2, 2], DepthU: [16, 32]}  # MT64x320
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 2, 11, 2, 2], DepthU: [16, 32]}  # MT64x352
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 2, 12, 2, 2], DepthU: [16, 32]}  # MT64x384
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 2, 13, 2, 2], DepthU: [16, 32]}  # MT64x416
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 2, 14, 2, 2], DepthU: [16, 32]}  # MT64x448
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 2, 15, 2, 2], DepthU: [16, 32]}  # MT64x480
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 2, 16, 2, 2], DepthU: [16, 32]}  # MT64x512
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 3, 1, 2, 2], DepthU: [16, 32, 64, 128]}  # MT96x32
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 3, 2, 2, 2], DepthU: [16, 32, 64]}  # MT96x64
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 3, 3, 2, 2], DepthU: [16, 32, 64]}  # MT96x96
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 3, 4, 2, 2], DepthU: [16, 32, 64]}  # MT96x128
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 3, 5, 2, 2], DepthU: [16, 32, 64]}  # MT96x160
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 3, 6, 2, 2], DepthU: [16, 32, 64]}  # MT96x192
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 3, 7, 2, 2], DepthU: [16, 32]}  # MT96x224
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 3, 8, 2, 2], DepthU: [16, 32]}  # MT96x256
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 3, 9, 2, 2], DepthU: [16, 32]}  # MT96x288
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 3, 10, 2, 2], DepthU: [16, 32]}  # MT96x320
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 4, 1, 2, 2], DepthU: [16, 32, 64]}  # MT128x32
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 4, 2, 2, 2], DepthU: [16, 32, 64]}  # MT128x64
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 4, 3, 2, 2], DepthU: [16, 32, 64]}  # MT128x96
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 4, 4, 2, 2], DepthU: [16, 32, 64]}  # MT128x128
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 4, 5, 2, 2], DepthU: [16, 32, 64]}  # MT128x160
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 4, 6, 2, 2], DepthU: [16, 32]}  # MT128x192
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 4, 7, 2, 2], DepthU: [16, 32]}  # MT128x224
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 4, 8, 2, 2], DepthU: [16, 32]}  # MT128x256
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 5, 1, 2, 2], DepthU: [16, 32, 64]}  # MT160x32
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 5, 2, 2, 2], DepthU: [16, 32, 64]}  # MT160x64
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 5, 3, 2, 2], DepthU: [16, 32, 64]}  # MT160x96
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 5, 4, 2, 2], DepthU: [16, 32, 64]}  # MT160x128
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 5, 5, 2, 2], DepthU: [16, 32]}  # MT160x160
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 5, 6, 2, 2], DepthU: [16, 32]}  # MT160x192
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 6, 1, 2, 2], DepthU: [16, 32, 64]}  # MT192x32
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 6, 2, 2, 2], DepthU: [16, 32, 64]}  # MT192x64
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 6, 3, 2, 2], DepthU: [16, 32, 64]}  # MT192x96
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 6, 4, 2, 2], DepthU: [16, 32]}  # MT192x128
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 6, 5, 2, 2], DepthU: [16, 32]}  # MT192x160
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 7, 1, 2, 2], DepthU: [16, 32, 64]}  # MT224x32
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 7, 2, 2, 2], DepthU: [16, 32, 64]}  # MT224x64
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 7, 3, 2, 2], DepthU: [16, 32]}  # MT224x96
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 7, 4, 2, 2], DepthU: [16, 32]}  # MT224x128
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 8, 1, 2, 2], DepthU: [16, 32, 64]}  # MT256x32
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 8, 2, 2, 2], DepthU: [16, 32]}  # MT256x64
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 8, 3, 2, 2], DepthU: [16, 32]}  # MT256x96
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 8, 4, 2, 2], DepthU: [16, 32]}  # MT256x128
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 9, 1, 2, 2], DepthU: [16, 32]}  # MT288x32
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 9, 2, 2, 2], DepthU: [16, 32]}  # MT288x64
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 9, 3, 2, 2], DepthU: [16, 32]}  # MT288x96
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 10, 1, 2, 2], DepthU: [16, 32]}  # MT320x32
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 10, 2, 2, 2], DepthU: [16, 32]}  # MT320x64
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 10, 3, 2, 2], DepthU: [16, 32]}  # MT320x96
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 11, 1, 2, 2], DepthU: [16, 32]}  # MT352x32
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 11, 2, 2, 2], DepthU: [16, 32]}  # MT352x64
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 12, 1, 2, 2], DepthU: [16, 32]}  # MT384x32
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 12, 2, 2, 2], DepthU: [16, 32]}  # MT384x64
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 13, 1, 2, 2], DepthU: [16, 32]}  # MT416x32
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 13, 2, 2, 2], DepthU: [16, 32]}  # MT416x64
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 14, 1, 2, 2], DepthU: [16, 32]}  # MT448x32
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 14, 2, 2, 2], DepthU: [16, 32]}  # MT448x64
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 15, 1, 2, 2], DepthU: [16, 32]}  # MT480x32
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 15, 2, 2, 2], DepthU: [16, 32]}  # MT480x64
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 16, 1, 2, 2], DepthU: [16, 32]}  # MT512x32
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 16, 2, 2, 2], DepthU: [16, 32]}  # MT512x64
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 17, 1, 2, 2], DepthU: [16, 32]}  # MT544x32
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 18, 1, 2, 2], DepthU: [16]}  # MT576x32
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 19, 1, 2, 2], DepthU: [16]}  # MT608x32
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 20, 1, 2, 2], DepthU: [16]}  # MT640x32
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 21, 1, 2, 2], DepthU: [16]}  # MT672x32
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 22, 1, 2, 2], DepthU: [16]}  # MT704x32
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 23, 1, 2, 2], DepthU: [16]}  # MT736x32
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 24, 1, 2, 2], DepthU: [16]}  # MT768x32
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 25, 1, 2, 2], DepthU: [16]}  # MT800x32
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 26, 1, 2, 2], DepthU: [16]}  # MT832x32
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 27, 1, 2, 2], DepthU: [16]}  # MT864x32
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 28, 1, 2, 2], DepthU: [16]}  # MT896x32
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 29, 1, 2, 2], DepthU: [16]}  # MT928x32
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 1, 1, 1, 4], DepthU: [16, 32, 64, 128, 256]}  # MT16x64
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 1, 2, 1, 4], DepthU: [16, 32, 64, 128]}  # MT16x128
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 1, 3, 1, 4], DepthU: [16, 32, 64]}  # MT16x192
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 1, 4, 1, 4], DepthU: [16, 32, 64]}  # MT16x256
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 1, 5, 1, 4], DepthU: [16, 32]}  # MT16x320
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 1, 6, 1, 4], DepthU: [16, 32]}  # MT16x384
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 1, 7, 1, 4], DepthU: [16, 32]}  # MT16x448
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 1, 8, 1, 4], DepthU: [16, 32]}  # MT16x512
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 1, 9, 1, 4], DepthU: [16, 32]}  # MT16x576
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 1, 10, 1, 4], DepthU: [16]}  # MT16x640
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 1, 11, 1, 4], DepthU: [16]}  # MT16x704
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 1, 12, 1, 4], DepthU: [16]}  # MT16x768
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 1, 13, 1, 4], DepthU: [16]}  # MT16x832
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 1, 14, 1, 4], DepthU: [16]}  # MT16x896
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 1, 15, 1, 4], DepthU: [16]}  # MT16x960
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 1, 16, 1, 4], DepthU: [16]}  # MT16x1024
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 2, 1, 1, 4], DepthU: [16, 32, 64, 128]}  # MT32x64
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 2, 2, 1, 4], DepthU: [16, 32, 64]}  # MT32x128
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 2, 3, 1, 4], DepthU: [16, 32, 64]}  # MT32x192
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 2, 4, 1, 4], DepthU: [16, 32, 64]}  # MT32x256
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 2, 5, 1, 4], DepthU: [16, 32]}  # MT32x320
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 2, 6, 1, 4], DepthU: [16, 32]}  # MT32x384
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 2, 7, 1, 4], DepthU: [16, 32]}  # MT32x448
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 2, 8, 1, 4], DepthU: [16, 32]}  # MT32x512
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 2, 9, 1, 4], DepthU: [16, 32]}  # MT32x576
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 2, 10, 1, 4], DepthU: [16]}  # MT32x640
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 2, 11, 1, 4], DepthU: [16]}  # MT32x704
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 2, 12, 1, 4], DepthU: [16]}  # MT32x768
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 2, 13, 1, 4], DepthU: [16]}  # MT32x832
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 2, 14, 1, 4], DepthU: [16]}  # MT32x896
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 2, 15, 1, 4], DepthU: [16]}  # MT32x960
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 2, 16, 1, 4], DepthU: [16]}  # MT32x1024
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 3, 1, 1, 4], DepthU: [16, 32, 64, 128]}  # MT48x64
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 3, 2, 1, 4], DepthU: [16, 32, 64]}  # MT48x128
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 3, 3, 1, 4], DepthU: [16, 32, 64]}  # MT48x192
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 3, 4, 1, 4], DepthU: [16, 32]}  # MT48x256
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 3, 5, 1, 4], DepthU: [16, 32]}  # MT48x320
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 3, 6, 1, 4], DepthU: [16, 32]}  # MT48x384
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 3, 7, 1, 4], DepthU: [16, 32]}  # MT48x448
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 3, 8, 1, 4], DepthU: [16, 32]}  # MT48x512
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 3, 9, 1, 4], DepthU: [16, 32]}  # MT48x576
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 3, 10, 1, 4], DepthU: [16]}  # MT48x640
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 4, 1, 1, 4], DepthU: [16, 32, 64, 128]}  # MT64x64
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 4, 2, 1, 4], DepthU: [16, 32, 64]}  # MT64x128
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 4, 3, 1, 4], DepthU: [16, 32, 64]}  # MT64x192
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 4, 4, 1, 4], DepthU: [16, 32]}  # MT64x256
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 4, 5, 1, 4], DepthU: [16, 32]}  # MT64x320
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 4, 6, 1, 4], DepthU: [16, 32]}  # MT64x384
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 4, 7, 1, 4], DepthU: [16, 32]}  # MT64x448
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 4, 8, 1, 4], DepthU: [16, 32]}  # MT64x512
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 5, 1, 1, 4], DepthU: [16, 32, 64, 128]}  # MT80x64
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 5, 2, 1, 4], DepthU: [16, 32, 64]}  # MT80x128
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 5, 3, 1, 4], DepthU: [16, 32, 64]}  # MT80x192
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 5, 4, 1, 4], DepthU: [16, 32]}  # MT80x256
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 5, 5, 1, 4], DepthU: [16, 32]}  # MT80x320
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 5, 6, 1, 4], DepthU: [16, 32]}  # MT80x384
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 6, 1, 1, 4], DepthU: [16, 32, 64]}  # MT96x64
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 6, 2, 1, 4], DepthU: [16, 32, 64]}  # MT96x128
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 6, 3, 1, 4], DepthU: [16, 32, 64]}  # MT96x192
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 6, 4, 1, 4], DepthU: [16, 32]}  # MT96x256
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 6, 5, 1, 4], DepthU: [16, 32]}  # MT96x320
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 7, 1, 1, 4], DepthU: [16, 32, 64]}  # MT112x64
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 7, 2, 1, 4], DepthU: [16, 32, 64]}  # MT112x128
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 7, 3, 1, 4], DepthU: [16, 32]}  # MT112x192
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 7, 4, 1, 4], DepthU: [16, 32]}  # MT112x256
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 8, 1, 1, 4], DepthU: [16, 32, 64]}  # MT128x64
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 8, 2, 1, 4], DepthU: [16, 32, 64]}  # MT128x128
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 8, 3, 1, 4], DepthU: [16, 32]}  # MT128x192
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 8, 4, 1, 4], DepthU: [16, 32]}  # MT128x256
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 9, 1, 1, 4], DepthU: [16, 32, 64]}  # MT144x64
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 9, 2, 1, 4], DepthU: [16, 32, 64]}  # MT144x128
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 9, 3, 1, 4], DepthU: [16, 32]}  # MT144x192
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 10, 1, 1, 4], DepthU: [16, 32, 64]}  # MT160x64
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 10, 2, 1, 4], DepthU: [16, 32, 64]}  # MT160x128
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 10, 3, 1, 4], DepthU: [16, 32]}  # MT160x192
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 11, 1, 1, 4], DepthU: [16, 32, 64]}  # MT176x64
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 11, 2, 1, 4], DepthU: [16, 32, 64]}  # MT176x128
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 12, 1, 1, 4], DepthU: [16, 32, 64]}  # MT192x64
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 12, 2, 1, 4], DepthU: [16, 32]}  # MT192x128
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 13, 1, 1, 4], DepthU: [16, 32, 64]}  # MT208x64
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 13, 2, 1, 4], DepthU: [16, 32]}  # MT208x128
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 14, 1, 1, 4], DepthU: [16, 32, 64]}  # MT224x64
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 14, 2, 1, 4], DepthU: [16, 32]}  # MT224x128
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 15, 1, 1, 4], DepthU: [16, 32]}  # MT240x64
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 15, 2, 1, 4], DepthU: [16, 32]}  # MT240x128
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 16, 1, 1, 4], DepthU: [16, 32]}  # MT256x64
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 16, 2, 1, 4], DepthU: [16, 32]}  # MT256x128
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 17, 1, 1, 4], DepthU: [16, 32]}  # MT272x64
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 18, 1, 1, 4], DepthU: [16, 32]}  # MT288x64
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 19, 1, 1, 4], DepthU: [16, 32]}  # MT304x64
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 20, 1, 1, 4], DepthU: [16, 32]}  # MT320x64
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 21, 1, 1, 4], DepthU: [16, 32]}  # MT336x64
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 22, 1, 1, 4], DepthU: [16, 32]}  # MT352x64
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 23, 1, 1, 4], DepthU: [16, 32]}  # MT368x64
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 24, 1, 1, 4], DepthU: [16, 32]}  # MT384x64
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 25, 1, 1, 4], DepthU: [16, 32]}  # MT400x64
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 26, 1, 1, 4], DepthU: [16, 32]}  # MT416x64
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 27, 1, 1, 4], DepthU: [16, 32]}  # MT432x64
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 28, 1, 1, 4], DepthU: [16, 32]}  # MT448x64
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 29, 1, 1, 4], DepthU: [16]}  # MT464x64
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 30, 1, 1, 4], DepthU: [16]}  # MT480x64
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 31, 1, 1, 4], DepthU: [16]}  # MT496x64
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 32, 1, 1, 4], DepthU: [16]}  # MT512x64
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 1, 1, 1, 2], DepthU: [16, 32, 64, 128, 256]}  # MT16x32
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 1, 2, 1, 2], DepthU: [16, 32, 64, 128, 256]}  # MT16x64
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 1, 3, 1, 2], DepthU: [16, 32, 64, 128]}  # MT16x96
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 1, 4, 1, 2], DepthU: [16, 32, 64, 128]}  # MT16x128
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 1, 5, 1, 2], DepthU: [16, 32, 64]}  # MT16x160
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 1, 6, 1, 2], DepthU: [16, 32, 64]}  # MT16x192
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 1, 7, 1, 2], DepthU: [16, 32, 64]}  # MT16x224
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 1, 8, 1, 2], DepthU: [16, 32, 64]}  # MT16x256
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 2, 1, 1, 2], DepthU: [16, 32, 64, 128, 256]}  # MT32x32
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 2, 2, 1, 2], DepthU: [16, 32, 64, 128]}  # MT32x64
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 2, 3, 1, 2], DepthU: [16, 32, 64, 128]}  # MT32x96
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 2, 4, 1, 2], DepthU: [16, 32, 64]}  # MT32x128
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 3, 1, 1, 2], DepthU: [16, 32, 64]}  # MT48x32
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 3, 2, 1, 2], DepthU: [16, 32, 64]}  # MT48x64
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 4, 1, 1, 2], DepthU: [16, 32, 64, 128]}  # MT64x32
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 4, 2, 1, 2], DepthU: [16, 32, 64, 128]}  # MT64x64
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 5, 1, 1, 2], DepthU: [16, 32, 64]}  # MT80x32
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 6, 1, 1, 2], DepthU: [16, 32, 64]}  # MT96x32
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 7, 1, 1, 2], DepthU: [16, 32, 64]}  # MT112x32
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 8, 1, 1, 2], DepthU: [16, 32, 64]}  # MT128x32
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 1, 1, 2, 1], DepthU: [16, 32, 64, 128, 256]}  # MT32x16
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 1, 2, 2, 1], DepthU: [16, 32, 64, 128, 256]}  # MT32x32
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 1, 3, 2, 1], DepthU: [16, 32, 64, 128, 256]}  # MT32x48
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 1, 4, 2, 1], DepthU: [16, 32, 64, 128]}  # MT32x64
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 1, 5, 2, 1], DepthU: [16, 32, 64, 128]}  # MT32x80
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 1, 6, 2, 1], DepthU: [16, 32, 64, 128]}  # MT32x96
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 1, 7, 2, 1], DepthU: [16, 32, 64, 128]}  # MT32x112
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 1, 8, 2, 1], DepthU: [16, 32, 64]}  # MT32x128
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 2, 1, 2, 1], DepthU: [16, 32, 64, 128, 256]}  # MT64x16
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 2, 2, 2, 1], DepthU: [16, 32, 64, 128]}  # MT64x32
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 2, 3, 2, 1], DepthU: [16, 32, 64, 128]}  # MT64x48
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 2, 4, 2, 1], DepthU: [16, 32, 64, 128]}  # MT64x64
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 3, 1, 2, 1], DepthU: [16, 32, 64]}  # MT96x16
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 3, 2, 2, 1], DepthU: [16, 32, 64]}  # MT96x32
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 4, 1, 2, 1], DepthU: [16, 32, 64, 128]}  # MT128x16
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 4, 2, 2, 1], DepthU: [16, 32, 64]}  # MT128x32
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 5, 1, 2, 1], DepthU: [16, 32]}  # MT160x16
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 6, 1, 2, 1], DepthU: [16, 32]}  # MT192x16
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 7, 1, 2, 1], DepthU: [16, 32]}  # MT224x16
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 8, 1, 2, 1], DepthU: [16, 32, 64]}  # MT256x16
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 1, 1, 1, 1], DepthU: [16, 32, 64, 128, 256]}  # MT16x16
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 1, 2, 1, 1], DepthU: [16, 32, 64, 128, 256]}  # MT16x32
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 1, 3, 1, 1], DepthU: [16, 32, 64, 128, 256]}  # MT16x48
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 1, 4, 1, 1], DepthU: [16, 32, 64, 128, 256]}  # MT16x64
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 1, 5, 1, 1], DepthU: [16, 32, 64, 128]}  # MT16x80
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 1, 6, 1, 1], DepthU: [16, 32, 64, 128]}  # MT16x96
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 1, 7, 1, 1], DepthU: [16, 32, 64, 128]}  # MT16x112
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 1, 8, 1, 1], DepthU: [16, 32, 64]}  # MT16x128
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 2, 1, 1, 1], DepthU: [16, 32, 64, 128, 256]}  # MT32x16
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 2, 2, 1, 1], DepthU: [16, 32, 64, 128, 256]}  # MT32x32
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 2, 3, 1, 1], DepthU: [16, 32, 64, 128, 256]}  # MT32x48
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 2, 4, 1, 1], DepthU: [16, 32, 64, 128]}  # MT32x64
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 3, 1, 1, 1], DepthU: [16, 32, 64]}  # MT48x16
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 3, 2, 1, 1], DepthU: [16, 32]}  # MT48x32
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 4, 1, 1, 1], DepthU: [16, 32, 64, 128, 256]}  # MT64x16
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 4, 2, 1, 1], DepthU: [16, 32, 64, 128]}  # MT64x32
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 5, 1, 1, 1], DepthU: [16, 32]}  # MT80x16
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 6, 1, 1, 1], DepthU: [16, 32]}  # MT96x16
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 7, 1, 1, 1], DepthU: [16, 32]}  # MT112x16
+  - {MatrixInstruction: [16, 16, 4, 1, 1, 8, 1, 1, 1], DepthU: [16, 32, 64]}  # MT128x16
+
+# Not buildable (closest kernel: overflow of its most over-used resource, and why):
+#   [16, 16, 4, 1, 1, 1, 30, 2, 2]  MT32x960  +0.8%  overflowed resources.  errorCode=1, msg="too many vgprs", vgprs=258, sgprs=102
+#   [16, 16, 4, 1, 1, 1, 31, 2, 2]  MT32x992  +3.9%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=266, sgprs=102
+#   [16, 16, 4, 1, 1, 1, 32, 2, 2]  MT32x1024  +7.8%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=276, sgprs=104
+#   [16, 16, 4, 1, 1, 30, 1, 2, 2]  MT960x32  +0.8%  overflowed resources.  errorCode=1, msg="too many vgprs", vgprs=258, sgprs=102
+#   [16, 16, 4, 1, 1, 31, 1, 2, 2]  MT992x32  +3.9%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=266, sgprs=102
+#   [16, 16, 4, 1, 1, 32, 1, 2, 2]  MT1024x32  +7.8%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=276, sgprs=104
