@@ -679,7 +679,8 @@ int test_a_one_lane_vector_is_a_one_element_store()
     CHECK(rocke_verify(b.kernel, &diags, &num_diags) == ROCKE_OK);
     rocke_diags_free(diags, num_diags);
     /* The HIP source names a value without its leading '%'. */
-    const std::string lane_zero_of_one_lane = std::string(one_lane->name + 1) + "[0];";
+    const std::string store_of_lane_zero = "_storage[" + std::string(zero->name + 1)
+                                           + "] = " + std::string(one_lane->name + 1) + "[0];";
     const Lowering lowering = lower_to_llvm(&b);
     const Lowering hip = lower_to_hip(&b, b.kernel);
     rocke_ir_builder_free(&b);
@@ -687,7 +688,7 @@ int test_a_one_lane_vector_is_a_one_element_store()
     CHECK(lowering.status == ROCKE_OK);
     CHECK(every_lds_access_claims(lowering.text, "store <1 x float> %", 4));
     CHECK(hip.status == ROCKE_OK);
-    CHECK(lines_with(hip.text, "_storage[c1] = " + lane_zero_of_one_lane).size() == 1);
+    CHECK(lines_with(hip.text, store_of_lane_zero).size() == 1);
     return 0;
 }
 
