@@ -102,9 +102,11 @@ private:
     // plan uses, or std::nullopt when it can.
     std::optional<std::string> launchLimitViolation(const fmha_v3_fwdConfig& config) const;
 
-    // launchLimitViolation as an isApplicable verdict: logs the reason and
-    // returns false when the kernel cannot be launched with the plan's block.
-    bool acceptsLaunchBlock(const fmha_v3_fwdConfig& config) const;
+    // Why isApplicable declines the graph, or std::nullopt when it accepts it.
+    // isApplicable logs the reason once.
+    std::optional<std::string> checkFwdApplicability(
+        const Handle& handle,
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const;
 };
 
 } // namespace asm_sdpa_engine
