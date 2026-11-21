@@ -189,6 +189,11 @@ void _rocsparse_mat_info::set_csrildlt0_info(rocsparse_operation    operation,
     this->m_trm.create_csrildlt0_info()->set(operation, fill_mode, trm);
 }
 
+rocsparse_cscsv_info _rocsparse_mat_info::get_cscsv_info()
+{
+    return this->m_trm.create_cscsv_info();
+}
+
 rocsparse_ellsv_info _rocsparse_mat_info::get_ellsv_info()
 {
     return this->m_trm.create_ellsv_info();

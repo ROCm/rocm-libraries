@@ -136,10 +136,9 @@ namespace rocsparse
                 // Mirror the CSR path (see PR #9295): run the analysis only for
                 // (operation, fill_mode) combinations that have not been analysed
                 // yet, instead of relying on the descriptor-wide mat->analysed flag.
-                // For CSC the analysis is cached under the CSR-mapped operation and
-                // fill mode, which cscsv_is_analyzed accounts for.
-                rocsparse_csrsv_info csrsv_info = mat->info->get_csrsv_info();
-                if(!rocsparse::cscsv_is_analyzed(csrsv_info, trans, mat))
+                // The size of temp_buffer is not passed to these stages, so it is not checked.
+                rocsparse_cscsv_info cscsv_info = mat->info->get_cscsv_info();
+                if(!rocsparse::cscsv_is_analyzed(cscsv_info, trans, mat))
                 {
                     RETURN_IF_ROCSPARSE_ERROR(
                         (rocsparse::cscsv_analysis(handle,
@@ -147,7 +146,8 @@ namespace rocsparse
                                                    mat,
                                                    rocsparse_analysis_policy_force,
                                                    rocsparse_solve_policy_auto,
-                                                   &csrsv_info,
+                                                   cscsv_info,
+                                                   std::numeric_limits<size_t>::max(),
                                                    temp_buffer)));
                 }
 
@@ -165,7 +165,8 @@ namespace rocsparse
                                                                  x,
                                                                  y,
                                                                  rocsparse_solve_policy_auto,
-                                                                 mat->info->get_csrsv_info(),
+                                                                 mat->info->get_cscsv_info(),
+                                                                 std::numeric_limits<size_t>::max(),
                                                                  temp_buffer));
                 return rocsparse_status_success;
             }
