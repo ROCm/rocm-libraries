@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -104,6 +104,20 @@ const vector<vector<int>> large_opt_range
     = {{0, 0, 0, 3, 3}, {1, 0, 0, 0, 1}, {0, 1, 0, 1, 0}, {0, 0, 1, 1, 1},
        {0, 0, 0, 3, 0}, {0, 0, 0, 1, 3}, {0, 0, 0, 3, 2}};
 
+// for weekly_lapack tests (large batch_count)
+// each size_range vector is a {m, n, fa, singular};
+const vector<vector<int>> large_batch_size_range
+    = {{17, 9, 0, 0}, {9, 17, 0, 0}, {17, 9, 1, 0}, {9, 17, 1, 0}};
+const vector<vector<int>> large_batch_opt_range
+    = {{0, 0, 0, 3, 3}, {1, 0, 0, 0, 1}, {0, 1, 0, 1, 0}, {0, 0, 1, 1, 1},
+       {0, 0, 0, 3, 0}, {0, 0, 0, 1, 3}, {0, 0, 0, 3, 2}};
+
+// ---------------------------------------------------------
+// reduced tests for syevd_hybrid since it may take too long
+// ---------------------------------------------------------
+const vector<vector<int>> large_batch_hybrid_size_range = {{17, 9, 0, 0}};
+const vector<vector<int>> large_batch_hybrid_opt_range = {{0, 0, 0, 3, 3}};
+
 Arguments gesvd_setup_arguments(gesvd_tuple tup)
 {
     vector<int> size = std::get<0>(tup);
@@ -158,7 +172,7 @@ Arguments gesvd_setup_arguments(gesvd_tuple tup)
     return arg;
 }
 
-template <rocblas_int MODE>
+template <rocblas_int MODE, int BATCH_COUNT = 3>
 class GESVD_BASE : public ::TestWithParam<gesvd_tuple>
 {
 protected:
@@ -177,7 +191,7 @@ protected:
            && arg.peek<char>("left_svect") == 'N' && arg.peek<char>("right_svect") == 'N')
             testing_gesvd_bad_arg<BATCHED, STRIDED, T>();
 
-        arg.batch_count = (BATCHED || STRIDED ? 3 : 1);
+        arg.batch_count = (BATCHED || STRIDED ? BATCH_COUNT : 1);
         testing_gesvd<BATCHED, STRIDED, T>(arg);
     }
 };
@@ -187,6 +201,16 @@ class GESVD : public GESVD_BASE<0>
 };
 
 class GESVD_HYBRID : public GESVD_BASE<1>
+{
+};
+
+int constexpr BCOUNT = (64 * 1024 + 1);
+
+class GESVD_LARGE_BATCH : public GESVD_BASE<0, BCOUNT>
+{
+};
+
+class GESVD_HYBRID_LARGE_BATCH : public GESVD_BASE<1, BCOUNT>
 {
 };
 
@@ -274,6 +298,48 @@ TEST_P(GESVD_HYBRID, batched__double_complex)
     run_tests<true, true, rocblas_double_complex>();
 }
 
+// large batched tests
+
+TEST_P(GESVD_LARGE_BATCH, batched__float)
+{
+    run_tests<true, true, float>();
+}
+
+TEST_P(GESVD_LARGE_BATCH, batched__double)
+{
+    run_tests<true, true, double>();
+}
+
+TEST_P(GESVD_LARGE_BATCH, batched__float_complex)
+{
+    run_tests<true, true, rocblas_float_complex>();
+}
+
+TEST_P(GESVD_LARGE_BATCH, batched__double_complex)
+{
+    run_tests<true, true, rocblas_double_complex>();
+}
+
+TEST_P(GESVD_HYBRID_LARGE_BATCH, batched__float)
+{
+    run_tests<true, true, float>();
+}
+
+TEST_P(GESVD_HYBRID_LARGE_BATCH, batched__double)
+{
+    run_tests<true, true, double>();
+}
+
+TEST_P(GESVD_HYBRID_LARGE_BATCH, batched__float_complex)
+{
+    run_tests<true, true, rocblas_float_complex>();
+}
+
+TEST_P(GESVD_HYBRID_LARGE_BATCH, batched__double_complex)
+{
+    run_tests<true, true, rocblas_double_complex>();
+}
+
 // strided_batched tests
 
 TEST_P(GESVD, strided_batched__float)
@@ -316,6 +382,48 @@ TEST_P(GESVD_HYBRID, strided_batched__double_complex)
     run_tests<false, true, rocblas_double_complex>();
 }
 
+// large strided_batched tests
+
+TEST_P(GESVD_LARGE_BATCH, strided_batched__float)
+{
+    run_tests<false, true, float>();
+}
+
+TEST_P(GESVD_LARGE_BATCH, strided_batched__double)
+{
+    run_tests<false, true, double>();
+}
+
+TEST_P(GESVD_LARGE_BATCH, strided_batched__float_complex)
+{
+    run_tests<false, true, rocblas_float_complex>();
+}
+
+TEST_P(GESVD_LARGE_BATCH, strided_batched__double_complex)
+{
+    run_tests<false, true, rocblas_double_complex>();
+}
+
+TEST_P(GESVD_HYBRID_LARGE_BATCH, strided_batched__float)
+{
+    run_tests<false, true, float>();
+}
+
+TEST_P(GESVD_HYBRID_LARGE_BATCH, strided_batched__double)
+{
+    run_tests<false, true, double>();
+}
+
+TEST_P(GESVD_HYBRID_LARGE_BATCH, strided_batched__float_complex)
+{
+    run_tests<false, true, rocblas_float_complex>();
+}
+
+TEST_P(GESVD_HYBRID_LARGE_BATCH, strided_batched__double_complex)
+{
+    run_tests<false, true, rocblas_double_complex>();
+}
+
 INSTANTIATE_TEST_SUITE_P(daily_lapack,
                          GESVD,
                          Combine(ValuesIn(large_size_range), ValuesIn(large_opt_range)));
@@ -329,3 +437,14 @@ INSTANTIATE_TEST_SUITE_P(daily_lapack,
 INSTANTIATE_TEST_SUITE_P(checkin_lapack,
                          GESVD_HYBRID,
                          Combine(ValuesIn(size_range), ValuesIn(opt_range)));
+
+// large batch weekly tests
+
+INSTANTIATE_TEST_SUITE_P(weekly_lapack,
+                         GESVD_LARGE_BATCH,
+                         Combine(ValuesIn(large_batch_size_range), ValuesIn(large_batch_opt_range)));
+
+INSTANTIATE_TEST_SUITE_P(weekly_lapack,
+                         GESVD_HYBRID_LARGE_BATCH,
+                         Combine(ValuesIn(large_batch_hybrid_size_range),
+                                 ValuesIn(large_batch_hybrid_opt_range)));

@@ -90,6 +90,13 @@ const vector<vector<int>> large_size_range = {{120, 100}, {300, 120}, {100, 120}
 const vector<vector<int>> large_opt_range
     = {{0, 0, 0, 0, 0}, {1, 0, 0, 1, 1}, {0, 1, 0, 2, 0}, {0, 0, 1, 0, 2}};
 
+// for weekly_lapack tests (large batch_count)
+// each size_range vector is a {m, n};
+// each opt_range vector is a {lda, ldu, ldv, leftsv, rightsv};
+const vector<vector<int>> large_batch_size_range = {{7, 7}, {17, 17}};
+const vector<vector<int>> large_batch_opt_range
+    = {{0, 0, 0, 0, 0}, {1, 0, 0, 1, 1}, {0, 1, 0, 2, 0}, {0, 0, 1, 0, 2}};
+
 Arguments gesdd_setup_arguments(gesdd_tuple tup, bool notransv)
 {
     vector<int> size = std::get<0>(tup);
@@ -133,7 +140,8 @@ Arguments gesdd_setup_arguments(gesdd_tuple tup, bool notransv)
     return arg;
 }
 
-class GESDD : public ::TestWithParam<gesdd_tuple>
+template <int BATCH_COUNT = 3>
+class GESDD_BASE : public ::TestWithParam<gesdd_tuple>
 {
 protected:
     void TearDown() override
@@ -144,15 +152,26 @@ protected:
     template <bool BATCHED, bool STRIDED, typename T>
     void run_tests()
     {
-        Arguments arg = gesdd_setup_arguments(GetParam(), false);
+        Arguments arg = gesdd_setup_arguments(this->GetParam(), false);
 
         if(arg.peek<rocblas_int>("m") == 0 && arg.peek<rocblas_int>("n") == 0
            && arg.peek<char>("left_svect") == 'N' && arg.peek<char>("right_svect") == 'N')
             testing_gesdd_bad_arg<BATCHED, STRIDED, T>();
 
-        arg.batch_count = (BATCHED || STRIDED ? 3 : 1);
+        arg.batch_count = (BATCHED || STRIDED ? BATCH_COUNT : 1);
         testing_gesdd<BATCHED, STRIDED, T>(arg);
     }
+};
+
+int constexpr GESDD_BCOUNT = 64 * 1024 + 1;
+int constexpr GESDD_BCOUNT_SMALL = 3;
+
+class GESDD : public GESDD_BASE<GESDD_BCOUNT_SMALL>
+{
+};
+
+class GESDD_LARGE_BATCH : public GESDD_BASE<GESDD_BCOUNT>
+{
 };
 
 /* class GESDD_NOTRANSV : public ::TestWithParam<gesdd_tuple> */
@@ -283,11 +302,57 @@ TEST_P(GESDD, strided_batched__double_complex)
 /*     run_tests<false, true, rocblas_double_complex>(); */
 /* } */
 
+// large batch_count tests
+
+TEST_P(GESDD_LARGE_BATCH, batched__float)
+{
+    run_tests<true, true, float>();
+}
+
+TEST_P(GESDD_LARGE_BATCH, batched__double)
+{
+    run_tests<true, true, double>();
+}
+
+TEST_P(GESDD_LARGE_BATCH, batched__float_complex)
+{
+    run_tests<true, true, rocblas_float_complex>();
+}
+
+TEST_P(GESDD_LARGE_BATCH, batched__double_complex)
+{
+    run_tests<true, true, rocblas_double_complex>();
+}
+
+TEST_P(GESDD_LARGE_BATCH, strided_batched__float)
+{
+    run_tests<false, true, float>();
+}
+
+TEST_P(GESDD_LARGE_BATCH, strided_batched__double)
+{
+    run_tests<false, true, double>();
+}
+
+TEST_P(GESDD_LARGE_BATCH, strided_batched__float_complex)
+{
+    run_tests<false, true, rocblas_float_complex>();
+}
+
+TEST_P(GESDD_LARGE_BATCH, strided_batched__double_complex)
+{
+    run_tests<false, true, rocblas_double_complex>();
+}
+
 INSTANTIATE_TEST_SUITE_P(daily_lapack,
                          GESDD,
                          Combine(ValuesIn(large_size_range), ValuesIn(large_opt_range)));
 
 INSTANTIATE_TEST_SUITE_P(checkin_lapack, GESDD, Combine(ValuesIn(size_range), ValuesIn(opt_range)));
+
+INSTANTIATE_TEST_SUITE_P(weekly_lapack,
+                         GESDD_LARGE_BATCH,
+                         Combine(ValuesIn(large_batch_size_range), ValuesIn(large_batch_opt_range)));
 
 /* INSTANTIATE_TEST_SUITE_P(daily_lapack, */
 /*                          GESDD_NOTRANSV, */
