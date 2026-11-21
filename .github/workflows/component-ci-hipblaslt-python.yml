@@ -97,7 +97,8 @@ jobs:
       - name: Checkout the bindings
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          # The public headers too: the enum coverage test reads the PR's own.
+          persist-credentials: false
+          # The status test reads the checkout's hipblas-common.h.
           sparse-checkout: |
             projects/hipblaslt/python
             projects/hipblaslt/library/include
@@ -140,7 +141,8 @@ jobs:
       - name: Checkout the bindings
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          # The public headers too: the enum coverage test reads the PR's own.
+          persist-credentials: false
+          # The status test reads the checkout's hipblas-common.h.
           sparse-checkout: |
             projects/hipblaslt/python
             projects/hipblaslt/library/include
@@ -186,7 +188,8 @@ jobs:
       - name: Checkout the bindings
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          # The public headers too: the enum coverage test reads the PR's own.
+          persist-credentials: false
+          # The status test reads the checkout's hipblas-common.h.
           sparse-checkout: |
             projects/hipblaslt/python
             projects/hipblaslt/library/include
