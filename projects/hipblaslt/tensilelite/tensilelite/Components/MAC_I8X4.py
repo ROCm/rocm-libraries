@@ -23,7 +23,9 @@
 ################################################################################
 
 from rocisa.code import Module
+from rocisa.container import vgpr
 from rocisa.enum import DataTypeEnum
+from rocisa.instruction import VDot4I32I8
 from ..Common.DataType import DataType
 from ..Component import Component, MAC
 
@@ -31,28 +33,26 @@ class MAC_I8X4_Plain(MAC):
     asmCaps = {"VOP3v_dot4_i32_i8": True}
     kernel = {"ProblemType": {"DataType": DataType(DataTypeEnum.Int8x4)}}
 
-    def __call__(self, writer, m, innerUnroll):
+    def __call__(self, writer, tPA, tPB, m, innerUnroll):
         kernel = writer.states.kernel
         module = Module("MAC_I8X4_Plain")
         module.addComment(self.commentHeader())
         priority = Component.Priority.find(writer)
 
-        vars = {}
-        vars["m"] = m
-        vars["ThreadTile0"] = kernel["ThreadTile0"]
-
         for b in range(0, kernel["ThreadTile1"]):
-            vars["b"] = b
             for a in range(0, kernel["ThreadTile0"]):
-                vars["a"] = a
                 for iui in range(0, innerUnroll):
-                    vars["iui"]  = iui
-                    cidx         = a + b*kernel["ThreadTile0"] + 0
-                    cStr         = "v[vgprValuC+{a}+{b}*{ThreadTile0}]".format_map(vars)
-                    aStr         = "v[vgprValuA_X{m}_I{iui}+{a}]".format_map(vars)
-                    bStr         = "v[vgprValuB_X{m}_I{iui}+{b}]".format_map(vars)
-                    module.addInst("v_dot4_i32_i8", cStr, aStr, bStr, cStr, "valuC[%u]" % cidx)
-                    module.add(priority(writer, 1, "Raise priority while processing macs"))
+                    cidx = a + b * kernel["ThreadTile0"]
+                    cStr = vgpr(f"ValuC+{cidx}")
+                    aStr = vgpr(f"ValuA_X{m}_I{iui}+{a}")
+                    bStr = vgpr(f"ValuB_X{m}_I{iui}+{b}")
+                    module.add(VDot4I32I8(cStr, aStr, bStr, cStr,
+                                          f"valuC[{cidx}]"))
+                    prio = priority(writer, 1, "Raise priority while processing macs")
+                    if prio:
+                        module.add(prio)
 
-        module.add(priority(writer, 0, "Reset priority after macs"))
+        prio = priority(writer, 0, "Reset priority after macs")
+        if prio:
+            module.add(prio)
         return module
