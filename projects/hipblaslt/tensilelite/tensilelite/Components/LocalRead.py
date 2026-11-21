@@ -105,7 +105,13 @@ class LocalReadVALU(LocalRead):
                 if numOffsets == 2:
                     ds = DSModifiers(na=2, offset0=paramList[0], offset1=paramList[1])
                     srcAddr=vgpr("LocalReadAddr%s"%tc)
-                LocalReadX = instruction.getInst()
+                highBits = (kernel["ISA"][0] == 10
+                            and not writer.states.archCaps["DSLow16NotPreserve"]
+                            and not kernel["UseDotInstruction"]
+                            and kernel["ProblemType"]["DataType"].isHalf()
+                            and not kernel["ProblemType"]["HighPrecisionAccumulate"]
+                            and blockWidth == 0.5 and int(valuIdx * 2) % 2 == 1)
+                LocalReadX = instruction.getInst(highBits)
                 self._emitLdsRead(writer, kernel, tP, LocalReadX, dst=destVgpr, src=srcAddr, ds=ds, module=localReadCode)
                 valuIdx += blockWidth
 
