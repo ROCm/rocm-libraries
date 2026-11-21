@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <cstring>
 #include <exception>
+#include <filesystem>
 #include <iterator>
 #include <optional>
 #include <stdexcept>
@@ -29,7 +30,9 @@
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
 #include <hipdnn_plugin_sdk/ingestor/NativeHooks.hpp>
+#include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
+#include <hipdnn_test_sdk/utilities/ScratchDirectory.hpp>
 
 #include "core/Handle.hpp"
 #include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
@@ -666,14 +669,18 @@ inline std::vector<KernelArgument> pythonLseAbi()
 /// A KPACK descriptor for @p arch's engine recording @p signature, carrying the completed
 /// D128 metadata prepare() reads: head_size and the (@p blockM, @p blockN) tile.
 ///
-/// The archive it names is not there, which is the point: every check prepare() makes
-/// before the loader is reached, and when they all pass the loader reports the missing
-/// file. No device, no compile, no launch.
+/// The archive is absent from an empty tree this binary owns and removes at exit. The
+/// cases only read it, so they share one. Unlike /nonexistent, its state is not the host's:
+/// containment and link checks pass, then the signature comparison and loader are reached.
+/// No device, no compile, no launch.
 inline KernelDefinition kpackKernel(const AttentionDenseTestArch& arch,
                                     const std::vector<KernelArgument>& signature,
                                     int64_t blockM = 256,
                                     int64_t blockN = 64)
 {
+    static const hipdnn_test_sdk::utilities::ScopedDirectory s_tree
+        = hipdnn_test_sdk::utilities::claimScratchDirectory("attentiondense");
+
     KernelDefinition kernel;
     kernel.kernelId
         = hipdnn_flatbuffers_sdk::utilities::parseUuid("00000000-0000-4000-8000-0000000051a1");
@@ -687,8 +694,8 @@ inline KernelDefinition kpackKernel(const AttentionDenseTestArch& arch,
     kernel.source.tocKey = "toc#0";
     kernel.source.symbol = "attention_dense";
     kernel.source.signature = signature;
-    kernel.originDirectory = "/nonexistent";
-    kernel.treeRoot = "/nonexistent";
+    kernel.originDirectory = s_tree.path();
+    kernel.treeRoot = s_tree.path();
     kernel.metadata = completedAttentionDenseMetadata(arch, HEAD_SIZE, blockM, blockN);
     return kernel;
 }

@@ -220,7 +220,7 @@ protected:
 /// argument list would pass all of them and launch nothing.
 ///
 /// Failure is still expected -- the archive is absent -- but it must arrive from the
-/// loader, past the comparison, rather than from the comparison itself.
+/// loader, past the comparison, rather than from the comparison itself or a check ahead of it.
 TEST_P(TestAttentionDenseSignature, AcceptsTheAbiThePythonDeclares)
 {
     const std::string failure = prepareFailure(arch(), pythonAbi());
@@ -228,6 +228,8 @@ TEST_P(TestAttentionDenseSignature, AcceptsTheAbiThePythonDeclares)
                                      "prepare() cannot have succeeded";
     EXPECT_EQ(failure.find(MISMATCH_MARKER), std::string::npos)
         << "the pack refused the argument list the rocKE builder declares: " << failure;
+    EXPECT_NE(failure.find("does not exist"), std::string::npos)
+        << "prepare() failed before the loader reported the absent archive: " << failure;
 }
 
 // =============================================================================
@@ -374,6 +376,8 @@ TEST(TestGfx942AttentionDenseSignature, AcceptsThePersistentFormOfTheCandidatesO
             ASSERT_FALSE(failure.empty()) << decode;
             EXPECT_EQ(failure.find(MISMATCH_MARKER), std::string::npos)
                 << decode << " lse " << lse << ": " << failure;
+            EXPECT_NE(failure.find("does not exist"), std::string::npos)
+                << decode << " lse " << lse << ": " << failure;
         }
     }
 }
@@ -427,6 +431,8 @@ TEST(TestGfx942AttentionDenseSignature, AcceptsTheLseAbiForAGraphThatBindsStats)
                                      "prepare() cannot have succeeded";
     EXPECT_EQ(failure.find(MISMATCH_MARKER), std::string::npos)
         << "the pack refused the emit_lse argument list the rocKE builder declares: " << failure;
+    EXPECT_NE(failure.find("does not exist"), std::string::npos)
+        << "prepare() failed before the loader reported the absent archive: " << failure;
 }
 
 TEST(TestGfx942AttentionDenseSignature, RefusesTheTenArgumentFormForAGraphThatBindsStats)
