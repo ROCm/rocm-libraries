@@ -190,7 +190,7 @@ def _make_candidate(
     return candidate
 
 
-def _build(spec, _arch: str):
+def _build(spec, arch: str):
     """Both norm builders take only a spec.
 
     Norm derives its wave size from the spec rather than the target, which is

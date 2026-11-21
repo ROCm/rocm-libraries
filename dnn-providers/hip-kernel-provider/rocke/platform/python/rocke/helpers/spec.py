@@ -25,7 +25,7 @@ from __future__ import annotations
 import dataclasses
 import hashlib
 import operator
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from typing import Iterable, List, Optional, Sequence, Tuple
 
 
@@ -44,8 +44,45 @@ __all__ = [
     "salted_kernel_name",
     "sig_param",
     "sig_scalar",
+    "validate_field_types",
     "validate_io",
 ]
+
+
+# ---------------------------------------------------------------------
+# validate_field_types
+# ---------------------------------------------------------------------
+
+
+def validate_field_types(spec: object) -> None:
+    """Reject bool/int confusion on a kernel spec's own fields.
+
+    Python makes ``bool`` a subclass of ``int``, so a spec accepts
+    ``v_paged=1`` and ``unroll=True`` without complaint. Neither is benign
+    here: a flag like ``v_paged`` changes the kernel's parameter list, and
+    the host arg packer lays out that list positionally -- so a truthy
+    non-bool silently produces a kernel whose ABI does not match what the
+    caller packed. ``type(x) is T`` rather than ``isinstance`` is the point:
+    it is the only check that separates the two.
+
+    Only ``bool``, ``int`` and ``str`` annotations are checked; anything
+    else (``Optional``, nested specs, tuples) is left alone, so this is safe
+    to call from any spec's ``__post_init__``.
+    """
+    for f in fields(spec):
+        val = getattr(spec, f.name)
+        # ``from __future__ import annotations`` leaves f.type a string; without
+        # it the field carries the class itself. Accept both spellings so the
+        # check does not quietly become a no-op in a module that lacks it.
+        key = f.type if isinstance(f.type, str) else getattr(f.type, "__name__", "")
+        expect = {"bool": bool, "int": int, "str": str}.get(key)
+        if expect is None:
+            continue
+        if type(val) is not expect:
+            raise TypeError(
+                f"{type(spec).__name__}.{f.name} must be {expect.__name__}, "
+                f"got {type(val).__name__} ({val!r})"
+            )
 
 
 # ---------------------------------------------------------------------
