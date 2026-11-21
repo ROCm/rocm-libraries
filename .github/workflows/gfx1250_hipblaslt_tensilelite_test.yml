@@ -97,7 +97,7 @@ jobs:
           jq -e --argjson org "$ORG_LABELS" 'any(.[]; . as $x | $org | index($x) != null)' <<<"$LABELS" >/dev/null \
             || skip "PR #$PR has no ROCm org label"
           # The Python bindings are tested by Component CI, so they alone don't run this job.
-          ALL_FILES="$(gh api --paginate "repos/$REPO/pulls/$PR/files" --jq '.[].filename')"
+          ALL_FILES="$(gh api --paginate "repos/$REPO/pulls/$PR/files" --jq '.[] | .filename, (.previous_filename // empty)')"
           FILES="$(grep -v '^projects/hipblaslt/python/' <<<"$ALL_FILES" || true)"
           # ci-env/action.yml holds therock-ref: a bump PR runs the job, so a compiler change
           # shows up there as the SDK compiler warning.
