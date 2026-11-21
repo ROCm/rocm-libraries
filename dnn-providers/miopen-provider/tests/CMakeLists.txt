@@ -37,6 +37,9 @@ add_executable(
     engines/plans/TestMiopenConvPlanBuilder.cpp
     engines/plans/TestMiopenConvWrwPlan.cpp
     engines/plans/TestMiopenPointwiseTensorChecks.cpp
+    engines/plans/TestMiopenResampleFwdChecks.cpp
+    engines/plans/TestMiopenResampleFwdPlan.cpp
+    engines/plans/TestMiopenResampleFwdPlanBuilder.cpp
     engines/plans/TestMiopenUnaryActivationChecks.cpp
     engines/plans/TestMiopenUnaryActivationPlanBuilder.cpp
     engines/TestMiopenEngine.cpp
@@ -47,6 +50,7 @@ add_executable(
     TestMiopenHipdnnEnginePluginHandle.cpp
     TestMiopenHipdnnPluginExecutionContext.cpp
     TestMiopenPluginPublic.cpp
+    TestMiopenPoolingDescriptor.cpp
     TestMiopenTensor.cpp
     TestMiopenUtils.cpp
 )
