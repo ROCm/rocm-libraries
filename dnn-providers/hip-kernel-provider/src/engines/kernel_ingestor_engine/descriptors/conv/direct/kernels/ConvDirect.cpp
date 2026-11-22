@@ -25,7 +25,8 @@
 //   CONV_DIRECT_LINE    1: 2-D rows on one-row images and 1 x S filters, the row as one halo
 //                       line (default 0)
 //   CONV_DIRECT_ZRING   1: the z-ring tile (ConvDirectZring.h), CONV_DIRECT_ATOM, _BM, _BN, _BC,
-//                       _WM, _WN; one workgroup per compute unit (default 0)
+//                       _WM, _WN; one workgroup per compute unit (default 0). K2Z_EDGES 1 (set
+//                       where an output plane is not whole tiles): its edge tiles
 
 #include "ConvDirectCore.h"
 #ifndef CONV_DIRECT_ROWS
