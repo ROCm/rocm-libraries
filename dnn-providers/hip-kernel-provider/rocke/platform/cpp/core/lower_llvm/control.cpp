@@ -1253,6 +1253,8 @@ static void _op_tile_asyncmark(rocke_lower_t* L, const rocke_op_t* op)
     if(!rocke_ll_live(L))
         return;
     rocke_ll_need(L, "asyncmark");
+    /* Operand-less on purpose: valid on llvm23; llvm24 adds a trailing i32 stages immarg and
+     * auto-upgrades this form to 0 (all stages). */
     rocke_ll_emit(L, "  call void @llvm.amdgcn.asyncmark()");
 }
 
@@ -1265,6 +1267,8 @@ static void _op_tile_wait_asyncmark(rocke_lower_t* L, const rocke_op_t* op)
         n = 0;
     ll_check_u16(L, "wait_asyncmark", "n", n);
     rocke_ll_need(L, "wait.asyncmark");
+    /* No stages operand on purpose: valid on llvm23; llvm24 adds a trailing i32 stages immarg
+     * and auto-upgrades this form to 0 (all stages). */
     rocke_ll_emitf(L, "  call void @llvm.amdgcn.wait.asyncmark(i16 %lld)", (long long)n);
 }
 

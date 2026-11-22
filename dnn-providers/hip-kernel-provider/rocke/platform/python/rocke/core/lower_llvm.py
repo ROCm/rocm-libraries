@@ -804,6 +804,8 @@ _INTRINSIC_DECLS: Dict[str, str] = {
         "i32 immarg, i32, i32 immarg, i32)"
     ),
     # --- LLVM 23 async markers (gfx12+ async global/LDS pipelines) ---
+    # Operand-less on purpose: valid on llvm23; llvm24 adds a trailing i32 stages immarg and
+    # auto-upgrades this form to 0 (all stages).
     "asyncmark": "declare void @llvm.amdgcn.asyncmark()",
     "wait.asyncmark": "declare void @llvm.amdgcn.wait.asyncmark(i16 immarg)",
     "raw.ptr.buffer.load.async.lds": (
