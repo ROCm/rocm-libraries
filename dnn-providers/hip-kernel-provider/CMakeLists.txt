@@ -673,17 +673,26 @@ if(HIPKERNELPROVIDER_ENABLE_ROCKE)
     # package and build whenever the build's Python has pybind11, unless
     # ROCKE_BUILD_PYBIND is set explicitly. Not on Windows: TheRock's test
     # artifact does not capture .pyd modules, and the modules have not been
-    # built or run there.
-    if(HIPKERNELPROVIDER_ENABLE_TESTS AND NOT WIN32 AND NOT DEFINED ROCKE_BUILD_PYBIND)
-        include("${CMAKE_CURRENT_SOURCE_DIR}/rocke/platform/cmake/rocke_pybind11.cmake")
-        rocke_locate_pybind11(_hkp_have_pybind11)
-        if(_hkp_have_pybind11)
-            set(ROCKE_BUILD_PYBIND ON)
+    # built or run there. When it builds none, ROCKE_ENGINE_MODULES_ABSENT_REASON
+    # says why: the installed guard rocke_engine_modules_check reports it as its
+    # skip reason.
+    if(HIPKERNELPROVIDER_ENABLE_TESTS AND NOT DEFINED ROCKE_BUILD_PYBIND)
+        if(WIN32)
+            set(ROCKE_ENGINE_MODULES_ABSENT_REASON
+                "Windows provider builds do not build them (TheRock's test artifact does not capture .pyd modules)")
         else()
-            message(WARNING
-                "rocKE: ${Python3_EXECUTABLE} has no pybind11, so the C++ engine's "
-                "Python modules are not built and the installed tests that need "
-                "them skip. Install pybind11 there to build them.")
+            include("${CMAKE_CURRENT_SOURCE_DIR}/rocke/platform/cmake/rocke_pybind11.cmake")
+            rocke_locate_pybind11(_hkp_have_pybind11)
+            if(_hkp_have_pybind11)
+                set(ROCKE_BUILD_PYBIND ON)
+            else()
+                set(ROCKE_ENGINE_MODULES_ABSENT_REASON
+                    "the build's Python had no pybind11")
+                message(WARNING
+                    "rocKE: ${Python3_EXECUTABLE} has no pybind11, so the C++ engine's "
+                    "Python modules are not built and the installed tests that need "
+                    "them skip. Install pybind11 there to build them.")
+            endif()
         endif()
     endif()
 

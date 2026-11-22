@@ -16,6 +16,7 @@ from unittest.mock import Mock
 import pytest
 from rocke.portable_ir.src import online
 from rocke.tests.ctest_listing import configure_installed_ctest, list_ctest_entries
+from rocke.tests.engine_modules import EngineModulesMarker, read_engine_modules_marker
 from rocke.tests.provider_categories import provider_category_labels
 
 PLATFORM = Path(__file__).resolve().parents[1]
@@ -342,6 +343,36 @@ def test_every_entry_sets_a_resource_class_timeout(tmp_path, provider_subdir):
             name: seconds for name, seconds in timeouts.items() if seconds not in limits
         }
         assert not off_limit, (tree.name, off_limit)
+
+
+@requires_cmake
+@pytest.mark.parametrize(
+    "cmake_arguments, marker",
+    [
+        ((), EngineModulesMarker((), "the build had ROCKE_BUILD_PYBIND off")),
+        (
+            ('-DROCKE_ENGINE_MODULES_ABSENT_REASON=no "pybind11" in C:\\py',),
+            EngineModulesMarker((), 'no "pybind11" in C:\\py'),
+        ),
+        (
+            (f"-DPython3_EXECUTABLE={sys.executable}", "-DROCKE_BUILD_PYBIND=ON"),
+            EngineModulesMarker(("rocke_engine", "rocke_library_engine"), ""),
+        ),
+    ],
+    ids=["pybind-off", "reason-given", "pybind-on"],
+)
+def test_the_configure_records_the_engine_modules_it_builds(
+    tmp_path, cmake_arguments, marker
+):
+    """The installed guard rocke_engine_modules_check reads this marker: the
+    modules the build makes, or why it makes none (any text, escaped as JSON).
+    The library module is recorded only beside the library tree."""
+    if "-DROCKE_BUILD_PYBIND=ON" in cmake_arguments:
+        pytest.importorskip("pybind11", reason="the binding's configure needs it")
+        if not (PLATFORM.parent / "library" / "cpp").is_dir():
+            marker = EngineModulesMarker(("rocke_engine",), "")
+    build, _ = configure_installed_ctest(tmp_path, *cmake_arguments)
+    assert read_engine_modules_marker(build / "rocke_engine_modules.json") == marker
 
 
 @requires_cmake

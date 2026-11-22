@@ -89,3 +89,6 @@ endif()
 install(TARGETS rocke_engine
         LIBRARY DESTINATION "${ROCKE_PYTHON_PACKAGE_INSTALL_DIR}"
         RUNTIME DESTINATION "${ROCKE_PYTHON_PACKAGE_INSTALL_DIR}")
+# The installed test tree records which engine modules the build makes
+# (platform/CMakeLists.txt writes the marker its guard reads).
+set_property(GLOBAL APPEND PROPERTY ROCKE_ENGINE_PYTHON_MODULES rocke_engine)

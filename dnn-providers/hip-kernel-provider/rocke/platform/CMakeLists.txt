@@ -444,6 +444,33 @@ if(ROCKE_INSTALL_TESTS)
     install(PROGRAMS "${CMAKE_CURRENT_SOURCE_DIR}/tools/rocke_installed_smoke.py"
             DESTINATION ${ROCKE_TEST_INSTALL_DIR})
 
+    # Which of the C++ engine's Python modules this build makes, or why it
+    # makes none, for the installed guard rocke_engine_modules_check
+    # (rocke.tests.engine_modules), which fails when a module the build made
+    # does not import. Under tests/, which TheRock's test artifact captures. A
+    # build that decides against the modules (the provider build, on Windows or
+    # without pybind11) says why in ROCKE_ENGINE_MODULES_ABSENT_REASON.
+    get_property(_ROCKE_ENGINE_PYTHON_MODULES GLOBAL PROPERTY ROCKE_ENGINE_PYTHON_MODULES)
+    if(_ROCKE_ENGINE_PYTHON_MODULES)
+      list(TRANSFORM _ROCKE_ENGINE_PYTHON_MODULES REPLACE "(.+)" "\"\\1\"")
+      list(JOIN _ROCKE_ENGINE_PYTHON_MODULES ", " _rocke_engine_modules_json)
+      set(_rocke_engine_modules_json "{\"modules\": [${_rocke_engine_modules_json}]}")
+    else()
+      if(NOT DEFINED ROCKE_ENGINE_MODULES_ABSENT_REASON)
+        set(ROCKE_ENGINE_MODULES_ABSENT_REASON "the build had ROCKE_BUILD_PYBIND off")
+      endif()
+      # A JSON string: escape its backslashes, then its quotes.
+      string(REPLACE "\\" "\\\\" _rocke_absent_reason "${ROCKE_ENGINE_MODULES_ABSENT_REASON}")
+      string(REPLACE "\"" "\\\"" _rocke_absent_reason "${_rocke_absent_reason}")
+      set(_rocke_engine_modules_json
+          "{\"modules\": [], \"absent_reason\": \"${_rocke_absent_reason}\"}")
+    endif()
+    set(_ROCKE_ENGINE_MODULES_MARKER "${CMAKE_CURRENT_BINARY_DIR}/rocke_engine_modules.json")
+    file(GENERATE OUTPUT "${_ROCKE_ENGINE_MODULES_MARKER}"
+         CONTENT "${_rocke_engine_modules_json}\n")
+    install(FILES "${_ROCKE_ENGINE_MODULES_MARKER}"
+            DESTINATION "${ROCKE_TEST_INSTALL_DIR}/tests")
+
     # Host-only golden IR byte-stability gate. The relocatable runner rebuilds the
     # representative IR from the co-located rocke package and compares digests to
     # the committed golden. It needs the parity harness module (imported by name)
@@ -669,6 +696,20 @@ if(ROCKE_INSTALL_TESTS)
            "add_test(rocke_python_import_smoke python \"${ROCKE_TEST_CTEST_REL}rocke_installed_smoke.py\")\n")
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
            "set_tests_properties(rocke_python_import_smoke PROPERTIES LABELS \"ckc;python;quick\" TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})\n")
+
+    # The engine modules the build made import from the installed tree, and
+    # lower_kernel_to_llvm lowers through the C++ engine: without this entry,
+    # losing the modules turns thousands of installed tests into skips and
+    # the run stays green. It skips (exit 77) with the marker's reason when the
+    # build made none. Not a pytest entry, so it runs whole on every CI shard;
+    # it costs about a second.
+    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+           "add_test(rocke_engine_modules_check python -m rocke.tests.engine_modules \"${ROCKE_TEST_CTEST_REL}tests/rocke_engine_modules.json\")\n"
+           "set_tests_properties(rocke_engine_modules_check PROPERTIES\n"
+           "  LABELS \"ckc;python;host;standard\"\n"
+           "  ENVIRONMENT \"PYTHONPATH=${_ROCKE_INSTALLED_PYTHONPATH}\"\n"
+           "  SKIP_RETURN_CODE 77\n"
+           "  TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})\n")
 
     set(_rocke_barrier_parity_entries "")
     if(TARGET rocke_optimization_barrier_emit)
@@ -945,10 +986,10 @@ if(ROCKE_INSTALL_TESTS)
       # 5.1.2), and every other directory runs in rocke_tiling_pytest. None of
       # the three is one of the parts, so none takes their name prefix. Four
       # kinds of test skip here and pass: the GPU tests, without a usable GPU;
-      # the C++-engine cases of the IR tests, as the installed tree has no
-      # rocke_engine binding (their Python-engine cases run); the source scans
-      # of the dsl_docs and library trees, which the installed tree does not
-      # hold (rocke.tests.source_tree); and every
+      # the C++-engine cases of the IR tests, where the build made no engine
+      # modules (see rocke_engine_modules_check; their Python-engine cases
+      # run); the source scans of the dsl_docs and library trees, which the
+      # installed tree does not hold (rocke.tests.source_tree); and every
       # test that loads platform/tools/, which it does not hold either. The last
       # kind runs only from a source checkout: the backend coverage
       # re-measurement, the compile of every issued MMA instruction and the
