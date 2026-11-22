@@ -54,7 +54,7 @@ from kernels.common.conv_args import ConvArgs
 from kernels.common.conv_direct_grouped import DirectConvProblem
 from kernels.common.conv_direct_nongrouped import _OOB_BASE
 from rocke.core.arch import ArchTarget
-from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
+from rocke.core.lower_llvm import LLVM_FLAVORS, _lower_kernel_to_llvm_python
 
 _SEED = 2026
 _SAMPLE_PER_K_LOOP = 3
@@ -639,6 +639,37 @@ def test_runtime_candidates_keep_every_serving_direct_instance(direct_jobs):
     )
     serving = [s for s in specs if gfx950_conv_fwd_aot_serves(s, problem)[0]]
     assert serving and gfx950_conv_fwd_aot_runtime_candidates(problem, specs) == serving
+
+
+def test_runtime_candidates_admit_each_instance_at_its_own_llvm_flavor(sweep_jobs):
+    """The same instance built for every LLVM flavor: a catalog scan admits each at
+    its own flavor, as serves does one instance at a time, so all of them run. An
+    instance admitted at another instance's flavor would be refused."""
+    dtype, job = sweep_jobs[0]
+    specs = [
+        _spec(replace(job.identity, llvm_flavor=flavor)) for flavor in LLVM_FLAVORS
+    ]
+    assert [s.identity().llvm_flavor for s in specs] == list(LLVM_FLAVORS)
+    problem = Gfx950ConvFwdSpec(
+        N=2, Hi=14, Wi=14, C=64, K=64, Y=3, X=3, pH=1, pW=1, dtype=dtype
+    )
+    assert all(gfx950_conv_fwd_aot_serves(s, problem)[0] for s in specs)
+    assert gfx950_conv_fwd_aot_runtime_candidates(problem, specs) == specs
+
+
+def test_a_problem_outside_the_contract_is_served_by_no_instance(sweep_jobs):
+    """The runtime problem checks come before any instance's own: serves names the
+    problem's fault, and a catalog scan selects nothing."""
+    dtype, job = sweep_jobs[0]
+    spec = _spec(job.identity)
+    problem = Gfx950ConvFwdSpec(
+        N=2, Hi=14, Wi=14, C=64, K=64, Y=3, X=3, pH=1, pW=1, groups=3, dtype=dtype
+    )
+    assert gfx950_conv_fwd_aot_serves(spec, problem) == (
+        False,
+        "C=64 is not divisible by groups=3",
+    )
+    assert gfx950_conv_fwd_aot_runtime_candidates(problem, [spec]) == []
 
 
 # ---- Direct instances ----

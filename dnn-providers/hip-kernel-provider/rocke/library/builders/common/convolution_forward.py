@@ -1037,6 +1037,13 @@ class Gfx950ConvFwdAotSpec:
         when none is, the dispatcher lists' flavor. The fields must already be
         consistent (:func:`supports_gfx950_conv_fwd_aot` checks them first).
         """
+        return self._identity
+
+    @functools.cached_property
+    def _identity(self) -> KernelIdentity:
+        """:meth:`identity`, kept on the instance: a catalog scan asks it of every
+        instance for every problem, and reaching the shared ``_aot_identity``
+        cache hashes every field of the spec on each ask."""
         return _aot_identity(self)
 
     def _direct_caps(self) -> tuple[int, int]:
@@ -1788,17 +1795,18 @@ def gfx950_conv_fwd_aot_capabilities(
 
 
 def _aot_admits(
-    spec: Gfx950ConvFwdAotSpec, problem: Gfx950ConvFwdSpec
+    spec: Gfx950ConvFwdAotSpec, request: ConvGroupedRequest
 ) -> tuple[bool, str]:
     """rocKE's grouped-convolution dispatcher's admission of ``spec``'s identity
-    for ``problem``: ``identity_supports_problem``, and for a direct identity the
-    per-shape re-validation of its knobs (``direct_spec_for_problem``)."""
-    ok, why = _dispatcher_admits(spec.identity(), spec.request(problem))
+    for ``request`` (:meth:`Gfx950ConvFwdAotSpec.request` of the problem):
+    ``identity_supports_problem``, and for a direct identity the per-shape
+    re-validation of its knobs (``direct_spec_for_problem``)."""
+    ok, why = _dispatcher_admits(spec.identity(), request)
     return (True, "ok") if ok else (False, why)
 
 
 def _aot_direct_serves(
-    spec: Gfx950ConvFwdAotSpec, problem: Gfx950ConvFwdSpec
+    spec: Gfx950ConvFwdAotSpec, query: _AotServesQuery
 ) -> tuple[bool, str]:
     """Whether a direct instance other than std or spatial computes ``problem``,
     which already passed the problem checks.
@@ -1811,6 +1819,7 @@ def _aot_direct_serves(
     axis 65535, the flat grid of the non-grouped and grouped-halo kernels (and
     of a split-C instance's fold) a 32-bit dispatch.
     """
+    problem = query.problem
     variant = spec.direct_variant
     if problem.sH != problem.sW or problem.pH != problem.pW:
         return False, "the direct kernels compile one stride and one padding"
@@ -1837,7 +1846,7 @@ def _aot_direct_serves(
             f"direct kernel compiled for cpg, kpg = {spec._direct_caps()}, "
             f"problem has {(cpg, kpg)}"
         )
-    ok, why = _aot_admits(spec, problem)
+    ok, why = _aot_admits(spec, query.request(spec))
     if not ok:
         return False, why
     steps = [spec.launch_step(problem)]
@@ -1909,33 +1918,71 @@ def gfx950_conv_fwd_aot_serves(
     the whole batch, never does. Every other instance needs the whole problem in
     one launch.
     """
-    if (
-        spec.is_direct
-        and spec.direct_variant in _AOT_HALO_VARIANTS
-        and problem.dtype == spec.dtype
-    ):
-        chunks = gfx950_conv_fwd_aot_batch_chunks(problem)
-        if chunks is not None:
-            if spec.is_split_c:
-                return False, "a batch-split launch does not take split-C kernels"
-            for images in sorted(set(chunks)):
-                ok, why = gfx950_conv_fwd_aot_serves(spec, replace(problem, N=images))
-                if not ok:
-                    return False, f"batch chunk of {images} image(s): {why}"
-            return True, "ok"
-    error = _problem_error(problem, decline_grouped_pointwise=False)
-    if error:
-        return False, error
-    if problem.dtype != spec.dtype:
-        return False, f"dtype {problem.dtype} != instance dtype {spec.dtype}"
-    if spec.is_direct:
-        if spec.direct_variant in _DIRECT_VARIANTS:
-            caps = gfx950_conv_fwd_aot_capabilities(spec)
-            return _direct_serves(caps, spec.runtime_spec(problem))
-        return _aot_direct_serves(spec, problem)
-    if problem.Y * problem.X * (problem.C // problem.groups) >= MUL24_REDUCTION_LIMIT:
-        return False, "the reduction extent Y*X*C/groups must stay below 2**23"
-    return _aot_admits(spec, problem)
+    return _AotServesQuery(problem).serves(spec)
+
+
+class _AotServesQuery:
+    """One runtime problem asked of many instances.
+
+    :meth:`serves` is :func:`gfx950_conv_fwd_aot_serves` of an instance and this
+    problem. What depends on the problem alone, its contract checks and its
+    dispatcher request (one per LLVM flavor), is computed once and reused for
+    every instance asked, which is what lets
+    :func:`gfx950_conv_fwd_aot_runtime_candidates` scan a whole catalog.
+    """
+
+    def __init__(self, problem: Gfx950ConvFwdSpec) -> None:
+        self.problem = problem
+        self._requests: dict[str, ConvGroupedRequest] = {}
+
+    @functools.cached_property
+    def problem_error(self) -> str:
+        """The problem's contract checks for a runtime problem; "" when accepted."""
+        return _problem_error(self.problem, decline_grouped_pointwise=False)
+
+    def request(self, spec: Gfx950ConvFwdAotSpec) -> ConvGroupedRequest:
+        """``spec.request(problem)``: built once per LLVM flavor, its only
+        dependence on the instance."""
+        flavor = spec.identity().llvm_flavor
+        request = self._requests.get(flavor)
+        if request is None:
+            request = self._requests[flavor] = spec.request(self.problem)
+        return request
+
+    def serves(self, spec: Gfx950ConvFwdAotSpec) -> tuple[bool, str]:
+        """Whether instance ``spec`` computes the problem, and why not."""
+        problem = self.problem
+        if (
+            spec.is_direct
+            and spec.direct_variant in _AOT_HALO_VARIANTS
+            and problem.dtype == spec.dtype
+        ):
+            chunks = gfx950_conv_fwd_aot_batch_chunks(problem)
+            if chunks is not None:
+                if spec.is_split_c:
+                    return False, "a batch-split launch does not take split-C kernels"
+                for images in sorted(set(chunks)):
+                    ok, why = gfx950_conv_fwd_aot_serves(
+                        spec, replace(problem, N=images)
+                    )
+                    if not ok:
+                        return False, f"batch chunk of {images} image(s): {why}"
+                return True, "ok"
+        if self.problem_error:
+            return False, self.problem_error
+        if problem.dtype != spec.dtype:
+            return False, f"dtype {problem.dtype} != instance dtype {spec.dtype}"
+        if spec.is_direct:
+            if spec.direct_variant in _DIRECT_VARIANTS:
+                caps = gfx950_conv_fwd_aot_capabilities(spec)
+                return _direct_serves(caps, spec.runtime_spec(problem))
+            return _aot_direct_serves(spec, self)
+        if (
+            problem.Y * problem.X * (problem.C // problem.groups)
+            >= MUL24_REDUCTION_LIMIT
+        ):
+            return False, "the reduction extent Y*X*C/groups must stay below 2**23"
+        return _aot_admits(spec, self.request(spec))
 
 
 def gfx950_conv_fwd_aot_runtime_candidates(
@@ -1959,7 +2006,8 @@ def gfx950_conv_fwd_aot_runtime_candidates(
     ``conv::widestVectorSelection`` is the same policy; the result keeps the order
     of ``specs``.
     """
-    serving = [spec for spec in specs if gfx950_conv_fwd_aot_serves(spec, problem)[0]]
+    query = _AotServesQuery(problem)
+    serving = [spec for spec in specs if query.serves(spec)[0]]
     load = _widest_vector_width(problem.C // problem.groups)
     store = _widest_vector_width(problem.K // problem.groups)
     widest = [
