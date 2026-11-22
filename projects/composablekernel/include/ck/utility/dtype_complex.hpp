@@ -69,6 +69,171 @@ __host__ __device__ inline T diff_of_products(T a, T d, T b, T c)
     return f - e;
 }
 
+__host__ __device__ inline float complex_copysign(float x, float s)
+{
+    return __builtin_copysignf(x, s);
+}
+
+__host__ __device__ inline double complex_copysign(double x, double s)
+{
+    return __builtin_copysign(x, s);
+}
+
+__host__ __device__ inline float complex_ldexp(float x, int n) { return __builtin_ldexpf(x, n); }
+
+__host__ __device__ inline double complex_ldexp(double x, int n) { return __builtin_ldexp(x, n); }
+
+// The exponent of x, as ilogb gives it, for finite nonzero x. Through frexp, which the GPU
+// has as an instruction; ilogb is a library call there.
+__host__ __device__ inline int complex_ilogb(float x)
+{
+    int e = 0;
+    __builtin_frexpf(x, &e);
+    return e - 1;
+}
+
+__host__ __device__ inline int complex_ilogb(double x)
+{
+    int e = 0;
+    __builtin_frexp(x, &e);
+    return e - 1;
+}
+
+__host__ __device__ inline float complex_fabs(float x) { return __builtin_fabsf(x); }
+
+__host__ __device__ inline double complex_fabs(double x) { return __builtin_fabs(x); }
+
+template <typename T>
+__host__ __device__ inline complex_t<T> kahan_multiply(const complex_t<T>& a, const complex_t<T>& b)
+{
+    return complex_t<T>{diff_of_products(a.real, b.real, a.imag, b.imag),
+                        diff_of_products(a.real, b.imag, -a.imag, b.real)};
+}
+
+__host__ __device__ constexpr int complex_max_exponent(float) { return __FLT_MAX_EXP__ - 1; }
+
+__host__ __device__ constexpr int complex_max_exponent(double) { return __DBL_MAX_EXP__ - 1; }
+
+// a * d - b * c for finite a, b, c, d when a product overflows. Both products are scaled by the
+// same power of two, through their first factors a and b, so that the larger product lies just
+// below the overflow threshold. Kahan's algorithm then runs without overflow, and scaling the
+// result back is exact unless the result itself is too large for T, which gives an infinity with
+// the correct sign. A zero product is left out of the scale. The scaled factor of the larger
+// product stays normal; that of the other turns subnormal only when its product is more than
+// 2^124 (float) or 2^1020 (double) below the larger one, where it changes no rounding.
+template <typename T>
+__host__ __device__ inline T rescaled_diff_of_products(T a, T d, T b, T c)
+{
+    const bool ad_nonzero = complex_fabs(a) > T{0} && complex_fabs(d) > T{0};
+    const bool bc_nonzero = complex_fabs(b) > T{0} && complex_fabs(c) > T{0};
+    const int e_ad        = ad_nonzero ? complex_ilogb(a) + complex_ilogb(d) : 0;
+    const int e_bc        = bc_nonzero ? complex_ilogb(b) + complex_ilogb(c) : 0;
+    const int e_max       = !bc_nonzero || (ad_nonzero && e_ad > e_bc) ? e_ad : e_bc;
+    const int shift       = e_max - (complex_max_exponent(T{}) - 2);
+    if(shift <= 0)
+    {
+        return diff_of_products(a, d, b, c);
+    }
+    return complex_ldexp(diff_of_products(complex_ldexp(a, -shift), d, complex_ldexp(b, -shift), c),
+                         shift);
+}
+
+// Finite factors whose product came out infinite or NaN: a product overflowed. Each part that is
+// not finite is computed again with the products rescaled.
+template <typename T>
+__host__ __device__ inline complex_t<T> rescaled_multiply(const complex_t<T>& a,
+                                                          const complex_t<T>& b)
+{
+    complex_t<T> r = kahan_multiply(a, b);
+    if(!__builtin_isfinite(r.real))
+    {
+        r.real = rescaled_diff_of_products(a.real, b.real, a.imag, b.imag);
+    }
+    if(!__builtin_isfinite(r.imag))
+    {
+        r.imag = rescaled_diff_of_products(a.real, b.imag, -a.imag, b.real);
+    }
+    return r;
+}
+
+// An infinity keeps its sign as 1, any finite part becomes a zero of its sign.
+template <typename T>
+__host__ __device__ inline T box_infinity(T x)
+{
+    return complex_copysign(__builtin_isinf(x) ? T{1} : T{0}, x);
+}
+
+template <typename T>
+__host__ __device__ inline T nan_to_zero(T x)
+{
+    return __builtin_isnan(x) ? complex_copysign(T{0}, x) : x;
+}
+
+// A factor is infinite or NaN: the products of the textbook formula, then the recovery of
+// C11 Annex G.5.1 (its example function _Cmultd). A result of NaN + iNaN is replaced by an
+// infinity when a factor is infinite, or when a product overflowed, because in Annex G an
+// infinity times a nonzero value is an infinity.
+// C11, final public draft N1570: https://www.open-std.org/jtc1/sc22/wg14/www/docs/n1570.pdf
+template <typename T>
+__host__ __device__ inline complex_t<T> annex_g_multiply(const complex_t<T>& z,
+                                                         const complex_t<T>& u)
+{
+#pragma clang fp contract(off)
+    T a = z.real, b = z.imag, c = u.real, d = u.imag;
+    const T ac = a * c, bd = b * d, ad = a * d, bc = b * c;
+    T x = ac - bd, y = ad + bc;
+    if(__builtin_isnan(x) && __builtin_isnan(y))
+    {
+        bool recalc = false;
+        if(__builtin_isinf(a) || __builtin_isinf(b))
+        {
+            a      = box_infinity(a);
+            b      = box_infinity(b);
+            c      = nan_to_zero(c);
+            d      = nan_to_zero(d);
+            recalc = true;
+        }
+        if(__builtin_isinf(c) || __builtin_isinf(d))
+        {
+            c      = box_infinity(c);
+            d      = box_infinity(d);
+            a      = nan_to_zero(a);
+            b      = nan_to_zero(b);
+            recalc = true;
+        }
+        if(!recalc && (__builtin_isinf(ac) || __builtin_isinf(bd) || __builtin_isinf(ad) ||
+                       __builtin_isinf(bc)))
+        {
+            a      = nan_to_zero(a);
+            b      = nan_to_zero(b);
+            c      = nan_to_zero(c);
+            d      = nan_to_zero(d);
+            recalc = true;
+        }
+        if(recalc)
+        {
+            const T inf = static_cast<T>(__builtin_huge_valf());
+            x           = inf * (a * c - b * d);
+            y           = inf * (a * d + b * c);
+        }
+    }
+    return complex_t<T>{x, y};
+}
+
+// The product when Kahan's result is not finite: finite factors are rescaled, others follow
+// Annex G. Not inlined, so that the rare slow path is not copied into every multiply.
+template <typename T>
+__host__ __device__ __attribute__((noinline)) complex_t<T>
+multiply_non_finite(const complex_t<T>& a, const complex_t<T>& b)
+{
+    if(__builtin_isfinite(a.real) && __builtin_isfinite(a.imag) && __builtin_isfinite(b.real) &&
+       __builtin_isfinite(b.imag))
+    {
+        return rescaled_multiply(a, b);
+    }
+    return annex_g_multiply(a, b);
+}
+
 } // namespace complex_impl
 
 template <typename T>
@@ -90,12 +255,21 @@ __host__ __device__ constexpr complex_t<T> operator-(const complex_t<T>& a)
 }
 
 // Each component is a difference of two products. Computed with Kahan's algorithm so that
-// cancellation does not lose the result and every target rounds the same way.
+// cancellation does not lose the result and every target rounds the same way. A result that is
+// not finite is computed again as C11 Annex G requires: finite factors give an infinity only when
+// the result is too large for T, and infinite factors give an infinity, not NaN + iNaN.
+// C11, final public draft N1570: https://www.open-std.org/jtc1/sc22/wg14/www/docs/n1570.pdf
 template <typename T>
 __host__ __device__ inline complex_t<T> operator*(const complex_t<T>& a, const complex_t<T>& b)
 {
-    return complex_t<T>{complex_impl::diff_of_products(a.real, b.real, a.imag, b.imag),
-                        complex_impl::diff_of_products(a.real, b.imag, -a.imag, b.real)};
+    const complex_t<T> r = complex_impl::kahan_multiply(a, b);
+    // One test for both parts: the sum is not finite when either part is not. A finite sum that
+    // overflows takes the slow path too, which then returns the same result.
+    if(__builtin_isfinite(r.real + r.imag))
+    {
+        return r;
+    }
+    return complex_impl::multiply_non_finite(a, b);
 }
 
 template <typename T>

@@ -3,6 +3,7 @@
 
 #include <cmath>
 #include <cstring>
+#include <limits>
 #include <type_traits>
 
 #include <hip/hip_complex.h>
@@ -135,4 +136,62 @@ TYPED_TEST(ComplexType, MultiplyKeepsSignOfZero)
     const C q = C{-T{0}, T{0}} * C{-T{0}, T{0}};
     EXPECT_FALSE(std::signbit(q.real));
     EXPECT_TRUE(std::signbit(q.imag));
+}
+
+// Finite factors give an infinity only in a part of the exact product that is too large for the
+// type; every other part keeps its exact value here, even when a product inside overflows.
+TYPED_TEST(ComplexType, MultiplyOverflowOnlyWhenTooLarge)
+{
+    using T     = TypeParam;
+    using C     = complex_t<T>;
+    using L     = std::numeric_limits<T>;
+    const T big = std::sqrt(L::max()) * T{2}; // big * big overflows
+
+    // (1, big)^2 = (1 - big^2, 2 big): only the real part is too large.
+    const C p1 = C{T{1}, big} * C{T{1}, big};
+    EXPECT_EQ(p1.real, -L::infinity());
+    EXPECT_EQ(p1.imag, T{2} * big);
+
+    // (big, big)^2 = (0, 2 big^2): both real products overflow, yet the real part is 0.
+    const C p2 = C{big, big} * C{big, big};
+    EXPECT_EQ(p2.real, T{0});
+    EXPECT_EQ(p2.imag, L::infinity());
+
+    // (0, -1.5) * (max, m): the real part comes from the small product alone.
+    const T m  = L::min() * T{4};
+    const C p3 = C{T{0}, T{-1.5}} * C{L::max(), m};
+    EXPECT_EQ(p3.real, T{1.5} * m);
+    EXPECT_EQ(p3.imag, -L::infinity());
+
+    // (1, big) * (big, -1) = (2 big, big^2 - 1): the real part is finite, only the imaginary
+    // part overflows.
+    const C p4 = C{T{1}, big} * C{big, T{-1}};
+    EXPECT_EQ(p4.real, T{2} * big);
+    EXPECT_EQ(p4.imag, L::infinity());
+}
+
+// C11 Annex G.5.1: an infinity times a nonzero value is an infinity (a complex value with an
+// infinite part), never NaN + iNaN. NaN times a finite value stays NaN.
+TYPED_TEST(ComplexType, MultiplyInfinityFollowsAnnexG)
+{
+    using T              = TypeParam;
+    using C              = complex_t<T>;
+    const T inf          = std::numeric_limits<T>::infinity();
+    const T nan          = std::numeric_limits<T>::quiet_NaN();
+    const C factors[][2] = {{C{inf, T{0}}, C{T{1}, T{0}}},
+                            {C{inf, inf}, C{T{1}, T{1}}},
+                            {C{inf, nan}, C{T{1}, T{0}}},
+                            {C{nan, inf}, C{T{0}, T{1}}},
+                            {C{inf, T{0}}, C{nan, T{1}}},
+                            {C{T{2}, T{-3}}, C{-inf, inf}}};
+    for(const auto& f : factors)
+    {
+        const C p = f[0] * f[1];
+        EXPECT_TRUE(std::isinf(p.real) || std::isinf(p.imag))
+            << "(" << f[0].real << ", " << f[0].imag << ") * (" << f[1].real << ", " << f[1].imag
+            << ") = (" << p.real << ", " << p.imag << ")";
+    }
+
+    const C n = C{nan, T{0}} * C{T{1}, T{0}};
+    EXPECT_TRUE(std::isnan(n.real) && std::isnan(n.imag));
 }
