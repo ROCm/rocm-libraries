@@ -62,6 +62,9 @@ _SEED = 2026
 #: The packaged dtypes. Tests over the whole sweep take one as a parameter, so each
 #: dtype's tests share a CI shard and the sweep is enumerated once per dtype.
 _DTYPES = ("fp16", "bf16")
+#: The forward sweep's pipelines. The knob-class IR check takes one with the dtype,
+#: so its kernels spread over CI shards rather than filling one per dtype.
+_PIPELINES = ("mem", "compv3", "compv4")
 _SAMPLE_PER_K_LOOP = 3
 
 
@@ -221,7 +224,7 @@ def knob_class_jobs(forward_sweep):
 @pytest.mark.parametrize("dtype", _DTYPES)
 def test_the_knob_class_sample_covers_every_knob_value(knob_class_jobs, dtype):
     classes = {_knob_class(job.identity) for job in knob_class_jobs(dtype)}
-    assert {c[0] for c in classes} == {"mem", "compv3", "compv4"}
+    assert {c[0] for c in classes} == set(_PIPELINES)
     assert {c[1] for c in classes} == {"default", "cshuffle"}
     assert {c[2] for c in classes} == {"plain", "unroll", "async_dma"}
     for position in (3, 4, 5):
@@ -230,11 +233,20 @@ def test_the_knob_class_sample_covers_every_knob_value(knob_class_jobs, dtype):
     assert len({c[6:] for c in classes if c[2] == "async_dma"}) > 1
 
 
-@pytest.mark.parametrize("dtype", _DTYPES)
-def test_every_knob_class_is_packageable_with_the_sweeps_ir(knob_class_jobs, dtype):
+@pytest.mark.parametrize(
+    "dtype,pipeline",
+    [(dtype, pipeline) for dtype in _DTYPES for pipeline in _PIPELINES],
+)
+def test_every_knob_class_is_packageable_with_the_sweeps_ir(
+    knob_class_jobs, dtype, pipeline
+):
     """The packaged kernel is the sweep's, byte for byte up to its symbol, for one
-    instance of every knob class in each dtype."""
-    for job in knob_class_jobs(dtype):
+    instance of every knob class in each dtype, a pipeline at a time."""
+    sample = [
+        job for job in knob_class_jobs(dtype) if job.identity.pipeline == pipeline
+    ]
+    assert sample
+    for job in sample:
         spec = _spec(job.identity)
         assert supports_gfx950_conv_fwd_aot(spec) == (True, "ok"), job.identity.label()
         ours = build_gfx950_conv_fwd_aot(spec)
