@@ -455,8 +455,7 @@ PENDING: tuple[PendingTest, ...] = (
     *_waiting(
         OWNER_DECISION,
         "needs pandas, scikit-learn, lightgbm and pyarrow, which no CI lane "
-        "installs, and test_model_compression needs models not in the tree: a "
-        "nightly lane with the dependencies, or leave them out",
+        "installs: a nightly lane with the dependencies, or leave them out",
         "rocKE heuristics; issue: none filed yet",
         "2026-12-15",
         "platform/python/rocke/heuristics/tests/test_data_pipeline.py",
@@ -464,7 +463,6 @@ PENDING: tuple[PendingTest, ...] = (
         "platform/python/rocke/heuristics/tests/test_feature_engine.py",
         "platform/python/rocke/heuristics/tests/test_feature_engine_grouped_conv.py",
         "platform/python/rocke/heuristics/tests/test_feature_parity.py",
-        "platform/python/rocke/heuristics/tests/test_model_compression.py",
         "platform/python/rocke/heuristics/tests/test_predict.py",
         "platform/python/rocke/heuristics/tests/test_search.py",
         "platform/python/rocke/heuristics/tests/test_train.py",
