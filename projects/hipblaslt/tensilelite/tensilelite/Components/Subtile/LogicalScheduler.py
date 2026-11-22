@@ -7957,7 +7957,6 @@ class LogicalScheduler:
                                        comment="skip other exit paths"))
 
         module.add(endLabel)
-        self._spaceRegionM0Writes(writer, module, mainloop)
         if self.halfDisjoint:
             from .InstructionScheduler import dropRelaxedFencesThatRetireNothing
             dropRelaxedFencesThatRetireNothing(self._mainLoopBodies(mainloop))
@@ -8013,55 +8012,6 @@ class LogicalScheduler:
 
         walk(module)
 
-    def _spaceRegionM0Writes(self, writer, module, mainloop=None):
-        """Space the m0 writes of every region in module from their loads.
-
-        Runs once the region order is final: C1 still edits C0, and the
-        bodies, exits and tail are woven after their own emission. The
-        main loop's copies are spaced together, by gap population
-        (spaceMainLoopM0Writes); every other region is spaced on its own.
-        gfx9 only.
-        """
-        from rocisa.code import Label
-        from .InstructionScheduler import (
-            _isCodeModule, _isComment, spaceM0WritesFromLdsLoads, spaceMainLoopM0Writes)
-        version = getattr(writer.states, "version", None)
-        if not (isinstance(version, (tuple, list)) and tuple(version[:1]) == (9,)):
-            return
-        if mainloop is not None:
-            bodies, outside, lead = [], [], [0]
-
-            def parts(container):
-                for item in container.items():
-                    if _isCodeModule(item):
-                        if (getattr(item, "name", "").startswith("MAINLOOP_C")
-                                and item.name in self._regionLabels):
-                            bodies.append(item)
-                            outside.append(0)
-                        else:
-                            parts(item)
-                    elif not (_isComment(item) or isinstance(item, Label)):
-                        if outside:
-                            outside[-1] += 1
-                        else:
-                            lead[0] += 1
-
-            parts(mainloop)
-            if bodies:
-                outside[-1] += lead[0]
-                spaceMainLoopM0Writes(bodies, outside, getattr(writer, "sgprs", None))
-
-        def walk(container):
-            for item in container.items():
-                if not _isCodeModule(item):
-                    continue
-                if getattr(item, "name", None) in self._regionLabels:
-                    spaceM0WritesFromLdsLoads(item)
-                else:
-                    walk(item)
-
-        walk(module)
-
     def emitTailLoop(self, writer, kernel):
         """Emit the tail loop body only (no counter setup, no skip branch).
 
@@ -8094,7 +8044,6 @@ class LogicalScheduler:
                                   schedule=False))
         for inst in self._emitter.emit_mask_k_done():
             module.add(inst)
-        self._spaceRegionM0Writes(writer, module)
         self._dropExitDominatedLgkmWaits(module)
         return module
 
