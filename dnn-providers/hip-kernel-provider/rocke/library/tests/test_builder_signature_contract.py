@@ -41,7 +41,9 @@
 # added later without a default makes that call raise `TypeError: missing
 # required argument` for every descriptor already in the wild. `REQUIRED_FIELDS`
 # freezes the set that is allowed to be mandatory -- the problem shape -- so a
-# new tuning knob has to arrive defaulted.
+# new tuning knob has to arrive defaulted. Python's own "non-default argument
+# follows default argument" error is no substitute: it catches a non-defaulted
+# field appended after the defaulted ones, not one inserted before them.
 
 from __future__ import annotations
 
