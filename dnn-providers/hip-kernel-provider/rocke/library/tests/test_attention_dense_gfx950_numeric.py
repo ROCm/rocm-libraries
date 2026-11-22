@@ -4,12 +4,15 @@
 """On-GPU numeric lane for the gfx950 dense flash-attn kernel.
 
 Drives the PUBLIC entry point ``run_attention_dense_torch`` end-to-end on a real
-gfx950 GPU and checks max_abs against an fp32 reference, including sink support.
+gfx950 GPU with device arrays (no torch) and checks max_abs against the float64
+``rocke.numeric.sdpa_reference`` oracle (sinks, bands and LSE included), computed
+from exactly the values stored on the device.
 
-Every test is marked ``gpu`` and gated with a device skipif, so it is a graceful
-skip on a CPU CI box and only executes on a gfx950. Select
-it with ``run_all.py --gpu`` (or ``pytest -m gpu``); the default CPU lane excludes
-it via ``-m "not gpu"``. Run standalone:
+Every test is marked ``gpu`` and gated on the current device's arch
+(``rocke.tests.gpu.current_device_arch_in``), so it is a graceful skip on a CPU CI
+box and only executes on a gfx950. Select it with ``run_all.py --gpu`` (or
+``pytest -m gpu``); the default CPU lane excludes it via ``-m "not gpu"``. Run
+standalone:
 
     HIP_VISIBLE_DEVICES=0 python -m pytest tests/test_attention_dense_gfx950_numeric.py
 """
@@ -20,7 +23,12 @@ import dataclasses
 import math
 from dataclasses import replace
 
+import numpy as np
 import pytest
+from rocke.numeric import storage
+from rocke.runtime.device_array import DeviceArray, host_values
+from rocke.tests.gpu import current_device_arch_in
+from rocke.tests.host_arrays import HostArray
 
 from kernels.common.attention_dense_spec import DENSE_TILE_GEOMETRIES
 from kernels.gfx950.attention_dense import (
@@ -29,26 +37,33 @@ from kernels.gfx950.attention_dense import (
     supports_attention_dense,
 )
 
-
-torch = pytest.importorskip("torch", reason="ROCm torch required")
-
-from ._dense_paged_gpu import paged_cache, run_dispatched_paged  # noqa: E402
-
-
-def _gpu_ready():
-    """True only on a gfx950 box with ROCm torch. Gate on ``gcnArchName`` (the ISA
-    target), NOT the marketing name."""
-    if not torch.cuda.is_available():
-        return False
-    arch = torch.cuda.get_device_properties(0).gcnArchName.lower()
-    return "gfx950" in arch
-
-
-requires_gfx950_gpu = pytest.mark.skipif(
-    not _gpu_ready(), reason="needs a gfx950 GPU with ROCm torch"
+from ._dense_numeric_gpu import (
+    Alias,
+    dense_reference,
+    filled,
+    first_tile_max,
+    fp8_kv,
+    guard_intact,
+    guarded,
+    max_abs_error,
+    operand,
+    paged_cache,
+    run_dispatched_paged,
+    same_bits,
+    same_values,
+    upload,
+    values,
+    window64_analytic_lse,
 )
 
-_TORCH_DT = {"fp16": "float16", "bf16": "bfloat16"}
+
+@pytest.fixture
+def _gfx950_gpu():
+    """Skip unless the current GPU is gfx950 (the ISA target, not a board name)."""
+    current_device_arch_in(("gfx950",), subject="the gfx950 dense kernel")
+
+
+requires_gfx950_gpu = pytest.mark.usefixtures("_gfx950_gpu")
 
 # (dtype, head_size, num_query_heads, num_kv_heads, persistent) -- a compact cohort
 # spanning both dtypes, D64/D128, GQA + MHA, and both grid variants. Sq is fixed at
@@ -181,55 +196,6 @@ def _tolerance(dtype):
     return 2e-2 if dtype == "fp16" else 4e-2
 
 
-def _standard_reference(q, k, v, scale, sliding_window=0, causal=True):
-    """Standard (optionally causal) attention reference using PyTorch SDPA.
-
-    Args:
-        q: [B, S, Hq, D] query tensor
-        k: [B, S, Hkv, D] key tensor
-        v: [B, S, Hkv, D] value tensor
-        scale: softmax scale (1/sqrt(D))
-
-    Returns:
-        ref: [B, S, Hq, D] reference output in fp32
-    """
-    import torch
-    import torch.nn.functional as F
-
-    Hq = q.shape[2]
-    Hkv = k.shape[2]
-    rep = Hq // Hkv
-
-    # Expand to [B, Hq, S, D] and expand GQA
-    qf = q.transpose(1, 2).float()
-    kf = k.transpose(1, 2).float().repeat_interleave(rep, dim=1)
-    vf = v.transpose(1, 2).float().repeat_interleave(rep, dim=1)
-
-    # PyTorch SDPA with causal masking
-    if sliding_window:
-        sq, sk = q.shape[1], k.shape[1]
-        qi = torch.arange(sq, device=q.device).view(-1, 1)
-        ki = torch.arange(sk, device=q.device).view(1, -1)
-        # The window's LEFT bound always applies. The causal (right) bound applies
-        # only when causal: gfx950 dense runs a left-only window too, and folding
-        # the causal bound in unconditionally would score a non-causal window
-        # against a causal reference and hide a real mask bug.
-        allowed = ki > qi - sliding_window
-        if causal:
-            allowed = allowed & (ki <= qi)
-        ref = F.scaled_dot_product_attention(
-            qf, kf, vf, attn_mask=allowed, scale=scale
-        ).transpose(1, 2)
-    else:
-        ref = F.scaled_dot_product_attention(
-            qf, kf, vf, is_causal=causal, scale=scale
-        ).transpose(
-            1, 2
-        )  # -> [B, S, Hq, D]
-
-    return ref
-
-
 class TestDenseNumeric:
     """Standard (non-sink) dense attention numerical validation."""
 
@@ -237,29 +203,25 @@ class TestDenseNumeric:
     @pytest.mark.gpu
     @pytest.mark.parametrize("dtype,d,hq,hkv,persistent", _COHORT)
     def test_dense_numeric_vs_fp32_sdpa(self, dtype, d, hq, hkv, persistent):
-        """Verify standard dense kernel against PyTorch SDPA."""
-        import torch
-
+        """Verify the standard dense kernel against the float64 reference."""
         tol = _tolerance(dtype)
-        tdt = getattr(torch, _TORCH_DT[dtype])
         B, S = 1, 512
         scale = 1.0 / math.sqrt(d)
-        torch.manual_seed(0)
+        rng = np.random.default_rng(0)
 
         # run_attention_dense_torch ABI: q/out [B,S,Hq,D], k/v [B,S,Hkv,D], dense.
-        q = torch.randn(B, S, hq, d, device="cuda", dtype=tdt)
-        k = torch.randn(B, S, hkv, d, device="cuda", dtype=tdt)
-        v = torch.randn(B, S, hkv, d, device="cuda", dtype=tdt)
-        out = torch.empty(B, S, hq, d, device="cuda", dtype=tdt)
+        q = operand(rng, (B, S, hq, d), dtype)
+        k = operand(rng, (B, S, hkv, d), dtype)
+        v = operand(rng, (B, S, hkv, d), dtype)
+        out = filled((B, S, hq, d), dtype)
 
         spec = _spec(dtype, d, hq, hkv, persistent, batch=B, sq=S)
         run_attention_dense_torch(spec=spec, q=q, k=k, v=v, out=out, scale=scale)
-        torch.cuda.synchronize()
 
-        # Reference: PyTorch fp32 SDPA
-        ref = _standard_reference(q, k, v, scale)
+        # Reference: float64 SDPA on the stored inputs
+        ref = dense_reference(q, k, v, scale)[0]
 
-        max_abs = (ref - out.float()).abs().max().item()
+        max_abs = max_abs_error(out, ref)
         assert max_abs < tol, (
             f"{dtype} D{d} GQA{hq}/{hkv} "
             f"{'persist' if persistent else 'default'}: max_abs={max_abs:.3e} >= {tol}"
@@ -276,24 +238,21 @@ class TestDenseNumeric:
         ``Q * scale * log2(e)`` back to bf16 before the QK MFMA puts this shape
         past the bf16 tolerance; the kernel must apply the scale in fp32.
         """
-        import torch
-
         dtype, d, hq, hkv = "bf16", 128, 16, 4
         tol = _tolerance(dtype)
         B, S, scale = 1, 512, 0.5
-        torch.manual_seed(0)
+        rng = np.random.default_rng(0)
 
-        q = torch.randn(B, S, hq, d, device="cuda", dtype=torch.bfloat16)
-        k = torch.randn(B, S, hkv, d, device="cuda", dtype=torch.bfloat16)
-        v = torch.randn(B, S, hkv, d, device="cuda", dtype=torch.bfloat16)
-        out = torch.empty(B, S, hq, d, device="cuda", dtype=torch.bfloat16)
+        q = operand(rng, (B, S, hq, d), "bf16")
+        k = operand(rng, (B, S, hkv, d), "bf16")
+        v = operand(rng, (B, S, hkv, d), "bf16")
+        out = filled((B, S, hq, d), "bf16")
 
         spec = _spec(dtype, d, hq, hkv, persistent, batch=B, sq=S)
         run_attention_dense_torch(spec=spec, q=q, k=k, v=v, out=out, scale=scale)
-        torch.cuda.synchronize()
 
-        ref = _standard_reference(q, k, v, scale)
-        max_abs = (ref - out.float()).abs().max().item()
+        ref = dense_reference(q, k, v, scale)[0]
+        max_abs = max_abs_error(out, ref)
         assert max_abs < tol, (
             f"bf16 D128 GQA16/4 scale=0.5 "
             f"{'persist' if persistent else 'default'}: max_abs={max_abs:.3e} >= {tol}"
@@ -311,26 +270,22 @@ class TestDenseNumeric:
         uniform; at 2**4 it is close to one-hot and the ordinary kernel's fma
         residue is at its largest. Both must match the fp32 reference.
         """
-        import torch
-
         d, hq, hkv = 128, 16, 4
         tol = _tolerance(dtype)
-        tdt = getattr(torch, _TORCH_DT[dtype])
         B, S = 1, 512
-        torch.manual_seed(0)
+        rng = np.random.default_rng(0)
 
-        q = torch.randn(B, S, hq, d, device="cuda", dtype=tdt)
-        k = torch.randn(B, S, hkv, d, device="cuda", dtype=tdt)
-        v = torch.randn(B, S, hkv, d, device="cuda", dtype=tdt)
-        out = torch.empty(B, S, hq, d, device="cuda", dtype=tdt)
+        q = operand(rng, (B, S, hq, d), dtype)
+        k = operand(rng, (B, S, hkv, d), dtype)
+        v = operand(rng, (B, S, hkv, d), dtype)
+        out = filled((B, S, hq, d), dtype)
 
         spec = _spec(dtype, d, hq, hkv, persistent, batch=B, sq=S)
         run_attention_dense_torch(spec=spec, q=q, k=k, v=v, out=out, scale=scale)
-        torch.cuda.synchronize()
 
-        assert torch.isfinite(out).all(), "non-finite output"
-        ref = _standard_reference(q, k, v, scale)
-        max_abs = (ref - out.float()).abs().max().item()
+        assert np.isfinite(values(out)).all(), "non-finite output"
+        ref = dense_reference(q, k, v, scale)[0]
+        max_abs = max_abs_error(out, ref)
         assert max_abs < tol, (
             f"{dtype} D128 GQA16/4 scale={scale:g} "
             f"{'persist' if persistent else 'default'}: max_abs={max_abs:.3e} >= {tol}"
@@ -354,27 +309,24 @@ class TestDenseNumeric:
         the upper bound) take different exact branches in the ordinary kernel;
         both are covered.
         """
-        import torch
-
         dtype, hq, hkv, window = "bf16", 16, 4, 128
         tol = _tolerance(dtype)
         B, S = 1, 512
-        torch.manual_seed(0)
+        rng = np.random.default_rng(0)
 
-        q = torch.randn(B, S, hq, d, device="cuda", dtype=torch.bfloat16)
-        k = torch.randn(B, S, hkv, d, device="cuda", dtype=torch.bfloat16)
-        v = torch.randn(B, S, hkv, d, device="cuda", dtype=torch.bfloat16)
-        out = torch.empty(B, S, hq, d, device="cuda", dtype=torch.bfloat16)
+        q = operand(rng, (B, S, hq, d), "bf16")
+        k = operand(rng, (B, S, hkv, d), "bf16")
+        v = operand(rng, (B, S, hkv, d), "bf16")
+        out = filled((B, S, hq, d), "bf16")
 
         spec = _spec(
             dtype, d, hq, hkv, persistent, batch=B, sq=S, sliding_window=window
         )
         run_attention_dense_torch(spec=spec, q=q, k=k, v=v, out=out, scale=scale)
-        torch.cuda.synchronize()
 
-        assert torch.isfinite(out).all(), "non-finite output"
-        ref = _standard_reference(q, k, v, scale, sliding_window=window)
-        max_abs = (ref - out.float()).abs().max().item()
+        assert np.isfinite(values(out)).all(), "non-finite output"
+        ref = dense_reference(q, k, v, scale, window=window)[0]
+        max_abs = max_abs_error(out, ref)
         assert max_abs < tol, (
             f"bf16 D{d} SWA{window} scale={scale:g} "
             f"{'persist' if persistent else 'default'}: max_abs={max_abs:.3e} >= {tol}"
@@ -402,28 +354,14 @@ class TestDenseNumeric:
         so this isolates kernel error from quantization loss (the convention the
         live bench uses). Covered over the causal, sliding-window and non-causal
         masks the grid variant serves for fp8."""
-        import torch
-
-        tdt = getattr(torch, _TORCH_DT[dtype])
         B, S = 1, 512
         scale = 1.0 / math.sqrt(d)
-        torch.manual_seed(0)
-        q = torch.randn(B, S, hq, d, device="cuda", dtype=tdt) * 0.3
-        k = torch.randn(B, S, hkv, d, device="cuda", dtype=tdt) * 0.3
-        v = torch.randn(B, S, hkv, d, device="cuda", dtype=tdt) * 0.3
-
-        fp8_max = torch.finfo(torch.float8_e4m3fn).max
-
-        def _quant(t):
-            amax = t.abs().max().clamp(min=1e-8)
-            s = (amax / fp8_max).item()
-            q8 = (t.float() / s).clamp(-fp8_max, fp8_max).to(torch.float8_e4m3fn)
-            return q8, s
-
-        k_fp8, k_scale = _quant(k)
-        v_fp8, v_scale = _quant(v)
-        k_deq = (k_fp8.float() * k_scale).to(tdt)
-        v_deq = (v_fp8.float() * v_scale).to(tdt)
+        rng = np.random.default_rng(0)
+        q = operand(rng, (B, S, hq, d), dtype, scale=0.3)
+        k = storage.round_to(rng.standard_normal((B, S, hkv, d)) * 0.3, dtype)
+        v = storage.round_to(rng.standard_normal((B, S, hkv, d)) * 0.3, dtype)
+        k_fp8, k_scale, k_deq = fp8_kv(k, dtype)
+        v_fp8, v_scale, v_deq = fp8_kv(v, dtype)
 
         spec = _spec(
             dtype,
@@ -437,7 +375,7 @@ class TestDenseNumeric:
             causal=causal,
             sliding_window=sliding_window,
         )
-        out = torch.empty(B, S, hq, d, device="cuda", dtype=tdt)
+        out = filled((B, S, hq, d), dtype)
         run_attention_dense_torch(
             spec=spec,
             q=q,
@@ -448,12 +386,11 @@ class TestDenseNumeric:
             k_scale=k_scale,
             v_scale=v_scale,
         )
-        torch.cuda.synchronize()
 
-        ref = _standard_reference(
-            q, k_deq, v_deq, scale, sliding_window=sliding_window, causal=causal
+        ref, _ = dense_reference(
+            q, k_deq, v_deq, scale, causal=causal, window=sliding_window
         )
-        max_abs = (ref - out.float()).abs().max().item()
+        max_abs = max_abs_error(out, ref)
         # Reference attends over the dequantized K/V, so the residual is kernel
         # compute error at the compute precision; keep a small fp8 margin over tol.
         assert max_abs < 6e-2, (
@@ -470,23 +407,20 @@ class TestDenseNumeric:
     def test_bf16_narrow_output_store_is_bit_identical(self, d, persistent, width):
         """bf16 o_store_width 1/2 must write the same bits as the width-4 store
         (fp16 is rejected below 4 because it does not)."""
-        import torch
-
         hq, hkv, B, S = 16, 4, 1, 512
         scale = 1.0 / math.sqrt(d)
-        torch.manual_seed(0)
-        q = torch.randn(B, S, hq, d, device="cuda", dtype=torch.bfloat16)
-        k = torch.randn(B, S, hkv, d, device="cuda", dtype=torch.bfloat16)
-        v = torch.randn(B, S, hkv, d, device="cuda", dtype=torch.bfloat16)
+        rng = np.random.default_rng(0)
+        q = operand(rng, (B, S, hq, d), "bf16")
+        k = operand(rng, (B, S, hkv, d), "bf16")
+        v = operand(rng, (B, S, hkv, d), "bf16")
         base = _spec("bf16", d, hq, hkv, persistent, batch=B, sq=S)
 
         outs = []
         for spec in (base, dataclasses.replace(base, o_store_width=width)):
-            out = torch.empty(B, S, hq, d, device="cuda", dtype=torch.bfloat16)
+            out = filled((B, S, hq, d), "bf16")
             run_attention_dense_torch(spec=spec, q=q, k=k, v=v, out=out, scale=scale)
             outs.append(out)
-        torch.cuda.synchronize()
-        assert torch.equal(outs[0], outs[1]), (
+        assert same_values(outs[0], outs[1]), (
             f"bf16 D{d} {'persist' if persistent else 'default'} "
             f"o_store_width={width} diverged from width 4"
         )
@@ -513,14 +447,11 @@ class TestDenseNumeric:
         Paired with the numeric check at both shapes so the test cannot pass by
         reusing one binary that happens to be wrong for the second shape.
         """
-        import torch
-
         from kernels.common.attention_dense_spec import attention_dense_cache_key
         from kernels.gfx950.attention_dense import _DENSE_LAUNCHER_CACHE
 
         dtype, d, hq, hkv = "bf16", 128, 16, 4  # flagship default, non-persistent
         tol = _tolerance(dtype)
-        tdt = getattr(torch, _TORCH_DT[dtype])
         scale = 1.0 / math.sqrt(d)
 
         shapes = ((1, 512), (4, 1024))
@@ -548,18 +479,17 @@ class TestDenseNumeric:
 
         launchers = []
         for (B, S), spec in zip(shapes, specs):
-            torch.manual_seed(0)
-            q = torch.randn(B, S, hq, d, device="cuda", dtype=tdt)
-            k = torch.randn(B, S, hkv, d, device="cuda", dtype=tdt)
-            v = torch.randn(B, S, hkv, d, device="cuda", dtype=tdt)
-            out = torch.empty(B, S, hq, d, device="cuda", dtype=tdt)
+            rng = np.random.default_rng(0)
+            q = operand(rng, (B, S, hq, d), dtype)
+            k = operand(rng, (B, S, hkv, d), dtype)
+            v = operand(rng, (B, S, hkv, d), dtype)
+            out = filled((B, S, hq, d), dtype)
 
             run_attention_dense_torch(spec=spec, q=q, k=k, v=v, out=out, scale=scale)
-            torch.cuda.synchronize()
             launchers.append(_launcher_for(spec))
 
-            ref = _standard_reference(q, k, v, scale, sliding_window=sliding_window)
-            max_abs = (ref - out.float()).abs().max().item()
+            ref = dense_reference(q, k, v, scale, window=sliding_window)[0]
+            max_abs = max_abs_error(out, ref)
             assert max_abs < tol, f"B={B} S={S}: max_abs={max_abs:.3e} >= {tol}"
 
         assert launchers[0] is not None, (
@@ -589,14 +519,11 @@ class TestDenseNumeric:
         single-entry assertions catch a key or lookup regression that recompiles per
         head config. Covers GQA 16, non-pow2 GQA 5 and 7, and MHA.
         """
-        import torch
-
         from kernels.common.attention_dense_spec import attention_dense_cache_key
         from kernels.gfx950.attention_dense import _DENSE_LAUNCHER_CACHE
 
         dtype, d, B, S = "bf16", 128, 1, 512  # flagship default, non-persistent
         tol = _tolerance(dtype)
-        tdt = getattr(torch, _TORCH_DT[dtype])
         scale = 1.0 / math.sqrt(d)
 
         heads = ((128, 8), (40, 8), (28, 4), (32, 32))
@@ -615,18 +542,17 @@ class TestDenseNumeric:
 
         launchers = []
         for (hq, hkv), spec in zip(heads, specs):
-            torch.manual_seed(0)
-            q = torch.randn(B, S, hq, d, device="cuda", dtype=tdt)
-            k = torch.randn(B, S, hkv, d, device="cuda", dtype=tdt)
-            v = torch.randn(B, S, hkv, d, device="cuda", dtype=tdt)
-            out = torch.empty(B, S, hq, d, device="cuda", dtype=tdt)
+            rng = np.random.default_rng(0)
+            q = operand(rng, (B, S, hq, d), dtype)
+            k = operand(rng, (B, S, hkv, d), dtype)
+            v = operand(rng, (B, S, hkv, d), dtype)
+            out = filled((B, S, hq, d), dtype)
 
             run_attention_dense_torch(spec=spec, q=q, k=k, v=v, out=out, scale=scale)
-            torch.cuda.synchronize()
             launchers.append(_launcher_for(spec))
 
-            ref = _standard_reference(q, k, v, scale)
-            max_abs = (ref - out.float()).abs().max().item()
+            ref = dense_reference(q, k, v, scale)[0]
+            max_abs = max_abs_error(out, ref)
             assert max_abs < tol, f"Hq={hq} Hkv={hkv}: max_abs={max_abs:.3e} >= {tol}"
 
         assert launchers[0] is not None, (
@@ -663,14 +589,11 @@ class TestDenseNumeric:
         NP < W < 2*NP, W > 2*NP, W % NP != 0), so idle CTAs, partial last rounds
         and multiple trips all run.
         """
-        import torch
-
         from kernels.common.attention_dense_spec import attention_dense_cache_key
         from kernels.gfx950.attention_dense import _DENSE_LAUNCHER_CACHE
 
         d = 128
         tol = _tolerance(dtype)
-        tdt = getattr(torch, _TORCH_DT[dtype])
         scale = 1.0 / math.sqrt(d)
 
         geometry = DENSE_TILE_GEOMETRIES[tile]
@@ -708,18 +631,17 @@ class TestDenseNumeric:
 
         launchers = []
         for (B, S, hq, hkv), spec in zip(configs, specs):
-            torch.manual_seed(0)
-            q = torch.randn(B, S, hq, d, device="cuda", dtype=tdt)
-            k = torch.randn(B, S, hkv, d, device="cuda", dtype=tdt)
-            v = torch.randn(B, S, hkv, d, device="cuda", dtype=tdt)
-            out = torch.empty(B, S, hq, d, device="cuda", dtype=tdt)
+            rng = np.random.default_rng(0)
+            q = operand(rng, (B, S, hq, d), dtype)
+            k = operand(rng, (B, S, hkv, d), dtype)
+            v = operand(rng, (B, S, hkv, d), dtype)
+            out = filled((B, S, hq, d), dtype)
 
             run_attention_dense_torch(spec=spec, q=q, k=k, v=v, out=out, scale=scale)
-            torch.cuda.synchronize()
             launchers.append(_launcher_for(spec))
 
-            ref = _standard_reference(q, k, v, scale, sliding_window=window)
-            max_abs = (ref - out.float()).abs().max().item()
+            ref = dense_reference(q, k, v, scale, window=window)[0]
+            max_abs = max_abs_error(out, ref)
             assert max_abs < tol, (
                 f"{persist_decode} B={B} S={S} Hq={hq} Hkv={hkv}: "
                 f"max_abs={max_abs:.3e} >= {tol}"
@@ -764,71 +686,6 @@ _SINK_COHORT = [
 ]
 
 
-def _sink_reference(q, k, v, sinks, scale, sliding_window=0, causal=True):
-    """Manual attention with sinks: softmax(concat([QK, sink]))[..., :-1] @ V.
-
-    This reference computes the full [B, Hq, S, S] attention matrix at once (NOT
-    query-chunked). Unlike the builder script's reference
-    (library/builders/gfx950/attention/prefill/attention_dense_prefill.py), which
-    chunks over queries to avoid OOM at large seqlens (Sq=8192, Hq=128 -> 34.4 GB),
-    this test uses small fixed shapes (S=512, Hq=32 -> 32 MB) that fit comfortably
-    in memory. The full-matrix version is simpler and clearer as a test oracle.
-
-    Args:
-        q: [B, S, Hq, D] query tensor
-        k: [B, S, Hkv, D] key tensor
-        v: [B, S, Hkv, D] value tensor
-        sinks: [Hq] sink logits (per query head, raw attention scores)
-        scale: softmax scale (1/sqrt(D))
-        sliding_window: sliding window size (0 = disabled)
-        causal: whether to apply causal masking
-
-    Returns:
-        ref: [B, S, Hq, D] reference output in fp32
-    """
-    import torch
-
-    B, S, Hq, D = q.shape
-    Hkv = k.shape[2]
-    rep = Hq // Hkv
-    dev = q.device
-
-    # Expand to [B, Hq, S, D] and expand GQA
-    qh = q.transpose(1, 2).float()
-    kh = k.transpose(1, 2).repeat_interleave(rep, 1).float()
-    vh = v.transpose(1, 2).repeat_interleave(rep, 1).float()
-
-    # Compute QK scores: [B, Hq, S, S]
-    attn = torch.einsum("bhqd,bhkd->bhqk", qh, kh) * scale
-
-    # Apply causal and/or sliding window mask
-    if causal or sliding_window > 0:
-        qi = torch.arange(S, device=dev).view(-1, 1)
-        ki = torch.arange(S, device=dev).view(1, -1)
-        mask = torch.zeros(S, S, dtype=torch.bool, device=dev)
-        # Causal: mask future tokens (only if causal)
-        if causal:
-            mask |= ki > qi
-        # Sliding window: mask tokens beyond window (when enabled)
-        if sliding_window > 0:
-            mask |= ki <= (qi - sliding_window)
-        attn.masked_fill_(mask.view(1, 1, S, S), float("-inf"))
-
-    # Append sink column: sinks are raw attention scores (same domain as attn)
-    sink_col = sinks.float().view(1, Hq, 1, 1).expand(B, Hq, S, 1)
-    attn = torch.cat([attn, sink_col], dim=-1)  # [B, Hq, S, S+1]
-
-    # Softmax over all scores (including sink)
-    attn = torch.softmax(attn, dim=-1)
-
-    # Remove sink from attention weights (sink has no V vector)
-    attn = attn[..., :-1]  # [B, Hq, S, S]
-
-    # Weighted sum over values
-    ref = torch.einsum("bhqk,bhkd->bhqd", attn, vh).transpose(1, 2)
-    return ref
-
-
 _GQA_PAIR_VARIANTS = [
     ("plain", 0, False, False),
     ("interleave", 0, False, True),
@@ -849,17 +706,13 @@ class TestDenseGqaPairVariants:
     def test_gqa_pair_variant_numeric(
         self, _name, sliding_window, use_sinks, interleave
     ):
-        import torch
-
         B, S, Hq, Hkv, D = 1, 512, 32, 8, 128
-        torch.manual_seed(0)
-        q = torch.randn(B, S, Hq, D, device="cuda", dtype=torch.float16)
-        k = torch.randn(B, S, Hkv, D, device="cuda", dtype=torch.float16)
-        v = torch.randn(B, S, Hkv, D, device="cuda", dtype=torch.float16)
-        out = torch.empty_like(q)
-        sinks = (
-            torch.zeros(Hq, device="cuda", dtype=torch.float16) if use_sinks else None
-        )
+        rng = np.random.default_rng(0)
+        q = operand(rng, (B, S, Hq, D), "fp16")
+        k = operand(rng, (B, S, Hkv, D), "fp16")
+        v = operand(rng, (B, S, Hkv, D), "fp16")
+        out = filled(q.shape, q.dtype)
+        sinks = filled((Hq,), "fp16", 0.0) if use_sinks else None
         scale = 1.0 / math.sqrt(D)
 
         # NQB=2 and Hkv=8, so the balanced mapping needs exactly 16 CTAs.
@@ -890,21 +743,9 @@ class TestDenseGqaPairVariants:
             scale=scale,
             sinks=sinks,
         )
-        torch.cuda.synchronize()
 
-        if use_sinks:
-            ref = _sink_reference(
-                q,
-                k,
-                v,
-                sinks,
-                scale,
-                sliding_window=sliding_window,
-                causal=True,
-            )
-        else:
-            ref = _standard_reference(q, k, v, scale, sliding_window=sliding_window)
-        max_abs = (ref - out.float()).abs().max().item()
+        ref, _ = dense_reference(q, k, v, scale, window=sliding_window, sinks=sinks)
+        max_abs = max_abs_error(out, ref)
         assert max_abs < _tolerance("fp16"), f"gqa_pair {_name}: max_abs={max_abs:.3e}"
 
     @requires_gfx950_gpu
@@ -912,14 +753,12 @@ class TestDenseGqaPairVariants:
     @pytest.mark.parametrize("block_m", (256, 128), ids=("bm256", "bm128"))
     def test_wide_dma_mha_numeric(self, block_m):
         """Both wide-DMA line-pass geometries work without GQA reuse."""
-        import torch
-
         B, S, H, D = 1, 512, 16, 128
-        torch.manual_seed(0)
-        q = torch.randn(B, S, H, D, device="cuda", dtype=torch.float16)
-        k = torch.randn(B, S, H, D, device="cuda", dtype=torch.float16)
-        v = torch.randn(B, S, H, D, device="cuda", dtype=torch.float16)
-        out = torch.empty_like(q)
+        rng = np.random.default_rng(0)
+        q = operand(rng, (B, S, H, D), "fp16")
+        k = operand(rng, (B, S, H, D), "fp16")
+        v = operand(rng, (B, S, H, D), "fp16")
+        out = filled(q.shape, q.dtype)
         scale = 1.0 / math.sqrt(D)
         spec = Gfx950AttentionDenseSpec(
             batch=B,
@@ -938,9 +777,8 @@ class TestDenseGqaPairVariants:
             wide_lds_dma=True,
         )
         run_attention_dense_torch(spec=spec, q=q, k=k, v=v, out=out, scale=scale)
-        torch.cuda.synchronize()
-        ref = _standard_reference(q, k, v, scale)
-        max_abs = (ref - out.float()).abs().max().item()
+        ref = dense_reference(q, k, v, scale)[0]
+        max_abs = max_abs_error(out, ref)
         assert max_abs < _tolerance("fp16"), f"wide DMA MHA: max_abs={max_abs:.3e}"
 
 
@@ -981,19 +819,16 @@ class TestDenseSinksNumeric:
         queries that DO see keys, ensuring the above/below sink comparison remains
         meaningful. At least one WG (first tile) hits the valid path.
         """
-        import torch
-
         tol = _tolerance(dtype)
-        tdt = getattr(torch, _TORCH_DT[dtype])
         B, S = 1, 512
         scale = 1.0 / math.sqrt(d)
-        torch.manual_seed(0)
+        rng = np.random.default_rng(0)
 
         # Standard Q/K/V tensors
-        q = torch.randn(B, S, hq, d, device="cuda", dtype=tdt)
-        k = torch.randn(B, S, hkv, d, device="cuda", dtype=tdt)
-        v = torch.randn(B, S, hkv, d, device="cuda", dtype=tdt)
-        out = torch.empty(B, S, hq, d, device="cuda", dtype=tdt)
+        q = operand(rng, (B, S, hq, d), dtype)
+        k = operand(rng, (B, S, hkv, d), dtype)
+        v = operand(rng, (B, S, hkv, d), dtype)
+        out = filled((B, S, hq, d), dtype)
 
         # Compute first tile's QK maximum to set sink relative to it.
         # We use the FIRST tile (not global max) because sinks are constant scalars
@@ -1001,30 +836,16 @@ class TestDenseSinksNumeric:
         # tile 0, does it correctly initialize m_init and l_init relative to the sink?"
         # Setting sink above/below first_tile_max directly tests this initialization.
         # First tile: queries [0:256], keys [0:64] (block_n=64 default)
-        q_tile = q[:, :256].transpose(1, 2).float()  # [B, Hq, 256, D]
-        k_tile = (
-            k[:, :64].transpose(1, 2).float().repeat_interleave(hq // hkv, 1)
-        )  # [B, Hq, 64, D]
-        qk_tile = (
-            torch.einsum("bhqd,bhkd->bhqk", q_tile, k_tile) * scale
-        )  # [B, Hq, 256, 64]
-        # Apply causal mask to first tile (only if causal)
-        if causal:
-            qi = torch.arange(256, device="cuda").view(-1, 1)
-            ki = torch.arange(64, device="cuda").view(1, -1)
-            mask = ki > qi
-            qk_tile.masked_fill_(mask.view(1, 1, 256, 64), float("-inf"))
-        first_tile_max = qk_tile.max(dim=-1)[0].max(dim=-1)[0]  # [B, Hq] max per head
+        tile_max = first_tile_max(q, k, scale, 256, 64, causal=causal)  # [Hq]
 
-        # Create sink values relative to first tile's QK max
+        # Create sink values relative to first tile's QK max, stored in the input
+        # dtype.
         if sink_magnitude == "above_qk_max":
             # Sink ABOVE first tile max -> tests m_init = max(m_tile0, sink)
-            sinks = first_tile_max[0] + 1.0  # [Hq], +1 above max
+            sinks = upload(tile_max + 1.0, dtype)
         else:  # below_qk_max
             # Sink BELOW first tile max -> tests l_init * alpha0 correction
-            sinks = first_tile_max[0] - 1.0  # [Hq], -1 below max
-
-        sinks = sinks.to(tdt)  # Match input dtype
+            sinks = upload(tile_max - 1.0, dtype)
 
         # Run kernel with sinks (and optional sliding window / causal)
         spec = _spec(
@@ -1042,12 +863,11 @@ class TestDenseSinksNumeric:
         run_attention_dense_torch(
             spec=spec, q=q, k=k, v=v, out=out, scale=scale, sinks=sinks
         )
-        torch.cuda.synchronize()
 
         # Reference: softmax(concat([QK, sink]))[..., :-1] @ V
-        ref = _sink_reference(q, k, v, sinks, scale, sliding_window=sw, causal=causal)
+        ref = dense_reference(q, k, v, scale, causal=causal, window=sw, sinks=sinks)[0]
 
-        max_abs = (ref - out.float()).abs().max().item()
+        max_abs = max_abs_error(out, ref)
         # Build descriptive label
         mask_label = []
         if not causal:
@@ -1063,34 +883,6 @@ class TestDenseSinksNumeric:
             f"{'persist' if persistent else 'default'} {mask_str} sink_{sink_magnitude}: "
             f"max_abs={max_abs:.3e} >= {tol}"
         )
-
-
-def _bottom_right_reference(q, k, v, sinks, scale, *, top_left):
-    """Explicit fp32 causal oracle for unequal query and KV lengths."""
-    import torch
-
-    batch, sq, hq, _ = q.shape
-    skv = k.shape[1]
-    hkv = k.shape[2]
-    qh = q.transpose(1, 2).float()
-    kh = k.transpose(1, 2).repeat_interleave(hq // hkv, dim=1).float()
-    vh = v.transpose(1, 2).repeat_interleave(hq // hkv, dim=1).float()
-
-    scores = torch.einsum("bhqd,bhkd->bhqk", qh, kh) * scale
-    qi = torch.arange(sq, device=q.device).view(-1, 1)
-    ki = torch.arange(skv, device=q.device).view(1, -1)
-    diagonal = 0 if top_left else skv - sq
-    allowed = ki <= qi + diagonal
-    scores.masked_fill_(~allowed.view(1, 1, sq, skv), float("-inf"))
-
-    if sinks is None:
-        probabilities = torch.softmax(scores, dim=-1)
-    else:
-        sink_col = sinks.float().view(1, hq, 1, 1).expand(batch, hq, sq, 1)
-        probabilities = torch.softmax(torch.cat([scores, sink_col], dim=-1), dim=-1)[
-            ..., :-1
-        ]
-    return torch.einsum("bhqk,bhkd->bhqd", probabilities, vh).transpose(1, 2)
 
 
 # The original nine PR cases plus one aligned and one ragged BM128 case. Each
@@ -1124,8 +916,6 @@ class TestDenseBottomRightNumeric:
     def test_jit_matches_shifted_diagonal_not_top_left(
         self, geometry, sq, skv, batch, ragged, use_sinks
     ):
-        import torch
-
         tile = DENSE_TILE_GEOMETRIES[geometry]
         spec = Gfx950AttentionDenseSpec(
             batch=batch,
@@ -1145,14 +935,12 @@ class TestDenseBottomRightNumeric:
         )
         assert skv > sq, "every case must exercise a moving diagonal"
 
-        torch.manual_seed(0)
-        q = torch.randn(batch, sq, 4, 128, device="cuda", dtype=torch.bfloat16)
-        k = torch.randn(batch, skv, 1, 128, device="cuda", dtype=torch.bfloat16)
-        v = torch.randn(batch, skv, 1, 128, device="cuda", dtype=torch.bfloat16)
-        out = torch.empty_like(q)
-        sinks = (
-            torch.randn(4, device="cuda", dtype=torch.bfloat16) if use_sinks else None
-        )
+        rng = np.random.default_rng(0)
+        q = operand(rng, (batch, sq, 4, 128), "bf16")
+        k = operand(rng, (batch, skv, 1, 128), "bf16")
+        v = operand(rng, (batch, skv, 1, 128), "bf16")
+        out = filled(q.shape, q.dtype)
+        sinks = operand(rng, (4,), "bf16") if use_sinks else None
         scale = 1.0 / math.sqrt(spec.head_size)
 
         run_attention_dense_torch(
@@ -1164,12 +952,11 @@ class TestDenseBottomRightNumeric:
             scale=scale,
             sinks=sinks,
         )
-        torch.cuda.synchronize()
 
-        shifted = _bottom_right_reference(q, k, v, sinks, scale, top_left=False)
-        top_left = _bottom_right_reference(q, k, v, sinks, scale, top_left=True)
-        shifted_err = (out.float() - shifted).abs().max().item()
-        top_left_err = (out.float() - top_left).abs().max().item()
+        shifted = dense_reference(q, k, v, scale, bottom_right=True, sinks=sinks)[0]
+        top_left = dense_reference(q, k, v, scale, sinks=sinks)[0]
+        shifted_err = max_abs_error(out, shifted)
+        top_left_err = max_abs_error(out, top_left)
 
         label = (
             f"{geometry} B{batch} {sq}x{skv} "
@@ -1196,8 +983,6 @@ class TestDenseBottomRightNumeric:
         ],
     )
     def test_fp8_kv_matches_shifted_diagonal_not_top_left(self, d, sq, skv):
-        import torch
-
         tile = DENSE_TILE_GEOMETRIES["default"]
         spec = Gfx950AttentionDenseSpec(
             batch=1,
@@ -1216,24 +1001,15 @@ class TestDenseBottomRightNumeric:
         )
         assert skv > sq, "every case must exercise a moving diagonal"
 
-        torch.manual_seed(0)
-        q = torch.randn(1, sq, 4, d, device="cuda", dtype=torch.bfloat16)
-        k = torch.randn(1, skv, 1, d, device="cuda", dtype=torch.bfloat16)
-        v = torch.randn(1, skv, 1, d, device="cuda", dtype=torch.bfloat16)
-        fp8_max = torch.finfo(torch.float8_e4m3fn).max
-
-        def _quant(t):
-            s = (t.abs().max().clamp(min=1e-8) / fp8_max).item()
-            q8 = (t.float() / s).clamp(-fp8_max, fp8_max).to(torch.float8_e4m3fn)
-            return q8, s
-
-        k_fp8, k_scale = _quant(k)
-        v_fp8, v_scale = _quant(v)
+        rng = np.random.default_rng(0)
+        q = operand(rng, (1, sq, 4, d), "bf16")
+        k = storage.round_to(rng.standard_normal((1, skv, 1, d)), "bf16")
+        v = storage.round_to(rng.standard_normal((1, skv, 1, d)), "bf16")
         # The oracle attends over the same dequantized K/V the kernel reads, so
         # the check isolates kernel error from quantization loss.
-        k_deq = (k_fp8.float() * k_scale).to(torch.bfloat16)
-        v_deq = (v_fp8.float() * v_scale).to(torch.bfloat16)
-        out = torch.empty_like(q)
+        k_fp8, k_scale, k_deq = fp8_kv(k, "bf16")
+        v_fp8, v_scale, v_deq = fp8_kv(v, "bf16")
+        out = filled(q.shape, q.dtype)
         scale = 1.0 / math.sqrt(d)
 
         run_attention_dense_torch(
@@ -1246,12 +1022,11 @@ class TestDenseBottomRightNumeric:
             k_scale=k_scale,
             v_scale=v_scale,
         )
-        torch.cuda.synchronize()
 
-        shifted = _bottom_right_reference(q, k_deq, v_deq, None, scale, top_left=False)
-        top_left = _bottom_right_reference(q, k_deq, v_deq, None, scale, top_left=True)
-        shifted_err = (out.float() - shifted).abs().max().item()
-        top_left_err = (out.float() - top_left).abs().max().item()
+        shifted = dense_reference(q, k_deq, v_deq, scale, bottom_right=True)[0]
+        top_left = dense_reference(q, k_deq, v_deq, scale)[0]
+        shifted_err = max_abs_error(out, shifted)
+        top_left_err = max_abs_error(out, top_left)
         label = f"fp8 D{d} {sq}x{skv}"
         assert (
             shifted_err < _BOTTOM_RIGHT_TOL
@@ -1274,8 +1049,6 @@ class TestDenseBottomRightNumeric:
         ],
     )
     def test_fp8_bottom_right_dispatched_split_matches_reference(self, d, sq, skv):
-        import torch
-
         spec = _spec(
             "bf16",
             d,
@@ -1298,22 +1071,13 @@ class TestDenseBottomRightNumeric:
             "segment+combine path"
         )
 
-        torch.manual_seed(0)
-        q = torch.randn(1, sq, 4, d, device="cuda", dtype=torch.bfloat16)
-        k = torch.randn(1, skv, 1, d, device="cuda", dtype=torch.bfloat16)
-        v = torch.randn(1, skv, 1, d, device="cuda", dtype=torch.bfloat16)
-        fp8_max = torch.finfo(torch.float8_e4m3fn).max
-
-        def _quant(t):
-            s = (t.abs().max().clamp(min=1e-8) / fp8_max).item()
-            q8 = (t.float() / s).clamp(-fp8_max, fp8_max).to(torch.float8_e4m3fn)
-            return q8, s
-
-        k_fp8, k_scale = _quant(k)
-        v_fp8, v_scale = _quant(v)
-        k_deq = (k_fp8.float() * k_scale).to(torch.bfloat16)
-        v_deq = (v_fp8.float() * v_scale).to(torch.bfloat16)
-        out = torch.empty_like(q)
+        rng = np.random.default_rng(0)
+        q = operand(rng, (1, sq, 4, d), "bf16")
+        k = storage.round_to(rng.standard_normal((1, skv, 1, d)), "bf16")
+        v = storage.round_to(rng.standard_normal((1, skv, 1, d)), "bf16")
+        k_fp8, k_scale, k_deq = fp8_kv(k, "bf16")
+        v_fp8, v_scale, v_deq = fp8_kv(v, "bf16")
+        out = filled(q.shape, q.dtype)
         scale = 1.0 / math.sqrt(d)
 
         run_attention_dense_torch(
@@ -1326,12 +1090,11 @@ class TestDenseBottomRightNumeric:
             k_scale=k_scale,
             v_scale=v_scale,
         )
-        torch.cuda.synchronize()
 
-        shifted = _bottom_right_reference(q, k_deq, v_deq, None, scale, top_left=False)
-        top_left = _bottom_right_reference(q, k_deq, v_deq, None, scale, top_left=True)
-        shifted_err = (out.float() - shifted).abs().max().item()
-        top_left_err = (out.float() - top_left).abs().max().item()
+        shifted = dense_reference(q, k_deq, v_deq, scale, bottom_right=True)[0]
+        top_left = dense_reference(q, k_deq, v_deq, scale)[0]
+        shifted_err = max_abs_error(out, shifted)
+        top_left_err = max_abs_error(out, top_left)
         label = f"fp8 split D{d} {sq}x{skv} segs={spec.kv_segments}"
         assert (
             shifted_err < _BOTTOM_RIGHT_TOL
@@ -1364,8 +1127,6 @@ class TestDenseKvSegmentsNumeric:
     def test_kv_segments_match_reference(
         self, geometry, mask, diag_split, segments, sq, skv, d
     ):
-        import torch
-
         tile = DENSE_TILE_GEOMETRIES[geometry]
         spec = Gfx950AttentionDenseSpec(
             batch=1,
@@ -1385,23 +1146,17 @@ class TestDenseKvSegmentsNumeric:
         )
         ok, why = supports_attention_dense(spec, arch="gfx950")
         assert ok, why
-        torch.manual_seed(0)
-        q = torch.randn(1, sq, 8, d, device="cuda", dtype=torch.bfloat16)
-        k = torch.randn(1, skv, 2, d, device="cuda", dtype=torch.bfloat16)
-        v = torch.randn(1, skv, 2, d, device="cuda", dtype=torch.bfloat16)
-        out = torch.empty_like(q)
+        rng = np.random.default_rng(0)
+        q = operand(rng, (1, sq, 8, d), "bf16")
+        k = operand(rng, (1, skv, 2, d), "bf16")
+        v = operand(rng, (1, skv, 2, d), "bf16")
+        out = filled(q.shape, q.dtype)
         scale = 1.0 / math.sqrt(d)
         run_attention_dense_torch(spec=spec, q=q, k=k, v=v, out=out, scale=scale)
-        torch.cuda.synchronize()
-        if mask == "full":
-            qh = q.transpose(1, 2).float()
-            kh = k.transpose(1, 2).repeat_interleave(4, dim=1).float()
-            vh = v.transpose(1, 2).repeat_interleave(4, dim=1).float()
-            p = torch.softmax(torch.einsum("bhqd,bhkd->bhqk", qh, kh) * scale, -1)
-            ref = torch.einsum("bhqk,bhkd->bhqd", p, vh).transpose(1, 2)
-        else:
-            ref = _bottom_right_reference(q, k, v, None, scale, top_left=mask == "tl")
-        err = (out.float() - ref).abs().max().item()
+        ref, _ = dense_reference(
+            q, k, v, scale, causal=mask != "full", bottom_right=mask == "br"
+        )
+        err = max_abs_error(out, ref)
         assert err < _BOTTOM_RIGHT_TOL, (
             f"{geometry} {mask} split={diag_split} S={segments} {sq}x{skv} D{d}: "
             f"max_abs={err:.3e}"
@@ -1429,8 +1184,6 @@ class TestWideDmaFeatures:
     def test_wide_dma_numeric(
         self, _name, causal, sliding_window, use_sinks, block_m, dtype
     ):
-        import torch
-
         from dispatch.attention import AttentionRequest, tuning_spec_with_knobs
 
         B, S, Hq, Hkv, D = 1, 512, 32, 8, 128
@@ -1455,64 +1208,33 @@ class TestWideDmaFeatures:
         assert spec.wide_lds_dma
         assert spec.block_m == block_m
 
-        tdt = getattr(torch, _TORCH_DT[dtype])
-        torch.manual_seed(0)
-        q = torch.randn(B, S, Hq, D, device="cuda", dtype=tdt)
-        k = torch.randn(B, S, Hkv, D, device="cuda", dtype=tdt)
-        v = torch.randn(B, S, Hkv, D, device="cuda", dtype=tdt)
-        out = torch.empty_like(q)
-        sinks = torch.randn(Hq, device="cuda", dtype=tdt) if use_sinks else None
+        rng = np.random.default_rng(0)
+        q = operand(rng, (B, S, Hq, D), dtype)
+        k = operand(rng, (B, S, Hkv, D), dtype)
+        v = operand(rng, (B, S, Hkv, D), dtype)
+        out = filled(q.shape, q.dtype)
+        sinks = operand(rng, (Hq,), dtype) if use_sinks else None
         scale = 1.0 / math.sqrt(D)
         run_attention_dense_torch(
             spec=spec, q=q, k=k, v=v, out=out, scale=scale, sinks=sinks
         )
-        torch.cuda.synchronize()
 
-        # A sink of -inf contributes nothing, so one reference covers both.
-        ref_sinks = (
-            sinks
-            if use_sinks
-            else torch.full((Hq,), float("-inf"), device="cuda", dtype=torch.float32)
+        ref, _ = dense_reference(
+            q, k, v, scale, causal=causal, window=sliding_window, sinks=sinks
         )
-        ref = _sink_reference(
-            q, k, v, ref_sinks, scale, sliding_window=sliding_window, causal=causal
-        )
-        max_abs = (ref - out.float()).abs().max().item()
+        max_abs = max_abs_error(out, ref)
         assert max_abs < _tolerance(
             dtype
-        ), f"{spec_id} {dtype} {_name}: max_abs={max_abs:.3e}"
+        ), f"widedma bm{block_m} {dtype} {_name}: max_abs={max_abs:.3e}"
 
 
-def _lse_reference(q, k, v, scale, *, causal, diagonal=0, window=0, sinks=None):
-    """Independent FP32 O and natural-log LSE, including truly empty rows.
-
-    Scores use FP32 Q/K with the softmax scale applied in FP32.
-    A sink adds denominator mass but contributes no value vector.
-    """
-    batch, sq, hq, _ = q.shape
-    skv, hkv = k.shape[1:3]
-    qh = q.transpose(1, 2).float()
-    kh = k.transpose(1, 2).float().repeat_interleave(hq // hkv, dim=1)
-    vh = v.transpose(1, 2).float().repeat_interleave(hq // hkv, dim=1)
-    scores = torch.matmul(qh, kh.transpose(-1, -2)) * scale
-    qi = torch.arange(sq, device=q.device).view(-1, 1) + diagonal
-    ki = torch.arange(skv, device=q.device).view(1, -1)
-    allowed = torch.ones((sq, skv), device=q.device, dtype=torch.bool)
-    if causal:
-        allowed &= ki <= qi
-    if window:
-        allowed &= ki > qi - window
-    scores = scores.masked_fill(~allowed.view(1, 1, sq, skv), float("-inf"))
-    if sinks is not None:
-        sink_scores = sinks.float().view(1, hq, 1, 1).expand(batch, hq, sq, 1)
-        scores = torch.cat((scores, sink_scores), dim=-1)
-    lse = torch.logsumexp(scores, dim=-1)
-    has_mass = torch.isfinite(lse)
-    safe_lse = torch.where(has_mass, lse, torch.zeros_like(lse))
-    probabilities = torch.exp(scores - safe_lse.unsqueeze(-1))
-    probabilities = torch.where(has_mass.unsqueeze(-1), probabilities, 0.0)
-    out = torch.matmul(probabilities[..., :skv], vh).transpose(1, 2)
-    return out, lse.unsqueeze(-1)
+def _scattered(sequence, page_ids, block_size=16):
+    """One sequence's ``[S, H, D]`` host K or V cut into pages of ``block_size`` rows,
+    page ``p`` stored at physical page ``page_ids[p]``."""
+    pages = sequence.reshape(len(page_ids), block_size, *sequence.shape[1:])
+    cache = np.empty_like(pages)
+    cache[page_ids] = pages
+    return cache
 
 
 @requires_gfx950_gpu
@@ -1543,19 +1265,13 @@ class TestDenseLseNumeric:
             block_m=int(DENSE_TILE_GEOMETRIES[geometry]["block_m"]),
             emit_lse=True,
         )
-        tdt = getattr(torch, _TORCH_DT[dtype])
         scale = 0.5
-        torch.manual_seed(11)
-        q = torch.randn(2, 512, hq, head_size, device="cuda", dtype=tdt)
-        k = torch.randn(2, 512, hkv, head_size, device=q.device, dtype=tdt)
-        v = torch.randn_like(k)
-        out = torch.empty_like(q)
-        lse = torch.full(
-            (2, hq, 512, 1),
-            float("nan"),
-            device=q.device,
-            dtype=torch.float32,
-        )
+        rng = np.random.default_rng(11)
+        q = operand(rng, (2, 512, hq, head_size), dtype)
+        k = operand(rng, (2, 512, hkv, head_size), dtype)
+        v = operand(rng, k.shape, k.dtype)
+        out = filled(q.shape, q.dtype)
+        lse = filled((2, hq, 512, 1), "fp32")
         returned = run_attention_dense_torch(
             spec=spec,
             q=q,
@@ -1565,12 +1281,11 @@ class TestDenseLseNumeric:
             lse=lse,
             scale=scale,
         )
-        torch.cuda.synchronize()
-        ref, lse_ref = _lse_reference(q, k, v, scale, causal=True)
+        ref, lse_ref = dense_reference(q, k, v, scale, causal=True)
         assert returned is out
-        assert (out.float() - ref).abs().max().item() < _tolerance(dtype)
-        assert (lse - lse_ref).abs().max().item() < _tolerance(dtype)
-        off_out = torch.empty_like(out)
+        assert max_abs_error(out, ref) < _tolerance(dtype)
+        assert max_abs_error(lse, lse_ref) < _tolerance(dtype)
+        off_out = filled(out.shape, out.dtype)
         run_attention_dense_torch(
             spec=replace(spec, emit_lse=False),
             q=q,
@@ -1579,9 +1294,8 @@ class TestDenseLseNumeric:
             out=off_out,
             scale=scale,
         )
-        torch.cuda.synchronize()
         # Every row has a key. Empty-row corrections are enabled-path-only.
-        assert torch.equal(out, off_out)
+        assert same_values(out, off_out)
 
     @pytest.mark.parametrize("width", [1, 2])
     @pytest.mark.parametrize(
@@ -1603,18 +1317,16 @@ class TestDenseLseNumeric:
             emit_lse=True,
         )
         scale = 0.5
-        torch.manual_seed(17)
-        q = torch.randn(1, 256, 4, 128, device="cuda", dtype=torch.bfloat16)
-        k = torch.randn(1, 64, 1, 128, device=q.device, dtype=q.dtype)
-        v = torch.randn_like(k)
-        out = torch.full_like(q, float("nan"))
-        lse = torch.full(
-            (1, 4, 256, 1), float("nan"), device=q.device, dtype=torch.float32
-        )
+        rng = np.random.default_rng(17)
+        q = operand(rng, (1, 256, 4, 128), "bf16")
+        k = operand(rng, (1, 64, 1, 128), q.dtype)
+        v = operand(rng, k.shape, k.dtype)
+        out = filled(q.shape, q.dtype)
+        lse = filled((1, 4, 256, 1), "fp32")
         run_attention_dense_torch(
             spec=spec, q=q, k=k, v=v, out=out, lse=lse, scale=scale
         )
-        off_out = torch.empty_like(q)
+        off_out = filled(q.shape, q.dtype)
         run_attention_dense_torch(
             spec=replace(spec, emit_lse=False),
             q=q,
@@ -1623,17 +1335,16 @@ class TestDenseLseNumeric:
             out=off_out,
             scale=scale,
         )
-        torch.cuda.synchronize()
-        ref, lse_ref = _lse_reference(q, k, v, scale, causal=True, window=64)
+        ref, lse_ref = dense_reference(q, k, v, scale, causal=True, window=64)
         # Rows 0..126 see at least one key; rows 127.. see none.
-        assert (out[:, :127].float() - ref[:, :127]).abs().max().item() < _tolerance(
-            "bf16"
-        )
-        assert torch.equal(out[:, :127], off_out[:, :127])
-        assert torch.equal(out[:, 127:], torch.zeros_like(out[:, 127:]))
-        finite = torch.isfinite(lse_ref)
-        assert (lse[finite] - lse_ref[finite]).abs().max().item() < _tolerance("bf16")
-        assert torch.equal(torch.isneginf(lse), torch.isneginf(lse_ref))
+        o, o_off = values(out), values(off_out)
+        assert max_abs_error(o[:, :127], ref[:, :127]) < _tolerance("bf16")
+        assert same_values(o[:, :127], o_off[:, :127])
+        assert same_values(o[:, 127:], np.zeros_like(o[:, 127:]))
+        lse_got = values(lse)
+        finite = np.isfinite(lse_ref)
+        assert max_abs_error(lse_got[finite], lse_ref[finite]) < _tolerance("bf16")
+        assert np.array_equal(np.isneginf(lse_got), np.isneginf(lse_ref))
 
     @pytest.mark.parametrize("right", [0, -1], ids=["causal", "left-only"])
     def test_runtime_shape_keyless_rows_match_with_and_without_lse(self, right):
@@ -1660,19 +1371,17 @@ class TestDenseLseNumeric:
             emit_lse=True,
         )
         assert spec.runtime_shape, "test setup error: not on the runtime-shape path"
-        torch.manual_seed(23)
-        q = torch.randn(_BAND_BATCH, sq, 4, 128, device="cuda", dtype=torch.bfloat16)
-        k = torch.randn(_BAND_BATCH, skv, 1, 128, device=q.device, dtype=q.dtype)
-        v = torch.randn_like(k)
+        rng = np.random.default_rng(23)
+        q = operand(rng, (_BAND_BATCH, sq, 4, 128), "bf16")
+        k = operand(rng, (_BAND_BATCH, skv, 1, 128), q.dtype)
+        v = operand(rng, k.shape, k.dtype)
         scale = 1.0 / math.sqrt(128)
-        out = torch.full_like(q, float("nan"))
-        lse = torch.full(
-            (_BAND_BATCH, 4, sq, 1), float("nan"), device=q.device, dtype=torch.float32
-        )
+        out = filled(q.shape, q.dtype)
+        lse = filled((_BAND_BATCH, 4, sq, 1), "fp32")
         run_attention_dense_torch(
             spec=spec, q=q, k=k, v=v, out=out, lse=lse, scale=scale
         )
-        off_out = torch.full_like(q, float("nan"))
+        off_out = filled(q.shape, q.dtype)
         run_attention_dense_torch(
             spec=replace(spec, emit_lse=False),
             q=q,
@@ -1681,12 +1390,11 @@ class TestDenseLseNumeric:
             out=off_out,
             scale=scale,
         )
-        torch.cuda.synchronize()
         ref, empty = _band_reference(q, k, v, scale, window, right)
         assert empty.any(), "test setup error: the shape has no keyless rows"
         _check_band(out, ref, empty)
         _check_band(off_out, ref, empty)
-        assert torch.equal(out, off_out)
+        assert same_values(out, off_out)
 
     @pytest.mark.parametrize(
         "persistent", [False, True], ids=["ordinary", "persistent"]
@@ -1706,21 +1414,12 @@ class TestDenseLseNumeric:
             use_sinks=with_sink,
             emit_lse=True,
         )
-        q = torch.zeros(1, 256, 3, 128, device="cuda", dtype=torch.bfloat16)
-        k = torch.zeros(1, 64, 1, 128, device=q.device, dtype=q.dtype)
-        v = torch.ones_like(k)
-        out = torch.full_like(q, float("nan"))
-        lse = torch.full(
-            (1, 3, 256, 1),
-            float("nan"),
-            device=q.device,
-            dtype=torch.float32,
-        )
-        sinks = (
-            torch.tensor([-2.0, 0.0, 2.0], device=q.device, dtype=q.dtype)
-            if with_sink
-            else None
-        )
+        q = filled((1, 256, 3, 128), "bf16", 0.0)
+        k = filled((1, 64, 1, 128), "bf16", 0.0)
+        v = filled(k.shape, "bf16", 1.0)
+        out = filled(q.shape, q.dtype)
+        lse = filled((1, 3, 256, 1), "fp32")
+        sinks = upload([-2.0, 0.0, 2.0], "bf16") if with_sink else None
         run_attention_dense_torch(
             spec=spec,
             q=q,
@@ -1731,24 +1430,8 @@ class TestDenseLseNumeric:
             scale=0.5,
             sinks=sinks,
         )
-        torch.cuda.synchronize()
-        rows = torch.arange(256, device=q.device)
-        counts = (
-            (
-                torch.minimum(rows + 1, torch.full_like(rows, 64))
-                - (rows - 63).clamp_min(0)
-            )
-            .clamp_min(0)
-            .float()
-        )
-        assert counts[63].item() == 64
-        assert counts[126].item() == 1
-        assert counts[127].item() == 0
-        mass = counts.view(1, 1, 256, 1).expand(1, 3, 256, 1)
-        if with_sink:
-            mass = mass + sinks.float().exp().view(1, 3, 1, 1)
-        analytic_lse = mass.log()
-        ref, lse_ref = _lse_reference(
+        analytic_lse = window64_analytic_lse(3, sinks)
+        ref, lse_ref = dense_reference(
             q,
             k,
             v,
@@ -1757,17 +1440,21 @@ class TestDenseLseNumeric:
             window=64,
             sinks=sinks,
         )
-        finite = torch.isfinite(analytic_lse)
-        assert (lse[finite] - analytic_lse[finite]).abs().max().item() < 1e-5
-        assert (lse_ref[finite] - analytic_lse[finite]).abs().max().item() < 1e-5
-        assert torch.equal(torch.isneginf(lse), torch.isneginf(analytic_lse))
-        assert (out.float() - ref).abs().max().item() < _tolerance("bf16")
-        assert torch.equal(out[:, 127:], torch.zeros_like(out[:, 127:]))
+        lse_got = values(lse)
+        finite = np.isfinite(analytic_lse)
+        assert max_abs_error(lse_got[finite], analytic_lse[finite]) < 1e-5
+        assert max_abs_error(lse_ref[finite], analytic_lse[finite]) < 1e-5
+        assert np.array_equal(np.isneginf(lse_got), np.isneginf(analytic_lse))
+        assert max_abs_error(out, ref) < _tolerance("bf16")
+        o = values(out)
+        assert same_values(o[:, 127:], np.zeros_like(o[:, 127:]))
         if with_sink:
-            expected = sinks.float().view(1, 3, 1, 1).expand(1, 3, 129, 1)
-            assert (lse[:, :, 127:] - expected).abs().max().item() < 1e-5
+            expected = np.broadcast_to(
+                values(sinks)[None, :, None, None], (1, 3, 129, 1)
+            )
+            assert max_abs_error(lse_got[:, :, 127:], expected) < 1e-5
         else:
-            assert torch.isneginf(lse[:, :, 127:]).all().item()
+            assert np.isneginf(lse_got[:, :, 127:]).all()
 
     @pytest.mark.parametrize("dtype", ["fp16", "bf16"])
     @pytest.mark.parametrize(
@@ -1874,44 +1561,27 @@ class TestDenseLseNumeric:
         options.update(case)
         spec = Gfx950AttentionDenseSpec(**options)
         batch, sq, skv = spec.batch, spec.seqlen_q, spec.seqlen_kv
-        tdt = getattr(torch, _TORCH_DT[dtype])
-        torch.manual_seed(19)
-        q = torch.randn(batch, sq, 4, 128, device="cuda", dtype=tdt)
-        k = torch.randn(batch, skv, 1, 128, device=q.device, dtype=tdt)
-        v = torch.randn_like(k)
-        out_count = q.numel()
-        out_storage = torch.full(
-            (out_count + 16,),
-            123.0,
-            device=q.device,
-            dtype=tdt,
-        )
-        out = out_storage[:out_count].view_as(q)
-        count = batch * 4 * sq
-        storage = torch.full(
-            (count + 16,),
-            12345.0,
-            device=q.device,
-            dtype=torch.float32,
-        )
-        lse = storage[:count].view(batch, 4, sq, 1)
-        sinks = (
-            torch.linspace(-1, 1, 4, device=q.device).to(tdt)
-            if spec.use_sinks
-            else None
-        )
+        rng = np.random.default_rng(19)
+        q = operand(rng, (batch, sq, 4, 128), dtype)
+        k = operand(rng, (batch, skv, 1, 128), dtype)
+        v = operand(rng, k.shape, k.dtype)
+        # Each output sits at the start of a buffer whose guard rows must survive.
+        out = guarded(q.shape, dtype, 123.0)
+        lse = guarded((batch, 4, sq, 1), "fp32", 12345.0)
+        sinks = upload(np.linspace(-1, 1, 4), dtype) if spec.use_sinks else None
         launch_k, launch_v = k, v
         scale = 0.5
         metadata = {}
         if spec.paged:
-            page_ids = torch.arange(31, -1, -1, device=q.device, dtype=torch.int32)
-            launch_k = torch.empty(32, 16, 1, 128, device=q.device, dtype=tdt)
-            launch_v = torch.empty_like(launch_k)
-            launch_k[page_ids.long()] = k[0].view(32, 16, 1, 128)
-            launch_v[page_ids.long()] = v[0].view(32, 16, 1, 128)
+            # Page p of the sequence lives at physical page 31 - p.
+            page_ids = np.arange(31, -1, -1, dtype=np.int32)
+            launch_k, launch_v = (
+                DeviceArray(_scattered(host_values(src)[0], page_ids), dtype)
+                for src in (k, v)
+            )
             metadata = {
-                "block_tables": page_ids.view(1, 32),
-                "kv_lens": torch.tensor([skv], device=q.device, dtype=torch.int32),
+                "block_tables": DeviceArray(page_ids.reshape(1, 32)),
+                "kv_lens": DeviceArray(np.array([skv], dtype=np.int32)),
             }
         returned = run_attention_dense_torch(
             spec=spec,
@@ -1924,26 +1594,22 @@ class TestDenseLseNumeric:
             sinks=sinks,
             **metadata,
         )
-        torch.cuda.synchronize()
-        ref, lse_ref = _lse_reference(
+        ref, lse_ref = dense_reference(
             q,
             k,
             v,
             scale,
             causal=spec.causal,
-            diagonal=skv - sq if spec.causal_bottom_right else 0,
+            bottom_right=spec.causal_bottom_right,
             window=spec.sliding_window,
             sinks=sinks,
         )
         assert returned is out
-        assert (out.float() - ref).abs().max().item() < _tolerance(dtype)
-        assert (lse - lse_ref).abs().max().item() < _tolerance(dtype)
-        assert torch.equal(storage[count:], torch.full_like(storage[count:], 12345.0))
-        assert torch.equal(
-            out_storage[out_count:],
-            torch.full_like(out_storage[out_count:], 123.0),
-        )
-        off_out = torch.empty_like(out)
+        assert max_abs_error(out, ref) < _tolerance(dtype)
+        assert max_abs_error(lse, lse_ref) < _tolerance(dtype)
+        assert guard_intact(lse, 12345.0), "LSE written past its end"
+        assert guard_intact(out, 123.0), "O written past its end"
+        off_out = filled(out.shape, out.dtype)
         run_attention_dense_torch(
             spec=replace(spec, emit_lse=False),
             q=q,
@@ -1954,8 +1620,7 @@ class TestDenseLseNumeric:
             sinks=sinks,
             **metadata,
         )
-        torch.cuda.synchronize()
-        assert torch.equal(out, off_out)
+        assert same_values(out, off_out)
 
     @pytest.mark.parametrize("dtype", ["fp16", "bf16"])
     @pytest.mark.parametrize(
@@ -1975,23 +1640,15 @@ class TestDenseLseNumeric:
             varlen=True,
             emit_lse=True,
         )
-        torch.manual_seed(23)
-        tdt = getattr(torch, _TORCH_DT[dtype])
-        q = torch.randn(q_offsets[-1], 4, 128, device="cuda", dtype=tdt)
-        k = torch.randn(k_offsets[-1], 1, 128, device=q.device, dtype=tdt)
-        v = torch.randn_like(k)
-        out = torch.full_like(q, float("nan"))
-        count = q_offsets[-1] * 4
-        storage = torch.full(
-            (count + 16,),
-            12345.0,
-            device=q.device,
-            dtype=torch.float32,
-        )
-        lse = storage[:count].view(q_offsets[-1], 4, 1)
+        rng = np.random.default_rng(23)
+        q = operand(rng, (q_offsets[-1], 4, 128), dtype)
+        k = operand(rng, (k_offsets[-1], 1, 128), dtype)
+        v = operand(rng, k.shape, k.dtype)
+        out = filled(q.shape, q.dtype)
+        lse = guarded((q_offsets[-1], 4, 1), "fp32", 12345.0)
         scale = 0.5
-        cu_q = torch.tensor(q_offsets, device=q.device, dtype=torch.int32)
-        cu_k = torch.tensor(k_offsets, device=q.device, dtype=torch.int32)
+        cu_q = DeviceArray(np.array(q_offsets, dtype=np.int32))
+        cu_k = DeviceArray(np.array(k_offsets, dtype=np.int32))
         returned = run_attention_dense_torch(
             spec=spec,
             q=q,
@@ -2003,30 +1660,17 @@ class TestDenseLseNumeric:
             cu_seqlens_q=cu_q,
             cu_seqlens_kv=cu_k,
         )
-        torch.cuda.synchronize()
-        expected_out = torch.empty_like(out, dtype=torch.float32)
-        expected_lse = torch.empty_like(lse)
-        for seq in range(2):
-            q0, q1 = q_offsets[seq : seq + 2]
-            k0, k1 = k_offsets[seq : seq + 2]
-            if q0 == q1:
-                continue
-            ref, lse_ref = _lse_reference(
-                q[q0:q1].unsqueeze(0),
-                k[k0:k1].unsqueeze(0),
-                v[k0:k1].unsqueeze(0),
-                scale,
-                causal=True,
-            )
-            expected_out[q0:q1] = ref[0]
-            expected_lse[q0:q1] = lse_ref[0].transpose(0, 1)
+        # Top-left causal within each sequence.
+        expected_out, expected_lse = dense_reference(
+            q, k, v, scale, q_offsets=q_offsets, kv_offsets=k_offsets
+        )
         assert returned is out
-        assert (out.float() - expected_out).abs().max().item() < _tolerance(dtype)
-        assert (lse - expected_lse).abs().max().item() < _tolerance(dtype)
-        assert torch.equal(storage[count:], torch.full_like(storage[count:], 12345.0))
+        assert max_abs_error(out, expected_out) < _tolerance(dtype)
+        assert max_abs_error(lse, expected_lse) < _tolerance(dtype)
+        assert guard_intact(lse, 12345.0), "LSE written past its end"
         # Packed varlen is the one mode where LSE changes the O store guard
         # (stores only rows that exist), so pin the bits against LSE off.
-        off_out = torch.full_like(q, float("nan"))
+        off_out = filled(q.shape, q.dtype)
         run_attention_dense_torch(
             spec=replace(spec, emit_lse=False),
             q=q,
@@ -2037,8 +1681,7 @@ class TestDenseLseNumeric:
             cu_seqlens_q=cu_q,
             cu_seqlens_kv=cu_k,
         )
-        torch.cuda.synchronize()
-        assert torch.equal(out.view(torch.int16), off_out.view(torch.int16))
+        assert same_bits(out, off_out)
 
     @pytest.mark.parametrize(
         "shape",
@@ -2087,15 +1730,12 @@ class TestDenseLseNumeric:
             emit_lse=emit_lse,
             sliding_window=window,
         )
-        torch.manual_seed(31)
-        tdt = getattr(torch, _TORCH_DT[dtype])
-        q = torch.randn(q_offsets[-1], 4, head_size, device="cuda", dtype=tdt)
-        k = torch.randn(k_offsets[-1], kv_heads, head_size, device=q.device, dtype=tdt)
-        v = torch.randn_like(k)
-        out = torch.full_like(q, float("nan"))
-        lse_out = torch.full(
-            (q_offsets[-1], 4, 1), float("nan"), device=q.device, dtype=torch.float32
-        )
+        rng = np.random.default_rng(31)
+        q = operand(rng, (q_offsets[-1], 4, head_size), dtype)
+        k = operand(rng, (k_offsets[-1], kv_heads, head_size), dtype)
+        v = operand(rng, k.shape, k.dtype)
+        out = filled(q.shape, q.dtype)
+        lse_out = filled((q_offsets[-1], 4, 1), "fp32")
         scale = 0.5
         run_attention_dense_torch(
             spec=spec,
@@ -2105,38 +1745,26 @@ class TestDenseLseNumeric:
             out=out,
             lse=lse_out if emit_lse else None,
             scale=scale,
-            cu_seqlens_q=torch.tensor(q_offsets, device=q.device, dtype=torch.int32),
-            cu_seqlens_kv=torch.tensor(k_offsets, device=q.device, dtype=torch.int32),
+            cu_seqlens_q=DeviceArray(np.array(q_offsets, dtype=np.int32)),
+            cu_seqlens_kv=DeviceArray(np.array(k_offsets, dtype=np.int32)),
         )
-        torch.cuda.synchronize()
-        expected_out = torch.empty_like(out, dtype=torch.float32)
-        expected_lse = torch.empty_like(lse_out)
-        for seq in range(2):
-            q0, q1 = q_offsets[seq : seq + 2]
-            k0, k1 = k_offsets[seq : seq + 2]
-            ref, lse_ref = _lse_reference(
-                q[q0:q1].unsqueeze(0),
-                k[k0:k1].unsqueeze(0),
-                v[k0:k1].unsqueeze(0),
-                scale,
-                causal=True,
-                window=window,
-            )
-            expected_out[q0:q1] = ref[0]
-            expected_lse[q0:q1] = lse_ref[0].transpose(0, 1)
-        has_key = torch.isfinite(expected_lse)
+        expected_out, expected_lse = dense_reference(
+            q, k, v, scale, window=window, q_offsets=q_offsets, kv_offsets=k_offsets
+        )
+        has_key = np.isfinite(expected_lse)
         # The case must have the rows it claims: the launcher rejects keyless rows
         # without LSE, and the keyless case is only worth running with some.
         assert bool((~has_key).any()) == keyless
         tol = _tolerance(dtype)
         # NaN anywhere in ``out`` (a row never stored) fails the comparison.
-        assert (out.float() - expected_out).abs().max().item() < tol
+        assert max_abs_error(out, expected_out) < tol
         if emit_lse:
-            assert torch.equal(torch.isfinite(lse_out), has_key)
-            assert (lse_out[has_key] - expected_lse[has_key]).abs().max().item() < tol
-            assert bool((lse_out[~has_key] == float("-inf")).all())
-            keyless_out = out[~has_key.squeeze(-1)]
-            assert torch.equal(keyless_out, torch.zeros_like(keyless_out))
+            lse_got = values(lse_out)
+            assert np.array_equal(np.isfinite(lse_got), has_key)
+            assert max_abs_error(lse_got[has_key], expected_lse[has_key]) < tol
+            assert bool((lse_got[~has_key] == float("-inf")).all())
+            keyless_out = values(out)[~has_key.squeeze(-1)]
+            assert same_values(keyless_out, np.zeros_like(keyless_out))
 
     @pytest.mark.parametrize(
         "failure",
@@ -2194,39 +1822,37 @@ class TestDenseLseNumeric:
         )
         tq = 256 if failure == "decreasing" else 768
         tk = 256 if failure == "zero_kv" else 384
-        q = torch.zeros(tq, 4, 128, device="cuda", dtype=torch.bfloat16)
-        k = torch.zeros(tk, 1, 128, device=q.device, dtype=q.dtype)
-        v = torch.zeros_like(k)
-        out = torch.empty_like(q)
-        lse = torch.empty(tq, 4, 1, device=q.device, dtype=torch.float32)
-        cu_q = torch.tensor(q_offsets, device=q.device, dtype=torch.int32)
-        cu_k = torch.tensor(k_offsets, device=q.device, dtype=torch.int32)
+        q = DeviceArray.zeros((tq, 4, 128), "bf16")
+        k = DeviceArray.zeros((tk, 1, 128), "bf16")
+        v = DeviceArray.zeros(k.shape, "bf16")
+        out = filled(q.shape, q.dtype)
+        lse = DeviceArray.zeros((tq, 4, 1), "fp32")
+        cu_q = DeviceArray(np.array(q_offsets, dtype=np.int32))
+        cu_k = DeviceArray(np.array(k_offsets, dtype=np.int32))
         if failure == "q_offset_dtype":
-            cu_q = cu_q.long()
+            cu_q = DeviceArray(np.array(q_offsets, dtype=np.int64))
         elif failure == "kv_offset_dtype":
-            cu_k = cu_k.long()
+            cu_k = DeviceArray(np.array(k_offsets, dtype=np.int64))
         elif failure == "q_offset_count":
-            cu_q = cu_q[:-1]
+            cu_q = DeviceArray(np.array(q_offsets[:-1], dtype=np.int32))
         elif failure == "kv_offset_count":
-            cu_k = cu_k[:-1]
+            cu_k = DeviceArray(np.array(k_offsets[:-1], dtype=np.int32))
         elif failure == "offset_layout":
-            cu_q = torch.tensor(
-                [0, 0, 256, 0, 768, 0],
-                device=q.device,
-                dtype=torch.int32,
-            )[::2]
+            # Every other element of [0, 0, 256, 0, 768, 0]: right values, strided.
+            cu_q = HostArray((3,), "i32", values=q_offsets, strides=(2,))
         elif failure == "offset_device":
-            cu_k = cu_k.cpu()
+            cu_k = HostArray((3,), "i32", values=k_offsets, device=None)
         elif failure == "missing_offsets":
             cu_q = None
         elif failure == "kv_extent":
-            v = v[:-1]
+            v = DeviceArray.zeros((tk - 1, 1, 128), "bf16")
         elif failure == "out_extent":
-            out = out[:-1]
+            out = filled((tq - 1, 4, 128), "bf16")
         elif failure == "packed_shape":
-            k = k.view(tk, 2, 64)
+            k = DeviceArray.zeros((tk, 2, 64), "bf16")
         elif failure == "packed_layout":
-            k = torch.zeros(tk, 1, 256, device=q.device, dtype=q.dtype)[..., ::2]
+            # The first half of every row of a [tk, 1, 256] buffer: not packed.
+            k = DeviceArray(np.zeros((tk, 1, 256), np.uint16), "bf16", shape=k.shape)
         with pytest.raises(ValueError):
             run_attention_dense_torch(
                 spec=spec,
@@ -2269,59 +1895,51 @@ class TestDenseLseNumeric:
             dtype="bf16",
             emit_lse=True,
         )
-        q = torch.zeros(2, 256, 4, 128, device="cuda", dtype=torch.bfloat16)
-        k = torch.zeros(2, 256, 1, 128, device=q.device, dtype=q.dtype)
-        v = torch.zeros_like(k)
-        out = torch.empty_like(q)
-        lse = torch.empty(2, 4, 256, 1, device=q.device, dtype=torch.float32)
+        q = DeviceArray.zeros((2, 256, 4, 128), "bf16")
+        k = DeviceArray.zeros((2, 256, 1, 128), "bf16")
+        v = DeviceArray.zeros(k.shape, "bf16")
+        out = filled(q.shape, q.dtype)
+        lse = DeviceArray.zeros((2, 4, 256, 1), "fp32")
         sinks, metadata = None, {}
         if failure == "missing":
             lse = None
         elif failure == "unexpected":
             spec = replace(spec, emit_lse=False)
         elif failure == "dtype":
-            lse = lse.bfloat16()
+            lse = DeviceArray.zeros(lse.shape, "bf16")
         elif failure == "shape":
-            lse = lse[..., 0]
+            lse = DeviceArray.zeros(lse.shape[:-1], "fp32")
         elif failure == "layout":
-            lse = torch.empty(
-                2,
-                4,
-                256,
-                2,
-                device=q.device,
-                dtype=torch.float32,
-            )[..., :1]
+            # The first column of a [2, 4, 256, 2] buffer: strided, not packed.
+            lse = DeviceArray(np.zeros((2, 4, 256, 2), np.float32), shape=lse.shape)
         elif failure == "device":
-            lse = lse.cpu()
+            lse = HostArray(lse.shape, "fp32", device=None)
         elif failure in {"overlap_q", "overlap_k", "overlap_v", "overlap_out"}:
-            tensor = {
+            array = {
                 "overlap_q": q,
                 "overlap_k": k,
                 "overlap_v": v,
                 "overlap_out": out,
             }[failure]
-            # Reinterpret the real input/output allocation, not a copied tensor.
-            lse = tensor.view(torch.float32).view(-1)[:2048].view(2, 4, 256, 1)
+            # A second view of the real input/output allocation, not a copy.
+            lse = Alias(array, lse.shape, "fp32")
         elif failure == "overlap_sink":
             spec = replace(spec, use_sinks=True)
-            sinks = lse.view(torch.bfloat16).view(-1)[:4]
+            sinks = Alias(lse, (4,), "bf16")
         elif failure == "overlap_metadata":
             spec = replace(spec, varlen=True)
-            q, k, v, out = (tensor.flatten(0, 1) for tensor in (q, k, v, out))
-            lse = lse.view(512, 4, 1)
-            cu_q = lse.view(torch.int32).view(-1)[:3]
-            cu_q.copy_(torch.tensor([0, 256, 512], device=q.device, dtype=torch.int32))
+            q, k, v, out = (
+                DeviceArray.zeros((512, *array.shape[2:]), "bf16")
+                for array in (q, k, v, out)
+            )
+            lse = DeviceArray.zeros((512, 4, 1), "fp32")
+            offsets = [0, 256, 512]
             metadata = {
-                "cu_seqlens_q": cu_q,
-                "cu_seqlens_kv": torch.tensor(
-                    [0, 256, 512],
-                    device=q.device,
-                    dtype=torch.int32,
-                ),
+                "cu_seqlens_q": Alias(lse, (3,), "i32", read_values=offsets),
+                "cu_seqlens_kv": DeviceArray(np.array(offsets, dtype=np.int32)),
             }
         elif failure == "companion":
-            k = k.cpu()
+            k = HostArray(k.shape, "bf16", device=None)
         with pytest.raises(ValueError):
             run_attention_dense_torch(
                 spec=spec,
@@ -2368,22 +1986,19 @@ class TestDenseLseNumeric:
             )
         )
         scale = 0.5
-        torch.manual_seed(23)
-        q = torch.randn(2, 512, 8, 128, device="cuda", dtype=torch.bfloat16)
-        k = torch.randn(2, 512, 2, 128, device=q.device, dtype=q.dtype)
-        v = torch.randn_like(k)
-        out = torch.empty_like(q)
-        lse = torch.full(
-            (2, 8, 512, 1), float("nan"), device=q.device, dtype=torch.float32
-        )
+        rng = np.random.default_rng(23)
+        q = operand(rng, (2, 512, 8, 128), "bf16")
+        k = operand(rng, (2, 512, 2, 128), q.dtype)
+        v = operand(rng, k.shape, k.dtype)
+        out = filled(q.shape, q.dtype)
+        lse = filled((2, 8, 512, 1), "fp32")
         tensors = {"q": q, "k": k, "v": v, "out": out}
         with pytest.raises(ValueError):
             result.bind_torch(tensors, scale=scale).launch()
         result.bind_torch({**tensors, "lse": lse}, scale=scale).launch()
-        torch.cuda.synchronize()
-        ref, lse_ref = _lse_reference(q, k, v, scale, causal=True)
-        assert (out.float() - ref).abs().max().item() < _tolerance("bf16")
-        assert (lse - lse_ref).abs().max().item() < _tolerance("bf16")
+        ref, lse_ref = dense_reference(q, k, v, scale, causal=True)
+        assert max_abs_error(out, ref) < _tolerance("bf16")
+        assert max_abs_error(lse, lse_ref) < _tolerance("bf16")
 
     def test_lse_runtime_shape_reuse(self):
         from kernels.common.attention_dense_spec import attention_dense_cache_key
@@ -2417,18 +2032,13 @@ class TestDenseLseNumeric:
         scale = 0.5
         try:
             for index, spec in enumerate(specs):
-                torch.manual_seed(29 + index)
+                rng = np.random.default_rng(29 + index)
                 batch, sq = spec.batch, spec.seqlen_q
-                q = torch.randn(batch, sq, 4, 128, device="cuda", dtype=torch.bfloat16)
-                k = torch.randn(batch, 512, 1, 128, device=q.device, dtype=q.dtype)
-                v = torch.randn_like(k)
-                out = torch.empty_like(q)
-                lse = torch.full(
-                    (batch, 4, sq, 1),
-                    float("nan"),
-                    device=q.device,
-                    dtype=torch.float32,
-                )
+                q = operand(rng, (batch, sq, 4, 128), "bf16")
+                k = operand(rng, (batch, 512, 1, 128), q.dtype)
+                v = operand(rng, k.shape, k.dtype)
+                out = filled(q.shape, q.dtype)
+                lse = filled((batch, 4, sq, 1), "fp32")
                 run_attention_dense_torch(
                     spec=spec,
                     q=q,
@@ -2438,14 +2048,13 @@ class TestDenseLseNumeric:
                     lse=lse,
                     scale=scale,
                 )
-                torch.cuda.synchronize()
-                ref, lse_ref = _lse_reference(q, k, v, scale, causal=True)
-                assert (out.float() - ref).abs().max().item() < _tolerance("bf16")
-                assert (lse - lse_ref).abs().max().item() < _tolerance("bf16")
+                ref, lse_ref = dense_reference(q, k, v, scale, causal=True)
+                assert max_abs_error(out, ref) < _tolerance("bf16")
+                assert max_abs_error(lse, lse_ref) < _tolerance("bf16")
                 launchers.append(_launcher_for(spec))
             assert launchers[0] is not None
             assert launchers[0] is launchers[1]
-            off_out = torch.empty_like(out)
+            off_out = filled(out.shape, out.dtype)
             run_attention_dense_torch(
                 spec=off_specs[-1],
                 q=q,
@@ -2454,8 +2063,7 @@ class TestDenseLseNumeric:
                 out=off_out,
                 scale=scale,
             )
-            torch.cuda.synchronize()
-            assert torch.equal(out, off_out)
+            assert same_values(out, off_out)
             assert _launcher_for(off_specs[-1]) is not launchers[0]
         finally:
             for key, entry in old_entries.items():
@@ -2510,25 +2118,22 @@ class TestDensePagedNumeric:
         cache at bind."""
         window = 1024
         q, k, v, out = run_dispatched_paged("gfx950", spec_id, window=window)
-        assert torch.isfinite(out).all()
+        assert np.isfinite(values(out)).all()
         scale = 1.0 / math.sqrt(q.shape[-1])
-        ref = _standard_reference(q, k, v, scale, sliding_window=window)
-        assert (out.float() - ref).abs().max().item() < _tolerance("fp16")
+        ref = dense_reference(q, k, v, scale, window=window)[0]
+        assert max_abs_error(out, ref) < _tolerance("fp16")
 
     @staticmethod
     def _check_paged(dtype, block_size, sq, sk, window, d):
-        import torch
-
         hq, hkv, B = 16, 4, 1
-        tdt = getattr(torch, _TORCH_DT[dtype])
         scale = 1.0 / math.sqrt(d)
-        torch.manual_seed(0)
+        rng = np.random.default_rng(0)
 
-        q = torch.randn(B, sq, hq, d, device="cuda", dtype=tdt)
-        k = torch.randn(B, sk, hkv, d, device="cuda", dtype=tdt)
-        v = torch.randn(B, sk, hkv, d, device="cuda", dtype=tdt)
+        q = operand(rng, (B, sq, hq, d), dtype)
+        k = operand(rng, (B, sk, hkv, d), dtype)
+        v = operand(rng, (B, sk, hkv, d), dtype)
 
-        k_cache, v_cache, block_tables, kv_lens = paged_cache(k, v, block_size)
+        k_cache, v_cache, block_tables, kv_lens = paged_cache(rng, k, v, block_size)
         num_kv_blocks = k_cache.shape[0]
 
         # The shipped paged spec (its tile can differ from the contiguous one's),
@@ -2549,11 +2154,11 @@ class TestDensePagedNumeric:
             shipped, paged=False, block_size=0, num_kv_blocks=0
         )
 
-        dense_out = torch.empty_like(q)
+        dense_out = filled(q.shape, q.dtype)
         run_attention_dense_torch(
             spec=dense_spec, q=q, k=k, v=v, out=dense_out, scale=scale
         )
-        paged_out = torch.empty_like(q)
+        paged_out = filled(q.shape, q.dtype)
         run_attention_dense_torch(
             spec=paged_spec,
             q=q,
@@ -2564,24 +2169,19 @@ class TestDensePagedNumeric:
             block_tables=block_tables,
             kv_lens=kv_lens,
         )
-        torch.cuda.synchronize()
 
         name = f"{dtype} D{d} pgd{block_size} sq{sq} sk{sk} swa{window}"
-        assert torch.isfinite(paged_out).all(), f"{name}: read a NaN (unused) page"
-        assert torch.equal(paged_out, dense_out), f"{name}: paged != dense bits"
-        ref = _standard_reference(q, k, v, scale, sliding_window=window)
-        # A row whose window holds no key has no SDPA reference (NaN); its output
-        # must be zero.
-        qi = torch.arange(sq, device="cuda").view(-1, 1)
-        ki = torch.arange(sk, device="cuda").view(1, -1)
-        keep = ki <= qi
-        if window:
-            keep &= ki > qi - window
-        live = keep.any(dim=1)
-        max_abs = (ref - paged_out.float())[:, live].abs().max().item()
+        paged = values(paged_out)
+        assert np.isfinite(paged).all(), f"{name}: read a NaN (unused) page"
+        assert same_values(paged_out, dense_out), f"{name}: paged != dense bits"
+        ref, lse_ref = dense_reference(q, k, v, scale, window=window)
+        # A row whose window holds no key (an infinite reference LSE) must output
+        # zero.
+        live = np.isfinite(lse_ref[0, 0, :, 0])
+        max_abs = max_abs_error(paged[:, live], ref[:, live])
         assert max_abs < _tolerance(dtype), f"{name}: max_abs={max_abs:.3e}"
         if not live.all():
-            worst = paged_out.float()[:, ~live].abs().max().item()
+            worst = np.abs(paged[:, ~live]).max()
             assert worst == 0.0, f"{name}: {int((~live).sum())} keyless rows: {worst}"
 
 
@@ -2607,8 +2207,6 @@ class TestDenseTopLeftCrossLengthNumeric:
     @pytest.mark.parametrize("persistent", [False, True], ids=["default", "persist"])
     @pytest.mark.parametrize("sq,skv,batch,ragged,use_sinks", _TOP_LEFT_CASES)
     def test_jit_matches_top_left(self, sq, skv, batch, ragged, use_sinks, persistent):
-        import torch
-
         tile = DENSE_TILE_GEOMETRIES["default"]
         spec = Gfx950AttentionDenseSpec(
             batch=batch,
@@ -2626,24 +2224,21 @@ class TestDenseTopLeftCrossLengthNumeric:
             use_sinks=use_sinks,
         )
 
-        torch.manual_seed(0)
-        q = torch.randn(batch, sq, 4, 128, device="cuda", dtype=torch.bfloat16)
-        k = torch.randn(batch, skv, 1, 128, device="cuda", dtype=torch.bfloat16)
-        v = torch.randn(batch, skv, 1, 128, device="cuda", dtype=torch.bfloat16)
-        out = torch.empty_like(q)
-        sinks = (
-            torch.randn(4, device="cuda", dtype=torch.bfloat16) if use_sinks else None
-        )
+        rng = np.random.default_rng(0)
+        q = operand(rng, (batch, sq, 4, 128), "bf16")
+        k = operand(rng, (batch, skv, 1, 128), "bf16")
+        v = operand(rng, (batch, skv, 1, 128), "bf16")
+        out = filled(q.shape, q.dtype)
+        sinks = operand(rng, (4,), "bf16") if use_sinks else None
         scale = 1.0 / math.sqrt(spec.head_size)
 
         run_attention_dense_torch(
             spec=spec, q=q, k=k, v=v, out=out, scale=scale, sinks=sinks
         )
-        torch.cuda.synchronize()
 
-        ref = _bottom_right_reference(q, k, v, sinks, scale, top_left=True)
-        err = (out.float() - ref).abs().max().item()
-        assert not torch.isnan(out).any(), "NaN in output"
+        ref = dense_reference(q, k, v, scale, sinks=sinks)[0]
+        err = max_abs_error(out, ref)
+        assert not np.isnan(values(out)).any(), "NaN in output"
         assert err < _BOTTOM_RIGHT_TOL, (
             f"B{batch} {sq}x{skv} {'ragged' if ragged else 'aligned'} "
             f"{'persist' if persistent else 'default'}"
@@ -2706,33 +2301,21 @@ _BAND_BATCH = 2
 
 
 def _band_reference(q, k, v, scale, window, right):
-    import torch
-
-    sq, skv = q.shape[1], k.shape[1]
-    qi = torch.arange(sq, device=q.device)[:, None]
-    ki = torch.arange(skv, device=q.device)[None, :]
-    allowed = torch.ones(sq, skv, dtype=torch.bool, device=q.device)
-    if right >= 0:
-        allowed &= ki <= qi + right
-    if window:
-        allowed &= qi - ki < window
-    scores = torch.einsum("bqhd,bkd->bhqk", q.float(), k[:, :, 0].float()) * scale
-    scores = scores.masked_fill(~allowed[None, None], float("-inf"))
-    empty = ~allowed.any(dim=1)
-    probs = torch.softmax(scores, dim=-1)
-    probs[:, :, empty, :] = 0.0
-    ref = torch.einsum("bhqk,bkd->bqhd", probs, v[:, :, 0].float())
-    return ref, empty
+    """The float64 O of the top-left band ``(window, right)``, and which query rows
+    see no key."""
+    ref, lse = dense_reference(
+        q, k, v, scale, causal=right >= 0, right_bound=max(right, 0), window=window
+    )
+    return ref, ~np.isfinite(lse[0, 0, :, 0])
 
 
 def _check_band(out, ref, empty):
-    import torch
-
-    assert not torch.isnan(out).any(), "NaN in output"
-    err = (out.float() - ref)[:, ~empty].abs().max().item()
+    o = values(out)
+    assert not np.isnan(o).any(), "NaN in output"
+    err = max_abs_error(o[:, ~empty], ref[:, ~empty])
     assert err < _BOTTOM_RIGHT_TOL, f"max_abs={err:.3e}"
     if empty.any():
-        worst = out.float()[:, empty].abs().max().item()
+        worst = np.abs(o[:, empty]).max()
         assert worst == 0.0, f"{int(empty.sum())} empty rows not zero: {worst}"
 
 
@@ -2741,8 +2324,6 @@ class TestDenseBandNumeric:
     @pytest.mark.gpu
     @pytest.mark.parametrize("sq,skv,window,right,persistent,ragged", _BAND_CASES)
     def test_jit_matches_band(self, sq, skv, window, right, persistent, ragged):
-        import torch
-
         tile = DENSE_TILE_GEOMETRIES["default"]
         spec = Gfx950AttentionDenseSpec(
             batch=_BAND_BATCH,
@@ -2760,14 +2341,13 @@ class TestDenseBandNumeric:
             persistent=persistent,
             ragged=ragged,
         )
-        torch.manual_seed(0)
-        q = torch.randn(_BAND_BATCH, sq, 4, 128, device="cuda", dtype=torch.bfloat16)
-        k = torch.randn(_BAND_BATCH, skv, 1, 128, device="cuda", dtype=torch.bfloat16)
-        v = torch.randn(_BAND_BATCH, skv, 1, 128, device="cuda", dtype=torch.bfloat16)
-        out = torch.empty_like(q)
+        rng = np.random.default_rng(0)
+        q = operand(rng, (_BAND_BATCH, sq, 4, 128), "bf16")
+        k = operand(rng, (_BAND_BATCH, skv, 1, 128), "bf16")
+        v = operand(rng, (_BAND_BATCH, skv, 1, 128), "bf16")
+        out = filled(q.shape, q.dtype)
         scale = 1.0 / math.sqrt(128)
         run_attention_dense_torch(spec=spec, q=q, k=k, v=v, out=out, scale=scale)
-        torch.cuda.synchronize()
         _check_band(out, *_band_reference(q, k, v, scale, window, right))
 
     @requires_gfx950_gpu
@@ -2777,7 +2357,6 @@ class TestDenseBandNumeric:
         self, sq, skv, window, right, persistent, ragged
     ):
         """The same bands through ``AttentionRequest`` -> dispatch -> dense spec."""
-        import torch
         from dispatch.attention import AttentionRequest, attention_tuning_spec
 
         req = AttentionRequest(
@@ -2799,14 +2378,13 @@ class TestDenseBandNumeric:
         ).kernel_spec
         assert spec.causal == (right >= 0) and spec.right_bound == max(right, 0)
         assert spec.ragged == ragged and spec.persistent == persistent
-        torch.manual_seed(1)
-        q = torch.randn(_BAND_BATCH, sq, 4, 128, device="cuda", dtype=torch.bfloat16)
-        k = torch.randn(_BAND_BATCH, skv, 1, 128, device="cuda", dtype=torch.bfloat16)
-        v = torch.randn(_BAND_BATCH, skv, 1, 128, device="cuda", dtype=torch.bfloat16)
-        out = torch.empty_like(q)
+        rng = np.random.default_rng(1)
+        q = operand(rng, (_BAND_BATCH, sq, 4, 128), "bf16")
+        k = operand(rng, (_BAND_BATCH, skv, 1, 128), "bf16")
+        v = operand(rng, (_BAND_BATCH, skv, 1, 128), "bf16")
+        out = filled(q.shape, q.dtype)
         scale = 1.0 / math.sqrt(128)
         run_attention_dense_torch(spec=spec, q=q, k=k, v=v, out=out, scale=scale)
-        torch.cuda.synchronize()
         _check_band(out, *_band_reference(q, k, v, scale, window, right))
 
 
@@ -2833,7 +2411,6 @@ class TestDenseVariantsBand:
     @pytest.mark.parametrize("spec_id", _DENSE_SPEC_IDS)
     @pytest.mark.parametrize("sq,skv,window,right", _VARIANT_BAND_CASES)
     def test_variant_matches_band(self, spec_id, sq, skv, window, right):
-        import torch
         from dispatch.attention import AttentionRequest, attention_tuning_spec
 
         req = AttentionRequest(
@@ -2851,14 +2428,13 @@ class TestDenseVariantsBand:
             right_bound=right,
         )
         spec = attention_tuning_spec(req, spec_id).kernel_spec
-        torch.manual_seed(1)
-        q = torch.randn(_BAND_BATCH, sq, 4, 128, device="cuda", dtype=torch.bfloat16)
-        k = torch.randn(_BAND_BATCH, skv, 1, 128, device="cuda", dtype=torch.bfloat16)
-        v = torch.randn(_BAND_BATCH, skv, 1, 128, device="cuda", dtype=torch.bfloat16)
-        out = torch.empty_like(q)
+        rng = np.random.default_rng(1)
+        q = operand(rng, (_BAND_BATCH, sq, 4, 128), "bf16")
+        k = operand(rng, (_BAND_BATCH, skv, 1, 128), "bf16")
+        v = operand(rng, (_BAND_BATCH, skv, 1, 128), "bf16")
+        out = filled(q.shape, q.dtype)
         scale = 1.0 / math.sqrt(128)
         run_attention_dense_torch(spec=spec, q=q, k=k, v=v, out=out, scale=scale)
-        torch.cuda.synchronize()
         _check_band(out, *_band_reference(q, k, v, scale, window, right))
 
 
@@ -2886,8 +2462,6 @@ class TestDenseBandIndexTruthTable:
     @pytest.mark.parametrize("persistent", [False, True], ids=["grid", "persist"])
     @pytest.mark.parametrize("window,right", _ONE_HOT_DENSE)
     def test_visible_key_set_is_exact(self, window, right, persistent):
-        import torch
-
         tile = DENSE_TILE_GEOMETRIES["default"]
         sq, skv, batch, head = int(tile["block_m"]), 128, 2, 128
         spec = Gfx950AttentionDenseSpec(
@@ -2905,14 +2479,14 @@ class TestDenseBandIndexTruthTable:
             sliding_window=window,
             persistent=persistent,
         )
-        q = torch.zeros(batch, sq, 2, head, device="cuda", dtype=torch.bfloat16)
-        k = torch.randn(batch, skv, 1, head, device="cuda", dtype=torch.bfloat16)
-        v = torch.zeros(batch, skv, 1, head, device="cuda", dtype=torch.bfloat16)
-        v[:, torch.arange(skv), 0, torch.arange(skv)] = 1.0
-        out = torch.empty_like(q)
+        q = filled((batch, sq, 2, head), "bf16", 0.0)
+        k = operand(np.random.default_rng(0), (batch, skv, 1, head), "bf16")
+        one_hot = np.zeros((batch, skv, 1, head))
+        one_hot[:, np.arange(skv), 0, np.arange(skv)] = 1.0
+        v = upload(one_hot, "bf16")
+        out = filled(q.shape, q.dtype)
         run_attention_dense_torch(spec=spec, q=q, k=k, v=v, out=out, scale=1.0)
-        torch.cuda.synchronize()
-        expected = torch.zeros(sq, 2, head, dtype=torch.float32)
+        expected = np.zeros((sq, 2, head))
         for p in range(sq):
             visible = [
                 kk
@@ -2921,7 +2495,7 @@ class TestDenseBandIndexTruthTable:
             ]
             if visible:
                 expected[p, :, visible] = 1.0 / len(visible)
-        err = (out.float().cpu() - expected[None]).abs().max().item()
+        err = max_abs_error(out, np.broadcast_to(expected, out.shape))
         assert err < 1e-2, f"max_abs={err:.3e}"
 
 
@@ -2943,31 +2517,28 @@ class TestDenseRowIndependence:
     @pytest.mark.parametrize("d", [64, 128])
     @pytest.mark.parametrize("dtype", ["bf16", "fp16"])
     def test_rows_independent_of_wave_neighbours(self, dtype, d, persistent, window):
-        import torch
-
-        tdt = getattr(torch, _TORCH_DT[dtype])
         B, S, H = 1, 512, 16
         scale = 1.0 / math.sqrt(d)
-        torch.manual_seed(0)
-        q = torch.randn(B, S, H, d, device="cuda", dtype=tdt)
-        k = torch.randn(B, S, H, d, device="cuda", dtype=tdt)
-        v = torch.randn(B, S, H, d, device="cuda", dtype=tdt)
-        k_hot, v_hot = k.clone(), v.clone()
-        k_hot[:, S - 1] = 1e4 * torch.sign(q[:, S - 1])
-        v_hot[:, S - 1] = 1e4 * torch.sign(torch.randn_like(v[:, S - 1]))
+        rng = np.random.default_rng(0)
+        q = operand(rng, (B, S, H, d), dtype)
+        k = operand(rng, (B, S, H, d), dtype)
+        v = operand(rng, (B, S, H, d), dtype)
+        k_hot, v_hot = values(k), values(v)
+        k_hot[:, S - 1] = 1e4 * np.sign(values(q)[:, S - 1])
+        v_hot[:, S - 1] = 1e4 * np.sign(rng.standard_normal(v_hot[:, S - 1].shape))
+        k_hot, v_hot = upload(k_hot, dtype), upload(v_hot, dtype)
 
         spec = _spec(dtype, d, H, H, persistent, sq=S, sliding_window=window)
         outs = []
         for kk, vv in ((k, v), (k_hot, v_hot)):
-            out = torch.empty_like(q)
+            out = filled(q.shape, q.dtype)
             run_attention_dense_torch(spec=spec, q=q, k=kk, v=vv, out=out, scale=scale)
-            torch.cuda.synchronize()
             outs.append(out)
-        base, hot = outs
-        assert torch.isfinite(hot).all(), "non-finite output"
-        assert not torch.equal(base[:, S - 1], hot[:, S - 1]), "key S-1 had no effect"
-        changed = (base[:, : S - 1] != hot[:, : S - 1]).any(dim=-1).nonzero()
-        assert changed.numel() == 0, (
+        base, hot = (values(o) for o in outs)
+        assert np.isfinite(hot).all(), "non-finite output"
+        assert not same_values(base[:, S - 1], hot[:, S - 1]), "key S-1 had no effect"
+        changed = np.argwhere((base[:, : S - 1] != hot[:, : S - 1]).any(axis=-1))
+        assert changed.size == 0, (
             f"{len(changed)} (row, head) pairs that mask key {S - 1} changed, rows "
             f"{sorted(set(changed[:, 1].tolist()))}"
         )
