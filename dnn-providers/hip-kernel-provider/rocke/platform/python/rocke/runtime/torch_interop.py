@@ -8,9 +8,9 @@ through the same hipModule path as `run_manifest`, without host staging.
 This module holds `resolve_stream` (substitute torch's current stream so
 its caching allocator stays coherent -- degrades to the HIP null stream
 when torch is absent, so the numpy/manifest hip-only path calls it too),
-`empty_workspace`, `torch_dtype`, `device_tensor`, `torch_array_info` (the
-torch side of :func:`rocke.runtime.device_array.array_info`), and the
-`launch_torch_kernel` back-compat shim.
+`empty_workspace`, `torch_dtype`, `device_tensor`, the torch sides of
+:mod:`rocke.runtime.device_array` (`torch_array_info`, `torch_host_values`,
+`torch_empty`), and the `launch_torch_kernel` back-compat shim.
 
 Kernel-argument packing is torch-agnostic and lives in `packing.py`; this
 module builds on it.
@@ -21,6 +21,8 @@ from __future__ import annotations
 import sys
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Mapping, Optional, Sequence, Tuple
+
+from ..numeric.storage import host_dtype
 
 if TYPE_CHECKING:
     from .device_array import ArrayInfo
@@ -146,6 +148,38 @@ def torch_array_info(tensor: Any) -> ArrayInfo:
         data_ptr=int(tensor.data_ptr()),
         device=int(device.index or 0) if device.type == "cuda" else None,
     )
+
+
+def _torch_dtype_of(element_type: str):
+    """The ``torch.dtype`` holding rocKE element type ``element_type``."""
+    for torch_name, name in _TORCH_ELEMENT_TYPE.items():
+        if name == element_type:
+            return torch_dtype(torch_name.removeprefix("torch."))
+    raise ValueError(
+        f"torch dtype failed - element type={element_type!r}, expected one of "
+        f"{sorted(_TORCH_ELEMENT_TYPE.values())}"
+    )
+
+
+def torch_host_values(tensor: Any):
+    """``tensor``'s elements as a host numpy array of its shape (the torch side
+    of :func:`rocke.runtime.device_array.host_values`).
+
+    Copied by ``Tensor.cpu()``, so ordered on torch's current stream. Element
+    types numpy has no type for (bf16, fp8) come back as raw bits of the same
+    width. Only reached with a live tensor, so torch is already imported."""
+    info = torch_array_info(tensor)
+    torch = sys.modules["torch"]
+    flat = tensor.detach().contiguous().cpu().reshape(-1)
+    raw = flat.view(torch.uint8).numpy()
+    return raw.view(host_dtype(info.dtype)).reshape(info.shape)
+
+
+def torch_empty(shape: Sequence[int], element_type: str, *, device: Any):
+    """An uninitialized torch tensor of rocKE element type ``element_type`` on
+    ``device`` (the torch side of
+    :func:`rocke.runtime.device_array.device_workspace`)."""
+    return empty_workspace(shape, dtype=_torch_dtype_of(element_type), device=device)
 
 
 def torch_dtype(name: str):

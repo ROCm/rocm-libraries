@@ -49,6 +49,7 @@ from kernels.gfx942.attention_dense import (
     supports_attention_dense,
 )
 from rocke.helpers.magic_division import calculate_magic_numbers
+from rocke.tests.host_arrays import HostArray
 
 _NAME = "attention_gfx942_dense"
 _SPEC_ID = "gfx942_dense"
@@ -1200,11 +1201,9 @@ class TestGfx942Sinks(unittest.TestCase):
 
 class TestGfx942SinksValidation(unittest.TestCase):
     """run_attention_dense_torch validates ``sinks`` before compiling anything, so
-    these run on CPU with duck-typed stand-ins for the tensors."""
+    these run on CPU with host-only stand-ins for the device arrays."""
 
     def _run(self, *, use_sinks, sinks):
-        from types import SimpleNamespace
-
         from kernels.gfx942.attention_dense import (
             AttentionDenseSpec,
             run_attention_dense_torch,
@@ -1221,8 +1220,8 @@ class TestGfx942SinksValidation(unittest.TestCase):
             use_sinks=use_sinks,
         )
         qshape = (1, 512, 8, 64)
-        q = SimpleNamespace(shape=qshape, dtype="bfloat16")
-        kv = SimpleNamespace(shape=qshape)
+        q = HostArray(qshape, "bf16")
+        kv = HostArray(qshape, "bf16")
         with self.assertRaises(ValueError) as cm:
             run_attention_dense_torch(
                 spec=spec, q=q, k=kv, v=kv, out=q, scale=0.125, sinks=sinks
@@ -1230,14 +1229,12 @@ class TestGfx942SinksValidation(unittest.TestCase):
         return str(cm.exception)
 
     @staticmethod
-    def _sinks(shape=(8,), dtype="bfloat16", contiguous=True, cuda=True):
-        from types import SimpleNamespace
-
-        return SimpleNamespace(
-            shape=shape,
-            dtype=dtype,
-            is_contiguous=lambda: contiguous,
-            is_cuda=cuda,
+    def _sinks(shape=(8,), dtype="bf16", contiguous=True, on_gpu=True):
+        return HostArray(
+            shape,
+            dtype,
+            strides=None if contiguous else (2,),
+            device=0 if on_gpu else None,
         )
 
     def test_sinks_rejected_when_use_sinks_false(self):
@@ -1253,19 +1250,18 @@ class TestGfx942SinksValidation(unittest.TestCase):
         self.assertIn("sinks must have shape (8,), got (16,)", msg)
 
     def test_sinks_wrong_dtype_rejected(self):
-        msg = self._run(use_sinks=True, sinks=self._sinks(dtype="float16"))
+        msg = self._run(use_sinks=True, sinks=self._sinks(dtype="fp16"))
         self.assertIn("must match q dtype", msg)
 
     def test_sinks_non_contiguous_rejected(self):
         msg = self._run(use_sinks=True, sinks=self._sinks(contiguous=False))
         self.assertIn("sinks must be contiguous", msg)
 
-    def test_sinks_cpu_tensor_rejected(self):
-        msg = self._run(use_sinks=True, sinks=self._sinks(cuda=False))
-        self.assertEqual(msg, "sinks must be a CUDA tensor")
+    def test_sinks_host_array_rejected(self):
+        msg = self._run(use_sinks=True, sinks=self._sinks(on_gpu=False))
+        self.assertEqual(msg, "sinks must be a GPU array")
 
     def test_valid_sinks_pass_validation_and_reach_compile(self):
-        from types import SimpleNamespace
         from unittest import mock
 
         import kernels.gfx942.attention_dense as ad
@@ -1281,8 +1277,8 @@ class TestGfx942SinksValidation(unittest.TestCase):
             dtype="bf16",
             use_sinks=True,
         )
-        q = SimpleNamespace(shape=(1, 256, 16, 128), dtype="bfloat16")
-        kv = SimpleNamespace(shape=(1, 256, 4, 128))
+        q = HostArray((1, 256, 16, 128), "bf16")
+        kv = HostArray((1, 256, 4, 128), "bf16")
         sentinel = RuntimeError("reached-compile")
 
         ad._DENSE_LAUNCHER_CACHE.clear()
@@ -1310,17 +1306,9 @@ class TestGfx942SinksBinding(unittest.TestCase):
     _NHEAD_Q = 16
 
     def _sinks(self, shape=None):
-        from types import SimpleNamespace
-
-        return SimpleNamespace(
-            shape=shape or (self._NHEAD_Q,),
-            dtype="bfloat16",
-            is_contiguous=lambda: True,
-            is_cuda=True,
-        )
+        return HostArray(shape or (self._NHEAD_Q,), "bf16")
 
     def _launch(self, *, use_sinks=True, tensor_sinks=None, launch_sinks=None):
-        from types import SimpleNamespace
         from unittest import mock
 
         import kernels.gfx942.attention_dense as ad
@@ -1330,8 +1318,8 @@ class TestGfx942SinksBinding(unittest.TestCase):
                 _req(nhead_q=self._NHEAD_Q, nhead_k=4, use_sinks=use_sinks)
             )
         self.assertEqual(r.candidate.name, _NAME)
-        q = SimpleNamespace(shape=(1, 2048, self._NHEAD_Q, 128), dtype="bfloat16")
-        kv = SimpleNamespace(shape=(1, 2048, 4, 128))
+        q = HostArray((1, 2048, self._NHEAD_Q, 128), "bf16")
+        kv = HostArray((1, 2048, 4, 128), "bf16")
         tensors = {"q": q, "k": kv, "v": kv, "out": q}
         if tensor_sinks is not None:
             tensors["sinks"] = tensor_sinks

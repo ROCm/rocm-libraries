@@ -2,16 +2,16 @@
 # SPDX-License-Identifier: MIT
 """Host checks of the paged dense kernel ABI and launcher on gfx942 and gfx950: the
 paged kernel arguments, and the launch-time refusals that keep a bad cache or
-block table from driving an out-of-bounds read. Tensor stand-ins replace torch,
-and compile is patched out, so no torch, comgr or GPU is needed."""
+block table from driving an out-of-bounds read. Host-only array stand-ins replace
+device arrays, and compile is patched out, so no torch, comgr or GPU is needed."""
 
 import importlib
 import unittest
 
 from ._dense_paged_stand_ins import (
-    CacheStandIn,
-    I32DeviceTensor,
     dense_arch_spec_class,
+    int32_table,
+    paged_cache,
 )
 
 
@@ -91,16 +91,16 @@ class TestDensePagedLaunch(unittest.TestCase):
                 qshape = (1, spec.seqlen_q, spec.num_query_heads, spec.head_size)
                 q = SimpleNamespace(shape=qshape)
                 out = SimpleNamespace(shape=qshape)
-                block_tables = I32DeviceTensor([list(range(512))])
-                kv_lens = I32DeviceTensor([spec.seqlen_kv])
+                block_tables = int32_table([list(range(512))])
+                kv_lens = int32_table([spec.seqlen_kv])
 
                 # Negative (K): fewer physical blocks than the spec claims -> reject.
                 with self.assertRaises(ValueError) as ctx:
                     run_attention_dense_torch(
                         spec=spec,
                         q=q,
-                        k=CacheStandIn(shape=wrong),
-                        v=CacheStandIn(shape=want),
+                        k=paged_cache(wrong),
+                        v=paged_cache(want),
                         out=out,
                         scale=1.0,
                         block_tables=block_tables,
@@ -116,8 +116,8 @@ class TestDensePagedLaunch(unittest.TestCase):
                     run_attention_dense_torch(
                         spec=spec,
                         q=q,
-                        k=CacheStandIn(shape=want),
-                        v=CacheStandIn(shape=wrong),
+                        k=paged_cache(want),
+                        v=paged_cache(wrong),
                         out=out,
                         scale=1.0,
                         block_tables=block_tables,
@@ -139,8 +139,8 @@ class TestDensePagedLaunch(unittest.TestCase):
                         run_attention_dense_torch(
                             spec=spec,
                             q=q,
-                            k=CacheStandIn(shape=want),
-                            v=CacheStandIn(shape=want),
+                            k=paged_cache(want),
+                            v=paged_cache(want),
                             out=out,
                             scale=1.0,
                             block_tables=block_tables,
@@ -174,9 +174,9 @@ class TestDensePagedLaunch(unittest.TestCase):
                 num_kv_blocks=128,
             )
             q = SimpleNamespace(shape=(1, 1024, 16, 128))
-            cache = CacheStandIn((128, 16, 4, 128))
+            cache = paged_cache((128, 16, 4, 128))
             table, lens = [list(range(64))], [1024]
-            i32 = I32DeviceTensor
+            i32 = int32_table
             for block_tables, kv_lens, k, error in (
                 (i32([list(range(63))]), i32(lens), cache, "block_tables shape"),
                 (i32(list(range(64))), i32(lens), cache, "block_tables shape"),
@@ -184,17 +184,17 @@ class TestDensePagedLaunch(unittest.TestCase):
                 (i32(table), i32([]), cache, "kv_lens shape"),
                 (i32(table), i32(lens * 2), cache, "kv_lens shape"),
                 (
-                    i32(table, dtype="torch.int64"),
+                    i32(table, dtype="i64"),
                     i32(lens),
                     cache,
                     "block_tables dtype",
                 ),
-                (i32(table), i32(lens, dtype="torch.int64"), cache, "kv_lens dtype"),
-                (i32(table, is_cuda=False), i32(lens), cache, "GPU tensor"),
-                (i32(table, device="cuda:1"), i32(lens), cache, "K/V device"),
+                (i32(table), i32(lens, dtype="i64"), cache, "kv_lens dtype"),
+                (i32(table, device=None), i32(lens), cache, "GPU array"),
+                (i32(table, device=1), i32(lens), cache, "K/V device"),
                 (i32(table, inner_stride=2), i32(lens), cache, "innermost stride"),
                 (
-                    i32(table, dtype="torch.uint32"),
+                    i32(table, dtype="fp32"),
                     i32(lens),
                     cache,
                     "block_tables dtype",
@@ -202,13 +202,13 @@ class TestDensePagedLaunch(unittest.TestCase):
                 (
                     i32(table),
                     i32(lens),
-                    CacheStandIn((128, 16, 4, 128), dtype="torch.bfloat16"),
+                    paged_cache((128, 16, 4, 128), dtype="bf16"),
                     "cache dtype",
                 ),
                 (
                     i32(table),
                     i32(lens),
-                    CacheStandIn((128, 16, 4, 128), contiguous=False),
+                    paged_cache((128, 16, 4, 128), contiguous=False),
                     "contiguous",
                 ),
             ):
@@ -226,12 +226,12 @@ class TestDensePagedLaunch(unittest.TestCase):
                             validate_paged=False,
                         )
             for v in (
-                CacheStandIn((128, 16, 4, 128), device="cpu", is_cuda=False),
-                CacheStandIn((128, 16, 4, 128), device="cuda:1"),
+                paged_cache((128, 16, 4, 128), device=None),
+                paged_cache((128, 16, 4, 128), device=1),
             ):
                 with self.subTest(arch=arch, v_device=v.device):
                     with self.assertRaisesRegex(
-                        ValueError, "paged v cache must be a GPU tensor on the K device"
+                        ValueError, "paged v cache must be a GPU array on the K device"
                     ):
                         ad.run_attention_dense_torch(
                             spec=spec,
@@ -300,11 +300,11 @@ class TestDensePagedLaunch(unittest.TestCase):
                 qshape = (1, spec.seqlen_q, spec.num_query_heads, spec.head_size)
                 q = SimpleNamespace(shape=qshape)
                 out = SimpleNamespace(shape=qshape)
-                k = CacheStandIn(shape=want)
-                v = CacheStandIn(shape=want)
-                kv_lens = I32DeviceTensor([256])  # == seqlen_kv -> 4 pages deref
-                good_bt = I32DeviceTensor([[0, 1, 2, 3]])  # all in [0, 512)
-                bad_bt = I32DeviceTensor([[0, 1, 600, 3]])  # 600 >= num_kv_blocks, USED
+                k = paged_cache(want)
+                v = paged_cache(want)
+                kv_lens = int32_table([256])  # == seqlen_kv -> 4 pages deref
+                good_bt = int32_table([[0, 1, 2, 3]])  # all in [0, 512)
+                bad_bt = int32_table([[0, 1, 600, 3]])  # 600 >= num_kv_blocks, USED
                 sentinel = RuntimeError("reached-compile")
 
                 # Negative (validate on, default): a used entry >= num_kv_blocks ->
@@ -337,7 +337,7 @@ class TestDensePagedLaunch(unittest.TestCase):
                             v=v,
                             out=out,
                             scale=1.0,
-                            block_tables=I32DeviceTensor([[0, 1, 2, 3, 600]]),
+                            block_tables=int32_table([[0, 1, 2, 3, 600]]),
                             kv_lens=kv_lens,
                         )
                     self.assertIs(beyond.exception, sentinel)
@@ -384,7 +384,7 @@ class TestDensePagedLaunch(unittest.TestCase):
         shorter than seqlen_kv leaves uncovered tiles reading page 0 (the masked
         block-table default) -> silently wrong output. validate_paged=True
         enforces kv_lens[i] == seqlen_kv; validate_paged=False skips it (hot
-        path). Host-only (plain lists), no torch / GPU."""
+        path). Host-only stand-ins, no torch / GPU."""
         from types import SimpleNamespace
         from unittest import mock
 
@@ -417,9 +417,9 @@ class TestDensePagedLaunch(unittest.TestCase):
                 qshape = (1, spec.seqlen_q, spec.num_query_heads, spec.head_size)
                 q = SimpleNamespace(shape=qshape)
                 out = SimpleNamespace(shape=qshape)
-                k = CacheStandIn(shape=want)
-                v = CacheStandIn(shape=want)
-                good_bt = I32DeviceTensor([[0, 1, 2, 3]])
+                k = paged_cache(want)
+                v = paged_cache(want)
+                good_bt = int32_table([[0, 1, 2, 3]])
                 sentinel = RuntimeError("reached-compile")
 
                 # Negative (validate on, default): kv_len < seqlen_kv -> reject loudly.
@@ -432,7 +432,7 @@ class TestDensePagedLaunch(unittest.TestCase):
                         out=out,
                         scale=1.0,
                         block_tables=good_bt,
-                        kv_lens=I32DeviceTensor([128]),
+                        kv_lens=int32_table([128]),
                     )
                 msg = str(ctx.exception)
                 self.assertIn("kv_lens[0]=128", msg)
@@ -451,7 +451,7 @@ class TestDensePagedLaunch(unittest.TestCase):
                             out=out,
                             scale=1.0,
                             block_tables=good_bt,
-                            kv_lens=I32DeviceTensor([128]),
+                            kv_lens=int32_table([128]),
                             validate_paged=False,
                         )
                     self.assertIs(gated.exception, sentinel)
@@ -469,6 +469,6 @@ class TestDensePagedLaunch(unittest.TestCase):
                             out=out,
                             scale=1.0,
                             block_tables=good_bt,
-                            kv_lens=I32DeviceTensor([256]),
+                            kv_lens=int32_table([256]),
                         )
                     self.assertIs(ok.exception, sentinel)

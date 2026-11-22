@@ -2133,6 +2133,8 @@ class TestAttentionHelpers(unittest.TestCase):
         from types import SimpleNamespace
         from unittest import mock
 
+        from rocke.tests.host_arrays import HostArray
+
         import kernels.gfx950.attention_dense as ad
         from kernels.gfx950.attention_dense import (
             AttentionDenseSpec,
@@ -2152,17 +2154,13 @@ class TestAttentionHelpers(unittest.TestCase):
         )
         qshape = (spec.batch, spec.seqlen_q, spec.num_query_heads, spec.head_size)
         kvshape = (spec.batch, spec.seqlen_kv, spec.num_kv_heads, spec.head_size)
-        q = SimpleNamespace(shape=qshape, dtype="bfloat16")
+        # Host-only stand-ins: the sinks check reads q's dtype and the sinks
+        # array's description; k, v and out are read for their shape only.
+        q = HostArray(qshape, "bf16")
         k = SimpleNamespace(shape=kvshape)
         v = SimpleNamespace(shape=kvshape)
         out = SimpleNamespace(shape=qshape)
-        # Mock sinks tensor with all required attributes
-        sinks = SimpleNamespace(
-            shape=(spec.num_query_heads,),
-            dtype="bfloat16",
-            is_contiguous=lambda: True,
-            is_cuda=True,
-        )
+        sinks = HostArray((spec.num_query_heads,), "bf16")
         sentinel = RuntimeError("reached-compile")
 
         ad._DENSE_LAUNCHER_CACHE.clear()

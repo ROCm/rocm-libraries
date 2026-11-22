@@ -19,9 +19,17 @@ import numpy as np
 import pytest
 
 from rocke.numeric.storage import encode
-from rocke.runtime.device_array import ArrayInfo, DeviceArray, array_info
+from rocke.runtime.device_array import (
+    ArrayInfo,
+    DescribedArray,
+    DeviceArray,
+    array_info,
+    device_workspace,
+    host_values,
+)
 from rocke.runtime.torch_interop import torch_array_info
 from rocke.tests.gpu import current_device_arch
+from rocke.tests.host_arrays import HostArray
 
 
 def _info(shape, strides, element_size=4, data_ptr=1024):
@@ -112,6 +120,38 @@ def test_view_shape_must_fit_the_host():
         DeviceArray(np.zeros((2, 8), np.int32), shape=(2, 9))
 
 
+def test_host_array_is_described_and_read_without_a_gpu():
+    table = HostArray((2, 3), "i32", values=[[1, 2, 3], [4, 5, 6]], strides=(4, 1))
+    assert isinstance(table, DescribedArray)
+    info = array_info(table)
+    assert (info.shape, info.strides, info.dtype, info.device) == (
+        (2, 3),
+        (4, 1),
+        "i32",
+        0,
+    )
+    assert info.element_size == 4 and not info.is_contiguous()
+    np.testing.assert_array_equal(host_values(table), [[1, 2, 3], [4, 5, 6]])
+
+
+def test_host_arrays_never_overlap():
+    first, second = HostArray((4,), "fp32"), HostArray((4,), "fp32")
+    first_end = first.info().byte_span()[1]
+    assert first_end <= second.info().byte_span()[0]
+
+
+def test_host_array_without_values_refuses_a_read():
+    with pytest.raises(ValueError, match=r"HostArray.read failed - built without"):
+        host_values(HostArray((2,), "i32"))
+
+
+def test_host_values_and_device_workspace_refuse_other_objects():
+    with pytest.raises(TypeError, match=r"array_info failed - array=list"):
+        host_values([1, 2])
+    with pytest.raises(TypeError, match=r"device_workspace failed - like=HostArray"):
+        device_workspace((2,), "fp32", like=HostArray((2,), "fp32"))
+
+
 # --- on the GPU ----------------------------------------------------------------------------------
 
 
@@ -151,3 +191,35 @@ def test_gpu_write_refuses_another_shape():
     array = DeviceArray(np.zeros(4, np.float32))
     with pytest.raises(ValueError, match=r"DeviceArray.write failed - host \(5,\)"):
         array.write(np.zeros(5, np.float32))
+
+
+def test_gpu_host_values_of_a_column_view():
+    current_device_arch()
+    host = np.arange(30, dtype=np.int32).reshape(3, 10)
+    table = DeviceArray(host, shape=(3, 4))
+    np.testing.assert_array_equal(host_values(table), host[:, :4])
+
+
+def test_gpu_device_workspace_matches_a_device_array():
+    current_device_arch()
+    like = DeviceArray(np.zeros(4, np.float16))
+    scratch = device_workspace((2, 3), "fp32", like=like)
+    assert isinstance(scratch, DeviceArray)
+    assert scratch.shape == (2, 3) and scratch.dtype == "fp32"
+    assert scratch.device == like.device
+
+
+# --- torch callers (optional: runs only where torch with a GPU is installed) ---------------------
+
+
+def test_gpu_torch_tensors_get_torch_values_and_workspaces():
+    torch = pytest.importorskip("torch")
+    if not torch.cuda.is_available():
+        pytest.skip("torch has no GPU here")
+    lengths = torch.arange(6, dtype=torch.int32, device="cuda").reshape(2, 3)
+    np.testing.assert_array_equal(host_values(lengths[:, :2]), [[0, 1], [3, 4]])
+    bits = torch.ones(2, dtype=torch.bfloat16, device="cuda")
+    np.testing.assert_array_equal(host_values(bits), encode(np.ones(2), "bf16"))
+    scratch = device_workspace((2, 3), "fp32", like=lengths)
+    assert scratch.dtype == torch.float32 and scratch.device == lengths.device
+    assert tuple(scratch.shape) == (2, 3)

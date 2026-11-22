@@ -3,16 +3,21 @@
 
 """Typed device arrays without torch, and the one description launch checks read.
 
-Two pieces, one per responsibility:
+Three pieces, one per responsibility:
 
 * :class:`ArrayInfo` describes an array a kernel argument points at: shape,
   element strides, rocKE element type (``"fp16"``, ``"bf16"``, ``"fp32"``,
   ``"i32"``, ... -- the :func:`rocke.core.dtypes.dtype_info` names), element
   size, device pointer and HIP device. :func:`array_info` builds it from a
-  :class:`DeviceArray` or from a torch tensor (through
+  :class:`DescribedArray` (a :class:`DeviceArray`, or a host-side stand-in in a
+  test) or from a torch tensor (through
   :func:`rocke.runtime.torch_interop.torch_array_info`, which never imports
   torch). Host-side launch checks (dtype, shape, contiguity, same device, no
-  overlap) read an ``ArrayInfo`` and so accept either kind of array.
+  overlap) read an ``ArrayInfo`` and so accept any of these.
+* :func:`host_values` copies an array's elements to the host, and
+  :func:`device_workspace` allocates a scratch array of the same kind as a
+  caller's array, so a launch helper that reads offsets or needs scratch stays
+  torch-neutral too.
 * :class:`DeviceArray` is a device copy of a host numpy array, allocated and
   copied by the rocKE runtime. It also answers the few tensor methods the
   launchers read (``shape``, ``stride``, ``data_ptr``, ``nbytes``), so it can
@@ -28,6 +33,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import Protocol, runtime_checkable
 
 import numpy as np
 
@@ -37,7 +43,14 @@ from .hip_module import Runtime, current_device
 from .host_buffers import as_u8_buffer
 from .launcher import DeviceMem
 
-__all__ = ["ArrayInfo", "DeviceArray", "array_info"]
+__all__ = [
+    "ArrayInfo",
+    "DescribedArray",
+    "DeviceArray",
+    "array_info",
+    "device_workspace",
+    "host_values",
+]
 
 
 @dataclass(frozen=True)
@@ -76,19 +89,84 @@ class ArrayInfo:
         return self.data_ptr, self.data_ptr + (last + 1) * self.element_size
 
 
+@runtime_checkable
+class DescribedArray(Protocol):
+    """An array that describes itself and can be read back to the host.
+
+    :class:`DeviceArray` is one. Host-only test stand-ins implement the same two
+    methods so launch checks can be exercised without a GPU."""
+
+    def info(self) -> ArrayInfo:
+        """The array's :class:`ArrayInfo`."""
+        ...
+
+    def read(self) -> np.ndarray:
+        """A host array whose leading ``info().shape`` part along each axis holds
+        the array's elements (it may be wider, as a :class:`DeviceArray` column
+        view's buffer is)."""
+        ...
+
+
+def _is_torch_tensor(array: object) -> bool:
+    # By module name, so torch is never imported to answer the question.
+    return type(array).__module__.split(".", 1)[0] == "torch"
+
+
 def array_info(array: object) -> ArrayInfo:
-    """The :class:`ArrayInfo` of a :class:`DeviceArray` or a torch tensor.
+    """The :class:`ArrayInfo` of a :class:`DescribedArray` (e.g. a
+    :class:`DeviceArray`) or a torch tensor.
 
     Anything else raises ``TypeError``: a launch check must know exactly what
     memory it is looking at."""
-    if isinstance(array, DeviceArray):
+    if isinstance(array, DescribedArray):
         return array.info()
-    if type(array).__module__.split(".", 1)[0] == "torch":
+    if _is_torch_tensor(array):
         from .torch_interop import torch_array_info
 
         return torch_array_info(array)
     raise TypeError(
         f"array_info failed - array={type(array).__name__}, expected a "
+        "rocke.runtime.DeviceArray or a torch tensor"
+    )
+
+
+def host_values(array: object) -> np.ndarray:
+    """The elements of ``array`` as a host numpy array of its shape.
+
+    The copy is blocking. A torch tensor is copied by torch, ordered on its
+    current stream as ``Tensor.cpu()`` is. Element types numpy has no type for
+    (bf16, fp8) come back as raw bits (:func:`rocke.numeric.storage.host_dtype`).
+    Anything :func:`array_info` refuses raises ``TypeError``."""
+    if _is_torch_tensor(array):
+        from .torch_interop import torch_host_values
+
+        return torch_host_values(array)
+    info = array_info(array)
+    return array.read()[tuple(slice(0, extent) for extent in info.shape)]
+
+
+def device_workspace(shape: Sequence[int], dtype: str, *, like: object) -> object:
+    """Device scratch of ``shape`` and element type ``dtype``, of the same kind
+    as the caller's array ``like``.
+
+    A torch tensor gets an uninitialized torch tensor on its device (torch's
+    caching allocator, ordered on torch's current stream); a
+    :class:`DeviceArray`, which must be on HIP's current device, gets a
+    zero-filled :class:`DeviceArray`. The contents are therefore unspecified:
+    read nothing from the scratch before a kernel writes it."""
+    if _is_torch_tensor(like):
+        from .torch_interop import torch_empty
+
+        return torch_empty(shape, dtype, device=like.device)
+    if isinstance(like, DeviceArray):
+        if like.device != current_device():
+            raise ValueError(
+                f"device_workspace failed - like is on device {like.device}, "
+                f"expected HIP's current device {current_device()}"
+            )
+        return DeviceArray.zeros(shape, dtype)
+    raise TypeError(
+        f"device_workspace failed - like={type(like).__name__}, expected a "
         "rocke.runtime.DeviceArray or a torch tensor"
     )
 

@@ -1,13 +1,16 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Host-only stand-ins for the GPU tensors a paged dense launch takes, and the
+"""Host-only stand-ins for the device arrays a paged dense launch takes, and the
 per-arch dense spec and pinned dispatch lookups the paged tests share.
 
-The stand-ins expose just what the launcher's checks read (shape, dtype, device,
-strides, indexing, values), so the paged launch validation is testable without torch
-or a GPU.
+The stand-ins are :class:`rocke.tests.host_arrays.HostArray` objects: the launcher's
+checks read their shape, dtype, device, strides and values, so the paged launch
+validation is testable without torch or a GPU.
 """
+
+import numpy as np
+from rocke.tests.host_arrays import HostArray
 
 
 def dense_arch_spec_class(module):
@@ -27,68 +30,24 @@ def pinned(req, spec_id):
     return opt_in_probe(req, candidates[spec_id])
 
 
-class I32DeviceTensor:
-    dtype = "torch.int32"
-
-    def __init__(
-        self, values, *, dtype=None, is_cuda=True, inner_stride=1, device="cuda:0"
-    ):
-        self._values = values
-        if dtype is not None:
-            self.dtype = dtype
-        self.is_cuda = is_cuda
-        self._inner_stride = inner_stride
-        self.device = device
-
-    @property
-    def shape(self):
-        rows = self._values
-        if rows and isinstance(rows[0], list):
-            return (len(rows), len(rows[0]))
-        return (len(rows),)
-
-    def stride(self, dim=None):
-        strides = (
-            (self.shape[1] * self._inner_stride, self._inner_stride)
-            if len(self.shape) == 2
-            else (self._inner_stride,)
-        )
-        return strides if dim is None else strides[dim]
-
-    def __getitem__(self, index):
-        if isinstance(index, tuple):  # [rows, cols] of a 2-D table
-            rows, cols = index
-            return I32DeviceTensor(
-                [row[cols] for row in self._values[rows]], device=self.device
-            )
-        item = self._values[index]
-        return (
-            I32DeviceTensor(item, device=self.device)
-            if isinstance(item, list)
-            else item
-        )
-
-    def tolist(self):
-        return self._values
+def int32_table(values, *, dtype="i32", device=0, inner_stride=1):
+    """A block table or length vector holding ``values`` (a list, or a list of
+    rows), as a host-only stand-in for an int32 device array on HIP device
+    ``device`` (``None``: host memory). ``inner_stride`` > 1 spaces the elements of
+    each row (a column slice of a wider buffer)."""
+    values = np.asarray(values, dtype=np.int64)
+    if values.ndim == 2:
+        strides = (values.shape[1] * inner_stride, inner_stride)
+    else:
+        strides = (inner_stride,)
+    return HostArray(values.shape, dtype, values=values, strides=strides, device=device)
 
 
-class CacheStandIn:
-    """A paged K or V cache: only its shape, dtype, layout and device are read."""
-
-    def __init__(
-        self,
-        shape,
-        *,
-        contiguous=True,
-        device="cuda:0",
-        dtype="torch.float16",
-        is_cuda=True,
-    ):
-        self.shape = tuple(shape)
-        self.dtype = dtype
-        self._contiguous = contiguous
-        self.device = device
-        self.is_cuda = is_cuda
-
-    def is_contiguous(self):
-        return self._contiguous
+def paged_cache(shape, *, dtype="fp16", device=0, contiguous=True):
+    """A paged K or V cache: only its shape, dtype, layout and device are read.
+    ``contiguous=False`` pads every page row (a strided view)."""
+    strides = None
+    if not contiguous:
+        dense = HostArray(shape, dtype).info().strides
+        strides = (dense[0] * 2, *dense[1:])
+    return HostArray(shape, dtype, strides=strides, device=device)

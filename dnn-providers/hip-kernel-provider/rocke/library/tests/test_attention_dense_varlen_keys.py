@@ -5,14 +5,17 @@
 
 The packed body zeroes no keyless row and has no handling for an empty KV sequence
 without LSE, so the launcher rejects both instead of returning wrong values. No test
-needs torch or a GPU: the helper reads only ``dtype`` and ``tolist()`` of its offsets,
-and the launcher reaches the check before it reads q, k, v or out, so the launcher
-tests pass stand-ins for them and run in the CPU attention lane.
+needs torch or a GPU: the offsets are host-only array stand-ins, and the launcher
+reaches the check before it reads q, k, v or out, so the launcher tests pass bare
+objects for them and run in the CPU attention lane.
 """
 
 from __future__ import annotations
 
+import itertools
+
 import pytest
+from rocke.tests.host_arrays import HostArray
 
 from kernels.common._lse_store import validate_varlen_keys
 from kernels.common.attention_dense_spec import DENSE_TILE_GEOMETRIES
@@ -41,21 +44,10 @@ def _spec(**over) -> Gfx950AttentionDenseSpec:
     return Gfx950AttentionDenseSpec(**kw)
 
 
-class _Offsets:
-    """Stand-in for a ``cu_seqlens`` tensor: the helper reads only dtype and tolist()."""
-
-    def __init__(self, lengths, dtype="torch.int32"):
-        self.dtype = dtype
-        self._values = [0]
-        for n in lengths:
-            self._values.append(self._values[-1] + n)
-
-    def tolist(self):
-        return list(self._values)
-
-
-def _offsets(*lengths, dtype="torch.int32"):
-    return _Offsets(lengths, dtype)
+def _offsets(*lengths, dtype="i32"):
+    """A host-only ``cu_seqlens`` array: ``[0, *running sums of lengths]``."""
+    values = [0, *itertools.accumulate(lengths)]
+    return HostArray((len(values),), dtype, values=values)
 
 
 def test_accepts_nonempty_sequences():
@@ -104,7 +96,7 @@ def test_rejects_offsets_of_the_wrong_length(q_lengths, kv_lengths):
 def test_rejects_offsets_that_are_not_int32():
     with pytest.raises(ValueError, match="must be int32"):
         validate_varlen_keys(
-            _spec(), _offsets(256, 256, dtype="torch.int64"), _offsets(256, 256)
+            _spec(), _offsets(256, 256, dtype="i64"), _offsets(256, 256)
         )
 
 

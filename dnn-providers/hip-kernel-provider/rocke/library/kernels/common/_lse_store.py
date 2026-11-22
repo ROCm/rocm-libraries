@@ -332,40 +332,47 @@ def validate_dense_lse(
 
     if not spec.varlen:
         return
-    for name, tensor, heads in (
-        ("q", q, spec.num_query_heads),
-        ("out", out, spec.num_query_heads),
-        ("k", k, spec.num_kv_heads),
-        ("v", v, spec.num_kv_heads),
+    from rocke.runtime.device_array import array_info, host_values
+
+    packed = {
+        name: array_info(tensor)
+        for name, tensor in (("q", q), ("out", out), ("k", k), ("v", v))
+    }
+    for name, heads in (
+        ("q", spec.num_query_heads),
+        ("out", spec.num_query_heads),
+        ("k", spec.num_kv_heads),
+        ("v", spec.num_kv_heads),
     ):
-        if tensor.ndim != 3 or tuple(tensor.shape[1:]) != (heads, spec.head_size):
+        info = packed[name]
+        if len(info.shape) != 3 or info.shape[1:] != (heads, spec.head_size):
             raise ValueError(
                 f"{name} must have packed [tokens, heads, head_size] shape"
             )
-        if not tensor.is_contiguous():
+        if not info.is_contiguous():
             raise ValueError(f"{name} must be contiguous")
-    if q.shape[0] != out.shape[0] or k.shape[0] != v.shape[0]:
+    q_tokens, k_tokens = packed["q"].shape[0], packed["k"].shape[0]
+    if q_tokens != packed["out"].shape[0] or k_tokens != packed["v"].shape[0]:
         raise ValueError("packed output/value extents must match query/key extents")
-    for name, tensor, extent, tile, maximum, allow_empty in (
-        ("cu_seqlens_q", cu_seqlens_q, q.shape[0], spec.block_m, spec.seqlen_q, True),
+    for name, offsets_array, extent, tile, maximum, allow_empty in (
+        ("cu_seqlens_q", cu_seqlens_q, q_tokens, spec.block_m, spec.seqlen_q, True),
         (
             "cu_seqlens_kv",
             cu_seqlens_kv,
-            k.shape[0],
+            k_tokens,
             spec.block_n,
             spec.seqlen_kv,
             False,
         ),
     ):
-        if str(tensor.dtype) != "torch.int32" or tuple(tensor.shape) != (
-            spec.batch + 1,
-        ):
+        info = array_info(offsets_array)
+        if info.dtype != "i32" or info.shape != (spec.batch + 1,):
             raise ValueError(f"{name} must be int32 [batch+1]")
-        if not tensor.is_contiguous():
+        if not info.is_contiguous():
             raise ValueError(f"{name} must be contiguous")
         # The existing packed body has no per-sequence load-tail handling.
-        # This enabled-path content check synchronizes device offsets to host.
-        offsets = tensor.tolist()
+        # This enabled-path content check copies the device offsets to the host.
+        offsets = host_values(offsets_array).tolist()
         if offsets[0] != 0 or offsets[-1] != extent:
             raise ValueError(f"{name} endpoints must span its packed tensor")
         for start, stop in zip(offsets, offsets[1:]):
@@ -388,19 +395,23 @@ def validate_varlen_keys(spec, cu_seqlens_q, cu_seqlens_kv):
     before touching KV, so it may have no keys. Both rejections are implementation
     shortcuts of the packed body, not hardware limits, so they raise
     ``NotImplementedError`` with a NOT_YET_IMPLEMENTED detail; malformed offsets raise
-    ``ValueError``. The offsets must be int32 (the kernel reads them as such).
+    ``ValueError``. The offsets must be int32 (the kernel reads them as such), each
+    anything :func:`rocke.runtime.device_array.array_info` describes.
     Tile alignment and the spec maxima are not checked here; with LSE,
     :func:`validate_dense_lse` checks them. The spec has no sinks with varlen.
-    Synchronizes both offset tensors to host.
+    Copies both offset arrays to the host.
     """
-    for name, tensor in (
+    from rocke.runtime.device_array import array_info, host_values
+
+    for name, offsets_array in (
         ("cu_seqlens_q", cu_seqlens_q),
         ("cu_seqlens_kv", cu_seqlens_kv),
     ):
-        if str(tensor.dtype) != "torch.int32":
-            raise ValueError(f"{name} must be int32, got {tensor.dtype}")
-    q_off = cu_seqlens_q.tolist()
-    kv_off = cu_seqlens_kv.tolist()
+        dtype = array_info(offsets_array).dtype
+        if dtype != "i32":
+            raise ValueError(f"{name} must be int32, got {dtype}")
+    q_off = host_values(cu_seqlens_q).tolist()
+    kv_off = host_values(cu_seqlens_kv).tolist()
     if len(q_off) != spec.batch + 1 or len(kv_off) != spec.batch + 1:
         raise ValueError(
             "cu_seqlens_q and cu_seqlens_kv must each have batch+1 entries"

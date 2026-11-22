@@ -9,8 +9,8 @@ from the pointer-only reduce signature leaves the head count, and with it the
 reduce's token strides, undefined. This captures the launcher's signature and
 values on the host and checks them against the reduce kernel's params.
 
-``test_combine_abi_matches_reduce_params`` needs neither torch nor a GPU, so it
-runs in every CPU lane; the launch test runs where torch is installed.
+Neither test needs torch or a GPU: the launch test stops at a stand-in launcher,
+so the workspace and output arrays it is given are never touched.
 """
 
 from __future__ import annotations
@@ -60,7 +60,6 @@ class _Art:
 
 @pytest.mark.parametrize("arch, spec_cls", _ARCHES)
 def test_combine_launch_matches_reduce_params(monkeypatch, arch, spec_cls):
-    torch = pytest.importorskip("torch")
     import rocke.helpers.compile as compile_mod
     import rocke.runtime as runtime_mod
 
@@ -82,11 +81,8 @@ def test_combine_launch_matches_reduce_params(monkeypatch, arch, spec_cls):
     monkeypatch.setattr(kv_split, "_COMBINE_LAUNCHER_CACHE", {})
 
     spec = _dense_spec(spec_cls)
-    workspace = kv_split.allocate_segment_workspace(spec, "cpu")
-    out = torch.empty(
-        (spec.batch, spec.seqlen_q, spec.num_query_heads, spec.head_size),
-        dtype=torch.bfloat16,
-    )
+    workspace = {name: object() for name in kv_split.SEGMENT_PARAMS}
+    out = object()
     kv_split.launch_segment_combine(spec, arch, out, workspace, stream=0)
 
     params = [p.name for p in built["kernel"].params]

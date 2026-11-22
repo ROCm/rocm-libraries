@@ -102,6 +102,7 @@ from kernels.common.attention_dense_spec import (
     check_dense_spec_preflight,
     require_fp8_kv_scale,
     require_ocp_fp8_kv,
+    validate_dense_sinks,
 )
 from kernels.common.attention_dense_decode import (
     NONPERSIST_DECODES,
@@ -3264,17 +3265,19 @@ def run_attention_dense_torch(
     lse=None,
 ):
     """High-level framework entry: compile (cached) + launch the dense prefill
-    kernel on torch tensors. ``q``/``k``/``v``/``out`` are dense contiguous
-    tensors ([B, S, H, D] for q/out, [B, Skv, Hkv, D] for k/v); ``scale`` is the
+    kernel on caller-owned device arrays: torch tensors or
+    :class:`rocke.runtime.device_array.DeviceArray`, anything
+    :func:`~rocke.runtime.device_array.array_info` describes (scratch, when the spec
+    needs it, is allocated of the same kind as ``q``). ``q``/``k``/``v``/``out`` are
+    dense contiguous arrays ([B, S, H, D] for q/out, [B, Skv, Hkv, D] for k/v);
+    ``scale`` is the
     softmax scale (1/sqrt(D)) and is supported in ``[2**-64, 2**4]`` (the
     ordinary kernel takes the row max on unscaled scores and folds the scale
     into an fma; see the scale-range note above ``_EMPTY_ROW_MAX_GRID``). A NaN
     or infinite scale raises ``ValueError``; a finite scale outside the range
     raises ``NotImplementedError``. Returns ``out``.
-    torch is imported lazily by the launcher — this module stays torch-free at
-    import time.
 
-    ``spec.emit_lse=True`` requires a caller-owned contiguous FP32 ``lse`` tensor
+    ``spec.emit_lse=True`` requires a caller-owned contiguous FP32 ``lse`` array
     on the same GPU, separate from every input and output. Its layout is
     [B, Hq, Sq, 1], or [total_query_tokens, Hq, 1] for packed varlen. The kernel
     writes natural-log softmax normalization while still returning ``out``.
@@ -3341,21 +3344,7 @@ def run_attention_dense_torch(
     if not spec.varlen and (cu_seqlens_q is not None or cu_seqlens_kv is not None):
         raise ValueError("cu_seqlens_* provided but spec.varlen is False")
     validate_paged_launch(spec, k, v, block_tables, kv_lens, validate_paged)
-    if not spec.use_sinks and sinks is not None:
-        raise ValueError("sinks provided but spec.use_sinks is False")
-    if spec.use_sinks:
-        if sinks is None:
-            raise ValueError("spec.use_sinks=True requires sinks that are not None")
-        if sinks.shape != (spec.num_query_heads,):
-            raise ValueError(
-                f"sinks must have shape ({spec.num_query_heads},), got {tuple(sinks.shape)}"
-            )
-        if sinks.dtype != q.dtype:
-            raise ValueError(f"sinks dtype {sinks.dtype} must match q dtype {q.dtype}")
-        if not sinks.is_contiguous():
-            raise ValueError("sinks must be contiguous")
-        if not sinks.is_cuda:
-            raise ValueError("sinks must be a CUDA tensor")
+    validate_dense_sinks(spec, q, sinks)
 
     if spec.varlen and not spec.emit_lse and validate_varlen:
         validate_varlen_keys(spec, cu_seqlens_q, cu_seqlens_kv)
@@ -3412,7 +3401,7 @@ def run_attention_dense_torch(
     if spec.emit_lse:
         vals["lse_ptr"] = lse
     if spec.kv_segments > 1:
-        workspace = allocate_segment_workspace(spec, q.device)
+        workspace = allocate_segment_workspace(spec, like=q)
         vals.update(workspace)
     launcher(
         vals,

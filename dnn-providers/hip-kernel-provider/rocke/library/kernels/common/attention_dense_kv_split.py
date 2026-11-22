@@ -152,17 +152,19 @@ def emit_segment_store(
         b.global_store(segm_l, ml_idx, denom, align=4)
 
 
-def allocate_segment_workspace(spec, device):
-    """FP32 workspace tensors keyed by :data:`SEGMENT_PARAMS`."""
-    import torch
+def allocate_segment_workspace(spec, like):
+    """FP32 workspace arrays keyed by :data:`SEGMENT_PARAMS`, of the same kind as
+    the caller's array ``like`` (see
+    :func:`rocke.runtime.device_array.device_workspace`)."""
+    from rocke.runtime.device_array import device_workspace
 
     shape = (spec.batch * spec.seqlen_q, spec.num_query_heads, spec.kv_segments)
     return {
-        "segm_output_ptr": torch.empty(
-            shape + (spec.head_size,), dtype=torch.float32, device=device
+        "segm_output_ptr": device_workspace(
+            shape + (spec.head_size,), "fp32", like=like
         ),
-        "segm_max_ptr": torch.empty(shape, dtype=torch.float32, device=device),
-        "segm_expsum_ptr": torch.empty(shape, dtype=torch.float32, device=device),
+        "segm_max_ptr": device_workspace(shape, "fp32", like=like),
+        "segm_expsum_ptr": device_workspace(shape, "fp32", like=like),
     }
 
 
@@ -233,13 +235,11 @@ def launch_segment_combine(spec, arch: str, out, workspace, stream: int) -> None
             signature=signature,
         )
         _COMBINE_LAUNCHER_CACHE[key] = launcher
-    import torch
-
     vals = dict(workspace)
     vals.update(scalars)
     vals["output_ptr"] = out
-    # Unused by the combine body; any int32 buffer satisfies the ABI.
-    vals["seq_lens_ptr"] = workspace["segm_max_ptr"].view(torch.int32)
+    # Unused by the combine body; any device buffer satisfies the i32 pointer.
+    vals["seq_lens_ptr"] = workspace["segm_max_ptr"]
     launcher(
         vals,
         config=LaunchConfig(
