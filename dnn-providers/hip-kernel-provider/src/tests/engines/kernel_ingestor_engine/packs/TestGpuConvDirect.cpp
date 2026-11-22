@@ -1024,7 +1024,7 @@ bool isZring(const hipdnn_plugin_sdk::ingestor::KernelDefinition& kernel)
 ConvShape zringCase()
 {
     // Units a plane: 2 x 2 tiles of 16 x 16, two images, two 64-channel column blocks.
-    constexpr int64_t UNITS_PER_PLANE = 2 * 2 * 2 * 2;
+    constexpr int64_t UNITS_PER_PLANE = int64_t{2} * 2 * 2 * 2;
     const int64_t units = device_units::dispatchUnits(currentDeviceProperties());
     const int64_t depth
         = (conv_direct::ZRING_MIN_PLANES * units + UNITS_PER_PLANE - 1) / UNITS_PER_PLANE + 5;

@@ -934,9 +934,15 @@ std::optional<Plan>
         {
             return std::nullopt;
         }
-        tile = config.zring      ? zringTileFor(problem, config, columnBlocks, computeUnits)
-               : config.run != 0 ? runTileFor(a, config, columnBlocks)
-                                 : tileFor(a, config, columnBlocks, computeUnits);
+        if(config.zring)
+        {
+            tile = zringTileFor(problem, config, columnBlocks, computeUnits);
+        }
+        else
+        {
+            tile = config.run != 0 ? runTileFor(a, config, columnBlocks)
+                                   : tileFor(a, config, columnBlocks, computeUnits);
+        }
     }
     if(!tile.has_value())
     {
