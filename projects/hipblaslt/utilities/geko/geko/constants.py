@@ -129,6 +129,70 @@ LOG_FIELDS = (
     "call_count",
 )
 
+# geko --specialize call identity: every key of a mask-128 hipBLASLt log record
+# except the observed recipe and the call weight, in producer order. Kept apart
+# from LOG_FIELDS so the --tune/--search/--bench group keys stay unchanged.
+SPECIALIZE_IDENTITY_FIELDS = (
+    "function",
+    "M",
+    "N",
+    "K",
+    "lda",
+    "ldb",
+    "ldc",
+    "ldd",
+    "stride_a",
+    "stride_b",
+    "stride_c",
+    "stride_d",
+    "alpha",
+    "alphai",
+    "beta",
+    "betai",
+    "transA",
+    "transB",
+    "batch_count",
+    "batch_mode",
+    "scaleA",
+    "scaleB",
+    "scaleC",
+    "scaleD",
+    "swizzleA",
+    "swizzleB",
+    "scaleAlpha_vector",
+    "gradient",
+    "use_e",
+    "bias_vector",
+    "bias_source",
+    "bias_stride",
+    "a_type",
+    "b_type",
+    "c_type",
+    "d_type",
+    "scale_type",
+    "bias_type",
+    "aux_type",
+    "compute_type",
+    "activation_type",
+    "flush",
+    "any_stride",
+    "rotating",
+    "cold_iters",
+    "iters",
+    "pointer_mode",
+    "activation_arg0",
+    "activation_arg1",
+)
+# Recipe hipBLASLt actually ran for a call; kept per observation, not identity.
+SPECIALIZE_OBSERVATION_FIELDS = (
+    "solution_index",
+    "solution_Name",
+    "kernel_name",
+)
+SPECIALIZE_RECORD_FIELDS = (
+    SPECIALIZE_IDENTITY_FIELDS + SPECIALIZE_OBSERVATION_FIELDS + ("call_count",)
+)
+
 
 INDEX_TYPE_MAP = {
     0: "f32_r",

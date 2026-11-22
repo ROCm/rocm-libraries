@@ -1,0 +1,112 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "geko/route_facts.schema.json",
+  "title": "geko --specialize route facts (one run configuration)",
+  "description": "Written by 'geko route-facts', read by 'geko --specialize --route-facts'. A fact counts only when evidence[fact] is a non-empty list; an absent or unproven fact is unknown and never assumed. --specialize reads run_configuration, calls and, for a configuration without calls, zero_verified, thin, matmul_count and per_process; the other fields are provenance.",
+  "type": "object",
+  "required": ["calls"],
+  "properties": {
+    "schema": {"const": 1},
+    "run_configuration": {
+      "type": "string",
+      "description": "Name of the --workload-log configuration directory these facts belong to; when absent the file name without .json is used."
+    },
+    "calls": {
+      "type": "array",
+      "description": "One entry per call identity. Empty when the producer stopped (see stops): every call of the configuration is then refused.",
+      "items": {"$ref": "#/$defs/call"}
+    },
+    "matmul_count": {"type": "integer", "minimum": 0, "description": "rocblaslt_matmul calls in the mask-16 API trace."},
+    "mask128_call_count": {"type": "integer", "minimum": 0, "description": "Sum of call_count over the mask-128 trace."},
+    "call_count": {"type": "integer", "minimum": 0},
+    "thin": {"type": "boolean", "description": "Fewer than two distinct call identities."},
+    "distinct_identities": {"type": "integer", "minimum": 0},
+    "zero_verified": {"type": "boolean", "description": "The configuration provably made no matmul call (zero mask-128 calls, every API process created a handle and made no matmul, no stops)."},
+    "runtime_route": {
+      "type": "object",
+      "description": "Configuration-level runtime-route proof from both runs' run.json/engine.log (complete, clean, env_values recorded, process_inventory consistent with the logs, API run bound to the trace run). --specialize requires proven: true with evidence, also for a configuration without calls.",
+      "required": ["proven", "evidence"],
+      "properties": {
+        "proven": {"type": "boolean"},
+        "evidence": {"type": "array", "items": {"$ref": "#/$defs/evidence"}},
+        "reason": {"type": ["string", "null"], "description": "What evidence is missing when proven is false."}
+      }
+    },
+    "reconciliation": {
+      "type": "object",
+      "properties": {
+        "matched": {"type": "boolean"},
+        "mask16_matmul_count": {"type": "integer"},
+        "mask128_call_count": {"type": "integer"},
+        "evidence": {"type": "array", "items": {"$ref": "#/$defs/evidence"}}
+      }
+    },
+    "per_process": {
+      "type": "object",
+      "description": "Per process id: API function name -> number of calls in the mask-16 trace.",
+      "additionalProperties": {"type": "object", "additionalProperties": {"type": "integer", "minimum": 0}}
+    },
+    "stops": {
+      "type": "array",
+      "description": "Observations that break the proof (e.g. api-count-mismatch, output-amax, nonordinary-api, pinned-index, tuning-override, tunableop, missing-heuristic, bias-axis, nonordinary-trace, run-incomplete, run-mode, run-mask, run-unclean, run-binding, inventory-stray-log, inventory-missing-log, inventory-empty-log).",
+      "items": {
+        "type": "object",
+        "required": ["code", "evidence"],
+        "properties": {"code": {"type": "string"}}
+      }
+    },
+    "scan": {"type": "array", "items": {"$ref": "#/$defs/evidence"}},
+    "api_epilogues": {"type": "array"},
+    "ordinary_api_allowlist": {"type": "array", "items": {"type": "string"}},
+    "run_json": {"type": ["object", "null"]},
+    "traces": {"type": "array", "items": {"type": "object"}},
+    "producer": {"type": "object"}
+  },
+  "$defs": {
+    "call": {
+      "type": "object",
+      "required": ["identity", "evidence"],
+      "properties": {
+        "identity": {
+          "type": "object",
+          "description": "The call identity exactly as the mask-128 trace logged it (every logged identity field, as strings; solution_index, solution_Name, kernel_name and call_count excluded).",
+          "additionalProperties": {"type": "string"}
+        },
+        "call_route": {
+          "type": "string",
+          "description": "Accepted: 'ordinary matmul API'. Any other string is a non-ordinary route (grouped GEMM, device args, hipblaslt-ext, RocRoller, ...) and the call is refused."
+        },
+        "bias_axis": {
+          "type": ["string", "null"],
+          "description": "Accepted: 'M'. Any other value with bias enabled is refused; null or unproven keeps the bias general."
+        },
+        "output_amax": {
+          "type": ["boolean", "null"],
+          "description": "Accepted: false (no amax output, with evidence). true, null, unproven or a non-boolean value refuses the call."
+        },
+        "runtime_route": {
+          "type": ["string", "null"],
+          "description": "Accepted: 'hipBLASLt heuristic' (both runs' run.json/engine.log show no TunableOp, tuning override or pinned solution index, and bind the API run to the trace run). Missing, null or any other value refuses the call."
+        },
+        "evidence": {
+          "type": "object",
+          "description": "Per fact (call_route, bias_axis, output_amax, runtime_route, identity) the evidence records; a fact without a non-empty list is unknown.",
+          "additionalProperties": {"type": "array", "items": {"$ref": "#/$defs/evidence"}}
+        },
+        "attribution": {"type": "string"}
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "required": ["file", "sha256"],
+      "properties": {
+        "file": {"type": "string"},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "line": {"type": "integer", "minimum": 1},
+        "line_start": {"type": "integer", "minimum": 1},
+        "line_end": {"type": "integer", "minimum": 1},
+        "observation": {"type": "string"}
+      }
+    }
+  }
+}

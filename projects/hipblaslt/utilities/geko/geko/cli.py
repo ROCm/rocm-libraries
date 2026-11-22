@@ -5,17 +5,19 @@
 
 Defines the argparse parser (build_parser), runs validation / normalization
 (parse_cli_args), and dispatches into the high-level pipeline functions in
-geko.pipeline (run_configure, run_optimize, run_search, run_bench).
+geko.pipeline (run_configure, run_optimize, run_search, run_bench) or, for
+--specialize, into geko.specialize.writer.run (CPU only, no --devices).
 
 Workload may be supplied as a hipBLASLt log YAML, a generator-style tuning
 YAML (via load_prepared_config_from_yaml), or a single inline GEMM
-description. The three top-level modes -- --tune, --search, and --bench --
-are mutually exclusive.
+description. The four top-level modes -- --tune, --search, --bench and
+--specialize -- are mutually exclusive.
 """
 
 from __future__ import annotations
 
 import argparse
+import sys
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -69,20 +71,28 @@ def _rows_from_gemm_config_yaml(path: Path, arch: str | None) -> Tuple[List[dict
 def build_parser() -> argparse.ArgumentParser:
     """Construct the argparse parser (mutually exclusive --tune/--search/--bench and workload sources)."""
     parser = argparse.ArgumentParser(
-        description="GEKO: tune, search, or benchmark a hipBLASLt GEMM workload log.",
+        description="GEKO: tune, search, benchmark or specialize a hipBLASLt GEMM workload log.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+        epilog="Route facts for --specialize: geko route-facts TRACE --api-log API_TRACE --out JSON "
+               "(see 'geko route-facts --help').",
     )
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--tune", action="store_true", help="Tuning workflow: configure then optimize")
     mode.add_argument("--search", action="store_true", help="Dense-search tuning workflow")
     mode.add_argument("--bench", action="store_true", help="Benchmark GEMMs from the workload log only")
+    mode.add_argument(
+        "--specialize",
+        action="store_true",
+        help="Bespoke logic per traced call (mask-128 traces; CPU only, --devices not needed)",
+    )
     workload_src = parser.add_mutually_exclusive_group(required=True)
     workload_src.add_argument(
         "--workload-log",
         type=str,
         metavar="PATH",
         dest="workload",
-        help="hipBLASLt GEMM workload log YAML (often produced with HIPBLASLT_LOG_MASK=64)",
+        help="hipBLASLt GEMM workload log YAML (often produced with HIPBLASLT_LOG_MASK=64); with "
+        "--specialize: one mask-128 log, or a directory of per-run-configuration trace directories",
     )
     workload_src.add_argument(
         "--list",
@@ -135,9 +145,10 @@ def build_parser() -> argparse.ArgumentParser:
         "-d",
         action="store",
         type=str,
-        required=True,
+        default=None,
         help=(
             "Comma-separated list of GPU device IDs (e.g., 0,1,2,3). "
+            "Required except with --specialize."
         ),
     )
     parser.add_argument(
@@ -245,7 +256,41 @@ def build_parser() -> argparse.ArgumentParser:
             "is skipped with a warning rather than blocking."
         ),
     )
+    specialize = parser.add_argument_group("--specialize options")
+    specialize.add_argument("--route-facts", dest="route_facts", metavar="PATH", default=None,
+                            help="Route facts JSON per run configuration (a <cfg>.json directory or one file), "
+                            "e.g. from 'geko route-facts'; without it every call's route is unknown and refused")
+    specialize.add_argument("--logic-root", dest="logic_root", metavar="DIR", default=None,
+                            help="Stock logic directory the --hipblaslt library was built from (default: "
+                            "params.txt logic=, else the source checkout the MatchTable names)")
+    specialize.add_argument("--keep-beta", dest="keep_beta", action="store_true",
+                            help="Keep UseBeta: true for beta-0 calls (manifest stage keep-beta)")
+    specialize.add_argument("--exclude-controls", dest="exclude_controls", metavar="YAML", default=None,
+                            help="Narrowing facts to withhold per (recipe identity, call identity)")
+    specialize.add_argument("--build-library", dest="build_library", metavar="OUT", default=None,
+                            help="Also run TensileCreateLibrary on the bespoke logic into OUT")
+    specialize.add_argument("--stock-only", dest="stock_only", action="store_true",
+                            help="Write the call corpus and manifest for the stock library; no bespoke logic")
+    specialize.add_argument("--jobs", dest="jobs", type=int, metavar="N", default=None,
+                            help="TensileCreateLibrary jobs for --build-library (default min(CPU affinity, 64); max 64)")
     return parser
+
+
+@dataclass(frozen=True)
+class SpecializeArgs:
+    """Normalized --specialize flags (geko.specialize.writer.run keywords)."""
+
+    workload_log: str
+    route_facts: str | None
+    hipblaslt: str
+    arch: str
+    workdir: str
+    keep_beta: bool
+    exclude_controls: str | None
+    build_library: str | None
+    stock_only: bool
+    jobs: int | None
+    logic_root: str | None
 
 
 @dataclass(frozen=True)
@@ -277,10 +322,24 @@ class CliArgs:
     skip_gpu_check: bool = False
 
 
-def parse_cli_args(argv: Sequence[str] | None) -> CliArgs:
+def parse_cli_args(argv: Sequence[str] | None) -> CliArgs | SpecializeArgs:
     """Parse argv (default sys.argv); invalid paths or rules call parser.error (SystemExit)."""
     parser = build_parser()
     ns = parser.parse_args(list(argv) if argv is not None else None)
+
+    if ns.specialize:
+        if ns.workload is None:
+            parser.error("--specialize needs --workload-log (mask-128 traces)")
+        missing = [flag for flag, value in (("--hipblaslt", ns.hipblaslt), ("--arch", ns.arch),
+                                            ("--workdir", ns.workdir)) if value is None]
+        if missing:
+            parser.error(f"--specialize requires {', '.join(missing)}")
+        if ns.arch not in ("gfx950", "gfx942"):
+            parser.error("--specialize supports --arch gfx950 or gfx942")
+        return SpecializeArgs(ns.workload, ns.route_facts, ns.hipblaslt, ns.arch, ns.workdir, ns.keep_beta,
+                              ns.exclude_controls, ns.build_library, ns.stock_only, ns.jobs, ns.logic_root)
+    if ns.devices is None:
+        parser.error("the following arguments are required: --devices/-d")
 
     workload = ns.workload
     gemm_config = ns.gemm_config
@@ -477,12 +536,21 @@ def dispatch(args: CliArgs, anchor: str | None = None) -> int:
 def main(argv: Sequence[str] | None = None, anchor: str | None = None) -> int:
     """Console script entry: parse_cli_args → dispatch; maps SystemExit to int code.
 
+    ``geko route-facts ...`` runs the route-facts producer (geko.specialize.route_facts).
     anchor is forwarded to dispatch for hipBLASLt root auto-detection;
     in-tree launchers (bin/geko) pass their location, the installed console
     script leaves it None and relies on --hipblaslt / the env var.
     """
+    argv = list(argv) if argv is not None else sys.argv[1:]
     try:
-        return dispatch(parse_cli_args(argv), anchor=anchor)
+        if argv[:1] == ["route-facts"]:
+            from geko.specialize.route_facts import main as route_facts_main
+            return route_facts_main(argv[1:])
+        args = parse_cli_args(argv)
+        if isinstance(args, SpecializeArgs):
+            from geko.specialize.writer import run as run_specialize
+            return run_specialize(**vars(args))
+        return dispatch(args, anchor=anchor)
     except SystemExit as e:
         return e.code if isinstance(e.code, int) else 1
 

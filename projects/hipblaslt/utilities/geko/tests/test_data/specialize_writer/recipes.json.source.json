@@ -1,0 +1,6 @@
+{
+  "producer": "TensileLite LibraryIO parsed stock subset then getSolutionNameMin/getKernelNameMin(splitGSU=False)",
+  "tensilelite": "tensilelite/SolutionStructs/Naming.py of this change (sha256 below)",
+  "Naming_sha256": "5ac95e12aa9f5e00ce578a24d45008b522a7416396af15232e4e731c2e880141",
+  "recipes_sha256": "94ad53325831d17a09916a3cdb9487c23bc2c7df2d1ab0d8da218629f8c150d0"
+}
