@@ -612,7 +612,7 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
 #
 # Not registered on Windows. The Windows CI shard runs close to its time
 # limit, and test_gdn_decode_fused.py::test_lowers_and_compiles_without_scratch
-# runs close to the 60 s per-test limit on Windows runners. Re-enable on
+# ran close to the entry's per-test limit (then 60 s) on Windows runners. Re-enable on
 # Windows once that case is cheaper or split out. The GDN/KDA numeric files
 # in rocke_library_gpu_pytest need gfx950/gfx942 devices and already skip
 # at collection on the Windows GPU lanes, so they are unchanged. This entry
@@ -652,12 +652,22 @@ endforeach()
 if(WIN32)
   message(STATUS "rocKE: rocke_library_gdn_pytest not registered on Windows (slow GDN fused case; see comment above)")
 else()
+  # The scratch and resource checks compile through comgr and read the code
+  # object with llvm-objdump, so the entry takes the compiler environment (as
+  # rocke_library_mla_pytest does); with it a missing tool fails rather than
+  # skips. Two compile cases of test_gdn_decode_fused.py take about 30 s each
+  # with the tools on one host core, so the per-test limit is 120 s, keeping
+  # them under half of it.
   string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-         "add_test(rocke_library_gdn_pytest ${_ROCKE_INSTALLED_PYTEST}${_ROCKE_LIBRARY_GDN_TESTS} -v -rs --timeout=60)\n")
+         "set(_rocke_library_gdn_pytest_environment \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\")\n"
+         "list(APPEND _rocke_library_gdn_pytest_environment\n"
+         "     \${_rocke_compiler_tool_environment}\n"
+         "     \${_rocke_compiler_requirement_environment})\n"
+         "add_test(rocke_library_gdn_pytest ${_ROCKE_INSTALLED_PYTEST}${_ROCKE_LIBRARY_GDN_TESTS} -v -rs --timeout=120)\n")
   string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
          "set_tests_properties(rocke_library_gdn_pytest PROPERTIES\n"
          "  LABELS \"ckc;python;gdn;host;standard\"\n"
-         "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
+         "  ENVIRONMENT \"\${_rocke_library_gdn_pytest_environment}\"\n"
          "  TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})\n")
 endif()
 

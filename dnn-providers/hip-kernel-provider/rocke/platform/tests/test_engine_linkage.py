@@ -608,6 +608,14 @@ def test_installed_ctest_entries_get_scoped_environment_contracts(
                 environment_for(tests, "rocke_library_mla_pytest")
                 == expected_mla_environment
             )
+            # The GDN/KDA host entry compiles and reads code objects as the MLA
+            # one does, so it takes the same environment; it is not registered
+            # on Windows.
+            if os.name != "nt":
+                assert (
+                    environment_for(tests, "rocke_library_gdn_pytest")
+                    == expected_mla_environment
+                )
             assert (
                 environment_for(tests, "rocke_library_runner_contract_pytest")
                 == expected_runner_environment
