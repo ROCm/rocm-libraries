@@ -4654,8 +4654,7 @@
         "verified_on": "llvm24"
       },
       "gfx1250": {
-        "evidence": "fatal error: error in backend: Cannot select: 0xADDR: v2bf16 = scalar_to_vector 0xADDR",
-        "status": "arch_absent",
+        "status": "ok",
         "verified_on": "llvm24"
       },
       "gfx908": {
@@ -8323,67 +8322,67 @@
     },
     "llvm.amdgcn.wmma.f16.16x16x128.bf8.bf8.v8f16.v16i32": {
       "gfx11-generic": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.bf8.bf8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.bf8.bf8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1100": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.bf8.bf8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.bf8.bf8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1101": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.bf8.bf8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.bf8.bf8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1102": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.bf8.bf8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.bf8.bf8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1103": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.bf8.bf8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.bf8.bf8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1150": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.bf8.bf8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.bf8.bf8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1151": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.bf8.bf8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.bf8.bf8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1152": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.bf8.bf8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.bf8.bf8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1153": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.bf8.bf8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.bf8.bf8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1154": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.bf8.bf8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.bf8.bf8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx12-generic": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.bf8.bf8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.bf8.bf8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1200": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.bf8.bf8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.bf8.bf8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1201": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.bf8.bf8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.bf8.bf8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
@@ -8392,89 +8391,89 @@
         "verified_on": "llvm24"
       },
       "gfx908": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.bf8.bf8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.bf8.bf8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx90a": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.bf8.bf8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.bf8.bf8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx942": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.bf8.bf8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.bf8.bf8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx950": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.bf8.bf8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.bf8.bf8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       }
     },
     "llvm.amdgcn.wmma.f16.16x16x128.bf8.fp8.v8f16.v16i32": {
       "gfx11-generic": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.bf8.fp8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.bf8.fp8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1100": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.bf8.fp8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.bf8.fp8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1101": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.bf8.fp8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.bf8.fp8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1102": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.bf8.fp8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.bf8.fp8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1103": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.bf8.fp8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.bf8.fp8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1150": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.bf8.fp8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.bf8.fp8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1151": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.bf8.fp8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.bf8.fp8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1152": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.bf8.fp8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.bf8.fp8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1153": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.bf8.fp8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.bf8.fp8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1154": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.bf8.fp8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.bf8.fp8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx12-generic": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.bf8.fp8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.bf8.fp8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1200": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.bf8.fp8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.bf8.fp8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1201": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.bf8.fp8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.bf8.fp8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
@@ -8483,89 +8482,89 @@
         "verified_on": "llvm24"
       },
       "gfx908": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.bf8.fp8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.bf8.fp8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx90a": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.bf8.fp8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.bf8.fp8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx942": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.bf8.fp8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.bf8.fp8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx950": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.bf8.fp8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.bf8.fp8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       }
     },
     "llvm.amdgcn.wmma.f16.16x16x128.fp8.bf8.v8f16.v16i32": {
       "gfx11-generic": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.fp8.bf8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.fp8.bf8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1100": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.fp8.bf8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.fp8.bf8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1101": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.fp8.bf8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.fp8.bf8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1102": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.fp8.bf8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.fp8.bf8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1103": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.fp8.bf8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.fp8.bf8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1150": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.fp8.bf8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.fp8.bf8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1151": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.fp8.bf8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.fp8.bf8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1152": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.fp8.bf8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.fp8.bf8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1153": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.fp8.bf8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.fp8.bf8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1154": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.fp8.bf8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.fp8.bf8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx12-generic": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.fp8.bf8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.fp8.bf8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1200": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.fp8.bf8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.fp8.bf8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1201": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.fp8.bf8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.fp8.bf8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
@@ -8574,89 +8573,89 @@
         "verified_on": "llvm24"
       },
       "gfx908": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.fp8.bf8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.fp8.bf8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx90a": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.fp8.bf8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.fp8.bf8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx942": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.fp8.bf8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.fp8.bf8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx950": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.fp8.bf8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.fp8.bf8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       }
     },
     "llvm.amdgcn.wmma.f16.16x16x128.fp8.fp8.v8f16.v16i32": {
       "gfx11-generic": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.fp8.fp8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.fp8.fp8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1100": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.fp8.fp8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.fp8.fp8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1101": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.fp8.fp8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.fp8.fp8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1102": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.fp8.fp8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.fp8.fp8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1103": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.fp8.fp8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.fp8.fp8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1150": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.fp8.fp8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.fp8.fp8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1151": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.fp8.fp8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.fp8.fp8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1152": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.fp8.fp8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.fp8.fp8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1153": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.fp8.fp8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.fp8.fp8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1154": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.fp8.fp8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.fp8.fp8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx12-generic": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.fp8.fp8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.fp8.fp8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1200": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.fp8.fp8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.fp8.fp8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1201": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.fp8.fp8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.fp8.fp8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
@@ -8665,22 +8664,22 @@
         "verified_on": "llvm24"
       },
       "gfx908": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.fp8.fp8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.fp8.fp8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx90a": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.fp8.fp8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.fp8.fp8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx942": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.fp8.fp8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.fp8.fp8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx950": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.fp8.fp8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x half>): llvm.amdgcn.wmma.f16.16x16x128.fp8.fp8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       }
@@ -9313,67 +9312,67 @@
     },
     "llvm.amdgcn.wmma.f32.16x16x128.bf8.bf8.v8f32.v16i32": {
       "gfx11-generic": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.bf8.bf8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.bf8.bf8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1100": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.bf8.bf8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.bf8.bf8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1101": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.bf8.bf8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.bf8.bf8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1102": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.bf8.bf8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.bf8.bf8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1103": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.bf8.bf8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.bf8.bf8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1150": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.bf8.bf8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.bf8.bf8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1151": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.bf8.bf8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.bf8.bf8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1152": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.bf8.bf8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.bf8.bf8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1153": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.bf8.bf8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.bf8.bf8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1154": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.bf8.bf8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.bf8.bf8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx12-generic": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.bf8.bf8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.bf8.bf8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1200": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.bf8.bf8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.bf8.bf8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1201": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.bf8.bf8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.bf8.bf8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
@@ -9382,89 +9381,89 @@
         "verified_on": "llvm24"
       },
       "gfx908": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.bf8.bf8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.bf8.bf8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx90a": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.bf8.bf8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.bf8.bf8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx942": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.bf8.bf8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.bf8.bf8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx950": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.bf8.bf8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.bf8.bf8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       }
     },
     "llvm.amdgcn.wmma.f32.16x16x128.bf8.fp8.v8f32.v16i32": {
       "gfx11-generic": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.bf8.fp8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.bf8.fp8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1100": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.bf8.fp8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.bf8.fp8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1101": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.bf8.fp8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.bf8.fp8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1102": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.bf8.fp8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.bf8.fp8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1103": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.bf8.fp8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.bf8.fp8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1150": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.bf8.fp8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.bf8.fp8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1151": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.bf8.fp8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.bf8.fp8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1152": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.bf8.fp8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.bf8.fp8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1153": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.bf8.fp8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.bf8.fp8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1154": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.bf8.fp8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.bf8.fp8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx12-generic": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.bf8.fp8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.bf8.fp8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1200": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.bf8.fp8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.bf8.fp8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1201": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.bf8.fp8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.bf8.fp8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
@@ -9473,22 +9472,22 @@
         "verified_on": "llvm24"
       },
       "gfx908": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.bf8.fp8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.bf8.fp8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx90a": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.bf8.fp8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.bf8.fp8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx942": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.bf8.fp8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.bf8.fp8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx950": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.bf8.fp8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.bf8.fp8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       }
@@ -9586,67 +9585,67 @@
     },
     "llvm.amdgcn.wmma.f32.16x16x128.fp8.bf8.v8f32.v16i32": {
       "gfx11-generic": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.fp8.bf8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.fp8.bf8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1100": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.fp8.bf8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.fp8.bf8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1101": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.fp8.bf8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.fp8.bf8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1102": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.fp8.bf8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.fp8.bf8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1103": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.fp8.bf8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.fp8.bf8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1150": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.fp8.bf8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.fp8.bf8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1151": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.fp8.bf8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.fp8.bf8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1152": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.fp8.bf8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.fp8.bf8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1153": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.fp8.bf8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.fp8.bf8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1154": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.fp8.bf8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.fp8.bf8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx12-generic": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.fp8.bf8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.fp8.bf8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1200": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.fp8.bf8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.fp8.bf8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1201": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.fp8.bf8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.fp8.bf8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
@@ -9655,89 +9654,89 @@
         "verified_on": "llvm24"
       },
       "gfx908": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.fp8.bf8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.fp8.bf8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx90a": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.fp8.bf8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.fp8.bf8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx942": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.fp8.bf8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.fp8.bf8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx950": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.fp8.bf8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.fp8.bf8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       }
     },
     "llvm.amdgcn.wmma.f32.16x16x128.fp8.fp8.v8f32.v16i32": {
       "gfx11-generic": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.fp8.fp8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.fp8.fp8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1100": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.fp8.fp8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.fp8.fp8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1101": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.fp8.fp8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.fp8.fp8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1102": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.fp8.fp8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.fp8.fp8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1103": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.fp8.fp8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.fp8.fp8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1150": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.fp8.fp8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.fp8.fp8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1151": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.fp8.fp8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.fp8.fp8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1152": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.fp8.fp8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.fp8.fp8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1153": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.fp8.fp8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.fp8.fp8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1154": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.fp8.fp8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.fp8.fp8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx12-generic": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.fp8.fp8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.fp8.fp8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1200": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.fp8.fp8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.fp8.fp8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1201": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.fp8.fp8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.fp8.fp8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
@@ -9746,22 +9745,22 @@
         "verified_on": "llvm24"
       },
       "gfx908": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.fp8.fp8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.fp8.fp8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx90a": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.fp8.fp8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.fp8.fp8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx942": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.fp8.fp8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.fp8.fp8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx950": {
-        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.fp8.fp8 requires target feature 'wmma-n16-insts'",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <16 x i32>, <16 x i32>, <8 x float>): llvm.amdgcn.wmma.f32.16x16x128.fp8.fp8 requires target feature 'wmma-16x16x128fp8-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       }
@@ -10864,8 +10863,7 @@
         "verified_on": "llvm24"
       },
       "gfx1250": {
-        "evidence": "fatal error: error in backend: Cannot select: 0xADDR: v2bf16 = scalar_to_vector 0xADDR",
-        "status": "arch_absent",
+        "status": "ok",
         "verified_on": "llvm24"
       },
       "gfx908": {
@@ -13282,8 +13280,7 @@
         "verified_on": "llvm24"
       },
       "gfx1250": {
-        "evidence": "fatal error: error in backend: Cannot select: 0xADDR: v2bf16 = scalar_to_vector 0xADDR",
-        "status": "arch_absent",
+        "status": "ok",
         "verified_on": "llvm24"
       },
       "gfx908": {
@@ -15436,53 +15433,53 @@
     },
     "s.barrier.init": {
       "gfx11-generic": {
-        "evidence": "Segmentation fault",
-        "status": "toolchain_crash",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, i32): llvm.amdgcn.s.barrier.init requires target feature 'gfx12-insts'",
+        "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1100": {
-        "evidence": "Segmentation fault",
-        "status": "toolchain_crash",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, i32): llvm.amdgcn.s.barrier.init requires target feature 'gfx12-insts'",
+        "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1101": {
-        "evidence": "Segmentation fault",
-        "status": "toolchain_crash",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, i32): llvm.amdgcn.s.barrier.init requires target feature 'gfx12-insts'",
+        "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1102": {
-        "evidence": "Segmentation fault",
-        "status": "toolchain_crash",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, i32): llvm.amdgcn.s.barrier.init requires target feature 'gfx12-insts'",
+        "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1103": {
-        "evidence": "Segmentation fault",
-        "status": "toolchain_crash",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, i32): llvm.amdgcn.s.barrier.init requires target feature 'gfx12-insts'",
+        "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1150": {
-        "evidence": "Segmentation fault",
-        "status": "toolchain_crash",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, i32): llvm.amdgcn.s.barrier.init requires target feature 'gfx12-insts'",
+        "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1151": {
-        "evidence": "Segmentation fault",
-        "status": "toolchain_crash",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, i32): llvm.amdgcn.s.barrier.init requires target feature 'gfx12-insts'",
+        "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1152": {
-        "evidence": "Segmentation fault",
-        "status": "toolchain_crash",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, i32): llvm.amdgcn.s.barrier.init requires target feature 'gfx12-insts'",
+        "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1153": {
-        "evidence": "Segmentation fault",
-        "status": "toolchain_crash",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, i32): llvm.amdgcn.s.barrier.init requires target feature 'gfx12-insts'",
+        "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1154": {
-        "evidence": "Segmentation fault",
-        "status": "toolchain_crash",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, i32): llvm.amdgcn.s.barrier.init requires target feature 'gfx12-insts'",
+        "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx12-generic": {
@@ -15502,75 +15499,75 @@
         "verified_on": "llvm24"
       },
       "gfx908": {
-        "evidence": "Segmentation fault",
-        "status": "toolchain_crash",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, i32): llvm.amdgcn.s.barrier.init requires target feature 'gfx12-insts'",
+        "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx90a": {
-        "evidence": "Segmentation fault",
-        "status": "toolchain_crash",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, i32): llvm.amdgcn.s.barrier.init requires target feature 'gfx12-insts'",
+        "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx942": {
-        "evidence": "Segmentation fault",
-        "status": "toolchain_crash",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, i32): llvm.amdgcn.s.barrier.init requires target feature 'gfx12-insts'",
+        "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx950": {
-        "evidence": "Segmentation fault",
-        "status": "toolchain_crash",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, i32): llvm.amdgcn.s.barrier.init requires target feature 'gfx12-insts'",
+        "status": "arch_absent",
         "verified_on": "llvm24"
       }
     },
     "s.barrier.join": {
       "gfx11-generic": {
-        "evidence": "Segmentation fault",
-        "status": "toolchain_crash",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr): llvm.amdgcn.s.barrier.join requires target feature 'gfx12-insts'",
+        "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1100": {
-        "evidence": "Segmentation fault",
-        "status": "toolchain_crash",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr): llvm.amdgcn.s.barrier.join requires target feature 'gfx12-insts'",
+        "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1101": {
-        "evidence": "Segmentation fault",
-        "status": "toolchain_crash",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr): llvm.amdgcn.s.barrier.join requires target feature 'gfx12-insts'",
+        "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1102": {
-        "evidence": "Segmentation fault",
-        "status": "toolchain_crash",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr): llvm.amdgcn.s.barrier.join requires target feature 'gfx12-insts'",
+        "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1103": {
-        "evidence": "Segmentation fault",
-        "status": "toolchain_crash",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr): llvm.amdgcn.s.barrier.join requires target feature 'gfx12-insts'",
+        "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1150": {
-        "evidence": "Segmentation fault",
-        "status": "toolchain_crash",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr): llvm.amdgcn.s.barrier.join requires target feature 'gfx12-insts'",
+        "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1151": {
-        "evidence": "Segmentation fault",
-        "status": "toolchain_crash",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr): llvm.amdgcn.s.barrier.join requires target feature 'gfx12-insts'",
+        "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1152": {
-        "evidence": "Segmentation fault",
-        "status": "toolchain_crash",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr): llvm.amdgcn.s.barrier.join requires target feature 'gfx12-insts'",
+        "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1153": {
-        "evidence": "Segmentation fault",
-        "status": "toolchain_crash",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr): llvm.amdgcn.s.barrier.join requires target feature 'gfx12-insts'",
+        "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1154": {
-        "evidence": "Segmentation fault",
-        "status": "toolchain_crash",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr): llvm.amdgcn.s.barrier.join requires target feature 'gfx12-insts'",
+        "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx12-generic": {
@@ -15590,74 +15587,74 @@
         "verified_on": "llvm24"
       },
       "gfx908": {
-        "evidence": "Segmentation fault",
-        "status": "toolchain_crash",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr): llvm.amdgcn.s.barrier.join requires target feature 'gfx12-insts'",
+        "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx90a": {
-        "evidence": "Segmentation fault",
-        "status": "toolchain_crash",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr): llvm.amdgcn.s.barrier.join requires target feature 'gfx12-insts'",
+        "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx942": {
-        "evidence": "Segmentation fault",
-        "status": "toolchain_crash",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr): llvm.amdgcn.s.barrier.join requires target feature 'gfx12-insts'",
+        "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx950": {
-        "evidence": "Segmentation fault",
-        "status": "toolchain_crash",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr): llvm.amdgcn.s.barrier.join requires target feature 'gfx12-insts'",
+        "status": "arch_absent",
         "verified_on": "llvm24"
       }
     },
     "s.barrier.leave": {
       "gfx11-generic": {
-        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.s.barrier.leave",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr): llvm.amdgcn.s.barrier.leave requires target feature 'gfx12-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1100": {
-        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.s.barrier.leave",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr): llvm.amdgcn.s.barrier.leave requires target feature 'gfx12-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1101": {
-        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.s.barrier.leave",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr): llvm.amdgcn.s.barrier.leave requires target feature 'gfx12-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1102": {
-        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.s.barrier.leave",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr): llvm.amdgcn.s.barrier.leave requires target feature 'gfx12-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1103": {
-        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.s.barrier.leave",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr): llvm.amdgcn.s.barrier.leave requires target feature 'gfx12-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1150": {
-        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.s.barrier.leave",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr): llvm.amdgcn.s.barrier.leave requires target feature 'gfx12-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1151": {
-        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.s.barrier.leave",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr): llvm.amdgcn.s.barrier.leave requires target feature 'gfx12-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1152": {
-        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.s.barrier.leave",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr): llvm.amdgcn.s.barrier.leave requires target feature 'gfx12-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1153": {
-        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.s.barrier.leave",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr): llvm.amdgcn.s.barrier.leave requires target feature 'gfx12-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1154": {
-        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.s.barrier.leave",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr): llvm.amdgcn.s.barrier.leave requires target feature 'gfx12-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
@@ -15678,75 +15675,75 @@
         "verified_on": "llvm24"
       },
       "gfx908": {
-        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.s.barrier.leave",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr): llvm.amdgcn.s.barrier.leave requires target feature 'gfx12-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx90a": {
-        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.s.barrier.leave",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr): llvm.amdgcn.s.barrier.leave requires target feature 'gfx12-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx942": {
-        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.s.barrier.leave",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr): llvm.amdgcn.s.barrier.leave requires target feature 'gfx12-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx950": {
-        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.s.barrier.leave",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr): llvm.amdgcn.s.barrier.leave requires target feature 'gfx12-insts'",
         "status": "arch_absent",
         "verified_on": "llvm24"
       }
     },
     "s.barrier.signal": {
       "gfx11-generic": {
-        "evidence": "Segmentation fault",
-        "status": "toolchain_crash",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr): llvm.amdgcn.s.barrier.signal requires target feature 'gfx12-insts'",
+        "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1100": {
-        "evidence": "Segmentation fault",
-        "status": "toolchain_crash",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr): llvm.amdgcn.s.barrier.signal requires target feature 'gfx12-insts'",
+        "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1101": {
-        "evidence": "Segmentation fault",
-        "status": "toolchain_crash",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr): llvm.amdgcn.s.barrier.signal requires target feature 'gfx12-insts'",
+        "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1102": {
-        "evidence": "Segmentation fault",
-        "status": "toolchain_crash",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr): llvm.amdgcn.s.barrier.signal requires target feature 'gfx12-insts'",
+        "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1103": {
-        "evidence": "Segmentation fault",
-        "status": "toolchain_crash",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr): llvm.amdgcn.s.barrier.signal requires target feature 'gfx12-insts'",
+        "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1150": {
-        "evidence": "Segmentation fault",
-        "status": "toolchain_crash",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr): llvm.amdgcn.s.barrier.signal requires target feature 'gfx12-insts'",
+        "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1151": {
-        "evidence": "Segmentation fault",
-        "status": "toolchain_crash",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr): llvm.amdgcn.s.barrier.signal requires target feature 'gfx12-insts'",
+        "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1152": {
-        "evidence": "Segmentation fault",
-        "status": "toolchain_crash",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr): llvm.amdgcn.s.barrier.signal requires target feature 'gfx12-insts'",
+        "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1153": {
-        "evidence": "Segmentation fault",
-        "status": "toolchain_crash",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr): llvm.amdgcn.s.barrier.signal requires target feature 'gfx12-insts'",
+        "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1154": {
-        "evidence": "Segmentation fault",
-        "status": "toolchain_crash",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr): llvm.amdgcn.s.barrier.signal requires target feature 'gfx12-insts'",
+        "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx12-generic": {
@@ -15766,75 +15763,75 @@
         "verified_on": "llvm24"
       },
       "gfx908": {
-        "evidence": "Segmentation fault",
-        "status": "toolchain_crash",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr): llvm.amdgcn.s.barrier.signal requires target feature 'gfx12-insts'",
+        "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx90a": {
-        "evidence": "Segmentation fault",
-        "status": "toolchain_crash",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr): llvm.amdgcn.s.barrier.signal requires target feature 'gfx12-insts'",
+        "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx942": {
-        "evidence": "Segmentation fault",
-        "status": "toolchain_crash",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr): llvm.amdgcn.s.barrier.signal requires target feature 'gfx12-insts'",
+        "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx950": {
-        "evidence": "Segmentation fault",
-        "status": "toolchain_crash",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr): llvm.amdgcn.s.barrier.signal requires target feature 'gfx12-insts'",
+        "status": "arch_absent",
         "verified_on": "llvm24"
       }
     },
     "s.barrier.signal.var": {
       "gfx11-generic": {
-        "evidence": "Segmentation fault",
-        "status": "toolchain_crash",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, i32): llvm.amdgcn.s.barrier.signal.var requires target feature 'gfx12-insts'",
+        "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1100": {
-        "evidence": "Segmentation fault",
-        "status": "toolchain_crash",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, i32): llvm.amdgcn.s.barrier.signal.var requires target feature 'gfx12-insts'",
+        "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1101": {
-        "evidence": "Segmentation fault",
-        "status": "toolchain_crash",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, i32): llvm.amdgcn.s.barrier.signal.var requires target feature 'gfx12-insts'",
+        "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1102": {
-        "evidence": "Segmentation fault",
-        "status": "toolchain_crash",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, i32): llvm.amdgcn.s.barrier.signal.var requires target feature 'gfx12-insts'",
+        "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1103": {
-        "evidence": "Segmentation fault",
-        "status": "toolchain_crash",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, i32): llvm.amdgcn.s.barrier.signal.var requires target feature 'gfx12-insts'",
+        "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1150": {
-        "evidence": "Segmentation fault",
-        "status": "toolchain_crash",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, i32): llvm.amdgcn.s.barrier.signal.var requires target feature 'gfx12-insts'",
+        "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1151": {
-        "evidence": "Segmentation fault",
-        "status": "toolchain_crash",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, i32): llvm.amdgcn.s.barrier.signal.var requires target feature 'gfx12-insts'",
+        "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1152": {
-        "evidence": "Segmentation fault",
-        "status": "toolchain_crash",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, i32): llvm.amdgcn.s.barrier.signal.var requires target feature 'gfx12-insts'",
+        "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1153": {
-        "evidence": "Segmentation fault",
-        "status": "toolchain_crash",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, i32): llvm.amdgcn.s.barrier.signal.var requires target feature 'gfx12-insts'",
+        "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1154": {
-        "evidence": "Segmentation fault",
-        "status": "toolchain_crash",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, i32): llvm.amdgcn.s.barrier.signal.var requires target feature 'gfx12-insts'",
+        "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx12-generic": {
@@ -15854,75 +15851,75 @@
         "verified_on": "llvm24"
       },
       "gfx908": {
-        "evidence": "Segmentation fault",
-        "status": "toolchain_crash",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, i32): llvm.amdgcn.s.barrier.signal.var requires target feature 'gfx12-insts'",
+        "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx90a": {
-        "evidence": "Segmentation fault",
-        "status": "toolchain_crash",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, i32): llvm.amdgcn.s.barrier.signal.var requires target feature 'gfx12-insts'",
+        "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx942": {
-        "evidence": "Segmentation fault",
-        "status": "toolchain_crash",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, i32): llvm.amdgcn.s.barrier.signal.var requires target feature 'gfx12-insts'",
+        "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx950": {
-        "evidence": "Segmentation fault",
-        "status": "toolchain_crash",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, i32): llvm.amdgcn.s.barrier.signal.var requires target feature 'gfx12-insts'",
+        "status": "arch_absent",
         "verified_on": "llvm24"
       }
     },
     "s.barrier.wait": {
       "gfx11-generic": {
-        "evidence": "Segmentation fault",
-        "status": "toolchain_crash",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr): llvm.amdgcn.s.barrier.wait requires target feature 'gfx12-insts'",
+        "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1100": {
-        "evidence": "Segmentation fault",
-        "status": "toolchain_crash",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr): llvm.amdgcn.s.barrier.wait requires target feature 'gfx12-insts'",
+        "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1101": {
-        "evidence": "Segmentation fault",
-        "status": "toolchain_crash",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr): llvm.amdgcn.s.barrier.wait requires target feature 'gfx12-insts'",
+        "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1102": {
-        "evidence": "Segmentation fault",
-        "status": "toolchain_crash",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr): llvm.amdgcn.s.barrier.wait requires target feature 'gfx12-insts'",
+        "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1103": {
-        "evidence": "Segmentation fault",
-        "status": "toolchain_crash",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr): llvm.amdgcn.s.barrier.wait requires target feature 'gfx12-insts'",
+        "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1150": {
-        "evidence": "Segmentation fault",
-        "status": "toolchain_crash",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr): llvm.amdgcn.s.barrier.wait requires target feature 'gfx12-insts'",
+        "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1151": {
-        "evidence": "Segmentation fault",
-        "status": "toolchain_crash",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr): llvm.amdgcn.s.barrier.wait requires target feature 'gfx12-insts'",
+        "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1152": {
-        "evidence": "Segmentation fault",
-        "status": "toolchain_crash",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr): llvm.amdgcn.s.barrier.wait requires target feature 'gfx12-insts'",
+        "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1153": {
-        "evidence": "Segmentation fault",
-        "status": "toolchain_crash",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr): llvm.amdgcn.s.barrier.wait requires target feature 'gfx12-insts'",
+        "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1154": {
-        "evidence": "Segmentation fault",
-        "status": "toolchain_crash",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr): llvm.amdgcn.s.barrier.wait requires target feature 'gfx12-insts'",
+        "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx12-generic": {
@@ -15942,23 +15939,23 @@
         "verified_on": "llvm24"
       },
       "gfx908": {
-        "evidence": "Segmentation fault",
-        "status": "toolchain_crash",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr): llvm.amdgcn.s.barrier.wait requires target feature 'gfx12-insts'",
+        "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx90a": {
-        "evidence": "Segmentation fault",
-        "status": "toolchain_crash",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr): llvm.amdgcn.s.barrier.wait requires target feature 'gfx12-insts'",
+        "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx942": {
-        "evidence": "Segmentation fault",
-        "status": "toolchain_crash",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr): llvm.amdgcn.s.barrier.wait requires target feature 'gfx12-insts'",
+        "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx950": {
-        "evidence": "Segmentation fault",
-        "status": "toolchain_crash",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr): llvm.amdgcn.s.barrier.wait requires target feature 'gfx12-insts'",
+        "status": "arch_absent",
         "verified_on": "llvm24"
       }
     },
@@ -16052,53 +16049,53 @@
     },
     "s.cluster.barrier": {
       "gfx11-generic": {
-        "evidence": "Segmentation fault",
-        "status": "toolchain_crash",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr): llvm.amdgcn.s.barrier.signal.isfirst requires target feature 'gfx12-insts'",
+        "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1100": {
-        "evidence": "Segmentation fault",
-        "status": "toolchain_crash",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr): llvm.amdgcn.s.barrier.signal.isfirst requires target feature 'gfx12-insts'",
+        "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1101": {
-        "evidence": "Segmentation fault",
-        "status": "toolchain_crash",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr): llvm.amdgcn.s.barrier.signal.isfirst requires target feature 'gfx12-insts'",
+        "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1102": {
-        "evidence": "Segmentation fault",
-        "status": "toolchain_crash",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr): llvm.amdgcn.s.barrier.signal.isfirst requires target feature 'gfx12-insts'",
+        "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1103": {
-        "evidence": "Segmentation fault",
-        "status": "toolchain_crash",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr): llvm.amdgcn.s.barrier.signal.isfirst requires target feature 'gfx12-insts'",
+        "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1150": {
-        "evidence": "Segmentation fault",
-        "status": "toolchain_crash",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr): llvm.amdgcn.s.barrier.signal.isfirst requires target feature 'gfx12-insts'",
+        "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1151": {
-        "evidence": "Segmentation fault",
-        "status": "toolchain_crash",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr): llvm.amdgcn.s.barrier.signal.isfirst requires target feature 'gfx12-insts'",
+        "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1152": {
-        "evidence": "Segmentation fault",
-        "status": "toolchain_crash",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr): llvm.amdgcn.s.barrier.signal.isfirst requires target feature 'gfx12-insts'",
+        "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1153": {
-        "evidence": "Segmentation fault",
-        "status": "toolchain_crash",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr): llvm.amdgcn.s.barrier.signal.isfirst requires target feature 'gfx12-insts'",
+        "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx1154": {
-        "evidence": "Segmentation fault",
-        "status": "toolchain_crash",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr): llvm.amdgcn.s.barrier.signal.isfirst requires target feature 'gfx12-insts'",
+        "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx12-generic": {
@@ -16118,23 +16115,23 @@
         "verified_on": "llvm24"
       },
       "gfx908": {
-        "evidence": "Segmentation fault",
-        "status": "toolchain_crash",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr): llvm.amdgcn.s.barrier.signal.isfirst requires target feature 'gfx12-insts'",
+        "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx90a": {
-        "evidence": "Segmentation fault",
-        "status": "toolchain_crash",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr): llvm.amdgcn.s.barrier.signal.isfirst requires target feature 'gfx12-insts'",
+        "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx942": {
-        "evidence": "Segmentation fault",
-        "status": "toolchain_crash",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr): llvm.amdgcn.s.barrier.signal.isfirst requires target feature 'gfx12-insts'",
+        "status": "arch_absent",
         "verified_on": "llvm24"
       },
       "gfx950": {
-        "evidence": "Segmentation fault",
-        "status": "toolchain_crash",
+        "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr): llvm.amdgcn.s.barrier.signal.isfirst requires target feature 'gfx12-insts'",
+        "status": "arch_absent",
         "verified_on": "llvm24"
       }
     },
@@ -20835,7 +20832,7 @@
     "amdgcn.permlanex16": {"operands": [{"source": "argument", "type": "i32"}, {"source": "argument", "type": "i32"}, {"source": "argument", "type": "i32"}, {"source": "argument", "type": "i32"}, {"source": "immediate", "type": "i1", "value": "false"}, {"source": "immediate", "type": "i1", "value": "false"}], "return_type": "i32", "version": 1},
     "amdgcn.s.wqm.i32": {"operands": [{"source": "argument", "type": "i32"}], "return_type": "i32", "version": 1},
     "amdgcn.s.wqm.i64": {"operands": [{"source": "argument", "type": "i64"}], "return_type": "i64", "version": 1},
-    "asyncmark": {"operands": [], "return_type": "void", "version": 1},
+    "asyncmark": {"operands": [{"source": "immediate", "type": "i32", "value": "0"}], "return_type": "void", "version": 1},
     "av.load.b128.p0": {"operands": [{"source": "base_pointer", "type": "ptr"}, {"source": "agent_metadata", "type": "metadata"}], "return_type": "<4 x i32>", "version": 1},
     "av.load.b128.p1": {"operands": [{"source": "addrspacecast", "type": "ptr addrspace(1)"}, {"source": "agent_metadata", "type": "metadata"}], "return_type": "<4 x i32>", "version": 1},
     "av.store.b128.p0": {"operands": [{"source": "base_pointer", "type": "ptr"}, {"source": "argument", "type": "<4 x i32>"}, {"source": "agent_metadata", "type": "metadata"}], "return_type": "void", "version": 1},
@@ -21035,7 +21032,7 @@
     "umax.i8": {"operands": [{"source": "argument", "type": "i8"}, {"source": "argument", "type": "i8"}], "return_type": "i8", "version": 1},
     "umin.i8": {"operands": [{"source": "argument", "type": "i8"}, {"source": "argument", "type": "i8"}], "return_type": "i8", "version": 1},
     "update.dpp.i32": {"operands": [{"source": "argument", "type": "i32"}, {"source": "argument", "type": "i32"}, {"source": "immediate", "type": "i32", "value": "0"}, {"source": "immediate", "type": "i32", "value": "0"}, {"source": "immediate", "type": "i32", "value": "0"}, {"source": "immediate", "type": "i1", "value": "false"}], "return_type": "i32", "version": 1},
-    "wait.asyncmark": {"operands": [{"source": "immediate", "type": "i16", "value": "0"}], "return_type": "void", "version": 1},
+    "wait.asyncmark": {"operands": [{"source": "immediate", "type": "i16", "value": "0"}, {"source": "immediate", "type": "i32", "value": "0"}], "return_type": "void", "version": 1},
     "wave.reduce.add.i32": {"operands": [{"source": "argument", "type": "i32"}, {"source": "immediate", "type": "i32", "value": "0"}], "return_type": "i32", "version": 1},
     "wave.reduce.fadd.f32": {"operands": [{"source": "argument", "type": "float"}, {"source": "immediate", "type": "i32", "value": "0"}], "return_type": "float", "version": 1},
     "wave.reduce.fmax.f32": {"operands": [{"source": "argument", "type": "float"}, {"source": "immediate", "type": "i32", "value": "0"}], "return_type": "float", "version": 1},
@@ -21142,7 +21139,7 @@
       "gfx942",
       "gfx950"
     ],
-    "clang": "AMD clang version 24.0.0git (https://github.com/ROCm/llvm-project.git 2792f8ceeb5aa6e188c1ce2b735923b2406a8e59)",
+    "clang": "AMD clang version 24.0.0git (https://github.com/ROCm/llvm-project.git 424729dba65359a5e521ab2e729af131c8a5b0d4)",
     "flavor": "llvm24",
     "generator": 7,
     "probe_cflags": [
