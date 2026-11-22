@@ -40,6 +40,8 @@ import sys
 from dataclasses import dataclass
 from typing import List
 
+import numpy as np
+
 os.environ.setdefault("ROCKE_CPP_QUIET_FALLBACK", "1")
 
 from benchmarks.common import batched_timing, conv_fill
@@ -463,8 +465,6 @@ def _verify_kernel(
     if rel_err >= tol and dump_fail:
         import pathlib
 
-        import numpy as np
-
         dump_dir = pathlib.Path(dump_fail)
         dump_dir.mkdir(parents=True, exist_ok=True)
         diff = out_f32.sub(ref_out)
@@ -666,9 +666,14 @@ def _run_depthwise_sweep(
     # sweeps the full bake-off rather than a subset of the variants.
     _torch_dtype = _torch_dtype_of(torch, dtype)
 
-    torch.manual_seed(42)
-    A_t, B_t = conv_fill.fwd_operands(
-        (p.N, p.H, p.W, p.total_c), (p.total_k, p.KH, p.KW, 1), dtype, _torch_dtype
+    A_t, B_t = (
+        torch.from_numpy(operand).to(_torch_dtype)
+        for operand in conv_fill.fwd_operands(
+            (p.N, p.H, p.W, p.total_c),
+            (p.total_k, p.KH, p.KW, 1),
+            dtype,
+            np.random.default_rng(42),
+        )
     )
     D_t = torch.empty(p.N, p.Ho, p.Wo, p.total_k, dtype=_torch_dtype)
 
@@ -961,10 +966,15 @@ def _run_sweep(
 
     p = problem
 
-    torch.manual_seed(42)
     _torch_dtype = _torch_dtype_of(torch, dtype)
-    A_t, B_t = conv_fill.fwd_operands(
-        (p.N, p.H, p.W, p.total_c), (p.total_k, p.KH, p.KW, p.cpg), dtype, _torch_dtype
+    A_t, B_t = (
+        torch.from_numpy(operand).to(_torch_dtype)
+        for operand in conv_fill.fwd_operands(
+            (p.N, p.H, p.W, p.total_c),
+            (p.total_k, p.KH, p.KW, p.cpg),
+            dtype,
+            np.random.default_rng(42),
+        )
     )
     D_t = torch.empty(p.N, p.Ho, p.Wo, p.total_k, dtype=_torch_dtype)
 
@@ -1194,10 +1204,15 @@ def _run_nongrouped_sweep(
 
     p = problem
 
-    torch.manual_seed(42)
     _torch_dtype = _torch_dtype_of(torch, dtype)
-    A_t, B_t = conv_fill.fwd_operands(
-        (p.N, p.H, p.W, p.total_c), (p.total_k, p.KH, p.KW, p.cpg), dtype, _torch_dtype
+    A_t, B_t = (
+        torch.from_numpy(operand).to(_torch_dtype)
+        for operand in conv_fill.fwd_operands(
+            (p.N, p.H, p.W, p.total_c),
+            (p.total_k, p.KH, p.KW, p.cpg),
+            dtype,
+            np.random.default_rng(42),
+        )
     )
     D_t = torch.empty(p.N, p.Ho, p.Wo, p.total_k, dtype=_torch_dtype)
 
@@ -2824,15 +2839,18 @@ def _run_from_cache(args, arch: str, cases: list, cache, directions) -> int:
                 out_name = "dw"
                 Out_t = torch.zeros(*w_shape, dtype=torch.float32)
             else:
-                W_t = torch.empty(*w_shape, dtype=torch_dt)
                 if direction == "fwd":
                     in_name, out_name = "x", "y"
-                    conv_fill.fill_w(W_t, dtype)
-                    In_t = conv_fill.fill_x(torch.empty(*x_shape, dtype=torch_dt))
+                    In_t, W_t = (
+                        torch.from_numpy(operand).to(torch_dt)
+                        for operand in conv_fill.fwd_operands(
+                            x_shape, w_shape, dtype, np.random.default_rng(42)
+                        )
+                    )
                     Out_t = torch.empty(*y_shape, dtype=torch_dt)
                 else:
                     in_name, out_name = "dy", "dx"
-                    W_t.uniform_(-1, 1)
+                    W_t = torch.empty(*w_shape, dtype=torch_dt).uniform_(-1, 1)
                     In_t = torch.empty(*y_shape, dtype=torch_dt).uniform_(-1, 1)
                     Out_t = torch.empty(*x_shape, dtype=torch_dt)
                 inputs = {in_name: In_t, "w": W_t}

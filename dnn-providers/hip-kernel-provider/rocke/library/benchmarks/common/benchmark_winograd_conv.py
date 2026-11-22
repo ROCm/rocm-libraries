@@ -46,6 +46,8 @@ import time
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
+import numpy as np
+
 from benchmarks.common import conv_fill
 
 os.environ.setdefault("ROCKE_CPP_QUIET_FALLBACK", "1")
@@ -654,15 +656,14 @@ def make_inputs(problem, io_dtype: str, seed: int = 42):
     import torch
 
     tdt = {"fp16": torch.float16, "bf16": torch.bfloat16}[io_dtype]
-    g = torch.Generator().manual_seed(seed)
-    x = conv_fill.fill_x(
-        torch.empty(problem.N, problem.Hi, problem.Wi, problem.C), generator=g
-    )
-    w = conv_fill.fill_w(
-        torch.empty(problem.K, problem.Y, problem.X, problem.cpg), io_dtype, generator=g
+    x, w = conv_fill.fwd_operands(
+        (problem.N, problem.Hi, problem.Wi, problem.C),
+        (problem.K, problem.Y, problem.X, problem.cpg),
+        io_dtype,
+        np.random.default_rng(seed),
     )
     y = torch.empty(problem.N, problem.Ho, problem.Wo, problem.K, dtype=tdt)
-    return x.to(tdt), w.to(tdt), y
+    return torch.from_numpy(x).to(tdt), torch.from_numpy(w).to(tdt), y
 
 
 def reference(x, w, problem, io_dtype: str):
