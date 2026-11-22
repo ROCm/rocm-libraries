@@ -146,8 +146,11 @@ def conv_fwd_reference(
     ``w [K, (Z,) Y, X, C/groups]``, computed over image slices of at most
     ``max_slice_bytes`` float64 activation bytes."""
     geometry = conv_geometry(problem)
-    batches = _image_batches(problem, x.shape[0], max_slice_bytes)
-    return np.concatenate([conv_fwd(x[batch], w, **geometry) for batch in batches])
+    n = x.shape[0]
+    y = np.empty((n, *conv_extents(problem).out_spatial, problem.K))
+    for batch in _image_batches(problem, n, max_slice_bytes):
+        y[batch] = conv_fwd(x[batch], w, **geometry)
+    return y
 
 
 def conv_dgrad_reference(
@@ -163,10 +166,11 @@ def conv_dgrad_reference(
     ``max_slice_bytes`` float64 activation bytes."""
     geometry = conv_geometry(problem)
     in_spatial = conv_extents(problem).in_spatial
-    batches = _image_batches(problem, dy.shape[0], max_slice_bytes)
-    return np.concatenate(
-        [conv_dgrad(dy[b], w, in_spatial=in_spatial, **geometry) for b in batches]
-    )
+    n = dy.shape[0]
+    dx = np.empty((n, *in_spatial, problem.C))
+    for batch in _image_batches(problem, n, max_slice_bytes):
+        dx[batch] = conv_dgrad(dy[batch], w, in_spatial=in_spatial, **geometry)
+    return dx
 
 
 def conv_wgrad_reference(
@@ -182,11 +186,10 @@ def conv_wgrad_reference(
     slice at most ``max_slice_bytes`` float64 activation bytes."""
     geometry = conv_geometry(problem)
     filter_spatial = conv_extents(problem).filter_spatial
-    batches = _image_batches(problem, x.shape[0], max_slice_bytes)
-    return sum(
-        conv_wgrad(x[b], dy[b], filter_spatial=filter_spatial, **geometry)
-        for b in batches
-    )
+    dw = np.zeros((problem.K, *filter_spatial, problem.cpg))
+    for batch in _image_batches(problem, x.shape[0], max_slice_bytes):
+        dw += conv_wgrad(x[batch], dy[batch], filter_spatial=filter_spatial, **geometry)
+    return dw
 
 
 @contextlib.contextmanager
