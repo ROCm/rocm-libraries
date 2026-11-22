@@ -25,10 +25,13 @@ import contextlib
 import functools
 from typing import TYPE_CHECKING
 
+from rocke.numeric.storage import xf32_truncate
+
 # torch is optional for the library: each reference imports it when called, so
 # the torch-free helpers here (batch slicing, tolerances) and the modules that
 # import this one load without it.
 if TYPE_CHECKING:
+    import numpy as np
     import torch
 
 # torch's GPU convolutions mis-compute an fp32 operand larger than 2^32 bytes:
@@ -118,19 +121,17 @@ def _tf32_native(arch: str) -> bool:
     return not tf32_is_emulated(arch)
 
 
-def tf32_reference_inputs(t: torch.Tensor, arch: str, dtype: str = "tf32"):
-    """``t`` as the MMA on ``arch`` consumes it for a ``dtype`` problem.
+def tf32_reference_inputs(values: np.ndarray, arch: str, dtype: str = "tf32"):
+    """fp32 ``values`` as the MMA on ``arch`` consumes them for a ``dtype`` problem.
 
     A native XF32 MFMA (gfx942) reads the top 19 bits of each fp32 operand
-    (``& 0xFFFFE000``); the BF16x3 emulation (gfx950) and the fp32 atoms use
-    the full payload, so every other case returns ``t`` unchanged. The arch
-    question is the catalog's (``tf32_is_emulated``).
+    (:func:`rocke.numeric.storage.xf32_truncate`); the BF16x3 emulation (gfx950)
+    and the fp32 atoms use the full payload, so every other case returns
+    ``values`` unchanged. The arch question is the catalog's (``tf32_is_emulated``).
     """
-    import torch
-
     if dtype != "tf32" or not _tf32_native(arch):
-        return t
-    return (t.view(torch.int32) & -0x2000).view(torch.float32)
+        return values
+    return xf32_truncate(values)
 
 
 def tf32_reference_tol(arch: str) -> float:

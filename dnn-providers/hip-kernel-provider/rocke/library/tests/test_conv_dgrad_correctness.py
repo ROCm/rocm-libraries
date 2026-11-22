@@ -2019,8 +2019,8 @@ class TestConvDgradTf32(unittest.TestCase):
         torch.manual_seed(0)
         dY = torch.empty(p.N, p.Ho, p.Wo, p.K).uniform_(-1.0, 1.0)
         W = torch.empty(p.K, p.Y, p.X, p.cpg).uniform_(-1.0, 1.0)
-        dY = tf32_reference_inputs(dY, ARCH)
-        W = tf32_reference_inputs(W, ARCH)
+        dY = torch.from_numpy(tf32_reference_inputs(dY.numpy(), ARCH))
+        W = torch.from_numpy(tf32_reference_inputs(W.numpy(), ARCH))
         # Pin the reference to IEEE fp32: torch 2.10 defaults convolutions to
         # TF32 where the backend has it.
         from builders.common.conv_reference import ieee_fp32
@@ -2133,8 +2133,8 @@ class TestConvDgradTf32(unittest.TestCase):
                     torch.manual_seed(0)
                     dY = torch.empty(p.N, p.Ho, p.Wo, p.K).uniform_(-1.0, 1.0)
                     W = torch.empty(p.K, p.Y, p.X, p.cpg).uniform_(-1.0, 1.0)
-                    dY = tf32_reference_inputs(dY, ARCH)
-                    W = tf32_reference_inputs(W, ARCH)
+                    dY = torch.from_numpy(tf32_reference_inputs(dY.numpy(), ARCH))
+                    W = torch.from_numpy(tf32_reference_inputs(W.numpy(), ARCH))
                     ref = torch.nn.grad.conv2d_input(
                         (p.N, p.C, p.Hi, p.Wi),
                         W.permute(0, 3, 1, 2).double(),

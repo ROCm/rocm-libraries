@@ -19,6 +19,7 @@ import itertools
 import sys
 from pathlib import Path
 
+import numpy as np
 import pytest
 from rocke.core.arch import ArchTarget
 
@@ -528,21 +529,18 @@ def test_tf32_reference_rules_follow_the_catalog():
     """One home for the TF32 test rules: native XF32 (gfx942) masks the low 13
     mantissa bits and gets the 1e-3 bound; the BF16x3 emulation (gfx950) and
     any non-tf32 dtype see the full payload."""
-    torch = pytest.importorskip("torch")
     from builders.common.conv_reference import (
         TF32_REFERENCE_TOL,
         tf32_reference_inputs,
         tf32_reference_tol,
     )
 
-    x = torch.tensor([1.0 + 2**-20, -3.14159], dtype=torch.float32)
+    x = np.array([1.0 + 2**-20, -3.14159], dtype=np.float32)
     masked = tf32_reference_inputs(x, "gfx942")
-    assert torch.equal(
-        masked.view(torch.int32) & 0x1FFF, torch.zeros(2, dtype=torch.int32)
-    )
-    assert masked[0].item() == 1.0
-    assert torch.equal(tf32_reference_inputs(x, "gfx950"), x)
-    assert torch.equal(tf32_reference_inputs(x, "gfx942", "fp32"), x)
+    np.testing.assert_array_equal(masked.view(np.uint32) & 0x1FFF, [0, 0])
+    assert masked[0] == 1.0
+    np.testing.assert_array_equal(tf32_reference_inputs(x, "gfx950"), x)
+    np.testing.assert_array_equal(tf32_reference_inputs(x, "gfx942", "fp32"), x)
     assert tf32_reference_tol("gfx942") == TF32_REFERENCE_TOL["native"] == 1e-3
     assert tf32_reference_tol("gfx950") == TF32_REFERENCE_TOL["emulated"] == 1e-4
 
