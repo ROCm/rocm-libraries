@@ -5,7 +5,8 @@
 
 CPU: the validator, the AOT grid and the cache offer, the C++/Python engine
 agreement and the run-side re-validation of the split_c knob. GPU (gfx950):
-the output against a torch reference for each layer type in FWD_FLEX_LAYERS
+the output against a float64 numpy reference of the stored operands for each
+layer type in FWD_FLEX_LAYERS
 at small sizes; split_c 2 and 4 (with the split-reduce fold); K tails where
 K % bk != 0 (K=136 with bk=128 and K=264 with bk=256); odd N*Ho*Wo pixel
 tails; and C == 64 * split_c exactly.
@@ -17,36 +18,24 @@ Run:
 
 from __future__ import annotations
 
-import importlib.util
 from dataclasses import replace
 
+import numpy as np
 import pytest
+from rocke.numeric import storage
+from rocke.tests.gpu import current_device_arch_in
 
 from kernels.common.conv_direct_fwd_flex_mfma import (
     FwdFlexMfmaSpec,
     build_fwd_flex_mfma,
     fwd_flex_mfma_reason,
 )
-from kernels.conv.direct_aot_jobs import FWD_FLEX_LAYERS, FWD_FLEX_KNOBS
 from kernels.common.conv_direct_grouped import DirectConvProblem
+from kernels.conv.direct_aot_jobs import FWD_FLEX_KNOBS, FWD_FLEX_LAYERS
+
+from ._direct_conv_numeric import direct_fwd_reference, launch_direct_kernel, poisoned
 
 _VARIANT = "direct_fwd_flex_mfma"
-_HAS_TORCH = importlib.util.find_spec("torch") is not None
-
-
-def _gpu_arch():
-    if not _HAS_TORCH:
-        return None
-    import torch
-
-    if not torch.cuda.is_available():
-        return None
-    from rocke.runtime.hip_module import get_device_arch
-
-    return get_device_arch(0)
-
-
-_GPU = pytest.mark.skipif(not _HAS_TORCH, reason="needs torch and a gfx950 GPU")
 
 
 def _problem(
@@ -473,60 +462,23 @@ def test_python_backend_needs_no_engine(monkeypatch):
 # --------------------------------------------------------------------------- GPU
 
 
-def _ref_conv(x, w, p):
-    """torch reference in fp32, NHWK out (x NHWC, w KRSC)."""
-    import torch
-
-    return torch.nn.functional.conv2d(
-        x.permute(0, 3, 1, 2).float(),
-        w.permute(0, 3, 1, 2).float(),
-        stride=p.stride,
-        padding=(p.PAD, p.PAD_W),
-        dilation=(p.dil_h, p.dil_w),
-    ).permute(0, 2, 3, 1)
-
-
 def _launch_flex(spec, x, w, y_or_ws):
-    """Launch the flex kernel.  For split_c == 1, ``y_or_ws`` is the final
-    output (NHWK fp16/bf16); for split_c > 1 it must be an fp32 workspace
-    buffer of ``spec.workspace_bytes // 4`` elements, and the caller is
-    responsible for running the split_reduce fold afterwards."""
-    import torch
+    """Launch the flex kernel over device arrays.  For split_c == 1,
+    ``y_or_ws`` is the final output (NHWK fp16/bf16); for split_c > 1 it must
+    be an fp32 workspace of ``spec.workspace_bytes // 4`` elements, and the
+    caller is responsible for running the split_reduce fold afterwards."""
     from rocke import compile_kernel
-    from rocke.runtime.launcher import KernelLauncher, LaunchConfig
 
-    from kernels.common.conv_abi import conv_direct_args_signature
-    from kernels.common.conv_args import ConvArgs
-
-    p = spec.problem
     art = compile_kernel(build_fwd_flex_mfma(spec, arch="gfx950"), arch="gfx950")
-    launcher = KernelLauncher(
-        hsaco=art.hsaco,
-        kernel_name=art.kernel_name,
-        signature=conv_direct_args_signature(p.dtype),
-    )
-    values = ConvArgs.from_problem(p).to_launch_values(
-        x.data_ptr(),
-        w.data_ptr(),
-        y_or_ws.data_ptr(),
-        x.nbytes,
-        w.nbytes,
-        y_or_ws.nbytes,
-    )
     grid, block = spec.launch_geometry()
-    launcher(values, config=LaunchConfig(grid=grid, block=block))
-    torch.cuda.synchronize()
+    launch_direct_kernel(art, spec.problem, (x, w, y_or_ws), grid=grid, block=block)
 
 
 def _launch_split_reduce(split_c, dtype, p, ws, y):
     """Run the direct_split_reduce fold kernel over the fp32 workspace ``ws``
     and write the folded output into ``y`` (NHWK fp16/bf16)."""
-    import torch
     from rocke import compile_kernel
-    from rocke.runtime.launcher import KernelLauncher, LaunchConfig
 
-    from kernels.common.conv_abi import conv_direct_args_signature
-    from kernels.common.conv_args import ConvArgs
     from kernels.common.conv_direct_nongrouped import (
         DirectSplitReduceSpec,
         build_direct_conv_split_reduce,
@@ -538,26 +490,12 @@ def _launch_split_reduce(split_c, dtype, p, ws, y):
     )
     # The split_reduce kernel takes the same direct-conv kernarg block: A is
     # the workspace (the split slabs, fp32) and D is the final output.  B is
-    # unused; pass the workspace ptr for it too so the byte check is happy.
-    values = ConvArgs.from_problem(p).to_launch_values(
-        ws.data_ptr(),
-        ws.data_ptr(),
-        y.data_ptr(),
-        ws.nbytes,
-        ws.nbytes,
-        y.nbytes,
+    # unused; pass the workspace for it too so the byte check is happy.
+    launch_direct_kernel(
+        art, p, (ws, ws, y), grid=rspec.grid(p), block=(rspec.threads, 1, 1)
     )
-    launcher = KernelLauncher(
-        hsaco=art.hsaco,
-        kernel_name=art.kernel_name,
-        signature=conv_direct_args_signature(dtype),
-    )
-    grid = rspec.grid(p)
-    launcher(values, config=LaunchConfig(grid=grid, block=(rspec.threads, 1, 1)))
-    torch.cuda.synchronize()
 
 
-@_GPU
 @pytest.mark.parametrize("dtype", ["bf16", "fp16"])
 @pytest.mark.parametrize(
     "kh,kw,pad,pad_w,stride,dil_h,dil_w,bk,split_c,N,H,W,C,K",
@@ -588,13 +526,12 @@ def _launch_split_reduce(split_c, dtype, p, ws, y):
         (3, 3, 1, 1, 1, 1, 1, 128, 1, 2, 91, 91, 128, 512),
     ],
 )
-def test_forward_matches_torch(
+def test_forward_matches_the_reference(
     dtype, kh, kw, pad, pad_w, stride, dil_h, dil_w, bk, split_c, N, H, W, C, K
 ):
-    if _gpu_arch() != "gfx950":
-        pytest.skip("needs a gfx950 GPU")
-    import torch
+    from rocke.runtime.device_array import DeviceArray
 
+    current_device_arch_in(("gfx950",), subject="the flex MFMA forward")
     p = _problem(
         N=N,
         H=H,
@@ -612,24 +549,21 @@ def test_forward_matches_torch(
     )
     spec = FwdFlexMfmaSpec(problem=p, bk=bk, split_c=split_c)
     assert fwd_flex_mfma_reason(spec) is None
-    td = torch.bfloat16 if dtype == "bf16" else torch.float16
-    torch.manual_seed(0)
-    x = torch.empty(p.N, p.H, p.W, p.cpg, dtype=td, device="cuda").uniform_(-1, 1)
-    w = torch.empty(p.kpg, kh, kw, p.cpg, dtype=td, device="cuda").uniform_(-1, 1)
-    y = torch.full((p.N, p.Ho, p.Wo, p.kpg), float("nan"), dtype=td, device="cuda")
+    rng = np.random.default_rng(0)
+    x = storage.encode(rng.uniform(-1, 1, (p.N, p.H, p.W, p.cpg)), dtype)
+    w = storage.encode(rng.uniform(-1, 1, (p.kpg, kh, kw, p.cpg)), dtype)
+    # NaN-filled output (and workspace): an element no kernel writes fails.
+    y = DeviceArray(poisoned((p.N, p.Ho, p.Wo, p.kpg), dtype, 0xFF), dtype)
+    x_dev, w_dev = DeviceArray(x, dtype), DeviceArray(w, dtype)
     if split_c == 1:
-        _launch_flex(spec, x, w, y)
+        _launch_flex(spec, x_dev, w_dev, y)
     else:
-        ws = torch.full(
-            (spec.workspace_bytes // 4,),
-            float("nan"),
-            dtype=torch.float32,
-            device="cuda",
-        )
-        _launch_flex(spec, x, w, ws)
+        ws = DeviceArray(poisoned((spec.workspace_bytes // 4,), "fp32", 0xFF))
+        _launch_flex(spec, x_dev, w_dev, ws)
         _launch_split_reduce(split_c, dtype, p, ws, y)
-    ref = _ref_conv(x, w, p)
-    assert not torch.isnan(y).any()
+    out = storage.decode(y.read(), dtype)
+    ref = direct_fwd_reference(p, storage.decode(x, dtype), storage.decode(w, dtype))
+    assert not np.isnan(out).any()
     tol = 2e-2 if dtype == "bf16" else 5e-3
-    rel = float((y.float() - ref).abs().max() / ref.abs().max().clamp(min=1))
+    rel = float(np.abs(out - ref).max() / max(np.abs(ref).max(), 1.0))
     assert rel < tol, rel
