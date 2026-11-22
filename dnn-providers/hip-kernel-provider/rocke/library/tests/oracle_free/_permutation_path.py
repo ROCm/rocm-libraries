@@ -17,6 +17,8 @@ import struct
 from collections import Counter
 from dataclasses import dataclass
 
+from rocke.tests.fp_policy import fp_policy_violations
+
 REDERIVE = "re-derive the bound"
 
 # LLVM spells FP32 constants as the hex of the equivalent double.
@@ -33,15 +35,6 @@ _CAST_TYPE = {"fp16": "half", "bf16": "bfloat"}
 _EXP2 = "llvm.amdgcn.exp2.f32"
 _MAXNUM = "llvm.maxnum.f32"
 _BPERMUTE = "llvm.amdgcn.ds.bpermute"
-_FP_FLAGS = ("fast", "contract", "afn", "reassoc", "nnan", "ninf", "nsz", "arcp")
-_FP_MODE_ATTRIBUTES = (
-    "denormal-fp-math",
-    "unsafe-fp-math",
-    "no-nans-fp-math",
-    "no-infs-fp-math",
-    "approx-func-fp-math",
-    "no-signed-zeros-fp-math",
-)
 _FP_TYPE = re.compile(r"\b(float|half|bfloat|double)\b")
 _INSTRUCTION = re.compile(r"^\s*(%[-\w.]+) = (.+)$")
 _VALUE = re.compile(r"%[-\w.]+")
@@ -123,17 +116,9 @@ def classify_unmasked_path(ir: str, dtype: str, block_n: int) -> tuple[list, Cou
                 found.append(user)
         return found
 
+    violations.extend(fp_policy_violations(ir))
     for line in ir.splitlines():
         stripped = line.strip()
-        match = re.search(r"= (?:f\w+|call|select|phi) ((?:\w+ )*)", stripped)
-        if match and set(match.group(1).split()) & set(_FP_FLAGS):
-            violations.append(f"fast-math flags: {stripped}")
-        if "!fpmath" in stripped:
-            violations.append(f"!fpmath metadata: {stripped}")
-        if stripped.startswith("attributes #"):
-            for attribute in _FP_MODE_ATTRIBUTES:
-                if f'"{attribute}' in stripped:
-                    violations.append(f"FP mode attribute {attribute}: {stripped}")
         declared = _DECLARE.match(stripped)
         if declared:
             returned, callee, arguments = declared.groups()
