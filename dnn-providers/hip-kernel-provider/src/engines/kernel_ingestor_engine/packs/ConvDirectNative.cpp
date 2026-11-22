@@ -365,6 +365,40 @@ std::optional<Tile> runTileFor(const K2Args& a, const Config& config, long long 
     return t;
 }
 
+/// Z-ring tiles (zring configs): bm / 16 rows x 16 columns of every output plane; the grid's
+/// units are (tile, output plane) pairs, at least ZRING_MIN_PLANES per compute unit, and the
+/// launch is one block per unit (planFor). Declines what the tile does not serve: reduction
+/// channels that are not whole stages, output channels not a multiple of the 4-channel store, an
+/// image's output past the 32-bit buffer offsets, or too few units.
+std::optional<Tile> zringTileFor(const DirectProblem& problem,
+                                 const Config& config,
+                                 long long columnBlocks,
+                                 long long computeUnits)
+{
+    const auto& a = problem.args;
+    const long long outImageBytes
+        = static_cast<long long>(a.dout) * a.ho * a.wo * a.k * problem.elementBytes;
+    if(a.c % config.bc != 0 || a.k % 4 != 0 || outImageBytes >= BUFFER_LIMIT)
+    {
+        return std::nullopt;
+    }
+    Tile t;
+    t.th = config.bm / 16;
+    t.tw = 16;
+    t.ds = a.dout;
+    t.tilesW = static_cast<int>(divUp(a.wo, t.tw));
+    t.tilesH = static_cast<int>(divUp(a.ho, t.th));
+    t.tilesD = 1;
+    const long long units
+        = static_cast<long long>(t.tilesW) * t.tilesH * a.n * columnBlocks * a.dout;
+    if(units > INT_LIMIT || units < ZRING_MIN_PLANES * computeUnits)
+    {
+        return std::nullopt;
+    }
+    t.blocks = units;
+    return t;
+}
+
 } // namespace
 
 std::optional<DirectProblem> parseDirectProblem(const MatchContext& context,
@@ -551,12 +585,13 @@ std::optional<Config> configOf(const KernelDefinition& kernel)
     const auto atom = stringField(kernel, "atom");
     const auto archs = stringField(kernel, "archs");
     if(!kind.has_value() || !atom.has_value() || !archs.has_value()
-       || (*kind != "mma" && *kind != "fma" && *kind != "rows"))
+       || (*kind != "mma" && *kind != "fma" && *kind != "rows" && *kind != "zring"))
     {
         return std::nullopt;
     }
     config.fma = *kind == "fma";
     config.rows = *kind == "rows";
+    config.zring = *kind == "zring";
     config.atom = *atom;
     config.archs = *archs;
     const auto info = conv_igemm::atomNamed(config.atom);
@@ -665,9 +700,11 @@ std::optional<Config> configOf(const KernelDefinition& kernel)
           || (config.line != 0 && std::any_of(LINE_FILTERS.begin(), LINE_FILTERS.end(), [&](int s) {
                   return s == config.s;
               }));
+    // Ring 2 is the z-ring tile's, and only its.
     if(!known || config.bc < 1 || config.vec < 1 || config.bc % config.vec != 0
-       || (config.ring != 0 && config.ring != 1) || (config.bl != 0 && config.bl != 1)
-       || (config.split != 0 && config.split != 1) || (config.pipe != 0 && config.pipe != 1))
+       || (config.zring ? config.ring != 2 : config.ring != 0 && config.ring != 1)
+       || (config.bl != 0 && config.bl != 1) || (config.split != 0 && config.split != 1)
+       || (config.pipe != 0 && config.pipe != 1))
     {
         return std::nullopt;
     }
@@ -690,6 +727,26 @@ std::optional<Config> configOf(const KernelDefinition& kernel)
             return std::nullopt;
         }
         config.ka = config.bl != 0 ? config.bc : step;
+    }
+    if(config.zring)
+    {
+        // 16 x 16 MFMA atoms on 16-bit operands, a 16-byte channel vector; tiles of whole 16-row
+        // M blocks per wave row and 16-channel N blocks per wave column; stages of whole 64-byte
+        // channel blocks, which the weights are formatted in (ka) so each fragment load reads
+        // whole 128-byte lines.
+        const auto element = conv_igemm::atomElement(config.atom);
+        constexpr int ZRING_BLOCK_BYTES = 64;
+        const bool mfma16
+            = config.atom.rfind("mfma16_", 0) == 0 || config.atom.rfind("mfma16x32_", 0) == 0;
+        if(!mfma16 || config.wave != 64 || (element != "f16" && element != "bf16") || config.math
+           || config.kd < 2 || config.vec * 2 != 16 || config.bl != 0 || config.split != 0
+           || config.cf != 0 || config.xpf != 0 || config.run != 0 || config.bm % 16 != 0
+           || (config.bm / 16) % config.wm != 0 || config.bn % (16 * config.wn) != 0
+           || config.bc % (ZRING_BLOCK_BYTES / 2) != 0)
+        {
+            return std::nullopt;
+        }
+        config.ka = ZRING_BLOCK_BYTES / 2;
     }
     return config;
 }
@@ -755,12 +812,28 @@ int64_t rowsLdsBytes(const Config& config)
     return 2 * haloRows * haloColumns * config.bc * operandBytes;
 }
 
+int64_t zringLdsBytes(const Config& config, std::string_view gcnArchName)
+{
+    if(!config.zring)
+    {
+        return 0;
+    }
+    const int64_t period
+        = hipdnn_plugin_sdk::stripArchFeatures(gcnArchName).rfind("gfx95", 0) == 0 ? 16 : 8;
+    const int64_t positions
+        = static_cast<int64_t>(config.bm / 16 + config.r - 1) * (16 + config.s - 1);
+    const int64_t padded = (positions + period - 1) / period * period;
+    // 16-byte chunks of the 16-bit operand: bc / 8 per position.
+    return 2 * (padded * (config.bc / 8) * 16 + 16);
+}
+
 bool configRunsOn(const Config& config, std::string_view gcnArchName)
 {
     // Channels-first rows run wherever rows run: 16-byte DMA and transpose reads on gfx950,
     // dword DMA and a gather transpose on the other MFMA parts.
     return conv_igemm::atomRunsOn(config.atom, gcnArchName) && shipsTo(config.archs, gcnArchName)
-           && rowsLdsBytes(config) * config.bpu <= ldsLimitOf(gcnArchName);
+           && rowsLdsBytes(config) * config.bpu <= ldsLimitOf(gcnArchName)
+           && zringLdsBytes(config, gcnArchName) <= ldsLimitOf(gcnArchName);
 }
 
 std::optional<Plan>
@@ -861,8 +934,15 @@ std::optional<Plan>
         {
             return std::nullopt;
         }
-        tile = config.run != 0 ? runTileFor(a, config, columnBlocks)
-                               : tileFor(a, config, columnBlocks, computeUnits);
+        if(config.zring)
+        {
+            tile = zringTileFor(problem, config, columnBlocks, computeUnits);
+        }
+        else
+        {
+            tile = config.run != 0 ? runTileFor(a, config, columnBlocks)
+                                   : tileFor(a, config, columnBlocks, computeUnits);
+        }
     }
     if(!tile.has_value())
     {
@@ -952,6 +1032,15 @@ std::optional<Plan>
     k2.xcdRun = k2.xcds > 1 && !config.rows
                     ? static_cast<int>(std::max<int64_t>(1, 2 * computeUnits / k2.xcds))
                     : 0;
+    if(config.zring)
+    {
+        // One block per unit; the kernel splits the units into balanced ranges by its grid size.
+        k2.xcds = 0;
+        k2.xcdRun = 0;
+        plan.grid[0] = static_cast<unsigned int>(std::min<long long>(tile->blocks, computeUnits));
+        plan.grid[1] = 1;
+        plan.grid[2] = 1;
+    }
     if(config.rows)
     {
         // One 1-D grid of at most bpu blocks per unit; the kernel walks the tiles.
@@ -1342,6 +1431,15 @@ public:
                 // The dword-DMA, gather-transpose form on any MFMA part (even widths).
                 options.add("K2R_DMA16", std::string("0"));
             }
+        }
+        else if(config.zring)
+        {
+            options.add("CONV_DIRECT_ZRING", std::string("1"));
+            options.add("CONV_DIRECT_ATOM", std::string(config.kernelType));
+            options.add("CONV_DIRECT_BM", std::to_string(config.bm));
+            options.add("CONV_DIRECT_BN", std::to_string(config.bn));
+            options.add("CONV_DIRECT_WM", std::to_string(config.wm));
+            options.add("CONV_DIRECT_WN", std::to_string(config.wn));
         }
         else
         {

@@ -1858,6 +1858,153 @@ TEST(TestConvDirectPlan, BatchUnfoldTilesPackImagesAlongTheColumns)
     EXPECT_FALSE(planOf(big, unfold, "HALF", 1024).has_value());
 }
 
+/// A gfx942 z-ring config: 16 x 16 positions x 64 channels, 2 x 4 waves, 32-channel stages.
+ConfigFields zringFields()
+{
+    ConfigFields f;
+    f.kind = "zring";
+    f.kd = 3;
+    f.bm = 256;
+    f.bn = 64;
+    f.bc = 32;
+    f.wm = 2;
+    f.wn = 4;
+    f.vec = 8;
+    f.ring = 2;
+    return f;
+}
+
+/// A channels-last 3x3x3 layer of 16 x 16 output planes, @p depth of them (one z-ring tile each).
+ConvShape zringShape(int64_t depth)
+{
+    auto shape = filterShape({3, 3, 3}, {1, 1, 1});
+    shape.channelsLast = true;
+    shape.n = 1;
+    shape.c = 32;
+    shape.k = 64;
+    shape.input = {depth, 16, 16};
+    return shape;
+}
+
+TEST(TestConvDirectKernelMatch, ZringConfigsTakeSixteenBitThreeDimensionalMfmaTiles)
+{
+    // admits() reports 64 units: ZRING_MIN_PLANES of them a unit.
+    const auto shape = zringShape(conv_direct::ZRING_MIN_PLANES * 64);
+    EXPECT_TRUE(admits(zringFields(), "gfx942", shape, "HALF"));
+    EXPECT_FALSE(admits(zringFields(), "gfx942", shape, "BFLOAT16"));
+    auto bf16 = zringFields();
+    bf16.atom = "mfma16_bf16";
+    EXPECT_TRUE(admits(bf16, "gfx942", shape, "BFLOAT16"));
+    auto gfx950 = zringFields();
+    gfx950.atom = "mfma16x32_f16";
+    gfx950.archs = "gfx950";
+    EXPECT_TRUE(admits(gfx950, "gfx950", shape, "HALF"));
+    // Each field one at a time.
+    const std::vector<std::pair<std::string, std::function<void(ConfigFields&)>>> mutations{
+        {"mma kind", [](ConfigFields& g) { g.kind = "mma"; }},
+        {"ring 1", [](ConfigFields& g) { g.ring = 1; }},
+        {"ring 0", [](ConfigFields& g) { g.ring = 0; }},
+        {"32x32 atom", [](ConfigFields& g) { g.atom = "mfma32_f16"; }},
+        {"fp32 atom", [](ConfigFields& g) { g.atom = "mfma16_f32"; }},
+        {"weights in LDS", [](ConfigFields& g) { g.bl = 1; }},
+        {"split", [](ConfigFields& g) { g.split = 1; }},
+        {"cross-chunk prefetch", [](ConfigFields& g) { g.xpf = 1; }},
+        {"run tile", [](ConfigFields& g) { g.run = 264; }},
+        {"channels-first", [](ConfigFields& g) { g.cf = 1; }},
+        {"half-block stage", [](ConfigFields& g) { g.bc = 16; }},
+        {"8-byte vector", [](ConfigFields& g) { g.vec = 4; }},
+        {"partial row block", [](ConfigFields& g) { g.bm = 200; }},
+        {"rows across waves", [](ConfigFields& g) { g.wm = 3; }},
+        {"channels across waves", [](ConfigFields& g) { g.bn = 48; }},
+    };
+    for(const auto& [name, mutate] : mutations)
+    {
+        auto g = zringFields();
+        mutate(g);
+        EXPECT_FALSE(admits(g, "gfx942", shape, g.atom == "mfma16_f32" ? "FLOAT" : "HALF")) << name;
+    }
+    // 2-D filters have no depth ring.
+    auto flat = zringFields();
+    flat.kd = 1;
+    auto shape2d = filterShape({3, 3}, {1, 1});
+    shape2d.channelsLast = true;
+    shape2d.c = 32;
+    shape2d.k = 64;
+    shape2d.input = {512, 512};
+    EXPECT_FALSE(admits(flat, "gfx942", shape2d));
+    // No MFMA.
+    EXPECT_FALSE(admits(zringFields(), "gfx1100", shape));
+}
+
+TEST(TestConvDirectPlan, ZringTilesAreSixteenColumnsAndOneBlockPerUnit)
+{
+    // 37 planes of 20 x 18 outputs: 2 x 2 tiles of 16 x 16, two 64-channel column blocks for
+    // K 72, two images.
+    auto shape = zringShape(37);
+    shape.n = 2;
+    shape.c = 64;
+    shape.k = 72;
+    shape.input = {37, 20, 18};
+    const long long units = 2LL * 2 * 2 * 2 * 37;
+    const int cus = static_cast<int>(units / conv_direct::ZRING_MIN_PLANES);
+    const auto plan = planOf(shape, zringFields(), "HALF", cus, 6);
+    ASSERT_TRUE(plan.has_value());
+    const auto& a = plan->args;
+    EXPECT_EQ(a.th, 16);
+    EXPECT_EQ(a.tw, 16);
+    EXPECT_EQ(a.tilesW, 2);
+    EXPECT_EQ(a.tilesH, 2);
+    EXPECT_EQ(a.kpad, 128);
+    // Weights formatted in 32-channel blocks: whole 64-byte runs a column.
+    EXPECT_EQ(plan->cpad, 64);
+    EXPECT_EQ(a.ca, 64 / 32);
+    EXPECT_EQ(plan->weightElems, 27LL * 64 * 128);
+    EXPECT_EQ(plan->grid[0], static_cast<unsigned>(cus));
+    EXPECT_EQ(plan->grid[1], 1u);
+    EXPECT_EQ(plan->grid[2], 1u);
+    EXPECT_EQ(a.xcds, 0);
+    EXPECT_EQ(a.splits, 1);
+    EXPECT_EQ(plan->workspaceBytes, plan->weightBytes);
+    // Fewer than ZRING_MIN_PLANES units a compute unit.
+    EXPECT_FALSE(planOf(shape, zringFields(), "HALF", cus + 1, 6).has_value());
+    // Reduction channels that are not whole 32-channel stages; output channels that are not
+    // whole 4-channel stores.
+    auto c48 = shape;
+    c48.c = 48;
+    EXPECT_FALSE(planOf(c48, zringFields(), "HALF", 8).has_value());
+    auto k66 = shape;
+    k66.k = 66;
+    EXPECT_FALSE(planOf(k66, zringFields(), "HALF", 8).has_value());
+    auto k68 = shape;
+    k68.k = 68;
+    EXPECT_TRUE(planOf(k68, zringFields(), "HALF", 8).has_value());
+    // One output image past the 32-bit buffer offsets.
+    auto huge = zringShape(64);
+    huge.k = 4096;
+    huge.input = {64, 64, 64};
+    EXPECT_FALSE(planOf(huge, zringFields(), "HALF", 8).has_value());
+}
+
+TEST(TestConvDirectKernelMatch, ZringStagesFitTheDeviceLdsAtItsReadPeriod)
+{
+    const auto config = conv_direct::configOf(kernelOf(zringFields(), "HALF"));
+    ASSERT_TRUE(config.has_value());
+    // 18 x 18 halo positions padded to 8 (gfx942) or 16 (gfx950) 16-byte slots, four chunks,
+    // two stages, a 16-byte slot each.
+    EXPECT_EQ(conv_direct::zringLdsBytes(*config, "gfx942"), 2 * (328 * 4 * 16 + 16));
+    EXPECT_EQ(conv_direct::zringLdsBytes(*config, "gfx950"), 2 * (336 * 4 * 16 + 16));
+    EXPECT_EQ(conv_direct::zringLdsBytes(*conv_direct::configOf(kernelOf(ConfigFields{}, "HALF")),
+                                         "gfx942"),
+              0);
+    // 128-channel stages of a 32-row tile pass 64 KiB.
+    auto wide = zringFields();
+    wide.bm = 512;
+    wide.bc = 128;
+    const auto big = conv_direct::configOf(kernelOf(wide, "HALF"));
+    ASSERT_TRUE(big.has_value());
+    EXPECT_FALSE(conv_direct::configRunsOn(*big, "gfx942"));
+}
+
 TEST(TestConvDirectPlan, ADeviceWithoutUnitsIsDeclined)
 {
     // The depth and split-C targets are blocks per unit: no reported units, no plan (and no

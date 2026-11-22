@@ -24,6 +24,8 @@
 //                       pixels (default 0: th x tw tiles)
 //   CONV_DIRECT_LINE    1: 2-D rows on one-row images and 1 x S filters, the row as one halo
 //                       line (default 0)
+//   CONV_DIRECT_ZRING   1: the z-ring tile (ConvDirectZring.h), CONV_DIRECT_ATOM, _BM, _BN, _BC,
+//                       _WM, _WN; one workgroup per compute unit (default 0)
 
 #include "ConvDirectCore.h"
 #ifndef CONV_DIRECT_ROWS
@@ -49,6 +51,12 @@
 #endif
 #ifndef CONV_DIRECT_LINE
 #define CONV_DIRECT_LINE 0
+#endif
+#ifndef CONV_DIRECT_ZRING
+#define CONV_DIRECT_ZRING 0
+#endif
+#if CONV_DIRECT_ZRING
+#include "ConvDirectZring.h"
 #endif
 #if CONV_DIRECT_DIL != 1 && !(CONV_DIRECT_ROWS && CONV_DIRECT_KD == 1)
 #error "dilation is served by the 2-D rows kernels only"
@@ -140,6 +148,18 @@ extern "C" __global__ void __launch_bounds__(CONV_DIRECT_BLOCK) ConvDirect(K2Arg
                CONV_DIRECT_SPLIT,
                CONV_DIRECT_DIL,
                CONV_DIRECT_LINE>(a CONV_EPI_ARG);
+#elif CONV_DIRECT_ZRING
+    k2ConvZring<CONV_DIRECT_T,
+                CONV_DIRECT_ATOM,
+                CONV_DIRECT_KD,
+                CONV_DIRECT_R,
+                CONV_DIRECT_S,
+                CONV_DIRECT_BM,
+                CONV_DIRECT_BN,
+                CONV_DIRECT_BC,
+                CONV_DIRECT_WM,
+                CONV_DIRECT_WN,
+                CONV_DIRECT_TO>(a CONV_EPI_ARG);
 #else
     k2ConvMma<CONV_DIRECT_T,
               CONV_DIRECT_ATOM,

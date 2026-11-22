@@ -31,6 +31,7 @@
 #include "engines/kernel_ingestor_engine/packs/ConvEpilogueDeviceTestSupport.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvEpilogueTiming.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvNaiveTestGraphs.hpp"
+#include "engines/kernel_ingestor_engine/packs/DeviceUnits.hpp"
 #include "engines/kernel_ingestor_engine/packs/IngestorPackTestSupport.hpp"
 
 /**
@@ -463,12 +464,16 @@ size_t spanBytes(const Tensor<T>& tensor)
     return static_cast<size_t>(last + 1) * sizeof(T);
 }
 
+/// Which catalog configs a case runs (all when empty).
+using ConfigFilter = std::function<bool(const hipdnn_plugin_sdk::ingestor::KernelDefinition&)>;
+
 template <typename T>
 void runCase(ConvShape shape,
              ConvDirection direction,
              Math math = Math::NATIVE,
              bool infinities = false,
-             bool guarded = false)
+             bool guarded = false,
+             const ConfigFilter& only = {})
 {
     shape.dataType = dataTypeOf<T>();
     const auto spec = specFor(shape, direction);
@@ -533,7 +538,7 @@ void runCase(ConvShape shape,
     for(const auto& kernel : catalog(direction))
     {
         if((kernel.getIntMetadata("math") == 1) != (math == Math::THREE_BF16)
-           || !matchesKernel(pack, fixture.context(), kernel, *bound))
+           || (only && !only(kernel)) || !matchesKernel(pack, fixture.context(), kernel, *bound))
         {
             continue;
         }
@@ -1004,6 +1009,74 @@ TEST(TestConvDirectCatalog, EveryFilterAndDtypeHasAConfigOnEveryArchitecture)
 }
 
 // ---------------------------------------------------------------------------
+// Z-ring tiles (forward 3x3x3, 16-bit, gfx942 and gfx950): the planner admits them only on grids
+// of ZRING_MIN_PLANES output planes per compute unit, so the case's depth is sized from this
+// device's units. Two images, two channel stages, 72 output channels (a partial column block),
+// 20 x 18 outputs (partial tile rows and columns), asymmetric padding (two leading planes, none
+// trailing), and ranges that cross tile boundaries.
+// ---------------------------------------------------------------------------
+
+bool isZring(const hipdnn_plugin_sdk::ingestor::KernelDefinition& kernel)
+{
+    return kernel.getStringMetadata("kind") == "zring";
+}
+
+ConvShape zringCase()
+{
+    // Units a plane: 2 x 2 tiles of 16 x 16, two images, two 64-channel column blocks.
+    constexpr int64_t UNITS_PER_PLANE = int64_t{2} * 2 * 2 * 2;
+    const int64_t units = device_units::dispatchUnits(currentDeviceProperties());
+    const int64_t depth
+        = (conv_direct::ZRING_MIN_PLANES * units + UNITS_PER_PLANE - 1) / UNITS_PER_PLANE + 5;
+    auto shape = dense(64, 72, {depth, 20, 18}, {3, 3, 3}, {2, 1, 0}, true);
+    shape.postPadding = {0, 1, 2};
+    return shape;
+}
+
+/// Whether a z-ring config runs on this device (its ship list names it).
+bool zringArch()
+{
+    const auto arch = std::string(currentDeviceProperties().gcnArchName);
+    const auto& kernels = catalog(ConvDirection::FORWARD);
+    return std::any_of(kernels.begin(), kernels.end(), [&](const auto& kernel) {
+        const auto config = conv_direct::configOf(kernel);
+        return isZring(kernel) && config.has_value() && conv_direct::configRunsOn(*config, arch);
+    });
+}
+
+TEST(TestGpuConvDirectZring, Half)
+{
+    SKIP_IF_NO_DEVICES();
+    if(!zringArch())
+    {
+        GTEST_SKIP() << "no z-ring config ships to this device";
+    }
+    runCase<Half>(zringCase(), ConvDirection::FORWARD, Math::NATIVE, false, false, isZring);
+}
+
+TEST(TestGpuConvDirectZring, BFloat16)
+{
+    SKIP_IF_NO_DEVICES();
+    if(!zringArch())
+    {
+        GTEST_SKIP() << "no z-ring config ships to this device";
+    }
+    runCase<BFloat16>(zringCase(), ConvDirection::FORWARD, Math::NATIVE, false, false, isZring);
+}
+
+/// Infinities in the input, which sits between NaN guards: the halo loads past the image and
+/// the planes past the input must take nothing from outside the tensor.
+TEST(TestGpuConvDirectZring, BFloat16InfinitiesGuarded)
+{
+    SKIP_IF_NO_DEVICES();
+    if(!zringArch())
+    {
+        GTEST_SKIP() << "no z-ring config ships to this device";
+    }
+    runCase<BFloat16>(zringCase(), ConvDirection::FORWARD, Math::NATIVE, true, true, isZring);
+}
+
+// ---------------------------------------------------------------------------
 // Fused pointwise epilogues (forward): every code path that writes y -- the FMA store, the
 // halo-tile strip store and its split-C partials, the rows kernels' direct and LDS-staged
 // stores (2-D, batch unfold, 3-D, in-place channels-first), the split-C reduce and the
@@ -1136,6 +1209,34 @@ INSTANTIATE_TEST_SUITE_P(,
                          TestGpuConvDirectFusedSpecials,
                          ::testing::ValuesIn(fusedShapes()),
                          [](const auto& info) { return info.param.name; });
+
+/// The z-ring tile's store with a fused bias + relu (its own store path: one 4-channel vector a
+/// lane, straight from the accumulators).
+TEST(TestGpuConvDirectZring, FusedBiasRelu)
+{
+    SKIP_IF_NO_DEVICES();
+    if(!zringArch())
+    {
+        GTEST_SKIP() << "no z-ring config ships to this device";
+    }
+    std::vector<hipdnn_plugin_sdk::ingestor::KernelDefinition> zring;
+    for(const auto& kernel : catalog(ConvDirection::FORWARD))
+    {
+        if(isZring(kernel))
+        {
+            zring.push_back(kernel);
+        }
+    }
+    const auto runner
+        = conv_epilogue_test::catalogRunner(packFor(ConvDirection::FORWARD), zring, {"atom"});
+    EXPECT_GE(conv_epilogue_test::checkFusedCase<BFloat16>(
+                  zringCase(),
+                  {conv_epilogue_test::bias(), conv_epilogue_test::relu()},
+                  runner,
+                  Specials::NONE,
+                  [](int64_t reduction) { return 1e-6 * static_cast<double>(reduction); }),
+              1);
+}
 
 // Opt-in: each config's time with and without a fused bias + relu (shapes in $K2_EPI_TIMING).
 TEST(TestGpuConvDirectFusedTiming, BareAgainstFused)

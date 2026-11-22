@@ -46,6 +46,10 @@ inline constexpr std::array<std::array<int, 3>, 7> FILTERS{{
 /// of one row (audio convolutions).
 inline constexpr std::array<int, 4> LINE_FILTERS{{3, 5, 7, 11}};
 
+/// Output planes per compute unit a z-ring grid needs at least (planFor): a range of L planes
+/// stages L + KD - 1 input planes and runs KD - 1 partial edge steps at each end.
+inline constexpr long long ZRING_MIN_PLANES = 6;
+
 /// A strided copy (or, for packed channels-first activations, a tiled transpose) of one
 /// forward-form activation into (in) or out of (out) the workspace's packed channels-last copy.
 struct Staging
@@ -148,6 +152,11 @@ struct Config
     /// Rows: persistent blocks resident per unit (1 to 3); each holds its own halo stages, so the
     /// blocks' memory phases and barriers overlap the others' MMAs.
     int bpu = 1;
+    /// The z-ring tile (kind "zring", ring 2; ConvDirectZring.h): 3-D, 16-bit, 16 x 16 MFMA atoms.
+    /// A tile is bm / 16 rows x 16 columns x bn channels, and one workgroup per compute unit walks
+    /// a balanced range of (tile, output plane) units along depth with the KD live output planes
+    /// in its accumulators; each input plane is staged once per range.
+    bool zring = false;
     std::string archs; ///< ship list: comma-separated arch groups, or "any"
 
     /// Output pixels per block (the planner's tile budget) and output channels per block.
@@ -193,8 +202,14 @@ int64_t ldsLimitOf(std::string_view gcnArchName);
 /// (wp pw + (r - 1) dil) x bc channel rows of 8-column runs. 0 for a config of another kind.
 int64_t rowsLdsBytes(const Config& config);
 
-/// Whether the device runs @p config: its atom exists there, its ship list names it, and (rows)
-/// the halo stages of its bpu resident blocks fit the device's LDS.
+/// LDS a z-ring config's kernel declares on @p gcnArchName: two stages of (bm / 16 + r - 1) x
+/// (16 + s - 1) positions x bc channels, each 16-byte channel chunk's positions padded to the
+/// device's conflict-free period for 128-bit reads (256 bytes on gfx950, 128 elsewhere), plus a
+/// 16-byte slot each (ConvDirectZring.h). 0 for a config of another kind.
+int64_t zringLdsBytes(const Config& config, std::string_view gcnArchName);
+
+/// Whether the device runs @p config: its atom exists there, its ship list names it, and (rows,
+/// z-ring) the stages of its resident blocks fit the device's LDS.
 bool configRunsOn(const Config& config, std::string_view gcnArchName);
 
 /// How a config runs a problem: the tile, the split, the launch grid and the workspace.
@@ -221,6 +236,12 @@ struct Plan
  *
  * A rows config has a fixed tile (wp pw rows x 16 wq columns) and launches at most one block per
  * compute unit, each walking its share of the tiles (rowsLdsBytes: up to ~153 KiB on gfx950).
+ *
+ * A z-ring config has a fixed tile (bm / 16 rows x 16 columns x bn channels) and launches one
+ * block per compute unit over the (tile, output plane) units; it serves 16-bit 3-D problems
+ * whose reduction channels are whole stages (bc) and whose output channels are a multiple of 4,
+ * and only grids of at least ZRING_MIN_PLANES output planes per unit, where the ring's reuse pays
+ * for its pencil edges.
  *
  * The tile is th x tw output pixels (tw a multiple of the FMA run length) of ds planes, chosen to
  * minimize padded pixel slots plus halo loads within the config's halo bound; depth is split

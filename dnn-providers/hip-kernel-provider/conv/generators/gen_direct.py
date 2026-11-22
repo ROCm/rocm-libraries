@@ -229,6 +229,17 @@ def RW(
     )
 
 
+def Z(atom, f, bm, bn, bc, wm, wn):
+    """Z-ring tile (ConvDirectZring.h; ring 2): 3-D, 16-bit, 16x16 MFMA atoms; a tile of bm / 16
+    rows x 16 columns x bn channels, one block per compute unit walking a balanced range of
+    (tile, output plane) units along depth with the depth taps' output planes in its
+    accumulators. Forward only."""
+    c = M(atom, f, bm, bn, bc, wm, wn, 8, ring=2)
+    c["kind"] = "zring"
+    c["dirs"] = ("FWD",)
+    return c
+
+
 def nr(f):
     """3-D configs here stream without the ring unless asked."""
     return 0 if f[0] > 1 else 1
@@ -1010,6 +1021,15 @@ for dt, atom in (("HALF", "wmma125_f16"), ("BFLOAT16", "wmma125_bf16")):
     # Reuse the 3x3 input halo across twice as many output channels per block.
     add(dt, ["gfx1250"], [M(atom, F33, 64, 128, 32, 2, 4, 8)])
 
+# Z-ring tiles (forward 3x3x3, 16-bit), 2 x 4 waves, 32-channel stages, the 16x16x32 atom on gfx950:
+# 16 x 16 positions x 64 channels, and 8 x 16 positions x 128 channels (the same accumulators a
+# wave), whose block reads each input plane once for 128 output channels.
+for dt in ("HALF", "BFLOAT16"):
+    e = x16(dt)
+    for bm, bn in ((256, 64), (128, 128)):
+        add(dt, ["gfx942"], [Z(f"mfma16_{e}", F333, bm, bn, 32, 2, 4)])
+        add(dt, ["gfx950"], [Z(f"mfma16x32_{e}", F333, bm, bn, 32, 2, 4)])
+
 # gfx942 fp32 3x3x3, 32-channel outputs (nnU-Net K = 32 layers on 96^3-160^3): the 256 x 32 tile
 # at 8-channel chunks and the streaming (ring) twin of its 16-channel form. MI325X, autotuned
 # against the catalog above: 1.01-1.07x on 18 of the 34 heaviest fp32 3-D layers, none slower.
@@ -1091,6 +1111,8 @@ for direction, tag in (("FWD", "fwd"), ("BWD", "bwd")):
         dt = {"FLOAT": "f32", "HALF": "f16", "BFLOAT16": "bf16"}[dtype]
         legacy_index = native_index = 0
         for archs, c in merged(entries):
+            if direction not in c.get("dirs", ("FWD", "BWD")):
+                continue
             if c["atom"].startswith("wmma125"):
                 priority = 1100 - native_index
                 native_index += 1
@@ -1123,6 +1145,11 @@ for direction, tag in (("FWD", "fwd"), ("BWD", "bwd")):
                     + (f".d{c['dil']}" if c["dil"] > 1 else "")
                     + (".line" if c["line"] else "")
                     + (f".b{c['bpu']}" if c["bpu"] > 1 else "")
+                )
+            elif c["kind"] == "zring":
+                name = (
+                    f"conv_direct.{tag}.{dt}.{c['kd']}x{c['r']}x{c['s']}.{c['atom']}.{mathTag}"
+                    f".zring.{c['bm']}x{c['bn']}c{c['bc']}.w{c['wm']}x{c['wn']}.v{c['vec']}"
                 )
             else:
                 name = (
