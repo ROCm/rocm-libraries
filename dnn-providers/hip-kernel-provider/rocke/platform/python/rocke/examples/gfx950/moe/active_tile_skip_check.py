@@ -20,7 +20,7 @@ Two cases are checked, each with the same A/B/C tensors and a
 Run::
 
     cd <repo>/dnn-providers/hip-kernel-provider/rocke/platform/python
-    python rocke/examples/moe/test_active_tile_skip.py
+    python rocke/examples/gfx950/moe/active_tile_skip_check.py
 """
 
 from __future__ import annotations

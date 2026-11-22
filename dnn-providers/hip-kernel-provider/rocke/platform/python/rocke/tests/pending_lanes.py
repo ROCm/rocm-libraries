@@ -468,17 +468,6 @@ PENDING: tuple[PendingTest, ...] = (
         "platform/python/rocke/heuristics/tests/test_train.py",
     ),
     *_waiting(
-        OWNER_DECISION,
-        "standalone parity and performance scripts with no pytest tests; two "
-        "import torch at module level (drop candidates: rename out of test_ or "
-        "convert to gfx950 GPU tests)",
-        "rocKE examples; issue: none filed yet",
-        "2026-12-15",
-        "platform/python/rocke/examples/gfx950/moe/test_active_tile_skip.py",
-        "platform/python/rocke/examples/gfx950/moe/test_fused_moe_preshuffle.py",
-        "platform/python/rocke/examples/gfx950/moe/test_preshuffle_b.py",
-    ),
-    *_waiting(
         TORCH_IN_CI,
         "its GPU numerics compare against a torch reference; without torch in the "
         "CI test environment those cases skip",

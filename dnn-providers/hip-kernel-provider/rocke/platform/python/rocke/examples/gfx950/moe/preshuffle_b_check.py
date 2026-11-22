@@ -22,7 +22,7 @@ This script:
 Run with::
 
     cd <repo>/dnn-providers/hip-kernel-provider/rocke/platform/python
-    python rocke/examples/gfx950/moe/test_preshuffle_b.py
+    python rocke/examples/gfx950/moe/preshuffle_b_check.py
 """
 
 from __future__ import annotations

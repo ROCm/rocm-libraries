@@ -12,7 +12,7 @@ plus end-to-end perf delta.
 Run with::
 
     cd <repo>/dnn-providers/hip-kernel-provider/rocke/platform/python
-    python rocke/examples/moe/test_fused_moe_preshuffle.py
+    python rocke/examples/gfx950/moe/fused_moe_preshuffle_check.py
 """
 
 from __future__ import annotations

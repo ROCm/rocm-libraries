@@ -3015,7 +3015,7 @@ Round 11 ports the idea into the DSL kernels.
    HSACO for any combination of `(preshuffle_b, active_tile_skip)`
    on demand, so the four binary variants per kernel family share
    one cache.
-6. `examples/gfx950/moe/test_active_tile_skip.py`: standalone parity +
+6. `examples/gfx950/moe/active_tile_skip_check.py`: standalone parity +
    perf harness. Confirms bitwise-equal output to baseline when
    all tiles active, zero output for inactive tiles, ~14× speedup
    when every tile is inactive.
@@ -3054,8 +3054,8 @@ decode_T1_E8_K2_H4096_I7168 :
 Closed roughly 30 % of the gap to CK Tile on the canonical
 decode_T1, and ~50 % on `decode_T1_E16`. Bitwise parity
 (`rel=0.00e+00`) across every standalone and e2e variant in
-`test_active_tile_skip.py`, `test_fused_moe_preshuffle.py`,
-`test_preshuffle_b.py`.
+`active_tile_skip_check.py`, `fused_moe_preshuffle_check.py`,
+`preshuffle_b_check.py`.
 
 **Lessons reinforced.**
 
@@ -3132,11 +3132,11 @@ pattern is unchanged.
    the preshuffled tensors inside `capture_graph` *before* the
    warmup loop so the one-time `torch.cat / permute / contiguous`
    cost stays out of the captured / replayed region.
-5. `examples/gfx950/moe/test_preshuffle_b.py`: standalone batched-GEMM
+5. `examples/gfx950/moe/preshuffle_b_check.py`: standalone batched-GEMM
    parity + perf harness that flips `preshuffle_b` and confirms
    bitwise-equal kernel outputs (`max|delta|=0.0` between the
    two paths) plus per-shape timing.
-6. `examples/gfx950/moe/test_fused_moe_preshuffle.py`: end-to-end harness
+6. `examples/gfx950/moe/fused_moe_preshuffle_check.py`: end-to-end harness
    that runs five FusedMoeForward configurations
    (`baseline_interleaved`, `baseline_packed`, `preshuf_down_only`,
    `preshuf_packed_full`, `preshuf_intl_full`) per scenario with
