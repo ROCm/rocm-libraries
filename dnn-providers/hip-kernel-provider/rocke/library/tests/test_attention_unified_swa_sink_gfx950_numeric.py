@@ -8,28 +8,21 @@ routes to the transposed 32x32 combo. Sinks seed the per-row running max, which
 only the scalar-state layout maps to the right rows, so every sink request takes
 it.
 
-The routing assertions run on CPU; the numeric ones need a gfx950 GPU and compare
-against ``parity_unified_attention.ref_paged_attn``.
+The routing assertions run on CPU; the numeric ones need a gfx950 GPU, launch on
+``rocke.runtime`` device arrays and compare against the FP64 numpy paged
+reference.
 """
 
 from __future__ import annotations
 
+import numpy as np
 import pytest
 from builders.common.attention_spec_builder import _tiled_spec_from_problem
+from builders.gfx950.attention.prefill.unified_attention_cases import Scenario
 from kernels.common.attention_unified import UnifiedAttentionProblem
+from rocke.tests.gpu import current_device_arch_in
 
-torch = pytest.importorskip("torch", reason="ROCm torch required")
-
-
-def _gpu_ready() -> bool:
-    if not torch.cuda.is_available():
-        return False
-    return "gfx950" in torch.cuda.get_device_properties(0).gcnArchName.lower()
-
-
-requires_gfx950_gpu = pytest.mark.skipif(
-    not _gpu_ready(), reason="needs a gfx950 GPU with ROCm torch"
-)
+from ._attention_paged_cases import case_reference, make_inputs, run_case
 
 # (name, head_size, seq_len, num_query_heads, num_kv_heads, block_size, dtype,
 #  window, sinks)
@@ -44,8 +37,6 @@ _CASES = [
     ("d64_fp16_w256", 64, 512, 64, 8, 64, "fp16", 256, False),
     ("d64_bf16_sinks", 64, 2048, 64, 8, 64, "bf16", 0, True),
 ]
-
-_TORCH_DTYPE = {"fp16": "float16", "bf16": "bfloat16"}
 
 
 def _problem(d, seq, hq, hkv, bs, dtype, window, sinks) -> UnifiedAttentionProblem:
@@ -78,32 +69,27 @@ def test_routes_to_transposed_combo(case):
         assert spec.use_transposed_scalar_state
 
 
-@requires_gfx950_gpu
 @pytest.mark.gpu
 @pytest.mark.parametrize("path", ["2d", "auto"])
 @pytest.mark.parametrize("case", _CASES, ids=lambda c: c[0])
 def test_matches_reference(case, path):
-    import builders.gfx950.attention.prefill.parity_unified_attention as P
-
+    current_device_arch_in(("gfx950",), "the gfx950 transposed combo")
     name, d, seq, hq, hkv, bs, dtype, window, sinks = case
-    tdt = getattr(torch, _TORCH_DTYPE[dtype])
-    scenario = P.Scenario(
+    scenario = Scenario(
         name=name,
         seq_lens=[(seq, seq)],
         num_query_heads=hq,
         num_kv_heads=hkv,
         head_size=d,
         block_size=bs,
-        dtype=tdt,
+        dtype=dtype,
         sliding_window=window or None,
         use_sinks=sinks,
         num_blocks=seq // bs + 8,
     )
-    data = P.make_inputs(scenario)
-    ref = P.run_reference(scenario, data)
-    out, _ = P._run_rocke(scenario, data, path=path, warmup=0, attempts=1)
-    torch.cuda.synchronize()
-    assert not torch.isnan(out).any(), "NaN in kernel output"
-    err = (out.float() - ref.float()).abs().max().item()
-    tol = 2e-2 if tdt == torch.float16 else 4e-2
+    inputs = make_inputs(scenario)
+    out = run_case(scenario, inputs, path)
+    assert not np.isnan(out).any(), "NaN in kernel output"
+    err = float(np.abs(out - case_reference(scenario, inputs)).max())
+    tol = 2e-2 if dtype == "fp16" else 4e-2
     assert err < tol, f"{name}/{path}: max_abs={err:.3e}"
