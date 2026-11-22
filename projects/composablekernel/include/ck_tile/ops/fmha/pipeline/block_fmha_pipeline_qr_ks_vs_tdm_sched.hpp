@@ -582,8 +582,20 @@ struct BlockFmhaPipelineQRKSVSTdmSched
                 Schedule::template RunPvStagePrelude<Mode, decltype(stage)::value>(
                     [&](auto ordinal) { rescale_fragment(ordinal); });
 
+                // V slices of the last Policy::kWmmaSourceKeepDepth WMMAs of this stage (see
+                // Policy::KeepFragmentAlive; pv_keep_b the newest).
+                constexpr index_t kKeepDepth = Policy::kWmmaSourceKeepDepth;
+                [[maybe_unused]] BWarpTensor pv_keep_b;
+                [[maybe_unused]] BWarpTensor pv_keep_b2;
+                [[maybe_unused]] BWarpTensor pv_keep_b3;
                 auto emit_wmma = [&](auto, auto wmma) {
-                    constexpr index_t ordinal     = decltype(wmma)::value;
+                    constexpr index_t ordinal = decltype(wmma)::value;
+                    if constexpr(kKeepDepth >= 1 && ordinal > 0)
+                        Policy::KeepFragmentAlive(pv_keep_b.get_thread_buffer());
+                    if constexpr(kKeepDepth >= 2 && ordinal > 1)
+                        Policy::KeepFragmentAlive(pv_keep_b2.get_thread_buffer());
+                    if constexpr(kKeepDepth >= 3 && ordinal > 2)
+                        Policy::KeepFragmentAlive(pv_keep_b3.get_thread_buffer());
                     constexpr index_t d_msb       = ordinal / Policy::OutputFragments::kNumN;
                     constexpr index_t n           = ordinal % Policy::OutputFragments::kNumN;
                     constexpr index_t m_iter      = d_msb / 2;
@@ -606,6 +618,11 @@ struct BlockFmhaPipelineQRKSVSTdmSched
                     WarpGemm{}(c_warp_tensor, a_warp_tensor, b_warp_tensor);
                     o_acc.at(wmma) =
                         c_warp_tensor.get_thread_buffer().template get_as<fp32x8_t>(number<0>{});
+                    if constexpr(kKeepDepth >= 3 && ordinal > 1)
+                        pv_keep_b3 = pv_keep_b2;
+                    if constexpr(kKeepDepth >= 2 && ordinal > 0)
+                        pv_keep_b2 = pv_keep_b;
+                    pv_keep_b = b_warp_tensor;
                 };
 
                 auto emit_rescale = [&](auto ordinal) {
@@ -615,6 +632,12 @@ struct BlockFmhaPipelineQRKSVSTdmSched
 
                 Policy::template RunPvScheduledStageWithWmma<decltype(stage)::value, Mode, Problem>(
                     next_b_block_tensor, b_lds_window, emit_wmma, emit_rescale, prepared_lds_reads);
+                if constexpr(kKeepDepth >= 1)
+                    Policy::KeepFragmentAlive(pv_keep_b.get_thread_buffer());
+                if constexpr(kKeepDepth >= 2 && Schedule::kPvWmmasPerStage > 1)
+                    Policy::KeepFragmentAlive(pv_keep_b2.get_thread_buffer());
+                if constexpr(kKeepDepth >= 3 && Schedule::kPvWmmasPerStage > 2)
+                    Policy::KeepFragmentAlive(pv_keep_b3.get_thread_buffer());
             };
 
             auto run_pv = [&](const auto& p_tile) {

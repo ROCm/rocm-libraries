@@ -4,8 +4,6 @@
 #include "fmha_test_common.hpp"
 #include "gtest/gtest.h"
 
-#include <array>
-
 namespace {
 
 using namespace ck_tile;
@@ -34,35 +32,6 @@ struct BiasProblem : Problem
 {
     static constexpr auto BiasEnum = Bias;
 };
-
-// This fixture exercises only the max-policy predicate. Its mixed and FP8
-// types do not imply that the corresponding full kernel problem is supported.
-template <typename Q, typename K, typename V, bool Group, bool Mask, bool Lse>
-struct CompilerMaxProblem
-{
-    using QDataType                    = Q;
-    using KDataType                    = K;
-    using VDataType                    = V;
-    static constexpr bool kIsGroupMode = Group;
-    static constexpr bool kStoreLSE    = Lse;
-    struct FmhaMask
-    {
-        static constexpr bool IsMasking = Mask;
-    };
-};
-
-template <typename Policy, typename Q, typename K, typename V>
-void ExpectCompilerMaxFlagMatrix(const std::array<bool, 8>& expected, const char* type_case)
-{
-    SCOPED_TRACE(type_case);
-    static_for<0, 8, 1>{}([&](auto state) {
-        constexpr int s = decltype(state)::value;
-        using Problem   = CompilerMaxProblem<Q, K, V, (s & 4) != 0, (s & 2) != 0, (s & 1) != 0>;
-        EXPECT_EQ((Policy::template UseCompilerMax<Problem>()), expected[s])
-            << "group=" << Problem::kIsGroupMode << " mask=" << Problem::FmhaMask::IsMasking
-            << " lse=" << Problem::kStoreLSE;
-    });
-}
 
 template <typename Policy, bool Early>
 struct OutputRescalePolicy : Policy
@@ -165,22 +134,17 @@ TYPED_TEST(QrTdmSchedConfig, SelectedScheduleAndInvalidCounts)
     EXPECT_FALSE((FmhaTdmSchedMode<Problem, WrongCountPolicy<P>>::kIsLegal));
 }
 
-TYPED_TEST(QrTdmSchedConfig, CompilerMaxScopeAcrossFlagsAndTypes)
+TYPED_TEST(QrTdmSchedConfig, WmmaSourceKeepDepth)
 {
     using G = typename TypeParam::Geometry;
     using P = typename TypeParam::Policy;
-    // State order: batch dense, batch masked, group dense, group masked;
-    // each pair has LSE disabled then enabled. Pin the shipped scope directly.
-    constexpr std::array<bool, 8> d64_d128_scope{true, true, true, true, true, true, true, true};
-    constexpr std::array<bool, 8> d192_scope{true, true, false, false, false, false, false, false};
-    constexpr auto expected = G::kHeadDimQK == 192 ? d192_scope : d64_d128_scope;
-    ExpectCompilerMaxFlagMatrix<P, bf16_t, bf16_t, bf16_t>(expected, "BF16");
-    ExpectCompilerMaxFlagMatrix<P, half_t, half_t, half_t>(expected, "FP16");
-    ExpectCompilerMaxFlagMatrix<P, const bf16_t&, bf16_t, bf16_t>(expected, "BF16 Q cvref");
-    ExpectCompilerMaxFlagMatrix<P, fp8_t, fp8_t, fp8_t>(expected, "FP8 predicate only");
-    ExpectCompilerMaxFlagMatrix<P, half_t, bf16_t, bf16_t>(expected, "mixed Q predicate only");
-    ExpectCompilerMaxFlagMatrix<P, bf16_t, half_t, bf16_t>(expected, "mixed K predicate only");
-    ExpectCompilerMaxFlagMatrix<P, bf16_t, bf16_t, half_t>(expected, "mixed V predicate only");
+    // Every configuration here is an M128 tile (two row groups per wave). The D64 N64 and D192
+    // N128 tiles keep no WMMA source alive; D128 N128 and D192 N64 keep the last three. (D64 M64
+    // tiles, not listed here, keep two.) Pin the shipped values.
+    EXPECT_EQ(G::kQkMIter, 2);
+    constexpr bool keep_none =
+        (G::kHeadDimQK == 64 && G::kN == 64) || (G::kHeadDimQK == 192 && G::kN == 128);
+    EXPECT_EQ(P::kWmmaSourceKeepDepth, keep_none ? 0 : 3);
 }
 
 TYPED_TEST(QrTdmSchedConfig, OutputRescaleModesRejectConflictingOwners)

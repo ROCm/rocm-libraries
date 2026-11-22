@@ -215,6 +215,63 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
         return make_static_tile_distribution(BlockGemm::MakeBBlockDistributionEncode());
     }
 
+    // WMMA-source keep-alive. Each scheduled stage issues the next stage's LDS reads right after
+    // its WMMAs (FmhaTdmSchedWmmaFirstPlacement). A read may reuse the VGPRs of a source that the
+    // last WMMAs have consumed; in expert scheduling mode the compiler then waits (s_wait_alu
+    // va_vdst) until those WMMAs complete before the read is issued (clang 24 inserts these WAR
+    // waits; clang 23 did not). Keeping the LDS-fed source (K in QK, V in PV) of the previous
+    // kWmmaSourceKeepDepth WMMAs of the stage alive until the next WMMA makes the allocator give
+    // the reads other VGPRs, so the reused registers belong to WMMAs that have long completed.
+    // Depths as measured on gfx1250 (clang 23 and 24): 2 for D64 M64 tiles, 3 for D64 M128xN128,
+    // D128 and D192 N64 tiles, none for D64 N64 tiles (no such waits to remove; the FP16 batch
+    // tile would cross 256 VGPRs) and D192 N128 tiles (the FP16 tile would cross 512 VGPRs).
+    static constexpr index_t kWmmaSourceKeepDepth =
+        (Geometry::kHeadDimQK == 64 && Geometry::kN == 64) ||
+                (Geometry::kHeadDimQK == 192 && Geometry::kN == 128)
+            ? 0
+        : (Geometry::kHeadDimQK == 64 && Geometry::kQkMIter == 1) ? 2
+                                                                  : 3;
+
+    // An empty use of a fragment's registers at this point, one 32-bit operand per dword: an
+    // inline-asm VGPR operand must sit in the low VGPR range, and a single wide operand would also
+    // need a contiguous aligned tuple there.
+    template <typename Buffer>
+    CK_TILE_DEVICE static void KeepFragmentAlive(const Buffer& buffer)
+    {
+#if defined(__HIP_DEVICE_COMPILE__)
+        static_assert(sizeof(Buffer) % 4 == 0);
+        constexpr index_t kDwords = sizeof(Buffer) / 4;
+        using Dwords              = ext_vector_t<float, kDwords>;
+        const Dwords dwords       = bit_cast<Dwords>(buffer);
+#pragma unroll
+        for(index_t i = 0; i < kDwords; ++i)
+        {
+            const float dword = dwords[i];
+            asm volatile("" : : "v"(dword));
+        }
+#else
+        (void)buffer;
+#endif
+    }
+
+    // The B (K) slice that RunQkSuWmma<WmmaOrdinal> passes to the warp GEMM.
+    template <index_t WmmaOrdinal, typename BlockGemm, typename BBlockTensor>
+    CK_TILE_DEVICE static auto GetQkBSlice(const BBlockTensor& b_block_tensor)
+    {
+        using WarpGemm  = typename BlockGemm::WarpGemm;
+        using BWarpDstr = typename WarpGemm::BWarpDstr;
+        constexpr auto b_warp_y_lengths =
+            to_sequence(BWarpDstr{}.get_ys_to_d_descriptor().get_lengths());
+        constexpr auto b_warp_y_index_zeros = uniform_sequence_gen_t<BWarpDstr::NDimY, 0>{};
+        constexpr index_t n_iter =
+            WmmaOrdinal / (BlockGemm::KIterPerWarp * BlockGemm::MIterPerWarp);
+        constexpr index_t k_iter =
+            (WmmaOrdinal / BlockGemm::MIterPerWarp) % BlockGemm::KIterPerWarp;
+        return b_block_tensor.get_y_sliced_thread_data(
+            merge_sequences(sequence<n_iter, k_iter>{}, b_warp_y_index_zeros),
+            merge_sequences(sequence<1, 1>{}, b_warp_y_lengths));
+    }
+
     template <index_t WmmaOrdinal,
               typename BlockGemm,
               typename CBlockTensor,
@@ -368,11 +425,34 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
                 __builtin_amdgcn_sched_barrier(0x0002 | 0x0400);
         };
 
+        // K slices of the last kWmmaSourceKeepDepth WMMAs of this stage (keep_b the newest).
+        using KeepSlice = remove_cvref_t<decltype(GetQkBSlice<0, BlockGemm>(b_block_tensor))>;
+        [[maybe_unused]] KeepSlice keep_b;
+        [[maybe_unused]] KeepSlice keep_b2;
+        [[maybe_unused]] KeepSlice keep_b3;
         auto emit_wmma = [&](auto, auto wmma) {
-            RunQkSuWmma<decltype(wmma)::value, BlockGemm>(
-                c_block_tensor, a_block_tensor, b_block_tensor);
+            constexpr index_t w = decltype(wmma)::value;
+            if constexpr(kWmmaSourceKeepDepth >= 1 && w > 0)
+                KeepFragmentAlive(keep_b);
+            if constexpr(kWmmaSourceKeepDepth >= 2 && w > 1)
+                KeepFragmentAlive(keep_b2);
+            if constexpr(kWmmaSourceKeepDepth >= 3 && w > 2)
+                KeepFragmentAlive(keep_b3);
+            RunQkSuWmma<w, BlockGemm>(c_block_tensor, a_block_tensor, b_block_tensor);
+            if constexpr(kWmmaSourceKeepDepth >= 3 && w > 1)
+                keep_b3 = keep_b2;
+            if constexpr(kWmmaSourceKeepDepth >= 2 && w > 0)
+                keep_b2 = keep_b;
+            keep_b = GetQkBSlice<w, BlockGemm>(b_block_tensor);
         };
         Executor::template ExecuteQkStage<Stage>(emit_wmma, emit_token, emit_point);
+        constexpr index_t kQkW = SelectedSchedule::kQkWmmasPerStage;
+        if constexpr(kWmmaSourceKeepDepth >= 1)
+            KeepFragmentAlive(keep_b);
+        if constexpr(kWmmaSourceKeepDepth >= 2 && kQkW > 1)
+            KeepFragmentAlive(keep_b2);
+        if constexpr(kWmmaSourceKeepDepth >= 3 && kQkW > 2)
+            KeepFragmentAlive(keep_b3);
         WaitQkStageTail<Stage>();
     }
 
@@ -526,16 +606,62 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
                Problem::BlockFmhaShape::Gemm0BlockWarps::at(number<1>{}) == 1;
     }
 
-    template <typename Problem>
-    CK_TILE_HOST_DEVICE static constexpr bool UseCompilerMax()
+    // RunPart0's local max of MSB Msb (lane max, its lane-half partner and the old max), with the
+    // lane max formed on the score pairs (c, c + 1) as two-wide vectors.
+    template <index_t Msb, typename ScoreTensor>
+    CK_TILE_DEVICE static float PairLocalMax(const ScoreTensor& score, float old_max)
     {
-        // Let the allocator place score tuples above the inline-asm low-VGPR range.
-        // D64/D128 and D192 dense batch use compiler-scheduled maximum chains.
-        return Geometry::kHeadDimQK <= 128 ||
-               (Geometry::kHeadDimQK == 192 && !Problem::kIsGroupMode &&
-                !Problem::FmhaMask::IsMasking);
+        using Softmax = ScoreSoftmax;
+        using Mapping = typename Softmax::Mapping;
+        array<typename Mapping::Pair, Mapping::kPairsPerMsb> pairs{};
+        static_for<0, Mapping::kPairsPerMsb, 1>{}(
+            [&](auto p) { pairs(p) = Mapping::template LoadPair<Msb, decltype(p)::value>(score); });
+        const auto pair_max  = PairTreeMax(pairs);
+        const float lane_max = max(pair_max[0], pair_max[1]);
+        return Softmax::template Max3<true>(lane_max, Softmax::PermuteLaneX16(lane_max), old_max);
     }
 
+    // ck_tile::max(float, float) is __builtin_fmaxf (llvm.maxnum); the same on two-wide vectors.
+    template <typename Pair>
+    CK_TILE_DEVICE static Pair PairMax(const Pair& x, const Pair& y)
+    {
+        return __builtin_elementwise_maxnum(x, y);
+    }
+
+    // Max of N pairs by max3 levels, lane by lane.
+    template <typename Pair, index_t N>
+    CK_TILE_DEVICE static Pair PairTreeMax(const array<Pair, N>& v)
+    {
+        if constexpr(N == 1)
+            return v[number<0>{}];
+        else if constexpr(N == 2)
+            return PairMax(v[number<0>{}], v[number<1>{}]);
+        else
+        {
+            constexpr index_t kTriples = N / 3;
+            constexpr index_t kRest    = N % 3;
+            array<Pair, kTriples + kRest> next{};
+            static_for<0, kTriples, 1>{}([&](auto i) {
+                constexpr index_t k = 3 * decltype(i)::value;
+                next(i) = PairMax(PairMax(v[number<k>{}], v[number<k + 1>{}]), v[number<k + 2>{}]);
+            });
+            static_for<0, kRest, 1>{}([&](auto i) {
+                constexpr index_t k          = decltype(i)::value;
+                next(number<kTriples + k>{}) = v[number<3 * kTriples + k>{}];
+            });
+            return PairTreeMax(next);
+        }
+    }
+
+    // Row maxima of the split softmax. Each MSB's score pairs (c, c + 1) reduce as two-wide vectors
+    // before one horizontal max, for every geometry:
+    // - On scalar max chains, the clang 24 SLP vectorizer pairs the two row halves' chains into
+    //   <2 x float> maxima (gfx1250 has no packed FP32 maximum) and carries that pairing into the
+    //   score PHIs and the mask selects: D64 M128 masked needs 336 VGPRs with 35 spilled, D128
+    //   M128 masked 514 (two waves per SIMD -> one).
+    // - It replaces the inline-asm v_max3 chains D192 used: inline-asm VGPR operands must sit in
+    //   the low VGPR range, which the WMMA-source keep-alive (KeepFragmentAlive) also needs.
+    // The maximum is associative and commutative, so the regrouped result is the same.
     template <typename Problem, typename ScoreTensor, typename RowTensor>
     CK_TILE_DEVICE static void RunSplitSoftmaxPart01(
         ScoreTensor& score, RowTensor& row_max, float log2e_scale, float& delta_m0, float& delta_m1)
@@ -548,46 +674,27 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
         static_assert(ScoreTensor::get_thread_buffer_size() == Mapping::kThreadBufferSize);
         static_assert(RowTensor::get_thread_buffer_size() == Geometry::kQkMIter);
 
+        constexpr bool kValidateMax = Problem::FmhaMask::IsMasking;
+        const float old_max_m0      = row_max.get_thread_buffer()[number<0>{}];
+        const float local_m0        = PairLocalMax<0>(score, old_max_m0);
+        const float local_m1        = PairLocalMax<1>(score, old_max_m0);
+        const auto p1_m0            = Softmax::template RunPart1<kValidateMax>(
+            local_m0, local_m1, old_max_m0 * log2e_scale, log2e_scale);
+        row_max.get_thread_buffer()[number<0>{}] = p1_m0.row_max;
+        delta_m0                                 = p1_m0.delta;
         if constexpr(Geometry::kQkMIter == 1)
         {
             // M64: each lane owns one row (Msb 0/1); there is no second row group.
-            const float old_max_m0         = row_max.get_thread_buffer()[number<0>{}];
-            constexpr bool kUseCompilerMax = UseCompilerMax<Problem>();
-            const auto p0_m0 = Softmax::template RunPart0<0, ScoreTensor, kUseCompilerMax>(
-                score, old_max_m0, log2e_scale);
-            const auto p0_m1 = Softmax::template RunPart0<1, ScoreTensor, kUseCompilerMax>(
-                score, old_max_m0, log2e_scale);
-            constexpr bool kValidateMax = Problem::FmhaMask::IsMasking;
-            const auto p1_m0            = Softmax::template RunPart1<kValidateMax>(
-                p0_m0.local_max, p0_m1.local_max, p0_m0.old_max_log2e, log2e_scale);
-            row_max.get_thread_buffer()[number<0>{}] = p1_m0.row_max;
-            delta_m0                                 = p1_m0.delta;
-            delta_m1                                 = 0.0f;
+            delta_m1 = 0.0f;
         }
         else
         {
-            const float old_max_m0 = row_max.get_thread_buffer()[number<0>{}];
             const float old_max_m1 = row_max.get_thread_buffer()[number<1>{}];
-
-            constexpr bool kUseCompilerMax = UseCompilerMax<Problem>();
-            const auto p0_m0 = Softmax::template RunPart0<0, ScoreTensor, kUseCompilerMax>(
-                score, old_max_m0, log2e_scale);
-            const auto p0_m1 = Softmax::template RunPart0<1, ScoreTensor, kUseCompilerMax>(
-                score, old_max_m0, log2e_scale);
-            const auto p0_m2 = Softmax::template RunPart0<2, ScoreTensor, kUseCompilerMax>(
-                score, old_max_m1, log2e_scale);
-            const auto p0_m3 = Softmax::template RunPart0<3, ScoreTensor, kUseCompilerMax>(
-                score, old_max_m1, log2e_scale);
-
-            constexpr bool kValidateMax = Problem::FmhaMask::IsMasking;
-            const auto p1_m0            = Softmax::template RunPart1<kValidateMax>(
-                p0_m0.local_max, p0_m1.local_max, p0_m0.old_max_log2e, log2e_scale);
-            const auto p1_m1 = Softmax::template RunPart1<kValidateMax>(
-                p0_m2.local_max, p0_m3.local_max, p0_m2.old_max_log2e, log2e_scale);
-
-            row_max.get_thread_buffer()[number<0>{}] = p1_m0.row_max;
+            const float local_m2   = PairLocalMax<2>(score, old_max_m1);
+            const float local_m3   = PairLocalMax<3>(score, old_max_m1);
+            const auto p1_m1       = Softmax::template RunPart1<kValidateMax>(
+                local_m2, local_m3, old_max_m1 * log2e_scale, log2e_scale);
             row_max.get_thread_buffer()[number<1>{}] = p1_m1.row_max;
-            delta_m0                                 = p1_m0.delta;
             delta_m1                                 = p1_m1.delta;
         }
     }
