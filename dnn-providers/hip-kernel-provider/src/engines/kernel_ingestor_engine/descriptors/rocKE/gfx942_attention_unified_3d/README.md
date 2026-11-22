@@ -56,10 +56,14 @@ and metric): `heuristic.uhd.json`, `model.bin.dvc` and `.gitignore` in git, `mod
 
 The L1 records the selector revision of the build it was trained on, and that revision digests
 the L2 and the rocKE code objects compiled at pack time. So whenever the L2, the catalog (the
-KDP), rocKE's code objects or the compiler (COMGR) that packs them changes, retrain the L1 with
-the UHD pipeline (`uhd-engine-build`, role `predict_engine`) on a build of the new source, after
-the L2. Until then the runtime refuses it (the engine reports no estimate), and the
-`TestGfx942AttentionUnified3dModelBinding` and `TestShippedEnginePredictors` census suites fail.
+KDP), rocKE's code objects or the compiler (COMGR) that packs them changes, retrain the L1 on a
+build of the new source, after the L2, with hipDNN's UHD tooling: `python -m uhd_gen generate`
+with `--role predict_engine --arch gfx942`, then `python -m uhd_gen promote --role
+predict_engine --arch gfx942` into this bundle (`projects/hipdnn/tools/uhd_gen/README.md`,
+"Regenerating a shipped model"; the `hipdnn-uhd` skill under `projects/hipdnn/tools/ai/skills`
+walks the same steps). Until then the runtime refuses it (the engine reports no estimate), and
+the `TestGfx942AttentionUnified3dModelBinding` and `TestShippedEnginePredictors` census suites
+fail.
 
 A build without `dvc pull -r ingestor` on a `model.bin.dvc` packs the bundle without that
 model: the pack warns, the model's UHD does not ship, and the loader logs the dangling id

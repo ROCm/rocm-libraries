@@ -28,8 +28,9 @@ engine:
   # (tests/test_trained_rankers.py, README "Shipping a trained model"). The engine
   # predictor (L1, `predict_engine`, d91b2ab8) estimates the engine under their pick, and
   # its selector revision digests them and the pack-time rocKE code objects: retrain it
-  # (UHD pipeline `uhd-engine-build`) whenever they, the catalog, rocKE's code objects or
-  # the compiler change.
+  # (`uhd_gen generate --role predict_engine`, then `uhd_gen promote --role predict_engine`;
+  # uhd_gen README "Regenerating a shipped model") whenever they, the catalog, rocKE's code
+  # objects or the compiler change.
   heuristics:
     sort_kernel_catalog:
       gfx950:

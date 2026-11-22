@@ -52,9 +52,13 @@ builder `build_attention_dense`). Engine: `hipkernel:Gfx950AttentionDense`.
   others. It records the selector revision of the build it was trained on, and that
   revision digests the rankers and the rocKE code objects compiled at pack time: whenever
   the L2, the KDP, rocKE's code objects or the compiler (COMGR) that packs them changes,
-  retrain the L1 with the UHD pipeline (`uhd-engine-build`, role `predict_engine`) on a
-  build of the new source. Until then the runtime refuses it (the engine reports no
-  estimate) and the `TestShippedEnginePredictors` census fails.
+  retrain the L1 on a build of the new source with hipDNN's UHD tooling: `python -m uhd_gen
+  generate` with `--role predict_engine --arch gfx950`, then `python -m uhd_gen promote
+  --role predict_engine --arch gfx950` into this bundle
+  (`projects/hipdnn/tools/uhd_gen/README.md`, "Regenerating a shipped model"; the
+  `hipdnn-uhd` skill under `projects/hipdnn/tools/ai/skills` walks the same steps). Until
+  then the runtime refuses it (the engine reports no estimate) and the
+  `TestShippedEnginePredictors` census fails.
 - **The native symbol reads the problem.** `preferredTile()` picks a tile from head size,
   mask and `seqlen_q`, and candidates are ranked by closeness to it, with the historical
   ascending `(block_m, block_n)` order as the tie-break. It is no longer a fixed
