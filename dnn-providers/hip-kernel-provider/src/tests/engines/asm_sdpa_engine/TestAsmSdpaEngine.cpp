@@ -30,6 +30,7 @@
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "AsmSdpaSelectorRevisionFixtures.hpp"
+#include "TestDescriptorRoot.hpp"
 #include "core/Context.hpp"
 #include "core/Handle.hpp"
 #include "core/Settings.hpp"
@@ -346,10 +347,12 @@ hipdnn_plugin_sdk::ingestor::DeclaredEnginePredictions
         {{std::string(arch), {hipdnn_flatbuffers_sdk::utilities::parseUuid(id)}}});
 }
 
-/// Every declared id names a model the provider installs, shipped for the architecture
-/// that declares it, which passes every load check and estimates a forward graph. The
-/// shipped-model gate owns the revision check, so each model is resolved under the revision
-/// it records: this case holds while a retrain is pending.
+/// Every declared id names a model the provider installs for each architecture whose
+/// production shard this install stages (TheRock installs one architecture family per test
+/// job, so there the other architectures' models are absent by design), shipped for the
+/// architecture that declares it, which passes every load check and estimates a forward
+/// graph. The shipped-model gate owns the revision check, so each model is resolved under
+/// the revision it records: this case holds while a retrain is pending.
 TEST(TestAsmSdpaEngineDeclaration, EachDeclaredModelShipsForItsArchitectureAndEstimates)
 {
     namespace ingestor = hipdnn_plugin_sdk::ingestor;
@@ -359,12 +362,19 @@ TEST(TestAsmSdpaEngineDeclaration, EachDeclaredModelShipsForItsArchitectureAndEs
     auto configBuilder = engineConfigNaming("tflops");
     const EngineConfigWrapper config(configBuilder.GetBufferPointer(), configBuilder.GetSize());
 
+    size_t shippedModels = 0;
     for(const auto& [arch, id] : AsmSdpaEngine::L1_MODEL_IDS)
     {
         SCOPED_TRACE(std::string(arch) + " declares " + std::string(id));
         const auto shipped
             = catalog.heuristics.find(hipdnn_flatbuffers_sdk::utilities::parseUuid(id));
-        ASSERT_NE(shipped, catalog.heuristics.end()) << "no installed descriptor defines it";
+        if(shipped == catalog.heuristics.end())
+        {
+            EXPECT_FALSE(hip_kernel_provider::testing::productShardStagedFor(std::string(arch)))
+                << "this install stages " << arch << " but no installed descriptor defines it";
+            continue;
+        }
+        ++shippedModels;
         const std::string recorded = shipped->second.descriptor.trainedAgainstSelectorRevision;
 
         const auto resolved = resolveDeclared(arch, id, recorded);
@@ -399,10 +409,15 @@ TEST(TestAsmSdpaEngineDeclaration, EachDeclaredModelShipsForItsArchitectureAndEs
         EXPECT_EQ(prediction.status, PredictionStatus::AVAILABLE) << prediction.reason;
         EXPECT_TRUE(std::isfinite(prediction.value) && prediction.value > 0.0) << prediction.value;
     }
+    if(shippedModels == 0 && !HasFailure())
+    {
+        GTEST_SKIP() << "this install stages no architecture an ASM SDPA L1 model is declared for";
+    }
 }
 
 /// The engine answers from the model it declares for the device's architecture: the
-/// estimate when that model binds this build, else the loader's own refusal of it.
+/// estimate when that model binds this build, else the loader's own refusal of it, and no
+/// estimate on an architecture whose shard this install does not stage.
 TEST_F(TestAsmSdpaEngine, EstimatesComeFromTheModelDeclaredForTheDeviceArchitecture)
 {
     auto graphBuilder = createSdpaFwdGraph();
@@ -432,8 +447,13 @@ TEST_F(TestAsmSdpaEngine, EstimatesComeFromTheModelDeclaredForTheDeviceArchitect
             continue;
         }
         const auto bound = expected.byMetric.find("tflops");
-        ASSERT_TRUE(bound != expected.byMetric.end() && bound->second.count(std::string(arch)) != 0)
-            << "the loader neither binds nor refuses the declared model: nothing deploys it";
+        if(bound == expected.byMetric.end() || bound->second.count(std::string(arch)) == 0)
+        {
+            EXPECT_FALSE(hip_kernel_provider::testing::productShardStagedFor(std::string(arch)))
+                << "the loader neither binds nor refuses the declared model: nothing deploys it";
+            EXPECT_EQ(prediction.status, PredictionStatus::UNAVAILABLE) << prediction.reason;
+            continue;
+        }
         EXPECT_EQ(prediction.status, PredictionStatus::AVAILABLE) << prediction.reason;
         EXPECT_TRUE(std::isfinite(prediction.value) && prediction.value > 0.0) << prediction.value;
     }
