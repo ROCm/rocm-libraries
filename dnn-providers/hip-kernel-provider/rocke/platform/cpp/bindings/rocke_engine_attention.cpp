@@ -1420,9 +1420,39 @@ void reg3(py::module_& m,
 
 /* ===================== spec_from_problem ===================== */
 
+/* Refuse a problem that sets a UnifiedAttentionProblem field the C struct has no
+ * member for, where the field changes the Python gfx950 tiled-2D spec: additive
+ * bias (selector gates and spec field), the LSE output, a pinned waves_per_eu, and
+ * the top-left / right-bounded mask. Dropping one would run the C++ selector on a
+ * different problem than the Python one and return a different spec without
+ * saying so. A field left at its default carries no information and is accepted. */
+static void require_c_representable_problem(const py::dict& d)
+{
+    std::vector<std::string> unsupported;
+    for(const char* flag : {"use_additive_bias", "emit_lse", "causal_top_left"})
+    {
+        if(a_bool(d, flag, false))
+            unsupported.push_back(std::string(flag) + "=True");
+    }
+    if(d.contains("waves_per_eu") && !d["waves_per_eu"].is_none())
+        unsupported.push_back("waves_per_eu=" + py::str(d["waves_per_eu"]).cast<std::string>());
+    if(const int right_bound = a_int(d, "right_bound", 0); right_bound != 0)
+        unsupported.push_back("right_bound=" + std::to_string(right_bound));
+    if(unsupported.empty())
+        return;
+    std::string fields;
+    for(const std::string& field : unsupported)
+        fields += (fields.empty() ? "" : ", ") + field;
+    throw py::value_error("gfx950_attn_tiled_spec_from_problem failed - " + fields
+                          + ": rocke_unified_attn_problem_t cannot carry this, so the C++ "
+                            "selector would pick a different spec than Python; select this "
+                            "problem with the Python engine");
+}
+
 /* Convert a Python UnifiedAttentionProblem dict to the C struct. */
 static rocke_unified_attn_problem_t problem_dict_to_c(const py::dict& d, Store& st)
 {
+    require_c_representable_problem(d);
     rocke_unified_attn_problem_t p{};
     p.total_q = a_int(d, "total_q", 0);
     p.num_seqs = a_int(d, "num_seqs", 0);
