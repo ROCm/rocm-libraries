@@ -7,7 +7,7 @@ import itertools
 import json
 import os
 from collections import OrderedDict
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, ClassVar, Dict, Iterable, List, Optional, Tuple
 
@@ -1984,6 +1984,22 @@ GFX125_QR_TDM_BM0_CROSSOVER_MAX_SEQLEN_Q = {
 # divided by batch. Logical member lengths still come from their sequence metadata.
 GFX125_D192_N128_MIN_AVERAGE_K = 512
 
+# Batch mode passes one K length; group mode passes total packed K, so compare
+# its average against the same per-sequence threshold. Logical length pointers
+# indicate that physical padding may inflate the total, so those cases keep N64.
+GFX125_D192_N128_CONSTRAINT = CppConstraint(
+    f"a.seqlen_k >= {GFX125_D192_N128_MIN_AVERAGE_K}LL * "
+    "(t.is_group_mode ? a.batch : 1)"
+    " && a.seqlen_k_ptr == nullptr"
+    " && a.cu_seqlen_k_ptr == nullptr"
+    " && get_num_blocks(128) <= num_cus"
+    " && (t.mask_type == mask_enum::no_mask ||"
+    " ((t.mask_type == mask_enum::mask_top_left ||"
+    " t.mask_type == mask_enum::mask_bottom_right)"
+    " && a.window_size_left < 0 && a.window_size_right == 0"
+    " && a.seqlen_q == a.seqlen_k))"
+)
+
 # d128 fp16/bf16 queries that qr_tdm_pingpong takes from qr_tdm_sched (from 128 rows)
 # and qr_tdm (below). qr_tdm_pingpong relies on several resident blocks to overlap
 # softmax with the gemms, while qr_tdm_sched and qr_tdm's double K/V buffer prefetch
@@ -2020,9 +2036,18 @@ GFX125_D64_N128_CONSTRAINT = CppConstraint(
     " ((t.mask_type == mask_enum::mask_top_left ||"
     " t.mask_type == mask_enum::mask_bottom_right) && a.window_size_right == 0"
     " && (a.window_size_left < 0 ||"
+    " (t.is_group_mode && a.window_size_left >= 127) ||"
     " (!t.is_group_mode && a.seqlen_q == a.seqlen_k && a.window_size_left >= 127"
     " && a.seqlen_q_ptr == nullptr && a.seqlen_k_ptr == nullptr"
     " && a.cu_seqlen_q_ptr == nullptr && a.cu_seqlen_k_ptr == nullptr))))"
+)
+
+# D64 scheduled M64 doubles the workgroup count of M128. Measured on D64 group-mode prefill (16
+# query heads, 2026-11-17): it wins when the M128 grid leaves CUs idle, or fills each CU once
+# with K loops of at least 2048 rows; with shorter loops the per-workgroup prologue dominates.
+GFX125_D64_SCHED_M64_CONSTRAINT = CppConstraint(
+    "get_num_blocks(128) < num_cus"
+    " || (get_num_blocks(128) <= num_cus && a.max_seqlen_q >= 2048)"
 )
 
 # GenericAttentionMask causal has a different measured crossover from the
@@ -2070,18 +2095,33 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
     # Pipelines whose tiles carry F_pipeline_tag (see check_tile_owner).
     _PIPELINES_WITH_OWN_TILES = ("qr_tdm_pingpong",)
 
-    # Define scheduled tile configurations once. Codegen inventory and pipeline
-    # compatibility share these entries; runtime constraints are attached to copies.
+    # Define scheduled tiles and their default runtime constraints once.
+    # Codegen inventory and pipeline compatibility share these entries.
     _QR_TDM_SCHED_TILES = {
         (64, 64): (
             FmhaFwdTileSize(128, 128, 32, 64, 32, 64, 4, 1, 1, 4, 1, 1, 16, 16, 32, 16, 16, 32, 3),
             FmhaFwdTileSize(128, 64, 32, 64, 32, 64, 4, 1, 1, 4, 1, 1, 16, 16, 32, 16, 16, 32, 3),
+            # M64: four waves of 16 query rows (one WMMA row tile per wave). N128 only:
+            # with N64 the per-iteration K/V reads and barriers dominate 16-row waves.
+            FmhaFwdTileSize(
+                64, 128, 32, 64, 32, 64,
+                4, 1, 1, 4, 1, 1,
+                16, 16, 32, 16, 16, 32,
+                3,
+                F_constraint=CppConstraint() & GFX125_D64_SCHED_M64_CONSTRAINT,
+            ),
         ),
         (128, 128): (
             FmhaFwdTileSize(128, 128, 32, 128, 32, 128, 4, 1, 1, 4, 1, 1, 16, 16, 32, 16, 16, 32, 1),
         ),
         (192, 128): (
-            FmhaFwdTileSize(128, 128, 32, 128, 32, 192, 4, 1, 1, 4, 1, 1, 16, 16, 32, 16, 16, 32, 1),
+            FmhaFwdTileSize(
+                128, 128, 32, 128, 32, 192,
+                4, 1, 1, 4, 1, 1,
+                16, 16, 32, 16, 16, 32,
+                1,
+                F_constraint=GFX125_D192_N128_CONSTRAINT,
+            ),
             FmhaFwdTileSize(128, 64, 32, 128, 32, 192, 4, 1, 1, 4, 1, 1, 16, 16, 32, 16, 16, 32, 2),
         ),
     }  # fmt: skip
@@ -2447,34 +2487,16 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
                 result[(64, 64)].extend(
                     copy.deepcopy(cls._QR_TDM_SCHED_TILES[(64, 64)])
                 )
+                # Dispatch order is ascending bm0; the stable sort keeps each pipeline's order.
+                result[(64, 64)].sort(key=lambda tile: tile.F_bm0)
                 # Append the qr_tdm_sched tiles. The codegen compatibility rule pairs
                 # these tile variants with the scheduled pipeline: D128 uses N128,
-                # while D192 tries N128 first and then N64. Batch mode passes
-                # one K length; group mode passes total packed K, so compare
-                # its average against the same per-sequence threshold. Logical
-                # length pointers indicate that physical padding may inflate
-                # the total, so those cases keep N64.
-                d192_n128_constraint = CppConstraint(
-                    f"a.seqlen_k >= {GFX125_D192_N128_MIN_AVERAGE_K}LL * "
-                    "(t.is_group_mode ? a.batch : 1)"
-                    " && a.seqlen_k_ptr == nullptr"
-                    " && a.cu_seqlen_k_ptr == nullptr"
-                    " && get_num_blocks(128) <= num_cus"
-                    " && (t.mask_type == mask_enum::no_mask ||"
-                    " ((t.mask_type == mask_enum::mask_top_left ||"
-                    " t.mask_type == mask_enum::mask_bottom_right)"
-                    " && a.window_size_left < 0 && a.window_size_right == 0"
-                    " && a.seqlen_q == a.seqlen_k))"
-                )
+                # while D192 tries N128 first and then N64.
                 result[(128, 128)].extend(
                     copy.deepcopy(cls._QR_TDM_SCHED_TILES[(128, 128)])
                 )
-                d192_n128, d192_n64 = copy.deepcopy(cls._QR_TDM_SCHED_TILES[(192, 128)])
                 result[(192, 128)].extend(
-                    [
-                        replace(d192_n128, F_constraint=d192_n128_constraint),
-                        d192_n64,
-                    ]
+                    copy.deepcopy(cls._QR_TDM_SCHED_TILES[(192, 128)])
                 )
             return result
         elif dtype in cls._DT_FP8_FP8BF16:

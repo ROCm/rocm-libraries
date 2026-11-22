@@ -41,9 +41,10 @@ struct BlockFmhaPipelineQRKSVSTdmSched
     using ODataType             = remove_cvref_t<typename Problem::ODataType>;
     using AttentionVariant      = remove_cvref_t<typename Problem::AttentionVariant>;
     using FmhaMask              = remove_cvref_t<typename Problem::FmhaMask>;
-    using SplitSoftmax          = FmhaTdmSchedSplitSoftmaxFor<Policy::Geometry::kQkStages>;
-    using Schedule              = typename Policy::Schedule;
-    using Mode                  = FmhaTdmSchedMode<Problem, Policy>;
+    using SplitSoftmax =
+        FmhaTdmSchedSplitSoftmaxFor<Policy::Geometry::kQkStages, Policy::Geometry::kQkMIter>;
+    using Schedule = typename Policy::Schedule;
+    using Mode     = FmhaTdmSchedMode<Problem, Policy>;
     static_assert(Mode::kIsLegal,
                   "qr_tdm_sched schedule geometry or output-rescale placement is incompatible");
 
@@ -51,7 +52,8 @@ struct BlockFmhaPipelineQRKSVSTdmSched
     using VLayout                    = remove_cvref_t<typename BlockFmhaShape::VLayout>;
     static constexpr bool kQLoadOnce = true; // if q_tile load whole block length (hdim) at once
     static_assert(kQLoadOnce == Policy::QLoadOnce);
-    static constexpr bool kKLoadOnce = BlockFmhaShape::kM0 > 64;
+    // The scheduled pipeline always loads the full K head (the policy requires it), also for M64.
+    static constexpr bool kKLoadOnce = true;
 
     static constexpr index_t kBlockSize = Problem::kBlockSize;
 
@@ -258,7 +260,8 @@ struct BlockFmhaPipelineQRKSVSTdmSched
         using PvBlockGemm   = remove_cvref_t<decltype(gemm_1)>;
         using PvWarpGemm    = typename PvBlockGemm::WarpGemm;
         using PvCWarpTensor = typename PvWarpGemm::CWarpTensor;
-        static_assert(PvBlockGemm::KIterPerWarp == 1 && PvBlockGemm::MIterPerWarp == 2 &&
+        static_assert(PvBlockGemm::KIterPerWarp == 1 &&
+                      PvBlockGemm::MIterPerWarp == Geometry::kPvMIter &&
                       PvBlockGemm::NIterPerWarp == Geometry::kPvNIter);
         static_assert(std::is_same_v<OaccDataType, float>);
         static_assert(std::is_same_v<remove_cvref_t<typename PvCWarpTensor::DataType>, float>);

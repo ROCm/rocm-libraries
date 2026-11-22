@@ -144,12 +144,13 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
     static constexpr index_t kLdsOffsetV1  = kLdsOffsetV0 + kVFootprintBytes;
     static constexpr index_t kLdsArenaSize = kLdsOffsetV1 + kVFootprintBytes;
 
-    using OutputFragments = FmhaTdmSchedOutputFragmentsFor<Geometry::kPvNIter / 2>;
+    using OutputFragments =
+        FmhaTdmSchedOutputFragmentsFor<Geometry::kPvNIter / 2, Geometry::kPvMIter>;
 
     // The split-softmax score mapping and the PV output fragments are hand-written for one
     // decomposition; tie them to the derived geometry.
     static_assert(FmhaTdmSchedSupportedGeometry<Geometry>::value);
-    using ScoreSoftmax = FmhaTdmSchedSplitSoftmaxFor<Geometry::kQkStages>;
+    using ScoreSoftmax = FmhaTdmSchedSplitSoftmaxFor<Geometry::kQkStages, Geometry::kQkMIter>;
     using ScoreMapping = typename ScoreSoftmax::Mapping;
     static_assert(ScoreMapping::kNumMIter == Geometry::kQkMIter &&
                       ScoreMapping::kNumNIter == Geometry::kN / Geometry::kQkWmmaN &&
@@ -545,31 +546,50 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
         static_assert(Problem::BiasEnum == BlockAttentionBiasEnum::NO_BIAS);
         static_assert(!Problem::kHasLogitsSoftCap);
         static_assert(ScoreTensor::get_thread_buffer_size() == Mapping::kThreadBufferSize);
-        static_assert(RowTensor::get_thread_buffer_size() == 2);
+        static_assert(RowTensor::get_thread_buffer_size() == Geometry::kQkMIter);
 
-        const float old_max_m0 = row_max.get_thread_buffer()[number<0>{}];
-        const float old_max_m1 = row_max.get_thread_buffer()[number<1>{}];
+        if constexpr(Geometry::kQkMIter == 1)
+        {
+            // M64: each lane owns one row (Msb 0/1); there is no second row group.
+            const float old_max_m0         = row_max.get_thread_buffer()[number<0>{}];
+            constexpr bool kUseCompilerMax = UseCompilerMax<Problem>();
+            const auto p0_m0 = Softmax::template RunPart0<0, ScoreTensor, kUseCompilerMax>(
+                score, old_max_m0, log2e_scale);
+            const auto p0_m1 = Softmax::template RunPart0<1, ScoreTensor, kUseCompilerMax>(
+                score, old_max_m0, log2e_scale);
+            constexpr bool kValidateMax = Problem::FmhaMask::IsMasking;
+            const auto p1_m0            = Softmax::template RunPart1<kValidateMax>(
+                p0_m0.local_max, p0_m1.local_max, p0_m0.old_max_log2e, log2e_scale);
+            row_max.get_thread_buffer()[number<0>{}] = p1_m0.row_max;
+            delta_m0                                 = p1_m0.delta;
+            delta_m1                                 = 0.0f;
+        }
+        else
+        {
+            const float old_max_m0 = row_max.get_thread_buffer()[number<0>{}];
+            const float old_max_m1 = row_max.get_thread_buffer()[number<1>{}];
 
-        constexpr bool kUseCompilerMax = UseCompilerMax<Problem>();
-        const auto p0_m0 = Softmax::template RunPart0<0, ScoreTensor, kUseCompilerMax>(
-            score, old_max_m0, log2e_scale);
-        const auto p0_m1 = Softmax::template RunPart0<1, ScoreTensor, kUseCompilerMax>(
-            score, old_max_m0, log2e_scale);
-        const auto p0_m2 = Softmax::template RunPart0<2, ScoreTensor, kUseCompilerMax>(
-            score, old_max_m1, log2e_scale);
-        const auto p0_m3 = Softmax::template RunPart0<3, ScoreTensor, kUseCompilerMax>(
-            score, old_max_m1, log2e_scale);
+            constexpr bool kUseCompilerMax = UseCompilerMax<Problem>();
+            const auto p0_m0 = Softmax::template RunPart0<0, ScoreTensor, kUseCompilerMax>(
+                score, old_max_m0, log2e_scale);
+            const auto p0_m1 = Softmax::template RunPart0<1, ScoreTensor, kUseCompilerMax>(
+                score, old_max_m0, log2e_scale);
+            const auto p0_m2 = Softmax::template RunPart0<2, ScoreTensor, kUseCompilerMax>(
+                score, old_max_m1, log2e_scale);
+            const auto p0_m3 = Softmax::template RunPart0<3, ScoreTensor, kUseCompilerMax>(
+                score, old_max_m1, log2e_scale);
 
-        constexpr bool kValidateMax = Problem::FmhaMask::IsMasking;
-        const auto p1_m0            = Softmax::template RunPart1<kValidateMax>(
-            p0_m0.local_max, p0_m1.local_max, p0_m0.old_max_log2e, log2e_scale);
-        const auto p1_m1 = Softmax::template RunPart1<kValidateMax>(
-            p0_m2.local_max, p0_m3.local_max, p0_m2.old_max_log2e, log2e_scale);
+            constexpr bool kValidateMax = Problem::FmhaMask::IsMasking;
+            const auto p1_m0            = Softmax::template RunPart1<kValidateMax>(
+                p0_m0.local_max, p0_m1.local_max, p0_m0.old_max_log2e, log2e_scale);
+            const auto p1_m1 = Softmax::template RunPart1<kValidateMax>(
+                p0_m2.local_max, p0_m3.local_max, p0_m2.old_max_log2e, log2e_scale);
 
-        row_max.get_thread_buffer()[number<0>{}] = p1_m0.row_max;
-        row_max.get_thread_buffer()[number<1>{}] = p1_m1.row_max;
-        delta_m0                                 = p1_m0.delta;
-        delta_m1                                 = p1_m1.delta;
+            row_max.get_thread_buffer()[number<0>{}] = p1_m0.row_max;
+            row_max.get_thread_buffer()[number<1>{}] = p1_m1.row_max;
+            delta_m0                                 = p1_m0.delta;
+            delta_m1                                 = p1_m1.delta;
+        }
     }
 
     template <typename Problem, typename ScoreTensor, typename RowTensor>
@@ -588,7 +608,7 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
         static_assert(Problem::BiasEnum == BlockAttentionBiasEnum::NO_BIAS);
         static_assert(!Problem::kHasLogitsSoftCap);
         static_assert(ScoreTensor::get_thread_buffer_size() == Mapping::kThreadBufferSize);
-        static_assert(RowTensor::get_thread_buffer_size() == 2);
+        static_assert(RowTensor::get_thread_buffer_size() == Geometry::kQkMIter);
 
         constexpr bool kValidateMax = Problem::FmhaMask::IsMasking;
 
@@ -603,27 +623,44 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
             }
         };
 
-        const float row_max_m0 = row_max.get_thread_buffer()[number<0>{}];
-        const float row_max_m1 = row_max.get_thread_buffer()[number<1>{}];
-        const float old_sum_m0 = row_sum.get_thread_buffer()[number<0>{}];
-        const float old_sum_m1 = row_sum.get_thread_buffer()[number<1>{}];
+        if constexpr(Geometry::kQkMIter == 1)
+        {
+            // M64: one row group per lane.
+            const float row_max_m0 = row_max.get_thread_buffer()[number<0>{}];
+            const float old_sum_m0 = row_sum.get_thread_buffer()[number<0>{}];
+            const float sum_m0     = Softmax::template RunPart2LocalSum<0>(
+                score, validated_max(row_max_m0), log2e_scale);
+            const float sum_m1 = Softmax::template RunPart2LocalSum<1>(
+                score, validated_max(row_max_m0), log2e_scale);
+            row_sum.get_thread_buffer()[number<0>{}] =
+                Softmax::UpdateRowSum(old_sum_m0, Softmax::MergeRowSum(sum_m0, sum_m1), delta_m0);
+            output_scale_m0 = Softmax::Exp2(delta_m0);
+            output_scale_m1 = 1.0f;
+        }
+        else
+        {
+            const float row_max_m0 = row_max.get_thread_buffer()[number<0>{}];
+            const float row_max_m1 = row_max.get_thread_buffer()[number<1>{}];
+            const float old_sum_m0 = row_sum.get_thread_buffer()[number<0>{}];
+            const float old_sum_m1 = row_sum.get_thread_buffer()[number<1>{}];
 
-        const float sum_m0 =
-            Softmax::template RunPart2LocalSum<0>(score, validated_max(row_max_m0), log2e_scale);
-        const float sum_m1 =
-            Softmax::template RunPart2LocalSum<1>(score, validated_max(row_max_m0), log2e_scale);
-        const float sum_m2 =
-            Softmax::template RunPart2LocalSum<2>(score, validated_max(row_max_m1), log2e_scale);
-        const float sum_m3 =
-            Softmax::template RunPart2LocalSum<3>(score, validated_max(row_max_m1), log2e_scale);
+            const float sum_m0 = Softmax::template RunPart2LocalSum<0>(
+                score, validated_max(row_max_m0), log2e_scale);
+            const float sum_m1 = Softmax::template RunPart2LocalSum<1>(
+                score, validated_max(row_max_m0), log2e_scale);
+            const float sum_m2 = Softmax::template RunPart2LocalSum<2>(
+                score, validated_max(row_max_m1), log2e_scale);
+            const float sum_m3 = Softmax::template RunPart2LocalSum<3>(
+                score, validated_max(row_max_m1), log2e_scale);
 
-        row_sum.get_thread_buffer()[number<0>{}] =
-            Softmax::UpdateRowSum(old_sum_m0, Softmax::MergeRowSum(sum_m0, sum_m1), delta_m0);
-        row_sum.get_thread_buffer()[number<1>{}] =
-            Softmax::UpdateRowSum(old_sum_m1, Softmax::MergeRowSum(sum_m2, sum_m3), delta_m1);
+            row_sum.get_thread_buffer()[number<0>{}] =
+                Softmax::UpdateRowSum(old_sum_m0, Softmax::MergeRowSum(sum_m0, sum_m1), delta_m0);
+            row_sum.get_thread_buffer()[number<1>{}] =
+                Softmax::UpdateRowSum(old_sum_m1, Softmax::MergeRowSum(sum_m2, sum_m3), delta_m1);
 
-        output_scale_m0 = Softmax::Exp2(delta_m0);
-        output_scale_m1 = Softmax::Exp2(delta_m1);
+            output_scale_m0 = Softmax::Exp2(delta_m0);
+            output_scale_m1 = Softmax::Exp2(delta_m1);
+        }
     }
 
     template <index_t Ordinal, typename Fragments>

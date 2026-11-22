@@ -8,13 +8,13 @@
 
 namespace ck_tile {
 
-template <index_t ColumnGroups>
+template <index_t ColumnGroups, index_t NumMIter = 2>
 struct FmhaTdmSchedOutputFragmentsFor
 {
-    using Mapping  = FmhaTdmSchedScoreFragmentMappingFor<ColumnGroups>;
+    using Mapping  = FmhaTdmSchedScoreFragmentMappingFor<ColumnGroups, NumMIter>;
     using Fragment = fp32x8_t;
 
-    static constexpr index_t kNumDmsb             = 4;
+    static constexpr index_t kNumDmsb             = 2 * NumMIter;
     static constexpr index_t kNumN                = ColumnGroups;
     static constexpr index_t kNumFragments        = kNumDmsb * kNumN;
     static constexpr index_t kElementsPerFragment = 8;
@@ -92,6 +92,8 @@ static_assert(FmhaTdmSchedOutputFragments::kNumFragments *
                   FmhaTdmSchedOutputFragments::kElementsPerFragment ==
               FmhaTdmSchedScoreFragmentMapping::kThreadBufferSize);
 static_assert(FmhaTdmSchedOutputFragments::ValidateMapping());
+static_assert(FmhaTdmSchedOutputFragmentsFor<2, 1>::kNumFragments == 4 &&
+              FmhaTdmSchedOutputFragmentsFor<2, 1>::ValidateMapping());
 
 // Each wave copies only the rows it staged, so no barrier follows the staging. The async store
 // has no bounds check: rows past num_valid_rows are clamped to the wave's last valid row.

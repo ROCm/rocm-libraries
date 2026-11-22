@@ -438,7 +438,8 @@ struct FmhaTdmSchedSequentialTileSchedule
 
 template <typename Geometry>
 using FmhaTdmSchedDefaultScheduleFor = FmhaTdmSchedSequentialTileSchedule<
-    std::conditional_t<Geometry::kHeadDimQK == 64 && Geometry::kN == 64,
+    // Read-first was validated with one read per WMMA row (M128); M64 keeps the reads after WMMAs.
+    std::conditional_t<Geometry::kM == 128 && Geometry::kHeadDimQK == 64 && Geometry::kN == 64,
                        FmhaTdmSchedReadFirstPlacement<FmhaTdmSchedScheduleFor<Geometry>>,
                        FmhaTdmSchedWmmaFirstPlacement<FmhaTdmSchedScheduleFor<Geometry>>>>;
 
