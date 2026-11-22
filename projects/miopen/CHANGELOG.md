@@ -91,8 +91,7 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   input depth of at least 3 and input width of at least 256 (for example Wan VAE layers). A
   hard-coded rule in `ConvHipImplicitGemm3DGroupFwdXdlops` returned one fixed CK instance for
   these problems ahead of the AI heuristic, and Composable Kernel now accepts that instance for
-  larger problems. The gfx950 rule is removed, so these problems use the AI heuristic. gfx942 is
-  unchanged.
+  larger problems. The gfx950 rule is removed, so these problems use the AI heuristic.
 
 ### Added
 * [Build] ROCm builds now enable `MIOPEN_ENABLE_HIPDNN_WRAPPER` by default. MIOpen is built as a
@@ -123,7 +122,13 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   implicit-GEMM solvers (2D and 3D; forward, backward-data, backward-weights) are refreshed on
   current tuning data. Set `MIOPEN_DEBUG_AI_DISABLE_PRECOMPUTED_CONFIG_EMB=1` to disable the table
   and revert to the non-AI heuristic; set `MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_FWD_XDLOPS_HARDCODE=0`
-  to skip the pre-existing gfx942 3D forward hard-coded kernel picks and use the AI heuristic.
+  to skip the remaining gfx942 3D forward hard-coded kernel pick and use the AI heuristic.
+* [Conv] On gfx942, `ConvHipImplicitGemm3DGroupFwdXdlops` now takes the default kernel for FP16
+  and BF16 3D forward convolutions from the AI heuristic in all but one of the input and output
+  channel ranges that had a hard-coded pick. Only the pick for ungrouped convolutions with at most
+  32 input channels and fewer than 128 output channels remains, and it applies to 1x1 filters with
+  no padding. On the problems the removed picks covered, the AI pick is closer to the tuned kernel
+  more often than the removed pick was.
 * [Conv] Refreshed the 2D and 3D TunaNet solver-selection heuristics for gfx942 and gfx950 to
   support the current solver set (including `ConvHipConv`, depthwise, and Winograd variants) and
   improve top-1 accuracy and time-regret across all four architecture/dimension combinations.

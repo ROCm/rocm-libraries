@@ -800,9 +800,12 @@ following table. For more information, see :doc:`Logging and debugging <../how-t
         | 1: Enable
 
     * - | ``MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_FWD_XDLOPS_HARDCODE``
-        | Opts out of the gfx942 FP16/BF16 hard-coded kernel picks for 3D
-        | ConvHipImplicitGemm3DGroupFwdXdlops, so selection uses the AI heuristic instead. gfx950
-        | has no hard-coded picks and always uses the AI heuristic.
+        | Opts out of the gfx942 FP16/BF16 hard-coded kernel pick for 3D
+        | ConvHipImplicitGemm3DGroupFwdXdlops, so selection uses the AI heuristic instead. The pick
+        | only covers ungrouped convolutions with 1x1 filters, no padding, at most 32 input
+        | channels and fewer than 128 output channels. Other problems, and gfx950, skip this step
+        | and go to the AI heuristic, then to the default kernel when the AI heuristic is disabled
+        | or finds no kernel.
       - | 0: Skip the override and use the AI heuristic
         | unset or 1: Hard-coded override active (default)
 
