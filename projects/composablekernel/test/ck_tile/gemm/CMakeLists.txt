@@ -311,6 +311,30 @@ if(GPU_TARGETS MATCHES "gfx94|gfx95|gfx90a|gfx11|gfx12")
             endforeach()
             target_compile_definitions(test_ck_tile_gemm_e_permute_tdm_v3 PRIVATE E_PERMUTE_TDM_V3)
             list(APPEND CK_TILE_GEMM_TEST_TARGETS ${CK_TILE_GEMM_E_PERMUTE_TDM_TARGETS})
+            # The A-stationary GEMM (plain and permuted E); its async mainloop is gfx125 only. A
+            # mismatched barrier or async-count wait would hang, hence the cap. The resource check
+            # fails if a compiler change makes its kernels spill VGPRs or use scratch.
+            add_gtest_executable(test_ck_tile_gemm_a_stationary test_gemm_a_stationary.cpp)
+            target_compile_options(test_ck_tile_gemm_a_stationary PRIVATE ${EXAMPLE_GEMM_COMPILE_OPTIONS})
+            ck_tile_restrict_archs(test_ck_tile_gemm_a_stationary "^gfx125")
+            set_tests_properties(test_ck_tile_gemm_a_stationary PROPERTIES TIMEOUT 900)
+            list(APPEND CK_TILE_GEMM_TEST_TARGETS test_ck_tile_gemm_a_stationary)
+            if(NOT _ra_non_gfx125_targets AND TEST test_ck_tile_gemm_a_stationary)
+                set_property(TEST test_ck_tile_gemm_a_stationary
+                    APPEND PROPERTY ENVIRONMENT "CK_TILE_REQUIRE_GFX125=1")
+            endif()
+            if(TARGET test_ck_tile_gemm_a_stationary AND CK_LLVM_OBJDUMP AND CK_LLVM_READELF)
+                add_test(NAME test_ck_tile_gemm_a_stationary_resources
+                    COMMAND ${CMAKE_COMMAND}
+                        -DTEST_BINARY=$<TARGET_FILE:test_ck_tile_gemm_a_stationary>
+                        -DLLVM_OBJDUMP=${CK_LLVM_OBJDUMP}
+                        -DLLVM_READELF=${CK_LLVM_READELF}
+                        -DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/a_stationary_resources
+                        -DKERNEL_PATTERN=GemmAStationary
+                        -P ${CMAKE_CURRENT_SOURCE_DIR}/check_comp_tdm_v3_resources.cmake)
+                set_tests_properties(test_ck_tile_gemm_a_stationary_resources
+                    PROPERTIES LABELS "SMOKE_TEST;CK_TILE_GEMM_TESTS")
+            endif()
         endif()
     endif()
 
@@ -320,9 +344,11 @@ if(GPU_TARGETS MATCHES "gfx94|gfx95|gfx90a|gfx11|gfx12")
     endforeach()
     # The loop above replaces the SMOKE_TEST label, and the gfx1250 CI stage only runs "ninja smoke".
     # Keep the gfx125 async-LDS tests, the TDM LDS padding test and the E-permute tests in that set;
-    # all of them fit the smoke time budget on the gfx1250 emulator.
+    # all of them fit the smoke time budget on the gfx1250 emulator. The A-stationary test joins
+    # them: its device cases are smoke-sized (B = 2, N <= 768, host reference).
     foreach(test_target ${CK_TILE_GEMM_ASYNC_WMMA_TARGETS} test_ck_tile_gemm_pipeline_tdm_lds_padding_wmma
-                        test_ck_tile_gemm_e_permute_wmma ${CK_TILE_GEMM_E_PERMUTE_TDM_TARGETS})
+                        test_ck_tile_gemm_e_permute_wmma ${CK_TILE_GEMM_E_PERMUTE_TDM_TARGETS}
+                        test_ck_tile_gemm_a_stationary)
         if(TEST ${test_target})
             set_property(TEST ${test_target} APPEND PROPERTY LABELS "SMOKE_TEST")
         endif()

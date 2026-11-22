@@ -2,24 +2,29 @@
 # SPDX-License-Identifier: MIT
 
 # Resource check for the comp_tdm_v3 kernels of a test binary: the comp_tdm_v3 GEMM pipeline tests
-# here and the gfx1250 Stream-K tests in ../gemm_streamk.
+# here and the gfx1250 Stream-K tests in ../gemm_streamk; with -DKERNEL_PATTERN=GemmAStationary,
+# for the A-stationary GEMM tests.
 # comp_tdm_v3 is laid out to fit 256 VGPRs at 16 waves without spilling; a compiler change that
 # makes it spill would still pass the numerical test, so fail here instead.
 #
 # Extracts the gfx125x code objects from the test binary (llvm-objdump --offloading), reads the
 # AMDGPU metadata (llvm-readelf --notes) and requires, for every kernel whose name contains
-# CompTDMV3, .private_segment_fixed_size 0 and .vgpr_spill_count 0. At least one such kernel must
-# be found. Kernels whose name contains TensorWaitIssuersOnly or RefillAfterArrive (opt-in
-# variants of the split barrier that spill with some compilers) are not checked.
+# KERNEL_PATTERN (default CompTDMV3), .private_segment_fixed_size 0 and .vgpr_spill_count 0. At
+# least one such kernel must be found. Kernels whose name contains TensorWaitIssuersOnly or
+# RefillAfterArrive (opt-in variants of the split barrier that spill with some compilers) are not
+# checked.
 #
 # Usage: cmake -DTEST_BINARY=<exe> -DLLVM_OBJDUMP=<llvm-objdump> -DLLVM_READELF=<llvm-readelf>
-#              -DWORK_DIR=<dir> -P check_comp_tdm_v3_resources.cmake
+#              -DWORK_DIR=<dir> [-DKERNEL_PATTERN=<name part>] -P check_comp_tdm_v3_resources.cmake
 
 foreach(var TEST_BINARY LLVM_OBJDUMP LLVM_READELF WORK_DIR)
     if(NOT DEFINED ${var} OR "${${var}}" STREQUAL "")
         message(FATAL_ERROR "check_comp_tdm_v3_resources: ${var} is not set")
     endif()
 endforeach()
+if(NOT DEFINED KERNEL_PATTERN OR "${KERNEL_PATTERN}" STREQUAL "")
+    set(KERNEL_PATTERN "CompTDMV3")
+endif()
 
 # llvm-objdump --offloading writes the extracted images next to its input, so work on a copy.
 file(REMOVE_RECURSE "${WORK_DIR}")
@@ -58,10 +63,10 @@ foreach(co ${code_objects})
             if(name MATCHES "TensorWaitIssuersOnly|RefillAfterArrive")
                 set(name "")
             endif()
-            if(name MATCHES "CompTDMV3")
+            if(name MATCHES "${KERNEL_PATTERN}")
                 math(EXPR num_kernels "${num_kernels} + 1")
             endif()
-        elseif(name MATCHES "CompTDMV3" AND
+        elseif(name MATCHES "${KERNEL_PATTERN}" AND
                line MATCHES "^[ ]+\\.(private_segment_fixed_size|vgpr_spill_count):[ ]+([0-9]+)")
             if(NOT CMAKE_MATCH_2 EQUAL 0)
                 list(APPEND failures "${CMAKE_MATCH_1} = ${CMAKE_MATCH_2} in ${name}")
@@ -71,10 +76,10 @@ foreach(co ${code_objects})
 endforeach()
 
 if(num_kernels EQUAL 0)
-    message(FATAL_ERROR "no CompTDMV3 kernel found in ${TEST_BINARY}")
+    message(FATAL_ERROR "no ${KERNEL_PATTERN} kernel found in ${TEST_BINARY}")
 endif()
 if(failures)
     string(REPLACE ";" "\n" failures "${failures}")
-    message(FATAL_ERROR "comp_tdm_v3 kernels use scratch:\n${failures}")
+    message(FATAL_ERROR "${KERNEL_PATTERN} kernels use scratch:\n${failures}")
 endif()
-message(STATUS "comp_tdm_v3 resources: ${num_kernels} kernels, no scratch, no VGPR spills")
+message(STATUS "${KERNEL_PATTERN} resources: ${num_kernels} kernels, no scratch, no VGPR spills")
