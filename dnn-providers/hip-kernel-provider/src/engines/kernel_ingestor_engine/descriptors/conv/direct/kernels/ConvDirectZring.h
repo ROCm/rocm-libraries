@@ -49,6 +49,14 @@
 
 #include "ConvDirectCore.h"
 
+#ifndef K2Z_EDGES
+#define K2Z_EDGES 0
+#endif
+// Edge tiles hold more state through the steps: a shallower weight prefetch leaves registers to
+// spare on both targets.
+#if K2Z_EDGES && !defined(K2Z_PREFETCH)
+#define K2Z_PREFETCH 4
+#endif
 // Per target: the LDS sub-plane period of conflict-free 128-bit reads (bytes) and the weight
 // prefetch depth (items ahead of their MMAs) the register budget holds without spills.
 #if defined(__gfx950__)
@@ -104,10 +112,6 @@ __device__ inline TO k2zStore(float v)
     else
         return K1Elem<TO>::store(v);
 }
-
-#ifndef K2Z_EDGES
-#define K2Z_EDGES 0
-#endif
 
 /// The most stage positions of a narrow tile of `frags` fragments over 1 to 15 columns.
 constexpr int k2zNarrowSlots(int frags, int r, int s)
@@ -271,12 +275,13 @@ __device__ __attribute__((always_inline)) void k2ConvZring(const K2Args& a CONV_
 #pragma unroll
             for(int i = 0; i < ROWS; ++i)
             {
-                if(i >= live)
-                    break;
-                const Frags fa = __builtin_bit_cast(Frags, af[i]);
+                if(i < live)
+                {
+                    const Frags fa = __builtin_bit_cast(Frags, af[i]);
 #pragma unroll
-                for(int j = 0; j < NBW; ++j)
-                    acc[dz][i][j] = Atom::mma(fb[j].f[s], fa.f[s], acc[dz][i][j]);
+                    for(int j = 0; j < NBW; ++j)
+                        acc[dz][i][j] = Atom::mma(fb[j].f[s], fa.f[s], acc[dz][i][j]);
+                }
             }
 #pragma unroll
         for(int i = 0; i < ROWS; ++i)
@@ -341,8 +346,8 @@ __device__ __attribute__((always_inline)) void k2ConvZring(const K2Args& a CONV_
             // row yA, pxr positions a row; lane (lr, lc) of every fragment. Its ROWS fragments are
             // dealt to the wave rows, ROWS / WM each: wave row wm's fragment i is the tile's
             // fragment wm ROWS / WM + i, rows (wm ROWS / WM + i) rf on. `live`: the fragments a
-            // wave computes (all of them in a whole tile; in the last tile row those with rows in
-            // the output; ROWS / WM in a narrow tile).
+            // wave computes, those with rows in the output (of its ROWS, or ROWS / WM in a narrow
+            // tile).
             const int rem = a.wo - static_cast<int>(tilesX) * TX;
             const int rf = NARROW ? 16 / rem : 1;
             const int lr = NARROW ? lm / rem : 0, lc = NARROW ? lm - lr * rem : 0;
@@ -350,9 +355,16 @@ __device__ __attribute__((always_inline)) void k2ConvZring(const K2Args& a CONV_
             const int pxr = NARROW ? rem + S - 1 : PX;
             const int ppr = NARROW ? (ROWS * rf + R - 1) * pxr : PP;
             const int rowsLeft = a.ho - y0 - wm * ROWS;
-            const int live = !EDGES   ? ROWS
-                             : NARROW ? ROWS / WM
-                                      : (rowsLeft < 0 ? 0 : (rowsLeft < ROWS ? rowsLeft : ROWS));
+            const int live
+                = !EDGES ? ROWS
+                  // A narrow tile's fragments with rows in the output (rf rows
+                  // each), wave-uniform.
+                  : NARROW ? static_cast<int>(k2zUniform(static_cast<unsigned>(
+                                 ((a.ho - yA - wm * (ROWS / WM) * rf + rf - 1) / rf) < 0 ? 0
+                                 : ((a.ho - yA - wm * (ROWS / WM) * rf + rf - 1) / rf) < ROWS / WM
+                                     ? ((a.ho - yA - wm * (ROWS / WM) * rf + rf - 1) / rf)
+                                     : ROWS / WM)))
+                           : (rowsLeft < 0 ? 0 : (rowsLeft < ROWS ? rowsLeft : ROWS));
             const bool waveLive = live > 0;
             // A narrow tile's lane slot (row wm ROWS / WM rf + lr, column lc of the stage): the
             // wave's and lane's part of every A read.
