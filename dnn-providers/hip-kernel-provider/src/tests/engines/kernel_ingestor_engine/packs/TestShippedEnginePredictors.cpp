@@ -103,7 +103,9 @@ std::vector<std::string> loadedMetrics(const ingestor::DescriptorSet& set,
 
 /// The device a census architecture's representative graph is estimated on: the board the
 /// architecture's shipped L1s were measured on, as hipGetDeviceProperties reports it, and
-/// that board's dense bf16/fp16 matrix peak in TFLOPS, which no estimate may exceed.
+/// that board's dense bf16/fp16 matrix peak in TFLOPS, which no estimate may exceed. Every
+/// architecture a shipped forward SDPA L1 is bound for needs one, whichever architecture the
+/// census runs on (EveryServedSdpaForwardPredictorEstimatesItsRepresentativeGraphs).
 struct CensusDevice
 {
     ingestor::DeviceProperties properties;
@@ -131,6 +133,10 @@ std::optional<CensusDevice> censusDevice(const std::string& arch)
         result.peakTflops = peak;
         return result;
     };
+    if(arch == "gfx90a") // MI210
+    {
+        return device(104, 64, 68702699520, 4096, 1600000, 65536, 181.0);
+    }
     if(arch == "gfx942") // MI300X
     {
         return device(304, 64, 205822885888, 8192, 1300000, 65536, 1307.4);
@@ -248,7 +254,8 @@ TEST(TestShippedEnginePredictors, EveryServedEnginePredictorLoadsAndMatchesThisB
             {
                 continue;
             }
-            SCOPED_TRACE("engine '" + set.engine.name + "', its " + key + " " + ROLE + " model");
+            SCOPED_TRACE(::testing::Message() << "engine '" << set.engine.name << "', its " << key
+                                              << " " << ROLE << " model");
             const auto metrics = loadedMetrics(set, key);
             if(metrics.empty())
             {
@@ -265,7 +272,8 @@ TEST(TestShippedEnginePredictors, EveryServedEnginePredictorLoadsAndMatchesThisB
             {
                 const auto* model = findModel(set.enginePredictionsByMetric, metric, key);
                 const auto id = hipdnn_flatbuffers_sdk::utilities::formatUuid(model->id);
-                SCOPED_TRACE(metric + " model " + id + " in " + model->baseDir.string());
+                SCOPED_TRACE(::testing::Message()
+                             << metric << " model " << id << " in " << model->baseDir.string());
                 EXPECT_NE(std::find(ids.begin(), ids.end(), id), ids.end())
                     << "the loaded model is not one the UED binds";
                 expectBoundPredictorMatchesThisBuild(set, metric, key);
@@ -287,10 +295,11 @@ TEST(TestShippedEnginePredictors, EveryServedEnginePredictorPassesTheRuntimeAcce
             {
                 const auto& model = *findModel(set.enginePredictionsByMetric, metric, key);
                 const auto config = ingestor::UhdKernelHeuristic::configFrom(model);
-                SCOPED_TRACE("engine '" + set.engine.name + "', its " + key + " " + metric + " "
-                             + ROLE + " model "
-                             + hipdnn_flatbuffers_sdk::utilities::formatUuid(model.id) + " in "
-                             + model.baseDir.string());
+                SCOPED_TRACE(::testing::Message()
+                             << "engine '" << set.engine.name << "', its " << key << " " << metric
+                             << " " << ROLE << " model "
+                             << hipdnn_flatbuffers_sdk::utilities::formatUuid(model.id) << " in "
+                             << model.baseDir.string());
 
                 // What uhd::predictEngine asks of the model before it evaluates it.
                 try
@@ -321,16 +330,38 @@ TEST(TestShippedEnginePredictors, EveryServedSdpaForwardPredictorEstimatesItsRep
     registerNativeIngestorSymbols();
     for(const auto& set : discoverDescriptorSets())
     {
+        // A board for every architecture the engine's forward SDPA L1s are bound for, read
+        // from the UED this shard carries for all of them, so a census that runs on one
+        // architecture names the board another one lacks before that architecture's own
+        // census meets it.
+        if(const auto tflops = set.enginePredictionsByMetric.find(TFLOPS);
+           tflops != set.enginePredictionsByMetric.end())
+        {
+            for(const auto& [key, bound] : tflops->second)
+            {
+                EXPECT_TRUE(key == "default" || !estimatesSdpaForward(bound)
+                            || censusDevice(key).has_value())
+                    << "engine '" << set.engine.name << "' binds a forward SDPA " << TFLOPS << " "
+                    << ROLE << " model for " << key
+                    << ", which censusDevice() names no board for: add the board that L1 was "
+                       "measured on (its hipGetDeviceProperties values and dense bf16 matrix "
+                       "peak)";
+            }
+        }
+
         const auto* model = servedModel(set, TFLOPS, arch);
         if(model == nullptr || !estimatesSdpaForward(*model))
         {
             continue;
         }
-        SCOPED_TRACE("engine '" + set.engine.name + "', its " + TFLOPS + " " + ROLE + " model "
-                     + hipdnn_flatbuffers_sdk::utilities::formatUuid(model->id));
+        SCOPED_TRACE(::testing::Message()
+                     << "engine '" << set.engine.name << "', its " << TFLOPS << " " << ROLE
+                     << " model " << hipdnn_flatbuffers_sdk::utilities::formatUuid(model->id));
         const auto device = censusDevice(arch);
-        ASSERT_TRUE(device.has_value()) << "the engine serves a forward SDPA estimate on " << arch
-                                        << ", which censusDevice() names no board for";
+        ASSERT_TRUE(device.has_value())
+            << "the engine serves a forward SDPA estimate on " << arch
+            << ", which censusDevice() names no board for: add the board its L1 was measured on "
+               "(its hipGetDeviceProperties values and dense bf16 matrix peak)";
 
         // GenericEngine's binding, built as its constructor builds it: every loaded model,
         // each under the arch key and metric it was bound with.
