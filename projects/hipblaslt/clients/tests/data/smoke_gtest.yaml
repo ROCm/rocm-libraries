@@ -155,7 +155,21 @@ Tests:
   alpha: 1
   beta: [ 0.0, 2.0 ]
   activation_type: sigmoid
-  bias_vector: [0, 1]
+  bias_vector: 0
+  unit_check: 0
+  norm_check: 1
+  norm_check_assert: 1
+
+- name: matmul_bias_sigmoid_refused_smoke
+  category: smoke
+  function:
+    sigmoid_bias_refused: *real_precisions
+  matrix_size: *smoke_matrix_size_range
+  transA_transB: *transA_transB_range
+  alpha: 1
+  beta: [ 0.0, 2.0 ]
+  activation_type: sigmoid
+  bias_vector: 1
   unit_check: 1
 
 - name: matmul_bias_gelu_smoke
@@ -625,4 +639,43 @@ Tests:
   beta: [ 0.0, 2.0 ]
   unit_check: 1
   gpu_arch: '1250'
+
+- name: sigmoid_client_no_bias_smoke
+  category: smoke
+  function:
+    sigmoid_client: *single_precision
+  M: 37
+  N: 29
+  K: 17
+  transA: N
+  transB: N
+  alpha: 1
+  beta: [0, 1]
+  batch_count: 1
+  bias_vector: 0
+  activation_type: sigmoid
+  initialization: hpl
+  unit_check: 0
+  norm_check: 1
+  norm_check_assert: 1
+  gpu_arch: '9(42|50)'
+
+- name: sigmoid_api_no_bias_smoke
+  category: smoke
+  function:
+    sigmoid_api: *single_precision
+  M: 37
+  N: 29
+  K: 17
+  transA: N
+  transB: N
+  alpha: 1
+  beta: [0, 1]
+  batch_count: 1
+  bias_vector: 0
+  activation_type: sigmoid
+  unit_check: 0
+  norm_check: 1
+  norm_check_assert: 1
+  gpu_arch: '9(42|50)'
 ...

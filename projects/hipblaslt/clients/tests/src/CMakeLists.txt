@@ -12,6 +12,8 @@ target_sources(hipblaslt-test
         ${CMAKE_CURRENT_SOURCE_DIR}/arch_revision_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/efficiency_monitor_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/matmul_gtest.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/sigmoid_gtest.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/trace_logging_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/math_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/scale_buffer_size_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/auxiliary_gtest.cpp
@@ -45,6 +47,7 @@ target_sources(hipblaslt-test
 if(NOT WIN32)
     target_sources(hipblaslt-test PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/multi_gpu_gtest.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/bespoke_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/cotenant_gtest.cpp
     )
 endif()

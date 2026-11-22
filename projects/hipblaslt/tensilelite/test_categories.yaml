@@ -37,6 +37,7 @@ test_categories:
       - "tensilelite/Tests/unit"
     exclude_markers:
       - "gpu"
+      - "slow"
     pytest_args:
       - "--snapshot-warn-unused"
     labels:

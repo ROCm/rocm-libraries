@@ -25,6 +25,7 @@
  *******************************************************************************/
 
 #include <Tensile/ContractionSolution.hpp>
+#include <Tensile/ContractionProblemPredicates.hpp>
 #include <Tensile/FusedA2AKernArg.hpp>
 #include <Tensile/RocRollerWgmKernargs.hpp>
 
@@ -4767,7 +4768,8 @@ namespace TensileLite
             {
                 std::string actName = ToString(problemType.activationType);
                 std::transform(actName.begin(), actName.end(), actName.begin(), ::toupper);
-                name += actName;
+                // Same "_<TYPE>" token as the generated name (KernelWriterConversion.py).
+                name += "_" + actName;
             }
 
             name += rocisa::TypeAbbrev(problemType.activationComputeDataType);
@@ -4794,6 +4796,14 @@ namespace TensileLite
         if(problemType.useScaleAlphaVec)
         {
             name += ("_ScaleAlphaVec");
+        }
+
+        // Same bespoke helper tokens as KernelWriterConversion.kernelName: a
+        // BespokeNarrowing solution launches its own helper, the beta-free body
+        // (_Beta0) or the beta-kept body (_Bespoke). Stock names carry no token.
+        if(bespokeNarrowing)
+        {
+            name += problemType.useBeta ? "_Bespoke" : "_Beta0";
         }
 
         uint32_t gsuTemp = gsu - 1;
@@ -5062,6 +5072,76 @@ namespace TensileLite
             throw std::runtime_error("Invalid persistent loop argument layout for execution policy");
         if(version == 1 && outerVersion != 3)
             throw std::runtime_error("DataParallel argument layout version 1 requires KernArgsVersion=3");
+    }
+
+    void ContractionSolution::collectNarrowedFactPredicate()
+    {
+        // Only bespoke solutions are guarded; stock solutions keep today's launch path.
+        narrowedFactPredicate = nullptr;
+        if(!bespokeNarrowing)
+            return;
+
+        namespace PC = Predicates::Contraction;
+        using Pred   = Predicates::Predicate<Problem>;
+
+        // Bias types a solution of this problem type supports when the logic does not
+        // narrow them (TensileLite getBiasDataTypeListDefault: DataType, ComputeDataType and
+        // DestDataType wider than one byte). DataType is serialized as computeInputTypeA
+        // (MacDataTypeA, which defaults to DataType); TensileLite refuses to generate a bias
+        // list that omits a DataType it does not serialize, so this set misses no default
+        // type and every narrowed list is eligible.
+        auto biasListNarrowed = [this](std::vector<rocisa::DataType> const& list) {
+            for(auto t :
+                {problemType.computeInputTypeA, problemType.computeType, problemType.dType})
+                if(DataTypeInfo::Get(t).elementSize > 1
+                   && std::find(list.begin(), list.end(), t) == list.end())
+                    return true;
+            return false;
+        };
+        auto isNarrowed = [&](std::shared_ptr<Pred> const& p) -> bool {
+            if(std::dynamic_pointer_cast<PC::BetaZero>(p) || std::dynamic_pointer_cast<PC::SizeEqual>(p))
+                return true;
+            if(auto q = std::dynamic_pointer_cast<PC::BoundSizeMultiple>(p))
+                return q->value > 1;
+            if(auto q = std::dynamic_pointer_cast<PC::Free0SizeMultiple>(p))
+                return q->value > 1;
+            if(auto q = std::dynamic_pointer_cast<PC::Free1SizeMultiple>(p))
+                return q->value > 1;
+            if(auto q = std::dynamic_pointer_cast<PC::ActivationCheck>(p))
+                return q->value != ActivationType::All && q->value != ActivationType::Hipblaslt_all;
+            if(auto q = std::dynamic_pointer_cast<PC::UseBiasCheck>(p))
+                return q->value == 0;
+            if(auto q = std::dynamic_pointer_cast<PC::UseScaleAlphaVecCheck>(p))
+                return q->value == 0;
+            if(auto q = std::dynamic_pointer_cast<PC::BiasDataTypeWhiteList>(p))
+                return biasListNarrowed(q->value);
+            return false;
+        };
+
+        // Only conjunctive leaves are facts of every problem the solution accepts.
+        std::vector<std::shared_ptr<Pred>> leaves;
+        std::vector<std::shared_ptr<Pred>> pending{problemPredicate};
+        while(!pending.empty())
+        {
+            auto p = pending.back();
+            pending.pop_back();
+            if(auto conj = std::dynamic_pointer_cast<Predicates::And<Problem>>(p))
+                pending.insert(pending.end(), conj->value.rbegin(), conj->value.rend());
+            else if(p && isNarrowed(p))
+                leaves.push_back(p);
+        }
+        // A bias kernel narrowed to its traced bias facts must not serve a no-bias problem
+        // (UseBiasCheck accepts that for every UseBias solution). Selection and support
+        // queries apply problemPredicate, caller-supplied indices this guard.
+        if(problemType.useBias != 0)
+        {
+            auto biasPresent = std::make_shared<PC::BiasPresentCheck>();
+            leaves.push_back(biasPresent);
+            problemPredicate = std::make_shared<Predicates::And<Problem>>(
+                std::vector<std::shared_ptr<Pred>>{problemPredicate, biasPresent});
+        }
+        narrowedFactPredicate
+            = leaves.empty() ? nullptr : std::make_shared<Predicates::And<Problem>>(leaves);
     }
 
     void ContractionSolution::validatePersistentLoopArgs() const
@@ -6856,12 +6936,17 @@ namespace TensileLite
         // Only a handwritten custom kernel can carry a stagger the host cannot
         // reach. A generated kernel takes StaggerU exclusively from the packed
         // internal argument: the solution's StaggerU survives code generation
-        // only as an SGPR-pool sizing input, so two solutions differing only in
-        // StaggerU -- or only in SupportCustomStaggerU -- emit byte-identical
-        // assembly, and every generated wrap site unpacks the runtime value.
-        // The clamp above therefore does reach it, and !internalArgsSupport
-        // .staggerU says nothing about whether the kernel staggers; it only
-        // says the host declines to write the field, which leaves it 0.
+        // only as an SGPR-pool sizing input, so two stock (general) solutions
+        // differing only in StaggerU -- or only in SupportCustomStaggerU --
+        // emit byte-identical assembly, and every generated wrap site unpacks
+        // the runtime value. A BespokeNarrowing kernel with StaggerU 0 and no
+        // SupportCustomStaggerU is the exception: the host never packs it a
+        // stagger, so the generator omits its dead wrap code entirely
+        // (KernelWriter.py staggerUCode) and it cannot stagger at all.
+        // The clamp above therefore does reach every generated wrap site, and
+        // !internalArgsSupport.staggerU says nothing about whether the kernel
+        // staggers; it only says the host declines to write the field, which
+        // leaves it 0.
         //
         // A handwritten custom kernel is one with a non-empty customKernel.name
         // that the generator did not produce (customKernel.generated == false);

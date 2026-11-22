@@ -31,7 +31,7 @@ BenchmarkProblems:
       Batched: True
       UseE: True
       Activation: True
-      ActivationType: hipblaslt_relu
+      ActivationType: hipblaslt_all
 
     - # BenchmarkProblemSizeGroup
       InitialSolutionParameters:
@@ -58,6 +58,8 @@ BenchmarkProblems:
           # === RANGE SIZES ===
           - Range: [ [64, 64, 256], [64, 64, 256], [1], [128] ]
           - Range: [ [512], [512], [1], [128, 128, 512] ]  # K-sweep
+        - ActivationArgs:
+          - [Enum: relu]
 
   # BF16 with UseE=True and GELU activation
   -
@@ -73,7 +75,7 @@ BenchmarkProblems:
       Batched: True
       UseE: True
       Activation: True
-      ActivationType: hipblaslt_gelu
+      ActivationType: hipblaslt_all
 
     - # BenchmarkProblemSizeGroup
       InitialSolutionParameters:
@@ -97,6 +99,8 @@ BenchmarkProblems:
           # === RANGE SIZES ===
           - Range: [ [64, 64, 256], [64, 64, 256], [1], [128] ]
           - Range: [ [256], [128], [1, 2, 4], [128] ]  # Batch sweep non-square
+        - ActivationArgs:
+          - [Enum: gelu]
 
   # FP16 with UseE=True, different E data type
   -
@@ -113,7 +117,7 @@ BenchmarkProblems:
       Batched: True
       UseE: True
       Activation: True
-      ActivationType: hipblaslt_relu
+      ActivationType: hipblaslt_all
 
     - # BenchmarkProblemSizeGroup
       InitialSolutionParameters:
@@ -137,3 +141,5 @@ BenchmarkProblems:
           # === RANGE SIZES ===
           - Range: [ [64, 64, 256], [64, 64, 128], [1], [128] ]
           - Range: [ [256], [256], [1], [64, 64, 256] ]  # K-sweep
+        - ActivationArgs:
+          - [Enum: relu]

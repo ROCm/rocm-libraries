@@ -1,0 +1,13 @@
+{
+  "base": "c4a209253210049628ffa99085da4e8f44a1e67b",
+  "recipes": {
+    "bf16_mt192x160.yaml": {
+      "text_sha256": "65a8a84ee2be4fac71b13271fac024b6223d35d2f8cc4f13f0f9d49f7b0c88e3",
+      "assembly_sha256": "eab2ec1fc3b2788bba280bbb2d7f41be63215688ea42a38f384f5be5f2280146"
+    },
+    "bf16_mt256x128.yaml": {
+      "text_sha256": "812b540474b57641bc0c00befdbc0a616348e2af68a7b7ba430d5036f7f5579a",
+      "assembly_sha256": "b8c07e9a70a73e68d24c23453988fa17d9ce77f1710fcc4267c1257ff3cf7802"
+    }
+  }
+}

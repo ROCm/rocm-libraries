@@ -225,6 +225,10 @@ static void hipblaslt_print_args(const std::string& args)
     hipblaslt_cout.flush();
 }
 
+#ifndef _WIN32
+int hipblaslt_bespoke_child(const char* name);
+#endif
+
 // Spawned by a test that re-launches this binary, which passes the role as the
 // first argument. The process plays that role and exits without reaching
 // Google Test.
@@ -232,6 +236,10 @@ static void hipblaslt_gtest_run_child(int argc, char** argv)
 {
     if(argc < 2 || argv[1] == nullptr)
         return;
+#ifndef _WIN32
+    if(argc == 3 && !strcmp(argv[1], "--bespoke-fixture-child"))
+        std::exit(hipblaslt_bespoke_child(argv[2]));
+#endif
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
     if(!strcmp(argv[1], "--a2a-rank-child"))
         std::exit(hipblaslt_bench::run_rank_child());

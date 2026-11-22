@@ -1334,13 +1334,13 @@
     'str': 'Cij_Aik_Bjk_S_B_UserArgs',
   })
 # ---
-# name: test_problem_type_construction[activation_unknown_to_none]
+# name: test_problem_type_construction[activation_single_relu]
   dict({
     'state': dict({
       'Activation': True,
       'ActivationComputeDataType': '<DataType Float>',
       'ActivationNoGuard': False,
-      'ActivationType': '<ActivationType None>',
+      'ActivationType': '<ActivationType Relu>',
       'AllowNoFreeDims': False,
       'AssignedDerivedParameters': True,
       'Batched': False,
@@ -1463,7 +1463,7 @@
       'UseScaleCD': False,
       'isMixMode': False,
     }),
-    'str': 'Cij_Aik_Bjk_S_B_UserArgs',
+    'str': 'Cij_Aik_Bjk_S_B_RELU_S_UserArgs',
   })
 # ---
 # name: test_problem_type_construction[allow_no_free_dims]

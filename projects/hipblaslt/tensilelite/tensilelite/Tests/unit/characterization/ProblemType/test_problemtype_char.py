@@ -68,7 +68,7 @@ _CONFIGS = {
     "bias_with_list": {"UseBias": 1, "BiasDataTypeList": ["s", "h"]},
     "activation_all": {"Activation": True, "ActivationType": "all"},
     "activation_hipblaslt": {"Activation": True, "ActivationType": "hipblaslt_all"},
-    "activation_unknown_to_none": {"Activation": True, "ActivationType": "relu"},
+    "activation_single_relu": {"Activation": True, "ActivationType": "relu"},
     "use_e": {"Activation": True, "ActivationType": "all", "UseE": True},
     "gradient": {"Activation": True, "ActivationType": "all", "Gradient": True,
                  "UseBias": 1, "BiasSrc": "A"},

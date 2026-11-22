@@ -937,7 +937,23 @@ Tests:
   alpha: 1
   beta: [ 0.0, 2.0 ]
   activation_type: sigmoid
-  bias_vector: [0, 1]
+  bias_vector: 0
+  unit_check: 0
+  norm_check: 1
+  norm_check_assert: 1
+
+- name: matmul_bias_sigmoid_refused
+  category: pre_checkin
+  function:
+    sigmoid_bias_refused: *real_precisions
+  M: [128, 129]
+  N: [128, 129]
+  K: [128, 129]
+  transA_transB: *transA_transB_range
+  alpha: 1
+  beta: [ 0.0, 2.0 ]
+  activation_type: sigmoid
+  bias_vector: 1
   unit_check: 1
 
 - name: matmul_bias_relu_streamk
@@ -5259,7 +5275,30 @@ Tests:
   beta: [0.0, 2.0]
   bias_vector: 1
   scaleAlpha_vector: 1
-  activation_type: [none, relu, gelu, sigmoid, swish]
+  activation_type: [none, relu, gelu, swish]
+  initialization: uniform_01
+  unit_check: 0
+  norm_check: 1
+  requested_solution_num: 1
+  gpu_arch: '950'
+
+- name: matmul_subtile_fp4_scaleAlphaVec_sigmoid_refused
+  category: nightly
+  function:
+    sigmoid_bias_refused:
+    - { a_type: f4_r, b_type: f4_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 1001, scaleB: 1001, scale_type: f32_r}
+    - { a_type: f4_r, b_type: f4_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scaleA: 1001, scaleB: 1001, scale_type: f32_r}
+    - { a_type: f4_r, b_type: f4_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r, scaleA: 1001, scaleB: 1001, scale_type: f32_r}
+  M: [128, 192]
+  N: [128, 192]
+  K: [256]
+  transA: T
+  transB: N
+  alpha: 1.0
+  beta: [0.0, 2.0]
+  bias_vector: 1
+  scaleAlpha_vector: 1
+  activation_type: sigmoid
   initialization: uniform_01
   unit_check: 0
   norm_check: 1

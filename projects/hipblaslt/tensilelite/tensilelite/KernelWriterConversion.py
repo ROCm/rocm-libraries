@@ -26,12 +26,20 @@ from typing import Dict
 from copy import deepcopy
 
 from .KernelWriterBase import KernelWriterBase
+from .KernelWriterActivationFunction import KernelWriterActivationFunction
 
 from .Common.Architectures import archMacroNames
 from .Common import INDEX_CHARS, IsaInfo
 from .Common.DataType import DataType
+from .SolutionStructs.Problem import bespokeNarrowing
 
 class KernelWriterConversion(KernelWriterBase):
+
+  @staticmethod
+  def betaFree(state):
+    # Only BespokeNarrowing solutions are guarded to beta == 0 at launch. Without the key a
+    # UseBeta:false solution keeps the develop helper, which applies beta at run time.
+    return not state["ProblemType"]["UseBeta"] and bespokeNarrowing(state)
 
   def __init__(self, state, load_vw, isaInfoMap: Dict[str, IsaInfo]):
     super().__init__()
@@ -41,13 +49,13 @@ class KernelWriterConversion(KernelWriterBase):
     self.state["_GlobalAccumulation"] = state["_GlobalAccumulation"]
     self.state["ActivationFused"] = state["ActivationFused"]
     self.state["GlobalSplitU"] = state["GlobalSplitU"]
+    self.state["BespokeNarrowing"] = bespokeNarrowing(state)
 
     self.state["UnrollOnly"] = state["UnrollOnly"]
 
     self.actGradientPrefix = ""
     if self.state["ProblemType"]["Gradient"]:
       self.actGradientPrefix = "Gradient"
-    self.gaurdStr = "NG" if self.state["ProblemType"]["ActivationNoGuard"] else ""
 
     # setup load vector width
     self.num_elements_load = load_vw
@@ -445,9 +453,10 @@ class KernelWriterConversion(KernelWriterBase):
         kStr += "  " + ptrStr + " * arg.E = arg.BatchE[wg];" + self.endLine
       ptrStr = self.state["ProblemType"]["DestDataType"].toDevice(self.language)
       kStr += "  " + ptrStr + " * arg.D = arg.BatchD[wg];" + self.endLine
-      ptrStr = self.state["ProblemType"]["DestDataType"].toDevice(self.language)
-      zeroStr = self.state["ProblemType"]["ComputeDataType"].zeroString(self.language, 1)
-      kStr += "  " + ptrStr + f" const* arg.C = (arg.beta == {zeroStr}) ? nullptr : arg.BatchC[wg];" + self.endLine
+      if not KernelWriterConversion.betaFree(self.state):
+        ptrStr = self.state["ProblemType"]["DestDataType"].toDevice(self.language)
+        zeroStr = self.state["ProblemType"]["ComputeDataType"].zeroString(self.language, 1)
+        kStr += "  " + ptrStr + f" const* arg.C = (arg.beta == {zeroStr}) ? nullptr : arg.BatchC[wg];" + self.endLine
 
     ########################################
     # D index
@@ -544,6 +553,12 @@ class KernelWriterConversion(KernelWriterBase):
       kStr += " + (arg.size%s - 1) * arg.strideW%s" % (indexChar, indexChar)
     kStr += ";" + self.endLine
     kStr += "  %s strideWLimit = strideW * arg.gsu * sizeof(%s);"%(self.uint64Str, self.datatype) + self.endLine
+    if bespokeNarrowing(self.state):
+      # Keep the W descriptor limit wave-uniform in every bespoke helper, beta-free or beta-kept.
+      # Without it the compiler can keep the narrowed helper's SRD in VGPRs and wrap every W
+      # buffer_load in a readfirstlane waterfall. Stock helpers are unchanged.
+      # readfirstlane returns int: cast each half back to uint32_t so the value is unchanged.
+      kStr += "  strideWLimit = ((%s)(uint32_t)__builtin_amdgcn_readfirstlane((uint32_t)(strideWLimit >> 32)) << 32) | (uint32_t)__builtin_amdgcn_readfirstlane((uint32_t)strideWLimit);"%(self.uint64Str) + self.endLine
 
     kStr += "  " + intermediateDataType + " accum[NUM_ELEMENT_LOAD] = {0};" + self.endLine
     kStr += "  " + destTypeStr + " result[NUM_ELEMENT_LOAD];" + self.endLine
@@ -761,28 +776,29 @@ class KernelWriterConversion(KernelWriterBase):
       kStr += self.endLine
 
     #scaleC
-    if self.state["ProblemType"]["UseScaleCD"]:
+    if self.state["ProblemType"]["UseScaleCD"] and not KernelWriterConversion.betaFree(self.state):
       kStr += "  arg.beta = arg.beta*scaleC_data;%s" % (self.endLine)
     kStr += self.endLine
 
-    #Beta
-    kStr += "  if(arg.beta != (%s)0){%s" % (self.state["ProblemType"]["ComputeDataType"].toDevice(self.language), self.endLine)
-    if not self.state["ProblemType"]["GroupedGemm"]:
-      kStr += "  if(batch_mode == 0)" + self.endLine
-      kStr += "  {" + self.endLine
-    for vIdx in range(self.num_dword_load):
-      kStr += "    %s[%d] += arg.beta * (%s)arg.C[idxC+%d];%s" % (accumStr, vIdx, intermediateDataType, vIdx, self.endLine)
-    if not self.state["ProblemType"]["GroupedGemm"]:
-      kStr += "  }" + self.endLine
-      kStr += "  else" + self.endLine
-      kStr += "  {" + self.endLine
-      # Dereference C pointer array and apply the batch offset (in bytes).
-      kStr += "    %s *ptr = *(reinterpret_cast<%s **>(((char *)arg.C) + (8*batchIdx))) + batchOffsetC/sizeof(%s);" % (destTypeStr, destTypeStr, destTypeStr) + self.endLine
+    #Beta (beta-free bespoke solutions only run with beta == 0, so they read no C)
+    if not KernelWriterConversion.betaFree(self.state):
+      kStr += "  if(arg.beta != (%s)0){%s" % (self.state["ProblemType"]["ComputeDataType"].toDevice(self.language), self.endLine)
+      if not self.state["ProblemType"]["GroupedGemm"]:
+        kStr += "  if(batch_mode == 0)" + self.endLine
+        kStr += "  {" + self.endLine
       for vIdx in range(self.num_dword_load):
-        kStr += "    %s[%d] += arg.beta * (%s)ptr[idxC+%d];%s" % (accumStr, vIdx, intermediateDataType, vIdx, self.endLine)
+        kStr += "    %s[%d] += arg.beta * (%s)arg.C[idxC+%d];%s" % (accumStr, vIdx, intermediateDataType, vIdx, self.endLine)
+      if not self.state["ProblemType"]["GroupedGemm"]:
+        kStr += "  }" + self.endLine
+        kStr += "  else" + self.endLine
+        kStr += "  {" + self.endLine
+        # Dereference C pointer array and apply the batch offset (in bytes).
+        kStr += "    %s *ptr = *(reinterpret_cast<%s **>(((char *)arg.C) + (8*batchIdx))) + batchOffsetC/sizeof(%s);" % (destTypeStr, destTypeStr, destTypeStr) + self.endLine
+        for vIdx in range(self.num_dword_load):
+          kStr += "    %s[%d] += arg.beta * (%s)ptr[idxC+%d];%s" % (accumStr, vIdx, intermediateDataType, vIdx, self.endLine)
+        kStr += "  }" + self.endLine
       kStr += "  }" + self.endLine
-    kStr += "  }" + self.endLine
-    kStr += self.endLine
+      kStr += self.endLine
 
     #Bias
     if self.state["ProblemType"]["UseBias"] and (not self.state["ProblemType"]["Gradient"]):
@@ -840,11 +856,12 @@ class KernelWriterConversion(KernelWriterBase):
         actArgs += ", arg.activationType"
       for args in self.state["ProblemType"]["ActivationType"].getAdditionalArgStringList():
         actArgs += (", " + "arg." + args)
+      actFuncName = KernelWriterActivationFunction.functionName(self.state["ProblemType"])
       for vIdx in range(self.num_dword_load):
         if self.state["ProblemType"]["Gradient"]:
-          kStr += "  %s[%d] *= activation%s((%s)dataE[%d]%s);%s" % (accumStr, vIdx, self.gaurdStr, typeActivationStr, vIdx, actArgs, self.endLine)
+          kStr += "  %s[%d] *= %s((%s)dataE[%d]%s);%s" % (accumStr, vIdx, actFuncName, typeActivationStr, vIdx, actArgs, self.endLine)
         else:
-          kStr += "  %s[%d] = activation%s((%s)%s[%d]%s);%s" % (accumStr, vIdx, self.gaurdStr, typeActivationStr, accumStr, vIdx, actArgs, self.endLine)
+          kStr += "  %s[%d] = %s((%s)%s[%d]%s);%s" % (accumStr, vIdx, actFuncName, typeActivationStr, accumStr, vIdx, actArgs, self.endLine)
       kStr += self.endLine
 
     #scaleD
@@ -973,6 +990,13 @@ class KernelWriterConversion(KernelWriterBase):
       name += "_ScaleABVec"
     name += "_ScaleCD" if state["ProblemType"]["UseScaleCD"] else ""
     name += "_ScaleAlphaVec" if state["ProblemType"]["UseScaleAlphaVec"] else ""
+    # BespokeNarrowing bodies differ from stock (beta-free: no C read; beta kept: wave-uniform
+    # W limit), so they get their own name; helpers are deduplicated by name. Stock and
+    # keyless names carry no token.
+    if KernelWriterConversion.betaFree(state):
+      name += "_Beta0"
+    elif bespokeNarrowing(state):
+      name += "_Bespoke"
     name += "_PostGSU" + str(state["GlobalSplitU"])
     if num_elements_load != None:
       name += "_VW" + str(num_elements_load)

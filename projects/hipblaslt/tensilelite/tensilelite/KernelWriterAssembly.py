@@ -86,7 +86,7 @@ from .Components.TDMFuse import tdmFusePaired, tdmGroupPartner, \
                                 tdmGrouping, tdmSharedSetOrder, tdmSharedScaleSetActive, \
                                 tdmMemberIsLive
 from .Components.TDMFuse import tdmWaveComponents, tdmWavePartition, tdmSoleWave, tdmWaveRangeText
-from .SolutionStructs import isPackedIndex
+from .SolutionStructs import isPackedIndex, bespokeNarrowing, effectiveFreeElementMultiple, effectiveSummationElementMultiple
 from .AsmStoreState import StoreState, VectorDataTypes
 from .Activation import ActivationType
 from .CustomKernels import isCustomKernelConfig, getCustomKernelFilepath, getCustomKernelSource, supportsUserSgprKernargPreload
@@ -166,6 +166,53 @@ class GprInfo:
 class GlobalReadGprRecord:
   a: GprInfo                       = field(default_factory=GprInfo)
   b: GprInfo                       = field(default_factory=GprInfo)
+
+def evenUnrollTripProof(kernel) -> bool:
+  """True when every workgroup provably runs an even, nonzero number of unroll
+  iterations: ASEM % (2*DepthU) == 0 makes the whole K loop even, and the
+  per-workgroup K equals the whole K only under a split fixed at codegen.
+  ASEM here is effectiveSummationElementMultiple: an exact single-index K counts
+  as its own multiple.
+  Stream-K splits a tile's K across workgroups at run time, GlobalSplitU != 1
+  divides K by a factor the ASEM bound does not cover, and SupportUserGSU lets
+  the host override GSU at launch, so each of those can leave a workgroup with
+  an odd or single trip. Persistent DataParallel runs whole tiles but is
+  excluded conservatively with the rest of the persistent kernels (derivation
+  gives every persistent kernel GSU 0, so the GSU test rejects them as well).
+  openLoop and closeLoop must both use this one proof."""
+  return effectiveSummationElementMultiple(kernel) % (kernel["DepthU"] * 2) == 0 \
+    and not isPersistent(kernel) \
+    and kernel["GlobalSplitU"] == 1 \
+    and not kernel["InternalSupportParams"]["SupportUserGSU"]
+
+def balancedStoreBatchStep(kernel) -> int:
+  """Element step of balanced store batches, or 0 to keep stock batching.
+  Only BespokeNarrowing kernels balance their store batches: the elements are
+  spread over the same number of batches so sizes differ by at most the step
+  (instead of full batches plus a small tail). The step is 2 for half/bf16,
+  whose batches start on even elements, else 1. StoreRemap (first-row
+  divisors), CompactLoopStore (equal batches per CLS body) and subtile
+  (MIWaveTile[0] alignment) keep their own batch sizes."""
+  if not bespokeNarrowing(kernel) or kernel["StoreRemapVectorWidth"] \
+      or kernel["CompactLoopStore"] or kernel.get("UseSubtileImpl"):
+    return 0
+  dataType = kernel["ProblemType"]["DataType"]
+  return 2 if (dataType.isHalf() or dataType.isBFloat16()) else 1
+
+def storeBatchBounds(kernel, numElements, numElementsPerBatch, numBatches, batchIdx):
+  """[start, stop) element range of store batch batchIdx. Stock: full batches
+  of numElementsPerBatch, then the remainder. Balanced: step-sized units split
+  over numBatches, smaller batches first, so only the last batch can be short
+  of a whole step; no batch exceeds numElementsPerBatch."""
+  step = balancedStoreBatchStep(kernel)
+  if not step or numBatches <= 1 or numElementsPerBatch % step:
+    start = batchIdx * numElementsPerBatch
+    return start, min(start + numElementsPerBatch, numElements)
+  unitsPerBatch, numLargeBatches = divmod(ceilDivide(numElements, step), numBatches)
+  numSmallBatches = numBatches - numLargeBatches
+  startUnit = batchIdx * unitsPerBatch + max(0, batchIdx - numSmallBatches)
+  stopUnit = startUnit + unitsPerBatch + (1 if batchIdx >= numSmallBatches else 0)
+  return min(startUnit * step, numElements), min(stopUnit * step, numElements)
 
 ################################################################################
 # Assembly Kernel
@@ -1951,11 +1998,16 @@ class KernelWriterAssembly(KernelWriter):
         if kernel["ProblemType"]["MXBlock%s" % tc[-1]]:
           module.add(RegSet("s", "sgprScaleGroupSpan%s" % tc, "sgprStrides%s" % tc, 0))
 
+    # SkPartialIdx reuses the beta kernarg slot. With UseBeta=false that slot is
+    # still reserved in the kernarg layout but is defined as "Betapad"
+    # (KernelWriter.defineSgpr), so alias whichever name was actually defined.
+    # The beta-off kernel never reads Betapad as a value.
+    betaSlotSgpr = "sgprBeta" if kernel["ProblemType"].get("UseBeta", True) else "sgprBetapad"
     if self.states.tileProcessing.emitsParallelReductionSgprAliases:
       module.addSpaceLine()
       module.addComment0("StreamK Parallel Reduction Assignments")
       module.add(RegSet("s", "sgprSkSplit", "sgprskTiles", 0))
-      module.add(RegSet("s", "sgprSkPartialIdx", "sgprBeta", 0))
+      module.add(RegSet("s", "sgprSkPartialIdx", betaSlotSgpr, 0))
       if hasHybridAssignment(kernel):
         # SK5 hybrid: the kernel only declares the 6 SK3-named kernarg slots
         # (see KernelWriter.py SK5 defineSgpr block). The SK4 code path still
@@ -1977,7 +2029,7 @@ class KernelWriterAssembly(KernelWriter):
         module.add(RegSet("s", "sgprPersistentIteration",    "sgprStreamKTileIdx",    0))
         module.add(RegSet("s", "sgprPersistentIterationEnd", "sgprStreamKPartialIdx", 0))
     elif hasDynamicAssignment(kernel):
-      module.add(RegSet("s", "sgprSkPartialIdx", "sgprBeta", 0))
+      module.add(RegSet("s", "sgprSkPartialIdx", betaSlotSgpr, 0))
 
     module.addSpaceLine()
     module.addComment0("Size Assignments")
@@ -8539,14 +8591,15 @@ class KernelWriterAssembly(KernelWriter):
     else: # not tailloop:
 
       if loopIdx == self.states.unrollIdx:
-        # 1 loop check is necessary only when AssertSummationElementMultiple % (DepthU * 2) != 0
+        # 1 loop check is necessary unless every workgroup provably runs an even
+        # trip count (evenUnrollTripProof)
         # toPGR1 is defined inside the NLL, so SuppressNoLoadLoop leaves the escape
         # without a target. Under RAP, which suppresses, it is not wanted either:
         # the escape hands a single-k-tile problem to the drain, and a RAP section
         # computes its own k-tile and then leaves through its early exit. The
         # pre-loop prefetch still skips its second stage at a counter of 1 on its
         # own, so falling through into the loop fetches nothing past K.
-        if kernel["PrefetchGlobalRead"] >= 2 and kernel["AssertSummationElementMultiple"] % (kernel["DepthU"] * 2) != 0 \
+        if kernel["PrefetchGlobalRead"] >= 2 and not evenUnrollTripProof(kernel) \
            and not kernel["SuppressNoLoadLoop"]:
           module.add(SCmpEQU32(
               src0=loopCounter, \
@@ -8773,26 +8826,25 @@ class KernelWriterAssembly(KernelWriter):
         # only once every k-tile has run. Under RAP that is every resident one.
         endCounter = 0
 
-      if kernel["AssertSummationElementMultiple"] % (kernel["DepthU"] * 2) == 0 and endCounter > 0 and \
-         kernel["PrefetchGlobalRead"] <= 2:
-        # if AssertSummationElementMultiple is multiple of DepthU*2, loop exit is necessary only once in 2 Loop iterations
+      # The "exit once per 2 iterations" shortcut needs an even per-workgroup
+      # trip count (evenUnrollTripProof) and exactly two alternating copies of
+      # the main loop (even/odd: ExpandPointerSwap or a forced second loop), one
+      # carrying the exit check and the other none. A single copy or HalfPLR's 3
+      # copies must check every iteration; a custom main loop schedule builds
+      # its own loop whose validator expects the plain dec+cmp.
+      halfExitLoop = evenUnrollTripProof(kernel) and \
+                     self.states.unrollLoopCopies == 2 and \
+                     not kernel["UseCustomMainLoopSchedule"]
+      if halfExitLoop and endCounter > 0 and kernel["PrefetchGlobalRead"] <= 2:
+        # if the trip count is even, loop exit is necessary only once in 2 Loop iterations
         #  In endCounter % 2 == 1 case, exit at lc % 2 == 0 (= oddLabel). It means no exit if not oddLabel
         #  In endCounter % 2 == 0 case, exit at lc % 2 == 1 (= not oddLabel). It means no exit if oddLabel
-        # No exit case, no code is necessary except for final Loop
+        # No exit case: decrement only (no compare/branch) except for final Loop
 
-        # decrement by 2 if PGR=2 and StaggerU is 0, else 1
-        if kernel["PrefetchGlobalRead"]==2:
-          with self.allocTmpSgpr(2, tag="closeLoop_tmpSgprInfo") as tmpSgprInfo:
-            tmpSgpr = tmpSgprInfo.idx
-            module.add(SCmpEQU32(src0=sgpr("StaggerU"), src1=0))
-            module.add(SCSelectB32(dst=sgpr(tmpSgpr), src0=hex(2), src1=hex(1)))
-            decCode = SSubU32(dst=loopCounter, src0=loopCounter, \
-                src1=sgpr(tmpSgpr), \
-                comment="dec counter%s"%(loopChar) )
-        else:
-          decCode = SSubU32(dst=loopCounter, src0=loopCounter, \
-              src1=1, \
-              comment="dec counter%s"%(loopChar) )
+        # Always decrement by exactly 1 per DepthU (StaggerU's wrap logic needs the exact count)
+        decCode = SSubU32(dst=loopCounter, src0=loopCounter, \
+            src1=1, \
+            comment="dec counter%s"%(loopChar) )
         condCode = SCmpEQI32(src0=loopCounter, \
             src1=hex(endCounter), \
             comment="counter%s==%d"%(loopChar,endCounter) )
@@ -8807,9 +8859,6 @@ class KernelWriterAssembly(KernelWriter):
             noExit = True
 
         if noExit:
-          # No exit. No dec code if decValue is 2
-          if decValue == 2:
-            decCode = ""
           condCode = ""
           if finalLoop:
             # No exit and finalLoop case, use s_branch (no condition)
@@ -9237,7 +9286,10 @@ class KernelWriterAssembly(KernelWriter):
           needActTypeArg = 1 if self.states.numActivationTypeArgSize else 0
           actNames = kernel["ProblemType"]["ActivationType"].getAdditionalArgStringList()
           actLoadSize = (len(actNames) * self.states.numActivationArgSize + needActTypeArg) * 4
-          if (actLoadSize == self.states.userArgsInfo.activationSize) or len(actNames) > 0:
+          if actLoadSize == 0:
+            # A single activation without extra args reads nothing from the activation block.
+            loadList.append([-1, 0, extArgOffset])  # Need to start a new loadAllKernArg cause the argument is not consecutively anymore.
+          elif (actLoadSize == self.states.userArgsInfo.activationSize) or len(actNames) > 0:
             if loadList[-1][0] == -1:
               loadList[-1][0] = self.sgprs[actNames[0]]
             loadList[-1][1] += actLoadSize
@@ -15624,6 +15676,8 @@ class KernelWriterAssembly(KernelWriter):
       kernel.get("UseSubtileImpl")
     )
     currentInstLength = 0
+    # Edge checks/bodies that AssertFree{0,1}ElementMultiple proves unreachable.
+    fullTile0, fullTile1 = self.storeEdgeProvablyFull(kernel) if edge else (False, False)
     for betaIdx in reversed(range(len(betas))):
       beta = betas[betaIdx]
       # beta*C is seeded into the output by the beta-only pre-pass before the GSU
@@ -15659,7 +15713,19 @@ class KernelWriterAssembly(KernelWriter):
             )
           )
           edgeModule = Module("Edge_B%u_FD%u_VW%u" % (beta, factorDim, vectorWidth))
-          if deferEdge:
+          # Decide whether any edge check can still branch into this edge body.
+          #   - no edge check left at all: no edge body is reachable.
+          #   - normal kernel, widest VW != narrowest VW: the widest edge body is
+          #     only entered by the Size1 check (Size0 edges go to the narrowest VW).
+          # Adaptive kernels funnel every edge through the Size0 % VW cascade, so
+          # each remaining VW body stays reachable as long as one check remains.
+          emitEdgeBody = not (fullTile0 and fullTile1)
+          if kernel["AdaptiveGemm"] == 0 and fullTile1 and \
+             vectorWidth == max(vectorWidths) and vectorWidth != min(vectorWidths):
+            emitEdgeBody = False
+          if not emitEdgeBody:
+            edgeModule.addComment1("Edge store B%u FD%u VW%u elided: unreachable under AssertFree0/1ElementMultiple" % (beta, factorDim, vectorWidth))
+          elif deferEdge:
             # Generate Edge store into a deferred module
             edgeDeferredModule = Module("Edge_B%u_FD%u_VW%u_DeferredBlock" % (beta, factorDim, vectorWidth))
             # Use ThenDeferredReturn as endLabel so the batch jumps back to inline directly
@@ -15785,30 +15851,34 @@ class KernelWriterAssembly(KernelWriter):
                 and kernel["_GlobalAccumulation"] not in ("MultipleBufferSingleKernel", "MultipleBuffer")
               )
               # If module, checking Size1 % MT1 > 0  (or subtile alignment for N)
-              # Force long branch when Edge code is deferred
-              isLongBranch = True if currentInstLength >= 16384 else False
-              with self.allocTmpSgpr(4, tag="generateBetaModules_tmpSgprInfo4") as tmpSgprInfo:
-                if useSubtileEdgeCheck:
-                  checkIsEdge = edgeModule.add(self.checkIsEdgeSubtile(kernel, tmpSgprInfo, \
-                    isEdgeTarget["Then"] if kernel["AdaptiveGemm"] == 0 else isEdgeTarget["NonEdgeEnd"], \
-                    isSize1=True, isLongBranch=isLongBranch), pos=0)
-                else:
-                  checkIsEdge = edgeModule.add(self.checkIsEdge(kernel, tmpSgprInfo, \
-                    isEdgeTarget["Then"] if kernel["AdaptiveGemm"] == 0 else isEdgeTarget["NonEdgeEnd"], \
-                    kernel["MacroTile1"], isSize1=True, isLongBranch=isLongBranch), pos=0)
-                currentInstLength += countInstruction(checkIsEdge)
+              # Skipped when AssertFree1ElementMultiple % MT1 == 0 (Size1 never partial).
+              if not fullTile1:
+                # Force long branch when Edge code is deferred
+                isLongBranch = True if currentInstLength >= 16384 else False
+                with self.allocTmpSgpr(4, tag="generateBetaModules_tmpSgprInfo4") as tmpSgprInfo:
+                  if useSubtileEdgeCheck:
+                    checkIsEdge = edgeModule.add(self.checkIsEdgeSubtile(kernel, tmpSgprInfo, \
+                      isEdgeTarget["Then"] if kernel["AdaptiveGemm"] == 0 else isEdgeTarget["NonEdgeEnd"], \
+                      isSize1=True, isLongBranch=isLongBranch), pos=0)
+                  else:
+                    checkIsEdge = edgeModule.add(self.checkIsEdge(kernel, tmpSgprInfo, \
+                      isEdgeTarget["Then"] if kernel["AdaptiveGemm"] == 0 else isEdgeTarget["NonEdgeEnd"], \
+                      kernel["MacroTile1"], isSize1=True, isLongBranch=isLongBranch), pos=0)
+                  currentInstLength += countInstruction(checkIsEdge)
               # If module, checking Size0 % MT0 > 0  (or subtile alignment for M)
-              isLongBranch = True if currentInstLength >= 16384 else False
-              with self.allocTmpSgpr(4, tag="generateBetaModules_tmpSgprInfo5") as tmpSgprInfo:
-                if useSubtileEdgeCheck:
-                  checkIsEdge = edgeModule.add(self.checkIsEdgeSubtile(kernel, tmpSgprInfo, \
-                    isEdgeTarget["Else"] if kernel["AdaptiveGemm"] == 0 else isEdgeTarget["NonEdgeEnd"], \
-                    isSize1=False, isLongBranch=isLongBranch), pos=0)
-                else:
-                  checkIsEdge = edgeModule.add(self.checkIsEdge(kernel, tmpSgprInfo, \
-                    isEdgeTarget["Else"] if kernel["AdaptiveGemm"] == 0 else isEdgeTarget["NonEdgeEnd"], \
-                    kernel["MacroTile0"], isLongBranch=isLongBranch), pos=0)
-                currentInstLength += countInstruction(checkIsEdge)
+              # Skipped when AssertFree0ElementMultiple % MT0 == 0 (Size0 never partial).
+              if not fullTile0:
+                isLongBranch = True if currentInstLength >= 16384 else False
+                with self.allocTmpSgpr(4, tag="generateBetaModules_tmpSgprInfo5") as tmpSgprInfo:
+                  if useSubtileEdgeCheck:
+                    checkIsEdge = edgeModule.add(self.checkIsEdgeSubtile(kernel, tmpSgprInfo, \
+                      isEdgeTarget["Else"] if kernel["AdaptiveGemm"] == 0 else isEdgeTarget["NonEdgeEnd"], \
+                      isSize1=False, isLongBranch=isLongBranch), pos=0)
+                  else:
+                    checkIsEdge = edgeModule.add(self.checkIsEdge(kernel, tmpSgprInfo, \
+                      isEdgeTarget["Else"] if kernel["AdaptiveGemm"] == 0 else isEdgeTarget["NonEdgeEnd"], \
+                      kernel["MacroTile0"], isLongBranch=isLongBranch), pos=0)
+                  currentInstLength += countInstruction(checkIsEdge)
           betaModule.add(edgeModule, pos=0)
 
         # FactorDim label
@@ -16108,15 +16178,45 @@ class KernelWriterAssembly(KernelWriter):
     self.states.subtileMBlockSize = mBlockSize
 
   ##############################################################################
+  # storeEdgeProvablyFull
+  # Returns (fullTile0, fullTile1): True when AssertFree{0,1}ElementMultiple
+  # (enforced by the Free{0,1}SizeMultiple predicates and the launch guard), or
+  # an exact size (effectiveFreeElementMultiple, enforced by SizeEqual), is a
+  # multiple of MacroTile{0,1}, so Size{0,1} % MT{0,1} == 0 for every accepted
+  # problem and the store edge for that dimension is unreachable. Packed free
+  # indices check PackedSize*, which the assertion does not cover, so they keep
+  # their edges; ForceEdgeStores keeps both. Only a narrowed fact (multiple
+  # > 1) counts: the default multiple of 1 on a one-wide tile keeps its edges.
+  # Only a BespokeNarrowing solution removes edges; stock solutions keep them.
+  ##############################################################################
+  def storeEdgeProvablyFull(self, kernel):
+    if self.db["ForceEdgeStores"] or not bespokeNarrowing(kernel):
+      return False, False
+    af0 = effectiveFreeElementMultiple(kernel, 0)
+    af1 = effectiveFreeElementMultiple(kernel, 1)
+    fullTile0 = len(kernel["PackedC0IndicesX"]) == 1 and af0 > 1 and af0 % kernel["MacroTile0"] == 0
+    fullTile1 = len(kernel["PackedC1IndicesX"]) == 1 and af1 > 1 and af1 % kernel["MacroTile1"] == 0
+    return fullTile0, fullTile1
+
+  ##############################################################################
   # checkIsEdge
   # tmpSgpr must have at least 4 free SGPR
   # isEdgeTarget is the branch target if Size % divisor > 0
+  # Emits no code when the dimension is provably full and its
+  # AssertFree*ElementMultiple is a multiple of divisor (the branch never fires).
   ##############################################################################
   def checkIsEdge(self, kernel, tmpSgprInfo, isEdgeTarget, divisor, isSize1=False, isLongBranch=False, placeHolder=None):
     assert(isinstance(isEdgeTarget, Label))
     isEdgeTargetLabel = isEdgeTarget.getLabelName()
     module = Module("checkIsEdge")
     dim = "N (isSize1)" if isSize1 else "M"
+    multiple = effectiveFreeElementMultiple(kernel, int(isSize1))
+    if self.storeEdgeProvablyFull(kernel)[int(isSize1)] and multiple % divisor == 0:
+      if multiple == kernel.get("AssertFree%uElementMultiple" % int(isSize1), 1):
+        module.addComment1("Edge check (%s) elided: AssertFree%uElementMultiple %% %d == 0" % (dim, int(isSize1), divisor))
+      else:
+        module.addComment1("Edge check (%s) elided: AssertSizeEqual size %u %% %d == 0" % (dim, multiple, divisor))
+      return module
     module.addComment1("Edge/NonEdge store path check (%s): Size %% %d > 0 -> Edge store; else -> NonEdge store" % (dim, divisor))
     tmpS0  = tmpSgprInfo.idx
     tmpS1  = tmpS0 + 1
@@ -16761,6 +16861,15 @@ class KernelWriterAssembly(KernelWriter):
       # Avoid wrong edge arg, making edge true for many vectorWidths
       if edge == False and len(vectorWidths) > 1:
         edge = True
+      # With Size0 % MT0 == 0 guaranteed, no Size0 edge (normal kernel) or
+      # Size0 % VW cascade step (adaptive kernel) can select a narrower store
+      # vector width, so only the widest VW needs store code.
+      if edge and self.storeEdgeProvablyFull(kernel)[0] and len(set(vectorWidths)) > 1:
+        maxVw = max(vectorWidths)
+        if effectiveFreeElementMultiple(kernel, 0) % maxVw == 0:
+          keep = [i for i, vw in enumerate(vectorWidths) if vw == maxVw]
+          vectorWidths = [vectorWidths[i] for i in keep]
+          elements     = [elements[i] for i in keep]
       if factorDims is None:
         factorDims = [0, 1] if self.states.FactorDim == 3 else [1] if self.states.FactorDim == 2 else [0]
       # Build one independent Beta/FD/VW/Edge label tree per concrete
@@ -16909,8 +17018,13 @@ class KernelWriterAssembly(KernelWriter):
         activationCDataType = kernel["ProblemType"]["ActivationComputeDataType"]
         activationLabelList = {}
         toActModuleList = {}
-        supportedBy = ActivationType.SupportedBy.ALL if kernel["ProblemType"]["ActivationType"] == 'all' else ActivationType.SupportedBy.HIPBLASLT
-        activationEnumStrList = ActivationType.getEnumStrList(activationCDataType, supportedBy, exportType=actExportType)
+        if kernel["ProblemType"]["ActivationType"].isSingleActivation():
+          # One callable body for the one activation. With a single entry the call needs no
+          # compare on activationType (insertActFunctionCallAddrCalc skips index 0).
+          activationEnumStrList = [str(kernel["ProblemType"]["ActivationType"]).lower()]
+        else:
+          supportedBy = ActivationType.SupportedBy.ALL if kernel["ProblemType"]["ActivationType"] == 'all' else ActivationType.SupportedBy.HIPBLASLT
+          activationEnumStrList = ActivationType.getEnumStrList(activationCDataType, supportedBy, exportType=actExportType)
         for gwvw in vectorWidths:
           if gwvw in activationLabelList:
             continue
@@ -17363,6 +17477,11 @@ class KernelWriterAssembly(KernelWriter):
             # break
 
     numBatches = max(1, ceilDivide(len(element),numElementsPerBatch))
+    # Balanced bespoke batches (storeBatchBounds): same batch count, the
+    # largest batch sizes the per-batch VGPR/SGPR need. Never above the budget.
+    balanceStep = balancedStoreBatchStep(kernel)
+    if balanceStep and numBatches > 1 and numElementsPerBatch % balanceStep == 0:
+      numElementsPerBatch = ceilDivide(ceilDivide(len(element), balanceStep), numBatches) * balanceStep
 
     # Grow pool if needed
     # Get true numVgprAvailable
@@ -17593,8 +17712,7 @@ class KernelWriterAssembly(KernelWriter):
           passAccVgprRead = deepcopy(codeAccVgprRead) if codeAccVgprRead is not None else None
           passMulAlpha    = deepcopy(codeMulAlpha) if codeMulAlpha is not None else None
           for batchIdx in range(0, numBatchesCLS):
-            elementStartIdx = batchIdx * numElementsPerBatch
-            elementStopIdx = min( elementStartIdx + numElementsPerBatch, len(element) )
+            elementStartIdx, elementStopIdx = storeBatchBounds(kernel, len(element), numElementsPerBatch, numBatches, batchIdx)
             elementsThisBatch = element[elementStartIdx:elementStopIdx]
             #print("BATCH[%u/%u]: element[%u:%u] VGPRs=%u" % (batchIdx, numBatches, elementStartIdx, elementStopIdx,ss.numVgprsPerElement ))
             # elementVgprs can be large and should be perfectly tuned to the number of available
@@ -19321,6 +19439,8 @@ class KernelWriterAssembly(KernelWriter):
           activationLabelModule = Label("Activation_%s%s"% (enumStr.capitalize(), activationLabelSuffix), "")
           activationLabelModules.append(activationLabelModule)
       else:
+        # A single activation has one store body and no run-time dispatch.
+        activationLabelModules.append("")
         activationEnumStrList.append(str(kernel["ProblemType"]["ActivationType"]).lower())
     else:
       activationLabelModules.append("")
@@ -19647,32 +19767,34 @@ class KernelWriterAssembly(KernelWriter):
       loopLabelSkipBegin.append(Label(self.rapLabel("LoopSkipBegin%s_%u%s%s"%(loopChar, l, strNta, strNtb)), "" ))
     loopLabelEnd = Label(self.rapLabel("LoopEnd%s%s%s"%(loopChar, strNta, strNtb)), "" )
 
-    tmpSgpr = self.sgprPool.checkOut(1, tag="simdSpecDispatch_tmpSgpr")
-    numbits = 1 if numCodePath == 2 else 2
-    module.add(SGetRegB32(dst=sgpr(tmpSgpr), src="hwreg(HW_REG_HW_ID, 4, %u)"%numbits))
+    # The temporaries go through allocTmpSgpr, which may grow the SGPR pool up
+    # to MaxSgpr. A plain checkOut uses the pool's preventOverflow default and
+    # fails when the kernel happens to define few SGPRs (e.g. StreamK with
+    # StreamKForceDPOnly drops the workspace/fixup SGPRs, leaving fewer holes
+    # before the main loop). When the old checkOut succeeded, allocTmpSgpr
+    # returns the same registers, so the emitted code is unchanged.
+    with self.allocTmpSgpr(1, tag="simdSpecDispatch_tmpSgpr") as tmpSgprInfo:
+      tmpSgpr = tmpSgprInfo.idx
+      numbits = 1 if numCodePath == 2 else 2
+      module.add(SGetRegB32(dst=sgpr(tmpSgpr), src="hwreg(HW_REG_HW_ID, 4, %u)"%numbits))
 
-    tmpSgpr1 = self.sgprPool.checkOutAligned(3, 2, tag="simdSpecDispatch_tmpSgpr1")
-    sgprPC = ContinuousRegister(tmpSgpr1, 3)
-    for l in range(numCodePath):
-      module.addComment0("Branch to code-path %u logic"%l)
-      module.add(SCmpEQU32(src0=sgpr(tmpSgpr), src1=hex(l), comment="" ))
-      #module.add(SCBranchSCC1(labelName=loopLabelBegin[l].getLabelName(), comment="" ))
-      module.add(SCLongBranchScc1(loopLabelBegin[l], sgprPC, \
-                                  loopLabelSkipBegin[l].getLabelName(), \
-                                  loopLabelBegin[l].getLabelName()))
-    self.sgprPool.checkIn(tmpSgpr1)
-    self.sgprPool.checkIn(tmpSgpr)
+      with self.allocTmpSgpr(3, alignment=2, tag="simdSpecDispatch_tmpSgpr1") as sgprPC:
+        for l in range(numCodePath):
+          module.addComment0("Branch to code-path %u logic"%l)
+          module.add(SCmpEQU32(src0=sgpr(tmpSgpr), src1=hex(l), comment="" ))
+          #module.add(SCBranchSCC1(labelName=loopLabelBegin[l].getLabelName(), comment="" ))
+          module.add(SCLongBranchScc1(loopLabelBegin[l], sgprPC, \
+                                      loopLabelSkipBegin[l].getLabelName(), \
+                                      loopLabelBegin[l].getLabelName()))
 
     for l in range(numCodePath):
       module.addComment0("SIMD %u code-path"%l)
       module.add(loopLabelBegin[l])
       module.add(MacroInstruction(name="MAINLOOP%s%s"%(strNta, strNtb), args=[l]))
       module.add(SCBranchSCC0(labelName=loopLabelBegin[l].getLabelName(), comment="" ))
-      tmpSgpr1 = self.sgprPool.checkOutAligned(3, 2, tag="simdSpecDispatch_tmpSgpr1_2")
-      sgprPC = ContinuousRegister(tmpSgpr1, 3)
-      #module.add(SBranch(labelName=loopLabelEnd.getLabelName(), comment="" ))
-      module.add(SLongBranchPositive(loopLabelEnd, sgprPC))
-      self.sgprPool.checkIn(tmpSgpr1)
+      with self.allocTmpSgpr(3, alignment=2, tag="simdSpecDispatch_tmpSgpr1_2") as sgprPC:
+        #module.add(SBranch(labelName=loopLabelEnd.getLabelName(), comment="" ))
+        module.add(SLongBranchPositive(loopLabelEnd, sgprPC))
 
     # close unrolled loop
     endStr = ""

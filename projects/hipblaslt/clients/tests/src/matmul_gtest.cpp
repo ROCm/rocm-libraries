@@ -26,7 +26,12 @@
 #include "hipblaslt_data.hpp"
 #include "hipblaslt_datatype2string.hpp"
 #include "hipblaslt_test.hpp"
+#include "sigmoid_test_observer.hpp"
+#include "utility.hpp"
+#include <hipblaslt/hipblaslt-ext.hpp>
+#define hipblasLtMatmulDescSetAttribute sigmoid_test_set_attribute
 #include "testing_matmul.hpp"
+#undef hipblasLtMatmulDescSetAttribute
 #include "testing_matmul_batch_offset.hpp"
 #include <cctype>
 #include <cstring>
@@ -134,7 +139,24 @@ namespace
         void operator()(const Arguments& arg)
         {
             if(!strcmp(arg.function, "matmul"))
-                testing_matmul(arg);
+            {
+                if(arg.activation_type == hipblaslt_activation_type::sigmoid && !arg.bias_vector)
+                {
+                    SigmoidEpilogueObservation observation;
+                    SigmoidObservationScope scope(observation);
+                    testing_matmul(arg);
+                    ASSERT_TRUE(observation.sent) << "Client never sent a sigmoid epilogue";
+                    ASSERT_EQ(observation.epilogue, HIPBLASLT_EPILOGUE_SIGMOID);
+                }
+                else
+                    testing_matmul(arg);
+            }
+            else if(!strcmp(arg.function, "sigmoid_bias_refused"))
+            {
+                ASSERT_EQ(arg.activation_type, hipblaslt_activation_type::sigmoid);
+                ASSERT_EQ(arg.bias_vector, 1);
+                EXPECT_THROW(testing_matmul(arg), std::invalid_argument);
+            }
             else if(!strcmp(arg.function, "matmul_bad_arg"))
                 testing_matmul_bad_arg(arg);
             else if(!strcmp(arg.function, "matmul_batch_offset"))
@@ -156,7 +178,8 @@ namespace
         static bool function_filter(const Arguments& arg)
         {
             return !strcmp(arg.function, "matmul") || !strcmp(arg.function, "matmul_bad_arg")
-                   || !strcmp(arg.function, "matmul_batch_offset");
+                   || !strcmp(arg.function, "matmul_batch_offset")
+                   || !strcmp(arg.function, "sigmoid_bias_refused");
         }
 
         // Google Test name suffix based on parameters

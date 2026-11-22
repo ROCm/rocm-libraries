@@ -409,3 +409,40 @@ TEST(PersistentArgumentLayout, DataParallelCustomDescriptorMatchesCompleteNormal
         EXPECT_FLOAT_EQ(value<float>(custom.args, "beta"), useBeta ? -1.25f : 0.0f);
     }
 }
+
+// A DataParallel solution has no split-K reduction: the derivation drops GlobalSplitU and
+// SupportUserGSU (Solution.py), and the host refuses a runtime GSU request for it.
+TEST(PersistentArgumentLayout, DataParallelRefusesRuntimeGsuWithoutGsuSupport)
+{
+    ContractionSolution solution;
+    configurePersistentSolution(solution, 3, 1);
+    solution.internalArgsSupport.gsu = false;
+    auto              problem = persistentProblem();
+    std::stringstream log;
+    EXPECT_TRUE(solution.checkInternalArgumentsSupport(problem, log, true));
+    problem.setParams().setGSU(2);
+    EXPECT_FALSE(solution.checkInternalArgumentsSupport(problem, log, true));
+    // A solution that does support a runtime GSU accepts the same request.
+    solution.internalArgsSupport.gsu = true;
+    EXPECT_TRUE(solution.checkInternalArgumentsSupport(problem, log, true));
+}
+
+TEST(PersistentArgumentLayout, DataParallelSolveRefusesGsuAboveOne)
+{
+    ContractionSolution solution;
+    configurePersistentSolution(solution, 3, 1);
+    auto problem = persistentProblem();
+    auto device  = persistentDevice();
+    // solve only packs the operand addresses; it never dereferences them.
+    std::vector<char> operands(64);
+    auto              inputs = persistentInputs();
+    inputs.a                 = operands.data();
+    inputs.b                 = operands.data();
+    inputs.c                 = operands.data();
+    inputs.d                 = operands.data();
+    inputs.beta              = 1.0f; // persistentProblem's beta
+    EXPECT_NO_THROW(solution.solve(problem, inputs, device, nullptr, 0, nullptr));
+    problem.setParams().setGSU(2);
+    EXPECT_THROW(solution.solve(problem, inputs, device, nullptr, 0, nullptr), std::runtime_error)
+        << "solve accepted GlobalSplitU 2 for a DataParallel solution";
+}

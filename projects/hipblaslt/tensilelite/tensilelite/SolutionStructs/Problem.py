@@ -975,6 +975,11 @@ class ProblemType(Mapping):
           if anchorDim not in self.state["IndexAssignments%s"%tc]:
               raise Exception("SetConstStride%s=%s anchorDim=%u is not in IndexAssignments%s"%(tc, sc, anchorDim, tc))
 
+    # Grouped launches do not evaluate the BetaZero predicate and device-side UserArguments
+    # can change beta after initialize, so the host cannot enforce beta == 0 for a grouped kernel.
+    if self["GroupedGemm"] and not self["UseBeta"]:
+      raise RuntimeError("UseBeta=False is not supported with GroupedGemm")
+
     # Bias
     # If compute data type is not equal to dest data type, TensileLite will run conversion kernel.
     # In this case we don't need to apply bias in beta only kernel.
@@ -986,6 +991,14 @@ class ProblemType(Mapping):
       if "BiasDataTypeList" in config:
         self["BiasDataTypeList"] = [DataType(btype) for btype in config["BiasDataTypeList"]]
         self["BiasDataTypeList"].sort() # Make name unique
+        # The host sees the bias default through MacDataTypeA, ComputeDataType and DestDataType
+        # only; a list omitting a wider DataType outside that set could not be guarded at launch.
+        dataType = self["DataType"]
+        if self["UseBias"] and dataType.numBytes() > 1 \
+            and dataType not in self["BiasDataTypeList"] \
+            and dataType not in (self["MacDataTypeA"], self["ComputeDataType"], self["DestDataType"]):
+          raise RuntimeError("BiasDataTypeList %s omits DataType %s, which the host cannot see" \
+                             % (self["BiasDataTypeList"], dataType))
       else:
         self["BiasDataTypeList"] = getBiasDataTypeListDefault(self)
     else:
@@ -1003,14 +1016,23 @@ class ProblemType(Mapping):
       self["GateResidualDataTypeList"] = []
 
     # Activation
-    # Currently, ActivationType supports only 'all' and 'hipblaslt_all', and is active only when the Activation configuration is set to True.
-    # Otherwise, ActivationType will be set to 'none'.
-    if "Activation" in config:
-      typeStr = config.get("ActivationType", 'none')
-      if typeStr not in ['all', 'hipblaslt_all']:
+    # ActivationType 'all' and 'hipblaslt_all' select the activation at run time and are active
+    # only when the Activation configuration is present; otherwise ActivationType is 'none'.
+    # A single forward activation hipBLASLt can request (gelu, relu, sigmoid, silu, clamp) builds
+    # only that activation and needs Activation: true. Any other explicit name is refused.
+    # hipBLASLt has no sigmoid+bias epilogue: refuse the request instead of normalizing it away.
+    typeStr = str(config.get("ActivationType", 'none')).lower()
+    if typeStr == 'sigmoid' and self["UseBias"]:
+      printExit("ActivationType sigmoid with UseBias=%s is not supported" % self["UseBias"])
+    if typeStr in ['none', 'all', 'hipblaslt_all']:
+      if "Activation" not in config:
         typeStr = 'none'
+    elif typeStr in ActivationType.lookup and ActivationType(typeStr).isSingleActivation():
+      if not config.get("Activation", False):
+        printExit("ActivationType %s needs Activation: true." % typeStr)
     else:
-      typeStr = 'none'
+      printExit("ActivationType %s is not supported; use none, all, hipblaslt_all, gelu, relu, "
+                "sigmoid, silu or clamp." % config["ActivationType"])
     self["ActivationType"] = ActivationType(typeStr)
     if "ActivationComputeDataType" in config:
       self["ActivationComputeDataType"] = DataType(config["ActivationComputeDataType"])
@@ -1085,6 +1107,19 @@ class ProblemType(Mapping):
         if (not self["Gradient"]):
           printWarning("ActivationNoGuard is set to False cause Gradient is off.")
           self["ActivationNoGuard"] = False
+
+    # A single activation kernel has no activation-type argument, so the host must see the
+    # whole epilogue at launch. Grouped GEMM reads the activation per gemm from device user
+    # arguments, and gradient, auxiliary E, amax and scaled-output epilogues are outside the
+    # dense forward domain such a kernel is built for: refuse them at generation.
+    if self["ActivationType"].isSingleActivation():
+      for key in ["GroupedGemm", "Gradient", "UseE", "OutputAmaxD", "UseScaleCD"]:
+        if self[key]:
+          printExit("ActivationType %s is not supported with %s; use hipblaslt_all." \
+                    % (self["ActivationType"].value, key))
+      if not ActivationType.lookup[self["ActivationType"].value]['instance'].typeAvailable(self["ActivationComputeDataType"]):
+        printExit("ActivationType %s does not support ActivationComputeDataType %s." \
+                  % (self["ActivationType"].value, self["ActivationComputeDataType"].toChar()))
 
   ################################################################################
    # Function checkIfSupportedGEMMType:
@@ -1468,3 +1503,63 @@ def getGateResidualDataTypeListDefault(problem: ProblemType) -> List[DataType]:
   gateResidualDataTypeList = list(set(gList))
   gateResidualDataTypeList.sort() # Make name unique
   return gateResidualDataTypeList
+
+################################################################################
+# Bespoke narrowing (opt-in)
+################################################################################
+# Code removal derived from assertions (store edges proven unreachable by
+# AF0EM/AF1EM, exact sizes used as element multiples) applies only to a
+# solution that asks for it with BespokeNarrowing: true. Stock logic never sets
+# the key, so its generated code and kernel names stay as before.
+
+def bespokeNarrowing(state) -> bool:
+  return state.get("BespokeNarrowing", False) is True
+
+################################################################################
+# Exact sizes as element multiples
+################################################################################
+# AssertSizeEqual {index: V} (enforced by the SizeEqual predicate) pins
+# Size(index) to V, so V is itself a multiple of that size. Under
+# BespokeNarrowing, codegen may use it in place of the asserted element
+# multiple where V > 0 is a whole number of
+# tiles of a single index: an unpacked free dimension (Index0/Index1, checked
+# against MacroTile) or the only summation index (checked against DepthU).
+# Batch indices map to no tile; packed free dimensions are checked against
+# PackedSize and multi-index sums have no single trip count, so those keep the
+# asserted multiples. The YAML Assert*ElementMultiple values are never changed.
+
+def _exactSizes(state) -> dict:
+  if not bespokeNarrowing(state):
+    return {}
+  exact = state.get("AssertSizeEqual")
+  return {index: size for index, size in exact.items() if size > 0} if isinstance(exact, dict) else {}
+
+def effectiveFreeElementMultiple(state, dim) -> int:
+  multiple = state.get("AssertFree%uElementMultiple" % dim, 1)
+  sizes = _exactSizes(state)
+  if not sizes or len(state["PackedC%uIndicesX" % dim]) != 1:
+    return multiple
+  size = sizes.get(state["ProblemType"]["Index%u" % dim], 0)
+  return size if size and size % state["MacroTile%u" % dim] == 0 else multiple
+
+def effectiveSummationElementMultiple(state) -> int:
+  multiple = state.get("AssertSummationElementMultiple", 1)
+  sizes = _exactSizes(state)
+  if not sizes or len(state["ProblemType"]["IndicesSummation"]) != 1:
+    return multiple
+  size = sizes.get(state["ProblemType"]["IndicesSummation"][0], 0)
+  return size if size and size % state["DepthU"] == 0 else multiple
+
+def exactSizeContradictions(state) -> list:
+  """[(key, multiple, index, size)] for every exact size that the asserted
+  element multiple of the same index excludes (Free0/Free1SizeMultiple check
+  Index0/Index1, BoundSizeMultiple the last summation index): no problem
+  satisfies both predicates, and the exact size must not feed codegen."""
+  sizes = _exactSizes(state)
+  if not sizes:
+    return []
+  pt = state["ProblemType"]
+  checks = (("AssertFree0ElementMultiple", pt["Index0"]), ("AssertFree1ElementMultiple", pt["Index1"]),
+            ("AssertSummationElementMultiple", pt["IndicesSummation"][-1]))
+  return [(key, state.get(key, 1), index, sizes[index]) for key, index in checks
+          if index in sizes and sizes[index] % state.get(key, 1) != 0]

@@ -29,7 +29,7 @@ from ..Common.RequiredParameters import getRequiredParametersMin, getRequiredPar
 from ..Common.Utilities import printWarning
 from ..Common.ValidParameters import parseStinkyTofuRegisterAllocation
 
-from .Problem import ProblemType
+from .Problem import ProblemType, bespokeNarrowing, effectiveFreeElementMultiple, effectiveSummationElementMultiple
 
 
 def getKernelCompileKey(state, splitGSU: bool) -> str:
@@ -192,7 +192,33 @@ def _nameSafe(value) -> str:
   return re.sub(r"[^A-Za-z0-9]", "", str(value).replace("-", "n").replace(".", "p"))
 
 
+def _narrowingToken(state) -> str:
+  """BespokeNarrowing is not a required parameter, so stock names are
+  unchanged. A BespokeNarrowing solution removes code its assertions prove
+  unreachable (store edges from AF0EM/AF1EM, exact sizes from AssertSizeEqual
+  used as element multiples), so name it with the element multiples codegen
+  uses. Empty without BespokeNarrowing."""
+  if not bespokeNarrowing(state):
+    return ""
+  return "BN%ux%ux%u" % (effectiveFreeElementMultiple(state, 0), effectiveFreeElementMultiple(state, 1),
+                         effectiveSummationElementMultiple(state))
+
+
 def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInternalArgs):
+  name = _getNameWithoutNarrowing(state, requiredParameters, splitGSU, ignoreInternalArgs)
+  ck = state.get("CustomKernel")
+  if isinstance(ck, dict) and ck.get("name") and not ck.get("generated", False):
+    return name
+  if not (isinstance(ck, dict) and ck.get("name")) and state.get("CustomKernelName", ""):
+    return name
+  # Last component, also after a generated kernel's CustomKernel.name stamp:
+  # the stamp omits it (getKernelStampName), so a stamped general recipe and
+  # its narrowed twin get distinct names whatever the stamp text is.
+  token = _narrowingToken(state)
+  return name + "_" + token if token else name
+
+
+def _getNameWithoutNarrowing(state, requiredParameters: frozenset, splitGSU: bool, ignoreInternalArgs):
 
   ck = state.get("CustomKernel")
   # CustomKernel.name on a generated kernel is the assembly identity.
@@ -287,6 +313,9 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
       if state.get(key, 0) != 0:
         requiredParametersTemp.add(key)
 
+    # BespokeNarrowing is named only when true, by _narrowingToken.
+    requiredParametersTemp.discard("BespokeNarrowing")
+
     # TDMFuse=0 is the arrangement every shipped kernel already has, so naming it
     # would rename all of them.
     if state.get("TDMFuse", 0):
@@ -360,6 +389,18 @@ def getKernelFileBase(splitGSU: bool, kernel):
 
 def getKernelNameMin(kernel, splitGSU: bool):
   return _getName(kernel, getRequiredParametersMin(), splitGSU, True)
+
+
+def getKernelStampName(kernel, kernelName: str):
+  """The CustomKernel.name a generated kernel is stamped with: its kernel name
+  (getKernelNameMin) without the narrowing token that _getName appended last
+  from the kernel's current facts. A stamp therefore never carries a token the
+  current facts did not produce, and stamping is idempotent."""
+  token = _narrowingToken(kernel)
+  if not token:
+    return kernelName
+  assert kernelName.endswith("_" + token), (kernelName, token)
+  return kernelName[:-len(token) - 1]
 
 
 def getSolutionNameMin(solution, splitGSU: bool):

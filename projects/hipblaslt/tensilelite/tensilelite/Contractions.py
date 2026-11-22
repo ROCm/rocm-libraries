@@ -34,7 +34,7 @@ from .Common.Architectures import gfxToIsa
 from .Common.DataType import DataType
 from .Common.GlobalParameters import internalParameters
 from .SolutionStructs import Solution as OriginalSolution
-from .SolutionStructs.Problem import getBiasDataTypeListDefault, getGateResidualDataTypeListDefault
+from .SolutionStructs.Problem import bespokeNarrowing, getBiasDataTypeListDefault, getGateResidualDataTypeListDefault
 from .Toolchain.Component import Assembler
 from math import ceil
 
@@ -455,6 +455,9 @@ class ProblemType:
                 supportedBy = ActivationType.SupportedBy.ALL if self.activationType == 'all' else ActivationType.SupportedBy.HIPBLASLT
                 enumList = [actEnum.capitalize() for actEnum in ActivationType.getEnumStrList(self.activationComputeDataType, supportedBy, exportType=exportType)]
                 predicates.append(ProblemPredicate("ActivationEnumWhiteList", value=enumList))
+            elif self.activationType.isSingleActivation():
+                # A single-activation kernel runs only calls that ask for exactly this activation.
+                predicates.append(ProblemPredicate("ActivationEnumWhiteList", value=[self.activationType.toEnum()]))
             # predicates.append(ProblemPredicate("UseScaleAlphaVec", value=self.useScaleAlphaVec))
             # predicates.append(ProblemPredicate("GroupedGemm", value=self.groupedGemm))
 
@@ -1070,6 +1073,7 @@ class Solution:
 
         rv.problemPredicate = ProblemPredicate.FromOriginalState(d, rv.problemType)
         rv.taskPredicate = TaskPredicate.FromOriginalState(d, rv.problemType)
+        rv.bespokeNarrowing = bespokeNarrowing(d)
 
         if 'DebugKernel' in d:
             rv.debugKernel = d['DebugKernel']
@@ -1139,12 +1143,21 @@ class Solution:
         self.index = None
         self.ideals = {}
         self.srcName = ""
+        self.bespokeNarrowing = False
 
         for key, value in kwargs:
             if key not in Solution.StateKeys and key not in Solution.HiddenKeys:
                 raise KeyError("{0} is not a property of Solution.".format(key))
 
             setattr(self, key, value)
+
+    def state(self):
+        rv = {key: state(getattr(self, key)) for key in Solution.StateKeys}
+        # The host guards only bespoke solutions at launch. The key is written only when
+        # true, so stock library entries stay as before.
+        if self.bespokeNarrowing:
+            rv["bespokeNarrowing"] = True
+        return rv
 
     def getSolutionKeys(self):
         return self.originalSolution.keys()

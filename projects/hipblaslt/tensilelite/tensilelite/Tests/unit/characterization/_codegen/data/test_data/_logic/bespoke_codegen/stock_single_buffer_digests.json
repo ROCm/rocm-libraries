@@ -1,0 +1,64 @@
+{
+  "bf16_bias_streamk.yaml": {
+    "assembly_sha256": {
+      "Cijk_SB_BiasB_HAS_ScaleAlphaVec_PostGSU1_VW1": "c4ad87f452f675b6b77322352770f6caacf226a2bc0fe15caca72b334db4ff33",
+      "Cijk_SB_BiasB_HAS_ScaleAlphaVec_PostGSU1_VW2": "ce0089d9b3eeb132e31f500cfe824a9fc0b530758c3e0061efa8391ccbd23c31",
+      "Cijk_SB_BiasB_HAS_ScaleAlphaVec_PostGSU1_VW4": "ef8cf6e39f6e5ccfd7cf40fa62d62411c07f251c2417aae8aee3592bb17f0526",
+      "Cijk_SB_BiasS_HAS_ScaleAlphaVec_PostGSU1_VW1": "10281ced29fe6e9ecc95489545e627c528950cb87c78f248c1437a109053194c",
+      "Cijk_SB_BiasS_HAS_ScaleAlphaVec_PostGSU1_VW2": "aa3f0115d5b0f1f1e7aa18a9b247f9130b3bdc3ceb3a54ffc0cd9b56f1863365",
+      "Cijk_SB_BiasS_HAS_ScaleAlphaVec_PostGSU1_VW4": "f87b6b37b9826bcc9bd6c39826ea16b8289c79cc0e9c2581b6bcb14ba2584aba",
+      "Cijk_SB_GG_BiasB_HAS_ScaleAlphaVec_PostGSU1_VW1": "5cdb64ec930fece64e07ec6d8512250943968b7f06e8a9dd5594a43052abfb6c",
+      "Cijk_SB_GG_BiasB_HAS_ScaleAlphaVec_PostGSU1_VW2": "2f48b0c1bd49dd0e25cfeb29370784794dab3881a85129d9dd2a1665e3b6952a",
+      "Cijk_SB_GG_BiasB_HAS_ScaleAlphaVec_PostGSU1_VW4": "e6550d0b1e56ba19292daf46020a64eeb13401492edab12ffea958446c80fcde",
+      "Cijk_SB_GG_BiasS_HAS_ScaleAlphaVec_PostGSU1_VW1": "e0bacf709153a1e913b4592c8176aafe35ac26af4242b876273de69d6bafe107",
+      "Cijk_SB_GG_BiasS_HAS_ScaleAlphaVec_PostGSU1_VW2": "73629e3e3d76345d05f2028cf0434eeb630aae5a88bba7c98afb55d46e5d10db",
+      "Cijk_SB_GG_BiasS_HAS_ScaleAlphaVec_PostGSU1_VW4": "6506b7cfa5caed61d91ddd302472a8daf0587e572955ffce4bcc4e25c9f45301"
+    },
+    "text_sha256": "390274220f053cd4cf140798b673de16730ab023b7770f6ce454c8cccd1b7c90"
+  },
+  "bf16_streamk.yaml": {
+    "assembly_sha256": {
+      "Cijk_SB_BiasB_HAS_ScaleAlphaVec_PostGSU1_VW1": "c4ad87f452f675b6b77322352770f6caacf226a2bc0fe15caca72b334db4ff33",
+      "Cijk_SB_BiasB_HAS_ScaleAlphaVec_PostGSU1_VW2": "ce0089d9b3eeb132e31f500cfe824a9fc0b530758c3e0061efa8391ccbd23c31",
+      "Cijk_SB_BiasB_HAS_ScaleAlphaVec_PostGSU1_VW4": "ef8cf6e39f6e5ccfd7cf40fa62d62411c07f251c2417aae8aee3592bb17f0526",
+      "Cijk_SB_BiasS_HAS_ScaleAlphaVec_PostGSU1_VW1": "10281ced29fe6e9ecc95489545e627c528950cb87c78f248c1437a109053194c",
+      "Cijk_SB_BiasS_HAS_ScaleAlphaVec_PostGSU1_VW2": "aa3f0115d5b0f1f1e7aa18a9b247f9130b3bdc3ceb3a54ffc0cd9b56f1863365",
+      "Cijk_SB_BiasS_HAS_ScaleAlphaVec_PostGSU1_VW4": "f87b6b37b9826bcc9bd6c39826ea16b8289c79cc0e9c2581b6bcb14ba2584aba",
+      "Cijk_SB_GG_BiasB_HAS_ScaleAlphaVec_PostGSU1_VW1": "5cdb64ec930fece64e07ec6d8512250943968b7f06e8a9dd5594a43052abfb6c",
+      "Cijk_SB_GG_BiasB_HAS_ScaleAlphaVec_PostGSU1_VW2": "2f48b0c1bd49dd0e25cfeb29370784794dab3881a85129d9dd2a1665e3b6952a",
+      "Cijk_SB_GG_BiasB_HAS_ScaleAlphaVec_PostGSU1_VW4": "e6550d0b1e56ba19292daf46020a64eeb13401492edab12ffea958446c80fcde",
+      "Cijk_SB_GG_BiasS_HAS_ScaleAlphaVec_PostGSU1_VW1": "e0bacf709153a1e913b4592c8176aafe35ac26af4242b876273de69d6bafe107",
+      "Cijk_SB_GG_BiasS_HAS_ScaleAlphaVec_PostGSU1_VW2": "73629e3e3d76345d05f2028cf0434eeb630aae5a88bba7c98afb55d46e5d10db",
+      "Cijk_SB_GG_BiasS_HAS_ScaleAlphaVec_PostGSU1_VW4": "6506b7cfa5caed61d91ddd302472a8daf0587e572955ffce4bcc4e25c9f45301"
+    },
+    "text_sha256": "390274220f053cd4cf140798b673de16730ab023b7770f6ce454c8cccd1b7c90"
+  },
+  "f16_streamk.yaml": {
+    "assembly_sha256": {
+      "Cijk_SH_BiasH_HAS_ScaleAlphaVec_PostGSU1_VW1": "97a2774ab39369a2ebcbb11df487234414455233fa832b27431ff8e2d95ba809",
+      "Cijk_SH_BiasH_HAS_ScaleAlphaVec_PostGSU1_VW2": "139ea2e7111ab7606575cac6e92bdd7501e7f89fe023f5a1aee22c0e8b4c16a7",
+      "Cijk_SH_BiasH_HAS_ScaleAlphaVec_PostGSU1_VW4": "33ed327e7de95142b4b6cc9ed2ef38c94c791076beb6818fa7aa11b35776e55a",
+      "Cijk_SH_BiasS_HAS_ScaleAlphaVec_PostGSU1_VW1": "f5213c563a6ee2c999ce581d4961aedcfba457f0340ebd83ba191e6be17cdc58",
+      "Cijk_SH_BiasS_HAS_ScaleAlphaVec_PostGSU1_VW2": "19f070f279f6674cfa67567c8bd8ab550a3e19b6211517a1775bafe89e785e4a",
+      "Cijk_SH_BiasS_HAS_ScaleAlphaVec_PostGSU1_VW4": "b928c23bfb9cce1e18593e2e58cce26426dedf988995890be4ea688370dfcd77",
+      "Cijk_SH_GG_BiasH_HAS_ScaleAlphaVec_PostGSU1_VW1": "e602ee310429ed8a1a70ca3800dede1cd1a760fbec66ab171194064b1540bd26",
+      "Cijk_SH_GG_BiasH_HAS_ScaleAlphaVec_PostGSU1_VW2": "e314f8a783b037243b37f532115156a7abbfea936d320542971af55ec1bb078e",
+      "Cijk_SH_GG_BiasH_HAS_ScaleAlphaVec_PostGSU1_VW4": "cc1c4432dfa80a7f507e463c35e3d43be14528cb01d0aa2c0ff1c50bbcd6984e",
+      "Cijk_SH_GG_BiasS_HAS_ScaleAlphaVec_PostGSU1_VW1": "dbeb1ccf88505b7e09cdf311c3ff2aa1f12bba3919562e959e04424f39621145",
+      "Cijk_SH_GG_BiasS_HAS_ScaleAlphaVec_PostGSU1_VW2": "0f74bae7ac54b2a7ea3afba685b73fea145d7a9f230e7d5655506c324d580f70",
+      "Cijk_SH_GG_BiasS_HAS_ScaleAlphaVec_PostGSU1_VW4": "9697ef087e2312a7dbba147b220adf416f12e4df2f4cbac22ded8ec9c874f68c"
+    },
+    "text_sha256": "3accc417b0283a87bc42b73b0c722a8740d197870b46827d0bf0edced2581d2b"
+  },
+  "f32_streamk.yaml": {
+    "assembly_sha256": {
+      "Cijk_SS_BiasS_HAS_ScaleAlphaVec_PostGSU1_VW1": "be8128cb4a4eb4ada52aa651e0e57e18f3575e9e0d581fcc9a2fecb77766074f",
+      "Cijk_SS_BiasS_HAS_ScaleAlphaVec_PostGSU1_VW2": "ec5da2a753bc07419698b0772faba2b3e38b771f536d9f08c63f438d1fcce1ba",
+      "Cijk_SS_BiasS_HAS_ScaleAlphaVec_PostGSU1_VW4": "b251cadeb636e627452f2d47ea04fcbed59c30b88a8f0727532fc0a78a59f0b9",
+      "Cijk_SS_GG_BiasS_HAS_ScaleAlphaVec_PostGSU1_VW1": "e681276c3a2b7e95b01675ce3fe37ececf16b1a6080b593a10928df3ef8d6d49",
+      "Cijk_SS_GG_BiasS_HAS_ScaleAlphaVec_PostGSU1_VW2": "077e9204b3c24bb11f1bf3af7938ec0cdec9c7c9eb2fc7a40fa9e19edb0ff4d2",
+      "Cijk_SS_GG_BiasS_HAS_ScaleAlphaVec_PostGSU1_VW4": "2df81aab8e6450e941647cc2d49f465beb4b0222be201c0275925ab191f5bc37"
+    },
+    "text_sha256": "308830b2dcb203df049b671a7b1494caf9ed3ac9ac8c9f55c04f59ecdf290e55"
+  }
+}

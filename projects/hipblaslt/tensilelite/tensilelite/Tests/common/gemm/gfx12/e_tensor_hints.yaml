@@ -31,7 +31,7 @@ BenchmarkProblems:
       Batched: True
       UseE: True
       Activation: True
-      ActivationType: hipblaslt_relu
+      ActivationType: hipblaslt_all
 
     - # BenchmarkProblemSizeGroup
       InitialSolutionParameters:
@@ -55,6 +55,8 @@ BenchmarkProblems:
           - Exact: [64, 256, 1, 128]   # Non-square
           # === RANGE SIZES ===
           - Range: [ [64, 64, 256], [64, 64, 256], [1], [128] ]
+        - ActivationArgs:
+          - [Enum: relu]
 
   # FP16 with UseE and TemporalHintE
   -
@@ -70,7 +72,7 @@ BenchmarkProblems:
       Batched: True
       UseE: True
       Activation: True
-      ActivationType: hipblaslt_gelu
+      ActivationType: hipblaslt_all
 
     - # BenchmarkProblemSizeGroup
       InitialSolutionParameters:
@@ -92,6 +94,8 @@ BenchmarkProblems:
           - Exact: [64, 64, 5, 64]     # Batched
           # === RANGE SIZES ===
           - Range: [ [64, 64, 256], [64, 64, 256], [1], [128] ]
+        - ActivationArgs:
+          - [Enum: gelu]
 
   # BF16 with UseE and NonVolatileE
   -
@@ -107,7 +111,7 @@ BenchmarkProblems:
       Batched: True
       UseE: True
       Activation: True
-      ActivationType: hipblaslt_relu
+      ActivationType: hipblaslt_all
 
     - # BenchmarkProblemSizeGroup
       InitialSolutionParameters:
@@ -129,3 +133,5 @@ BenchmarkProblems:
           - Exact: [97, 97, 1, 97]     # Prime
           # === RANGE SIZES ===
           - Range: [ [64, 64, 256], [64, 64, 256], [1], [128] ]
+        - ActivationArgs:
+          - [Enum: relu]

@@ -683,6 +683,12 @@ validParameters = { # we need to make sure this matches develop
     # Empty dict is unset. Fork YAML: AssertSizeEqual: [{0: 1}]  # M==1
     # A value of -1 for a given index is ignored (classic Tensile).
     "AssertSizeEqual": -1,
+    # Opt-in for code removal derived from the assertions above: store edge
+    # checks/bodies that AssertFree0/1ElementMultiple prove unreachable, and
+    # exact AssertSizeEqual sizes used as element multiples (full tiles, no
+    # tail loop). Only bespoke requests set it; without it (all stock logic)
+    # codegen keeps those paths. A true value is named in the kernel name.
+    "BespokeNarrowing": [False, True],
     # Strict lower bound per dimension, same {index: size} form. The runtime
     # predicate is size(index) > value, so a kernel whose tail handling needs
     # at least one full tile declares the largest size it cannot handle.

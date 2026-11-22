@@ -42,7 +42,6 @@ class KernelWriterActivationFunction(KernelWriterBase):
     if self.state["ProblemType"]["Gradient"]:
       self.actGradientPrefix = "Gradient"
       self.actExportType = ActivationType.Export.GRADONLY
-    self.gaurdStr = "NG" if self.state["ProblemType"]["ActivationNoGuard"] else ""
 
     self.enumName = "Tensile::%sActivationType_%s"%(self.actGradientPrefix, \
                                                     self.state["ProblemType"]["ActivationComputeDataType"])
@@ -69,6 +68,15 @@ class KernelWriterActivationFunction(KernelWriterBase):
   def getKernelName(self):
     return KernelWriterActivationFunction.kernelName(self)
 
+  @staticmethod
+  def functionName(problemType):
+    # 'all' and 'hipblaslt_all' share one overloaded name. A single activation gets its own
+    # name, so two single-activation headers with the same signature do not clash in Kernels.h.
+    gaurdStr = "NG" if problemType["ActivationNoGuard"] else ""
+    if problemType["ActivationType"] in ['all', 'hipblaslt_all']:
+      return "activation%s"%gaurdStr
+    return "activation%s_%s"%(gaurdStr, str(problemType["ActivationType"]))
+
   def getSourceFileString(self):
     fileString = "// This is a dummy file."
     return (0, fileString)
@@ -85,7 +93,7 @@ class KernelWriterActivationFunction(KernelWriterBase):
       names += ",\n"
       names += "  %s const %s"%(ptrStr, name)
     changeLine = "\n  " if names else ""
-    kStr += "__device__ inline %s activation%s(%s%s value%s)\n{\n"%(ptrStr, self.gaurdStr, changeLine, ptrStr, names)
+    kStr += "__device__ inline %s %s(%s%s value%s)\n{\n"%(ptrStr, KernelWriterActivationFunction.functionName(self.state["ProblemType"]), changeLine, ptrStr, names)
     return kStr
 
   def getInlineAsm(self, activation: ActivationInline, spaces: int, activationType: str):

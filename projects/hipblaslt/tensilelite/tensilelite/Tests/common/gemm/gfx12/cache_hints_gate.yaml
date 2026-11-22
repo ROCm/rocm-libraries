@@ -34,7 +34,8 @@ BenchmarkProblems:
       TransposeB: False
       UseBeta: True
       Batched: True
-      UseGradient: True
+      Gradient: True
+      UseBias: 1
       UseGate: True
 
     - # BenchmarkProblemSizeGroup
@@ -52,6 +53,7 @@ BenchmarkProblems:
           - Exact: [128, 128, 1, 128]
           - Exact: [256, 256, 1, 256]
           - Range: [ [64, 64, 256], [64, 64, 256], [1], [64] ]
+        - BiasTypeArgs: ['h']
 
   # NonVolatileGate
   -
@@ -65,7 +67,8 @@ BenchmarkProblems:
       TransposeB: False
       UseBeta: True
       Batched: True
-      UseGradient: True
+      Gradient: True
+      UseBias: 1
       UseGate: True
 
     - # BenchmarkProblemSizeGroup
@@ -83,6 +86,7 @@ BenchmarkProblems:
           - Exact: [64, 64, 1, 64]
           - Exact: [128, 128, 1, 128]
           - Exact: [256, 256, 1, 256]
+        - BiasTypeArgs: ['b']
 
   # Combined Gate cache hints
   -
@@ -95,7 +99,8 @@ BenchmarkProblems:
       TransposeB: False
       UseBeta: True
       Batched: True
-      UseGradient: True
+      Gradient: True
+      UseBias: 1
       UseGate: True
 
     - # BenchmarkProblemSizeGroup
@@ -114,3 +119,4 @@ BenchmarkProblems:
           - Exact: [256, 256, 1, 256]
           - Exact: [512, 512, 1, 512]
           - Range: [ [128, 128, 256], [128, 128, 256], [1], [128] ]
+        - BiasTypeArgs: ['s']

@@ -1377,6 +1377,7 @@
     'AssertStrideCEqual',
     'AssertStrideDEqual',
     'AssertSummationElementMultiple',
+    'BespokeNarrowing',
     'BufferLoad',
     'BufferStore',
     'ClusterAIDMapping',
@@ -1669,6 +1670,14 @@
         4,
       ]),
       'len': 9,
+      'type': 'list',
+    }),
+    'BespokeNarrowing': dict({
+      'head': list([
+        False,
+        True,
+      ]),
+      'len': 2,
       'type': 'list',
     }),
     'BufferLoad': dict({

@@ -2011,6 +2011,9 @@ void testing_matmul_with_bias(const Arguments& arg,
         throw std::invalid_argument("scaleA=1001 requires transA=T");
     if(arg.scaleB == hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT && transB != HIPBLAS_OP_N)
         throw std::invalid_argument("scaleB=1001 requires transB=N");
+    // hipBLASLt has no sigmoid+bias epilogue; never run it as BIAS or drop the bias.
+    if(arg.activation_type == hipblaslt_activation_type::sigmoid && arg.bias_vector)
+        throw std::invalid_argument("activation sigmoid does not support bias_vector");
 
     double gpu_time_used, cpu_time_used, gpu_mem_gbytes;
     gpu_time_used = cpu_time_used = gpu_mem_gbytes = 0.0;
@@ -2681,6 +2684,10 @@ void testing_matmul_with_bias(const Arguments& arg,
                     break;
                 case hipblaslt_activation_type::clamp:
                     epilogue[i]    = HIPBLASLT_EPILOGUE_CLAMP_EXT;
+                    epilogue_on[i] = true;
+                    break;
+                case hipblaslt_activation_type::sigmoid:
+                    epilogue[i]    = HIPBLASLT_EPILOGUE_SIGMOID;
                     epilogue_on[i] = true;
                     break;
                 default:
@@ -5528,6 +5535,17 @@ void testing_matmul_with_bias(const Arguments& arg,
                                         arg.activation_arg2,
                                         ::_clamp,
                                         arg.gradient,
+                                        To,
+                                        Talpha);
+                            break;
+                        case hipblaslt_activation_type::sigmoid:
+                            epilogue_func(epilogue_param,
+                                        hBias_buf,
+                                        Tbias,
+                                        arg.activation_arg1,
+                                        arg.activation_arg2,
+                                        ::_sigmoid,
+                                        false,
                                         To,
                                         Talpha);
                             break;

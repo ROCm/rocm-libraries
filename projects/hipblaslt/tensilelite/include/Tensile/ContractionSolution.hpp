@@ -1421,6 +1421,22 @@ namespace TensileLite
         std::shared_ptr<Predicates::Predicate<Hardware>> hardwarePredicate
             = std::make_shared<Predicates::True<Hardware>>();
 
+        // Library key bespokeNarrowing: present (true) only for solutions generated with
+        // BespokeNarrowing; stock libraries never carry it.
+        bool bespokeNarrowing = false;
+
+        // For a bespokeNarrowing solution, the narrowed-fact leaves of problemPredicate
+        // (BetaZero, Activation other than all/hipblaslt_all, UseBias 0, UseScaleAlphaVec 0,
+        // a BiasDataTypeWhiteList missing a default bias type, Bound/Free0/Free1SizeMultiple,
+        // SizeEqual), collected once at load by collectNarrowedFactPredicate(). With
+        // UseBias != 0 it also holds BiasPresent, which the same call conjoins to
+        // problemPredicate so selection skips such a solution for a no-bias problem. Null for
+        // every other solution (all stock), whose launch paths stay unguarded as before.
+        // Launch paths that take a caller-supplied index evaluate this instead of the
+        // full predicate set.
+        std::shared_ptr<Predicates::Predicate<Problem>> narrowedFactPredicate;
+        void                                            collectNarrowedFactPredicate();
+
         SizeMapping  sizeMapping;
         CustomKernel customKernel;
 

@@ -1517,7 +1517,17 @@ def run():
 
 
     kernels = generateKernelObjectsFromSolutions(solutions)
-    kernelHelperObjs = generateKernelHelperObjects(kernels, str(asmToolchain.assembler.path), isaInfoMap)
+    # Helpers follow each library solution's ProblemType, not the kernel it
+    # shares: a handwritten CustomKernel is named by CustomKernel.name alone, so
+    # solutions that need different helpers (UseBeta:false selects the _Beta0
+    # conversion helpers) collapse onto one entry of `solutions` and `kernels`.
+    librarySolutions = [
+        sol.originalSolution
+        for masterLibrary in masterLibraries.values()
+        for lib in (masterLibrary, *masterLibrary.lazyLibraries.values())
+        for sol in lib.solutions.values()
+    ]
+    kernelHelperObjs = generateKernelHelperObjects(librarySolutions, str(asmToolchain.assembler.path), isaInfoMap)
     kernelWriterAssembly = KernelWriterAssembly(asmToolchain.assembler, DebugConfig())
 
     # Resolved before the writer runs: archs is narrowed to the supported subset

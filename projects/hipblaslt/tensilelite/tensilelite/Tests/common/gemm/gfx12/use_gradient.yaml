@@ -1,7 +1,7 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-# Gap Coverage: UseGradient parameter
+# Gap Coverage: Gradient parameter
 # Tests backward pass / gradient computation support
 
 TestParameters:
@@ -17,7 +17,7 @@ GlobalParameters:
   Architecture: gfx1250
 
 BenchmarkProblems:
-  # FP16 with UseGradient=True
+  # FP16 with Gradient=True
   -
     - # ProblemType
       OperationType: GEMM
@@ -29,7 +29,8 @@ BenchmarkProblems:
       TransposeB: True
       UseBeta: True
       Batched: True
-      UseGradient: True
+      Gradient: True
+      UseBias: 1
 
     - # BenchmarkProblemSizeGroup
       InitialSolutionParameters:
@@ -56,8 +57,9 @@ BenchmarkProblems:
           # === RANGE SIZES ===
           - Range: [ [64, 64, 256], [64, 64, 256], [1], [128] ]
           - Range: [ [512], [512], [1], [128, 128, 512] ]  # K-sweep
+        - BiasTypeArgs: ['h']
 
-  # BF16 with UseGradient
+  # BF16 with Gradient
   -
     - # ProblemType
       OperationType: GEMM
@@ -69,7 +71,8 @@ BenchmarkProblems:
       TransposeB: True
       UseBeta: True
       Batched: True
-      UseGradient: True
+      Gradient: True
+      UseBias: 1
 
     - # BenchmarkProblemSizeGroup
       InitialSolutionParameters:
@@ -93,8 +96,9 @@ BenchmarkProblems:
           # === RANGE SIZES ===
           - Range: [ [64, 64, 256], [64, 64, 256], [1], [128] ]
           - Range: [ [256], [128], [1, 2, 4], [128] ]  # Batch sweep non-square
+        - BiasTypeArgs: ['b']
 
-  # FP16 with UseGradient and activation
+  # FP16 with Gradient and activation
   -
     - # ProblemType
       OperationType: GEMM
@@ -106,9 +110,10 @@ BenchmarkProblems:
       TransposeB: True
       UseBeta: True
       Batched: True
-      UseGradient: True
+      Gradient: True
+      UseBias: 1
       Activation: True
-      ActivationType: hipblaslt_relu
+      ActivationType: hipblaslt_all
 
     - # BenchmarkProblemSizeGroup
       InitialSolutionParameters:
@@ -132,3 +137,6 @@ BenchmarkProblems:
           # === RANGE SIZES ===
           - Range: [ [64, 64, 256], [64, 64, 256], [1], [128] ]
           - Range: [ [256], [256], [1], [64, 64, 256] ]  # K-sweep
+        - BiasTypeArgs: ['h']
+        - ActivationArgs:
+          - [Enum: drelu]

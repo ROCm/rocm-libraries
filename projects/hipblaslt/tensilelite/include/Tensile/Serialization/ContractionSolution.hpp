@@ -66,12 +66,14 @@ namespace TensileLite
                 iot::mapOptional(io, "libraryLogicIndex", s.libraryLogicIndex);
                 iot::mapOptional(io, "ideals", s.ideals);
                 iot::mapOptional(io, "linearModel", s.linearModel);
+                iot::mapOptional(io, "bespokeNarrowing", s.bespokeNarrowing);
 
                 iot::mapRequired(io, "sizeMapping", s.sizeMapping);
                 iot::mapOptional(io, "customKernel", s.customKernel);
                 iot::mapRequired(io, "internalArgsSupport", s.internalArgsSupport);
                 s.validatePersistentLoopArgs();
                 iot::mapRequired(io, "problemType", s.problemType);
+                s.collectNarrowedFactPredicate();
             }
 
             const static bool flow = false;

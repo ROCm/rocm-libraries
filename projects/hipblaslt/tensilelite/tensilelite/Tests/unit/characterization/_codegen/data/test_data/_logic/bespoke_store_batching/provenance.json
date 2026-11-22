@@ -1,0 +1,19 @@
+{
+  "base": "c4a209253210049628ffa99085da4e8f44a1e67b",
+  "recipes": {
+    "bf16_mt192x160.yaml": {
+      "source": "one-solution general logic of a traced gfx950 call (stock recipe with the call's exact sizes)",
+      "sha256": "c2429474d79379f34ed9c42bda5e9d1a2a32944d601b8e159b14cdd45244c492",
+      "bespoke_source": "bespoke logic generated for the same call (geko --specialize --keep-beta)",
+      "bespoke_sha256": "bfe66c3e09148976923481b08a7019c05f53363a6b72997ec61313f44be6a279",
+      "solutions": 1
+    },
+    "bf16_mt256x128.yaml": {
+      "source": "one-solution general logic of a traced gfx950 call (stock recipe with the call's exact sizes)",
+      "sha256": "fea0d04ebc6c68450e7ba36dca63c15354f7439fb45fe8580e32fa1b049addff",
+      "bespoke_source": "bespoke logic generated for the same call (geko --specialize --keep-beta)",
+      "bespoke_sha256": "703f064d7d495ac5b889ed283da8395a319078e507d98c0f1424cfdf131a74df",
+      "solutions": 1
+    }
+  }
+}

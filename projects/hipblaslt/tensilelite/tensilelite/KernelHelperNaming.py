@@ -33,6 +33,7 @@ from .KernelWriterConversion import KernelWriterConversion
 from .KernelWriterActivationEnumHeader import KernelWriterActivationEnumHeader
 from .KernelWriterActivationFunction import KernelWriterActivationFunction
 from .KernelWriterReduction import KernelWriterReduction
+from .Activation import ActivationType
 
 
 class KernelHelperEnum(IntEnum):
@@ -84,7 +85,8 @@ def activationEnumHeaderNames(solution):
 
 def activationFunctionNames(solution):
   activationFunctionNames = []
-  if solution["ProblemType"]["ActivationType"] in ['all', 'hipblaslt_all']:
+  if solution["ProblemType"]["ActivationType"] in ['all', 'hipblaslt_all'] or \
+     ActivationType(solution["ProblemType"]["ActivationType"]).isSingleActivation():
     activationFunctionNames.append(KernelWriterActivationFunction.kernelName(solution))
   return activationFunctionNames
 
@@ -173,6 +175,8 @@ def initConversionKernelObjects(solution, isaInfoMap):
     return conversionKernelObjects
   gateList = solution["ProblemType"]["GateResidualDataTypeList"] if solution["ProblemType"]["UseGateResidual"] else [None]
   def appendConversionKernel(state, vw):
+    # The beta-free conversion body is selected only for BespokeNarrowing solutions.
+    state["BespokeNarrowing"] = solution.get("BespokeNarrowing", False)
     for gtype in gateList:
       if len(gateList) > 1:
         gstate = deepcopy(state)
@@ -238,7 +242,10 @@ def initActivationEnumHeaderObjects(solution):
 
 def initActivationFunctionObjects(solution, cxxCompiler, isaInfoMap):
   activationFunctionObjects = []
-  if solution["ProblemType"]["ActivationType"] in ['all', 'hipblaslt_all']:
+  # The conversion (GSU / Stream-K reduction) kernel calls this function, so a single
+  # activation needs it too.
+  if solution["ProblemType"]["ActivationType"] in ['all', 'hipblaslt_all'] or \
+     ActivationType(solution["ProblemType"]["ActivationType"]).isSingleActivation():
     state = {}
     state["ProblemType"] = deepcopy(solution["ProblemType"])
     state["ProblemType"]["GroupedGemm"] = False

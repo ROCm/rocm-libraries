@@ -30,7 +30,7 @@ BenchmarkProblems:
       UseBeta: True
       Batched: True
       Activation: True
-      ActivationType: hipblaslt_relu
+      ActivationType: hipblaslt_all
       ActivationNoGuard: True
 
     - # BenchmarkProblemSizeGroup
@@ -60,6 +60,8 @@ BenchmarkProblems:
           # === RANGE SIZES ===
           - Range: [ [64, 64, 256], [64, 64, 256], [1], [128] ]
           - Range: [ [256], [256], [1], [128, 128, 512] ]  # K-sweep
+        - ActivationArgs:
+          - [Enum: relu]
 
   # BF16 with ActivationNoGuard and GELU
   -
@@ -74,7 +76,7 @@ BenchmarkProblems:
       UseBeta: True
       Batched: True
       Activation: True
-      ActivationType: hipblaslt_gelu
+      ActivationType: hipblaslt_all
       ActivationNoGuard: True
 
     - # BenchmarkProblemSizeGroup
@@ -100,6 +102,8 @@ BenchmarkProblems:
           # === RANGE SIZES ===
           - Range: [ [128, 128, 384], [128, 128, 384], [1], [256] ]
           - Range: [ [512], [512], [1], [256, 256, 1024] ]  # K-sweep
+        - ActivationArgs:
+          - [Enum: gelu]
 
   # FP16 comparing ActivationNoGuard True vs False
   -
@@ -114,7 +118,7 @@ BenchmarkProblems:
       UseBeta: True
       Batched: True
       Activation: True
-      ActivationType: hipblaslt_relu
+      ActivationType: hipblaslt_all
       ActivationNoGuard: False
 
     - # BenchmarkProblemSizeGroup
@@ -140,3 +144,5 @@ BenchmarkProblems:
           # === RANGE SIZES ===
           - Range: [ [128, 128, 512], [128, 128, 512], [1], [256] ]
           - Range: [ [256], [512], [1], [128, 128, 512] ]  # K-sweep non-square
+        - ActivationArgs:
+          - [Enum: relu]

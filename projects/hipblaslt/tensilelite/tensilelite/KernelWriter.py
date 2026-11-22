@@ -61,6 +61,7 @@ from .Components.DecouplePGR import decouplePGRBlocks, decoupledSingleBuffered, 
 from .Components.DecouplePGR import tdmWaveIssueOrder, decoupledThickGateRelaxation, dcpThickGateFromTokenPasses, dcpThickGateUncoveredSites, dcpIsFillLabel, DCP_TENSORCNT_RE, DCP_THICK_GATE_TEXT, DCP_THICK_GATE_TOKENS
 from .Components.TDMFuse import tdmWavePartition
 from .SolutionStructs import Solution, isPackedIndex
+from .SolutionStructs.Problem import bespokeNarrowing
 from .SolutionStructs.Utilities import getMiInputType, isSubtileIterateMode
 from .AsmMemoryInstruction import MemoryInstruction
 from .Activation import ActivationModule
@@ -71,7 +72,7 @@ from .Common.GlobalParameters import globalParameters
 from .Common.Architectures import ARCH_CAP_OVERRIDES
 from .Common.ValidParameters import resolveSwInstructionPrefetch, \
   parseStinkyTofuRegisterAllocation, SW_INSTRUCTION_PREFETCH_AUTO
-from .SolutionStructs.Naming import getKernelFileBase, getKernelNameMin
+from .SolutionStructs.Naming import getKernelFileBase, getKernelNameMin, getKernelStampName
 from .Toolchain.Component import Assembler
 
 import rocisa
@@ -7487,6 +7488,13 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
        kernel["UseSubtileImpl"] or \
        clusterEnabled(kernel["ClusterDim"]):
       self.states.staggerUCode = False
+    # A BespokeNarrowing kernel with StaggerU 0 and no host-packed custom StaggerU never
+    # staggers at run time, so the runtime stagger code would be dead. Custom main-loop
+    # schedules keep it: their tables expect the full stagger (GRInc) sequence.
+    if bespokeNarrowing(kernel) and kernel["StaggerU"] == 0 and \
+       not kernel["InternalSupportParams"]["SupportCustomStaggerU"] and \
+       not kernel["UseCustomMainLoopSchedule"]:
+      self.states.staggerUCode = False
     
     self.states.tailloopInNllmaxUnit = 1
     if self.states.tailloopInNll:
@@ -11956,7 +11964,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     if isPersistent(kernel):
       gridX = "PersistentGrid" if isPersistentDataParallel(kernel) else ("PersistentWithBatch" if kernel["ProblemType"]["NumIndicesC"] > 2 else "PersistentNoBatch")
     kernel["CustomKernel"] = {
-      "name": self.states.kernelName,
+      "name": getKernelStampName(kernel, self.states.kernelName),
       "args": self.kernelArgDefs,
       "macrotile": [kernel["MacroTile0"], kernel["MacroTile1"], kernel["DepthU"]],
       "threads": [kernel["NumThreads"], 1, 1],

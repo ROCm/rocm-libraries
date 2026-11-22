@@ -27,6 +27,7 @@
 #include <gtest/gtest.h>
 
 #include <Tensile/ContractionProblemPredicates.hpp>
+#include <Tensile/ContractionSolution.hpp>
 
 TEST(Predicates, ArithmeticIntensity)
 {
@@ -258,4 +259,142 @@ TEST(Predicates, BufferStoreOffsetLimitCheck_NarrowOutputUsesItsOwnWidth)
 
     auto pred = std::make_shared<Predicates::Contraction::BufferStoreOffsetLimitCheck>(macroTile1);
     EXPECT_TRUE((*pred)(bf16ColumnMajorD(m, n)));
+}
+
+// ----------------------------------------------------------------------------
+// Narrowed-fact predicates: a solution generated for one call fact (UseBeta false,
+// ActivationType none, UseBias 0, UseScaleAlphaVec 0, AssertSummationElementMultiple)
+// carries the predicate below in its library problem predicate (Contractions.py; pinned
+// by test_narrowed_control_preservation.py, which checks the same type names). The host
+// evaluates it before using the solution: a call without the fact must be refused, a call
+// with it accepted.
+// ----------------------------------------------------------------------------
+
+namespace
+{
+    // The shape of the narrowed-control fixture: bf16-sized NN, M=32, N=618, batch 1.
+    TensileLite::ContractionProblemGemm narrowedFactCall(double beta, size_t k = 128)
+    {
+        return TensileLite::ContractionProblemGemm::GEMM(
+            false, false, 32, 618, k, 32, k, 32, beta, false, 1);
+    }
+}
+
+TEST(Predicates, NarrowedFact_BetaZero_RefusesNonZeroBeta)
+{
+    using namespace TensileLite;
+    auto pred = std::make_shared<Predicates::Contraction::BetaZero>();
+    EXPECT_EQ("BetaZero", pred->type());
+    EXPECT_TRUE((*pred)(narrowedFactCall(0.0)));
+    EXPECT_FALSE((*pred)(narrowedFactCall(1.0)));
+    EXPECT_FALSE((*pred)(narrowedFactCall(-0.5)));
+}
+
+TEST(Predicates, NarrowedFact_ActivationNone_RefusesRequestedActivation)
+{
+    using namespace TensileLite;
+    auto pred = std::make_shared<Predicates::Contraction::ActivationCheck>(ActivationType::None);
+    EXPECT_EQ("Activation", pred->type());
+    auto call = narrowedFactCall(0.0);
+    call.setActivationType(ActivationType::None);
+    EXPECT_TRUE((*pred)(call));
+    // hipBLASLt sends Hipblaslt_all for every epilogue with an activation.
+    call.setActivationType(ActivationType::Hipblaslt_all);
+    EXPECT_FALSE((*pred)(call));
+    call.setActivationType(ActivationType::Gelu);
+    EXPECT_FALSE((*pred)(call));
+}
+
+TEST(Predicates, NarrowedFact_UseBias0_RefusesBias)
+{
+    using namespace TensileLite;
+    auto pred = std::make_shared<Predicates::Contraction::UseBiasCheck>(0);
+    EXPECT_EQ("UseBias", pred->type());
+    auto call = narrowedFactCall(0.0);
+    call.setUseBias(0);
+    EXPECT_TRUE((*pred)(call));
+    call.setUseBias(1);
+    EXPECT_FALSE((*pred)(call));
+}
+
+TEST(Predicates, NarrowedFact_UseScaleAlphaVec0_RefusesAlphaVector)
+{
+    using namespace TensileLite;
+    auto pred = std::make_shared<Predicates::Contraction::UseScaleAlphaVecCheck>(0);
+    EXPECT_EQ("UseScaleAlphaVec", pred->type());
+    auto call = narrowedFactCall(0.0);
+    call.setUseScaleAlphaVec(0);
+    EXPECT_TRUE((*pred)(call));
+    // Every non-zero hipBLASLt pointer mode passes alpha as a device vector (SAV 1).
+    call.setUseScaleAlphaVec(1);
+    EXPECT_FALSE((*pred)(call));
+}
+
+TEST(Predicates, NarrowedFact_SummationMultiple_RefusesKTail)
+{
+    using namespace TensileLite;
+    // AssertSummationElementMultiple = DepthU (64): the kernel has no tail loop.
+    auto pred = std::make_shared<Predicates::Contraction::BoundSizeMultiple>(-1, 64);
+    EXPECT_EQ("BoundSizeMultiple", pred->type());
+    EXPECT_TRUE((*pred)(narrowedFactCall(0.0, 128)));
+    EXPECT_FALSE((*pred)(narrowedFactCall(0.0, 120)));
+    EXPECT_FALSE((*pred)(narrowedFactCall(0.0, 129)));
+}
+
+TEST(Predicates, NarrowedFact_BiasDataTypeWhiteList_RefusesOtherBiasType)
+{
+    using namespace TensileLite;
+    // BiasDataTypeList narrowed to the call's one bias type (bf16).
+    auto pred   = std::make_shared<Predicates::Contraction::BiasDataTypeWhiteList>();
+    pred->value = {rocisa::DataType::BFloat16};
+    EXPECT_EQ("BiasDataTypeWhiteList", pred->type());
+    auto call = narrowedFactCall(0.0);
+    EXPECT_TRUE((*pred)(call)); // no bias
+    call.setUseBias(1);
+    call.setBias(rocisa::DataType::BFloat16, 32, 32);
+    EXPECT_TRUE((*pred)(call));
+    call.setBias(rocisa::DataType::Float, 32, 32);
+    EXPECT_FALSE((*pred)(call));
+    call.setBias(rocisa::DataType::Half, 32, 32);
+    EXPECT_FALSE((*pred)(call));
+}
+
+// The launch guard runs only for solutions marked bespokeNarrowing. A stock solution with
+// the same predicate leaves (activation none, no bias, no SAV, summation multiple) must
+// keep develop's launch path: no narrowed-fact predicate, so no guard evaluation.
+namespace
+{
+    void setStockLikePredicates(TensileLite::ContractionSolution& solution)
+    {
+        using namespace TensileLite;
+        namespace PC = Predicates::Contraction;
+        solution.problemPredicate = std::make_shared<Predicates::And<ContractionProblemGemm>>(
+            std::vector<std::shared_ptr<Predicates::Predicate<ContractionProblemGemm>>>{
+                std::make_shared<PC::ActivationCheck>(ActivationType::None),
+                std::make_shared<PC::UseBiasCheck>(0),
+                std::make_shared<PC::UseScaleAlphaVecCheck>(0),
+                std::make_shared<PC::BoundSizeMultiple>(-1, 64)});
+    }
+}
+
+TEST(Predicates, NarrowedFact_StockSolutionHasNoLaunchGuard)
+{
+    TensileLite::ContractionSolution solution;
+    setStockLikePredicates(solution);
+    solution.collectNarrowedFactPredicate();
+    EXPECT_EQ(solution.narrowedFactPredicate, nullptr);
+}
+
+TEST(Predicates, NarrowedFact_BespokeSolutionKeepsLaunchGuard)
+{
+    TensileLite::ContractionSolution solution;
+    setStockLikePredicates(solution);
+    solution.bespokeNarrowing = true;
+    solution.collectNarrowedFactPredicate();
+    ASSERT_NE(solution.narrowedFactPredicate, nullptr);
+    auto call = narrowedFactCall(0.0);
+    call.setActivationType(TensileLite::ActivationType::None);
+    EXPECT_TRUE((*solution.narrowedFactPredicate)(call));
+    call.setUseBias(1);
+    EXPECT_FALSE((*solution.narrowedFactPredicate)(call));
 }

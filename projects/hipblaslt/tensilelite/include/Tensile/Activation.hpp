@@ -80,5 +80,24 @@ namespace TensileLite
     TENSILELITEHOST_EXPORT std::istream& operator>>(std::istream& stream, ActivationType& t);
 
     TENSILELITEHOST_EXPORT int getAdditionalArgNum(ActivationType d);
+
+    // True for the forward activations hipBLASLt can request that TensileLite builds as a
+    // single-activation kernel (logic ActivationType gelu, relu, sigmoid, silu or clamp): the
+    // kernel applies only that activation and has no activationType argument.
+    // Keep in step with ActivationType.isSingleActivation() in tensilelite/Activation.py.
+    inline bool isSingleActivationType(ActivationType t)
+    {
+        switch(t)
+        {
+        case ActivationType::Gelu:
+        case ActivationType::Relu:
+        case ActivationType::Sigmoid:
+        case ActivationType::Silu:
+        case ActivationType::Clamp:
+            return true;
+        default:
+            return false;
+        }
+    }
 }
 

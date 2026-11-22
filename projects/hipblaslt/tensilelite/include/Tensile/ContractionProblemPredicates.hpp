@@ -2166,6 +2166,14 @@ namespace TensileLite
                 {
                     if(value == ActivationType::All)
                         return true;
+                    // A single-activation kernel has no "no activation" path and no other
+                    // activation: it runs only calls asking for exactly this one, directly or
+                    // through All / Hipblaslt_all plus the activation enum (what hipBLASLt sends).
+                    if(isSingleActivationType(value))
+                        return problem.activationType() == value
+                               || ((problem.activationType() == ActivationType::All
+                                    || problem.activationType() == ActivationType::Hipblaslt_all)
+                                   && problem.getParams().activationEnum() == value);
                     if(problem.activationType() == value
                        || problem.activationType() == ActivationType::None)
                         return true;
@@ -2184,6 +2192,17 @@ namespace TensileLite
                 virtual bool debugEval(ContractionProblemGemm const& problem,
                                        std::ostream&                 stream) const override
                 {
+                    if(isSingleActivationType(value))
+                    {
+                        // The enum decides the match for All / Hipblaslt_all calls.
+                        bool               rv = (*this)(problem);
+                        std::ostringstream details;
+                        details << "prob=" << ToString(problem.activationType())
+                                << ", probEnum=" << ToString(problem.getParams().activationEnum())
+                                << ", sol=" << ToString(value);
+                        PredicateDebugger::printRow(stream, rv, this->type(), details.str());
+                        return rv;
+                    }
                     return debugEvalCmp(
                         problem, stream, "prob", problem.activationType(), "==", "sol", value);
                 }
@@ -2350,6 +2369,37 @@ namespace TensileLite
                     bool rv = (*this)(problem);
                     std::ostringstream details;
                     details << "prob=" << problem.useBias() << ", sol_supports=" << value;
+                    PredicateDebugger::printRow(stream, rv, this->type(), details.str());
+                    return rv;
+                }
+            };
+
+            // Host-only requirement of a bespokeNarrowing solution with UseBias != 0: the
+            // problem must use bias. Derived at load by collectNarrowedFactPredicate(); never
+            // serialized, so stock solutions and library files are unchanged.
+            struct BiasPresentCheck : public Predicate_CRTP<BiasPresentCheck, ContractionProblemGemm>
+            {
+                enum
+                {
+                    HasIndex = false,
+                    HasValue = false
+                };
+                static std::string Type()
+                {
+                    return "BiasPresent";
+                }
+
+                virtual bool operator()(ContractionProblemGemm const& problem) const override
+                {
+                    return problem.useBias();
+                }
+
+                virtual bool debugEval(ContractionProblemGemm const& problem,
+                                       std::ostream&                 stream) const override
+                {
+                    bool               rv = (*this)(problem);
+                    std::ostringstream details;
+                    details << "prob=" << problem.useBias() << ", sol_requires=1";
                     PredicateDebugger::printRow(stream, rv, this->type(), details.str());
                     return rv;
                 }

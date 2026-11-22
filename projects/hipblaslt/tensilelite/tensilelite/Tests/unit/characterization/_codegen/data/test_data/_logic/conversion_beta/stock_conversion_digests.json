@@ -1,0 +1,26 @@
+{
+  "gfx950_TN_pgr2.yaml": {
+    "Cijk_SB_BiasS_HAS_ScaleAlphaVec_PostGSU16_VW1": "73d4c36b908753dcce16e9e20df9774936d0fbaf1fc10dd491c7513fdf017552",
+    "Cijk_SB_BiasB_HAS_ScaleAlphaVec_PostGSU16_VW1": "967182306a930b435af7e81f5118b14b26d3b803b9d82afda59d1e05ed2ae889",
+    "Cijk_SB_BiasS_HAS_ScaleAlphaVec_PostGSU16_VW2": "51db3a531e5f195d4291378f3370d06017e450605304de413ec327a9e57fb50a",
+    "Cijk_SB_BiasB_HAS_ScaleAlphaVec_PostGSU16_VW2": "b742c8700d2fbd35751d7a47a19ee050949d6da454fd6814ed513393dfc1b657",
+    "Cijk_SB_BiasS_HAS_ScaleAlphaVec_PostGSU16_VW4": "ba912b3a8dcf0fb10ae8c082278570e8aac421dec5cb1f8f6130b28915a78a52",
+    "Cijk_SB_BiasB_HAS_ScaleAlphaVec_PostGSU16_VW4": "f858e4c644ddd1885f07787be8c40a06d9e14f3d7014cfe8dc59d0ae8ea14a43"
+  },
+  "gfx950_NN_pgr0.yaml": {
+    "Cijk_SB_BiasS_HAS_ScaleAlphaVec_PostGSU16_VW1": "73d4c36b908753dcce16e9e20df9774936d0fbaf1fc10dd491c7513fdf017552",
+    "Cijk_SB_BiasB_HAS_ScaleAlphaVec_PostGSU16_VW1": "967182306a930b435af7e81f5118b14b26d3b803b9d82afda59d1e05ed2ae889",
+    "Cijk_SB_BiasS_HAS_ScaleAlphaVec_PostGSU16_VW2": "51db3a531e5f195d4291378f3370d06017e450605304de413ec327a9e57fb50a",
+    "Cijk_SB_BiasB_HAS_ScaleAlphaVec_PostGSU16_VW2": "b742c8700d2fbd35751d7a47a19ee050949d6da454fd6814ed513393dfc1b657",
+    "Cijk_SB_BiasS_HAS_ScaleAlphaVec_PostGSU16_VW4": "ba912b3a8dcf0fb10ae8c082278570e8aac421dec5cb1f8f6130b28915a78a52",
+    "Cijk_SB_BiasB_HAS_ScaleAlphaVec_PostGSU16_VW4": "f858e4c644ddd1885f07787be8c40a06d9e14f3d7014cfe8dc59d0ae8ea14a43"
+  },
+  "gfx942_NT_gsu_auto.yaml": {
+    "Cijk_SB_BiasS_HAS_ScaleAlphaVec_PostGSU16_VW1": "73d4c36b908753dcce16e9e20df9774936d0fbaf1fc10dd491c7513fdf017552",
+    "Cijk_SB_BiasB_HAS_ScaleAlphaVec_PostGSU16_VW1": "967182306a930b435af7e81f5118b14b26d3b803b9d82afda59d1e05ed2ae889",
+    "Cijk_SB_BiasS_HAS_ScaleAlphaVec_PostGSU16_VW2": "51db3a531e5f195d4291378f3370d06017e450605304de413ec327a9e57fb50a",
+    "Cijk_SB_BiasB_HAS_ScaleAlphaVec_PostGSU16_VW2": "b742c8700d2fbd35751d7a47a19ee050949d6da454fd6814ed513393dfc1b657",
+    "Cijk_SB_BiasS_HAS_ScaleAlphaVec_PostGSU16_VW4": "ba912b3a8dcf0fb10ae8c082278570e8aac421dec5cb1f8f6130b28915a78a52",
+    "Cijk_SB_BiasB_HAS_ScaleAlphaVec_PostGSU16_VW4": "f858e4c644ddd1885f07787be8c40a06d9e14f3d7014cfe8dc59d0ae8ea14a43"
+  }
+}

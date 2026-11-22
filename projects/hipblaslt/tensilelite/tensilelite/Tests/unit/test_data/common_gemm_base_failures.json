@@ -1,0 +1,29 @@
+{
+  "base_commit": "98737a5c5f4",
+  "validator": "test_common_gemm_yaml_derived_parameters_have_no_fatal_input_errors",
+  "measurement_log_sha256": "6ebd2a1e9bbaf81e77260337585c872d0bf3bafb2e7867e7f8fff629c7b445a3",
+  "exit_code": 1,
+  "failed": [
+    {
+      "path": "gfx12/persistent_advanced.yaml",
+      "exception": "ValueError",
+      "reason": "Conflicting legacy StreamK and WorkAssignment=DynamicWorkQueue (expected StaticGrid)"
+    },
+    {
+      "path": "swizzleA.yaml",
+      "exception": "AssertionError",
+      "reason": "LdsPadA >= 0"
+    },
+    {
+      "path": "swizzleB.yaml",
+      "exception": "AssertionError",
+      "reason": "LdsPadA >= 0"
+    }
+  ],
+  "passed": [
+    "gfx12/cache_hints_gate.yaml",
+    "gfx12/e_tensor_hints.yaml",
+    "gfx12/use_e_output.yaml",
+    "gfx12/use_gradient.yaml"
+  ]
+}

@@ -282,6 +282,16 @@ class ActivationType:
     def toEnum(self):
         return self.value.capitalize()
 
+    def isSingleActivation(self) -> bool:
+        # A forward activation hipBLASLt can request (gelu, relu, sigmoid, silu, clamp) that a
+        # kernel can be built for on its own: only that activation, no run-time selection.
+        # Keep in step with isSingleActivationType() in include/Tensile/Activation.hpp.
+        if self.value in ['none', 'all', 'hipblaslt_all'] or self.value not in self.lookup:
+            return False
+        entry = self.lookup[self.value]
+        return bool(entry['supported_by'] & ActivationType.SupportedBy.HIPBLASLT) and \
+            not entry['instance'].isGradient
+
 @dataclass
 class actCacheInfo:
     usePK: bool
@@ -401,7 +411,8 @@ class ActivationModule:
         elif actType == 'hipblaslt_all':
             enumList = ActivationType.getEnumStrList(cDataType, configSupported=ActivationType.SupportedBy.HIPBLASLT, exportType=exportType)
         else:
-            enumList = [str(actType)]
+            # str() of an ActivationType is capitalized; getModule matches lower-case names.
+            enumList = [str(actType).lower()]
         for enumStr in enumList:
             _ = self.getModule(cDataType, enumStr, 0, 1) # dummy vgpr
             usage[enumStr] = {"vgpr": self.vgprCounter, "sgpr": self.sgprCounter}

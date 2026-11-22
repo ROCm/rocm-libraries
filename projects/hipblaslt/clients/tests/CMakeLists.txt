@@ -26,6 +26,25 @@ add_custom_command(
 add_custom_target(hipblaslt-test-data DEPENDS ${HIPBLASLT_TEST_DATA})
 add_dependencies(hipblaslt-test hipblaslt-test-data)
 
+if(NOT WIN32)
+    if(NOT COMMAND create_device_library)
+        include("${PROJECT_SOURCE_DIR}/tensilelite/cmake/hipblaslt_codegen.cmake")
+    endif()
+    set(HIPBLASLT_BESPOKE_FIXTURE_ROOT "${CMAKE_CURRENT_BINARY_DIR}/../bespoke-fixture")
+    foreach(_fixture_arch gfx950 gfx942)
+        set(_fixture_targets "")
+        foreach(_target IN LISTS GPU_TARGETS)
+            string(REGEX REPLACE ":.*$" "" _processor "${_target}")
+            if(_processor STREQUAL _fixture_arch)
+                list(APPEND _fixture_targets "${_target}")
+            endif()
+        endforeach()
+        if(_fixture_targets)
+            add_subdirectory(data/bespoke "bespoke-${_fixture_arch}")
+        endif()
+    endforeach()
+endif()
+
 # Optional: CTest test categorization when building in rocm-libraries with shared/ctest.
 # Skipped when shared/ is not present (e.g. standalone hipblaslt or sparse checkout in CI).
 set(HIPBLASLT_CTEST_INSTALL_FILE "")

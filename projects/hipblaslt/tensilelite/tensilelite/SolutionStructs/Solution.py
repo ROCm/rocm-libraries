@@ -74,7 +74,7 @@ from ..Common.ValidParameters import validParameters, \
                                             SW_INSTRUCTION_PREFETCH_ABSOLUTE, \
                                             SW_INSTRUCTION_PREFETCH_AUTO
 from .Naming import getSolutionNameFull
-from .Problem import ProblemType
+from .Problem import ProblemType, bespokeNarrowing, effectiveSummationElementMultiple, exactSizeContradictions
 from .segment_interleave import evaluate as segIntEval, aligned_budget_ok as segAlignedBudget, \
   b_rotate_reason as segBRotateReason
 from ..Toolchain.Component import Assembler
@@ -2078,6 +2078,15 @@ class Solution(collections.abc.Mapping):
       # The amax workspace/counter indexes dense output tiles within one batch.
       # Publish the corresponding runtime predicate, including for explicit YAML.
       state["BatchSizeEqual"] = 1
+    # A single ActivationType exists only in bespoke requests, and the host guards only
+    # BespokeNarrowing solutions at launch: refuse the kernel rather than leave it unguarded.
+    if state["ProblemType"]["ActivationType"].isSingleActivation() and not bespokeNarrowing(state):
+      raise RuntimeError("ActivationType %s needs BespokeNarrowing: true"
+                         % state["ProblemType"]["ActivationType"])
+    # Beta-off Stream-K did not assemble before the Betapad alias, and its beta == 0 fact is
+    # guarded at launch only for BespokeNarrowing solutions: refuse it without the key.
+    if not state["ProblemType"]["UseBeta"] and isStreamK(state) and not bespokeNarrowing(state):
+      raise RuntimeError("UseBeta: false with Stream-K needs BespokeNarrowing: true")
     if dcpAutoSkip is None:
       # Re-derive pair-dependent scalar state from pristine input on each retry.
       pristine = copy.deepcopy(state) if pgrAutoPairRequested(state) else None
@@ -5439,10 +5448,19 @@ class Solution(collections.abc.Mapping):
       reject(state, printRejectionReason, "Source KernelLanguage only supports LdsPadA == LdsPadB")
       return
 
+    # An exact size its own asserted element multiple excludes matches no
+    # problem; refuse it rather than derive edge/tail facts from it.
+    contradictions = exactSizeContradictions(state)
+    if contradictions:
+      raise RuntimeError("AssertSizeEqual contradicts the asserted element multiples: " + ", ".join(
+        "size(%u) = %u is not a multiple of %s = %u" % (index, size, key, multiple)
+        for key, multiple, index, size in contradictions))
+
     # NoTailLoop parameter initialization.
-    # If ASEM is multiple of DepthU TailLoop will not be used.
+    # If ASEM (or an exact summation size, see effectiveSummationElementMultiple)
+    # is a multiple of DepthU TailLoop will not be used.
     state["NoTailLoop"] = False
-    if state["AssertSummationElementMultiple"] % state["DepthU"] == 0:
+    if effectiveSummationElementMultiple(state) % state["DepthU"] == 0:
       state["NoTailLoop"] = True
 
     # TailloopInNll optimization check
@@ -7246,8 +7264,11 @@ class Solution(collections.abc.Mapping):
         reject(state, printRejectionReason, "Use E does not support GroupLoadStore.")
 
     # Activation
-    # Function call is set to false if GSU != 1 or Activation is not fused or ActivationType is not All.
-    if not (state["ActivationFused"] and state["ProblemType"]["ActivationType"] in ['all', 'hipblaslt_all']) \
+    # Function call is set to false if Activation is not fused or ActivationType is neither All
+    # nor a single activation (whose one body the store paths call).
+    actTypeForAfc = state["ProblemType"]["ActivationType"]
+    if not (state["ActivationFused"] and (actTypeForAfc in ['all', 'hipblaslt_all'] or \
+                                          ActivationType(actTypeForAfc).isSingleActivation())) \
       and state["ActivationFuncCall"]:
       state["ActivationFuncCall"] = False
 
