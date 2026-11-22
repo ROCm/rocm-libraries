@@ -33,6 +33,17 @@ plugin filters after ``-k``, ``-m``, ``--deselect`` and the conftest filters.
 Thus every shard divides the same set of tests, and each test runs in exactly
 one shard.
 
+The marks are placement hints, not the projection of shard time (that is the
+per-entry times file). So that a mark does not drift silently from what its
+tests cost, the plugin times the marked tests of every run. A shard key counts
+when every marked test of it passed; its ratio is measured seconds over
+declared cost, and the run's scale is the median ratio of the keys that count,
+so the check needs no reference machine. A key whose ratio is more than
+``COST_MARK_TOLERANCE`` times the scale, or less than its inverse, gets a
+``rocke-ctest-shard: cost mark ...`` line in the terminal summary. The line
+warns and never changes the exit status. Under pytest-xdist the tests run in
+the workers, which print no summary, so there is no check.
+
 A header line names the shard and its source, for example
 ``rocke-ctest-shard: 1/4 (GTEST_SHARD_INDEX=1, GTEST_TOTAL_SHARDS=4)``, or
 ``rocke-ctest-shard: off``. The plugin adds this line to the report header
@@ -50,8 +61,11 @@ when it is true, the plugin does the selection.
 
 from __future__ import annotations
 
+import collections
 import dataclasses
 import os
+import statistics
+from collections.abc import Mapping
 
 import pytest
 
@@ -73,11 +87,13 @@ from .ci_shard import (
 __all__ = [
     "ACTIVATION_FLAG",
     "CHILD_ENV_EXCLUDED",
+    "COST_MARK_TOLERANCE",
     "GTEST_INDEX_ENV",
     "GTEST_TOTAL_ENV",
     "PLUGIN_NAME",
     "SHARD_COST_MARKER",
     "SHARD_ENV",
+    "drifted_cost_marks",
     "owns_selection",
     "parse_shard",
     "register_shard_cost_marker",
@@ -91,6 +107,7 @@ __all__ = [
 
 PLUGIN_NAME = "rocke.tests.ctest_shard"
 SHARD_COST_MARKER = "rocke_shard_cost"
+COST_MARK_TOLERANCE = 2.0
 
 
 def shard_key(item) -> str:
@@ -143,15 +160,49 @@ def shard_costs(items) -> dict[str, float]:
     return costs
 
 
-def select_items(config, items: list, spec: str | None = None) -> None:
+def drifted_cost_marks(
+    declared: Mapping[str, float],
+    measured: Mapping[str, float],
+    tolerance: float = COST_MARK_TOLERANCE,
+) -> dict[str, float]:
+    """The shard keys whose cost mark is off, each with its ratio to the run's
+    scale. A key's ratio is ``measured[key] / declared[key]``; the scale is the
+    median ratio over the keys in both mappings; a key is off when its ratio is
+    more than ``tolerance`` times the scale or less than the scale divided by
+    ``tolerance``. Raises ``ValueError`` unless ``tolerance`` is at least 1."""
+    if not (tolerance >= 1):  # also refuses NaN
+        raise ValueError(f"cost mark tolerance {tolerance!r} is not at least 1")
+    ratios = {key: measured[key] / declared[key] for key in declared if key in measured}
+    if not ratios:
+        return {}
+    scale = statistics.median(ratios.values())
+    if scale <= 0:
+        return {}
+    relative = {key: ratio / scale for key, ratio in ratios.items()}
+    return {
+        key: value
+        for key, value in sorted(relative.items())
+        if not 1 / tolerance <= value <= tolerance
+    }
+
+
+def select_items(
+    config,
+    items: list,
+    spec: str | None = None,
+    *,
+    costs: Mapping[str, float] | None = None,
+) -> None:
     """``pytest_collection_modifyitems`` body: keep the items of shard
-    ``spec`` (default: ``ROCKE_TEST_SHARD``; blank keeps every item)."""
+    ``spec`` (default: ``ROCKE_TEST_SHARD``; blank keeps every item).
+    ``costs`` are the shard costs of ``items`` when the caller already has
+    them (default: computed here with ``shard_costs``)."""
     text = (os.environ.get(SHARD_ENV, "") if spec is None else spec).strip()
     if not text:
         return
     shard = Shard(text)
     keys = [shard_key(item) for item in items]
-    kept = shard.keeps(keys, shard_costs(items))
+    kept = shard.keeps(keys, shard_costs(items) if costs is None else costs)
     keep, drop = [], []
     for item, key in zip(items, keys):
         (keep if key in kept else drop).append(item)
@@ -166,6 +217,7 @@ class _ShardState:
     before: int | None = None
     split_line: str | None = None
     kept: int | None = None
+    costs: dict[str, float] | None = None
 
     def empty_share(self, exitstatus) -> bool:
         """True when the selection had tests, none fell in this shard, and
@@ -179,6 +231,66 @@ class _ShardState:
 
 
 _STATE = pytest.StashKey[_ShardState]()
+
+
+# eq=False keeps the instance hashable: it is registered as a plugin.
+@dataclasses.dataclass(eq=False)
+class _CostMarkTiming:
+    """The measured time of the run's marked tests, per shard key."""
+
+    key_of_test: dict[str, str] = dataclasses.field(default_factory=dict)
+    declared: dict[str, float] = dataclasses.field(default_factory=dict)
+    measured: collections.Counter[str] = dataclasses.field(
+        default_factory=collections.Counter
+    )
+    passed: collections.Counter[str] = dataclasses.field(
+        default_factory=collections.Counter
+    )
+    spoiled: set[str] = dataclasses.field(default_factory=set)
+
+    def pytest_collection_finish(self, session) -> None:
+        """Time the marked tests of the run's final selection, reusing the
+        shard costs the selection computed when there was a shard."""
+        state = session.config.stash.get(_STATE, None)
+        costs = None if state is None else state.costs
+        self.declared = shard_costs(session.items) if costs is None else costs
+        self.key_of_test = {
+            item.nodeid: shard_key(item)
+            for item in session.items
+            if _declared_cost(item) is not None
+        }
+
+    def pytest_runtest_logreport(self, report) -> None:
+        key = self.key_of_test.get(report.nodeid)
+        if key is None:
+            return
+        self.measured[key] += report.duration
+        if report.outcome != "passed":
+            self.spoiled.add(key)
+        elif report.when == "call":
+            self.passed[key] += 1
+
+    def complete(self) -> dict[str, float]:
+        """Measured seconds of each key whose marked tests all passed."""
+        tests_per_key = collections.Counter(self.key_of_test.values())
+        return {
+            key: self.measured[key]
+            for key, count in tests_per_key.items()
+            if key not in self.spoiled and self.passed[key] == count
+        }
+
+    def warning_lines(self) -> list[str]:
+        drifted = drifted_cost_marks(self.declared, self.complete())
+        return [
+            f"rocke-ctest-shard: cost mark of {key} is off: declared "
+            f"{self.declared[key]:g} s, measured {self.measured[key]:.3g} s, "
+            f"{relative:.2g}x the run's median ratio; update its "
+            f"{SHARD_COST_MARKER} mark"
+            for key, relative in drifted.items()
+        ]
+
+
+_TIMING = pytest.StashKey[_CostMarkTiming]()
 
 
 def owns_selection(config) -> bool:
@@ -207,6 +319,9 @@ def pytest_configure(config):
         raise pytest.UsageError(f"rocke-ctest-shard: {error}") from error
     shard = None if resolved is None else Shard(*resolved)
     config.stash[_STATE] = _ShardState(shard=shard)
+    timing = _CostMarkTiming()
+    config.stash[_TIMING] = timing
+    config.pluginmanager.register(timing, f"{PLUGIN_NAME}.cost_mark_timing")
 
 
 def _shard_of_run(config) -> Shard | None:
@@ -225,16 +340,21 @@ def pytest_collection_modifyitems(config, items):
     if state is None or state.shard is None:
         return
     state.before = len(items)
+    state.costs = shard_costs(items)
     state.split_line = state.shard.split_line(
-        [shard_key(item) for item in items], shard_costs(items)
+        [shard_key(item) for item in items], state.costs
     )
-    select_items(config, items, state.shard.spec)
+    select_items(config, items, state.shard.spec, costs=state.costs)
     state.kept = len(items)
 
 
 def pytest_terminal_summary(terminalreporter, exitstatus, config):
     state = config.stash.get(_STATE, None)
     terminalreporter.write_line(header_line(_shard_of_run(config)))
+    timing = config.stash.get(_TIMING, None)
+    if timing is not None:
+        for line in timing.warning_lines():
+            terminalreporter.write_line(line)
     if state is None or state.split_line is None:
         return
     terminalreporter.write_line(state.split_line)

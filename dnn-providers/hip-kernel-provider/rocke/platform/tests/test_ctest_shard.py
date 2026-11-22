@@ -739,9 +739,74 @@ def test_a_malformed_cost_mark_is_a_usage_error(tmp_path, mark):
         "def test_one():\n    pass\n"
     )
     project = _project(tmp_path, source)
-    (run,) = _pytest_side_by_side(project, [_Run((), _gtest(0))])
-    assert run.returncode == pytest.ExitCode.USAGE_ERROR, run.stdout + run.stderr
-    assert "test_mod.py::test_one: " in run.stderr
+    # With a shard and without one: the mark is checked in every run.
+    for run in _pytest_side_by_side(project, [_Run((), _gtest(0)), _Run(flag=False)]):
+        assert run.returncode == pytest.ExitCode.USAGE_ERROR, run.stdout + run.stderr
+        assert "test_mod.py::test_one: " in run.stderr
+
+
+# ------------------------------------------------------------------ cost mark drift
+def test_a_cost_mark_is_off_relative_to_the_runs_median_ratio():
+    declared = {"a": 1.0, "b": 2.0, "c": 4.0, "slow": 1.0, "fast": 8.0}
+    # a, b and c run at 3 measured seconds per declared unit: the run's scale.
+    measured = {"a": 3.0, "b": 6.0, "c": 12.0, "slow": 9.0, "fast": 6.0}
+    assert ctest_shard.drifted_cost_marks(declared, measured) == {
+        "fast": 0.25,
+        "slow": 3.0,
+    }
+    # Exactly the tolerance away from the scale is still in bounds.
+    assert ctest_shard.drifted_cost_marks(declared, measured, tolerance=4.0) == {}
+
+
+def test_a_cost_mark_without_a_measurement_is_not_judged():
+    assert ctest_shard.drifted_cost_marks({"a": 1.0, "b": 1.0}, {"a": 5.0}) == {}
+    assert ctest_shard.drifted_cost_marks({"a": 1.0}, {}) == {}
+
+
+@pytest.mark.parametrize("tolerance", [0.5, float("nan")])
+def test_a_cost_mark_tolerance_below_one_is_an_error(tolerance):
+    with pytest.raises(ValueError, match="is not at least 1"):
+        ctest_shard.drifted_cost_marks({"a": 1.0}, {"a": 1.0}, tolerance)
+
+
+_DRIFT_MODULE = textwrap.dedent(
+    f"""
+    import time
+
+    import pytest
+
+    cost = pytest.mark.{ctest_shard.SHARD_COST_MARKER}
+
+    @pytest.mark.parametrize("name", ["even0", "even1", "even2"])
+    @cost(1)
+    def test_even(name):
+        time.sleep(0.05)
+
+    @cost(1)
+    def test_slow():
+        time.sleep(0.4)
+
+    @cost(1)
+    def test_skipped():
+        pytest.skip("a key with a skip is not judged")
+
+    @cost(100)
+    def test_failing():
+        assert False, "a key with a failure is not judged"
+    """
+)
+
+
+def test_a_run_warns_only_about_a_drifted_cost_mark_of_passing_tests(tmp_path):
+    project = _project(tmp_path, _DRIFT_MODULE)
+    (run,) = _pytest_side_by_side(project, [_Run(flag=False)])
+    # The failing test, not the warning, sets the exit status.
+    assert run.returncode == pytest.ExitCode.TESTS_FAILED, run.stdout + run.stderr
+    warned = [line for line in run.stdout.splitlines() if " cost mark of " in line]
+    assert len(warned) == 1, run.stdout
+    assert warned[0].startswith(
+        "rocke-ctest-shard: cost mark of test_mod.py::test_slow is off: declared 1 s"
+    ), warned[0]
 
 
 def test_owns_selection_only_when_loaded_as_a_plugin(tmp_path):
