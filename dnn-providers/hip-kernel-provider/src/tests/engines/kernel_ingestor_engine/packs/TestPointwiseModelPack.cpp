@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <set>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -78,8 +79,15 @@ TEST(TestPointwiseModelPack, TheGeneratedModelRanksTheKernelDeclaredOrderWouldNo
     const auto bound = graphMatch(context);
     ASSERT_TRUE(bound.has_value()) << "the engine does not serve an fp32 ADD graph";
 
+    // An installed tree can carry the pack once per architecture shard, so the catalog may
+    // hold several copies of each kernel; what it must hold is a 64 and a 256 kernel.
     const auto kernels = shippedKernels(set);
-    ASSERT_EQ(kernels.size(), 2U) << "the pack ships a 64 and a 256 kernel";
+    std::set<int64_t> blockSizes;
+    for(const auto& kernel : kernels)
+    {
+        blockSizes.insert(kernel.getIntMetadata("block_size"));
+    }
+    ASSERT_EQ(blockSizes, (std::set<int64_t>{64, 256})) << "the pack ships a 64 and a 256 kernel";
     ingestor::Catalog catalog;
     catalog.bound = *bound;
     for(const auto& kernel : kernels)
