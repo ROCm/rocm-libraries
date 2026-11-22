@@ -4976,8 +4976,15 @@ def pytest_generate_tests(metafunc):
     # One test per LLVM flavor, as the platform golden test does, so each
     # flavor gets its own timeout. A hook rather than a decorator keeps pytest
     # out of the --check / --write script path.
+    # Each flavor's check costs a few seconds; the cost mark lets the CI
+    # shards share them (rocke.tests.ctest_shard).
     if "flavor" in metafunc.fixturenames:
-        metafunc.parametrize("flavor", GOLDEN_FLAVORS)
+        import pytest
+
+        cost = pytest.mark.rocke_shard_cost(4)
+        metafunc.parametrize(
+            "flavor", [pytest.param(flavor, marks=cost) for flavor in GOLDEN_FLAVORS]
+        )
 
 
 def test_conv_ir_golden_holds_every_llvm_flavor():

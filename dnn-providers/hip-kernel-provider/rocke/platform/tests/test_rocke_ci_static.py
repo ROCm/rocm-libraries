@@ -212,6 +212,9 @@ def test_golden_holds_every_llvm_flavor():
     )
 
 
+# Each flavor costs about 6 s; the mark lets the CI shards share them
+# (rocke.tests.ctest_shard).
+@pytest.mark.rocke_shard_cost(6)
 @pytest.mark.parametrize("flavor", GOLDEN_FLAVORS)
 def test_ir_cases_match_golden_sha256(flavor):
     """Every case's lowered-IR sha256 (and the set of expected failures) at
