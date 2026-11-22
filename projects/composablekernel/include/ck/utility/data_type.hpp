@@ -4,6 +4,7 @@
 #pragma once
 #include <stdint.h>
 #include "ck/utility/amd_ck_fp8.hpp"
+#include "ck/utility/dtype_complex.hpp"
 #include "ck/utility/e4m3.hpp"
 #include "ck/utility/e5m3.hpp"
 #include "ck/utility/e8m0.hpp"
