@@ -122,6 +122,7 @@ def test_gpu_round_trip_and_tensor_methods():
     assert array.dtype == "bf16" and array.shape == (3, 4) and array.ndim == 2
     assert array.stride() == (4, 1) and array.stride(0) == 4
     assert array.element_size() == 2 and array.numel() == 12
+    assert array.nbytes == host.nbytes == 24
     assert array.is_contiguous() and array.data_ptr() != 0
     np.testing.assert_array_equal(array.read(), host)
     array.write(host[::-1].copy())
@@ -134,6 +135,7 @@ def test_gpu_column_view_keeps_the_host_strides():
     current_device_arch()
     table = DeviceArray(np.zeros((3, 10), np.int32), shape=(3, 4))
     assert table.shape == (3, 4) and table.stride(0) == 10
+    assert table.nbytes == 3 * 4 * 4
     assert not table.is_contiguous()
 
 

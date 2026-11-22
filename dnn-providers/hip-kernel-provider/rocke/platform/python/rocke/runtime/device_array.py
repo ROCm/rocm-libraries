@@ -15,8 +15,8 @@ Two pieces, one per responsibility:
   overlap) read an ``ArrayInfo`` and so accept either kind of array.
 * :class:`DeviceArray` is a device copy of a host numpy array, allocated and
   copied by the rocKE runtime. It also answers the few tensor methods the
-  launchers read (``shape``, ``stride``, ``data_ptr``), so it can be passed
-  wherever a launch helper takes a device tensor.
+  launchers read (``shape``, ``stride``, ``data_ptr``, ``nbytes``), so it can
+  be passed wherever a launch helper takes a device tensor.
 
 numpy has no bf16 and no fp8, so a :class:`DeviceArray` of those types holds
 the raw bits on the host (``uint16`` / ``uint8``) and names its element type
@@ -167,6 +167,12 @@ class DeviceArray:
 
     def numel(self) -> int:
         return int(np.prod(self.shape, dtype=np.int64))
+
+    @property
+    def nbytes(self) -> int:
+        """Bytes of the elements ``shape`` covers (``numel() * element_size()``,
+        as a torch tensor's ``nbytes``)."""
+        return self.numel() * self.element_size()
 
     def is_contiguous(self) -> bool:
         return self.info().is_contiguous()
