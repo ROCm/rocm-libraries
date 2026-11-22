@@ -55,6 +55,35 @@ bool BnFwdInference::IsApplicable(const ExecutionContext&,
        activ_mode != miopenActivationCLIPPEDRELU && activ_mode != miopenActivationCLAMP)
         return false;
 
+    // the launch puts the spatial dimension on grid y (see GetSolution,
+    // which this mirrors). workgroup ids y/z are 16-bit, and a module
+    // launch with more than 65535 workgroups in y wraps silently on gfx12
+    // with wrong results, so a problem this size has to be left to another
+    // solver. 65535, not 65536: multi-XCD gfx12 parts page-fault at 65536
+    {
+        int n, c, h, w;
+        std::tie(n, c, h, w) = tien<4>(bn_problem.GetXDesc().GetLengths());
+        const size_t in_cstride = size_t{h} * size_t{w};
+        if(in_cstride > 65535)
+            return false;
+        const size_t vectorsize =
+            bn_problem.IsLayoutNHWC()
+                ? (c % 4 == 0 ? 4 : (c % 2 == 0 ? 2 : 1))
+                : (in_cstride % 4 == 0 ? 4 : (in_cstride % 2 == 0 ? 2 : 1));
+        if(bn_problem.GetXDesc().GetLayoutEnum() == miopenTensorNHWC)
+        {
+            const size_t xlocalsize = std::min(size_t{c / vectorsize}, size_t{256});
+            const size_t ylocalsize = 256 / xlocalsize;
+            if(AlignUp(in_cstride, ylocalsize) > 65535)
+                return false;
+        }
+        else
+        {
+            if(AlignUp(in_cstride / vectorsize, size_t{256}) > 65535)
+                return false;
+        }
+    }
+
     return true;
 }
 
