@@ -29,7 +29,7 @@ from rocke.tests.pending_lanes import (
     measured_scratch_allowance,
 )
 
-from ._gdn_decode_compile import compiled_scratch_bytes
+from ._gdn_decode_compile import compile_each
 
 ARCH = "gfx950"
 
@@ -193,11 +193,6 @@ class TestFusedSignature(unittest.TestCase):
         self.assertEqual(n[-3:], ["batch_size", "og_stride", "norm_eps"])
 
 
-def _scratch_bytes(spec: GdnDecodeSpec) -> int:
-    """Compile through comgr (no GPU) and return the spilled scratch bytes."""
-    return compiled_scratch_bytes(build_gdn_decode(spec, arch=ARCH), ARCH)
-
-
 _FLAGS = ((True, False), (False, True), (True, True))
 
 # Fused (NW, WTK) tiles at DK = DV = 128, 16/16 heads, BPV = 1 that compile
@@ -234,9 +229,9 @@ class TestFusedEmission(unittest.TestCase):
                             [e["name"] for e in gdn_decode_signature(s)],
                         )
 
-    # Lowers 344 specs and compiles 116 code objects in one test: about 54 s on the
-    # Windows CI runners, against the suite's 60 s per-test limit, so ordinary runner
-    # variance timed it out. Its own limit leaves headroom without hiding a hang.
+    # Lowers 344 specs and compiles 116 code objects in one test: on one CPU that
+    # comes close to the suite's 60 s per-test limit, so ordinary runner variance
+    # timed it out. Its own limit leaves headroom without hiding a hang.
     @pytest.mark.rocke_shard_cost(30)
     @pytest.mark.timeout(180)
     def test_lowers_and_compiles_without_scratch(self):
@@ -245,7 +240,7 @@ class TestFusedEmission(unittest.TestCase):
         (1,16,1), which owns all DV rows plus their taps and weights."""
         from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
 
-        held = 0
+        held = []
         for gate in ("gdn", "kda"):
             for st in ("bf16", "f32"):
                 for conv, norm in _FLAGS:
@@ -262,19 +257,20 @@ class TestFusedEmission(unittest.TestCase):
                             if not is_valid_spec(s, arch=ARCH)[0]:
                                 continue
                             with self.subTest(name=s.kernel_name()):
+                                kernel = build_gdn_decode(s, arch=ARCH)
                                 ll = _lower_kernel_to_llvm_python(
-                                    build_gdn_decode(s, arch=ARCH),
-                                    arch=ARCH,
-                                    llvm_flavor="llvm20",
+                                    kernel, arch=ARCH, llvm_flavor="llvm20"
                                 )
                                 self.assertIn("define amdgpu_kernel", ll)
                                 if (nw, wtk) in _NO_SPILL_TILES or (
                                     not conv and (nw, wtk) not in _NORM_ONLY_SPILL_TILES
                                 ):
-                                    held += 1
-                                    self.assertEqual(_scratch_bytes(s), 0)
+                                    held.append(kernel)
         # 6 tiles x 12 modes, plus norm-only on the 11 other legal tiles.
-        self.assertEqual(held, 6 * 12 + 11 * 4)
+        self.assertEqual(len(held), 6 * 12 + 11 * 4)
+        for outcome in compile_each(held, ARCH):
+            with self.subTest(name=outcome.kernel_name):
+                self.assertEqual(outcome.scratch_bytes(), 0)
 
     @pytest.mark.rocke_shard_cost(11)
     def test_one_wave_conv_once_loads_first_without_a_new_spill(self):
@@ -292,6 +288,7 @@ class TestFusedEmission(unittest.TestCase):
         from kernels.gfx950 import gdn_decode
 
         built_names = set()
+        pairs = []  # (name, loads-first kernel, late-order kernel)
 
         modes = (
             dict(fuse_out_norm=False),
@@ -324,19 +321,31 @@ class TestFusedEmission(unittest.TestCase):
                             self.assertFalse(gdn_decode.late_row_inputs(s))
                             late_spec = dc.replace(s, row_loads="late")
                             self.assertTrue(gdn_decode.late_row_inputs(late_spec))
-                            hoisted = _scratch_bytes(s)
-                            late = _scratch_bytes(late_spec)
+                            hoisted_kernel = build_gdn_decode(s, arch=ARCH)
+                            late_kernel = build_gdn_decode(late_spec, arch=ARCH)
                             # the knob reached the emitter: the order moved
-                            self.assertNotEqual(_op_names(s), _op_names(late_spec))
-                            extra = measured_scratch_allowance(
-                                _MEASURED_BUDGETS_PATH, name, loaded_compiler_info()
+                            self.assertNotEqual(
+                                _op_names(hoisted_kernel), _op_names(late_kernel)
                             )
-                            self.assertLessEqual(
-                                hoisted,
-                                late + extra,
-                                f"{name} spills {hoisted} B loads-first against "
-                                f"{late} B late, over its {extra} B allowance",
-                            )
+                            pairs.append((name, hoisted_kernel, late_kernel))
+        outcomes = compile_each(
+            [kernel for _, hoisted, late in pairs for kernel in (hoisted, late)], ARCH
+        )
+        for (name, _, _), hoisted_outcome, late_outcome in zip(
+            pairs, outcomes[0::2], outcomes[1::2]
+        ):
+            with self.subTest(name=name):
+                hoisted = hoisted_outcome.scratch_bytes()
+                late = late_outcome.scratch_bytes()
+                extra = measured_scratch_allowance(
+                    _MEASURED_BUDGETS_PATH, name, loaded_compiler_info()
+                )
+                self.assertLessEqual(
+                    hoisted,
+                    late + extra,
+                    f"{name} spills {hoisted} B loads-first against "
+                    f"{late} B late, over its {extra} B allowance",
+                )
         self.assertLessEqual(
             measured_budget_kernels(_MEASURED_BUDGETS_PATH), built_names
         )
@@ -351,9 +360,9 @@ class TestFusedEmission(unittest.TestCase):
         self.assertNotIn("s.barrier", ll)
 
 
-def _op_names(spec):
-    """Op names of ``spec``'s kernel in emission order (regions inline)."""
-    return [op.name for op in _flat_ops(build_gdn_decode(spec, arch=ARCH))]
+def _op_names(kernel):
+    """Op names of ``kernel`` in emission order (regions inline)."""
+    return [op.name for op in _flat_ops(kernel)]
 
 
 def _flat_ops(kernel):

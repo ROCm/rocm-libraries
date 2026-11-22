@@ -33,7 +33,7 @@ from kernels.gfx950.gdn_decode import (
     is_valid_spec,
 )
 
-from ._gdn_decode_compile import compiled_scratch_bytes
+from ._gdn_decode_compile import compile_each, compiled_scratch_bytes
 
 ARCH = "gfx950"
 
@@ -382,9 +382,13 @@ class TestEmission(unittest.TestCase):
             )
             registered = {result.candidate.spec_id for result in results}
             self.assertLessEqual(may_spill, registered, "stale may_spill entry")
-            for result in results:
+            outcomes = compile_each(
+                [build_gdn_decode(r.spec.kernel_spec, arch=ARCH) for r in results],
+                ARCH,
+            )
+            for result, outcome in zip(results, outcomes):
                 with self.subTest(spec_id=result.candidate.spec_id):
-                    scratch = _compiled_scratch_bytes(result.spec.kernel_spec)
+                    scratch = outcome.scratch_bytes()
                     if result.candidate.spec_id in may_spill:
                         self.assertLessEqual(scratch, spill_budget_bytes[gate_kind])
                     else:
@@ -404,6 +408,7 @@ class TestEmission(unittest.TestCase):
             (False, True, 16),
             (False, True, 32),
         )
+        dispatched = []  # (state dtype, the configuration auto runs)
         for gate_kind in ("gdn", "kda"):
             for (conv, norm, heads_v), state_dtype in product(
                 modes, ("bf16", "f16", "f32")
@@ -418,9 +423,14 @@ class TestEmission(unittest.TestCase):
                     fuse_conv=conv,
                     fuse_out_norm=norm,
                 )
-                spec = dispatch_gdn_decode(req).spec
-                with self.subTest(tuning_id=spec.tuning_id, state=state_dtype):
-                    self.assertEqual(_compiled_scratch_bytes(spec.kernel_spec), 0)
+                dispatched.append((state_dtype, dispatch_gdn_decode(req).spec))
+        outcomes = compile_each(
+            [build_gdn_decode(spec.kernel_spec, arch=ARCH) for _, spec in dispatched],
+            ARCH,
+        )
+        for (state_dtype, spec), outcome in zip(dispatched, outcomes):
+            with self.subTest(tuning_id=spec.tuning_id, state=state_dtype):
+                self.assertEqual(outcome.scratch_bytes(), 0)
 
     def test_auto_does_not_spill_off_the_measured_head_dims(self):
         # The sweep ran at DK = DV = 128. The fused f32 GDN row's

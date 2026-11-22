@@ -20,20 +20,21 @@ from __future__ import annotations
 import unittest
 
 import pytest
-from rocke.core.ir import KernelDef, Region
+from rocke.core.ir import KernelDef, Op, Region
+from rocke.helpers import compile as compile_module
 from rocke.helpers.compile import compile_kernel
 from rocke.runtime import comgr
 from rocke.runtime.comgr import CompilerInfo
 from rocke.runtime.compiler_options import measured_answers, require_accepted
 from rocke.tests.compiler_tools import REQUIRE_COMPILER_TOOLS_ENV, require_tools_or_skip
 
-from . import _attention_bwd_resources
+from . import _attention_bwd_resources, _gdn_decode_compile
 from ._attention_bwd_resources import compile_or_skip
 from ._compiler_test_utils import (
     skip_where_compiler_refuses_option,
     skip_where_compiler_refuses_processor,
 )
-from ._gdn_decode_compile import compiled_resources
+from ._gdn_decode_compile import compile_each, compiled_resources
 
 OPTION = "-amdgpu-mfma-vgpr-form"
 # How the refusal starts, and how the policy introduces it.
@@ -223,3 +224,36 @@ def test_gdn_compiled_resources_applies_the_policy(
     monkeypatch.setenv(REQUIRE_COMPILER_TOOLS_ENV, required)
     with pytest.raises(outcome, match=reason):
         compiled_resources(kernel)
+
+
+def test_a_batch_reports_each_kernels_failure_on_that_kernel(monkeypatch):
+    # One kernel lowers and compiles, one fails to lower, one fails to compile:
+    # each outcome names its own kernel, and the failures raise only when their
+    # own kernel is asked. One worker, so the compile stand-in applies.
+    good = KernelDef("batch_good", [], Region("entry"))
+    unlowerable = KernelDef("batch_unlowerable", [], Region("entry", [Op("no.op")]))
+    uncompilable = KernelDef("batch_uncompilable", [], Region("entry"))
+    try:
+        compile_kernel(good, arch="gfx950", capture_ir_text=False)
+    except ImportError as exc:
+        require_tools_or_skip(f"comgr toolchain unavailable: {exc}")
+    compile_one = compile_module.compile_comgr_input
+
+    def compile_or_refuse(comgr_input):
+        if comgr_input.kernel_name == uncompilable.name:
+            raise comgr.ComgrError("refused")
+        return compile_one(comgr_input)
+
+    monkeypatch.setattr(compile_module, "compile_comgr_input", compile_or_refuse)
+    monkeypatch.setattr(_gdn_decode_compile, "available_cpus", lambda: 1)
+    outcomes = compile_each([good, unlowerable, uncompilable])
+    assert [o.kernel_name for o in outcomes] == [
+        good.name,
+        unlowerable.name,
+        uncompilable.name,
+    ]
+    assert outcomes[0].error is None and outcomes[0].hsaco[:4] == b"\x7fELF"
+    with pytest.raises(NotImplementedError, match="no.op"):
+        outcomes[1].scratch_bytes()
+    with pytest.raises(comgr.ComgrError, match="refused"):
+        outcomes[2].scratch_bytes()
