@@ -219,4 +219,103 @@ TYPED_TEST(ComplexLoadStore, BufferLoadStoreMasking)
     check_buffer_masking<TypeParam, 2>();
 }
 
+// Kernels read and write through DynamicBuffer. For LDS, and for global memory with a 64-bit
+// index, it does not use the buffer functions but plain loads and stores, and builds the value of
+// an invalid element itself. Every third vector is invalid: it reads as zero, and a store to it is
+// skipped.
+template <typename T, index_t Vec, bool InLds>
+__global__ void
+dynamic_buffer_kernel(const complex_t<T>* src, complex_t<T>* got_out, complex_t<T>* set_out)
+{
+    using Elem               = complex_t<T>;
+    using V                  = typename ck::vector_type<Elem, Vec>::type;
+    const index_t t          = static_cast<index_t>(threadIdx.x);
+    const index_t offset     = t * Vec;
+    const bool valid         = t % 3 != 1;
+    constexpr index_t kCount = kVectors * Vec;
+    if constexpr(InLds)
+    {
+        __shared__ Elem in[kCount];
+        __shared__ Elem out[kCount];
+        for(index_t j = 0; j < Vec; ++j)
+        {
+            in[offset + j]  = src[offset + j];
+            out[offset + j] = set_out[offset + j];
+        }
+        __syncthreads();
+        auto in_buf  = ck::make_dynamic_buffer<ck::AddressSpaceEnum::Lds>(&in[0], kCount);
+        auto out_buf = ck::make_dynamic_buffer<ck::AddressSpaceEnum::Lds>(&out[0], kCount);
+        const V got  = in_buf.template Get<V>(offset, valid);
+        out_buf.template Set<V>(offset, valid, in_buf.template Get<V>(offset, true));
+        __syncthreads();
+        for(index_t j = 0; j < Vec; ++j)
+        {
+            set_out[offset + j] = out[offset + j];
+        }
+        __builtin_memcpy(got_out + offset, &got, sizeof(V));
+    }
+    else
+    {
+        using Coherence = ck::AmdBufferCoherenceEnum;
+        auto in_buf     = ck::make_dynamic_buffer<ck::AddressSpaceEnum::Global,
+                                                  Coherence::DefaultCoherence,
+                                                  ck::long_index_t>(src, kCount);
+        auto out_buf    = ck::make_dynamic_buffer<ck::AddressSpaceEnum::Global,
+                                                  Coherence::DefaultCoherence,
+                                                  ck::long_index_t>(set_out, kCount);
+        const V got     = in_buf.template Get<V>(offset, valid);
+        out_buf.template Set<V>(offset, valid, in_buf.template Get<V>(offset, true));
+        __builtin_memcpy(got_out + offset, &got, sizeof(V));
+    }
+}
+
+template <typename T, index_t Vec, bool InLds>
+void check_dynamic_buffer()
+{
+    using Elem              = complex_t<T>;
+    const std::size_t count = static_cast<std::size_t>(kVectors) * Vec;
+    const auto src          = make_data<T>(count, 11u);
+    const Elem zero{T{0}, T{0}};
+    const Elem sentinel{T{-7.25}, T{9.5}};
+    const std::vector<Elem> filled(count, sentinel);
+
+    ck::DeviceMem src_dev(sizeof(Elem) * count), got_dev(sizeof(Elem) * count),
+        set_dev(sizeof(Elem) * count);
+    src_dev.ToDevice(src.data());
+    set_dev.ToDevice(filled.data());
+    hipLaunchKernelGGL((dynamic_buffer_kernel<T, Vec, InLds>),
+                       dim3(1),
+                       dim3(kVectors),
+                       0,
+                       nullptr,
+                       static_cast<const Elem*>(src_dev.GetDeviceBuffer()),
+                       static_cast<Elem*>(got_dev.GetDeviceBuffer()),
+                       static_cast<Elem*>(set_dev.GetDeviceBuffer()));
+    ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+
+    std::vector<Elem> got(count), set(count);
+    got_dev.FromDevice(got.data());
+    set_dev.FromDevice(set.data());
+    long bad_get = 0, bad_set = 0;
+    for(std::size_t i = 0; i < count; ++i)
+    {
+        const bool valid = (i / Vec) % 3 != 1;
+        bad_get += same_bits(got[i], valid ? src[i] : zero) ? 0 : 1;
+        bad_set += same_bits(set[i], valid ? src[i] : sentinel) ? 0 : 1;
+    }
+    const char* where = InLds ? "LDS" : "global memory, 64-bit index";
+    EXPECT_EQ(bad_get, 0) << where << ", Get, elements per vector: " << Vec;
+    EXPECT_EQ(bad_set, 0) << where << ", Set, elements per vector: " << Vec;
+}
+
+TYPED_TEST(ComplexLoadStore, DynamicBufferWithoutBufferFunctions)
+{
+    check_dynamic_buffer<TypeParam, 1, true>();
+    check_dynamic_buffer<TypeParam, 2, true>();
+    check_dynamic_buffer<TypeParam, 4, true>();
+    check_dynamic_buffer<TypeParam, 1, false>();
+    check_dynamic_buffer<TypeParam, 2, false>();
+    check_dynamic_buffer<TypeParam, 4, false>();
+}
+
 } // namespace

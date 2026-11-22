@@ -159,7 +159,14 @@ struct DynamicBuffer
             }
             else
             {
-                if constexpr(InvalidElementUseNumericalZeroValue)
+                if constexpr(InvalidElementUseNumericalZeroValue &&
+                             is_two_component_type<remove_cvref_t<T>>::value)
+                {
+                    // For a vector of complex_double_t, X{0} would be ambiguous: 0 converts as
+                    // well to its 16-byte storage type as to double.
+                    return X{remove_cvref_t<T>{0}};
+                }
+                else if constexpr(InvalidElementUseNumericalZeroValue)
                 {
                     return X{0};
                 }
