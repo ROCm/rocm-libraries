@@ -28,6 +28,10 @@
 #include <hipblaslt/hipblaslt.h>
 #include <hip/hip_runtime.h>
 
+#include <cstdint>
+#include <memory>
+#include <vector>
+
 // Test Suite 1: Invalid Handle Tests
 // Targets: hipblaslt.cpp NULL handle checks
 TEST(ErrorPathsTest, InvalidHandle)
@@ -173,6 +177,127 @@ TEST(ErrorPathsTest, ComputeTypes)
     ASSERT_EQ(hipblasLtMatmulDescCreate(&matmul, HIPBLAS_COMPUTE_32I, HIP_R_32I),
               HIPBLAS_STATUS_SUCCESS);
     hipblasLtMatmulDescDestroy(matmul);
+}
+
+// Int32 compute reads alpha and beta as int32. With a float scale type the heuristic
+// returns no algos and hipblasLtMatmul refuses the problem, rather than using the bits
+// of the float alpha as an integer, which saturates D.
+TEST(ErrorPathsTest, Int32ComputeRefusesNonInt32ScaleType)
+{
+    constexpr int64_t m = 64, n = 64, k = 16;
+    constexpr size_t  workspaceSize = size_t(32) << 20;
+
+    hipblasLtHandle_t handle = nullptr;
+    ASSERT_EQ(hipblasLtCreate(&handle), HIPBLAS_STATUS_SUCCESS);
+    const std::unique_ptr<void, decltype(&hipblasLtDestroy)> handleOwner(handle,
+                                                                         &hipblasLtDestroy);
+    using LayoutOwner
+        = std::unique_ptr<hipblasLtMatrixLayoutOpaque_t, decltype(&hipblasLtMatrixLayoutDestroy)>;
+    auto layout = [](int64_t rows, int64_t cols) {
+        hipblasLtMatrixLayout_t l = nullptr;
+        EXPECT_EQ(hipblasLtMatrixLayoutCreate(&l, HIP_R_8I, rows, cols, rows),
+                  HIPBLAS_STATUS_SUCCESS);
+        return LayoutOwner(l, &hipblasLtMatrixLayoutDestroy);
+    };
+    const LayoutOwner matA = layout(m, k), matB = layout(k, n), matD = layout(m, n);
+    using DescOwner
+        = std::unique_ptr<hipblasLtMatmulDescOpaque_t, decltype(&hipblasLtMatmulDescDestroy)>;
+    auto desc = [](hipDataType scaleType) {
+        hipblasLtMatmulDesc_t d = nullptr;
+        EXPECT_EQ(hipblasLtMatmulDescCreate(&d, HIPBLAS_COMPUTE_32I, scaleType),
+                  HIPBLAS_STATUS_SUCCESS);
+        return DescOwner(d, &hipblasLtMatmulDescDestroy);
+    };
+    const DescOwner int32Scale = desc(HIP_R_32I), floatScale = desc(HIP_R_32F);
+
+    hipblasLtMatmulPreference_t pref = nullptr;
+    ASSERT_EQ(hipblasLtMatmulPreferenceCreate(&pref), HIPBLAS_STATUS_SUCCESS);
+    const std::unique_ptr<hipblasLtMatmulPreferenceOpaque_t,
+                          decltype(&hipblasLtMatmulPreferenceDestroy)>
+        prefOwner(pref, &hipblasLtMatmulPreferenceDestroy);
+    ASSERT_EQ(hipblasLtMatmulPreferenceSetAttribute(pref,
+                                                    HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES,
+                                                    &workspaceSize,
+                                                    sizeof(workspaceSize)),
+              HIPBLAS_STATUS_SUCCESS);
+
+    // A and B all ones, so each element of D is alpha * k.
+    auto freeBuffer = [](void* p) { static_cast<void>(hipFree(p)); };
+    using BufferOwner = std::unique_ptr<void, decltype(freeBuffer)>;
+    auto buffer       = [&](size_t bytes, int fill) {
+        void* p = nullptr;
+        EXPECT_EQ(hipMalloc(&p, bytes), hipSuccess);
+        if(p)
+            EXPECT_EQ(hipMemset(p, fill, bytes), hipSuccess);
+        return BufferOwner(p, freeBuffer);
+    };
+    const BufferOwner a = buffer(m * k, 1), b = buffer(k * n, 1), d = buffer(m * n, 0),
+                      workspace = buffer(workspaceSize, 0);
+    ASSERT_TRUE(a && b && d && workspace);
+
+    hipblasLtMatmulHeuristicResult_t result{};
+    int                              returned = 0;
+    ASSERT_EQ(hipblasLtMatmulAlgoGetHeuristic(handle,
+                                              int32Scale.get(),
+                                              matA.get(),
+                                              matB.get(),
+                                              matD.get(),
+                                              matD.get(),
+                                              pref,
+                                              1,
+                                              &result,
+                                              &returned),
+              HIPBLAS_STATUS_SUCCESS);
+    if(returned == 0)
+        GTEST_SKIP() << "the loaded library has no int8 solution";
+
+    std::vector<int8_t> host(m * n);
+    auto matmul = [&](hipblasLtMatmulDesc_t desc, const void* alpha, const void* beta) {
+        EXPECT_EQ(hipMemset(d.get(), 0x55, m * n), hipSuccess);
+        const hipblasStatus_t status = hipblasLtMatmul(handle,
+                                                       desc,
+                                                       alpha,
+                                                       a.get(),
+                                                       matA.get(),
+                                                       b.get(),
+                                                       matB.get(),
+                                                       beta,
+                                                       d.get(),
+                                                       matD.get(),
+                                                       d.get(),
+                                                       matD.get(),
+                                                       &result.algo,
+                                                       workspace.get(),
+                                                       workspaceSize,
+                                                       nullptr);
+        EXPECT_EQ(hipDeviceSynchronize(), hipSuccess);
+        EXPECT_EQ(hipMemcpy(host.data(), d.get(), host.size(), hipMemcpyDeviceToHost),
+                  hipSuccess);
+        return status;
+    };
+
+    const int32_t alphaI = 1, betaI = 0;
+    EXPECT_EQ(matmul(int32Scale.get(), &alphaI, &betaI), HIPBLAS_STATUS_SUCCESS);
+    EXPECT_EQ(host[0], k);
+    EXPECT_EQ(host[m * n - 1], k);
+
+    hipblasLtMatmulHeuristicResult_t floatResult{};
+    returned = -1;
+    EXPECT_EQ(hipblasLtMatmulAlgoGetHeuristic(handle,
+                                              floatScale.get(),
+                                              matA.get(),
+                                              matB.get(),
+                                              matD.get(),
+                                              matD.get(),
+                                              pref,
+                                              1,
+                                              &floatResult,
+                                              &returned),
+              HIPBLAS_STATUS_SUCCESS);
+    EXPECT_EQ(returned, 0);
+    const float alphaF = 1.0f, betaF = 0.0f;
+    EXPECT_EQ(matmul(floatScale.get(), &alphaF, &betaF), HIPBLAS_STATUS_INVALID_VALUE);
+    EXPECT_EQ(host[0], 0x55) << "D was written";
 }
 
 // Note: Non-square layout tests are in utility_helpers_test.cpp (DataValidationTest.NonSquareMatrices)

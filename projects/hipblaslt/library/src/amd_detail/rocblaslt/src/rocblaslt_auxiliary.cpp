@@ -3409,7 +3409,8 @@ rocblaslt_status rocblaslt_matmul_get_all_algos_cpp(
     matmul_desc.op_A                  = opA;
     matmul_desc.op_B                  = opB;
     matmul_desc.compute_type          = typeCompute;
-    matmul_desc.scale_type            = typeD;
+    // Int32 compute takes only an int32 scale type, whatever D's type is.
+    matmul_desc.scale_type = typeCompute == rocblaslt_compute_i32 ? HIP_R_32I : typeD;
     rocblaslt_status status           = rocblaslt_status_success;
     size_t           maxWorkspaceSize = std::numeric_limits<size_t>::max();
     try

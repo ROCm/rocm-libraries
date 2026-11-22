@@ -573,6 +573,17 @@ inline rocblaslt_status validateMatmulArgs(int64_t                       m,
        && !isScaleAlphaVecPointerMode(pointermode))
         return rocblaslt_status_invalid_value;
 
+    // Int32 compute reads alpha and beta as int32, and its kernels take no other
+    // scalar type, so the bits of a float alpha would be used as an integer.
+    if(compute_type == rocblaslt_compute_i32 && scale_type != HIPBLASLT_DATATYPE_INVALID
+       && scale_type != HIP_R_32I)
+    {
+        log_error(__func__,
+                  "compute type i32 takes scale type HIP_R_32I, not",
+                  hipDataType_to_string(scale_type));
+        return rocblaslt_status_invalid_value;
+    }
+
     if(!(type_a == HIP_R_32F && type_b == HIP_R_32F && type_c == HIP_R_32F && type_d == HIP_R_32F)
        && compute_type == rocblaslt_compute_f32_fast_xf32)
         status = rocblaslt_status_not_implemented;
