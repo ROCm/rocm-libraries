@@ -88,6 +88,7 @@ NO_KERNEL_FAMILIES = {
 FAMILIES_WITHOUT_HIP_LOWERING = {
     "attention_strided_kv": "math.exp2_fast",
     "buffer_atomic_fadd": "tile.buffer_atomic_fadd_f32",
+    "coalesced_loader_async": "tile.global_load_async_to_lds",
     "conv_dgrad_patch_wmma": "tile.tensor_load_to_lds",
     "conv_dgrad_smallc_wmma": "tile.tensor_load_to_lds",
     "conv_direct_dgrad_wmma": "tile.tensor_load_to_lds; s_waitcnt where a target "
