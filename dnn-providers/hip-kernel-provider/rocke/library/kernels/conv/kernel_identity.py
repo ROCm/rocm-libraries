@@ -22,6 +22,7 @@ Names are spelled by :mod:`kernels.conv.kernel_label`.
 from __future__ import annotations
 
 import dataclasses
+import functools
 import hashlib
 import json
 import math
@@ -246,6 +247,12 @@ class KernelIdentity:
         Suitable as a filesystem-safe filename component. Deterministic
         across Python versions (sorted JSON keys, no randomization).
         """
+        return self._stable_digest
+
+    @functools.cached_property
+    def _stable_digest(self) -> str:
+        """The digest :meth:`stable_hash` returns, computed once: an identity is
+        immutable, and the sweeps and caches ask for it many times."""
         fields = asdict(self)
         # Left out at its "no scratch" value so identities that predate the
         # field keep their hash (and their cache entries).
