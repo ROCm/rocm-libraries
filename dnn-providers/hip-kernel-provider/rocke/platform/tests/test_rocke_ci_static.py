@@ -41,6 +41,7 @@ from rocke.core.ir_golden import (
     load_golden,
 )
 from rocke.tests.arch_marks import COVERED_ARCHES
+from rocke.tests.fp_policy import fp_policy_violations
 from rocke_ir_parity_harness import (  # noqa: E402 -- after sys.path shim
     GOLDEN_NAME,
     cases,
@@ -140,6 +141,26 @@ class TestIrParityCoverage(unittest.TestCase):
     def test_ir_case_ids_are_unique(self):
         case_ids = [case["case_id"] for case in cases()]
         self.assertEqual(len(case_ids), len(set(case_ids)))
+
+    def test_ir_cases_carry_no_floating_point_relaxation(self):
+        """rocKE's NaN, infinity and subnormal policy rests on the emitted IR
+        carrying no fast-math flags, no ``!fpmath`` metadata and no
+        floating-point mode attributes (``dsl_docs/numerics/README.md``,
+        "Shared rules"): with ``nnan`` or ``contract`` the compiler may drop
+        NaN checks or fuse a multiply-add, and ``denormal-fp-math`` would change
+        the subnormal mode. A golden re-bless would accept such a change
+        silently, so lower one case per (family, arch) and check it."""
+        from rocke.core.lower_llvm import lower_kernel_to_llvm
+
+        lowered: set[tuple[str, str]] = set()
+        for case in cases():
+            family, arch = case["family"], case["arch"]
+            if (family, arch) in lowered:
+                continue
+            lowered.add((family, arch))
+            with self.subTest(family=family, arch=arch):
+                llvm = lower_kernel_to_llvm(case["build"](), arch=arch)
+                self.assertEqual(fp_policy_violations(llvm), [])
 
     def test_nvfp4_variants_are_registered_and_lowerable(self):
         from rocke.core.lower_llvm import lower_kernel_to_llvm
