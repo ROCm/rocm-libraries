@@ -789,6 +789,7 @@ set(_ROCKE_LIBRARY_GPU_TEST_RELPATHS
     "tests/library/tests/test_conv_winograd_gen_gpu.py"
     "tests/library/tests/test_conv_winograd_dispatch_gpu.py"
     "tests/library/tests/test_conv_implicit_gemm_numeric.py"
+    "tests/library/tests/test_convolution_forward_aot_numeric.py"
     "tests/library/tests/test_conv_direct_tf32_mfma.py::TestDirectTf32Gpu"
     "tests/library/tests/test_conv_direct_tf32_scalar.py::TestGpuCorrectness"
     # The sweep sampler (test_sweep_candidates) compiles exact-fp32 grid
