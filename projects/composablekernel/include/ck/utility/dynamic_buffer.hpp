@@ -224,8 +224,23 @@ struct DynamicBuffer
         {
             auto tmp       = this->template Get<X>(i, is_valid_element);
             using scalar_t = typename scalar_type<remove_cvref_t<T>>::type;
+            if constexpr(is_two_component_type<remove_cvref_t<T>>::value)
+            {
+                // A vector of complex_t has no addition of its own (for complex_float_t it would
+                // add the bits as integers), so its elements are added one by one.
+                using elem_t        = remove_cvref_t<T>;
+                constexpr index_t n = scalar_type<remove_cvref_t<X>>::vector_size;
+                const vector_type<elem_t, n> a{tmp};
+                const vector_type<elem_t, n> b{x};
+                vector_type<elem_t, n> sum;
+                static_for<0, n, 1>{}([&](auto k) {
+                    sum.template AsType<elem_t>()(k) =
+                        a.template AsType<elem_t>()[k] + b.template AsType<elem_t>()[k];
+                });
+                this->template Set<X>(i, is_valid_element, sum.template AsType<X>()[Number<0>{}]);
+            }
             // handle bfloat addition
-            if constexpr(is_same_v<scalar_t, bhalf_t>)
+            else if constexpr(is_same_v<scalar_t, bhalf_t>)
             {
                 if constexpr(is_scalar_type<X>::value)
                 {
@@ -512,7 +527,7 @@ struct DynamicBuffer
 #elif CK_USE_AMD_BUFFER_ATOMIC_ADD_INTEGER && (!CK_USE_AMD_BUFFER_ATOMIC_ADD_FLOAT)
         bool constexpr use_amd_buffer_addressing =
             sizeof(IndexType) <= sizeof(int32_t) && is_same_v<remove_cvref_t<scalar_t>, int32_t>;
-#elif(!CK_USE_AMD_BUFFER_ATOMIC_ADD_INTEGER) && CK_USE_AMD_BUFFER_ATOMIC_ADD_FLOAT
+#elif (!CK_USE_AMD_BUFFER_ATOMIC_ADD_INTEGER) && CK_USE_AMD_BUFFER_ATOMIC_ADD_FLOAT
         bool constexpr use_amd_buffer_addressing =
             sizeof(IndexType) <= sizeof(int32_t) &&
             (is_same_v<remove_cvref_t<scalar_t>, float> ||

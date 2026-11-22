@@ -318,4 +318,58 @@ TYPED_TEST(ComplexLoadStore, DynamicBufferWithoutBufferFunctions)
     check_dynamic_buffer<TypeParam, 4, false>();
 }
 
+// A kernel that adds its result to the output (C += x) writes through DynamicBuffer::Update with
+// Add. Every third vector is invalid and keeps its old value.
+template <typename T, index_t Vec>
+__global__ void update_add_kernel(const complex_t<T>* x, complex_t<T>* y)
+{
+    using V                  = typename ck::vector_type<complex_t<T>, Vec>::type;
+    constexpr index_t kCount = kVectors * Vec;
+    const index_t t          = static_cast<index_t>(threadIdx.x);
+    const index_t offset     = t * Vec;
+    auto x_buf               = ck::make_dynamic_buffer<ck::AddressSpaceEnum::Global>(x, kCount);
+    auto y_buf               = ck::make_dynamic_buffer<ck::AddressSpaceEnum::Global>(y, kCount);
+    y_buf.template Update<ck::InMemoryDataOperationEnum::Add, V>(
+        offset, t % 3 != 1, x_buf.template Get<V>(offset, true));
+}
+
+// The data are multiples of 1/1024 in [-4, 4), so every sum is exact.
+template <typename T, index_t Vec>
+void check_update_add()
+{
+    using Elem              = complex_t<T>;
+    const std::size_t count = static_cast<std::size_t>(kVectors) * Vec;
+    const auto x            = make_data<T>(count, 12u);
+    const auto y_old        = make_data<T>(count, 13u);
+
+    ck::DeviceMem x_dev(sizeof(Elem) * count), y_dev(sizeof(Elem) * count);
+    x_dev.ToDevice(x.data());
+    y_dev.ToDevice(y_old.data());
+    hipLaunchKernelGGL((update_add_kernel<T, Vec>),
+                       dim3(1),
+                       dim3(kVectors),
+                       0,
+                       nullptr,
+                       static_cast<const Elem*>(x_dev.GetDeviceBuffer()),
+                       static_cast<Elem*>(y_dev.GetDeviceBuffer()));
+    ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+
+    std::vector<Elem> y(count);
+    y_dev.FromDevice(y.data());
+    long bad = 0;
+    for(std::size_t i = 0; i < count; ++i)
+    {
+        const bool valid = (i / Vec) % 3 != 1;
+        bad += same_bits(y[i], valid ? y_old[i] + x[i] : y_old[i]) ? 0 : 1;
+    }
+    EXPECT_EQ(bad, 0) << "elements per vector: " << Vec;
+}
+
+TYPED_TEST(ComplexLoadStore, UpdateAddsToOutput)
+{
+    check_update_add<TypeParam, 1>();
+    check_update_add<TypeParam, 2>();
+    check_update_add<TypeParam, 4>();
+}
+
 } // namespace
