@@ -75,8 +75,9 @@ writes an intermediate tensor. Each reorders the 1.5 MiB weight on every call, i
 path.
 
 - **Library kernel** (`gemm_permute.hpp`): a thin user of `ck_tile::GemmEPermuteKernel`
-  (`include/ck_tile/ops/gemm/kernel/gemm_e_permute_kernel.hpp`) with the stock CompV3 pipeline
-  (TDM V3 on gfx1250), `CShuffleEpilogue` and `GemmSpatiallyLocalTilePartitioner`, unchanged.
+  (`include/ck_tile/ops/gemm/kernel/gemm_e_permute_kernel.hpp`) with a stock pipeline (CompV3 on
+  gfx950, TDM run-ahead on gfx1250), `CShuffleEpilogue` and `GemmSpatiallyLocalTilePartitioner`,
+  unchanged.
 - **A-stationary kernel** (`gemm_permute_astationary.hpp`): a hand-written gfx950 kernel built
   from CK-Tile parts, for this shape; on gfx1250 the kernel of
   `gemm_permute_astationary_gfx1250.hpp`, with the same interface.
@@ -210,12 +211,13 @@ off) the overlap of step 8 hides part of the 347 us Y write, but against the mat
 (355 us) it does not, because the stores slow the clock.
 
 On gfx1250 (`GPU_TARGETS=gfx1250`) the same driver runs with that architecture's tiles. The library
-kernel and the unfused baseline use `GemmPipelineAgBgCrCompTDMV3` with a 160x256x64 tile of 2x8
-waves (16x16x32 WMMA, `TransposeC`, double LDS buffer), the fastest TDM V3 tile for this shape. The
-TDM run-ahead `GemmKernel` was about 4% faster alone in a separate session (about 4.1x for the
-A-stationary kernel against that pair); the example keeps TDM V3 because the run-ahead pipeline is
-validated only in the plain GEMM kernel. There is no
-weight-preshuffle baseline, so the driver checks three outputs. The A-stationary kernel
+kernel and the unfused baseline use `GemmPipelineAgBgCrCompTDMRunAhead` with
+`GemmPipelineAgBgCrCompTDMRunAheadPolicy<2, 1>` (two LDS slots, filled one K step ahead of the
+math) on a 192x256x64 tile of 2x8 waves (16x16x32 WMMA, `TransposeC`), the fastest TDM pipeline and
+tile for this shape. Measured in one binary against the fastest TDM V3 tile (160x256x64), the
+run-ahead `GemmKernel` alone is 1.04x and the library kernel 1.03x faster. The run-ahead pipeline
+pads nothing; TDM clips the M tail. There is no weight-preshuffle baseline, so the driver checks
+three outputs. The A-stationary kernel
 (`gemm_permute_astationary_gfx1250.hpp`) runs one 8-wave workgroup per `(b, 256 rows of t)`: it
 copies its A tile into LDS asynchronously in three K pieces and starts on the first one; each wave
 reads the weight straight into WMMA registers from the `ck_tile::shuffle_b` layout (repacked on
@@ -228,32 +230,36 @@ Two runs on gfx1250, each the median of 11 samples; the ratios of the two runs a
 
 | Path | Speedup |
 |---|---:|
-| A-stationary fused | 4.15x |
-| Library fused (`GemmEPermuteKernel`) | 3.25x |
-| TDM V3 `GemmKernel` + `ElementWiseKernel` | 1.00x |
+| A-stationary fused | 4.11x |
+| Library fused (`GemmEPermuteKernel`) | 3.33x |
+| TDM run-ahead `GemmKernel` + `ElementWiseKernel` | 1.00x |
 
-On N(0,1) data the A-stationary speedup is 3.91x to 3.92x. About 70% of the two-op time is the
+On N(0,1) data the A-stationary speedup is 3.86x to 3.87x. About 70% of the two-op time is the
 stock `ElementWiseKernel` permute (two-op minus GEMM alone), which is about 4.5x slower than a
 plain copy of the same bytes on this device (measured separately), so the two-op speedup mostly
-reflects that op. Against the TDM V3 `GemmKernel` alone, which does not write Y, the A-stationary
-kernel is 1.24x faster.
+reflects that op. Against the TDM run-ahead `GemmKernel` alone, which does not write Y, the
+A-stationary kernel is 1.20x faster.
 
 #### Limits
 
 - `GemmEPermuteKernel` (v1): row-major E, no D tensors, one A and one B tensor, no split-K, no
   TDM epilogue. `IsSupportedArgument` rejects views that overlap themselves, non-positive
   strides, `N1` not a multiple of the vector size and an E span of 2 GB or more; gapped targets
-  and ragged `M0`/`M1` are accepted.
+  and ragged `M0`/`M1` are accepted. For the example's library kernel this means any T >= 1 and
+  B >= 1 whose Y span stays below 2 GB (B = 1024 at T = 768 is rejected); N must be a multiple of
+  the N tile, except with a pipeline that sets `kPadN` (tested with TDM V3).
 - A-stationary kernel: gfx950 and gfx1250, one kernel each (the driver exits on other arches),
   `K = 384`, `D = 256`, `H = 8` compiled in. Any T, and B up to 21,845 on gfx950 and 10,922 on
   gfx1250 (the A window of a workgroup uses 32-bit offsets); A, weight and Y must be dense,
   non-overlapping and 16-byte aligned.
 - BF16 outputs are converted with `type_convert`, which on gfx950 and gfx1250 (ROCm 7 and later)
   is the native conversion instruction, round to nearest even as in torch.
-- Tests: `test_ck_tile_gemm_e_permute` (XDL, gfx950) and `test_ck_tile_gemm_e_permute_wmma`
-  (WMMA, gfx125) run 16 cases each, 5 on the device with a sentinel over the whole E span and 11
-  argument checks; both pass. The gfx1250 example runs the library kernel with TDM V3, which only
-  the example driver checks. The `kPadN` tail branch has no test.
+- Tests: four gtests run the same 17 cases, 6 on the device with a sentinel over the whole E span
+  (one of them over 5 K tiles) and 11 argument checks: `test_ck_tile_gemm_e_permute` (XDL CompV3,
+  gfx950), `test_ck_tile_gemm_e_permute_wmma` (WMMA CompV3, gfx125),
+  `test_ck_tile_gemm_e_permute_tdm` (the example's gfx1250 run-ahead pipeline and tile) and
+  `test_ck_tile_gemm_e_permute_tdm_v3` (TDM V3, 160x256x64, with `kPadN`, where the ragged-N case
+  runs on the device instead of being rejected).
 
 ## example
 ```
