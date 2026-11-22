@@ -6,9 +6,11 @@
 out of a log is enough to rebuild the binary (``reproduce_kernel.py``). Three
 things make that true, and each has a test here:
 
-* ``from_label(label(i)) == i`` over every identity the AOT grids produce,
-  and over identities with any field set to an awkward value -- including
-  fields the label format has no tag for;
+* ``from_label(label(i)) == i`` over the identities the AOT grids produce
+  (the implicit grid on a spread of geometries; the direct grid with each
+  capabilities row and knob setting at least once, and its full product in
+  an ``exhaustive`` test), and over identities with any field set to an
+  awkward value -- including fields the label format has no tag for;
 * the job rebuilt from an identity is the one ``--compile-all`` builds;
 * the tags cannot be mistaken for one another.
 
@@ -107,28 +109,51 @@ def test_implicit_grid_round_trips(direction):
     assert len(names) == len({j.identity for j in _implicit_jobs(direction, 40)})
 
 
-def test_direct_grid_round_trips():
-    """Every direct identity, knobs included, before spec validation."""
+def _every_pair(caps_list: list, knob_list: list):
+    """Every capabilities row with every knob setting: the whole grid."""
+    return itertools.product(caps_list, knob_list)
+
+
+def _each_choice(caps_list: list, knob_list: list):
+    """Each capabilities row and each knob setting at least once, in
+    max(len(caps_list), len(knob_list)) pairs instead of their product."""
+    if not caps_list or not knob_list:
+        return iter(())
+    count = max(len(caps_list), len(knob_list))
+    return (
+        (caps_list[i % len(caps_list)], knob_list[i % len(knob_list)])
+        for i in range(count)
+    )
+
+
+def _assert_direct_grid_round_trips(pairing) -> None:
+    """Round-trip direct identities, knobs included, before spec validation.
+
+    ``pairing(caps_list, knob_list)`` chooses the (capabilities, knobs) cells
+    walked for each variant and dtype; every capabilities row also gets the
+    dgrad helper identities.
+    """
     n = 0
     for variant, (direction, caps_list) in dks.DIRECT_CAPABILITIES.items():
         arch = _WAVE32_ONLY.get(variant, _ARCH)
         if not any(True for _ in dks._knob_grid(variant, arch, "fp16")):
             arch = "gfx1250"
         target = ArchTarget.from_gfx(arch)
+        for dtype in dks.DIRECT_DTYPES:
+            knob_list = list(dks._knob_grid(variant, arch, dtype))
+            for caps, knobs in pairing(caps_list, knob_list):
+                ident = dks._identity(
+                    arch,
+                    target.wave_size,
+                    variant,
+                    f"direct_{direction}",
+                    caps,
+                    knobs,
+                    dtype,
+                )
+                _round_trips(ident)
+                n += 1
         for caps in caps_list:
-            for dtype in dks.DIRECT_DTYPES:
-                for knobs in dks._knob_grid(variant, arch, dtype):
-                    ident = dks._identity(
-                        arch,
-                        target.wave_size,
-                        variant,
-                        f"direct_{direction}",
-                        caps,
-                        knobs,
-                        dtype,
-                    )
-                    _round_trips(ident)
-                    n += 1
             for helper, knobs in (
                 (DIRECT_DGRAD_TRANSPOSE, {}),
                 (DIRECT_DGRAD_REORGANIZE, {"fold_k32": True}),
@@ -139,6 +164,28 @@ def test_direct_grid_round_trips():
                     )
                 )
     assert n > 0
+
+
+def test_direct_grid_round_trips():
+    """Every capabilities row and every knob setting of each direct variant
+    and dtype round-trips, each in at least one identity."""
+    _assert_direct_grid_round_trips(_each_choice)
+
+
+@pytest.mark.exhaustive
+def test_direct_grid_product_round_trips():
+    """Every direct identity the grid produces: each capabilities row with
+    each knob setting, about a million names."""
+    _assert_direct_grid_round_trips(_every_pair)
+
+
+def test_each_choice_covers_every_row_and_setting():
+    caps_list, knob_list = ["c0", "c1", "c2"], ["k0", "k1", "k2", "k3", "k4"]
+    pairs = list(_each_choice(caps_list, knob_list))
+    assert len(pairs) == len(knob_list)
+    assert {caps for caps, _ in pairs} == set(caps_list)
+    assert {knobs for _, knobs in pairs} == set(knob_list)
+    assert list(_each_choice(caps_list, [])) == []
 
 
 def _base_identity(direct: bool) -> KernelIdentity:
