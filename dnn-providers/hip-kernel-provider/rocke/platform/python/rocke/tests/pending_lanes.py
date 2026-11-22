@@ -775,4 +775,25 @@ def measured_scratch_allowance(
     )
 
 
-QUARANTINED: tuple[QuarantinedTest, ...] = ()
+def _quarantined(
+    issue: str, reason: str, owner: str, expires: str, *test_ids: str
+) -> tuple[QuarantinedTest, ...]:
+    """One entry per test id, all quarantined for the same issue and reason."""
+    return tuple(
+        QuarantinedTest(test_id, issue, reason, owner, expires) for test_id in test_ids
+    )
+
+
+QUARANTINED: tuple[QuarantinedTest, ...] = (
+    *_quarantined(
+        "AICK-2863",
+        "the portable-IR recorder refuses scf.if_else with results, which the "
+        "three conv_direct_*_mfma kernels use, so recording and replaying every "
+        "production kernel fails",
+        "rocKE platform portable IR",
+        "2027-01-31",
+        "platform/tests/portable_ir/test_portable_ir.py::test_unit[test_recording_builder]",
+        "platform/tests/portable_ir/test_portable_ir.py::test_record_coverage",
+        "platform/tests/portable_ir/test_portable_ir.py::test_parity_matrix",
+    ),
+)

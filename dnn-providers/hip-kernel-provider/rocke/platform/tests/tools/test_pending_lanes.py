@@ -769,6 +769,33 @@ def test_only_a_quarantine_tree_skips_quarantined_tests():
         skip_quarantined_items([], ROCKE / "platform/python", "platform/python")
 
 
+@pytest.mark.skipif(not QUARANTINED, reason="no test is quarantined")
+def test_a_quarantined_test_is_skipped_with_its_issue(tmp_path):
+    entry = QUARANTINED[0]
+    environment = {k: v for k, v in os.environ.items() if k != "ROCKE_QUARANTINE"}
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            "-p",
+            "no:cacheprovider",
+            f"--basetemp={tmp_path}",
+            "-rs",
+            entry.test_id,
+        ],
+        cwd=ROCKE,
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=120,
+    )
+    assert result.returncode == 0, result.stdout[-4000:] + result.stderr[-4000:]
+    assert f"quarantined: {entry.issue}" in result.stdout, result.stdout[-4000:]
+    assert " passed" not in result.stdout and " failed" not in result.stdout
+
+
 def _defines_test(test_file: Path, node_name: str) -> bool:
     """Whether ``test_file`` defines the test function ``node_name`` names."""
     function = node_name.split("::")[-1].partition("[")[0]
