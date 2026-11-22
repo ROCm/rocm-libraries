@@ -156,6 +156,10 @@ test_categories:
       # rocke/platform/tests/cmake/CoreTests.cmake).
       - "rocke_arch_table_engine_parity"
       - "rocke_gemm_spec_dict_binding_parity"
+      # Registered only in the build tree: they run from this source tree, which
+      # the installed test artifact does not carry (see
+      # rocke/platform/tests/cmake/CoreTests.cmake).
+      - "rocke_coalesced_loader_async_refusals"
       - "rocke_python_import_smoke"
       - "rocke_golden_static"
       - "rocke_differential_golden_ll"

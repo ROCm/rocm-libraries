@@ -120,6 +120,35 @@ if(BUILD_TESTING)
                                     TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})
   endif()
 
+  # The coalesced loader's async LDS copy refuses the same configs with the
+  # same message in both engines; the byte-identity gate compares the configs
+  # both build, not why both refuse the others.
+  set_source_files_properties(instances/parity/coalesced_loader_async_emit.c
+                              PROPERTIES LANGUAGE CXX)
+  add_executable(rocke_coalesced_loader_async_emit
+                 instances/parity/coalesced_loader_async_emit.c)
+  target_link_libraries(rocke_coalesced_loader_async_emit PRIVATE rocke_core)
+  if(MSVC OR CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
+    target_compile_options(rocke_coalesced_loader_async_emit PRIVATE /TP)
+  else()
+    target_compile_options(rocke_coalesced_loader_async_emit PRIVATE -x c++)
+  endif()
+  if(Python3_Interpreter_FOUND)
+    add_test(
+      NAME rocke_coalesced_loader_async_refusals
+      COMMAND "${Python3_EXECUTABLE}"
+              "${CMAKE_CURRENT_SOURCE_DIR}/instances/differential/compare_refusals.py"
+              --native "$<TARGET_FILE:rocke_coalesced_loader_async_emit>"
+              --launcher
+              "${CMAKE_CURRENT_SOURCE_DIR}/../python/rocke/tests/subprocess_launcher.py"
+              --emitter
+              "${CMAKE_CURRENT_SOURCE_DIR}/instances/parity/coalesced_loader_async_emit.py"
+              --expected-refusals 4)
+    set_tests_properties(rocke_coalesced_loader_async_refusals
+                         PROPERTIES LABELS "ckc;python;host"
+                                    TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})
+  endif()
+
   add_executable(rocke_optimization_barrier core/test_optimization_barrier.cpp)
   target_link_libraries(rocke_optimization_barrier PRIVATE rocke_core)
   add_test(NAME rocke_optimization_barrier COMMAND rocke_optimization_barrier)
