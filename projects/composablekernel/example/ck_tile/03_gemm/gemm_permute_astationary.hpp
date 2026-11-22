@@ -12,8 +12,8 @@
 // - 16x16x32 MFMA, C not transposed: N-repeat r and MFMA column j hold tile column 4*j + r, so a
 //   lane owns 4 consecutive d of 4 rows and stores them straight from the accumulators into the
 //   interleaved Y (128 contiguous bytes per row and wave); no LDS shuffle. Accumulators are double
-//   buffered: tile i - 1 is converted to BF16 (truncation, the CK default) and stored while the
-//   MFMAs of tile i's first K steps run.
+//   buffered: tile i - 1 is converted to BF16 (type_convert, round to nearest even) and stored
+//   while the MFMAs of tile i's first K steps run.
 // The gfx1250 kernel is in gemm_permute_astationary_gfx1250.hpp; repack_weight and launch below
 // serve both.
 #pragma once
