@@ -34,6 +34,7 @@ __all__ = [
     "ComplianceRule",
     "find_hits",
     "load_rules",
+    "rules_from_entries",
     "scan_paths",
 ]
 
@@ -89,6 +90,25 @@ def _rule_from_entry(entry: object, source: Path) -> ComplianceRule:
     )
 
 
+def rules_from_entries(entries: object, source: Path) -> tuple[ComplianceRule, ...]:
+    """Compile a non-empty list of rule entries read from ``source`` (named in errors).
+
+    The one definition of an entry (its keys, flags and ``allowed`` list); every pattern
+    file is read through it."""
+    if not isinstance(entries, list) or not entries:
+        raise ValueError(
+            f"load_rules failed - file={source.name!r}, "
+            "expected a non-empty list of rule entries"
+        )
+    rules = tuple(_rule_from_entry(entry, source) for entry in entries)
+    rule_ids = [rule.rule_id for rule in rules]
+    if len(set(rule_ids)) != len(rule_ids):
+        raise ValueError(
+            f"load_rules failed - file={source.name!r} ids={rule_ids}, expected unique ids"
+        )
+    return rules
+
+
 def load_rules(path: Path = PATTERN_FILE) -> tuple[ComplianceRule, ...]:
     """Read and compile the pattern file; refuse a malformed file instead of skipping."""
     document = json.loads(path.read_text(encoding="utf-8"))
@@ -98,13 +118,7 @@ def load_rules(path: Path = PATTERN_FILE) -> tuple[ComplianceRule, ...]:
             f"load_rules failed - file={path.name!r}, "
             "expected a top-level object with a non-empty 'rules' list"
         )
-    rules = tuple(_rule_from_entry(entry, path) for entry in entries)
-    rule_ids = [rule.rule_id for rule in rules]
-    if len(set(rule_ids)) != len(rule_ids):
-        raise ValueError(
-            f"load_rules failed - file={path.name!r} ids={rule_ids}, expected unique ids"
-        )
-    return rules
+    return rules_from_entries(entries, path)
 
 
 def find_hits(text: str, rules: Iterable[ComplianceRule]) -> list[ComplianceHit]:
