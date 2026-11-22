@@ -51,7 +51,16 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable, List, Optional, Sequence, Tuple
 
-from ..core.ir import F16, I64, IRBuilder, Type, Value
+from ..core.ir import (
+    F16,
+    I64,
+    IRBuilder,
+    PtrType,
+    SmemType,
+    Type,
+    Value,
+    type_bits,
+)
 
 
 # A descriptor callback maps (row, col) in the tile-local coordinate
@@ -638,7 +647,8 @@ class CoalescedTileLoader:
         Same slot partition and descriptor contract as :meth:`load` in
         ``vector_axis="col"`` mode, but each in-range chunk is one per-lane
         async global->LDS copy of ``load_vec`` elements to ``smem_dst[row, col]``
-        instead of a register round trip. The copy reads through a plain global
+        instead of a register round trip; ``ptr`` and ``smem_dst`` must hold
+        elements of ``elem_dtype``'s width. The copy reads through a plain global
         pointer with no buffer-resource range check, so the check the resource
         would make -- byte offset below ``num_bytes``, compared unsigned as the
         resource does, so an offset at or past 2 GiB (negative as i32) is out
@@ -669,6 +679,24 @@ class CoalescedTileLoader:
                 f"global_load_async_to_lds moves 4, 8 or 16 bytes per lane; a "
                 f"{self.load_vec} x {elem_bytes} B chunk is {width} B"
             )
+        # The copy reads ptr[off_elems] and lands at smem_dst[row, col], each
+        # addressed in its own element type, while the slot plan, the copy
+        # width and the range check count elem_dtype elements: an operand of
+        # another width would scatter the chunks.
+        for role, operand_elem in (
+            (
+                "smem_dst",
+                smem_dst.type.elem if isinstance(smem_dst.type, SmemType) else None,
+            ),
+            ("ptr", ptr.type.pointee if isinstance(ptr.type, PtrType) else None),
+        ):
+            if operand_elem is None or type_bits(operand_elem) != 8 * elem_bytes:
+                held = "no element type" if operand_elem is None else operand_elem.name
+                raise ValueError(
+                    f"CoalescedTileLoader.load_async_to_lds: {role} must hold "
+                    f"{elem_bytes}-byte elements to match elem_dtype "
+                    f"{self.elem_dtype.name!r} (got {held})"
+                )
         zero = b.zero_vec(self.elem_dtype, self.load_vec)
         c_elem_bytes = b.const_i32(elem_bytes)
         for row, col in self.plan_slots(b, tid=tid):

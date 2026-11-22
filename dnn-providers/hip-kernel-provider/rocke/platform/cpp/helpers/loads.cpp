@@ -870,6 +870,36 @@ void rocke_coalesced_tile_loader_load_async_to_lds(rocke_ir_builder_t* b,
                         width);
         return;
     }
+    /* The copy reads ptr[off_elems] and lands at smem_dst[row, col], each
+     * addressed in its own element type, while the slot plan, the copy width
+     * and the range check count elem_dtype elements: an operand of another
+     * width would scatter the chunks. */
+    const rocke_type_t* tile_type = smem_dst->type;
+    const rocke_type_t* ptr_type = ptr->type;
+    const struct
+    {
+        const char* role;
+        const rocke_type_t* elem;
+    } operands[] = {
+        {"smem_dst",
+         (tile_type != NULL && tile_type->kind == ROCKE_TYPE_SMEM) ? tile_type->elem : NULL},
+        {"ptr", (ptr_type != NULL && ptr_type->kind == ROCKE_TYPE_PTR) ? ptr_type->pointee : NULL},
+    };
+    for(const auto& operand : operands)
+    {
+        if(operand.elem == NULL || rocke_i_type_bits(operand.elem) != 8 * elem_bytes)
+        {
+            rocke_i_set_err(b,
+                            ROCKE_ERR_VALUE,
+                            "CoalescedTileLoader.load_async_to_lds: %s must hold %d-byte "
+                            "elements to match elem_dtype '%s' (got %s)",
+                            operand.role,
+                            elem_bytes,
+                            ctl_elem_dtype(self)->name,
+                            operand.elem != NULL ? operand.elem->name : "no element type");
+            return;
+        }
+    }
 
     /* Python: zero = b.zero_vec(self.elem_dtype, self.load_vec) */
     rocke_value_t* zero = rocke_b_zero_vec(b, ctl_elem_dtype(self), self->load_vec);
