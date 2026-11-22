@@ -1701,7 +1701,7 @@ class TestGfx125V128Codegen(unittest.TestCase):
                         for k in pingpong
                         if k.F_pipeline.F_packgqa == "f"
                     }
-                    # packed-GQA decode: mask (none, causal) x lse x sink
+                    # packed-GQA decode: mask (none, causal, window) x lse x sink
                     self.assertEqual(
                         len(
                             {
@@ -1714,7 +1714,7 @@ class TestGfx125V128Codegen(unittest.TestCase):
                                 if k.F_pipeline.F_packgqa == "t"
                             }
                         ),
-                        8,
+                        12,
                     )
                     # the causal band variants have no sink (the generic mask serves it)
                     self.assertEqual(len(variants), 2 * 3 * 2 * 2 - 2 * 2)
@@ -2290,7 +2290,8 @@ int main() {
 
     def test_pingpong_packgqa_decode(self):
         # GQA decode folds a KV head's query heads into one pingpong tile, for both widths:
-        # no mask, or one query per head under a bottom-right causal mask; merged rows take
+        # no mask, or one query per head under a bottom-right causal mask or any window
+        # (the mask's one query row serves every merged row); merged rows take
         # their heads' q descales and sink logits but no bias; batch only, so no sequence
         # padding. The
         # packed variants of every tile dispatch ahead of the unpacked pingpong ones.
@@ -2313,7 +2314,7 @@ int main() {
                     self.assertEqual(k.F_mode, "batch")
                     self.assertEqual((p.F_bias, p.F_dropout), ("no", "f"))
                     self.assertIn(p.F_qscale, qscales)
-                    self.assertIn(p.F_mask, ("s_no", "causal"))
+                    self.assertIn(p.F_mask, ("s_no", "causal", "s_mask"))
                     self.assertEqual((p.F_spad, p.F_skpad), ("f", "f"))
                     constraint = str(k.api_trait().constraint)
                     self.assertIn(
@@ -2322,6 +2323,7 @@ int main() {
                     )
                     if p.F_mask == "causal":
                         self.assertIn("mask_enum::mask_bottom_right", constraint)
+                    if p.F_mask != "s_no":
                         self.assertIn("a.seqlen_q == 1", constraint)
                     self.assertIn("ck_tile::TileFmhaMergeHeadsTraits<", k.render())
                 # dispatch tries the rendered traits in order
@@ -2512,7 +2514,8 @@ int main() {
                             else {}
                         )
                         # one query per head packs the 4 query heads of a KV head
-                        if size == 1 and not group and not mask:
+                        # (any mask: the windowed packed-GQA decode takes one query a head)
+                        if size == 1 and not group:
                             extra["packgqa"] = "t"
                         expected = dispatch.expected_id(
                             pipeline="qr_tdm_pingpong",
