@@ -20,6 +20,7 @@
 #include <hipdnn_flatbuffers_sdk/utilities/Uuid.hpp>
 #include <hipdnn_frontend/Types.hpp>
 #include <hipdnn_plugin_sdk/BehaviorNote.h>
+#include <hipdnn_plugin_sdk/GlobalKnobDefines.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/MockEngineConfig.hpp>
@@ -97,6 +98,36 @@ flatbuffers::FlatBufferBuilder createEngineConfigWithoutKnobs()
     builder.Finish(hipdnn_flatbuffers_sdk::data_objects::CreateEngineConfig(
         builder, AsmSdpaEngine::staticId()));
     return builder;
+}
+
+// An engine config for this engine carrying the global workspace limit, in bytes.
+flatbuffers::FlatBufferBuilder createWorkspaceLimitConfig(int64_t limit)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+    flatbuffers::FlatBufferBuilder builder;
+    const auto knobValue = CreateIntValue(builder, limit);
+    const std::vector<flatbuffers::Offset<KnobSetting>> knobSettings{
+        CreateKnobSettingDirect(builder,
+                                hipdnn_plugin_sdk::WORKSPACE_SIZE_LIMIT_KNOB_NAME,
+                                KnobValue::IntValue,
+                                knobValue.Union())};
+    builder.Finish(CreateEngineConfigDirect(builder, AsmSdpaEngine::staticId(), &knobSettings));
+    return builder;
+}
+
+// The status a call throws, or SUCCESS when it returns.
+template <typename Call>
+hipdnnPluginStatus_t statusOf(Call&& call)
+{
+    try
+    {
+        call();
+    }
+    catch(const hipdnn_plugin_sdk::HipdnnPluginException& error)
+    {
+        return error.getStatus();
+    }
+    return HIPDNN_PLUGIN_STATUS_SUCCESS;
 }
 
 EngineConfigWrapper wrapConfig(const flatbuffers::FlatBufferBuilder& builder)
@@ -466,6 +497,60 @@ TEST_F(TestAsmSdpaEngine, InitializeExecutionContextBuildsPlanWithConfiguredSett
     engine.initializeExecutionContext(_handle, graph, wrapConfig(configBuilder), context);
 
     EXPECT_EQ(accumulatorSeenByBuildPlan, AccumulatorType::A16);
+}
+
+/// A plan that needs more workspace than global.workspace_size_limit allows is declined as
+/// NOT_APPLICABLE by both entry points, and is never built; a plan at the limit, or with no
+/// limit set, is not.
+TEST_F(TestAsmSdpaEngine, APlanOverTheWorkspaceLimitIsDeclinedAndNeverBuilt)
+{
+    constexpr size_t PLAN_BYTES = 1024;
+    auto builder = std::make_unique<::testing::NiceMock<MockPlanBuilder>>();
+    ON_CALL(*builder, isApplicable).WillByDefault(::testing::Return(true));
+    ON_CALL(*builder, getMaxWorkspaceSize).WillByDefault(::testing::Return(PLAN_BYTES));
+    int plansBuilt = 0;
+    ON_CALL(*builder, buildPlan).WillByDefault([&](auto&&...) { ++plansBuilt; });
+    AsmSdpaEngine engine;
+    engine.addPlanBuilder(std::move(builder));
+    const hipdnn_test_sdk::utilities::MockGraph graph;
+
+    const auto under = createWorkspaceLimitConfig(PLAN_BYTES - 1);
+    Context declined;
+    EXPECT_EQ(statusOf([&] {
+                  static_cast<void>(engine.getMaxWorkspaceSize(_handle, graph, wrapConfig(under)));
+              }),
+              HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE);
+    EXPECT_EQ(statusOf([&] {
+                  engine.initializeExecutionContext(_handle, graph, wrapConfig(under), declined);
+              }),
+              HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE);
+    EXPECT_EQ(plansBuilt, 0);
+
+    const auto exact = createWorkspaceLimitConfig(PLAN_BYTES);
+    EXPECT_EQ(engine.getMaxWorkspaceSize(_handle, graph, wrapConfig(exact)), PLAN_BYTES);
+    Context atLimit;
+    engine.initializeExecutionContext(_handle, graph, wrapConfig(exact), atLimit);
+    EXPECT_EQ(plansBuilt, 1);
+
+    const auto unlimited = createEngineConfigWithoutKnobs();
+    EXPECT_EQ(engine.getMaxWorkspaceSize(_handle, graph, wrapConfig(unlimited)), PLAN_BYTES);
+}
+
+/// A negative limit is a bad value, not a decline.
+TEST_F(TestAsmSdpaEngine, ANegativeWorkspaceLimitIsAnInvalidValue)
+{
+    auto builder = std::make_unique<::testing::NiceMock<MockPlanBuilder>>();
+    ON_CALL(*builder, isApplicable).WillByDefault(::testing::Return(true));
+    AsmSdpaEngine engine;
+    engine.addPlanBuilder(std::move(builder));
+    const hipdnn_test_sdk::utilities::MockGraph graph;
+
+    const auto negative = createWorkspaceLimitConfig(-1);
+    EXPECT_EQ(statusOf([&] {
+                  static_cast<void>(
+                      engine.getMaxWorkspaceSize(_handle, graph, wrapConfig(negative)));
+              }),
+              HIPDNN_PLUGIN_STATUS_INVALID_VALUE);
 }
 
 TEST_F(TestAsmSdpaEngine, GetDetailsAdvertisesAccumulatorKnobForBwdGraph)

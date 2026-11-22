@@ -671,7 +671,7 @@ endif()
 # ============================================================================
 # Heuristics of engines that bind their L1 models by declared UUID
 # ============================================================================
-# ASM SDPA (AITER) binds its L1 models by a UUID declared in provider code
+# The ASM SDPA engine binds its L1 models by a UUID declared in provider code
 # (RFC 0019 §4.1), so the models have no pack and must be delivered into the production
 # tree directly, each engine under its own folder. Declared ahead of descriptor-packaging
 # because the production pack wipes that tree and stages these files itself

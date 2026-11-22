@@ -12,8 +12,10 @@ build produces, and rewrites the recorded revision only when every change is pro
 moved, bytes pinned by a hash) or measurably (the engine's own L1 labels before and after)
 irrelevant. Anything else is a refusal that says to retrain. The runtime rule stays exact.
 
-Selector dumps are written by the build (`HIPDNN_UHD_SELECTOR_DUMP_DIR`), one JSON object per
-engine: `{"engine", "selector_revision", "selector": <description>}`.
+Selector dumps are one JSON object per engine: `{"engine", "selector_revision", "selector":
+<description>}`. A descriptor-backed engine writes its own at run time when
+`HIPDNN_UHD_SELECTOR_DUMP_DIR` names a directory; the ASM SDPA engine's comes from the build
+(`selector_revisions/ASM_SDPA_ENGINE.selector.json`) or `HkpSelectorManifest.cmake`.
 """
 from __future__ import annotations
 

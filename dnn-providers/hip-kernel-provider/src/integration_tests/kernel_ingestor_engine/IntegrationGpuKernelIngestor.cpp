@@ -1052,7 +1052,8 @@ TEST_F(IntegrationGpuKernelIngestorSaveLoadRefusals,
     ASSERT_NO_FATAL_FAILURE(loadWithAnotherFormatMajorVersion(saved));
 }
 
-// hipkernel:PointwiseModel is embedded_source, which only the unit binary can serve.
+// hipkernel:PointwiseModel is embedded_source, which only the unit binary can serve, so its
+// model-decided ranking is tested there (TestPointwiseModelPack).
 
 /// Asserts on provenance (RFC 0019 §12 trace): for the shipped engines, declared-order
 /// fallback picks the same kernel as the native scorer, so the outcome can't tell them apart.

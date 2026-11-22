@@ -3,7 +3,9 @@
 Every other pack in this tree declares `"adapter": "native"`: its heuristic is a compiled
 function resolved by symbol. This one declares `"adapter": "tree_data"`, so its heuristic
 is a trained artifact loaded at plan build (RFC 0019 §7). It exists so a model-backed UHD is
-generated, packed and validated with the rest of the test descriptors.
+generated, packed and validated with the rest of the test descriptors, and
+`TestPointwiseModelPack` in `hip_kernel_provider_tests` checks that the model, not declared
+order, decides the ranking.
 
 ## What is deliberate here
 

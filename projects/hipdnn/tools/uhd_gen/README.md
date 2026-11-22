@@ -1042,8 +1042,11 @@ for the lifetime of the engine that owns it.
 expires its shipped models, including edits that cannot move a prediction. When the engine
 changed only in such ways, `restamp` rebinds the model instead of a retrain, and refuses
 unless it can prove it. It reads the selector dump of the build that trained the model and
-of the build to bind (`HIPDNN_UHD_SELECTOR_DUMP_DIR=<dir>` makes a build write one
-`<engine>.selector.json` per engine) and diffs the two descriptions:
+of the build to bind, and diffs the two descriptions. A descriptor-backed engine's dump is
+written at run time (`HIPDNN_UHD_SELECTOR_DUMP_DIR=<dir>`: one `<engine>.selector.json` per
+engine); the ASM SDPA engine's is written by the build
+(`<build>/selector_revisions/ASM_SDPA_ENGINE.selector.json`), or for any checkout without
+configuring it by `cmake -DHKP_ENGINE=asm_sdpa -DHKP_PROVIDER_DIR=<checkout>/dnn-providers/hip-kernel-provider -DHKP_OUT=<file> -P <checkout>/dnn-providers/hip-kernel-provider/cmake/HkpSelectorManifest.cmake`:
 
 ```bash
 python -m uhd_gen restamp <model .uhd.json> \

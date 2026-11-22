@@ -146,6 +146,23 @@ A comma-separated list of ingestor engines to skip before registration. Each ent
 export HIPDNN_DISABLE_ENGINES="hipkernel:SomeEngine,0x1A2B3C4D5E6F7080"
 ```
 
+#### HIPDNN_UHD_SELECTOR_DUMP_DIR
+
+A directory into which the provider writes the selector of every descriptor-backed engine it builds, as `<engine name>.selector.json` (characters outside `[A-Za-z0-9._-]` in the name become `_`). Each file holds the engine name, its `selector_revision` and the selector description that revision digests.
+
+The ASM SDPA engine does not read this variable: its selector is fixed at configure time, and the build writes it to `<build>/selector_revisions/ASM_SDPA_ENGINE.selector.json`.
+
+| Value      | Description                                            |
+|------------|--------------------------------------------------------|
+| (unset)    | Nothing is written |
+| `<path>`   | Writes one file per engine here; the directory is created if needed |
+
+An engine-prediction (L1) model records the selector revision it was trained against, and the provider refuses one whose revision differs from the engine's; the refusal is logged at `ERROR` with a pointer to this variable. Write the selector of the build that trained the model and of the build that refused it, and compare the two files to see which kernel, ranker or descriptor changed. `uhd_gen restamp` reads the same files (`--selector-before`, `--selector-after`). A failed write is logged at `WARN` and does not affect the engine.
+
+```bash
+export HIPDNN_UHD_SELECTOR_DUMP_DIR=/tmp/hipdnn-selectors
+```
+
 
 ### Heuristic Policy Selection
 

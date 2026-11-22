@@ -522,6 +522,30 @@ TEST_F(TestEnginePredictor, BindingSelectsByMetricAndFallsBackWithinIt)
     EXPECT_EQ(ask("tflops", "gfx942").status, PredictionStatus::AVAILABLE);
 }
 
+/// The refusal that applies, and the one an engine reports, is the most specific key serving
+/// the device: a refused `default` behind a bound architecture model is not it.
+TEST_F(TestEnginePredictor, TheRefusalThatAppliesIsTheMostSpecificKeyServingTheDevice)
+{
+    EngineModelBinding binding;
+    binding.bind("tflops", "gfx950", config(document()));
+    binding.markUnusable("tflops", "default", PredictionStatus::UNAVAILABLE, "default stale");
+    binding.markUnusable("tflops", "gfx942", PredictionStatus::INVALID, "gfx942 broken");
+    const auto ask = [&](const std::string& arch) {
+        return binding.predict(17, "test:opaque", "selector-1", "tflops", arch, _features, true);
+    };
+
+    EXPECT_EQ(binding.refusedArch("tflops", "gfx950:sramecc+:xnack-"), std::nullopt);
+    EXPECT_EQ(ask("gfx950:sramecc+:xnack-").status, PredictionStatus::AVAILABLE);
+
+    EXPECT_EQ(binding.refusedArch("tflops", "gfx942:sramecc+:xnack-"), "gfx942");
+    EXPECT_EQ(ask("gfx942:sramecc+:xnack-").reason, "gfx942 broken");
+
+    EXPECT_EQ(binding.refusedArch("tflops", "gfx1100"), "default");
+    EXPECT_EQ(ask("gfx1100").reason, "default stale");
+
+    EXPECT_EQ(binding.refusedArch("time", "gfx942"), std::nullopt);
+}
+
 /// RFC 0019 §11.4: a value must be strictly positive in every metric; a 0 throughput is
 /// what kernel rankings write for "no measurement", so it is not a worst-case estimate.
 TEST_F(TestEnginePredictor, ValidityIsTheRequestedMetrics)

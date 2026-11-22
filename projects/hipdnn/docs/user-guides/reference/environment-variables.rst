@@ -282,6 +282,25 @@ Entries are not checked for existence: an entry that does not exist on this mach
 
 On Linux, all three variables are ignored in a secure execution environment, because a descriptor can name a shared library for the provider to load (see :ref:`secure-execution-variables`).
 
+``HIPDNN_UHD_SELECTOR_DUMP_DIR``
+--------------------------------
+
+A directory into which the provider writes the selector of every descriptor-backed engine it builds, as ``<engine name>.selector.json`` (characters outside ``[A-Za-z0-9._-]`` in the name become ``_``).
+Each file holds the engine name, its ``selector_revision`` and the selector description that revision digests.
+The ASM SDPA engine does not read this variable: its selector is fixed at configure time, and the build writes it to ``<build>/selector_revisions/ASM_SDPA_ENGINE.selector.json``.
+
+- Unset: nothing is written.
+- ``<path>``: one file per engine is written here; the directory is created if needed.
+
+An engine-prediction (L1) model records the selector revision it was trained against, and the provider refuses one whose revision differs from the engine's; the refusal is logged at ``ERROR`` with a pointer to this variable.
+Write the selector of the build that trained the model and of the build that refused it, and compare the two files to see which kernel, ranker or descriptor changed.
+``uhd_gen restamp`` reads the same files (``--selector-before``, ``--selector-after``).
+A failed write is logged at ``WARN`` and does not affect the engine.
+
+.. code:: bash
+
+  export HIPDNN_UHD_SELECTOR_DUMP_DIR=/tmp/hipdnn-selectors
+
 .. _secure-execution-variables:
 
 Secure execution

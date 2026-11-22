@@ -47,110 +47,32 @@ endif()
 # The selector revision is a configure-time digest, so its recipe can only be run against
 # other trees here. TestAsmSdpaSelectorRevision asserts that LF and CRLF copies of the
 # engine tree agree with the built revision, and that each forward or backward input moves
-# it while doc and engine-class changes do not.
+# it while doc and engine-class changes do not. The fixtures copy the tree and run the
+# recipe once per probe, so they are a build step that reruns only when an engine file, the
+# recipe or the script changes, not work every configure repeats.
 set(_hkp_asm_engine_dir "${CMAKE_CURRENT_SOURCE_DIR}/../../../engines/asm_sdpa_engine")
 cmake_path(NORMAL_PATH _hkp_asm_engine_dir)
-include("${_hkp_asm_engine_dir}/AsmSdpaSelectorRevision.cmake")
-
-# cmake-lint: disable=E1126
-# cmake-lint has no form spec for file(COPY_FILE) or file(CONFIGURE); both are valid CMake.
-set(_hkp_asm_lf "${CMAKE_CURRENT_BINARY_DIR}/selector_revision/lf")
-set(_hkp_asm_crlf "${CMAKE_CURRENT_BINARY_DIR}/selector_revision/crlf")
-file(REMOVE_RECURSE "${CMAKE_CURRENT_BINARY_DIR}/selector_revision")
-set(_hkp_at "@")
-file(GLOB_RECURSE _hkp_asm_files RELATIVE "${_hkp_asm_engine_dir}" "${_hkp_asm_engine_dir}/*")
-foreach(_rel IN LISTS _hkp_asm_files)
-    if(_rel MATCHES "^descriptors/")
-        continue()
-    endif()
-    if(_rel MATCHES "\\.co$")
-        foreach(_tree IN ITEMS "${_hkp_asm_lf}" "${_hkp_asm_crlf}")
-            cmake_path(GET _rel PARENT_PATH _rel_dir)
-            file(MAKE_DIRECTORY "${_tree}/${_rel_dir}")
-            file(COPY_FILE "${_hkp_asm_engine_dir}/${_rel}" "${_tree}/${_rel}")
-        endforeach()
-    else()
-        # file(WRITE) writes CRLF on Windows; file(CONFIGURE) honors NEWLINE_STYLE. Every
-        # `@` is routed through @_hkp_at@ so no source text is substituted.
-        file(READ "${_hkp_asm_engine_dir}/${_rel}" _text)
-        string(REPLACE "@" "@_hkp_at@" _text "${_text}")
-        file(CONFIGURE OUTPUT "${_hkp_asm_lf}/${_rel}" CONTENT "${_text}" @ONLY NEWLINE_STYLE LF)
-        file(CONFIGURE OUTPUT "${_hkp_asm_crlf}/${_rel}" CONTENT "${_text}" @ONLY
-             NEWLINE_STYLE CRLF)
-    endif()
-endforeach()
-hkp_asm_sdpa_revision(_hkp_asm_rev_lf "${_hkp_asm_lf}")
-hkp_asm_sdpa_revision(_hkp_asm_rev_crlf "${_hkp_asm_crlf}")
-
-set(_hkp_asm_probe_rows "")
-# Applies <change> to <rel> in the LF tree, records the revision, and restores the file.
-# EDIT appends a line; ADD creates <rel>. Restored from a copy because file(WRITE) would
-# rewrite line endings on Windows.
-function(_hkp_asm_revision_probe _change _rel _must_expire)
-    set(_path "${_hkp_asm_lf}/${_rel}")
-    set(_saved "${CMAKE_CURRENT_BINARY_DIR}/selector_revision/probe_original")
-    if(_change STREQUAL "EDIT")
-        file(COPY_FILE "${_path}" "${_saved}")
-        file(APPEND "${_path}" "probe\n")
-    else()
-        cmake_path(GET _path PARENT_PATH _dir)
-        file(MAKE_DIRECTORY "${_dir}")
-        file(WRITE "${_path}" "probe\n")
-    endif()
-    hkp_asm_sdpa_revision(_probed "${_hkp_asm_lf}")
-    if(_change STREQUAL "EDIT")
-        file(RENAME "${_saved}" "${_path}")
-    else()
-        file(REMOVE "${_path}")
-    endif()
-    string(TOLOWER "${_change}" _label)
-    string(APPEND _label " ${_rel}")
-    set(_hkp_asm_probe_rows
-        "${_hkp_asm_probe_rows}    Probe{\"${_label}\", \"${_probed}\", ${_must_expire}},\n"
-        PARENT_SCOPE)
-endfunction()
-# Every selection input of either direction.
-foreach(_source IN ITEMS
-        asm/asm_kernels/codegen.py
-        plans/SdpaFwdPlanBuilder.cpp plans/SdpaFwdPlanBuilder.hpp
-        plans/SdpaBwdPlanBuilder.cpp plans/SdpaBwdPlanBuilder.hpp
-        plans/SdpaPlanUtils.hpp
-        plans/SdpaFwdPlan.cpp plans/SdpaFwdPlan.hpp plans/SdpaFwdParams.hpp
-        plans/SdpaFwdLaunchParams.hpp
-        plans/SdpaBwdPlan.cpp plans/SdpaBwdPlan.hpp plans/SdpaBwdParams.hpp
-        plans/SdpaBwdLaunchParams.hpp
-        plans/SdpaFwdArgsBuilder.hpp plans/SdpaBwdArgsBuilder.hpp
-        asm/SdpaFwdKernelArgs.hpp asm/SdpaBwdKernelArgs.hpp asm/SgprPadding.hpp
-        asm/asm_kernels/gfx942/fmha_v3_fwd/fmha_fwd.csv)
-    _hkp_asm_revision_probe(EDIT ${_source} true)
-endforeach()
-# A new kernel or arch directory, in either direction, is an inventory change.
-_hkp_asm_revision_probe(ADD asm/asm_kernels/gfx950/fmha_v3_fwd/fwd_probe.co true)
-_hkp_asm_revision_probe(ADD asm/asm_kernels/gfx_probe/fmha_v3_fwd/fmha_fwd.csv true)
-_hkp_asm_revision_probe(ADD asm/asm_kernels/gfx942/fmha_v3_bwd/bwd_probe.co true)
-_hkp_asm_revision_probe(ADD asm/asm_kernels/gfx_probe/fmha_v3_bwd/fmha_bwd.csv true)
-# Provenance and docs cannot move a throughput number.
-_hkp_asm_revision_probe(EDIT asm/asm_kernels/gfx942/fmha_v3_fwd/SOURCE.md false)
-_hkp_asm_revision_probe(EDIT asm/asm_kernels/gfx942/fmha_v3_bwd/SOURCE.md false)
-_hkp_asm_revision_probe(EDIT asm/asm_kernels/README.md false)
-# The engine class reports details, binds L1 models and dispatches to a plan builder; the
-# builders, not it, choose the kernel.
-_hkp_asm_revision_probe(EDIT AsmSdpaEngine.cpp false)
-_hkp_asm_revision_probe(EDIT AsmSdpaEngine.hpp false)
-
-string(CONCAT _hkp_asm_fixture_text
-    "// Generated by ${CMAKE_CURRENT_LIST_FILE}. Do not edit.\n"
-    "#pragma once\n\n"
-    "#include <array>\n\n"
-    "namespace asm_sdpa_engine::selector_revision_fixtures\n{\n\n"
-    "inline constexpr const char* REVISION_LF = \"${_hkp_asm_rev_lf}\";\n"
-    "inline constexpr const char* REVISION_CRLF = \"${_hkp_asm_rev_crlf}\";\n\n"
-    "struct Probe\n{\n    const char* change;\n    const char* revision;\n    bool mustExpire;\n};\n\n"
-    "inline constexpr std::array PROBES{\n${_hkp_asm_probe_rows}};\n\n"
-    "} // namespace asm_sdpa_engine::selector_revision_fixtures\n")
-# Rewritten only when content changes, so a no-op reconfigure recompiles nothing.
-file(CONFIGURE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/AsmSdpaSelectorRevisionFixtures.hpp"
-     CONTENT "${_hkp_asm_fixture_text}" @ONLY)
+set(_hkp_asm_fixtures_script "${CMAKE_CURRENT_SOURCE_DIR}/AsmSdpaSelectorRevisionFixtures.cmake")
+set(_hkp_asm_fixtures_header "${CMAKE_CURRENT_BINARY_DIR}/AsmSdpaSelectorRevisionFixtures.hpp")
+set(_hkp_asm_fixtures_stamp "${CMAKE_CURRENT_BINARY_DIR}/AsmSdpaSelectorRevisionFixtures.stamp")
+file(GLOB_RECURSE _hkp_asm_fixture_inputs CONFIGURE_DEPENDS "${_hkp_asm_engine_dir}/*")
+list(FILTER _hkp_asm_fixture_inputs EXCLUDE REGEX "/descriptors/")
+add_custom_command(
+    OUTPUT "${_hkp_asm_fixtures_stamp}"
+    BYPRODUCTS "${_hkp_asm_fixtures_header}"
+    COMMAND "${CMAKE_COMMAND}" "-DENGINE_DIR=${_hkp_asm_engine_dir}"
+            "-DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/selector_revision"
+            "-DOUTPUT=${_hkp_asm_fixtures_header}" -P "${_hkp_asm_fixtures_script}"
+    COMMAND "${CMAKE_COMMAND}" -E touch "${_hkp_asm_fixtures_stamp}"
+    DEPENDS "${_hkp_asm_fixtures_script}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/../../../../cmake/HkpSourceDigest.cmake"
+            ${_hkp_asm_fixture_inputs}
+    COMMENT "Computing ASM SDPA selector revision fixtures"
+    VERBATIM)
+add_custom_target(hkp_asm_selector_revision_fixtures
+    DEPENDS "${_hkp_asm_fixtures_stamp}"
+    COMMENT "ASM SDPA selector revision fixtures")
+add_dependencies(hip_kernel_provider_tests hkp_asm_selector_revision_fixtures)
 target_include_directories(hip_kernel_provider_tests PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
 
 # ============================================================================

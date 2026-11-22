@@ -401,26 +401,17 @@ private:
     /// when a request on that architecture meets it: selection then ranks this engine in static
     /// order without saying so. Not at construction, where every other architecture's model in
     /// the set (each trained against its own architecture's selector) would be reported too.
-    /// @param arch The device `gcnArchName`; refusals are keyed as declared (`default` or a
-    ///             prefix), so the most specific matching key is the one reported.
+    /// @param arch The device `gcnArchName`. The refusal reported is the one the binding
+    ///             applied, so a refused `default` behind a bound architecture model is not.
     void reportRefusal(const std::string& metric, const std::string& arch) const
     {
-        const std::string* refusal = nullptr;
-        std::string matched;
-        for(const auto& [key, reason] : _refusals)
+        const auto matched = _binding.refusedArch(metric, arch);
+        if(!matched)
         {
-            const auto& target = key.second;
-            if(key.first == metric
-               && ((target == "default" && matched.empty())
-                   || (target != "default" && archMatches(arch, target, ArchMatchMode::PREFIX)
-                       && (matched.empty() || matched == "default"
-                           || target.size() > matched.size()))))
-            {
-                refusal = &reason;
-                matched = target;
-            }
+            return;
         }
-        if(refusal == nullptr)
+        const auto refusal = _refusals.find({metric, *matched});
+        if(refusal == _refusals.end())
         {
             return;
         }
@@ -428,14 +419,14 @@ private:
         static std::set<std::string> s_logged;
         {
             const std::lock_guard<std::mutex> lock(s_mutex);
-            if(!s_logged.insert(_engine.name + '\n' + metric + '\n' + matched).second)
+            if(!s_logged.insert(_engine.name + '\n' + metric + '\n' + *matched).second)
             {
                 return;
             }
         }
         HIPDNN_PLUGIN_LOG_ERROR("ingestor: engine '"
-                                << _engine.name << "' metric='" << metric << "' arch='" << matched
-                                << "' engine-prediction " << *refusal
+                                << _engine.name << "' metric='" << metric << "' arch='" << *matched
+                                << "' engine-prediction " << refusal->second
                                 << "; the engine is ranked without an estimate. Set "
                                 << SELECTOR_DUMP_DIR_ENV
                                 << " to write this build's selector and compare it with the "
