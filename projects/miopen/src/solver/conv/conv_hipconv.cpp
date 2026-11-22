@@ -24,6 +24,7 @@
 #include <cstddef>
 #include <exception>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <unordered_set>
@@ -45,7 +46,7 @@ using ProblemDescription = miopen::conv::ProblemDescription;
 // index is consistent across calls.
 constexpr std::size_t MAX_CONFIGS = hipconv::ALL_RANKED_CONFIGS;
 
-// hipconv throws std::exception, and Find skips a solver only on a miopen::Exception.
+// hipconv throws std::invalid_argument; Find catches only miopen::Exception.
 static void LogHipConvError(const char* where, const std::exception& ex)
 {
     MIOPEN_LOG_W("ConvHipConv: " << where << ": " << ex.what());
@@ -526,7 +527,7 @@ void PerformanceConfigConvHipConv::InitFromDevice(const void* device,
     {
         cfgs = GetConfigs(*static_cast<const hipconv::Device*>(device), problem);
     }
-    catch(const std::exception& ex)
+    catch(const std::invalid_argument& ex)
     {
         LogHipConvError("InitFromDevice", ex);
     }
@@ -586,7 +587,7 @@ try
     kernel = found;
     return true;
 }
-catch(const std::exception& ex)
+catch(const std::invalid_argument& ex)
 {
     LogHipConvError("IsValid", ex);
     return false;
@@ -621,7 +622,7 @@ bool ConvHipConv::IsApplicable(const ExecutionContext& ctx, const ProblemDescrip
             return hipconv::find_config(*device, ToHipconvParams(problem)).has_value();
         return !GetConfigs(*device, problem).empty();
     }
-    catch(const std::exception& ex)
+    catch(const std::invalid_argument& ex)
     {
         LogHipConvError("IsApplicable", ex);
         return false;
@@ -654,11 +655,7 @@ size_t ConvHipConv::GetWorkspaceSize(const ExecutionContext& ctx,
                 size = std::max(size, wt.GetSize());
             }
         }
-        catch(const Exception&)
-        {
-            throw;
-        }
-        catch(const std::exception& ex)
+        catch(const std::invalid_argument& ex)
         {
             MIOPEN_THROW(miopenStatusInternalError,
                          std::string("ConvHipConv: GetWorkspaceSize: ") + ex.what());
@@ -686,7 +683,7 @@ float ConvHipConv::GetWti(const ExecutionContext& ctx, const ProblemDescription&
         return hipconv::get_weighted_throughput_index(
             cfgs[0], *device, GetKernelParams(cfgs[0], *device, problem));
     }
-    catch(const std::exception& ex)
+    catch(const std::invalid_argument& ex)
     {
         LogHipConvError("GetWti", ex);
         return wti_approximate_worst;
@@ -924,11 +921,7 @@ ConvSolution ConvHipConv::GetSolution(const ExecutionContext& ctx,
     {
         return MakeSolution(ctx, problem, config);
     }
-    catch(const Exception&)
-    {
-        throw;
-    }
-    catch(const std::exception& ex)
+    catch(const std::invalid_argument& ex)
     {
         LogHipConvError("GetSolution", ex);
         return {miopenStatusInternalError};
