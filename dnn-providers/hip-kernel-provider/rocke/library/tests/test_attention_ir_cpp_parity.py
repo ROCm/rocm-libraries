@@ -4,8 +4,8 @@
 """C++/Python byte-identity gate for the library attention kernels.
 
 The IR-sha256 golden for these kernels lives in the platform parity harness
-(``platform/tests/instances/rocke_ir_parity_harness.py``, families
-``attention_dense`` / ``attention_d256``) and is gated in CI by the
+(``platform/tests/instances/rocke_ir_parity_harness.py``, the families in
+``_FAMILIES`` below) and is gated in CI by the
 ``rocke_golden_static`` CTest entry. That golden pins the *Python* lowering only.
 This file adds the other half for the same case set: the C++ engine
 (``rocke_engine``) must lower each of those kernels to byte-identical IR.
@@ -37,7 +37,12 @@ _HARNESS_DIR = Path(__file__).resolve().parents[2] / "platform" / "tests" / "ins
 # lightning_indexer is a Python-authored, generically-lowered family (no
 # hand-written C++ emitter), so this gate is what actually proves its Python and
 # C++ lowerings agree -- the representative golden only pins the Python side.
-_FAMILIES = ("attention_dense", "attention_d256", "lightning_indexer")
+_FAMILIES = (
+    "attention_dense",
+    "attention_d256",
+    "attention_d128_swa",
+    "lightning_indexer",
+)
 
 
 def _harness():
