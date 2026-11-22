@@ -10,7 +10,6 @@ merely named like a flag is not."""
 from __future__ import annotations
 
 import pytest
-
 from rocke.core.ir import F32, IRBuilder, PtrType
 from rocke.core.lower_llvm import lower_kernel_to_llvm
 from rocke.tests.fp_policy import fp_policy_violations
@@ -43,6 +42,16 @@ def test_a_lowered_kernel_carries_no_relaxation():
             '"uniform-work-group-size"="true"',
             '"uniform-work-group-size"="true" "denormal-fp-math-f32"="preserve-sign"',
             "FP mode attribute denormal-fp-math",
+        ),
+        (
+            '"uniform-work-group-size"="true"',
+            '"uniform-work-group-size"="true" "amdgpu-ieee"="false"',
+            "FP mode attribute amdgpu-ieee",
+        ),
+        (
+            '"uniform-work-group-size"="true"',
+            '"uniform-work-group-size"="true" "amdgpu-dx10-clamp"="false"',
+            "FP mode attribute amdgpu-dx10-clamp",
         ),
     ],
 )

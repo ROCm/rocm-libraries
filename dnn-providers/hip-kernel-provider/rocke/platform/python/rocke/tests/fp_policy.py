@@ -7,7 +7,8 @@ forbids in lowered LLVM IR.
 rocKE emits no fast-math flags, no ``!fpmath`` accuracy metadata and no
 floating-point mode function attributes (``dsl_docs/numerics/README.md``,
 "Shared rules"), so the compiler may not assume NaN or infinity away, fuse a
-multiply and an add, relax a division or flush subnormals on its own.
+multiply and an add, relax a division, flush subnormals, or change the IEEE and
+DX10-clamp mode bits of the kernel descriptor on its own.
 :func:`fp_policy_violations` lists every line of a module that breaks that
 rule, each prefixed with the kind of relaxation it carries.
 """
@@ -26,6 +27,8 @@ FP_MODE_ATTRIBUTES = (
     "no-infs-fp-math",
     "approx-func-fp-math",
     "no-signed-zeros-fp-math",
+    "amdgpu-ieee",
+    "amdgpu-dx10-clamp",
 )
 # The words between the opcode of a value-producing instruction that may carry
 # fast-math flags and its type: where LLVM prints those flags.
