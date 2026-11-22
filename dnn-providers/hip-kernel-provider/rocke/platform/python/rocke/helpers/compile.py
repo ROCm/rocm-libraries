@@ -466,8 +466,7 @@ def lower_kernel_for_comgr(
     """The lowering half of :func:`compile_kernel`, without running COMGR.
 
     Resolves the target the same way and lowers through the same backend, so
-    ``build_hsaco_from_llvm_ir(c.llvm_text, isa=c.isa, options=list(c.options),
-    fresh_process=c.fresh_process)`` produces the binary
+    :func:`compile_comgr_input` of the result produces the binary
     ``compile_kernel(kernel, arch=arch)`` would, and it refuses the same
     compiler options ``compile_kernel`` refuses. The ISA name is chosen for the
     compiler COMGR loads in this process; where COMGR cannot be loaded, the
@@ -485,6 +484,19 @@ def lower_kernel_for_comgr(
         options=tuple(options),
         fresh_process=bool(kernel.attrs.get(COMGR_FRESH_PROCESS_ATTR)),
     )
+
+
+def compile_comgr_input(comgr_input: ComgrInput) -> bytes:
+    """The COMGR half of :func:`compile_kernel`: the code object of a
+    :func:`lower_kernel_for_comgr` result, built in this process or, for a
+    kernel that asks for one, in a fresh process."""
+    hsaco, _ = build_hsaco_from_llvm_ir(
+        comgr_input.llvm_text,
+        isa=comgr_input.isa,
+        options=list(comgr_input.options),
+        fresh_process=comgr_input.fresh_process,
+    )
+    return bytes(hsaco)
 
 
 def _lower_llvm_via_backend(

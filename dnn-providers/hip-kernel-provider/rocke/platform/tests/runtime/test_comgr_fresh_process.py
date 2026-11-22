@@ -194,6 +194,33 @@ def test_compile_kernel_follows_the_kernel_attribute(marked: bool, arch: str) ->
 
 
 @pytest.mark.parametrize("arch", COVERED_ARCHES)
+@pytest.mark.parametrize("marked", [False, True])
+def test_a_lowered_kernel_compiles_as_compile_kernel_compiles_it(
+    marked: bool, arch: str
+) -> None:
+    """compile_comgr_input hands COMGR what compile_kernel hands it, fresh process
+    included, and returns the code object."""
+    kernel = KernelDef("fresh_contract", [], Region("entry"))
+    if marked:
+        kernel.attrs[compile_module.COMGR_FRESH_PROCESS_ATTR] = True
+    with (
+        mock.patch.object(compile_module, "_lower_llvm_via_backend", return_value="ll"),
+        mock.patch.object(
+            compile_module,
+            "build_hsaco_from_llvm_ir",
+            return_value=(b"hsaco", comgr.ComgrTimings()),
+        ) as build,
+    ):
+        compile_module.compile_kernel(kernel, arch=arch)
+        whole = build.call_args
+        hsaco = compile_module.compile_comgr_input(
+            compile_module.lower_kernel_for_comgr(kernel, arch=arch)
+        )
+    assert build.call_args == whole
+    assert hsaco == b"hsaco"
+
+
+@pytest.mark.parametrize("arch", COVERED_ARCHES)
 def test_fresh_process_builds_the_in_process_object(arch: str) -> None:
     """With a loadable comgr: a trivial kernel compiles to the same bytes in
     this process and in a fresh one (the child really runs)."""

@@ -128,15 +128,10 @@ def reproduce(
 
     hsaco = None
     if compile_hsaco:
-        from rocke.runtime.comgr import build_hsaco_from_llvm_ir
+        from rocke.helpers.compile import compile_comgr_input
 
         try:
-            hsaco, _ = build_hsaco_from_llvm_ir(
-                comgr_input.llvm_text,
-                isa=comgr_input.isa,
-                options=list(comgr_input.options),
-                fresh_process=comgr_input.fresh_process,
-            )
+            hsaco = compile_comgr_input(comgr_input)
         except Exception as e:  # noqa: BLE001 - reported per kernel
             log(f"  [error] compile failed: {type(e).__name__}: {e}")
             return False
