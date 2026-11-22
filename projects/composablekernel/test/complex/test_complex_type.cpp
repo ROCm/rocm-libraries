@@ -10,7 +10,9 @@
 
 #include "gtest/gtest.h"
 #include "ck/utility/data_type.hpp"
+#include "ck/utility/dtype_vector.hpp"
 #include "ck/utility/dtype_complex.hpp"
+#include "ck/utility/functional2.hpp"
 #include "ck/utility/type_convert.hpp"
 
 using ck::complex_t;
@@ -83,6 +85,30 @@ TYPED_TEST(ComplexType, RealDoesNotConvertImplicitly)
                   "complex_t(T) must stay explicit");
     static_assert(std::is_constructible_v<complex_t<TypeParam>, TypeParam>,
                   "complex_t{r} must still work");
+}
+
+TYPED_TEST(ComplexType, CountsAsOneElement)
+{
+    using C = complex_t<TypeParam>;
+    EXPECT_TRUE(ck::is_two_component_type<C>::value);
+    EXPECT_FALSE(ck::is_two_component_type<TypeParam>::value);
+
+    EXPECT_EQ((ck::scalar_type<typename ck::vector_type<C, 1>::type>::vector_size), 1);
+    EXPECT_EQ((ck::scalar_type<typename ck::vector_type<C, 2>::type>::vector_size), 2);
+    EXPECT_EQ((ck::scalar_type<typename ck::vector_type<C, 4>::type>::vector_size), 4);
+}
+
+TYPED_TEST(ComplexType, AsTypeReadBack)
+{
+    using C = complex_t<TypeParam>;
+    ck::vector_type<C, 4> v;
+    ck::static_for<0, 4, 1>{}(
+        [&](auto i) { v.template AsType<C>()(i) = C{TypeParam(i.value), TypeParam(-i.value)}; });
+    ck::static_for<0, 4, 1>{}([&](auto i) {
+        const C c = v.template AsType<C>()[i];
+        EXPECT_EQ(c.real, TypeParam(i.value));
+        EXPECT_EQ(c.imag, TypeParam(-i.value));
+    });
 }
 
 TYPED_TEST(ComplexType, Arithmetic)

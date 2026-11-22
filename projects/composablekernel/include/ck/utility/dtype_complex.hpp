@@ -11,6 +11,8 @@ namespace ck {
 // and the alignment is twice the size of a part: the same size, order and alignment as
 // hipFloatComplex / hipDoubleComplex, cuda::std::complex and thrust::complex. std::complex<T> is
 // aligned to T only, so an array of std::complex is copied to complex_t, not cast.
+// Kernels count one complex_t as one element and load or store it as two components (see
+// is_two_component_type in data_type.hpp).
 template <typename T>
 struct alignas(2 * sizeof(T)) complex_t
 {
@@ -19,6 +21,11 @@ struct alignas(2 * sizeof(T)) complex_t
 
     static_assert(is_same_v<T, float> || is_same_v<T, double>,
                   "complex_t supports float and double components");
+
+    // Marks the type as a two-component element.
+    using component_type = T;
+    // Read by non_native_vector_base for 16-byte elements.
+    using element_type = T;
 
     // Trivial, so that kernels can keep complex_t in __shared__ arrays.
     complex_t() = default;

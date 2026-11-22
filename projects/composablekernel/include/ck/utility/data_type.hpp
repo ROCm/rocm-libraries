@@ -78,6 +78,23 @@ struct scalar_type
     static constexpr index_t vector_size = 1;
 };
 
+// True for an element made of two components of one real type, such as complex_t. Such an
+// element counts as one scalar (scalar_type above) and is loaded and stored as two
+// T::component_type values.
+template <typename T, typename = void>
+struct is_two_component_type
+{
+    static constexpr bool value = false;
+};
+
+template <typename T>
+struct is_two_component_type<T, void_t<typename T::component_type>>
+{
+    static_assert(sizeof(T) == 2 * sizeof(typename T::component_type),
+                  "A type with component_type must be exactly two components wide");
+    static constexpr bool value = true;
+};
+
 /**
  * @brief scalar_type trait override for NativeVectorT
  * @tparam T The vector type
