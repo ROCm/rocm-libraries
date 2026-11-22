@@ -2360,7 +2360,7 @@ class GlobalWriteBatchWriter:
             for vi in range(0, self.gwvw):
               dataEV  = dataE + vi
               dataEV2 = dataE + vi // 2
-              selectbit = HighBitSel.LOW if (self.gwvw != 1 and vi % 2 == 0) or (self.gwvw == 1 and elementIdx % 2 == 0) else HighBitSel.HIGH
+              selectbit = HighBitSel.LOW if (vc0 if self.gwvw == 1 else vi) % 2 == 0 else HighBitSel.HIGH
               gradientCvtModule.add(ECvtF16toF32(dst=vgpr(dataEV), src=vgpr(dataEV2+loadOffset), sel=selectbit, comment="gwvw %d, elementIdx %d"%(self.gwvw, elementIdx)))
           elif activationCDataType.isSingle() and self.kernel["ProblemType"]["DataTypeE"].isBFloat16():
             for vi in range(0, self.gwvw):

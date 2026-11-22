@@ -307,10 +307,10 @@ rocke_kernel_def_t* rocke_build_wmma_gemm_iu8_dequant(
 
             /* a_frag = b.global_load_vN(A, b.add(a_base, k0), I32, _K_PER_I32) */
             a_frag = rocke_b_global_load_vN(
-                b, A, rocke_b_add(b, a_base, k0), i32, ROCKE_WMMA_IU8_K_PER_I32, /*align=*/-1);
+                b, A, rocke_b_add(b, a_base, k0), i32, ROCKE_WMMA_IU8_K_PER_I32, /*align=*/0);
             /* b_frag = b.global_load_vN(Bp, b.add(b_base, k0), I32, _K_PER_I32) */
             b_frag = rocke_b_global_load_vN(
-                b, Bp, rocke_b_add(b, b_base, k0), i32, ROCKE_WMMA_IU8_K_PER_I32, /*align=*/-1);
+                b, Bp, rocke_b_add(b, b_base, k0), i32, ROCKE_WMMA_IU8_K_PER_I32, /*align=*/0);
             /* nacc = b.mma(op, a_frag, b_frag, acc) */
             nacc = rocke_b_mma(b, op_id, a_frag, b_frag, acc_v, NULL, 0);
             /* b.scf_yield(nacc) */
@@ -349,7 +349,7 @@ rocke_kernel_def_t* rocke_build_wmma_gemm_iu8_dequant(
             /* idx = b.add(b.mul(out_row, N), out_col) */
             idx = rocke_b_add(b, rocke_b_mul(b, out_row, Nparam), out_col);
             /* b.global_store(C, idx, h) */
-            rocke_b_global_store(b, C, idx, h, /*align=*/-1);
+            rocke_b_global_store(b, C, idx, h, /*align=*/0);
         }
 
         /* return b.kernel -- no explicit cf.return (added at lowering); matches Python IR. */

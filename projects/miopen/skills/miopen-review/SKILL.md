@@ -150,8 +150,9 @@ model is enough for lanes 2 and 4 (enumeration and cross-checking).
   Check `CMAKE_CXX_STANDARD` first. A short idiomatic loop rewritten with ranges is churn, not a finding.
   Tag findings `[clean]` or `[modern]`.
 - Project conventions from `AGENTS.md` *Code Conventions*: formatting (`.clang-format`, Allman braces, 100
-  columns), the two-line AMD copyright and SPDX header on new files, `miopen...` naming, logging macros, env
-  var declaration helpers.
+  columns), the two-line AMD copyright and SPDX header on new files, `#pragma once` rather than `#ifndef`
+  guards in new headers, `miopen...` naming, logging macros, env var declaration helpers, and no ticket IDs in
+  code or comments unless the comment marks a workaround.
 
 **Lane 4 - Documentation and PR text (cheaper model)**
 
@@ -162,7 +163,8 @@ model is enough for lanes 2 and 4 (enumeration and cross-checking).
 - PR text (PR mode) or commit messages (local mode): states the motivation (the why, not a restatement of
   the diff); every factual claim matches the diff; scope claims ("only affects X") hold; risk claims ("no
   allocation on the hot path") are not contradicted by the code; the test plan matches the tests actually
-  added; a JIRA ID is present where the project convention needs one; stale references to renamed or removed
+  added; a JIRA ID is present in the PR text where the project convention needs one (not in code or code
+  comments); no host names, runner names or CI job IDs; stale references to renamed or removed
   things. Tag `[pr-text]`. Trim excess how-detail that duplicates the code.
 - Do not nitpick prose, formatting or grammar.
 

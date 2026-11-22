@@ -38,6 +38,7 @@
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
 #include <hipdnn_plugin_sdk/ingestor/UhdKernelHeuristic.hpp>
+#include <hipdnn_tools/OptionalFeatures.hpp>
 
 /**
  * @file ValidateDescriptors.cpp
@@ -735,6 +736,29 @@ nlohmann::json validateModels(const DescriptorCatalog& catalog,
                    && extractor.getSignatureHash() != model->featuresHash)
                 {
                     throw std::invalid_argument("Feature contract hash mismatch");
+                }
+                // RFC 0019 section 6.7 (absent is not zero) and section 6.8 rule 9: a feature a
+                // valid graph may leave unbound must be read through value_or_default or behind
+                // present, or that graph is unscorable (a model of a work-derived metric, tflops,
+                // may read the work features bare). A warning until the shipped models are
+                // migrated (uhd_gen rewrite-signature).
+                const auto unguarded = hipdnn_tools::unguardedOptionalReferences(
+                    model->featuresSignature, model->score.metric);
+                if(!unguarded.empty())
+                {
+                    std::string references;
+                    for(const auto& found : unguarded)
+                    {
+                        references += (references.empty() ? "" : " ") + found.reference;
+                    }
+                    check["unguarded_optional_features"] = references;
+                    HIPDNN_PLUGIN_LOG_WARN(
+                        "descriptor validator: engine='"
+                        << set.engine.name << "'" << where << " role=" << role << " arch='" << arch
+                        << "' model=" << toString(id)
+                        << ": reads features a valid graph may leave unbound, so such a graph "
+                           "is unscorable: "
+                        << references << " (rewrite with uhd_gen rewrite-signature)");
                 }
                 const auto features
                     = std::string_view(role)
