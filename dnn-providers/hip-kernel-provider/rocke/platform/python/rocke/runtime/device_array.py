@@ -42,6 +42,12 @@ from ..numeric.storage import element_type_of, host_dtype
 from .hip_module import Runtime, current_device
 from .host_buffers import as_u8_buffer
 from .launcher import DeviceMem
+from .torch_interop import (
+    is_torch_tensor,
+    torch_array_info,
+    torch_empty,
+    torch_host_values,
+)
 
 __all__ = [
     "ArrayInfo",
@@ -50,6 +56,7 @@ __all__ = [
     "array_info",
     "device_workspace",
     "host_values",
+    "strided_extent",
 ]
 
 
@@ -57,8 +64,13 @@ __all__ = [
 class ArrayInfo:
     """What a launch check needs to know about one device array.
 
+    ``dtype`` is a :func:`rocke.core.dtypes.dtype_info` name, or one of the FNUZ
+    fp8 storage encodings ``"fp8e4m3fnuz"`` / ``"bf8e5m2fnuz"`` that only a torch
+    tensor holds (the kernels read them as bytes; the IR has no type for them).
     ``strides`` and every extent are in elements; ``device`` is the HIP device
-    ordinal the memory lives on, or ``None`` for host memory."""
+    ordinal the memory lives on, or ``None`` for host memory. ``backed_elements``
+    is how many elements the allocation holds from ``data_ptr`` on, so a check
+    can bound an index computed from strides passed separately from the array."""
 
     shape: tuple[int, ...]
     strides: tuple[int, ...]
@@ -66,6 +78,7 @@ class ArrayInfo:
     element_size: int
     data_ptr: int
     device: int | None
+    backed_elements: int
 
     @property
     def numel(self) -> int:
@@ -83,10 +96,16 @@ class ArrayInfo:
     def byte_span(self) -> tuple[int, int]:
         """``[start, end)`` of the bytes the array can touch, holes included
         (strides are non-negative)."""
-        if not self.numel:
-            return self.data_ptr, self.data_ptr
-        last = sum((e - 1) * s for e, s in zip(self.shape, self.strides))
-        return self.data_ptr, self.data_ptr + (last + 1) * self.element_size
+        reach = strided_extent(self.shape, self.strides)
+        return self.data_ptr, self.data_ptr + reach * self.element_size
+
+
+def strided_extent(shape: Sequence[int], strides: Sequence[int]) -> int:
+    """Elements from an array's first element through its last, holes included:
+    0 for an empty array (strides are non-negative)."""
+    if not all(shape):
+        return 0
+    return 1 + sum((extent - 1) * stride for extent, stride in zip(shape, strides))
 
 
 @runtime_checkable
@@ -107,11 +126,6 @@ class DescribedArray(Protocol):
         ...
 
 
-def _is_torch_tensor(array: object) -> bool:
-    # By module name, so torch is never imported to answer the question.
-    return type(array).__module__.split(".", 1)[0] == "torch"
-
-
 def array_info(array: object) -> ArrayInfo:
     """The :class:`ArrayInfo` of a :class:`DescribedArray` (e.g. a
     :class:`DeviceArray`) or a torch tensor.
@@ -120,9 +134,7 @@ def array_info(array: object) -> ArrayInfo:
     memory it is looking at."""
     if isinstance(array, DescribedArray):
         return array.info()
-    if _is_torch_tensor(array):
-        from .torch_interop import torch_array_info
-
+    if is_torch_tensor(array):
         return torch_array_info(array)
     raise TypeError(
         f"array_info failed - array={type(array).__name__}, expected a "
@@ -137,9 +149,7 @@ def host_values(array: object) -> np.ndarray:
     current stream as ``Tensor.cpu()`` is. Element types numpy has no type for
     (bf16, fp8) come back as raw bits (:func:`rocke.numeric.storage.host_dtype`).
     Anything :func:`array_info` refuses raises ``TypeError``."""
-    if _is_torch_tensor(array):
-        from .torch_interop import torch_host_values
-
+    if is_torch_tensor(array):
         return torch_host_values(array)
     info = array_info(array)
     return array.read()[tuple(slice(0, extent) for extent in info.shape)]
@@ -154,9 +164,7 @@ def device_workspace(shape: Sequence[int], dtype: str, *, like: object) -> objec
     :class:`DeviceArray`, which must be on HIP's current device, gets a
     zero-filled :class:`DeviceArray`. The contents are therefore unspecified:
     read nothing from the scratch before a kernel writes it."""
-    if _is_torch_tensor(like):
-        from .torch_interop import torch_empty
-
+    if is_torch_tensor(like):
         return torch_empty(shape, dtype, device=like.device)
     if isinstance(like, DeviceArray):
         if like.device != current_device():
@@ -263,6 +271,7 @@ class DeviceArray:
             element_size=self.element_size(),
             data_ptr=self.data_ptr(),
             device=self.device,
+            backed_elements=self._host.size,
         )
 
     def read(self) -> np.ndarray:

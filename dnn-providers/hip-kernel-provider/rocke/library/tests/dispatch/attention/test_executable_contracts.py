@@ -17,6 +17,7 @@ from dispatch.attention import (
 from dispatch.attention import bindings as attention_bindings
 from dispatch.attention.common import AttentionTuningSpec, attention_problem
 from kernels.common.attention_dense_spec import AttentionDenseSpec
+from rocke.tests.host_arrays import HostArray
 
 
 def _req(arch="gfx950", **kw) -> AttentionRequest:
@@ -36,58 +37,28 @@ def _req(arch="gfx950", **kw) -> AttentionRequest:
     return AttentionRequest(**base)
 
 
-class _Tensor:
-    def __init__(
-        self,
-        shape,
-        dtype,
-        values=None,
-        *,
-        device="cuda:0",
-        contiguous=True,
-        strides=None,
-    ):
-        self.shape = tuple(shape)
-        self.dtype = dtype
-        self.device = device
-        self._values = values
-        self._contiguous = contiguous
-        self._strides = strides
+#: The torch dtype names these cases were written with -> rocKE element types.
+_DTYPES = {"torch.bfloat16": "bf16", "torch.float16": "fp16", "torch.int32": "i32"}
 
-    def is_contiguous(self):
-        return self._contiguous
 
-    def detach(self):
-        return self
-
-    def stride(self, dim):
-        if self._strides is not None:
-            return self._strides[dim]
-        stride = 1
-        values = [0] * len(self.shape)
-        for index in range(len(self.shape) - 1, -1, -1):
-            values[index] = stride
-            stride *= self.shape[index]
-        return values[dim]
-
-    def cpu(self):
-        return self
-
-    def tolist(self):
-        if self._values is None:
-            raise AssertionError("no host values")
-        return self._values
+def _array(shape, dtype, values=None, *, contiguous=True, strides=None):
+    """A host-only stand-in for a device array on device 0. ``contiguous=False``
+    without ``strides`` pads the outer axis (a strided view)."""
+    if strides is None and not contiguous:
+        dense = HostArray(shape, _DTYPES[dtype]).info().strides
+        strides = (dense[0] * 2, *dense[1:])
+    return HostArray(shape, _DTYPES[dtype], values=values, strides=strides)
 
 
 def _paged_tensors(*, num_blocks=64):
     return {
-        "q": _Tensor((1024, 32, 128), "torch.bfloat16"),
-        "out": _Tensor((1024, 32, 128), "torch.bfloat16"),
-        "k": _Tensor((num_blocks, 16, 8, 128), "torch.bfloat16"),
-        "v": _Tensor((num_blocks, 16, 8, 128), "torch.bfloat16"),
-        "cu_seqlens_q": _Tensor((2,), "torch.int32", [0, 1024]),
-        "seqused_k": _Tensor((1,), "torch.int32", [1024]),
-        "block_table": _Tensor((1, 64), "torch.int32", [list(range(64))]),
+        "q": _array((1024, 32, 128), "torch.bfloat16"),
+        "out": _array((1024, 32, 128), "torch.bfloat16"),
+        "k": _array((num_blocks, 16, 8, 128), "torch.bfloat16"),
+        "v": _array((num_blocks, 16, 8, 128), "torch.bfloat16"),
+        "cu_seqlens_q": _array((2,), "torch.int32", [0, 1024]),
+        "seqused_k": _array((1,), "torch.int32", [1024]),
+        "block_table": _array((1, 64), "torch.int32", [list(range(64))]),
     }
 
 
@@ -133,8 +104,8 @@ class TestRegistrySplit(unittest.TestCase):
             FAMILY,
         )
         from rocke.dispatch.core import (
-            Capability,
             CandidateRegistry,
+            Capability,
             KernelCandidate,
         )
 
@@ -253,7 +224,7 @@ class TestRegistrySplit(unittest.TestCase):
             64,
         )
         row_padded = dict(valid)
-        row_padded["block_table"] = _Tensor(
+        row_padded["block_table"] = _array(
             (1, 64),
             "torch.int32",
             [list(range(64))],
@@ -265,24 +236,24 @@ class TestRegistrySplit(unittest.TestCase):
             64,
         )
         cases = {
-            "q_shape": ("q", _Tensor((1023, 32, 128), "torch.bfloat16")),
-            "k_dtype": ("k", _Tensor((64, 16, 8, 128), "torch.float16")),
-            "v_shape": ("v", _Tensor((63, 16, 8, 128), "torch.bfloat16")),
+            "q_shape": ("q", _array((1023, 32, 128), "torch.bfloat16")),
+            "k_dtype": ("k", _array((64, 16, 8, 128), "torch.float16")),
+            "v_shape": ("v", _array((63, 16, 8, 128), "torch.bfloat16")),
             "cu_dtype": (
                 "cu_seqlens_q",
-                _Tensor((2,), "torch.float16", [0, 1024]),
+                _array((2,), "torch.float16", [0, 1024]),
             ),
             "seqused_range": (
                 "seqused_k",
-                _Tensor((1,), "torch.int32", [1025]),
+                _array((1,), "torch.int32", [1025]),
             ),
             "block_table_shape": (
                 "block_table",
-                _Tensor((2, 32), "torch.int32", [list(range(32))] * 2),
+                _array((2, 32), "torch.int32", [list(range(32))] * 2),
             ),
             "block_table_value": (
                 "block_table",
-                _Tensor(
+                _array(
                     (1, 64),
                     "torch.int32",
                     [[64] + list(range(1, 64))],
@@ -290,7 +261,7 @@ class TestRegistrySplit(unittest.TestCase):
             ),
             "block_table_stride": (
                 "block_table",
-                _Tensor(
+                _array(
                     (1, 64),
                     "torch.int32",
                     [list(range(64))],
@@ -304,14 +275,14 @@ class TestRegistrySplit(unittest.TestCase):
                 tensors[name] = replacement
                 attention_bindings.validate_tuning_attention_tensors(problem, tensors)
         tensors = dict(valid)
-        tensors["k"] = _Tensor((64, 16, 8, 128), "torch.bfloat16", contiguous=False)
+        tensors["k"] = _array((64, 16, 8, 128), "torch.bfloat16", contiguous=False)
         with self.assertRaisesRegex(ValueError, "contiguous"):
             attention_bindings.validate_tuning_attention_tensors(problem, tensors)
 
     def test_explicit_binding_can_skip_only_metadata_content_sync(self):
         problem = attention_problem(_req())
         tensors = _paged_tensors()
-        tensors["block_table"] = _Tensor(
+        tensors["block_table"] = _array(
             (1, 64), "torch.int32", [[999] + list(range(1, 64))]
         )
         self.assertEqual(
@@ -324,8 +295,8 @@ class TestRegistrySplit(unittest.TestCase):
     def test_explicit_binding_ignores_invalid_unused_table_columns(self):
         problem = attention_problem(_req())
         tensors = _paged_tensors()
-        tensors["seqused_k"] = _Tensor((1,), "torch.int32", [16])
-        tensors["block_table"] = _Tensor(
+        tensors["seqused_k"] = _array((1,), "torch.int32", [16])
+        tensors["block_table"] = _array(
             (1, 64),
             "torch.int32",
             [[0] + [999] * 63],
@@ -340,7 +311,7 @@ class TestRegistrySplit(unittest.TestCase):
         problem = attention_problem(request)
         tensors = _paged_tensors()
         for tensor in tensors.values():
-            tensor.device = "cpu"
+            tensor.device = None  # host memory
         with self.assertRaisesRegex(ValueError, "HIP/CUDA"):
             attention_bindings.validate_tuning_attention_tensors(problem, tensors)
 
@@ -439,7 +410,7 @@ class TestRegistrySplit(unittest.TestCase):
         req = _req(algorithm=candidate.algorithm, spec_id=candidate.spec_id)
         spec = candidate.select_spec(req)
         tensors = _paged_tensors()
-        tensors["block_table"] = _Tensor(
+        tensors["block_table"] = _array(
             (1, 64), "torch.int32", [[999] + list(range(1, 64))]
         )
         for value in ("False", 0, None):

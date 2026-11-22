@@ -22,10 +22,8 @@ the GQA cases check that a per-query-head bias is not collapsed onto KV heads.
 
 The numeric tests are marked ``gpu`` and gated with a device skipif, so they
 are a graceful skip on a CPU CI box. The host-side argument-validation tests at
-the bottom need torch for real CPU tensors (``_validate_additive_bias`` checks
-a torch-specific dtype string), so they are gated with ``requires_torch`` and
-skip, rather than erroring the whole module, on an image with no torch (e.g.
-TheRock's gfx94X CI). Run standalone:
+the bottom run on host-only array stand-ins, so they need neither a GPU nor
+torch. Run standalone:
 
     HIP_VISIBLE_DEVICES=0 python -m pytest tests/test_attention_additive_bias_gfx950_numeric.py
 """
@@ -33,8 +31,8 @@ TheRock's gfx94X CI). Run standalone:
 from __future__ import annotations
 
 import pytest
-
 from kernels import UnifiedAttentionProblem, run_unified_attention_torch
+from rocke.tests.host_arrays import HostArray
 
 try:
     import torch
@@ -386,7 +384,7 @@ def test_additive_bias_combo_cohort_matches_reference(heads, bias_mode):
 
 
 # Host-side argument validation. These raise before any compile or launch, so
-# they run on CPU tensors and need no GPU.
+# they run on host-only array stand-ins and need no GPU.
 
 
 def _bias_problem(use_additive_bias=True):
@@ -422,22 +420,23 @@ def _launch_with_bias(problem, additive_bias, **kwargs):
     )
 
 
-_BIAS = dict(dtype=torch.float32) if _HAS_TORCH else {}
-
-
 @pytest.mark.parametrize(
     "use_bias, make_bias, sq_stride, match",
     [
         (True, lambda: None, 64, "requires an additive_bias tensor"),
-        (False, lambda: torch.zeros(4, 64, **_BIAS), 64, "use_additive_bias is False"),
-        (True, lambda: torch.zeros(4, 64, dtype=torch.float16), 64, "float32"),
-        (True, lambda: torch.zeros(64, 4, **_BIAS).t(), 64, "contiguous along Sk"),
-        (True, lambda: torch.zeros(4, 64, **_BIAS), None, "requires additive_bias_sq"),
-        (True, lambda: torch.zeros(4, 64, **_BIAS), 32, "or >= max_seqlen_k=64"),
+        (False, lambda: HostArray((4, 64), "fp32"), 64, "use_additive_bias is False"),
+        (True, lambda: HostArray((4, 64), "fp16"), 64, "float32"),
+        (
+            True,
+            lambda: HostArray((4, 64), "fp32", strides=(1, 4)),
+            64,
+            "contiguous along Sk",
+        ),
+        (True, lambda: HostArray((4, 64), "fp32"), None, "requires additive_bias_sq"),
+        (True, lambda: HostArray((4, 64), "fp32"), 32, "or >= max_seqlen_k=64"),
     ],
     ids=["missing", "flag_off", "fp16", "sk_strided", "no_sq_stride", "short_sq"],
 )
-@requires_torch
 def test_additive_bias_bad_args_rejected(use_bias, make_bias, sq_stride, match):
     with pytest.raises(ValueError, match=match):
         _launch_with_bias(
@@ -447,12 +446,11 @@ def test_additive_bias_bad_args_rejected(use_bias, make_bias, sq_stride, match):
         )
 
 
-@requires_torch
 @pytest.mark.parametrize("sq_stride", [0, 64, 71])
 def test_additive_bias_sq_stride_accepted(sq_stride):
     from kernels.common.attention_unified import _validate_additive_bias
 
-    bias = torch.zeros(4, 71, **_BIAS)
+    bias = HostArray((4, 71), "fp32")
     assert (
         _validate_additive_bias(_bias_problem(), bias, 0, 0, sq_stride, bias.device)
         == sq_stride
@@ -465,13 +463,12 @@ def test_additive_bias_off_needs_no_sq_stride():
     assert _validate_additive_bias(_bias_problem(False), None, 0, 0, None, None) == 0
 
 
-@requires_torch
 def test_additive_bias_device_mismatch_rejected():
     from kernels.common.attention_unified import _validate_additive_bias
 
-    bias = torch.zeros(4, 64, **_BIAS)  # cpu
+    bias = HostArray((4, 64), "fp32", device=None)  # host memory
     with pytest.raises(ValueError, match="same device as q"):
-        _validate_additive_bias(_bias_problem(), bias, 0, 0, 64, torch.device("meta"))
+        _validate_additive_bias(_bias_problem(), bias, 0, 0, 64, 0)
 
 
 # i32 boundary shape: H=16, Sq=Sk=8192 -> a full [B,H,Sq,Sk] bias is 2**30
@@ -499,18 +496,17 @@ def _long_bias_problem(num_seqs):
 def _validate_long(num_seqs, batch_stride, numel=1):
     from kernels.common.attention_unified import _validate_additive_bias
 
-    # A meta tensor reports its storage size without allocating it.
+    # A host-only stand-in describes its size without allocating it.
     return _validate_additive_bias(
         _long_bias_problem(num_seqs),
-        torch.empty(numel, device="meta", **_BIAS),
+        HostArray((numel,), "fp32"),
         batch_stride,
         _LONG_HEAD,
         _LONG,
-        torch.device("meta"),
+        0,
     )
 
 
-@requires_torch
 def test_additive_bias_i32_index_overflow_rejected():
     with pytest.raises(NotImplementedError, match="i32 bias addressing"):
         _validate_long(3, _LONG_BATCH)
@@ -521,38 +517,29 @@ def test_additive_bias_i32_index_overflow_rejected():
     [(2, _LONG_BATCH, 2 * _LONG_BATCH), (3, 0, _LONG_BATCH)],
     ids=["max_index_fits", "batch_broadcast"],
 )
-@requires_torch
 def test_additive_bias_i32_index_limit_accepted(num_seqs, batch_stride, numel):
     assert _validate_long(num_seqs, batch_stride, numel) == _LONG
 
 
-@requires_torch
 @pytest.mark.parametrize("batch_stride", [-1, 2**31], ids=["negative", "over_i32"])
 def test_additive_bias_stride_range_rejected(batch_stride):
     from kernels.common.attention_unified import _validate_additive_bias
 
-    bias = torch.zeros(4, 64, **_BIAS)
+    bias = HostArray((4, 64), "fp32")
     with pytest.raises(ValueError, match="additive_bias_batch_stride"):
         _validate_additive_bias(_bias_problem(), bias, batch_stride, 0, 64, bias.device)
 
 
 # _bias_problem reads index 3*sq_stride + 63 at most, so sq_stride=64 needs 256
-# backed elements past the storage offset.
+# backed elements from the array's start. (How a torch view's storage offset
+# counts against its storage is torch_array_info's, tested with the runtime.)
 @pytest.mark.parametrize(
-    "make_bias, ok",
-    [
-        (lambda: torch.zeros(256, **_BIAS), True),
-        (lambda: torch.zeros(255, **_BIAS), False),
-        (lambda: torch.zeros(320, **_BIAS)[64:], True),
-        (lambda: torch.zeros(320, **_BIAS)[65:], False),
-    ],
-    ids=["exact", "short", "offset_exact", "offset_short"],
+    "backed, ok", [(256, True), (255, False)], ids=["exact", "short"]
 )
-@requires_torch
-def test_additive_bias_storage_bounds(make_bias, ok):
+def test_additive_bias_storage_bounds(backed, ok):
     from kernels.common.attention_unified import _validate_additive_bias
 
-    bias = make_bias()
+    bias = HostArray((backed,), "fp32")
     args = (_bias_problem(), bias, 0, 0, 64, bias.device)
     if ok:
         assert _validate_additive_bias(*args) == 64

@@ -21,7 +21,7 @@ import numpy as np
 from rocke.core.dtypes import dtype_info
 from rocke.core.storage import element_bytes
 from rocke.numeric.storage import host_dtype
-from rocke.runtime.device_array import ArrayInfo
+from rocke.runtime.device_array import ArrayInfo, strided_extent
 
 __all__ = ["HostArray"]
 
@@ -37,7 +37,7 @@ class HostArray:
     ``shape`` in ``dtype``'s host type (:func:`rocke.numeric.storage.host_dtype`);
     without them :meth:`read` raises. ``strides`` (elements) default to row-major
     dense; ``device`` is the HIP ordinal the array claims, or ``None`` for host
-    memory.
+    memory. The claimed allocation is exactly what the strides reach.
     """
 
     def __init__(
@@ -80,6 +80,7 @@ class HostArray:
             element_size=element_bytes(self.dtype),
             data_ptr=self._data_ptr,
             device=self.device,
+            backed_elements=strided_extent(self.shape, self._strides),
         )
 
     def read(self) -> np.ndarray:

@@ -40,24 +40,6 @@ def _dtype_kind(tensor, name: str) -> str:
     raise ValueError(f"{name} has unsupported dtype {getattr(tensor, 'dtype', None)!r}")
 
 
-def _require_contiguous(tensor, name: str) -> None:
-    predicate = getattr(tensor, "is_contiguous", None)
-    if not callable(predicate) or not bool(predicate()):
-        raise ValueError(f"{name} must be contiguous")
-
-
-def _tolist(tensor, name: str):
-    value = tensor
-    for method in ("detach", "cpu"):
-        fn = getattr(value, method, None)
-        if callable(fn):
-            value = fn()
-    fn = getattr(value, "tolist", None)
-    if not callable(fn):
-        raise ValueError(f"{name} must support tolist() for validation")
-    return fn()
-
-
 def validate_tuning_attention_contract(request, problem, spec) -> None:
     """Ensure request, runtime problem, and explicit specs describe one launch."""
     request_fields = (
@@ -138,6 +120,8 @@ def validate_tuning_attention_tensors(
     ``validate_contents=False`` skips device-to-host metadata checks for trusted
     graph/hot paths, but structural shape/dtype/layout checks remain mandatory.
     Returns the physical K/V block count used to refresh address-width state.
+    Each tensor is anything :func:`rocke.runtime.device_array.array_info`
+    describes (a torch tensor or a ``DeviceArray``).
     """
     required = (
         "q",
@@ -152,10 +136,9 @@ def validate_tuning_attention_tensors(
     if missing:
         raise ValueError("missing attention tensors: " + ", ".join(missing))
 
-    q, k, v, out = (tensors[name] for name in ("q", "k", "v", "out"))
-    cu = tensors["cu_seqlens_q"]
-    used = tensors["seqused_k"]
-    table = tensors["block_table"]
+    from rocke.runtime.device_array import array_info, host_values
+
+    info = {name: array_info(tensors[name]) for name in required}
 
     q_shape = (
         int(problem.total_q),
@@ -167,12 +150,12 @@ def validate_tuning_attention_tensors(
         int(problem.num_kv_heads),
         int(problem.head_size),
     )
-    if _shape(q, "q") != q_shape:
-        raise ValueError(f"q shape must be {q_shape}, got {_shape(q, 'q')}")
-    if _shape(out, "out") != q_shape:
-        raise ValueError(f"out shape must be {q_shape}, got {_shape(out, 'out')}")
-    k_shape = _shape(k, "k")
-    v_shape = _shape(v, "v")
+    if info["q"].shape != q_shape:
+        raise ValueError(f"q shape must be {q_shape}, got {info['q'].shape}")
+    if info["out"].shape != q_shape:
+        raise ValueError(f"out shape must be {q_shape}, got {info['out'].shape}")
+    k_shape = info["k"].shape
+    v_shape = info["v"].shape
     if len(k_shape) != 4 or k_shape[1:] != kv_tail:
         raise ValueError(f"k shape must be [blocks, {kv_tail}], got {k_shape}")
     if v_shape != k_shape:
@@ -181,38 +164,34 @@ def validate_tuning_attention_tensors(
     if num_blocks <= 0:
         raise ValueError("paged K/V cache must contain at least one physical block")
 
-    q_kind = "bf16" if str(problem.dtype).lower() == "bf16" else "fp16"
-    kv_kind = (
-        "fp8_fnuz"
+    q_dtype = "bf16" if str(problem.dtype).lower() == "bf16" else "fp16"
+    kv_dtype = (
+        "fp8e4m3fnuz"
         if problem.use_fp8 and problem.fp8_fnuz
-        else "fp8" if problem.use_fp8 else q_kind
+        else "fp8e4m3" if problem.use_fp8 else q_dtype
     )
-    for tensor, name, expected in (
-        (q, "q", q_kind),
-        (out, "out", q_kind),
-        (k, "k", kv_kind),
-        (v, "v", kv_kind),
-        (cu, "cu_seqlens_q", "int32"),
-        (used, "seqused_k", "int32"),
-        (table, "block_table", "int32"),
+    for name, expected in (
+        ("q", q_dtype),
+        ("out", q_dtype),
+        ("k", kv_dtype),
+        ("v", kv_dtype),
+        ("cu_seqlens_q", "i32"),
+        ("seqused_k", "i32"),
+        ("block_table", "i32"),
     ):
-        actual = _dtype_kind(tensor, name)
-        if actual != expected:
-            raise ValueError(f"{name} dtype must be {expected}, got {actual}")
-        if name != "block_table":
-            _require_contiguous(tensor, name)
+        if info[name].dtype != expected:
+            raise ValueError(f"{name} dtype must be {expected}, got {info[name].dtype}")
+        if name != "block_table" and not info[name].is_contiguous():
+            raise ValueError(f"{name} must be contiguous")
 
-    device_values = [
-        getattr(tensor, "device", None) for tensor in (q, k, v, out, cu, used, table)
-    ]
-    devices = {str(device) for device in device_values}
+    devices = {item.device for item in info.values()}
     if len(devices) != 1:
         raise ValueError(f"all attention tensors must share one device, got {devices}")
-    device_type = getattr(device_values[0], "type", str(device_values[0]).split(":")[0])
-    if str(device_type).lower() != "cuda":
+    if devices == {None}:
         raise ValueError("explicit attention tensors must be on a HIP/CUDA device")
 
-    table_shape = _shape(table, "block_table")
+    table = info["block_table"]
+    table_shape = table.shape
     if len(table_shape) != 2 or table_shape[0] != int(problem.num_seqs):
         raise ValueError(
             "block_table shape must be "
@@ -220,24 +199,20 @@ def validate_tuning_attention_tensors(
         )
     if table_shape[1] <= 0:
         raise ValueError("block_table must have at least one block column")
-    stride = getattr(table, "stride", None)
-    if not callable(stride):
-        raise ValueError("block_table must expose strides")
-    inner_stride = int(stride(1))
-    row_stride = int(stride(0))
+    row_stride, inner_stride = table.strides
     if inner_stride != 1:
         raise ValueError("block_table innermost stride must be 1")
     if row_stride < table_shape[1] or row_stride > 0x7FFF_FFFF:
         raise ValueError("block_table row stride must be non-overlapping and fit int32")
-    if _shape(cu, "cu_seqlens_q") != (int(problem.num_seqs) + 1,):
+    if info["cu_seqlens_q"].shape != (int(problem.num_seqs) + 1,):
         raise ValueError("cu_seqlens_q must have shape [num_seqs + 1]")
-    if _shape(used, "seqused_k") != (int(problem.num_seqs),):
+    if info["seqused_k"].shape != (int(problem.num_seqs),):
         raise ValueError("seqused_k must have shape [num_seqs]")
 
     if validate_contents:
-        cu_values = [int(v) for v in _tolist(cu, "cu_seqlens_q")]
-        used_values = [int(v) for v in _tolist(used, "seqused_k")]
-        table_values = _tolist(table, "block_table")
+        cu_values = host_values(tensors["cu_seqlens_q"]).tolist()
+        used_values = host_values(tensors["seqused_k"]).tolist()
+        table_values = host_values(tensors["block_table"]).tolist()
         if (
             cu_values[0] != 0
             or cu_values[-1] != int(problem.total_q)
@@ -262,14 +237,7 @@ def validate_tuning_attention_tensors(
                     f"block_table row {seq} has {table_shape[1]} entries but "
                     f"seqused_k requires {pages}"
                 )
-            row = table_values[seq]
-            if len(row) != table_shape[1]:
-                raise ValueError(
-                    f"block_table row {seq} has {len(row)} values, "
-                    f"expected {table_shape[1]}"
-                )
-            for page, physical in enumerate(row[:pages]):
-                physical = int(physical)
+            for page, physical in enumerate(table_values[seq][:pages]):
                 if physical < 0 or physical >= num_blocks:
                     raise ValueError(
                         f"block_table[{seq}, {page}]={physical} is outside "
@@ -470,7 +438,7 @@ def bind_tuning_attention_torch(
     validate_tuning_attention_contract(request, problem, spec)
     # The caller-owned LSE buffer must be bound exactly when the problem asks
     # for it, so misuse fails here and not at the first launch. Its shape,
-    # dtype, device and overlap are validated by the runner, which needs torch.
+    # dtype, device and overlap are validated by the runner.
     has_lse = tensors.get("lse") is not None
     if problem.emit_lse and not has_lse:
         raise ValueError("emit_lse=True requires tensors['lse']")

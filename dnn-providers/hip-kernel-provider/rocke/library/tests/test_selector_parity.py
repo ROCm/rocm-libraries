@@ -1137,10 +1137,12 @@ class _RouteGuardCase(unittest.TestCase):
             p.start()
             self.addCleanup(p.stop)
 
-    def _run(self, problem: UnifiedAttentionProblem, num_blocks: int, **kw) -> None:
+    def _run(
+        self, problem: UnifiedAttentionProblem, num_blocks: int, q=None, **kw
+    ) -> None:
         return _au.run_unified_attention_torch(
             problem=problem,
-            q=None,
+            q=q,
             k=_kv_cache(num_blocks, problem),
             v=None,
             out=None,
@@ -1151,6 +1153,12 @@ class _RouteGuardCase(unittest.TestCase):
             softcap=0.0,
             **kw,
         )
+
+
+class _TorchTensor:
+    """Only its type's module is read: the runner treats it as a torch tensor."""
+
+    __module__ = "torch"
 
 
 class TestProductionRouteGuard(_RouteGuardCase):
@@ -1257,8 +1265,9 @@ class TestGfx942RouteGuard(_RouteGuardCase):
         ), mock.patch.dict(
             _au._2D_GRAPHS, clear=True
         ):
+            # Graph replay serves torch tensors only, so Q is typed as one.
             with self.assertRaisesRegex(ValueError, "below the cache's block count"):
-                self._run(p, _BUG_BLOCKS, backend="tiled")
+                self._run(p, _BUG_BLOCKS, q=_TorchTensor(), backend="tiled")
         self.assertEqual(len(raised), 1, "the graph path did not run the guard")
         self.launcher.assert_not_called()
 

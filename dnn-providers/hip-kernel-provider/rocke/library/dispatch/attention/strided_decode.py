@@ -43,9 +43,10 @@ def _dense_as_strided(request, tensors):
 
     Q/O ``[B,1,Hq,D]`` (or ``[B,Hq,1,D]``) become ``[B,Hq,D]`` views, K/V
     become logical ``[B,Hkv,S,D]`` views of the caller's storage, and every
-    sequence takes one query row and ``seqlen_k`` keys.
+    sequence takes one query row and ``seqlen_k`` keys. The views are torch
+    tensor views, so this adapter takes torch tensors only.
     """
-    import torch
+    from rocke.runtime.torch_interop import is_torch_tensor
 
     from .bindings import _dense_axis_order, _shape
 
@@ -57,6 +58,14 @@ def _dense_as_strided(request, tensors):
             "unsupported dense decode tensors: " + ", ".join(sorted(unknown))
         )
     q, k, v, out = (tensors[name] for name in ("q", "k", "v", "out"))
+    if not is_torch_tensor(q):
+        raise TypeError(
+            "dense-layout strided decode reshapes torch tensors; with other "
+            "arrays, request kv_layout='strided' and pass [B,Hq,D] Q/O, "
+            "[B,Hkv,S,D] K/V views and the int32 query offsets and KV lengths"
+        )
+    import torch
+
     _, _, order = _dense_axis_order(request, q)
     if _shape(out, "out") != _shape(q, "q"):
         raise ValueError("dense decode out must have the shape of q")

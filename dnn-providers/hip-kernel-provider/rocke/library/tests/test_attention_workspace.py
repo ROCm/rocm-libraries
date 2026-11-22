@@ -1,7 +1,11 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Host checks for split-KV scratch ownership, independent of GPU scheduling."""
+"""Host checks for split-KV scratch ownership, independent of GPU scheduling.
+
+Torch tensors keep torch's stream and allocator: those checks stand in a fake
+``torch`` module and a Q typed as a torch tensor. Other arrays launch on the
+HIP stream given, with scratch of their own kind and no torch context."""
 
 import sys
 from contextlib import contextmanager, nullcontext
@@ -53,6 +57,14 @@ def runtime(monkeypatch):
     return state
 
 
+class _TorchQ:
+    """A Q the runner treats as a torch tensor (only its type's module and its
+    device are read)."""
+
+    __module__ = "torch"
+    device = "cuda:0"
+
+
 def _arguments():
     problem = au.UnifiedAttentionProblem(
         total_q=1,
@@ -68,7 +80,7 @@ def _arguments():
     )
     return {
         "problem": problem,
-        "q": SimpleNamespace(device="cuda:0"),
+        "q": _TorchQ(),
         "k": object(),
         "v": object(),
         "out": object(),
@@ -279,3 +291,30 @@ def test_graph_churn_bounds_resources_and_waits_before_eviction(
     else:
         au.clear_attention_3d_graph_cache()
     assert not resident
+
+
+def test_other_arrays_launch_on_the_given_stream_without_torch(monkeypatch):
+    """A non-torch Q never touches torch: the scratch is allocated of Q's kind
+    and the pair launches on the stream given (0 stays the HIP null stream)."""
+    from rocke.tests.host_arrays import HostArray
+
+    monkeypatch.setitem(sys.modules, "torch", None)  # any torch import fails
+    monkeypatch.setattr(au, "_resolve_attention_arch", lambda: "gfx942")
+    monkeypatch.setattr(au, "_enable_3d_graph_replay", lambda problem, arch: True)
+    monkeypatch.setattr(au, "_get_3d_pipeline", lambda *args, **kwargs: None)
+    scratch = []
+
+    def workspace(shape, dtype, *, like):
+        scratch.append((dtype, like))
+        return HostArray(shape, dtype)
+
+    monkeypatch.setattr(au, "device_workspace", workspace)
+    calls = []
+    monkeypatch.setattr(
+        au, "_launch_3d_pipeline", lambda *args, **kwargs: calls.append(args)
+    )
+    q = HostArray((1, 4, 64), "fp16")
+    for stream in (0, 29):
+        au._run_3d_tiled(**dict(_arguments(), q=q), stream=stream)
+        assert calls[-1][3] == stream
+    assert scratch == [("fp32", q)] * 6

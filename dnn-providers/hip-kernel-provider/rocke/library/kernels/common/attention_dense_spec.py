@@ -581,8 +581,8 @@ class AttentionDenseSpec:
 
 
 #: The one element type an fp8 KV loader decodes. The K/V pointers are declared
-#: OCP fp8e4m3, so a bf16 or FNUZ array is read as OCP and silently produces wrong
-#: output. A FNUZ torch tensor has no rocKE element type, so it never matches.
+#: OCP fp8e4m3, so a bf16 or FNUZ (``fp8e4m3fnuz``) array is read as OCP and
+#: silently produces wrong output.
 OCP_FP8_KV_DTYPE = "fp8e4m3"
 
 
@@ -599,11 +599,7 @@ def require_ocp_fp8_kv(named_arrays) -> None:
     from rocke.runtime.device_array import array_info
 
     for name, array in named_arrays:
-        try:
-            dtype = array_info(array).dtype
-        except ValueError:
-            # A torch dtype with no rocKE element type, e.g. FNUZ fp8.
-            dtype = str(array.dtype)
+        dtype = array_info(array).dtype
         if dtype != OCP_FP8_KV_DTYPE:
             raise ValueError(
                 f"fp8 dense expects OCP fp8 {name} ({OCP_FP8_KV_DTYPE}), got "

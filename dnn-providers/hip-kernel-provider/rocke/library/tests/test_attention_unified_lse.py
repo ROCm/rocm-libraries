@@ -4,8 +4,6 @@
 """Host-only contract for the optional unified (split-KV and tiled 2D) LSE output."""
 
 import importlib
-import sys
-from contextlib import nullcontext
 from dataclasses import fields as dataclass_fields, replace
 from types import SimpleNamespace
 
@@ -13,6 +11,7 @@ import pytest
 
 from kernels.common import attention_unified as au
 from rocke.core.lower_llvm import lower_kernel_to_llvm
+from rocke.tests.host_arrays import HostArray
 
 _ARCHES = ("gfx942", "gfx950")
 
@@ -379,13 +378,12 @@ def test_validator_rejects_an_unknown_lse_layout():
 
 def test_head_major_validator_refuses_a_non_contiguous_buffer_without_gpu():
     """Head-major reads the buffer flat, so a strided view would be misread."""
-    torch = pytest.importorskip("torch")
     problem = _problem(emit_lse=True)
-    lse = torch.empty(problem.num_query_heads, problem.total_q, dtype=torch.float32)
+    heads, rows = problem.num_query_heads, problem.total_q
+    # The transpose of a [heads, rows] buffer: [rows, heads] with strides (1, rows).
+    lse = HostArray((rows, heads), "fp32", strides=(1, rows))
     with pytest.raises(ValueError, match="contiguous"):
-        au.validate_unified_lse(
-            problem, lse.t(), lse_layout="head_major", **_NO_TENSORS
-        )
+        au.validate_unified_lse(problem, lse, lse_layout="head_major", **_NO_TENSORS)
 
 
 # ---------------------------------------------------------------------------
@@ -400,21 +398,10 @@ def test_head_major_validator_refuses_a_non_contiguous_buffer_without_gpu():
 def runner(monkeypatch):
     state = SimpleNamespace(red_vals=None, vals2d=None, graphed=0, validated=[])
 
-    def empty(shape, *, dtype, device):
-        return SimpleNamespace(shape=shape, device=device)
-
-    torch = SimpleNamespace(
-        float32="float32",
-        empty=empty,
-        cuda=SimpleNamespace(
-            device=lambda device: nullcontext(),
-            stream=lambda stream: nullcontext(),
-            ExternalStream=lambda stream, device: SimpleNamespace(cuda_stream=stream),
-            current_stream=lambda device=None: SimpleNamespace(cuda_stream=17),
-            is_current_stream_capturing=lambda: False,
-        ),
+    # Host-only scratch: the 3D launch is recorded, never run.
+    monkeypatch.setattr(
+        au, "device_workspace", lambda shape, dtype, *, like: HostArray(shape, dtype)
     )
-    monkeypatch.setitem(sys.modules, "torch", torch)
     monkeypatch.setattr(au, "validate_unified_lse", lambda *a, **k: None)
     monkeypatch.setattr(au, "_resolve_attention_arch", lambda: "gfx942")
     monkeypatch.setattr(au, "_enable_3d_graph_replay", lambda problem, arch: False)
@@ -480,11 +467,17 @@ def runner(monkeypatch):
     return state
 
 
+class _TorchTensor:
+    """Only its type's module is read: graph replay serves torch tensors."""
+
+    __module__ = "torch"
+
+
 def _run(problem, **overrides):
     args = dict(
         problem=problem,
-        q=SimpleNamespace(device="cuda:0"),
-        k=SimpleNamespace(shape=(64,)),
+        q=HostArray((1,), problem.dtype),
+        k=HostArray((64,), problem.dtype),
         v=object(),
         out=object(),
         cu_seqlens_q=object(),
@@ -519,8 +512,16 @@ def test_runner_launches_lse_on_a_2d_routed_shape_without_the_graph(runner, back
 
 
 def test_runner_without_lse_keeps_the_2d_graph(runner):
-    assert _run(_prefill_problem("gfx942"), backend="auto") == "graphed"
+    assert _run(_prefill_problem("gfx942"), backend="auto", q=_TorchTensor()) == (
+        "graphed"
+    )
     assert runner.graphed == 1 and runner.vals2d is None
+
+
+def test_runner_launches_other_arrays_without_the_2d_graph(runner):
+    """Graph replay captures through torch, so a non-torch Q launches eagerly."""
+    _run(_prefill_problem("gfx942"), backend="auto")
+    assert runner.graphed == 0 and runner.vals2d is not None
 
 
 def test_auto_lse_refusal_names_why_both_lse_paths_declined(runner):
@@ -581,7 +582,9 @@ def test_auto_hands_an_lse_request_tiled_2d_declines_to_split_kv(runner):
 
 
 def test_auto_without_lse_keeps_tiled_2d_for_that_shape(runner):
-    assert _run(_gfx942_d256_bs32_prefill(), backend="auto") == "graphed"
+    assert (
+        _run(_gfx942_d256_bs32_prefill(), backend="auto", q=_TorchTensor()) == "graphed"
+    )
     assert runner.red_vals is None
 
 

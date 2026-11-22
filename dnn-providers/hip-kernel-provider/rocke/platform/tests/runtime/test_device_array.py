@@ -26,6 +26,7 @@ from rocke.runtime.device_array import (
     array_info,
     device_workspace,
     host_values,
+    strided_extent,
 )
 from rocke.runtime.torch_interop import torch_array_info
 from rocke.tests.gpu import current_device_arch
@@ -40,6 +41,7 @@ def _info(shape, strides, element_size=4, data_ptr=1024):
         element_size=element_size,
         data_ptr=data_ptr,
         device=0,
+        backed_elements=strided_extent(shape, strides),
     )
 
 
@@ -80,6 +82,13 @@ class _TorchTensorAttributes:
     def data_ptr(self):
         return 4096
 
+    def untyped_storage(self):
+        # 128 bytes (64 bf16) of storage; the tensor starts 8 elements in.
+        return SimpleNamespace(nbytes=lambda: 128)
+
+    def storage_offset(self):
+        return 8
+
 
 def test_torch_tensor_info_maps_dtype_and_device():
     info = array_info(_TorchTensorAttributes())
@@ -90,6 +99,7 @@ def test_torch_tensor_info_maps_dtype_and_device():
         element_size=2,
         data_ptr=4096,
         device=1,
+        backed_elements=56,
     )
     assert not info.is_contiguous()
 

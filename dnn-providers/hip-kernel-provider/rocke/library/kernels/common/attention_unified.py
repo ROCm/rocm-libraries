@@ -10,11 +10,14 @@ until every required primitive and correctness/perf path is present.
 
 from __future__ import annotations
 
+import sys
 from collections import OrderedDict
+from contextlib import ExitStack, nullcontext
 from dataclasses import dataclass, replace
 from threading import Lock, RLock
 from typing import Any, Callable, Dict, Optional, Sequence, Tuple
 
+import numpy as np
 from rocke.core.arch import validate_arch
 from rocke.core.ir import (
     BF16,
@@ -42,6 +45,9 @@ from rocke.runtime.launcher import (
     retain_for_stream,
     wait_stream_and_release,
 )
+from rocke.numeric.storage import element_type_of
+from rocke.runtime.device_array import array_info, device_workspace
+from rocke.runtime.torch_interop import is_torch_tensor
 
 from rocke.helpers.attention import (
     BINARY_SEARCH_FALLBACK_ITERS,
@@ -4646,15 +4652,13 @@ class Attention3DExecution:
         Caller-owned outer graphs and their capture streams require caller cleanup.
         Do not close concurrently with an outer capture using these bindings.
         """
-        import torch
-
         if not self._lock.acquire(blocking=False):
             raise RuntimeError("execution is already submitting work")
         try:
             if self._closed:
                 return
             if self._stream is not None:
-                with torch.cuda.device(self._device):
+                with _device_scope(self._device):
                     if _torch_stream_capturing():
                         raise RuntimeError("cannot close execution during capture")
                     wait_stream_and_release(self._stream)
@@ -4686,9 +4690,7 @@ def prepare_unified_attention_torch(**arguments: Any) -> Attention3DExecution:
         run_unified_attention_torch(**arguments, execution=execution)
         if execution._identity is None:
             raise ValueError("prepared execution requires a supported 3D path")
-        import torch
-
-        with torch.cuda.device(execution._device):
+        with _device_scope(execution._device):
             wait_stream_and_release(execution._stream)
         execution._arguments = dict(arguments)
         return execution
@@ -4699,13 +4701,11 @@ def prepare_unified_attention_torch(**arguments: Any) -> Attention3DExecution:
 
 def clear_attention_3d_graph_cache() -> None:
     """Drain internal graph streams before releasing their captured resources."""
-    import torch
-
     with _3D_GRAPH_LOCK:
         if _torch_stream_capturing():
             raise RuntimeError("cannot clear the graph cache during capture")
         for entry in _3D_GRAPHS.values():
-            with torch.cuda.device(entry.device):
+            with _device_scope(entry.device):
                 wait_stream_and_release(entry.stream)
         _3D_GRAPHS.clear()
 
@@ -4719,31 +4719,65 @@ class _Attention3DGraph:
 
 
 def _run_3d_tiled(*, q, stream: int = 0, execution=None, **kwargs):
-    """Keep allocation and complete pair submission on the owner's stream."""
-    import torch
-    from rocke.runtime.torch_interop import resolve_stream
+    """Keep allocation and complete pair submission on the owner's stream.
 
-    # An outer capture owns its active stream. The prepared eager stream is
-    # retained only as geometry identity; captures never use its workspace.
-    if execution is not None and _torch_stream_capturing():
-        stream = int(torch.cuda.current_stream(q.device).cuda_stream)
+    For torch tensors that is a torch stream on Q's device (``stream=0`` picks
+    torch's current one), so torch's allocator sees the scratch's stream. Other
+    arrays launch on the HIP stream ``stream`` as given."""
+    if is_torch_tensor(q):
+        stream = _torch_owner_stream(q, stream, prepared=execution is not None)
     else:
-        stream = resolve_stream(stream, device=q.device)
+        stream = int(stream)
     if execution is not None and not execution._lock.acquire(blocking=False):
         # Reject reentrant/concurrent submission instead of interleaving pairs.
         raise RuntimeError("execution is already submitting work")
     try:
         if execution is not None and execution._closed:
             raise RuntimeError("execution is closed")
-        with torch.cuda.device(q.device), torch.cuda.stream(
-            torch.cuda.ExternalStream(stream, device=q.device)
-        ):
+        with _stream_scope(q, stream):
             return _run_3d_tiled_on_stream(
                 q=q, stream=stream, execution=execution, **kwargs
             )
     finally:
         if execution is not None:
             execution._lock.release()
+
+
+def _torch_owner_stream(q, stream: int, *, prepared: bool) -> int:
+    """The torch stream a launch on torch tensors uses."""
+    import torch
+    from rocke.runtime.torch_interop import resolve_stream
+
+    # An outer capture owns its active stream. The prepared eager stream is
+    # retained only as geometry identity; captures never use its workspace.
+    if prepared and _torch_stream_capturing():
+        return int(torch.cuda.current_stream(q.device).cuda_stream)
+    return resolve_stream(stream, device=q.device)
+
+
+def _stream_scope(q, stream: int):
+    """Make ``stream`` on Q's device torch's current stream for torch tensors, so
+    workspaces torch allocates are ordered on it; nothing for other arrays."""
+    if not is_torch_tensor(q):
+        return nullcontext()
+    import torch
+
+    scope = ExitStack()
+    scope.enter_context(torch.cuda.device(q.device))
+    scope.enter_context(
+        torch.cuda.stream(torch.cuda.ExternalStream(stream, device=q.device))
+    )
+    return scope
+
+
+def _device_scope(device):
+    """Torch's device context for a torch device; nothing for a HIP ordinal (the
+    device of a non-torch array)."""
+    if not is_torch_tensor(device):
+        return nullcontext()
+    import torch
+
+    return torch.cuda.device(device)
 
 
 def _run_3d_tiled_on_stream(
@@ -4853,7 +4887,13 @@ def _run_3d_tiled_on_stream(
             raise ValueError(
                 "execution geometry, layout, device or stream changed; prepare again"
             )
-    if use_graph and _enable_3d_graph_replay(problem, _launch_arch) and not capturing:
+    # Graph replay captures through torch, so it serves torch tensors only.
+    if (
+        use_graph
+        and is_torch_tensor(q)
+        and _enable_3d_graph_replay(problem, _launch_arch)
+        and not capturing
+    ):
         with _3D_GRAPH_LOCK:
             return _run_3d_graph(
                 problem=problem,
@@ -4895,13 +4935,11 @@ def _run_3d_tiled_on_stream(
         tuning_spec=tuning_spec,
         strided_kv=kv_cache_layout is not None,
     )
-    import torch
-
     # External and internal captures own separate graph-private allocation.
     # Eager reuse is safe only under the owner's whole-pair submission lock.
     if execution is None or capturing or execution._workspace is None:
         workspace = tuple(
-            torch.empty(spec.shape, dtype=spec.dtype, device=spec.device)
+            device_workspace(spec.shape, element_type_of(spec.dtype), like=q)
             for spec in _attention_3d_workspace_specs(problem, num_segments, q.device)
         )
         if execution is not None and not capturing:
@@ -4912,9 +4950,9 @@ def _run_3d_tiled_on_stream(
         capture_refs.extend(workspace)
     segm_output, segm_max, segm_expsum = workspace
     if _launch_arch == "gfx1250":
-        segm_max.fill_(-1e30)
-        segm_expsum.zero_()
-        segm_output.zero_()
+        _fill_workspace(segm_max, -1e30)
+        _fill_workspace(segm_expsum, 0.0)
+        _fill_workspace(segm_output, 0.0)
 
     _require_additive_bias(problem, additive_bias)
     seg_vals = {
@@ -5560,12 +5598,23 @@ def _run_2d_graphed(
 
 
 def _torch_stream_capturing() -> bool:
+    """Whether torch is capturing a graph on its current stream. Never imports
+    torch: a process that has not imported it has no torch capture to be in."""
+    torch = sys.modules.get("torch")
+    if torch is None:
+        return False
     try:
-        import torch
-
         return bool(torch.cuda.is_current_stream_capturing())
     except Exception:
         return False
+
+
+def _fill_workspace(workspace, value: float) -> None:
+    """Set every element of a 3D workspace array (see ``device_workspace``)."""
+    if is_torch_tensor(workspace):
+        workspace.fill_(value)
+    else:
+        workspace.write(np.full(workspace.shape, value, np.float32))
 
 
 def _attention_3d_workspace_specs(
@@ -5579,18 +5628,12 @@ def _attention_3d_workspace_specs(
     `lse_acc_ptr` + `o_acc_ptr` sizing in
     `example/ck_tile/01_fmha/fmha_fwd_runner.hpp`: all scratch shapes
     are derived from the problem up front and passed to the segment and reduce
-    kernels by pointer. The launcher allocates them per invocation; captured
-    allocations use Torch's graph-private pool.
+    kernels by pointer. The launcher allocates them per invocation, of the
+    caller's array kind (``device_workspace``); captured torch allocations use
+    torch's graph-private pool. The dtype is numpy's, so byte accounting needs
+    no torch.
     """
-    try:
-        import torch
-
-        f32 = torch.float32
-    except Exception:
-        # CPU-only/static tests can still ask for byte accounting without
-        # importing torch. WorkspacePool.required_nbytes understands this
-        # string fallback via `_dtype_element_size`.
-        f32 = "float32"
+    f32 = np.dtype(np.float32)
 
     return (
         WorkspaceSpec(
@@ -6153,10 +6196,11 @@ def _validate_additive_bias(
     That index must also fall inside the tensor's storage, which catches
     strides that do not match the tensor passed.
 
-    ``q_device`` is the launch's Q device; a mismatch would pack a pointer
-    from the wrong device and fault at launch rather than at this check.
-    Pass ``None`` to skip the device check (used by host-only validation
-    tests that have no Q tensor).
+    ``q_device`` is the launch's Q device (an ``ArrayInfo.device``); a mismatch
+    would pack a pointer from the wrong device and fault at launch rather than
+    at this check. Pass ``None`` to skip the device check (used by host-only
+    validation tests that have no Q array). ``additive_bias`` is anything
+    :func:`rocke.runtime.device_array.array_info` describes.
     """
     if not problem.use_additive_bias:
         if additive_bias is not None:
@@ -6165,17 +6209,18 @@ def _validate_additive_bias(
             )
         return 0
     _require_additive_bias(problem, additive_bias)
-    if str(additive_bias.dtype) != "torch.float32":
-        raise ValueError(f"additive_bias must be float32, got {additive_bias.dtype}")
-    if q_device is not None and additive_bias.device != q_device:
+    bias = array_info(additive_bias)
+    if bias.dtype != "fp32":
+        raise ValueError(f"additive_bias must be float32, got {bias.dtype}")
+    if q_device is not None and bias.device != q_device:
         raise ValueError(
             f"additive_bias must be on the same device as q, got "
-            f"{additive_bias.device} vs {q_device}"
+            f"{bias.device} vs {q_device}"
         )
-    if additive_bias.stride(-1) != 1:
+    if bias.strides[-1] != 1:
         raise ValueError(
             "additive_bias must be contiguous along Sk (stride(-1) == 1), "
-            f"got strides {tuple(additive_bias.stride())}"
+            f"got strides {bias.strides}"
         )
     if sq_stride is None:
         raise ValueError(
@@ -6208,16 +6253,12 @@ def _validate_additive_bias(
             "i32 bias addressing (< 2**31, i.e. 8 GiB of f32); broadcast a "
             "dimension (stride 0) or split the launch"
         )
-    # Strides are passed separately from the tensor, so a mismatch would read
-    # past its storage; check the reach against the elements actually backed.
-    avail = (
-        additive_bias.untyped_storage().nbytes() // additive_bias.element_size()
-        - additive_bias.storage_offset()
-    )
-    if max_idx >= avail:
+    # Strides are passed separately from the array, so a mismatch would read
+    # past its allocation; check the reach against the elements actually backed.
+    if max_idx >= bias.backed_elements:
         raise ValueError(
-            f"additive_bias strides reach element {max_idx} but the tensor "
-            f"only backs {avail} elements from its storage offset"
+            f"additive_bias strides reach element {max_idx} but the array "
+            f"only backs {bias.backed_elements} elements from its start"
         )
     return sq_stride
 
@@ -6255,7 +6296,14 @@ def run_unified_attention_torch(
     use_graph: bool = True,
     lse=None,
 ):
-    """Launch a CK DSL attention kernel on torch tensors.
+    """Launch a CK DSL attention kernel on caller-owned device arrays.
+
+    Every array argument is anything
+    :func:`rocke.runtime.device_array.array_info` describes: a torch tensor or a
+    :class:`rocke.runtime.device_array.DeviceArray`. Scratch is allocated of
+    the same kind as ``q``. Graph replay (the gfx942 2D and the opt-in 3D
+    replay) captures through torch, so it serves torch tensors only; other
+    arrays launch eagerly.
 
     ``kv_layout="strided"`` adapts non-paged K/V tensors with logical shape
     [B,Hkv,capacity,D] to the existing split-KV pipeline on gfx942/gfx950.
@@ -6286,14 +6334,14 @@ def run_unified_attention_torch(
     Strided-KV decode (``kv_layout="strided"``) does not support it.
 
     ``stream`` is the HIP stream handle (an `int`) to launch on. In the 3D
-    path, zero selects Torch's current stream on Q's device. Scratch allocation,
-    initialization and both launches use that stream. Eager calls own separate
+    path with torch tensors, zero selects Torch's current stream on Q's device.
+    Scratch allocation, initialization and both launches use that stream. Eager calls own separate
     scratch unless an execution owner is supplied. Captures use graph-private
     scratch; ``use_graph=False`` disables internal 3D replay.
     Warm up compilation before enclosing calls in ``torch.cuda.graph``.
 
     ``lse`` is the optional caller-owned natural-log softmax normalizer, a
-    contiguous FP32 ``[total_q, num_query_heads, 1]`` tensor, written only when
+    contiguous FP32 ``[total_q, num_query_heads, 1]`` array, written only when
     ``problem.emit_lse`` is set. The gfx942/gfx950 split-KV (3D) and tiled 2D
     paths write it (an LSE request skips the gfx942 2D graph replay and the
     4-warp GQA builder); the scalar path, sinks and other arches raise
@@ -6359,7 +6407,9 @@ def run_unified_attention_torch(
     # as such rather than as a bias-argument error. Bias-free paths do not need
     # tensor metadata here; when bias is enabled, keep strict device access so a
     # malformed non-None Q cannot bypass the same-device launch check.
-    q_device = q.device if problem.use_additive_bias and q is not None else None
+    q_device = (
+        array_info(q).device if problem.use_additive_bias and q is not None else None
+    )
     additive_bias_sq_stride = _validate_additive_bias(
         problem,
         additive_bias,
@@ -6417,33 +6467,38 @@ def run_unified_attention_torch(
         if problem.max_seqlen_k > capacity:
             raise ValueError("maximum valid KV length exceeds allocation capacity")
         expected_q = (batch, problem.num_query_heads, dim)
-        expected_dtype = (
-            "torch.float16" if problem.dtype == "fp16" else "torch.bfloat16"
-        )
-        if tuple(q.shape) != expected_q or tuple(out.shape) != expected_q:
+        q_info, out_info = array_info(q), array_info(out)
+        lengths, offsets = array_info(seqused_k), array_info(cu_seqlens_q)
+        if q_info.shape != expected_q or out_info.shape != expected_q:
             raise ValueError("strided decode Q/O must have shape [B,Hq,D]")
-        if not q.is_contiguous() or not out.is_contiguous():
+        if not q_info.is_contiguous() or not out_info.is_contiguous():
             raise ValueError("strided decode Q/O must be contiguous")
-        if not q.is_cuda:
-            raise ValueError("strided decode requires device tensors")
-        if any(int(t.data_ptr()) % 16 for t in (q, out)):
+        if q_info.device is None:
+            raise ValueError("strided decode requires device arrays")
+        if any(info.data_ptr % 16 for info in (q_info, out_info)):
             raise ValueError("strided decode Q/O must be 16-byte aligned")
-        if any(str(t.dtype) != expected_dtype for t in (q, k, v, out)):
+        if any(
+            info.dtype != problem.dtype
+            for info in (q_info, array_info(k), array_info(v), out_info)
+        ):
             raise ValueError("strided decode Q/K/V/O dtype must match the problem")
-        if any(t.device != q.device for t in (k, v, out, seqused_k, cu_seqlens_q)):
+        if any(
+            info.device != q_info.device
+            for info in (array_info(k), array_info(v), out_info, lengths, offsets)
+        ):
             raise ValueError("strided decode inputs must be on the same device")
         if (
-            str(seqused_k.dtype) != "torch.int32"
-            or tuple(seqused_k.shape) != (batch,)
-            or not seqused_k.is_contiguous()
+            lengths.dtype != "i32"
+            or lengths.shape != (batch,)
+            or not lengths.is_contiguous()
         ):
-            raise ValueError("KV lengths must be a contiguous int32 [B] tensor")
+            raise ValueError("KV lengths must be a contiguous int32 [B] array")
         if (
-            str(cu_seqlens_q.dtype) != "torch.int32"
-            or tuple(cu_seqlens_q.shape) != (batch + 1,)
-            or not cu_seqlens_q.is_contiguous()
+            offsets.dtype != "i32"
+            or offsets.shape != (batch + 1,)
+            or not offsets.is_contiguous()
         ):
-            raise ValueError("query offsets must be a contiguous int32 [B+1] tensor")
+            raise ValueError("query offsets must be a contiguous int32 [B+1] array")
         # Caller-owned device metadata: lengths are in [0, max_seqlen_k], and
         # query offsets are [0, 1, ..., B]. No host read/synchronization here.
         ok, why = _explicit_path_supported(problem, tuning_spec, "3d", _launch_arch)
@@ -6619,6 +6674,7 @@ def run_unified_attention_torch(
         if (
             tuning_spec is None
             and not problem.emit_lse
+            and is_torch_tensor(q)
             and _enable_2d_graph_replay(problem, _launch_arch)
             and not _torch_stream_capturing()
         ):

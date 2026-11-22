@@ -454,13 +454,30 @@ class TestFp8DenseGuards(unittest.TestCase):
         # runner must reject a bf16 or FNUZ K/V for an fp8 spec too, before any
         # launch -- otherwise the OCP-declared pointers read the wrong encoding.
         # The runner reads only the arrays' descriptions here, so host-only
-        # stand-ins keep this on the CPU lane: a bf16 array, and a FNUZ torch
-        # tensor (which has no rocKE element type).
+        # stand-ins keep this on the CPU lane: a bf16 array, and the attributes
+        # of a FNUZ torch tensor (only torch holds FNUZ fp8).
         from kernels.gfx950.attention_dense import run_attention_dense_torch
 
         class _FnuzTorchTensor:
             __module__ = "torch"
             dtype = "torch.float8_e4m3fnuz"
+            device = SimpleNamespace(type="cuda", index=0)
+            shape = (1,)
+
+            def stride(self):
+                return (1,)
+
+            def element_size(self):
+                return 1
+
+            def data_ptr(self):
+                return 4096
+
+            def untyped_storage(self):
+                return SimpleNamespace(nbytes=lambda: 1)
+
+            def storage_offset(self):
+                return 0
 
         spec = self._fp8_grid_spec()[1].kernel_spec
         for kv in (HostArray((1,), "bf16"), _FnuzTorchTensor()):

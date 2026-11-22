@@ -8,9 +8,10 @@ through the same hipModule path as `run_manifest`, without host staging.
 This module holds `resolve_stream` (substitute torch's current stream so
 its caching allocator stays coherent -- degrades to the HIP null stream
 when torch is absent, so the numpy/manifest hip-only path calls it too),
-`empty_workspace`, `torch_dtype`, `device_tensor`, the torch sides of
-:mod:`rocke.runtime.device_array` (`torch_array_info`, `torch_host_values`,
-`torch_empty`), and the `launch_torch_kernel` back-compat shim.
+`empty_workspace`, `torch_dtype`, `device_tensor`, `is_torch_tensor`, the
+torch sides of :mod:`rocke.runtime.device_array` (`torch_array_info`,
+`torch_host_values`, `torch_empty`), and the `launch_torch_kernel` back-compat
+shim.
 
 Kernel-argument packing is torch-agnostic and lives in `packing.py`; this
 module builds on it.
@@ -21,6 +22,8 @@ from __future__ import annotations
 import sys
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Mapping, Optional, Sequence, Tuple
+
+import numpy as np
 
 from ..numeric.storage import host_dtype
 
@@ -40,6 +43,12 @@ def _require_torch():
     except Exception as e:  # pragma: no cover - environment dependent
         raise RuntimeError("rocke.runtime.torch_interop requires torch") from e
     return torch
+
+
+def is_torch_tensor(value: object) -> bool:
+    """Whether ``value`` is a torch object, judged by its type's module so torch
+    is never imported to answer."""
+    return type(value).__module__.split(".", 1)[0] == "torch"
 
 
 def resolve_stream(stream, device=None) -> int:
@@ -116,6 +125,8 @@ _TORCH_ELEMENT_TYPE = {
     "torch.float64": "fp64",
     "torch.float8_e4m3fn": "fp8e4m3",
     "torch.float8_e5m2": "bf8e5m2",
+    "torch.float8_e4m3fnuz": "fp8e4m3fnuz",
+    "torch.float8_e5m2fnuz": "bf8e5m2fnuz",
     "torch.int8": "i8",
     "torch.int16": "i16",
     "torch.int32": "i32",
@@ -129,8 +140,8 @@ def torch_array_info(tensor: Any) -> ArrayInfo:
     """The :class:`rocke.runtime.device_array.ArrayInfo` of a torch tensor.
 
     Reads only tensor attributes, so it never imports torch. ``device`` is the
-    CUDA/HIP ordinal, or ``None`` for a CPU tensor. The FNUZ fp8 types have no
-    rocKE element type here yet and are refused."""
+    CUDA/HIP ordinal, or ``None`` for a CPU tensor. The FNUZ fp8 types are named
+    by their storage encodings (see :class:`ArrayInfo`)."""
     from .device_array import ArrayInfo
 
     name = str(tensor.dtype)
@@ -147,6 +158,9 @@ def torch_array_info(tensor: Any) -> ArrayInfo:
         element_size=int(tensor.element_size()),
         data_ptr=int(tensor.data_ptr()),
         device=int(device.index or 0) if device.type == "cuda" else None,
+        backed_elements=int(tensor.untyped_storage().nbytes())
+        // int(tensor.element_size())
+        - int(tensor.storage_offset()),
     )
 
 
@@ -166,13 +180,18 @@ def torch_host_values(tensor: Any):
     of :func:`rocke.runtime.device_array.host_values`).
 
     Copied by ``Tensor.cpu()``, so ordered on torch's current stream. Element
-    types numpy has no type for (bf16, fp8) come back as raw bits of the same
-    width. Only reached with a live tensor, so torch is already imported."""
+    types numpy has no type for (bf16, fp8, FNUZ fp8) come back as raw bits of
+    the same width. Only reached with a live tensor, so torch is already
+    imported."""
     info = torch_array_info(tensor)
     torch = sys.modules["torch"]
     flat = tensor.detach().contiguous().cpu().reshape(-1)
     raw = flat.view(torch.uint8).numpy()
-    return raw.view(host_dtype(info.dtype)).reshape(info.shape)
+    try:
+        values_dtype = host_dtype(info.dtype)
+    except ValueError:  # a FNUZ storage encoding: raw bits
+        values_dtype = np.dtype(f"u{info.element_size}")
+    return raw.view(values_dtype).reshape(info.shape)
 
 
 def torch_empty(shape: Sequence[int], element_type: str, *, device: Any):

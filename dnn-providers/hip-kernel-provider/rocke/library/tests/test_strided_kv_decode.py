@@ -522,6 +522,24 @@ def test_dense_decode_binding_rejects_bad_tensors(mutate, match):
         result.candidate.bind_torch(result.request, result.spec, tensors)
 
 
+def test_dense_decode_binding_refuses_arrays_it_cannot_view():
+    """The dense-layout adapter reshapes torch tensor views; another array kind
+    is refused with the strided-layout alternative named, before any launch."""
+    from dispatch.attention import dispatch_attention
+    from rocke.tests.host_arrays import HostArray
+
+    req = _dense_decode_request("gfx950", tensor_layout="bshd")
+    result = dispatch_attention(req)
+    tensors = {
+        "q": HostArray((3, 1, 8, 128), "bf16"),
+        "k": HostArray((3, 65, 2, 128), "bf16"),
+        "v": HostArray((3, 65, 2, 128), "bf16"),
+        "out": HostArray((3, 1, 8, 128), "bf16"),
+    }
+    with pytest.raises(TypeError, match="request kv_layout='strided'"):
+        result.candidate.bind_torch(result.request, result.spec, tensors)
+
+
 @pytest.mark.parametrize("arch", ["gfx1250", "gfx1151", "gfx90a"])
 def test_strided_spec_policy_rejects_other_arches(arch):
     from dispatch.attention.common import attention_problem
@@ -705,7 +723,8 @@ def test_additive_bias_does_not_normalize_q_without_device(
     _, _, tensors = strided_binding_case
     tensors["problem"] = replace(tensors["problem"], use_additive_bias=True)
     monkeypatch.setattr(au, "_resolve_attention_arch", lambda: "gfx942")
-    with pytest.raises(AttributeError, match="device"):
+    # A Q that is not a device array is refused, not let past the device check.
+    with pytest.raises(TypeError, match="array_info failed - array=object"):
         au.run_unified_attention_torch(
             **tensors,
             block_table=None,
