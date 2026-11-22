@@ -873,7 +873,7 @@ struct FmhaDecodePaged5dKernel
                 *ptr_as<float2>(a.ws_ml + (part0 + s * kRows + row) * 2) =
                     make_float2(m_row, l_row);
             asm volatile("s_wait_storecnt 0x0" ::: "memory");
-            __builtin_amdgcn_s_cluster_barrier();
+            cluster_barrier();
             asm volatile("global_inv scope:SCOPE_SE" ::: "memory");
 
             // merge the splits: split s takes rows [s*kRowsPer, +kRowsPer); thread -> (row, 2 dims)
@@ -1019,9 +1019,9 @@ struct FmhaDecodePaged5dKernel
 };
 
 // Up to 15 splits the cluster size is a compile-time attribute: HIP stream capture drops a cluster
-// size given to hipLaunchKernelEx only, so a captured graph would run without clusters. Device
-// passes for other architectures reject the attribute; their kernel is empty anyway.
-#if !defined(__HIP_DEVICE_COMPILE__) || defined(__gfx125__)
+// size given to hipLaunchKernelEx only, so a captured graph would run without clusters. Only
+// builds for gfx125 take the attribute; elsewhere the kernel is empty.
+#if CK_TILE_ENABLE_CLUSTER_LAUNCH
 #define CK_TILE_FMHA_DECODE_PAGED5D_CLUSTER(n) __attribute__((cluster_dims(n, 1, 1)))
 #else
 #define CK_TILE_FMHA_DECODE_PAGED5D_CLUSTER(n)
