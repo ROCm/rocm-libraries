@@ -53,15 +53,8 @@ import unittest.mock
 from dataclasses import dataclass, replace
 
 import numpy as np
+from rocke.runtime.hip_module import get_device_arch
 
-try:
-    # Optional. When torch is installed its bundled HIP runtime must load
-    # before rocke's launcher does; otherwise the launcher pulls in a second
-    # libamdhip64 and torch.cuda reports no GPUs for every later test in this
-    # pytest process.
-    import torch  # noqa: F401
-except ImportError:
-    pass
 from kernels.common.conv_direct_grouped import (
     DW_DGRAD_MFMA_CH,
     DW_DGRAD_WIN_MAX_UNROLL,
@@ -71,7 +64,6 @@ from kernels.common.conv_direct_grouped import (
     direct_launch_geometry,
     is_valid_depthwise_dgrad_win_spec,
 )
-from rocke.runtime.hip_module import get_device_arch
 
 GPU_ARCH = get_device_arch(0)
 _TOL = 1e-2

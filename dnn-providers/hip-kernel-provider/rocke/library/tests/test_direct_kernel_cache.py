@@ -1765,17 +1765,10 @@ def test_small_c_depthwise_wgrad_binary_bakes_its_channel_count(cache):
     )
 
 
-def _need_benchmark_direct_conv():
-    """benchmark_direct_conv imports torch at module level (its conv
-    references); the host-only CI venv that runs this file has none."""
-    pytest.importorskip("torch")
-
-
 def test_run_from_cache_variants_filter():
     """``--variants`` names cache variants (DIRECT_CAPABILITIES keys)."""
     from types import SimpleNamespace
 
-    _need_benchmark_direct_conv()
     from benchmarks.common.benchmark_direct_conv import _cache_variants
 
     assert _cache_variants(SimpleNamespace(variants=None)) == frozenset()
@@ -1794,7 +1787,6 @@ def test_run_from_cache_variants_filter_can_leave_nothing():
     index error or a missing cache build."""
     from types import SimpleNamespace
 
-    _need_benchmark_direct_conv()
     from benchmarks.common.benchmark_direct_conv import (
         _filter_variants,
         _no_plan_reason,
@@ -1823,7 +1815,6 @@ def test_run_from_cache_variants_filter_can_leave_nothing():
 def test_run_from_cache_batch_chunks_are_balanced():
     """A problem past the 2 GiB activation limit runs as the fewest balanced
     chunks, which need not divide N; each launch binds its own slice."""
-    _need_benchmark_direct_conv()
     from benchmarks.common.benchmark_direct_conv import (
         _TENSOR_LIMIT,
         _batch_chunks,
@@ -1863,7 +1854,6 @@ def test_run_from_cache_wgrad_chunks_accumulate_into_one_dw():
     plans that accumulate into dW (no fold, reduce or scratch) are offered."""
     from types import SimpleNamespace
 
-    _need_benchmark_direct_conv()
     from benchmarks.common.benchmark_direct_conv import (
         _accumulates_dw,
         _chunk_buffers,
@@ -1916,7 +1906,6 @@ def test_measure_plans_skips_a_plan_whose_kernargs_do_not_fit(monkeypatch, capsy
     import struct
     from types import SimpleNamespace
 
-    _need_benchmark_direct_conv()
     from benchmarks.common import benchmark_direct_conv as bdc
 
     monkeypatch.setattr(dks, "launch_values", lambda st, ptrs, sizes: {"A": 0})
@@ -1981,7 +1970,6 @@ def test_run_from_cache_plans_each_chunk_size():
     serve every chunk are offered, each launch with its chunk's plan."""
     from types import SimpleNamespace
 
-    _need_benchmark_direct_conv()
     from benchmarks.common.benchmark_direct_conv import _chunk_plans
 
     seen = []
@@ -2014,7 +2002,6 @@ def test_compile_all_refuses_variants_before_checking_them(capsys):
     the names are valid: --variants only filters --run-from-cache."""
     from types import SimpleNamespace
 
-    _need_benchmark_direct_conv()
     from benchmarks.common.benchmark_direct_conv import _cache_dispatch
 
     for names in ("direct_grouped_dgrad_4c", "bogus"):

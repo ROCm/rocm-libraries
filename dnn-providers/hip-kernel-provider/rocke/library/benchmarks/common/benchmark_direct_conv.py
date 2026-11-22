@@ -2385,7 +2385,6 @@ def _measure_plans(
     ``ref_floor`` floors the reference peak of the verify error
     (:func:`conv_fill.ref_floor` of the case's direction).
     """
-    import torch
     from benchmarks.common.direct_kernel_sweep import launch_values
     from rocke.runtime import synchronize_and_release
     from rocke.runtime.hip_module import HipError
@@ -2438,6 +2437,7 @@ def _measure_plans(
     def verify(plan, run) -> bool:
         """Peak-normalised rel-err of one plan against the case's reference."""
         nonlocal rc
+        import torch  # only a verified run holds torch tensors
 
         rt.memset(ptrs[out_name], 0, Out_t.nbytes)
         # Two-stage wgrad scratch accumulates too: zeroed again for the

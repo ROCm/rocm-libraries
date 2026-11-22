@@ -46,7 +46,6 @@ _CMD = "MIOpenDriver {kw} -n 2 -c 64 -H 28 -W 28 -k 64 -y 3 -x 3 -p 1 -q 1 -u 1 
 
 @pytest.fixture(scope="module")
 def parse():
-    pytest.importorskip("torch")  # the benchmark module imports the reference
     from benchmarks.common.benchmark_direct_conv import parse_miopen_cmd_direct
 
     return parse_miopen_cmd_direct
@@ -139,13 +138,18 @@ def test_unknown_dtype_is_refused(dtype):
 
 
 def test_torch_dtype_map():
-    torch = pytest.importorskip("torch")
+    """The benchmark's torch host dtype is the storage dtype (fp32 for tf32).
+    ``_torch_dtype_of`` reads the dtypes off the module its caller passes, so
+    a module with just those three attributes shows the map without torch."""
+    from types import SimpleNamespace
+
     from benchmarks.common.benchmark_direct_conv import _abi_dtype, _torch_dtype_of
 
-    assert _torch_dtype_of(torch, "fp16") is torch.float16
-    assert _torch_dtype_of(torch, "bf16") is torch.bfloat16
-    assert _torch_dtype_of(torch, "fp32") is torch.float32
-    assert _torch_dtype_of(torch, "tf32") is torch.float32
+    module = SimpleNamespace(float16="float16", bfloat16="bfloat16", float32="float32")
+    assert _torch_dtype_of(module, "fp16") == "float16"
+    assert _torch_dtype_of(module, "bf16") == "bfloat16"
+    assert _torch_dtype_of(module, "fp32") == "float32"
+    assert _torch_dtype_of(module, "tf32") == "float32"
     assert _abi_dtype("tf32") == "fp32"
 
 
@@ -661,7 +665,6 @@ def test_plans_serve_only_their_dtype(mixed_cache, direction, shape, dtype):
 
 
 def test_best_ranks_only_verified_kernels(capsys):
-    pytest.importorskip("torch")
     from benchmarks.common.benchmark_direct_conv import _rank_verified
 
     results = [

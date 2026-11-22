@@ -28,7 +28,6 @@ numpy is the only hard dependency; no torch.
 from __future__ import annotations
 
 import ctypes
-import importlib.util
 import os
 import re
 import tempfile
@@ -36,15 +35,6 @@ import unittest
 from pathlib import Path
 
 import numpy as np
-
-if importlib.util.find_spec("torch") is not None:
-    # This file does not use torch, but other test files in the same pytest
-    # process do: torch's HIP runtime has to claim the process context before
-    # rocke's does (see test_direct_conv_correctness.py).
-    import torch
-
-    torch.cuda.is_available()
-
 from rocke.runtime.hip_module import get_device_arch
 
 GPU_ARCH = get_device_arch(0)
