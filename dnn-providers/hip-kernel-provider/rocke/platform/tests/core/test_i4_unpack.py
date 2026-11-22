@@ -26,7 +26,7 @@ from rocke.tests.gpu import run_on_device
 
 # The arches this test has run on. Every arch executes these integer and
 # conversion instructions; add an arch here once the test has run green on it.
-_RUN_ARCHES = ("gfx90a", "gfx950")
+_RUN_ARCHES = ("gfx90a", "gfx942", "gfx950")
 
 _BYTES = np.arange(256, dtype=np.uint8)
 

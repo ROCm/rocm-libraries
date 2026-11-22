@@ -45,7 +45,7 @@ from rocke.instances.common.moe_sorting import (
 from rocke.tests.gpu import current_device_arch_in, launch_with_buffers
 
 # The arches this test has run green on; add one once it has.
-_RUN_ARCHES = ("gfx90a", "gfx950")
+_RUN_ARCHES = ("gfx90a", "gfx942", "gfx950")
 
 _SPECS = [
     # Decode-sized: 16 pairs over 64 experts, so most experts get none.

@@ -28,7 +28,7 @@ from rocke.instances.common.permute_nd import (
 from rocke.tests.gpu import current_device_arch_in, launch_with_buffers
 
 # The arches this test has run green on; add one once it has.
-_RUN_ARCHES = ("gfx90a", "gfx950")
+_RUN_ARCHES = ("gfx90a", "gfx942", "gfx950")
 
 _SPECS = [
     # Innermost axis kept: vector widths 8, 4 and 2.

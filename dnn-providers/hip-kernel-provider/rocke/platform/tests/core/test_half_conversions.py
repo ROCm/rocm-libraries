@@ -36,7 +36,7 @@ from rocke.tests.ieee_compare import assert_ieee_identical
 # The arches this test has run on (gfx950 narrows to bf16 with
 # v_cvt_pk_bf16_f32, gfx90a in integer instructions, so the two round
 # differently). Add an arch here once the test has run green on it.
-_RUN_ARCHES = ("gfx90a", "gfx950")
+_RUN_ARCHES = ("gfx90a", "gfx942", "gfx950")
 
 _F16_MAX = float(np.finfo(np.float16).max)  # 65504, significand 0x3ff (odd)
 _F16_TINY = 2.0**-24  # the smallest f16 subnormal

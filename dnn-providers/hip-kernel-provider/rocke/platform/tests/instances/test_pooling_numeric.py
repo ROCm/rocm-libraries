@@ -37,7 +37,7 @@ from rocke.numeric import storage
 from rocke.tests.gpu import current_device_arch_in, launch_with_buffers
 
 # The arches this test has run green on; add an arch once it has.
-_RUN_ARCHES = ("gfx90a", "gfx950")
+_RUN_ARCHES = ("gfx90a", "gfx942", "gfx950")
 
 # One f32-accumulated reduction then one rounding to the I/O dtype: within one
 # unit in the last place of the result (relative 2**-10 for fp16, 2**-7 for

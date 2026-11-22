@@ -49,7 +49,7 @@ from rocke.numeric import storage
 from rocke.tests.gpu import current_device_arch_in, launch_with_buffers
 
 # The arches this test has run green on; add an arch once it has.
-_RUN_ARCHES = ("gfx90a", "gfx950")
+_RUN_ARCHES = ("gfx90a", "gfx942", "gfx950")
 
 # Input bounds that keep every value exact: fp16 holds every integer up to 2048
 # and bf16 up to 256. With |A|, |B| <= the bound, K <= 64 and |D| <= 4, every
