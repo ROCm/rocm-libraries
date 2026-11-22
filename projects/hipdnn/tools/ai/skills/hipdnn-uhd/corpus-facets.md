@@ -64,13 +64,20 @@ from the set is a regime the report cannot warn about.
 An enum parameter may declare `weights` (value -> relative weight; unlisted values weigh 1): a
 combination's share of the sweep scales with the product of its values' weights, raked over the
 combinations that can hold a problem (the excluded pairings above do not take a share), and the
-cut to `--count` keeps those shares: each combination's part of the cut is proportional to the
-same product, an unweighted parameter's values counting equally. The SDPA files weight `layout`,
+cut to `--count` keeps those shares: each combination's part of the cut is proportional to its
+raked size, with every unweighted enum and bool parameter's values at equal shares. Where the
+declared constraints tie an unweighted parameter's values to others' (in `sdpa_bwd` only a
+causal mask has a bottom-right anchor, so equal `alignment` and `is_causal` shares would leave
+no causal top-left graph), equal shares would leave some combination with almost no rows; that
+parameter is kept as the first pass left it, the run says so on stderr, and every combination
+keeps its place in the cut. A declaration that weights
+nothing is cut in proportion to what its first pass holds. The SDPA files weight `layout`,
 `scale` and, on `sdpa_fwd`, `window`, keeping the common configuration (BSHD, `1/sqrt(head_dim)`,
-no window) at about half of each facet of the sweep, at any `--count`. The weights shape the
-sweep and its cut only: recorded model shapes (`--model-shapes`) and kernel-catalog entries
-(`--kdp-root`) are kept as recorded. Each is a real configuration whose facets are what they are
-(a pack's from its `kernel_catalog.constants`, a shape file's from its columns or the
+no window) at about half of each facet of the sweep from about `--count 300` up; a shorter cut
+cannot place a share that fine (no window is 0.42 of `sdpa_fwd` at `--count 100`). The weights
+shape the sweep and its cut only: recorded model shapes (`--model-shapes`) and kernel-catalog
+entries (`--kdp-root`) are kept as recorded. Each is a real configuration whose facets are what
+they are (a pack's from its `kernel_catalog.constants`, a shape file's from its columns or the
 `model_shape_defaults` below), and moving them to the declared mixture would misstate what was
 recorded, so a set with a large model or kernel share holds the common configuration more often
 than the declared weights say.
@@ -92,8 +99,10 @@ forms are declared with one scale (`scale_unset`, `scale_tensor`: `inv_sqrt_d` o
 layout (`ragged`: `bshd` only), so fewer combinations can hold a problem. With `--count` the cut
 takes each form evenly, as far as the first pass holds it: `sdpa_fwd` at `--count 2000` comes
 out at about an eighth each, while `sdpa_bwd` holds only about 220 rows each of `scale_unset`
-and `scale_tensor`, so at 2000 they get about 9% each against about 20% for the other four
-forms. `--form-floor` tops each form up to its count regardless.
+and `scale_tensor`, all of which a 2000 cut takes (about 11% each, against about 19.5% for each
+of the other four forms). Those two forms state only `1/sqrt(head_dim)`, so with them used up
+its share of `sdpa_bwd` at `--count 2000` is about 0.44. `--form-floor` tops each form up to its
+count regardless.
 
 Because the product of sdpa_fwd's facets (6912 combinations) is past the 1024 bound, the forward
 explores a scattered sample of the combinations that can hold a problem, every declared value

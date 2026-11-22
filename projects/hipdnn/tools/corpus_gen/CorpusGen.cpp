@@ -612,6 +612,32 @@ nlohmann::json deliveredAnchoredShare(const std::vector<hipdnn_corpus_gen::PoolE
         {"anchor_scaling", anchorScaling}};
 }
 
+/// Weighs the sweep's pool of @p pools for the cut (weighGroups) and says on stderr which
+/// unweighted parameters the declared constraints keep from equal shares.
+void weighSweep(hipdnn_corpus_gen::SourcePools& pools,
+                const hipdnn_corpus_gen::OperationMetadata& metadata,
+                const std::string& operation)
+{
+    const auto sweep = pools.find("sweep");
+    if(sweep == pools.end())
+    {
+        return;
+    }
+    const auto weighing = hipdnn_corpus_gen::weighGroups(sweep->second, metadata);
+    if(weighing.uneven.empty())
+    {
+        return;
+    }
+    std::string names;
+    for(const auto& name : weighing.uneven)
+    {
+        names += (names.empty() ? "" : ", ") + name;
+    }
+    std::cerr << operation << ": the declared constraints tie the values of " << names
+              << " to others', so the --count cut keeps them as the first pass left them, "
+                 "not at equal shares\n";
+}
+
 /// One line per operation searched against an engine: its queries, and their cost per query.
 void printQueryTiming(const std::string& operation,
                       const hipdnn_corpus_gen::OracleTiming& timing,
@@ -1613,11 +1639,9 @@ int runGenerator(const std::vector<std::string>& args)
 
         // A cut keeps the declared weights: the sweep's pool is cut by each categorical
         // combination's weight, not by what the first pass and the growth happened to leave.
-        // Recorded shapes (the model and kernel pools) are cut in proportion to what they hold.
-        if(const auto sweep = pools.find("sweep"); sweep != pools.end())
-        {
-            hipdnn_corpus_gen::weighGroups(sweep->second, metadata);
-        }
+        // A declaration with no weights, and recorded shapes (the model and kernel pools), are
+        // cut in proportion to what they hold.
+        weighSweep(pools, metadata, result.operation);
 
         std::map<std::string, int64_t> dropped;
         // One entry per graph: two points a builder renders identically (one differing only in

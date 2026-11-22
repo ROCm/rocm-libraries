@@ -456,15 +456,22 @@ inline bool excludedByCategoricals(const OperationMetadata& metadata,
 /// weights' shares, over the values that have any combination left, until all agree. The one
 /// definition the main search and the regime focus share, so both realise the declared shares.
 ///
-/// With @p evenUnweighted the values of every enum and bool parameter that declares no weights
-/// are raked too, each to an equal share, so that a value fewer combinations can hold (a form
-/// that the constraints leave in a few combinations) is not smaller than the others.
+/// The unweighted enum and bool parameters named in @p even are raked too, each value to an
+/// equal share, so that a value fewer combinations can hold (a form that the constraints leave
+/// in a few combinations) is not smaller than the others. When a constraint ties one value to
+/// another, the shares may be reachable only by taking some combinations to 0, which the raking
+/// approaches without reaching; @p converged (when given) is false then (see weighGroups).
 inline std::vector<double> combinationSizes(const OperationMetadata& metadata,
                                             const std::vector<ProblemPoint>& combinations,
-                                            bool evenUnweighted = false)
+                                            const std::set<std::string>& even = {},
+                                            bool* converged = nullptr)
 {
+    if(converged != nullptr)
+    {
+        *converged = true;
+    }
     std::vector<double> sizes(combinations.size(), 1.0);
-    const bool raked = evenUnweighted || anyWeighted(metadata.parameters);
+    const bool raked = !even.empty() || anyWeighted(metadata.parameters);
     size_t live = 0;
     for(size_t index = 0; index < combinations.size(); ++index)
     {
@@ -488,11 +495,12 @@ inline std::vector<double> combinationSizes(const OperationMetadata& metadata,
         return sizes;
     }
 
-    // The raked parameters: the weighted ones and, when asked, the other enums and bools.
+    // The raked parameters: the weighted ones and the unweighted ones named in `even`.
     std::vector<const Parameter*> raking;
     for(const auto& parameter : metadata.parameters)
     {
-        if(!parameter.weights.empty() || (evenUnweighted && !parameter.enumerable().empty()))
+        if(!parameter.weights.empty()
+           || (!parameter.enumerable().empty() && even.count(parameter.name) > 0))
         {
             raking.push_back(&parameter);
         }
@@ -521,9 +529,12 @@ inline std::vector<double> combinationSizes(const OperationMetadata& metadata,
         }
     };
     normalise();
+    // A raking that settles is the shares met; one still moving after the last round is
+    // approaching an unreachable boundary, a combination shrinking toward 0.
+    double change = 0.0;
     for(int round = 0; round < 200; ++round)
     {
-        double change = 0.0;
+        change = 0.0;
         for(const auto* parameter : raking)
         {
             std::map<std::string, double> mass;
@@ -570,6 +581,10 @@ inline std::vector<double> combinationSizes(const OperationMetadata& metadata,
         {
             break;
         }
+    }
+    if(converged != nullptr)
+    {
+        *converged = change < 1e-6;
     }
     return sizes;
 }

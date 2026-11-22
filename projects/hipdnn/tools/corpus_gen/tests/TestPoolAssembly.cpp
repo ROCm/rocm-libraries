@@ -7,6 +7,7 @@
 #include <gtest/gtest.h>
 
 #include <map>
+#include <optional>
 #include <set>
 #include <string>
 #include <vector>
@@ -431,7 +432,9 @@ TEST(TestPoolAssembly, TheGroupsOfAGeneratedPoolWeighTheirCombinationsAtTheDecla
             pool.push_back(entry);
         }
     }
-    weighGroups(pool, *load.metadata);
+    const auto weighing = weighGroups(pool, *load.metadata);
+    EXPECT_TRUE(weighing.weighed);
+    EXPECT_TRUE(weighing.uneven.empty());
 
     std::map<std::string, double> perValue;
     double total = 0.0;
@@ -447,6 +450,109 @@ TEST(TestPoolAssembly, TheGroupsOfAGeneratedPoolWeighTheirCombinationsAtTheDecla
     for(const auto* form : {"x", "y", "z"})
     {
         EXPECT_NEAR(perValue.at(std::string("form=") + form) / total, 1.0 / 3.0, 1e-6) << form;
+    }
+}
+
+namespace
+{
+
+/// A toy declaration with `fusion` and `mode` tied by a constraint (no fusion only with relu),
+/// `layout` weighted 3:1 when @p weighted, and the pool of every combination it admits.
+std::vector<PoolEntry> tiedPool(bool weighted, std::optional<OperationMetadata>& metadata)
+{
+    const std::string layout = weighted ? R"({ "type": "enum", "values": ["a", "b"],
+                                               "weights": {"a": 3, "b": 1} })"
+                                        : R"({ "type": "enum", "values": ["a", "b"] })";
+    const auto load = parseOperationMetadata(nlohmann::json::parse(R"({
+      "schema_version": "1.0",
+      "operation": "toy",
+      "parameters": {
+        "M":      { "type": "int64" },
+        "layout": )" + layout + R"(,
+        "fusion": { "type": "enum", "values": ["none", "add"] },
+        "mode":   { "type": "enum", "values": ["relu", "gelu"] }
+      },
+      "stratification_axis": "working_set",
+      "regimes": {},
+      "graph_builder": { "function": "createValidMatmulGraph", "source": "x.hpp",
+                         "arguments": [] },
+      "constraints": [ { "or": [ { "==": ["$q.fusion", "add"] },
+                                 { "==": ["$q.mode", "relu"] } ] } ]
+    })"));
+    EXPECT_TRUE(load.ok()) << (load.errors.empty() ? "" : load.errors.front());
+    metadata = load.metadata;
+
+    std::vector<PoolEntry> pool;
+    for(const auto* layoutValue : {"a", "b"})
+    {
+        for(const auto* fusion : {"none", "add"})
+        {
+            for(const auto* mode : {"relu", "gelu"})
+            {
+                if(std::string(fusion) == "none" && std::string(mode) == "gelu")
+                {
+                    continue;
+                }
+                auto entry = entryAt("sweep", static_cast<int64_t>(pool.size()), "");
+                entry.point["layout"] = std::string(layoutValue);
+                entry.point["fusion"] = std::string(fusion);
+                entry.point["mode"] = std::string(mode);
+                pool.push_back(entry);
+            }
+        }
+    }
+    return pool;
+}
+
+} // namespace
+
+TEST(TestPoolAssembly, AParameterWhoseEqualSharesWouldStarveACombinationIsLeftUneven)
+{
+    // Equal fusion and mode shares put all of `none` on relu, so relu could take no `add` row:
+    // (add, relu) would weigh about 0 and drop out of a cut. One of the two is left as the
+    // combinations carry it; the other still takes equal shares, and layout its weights.
+    std::optional<OperationMetadata> metadata;
+    auto pool = tiedPool(/*weighted=*/true, metadata);
+    ASSERT_TRUE(metadata.has_value());
+
+    const auto weighing = weighGroups(pool, *metadata);
+    EXPECT_TRUE(weighing.weighed);
+    ASSERT_EQ(weighing.uneven.size(), 1U);
+    const std::string kept = weighing.uneven.front() == "fusion" ? "mode" : "fusion";
+    EXPECT_TRUE(weighing.uneven.front() == "fusion" || weighing.uneven.front() == "mode");
+
+    double total = 0.0;
+    double layoutA = 0.0;
+    std::map<std::string, double> keptShares;
+    for(const auto& entry : pool)
+    {
+        total += entry.weight;
+        layoutA += std::get<std::string>(entry.point.at("layout")) == "a" ? entry.weight : 0.0;
+        keptShares[std::get<std::string>(entry.point.at(kept))] += entry.weight;
+    }
+    for(const auto& entry : pool)
+    {
+        EXPECT_GT(entry.weight, 0.25 * total / static_cast<double>(pool.size())) << entry.group;
+    }
+    EXPECT_NEAR(layoutA / total, 0.75, 1e-6);
+    for(const auto& [value, share] : keptShares)
+    {
+        EXPECT_NEAR(share / total, 0.5, 1e-6) << kept << "=" << value;
+    }
+}
+
+TEST(TestPoolAssembly, ADeclarationWithNoWeightsLeavesItsPoolCutByWhatItHolds)
+{
+    std::optional<OperationMetadata> metadata;
+    auto pool = tiedPool(/*weighted=*/false, metadata);
+    ASSERT_TRUE(metadata.has_value());
+
+    EXPECT_FALSE(weighGroups(pool, *metadata).weighed);
+
+    for(const auto& entry : pool)
+    {
+        EXPECT_TRUE(entry.group.empty());
+        EXPECT_EQ(entry.weight, 0.0);
     }
 }
 

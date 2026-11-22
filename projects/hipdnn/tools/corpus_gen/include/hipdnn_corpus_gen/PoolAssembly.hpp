@@ -195,14 +195,67 @@ inline SourcePools deduplicate(
     return unique;
 }
 
-/// Sets the group and weight of every entry of @p pool, so that a cut of the pool holds each
-/// categorical value at its declared share instead of at its share of what the pool happens to
-/// hold: a group is a categorical combination, weighing its size under combinationSizes with
-/// every enum and bool parameter's values at equal shares unless the declaration weights them.
-/// Only for pools of generated problems; recorded shapes (a model's, a kernel pack's) are what
-/// they are and are cut in proportion to what the pool holds.
-inline void weighGroups(std::vector<PoolEntry>& pool, const OperationMetadata& metadata)
+/// How weighGroups weighed a pool.
+struct GroupWeighing
 {
+    /// Groups were set: the declaration weights some parameter. Otherwise the pool is cut in
+    /// proportion to what it holds, as recorded shapes are.
+    bool weighed = false;
+
+    /// The unweighted enum and bool parameters left as the pool's combinations carry them, not
+    /// at equal shares: the declared constraints tie their values to others' (a causal mask
+    /// only with one anchor, say), so equal shares would starve whole combinations.
+    std::vector<std::string> uneven;
+};
+
+namespace detail
+{
+
+/// How far @p parameter's values are from equal shares of @p sizes over @p combinations: the
+/// largest gap between a value's share and an equal share, over the values that hold any.
+inline double gapFromEqualShares(const Parameter& parameter,
+                                 const std::vector<ProblemPoint>& combinations,
+                                 const std::vector<double>& sizes)
+{
+    std::map<std::string, double> mass;
+    double total = 0.0;
+    for(size_t index = 0; index < combinations.size(); ++index)
+    {
+        const auto found = combinations[index].find(parameter.name);
+        if(found != combinations[index].end() && sizes[index] > 0.0)
+        {
+            mass[describe({*found})] += sizes[index];
+            total += sizes[index];
+        }
+    }
+    double gap = 0.0;
+    for(const auto& [value, held] : mass)
+    {
+        gap = std::max(gap, std::abs(held / total - 1.0 / static_cast<double>(mass.size())));
+    }
+    return gap;
+}
+
+} // namespace detail
+
+/// Sets the group and weight of every entry of @p pool, so that a cut of the pool holds each
+/// weighted categorical value at its declared share instead of at its share of what the pool
+/// happens to hold: a group is a categorical combination, weighing its size under
+/// combinationSizes with every unweighted enum and bool parameter's values at equal shares.
+/// When equal shares are unreachable under the declared constraints (the raking approaches
+/// them only by taking some combination toward 0, and does not settle), the parameter furthest
+/// from them is left as the combinations carry it, one at a time until the raking settles, so
+/// no combination drops out of the cut. A declaration with no weights is left unweighed. Only
+/// for pools of generated problems; recorded shapes (a model's, a kernel pack's) are what they
+/// are and are cut in proportion to what the pool holds.
+inline GroupWeighing weighGroups(std::vector<PoolEntry>& pool, const OperationMetadata& metadata)
+{
+    GroupWeighing weighing;
+    if(!detail::anyWeighted(metadata.parameters))
+    {
+        return weighing;
+    }
+    weighing.weighed = true;
     std::map<std::string, size_t> index;
     std::vector<ProblemPoint> combinations;
     for(auto& entry : pool)
@@ -226,11 +279,43 @@ inline void weighGroups(std::vector<PoolEntry>& pool, const OperationMetadata& m
             combinations.push_back(std::move(combination));
         }
     }
-    const auto sizes = detail::combinationSizes(metadata, combinations, /*evenUnweighted=*/true);
+
+    std::set<std::string> even;
+    for(const auto& parameter : metadata.parameters)
+    {
+        if(parameter.weights.empty() && !parameter.enumerable().empty())
+        {
+            even.insert(parameter.name);
+        }
+    }
+    bool settled = false;
+    auto sizes = detail::combinationSizes(metadata, combinations, even, &settled);
+    while(!settled && !even.empty())
+    {
+        const Parameter* furthest = nullptr;
+        double gap = -1.0;
+        for(const auto& parameter : metadata.parameters)
+        {
+            if(even.count(parameter.name) == 0)
+            {
+                continue;
+            }
+            const auto own = detail::gapFromEqualShares(parameter, combinations, sizes);
+            if(own > gap)
+            {
+                gap = own;
+                furthest = &parameter;
+            }
+        }
+        even.erase(furthest->name);
+        weighing.uneven.push_back(furthest->name);
+        sizes = detail::combinationSizes(metadata, combinations, even, &settled);
+    }
     for(auto& entry : pool)
     {
         entry.weight = sizes[index.at(entry.group)];
     }
+    return weighing;
 }
 
 namespace detail
