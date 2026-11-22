@@ -1021,12 +1021,14 @@ for dt, atom in (("HALF", "wmma125_f16"), ("BFLOAT16", "wmma125_bf16")):
     # Reuse the 3x3 input halo across twice as many output channels per block.
     add(dt, ["gfx1250"], [M(atom, F33, 64, 128, 32, 2, 4, 8)])
 
-# Z-ring tiles (forward 3x3x3, 16-bit): 16 x 16 positions x 64 channels, 2 x 4 waves, 32-channel
-# stages; the 16x16x32 atom on gfx950.
+# Z-ring tiles (forward 3x3x3, 16-bit), 2 x 4 waves, 32-channel stages, the 16x16x32 atom on gfx950:
+# 16 x 16 positions x 64 channels, and 8 x 16 positions x 128 channels (the same accumulators a
+# wave), whose block reads each input plane once for 128 output channels.
 for dt in ("HALF", "BFLOAT16"):
     e = x16(dt)
-    add(dt, ["gfx942"], [Z(f"mfma16_{e}", F333, 256, 64, 32, 2, 4)])
-    add(dt, ["gfx950"], [Z(f"mfma16x32_{e}", F333, 256, 64, 32, 2, 4)])
+    for bm, bn in ((256, 64), (128, 128)):
+        add(dt, ["gfx942"], [Z(f"mfma16_{e}", F333, bm, bn, 32, 2, 4)])
+        add(dt, ["gfx950"], [Z(f"mfma16x32_{e}", F333, bm, bn, 32, 2, 4)])
 
 # gfx942 fp32 3x3x3, 32-channel outputs (nnU-Net K = 32 layers on 96^3-160^3): the 256 x 32 tile
 # at 8-channel chunks and the streaming (ring) twin of its 16-channel form. MI325X, autotuned
