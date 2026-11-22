@@ -28,7 +28,7 @@ the same floating-point operations are also compared bit for bit with the
 knob-off kernel on identical inputs (out_lds's f16 output within one f16 ulp,
 see ``_assert_bitwise``).
 
-Needs a real gfx950 and ROCm torch; marked ``gpu`` and skipped elsewhere.
+Needs a real gfx950; marked ``gpu`` and skipped elsewhere.
 """
 
 from __future__ import annotations
@@ -36,30 +36,18 @@ from __future__ import annotations
 import dataclasses as dc
 from itertools import product
 
+import numpy as np
 import pytest
+from rocke.core.dtypes import dtype_info
+from rocke.numeric import storage
+from rocke.tests.gpu import probe_device_arch
 
 ARCH = "gfx950"
 
-torch = pytest.importorskip("torch", reason="ROCm torch required")
-
 pytestmark = pytest.mark.gpu
 
-
-def _device_is_gfx950() -> bool:
-    # rocke's own query, as the sibling GDN suites do: get_device_arch goes
-    # through hipDeviceGetAttribute and strips the feature flags.
-    if not torch.cuda.is_available():
-        return False
-    try:
-        from rocke.runtime.hip_module import get_device_arch
-
-        return get_device_arch() == ARCH
-    except Exception:
-        return False
-
-
 requires_gfx950 = pytest.mark.skipif(
-    not _device_is_gfx950(), reason=f"needs a {ARCH} device"
+    probe_device_arch()[0] != ARCH, reason=f"needs a {ARCH} device"
 )
 
 # knob -> the spec overrides that switch it on (norm_gate_once needs conv_once)
@@ -239,13 +227,13 @@ _BITWISE_KNOBS = [
 
 def _f16_ulps(x, y):
     """Elementwise distance in ulps (units in the last place) of two 16-bit
-    float tensors, through their bit patterns mapped to ordered integers."""
+    float arrays, through their bit patterns mapped to ordered integers."""
 
     def ordered(t):
-        i = t.view(torch.int16).to(torch.int32)
-        return torch.where(i < 0, -32768 - i, i)
+        i = t.view(np.int16).astype(np.int32)
+        return np.where(i < 0, -32768 - i, i)
 
-    return (ordered(x) - ordered(y)).abs()
+    return np.abs(ordered(x) - ordered(y))
 
 
 def _assert_bitwise(spec, knob):
@@ -272,20 +260,15 @@ def _assert_same_bits(off, spec, *, knob=None, batch=3, state_ulps=0):
     :func:`_assert_bitwise` (``knob``); with ``state_ulps``, the state may
     differ by up to that many f16 ulps per element."""
     from builders.gfx950.gdn.gdn_decode import (
-        drain,
-        launch,
+        input_dtypes,
         launcher_for,
         make_inputs,
-        prepare,
+        run_values,
     )
 
     inp = make_inputs(off, batch)
-    arms = []
-    for s in (off, spec):
-        values, cfg = prepare(s, inp, batch)
-        launch(launcher_for(s), values, cfg)
-        drain()
-        arms.append(values)
+    arms = [run_values(s, inp, launcher_for(s), batch) for s in (off, spec)]
+    dtypes = dict(input_dtypes(spec), out=dtype_info(spec.dtype).name)
     for key in ("out", "state") + (("conv_state",) if spec.fuse_conv else ()):
         a, b = arms[0][key], arms[1][key]
         if key == "out" and knob == "out_lds" and spec.dtype == "f16":
@@ -295,7 +278,11 @@ def _assert_same_bits(off, spec, *, knob=None, batch=3, state_ulps=0):
             ulps = int(_f16_ulps(a, b).max())
             assert ulps <= state_ulps, (spec.kernel_name(), key, ulps)
         else:
-            assert torch.equal(a, b), (spec.kernel_name(), key)
+            # Equal values (+0 == -0, NaN never equal), as the knob-off kernel
+            # is the reference here.
+            values_a = storage.decode(a, dtypes[key])
+            values_b = storage.decode(b, dtypes[key])
+            assert np.array_equal(values_a, values_b), (spec.kernel_name(), key)
 
 
 @requires_gfx950

@@ -102,7 +102,6 @@ def test_launcher_cache_hit_does_not_bypass_flag_validation(field, value, monkey
     # ("false" and 1 with the knob on, 0 and None with it off). Warm the cache
     # under both names: ``launcher_for`` must still raise, never hand back the
     # cached launcher.
-    pytest.importorskip("torch", reason="the builder module imports torch")
     from builders.gfx950.gdn import gdn_decode as builder
 
     def spec_for(flag):

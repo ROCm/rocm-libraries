@@ -40,7 +40,22 @@ import sys
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 
+from rocke.core.dtypes import dtype_info
+from rocke.numeric import storage
+from rocke.runtime.hip_module import get_device_arch, get_device_count
+
 from benchmarks.gfx950.gdn import decode_table_sweep as table_sweep
+from builders.gfx950.gdn.gdn_decode import (
+    ROTATE_MB,
+    eager_us,
+    gate_launch,
+    import_graph_torch,
+    launcher_for,
+    make_inputs,
+    precompute_kda_log_decay,
+    timing_label,
+)
+from builders.gfx950.gdn.gdn_decode import device_us as cold_device_us
 from dispatch.gdn import GdnDecodeRequest, dispatch_gdn_decode
 from dispatch.gdn.cli_args import (
     check_rotate_mb,
@@ -49,35 +64,10 @@ from dispatch.gdn.cli_args import (
     parse_batches,
 )
 from kernels.gfx950.gdn_decode import GdnDecodeSpec, gdn_decode_grid
-from rocke.runtime.hip_module import get_device_arch, get_device_count
 
 ARCH = "gfx950"
 DEFAULT_BATCHES = (1, 8, 32, 128)
 KNOWN_VARIANTS = ("fused", "precomputed", "simple")
-
-
-def _load_device_backend() -> bool:
-    """Load Torch launch helpers when the benchmark is actually executed."""
-    global ROTATE_MB, cold_device_us, eager_us, gate_launch, launcher_for
-    global make_inputs, precompute_kda_log_decay, timing_label, torch
-    try:
-        import torch as torch_module
-        from builders.gfx950.gdn.gdn_decode import (
-            ROTATE_MB,
-            eager_us,
-            gate_launch,
-            launcher_for,
-            make_inputs,
-            precompute_kda_log_decay,
-            timing_label,
-        )
-        from builders.gfx950.gdn.gdn_decode import device_us as cold_device_us
-    except ModuleNotFoundError as exc:
-        if exc.name == "torch":
-            return False
-        raise
-    torch = torch_module
-    return get_device_count() > 0
 
 
 @dataclass(frozen=True)
@@ -180,23 +170,16 @@ def compare_selected_to_sweep(selected_id: str, rows) -> SweepComparison:
     )
 
 
-def _clone_inputs(inp):
-    return {
-        name: value.clone() if torch.is_tensor(value) else value
-        for name, value in inp.items()
-    }
-
-
 def inputs_for_variant(name: str, fused_spec: GdnDecodeSpec, raw_inputs):
-    """Independent buffers for one variant, all derived from one raw input set."""
-    inp = _clone_inputs(raw_inputs)
-    if name == "precomputed":
-        inp["a"] = (
-            precompute_kda_log_decay(fused_spec, raw_inputs)
-            .to(raw_inputs["a"].dtype)[:, None]
-            .contiguous()
-        )
-    return inp
+    """One variant's host inputs, all derived from one raw input set. A launch
+    uploads its own device copy and never modifies its host inputs, so the
+    variants can share every array but the precomputed variant's ``a``."""
+    if name != "precomputed":
+        return raw_inputs
+    log_decay = precompute_kda_log_decay(fused_spec, raw_inputs)[:, None]
+    return dict(
+        raw_inputs, a=storage.encode(log_decay, dtype_info(fused_spec.dtype).name)
+    )
 
 
 def device_us(spec: GdnDecodeSpec, inp, batch: int, rotate_mb: int) -> float | None:
@@ -375,6 +358,8 @@ def main(argv: Iterable[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
     check_rotate_mb(args.rotate_mb, parser)
+    if not args.no_device:
+        import_graph_torch()  # graph timing: before the first HIP call
 
     try:
         names = parse_variants(args.variants)
@@ -382,8 +367,8 @@ def main(argv: Iterable[str] | None = None) -> int:
         parser.error(str(exc))
     batches = args.batches
 
-    if not _load_device_backend():
-        print("requires ROCm torch and a visible HIP device", file=sys.stderr)
+    if not get_device_count():
+        print("requires a visible HIP device", file=sys.stderr)
         return 2
 
     device_arch = get_device_arch()
