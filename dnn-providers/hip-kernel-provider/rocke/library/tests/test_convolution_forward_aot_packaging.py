@@ -63,6 +63,20 @@ _SEED = 2026
 #: The packaged dtypes. Tests over the whole sweep take one as a parameter, so each
 #: dtype's tests share a CI shard and the sweep is enumerated once per dtype.
 _DTYPES = ("fp16", "bf16")
+#: The dtypes whose whole-sweep cases are exhaustive: they run in the comprehensive
+#: tier (rocke_library_conv_exhaustive_pytest), and fp16's run in the standard tier.
+_EXHAUSTIVE_SWEEP_DTYPES = frozenset({"bf16"})
+
+
+def _sweep_dtype_marks(dtype: str) -> list[pytest.MarkDecorator]:
+    """The marks of a whole-sweep case of ``dtype``."""
+    return [pytest.mark.exhaustive] if dtype in _EXHAUSTIVE_SWEEP_DTYPES else []
+
+
+#: Each packaged dtype as the parameter of a test over the whole sweep.
+_SWEEP_DTYPE_PARAMS = [
+    pytest.param(dtype, marks=_sweep_dtype_marks(dtype)) for dtype in _DTYPES
+]
 #: The forward sweep's pipelines. The knob-class IR check takes one with the dtype,
 #: so its kernels spread over CI shards rather than filling one per dtype.
 _PIPELINES = ("mem", "compv3", "compv4")
@@ -234,7 +248,7 @@ def knob_class_jobs(forward_sweep):
     return sample_of
 
 
-@pytest.mark.parametrize("dtype", _DTYPES)
+@pytest.mark.parametrize("dtype", _SWEEP_DTYPE_PARAMS)
 def test_the_knob_class_sample_covers_every_knob_value(knob_class_jobs, dtype):
     classes = {_knob_class(job.identity) for job in knob_class_jobs(dtype)}
     assert {c[0] for c in classes} == set(_PIPELINES)
@@ -257,7 +271,10 @@ _KNOB_CLASS_SHARD_COSTS = {"mem": 12, "compv3": 5, "compv4": 6}
         pytest.param(
             dtype,
             pipeline,
-            marks=pytest.mark.rocke_shard_cost(_KNOB_CLASS_SHARD_COSTS[pipeline]),
+            marks=[
+                pytest.mark.rocke_shard_cost(_KNOB_CLASS_SHARD_COSTS[pipeline]),
+                *_sweep_dtype_marks(dtype),
+            ],
         )
         for dtype in _DTYPES
         for pipeline in _PIPELINES
@@ -594,7 +611,7 @@ _SELECTION_GRID = (
 
 
 @pytest.mark.rocke_shard_cost(14)
-@pytest.mark.parametrize("dtype", _DTYPES)
+@pytest.mark.parametrize("dtype", _SWEEP_DTYPE_PARAMS)
 def test_runtime_candidates_are_rockes_runtime_selection(forward_sweep, dtype):
     """Over the whole packaged sweep, the instances selected for a problem are exactly
     the ones rocKE's --run-from-cache benchmark runs by default from a cache holding
