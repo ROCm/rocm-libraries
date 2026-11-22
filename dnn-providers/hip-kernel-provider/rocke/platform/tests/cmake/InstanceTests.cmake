@@ -166,6 +166,26 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/instances/gemm_universal_spec_guards.cpp"
                rocke_gemm_universal_spec_guards)
 endif()
 
+# Two spec refusals of the C++ engine with their reason strings (pooling bf16,
+# a multi-D GEMM whose D dtype is not the C dtype), which the byte-identity
+# gate cannot see because neither engine builds those specs.
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/instances/spec_refusal_guards.cpp")
+  add_executable(rocke_spec_refusal_guards instances/spec_refusal_guards.cpp)
+  target_link_libraries(rocke_spec_refusal_guards PRIVATE rocke_core)
+  if(UNIX)
+    target_link_libraries(rocke_spec_refusal_guards PRIVATE m)
+  endif()
+  add_test(NAME rocke_spec_refusal_guards COMMAND rocke_spec_refusal_guards)
+  set_tests_properties(rocke_spec_refusal_guards PROPERTIES LABELS "ckc;unit;host")
+  rocke_cxx_test_installed_name(_rocke_installed_name rocke_spec_refusal_guards)
+  set_target_properties(rocke_spec_refusal_guards
+                        PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+  install(TARGETS rocke_spec_refusal_guards
+          RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+  set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
+               rocke_spec_refusal_guards)
+endif()
+
 # The MX GEMM's C grid for an unset workgroup tile, which no Python caller
 # reaches.
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/instances/mx_gemm_host.cpp")
