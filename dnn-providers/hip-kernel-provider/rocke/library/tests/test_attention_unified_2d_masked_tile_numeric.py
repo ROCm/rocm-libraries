@@ -165,10 +165,9 @@ def _rows_with_masked_leading_tile(kernel_spec, q_len):
 def _reference(q, k_cache, v_cache, kv_len, block_table, scale):
     """FP32 O for one sequence, bottom-right causal + sliding window, from
     float32 arrays of the uploaded values."""
-    out, _has_key = paged_attention_reference(
+    return paged_attention_reference(
         q, k_cache, v_cache, kv_len, block_table[0], scale, sliding_window=_WINDOW
     )
-    return out
 
 
 def _paged_cache(rng, kv_len, bs, head_size, dtype, k_value=None):

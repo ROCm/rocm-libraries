@@ -1,10 +1,12 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""One-sequence launch of the tiled 2D unified attention path for the
-torch-free paged attention numeric tests."""
+"""Launches of the tiled 2D unified attention path for the torch-free paged
+attention numeric tests."""
 
 from __future__ import annotations
+
+import itertools
 
 import numpy as np
 from dispatch.attention.common import AttentionTuningSpec
@@ -17,7 +19,70 @@ from rocke.runtime.hip_module import Runtime
 from ._attention_device_array import DeviceArray
 from ._attention_paged_reference import decode_half, encode_half
 
-__all__ = ["launch_tiled_one_sequence"]
+__all__ = ["launch_tiled", "launch_tiled_one_sequence"]
+
+
+def launch_tiled(
+    rt: Runtime,
+    problem: UnifiedAttentionProblem,
+    spec: AttentionTuningSpec | None,
+    q: np.ndarray,
+    k_cache: np.ndarray,
+    v_cache: np.ndarray,
+    block_table: np.ndarray,
+    scale: float,
+    *,
+    q_lens: list[int],
+    kv_lens: list[int],
+    softcap: float = 0.0,
+    sinks: np.ndarray | None = None,
+    alibi_slopes: np.ndarray | None = None,
+    qq_bias: np.ndarray | None = None,
+) -> np.ndarray:
+    """Run the tiled 2D path on a batch of sequences and return O as float32.
+
+    ``q`` (``[sum(q_lens), num_query_heads, head_size]``), ``k_cache``,
+    ``v_cache`` and ``sinks`` are float32 arrays of values exact in
+    ``problem.dtype``; the kernel reads all four in that dtype. ``alibi_slopes``
+    (``[num_query_heads]``) and ``qq_bias`` (2D; its row length is the stride
+    the kernel indexes with) are read as float32. ``spec`` is the tuning spec
+    to pin, or ``None`` for the production route. The output buffer starts with
+    every byte 0xFF, which is NaN in fp16 and bf16, so an element the kernel
+    skips fails the caller's checks instead of passing on stale memory.
+    """
+    dtype = problem.dtype
+
+    def in_kernel_dtype(values):
+        return None if values is None else DeviceArray(rt, encode_half(values, dtype))
+
+    def as_numpy_dtype(values, numpy_dtype):
+        if values is None:
+            return None
+        return DeviceArray(rt, np.ascontiguousarray(values, dtype=numpy_dtype))
+
+    host_q = encode_half(q, dtype)
+    out_host = np.empty_like(host_q)
+    out_host.view(np.uint8)[...] = 0xFF
+    out = DeviceArray(rt, out_host)
+    run_unified_attention_torch(
+        problem=problem,
+        q=DeviceArray(rt, host_q),
+        k=in_kernel_dtype(k_cache),
+        v=in_kernel_dtype(v_cache),
+        out=out,
+        cu_seqlens_q=as_numpy_dtype([0, *itertools.accumulate(q_lens)], np.int32),
+        seqused_k=as_numpy_dtype(kv_lens, np.int32),
+        softmax_scale=scale,
+        block_table=DeviceArray(rt, block_table),
+        softcap=softcap,
+        sinks=in_kernel_dtype(sinks),
+        alibi_slopes=as_numpy_dtype(alibi_slopes, np.float32),
+        qq_bias=as_numpy_dtype(qq_bias, np.float32),
+        qq_bias_stride_0=0 if qq_bias is None else int(np.shape(qq_bias)[1]),
+        backend="tiled",
+        tuning_spec=spec,
+    )
+    return decode_half(out.read(), dtype)
 
 
 def launch_tiled_one_sequence(
@@ -31,31 +96,23 @@ def launch_tiled_one_sequence(
     scale: float,
     dtype: str,
 ) -> np.ndarray:
-    """Run the tiled 2D path on one sequence and return O as float32.
-
-    ``q``, ``k_cache`` and ``v_cache`` are float32 arrays of values exact in
-    ``dtype``; ``spec`` is the tuning spec to pin, or ``None`` for the
-    production route. The output buffer starts with every byte 0xFF, which is
-    NaN in fp16 and bf16, so an element the kernel skips fails the caller's
-    checks instead of passing on stale memory.
-    """
-    q_len, kv_len = problem.total_q, problem.max_seqlen_k
-    host_q = encode_half(q, dtype)
-    out_host = np.empty_like(host_q)
-    out_host.view(np.uint8)[...] = 0xFF
-    out = DeviceArray(rt, out_host)
-    run_unified_attention_torch(
-        problem=problem,
-        q=DeviceArray(rt, host_q),
-        k=DeviceArray(rt, encode_half(k_cache, dtype)),
-        v=DeviceArray(rt, encode_half(v_cache, dtype)),
-        out=out,
-        cu_seqlens_q=DeviceArray(rt, np.array([0, q_len], dtype=np.int32)),
-        seqused_k=DeviceArray(rt, np.array([kv_len], dtype=np.int32)),
-        softmax_scale=scale,
-        block_table=DeviceArray(rt, block_table),
-        softcap=0.0,
-        backend="tiled",
-        tuning_spec=spec,
+    """:func:`launch_tiled` for one sequence of ``problem.total_q`` queries
+    and ``problem.max_seqlen_k`` keys, with no score modifiers. ``dtype`` must
+    be ``problem.dtype``."""
+    if dtype != problem.dtype:
+        raise ValueError(
+            f"one-sequence tiled launch failed - dtype={dtype!r}, "
+            f"expected problem.dtype={problem.dtype!r}"
+        )
+    return launch_tiled(
+        rt,
+        problem,
+        spec,
+        q,
+        k_cache,
+        v_cache,
+        block_table,
+        scale,
+        q_lens=[problem.total_q],
+        kv_lens=[problem.max_seqlen_k],
     )
-    return decode_half(out.read(), dtype)
