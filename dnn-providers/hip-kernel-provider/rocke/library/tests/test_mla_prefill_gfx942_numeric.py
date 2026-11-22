@@ -21,8 +21,8 @@ odd ones, and agpr_acc for batches averaging >= 320 query rows per sequence
 shapes: agpr_acc forced on for short / ragged batches, and the unfused
 ``absorbed_query`` composition.
 
-The numeric tests are marked ``gpu`` and skip without a gfx942 device and ROCm
-torch (torch also runs the ``absorbed_query`` lane's head projections); the
+The numeric tests are marked ``gpu`` and skip without a gfx942 device (the
+``absorbed_query`` lane models its two head projections on the host); the
 scenario-table and dispatch checks run on CPU. Run:
 
     HIP_VISIBLE_DEVICES=0 python -m pytest tests/test_mla_prefill_gfx942_numeric.py
@@ -31,20 +31,10 @@ scenario-table and dispatch checks run on CPU. Run:
 from __future__ import annotations
 
 import pytest
-
-torch = pytest.importorskip("torch", reason="ROCm torch required")
-
-
-def _gpu_ready() -> bool:
-    """True on a gfx942 box with ROCm torch (gated on ``gcnArchName``, the ISA
-    target, as the dense numeric lane does)."""
-    if not torch.cuda.is_available():
-        return False
-    return "gfx942" in torch.cuda.get_device_properties(0).gcnArchName.lower()
-
+from rocke.tests.gpu import probe_device_arch
 
 requires_gfx942_gpu = pytest.mark.skipif(
-    not _gpu_ready(), reason="needs a gfx942 GPU with ROCm torch"
+    probe_device_arch()[0] != "gfx942", reason="needs a gfx942 GPU"
 )
 
 # Scenario names come from the probe's table; spelled out here so the test ids

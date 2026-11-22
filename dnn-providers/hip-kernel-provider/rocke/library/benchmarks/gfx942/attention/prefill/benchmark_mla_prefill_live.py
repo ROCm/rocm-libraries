@@ -495,6 +495,8 @@ def _build_rocke_kernel(
     """
     import dataclasses
 
+    from rocke import compile_kernel
+
     from dispatch.mla import dispatch_mla
     from kernels.mla.mla_prefill_gfx942 import (
         build_mla_prefill_fwd,
@@ -502,7 +504,6 @@ def _build_rocke_kernel(
         mla_prefill_fwd_signature,
         supports_mla_prefill,
     )
-    from rocke import compile_kernel
 
     req = shape.to_request(arch=arch, absorbed_query=absorbed_query)
     try:
@@ -781,7 +782,7 @@ def _gate(
     rel_tol: float = OUT_REL_PEAK_TOL,
     lse_tol: float = LSE_ATOL,
 ) -> dict:
-    """Gate ``out [total_q, h, d_v]`` and, if given, ``lse [total_q, h]``.
+    """Gate host ``out [total_q, h, d_v]`` and, if given, ``lse [total_q, h]``.
 
     The verifier's bars (:mod:`builders.mla.verify_score_probe_gfx942`):
     ``out`` ``max_abs <= tol`` and, per gate window, ``max_abs / peak(|ref|)
@@ -798,7 +799,7 @@ def _gate(
     worst_l = 0.0 if lse is not None else None
     finite = True
     for rows, ref_out, ref_lse in refs:
-        o = out[rows].float().cpu().numpy()
+        o = out[rows]
         if not np.all(np.isfinite(o)):
             finite = False
             continue
@@ -807,7 +808,7 @@ def _gate(
         worst_o = max(worst_o, err)
         worst_rel = max(worst_rel, err / (peak if peak > 0 else 1.0))
         if lse is not None:
-            lv = lse[rows].float().cpu().numpy()
+            lv = lse[rows]
             if not np.all(np.isfinite(lv)):
                 finite = False
                 continue
@@ -822,6 +823,11 @@ def _gate(
         "max_rel_peak_out": worst_rel,
         "max_abs_lse": worst_l,
     }
+
+
+def _host(tensor):
+    """A device tensor of an arm's results as a host fp32 numpy array."""
+    return tensor.float().cpu().numpy()
 
 
 def _gate_error(exc: BaseException) -> dict:
@@ -1077,7 +1083,9 @@ def main(argv=None) -> int:
                 iters=args.iterations,
             )
             refs = _reference(shape, rocke_data)
-            rocke_gate = _gate(r_out[:, heads], r_lse[:, heads], refs, **bars)
+            rocke_gate = _gate(
+                _host(r_out[:, heads]), _host(r_lse[:, heads]), refs, **bars
+            )
             del r_out, r_lse
             if rocke_gate["ok"]:
                 n_ok += 1
@@ -1115,7 +1123,7 @@ def main(argv=None) -> int:
                 a_out = torch.einsum(
                     "thr,hrv->thv", a_latent[:, heads].float(), w_uv.float()
                 )
-                aiter_gate = _gate(a_out, None, refs, **bars)
+                aiter_gate = _gate(_host(a_out), None, refs, **bars)
                 del a_latent, a_out
                 if not aiter_gate["ok"]:
                     n_gate_fail += 1

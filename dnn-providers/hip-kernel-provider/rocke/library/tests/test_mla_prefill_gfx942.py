@@ -20,6 +20,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from rocke.core.lower_llvm import lower_kernel_to_llvm
+from rocke.tests.compiler_tools import require_tools_or_skip
+
 from kernels.mla.mla_prefill_gfx942 import (
     MlaPrefillSpec,
     _fwd_lds_bytes,
@@ -32,8 +35,6 @@ from kernels.mla.mla_prefill_gfx942 import (
     mla_prefill_score_probe_signature,
     supports_mla_prefill,
 )
-from rocke.core.lower_llvm import lower_kernel_to_llvm
-from rocke.tests.compiler_tools import require_tools_or_skip
 
 from ._compiler_test_utils import skip_where_compiler_refuses_option
 
@@ -422,15 +423,6 @@ class _OccupancyGuard:
 
     @classmethod
     def setUpClass(cls):
-        # Import torch first when it is installed: it binds the torch-bundled
-        # comgr, the one the benchmark and dispatch path compile with. The
-        # system comgr is a different LLVM vintage and allocates a few more
-        # VGPRs, so without this the guard would check a code object the
-        # runtime never runs.
-        try:
-            import torch  # noqa: F401
-        except ImportError:
-            pass
         try:
             from rocke.analysis.isa import analyze_hsaco
             from rocke.helpers.compile import compile_kernel
@@ -591,10 +583,6 @@ class TestAgprAccResources(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        try:
-            import torch  # noqa: F401
-        except ImportError:
-            pass
         try:
             from rocke.analysis.isa import analyze_hsaco
             from rocke.core.lower_llvm import _is_modern_flavor, _resolve_llvm_flavor
