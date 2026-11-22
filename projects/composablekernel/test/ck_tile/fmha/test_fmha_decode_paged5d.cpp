@@ -46,9 +46,12 @@ std::vector<Param> params()
     // forced layouts
     add("full_coop", {2, 16, 1, {5000}, 0, 0, 0, "coop"}, "coop");
     add("swa_wave", {2, 16, 1, {5000}, 2048, 0, 0, "wave"}, "wave");
-    // one split (direct output), the most splits a cluster takes
+    // one split (direct output); 15 splits, the most with a compile-time cluster size; 16, the
+    // most a cluster takes (cluster size given at launch)
     add("one_split", {2, 16, 1, {700}, 2048, 1});
     add("fifteen_splits", {2, 16, 1, {960}, 2048, 15});
+    add("sixteen_splits", {2, 16, 1, {1024}, 2048, 16});
+    add("sixteen_splits_wave", {2, 16, 1, {8192}, 0, 16, 0, "wave"}, "wave");
     // other GQA shapes: fewer than 16 rows, several kv heads
     add("gqa_8_1", {2, 8, 1, {2500}, 2048});
     add("gqa_16_2", {2, 16, 2, {4000}, 2048});

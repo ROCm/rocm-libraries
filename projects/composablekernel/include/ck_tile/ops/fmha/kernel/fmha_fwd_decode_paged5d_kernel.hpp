@@ -54,6 +54,9 @@ struct FmhaDecodePaged5dHostArgs
     bool qo_fp16 = false; // Q and O are fp16 instead of bf16
 };
 
+// workgroups of a cluster: a gfx1250 cluster holds up to 16
+inline constexpr index_t kMaxClusterSplits = 16;
+
 // num_splits workgroups per cluster, num_groups clusters per (batch, kv head)
 struct FmhaDecodePaged5dConfig
 {
@@ -76,11 +79,11 @@ CK_TILE_HOST index_t fmha_decode_paged5d_max_span(index_t max_seqlen_k,
     return std::max<index_t>(span, 1);
 }
 
-// Up to 240 pages: one cluster of cooperative splits, as many as 4-page steps allow (at most 15),
-// at least 16 pages each once the grid would exceed about 640 workgroups. Up to 960 pages: one
-// wave-split cluster while the grid has 64 to 512 workgroups. Longer: several clusters (groups)
-// of the shortest 8-, 12- or 16-page cooperative splits within 512 workgroups, else wave-split
-// splits for about 384 workgroups.
+// Up to 256 pages: one cluster of cooperative splits, as many as 4-page steps allow (at most 16),
+// at least 8 pages each once the grid would exceed 256 workgroups, 16 beyond about 640. Up to 1024
+// pages: one wave-split cluster while the grid has 64 to 512 workgroups. Longer: several clusters
+// (groups) of the shortest 8-, 12- or 16-page cooperative splits within 512 workgroups, else
+// wave-split splits for about 384 workgroups.
 CK_TILE_HOST FmhaDecodePaged5dConfig fmha_decode_paged5d_config(
     index_t batch, index_t nhead_k, index_t max_seqlen_k, index_t window, index_t page_size = 16)
 {
@@ -90,19 +93,22 @@ CK_TILE_HOST FmhaDecodePaged5dConfig fmha_decode_paged5d_config(
     const index_t heads = batch * nhead_k;
     const auto make     = [&](index_t pps, bool wave_split) {
         const index_t total  = ceil_div(span, pps);
-        const index_t groups = ceil_div(total, 15);
+        const index_t groups = ceil_div(total, kMaxClusterSplits);
         return FmhaDecodePaged5dConfig{ceil_div(total, groups), pps, wave_split, groups};
     };
-    if(span <= 15 * 16)
+    constexpr index_t kC = kMaxClusterSplits;
+    if(span <= kC * 16)
     {
-        index_t pps = round_up(ceil_div(span, std::min<index_t>(15, ceil_div(span, 4))), 4);
+        index_t pps = round_up(ceil_div(span, std::min<index_t>(kC, ceil_div(span, 4))), 4);
+        if(heads * ceil_div(span, pps) > 256)
+            pps = std::max<index_t>(pps, 8);
         if(heads * ceil_div(span, pps) > 640)
             pps = std::max<index_t>(pps, 16);
         return make(pps, false);
     }
-    const index_t wave_pps = round_up(ceil_div(span, 15), 16);
+    const index_t wave_pps = round_up(ceil_div(span, kC), 16);
     const index_t wave_wgs = heads * ceil_div(span, wave_pps);
-    if(span <= 15 * 64 && wave_wgs <= 512 && (span <= 512 || wave_wgs >= 64))
+    if(span <= kC * 64 && wave_wgs <= 512 && (span <= 512 || wave_wgs >= 64))
         return make(wave_pps, true);
     for(index_t pps : {8, 12, 16})
         if(ceil_div(span, pps) <= 192 && heads * ceil_div(span, pps) <= 512)
@@ -126,7 +132,7 @@ CK_TILE_HOST size_t fmha_decode_paged5d_workspace_bytes(index_t batch,
 // one per (batch, kv head, row block) for any configuration
 CK_TILE_HOST size_t fmha_decode_paged5d_num_counters(index_t batch, index_t nhead_k)
 {
-    return static_cast<size_t>(batch) * nhead_k * 15;
+    return static_cast<size_t>(batch) * nhead_k * kMaxClusterSplits;
 }
 
 template <bool kWaveSplit_,
@@ -153,7 +159,7 @@ struct FmhaDecodePaged5dKernel
     static constexpr index_t kStages    = kWaveSplit ? 2 : 3;
     // 16-token pages per cache page
     static constexpr index_t kSubPages = kPageSize / kPage;
-    static_assert(1 <= kNumSplits && kNumSplits <= 15);
+    static_assert(1 <= kNumSplits && kNumSplits <= kMaxClusterSplits);
     static_assert(kPageSize == 16 || kPageSize == 64 || kPageSize == 128);
     // LDS K of a wave-split step: four page-16 images, or with larger cache pages the 64 tokens as
     // they lie in the cache ([hdim / 16][64 tokens][16 B]); offsets of a page and a 16-byte chunk
@@ -244,17 +250,17 @@ struct FmhaDecodePaged5dKernel
 
     struct alignas(16) SmemWaveSplit
     {
-        union
+        // per wave, so that a wave's O for the intra-workgroup merge reuses only its own stages
+        union alignas(16) PerWave
         {
             struct
             {
-                alignas(16) uint8_t k[kStages][kNumWaves][kWavePages][kPageBytes];
-                alignas(16) uint8_t v[kStages][kNumWaves][kWavePages][kPageBytes];
+                alignas(16) uint8_t k[kStages][kWavePages][kPageBytes];
+                alignas(16) uint8_t v[kStages][kWavePages][kPageBytes];
             } kv;
-            // the waves' O for the intra-workgroup merge; padded rows keep the column-wise
-            // stores of 16 rows off one bank
-            alignas(16) float o[kNumWaves][kRows][kHdim + 4];
-        };
+            // padded rows keep the column-wise stores of 16 rows off one bank
+            alignas(16) float o[kRows][kHdim + 4];
+        } wave[kNumWaves];
         alignas(16) float ml[2][kNumWaves][kRows];
     };
 
@@ -427,7 +433,7 @@ struct FmhaDecodePaged5dKernel
         // LDS page buffers of wave w
         const auto kbuf = [&](index_t st, index_t q) -> uint8_t* {
             if constexpr(kWaveSplit)
-                return &sm.kv.k[st][w][0][0] + q * kKPageStride;
+                return &sm.wave[w].kv.k[st][0][0] + q * kKPageStride;
             else
             {
                 ignore = q;
@@ -436,7 +442,7 @@ struct FmhaDecodePaged5dKernel
         };
         const auto vbuf = [&](index_t st, index_t q) -> uint8_t* {
             if constexpr(kWaveSplit)
-                return &sm.kv.v[st][w][q][0];
+                return &sm.wave[w].kv.v[st][q][0];
             else
             {
                 ignore = q;
@@ -541,6 +547,11 @@ struct FmhaDecodePaged5dKernel
                 __builtin_amdgcn_s_wait_tensorcnt(2);
             else
                 __builtin_amdgcn_s_wait_tensorcnt(0);
+            // the step's pages are consecutive: if the last lies in the split and the context,
+            // every token is valid (the common case, one scalar test instead of one per page)
+            const index_t pg_end = pg0 + page_idx(t, kWavePages - 1) + 1;
+            if(pg_end <= pend && pg_end * kPage <= ctx)
+                return;
             for(index_t q = 0; q < kWavePages; ++q)
             {
                 const index_t pg    = pg0 + page_idx(t, q);
@@ -671,8 +682,8 @@ struct FmhaDecodePaged5dKernel
                 for(index_t db = 0; db < 8; ++db)
                 {
                     const index_t off = (db * 16 + n) * 16;
-                    const v4i x       = *ptr_as<v4i>(&sm.kv.v[st][w][2 * h][off]);
-                    const v4i y       = *ptr_as<v4i>(&sm.kv.v[st][w][2 * h + 1][off]);
+                    const v4i x       = *ptr_as<v4i>(&sm.wave[w].kv.v[st][2 * h][off]);
+                    const v4i y       = *ptr_as<v4i>(&sm.wave[w].kv.v[st][2 * h + 1][off]);
                     const v8i vf{x[0], x[1], x[2], x[3], y[0], y[1], y[2], y[3]};
                     acc[db] = __builtin_amdgcn_wmma_f32_16x16x64_fp8_fp8(
                         vf, pf, 0, acc[db], false, false);
@@ -763,21 +774,18 @@ struct FmhaDecodePaged5dKernel
         float m_row, l_row;
         if constexpr(kWaveSplit)
         {
-            // merge the waves; lane (n, h) holds O[row n][d = db*16 + h*8 + r]
+            // merge the waves; lane (n, h) holds O[row n][d = db*16 + h*8 + r]. Each wave stores
+            // its O relative to its own max (in its own stages, which it is done with), so one
+            // barrier suffices; the reader weights the waves.
             if(h == 0)
             {
                 sm.ml[0][w][n] = m_run;
                 sm.ml[1][w][n] = l_run;
             }
-            __syncthreads(); // also: every wave is done with the stages the merge buffer reuses
-            float M = -numeric<float>::infinity();
-            for(index_t i = 0; i < kNumWaves; ++i)
-                M = fmaxf(M, sm.ml[0][i][n]);
-            const float f = exp2(m_run - (is_neg_inf(M) ? 0.f : M));
             for(index_t db = 0; db < 8; ++db)
             {
-                const v8f x = acc[db] * f;
-                float4* dst = ptr_as<float4>(&sm.o[w][n][db * 16 + h * 8]);
+                const v8f x = acc[db];
+                float4* dst = ptr_as<float4>(&sm.wave[w].o[n][db * 16 + h * 8]);
                 dst[0]      = make_float4(x[0], x[1], x[2], x[3]);
                 dst[1]      = make_float4(x[4], x[5], x[6], x[7]);
             }
@@ -788,19 +796,23 @@ struct FmhaDecodePaged5dKernel
             for(index_t i = 0; i < kNumWaves; ++i)
                 m_row = fmaxf(m_row, sm.ml[0][i][row]);
             const float mu = is_neg_inf(m_row) ? 0.f : m_row;
-            l_row          = 0.f;
+            float wi[kNumWaves];
+            l_row = 0.f;
             for(index_t i = 0; i < kNumWaves; ++i)
-                l_row += sm.ml[1][i][row] * exp2(sm.ml[0][i][row] - mu);
+            {
+                wi[i] = exp2(sm.ml[0][i][row] - mu);
+                l_row += sm.ml[1][i][row] * wi[i];
+            }
             for(index_t e = 0; e < 16; ++e)
                 o[e] = 0.f;
             for(index_t i = 0; i < kNumWaves; ++i)
                 for(index_t e4 = 0; e4 < 4; ++e4)
                 {
-                    const float4 x = *ptr_as<float4>(&sm.o[i][row][d0 + 4 * e4]);
-                    o[4 * e4] += x.x;
-                    o[4 * e4 + 1] += x.y;
-                    o[4 * e4 + 2] += x.z;
-                    o[4 * e4 + 3] += x.w;
+                    const float4 x = *ptr_as<float4>(&sm.wave[i].o[row][d0 + 4 * e4]);
+                    o[4 * e4]      = fmaf(wi[i], x.x, o[4 * e4]);
+                    o[4 * e4 + 1]  = fmaf(wi[i], x.y, o[4 * e4 + 1]);
+                    o[4 * e4 + 2]  = fmaf(wi[i], x.z, o[4 * e4 + 2]);
+                    o[4 * e4 + 3]  = fmaf(wi[i], x.w, o[4 * e4 + 3]);
                 }
         }
         else
@@ -1006,9 +1018,9 @@ struct FmhaDecodePaged5dKernel
 #endif
 };
 
-// The cluster size is a compile-time attribute: HIP stream capture drops a cluster size given only
-// as a launch attribute, so a captured graph would run without clusters. Device passes for other
-// architectures reject the attribute; their kernel is empty anyway.
+// Up to 15 splits the cluster size is a compile-time attribute: HIP stream capture drops a cluster
+// size given to hipLaunchKernelEx only, so a captured graph would run without clusters. Device
+// passes for other architectures reject the attribute; their kernel is empty anyway.
 #if !defined(__HIP_DEVICE_COMPILE__) || defined(__gfx125__)
 #define CK_TILE_FMHA_DECODE_PAGED5D_CLUSTER(n) __attribute__((cluster_dims(n, 1, 1)))
 #else
@@ -1018,6 +1030,15 @@ struct FmhaDecodePaged5dKernel
 template <typename Kernel>
 __global__ __launch_bounds__(Kernel::kBlockSize) CK_TILE_FMHA_DECODE_PAGED5D_CLUSTER(
     Kernel::kNumSplits) void fmha_decode_paged5d_entry(typename Kernel::Kargs kargs)
+{
+    Kernel{}(kargs);
+}
+
+// 16 splits: clang checks cluster_dims against 4 bits, so the cluster size comes with the launch,
+// through hipDrvLaunchKernelEx, whose stream capture keeps it.
+template <typename Kernel>
+__global__ __launch_bounds__(Kernel::kBlockSize) void fmha_decode_paged5d_entry_launch_cluster(
+    typename Kernel::Kargs kargs)
 {
     Kernel{}(kargs);
 }

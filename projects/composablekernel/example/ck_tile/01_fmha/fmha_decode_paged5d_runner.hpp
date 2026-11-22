@@ -30,19 +30,47 @@ hipError_t launch_one(const ck_tile::FmhaDecodePaged5dHostArgs& h, hipStream_t s
 {
     using K = ck_tile::FmhaDecodePaged5dKernel<kWaveSplit, kNumSplits, kGroups, kPageSize, kQoFp16>;
     auto kargs = K::MakeKargs(h);
-    hipLaunchConfig_t cfg{};
-    cfg.gridDim  = K::GridSize(h.batch, h.nhead_k, h.num_groups);
-    cfg.blockDim = K::BlockSize();
-    cfg.stream   = stream;
-    // must match the cluster_dims of the entry
     hipLaunchAttribute attr[1];
     attr[0].id               = hipLaunchAttributeClusterDimension;
     attr[0].val.clusterDim.x = kNumSplits;
     attr[0].val.clusterDim.y = 1;
     attr[0].val.clusterDim.z = 1;
-    cfg.attrs                = attr;
-    cfg.numAttrs             = 1;
-    return hipLaunchKernelEx(&cfg, ck_tile::fmha_decode_paged5d_entry<K>, kargs);
+    if constexpr(kNumSplits > 15)
+    {
+        // see fmha_decode_paged5d_entry_launch_cluster
+        static const hipFunction_t fn = [] {
+            hipFunction_t f = nullptr;
+            HIP_CHECK_ERROR(
+                hipGetFuncBySymbol(&f,
+                                   reinterpret_cast<const void*>(
+                                       &ck_tile::fmha_decode_paged5d_entry_launch_cluster<K>)));
+            return f;
+        }();
+        const dim3 grid = K::GridSize(h.batch, h.nhead_k, h.num_groups);
+        HIP_LAUNCH_CONFIG cfg{};
+        cfg.gridDimX    = grid.x;
+        cfg.gridDimY    = grid.y;
+        cfg.gridDimZ    = grid.z;
+        cfg.blockDimX   = K::kBlockSize;
+        cfg.blockDimY   = 1;
+        cfg.blockDimZ   = 1;
+        cfg.hStream     = stream;
+        cfg.attrs       = attr;
+        cfg.numAttrs    = 1;
+        void* params[1] = {&kargs};
+        return hipDrvLaunchKernelEx(&cfg, fn, params, nullptr);
+    }
+    else
+    {
+        hipLaunchConfig_t cfg{};
+        cfg.gridDim  = K::GridSize(h.batch, h.nhead_k, h.num_groups);
+        cfg.blockDim = K::BlockSize();
+        cfg.stream   = stream;
+        // must match the cluster_dims of the entry
+        cfg.attrs    = attr;
+        cfg.numAttrs = 1;
+        return hipLaunchKernelEx(&cfg, ck_tile::fmha_decode_paged5d_entry<K>, kargs);
+    }
 }
 
 template <bool kWaveSplit, bool kGroups, index_t kPageSize, bool kQoFp16, index_t... Ns>
@@ -65,7 +93,7 @@ hipError_t launch_page(const ck_tile::FmhaDecodePaged5dHostArgs& h,
                        const ck_tile::FmhaDecodePaged5dConfig& c,
                        hipStream_t stream)
 {
-    const auto seq = std::make_integer_sequence<index_t, 15>{};
+    const auto seq = std::make_integer_sequence<index_t, ck_tile::kMaxClusterSplits>{};
     if(c.num_groups > 1)
         return c.wave_split
                    ? dispatch<true, true, kPageSize, kQoFp16>(h, c.num_splits, stream, seq)
@@ -174,7 +202,7 @@ inline Result run(const Case& c, bool validate, int warmup = 0, int repeat = 0)
     {
         cfg.pages_per_split = (cfg.pages_per_split + lo_align - 1) / lo_align * lo_align;
         const index_t total = (span + cfg.pages_per_split - 1) / cfg.pages_per_split;
-        cfg.num_groups      = (total + 14) / 15;
+        cfg.num_groups      = (total + ck_tile::kMaxClusterSplits - 1) / ck_tile::kMaxClusterSplits;
         cfg.num_splits      = (total + cfg.num_groups - 1) / cfg.num_groups;
     }
     res.config = cfg;
