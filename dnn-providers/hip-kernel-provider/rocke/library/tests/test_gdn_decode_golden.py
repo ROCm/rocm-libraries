@@ -460,43 +460,42 @@ def _current_flavor():
     return _resolve_llvm_flavor()
 
 
-def _sha_for(build, flavor):
+def _sha_of(kernel, flavor):
     from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
 
-    llvm = _lower_kernel_to_llvm_python(build(), arch=_ARCH, llvm_flavor=flavor)
+    llvm = _lower_kernel_to_llvm_python(kernel, arch=_ARCH, llvm_flavor=flavor)
     data = llvm.encode("utf-8")
     return hashlib.sha256(data).hexdigest(), len(data)
 
 
-def _run(flavor):
-    """One flavor's golden sub-document, for ``check_golden``. A lowering error
-    propagates with its traceback."""
-    cases = {}
+def _run_flavors(flavors, failures=None):
+    """Each flavor's golden sub-document. Every case is built once and lowered at
+    each flavor. A build or lowering error propagates with its traceback, unless
+    ``failures`` is a list: then the case is left out and the error appended."""
+    cases = {flavor: {} for flavor in flavors}
     for cid, build in _cases().items():
-        sha, nbytes = _sha_for(build, flavor)
-        cases[cid] = {"sha256": sha, "bytes": nbytes}
-    return {"cases": cases}
+        try:
+            kernel = build()
+            records = {flavor: _sha_of(kernel, flavor) for flavor in flavors}
+        except Exception as exc:
+            if failures is None:
+                raise
+            failures.append(f"{cid}: {exc}")
+            continue
+        for flavor, (sha, nbytes) in records.items():
+            cases[flavor][cid] = {"sha256": sha, "bytes": nbytes}
+    return {flavor: {"cases": by_id} for flavor, by_id in cases.items()}
 
 
 def _build_doc():
     from rocke.core.ir_golden import GOLDEN_ALIASES, GOLDEN_PROFILE_FLAVORS
 
+    failures = []
     doc = {
         "schema": "gdn_decode_gfx950.ir_golden_sha256/v1",
         "aliases": GOLDEN_ALIASES,
-        "flavors": {},
+        "flavors": _run_flavors(GOLDEN_PROFILE_FLAVORS, failures),
     }
-    failures = []
-    for flavor in GOLDEN_PROFILE_FLAVORS:
-        cases = {}
-        for cid, build in _cases().items():
-            try:
-                sha, nbytes = _sha_for(build, flavor)
-            except Exception as exc:  # pragma: no cover - diagnostic only
-                failures.append(f"{flavor}/{cid}: {exc}")
-                continue
-            cases[cid] = {"sha256": sha, "bytes": nbytes}
-        doc["flavors"][flavor] = {"cases": cases}
     if failures:
         raise RuntimeError(
             "refusing to write golden fixture with lowering failures:\n  "
@@ -508,7 +507,7 @@ def _build_doc():
 def test_gdn_decode_ir_matches_golden():
     import pytest
     from rocke.core.golden_file import rerecord_hint
-    from rocke.core.ir_golden import check_golden
+    from rocke.core.ir_golden import GOLDEN_FLAVORS, check_golden
 
     if not _GOLDEN.exists():
         pytest.skip("gdn_decode golden fixture missing; generate with --write")
@@ -522,8 +521,10 @@ def test_gdn_decode_ir_matches_golden():
     ]
     assert not unrecorded, "\n  ".join(unrecorded)
     # Every flavor in LLVM_FLAVORS, from any host, so a datalayout or intrinsic
-    # change for a flavor this host does not run still fails here.
-    drift = check_golden(_GOLDEN, _run)
+    # change for a flavor this host does not run still fails here. GOLDEN_FLAVORS
+    # are the flavors check_golden compares when given none.
+    runs = _run_flavors(GOLDEN_FLAVORS)
+    drift = check_golden(_GOLDEN, runs.__getitem__)
     assert not drift, (
         "gdn_decode IR drift vs golden:\n  "
         + "\n  ".join(drift)
@@ -608,12 +609,12 @@ def test_config_coverage_rejects_entry_without_sha256(monkeypatch, tmp_path):
 def test_build_doc_refuses_lowering_failure(monkeypatch):
     import pytest
 
-    monkeypatch.setattr(sys.modules[__name__], "_cases", lambda: {"default": object()})
+    monkeypatch.setattr(sys.modules[__name__], "_cases", lambda: {"default": object})
 
     def fail_lowering(*_):
         raise RuntimeError("synthetic lowering failure")
 
-    monkeypatch.setattr(sys.modules[__name__], "_sha_for", fail_lowering)
+    monkeypatch.setattr(sys.modules[__name__], "_sha_of", fail_lowering)
 
     with pytest.raises(RuntimeError, match="refusing to write"):
         _build_doc()
@@ -635,8 +636,8 @@ def test_gate_kind_actually_moves_the_ir():
     gdn = GdnDecodeSpec()
     kda = _dc.replace(gdn, gate_kind="kda")
 
-    gdn_sha, _ = _sha_for(lambda: build_gdn_decode(gdn, arch=_ARCH), flavor)
-    kda_sha, _ = _sha_for(lambda: build_gdn_decode(kda, arch=_ARCH), flavor)
+    gdn_sha, _ = _sha_of(build_gdn_decode(gdn, arch=_ARCH), flavor)
+    kda_sha, _ = _sha_of(build_gdn_decode(kda, arch=_ARCH), flavor)
 
     assert gdn_sha != kda_sha, "gate_kind did not change the emitted IR"
     assert gdn.kernel_name() != kda.kernel_name(), "gate_kind did not change the name"
