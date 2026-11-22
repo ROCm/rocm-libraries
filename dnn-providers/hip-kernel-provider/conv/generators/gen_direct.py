@@ -233,10 +233,9 @@ def Z(atom, f, bm, bn, bc, wm, wn):
     """Z-ring tile (ConvDirectZring.h; ring 2): 3-D, 16-bit, 16x16 MFMA atoms; a tile of bm / 16
     rows x 16 columns x bn channels, one block per compute unit walking a balanced range of
     (tile, output plane) units along depth with the depth taps' output planes in its
-    accumulators. Forward only."""
+    accumulators. Forward and backward data (the forward form of dy)."""
     c = M(atom, f, bm, bn, bc, wm, wn, 8, ring=2)
     c["kind"] = "zring"
-    c["dirs"] = ("FWD",)
     return c
 
 
@@ -1021,9 +1020,9 @@ for dt, atom in (("HALF", "wmma125_f16"), ("BFLOAT16", "wmma125_bf16")):
     # Reuse the 3x3 input halo across twice as many output channels per block.
     add(dt, ["gfx1250"], [M(atom, F33, 64, 128, 32, 2, 4, 8)])
 
-# Z-ring tiles (forward 3x3x3, 16-bit), 2 x 4 waves, 32-channel stages, the 16x16x32 atom on gfx950:
-# 16 x 16 positions x 64 channels, and 8 x 16 positions x 128 channels (the same accumulators a
-# wave), whose block reads each input plane once for 128 output channels.
+# Z-ring tiles (3x3x3, 16-bit, forward and backward data), 2 x 4 waves, 32-channel stages, the
+# 16x16x32 atom on gfx950: 16 x 16 positions x 64 channels, and 8 x 16 positions x 128 channels
+# (the same accumulators a wave), whose block reads each input plane once for 128 output channels.
 for dt in ("HALF", "BFLOAT16"):
     e = x16(dt)
     for bm, bn in ((256, 64), (128, 128)):

@@ -365,11 +365,21 @@ std::optional<Tile> runTileFor(const K2Args& a, const Config& config, long long 
     return t;
 }
 
+/// Whether a z-ring config's tiles leave part of an output plane (columns past the last whole
+/// 16-column strip, or rows past the last whole tile row): the kernel then runs its edge tiles
+/// (K2Z_EDGES).
+bool zringEdges(const K2Args& a, const Config& config)
+{
+    return a.wo % 16 != 0 || a.ho % (config.bm / 16) != 0;
+}
+
 /// Z-ring tiles (zring configs): bm / 16 rows x 16 columns of every output plane; the grid's
 /// units are (tile, output plane) pairs, at least ZRING_MIN_PLANES per compute unit, and the
-/// launch is one block per unit (planFor). Declines what the tile does not serve: reduction
-/// channels that are not whole stages, output channels not a multiple of the 4-channel store, an
-/// image's output past the 32-bit buffer offsets, or too few units.
+/// launch is one block per unit (planFor). With edges, the whole 16-column strips (tilesW) take
+/// tilesH tile rows each, and the columns left over take tilesD narrow tiles: wave row 0's
+/// bm / 16 / wm fragments, each 16 / rem rows of the rem columns. Declines what the tile does not
+/// serve: reduction channels that are not whole stages, output channels not a multiple of the
+/// 4-channel store, an image's output past the 32-bit buffer offsets, or too few units.
 std::optional<Tile> zringTileFor(const DirectProblem& problem,
                                  const Config& config,
                                  long long columnBlocks,
@@ -389,8 +399,17 @@ std::optional<Tile> zringTileFor(const DirectProblem& problem,
     t.tilesW = static_cast<int>(divUp(a.wo, t.tw));
     t.tilesH = static_cast<int>(divUp(a.ho, t.th));
     t.tilesD = 1;
-    const long long units
-        = static_cast<long long>(t.tilesW) * t.tilesH * a.n * columnBlocks * a.dout;
+    long long tilesPer = static_cast<long long>(t.tilesW) * t.tilesH;
+    if(zringEdges(a, config))
+    {
+        const int rem = a.wo % 16;
+        t.tilesW = a.wo / 16;
+        t.tilesD = rem > 0
+                       ? static_cast<int>(divUp(a.ho, (config.bm / 16 / config.wm) * (16 / rem)))
+                       : 0;
+        tilesPer = static_cast<long long>(t.tilesW) * t.tilesH + t.tilesD;
+    }
+    const long long units = tilesPer * a.n * columnBlocks * a.dout;
     if(units > INT_LIMIT || units < ZRING_MIN_PLANES * computeUnits)
     {
         return std::nullopt;
@@ -820,8 +839,16 @@ int64_t zringLdsBytes(const Config& config, std::string_view gcnArchName)
     }
     const int64_t period
         = hipdnn_plugin_sdk::stripArchFeatures(gcnArchName).rfind("gfx95", 0) == 0 ? 16 : 8;
-    const int64_t positions
-        = static_cast<int64_t>(config.bm / 16 + config.r - 1) * (16 + config.s - 1);
+    // The stage holds a whole tile's or (edge tiles) a narrow tile's, whichever is more:
+    // k2zNarrowSlots in the kernel.
+    int64_t positions = static_cast<int64_t>(config.bm / 16 + config.r - 1) * (16 + config.s - 1);
+    for(int w = 1; w < 16; ++w)
+    {
+        positions = std::max<int64_t>(
+            positions,
+            static_cast<int64_t>(config.bm / 16 / config.wm * (16 / w) + config.r - 1)
+                * (w + config.s - 1));
+    }
     const int64_t padded = (positions + period - 1) / period * period;
     // 16-byte chunks of the 16-bit operand: bc / 8 per position.
     return 2 * (padded * (config.bc / 8) * 16 + 16);
@@ -1435,6 +1462,12 @@ public:
         else if(config.zring)
         {
             options.add("CONV_DIRECT_ZRING", std::string("1"));
+            // Edge tiles only where an output plane is not whole tiles: the other graphs keep
+            // the code without them.
+            if(zringEdges(run->problem.args, config))
+            {
+                options.add("K2Z_EDGES", std::string("1"));
+            }
             options.add("CONV_DIRECT_ATOM", std::string(config.kernelType));
             options.add("CONV_DIRECT_BM", std::to_string(config.bm));
             options.add("CONV_DIRECT_BN", std::to_string(config.bn));
