@@ -5,10 +5,10 @@ SPDX-License-Identifier:  MIT
 
 # CONV_DIRECT (K2) — stride-1 direct convolution on matrix cores, halo tiles and filter-row reuse
 
-> Engine ids: `hipkernel:CONV_DIRECT_FWD`, `hipkernel:CONV_DIRECT_BWD` · Generator: `conv/generators/gen_direct.py` · Kernels: `src/engines/kernel_ingestor_engine/descriptors/conv/direct/kernels/` (`ConvDirect.cpp`, `ConvDirectCore.h`, `ConvDirectRows.h`, `ConvDirectArgs.h`) · Pack: `packs/ConvDirectNative.cpp`, `packs/ConvDirectProblem.hpp`
+> Engine ids: `hipkernel:CONV_DIRECT_FWD`, `hipkernel:CONV_DIRECT_BWD` · Generator: `conv/generators/gen_direct.py` · Kernels: `src/engines/kernel_ingestor_engine/descriptors/conv/direct/kernels/` (`ConvDirect.cpp`, `ConvDirectCore.h`, `ConvDirectRows.h`, `ConvDirectZring.h`, `ConvDirectArgs.h`) · Pack: `packs/ConvDirectNative.cpp`, `packs/ConvDirectProblem.hpp`
 
 ## At a glance
-- **What:** direct convolution with every filter tap run as a small GEMM over an LDS-staged input window. Two kernel kinds: the halo tile (`mma`, `fma`) and `rows`, hipconv's filter-row-reuse form with LDS DMA and a persistent tile walk.
+- **What:** direct convolution with every filter tap run as a small GEMM over an LDS-staged input window. Three kernel kinds: the halo tile (`mma`, `fma`); `rows`, hipconv's filter-row-reuse form with LDS DMA and a persistent tile walk; and the forward 3-D `zring` tile, which keeps the filter depth's output planes in its accumulators and stages each input plane once per workgroup range.
 - **Covers:** forward and backward data. fp32, fp16 and bf16; a three-bf16 fp32 form in the `CONV_DIRECT_FWD/BWD_TF32` sibling engines. Any activation layout: channels-last is native; packed channels-first 16-bit 2-D graphs run in place on gfx950 (`rows` `cf`) and are staged elsewhere; other layouts are staged. 2-D and 3-D; 1-D graphs (and 2-D ones of one row) under 1 x S filters on the `rows` line configs.
 - **Geometry limits:** filters 3x3, 5x5, 7x7, 1x7, 7x1, 3x3x3 and 5x5x5, and 1x3, 1x5, 1x7 and 1x11 on one-row images, fixed at compile time. Groups 1, stride 1. Dilation 1, or the dilation a `rows` config fixes: 2 and 4 for 2-D 3x3, 3 and 5 for one-row 1 x S (an axis the filter does not span takes any dilation). Any padding, asymmetric included, and both convolution modes.
 - **Large tensors:** served past 2 GiB as long as one forward-form input image stays under 2 GiB (32-bit offsets inside an image, 64-bit image bases).
@@ -20,7 +20,7 @@ SPDX-License-Identifier:  MIT
   - NCHW 16-bit 3x3 usually goes to `CONV_WINOGRAD`;
   - anything strided or grouped, and dilations the `rows` configs do not fix (DeepLab's 6-36), go to `CONV_IGEMM`.
 - **Precision:** fp32 accumulation of exact products, rounded once at the store (split-C sums fp32 partials in a fixed order). Deterministic. No numerical note on the exact engines; the TF32 siblings report `TENSOR_CORE`.
-- **Instances:** 1560 exact configs, 780 per direction: 252 halo-tile MMA, 196 2-D and 3-D `rows` (70 of them channels-first `cf`, 30 dilated), 288 `rows` line tiles, 44 FMA (the floor on every architecture); and 18 three-bf16 per direction in the TF32 siblings. Each matrix-core config ships only to the architecture groups whose autotuned sweeps it won (`archs`).
+- **Instances:** 1640 exact configs: 816 per direction (284 halo-tile MMA, 200 2-D and 3-D `rows` (70 of them channels-first `cf`, 30 dilated), 288 `rows` line tiles, 44 FMA, the floor on every architecture) and 8 forward `zring` tiles; and 21 three-bf16 per direction in the TF32 siblings. Each matrix-core config ships only to the architecture groups whose autotuned sweeps it won (`archs`).
 - **vs MIOpen:** usage-weighted speedup on the subset graphs where K2 is our fastest engine: 1.49x gfx950, 1.23x gfx942, 1.22x gfx90a, 1.03x gfx908, 2.16x gfx906, 2.80x gfx1201, 3.88x gfx1100. MIOpen ran in search mode.
 
 ## Why it exists
@@ -55,6 +55,18 @@ A 128-pixel run of a 16-wide strip is 8 whole rows, so its halo is the 8 x 16 ti
 3-D has two modes, both configs:
 - **ring** streams each input plane once into KD rotating accumulator sets; the plane loop is unrolled by KD, so set indices are compile-time.
 - **non-ring** keeps one accumulator set and re-stages the KD input planes of each output plane (L2 hits).
+
+**Z-ring tile (`zring`, forward 3-D, 16-bit, 16x16 MFMA atoms).** The ring lives in the accumulators, not in LDS. Output planes are numbered in the order (tile, z), a tile being bm / 16 rows x 16 columns x bn channels of one image; the launch has one workgroup per compute unit, and workgroup b takes the b-th of that many contiguous ranges (lengths within one plane of each other), one pencil per tile it touches:
+
+```
+for each pencil (tile, output planes zs .. zs+L-1):
+    for each input plane zs - pd + t, t = 0 .. L + KD - 2:          # each staged once
+        for each 32-channel chunk: stage the plane's (bm/16 + R-1) x (16 + S-1) halo in LDS (double-buffered)
+            for each (r, s, depth tap dz):  acc[dz] += halo shifted by (r, s)  x  W[dz, r, s]
+        store acc[KD-1] (output plane zs + t - KD + 1); shift the ring: acc[dz] <- acc[dz-1], acc[0] <- 0
+```
+
+Each input element is fetched about (bm/16 + R - 1)(16 + S - 1) / (bm/16 x 16) times (1.27 for the 16 x 16 tile) instead of once per depth tap. LDS is chunk-major ([16-byte channel chunk][position]), each chunk's positions padded to the target's conflict-free period for 128-bit reads (128 bytes on gfx942, 256 on gfx950), so a 16-lane fragment read covers 16 consecutive slots of one chunk. Waves are 2 along the rows x 4 along the channels; a wave reads its A fragments of a (r, s, chunk) once (16 bytes a lane) and applies them to all KD depth taps. The weights are formatted with ka = 64 bytes of channels (32 16-bit), so a fragment load reads whole 128-byte lines, and prefetched 5 items ahead on gfx942 and 8 on gfx950, carried across chunks. The MMA takes the weights as its first operand, so a lane's result is 4 consecutive output channels of one position, stored as one vector with the row offset in the scalar operand. Prologue, steady and epilogue steps are three loops (the edge steps guard each depth tap with a uniform branch): one loop with a uniform if/else keeps both branches' accumulators live. Two tiles ship on gfx942 and gfx950: 16 x 16 x 64 and 8 x 16 x 128 (the same accumulators a wave; one input-plane read per 128 output channels).
 
 Weight fragments come straight from global memory (L1/L2-resident), prefetched a few steps ahead in registers. `xpf 1` configs keep that register ring across channel chunks: a chunk's last steps load the next chunk's first steps, so a chunk starts with its weights in flight and only its halo waits on the barrier. `bl 1` configs instead stage per-tap weight tiles in LDS. The FMA kernel keeps an fp32 channel-major halo and slides TM + S - 1 values across the S taps.
 
@@ -107,6 +119,7 @@ Weight fragments come straight from global memory (L1/L2-resident), prefetched a
 - **Planner.**
   - Halo tile: picks `tw`, then the largest `th` whose halo fits the compile-time LDS bound, minimizing padded pixel slots plus halo loads. Run tiles: 16-column strips and the columns left over (`runTileFor`), each strip's raster in runs of BM. Depth is split until there are 4 (ring) or 8 blocks per dispatch unit (`DeviceUnits.hpp`: CUs on gfx9, WGPs on gfx10+).
   - Split-C, halo tile: only below 2 blocks per unit, with at least 2 chunks per split and at most 16 splits. A grid that needs no split declines the split config; its split-0 twin runs the same tile in one launch.
+  - `zring` tiles are fixed (bm / 16 x 16), and the grid is min(units, dispatch units), units being (tile, output channel block, output plane) triples. Admitted only with whole 32-channel stages, output channels a multiple of 4, an output image under 2^31 bytes, and at least `ZRING_MIN_PLANES` (6) units per dispatch unit, so each range's KD - 1 partial edge steps at both ends are a small share of it.
   - `rows` tiles are fixed, and the grid is min(tiles, bpu x units): `bpu` blocks resident per unit (1 to 3, each with its own halo stages, all within the device's LDS), so one block's chunk DMA, transposes and barriers overlap another's MMAs. A line tile is wp pw x 16 wq columns of the row. Rows split-C runs only where the tiles leave three quarters of the units idle: it measured 1.4x on n1 c640 64², but 0.7-0.9x at 128-250 tiles.
   - gfx950 16-bit rows tiles smaller than 16 x 32 x 128 decline past 8 persistent rounds, where the large tile is ahead. Tiles compare by the output channels they compute (on K < 128 the reference tile's columns past K are idle, so a tile as wide as K is not smaller), and bpu resident blocks as one bpu times larger tile.
 - **Workspace.** In order: staged activations (none for `cf`), formatted weights, the three-bf16 input copy, then split partials. Each region is 256-byte aligned. Non-channels-last activations go through K1's tiled transpose (packed channels-first) or a strided copy. The weight pre-pass runs on every execution; its 16-byte form costs about 0.016 ms on a 384x384x27 bf16 filter on gfx1201. Backward data with channels-last filter rows formats VEC x VEC squares: VEC output channels' 16-byte runs, transposed in registers into the input channels' 16-byte run pieces.
@@ -169,6 +182,7 @@ Measured with autotune (fresh cache), our engines only, against MIOpen in search
   - Wan VAE 3x3x3 bf16 (fwd 0.54-0.85x of MIOpen's time, bwd 0.36-0.47x on gfx90a-gfx950);
   - SD/SDXL/Flux VAE and UNet NHWC 3x3 on CDNA2/3 and RDNA;
   - nnU-Net fp32 NCHW 3-D on RDNA (50-100x, against MIOpen's naive kernels).
+  - deep 16-bit 3x3x3 forward layers (many output planes per compute unit), `zring` against the halo tiles (autotuned, fresh cache, 20 iterations, three interleaved rounds in both orders, engine alone): MI300A 1.03-1.13x (roofline efficiency 46-52% -> 51-55%; at the 550 W cap 71% -> 81% of the power-capped ceiling, L2 reads per MFMA 0.81 -> 0.35, VALU 0.56 -> 0.17, energy 9.6 -> 8.4 nJ per MFMA), MI355X 1.05-1.06x where it is admitted and faster than `rows`. Over the K2-won corpus graphs (80% of K2's forward time) it is neutral: no graph repeatably slower on MI300A or gfx950 (geomean 1.00x on both), one Wan VAE c192 3-D layer 1.02-1.03x on MI300A; shallow Wan VAE outputs (4-6 planes) and the gfx950 `rows` tiles keep their layers.
   - nnU-Net fp32 3x3x3 K = 32 layers on gfx942: the 256 x 32 tile at 8-channel chunks and the streaming twin of its 16-channel form, 1.02x forward on MI325X (1.00-1.04x per layer; 34 fp32 3-D layers, all engines, autotuned, two interleaved rounds, none repeatably slower).
   - `rows` measured 1.28x over the halo tile on gfx950 (Flux c256 768²), and its gfx90a ping-pong tiles 1.04-1.12x over the halo tile from 256 channels.
 - **Weak:**
@@ -201,23 +215,25 @@ Measured with autotune (fresh cache), our engines only, against MIOpen in search
 No code was copied.
 
 ## Next steps and deferred ideas
-1. **gfx950's largest VAE maps vs `ConvHipConv`** (1.01-1.03x behind on 384²-1024² layers). Measured and not adopted: a row-fastest tile walk (no gain) and hipconv's DMA spread over every step with the drain after the last step's MMAs (0.2-0.3% faster, within run-to-run spread). csplit and dynamic XCD claiming remain unported.
-2. **3x3x3 on gfx90a/gfx942 against CK at 384 channels.** On gfx90a, rows3d measured 1.07-1.14x over the halo tile on 96-channel Wan VAE layers and 1.08x on one 384-channel layer. Wider rows3d tiles, or K-fill tiles for 384, are the candidates. Dense 3x3x3 is the largest single block of our CDNA time.
-3. **Generic tier** (runtime filter for other sizes, 1-D): low priority, because `CONV_IGEMM` already serves those graphs.
-4. **Images past 2 GiB:** a block-based-buffer variant on the generic tier only, so normal graphs gain no candidates. `CONV_IGEMM` serves these today.
-5. **`cf` beyond gfx950**: gfx90a/gfx942 have dword LDS DMA but no transpose read; the transpose would need `ds_read_u16` gathers. The `cf` epilogue stores 2-byte elements; an LDS-staged channels-first epilogue is untried.
-6. **RDNA `rows`**: needs a wave32 lane map and a register-staged fill (no LDS DMA). Low payoff: RDNA losses in this class are Winograd-served NCHW shapes.
+1. **`zring` follow-ups.** Backward data through the same kernel (dy as the input, the flipped filter, padding F - 1 - p) is unported: on gfx942 the rows kernels already re-read each input row about 3 times and the ragged output widths of unpadded backward data leave 16-wide tiles partly idle. With few channel stages a step, the per-step store, rounding and ring shift are a larger share (VALU 0.33 per MFMA at two stages against 0.17 at four); overlapping the finished plane's store with the next step's MMAs needs registers the tile does not have.
+2. **gfx950's largest VAE maps vs `ConvHipConv`** (1.01-1.03x behind on 384²-1024² layers). Measured and not adopted: a row-fastest tile walk (no gain) and hipconv's DMA spread over every step with the drain after the last step's MMAs (0.2-0.3% faster, within run-to-run spread). csplit and dynamic XCD claiming remain unported.
+3. **3x3x3 on gfx90a/gfx942 against CK at 384 channels.** On gfx90a, rows3d measured 1.07-1.14x over the halo tile on 96-channel Wan VAE layers and 1.08x on one 384-channel layer. Wider rows3d tiles, or K-fill tiles for 384, are the candidates. Dense 3x3x3 is the largest single block of our CDNA time.
+4. **Generic tier** (runtime filter for other sizes, 1-D): low priority, because `CONV_IGEMM` already serves those graphs.
+5. **Images past 2 GiB:** a block-based-buffer variant on the generic tier only, so normal graphs gain no candidates. `CONV_IGEMM` serves these today.
+6. **`cf` beyond gfx950**: gfx90a/gfx942 have dword LDS DMA but no transpose read; the transpose would need `ds_read_u16` gathers. The `cf` epilogue stores 2-byte elements; an LDS-staged channels-first epilogue is untried.
+7. **RDNA `rows`**: needs a wave32 lane map and a register-staged fill (no LDS DMA). Low payoff: RDNA losses in this class are Winograd-served NCHW shapes.
 
 ## Tests
 - `src/tests/engines/kernel_ingestor_engine/packs/TestConvDirectProblem.cpp` (host, no device):
   - **Gates:** each gated field refused one at a time; the buffer-range and LDS declines; ship lists and arch families; malformed metadata; cuDNN compute types.
-  - **Planner:** tile versus halo bound, split and unfold rules, the small-tile decline, the rows one-block-per-unit grid.
+  - **Planner:** tile versus halo bound, split and unfold rules, the small-tile decline, the rows one-block-per-unit grid, the `zring` tile, grid and declines (units per unit, stage channels, 4-channel stores, output image size) and its LDS at each read period.
   - **TF32:** three-bf16 admitted only for fp32 graphs.
 - `TestGpuConvDirect.cpp` (device):
   - every admitted config on fp32/fp16/bf16, forward and backward data;
   - NHWC and staged NCHW, asymmetric padding, convolution mode, a split-C case;
   - the three-bf16 forms under the switch, and planted infinities (native and three-bf16);
   - the determinism relaunch;
+  - `zring` on a case whose depth is sized from the device's units (so the planner admits it): fp16, bf16, bf16 with planted infinities between NaN guards, and a fused bias + relu; partial tile rows, columns and channel blocks, asymmetric depth padding, ranges crossing tiles;
   - every config parses, and every filter/dtype has a config on every architecture.
 - `TestConvDescriptorShards.cpp` checks the shipped shards' numerical notes (exact engines none, TF32 siblings `TENSOR_CORE`; all deterministic) and that only the TF32 siblings list three-bf16 configs.
 - No in-repo device test goes past 2 GiB. The large-tensor runs use sampled fp64 checks outside the unit suites.
