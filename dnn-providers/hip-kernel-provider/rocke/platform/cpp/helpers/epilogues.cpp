@@ -548,12 +548,9 @@ void rocke_cshuffle_epilogue_store(rocke_ir_builder_t* b,
                     ld_n = rocke_b_add(b, tile_n_base, col_in_atom);
                     idx[0] = ld_m;
                     idx[1] = ld_n;
-                    if(_fp32_out)
-                        rocke_b_smem_store_vN_f32(b, c_smem, idx, 2, elems[i], 1);
-                    else if(_bf16_out)
-                        rocke_b_smem_store_vN(b, c_smem, idx, 2, elems[i], 1);
-                    else
-                        rocke_b_smem_store_vN_f16(b, c_smem, idx, 2, elems[i], 1);
+                    /* store_tile_cshuffle: b.smem_store_vN(base, coords, scalar, 1)
+                     * for every output dtype. */
+                    rocke_b_smem_store_vN(b, c_smem, idx, 2, elems[i], 1);
                 }
             }
         }
@@ -845,12 +842,9 @@ void rocke_cshuffle_epilogue_atomic_store_addr(rocke_ir_builder_t* b,
                     ld_n = rocke_b_add(b, tile_n_base, col_in_atom);
                     idx[0] = ld_m;
                     idx[1] = ld_n;
-                    if(_fp32_out)
-                        rocke_b_smem_store_vN_f32(b, c_smem, idx, 2, elems[i], 1);
-                    else if(_bf16_out)
-                        rocke_b_smem_store_vN(b, c_smem, idx, 2, elems[i], 1);
-                    else
-                        rocke_b_smem_store_vN_f16(b, c_smem, idx, 2, elems[i], 1);
+                    /* store_tile_cshuffle: b.smem_store_vN(base, coords, scalar, 1)
+                     * for every output dtype. */
+                    rocke_b_smem_store_vN(b, c_smem, idx, 2, elems[i], 1);
                 }
             }
         }
