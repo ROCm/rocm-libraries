@@ -25,6 +25,7 @@ int main(int argc, char* argv[])
         .insert("layout", "auto", "auto, coop or wave")
         .insert("v", "1", "validate against the CPU reference")
         .insert("seed", "1", "random seed")
+        .insert("needles", "0", "inputs that count every key instead of random ones")
         .insert("warmup", "10", "warmup launches")
         .insert("repeat", "100", "timed launches");
     if(!arg_parser.parse(argc, argv))
@@ -45,6 +46,7 @@ int main(int argc, char* argv[])
     c.page_size         = arg_parser.get_int("page_size");
     c.fp16              = arg_parser.get_str("prec") == "fp16";
     c.seed              = arg_parser.get_int("seed");
+    c.needles           = arg_parser.get_bool("needles");
     const bool validate = arg_parser.get_bool("v");
 
     const auto r = fmha_decode_paged5d::run(
@@ -55,8 +57,11 @@ int main(int argc, char* argv[])
         return -1;
     }
     if(validate)
-        std::printf(
-            "max abs err %.4g (max |ref| %.4g), cos %.6f, ", r.max_err, r.max_ref, r.cosine);
+        std::printf("max abs err %.4g (max |ref| %.4g), cos %.6f, row err/tol %.3f, ",
+                    r.max_err,
+                    r.max_ref,
+                    r.cosine,
+                    r.row_err);
     std::printf(
         "%s b:%d h:%d/%d s_k:%d page:%d window:%d layout:%s groups:%d splits:%d pages/split:%d, "
         "stream %.2f us, graph %.2f us%s\n",

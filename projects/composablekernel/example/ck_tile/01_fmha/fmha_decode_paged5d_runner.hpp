@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <numeric>
 #include <random>
 #include <string>
@@ -24,6 +25,10 @@ namespace fmha_decode_paged5d {
 using ck_tile::index_t;
 constexpr index_t kHdim = 128;
 constexpr index_t kPage = 16;
+// needle keys (Case::needles): fp8 codes of 1 and 32, dims of K one query row looks at
+constexpr uint8_t kFp8One       = 0x38;
+constexpr uint8_t kFp8ThirtyTwo = 0x60;
+constexpr index_t kNeedleDims   = kHdim / 16;
 
 template <bool kWaveSplit, index_t kNumSplits, bool kGroups, index_t kPageSize, bool kQoFp16>
 hipError_t launch_one(const ck_tile::FmhaDecodePaged5dHostArgs& h, hipStream_t stream)
@@ -153,12 +158,14 @@ struct Case
     index_t page_size       = 16;        // tokens per cache page: 16, 64 or 128
     bool fp16               = false;     // fp16 Q and output instead of bf16
     unsigned seed           = 1;
+    bool needles            = false; // needle keys instead of random inputs, see run()
 };
 
 struct Result
 {
     bool valid     = false; // set only when validated
     double max_err = 0, max_ref = 0, cosine = 0;
+    double row_err = 0; // largest error of an output row over the row's tolerance
     ck_tile::FmhaDecodePaged5dConfig config{};
     float us_stream = 0, us_graph = 0; // set only when timed
     bool graph_same = true;            // graph replay wrote the output of a stream launch
@@ -168,6 +175,14 @@ struct Result
 // Runs one case: random Q (bf16 or fp16), K/V (finite fp8 in [-1, 1], pages in a random order, the
 // unused tail of each sequence's last page filled with NaN codes), a workspace filled with NaN
 // codes, then validates against a CPU reference and/or times stream and HIP-graph launches.
+//
+// Random keys cannot show one key lost or counted twice: among thousands it moves the output less
+// than the fp8 rounding of P does. Case::needles makes single keys visible. The keys on both
+// sides of every 16-token page boundary, the window's first key, the key before it and the newest
+// key become needles, handed to the query rows of a kv head in turn: Q of a row is nonzero in 8
+// dims of its own, K of its needles is large in those dims and zero elsewhere, V of a needle is
+// one-hot. The output of a row is then the mean of the V of its needles inside the window, and
+// each of them accounts for 1 / count of one output element.
 inline Result run(const Case& c, bool validate, int warmup = 0, int repeat = 0)
 {
     Result res;
@@ -221,12 +236,18 @@ inline Result run(const Case& c, bool validate, int warmup = 0, int repeat = 0)
     const auto v_off = [&](index_t tok, index_t d) {
         return (tok / 16) * kHdim * 16 + d * 16 + tok % 16;
     };
+    const index_t gqa = c.nhead / c.nhead_k;
     std::vector<uint16_t> q(static_cast<size_t>(batch) * c.nhead * kHdim);
-    for(auto& x : q)
-        x = c.fp16 ? ck_tile::bit_cast<uint16_t>(
-                         ck_tile::type_convert<ck_tile::fp16_t>(2.f * uni(rng)))
-                   : ck_tile::bit_cast<uint16_t>(
-                         ck_tile::type_convert<ck_tile::bf16_t>(2.f * uni(rng)));
+    for(size_t i = 0; i < q.size(); ++i)
+    {
+        float x = 0.f;
+        if(!c.needles)
+            x = 2.f * uni(rng);
+        else if((i % kHdim) / kNeedleDims == (i / kHdim) % gqa)
+            x = 2.f;
+        q[i] = c.fp16 ? ck_tile::bit_cast<uint16_t>(ck_tile::type_convert<ck_tile::fp16_t>(x))
+                      : ck_tile::bit_cast<uint16_t>(ck_tile::type_convert<ck_tile::bf16_t>(x));
+    }
     const auto qo_to_float = [&](uint16_t x) {
         return c.fp16 ? fp16_to_float(x) : bf16_to_float(x);
     };
@@ -246,6 +267,11 @@ inline Result run(const Case& c, bool validate, int warmup = 0, int repeat = 0)
     std::shuffle(perm.begin(), perm.end(), rng);
     std::vector<int32_t> block_table(static_cast<size_t>(batch) * max_blocks, 0);
     std::vector<int32_t> seqlens32(seqlens.begin(), seqlens.end());
+    const auto window_lo = [&](index_t sk) {
+        return c.window > 0 ? std::max(0, sk - c.window) : 0;
+    };
+    // needle tokens of each sequence, ascending; needle i belongs to row i % gqa of the kv head
+    std::vector<std::vector<index_t>> needles(batch);
     {
         size_t next = 0;
         for(index_t b = 0; b < batch; ++b)
@@ -264,6 +290,32 @@ inline Result run(const Case& c, bool validate, int warmup = 0, int repeat = 0)
                             (static_cast<size_t>(last) * c.nhead_k + hk) * page_bytes;
                         k[base + k_off(tok, d)] = 0x7f;
                         v[base + v_off(tok, d)] = 0x7f;
+                    }
+            if(!c.needles)
+                continue;
+            auto& n = needles[b];
+            n       = {window_lo(seqlens[b]) - 1, window_lo(seqlens[b]), seqlens[b] - 1};
+            for(index_t t = kPage; t < seqlens[b]; t += kPage)
+            {
+                n.push_back(t - 1);
+                n.push_back(t);
+            }
+            std::sort(n.begin(), n.end());
+            n.erase(std::unique(n.begin(), n.end()), n.end());
+            n.erase(n.begin(), std::lower_bound(n.begin(), n.end(), 0));
+            for(size_t i = 0; i < n.size(); ++i)
+                for(index_t hk = 0; hk < c.nhead_k; ++hk)
+                    for(index_t d = 0; d < kHdim; ++d)
+                    {
+                        const size_t base =
+                            (static_cast<size_t>(block_table[b * max_blocks + n[i] / ps]) *
+                                 c.nhead_k +
+                             hk) *
+                            page_bytes;
+                        const bool row_dim = d / kNeedleDims == static_cast<index_t>(i % gqa);
+                        const bool v_dim   = d == static_cast<index_t>(i / gqa % kHdim);
+                        k[base + k_off(n[i] % ps, d)] = row_dim ? kFp8ThirtyTwo : 0;
+                        v[base + v_off(n[i] % ps, d)] = v_dim ? kFp8One : 0;
                     }
         }
     }
@@ -318,12 +370,11 @@ inline Result run(const Case& c, bool validate, int warmup = 0, int repeat = 0)
     {
         std::vector<uint16_t> out(q.size());
         o_buf.FromDevice(out.data());
-        const index_t gqa = c.nhead / c.nhead_k;
         double dot = 0, nr = 0, ng = 0;
         for(index_t b = 0; b < batch; ++b)
         {
             const index_t sk = seqlens[b];
-            const index_t lo = c.window > 0 ? std::max(0, sk - c.window) : 0;
+            const index_t lo = window_lo(sk);
             for(index_t hq = 0; hq < c.nhead; ++hq)
             {
                 const index_t hk     = hq / gqa;
@@ -352,24 +403,37 @@ inline Result run(const Case& c, bool validate, int warmup = 0, int repeat = 0)
                     for(index_t d = 0; d < kHdim; ++d)
                         o[d] += p * fp8_to_float(v[page_base(t) + v_off(t % ps, d)]);
                 }
+                double row_err = 0, row_ref = 0;
+                bool row_finite = true;
                 for(index_t d = 0; d < kHdim; ++d)
                 {
                     const double ref = l > 0 ? o[d] / l * v_descale : 0.0;
                     const double got =
                         qo_to_float(out[(static_cast<size_t>(b) * c.nhead + hq) * kHdim + d]);
-                    res.max_err = std::max(res.max_err, std::fabs(ref - got));
-                    res.max_ref = std::max(res.max_ref, std::fabs(ref));
+                    row_finite = row_finite && std::isfinite(got);
+                    row_err    = std::max(row_err, std::fabs(ref - got));
+                    row_ref    = std::max(row_ref, std::fabs(ref));
                     dot += ref * got;
                     nr += ref * ref;
                     ng += got * got;
                 }
+                index_t seen = 0;
+                for(size_t i = hq % gqa; i < needles[b].size(); i += gqa)
+                    seen += needles[b][i] >= lo ? 1 : 0;
+                // A row of needles: a quarter of what one key lost or counted twice moves an
+                // element. Other rows carry the fp8 rounding of Q and P, a few percent of the
+                // row's largest output.
+                const double tol =
+                    seen > 0 ? 0.25 * v_descale / seen : 0.1 * std::max(row_ref, 1e-3);
+                res.row_err =
+                    std::max(res.row_err,
+                             row_finite ? row_err / tol : std::numeric_limits<double>::infinity());
+                res.max_err = std::max(res.max_err, row_err);
+                res.max_ref = std::max(res.max_ref, row_ref);
             }
         }
         res.cosine = nr + ng <= 0.0 ? 1.0 : dot / std::sqrt(nr * ng + 1e-300);
-        // fp8 Q and P: the output follows the reference direction tightly, element errors stay
-        // a few percent of the largest output
-        res.valid = std::isfinite(res.max_err) && res.cosine > 0.999 &&
-                    res.max_err < 0.05 * std::max(res.max_ref, 1e-3);
+        res.valid  = res.row_err < 1.0 && res.cosine > 0.999;
     }
 
     if(repeat > 0)
