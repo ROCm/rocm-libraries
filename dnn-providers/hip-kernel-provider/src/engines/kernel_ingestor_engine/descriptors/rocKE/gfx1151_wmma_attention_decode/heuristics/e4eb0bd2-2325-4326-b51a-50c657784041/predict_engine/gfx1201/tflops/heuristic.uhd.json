@@ -1,7 +1,7 @@
 {
   "version": "1.0",
-  "id": "7695d498-1c8a-4152-bac1-29b232d6acaf",
-  "name": "hipkernel:Gfx1151WmmaAttentionDecode (gfx1201, 9 contribution(s))",
+  "id": "d9d84cda-db94-4dc2-a4ae-ace3e992af3f",
+  "name": "hipkernel:Gfx1151WmmaAttentionDecode (gfx1201, 18 contribution(s))",
   "adapter": "tree_data",
   "features_signature": [
     "$device.total_global_mem",
@@ -589,6 +589,6 @@
   },
   "tree_data": {
     "artifact": "model.bin",
-    "hash": "03e08ccfbbcdfe7660a4655bfcd865b68b92c0a1fe059f6fbfa78ab32572ed6a"
+    "hash": "49afa497ee60d0a448844c388145dd7cf0fb6c4e5a8b2dbd12330b1d33b28ca9"
   }
 }

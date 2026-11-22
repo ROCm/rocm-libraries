@@ -13,7 +13,7 @@
   "knobs": [
     "head_size",
     "head_size_v"
-    ],
+  ],
   "behavior_notes": [
     "supports_graph_capture"
   ],
@@ -22,13 +22,13 @@
       "7d0b7a91-f44b-4b9d-82bc-6dabdb1e2c3e"
     ],
     "gfx1100": [
-      "876ede73-3898-4499-9702-02aaad4637be"
+      "0694b5e1-01fb-4fc1-91a2-4fe81ebcac5a"
     ],
     "gfx1201": [
-      "b141ce73-e0c4-4ab6-bf6b-0ccfd038562a"
+      "a3eef274-65c6-4eda-9a7d-4d5c9d16128e"
     ],
     "gfx1101": [
-      "9289b038-cc70-487a-9368-e03c142050c1"
+      "52506bc7-0df7-41c1-abcb-c3e1cd608c9a"
     ]
   }
 }

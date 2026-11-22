@@ -1,8 +1,8 @@
 {
   "version": "1.0",
-  "id": "b141ce73-e0c4-4ab6-bf6b-0ccfd038562a",
-  "name": "hipkernel:Gfx1151WmmaAttention (gfx1201, 46 contribution(s))",
-  "adapter": "tree_data",
+  "id": "a3eef274-65c6-4eda-9a7d-4d5c9d16128e",
+  "name": "hipkernel:Gfx1151WmmaAttention (gfx1201, 88 contribution(s))",
+  "adapter": "mlp_data",
   "features_signature": [
     "$device.total_global_mem",
     "$gfx1151_wmma_attention.bias",
@@ -578,7 +578,7 @@
         "revision": "1.0"
       }
     ],
-    "selector_revision": "generic-untuned-v1/e25b59995b2b5a14695bcc9e83403326ce329aedef69dcbf6bea6d68bdab7c48",
+    "selector_revision": "generic-untuned-v1/a2ad1e9d2749c6896c364efa22b9f93d235e59e88934342901c30fdc79e7377f",
     "feature_semantics_revision": 1
   },
   "objective": "max",
@@ -587,8 +587,8 @@
     "calibrated": true,
     "transform": "log"
   },
-  "tree_data": {
+  "mlp_data": {
     "artifact": "model.bin",
-    "hash": "9cb9bafd64c993201c31cb7ec14e7b4c602e2fc07605673d2f30096d4eb06450"
+    "hash": "7f73d5923a6a4cec38f5f8262dcce4e131c1d82891646bf3d3d1805a60b8018e"
   }
 }

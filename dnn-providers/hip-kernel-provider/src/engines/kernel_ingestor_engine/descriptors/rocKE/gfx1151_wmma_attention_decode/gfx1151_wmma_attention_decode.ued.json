@@ -12,19 +12,19 @@
   },
   "knobs": [
     "head_size"
-    ],
+  ],
   "behavior_notes": [
     "supports_graph_capture"
   ],
   "predict_engine": {
     "gfx1151": [
-      "011b9a83-7434-499a-a240-852370172d37"
+      "21d15d2b-dba6-42f2-85ea-051d4c5ff122"
     ],
     "gfx1100": [
-      "68638159-f391-43c5-83a6-85c9d41b0a39"
+      "2f315e14-1b00-482b-bbe6-2df6bbde031c"
     ],
     "gfx1201": [
-      "7695d498-1c8a-4152-bac1-29b232d6acaf"
+      "d9d84cda-db94-4dc2-a4ae-ace3e992af3f"
     ]
   }
 }
