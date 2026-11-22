@@ -40,7 +40,9 @@ if str(_TESTROOT) not in sys.path:
     sys.path.append(str(_TESTROOT))
 
 # The library parity emitters load the platform emitter driver through
-# rocke.assets.platform_parity_dir(). An install has no platform root: it stages
+# rocke.assets.platform_parity_dir(), and the attention IR parity test the
+# platform IR parity harness through rocke.assets.platform_instances_dir(). An
+# install has no platform root: it stages
 # the platform test payload in tests/, two levels above this tests/library/tests,
 # and pytest does not load the platform conftest.py that points the locators
 # there, so point them here the same way. Emitter subprocesses inherit the

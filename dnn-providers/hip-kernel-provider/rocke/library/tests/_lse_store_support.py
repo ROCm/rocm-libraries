@@ -6,11 +6,12 @@
 from __future__ import annotations
 
 import sys
-from pathlib import Path
 
-_INSTANCES = Path(__file__).resolve().parents[2] / "platform" / "tests" / "instances"
-if str(_INSTANCES) not in sys.path:
-    sys.path.insert(0, str(_INSTANCES))
+from rocke.assets import platform_instances_dir
+
+_INSTANCES = str(platform_instances_dir())
+if _INSTANCES not in sys.path:
+    sys.path.insert(0, _INSTANCES)
 
 from kernels.common._lse_store import (  # noqa: E402
     make_mfma_lse_epilogue,

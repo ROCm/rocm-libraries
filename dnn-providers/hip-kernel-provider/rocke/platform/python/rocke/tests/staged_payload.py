@@ -4,11 +4,12 @@
 """Point the ``rocke.assets`` locators at the trees an installed test payload stages.
 
 An installed test tree has no platform root, so the defaults of
-``rocke.assets.platform_tools_dir()`` and ``rocke.assets.platform_parity_dir()``
-name directories that do not exist there. The install stages what its tests
-need under the test root instead::
+``rocke.assets.platform_tools_dir()``, ``rocke.assets.platform_instances_dir()``
+and ``rocke.assets.platform_parity_dir()`` name directories that do not exist
+there. The install stages what its tests need under the test root instead::
 
     <tests root>/arch_domain/        the platform tools the tests run
+    <tests root>/instances/          the platform instance tests and IR parity harness
     <tests root>/instances/parity/   the platform parity-emitter tree
 
 :func:`point_locators_at_staged_payload` sets each locator's override to its
@@ -30,6 +31,7 @@ __all__ = ["point_locators_at_staged_payload"]
 # Override variable of each locator -> its staged directory under the tests root.
 _STAGED_LOCATORS = {
     "ROCKE_PLATFORM_TOOLS_DIR": Path("arch_domain"),
+    "ROCKE_PLATFORM_INSTANCES_DIR": Path("instances"),
     "ROCKE_PLATFORM_PARITY_DIR": Path("instances") / "parity",
 }
 

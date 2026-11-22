@@ -65,19 +65,31 @@ def platform_tools_dir() -> Path:
     return Path(override) if override else platform_root() / "tools"
 
 
+def platform_instances_dir() -> Path:
+    """The platform instance-test tree, home of the representative-IR parity
+    harness ``rocke_ir_parity_harness.py`` and of the parity-emitter tree.
+
+    Override with ``ROCKE_PLATFORM_INSTANCES_DIR``. The installed test payload
+    has no platform root; it stages the tree at ``tests/instances``, and
+    :func:`rocke.tests.staged_payload.point_locators_at_staged_payload` points
+    the override there.
+    """
+    override = os.environ.get("ROCKE_PLATFORM_INSTANCES_DIR")
+    return Path(override) if override else platform_root() / "tests" / "instances"
+
+
 def platform_parity_dir() -> Path:
     """The platform parity-emitter tree, home of the shared emitter driver
     ``_emit_common.py`` that the library emitters re-export.
 
-    Override with ``ROCKE_PLATFORM_PARITY_DIR``. The installed test payload has
-    no platform root; it stages the tree at ``tests/instances/parity``, and
+    Override with ``ROCKE_PLATFORM_PARITY_DIR``; without it, the ``parity``
+    directory of :func:`platform_instances_dir`. The installed test payload
+    stages the tree at ``tests/instances/parity``, and
     :func:`rocke.tests.staged_payload.point_locators_at_staged_payload` points
     the override there.
     """
     override = os.environ.get("ROCKE_PLATFORM_PARITY_DIR")
-    if override:
-        return Path(override)
-    return platform_root() / "tests" / "instances" / "parity"
+    return Path(override) if override else platform_instances_dir() / "parity"
 
 
 def shape_utils_dir() -> Path:

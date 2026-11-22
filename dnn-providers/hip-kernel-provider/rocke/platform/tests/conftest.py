@@ -113,8 +113,9 @@ for _lib_root in (_HERE / "library", _HERE.parents[1] / "library"):
         break
 
 # An install has no platform root: it stages the IR-validity tool (which
-# rocke.tests.ir_validity runs) under tests/arch_domain and the parity-emitter
-# tree under tests/instances/parity. Point the rocke.assets locators there. The
+# rocke.tests.ir_validity runs) under tests/arch_domain, the instance tests and
+# their IR parity harness under tests/instances, and the parity-emitter tree
+# under tests/instances/parity. Point the rocke.assets locators there. The
 # IR-validity probe keys on the directory, so an install that lost the tool
 # fails rather than skips.
 from rocke.tests.staged_payload import point_locators_at_staged_payload

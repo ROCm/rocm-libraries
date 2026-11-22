@@ -20,6 +20,7 @@ def test_each_staged_tree_sets_its_locator(tmp_path):
     point_locators_at_staged_payload(tmp_path, env)
     assert env == {
         "ROCKE_PLATFORM_TOOLS_DIR": str(tmp_path / "arch_domain"),
+        "ROCKE_PLATFORM_INSTANCES_DIR": str(tmp_path / "instances"),
         "ROCKE_PLATFORM_PARITY_DIR": str(tmp_path / "instances" / "parity"),
     }
 
@@ -45,9 +46,11 @@ def test_the_process_environment_is_the_default(tmp_path, monkeypatch):
     _stage(tmp_path, "instances/parity")
     # setenv first, so monkeypatch restores the original value (or absence)
     # after the helper writes the variable.
-    monkeypatch.setenv("ROCKE_PLATFORM_PARITY_DIR", "")
-    monkeypatch.delenv("ROCKE_PLATFORM_PARITY_DIR")
+    for variable in ("ROCKE_PLATFORM_INSTANCES_DIR", "ROCKE_PLATFORM_PARITY_DIR"):
+        monkeypatch.setenv(variable, "")
+        monkeypatch.delenv(variable)
     point_locators_at_staged_payload(tmp_path)
+    assert os.environ["ROCKE_PLATFORM_INSTANCES_DIR"] == str(tmp_path / "instances")
     assert os.environ["ROCKE_PLATFORM_PARITY_DIR"] == str(
         tmp_path / "instances" / "parity"
     )
