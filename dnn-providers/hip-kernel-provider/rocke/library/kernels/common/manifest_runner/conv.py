@@ -11,7 +11,11 @@ from kernels.common.conv_args import ConvArgs, ConvGeometry
 from kernels.common.conv_abi import conv_args_signature, conv_direct_args_signature
 from rocke.runtime.hip_module import Runtime
 from rocke.runtime.packing import pack_args
-from kernels.common.manifest_runner.utils import as_u8_buffer, nbytes, require_numpy
+from rocke.instances.common.manifest_runner.utils import (
+    as_u8_buffer,
+    nbytes,
+    require_numpy,
+)
 
 
 def run_conv_manifest_problem(
