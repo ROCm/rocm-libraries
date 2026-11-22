@@ -544,9 +544,7 @@ _BREAKDOWN_AXES = (
             (
                 "cluster"
                 if i.split_k_cluster
-                else "two-stage"
-                if i.needs_stage2
-                else "atomic"
+                else "two-stage" if i.needs_stage2 else "atomic"
             )
             if i.split_k > 1
             else "no"
