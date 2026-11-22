@@ -157,8 +157,9 @@ WEEKLY_TORCH_GPU = Lane(
 )
 BINDING_LANE = Lane(
     "binding-lane",
-    "a CI lane that builds the rocke_engine binding, which no CI tree has",
-    enrolled=False,
+    "the C++ engine's Python modules in the CI test tree: the file is in a CI-run "
+    "entry, but its cases skip where the build's Python had no pybind11",
+    enrolled=True,
 )
 OWNER_DECISION = Lane(
     "owner-decision",
@@ -494,12 +495,13 @@ PENDING: tuple[PendingTest, ...] = (
     ),
     *_waiting(
         BINDING_LANE,
-        "C++ engine parity checks that need the rocke_engine binding; every case "
-        "skips without it",
+        "C++ engine parity checks that need the rocke_engine module; every case "
+        "skips without it, until TheRock's build environment has pybind11",
         "rocKE platform engine; issue: none filed yet",
         "2027-01-31",
         "library/tests/test_attention_ir_cpp_parity.py",
         "library/tests/test_gdn_decode_ir_cpp_parity.py",
+        "library/tests/test_selector_cpp_parity.py",
     ),
     *_waiting(
         NIGHTLY_SOURCE,

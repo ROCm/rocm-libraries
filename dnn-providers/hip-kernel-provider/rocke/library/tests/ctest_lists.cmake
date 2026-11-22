@@ -678,6 +678,43 @@ else()
          "  TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})\n")
 endif()
 
+# The C++/Python engine parity checks of library kernels: the gfx950 tiled-2D
+# selector, and the LLVM IR of the attention, MLA prefill and GDN/KDA decode
+# kernels. They run the C++ engine through its Python modules (rocke_engine),
+# which a provider build installs beside the rocke package when the build's
+# Python has pybind11; without them every case skips, and
+# rocke_engine_modules_check says why. The selector's full grid (its exhaustive
+# items) runs in the comprehensive entry below. The GDN/KDA decode case takes
+# about 20 s on one host core (it lowers 341 kernels at four LLVM flavors with
+# each engine), so the per-test limit is 120 s.
+#
+# Not registered on Windows: provider builds there make no engine modules, so
+# every case would skip.
+set(_ROCKE_LIBRARY_ENGINE_PARITY_TEST_RELPATHS
+    "tests/library/tests/test_selector_cpp_parity.py"
+    "tests/library/tests/test_attention_ir_cpp_parity.py"
+    "tests/library/tests/test_gdn_decode_ir_cpp_parity.py")
+set(_ROCKE_LIBRARY_ENGINE_PARITY_TESTS "")
+foreach(_rocke_engine_parity_test ${_ROCKE_LIBRARY_ENGINE_PARITY_TEST_RELPATHS})
+  string(APPEND _ROCKE_LIBRARY_ENGINE_PARITY_TESTS
+         " \"${ROCKE_TEST_CTEST_REL}${_rocke_engine_parity_test}\"")
+endforeach()
+if(WIN32)
+  message(STATUS "rocKE: rocke_library_engine_parity_pytest not registered on Windows (no engine modules; see comment above)")
+else()
+  string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+         "add_test(rocke_library_engine_parity_pytest ${_ROCKE_INSTALLED_PYTEST}${_ROCKE_LIBRARY_ENGINE_PARITY_TESTS} -m \"not exhaustive\" -v -rs --timeout=120)\n"
+         "set_tests_properties(rocke_library_engine_parity_pytest PROPERTIES\n"
+         "  LABELS \"ckc;python;host;standard\"\n"
+         "  ENVIRONMENT \"PYTHONPATH=${_ROCKE_LIBRARY_PYTHONPATH}\"\n"
+         "  TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})\n"
+         "add_test(rocke_library_engine_parity_exhaustive_pytest ${_ROCKE_INSTALLED_PYTEST} \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_selector_cpp_parity.py\" -m exhaustive -v -rs --timeout=60)\n"
+         "set_tests_properties(rocke_library_engine_parity_exhaustive_pytest PROPERTIES\n"
+         "  LABELS \"ckc;python;host;comprehensive;full\"\n"
+         "  ENVIRONMENT \"PYTHONPATH=${_ROCKE_LIBRARY_PYTHONPATH}\"\n"
+         "  TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})\n")
+endif()
+
 # Library attention GPU numeric tests (gfx950-specific; require a GPU).
 # Separate from the omnibus GPU suite so it can be targeted on its own when only
 # attention hardware is available: select it by name (`ctest -R

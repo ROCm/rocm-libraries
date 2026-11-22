@@ -1,6 +1,6 @@
 {
   "linux": {
-    "source": "Linux gfx942 CI test job run in emulation, quick and standard tiers, one run, 2026-11-22; rocke_library_conv_fwd_aot_packaging_pytest less its bf16 whole-sweep items (now comprehensive), timed on a build host",
+    "source": "Linux gfx942 CI test job run in emulation, quick and standard tiers, one run, 2026-11-22; rocke_library_conv_fwd_aot_packaging_pytest less its bf16 whole-sweep items (now comprehensive), timed on a build host; rocke_engine_modules_check and rocke_library_engine_parity_pytest from a second emulation run, with the C++ engine modules built",
     "seconds": {
       "rocke_arch_domain_refusal": 0.0,
       "rocke_arch_domain_reproducibility": 9.92,
@@ -29,6 +29,7 @@
       "rocke_differential_golden_canonical": 30.12,
       "rocke_differential_golden_ll": 36.48,
       "rocke_dtypes": 0.0,
+      "rocke_engine_modules_check": 0.14,
       "rocke_entry_time_check": 0.2,
       "rocke_f64_lowering": 0.01,
       "rocke_f64_mma": 0.07,
@@ -70,6 +71,7 @@
       "rocke_library_conv_tf32_lowering_pytest": 16.0,
       "rocke_library_conv_tf32_pytest": 17.98,
       "rocke_library_dsa_pytest": 2.4,
+      "rocke_library_engine_parity_pytest": 19.64,
       "rocke_library_gdn_pytest": 106.08,
       "rocke_library_gpu_pytest": 53.84,
       "rocke_library_host_pytest": 1.98,

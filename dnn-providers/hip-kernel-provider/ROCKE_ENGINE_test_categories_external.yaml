@@ -272,6 +272,9 @@ test_categories:
       # parser ignores a listed name that has no registered test.
       - "rocke_library_attention_builds_pytest"
       - "rocke_library_gdn_pytest"
+      # Not registered on Windows (see rocke/library/tests/ctest_lists.cmake); the
+      # parser ignores a listed name that has no registered test.
+      - "rocke_library_engine_parity_pytest"
       # Skips, with the build's reason, where the build made no engine modules.
       - "rocke_engine_modules_check"
       - "rocke_library_attention_gpu_pytest"
@@ -321,6 +324,9 @@ test_categories:
       # parser ignores a listed name that has no registered test.
       - "rocke_library_attention_builds_pytest"
       - "rocke_library_gdn_pytest"
+      # Not registered on Windows (see rocke/library/tests/ctest_lists.cmake); the
+      # parser ignores a listed name that has no registered test.
+      - "rocke_library_engine_parity_pytest"
       # Skips, with the build's reason, where the build made no engine modules.
       - "rocke_engine_modules_check"
       # Compiles kernels to check the backend's access widths: a performance check.
@@ -414,3 +420,5 @@ test_categories:
       - "rocke_tiling_visualization_pytest"
       - "rocke_library_conv_exhaustive_pytest"
       - "rocke_library_attention_cache_key_sweep_pytest"
+      # Not registered on Windows (see rocke/library/tests/ctest_lists.cmake).
+      - "rocke_library_engine_parity_exhaustive_pytest"
