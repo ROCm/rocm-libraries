@@ -290,7 +290,6 @@ test_categories:
     description: "rocKE generated-artifact reproduction checks"
     test_patterns:
       - "rocke_arch_domain_reproducibility"
-      - "rocke_library_attention_cache_key_sweep_pytest"
       - "rocke_compiler_options_reproducibility"
     labels:
       - "host"
@@ -410,3 +409,4 @@ test_categories:
     test_patterns:
       - "rocke_tiling_visualization_pytest"
       - "rocke_library_conv_exhaustive_pytest"
+      - "rocke_library_attention_cache_key_sweep_pytest"

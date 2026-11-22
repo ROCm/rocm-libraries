@@ -419,7 +419,8 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
 # Tiled attention cache-key contract (no GPU). The targeted share/split
 # checks take seconds. The invariant sweep compares key equality with build
 # equality across every selector threshold for each tiled arch, so each sweep
-# case runs for tens of seconds: it is a separate entry with its own budget.
+# case runs for tens of seconds: it is a separate entry with its own budget,
+# run by scheduled CI only (the comprehensive tier).
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "add_test(rocke_library_attention_cache_key_pytest ${_ROCKE_INSTALLED_PYTEST} \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_attention_tiled_cache_key.py\" -k \"not test_key_matches_build_identity\" -v -rs --timeout=30)\n")
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
@@ -431,7 +432,7 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "add_test(rocke_library_attention_cache_key_sweep_pytest ${_ROCKE_INSTALLED_PYTEST} \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_attention_tiled_cache_key.py\" -k test_key_matches_build_identity -v -rs --timeout=240)\n")
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "set_tests_properties(rocke_library_attention_cache_key_sweep_pytest PROPERTIES\n"
-       "  LABELS \"ckc;python;attention;host;standard\"\n"
+       "  LABELS \"ckc;python;attention;host;comprehensive;full\"\n"
        "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
        "  TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})\n")
 
