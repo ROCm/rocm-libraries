@@ -8,26 +8,19 @@ cross-engine agreement of the validator, kernel name, grid and LDS size. GPU
 (gfx1250): 3x3 layers with 8 / 16 / 32 / 56 / 64 channels per group at
 stride 1 and 2 (with and without the phase split), image edges on every side,
 walks that run past the last band, 2 and 3 halo slots, prefetch depth 1 / 2
-and none -- checked numerically against torch's grouped convolution.
+and none -- checked numerically against a float64 numpy reference of the
+stored operands.
 
 Run:
-    PYTHONPATH=rocke/platform/python:rocke/library <torch-python> -m pytest \\
+    PYTHONPATH=rocke/platform/python:rocke/library python -m pytest \\
         rocke/library/tests/test_direct_fwd_gstream_wmma.py -v
 """
 
 from __future__ import annotations
 
-import ctypes
-import importlib.util
 import unittest
 
 from rocke.runtime.hip_module import get_device_arch
-
-_HAS_TORCH = importlib.util.find_spec("torch") is not None
-if _HAS_TORCH:
-    import torch
-
-    torch.cuda.is_available()
 
 from kernels.common.conv_direct_fwd_gstream_wmma import (
     FwdGstreamWmmaSpec,
@@ -35,6 +28,8 @@ from kernels.common.conv_direct_fwd_gstream_wmma import (
     fwd_gstream_reason,
 )
 from kernels.common.conv_direct_grouped import DirectConvProblem
+
+from ._direct_conv_numeric import direct_fwd_peak_error
 
 GPU_ARCH = get_device_arch(0)
 
@@ -217,8 +212,6 @@ class TestFwdGstreamSpec(unittest.TestCase):
 def _gpu_skip() -> str:
     if GPU_ARCH != "gfx1250":
         return f"needs gfx1250 (got {GPU_ARCH!r})"
-    if not _HAS_TORCH:
-        return "torch not importable"
     return ""
 
 
@@ -246,52 +239,14 @@ _CASES = (
 @unittest.skipUnless(not _gpu_skip(), _gpu_skip() or "no GPU")
 class TestFwdGstreamGpu(unittest.TestCase):
     def _check(self, pkw, knobs):
-        from kernels.common.conv_abi import conv_direct_args_signature
-        from kernels.common.conv_args import ConvArgs
         from rocke import compile_kernel
-        from rocke.runtime.hip_module import Runtime
-        from rocke.runtime.launcher import KernelLauncher, LaunchConfig
 
         p = _problem(**pkw)
         spec = FwdGstreamWmmaSpec(problem=p, **knobs)
         self.assertIsNone(fwd_gstream_reason(spec, GPU_ARCH))
         art = compile_kernel(build_fwd_gstream_wmma(spec, GPU_ARCH), arch=GPU_ARCH)
-        td = torch.bfloat16 if p.dtype == "bf16" else torch.float16
-        torch.manual_seed(0)
-        x = torch.empty(p.N, p.H, p.W, p.total_c).uniform_(-1, 1).to(td)
-        w = torch.empty(p.total_k, p.KH, p.KW, p.cpg).uniform_(-1, 1).to(td)
-        y = torch.zeros(p.N, p.Ho, p.Wo, p.total_k, dtype=td)
-        rt = Runtime()
-
-        def u8(t):
-            return (ctypes.c_uint8 * t.nbytes).from_address(t.data_ptr())
-
-        bufs = [rt.alloc(t.nbytes) for t in (x, w, y)]
-        try:
-            rt.memcpy_h2d(bufs[0], u8(x), x.nbytes)
-            rt.memcpy_h2d(bufs[1], u8(w), w.nbytes)
-            rt.memset(bufs[2], 0x7F, y.nbytes)  # poison: every element is written
-            vals = ConvArgs.from_problem(p, direction="fwd").to_launch_values(
-                *(int(v) for v in bufs), x.nbytes, w.nbytes, y.nbytes
-            )
-            grid, block = spec.launch_geometry()
-            KernelLauncher(
-                hsaco=art.hsaco,
-                kernel_name=art.kernel_name,
-                signature=conv_direct_args_signature(p.dtype, direction="fwd"),
-            )(vals, config=LaunchConfig(grid=grid, block=block, fence=True))
-            rt.memcpy_d2h(u8(y), bufs[2], y.nbytes)
-        finally:
-            for v in bufs:
-                rt.free(v)
-        ref = torch.nn.functional.conv2d(
-            x.float().permute(0, 3, 1, 2),
-            w.float().permute(0, 3, 1, 2),
-            stride=p.stride,
-            padding=p.PAD,
-            groups=p.groups,
-        ).permute(0, 2, 3, 1)
-        err = float((y.float() - ref).abs().max() / ref.abs().max())
+        grid, block = spec.launch_geometry()
+        err = direct_fwd_peak_error(art, p, grid=grid, block=block)
         self.assertLess(err, 1e-2, f"{pkw} {knobs}: rel err {err:.3g}")
 
     def test_cases(self):

@@ -6,29 +6,23 @@
 CPU: the spec validators and the AOT grid. GPU (gfx1250): patch sizes with and
 without an uncovered border, padded GEMM columns, several patch-row blocks;
 3x3 stride 1 / 2 and 7x7 stride 2 small-C stems with image edges -- checked
-numerically against torch's dgrad, both hand-built and as the AOT cache's
+numerically against a float64 numpy dgrad of the stored operands, both hand-built and as the AOT cache's
 binaries (every shipped knob of the 7x7 stem and of the /14 patch embedding).
 
 Run:
-    PYTHONPATH=rocke/platform/python:rocke/library <torch-python> -m pytest \\
+    PYTHONPATH=rocke/platform/python:rocke/library python -m pytest \\
         rocke/library/tests/test_dgrad_stem_wmma.py -v
 """
 
 from __future__ import annotations
 
-import ctypes
 import dataclasses
-import importlib.util
 import unittest
 
+import numpy as np
 import pytest
+from rocke.numeric import storage
 from rocke.runtime.hip_module import get_device_arch
-
-_HAS_TORCH = importlib.util.find_spec("torch") is not None
-if _HAS_TORCH:
-    import torch
-
-    torch.cuda.is_available()
 
 from kernels.common.conv_dgrad_patch_wmma import (
     DgradPatchWmmaSpec,
@@ -41,6 +35,8 @@ from kernels.common.conv_dgrad_smallc_wmma import (
     dgrad_smallc_reason,
 )
 from kernels.common.conv_direct_grouped import DirectConvProblem
+
+from ._direct_conv_numeric import direct_dgrad_reference, poisoned
 
 GPU_ARCH = get_device_arch(0)
 
@@ -528,8 +524,6 @@ def _with_dtype(spec, dtype):
 def _gpu_skip() -> str:
     if GPU_ARCH != "gfx1250":
         return f"needs gfx1250 (got {GPU_ARCH!r})"
-    if not _HAS_TORCH:
-        return "torch not importable"
     return ""
 
 
@@ -589,38 +583,24 @@ _SMALLC_CASES = (
 class TestStemGpu(unittest.TestCase):
     def _run(self, p, launch, label):
         """Fill dY / W, poison dX, ``launch(ptrs, sizes)`` and check dX
-        against torch's dgrad."""
-        from rocke.runtime.hip_module import Runtime
+        against a float64 numpy dgrad of the stored operands."""
+        from rocke.runtime.device_array import DeviceArray
 
-        td = torch.bfloat16 if p.dtype == "bf16" else torch.float16
-        torch.manual_seed(0)
-        dY = torch.empty(p.N, p.Ho, p.Wo, p.total_k).uniform_(-1, 1).to(td)
-        w = torch.empty(p.total_k, p.KH, p.KW, p.cpg).uniform_(-1, 1).to(td)
-        dX = torch.zeros(p.N, p.H, p.W, p.total_c, dtype=td)
-        rt = Runtime()
-
-        def u8(t):
-            return (ctypes.c_uint8 * t.nbytes).from_address(t.data_ptr())
-
-        sizes = {"dy": dY.nbytes, "w": w.nbytes, "dx": dX.nbytes}
-        ptrs = {name: rt.alloc(nb) for name, nb in sizes.items()}
-        try:
-            rt.memcpy_h2d(ptrs["dy"], u8(dY), dY.nbytes)
-            rt.memcpy_h2d(ptrs["w"], u8(w), w.nbytes)
-            rt.memset(ptrs["dx"], 0x7F, dX.nbytes)  # poison: every element is written
-            launch({k: int(v) for k, v in ptrs.items()}, sizes)
-            rt.memcpy_d2h(u8(dX), ptrs["dx"], dX.nbytes)
-        finally:
-            for x in ptrs.values():
-                rt.free(x)
-        ref = torch.nn.grad.conv2d_input(
-            (p.N, p.total_c, p.H, p.W),
-            w.float().permute(0, 3, 1, 2),
-            dY.float().permute(0, 3, 1, 2),
-            stride=p.stride,
-            padding=p.PAD,
-        ).permute(0, 2, 3, 1)
-        err = float((dX.float() - ref).abs().max() / ref.abs().max())
+        rng = np.random.default_rng(0)
+        dy = storage.encode(rng.uniform(-1, 1, (p.N, p.Ho, p.Wo, p.total_k)), p.dtype)
+        w = storage.encode(rng.uniform(-1, 1, (p.total_k, p.KH, p.KW, p.cpg)), p.dtype)
+        # Poison: every element is written.
+        host = {"dy": dy, "w": w, "dx": poisoned((p.N, p.H, p.W, p.total_c), p.dtype)}
+        device = {name: DeviceArray(array, p.dtype) for name, array in host.items()}
+        launch(
+            {name: array.data_ptr() for name, array in device.items()},
+            {name: array.nbytes for name, array in host.items()},
+        )
+        dx = storage.decode(device["dx"].read(), p.dtype)
+        ref = direct_dgrad_reference(
+            p, storage.decode(dy, p.dtype), storage.decode(w, p.dtype)
+        )
+        err = float(np.abs(dx - ref).max() / np.abs(ref).max())
         self.assertLess(err, 1e-2, f"{label}: rel err {err:.3g}")
 
     def _check(self, spec, build):
