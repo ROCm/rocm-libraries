@@ -26,6 +26,7 @@
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
 
+#include "TestDescriptorRoot.hpp"
 #include "engines/kernel_ingestor_engine/packs/IngestorPackTestSupport.hpp"
 
 /**
@@ -211,33 +212,6 @@ inline std::vector<std::string> flydslShippedArches(std::string_view op)
     return arches;
 }
 
-/// Whether this install staged a product shard for @p arch: a directory named for it
-/// under the additive descriptor root main() points at the product tree. A root that holds
-/// no architecture's shard at all is a mis-pointed or empty root rather than a build that
-/// left this one out, so it counts as staged and the cases that need objects fail.
-inline bool flydslShardStagedFor(const std::string& arch)
-{
-    const std::filesystem::path root
-        = hipdnn_data_sdk::utilities::getEnv("HIPDNN_DESCRIPTOR_RUNTIME_DIR");
-    std::error_code failed;
-    if(root.empty() || !std::filesystem::is_directory(root, failed))
-    {
-        return true;
-    }
-    if(std::filesystem::is_directory(root / arch, failed))
-    {
-        return true;
-    }
-    for(const auto& entry : std::filesystem::directory_iterator(root, failed))
-    {
-        if(entry.is_directory() && entry.path().filename().string().rfind("gfx", 0) == 0)
-        {
-            return false;
-        }
-    }
-    return true;
-}
-
 /// Whether this install ships @p op's objects for the current device: FlyDSL has them for
 /// its arch and the install staged the arch's shard. A case that then finds none has found
 /// a packaging fault rather than an arch FlyDSL, or this install, does not serve.
@@ -246,7 +220,7 @@ inline bool flydslShipsForThisDevice(std::string_view op)
     const auto arches = flydslShippedArches(op);
     const auto device = packedArchDeviceProperties().gcnArchName;
     return std::find(arches.begin(), arches.end(), device) != arches.end()
-           && flydslShardStagedFor(device);
+           && hip_kernel_provider::testing::productShardStagedFor(device);
 }
 
 /// Whether this install ships @p op's objects for any architecture it staged.
@@ -254,7 +228,7 @@ inline bool flydslShipsAnywhere(std::string_view op)
 {
     const auto arches = flydslShippedArches(op);
     return std::any_of(arches.begin(), arches.end(), [](const std::string& arch) {
-        return flydslShardStagedFor(arch);
+        return hip_kernel_provider::testing::productShardStagedFor(arch);
     });
 }
 

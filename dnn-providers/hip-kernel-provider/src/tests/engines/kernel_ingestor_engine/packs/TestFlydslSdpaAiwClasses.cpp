@@ -52,7 +52,7 @@ std::string aiwArch()
 {
     for(const auto& arch : flydslShippedArches("sdpa_aiw"))
     {
-        if(flydslShardStagedFor(arch))
+        if(hip_kernel_provider::testing::productShardStagedFor(arch))
         {
             return arch;
         }

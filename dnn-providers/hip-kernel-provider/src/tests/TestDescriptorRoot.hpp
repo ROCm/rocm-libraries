@@ -74,6 +74,36 @@ inline std::string describeUnusableDescriptorRoot(const std::filesystem::path& r
     return "the descriptor root '" + root.string() + "' holds no descriptor JSON";
 }
 
+/// Whether this install staged a production shard for @p arch: a directory named for it
+/// under the additive descriptor root main() points at the production tree. A multi-arch
+/// build (TheRock RFC 0008) compiles this binary in one architecture's shard and runs it
+/// on all, each install carrying only its own architectures' content, so what ships for
+/// an architecture is a run-time question. A root that holds no architecture's shard at
+/// all is a mis-pointed or empty root rather than a build that left this one out, so it
+/// counts as staged and the cases that need content fail.
+inline bool productShardStagedFor(const std::string& arch)
+{
+    const std::filesystem::path root
+        = hipdnn_data_sdk::utilities::getEnv("HIPDNN_DESCRIPTOR_RUNTIME_DIR");
+    std::error_code failed;
+    if(root.empty() || !std::filesystem::is_directory(root, failed))
+    {
+        return true;
+    }
+    if(std::filesystem::is_directory(root / arch, failed))
+    {
+        return true;
+    }
+    for(const auto& entry : std::filesystem::directory_iterator(root, failed))
+    {
+        if(entry.is_directory() && entry.path().filename().string().rfind("gfx", 0) == 0)
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
 #ifdef HIPKERNELPROVIDER_UNIT_KPACK_RELDIR
 /// The packed set inside this binary's own discovery root, holding one subdirectory per
 /// packed arch, each with a real archive under `kpack/`.
