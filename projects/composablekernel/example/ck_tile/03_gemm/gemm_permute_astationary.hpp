@@ -14,12 +14,18 @@
 //   interleaved Y (128 contiguous bytes per row and wave); no LDS shuffle. Accumulators are double
 //   buffered: tile i - 1 is converted to BF16 (truncation, the CK default) and stored while the
 //   MFMAs of tile i's first K steps run.
+// The gfx1250 kernel is in gemm_permute_astationary_gfx1250.hpp; repack_weight and launch below
+// serve both.
 #pragma once
 
 #include "gemm_permute.hpp"
+#if defined(CK_USE_GFX1250)
+#include "gemm_permute_astationary_gfx1250.hpp"
+#endif
 
 namespace gemm_permute::astationary {
 
+#if !defined(CK_USE_GFX1250)
 // Wave tile j (j = wave + Waves * i) is head j / Tw, columns (j % Tw) * WN.
 inline constexpr int BM = 128, BK = 32, WN = 64, Waves = 4, Threads = Waves * 64;
 inline constexpr int Tw = D / WN, KBlocks = K / BK, WaveTiles = N / WN / Waves;
@@ -246,6 +252,7 @@ __global__ void __launch_bounds__(Threads) kernel(const Bf16* __restrict__ a,
     }
     store_rows(res_prev, acc[1], number<0>{}, number<MRep>{});
 }
+#endif
 
 // W[k, n] (row-major [K, N], n = d*H + h) -> flat layout, one thread per 16 B chunk (8 consecutive
 // k). head_major: GEMM column h*D + d (this kernel); otherwise n (the weight-preshuffle GEMM).
