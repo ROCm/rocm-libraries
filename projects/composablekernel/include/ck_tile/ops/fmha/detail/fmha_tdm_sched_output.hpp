@@ -181,7 +181,14 @@ CK_TILE_DEVICE void fmha_tdm_sched_store_o_tile_async_from_lds(void* o_lds,
             amd_async_global_store_from_lds_b128_x8(o_tile_ptr, global_offset, lds_addr);
         });
     }
+    // The stores above are inline asm without an asyncmark, which wait_asyncmark (what
+    // s_wait_asynccnt<0>() becomes with the asyncmark builtins) does not track. Wait on ASYNCcnt
+    // itself so the workgroup's LDS is not released while the stores still read it.
+#if defined(__gfx125__)
+    __builtin_amdgcn_s_wait_asynccnt(0);
+#else
     s_wait_asynccnt<0>();
+#endif
 }
 
 } // namespace ck_tile
