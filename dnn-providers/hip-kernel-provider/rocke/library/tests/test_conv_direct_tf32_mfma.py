@@ -22,17 +22,13 @@ and gfx942, checks the MFMA intrinsics and their counts, the rejections, and
 that fp16 / bf16 kernel names are unchanged; one comgr compile per arch checks
 the ISA, including that the BF16x3 split of the loop-invariant weights is
 hoisted out of the row loop. The GPU part runs every variant on the device
-(gfx942 or gfx950) for both dtypes against a float64 CPU reference (no TF32
+(gfx942 or gfx950) for both dtypes against a float64 numpy reference (no TF32
 anywhere in it). On gfx942 the TF32 reference reads the inputs masked to what
 the native XF32 MFMA consumes (``conv_reference.tf32_reference_inputs``).
-
-Run the GPU part as ``python3 test_conv_direct_tf32_mfma.py`` if pytest's
-forked workers report "No HIP GPUs are available".
 """
 
 from __future__ import annotations
 
-import ctypes
 import importlib.util
 import re
 import subprocess
@@ -41,12 +37,18 @@ import unittest
 from dataclasses import replace
 from pathlib import Path
 
+import numpy as np
+from rocke.core.lower_llvm import lower_kernel_to_llvm
+from rocke.numeric import storage
+from rocke.tests.llc import find_llvm_tool
+
+from builders.common.conv_reference import tf32_reference_inputs, tf32_reference_tol
 from kernels.common.conv_direct_grouped import (
     DirectCoalescedWeightsDgradSpec,
-    DirectConv16cSpec,
-    DirectConv32cSpec,
     DirectConv4cSpec,
     DirectConv8cSpec,
+    DirectConv16cSpec,
+    DirectConv32cSpec,
     DirectConvProblem,
     DirectConvSpec,
     DirectReorganizeWeightsSpec,
@@ -54,35 +56,30 @@ from kernels.common.conv_direct_grouped import (
     _f32_mma_plan,
     build_direct_coalesced_weights_dgrad,
     build_direct_conv,
-    build_direct_conv_16c,
-    build_direct_conv_32c,
     build_direct_conv_4c,
     build_direct_conv_8c,
+    build_direct_conv_16c,
+    build_direct_conv_32c,
     build_direct_reorganize_weights,
     build_direct_transpose_weights_dgrad,
     direct_conv_lds_bytes,
     direct_dgrad_coalesced_workspace_bytes,
     direct_dgrad_workspace_bytes,
     is_valid_spec,
-    is_valid_spec_16c,
-    is_valid_spec_32c,
     is_valid_spec_4c,
     is_valid_spec_8c,
+    is_valid_spec_16c,
+    is_valid_spec_32c,
     make_dgrad_fprop_spec,
     preload_weight_vgprs,
 )
-from rocke.core.lower_llvm import lower_kernel_to_llvm
-from rocke.tests.llc import find_llvm_tool
 
-_HAS_TORCH = importlib.util.find_spec("torch") is not None
-if _HAS_TORCH:
-    from builders.common.conv_reference import tf32_reference_inputs, tf32_reference_tol
-if _HAS_TORCH:
-    # Claim the HIP context for torch before rocke's runtime does; see
-    # test_direct_conv_correctness.py.
-    import torch
-
-    torch.cuda.is_available()
+from ._direct_conv_numeric import (
+    direct_dgrad_reference,
+    direct_fwd_reference,
+    launch_direct_kernel,
+    poisoned,
+)
 
 _ARCHES = ("gfx950", "gfx942")
 _F32_DTYPES = ("fp32", "tf32")
@@ -656,8 +653,6 @@ class TestDirectTf32Isa(unittest.TestCase):
 
 
 def _gpu_arch() -> str:
-    if not _HAS_TORCH:
-        return ""
     from rocke.runtime.hip_module import get_device_arch
 
     return get_device_arch(0) or ""
@@ -667,8 +662,6 @@ _GPU_ARCH = _gpu_arch()
 
 
 def _gpu_skip_reason() -> str:
-    if not _HAS_TORCH:
-        return "torch not importable"
     if _GPU_ARCH not in _ARCHES:
         return f"needs a gfx942 or gfx950 GPU (got {_GPU_ARCH!r})"
     return ""
@@ -690,93 +683,63 @@ def _tolerance(dtype: str, arch: str) -> float:
     return 2e-5
 
 
-def _u8(t):
-    return (ctypes.c_uint8 * t.nbytes).from_address(t.data_ptr())
-
-
-def _fwd_reference(A, B, p):
-    """NHWK float64 reference on the CPU (no TF32 path can touch it)."""
-    import torch.nn.functional as F
-
-    out = F.conv2d(
-        A.double().permute(0, 3, 1, 2),
-        B.double().permute(0, 3, 1, 2),
-        padding=p.PAD,
-        stride=p.stride,
-        groups=p.groups,
-    )
-    return out.permute(0, 2, 3, 1).contiguous()
-
-
-def _launch(rt, art, sig, values, spec):
+def _launch_geometry(spec):
+    """``(grid, block)`` of ``spec``'s kernel."""
     from kernels.common.conv_direct_grouped import direct_launch_geometry
-    from rocke.runtime.launcher import KernelLauncher, LaunchConfig
 
     if isinstance(spec, (DirectConv16cSpec, DirectConv8cSpec, DirectConv32cSpec)):
         # The fixed-cpg kernels decode (bx, by, bz) = (Q tile, group tile, n);
         # direct_launch_geometry does not cover them.
         p = spec.problem
         grid = (-(-p.Wo // spec.block_q), p.groups // spec.block_groups, p.N)
-        block = (spec.threads_per_block, 1, 1)
-    else:
-        grid, block = direct_launch_geometry(spec)
+        return grid, (spec.threads_per_block, 1, 1)
+    return direct_launch_geometry(spec)
+
+
+def _launch_transform(art, sig, values, spec):
+    """Launch a dgrad weight-transform kernel and wait for it."""
+    from rocke.runtime.launcher import KernelLauncher, LaunchConfig
+
+    grid, block = _launch_geometry(spec)
     KernelLauncher(hsaco=art.hsaco, kernel_name=art.kernel_name, signature=sig)(
         values, config=LaunchConfig(grid=grid, block=block, fence=True)
     )
 
 
 def _rel_err(out, ref) -> float:
-    return float((out.double() - ref).abs().max() / ref.abs().max().clamp(min=1.0))
+    return float(np.abs(out - ref).max() / max(np.abs(ref).max(), 1.0))
 
 
 def _run_fwd(spec, build, arch: str) -> float:
-    import torch
-
-    from kernels.common.conv_abi import conv_direct_args_signature
-    from kernels.common.conv_args import ConvArgs
     from rocke import compile_kernel
-    from rocke.runtime import synchronize_and_release
-    from rocke.runtime.hip_module import Runtime
+    from rocke.runtime.device_array import DeviceArray
 
     p = spec.problem
     art = compile_kernel(build(spec, arch=arch), arch=arch)
-    torch.manual_seed(0)
-    A = torch.empty(p.N, p.H, p.W, p.total_c).uniform_(-1.0, 1.0)
-    B = torch.empty(p.total_k, p.KH, p.KW, p.cpg).uniform_(-1.0, 1.0)
-    D = torch.empty(p.N, p.Ho, p.Wo, p.total_k)
-    ref = _fwd_reference(
-        tf32_reference_inputs(A, arch, p.dtype),
-        tf32_reference_inputs(B, arch, p.dtype),
+    rng = np.random.default_rng(0)
+    a = storage.encode(rng.uniform(-1.0, 1.0, (p.N, p.H, p.W, p.total_c)), "fp32")
+    b = storage.encode(rng.uniform(-1.0, 1.0, (p.total_k, p.KH, p.KW, p.cpg)), "fp32")
+    ref = direct_fwd_reference(
         p,
+        tf32_reference_inputs(a, arch, p.dtype),
+        tf32_reference_inputs(b, arch, p.dtype),
     )
-
-    rt = Runtime()
-    bufs = [rt.alloc(t.nbytes) for t in (A, B, D)]
-    rt.memcpy_h2d(bufs[0], _u8(A), A.nbytes)
-    rt.memcpy_h2d(bufs[1], _u8(B), B.nbytes)
-    rt.memset(bufs[2], 0x7F, D.nbytes)  # an unwritten output shows up huge
-    values = ConvArgs.from_problem(p).to_launch_values(
-        int(bufs[0]), int(bufs[1]), int(bufs[2]), A.nbytes, B.nbytes, D.nbytes
-    )
+    # 0x7F bytes: an unwritten output shows up huge.
+    y = DeviceArray(poisoned((p.N, p.Ho, p.Wo, p.total_k), "fp32"))
+    grid, block = _launch_geometry(spec)
     # fp32 and tf32 share the fp32 storage ABI.
-    _launch(rt, art, conv_direct_args_signature("fp32"), values, spec)
-    rt.memcpy_d2h(_u8(D), bufs[2], D.nbytes)
-    for buf in bufs:
-        rt.free(buf)
-    synchronize_and_release(0)
-    return _rel_err(D, ref)
+    launch_direct_kernel(
+        art, p, (DeviceArray(a), DeviceArray(b), y), grid=grid, block=block
+    )
+    return _rel_err(y.read(), ref)
 
 
 def _run_dgrad(problem, fprop, arch: str) -> float:
-    """transpose [-> reorganize] -> fprop on fp32 storage, vs conv_transpose2d."""
-    import torch
-
-    from kernels.common.conv_abi import conv_direct_args_signature
-    from kernels.common.conv_args import ConvArgs
-    from kernels.common.conv_direct_grouped import DIRECT_WEIGHT_TRANSFORM_RTC_ARGS
+    """transpose [-> reorganize] -> fprop on fp32 storage, vs the float64 dgrad."""
     from rocke import compile_kernel
-    from rocke.runtime import synchronize_and_release
-    from rocke.runtime.hip_module import Runtime
+    from rocke.runtime.device_array import DeviceArray
+
+    from kernels.common.conv_direct_grouped import DIRECT_WEIGHT_TRANSFORM_RTC_ARGS
 
     p = problem
     rtc = fprop.runtime_channels
@@ -802,74 +765,54 @@ def _run_dgrad(problem, fprop, arch: str) -> float:
     r_art = compile_kernel(build_direct_reorganize_weights(r_spec), arch=arch)
     f_art = compile_kernel(build_direct_conv(fprop, arch=arch), arch=arch)
 
-    torch.manual_seed(7)
-    dY = torch.empty(p.N, p.Ho, p.Wo, p.total_k).uniform_(-1.0, 1.0)
-    W = torch.empty(p.total_k, p.KH, p.KW, p.cpg).uniform_(-1.0, 1.0)
-    dX = torch.empty(p.N, p.H, p.W, p.total_c)
-    ref = (
-        torch.nn.functional.conv_transpose2d(
-            tf32_reference_inputs(dY, arch, p.dtype).double().permute(0, 3, 1, 2),
-            tf32_reference_inputs(W, arch, p.dtype).double().permute(0, 3, 1, 2),
-            padding=p.PAD,
-            groups=p.groups,
-        )
-        .permute(0, 2, 3, 1)
-        .contiguous()
+    rng = np.random.default_rng(7)
+    dy = storage.encode(rng.uniform(-1.0, 1.0, (p.N, p.Ho, p.Wo, p.total_k)), "fp32")
+    w = storage.encode(rng.uniform(-1.0, 1.0, (p.total_k, p.KH, p.KW, p.cpg)), "fp32")
+    ref = direct_dgrad_reference(
+        p,
+        tf32_reference_inputs(dy, arch, p.dtype),
+        tf32_reference_inputs(w, arch, p.dtype),
     )
 
-    rt = Runtime()
     ws_t = direct_dgrad_workspace_bytes(p)
     ws_coa = direct_dgrad_coalesced_workspace_bytes(p, fold_k32=fprop.fold_k32)
-    bufs = {
-        "dy": rt.alloc(dY.nbytes),
-        "w": rt.alloc(W.nbytes),
-        "dx": rt.alloc(dX.nbytes),
-        "ws_t": rt.alloc(ws_t),
-        "ws_coa": rt.alloc(ws_coa),
-    }
-    rt.memcpy_h2d(bufs["dy"], _u8(dY), dY.nbytes)
-    rt.memcpy_h2d(bufs["w"], _u8(W), W.nbytes)
-    rt.memset(bufs["dx"], 0x7F, dX.nbytes)
-    rt.memset(bufs["ws_t"], 0x7F, ws_t)
-    rt.memset(bufs["ws_coa"], 0x7F, ws_coa)
-    _launch(
-        rt,
+    dy_dev, w_dev = DeviceArray(dy), DeviceArray(w)
+    # 0x7F bytes: an unwritten output or workspace element shows up huge.
+    dx_dev = DeviceArray(poisoned((p.N, p.H, p.W, p.total_c), "fp32"))
+    transposed = DeviceArray(poisoned((ws_t,), "u8"))
+    coalesced_ws = DeviceArray(poisoned((ws_coa,), "u8"))
+    _launch_transform(
         t_art,
         xform_sig,
         {
-            "A": bufs["w"],
-            "D": bufs["ws_t"],
-            "A_bytes": W.nbytes,
+            "A": w_dev.data_ptr(),
+            "D": transposed.data_ptr(),
+            "A_bytes": w_dev.nbytes,
             "D_bytes": ws_t,
             **scalars,
         },
         t_spec,
     )
-    weights, w_bytes = bufs["ws_t"], ws_t
+    weights = transposed
     if coalesced:
-        _launch(
-            rt,
+        _launch_transform(
             r_art,
             xform_sig,
             {
-                "A": bufs["ws_t"],
-                "D": bufs["ws_coa"],
+                "A": transposed.data_ptr(),
+                "D": coalesced_ws.data_ptr(),
                 "A_bytes": ws_t,
                 "D_bytes": ws_coa,
                 **scalars,
             },
             r_spec,
         )
-        weights, w_bytes = bufs["ws_coa"], ws_coa
-    values = ConvArgs.from_problem(fprop.problem).to_launch_values(
-        bufs["dy"], weights, bufs["dx"], dY.nbytes, w_bytes, dX.nbytes
+        weights = coalesced_ws
+    grid, block = _launch_geometry(fprop)
+    launch_direct_kernel(
+        f_art, fprop.problem, (dy_dev, weights, dx_dev), grid=grid, block=block
     )
-    _launch(rt, f_art, conv_direct_args_signature("fp32"), values, fprop)
-    rt.memcpy_d2h(_u8(dX), bufs["dx"], dX.nbytes)
-    for buf in bufs.values():
-        rt.free(buf)
-    synchronize_and_release(0)
-    return _rel_err(dX, ref)
+    return _rel_err(dx_dev.read(), ref)
 
 
 # These read B in the reorganized (W_coa) layout the dgrad weight transforms
@@ -972,8 +915,9 @@ class TestDirectF32CrossEngine(unittest.TestCase):
     the ``conv_direct_grouped`` byte-identity family compares them."""
 
     def test_python_and_cpp_builders_agree(self):
-        from kernels.conv.engine_bridge import lower_conv_direct_grouped
         from rocke.core.backend import BACKEND_CPP, BACKEND_PYTHON
+
+        from kernels.conv.engine_bridge import lower_conv_direct_grouped
 
         for name, (build, _valid, make, m) in _FWD.items():
             kind = _BACKEND_KIND.get(build)

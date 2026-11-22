@@ -14,41 +14,38 @@ through ``_mma_f32_logical`` -- exact fp32 atoms for ``"fp32"``, TF32 atoms
 CPU part: build + lower on gfx950 and gfx942, names, rejections, fp32 == tf32
 IR for the scalar kernels, and an ISA instruction-count check of the wgrad
 MFMAs (comgr cross-compile). GPU part (gfx950/gfx942 attached): correctness
-against an IEEE fp32 torch reference computed on the CPU, relative to the
-output peak -- 1e-5 for exact fp32 math; for the TF32 wgrad, 1e-4 on gfx950
-and, on gfx942, 1e-3 against a reference whose inputs are masked to what the
-native XF32 MFMA consumes (``conv_reference.tf32_reference_inputs``).
-
-pytest forks per test on some setups, which leaves HIP without a device; run
-the GPU part as ``python3 library/tests/test_conv_direct_tf32_scalar.py``.
+against a float64 numpy reference, relative to the output peak -- 1e-5 for
+exact fp32 math; for the TF32 wgrad, 1e-4 on gfx950 and, on gfx942, 1e-3
+against a reference whose inputs are masked to what the native XF32 MFMA
+consumes (``conv_reference.tf32_reference_inputs``).
 """
 
 from __future__ import annotations
 
-import ctypes
-import importlib.util
 import re
 import unittest
 from typing import Callable, List, Tuple
 
+import numpy as np
+from rocke.numeric import storage
+from rocke.tests.llc import find_llvm_tool
+
+from builders.common.conv_reference import (
+    tf32_reference_inputs,
+    tf32_reference_tol,
+)
 from kernels.common import conv_direct_grouped as cdg
 from kernels.common.conv_direct_grouped import DirectConvProblem as P
-from rocke.tests.llc import find_llvm_tool
+
+from ._direct_conv_numeric import (
+    direct_dgrad_reference,
+    direct_fwd_reference,
+    direct_wgrad_reference,
+    launch_direct_conv,
+)
 
 _ARCHS = ("gfx950", "gfx942")
 _F32_DTYPES = ("fp32", "tf32")
-_HAS_TORCH = importlib.util.find_spec("torch") is not None
-if _HAS_TORCH:
-    from builders.common.conv_reference import (
-        tf32_reference_inputs,
-        tf32_reference_tol,
-    )
-if _HAS_TORCH:
-    # Claim the HIP context for torch before rocke's runtime touches it (see
-    # test_direct_conv_correctness.py). The reference itself runs on the CPU.
-    import torch
-
-    torch.cuda.is_available()
 
 
 def _gpu_arch() -> str:
@@ -371,113 +368,40 @@ class TestWgradBuild(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 
-def _u8(t):
-    return (ctypes.c_uint8 * t.nbytes).from_address(t.data_ptr())
-
-
-def _launch(spec, build, arch: str, direction: str, A, B, D) -> "torch.Tensor":
-    """Compile ``spec``, launch it on host tensors A/B/D, return D's result."""
-    from kernels.common.conv_abi import conv_direct_args_signature
-    from kernels.common.conv_args import ConvArgs
+def _launch(spec, build, arch: str, direction: str, inputs, output_shape):
+    """Compile ``spec`` and launch it on the fp32 host ``inputs`` (ABI order)
+    with a zeroed output (wgrad accumulates into it); return the output."""
     from rocke import compile_kernel
-    from rocke.runtime import synchronize_and_release
-    from rocke.runtime.hip_module import Runtime
-    from rocke.runtime.launcher import KernelLauncher, LaunchConfig
 
     art = compile_kernel(build(spec, arch=arch), arch=arch)
-    rt = Runtime()
-    devs = []
-    for t in (A, B, D):
-        d = rt.alloc(t.nbytes)
-        devs.append(d)
-    rt.memcpy_h2d(devs[0], _u8(A), A.nbytes)
-    rt.memcpy_h2d(devs[1], _u8(B), B.nbytes)
-    rt.memset(devs[2], 0, D.nbytes)
-    try:
-        # fp32 pointers either way: tf32 is fp32 storage.
-        sig = conv_direct_args_signature("fp32", direction=direction)
-        launcher = KernelLauncher(
-            hsaco=art.hsaco, kernel_name=art.kernel_name, signature=sig
-        )
-        values = ConvArgs.from_problem(spec.problem, direction=direction)
-        values = values.to_launch_values(
-            int(devs[0]), int(devs[1]), int(devs[2]), A.nbytes, B.nbytes, D.nbytes
-        )
-        grid, block = cdg.direct_launch_geometry(spec)
-        launcher(values, config=LaunchConfig(grid=grid, block=block, fence=True))
-        out = torch.empty_like(D)
-        rt.memcpy_d2h(_u8(out), devs[2], D.nbytes)
-    finally:
-        for d in devs:
-            rt.free(d)
-        synchronize_and_release(0)
-    return out
+    grid, block = cdg.direct_launch_geometry(spec)
+    return launch_direct_conv(
+        art,
+        spec.problem,
+        inputs,
+        np.zeros(output_shape, np.float32),
+        grid=grid,
+        block=block,
+        direction=direction,
+    )
 
 
 def _rel_err(out, ref) -> float:
-    return float((out - ref).abs().max() / ref.abs().max().clamp(min=1e-30))
+    return float(np.abs(out - ref).max() / max(np.abs(ref).max(), 1e-30))
 
 
-def _ref_fwd(X, W, p):
-    import torch.nn.functional as F
-
-    y = F.conv2d(
-        X.permute(0, 3, 1, 2),
-        W.permute(0, 3, 1, 2),
-        padding=p.PAD,
-        stride=p.stride,
-        groups=p.groups,
-    )
-    return y.permute(0, 2, 3, 1).contiguous()
-
-
-def _ref_dgrad(dY, W, p):
-    import torch.nn.functional as F
-
-    hb = (p.Ho - 1) * p.stride - 2 * p.PAD + p.KH
-    wb = (p.Wo - 1) * p.stride - 2 * p.PAD + p.KW
-    dx = F.conv_transpose2d(
-        dY.permute(0, 3, 1, 2),
-        W.permute(0, 3, 1, 2),
-        padding=p.PAD,
-        stride=p.stride,
-        groups=p.groups,
-        output_padding=(p.H - hb, p.W - wb),
-    )
-    return dx.permute(0, 2, 3, 1).contiguous()
-
-
-def _ref_wgrad(X, dY, p):
-    import torch.nn.functional as F
-
-    W = torch.zeros(p.total_k, p.cpg, p.KH, p.KW, requires_grad=True)
-    y = F.conv2d(
-        X.permute(0, 3, 1, 2), W, padding=p.PAD, stride=p.stride, groups=p.groups
-    )
-    y.backward(dY.permute(0, 3, 1, 2))
-    return W.grad.permute(0, 2, 3, 1).contiguous()
+def _uniform(rng, shape) -> np.ndarray:
+    return storage.encode(rng.uniform(-1, 1, shape), "fp32")
 
 
 _GPU = _gpu_arch()
-_GPU_SKIP = (
-    "torch not importable"
-    if not _HAS_TORCH
-    else ("" if _GPU in _ARCHS else f"no gfx950/gfx942 GPU (got {_GPU!r})")
-)
+_GPU_SKIP = "" if _GPU in _ARCHS else f"no gfx950/gfx942 GPU (got {_GPU!r})"
 
 
 @unittest.skipIf(bool(_GPU_SKIP), _GPU_SKIP)
 class TestGpuCorrectness(unittest.TestCase):
     def setUp(self):
-        import contextlib
-
-        from builders.common.conv_reference import ieee_fp32
-
-        # IEEE fp32 references for the whole test, restored afterwards.
-        pin = contextlib.ExitStack()
-        pin.enter_context(ieee_fp32())
-        self.addCleanup(pin.close)
-        torch.manual_seed(0)
+        self.rng = np.random.default_rng(0)
 
     def test_scalar_variants(self):
         ran = 0
@@ -487,17 +411,29 @@ class TestGpuCorrectness(unittest.TestCase):
                     p = spec.problem
                     ok, why = valid(spec, arch=_GPU)
                     self.assertTrue(ok, why)
-                    W = torch.empty(p.total_k, p.KH, p.KW, p.cpg).uniform_(-1, 1)
+                    W = _uniform(self.rng, (p.total_k, p.KH, p.KW, p.cpg))
                     if direction == "fwd":
-                        X = torch.empty(p.N, p.H, p.W, p.total_c).uniform_(-1, 1)
-                        D = torch.empty(p.N, p.Ho, p.Wo, p.total_k)
-                        out = _launch(spec, build, _GPU, "fwd", X, W, D)
-                        ref = _ref_fwd(X, W, p)
+                        X = _uniform(self.rng, (p.N, p.H, p.W, p.total_c))
+                        out = _launch(
+                            spec,
+                            build,
+                            _GPU,
+                            "fwd",
+                            (X, W),
+                            (p.N, p.Ho, p.Wo, p.total_k),
+                        )
+                        ref = direct_fwd_reference(p, X, W)
                     else:
-                        dY = torch.empty(p.N, p.Ho, p.Wo, p.total_k).uniform_(-1, 1)
-                        D = torch.empty(p.N, p.H, p.W, p.total_c)
-                        out = _launch(spec, build, _GPU, "dgrad", dY, W, D)
-                        ref = _ref_dgrad(dY, W, p)
+                        dY = _uniform(self.rng, (p.N, p.Ho, p.Wo, p.total_k))
+                        out = _launch(
+                            spec,
+                            build,
+                            _GPU,
+                            "dgrad",
+                            (dY, W),
+                            (p.N, p.H, p.W, p.total_c),
+                        )
+                        ref = direct_dgrad_reference(p, dY, W)
                     err = _rel_err(out, ref)
                     print(f"  {dtype:5s} {label:18s} rel_err={err:.2e}", flush=True)
                     self.assertLess(err, 1e-5)
@@ -511,20 +447,21 @@ class TestGpuCorrectness(unittest.TestCase):
                 with self.subTest(dtype=dtype, case=label):
                     spec = _wgrad_spec(label, pkw, skw, dtype)
                     p = spec.problem
-                    X = torch.empty(p.N, p.H, p.W, p.total_c).uniform_(-1, 1)
-                    dY = torch.empty(p.N, p.Ho, p.Wo, p.total_k).uniform_(-1, 1)
-                    dW = torch.empty(p.total_k, p.KH, p.KW, p.cpg)
+                    X = _uniform(self.rng, (p.N, p.H, p.W, p.total_c))
+                    dY = _uniform(self.rng, (p.N, p.Ho, p.Wo, p.total_k))
                     out = _launch(
-                        spec, cdg.build_direct_conv_wgrad, _GPU, "wgrad", dY, X, dW
+                        spec,
+                        cdg.build_direct_conv_wgrad,
+                        _GPU,
+                        "wgrad",
+                        (dY, X),
+                        (p.total_k, p.KH, p.KW, p.cpg),
                     )
-                    if dtype == "tf32":
-                        ref = _ref_wgrad(
-                            tf32_reference_inputs(X, _GPU),
-                            tf32_reference_inputs(dY, _GPU),
-                            p,
-                        )
-                    else:
-                        ref = _ref_wgrad(X, dY, p)
+                    ref = direct_wgrad_reference(
+                        p,
+                        tf32_reference_inputs(X, _GPU, dtype),
+                        tf32_reference_inputs(dY, _GPU, dtype),
+                    )
                     err = _rel_err(out, ref)
                     print(
                         f"  {dtype:5s} wgrad {label:14s} rel_err={err:.2e}", flush=True
