@@ -139,6 +139,8 @@ _KERNEL_RESOURCE_BUDGETS = {
     # toolchain, not of the kernel -- the figure moved between ROCm releases while this
     # body did not -- so the budget asserts the invariant (no spill) rather than
     # recording any one compiler's number. Tuned for 2 waves/SIMD (512 VGPR/SIMD // 256).
+    # (The four gfx942 wskip / kpad8 entries at the end are different: a temporary
+    # measured spill budget pending the owner's retune decision, not an invariant.)
     "rocke_attention_dense_d128_bn64_bf16_causal_lazyrs_persist256_bthkvmin": {
         "min_waves_per_simd": 2,
     },
@@ -158,6 +160,31 @@ _KERNEL_RESOURCE_BUDGETS = {
     "rocke_attention_dense_d128_hq32_kv8_bn64_fp16_sq8192_sk8192_causal_swa4096_pgd16_nb512_lazyrs_gfx942_b1_wpe2": {
         "max_scratch_bytes": 32,
         "min_waves_per_simd": 2,
+    },
+    # gfx942 D128 paged prefill at the smaller BN=32 tile (wpe2, window skip): AMD
+    # clang 24.0.0git (llvm-project 424729dba653) caps VGPR at 256 and spills 44 B
+    # (fp16) and 24 B (bf16); ROCm 7.1 compiles both with no scratch. Each budget is
+    # the measured spill, so any growth fails; on ROCm 7.1 this allows up to 44 / 24 B
+    # where 0 B is measured. Tuned for 2 waves/SIMD, as the wpe2 entry above. Retune
+    # pending owner decision.
+    "rocke_attention_dense_d128_hq16_kv4_bn32_fp16_bm128_sq1024_sk1024_causal_swa256_pgd16_nb128_lazyrs_gfx942_b1_wpe2_wskip": {
+        "max_scratch_bytes": 44,
+        "min_waves_per_simd": 2,
+    },
+    "rocke_attention_dense_d128_hq16_kv4_bn32_bf16_bm128_sq1024_sk1024_causal_swa256_pgd16_nb128_lazyrs_gfx942_b1_wpe2_wskip": {
+        "max_scratch_bytes": 24,
+        "min_waves_per_simd": 2,
+    },
+    # gfx942 dispatched bf16 D64 causal prefill (wpe4, K padded to 8): AMD clang
+    # 24.0.0git (llvm-project 424729dba653) caps VGPR at 128 and spills 40 B, and
+    # 44 B with LSE; ROCm 7.1 compiles both with no scratch. Each budget is the
+    # measured spill, so any growth fails; on ROCm 7.1 this allows up to 40 / 44 B
+    # where 0 B is measured. Retune pending owner decision.
+    "rocke_attention_dense_d64_bn64_bf16_kpad8_causal_lazyrs_npbthkvmin_gfx942_wpe4": {
+        "max_scratch_bytes": 40,
+    },
+    "rocke_attention_dense_d64_bn64_bf16_kpad8_causal_lazyrs_npbthkvmin_gfx942_wpe4_lse": {
+        "max_scratch_bytes": 44,
     },
 }
 
