@@ -606,8 +606,8 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
                Problem::BlockFmhaShape::Gemm0BlockWarps::at(number<1>{}) == 1;
     }
 
-    // RunPart0's local max of MSB Msb (lane max, its lane-half partner and the old max), with the
-    // lane max formed on the score pairs (c, c + 1) as two-wide vectors.
+    // Local max of MSB Msb for RunPart1 (lane max, its lane-half partner and the old max), with
+    // the lane max formed on the score pairs (c, c + 1) as two-wide vectors.
     template <index_t Msb, typename ScoreTensor>
     CK_TILE_DEVICE static float PairLocalMax(const ScoreTensor& score, float old_max)
     {
@@ -618,7 +618,7 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
             [&](auto p) { pairs(p) = Mapping::template LoadPair<Msb, decltype(p)::value>(score); });
         const auto pair_max  = PairTreeMax(pairs);
         const float lane_max = max(pair_max[0], pair_max[1]);
-        return Softmax::template Max3<true>(lane_max, Softmax::PermuteLaneX16(lane_max), old_max);
+        return Softmax::Max3(lane_max, Softmax::PermuteLaneX16(lane_max), old_max);
     }
 
     // ck_tile::max(float, float) is __builtin_fmaxf (llvm.maxnum); the same on two-wide vectors.
