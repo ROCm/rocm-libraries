@@ -154,10 +154,8 @@ static bool enable_combo_2d(const rocke_unified_attn_problem_t* p)
         /* bf16 admits the whole combo cohort; every other dtype is rejected. */
         return false;
     }
-    if(p->use_alibi || p->use_qq_bias || p->softcap > 0)
-    {
-        return false;
-    }
+    /* ALiBi, QQ bias and softcap ride the combo: the transposed softmax body
+       applies them per score. */
     if(p->head_size != 64 || p->block_size != 32)
     {
         return false;
@@ -192,10 +190,8 @@ static bool enable_single_batch_combo(const rocke_unified_attn_problem_t* p)
     {
         return false;
     }
-    if(p->use_alibi || p->use_qq_bias)
-    {
-        return false;
-    }
+    /* ALiBi and QQ bias are admitted: the transposed softmax body applies them
+       per score. */
     if(p->softcap > 0)
     {
         return false;
@@ -332,10 +328,8 @@ static bool enable_transposed_qk_32x32(const rocke_unified_attn_problem_t* p)
     {
         return false;
     }
-    if(p->use_alibi || p->use_qq_bias)
-    {
-        return false;
-    }
+    /* Only softcap and sinks are gated here: the transposed softmax body applies
+       ALiBi and QQ bias per score. */
     if(p->softcap > 0 || p->use_sinks)
     {
         return false;
@@ -412,6 +406,12 @@ static bool enable_v_double_buffer(const rocke_unified_attn_problem_t* p)
 static bool enable_transposed_subflags(const rocke_unified_attn_problem_t* p)
 {
     if(p->sliding_window > 0)
+    {
+        return false;
+    }
+    /* The VALU sub-flags (mask-limit among them) do not support softcap, ALiBi or
+       QQ bias; the spec validator enforces this. */
+    if(p->softcap > 0 || p->use_alibi || p->use_qq_bias)
     {
         return false;
     }
