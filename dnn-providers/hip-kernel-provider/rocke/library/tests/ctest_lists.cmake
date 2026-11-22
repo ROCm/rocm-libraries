@@ -229,7 +229,16 @@ endif()
 # oracle-free uniform-probability checker and subject contracts, the gfx942
 # dense golden IR hashes (pure text lowering, a few seconds), the dense
 # varlen-keys host checks, the gfx950 dense varlen K/V buffer bound on the emitted
-# IR, and the backward-test memo bound in tests/conftest.py.
+# IR, and the backward-test memo bound in tests/conftest.py. Then the forward
+# routing and admission checks: the spec builder's arch argument, the gfx950
+# tiled-2D selector and its per-engine spec builders, the 2D LDS budget
+# resolver, decode routing to the 3D kernel, non-power-of-two GQA ratios in the
+# 2D and 3D gates, the gfx942 D128 sliding-window route, GQA head fold, sliced-K
+# width, 4-warp exp2 softmax and 3D D192 LDS footprint, the dense LDS budgets
+# (gfx942, D64 pad), dense bottom-right causal and LSE output checks, the
+# split-KV workspace ownership, the strided (non-paged) KV decode contracts and
+# LDS admission, the FLOP helper, the SDPA reference-transfer contract and the
+# attention doc claims.
 # File-list style (same pattern as conv_pytest) so PYTHONPATH resolves rocke/
 # correctly from the installed tree.
 set(_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS
@@ -279,6 +288,28 @@ set(_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS
     "tests/library/tests/test_attention_combo_sweep_fp8.py"
     "tests/library/tests/test_dense_prefill_emit_shapes.py"
     "tests/library/tests/dispatch/attention/test_review_followups.py"
+    "tests/library/tests/test_arch_binding_guard.py"
+    "tests/library/tests/test_selector_parity.py"
+    "tests/library/tests/test_per_engine_spec_fns.py"
+    "tests/library/tests/test_lds_budget_resolver.py"
+    "tests/library/tests/test_attn_decode_route_3d.py"
+    "tests/library/tests/test_attn_tiled_2d_nqk_nonpow2.py"
+    "tests/library/tests/test_attn_tiled_3d_nqk_nonpow2.py"
+    "tests/library/tests/test_gfx942_d128_sw_routing.py"
+    "tests/library/tests/test_gfx942_gqa_head_fold.py"
+    "tests/library/tests/test_attn_k_slice_hd.py"
+    "tests/library/tests/test_gfx942_4wgqa_softmax_exp2fast.py"
+    "tests/library/tests/test_gfx942_3d_d192_lds.py"
+    "tests/library/tests/test_attention_dense_gfx942_lds.py"
+    "tests/library/tests/test_attention_dense_d64_lds.py"
+    "tests/library/tests/test_attention_dense_bottom_right.py"
+    "tests/library/tests/test_attention_dense_lse.py"
+    "tests/library/tests/test_attention_workspace.py"
+    "tests/library/tests/test_strided_kv_decode.py"
+    "tests/library/tests/test_strided_kv_lds.py"
+    "tests/library/tests/test_attention_flops.py"
+    "tests/library/tests/test_sdpa_torch_reference.py"
+    "tests/library/tests/test_verify_dsl_docs_attention.py"
     # One node id, not the file: the rest of test_attention_builds.py
     # disassembles HSACO, so it needs the compiler tools this lane does not
     # inject, and its budget sentinel turns a missing-tool skip into a
