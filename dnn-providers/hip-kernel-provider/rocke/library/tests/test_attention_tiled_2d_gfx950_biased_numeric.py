@@ -144,13 +144,6 @@ MODIFIER_MIXES = {
 }
 
 
-@pytest.fixture(scope="module")
-def rt():
-    from rocke.runtime.hip_module import Runtime
-
-    return Runtime()
-
-
 def _problem(case: Case, num_kv_blocks: int) -> UnifiedAttentionProblem:
     return UnifiedAttentionProblem(
         total_q=sum(case.q_lens),
@@ -257,7 +250,7 @@ def _each_modifier_dropped(case: Case, modifiers: dict):
             yield name, case, {**modifiers, name: None}
 
 
-def _check(rt, case: Case):
+def _check(case: Case):
     q, k_cache, v_cache, block_table, modifiers = _inputs(case)
     problem = _problem(case, num_kv_blocks=k_cache.shape[0])
     assert _takes_route(problem, case.route), f"no longer on the {case.route}"
@@ -287,7 +280,6 @@ def _check(rt, case: Case):
         num_kv_blocks=problem.num_kv_blocks,
     )
     out = launch_tiled(
-        rt,
         problem,
         spec,
         q,
@@ -307,11 +299,11 @@ def _check(rt, case: Case):
 @pytest.mark.parametrize(
     "case", EACH_MODIFIER_ON_EACH_ROUTE.values(), ids=EACH_MODIFIER_ON_EACH_ROUTE
 )
-def test_each_modifier_on_each_route(rt, case):
-    _check(rt, case)
+def test_each_modifier_on_each_route(case):
+    _check(case)
 
 
 @pytest.mark.exhaustive
 @pytest.mark.parametrize("case", MODIFIER_MIXES.values(), ids=MODIFIER_MIXES)
-def test_modifier_mixes(rt, case):
-    _check(rt, case)
+def test_modifier_mixes(case):
+    _check(case)

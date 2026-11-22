@@ -48,9 +48,9 @@ from kernels.common.attention_unified import (
     run_unified_attention_torch,
 )
 from rocke.core.arch.target import known_arches
+from rocke.runtime.device_array import DeviceArray
 from rocke.runtime.hip_module import get_device_arch
 
-from ._attention_device_array import DeviceArray
 from ._attention_paged_reference import (
     decode_half,
     encode_half,
@@ -75,13 +75,6 @@ _WINDOW = 32
 _HQ, _HKV, _D, _BS = 8, 2, 64, 16
 _NUM_SEGMENTS = 8
 _DTYPES = ["fp16", "bf16"]
-
-
-@pytest.fixture(scope="module")
-def rt():
-    from rocke.runtime.hip_module import Runtime
-
-    return Runtime()
 
 
 def _nan_filled(like):
@@ -149,25 +142,25 @@ def _reference(data, kv_len, top_left, window=_WINDOW):
     )
 
 
-def _run_scalar_2d(rt, problem, data):
-    out = DeviceArray(rt, _nan_filled(data["q"]))
+def _run_scalar_2d(problem, data):
+    out = DeviceArray(_nan_filled(data["q"]), data["dtype"])
     run_unified_attention_torch(
         problem=problem,
-        q=DeviceArray(rt, data["q"]),
-        k=DeviceArray(rt, data["k"]),
-        v=DeviceArray(rt, data["v"]),
+        q=DeviceArray(data["q"], data["dtype"]),
+        k=DeviceArray(data["k"], data["dtype"]),
+        v=DeviceArray(data["v"], data["dtype"]),
         out=out,
-        cu_seqlens_q=DeviceArray(rt, data["cu"]),
-        seqused_k=DeviceArray(rt, data["seqused"]),
+        cu_seqlens_q=DeviceArray(data["cu"]),
+        seqused_k=DeviceArray(data["seqused"]),
         softmax_scale=data["scale"],
-        block_table=DeviceArray(rt, data["block_table"]),
+        block_table=DeviceArray(data["block_table"]),
         softcap=0.0,
         backend="scalar",
     )
     return decode_half(out.read(), data["dtype"])
 
 
-def _run_scalar_3d(rt, problem, data, between=None):
+def _run_scalar_3d(problem, data, between=None):
     """Scalar split-3D segment kernel then the scalar reduce, launched directly.
 
     ``between(segm_sum)``, if given, runs after the segment launch and before
@@ -239,23 +232,23 @@ def _run_scalar_3d(rt, problem, data, between=None):
     # The segm_ml descriptor spans max_seqlen_q + 1 tokens.
     rows = problem.max_seqlen_q + 1
     segm_out = DeviceArray(
-        rt, np.full((rows, _HQ, _NUM_SEGMENTS, _D), np.nan, dtype=np.float32)
+        np.full((rows, _HQ, _NUM_SEGMENTS, _D), np.nan, dtype=np.float32)
     )
-    segm_max = DeviceArray(rt, np.full((rows, _HQ, _NUM_SEGMENTS), np.nan, np.float32))
-    segm_sum = DeviceArray(rt, np.full((rows, _HQ, _NUM_SEGMENTS), np.nan, np.float32))
-    out = DeviceArray(rt, _nan_filled(data["q"]))
-    seqused = DeviceArray(rt, data["seqused"])
-    cu = DeviceArray(rt, data["cu"])
+    segm_max = DeviceArray(np.full((rows, _HQ, _NUM_SEGMENTS), np.nan, np.float32))
+    segm_sum = DeviceArray(np.full((rows, _HQ, _NUM_SEGMENTS), np.nan, np.float32))
+    out = DeviceArray(_nan_filled(data["q"]), data["dtype"])
+    seqused = DeviceArray(data["seqused"])
+    cu = DeviceArray(data["cu"])
     seg(
         {
             "segm_output_ptr": segm_out,
             "segm_max_ptr": segm_max,
             "segm_expsum_ptr": segm_sum,
-            "query_ptr": DeviceArray(rt, data["q"]),
-            "key_cache_ptr": DeviceArray(rt, data["k"]),
-            "value_cache_ptr": DeviceArray(rt, data["v"]),
+            "query_ptr": DeviceArray(data["q"], data["dtype"]),
+            "key_cache_ptr": DeviceArray(data["k"], data["dtype"]),
+            "value_cache_ptr": DeviceArray(data["v"], data["dtype"]),
             "sink_ptr": 0,
-            "block_tables_ptr": DeviceArray(rt, data["block_table"]),
+            "block_tables_ptr": DeviceArray(data["block_table"]),
             "seq_lens_ptr": seqused,
             "alibi_slopes_ptr": 0,
             "qq_bias_ptr": 0,
@@ -327,17 +320,17 @@ _CASES = {
 
 @pytest.mark.parametrize("dtype", _DTYPES)
 @pytest.mark.parametrize("case", list(_CASES))
-def test_scalar_2d_masked_leading_keys(rt, case, dtype):
+def test_scalar_2d_masked_leading_keys(case, dtype):
     q_len, kv_len, top_left = _CASES[case]
     data = _inputs(dtype, q_len, kv_len)
     problem = _problem(dtype, q_len, kv_len, data["num_blocks"], top_left)
-    out = _run_scalar_2d(rt, problem, data)
+    out = _run_scalar_2d(problem, data)
     ref, has_key = _reference(data, kv_len, top_left)
     _check(out, ref, has_key, dtype)
 
 
 @pytest.mark.parametrize("dtype", _DTYPES)
-def test_scalar_2d_default_mask_keyless_rows(rt, dtype):
+def test_scalar_2d_default_mask_keyless_rows(dtype):
     """Default mask (bottom-right causal, no window) with q_len > kv_len.
 
     Query row i sees keys 0..i - (q_len - kv_len), so the first 16 of 32 rows
@@ -347,7 +340,7 @@ def test_scalar_2d_default_mask_keyless_rows(rt, dtype):
     data = _inputs(dtype, q_len, kv_len)
     problem = _problem(dtype, q_len, kv_len, data["num_blocks"], False, window=0)
     assert problem.default_mask
-    out = _run_scalar_2d(rt, problem, data)
+    out = _run_scalar_2d(problem, data)
     ref, has_key = _reference(data, kv_len, False, window=0)
     assert int((~has_key).sum()) == 16
     _check(out, ref, has_key, dtype)
@@ -355,7 +348,7 @@ def test_scalar_2d_default_mask_keyless_rows(rt, dtype):
 
 @pytest.mark.parametrize("dtype", _DTYPES)
 @pytest.mark.parametrize("case", ["bottom_right", "top_left"])
-def test_scalar_2d_propagates_nan_query_row(rt, case, dtype):
+def test_scalar_2d_propagates_nan_query_row(case, dtype):
     """A NaN query row must give NaN O, not be stored as a keyless 0.
 
     The NaN scores make the row's sum l NaN. The epilogue stores 0 only for an
@@ -378,7 +371,7 @@ def test_scalar_2d_propagates_nan_query_row(rt, case, dtype):
     ref, has_key = _reference(data, kv_len, top_left)
     assert bool(has_key[row])
     data["q"][row, head] = encode_half(np.nan, dtype)
-    out = _run_scalar_2d(rt, problem, data)
+    out = _run_scalar_2d(problem, data)
     _check_nan_slot(
         out, ref, row, head, dtype, f"row {row} head {head}: NaN query did not reach O"
     )
@@ -386,19 +379,19 @@ def test_scalar_2d_propagates_nan_query_row(rt, case, dtype):
 
 @pytest.mark.parametrize("dtype", _DTYPES)
 @pytest.mark.parametrize("case", list(_CASES))
-def test_scalar_3d_masked_leading_keys_and_segments(rt, case, dtype):
+def test_scalar_3d_masked_leading_keys_and_segments(case, dtype):
     # bottom_right is the default mask with a window: the 3D body must apply the
     # window there too, not attend to every key before the diagonal.
     q_len, kv_len, top_left = _CASES[case]
     data = _inputs(dtype, q_len, kv_len)
     problem = _problem(dtype, q_len, kv_len, data["num_blocks"], top_left)
-    out = _run_scalar_3d(rt, problem, data)
+    out = _run_scalar_3d(problem, data)
     ref, has_key = _reference(data, kv_len, top_left)
     _check(out, ref, has_key, dtype)
 
 
 @pytest.mark.parametrize("dtype", _DTYPES)
-def test_scalar_3d_default_mask_masked_trailing_segments(rt, dtype):
+def test_scalar_3d_default_mask_masked_trailing_segments(dtype):
     """Default mask with q_len == kv_len = 128, keys split over 8 segments.
 
     Row 0 sees key 0 only, so every later segment sees only masked keys.
@@ -409,14 +402,14 @@ def test_scalar_3d_default_mask_masked_trailing_segments(rt, dtype):
     data = _inputs(dtype, q_len, kv_len)
     problem = _problem(dtype, q_len, kv_len, data["num_blocks"], False, window=0)
     assert problem.default_mask
-    out = _run_scalar_3d(rt, problem, data)
+    out = _run_scalar_3d(problem, data)
     ref, has_key = _reference(data, kv_len, False, window=0)
     assert bool(has_key.all())
     _check(out, ref, has_key, dtype)
 
 
 @pytest.mark.parametrize("dtype", _DTYPES)
-def test_scalar_3d_reduce_propagates_nan_segment_sum(rt, dtype):
+def test_scalar_3d_reduce_propagates_nan_segment_sum(dtype):
     """A NaN per-segment sum must reach O, not be skipped as an empty segment.
 
     The reduce treats only an exact-zero sum as an empty segment (``fcmp oeq``).
@@ -440,7 +433,7 @@ def test_scalar_3d_reduce_propagates_nan_segment_sum(rt, dtype):
 
     data = _inputs(dtype, q_len, kv_len)
     problem = _problem(dtype, q_len, kv_len, data["num_blocks"], top_left)
-    out = _run_scalar_3d(rt, problem, data, between=poison)
+    out = _run_scalar_3d(problem, data, between=poison)
     ref, has_key = _reference(data, kv_len, top_left)
     assert bool(has_key[row])
 

@@ -238,39 +238,50 @@ def zero_keyless_row(b, packed, row_has_key, dtype, width=4):
     return b.bitcast(bits, VectorType(dtype, width))
 
 
+def _lse_info(lse):
+    """The ``ArrayInfo`` of a caller's LSE buffer: a torch tensor or a
+    ``rocke.runtime.device_array.DeviceArray``, anything else is refused."""
+    from rocke.runtime.device_array import array_info
+
+    try:
+        return array_info(lse)
+    except TypeError:
+        raise ValueError(
+            "lse must be a torch tensor or a rocke.runtime DeviceArray"
+        ) from None
+
+
 def _check_lse_buffer(lse, q, expected, inputs):
     """Shared caller-owned LSE buffer contract: FP32, exact shape, contiguous,
-    on q's GPU, and not overlapping any input or output tensor."""
-    import torch
+    on q's GPU, and not overlapping any input or output array.
 
-    if not isinstance(lse, torch.Tensor):
-        raise ValueError("lse must be a torch tensor")
-    if lse.dtype != torch.float32:
+    Each array is a torch tensor or a ``rocke.runtime.device_array.DeviceArray``;
+    the checks read its :func:`~rocke.runtime.device_array.array_info`."""
+    from rocke.runtime.device_array import array_info
+
+    lse_info = _lse_info(lse)
+    q_info = array_info(q)
+    if lse_info.dtype != "fp32":
         raise ValueError("lse must have dtype float32")
-    if tuple(lse.shape) != expected:
-        raise ValueError(f"lse shape {tuple(lse.shape)} != {expected}")
-    if not lse.is_contiguous():
+    if lse_info.shape != expected:
+        raise ValueError(f"lse shape {lse_info.shape} != {expected}")
+    if not lse_info.is_contiguous():
         raise ValueError("lse must be contiguous")
-    if not q.is_cuda or not lse.is_cuda or lse.device != q.device:
+    if q_info.device is None or lse_info.device != q_info.device:
         raise ValueError("lse and q must be GPU tensors on the same device")
 
-    lse_start = lse.data_ptr()
-    lse_end = lse_start + lse.numel() * lse.element_size()
+    lse_start, lse_end = lse_info.byte_span()
     for name, tensor in inputs.items():
         if tensor is None:
             continue
-        if not tensor.is_cuda or tensor.device != q.device:
+        info = array_info(tensor)
+        if info.device != q_info.device:
             raise ValueError(f"{name} must be on q's GPU device")
-        if not tensor.numel():
+        if not info.numel:
             continue
-        # Torch strides are nonnegative. Include holes conservatively when
-        # checking the span of an input view against the contiguous output.
-        span = 1 + sum(
-            (extent - 1) * stride
-            for extent, stride in zip(tensor.shape, tensor.stride())
-        )
-        start = tensor.data_ptr()
-        end = start + span * tensor.element_size()
+        # Include holes conservatively when checking the span of an input view
+        # against the contiguous output.
+        start, end = info.byte_span()
         if lse_start < end and start < lse_end:
             raise ValueError(f"lse overlaps {name}")
 
@@ -525,12 +536,14 @@ def validate_unified_lse(
         raise ValueError("emit_lse=True requires a caller-owned lse buffer")
     expected = (problem.total_q, problem.num_query_heads, 1)
     if lse_layout == "head_major":
-        # Any contiguous view of the elements; _check_lse_buffer rejects a non-tensor.
-        if hasattr(lse, "is_contiguous"):
-            if not lse.is_contiguous():
-                raise ValueError("lse must be contiguous")
-            lse = lse.reshape(-1)
-        expected = (problem.total_q * problem.num_query_heads,)
+        # Any contiguous view of the total_q * Hq elements, e.g. [B, Hq, S, 1].
+        info = _lse_info(lse)
+        if not info.is_contiguous():
+            raise ValueError("lse must be contiguous")
+        rows = problem.total_q * problem.num_query_heads
+        if info.numel != rows:
+            raise ValueError(f"lse shape {(info.numel,)} != {(rows,)}")
+        expected = info.shape
     _check_lse_buffer(
         lse,
         q,

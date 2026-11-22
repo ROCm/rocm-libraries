@@ -8,7 +8,8 @@ through the same hipModule path as `run_manifest`, without host staging.
 This module holds `resolve_stream` (substitute torch's current stream so
 its caching allocator stays coherent -- degrades to the HIP null stream
 when torch is absent, so the numpy/manifest hip-only path calls it too),
-`empty_workspace`, `torch_dtype`, `device_tensor`, and the
+`empty_workspace`, `torch_dtype`, `device_tensor`, `torch_array_info` (the
+torch side of :func:`rocke.runtime.device_array.array_info`), and the
 `launch_torch_kernel` back-compat shim.
 
 Kernel-argument packing is torch-agnostic and lives in `packing.py`; this
@@ -19,7 +20,10 @@ from __future__ import annotations
 
 import sys
 from dataclasses import dataclass
-from typing import Any, Mapping, Optional, Sequence, Tuple
+from typing import TYPE_CHECKING, Any, Mapping, Optional, Sequence, Tuple
+
+if TYPE_CHECKING:
+    from .device_array import ArrayInfo
 
 
 @dataclass(frozen=True)
@@ -100,6 +104,48 @@ def empty_workspace(shape: Sequence[int], *, dtype: Any, device: Any):
     """
     torch = _require_torch()
     return torch.empty(tuple(int(x) for x in shape), dtype=dtype, device=device)
+
+
+#: ``str(torch.dtype)`` -> rocKE element type, for the dtypes a kernel argument can hold.
+_TORCH_ELEMENT_TYPE = {
+    "torch.float16": "fp16",
+    "torch.bfloat16": "bf16",
+    "torch.float32": "fp32",
+    "torch.float64": "fp64",
+    "torch.float8_e4m3fn": "fp8e4m3",
+    "torch.float8_e5m2": "bf8e5m2",
+    "torch.int8": "i8",
+    "torch.int16": "i16",
+    "torch.int32": "i32",
+    "torch.int64": "i64",
+    "torch.uint8": "u8",
+    "torch.bool": "i1",
+}
+
+
+def torch_array_info(tensor: Any) -> ArrayInfo:
+    """The :class:`rocke.runtime.device_array.ArrayInfo` of a torch tensor.
+
+    Reads only tensor attributes, so it never imports torch. ``device`` is the
+    CUDA/HIP ordinal, or ``None`` for a CPU tensor. The FNUZ fp8 types have no
+    rocKE element type here yet and are refused."""
+    from .device_array import ArrayInfo
+
+    name = str(tensor.dtype)
+    if name not in _TORCH_ELEMENT_TYPE:
+        raise ValueError(
+            f"torch_array_info failed - dtype={name}, expected one of "
+            f"{sorted(_TORCH_ELEMENT_TYPE)}"
+        )
+    device = tensor.device
+    return ArrayInfo(
+        shape=tuple(int(extent) for extent in tensor.shape),
+        strides=tuple(int(stride) for stride in tensor.stride()),
+        dtype=_TORCH_ELEMENT_TYPE[name],
+        element_size=int(tensor.element_size()),
+        data_ptr=int(tensor.data_ptr()),
+        device=int(device.index or 0) if device.type == "cuda" else None,
+    )
 
 
 def torch_dtype(name: str):

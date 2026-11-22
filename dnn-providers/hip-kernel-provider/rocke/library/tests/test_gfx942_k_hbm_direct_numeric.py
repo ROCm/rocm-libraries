@@ -56,13 +56,6 @@ _GEOMETRIES = [
 _TOLERANCE = {"fp16": 2e-2, "bf16": 4e-2}
 
 
-@pytest.fixture(scope="module")
-def rt():
-    from rocke.runtime.hip_module import Runtime
-
-    return Runtime()
-
-
 def _k_from_hbm_spec(problem, variant_id, v_from_hbm):
     """``variant_id``'s spec for ``problem`` with K (and optionally V) read
     straight from HBM."""
@@ -83,7 +76,7 @@ def _k_from_hbm_spec(problem, variant_id, v_from_hbm):
     ids=[f"{g[0]}_d{g[1]}" for g in _GEOMETRIES],
 )
 def test_k_from_hbm_matches_reference(
-    rt, dtype, head_size, page_size, variant_id, v_from_hbm
+    dtype, head_size, page_size, variant_id, v_from_hbm
 ):
     rng = np.random.default_rng(0)
     pages = _SEQ_LEN // page_size
@@ -114,7 +107,7 @@ def test_k_from_hbm_matches_reference(
     spec = _k_from_hbm_spec(problem, variant_id, v_from_hbm)
 
     o = launch_tiled_one_sequence(
-        rt, problem, spec, q, k_cache, v_cache, block_table, scale, dtype
+        problem, spec, q, k_cache, v_cache, block_table, scale, dtype
     )
     o_ref, _has_key = paged_attention_reference(
         q, k_cache, v_cache, _SEQ_LEN, block_table[0], scale

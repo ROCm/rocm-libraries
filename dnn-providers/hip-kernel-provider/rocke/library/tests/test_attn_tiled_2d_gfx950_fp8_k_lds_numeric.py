@@ -28,9 +28,9 @@ from kernels import UnifiedAttentionProblem, run_unified_attention_torch
 from kernels.gfx950.attention_tiled_2d import UnifiedAttention2DTiledSpec
 from rocke.numeric.bf16 import bf16_to_f32, f32_to_bf16
 from rocke.numeric.sdpa_reference import sdpa_reference
+from rocke.runtime.device_array import DeviceArray
 from rocke.runtime.hip_module import get_device_arch
 
-from ._attention_device_array import DeviceArray
 from ._attn_tiled_2d_gfx950_qk_paths import FP8_K_IN_LDS, QK_PATHS
 
 # Optional test dependency (platform/tests/README.md): skip, not fail, without it.
@@ -51,13 +51,6 @@ _K_SCALE = 0.75
 _V_SCALE = 1.25
 # bf16 output after fp8 K/V; the reference runs over the same dequantized values.
 _TOL = 4e-2
-
-
-@pytest.fixture(scope="module")
-def rt():
-    from rocke.runtime.hip_module import Runtime
-
-    return Runtime()
 
 
 def _query_starts():
@@ -143,7 +136,7 @@ def _tuning_spec(path, num_kv_blocks):
 
 
 @pytest.mark.parametrize("path", sorted(QK_PATHS))
-def test_fp8_k_in_lds_matches_reference(rt, path):
+def test_fp8_k_in_lds_matches_reference(path):
     q, (k_bytes, k_values), (v_bytes, v_values), block_table = _inputs()
     num_kv_blocks = int(k_bytes.shape[0])
     problem = UnifiedAttentionProblem(
@@ -162,19 +155,19 @@ def test_fp8_k_in_lds_matches_reference(rt, path):
     host_q = f32_to_bf16(q)
     # 0xFFFF is NaN in bf16: an element the kernel does not store fails the
     # check instead of passing on an earlier case's output in reused memory.
-    out = DeviceArray(rt, np.full_like(host_q, 0xFFFF))
+    out = DeviceArray(np.full_like(host_q, 0xFFFF), "bf16")
     kv_lens = np.diff(_kv_starts()).astype(np.int32)
     scale = _HEAD_SIZE**-0.5
     run_unified_attention_torch(
         problem=problem,
-        q=DeviceArray(rt, host_q),
-        k=DeviceArray(rt, k_bytes),
-        v=DeviceArray(rt, v_bytes),
+        q=DeviceArray(host_q, "bf16"),
+        k=DeviceArray(k_bytes, "fp8e4m3"),
+        v=DeviceArray(v_bytes, "fp8e4m3"),
         out=out,
-        cu_seqlens_q=DeviceArray(rt, _query_starts()),
-        seqused_k=DeviceArray(rt, kv_lens),
+        cu_seqlens_q=DeviceArray(_query_starts()),
+        seqused_k=DeviceArray(kv_lens),
         softmax_scale=scale,
-        block_table=DeviceArray(rt, block_table),
+        block_table=DeviceArray(block_table),
         softcap=0.0,
         k_scale=_K_SCALE,
         v_scale=_V_SCALE,

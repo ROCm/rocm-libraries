@@ -93,13 +93,6 @@ _HEAD_SIZES = [64, 128, 256]
 _PAGE_SIZES = [16, 64]
 
 
-@pytest.fixture(scope="module")
-def rt():
-    from rocke.runtime.hip_module import Runtime
-
-    return Runtime()
-
-
 def _problem(dtype, q_len, kv_len, num_blocks, bs, head_size):
     return UnifiedAttentionProblem(
         total_q=q_len,
@@ -186,7 +179,7 @@ def _paged_cache(rng, kv_len, bs, head_size, dtype, k_value=None):
     return k_cache, v_cache, block_table, num_blocks
 
 
-def _run_and_check(rt, dtype, score, bs, head_size, spec_for):
+def _run_and_check(dtype, score, bs, head_size, spec_for):
     """Run one sequence where every visible score is ``score`` and check O.
 
     ``spec_for(problem)`` returns the tuning spec to pin, or ``None`` for the
@@ -215,7 +208,7 @@ def _run_and_check(rt, dtype, score, bs, head_size, spec_for):
         kernel_spec, q_len
     ), "geometry no longer gives any row a fully masked leading tile"
     out = launch_tiled_one_sequence(
-        rt, problem, spec, q, k_cache, v_cache, block_table, scale, dtype
+        problem, spec, q, k_cache, v_cache, block_table, scale, dtype
     )
     o_ref = _reference(q, k_cache, v_cache, kv_len, block_table, scale)
 
@@ -234,11 +227,8 @@ def _run_and_check(rt, dtype, score, bs, head_size, spec_for):
 @pytest.mark.parametrize("bs", _PAGE_SIZES)
 @pytest.mark.parametrize("dtype,score", _SCORES)
 @pytest.mark.parametrize("branch", _BRANCHES)
-def test_masked_leading_tile_keeps_rows_with_keys(
-    rt, branch, dtype, score, bs, head_size
-):
+def test_masked_leading_tile_keeps_rows_with_keys(branch, dtype, score, bs, head_size):
     _run_and_check(
-        rt,
         dtype,
         score,
         bs,
@@ -247,14 +237,14 @@ def test_masked_leading_tile_keeps_rows_with_keys(
     )
 
 
-def test_masked_leading_tile_auto_route_d64_bf16(rt):
+def test_masked_leading_tile_auto_route_d64_bf16():
     # No tuning spec: the production route. At D64 bf16 with a sliding window it
     # is the default builder with several warps per CTA (gfx942: 4 warps, tile
     # 16; gfx950: 2 warps, tile 64), not the gfx942 4-warp GQA kernel.
     problem = _problem("bf16", 256, 256, 256 // 16 + 3, 16, 64)
     assert _gfx942_4warp_route(problem, _ARCH) is None
     assert _tiled_spec_from_problem(problem, _ARCH).num_warps > 1
-    _run_and_check(rt, "bf16", -200.0, 16, 64, lambda p: None)
+    _run_and_check("bf16", -200.0, 16, 64, lambda p: None)
 
 
 _NAN_ROW, _NAN_HEAD = 100, 5
@@ -262,7 +252,7 @@ _NAN_ROW, _NAN_HEAD = 100, 5
 
 @pytest.mark.parametrize("dtype", ["fp16", "bf16"])
 @pytest.mark.parametrize("branch", _BRANCHES)
-def test_nan_query_row_reaches_output(rt, branch, dtype):
+def test_nan_query_row_reaches_output(branch, dtype):
     """A NaN in one query row must give NaN O for that (row, head) only.
 
     The NaN scores make the row's softmax sum ``l`` NaN. The epilogue's keyless
@@ -282,7 +272,7 @@ def test_nan_query_row_reaches_output(rt, branch, dtype):
     problem = _problem(dtype, q_len, kv_len, num_blocks, bs, head_size)
     spec = _branch_spec(problem, branch, bs, _ARCH)
     out = launch_tiled_one_sequence(
-        rt, problem, spec, q, k_cache, v_cache, block_table, scale, dtype
+        problem, spec, q, k_cache, v_cache, block_table, scale, dtype
     )
     o_ref = _reference(q, k_cache, v_cache, kv_len, block_table, scale)
 

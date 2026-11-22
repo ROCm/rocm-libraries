@@ -14,16 +14,14 @@ from kernels.common.attention_unified import (
     UnifiedAttentionProblem,
     run_unified_attention_torch,
 )
-from rocke.runtime.hip_module import Runtime
+from rocke.runtime.device_array import DeviceArray
 
-from ._attention_device_array import DeviceArray
 from ._attention_paged_reference import decode_half, encode_half
 
 __all__ = ["launch_tiled", "launch_tiled_one_sequence"]
 
 
 def launch_tiled(
-    rt: Runtime,
     problem: UnifiedAttentionProblem,
     spec: AttentionTuningSpec | None,
     q: np.ndarray,
@@ -53,27 +51,29 @@ def launch_tiled(
     dtype = problem.dtype
 
     def in_kernel_dtype(values):
-        return None if values is None else DeviceArray(rt, encode_half(values, dtype))
+        return (
+            None if values is None else DeviceArray(encode_half(values, dtype), dtype)
+        )
 
     def as_numpy_dtype(values, numpy_dtype):
         if values is None:
             return None
-        return DeviceArray(rt, np.ascontiguousarray(values, dtype=numpy_dtype))
+        return DeviceArray(np.ascontiguousarray(values, dtype=numpy_dtype))
 
     host_q = encode_half(q, dtype)
     out_host = np.empty_like(host_q)
     out_host.view(np.uint8)[...] = 0xFF
-    out = DeviceArray(rt, out_host)
+    out = DeviceArray(out_host, dtype)
     run_unified_attention_torch(
         problem=problem,
-        q=DeviceArray(rt, host_q),
+        q=DeviceArray(host_q, dtype),
         k=in_kernel_dtype(k_cache),
         v=in_kernel_dtype(v_cache),
         out=out,
         cu_seqlens_q=as_numpy_dtype([0, *itertools.accumulate(q_lens)], np.int32),
         seqused_k=as_numpy_dtype(kv_lens, np.int32),
         softmax_scale=scale,
-        block_table=DeviceArray(rt, block_table),
+        block_table=DeviceArray(block_table),
         softcap=softcap,
         sinks=in_kernel_dtype(sinks),
         alibi_slopes=as_numpy_dtype(alibi_slopes, np.float32),
@@ -86,7 +86,6 @@ def launch_tiled(
 
 
 def launch_tiled_one_sequence(
-    rt: Runtime,
     problem: UnifiedAttentionProblem,
     spec: AttentionTuningSpec | None,
     q: np.ndarray,
@@ -105,7 +104,6 @@ def launch_tiled_one_sequence(
             f"expected problem.dtype={problem.dtype!r}"
         )
     return launch_tiled(
-        rt,
         problem,
         spec,
         q,
