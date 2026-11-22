@@ -1464,7 +1464,7 @@ public:
             options.add("CONV_DIRECT_ZRING", std::string("1"));
             // Edge tiles only where an output plane is not whole tiles: the other graphs keep
             // the code without them.
-            if(zringEdges(run->problem.args, config))
+            if(conv_direct::zringEdges(run->problem.args, config))
             {
                 options.add("K2Z_EDGES", std::string("1"));
             }
