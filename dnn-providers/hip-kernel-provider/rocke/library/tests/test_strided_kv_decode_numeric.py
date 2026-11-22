@@ -6,8 +6,11 @@
 Set ROCKE_REQUIRE_DECODE_GPU=gfx942/gfx950 to require hardware (no skips).
 For shared paged graph coverage on gfx1250, set that target and select
 ``-k 'graph_replay and paged and bf16'`` (D64, GQA-8).
-Reference attention is computed independently in FP32 on the CPU from logical
-KV tensors, after rounding inputs to the tested fp16/bf16 dtype.
+Reference attention is the FP64 numpy decode over the fp16/bf16-rounded inputs.
+
+The decode launches run on ``rocke.runtime`` device arrays and HIP streams. Graph
+replay, torch streams and outer torch graph captures belong to torch callers, so
+those tests build the same inputs as torch tensors and need torch.
 """
 
 import math
@@ -15,54 +18,63 @@ import os
 from collections import OrderedDict
 from dataclasses import replace
 
+import numpy as np
 import pytest
+from rocke.numeric import storage
+from rocke.runtime.device_array import DeviceArray
+from rocke.runtime.hip_module import Runtime, get_device_arch
+
+from ._attention_unified_support import (
+    decode_reference,
+    paged_cache,
+    paged_layout,
+    random_half,
+)
 
 
 @pytest.fixture(scope="module")
 def gpu():
     required = os.environ.get("ROCKE_REQUIRE_DECODE_GPU")
-    if required:
-        import torch
-    else:
-        torch = pytest.importorskip("torch")
-    from rocke.runtime.hip_module import get_device_arch
-
-    if not torch.cuda.is_available():
+    arch = get_device_arch()
+    if arch is None:
         if required:
             pytest.fail("required decode GPU is unavailable")
         pytest.skip("requires a ROCm GPU")
-    arch = get_device_arch()
     if required and arch != required:
         pytest.fail(f"requested {required}, found {arch}")
     if arch not in ("gfx942", "gfx950", "gfx1250"):
         if required:
             pytest.fail(f"unsupported required decode target {arch}")
         pytest.skip("decode validation targets gfx942/gfx950/gfx1250")
-    return torch, arch
+    return arch
 
 
-def _reference(torch, q, k, v, lengths, window):
-    output = torch.zeros_like(q, dtype=torch.float32)
-    ratio = q.shape[1] // k.shape[1]
-    for batch, length in enumerate(lengths):
-        if length == 0:
-            continue
-        begin = max(0, length - window) if window else 0
-        for head in range(q.shape[1]):
-            keys = k[batch, head // ratio, begin:length].float()
-            values = v[batch, head // ratio, begin:length].float()
-            scores = (keys @ q[batch, head].float()) / math.sqrt(q.shape[2])
-            output[batch, head] = scores.softmax(0) @ values
-    return output
+@pytest.fixture(scope="module")
+def torch_gpu(gpu):
+    """Torch with a GPU, for the torch-caller features (graphs, torch streams)."""
+    torch = pytest.importorskip("torch")
+    if not torch.cuda.is_available():
+        pytest.skip("torch has no GPU here")
+    return torch, gpu
 
 
-def _cache(torch, logical, layout):
+def _reference(q, k, v, lengths, window):
+    return decode_reference(
+        q, k, v, lengths, 1 / math.sqrt(q.shape[2]), sliding_window=window
+    )
+
+
+def _strided_storage(logical, layout):
+    """Host storage of ``logical`` ``[B, H, S, D]`` in ``layout`` and the element
+    strides that view it as ``[B, H, S, D]``: ``bhsd`` as is, ``bshd`` token-major,
+    ``padded`` with unit-D rows 8 unused (NaN) elements apart plus batch/head
+    padding."""
     batch, heads, capacity, dim = logical.shape
     if layout == "bhsd":
-        return logical.cuda()
+        return logical, None
     if layout == "bshd":
-        return logical.permute(0, 2, 1, 3).contiguous().cuda().permute(0, 2, 1, 3)
-    # Unit-D rows separated by 8 unused elements, plus batch/head padding.
+        seq = capacity
+        return logical.transpose(0, 2, 1, 3), (seq * heads * dim, dim, heads * dim, 1)
     row_stride = dim + 8
     head_stride = (capacity + 1) * row_stride
     batch_stride = (heads + 1) * head_stride
@@ -72,22 +84,122 @@ def _cache(torch, logical, layout):
         + (capacity - 1) * row_stride
         + dim
     )
-    backing = torch.full((span,), float("nan"), dtype=logical.dtype)
-    view = backing.as_strided(logical.shape, (batch_stride, head_stride, row_stride, 1))
-    view.copy_(logical)
-    return backing.cuda().as_strided(logical.shape, view.stride())
+    backing = np.full(span, np.nan, np.float32)
+    strides = (batch_stride, head_stride, row_stride, 1)
+    np.lib.stride_tricks.as_strided(
+        backing, logical.shape, tuple(4 * x for x in strides)
+    )[...] = logical
+    return backing, strides
 
 
-def _paged_cache(torch, logical, block_size):
-    batch, heads, capacity, dim = logical.shape
-    blocks = (capacity + block_size - 1) // block_size
-    backing = torch.zeros(batch, blocks * block_size, heads, dim, dtype=logical.dtype)
-    backing[:, :capacity].copy_(logical.permute(0, 2, 1, 3))
-    pages = backing.reshape(batch * blocks, block_size, heads, dim).flip(0).contiguous()
-    table = torch.arange(batch * blocks - 1, -1, -1, dtype=torch.int32).view(
-        batch, blocks
-    )
-    return pages.cuda(), table.cuda()
+class _RockeArrays:
+    """Device arrays and HIP streams from ``rocke.runtime``."""
+
+    def half(self, values, dtype):
+        return DeviceArray(storage.encode(values, dtype), dtype)
+
+    def ints(self, values):
+        return DeviceArray(np.asarray(values, np.int32))
+
+    def set_ints(self, array, values):
+        array.write(np.asarray(values, np.int32))
+
+    def strided_kv(self, logical, layout, dtype):
+        host, strides = _strided_storage(logical, layout)
+        array = self.half(host, dtype)
+        return array if strides is None else array.view(logical.shape, strides)
+
+    def paged_kv(self, logical, block_size, dtype):
+        pages, table = paged_cache(logical, block_size, dtype)
+        return pages, self.ints(table)
+
+    def guarded_output(self, shape, dtype, guard, fill):
+        """An output view with ``guard`` elements of ``fill`` on each side."""
+        count = math.prod(shape)
+        backing = self.half(np.full(count + 2 * guard, fill, np.float32), dtype)
+        return backing.view(shape, offset=guard), backing
+
+    def read(self, array, dtype):
+        return storage.decode(array.values(), dtype)
+
+    def stream(self, default):
+        return 0 if default else Runtime().create_stream()
+
+    def handle(self, stream):
+        return stream
+
+    def sync(self, stream):
+        Runtime().wait_stream(stream)
+
+    def release(self, stream):
+        if stream:
+            Runtime().destroy_stream(stream)
+
+
+class _TorchArrays:
+    """The same inputs as torch tensors on torch streams."""
+
+    def __init__(self, torch):
+        self.torch = torch
+
+    def _dtype(self, dtype):
+        return self.torch.float16 if dtype == "fp16" else self.torch.bfloat16
+
+    def half(self, values, dtype):
+        bits = storage.encode(values, dtype)
+        if dtype == "bf16":
+            bits = bits.view(np.int16)
+        tensor = self.torch.from_numpy(np.ascontiguousarray(bits))
+        return tensor.view(self._dtype(dtype)).cuda()
+
+    def ints(self, values):
+        return self.torch.tensor(list(values), dtype=self.torch.int32).cuda()
+
+    def set_ints(self, array, values):
+        array.copy_(self.torch.tensor(list(values), dtype=self.torch.int32))
+        self.torch.cuda.synchronize()
+
+    def strided_kv(self, logical, layout, dtype):
+        host, strides = _strided_storage(logical, layout)
+        tensor = self.half(host, dtype)
+        return tensor if strides is None else tensor.as_strided(logical.shape, strides)
+
+    def paged_kv(self, logical, block_size, dtype):
+        pages, table = paged_layout(logical, block_size)
+        return self.half(pages, dtype), self.ints(table.ravel()).view(table.shape)
+
+    def guarded_output(self, shape, dtype, guard, fill):
+        count = math.prod(shape)
+        backing = self.half(np.full(count + 2 * guard, fill, np.float32), dtype)
+        return backing[guard:-guard].view(shape), backing
+
+    def read(self, array, dtype):
+        bits = array.detach().cpu().contiguous()
+        if dtype == "bf16":
+            return storage.decode(
+                bits.view(self.torch.int16).numpy().view(np.uint16), dtype
+            )
+        return bits.float().numpy()
+
+    def stream(self, default):
+        torch = self.torch
+        return torch.cuda.default_stream() if default else torch.cuda.Stream()
+
+    def handle(self, stream):
+        return stream.cuda_stream
+
+    def sync(self, stream):
+        stream.synchronize()
+
+    def release(self, stream):
+        pass
+
+
+def _decode_inputs(rng, dtype, batch, q_heads, kv_heads, capacity, dim):
+    q = random_half(rng, (batch, q_heads, dim), dtype)
+    k = random_half(rng, (batch, kv_heads, capacity, dim), dtype)
+    v = random_half(rng, (batch, kv_heads, capacity, dim), dtype)
+    return q, k, v
 
 
 @pytest.mark.parametrize("dtype", ["fp16", "bf16"])
@@ -96,11 +208,12 @@ def _paged_cache(torch, logical, block_size):
     [(256, 16, None), (256, 32, None), (128, 64, None), (256, 64, 16), (256, 64, None)],
 )
 def test_strided_lds_admission_numeric(gpu, dtype, dim, block, tile):
-    from dispatch.attention import AttentionRequest, dispatch_attention
     from dispatch.attention.common import attention_problem
     from kernels.common import attention_unified as au
 
-    torch, arch = gpu
+    from dispatch.attention import AttentionRequest, dispatch_attention
+
+    arch = gpu
     if arch == "gfx950" and tile is not None and tile < block:
         pytest.skip("gfx950 tile_size_override is a multiple of block_size")
     request = AttentionRequest(
@@ -118,20 +231,17 @@ def test_strided_lds_admission_numeric(gpu, dtype, dim, block, tile):
         target_ctas=8,
     )
     problem = attention_problem(request)
-    torch.manual_seed(314)
-    storage_dtype = torch.float16 if dtype == "fp16" else torch.bfloat16
-    q_cpu = torch.randn(3, 8, dim).to(storage_dtype)
-    k_cpu = torch.randn(3, 2, 65, dim).to(storage_dtype)
-    v_cpu = torch.randn(3, 2, 65, dim).to(storage_dtype)
+    q, k, v = _decode_inputs(np.random.default_rng(314), dtype, 3, 8, 2, 65, dim)
     lengths = [0, 64, 65]
-    reference = _reference(torch, q_cpu, k_cpu, v_cpu, lengths, 0)
+    reference = _reference(q, k, v, lengths, 0)
+    arrays = _RockeArrays()
     tensors = dict(
-        q=q_cpu.cuda(),
-        k=_cache(torch, k_cpu, "bshd"),
-        v=_cache(torch, v_cpu, "bhsd"),
-        out=torch.empty_like(q_cpu).cuda(),
-        cu_seqlens_q=torch.arange(4, dtype=torch.int32).cuda(),
-        seqused_k=torch.tensor(lengths, dtype=torch.int32).cuda(),
+        q=arrays.half(q, dtype),
+        k=arrays.strided_kv(k, "bshd", dtype),
+        v=arrays.strided_kv(v, "bhsd", dtype),
+        out=arrays.half(np.zeros(q.shape, np.float32), dtype),
+        cu_seqlens_q=arrays.ints(range(4)),
+        seqused_k=arrays.ints(lengths),
     )
     spec = None
     if tile is not None:
@@ -159,14 +269,12 @@ def test_strided_lds_admission_numeric(gpu, dtype, dim, block, tile):
     else:
         au.run_unified_attention_torch(**kwargs, tuning_spec=spec)
     atol, rtol = (0.003, 0.005) if dtype == "fp16" else (0.01, 0.02)
-    torch.testing.assert_close(
-        tensors["out"].cpu().float(), reference, atol=atol, rtol=rtol
-    )
+    out = arrays.read(tensors["out"], dtype)
+    np.testing.assert_allclose(out, reference, atol=atol, rtol=rtol)
     if tile is None:
         au.run_unified_attention_torch(**kwargs)
-        torch.testing.assert_close(
-            tensors["out"].cpu().float(), reference, atol=atol, rtol=rtol
-        )
+        out = arrays.read(tensors["out"], dtype)
+        np.testing.assert_allclose(out, reference, atol=atol, rtol=rtol)
 
 
 # Distinct batches, empty/partial segments, both physical orders, independent
@@ -183,11 +291,9 @@ _CASES = [
 ]
 
 
-@pytest.mark.parametrize("dtype", ["fp16", "bf16"])
-@pytest.mark.parametrize("case", _CASES)
-@pytest.mark.parametrize("kv_layout", ["strided", "paged"])
-def test_strided_kv_decode(
-    gpu,
+def _strided_kv_decode(
+    arch,
+    arrays,
     monkeypatch,
     dtype,
     case,
@@ -196,7 +302,6 @@ def test_strided_kv_decode(
     default_stream=False,
     block_size=16,
 ):
-    torch, arch = gpu
     from kernels.common import attention_unified as au
 
     if arch == "gfx1250" and (
@@ -211,27 +316,25 @@ def test_strided_kv_decode(
     monkeypatch.setenv("HIPDNN_GFX1250_3D_GRAPH", str(int(graph)))
     capacity, dim, kv_heads, q_heads, k_layout, v_layout, window = case
     batch = 3
-    tdtype = torch.float16 if dtype == "fp16" else torch.bfloat16
-    rng = torch.Generator().manual_seed(701 + capacity + dim)
-    q_host = torch.randn(batch, q_heads, dim, generator=rng).to(tdtype)
-    k_host = torch.randn(batch, kv_heads, capacity, dim, generator=rng).to(tdtype)
-    v_host = torch.randn(batch, kv_heads, capacity, dim, generator=rng).to(tdtype)
+    rng = np.random.default_rng(701 + capacity + dim)
+    q_host, k_host, v_host = _decode_inputs(
+        rng, dtype, batch, q_heads, kv_heads, capacity, dim
+    )
     # Large per-batch shifts make shared-cache bugs observable.
     for b in range(batch):
-        v_host[b] += b
-    q = q_host.cuda()
+        v_host[b] = storage.round_to(v_host[b] + b, dtype)
+    q = arrays.half(q_host, dtype)
     if kv_layout == "strided":
-        k, v = _cache(torch, k_host, k_layout), _cache(torch, v_host, v_layout)
+        k = arrays.strided_kv(k_host, k_layout, dtype)
+        v = arrays.strided_kv(v_host, v_layout, dtype)
         block_table = None
     else:
-        k, block_table = _paged_cache(torch, k_host, block_size)
-        v, _ = _paged_cache(torch, v_host, block_size)
-    cu_q = torch.arange(batch + 1, dtype=torch.int32).cuda()
+        k, block_table = arrays.paged_kv(k_host, block_size, dtype)
+        v, _ = arrays.paged_kv(v_host, block_size, dtype)
+    cu_q = arrays.ints(range(batch + 1))
     lengths_host = [capacity, max(0, capacity - 3), 0]
-    lengths = torch.tensor(lengths_host, dtype=torch.int32).cuda()
-    count = q.numel()
-    storage = torch.full((count + 64,), 117, dtype=tdtype).cuda()
-    output = storage[32:-32].view(q.shape)
+    lengths = arrays.ints(lengths_host)
+    output, guarded = arrays.guarded_output(q_host.shape, dtype, 32, 117)
     problem = au.UnifiedAttentionProblem(
         total_q=batch,
         num_seqs=batch,
@@ -245,114 +348,128 @@ def test_strided_kv_decode(
         sliding_window=window,
         target_ctas=8,
     )
-    stream = torch.cuda.default_stream() if default_stream else torch.cuda.Stream()
-    torch.cuda.synchronize()
-    # Paged cases exercise the direct runtime; strided cases also test dispatch.
-    if kv_layout == "strided":
-        from dispatch.attention import AttentionRequest, dispatch_attention
-        from dispatch.attention.common import AttentionMaskType
+    stream = arrays.stream(default_stream)
+    try:
+        # Paged cases exercise the direct runtime; strided cases also test dispatch.
+        if kv_layout == "strided":
+            from dispatch.attention.common import AttentionMaskType
 
-        # A decode window is anchored at the end of the sequence (bottom-right causal);
-        # NO_MASK + sliding_window is the non-causal top-left band.
-        request = AttentionRequest(
-            mask_type=(
-                AttentionMaskType.BOTTOM_RIGHT_CAUSAL
-                if window
-                else AttentionMaskType.NO_MASK
-            ),
-            batch=batch,
-            nhead_q=q_heads,
-            nhead_k=kv_heads,
-            seqlen_q=1,
-            seqlen_k=capacity,
-            hdim_q=dim,
-            hdim_v=dim,
-            arch=arch,
-            dtype=dtype,
-            kv_layout="strided",
-            kv_block_size=block_size,
-            sliding_window=window,
-            target_ctas=8,
-        )
-        result = dispatch_attention(request)
-        assert result.candidate.name == "attention_strided_decode"
-        binding = result.candidate.bind_torch(
-            request,
-            result.spec,
-            dict(
-                problem=problem,
-                q=q,
-                k=k,
-                v=v,
-                out=output,
-                cu_seqlens_q=cu_q,
-                seqused_k=lengths,
-            ),
-            stream=stream.cuda_stream,
-        )
-    graphs_before = set(au._3D_GRAPHS)
-    captured_graphs = {}
-    for step in range(3):
-        if step:
-            lengths_host = (
-                [max(0, capacity - 1), capacity, min(1, capacity)]
-                if step == 1
-                else [capacity, min(1, capacity), capacity]
+            from dispatch.attention import AttentionRequest, dispatch_attention
+
+            # A decode window is anchored at the end of the sequence (bottom-right
+            # causal); NO_MASK + sliding_window is the non-causal top-left band.
+            request = AttentionRequest(
+                mask_type=(
+                    AttentionMaskType.BOTTOM_RIGHT_CAUSAL
+                    if window
+                    else AttentionMaskType.NO_MASK
+                ),
+                batch=batch,
+                nhead_q=q_heads,
+                nhead_k=kv_heads,
+                seqlen_q=1,
+                seqlen_k=capacity,
+                hdim_q=dim,
+                hdim_v=dim,
+                arch=arch,
+                dtype=dtype,
+                kv_layout="strided",
+                kv_block_size=block_size,
+                sliding_window=window,
+                target_ctas=8,
             )
-            lengths.copy_(torch.tensor(lengths_host, dtype=torch.int32))
-            torch.cuda.synchronize()
-        if step and kv_layout == "strided":
-            binding.launch()
-        else:
-            au.run_unified_attention_torch(
-                problem=problem,
-                q=q,
-                k=k,
-                v=v,
-                out=output,
-                cu_seqlens_q=cu_q,
-                seqused_k=lengths,
-                softmax_scale=1 / math.sqrt(dim),
-                block_table=block_table,
-                softcap=0.0,
-                backend="3d",
-                kv_layout=kv_layout,
-                stream=stream.cuda_stream,
+            result = dispatch_attention(request)
+            assert result.candidate.name == "attention_strided_decode"
+            binding = result.candidate.bind_torch(
+                request,
+                result.spec,
+                dict(
+                    problem=problem,
+                    q=q,
+                    k=k,
+                    v=v,
+                    out=output,
+                    cu_seqlens_q=cu_q,
+                    seqused_k=lengths,
+                ),
+                stream=arrays.handle(stream),
             )
-        stream.synchronize()
-        if graph:
-            graph_keys = set(au._3D_GRAPHS) - graphs_before
-            # Direct and explicit-spec launches have separate cache identities.
-            assert len(graph_keys) == 1
-            current_graphs = {key: au._3D_GRAPHS[key] for key in graph_keys}
-            if kv_layout == "strided" and step:
-                owned = binding.launch.execution._graphs
-                assert len(owned) == 1
-                current_graphs.update(owned)
-            assert all(
-                current_graphs[key] is value for key, value in captured_graphs.items()
+        graphs_before = set(au._3D_GRAPHS)
+        captured_graphs = {}
+        for step in range(3):
+            if step:
+                lengths_host = (
+                    [max(0, capacity - 1), capacity, min(1, capacity)]
+                    if step == 1
+                    else [capacity, min(1, capacity), capacity]
+                )
+                arrays.set_ints(lengths, lengths_host)
+            if step and kv_layout == "strided":
+                binding.launch()
+            else:
+                au.run_unified_attention_torch(
+                    problem=problem,
+                    q=q,
+                    k=k,
+                    v=v,
+                    out=output,
+                    cu_seqlens_q=cu_q,
+                    seqused_k=lengths,
+                    softmax_scale=1 / math.sqrt(dim),
+                    block_table=block_table,
+                    softcap=0.0,
+                    backend="3d",
+                    kv_layout=kv_layout,
+                    stream=arrays.handle(stream),
+                )
+            arrays.sync(stream)
+            if graph:
+                graph_keys = set(au._3D_GRAPHS) - graphs_before
+                # Direct and explicit-spec launches have separate cache identities.
+                assert len(graph_keys) == 1
+                current_graphs = {key: au._3D_GRAPHS[key] for key in graph_keys}
+                if kv_layout == "strided" and step:
+                    owned = binding.launch.execution._graphs
+                    assert len(owned) == 1
+                    current_graphs.update(owned)
+                assert all(
+                    current_graphs[key] is value
+                    for key, value in captured_graphs.items()
+                )
+                captured_graphs = current_graphs
+            expected = _reference(q_host, k_host, v_host, lengths_host, window)
+            atol, rtol = (0.01, 0.02) if dtype == "bf16" else (0.003, 0.005)
+            np.testing.assert_allclose(
+                arrays.read(output, dtype), expected, atol=atol, rtol=rtol
             )
-            captured_graphs = current_graphs
-        expected = _reference(torch, q_host, k_host, v_host, lengths_host, window)
-        atol, rtol = (0.01, 0.02) if dtype == "bf16" else (0.003, 0.005)
-        torch.testing.assert_close(output.cpu().float(), expected, atol=atol, rtol=rtol)
-        torch.testing.assert_close(
-            storage[:32].cpu(), torch.full((32,), 117, dtype=tdtype), atol=0, rtol=0
-        )
-        torch.testing.assert_close(
-            storage[-32:].cpu(), torch.full((32,), 117, dtype=tdtype), atol=0, rtol=0
-        )
+            guards = arrays.read(guarded, dtype)
+            np.testing.assert_array_equal(guards[:32], 117)
+            np.testing.assert_array_equal(guards[-32:], 117)
+        if kv_layout == "strided":
+            binding.launch.close()
+    finally:
+        arrays.release(stream)
+
+
+@pytest.mark.parametrize("dtype", ["fp16", "bf16"])
+@pytest.mark.parametrize("case", _CASES)
+@pytest.mark.parametrize("kv_layout", ["strided", "paged"])
+def test_strided_kv_decode(gpu, monkeypatch, dtype, case, kv_layout):
+    _strided_kv_decode(gpu, _RockeArrays(), monkeypatch, dtype, case, kv_layout)
 
 
 @pytest.mark.parametrize("dtype", ["fp16", "bf16"])
 @pytest.mark.parametrize("kv_layout", ["strided", "paged"])
 @pytest.mark.parametrize("default_stream", [False, True])
 def test_strided_decode_graph_replay(
-    gpu, monkeypatch, dtype, kv_layout, default_stream
+    torch_gpu, monkeypatch, dtype, kv_layout, default_stream
 ):
-    case = (17, 64, 2, 16, "bshd", "bshd", 0) if gpu[1] == "gfx1250" else _CASES[1]
-    test_strided_kv_decode(
-        gpu,
+    """Graph replay captures through torch: torch tensors on torch streams."""
+    torch, arch = torch_gpu
+    case = (17, 64, 2, 16, "bshd", "bshd", 0) if arch == "gfx1250" else _CASES[1]
+    _strided_kv_decode(
+        arch,
+        _TorchArrays(torch),
         monkeypatch,
         dtype,
         case,
@@ -367,8 +484,9 @@ def test_strided_decode_graph_replay(
 @pytest.mark.parametrize("window", [0, 17])
 def test_strided_decode_tile_policy(gpu, monkeypatch, dtype, block_size, window):
     case = (*_CASES[2][:-1], window)
-    test_strided_kv_decode(
+    _strided_kv_decode(
         gpu,
+        _RockeArrays(),
         monkeypatch,
         dtype,
         case,
@@ -378,9 +496,10 @@ def test_strided_decode_tile_policy(gpu, monkeypatch, dtype, block_size, window)
 
 
 @pytest.fixture
-def concurrent_decode(gpu, monkeypatch):
-    """Own streams and drain asynchronous references without serializing calls."""
-    torch, arch = gpu
+def concurrent_decode(torch_gpu, monkeypatch):
+    """Own streams and drain asynchronous references without serializing calls.
+    Torch streams and graphs: the torch-caller surface."""
+    torch, arch = torch_gpu
     from kernels.common import attention_unified as au
     from rocke.runtime.launcher import synchronize_and_release
 
@@ -408,7 +527,7 @@ def test_decode_concurrent_workspace(
     from rocke.runtime.launcher import no_fence, synchronize_and_release
 
     batch, q_heads, kv_heads, capacity, dim = 3, 16, 2, 257, 64
-    tdtype = torch.float16 if dtype == "fp16" else torch.bfloat16
+    arrays = _TorchArrays(torch)
     problem = au.UnifiedAttentionProblem(
         total_q=batch,
         num_seqs=batch,
@@ -423,28 +542,27 @@ def test_decode_concurrent_workspace(
     )
     requests, expected = [], []
     for index in range(2):
-        rng = torch.Generator().manual_seed(1701 + index)
-        q = torch.randn(batch, q_heads, dim, generator=rng).to(tdtype)
-        k = torch.randn(batch, kv_heads, capacity, dim, generator=rng).to(tdtype)
-        v = (torch.randn(batch, kv_heads, capacity, dim, generator=rng) + index * 4).to(
-            tdtype
-        )
+        rng = np.random.default_rng(1701 + index)
+        q, k, v = _decode_inputs(rng, dtype, batch, q_heads, kv_heads, capacity, dim)
+        v = storage.round_to(v + index * 4, dtype)
         lengths = [capacity, capacity - 7, 0]
-        expected.append(_reference(torch, q, k, v, lengths, 0))
+        expected.append(_reference(q, k, v, lengths, 0))
         if kv_layout == "paged":
-            kd, table = _paged_cache(torch, k, 16)
-            vd, _ = _paged_cache(torch, v, 16)
+            kd, table = arrays.paged_kv(k, 16, dtype)
+            vd, _ = arrays.paged_kv(v, 16, dtype)
         else:
-            kd, vd, table = _cache(torch, k, "bshd"), _cache(torch, v, "bhsd"), None
+            kd = arrays.strided_kv(k, "bshd", dtype)
+            vd = arrays.strided_kv(v, "bhsd", dtype)
+            table = None
         requests.append(
             {
                 "problem": problem,
-                "q": q.cuda(),
+                "q": arrays.half(q, dtype),
                 "k": kd,
                 "v": vd,
-                "out": torch.empty_like(q, device="cuda"),
-                "cu_seqlens_q": torch.arange(batch + 1, dtype=torch.int32).cuda(),
-                "seqused_k": torch.tensor(lengths, dtype=torch.int32).cuda(),
+                "out": arrays.half(np.zeros(q.shape, np.float32), dtype),
+                "cu_seqlens_q": arrays.ints(range(batch + 1)),
+                "seqused_k": arrays.ints(lengths),
                 "softmax_scale": 1 / math.sqrt(dim),
                 "block_table": table,
                 "softcap": 0.0,
@@ -453,7 +571,11 @@ def test_decode_concurrent_workspace(
             }
         )
     torch.cuda.synchronize()
-    poison = torch.full((batch, q_heads, dim), float("nan"), dtype=tdtype).pin_memory()
+    poison = (
+        arrays.half(np.full((batch, q_heads, dim), np.nan, np.float32), dtype)
+        .cpu()
+        .pin_memory()
+    )
 
     # Record addresses without retaining tensors: later churn checks graph-pool
     # ownership after the runtime's temporary launch references have drained.
@@ -535,14 +657,14 @@ def test_decode_concurrent_workspace(
         assert not allocations  # cache hits replay without new scratch allocations
     atol, rtol = (0.01, 0.02) if dtype == "bf16" else (0.003, 0.005)
     for request, reference in zip(requests, expected):
-        torch.testing.assert_close(
-            request["out"].cpu().float(), reference, atol=atol, rtol=rtol
+        np.testing.assert_allclose(
+            arrays.read(request["out"], dtype), reference, atol=atol, rtol=rtol
         )
     if mode == "external":
         for _, workspace in allocations:
             assert set(workspace).isdisjoint(captured[0] + captured[1])
-        torch.testing.assert_close(
-            eager_request["out"].cpu().float(), expected[0], atol=atol, rtol=rtol
+        np.testing.assert_allclose(
+            arrays.read(eager_request["out"], dtype), expected[0], atol=atol, rtol=rtol
         )
     if graphs:
         assert len(churn) == 8
@@ -551,9 +673,10 @@ def test_decode_concurrent_workspace(
 @pytest.mark.parametrize("dtype", ["fp16", "bf16"])
 @pytest.mark.parametrize("kv_layout", ["paged", "strided"])
 @pytest.mark.parametrize("graph", [False, True])
-def test_prepared_decode_lifecycle(gpu, monkeypatch, dtype, kv_layout, graph):
-    """Changing bindings/lengths, graph eviction and scratch reuse on hardware."""
-    torch, arch = gpu
+def test_prepared_decode_lifecycle(torch_gpu, monkeypatch, dtype, kv_layout, graph):
+    """Changing bindings/lengths, graph eviction and scratch reuse on hardware,
+    on torch streams and under an outer torch graph capture."""
+    torch, arch = torch_gpu
     if arch == "gfx1250" and (dtype != "bf16" or kv_layout != "paged"):
         pytest.skip("gfx1250 coverage is paged BF16 D64 GQA-8 decode")
     from kernels.common import attention_unified as au
@@ -561,18 +684,18 @@ def test_prepared_decode_lifecycle(gpu, monkeypatch, dtype, kv_layout, graph):
 
     monkeypatch.setenv(f"HIPDNN_{arch.upper()}_3D_GRAPH", str(int(graph)))
     batch, heads, dim, capacity = 2, 8, 64, 65
-    tdtype = torch.float16 if dtype == "fp16" else torch.bfloat16
-    rng = torch.Generator().manual_seed(808)
-    q_host = torch.randn(batch, heads, dim, generator=rng).to(tdtype)
-    k_host = torch.randn(batch, 1, capacity, dim, generator=rng).to(tdtype)
-    v_host = torch.randn(batch, 1, capacity, dim, generator=rng).to(tdtype)
+    arrays = _TorchArrays(torch)
+    q_host, k_host, v_host = _decode_inputs(
+        np.random.default_rng(808), dtype, batch, heads, 1, capacity, dim
+    )
     if kv_layout == "strided":
-        k, v = _cache(torch, k_host, "bshd"), _cache(torch, v_host, "padded")
+        k = arrays.strided_kv(k_host, "bshd", dtype)
+        v = arrays.strided_kv(v_host, "padded", dtype)
         table = None
     else:
-        k, table = _paged_cache(torch, k_host, 16)
-        v, _ = _paged_cache(torch, v_host, 16)
-    lengths = torch.tensor([capacity, 0], dtype=torch.int32).cuda()
+        k, table = arrays.paged_kv(k_host, 16, dtype)
+        v, _ = arrays.paged_kv(v_host, 16, dtype)
+    lengths = arrays.ints([capacity, 0])
     stream = torch.cuda.Stream()
     args = dict(
         problem=au.UnifiedAttentionProblem(
@@ -587,11 +710,11 @@ def test_prepared_decode_lifecycle(gpu, monkeypatch, dtype, kv_layout, graph):
             dtype=dtype,
             target_ctas=8,
         ),
-        q=q_host.cuda(),
+        q=arrays.half(q_host, dtype),
         k=k,
         v=v,
-        out=torch.empty_like(q_host).cuda(),
-        cu_seqlens_q=torch.arange(batch + 1, dtype=torch.int32).cuda(),
+        out=arrays.half(np.zeros(q_host.shape, np.float32), dtype),
+        cu_seqlens_q=arrays.ints(range(batch + 1)),
         seqused_k=lengths,
         block_table=table,
         softmax_scale=1 / math.sqrt(dim),
@@ -623,19 +746,19 @@ def test_prepared_decode_lifecycle(gpu, monkeypatch, dtype, kv_layout, graph):
     try:
         for step in range(24):
             lens = [capacity - step % 5, step % capacity]
-            q_step = (q_host.float() + step / 64).to(tdtype)
+            q_step = storage.round_to(q_host + step / 64, dtype)
             with torch.cuda.stream(stream):
                 lengths.copy_(torch.tensor(lens, dtype=torch.int32), non_blocking=True)
                 # New Q/output objects force graph rebinding, as in decode callers.
-                q = q_step.cuda()
+                q = arrays.half(q_step, dtype)
                 output = torch.empty_like(q)
                 with no_fence():
                     execution.launch(q=q, out=output)
             synchronize_and_release(stream.cuda_stream)
-            expected = _reference(torch, q_step, k_host, v_host, lens, 0)
+            expected = _reference(q_step, k_host, v_host, lens, 0)
             atol, rtol = (0.01, 0.02) if dtype == "bf16" else (0.003, 0.005)
-            torch.testing.assert_close(
-                output.cpu().float(), expected, atol=atol, rtol=rtol
+            np.testing.assert_allclose(
+                arrays.read(output, dtype), expected, atol=atol, rtol=rtol
             )
             assert tuple(t.data_ptr() for t in execution._workspace) == scratch
             assert len(execution._graphs) <= 1
@@ -651,7 +774,9 @@ def test_prepared_decode_lifecycle(gpu, monkeypatch, dtype, kv_layout, graph):
         with torch.cuda.stream(stream):
             outer.replay()
         synchronize_and_release(stream.cuda_stream)
-        torch.testing.assert_close(output.cpu().float(), expected, atol=atol, rtol=rtol)
+        np.testing.assert_allclose(
+            arrays.read(output, dtype), expected, atol=atol, rtol=rtol
+        )
     finally:
         execution.close()
     assert not execution._graphs and execution._workspace is None
