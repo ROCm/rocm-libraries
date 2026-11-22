@@ -5,19 +5,20 @@
 
 CPU: the validator gate, the ABI, that ``split_k = 1`` builds the same
 kernel as before, and the auto (``-1``) degree policy and its resolver. GPU
-(gfx1250 WMMA, gfx950 MFMA): Stage 1 + the Stage 2 reduce against the
-reference across degrees, tiles, pipelines, epilogues, groups, strides, a
-partial last K tile and degrees past the K-tile count (empty slices).
+(gfx1250 WMMA, gfx950 MFMA): Stage 1 + the Stage 2 reduce against a float64
+reference of the stored inputs, rounded to the output dtype, across degrees,
+tiles, pipelines, epilogues, groups, strides, a partial last K tile and
+degrees past the K-tile count (empty slices).
 """
 
 from __future__ import annotations
 
 import collections
-import ctypes
-import importlib.util
 import os
 import unittest
 from unittest import mock
+
+import numpy as np
 
 from kernels.common._conv_implicit_gemm_common import ConvDataSpec, ConvProblem
 from kernels.common.conv_abi import conv_arg_names
@@ -26,8 +27,6 @@ from kernels.common.conv_implicit_gemm import (
     build_implicit_gemm_conv,
     is_valid_spec,
 )
-
-_HAS_TORCH = importlib.util.find_spec("torch") is not None
 
 _WMMA = dict(
     warp_tile_m=16,
@@ -1223,8 +1222,6 @@ class TestSplitKReduceEngine(unittest.TestCase):
 
 
 def _device_arch() -> str:
-    if not _HAS_TORCH:
-        return ""
     try:
         from rocke.runtime.hip_module import get_device_arch
 
@@ -1237,8 +1234,6 @@ _DEVICE_ARCH = _device_arch()
 
 
 def _gpu_skip(archs=("gfx1250", "gfx950")) -> str:
-    if not _HAS_TORCH:
-        return "torch not importable"
     if not _DEVICE_ARCH:
         return "no GPU"
     if _DEVICE_ARCH not in archs:
@@ -1248,36 +1243,16 @@ def _gpu_skip(archs=("gfx1250", "gfx950")) -> str:
     return ""
 
 
-def _u8(t):
-    return (ctypes.c_uint8 * t.nbytes).from_address(t.data_ptr())
-
-
-def _torch_reference(A, B, problem, out_dtype):
-    """fp32 ``torch.nn.functional.conv2d`` on the CPU, NHWC in and out,
-    rounded to ``out_dtype`` as the kernel's output is."""
-    import torch.nn.functional as F
-
-    out = F.conv2d(
-        A.float().permute(0, 3, 1, 2),
-        B.float().permute(0, 3, 1, 2),
-        stride=(problem.sH, problem.sW),
-        padding=(problem.pH, problem.pW),
-        dilation=(problem.dH, problem.dW),
-        groups=problem.groups,
-    )
-    return out.permute(0, 2, 3, 1).contiguous().to(out_dtype).float()
-
-
 def _run(problem, spec_kw, degrees, dtype="bf16", unrolled=True, cluster=False):
     """Max relative error per degree of one split-K binary on ``problem``, on
     the device's arch (gfx1250: WMMA spec, gfx950: MFMA spec)."""
-    import torch
-
     arch = _DEVICE_ARCH
     make_spec = _spec if arch == "gfx1250" else _mfma_spec
 
     from rocke import compile_kernel
-    from builders.common.conv_reference import conv_reference_gfx1250
+    from rocke.numeric import storage
+    from rocke.runtime.host_buffers import as_u8_buffer
+    from builders.common.conv_reference import conv_fwd_reference
     from kernels.common.conv_abi import conv_args_signature
     from kernels.common.conv_args import ConvArgs
     from kernels.common.conv_fwd_split_k_reduce import (
@@ -1336,32 +1311,32 @@ def _run(problem, spec_kw, degrees, dtype="bf16", unrolled=True, cluster=False):
             signature=fwd_split_k_reduce_signature(r_spec),
         )
 
-    tdt = {"fp16": torch.float16, "bf16": torch.bfloat16}[dtype]
-    torch.manual_seed(0)
-    A = (
-        torch.empty(problem.N, problem.Hi, problem.Wi, problem.C)
-        .uniform_(-1, 1)
-        .to(tdt)
-    )
-    B = (
-        torch.empty(problem.K, problem.Y, problem.X, problem.cpg)
-        .uniform_(-1, 1)
-        .to(tdt)
-    )
-    if arch == "gfx1250":
-        ref = conv_reference_gfx1250(A, B, problem, out_dtype=tdt).float().cpu()
-    else:
-        ref = _torch_reference(A, B, problem, tdt)
-    D = torch.empty(problem.N, problem.Ho, problem.Wo, problem.K, dtype=tdt)
-    # Host <-> device copies go through pinned buffers only: a pageable copy
-    # registers the host range with the driver, which must not overlap a
-    # kernel in flight.
-    A, B = A.pin_memory(), B.pin_memory()
+    rng = np.random.default_rng(0)
+    p = problem
+    A = storage.encode(rng.uniform(-1, 1, (p.N, p.Hi, p.Wi, p.C)), dtype)
+    B = storage.encode(rng.uniform(-1, 1, (p.K, p.Y, p.X, p.cpg)), dtype)
+    # The kernel's output is rounded to ``dtype``; so is the reference.
+    ref = storage.round_to(
+        conv_fwd_reference(storage.decode(A, dtype), storage.decode(B, dtype), p),
+        dtype,
+    ).astype(np.float64)
+    ref_scale = max(1.0, float(np.abs(ref).max()))
+    D = np.empty((p.N, p.Ho, p.Wo, p.K), dtype=A.dtype)
 
+    # The host arrays are pageable: every launch below is fenced or followed
+    # by synchronize_and_release() before its output is copied back, so no
+    # copy overlaps a kernel in flight.
     rt = Runtime()
     bufs = [rt.alloc(A.nbytes), rt.alloc(B.nbytes), rt.alloc(D.nbytes)]
-    rt.memcpy_h2d(bufs[0], _u8(A), A.nbytes)
-    rt.memcpy_h2d(bufs[1], _u8(B), B.nbytes)
+    rt.memcpy_h2d(bufs[0], as_u8_buffer(A), A.nbytes)
+    rt.memcpy_h2d(bufs[1], as_u8_buffer(B), B.nbytes)
+
+    def _max_rel_err() -> float:
+        """Peak-relative error of the output now in device D."""
+        out = np.empty_like(D)
+        rt.memcpy_d2h(as_u8_buffer(out), bufs[2], D.nbytes)
+        return float(np.abs(storage.decode(out, dtype) - ref).max()) / ref_scale
+
     errs = {}
     try:
         for degree in degrees:
@@ -1395,20 +1370,12 @@ def _run(problem, spec_kw, degrees, dtype="bf16", unrolled=True, cluster=False):
                 # One launch: the cluster folds the slabs into D itself. Run
                 # it through bind() too, the path the benchmark times.
                 s1(values, config=s1_cfg)
-                out = torch.empty_like(D).pin_memory()
-                rt.memcpy_d2h(_u8(out), bufs[2], D.nbytes)
-                errs[degree] = float(
-                    (out.float() - ref).abs().max() / ref.abs().max().clamp(min=1.0)
-                )
+                launch_err = _max_rel_err()
                 rt.memset(bufs[2], 0x7F, D.nbytes)
                 s1.bind(values, config=s1_cfg)()
                 synchronize_and_release()
-                rt.memcpy_d2h(_u8(out), bufs[2], D.nbytes)
+                errs[degree] = max(launch_err, _max_rel_err())
                 rt.free(ws)
-                diff = (out.float() - ref).abs().max()
-                errs[degree] = max(
-                    errs[degree], float(diff / ref.abs().max().clamp(min=1.0))
-                )
                 continue
             s1(values, config=s1_cfg)
             s2(
@@ -1426,11 +1393,8 @@ def _run(problem, spec_kw, degrees, dtype="bf16", unrolled=True, cluster=False):
                     fence=True,
                 ),
             )
-            out = torch.empty_like(D).pin_memory()
-            rt.memcpy_d2h(_u8(out), bufs[2], D.nbytes)
+            errs[degree] = _max_rel_err()
             rt.free(ws)
-            diff = (out.float() - ref).abs().max()
-            errs[degree] = float(diff / ref.abs().max().clamp(min=1.0))
     finally:
         for x in bufs:
             rt.free(x)

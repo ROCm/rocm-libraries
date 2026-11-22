@@ -15,7 +15,7 @@ The subprocesses import this process's own ``rocke`` package first
 ``dispatch.*``) on their path, in a source checkout and an installed test tree
 alike.
 
-Requires a ROCm GPU and torch; skipped otherwise. Run it as a script, not under
+Requires a ROCm GPU; skipped otherwise. Run it as a script, not under
 pytest, in a process that has touched HIP:
     python3 rocke/library/tests/test_conv_implicit_gemm_numeric.py
 """
@@ -23,7 +23,6 @@ pytest, in a process that has touched HIP:
 from __future__ import annotations
 
 import glob
-import importlib.util
 import os
 import pathlib
 import subprocess
@@ -43,17 +42,11 @@ pytestmark = pytest.mark.gpu
 _LIBDIR = pathlib.Path(__file__).resolve().parents[1]  # the library root
 
 
-# Detect arch via the rocke HIP runtime (no torch). The verify subprocess imports
-# torch for its numeric reference, so also gate on torch being importable (a
-# dependency check, not a device probe) -- a torch-free env then skips cleanly.
 ARCH = get_device_arch(0)
 _CDNA = ARCH in ("gfx942", "gfx950")  # MFMA targets; gfx1151 is RDNA/WMMA
-_HAS_TORCH = importlib.util.find_spec("torch") is not None
 
 
-@unittest.skipUnless(
-    ARCH and _HAS_TORCH, "needs a ROCm GPU + torch (run under a torch venv)"
-)
+@unittest.skipUnless(ARCH, "needs a ROCm GPU")
 class TestNumericVerification(unittest.TestCase):
     """Launch + numeric-compare on whatever gfx device this runs on."""
 

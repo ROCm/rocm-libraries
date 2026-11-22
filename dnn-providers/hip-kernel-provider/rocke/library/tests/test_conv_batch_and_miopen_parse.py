@@ -8,9 +8,10 @@
   dropped, and the problem silently replaced by defaults.
 * ``_batch_chunks`` -- the batch slices one AOT launch each covers, so no
   operand exceeds the kernels' i32 byte addressing.
-* ``_batch_slices`` -- the batch slices the torch reference runs, so no fp32
-  operand crosses torch's 2^32-byte break point.
-  ``conv_reference`` refuses an image that alone crosses the cap.
+* ``_batch_slices`` -- the batch slices the benchmarks' torch reference runs,
+  so no fp32 operand crosses torch's 2^32-byte break point.
+  ``conv_reference`` refuses an image that alone crosses the cap; those two
+  checks exercise the torch reference itself and skip without torch.
 
 CPU only; no kernel is built or launched.
 """
@@ -232,7 +233,6 @@ def test_batch_chunks_rejects_oversized_weights():
 
 
 def _slices(p, n):
-    pytest.importorskip("torch")
     from builders.common.conv_reference import _batch_slices
 
     return _batch_slices(p, n)
