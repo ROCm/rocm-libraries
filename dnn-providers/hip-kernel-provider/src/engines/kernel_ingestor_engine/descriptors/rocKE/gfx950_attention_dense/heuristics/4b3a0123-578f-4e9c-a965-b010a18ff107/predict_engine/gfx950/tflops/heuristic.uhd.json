@@ -1,7 +1,7 @@
 {
   "version": "1.0",
-  "id": "d91b2ab8-19b3-424a-9eee-3cce9b4a1a6f",
-  "name": "hipkernel:Gfx950AttentionDense (gfx950, 42 contribution(s))",
+  "id": "2fe8569d-c1f3-42bb-80ce-6e287ec751ed",
+  "name": "hipkernel:Gfx950AttentionDense (gfx950, 65 contribution(s))",
   "adapter": "tree_data",
   "features_signature": [
     "$device.memory_clock_rate",
@@ -333,6 +333,6 @@
   },
   "tree_data": {
     "artifact": "model.bin",
-    "hash": "d83550d8c65b3f61f15d4e163f697b2ef54b84d2c69884de97d1b85d50c7414c"
+    "hash": "049379ab1d4b5dba4b0a954c11387238914fd2c8036ffc1f8c1fba88fa6124bf"
   }
 }
