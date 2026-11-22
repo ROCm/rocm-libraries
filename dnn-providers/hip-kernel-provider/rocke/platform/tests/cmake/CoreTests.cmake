@@ -16,13 +16,14 @@ if(BUILD_TESTING)
   # It re-probes the full intrinsic/architecture matrix and therefore has a
   # different timeout, resource, and skip contract from Python unit tests. The
   # installed test manifest registers the same logical gate against its staged
-  # generator and relocated package data.
+  # generator and relocated package data. Under a CI shard each shard checks
+  # the declaration keys it owns; a plain ctest run checks them all.
   if(Python3_Interpreter_FOUND)
     add_test(
       NAME rocke_arch_domain_reproducibility
       COMMAND "${Python3_EXECUTABLE}" -u
               "${CMAKE_CURRENT_SOURCE_DIR}/../tools/gen_arch_domain.py"
-              --check --unvalidated-exit-code 77)
+              --check --unvalidated-exit-code 77 --rocke-shard-from-gtest-env)
     set_tests_properties(
       rocke_arch_domain_reproducibility
       PROPERTIES

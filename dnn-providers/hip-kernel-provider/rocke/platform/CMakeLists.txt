@@ -722,9 +722,10 @@ if(ROCKE_INSTALL_TESTS)
 
     # Reproduce the committed host-flavor column from the relocated artifact.
     # This mirrors the build-tree CTest in tests/cmake/CoreTests.cmake, but deliberately
-    # uses the installed package data that downstream/provider CI consumes.
+    # uses the installed package data that downstream/provider CI consumes. Each
+    # CI shard checks the declaration keys it owns (rocke.tests.ci_shard).
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-           "add_test(rocke_arch_domain_reproducibility python -u \"${ROCKE_TEST_CTEST_REL}tests/arch_domain/gen_arch_domain.py\" --check --unvalidated-exit-code 77)\n")
+           "add_test(rocke_arch_domain_reproducibility python -u \"${ROCKE_TEST_CTEST_REL}tests/arch_domain/gen_arch_domain.py\" --check --unvalidated-exit-code 77 --rocke-shard-from-gtest-env)\n")
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
            "set_tests_properties(rocke_arch_domain_reproducibility PROPERTIES\n"
            "  LABELS \"ckc;python;host;integration;toolchain;generated-artifact;standard\"\n"

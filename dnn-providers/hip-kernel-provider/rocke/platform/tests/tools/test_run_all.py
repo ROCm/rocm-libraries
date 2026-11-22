@@ -591,6 +591,7 @@ def test_arch_domain_ctest_registration_contract(runner, tmp_path):
         "--check",
         "--unvalidated-exit-code",
         "77",
+        "--rocke-shard-from-gtest-env",
     ]
     properties = {item["name"]: item["value"] for item in test["properties"]}
     assert properties["SKIP_RETURN_CODE"] == 77
@@ -605,7 +606,10 @@ def test_arch_domain_ctest_registration_contract(runner, tmp_path):
     installed_manifest = (build / "CTestTestfile.cmake.install").read_text()
     assert "add_test(rocke_arch_domain_reproducibility" in installed_manifest
     assert "tests/arch_domain/gen_arch_domain.py" in installed_manifest
-    assert "--check --unvalidated-exit-code 77" in installed_manifest
+    assert (
+        "--check --unvalidated-exit-code 77 --rocke-shard-from-gtest-env"
+        in installed_manifest
+    )
     assert "SKIP_RETURN_CODE 77" in installed_manifest
     assert "RUN_SERIAL TRUE" in installed_manifest
     assert "TIMEOUT 1800" in installed_manifest
