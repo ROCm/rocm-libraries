@@ -85,7 +85,7 @@ def _scenario(sq: int, bs: int, window: int):
         num_kv_heads=8,
         head_size=128,
         block_size=bs,
-        dtype=torch.bfloat16,
+        dtype="bf16",
         sliding_window=window,
     )
 
