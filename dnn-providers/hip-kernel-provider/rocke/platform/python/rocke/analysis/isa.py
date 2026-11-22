@@ -340,6 +340,125 @@ def parse_resources(text: str) -> ResourceInfo:
     )
 
 
+@dataclass(frozen=True)
+class KernelArgument:
+    """One argument of a kernel, as its code object's metadata lays it out.
+
+    ``value_kind`` is the metadata's ``.value_kind`` (``global_buffer``,
+    ``by_value``, or a ``hidden_*`` kind the compiler appends); ``offset`` and
+    ``size`` are bytes within the kernarg segment. ``name`` is None for an
+    argument the metadata does not name.
+    """
+
+    name: str | None
+    value_kind: str
+    offset: int
+    size: int
+
+
+# A ``.key: value`` line of the YAML metadata ``llvm-readelf --notes`` prints;
+# ``item`` marks the first key of a list entry (``- .key: value``).
+_METADATA_LINE_RE = re.compile(
+    r"^(?P<indent> *)(?P<item>- )?\.(?P<key>[A-Za-z0-9_]+):\s*(?P<value>.*?)\s*$"
+)
+
+
+def _metadata_scalar(value: str) -> str:
+    """A YAML scalar without its tag (``!str N`` prints for the name ``N``)."""
+    if value.startswith("!"):
+        value = value.partition(" ")[2]
+    return value.strip("'\"")
+
+
+def parse_kernel_arguments(readelf_notes: str) -> dict[str, tuple[KernelArgument, ...]]:
+    """Each kernel's arguments, by kernel name, from ``llvm-readelf --notes``
+    output of an AMDHSA code object (its ``amdhsa.kernels`` metadata).
+
+    Every kernel entry of the list is one dict of ``.key: value`` lines; the
+    entries of its ``.args`` list sit deeper. Only the first ``amdhsa.kernels``
+    list is read (a code object carries one metadata note). Raises
+    ``ValueError`` when the list does not start with an entry, a kernel has no
+    ``.name``, or an argument lacks ``.value_kind``, ``.offset`` or ``.size``.
+    """
+    kernels: list[dict] = []
+    kernel_column: int | None = None  # the column of a kernel-level key
+    last_kernel_key = ""  # nested entries belong to .args only after it
+    in_kernels = False
+    for line in readelf_notes.splitlines():
+        if not in_kernels:
+            in_kernels = line.startswith("amdhsa.kernels:")
+            continue
+        if line and not line.startswith(" "):
+            break  # the next top-level key ends the kernel list
+        match = _METADATA_LINE_RE.match(line)
+        if match is None:
+            continue
+        column = len(match["indent"]) + (2 if match["item"] else 0)
+        key, value = match["key"], _metadata_scalar(match["value"])
+        if kernel_column is None:
+            if not match["item"]:
+                raise ValueError(
+                    "amdhsa.kernels does not start with a list entry: " + line.strip()
+                )
+            kernel_column = column
+        if column == kernel_column:
+            if match["item"]:
+                kernels.append({"args": []})
+            last_kernel_key = key
+            if key != "args":
+                kernels[-1][key] = value
+        elif column > kernel_column and last_kernel_key == "args":
+            if match["item"]:
+                kernels[-1]["args"].append({})
+            kernels[-1]["args"][-1][key] = value
+
+    result: dict[str, tuple[KernelArgument, ...]] = {}
+    for kernel in kernels:
+        if "name" not in kernel:
+            raise ValueError("a kernel in the code-object metadata has no .name")
+        arguments = []
+        for arg in kernel["args"]:
+            missing = sorted({"value_kind", "offset", "size"} - set(arg))
+            if missing:
+                raise ValueError(
+                    f"an argument of kernel {kernel['name']!r} has no "
+                    f"{', '.join('.' + key for key in missing)}"
+                )
+            arguments.append(
+                KernelArgument(
+                    name=arg.get("name"),
+                    value_kind=arg["value_kind"],
+                    offset=int(arg["offset"]),
+                    size=int(arg["size"]),
+                )
+            )
+        result[kernel["name"]] = tuple(arguments)
+    return result
+
+
+def read_code_object_notes(hsaco_path: Path, *, readelf: str = "llvm-readelf") -> str:
+    """``readelf --notes`` of one code object: its AMDGPU metadata as the YAML
+    text :func:`parse_kernel_arguments` and :func:`parse_resources` read.
+
+    Raises ``FileNotFoundError`` if the code object or ``readelf`` is missing,
+    and ``RuntimeError`` if ``readelf`` returns non-zero.
+    """
+    path = Path(hsaco_path)
+    if not path.exists():
+        raise FileNotFoundError(path)
+    if shutil.which(readelf) is None:
+        raise FileNotFoundError(f"missing tool: {readelf}")
+    result = subprocess.run(
+        [readelf, "--notes", str(path)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"{readelf} failed: {result.stderr or result.stdout}")
+    return result.stdout
+
+
 def analyze_hsaco(
     hsaco_path: Path,
     *,
@@ -372,20 +491,13 @@ def analyze_hsaco(
 
     # --notes is where code-object metadata generally lives. Some toolchains
     # expose extra metadata only in --all, so parse the objdump text too below.
-    relf = subprocess.run(
-        [readelf, "--notes", str(path)],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if relf.returncode != 0:
-        raise RuntimeError(f"{readelf} failed: {relf.stderr or relf.stdout}")
+    notes = read_code_object_notes(path, readelf=readelf)
 
-    resource_text = relf.stdout + "\n" + obj.stdout
+    resource_text = notes + "\n" + obj.stdout
     return HsacoAnalysis(
         path=path,
         isa=parse_isa(obj.stdout),
         resources=parse_resources(resource_text),
         objdump_text=obj.stdout if keep_text else "",
-        readelf_text=relf.stdout if keep_text else "",
+        readelf_text=notes if keep_text else "",
     )

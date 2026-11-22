@@ -21,11 +21,16 @@ import os
 import re
 import shutil
 import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
+from ..analysis import read_code_object_notes
+from .compiler_tools import require_tools_or_skip
+
 __all__ = [
     "checked_llc_output",
+    "code_object_notes",
     "find_amdgpu_llc",
     "find_llvm_tool",
     "lists_amdgpu_backend",
@@ -166,3 +171,17 @@ def llc_code_object(
     if obj is None:
         raise unittest.SkipTest(f"this llc does not know {processor}")
     return obj
+
+
+def code_object_notes(code_object: bytes) -> str:
+    """``llvm-readelf --notes`` of ``code_object``: its AMDGPU metadata as text,
+    for :func:`rocke.analysis.parse_kernel_arguments`. Skips the test when
+    llvm-readelf is missing (fails instead under
+    ``ROCKE_REQUIRE_COMPILER_TOOLS=1``)."""
+    readelf = find_llvm_tool("llvm-readelf")
+    if readelf is None:
+        require_tools_or_skip("llvm-readelf not found (ROCM_PATH / PATH)")
+    with tempfile.TemporaryDirectory() as scratch:
+        path = Path(scratch) / "code_object.hsaco"
+        path.write_bytes(code_object)
+        return read_code_object_notes(path, readelf=readelf)

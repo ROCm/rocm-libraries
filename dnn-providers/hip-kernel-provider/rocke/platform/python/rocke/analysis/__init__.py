@@ -18,16 +18,20 @@ from .ir import LlvmIrStats, analyze_llvm_ir
 from .isa import (
     HsacoAnalysis,
     IsaStats,
+    KernelArgument,
     ResourceInfo,
     analyze_hsaco,
     parse_isa,
+    parse_kernel_arguments,
     parse_resources,
+    read_code_object_notes,
 )
 from .report import VariantReport, compare_variant_reports
 
 __all__ = [
     "HsacoAnalysis",
     "IsaStats",
+    "KernelArgument",
     "LlvmIrStats",
     "ResourceInfo",
     "VariantReport",
@@ -35,5 +39,7 @@ __all__ = [
     "analyze_llvm_ir",
     "compare_variant_reports",
     "parse_isa",
+    "parse_kernel_arguments",
     "parse_resources",
+    "read_code_object_notes",
 ]
