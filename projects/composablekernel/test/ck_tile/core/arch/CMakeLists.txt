@@ -34,6 +34,10 @@ else()
     message(DEBUG "Skipping test_barrier_device: requires a gfx125x target")
 endif()
 
+if(SUPPORTED_GPU_TARGETS MATCHES "gfx125")
+    add_gtest_executable(test_async_lds_store test_async_lds_store.cpp)
+endif()
+
 # Compile-only, for every gfx125 variant the compiler supports, whatever GPU_TARGETS is: most
 # CI configurations have no gfx125 target, so a gap in the target detection of config.hpp or
 # arch.hpp would otherwise go unnoticed. A failure is a build error.
