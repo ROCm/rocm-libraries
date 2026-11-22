@@ -16,12 +16,12 @@ Algorithm (per row, K iterations of *find + mask + softmax*):
      local_max_idx)``.
   2. **Packed wave-XOR argmax butterfly** reduces ``(local_max_val,
      local_max_idx)`` across the wave (``log2(min(BS, 64))`` stages of
-     ``ds_bpermute`` / ``ds_swizzle_xor``). For multi-wave blocks
-     (``BS > 64``) the per-wave (val, idx) is staged in LDS and the
-     first wave does a final XOR butterfly across the (BS/64) waves.
-     Mirrors CK Tile's ``BlockTopkStream2D`` ``ArgmaxPacket`` reduce
-     and AITER's ``multithread_reduce(arg_max, THREADS_PER_ROW)`` —
-     no LDS round-trip + race-write for the index broadcast.
+     ``ds_bpermute`` / ``ds_swizzle_xor``). Mirrors CK Tile's
+     ``BlockTopkStream2D`` ``ArgmaxPacket`` reduce and AITER's
+     ``multithread_reduce(arg_max, THREADS_PER_ROW)``. In a block of more
+     than one wave each wave runs the butterfly, then every lane folds the
+     waves' winners from LDS in wave order. Both steps break a tie toward
+     the smaller index.
   3. Each lane that owns ``winning_idx`` masks it out in its local
      cache (set to ``-inf``) so the next iteration skips it.
   4. After K iterations, softmax over the K picked values is computed
@@ -57,7 +57,6 @@ from ...helpers.distribution import (
     make_static_tile_distribution,
 )
 from ...helpers.io import io_ir_type
-from ...helpers.reduction import block_lds_reduce
 from ...helpers.spec import SignatureBuilder, ceil_div_grid, kernel_name_join
 from ...helpers.tensor_view import make_lds_view
 
@@ -120,6 +119,30 @@ def _wave_argmax_butterfly(
     return cur_val, cur_idx
 
 
+def _lds_argmax_fold(
+    b: IRBuilder, lds_val: Value, lds_arg: Value, count: int
+) -> tuple[Value, Value]:
+    """Fold ``count`` LDS ``(val, idx)`` slots in slot order into one argmax,
+    with :func:`_wave_argmax_butterfly`'s rule: a larger value wins and a tie
+    goes to the smaller index. Every lane reads every slot, so every lane holds
+    the result."""
+    best_val = b.vec_extract(b.smem_load_vN_f32(lds_val, b.const_i32(0), n=1), 0)
+    best_idx = b.bitcast(
+        b.vec_extract(b.smem_load_vN_f32(lds_arg, b.const_i32(0), n=1), 0), I32
+    )
+    for slot in range(1, count):
+        c_slot = b.const_i32(slot)
+        val = b.vec_extract(b.smem_load_vN_f32(lds_val, c_slot, n=1), 0)
+        idx = b.bitcast(b.vec_extract(b.smem_load_vN_f32(lds_arg, c_slot, n=1), 0), I32)
+        is_better = b.lor(
+            b.fcmp("ogt", val, best_val),
+            b.land(b.fcmp("oeq", val, best_val), b.cmp_lt(idx, best_idx)),
+        )
+        best_val = b.select(is_better, val, best_val)
+        best_idx = b.select(is_better, idx, best_idx)
+    return best_val, best_idx
+
+
 def make_input_distribution(
     *, block_size: int, elems_per_thread: int
 ) -> TileDistribution:
@@ -165,14 +188,8 @@ class TopkSoftmaxSpec:
     out_dtype: DType = "f32"  # output Y dtype
     block_size: int = 64
     name: str = "rocke_topk_softmax"
-    # P91: cross-wave packed argmax for ``block_size > 64``. When
-    # True, the per-wave wave-XOR butterfly produces a packed
-    # ``(val, idx)`` per wave, the per-wave packs land in
-    # ``num_warps``-slot LDS, and wave 0 runs a final XOR butterfly
-    # to merge them. Avoids the O(K * BS) per-thread chain that
-    # the legacy form does for BS > 64. Defaults to False because
-    # the cross-wave merge has higher register pressure on small
-    # BS — opt in for ``block_size in {128, 256}``.
+    # Accepted for compatibility and ignored: every multi-wave block runs a
+    # butterfly per wave and folds the waves' winners through LDS.
     cross_wave_argmax: bool = False
 
     @property
@@ -257,10 +274,10 @@ def build_topk_softmax(spec: TopkSoftmaxSpec, arch: str = "gfx950") -> KernelDef
 
     ``arch`` selects the target's :class:`ArchTarget` (wave size). The
     wave-XOR packed argmax butterfly is only used when the row fits in a
-    single wave (``block_size <= wave_size``); larger blocks take the
-    wave-agnostic LDS reduce. On wave32 targets (RDNA, e.g. gfx1151) a
-    ``block_size == 64`` row therefore spans two waves and routes through
-    the LDS path automatically — the wave-XOR butterfly never reaches
+    single wave (``block_size <= wave_size``); in a larger block each wave
+    runs it and the waves' winners are folded through LDS. On wave32
+    targets (RDNA, e.g. gfx1151) a ``block_size == 64`` row therefore spans
+    two waves and takes the LDS fold — the wave-XOR butterfly never reaches
     across waves. Default ``arch="gfx950"`` keeps the wave64 path
     byte-identical.
     """
@@ -359,39 +376,33 @@ def build_topk_softmax(spec: TopkSoftmaxSpec, arch: str = "gfx950") -> KernelDef
     #   no LDS round-trip, no ``b.sync()``. This is where we
     #   demonstrably beat the LDS reduce + LDS race-write baseline
     #   (1.1-1.4x for f16/bf16/f32 with K=4..8).
-    # * ``BS in {128, 256}`` (multi-wave row): the cross-wave merge
-    #   needs an LDS round-trip anyway (cross-32-half traffic isn't
-    #   wave-shuffleable in a single instruction on gfx950). The
-    #   per-pick instruction count of a per-wave butterfly + LDS
-    #   gather + cross-wave butterfly + LDS broadcast is roughly the
-    #   same as the LDS-tree reduce, but its *register pressure* is
-    #   higher (each pick keeps wave_max + wave_arg live across the
-    #   nested ``scf_if`` for the cross-wave merge), and we
-    #   benchmarked 2-4x slowdowns vs the LDS path for ``f32 K=8``
-    #   at BS=128/256. We therefore keep the LDS reduce + LDS
-    #   race-write argmax for these block sizes; the multi-wave
-    #   wave-shuffle implementation lives in git history as
-    #   reference but isn't built into the current production path.
-    #   A v2 design (per-warp registers + smaller cross-wave
-    #   merge) is the path forward.
-    # Single-wave rows (``BS <= wave_size``) can run the cross-lane
-    # wave-XOR butterfly; multi-wave rows fall back to the wave-agnostic
-    # LDS reduce + LDS race-write argmax. On wave32 a ``BS == 64`` row is
-    # two waves, so it correctly takes the LDS path (the butterfly's
-    # ``ds_bpermute`` for the cross-wave XOR mask only addresses one wave).
+    # * ``BS in {128, 256}`` (multi-wave row): each wave runs the same
+    #   butterfly, its leader lane stores the wave's (val, idx) to LDS,
+    #   and after a barrier every lane folds the ``BS / wave_size``
+    #   winners in wave order with the same rule, so a tie still goes to
+    #   the smaller index. A second barrier protects those slots from the
+    #   next pick's stores. Publishing the winner any other way (one
+    #   lane writing it) would break ties by whichever lane wrote last.
+    # On wave32 a ``BS == 64`` row is two waves, so it takes the fold (the
+    # butterfly's ``ds_bpermute`` for the cross-wave XOR mask only
+    # addresses one wave).
     use_wave_argmax = BS <= wave_size
     if use_wave_argmax:
         intra_stages = _ilog2(BS)
-        lds_red = None  # not needed
-        lds_winner = None
+        num_waves = 1
     else:
-        intra_stages = 0
-        # LDS scratch matching the baseline argmax path: a
-        # ``BS``-sized f32 buffer for the value reduce and a 1-slot
-        # buffer for the idx race-write broadcast.
-        lds_red = make_lds_view(b, dtype=F32, shape=(BS,), name_hint="lds_red").base
-        lds_winner = make_lds_view(
-            b, dtype=F32, shape=(1,), name_hint="lds_winner"
+        # Each wave reduces its lanes with the butterfly, then the waves'
+        # winners meet in LDS: one value and one index (as f32 bits) per wave.
+        intra_stages = _ilog2(wave_size)
+        num_waves = BS // wave_size
+        c_wave_size = b.const_i32(wave_size)
+        wave = b.div(tid, c_wave_size)
+        is_wave_leader = b.cmp_eq(b.mod(tid, c_wave_size), b.const_i32(0))
+        lds_wave_val = make_lds_view(
+            b, dtype=F32, shape=(num_waves,), name_hint="lds_wave_val"
+        ).base
+        lds_wave_arg = make_lds_view(
+            b, dtype=F32, shape=(num_waves,), name_hint="lds_wave_arg"
         ).base
 
     # K iterations of pick-max + mask. ``picks_val[k]`` /
@@ -416,27 +427,24 @@ def build_topk_softmax(spec: TopkSoftmaxSpec, arch: str = "gfx950") -> KernelDef
             local_max = b.select(is_greater, cache[e], local_max)
             local_arg = b.select(is_greater, cache_idx[e], local_arg)
 
-        if use_wave_argmax:
-            # 2a) Wave-XOR packed argmax butterfly. After this every
-            # lane in the wave holds the same (val, idx).
-            global_max, winner_idx = _wave_argmax_butterfly(
-                b, local_max, local_arg, stages=intra_stages
-            )
-        else:
-            # 2b) LDS-tree max reduce + LDS race-write argmax. Same
-            # algorithm as the pre-optimisation baseline; see the
-            # ``use_wave_argmax`` comment above for why we keep it
-            # here for BS > 64.
-            global_max = block_lds_reduce(
-                b, local_max, lds_red, tid, block_size=BS, combine="max"
-            )
-            matches = b.fcmp("oeq", local_max, global_max)
-            with b.scf_if(matches):
-                arg_as_f32 = b.bitcast(local_arg, F32)
-                b.smem_store_vN_f32(lds_winner, [b.const_i32(0)], arg_as_f32, 1)
+        # 2a) Wave-XOR packed argmax butterfly. After this every lane in
+        # the wave holds the same (val, idx): the wave's winner.
+        global_max, winner_idx = _wave_argmax_butterfly(
+            b, local_max, local_arg, stages=intra_stages
+        )
+        if not use_wave_argmax:
+            # 2b) The waves' winners, folded in wave order through LDS with
+            # the butterfly's rule (a larger value wins, a tie goes to the
+            # smaller index). The second barrier keeps the next pick's
+            # stores off the slots other waves may still be reading.
+            with b.scf_if(is_wave_leader):
+                b.smem_store_vN_f32(lds_wave_val, [wave], global_max, 1)
+                b.smem_store_vN_f32(lds_wave_arg, [wave], b.bitcast(winner_idx, F32), 1)
             b.sync()
-            winner_vec_f32 = b.smem_load_vN_f32(lds_winner, b.const_i32(0), n=1)
-            winner_idx = b.bitcast(b.vec_extract(winner_vec_f32, 0), I32)
+            global_max, winner_idx = _lds_argmax_fold(
+                b, lds_wave_val, lds_wave_arg, num_waves
+            )
+            b.sync()
 
         picks_val.append(global_max)
         picks_idx.append(winner_idx)

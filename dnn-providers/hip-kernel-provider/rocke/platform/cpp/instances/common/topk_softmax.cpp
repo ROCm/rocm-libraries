@@ -9,7 +9,8 @@
  * Algorithm (per row, K iterations of find + mask + softmax):
  *   1. each lane scans its slice of the row -> (local_max_val, local_max_idx);
  *   2a. single-wave (BS <= wave_size): packed wave-XOR argmax butterfly (no LDS);
- *   2b. multi-wave  (BS >  wave_size): LDS tree max reduce + LDS race-write idx;
+ *   2b. multi-wave  (BS >  wave_size): the butterfly per wave, then every lane
+ *       folds the waves' winners from LDS in wave order (ties to the smaller idx);
  *   3. winner masked to -inf in the per-lane cache for the next iteration;
  *   4. softmax over the K picks computed in registers (exp2 form, log2(e));
  *   5. K stores distributed across K lanes (lane k writes (Y[m,k], Idx[m,k])).
@@ -268,6 +269,57 @@ static void rocke_topk_wave_argmax_butterfly(rocke_ir_builder_t* b,
     *out_idx = cur_idx;
 }
 
+/* topk_softmax.py: _lds_argmax_fold(b, lds_val, lds_arg, count).
+ * Fold `count` LDS (val, idx) slots in slot order into one argmax with the
+ * butterfly's rule: a larger value wins and a tie goes to the smaller index.
+ * Every lane reads every slot. Builder calls are sequenced in Python's order. */
+static void rocke_topk_lds_argmax_fold(rocke_ir_builder_t* b,
+                                       rocke_value_t* lds_val,
+                                       rocke_value_t* lds_arg,
+                                       int count,
+                                       rocke_value_t** out_val,
+                                       rocke_value_t** out_idx)
+{
+    rocke_value_t* slot_idx[1];
+    rocke_value_t* best_val;
+    rocke_value_t* best_idx;
+    int slot;
+
+    slot_idx[0] = rocke_b_const_i32(b, 0);
+    best_val = rocke_b_vec_extract(b, rocke_b_smem_load_vN_f32(b, lds_val, slot_idx, 1, 1), 0);
+    slot_idx[0] = rocke_b_const_i32(b, 0);
+    best_idx = rocke_b_bitcast(
+        b,
+        rocke_b_vec_extract(b, rocke_b_smem_load_vN_f32(b, lds_arg, slot_idx, 1, 1), 0),
+        rocke_i32());
+    for(slot = 1; slot < count; ++slot)
+    {
+        rocke_value_t* val;
+        rocke_value_t* idx;
+        rocke_value_t* ogt;
+        rocke_value_t* oeq;
+        rocke_value_t* lt;
+        rocke_value_t* tie;
+        rocke_value_t* is_better;
+
+        slot_idx[0] = rocke_b_const_i32(b, slot);
+        val = rocke_b_vec_extract(b, rocke_b_smem_load_vN_f32(b, lds_val, slot_idx, 1, 1), 0);
+        idx = rocke_b_bitcast(
+            b,
+            rocke_b_vec_extract(b, rocke_b_smem_load_vN_f32(b, lds_arg, slot_idx, 1, 1), 0),
+            rocke_i32());
+        ogt = rocke_b_fcmp(b, "ogt", val, best_val);
+        oeq = rocke_b_fcmp(b, "oeq", val, best_val);
+        lt = rocke_b_cmp_lt(b, idx, best_idx);
+        tie = rocke_b_land(b, oeq, lt);
+        is_better = rocke_b_lor(b, ogt, tie);
+        best_val = rocke_b_select(b, is_better, val, best_val);
+        best_idx = rocke_b_select(b, is_better, idx, best_idx);
+    }
+    *out_val = best_val;
+    *out_idx = best_idx;
+}
+
 /* topk_softmax.py: make_input_distribution(...).calculate_x(b, ys=[e], ps=[[tid]]).
  *
  * The warp-per-row input distribution decomposes N as (IssuesPerThread,
@@ -330,8 +382,11 @@ rocke_kernel_def_t* rocke_build_topk_softmax(rocke_ir_builder_t* b,
     rocke_value_t* picks_idx[ROCKE_TOPK_MAX_K];
     rocke_value_t* exps[ROCKE_TOPK_MAX_K] = {0};
 
-    rocke_value_t* lds_red = NULL;
-    rocke_value_t* lds_winner = NULL;
+    rocke_value_t* wave = NULL;
+    rocke_value_t* is_wave_leader = NULL;
+    rocke_value_t* lds_wave_val = NULL;
+    rocke_value_t* lds_wave_arg = NULL;
+    int num_waves;
 
     rocke_value_t* vmax;
     rocke_value_t* LN2_E;
@@ -471,20 +526,24 @@ rocke_kernel_def_t* rocke_build_topk_softmax(rocke_ir_builder_t* b,
     if(use_wave_argmax)
     {
         intra_stages = rocke_topk_ilog2(BS);
-        lds_red = NULL;
-        lds_winner = NULL;
+        num_waves = 1;
     }
     else
     {
-        int shape_red[1];
-        int shape_one[1];
-        intra_stages = 0;
-        /* lds_red    = make_lds_view(b, dtype=F32, shape=(BS,), ...).base. */
-        shape_red[0] = BS;
-        lds_red = rocke_b_smem_alloc(b, rocke_f32(), shape_red, 1, "lds_red");
-        /* lds_winner = make_lds_view(b, dtype=F32, shape=(1,), ...).base. */
-        shape_one[0] = 1;
-        lds_winner = rocke_b_smem_alloc(b, rocke_f32(), shape_one, 1, "lds_winner");
+        /* Each wave reduces its lanes with the butterfly, then the waves'
+         * winners meet in LDS: one value and one index (as f32 bits) per wave. */
+        int shape_waves[1];
+        rocke_value_t* c_wave_size;
+        rocke_value_t* lane_in_wave;
+        intra_stages = rocke_topk_ilog2(wave_size);
+        num_waves = BS / wave_size;
+        c_wave_size = rocke_b_const_i32(b, wave_size);
+        wave = rocke_b_div(b, tid, c_wave_size);
+        lane_in_wave = rocke_b_mod(b, tid, c_wave_size);
+        is_wave_leader = rocke_b_cmp_eq(b, lane_in_wave, rocke_b_const_i32(b, 0));
+        shape_waves[0] = num_waves;
+        lds_wave_val = rocke_b_smem_alloc(b, rocke_f32(), shape_waves, 1, "lds_wave_val");
+        lds_wave_arg = rocke_b_smem_alloc(b, rocke_f32(), shape_waves, 1, "lds_wave_arg");
     }
 
     /* K iterations of pick-max + mask. */
@@ -505,33 +564,29 @@ rocke_kernel_def_t* rocke_build_topk_softmax(rocke_ir_builder_t* b,
             local_arg = rocke_b_select(b, is_greater, cache_idx[e], local_arg);
         }
 
-        if(use_wave_argmax)
+        /* 2a) wave-XOR packed argmax butterfly: the wave's winner. */
+        rocke_topk_wave_argmax_butterfly(
+            b, local_max, local_arg, intra_stages, &global_max, &winner_idx);
+        if(!use_wave_argmax)
         {
-            /* 2a) wave-XOR packed argmax butterfly. */
-            rocke_topk_wave_argmax_butterfly(
-                b, local_max, local_arg, intra_stages, &global_max, &winner_idx);
-        }
-        else
-        {
-            /* 2b) LDS-tree max reduce + LDS race-write argmax. */
-            rocke_value_t* matches;
-            rocke_if_t gate;
-            rocke_value_t* winner_vec_f32;
-            rocke_value_t* idx0;
-            global_max = rocke_block_lds_reduce(b, local_max, lds_red, tid, BS, ROCKE_REDUCE_MAX);
-            matches = rocke_b_fcmp(b, "oeq", local_max, global_max);
-            gate = rocke_b_scf_if(b, matches);
+            /* 2b) the waves' winners, folded in wave order through LDS; the
+             * second barrier keeps the next pick's stores off the slots other
+             * waves may still be reading. */
+            rocke_if_t gate = rocke_b_scf_if(b, is_wave_leader);
             rocke_b_region_enter(b, gate.then_region);
             {
-                rocke_value_t* arg_as_f32 = rocke_b_bitcast(b, local_arg, rocke_f32());
-                rocke_value_t* z = rocke_b_const_i32(b, 0);
-                rocke_b_smem_store_vN_f32(b, lds_winner, &z, 1, arg_as_f32, 1);
+                rocke_value_t* wave_idx[1];
+                rocke_value_t* arg_as_f32;
+                wave_idx[0] = wave;
+                rocke_b_smem_store_vN_f32(b, lds_wave_val, wave_idx, 1, global_max, 1);
+                arg_as_f32 = rocke_b_bitcast(b, winner_idx, rocke_f32());
+                rocke_b_smem_store_vN_f32(b, lds_wave_arg, wave_idx, 1, arg_as_f32, 1);
             }
             rocke_b_region_leave(b);
             rocke_b_sync(b);
-            idx0 = rocke_b_const_i32(b, 0);
-            winner_vec_f32 = rocke_b_smem_load_vN_f32(b, lds_winner, &idx0, 1, 1);
-            winner_idx = rocke_b_bitcast(b, rocke_b_vec_extract(b, winner_vec_f32, 0), rocke_i32());
+            rocke_topk_lds_argmax_fold(
+                b, lds_wave_val, lds_wave_arg, num_waves, &global_max, &winner_idx);
+            rocke_b_sync(b);
         }
 
         picks_val[pick_k] = global_max;
