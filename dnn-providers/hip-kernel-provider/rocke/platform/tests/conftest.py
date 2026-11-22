@@ -20,6 +20,16 @@ if str(_PYROOT) not in sys.path:
     sys.path.insert(0, str(_PYROOT))
 
 
+def pytest_addoption(parser):
+    # tools/test_pending_lanes.py: a scheduled run fails on any expired entry;
+    # a pull-request run fails only on the ones its change touches.
+    parser.addoption(
+        "--strict-expiry",
+        action="store_true",
+        help="fail on every expired rocke.tests.pending_lanes entry",
+    )
+
+
 @pytest.hookimpl(hookwrapper=True)
 def pytest_runtest_makereport(item, call):
     """Report a ``ROCKE_BACKEND=both`` coverage gap as a skip, never a pass.

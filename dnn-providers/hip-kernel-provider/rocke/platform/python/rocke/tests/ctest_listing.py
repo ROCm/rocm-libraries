@@ -13,11 +13,14 @@ cannot find the program, so list a built tree, with the test interpreter on
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
 from collections.abc import Mapping
 from pathlib import Path
 
-__all__ = ["list_ctest_entries"]
+from ..assets import platform_root
+
+__all__ = ["configure_installed_ctest", "list_ctest_entries"]
 
 
 def list_ctest_entries(
@@ -40,3 +43,35 @@ def list_ctest_entries(
         command, check=True, capture_output=True, text=True, env=env
     )
     return json.loads(listed.stdout)["tests"]
+
+
+def configure_installed_ctest(
+    scratch: Path, *cmake_arguments: str
+) -> tuple[Path, Path]:
+    """Configure the platform source tree with BUILD_TESTING into
+    ``scratch/build`` and return that build directory and ``scratch/installed-ctest``,
+    a directory holding its installed CTestTestfile as an install lays it out.
+    Nothing is built. A -D in ``cmake_arguments`` overrides the default
+    ROCKE_INSTALL_TEST_GPU_REFERENCES=OFF, because CMake keeps the last value."""
+    build = scratch / "build"
+    subprocess.run(
+        [
+            "cmake",
+            "-S",
+            str(platform_root()),
+            "-B",
+            str(build),
+            "-DBUILD_TESTING=ON",
+            "-DROCKE_INSTALL_TEST_GPU_REFERENCES=OFF",
+            *cmake_arguments,
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    ctest_dir = scratch / "installed-ctest"
+    ctest_dir.mkdir()
+    shutil.copy2(
+        build / "CTestTestfile.cmake.install", ctest_dir / "CTestTestfile.cmake"
+    )
+    return build, ctest_dir

@@ -15,7 +15,7 @@ from unittest.mock import Mock
 
 import pytest
 from rocke.portable_ir.src import online
-from rocke.tests.ctest_listing import list_ctest_entries
+from rocke.tests.ctest_listing import configure_installed_ctest, list_ctest_entries
 from rocke.tests.provider_categories import provider_category_labels
 
 PLATFORM = Path(__file__).resolve().parents[1]
@@ -114,35 +114,6 @@ requires_cmake = pytest.mark.skipif(
     shutil.which("cmake") is None or shutil.which("ctest") is None,
     reason="CMake and CTest required",
 )
-
-
-def configure_installed_ctest(tmp_path, *cmake_arguments):
-    """Configure the platform with BUILD_TESTING and return the build directory
-    and a directory holding its installed CTestTestfile, as an install lays it
-    out. A -D in cmake_arguments overrides the default
-    ROCKE_INSTALL_TEST_GPU_REFERENCES=OFF, because CMake keeps the last value."""
-    build = tmp_path / "build"
-    subprocess.run(
-        [
-            "cmake",
-            "-S",
-            str(PLATFORM),
-            "-B",
-            str(build),
-            "-DBUILD_TESTING=ON",
-            "-DROCKE_INSTALL_TEST_GPU_REFERENCES=OFF",
-            *cmake_arguments,
-        ],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    ctest_dir = tmp_path / "installed-ctest"
-    ctest_dir.mkdir()
-    shutil.copy2(
-        build / "CTestTestfile.cmake.install", ctest_dir / "CTestTestfile.cmake"
-    )
-    return build, ctest_dir
 
 
 # How every installed pytest entry other than an explicit gate starts its
