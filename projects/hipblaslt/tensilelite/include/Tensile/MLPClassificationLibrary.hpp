@@ -123,7 +123,8 @@ namespace TensileLite
             }
             SolutionSet<MySolution> rv;
             for(auto const& row : solutionmap)
-                rv.insert(row.second);
+                if(matchesSearch(*row.second, problem, searchType))
+                    rv.insert(row.second);
 
             return rv;
         }
@@ -215,9 +216,21 @@ namespace TensileLite
 
             SolutionSet<MySolution> rv;
             for(auto const& row : solutionmap)
-                rv.insert(row.second);
+                if(matchesSearch(*row.second, problems[0], searchType))
+                    rv.insert(row.second);
 
             return rv;
+        }
+
+    private:
+        // A GEMM_TYPE_ONLY search reaches this library without the problem-type
+        // rows above it having been evaluated, so filter by type here, as
+        // SingleSolutionLibrary does.
+        static bool matchesSearch(MySolution const&         solution,
+                                  MyProblem const&          problem,
+                                  SolutionLibrarySearchType searchType)
+        {
+            return !isGemmTypeOnlySearch(searchType) || isGemmTypeSame(solution, problem);
         }
     };
 

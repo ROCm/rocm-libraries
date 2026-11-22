@@ -13,6 +13,7 @@
 #include <functional>
 #include <memory>
 #include <new>
+#include <set>
 #include <string>
 #include <utility>
 #include <vector>
@@ -197,6 +198,11 @@ namespace
         int  customUniformSummationOrder = -1;
         // Top-level integer keys written after the others.
         std::vector<std::pair<std::string, int64_t>> extraIntegers;
+        // ProblemType keys written after the others, and UseBeta.
+        std::vector<std::pair<std::string, int64_t>> typeIntegers;
+        std::vector<std::pair<std::string, bool>>    typeBooleans;
+        char const*                                  activationType = nullptr;
+        bool                                         useBeta        = true;
     };
 
     StateMap problemType(StateOptions const& options)
@@ -257,8 +263,14 @@ namespace
         type.boolean("SwizzleTensorA", false);
         type.boolean("SwizzleTensorB", false);
         type.text("FusedA2A", "Disabled");
-        type.boolean("UseBeta", true);
+        type.boolean("UseBeta", options.useBeta);
         type.boolean("StridedBatched", true);
+        if(options.activationType)
+            type.text("ActivationType", options.activationType);
+        for(auto const& [key, value] : options.typeIntegers)
+            type.integer(key, value);
+        for(auto const& [key, value] : options.typeBooleans)
+            type.boolean(key, value);
         return type;
     }
 
@@ -1058,5 +1070,84 @@ TEST(SolutionState, RejectsAnUnknownInt4EncodingA)
     catch(std::runtime_error const& error)
     {
         EXPECT_STREQ(error.what(), "Int4EncodingA must be Signed or UnsignedBias8");
+    }
+}
+
+namespace
+{
+    void collectTypes(std::shared_ptr<ProblemPredicate> const& predicate,
+                      std::set<std::string>&                   types)
+    {
+        if(auto all = std::dynamic_pointer_cast<Predicates::And<ContractionProblemGemm>>(predicate))
+            for(auto const& term : all->value)
+                collectTypes(term, types);
+        else if(auto any
+                = std::dynamic_pointer_cast<Predicates::Or<ContractionProblemGemm>>(predicate))
+            for(auto const& term : any->value)
+                collectTypes(term, types);
+        else if(predicate)
+            types.insert(predicate->type());
+    }
+}
+
+// hipBLASLt checks an algo it is given against kernelKindPredicate(). Every term a solution
+// predicate can hold is either in it or deliberately left out below; a new predicate type
+// must be added to one of the two (isKernelKindTerm in ContractionSolution.cpp).
+TEST(SolutionState, KernelKindPredicateClassifiesEveryTerm)
+{
+    // Sizes, strides, alignment, launch limits and selection-only terms: an algo may be
+    // reused for another size. Then the problem-type terms left out on purpose: the
+    // grouped and user-argument terms (checkGroupedGemmMatch), AmaxDCheck (its GSU
+    // clause; hipBLASLt compares outputAmaxD itself), PeerDCheck (checkPeerDKernelMatch),
+    // F32XdlMathOp (the fp32 fallback of a TF32 problem; compared by hipBLASLt) and
+    // MXScaleFormatEquals (checkMxScaleLayout).
+    static const std::set<std::string> leftOut{
+        "Free0SizeMultiple", "Free1SizeMultiple", "BatchSizeMultiple", "BatchSizeEqual",
+        "SynchronizerSizeCheck", "BoundSizeMultiple", "ProblemSizeEqual",
+        "MaxProblemSizeGreaterThan", "LeadingFree0SizesGreaterOrEqual",
+        "LeadingFree1SizesGreaterOrEqual", "SizeEqual", "SizeGreaterThan", "SizeLessThan",
+        "SizeMultiple", "SizeInRange", "StrideAEqual", "StrideBEqual", "StrideAMultiple",
+        "StrideBMultiple", "TensorBytesLessThan", "MXScalesPreSwizzled", "StrideCEqual",
+        "StrideDEqual", "LDCEqualsLDD", "CEqualsD", "BetaOne", "KernelLanguageCompatible",
+        "DeterministicMode", "AIGreaterThanEqual", "AILessThanEqual", "AlphaValue", "BetaValue",
+        "BufferLoadOffsetLimitCheck", "GL2PrefetchSAddrOffsetLimitCheck",
+        "BufferStoreOffsetLimitCheck", "WorkgroupNumberCheck", "PersistentKernelCheck",
+        "GlobalSplitUCheckMinK", "CDStridesEqual", "CUEfficiency", "ExperimentalStreamK",
+        "ExperimentalMLP", "EqualityMatching", "RangeMatching", "FreeSizeMatching",
+        "PredictionMatching", "GridBasedMatching", "MeshBasedMatching", "GemmA2AShape",
+        "A2AGemmShape", "WorkgroupMappingXCCCheck", "TruePred", "FalsePred",
+        "GroupedGemm", "SupportDeviceUserArguments", "AmaxDCheck", "PeerDCheck",
+        "F32XdlMathOp", "MXScaleFormatEquals"};
+
+    // Every feature on that adds a problem-type term: beta zero, bias, all activations,
+    // MX blocks, w4a16 group scaling.
+    StateOptions options;
+    options.useBeta        = false;
+    options.useBias        = 1;
+    options.activationType = "all";
+    options.typeIntegers   = {{"MXBlockA", 32}, {"MXBlockB", 32}};
+    options.typeBooleans   = {{"UseE", true}, {"OutputAmaxD", true}};
+    StateOptions int4;
+    int4.dataType         = "I4";
+    int4.dataTypeA        = "I4";
+    int4.scaleBlockSizesA = {128, 32};
+
+    for(auto const& solution : {build(options), build(int4)})
+    {
+        auto const& kind = solution->kernelKindPredicate();
+        EXPECT_EQ(&solution->kernelKindPredicate(), &kind) << "derived once and kept";
+        std::set<std::string> all, kinds;
+        collectTypes(solution->problemPredicate, all);
+        auto const* conjunction = dynamic_cast<Predicates::And<ContractionProblemGemm> const*>(&kind);
+        ASSERT_NE(conjunction, nullptr);
+        for(auto const& term : conjunction->value)
+            collectTypes(term, kinds);
+        for(auto const& type : all)
+            EXPECT_TRUE(kinds.count(type) || leftOut.count(type))
+                << type << " is neither a kernel-kind term nor left out on purpose";
+        for(auto const& type : kinds)
+            EXPECT_FALSE(leftOut.count(type)) << type;
+        for(auto const* type : {"TypesEqual", "OperationIdentifierEqual", "UseBias"})
+            EXPECT_TRUE(kinds.count(type)) << type;
     }
 }

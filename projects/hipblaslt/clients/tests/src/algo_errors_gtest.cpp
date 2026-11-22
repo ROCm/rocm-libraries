@@ -16,6 +16,7 @@
 #include <cstring>
 #include <functional>
 #include <limits>
+#include <map>
 #include <memory>
 #include <string>
 #include <vector>
@@ -1463,5 +1464,417 @@ namespace
 
         if(rejected == 0)
             GTEST_SKIP() << "no solution in the loaded library requires a fixed workspace";
+    }
+
+    using HandleOwner = std::unique_ptr<void, decltype(&hipblasLtDestroy)>;
+    using DescOwner
+        = std::unique_ptr<hipblasLtMatmulDescOpaque_t, decltype(&hipblasLtMatmulDescDestroy)>;
+
+    HandleOwner createHandle()
+    {
+        hipblasLtHandle_t handle = nullptr;
+        EXPECT_EQ(hipblasLtCreate(&handle), HIPBLAS_STATUS_SUCCESS);
+        return HandleOwner(handle, &hipblasLtDestroy);
+    }
+
+    // Device memory freed on scope exit, so a failed assertion does not leak it.
+    struct DeviceBuffer
+    {
+        void* ptr = nullptr;
+        explicit DeviceBuffer(size_t bytes)
+        {
+            EXPECT_EQ(hipMalloc(&ptr, bytes), hipSuccess);
+            if(ptr)
+                EXPECT_EQ(hipMemset(ptr, 0, bytes), hipSuccess);
+        }
+        DeviceBuffer(const DeviceBuffer&)            = delete;
+        DeviceBuffer& operator=(const DeviceBuffer&) = delete;
+        ~DeviceBuffer()
+        {
+            if(ptr)
+                static_cast<void>(hipFree(ptr));
+        }
+    };
+
+    // getAllAlgos searches by GEMM type only, and every solution is for one GEMM type,
+    // so no algo may come back for two different types or transposes. A library that
+    // skipped the type check returned its solutions for every type that shares its
+    // transposes (on gfx1201, the TN Origami catalogs for fp8 and int8).
+    TEST(AlgoGemmType, smoke_GetAllAlgosReturnsEachAlgoForOneGemmTypeOnly)
+    {
+        const hipDataType        types[] = {HIP_R_32F, HIP_R_16F};
+        const hipblasOperation_t ops[]   = {HIPBLAS_OP_N, HIPBLAS_OP_T};
+
+        const HandleOwner handle = createHandle();
+        ASSERT_NE(handle, nullptr);
+
+        std::map<int, std::string> queryOf;
+        size_t                     algos = 0, repeated = 0;
+        for(const hipDataType type : types)
+            for(const hipblasOperation_t opA : ops)
+            {
+                const std::string query = std::string(type == HIP_R_32F ? "f32 " : "f16 ")
+                                          + (opA == HIPBLAS_OP_N ? "NN" : "TN");
+                std::vector<hipblasLtMatmulHeuristicResult_t> results;
+                // A type the loaded library does not support gets no algos.
+                if(hipblaslt_ext::getAllAlgos(handle.get(),
+                                              hipblaslt_ext::GemmType::HIPBLASLT_GEMM,
+                                              opA,
+                                              HIPBLAS_OP_N,
+                                              type,
+                                              type,
+                                              type,
+                                              type,
+                                              HIPBLAS_COMPUTE_32F,
+                                              results)
+                   != HIPBLAS_STATUS_SUCCESS)
+                    continue;
+                for(auto& result : results)
+                {
+                    algos++;
+                    const int index  = hipblaslt_ext::getIndexFromAlgo(result.algo);
+                    auto [it, first] = queryOf.emplace(index, query);
+                    if(!first && repeated++ < 5)
+                        ADD_FAILURE()
+                            << "algo " << index << " ("
+                            << hipblaslt_ext::getSolutionNameFromAlgo(handle.get(), result.algo)
+                            << ") is returned for " << it->second << " and for " << query;
+                }
+            }
+        EXPECT_EQ(repeated, 0u) << "of " << algos << " algos";
+        if(algos == 0)
+            GTEST_SKIP() << "the loaded library has no solution for these types";
+    }
+
+    // An algo for one GEMM type is refused for a problem of another type or other
+    // transposes, as matmulIsAlgoSupported refuses it, instead of running a kernel that
+    // reads and writes the tensors as the wrong type. This holds for generated kernels
+    // too, which may otherwise be reused for problems of other sizes, and for every API
+    // that takes an algo.
+    TEST(AlgoGemmType, smoke_AlgoOfAnotherGemmTypeIsRefused)
+    {
+        constexpr int64_t n          = 64;
+        constexpr size_t  kWorkspace = size_t(32) << 20;
+        // Large enough for any of the types below, so that a kernel of another type
+        // that still ran would stay inside the buffers.
+        constexpr size_t kBytes = n * n * sizeof(double);
+
+        const HandleOwner handle = createHandle();
+        ASSERT_NE(handle, nullptr);
+        DeviceBuffer a(kBytes), b(kBytes), d(kBytes), workspace(kWorkspace);
+        for(void* p : {a.ptr, b.ptr, d.ptr, workspace.ptr})
+            ASSERT_NE(p, nullptr);
+
+        auto layoutOf = [](hipDataType type) {
+            hipblasLtMatrixLayout_t l = nullptr;
+            EXPECT_EQ(hipblasLtMatrixLayoutCreate(&l, type, n, n, n), HIPBLAS_STATUS_SUCCESS);
+            return LayoutPtr(l, &hipblasLtMatrixLayoutDestroy);
+        };
+        auto descOf = [](hipblasOperation_t opA) {
+            hipblasLtMatmulDesc_t desc = nullptr;
+            EXPECT_EQ(hipblasLtMatmulDescCreate(&desc, HIPBLAS_COMPUTE_32F, HIP_R_32F),
+                      HIPBLAS_STATUS_SUCCESS);
+            EXPECT_EQ(hipblasLtMatmulDescSetAttribute(
+                          desc, HIPBLASLT_MATMUL_DESC_TRANSA, &opA, sizeof(opA)),
+                      HIPBLAS_STATUS_SUCCESS);
+            return DescOwner(desc, &hipblasLtMatmulDescDestroy);
+        };
+        const LayoutPtr f32 = layoutOf(HIP_R_32F), f16 = layoutOf(HIP_R_16F);
+        const DescOwner nn = descOf(HIPBLAS_OP_N), tn = descOf(HIPBLAS_OP_T);
+
+        hipblaslt_ext::GemmPreference gemmPref;
+        gemmPref.setMaxWorkspaceBytes(kWorkspace);
+        hipblaslt_ext::Gemm f32Gemm(handle.get(),
+                                    HIPBLAS_OP_N,
+                                    HIPBLAS_OP_N,
+                                    HIP_R_32F,
+                                    HIP_R_32F,
+                                    HIP_R_32F,
+                                    HIP_R_32F,
+                                    HIPBLAS_COMPUTE_32F);
+        float                       alpha = 1.0f, beta = 0.0f;
+        hipblaslt_ext::GemmEpilogue epilogue;
+        hipblaslt_ext::GemmInputs   inputs;
+        inputs.setA(a.ptr);
+        inputs.setB(b.ptr);
+        inputs.setC(d.ptr);
+        inputs.setD(d.ptr);
+        inputs.setAlpha(&alpha);
+        inputs.setBeta(&beta);
+        ASSERT_EQ(f32Gemm.setProblem(n, n, n, 1, epilogue, inputs), HIPBLAS_STATUS_SUCCESS);
+        std::vector<hipblasLtMatmulHeuristicResult_t> results;
+        ASSERT_EQ(f32Gemm.algoGetHeuristic(1, gemmPref, results), HIPBLAS_STATUS_SUCCESS);
+        ASSERT_FALSE(results.empty());
+        const hipblasLtMatmulAlgo_t algo = results[0].algo;
+
+        auto matmul = [&](hipblasLtMatmulDesc_t desc, hipblasLtMatrixLayout_t layout) {
+            return hipblasLtMatmul(handle.get(),
+                                   desc,
+                                   &alpha,
+                                   a.ptr,
+                                   layout,
+                                   b.ptr,
+                                   layout,
+                                   &beta,
+                                   d.ptr,
+                                   layout,
+                                   d.ptr,
+                                   layout,
+                                   &algo,
+                                   workspace.ptr,
+                                   kWorkspace,
+                                   nullptr);
+        };
+
+        // The algo runs the problem it was queried for, but not one with other data
+        // types or other transposes.
+        EXPECT_EQ(matmul(nn.get(), f32.get()), HIPBLAS_STATUS_SUCCESS);
+        EXPECT_EQ(matmul(nn.get(), f16.get()), HIPBLAS_STATUS_INVALID_VALUE);
+        EXPECT_EQ(matmul(tn.get(), f32.get()), HIPBLAS_STATUS_INVALID_VALUE);
+
+        hipblaslt_ext::Gemm f16Gemm(handle.get(),
+                                    HIPBLAS_OP_N,
+                                    HIPBLAS_OP_N,
+                                    HIP_R_16F,
+                                    HIP_R_16F,
+                                    HIP_R_16F,
+                                    HIP_R_16F,
+                                    HIPBLAS_COMPUTE_32F);
+        ASSERT_EQ(f16Gemm.setProblem(n, n, n, 1, epilogue, inputs), HIPBLAS_STATUS_SUCCESS);
+        EXPECT_EQ(f16Gemm.initialize(algo, workspace.ptr, false), HIPBLAS_STATUS_INVALID_VALUE);
+        EXPECT_EQ(hipDeviceSynchronize(), hipSuccess);
+    }
+
+    // The same for a grouped GEMM: an fp16 grouped algo is refused for an fp32 group.
+    TEST(AlgoGemmType, smoke_GroupedAlgoOfAnotherGemmTypeIsRefused)
+    {
+        constexpr int64_t n          = 64;
+        constexpr size_t  kWorkspace = size_t(32) << 20;
+        constexpr size_t  kBytes     = n * n * sizeof(float);
+
+        const HandleOwner handle = createHandle();
+        ASSERT_NE(handle, nullptr);
+        DeviceBuffer a(kBytes), b(kBytes), d(kBytes), d2(kBytes), workspace(kWorkspace);
+        for(void* p : {a.ptr, b.ptr, d.ptr, d2.ptr, workspace.ptr})
+            ASSERT_NE(p, nullptr);
+
+        float                     alpha = 1.0f, beta = 0.0f;
+        hipblaslt_ext::GemmInputs inputs;
+        inputs.setA(a.ptr);
+        inputs.setB(b.ptr);
+        inputs.setC(d.ptr);
+        inputs.setD(d.ptr);
+        inputs.setAlpha(&alpha);
+        inputs.setBeta(&beta);
+        auto groupOf = [&](hipDataType type) {
+            hipblaslt_ext::GroupedGemm grouped(
+                handle.get(), HIPBLAS_OP_N, HIPBLAS_OP_N, type, type, type, type, HIPBLAS_COMPUTE_32F);
+            std::vector<int64_t>                     size(2, n), batch(2, 1);
+            std::vector<hipblaslt_ext::GemmEpilogue> epilogues(2);
+            std::vector<hipblaslt_ext::GemmInputs>   ins(2, inputs);
+            ins[1].setD(d2.ptr);
+            EXPECT_EQ(grouped.setProblem(size, size, size, batch, epilogues, ins),
+                      HIPBLAS_STATUS_SUCCESS);
+            return grouped;
+        };
+        hipblaslt_ext::GroupedGemm                    f16Group = groupOf(HIP_R_16F);
+        hipblaslt_ext::GemmPreference                 gemmPref;
+        std::vector<hipblasLtMatmulHeuristicResult_t> results;
+        gemmPref.setMaxWorkspaceBytes(kWorkspace);
+        ASSERT_EQ(f16Group.algoGetHeuristic(1, gemmPref, results), HIPBLAS_STATUS_SUCCESS);
+        if(results.empty())
+            GTEST_SKIP() << "the loaded library has no grouped fp16 solution";
+        hipblaslt_ext::GroupedGemm f32Group = groupOf(HIP_R_32F);
+        EXPECT_EQ(f16Group.initialize(results[0].algo, workspace.ptr, false),
+                  HIPBLAS_STATUS_SUCCESS);
+        EXPECT_EQ(f32Group.initialize(results[0].algo, workspace.ptr, false),
+                  HIPBLAS_STATUS_INVALID_VALUE);
+    }
+
+    // The same holds for an epilogue: an algo whose kernel was built without bias support
+    // is refused for a problem with a bias epilogue, instead of dropping the bias.
+    // getAllAlgos, a search by type only, returns such algos.
+    TEST(AlgoGemmType, smoke_AlgoWithoutTheEpilogueIsRefused)
+    {
+        constexpr int64_t n          = 64;
+        constexpr size_t  kWorkspace = size_t(32) << 20;
+        constexpr size_t  kBytes     = n * n * sizeof(uint16_t);
+
+        const HandleOwner handle = createHandle();
+        ASSERT_NE(handle, nullptr);
+        DeviceBuffer a(kBytes), b(kBytes), d(kBytes), bias(n * sizeof(uint16_t)),
+            workspace(kWorkspace);
+        for(void* p : {a.ptr, b.ptr, d.ptr, bias.ptr, workspace.ptr})
+            ASSERT_NE(p, nullptr);
+
+        hipblasLtMatrixLayout_t l = nullptr;
+        ASSERT_EQ(hipblasLtMatrixLayoutCreate(&l, HIP_R_16F, n, n, n), HIPBLAS_STATUS_SUCCESS);
+        const LayoutPtr       layout(l, &hipblasLtMatrixLayoutDestroy);
+        hipblasLtMatmulDesc_t plain = nullptr;
+        ASSERT_EQ(hipblasLtMatmulDescCreate(&plain, HIPBLAS_COMPUTE_32F, HIP_R_32F),
+                  HIPBLAS_STATUS_SUCCESS);
+        const DescOwner       plainOwner(plain, &hipblasLtMatmulDescDestroy);
+        hipblasLtMatmulDesc_t desc = nullptr;
+        ASSERT_EQ(hipblasLtMatmulDescCreate(&desc, HIPBLAS_COMPUTE_32F, HIP_R_32F),
+                  HIPBLAS_STATUS_SUCCESS);
+        const DescOwner           descOwner(desc, &hipblasLtMatmulDescDestroy);
+        const hipblasLtEpilogue_t epilogue = HIPBLASLT_EPILOGUE_BIAS;
+        ASSERT_EQ(hipblasLtMatmulDescSetAttribute(
+                      desc, HIPBLASLT_MATMUL_DESC_EPILOGUE, &epilogue, sizeof(epilogue)),
+                  HIPBLAS_STATUS_SUCCESS);
+        ASSERT_EQ(hipblasLtMatmulDescSetAttribute(
+                      desc, HIPBLASLT_MATMUL_DESC_BIAS_POINTER, &bias.ptr, sizeof(bias.ptr)),
+                  HIPBLAS_STATUS_SUCCESS);
+        float alpha = 1.0f, beta = 0.0f;
+
+        std::vector<hipblasLtMatmulHeuristicResult_t> all;
+        ASSERT_EQ(hipblaslt_ext::getAllAlgos(handle.get(),
+                                             hipblaslt_ext::GemmType::HIPBLASLT_GEMM,
+                                             HIPBLAS_OP_N,
+                                             HIPBLAS_OP_N,
+                                             HIP_R_16F,
+                                             HIP_R_16F,
+                                             HIP_R_16F,
+                                             HIP_R_16F,
+                                             HIPBLAS_COMPUTE_32F,
+                                             all),
+                  HIPBLAS_STATUS_SUCCESS);
+        // A generated kernel without "_Bias" in its name has no bias support. Take one
+        // the problem without the epilogue supports, so that the epilogue is the only
+        // difference.
+        auto noBias = std::find_if(all.begin(), all.end(), [&](auto& result) {
+            const std::string name = hipblaslt_ext::getKernelNameFromAlgo(handle.get(), result.algo);
+            size_t            required = kWorkspace;
+            return name.rfind("Cijk_", 0) == 0 && name.find("_Bias") == std::string::npos
+                   && hipblaslt_ext::matmulIsAlgoSupported(
+                          handle.get(), plain, &alpha, l, l, &beta, l, l, result.algo, required)
+                          == HIPBLAS_STATUS_SUCCESS
+                   && required <= kWorkspace;
+        });
+        if(noBias == all.end())
+            GTEST_SKIP() << "no fp16 NN kernel without bias support runs this problem";
+
+        auto matmul = [&](hipblasLtMatmulDesc_t matmulDesc) {
+            EXPECT_EQ(hipMemsetD16(d.ptr, 0x5555, n * n), hipSuccess);
+            const hipblasStatus_t status = hipblasLtMatmul(handle.get(),
+                                                           matmulDesc,
+                                                           &alpha,
+                                                           a.ptr,
+                                                           l,
+                                                           b.ptr,
+                                                           l,
+                                                           &beta,
+                                                           d.ptr,
+                                                           l,
+                                                           d.ptr,
+                                                           l,
+                                                           &noBias->algo,
+                                                           workspace.ptr,
+                                                           kWorkspace,
+                                                           nullptr);
+            EXPECT_EQ(hipDeviceSynchronize(), hipSuccess);
+            return status;
+        };
+        // The algo runs the problem without the epilogue, and is refused with it.
+        EXPECT_EQ(matmul(plain), HIPBLAS_STATUS_SUCCESS)
+            << hipblaslt_ext::getSolutionNameFromAlgo(handle.get(), noBias->algo);
+        EXPECT_EQ(matmul(desc), HIPBLAS_STATUS_INVALID_VALUE)
+            << hipblaslt_ext::getSolutionNameFromAlgo(handle.get(), noBias->algo);
+        uint16_t first = 0;
+        EXPECT_EQ(hipMemcpy(&first, d.ptr, sizeof(first), hipMemcpyDeviceToHost), hipSuccess);
+        EXPECT_EQ(first, 0x5555) << "D was written";
+    }
+
+    // Every algo the heuristic returns for a problem runs it, including where selection
+    // accepts a solution whose problem type differs from the problem's: a TF32 problem
+    // falls back to fp32 (F32XdlMathOp Float) solutions where there is no TF32 kernel,
+    // and fp8 x bf8 solutions may store a combined compute-input type.
+    TEST(AlgoGemmType, smoke_HeuristicAlgosRunForTf32AndMixedFp8)
+    {
+        struct Case
+        {
+            const char*          name;
+            hipDataType          a, b, cd;
+            hipblasComputeType_t compute;
+            hipblasOperation_t   opA;
+        };
+        const Case cases[]
+            = {{"tf32 NN", HIP_R_32F, HIP_R_32F, HIP_R_32F, HIPBLAS_COMPUTE_32F_FAST_TF32, HIPBLAS_OP_N},
+               {"tf32 TN", HIP_R_32F, HIP_R_32F, HIP_R_32F, HIPBLAS_COMPUTE_32F_FAST_TF32, HIPBLAS_OP_T},
+               {"f8 x bf8 TN", HIP_R_8F_E4M3, HIP_R_8F_E5M2, HIP_R_32F, HIPBLAS_COMPUTE_32F, HIPBLAS_OP_T},
+               {"bf8 x f8 TN", HIP_R_8F_E5M2, HIP_R_8F_E4M3, HIP_R_32F, HIPBLAS_COMPUTE_32F, HIPBLAS_OP_T},
+               {"f8 x bf8 TN fnuz",
+                HIP_R_8F_E4M3_FNUZ,
+                HIP_R_8F_E5M2_FNUZ,
+                HIP_R_32F,
+                HIPBLAS_COMPUTE_32F,
+                HIPBLAS_OP_T}};
+        constexpr int64_t n          = 128;
+        constexpr size_t  kWorkspace = size_t(32) << 20;
+        constexpr size_t  kBytes     = n * n * sizeof(float);
+
+        const HandleOwner handle = createHandle();
+        ASSERT_NE(handle, nullptr);
+        DeviceBuffer a(kBytes), b(kBytes), d(kBytes), workspace(kWorkspace);
+        for(void* p : {a.ptr, b.ptr, d.ptr, workspace.ptr})
+            ASSERT_NE(p, nullptr);
+        hipblasLtMatmulPreference_t pref = nullptr;
+        ASSERT_EQ(hipblasLtMatmulPreferenceCreate(&pref), HIPBLAS_STATUS_SUCCESS);
+        const std::unique_ptr<hipblasLtMatmulPreferenceOpaque_t,
+                              decltype(&hipblasLtMatmulPreferenceDestroy)>
+            prefOwner(pref, &hipblasLtMatmulPreferenceDestroy);
+        ASSERT_EQ(hipblasLtMatmulPreferenceSetAttribute(
+                      pref, HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES, &kWorkspace, sizeof(kWorkspace)),
+                  HIPBLAS_STATUS_SUCCESS);
+
+        int ran = 0;
+        for(const Case& c : cases)
+        {
+            SCOPED_TRACE(c.name);
+            hipblasLtMatmulDesc_t desc = nullptr;
+            ASSERT_EQ(hipblasLtMatmulDescCreate(&desc, c.compute, HIP_R_32F),
+                      HIPBLAS_STATUS_SUCCESS);
+            const DescOwner descOwner(desc, &hipblasLtMatmulDescDestroy);
+            ASSERT_EQ(hipblasLtMatmulDescSetAttribute(
+                          desc, HIPBLASLT_MATMUL_DESC_TRANSA, &c.opA, sizeof(c.opA)),
+                      HIPBLAS_STATUS_SUCCESS);
+            hipblasLtMatrixLayout_t la = nullptr, lb = nullptr, lcd = nullptr;
+            ASSERT_EQ(hipblasLtMatrixLayoutCreate(&la, c.a, n, n, n), HIPBLAS_STATUS_SUCCESS);
+            const LayoutPtr laOwner(la, &hipblasLtMatrixLayoutDestroy);
+            ASSERT_EQ(hipblasLtMatrixLayoutCreate(&lb, c.b, n, n, n), HIPBLAS_STATUS_SUCCESS);
+            const LayoutPtr lbOwner(lb, &hipblasLtMatrixLayoutDestroy);
+            ASSERT_EQ(hipblasLtMatrixLayoutCreate(&lcd, c.cd, n, n, n), HIPBLAS_STATUS_SUCCESS);
+            const LayoutPtr lcdOwner(lcd, &hipblasLtMatrixLayoutDestroy);
+
+            hipblasLtMatmulHeuristicResult_t results[4]{};
+            int                              returned = 0;
+            if(hipblasLtMatmulAlgoGetHeuristic(
+                   handle.get(), desc, la, lb, lcd, lcd, pref, 4, results, &returned)
+               != HIPBLAS_STATUS_SUCCESS)
+                continue;
+            float alpha = 1.0f, beta = 0.0f;
+            for(int i = 0; i < returned; i++, ran++)
+                EXPECT_EQ(hipblasLtMatmul(handle.get(),
+                                          desc,
+                                          &alpha,
+                                          a.ptr,
+                                          la,
+                                          b.ptr,
+                                          lb,
+                                          &beta,
+                                          d.ptr,
+                                          lcd,
+                                          d.ptr,
+                                          lcd,
+                                          &results[i].algo,
+                                          workspace.ptr,
+                                          kWorkspace,
+                                          nullptr),
+                          HIPBLAS_STATUS_SUCCESS)
+                    << hipblaslt_ext::getSolutionNameFromAlgo(handle.get(), results[i].algo);
+            EXPECT_EQ(hipDeviceSynchronize(), hipSuccess);
+        }
+        if(ran == 0)
+            GTEST_SKIP() << "the loaded library has no solution for these problems";
     }
 } // namespace

@@ -34,6 +34,8 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
 
 ### Resolved issues
 
+* Fixed `hipblaslt_ext::getAllAlgos` returning, from the Origami (Prediction) and MLP classification libraries, solutions of other data types that share the queried transposes.
+* Fixed `hipblasLtMatmul`, `hipblaslt_ext::Gemm::initialize` and `hipblaslt_ext::GroupedGemm::initialize` running a caller's algo whose Tensile solution computes another kind of GEMM (data types, transposes, conjugation or epilogue); they now return `HIPBLAS_STATUS_INVALID_VALUE`, while sizes are still not checked.
 * Fixed `hipblaslt-bench` and `hipblaslt-test` rejecting a compute-input type override for A alone and accepting an unsupported override for B alone.
 * Fixed `hipblasLtMatmul` and `hipblaslt_ext::Gemm::initialize` accepting an algo for a grouped GEMM solution, and `hipblaslt_ext::GroupedGemm::initialize` accepting one for a non-grouped solution. They now return `HIPBLAS_STATUS_INVALID_VALUE`.
 * Fixed `hipblaslt_ext::GroupedGemm::initialize` with `useUserArgs = false` accepting an algo for a hand-written kernel (gfx942 only) whose problem predicates a GEMM of the group fails. It now returns `HIPBLAS_STATUS_INVALID_VALUE`, as `hipblaslt_ext::Gemm::initialize` does. With `useUserArgs = true` the sizes come from device memory and are not checked.

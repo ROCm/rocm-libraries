@@ -71,6 +71,17 @@ namespace TensileLite
             return concatenate(type(), solution_list.size());
         }
 
+        // A GEMM_TYPE_ONLY search reaches this library without the problem-type
+        // rows above it having been evaluated, so filter by type here, as
+        // SingleSolutionLibrary does. Otherwise every such search that shares this
+        // library's transposes gets its solutions, whatever their data types.
+        static bool matchesSearch(MySolution const&         solution,
+                                  MyProblem const&          problem,
+                                  SolutionLibrarySearchType searchType)
+        {
+            return !isGemmTypeOnlySearch(searchType) || isGemmTypeSame(solution, problem);
+        }
+
         virtual std::shared_ptr<MySolution> getSolutionByIndex(MyProblem const& problem,
                                                                Hardware const&  hardware,
                                                                const int index) const override
@@ -112,7 +123,8 @@ namespace TensileLite
             {
                 if(debug)
                     std::cout << row.second->description() << std::endl;
-                rv.insert(row.second);
+                if(matchesSearch(*row.second, problem, searchType))
+                    rv.insert(row.second);
             }
 
             return rv;
@@ -133,7 +145,8 @@ namespace TensileLite
             {
                 if(debug)
                     std::cout << row.second->description() << std::endl;
-                rv.insert(row.second);
+                if(matchesSearch(*row.second, problems[0], searchType))
+                    rv.insert(row.second);
             }
 
             return rv;

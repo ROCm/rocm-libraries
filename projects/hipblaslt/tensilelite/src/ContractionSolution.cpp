@@ -34,6 +34,7 @@
 
 #include <Tensile/AMDGPU.hpp>
 #include <Tensile/ContractionProblem.hpp>
+#include <Tensile/ContractionProblemPredicates.hpp>
 #include <Tensile/Task.hpp>
 #include <Tensile/Utils.hpp>
 #include <Tensile/UtilsOrigami.hpp>
@@ -59,7 +60,9 @@
 #include <numeric>
 #include <random>
 #include <stdexcept>
+#include <typeindex>
 #include <unordered_map>
+#include <unordered_set>
 
 #include <sstream>
 
@@ -4989,6 +4992,100 @@ namespace TensileLite
     {
         if(handwrittenCustomKernel())
             throw std::runtime_error("External custom kernels do not support StreamK scheduling ABI 2");
+    }
+
+    namespace
+    {
+        using KindPredicate = Predicates::Predicate<ContractionProblemGemm>;
+
+        // The kernel-kind terms (see kernelKindPredicate()), keyed by type so
+        // that classifying a term builds no string.
+        bool isKernelKindTerm(KindPredicate const& term)
+        {
+            namespace C = Predicates::Contraction;
+            static const std::unordered_set<std::type_index> kinds{
+                typeid(C::TypesEqual),
+                typeid(C::OperationIdentifierEqual),
+                typeid(C::HighPrecisionAccumulateEqual),
+                typeid(C::Sparse),
+                typeid(C::SwizzleTensorA),
+                typeid(C::SwizzleTensorB),
+                typeid(C::FusedA2AEqual),
+                typeid(C::StridedBatchedEqual),
+                typeid(C::BetaZero),
+                typeid(C::UseGradientEqual),
+                typeid(C::ActivationCheck),
+                typeid(C::ActivationEnumWhiteList),
+                typeid(C::ActivationComputeTypeEqual),
+                typeid(C::ActivationNoGuardEqual),
+                typeid(C::UseBiasCheck),
+                typeid(C::BiasDataTypeWhiteList),
+                typeid(C::BiasSrcWhiteList),
+                typeid(C::UseEEqual),
+                typeid(C::DataTypeEEqual),
+                typeid(C::UseGateResidualCheck),
+                typeid(C::GateResidualDataTypeWhiteList),
+                typeid(C::UseScaleABCheck),
+                typeid(C::UseScaleCDCheck),
+                typeid(C::UseScaleAlphaVecCheck),
+                typeid(C::ScaleBlockSizeA),
+                typeid(C::ScaleZeroPointA),
+                typeid(C::Int4EncodingA),
+                typeid(C::MXBlockA),
+                typeid(C::MXBlockB),
+                typeid(C::MXBlockFreeA),
+                typeid(C::MXBlockFreeB),
+                typeid(C::DataTypeMXSA),
+                typeid(C::DataTypeMXSB)};
+            return kinds.count(std::type_index(typeid(term))) != 0;
+        }
+
+        void collectKernelKindTerms(std::shared_ptr<KindPredicate> const&        predicate,
+                                    std::vector<std::shared_ptr<KindPredicate>>& terms)
+        {
+            if(!predicate)
+                return;
+            if(auto all = dynamic_cast<Predicates::And<ContractionProblemGemm> const*>(
+                   predicate.get()))
+            {
+                for(auto const& term : all->value)
+                    collectKernelKindTerms(term, terms);
+            }
+            // An Or lists alternatives of one kind, such as the w4a16 group sizes a
+            // runtime-group kernel takes. It is a kind term when all of them are.
+            else if(auto any = dynamic_cast<Predicates::Or<ContractionProblemGemm> const*>(
+                        predicate.get()))
+            {
+                if(!any->value.empty()
+                   && std::all_of(any->value.begin(), any->value.end(), [](auto const& term) {
+                          return term && isKernelKindTerm(*term);
+                      }))
+                    terms.push_back(predicate);
+            }
+            else if(isKernelKindTerm(*predicate))
+                terms.push_back(predicate);
+        }
+    }
+
+    Predicates::Predicate<ContractionSolution::Problem> const&
+        ContractionSolution::kernelKindPredicate() const
+    {
+        auto& cache = m_kernelKindPredicate;
+        if(auto const* entry = cache.current.load(std::memory_order_acquire);
+           entry && entry->source == problemPredicate)
+            return *entry->kind;
+
+        std::lock_guard<std::mutex> lock(cache.access);
+        if(auto const* entry = cache.current.load(std::memory_order_relaxed);
+           entry && entry->source == problemPredicate)
+            return *entry->kind;
+        std::vector<std::shared_ptr<KindPredicate>> terms;
+        collectKernelKindTerms(problemPredicate, terms);
+        cache.entries.push_back(std::make_unique<KernelKindCache::Entry>(
+            KernelKindCache::Entry{problemPredicate,
+                                   std::make_shared<Predicates::And<Problem>>(terms)}));
+        cache.current.store(cache.entries.back().get(), std::memory_order_release);
+        return *cache.entries.back()->kind;
     }
 
     void ContractionSolution::validatePersistentLoopArgs() const

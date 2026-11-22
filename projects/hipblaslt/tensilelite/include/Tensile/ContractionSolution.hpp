@@ -34,6 +34,7 @@
 #include <limits>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -900,6 +901,20 @@ namespace TensileLite
         // callers must also validate after constructing or changing a descriptor.
         void validatePersistentLoopArgs() const;
 
+        /**
+         * The problem-type terms of problemPredicate (ProblemType.predicates() in
+         * Contractions.py) that decide what kind of GEMM the kernel computes: data
+         * and compute-input types, transposes and conjugation, accumulation,
+         * swizzle, sparsity, MX and w4a16 scaling, and the epilogue features the
+         * kernel was built with. Left out are the size, stride and alignment terms,
+         * the grouped and device-user-argument terms, AmaxDCheck, which also reads
+         * the GSU parameter, and F32XdlMathOp, because selection falls back from
+         * XFloat32 to Float solutions. Derived from problemPredicate on first use
+         * and kept while the solution lives, so loading a library pays nothing for
+         * it. Thread-safe.
+         */
+        Predicates::Predicate<Problem> const& kernelKindPredicate() const;
+
         // Prebuilt kernels retain their declared scheduling ABI even when their
         // cluster geometry also supports the spatial schedule. Policy and shape
         // compatibility are checked by validatePersistentLoopArgs().
@@ -1272,6 +1287,29 @@ namespace TensileLite
         std::map<int, double> ideals;
         LinearModel           linearModel;
         MatchingTag           tag{MatchingTag::Others};
+        // What kernelKindPredicate() derived, with the problemPredicate it derived it
+        // from. Entries live as long as the solution, so a reference stays valid; a
+        // copy derives its own. Last, so the members above keep their offsets for
+        // code built against an older libtensilelite-host.
+        struct KernelKindCache
+        {
+            struct Entry
+            {
+                std::shared_ptr<Predicates::Predicate<Problem>> source;
+                std::shared_ptr<Predicates::Predicate<Problem>> kind;
+            };
+            std::atomic<Entry const*>           current{nullptr};
+            std::mutex                          access;
+            std::vector<std::unique_ptr<Entry>> entries;
+
+            KernelKindCache() = default;
+            KernelKindCache(KernelKindCache const&) {}
+            KernelKindCache& operator=(KernelKindCache const&)
+            {
+                return *this;
+            }
+        };
+        mutable KernelKindCache m_kernelKindPredicate;
 
         /**
          * Unroll iterations spanned by one indivisible unit of K.
