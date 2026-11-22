@@ -379,6 +379,41 @@ _TILED_2D_BUDGET_GEOMETRIES = [
             sliding_window=128,
         ),
     ),
+    # gfx950 bf16 D64 bs32 GQA-8 prefill: the selector puts this cohort on the
+    # transposed-32x32 combo stack (half-local PV, fast paged-KV descriptor), a
+    # geometry none of the D128 rows above builds.
+    (
+        "bf16_d64_bs32_gqa64x8_combo",
+        "gfx950",
+        dict(
+            head_size=64,
+            num_query_heads=64,
+            num_kv_heads=8,
+            dtype="bf16",
+            block_size=32,
+        ),
+    ),
+    # gfx950 bf16 D64 short prefill (Sq <= 1024): the selector adds the V
+    # double buffer, which doubles the V staging in LDS.
+    (
+        "bf16_d64_short_vdbuf_gqa64x8",
+        "gfx950",
+        dict(
+            head_size=64,
+            num_query_heads=64,
+            num_kv_heads=8,
+            dtype="bf16",
+            seq=1024,
+        ),
+    ),
+    # gfx950 bf16 D256 prefill: the D256 override set (Q held in registers,
+    # softmax/MFMA interleave mode 2, single-buffered padded K) is the widest
+    # register and LDS footprint the 2D path ships.
+    (
+        "bf16_d256_gqa16x2",
+        "gfx950",
+        dict(head_size=256, num_query_heads=16, num_kv_heads=2, dtype="bf16"),
+    ),
 ]
 
 
