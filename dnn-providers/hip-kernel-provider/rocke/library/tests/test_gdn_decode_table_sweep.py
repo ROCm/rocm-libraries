@@ -9,6 +9,8 @@ so selection, ordering and aggregation are checked exactly.
 
 from __future__ import annotations
 
+import copy
+import functools
 import itertools
 import json
 import math
@@ -591,6 +593,12 @@ def test_auto_key_is_the_dispatchers_own_case():
 
 # ---------------------------------------------------------------- files
 def _rows():
+    """Four timed rows of SHAPE's production walk, a fresh copy per call."""
+    return copy.deepcopy(_shape_rows())
+
+
+@functools.cache
+def _shape_rows():
     auto, configs = sweep.shape_configs(SHAPE, sweep.options())
     meta = dict(_META, sha="abc", device="gfx950", arch="gfx950")
     out = []
