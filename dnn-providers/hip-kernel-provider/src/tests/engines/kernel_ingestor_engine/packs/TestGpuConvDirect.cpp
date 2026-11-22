@@ -1009,11 +1009,12 @@ TEST(TestConvDirectCatalog, EveryFilterAndDtypeHasAConfigOnEveryArchitecture)
 }
 
 // ---------------------------------------------------------------------------
-// Z-ring tiles (forward 3x3x3, 16-bit, gfx942 and gfx950): the planner admits them only on grids
-// of ZRING_MIN_PLANES output planes per compute unit, so the case's depth is sized from this
+// Z-ring tiles (3x3x3, 16-bit, gfx942 and gfx950): the planner admits them only on grids of
+// ZRING_MIN_PLANES output planes per compute unit, so the case's depth is sized from this
 // device's units. Two images, two channel stages, 72 output channels (a partial column block),
-// 20 x 18 outputs (partial tile rows and columns), asymmetric padding (two leading planes, none
-// trailing), and ranges that cross tile boundaries.
+// 20 x 18 outputs (edge tiles: a partial tile row and two columns past the whole strip),
+// asymmetric padding (two leading planes, none trailing), and ranges that cross tile boundaries.
+// Forward, and backward data (the forward form of dy: rotated filter, swapped channel roles).
 // ---------------------------------------------------------------------------
 
 bool isZring(const hipdnn_plugin_sdk::ingestor::KernelDefinition& kernel)
@@ -1021,14 +1022,18 @@ bool isZring(const hipdnn_plugin_sdk::ingestor::KernelDefinition& kernel)
     return kernel.getStringMetadata("kind") == "zring";
 }
 
-ConvShape zringCase()
+ConvShape zringCase(ConvDirection direction = ConvDirection::FORWARD)
 {
-    // Units a plane: 2 x 2 tiles of 16 x 16, two images, two 64-channel column blocks.
-    constexpr int64_t UNITS_PER_PLANE = int64_t{2} * 2 * 2 * 2;
+    // Units a plane: one whole strip of 2 tile rows and one narrow tile, two images, two
+    // 64-channel column blocks.
+    constexpr int64_t UNITS_PER_PLANE = (int64_t{1} * 2 + 1) * 2 * 2;
     const int64_t units = device_units::dispatchUnits(currentDeviceProperties());
     const int64_t depth
         = (conv_direct::ZRING_MIN_PLANES * units + UNITS_PER_PLANE - 1) / UNITS_PER_PLANE + 5;
-    auto shape = dense(64, 72, {depth, 20, 18}, {3, 3, 3}, {2, 1, 0}, true);
+    // Backward data reduces over k and writes c: 64 dy channels (two stages), 72 dx channels.
+    const bool forward = direction == ConvDirection::FORWARD;
+    auto shape
+        = dense(forward ? 64 : 72, forward ? 72 : 64, {depth, 20, 18}, {3, 3, 3}, {2, 1, 0}, true);
     shape.postPadding = {0, 1, 2};
     return shape;
 }
@@ -1074,6 +1079,53 @@ TEST(TestGpuConvDirectZring, BFloat16InfinitiesGuarded)
         GTEST_SKIP() << "no z-ring config ships to this device";
     }
     runCase<BFloat16>(zringCase(), ConvDirection::FORWARD, Math::NATIVE, true, true, isZring);
+}
+
+TEST(TestGpuConvDirectZring, HalfBackwardData)
+{
+    SKIP_IF_NO_DEVICES();
+    if(!zringArch())
+    {
+        GTEST_SKIP() << "no z-ring config ships to this device";
+    }
+    runCase<Half>(zringCase(ConvDirection::BACKWARD_DATA),
+                  ConvDirection::BACKWARD_DATA,
+                  Math::NATIVE,
+                  false,
+                  false,
+                  isZring);
+}
+
+TEST(TestGpuConvDirectZring, BFloat16BackwardData)
+{
+    SKIP_IF_NO_DEVICES();
+    if(!zringArch())
+    {
+        GTEST_SKIP() << "no z-ring config ships to this device";
+    }
+    runCase<BFloat16>(zringCase(ConvDirection::BACKWARD_DATA),
+                      ConvDirection::BACKWARD_DATA,
+                      Math::NATIVE,
+                      false,
+                      false,
+                      isZring);
+}
+
+/// Infinities in dy between NaN guards: they reach the dx elements whose products the reference
+/// sums, and nothing outside the tensor reaches dx.
+TEST(TestGpuConvDirectZring, BFloat16BackwardDataInfinitiesGuarded)
+{
+    SKIP_IF_NO_DEVICES();
+    if(!zringArch())
+    {
+        GTEST_SKIP() << "no z-ring config ships to this device";
+    }
+    runCase<BFloat16>(zringCase(ConvDirection::BACKWARD_DATA),
+                      ConvDirection::BACKWARD_DATA,
+                      Math::NATIVE,
+                      true,
+                      true,
+                      isZring);
 }
 
 // ---------------------------------------------------------------------------

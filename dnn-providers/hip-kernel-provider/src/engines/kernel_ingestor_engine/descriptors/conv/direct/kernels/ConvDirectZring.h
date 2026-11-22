@@ -149,6 +149,7 @@ __device__ __attribute__((always_inline)) void k2ConvZring(const K2Args& a CONV_
     constexpr bool EDGES = K2Z_EDGES != 0;
     constexpr int PPN = EDGES ? k2zNarrowSlots(ROWS, R, S) : 0; // a narrow tile's stage, at most
     constexpr int PPM = PPN > PP ? PPN : PP;
+    static_assert(!EDGES || ROWS % WM == 0, "narrow tiles deal their fragments to the wave rows");
     constexpr int PER = K2Z_PERIOD_BYTES / 16;
     constexpr int PPA = (PPM + PER - 1) / PER * PER; // positions per chunk sub-plane
     constexpr int NQ = BC / VEC; // chunks per stage
@@ -256,6 +257,34 @@ __device__ __attribute__((always_inline)) void k2ConvZring(const K2Args& a CONV_
             for(int j = 0; j < NBW; ++j)
                 k2zPin(acc[dz][i][j]);
     };
+#if K2Z_EDGES
+    // Edge tiles' steps: only the wave's first `live` fragments (scalar branches; the rest of the
+    // tile lies past the output).
+    auto mmasLive = [&](auto DZ, const Raw(&af)[ROWS], const Raw(&bf)[NBW], int live) {
+        constexpr int dz = decltype(DZ)::value;
+        Frags fb[NBW];
+#pragma unroll
+        for(int j = 0; j < NBW; ++j)
+            fb[j] = __builtin_bit_cast(Frags, bf[j]);
+#pragma unroll
+        for(int s = 0; s < NSL; ++s)
+#pragma unroll
+            for(int i = 0; i < ROWS; ++i)
+            {
+                if(i >= live)
+                    break;
+                const Frags fa = __builtin_bit_cast(Frags, af[i]);
+#pragma unroll
+                for(int j = 0; j < NBW; ++j)
+                    acc[dz][i][j] = Atom::mma(fb[j].f[s], fa.f[s], acc[dz][i][j]);
+            }
+#pragma unroll
+        for(int i = 0; i < ROWS; ++i)
+#pragma unroll
+            for(int j = 0; j < NBW; ++j)
+                k2zPin(acc[dz][i][j]);
+    };
+#endif
 
     const unsigned firstTile = k2zUniform(u0 / dOut), lastTile = k2zUniform((u1 - 1) / dOut);
     // The first tile's (channel tile, x tile, y tile, image); the next pencils' tiles follow it
@@ -309,19 +338,25 @@ __device__ __attribute__((always_inline)) void k2ConvZring(const K2Args& a CONV_
                 = k1Rsrc(yImg, yImage * static_cast<long long>(sizeof(TO)));
 
             // Narrow tile nq: rows yA .. yA + ROWS rf - 1 of the last strip (rem columns), staged from
-            // row yA, pxr positions a row; lane (lr, lc) of every fragment, fragment i rows i rf on.
-            // Wave rows past row 0 (narrow tiles) or past the output's rows (the last tile row) skip
-            // their MMAs.
+            // row yA, pxr positions a row; lane (lr, lc) of every fragment. Its ROWS fragments are
+            // dealt to the wave rows, ROWS / WM each: wave row wm's fragment i is the tile's
+            // fragment wm ROWS / WM + i, rows (wm ROWS / WM + i) rf on. `live`: the fragments a
+            // wave computes (all of them in a whole tile; in the last tile row those with rows in
+            // the output; ROWS / WM in a narrow tile).
             const int rem = a.wo - static_cast<int>(tilesX) * TX;
             const int rf = NARROW ? 16 / rem : 1;
             const int lr = NARROW ? lm / rem : 0, lc = NARROW ? lm - lr * rem : 0;
             const int yA = NARROW ? static_cast<int>(nq) * ROWS * rf : y0;
             const int pxr = NARROW ? rem + S - 1 : PX;
             const int ppr = NARROW ? (ROWS * rf + R - 1) * pxr : PP;
-            const bool waveLive = !EDGES || (NARROW ? wm == 0 : y0 + wm * ROWS < a.ho);
-            // A narrow tile's lane slot (row lr, column lc of the stage), the lane's own part of
-            // every A read.
-            const int laneSlot = lg * SUB + (lr * pxr + lc) * VEC;
+            const int rowsLeft = a.ho - y0 - wm * ROWS;
+            const int live = !EDGES   ? ROWS
+                             : NARROW ? ROWS / WM
+                                      : (rowsLeft < 0 ? 0 : (rowsLeft < ROWS ? rowsLeft : ROWS));
+            const bool waveLive = live > 0;
+            // A narrow tile's lane slot (row wm ROWS / WM rf + lr, column lc of the stage): the
+            // wave's and lane's part of every A read.
+            const int laneSlot = lg * SUB + ((wm * (ROWS / WM) * rf + lr) * pxr + lc) * VEC;
             // Stage copy: 16-byte slot i = tid + r THREADS is octet o = i / 8 -> chunk o % NQ,
             // positions 8 (o / NQ) .. + 7, one per lane of the octet.
             int tidp = tid;
@@ -368,13 +403,12 @@ __device__ __attribute__((always_inline)) void k2ConvZring(const K2Args& a CONV_
                 typedef typename K1Raw<4 * static_cast<int>(sizeof(TO))>::type Out;
                 if constexpr(NARROW)
                 {
-                    // Fragment i of wave row 0: row yA + i rf + lr, column x0 + lc; the lane's part
-                    // as the vector offset, the row's as the scalar offset.
-                    const bool laneOk = wm == 0 && lr < rf;
+                    // Fragment i: row yA + (wm ROWS / WM + i) rf + lr, column x0 + lc.
+                    const bool laneOk = lr < rf;
 #pragma unroll
-                    for(int i = 0; i < ROWS; ++i)
+                    for(int i = 0; i < ROWS / WM; ++i)
                     {
-                        const int yy = yA + i * rf + lr;
+                        const int yy = yA + (wm * (ROWS / WM) + i) * rf + lr;
                         const bool posOk = laneOk && yy < ho;
                         const int pixBase = ((zo * ho + yy) * wo + x0 + lc) * kk;
 #pragma unroll
@@ -489,7 +523,7 @@ __device__ __attribute__((always_inline)) void k2ConvZring(const K2Args& a CONV_
                         constexpr int g = decltype(G)::value;
                         constexpr int jb = g % JB, dx = (g / JB) % S, dy = g / JB / S;
 #pragma unroll
-                        for(int i = 0; i < ROWS; ++i)
+                        for(int i = 0; i < ROWS / WM; ++i)
                             af[i] = *reinterpret_cast<const Raw*>(
                                 ab + 4 * jb * SUB + ((i * rf + dy) * pxr + dx) * VEC);
                     }
@@ -510,8 +544,18 @@ __device__ __attribute__((always_inline)) void k2ConvZring(const K2Args& a CONV_
                     if constexpr(k == 0)
                         loadPlane(zinN, cN, pl);
                     k2zFence();
+#if K2Z_EDGES
+                    if(!EDGE || valid[dz])
+                    {
+                        if constexpr(EDGE)
+                            mmasLive(K2Int<dz>{}, aq[g % 2], bq[k], live);
+                        else
+                            mmas(K2Int<dz>{}, aq[g % 2], bq[k]);
+                    }
+#else
                     if(!EDGE || valid[dz])
                         mmas(K2Int<dz>{}, aq[g % 2], bq[k]);
+#endif
                     k2zFence();
                 });
 #pragma unroll
@@ -582,14 +626,15 @@ __device__ __attribute__((always_inline)) void k2ConvZring(const K2Args& a CONV_
             };
             const int tS = L > KD - 1 ? L : KD - 1;
             steps(K2Int<1>{}, K2Int<0>{}, 0, KD - 1);
-            if(waveLive)
+            if(live == ROWS)
             {
                 steps(K2Int<0>{}, K2Int<1>{}, KD - 1, tS);
                 steps(K2Int<1>{}, K2Int<1>{}, tS, L + KD - 1);
             }
             else
             {
-                // A wave row with no output in the tile: the same stages and barriers, no MMAs.
+                // A wave with part of the tile or none: the same stages and barriers, its live
+                // fragments' MMAs only.
                 steps(K2Int<1>{}, K2Int<1>{}, KD - 1, L + KD - 1);
             }
 #if K2Z_EDGES

@@ -1938,22 +1938,24 @@ TEST(TestConvDirectKernelMatch, ZringConfigsTakeSixteenBitThreeDimensionalMfmaTi
 
 TEST(TestConvDirectPlan, ZringTilesAreSixteenColumnsAndOneBlockPerUnit)
 {
-    // 37 planes of 20 x 18 outputs: 2 x 2 tiles of 16 x 16, two 64-channel column blocks for
-    // K 72, two images.
+    // 37 planes of 20 x 18 outputs: one whole 16-column strip of 2 tile rows (the second partial)
+    // and the 2 columns left over in one narrow tile (wave row 0's 8 fragments of 8 rows x 2
+    // columns: 64 rows), two 64-channel column blocks for K 72, two images.
     auto shape = zringShape(37);
     shape.n = 2;
     shape.c = 64;
     shape.k = 72;
     shape.input = {37, 20, 18};
-    const long long units = 2LL * 2 * 2 * 2 * 37;
+    const long long units = (1LL * 2 + 1) * 2 * 2 * 37;
     const int cus = static_cast<int>(units / conv_direct::ZRING_MIN_PLANES);
     const auto plan = planOf(shape, zringFields(), "HALF", cus, 6);
     ASSERT_TRUE(plan.has_value());
     const auto& a = plan->args;
     EXPECT_EQ(a.th, 16);
     EXPECT_EQ(a.tw, 16);
-    EXPECT_EQ(a.tilesW, 2);
+    EXPECT_EQ(a.tilesW, 1);
     EXPECT_EQ(a.tilesH, 2);
+    EXPECT_EQ(a.tilesD, 1);
     EXPECT_EQ(a.kpad, 128);
     // Weights formatted in 32-channel blocks: whole 64-byte runs a column.
     EXPECT_EQ(plan->cpad, 64);
@@ -1967,6 +1969,21 @@ TEST(TestConvDirectPlan, ZringTilesAreSixteenColumnsAndOneBlockPerUnit)
     EXPECT_EQ(plan->workspaceBytes, plan->weightBytes);
     // Fewer than ZRING_MIN_PLANES units a compute unit.
     EXPECT_FALSE(planOf(shape, zringFields(), "HALF", cus + 1, 6).has_value());
+    // Whole tiles: no narrow tiles. 3 columns left over: 5-row fragments, 40-row narrow tiles.
+    auto whole = shape;
+    whole.input = {37, 32, 32};
+    const auto wholePlan = planOf(whole, zringFields(), "HALF", 8);
+    ASSERT_TRUE(wholePlan.has_value());
+    EXPECT_EQ(wholePlan->args.tilesW, 2);
+    EXPECT_EQ(wholePlan->args.tilesH, 2);
+    EXPECT_EQ(wholePlan->args.tilesD, 1);
+    auto three = shape;
+    three.input = {37, 81, 19};
+    const auto threePlan = planOf(three, zringFields(), "HALF", 8);
+    ASSERT_TRUE(threePlan.has_value());
+    EXPECT_EQ(threePlan->args.tilesW, 1);
+    EXPECT_EQ(threePlan->args.tilesH, 6);
+    EXPECT_EQ(threePlan->args.tilesD, 3);
     // Reduction channels that are not whole 32-channel stages; output channels that are not
     // whole 4-channel stores.
     auto c48 = shape;
@@ -1989,10 +2006,11 @@ TEST(TestConvDirectKernelMatch, ZringStagesFitTheDeviceLdsAtItsReadPeriod)
 {
     const auto config = conv_direct::configOf(kernelOf(zringFields(), "HALF"));
     ASSERT_TRUE(config.has_value());
-    // 18 x 18 halo positions padded to 8 (gfx942) or 16 (gfx950) 16-byte slots, four chunks,
-    // two stages, a 16-byte slot each.
-    EXPECT_EQ(conv_direct::zringLdsBytes(*config, "gfx942"), 2 * (328 * 4 * 16 + 16));
-    EXPECT_EQ(conv_direct::zringLdsBytes(*config, "gfx950"), 2 * (336 * 4 * 16 + 16));
+    // The larger of 18 x 18 halo positions and a narrow tile's most (one column: 128 rows plus
+    // the halo's 2, 3 positions wide), padded to 8 (gfx942) or 16 (gfx950) 16-byte slots, four
+    // chunks, two stages, a 16-byte slot each.
+    EXPECT_EQ(conv_direct::zringLdsBytes(*config, "gfx942"), 2 * (392 * 4 * 16 + 16));
+    EXPECT_EQ(conv_direct::zringLdsBytes(*config, "gfx950"), 2 * (400 * 4 * 16 + 16));
     EXPECT_EQ(conv_direct::zringLdsBytes(*conv_direct::configOf(kernelOf(ConfigFields{}, "HALF")),
                                          "gfx942"),
               0);
