@@ -159,6 +159,8 @@ test_categories:
       # Registered only in the build tree: they run from this source tree, which
       # the installed test artifact does not carry (see
       # rocke/platform/tests/cmake/CoreTests.cmake).
+      # Not registered on Windows (see rocke/platform/tests/cmake/CoreTests.cmake).
+      - "rocke_pending_lanes_check"
       - "rocke_coalesced_loader_async_refusals"
       - "rocke_python_import_smoke"
       - "rocke_golden_static"

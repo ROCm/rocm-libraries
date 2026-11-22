@@ -74,6 +74,24 @@ if(BUILD_TESTING)
         LABELS "ckc;python;host"
         TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU}
         ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python")
+
+    # Every test file runs in a CI-run entry or is listed, with its reason, in
+    # rocke.tests.pending_lanes. The check configures this source tree and reads
+    # the provider categories, which the installed test tree does not carry.
+    # The registration it audits is the same on every platform, so it runs
+    # where the provider's install paths are POSIX paths only.
+    if(NOT WIN32)
+      add_test(
+        NAME rocke_pending_lanes_check
+        COMMAND "${Python3_EXECUTABLE}" -m pytest
+                "${CMAKE_CURRENT_SOURCE_DIR}/tools/test_pending_lanes.py" -q)
+      set_tests_properties(
+        rocke_pending_lanes_check
+        PROPERTIES
+          LABELS "ckc;python;host"
+          TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU}
+          ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python")
+    endif()
   else()
     message(WARNING
             "rocKE: Python3 interpreter not found; the Python-driven build-tree "
