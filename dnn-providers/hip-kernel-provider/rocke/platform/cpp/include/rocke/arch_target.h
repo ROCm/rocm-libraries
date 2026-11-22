@@ -558,10 +558,13 @@ const char* rocke_target_id_from_isa(const char* isa, char* out, size_t out_cap)
 
 /* parse_target_id(value): the target ID of an AMDHSA ISA name or a bare target
  * ID, refusing any other form. All of value must be an optional
- * "amdgcn-amd-amdhsa--" or "amdgcn-amd-amdhsa-unknown-" prefix, a processor
- * (gfx942, gfx11-generic, gfx9-4-generic), then zero or more ":feature+" or
- * ":feature-" suffixes. On success writes the target ID without the prefix
- * (amdgcn-amd-amdhsa-unknown-gfx942:xnack- gives gfx942:xnack-) and returns out.
+ * "amdgcn-amd-amdhsa--" or "amdgcn-amd-amdhsa-unknown-" prefix, whose "amdgcn"
+ * newer compilers write as "amdgpu" and the processor's version ("amdgpu9.42",
+ * "amdgpu9.0a", "amdgpu11"; the version is not checked against the processor),
+ * a processor (gfx942, gfx11-generic, gfx9-4-generic), then zero or more
+ * ":feature+" or ":feature-" suffixes. On success writes the target ID without
+ * the prefix (amdgcn-amd-amdhsa-unknown-gfx942:xnack- and
+ * amdgpu9.42-amd-amdhsa-unknown-gfx942:xnack- give gfx942:xnack-) and returns out.
  * err is not written on success. On refusal returns NULL, leaves out untouched
  * and writes the text of Python's ValueError into err (truncated to err_cap;
  * NULL err or zero err_cap writes nothing). NULL value/out or zero out_cap

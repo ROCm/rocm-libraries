@@ -169,6 +169,15 @@ def test_target_id_extraction_accepts_all_triple_field_forms(
         ("amdgcn-amd-amdhsa--gfx11-generic", "gfx11-generic"),
         ("amdgcn-amd-amdhsa-unknown-gfx9-4-generic:xnack+", "gfx9-4-generic:xnack+"),
         ("gfx1250-strict", "gfx1250-strict"),
+        # Newer compilers write the architecture field as amdgpu and the
+        # processor's version, as these code objects' amdhsa.target notes do.
+        ("amdgpu9.42-amd-amdhsa-unknown-gfx942", "gfx942"),
+        ("amdgpu9.50-amd-amdhsa-unknown-gfx950", "gfx950"),
+        ("amdgpu9.0a-amd-amdhsa-unknown-gfx90a", "gfx90a"),
+        ("amdgpu12.01-amd-amdhsa-unknown-gfx1201", "gfx1201"),
+        ("amdgpu11-amd-amdhsa-unknown-gfx11-generic", "gfx11-generic"),
+        ("amdgpu9.4-amd-amdhsa-unknown-gfx9-4-generic", "gfx9-4-generic"),
+        ("amdgpu9.42-amd-amdhsa--gfx942:sramecc+:xnack-", "gfx942:sramecc+:xnack-"),
     ],
 )
 def test_parse_target_id_accepts_isa_names_and_bare_target_ids(
@@ -194,6 +203,12 @@ def test_parse_target_id_accepts_isa_names_and_bare_target_ids(
         "amdgcn-amd-amdhsa--",
         "amdgcn-amd-amdhsa-linux-gfx950",
         "amdgcn-amd-amdhsa-opencl-gfx950",
+        # The amdgpu architecture field without its version, or malformed.
+        "amdgpu-amd-amdhsa-unknown-gfx950",
+        "amdgpu9.-amd-amdhsa-unknown-gfx950",
+        "amdgpu.50-amd-amdhsa-unknown-gfx950",
+        "amdgpu9.50-amd-amdhsa-linux-gfx950",
+        "amdgpu9.50-amd-amdhsa-unknown-",
         # A feature without its sign, an empty feature, a trailing separator.
         "gfx950:xnack",
         "gfx950:",
@@ -361,6 +376,10 @@ def _native_comparison_inputs() -> list[str]:
             "amdgcn-amd-amdhsa--",
             "amdgcn-amd-amdhsa-unknown-",
             "amdgcn-amd-amdhsa-linux-",
+            "amdgpu9.42-amd-amdhsa-unknown-",
+            "amdgpu11-amd-amdhsa--",
+            "amdgpu-amd-amdhsa--",
+            "amdgpu9.-amd-amdhsa-unknown-",
             "gfx-named-prefix-",
         )
         for profile in ("", "-strict", "-")

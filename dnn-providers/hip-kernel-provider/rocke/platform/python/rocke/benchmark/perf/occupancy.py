@@ -39,7 +39,9 @@ _NOTE_FIELDS = {
 
 # The code object records the ISA it was built for
 # (`amdhsa.target: amdgcn-amd-amdhsa--gfx1201`; newer compilers write the empty
-# environment field as `unknown`, `amdgcn-amd-amdhsa-unknown-gfx1201`). That beats
+# environment field as `unknown`, `amdgcn-amd-amdhsa-unknown-gfx1201`, and newer
+# still the architecture field as `amdgpu` and a version,
+# `amdgpu12.01-amd-amdhsa-unknown-gfx1201`). That beats
 # any caller-supplied arch: the occupancy model must follow the binary, not a stale
 # CLI flag. ``_TARGET_FIELD`` captures the whole value, an empty one too; the one
 # rule for what a target value may be, and for its processor, is
