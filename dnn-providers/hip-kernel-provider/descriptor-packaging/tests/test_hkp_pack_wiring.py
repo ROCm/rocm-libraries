@@ -477,6 +477,51 @@ hkp_product_engine_prediction_arches(_arches)
     )
 
 
+@pytest.mark.parametrize(
+    ("l1_key", "expected"),
+    [("gfx950", "gfx950"), ("default", "gfx942;gfx950"), ("gfx90a", ""), (None, "")],
+    ids=["own-arch", "default", "unwired-arch", "none"],
+)
+def test_the_engine_prediction_arches_come_from_the_wired_roots_probe(
+    consumer, empty_arch_fixture, l1_key, expected
+):
+    """The census registration reads what the packer said when the product root was
+    wired, not a value a test set: a root whose engine ships for every wired arch
+    names the arches its UED binds an L1 under, `default` naming them all, and none
+    for an L1 bound only under an arch the build does not pack. Wired with rocKE
+    off, so a probe answer lost on the way reads as no arch at all."""
+    authored = consumer.source / "authored" / "pointwise"
+    _wildcard_pointwise(empty_arch_fixture, authored)
+    if l1_key is not None:
+        l1_id = "9c245a40-2483-5c46-a92e-97cd450b0a51"
+        (authored / "solo_tflops.uhd.json").write_text(
+            json.dumps(
+                {
+                    "version": "1.0",
+                    "id": l1_id,
+                    "name": "Solo TFLOPS estimate",
+                    "adapter": "native",
+                    "objective": "max",
+                    "native": {"symbol": "hipkernel.solo.score"},
+                    "score": {"metric": "tflops", "calibrated": True},
+                }
+            ),
+            encoding="utf-8",
+        )
+        ued_path = authored / "solo.ued.json"
+        ued = json.loads(ued_path.read_text(encoding="utf-8"))
+        ued["predict_engine"] = {l1_key: l1_id}
+        ued_path.write_text(json.dumps(ued), encoding="utf-8")
+
+    consumer._write(
+        _wire_root("product", arches="gfx942;gfx950")
+        + f"""hkp_product_engine_prediction_arches(_arches)
+{_report("arches", "${_arches}")}
+"""
+    )
+    assert _reported(consumer.configure(), "arches") == expected
+
+
 def test_a_probe_failure_prints_the_packers_reason_and_wires_the_root(consumer):
     """A root the packer cannot load is still wired, so the pack reports the
     problem, and configure says why the probe could not answer."""
