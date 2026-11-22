@@ -5,8 +5,8 @@
 # categories.
 #
 # Pinned to hipkernel:hip_conv_fwd_bias_act_fma_igemm_rdna via --test-engine. Selects the shared
-# integration-test-bundles/<tier>/ConvolutionFwdPointwise/Variant2 sweeps (conv -> bias ADD ->
-# activation). Engine pinning and support claims do the rest: a claimed case the engine declines
+# integration-test-bundles/<tier>/ConvolutionFwdPointwise/Default (conv -> activation) and
+# Variant2 (conv -> bias ADD -> activation) sweeps. Engine pinning and support claims do the rest: a claimed case the engine declines
 # fails its lane, an unclaimed one it declines (depthwise, narrow groups, a bias of another shape
 # or dtype) skips, and an unclaimed one it accepts runs and is reported as unclaimed support.
 # Tiers cascade: standard runs quick + standard, comprehensive runs quick + standard +
@@ -17,8 +17,9 @@ _common_excludes: &common_excludes
 
 test_categories:
   quick:
-    description: "Quick RDNA HIP conv + bias + activation coverage"
+    description: "Quick RDNA HIP conv + (bias) + activation coverage"
     test_patterns:
+      - "quick_ConvolutionFwdPointwise_Default*"
       - "quick_ConvolutionFwdPointwise_Variant2*"
     exclude: *common_excludes
     labels:
@@ -27,9 +28,11 @@ test_categories:
       - "smoke"
 
   standard:
-    description: "Standard RDNA HIP conv + bias + activation coverage"
+    description: "Standard RDNA HIP conv + (bias) + activation coverage"
     test_patterns:
+      - "quick_ConvolutionFwdPointwise_Default*"
       - "quick_ConvolutionFwdPointwise_Variant2*"
+      - "standard_ConvolutionFwdPointwise_Default*"
       - "standard_ConvolutionFwdPointwise_Variant2*"
     exclude: *common_excludes
     labels:
@@ -38,10 +41,13 @@ test_categories:
       - "precheckin"
 
   comprehensive:
-    description: "Comprehensive RDNA HIP conv + bias + activation coverage"
+    description: "Comprehensive RDNA HIP conv + (bias) + activation coverage"
     test_patterns:
+      - "quick_ConvolutionFwdPointwise_Default*"
       - "quick_ConvolutionFwdPointwise_Variant2*"
+      - "standard_ConvolutionFwdPointwise_Default*"
       - "standard_ConvolutionFwdPointwise_Variant2*"
+      - "comprehensive_ConvolutionFwdPointwise_Default*"
       - "comprehensive_ConvolutionFwdPointwise_Variant2*"
     exclude: *common_excludes
     labels:
@@ -50,8 +56,9 @@ test_categories:
       - "extended"
 
   full:
-    description: "Full RDNA HIP conv + bias + activation coverage"
+    description: "Full RDNA HIP conv + (bias) + activation coverage"
     test_patterns:
+      - "*ConvolutionFwdPointwise_Default*"
       - "*ConvolutionFwdPointwise_Variant2*"
     exclude: *common_excludes
     labels:
@@ -59,8 +66,9 @@ test_categories:
       - "all"
 
   ffm-quick:
-    description: "Fast-feedback quick tier: RDNA HIP conv + bias + activation quick bundles"
+    description: "Fast-feedback quick tier: RDNA HIP conv + (bias) + activation quick bundles"
     test_patterns:
+      - "quick_ConvolutionFwdPointwise_Default*"
       - "quick_ConvolutionFwdPointwise_Variant2*"
     exclude: *common_excludes
     labels:

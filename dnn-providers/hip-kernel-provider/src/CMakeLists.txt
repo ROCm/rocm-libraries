@@ -800,9 +800,9 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
         message(STATUS "Created ${_target} target")
     endforeach()
 
-    # hipkernel:hip_conv_fwd_bias_act_fma_igemm_rdna against the shared conv -> bias -> activation
-    # sweeps (ConvolutionFwdPointwise/Variant2), one entry per RDNA arch the product pack ships it
-    # for, in the shape of the hipkernel:hip_conv_fwd_fma_igemm_rdna entry above.
+    # hipkernel:hip_conv_fwd_bias_act_fma_igemm_rdna against the shared conv -> (bias ->) activation
+    # sweeps (ConvolutionFwdPointwise/Default and /Variant2), one entry per RDNA arch the product
+    # pack ships it for, in the shape of the hipkernel:hip_conv_fwd_fma_igemm_rdna entry above.
     foreach(_arch IN ITEMS gfx1100 gfx1101 gfx1102 gfx1103 gfx1150 gfx1151 gfx1152 gfx1153
                            gfx1200 gfx1201)
         set(_hkp_hip_conv_fwd_bias_act_fma_igemm_rdna FALSE)
@@ -836,7 +836,7 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
             INSTALL_DESTINATION "${_shard_dest}"
             INSTALL_STAGING_KEY hkp_census_${_arch}
             TEST_CONFIG    ${_config}
-            GTEST_FILTER   "quick_ConvolutionFwdPointwise_Variant2.*:standard_ConvolutionFwdPointwise_Variant2.*:comprehensive_ConvolutionFwdPointwise_Variant2.*:full_ConvolutionFwdPointwise_Variant2.*"
+            GTEST_FILTER   "quick_ConvolutionFwdPointwise_Default.*:standard_ConvolutionFwdPointwise_Default.*:comprehensive_ConvolutionFwdPointwise_Default.*:full_ConvolutionFwdPointwise_Default.*:quick_ConvolutionFwdPointwise_Variant2.*:standard_ConvolutionFwdPointwise_Variant2.*:comprehensive_ConvolutionFwdPointwise_Variant2.*:full_ConvolutionFwdPointwise_Variant2.*"
             ENVIRONMENT    ${TEST_ENVIRONMENT}
             ENVIRONMENT_MODIFICATION ${TEST_ENVIRONMENT_MODIFICATION}
             ${_category_args}
