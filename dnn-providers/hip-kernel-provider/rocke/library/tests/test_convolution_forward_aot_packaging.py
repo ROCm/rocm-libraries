@@ -233,9 +233,22 @@ def test_the_knob_class_sample_covers_every_knob_value(knob_class_jobs, dtype):
     assert len({c[6:] for c in classes if c[2] == "async_dma"}) > 1
 
 
+# Rough single-core seconds of each pipeline's case, for CI shard placement
+# (rocke.tests.ctest_shard).
+_KNOB_CLASS_SHARD_COSTS = {"mem": 12, "compv3": 5, "compv4": 6}
+
+
 @pytest.mark.parametrize(
     "dtype,pipeline",
-    [(dtype, pipeline) for dtype in _DTYPES for pipeline in _PIPELINES],
+    [
+        pytest.param(
+            dtype,
+            pipeline,
+            marks=pytest.mark.rocke_shard_cost(_KNOB_CLASS_SHARD_COSTS[pipeline]),
+        )
+        for dtype in _DTYPES
+        for pipeline in _PIPELINES
+    ],
 )
 def test_every_knob_class_is_packageable_with_the_sweeps_ir(
     knob_class_jobs, dtype, pipeline
@@ -297,6 +310,7 @@ def merged_jobs():
     return sample
 
 
+@pytest.mark.rocke_shard_cost(6)
 def test_group_merged_identities_are_packaged_with_the_sweeps_ir(merged_jobs):
     """A group-merged depthwise kernel records its builder-derived widths as 0 and is
     built on the merged probe, as the sweep builds it, byte for byte up to its symbol.
@@ -590,6 +604,7 @@ _SELECTION_GRID = (
 )
 
 
+@pytest.mark.rocke_shard_cost(14)
 @pytest.mark.parametrize("dtype", _DTYPES)
 def test_runtime_candidates_are_rockes_runtime_selection(forward_sweep, dtype):
     """Over the whole packaged sweep, the instances selected for a problem are exactly
@@ -632,6 +647,7 @@ def test_runtime_candidates_are_rockes_runtime_selection(forward_sweep, dtype):
     assert narrowed > len(_SELECTION_GRID) // 2 and kept_default > 0
 
 
+@pytest.mark.rocke_shard_cost(4)
 @pytest.mark.parametrize("dtype", ["fp16"])
 def test_runtime_candidates_fall_back_to_every_serving_instance(forward_sweep, dtype):
     """A catalog that does not build the problem's widest combination runs every
@@ -791,6 +807,7 @@ def _sampled(direct_jobs, count: int = _DIRECT_SAMPLE):
     return picked
 
 
+@pytest.mark.rocke_shard_cost(7)
 def test_every_direct_sweep_identity_is_packageable_on_the_sweeps_probe(direct_jobs):
     counts: dict = {}
     for dtype, job in direct_jobs:
@@ -813,7 +830,29 @@ def test_every_direct_sweep_identity_is_packageable_on_the_sweeps_probe(direct_j
     }
 
 
-@pytest.mark.parametrize("algorithm", sorted(_DIRECT_COUNTS))
+# Rough single-core seconds of the heavy algorithms' cases, for CI shard
+# placement (rocke.tests.ctest_shard); the others are light.
+_DIRECT_IR_SHARD_COSTS = {
+    "direct_depthwise": 20,
+    "direct_depthwise_spatial": 10,
+    "direct_grouped": 3,
+}
+
+
+@pytest.mark.parametrize(
+    "algorithm",
+    [
+        pytest.param(
+            algorithm,
+            marks=(
+                [pytest.mark.rocke_shard_cost(_DIRECT_IR_SHARD_COSTS[algorithm])]
+                if algorithm in _DIRECT_IR_SHARD_COSTS
+                else []
+            ),
+        )
+        for algorithm in sorted(_DIRECT_COUNTS)
+    ],
+)
 def test_packaged_direct_ir_is_the_sweep_kernel_up_to_its_symbol(
     direct_jobs, algorithm
 ):

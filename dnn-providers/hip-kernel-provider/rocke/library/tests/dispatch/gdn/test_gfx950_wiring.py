@@ -16,6 +16,7 @@ from dataclasses import asdict
 from itertools import product
 
 import numpy as np
+import pytest
 
 from dispatch.gdn import (
     GDN_REGISTRY,
@@ -162,6 +163,7 @@ class TestStaticSelection(unittest.TestCase):
                 self.assertEqual(f16.spec.tuning_id, bf16.spec.tuning_id)
                 self.assertEqual(f16.spec.kernel_spec.state_dtype, "f16")
 
+    @pytest.mark.rocke_shard_cost(3)
     def test_every_case_runs_its_tile_and_knobs_at_every_batch(self):
         # Sharded-head deployments see head counts other than the default
         # geometry, so cover them; fuse_conv needs Hk == Hv.
@@ -251,6 +253,7 @@ class TestStaticSelection(unittest.TestCase):
                 self.assertEqual(pinned.spec.knobs, ())
                 self.assertNotEqual(pinned.spec, dispatch_gdn_decode(req).spec)
 
+    @pytest.mark.rocke_shard_cost(7)
     def test_auto_is_the_case_stack_or_the_documented_fallback(self):
         """Over a broad request domain: where the case's tile is legal, auto
         runs it with the case's stack (the validator never refuses a stack;

@@ -668,6 +668,15 @@ def test_gdn_cases_carry_no_kda_marker():
     assert not set(gdn_ids) & set(kda_ids)
 
 
+# About 16 s. Marked for CI shard placement (rocke.tests.ctest_shard) only
+# when pytest collects this module, so the --write / --check script path still
+# runs without pytest.
+if "pytest" in sys.modules:
+    test_gdn_decode_ir_matches_golden = sys.modules["pytest"].mark.rocke_shard_cost(16)(
+        test_gdn_decode_ir_matches_golden
+    )
+
+
 if __name__ == "__main__":
     if "--write" in sys.argv:
         from rocke.core.golden_file import write_golden_json

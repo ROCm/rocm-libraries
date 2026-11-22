@@ -224,6 +224,7 @@ class TestFusedEmission(unittest.TestCase):
     # Lowers 344 specs and compiles 116 code objects in one test: about 54 s on the
     # Windows CI runners, against the suite's 60 s per-test limit, so ordinary runner
     # variance timed it out. Its own limit leaves headroom without hiding a hang.
+    @pytest.mark.rocke_shard_cost(30)
     @pytest.mark.timeout(180)
     def test_lowers_and_compiles_without_scratch(self):
         """Every legal fused tile lowers; the tiles every measured compiler
@@ -262,6 +263,7 @@ class TestFusedEmission(unittest.TestCase):
         # 6 tiles x 12 modes, plus norm-only on the 11 other legal tiles.
         self.assertEqual(held, 6 * 12 + 11 * 4)
 
+    @pytest.mark.rocke_shard_cost(11)
     def test_one_wave_conv_once_loads_first_without_a_new_spill(self):
         """Where auto_late_row_inputs lets single-wave fuse_conv load its
         rows' state and norm inputs first (conv_once, WTK 4 / 8), the hoisted

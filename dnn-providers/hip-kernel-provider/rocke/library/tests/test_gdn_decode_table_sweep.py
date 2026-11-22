@@ -765,6 +765,7 @@ def test_shape_entries_refuse_conflicting_or_empty_keys():
             sweep.expand_entry(dict(base, **bad))
 
 
+@pytest.mark.rocke_shard_cost(3)
 def test_tuning_ids_the_walk_does_not_list_are_an_error(capsys):
     production = sweep.shape_configs(SHAPE, sweep.options())[1]
     listed = {r.spec.tuning_id for r in production}
@@ -786,6 +787,7 @@ def test_tuning_ids_the_walk_does_not_list_are_an_error(capsys):
     assert "typo_id" in capsys.readouterr().out
 
 
+@pytest.mark.rocke_shard_cost(2)
 def test_list_only_lists_both_row_load_orders_on_single_wave_fused_tiles(capsys):
     """``row_loads``: a single-wave fuse_conv tile lists each knob set at each
     waves_per_eu value in auto's order and in the other one ("late" with

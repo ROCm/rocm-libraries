@@ -347,6 +347,7 @@ def test_a_restating_row_loads_is_reported_as_dropped_for_an_aliased_flag():
         )
 
 
+@pytest.mark.rocke_shard_cost(7)
 def test_row_loads_is_one_configuration_per_order_auto_does_not_choose():
     """On a single-wave fuse_conv tile, a forced order that is auto's own (for
     its knobs and waves_per_eu) is dropped like an out-of-scope knob, and the

@@ -249,6 +249,15 @@ def test_kda_gfx950_ir_matches_golden():
     )
 
 
+# About 3 s. Marked for CI shard placement (rocke.tests.ctest_shard) only
+# when pytest collects this module, so the --write / --check script path still
+# runs without pytest.
+if "pytest" in sys.modules:
+    test_kda_gfx950_ir_matches_golden = sys.modules["pytest"].mark.rocke_shard_cost(3)(
+        test_kda_gfx950_ir_matches_golden
+    )
+
+
 if __name__ == "__main__":
     if "--write" in sys.argv:
         from rocke.core.golden_file import write_golden_json

@@ -24,6 +24,7 @@ import dataclasses as dc
 import unittest
 from itertools import product
 
+import pytest
 from kernels.gfx950.gdn_decode import (
     GdnDecodeSpec,
     build_gdn_decode,
@@ -348,6 +349,7 @@ class TestEmission(unittest.TestCase):
         # 1188 B with ROCm 7.13 on gfx950). Require only that it compiles.
         _compiled_scratch_bytes(GdnDecodeSpec(simple=True))
 
+    @pytest.mark.rocke_shard_cost(13)
     def test_registered_tiles_compile(self):
         from dispatch.gdn import GdnDecodeRequest, dispatch_gdn_decode_bases
         from dispatch.gdn.gfx950 import spec_id_for
