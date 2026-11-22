@@ -263,6 +263,7 @@ test_categories:
       - "rocke_library_attention_pytest"
       # Not registered on Windows (see rocke/library/tests/ctest_lists.cmake); the
       # parser ignores a listed name that has no registered test.
+      - "rocke_library_attention_builds_pytest"
       - "rocke_library_gdn_pytest"
       - "rocke_library_attention_gpu_pytest"
       - "rocke_library_attention_bias_gpu_pytest"
@@ -309,6 +310,7 @@ test_categories:
       - "rocke_library_sdpa_pytest"
       # Not registered on Windows (see rocke/library/tests/ctest_lists.cmake); the
       # parser ignores a listed name that has no registered test.
+      - "rocke_library_attention_builds_pytest"
       - "rocke_library_gdn_pytest"
       # Compiles kernels to check the backend's access widths: a performance check.
       - "rocke_tiling_backend_width_pytest"

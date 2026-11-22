@@ -207,6 +207,13 @@ else()
          "  TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})\n")
 endif()
 
+# The one test of test_attention_builds.py that needs no compiler tools: it runs
+# in the CPU entry below, and the builds entry further down deselects it. Kept as
+# the pytest node id relative to the library tests' rootdir (tests/library/tests,
+# where their pytest.ini is), the form --deselect matches.
+set(_ROCKE_LIBRARY_ATTENTION_BUILDS_HOST_TEST
+    "test_attention_builds.py::TestAttentionHelpers::test_gfx950_signature_matches_the_built_kernels_params")
+
 # Library attention CPU tests (no GPU required): gfx942 Q staging when K is
 # read from HBM on the emitted IR, the paged attention tests' fp16/bf16-only
 # host encoding, gfx950 LDS budget model,
@@ -310,11 +317,10 @@ set(_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS
     "tests/library/tests/test_attention_flops.py"
     "tests/library/tests/test_sdpa_torch_reference.py"
     "tests/library/tests/test_verify_dsl_docs_attention.py"
-    # One node id, not the file: the rest of test_attention_builds.py
-    # disassembles HSACO, so it needs the compiler tools this lane does not
-    # inject, and its budget sentinel turns a missing-tool skip into a
-    # failure. This test is pure host-side signature/params mirroring.
-    "tests/library/tests/test_attention_builds.py::TestAttentionHelpers::test_gfx950_signature_matches_the_built_kernels_params")
+    # One host-only test of test_attention_builds.py (signature/params
+    # mirroring); the rest of the file runs in
+    # rocke_library_attention_builds_pytest below, which deselects this one.
+    "tests/library/tests/${_ROCKE_LIBRARY_ATTENTION_BUILDS_HOST_TEST}")
 set(_ROCKE_LIBRARY_ATTENTION_CPU_TESTS "")
 foreach(_t ${_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS})
   string(APPEND _ROCKE_LIBRARY_ATTENTION_CPU_TESTS
@@ -327,6 +333,31 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "  LABELS \"ckc;python;attention;host;standard\"\n"
        "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
        "  TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})\n")
+
+# The rest of test_attention_builds.py (no GPU): the attention builders' compile
+# smoke tests and the HSACO resource budgets of the built kernels (scratch,
+# LDS, waves per SIMD), read with llvm-readelf / llvm-objdump. The entry takes
+# the compiler environment, so a missing tool fails instead of skipping. It
+# deselects _ROCKE_LIBRARY_ATTENTION_BUILDS_HOST_TEST, which
+# rocke_library_attention_cpu_pytest runs.
+#
+# Not registered on Windows: the compiler tool environment is Linux-only (see
+# platform/CMakeLists.txt), so the budget checks there would fail on the
+# missing tools rather than run.
+if(WIN32)
+  message(STATUS "rocKE: rocke_library_attention_builds_pytest not registered on Windows (compiler tools; see comment above)")
+else()
+  string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+         "set(_rocke_library_attention_builds_pytest_environment \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\")\n"
+         "list(APPEND _rocke_library_attention_builds_pytest_environment\n"
+         "     \${_rocke_compiler_tool_environment}\n"
+         "     \${_rocke_compiler_requirement_environment})\n"
+         "add_test(rocke_library_attention_builds_pytest ${_ROCKE_INSTALLED_PYTEST} \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_attention_builds.py\" --deselect \"${_ROCKE_LIBRARY_ATTENTION_BUILDS_HOST_TEST}\" -v -rs --timeout=120)\n"
+         "set_tests_properties(rocke_library_attention_builds_pytest PROPERTIES\n"
+         "  LABELS \"ckc;python;attention;host;standard\"\n"
+         "  ENVIRONMENT \"\${_rocke_library_attention_builds_pytest_environment}\"\n"
+         "  TIMEOUT ${ROCKE_TEST_TIMEOUT_TOOLCHAIN})\n")
+endif()
 
 # The pure runner policy and the real subprocess/process-tree contracts run as
 # two entries, each with its own whole-entry budget.
