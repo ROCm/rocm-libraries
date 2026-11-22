@@ -17,16 +17,18 @@ from types import SimpleNamespace
 
 import numpy as np
 import pytest
-
 from rocke.numeric.storage import encode
 from rocke.runtime.device_array import (
     ArrayInfo,
     DescribedArray,
     DeviceArray,
     array_info,
+    dense_strides,
+    device_values,
     device_workspace,
     host_values,
     strided_extent,
+    strided_view,
 )
 from rocke.runtime.torch_interop import torch_array_info
 from rocke.tests.gpu import current_device_arch
@@ -144,6 +146,12 @@ def test_host_array_is_described_and_read_without_a_gpu():
     np.testing.assert_array_equal(host_values(table), [[1, 2, 3], [4, 5, 6]])
 
 
+def test_dense_strides_are_row_major():
+    assert dense_strides((2, 3, 4)) == (12, 4, 1)
+    assert dense_strides((0, 4)) == (4, 1)
+    assert dense_strides(()) == ()
+
+
 def test_host_arrays_never_overlap():
     first, second = HostArray((4,), "fp32"), HostArray((4,), "fp32")
     first_end = first.info().byte_span()[1]
@@ -151,15 +159,19 @@ def test_host_arrays_never_overlap():
 
 
 def test_host_array_without_values_refuses_a_read():
-    with pytest.raises(ValueError, match=r"HostArray.read failed - built without"):
+    with pytest.raises(ValueError, match=r"HostArray.values failed - built without"):
         host_values(HostArray((2,), "i32"))
 
 
 def test_host_values_and_device_workspace_refuse_other_objects():
-    with pytest.raises(TypeError, match=r"array_info failed - array=list"):
+    with pytest.raises(TypeError, match=r"host_values failed - array=list"):
         host_values([1, 2])
     with pytest.raises(TypeError, match=r"device_workspace failed - like=HostArray"):
         device_workspace((2,), "fp32", like=HostArray((2,), "fp32"))
+    with pytest.raises(TypeError, match=r"device_values failed - like=HostArray"):
+        device_values(np.zeros(2, np.int32), like=HostArray((2,), "fp32"))
+    with pytest.raises(TypeError, match=r"strided_view failed - array=HostArray"):
+        strided_view(HostArray((2,), "fp32"), (2,), (1,))
 
 
 # --- on the GPU ----------------------------------------------------------------------------------
@@ -187,6 +199,60 @@ def test_gpu_column_view_keeps_the_host_strides():
     assert table.shape == (3, 4) and table.stride(0) == 10
     assert table.nbytes == 3 * 4 * 4
     assert not table.is_contiguous()
+    assert table.info().backed_elements == 30
+
+
+def test_gpu_view_shares_the_buffer_with_its_own_layout():
+    current_device_arch()
+    host = np.arange(24, dtype=np.float32).reshape(2, 3, 4)
+    array = DeviceArray(host)
+    # The [2, 4, 3] transpose of the last two axes, starting one element in.
+    view = array.view((2, 4, 2), (12, 1, 4), offset=1)
+    assert view.stride() == (12, 1, 4) and not view.is_contiguous()
+    assert view.data_ptr() == array.data_ptr() + 4
+    assert view.info().backed_elements == 23
+    expected = np.lib.stride_tricks.as_strided(
+        host.reshape(-1)[1:], (2, 4, 2), (48, 4, 16)
+    )
+    np.testing.assert_array_equal(host_values(view), expected)
+    array.write(host + 100)
+    np.testing.assert_array_equal(view.values(), expected + 100)
+
+
+def test_gpu_strided_view_keeps_the_view_start():
+    current_device_arch()
+    host = np.arange(12, dtype=np.int32)
+    tail = DeviceArray(host).view((8,), (1,), offset=4)
+    # A [4, 2] transpose of the tail starts where the tail starts.
+    pairs = strided_view(tail, (4, 2), (1, 4))
+    assert pairs.data_ptr() == tail.data_ptr()
+    np.testing.assert_array_equal(host_values(pairs), host[4:].reshape(2, 4).T)
+
+
+def test_gpu_device_values_of_a_device_array_kind():
+    current_device_arch()
+    lengths = device_values(
+        np.array([3, 1, 2], np.int32), like=DeviceArray.zeros((1,), "fp16")
+    )
+    assert isinstance(lengths, DeviceArray) and lengths.dtype == "i32"
+    np.testing.assert_array_equal(host_values(lengths), [3, 1, 2])
+
+
+def test_gpu_view_defaults_to_dense_strides():
+    current_device_arch()
+    host = np.arange(12, dtype=np.int32)
+    rows = DeviceArray(host).view((2, 3), offset=6)
+    assert rows.stride() == (3, 1)
+    np.testing.assert_array_equal(rows.values(), host[6:].reshape(2, 3))
+
+
+def test_gpu_view_must_stay_inside_the_buffer():
+    current_device_arch()
+    array = DeviceArray(np.zeros(8, np.float32))
+    with pytest.raises(ValueError, match=r"reaches past the 8-element buffer"):
+        array.view((4,), (2,), offset=2)
+    with pytest.raises(ValueError, match=r"expected one non-negative stride"):
+        array.view((4,), (-1,))
 
 
 def test_gpu_zeros():
@@ -233,3 +299,7 @@ def test_gpu_torch_tensors_get_torch_values_and_workspaces():
     scratch = device_workspace((2, 3), "fp32", like=lengths)
     assert scratch.dtype == torch.float32 and scratch.device == lengths.device
     assert tuple(scratch.shape) == (2, 3)
+    columns = strided_view(lengths[1:], (3, 1), (1, 3))
+    np.testing.assert_array_equal(host_values(columns), [[3], [4], [5]])
+    offsets = device_values(np.arange(3, dtype=np.int32), like=lengths)
+    assert offsets.device == lengths.device and offsets.dtype == torch.int32

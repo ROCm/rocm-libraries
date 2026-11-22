@@ -6,7 +6,6 @@ from __future__ import annotations
 from unittest import mock
 
 import pytest
-
 from rocke import runtime
 from rocke.runtime import device_info, hip_module
 
@@ -147,3 +146,17 @@ def test_device_info_owns_snapshot_with_read_only_properties() -> None:
     for name in ("target_id", "asic_revision", "base_arch", "compiler_target"):
         with pytest.raises(AttributeError):
             setattr(info, name, None)
+
+
+def test_gpu_free_memory_shrinks_by_an_allocation() -> None:
+    """hipMemGetInfo's free bytes drop while a 256 MiB buffer is held."""
+    from rocke.runtime.launcher import DeviceMem
+    from rocke.tests.gpu import current_device_arch
+
+    current_device_arch()
+    before = hip_module.get_device_free_memory()
+    assert before is not None and before > 0
+    held = DeviceMem(256 << 20)
+    during = hip_module.get_device_free_memory()
+    del held
+    assert during is not None and during <= before - (256 << 20)

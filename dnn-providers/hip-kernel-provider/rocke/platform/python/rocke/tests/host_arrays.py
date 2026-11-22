@@ -21,7 +21,7 @@ import numpy as np
 from rocke.core.dtypes import dtype_info
 from rocke.core.storage import element_bytes
 from rocke.numeric.storage import host_dtype
-from rocke.runtime.device_array import ArrayInfo, strided_extent
+from rocke.runtime.device_array import ArrayInfo, dense_strides, strided_extent
 
 __all__ = ["HostArray"]
 
@@ -33,9 +33,9 @@ _addresses = itertools.count(1)
 class HostArray:
     """A host-only stand-in for a device array of ``shape`` and element type ``dtype``.
 
-    ``values`` (optional) are the elements :meth:`read` returns, as a host array of
-    ``shape`` in ``dtype``'s host type (:func:`rocke.numeric.storage.host_dtype`);
-    without them :meth:`read` raises. ``strides`` (elements) default to row-major
+    ``values`` (optional) are the elements :meth:`values` returns, as a host array
+    of ``shape`` in ``dtype``'s host type (:func:`rocke.numeric.storage.host_dtype`);
+    without them :meth:`values` raises. ``strides`` (elements) default to row-major
     dense; ``device`` is the HIP ordinal the array claims, or ``None`` for host
     memory. The claimed allocation is exactly what the strides reach.
     """
@@ -55,7 +55,7 @@ class HostArray:
         self._strides = (
             tuple(int(stride) for stride in strides)
             if strides is not None
-            else _dense_strides(self.shape)
+            else dense_strides(self.shape)
         )
         if len(self._strides) != len(self.shape):
             raise ValueError(
@@ -83,21 +83,13 @@ class HostArray:
             backed_elements=strided_extent(self.shape, self._strides),
         )
 
-    def read(self) -> np.ndarray:
+    def values(self) -> np.ndarray:
         if self._values is None:
             raise ValueError(
-                "HostArray.read failed - built without values, expected values= for "
-                "a check that reads the elements"
+                "HostArray.values failed - built without values, expected values= "
+                "for a check that reads the elements"
             )
         return self._values
 
     def __repr__(self) -> str:
         return f"HostArray(shape={self.shape}, dtype={self.dtype!r})"
-
-
-def _dense_strides(shape: tuple[int, ...]) -> tuple[int, ...]:
-    strides, step = [], 1
-    for extent in reversed(shape):
-        strides.append(step)
-        step *= max(extent, 1)
-    return tuple(reversed(strides))

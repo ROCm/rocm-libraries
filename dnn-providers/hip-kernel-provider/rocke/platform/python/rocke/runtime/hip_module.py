@@ -222,6 +222,9 @@ _hipStreamWaitValue32 = _b(
     ctypes.c_uint,
     ctypes.c_uint32,
 )
+_hipMemGetInfo = _b(
+    "hipMemGetInfo", ctypes.POINTER(ctypes.c_size_t), ctypes.POINTER(ctypes.c_size_t)
+)
 _hipDeviceSynchronize = _b("hipDeviceSynchronize")
 _hipStreamSynchronize = _b("hipStreamSynchronize", ctypes.c_void_p)
 _hipStreamCreate = _b("hipStreamCreate", ctypes.POINTER(ctypes.c_void_p))
@@ -391,6 +394,18 @@ def get_device_num_cus(device: int = 0) -> Optional[int]:
     except (AttributeError, OSError):
         return None
     return int(v.value) if rc == 0 and v.value > 0 else None
+
+
+def get_device_free_memory() -> int | None:
+    """Free bytes on HIP's current device (``hipMemGetInfo``), or ``None`` if the
+    runtime cannot be queried. Torch-free twin of ``torch.cuda.mem_get_info``'s
+    first value, e.g. for a test that needs a large allocation to fit."""
+    free, total = ctypes.c_size_t(0), ctypes.c_size_t(0)
+    try:
+        rc = _hipMemGetInfo(ctypes.byref(free), ctypes.byref(total))
+    except (AttributeError, OSError):
+        return None
+    return int(free.value) if rc == 0 else None
 
 
 # Per-device ``clusterLaunch`` answers; a device's capability does not change

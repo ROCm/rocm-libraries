@@ -10,8 +10,8 @@ its caching allocator stays coherent -- degrades to the HIP null stream
 when torch is absent, so the numpy/manifest hip-only path calls it too),
 `empty_workspace`, `torch_dtype`, `device_tensor`, `is_torch_tensor`, the
 torch sides of :mod:`rocke.runtime.device_array` (`torch_array_info`,
-`torch_host_values`, `torch_empty`), and the `launch_torch_kernel` back-compat
-shim.
+`torch_host_values`, `torch_empty`, `torch_strided_view`,
+`torch_device_values`), and the `launch_torch_kernel` back-compat shim.
 
 Kernel-argument packing is torch-agnostic and lives in `packing.py`; this
 module builds on it.
@@ -199,6 +199,23 @@ def torch_empty(shape: Sequence[int], element_type: str, *, device: Any):
     ``device`` (the torch side of
     :func:`rocke.runtime.device_array.device_workspace`)."""
     return empty_workspace(shape, dtype=_torch_dtype_of(element_type), device=device)
+
+
+def torch_strided_view(tensor: Any, shape: Sequence[int], strides: Sequence[int]):
+    """``tensor``'s storage from its first element as ``shape`` with element
+    ``strides`` (the torch side of
+    :func:`rocke.runtime.device_array.strided_view`)."""
+    torch = sys.modules["torch"]
+    return torch.as_strided(
+        tensor, tuple(shape), tuple(strides), tensor.storage_offset()
+    )
+
+
+def torch_device_values(values, *, device: Any):
+    """A torch tensor on ``device`` holding the host numpy ``values`` (the torch
+    side of :func:`rocke.runtime.device_array.device_values`)."""
+    torch = sys.modules["torch"]
+    return torch.from_numpy(np.ascontiguousarray(values)).to(device)
 
 
 def torch_dtype(name: str):
