@@ -5,10 +5,10 @@
 
 ``rocke.numeric.sdpa_reference.sdpa_reference_bwd`` is checked four ways:
 
-* against torch autograd in float64 on CPU (an explicit masked-softmax graph
-  and ``torch.nn.functional.scaled_dot_product_attention``); torch is optional,
-  so these tests skip without it;
-* against central finite differences of ``sum(O * dO)`` (torch-free);
+* against the gradients of an explicit masked-softmax graph, back-propagated
+  one operation at a time with each softmax row's full Jacobian
+  ``diag(p) - p p^T`` (no ``delta`` shortcut);
+* against central finite differences of ``sum(O * dO)``;
 * against an independent scalar per-element loop with a different structure
   (``delta`` from ``sum_j P_ij * dP_ij`` instead of ``rowsum(dO * O)``);
 * for fully masked rows, padded rows / keys and argument errors.
@@ -16,7 +16,6 @@
 
 from __future__ import annotations
 
-import importlib.util
 import math
 
 import numpy as np
@@ -41,13 +40,6 @@ MASKS = [
     ("window_br_w5", 5, 0, False),
     ("diag_only_br", 0, 0, False),
 ]
-
-
-def _torch_available():
-    try:
-        return importlib.util.find_spec("torch") is not None
-    except (ImportError, ValueError):
-        return False
 
 
 def _rand(rng, shape):
@@ -97,49 +89,51 @@ def _close(a, b, tol=1e-10):
 
 
 # ---------------------------------------------------------------------------
-# torch autograd (float64, CPU)
+# explicit masked-softmax graph, back-propagated operation by operation
 # ---------------------------------------------------------------------------
 
 
-def _torch_grads(q, k, v, do, *, scale, left, right, tl, lens_q=None, lens_kv=None):
-    """Autograd of ``sum(O * dO)`` through an explicit masked-softmax graph."""
-    torch = pytest.importorskip("torch")
-    tq, tk, tv = (
-        torch.tensor(a, dtype=torch.float64, requires_grad=True) for a in (q, k, v)
-    )
-    tdo = torch.tensor(do, dtype=torch.float64)
+def _graph_grads(q, k, v, do, *, scale, left, right, tl, lens_q=None, lens_kv=None):
+    """Gradients of ``sum(O * dO)`` through ``O = softmax_masked(scale * Q K^T) V``.
+
+    Each operation's vector-Jacobian product is applied in turn: the value
+    product gives ``dP = dO V^T`` and ``dV = P^T dO``; each softmax row applies
+    its full Jacobian ``diag(p) - p p^T`` to ``dP`` (masked columns have
+    ``p = 0``, so their rows and columns of the Jacobian vanish); the score
+    product gives ``dQ = scale * dS K`` and ``dK = scale * dS^T Q``. KV heads
+    are shared by contiguous query-head groups, so their gradients sum over
+    the group."""
     B, Hq, Sq, _ = q.shape
     Hk, Skv, Hv = k.shape[1], k.shape[2], v.shape[1]
-    loss = tq.new_zeros(())
+    dq, dk, dv = np.zeros(q.shape), np.zeros(k.shape), np.zeros(v.shape)
     for b in range(B):
         sq = Sq if lens_q is None else lens_q[b]
         skv = Skv if lens_kv is None else lens_kv[b]
-        if sq == 0:
-            continue
-        mask = torch.tensor(_band(sq, skv, left, right, tl))
+        if sq == 0 or skv == 0:
+            continue  # nothing attends, so every gradient stays zero
+        mask = _band(sq, skv, left, right, tl)
         for h in range(Hq):
-            qa = tq[b, h, :sq]
-            ka = tk[b, h // (Hq // Hk), :skv]
-            va = tv[b, h // (Hq // Hv), :skv]
-            s = (qa @ ka.T) * scale
-            sm = s.masked_fill(~mask, -math.inf)
-            m = sm.max(dim=1, keepdim=True).values if skv else s.new_zeros((sq, 1))
-            m = torch.where(torch.isfinite(m), m, torch.zeros_like(m)).detach()
-            e = torch.where(
-                mask, torch.exp(torch.where(mask, s - m, torch.zeros_like(s))), 0.0
+            hk, hv = h // (Hq // Hk), h // (Hq // Hv)
+            qa, ka, va = q[b, h, :sq], k[b, hk, :skv], v[b, hv, :skv]
+            scores = np.where(mask, (qa @ ka.T) * scale, -np.inf)
+            p = np.zeros((sq, skv))
+            live = mask.any(axis=1)
+            shifted = scores[live] - scores[live].max(axis=1, keepdims=True)
+            p[live] = np.exp(shifted) / np.exp(shifted).sum(axis=1, keepdims=True)
+            dp = do[b, h, :sq] @ va.T
+            ds = np.stack(
+                [(np.diag(row) - np.outer(row, row)) @ g for row, g in zip(p, dp)]
             )
-            den = e.sum(dim=1, keepdim=True)
-            p = e / torch.where(den > 0, den, torch.ones_like(den))
-            loss = loss + ((p @ va) * tdo[b, h, :sq]).sum()
-    loss.backward()
-    z = lambda t: np.zeros(t.shape) if t.grad is None else t.grad.numpy()  # noqa: E731
-    return z(tq), z(tk), z(tv)
+            dq[b, h, :sq] = (ds @ ka) * scale
+            dk[b, hk, :skv] += (ds.T @ qa) * scale
+            dv[b, hv, :skv] += p.T @ do[b, h, :sq]
+    return dq, dk, dv
 
 
 @pytest.mark.parametrize("d", [32, 64, 128])
 @pytest.mark.parametrize("heads", [(4, 4), (4, 2), (4, 1)], ids=["mha", "gqa2", "mqa"])
 @pytest.mark.parametrize("mask", MASKS, ids=[m[0] for m in MASKS])
-def test_against_torch_autograd_dense(d, heads, mask):
+def test_against_graph_gradients_dense(d, heads, mask):
     _, left, right, tl = mask
     Hq, Hk = heads
     rng = np.random.default_rng(d * 31 + Hk * 7 + left * 3 + right + 10)
@@ -147,7 +141,7 @@ def test_against_torch_autograd_dense(d, heads, mask):
         q, k, v, do = _problem(rng, 2, Hq, Hk, sq, skv, d)
         scale = 1.0 / math.sqrt(d) * 1.3
         _, _, res = _run(q, k, v, do, scale=scale, left=left, right=right, tl=tl)
-        tq, tk, tv = _torch_grads(
+        tq, tk, tv = _graph_grads(
             q, k, v, do, scale=scale, left=left, right=right, tl=tl
         )
         _close(res.dq, tq)
@@ -155,14 +149,14 @@ def test_against_torch_autograd_dense(d, heads, mask):
         _close(res.dv, tv)
 
 
-def test_against_torch_autograd_window_left_off_by_one():
+def test_against_graph_gradients_window_left_off_by_one():
     """``left = W`` keeps W + 1 keys; W - 1 / W + 1 must differ from W."""
     rng = np.random.default_rng(11)
     q, k, v, do = _problem(rng, 1, 2, 1, 24, 24, 32)
     grads = {}
     for w in (6, 7, 8):
         _, _, res = _run(q, k, v, do, left=w, right=0)
-        tq, tk, tv = _torch_grads(
+        tq, tk, tv = _graph_grads(
             q, k, v, do, scale=1 / math.sqrt(32), left=w, right=0, tl=True
         )
         _close(res.dq, tq)
@@ -182,7 +176,7 @@ def test_against_torch_autograd_window_left_off_by_one():
 
 
 @pytest.mark.parametrize("mask", MASKS, ids=[m[0] for m in MASKS])
-def test_against_torch_autograd_padded(mask):
+def test_against_graph_gradients_padded(mask):
     _, left, right, tl = mask
     rng = np.random.default_rng(50 + left + 10 * right)
     lens_q, lens_kv = [11, 4, 0, 17], [17, 9, 5, 3]
@@ -190,7 +184,7 @@ def test_against_torch_autograd_padded(mask):
     _, _, res = _run(
         q, k, v, do, left=left, right=right, tl=tl, lens_q=lens_q, lens_kv=lens_kv
     )
-    tq, tk, tv = _torch_grads(
+    tq, tk, tv = _graph_grads(
         q,
         k,
         v,
@@ -207,34 +201,25 @@ def test_against_torch_autograd_padded(mask):
     _close(res.dv, tv)
 
 
-def test_against_torch_sdpa_function():
-    torch = pytest.importorskip("torch")
-    F = torch.nn.functional
+def test_causal_gqa_with_recomputed_lse_against_graph_gradients():
+    """The causal and GQA shorthands, with the LSE recomputed from ``O``."""
     rng = np.random.default_rng(3)
     for Hq, Hk, causal in ((4, 4, False), (4, 4, True), (8, 2, True), (8, 1, False)):
         q, k, v, do = _problem(rng, 2, Hq, Hk, 19, 19, 64)
-        tq, tk, tv = (torch.tensor(a, requires_grad=True) for a in (q, k, v))
-        out = F.scaled_dot_product_attention(
-            tq, tk, tv, is_causal=causal, scale=0.2, enable_gqa=Hq != Hk
-        )
-        out.backward(torch.tensor(do))
+        o, _ = sdpa_reference(q, k, v, scale=0.2, causal=causal)
         res = sdpa_reference_bwd(
-            q,
-            k,
-            v,
-            out.detach().numpy(),
-            do,
-            scale=0.2,
-            causal=causal,
-            recompute_lse=True,
+            q, k, v, o, do, scale=0.2, causal=causal, recompute_lse=True
         )
-        _close(res.dq, tq.grad.numpy())
-        _close(res.dk, tk.grad.numpy())
-        _close(res.dv, tv.grad.numpy())
+        tq, tk, tv = _graph_grads(
+            q, k, v, do, scale=0.2, left=-1, right=0 if causal else -1, tl=True
+        )
+        _close(res.dq, tq)
+        _close(res.dk, tk)
+        _close(res.dv, tv)
 
 
 @pytest.mark.parametrize("mask", MASKS, ids=[m[0] for m in MASKS])
-def test_ragged_matches_per_sequence_dense_and_torch(mask):
+def test_ragged_matches_per_sequence_dense_and_graph(mask):
     _, left, right, tl = mask
     rng = np.random.default_rng(170 + left)
     Hq, Hk, D = 4, 2, 32
@@ -266,8 +251,8 @@ def test_ragged_matches_per_sequence_dense_and_torch(mask):
         _close(res.dk[ks], ref.dk[0].transpose(1, 0, 2), 1e-12)
         _close(res.dv[ks], ref.dv[0].transpose(1, 0, 2), 1e-12)
         _close(res.delta[qs], ref.delta[0].T, 1e-12)
-        if b == 2 and _torch_available():
-            tq, tk, tv = _torch_grads(
+        if b == 2:
+            tq, tk, tv = _graph_grads(
                 t(q[qs]),
                 t(k[ks]),
                 t(v[ks]),
@@ -282,7 +267,7 @@ def test_ragged_matches_per_sequence_dense_and_torch(mask):
 
 
 # ---------------------------------------------------------------------------
-# finite differences (torch-free)
+# finite differences
 # ---------------------------------------------------------------------------
 
 
