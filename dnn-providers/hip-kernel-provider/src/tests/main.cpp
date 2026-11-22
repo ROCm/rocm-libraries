@@ -275,23 +275,23 @@ int main(int argc, char** argv)
     }
 #endif
 
-#ifdef HIPKERNELPROVIDER_FLYDSL_PRODUCT_DESCRIPTOR_RELDIR
-    // FlyDSL's kernels ship in the production shard, which the unit root above does not
-    // reach. An installed plugin finds that shard beside its own module; this binary is
-    // not the plugin, so it names the shard through HIPDNN_DESCRIPTOR_RUNTIME_DIR, the
-    // ingestor's additive root: it ADDS the tree to the search instead of replacing one,
-    // so the unit sets stay loaded.
+#ifdef HIPKERNELPROVIDER_TESTS_SEARCH_PRODUCT_TREE
+    // FlyDSL's kernels and the declared-id engines' L1 models ship in the production
+    // tree, which the unit root above does not reach. An installed plugin finds that tree
+    // beside its own module; this binary is not the plugin, so it names the tree through
+    // HIPDNN_DESCRIPTOR_RUNTIME_DIR, the ingestor's additive root: it ADDS the tree to the
+    // search instead of replacing one, so the unit sets stay loaded.
     //
-    // Set only when this binary was built with FlyDSL active, and never over a value the
-    // caller supplied. Unlike the root above this one does not fail the process when it
-    // resolves to nothing: the cases that need the shard are FlyDSL's own, and on a
-    // device this build ships FlyDSL for they fail when the objects are not there
-    // (reportUnstaged() in FlydslNormDeviceTestSupport.hpp), while every other suite in
-    // this binary is indifferent to it.
+    // Set only when this binary was built with FlyDSL active or a declared-id engine
+    // shipping, and never over a value the caller supplied. Unlike the root above this one
+    // does not fail the process when it resolves to nothing: the cases that need the tree
+    // fail on an architecture this install stages when their content is not there
+    // (reportUnstaged() in FlydslNormDeviceTestSupport.hpp, the ASM SDPA L1 cases), while
+    // every other suite in this binary is indifferent to it.
     if(hipdnn_data_sdk::utilities::getEnv("HIPDNN_DESCRIPTOR_RUNTIME_DIR").empty())
     {
         const auto productDescriptors = hip_kernel_provider::testing::descriptorSetRoot(
-            HIPKERNELPROVIDER_FLYDSL_PRODUCT_DESCRIPTOR_RELDIR);
+            HIPKERNELPROVIDER_PRODUCT_DESCRIPTOR_RELDIR);
         hipdnn_data_sdk::utilities::setEnv("HIPDNN_DESCRIPTOR_RUNTIME_DIR",
                                            productDescriptors.string().c_str());
     }

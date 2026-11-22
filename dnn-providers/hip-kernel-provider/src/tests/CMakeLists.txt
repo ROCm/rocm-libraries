@@ -150,9 +150,10 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         HIPKERNELPROVIDER_MULTI_LAUNCH_RELDIR="${HIPKERNELPROVIDER_TEST_DESCRIPTOR_RELDIR}/${HIPKERNELPROVIDER_TEST_SET_MULTI_LAUNCH}")
 
     # The production descriptor tree, as the same binary-relative offset the integration
-    # binary uses. Only TestGfx950ConvDgradMatchers reads it, to run the shipped dgrad
-    # catalog's metadata through the real state manager; it skips when this configuration
-    # packs no production tree, so no dependency on hkp_packaging_product is added here.
+    # binary uses. TestGfx950ConvDgradMatchers reads it to run the shipped dgrad catalog's
+    # metadata through the real state manager; it skips when this configuration packs no
+    # production tree, so no dependency on hkp_packaging_product is added here. main()
+    # also searches it where HIPKERNELPROVIDER_TESTS_SEARCH_PRODUCT_TREE (below) says so.
     target_compile_definitions(hip_kernel_provider_tests PRIVATE
         HIPKERNELPROVIDER_PRODUCT_DESCRIPTOR_RELDIR="${HIPKERNELPROVIDER_PLUGIN_ENGINE_RELDIR}/${HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR}")
 
@@ -238,20 +239,26 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         add_dependencies(hip_kernel_provider_tests hkp_packaging_multi_launch)
     endif()
 
-    # FlyDSL's kernels ship in the production shard, which the unit root main()
-    # resolves does not reach, so FlyDSL's device cases would find no descriptor for
-    # their engine. The binary therefore names the production root as an ADDITIVE one,
-    # as the integration binary does, and is built after the pack that fills it.
+    # FlyDSL's kernels, and the L1 models of the engines that bind theirs by declared id
+    # (HIPKERNELPROVIDER_DECLARED_MODEL_ENGINES), ship in the production tree, which the
+    # unit root main() resolves does not reach, so their cases would find no descriptor.
+    # The binary therefore names the production root as an ADDITIVE one, as the
+    # integration binary does, and is built after whatever fills it: the production pack,
+    # or with that pack dormant the declared-id engines' own staging targets.
     #
     # The ordinary binary only. A census addresses exactly one shard through an explicit
     # HIPDNN_DESCRIPTOR_DIR, and a second root reachable from that process would put
     # kernels in its inventory that the entry running it never named.
-    if(HIPKERNELPROVIDER_FLYDSL_ACTIVE)
+    if(HIPKERNELPROVIDER_FLYDSL_ACTIVE OR HIPKERNELPROVIDER_DECLARED_MODEL_ENGINES)
         if(TARGET hkp_packaging_product)
             add_dependencies(hip_kernel_provider_tests hkp_packaging_product)
+        else()
+            foreach(_engine IN LISTS HIPKERNELPROVIDER_DECLARED_MODEL_ENGINES)
+                add_dependencies(hip_kernel_provider_tests ${_engine}_engine_descriptors)
+            endforeach()
         endif()
         target_compile_definitions(hip_kernel_provider_tests PRIVATE
-            HIPKERNELPROVIDER_FLYDSL_PRODUCT_DESCRIPTOR_RELDIR="${HIPKERNELPROVIDER_PLUGIN_ENGINE_RELDIR}/${HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR}")
+            HIPKERNELPROVIDER_TESTS_SEARCH_PRODUCT_TREE)
     endif()
 
     # The packed-load test also reads the slotted fixtures' shards (RFC 0021), beside the
