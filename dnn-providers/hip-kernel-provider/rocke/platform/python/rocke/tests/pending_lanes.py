@@ -1,7 +1,8 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Test files that wait for a CI lane, each with its recorded reason.
+"""Test files that wait for a CI lane, and measured allowances that wait for a
+decision, each with its recorded reason.
 
 A test is out of limbo only when a CI lane runs it, or when it has an explicit,
 recorded reason not to yet. This module is that record: one entry per test file
@@ -34,6 +35,22 @@ need it skip there.
         expires="2027-01-31",
     )
 
+A measured budget is the other kind of record: a test's resource check allows
+one kernel the bytes one compiler is measured to spill, while the kernel owners
+decide its retune. The allowance applies only on that compiler (matched by LLVM
+major); on any other the test's strict rule holds. It carries the same reason,
+owner and expiry, and the same check reports it stale or expired.
+
+    MeasuredBudget(
+        path="library/tests/test_example.py",  # the test file that applies it
+        kernel_name="rocke_example_kernel",
+        scratch_bytes=40,
+        llvm_major=24,
+        reason="spills 40 B at its VGPR cap on LLVM 24; LLVM 20 spills none",
+        owner="kernel owners; issue: none filed yet",
+        expires="2027-01-31",
+    )
+
 Paths, owners and issues are plain text: no links.
 """
 
@@ -41,6 +58,10 @@ from __future__ import annotations
 
 import datetime
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ..runtime.comgr import CompilerInfo
 
 __all__ = [
     "BINDING_LANE",
@@ -48,6 +69,7 @@ __all__ = [
     "GFX90A_RUNNER",
     "GFX950_RUNNER",
     "LANES",
+    "MEASURED_BUDGETS",
     "NIGHTLY_GPU",
     "NIGHTLY_SOURCE",
     "OWNER_DECISION",
@@ -57,7 +79,10 @@ __all__ = [
     "WEEKLY_EXHAUSTIVE",
     "WEEKLY_TORCH_GPU",
     "Lane",
+    "MeasuredBudget",
     "PendingTest",
+    "measured_budget_kernels",
+    "measured_scratch_allowance",
 ]
 
 
@@ -150,6 +175,38 @@ LANES: tuple[Lane, ...] = (
 )
 
 
+def _require_test_path(kind: str, path: str) -> None:
+    if not path.endswith(".py") or path.startswith("/"):
+        raise ValueError(
+            f"{kind} failed - path={path!r}, expected a test file path relative "
+            "to the rocke directory"
+        )
+
+
+def _require_recorded(
+    kind: str, path: str, reason: str, owner: str, expires: str
+) -> None:
+    """Fail unless the reason and owner are plain text and expires is an ISO date."""
+    for field_name, text in (("reason", reason), ("owner", owner)):
+        if not text.strip():
+            raise ValueError(
+                f"{kind} failed - path={path!r}, {field_name} is empty, expected "
+                "the recorded text"
+            )
+    if "://" in f"{reason} {owner}":
+        raise ValueError(
+            f"{kind} failed - path={path!r}, the reason or owner holds a link, "
+            "expected plain text"
+        )
+    try:
+        datetime.date.fromisoformat(expires)
+    except ValueError:
+        raise ValueError(
+            f"{kind} failed - path={path!r}, expires={expires!r}, expected an ISO "
+            "date (YYYY-MM-DD)"
+        ) from None
+
+
 @dataclass(frozen=True)
 class PendingTest:
     """One test file waiting for a lane, with its recorded reason."""
@@ -161,34 +218,54 @@ class PendingTest:
     expires: str
 
     def __post_init__(self) -> None:
-        if not self.path.endswith(".py") or self.path.startswith("/"):
-            raise ValueError(
-                f"PendingTest failed - path={self.path!r}, expected a test file "
-                "path relative to the rocke directory"
-            )
+        _require_test_path("PendingTest", self.path)
         if self.lane not in LANES:
             raise ValueError(
                 f"PendingTest failed - path={self.path!r}, lane={self.lane.name!r}, "
                 "expected one of pending_lanes.LANES"
             )
-        for field_name in ("reason", "owner"):
-            if not getattr(self, field_name).strip():
-                raise ValueError(
-                    f"PendingTest failed - path={self.path!r}, {field_name} is "
-                    "empty, expected the recorded text"
-                )
-        if "://" in f"{self.reason} {self.owner}":
+        _require_recorded(
+            "PendingTest", self.path, self.reason, self.owner, self.expires
+        )
+
+    @property
+    def expiry_date(self) -> datetime.date:
+        return datetime.date.fromisoformat(self.expires)
+
+
+@dataclass(frozen=True)
+class MeasuredBudget:
+    """The scratch bytes one test allows one kernel on one compiler, pending a
+    retune. What the bytes bound is the test's own check: total spill, or spill
+    above a reference build of the same kernel."""
+
+    path: str
+    kernel_name: str
+    scratch_bytes: int
+    # The LLVM major of the compiler the bytes were measured on; on any other
+    # compiler the allowance is 0.
+    llvm_major: int
+    reason: str
+    owner: str
+    expires: str
+
+    def __post_init__(self) -> None:
+        _require_test_path("MeasuredBudget", self.path)
+        if not self.kernel_name.strip():
             raise ValueError(
-                f"PendingTest failed - path={self.path!r}, the reason or owner "
-                "holds a link, expected plain text"
+                f"MeasuredBudget failed - path={self.path!r}, kernel_name is empty, "
+                "expected the exact kernel name"
             )
-        try:
-            datetime.date.fromisoformat(self.expires)
-        except ValueError:
-            raise ValueError(
-                f"PendingTest failed - path={self.path!r}, expires={self.expires!r}, "
-                "expected an ISO date (YYYY-MM-DD)"
-            ) from None
+        for field_name in ("scratch_bytes", "llvm_major"):
+            value = getattr(self, field_name)
+            if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+                raise ValueError(
+                    f"MeasuredBudget failed - kernel_name={self.kernel_name!r}, "
+                    f"{field_name}={value!r}, expected a positive integer"
+                )
+        _require_recorded(
+            "MeasuredBudget", self.path, self.reason, self.owner, self.expires
+        )
 
     @property
     def expiry_date(self) -> datetime.date:
@@ -467,3 +544,121 @@ PENDING: tuple[PendingTest, ...] = (
         "platform/python/rocke/tests/helpers/tiling/test_leading_axes.py",
     ),
 )
+
+
+_ATTENTION_BUILDS = "library/tests/test_attention_builds.py"
+_GDN_DECODE_FUSED = "library/tests/test_gdn_decode_fused.py"
+_COMPILER_24 = "AMD clang 24.0.0git (llvm-project 424729dba653)"
+_SPILL_RETUNE_OWNER = "kernel owners; issue: none filed yet"
+_SPILL_RETUNE_EXPIRES = "2026-12-31"
+
+
+def _measured(
+    path: str, llvm_major: int, reason: str, *allowances: tuple[str, int]
+) -> tuple[MeasuredBudget, ...]:
+    """One spill-retune budget per ``(kernel name, bytes)``, all for one reason."""
+    return tuple(
+        MeasuredBudget(
+            path,
+            kernel_name,
+            scratch_bytes,
+            llvm_major,
+            reason,
+            _SPILL_RETUNE_OWNER,
+            _SPILL_RETUNE_EXPIRES,
+        )
+        for kernel_name, scratch_bytes in allowances
+    )
+
+
+MEASURED_BUDGETS: tuple[MeasuredBudget, ...] = (
+    *_measured(
+        _ATTENTION_BUILDS,
+        24,
+        "gfx942 D128 paged prefill at the BN=32 tile (wpe2, window skip): "
+        f"{_COMPILER_24} caps VGPR at 256 for its 2-wave tuning and spills this "
+        "many bytes (fp16, bf16); ROCm 7.1 (LLVM 20) compiles both with no scratch",
+        (
+            "rocke_attention_dense_d128_hq16_kv4_bn32_fp16_bm128_sq1024_sk1024_causal_swa256_pgd16_nb128_lazyrs_gfx942_b1_wpe2_wskip",
+            44,
+        ),
+        (
+            "rocke_attention_dense_d128_hq16_kv4_bn32_bf16_bm128_sq1024_sk1024_causal_swa256_pgd16_nb128_lazyrs_gfx942_b1_wpe2_wskip",
+            24,
+        ),
+    ),
+    *_measured(
+        _ATTENTION_BUILDS,
+        24,
+        "gfx942 dispatched bf16 D64 causal prefill (wpe4, K padded to 8): "
+        f"{_COMPILER_24} caps VGPR at 128 and spills this many bytes (without, "
+        "with LSE); ROCm 7.1 (LLVM 20) compiles both with no scratch",
+        (
+            "rocke_attention_dense_d64_bn64_bf16_kpad8_causal_lazyrs_npbthkvmin_gfx942_wpe4",
+            40,
+        ),
+        (
+            "rocke_attention_dense_d64_bn64_bf16_kpad8_causal_lazyrs_npbthkvmin_gfx942_wpe4_lse",
+            44,
+        ),
+    ),
+    *_measured(
+        _GDN_DECODE_FUSED,
+        24,
+        "gfx950 single-wave conv_once decode, f32 state, WTK 4, conv only: "
+        f"{_COMPILER_24} spills this many bytes more loading the rows first than "
+        "late (0 B late); ROCm 7.1 (LLVM 20) spills neither",
+        (
+            "rocke_gdn_decode_bf16_kh16_vh16_dk128_dv128_w1k4b1_stf32_lhnt_shnt_l2_cv_rn_xcd_sr_co",
+            36,
+        ),
+        (
+            "rocke_gdn_decode_bf16_kh16_vh16_dk128_dv128_w1k4b1_stf32_lhnt_shnt_l2_cv_rn_xcd_sr_ic_co",
+            36,
+        ),
+    ),
+    *_measured(
+        _GDN_DECODE_FUSED,
+        24,
+        "gfx950 single-wave conv_once decode, f32 state, WTK 4, KDA gate, conv and "
+        f"norm with out_lds and norm_gate_once: {_COMPILER_24} spills this many "
+        "bytes more loading the rows first than late (0 B late); ROCm 7.1 "
+        "(LLVM 20) spills neither",
+        (
+            "rocke_gdn_decode_bf16_kh16_vh16_dk128_dv128_w1k4b1_stf32_kda_lhnt_shnt_l2_cv_rn_xcd_sr_co_ngo_olds",
+            24,
+        ),
+        (
+            "rocke_gdn_decode_bf16_kh16_vh16_dk128_dv128_w1k4b1_stf32_kda_lhnt_shnt_l2_cv_rn_xcd_sr_ic_co_ngo_olds",
+            24,
+        ),
+    ),
+)
+
+
+def measured_budget_kernels(path: str) -> frozenset[str]:
+    """The kernel names ``MEASURED_BUDGETS`` holds for the test file ``path``,
+    whatever the compiler, so the test can fail a name it no longer builds."""
+    return frozenset(
+        budget.kernel_name for budget in MEASURED_BUDGETS if budget.path == path
+    )
+
+
+def measured_scratch_allowance(
+    path: str, kernel_name: str, compiler: CompilerInfo | None
+) -> int:
+    """The scratch bytes the test file ``path`` allows ``kernel_name`` when
+    built by ``compiler`` (``rocke.runtime.comgr.loaded_compiler_info()``): its
+    measured budget when the compiler's LLVM major is the measured one, else 0."""
+    if compiler is None or compiler.llvm_version is None:
+        return 0
+    return next(
+        (
+            budget.scratch_bytes
+            for budget in MEASURED_BUDGETS
+            if budget.path == path
+            and budget.kernel_name == kernel_name
+            and budget.llvm_major == compiler.llvm_version[0]
+        ),
+        0,
+    )

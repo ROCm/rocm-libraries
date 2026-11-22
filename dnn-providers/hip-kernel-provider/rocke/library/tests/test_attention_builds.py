@@ -30,7 +30,12 @@ import unittest
 import pytest
 
 from rocke import lower_kernel_to_llvm
+from rocke.runtime.comgr import loaded_compiler_info
 from rocke.tests.compiler_tools import require_tools_or_skip
+from rocke.tests.pending_lanes import (
+    measured_budget_kernels,
+    measured_scratch_allowance,
+)
 
 from ._dense_paged_stand_ins import dense_arch_spec_class
 
@@ -139,8 +144,6 @@ _KERNEL_RESOURCE_BUDGETS = {
     # toolchain, not of the kernel -- the figure moved between ROCm releases while this
     # body did not -- so the budget asserts the invariant (no spill) rather than
     # recording any one compiler's number. Tuned for 2 waves/SIMD (512 VGPR/SIMD // 256).
-    # (The four gfx942 wskip / kpad8 entries at the end are different: a temporary
-    # measured spill budget pending the owner's retune decision, not an invariant.)
     "rocke_attention_dense_d128_bn64_bf16_causal_lazyrs_persist256_bthkvmin": {
         "min_waves_per_simd": 2,
     },
@@ -161,30 +164,14 @@ _KERNEL_RESOURCE_BUDGETS = {
         "max_scratch_bytes": 32,
         "min_waves_per_simd": 2,
     },
-    # gfx942 D128 paged prefill at the smaller BN=32 tile (wpe2, window skip): AMD
-    # clang 24.0.0git (llvm-project 424729dba653) caps VGPR at 256 and spills 44 B
-    # (fp16) and 24 B (bf16); ROCm 7.1 compiles both with no scratch. Each budget is
-    # the measured spill, so any growth fails; on ROCm 7.1 this allows up to 44 / 24 B
-    # where 0 B is measured. Tuned for 2 waves/SIMD, as the wpe2 entry above. Retune
-    # pending owner decision.
+    # gfx942 D128 paged prefill at the smaller BN=32 tile (wpe2, window skip): tuned
+    # for 2 waves/SIMD, as the wpe2 entry above. Its scratch budget is a measured,
+    # compiler-keyed allowance in rocke.tests.pending_lanes.MEASURED_BUDGETS.
     "rocke_attention_dense_d128_hq16_kv4_bn32_fp16_bm128_sq1024_sk1024_causal_swa256_pgd16_nb128_lazyrs_gfx942_b1_wpe2_wskip": {
-        "max_scratch_bytes": 44,
         "min_waves_per_simd": 2,
     },
     "rocke_attention_dense_d128_hq16_kv4_bn32_bf16_bm128_sq1024_sk1024_causal_swa256_pgd16_nb128_lazyrs_gfx942_b1_wpe2_wskip": {
-        "max_scratch_bytes": 24,
         "min_waves_per_simd": 2,
-    },
-    # gfx942 dispatched bf16 D64 causal prefill (wpe4, K padded to 8): AMD clang
-    # 24.0.0git (llvm-project 424729dba653) caps VGPR at 128 and spills 40 B, and
-    # 44 B with LSE; ROCm 7.1 compiles both with no scratch. Each budget is the
-    # measured spill, so any growth fails; on ROCm 7.1 this allows up to 40 / 44 B
-    # where 0 B is measured. Retune pending owner decision.
-    "rocke_attention_dense_d64_bn64_bf16_kpad8_causal_lazyrs_npbthkvmin_gfx942_wpe4": {
-        "max_scratch_bytes": 40,
-    },
-    "rocke_attention_dense_d64_bn64_bf16_kpad8_causal_lazyrs_npbthkvmin_gfx942_wpe4_lse": {
-        "max_scratch_bytes": 44,
     },
 }
 
@@ -195,6 +182,9 @@ _KERNEL_RESOURCE_BUDGETS = {
 # loud on drift (its default is 0); the occupancy floor defaults to no check, so
 # without this a renamed kernel would just stop being floored.
 _SEEN_KERNEL_NAMES: set = set()
+
+# This file's path in rocke.tests.pending_lanes.MEASURED_BUDGETS.
+_MEASURED_BUDGETS_PATH = "library/tests/test_attention_builds.py"
 
 
 def _assert_resources_fit(art, *, arch: str, kernel_name: str = ""):
@@ -250,11 +240,17 @@ def _assert_resources_fit(art, *, arch: str, kernel_name: str = ""):
     )
     budgets = _KERNEL_RESOURCE_BUDGETS.get(kernel_name, {})
     # Register overflow does not fail the compile -- it spills. Scratch use above
-    # the kernel's budget (0 unless it is a known occupancy-bound kernel) is a
-    # register-budget regression, so treat it as a failure.
+    # the kernel's budget (0 unless it is a known occupancy-bound kernel, or has a
+    # measured allowance on the loaded compiler) is a register-budget regression,
+    # so treat it as a failure.
     scratch = res.scratch_bytes
     if scratch is not None:
-        max_scratch = budgets.get("max_scratch_bytes", 0)
+        max_scratch = budgets.get(
+            "max_scratch_bytes",
+            measured_scratch_allowance(
+                _MEASURED_BUDGETS_PATH, kernel_name, loaded_compiler_info()
+            ),
+        )
         assert scratch <= max_scratch, (
             f"{name} spills {scratch} B to scratch on {arch} (VGPR {res.vgpr_count}), "
             f"over its {max_scratch} B budget -- register over-subscription; kernel "
@@ -6516,15 +6512,23 @@ def test_every_declared_budget_was_exercised():
     """A budget key that matches no built kernel (name drift from a re-tuned
     selector -- these names carry tokens like wpe2 / persist256 / ksring that get
     re-tuned) would silently drop that kernel's occupancy floor. Turn it into a red
-    test: every ``_KERNEL_RESOURCE_BUDGETS`` key must have been handed to
-    ``_assert_resources_fit`` by some test in this run.
+    test: every ``_KERNEL_RESOURCE_BUDGETS`` key and every kernel this file has a
+    measured budget for must have been handed to ``_assert_resources_fit`` by some
+    test in this run. A kernel takes its scratch budget from one place only.
 
     Skips under a partial selection (``pytest -k``) that builds none of the
     budgeted kernels, so the check is meaningful on a full-file / CI run without
     false-failing an unrelated targeted run."""
     if not _SEEN_KERNEL_NAMES:
         pytest.skip("no budgeted kernels built in this selection")
-    orphaned = set(_KERNEL_RESOURCE_BUDGETS) - _SEEN_KERNEL_NAMES
+    measured = measured_budget_kernels(_MEASURED_BUDGETS_PATH)
+    twice = sorted(
+        name
+        for name, budget in _KERNEL_RESOURCE_BUDGETS.items()
+        if name in measured and "max_scratch_bytes" in budget
+    )
+    assert not twice, f"scratch budget declared twice (here and measured): {twice}"
+    orphaned = (set(_KERNEL_RESOURCE_BUDGETS) | measured) - _SEEN_KERNEL_NAMES
     assert (
         not orphaned
     ), f"budget declared for kernels never built (name drift?): {sorted(orphaned)}"

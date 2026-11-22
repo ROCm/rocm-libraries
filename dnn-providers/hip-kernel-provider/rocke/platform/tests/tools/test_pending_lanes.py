@@ -18,7 +18,9 @@ listed entry must be current: its file present and its lane's kind still
 true of the file (a file waiting for a new lane is in no CI-run entry; a
 file waiting for something CI lacks is in one). An expired entry fails only a
 change that touches the registry or its file, and every run under
-``--strict-expiry``; otherwise it is reported as a warning.
+``--strict-expiry``; otherwise it is reported as a warning. The registry's
+measured budgets are held to the same rules: each names a present test file, is
+listed once, and is reported or failed when expired the same way.
 
 The check configures the platform (nothing is built) and reads the provider
 categories, so it runs in a source checkout of the monorepo only.
@@ -43,9 +45,18 @@ from typing import Protocol
 import pytest
 from _pytest.mark.expression import Expression
 from rocke.assets import platform_root
+from rocke.runtime.comgr import CompilerInfo
 from rocke.tests import in_tree_suites
 from rocke.tests.ctest_listing import configure_installed_ctest, list_ctest_entries
-from rocke.tests.pending_lanes import LANES, PENDING, PendingTest
+from rocke.tests.pending_lanes import (
+    LANES,
+    MEASURED_BUDGETS,
+    PENDING,
+    MeasuredBudget,
+    PendingTest,
+    measured_budget_kernels,
+    measured_scratch_allowance,
+)
 from rocke.tests.provider_categories import provider_category_labels
 
 ROCKE = platform_root().parent
@@ -594,6 +605,26 @@ def test_expired_entries_fail_only_a_change_that_touches_them():
     assert expiry_failures(expired, None, strict=True) == expired
 
 
+def _fail_or_report_expired(request, registry: str, expired: dict[str, str]) -> None:
+    """Fail on the ``expired`` entries (label -> its test file) that
+    :func:`expiry_failures` says fail this run; report the rest as a warning."""
+    if not expired:
+        return
+    strict = request.config.getoption("--strict-expiry")
+    failing_paths = set(
+        expiry_failures(sorted(set(expired.values())), changed_files(), strict=strict)
+    )
+    failing = sorted(label for label, path in expired.items() if path in failing_paths)
+    assert not failing, f"expired {registry} entries; re-decide them: {failing}"
+    message = f"{registry} entries past their expiry: {sorted(expired)}"
+    print(message)
+    warnings.warn(message, stacklevel=2)
+
+
+def _utc_today() -> datetime.date:
+    return datetime.datetime.now(datetime.timezone.utc).date()
+
+
 def test_every_pending_entry_is_current(request):
     paths = [pending.path for pending in PENDING]
     duplicates = sorted({path for path in paths if paths.count(path) > 1})
@@ -602,16 +633,84 @@ def test_every_pending_entry_is_current(request):
         pending.path for pending in PENDING if not (ROCKE / pending.path).is_file()
     ]
     assert not missing, f"listed but gone: {missing}"
-    today = datetime.datetime.now(datetime.timezone.utc).date()
-    expired = [pending.path for pending in PENDING if pending.expiry_date < today]
-    if not expired:
-        return
-    strict = request.config.getoption("--strict-expiry")
-    failing = expiry_failures(expired, changed_files(), strict=strict)
-    assert not failing, f"expired; enrol, fix or re-decide them: {failing}"
-    message = f"pending_lanes entries past their expiry: {expired}"
-    print(message)
-    warnings.warn(message, stacklevel=1)
+    today = _utc_today()
+    _fail_or_report_expired(
+        request,
+        "pending_lanes",
+        {p.path: p.path for p in PENDING if p.expiry_date < today},
+    )
+
+
+def test_every_measured_budget_is_current(request):
+    keys = [(budget.path, budget.kernel_name) for budget in MEASURED_BUDGETS]
+    duplicates = sorted({key for key in keys if keys.count(key) > 1})
+    assert not duplicates, f"measured budget listed more than once: {duplicates}"
+    missing = sorted(
+        {b.path for b in MEASURED_BUDGETS if not (ROCKE / b.path).is_file()}
+    )
+    assert not missing, f"measured budgets for test files that are gone: {missing}"
+    today = _utc_today()
+    _fail_or_report_expired(
+        request,
+        "measured budget",
+        {
+            f"{b.path}::{b.kernel_name}": b.path
+            for b in MEASURED_BUDGETS
+            if b.expiry_date < today
+        },
+    )
+
+
+def test_a_measured_budget_applies_only_on_its_compiler():
+    budget = MEASURED_BUDGETS[0]
+
+    def compiler(llvm_version):
+        return CompilerInfo(llvm_version, "test", None, None, None)
+
+    measured_on = compiler((budget.llvm_major, 0, 0))
+    assert (
+        measured_scratch_allowance(budget.path, budget.kernel_name, measured_on)
+        == budget.scratch_bytes
+    )
+    other = compiler((budget.llvm_major - 1, 0, 0))
+    assert measured_scratch_allowance(budget.path, budget.kernel_name, other) == 0
+    assert measured_scratch_allowance(budget.path, budget.kernel_name, None) == 0
+    unqueried = compiler(None)
+    assert measured_scratch_allowance(budget.path, budget.kernel_name, unqueried) == 0
+    assert measured_scratch_allowance(budget.path, "rocke_other", measured_on) == 0
+    other_file = "library/tests/test_x.py"
+    assert measured_scratch_allowance(other_file, budget.kernel_name, measured_on) == 0
+    assert budget.kernel_name in measured_budget_kernels(budget.path)
+    assert measured_budget_kernels(other_file) == frozenset()
+
+
+def test_a_measured_budget_needs_a_positive_size_and_its_recorded_reason():
+    def budget(**overrides):
+        fields = {
+            "path": "library/tests/test_x.py",
+            "kernel_name": "rocke_x",
+            "scratch_bytes": 8,
+            "llvm_major": 24,
+            "reason": "why",
+            "owner": "owner",
+            "expires": "2027-01-31",
+        }
+        return MeasuredBudget(**{**fields, **overrides})
+
+    with pytest.raises(ValueError, match="expected a test file path"):
+        budget(path="/abs/test_x.py")
+    with pytest.raises(ValueError, match="kernel_name is empty"):
+        budget(kernel_name=" ")
+    with pytest.raises(ValueError, match="scratch_bytes=0, expected a positive"):
+        budget(scratch_bytes=0)
+    with pytest.raises(ValueError, match="llvm_major=True, expected a positive"):
+        budget(llvm_major=True)
+    with pytest.raises(ValueError, match="owner is empty"):
+        budget(owner="")
+    with pytest.raises(ValueError, match="expected plain text"):
+        budget(reason="see https://x")
+    with pytest.raises(ValueError, match="expected an ISO date"):
+        budget(expires="next month")
 
 
 @pytest.mark.skipif(

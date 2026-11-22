@@ -23,6 +23,12 @@ from kernels.gfx950.gdn_decode import (
     is_valid_spec,
 )
 
+from rocke.runtime.comgr import loaded_compiler_info
+from rocke.tests.pending_lanes import (
+    measured_budget_kernels,
+    measured_scratch_allowance,
+)
+
 from ._gdn_decode_compile import compiled_scratch_bytes
 
 ARCH = "gfx950"
@@ -205,24 +211,12 @@ _FLAGS = ((True, False), (False, True), (True, True))
 _NO_SPILL_TILES = ((1, 16), (2, 8), (2, 16), (4, 8), (4, 16), (8, 16))
 _NORM_ONLY_SPILL_TILES = ((1, 1), (1, 2))
 
-# Single-wave conv_once kernels whose loads-first order may spill this many bytes
-# more than their late order (test_one_wave_conv_once_loads_first_without_a_new_spill).
-# Keyed by the exact kernel name, so a renamed kernel loses its allowance and the
-# strict rule returns; each value is the measured extra spill, so any growth fails.
-# Every other kernel must spill no more than its late order. On ROCm 7.1 each
-# entry allows up to its value in bytes where 0 B is measured.
-_HOISTED_EXTRA_SPILL_BUDGETS = {
-    # f32 state, WTK 4, conv only: AMD clang 24.0.0git (llvm-project 424729dba653)
-    # spills 36 B loads-first against 0 B late; ROCm 7.1 spills neither. Retune
-    # pending owner decision.
-    "rocke_gdn_decode_bf16_kh16_vh16_dk128_dv128_w1k4b1_stf32_lhnt_shnt_l2_cv_rn_xcd_sr_co": 36,
-    "rocke_gdn_decode_bf16_kh16_vh16_dk128_dv128_w1k4b1_stf32_lhnt_shnt_l2_cv_rn_xcd_sr_ic_co": 36,
-    # f32 state, WTK 4, KDA gate, conv + norm with out_lds and norm_gate_once: the
-    # same compiler spills 24 B loads-first against 0 B late; ROCm 7.1 spills
-    # neither. Retune pending owner decision.
-    "rocke_gdn_decode_bf16_kh16_vh16_dk128_dv128_w1k4b1_stf32_kda_lhnt_shnt_l2_cv_rn_xcd_sr_co_ngo_olds": 24,
-    "rocke_gdn_decode_bf16_kh16_vh16_dk128_dv128_w1k4b1_stf32_kda_lhnt_shnt_l2_cv_rn_xcd_sr_ic_co_ngo_olds": 24,
-}
+# Single-wave conv_once kernels whose loads-first order may spill more than their
+# late order (test_one_wave_conv_once_loads_first_without_a_new_spill) carry a
+# measured, compiler-keyed allowance under this path in
+# rocke.tests.pending_lanes.MEASURED_BUDGETS; every other kernel, and every kernel
+# on another compiler, must spill no more than its late order.
+_MEASURED_BUDGETS_PATH = "library/tests/test_gdn_decode_fused.py"
 
 
 class TestFusedEmission(unittest.TestCase):
@@ -292,8 +286,9 @@ class TestFusedEmission(unittest.TestCase):
         interleave_cols with an f32 state), in three modes: conv only; conv +
         norm with the per-lane norm inputs; conv + norm with out_lds and
         norm_gate_once. waves_per_eu stays 0: a floor keeps the late order.
-        Kernels named in _HOISTED_EXTRA_SPILL_BUDGETS may spill up to their
-        budget more, and every name there must be one this test builds."""
+        A kernel with a measured budget for this file may spill up to that many
+        bytes more on its measured compiler, and every such name must be one this
+        test builds."""
         from kernels.gfx950 import gdn_decode
 
         built_names = set()
@@ -333,14 +328,18 @@ class TestFusedEmission(unittest.TestCase):
                             late = _scratch_bytes(late_spec)
                             # the knob reached the emitter: the order moved
                             self.assertNotEqual(_op_names(s), _op_names(late_spec))
-                            extra = _HOISTED_EXTRA_SPILL_BUDGETS.get(name, 0)
+                            extra = measured_scratch_allowance(
+                                _MEASURED_BUDGETS_PATH, name, loaded_compiler_info()
+                            )
                             self.assertLessEqual(
                                 hoisted,
                                 late + extra,
                                 f"{name} spills {hoisted} B loads-first against "
                                 f"{late} B late, over its {extra} B allowance",
                             )
-        self.assertLessEqual(set(_HOISTED_EXTRA_SPILL_BUDGETS), built_names)
+        self.assertLessEqual(
+            measured_budget_kernels(_MEASURED_BUDGETS_PATH), built_names
+        )
 
     def test_unfused_kernel_has_no_lds_or_barrier(self):
         from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
