@@ -10,10 +10,15 @@
 This lets rocke be timed on the same data distribution as MIOpenDriver; the time of a
 power-bound loop can depend on the magnitude of its data.
 
+The fills are float32 numpy arrays drawn from a caller-owned
+``numpy.random.Generator``; the caller rounds them to its storage dtype.
+
 The verify error is peak-normalised: max|out - ref| / max|ref|. The default floors the
 denominator at 1, which is what makes it a relative error on U(-1, 1) data. Small-magnitude data
 needs a floor near zero, or every output would pass; ``ref_floor`` gives the floor for the mode.
 """
+
+import numpy as np
 
 # DIRECTIONS: the directions a kernel label starts with (KernelIdentity.label()).
 from kernels.conv.kernel_identity import DIRECTIONS
@@ -33,30 +38,30 @@ def mode() -> str:
     return _MODE
 
 
-def fill_x(t, generator=None):
-    """Fill the input activations ``t`` in place; returns ``t``."""
-    if _MODE == "miopen":
-        return t.uniform_(0.0, 0.01, generator=generator)
-    return t.uniform_(-1.0, 1.0, generator=generator)
+def fill_x(shape, rng: np.random.Generator) -> np.ndarray:
+    """New float32 input activations of ``shape``, drawn from ``rng`` per the mode."""
+    lo, hi = (0.0, 0.01) if _MODE == "miopen" else (-1.0, 1.0)
+    return rng.uniform(lo, hi, shape).astype(np.float32)
 
 
-def fill_w(t, dtype: str, generator=None):
-    """Fill the weights ``t`` (of io dtype ``dtype``) in place; returns ``t``."""
+def fill_w(shape, dtype: str, rng: np.random.Generator) -> np.ndarray:
+    """New float32 weights of ``shape`` (io dtype ``dtype``), drawn from ``rng``
+    per the mode."""
     if _MODE == "miopen":
         lo, hi = (-1.0 / 3.0, 0.5) if dtype == "fp16" else (-0.5, 0.5)
-        return t.uniform_(0.01 * lo, 0.01 * hi, generator=generator)
-    return t.uniform_(-1.0, 1.0, generator=generator)
+        lo, hi = 0.01 * lo, 0.01 * hi
+    else:
+        lo, hi = -1.0, 1.0
+    return rng.uniform(lo, hi, shape).astype(np.float32)
 
 
-def fwd_operands(x_shape, w_shape, dtype: str, torch_dtype=None):
-    """``(x, w)`` of a forward benchmark: new tensors of ``torch_dtype``
-    (default fp32) of the given shapes, filled per the mode, x first (the
-    draw order of the seeded RNG)."""
-    import torch
-
-    kw = {} if torch_dtype is None else {"dtype": torch_dtype}
-    x = fill_x(torch.empty(*x_shape, **kw))
-    return x, fill_w(torch.empty(*w_shape, **kw), dtype)
+def fwd_operands(
+    x_shape, w_shape, dtype: str, rng: np.random.Generator
+) -> tuple[np.ndarray, np.ndarray]:
+    """``(x, w)`` of a forward benchmark: float32 arrays of the given shapes,
+    filled per the mode for io dtype ``dtype``, x drawn from ``rng`` first."""
+    x = fill_x(x_shape, rng)
+    return x, fill_w(w_shape, dtype, rng)
 
 
 def ref_floor(direction: str = "fwd") -> float:

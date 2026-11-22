@@ -53,6 +53,8 @@ from dataclasses import replace as dc_replace
 from typing import NamedTuple
 from typing import List
 
+import numpy as np
+
 # hipDeviceAttributeMaxGridDimZ. Grouped wgrad puts groups*split_k on z, which
 # is the only launch in this driver that can reach the limit. The z extent is
 # a 16-bit field in the dispatch packet on every arch rocke targets, so this is
@@ -2950,17 +2952,19 @@ def _compile_kernels_parallel(kernels, compile_kernel, arch: str, jobs: int) -> 
     return artifact_map
 
 
-def _fwd_sweep_inputs(a_shape: tuple, b_shape: tuple, dtype: str, args):
-    """The forward sweep's fp32 ``(A, B)`` (activations, weights), A first:
-    the ``--debug-init`` constant when given, else filled per ``--fill``
-    (:mod:`benchmarks.common.conv_fill`; ``dtype`` is the io dtype)."""
-    import torch
-
+def _fwd_sweep_inputs(
+    a_shape: tuple, b_shape: tuple, dtype: str, args, rng: np.random.Generator
+) -> tuple[np.ndarray, np.ndarray]:
+    """The forward sweep's float32 ``(A, B)`` (activations, weights): the
+    ``--debug-init`` constant when given, else drawn from ``rng`` (A first)
+    per ``--fill`` (:mod:`benchmarks.common.conv_fill`; ``dtype`` is the io
+    dtype)."""
     if args.debug_init is not None:
-        return torch.full(a_shape, args.debug_init), torch.full(
-            b_shape, args.debug_init
+        return (
+            np.full(a_shape, args.debug_init, dtype=np.float32),
+            np.full(b_shape, args.debug_init, dtype=np.float32),
         )
-    return conv_fill.fwd_operands(a_shape, b_shape, dtype)
+    return conv_fill.fwd_operands(a_shape, b_shape, dtype, rng)
 
 
 def _run_sweep(
@@ -2998,20 +3002,20 @@ def _run_sweep(
         "bf16": torch.bfloat16,
         "fp32": torch.float32,
     }[storage_dtype(dtype)]
-    torch.manual_seed(42)
+    rng = np.random.default_rng(42)
 
     if p.is_3d:
         _A_f32, _B_f32 = _fwd_sweep_inputs(
-            (p.N, p.Di, p.Hi, p.Wi, p.C), (p.K, p.Z, p.Y, p.X, p.cpg), dtype, args
+            (p.N, p.Di, p.Hi, p.Wi, p.C), (p.K, p.Z, p.Y, p.X, p.cpg), dtype, args, rng
         )
         D_t = torch.empty(p.N, p.Do, p.Ho, p.Wo, p.K, dtype=_torch_dtype)
     else:
         _A_f32, _B_f32 = _fwd_sweep_inputs(
-            (p.N, p.Hi, p.Wi, p.C), (p.K, p.Y, p.X, p.cpg), dtype, args
+            (p.N, p.Hi, p.Wi, p.C), (p.K, p.Y, p.X, p.cpg), dtype, args, rng
         )
         D_t = torch.empty(p.N, p.Ho, p.Wo, p.K, dtype=_torch_dtype)
-    A_t = _A_f32.to(_torch_dtype)
-    B_t = _B_f32.to(_torch_dtype)
+    A_t = torch.from_numpy(_A_f32).to(_torch_dtype)
+    B_t = torch.from_numpy(_B_f32).to(_torch_dtype)
 
     bytes_xfer = float(A_t.nbytes + B_t.nbytes + D_t.nbytes)
     flop = float(p.flops)
@@ -5114,10 +5118,11 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
                 a_shape, b_shape, d_shape = nhwc, krsc, nhwk
 
             if direction == "fwd":
-                A_t = conv_fill.fill_x(torch.empty(*a_shape, dtype=torch_dt))
-                B_t = conv_fill.fill_w(
-                    torch.empty(*b_shape, dtype=torch_dt), case_dtype
-                )
+                rng = np.random.default_rng(42)
+                activations = conv_fill.fill_x(a_shape, rng)
+                weights = conv_fill.fill_w(b_shape, case_dtype, rng)
+                A_t = torch.from_numpy(activations).to(torch_dt)
+                B_t = torch.from_numpy(weights).to(torch_dt)
             else:
                 A_t = torch.empty(*a_shape, dtype=torch_dt).uniform_(-1, 1)
                 B_t = torch.empty(*b_shape, dtype=torch_dt).uniform_(-1, 1)
