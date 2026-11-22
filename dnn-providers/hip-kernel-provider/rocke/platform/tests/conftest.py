@@ -113,3 +113,11 @@ for _lib_root in (_HERE / "library", _HERE.parents[1] / "library"):
 from rocke.tests.staged_payload import point_locators_at_staged_payload
 
 point_locators_at_staged_payload(_HERE)
+
+
+def pytest_configure(config):
+    """Declare the shard-cost mark for runs that do not load the
+    ``rocke.tests.ctest_shard`` plugin."""
+    from rocke.tests.ctest_shard import register_shard_cost_marker
+
+    register_shard_cost_marker(config)

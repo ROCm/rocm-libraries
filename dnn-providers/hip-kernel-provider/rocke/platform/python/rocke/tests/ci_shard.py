@@ -18,6 +18,13 @@ TheRock's 1-based ``SHARD_INDEX`` and ``TOTAL_SHARDS`` are not read. A key (a
 test's shard key, a golden family) belongs to the shard ``sha256(key) mod n``,
 so each key falls in exactly one shard of ``n``, whatever else is selected.
 
+A key may also carry a declared cost (:func:`place_keys`): the keys with a cost
+are spread over the shards heaviest first, each onto the shard holding the
+least declared cost so far, so a few heavy keys no longer land together by
+chance. Keys without a cost keep the hash rule, so a run that declares no cost
+splits exactly as before. Every shard of one run places the same keys with the
+same costs, so each key still runs in exactly one shard.
+
 A runner prints :func:`header_line` and :meth:`Shard.split_line`, the lines
 the plugin prints, so one log parser reads both.
 """
@@ -26,6 +33,7 @@ from __future__ import annotations
 
 import dataclasses
 import hashlib
+import math
 import os
 from collections.abc import Iterable, Mapping
 
@@ -36,9 +44,11 @@ __all__ = [
     "GTEST_TOTAL_ENV",
     "SHARD_ENV",
     "Shard",
+    "check_cost",
     "current_shard",
     "header_line",
     "parse_shard",
+    "place_keys",
     "resolve_shard",
     "shard_of",
     "unsharded_environment",
@@ -79,6 +89,49 @@ def parse_shard(text: str) -> tuple[frozenset[int], int]:
 def shard_of(key: str, n: int) -> int:
     """The shard of ``n`` that ``key`` belongs to."""
     return int(hashlib.sha256(key.encode()).hexdigest()[:8], 16) % n
+
+
+def check_cost(key: str, cost: object) -> None:
+    """Raise ``ValueError`` unless ``cost``, the declared cost of ``key``, is
+    a positive finite number."""
+    if not (
+        isinstance(cost, (int, float))
+        and not isinstance(cost, bool)
+        and math.isfinite(cost)
+        and cost > 0
+    ):
+        raise ValueError(
+            f"shard cost {cost!r} of {key!r} is not a positive finite number"
+        )
+
+
+def place_keys(
+    keys: Iterable[str], total: int, costs: Mapping[str, float] | None = None
+) -> dict[str, int]:
+    """The shard of ``total`` that each of ``keys`` runs in.
+
+    A key without a cost in ``costs`` goes to :func:`shard_of`'s shard. The
+    keys with a cost (any positive unit the keys of one run share, e.g.
+    seconds) go heaviest first, ties by key, each to the shard holding the
+    least declared cost so far; among equally loaded shards, the first at or
+    after the key's own hash shard. A cost for a key not in ``keys`` is
+    ignored. Raises ``ValueError`` for a cost that is not a positive finite
+    number."""
+    unique = list(dict.fromkeys(keys))
+    declared = {} if costs is None else costs
+    weighted = {key: declared[key] for key in unique if key in declared}
+    for key, cost in weighted.items():
+        check_cost(key, cost)
+    placement = {key: shard_of(key, total) for key in unique if key not in weighted}
+    load = [0.0] * total
+    for key in sorted(weighted, key=lambda key: (-weighted[key], key)):
+        home = shard_of(key, total)
+        shard = min(
+            range(total), key=lambda index: (load[index], (index - home) % total)
+        )
+        placement[key] = shard
+        load[shard] += weighted[key]
+    return placement
 
 
 def _count(name: str, raw: str) -> int:
@@ -162,15 +215,28 @@ class Shard:
         object.__setattr__(self, "total", total)
 
     def owns(self, key: str) -> bool:
-        """True when ``key`` belongs to this shard."""
-        return shard_of(key, self.total) in self.picks
+        """True when ``key``, a key without a declared cost, belongs to this
+        shard. For keys that may carry a cost use :meth:`keeps`."""
+        return place_keys([key], self.total)[key] in self.picks
 
-    def split_line(self, keys: Iterable[str]) -> str:
-        """How ``keys`` split over every shard of this run, and how many this
-        one keeps; the same split on every shard of one run."""
+    def keeps(
+        self, keys: Iterable[str], costs: Mapping[str, float] | None = None
+    ) -> set[str]:
+        """The keys of ``keys`` that this shard runs, by :func:`place_keys`."""
+        placement = place_keys(keys, self.total, costs)
+        return {key for key, shard in placement.items() if shard in self.picks}
+
+    def split_line(
+        self, keys: Iterable[str], costs: Mapping[str, float] | None = None
+    ) -> str:
+        """How ``keys`` split over every shard of this run (by
+        :func:`place_keys`), and how many this one keeps; the same split on
+        every shard of one run."""
+        keys = list(keys)
+        placement = place_keys(keys, self.total, costs)
         counts = [0] * self.total
-        for key in keys:
-            counts[shard_of(key, self.total)] += 1
+        for key in keys:  # a key repeated in ``keys`` counts each time
+            counts[placement[key]] += 1
         kept = sum(counts[pick] for pick in self.picks)
         split = "/".join(str(count) for count in counts)
         return (

@@ -164,6 +164,64 @@ def test_the_shards_of_one_run_split_any_keys_between_them():
         )
 
 
+def _keys_hashed_to(shard, total, count):
+    """``count`` keys whose hash shard of ``total`` is ``shard``."""
+    keys = (f"heavy{index}" for index in range(10_000))
+    return [key for key in keys if ci_shard.shard_of(key, total) == shard][:count]
+
+
+def test_keys_without_a_cost_keep_the_hash_rule():
+    keys = [f"family{index}" for index in range(200)]
+    for costs in (None, {}, {"not-selected": 5.0}):
+        assert ci_shard.place_keys(keys, 4, costs) == {
+            key: ci_shard.shard_of(key, 4) for key in keys
+        }
+
+
+def test_costed_keys_spread_heaviest_first_onto_the_least_loaded_shard():
+    # Eight equal heavy keys that all hash to shard 0: the hash rule would
+    # run all of them there; by cost each shard runs two.
+    heavy = _keys_hashed_to(0, 4, 8)
+    light = [f"light{index}" for index in range(30)]
+    costs = {key: 10.0 for key in heavy}
+    placement = ci_shard.place_keys(light + heavy, 4, costs)
+    assert sorted(placement[key] for key in heavy) == [0, 0, 1, 1, 2, 2, 3, 3]
+    assert all(placement[key] == ci_shard.shard_of(key, 4) for key in light)
+    # Unequal costs: the heaviest goes alone, the rest fill the other shards.
+    costs = dict(zip(heavy[:5], (30.0, 10.0, 10.0, 10.0, 10.0)))
+    placement = ci_shard.place_keys(heavy[:5], 4, costs)
+    load = [0.0] * 4
+    for key, shard in placement.items():
+        load[shard] += costs[key]
+    assert sorted(load) == [10.0, 10.0, 20.0, 30.0]
+    assert placement[heavy[0]] == 0  # the heaviest stays on its hash shard
+
+
+def test_every_shard_of_a_run_keeps_its_share_of_costed_keys_once():
+    keys = [f"case{index}" for index in range(60)]
+    costs = {key: float(1 + index % 7) for index, key in enumerate(keys[:25])}
+    shards = [ci_shard.Shard(f"{index}/4") for index in range(4)]
+    kept = [shard.keeps(keys, costs) for shard in shards]
+    assert sum(len(keys_of_shard) for keys_of_shard in kept) == len(keys)
+    assert set().union(*kept) == set(keys)
+    assert ci_shard.Shard("0,2/4").keeps(keys, costs) == kept[0] | kept[2]
+    # Repeated keys (the tests of one parameter set) count in the split.
+    repeated = keys + keys[:10]
+    counts = [len(keys_of_shard) for keys_of_shard in kept]
+    for key in keys[:10]:
+        counts[next(i for i, k in enumerate(kept) if key in k)] += 1
+    split = "/".join(map(str, counts))
+    assert shards[1].split_line(repeated, costs) == (
+        f"rocke-ctest-shard 1/4: split {split} of 70; kept {counts[1]}"
+    )
+
+
+@pytest.mark.parametrize("cost", [0, -1.0, float("nan"), float("inf"), True, "3"])
+def test_a_cost_that_is_not_a_positive_number_is_an_error(cost):
+    with pytest.raises(ValueError, match="is not a positive finite number"):
+        ci_shard.place_keys(["key"], 4, {"key": cost})
+
+
 def test_a_shard_names_its_source_in_the_header_line():
     assert ci_shard.header_line(None) == "rocke-ctest-shard: off"
     shard = ci_shard.current_shard(_gtest(1), from_gtest=True)
@@ -601,6 +659,89 @@ def test_a_child_pytest_started_by_a_test_is_not_sliced(tmp_path):
     (run,) = _pytest_side_by_side(outer, [_Run(("test_outer.py",), _gtest(index))])
     assert run.returncode == 0, run.stdout + run.stderr
     assert "1 passed" in run.stdout
+
+
+_HEAVY_KEYS = [
+    key
+    for key in (f"test_mod.py[h{index}]" for index in range(10_000))
+    if ci_shard.shard_of(key, 4) == 0
+][:8]
+
+
+def _costed_module():
+    """A module whose eight ``heavy`` parameters all hash to shard 0 of 4 and
+    declare a cost, beside forty unmarked ones."""
+    heavy = [key.removeprefix("test_mod.py[").removesuffix("]") for key in _HEAVY_KEYS]
+    return textwrap.dedent(
+        f"""
+        import pytest
+
+        cost = pytest.mark.{ctest_shard.SHARD_COST_MARKER}
+
+        @pytest.mark.parametrize("name", {heavy!r})
+        @cost(10)
+        def test_heavy(name):
+            pass
+
+        @pytest.mark.parametrize("i", range(40))
+        def test_light(i):
+            pass
+        """
+    )
+
+
+def test_declared_costs_spread_heavy_tests_over_the_shards(tmp_path):
+    project = _project(tmp_path, _costed_module())
+    runs = [_Run(("-v", "-W", "error"), _gtest(k)) for k in range(4)]
+    runs.append(_Run(("-v", "-W", "error"), _gtest(0, 1)))
+    *results, whole = _pytest_side_by_side(project, runs)
+    for run in (*results, whole):
+        assert run.returncode == 0, run.stdout + run.stderr
+    shards = [_passed(run.stdout) for run in results]
+    _assert_partition(shards, _passed(whole.stdout))
+    assert [len([i for i in ids if "test_heavy" in i]) for ids in shards] == [2] * 4
+    assert len({_split_line(run.stdout).group(2) for run in results}) == 1
+
+
+def test_a_conftest_selection_places_costed_tests_like_the_plugin(tmp_path):
+    conftest = (
+        "from rocke.tests import ctest_shard\n"
+        "\n"
+        "\n"
+        "def pytest_configure(config):\n"
+        "    ctest_shard.register_shard_cost_marker(config)\n"
+        "\n"
+        "\n"
+        "def pytest_collection_modifyitems(config, items):\n"
+        "    if not ctest_shard.owns_selection(config):\n"
+        "        ctest_shard.select_items(config, items)\n"
+    )
+    project = _project(tmp_path, _costed_module(), conftest)
+    shard = {"ROCKE_TEST_SHARD": "2/4"}
+    plugin, conftest_only = _pytest_side_by_side(
+        project,
+        [
+            _Run(("-v", "-W", "error"), shard, flag=False),
+            _Run(("-v", "-W", "error"), shard, flag=False, plugin=False),
+        ],
+    )
+    for run in (plugin, conftest_only):
+        assert run.returncode == 0, run.stdout + run.stderr
+    assert _passed(plugin.stdout) == _passed(conftest_only.stdout)
+    assert len([i for i in _passed(plugin.stdout) if "test_heavy" in i]) == 2
+
+
+@pytest.mark.parametrize("mark", ["(0)", "()", "(1, 2)", "(seconds=3)", "('x')"])
+def test_a_malformed_cost_mark_is_a_usage_error(tmp_path, mark):
+    source = (
+        "import pytest\n\n"
+        f"@pytest.mark.{ctest_shard.SHARD_COST_MARKER}{mark}\n"
+        "def test_one():\n    pass\n"
+    )
+    project = _project(tmp_path, source)
+    (run,) = _pytest_side_by_side(project, [_Run((), _gtest(0))])
+    assert run.returncode == pytest.ExitCode.USAGE_ERROR, run.stdout + run.stderr
+    assert "test_mod.py::test_one: " in run.stderr
 
 
 def test_owns_selection_only_when_loaded_as_a_plugin(tmp_path):

@@ -692,7 +692,9 @@ def test_shard_parse_and_partition(monkeypatch):
     def item(fn, pid):
         cs = types.SimpleNamespace(id=pid) if pid else None
         nodeid = f"tests/test_x.py::{fn}" + (f"[{pid}]" if pid else "")
-        return types.SimpleNamespace(nodeid=nodeid, callspec=cs)
+        return types.SimpleNamespace(
+            nodeid=nodeid, callspec=cs, get_closest_marker=lambda name: None
+        )
 
     items = [item(f, f"c{i}-debug") for i in range(40) for f in ("t_a", "t_b")]
     items += [item(f"t_plain{i}", None) for i in range(10)]

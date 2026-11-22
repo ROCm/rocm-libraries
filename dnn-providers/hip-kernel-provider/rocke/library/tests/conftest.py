@@ -106,7 +106,12 @@ def pytest_configure(config):
 
     An import failure of the ``kernels`` package is reported, not raised: the
     tests that need the package fail on it themselves, the others still run
-    (the same rule as ``_restore_attention_arch_state`` below)."""
+    (the same rule as ``_restore_attention_arch_state`` below). It also
+    declares the shard-cost mark for runs that do not load the
+    ``rocke.tests.ctest_shard`` plugin."""
+    from rocke.tests.ctest_shard import register_shard_cost_marker
+
+    register_shard_cost_marker(config)
     try:
         from kernels.common.attention_bwd_comgr import ensure_production_comgr
     except Exception as exc:  # noqa: BLE001 - see the docstring

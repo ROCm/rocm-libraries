@@ -781,7 +781,13 @@ same CI shard. `ROCKE_TEST_SHARD`,
 rule. The plugin splits the items that remain after `-k`, `-m`, `--deselect`
 and the conftest filters. Thus every CI shard divides the same set of items,
 and each item runs on exactly one CI shard. On a large entry, the hash spreads
-the items about evenly by count. The split does not use the run time.
+the items about evenly by count, but not by run time: a few heavy parameter
+sets can land on one CI shard together. A heavy test declares its rough cost
+in seconds with `@pytest.mark.rocke_shard_cost(seconds)`; the keys that carry
+a cost are then spread over the CI shards heaviest first, each onto the CI
+shard with the least declared cost so far (`rocke.tests.ci_shard.place_keys`).
+Keys without a cost keep the hash. Mark only the few groups that unbalance an
+entry, measured with `--durations`.
 
 **How an entry turns on sharding.** `platform/CMakeLists.txt` defines
 `_ROCKE_INSTALLED_PYTEST` as

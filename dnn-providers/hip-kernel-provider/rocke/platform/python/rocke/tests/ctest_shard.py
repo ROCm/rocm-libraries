@@ -20,7 +20,15 @@ set is also a usage error, when it is that source.
 The plugin hashes a shard key per test and keeps the tests whose hash falls in
 this shard. The shard sources and this rule live in ``rocke.tests.ci_shard``,
 which runners that are not pytest share. The key is the module path plus the
-parameter id, so all tests of one parameter set run in the same shard. The
+parameter id, so all tests of one parameter set run in the same shard.
+
+A heavy test declares its cost with ``@pytest.mark.rocke_shard_cost(seconds)``
+(on a function, a class, a module's ``pytestmark`` or one ``pytest.param``; the
+closest mark wins). A shard key's cost is the sum over its tests, and the keys
+with a cost are spread over the shards by ``ci_shard.place_keys`` instead of by
+their hash, heaviest first, so an entry's few heavy groups do not pile onto one
+shard by chance. The seconds are a rough single-core measurement; only their
+relative size matters. Tests without the mark keep the hash rule. The
 plugin filters after ``-k``, ``-m``, ``--deselect`` and the conftest filters.
 Thus every shard divides the same set of tests, and each test runs in exactly
 one shard.
@@ -54,6 +62,7 @@ from .ci_shard import (
     GTEST_TOTAL_ENV,
     SHARD_ENV,
     Shard,
+    check_cost,
     header_line,
     parse_shard,
     resolve_shard,
@@ -67,17 +76,21 @@ __all__ = [
     "GTEST_INDEX_ENV",
     "GTEST_TOTAL_ENV",
     "PLUGIN_NAME",
+    "SHARD_COST_MARKER",
     "SHARD_ENV",
     "owns_selection",
     "parse_shard",
+    "register_shard_cost_marker",
     "resolve_shard",
     "select_items",
+    "shard_costs",
     "shard_key",
     "shard_of",
     "unsharded_environment",
 ]
 
 PLUGIN_NAME = "rocke.tests.ctest_shard"
+SHARD_COST_MARKER = "rocke_shard_cost"
 
 
 def shard_key(item) -> str:
@@ -90,6 +103,46 @@ def shard_key(item) -> str:
     return f"{item.nodeid.split('::', 1)[0]}[{callspec.id}]"
 
 
+def register_shard_cost_marker(config) -> None:
+    """Declare the ``rocke_shard_cost`` mark, so a run that marks tests
+    without loading this plugin does not warn about an unknown mark."""
+    config.addinivalue_line(
+        "markers",
+        f"{SHARD_COST_MARKER}(seconds): the rough cost of a heavy test, which "
+        "places its shard key by cost instead of by hash (rocke.tests.ctest_shard)",
+    )
+
+
+def _declared_cost(item) -> float | None:
+    marker = item.get_closest_marker(SHARD_COST_MARKER)
+    if marker is None:
+        return None
+    if marker.kwargs or len(marker.args) != 1:
+        raise pytest.UsageError(
+            f"{item.nodeid}: {SHARD_COST_MARKER} takes one positional cost in "
+            f"seconds, got args={marker.args!r} kwargs={marker.kwargs!r}"
+        )
+    return marker.args[0]
+
+
+def shard_costs(items) -> dict[str, float]:
+    """The declared cost of each shard key of ``items`` that has one: the sum
+    of its tests' ``rocke_shard_cost`` marks. Raises ``pytest.UsageError``
+    for a malformed mark or a cost that is not a positive finite number."""
+    costs: dict[str, float] = {}
+    for item in items:
+        cost = _declared_cost(item)
+        if cost is None:
+            continue
+        key = shard_key(item)
+        try:
+            check_cost(key, cost)
+        except ValueError as error:
+            raise pytest.UsageError(f"{item.nodeid}: {error}") from error
+        costs[key] = costs.get(key, 0) + cost
+    return costs
+
+
 def select_items(config, items: list, spec: str | None = None) -> None:
     """``pytest_collection_modifyitems`` body: keep the items of shard
     ``spec`` (default: ``ROCKE_TEST_SHARD``; blank keeps every item)."""
@@ -97,9 +150,11 @@ def select_items(config, items: list, spec: str | None = None) -> None:
     if not text:
         return
     shard = Shard(text)
+    keys = [shard_key(item) for item in items]
+    kept = shard.keeps(keys, shard_costs(items))
     keep, drop = [], []
-    for item in items:
-        (keep if shard.owns(shard_key(item)) else drop).append(item)
+    for item, key in zip(items, keys):
+        (keep if key in kept else drop).append(item)
     if drop:
         config.hook.pytest_deselected(items=drop)
         items[:] = keep
@@ -145,6 +200,7 @@ def pytest_addoption(parser):
 
 
 def pytest_configure(config):
+    register_shard_cost_marker(config)
     try:
         resolved = resolve_shard(from_gtest=config.getoption(ACTIVATION_FLAG))
     except ValueError as error:
@@ -169,7 +225,9 @@ def pytest_collection_modifyitems(config, items):
     if state is None or state.shard is None:
         return
     state.before = len(items)
-    state.split_line = state.shard.split_line(shard_key(item) for item in items)
+    state.split_line = state.shard.split_line(
+        [shard_key(item) for item in items], shard_costs(items)
+    )
     select_items(config, items, state.shard.spec)
     state.kept = len(items)
 
