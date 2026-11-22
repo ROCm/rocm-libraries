@@ -131,9 +131,10 @@ class GoldenGateTree(unittest.TestCase):
             code = run_diff.main()
         return code, out.getvalue()
 
-    def reference_families(self, fams, *_):
+    def reference_families(self, fams, flavors, *_):
         """The stand-in for the Python emitters: ``self.current``'s hashes."""
-        return {name: self.current[name] for name, _ in fams}, []
+        shas = {name: self.current[name] for name, _ in fams}
+        return {flavor: (shas, []) for flavor in flavors}
 
 
 class TestGoldenRoutingGates(GoldenGateTree):

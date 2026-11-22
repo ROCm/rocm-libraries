@@ -471,6 +471,49 @@ class TestBatchAndBuildReuse(unittest.TestCase):
         )
         self.assertTrue(run_diff.is_end_emission(result.emissions[2]))
 
+    def test_each_family_and_flavor_pair_emits_for_its_own_flavor(self):
+        # One pool runs every (family, flavor) pair, so each emitter must get
+        # its flavor from its own environment, not from this process's.
+        flavors = list(run_diff._llvm_flavors())[:2]
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            for name in ("first", "second"):
+                (root / f"{name}_emit.py").write_text(
+                    "import os, sys\n"
+                    "def main():\n"
+                    "    idx = int(sys.argv[1])\n"
+                    "    if idx == 1:\n"
+                    "        raise SystemExit(f'unknown config index {idx}')\n"
+                    f"    sys.stdout.write('{name}:' + os.environ['ROCKE_LLVM_FLAVOR'])\n"
+                    "    return 0\n"
+                )
+            families = [("first", root), ("second", root)]
+            with mock.patch.dict(os.environ, {"ROCKE_LLVM_FLAVOR": "not-a-flavor"}):
+                results = run_diff.python_reference_families(
+                    families, flavors, "ll", False, 4
+                )
+                self.assertEqual(os.environ["ROCKE_LLVM_FLAVOR"], "not-a-flavor")
+        self.assertEqual(sorted(results), sorted(flavors))
+        for flavor in flavors:
+            shas, errors = results[flavor]
+            self.assertEqual(errors, [])
+            self.assertEqual(
+                shas,
+                {
+                    name: {"0": hashlib.sha256(f"{name}:{flavor}".encode()).hexdigest()}
+                    for name in ("first", "second")
+                },
+            )
+
+    def test_selecting_a_flavor_leaves_this_process_environment_alone(self):
+        flavor = run_diff._llvm_flavors()[0]
+        with mock.patch.dict(os.environ):
+            os.environ.pop("ROCKE_LLVM_FLAVOR", None)
+            self.assertEqual(run_diff.selected_llvm_flavor(flavor), flavor)
+            self.assertNotIn("ROCKE_LLVM_FLAVOR", os.environ)
+            self.assertEqual(run_diff.emitter_env(flavor)["ROCKE_LLVM_FLAVOR"], flavor)
+            self.assertNotIn("ROCKE_LLVM_FLAVOR", run_diff.emitter_env(None))
+
     def test_python_timeout_is_per_config_not_per_family(self):
         with TemporaryDirectory() as directory:
             root = Path(directory)
@@ -851,7 +894,7 @@ class TestMainReturnsTheGateVerdict(unittest.TestCase):
                 with mock.patch.object(
                     run_diff,
                     "python_reference_families",
-                    return_value=({"kept": {"0": "new"}}, []),
+                    return_value={"llvm20": ({"kept": {"0": "new"}}, [])},
                 ):
                     with mock.patch.object(sys, "argv", argv):
                         with mock.patch.dict(
@@ -962,7 +1005,7 @@ class TestConfigEnumeration(unittest.TestCase):
                 mock.patch.object(
                     run_diff,
                     "_run_native_configs",
-                    side_effect=lambda binary, indices, mode, canonical: emissions(
+                    side_effect=lambda binary, indices, mode, canonical, **kw: emissions(
                         "native", indices, mode
                     ),
                 ),

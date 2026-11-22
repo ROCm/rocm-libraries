@@ -157,6 +157,10 @@ def golden_kind(mode, canonical):
     )
 
 
+# How an emitter process is told which LLVM flavor to write IR for.
+FLAVOR_ENV = "ROCKE_LLVM_FLAVOR"
+
+
 def _llvm_flavors() -> tuple[str, ...]:
     if str(PY_REF_ROOT) not in sys.path:
         sys.path.insert(0, str(PY_REF_ROOT))
@@ -165,15 +169,16 @@ def _llvm_flavors() -> tuple[str, ...]:
     return tuple(LLVM_FLAVORS)
 
 
-def pin_llvm_flavor(requested: str) -> str:
-    """The LLVM flavor this run emits for, exported to both emitters.
+def selected_llvm_flavor(requested: str) -> str:
+    """The LLVM flavor a run emits for.
 
     `requested` (``--flavor``) wins; otherwise ROCKE_LLVM_FLAVOR, otherwise the
-    flavor rocke resolves for this host. Exporting it means every emitter
-    process writes IR for the same flavor the golden records or checks.
+    flavor rocke resolves for this host. The run hands it to every emitter it
+    starts (``emitter_env``), so each one writes IR for the flavor the golden
+    records or checks; this process's environment is left as it is.
     """
     flavors = _llvm_flavors()
-    flavor = (requested or os.environ.get("ROCKE_LLVM_FLAVOR", "")).strip().lower()
+    flavor = (requested or os.environ.get(FLAVOR_ENV, "")).strip().lower()
     if not flavor:
         from rocke.core.lower_llvm import _resolve_llvm_flavor
 
@@ -182,8 +187,17 @@ def pin_llvm_flavor(requested: str) -> str:
         raise SystemExit(
             f"unknown LLVM flavor {flavor!r}, expected one of {list(flavors)}"
         )
-    os.environ["ROCKE_LLVM_FLAVOR"] = flavor
     return flavor
+
+
+def emitter_env(flavor: str | None) -> dict[str, str]:
+    """The environment an emitter process starts with: this process's, with
+    ``flavor`` as its LLVM flavor. ``None`` leaves the emitter to resolve its
+    own, as a plain parity run without ``--flavor`` does."""
+    env = dict(os.environ)
+    if flavor is not None:
+        env[FLAVOR_ENV] = flavor
+    return env
 
 
 def collect_ref_shas(results):
@@ -447,15 +461,19 @@ def _run_native_configs(
     indices: Iterable[int],
     mode: str = "ll",
     canonical: bool = False,
+    flavor: str | None = None,
 ) -> BatchResult:
     """Stream native configs through short-lived, pipe-backed emitters."""
     emissions = []
+    env = emitter_env(flavor)
     for index in indices:
         args = [str(binpath), str(index)]
         if mode != "ll":
             args.append(mode)
         try:
-            process = subprocess.run(args, capture_output=True, timeout=TIMEOUT)
+            process = subprocess.run(
+                args, capture_output=True, timeout=TIMEOUT, env=env
+            )
             emission = _emission(
                 process.returncode,
                 process.stdout,
@@ -482,11 +500,11 @@ PY_REF_ROOT = PYROOT
 SHIM_DIR = None
 
 
-def python_emitter_env(src_dir: Path) -> dict[str, str]:
-    """The environment a Python emitter in ``src_dir`` runs in: the reference
-    rocke package, the library and the parity directories on ``PYTHONPATH``,
-    and no debug-location capture."""
-    env = dict(os.environ)
+def python_emitter_env(src_dir: Path, flavor: str | None = None) -> dict[str, str]:
+    """The environment a Python emitter in ``src_dir`` runs in: ``emitter_env``
+    for ``flavor``, plus the reference rocke package, the library and the
+    parity directories on ``PYTHONPATH``, and no debug-location capture."""
+    env = emitter_env(flavor)
     # The C emitters build their IR natively and so have no Python authoring
     # stack to record; letting location capture through here would give the
     # reference side debug metadata the other side cannot have, and report drift
@@ -516,12 +534,14 @@ def _run_python_batch(
     src_dir: Path | None = None,
     canonical: bool = False,
     digest_in_worker: bool = False,
+    flavor: str | None = None,
 ) -> BatchResult:
     """Emit one family's configurations with a deadline for each invocation.
 
     With `canonical`, the canonical hash is computed here from the worker's
     output files, or, with `digest_in_worker`, by the worker itself (in
-    parallel across families; nothing is written to disk)."""
+    parallel across families; nothing is written to disk). `flavor` is the
+    LLVM flavor the emitter writes IR for (``emitter_env``)."""
     if src_dir is None:
         src_dir = PARITY
     indices = list(indices)
@@ -545,7 +565,7 @@ def _run_python_batch(
                 stdout=subprocess.PIPE,
                 stderr=errors,
                 text=True,
-                env=python_emitter_env(src_dir),
+                env=python_emitter_env(src_dir, flavor),
             )
             assert process.stdout is not None
             records: queue.Queue[str | None] = queue.Queue()
@@ -801,13 +821,13 @@ def _batch_complete(emissions: list[Emission], mode: str, limit: int = MAX_CFG) 
     )
 
 
-def _run_family_hashed(name, binpath, mode, canonical, src_dir):
+def _run_family_hashed(name, binpath, mode, canonical, src_dir, flavor=None):
     """Run both emitters once when comparison needs hashes, not raw text."""
     limit = config_limit(name)
     emitter_workers = min(2, available_cpus())
     with ThreadPoolExecutor(max_workers=emitter_workers) as emitters:
         c_future = emitters.submit(
-            _run_native_configs, binpath, range(limit), mode, canonical
+            _run_native_configs, binpath, range(limit), mode, canonical, flavor=flavor
         )
         p_future = emitters.submit(
             _run_python_batch,
@@ -816,6 +836,7 @@ def _run_family_hashed(name, binpath, mode, canonical, src_dir):
             mode,
             src_dir=src_dir,
             canonical=canonical,
+            flavor=flavor,
         )
         c_batch = c_future.result()
         p_batch = p_future.result()
@@ -895,7 +916,7 @@ def _canonical_form_missing(*emissions: Emission) -> bool:
     return any(e.has_output and e.canonical_error for e in emissions)
 
 
-def run_family(name, archive, mode, canonical=False, src_dir=None):
+def run_family(name, archive, mode, canonical=False, src_dir=None, flavor=None):
     if src_dir is None:
         src_dir = PARITY
     binpath, cerr = compile_c(name, archive, src_dir=src_dir)
@@ -907,7 +928,7 @@ def run_family(name, archive, mode, canonical=False, src_dir=None):
             "configs": [],
         }
     configs, range_drift, unsupported, batch_error = _run_family_hashed(
-        name, binpath, mode, canonical, src_dir
+        name, binpath, mode, canonical, src_dir, flavor
     )
     if batch_error:
         return {
@@ -1070,21 +1091,27 @@ def _print_family_result(result: dict) -> None:
                         print(f"          {side}: {config[side]}", flush=True)
 
 
-def _default_family_workers(family_count: int, _mode: str) -> int:
-    """Size the outer pool from the child processes active per family."""
-    children_per_family = 2
+# Child processes one pooled task keeps busy: a parity comparison runs the
+# native and the Python emitter side by side, a golden run only the Python one.
+PARITY_CHILDREN_PER_TASK = 2
+GOLDEN_CHILDREN_PER_TASK = 1
+
+
+def _default_family_workers(task_count: int, children_per_task: int) -> int:
+    """Size the outer pool from the child processes each task keeps busy."""
     return min(
-        family_count,
-        max(1, available_cpus() // children_per_family),
+        task_count,
+        max(1, available_cpus() // children_per_task),
         8,
     )
 
 
-def python_reference_shas(name, mode, canonical, src_dir):
+def python_reference_shas(name, mode, canonical, src_dir, flavor=None):
     """One family's Python reference hashes, {config index: sha}, without the
-    C++ engine: what a golden records. Returns (shas, error); a family whose
-    emitter does not accept the mode yields ({}, None). With ``canonical``, an
-    output without a canonical form is an error: no hash stands in for it."""
+    C++ engine: what a golden records, for LLVM flavor ``flavor``. Returns
+    (shas, error); a family whose emitter does not accept the mode yields
+    ({}, None). With ``canonical``, an output without a canonical form is an
+    error: no hash stands in for it."""
     limit = config_limit(name)
     batch = _run_python_batch(
         name,
@@ -1093,6 +1120,7 @@ def python_reference_shas(name, mode, canonical, src_dir):
         src_dir=src_dir,
         canonical=canonical,
         digest_in_worker=True,
+        flavor=flavor,
     )
     if batch.error:
         return {}, f"Python batch failed: {batch.error}"
@@ -1116,25 +1144,33 @@ def python_reference_shas(name, mode, canonical, src_dir):
     return shas, None
 
 
-def python_reference_families(families, mode, canonical, family_workers):
-    """`python_reference_shas` for every family, concurrently. Returns
-    ({family: {idx: sha}}, [(family, error)])."""
-    shas, errors = {}, []
+def python_reference_families(families, flavors, mode, canonical, family_workers):
+    """`python_reference_shas` for every (family, flavor) pair, in one pool:
+    no flavor waits for another flavor's slowest family. Returns
+    {flavor: ({family: {idx: sha}}, [(family, error)])} for each of
+    ``flavors``."""
+    results = {flavor: ({}, []) for flavor in flavors}
     if not families:
-        return shas, errors
+        return results
     with ThreadPoolExecutor(max_workers=family_workers) as pool:
         futures = {
-            pool.submit(python_reference_shas, name, mode, canonical, src_dir): name
+            pool.submit(
+                python_reference_shas, name, mode, canonical, src_dir, flavor
+            ): (name, flavor)
             for name, src_dir in families
+            for flavor in flavors
         }
         for future in as_completed(futures):
-            name = futures[future]
+            name, flavor = futures[future]
+            shas, errors = results[flavor]
             family_shas, error = future.result()
             if error:
                 errors.append((name, error))
             if family_shas:
                 shas[name] = family_shas
-    return shas, sorted(errors)
+    for _shas, errors in results.values():
+        errors.sort()
+    return results
 
 
 def _run_families(
@@ -1143,6 +1179,7 @@ def _run_families(
     mode: str,
     canonical: bool = False,
     family_workers: int | None = None,
+    flavor: str | None = None,
 ) -> list[dict]:
     """Run independent families concurrently and return discovery order.
 
@@ -1154,7 +1191,9 @@ def _run_families(
         return []
     if family_workers is None:
         # Cap concurrency to avoid excessive captured-IR memory.
-        family_workers = _default_family_workers(len(families), mode)
+        family_workers = _default_family_workers(
+            len(families), PARITY_CHILDREN_PER_TASK
+        )
     ordered: dict[int, dict] = {}
     with ThreadPoolExecutor(max_workers=family_workers) as pool:
         futures = {
@@ -1165,6 +1204,7 @@ def _run_families(
                 mode,
                 canonical=canonical,
                 src_dir=src_dir,
+                flavor=flavor,
             ): index
             for index, (name, src_dir) in enumerate(families)
         }
@@ -1176,18 +1216,6 @@ def _run_families(
 
 
 def main():
-    """Run the CLI without leaking its pinned flavor to in-process callers."""
-    previous_flavor = os.environ.get("ROCKE_LLVM_FLAVOR")
-    try:
-        return _main()
-    finally:
-        if previous_flavor is None:
-            os.environ.pop("ROCKE_LLVM_FLAVOR", None)
-        else:
-            os.environ["ROCKE_LLVM_FLAVOR"] = previous_flavor
-
-
-def _main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--mode", default="ll", choices=["ll", "ir", "verify"])
     ap.add_argument(
@@ -1231,7 +1259,10 @@ def _main():
         "--jobs",
         type=int,
         default=0,
-        help="families to compare concurrently (default: min(8, available CPUs))",
+        help="emitter tasks to run concurrently: families for a parity run, "
+        "(family, flavor) pairs for --python-only (default: at most 8, and "
+        "no more than the available CPUs hold at one or two emitter processes "
+        "per task)",
     )
     ap.add_argument(
         "--record-golden",
@@ -1255,7 +1286,7 @@ def _main():
         help="LLVM flavor to emit for and to record / check under (llvm20, "
         "llvm22, llvm23); default ROCKE_LLVM_FLAVOR, else the host's flavor. "
         "--python-only --mode ll takes a comma-separated list, or 'all' for "
-        "every flavor rocke qualifies, and handles each flavor in turn",
+        "every flavor rocke qualifies, and emits for all of them in one pool",
     )
     ap.add_argument(
         "--golden-file",
@@ -1323,7 +1354,6 @@ def _main():
     # A filtered run records or checks only the families it ran.
     scope = [name for name, _ in fams] if (args.only or args.exclude) else None
 
-    jobs = args.jobs or _default_family_workers(len(fams), args.mode)
     if args.python_only:
         if not fams:
             # Checking nothing would print GOLDEN OK; recording nothing would
@@ -1337,15 +1367,19 @@ def _main():
             print(shard.split_line(name for name, _ in fams))
             run_fams = [(name, d) for name, d in fams if shard.owns(name)]
         status = 0
-        for requested in flavors:
-            flavor = pin_llvm_flavor(requested)
+        selected = list(dict.fromkeys(selected_llvm_flavor(f) for f in flavors))
+        jobs = args.jobs or _default_family_workers(
+            len(run_fams) * len(selected), GOLDEN_CHILDREN_PER_TASK
+        )
+        references = python_reference_families(
+            run_fams, selected, args.mode, args.canonical, jobs
+        )
+        for flavor in selected:
             print(
                 f"mode={args.mode}  flavor={flavor}  families={len(run_fams)}  "
                 f"jobs={jobs}  python-only"
             )
-            cur, errors = python_reference_families(
-                run_fams, args.mode, args.canonical, jobs
-            )
+            cur, errors = references[flavor]
             if errors:
                 print("\n=== PYTHON REFERENCE FAILURES ===")
                 for family, error in errors:
@@ -1360,7 +1394,7 @@ def _main():
 
     # A golden is per flavor, so its runs always pin one; a plain parity run
     # leaves each emitter to resolve its own unless --flavor is given.
-    flavor = pin_llvm_flavor(flavors[0]) if (golden or args.flavor) else "host"
+    flavor = selected_llvm_flavor(flavors[0]) if (golden or args.flavor) else None
 
     archive = Path(args.archive)
     if not archive.exists():
@@ -1392,9 +1426,10 @@ def _main():
             "(tools/check_byte_identity.py does), or pass --library-archive"
         )
 
+    jobs = args.jobs or _default_family_workers(len(fams), PARITY_CHILDREN_PER_TASK)
     print(
-        f"mode={args.mode}  flavor={flavor}  families={len(fams)}  jobs={jobs}  "
-        f"archive={archive}"
+        f"mode={args.mode}  flavor={flavor or 'host'}  families={len(fams)}  "
+        f"jobs={jobs}  archive={archive}"
     )
     print(f"engine build-id: {archive_build_id(archive)}")
     if LIBRARY_ARCHIVE is not None:
@@ -1405,6 +1440,7 @@ def _main():
         args.mode,
         canonical=args.canonical,
         family_workers=jobs,
+        flavor=flavor,
     )
 
     Path(args.json).write_text(json.dumps(results, indent=2))
