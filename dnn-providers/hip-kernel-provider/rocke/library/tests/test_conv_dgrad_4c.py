@@ -9,7 +9,7 @@ Covers:
   ``stage_rows`` knob's name, validator and defaults, and that the bf16 4c
   kernel emits only the ``mfma_f32_4x4x4_bf16`` (``_1k``) atom while the fp16
   kernel keeps the f16 atom;
-* on-device numerics (gfx942 / gfx950 + torch): the 4c forward kernel in bf16
+* on-device numerics (gfx942 / gfx950): the 4c forward kernel in bf16
   and the 4c dgrad in its forms -- the two-kernel pipeline (weight transpose
   + 4c kernel on dY), the single kernel with fused weights (per-element
   gathers, or LDS staging + transpose reads with ``dgrad_weights_lds`` on
@@ -23,7 +23,9 @@ Every launch goes through the direct forward ABI (``ConvArgs`` /
 ``conv_direct_args_signature``) with the grid of ``direct_launch_geometry``;
 the dgrad runs it over the transposed problem, like the AOT plan does.
 
-Elementwise rule (``manifest_runner/conv.py``): an output element is bad when
+References are float64 convolutions of the stored inputs
+(``rocke.numeric.conv``). Elementwise rule (``manifest_runner/conv.py``): an
+output element is bad when
 ``|out - ref| > tol + tol * |ref|`` with ``tol = 1e-2``; a case passes iff no
 element is bad. The output is NaN-filled before each launch, so an element the
 kernel never writes is caught as bad too.
@@ -35,10 +37,14 @@ Run (GPU part as a script, as the other numeric suites):
 
 from __future__ import annotations
 
-import ctypes
-import importlib.util
 import unittest
 from dataclasses import replace
+
+import numpy as np
+from rocke.numeric import storage
+from rocke.numeric.conv import conv_dgrad, conv_fwd
+from rocke.runtime.hip_module import get_device_arch
+from rocke.runtime.host_buffers import as_u8_buffer
 
 from kernels.common.conv_direct_grouped import (
     DirectConv4cSpec,
@@ -53,21 +59,12 @@ from kernels.common.conv_direct_grouped import (
     is_valid_spec_4c,
     make_dgrad_4c_spec,
 )
-from rocke.runtime.hip_module import get_device_arch
-
-_HAS_TORCH = importlib.util.find_spec("torch") is not None
-if _HAS_TORCH:
-    # Claim the HIP context for torch before rocke's runtime touches it (see
-    # test_direct_conv_correctness.py).
-    import torch
-
-    torch.cuda.is_available()
 
 GPU_ARCH = get_device_arch(0)
 _GPU_SKIP = (
     ""
-    if (GPU_ARCH in ("gfx942", "gfx950") and _HAS_TORCH)
-    else f"needs gfx942/gfx950 + torch (arch={GPU_ARCH!r}, torch={_HAS_TORCH})"
+    if GPU_ARCH in ("gfx942", "gfx950")
+    else f"needs gfx942/gfx950 (arch={GPU_ARCH!r})"
 )
 _TOL = 1e-2
 
@@ -225,15 +222,14 @@ class TestDgrad4cSpec(unittest.TestCase):
             passes = -(-(bg * 4 * DCONV4C_MAX_TAPS * 4 // 8) // threads)
             self.assertLessEqual(passes, DCONV4C_MAX_WL_PASSES)
 
-    @unittest.skipUnless(_HAS_TORCH, "needs torch")
     def test_check_counts_nan_as_bad(self):
-        ref = torch.zeros(8)
-        out = ref.clone()
-        out[3] = float("nan")
+        ref = np.zeros(8)
+        out = ref.copy()
+        out[3] = np.nan
         ok, msg = _check(out, ref)
         self.assertFalse(ok)
         self.assertIn("bad=1", msg)
-        self.assertTrue(_check(ref.clone(), ref)[0])
+        self.assertTrue(_check(ref.copy(), ref)[0])
 
     def test_spec_helper(self):
         p = _problem(N=6, H=30, W=26, groups=32)
@@ -454,24 +450,19 @@ class Test4cStageRowsSpec(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 
-def _u8(t):
-    return (ctypes.c_uint8 * t.nbytes).from_address(t.data_ptr())
-
-
-def _check(out, ref) -> tuple[bool, str]:
-    out_f = out.float().cpu()
-    ref_f = ref.float().cpu()
-    diff = (out_f - ref_f).abs()
+def _check(out: np.ndarray, ref: np.ndarray) -> tuple[bool, str]:
+    """Elementwise rule on the output values ``out`` against ``ref``."""
+    diff = np.abs(out - ref)
     # NaN-safe: a NaN (e.g. unwritten, NaN-filled) element fails `<=`, so it
     # counts as bad; `diff > tol` would let it pass.
-    n_bad = int((~(diff <= _TOL + _TOL * ref_f.abs())).sum())
-    max_abs = float(diff.nan_to_num(nan=float("inf")).max())
+    n_bad = int((~(diff <= _TOL + _TOL * np.abs(ref))).sum())
+    max_abs = float(np.nan_to_num(diff, nan=np.inf).max())
     return n_bad == 0, f"bad={n_bad} max_abs={max_abs:.3e}"
 
 
-def _rand(shape, dtype):
-    td = torch.bfloat16 if dtype == "bf16" else torch.float16
-    return torch.empty(*shape, dtype=td).uniform_(-1.0, 1.0)
+def _rand(shape, dtype, rng: np.random.Generator) -> np.ndarray:
+    """U(-1, 1) values stored as ``dtype`` host data."""
+    return storage.encode(rng.uniform(-1.0, 1.0, shape), dtype)
 
 
 def _compile(kernel):
@@ -485,7 +476,7 @@ def _launch_direct(art, spec, run_problem, abi_problem, a, b, d, direction="fwd"
 
     ``abi_problem`` is the problem the kernarg block describes (for a dgrad run
     on the transposed problem this is the transposed one); ``a`` / ``b`` / ``d``
-    are host tensors bound to the A, B and D slots. Returns the D tensor.
+    are host arrays bound to the A, B and D slots. Returns ``d``, read back.
     """
     from dataclasses import replace
 
@@ -496,8 +487,8 @@ def _launch_direct(art, spec, run_problem, abi_problem, a, b, d, direction="fwd"
 
     rt = Runtime()
     bufs = [rt.alloc(t.nbytes) for t in (a, b, d)]
-    rt.memcpy_h2d(bufs[0], _u8(a), a.nbytes)
-    rt.memcpy_h2d(bufs[1], _u8(b), b.nbytes)
+    rt.memcpy_h2d(bufs[0], as_u8_buffer(a), a.nbytes)
+    rt.memcpy_h2d(bufs[1], as_u8_buffer(b), b.nbytes)
     # NaN-fill the output so an unwritten element can never pass.
     rt.memset(bufs[2], 0xFF, d.nbytes)
     grid, block = direct_launch_geometry(replace(spec, problem=abi_problem))
@@ -510,7 +501,7 @@ def _launch_direct(art, spec, run_problem, abi_problem, a, b, d, direction="fwd"
         signature=conv_direct_args_signature(run_problem.dtype, direction=direction),
     )
     launcher(values, config=LaunchConfig(grid=grid, block=block, fence=True))
-    rt.memcpy_d2h(_u8(d), bufs[2], d.nbytes)
+    rt.memcpy_d2h(as_u8_buffer(d), bufs[2], d.nbytes)
     for buf in bufs:
         rt.free(buf)
     return d
@@ -521,18 +512,18 @@ def _run_4c_fprop(spec: DirectConv4cSpec, p: DirectConvProblem, art=None):
     class) on ``p``; ``(ok, msg)``."""
     if art is None:
         art = _compile(build_direct_conv_4c(spec, arch=GPU_ARCH))
-    torch.manual_seed(0)
-    x = _rand((p.N, p.H, p.W, p.total_c), p.dtype)
-    w = _rand((p.total_k, p.KH, p.KW, p.cpg), p.dtype)
-    y = torch.zeros(p.N, p.Ho, p.Wo, p.total_k, dtype=x.dtype)
-    ref = torch.nn.functional.conv2d(
-        x.float().permute(0, 3, 1, 2),
-        w.float().permute(0, 3, 1, 2),
+    rng = np.random.default_rng(0)
+    x = _rand((p.N, p.H, p.W, p.total_c), p.dtype, rng)
+    w = _rand((p.total_k, p.KH, p.KW, p.cpg), p.dtype, rng)
+    y = np.zeros((p.N, p.Ho, p.Wo, p.total_k), dtype=x.dtype)
+    ref = conv_fwd(
+        storage.decode(x, p.dtype),
+        storage.decode(w, p.dtype),
         padding=p.PAD,
         groups=p.groups,
-    ).permute(0, 2, 3, 1)
+    )
     y = _launch_direct(art, spec, p, p, x, w, y)
-    return _check(y, ref)
+    return _check(storage.decode(y, p.dtype), ref)
 
 
 @unittest.skipIf(bool(_GPU_SKIP), _GPU_SKIP or "gpu")
@@ -598,25 +589,24 @@ def _run_4c_dgrad(p: DirectConvProblem, spec: DirectConv4cSpec, arts=None):
     tp = dgrad_4c_transposed_problem(p)
     run_spec = replace(spec, problem=tp)
 
-    torch.manual_seed(1)
-    dy = _rand((p.N, p.Ho, p.Wo, p.total_k), p.dtype)
-    w = _rand((p.total_k, p.KH, p.KW, p.cpg), p.dtype)
-    dx = torch.zeros(p.N, p.H, p.W, p.total_c, dtype=dy.dtype)
-    ref = torch.nn.grad.conv2d_input(
-        (p.N, p.total_c, p.H, p.W),
-        w.float().permute(0, 3, 1, 2),
-        dy.float().permute(0, 3, 1, 2),
-        stride=1,
+    rng = np.random.default_rng(1)
+    dy = _rand((p.N, p.Ho, p.Wo, p.total_k), p.dtype, rng)
+    w = _rand((p.total_k, p.KH, p.KW, p.cpg), p.dtype, rng)
+    dx = np.zeros((p.N, p.H, p.W, p.total_c), dtype=dy.dtype)
+    ref = conv_dgrad(
+        storage.decode(dy, p.dtype),
+        storage.decode(w, p.dtype),
+        in_spatial=(p.H, p.W),
         padding=p.PAD,
         groups=p.groups,
-    ).permute(0, 2, 3, 1)
+    )
     b_host = w
     if art_t is not None:
         # The weight pre-pass writes W_T, which the 4c kernel reads as B.
         L = direct_4c_dgrad_launch(run_spec)
         rt = Runtime()
         d_w, d_ws = rt.alloc(w.nbytes), rt.alloc(L["workspace_bytes"])
-        rt.memcpy_h2d(d_w, _u8(w), w.nbytes)
+        rt.memcpy_h2d(d_w, as_u8_buffer(w), w.nbytes)
         elem = "bf16" if p.dtype == "bf16" else "f16"
         sig = [
             {"name": "A", "type": f"ptr<{elem}, global>", "size_bytes": 8},
@@ -635,12 +625,12 @@ def _run_4c_dgrad(p: DirectConvProblem, spec: DirectConv4cSpec, arts=None):
                 grid=L["transpose_grid"], block=L["transpose_block"], fence=True
             ),
         )
-        b_host = torch.empty(L["workspace_bytes"] // 2, dtype=w.dtype)
-        rt.memcpy_d2h(_u8(b_host), d_ws, L["workspace_bytes"])
+        b_host = np.empty(L["workspace_bytes"] // w.itemsize, dtype=w.dtype)
+        rt.memcpy_d2h(as_u8_buffer(b_host), d_ws, L["workspace_bytes"])
         rt.free(d_w)
         rt.free(d_ws)
     dx = _launch_direct(art_m, run_spec, p, tp, dy, b_host, dx)
-    return _check(dx, ref)
+    return _check(storage.decode(dx, p.dtype), ref)
 
 
 @unittest.skipIf(bool(_GPU_SKIP), _GPU_SKIP or "gpu")
@@ -706,7 +696,7 @@ class Test4cDgrad(unittest.TestCase):
                     self.assertTrue(ok, msg)
 
 
-@unittest.skipIf(GPU_ARCH != "gfx950" or not _HAS_TORCH, "needs gfx950 + torch")
+@unittest.skipIf(GPU_ARCH != "gfx950", "needs gfx950")
 class Test4cStageRowsDgrad(unittest.TestCase):
     """On device: the row-staged kernel over adversarial shapes (NaN-filled
     dX, so an unwritten element fails)."""

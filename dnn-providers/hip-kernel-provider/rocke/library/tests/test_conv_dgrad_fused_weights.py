@@ -24,7 +24,8 @@ plus the kernel-level hooks ``direct_dgrad_spec_for_problem`` /
 ``direct_dgrad_launch`` / ``build_direct_dgrad``.
 
 CPU tests cover spec plumbing, validation and emission. GPU tests (gfx942 /
-gfx950 + torch) check numerics against ``torch.nn.grad.conv2d_input`` over
+gfx950) check numerics against a float64 data-gradient reference of the
+stored inputs (``rocke.numeric.conv.conv_dgrad``) over
 adversarial shapes: odd H / W, N = 1, W not a multiple of block_q, partial
 K atoms (cpg 8 / 12), partial M tiles, cpg != kpg, 3 K atoms, fold_k32,
 H tiles taller than the image and block_q = 32. Every kernel is launched
@@ -37,10 +38,14 @@ element is bad (dX is NaN-filled first).
 
 from __future__ import annotations
 
-import ctypes
-import importlib.util
 import unittest
 from dataclasses import replace
+
+import numpy as np
+from rocke.numeric import storage
+from rocke.numeric.conv import conv_dgrad
+from rocke.runtime.hip_module import get_device_arch
+from rocke.runtime.host_buffers import as_u8_buffer
 
 from kernels.common.conv_direct_grouped import (
     DirectConv4cSpec,
@@ -59,21 +64,12 @@ from kernels.common.conv_direct_grouped import (
     is_valid_spec,
     make_dgrad_fprop_spec,
 )
-from rocke.runtime.hip_module import get_device_arch
-
-_HAS_TORCH = importlib.util.find_spec("torch") is not None
-if _HAS_TORCH:
-    # Claim the HIP context for torch before rocke's runtime touches it (see
-    # test_direct_conv_correctness.py).
-    import torch
-
-    torch.cuda.is_available()
 
 GPU_ARCH = get_device_arch(0)
 _GPU_SKIP = (
     ""
-    if (GPU_ARCH in ("gfx942", "gfx950") and _HAS_TORCH)
-    else f"needs gfx942/gfx950 + torch (arch={GPU_ARCH!r}, torch={_HAS_TORCH})"
+    if GPU_ARCH in ("gfx942", "gfx950")
+    else f"needs gfx942/gfx950 (arch={GPU_ARCH!r})"
 )
 _TOL = 1e-2
 _TR_READ = "call <4 x i16> @llvm.amdgcn.ds.read.tr16.b64("
@@ -360,10 +356,6 @@ class TestFusedWeightSpec(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 
-def _u8(t):
-    return (ctypes.c_uint8 * t.nbytes).from_address(t.data_ptr())
-
-
 def _compile(kernel):
     from rocke import compile_kernel
 
@@ -387,24 +379,22 @@ def _run(p: DirectConvProblem, spec: DirectConvSpec, art=None) -> tuple[bool, st
         return False, f"invalid spec: {why}"
     if art is None:
         art = _compile(build_direct_conv(spec, arch=GPU_ARCH))
-    torch.manual_seed(3)
-    td = torch.bfloat16 if p.dtype == "bf16" else torch.float16
-    dy = torch.empty(p.N, p.Ho, p.Wo, p.total_k, dtype=td).uniform_(-1.0, 1.0)
-    w = torch.empty(p.total_k, p.KH, p.KW, p.cpg, dtype=td).uniform_(-1.0, 1.0)
-    dx = torch.empty(p.N, p.H, p.W, p.total_c, dtype=td)
-    ref = torch.nn.grad.conv2d_input(
-        (p.N, p.total_c, p.H, p.W),
-        w.float().permute(0, 3, 1, 2),
-        dy.float().permute(0, 3, 1, 2),
-        stride=1,
+    rng = np.random.default_rng(3)
+    dy = storage.encode(rng.uniform(-1.0, 1.0, (p.N, p.Ho, p.Wo, p.total_k)), p.dtype)
+    w = storage.encode(rng.uniform(-1.0, 1.0, (p.total_k, p.KH, p.KW, p.cpg)), p.dtype)
+    dx = np.empty((p.N, p.H, p.W, p.total_c), dtype=dy.dtype)
+    ref = conv_dgrad(
+        storage.decode(dy, p.dtype),
+        storage.decode(w, p.dtype),
+        in_spatial=(p.H, p.W),
         padding=p.PAD,
         groups=p.groups,
-    ).permute(0, 2, 3, 1)
+    )
 
     rt = Runtime()
     d_dy, d_w, d_dx = (rt.alloc(t.nbytes) for t in (dy, w, dx))
-    rt.memcpy_h2d(d_dy, _u8(dy), dy.nbytes)
-    rt.memcpy_h2d(d_w, _u8(w), w.nbytes)
+    rt.memcpy_h2d(d_dy, as_u8_buffer(dy), dy.nbytes)
+    rt.memcpy_h2d(d_w, as_u8_buffer(w), w.nbytes)
     rt.memset(d_dx, 0xFF, dx.nbytes)  # NaN-fill: unwritten outputs fail
     extra = []
     if spec.dgrad_fused_weights:
@@ -437,12 +427,15 @@ def _run(p: DirectConvProblem, spec: DirectConvSpec, art=None) -> tuple[bool, st
         kernel_name=art.kernel_name,
         signature=conv_direct_args_signature(p.dtype, direction="fwd"),
     )(values, config=LaunchConfig(grid=grid, block=block, fence=True))
-    rt.memcpy_d2h(_u8(dx), d_dx, dx.nbytes)
+    rt.memcpy_d2h(as_u8_buffer(dx), d_dx, dx.nbytes)
     for b in (d_dy, d_w, d_dx, *extra):
         rt.free(b)
-    diff = (dx.float() - ref).abs()
-    n_bad = int((~(diff <= _TOL + _TOL * ref.abs())).sum())
-    return n_bad == 0, f"bad={n_bad} max_abs={float(diff.nan_to_num(1e9).max()):.3e}"
+    diff = np.abs(storage.decode(dx, p.dtype) - ref)
+    n_bad = int((~(diff <= _TOL + _TOL * np.abs(ref))).sum())
+    return (
+        n_bad == 0,
+        f"bad={n_bad} max_abs={float(np.nan_to_num(diff, nan=1e9).max()):.3e}",
+    )
 
 
 #: (problem, extra make_dgrad_fprop_spec knobs) -- adversarial coverage.

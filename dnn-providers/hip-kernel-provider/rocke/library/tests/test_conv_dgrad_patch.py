@@ -4,20 +4,20 @@
 the width fold the grouped-convolution dispatcher runs dgrad problems through
 (``fold_width``).
 
-No GPU and no comgr: the fold's arithmetic (checked against torch on the CPU
-when torch is installed), the patch record, the validity gates, the lowered
-IR, the cache identity, the AOT job grid and admission. The two-engine
-counterpart is configs 34-35 of the dgrad parity emitters.
+No GPU and no comgr: the fold's arithmetic (checked against the float64
+references of ``builders.common.conv_reference``), the patch record, the
+validity gates, the lowered IR, the cache identity, the AOT job grid and
+admission. The two-engine counterpart is configs 34-35 of the dgrad parity
+emitters.
 """
 
 from __future__ import annotations
 
-import importlib.util
 import re
 import unittest
 from dataclasses import replace
 
-_HAS_TORCH = importlib.util.find_spec("torch") is not None
+import numpy as np
 
 
 def _problem(**kw):
@@ -113,24 +113,11 @@ class TestFoldWidth(unittest.TestCase):
         with self.assertRaises(ValueError):
             fold_width(_problem(Wi=30, X=4, sW=4), 4)
 
-    @unittest.skipUnless(_HAS_TORCH, "torch is optional")
     def test_folded_dgrad_is_the_same_numbers(self):
-        import torch
-
+        from builders.common.conv_reference import conv_dgrad_reference
         from kernels.common.conv_implicit_gemm_dgrad import fold_width
 
-        def dgrad(p, dy, w):
-            # NHWC dY / KYXC W -> NHWC dX, through torch's NCHW reference.
-            dx = torch.nn.grad.conv2d_input(
-                (p.N, p.C, p.Hi, p.Wi),
-                w.permute(0, 3, 1, 2),
-                dy.permute(0, 3, 1, 2),
-                stride=(p.sH, p.sW),
-                padding=(p.pH, p.pW),
-            )
-            return dx.permute(0, 2, 3, 1).contiguous()
-
-        torch.manual_seed(0)
+        rng = np.random.default_rng(0)
         for kw in (
             {
                 "N": 2,
@@ -171,33 +158,23 @@ class TestFoldWidth(unittest.TestCase):
             p = _problem(**kw)
             q = fold_width(p)
             self.assertNotEqual(q, p)
-            dy = torch.randn(p.N, p.Ho, p.Wo, p.K, dtype=torch.float64)
-            w = torch.randn(p.K, p.Y, p.X, p.C, dtype=torch.float64)
-            want = dgrad(p, dy, w)
-            got = dgrad(q, dy, w.reshape(q.K, q.Y, q.X, q.C))
-            torch.testing.assert_close(got.reshape(want.shape), want)
+            dy = rng.standard_normal((p.N, p.Ho, p.Wo, p.K))
+            w = rng.standard_normal((p.K, p.Y, p.X, p.C))
+            want = conv_dgrad_reference(dy, w, p)
+            got = conv_dgrad_reference(dy, w.reshape(q.K, q.Y, q.X, q.C), q)
+            np.testing.assert_allclose(
+                got.reshape(want.shape), want, rtol=1e-7, atol=1e-7
+            )
 
 
 class TestForwardWidthFold(unittest.TestCase):
     """The fold is direction-free: a forward runs folded on the same tensors."""
 
-    @unittest.skipUnless(_HAS_TORCH, "torch is optional")
     def test_folded_forward_is_the_same_numbers(self):
-        import torch
-
+        from builders.common.conv_reference import conv_fwd_reference
         from kernels.common.conv_implicit_gemm_dgrad import fold_width
 
-        def fwd(p, x, w):
-            # NHWC X / KYXC W -> NHWC Y, through torch's NCHW reference.
-            y = torch.nn.functional.conv2d(
-                x.permute(0, 3, 1, 2),
-                w.permute(0, 3, 1, 2),
-                stride=(p.sH, p.sW),
-                padding=(p.pH, p.pW),
-            )
-            return y.permute(0, 2, 3, 1).contiguous()
-
-        torch.manual_seed(0)
+        rng = np.random.default_rng(0)
         for kw in (
             # ViT patch embedding, ConvNeXt stem, a 2x2 stride-2 downsample,
             # and a padded strided case the fold still covers.
@@ -241,11 +218,13 @@ class TestForwardWidthFold(unittest.TestCase):
             p = _problem(**kw)
             q = fold_width(p)
             self.assertNotEqual(q, p)
-            x = torch.randn(p.N, p.Hi, p.Wi, p.C, dtype=torch.float64)
-            w = torch.randn(p.K, p.Y, p.X, p.C, dtype=torch.float64)
-            want = fwd(p, x, w)
-            got = fwd(q, x.reshape(q.N, q.Hi, q.Wi, q.C), w.reshape(q.K, q.Y, q.X, q.C))
-            torch.testing.assert_close(got, want)
+            x = rng.standard_normal((p.N, p.Hi, p.Wi, p.C))
+            w = rng.standard_normal((p.K, p.Y, p.X, p.C))
+            want = conv_fwd_reference(x, w, p)
+            got = conv_fwd_reference(
+                x.reshape(q.N, q.Hi, q.Wi, q.C), w.reshape(q.K, q.Y, q.X, q.C), q
+            )
+            np.testing.assert_allclose(got, want, rtol=1e-7, atol=1e-7)
 
     def test_benchmark_launches_forward_folded(self):
         from benchmarks.common.benchmark_implicit_gemm_conv import _launch_problem
