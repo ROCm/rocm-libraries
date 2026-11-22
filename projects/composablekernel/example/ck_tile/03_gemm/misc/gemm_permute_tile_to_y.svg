@@ -1,0 +1,51 @@
+<!-- Copyright (c) Advanced Micro Devices, Inc., or its affiliates. SPDX-License-Identifier: MIT -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 860 344" width="860" height="344" role="img" aria-label="One 128 x 256 tile of the library kernel is 128 consecutive b at one t and one head; each of its rows is stored by the stock CShuffleEpilogue as one contiguous 512-byte run of Y, consecutive rows T*D elements apart">
+<style>text{font-family:system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif}.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}.h{font-size:15px;font-weight:600}.b{font-size:13px;font-weight:600}.n{font-size:12px}.s{font-size:11px}.x{font-size:10px}.w{fill:#ffffff}.halo{paint-order:stroke;stroke-width:4px;stroke-linejoin:round}line{stroke-width:1}.ar{stroke-width:1.5}.bg{fill:#fcfcfb;stroke:#e1e0d9}.t1{fill:#0b0b0b}.t2{fill:#52514e}.t3{fill:#898781}.grid{stroke:#e1e0d9}.axis{stroke:#c3c2b7}.track{fill:#e1e0d9}.cell{fill:#fcfcfb;stroke:#c3c2b7}.halo{stroke:#fcfcfb}.ref{stroke:#898781}.plate{fill:#fcfcfb}.ar{stroke:#898781}.ah{fill:#898781}.s1{fill:#2a78d6}.o1{stroke:#2a78d6;fill:none}.s2{fill:#eb6834}.o2{stroke:#eb6834;fill:none}.s3{fill:#1baf7a}.o3{stroke:#1baf7a;fill:none}@media (prefers-color-scheme:dark){.bg{fill:#1a1a19;stroke:#2c2c2a}.t1{fill:#f0efec}.t2{fill:#c3c2b7}.t3{fill:#898781}.grid{stroke:#2c2c2a}.axis{stroke:#383835}.track{fill:#2c2c2a}.cell{fill:#1a1a19;stroke:#383835}.halo{stroke:#1a1a19}.ref{stroke:#898781}.plate{fill:#1a1a19}.ar{stroke:#898781}.ah{fill:#898781}.s1{fill:#3987e5}.o1{stroke:#3987e5;fill:none}.s2{fill:#d95926}.o2{stroke:#d95926;fill:none}.s3{fill:#199e70}.o3{stroke:#199e70;fill:none}}</style>
+<rect class="bg" x="0.5" y="0.5" width="859" height="343" rx="8"/>
+<text x="24" y="34" class="t1 h">Library kernel: where one 128 x 256 tile lands in Y</text>
+<text x="24" y="54" class="t2 n">A tile is 128 consecutive m = t*B + b (128 b at one t) and 256 consecutive n = h*D + d (one head, all 256 d)</text>
+<text x="24" y="88" class="t1 b">C tile in the epilogue, 128 x 256</text>
+<text x="24" y="104" class="t3 s">rows b0 .. b0+127 at one t; columns d = 0..255 of head h</text>
+<rect x="91.5" y="117.5" width="265" height="101" rx="3" class="cell"/>
+<rect x="96" y="122" width="256" height="12" rx="2" class="s3"/>
+<text x="84" y="132" class="t2 s mono" text-anchor="end">b0</text>
+<rect x="520" y="118" width="256" height="22" class="cell"/>
+<rect x="520" y="127" width="256" height="4" class="s1"/>
+<text x="784" y="133" class="t2 s mono">b0</text>
+<line x1="358" y1="128" x2="512" y2="129" class="ar"/>
+<polygon points="519,129 511,125 511,133" class="ah"/>
+<rect x="96" y="138" width="256" height="12" rx="2" class="s3"/>
+<text x="84" y="148" class="t2 s mono" text-anchor="end">b0+1</text>
+<rect x="520" y="144" width="256" height="22" class="cell"/>
+<rect x="520" y="153" width="256" height="4" class="s1"/>
+<text x="784" y="159" class="t2 s mono">b0+1</text>
+<line x1="358" y1="144" x2="512" y2="155" class="ar"/>
+<polygon points="519,155 511,151 511,159" class="ah"/>
+<rect x="96" y="154" width="256" height="12" rx="2" class="s3"/>
+<text x="84" y="164" class="t2 s mono" text-anchor="end">b0+2</text>
+<rect x="520" y="170" width="256" height="22" class="cell"/>
+<rect x="520" y="179" width="256" height="4" class="s1"/>
+<text x="784" y="185" class="t2 s mono">b0+2</text>
+<line x1="358" y1="160" x2="512" y2="181" class="ar"/>
+<polygon points="519,181 511,177 511,185" class="ah"/>
+<rect x="96" y="202" width="256" height="12" rx="2" class="s3"/>
+<text x="84" y="212" class="t2 s mono" text-anchor="end">b0+127</text>
+<rect x="520" y="214" width="256" height="22" class="cell"/>
+<rect x="520" y="223" width="256" height="4" class="s1"/>
+<text x="784" y="229" class="t2 s mono">b0+127</text>
+<line x1="358" y1="208" x2="512" y2="225" class="ar"/>
+<polygon points="519,225 511,221 511,229" class="ah"/>
+<text x="224" y="131" class="w x" text-anchor="middle">d = 0 .. 255</text>
+<text x="224" y="190" class="t3 s" text-anchor="middle">...</text>
+<text x="648" y="206" class="t3 s" text-anchor="middle">...</text>
+<text x="24" y="246" class="t2 s">stock CShuffleEpilogue: 16 B stores (8 d) along each row</text>
+<text x="24" y="262" class="t2 s">4 waves (2 x 2), MFMA 32x32x16, tile 128 x 256 x 32</text>
+<text x="520" y="88" class="t1 b">Y[h, b, t, d], one block per b</text>
+<text x="520" y="104" class="t3 s">block Y[h, b, 0..T-1, 0..255]; blue = row t</text>
+<text x="520" y="254" class="t2 s">each row: one contiguous, aligned 512 B run</text>
+<text x="520" y="270" class="t2 s">consecutive rows: T*D elements (393,216 B) apart</text>
+<line x1="24" y1="288" x2="836" y2="288" class="grid"/>
+<text x="24" y="310" class="t1 b">Grid</text>
+<text x="92" y="310" class="t2 n">(M/128) x (N/256) = 3072 x 8 = 24,576 workgroups of 256 threads, in the order of the stock</text>
+<text x="92" y="328" class="t2 n">GemmSpatiallyLocalTilePartitioner&lt;Shape, 8, 16&gt;. Mainloop, epilogue and partitioner are unchanged.</text>
+</svg>

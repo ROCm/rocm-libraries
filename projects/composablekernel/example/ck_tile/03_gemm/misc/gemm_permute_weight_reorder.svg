@@ -1,0 +1,149 @@
+<!-- Copyright (c) Advanced Micro Devices, Inc., or its affiliates. SPDX-License-Identifier: MIT -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 860 488" width="860" height="488" role="img" aria-label="With the original weight W[k,d,h] adjacent GEMM columns are different heads, so one tile row lands in Y as eight 64-byte pieces; after the reorder to Wp[k,h,d] a tile row is one head and lands as one contiguous 512-byte run">
+<style>text{font-family:system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif}.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}.h{font-size:15px;font-weight:600}.b{font-size:13px;font-weight:600}.n{font-size:12px}.s{font-size:11px}.x{font-size:10px}.w{fill:#ffffff}.halo{paint-order:stroke;stroke-width:4px;stroke-linejoin:round}line{stroke-width:1}.ar{stroke-width:1.5}.bg{fill:#fcfcfb;stroke:#e1e0d9}.t1{fill:#0b0b0b}.t2{fill:#52514e}.t3{fill:#898781}.grid{stroke:#e1e0d9}.axis{stroke:#c3c2b7}.track{fill:#e1e0d9}.cell{fill:#fcfcfb;stroke:#c3c2b7}.halo{stroke:#fcfcfb}.ref{stroke:#898781}.plate{fill:#fcfcfb}.ar{stroke:#898781}.ah{fill:#898781}.s1{fill:#2a78d6}.o1{stroke:#2a78d6;fill:none}.s2{fill:#eb6834}.o2{stroke:#eb6834;fill:none}.s3{fill:#1baf7a}.o3{stroke:#1baf7a;fill:none}@media (prefers-color-scheme:dark){.bg{fill:#1a1a19;stroke:#2c2c2a}.t1{fill:#f0efec}.t2{fill:#c3c2b7}.t3{fill:#898781}.grid{stroke:#2c2c2a}.axis{stroke:#383835}.track{fill:#2c2c2a}.cell{fill:#1a1a19;stroke:#383835}.halo{stroke:#1a1a19}.ref{stroke:#898781}.plate{fill:#1a1a19}.ar{stroke:#898781}.ah{fill:#898781}.s1{fill:#3987e5}.o1{stroke:#3987e5;fill:none}.s2{fill:#d95926}.o2{stroke:#d95926;fill:none}.s3{fill:#199e70}.o3{stroke:#199e70;fill:none}}</style>
+<rect class="bg" x="0.5" y="0.5" width="859" height="487" rx="8"/>
+<text x="24" y="34" class="t1 h">Weight reorder: one tile row, one head, contiguous d</text>
+<text x="24" y="54" class="t2 n">Wp[k,h,d] = W[k,d,h] (1.5 MiB, about 3 us, timed in every fused call) changes which GEMM columns are neighbours</text>
+<text x="24" y="88" class="t1 b">Original W[k,d,h]: n = d*H + h</text>
+<text x="24" y="106" class="t2 n">adjacent GEMM columns are different heads</text>
+<rect x="24" y="120" width="18" height="20" rx="3" class="s2"/>
+<text x="33" y="134" class="w x" text-anchor="middle">0</text>
+<rect x="44" y="120" width="18" height="20" rx="3" class="s2"/>
+<text x="53" y="134" class="w x" text-anchor="middle">1</text>
+<rect x="64" y="120" width="18" height="20" rx="3" class="s2"/>
+<text x="73" y="134" class="w x" text-anchor="middle">2</text>
+<rect x="84" y="120" width="18" height="20" rx="3" class="s2"/>
+<text x="93" y="134" class="w x" text-anchor="middle">3</text>
+<rect x="104" y="120" width="18" height="20" rx="3" class="s2"/>
+<text x="113" y="134" class="w x" text-anchor="middle">4</text>
+<rect x="124" y="120" width="18" height="20" rx="3" class="s2"/>
+<text x="133" y="134" class="w x" text-anchor="middle">5</text>
+<rect x="144" y="120" width="18" height="20" rx="3" class="s2"/>
+<text x="153" y="134" class="w x" text-anchor="middle">6</text>
+<rect x="164" y="120" width="18" height="20" rx="3" class="s2"/>
+<text x="173" y="134" class="w x" text-anchor="middle">7</text>
+<rect x="184" y="120" width="18" height="20" rx="3" class="s2"/>
+<text x="193" y="134" class="w x" text-anchor="middle">0</text>
+<rect x="204" y="120" width="18" height="20" rx="3" class="s2"/>
+<text x="213" y="134" class="w x" text-anchor="middle">1</text>
+<rect x="224" y="120" width="18" height="20" rx="3" class="s2"/>
+<text x="233" y="134" class="w x" text-anchor="middle">2</text>
+<rect x="244" y="120" width="18" height="20" rx="3" class="s2"/>
+<text x="253" y="134" class="w x" text-anchor="middle">3</text>
+<rect x="264" y="120" width="18" height="20" rx="3" class="s2"/>
+<text x="273" y="134" class="w x" text-anchor="middle">4</text>
+<rect x="284" y="120" width="18" height="20" rx="3" class="s2"/>
+<text x="293" y="134" class="w x" text-anchor="middle">5</text>
+<rect x="304" y="120" width="18" height="20" rx="3" class="s2"/>
+<text x="313" y="134" class="w x" text-anchor="middle">6</text>
+<rect x="324" y="120" width="18" height="20" rx="3" class="s2"/>
+<text x="333" y="134" class="w x" text-anchor="middle">7</text>
+<line x1="24" y1="148" x2="182" y2="148" class="ar"/>
+<line x1="24" y1="144" x2="24" y2="148" class="ar"/>
+<line x1="182" y1="144" x2="182" y2="148" class="ar"/>
+<text x="103" y="164" class="t2 s" text-anchor="middle">d = 0: one 16 B store</text>
+<line x1="184" y1="148" x2="342" y2="148" class="ar"/>
+<line x1="184" y1="144" x2="184" y2="148" class="ar"/>
+<line x1="342" y1="144" x2="342" y2="148" class="ar"/>
+<text x="263" y="164" class="t2 s" text-anchor="middle">d = 1</text>
+<text x="24" y="186" class="t3 s">a 256-column tile row holds 32 d of each of the 8 heads</text>
+<line x1="356" y1="130" x2="424" y2="130" class="ar"/>
+<polygon points="432,130 424,126 424,134" class="ah"/>
+<text x="498" y="88" class="t3 s">Y[h, b, t, 0..255] for h = 0..7</text>
+<text x="490" y="106" class="t3 x" text-anchor="end">h=0</text>
+<rect x="498" y="98" width="256" height="8" rx="2" class="track"/>
+<rect x="498" y="98" width="32" height="8" rx="2" class="s2"/>
+<text x="490" y="118" class="t3 x" text-anchor="end">h=1</text>
+<rect x="498" y="110" width="256" height="8" rx="2" class="track"/>
+<rect x="498" y="110" width="32" height="8" rx="2" class="s2"/>
+<text x="490" y="130" class="t3 x" text-anchor="end">h=2</text>
+<rect x="498" y="122" width="256" height="8" rx="2" class="track"/>
+<rect x="498" y="122" width="32" height="8" rx="2" class="s2"/>
+<text x="490" y="142" class="t3 x" text-anchor="end">h=3</text>
+<rect x="498" y="134" width="256" height="8" rx="2" class="track"/>
+<rect x="498" y="134" width="32" height="8" rx="2" class="s2"/>
+<text x="490" y="154" class="t3 x" text-anchor="end">h=4</text>
+<rect x="498" y="146" width="256" height="8" rx="2" class="track"/>
+<rect x="498" y="146" width="32" height="8" rx="2" class="s2"/>
+<text x="490" y="166" class="t3 x" text-anchor="end">h=5</text>
+<rect x="498" y="158" width="256" height="8" rx="2" class="track"/>
+<rect x="498" y="158" width="32" height="8" rx="2" class="s2"/>
+<text x="490" y="178" class="t3 x" text-anchor="end">h=6</text>
+<rect x="498" y="170" width="256" height="8" rx="2" class="track"/>
+<rect x="498" y="170" width="32" height="8" rx="2" class="s2"/>
+<text x="490" y="190" class="t3 x" text-anchor="end">h=7</text>
+<rect x="498" y="182" width="256" height="8" rx="2" class="track"/>
+<rect x="498" y="182" width="32" height="8" rx="2" class="s2"/>
+<text x="498" y="212" class="t2 s">8 pieces of 32 d (64 B), one per head</text>
+<text x="498" y="228" class="t2 s">each 16 B store of C splits into 8 two-byte writes</text>
+<line x1="24" y1="250" x2="836" y2="250" class="grid"/>
+<text x="24" y="276" class="t1 b">Reordered Wp[k,h,d]: n = h*D + d</text>
+<text x="24" y="294" class="t2 n">a tile row is one head with contiguous d</text>
+<rect x="24" y="308" width="18" height="20" rx="3" class="s1"/>
+<text x="33" y="322" class="w x" text-anchor="middle">0</text>
+<rect x="44" y="308" width="18" height="20" rx="3" class="s1"/>
+<text x="53" y="322" class="w x" text-anchor="middle">1</text>
+<rect x="64" y="308" width="18" height="20" rx="3" class="s1"/>
+<text x="73" y="322" class="w x" text-anchor="middle">2</text>
+<rect x="84" y="308" width="18" height="20" rx="3" class="s1"/>
+<text x="93" y="322" class="w x" text-anchor="middle">3</text>
+<rect x="104" y="308" width="18" height="20" rx="3" class="s1"/>
+<text x="113" y="322" class="w x" text-anchor="middle">4</text>
+<rect x="124" y="308" width="18" height="20" rx="3" class="s1"/>
+<text x="133" y="322" class="w x" text-anchor="middle">5</text>
+<rect x="144" y="308" width="18" height="20" rx="3" class="s1"/>
+<text x="153" y="322" class="w x" text-anchor="middle">6</text>
+<rect x="164" y="308" width="18" height="20" rx="3" class="s1"/>
+<text x="173" y="322" class="w x" text-anchor="middle">7</text>
+<rect x="184" y="308" width="18" height="20" rx="3" class="s1"/>
+<text x="193" y="322" class="w x" text-anchor="middle">8</text>
+<rect x="204" y="308" width="18" height="20" rx="3" class="s1"/>
+<text x="213" y="322" class="w x" text-anchor="middle">9</text>
+<rect x="224" y="308" width="18" height="20" rx="3" class="s1"/>
+<text x="233" y="322" class="w x" text-anchor="middle">10</text>
+<rect x="244" y="308" width="18" height="20" rx="3" class="s1"/>
+<text x="253" y="322" class="w x" text-anchor="middle">11</text>
+<rect x="264" y="308" width="18" height="20" rx="3" class="s1"/>
+<text x="273" y="322" class="w x" text-anchor="middle">12</text>
+<rect x="284" y="308" width="18" height="20" rx="3" class="s1"/>
+<text x="293" y="322" class="w x" text-anchor="middle">13</text>
+<rect x="304" y="308" width="18" height="20" rx="3" class="s1"/>
+<text x="313" y="322" class="w x" text-anchor="middle">14</text>
+<rect x="324" y="308" width="18" height="20" rx="3" class="s1"/>
+<text x="333" y="322" class="w x" text-anchor="middle">15</text>
+<line x1="24" y1="336" x2="182" y2="336" class="ar"/>
+<line x1="24" y1="332" x2="24" y2="336" class="ar"/>
+<line x1="182" y1="332" x2="182" y2="336" class="ar"/>
+<text x="103" y="352" class="t2 s" text-anchor="middle">8 d: one 16 B store</text>
+<line x1="184" y1="336" x2="342" y2="336" class="ar"/>
+<line x1="184" y1="332" x2="184" y2="336" class="ar"/>
+<line x1="342" y1="332" x2="342" y2="336" class="ar"/>
+<text x="263" y="352" class="t2 s" text-anchor="middle">8 d</text>
+<text x="24" y="374" class="t3 s">a 256-column tile row holds d = 0..255 of one head</text>
+<line x1="356" y1="318" x2="424" y2="318" class="ar"/>
+<polygon points="432,318 424,314 424,322" class="ah"/>
+<text x="498" y="276" class="t3 s">Y[h, b, t, 0..255] for h = 0..7</text>
+<text x="490" y="294" class="t3 x" text-anchor="end">h=0</text>
+<rect x="498" y="286" width="256" height="8" rx="2" class="track"/>
+<rect x="498" y="286" width="256" height="8" rx="2" class="s1"/>
+<text x="490" y="306" class="t3 x" text-anchor="end">h=1</text>
+<rect x="498" y="298" width="256" height="8" rx="2" class="track"/>
+<text x="490" y="318" class="t3 x" text-anchor="end">h=2</text>
+<rect x="498" y="310" width="256" height="8" rx="2" class="track"/>
+<text x="490" y="330" class="t3 x" text-anchor="end">h=3</text>
+<rect x="498" y="322" width="256" height="8" rx="2" class="track"/>
+<text x="490" y="342" class="t3 x" text-anchor="end">h=4</text>
+<rect x="498" y="334" width="256" height="8" rx="2" class="track"/>
+<text x="490" y="354" class="t3 x" text-anchor="end">h=5</text>
+<rect x="498" y="346" width="256" height="8" rx="2" class="track"/>
+<text x="490" y="366" class="t3 x" text-anchor="end">h=6</text>
+<rect x="498" y="358" width="256" height="8" rx="2" class="track"/>
+<text x="490" y="378" class="t3 x" text-anchor="end">h=7</text>
+<rect x="498" y="370" width="256" height="8" rx="2" class="track"/>
+<text x="498" y="400" class="t2 s">one contiguous 512 B run per tile row</text>
+<text x="498" y="416" class="t2 s">every 16 B store stays whole</text>
+<line x1="24" y1="432" x2="836" y2="432" class="grid"/>
+<text x="24" y="454" class="t1 b">Reorder</text>
+<text x="92" y="454" class="t2 n">prepermute_kernel: grid K, block D; each thread reads the 8 heads of one (k, d) with one 16 B load.</text>
+<text x="92" y="472" class="t2 n">GemmEPermuteKernel fixes the N1 stride to 1, so d has to be the fast GEMM column index.</text>
+</svg>

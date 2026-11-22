@@ -1,0 +1,215 @@
+<!-- Copyright (c) Advanced Micro Devices, Inc., or its affiliates. SPDX-License-Identifier: MIT -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 860 458" width="860" height="458" role="img" aria-label="With the repacked weight, N-repeat r and MFMA column j hold tile column 4 j plus r, so each lane owns 4 consecutive d of 4 rows and a wave writes 128 contiguous bytes per row of Y straight from the accumulators, without the LDS round trip of the CShuffle epilogue">
+<rect class="bg" x="0.5" y="0.5" width="859" height="457" rx="8"/>
+<style>text{font-family:system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif}.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}.h{font-size:15px;font-weight:600}.b{font-size:13px;font-weight:600}.n{font-size:12px}.s{font-size:11px}.x{font-size:10px}.w{fill:#ffffff}.halo{paint-order:stroke;stroke-width:4px;stroke-linejoin:round}line{stroke-width:1}.ar{stroke-width:1.5}.bg{fill:#fcfcfb;stroke:#e1e0d9}.t1{fill:#0b0b0b}.t2{fill:#52514e}.t3{fill:#898781}.grid{stroke:#e1e0d9}.axis{stroke:#c3c2b7}.track{fill:#e1e0d9}.cell{fill:#fcfcfb;stroke:#c3c2b7}.halo{stroke:#fcfcfb}.ref{stroke:#898781}.plate{fill:#fcfcfb}.ar{stroke:#898781}.ah{fill:#898781}.s1{fill:#2a78d6}.o1{stroke:#2a78d6;fill:none}.s2{fill:#eb6834}.o2{stroke:#eb6834;fill:none}.s3{fill:#1baf7a}.o3{stroke:#1baf7a;fill:none}@media (prefers-color-scheme:dark){.bg{fill:#1a1a19;stroke:#2c2c2a}.t1{fill:#f0efec}.t2{fill:#c3c2b7}.t3{fill:#898781}.grid{stroke:#2c2c2a}.axis{stroke:#383835}.track{fill:#2c2c2a}.cell{fill:#1a1a19;stroke:#383835}.halo{stroke:#1a1a19}.ref{stroke:#898781}.plate{fill:#1a1a19}.ar{stroke:#898781}.ah{fill:#898781}.s1{fill:#3987e5}.o1{stroke:#3987e5;fill:none}.s2{fill:#d95926}.o2{stroke:#d95926;fill:none}.s3{fill:#199e70}.o3{stroke:#199e70;fill:none}}</style>
+<text x="24" y="34" class="t1 h" text-anchor="start">Direct store: each lane writes 4 consecutive d, no LDS shuffle</text>
+<text x="24" y="54" class="t2 n" text-anchor="start">16x16x32 MFMA, C not transposed: the repacked weight puts tile column 4*j + r in N-repeat r, MFMA column j</text>
+<rect x="40" y="76" width="12" height="12" rx="3" class="s2"/>
+<text x="58" y="86" class="t1 b" text-anchor="start">Plain weight order</text>
+<text x="40" y="104" class="t2 s" text-anchor="start">one row of the [128, 64] wave tile; N-repeat r = d 16r .. 16r+15</text>
+<rect x="40" y="126" width="352.0" height="20" rx="0" class="cell"/>
+<line x1="128.0" y1="126" x2="128.0" y2="146" class="axis"/>
+<line x1="216.0" y1="126" x2="216.0" y2="146" class="axis"/>
+<line x1="304.0" y1="126" x2="304.0" y2="146" class="axis"/>
+<text x="84.0" y="120" class="t3 x" text-anchor="middle">r0</text>
+<text x="172.0" y="120" class="t3 x" text-anchor="middle">r1</text>
+<text x="260.0" y="120" class="t3 x" text-anchor="middle">r2</text>
+<text x="348.0" y="120" class="t3 x" text-anchor="middle">r3</text>
+<rect x="51.0" y="126" width="5.5" height="20" rx="0" class="s2"/>
+<rect x="139.0" y="126" width="5.5" height="20" rx="0" class="s2"/>
+<rect x="227.0" y="126" width="5.5" height="20" rx="0" class="s2"/>
+<rect x="315.0" y="126" width="5.5" height="20" rx="0" class="s2"/>
+<text x="40" y="166" class="t1 s" text-anchor="start">lane q = 2 holds d 2, 18, 34, 50</text>
+<text x="40" y="182" class="t2 s" text-anchor="start">not contiguous: the tile is regrouped through LDS</text>
+<rect x="460" y="76" width="12" height="12" rx="3" class="s1"/>
+<text x="478" y="86" class="t1 b" text-anchor="start">Repacked weight (this kernel)</text>
+<text x="460" y="104" class="t2 s" text-anchor="start">one row of the [128, 64] wave tile; lane q = d 4q .. 4q+3</text>
+<rect x="460" y="126" width="352.0" height="20" rx="0" class="cell"/>
+<line x1="482.0" y1="126" x2="482.0" y2="146" class="axis"/>
+<line x1="504.0" y1="126" x2="504.0" y2="146" class="axis"/>
+<line x1="526.0" y1="126" x2="526.0" y2="146" class="axis"/>
+<line x1="548.0" y1="126" x2="548.0" y2="146" class="axis"/>
+<line x1="570.0" y1="126" x2="570.0" y2="146" class="axis"/>
+<line x1="592.0" y1="126" x2="592.0" y2="146" class="axis"/>
+<line x1="614.0" y1="126" x2="614.0" y2="146" class="axis"/>
+<line x1="636.0" y1="126" x2="636.0" y2="146" class="axis"/>
+<line x1="658.0" y1="126" x2="658.0" y2="146" class="axis"/>
+<line x1="680.0" y1="126" x2="680.0" y2="146" class="axis"/>
+<line x1="702.0" y1="126" x2="702.0" y2="146" class="axis"/>
+<line x1="724.0" y1="126" x2="724.0" y2="146" class="axis"/>
+<line x1="746.0" y1="126" x2="746.0" y2="146" class="axis"/>
+<line x1="768.0" y1="126" x2="768.0" y2="146" class="axis"/>
+<line x1="790.0" y1="126" x2="790.0" y2="146" class="axis"/>
+<text x="515.0" y="120" class="t3 x" text-anchor="middle">q = 2</text>
+<rect x="504.0" y="126" width="22.0" height="20" rx="0" class="s1"/>
+<text x="460" y="166" class="t1 s" text-anchor="start">lane q = 2 holds d 8, 9, 10, 11 (r = 0 .. 3)</text>
+<text x="460" y="182" class="t2 s" text-anchor="start">one 8 B store, straight from the accumulators</text>
+<line x1="24" y1="198" x2="836" y2="198" class="grid"/>
+<text x="24" y="222" class="t1 b" text-anchor="start">One store instruction of a wave: 64 lanes x 8 B (4 BF16), lane = 16g + q</text>
+<text x="142" y="251" class="t2 x mono" text-anchor="end">row 16mi+e</text>
+<rect x="152" y="236" width="24" height="22" rx="3" class="s1"/>
+<text x="164" y="251" class="w x" text-anchor="middle">0</text>
+<rect x="178" y="236" width="24" height="22" rx="3" class="s1"/>
+<text x="190" y="251" class="w x" text-anchor="middle">1</text>
+<rect x="204" y="236" width="24" height="22" rx="3" class="s1"/>
+<text x="216" y="251" class="w x" text-anchor="middle">2</text>
+<rect x="230" y="236" width="24" height="22" rx="3" class="s1"/>
+<text x="242" y="251" class="w x" text-anchor="middle">3</text>
+<rect x="256" y="236" width="24" height="22" rx="3" class="s1"/>
+<text x="268" y="251" class="w x" text-anchor="middle">4</text>
+<rect x="282" y="236" width="24" height="22" rx="3" class="s1"/>
+<text x="294" y="251" class="w x" text-anchor="middle">5</text>
+<rect x="308" y="236" width="24" height="22" rx="3" class="s1"/>
+<text x="320" y="251" class="w x" text-anchor="middle">6</text>
+<rect x="334" y="236" width="24" height="22" rx="3" class="s1"/>
+<text x="346" y="251" class="w x" text-anchor="middle">7</text>
+<rect x="360" y="236" width="24" height="22" rx="3" class="s1"/>
+<text x="372" y="251" class="w x" text-anchor="middle">8</text>
+<rect x="386" y="236" width="24" height="22" rx="3" class="s1"/>
+<text x="398" y="251" class="w x" text-anchor="middle">9</text>
+<rect x="412" y="236" width="24" height="22" rx="3" class="s1"/>
+<text x="424" y="251" class="w x" text-anchor="middle">10</text>
+<rect x="438" y="236" width="24" height="22" rx="3" class="s1"/>
+<text x="450" y="251" class="w x" text-anchor="middle">11</text>
+<rect x="464" y="236" width="24" height="22" rx="3" class="s1"/>
+<text x="476" y="251" class="w x" text-anchor="middle">12</text>
+<rect x="490" y="236" width="24" height="22" rx="3" class="s1"/>
+<text x="502" y="251" class="w x" text-anchor="middle">13</text>
+<rect x="516" y="236" width="24" height="22" rx="3" class="s1"/>
+<text x="528" y="251" class="w x" text-anchor="middle">14</text>
+<rect x="542" y="236" width="24" height="22" rx="3" class="s1"/>
+<text x="554" y="251" class="w x" text-anchor="middle">15</text>
+<text x="142" y="279" class="t2 x mono" text-anchor="end">16mi+4+e</text>
+<rect x="152" y="264" width="24" height="22" rx="3" class="s1"/>
+<text x="164" y="279" class="w x" text-anchor="middle">16</text>
+<rect x="178" y="264" width="24" height="22" rx="3" class="s1"/>
+<text x="190" y="279" class="w x" text-anchor="middle">17</text>
+<rect x="204" y="264" width="24" height="22" rx="3" class="s1"/>
+<text x="216" y="279" class="w x" text-anchor="middle">18</text>
+<rect x="230" y="264" width="24" height="22" rx="3" class="s1"/>
+<text x="242" y="279" class="w x" text-anchor="middle">19</text>
+<rect x="256" y="264" width="24" height="22" rx="3" class="s1"/>
+<text x="268" y="279" class="w x" text-anchor="middle">20</text>
+<rect x="282" y="264" width="24" height="22" rx="3" class="s1"/>
+<text x="294" y="279" class="w x" text-anchor="middle">21</text>
+<rect x="308" y="264" width="24" height="22" rx="3" class="s1"/>
+<text x="320" y="279" class="w x" text-anchor="middle">22</text>
+<rect x="334" y="264" width="24" height="22" rx="3" class="s1"/>
+<text x="346" y="279" class="w x" text-anchor="middle">23</text>
+<rect x="360" y="264" width="24" height="22" rx="3" class="s1"/>
+<text x="372" y="279" class="w x" text-anchor="middle">24</text>
+<rect x="386" y="264" width="24" height="22" rx="3" class="s1"/>
+<text x="398" y="279" class="w x" text-anchor="middle">25</text>
+<rect x="412" y="264" width="24" height="22" rx="3" class="s1"/>
+<text x="424" y="279" class="w x" text-anchor="middle">26</text>
+<rect x="438" y="264" width="24" height="22" rx="3" class="s1"/>
+<text x="450" y="279" class="w x" text-anchor="middle">27</text>
+<rect x="464" y="264" width="24" height="22" rx="3" class="s1"/>
+<text x="476" y="279" class="w x" text-anchor="middle">28</text>
+<rect x="490" y="264" width="24" height="22" rx="3" class="s1"/>
+<text x="502" y="279" class="w x" text-anchor="middle">29</text>
+<rect x="516" y="264" width="24" height="22" rx="3" class="s1"/>
+<text x="528" y="279" class="w x" text-anchor="middle">30</text>
+<rect x="542" y="264" width="24" height="22" rx="3" class="s1"/>
+<text x="554" y="279" class="w x" text-anchor="middle">31</text>
+<text x="142" y="307" class="t2 x mono" text-anchor="end">16mi+8+e</text>
+<rect x="152" y="292" width="24" height="22" rx="3" class="s1"/>
+<text x="164" y="307" class="w x" text-anchor="middle">32</text>
+<rect x="178" y="292" width="24" height="22" rx="3" class="s1"/>
+<text x="190" y="307" class="w x" text-anchor="middle">33</text>
+<rect x="204" y="292" width="24" height="22" rx="3" class="s1"/>
+<text x="216" y="307" class="w x" text-anchor="middle">34</text>
+<rect x="230" y="292" width="24" height="22" rx="3" class="s1"/>
+<text x="242" y="307" class="w x" text-anchor="middle">35</text>
+<rect x="256" y="292" width="24" height="22" rx="3" class="s1"/>
+<text x="268" y="307" class="w x" text-anchor="middle">36</text>
+<rect x="282" y="292" width="24" height="22" rx="3" class="s1"/>
+<text x="294" y="307" class="w x" text-anchor="middle">37</text>
+<rect x="308" y="292" width="24" height="22" rx="3" class="s1"/>
+<text x="320" y="307" class="w x" text-anchor="middle">38</text>
+<rect x="334" y="292" width="24" height="22" rx="3" class="s1"/>
+<text x="346" y="307" class="w x" text-anchor="middle">39</text>
+<rect x="360" y="292" width="24" height="22" rx="3" class="s1"/>
+<text x="372" y="307" class="w x" text-anchor="middle">40</text>
+<rect x="386" y="292" width="24" height="22" rx="3" class="s1"/>
+<text x="398" y="307" class="w x" text-anchor="middle">41</text>
+<rect x="412" y="292" width="24" height="22" rx="3" class="s1"/>
+<text x="424" y="307" class="w x" text-anchor="middle">42</text>
+<rect x="438" y="292" width="24" height="22" rx="3" class="s1"/>
+<text x="450" y="307" class="w x" text-anchor="middle">43</text>
+<rect x="464" y="292" width="24" height="22" rx="3" class="s1"/>
+<text x="476" y="307" class="w x" text-anchor="middle">44</text>
+<rect x="490" y="292" width="24" height="22" rx="3" class="s1"/>
+<text x="502" y="307" class="w x" text-anchor="middle">45</text>
+<rect x="516" y="292" width="24" height="22" rx="3" class="s1"/>
+<text x="528" y="307" class="w x" text-anchor="middle">46</text>
+<rect x="542" y="292" width="24" height="22" rx="3" class="s1"/>
+<text x="554" y="307" class="w x" text-anchor="middle">47</text>
+<text x="142" y="335" class="t2 x mono" text-anchor="end">16mi+12+e</text>
+<rect x="152" y="320" width="24" height="22" rx="3" class="s1"/>
+<text x="164" y="335" class="w x" text-anchor="middle">48</text>
+<rect x="178" y="320" width="24" height="22" rx="3" class="s1"/>
+<text x="190" y="335" class="w x" text-anchor="middle">49</text>
+<rect x="204" y="320" width="24" height="22" rx="3" class="s1"/>
+<text x="216" y="335" class="w x" text-anchor="middle">50</text>
+<rect x="230" y="320" width="24" height="22" rx="3" class="s1"/>
+<text x="242" y="335" class="w x" text-anchor="middle">51</text>
+<rect x="256" y="320" width="24" height="22" rx="3" class="s1"/>
+<text x="268" y="335" class="w x" text-anchor="middle">52</text>
+<rect x="282" y="320" width="24" height="22" rx="3" class="s1"/>
+<text x="294" y="335" class="w x" text-anchor="middle">53</text>
+<rect x="308" y="320" width="24" height="22" rx="3" class="s1"/>
+<text x="320" y="335" class="w x" text-anchor="middle">54</text>
+<rect x="334" y="320" width="24" height="22" rx="3" class="s1"/>
+<text x="346" y="335" class="w x" text-anchor="middle">55</text>
+<rect x="360" y="320" width="24" height="22" rx="3" class="s1"/>
+<text x="372" y="335" class="w x" text-anchor="middle">56</text>
+<rect x="386" y="320" width="24" height="22" rx="3" class="s1"/>
+<text x="398" y="335" class="w x" text-anchor="middle">57</text>
+<rect x="412" y="320" width="24" height="22" rx="3" class="s1"/>
+<text x="424" y="335" class="w x" text-anchor="middle">58</text>
+<rect x="438" y="320" width="24" height="22" rx="3" class="s1"/>
+<text x="450" y="335" class="w x" text-anchor="middle">59</text>
+<rect x="464" y="320" width="24" height="22" rx="3" class="s1"/>
+<text x="476" y="335" class="w x" text-anchor="middle">60</text>
+<rect x="490" y="320" width="24" height="22" rx="3" class="s1"/>
+<text x="502" y="335" class="w x" text-anchor="middle">61</text>
+<rect x="516" y="320" width="24" height="22" rx="3" class="s1"/>
+<text x="528" y="335" class="w x" text-anchor="middle">62</text>
+<rect x="542" y="320" width="24" height="22" rx="3" class="s1"/>
+<text x="554" y="335" class="w x" text-anchor="middle">63</text>
+<text x="590" y="252" class="t1 s" text-anchor="start">16 lanes x 8 B = 128 B per row,</text>
+<text x="590" y="268" class="t2 s" text-anchor="start">contiguous in Y (d = 64w .. 64w+63)</text>
+<text x="590" y="296" class="t2 s" text-anchor="start">the 4 rows of one store are 4 apart;</text>
+<text x="590" y="312" class="t2 s" text-anchor="start">a Y row is 256 d = 512 B</text>
+<text x="590" y="338" class="t2 s" text-anchor="start">4 stores per 16-row block, 32 per tile</text>
+<text x="24" y="374" class="t1 s" text-anchor="start">Before: CShuffle epilogue</text>
+<rect x="24" y="382" width="74" height="22" rx="3" class="s2"/>
+<text x="61.0" y="397" class="w s" text-anchor="middle">acc FP32</text>
+<line x1="101" y1="393" x2="111" y2="393" class="ar"/>
+<polygon points="117,393 110,389 110,397" class="ah"/>
+<rect x="120" y="382" width="52" height="22" rx="3" class="s2"/>
+<text x="146.0" y="397" class="w s" text-anchor="middle">LDS</text>
+<line x1="175" y1="393" x2="185" y2="393" class="ar"/>
+<polygon points="191,393 184,389 184,397" class="ah"/>
+<rect x="194" y="382" width="74" height="22" rx="3" class="s2"/>
+<text x="231.0" y="397" class="w s" text-anchor="middle">registers</text>
+<line x1="271" y1="393" x2="281" y2="393" class="ar"/>
+<polygon points="287,393 280,389 280,397" class="ah"/>
+<rect x="290" y="382" width="40" height="22" rx="3" class="s2"/>
+<text x="310.0" y="397" class="w s" text-anchor="middle">Y</text>
+<text x="460" y="374" class="t1 s" text-anchor="start">Now: direct store</text>
+<rect x="460" y="382" width="70" height="22" rx="3" class="s1"/>
+<text x="495.0" y="397" class="w s" text-anchor="middle">acc FP32</text>
+<line x1="533" y1="393" x2="543" y2="393" class="ar"/>
+<polygon points="549,393 542,389 542,397" class="ah"/>
+<rect x="552" y="382" width="104" height="22" rx="3" class="s1"/>
+<text x="604.0" y="397" class="w s" text-anchor="middle">BF16, truncated</text>
+<line x1="659" y1="393" x2="669" y2="393" class="ar"/>
+<polygon points="675,393 668,389 668,397" class="ah"/>
+<rect x="678" y="382" width="150" height="22" rx="3" class="s1"/>
+<text x="753.0" y="397" class="w s" text-anchor="middle">Y (8 B, non-temporal)</text>
+<line x1="24" y1="418" x2="836" y2="418" class="grid"/>
+<text x="24" y="441" class="t1 b" text-anchor="start">Measured</text>
+<text x="100" y="441" class="t2 n" text-anchor="start">CShuffle round trip 741.9 to 751.1 us -> direct store, double-buffered acc. 688.6 to 691.5 us (two sessions)</text>
+</svg>

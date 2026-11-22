@@ -1,0 +1,45 @@
+<!-- Copyright (c) Advanced Micro Devices, Inc., or its affiliates. SPDX-License-Identifier: MIT -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 860 354" width="860" height="354" role="img" aria-label="Limits on gfx950: matrix cores alone 355 us, Y write alone 347 us, HBM byte floor 416 us, matrix cores then Y write 702 us, A-stationary mainloop only about 500 us, fused kernel 687 to 689 us">
+<style>text{font-family:system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif}.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}.h{font-size:15px;font-weight:600}.b{font-size:13px;font-weight:600}.n{font-size:12px}.s{font-size:11px}.x{font-size:10px}.w{fill:#ffffff}.halo{paint-order:stroke;stroke-width:4px;stroke-linejoin:round}line{stroke-width:1}.ar{stroke-width:1.5}.bg{fill:#fcfcfb;stroke:#e1e0d9}.t1{fill:#0b0b0b}.t2{fill:#52514e}.t3{fill:#898781}.grid{stroke:#e1e0d9}.axis{stroke:#c3c2b7}.track{fill:#e1e0d9}.cell{fill:#fcfcfb;stroke:#c3c2b7}.halo{stroke:#fcfcfb}.ref{stroke:#898781}.plate{fill:#fcfcfb}.ar{stroke:#898781}.ah{fill:#898781}.s1{fill:#2a78d6}.o1{stroke:#2a78d6;fill:none}.s2{fill:#eb6834}.o2{stroke:#eb6834;fill:none}.s3{fill:#1baf7a}.o3{stroke:#1baf7a;fill:none}@media (prefers-color-scheme:dark){.bg{fill:#1a1a19;stroke:#2c2c2a}.t1{fill:#f0efec}.t2{fill:#c3c2b7}.t3{fill:#898781}.grid{stroke:#2c2c2a}.axis{stroke:#383835}.track{fill:#2c2c2a}.cell{fill:#1a1a19;stroke:#383835}.halo{stroke:#1a1a19}.ref{stroke:#898781}.plate{fill:#1a1a19}.ar{stroke:#898781}.ah{fill:#898781}.s1{fill:#3987e5}.o1{stroke:#3987e5;fill:none}.s2{fill:#d95926}.o2{stroke:#d95926;fill:none}.s3{fill:#199e70}.o3{stroke:#199e70;fill:none}}</style>
+<rect class="bg" x="0.5" y="0.5" width="859" height="353" rx="8"/>
+<text x="24" y="34" class="t1 h" text-anchor="start">Where the fused kernel stands against its limits</text>
+<text x="24" y="54" class="t2 n" text-anchor="start">gfx950 (MI350X, 1000 W cap), trace shape; times for the same 618.5 GFLOP, A read once and Y written once</text>
+<rect x="24" y="74" width="12" height="12" rx="2" class="s3"/>
+<text x="42" y="84" class="t2 s" text-anchor="start">matrix cores</text>
+<rect x="128" y="74" width="12" height="12" rx="2" class="s2"/>
+<text x="146" y="84" class="t2 s" text-anchor="start">HBM traffic</text>
+<rect x="230" y="74" width="12" height="12" rx="2" class="s1"/>
+<text x="248" y="84" class="t2 s" text-anchor="start">A-stationary fused kernel</text>
+<text x="290" y="290" class="t3 s" text-anchor="middle">0</text>
+<line x1="400" y1="102" x2="400" y2="274" class="grid"/>
+<text x="400" y="290" class="t3 s" text-anchor="middle">200</text>
+<line x1="510" y1="102" x2="510" y2="274" class="grid"/>
+<text x="510" y="290" class="t3 s" text-anchor="middle">400</text>
+<line x1="620" y1="102" x2="620" y2="274" class="grid"/>
+<text x="620" y="290" class="t3 s" text-anchor="middle">600</text>
+<line x1="730" y1="102" x2="730" y2="274" class="grid"/>
+<text x="730" y="290" class="t3 s" text-anchor="middle">800</text>
+<text x="730" y="306" class="t3 s" text-anchor="end">us per call, lower is better</text>
+<text x="278" y="125" class="t1 n" text-anchor="end">Matrix cores only, at the 1000 W cap</text>
+<path class="s3" d="M290 112h191.3a4 4 0 0 1 4 4v10a4 4 0 0 1 -4 4h-191.3z"/>
+<text x="493.25" y="125" class="t1 n halo" text-anchor="start">355 us (415 us on random data)</text>
+<text x="278" y="153" class="t1 n" text-anchor="end">Y write alone (memset)</text>
+<path class="s2" d="M290 140h186.9a4 4 0 0 1 4 4v10a4 4 0 0 1 -4 4h-186.9z"/>
+<text x="488.85" y="153" class="t1 n halo" text-anchor="start">347 us</text>
+<text x="278" y="181" class="t1 n" text-anchor="end">HBM byte floor (A read + Y write)</text>
+<path class="s2" d="M290 168h224.8a4 4 0 0 1 4 4v10a4 4 0 0 1 -4 4h-224.8z"/>
+<text x="526.8" y="181" class="t1 n halo" text-anchor="start">416 us = about 1.91 GB at 4.59 TB/s</text>
+<text x="278" y="209" class="t1 n" text-anchor="end">Matrix cores, then Y write</text>
+<rect x="290" y="196" width="193.3" height="18" class="s3"/>
+<path class="s2" d="M485.25 196h186.9a4 4 0 0 1 4 4v10a4 4 0 0 1 -4 4h-186.9z"/>
+<text x="684.1" y="209" class="t1 n halo" text-anchor="start">355 + 347 = 702 us</text>
+<text x="278" y="237" class="t1 n" text-anchor="end">A-stationary mainloop only</text>
+<path class="o1" stroke-width="1.5" d="M290.75 224.75h268.4a4 4 0 0 1 4 4v8.5a4 4 0 0 1 -4 4h-268.4z"/>
+<text x="571.9" y="237" class="t1 n halo" text-anchor="start">about 500 us</text>
+<text x="278" y="265" class="t1 n" text-anchor="end">A-stationary fused, measured</text>
+<path class="s1" d="M290 252h375.0a4 4 0 0 1 4 4v10a4 4 0 0 1 -4 4h-375.0z"/>
+<text x="676.95" y="265" class="t1 n halo" text-anchor="start">687 to 689 us</text>
+<line x1="290" y1="102" x2="290" y2="274" class="axis"/>
+<text x="24" y="324" class="t3 s" text-anchor="start">The fused kernel runs at 0.90 PF, about 52% of the capped matrix-core rate, and takes 1.66x the byte floor. Its time is about the serial sum</text>
+<text x="24" y="340" class="t3 s" text-anchor="start">of the matrix-core time and the Y write (702 us): Y stores drop the clock from about 1725 to 1440 MHz, so overlapping them gains little.</text>
+</svg>

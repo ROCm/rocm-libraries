@@ -1,0 +1,171 @@
+<!-- Copyright (c) Advanced Micro Devices, Inc., or its affiliates. SPDX-License-Identifier: MIT -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 860 356" width="860" height="356" role="img" aria-label="Timeline of one wave over two consecutive output tiles: while the MFMAs of tile i run its first 4 K steps, the accumulators of tile i-1 are converted to BF16 and stored, 32 rows per step, and the weight loads run 2 K steps ahead, across the tile boundary">
+<rect class="bg" x="0.5" y="0.5" width="859" height="355" rx="8"/>
+<style>text{font-family:system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif}.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}.h{font-size:15px;font-weight:600}.b{font-size:13px;font-weight:600}.n{font-size:12px}.s{font-size:11px}.x{font-size:10px}.w{fill:#ffffff}.halo{paint-order:stroke;stroke-width:4px;stroke-linejoin:round}line{stroke-width:1}.ar{stroke-width:1.5}.bg{fill:#fcfcfb;stroke:#e1e0d9}.t1{fill:#0b0b0b}.t2{fill:#52514e}.t3{fill:#898781}.grid{stroke:#e1e0d9}.axis{stroke:#c3c2b7}.track{fill:#e1e0d9}.cell{fill:#fcfcfb;stroke:#c3c2b7}.halo{stroke:#fcfcfb}.ref{stroke:#898781}.plate{fill:#fcfcfb}.ar{stroke:#898781}.ah{fill:#898781}.s1{fill:#2a78d6}.o1{stroke:#2a78d6;fill:none}.s2{fill:#eb6834}.o2{stroke:#eb6834;fill:none}.s3{fill:#1baf7a}.o3{stroke:#1baf7a;fill:none}@media (prefers-color-scheme:dark){.bg{fill:#1a1a19;stroke:#2c2c2a}.t1{fill:#f0efec}.t2{fill:#c3c2b7}.t3{fill:#898781}.grid{stroke:#2c2c2a}.axis{stroke:#383835}.track{fill:#2c2c2a}.cell{fill:#1a1a19;stroke:#383835}.halo{stroke:#1a1a19}.ref{stroke:#898781}.plate{fill:#1a1a19}.ar{stroke:#898781}.ah{fill:#898781}.s1{fill:#3987e5}.o1{stroke:#3987e5;fill:none}.s2{fill:#d95926}.o2{stroke:#d95926;fill:none}.s3{fill:#199e70}.o3{stroke:#199e70;fill:none}}</style>
+<text x="24" y="34" class="t1 h" text-anchor="start">The store of tile i-1 runs under the MFMAs of tile i</text>
+<text x="24" y="54" class="t2 n" text-anchor="start">One wave, [128, 64] tiles of 12 K steps; two FP32 accumulator tiles; the weight is loaded 2 K steps ahead</text>
+<rect x="600" y="24" width="12" height="12" rx="3" class="s3"/>
+<text x="618" y="34" class="t2 n" text-anchor="start">tile i-1</text>
+<rect x="690" y="24" width="12" height="12" rx="3" class="s1"/>
+<text x="708" y="34" class="t2 n" text-anchor="start">tile i</text>
+<rect x="768" y="24" width="12" height="12" rx="3" class="track"/>
+<text x="786" y="34" class="t2 n" text-anchor="start">tile i+1</text>
+<line x1="184" y1="88" x2="398" y2="88" class="ar"/>
+<line x1="184" y1="88" x2="184" y2="92" class="ar"/>
+<line x1="398" y1="88" x2="398" y2="92" class="ar"/>
+<text x="291.0" y="82" class="t2 s" text-anchor="middle">tile i-1 -&gt; acc[(i-1) % 2]</text>
+<line x1="400" y1="88" x2="830" y2="88" class="ar"/>
+<line x1="400" y1="88" x2="400" y2="92" class="ar"/>
+<line x1="830" y1="88" x2="830" y2="92" class="ar"/>
+<text x="615.0" y="82" class="t2 s" text-anchor="middle">tile i -&gt; acc[i % 2]</text>
+<text x="201.0" y="106" class="t3 x" text-anchor="middle">k6</text>
+<text x="237.0" y="106" class="t3 x" text-anchor="middle">k7</text>
+<text x="273.0" y="106" class="t3 x" text-anchor="middle">k8</text>
+<text x="309.0" y="106" class="t3 x" text-anchor="middle">k9</text>
+<text x="345.0" y="106" class="t3 x" text-anchor="middle">k10</text>
+<text x="381.0" y="106" class="t3 x" text-anchor="middle">k11</text>
+<text x="417.0" y="106" class="t3 x" text-anchor="middle">k0</text>
+<text x="453.0" y="106" class="t3 x" text-anchor="middle">k1</text>
+<text x="489.0" y="106" class="t3 x" text-anchor="middle">k2</text>
+<text x="525.0" y="106" class="t3 x" text-anchor="middle">k3</text>
+<text x="561.0" y="106" class="t3 x" text-anchor="middle">k4</text>
+<text x="597.0" y="106" class="t3 x" text-anchor="middle">k5</text>
+<text x="633.0" y="106" class="t3 x" text-anchor="middle">k6</text>
+<text x="669.0" y="106" class="t3 x" text-anchor="middle">k7</text>
+<text x="705.0" y="106" class="t3 x" text-anchor="middle">k8</text>
+<text x="741.0" y="106" class="t3 x" text-anchor="middle">k9</text>
+<text x="777.0" y="106" class="t3 x" text-anchor="middle">k10</text>
+<text x="813.0" y="106" class="t3 x" text-anchor="middle">k11</text>
+<text x="24" y="130" class="t2 n" text-anchor="start">weight -&gt; B regs</text>
+<rect x="184" y="114" width="34" height="24" rx="3" class="s3"/>
+<text x="201.0" y="130" class="w x" text-anchor="middle">k8</text>
+<rect x="220" y="114" width="34" height="24" rx="3" class="s3"/>
+<text x="237.0" y="130" class="w x" text-anchor="middle">k9</text>
+<rect x="256" y="114" width="34" height="24" rx="3" class="s3"/>
+<text x="273.0" y="130" class="w x" text-anchor="middle">k10</text>
+<rect x="292" y="114" width="34" height="24" rx="3" class="s3"/>
+<text x="309.0" y="130" class="w x" text-anchor="middle">k11</text>
+<rect x="328" y="114" width="34" height="24" rx="3" class="s1"/>
+<text x="345.0" y="130" class="w x" text-anchor="middle">k0</text>
+<rect x="364" y="114" width="34" height="24" rx="3" class="s1"/>
+<text x="381.0" y="130" class="w x" text-anchor="middle">k1</text>
+<rect x="400" y="114" width="34" height="24" rx="3" class="s1"/>
+<text x="417.0" y="130" class="w x" text-anchor="middle">k2</text>
+<rect x="436" y="114" width="34" height="24" rx="3" class="s1"/>
+<text x="453.0" y="130" class="w x" text-anchor="middle">k3</text>
+<rect x="472" y="114" width="34" height="24" rx="3" class="s1"/>
+<text x="489.0" y="130" class="w x" text-anchor="middle">k4</text>
+<rect x="508" y="114" width="34" height="24" rx="3" class="s1"/>
+<text x="525.0" y="130" class="w x" text-anchor="middle">k5</text>
+<rect x="544" y="114" width="34" height="24" rx="3" class="s1"/>
+<text x="561.0" y="130" class="w x" text-anchor="middle">k6</text>
+<rect x="580" y="114" width="34" height="24" rx="3" class="s1"/>
+<text x="597.0" y="130" class="w x" text-anchor="middle">k7</text>
+<rect x="616" y="114" width="34" height="24" rx="3" class="s1"/>
+<text x="633.0" y="130" class="w x" text-anchor="middle">k8</text>
+<rect x="652" y="114" width="34" height="24" rx="3" class="s1"/>
+<text x="669.0" y="130" class="w x" text-anchor="middle">k9</text>
+<rect x="688" y="114" width="34" height="24" rx="3" class="s1"/>
+<text x="705.0" y="130" class="w x" text-anchor="middle">k10</text>
+<rect x="724" y="114" width="34" height="24" rx="3" class="s1"/>
+<text x="741.0" y="130" class="w x" text-anchor="middle">k11</text>
+<rect x="760" y="114" width="34" height="24" rx="3" class="track"/>
+<text x="777.0" y="130" class="t2 x" text-anchor="middle">k0</text>
+<rect x="796" y="114" width="34" height="24" rx="3" class="track"/>
+<text x="813.0" y="130" class="t2 x" text-anchor="middle">k1</text>
+<text x="24" y="162" class="t2 n" text-anchor="start">A: LDS -&gt; regs</text>
+<rect x="184" y="146" width="34" height="24" rx="3" class="s3"/>
+<text x="201.0" y="162" class="w x" text-anchor="middle">k7</text>
+<rect x="220" y="146" width="34" height="24" rx="3" class="s3"/>
+<text x="237.0" y="162" class="w x" text-anchor="middle">k8</text>
+<rect x="256" y="146" width="34" height="24" rx="3" class="s3"/>
+<text x="273.0" y="162" class="w x" text-anchor="middle">k9</text>
+<rect x="292" y="146" width="34" height="24" rx="3" class="s3"/>
+<text x="309.0" y="162" class="w x" text-anchor="middle">k10</text>
+<rect x="328" y="146" width="34" height="24" rx="3" class="s3"/>
+<text x="345.0" y="162" class="w x" text-anchor="middle">k11</text>
+<rect x="364" y="146" width="34" height="24" rx="3" class="s1"/>
+<text x="381.0" y="162" class="w x" text-anchor="middle">k0</text>
+<rect x="400" y="146" width="34" height="24" rx="3" class="s1"/>
+<text x="417.0" y="162" class="w x" text-anchor="middle">k1</text>
+<rect x="436" y="146" width="34" height="24" rx="3" class="s1"/>
+<text x="453.0" y="162" class="w x" text-anchor="middle">k2</text>
+<rect x="472" y="146" width="34" height="24" rx="3" class="s1"/>
+<text x="489.0" y="162" class="w x" text-anchor="middle">k3</text>
+<rect x="508" y="146" width="34" height="24" rx="3" class="s1"/>
+<text x="525.0" y="162" class="w x" text-anchor="middle">k4</text>
+<rect x="544" y="146" width="34" height="24" rx="3" class="s1"/>
+<text x="561.0" y="162" class="w x" text-anchor="middle">k5</text>
+<rect x="580" y="146" width="34" height="24" rx="3" class="s1"/>
+<text x="597.0" y="162" class="w x" text-anchor="middle">k6</text>
+<rect x="616" y="146" width="34" height="24" rx="3" class="s1"/>
+<text x="633.0" y="162" class="w x" text-anchor="middle">k7</text>
+<rect x="652" y="146" width="34" height="24" rx="3" class="s1"/>
+<text x="669.0" y="162" class="w x" text-anchor="middle">k8</text>
+<rect x="688" y="146" width="34" height="24" rx="3" class="s1"/>
+<text x="705.0" y="162" class="w x" text-anchor="middle">k9</text>
+<rect x="724" y="146" width="34" height="24" rx="3" class="s1"/>
+<text x="741.0" y="162" class="w x" text-anchor="middle">k10</text>
+<rect x="760" y="146" width="34" height="24" rx="3" class="s1"/>
+<text x="777.0" y="162" class="w x" text-anchor="middle">k11</text>
+<rect x="796" y="146" width="34" height="24" rx="3" class="track"/>
+<text x="813.0" y="162" class="t2 x" text-anchor="middle">k0</text>
+<text x="24" y="194" class="t2 n" text-anchor="start">MFMA, 32 per step</text>
+<rect x="184" y="178" width="34" height="24" rx="3" class="s3"/>
+<text x="201.0" y="194" class="w x" text-anchor="middle">k6</text>
+<rect x="220" y="178" width="34" height="24" rx="3" class="s3"/>
+<text x="237.0" y="194" class="w x" text-anchor="middle">k7</text>
+<rect x="256" y="178" width="34" height="24" rx="3" class="s3"/>
+<text x="273.0" y="194" class="w x" text-anchor="middle">k8</text>
+<rect x="292" y="178" width="34" height="24" rx="3" class="s3"/>
+<text x="309.0" y="194" class="w x" text-anchor="middle">k9</text>
+<rect x="328" y="178" width="34" height="24" rx="3" class="s3"/>
+<text x="345.0" y="194" class="w x" text-anchor="middle">k10</text>
+<rect x="364" y="178" width="34" height="24" rx="3" class="s3"/>
+<text x="381.0" y="194" class="w x" text-anchor="middle">k11</text>
+<rect x="400" y="178" width="34" height="24" rx="3" class="s1"/>
+<text x="417.0" y="194" class="w x" text-anchor="middle">k0</text>
+<rect x="436" y="178" width="34" height="24" rx="3" class="s1"/>
+<text x="453.0" y="194" class="w x" text-anchor="middle">k1</text>
+<rect x="472" y="178" width="34" height="24" rx="3" class="s1"/>
+<text x="489.0" y="194" class="w x" text-anchor="middle">k2</text>
+<rect x="508" y="178" width="34" height="24" rx="3" class="s1"/>
+<text x="525.0" y="194" class="w x" text-anchor="middle">k3</text>
+<rect x="544" y="178" width="34" height="24" rx="3" class="s1"/>
+<text x="561.0" y="194" class="w x" text-anchor="middle">k4</text>
+<rect x="580" y="178" width="34" height="24" rx="3" class="s1"/>
+<text x="597.0" y="194" class="w x" text-anchor="middle">k5</text>
+<rect x="616" y="178" width="34" height="24" rx="3" class="s1"/>
+<text x="633.0" y="194" class="w x" text-anchor="middle">k6</text>
+<rect x="652" y="178" width="34" height="24" rx="3" class="s1"/>
+<text x="669.0" y="194" class="w x" text-anchor="middle">k7</text>
+<rect x="688" y="178" width="34" height="24" rx="3" class="s1"/>
+<text x="705.0" y="194" class="w x" text-anchor="middle">k8</text>
+<rect x="724" y="178" width="34" height="24" rx="3" class="s1"/>
+<text x="741.0" y="194" class="w x" text-anchor="middle">k9</text>
+<rect x="760" y="178" width="34" height="24" rx="3" class="s1"/>
+<text x="777.0" y="194" class="w x" text-anchor="middle">k10</text>
+<rect x="796" y="178" width="34" height="24" rx="3" class="s1"/>
+<text x="813.0" y="194" class="w x" text-anchor="middle">k11</text>
+<text x="24" y="226" class="t2 n" text-anchor="start">BF16 + stores</text>
+<rect x="400" y="210" width="34" height="24" rx="3" class="s3"/>
+<text x="417.0" y="226" class="w x" text-anchor="middle">i-1</text>
+<text x="417.0" y="248" class="t2 x" text-anchor="middle">0-31</text>
+<rect x="436" y="210" width="34" height="24" rx="3" class="s3"/>
+<text x="453.0" y="226" class="w x" text-anchor="middle">i-1</text>
+<text x="453.0" y="248" class="t2 x" text-anchor="middle">32-63</text>
+<rect x="472" y="210" width="34" height="24" rx="3" class="s3"/>
+<text x="489.0" y="226" class="w x" text-anchor="middle">i-1</text>
+<text x="489.0" y="248" class="t2 x" text-anchor="middle">64-95</text>
+<rect x="508" y="210" width="34" height="24" rx="3" class="s3"/>
+<text x="525.0" y="226" class="w x" text-anchor="middle">i-1</text>
+<text x="525.0" y="248" class="t2 x" text-anchor="middle">96-127</text>
+<text x="548" y="226" class="t3 s" text-anchor="start">tile i: stored in k0 .. k3 of tile i+1</text>
+<line x1="399" y1="92" x2="399" y2="240" class="ref" stroke-dasharray="3 3"/>
+<text x="24" y="270" class="t2 s" text-anchor="start">Cells name the K step served. Tile i-1 is stored in 4 K steps: 32 rows and 8 stores of 8 B per lane per step.</text>
+<text x="24" y="286" class="t2 s" text-anchor="start">Each store is issued with 4 MFMAs and 8 VALU ops (sched_group_barrier). The last tile is stored after the loop.</text>
+<text x="24" y="302" class="t2 s" text-anchor="start">Weight loads cross the tile boundary: k0 and k1 of tile i are issued during k10 and k11 of tile i-1.</text>
+<line x1="24" y1="316" x2="836" y2="316" class="grid"/>
+<text x="24" y="339" class="t1 b" text-anchor="start">Measured</text>
+<text x="100" y="339" class="t2 n" text-anchor="start">687 to 689 us per call; mainloop alone about 500 us; Y write alone (memset) 347 us; only part of the store time is hidden</text>
+</svg>
