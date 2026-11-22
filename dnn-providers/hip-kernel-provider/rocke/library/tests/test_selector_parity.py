@@ -10,9 +10,9 @@ required.
 
 These tests encode the expected routing decisions so a selector change that
 moves a cohort onto another kernel is caught on any developer machine. The C++
-twin (``attention_unified_selectors.cpp``) must make the same decisions; the
-binding-level check in ``platform/cpp/bindings/prove_parity_binding.py`` compares
-the two engines on a problem matrix that includes the biased combo cohort below.
+twin (``attention_unified_selectors.cpp``) must make the same decisions;
+``test_selector_cpp_parity.py`` compares the two engines through the
+``rocke_engine`` binding on a grid that includes the biased combo cohort below.
 
 Biased combo geometry (ALiBi, QQ bias or softcap) rides the combo: the transposed
 softmax body applies the bias per score. Only the no-window VALU sub-flags that
