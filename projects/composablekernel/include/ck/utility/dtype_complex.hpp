@@ -86,6 +86,10 @@ __host__ __device__ inline double complex_copysign(double x, double s)
     return __builtin_copysign(x, s);
 }
 
+__host__ __device__ inline float complex_huge_val(float) { return __builtin_huge_valf(); }
+
+__host__ __device__ inline double complex_huge_val(double) { return __builtin_huge_val(); }
+
 __host__ __device__ inline float complex_ldexp(float x, int n) { return __builtin_ldexpf(x, n); }
 
 __host__ __device__ inline double complex_ldexp(double x, int n) { return __builtin_ldexp(x, n); }
@@ -219,7 +223,7 @@ __host__ __device__ inline complex_t<T> annex_g_multiply(const complex_t<T>& z,
         }
         if(recalc)
         {
-            const T inf = static_cast<T>(__builtin_huge_valf());
+            const T inf = complex_huge_val(T{});
             x           = inf * (a * c - b * d);
             y           = inf * (a * d + b * c);
         }
