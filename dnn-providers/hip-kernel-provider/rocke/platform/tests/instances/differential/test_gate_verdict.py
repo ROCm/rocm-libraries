@@ -656,6 +656,82 @@ class TestLlModeInvariant(unittest.TestCase):
         self.assertIn(ll, GATE_FAIL)
 
 
+class TestRefusalComparison(unittest.TestCase):
+    """A config both engines refuse passes only with the same message in a
+    family whose refusals are compared."""
+
+    MESSAGE = "CoalescedTileLoader: async copy needs 16-byte elements"
+
+    @staticmethod
+    def native(line):
+        return run_diff.Emission(1, False, None, f"some context\n{line}\n")
+
+    @staticmethod
+    def python(line):
+        traceback = 'Traceback (most recent call last):\n  File "x.py"\n'
+        return run_diff.Emission(1, False, None, traceback + line + "\n")
+
+    def verdict(self, native_line, python_line, compare_refusals=True):
+        verdict, _ = run_diff.classify_emissions(
+            self.native(native_line), self.python(python_line), compare_refusals
+        )
+        return verdict
+
+    def test_the_same_message_is_both_rejected(self):
+        self.assertEqual(
+            self.verdict(
+                f"builder error: {self.MESSAGE}", f"ValueError: {self.MESSAGE}"
+            ),
+            "BOTH_REJECTED",
+        )
+
+    def test_a_different_message_or_failure_is_a_refusal_mismatch(self):
+        for native_line, python_line in (
+            (f"builder error: {self.MESSAGE}", "ValueError: another reason"),
+            (f"build failed: {self.MESSAGE}", f"ValueError: {self.MESSAGE}"),
+            (f"builder error: {self.MESSAGE}", f"SystemExit: {self.MESSAGE}"),
+            (f"builder error: {self.MESSAGE}", "unknown config 3"),
+        ):
+            with self.subTest(native=native_line, python=python_line):
+                self.assertEqual(
+                    self.verdict(native_line, python_line), "REFUSAL_MISMATCH"
+                )
+                self.assertIn("REFUSAL_MISMATCH", run_diff.DRIFT_VERDICTS)
+                # A family whose refusals are not compared keeps passing them.
+                self.assertEqual(
+                    self.verdict(native_line, python_line, False), "BOTH_REJECTED"
+                )
+
+    def test_a_compared_family_drifts_on_a_reworded_refusal(self):
+        identical = run_diff.Emission(0, True, "same", "")
+        end = run_diff.Emission(1, False, None, "unknown config 2\n")
+        native = [identical, self.native(f"builder error: {self.MESSAGE}"), end]
+        python = [identical, self.python("ValueError: reworded"), end]
+        compared = min(run_diff.REFUSAL_COMPARED_FAMILIES)
+        for family, status in ((compared, "DRIFT"), ("not_compared", "GREEN")):
+            with self.subTest(family=family):
+                with mock.patch.multiple(
+                    run_diff,
+                    compile_c=mock.DEFAULT,
+                    _run_native_configs=mock.DEFAULT,
+                    _run_python_batch=mock.DEFAULT,
+                ) as m:
+                    m["compile_c"].return_value = (Path("emit_c"), "")
+                    m["_run_native_configs"].return_value = batch(*native)
+                    m["_run_python_batch"].return_value = batch(*python)
+                    result = run_diff.run_family(family, Path("archive.a"), "ll")
+                self.assertEqual(result["status"], status)
+                if status == "DRIFT":
+                    record = result["configs"][1]
+                    self.assertEqual(record["verdict"], "REFUSAL_MISMATCH")
+                    self.assertIn(self.MESSAGE, record["c_error"])
+                    self.assertIn("reworded", record["p_error"])
+
+    def test_every_compared_family_is_a_parity_family(self):
+        names = {name for name, _ in run_diff.find_families()}
+        self.assertLessEqual(run_diff.REFUSAL_COMPARED_FAMILIES, names)
+
+
 class TestModeRejection(unittest.TestCase):
     """Only the emitter's own refusal of a mode counts as MODE_UNSUPPORTED.
 

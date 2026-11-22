@@ -31,6 +31,9 @@
 #   IDENTICAL          both non-empty, sha equal
 #   MISMATCH           both non-empty, sha differ              (drift)
 #   BOTH_REJECTED      both empty + positive rc, not end-of-range (parity-faithful)
+#   REFUSAL_MISMATCH   both rejected, but with different messages, in a family
+#                      whose refusals are compared (REFUSAL_COMPARED_FAMILIES)
+#                                                              (drift)
 #   ASYMMETRIC         one empty / rc disagree                 (drift)
 #   CRASH              either side died on a signal (rc < 0)   (drift)
 #   END                both report "unknown config" (range end; stops the family)
@@ -677,6 +680,43 @@ def last_error_line(emission: Emission) -> str:
     return lines[-1] if lines else ""
 
 
+# The native emitters report a builder refusal on stderr behind this prefix; a
+# Python emitter's refusal is its exception line, ``<Type>Error: <message>``.
+NATIVE_REFUSAL_PREFIX = "builder error: "
+
+# The families whose BOTH_REJECTED configs must also carry the same refusal
+# message in both engines. A family joins once its native emitter reports every
+# refusal as ``builder error: <message>`` (the others print a bare "build
+# failed:" or a status code today, so their refusals cannot be compared yet).
+REFUSAL_COMPARED_FAMILIES = frozenset(
+    {
+        "buffer_atomic_fadd",
+        "buffer_load_vN",
+        "buffer_store_vN",
+        "coalesced_loader_async",
+        "tensor_view_buffer",
+    }
+)
+
+
+def native_refusal_message(emission: Emission) -> str | None:
+    """The message of a native builder refusal, or None when the native
+    emitter failed some other way."""
+    line = last_error_line(emission)
+    if not line.startswith(NATIVE_REFUSAL_PREFIX):
+        return None
+    return line.removeprefix(NATIVE_REFUSAL_PREFIX)
+
+
+def python_refusal_message(emission: Emission) -> str | None:
+    """The message of a Python refusal (its exception line), or None when the
+    Python emitter failed some other way."""
+    exception_type, _, message = last_error_line(emission).partition(": ")
+    if not message or not exception_type.endswith("Error"):
+        return None
+    return message
+
+
 def mode_unsupported(emission: Emission) -> bool:
     """True when `emission` is the emitter refusing the mode itself."""
     if emission.returncode != 2 or emission.has_output:
@@ -709,9 +749,11 @@ def is_end_emission(emission: Emission) -> bool:
 
 
 def classify_emissions(
-    c_emission: Emission, p_emission: Emission
+    c_emission: Emission, p_emission: Emission, compare_refusals: bool = False
 ) -> tuple[str, tuple[str | None, str | None] | None]:
-    """Classify two reduced results without retaining their raw IR."""
+    """Classify two reduced results without retaining their raw IR. With
+    ``compare_refusals``, a config both engines reject is REFUSAL_MISMATCH
+    unless both report the same refusal message."""
     # A timed-out emitter is a harness failure, never a clean spec rejection.
     # Fail the family immediately rather than paying the timeout again for every
     # remaining config and making the gate look hung.
@@ -733,9 +775,16 @@ def classify_emissions(
         if c_emission.returncode == 0 and p_emission.returncode == 0:
             return "IDENTICAL", None
         if c_emission.returncode > 0 and p_emission.returncode > 0:
+            if compare_refusals and not _same_refusal(c_emission, p_emission):
+                return "REFUSAL_MISMATCH", None
             return "BOTH_REJECTED", None
         return "ASYMMETRIC", None
     return "ASYMMETRIC", (c_emission.output_sha, p_emission.output_sha)
+
+
+def _same_refusal(c_emission: Emission, p_emission: Emission) -> bool:
+    native = native_refusal_message(c_emission)
+    return native is not None and native == python_refusal_message(p_emission)
 
 
 # Per-config verdicts that force the family to DRIFT: the engines disagreed, or
@@ -745,12 +794,15 @@ def classify_emissions(
 DRIFT_VERDICTS = (
     "MISMATCH",
     "ASYMMETRIC",
+    "REFUSAL_MISMATCH",
     "STRUCT_DRIFT",
     "CANON_ERROR",
     "CRASH",
     "TIMEOUT",
 )
 TERMINAL_VERDICTS = ("CRASH", "TIMEOUT")
+# Verdicts whose config record keeps both engines' stderr as evidence.
+_ERROR_RECORDING_VERDICTS = (*TERMINAL_VERDICTS, "REFUSAL_MISMATCH")
 
 
 class FamilyStatus(NamedTuple):
@@ -799,9 +851,9 @@ def _config_record(
         "c_rc": c_emission.returncode,
         "p_rc": p_emission.returncode,
     }
-    if verdict in TERMINAL_VERDICTS and c_emission.error:
+    if verdict in _ERROR_RECORDING_VERDICTS and c_emission.error:
         record["c_error"] = c_emission.error
-    if verdict in TERMINAL_VERDICTS and p_emission.error:
+    if verdict in _ERROR_RECORDING_VERDICTS and p_emission.error:
         record["p_error"] = p_emission.error
     return record
 
@@ -883,7 +935,9 @@ def _run_family_hashed(name, binpath, mode, canonical, src_dir, flavor=None):
         if c_end or p_end:
             range_drift = {"idx": idx, "c_end": c_end, "p_end": p_end}
             break
-        verdict, shas = classify_emissions(c_emission, p_emission)
+        verdict, shas = classify_emissions(
+            c_emission, p_emission, name in REFUSAL_COMPARED_FAMILIES
+        )
         if canonical and _canonical_form_missing(c_emission, p_emission):
             # Equal bytes do not excuse it: there is no canonical hash to
             # compare, record or check.
