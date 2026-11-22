@@ -119,6 +119,7 @@ from golden_store import (  # noqa: E402 -- HERE bootstrap above
 )
 from rocke.core.golden_file import rerecord_hint
 from rocke.tests.ci_shard import ACTIVATION_FLAG, Shard, current_shard, header_line
+from rocke.tests.staged_payload import point_locators_at_staged_payload
 
 # The differential golden's name in the golden index, printed in its re-record
 # command (which re-records both golden files, every mode and flavor).
@@ -495,9 +496,10 @@ def python_emitter_env(src_dir: Path) -> dict[str, str]:
     env.pop("ROCKE_DEBUG_LOC", None)  # ir.LOC_CAPTURE_ENV
     # A library emitter locates the platform parity driver through
     # ROCKE_PLATFORM_PARITY_DIR when it is set. This runner has no conftest to
-    # set it, so it names PARITY, the driver's home in a checkout and in an
-    # installed test tree alike.
-    env.setdefault("ROCKE_PLATFORM_PARITY_DIR", str(PARITY))
+    # set it, so it points the locators at ROCKE's tests/ the way the conftests
+    # do; that names PARITY, the driver's home in a checkout and in an installed
+    # test tree alike.
+    point_locators_at_staged_payload(ROCKE / "tests", env)
     roots = [str(PY_REF_ROOT), str(LIB_ROOT), str(src_dir), str(PARITY)]
     if SHIM_DIR:
         roots.insert(0, str(SHIM_DIR))

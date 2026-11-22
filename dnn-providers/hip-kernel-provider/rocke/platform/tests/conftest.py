@@ -7,7 +7,6 @@
 #
 # source tree: this dir -> rocke/platform/tests, so parent -> rocke/platform
 
-import os
 import sys
 import warnings
 from pathlib import Path
@@ -96,20 +95,11 @@ for _lib_root in (_HERE / "library", _HERE.parents[1] / "library"):
             sys.path.insert(0, str(_lib_root))
         break
 
-# rocke.tests.ir_validity compiles lowered IR with the platform's IR-validity
-# tool, found through rocke.assets.platform_tools_dir() (tools/ in a checkout).
-# An install has no tools/ tree: it stages a copy of the tool and the modules it
-# imports under tests/arch_domain, so point the locator there unless the caller
-# already chose a directory. The probe keys on the directory, so an install that
-# lost the tool fails rather than skips.
-_STAGED_TOOLS = _HERE / "arch_domain"
-if _STAGED_TOOLS.is_dir():
-    os.environ.setdefault("ROCKE_PLATFORM_TOOLS_DIR", str(_STAGED_TOOLS))
+# An install has no platform root: it stages the IR-validity tool (which
+# rocke.tests.ir_validity runs) under tests/arch_domain and the parity-emitter
+# tree under tests/instances/parity. Point the rocke.assets locators there. The
+# IR-validity probe keys on the directory, so an install that lost the tool
+# fails rather than skips.
+from rocke.tests.staged_payload import point_locators_at_staged_payload
 
-# The library parity emitters re-export the platform emitter driver, found
-# through rocke.assets.platform_parity_dir(). An install has no platform root
-# but stages the parity tree here, so point the locator at it the same way (in
-# a checkout this is the directory the default already names).
-_STAGED_PARITY = _HERE / "instances" / "parity"
-if _STAGED_PARITY.is_dir():
-    os.environ.setdefault("ROCKE_PLATFORM_PARITY_DIR", str(_STAGED_PARITY))
+point_locators_at_staged_payload(_HERE)

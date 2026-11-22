@@ -34,15 +34,12 @@ _STRIDED_KV_CONFIGS = tuple(str(index) for index in range(14))
 def _strided_kv_ir_sha256(flavor: str, config: str) -> str:
     """The sha256 of one strided-KV config's LLVM IR at ``flavor``, emitted the
     way the parity emitter runs: its own process, Python backend."""
-    from rocke.assets import platform_root
+    from rocke.assets import platform_parity_dir
+    from rocke.tests.subprocess_launcher import rocke_subprocess_env
 
-    env = dict(os.environ, ROCKE_LLVM_FLAVOR=flavor, ROCKE_BACKEND="python")
-    env["PYTHONPATH"] = os.pathsep.join(
-        [
-            str(platform_root() / "tests" / "instances" / "parity"),
-            str(platform_root() / "python"),
-            str(_TESTS.parent),
-        ]
+    env = rocke_subprocess_env(
+        dict(os.environ, ROCKE_LLVM_FLAVOR=flavor, ROCKE_BACKEND="python"),
+        python_paths=(platform_parity_dir(), _TESTS.parent),
     )
     data = subprocess.check_output(
         [

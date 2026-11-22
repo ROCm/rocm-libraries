@@ -57,8 +57,9 @@ def platform_tools_dir() -> Path:
 
     Override with ``ROCKE_PLATFORM_TOOLS_DIR``. The installed test payload has
     no ``tools/`` tree; it stages a partial copy, only the scripts its tests
-    run, under ``tests/arch_domain``, and its ``conftest.py`` points the
-    override there.
+    run, under ``tests/arch_domain``, and
+    :func:`rocke.tests.staged_payload.point_locators_at_staged_payload` points
+    the override there.
     """
     override = os.environ.get("ROCKE_PLATFORM_TOOLS_DIR")
     return Path(override) if override else platform_root() / "tools"
@@ -69,8 +70,9 @@ def platform_parity_dir() -> Path:
     ``_emit_common.py`` that the library emitters re-export.
 
     Override with ``ROCKE_PLATFORM_PARITY_DIR``. The installed test payload has
-    no platform root; its ``conftest.py`` points the override at its staged
-    ``tests/instances/parity``.
+    no platform root; it stages the tree at ``tests/instances/parity``, and
+    :func:`rocke.tests.staged_payload.point_locators_at_staged_payload` points
+    the override there.
     """
     override = os.environ.get("ROCKE_PLATFORM_PARITY_DIR")
     if override:

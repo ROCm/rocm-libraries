@@ -39,6 +39,17 @@ _TESTROOT = Path(__file__).resolve().parent
 if str(_TESTROOT) not in sys.path:
     sys.path.append(str(_TESTROOT))
 
+# The library parity emitters load the platform emitter driver through
+# rocke.assets.platform_parity_dir(). An install has no platform root: it stages
+# the platform test payload in tests/, two levels above this tests/library/tests,
+# and pytest does not load the platform conftest.py that points the locators
+# there, so point them here the same way. Emitter subprocesses inherit the
+# setting. In a checkout that directory (rocke/) stages nothing, so this is a
+# no-op.
+from rocke.tests.staged_payload import point_locators_at_staged_payload
+
+point_locators_at_staged_payload(_TESTROOT.parents[1])
+
 # pytest rewrites asserts only in test modules and conftest files. Every
 # operation's pinned GPU tests come from this helper, so register it before a
 # test module imports it; otherwise a failed assert shows none of its values.
