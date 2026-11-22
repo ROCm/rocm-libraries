@@ -3011,8 +3011,11 @@ fwd_result fmha_fwd_run(mode_enum mode,
                     const double alpha_rows = static_cast<double>(
                         mask.type == mask_enum::no_mask ? real_seqlen_q
                                                         : std::min(real_seqlen_q, real_seqlen_k));
-                    // The one policy constant: the worst correct head measured needed 1.07.
-                    constexpr double alpha_k = 2;
+                    // The one policy constant. e4m3 flushes a row's smallest p, which sharpens
+                    // the softmax and lifts O by a gain the rounding noise does not cover on long
+                    // dense rows: gfx1250 fp8 per-tensor d128, 8192 x 8192, -init=3, 8 seeds,
+                    // needed up to 2.07 (qr_tdm_fp8_sched) and 2.09 (qr_tdm_pingpong).
+                    constexpr double alpha_k = 2.5;
                     // 1/12 is the variance of a half-ULP round-to-nearest.
                     // Dropout keeps 1 - p of a row's keys, whose P rounding averages over that
                     // fraction of the terms.
