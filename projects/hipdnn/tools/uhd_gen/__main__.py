@@ -1242,6 +1242,19 @@ def _parse_mlp_hidden(text: str) -> tuple[int, ...]:
     return widths
 
 
+def mlp_fit_options(args: argparse.Namespace) -> dict:
+    """The `fit_mlp` keywords the caller gave as `--mlp-*`; `fit_mlp`'s own defaults stand
+    for the rest."""
+    options = {
+        dest.removeprefix("mlp_"): getattr(args, dest)
+        for _, dest in _MLP_OPTIONS
+        if getattr(args, dest) is not None
+    }
+    if "hidden" in options:
+        options["hidden"] = _parse_mlp_hidden(options["hidden"])
+    return options
+
+
 def _fit_mlp(
     args: argparse.Namespace,
     df: pd.DataFrame,
@@ -1251,16 +1264,7 @@ def _fit_mlp(
     """The ensemble fit of mlp_data on log(target). Returns the ensemble and what the
     manifest records. `groups` are the columns identifying a problem (None for a corpus
     without problem identity)."""
-    from .mlp import (
-        DEFAULT_EPOCHS,
-        DEFAULT_HIDDEN,
-        DEFAULT_MEMBERS,
-        DEFAULT_SEED,
-        fit_mlp,
-    )
-
-    def option(value, default):
-        return default if value is None else value
+    from .mlp import fit_mlp
 
     target = df[args.target].to_numpy(dtype=np.float64)
     if not np.isfinite(target).all() or (target <= 0).any():
@@ -1283,16 +1287,8 @@ def _fit_mlp(
     ensemble, fit = fit_mlp(
         matrix,
         score_transform.forward(target),
-        hidden=(
-            DEFAULT_HIDDEN
-            if args.mlp_hidden is None
-            else _parse_mlp_hidden(args.mlp_hidden)
-        ),
-        members=option(args.mlp_members, DEFAULT_MEMBERS),
-        epochs=option(args.mlp_epochs, DEFAULT_EPOCHS),
-        seed=option(args.mlp_seed, DEFAULT_SEED),
-        max_rows=option(args.mlp_max_rows, 0),
         groups=problems,
+        **mlp_fit_options(args),
     )
     logger.info(
         "Fitted %d network(s) on %d of %d rows; held-out L1 %.4f in log units",

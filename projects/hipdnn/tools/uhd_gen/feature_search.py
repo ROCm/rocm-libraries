@@ -2,13 +2,14 @@
 # SPDX-License-Identifier: MIT
 """Search a feature recipe: backward elimination over published columns and derived expressions.
 
-The candidates are the published columns every training row binds (after duplicate and
-constant columns collapse) and canonical jsonexpr expressions over them -- padding, ratios,
-stride order, grid/wave counts, and rounding up to the tiers a catalog offers. LightGBM scores a set by
-grouped cross-validation on the training rows (never the evaluation slice); the search drops
-the least important features round by round, keeps the smallest set within one standard error
-of the best, then removes what it still can one feature at a time. The result is a canonical
-features-signature array, usable as `uhd_gen generate --feature-signature`.
+The candidates are the published columns every training row binds (constant columns drop
+out; columns that are the same expression collapse) and canonical jsonexpr expressions over
+them -- padding, ratios, stride order, grid/wave counts, and rounding up to the tiers a
+catalog offers. LightGBM scores a set by grouped cross-validation on the training rows (never
+the evaluation slice); the search drops the least important features round by round, keeps
+the smallest set whose score is within the noise of the best (the larger of the spread over
+seeds and MIN_TOLERANCE), then removes what it still can one feature at a time. The result is
+a canonical features-signature array, usable as `uhd_gen generate --feature-signature`.
 """
 from __future__ import annotations
 
@@ -28,7 +29,14 @@ import numpy as np
 import pandas as pd
 
 from .coverage import device_field_coverage
-from .features import derive_categorical_encoding, evaluate_feature_rows
+from .features import (
+    derive_categorical_encoding,
+    evaluate_feature_rows,
+    feature_reference,
+)
+from .corpus_io import write_json
+from .optional import guarded_read
+from .proposal import presence_flag, search_inputs, settle_omissions
 
 logger = logging.getLogger(__name__)
 
@@ -57,12 +65,17 @@ FLOOR = 8
 #: Columns this correlated carry the same information and leave a round together.
 CLUSTER_CORRELATION = 0.999
 BOOST_ROUNDS = 150
-#: The adapter pass tries at most this many candidates, and fits the real MLP on this many
-#: held-out folds of each seed.
+#: The adapter pass tries at most this many candidates.
 ADAPTER_PASS_BUDGET = 60
-#: The adapter pass reads disjoint folds of each seed: it picks candidates on DISCOVERY,
-#: confirms each pick on CONFIRM, checks removals on REMOVAL, and chooses between the
-#: pruned and pre-prune sets on CONFIRM + REMOVAL.
+#: The adapters a search is scored for, spelled as `generate --adapter` spells them, each
+#: with the model `search_features` scores for it. `linear_data` is absent: it fits a
+#: per-problem slowdown, which no pooled regression on the log target stands in for.
+SEARCH_ADAPTERS = {"tree_data": "tree", "mlp_data": "mlp_data"}
+#: The adapter pass reads one layout of the graphs into folds for every seed (the seed varies
+#: the model, not the folds), so these folds are disjoint graph sets: it picks candidates on
+#: DISCOVERY, confirms each pick on CONFIRM, checks removals on REMOVAL, and chooses between
+#: the pruned and pre-prune sets on CONFIRM + REMOVAL.
+ADAPTER_FOLD_SEED = 0
 ADAPTER_DISCOVERY = (0, 1)
 ADAPTER_CONFIRM = (2, 3)
 ADAPTER_REMOVAL = (4,)
@@ -114,20 +127,28 @@ def _literal(value: float):
     return int(value) if float(value).is_integer() else float(value)
 
 
+def _margin(error: float, z: float = 1.0) -> float:
+    """The smallest difference that counts against noise `error`: `z` times it, and never
+    less than MIN_TOLERANCE."""
+    return max(z * error, MIN_TOLERANCE)
+
+
 class _Pool:
-    """The candidates, deduplicated by value and bounded."""
+    """The candidates, deduplicated by expression and bounded."""
 
     def __init__(self, bound: int) -> None:
         self.bound = bound
         self.candidates: list[Candidate] = []
         self.stats: dict[str, collections.Counter] = {}
-        #: kept name -> the names with exactly its values, collapsed into it
-        self.duplicates: dict[str, list[str]] = {}
-        self._index: dict[bytes, int] = {}
+        self._names: set[str] = set()
+        #: values -> the candidates that have exactly them
+        self._equal: dict[bytes, list[str]] = {}
 
     def add(self, template: str, entry, values: np.ndarray) -> str | None:
-        """Admit `entry`; its kept name (itself or the equal one before it), or None if it
-        is constant or not finite on some row."""
+        """Admit `entry`; its name, or None if it is constant or not finite on some row. An
+        expression already admitted is admitted once. Candidates that are different
+        expressions are all kept, though their values are equal on the rows: nothing in the
+        rows says the two differ where they would be read."""
         stats = self.stats.setdefault(template, collections.Counter())
         stats["generated"] += 1
         if not np.isfinite(values).all():
@@ -137,20 +158,19 @@ class _Pool:
             stats["constant"] += 1
             return None
         name = _canonical(entry)
-        digest = hashlib.blake2b(values.tobytes(), digest_size=16).digest()
-        index = self._index.get(digest)
-        if index is not None:
-            kept = self.candidates[index].name
-            self.duplicates.setdefault(kept, []).append(name)
+        if name in self._names:
             stats["duplicate"] += 1
-            return kept
+            return name
         if len(self.candidates) >= self.bound:
             raise ValueError(
                 f"the search has more than {self.bound} candidate features "
-                f"({self.counts()}); refusing rather than sampling. Narrow the published "
-                "columns with --features/--feature-signature, or raise --max-candidates"
+                f"({self.counts()}); refusing rather than sampling. Raise --max-candidates, "
+                "or narrow the published columns (`feature-search --columns`; `generate` "
+                "skips the search when it is given --features or --feature-signature)"
             )
-        self._index[digest] = len(self.candidates)
+        digest = hashlib.blake2b(values.tobytes(), digest_size=16).digest()
+        self._equal.setdefault(digest, []).append(name)
+        self._names.add(name)
         self.candidates.append(Candidate(name, entry, template, values))
         stats["kept"] += 1
         return name
@@ -158,18 +178,19 @@ class _Pool:
     def counts(self) -> dict[str, int]:
         return {name: stat["kept"] for name, stat in self.stats.items()}
 
+    def equal_candidates(self) -> list[list[str]]:
+        """The groups of candidates whose values are equal on every row."""
+        return sorted(sorted(names) for names in self._equal.values() if len(names) > 1)
 
-def _column_values(frame: pd.DataFrame, name: str) -> np.ndarray:
-    """A column as the evaluator reads it: numbers as they are, strings as the sorted codes
-    `derive_categorical_encoding` assigns."""
+
+def _column_values(frame: pd.DataFrame, name: str, encoding: dict) -> np.ndarray:
+    """A column as the evaluator reads it: numbers as they are, a string column as the codes
+    `encoding` (`derive_categorical_encoding`) assigns, an absent binding as NaN."""
+    codes = encoding.get(feature_reference(name))
     series = frame[name]
-    strings = series.map(lambda value: isinstance(value, str))
-    if strings.all():
-        codes = {value: code for code, value in enumerate(sorted(set(series)))}
-        return series.map(codes).to_numpy(dtype=np.float64)
-    if strings.any():
-        raise ValueError(f"feature column {name!r} mixes strings with numbers")
-    return series.to_numpy(dtype=np.float64)
+    if codes is None:
+        return series.to_numpy(dtype=np.float64)
+    return series.map(codes).to_numpy(dtype=np.float64)
 
 
 class _Term:
@@ -199,6 +220,28 @@ class _Term:
             values = self.values / other.values
         return _Term({"/": [self.expr, other.expr]}, values)
 
+    def over_positive(self, other: "_Term", otherwise: float) -> "_Term":
+        """`self / other` where `other` is positive, else `otherwise`. The evaluator's `/`
+        declines on a zero divisor, and `if` evaluates only the branch it takes."""
+        positive = other.values > 0
+        with np.errstate(divide="ignore", invalid="ignore"):
+            values = np.where(positive, self.values / other.values, float(otherwise))
+        return _Term(
+            {
+                "if": [
+                    {">": [other.expr, 0]},
+                    {"/": [self.expr, other.expr]},
+                    _literal(otherwise),
+                ]
+            },
+            values,
+        )
+
+    @property
+    def is_guarded(self) -> bool:
+        """Whether this reads an optional feature through its default."""
+        return isinstance(self.expr, dict) and "value_or_default" in self.expr
+
 
 def _product(terms: list[_Term]) -> _Term:
     values = terms[0].values
@@ -221,8 +264,8 @@ def _derived_candidates(
     stats: dict,
     column_terms: dict[str, _Term],
 ) -> None:
-    """Add the pad, ratio, stride-order, grid and tier templates over the base columns'
-    representatives.
+    """Add the pad, ratio, stride-order, grid and tier templates over the base columns that
+    the pool kept (`representative`: column name -> its candidate's name).
 
     A column's term is its signature entry: a bare `$name`, or `value_or_default` of it where
     the column is an optional feature, so every expression built on it reads it guarded.
@@ -233,9 +276,8 @@ def _derived_candidates(
         candidate = by_name[name]
         return _Term(candidate.entry, candidate.values)
 
-    # The dim columns: `...dims[<k>]` with integer values that vary, by tensor role. A dim
-    # that duplicates another tensor's (q and o share B, H, Sq) is read through the
-    # lexicographically first column of its group, so a role still reaches every dim.
+    # The dim columns: `...dims[<k>]` with integer values that vary, by tensor role. Each
+    # role reads its own dims, whether or not another tensor's equal them on the rows.
     roles: dict[str, list[tuple[int, str]]] = {}
     for name in sorted(representative):
         match = _DIMS.fullmatch(name)
@@ -259,7 +301,9 @@ def _derived_candidates(
                 continue
             padded = dim.ceil_div(multiple).times(multiple)
             pool.add("pad", padded.expr, padded.values)
-            fill = dim.over(padded)
+            # An optional dim reads its default (-1) where unbound, which pads to 0: a full
+            # tensor is the fill there, as if nothing were padded.
+            fill = dim.over_positive(padded, 1) if dim.is_guarded else dim.over(padded)
             pool.add("pad", fill.expr, fill.values)
             remainder = dim.mod(multiple)
             pool.add("pad", remainder.expr, remainder.values)
@@ -278,7 +322,7 @@ def _derived_candidates(
             strides.setdefault(match.group(1), []).append((int(match.group(2)), name))
 
     def stride(name: str) -> _Term | None:
-        # The column itself: a stride that collapsed into a dim's group is still a stride.
+        # The column itself, whatever else its values equal.
         if frame[name].map(lambda value: isinstance(value, str)).any():
             return None
         return column_terms[name]
@@ -367,13 +411,13 @@ def _column_terms(
     `value_or_default($name, default)`, and its values are the shared evaluator's on every
     row, the ones that leave it unbound included; any other column is read bare."""
     guarded = sorted(name for name in names if name in guards)
+    bare = [name for name in names if name not in guards]
+    encoding = derive_categorical_encoding(frame, bare)
     terms = {
-        name: _Term("$" + name, _column_values(frame, name))
-        for name in names
-        if name not in guards
+        name: _Term("$" + name, _column_values(frame, name, encoding)) for name in bare
     }
     if guarded:
-        entries = [{"value_or_default": ["$" + name, guards[name]]} for name in guarded]
+        entries = [guarded_read("$" + name, guards[name]) for name in guarded]
         _, values = evaluate_feature_rows(frame, entries, {}, executable)
         matrix = np.asarray(values, dtype=np.float64).reshape(len(frame), len(entries))
         terms.update(
@@ -410,7 +454,7 @@ def build_candidates(
     for name in sorted(presence_columns):
         # Whether the tensor is bound, never its identifier's value; a guarded identifier
         # reads -1 (the sentinel an absent tensor has) where it is unbound.
-        flag = {"!=": [terms[name].expr, -1]}
+        flag = presence_flag(name, (guards or {}).get(name))
         pool.add("presence", flag, (terms[name].values != -1).astype(float))
     details["constant_columns"] = sorted(
         name for name in columns if name not in representative
@@ -508,6 +552,8 @@ class _Scorer:
         self.matrix, self.target = matrix, target
         self.seeds, self.folds = list(seeds), folds
         self.fold_of = [_folds(groups, seed, folds) for seed in self.seeds]
+        #: the adapter pass's folds: one layout, whatever the seeds
+        self.adapter_fold_of = _folds(groups, ADAPTER_FOLD_SEED, folds)
         self.fits = 0
 
     def score(
@@ -601,7 +647,7 @@ def _prune(
     fresh = False
     while True:
         while len(current) > 1:
-            threshold = max(spread, MIN_TOLERANCE)
+            threshold = _margin(spread)
             weak = [c for c in current if costs[c] <= threshold]
             if not weak:
                 break
@@ -646,7 +692,9 @@ def _prune(
 class _MlpScorer:
     """Held-out error of the real MLP trainer (`mlp.fit_mlp`, one ensemble member, early
     stopping on whole graphs as `train` does, `options` its hidden/epochs/max_rows) per
-    (seed, fold) cell: the cells of a set are paired with another set's."""
+    (seed, fold) cell, on the adapter pass's one fold layout: the seed varies the model, so
+    the cells of a fold are repeats of one held-out set. The cells of a set are paired with
+    another set's."""
 
     def __init__(self, scorer: "_Scorer", options: dict | None = None) -> None:
         self.scorer = scorer
@@ -655,14 +703,16 @@ class _MlpScorer:
         self._cells: dict = {}
 
     def cells(self, columns: list[int], folds: tuple[int, ...]) -> np.ndarray:
+        """The held-out error of each (seed, fold) cell, shape (seeds, folds)."""
         key = (tuple(columns), folds)
         if key in self._cells:
             return self._cells[key]
         from .mlp import fit_mlp
 
         scorer = self.scorer
+        fold_of = scorer.adapter_fold_of
         errors = []
-        for seed, fold_of in zip(scorer.seeds, scorer.fold_of):
+        for seed in scorer.seeds:
             for fold in folds:
                 train = np.flatnonzero(fold_of != fold)
                 test = np.flatnonzero(fold_of == fold)
@@ -675,16 +725,19 @@ class _MlpScorer:
                 self.fits += 1
                 predicted = ensemble.predict(scorer.matrix[np.ix_(test, columns)])
                 errors.append(float(np.abs(predicted - scorer.target[test]).mean()))
-        self._cells[key] = np.array(errors)
+        self._cells[key] = np.array(errors).reshape(len(scorer.seeds), len(folds))
         return self._cells[key]
 
 
 def _paired(worse: np.ndarray, better: np.ndarray) -> tuple[float, float]:
-    """(mean, standard error) of the per-cell fall in error from `worse` to `better`.
+    """(mean, standard error) of the fall in error from `worse` to `better`, cells shaped
+    (seeds, folds).
 
-    One cell has no spread to estimate: its standard error is 0, so the margin is the
-    MIN_TOLERANCE floor, as it is for a one-seed LightGBM run."""
-    difference = worse - better
+    The seeds of one fold score the same held-out graphs, so they are averaged first and the
+    standard error is taken over the folds: cells that share graphs are not independent
+    draws. One fold has no spread to estimate: its standard error is 0, so the margin is the
+    MIN_TOLERANCE floor."""
+    difference = (worse - better).mean(axis=0)
     count = len(difference)
     error = float(difference.std(ddof=1) / math.sqrt(count)) if count > 1 else 0.0
     return float(difference.mean()), error
@@ -696,7 +749,8 @@ def _adapter_candidates(
     """The derived features the adapter pass tries, as (index, LightGBM gain): per template
     (tier, grid, pad, ratio) those not already kept, best gain first, dealt out across the
     templates in that order until `budget` are chosen, so no template takes the whole pass.
-    The gain comes from a fit on the rows the first seed's discovery folds train on."""
+    The gain comes from a fit, with the first seed, on the rows outside the discovery folds.
+    """
     pool = [
         index
         for index, candidate in enumerate(candidates)
@@ -705,7 +759,7 @@ def _adapter_candidates(
     if not pool:
         return []
     columns = sorted(set(current) | set(pool))
-    rows = np.flatnonzero(scorer.fold_of[0] > max(ADAPTER_DISCOVERY))
+    rows = np.flatnonzero(scorer.adapter_fold_of > max(ADAPTER_DISCOVERY))
     booster = scorer.lightgbm.train(
         {**LGBM_PARAMS, "seed": scorer.seeds[0]},
         scorer.lightgbm.Dataset(
@@ -741,13 +795,15 @@ def _adapter_pass(
     options: dict | None = None,
 ) -> tuple[list[int], dict, dict]:
     """Forward pass scored by the MLP the model will be trained as, on paired per-fold
-    differences: a derived feature is picked if the held-out error on the DISCOVERY folds
-    falls by more than max(ADAPTER_Z standard errors, MIN_TOLERANCE), and kept only if the
-    CONFIRM folds agree (by more than one standard error); an added feature is dropped
-    again if the REMOVAL fold finds it costs no more than that. The LightGBM prune can remove
-    what the MLP uses, so `alternative` (the set before the prune) plus the added features is
-    scored too, and kept only if it beats the pruned set by that margin on the CONFIRM and
-    REMOVAL folds. Returns (features, report, the kept added features' removal costs).
+    differences (a fold's seeds averaged, the standard error over the folds): a derived
+    feature is picked if the held-out error on the DISCOVERY folds falls by more than
+    max(ADAPTER_Z standard errors, MIN_TOLERANCE), and kept only if the CONFIRM folds agree
+    (by more than one standard error, and MIN_TOLERANCE); an added feature is dropped again
+    if the REMOVAL fold, one fold whose standard error is 0, finds it costs no more than
+    MIN_TOLERANCE. The LightGBM prune can remove what the MLP uses, so `alternative` (the set
+    before the prune) plus the added features is scored too, and kept only if it beats the
+    pruned set by the pick's margin on the CONFIRM and REMOVAL folds. Returns (features,
+    report, the kept added features' removal costs).
     """
     started = time.monotonic()
     mlp = _MlpScorer(scorer, options)
@@ -759,7 +815,7 @@ def _adapter_pass(
         before = mlp.cells(sorted(current), discovery)
         after = mlp.cells(sorted(current + [index]), discovery)
         delta, error = _paired(before, after)
-        picked = delta > max(ADAPTER_Z * error, MIN_TOLERANCE)
+        picked = delta > _margin(error, ADAPTER_Z)
         entry = {
             "feature": candidates[index].name,
             "template": candidates[index].template,
@@ -776,7 +832,7 @@ def _adapter_pass(
                 mlp.cells(sorted(current), confirm),
                 mlp.cells(sorted(current + [index]), confirm),
             )
-            entry["added"] = entry["confirm_delta"] > max(confirm_error, MIN_TOLERANCE)
+            entry["added"] = entry["confirm_delta"] > _margin(confirm_error)
         tried.append(entry)
         logger.info(
             "feature search adapter pass: %s %s (delta %+.5f +- %.5f, confirm %s)",
@@ -796,9 +852,8 @@ def _adapter_pass(
             mlp.cells(without, ADAPTER_REMOVAL),
             mlp.cells(sorted(current), ADAPTER_REMOVAL),
         )
-        # Fewer cells than the other folds: one standard error is the bar, as in confirm. With
-        # one seed the removal fold is one cell and its error is 0: the floor alone decides.
-        kept = cost > max(error, MIN_TOLERANCE)
+        # One fold has no spread to estimate (its error is 0): the floor alone decides.
+        kept = cost > _margin(error)
         checks.append(
             {"feature": candidates[index].name, "mlp_removal_cost": cost, "kept": kept}
         )
@@ -814,7 +869,7 @@ def _adapter_pass(
             gain, error = _paired(
                 mlp.cells(sorted(current), held), mlp.cells(wider, held)
             )
-            keep_wider = gain > max(ADAPTER_Z * error, MIN_TOLERANCE)
+            keep_wider = gain > _margin(error, ADAPTER_Z)
             choice = {
                 "pruned_features": len(current),
                 "pruned_mlp_score": float(mlp.cells(sorted(current), held).mean()),
@@ -884,6 +939,9 @@ def search_features(
     rows on several devices never fall on both sides. The target's log is the regression label for
     either objective: the search wants the features that explain it, not a ranking.
 
+    `seeds` deal the LightGBM validation folds anew; the adapter pass deals its folds once
+    (ADAPTER_FOLD_SEED), whatever the seeds, and its seeds vary the MLP.
+
     `adapter` is the model the recipe will train: with `mlp_data` a forward pass scored by
     the MLP follows the LightGBM elimination."""
     started = time.monotonic()
@@ -928,9 +986,6 @@ def search_features(
     clusters = _clusters(matrix)
     cluster_of = {column: index for index, c in enumerate(clusters) for column in c}
 
-    def tolerance(spread: float) -> float:
-        return max(spread, MIN_TOLERANCE)
-
     # Backward elimination from every candidate.
     active = list(range(len(clusters)))
     rounds, dropped = [], []
@@ -961,7 +1016,7 @@ def search_features(
         )
         if best is None or score < best["score"]:
             best = rounds[-1]
-        worse = worse + 1 if score > best["score"] + tolerance(best["spread"]) else 0
+        worse = worse + 1 if score > best["score"] + _margin(best["spread"]) else 0
         if worse >= 2 or len(columns_now) <= floor:
             break
         # Whole clusters leave together, least important first.
@@ -990,10 +1045,10 @@ def search_features(
             )
         active = [index for index in active if index not in leaving]
 
-    # The smallest set within one standard error of the best round; a spread under the
-    # noise floor (three seeds of one fold layout) does not narrow it.
+    # The smallest set whose score is within the noise of the best round: the spread over
+    # seeds, and not under MIN_TOLERANCE.
     chosen = min(
-        (r for r in rounds if r["score"] <= best["score"] + tolerance(best["spread"])),
+        (r for r in rounds if r["score"] <= best["score"] + _margin(best["spread"])),
         key=lambda r: (r["features"], r["score"]),
     )
     survivors = sorted(c for index in chosen["active"] for c in clusters[index])
@@ -1023,7 +1078,7 @@ def search_features(
         "seeds": list(seeds),
         "folds": FOLDS,
         "model": {"lightgbm": LGBM_PARAMS, "boost_rounds": BOOST_ROUNDS},
-        "exclusions": list(omitted),
+        "exclusions": settle_omissions(omitted, recipe),
         "catalog": {
             "source": catalog_source,
             "tier_fields": tiers,
@@ -1040,10 +1095,7 @@ def search_features(
                 template: dict(stat) for template, stat in sorted(pool.stats.items())
             },
             "constant_columns": details["constant_columns"],
-            "duplicate_groups": [
-                {"kept": kept, "collapsed": sorted(collapsed)}
-                for kept, collapsed in sorted(pool.duplicates.items())
-            ],
+            "equal_candidates": pool.equal_candidates(),
             "grid_per_cu": details["grid_per_cu"],
             "grid_tiles": {"tiles": details["grid_tiles"], "source": tile_source},
             "correlated_clusters": [
@@ -1126,11 +1178,7 @@ def write_search(report: dict, directory: Path) -> dict[str, Path]:
         (paths["recipe"], report["recipe"]),
         (paths["report"], report),
     ):
-        path.write_text(
-            json.dumps(value, indent=2, ensure_ascii=False, allow_nan=False) + "\n",
-            encoding="utf-8",
-            newline="\n",
-        )
+        write_json(path, value)
     paths["summary"].write_text(_summary(report), encoding="utf-8", newline="\n")
     return paths
 
@@ -1212,6 +1260,41 @@ def _summary(report: dict) -> str:
     return "\n".join(lines) + "\n"
 
 
+def search_seeds(seed: int) -> list[int]:
+    """The validation seeds of a search whose `--seed` is `seed`: that and the next two."""
+    return [seed + offset for offset in range(len(DEFAULT_SEEDS))]
+
+
+def _non_negative_int(text: str) -> int:
+    """An `--adapter-pass-budget`: a number of candidates, none included."""
+    try:
+        count = int(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"{text!r} is not an integer") from None
+    if count < 0:
+        raise argparse.ArgumentTypeError("the budget must not be negative")
+    return count
+
+
+def add_search_budget_arguments(parser: argparse.ArgumentParser) -> None:
+    """The bounds of a search, which `feature-search` and `generate --feature-search` take
+    alike."""
+    parser.add_argument(
+        "--max-candidates",
+        type=int,
+        default=MAX_CANDIDATES,
+        help=f"Refuse a search over more candidates (default: {MAX_CANDIDATES})",
+    )
+    parser.add_argument(
+        "--adapter-pass-budget",
+        type=_non_negative_int,
+        default=ADAPTER_PASS_BUDGET,
+        help="With --adapter mlp_data: the derived features the MLP-scored pass tries, "
+        "dealt out across the tier, grid, pad and ratio templates "
+        f"(default: {ADAPTER_PASS_BUDGET})",
+    )
+
+
 def add_feature_search_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--input",
@@ -1234,7 +1317,9 @@ def add_feature_search_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--group-by",
         nargs="+",
-        help="Columns identifying a problem (default: benchmark and device)",
+        help="Columns that together identify a graph: rows that agree on all of them stay on "
+        "one side of every fold, whatever order they are listed in (default: benchmark, "
+        "so a graph measured on several devices stays whole)",
     )
     parser.add_argument(
         "--columns",
@@ -1259,31 +1344,20 @@ def add_feature_search_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--seed",
         type=int,
-        nargs="+",
-        default=list(DEFAULT_SEEDS),
-        help="Validation seeds; the score is the mean over them and its spread their "
-        f"std (default: {' '.join(map(str, DEFAULT_SEEDS))})",
-    )
-    parser.add_argument(
-        "--max-candidates",
-        type=int,
-        default=MAX_CANDIDATES,
-        help=f"Refuse a search over more candidates (default: {MAX_CANDIDATES})",
+        default=0,
+        help="The first validation seed: the search runs over this seed and the next two, "
+        "and the score is the mean over them and its spread their std; `generate "
+        "--feature-search` seeds its search the same way from its own --seed (default: 0)",
     )
     parser.add_argument(
         "--adapter",
-        choices=("tree", "mlp_data"),
-        default="tree",
-        help="The model the recipe will train: mlp_data adds a forward pass scored by the "
-        "MLP trainer after the LightGBM elimination (default: tree)",
+        choices=tuple(SEARCH_ADAPTERS),
+        default="tree_data",
+        help="The model the recipe will train, spelled as `generate --adapter` spells it: "
+        "mlp_data adds a forward pass scored by the MLP trainer after the LightGBM "
+        "elimination (default: tree_data)",
     )
-    parser.add_argument(
-        "--adapter-pass-budget",
-        type=int,
-        default=ADAPTER_PASS_BUDGET,
-        help="Derived features the adapter pass tries, dealt out across the tier, grid, "
-        f"pad and ratio templates (default: {ADAPTER_PASS_BUDGET})",
-    )
+    add_search_budget_arguments(parser)
     parser.add_argument(
         "--feature-evaluator", help="Shared hipdnn_uhd_features executable"
     )
@@ -1294,11 +1368,20 @@ def add_feature_search_arguments(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def _graph_keys(frame: pd.DataFrame, columns: list[str]) -> pd.Series:
+    """One id per distinct combination of `columns`, numbered by first appearance: rows that
+    agree on all of them share a graph, whatever order the columns are listed in."""
+    columns = list(dict.fromkeys(columns))
+    missing = [column for column in columns if column not in frame.columns]
+    if missing:
+        raise ValueError(f"--group-by columns absent from the rows: {missing}")
+    return frame.groupby(columns, sort=False, dropna=False).ngroup()
+
+
 def run_feature_search(args: argparse.Namespace) -> int:
     from .correctness import measured_rows
     from .corpus_io import read_corpus_frame
-    from .evaluate import Grouping, resolve_grouping
-    from .generate import search_inputs
+    from .evaluate import resolve_grouping
 
     try:
         output = Path(args.output_dir).resolve()
@@ -1322,13 +1405,10 @@ def run_feature_search(args: argparse.Namespace) -> int:
         missing = sorted(published - set(frame.columns))
         if missing:
             raise ValueError(f"published columns absent from the rows: {missing}")
-        grouping = (
-            Grouping(tuple(args.group_by), False, "--group-by")
-            if args.group_by
-            else resolve_grouping(frame)
-        )
-        # Folds hold whole graphs: the grouping's first column is the benchmark.
-        keys = frame[grouping.columns[0]].astype(str)
+        # Folds hold whole graphs. By default a graph is its benchmark, so one measured on
+        # several devices is never on both sides of a split; --group-by names the columns
+        # that together identify one.
+        keys = _graph_keys(frame, args.group_by or [resolve_grouping(frame).columns[0]])
         # No metric: every optional feature is guarded, whichever model reads the recipe.
         columns, identifiers, guards, omitted = search_inputs(
             frame, published, None, [], None, args.feature_evaluator
@@ -1351,11 +1431,11 @@ def run_feature_search(args: argparse.Namespace) -> int:
             groups=keys,
             catalog_values=catalog,
             catalog_source=source,
-            seeds=args.seed,
+            seeds=search_seeds(args.seed),
             max_candidates=args.max_candidates,
             omitted=omitted,
             feature_evaluator=args.feature_evaluator,
-            adapter=args.adapter,
+            adapter=SEARCH_ADAPTERS[args.adapter],
             adapter_pass_budget=args.adapter_pass_budget,
         )
         paths = write_search(report, output)

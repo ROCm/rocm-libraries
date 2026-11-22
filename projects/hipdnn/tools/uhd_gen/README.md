@@ -674,13 +674,24 @@ Automatic feature proposals never read a tensor identifier's value. A published 
 in `.uid`, such as the `<engine>.bias.uid` a matcher binds so dispatch finds the tensor's
 buffer, labels the tensor and says nothing about the problem, and a corpus fixes it, so a
 model reading the number would score the corpus's label. The proposal reads it as a presence
-flag instead, `{"!=": ["$<engine>.bias.uid", -1]}`: every matcher binds an absent optional
-tensor's uid as -1. A uid that hipDNN lists as optional (the uid of an optional tensor) is
-read through its default inside the flag,
-`{"!=": [{"value_or_default": ["$<engine>.bias.uid", -1]}, -1]}`, which is 0 on a row that
-leaves it unbound; it is still the presence flag and never a read of the uid's value.
-`generation_manifest.json` lists each one under `omitted_proposals` with
-`reason: tensor_identifier` and the flag read instead; an authored recipe is taken as written.
+flag instead, `{"!=": ["$<engine>.bias.uid", -1]}`. The attention packs of the
+hip-kernel-provider (Flydsl SDPA, the gfx942 and gfx950 dense and unified attention) bind an
+absent optional tensor's uid as -1, so the flag is the matcher's own test and any other
+value, 0 included, is a bound tensor. Not every matcher does: `gfx1151_wmma_attention` binds
+`lse.uid` as the output's uid when stats are off (its `write_lse` says whether they are on)
+and leaves `scale.uid`, `bias.uid`, `sink.uid`, `q_offset.uid`, `page_table.uid` and
+`seq_len_*.uid` unbound when the tensor is absent, and `flydsl_rmsnorm` leaves `inv_rms.uid`
+unbound outside a training graph. A column some rows leave unbound enters a proposal only if
+it is one of hipDNN's optional features, which an engine's namespace never is, so such a
+column is left out of the proposal without an `omitted_proposals` entry. The uid of an
+optional operand of a graph node (`graph.nodes[<i>].<operand>.uid`) is one of those features,
+and the flag reads it through its default,
+`{"!=": [{"value_or_default": ["$graph.nodes[0].bias.uid", -1]}, -1]}`, which is 0 on a row
+that leaves it unbound; it is still the presence flag and never a read of the uid's value.
+`generation_manifest.json` lists each identifier read as a flag under `omitted_proposals`
+with `reason: tensor_identifier` and the flag read instead; with `--feature-search` the entry
+names the flag only when the recipe the search chose reads it. An authored recipe is taken
+as written.
 
 A value a row does not publish is **absent**, never zero and never NaN: a conv-fwd row
 has no `dy`, and pandas fills that hole with NaN, which `evaluate_feature_rows` turns back
@@ -774,14 +785,22 @@ that does learns the corpus rather than the cost; each is listed in `omitted_pro
 |---|---|
 | `positional_tensor` | `graph.tensors[<i>].*`: positional copies of a node's tensor roles, which are role-ambiguous (the node-role columns stay) |
 | `derived_numel` | names ending `.numel`: the product of the published dims |
-| `caller_value` | `graph.nodes[<i>].attn_scale_value` and a matcher's `<namespace>.scale`, `.scale_bits`, `.scale_value`, `.sm_scale` (not `scale_source`, a mode): caller-chosen multipliers, often `1/sqrt(head_dim)`, so a second head_dim to a model |
+| `caller_value` | `graph.nodes[<i>].attn_scale_value` and a matcher's `<namespace>.scale`, `.sm_scale` or `.softmax_scale`, each also with a `_bits` or `_value` suffix (not `scale_source`, a mode, nor a tensor of the scale such as `scale.uid`): caller-chosen multipliers, often `1/sqrt(head_dim)`, so a second head_dim to a model |
 | `board_identity` | `device.total_global_mem`: varies only between the pooled boards |
 
 Strides, `dropout_p`/`dropout_probability` and `virtual` are kept. An authored recipe
 (`--features`, `--feature-signature`) is never filtered.
 
 **Search.** `generate --feature-search` replaces the proposal with a search on the training
-rows (never the evaluation slice). The same search runs on any rows, to read what it chooses:
+rows (never the evaluation slice). It is scored for one metric's label and for the `--adapter`
+model, and every metric of the run shares the recipe it finds, so it takes one `--metric` and
+`--adapter tree_data` or `mlp_data` (not `linear_data`, which fits a per-problem slowdown the
+search does not score). `generate` and `feature-search` take the same `--adapter` spellings,
+`--max-candidates` and `--adapter-pass-budget` (a negative budget is refused), and `--seed`
+means the same in both: the first of three validation seeds, `--seed`, `--seed + 1` and
+`--seed + 2`. The search replaces the proposal's dimension-to-tile pairs with its own grid and
+tier templates, so `--dim-tile` is refused with it. The same search runs on any rows, to read
+what it chooses:
 
 ```bash
 python -m uhd_gen feature-search --input train.csv --target tflops \
@@ -789,15 +808,20 @@ python -m uhd_gen feature-search --input train.csv --target tflops \
 ```
 
 The candidates are the published columns every row binds, and the optional features (see
-"Optional features are read through a default") some rows leave unbound (exact duplicates and
-constants collapse, the lexicographically first name of a duplicate group is kept), and
+"Optional features are read through a default") some rows leave unbound (constant columns drop
+out, and an expression offered twice is one candidate; columns that merely have equal values on
+the rows, as the query and key head counts do on a corpus of equal-head attention, are all kept
+and listed under `candidates.equal_candidates` in the report, because the rows cannot say they
+are one quantity: the backward elimination removes the redundant one), and
 `jsonexpr` expressions over them. The rows that leave an optional column unbound stay in the
 search's rows and take the column's default: every candidate over it, the base column and each
 padding, ratio, stride-order, grid and tier expression, reads it as
 `{"value_or_default": ["$<name>", <default>]}`, so the recipe passes the optional-read lint
-that `train` and `promote` apply (which optional names need the guard follows the first
+that `train` and `promote` apply (which optional names need the guard follows the run's
 metric, as `hipdnn_uhd_features --lint` decides: a `tflops` model keeps the work features
-bare; `uhd_gen feature-search`, which names no metric, guards them too). An optional column
+bare; `uhd_gen feature-search`, which names no metric, guards them too). The fill
+`d / (ceil_div(d, m) * m)` of an optional dim is read as 1 where the dim is unbound: its default
+pads to 0, which the evaluator's `/` declines on. An optional column
 that holds strings cannot take a default and is left out (`omitted_proposals` reason
 `optional_categorical`). The expressions are: padding (`ceil_div(d, m) * m`, `d / (ceil_div(d, m) * m)`, `d % m`, for
 m in 8..128), ratios of dims of different tensor roles, stride order
@@ -809,29 +833,37 @@ non-innermost axes, `t` one of the catalog's tile-like integer fields (`block_*`
 the innermost axis is the one with stride 1, else the last) and, given catalog values, `d` rounded up to each catalog field's tiers
 (`--catalog-values file.json` with `{"field": [values...]}`, or the metadata of the engine's KDP
 kernels in `--descriptor-tree`, which `generate` always reads). More than `--max-candidates`
-(2000) candidates are refused, not sampled. The search is backward elimination scored by
-LightGBM on the log target with 5-fold validation by problem, repeated over three seeds: each round
+(2000, also a `generate` flag) candidates are refused, not sampled. The search is backward elimination scored by
+LightGBM on the log target with 5-fold validation by problem, repeated over three seeds (each seed
+deals the folds anew): each round
 drops the least important 15% (permutation importance; near-duplicate clusters, |corr| > 0.999,
 leave together), it stops after two rounds worse than the best by more than
 `max(spread, 0.002)` or at 8 features, and keeps the smallest round within that tolerance of the
 best. A prune then refits without each feature, weakest first, and removes it unless the score
 rises by more than `max(spread, 0.002)`, until every feature left costs more than that.
 
-Folds hold whole graphs (the first column of the problem identity, `benchmark`), so a graph
-measured on two boards is never on both sides of a split.
+Folds hold whole graphs: by default a graph is its `benchmark`, so one measured on two boards is
+never on both sides of a split. `feature-search --group-by` names the columns that together
+identify a graph, in any order; `--group-by benchmark device` makes each board's measurements of
+a benchmark a graph of its own.
 
 With `--adapter mlp_data` (`generate` passes its own adapter and `--mlp-hidden/--mlp-epochs/
---mlp-max-rows`; the default is `tree`) a forward pass follows, scored by the MLP trainer the model
+--mlp-max-rows`; `feature-search` takes the adapter but no `--mlp-*` option, so its pass fits
+the defaults; `--adapter` is `tree_data` by default, which runs no MLP pass) a forward pass
+follows, scored by the MLP trainer the model
 will be fitted with (one ensemble member, early stopping on whole graphs) on paired per-fold
-differences. Up to `--adapter-pass-budget` (60, also a `generate` flag) tier, grid, pad and ratio
-features the prune did not keep, best LightGBM gain first (on rows the first seed's discovery
-folds train on) and dealt out across those templates, are tried one at a time: a feature is picked
-if the held-out error on folds 0-1 of each seed falls by more than `max(2 standard errors of the
-paired differences, 0.002)`, added only if folds 2-3 agree by more than one standard error, and
-removed again if fold 4 finds it costs no more than that. The LightGBM prune can remove what the
-MLP uses, so the set before the prune (plus the added features) is scored too, on folds 2-4, and
-replaces the pruned set only if it wins by the same margin; the report records both scores and the
-choice, and the removal-cost guarantee holds for the pruned set. The report lists every
+differences. Its folds are one layout of the graphs for every seed (a seed varies the MLP, not
+which graphs are held out), so folds 0-1 (discovery), 2-3 (confirm) and 4 (removal) are disjoint
+sets of graphs. The seeds of a fold score the same graphs, so they are averaged and the standard
+error is taken over the folds. Up to `--adapter-pass-budget` (60, also a `generate` flag) tier,
+grid, pad and ratio features the prune did not keep, best LightGBM gain first (on the rows outside
+the discovery folds) and dealt out across those templates, are tried one at a time: a feature is
+picked if the held-out error on folds 0-1 falls by more than `max(2 standard errors, 0.002)`,
+added only if folds 2-3 agree by more than one standard error (and 0.002), and removed again if
+fold 4, one fold with no spread to estimate, finds it costs no more than 0.002. The LightGBM prune
+can remove what the MLP uses, so the set before the prune (plus the added features) is scored
+too, on folds 2-4, and replaces the pruned set only if it wins by the pick's margin; the report
+records both scores and the choice, and the removal-cost guarantee holds for the pruned set. The report lists every
 candidate's MLP delta and standard error.
 Every recipe entry is checked against `hipdnn_uhd_features` on every row, the rows with unbound
 optional columns included, before it is written. The
@@ -840,13 +872,15 @@ same rows and seeds give the same recipe.
 The output directory (`feature_search/` beside the model for `generate`, whose
 `generation_manifest.json` records the report path and a summary under `feature_search`)
 holds `recipe.json`, a features-signature array; `feature_search_report.json`, with the
-candidate counts per template, the exclusions, every round (features kept, score and spread),
+candidate counts per template, the candidates whose values are equal on the rows, the
+exclusions, every round (features kept, score and spread),
 the prune's steps, the adapter pass, the final features with each one's removal cost (the MLP's
 for a feature the adapter pass added), and what was dropped and why; and a Markdown summary.
 
 **Overriding.** `--features` or `--feature-signature` is taken as written and skips the
 search. To choose a subset of what the search found, edit `recipe.json` and pass it back as
-`--feature-signature recipe.json`. `--feature-search` together with either is an error.
+`--feature-signature recipe.json`. `--feature-search` together with either, or with
+`--dim-tile`, is an error.
 
 ### Reproducible generation
 

@@ -221,7 +221,7 @@ def test_a_safe_signature_wraps_reads_inside_expressions_and_keeps_presence_cond
 @pytest.mark.parametrize(
     "column,values,kept",
     [
-        # Not attn_scale_value: a proposal never reads a caller-chosen scale (generate.EXCLUSIONS).
+        # Not attn_scale_value: a proposal never reads a caller-chosen scale (proposal.EXCLUSIONS).
         pytest.param(
             DROPOUT[1:], [0.125, None, 0.0625, None, 0.125, 0.25], True, id="float"
         ),
@@ -461,7 +461,7 @@ def test_a_searched_recipe_is_rewritten_to_the_form_the_search_now_writes(
     """A recipe searched before optional reads were guarded: the rewrite wraps its optional
     dim and its uid presence flag exactly as the search does, and a recipe the search wrote
     now is already safe."""
-    from uhd_gen.generate import presence_flag
+    from uhd_gen.proposal import presence_flag
     from uhd_gen.rewrite import rewrite_descriptor
 
     uid, dim = "graph.nodes[0].bias.uid", "graph.nodes[0].bias.dims[1]"

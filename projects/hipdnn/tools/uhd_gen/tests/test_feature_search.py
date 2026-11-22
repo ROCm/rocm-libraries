@@ -21,8 +21,6 @@ from uhd_gen.feature_search import (
 )
 from uhd_gen.tests.kdp_stub import kdp
 
-SEEDS = ["0", "1"]
-
 
 @pytest.fixture(scope="module", autouse=True)
 def _short_boosting():
@@ -37,6 +35,23 @@ def _evaluator_path() -> str:
         return resolve_feature_evaluator()
     except ValueError as error:
         pytest.skip(str(error))
+
+
+def _run_search(train, output, *options):
+    """`uhd_gen feature-search` over the rows in `train`, writing `output`: its exit code and
+    the report (None when the search wrote none)."""
+    code = main(
+        [
+            "feature-search",
+            "--input",
+            str(train),
+            "--output-dir",
+            str(output),
+            *map(str, options),
+        ]
+    )
+    report = output / "feature_search_report.json"
+    return code, json.loads(report.read_text("utf-8")) if report.exists() else None
 
 
 def _rows(count=800, seed=7) -> pd.DataFrame:
@@ -87,19 +102,8 @@ def searched(tmp_path_factory):
     frame = _rows()
     frame.to_csv(directory / "train.csv", index=False)
     output = directory / "out"
-    code = main(
-        [
-            "feature-search",
-            "--input",
-            str(directory / "train.csv"),
-            "--output-dir",
-            str(output),
-            "--seed",
-            *SEEDS,
-        ]
-    )
+    code, report = _run_search(directory / "train.csv", output)
     assert code == 0
-    report = json.loads((output / "feature_search_report.json").read_text("utf-8"))
     return {"frame": frame, "directory": directory, "output": output, "report": report}
 
 
@@ -131,14 +135,16 @@ def test_the_search_keeps_the_pad_and_grid_features_and_drops_the_noise(searched
     assert "$g.noise" in dropped and dropped["$g.noise"]
 
 
-def test_a_duplicate_column_collapses_into_the_first_by_name(searched):
-    candidates = searched["report"]["candidates"]
-    assert candidates["duplicate_groups"] == [
-        {"kept": "$g.q.dims[0]", "collapsed": ["$g.q_copy.dims[0]"]}
-    ]
-    assert "$g.q_copy.dims[0]" not in {
-        entry["feature"] for entry in searched["report"]["final"]["features"]
-    }
+def test_columns_equal_on_the_rows_are_all_searched_and_listed_and_the_search_keeps_one(
+    searched,
+):
+    report = searched["report"]
+    copy, original = "$g.q_copy.dims[0]", "$g.q.dims[0]"
+    assert [original, copy] in report["candidates"]["equal_candidates"]
+    assert {original, copy} <= set(report["rounds"][0]["kept"])
+    # Nothing in the rows tells the two apart, so the elimination keeps no more than one.
+    final = {entry["feature"] for entry in report["final"]["features"]}
+    assert len({original, copy} & final) <= 1
 
 
 def test_excluded_columns_are_recorded_and_never_searched(searched):
@@ -152,8 +158,8 @@ def test_excluded_columns_are_recorded_and_never_searched(searched):
     # The positional copy of B would otherwise collapse into a duplicate group of its own.
     assert not any(
         "graph.tensors" in name
-        for group in report["candidates"]["duplicate_groups"]
-        for name in [group["kept"], *group["collapsed"]]
+        for group in report["candidates"]["equal_candidates"]
+        for name in group
     )
     assert "$g.q.numel" not in json.dumps(report["recipe"])
 
@@ -177,25 +183,12 @@ def test_a_later_round_never_holds_a_feature_an_earlier_one_dropped(searched):
 
 def test_the_same_rows_and_seeds_give_the_same_recipe(searched, tmp_path):
     again = tmp_path / "again"
-    assert (
-        main(
-            [
-                "feature-search",
-                "--input",
-                str(searched["directory"] / "train.csv"),
-                "--output-dir",
-                str(again),
-                "--seed",
-                *SEEDS,
-            ]
-        )
-        == 0
-    )
+    code, repeat = _run_search(searched["directory"] / "train.csv", again)
+    assert code == 0
     assert (again / "recipe.json").read_bytes() == (
         searched["output"] / "recipe.json"
     ).read_bytes()
     # Not only the recipe: every round scored the same.
-    repeat = json.loads((again / "feature_search_report.json").read_text("utf-8"))
     assert repeat["rounds"] == searched["report"]["rounds"]
     assert repeat["final"] == searched["report"]["final"]
 
@@ -313,14 +306,19 @@ def test_the_search_keeps_a_stride_order_flag_when_time_depends_on_layout():
     ]
 
 
-def _signal_search(**options):
+def _signal_columns(count=400):
     """One column time depends on and five it does not; no dim columns, so no templates."""
-    options.setdefault("seeds", [0])
     rng = np.random.default_rng(5)
-    count = 400
     frame = pd.DataFrame({"s.x": rng.random(count)})
     for index in range(5):
         frame[f"s.n{index}"] = rng.random(count)
+    return frame
+
+
+def _signal_search(**options):
+    options.setdefault("seeds", [0])
+    frame = _signal_columns()
+    count = len(frame)
     frame["benchmark"] = [str(i) for i in range(count)]
     frame["tflops"] = np.exp(-3 * frame["s.x"])
     return search_features(
@@ -453,27 +451,47 @@ def _adapter_search(**options):
     )
 
 
-def _mlp_that_wants_the_remainder(monkeypatch, frame):
-    """A constant stub: the MLP scores 0.1 better with `dim % 8` among its columns."""
-    remainder = (frame["g.q.dims[3]"] % 8).to_numpy(float)
+def _noisy_cells(monkeypatch, wanted, gain):
+    """Stub `_MlpScorer.cells` with a known paired difference per (seed, fold) cell.
+
+    Cells are shaped (seeds, folds) as the real method's are: `0.5 + 1e-4 * len(columns)`,
+    less `gain(seed_index, fold)` when a column equals `wanted`. A set that adds a column
+    pays 1e-4 for it; every other difference between two sets is `gain` on the cells it
+    names, so a gain can differ by seed and fold. Returns the (columns, folds) of each
+    call."""
+    calls = []
 
     def cells(self, columns, folds):
-        useful = any(
-            np.array_equal(self.scorer.matrix[:, column], remainder)
-            for column in columns
-        )
-        return np.full(
-            len(self.scorer.seeds) * len(folds),
-            0.5 - (0.1 if useful else 0.0) + 0.0001 * len(columns),
+        calls.append((tuple(columns), tuple(folds)))
+        useful = any(np.array_equal(self.scorer.matrix[:, c], wanted) for c in columns)
+        return np.array(
+            [
+                [
+                    0.5 + 1e-4 * len(columns) - (gain(seed, fold) if useful else 0.0)
+                    for fold in folds
+                ]
+                for seed in range(len(self.scorer.seeds))
+            ]
         )
 
     monkeypatch.setattr(feature_search._MlpScorer, "cells", cells)
+    return calls
+
+
+def _remainder_values():
+    """`dim % 8` of the adapter frame, the column the stub MLPs want."""
+    return (_adapter_frame()["g.q.dims[3]"] % 8).to_numpy(float)
+
+
+def _mlp_that_wants_the_remainder(monkeypatch):
+    """A constant stub: the MLP scores 0.1 better with `dim % 8` among its columns."""
+    _noisy_cells(monkeypatch, _remainder_values(), lambda seed, fold: 0.1)
 
 
 def test_the_adapter_pass_adds_what_the_mlp_scores_better_and_records_each_delta(
     monkeypatch,
 ):
-    _mlp_that_wants_the_remainder(monkeypatch, _adapter_frame())
+    _mlp_that_wants_the_remainder(monkeypatch)
     _, tree = _adapter_search()
     _, mlp = _adapter_search(adapter="mlp_data", adapter_pass_budget=40)
     assert tree["adapter_pass"] is None and tree["recipe"] == ["$s.x"]
@@ -494,26 +512,10 @@ def test_the_adapter_pass_adds_what_the_mlp_scores_better_and_records_each_delta
     assert added["mlp_removal_cost"] > 0.09 and added["removal_cost"] is None
 
 
-def _signal_columns(count=400):
-    """`_signal_search`'s frame: the columns by name, for a stub MLP to prefer one."""
-    rng = np.random.default_rng(5)
-    frame = pd.DataFrame({"s.x": rng.random(count)})
-    for index in range(5):
-        frame[f"s.n{index}"] = rng.random(count)
-    return frame
-
-
 def test_the_mlp_keeps_the_pre_prune_set_when_it_scores_better(monkeypatch, tmp_path):
     """LightGBM sees `n0` as noise and the prune removes it; the stub MLP uses it."""
     n0 = _signal_columns()["s.n0"].to_numpy()
-
-    def mlp_that_uses_n0(self, columns, folds):
-        useful = any(np.array_equal(self.scorer.matrix[:, c], n0) for c in columns)
-        return np.full(
-            len(self.scorer.seeds) * len(folds), 0.5 - (0.1 if useful else 0.0)
-        )
-
-    monkeypatch.setattr(feature_search._MlpScorer, "cells", mlp_that_uses_n0)
+    _noisy_cells(monkeypatch, n0, lambda seed, fold: 0.1)
     report = _signal_search(adapter="mlp_data")
     choice = report["adapter_pass"]["set_choice"]
     assert report["prune"] and sum(step["removed"] for step in report["prune"]) == 5
@@ -529,9 +531,37 @@ def test_the_mlp_keeps_the_pre_prune_set_when_it_scores_better(monkeypatch, tmp_
     assert summary["mlp_score"] == report["adapter_pass"]["final_score"]
 
 
+@pytest.mark.parametrize("budget", [0, 1, 6])
+def test_the_adapter_pass_tries_no_more_candidates_than_its_budget(monkeypatch, budget):
+    """Four templates compete for the budget: a budget of 6 is a round of four and a round
+    of two, not two rounds of four."""
+    frame = _catalog_frame()
+    frame["benchmark"] = [str(i) for i in range(len(frame))]
+    frame["tflops"] = np.exp(-0.3 * np.log(frame["t.q.dims[2]"]))
+    _noisy_cells(monkeypatch, np.full(len(frame), -1.0), lambda seed, fold: 0.0)
+    report = search_features(
+        frame,
+        columns=[name for name in frame.columns if ".dims[" in name],
+        target="tflops",
+        objective="max",
+        groups=frame["benchmark"],
+        catalog_values={"tile": [64.0, 128.0, 256.0]},
+        seeds=[0],
+        adapter="mlp_data",
+        adapter_pass_budget=budget,
+        feature_evaluator=_evaluator_path(),
+    )
+    tried = report["adapter_pass"]["candidates"]
+    assert report["adapter_pass"]["budget"] == budget
+    assert len(tried) == budget
+    # Dealt out across the templates in turn: no template has the whole of a short budget.
+    templates = [entry["template"] for entry in tried]
+    assert templates == list(feature_search.ADAPTER_TEMPLATES)[:budget] + templates[4:]
+
+
 def test_the_mlp_keeps_the_pruned_set_when_it_scores_better(monkeypatch):
     def mlp_that_prefers_fewer_features(self, columns, folds):
-        return np.full(len(self.scorer.seeds) * len(folds), 0.5 + 0.01 * len(columns))
+        return np.full((len(self.scorer.seeds), len(folds)), 0.5 + 0.01 * len(columns))
 
     monkeypatch.setattr(
         feature_search._MlpScorer, "cells", mlp_that_prefers_fewer_features
@@ -549,7 +579,7 @@ def test_a_one_seed_adapter_pass_keeps_a_feature_the_removal_fold_says_is_needed
 ):
     """One seed leaves the removal fold a single cell, which has no spread to estimate: its
     standard error is 0 (the margin is the floor), not NaN, which kept nothing."""
-    _mlp_that_wants_the_remainder(monkeypatch, _adapter_frame())
+    _mlp_that_wants_the_remainder(monkeypatch)
     _, report = _adapter_search(adapter="mlp_data", adapter_pass_budget=40, seeds=[0])
     remainder = {"%": ["$g.q.dims[3]", 8]}
     assert report["recipe"] == ["$s.x", remainder]
@@ -559,54 +589,52 @@ def test_a_one_seed_adapter_pass_keeps_a_feature_the_removal_fold_says_is_needed
     assert np.isfinite(added["mlp_removal_cost"]) and added["mlp_removal_cost"] > 0.09
 
 
-def test_paired_with_one_cell_has_zero_standard_error():
+def test_paired_with_one_fold_has_zero_standard_error():
     with warnings.catch_warnings():
-        # A standard error of one cell is not computed: no "degrees of freedom" warning.
+        # A standard error of one fold is not computed: no "degrees of freedom" warning.
         warnings.simplefilter("error")
-        mean, error = feature_search._paired(np.array([0.5]), np.array([0.25]))
-    assert (mean, error) == (0.25, 0.0)
-    mean, error = feature_search._paired(np.array([0.5, 0.5]), np.array([0.25, 0.45]))
-    assert mean == pytest.approx(0.15)
-    assert error == pytest.approx(np.std([0.25, 0.05], ddof=1) / np.sqrt(2))
-
-
-def _noisy_cells(monkeypatch, wanted, gain):
-    """Stub `_MlpScorer.cells` with a known paired difference per (seed, fold) cell.
-
-    One value per cell, in the real method's order (each seed's folds in turn):
-    `0.5 + 1e-4 * len(columns)`, less `gain(seed_index, fold)` when a column equals
-    `wanted`. A set that adds a column pays 1e-4 for it; every other difference between
-    two sets is `gain` on the cells it names, so a gain can differ by seed and fold.
-    Returns the (columns, folds) of each call."""
-    calls = []
-
-    def cells(self, columns, folds):
-        calls.append((tuple(columns), tuple(folds)))
-        useful = any(np.array_equal(self.scorer.matrix[:, c], wanted) for c in columns)
-        return np.array(
-            [
-                0.5 + 1e-4 * len(columns) - (gain(seed, fold) if useful else 0.0)
-                for seed in range(len(self.scorer.seeds))
-                for fold in folds
-            ]
+        mean, error = feature_search._paired(
+            np.array([[0.5], [0.5]]), np.array([[0.25], [0.35]])
         )
+    assert mean == pytest.approx(0.2) and error == 0.0
 
-    monkeypatch.setattr(feature_search._MlpScorer, "cells", cells)
-    return calls
+
+def test_paired_takes_the_standard_error_over_the_folds_not_the_cells():
+    worse = np.full((3, 2), 0.5)
+    # The same fall of 0.01 on one fold and 0.03 on the other, whatever the seed.
+    mean, error = feature_search._paired(worse, worse - [[0.01, 0.03]] * 3)
+    assert mean == pytest.approx(0.02)
+    # Six independent cells would give 0.0045, a third of this.
+    assert error == pytest.approx(np.std([0.01, 0.03], ddof=1) / np.sqrt(2))
+
+
+def test_paired_averages_the_seeds_of_a_fold_before_the_error():
+    worse = np.full((3, 2), 0.5)
+    # The seeds disagree on each fold and agree on average: nothing is left to the error.
+    falls = np.array([[0.01, 0.03], [0.03, 0.01], [0.02, 0.02]])
+    mean, error = feature_search._paired(worse, worse - falls)
+    assert mean == pytest.approx(0.02)
+    assert error == pytest.approx(0.0, abs=1e-12)
 
 
 def _gain_by_fold(discovery=0.0, confirm=0.0, removal=0.0):
     """`gain` for `_noisy_cells`: a level per stage (the folds 0-1, 2-3 and 4), or
-    (level, wobble) for a gain that swings by +-wobble from one cell to the next."""
+    (level, wobble) for a gain that swings by +-wobble from one fold to the next, the same
+    for every seed."""
     stages = {0: discovery, 1: discovery, 2: confirm, 3: confirm, 4: removal}
 
     def gain(seed, fold):
         level, wobble = (
             stages[fold] if isinstance(stages[fold], tuple) else (stages[fold], 0)
         )
-        return level + wobble * (-1) ** (seed + fold)
+        return level + wobble * (-1) ** fold
 
     return gain
+
+
+def _fold_gains(gain, folds):
+    """The stub's gain on each of `folds`, averaged over the three seeds."""
+    return [np.mean([gain(seed, fold) for seed in range(3)]) for fold in folds]
 
 
 def _standard_error(values):
@@ -619,8 +647,7 @@ _REMAINDER = json.dumps({"%": ["$g.q.dims[3]", 8]}, separators=(",", ":"))
 def _remainder_pass(monkeypatch, gain):
     """The adapter pass over `_adapter_frame` with three seeds, the stub MLP gaining `gain`
     from `dim % 8`: the report and the remainder's entry."""
-    frame = _adapter_frame()
-    calls = _noisy_cells(monkeypatch, (frame["g.q.dims[3]"] % 8).to_numpy(float), gain)
+    calls = _noisy_cells(monkeypatch, _remainder_values(), gain)
     _, report = _adapter_search(
         adapter="mlp_data", adapter_pass_budget=40, seeds=[0, 1, 2]
     )
@@ -631,20 +658,24 @@ def _remainder_pass(monkeypatch, gain):
 
 
 def test_a_gain_inside_two_standard_errors_is_not_picked(monkeypatch):
-    # Cells swing between 0.03 and -0.01: the mean 0.01 clears the floor, not 2 errors.
-    noisy = _gain_by_fold(discovery=(0.01, 0.02))
+    # The folds swing between 0.05 and 0.01: the mean 0.03 clears the floor and one
+    # standard error (0.02), not two.
+    noisy = _gain_by_fold(discovery=(0.03, 0.02))
     report, entry, _ = _remainder_pass(monkeypatch, noisy)
-    cells = [
-        noisy(seed, fold)
-        for seed in range(3)
-        for fold in feature_search.ADAPTER_DISCOVERY
-    ]
-    assert entry["mlp_delta"] == pytest.approx(np.mean(cells) - 1e-4)
-    assert entry["mlp_delta_se"] == pytest.approx(_standard_error(cells))
-    assert feature_search.MIN_TOLERANCE < entry["mlp_delta"] < 2 * entry["mlp_delta_se"]
+    folds = _fold_gains(noisy, feature_search.ADAPTER_DISCOVERY)
+    assert entry["mlp_delta"] == pytest.approx(np.mean(folds) - 1e-4)
+    assert entry["mlp_delta_se"] == pytest.approx(_standard_error(folds))
+    assert entry["mlp_delta_se"] < entry["mlp_delta"] < 2 * entry["mlp_delta_se"]
     assert not entry["picked"] and not entry["added"]
     assert entry["confirm_delta"] is None
     assert report["recipe"] == ["$s.x"]
+
+
+def test_a_gain_past_two_standard_errors_and_inside_three_is_picked(monkeypatch):
+    # The folds swing between 0.07 and 0.03: the mean 0.05 is 2.5 standard errors.
+    _, entry, _ = _remainder_pass(monkeypatch, _gain_by_fold(discovery=(0.05, 0.02)))
+    assert 2 * entry["mlp_delta_se"] < entry["mlp_delta"] < 3 * entry["mlp_delta_se"]
+    assert entry["picked"]
 
 
 def test_a_gain_past_two_standard_errors_is_picked_confirmed_and_kept(monkeypatch):
@@ -675,7 +706,7 @@ def test_a_pick_the_confirm_folds_support_inside_one_standard_error_is_not_added
     monkeypatch,
 ):
     steady = (0.05, 0.001)
-    # Cells swing between 0.04 and -0.02: the mean 0.01 clears the floor, not one error.
+    # The folds swing between 0.04 and -0.02: the mean 0.01 clears the floor, not one error.
     report, entry, _ = _remainder_pass(
         monkeypatch,
         _gain_by_fold(discovery=steady, confirm=(0.01, 0.03), removal=steady),
@@ -683,6 +714,18 @@ def test_a_pick_the_confirm_folds_support_inside_one_standard_error_is_not_added
     assert entry["picked"] and not entry["added"]
     assert entry["confirm_delta"] > feature_search.MIN_TOLERANCE
     assert report["recipe"] == ["$s.x"]
+
+
+def test_a_pick_the_confirm_folds_support_past_one_standard_error_is_added(monkeypatch):
+    steady = (0.05, 0.001)
+    # The folds swing between 0.025 and 0.005: the mean 0.015 is 1.5 standard errors.
+    confirm = (0.015, 0.01)
+    report, entry, _ = _remainder_pass(
+        monkeypatch, _gain_by_fold(discovery=steady, confirm=confirm, removal=steady)
+    )
+    error = _standard_error(_fold_gains(_gain_by_fold(confirm=confirm), (2, 3)))
+    assert error < entry["confirm_delta"] < 2 * error
+    assert entry["picked"] and entry["added"]
 
 
 def test_a_gain_only_on_the_confirm_folds_is_never_picked(monkeypatch):
@@ -695,27 +738,47 @@ def test_a_gain_only_on_the_confirm_folds_is_never_picked(monkeypatch):
     assert report["recipe"] == ["$s.x"]
 
 
-@pytest.mark.parametrize(
-    "removal",
-    [
-        # No gain on the removal fold.
-        (0.0, 0.001),
-        # A gain of 0.015 that three cells swinging between 0.035 and -0.025 do not show.
-        (0.005, 0.03),
-    ],
-)
-def test_an_added_feature_the_removal_fold_does_not_need_is_dropped_again(
-    monkeypatch, removal
-):
+def test_an_added_feature_the_removal_fold_does_not_need_is_dropped_again(monkeypatch):
     steady = (0.05, 0.001)
     report, entry, _ = _remainder_pass(
-        monkeypatch, _gain_by_fold(discovery=steady, confirm=steady, removal=removal)
+        monkeypatch,
+        _gain_by_fold(discovery=steady, confirm=steady, removal=(0.0, 0.001)),
     )
     assert entry["picked"] and entry["added"]
     [check] = report["adapter_pass"]["removal_check"]
     assert check["feature"] == _REMAINDER and not check["kept"]
     assert report["recipe"] == ["$s.x"]
     assert report["adapter_pass"]["added"] == []
+
+
+#: A stage's gain with no spread, so its margin is the floor alone: a paired difference is
+#: the gain less the 1e-4 the extra column costs, 0.0014 or 0.0024 for these.
+BELOW_THE_FLOOR, ABOVE_THE_FLOOR = 0.0015, 0.0025
+
+
+@pytest.mark.parametrize(
+    "stage, level, passes",
+    [
+        ("discovery", BELOW_THE_FLOOR, False),
+        ("discovery", ABOVE_THE_FLOOR, True),
+        ("confirm", BELOW_THE_FLOOR, False),
+        ("confirm", ABOVE_THE_FLOOR, True),
+        ("removal", BELOW_THE_FLOOR, False),
+        ("removal", ABOVE_THE_FLOOR, True),
+    ],
+)
+def test_each_stage_needs_the_floor_when_its_gain_has_no_spread(
+    monkeypatch, stage, level, passes
+):
+    levels = {"discovery": 0.05, "confirm": 0.05, "removal": 0.05, stage: level}
+    report, entry, _ = _remainder_pass(monkeypatch, _gain_by_fold(**levels))
+    if stage == "removal":
+        [check] = report["adapter_pass"]["removal_check"]
+        assert check["kept"] == passes
+    else:
+        assert {"discovery": entry["picked"], "confirm": entry["added"]}[
+            stage
+        ] == passes
 
 
 def _pre_prune_choice(monkeypatch, gain):
@@ -730,14 +793,44 @@ def _pre_prune_choice(monkeypatch, gain):
 def test_the_pre_prune_set_needs_a_gain_past_two_standard_errors_to_replace_the_pruned(
     monkeypatch,
 ):
-    swinging = (0.005, 0.02)
+    swinging = (0.02, 0.03)
     report, choice = _pre_prune_choice(
         monkeypatch, _gain_by_fold(confirm=swinging, removal=swinging)
     )
-    # Ahead on average, by more than the floor and by less than 2 standard errors.
-    assert 0.002 < choice["pre_prune_gain"] < 2 * choice["pre_prune_gain_se"]
+    # Ahead on average, by more than one standard error and by less than 2.
+    gain, error = choice["pre_prune_gain"], choice["pre_prune_gain_se"]
+    assert error < gain < 2 * error
     assert choice["chosen"] == "pruned"
     assert report["recipe"] == ["$s.x"]
+
+
+def test_the_pre_prune_set_replaces_the_pruned_with_a_gain_inside_three_errors(
+    monkeypatch,
+):
+    swinging = (0.015, 0.01)
+    report, choice = _pre_prune_choice(
+        monkeypatch, _gain_by_fold(confirm=swinging, removal=swinging)
+    )
+    gain, error = choice["pre_prune_gain"], choice["pre_prune_gain_se"]
+    assert 2 * error < gain < 3 * error
+    assert choice["chosen"] == "pre_prune"
+
+
+@pytest.mark.parametrize(
+    "level, chosen",
+    [
+        # The five extra columns cost 5e-4: the gain is 0.0019 and 0.003.
+        (0.0024, "pruned"),
+        (0.0035, "pre_prune"),
+    ],
+)
+def test_the_pre_prune_set_needs_the_floor_when_its_gain_has_no_spread(
+    monkeypatch, level, chosen
+):
+    _, choice = _pre_prune_choice(
+        monkeypatch, _gain_by_fold(confirm=level, removal=level)
+    )
+    assert choice["chosen"] == chosen
 
 
 def test_a_clear_gain_on_the_held_folds_chooses_the_pre_prune_set(monkeypatch):
@@ -817,7 +910,8 @@ def test_the_real_mlp_scores_the_column_time_depends_on_far_better():
     scorer, _ = _scorer_over(None)
     mlp = feature_search._MlpScorer(scorer)
     signal, noise = mlp.cells([0], (0,)), mlp.cells([1], (0,))
-    assert len(signal) == len(noise) == 2
+    # One cell per seed on the one fold.
+    assert signal.shape == noise.shape == (2, 1)
     assert (noise - signal).min() > 0.1
     delta, error = feature_search._paired(noise, signal)
     assert delta > 0.1 and error >= 0
@@ -839,7 +933,7 @@ def test_the_mlp_pass_fits_with_the_callers_options_and_whole_graphs(monkeypatch
         assert options["hidden"] == (8,) and options["epochs"] == 7
         assert options["members"] == 1
     # Early stopping holds out whole graphs: the groups are the training rows' graphs.
-    assert np.array_equal(seen[0]["groups"], groups[scorer.fold_of[0] != 0])
+    assert np.array_equal(seen[0]["groups"], groups[scorer.adapter_fold_of != 0])
 
 
 def test_no_graph_falls_in_two_folds_even_across_devices(monkeypatch):
@@ -871,11 +965,60 @@ def test_no_graph_falls_in_two_folds_even_across_devices(monkeypatch):
         seeds=[0, 1],
         feature_evaluator=_evaluator_path(),
     )
-    assert len(recorded) == 2
+    assert len(recorded) >= 2
     for group_ids, folds in recorded:
         assert len(set(folds)) == 5
         for graph in np.unique(group_ids):
             assert len(set(folds[group_ids == graph])) == 1
+
+
+def test_the_adapter_pass_scores_the_same_held_out_graphs_whatever_the_seed(
+    monkeypatch,
+):
+    """The discovery, confirm and removal folds are disjoint sets of graphs across all the
+    seeds, not only within one: a seed varies the model, not which graphs are held out.
+    """
+    count = 200
+    matrix = np.column_stack([np.arange(count), np.random.default_rng(3).random(count)])
+    held = []
+
+    def fit(train, target, **options):
+        held.append([])
+        return (
+            types.SimpleNamespace(
+                predict=lambda rows: (
+                    held[-1].extend(rows[:, 0].astype(int)),
+                    np.zeros(len(rows)),
+                )[1]
+            ),
+            {},
+        )
+
+    monkeypatch.setattr("uhd_gen.mlp.fit_mlp", fit)
+    scorer = feature_search._Scorer(
+        matrix, np.zeros(count), np.arange(count), [0, 1, 2], 5
+    )
+    mlp = feature_search._MlpScorer(scorer)
+    stages = {}
+    for name, folds in (
+        ("discovery", feature_search.ADAPTER_DISCOVERY),
+        ("confirm", feature_search.ADAPTER_CONFIRM),
+        ("removal", feature_search.ADAPTER_REMOVAL),
+    ):
+        held.clear()
+        mlp.cells([0, 1], folds)
+        # One fit per (seed, fold), seed-major.
+        assert len(held) == 3 * len(folds)
+        per_fold = [
+            {tuple(sorted(held[seed * len(folds) + k])) for seed in range(3)}
+            for k in range(len(folds))
+        ]
+        assert all(len(sets) == 1 for sets in per_fold), name
+        stages[name] = set().union(*(set(*sets) for sets in per_fold))
+    assert not stages["discovery"] & stages["confirm"]
+    assert not stages["discovery"] & stages["removal"]
+    assert not stages["confirm"] & stages["removal"]
+    assert len(stages["discovery"] | stages["confirm"] | stages["removal"]) == count
 
 
 def test_the_stride_order_flag_reads_the_stride_even_when_it_equals_a_dim():
@@ -886,7 +1029,7 @@ def test_the_stride_order_flag_reads_the_stride_even_when_it_equals_a_dim():
         {
             "t.q.dims[0]": batch,
             "t.q.strides[0]": rng.integers(1000, 2000, count),
-            # Equal to the batch dim on every row, so it collapses into that group.
+            # Equal to the batch dim on every row.
             "t.q.strides[1]": batch,
             "t.q.strides[2]": rng.integers(1, 9, count),
             "t.q.strides[3]": 1,
@@ -895,6 +1038,81 @@ def test_the_stride_order_flag_reads_the_stride_even_when_it_equals_a_dim():
     pool, _ = build_candidates(frame, list(frame.columns), [], None, 2000)
     flags = [c.entry for c in pool.candidates if c.template == "stride_order"]
     assert {">": ["$t.q.strides[1]", "$t.q.strides[2]"]} in flags
+
+
+def test_a_grid_reads_its_own_tensors_heads_when_another_tensors_are_equal_on_the_rows():
+    """Every training graph here has as many key heads as query heads, so `k.dims[1]` equals
+    `q.dims[1]` on every row; the grid over q's launch must still read q's."""
+    rng = np.random.default_rng(12)
+    count = 200
+    heads = rng.choice([2, 4, 8], count)
+    frame = pd.DataFrame(
+        {
+            "t.k.dims[0]": rng.integers(1, 9, count),
+            "t.k.dims[1]": heads,
+            "t.k.dims[2]": rng.integers(1, 1500, count),
+            "t.q.dims[1]": heads,
+            "t.q.dims[2]": rng.integers(1, 1500, count),
+        }
+    )
+    frame["t.q.dims[0]"] = frame["t.k.dims[0]"]
+    frame["t.k.dims[3]"] = frame["t.q.dims[3]"] = rng.choice([64, 128], count)
+    pool, _ = build_candidates(frame, list(frame.columns), [], None, 2000)
+    assert ["$t.k.dims[1]", "$t.q.dims[1]"] in pool.equal_candidates()
+    grids = {
+        c.name: json.dumps(c.entry["*"])
+        for c in pool.candidates
+        if c.template == "grid"
+    }
+    q_grids = [text for text in grids.values() if "$t.q.dims[1]" in text]
+    assert q_grids and all("$t.k." not in text for text in q_grids)
+    k_grids = [text for text in grids.values() if "$t.k.dims[1]" in text]
+    assert k_grids and all("$t.q." not in text for text in k_grids)
+    # Ratios across roles are offered for the equal pair too: kv heads over query heads
+    # would be constant, but the query sequence over the key sequence is not.
+    assert any(
+        c.entry == {"/": ["$t.k.dims[2]", "$t.q.dims[2]"]}
+        or c.entry == {"/": ["$t.q.dims[2]", "$t.k.dims[2]"]}
+        for c in pool.candidates
+    )
+
+
+def test_a_fill_is_offered_for_an_optional_dim_and_reads_one_where_it_is_unbound():
+    from uhd_gen.optional import lint
+
+    frame = _optional_rows()
+    columns, identifiers, guards, _ = _optional_inputs(frame)
+    pool, _ = build_candidates(
+        frame,
+        columns,
+        identifiers,
+        None,
+        2000,
+        feature_search.FALLBACK_TILES,
+        guards,
+        _evaluator_path(),
+    )
+    top = frame[BIAS_DIM].max()
+    multiples = [m for m in feature_search.PAD_MULTIPLES if m < top]
+    fills = [
+        c
+        for c in pool.candidates
+        if c.template == "pad"
+        and BIAS_DIM in json.dumps(c.entry)
+        and isinstance(c.entry, dict)
+        and "if" in c.entry
+    ]
+    assert len(fills) == len(multiples) > 1
+    unbound = frame[BIAS_DIM].isna().to_numpy()
+    assert unbound.any() and (~unbound).any()
+    for fill in fills:
+        # No padding to fill where there is no dim; the fraction of the padded dim where
+        # there is one.
+        assert (fill.values[unbound] == 1).all()
+        assert ((fill.values[~unbound] > 0) & (fill.values[~unbound] <= 1)).all()
+    entries = [c.entry for c in pool.candidates]
+    verify_recipe(entries, pool.candidates, frame, _evaluator_path())
+    assert lint(entries, "tflops", _evaluator_path()) == []
 
 
 def test_a_tier_ladder_of_flags_or_out_of_range_values_is_not_crossed_with_the_dims():
@@ -977,14 +1195,26 @@ def test_more_candidates_than_the_bound_are_refused_not_sampled():
         build_candidates(frame, columns, [], None, 10)
 
 
-def test_a_constant_column_is_dropped_and_the_first_duplicate_by_name_is_kept():
+def test_a_constant_column_is_dropped_and_columns_with_equal_values_are_all_kept():
     frame = pd.DataFrame(
         {"b": [1, 2, 3, 4], "a": [1, 2, 3, 4], "c": [5, 5, 5, 5], "d": [4, 3, 1, 2]}
     )
     pool, details = build_candidates(frame, ["b", "a", "c", "d"], [], None, 2000)
-    assert [candidate.name for candidate in pool.candidates] == ["$a", "$d"]
-    assert pool.duplicates == {"$a": ["$b"]}
+    assert [candidate.name for candidate in pool.candidates] == ["$a", "$b", "$d"]
+    assert pool.equal_candidates() == [["$a", "$b"]]
     assert details["constant_columns"] == ["c"]
+
+
+def test_an_expression_offered_twice_is_one_candidate():
+    """Two catalog fields with the same ladder round a dim up to the same tiers."""
+    frame = _catalog_frame()
+    columns = [name for name in frame.columns if name.startswith("t.q.")]
+    ladder = [64.0, 128.0, 256.0]
+    once, _ = build_candidates(frame, columns, [], {"a": ladder}, 2000)
+    twice, _ = build_candidates(frame, columns, [], {"a": ladder, "b": ladder}, 2000)
+    assert [c.name for c in twice.candidates] == [c.name for c in once.candidates]
+    assert twice.stats["tier"]["duplicate"] == once.stats["tier"]["kept"] > 0
+    assert twice.equal_candidates() == once.equal_candidates()
 
 
 def test_the_search_needs_enough_problems_for_its_folds():
@@ -1053,7 +1283,7 @@ def _unguarded_reads(node, names: set) -> list:
 
 
 def _optional_inputs(frame):
-    from uhd_gen.generate import search_inputs
+    from uhd_gen.proposal import search_inputs
 
     return search_inputs(
         frame,
@@ -1066,7 +1296,7 @@ def _optional_inputs(frame):
 
 
 def test_a_search_guards_every_optional_read_and_a_uid_stays_a_presence_flag():
-    from uhd_gen.generate import presence_flag
+    from uhd_gen.proposal import presence_flag
     from uhd_gen.optional import lint
 
     frame = _optional_rows()
@@ -1112,7 +1342,7 @@ def test_a_search_guards_every_optional_read_and_a_uid_stays_a_presence_flag():
 
 
 def test_a_template_over_an_optional_dim_reads_it_guarded_and_matches_the_evaluator():
-    from uhd_gen.generate import presence_flag
+    from uhd_gen.proposal import presence_flag
     from uhd_gen.optional import lint
 
     frame = _optional_rows()
@@ -1165,21 +1395,10 @@ def test_the_standalone_search_publishes_the_columns_any_row_binds(tmp_path):
     }
     frame.to_csv(tmp_path / "train.csv", index=False)
     output = tmp_path / "out"
-    code = main(
-        [
-            "feature-search",
-            "--input",
-            str(tmp_path / "train.csv"),
-            "--output-dir",
-            str(output),
-            "--seed",
-            *SEEDS,
-            "--feature-evaluator",
-            _evaluator_path(),
-        ]
+    code, report = _run_search(
+        tmp_path / "train.csv", output, "--feature-evaluator", _evaluator_path()
     )
     assert code == 0
-    report = json.loads((output / "feature_search_report.json").read_text("utf-8"))
     # The columns only some rows bind reach the search, each read through value_or_default:
     # two bound columns and the bias dim and dropout probability.
     assert report["candidates"]["by_template"]["base"]["generated"] == 4
@@ -1199,3 +1418,171 @@ def test_an_optional_column_that_holds_strings_cannot_take_a_default_and_is_left
     columns, _, guards, omitted = _optional_inputs(frame)
     assert name not in columns and name not in guards
     assert {"expression": "$" + name, "reason": "optional_categorical"} in omitted
+
+
+def _csv(directory, frame, name="train.csv"):
+    frame.to_csv(directory / name, index=False)
+    return directory / name
+
+
+def test_the_target_objective_columns_and_seed_options_reach_the_report(tmp_path):
+    frame = _rows(count=300)
+    frame["score"] = frame["tflops"]
+    code, report = _run_search(
+        _csv(tmp_path, frame),
+        tmp_path / "out",
+        *("--target", "score", "--objective", "min", "--seed", 5),
+        *("--columns", "g.q.dims[1]", "g.q.dims[2]", "g.noise"),
+    )
+    assert code == 0
+    assert (report["target"], report["objective"]) == ("score", "min")
+    assert report["seeds"] == [5, 6, 7]
+    # Only the named columns are read; the other published ones are not searched.
+    assert {n for n in report["rounds"][0]["kept"] if n.startswith("$")} == {
+        "$g.q.dims[1]",
+        "$g.q.dims[2]",
+        "$g.noise",
+    }
+    assert report["candidates"]["by_template"]["base"]["generated"] == 3
+
+
+def _two_device_rows(count=100):
+    """`count` graphs, each measured on two boards: the same published features."""
+    frame = pd.concat([_rows(count=count), _rows(count=count)], ignore_index=True)
+    frame["device"] = ["0"] * count + ["1"] * count
+    frame.loc[count:, "tflops"] *= 1.1
+    return frame
+
+
+def test_group_by_names_the_columns_that_together_identify_a_graph(tmp_path):
+    train = _csv(tmp_path, _two_device_rows())
+    reports = {}
+    for name, columns in (
+        ("default", []),
+        ("both", ["--group-by", "benchmark", "device"]),
+        ("reversed", ["--group-by", "device", "benchmark"]),
+    ):
+        code, reports[name] = _run_search(train, tmp_path / name, *columns)
+        assert code == 0, name
+    # By default a graph is its benchmark; with both columns listed, a benchmark on each
+    # board is a graph of its own, in whichever order they are listed.
+    assert reports["default"]["problems"] == 100
+    assert reports["both"]["problems"] == reports["reversed"]["problems"] == 200
+    assert reports["reversed"]["rounds"] == reports["both"]["rounds"]
+    assert reports["reversed"]["recipe"] == reports["both"]["recipe"]
+
+
+def test_a_group_by_column_the_rows_lack_is_refused(tmp_path, caplog):
+    code, report = _run_search(
+        _csv(tmp_path, _rows(count=100)),
+        tmp_path / "out",
+        *("--group-by", "benchmark", "board"),
+    )
+    assert code == 1 and report is None
+    assert "board" in caplog.text
+
+
+def test_max_candidates_refuses_a_larger_search(tmp_path, caplog):
+    train = _csv(tmp_path, _rows(count=300))
+    code, report = _run_search(train, tmp_path / "refused", "--max-candidates", 5)
+    assert code == 1 and report is None
+    assert "refusing rather than sampling" in caplog.text
+    assert _run_search(train, tmp_path / "allowed", "--max-candidates", 2000)[0] == 0
+
+
+def test_catalog_values_feed_the_tier_template(tmp_path):
+    train = _csv(tmp_path, _rows(count=300))
+    values = tmp_path / "catalog.json"
+    values.write_text(json.dumps({"tile": [64, 128, 256]}), "utf-8")
+    code, report = _run_search(train, tmp_path / "out", "--catalog-values", values)
+    assert code == 0
+    assert report["catalog"]["tier_fields"] == {"tile": [64.0, 128.0, 256.0]}
+    assert report["catalog"]["source"] == str(values.resolve())
+    assert report["candidates"]["by_template"]["tier"]["generated"] > 0
+    assert report["candidates"]["grid_tiles"] == {
+        "tiles": [64, 128, 256],
+        "source": "catalog",
+    }
+
+
+def test_a_descriptor_tree_feeds_the_tier_template_with_the_kernels_of_one_engine(
+    tmp_path,
+):
+    ued, other = (
+        "11111111-1111-4111-8111-111111111111",
+        "22222222-2222-4222-8222-222222222222",
+    )
+    tree = tmp_path / "tree"
+    tree.mkdir()
+    (tree / "a.ued.json").write_text(
+        json.dumps({"version": "1.0", "id": ued, "name": "provider:a"}), "utf-8"
+    )
+    (tree / "a.kdp.json").write_text(
+        json.dumps(kdp("33333333-3333-4333-8333-333333333330", ued, [64, 128])), "utf-8"
+    )
+    (tree / "b.kdp.json").write_text(
+        json.dumps(kdp("44444444-4444-4444-8444-444444444440", other, [32, 256])),
+        "utf-8",
+    )
+    train = _csv(tmp_path, _rows(count=300))
+    code, report = _run_search(
+        train,
+        tmp_path / "one",
+        *("--descriptor-tree", tree, "--engine", "provider:a"),
+    )
+    assert code == 0
+    assert report["catalog"]["tier_fields"] == {"tile": [64.0, 128.0]}
+    assert report["catalog"]["source"] == str(tree.resolve())
+    code, report = _run_search(train, tmp_path / "all", "--descriptor-tree", tree)
+    assert code == 0
+    assert report["catalog"]["tier_fields"] == {"tile": [32.0, 64.0, 128.0, 256.0]}
+
+
+def test_two_catalogs_are_refused(tmp_path):
+    values = tmp_path / "catalog.json"
+    values.write_text("{}", "utf-8")
+    code, report = _run_search(
+        _csv(tmp_path, _rows(count=100)),
+        tmp_path / "out",
+        *("--catalog-values", values, "--descriptor-tree", tmp_path),
+    )
+    assert code == 1 and report is None
+
+
+def test_the_adapter_and_its_budget_reach_the_search(tmp_path, monkeypatch):
+    _noisy_cells(monkeypatch, np.full(300, -1.0), lambda seed, fold: 0.0)
+    train = _csv(tmp_path, _rows(count=300))
+    code, tree = _run_search(train, tmp_path / "tree")
+    assert code == 0 and tree["adapter_pass"] is None
+    code, mlp = _run_search(
+        train,
+        tmp_path / "mlp",
+        *("--adapter", "mlp_data", "--adapter-pass-budget", 2),
+    )
+    assert code == 0
+    assert mlp["adapter_pass"]["adapter"] == "mlp_data"
+    assert mlp["adapter_pass"]["budget"] == 2
+    assert len(mlp["adapter_pass"]["candidates"]) == 2
+    code, none = _run_search(
+        train,
+        tmp_path / "none",
+        *("--adapter", "mlp_data", "--adapter-pass-budget", 0),
+    )
+    assert code == 0 and none["adapter_pass"]["candidates"] == []
+
+
+def test_a_negative_adapter_pass_budget_is_refused(tmp_path, capsys):
+    with pytest.raises(SystemExit):
+        _run_search(
+            _csv(tmp_path, _rows(count=100)),
+            tmp_path / "out",
+            *("--adapter", "mlp_data", "--adapter-pass-budget", -1),
+        )
+    assert "must not be negative" in capsys.readouterr().err
+    assert not (tmp_path / "out").exists()
+
+
+def test_an_existing_output_directory_is_refused(tmp_path):
+    (tmp_path / "out").mkdir()
+    code, report = _run_search(_csv(tmp_path, _rows(count=100)), tmp_path / "out")
+    assert code == 1 and report is None

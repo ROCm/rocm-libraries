@@ -189,6 +189,12 @@ def optional_guards(names, metric: str | None, executable=None) -> dict[str, obj
     }
 
 
+def guarded_read(reference: str, default) -> dict:
+    """`reference` (`$name`) read through value_or_default: a graph that leaves it unbound
+    reads `default`."""
+    return {"value_or_default": [reference, default]}
+
+
 def _wrap(node, targets: dict):
     """`node` with every read of a reference in `targets` taking its default when unbound.
 
@@ -197,7 +203,7 @@ def _wrap(node, targets: dict):
     """
     if isinstance(node, str):
         if node in targets:
-            return {"value_or_default": [node, targets[node]]}
+            return guarded_read(node, targets[node])
         return node
     if isinstance(node, list):
         return [_wrap(item, targets) for item in node]

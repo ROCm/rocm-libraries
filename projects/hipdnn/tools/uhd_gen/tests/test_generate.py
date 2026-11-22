@@ -1080,9 +1080,10 @@ def test_a_proposal_leaves_out_each_excluded_column_and_records_why(column, reas
 
 
 def test_a_proposal_keeps_strides_dropout_virtual_and_the_columns_the_rules_resemble():
-    """The corpus never varies strides, dropout or `virtual`, which is why they look
-    neutral; the audit kept them. A scale tensor's uid is an identifier, read as presence,
-    not a caller value, and a node's `scale` tensor dims are dims."""
+    """Strides, dropout and `virtual` are not excluded. The corpus varies strides (the
+    `layout` facet) and dropout (the `form` facet), so each can say something about the
+    problem, and the audit kept them. A scale tensor's uid is an identifier, read as
+    presence, not a caller value, and a node's `scale` tensor dims are dims."""
     frame = _rule_frame()
     signature, omitted = feature_recipe(frame, set(frame.columns), None, None, [], [])
     for kept in (
@@ -1102,6 +1103,57 @@ def test_a_proposal_keeps_strides_dropout_virtual_and_the_columns_the_rules_rese
         for entry in omitted
         if entry["expression"] == "$flydsl_sdpa_rdna.scale.uid"
     ] == ["tensor_identifier"]
+
+
+@pytest.mark.parametrize(
+    ("name", "caller_value"),
+    [
+        ("graph.nodes[0].attn_scale_value", True),
+        ("graph.nodes[12].attn_scale_value", True),
+        ("engine.scale", True),
+        ("engine.scale_bits", True),
+        ("engine.scale_value", True),
+        ("engine.sm_scale", True),
+        ("engine.sm_scale_bits", True),
+        ("engine.sm_scale_value", True),
+        ("engine.softmax_scale", True),
+        ("engine.softmax_scale_bits", True),
+        ("engine.softmax_scale_value", True),
+        # A mode, a tensor of the scale, and tokens that only start or end like one.
+        ("engine.scale_source", False),
+        ("engine.scale.uid", False),
+        ("engine.scale.dims[0]", False),
+        ("engine.softmax_scale_x", False),
+        ("engine.scale_bitsx", False),
+        ("engine.x_scale", False),
+        ("engine.rescale", False),
+        ("graph.nodes[0].my_attn_scale_value", False),
+        ("graph.nodes[0].attn_scale_value[0]", False),
+        # `graph`, `device` and `kernel` are not a matcher's namespace.
+        ("graph.scale", False),
+        ("device.scale", False),
+        ("kernel.scale", False),
+    ],
+)
+def test_the_caller_value_rule_matches_whole_scale_tokens_of_a_matcher_namespace(
+    name, caller_value
+):
+    from uhd_gen.proposal import is_caller_value
+
+    assert is_caller_value(name) is caller_value
+
+
+def test_a_search_names_a_flag_read_instead_only_when_its_recipe_reads_it():
+    from uhd_gen.proposal import identifier_omissions, presence_flag, settle_omissions
+
+    board = {"expression": "$device.total_global_mem", "reason": "board_identity"}
+    omitted = [board, *identifier_omissions(["a.uid", "b.uid"], {"b.uid": -1})]
+    recipe = ["$graph.flops", presence_flag("b.uid", -1)]
+    assert settle_omissions(omitted, recipe) == [
+        board,
+        {"expression": "$a.uid", "reason": "tensor_identifier"},
+        omitted[2],
+    ]
 
 
 def test_an_authored_recipe_is_never_filtered_by_the_exclusion_rules():
@@ -1285,7 +1337,7 @@ def _spied_feature_search(monkeypatch, tmp_path, evaluator, *extra):
     monkeypatch.setattr(
         feature_search._MlpScorer,
         "cells",
-        lambda self, columns, folds: np.full(len(self.scorer.seeds) * len(folds), 0.5),
+        lambda self, columns, folds: np.full((len(self.scorer.seeds), len(folds)), 0.5),
     )
     seen = []
     real = feature_search.search_features
@@ -1308,7 +1360,7 @@ def test_feature_search_forwards_the_callers_options_to_the_search(
     monkeypatch, tmp_path, evaluator
 ):
     from uhd_gen.feature_search import catalog_values_from_tree
-    from uhd_gen.generate import search_inputs
+    from uhd_gen.proposal import search_inputs
 
     frame, options, published, metric, tree = _spied_feature_search(
         monkeypatch,
@@ -1326,10 +1378,19 @@ def test_feature_search_forwards_the_callers_options_to_the_search(
         "3",
         "--mlp-max-rows",
         "50",
+        "--mlp-members",
+        "2",
+        "--mlp-seed",
+        "4",
+        "--max-candidates",
+        "123",
     )
     assert options["seeds"] == [5, 6, 7]
     assert options["adapter"] == "mlp_data"
     assert options["adapter_pass_budget"] == 7
+    assert options["max_candidates"] == 123
+    # The pass fits one member and seeds each fit itself, whatever --mlp-members and
+    # --mlp-seed ask of the final model.
     assert options["mlp_options"] == {"hidden": (8,), "epochs": 3, "max_rows": 50}
     assert options["catalog_values"] == {"tile": [64, 128]}
     assert options["catalog_values"] == catalog_values_from_tree(tree, None)
@@ -1350,14 +1411,129 @@ def test_feature_search_forwards_the_callers_options_to_the_search(
 def test_feature_search_without_options_searches_as_the_tree_over_three_seeds(
     monkeypatch, tmp_path, evaluator
 ):
-    from uhd_gen.feature_search import ADAPTER_PASS_BUDGET
+    from uhd_gen.feature_search import ADAPTER_PASS_BUDGET, MAX_CANDIDATES
 
     _, options, _, _, _ = _spied_feature_search(monkeypatch, tmp_path, evaluator)
     assert options["seeds"] == [0, 1, 2]
     assert options["adapter"] == "tree"
     assert options["adapter_pass_budget"] == ADAPTER_PASS_BUDGET
+    assert options["max_candidates"] == MAX_CANDIDATES
     assert options["mlp_options"] == {}
     assert options["catalog_values"] == {"tile": [64, 128]}
+
+
+@pytest.mark.parametrize(
+    ("metric", "target", "objective"),
+    [("tflops", "tflops", "max"), ("time", "avgTimeMs", "min")],
+)
+def test_feature_search_scores_the_label_of_the_metric_it_was_asked_for(
+    monkeypatch, tmp_path, evaluator, metric, target, objective
+):
+    _, options, _, requested, _ = _spied_feature_search(
+        monkeypatch, tmp_path, evaluator, "--metric", metric
+    )
+    assert requested == metric
+    assert (options["target"], options["objective"]) == (target, objective)
+
+
+def test_a_search_names_the_flag_read_instead_only_for_a_flag_the_recipe_reads(
+    monkeypatch, tmp_path, evaluator
+):
+    _spied_feature_search(monkeypatch, tmp_path, evaluator)
+    output = tmp_path / "out"
+    manifest = json.loads(
+        (output / "generation_manifest.json").read_text(encoding="utf-8")
+    )
+    recipe = manifest["features_signature"]
+    entries = {
+        entry["expression"]: entry
+        for entry in manifest["omitted_proposals"]
+        if entry["reason"] == "tensor_identifier"
+    }
+    assert set(entries) == {"$engine7.bias.uid", "$graph.nodes[0].in_1.uid"}
+    # The bias uid is the same on every row, so its flag is a constant the search drops.
+    assert {"!=": ["$engine7.bias.uid", -1]} not in recipe
+    assert "read_instead" not in entries["$engine7.bias.uid"]
+    for entry in entries.values():
+        flag = entry.get("read_instead")
+        assert (flag is not None) == (flag in recipe)
+    # The report beside the model says the same.
+    report = json.loads(
+        (output / "feature_search" / "feature_search_report.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert report["exclusions"] == manifest["omitted_proposals"]
+
+
+def test_the_default_proposal_records_its_exclusions_in_the_manifest(
+    monkeypatch, tmp_path, evaluator
+):
+    main = _cli()
+    tree = _ued_tree(tmp_path / "descriptors")
+    _bench_publishing_excluded_columns(monkeypatch, snapshot_provenance(tree))
+    output = tmp_path / "out"
+    command = _search_args(_graphs(tmp_path / "graphs"), tree, output, evaluator)
+    assert main(command) == 0
+    manifest = json.loads(
+        (output / "generation_manifest.json").read_text(encoding="utf-8")
+    )
+    assert {
+        (entry["expression"], entry["reason"])
+        for entry in manifest["omitted_proposals"]
+    } == {
+        ("$graph.tensors[0].dims[0]", "positional_tensor"),
+        ("$graph.nodes[0].attn_scale_value", "caller_value"),
+        ("$device.total_global_mem", "board_identity"),
+    }
+    assert manifest["feature_search"] is None
+    assert "graph.tensors" not in json.dumps(manifest["features_signature"])
+
+
+def test_a_search_is_not_started_for_a_promotion_arch_the_corpus_lacks(
+    monkeypatch, tmp_path, evaluator, caplog
+):
+    main = _cli()
+    tree = _ued_tree(tmp_path / "descriptors")
+    _bench_publishing_excluded_columns(monkeypatch, snapshot_provenance(tree))
+    searched = []
+    monkeypatch.setattr(
+        "uhd_gen.feature_search.search_features",
+        lambda *arguments, **options: searched.append(options),
+    )
+    command = _search_args(
+        _graphs(tmp_path / "graphs"),
+        tree,
+        tmp_path / "out",
+        evaluator,
+        "--arch",
+        "gfx999",
+        "--feature-search",
+    )
+    assert main(command) == 1
+    assert "absent from the observed device architectures" in caplog.text
+    assert not searched
+
+
+def test_a_search_reads_only_the_kernel_fields_a_model_may_rank_on(evaluator):
+    from uhd_gen.proposal import search_inputs
+
+    frame = pd.DataFrame(
+        {
+            "graph.nodes[0].q.dims[0]": [64, 128, 256],
+            "kernel.block_m": [64, 128, 64],
+            "kernel.ragged": [0, 1, 0],
+        }
+    )
+    published = set(frame.columns)
+    # A catalog run offers a shipping knob (block_m), not every KMD field (ragged).
+    columns, *_ = search_inputs(
+        frame, published, _KMD_FIELDS, _SHIPPING_KNOBS, "tflops", evaluator
+    )
+    assert columns == ["graph.nodes[0].q.dims[0]", "kernel.block_m"]
+    # An engine-level run offers none.
+    columns, *_ = search_inputs(frame, published, None, [], "tflops", evaluator)
+    assert columns == ["graph.nodes[0].q.dims[0]"]
 
 
 def test_feature_search_trains_on_its_recipe_and_records_the_report(
@@ -1681,6 +1857,90 @@ def test_generate_refuses_an_adapter_option_that_does_not_apply_before_measuring
         _check_generate_arguments(
             _generate_arguments(*extra), False, Path("nonexistent-output"), Path("t")
         )
+
+
+@pytest.mark.parametrize(
+    ("extra", "message"),
+    [
+        (
+            ["--feature-search", "--dim-tile", "dim=tile"],
+            "--feature-search searches for a recipe and --dim-tile",
+        ),
+        (
+            ["--feature-search", "--adapter", "linear_data"],
+            "--feature-search scores its candidates for a tree_data or mlp_data model, "
+            "not --adapter linear_data",
+        ),
+        (
+            ["--feature-search", "--metric", "tflops", "time"],
+            "scored for one metric's label.*pass one --metric",
+        ),
+        (["--dim-tile", "no_separator"], "--dim-tile requires DIMENSION=KERNEL_FIELD"),
+    ],
+)
+def test_generate_refuses_a_search_it_cannot_score_and_a_malformed_dim_tile_before_measuring(
+    extra, message
+):
+    from uhd_gen.generate import _check_generate_arguments
+
+    with pytest.raises(ValueError, match=message):
+        _check_generate_arguments(
+            _generate_arguments(*extra), False, Path("nonexistent-output"), Path("t")
+        )
+
+
+@pytest.mark.parametrize("adapter", ["tree_data", "mlp_data"])
+def test_generate_accepts_a_search_for_each_adapter_it_scores_and_a_repeated_metric(
+    adapter,
+):
+    from uhd_gen.generate import _check_generate_arguments
+
+    _check_generate_arguments(
+        _generate_arguments(
+            "--feature-search",
+            "--adapter",
+            adapter,
+            "--metric",
+            "time",
+            "time",
+            "--metric",
+            "time",
+        ),
+        False,
+        Path("nonexistent-output"),
+        Path("t"),
+    )
+
+
+def test_both_entry_points_take_the_search_options_with_the_same_spellings():
+    import argparse
+
+    from uhd_gen.feature_search import SEARCH_ADAPTERS, add_feature_search_arguments
+
+    standalone = argparse.ArgumentParser()
+    add_feature_search_arguments(standalone)
+    for adapter in SEARCH_ADAPTERS:
+        given = [
+            "--adapter",
+            adapter,
+            "--seed",
+            "3",
+            "--max-candidates",
+            "9",
+            "--adapter-pass-budget",
+            "4",
+        ]
+        searching = standalone.parse_args(["--input", "x", "--output-dir", "o", *given])
+        generating = _generate_arguments("--feature-search", *given)
+        options = ("adapter", "seed", "max_candidates", "adapter_pass_budget")
+        assert [getattr(searching, name) for name in options] == [adapter, 3, 9, 4]
+        assert [getattr(generating, name) for name in options] == [adapter, 3, 9, 4]
+
+
+def test_a_negative_adapter_pass_budget_is_refused_and_zero_is_the_off_switch():
+    with pytest.raises(SystemExit):
+        _generate_arguments("--adapter-pass-budget", "-1")
+    assert _generate_arguments("--adapter-pass-budget", "0").adapter_pass_budget == 0
 
 
 def test_generate_trains_the_adapter_it_was_asked_for_on_the_metric_it_was_asked_for(
