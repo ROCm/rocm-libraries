@@ -54,7 +54,8 @@ from kernels.common.conv_args import ConvArgs
 from kernels.common.conv_direct_grouped import DirectConvProblem
 from kernels.common.conv_direct_nongrouped import _OOB_BASE
 from rocke.core.arch import ArchTarget
-from rocke.core.lower_llvm import LLVM_FLAVORS, _lower_kernel_to_llvm_python
+from rocke.core.ir_serialize import serialize
+from rocke.core.lower_llvm import LLVM_FLAVORS
 
 from ._worker_process import available_cpus
 
@@ -123,6 +124,18 @@ def _spec(identity: KernelIdentity) -> Gfx950ConvFwdAotSpec:
         instance_id=identity.stable_hash(),
         group_merge=identity.group_merge,
     )
+
+
+def _assert_same_kernel_up_to_symbol(ours, theirs, label: str) -> None:
+    """The packaged kernel is the sweep's, byte for byte up to its symbol.
+
+    Compares the serialized kernels rather than their lowerings: the serialization is
+    everything the C++ engine lowers from, to the LLVM IR the byte-identity gate holds
+    equal to the Python engine's at every flavor, so equal serializations lower alike.
+    """
+    assert serialize(ours).replace(ours.name, "@K") == serialize(theirs).replace(
+        theirs.name, "@K"
+    ), label
 
 
 @pytest.fixture(scope="module")
@@ -264,15 +277,7 @@ def test_every_knob_class_is_packageable_with_the_sweeps_ir(
         assert supports_gfx950_conv_fwd_aot(spec) == (True, "ok"), job.identity.label()
         ours = build_gfx950_conv_fwd_aot(spec)
         theirs, _ = kernel_sweep.kernel_for_job(job, "gfx950", dtype)
-        ours_ir = _lower_kernel_to_llvm_python(
-            ours, arch="gfx950", llvm_flavor=kernel_sweep.current_llvm_flavor()
-        )
-        theirs_ir = _lower_kernel_to_llvm_python(
-            theirs, arch="gfx950", llvm_flavor=kernel_sweep.current_llvm_flavor()
-        )
-        assert ours_ir.replace(ours.name, "@K") == theirs_ir.replace(
-            theirs.name, "@K"
-        ), job.identity.label()
+        _assert_same_kernel_up_to_symbol(ours, theirs, job.identity.label())
 
 
 def test_every_sampled_sweep_identity_is_packageable(sweep_jobs):
@@ -322,15 +327,7 @@ def test_group_merged_identities_are_packaged_with_the_sweeps_ir(merged_jobs):
         assert (spec.vector_size_a, spec.vector_size_b, spec.vector_size_c) == (0, 0, 0)
         ours = build_gfx950_conv_fwd_aot(spec)
         theirs, _ = kernel_sweep.kernel_for_job(job, "gfx950", dtype)
-        ours_ir = _lower_kernel_to_llvm_python(
-            ours, arch="gfx950", llvm_flavor=kernel_sweep.current_llvm_flavor()
-        )
-        theirs_ir = _lower_kernel_to_llvm_python(
-            theirs, arch="gfx950", llvm_flavor=kernel_sweep.current_llvm_flavor()
-        )
-        assert ours_ir.replace(ours.name, "@K") == theirs_ir.replace(
-            theirs.name, "@K"
-        ), job.identity.label()
+        _assert_same_kernel_up_to_symbol(ours, theirs, job.identity.label())
 
 
 def test_group_merged_serves_agree_with_kernel_cache_and_launch_merged(merged_jobs):
@@ -420,15 +417,7 @@ def test_packaged_ir_is_the_sweep_kernel_up_to_its_symbol(sweep_jobs):
         ours = build_gfx950_conv_fwd_aot(spec)
         theirs, _ = kernel_sweep.kernel_for_job(job, "gfx950", dtype)
         assert ours.name.startswith(spec.kernel_symbol_prefix())
-        ours_ir = _lower_kernel_to_llvm_python(
-            ours, arch="gfx950", llvm_flavor=kernel_sweep.current_llvm_flavor()
-        )
-        theirs_ir = _lower_kernel_to_llvm_python(
-            theirs, arch="gfx950", llvm_flavor=kernel_sweep.current_llvm_flavor()
-        )
-        assert ours_ir.replace(ours.name, "@K") == theirs_ir.replace(
-            theirs.name, "@K"
-        ), job.identity.label()
+        _assert_same_kernel_up_to_symbol(ours, theirs, job.identity.label())
 
 
 def _random_problems(count: int, dtype: str):
@@ -866,15 +855,7 @@ def test_packaged_direct_ir_is_the_sweep_kernel_up_to_its_symbol(
         theirs, _ = direct_kernel_sweep.direct_kernel_for_job(job, "gfx950", dtype)
         assert ours.name.startswith(spec.kernel_symbol_prefix())
         assert ours.name == spec.kernel_name()
-        ours_ir = _lower_kernel_to_llvm_python(
-            ours, arch="gfx950", llvm_flavor=kernel_sweep.current_llvm_flavor()
-        )
-        theirs_ir = _lower_kernel_to_llvm_python(
-            theirs, arch="gfx950", llvm_flavor=kernel_sweep.current_llvm_flavor()
-        )
-        assert ours_ir.replace(ours.name, "@K") == theirs_ir.replace(
-            theirs.name, "@K"
-        ), job.identity.label()
+        _assert_same_kernel_up_to_symbol(ours, theirs, job.identity.label())
 
 
 def _depthwise_problems(dtype: str):
