@@ -14,32 +14,24 @@ Coverage:
   - Corner cases: single-element output, groups=2, groups=4 (cpg not div-by-8), asymmetric HW,
     grouped pointwise 1x1
 
-Requires a ROCm GPU and torch. Run:
-    PYTHONPATH=rocke/platform/python:rocke/library <torch-python> -m pytest \\
+Every output is checked against a float64 numpy reference of the exact stored
+inputs (``rocke.numeric.conv``), so the file needs a ROCm GPU but not torch. Run:
+    PYTHONPATH=rocke/platform/python:rocke/library python -m pytest \\
         rocke/library/tests/test_conv_fwd_correctness.py
 """
 
 from __future__ import annotations
 
-import ctypes
-import importlib.util
 import unittest
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
+import numpy as np
+
+from builders.common.conv_reference import tf32_reference_inputs, tf32_reference_tol
+from rocke.numeric import storage
+from rocke.numeric.conv import conv_fwd
 from rocke.runtime.hip_module import get_device_arch
-
-_HAS_TORCH = importlib.util.find_spec("torch") is not None
-if _HAS_TORCH:
-    from builders.common.conv_reference import tf32_reference_inputs, tf32_reference_tol
-
-if _HAS_TORCH:
-    # Let torch claim the process HIP context before rocke's runtime binds it.
-    # Whichever initialises first wins; rocke-first leaves torch raising
-    # "No HIP GPUs are available" from the .cuda() calls in conv_reference.
-    import torch
-
-    torch.cuda.is_available()
 
 GPU_ARCH = get_device_arch(0)
 _IS_WMMA = GPU_ARCH == "gfx1250"  # wave32 / WMMA target
@@ -49,8 +41,6 @@ _IS_MFMA = GPU_ARCH in ("gfx942", "gfx950")  # wave64 / MFMA targets
 def _skip_reason() -> str:
     if not GPU_ARCH:
         return "no ROCm GPU detected"
-    if not _HAS_TORCH:
-        return "torch not importable"
     if not (_IS_WMMA or _IS_MFMA):
         return f"unsupported arch {GPU_ARCH} (need gfx942/gfx950/gfx1250)"
     return ""
@@ -215,12 +205,13 @@ _STORAGE = {"fp16": "fp16", "bf16": "bf16", "fp32": "fp32", "tf32": "fp32"}
 def _tolerance(dtype: str, arch: str) -> float:
     """Peak-relative error bound for ``dtype`` on ``arch``.
 
-    fp32 and gfx950 TF32 are checked against an fp64 reference of the exact
-    inputs. The bf16x3 emulation is close to fp32, and the 1e-4 bound fails a
-    single bf16 pass or a dropped cross term. gfx942 hardware TF32 ignores the
-    low 13 mantissa bits, so its reference is computed from inputs masked the
-    same way (``conv_reference.tf32_reference_inputs``). That leaves only accumulation error,
-    and the fp32 bound applies.
+    Every dtype is checked against a float64 reference of the exact stored
+    inputs; fp16 and bf16 round that reference to the output dtype, as the
+    kernel's store does. The bf16x3 emulation is close to fp32, and the 1e-4
+    bound fails a single bf16 pass or a dropped cross term. gfx942 hardware TF32
+    ignores the low 13 mantissa bits, so its reference is computed from inputs
+    masked the same way (``conv_reference.tf32_reference_inputs``). That leaves
+    only accumulation error, and the fp32 bound applies.
     """
     if dtype == "fp32":
         return 1e-4
@@ -234,43 +225,29 @@ def _tolerance(dtype: str, arch: str) -> float:
 # ---------------------------------------------------------------------------
 
 
-def _u8(t):
-    import torch  # noqa: F401 — only called when torch is available
+def _reference(problem, a_stored, b_stored, dtype: str, arch: str) -> np.ndarray:
+    """float64 forward convolution of the values the kernel reads, rounded to
+    the output storage dtype the way the kernel's store rounds it.
 
-    return (ctypes.c_uint8 * t.nbytes).from_address(t.data_ptr())
-
-
-def _conv_reference_fp64(A, B, problem):
-    """fp64 CPU reference (NHWC / NDHWC out).
-
-    Deliberately not ``conv_reference``: that runs an fp32 convolution on the
-    GPU, which torch may route through TF32 (``allow_tf32`` /
-    ``conv.fp32_precision``), so the reference could share the error under
-    test. An fp64 CPU convolution has no TF32 path at all.
-    """
-    import torch.nn.functional as F
-
+    TF32 operands are masked as ``arch``'s MMA reads them; fp32 output is kept
+    in float64, since rounding the reference to fp32 would only add error."""
+    storage_dtype = _STORAGE[dtype]
+    a = tf32_reference_inputs(storage.decode(a_stored, storage_dtype), arch, dtype)
+    b = tf32_reference_inputs(storage.decode(b_stored, storage_dtype), arch, dtype)
     p = problem
-    cpg = p.C // p.groups
-    if not p.is_3d:
-        out = F.conv2d(
-            A.cpu().double().permute(0, 3, 1, 2),
-            B.cpu().double()[..., :cpg].permute(0, 3, 1, 2),
-            stride=(p.sH, p.sW),
-            padding=(p.pH, p.pW),
-            dilation=(p.dH, p.dW),
-            groups=p.groups,
-        )
-        return out.permute(0, 2, 3, 1).contiguous()
-    out = F.conv3d(
-        A.cpu().double().permute(0, 4, 1, 2, 3),
-        B.cpu().double()[..., :cpg].permute(0, 4, 1, 2, 3),
-        stride=(p.sD, p.sH, p.sW),
-        padding=(p.pD, p.pH, p.pW),
-        dilation=(p.dD, p.dH, p.dW),
-        groups=p.groups,
+    spatial = (
+        {
+            "stride": (p.sD, p.sH, p.sW),
+            "padding": (p.pD, p.pH, p.pW),
+            "dilation": (p.dD, p.dH, p.dW),
+        }
+        if p.is_3d
+        else {"stride": (p.sH, p.sW), "padding": (p.pH, p.pW), "dilation": (p.dH, p.dW)}
     )
-    return out.permute(0, 2, 3, 4, 1).contiguous()
+    reference = conv_fwd(a, b, groups=p.groups, **spatial)
+    if storage_dtype == "fp32":
+        return reference
+    return storage.round_to(reference, storage_dtype).astype(np.float64)
 
 
 def _select_warp_tile_k(arch: str, dtype: str, warp_tile_mn: int, tile_k: int) -> int:
@@ -316,10 +293,7 @@ def _run_one(
     produce bit-comparable output to the unmerged one. That is the entire claim
     this test exists to check.
     """
-    import torch
-
     from rocke import compile_kernel
-    from builders.common.conv_reference import conv_reference, conv_reference_gfx1250
     from rocke.core.arch import ArchTarget
     from kernels.common.conv_args import ConvArgs
     from kernels.common.conv_abi import conv_args_signature
@@ -330,9 +304,9 @@ def _run_one(
         build_implicit_gemm_conv,
         is_valid_spec_for_problem,
     )
-    from rocke.runtime import synchronize_and_release
     from rocke.runtime.hip_module import HipError, Runtime
-    from rocke.runtime.launcher import KernelLauncher, LaunchConfig
+    from rocke.runtime.host_buffers import as_u8_buffer
+    from rocke.runtime.launcher import DeviceMem, KernelLauncher, LaunchConfig
 
     target = ArchTarget.from_gfx(arch)
     wave_size = target.wave_size
@@ -367,7 +341,7 @@ def _run_one(
         pD=shape.pD,
         dD=shape.dD,
     )
-    storage = _STORAGE[dtype]
+    storage_dtype = _STORAGE[dtype]
 
     # For wavelet on the small test tile (warp_m=warp_n=1, n_math_warps=1),
     # num_load_waves must be <= n_math_warps to avoid the over-provisioning warning.
@@ -379,9 +353,9 @@ def _run_one(
             + "".join(f"_{k}" for k, v in sorted(spec_extra.items()) if v)
         ),
         data=ConvDataSpec(
-            dtype_a=storage,
-            dtype_b=storage,
-            dtype_d=storage,
+            dtype_a=storage_dtype,
+            dtype_b=storage_dtype,
+            dtype_d=storage_dtype,
             mma_dtype="tf32" if dtype == "tf32" else None,
         ),
         tile_m=tile_m,
@@ -420,58 +394,39 @@ def _run_one(
     except Exception as e:
         return False, f"compile failed: {e}"
 
-    _torch_dtype = {
-        "fp16": torch.float16,
-        "bf16": torch.bfloat16,
-        "fp32": torch.float32,
-    }[storage]
     _depth = (problem.Di,) if problem.is_3d else ()
     _filt = (problem.Z,) if problem.is_3d else ()
     _out_depth = (problem.Do,) if problem.is_3d else ()
-    torch.manual_seed(0)
-    A_t = (
-        torch.empty(problem.N, *_depth, problem.Hi, problem.Wi, problem.C)
-        .uniform_(-1.0, 1.0)
-        .to(_torch_dtype)
+    rng = np.random.default_rng(0)
+    a_host = storage.encode(
+        rng.uniform(-1.0, 1.0, (problem.N, *_depth, problem.Hi, problem.Wi, problem.C)),
+        storage_dtype,
     )
-    B_t = (
-        torch.empty(
-            problem.K, *_filt, problem.Y, problem.X, problem.C // problem.groups
-        )
-        .uniform_(-1.0, 1.0)
-        .to(_torch_dtype)
+    b_host = storage.encode(
+        rng.uniform(
+            -1.0,
+            1.0,
+            (problem.K, *_filt, problem.Y, problem.X, problem.C // problem.groups),
+        ),
+        storage_dtype,
     )
-    D_t = torch.empty(
-        problem.N, *_out_depth, problem.Ho, problem.Wo, problem.K, dtype=_torch_dtype
+    d_host = np.empty(
+        (problem.N, *_out_depth, problem.Ho, problem.Wo, problem.K),
+        dtype=a_host.dtype,
     )
-
-    # Reference
-    if storage == "fp32":
-        # fp64 on the CPU: an fp32 GPU reference may itself run as TF32.
-        if dtype == "tf32":
-            ref = _conv_reference_fp64(
-                tf32_reference_inputs(A_t, arch),
-                tf32_reference_inputs(B_t, arch),
-                problem,
-            )
-        else:
-            ref = _conv_reference_fp64(A_t, B_t, problem)
-    elif arch == "gfx1250":
-        ref = conv_reference_gfx1250(A_t, B_t, problem, out_dtype=_torch_dtype)
-    else:
-        ref = conv_reference(A_t, B_t, problem, out_dtype=_torch_dtype)
+    ref = _reference(problem, a_host, b_host, dtype, arch)
 
     rt = Runtime()
-    A_dev = rt.alloc(A_t.nbytes)
-    B_dev = rt.alloc(B_t.nbytes)
-    D_dev = rt.alloc(D_t.nbytes)
-    rt.memcpy_h2d(A_dev, _u8(A_t), A_t.nbytes)
-    rt.memcpy_h2d(B_dev, _u8(B_t), B_t.nbytes)
+    a_dev = DeviceMem(a_host.nbytes)
+    b_dev = DeviceMem(b_host.nbytes)
+    d_dev = DeviceMem(d_host.nbytes)
+    rt.memcpy_h2d(a_dev.ptr(), as_u8_buffer(a_host), a_host.nbytes)
+    rt.memcpy_h2d(b_dev.ptr(), as_u8_buffer(b_host), b_host.nbytes)
     # NaN sentinel (0xFFFF is a NaN in fp16 and bf16): an output the kernel
     # never writes fails the comparison instead of passing as a zero.
-    rt.memset(D_dev, 0xFF, D_t.nbytes)
+    rt.memset(d_dev.ptr(), 0xFF, d_host.nbytes)
 
-    sig = conv_args_signature(storage, is_3d=problem.is_3d)
+    sig = conv_args_signature(storage_dtype, is_3d=problem.is_3d)
     try:
         launcher = KernelLauncher(
             hsaco=artifact.hsaco,
@@ -479,9 +434,6 @@ def _run_one(
             signature=sig,
         )
     except HipError as e:
-        rt.free(A_dev)
-        rt.free(B_dev)
-        rt.free(D_dev)
         return False, f"kernel load failed: {e}"
 
     # Launch over the MERGED dims. These are identical to the true dims at
@@ -500,26 +452,19 @@ def _run_one(
     values = ConvArgs.from_problem(
         problem, tile_m=spec.tile_m, tile_n=spec.tile_n
     ).to_launch_values(
-        int(A_dev),
-        int(B_dev),
-        int(D_dev),
-        A_t.nbytes,
-        B_t.nbytes,
-        D_t.nbytes,
+        a_dev.ptr(),
+        b_dev.ptr(),
+        d_dev.ptr(),
+        a_host.nbytes,
+        b_host.nbytes,
+        d_host.nbytes,
     )
     launcher(values, config=LaunchConfig(grid=grid, block=block, fence=True))
 
-    D_cpu = torch.empty_like(D_t)
-    rt.memcpy_d2h(_u8(D_cpu), D_dev, D_t.nbytes)
-    rt.free(A_dev)
-    rt.free(B_dev)
-    rt.free(D_dev)
-
-    out_f32 = D_cpu.double() if storage == "fp32" else D_cpu.float()
-    ref_f32 = ref.cpu().to(out_f32.dtype)
-    abs_diff = (out_f32 - ref_f32).abs()
-    ref_scale = ref_f32.abs().max().clamp(min=1.0)
-    rel_err = float(abs_diff.max() / ref_scale)
+    rt.memcpy_d2h(as_u8_buffer(d_host), d_dev.ptr(), d_host.nbytes)
+    out = storage.decode(d_host, storage_dtype).astype(np.float64)
+    ref_scale = max(1.0, float(np.abs(ref).max()))
+    rel_err = float(np.abs(out - ref).max()) / ref_scale
     tol = _tolerance(dtype, arch)
     passed = rel_err < tol
     if not passed:
