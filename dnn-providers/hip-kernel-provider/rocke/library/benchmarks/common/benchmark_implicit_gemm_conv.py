@@ -98,6 +98,14 @@ from benchmarks.common.tf32_verify import (  # noqa: E402
     rank_verified,
     tf32_implies_verify,
 )
+from builders.common.conv_reference import (
+    conv_dgrad_reference,
+    conv_extents,
+    conv_fwd_reference,
+    conv_wgrad_reference,
+)
+from rocke.numeric import storage
+from rocke.runtime.host_buffers import as_u8_buffer
 from kernels.conv.aot_jobs import _AOT_ALIAS_PIPELINES  # noqa: E402
 from kernels.conv.aot_jobs import (  # noqa: E402
     conv_data_spec,
@@ -619,12 +627,13 @@ def _verify_kernel(
     block: "tuple | None" = None,
     launch_fn=None,
     out_dev,
-    out_t,
+    out_t: np.ndarray,
+    out_dtype: str,
     zero_init_out: bool,
-    ref_out,
+    ref_out: np.ndarray,
     kernel_name: str,
     dump_fail: "str | None",
-    extra_tensors: "dict | None" = None,
+    extra_values: "dict | None" = None,
     u8,
     arch: str,
     compute_dtype: "str | None" = None,
@@ -635,6 +644,12 @@ def _verify_kernel(
 
     Parameters
     ----------
+    out_t, out_dtype:
+        A host array shaped and typed like the output (its storage dtype
+        ``out_dtype``, see :mod:`rocke.numeric.storage`); the kernel's output
+        is read back into a new array like it.
+    ref_out:
+        The float64 reference output.
     zero_init_out:
         Zero the output buffer before launching (required for split-K atomic
         accumulation; not needed for direct-store kernels).
@@ -648,9 +663,9 @@ def _verify_kernel(
     dump_fail:
         Directory path to dump tensors into on first failure, or ``None`` to
         just print the error.
-    extra_tensors:
-        Additional {name: tensor} pairs saved alongside out/ref/diff when
-        ``dump_fail`` is set (e.g. ``{"dY": dY_t, "X": X_t}`` for wgrad).
+    extra_values:
+        Additional {name: array} values saved alongside out/ref/diff when
+        ``dump_fail`` is set (e.g. the input values for wgrad).
     ref_floor:
         Floor of the reference peak in the error's denominator
         (:func:`conv_fill.ref_floor` of the direction; 1 for U(-1, 1) data).
@@ -662,8 +677,6 @@ def _verify_kernel(
         the sweep should abort; ``passed`` is ``True`` if the kernel output
         matched the reference within tolerance.
     """
-    import torch
-
     if zero_init_out:
         rt.memset(out_dev, 0, out_t.nbytes)
 
@@ -674,18 +687,12 @@ def _verify_kernel(
 
         launcher(values, config=LaunchConfig(grid=grid, block=block, fence=True))
 
-    out_cpu = torch.empty_like(out_t)
-    rt.memcpy_d2h(u8(out_cpu), out_dev, out_t.nbytes)
-
-    if arch == "gfx1250":
-        out_f32 = out_cpu.float()
-        abs_diff = out_f32.sub(ref_out.cpu()).abs()
-        ref_scale = ref_out.cpu().abs().max().clamp(min=ref_floor)
-    else:
-        out_f32 = out_cpu.float().cuda()
-        abs_diff = out_f32.sub(ref_out).abs()
-        ref_scale = ref_out.abs().max().clamp(min=ref_floor)
-    rel_err = float(abs_diff.max() / ref_scale)
+    out_host = np.empty_like(out_t)
+    rt.memcpy_d2h(u8(out_host), out_dev, out_t.nbytes)
+    out_values = storage.decode(out_host, out_dtype).astype(np.float64)
+    diff = out_values - ref_out
+    ref_scale = max(ref_floor, float(np.abs(ref_out).max()))
+    rel_err = float(np.abs(diff).max()) / ref_scale
     # Peak-normalised relative error: max|out-ref| / max|ref|.
     # Caveat: a large relative error on a small-magnitude weight can be masked
     # by the global-max denominator, and 5e-2 is fairly loose for bf16
@@ -694,13 +701,11 @@ def _verify_kernel(
     # re-enabled after the fwd fixes in #9824.
     # Tolerance follows the *compute* dtype, not the storage dtype: an fp32 dW
     # holding the result of bf16 MFMAs is no more accurate than bf16 math, so
-    # keying off out_t.dtype would apply the 1e-3 fp32 bound to a 16-bit result
+    # keying off out_dtype would apply the 1e-3 fp32 bound to a 16-bit result
     # and fail every kernel. compute_dtype is the A/B dtype when the caller
     # separates them; without it, fall back to the output dtype.
     if compute_dtype is None:
-        compute_dtype = (
-            "fp16" if out_t.dtype in (torch.float16, torch.bfloat16) else "fp32"
-        )
+        compute_dtype = "fp16" if out_dtype in ("fp16", "bf16") else "fp32"
     tol = _verify_tol(compute_dtype, arch, op_id)
     err = rel_err
     status = "PASS" if err < tol else f"FAIL(rel_err={err:.2e})"
@@ -708,32 +713,29 @@ def _verify_kernel(
 
     if err >= tol and dump_fail:
         import pathlib
-        import numpy as np
 
         dump_dir = pathlib.Path(dump_fail)
         dump_dir.mkdir(parents=True, exist_ok=True)
-        diff = out_f32.sub(ref_out)
 
-        def _save(name, t):
-            arr = t.cpu().numpy()
+        def _save(name, array):
             np.savetxt(
                 dump_dir / f"{kernel_name}_{name}.txt",
-                arr.flatten(),
+                np.asarray(array).flatten(),
                 fmt="%.6f",
             )
 
-        _save("out", out_f32)
+        _save("out", out_values)
         _save("ref", ref_out)
         _save("diff", diff)
-        for name, tensor in (extra_tensors or {}).items():
-            _save(name, tensor.float())
+        for name, extra_values in (extra_values or {}).items():
+            _save(name, extra_values)
 
         max_idx = int(diff.argmax())
         unravel = np.unravel_index(max_idx, diff.shape)
         print(
             f"  [dump] saved to {dump_dir}/  "
             f"max_diff={err:.4e} at index {unravel} (flat {max_idx})\n"
-            f"  [dump] out={float(out_f32.flatten()[max_idx]):.6f}  "
+            f"  [dump] out={float(out_values.flatten()[max_idx]):.6f}  "
             f"ref={float(ref_out.flatten()[max_idx]):.6f}",
             flush=True,
         )
@@ -1375,7 +1377,7 @@ def main() -> int:
     parser.add_argument(
         "--verify",
         action="store_true",
-        help="verify every kernel against the torch reference; ranking skips failures",
+        help="verify every kernel against a float64 reference; ranking skips failures",
     )
     parser.add_argument(
         "--dump-fail",
@@ -1905,8 +1907,6 @@ def main() -> int:
             print("--Di (input depth) is required when --Z is set", file=sys.stderr)
             return 2
 
-    import ctypes
-
     from rocke import compile_kernel
     from rocke.core.arch import ArchTarget
     from kernels.common.conv_implicit_gemm import (
@@ -1930,9 +1930,6 @@ def main() -> int:
     from rocke.runtime import synchronize_and_release, time_launches
     from rocke.runtime.hip_module import HipError, Runtime
     from rocke.runtime.launcher import KernelLauncher, LaunchConfig
-
-    def _u8(t):
-        return (ctypes.c_uint8 * t.nbytes).from_address(t.data_ptr())
 
     arch = args.arch
     target = ArchTarget.from_gfx(arch)
@@ -2152,7 +2149,7 @@ def main() -> int:
                 Runtime=Runtime,
                 KernelLauncher=KernelLauncher,
                 LaunchConfig=LaunchConfig,
-                u8=_u8,
+                u8=as_u8_buffer,
                 case_idx=case_idx,
             )
 
@@ -2960,11 +2957,16 @@ def _fwd_sweep_inputs(
     per ``--fill`` (:mod:`benchmarks.common.conv_fill`; ``dtype`` is the io
     dtype)."""
     if args.debug_init is not None:
-        return (
-            np.full(a_shape, args.debug_init, dtype=np.float32),
-            np.full(b_shape, args.debug_init, dtype=np.float32),
-        )
+        return _sweep_values(a_shape, args, rng), _sweep_values(b_shape, args, rng)
     return conv_fill.fwd_operands(a_shape, b_shape, dtype, rng)
+
+
+def _sweep_values(shape: tuple, args, rng: np.random.Generator) -> np.ndarray:
+    """float32 values of one sweep input: the ``--debug-init`` constant when
+    given, else U(-1, 1) drawn from ``rng``."""
+    if args.debug_init is not None:
+        return np.full(shape, args.debug_init, dtype=np.float32)
+    return rng.uniform(-1.0, 1.0, shape).astype(np.float32)
 
 
 def _run_sweep(
@@ -2989,7 +2991,6 @@ def _run_sweep(
     case_idx: int = 0,
     **_ignored,  # absorbs keys from _common not used by this sweep
 ) -> int:
-    import torch
     from kernels.common.conv_abi import conv_args_signature
     from kernels.common.conv_args import ConvArgs
 
@@ -2997,25 +2998,22 @@ def _run_sweep(
 
     p = problem
 
-    _torch_dtype = {
-        "fp16": torch.float16,
-        "bf16": torch.bfloat16,
-        "fp32": torch.float32,
-    }[storage_dtype(dtype)]
+    _storage = storage_dtype(dtype)
     rng = np.random.default_rng(42)
 
     if p.is_3d:
         _A_f32, _B_f32 = _fwd_sweep_inputs(
             (p.N, p.Di, p.Hi, p.Wi, p.C), (p.K, p.Z, p.Y, p.X, p.cpg), dtype, args, rng
         )
-        D_t = torch.empty(p.N, p.Do, p.Ho, p.Wo, p.K, dtype=_torch_dtype)
+        d_shape = (p.N, p.Do, p.Ho, p.Wo, p.K)
     else:
         _A_f32, _B_f32 = _fwd_sweep_inputs(
             (p.N, p.Hi, p.Wi, p.C), (p.K, p.Y, p.X, p.cpg), dtype, args, rng
         )
-        D_t = torch.empty(p.N, p.Ho, p.Wo, p.K, dtype=_torch_dtype)
-    A_t = torch.from_numpy(_A_f32).to(_torch_dtype)
-    B_t = torch.from_numpy(_B_f32).to(_torch_dtype)
+        d_shape = (p.N, p.Ho, p.Wo, p.K)
+    A_t = storage.encode(_A_f32, _storage)
+    B_t = storage.encode(_B_f32, _storage)
+    D_t = np.empty(d_shape, dtype=A_t.dtype)
 
     bytes_xfer = float(A_t.nbytes + B_t.nbytes + D_t.nbytes)
     flop = float(p.flops)
@@ -3206,26 +3204,10 @@ def _run_sweep(
     rt.memcpy_h2d(B_dev, _u8(B_t), B_t.nbytes)
     rt.memset(D_dev, 0, D_t.nbytes)
 
-    ref_out: torch.Tensor | None = None
+    ref_out: np.ndarray | None = None
     if args.verify:
-        from builders.common.conv_reference import (
-            conv_reference,
-            conv_reference_gfx1250,
-        )
-
-        if arch == "gfx1250" and not p.is_3d:
-            ref_out = conv_reference_gfx1250(A_t, B_t, p, out_dtype=_torch_dtype).cuda()
-            print(
-                f"Reference computed via gfx1250 hand-written conv "
-                f"({tuple(ref_out.shape)}, {ref_out.dtype}).",
-                flush=True,
-            )
-        else:
-            ref_out = conv_reference(A_t, B_t, p, out_dtype=_torch_dtype)
-            print(
-                f"Reference computed via torch ({tuple(ref_out.shape)}, {ref_out.dtype}).",
-                flush=True,
-            )
+        ref_out = _reference_output("fwd", p, A_t, B_t, _storage)
+        print(f"Reference computed ({tuple(ref_out.shape)}, float64).", flush=True)
 
     _stop = EarlyStop.for_case(args, problem, dtype, "fwd")
     n_run = 0
@@ -3291,6 +3273,7 @@ def _run_sweep(
                 block=block,
                 out_dev=D_dev,
                 out_t=D_t,
+                out_dtype=_storage,
                 zero_init_out=False,
                 ref_out=ref_out,
                 kernel_name=artifact.kernel_name,
@@ -3472,41 +3455,28 @@ def _run_wgrad_sweep(
                    kernel atomic-adds partials, result is final dW.
         0 (auto) — sweep all degrees in _SPLIT_K_AUTO.
     """
-    import torch
     from kernels.common.conv_abi import conv_args_signature
     from kernels.common.conv_args import ConvArgs
 
     _u8 = u8
     p = problem
 
-    _TORCH_DT = {
-        "fp16": torch.float16,
-        "bf16": torch.bfloat16,
-        "fp32": torch.float32,
-    }
-    _torch_dtype = _TORCH_DT[storage_dtype(dtype)]
-    _torch_dtype_d = _TORCH_DT[dtype_triple(dtype)[2]]
-    torch.manual_seed(42)
-
-    def _make(*shape):
-        return (
-            torch.full(shape, args.debug_init)
-            if args.debug_init is not None
-            else torch.empty(*shape).uniform_(-1.0, 1.0)
-        )
+    _storage = storage_dtype(dtype)
+    _storage_d = dtype_triple(dtype)[2]
+    rng = np.random.default_rng(42)
 
     _cpg = p.C // p.groups
-    if p.is_3d:
-        _X_f32 = _make(p.N, p.Di, p.Hi, p.Wi, p.C)
-        _dY_f32 = _make(p.N, p.Do, p.Ho, p.Wo, p.K)
-        dW_t = torch.empty(p.K, p.Z, p.Y, p.X, _cpg, dtype=_torch_dtype_d)
-    else:
-        _X_f32 = _make(p.N, p.Hi, p.Wi, p.C)
-        _dY_f32 = _make(p.N, p.Ho, p.Wo, p.K)
-        dW_t = torch.empty(p.K, p.Y, p.X, _cpg, dtype=_torch_dtype_d)
-
-    X_t = _X_f32.to(_torch_dtype)
-    dY_t = _dY_f32.to(_torch_dtype)
+    in_spatial, out_spatial, filter_spatial = conv_extents(p)
+    X_t = storage.encode(_sweep_values((p.N, *in_spatial, p.C), args, rng), _storage)
+    dY_t = storage.encode(_sweep_values((p.N, *out_spatial, p.K), args, rng), _storage)
+    dw_shape = (p.K, *filter_spatial, _cpg)
+    dW_t = np.empty(dw_shape, dtype=storage.host_dtype(_storage_d))
+    # --dump-fail saves the input values the kernel read beside a failure.
+    _inputs = (
+        {"dY": storage.decode(dY_t, _storage), "X": storage.decode(X_t, _storage)}
+        if args.dump_fail
+        else None
+    )
 
     bytes_xfer = float(dY_t.nbytes + X_t.nbytes + dW_t.nbytes)
     flop = float(p.flops)
@@ -3793,27 +3763,12 @@ def _run_wgrad_sweep(
     rt.memcpy_h2d(X_dev, _u8(X_t), X_t.nbytes)
     rt.memset(dW_dev, 0, dW_t.nbytes)
 
-    ref_out: torch.Tensor | None = None
+    ref_out: np.ndarray | None = None
     if args.verify or args.dump_fail:
-        if arch == "gfx1250":
-            from builders.common.conv_reference import wgrad_reference_gfx1250
-
-            ref_out = wgrad_reference_gfx1250(
-                _X_f32, _dY_f32, p, out_dtype=_torch_dtype_d
-            )
-            print(
-                f"Wgrad reference computed via gfx1250 hand-written wgrad "
-                f"({tuple(ref_out.shape)}, {ref_out.dtype}).",
-                flush=True,
-            )
-        else:
-            from builders.common.conv_reference import wgrad_reference
-
-            ref_out = wgrad_reference(_X_f32, _dY_f32, p)
-            print(
-                f"Wgrad reference computed ({tuple(ref_out.shape)}, {ref_out.dtype}).",
-                flush=True,
-            )
+        ref_out = _reference_output("wgrad", p, dY_t, X_t, _storage)
+        print(
+            f"Wgrad reference computed ({tuple(ref_out.shape)}, float64).", flush=True
+        )
 
     _do_prune = args.split_k == 0 and args.split_k_prune is not None
     _prune_threshold = (args.split_k_prune or 0.0) / 100.0
@@ -3934,11 +3889,12 @@ def _run_wgrad_sweep(
                     block=block,
                     out_dev=dW_dev,
                     out_t=dW_t,
+                    out_dtype=_storage_d,
                     zero_init_out=_is_atomic_launch,
                     ref_out=ref_out,
                     kernel_name=artifact.kernel_name,
                     dump_fail=args.dump_fail,
-                    extra_tensors={"dY": dY_t, "X": X_t},
+                    extra_values=_inputs,
                     u8=_u8,
                     arch=arch,
                     compute_dtype=dtype,
@@ -4207,11 +4163,12 @@ def _run_wgrad_sweep(
                         launch_fn=_launch_two_stage,
                         out_dev=dW_dev2,
                         out_t=dW_t,
+                        out_dtype=_storage_d,
                         zero_init_out=False,
                         ref_out=ref_out,
                         kernel_name=s1_art.kernel_name,
                         dump_fail=args.dump_fail,
-                        extra_tensors={"dY": dY_t, "X": X_t},
+                        extra_values=_inputs,
                         u8=_u8,
                         arch=arch,
                         compute_dtype=dtype,
@@ -4345,11 +4302,12 @@ def _run_wgrad_sweep(
                             launch_fn=run,
                             out_dev=dW_dev3,
                             out_t=dW_t,
+                            out_dtype=_storage_d,
                             zero_init_out=True,
                             ref_out=ref_out,
                             kernel_name=artifact.kernel_name,
                             dump_fail=args.dump_fail,
-                            extra_tensors={"dY": dY_t, "X": X_t},
+                            extra_values=_inputs,
                             u8=_u8,
                             arch=arch,
                             compute_dtype=dtype,
@@ -4498,7 +4456,7 @@ def _run_dgrad_sweep(
         0 (auto) -- sweep all degrees in _SPLIT_K_AUTO.
     """
     import ctypes
-    import torch
+
     from kernels.common.conv_abi import conv_args_signature
     from kernels.common.conv_args import ConvArgs
 
@@ -4514,26 +4472,17 @@ def _run_dgrad_sweep(
         )
         return 2, []
 
-    _torch_dtype = {
-        "fp16": torch.float16,
-        "bf16": torch.bfloat16,
-        "fp32": torch.float32,
-    }[storage_dtype(dtype)]
-    torch.manual_seed(42)
-
-    def _make(*shape):
-        return (
-            torch.full(shape, args.debug_init)
-            if args.debug_init is not None
-            else torch.empty(*shape).uniform_(-1.0, 1.0)
-        )
-
-    _dY_f32 = _make(p.N, p.Ho, p.Wo, p.K)
-    _W_f32 = _make(p.K, p.Y, p.X, p.cpg)
-    dX_t = torch.empty(p.N, p.Hi, p.Wi, p.C, dtype=_torch_dtype)
-
-    dY_t = _dY_f32.to(_torch_dtype)
-    W_t = _W_f32.to(_torch_dtype)
+    _storage = storage_dtype(dtype)
+    rng = np.random.default_rng(42)
+    dY_t = storage.encode(_sweep_values((p.N, p.Ho, p.Wo, p.K), args, rng), _storage)
+    W_t = storage.encode(_sweep_values((p.K, p.Y, p.X, p.cpg), args, rng), _storage)
+    dX_t = np.empty((p.N, p.Hi, p.Wi, p.C), dtype=dY_t.dtype)
+    # --dump-fail saves the input values the kernel read beside a failure.
+    _inputs = (
+        {"dY": storage.decode(dY_t, _storage), "W": storage.decode(W_t, _storage)}
+        if args.dump_fail
+        else None
+    )
 
     bytes_xfer = float(dY_t.nbytes + W_t.nbytes + dX_t.nbytes)
     flop = float(p.flops)
@@ -4618,27 +4567,12 @@ def _run_dgrad_sweep(
     rt.memcpy_h2d(W_dev, _u8(W_t), W_t.nbytes)
     rt.memset(dX_dev, 0, dX_t.nbytes)
 
-    ref_out: torch.Tensor | None = None
+    ref_out: np.ndarray | None = None
     if args.verify or args.dump_fail:
-        if arch == "gfx1250":
-            from builders.common.conv_reference import dgrad_reference_gfx1250
-
-            ref_out = dgrad_reference_gfx1250(
-                _dY_f32, _W_f32, p, out_dtype=_torch_dtype
-            )
-            print(
-                f"Dgrad reference computed via gfx1250 hand-written dgrad "
-                f"({tuple(ref_out.shape)}, {ref_out.dtype}).",
-                flush=True,
-            )
-        else:
-            from builders.common.conv_reference import dgrad_reference
-
-            ref_out = dgrad_reference(_dY_f32, _W_f32, p)
-            print(
-                f"Dgrad reference computed ({tuple(ref_out.shape)}, {ref_out.dtype}).",
-                flush=True,
-            )
+        ref_out = _reference_output("dgrad", p, dY_t, W_t, _storage)
+        print(
+            f"Dgrad reference computed ({tuple(ref_out.shape)}, float64).", flush=True
+        )
 
     _stop = EarlyStop.for_case(args, problem, dtype, "dgrad")
     n_measured = 0
@@ -4693,11 +4627,12 @@ def _run_dgrad_sweep(
                 block=block,
                 out_dev=dX_dev,
                 out_t=dX_t,
+                out_dtype=_storage,
                 zero_init_out=_zero_init,
                 ref_out=ref_out,
                 kernel_name=artifact.kernel_name,
                 dump_fail=args.dump_fail,
-                extra_tensors={"dY": dY_t, "W": W_t},
+                extra_values=_inputs,
                 u8=_u8,
                 arch=arch,
                 compute_dtype=dtype,
@@ -4900,16 +4835,10 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
     filter, not a build. The one exception is the two-stage wgrad Stage 2
     reduce, a small shape-generic kernel compiled once per dW dtype.
     """
-    import ctypes
-
-    import torch
-
     from benchmarks.common.module_cache import ModuleCache
     from rocke.runtime import synchronize_and_release
     from rocke.runtime.hip_module import HipError, Runtime
     from rocke.runtime.launcher import KernelLauncher, LaunchConfig
-
-    _TORCH_DT = {"fp16": torch.float16, "bf16": torch.bfloat16, "fp32": torch.float32}
 
     # A cached binary is shape-generic: its module is loaded on the first case
     # that offers it and reused by every later one.
@@ -4928,9 +4857,7 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
         append=same_results_file(args.results, args.skip_measured),
     )
     n_skipped = 0
-
-    def _u8(t):
-        return (ctypes.c_uint8 * t.nbytes).from_address(t.data_ptr())
+    _u8 = as_u8_buffer
 
     overall_rc = 0
     # Stage 2 reduce launchers for two-stage wgrad, compiled once per dW dtype.
@@ -5101,8 +5028,8 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
                     flush=True,
                 )
 
-            torch_dt = _TORCH_DT[storage_dtype(case_dtype)]
-            torch.manual_seed(42)
+            case_storage = storage_dtype(case_dtype)
+            rng = np.random.default_rng(42)
             # Operand shapes follow the direction: fwd contracts A x B -> D,
             # wgrad contracts dY x X -> dW, dgrad contracts dY x W -> dX. The
             # three tensors always bind to the same three kernarg slots, so
@@ -5118,15 +5045,14 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
                 a_shape, b_shape, d_shape = nhwc, krsc, nhwk
 
             if direction == "fwd":
-                rng = np.random.default_rng(42)
-                activations = conv_fill.fill_x(a_shape, rng)
-                weights = conv_fill.fill_w(b_shape, case_dtype, rng)
-                A_t = torch.from_numpy(activations).to(torch_dt)
-                B_t = torch.from_numpy(weights).to(torch_dt)
+                a_values = conv_fill.fill_x(a_shape, rng)
+                b_values = conv_fill.fill_w(b_shape, case_dtype, rng)
             else:
-                A_t = torch.empty(*a_shape, dtype=torch_dt).uniform_(-1, 1)
-                B_t = torch.empty(*b_shape, dtype=torch_dt).uniform_(-1, 1)
-            D_t = torch.empty(*d_shape, dtype=torch_dt)
+                a_values = rng.uniform(-1.0, 1.0, a_shape)
+                b_values = rng.uniform(-1.0, 1.0, b_shape)
+            A_t = storage.encode(a_values, case_storage)
+            B_t = storage.encode(b_values, case_storage)
+            D_t = np.empty(d_shape, dtype=A_t.dtype)
 
             rt = Runtime()
             A_dev = rt.alloc(A_t.nbytes)
@@ -5141,7 +5067,7 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
             # --verify / --dump-fail: one reference per case and direction;
             # every cached kernel is checked against it before it is timed.
             ref_out = (
-                _cache_reference(direction, problem, A_t, B_t, torch_dt, arch)
+                _reference_output(direction, problem, A_t, B_t, case_storage)
                 if args.verify or args.dump_fail
                 else None
             )
@@ -5322,6 +5248,7 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
                                 launch_fn=run,
                                 out_dev=D_dev,
                                 out_t=D_t,
+                                out_dtype=case_storage,
                                 zero_init_out=True,
                                 ref_out=ref_out,
                                 kernel_name=label,
@@ -5660,6 +5587,7 @@ def _fast_rank_candidates(
                 launch_fn=run,
                 out_dev=ptrs[2],
                 out_t=D_t,
+                out_dtype=storage_dtype(case_dtype),
                 zero_init_out=True,
                 ref_out=ref_out,
                 kernel_name=labels[i],
@@ -5822,30 +5750,28 @@ def _widest_vector_sizes(candidates):
     return [c for c in candidates if rank(c[0]) == best[kind(c[0])]]
 
 
-def _cache_reference(direction, problem, A_t, B_t, torch_dt, arch):
-    """Reference output for --run-from-cache --verify.
+def _reference_output(
+    direction: str,
+    problem,
+    A_t: np.ndarray,
+    B_t: np.ndarray,
+    storage_dtype_name: str,
+) -> np.ndarray:
+    """float64 reference output of a ``direction`` kernel, for --verify.
 
-    ``A_t`` / ``B_t`` are the operands bound to the A / B kernarg slots: X / W
-    (fwd), dY / X (wgrad), dY / W (dgrad). Same references as the JIT sweeps,
-    on the device _verify_kernel compares on (host for gfx1250).
+    ``A_t`` / ``B_t`` are the stored (``storage_dtype_name``) operands bound to
+    the A / B kernarg slots: X / W (fwd), dY / X (wgrad), dY / W (dgrad). The
+    forward reference is rounded to the output storage dtype and the backward
+    ones are not, as the sweeps compared them before.
     """
-    from builders.common import conv_reference as cr
-
-    if arch == "gfx1250":
-        if direction == "wgrad":
-            return cr.wgrad_reference_gfx1250(
-                B_t.float(), A_t.float(), problem, out_dtype=torch_dt
-            )
-        if direction == "dgrad":
-            return cr.dgrad_reference_gfx1250(
-                A_t.float(), B_t.float(), problem, out_dtype=torch_dt
-            )
-        return cr.conv_reference_gfx1250(A_t, B_t, problem, out_dtype=torch_dt)
+    a_values = storage.decode(A_t, storage_dtype_name)
+    b_values = storage.decode(B_t, storage_dtype_name)
     if direction == "wgrad":
-        return cr.wgrad_reference(B_t.float().cuda(), A_t.float().cuda(), problem)
+        return conv_wgrad_reference(b_values, a_values, problem)
     if direction == "dgrad":
-        return cr.dgrad_reference(A_t.float().cuda(), B_t.float().cuda(), problem)
-    return cr.conv_reference(A_t.cuda(), B_t.cuda(), problem, out_dtype=torch_dt)
+        return conv_dgrad_reference(a_values, b_values, problem)
+    reference = conv_fwd_reference(a_values, b_values, problem)
+    return storage.round_to(reference, storage_dtype_name).astype(np.float64)
 
 
 def _signature_for_identity(ident, dtype):
