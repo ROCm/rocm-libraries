@@ -147,9 +147,10 @@ const std::vector<KernelArgument>& kernelSignature(bool hasBias, bool hasActivat
         signature.insert(signature.end(), 22, s_scalar);
         if(activation)
         {
-            // The activation, then its three parameters.
+            // The activation, its three parameters, then has_bias.
             signature.push_back(s_scalar);
             signature.insert(signature.end(), 3, s_float);
+            signature.push_back(s_scalar);
         }
         return signature;
     };
@@ -225,8 +226,11 @@ void launch(const compilation::IRunnableKernel& kernel,
         };
         if(activation != nullptr)
         {
-            withEpilogue(
-                static_cast<int>(activation->mode), activation->p0, activation->p1, activation->p2);
+            withEpilogue(static_cast<int>(activation->mode),
+                         activation->p0,
+                         activation->p1,
+                         activation->p2,
+                         hasBias ? 1 : 0);
         }
         else
         {

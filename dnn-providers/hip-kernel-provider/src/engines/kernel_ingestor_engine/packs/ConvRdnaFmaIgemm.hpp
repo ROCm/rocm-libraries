@@ -79,8 +79,8 @@ bool serves(const ConvProblem& problem);
 bool isVariantOf(const hipdnn_plugin_sdk::ingestor::KernelDefinition& kernel,
                  const ConvProblem& problem);
 
-/// The argument list of the kernel: in, wei, out, [bias,] then 22 ints [, then the activation
-/// and its three float parameters].
+/// The argument list of the kernel: in, wei, out, [bias,] then 22 ints [, then the activation,
+/// its three float parameters and has_bias].
 const std::vector<hipdnn_plugin_sdk::ingestor::KernelArgument>&
     kernelSignature(bool hasBias, bool hasActivation = false);
 
@@ -92,7 +92,8 @@ void addCompileOptions(compilation::KernelCompileOptions& options,
 
 /// Launches the kernel over the grid of @p problem (set by the caller). @p bias is ignored
 /// unless the kernel was built with CONV_HAS_BIAS; @p activation is given exactly when it was
-/// built with CONV_HAS_ACT, which this engine family only builds together with the bias.
+/// built with CONV_HAS_ACT, which this engine family only builds together with the bias. With
+/// an activation, @p hasBias false launches without a bias (@p bias may then be null).
 void launch(const compilation::IRunnableKernel& kernel,
             hipStream_t stream,
             const void* x,

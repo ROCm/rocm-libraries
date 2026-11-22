@@ -32,8 +32,9 @@
 //                       to every output before it is stored; the kernel then takes the bias
 //                       pointer after `out`
 //   CONV_HAS_ACT        1 = apply an activation to every output, after the bias, before it is
-//                       stored; the kernel then takes the activation (ACT_* below) and its three
-//                       parameters after `groups`
+//                       stored; the kernel then takes the activation (ACT_* below), its three
+//                       parameters and has_bias after `groups`. Built with CONV_HAS_BIAS; a graph
+//                       without a bias passes has_bias 0, and the bias pointer is not read
 
 #ifndef CONV_DTYPE
 #define CONV_DTYPE 0
@@ -181,7 +182,8 @@ extern "C" __global__ void __launch_bounds__(BLOCK_SIZE)
                     int act,
                     float act_p0,
                     float act_p1,
-                    float act_p2
+                    float act_p2,
+                    int has_bias
 #endif
     )
 {
@@ -365,7 +367,12 @@ extern "C" __global__ void __launch_bounds__(BLOCK_SIZE)
     for(int j = 0; j < MICRO_N; ++j)
     {
         const int k = k0 + tn + j * (TILE_N / MICRO_N);
-        bv[j] = k < Kg ? to_float(bias[static_cast<long long>(g) * Kg + k]) : 0.f;
+#if CONV_HAS_ACT
+        const bool read = k < Kg && has_bias != 0;
+#else
+        const bool read = k < Kg;
+#endif
+        bv[j] = read ? to_float(bias[static_cast<long long>(g) * Kg + k]) : 0.f;
     }
 #endif
 

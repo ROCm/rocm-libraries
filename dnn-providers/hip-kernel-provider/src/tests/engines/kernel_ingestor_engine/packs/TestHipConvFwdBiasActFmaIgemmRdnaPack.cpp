@@ -26,7 +26,7 @@
 /**
  * @file TestHipConvFwdBiasActFmaIgemmRdnaPack.cpp
  * @brief Host-only checks of `hipkernel:hip_conv_fwd_bias_act_fma_igemm_rdna`: the
- *        conv + bias + activation graphs its matcher accepts and refuses, the tokens it binds,
+ *        conv + (bias +) activation graphs its matcher accepts and refuses, the tokens it binds,
  *        the one kernel its kernel matcher admits per graph, and its saved launch values. The
  *        device cases are IntegrationGpuHipConvFwdBiasActFmaIgemmRdna.
  */
@@ -101,6 +101,8 @@ struct GraphSpec
     bool activationReadsConvOut = false;
     /// No activation node: the conv + bias engine's graph.
     bool noActivation = false;
+    /// No bias: conv -> activation (with noActivation, the conv node alone).
+    bool noBias = false;
 };
 
 /// Strides of @p dims (NC-spatial order) packed channels-first or channels-last.
@@ -154,7 +156,8 @@ flatbuffers::Offset<data_objects::PointwiseAttributes>
 {
     data_objects::PointwiseAttributesBuilder attributes(builder);
     attributes.add_operation(spec.activation);
-    attributes.add_in_0_tensor_uid(spec.activationReadsConvOut ? CONV_OUT_UID : SUM_UID);
+    attributes.add_in_0_tensor_uid(spec.activationReadsConvOut || spec.noBias ? CONV_OUT_UID
+                                                                              : SUM_UID);
     attributes.add_out_0_tensor_uid(Y_UID);
     if(spec.reluLowerClip)
     {
@@ -208,9 +211,12 @@ flatbuffers::FlatBufferBuilder buildGraph(const GraphSpec& spec)
         builder, W_UID, nullptr, spec.dtype, &wStrides, &wDims));
     tensors.push_back(data_objects::CreateTensorAttributesDirect(
         builder, CONV_OUT_UID, nullptr, intermediate, &yStrides, &yDims, spec.convOutVirtual));
-    tensors.push_back(data_objects::CreateTensorAttributesDirect(
-        builder, B_UID, nullptr, spec.biasDtype.value_or(spec.dtype), &bStrides, &bDims));
-    if(!spec.noActivation)
+    if(!spec.noBias)
+    {
+        tensors.push_back(data_objects::CreateTensorAttributesDirect(
+            builder, B_UID, nullptr, spec.biasDtype.value_or(spec.dtype), &bStrides, &bDims));
+    }
+    if(!spec.noActivation && !spec.noBias)
     {
         tensors.push_back(data_objects::CreateTensorAttributesDirect(
             builder, SUM_UID, nullptr, intermediate, &yStrides, &yDims, spec.sumVirtual));
@@ -235,13 +241,16 @@ flatbuffers::FlatBufferBuilder buildGraph(const GraphSpec& spec)
                                        spec.convCompute,
                                        data_objects::NodeAttributes::ConvolutionFwdAttributes,
                                        conv.Union()));
-    auto bias = biasNode(builder, spec);
-    nodes.push_back(
-        data_objects::CreateNodeDirect(builder,
-                                       "bias",
-                                       data_objects::DataType::FLOAT,
-                                       data_objects::NodeAttributes::PointwiseAttributes,
-                                       bias.Union()));
+    if(!spec.noBias)
+    {
+        auto bias = biasNode(builder, spec);
+        nodes.push_back(
+            data_objects::CreateNodeDirect(builder,
+                                           "bias",
+                                           data_objects::DataType::FLOAT,
+                                           data_objects::NodeAttributes::PointwiseAttributes,
+                                           bias.Union()));
+    }
     if(!spec.noActivation)
     {
         auto activation = activationNode(builder, spec);
@@ -318,6 +327,9 @@ TEST(TestHipConvFwdBiasActFmaIgemmRdnaGraphMatcher, AcceptsEveryServedActivation
         GraphSpec spec;
         spec.activation = mode;
         EXPECT_TRUE(matches(spec)) << data_objects::EnumNamePointwiseMode(mode);
+        spec.noBias = true;
+        EXPECT_TRUE(matches(spec))
+            << data_objects::EnumNamePointwiseMode(mode) << " without a bias";
     }
 
     GraphSpec clamp;
@@ -368,6 +380,18 @@ TEST(TestHipConvFwdBiasActFmaIgemmRdnaGraphMatcher, AcceptsEveryServedShape)
     EXPECT_TRUE(matches(rank3));
     EXPECT_TRUE(matches(threeD(GraphSpec{})));
     EXPECT_TRUE(matches(threeD(nhwc)));
+
+    GraphSpec noBias;
+    noBias.noBias = true;
+    GraphSpec noBiasHalfNhwc = noBias;
+    noBiasHalfNhwc.dtype = data_objects::DataType::HALF;
+    noBiasHalfNhwc.channelsLast = true;
+    GraphSpec noBiasGrouped = noBias;
+    noBiasGrouped.groups = 2;
+    EXPECT_TRUE(matches(noBias)) << "conv -> activation";
+    EXPECT_TRUE(matches(noBiasHalfNhwc)) << "conv -> activation, half NHWC";
+    EXPECT_TRUE(matches(noBiasGrouped)) << "conv -> activation, grouped";
+    EXPECT_TRUE(matches(threeD(noBias))) << "conv -> activation, 3-D";
 }
 
 TEST(TestHipConvFwdBiasActFmaIgemmRdnaGraphMatcher, RefusesWhatItCannotServe)
@@ -418,6 +442,26 @@ TEST(TestHipConvFwdBiasActFmaIgemmRdnaGraphMatcher, RefusesWhatItCannotServe)
     convBiasOnly.noActivation = true;
     EXPECT_FALSE(matches(convBiasOnly)) << "conv + bias without an activation";
 
+    GraphSpec convOnly;
+    convOnly.noActivation = true;
+    convOnly.noBias = true;
+    EXPECT_FALSE(matches(convOnly)) << "the conv node alone";
+
+    GraphSpec noBiasStoredConvOut;
+    noBiasStoredConvOut.noBias = true;
+    noBiasStoredConvOut.convOutVirtual = false;
+    EXPECT_FALSE(matches(noBiasStoredConvOut)) << "conv -> activation, conv output stored too";
+
+    GraphSpec noBiasExp;
+    noBiasExp.noBias = true;
+    noBiasExp.activation = data_objects::PointwiseMode::EXP;
+    EXPECT_FALSE(matches(noBiasExp)) << "conv -> EXP";
+
+    GraphSpec noBiasHalfActivation;
+    noBiasHalfActivation.noBias = true;
+    noBiasHalfActivation.activationCompute = data_objects::DataType::HALF;
+    EXPECT_FALSE(matches(noBiasHalfActivation)) << "conv -> activation computed in half";
+
     GraphSpec fullTensor;
     fullTensor.biasDims = outputDims(fullTensor);
     EXPECT_FALSE(matches(fullTensor)) << "an ADD of a full tensor";
@@ -453,6 +497,19 @@ TEST(TestHipConvFwdBiasActFmaIgemmRdnaBinding, BindsTheOperandsTheBiasAndTheGrou
     // 2 x N x K x (D x H x W out) x (C / groups) x taps; padding 1 keeps the output size.
     EXPECT_EQ(tryGetBoundInt(*bound, "conv_fwd_bias_act.flops"),
               int64_t{2} * 2 * 32 * 4 * 9 * 11 * (8 / 2) * 27);
+}
+
+TEST(TestHipConvFwdBiasActFmaIgemmRdnaBinding, BindsNoBiasForConvActivation)
+{
+    GraphSpec spec;
+    spec.noBias = true;
+    const GraphFixture fixture(buildGraph(spec));
+    const auto bound = matchesGraph(HIP_CONV_FWD_BIAS_ACT_FMA_IGEMM_RDNA, fixture.context());
+    ASSERT_TRUE(bound.has_value());
+
+    EXPECT_EQ(tryGetBoundInt(*bound, HIP_CONV_FWD_BIAS_ACT_FMA_IGEMM_RDNA.inputAToken), X_UID);
+    EXPECT_EQ(tryGetBoundInt(*bound, HIP_CONV_FWD_BIAS_ACT_FMA_IGEMM_RDNA.outputToken), Y_UID);
+    EXPECT_FALSE(tryGetBoundInt(*bound, "conv_fwd_bias_act.b.uid").has_value());
 }
 
 // ---------------------------------------------------------------------------
@@ -556,6 +613,27 @@ TEST(TestHipConvFwdBiasActFmaIgemmRdnaLaunchValues, RoundTripEveryActivation)
     const auto read = readHipConvFwdBiasActFmaIgemmRdnaLaunchInputs(savedValid(
         Activation{ActivationMode::RELU, 0.0F, std::numeric_limits<float>::max(), 0.0F}));
     EXPECT_EQ(read.activation.p1, std::numeric_limits<float>::max());
+}
+
+TEST(TestHipConvFwdBiasActFmaIgemmRdnaLaunchValues, RoundTripWithoutABias)
+{
+    HipConvFwdBiasActFmaIgemmRdnaBinding binding;
+    binding.x = 21;
+    binding.w = 22;
+    binding.y = 23;
+    const SavedLaunchInputs saved{
+        std::string(HIP_CONV_FWD_BIAS_ACT_FMA_IGEMM_RDNA_DISPATCH_SYMBOL_V1),
+        hipConvFwdBiasActFmaIgemmRdnaLaunchValues(
+            binding, distinctProblem(), distinctActivation())};
+    EXPECT_EQ(saved.values.count("b.uid"), 0U);
+    EXPECT_EQ(saved.values.size(), 29U);
+
+    const auto read = readHipConvFwdBiasActFmaIgemmRdnaLaunchInputs(saved);
+    EXPECT_EQ(read.binding.x, 21);
+    EXPECT_EQ(read.binding.w, 22);
+    EXPECT_FALSE(read.binding.b.has_value());
+    EXPECT_EQ(read.binding.y, 23);
+    EXPECT_EQ(read.activation.mode, ActivationMode::RELU);
 }
 
 TEST(TestHipConvFwdBiasActFmaIgemmRdnaLaunchValues, SavesTheV1ValueNames)

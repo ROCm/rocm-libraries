@@ -47,9 +47,10 @@
  *        (descriptors/hip/conv_bias_act_rdna/): matching, scoring, dispatch, and the function
  *        that registers them.
  *
- * The engine serves a three-node graph on the gfx11 and gfx12 RDNA targets: a conv-forward
- * node whose virtual output feeds a pointwise ADD with a per-output-channel bias, whose virtual
- * output feeds a forward activation. It runs the FMA implicit-GEMM kernel of
+ * The engine serves, on the gfx11 and gfx12 RDNA targets, a conv-forward node whose virtual
+ * output feeds a pointwise ADD with a per-output-channel bias, whose virtual output feeds a
+ * forward activation; or, without the bias, a conv-forward node whose virtual output feeds the
+ * activation directly. It runs the FMA implicit-GEMM kernel of
  * `hip_conv_fwd_fma_igemm_rdna` (ConvRdnaFmaIgemm.hpp) built with its bias and activation
  * epilogues, so neither intermediate is stored: the bias is added and the activation applied
  * in fp32, and the result rounded once. The convolution itself is served under the same rules
@@ -203,10 +204,11 @@ struct MatchedConvBiasAct
     const data_objects::ConvolutionFwdAttributes* conv = nullptr;
     const data_objects::TensorAttributes* x = nullptr;
     const data_objects::TensorAttributes* w = nullptr;
+    /// The bias; null for a graph without one.
     const data_objects::TensorAttributes* b = nullptr;
     /// The output of the activation: what the kernel stores.
     const data_objects::TensorAttributes* y = nullptr;
-    int64_t bUid = 0;
+    std::optional<int64_t> bUid;
     int64_t yUid = 0;
     ConvProblem problem;
     Activation activation;
@@ -269,13 +271,15 @@ bool isChannelBias(const data_objects::TensorAttributes& bias,
 
 std::optional<MatchedConvBiasAct> matchConvBiasAct(const MatchContext& context)
 {
-    if(context.graph.nodeCount() != 3)
+    // conv -> ADD(bias) -> activation, or conv -> activation.
+    const uint32_t nodes = context.graph.nodeCount();
+    if(nodes != 2 && nodes != 3)
     {
         return std::nullopt;
     }
     const data_objects::ConvolutionFwdAttributes* conv = nullptr;
     std::vector<const data_objects::PointwiseAttributes*> pointwise;
-    for(uint32_t i = 0; i < 3; ++i)
+    for(uint32_t i = 0; i < nodes; ++i)
     {
         const auto& node = context.graph.getNodeWrapper(i);
         // The kernel accumulates the convolution and applies the activation in fp32, so a
@@ -297,21 +301,33 @@ std::optional<MatchedConvBiasAct> matchConvBiasAct(const MatchContext& context)
             pointwise.push_back(&attributes);
         }
     }
-    if(conv == nullptr || pointwise.size() != 2)
+    if(conv == nullptr || pointwise.size() != nodes - 1)
     {
         return std::nullopt;
     }
 
-    // One pointwise node is the ADD of the bias, the other the activation that reads its sum.
-    const auto* add = pointwise[0];
-    const auto* act = pointwise[1];
-    if(act->operation() == data_objects::PointwiseMode::ADD)
+    // With a bias, one pointwise node is the ADD of the bias and the other the activation that
+    // reads its sum; without one, the activation reads the convolution output.
+    const int64_t convOutUid = conv->y_tensor_uid();
+    const data_objects::PointwiseAttributes* add = nullptr;
+    const auto* act = pointwise[0];
+    if(nodes == 3)
     {
-        std::swap(add, act);
+        add = pointwise[0];
+        act = pointwise[1];
+        if(act->operation() == data_objects::PointwiseMode::ADD)
+        {
+            std::swap(add, act);
+        }
+        if(add->operation() != data_objects::PointwiseMode::ADD
+           || !add->in_1_tensor_uid().has_value() || add->in_2_tensor_uid().has_value())
+        {
+            return std::nullopt;
+        }
     }
-    if(add->operation() != data_objects::PointwiseMode::ADD || !add->in_1_tensor_uid().has_value()
-       || add->in_2_tensor_uid().has_value() || act->in_1_tensor_uid().has_value()
-       || act->in_2_tensor_uid().has_value() || act->in_0_tensor_uid() != add->out_0_tensor_uid())
+    const int64_t actInUid = add != nullptr ? add->out_0_tensor_uid() : convOutUid;
+    if(act->in_1_tensor_uid().has_value() || act->in_2_tensor_uid().has_value()
+       || act->in_0_tensor_uid() != actInUid)
     {
         return std::nullopt;
     }
@@ -321,34 +337,40 @@ std::optional<MatchedConvBiasAct> matchConvBiasAct(const MatchContext& context)
         return std::nullopt;
     }
 
-    // One ADD operand is the convolution output, the other the bias, in either order.
-    const int64_t convOutUid = conv->y_tensor_uid();
-    const int64_t in0 = add->in_0_tensor_uid();
-    const int64_t in1 = *add->in_1_tensor_uid();
-    if((in0 == convOutUid) == (in1 == convOutUid))
-    {
-        return std::nullopt;
-    }
-
     MatchedConvBiasAct matched;
+    const data_objects::TensorAttributes* sum = nullptr;
+    if(add != nullptr)
+    {
+        // One ADD operand is the convolution output, the other the bias, in either order.
+        const int64_t in0 = add->in_0_tensor_uid();
+        const int64_t in1 = *add->in_1_tensor_uid();
+        if((in0 == convOutUid) == (in1 == convOutUid))
+        {
+            return std::nullopt;
+        }
+        matched.bUid = in0 == convOutUid ? in1 : in0;
+        matched.b = conv_rdna::findTensor(context, *matched.bUid);
+        sum = conv_rdna::findTensor(context, actInUid);
+        if(matched.b == nullptr || sum == nullptr)
+        {
+            return std::nullopt;
+        }
+    }
     matched.conv = conv;
     matched.activation = *activation;
-    matched.bUid = in0 == convOutUid ? in1 : in0;
     matched.yUid = act->out_0_tensor_uid();
     matched.x = conv_rdna::findTensor(context, conv->x_tensor_uid());
     matched.w = conv_rdna::findTensor(context, conv->w_tensor_uid());
-    matched.b = conv_rdna::findTensor(context, matched.bUid);
     matched.y = conv_rdna::findTensor(context, matched.yUid);
     const auto* convOut = conv_rdna::findTensor(context, convOutUid);
-    const auto* sum = conv_rdna::findTensor(context, add->out_0_tensor_uid());
-    if(matched.x == nullptr || matched.w == nullptr || matched.b == nullptr || matched.y == nullptr
-       || convOut == nullptr || sum == nullptr)
+    if(matched.x == nullptr || matched.w == nullptr || matched.y == nullptr || convOut == nullptr)
     {
         return std::nullopt;
     }
 
     // Neither the convolution output nor the biased sum is stored, and nothing else reads them.
-    if(!isFusedIntermediate(*convOut, *matched.y) || !isFusedIntermediate(*sum, *matched.y))
+    if(!isFusedIntermediate(*convOut, *matched.y)
+       || (sum != nullptr && !isFusedIntermediate(*sum, *matched.y)))
     {
         return std::nullopt;
     }
@@ -360,7 +382,8 @@ std::optional<MatchedConvBiasAct> matchConvBiasAct(const MatchContext& context)
                                                conv->pre_padding(),
                                                conv->post_padding()};
     const auto problem = conv_rdna::convProblem(*matched.x, *matched.w, *matched.y, attributes);
-    if(!problem || !isChannelBias(*matched.b, *problem, matched.x->dims()->size()))
+    if(!problem
+       || (matched.b != nullptr && !isChannelBias(*matched.b, *problem, matched.x->dims()->size())))
     {
         return std::nullopt;
     }
@@ -386,7 +409,10 @@ std::optional<BoundTokens> graphMatches(const MatchContext& context)
                                 *matched->x,
                                 *matched->w,
                                 *matched->y);
-    bound[std::string(B_TOKEN)] = matched->bUid;
+    if(matched->bUid)
+    {
+        bound[std::string(B_TOKEN)] = *matched->bUid;
+    }
     return bound;
 }
 
@@ -421,7 +447,13 @@ BiasActBinding biasActBinding(const BoundTokens& bound)
         }
         return *value;
     };
-    return {read(X_TOKEN), read(W_TOKEN), read(B_TOKEN), read(Y_TOKEN)};
+    BiasActBinding binding;
+    binding.x = read(X_TOKEN);
+    binding.w = read(W_TOKEN);
+    // No bias token for a graph without a bias.
+    binding.b = hipdnn_plugin_sdk::ingestor::tryGetBoundInt(bound, B_TOKEN);
+    binding.y = read(Y_TOKEN);
+    return binding;
 }
 
 // ---------------------------------------------------------------------------
@@ -497,8 +529,11 @@ MetadataValues launchValues(const BiasActBinding& binding,
 {
     MetadataValues values{{std::string(X_UID_VALUE), binding.x},
                           {std::string(W_UID_VALUE), binding.w},
-                          {std::string(B_UID_VALUE), binding.b},
                           {std::string(Y_UID_VALUE), binding.y}};
+    if(binding.b)
+    {
+        values[std::string(B_UID_VALUE)] = *binding.b;
+    }
     fma_igemm::addProblemLaunchValues(values, problem);
     const auto mode = pointwiseMode(activation.mode);
     values[std::string(ACTIVATION_VALUE)]
@@ -526,7 +561,10 @@ LaunchInputs readLaunchInputs(const SavedLaunchInputs& inputs)
     LaunchInputs launch;
     launch.binding.x = requireLaunchInt(inputs, X_UID_VALUE);
     launch.binding.w = requireLaunchInt(inputs, W_UID_VALUE);
-    launch.binding.b = requireLaunchInt(inputs, B_UID_VALUE);
+    if(inputs.values.count(std::string(B_UID_VALUE)) != 0)
+    {
+        launch.binding.b = requireLaunchInt(inputs, B_UID_VALUE);
+    }
     launch.binding.y = requireLaunchInt(inputs, Y_UID_VALUE);
     launch.problem = fma_igemm::readProblemLaunchValues(inputs);
 
@@ -577,7 +615,7 @@ public:
     {
     }
 
-    /// The weights are read in place and neither intermediate is stored.
+    /// The weights are read in place and no intermediate is stored.
     size_t workspaceBytes(const MatchContext& /*context*/,
                           const BoundTokens& /*bound*/,
                           const KernelDefinition& /*kernel*/) const override
@@ -656,8 +694,12 @@ public:
             = hipdnn_plugin_sdk::findDeviceBuffer(binding.x, deviceBuffers, numDeviceBuffers);
         const auto w
             = hipdnn_plugin_sdk::findDeviceBuffer(binding.w, deviceBuffers, numDeviceBuffers);
-        const auto b
-            = hipdnn_plugin_sdk::findDeviceBuffer(binding.b, deviceBuffers, numDeviceBuffers);
+        const void* b = nullptr;
+        if(binding.b)
+        {
+            b = hipdnn_plugin_sdk::findDeviceBuffer(*binding.b, deviceBuffers, numDeviceBuffers)
+                    .ptr;
+        }
         const auto y
             = hipdnn_plugin_sdk::findDeviceBuffer(binding.y, deviceBuffers, numDeviceBuffers);
 
@@ -666,8 +708,8 @@ public:
                           x.ptr,
                           w.ptr,
                           y.ptr,
-                          b.ptr,
-                          /*hasBias=*/true,
+                          b,
+                          binding.b.has_value(),
                           conv.problem(),
                           &conv.activation());
     }

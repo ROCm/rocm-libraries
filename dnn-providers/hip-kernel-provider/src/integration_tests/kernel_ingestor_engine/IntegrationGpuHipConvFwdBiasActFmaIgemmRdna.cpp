@@ -32,13 +32,15 @@
 // ---- hipkernel:hip_conv_fwd_bias_act_fma_igemm_rdna on the GPU ----
 //
 // Each case pins the engine, builds a conv-forward node whose virtual output feeds a pointwise
-// ADD with a per-output-channel bias, whose virtual output feeds a forward activation, runs it
-// on the device and checks it against the CPU reference graph executor. The shape cases are the
+// ADD with a per-output-channel bias, whose virtual output feeds a forward activation (or, for
+// the NoBias cases, feeds the activation directly), runs it on the device and checks it against
+// the CPU reference graph executor. The shape cases are the
 // conv + bias engine's suite (1-D, 2-D and 3-D, both packed layouts, stride, padding,
 // asymmetric padding, dilation, groups, every channel tile and every dtype), each with one of
 // the activations in turn; the sweep cases run every activation and parameter setting in every
-// dtype on one graph. Graphs the conv + bias engine declines, an activation the kernel does not
-// apply, and conv + bias without an activation must be declined.
+// dtype on one graph, with and without the bias. Graphs the conv + bias engine declines, an
+// activation the kernel does not apply, conv + bias without an activation and the conv node
+// alone must be declined.
 
 namespace hip_kernel_provider::kernel_ingestor_engine::integration
 {
@@ -120,6 +122,8 @@ struct BiasActCase
     /// ADD(bias, conv) rather than ADD(conv, bias).
     bool biasFirst;
     ActivationSpec activation;
+    /// conv -> ADD(bias) -> activation; false: conv -> activation.
+    bool withBias = true;
 };
 
 std::ostream& operator<<(std::ostream& os, const BiasActCase& biasActCase)
@@ -200,7 +204,8 @@ PointwiseAttributes activationAttributes(const ActivationSpec& spec)
 }
 
 /// @p yOut receives the output tensor for a caller-registered validator. Without
-/// @p withActivation the graph is conv + bias, the conv + bias engine's graph.
+/// @p withActivation the graph is conv + bias, the conv + bias engine's graph (or the conv node
+/// alone for a case without a bias).
 std::shared_ptr<Graph> buildGraph(const BiasActCase& biasActCase,
                                   std::shared_ptr<TensorAttributes>* yOut = nullptr,
                                   bool withActivation = true)
@@ -248,10 +253,16 @@ std::shared_ptr<Graph> buildGraph(const BiasActCase& biasActCase,
         .set_convolution_mode(ConvolutionMode::CROSS_CORRELATION);
     auto convOut = graph->conv_fprop(x, w, convAttrs);
 
-    PointwiseAttributes addAttrs;
-    addAttrs.set_name("bias").set_mode(PointwiseMode::ADD).set_compute_data_type(DataType::FLOAT);
-    auto sum = biasActCase.biasFirst ? graph->pointwise(b, convOut, addAttrs)
-                                     : graph->pointwise(convOut, b, addAttrs);
+    auto sum = convOut;
+    if(biasActCase.withBias)
+    {
+        PointwiseAttributes addAttrs;
+        addAttrs.set_name("bias")
+            .set_mode(PointwiseMode::ADD)
+            .set_compute_data_type(DataType::FLOAT);
+        sum = biasActCase.biasFirst ? graph->pointwise(b, convOut, addAttrs)
+                                    : graph->pointwise(convOut, b, addAttrs);
+    }
     auto y = withActivation ? graph->pointwise(sum, activationAttributes(biasActCase.activation))
                             : sum;
     y->set_uid(Y_UID).set_name("Y").set_output(true).set_data_type(biasActCase.dtype);
@@ -342,18 +353,23 @@ const std::vector<BiasActCase>& cases()
             shaped.name += shaped.activation.name;
             all.push_back(shaped);
         }
-        // Every activation in every dtype on one graph.
+        // Every activation in every dtype on one graph, with and without the bias.
         const auto& sweepShape = shapes[1]; // F32Pad1
-        for(const auto& [dtype, prefix] :
-            {std::pair{F32, "SweepF32"}, std::pair{F16, "SweepF16"}, std::pair{BF16, "SweepBf16"}})
+        for(const bool withBias : {true, false})
         {
-            for(const auto& activation : acts)
+            for(const auto& [dtype, prefix] : {std::pair{F32, "SweepF32"},
+                                               std::pair{F16, "SweepF16"},
+                                               std::pair{BF16, "SweepBf16"}})
             {
-                auto swept = sweepShape;
-                swept.dtype = dtype;
-                swept.activation = activation;
-                swept.name = std::string(prefix) + activation.name;
-                all.push_back(swept);
+                for(const auto& activation : acts)
+                {
+                    auto swept = sweepShape;
+                    swept.dtype = dtype;
+                    swept.activation = activation;
+                    swept.withBias = withBias;
+                    swept.name = std::string(withBias ? "" : "NoBias") + prefix + activation.name;
+                    all.push_back(swept);
+                }
             }
         }
         return all;
@@ -515,16 +531,20 @@ public:
     CaseBuffers(const CaseBuffers&) = delete;
     CaseBuffers& operator=(const CaseBuffers&) = delete;
 
-    std::unordered_map<int64_t, void*> variantPack() const
+    std::unordered_map<int64_t, void*> variantPack(bool withBias) const
     {
+        if(!withBias)
+        {
+            return {{X_UID, _x}, {W_UID, _w}, {Y_UID, _y}};
+        }
         return {{X_UID, _x}, {W_UID, _w}, {B_UID, _b}, {Y_UID, _y}};
     }
 
     /// Clears y, runs @p graph, and returns y's bytes.
-    std::vector<uint8_t> run(Graph& graph, hipdnnHandle_t handle, hipStream_t stream)
+    std::vector<uint8_t> run(Graph& graph, hipdnnHandle_t handle, hipStream_t stream, bool withBias)
     {
         EXPECT_EQ(hipMemset(_y, 0xff, _yBytes), hipSuccess);
-        auto pack = variantPack();
+        auto pack = variantPack(withBias);
         const auto result = graph.execute(handle, pack, nullptr);
         EXPECT_EQ(result.code, ErrorCode::OK) << result.err_msg;
         EXPECT_EQ(hipStreamSynchronize(stream), hipSuccess);
@@ -543,14 +563,15 @@ private:
 
 /// The cases a saved plan must reproduce: the kernel shapes (2-D NCHW, 3-D, NHWC / NDHWC
 /// 16-bit), with activations whose saved parameters change the output (a clamp, a leaky ReLU,
-/// a swish beta).
+/// a swish beta), and a graph without a bias.
 bool savesThisCase(const BiasActCase& biasActCase)
 {
     return biasActCase.name == "F32Groups2K96GeluTanh"
            || biasActCase.name == "F32Conv3dTemporalReluClamp"
            || biasActCase.name == "F32Ndhwc3dGroups2LeakyRelu"
            || biasActCase.name == "F16NhwcTileN128Elu"
-           || biasActCase.name == "Bf16NdhwcConv3dSwishBeta1p5";
+           || biasActCase.name == "Bf16NdhwcConv3dSwishBeta1p5"
+           || biasActCase.name == "NoBiasSweepF16LeakyRelu";
 }
 
 /// Whether the engine is among those offered for @p graph.
@@ -574,7 +595,7 @@ TEST_P(IntegrationGpuHipConvFwdBiasActFmaIgemmRdna, SavedPlanReproducesTheOutput
     const auto& biasActCase = GetParam();
     if(!savesThisCase(biasActCase))
     {
-        GTEST_SKIP() << "saved plans are checked on five representative graphs";
+        GTEST_SKIP() << "saved plans are checked on six representative graphs";
     }
     CaseBuffers buffers(biasActCase);
 
@@ -598,7 +619,7 @@ TEST_P(IntegrationGpuHipConvFwdBiasActFmaIgemmRdna, SavedPlanReproducesTheOutput
                                 BehaviorNote::SUPPORTS_EXECUTION_PLAN_SERIALIZATION),
                       notes.end());
 
-            expected = buffers.run(*graph, _handle, _stream);
+            expected = buffers.run(*graph, _handle, _stream, biasActCase.withBias);
             auto [saved, error] = detail::saveInForm(*graph, form);
             ASSERT_EQ(error.code, ErrorCode::OK) << error.err_msg;
             bytes = std::move(saved);
@@ -613,14 +634,14 @@ TEST_P(IntegrationGpuHipConvFwdBiasActFmaIgemmRdna, SavedPlanReproducesTheOutput
         ASSERT_EQ(loaded.get_execution_plan_engine_id(servingEngineId).code, ErrorCode::OK);
         EXPECT_EQ(servingEngineId, engineId());
 
-        const auto actual = buffers.run(loaded, _handle, _stream);
+        const auto actual = buffers.run(loaded, _handle, _stream, biasActCase.withBias);
         EXPECT_TRUE(actual == expected) << "the loaded plan's output differs";
     }
 }
 
 // Depthwise (and any group with fewer than 16 output channels) is left to other engines, as
-// for the conv + bias engine; so are an activation the kernel does not apply and conv + bias
-// without an activation.
+// for the conv + bias engine; so are an activation the kernel does not apply, conv + bias
+// without an activation, and the conv node alone.
 TEST_P(IntegrationGpuHipConvFwdBiasActFmaIgemmRdna, DeclinesWhatItDoesNotServe)
 {
     const auto& base = GetParam();
@@ -641,6 +662,13 @@ TEST_P(IntegrationGpuHipConvFwdBiasActFmaIgemmRdna, DeclinesWhatItDoesNotServe)
 
     EXPECT_FALSE(offered(*buildGraph(base, nullptr, /*withActivation=*/false), _handle, engineId()))
         << "conv + bias";
+
+    BiasActCase convOnly = base;
+    convOnly.name = "F32ConvOnly";
+    convOnly.withBias = false;
+    EXPECT_FALSE(
+        offered(*buildGraph(convOnly, nullptr, /*withActivation=*/false), _handle, engineId()))
+        << "conv alone";
 }
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine::integration
