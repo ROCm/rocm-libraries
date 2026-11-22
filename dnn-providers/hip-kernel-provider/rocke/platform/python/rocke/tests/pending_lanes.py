@@ -1,8 +1,9 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Test files that wait for a CI lane, and measured allowances that wait for a
-decision, each with its recorded reason.
+"""Every test that does not run normally, with its recorded reason: test files
+that wait for a CI lane, measured allowances that wait for a decision, and
+quarantined tests that are known to fail.
 
 A test is out of limbo only when a CI lane runs it, or when it has an explicit,
 recorded reason not to yet. This module is that record: one entry per test file
@@ -51,12 +52,30 @@ owner and expiry, and the same check reports it stale or expired.
         expires="2027-01-31",
     )
 
+A quarantined test is known to fail (a flake, or a defect that turns develop
+red) and is held out of every run until it is fixed. It names one pytest item,
+or every parameter of one test function, and needs an issue that tracks the
+fix. The pytest roots of ``platform/tests`` and ``library/tests`` skip it with
+the reason ``quarantined: <issue>`` (``rocke.tests.quarantine``), so it stays
+visible in every report; ``ROCKE_QUARANTINE=ignore`` runs it anyway. Rules
+stricter than a pending entry's hold it: an expired quarantine always fails
+the check, and at most ``QUARANTINE_CAP`` tests may be quarantined at once.
+
+    QuarantinedTest(
+        test_id="platform/tests/test_example.py::test_case[gfx942]",
+        issue="AICK-1234",  # a Jira id or ROCm/<repo>#<number>
+        reason="fails on every run since the recorder change",
+        owner="rocKE platform",
+        expires="2027-01-31",
+    )
+
 Paths, owners and issues are plain text: no links.
 """
 
 from __future__ import annotations
 
 import datetime
+import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -75,14 +94,19 @@ __all__ = [
     "OWNER_DECISION",
     "PENDING",
     "PR_16482",
+    "QUARANTINED",
+    "QUARANTINE_CAP",
+    "QUARANTINE_TREES",
     "TORCH_IN_CI",
     "WEEKLY_EXHAUSTIVE",
     "WEEKLY_TORCH_GPU",
     "Lane",
     "MeasuredBudget",
     "PendingTest",
+    "QuarantinedTest",
     "measured_budget_kernels",
     "measured_scratch_allowance",
+    "quarantined_test",
 ]
 
 
@@ -270,6 +294,83 @@ class MeasuredBudget:
     @property
     def expiry_date(self) -> datetime.date:
         return datetime.date.fromisoformat(self.expires)
+
+
+# The pytest roots that skip quarantined tests, relative to the rocke directory.
+QUARANTINE_TREES: tuple[str, ...] = ("platform/tests", "library/tests")
+# At most this many tests are quarantined at once, so quarantine cannot become
+# the backlog: at the cap, a new entry needs one cleared first.
+QUARANTINE_CAP = 10
+# A Jira id (AICK-1234) or a GitHub issue (ROCm/rocm-libraries#123).
+_ISSUE = re.compile(r"[A-Z][A-Z0-9]+-[0-9]+|ROCm/[A-Za-z0-9._-]+#[0-9]+")
+
+
+@dataclass(frozen=True)
+class QuarantinedTest:
+    """One test known to fail, skipped in every run until its issue is fixed.
+
+    ``test_id`` is the test file relative to the rocke directory, ``::`` and the
+    pytest node name: ``...::test_x[gfx942]`` names one parameter of
+    ``test_x``, ``...::test_x`` all of them.
+    """
+
+    test_id: str
+    issue: str
+    reason: str
+    owner: str
+    expires: str
+
+    def __post_init__(self) -> None:
+        path, separator, node_name = self.test_id.partition("::")
+        if not separator or not node_name:
+            raise ValueError(
+                f"QuarantinedTest failed - test_id={self.test_id!r}, expected "
+                "<test file>::<pytest node name>"
+            )
+        _require_test_path("QuarantinedTest", path)
+        if not path.startswith(tuple(f"{tree}/" for tree in QUARANTINE_TREES)):
+            raise ValueError(
+                f"QuarantinedTest failed - test_id={self.test_id!r}, expected a "
+                f"test under one of {QUARANTINE_TREES}, whose pytest roots skip "
+                "quarantined tests"
+            )
+        if not _ISSUE.fullmatch(self.issue):
+            raise ValueError(
+                f"QuarantinedTest failed - test_id={self.test_id!r}, "
+                f"issue={self.issue!r}, expected a Jira id (AICK-1234) or "
+                "ROCm/<repo>#<number>"
+            )
+        _require_recorded(
+            "QuarantinedTest", path, self.reason, self.owner, self.expires
+        )
+
+    @property
+    def path(self) -> str:
+        """The test file, relative to the rocke directory."""
+        return self.test_id.partition("::")[0]
+
+    @property
+    def node_name(self) -> str:
+        """The pytest node name after the file: ``[Class::]test[params]``."""
+        return self.test_id.partition("::")[2]
+
+    @property
+    def expiry_date(self) -> datetime.date:
+        return datetime.date.fromisoformat(self.expires)
+
+    def covers(self, path: str, node_name: str) -> bool:
+        """Whether this entry quarantines the item ``node_name`` of ``path``."""
+        if path != self.path:
+            return False
+        return node_name == self.node_name or (
+            "[" not in self.node_name and node_name.startswith(f"{self.node_name}[")
+        )
+
+
+def quarantined_test(path: str, node_name: str) -> QuarantinedTest | None:
+    """The ``QUARANTINED`` entry for the pytest item ``node_name`` of the test
+    file ``path`` (relative to the rocke directory), or None."""
+    return next((entry for entry in QUARANTINED if entry.covers(path, node_name)), None)
 
 
 def _waiting(
@@ -672,3 +773,6 @@ def measured_scratch_allowance(
         ),
         0,
     )
+
+
+QUARANTINED: tuple[QuarantinedTest, ...] = ()

@@ -63,6 +63,13 @@ def pytest_runtest_makereport(item, call):
     report.longrepr = (str(item.path), item.location[1] + 1, str(call.excinfo.value))
 
 
+def pytest_collection_modifyitems(config, items):
+    """Skip the quarantined tests (``rocke.tests.quarantine``)."""
+    from rocke.tests.quarantine import skip_quarantined_items
+
+    skip_quarantined_items(items, _HERE, "platform/tests")
+
+
 def pytest_collection_finish(session):
     """Before any test runs, call ``prepare_before_tests(items)`` on each
     collected test module that defines it, with that module's collected items.

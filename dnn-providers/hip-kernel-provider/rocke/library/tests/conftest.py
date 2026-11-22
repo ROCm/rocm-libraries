@@ -297,7 +297,8 @@ def pytest_sessionstart(session):
 
 @pytest.hookimpl(tryfirst=True)
 def pytest_collection_modifyitems(config, items):
-    """``--rocke-reference-arch``: keep that arch's reference cases; then
+    """Skip the quarantined tests (``rocke.tests.quarantine``); then
+    ``--rocke-reference-arch``: keep that arch's reference cases; then
     ``ROCKE_TEST_SHARD=i[,j...]/n``: keep the items of those shards (see
     ``rocke.tests.ctest_shard``; unset: every item); then group the tests
     of one kernel (:func:`_group_by_parameter_set`). When the run loads the
@@ -305,8 +306,10 @@ def pytest_collection_modifyitems(config, items):
     this hook."""
     from reference_common.pytest_support import select_reference_items
     from rocke.tests import ctest_shard
+    from rocke.tests.quarantine import skip_quarantined_items
     from tests._affordable_lane import mark_exhaustive_items
 
+    skip_quarantined_items(items, _TESTROOT, "library/tests")
     mark_exhaustive_items(items)
     select_reference_items(config, items)
     shard = os.environ.get(ctest_shard.SHARD_ENV, "").strip()

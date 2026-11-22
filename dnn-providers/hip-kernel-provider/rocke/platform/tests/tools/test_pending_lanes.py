@@ -20,7 +20,10 @@ file waiting for something CI lacks is in one). An expired entry fails only a
 change that touches the registry or its file, and every run under
 ``--strict-expiry``; otherwise it is reported as a warning. The registry's
 measured budgets are held to the same rules: each names a present test file, is
-listed once, and is reported or failed when expired the same way.
+listed once, and is reported or failed when expired the same way. A
+quarantined test is held to stricter rules: it names a test that exists, is
+listed once, fails the check as soon as it expires, and the registry holds at
+most ``QUARANTINE_CAP`` of them.
 
 The check configures the platform (nothing is built) and reads the provider
 categories, so it runs in a source checkout of the monorepo only.
@@ -52,12 +55,16 @@ from rocke.tests.pending_lanes import (
     LANES,
     MEASURED_BUDGETS,
     PENDING,
+    QUARANTINE_CAP,
+    QUARANTINED,
     MeasuredBudget,
     PendingTest,
+    QuarantinedTest,
     measured_budget_kernels,
     measured_scratch_allowance,
 )
 from rocke.tests.provider_categories import provider_category_labels
+from rocke.tests.quarantine import skip_quarantined_items
 
 ROCKE = platform_root().parent
 # The tiers pull-request and push CI select.
@@ -711,6 +718,129 @@ def test_a_measured_budget_needs_a_positive_size_and_its_recorded_reason():
         budget(reason="see https://x")
     with pytest.raises(ValueError, match="expected an ISO date"):
         budget(expires="next month")
+
+
+def _quarantined(test_id: str, **overrides: str) -> QuarantinedTest:
+    fields = {
+        "issue": "AICK-1234",
+        "reason": "why",
+        "owner": "owner",
+        "expires": "2027-01-31",
+    }
+    return QuarantinedTest(test_id, **{**fields, **overrides})
+
+
+def test_a_quarantined_test_needs_an_item_an_issue_and_its_recorded_reason():
+    with pytest.raises(ValueError, match="expected <test file>::<pytest node name>"):
+        _quarantined("library/tests/test_x.py")
+    with pytest.raises(ValueError, match="expected a test under one of"):
+        _quarantined("platform/python/rocke/tests/test_x.py::test_y")
+    with pytest.raises(ValueError, match="expected a Jira id"):
+        _quarantined("library/tests/test_x.py::test_y", issue="none filed yet")
+    with pytest.raises(ValueError, match="expected a Jira id"):
+        _quarantined(
+            "library/tests/test_x.py::test_y",
+            issue="https://x/issues/1",
+        )
+    with pytest.raises(ValueError, match="expected plain text"):
+        _quarantined("library/tests/test_x.py::test_y", reason="see https://x")
+    with pytest.raises(ValueError, match="expected an ISO date"):
+        _quarantined("library/tests/test_x.py::test_y", expires="next month")
+    github = _quarantined(
+        "library/tests/test_x.py::test_y", issue="ROCm/rocm-libraries#1"
+    )
+    assert github.issue == "ROCm/rocm-libraries#1"
+
+
+def test_a_quarantined_function_covers_its_parameters_and_a_case_only_itself():
+    function = _quarantined("platform/tests/test_x.py::test_y")
+    assert function.covers("platform/tests/test_x.py", "test_y")
+    assert function.covers("platform/tests/test_x.py", "test_y[gfx942]")
+    assert not function.covers("platform/tests/test_x.py", "test_yz")
+    assert not function.covers("library/tests/test_x.py", "test_y")
+    case = _quarantined("platform/tests/test_x.py::test_y[gfx942]")
+    assert case.covers("platform/tests/test_x.py", "test_y[gfx942]")
+    assert not case.covers("platform/tests/test_x.py", "test_y[gfx950]")
+    assert not case.covers("platform/tests/test_x.py", "test_y")
+
+
+def test_only_a_quarantine_tree_skips_quarantined_tests():
+    with pytest.raises(ValueError, match="expected one of"):
+        skip_quarantined_items([], ROCKE / "platform/python", "platform/python")
+
+
+def _defines_test(test_file: Path, node_name: str) -> bool:
+    """Whether ``test_file`` defines the test function ``node_name`` names."""
+    function = node_name.split("::")[-1].partition("[")[0]
+    tree = ast.parse(test_file.read_text(encoding="utf-8"))
+    return any(
+        isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and node.name == function
+        for node in ast.walk(tree)
+    )
+
+
+def quarantine_breaches(
+    entries: Iterable[QuarantinedTest], today: datetime.date
+) -> list[str]:
+    """What fails the quarantine record, whatever the change: an item listed
+    twice, more items than ``QUARANTINE_CAP``, or an expired entry."""
+    entries = list(entries)
+    ids = [entry.test_id for entry in entries]
+    breaches = [
+        f"quarantined more than once: {test_id}"
+        for test_id in sorted({test_id for test_id in ids if ids.count(test_id) > 1})
+    ]
+    if len(entries) > QUARANTINE_CAP:
+        breaches.append(
+            f"{len(entries)} quarantined tests, over the cap of {QUARANTINE_CAP}; "
+            "fix one before quarantining another"
+        )
+    breaches += [
+        f"quarantine expired: {entry.test_id}; fix the test, retire it, or extend "
+        "the expiry with the reason recorded in its issue"
+        for entry in entries
+        if entry.expiry_date < today
+    ]
+    return breaches
+
+
+def test_a_quarantine_fails_when_expired_listed_twice_or_over_the_cap():
+    today = datetime.date(2027, 1, 1)
+    current = _quarantined("library/tests/test_x.py::test_y")
+    assert quarantine_breaches([current], today) == []
+    expired = _quarantined("library/tests/test_x.py::test_z", expires="2026-12-31")
+    assert quarantine_breaches([current, expired], today) == [
+        (
+            "quarantine expired: library/tests/test_x.py::test_z; fix the test, "
+            "retire it, or extend the expiry with the reason recorded in its issue"
+        )
+    ]
+    assert quarantine_breaches([current, current], today) == [
+        "quarantined more than once: library/tests/test_x.py::test_y"
+    ]
+    over_the_cap = [
+        _quarantined(f"library/tests/test_x.py::test_{index}")
+        for index in range(QUARANTINE_CAP + 1)
+    ]
+    assert quarantine_breaches(over_the_cap, today) == [
+        (
+            f"{QUARANTINE_CAP + 1} quarantined tests, over the cap of "
+            f"{QUARANTINE_CAP}; fix one before quarantining another"
+        )
+    ]
+
+
+def test_every_quarantined_test_is_current():
+    breaches = quarantine_breaches(QUARANTINED, _utc_today())
+    assert not breaches, breaches
+    gone = [
+        entry.test_id
+        for entry in QUARANTINED
+        if not (ROCKE / entry.path).is_file()
+        or not _defines_test(ROCKE / entry.path, entry.node_name)
+    ]
+    assert not gone, f"quarantined but gone: {gone}"
 
 
 @pytest.mark.skipif(
