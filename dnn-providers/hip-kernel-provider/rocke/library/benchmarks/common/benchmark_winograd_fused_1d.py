@@ -27,7 +27,9 @@ os.environ.setdefault("ROCKE_CPP_QUIET_FALLBACK", "1")
 
 from benchmarks.common.benchmark_winograd_conv import (  # noqa: E402
     make_inputs,
+    read_back_drained,
     reference,
+    upload_drained,
     verify_error,
 )
 from benchmarks.common.benchmark_winograd_gen import parse_variant  # noqa: E402
@@ -59,10 +61,8 @@ def build_cfg(item):
 
 def run_case(problem, variant, cfgs, args, arch, ref_cache):
     from rocke import compile_kernel
-    from rocke.numeric import storage
     from rocke.runtime import time_launches
     from rocke.runtime.hip_module import Runtime
-    from rocke.runtime.host_buffers import as_u8_buffer, pinned_copy, pinned_empty
     from rocke.runtime.launcher import KernelLauncher, LaunchConfig
 
     from kernels.common import conv_winograd_gen as WG
@@ -103,11 +103,8 @@ def run_case(problem, variant, cfgs, args, arch, ref_cache):
     bufs = {k: int(rt.alloc(max(v, 4))) for k, v in sizes.items()}
     out = []
     try:
-        rt.sync()
-        for key, host in (("x", x), ("w", w)):
-            staged = pinned_copy(host)
-            rt.memcpy_h2d(bufs[key], as_u8_buffer(staged), staged.nbytes)
-            rt.sync()
+        upload_drained(rt, bufs["x"], x)
+        upload_drained(rt, bufs["w"], w)
         k1 = KernelLauncher(
             hsaco=k1_art.hsaco,
             kernel_name=k1_art.kernel_name,
@@ -121,12 +118,8 @@ def run_case(problem, variant, cfgs, args, arch, ref_cache):
         rt.sync()
 
         def read_y():
-            rt.sync()
             y_shape = (problem.N, problem.Ho, problem.Wo, problem.K)
-            staged = pinned_empty(y_shape, storage.host_dtype("fp16"))
-            rt.memcpy_d2h(as_u8_buffer(staged), bufs["y"], staged.nbytes)
-            rt.sync()
-            return storage.decode(staged, "fp16")
+            return read_back_drained(rt, bufs["y"], y_shape, "fp16")
 
         for cfg, spec, art in built:
             lau = KernelLauncher(

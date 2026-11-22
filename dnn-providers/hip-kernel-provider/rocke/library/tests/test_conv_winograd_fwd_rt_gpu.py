@@ -23,6 +23,8 @@ import dataclasses
 import pytest
 from rocke.runtime.hip_module import get_device_arch
 
+from ._winograd_plan import run_winograd_plan
+
 GPU_ARCH = get_device_arch(0)
 
 pytestmark = pytest.mark.skipif(GPU_ARCH != "gfx1250", reason="needs a gfx1250 GPU")
@@ -45,59 +47,7 @@ def _artifact(step):
 
 def _run(req, spec):
     """Run ``spec`` (an AOT Winograd plan selected for ``req``); ``err``."""
-    from rocke.numeric import storage
-    from rocke.runtime.hip_module import Runtime
-    from rocke.runtime.host_buffers import as_u8_buffer, pinned_copy, pinned_empty
-    from rocke.runtime.launcher import KernelLauncher, LaunchConfig
-
-    from benchmarks.common.benchmark_winograd_conv import (
-        make_inputs,
-        reference,
-        verify_error,
-    )
-    from dispatch.grouped_convolution import launch_plan_for
-
-    problem, dtype = spec.problem, spec.dtype
-    plan = launch_plan_for(req, spec)
-    launchers = []
-    for step in plan.steps:
-        art = _artifact(step)
-        launchers.append(
-            KernelLauncher(
-                hsaco=art.hsaco, kernel_name=art.kernel_name, signature=step.signature
-            )
-        )
-    x, w = make_inputs(problem, dtype, seed=7)
-    ref = reference(x, w, problem, dtype)
-    y = pinned_empty(
-        (problem.N, problem.Ho, problem.Wo, problem.K), storage.host_dtype(dtype)
-    )
-    sizes = {"x": x.nbytes, "w": w.nbytes, "y": y.nbytes, **plan.workspaces}
-    rt = Runtime()
-    ptrs = {k: int(rt.alloc(max(int(v), 4))) for k, v in sizes.items()}
-    try:
-        rt.sync()
-        for key, host in (("x", x), ("w", w)):
-            staged = pinned_copy(host)
-            rt.memcpy_h2d(ptrs[key], as_u8_buffer(staged), staged.nbytes)
-            rt.sync()
-            del staged
-        for key in (*plan.workspaces, "y"):
-            rt.memset(ptrs[key], 0x7F, sizes[key])
-        rt.sync()
-        for step, lau in zip(plan.steps, launchers):
-            lau(
-                plan.values(step, ptrs, sizes),
-                config=LaunchConfig(grid=step.grid, block=step.block, fence=True),
-            )
-        rt.sync()
-        rt.memcpy_d2h(as_u8_buffer(y), ptrs["y"], y.nbytes)
-        rt.sync()
-    finally:
-        rt.sync()
-        for p in ptrs.values():
-            rt.free(p)
-    err, _ = verify_error(storage.decode(y, dtype), ref)
+    err, _ = run_winograd_plan(req, spec, compile_step=_artifact, seed=7)
     return err
 
 

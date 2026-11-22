@@ -20,6 +20,7 @@ import unittest
 
 import numpy as np
 from rocke.numeric import storage
+from rocke.numeric.compare import peak_relative_error
 from rocke.runtime.hip_module import get_device_arch
 
 from kernels.common.conv_winograd_gemm_wmma import (  # noqa: E402
@@ -241,9 +242,12 @@ class TestGemmGpu(unittest.TestCase):
     def _check(self, dims, dtype, steps):
         from rocke import compile_kernel
         from rocke.runtime.hip_module import Runtime
-        from rocke.runtime.host_buffers import as_u8_buffer, pinned_copy, pinned_empty
 
         from benchmarks.common import winograd_k3_wmma as K3W
+        from benchmarks.common.benchmark_winograd_conv import (
+            read_back_drained,
+            upload_drained,
+        )
 
         T, G, Cg, Kg = dims
         prob = WinogradGemmProblem(T=T, G=G, Cg=Cg, Kg=Kg)
@@ -260,19 +264,17 @@ class TestGemmGpu(unittest.TestCase):
         if any(s.spec.split_k for s in plan.steps):
             reduce_art = K3W.build_reduce(dtype, GPU_ARCH)
         rng = np.random.default_rng(0)
-        # Pinned host buffers: pageable copies near in-flight kernels hang gfx1250.
-        V = pinned_copy(storage.encode(rng.uniform(-1, 1, (T, G, Cg)), dtype))
-        U = pinned_copy(storage.encode(rng.uniform(-1, 1, (G, Kg, Cg)), dtype))
-        M = pinned_empty((T, G, Kg), storage.host_dtype(dtype))
+        V = storage.encode(rng.uniform(-1, 1, (T, G, Cg)), dtype)
+        U = storage.encode(rng.uniform(-1, 1, (G, Kg, Cg)), dtype)
+        M_bytes = T * G * Kg * storage.host_dtype(dtype).itemsize
         rt = Runtime()
         ws_bytes = plan.workspace_bytes(prob)
-        bufs = [rt.alloc(array.nbytes) for array in (V, U, M)]
+        bufs = [rt.alloc(nbytes) for nbytes in (V.nbytes, U.nbytes, M_bytes)]
         bufs.append(rt.alloc(max(ws_bytes, 4)))
         try:
-            rt.sync()
-            rt.memcpy_h2d(bufs[0], as_u8_buffer(V), V.nbytes)
-            rt.memcpy_h2d(bufs[1], as_u8_buffer(U), U.nbytes)
-            rt.memset(bufs[2], 0x7F, M.nbytes)
+            upload_drained(rt, bufs[0], V)
+            upload_drained(rt, bufs[1], U)
+            rt.memset(bufs[2], 0x7F, M_bytes)
             rt.memset(bufs[3], 0x7F, max(ws_bytes, 4))
             run = plan.bind(
                 prob,
@@ -283,8 +285,7 @@ class TestGemmGpu(unittest.TestCase):
                 reduce_art=reduce_art,
             )
             run()
-            rt.sync()
-            rt.memcpy_d2h(as_u8_buffer(M), bufs[2], M.nbytes)
+            M = read_back_drained(rt, bufs[2], (T, G, Kg), dtype)
         finally:
             from rocke.runtime import synchronize_and_release
 
@@ -296,7 +297,7 @@ class TestGemmGpu(unittest.TestCase):
             storage.decode(V, dtype).astype(np.float64),
             storage.decode(U, dtype).astype(np.float64),
         )
-        err = float(np.abs(storage.decode(M, dtype) - ref).max() / np.abs(ref).max())
+        err = peak_relative_error(M, ref)
         self.assertLess(err, 1e-2, f"{dims} {dtype} {plan.label()}: rel err {err:.3g}")
 
     def test_cases(self):

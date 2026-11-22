@@ -43,13 +43,17 @@ import os
 import sys
 import time
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
 
 import numpy as np
 from rocke.numeric import storage
+from rocke.numeric.compare import peak_relative_error
 from rocke.runtime.host_buffers import as_u8_buffer, pinned_copy, pinned_empty
 
 from benchmarks.common import conv_fill
+
+if TYPE_CHECKING:
+    from rocke.runtime.hip_module import Event
 
 os.environ.setdefault("ROCKE_CPP_QUIET_FALLBACK", "1")
 
@@ -280,6 +284,29 @@ def k3_label(cfg: tuple) -> str:
 # ---------------------------------------------------------------------------
 
 
+def upload_drained(rt, ptr: int, host: np.ndarray) -> None:
+    """Copy ``host`` to the device buffer ``ptr`` through page-locked
+    staging, the device drained before and after. A pageable copy registers
+    host memory through KFD's SVM path, and that page-table update while a
+    kernel is in flight hangs gfx1250."""
+    rt.sync()
+    staged = pinned_copy(host)
+    rt.memcpy_h2d(ptr, as_u8_buffer(staged), staged.nbytes)
+    rt.sync()
+
+
+def read_back_drained(
+    rt, ptr: int, shape: tuple[int, ...], io_dtype: str
+) -> np.ndarray:
+    """The values of the ``io_dtype`` device buffer ``ptr`` of ``shape``, as
+    float32, staged and drained as :func:`upload_drained` does."""
+    rt.sync()
+    staged = pinned_empty(shape, storage.host_dtype(io_dtype))
+    rt.memcpy_d2h(as_u8_buffer(staged), ptr, staged.nbytes)
+    rt.sync()
+    return storage.decode(staged, io_dtype)
+
+
 @dataclass
 class WinogradPipeline:
     """Device buffers + launchers of one Winograd pipeline instance.
@@ -316,7 +343,7 @@ class WinogradPipeline:
     k3_plan: Optional[tuple] = None
     # Streams and events bound_two_streams created; free() releases them.
     side_streams: list[int] = field(default_factory=list)
-    events: list[object] = field(default_factory=list)
+    events: list[Event] = field(default_factory=list)
 
     @property
     def gemm_problem(self):
@@ -387,19 +414,11 @@ class WinogradPipeline:
 
     def upload(self, x, w):
         """Copy the stored activations ``x`` (every chunk) and weights ``w``
-        (:func:`make_inputs`) to the device."""
-        # Pinned host staging, device drained around each copy: a pageable copy
-        # registers host memory through KFD's SVM path, and that page-table
-        # update while one of our kernels is in flight hangs gfx1250.
-        self.rt.sync()
+        (:func:`make_inputs`) to the device (:func:`upload_drained`)."""
         nc = self._nc()
-        items = [(self.xs[i], x[i * nc : (i + 1) * nc]) for i in range(self.chunks)]
-        items.append((self.bufs["w"], w))
-        for ptr, host in items:
-            staged = pinned_copy(host)
-            self.rt.memcpy_h2d(ptr, as_u8_buffer(staged), staged.nbytes)
-            self.rt.sync()
-            del staged
+        for i in range(self.chunks):
+            upload_drained(self.rt, self.xs[i], x[i * nc : (i + 1) * nc])
+        upload_drained(self.rt, self.bufs["w"], w)
 
     def poison(self, byte: int = 0x7F):
         for k in ("U", "V", "M", "e"):
@@ -571,8 +590,9 @@ class WinogradPipeline:
         for it. Each call starts K1 only after the previous call's work on
         the main stream (a fork / join per call), so calls do not overlap.
         ``stream``: main stream handle; usable inside a HIP graph capture on
-        that stream. The side stream and the events live until :meth:`free`."""
-        side = self.rt.create_stream()
+        that stream. The side stream is non-blocking, so K1 is not ordered
+        against the null stream; it and the events live until :meth:`free`."""
+        side = self.rt.create_stream(non_blocking=True)
         fork, filters_done = self.rt.event(), self.rt.event()
         self.side_streams.append(side)
         self.events += [fork, filters_done]
@@ -598,16 +618,14 @@ class WinogradPipeline:
     def read_y(self) -> np.ndarray:
         """The output of every chunk, ``[N, Ho, Wo, K]``, as float32 values of
         what the pipeline stored."""
-        io_dtype = self.spec.io_dtype
         p = self.spec.problem
-        self.rt.sync()
-        chunks = []
-        for ptr in self.ys:
-            staged = pinned_empty((p.N, p.Ho, p.Wo, p.K), storage.host_dtype(io_dtype))
-            self.rt.memcpy_d2h(as_u8_buffer(staged), ptr, staged.nbytes)
-            self.rt.sync()
-            chunks.append(storage.decode(staged, io_dtype))
-        return np.concatenate(chunks)
+        shape = (p.N, p.Ho, p.Wo, p.K)
+        return np.concatenate(
+            [
+                read_back_drained(self.rt, ptr, shape, self.spec.io_dtype)
+                for ptr in self.ys
+            ]
+        )
 
 
 def time_graph(fn, *, warmup: int, iters: int) -> float:
@@ -646,12 +664,10 @@ def verify_error(out: np.ndarray, ref: np.ndarray) -> tuple[float, float]:
     """``(rocke metric, relL2)``: max|out-ref| / max(max|ref|, floor) as the
     other conv benchmarks compute it (floor: :func:`conv_fill.ref_floor`),
     plus the relative L2 error for context. Both are values, not stored bits."""
-    out = np.asarray(out, dtype=np.float64)
-    ref = np.asarray(ref, dtype=np.float64)
-    diff = out - ref
-    err = float(np.abs(diff).max() / max(np.abs(ref).max(), conv_fill.ref_floor()))
+    err = peak_relative_error(out, ref, floor=conv_fill.ref_floor())
     if err != err:  # NaN
         err = float("inf")
+    diff = np.asarray(out, dtype=np.float64) - np.asarray(ref, dtype=np.float64)
     l2 = float(np.linalg.norm(diff) / max(np.linalg.norm(ref), 1e-30))
     return err, l2
 

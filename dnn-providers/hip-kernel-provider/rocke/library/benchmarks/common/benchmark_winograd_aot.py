@@ -312,9 +312,13 @@ class Case:
     """Device buffers of one case: x / y (all chunks) and w are shared by the tiles."""
 
     def __init__(self, rt, problem, io: str, seed: int, verify: bool):
-        from rocke.runtime.host_buffers import as_u8_buffer, pinned_copy
+        from rocke.numeric import storage
 
-        from benchmarks.common.benchmark_winograd_conv import make_inputs, reference
+        from benchmarks.common.benchmark_winograd_conv import (
+            make_inputs,
+            reference,
+            upload_drained,
+        )
 
         self.rt = rt
         self.problem = problem
@@ -324,28 +328,19 @@ class Case:
         self.y_shape = (problem.N, problem.Ho, problem.Wo, problem.K)
         self.xb = x.nbytes
         self.wb = w.nbytes
-        self.yb = int(np.prod(self.y_shape)) * x.itemsize
+        self.yb = int(np.prod(self.y_shape)) * storage.host_dtype(io).itemsize
         self.x = int(rt.alloc(max(self.xb, 4)))
         self.w = int(rt.alloc(max(self.wb, 4)))
         self.y = int(rt.alloc(max(self.yb, 4)))
 
-        rt.sync()
-        for ptr, host in ((self.x, x), (self.w, w)):
-            staged = pinned_copy(host)
-            rt.memcpy_h2d(ptr, as_u8_buffer(staged), staged.nbytes)
-            rt.sync()
-            del staged
+        upload_drained(rt, self.x, x)
+        upload_drained(rt, self.w, w)
 
     def read_y(self) -> np.ndarray:
         """y as float32 values of what the pipeline stored."""
-        from rocke.numeric import storage
-        from rocke.runtime.host_buffers import as_u8_buffer, pinned_empty
+        from benchmarks.common.benchmark_winograd_conv import read_back_drained
 
-        self.rt.sync()
-        staged = pinned_empty(self.y_shape, storage.host_dtype(self.io))
-        self.rt.memcpy_d2h(as_u8_buffer(staged), self.y, staged.nbytes)
-        self.rt.sync()
-        return storage.decode(staged, self.io)
+        return read_back_drained(self.rt, self.y, self.y_shape, self.io)
 
     def free(self):
         from rocke.runtime import synchronize_and_release
