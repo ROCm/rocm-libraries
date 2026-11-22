@@ -109,7 +109,7 @@ def test_k_from_hbm_matches_reference(
     o = launch_tiled_one_sequence(
         problem, spec, q, k_cache, v_cache, block_table, scale, dtype
     )
-    o_ref, _has_key = paged_attention_reference(
+    o_ref = paged_attention_reference(
         q, k_cache, v_cache, _SEQ_LEN, block_table[0], scale
     )
 

@@ -55,6 +55,7 @@ from ._attention_paged_reference import (
     decode_half,
     encode_half,
     paged_attention_reference,
+    rows_with_keys,
 )
 
 # The launches compile for the device's own target id, which the builders must
@@ -128,9 +129,10 @@ def _inputs(dtype, q_len, kv_len):
 
 
 def _reference(data, kv_len, top_left, window=_WINDOW):
-    """FP32 O for one sequence, causal + sliding window (0: none); keyless rows give 0."""
+    """FP32 O for one sequence, causal + sliding window (0: none), and which rows
+    see a key; keyless rows give 0."""
     dtype = data["dtype"]
-    return paged_attention_reference(
+    out = paged_attention_reference(
         decode_half(data["q"], dtype),
         decode_half(data["k"], dtype),
         decode_half(data["v"], dtype),
@@ -140,6 +142,8 @@ def _reference(data, kv_len, top_left, window=_WINDOW):
         sliding_window=window,
         top_left=top_left,
     )
+    q_len = data["q"].shape[0]
+    return out, rows_with_keys(q_len, kv_len, sliding_window=window, top_left=top_left)
 
 
 def _run_scalar_2d(problem, data):

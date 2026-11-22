@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+from rocke.numeric.sdpa_reference import sdpa_reference
 
 from ._attention_paged_reference import (
     alibi_score_bias,
@@ -23,6 +24,7 @@ from ._attention_paged_reference import (
     paged_attention_reference,
     qq_score_bias,
     round_to_half,
+    rows_with_keys,
 )
 
 
@@ -101,3 +103,28 @@ def test_paged_reference_applies_softcap_bias_and_sinks_on_the_gathered_keys():
         weights /= weights.sum(-1, keepdims=True) + np.exp(sinks[head])
         want[:, head] = weights @ values[:, head]
     np.testing.assert_allclose(got, want, rtol=1e-6, atol=1e-6)
+
+
+@pytest.mark.parametrize("top_left", [False, True])
+@pytest.mark.parametrize("sliding_window", [0, 1, 3, 40])
+@pytest.mark.parametrize(("q_len", "kv_len"), [(8, 8), (8, 3), (3, 8), (16, 5)])
+def test_rows_with_keys_matches_the_oracle_lse(q_len, kv_len, sliding_window, top_left):
+    rng = np.random.default_rng(0)
+    q = rng.standard_normal((q_len, 2, 4))
+    kv = rng.standard_normal((kv_len, 1, 4))
+    _out, lse = sdpa_reference(
+        q,
+        kv,
+        kv,
+        scale=0.5,
+        left_bound=sliding_window - 1 if sliding_window > 0 else None,
+        right_bound=0,
+        top_left=top_left,
+        q_offsets=[0, q_len],
+        kv_offsets=[0, kv_len],
+    )
+    expected = np.isfinite(lse).any(axis=-1)
+    got = rows_with_keys(
+        q_len, kv_len, sliding_window=sliding_window, top_left=top_left
+    )
+    np.testing.assert_array_equal(got, expected)

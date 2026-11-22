@@ -22,6 +22,7 @@ __all__ = [
     "paged_attention_reference",
     "qq_score_bias",
     "round_to_half",
+    "rows_with_keys",
 ]
 
 
@@ -86,6 +87,22 @@ def qq_score_bias(qq_bias: npt.ArrayLike, q_len: int, kv_len: int) -> np.ndarray
     out = np.zeros((q_len, kv_len))
     out[:, in_range] = qq_bias[:q_len, query_keys[in_range]]
     return out
+
+
+def rows_with_keys(
+    q_len: int, kv_len: int, *, sliding_window: int = 0, top_left: bool = False
+) -> np.ndarray:
+    """Which query rows see at least one key, ``[q_len]`` bool.
+
+    Uses the visibility rule of :func:`paged_attention_reference`: key ``k`` is
+    visible to row ``p`` when ``0 <= k < kv_len``, ``k <= diag`` and, with a
+    ``sliding_window`` above 0, ``diag - k < sliding_window``.
+    """
+    rows = np.arange(q_len)
+    diag = rows if top_left else rows + kv_len - q_len
+    first = np.maximum(0, diag - sliding_window + 1) if sliding_window > 0 else 0
+    last = np.minimum(diag, kv_len - 1)
+    return last >= first
 
 
 def paged_attention_reference(
