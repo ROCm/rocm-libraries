@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import numpy as np
 import numpy.typing as npt
-from rocke.numeric.bf16 import bf16_to_f32, f32_to_bf16
+from rocke.numeric import storage
 from rocke.numeric.sdpa_reference import sdpa_reference
 
 __all__ = [
@@ -43,15 +43,14 @@ def encode_half(values: npt.ArrayLike, dtype: str) -> np.ndarray:
     ``"fp16"``, raw uint16 bit patterns for ``"bf16"``. Any other ``dtype``
     raises ``ValueError``."""
     _require_half_dtype(dtype)
-    values = np.asarray(values, dtype=np.float32)
-    return values.astype(np.float16) if dtype == "fp16" else f32_to_bf16(values)
+    return storage.encode(values, dtype)
 
 
 def decode_half(array: np.ndarray, dtype: str) -> np.ndarray:
     """The float32 values of an ``encode_half`` array. Any ``dtype`` other than
     ``"fp16"`` or ``"bf16"`` raises ``ValueError``."""
     _require_half_dtype(dtype)
-    return array.astype(np.float32) if dtype == "fp16" else bf16_to_f32(array)
+    return storage.decode(array, dtype)
 
 
 def round_to_half(values: npt.ArrayLike, dtype: str) -> np.ndarray:
