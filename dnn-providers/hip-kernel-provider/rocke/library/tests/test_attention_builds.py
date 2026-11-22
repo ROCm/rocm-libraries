@@ -105,82 +105,45 @@ def _compile_or_skip(kernel, *, arch: str):
         require_tools_or_skip(f"comgr toolchain unavailable: {e}")
 
 
-# Two shipped attention kernels are tuned to sit at the VGPR ceiling their
-# occupancy target dictates, and the compiler holds that occupancy by spilling a
-# handful of dwords rather than dropping a resident wave -- the correct trade, not
-# a regression. Erasing the spill would mean either halving occupancy (e.g. the
-# gfx942 tiled-2d kernel wants 354 VGPR unconstrained; forcing scratch==0 drops it
-# to 1 wave/EU) or ~100 VGPR of register-pressure surgery on a perf-tuned kernel
-# -- a bad deal for the 20-40 B of scratch, which costs no *incremental* occupancy
-# once VGPR is already pegged at the ceiling. So these named kernels carry
-# per-kernel budgets; every other kernel keeps the strict defaults (0 scratch, no
-# occupancy floor). The key is the exact kernel name, so if the shipped geometry
-# changes (and with it the name) the budget evaporates and strict checking
-# returns.
-#
-# The two budget axes catch DIFFERENT regressions, and neither subsumes the other
-# -- a kernel is healthy only if both hold:
-#
-#   * ``max_scratch_bytes`` -- how much the kernel may spill. Catches spill GROWTH
-#     at fixed occupancy: a change that balloons register demand while VGPR stays
-#     pegged at the ceiling just spills more (e.g. 40 B -> 400 B) at unchanged
-#     occupancy, so an occupancy check is blind to it; the byte bound is not. Kept
-#     tight enough that a real blow-up (spill into the hundreds) still fails.
-#   * ``min_waves_per_simd`` -- the occupancy the kernel is tuned for. Catches an
-#     occupancy DROP: a change that pushes register or LDS pressure past the point
-#     where the tuned wave count still fits. The scratch bound cannot see this --
-#     spilling is exactly the mechanism that holds occupancy constant -- so it is a
-#     distinct signal. Occupancy is the static multi-limiter estimate
-#     (``benchmark.perf.occupancy.estimate_occupancy_detail``: min over VGPR / AGPR
-#     / LDS / workgroup / wave cap, no GPU). Its VGPR file matches the compiler;
-#     its AGPR, LDS and workgroup limiters are still PROVISIONAL pending rocprofv3
-#     calibration on real hardware, so treat it as a floor, not an exact oracle.
-_KERNEL_RESOURCE_BUDGETS = {
+# Some shipped attention kernels are tuned for a wave count that pins VGPR at the
+# ceiling it dictates. Spill is checked separately: every kernel's scratch budget is
+# 0, except a measured, compiler-keyed allowance in
+# rocke.tests.pending_lanes.MEASURED_BUDGETS (how much a kernel spills at its cap is
+# a property of the toolchain, not of the kernel -- the figure moves between
+# compiler releases while the kernel body does not). What this table adds is the
+# occupancy floor: a change that pushes register or LDS pressure past the point
+# where the tuned wave count still fits. The scratch bound cannot see that --
+# spilling is exactly the mechanism that holds occupancy constant -- so it is a
+# distinct signal. Occupancy is the static multi-limiter estimate
+# (``benchmark.perf.occupancy.estimate_occupancy_detail``: min over VGPR / AGPR /
+# LDS / workgroup / wave cap, no GPU). Its VGPR file matches the compiler; its
+# AGPR, LDS and workgroup limiters are still PROVISIONAL pending rocprofv3
+# calibration on real hardware, so treat it as a floor, not an exact oracle. The
+# key is the exact kernel name, so if the shipped geometry changes (and with it the
+# name) the floor evaporates; ``test_every_declared_budget_was_exercised`` turns
+# that into a red test.
+_MIN_WAVES_PER_SIMD = {
     # gfx950 dense persistent prefill (runtime shape, so no hq/kv/sq/sk tokens): the
     # 512-thread (8-wave) workgroup pins VGPR at the 256 ceiling independent of
-    # waves_per_eu, so the occupancy floor is the live constraint. No
-    # ``max_scratch_bytes``: these take the default 0, the same no-spill gate every
-    # other kernel gets. How much a given toolchain spills is a property of that
-    # toolchain, not of the kernel -- the figure moved between ROCm releases while this
-    # body did not -- so the budget asserts the invariant (no spill) rather than
-    # recording any one compiler's number. Tuned for 2 waves/SIMD (512 VGPR/SIMD // 256).
-    "rocke_attention_dense_d128_bn64_bf16_causal_lazyrs_persist256_bthkvmin": {
-        "min_waves_per_simd": 2,
-    },
-    # LSE retains the same persistent occupancy limit.
-    "rocke_attention_dense_d128_bn64_bf16_causal_lazyrs_lse_persist256_bthkvmin": {
-        "min_waves_per_simd": 2,
-    },
+    # waves_per_eu, so the occupancy floor is the live constraint. Tuned for 2
+    # waves/SIMD (512 VGPR/SIMD // 256). The LSE variant keeps the same limit.
+    "rocke_attention_dense_d128_bn64_bf16_causal_lazyrs_persist256_bthkvmin": 2,
+    "rocke_attention_dense_d128_bn64_bf16_causal_lazyrs_lse_persist256_bthkvmin": 2,
     # gfx942 fp16 D128 tiled-2d (shipped default geometry): 2 waves/EU caps VGPR at
-    # 256; the kernel wants 354, so it spills ~40 B to hold 2-wave occupancy.
-    "rocke_uattn2d_tiled_d128_b64_g4_fp16_w4_wpe2_mw32_mfma32x8_stqk_s1_mask1_hoist_mlim_kvcpall_cfvst_ksring_rd2": {
-        "max_scratch_bytes": 64,
-        "min_waves_per_simd": 2,
-    },
-    # gfx942 fp16 D128 paged prefill: paged V always takes the DMA path (no cfvst),
-    # where the ROCm 7.1 comgr caps VGPR at 256 and spills 28 B; contiguous with
-    # use_cfvst=False spills the same there. ROCm 7.2 and later fit with no scratch.
-    "rocke_attention_dense_d128_hq32_kv8_bn64_fp16_sq8192_sk8192_causal_swa4096_pgd16_nb512_lazyrs_gfx942_b1_wpe2": {
-        "max_scratch_bytes": 32,
-        "min_waves_per_simd": 2,
-    },
-    # gfx942 D128 paged prefill at the smaller BN=32 tile (wpe2, window skip): tuned
-    # for 2 waves/SIMD, as the wpe2 entry above. Its scratch budget is a measured,
-    # compiler-keyed allowance in rocke.tests.pending_lanes.MEASURED_BUDGETS.
-    "rocke_attention_dense_d128_hq16_kv4_bn32_fp16_bm128_sq1024_sk1024_causal_swa256_pgd16_nb128_lazyrs_gfx942_b1_wpe2_wskip": {
-        "min_waves_per_simd": 2,
-    },
-    "rocke_attention_dense_d128_hq16_kv4_bn32_bf16_bm128_sq1024_sk1024_causal_swa256_pgd16_nb128_lazyrs_gfx942_b1_wpe2_wskip": {
-        "min_waves_per_simd": 2,
-    },
+    # 256.
+    "rocke_uattn2d_tiled_d128_b64_g4_fp16_w4_wpe2_mw32_mfma32x8_stqk_s1_mask1_hoist_mlim_kvcpall_cfvst_ksring_rd2": 2,
+    # gfx942 fp16 D128 paged prefill at the BN=64 tile (wpe2).
+    "rocke_attention_dense_d128_hq32_kv8_bn64_fp16_sq8192_sk8192_causal_swa4096_pgd16_nb512_lazyrs_gfx942_b1_wpe2": 2,
+    # gfx942 D128 paged prefill at the smaller BN=32 tile (wpe2, window skip).
+    "rocke_attention_dense_d128_hq16_kv4_bn32_fp16_bm128_sq1024_sk1024_causal_swa256_pgd16_nb128_lazyrs_gfx942_b1_wpe2_wskip": 2,
+    "rocke_attention_dense_d128_hq16_kv4_bn32_bf16_bm128_sq1024_sk1024_causal_swa256_pgd16_nb128_lazyrs_gfx942_b1_wpe2_wskip": 2,
 }
 
-# Every kernel_name ``_assert_resources_fit`` is handed, so a budget whose key no
-# longer matches any built kernel (name drift from a re-tuned selector) becomes a
-# red test rather than a silently-orphaned entry -- see
-# ``test_every_declared_budget_was_exercised``. The scratch bound already fails
-# loud on drift (its default is 0); the occupancy floor defaults to no check, so
-# without this a renamed kernel would just stop being floored.
+# Every kernel_name ``_assert_resources_fit`` is handed, so a floor or measured
+# allowance whose key no longer matches any built kernel (name drift from a
+# re-tuned selector) becomes a red test rather than a silently-orphaned entry --
+# see ``test_every_declared_budget_was_exercised``. Without it a renamed kernel
+# would just stop being floored.
 _SEEN_KERNEL_NAMES: set = set()
 
 # This file's path in rocke.tests.pending_lanes.MEASURED_BUDGETS.
@@ -200,13 +163,13 @@ def _assert_resources_fit(art, *, arch: str, kernel_name: str = ""):
     - **Register (VGPR) over-subscription** -- the compiler does NOT fail; it
       *spills to scratch* and the kernel still compiles, then runs at reduced
       occupancy with scratch traffic. A pass/fail compile check is blind to this,
-      so we assert ``scratch_bytes`` stays within its no-spill budget (0 for all
-      but a few occupancy-bound shipped kernels; see
-      ``_KERNEL_RESOURCE_BUDGETS``).
+      so we assert ``scratch_bytes`` stays within its budget: 0, unless the
+      kernel has a measured allowance on the loaded compiler in
+      ``rocke.tests.pending_lanes.MEASURED_BUDGETS``.
     - **Occupancy drop** -- a change can push register/LDS pressure past the point
       where the kernel's tuned wave count still fits; the scratch bound cannot see
-      this (spilling holds occupancy constant), so for kernels with a declared
-      ``min_waves_per_simd`` we also assert the static multi-limiter occupancy stays
+      this (spilling holds occupancy constant), so for kernels in
+      ``_MIN_WAVES_PER_SIMD`` we also assert the static multi-limiter occupancy stays
       at or above that floor.
 
     Resource fields come from ``group_segment_fixed_size`` /
@@ -238,18 +201,13 @@ def _assert_resources_fit(art, *, arch: str, kernel_name: str = ""):
         f"{name} LDS {lds} B exceeds {arch} cap {cap} B (over by {lds - cap} B) "
         f"-- comgr codegen rejection at larger tiles / seq"
     )
-    budgets = _KERNEL_RESOURCE_BUDGETS.get(kernel_name, {})
     # Register overflow does not fail the compile -- it spills. Scratch use above
-    # the kernel's budget (0 unless it is a known occupancy-bound kernel, or has a
-    # measured allowance on the loaded compiler) is a register-budget regression,
-    # so treat it as a failure.
+    # the kernel's budget (0 unless it has a measured allowance on the loaded
+    # compiler) is a register-budget regression, so treat it as a failure.
     scratch = res.scratch_bytes
     if scratch is not None:
-        max_scratch = budgets.get(
-            "max_scratch_bytes",
-            measured_scratch_allowance(
-                _MEASURED_BUDGETS_PATH, kernel_name, loaded_compiler_info()
-            ),
+        max_scratch = measured_scratch_allowance(
+            _MEASURED_BUDGETS_PATH, kernel_name, loaded_compiler_info()
         )
         assert scratch <= max_scratch, (
             f"{name} spills {scratch} B to scratch on {arch} (VGPR {res.vgpr_count}), "
@@ -259,7 +217,7 @@ def _assert_resources_fit(art, *, arch: str, kernel_name: str = ""):
     # Occupancy floor: for kernels tuned to a known wave count, assert the static
     # multi-limiter occupancy has not fallen below it. Complementary to the scratch
     # bound above -- catches an occupancy drop the byte count cannot see.
-    min_waves = budgets.get("min_waves_per_simd")
+    min_waves = _MIN_WAVES_PER_SIMD.get(kernel_name)
     if min_waves is not None:
         from rocke.benchmark.perf.occupancy import estimate_occupancy_detail
 
@@ -6512,9 +6470,9 @@ def test_every_declared_budget_was_exercised():
     """A budget key that matches no built kernel (name drift from a re-tuned
     selector -- these names carry tokens like wpe2 / persist256 / ksring that get
     re-tuned) would silently drop that kernel's occupancy floor. Turn it into a red
-    test: every ``_KERNEL_RESOURCE_BUDGETS`` key and every kernel this file has a
-    measured budget for must have been handed to ``_assert_resources_fit`` by some
-    test in this run. A kernel takes its scratch budget from one place only.
+    test: every ``_MIN_WAVES_PER_SIMD`` key and every kernel this file has a
+    measured scratch allowance for must have been handed to
+    ``_assert_resources_fit`` by some test in this run.
 
     Skips under a partial selection (``pytest -k``) that builds none of the
     budgeted kernels, so the check is meaningful on a full-file / CI run without
@@ -6522,13 +6480,7 @@ def test_every_declared_budget_was_exercised():
     if not _SEEN_KERNEL_NAMES:
         pytest.skip("no budgeted kernels built in this selection")
     measured = measured_budget_kernels(_MEASURED_BUDGETS_PATH)
-    twice = sorted(
-        name
-        for name, budget in _KERNEL_RESOURCE_BUDGETS.items()
-        if name in measured and "max_scratch_bytes" in budget
-    )
-    assert not twice, f"scratch budget declared twice (here and measured): {twice}"
-    orphaned = (set(_KERNEL_RESOURCE_BUDGETS) | measured) - _SEEN_KERNEL_NAMES
+    orphaned = (set(_MIN_WAVES_PER_SIMD) | measured) - _SEEN_KERNEL_NAMES
     assert (
         not orphaned
     ), f"budget declared for kernels never built (name drift?): {sorted(orphaned)}"

@@ -548,6 +548,7 @@ PENDING: tuple[PendingTest, ...] = (
 
 _ATTENTION_BUILDS = "library/tests/test_attention_builds.py"
 _GDN_DECODE_FUSED = "library/tests/test_gdn_decode_fused.py"
+_COMPILER_20 = "ROCm 7.1 (AMD clang 20.0.0git, roc-7.1.0 25425)"
 _COMPILER_24 = "AMD clang 24.0.0git (llvm-project 424729dba653)"
 _SPILL_RETUNE_OWNER = "kernel owners; issue: none filed yet"
 _SPILL_RETUNE_EXPIRES = "2026-12-31"
@@ -572,6 +573,28 @@ def _measured(
 
 
 MEASURED_BUDGETS: tuple[MeasuredBudget, ...] = (
+    *_measured(
+        _ATTENTION_BUILDS,
+        20,
+        "gfx942 fp16 D128 tiled-2d, the shipped default geometry (wpe2): "
+        f"{_COMPILER_20} caps VGPR at 256 for its 2-wave tuning and spills this "
+        f"many bytes; {_COMPILER_24} compiles it with no scratch",
+        (
+            "rocke_uattn2d_tiled_d128_b64_g4_fp16_w4_wpe2_mw32_mfma32x8_stqk_s1_mask1_hoist_mlim_kvcpall_cfvst_ksring_rd2",
+            44,
+        ),
+    ),
+    *_measured(
+        _ATTENTION_BUILDS,
+        20,
+        "gfx942 fp16 D128 paged prefill at the BN=64 tile (wpe2; paged V takes the "
+        f"DMA path): {_COMPILER_20} caps VGPR at 256 and spills this many bytes; "
+        f"{_COMPILER_24} compiles it with no scratch",
+        (
+            "rocke_attention_dense_d128_hq32_kv8_bn64_fp16_sq8192_sk8192_causal_swa4096_pgd16_nb512_lazyrs_gfx942_b1_wpe2",
+            28,
+        ),
+    ),
     *_measured(
         _ATTENTION_BUILDS,
         24,
