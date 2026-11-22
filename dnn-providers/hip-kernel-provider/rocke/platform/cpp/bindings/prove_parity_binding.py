@@ -1752,16 +1752,8 @@ def _selector_parity_row(problem_dict, arch):
         )
 
     # --- Compare specs ---
-    # use_fp8_mfma_qk requires _fp8_qk_loader_fits which is not yet ported to C++;
-    # exclude it from comparison for fp8 problems until the predicate is ported.
-    skip_fields = set()
-    if problem_dict.get("use_fp8", False):
-        skip_fields.add("use_fp8_mfma_qk")
-
     mismatches = []
     for key in sorted(py_spec):
-        if key in skip_fields:
-            continue
         pv = py_spec.get(key)
         cv = cpp_spec.get(key)
         if pv != cv:
