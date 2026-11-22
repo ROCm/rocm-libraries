@@ -227,21 +227,16 @@ TEST(TestKernelCatalogSource, AGeometryTooLargeToBenchmarkIsCountedApartFromOneT
     // separately.
     const auto metadata = shippedSdpa();
 
-    const ProblemPoint point{{"batch", int64_t{1}},
-                             {"heads", int64_t{8}},
-                             {"heads_kv", int64_t{8}},
-                             {"seqlen_q", int64_t{512}},
-                             {"seqlen_k", int64_t{512}},
-                             {"head_dim", int64_t{64}},
-                             {"is_causal", true},
-                             // Built directly; a pack gets this from `kernel_catalog.constants`.
-                             {"alignment", std::string("top_left")},
-                             {"generate_stats", false},
-                             {"form", std::string("plain")},
-                             {"layout", std::string("bshd")},
-                             {"scale", std::string("inv_sqrt_d")},
-                             {"window", std::string("none")},
-                             {"dtype", std::string("bf16")}};
+    // Built directly; a pack gets its categoricals from `kernel_catalog.constants`.
+    const auto point = test::withDefaultCategoricals(metadata,
+                                                     ProblemPoint{{"batch", int64_t{1}},
+                                                                  {"heads", int64_t{8}},
+                                                                  {"heads_kv", int64_t{8}},
+                                                                  {"seqlen_q", int64_t{512}},
+                                                                  {"seqlen_k", int64_t{512}},
+                                                                  {"head_dim", int64_t{64}},
+                                                                  {"is_causal", true},
+                                                                  {"dtype", std::string("bf16")}});
     const auto built = buildAdmissible(metadata, point);
     ASSERT_TRUE(built.has_value());
     const auto footprint = graphBytes(*built);

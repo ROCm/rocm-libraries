@@ -1,6 +1,7 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
+#include <hipdnn_corpus_gen/OperationMetadata.hpp>
 #include <hipdnn_corpus_gen/PoolAssembly.hpp>
 
 #include <gtest/gtest.h>
@@ -287,6 +288,166 @@ TEST(TestPoolAssembly, ACutKeepsTheProportionOfStrataThatWeightedCombinationsGav
     const std::map<std::string, int64_t> expected{
         {"layout=a,|", 30}, {"layout=b,|", 15}, {"layout=c,|", 15}};
     EXPECT_EQ(perStratum, expected);
+}
+
+namespace
+{
+
+/// @p count entries of one group and weight, in the strata `<group>|r0`, `<group>|r1`.
+void addGroup(std::vector<PoolEntry>& pool, const std::string& group, double weight, int64_t count)
+{
+    for(int64_t i = 0; i < count; ++i)
+    {
+        auto entry = entryAt("sweep", static_cast<int64_t>(pool.size()), "");
+        entry.group = group;
+        entry.weight = weight;
+        entry.stratum = group + "|r" + std::to_string(i % 2);
+        pool.push_back(entry);
+    }
+}
+
+std::map<std::string, int64_t> groupCounts(const std::vector<PoolEntry>& entries)
+{
+    std::map<std::string, int64_t> counts;
+    for(const auto& entry : entries)
+    {
+        ++counts[entry.group];
+    }
+    return counts;
+}
+
+} // namespace
+
+TEST(TestPoolAssembly, ACutHoldsEachWeightedGroupAtItsWeightNotAtWhatThePoolHoldsOfIt)
+{
+    // The pool holds five times as much of group a as of b, and a cut of 40 takes 20 of each
+    // when they weigh the same, and 30 and 10 when a weighs three times b, whatever the pool
+    // holds.
+    std::vector<PoolEntry> pool;
+    addGroup(pool, "a", 1.0, 200);
+    addGroup(pool, "b", 1.0, 40);
+    std::map<std::string, int64_t> allocation;
+    auto selected = select({{"sweep", pool}}, 40, defaultShares(), allocation);
+    EXPECT_EQ(groupCounts(selected), (std::map<std::string, int64_t>{{"a", 20}, {"b", 20}}));
+
+    for(auto& entry : pool)
+    {
+        entry.weight = entry.group == "a" ? 3.0 : 1.0;
+    }
+    selected = select({{"sweep", pool}}, 40, defaultShares(), allocation);
+    EXPECT_EQ(groupCounts(selected), (std::map<std::string, int64_t>{{"a", 30}, {"b", 10}}));
+}
+
+TEST(TestPoolAssembly, AWeightedGroupThatRunsOutHandsItsShareToTheOthers)
+{
+    std::vector<PoolEntry> pool;
+    addGroup(pool, "a", 1.0, 200);
+    addGroup(pool, "b", 1.0, 6);
+    std::map<std::string, int64_t> allocation;
+    const auto selected = select({{"sweep", pool}}, 40, defaultShares(), allocation);
+    EXPECT_EQ(groupCounts(selected), (std::map<std::string, int64_t>{{"a", 34}, {"b", 6}}));
+}
+
+TEST(TestPoolAssembly, ACutTooShortForEveryWeightedGroupToHaveAMemberStillSpreadsThemByWeight)
+{
+    // 20 groups weigh 2.5 and 20 weigh 1; a cut of 15 expects about 4 members from the light
+    // ones. Rounding each group to nearest would give every one of the 15 to the heavy groups,
+    // the lighter combinations never getting a turn.
+    std::vector<PoolEntry> pool;
+    for(int64_t group = 0; group < 40; ++group)
+    {
+        addGroup(pool, "g" + std::to_string(group), group < 20 ? 2.5 : 1.0, 10);
+    }
+    std::map<std::string, int64_t> allocation;
+    const auto selected = select({{"sweep", pool}}, 15, defaultShares(), allocation);
+
+    int64_t light = 0;
+    for(const auto& entry : selected)
+    {
+        light += entry.weight < 2.0 ? 1 : 0;
+    }
+    EXPECT_GE(light, 2);
+    EXPECT_LE(light, 7);
+}
+
+TEST(TestPoolAssembly, WithinAWeightedGroupTheStrataKeepTheirMembersMix)
+{
+    std::vector<PoolEntry> pool;
+    addGroup(pool, "a", 1.0, 40);
+    for(int64_t i = 0; i < 10; ++i)
+    {
+        // A third stratum holding a quarter of group a.
+        auto entry = entryAt("sweep", 100 + i, "");
+        entry.group = "a";
+        entry.weight = 1.0;
+        entry.stratum = "a|rare";
+        pool.push_back(entry);
+    }
+    std::map<std::string, int64_t> allocation;
+    const auto selected = select({{"sweep", pool}}, 20, defaultShares(), allocation);
+
+    std::map<std::string, int64_t> perStratum;
+    for(const auto& entry : selected)
+    {
+        ++perStratum[entry.stratum];
+    }
+    EXPECT_EQ(perStratum,
+              (std::map<std::string, int64_t>{{"a|r0", 8}, {"a|r1", 8}, {"a|rare", 4}}));
+}
+
+TEST(TestPoolAssembly, TheGroupsOfAGeneratedPoolWeighTheirCombinationsAtTheDeclaredShares)
+{
+    // `layout` is weighted 3:1 and `form` is not; form z is declared only with layout a, so a
+    // plain product of weights would leave it a smaller share than x and y.
+    const auto load = parseOperationMetadata(nlohmann::json::parse(R"({
+      "schema_version": "1.0",
+      "operation": "toy",
+      "parameters": {
+        "M":      { "type": "int64" },
+        "layout": { "type": "enum", "values": ["a", "b"], "weights": {"a": 3, "b": 1} },
+        "form":   { "type": "enum", "values": ["x", "y", "z"] }
+      },
+      "stratification_axis": "working_set",
+      "regimes": {},
+      "graph_builder": { "function": "createValidMatmulGraph", "source": "x.hpp",
+                         "arguments": [] },
+      "constraints": [ { "or": [ { "==": ["$q.form", "x"] }, { "==": ["$q.form", "y"] },
+                                 { "==": ["$q.layout", "a"] } ] } ]
+    })"));
+    ASSERT_TRUE(load.ok()) << (load.errors.empty() ? "" : load.errors.front());
+
+    std::vector<PoolEntry> pool;
+    for(const auto* layout : {"a", "b"})
+    {
+        for(const auto* form : {"x", "y", "z"})
+        {
+            if(std::string(layout) == "b" && std::string(form) == "z")
+            {
+                continue;
+            }
+            auto entry = entryAt("sweep", static_cast<int64_t>(pool.size()), "");
+            entry.point["layout"] = std::string(layout);
+            entry.point["form"] = std::string(form);
+            pool.push_back(entry);
+        }
+    }
+    weighGroups(pool, *load.metadata);
+
+    std::map<std::string, double> perValue;
+    double total = 0.0;
+    for(const auto& entry : pool)
+    {
+        EXPECT_FALSE(entry.group.empty());
+        perValue["layout=" + std::get<std::string>(entry.point.at("layout"))] += entry.weight;
+        perValue["form=" + std::get<std::string>(entry.point.at("form"))] += entry.weight;
+        total += entry.weight;
+    }
+    EXPECT_NEAR(perValue.at("layout=a") / total, 0.75, 1e-6);
+    EXPECT_NEAR(perValue.at("layout=b") / total, 0.25, 1e-6);
+    for(const auto* form : {"x", "y", "z"})
+    {
+        EXPECT_NEAR(perValue.at(std::string("form=") + form) / total, 1.0 / 3.0, 1e-6) << form;
+    }
 }
 
 TEST(TestPoolAssembly, ARegimeQuotaIsFilledBeforeTheProportionalCut)

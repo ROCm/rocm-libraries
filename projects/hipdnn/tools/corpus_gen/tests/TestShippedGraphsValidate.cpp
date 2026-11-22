@@ -18,8 +18,11 @@
 #include <nlohmann/json.hpp>
 
 #include "OperationsDir.hpp"
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
+#include <map>
+#include <random>
 #include <string>
 #include <vector>
 
@@ -131,12 +134,39 @@ TEST(TestShippedGraphsValidate, EverySdpaFormLayoutScaleWindowAndSequenceRelatio
 {
     // The sweep above draws a couple of points per combination; these are the corners the SDPA
     // facets add: cross attention (seqlen_q > seqlen_k, non-causal), the widest head, fp32, every
-    // form, layout, scale and window the declaration admits together.
+    // form, layout, scale and window the declaration declares, together. A declaration that
+    // excludes every point of one of them certifies nothing about it, so each declared value, and
+    // cross attention, must have validated at least one graph.
     for(const std::string operation : {"sdpa_fwd", "sdpa_bwd"})
     {
         const auto metadata = test::shippedOperation(operation);
         const auto* form = metadata.find("form");
         ASSERT_NE(form, nullptr) << operation;
+        const auto* layouts = metadata.find("layout");
+        const auto* scales = metadata.find("scale");
+        const auto* windowParameter = metadata.find("window");
+        ASSERT_NE(layouts, nullptr) << operation;
+        ASSERT_NE(scales, nullptr) << operation;
+        // The values below are the ones this certifies; one dropped from the declaration is a
+        // facet it would silently stop covering.
+        const std::map<std::string, std::vector<std::string>> certified{
+            {"layout", {"bshd", "bhsd", "kv_bhsd"}},
+            {"scale", {"inv_sqrt_d", "unit", "jitter"}},
+            {"window", {"none", "local_128", "local_1024", "local_4096"}}};
+        for(const auto& [name, values] : certified)
+        {
+            const auto* parameter = metadata.find(name);
+            if(parameter == nullptr)
+            {
+                continue; // the backward declares no window
+            }
+            for(const auto& value : values)
+            {
+                EXPECT_NE(std::find(parameter->values.begin(), parameter->values.end(), value),
+                          parameter->values.end())
+                    << operation << " does not declare " << name << " " << value;
+            }
+        }
 
         struct Shape
         {
@@ -145,43 +175,63 @@ TEST(TestShippedGraphsValidate, EverySdpaFormLayoutScaleWindowAndSequenceRelatio
             int64_t headDim;
             bool causal;
         };
-        const std::vector<Shape> shapes{{4096, 77, 40, false},
-                                        {1024, 1024, 512, true},
-                                        {1, 4096, 128, true},
-                                        {197, 197, 8, false}};
+        std::vector<Shape> shapes{{4096, 77, 40, false},
+                                  {1024, 1024, 512, true},
+                                  {1, 4096, 128, true},
+                                  {197, 197, 8, false}};
+        // The declared cross attention archetype, drawn once, is a shape too.
+        const auto crossAttention = std::find_if(
+            metadata.archetypes.begin(), metadata.archetypes.end(), [](const Archetype& archetype) {
+                return archetype.name == "cross_attention";
+            });
+        if(operation == "sdpa_fwd")
+        {
+            ASSERT_TRUE(crossAttention != metadata.archetypes.end()) << operation;
+        }
+        if(crossAttention != metadata.archetypes.end())
+        {
+            std::mt19937_64 rng(7);
+            const auto drawn = detail::drawFromArchetype(
+                metadata, *crossAttention, test::withDefaultCategoricals(metadata, {}), rng);
+            ASSERT_TRUE(drawn.has_value()) << operation;
+            shapes.push_back({std::get<int64_t>(drawn->at("seqlen_q")),
+                              std::get<int64_t>(drawn->at("seqlen_k")),
+                              std::get<int64_t>(drawn->at("head_dim")),
+                              std::get<bool>(drawn->at("is_causal"))});
+        }
+        // The backward declares no window: one pass with the parameter left out.
         const std::vector<std::string> windows
-            = operation == "sdpa_fwd" ? std::vector<std::string>{"none", "local_128", "local_4096"}
-                                      : std::vector<std::string>{"none"};
+            = windowParameter != nullptr ? windowParameter->values : std::vector<std::string>{""};
         int64_t validated = 0;
+        std::map<std::string, int64_t> validatedFor;
         for(const auto& shape : shapes)
         {
             for(const auto& formValue : form->values)
             {
-                for(const std::string layout : {"bshd", "bhsd", "kv_bhsd"})
+                for(const auto& layout : layouts->values)
                 {
-                    for(const std::string scale : {"inv_sqrt_d", "unit", "jitter"})
+                    for(const auto& scale : scales->values)
                     {
                         for(const std::string dtype : {"fp16", "fp32"})
                         {
                             for(const auto& window : windows)
                             {
-                                ProblemPoint point{{"batch", int64_t{2}},
+                                ProblemPoint given{{"batch", int64_t{2}},
                                                    {"heads", int64_t{8}},
                                                    {"heads_kv", int64_t{2}},
                                                    {"seqlen_q", shape.seqlenQ},
                                                    {"seqlen_k", shape.seqlenK},
                                                    {"head_dim", shape.headDim},
                                                    {"is_causal", shape.causal},
-                                                   {"alignment", std::string("top_left")},
                                                    {"dtype", dtype},
                                                    {"form", formValue},
                                                    {"layout", layout},
                                                    {"scale", scale}};
-                                if(operation == "sdpa_fwd")
+                                if(windowParameter != nullptr)
                                 {
-                                    point["generate_stats"] = false;
-                                    point["window"] = window;
+                                    given["window"] = window;
                                 }
+                                const auto point = test::withDefaultCategoricals(metadata, given);
                                 const std::string where = operation + " " + detail::describe(point);
                                 if(!detail::satisfiesConstraints(metadata, point))
                                 {
@@ -192,6 +242,14 @@ TEST(TestShippedGraphsValidate, EverySdpaFormLayoutScaleWindowAndSequenceRelatio
                                     continue;
                                 }
                                 ++validated;
+                                ++validatedFor["form=" + formValue];
+                                ++validatedFor["layout=" + layout];
+                                ++validatedFor["scale=" + scale];
+                                ++validatedFor["window=" + window];
+                                if(shape.seqlenQ > shape.seqlenK)
+                                {
+                                    ++validatedFor["cross attention"];
+                                }
                                 const auto built = buildGraphFor(metadata, point);
                                 ASSERT_TRUE(built.ok()) << where << ": " << built.error;
                                 hipdnn_frontend::graph::Graph graph;
@@ -208,6 +266,20 @@ TEST(TestShippedGraphsValidate, EverySdpaFormLayoutScaleWindowAndSequenceRelatio
             }
         }
         EXPECT_GT(validated, 0) << operation << " certified nothing";
+        EXPECT_GT(validatedFor["cross attention"], 0)
+            << operation << " certified no cross attention";
+        for(const auto* parameter : {form, layouts, scales, windowParameter})
+        {
+            if(parameter == nullptr)
+            {
+                continue;
+            }
+            for(const auto& value : parameter->values)
+            {
+                EXPECT_GT(validatedFor[parameter->name + "=" + value], 0)
+                    << operation << " certified no " << parameter->name << " " << value;
+            }
+        }
     }
 }
 

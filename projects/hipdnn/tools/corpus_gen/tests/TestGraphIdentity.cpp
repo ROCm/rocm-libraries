@@ -31,20 +31,15 @@ std::vector<uint8_t> someGraph()
 {
     const auto metadata = test::shippedOperation("sdpa_fwd");
 
-    const ProblemPoint point{{"batch", int64_t{1}},
-                             {"heads", int64_t{32}},
-                             {"heads_kv", int64_t{32}},
-                             {"seqlen_q", int64_t{2048}},
-                             {"seqlen_k", int64_t{2048}},
-                             {"head_dim", int64_t{128}},
-                             {"is_causal", true},
-                             {"alignment", std::string("top_left")},
-                             {"generate_stats", false},
-                             {"form", std::string("plain")},
-                             {"layout", std::string("bshd")},
-                             {"scale", std::string("inv_sqrt_d")},
-                             {"window", std::string("none")},
-                             {"dtype", std::string("bf16")}};
+    const auto point = test::withDefaultCategoricals(metadata,
+                                                     ProblemPoint{{"batch", int64_t{1}},
+                                                                  {"heads", int64_t{32}},
+                                                                  {"heads_kv", int64_t{32}},
+                                                                  {"seqlen_q", int64_t{2048}},
+                                                                  {"seqlen_k", int64_t{2048}},
+                                                                  {"head_dim", int64_t{128}},
+                                                                  {"is_causal", true},
+                                                                  {"dtype", std::string("bf16")}});
 
     const auto built = buildGraphFor(metadata, point);
     EXPECT_TRUE(built.ok()) << built.error;
@@ -145,20 +140,15 @@ TEST(TestGraphIdentity, DifferentGraphsGetDifferentContentKeys)
     const auto original = stampGraphIdentity(other, "a_graph");
     // Another shape through the same declaration.
     const auto metadata = test::shippedOperation("sdpa_fwd");
-    const ProblemPoint point{{"batch", int64_t{2}},
-                             {"heads", int64_t{32}},
-                             {"heads_kv", int64_t{32}},
-                             {"seqlen_q", int64_t{2048}},
-                             {"seqlen_k", int64_t{2048}},
-                             {"head_dim", int64_t{128}},
-                             {"is_causal", true},
-                             {"alignment", std::string("top_left")},
-                             {"generate_stats", false},
-                             {"form", std::string("plain")},
-                             {"layout", std::string("bshd")},
-                             {"scale", std::string("inv_sqrt_d")},
-                             {"window", std::string("none")},
-                             {"dtype", std::string("bf16")}};
+    const auto point = test::withDefaultCategoricals(metadata,
+                                                     ProblemPoint{{"batch", int64_t{2}},
+                                                                  {"heads", int64_t{32}},
+                                                                  {"heads_kv", int64_t{32}},
+                                                                  {"seqlen_q", int64_t{2048}},
+                                                                  {"seqlen_k", int64_t{2048}},
+                                                                  {"head_dim", int64_t{128}},
+                                                                  {"is_causal", true},
+                                                                  {"dtype", std::string("bf16")}});
     const auto built = buildGraphFor(metadata, point);
     ASSERT_TRUE(built.ok()) << built.error;
     EXPECT_NE(stampGraphIdentity(built.bytes, "a_graph").key, original.key);
@@ -180,20 +170,16 @@ TEST(TestGraphIdentity, TheDefaultFacetsKeepTheContentKeyOfTheGraphBeforeTheyExi
                                    bool causal,
                                    const std::string& dtype,
                                    bool stats) {
-        const ProblemPoint point{{"batch", batch},
-                                 {"heads", heads},
-                                 {"heads_kv", headsKv},
-                                 {"seqlen_q", seqlenQ},
-                                 {"seqlen_k", seqlenK},
-                                 {"head_dim", headDim},
-                                 {"is_causal", causal},
-                                 {"alignment", std::string("top_left")},
-                                 {"generate_stats", stats},
-                                 {"form", std::string("plain")},
-                                 {"layout", std::string("bshd")},
-                                 {"scale", std::string("inv_sqrt_d")},
-                                 {"window", std::string("none")},
-                                 {"dtype", dtype}};
+        const auto point = test::withDefaultCategoricals(metadata,
+                                                         ProblemPoint{{"batch", batch},
+                                                                      {"heads", heads},
+                                                                      {"heads_kv", headsKv},
+                                                                      {"seqlen_q", seqlenQ},
+                                                                      {"seqlen_k", seqlenK},
+                                                                      {"head_dim", headDim},
+                                                                      {"is_causal", causal},
+                                                                      {"generate_stats", stats},
+                                                                      {"dtype", dtype}});
         const auto built = buildGraphFor(metadata, point);
         EXPECT_TRUE(built.ok()) << built.error;
         return stampGraphIdentity(built.bytes, "a_graph").key;

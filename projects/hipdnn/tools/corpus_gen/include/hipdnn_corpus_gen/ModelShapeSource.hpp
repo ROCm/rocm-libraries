@@ -100,8 +100,8 @@ inline std::vector<std::string> csvFields(const std::string& line)
 /// Every declared parameter must be present and readable; a partial point is refused rather
 /// than defaulted, since a default would pass off an unrecorded shape as recorded. The one
 /// exception is a parameter the file has no column for at all and the operation lists under
-/// `model_shape_defaults`: the file predates the parameter (`layout`, added after the shape
-/// files existed), and the listed value is the operation's own meaning of a source without it.
+/// `model_shape_defaults` (`layout`, say): the listed value is the operation's own meaning of a
+/// source without it.
 /// Pack constants are not consulted: they answer for kernels, not for recorded workloads, and
 /// `alignment` or `generate_stats` left out of a file must not become a recorded decode shape.
 /// A column that exists but is empty on a row is still a refusal. Each parameter filled this way

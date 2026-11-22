@@ -383,13 +383,7 @@ struct ScratchDirectory
 std::vector<uint8_t> builtSdpaGraph(int64_t seqlenQ)
 {
     const auto metadata = test::shippedOperation("sdpa_fwd");
-    auto point = sdpaPoint(seqlenQ, 4096);
-    point["alignment"] = std::string("top_left");
-    point["generate_stats"] = false;
-    point["form"] = std::string("plain");
-    point["layout"] = std::string("bshd");
-    point["scale"] = std::string("inv_sqrt_d");
-    point["window"] = std::string("none");
+    const auto point = test::withDefaultCategoricals(metadata, sdpaPoint(seqlenQ, 4096));
     const auto built = buildGraphFor(metadata, point);
     EXPECT_TRUE(built.ok()) << built.error;
     return built.bytes;

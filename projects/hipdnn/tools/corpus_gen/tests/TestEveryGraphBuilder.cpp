@@ -395,22 +395,20 @@ constexpr int64_t SEQLEN_Q = 16;
 constexpr int64_t SEQLEN_K = 32;
 constexpr int64_t HEAD_DIM = 64;
 
-ProblemPoint formPoint(const std::string& form, bool stats = true)
+ProblemPoint
+    formPoint(const OperationMetadata& metadata, const std::string& form, bool stats = true)
 {
-    return ProblemPoint{{"batch", BATCH},
-                        {"heads", HEADS},
-                        {"heads_kv", HEADS_KV},
-                        {"seqlen_q", SEQLEN_Q},
-                        {"seqlen_k", SEQLEN_K},
-                        {"head_dim", HEAD_DIM},
-                        {"is_causal", true},
-                        {"alignment", std::string("top_left")},
-                        {"generate_stats", stats},
-                        {"dtype", std::string("fp16")},
-                        {"layout", std::string("bshd")},
-                        {"scale", std::string("inv_sqrt_d")},
-                        {"window", std::string("none")},
-                        {"form", form}};
+    return test::withDefaultCategoricals(metadata,
+                                         ProblemPoint{{"batch", BATCH},
+                                                      {"heads", HEADS},
+                                                      {"heads_kv", HEADS_KV},
+                                                      {"seqlen_q", SEQLEN_Q},
+                                                      {"seqlen_k", SEQLEN_K},
+                                                      {"head_dim", HEAD_DIM},
+                                                      {"is_causal", true},
+                                                      {"generate_stats", stats},
+                                                      {"dtype", std::string("fp16")},
+                                                      {"form", form}});
 }
 
 /// What an SDPA node binds, as the generated `node_operands::visit` reports it for either
@@ -522,7 +520,7 @@ std::vector<int64_t> dimsOf(const fb::TensorAttributes* tensor)
 
 BuildResult buildForm(const OperationMetadata& metadata, const std::string& form, bool stats = true)
 {
-    return buildGraphFor(metadata, formPoint(form, stats));
+    return buildGraphFor(metadata, formPoint(metadata, form, stats));
 }
 
 } // namespace

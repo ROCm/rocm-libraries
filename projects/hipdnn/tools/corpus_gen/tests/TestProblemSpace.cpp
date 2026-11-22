@@ -696,18 +696,24 @@ TEST(TestProblemSpace, AnchorScalingNeverShrinksTheFixedQuotasAndNeedsATarget)
     }
 }
 
-TEST(TestProblemSpace, AnchorScalingSharesTheTargetOverTheCombinationsThatCanHoldAProblem)
+namespace
 {
-    // Layout c is empty by the declaration, so the corpus is split over layouts a and b: each
-    // gets half of the target, not a third, and the quotas sum to the target.
-    const auto metadata = metadataFor(R"({
+
+/// Each combination's result of an anchor-scaled run toward 120 problems over a declaration
+/// whose `layout` c is empty, with the values of `layout` weighted or not.
+std::vector<CombinationResult> anchorScaledOverAnEmptyLayout(bool weighted)
+{
+    const auto metadata = metadataFor(std::string(R"({
       "schema_version": "1.0",
       "operation": "toy",
       "parameters": {
         "M":      { "type": "int64" },
         "N":      { "type": "int64" },
-        "layout": { "type": "enum", "values": ["a", "b", "c"],
-                    "weights": {"a": 1, "b": 1, "c": 1} }
+        "layout": { "type": "enum", "values": ["a", "b", "c"])")
+                                      + (weighted ? R"(,
+                    "weights": {"a": 1, "b": 1, "c": 1})"
+                                                  : "")
+                                      + R"( }
       },
       "stratification_axis": "working_set",
       "regimes": {},
@@ -731,10 +737,13 @@ TEST(TestProblemSpace, AnchorScalingSharesTheTargetOverTheCombinationsThatCanHol
     request.anchorScaling = true;
     request.seed = 8;
 
-    const auto corpus = exploreProblemSpace(metadata, request, ACCEPT_EVERYTHING);
+    return exploreProblemSpace(metadata, request, ACCEPT_EVERYTHING).combinations;
+}
 
+void expectTheTargetSharedOverTheLiveCombinations(const std::vector<CombinationResult>& result)
+{
     int64_t fromArchetypes = 0;
-    for(const auto& combination : corpus.combinations)
+    for(const auto& combination : result)
     {
         if(!combination.problems.empty())
         {
@@ -744,6 +753,22 @@ TEST(TestProblemSpace, AnchorScalingSharesTheTargetOverTheCombinationsThatCanHol
         fromArchetypes += combination.fromArchetypes;
     }
     EXPECT_EQ(fromArchetypes, 30);
+}
+
+} // namespace
+
+TEST(TestProblemSpace, AnchorScalingSharesTheTargetOverTheCombinationsThatCanHoldAProblem)
+{
+    // Layout c is empty by the declaration, so the corpus is split over layouts a and b: each
+    // gets half of the target, not a third, and the quotas sum to the target.
+    expectTheTargetSharedOverTheLiveCombinations(anchorScaledOverAnEmptyLayout(true));
+}
+
+TEST(TestProblemSpace, AnchorScalingSharesTheTargetOverTheLiveCombinationsOfAnUnweightedDeclaration)
+{
+    // The same split when no value is weighted: a combination the declaration empties is not
+    // counted among those the target is divided over.
+    expectTheTargetSharedOverTheLiveCombinations(anchorScaledOverAnEmptyLayout(false));
 }
 
 TEST(TestProblemSpace, EveryShippedSdpaCombinationIsExploredAndNoDeclaredValueIsDropped)
@@ -811,33 +836,10 @@ TEST(TestProblemSpace, EveryShippedSdpaCombinationIsExploredAndNoDeclaredValueIs
     }
 }
 
-namespace
-{
-
-/// The facets a narrow `--keep` names on the shipped forward: one value of each of form, layout,
-/// scale, window and dtype, which leaves is_causal x alignment x generate_stats (8 combinations,
-/// 6 of them able to hold a problem) of the 6912.
-std::vector<KeepClause> narrowSdpaFwdKeeps()
-{
-    return {{"form", "plain"},
-            {"layout", "bshd"},
-            {"scale", "inv_sqrt_d"},
-            {"window", "none"},
-            {"dtype", "fp16"}};
-}
-
-/// What the tool's search admits for a keep: only the points the clauses keep.
-ProblemOracle admitsOnlyWhatKeepKeeps(const std::vector<KeepClause>& keep)
-{
-    return [&keep](const ProblemPoint& point) { return keeps(keep, point); };
-}
-
-} // namespace
-
 TEST(TestProblemSpace, AKeepOnACategoricalAxisNarrowsTheCombinationsBeforeTheBoundApplies)
 {
     const auto metadata = test::shippedOperation("sdpa_fwd");
-    const auto narrow = narrowSdpaFwdKeeps();
+    const auto narrow = test::narrowSdpaFwdKeeps();
 
     size_t total = 0;
     auto combinations = detail::categoricalCombinations(
@@ -876,15 +878,16 @@ TEST(TestProblemSpace, EveryCombinationAShippedSdpaKeepAdmitsProducesProblemsPas
     // 16 problems from one combination of the 6 that can hold one.
     const auto metadata = test::shippedOperation("sdpa_fwd");
     ExplorationRequest request;
-    request.keep = narrowSdpaFwdKeeps();
+    request.keep = test::narrowSdpaFwdKeeps();
     request.pointsPerCombination = 8;
     request.budgetPerCombination = 2000;
 
     const auto corpus
-        = exploreProblemSpace(metadata, request, admitsOnlyWhatKeepKeeps(request.keep));
+        = exploreProblemSpace(metadata, request, test::admitsOnlyWhatKeepKeeps(request.keep));
 
     EXPECT_EQ(corpus.categoricalTotal, 8U);
     EXPECT_EQ(corpus.categoricalNotExplored, 0U);
+    EXPECT_EQ(corpus.categoricalConstraintEmpty, 2U) << "counted though the product fits the bound";
     size_t live = 0;
     std::set<bool> causal;
     for(const auto& combination : corpus.combinations)
@@ -904,7 +907,7 @@ TEST(TestProblemSpace, EveryCombinationAShippedSdpaKeepAdmitsProducesProblemsPas
     // Narrowing by one more clause keeps exploring what is left rather than going empty.
     request.keep.push_back({"is_causal", "true"});
     const auto causalOnly
-        = exploreProblemSpace(metadata, request, admitsOnlyWhatKeepKeeps(request.keep));
+        = exploreProblemSpace(metadata, request, test::admitsOnlyWhatKeepKeeps(request.keep));
     EXPECT_EQ(causalOnly.categoricalTotal, 4U);
     EXPECT_GE(causalOnly.problems().size(), 4U * 4U);
     size_t withProblems = 0;
@@ -929,27 +932,106 @@ TEST(TestProblemSpace, AKeepEveryDeclaredConstraintEmptiesExploresNothingRatherT
     request.maxCombinations = 4;
 
     const auto corpus
-        = exploreProblemSpace(metadata, request, admitsOnlyWhatKeepKeeps(request.keep));
+        = exploreProblemSpace(metadata, request, test::admitsOnlyWhatKeepKeeps(request.keep));
 
     EXPECT_TRUE(corpus.problems().empty());
     EXPECT_EQ(corpus.categoricalTotal, 288U);
+    EXPECT_EQ(corpus.categoricalConstraintEmpty, 288U);
+    EXPECT_EQ(corpus.categoricalNotExplored, 0U) << "none was left out: none could hold a problem";
+    ASSERT_FALSE(corpus.skippedCombinations.empty());
+    EXPECT_NE(corpus.skippedCombinations.front().find("empty under the declared constraints"),
+              std::string::npos)
+        << corpus.skippedCombinations.front();
 }
 
 TEST(TestProblemSpace, TheCombinationsTheBoundLeavesOutAreCountedAgainstTheKeptProduct)
 {
+    // The product is 8 and 2 of them are empty by the declaration, so the 4 the bound allows are
+    // taken from the 6 that can hold a problem and 2 of those are left out.
     const auto metadata = test::shippedOperation("sdpa_fwd");
     ExplorationRequest request;
-    request.keep = narrowSdpaFwdKeeps();
+    request.keep = test::narrowSdpaFwdKeeps();
     request.maxCombinations = 4;
     request.pointsPerCombination = 2;
     request.budgetPerCombination = 500;
 
     const auto corpus
-        = exploreProblemSpace(metadata, request, admitsOnlyWhatKeepKeeps(request.keep));
+        = exploreProblemSpace(metadata, request, test::admitsOnlyWhatKeepKeeps(request.keep));
 
     EXPECT_EQ(corpus.categoricalTotal, 8U) << "the keep's product, not the declared 6912";
-    EXPECT_GT(corpus.categoricalNotExplored, 0U);
-    EXPECT_EQ(corpus.categoricalTotal - corpus.categoricalNotExplored, corpus.combinations.size());
+    EXPECT_EQ(corpus.categoricalConstraintEmpty, 2U);
+    EXPECT_EQ(corpus.categoricalNotExplored, 2U)
+        << "the combinations the constraints empty were never candidates";
+    ASSERT_FALSE(corpus.skippedCombinations.empty());
+    EXPECT_NE(corpus.skippedCombinations.front().find("2 of 6"), std::string::npos)
+        << corpus.skippedCombinations.front();
+}
+
+TEST(TestProblemSpace, TheConstraintEmptyCombinationsAreCountedOverTheWholeProductPastTheBound)
+{
+    // The sample stops once it holds 1024 combinations that can hold a problem; the count of
+    // those that cannot covers the product the walk did not reach too.
+    const auto metadata = test::shippedOperation("sdpa_fwd");
+    const auto live = [&metadata](const ProblemPoint& combination) {
+        return !detail::excludedByCategoricals(metadata, combination);
+    };
+    size_t total = 0;
+    const auto everything = detail::categoricalCombinations(metadata.parameters, 0, total);
+    const auto empty = static_cast<size_t>(
+        std::count_if(everything.begin(), everything.end(), [&](const ProblemPoint& combination) {
+            return !live(combination);
+        }));
+    ASSERT_GT(empty, 0U);
+
+    size_t sampledTotal = 0;
+    size_t counted = 0;
+    const auto sampled = detail::categoricalCombinations(metadata.parameters,
+                                                         ExplorationRequest{}.maxCombinations,
+                                                         sampledTotal,
+                                                         live,
+                                                         {},
+                                                         &counted);
+    EXPECT_EQ(sampled.size(), ExplorationRequest{}.maxCombinations);
+    EXPECT_EQ(counted, empty);
+
+    size_t underTheBound = 0;
+    detail::categoricalCombinations(
+        metadata.parameters, 0, sampledTotal, live, test::narrowSdpaFwdKeeps(), &underTheBound);
+    EXPECT_EQ(underTheBound, 2U);
+
+    ExplorationRequest request;
+    request.pointsPerCombination = 1;
+    request.budgetPerCombination = 50;
+    request.probeBudget = 25;
+    const auto corpus
+        = exploreProblemSpace(metadata, request, [](const ProblemPoint&) { return false; });
+    EXPECT_EQ(corpus.categoricalTotal, total);
+    EXPECT_EQ(corpus.categoricalConstraintEmpty, empty);
+    EXPECT_EQ(corpus.categoricalNotExplored, total - empty - corpus.combinations.size())
+        << "the combinations that can hold a problem and the bound left out";
+}
+
+TEST(TestProblemSpace, ACombinationTheConstraintsEmptyHasNoSizeWhetherOrNotAnythingIsWeighted)
+{
+    const auto metadata = metadataFor(R"({
+      "schema_version": "1.0",
+      "operation": "toy",
+      "parameters": {
+        "M":      { "type": "int64" },
+        "layout": { "type": "enum", "values": ["a", "b", "c"] }
+      },
+      "stratification_axis": "working_set",
+      "regimes": {},
+      "graph_builder": { "function": "createValidMatmulGraph", "source": "x.hpp",
+                         "arguments": [] },
+      "constraints": [ { "!=": ["$q.layout", "c"] } ]
+    })");
+    size_t total = 0;
+    const auto combinations = detail::categoricalCombinations(metadata.parameters, 0, total);
+    ASSERT_EQ(combinations.size(), 3U);
+
+    EXPECT_EQ(detail::combinationSizes(metadata, combinations),
+              (std::vector<double>{1.0, 1.0, 0.0}));
 }
 
 /// The shipped attention declarations, whose constraints the forward and the backward share.
@@ -985,15 +1067,13 @@ TEST_P(TestShippedSdpaConstraints, KeepOnlyProblemsThatAreDistinctAndHaveKeys)
                            {"is_causal", c.causal},
                            {"alignment", c.alignment},
                            {"dtype", std::string("fp16")},
-                           {"form", std::string("plain")},
-                           {"layout", c.layout},
-                           {"scale", std::string("inv_sqrt_d")}};
+                           {"layout", c.layout}};
         if(forward)
         {
-            point["generate_stats"] = false;
             point["window"] = c.window;
         }
-        return detail::satisfiesConstraints(metadata, point);
+        return detail::satisfiesConstraints(metadata,
+                                            test::withDefaultCategoricals(metadata, point));
     };
 
     // Cross attention is bidirectional; a causal mask needs seqlen_q <= seqlen_k.
@@ -1041,6 +1121,7 @@ TEST(TestProblemSpace, TheShippedSdpaFacetInteractionsRefuseWhatIsDegenerateAndA
         bool causal = false;
     };
     const auto admitsFor = [](const std::string& operation, const Candidate& c) {
+        const auto metadata = test::shippedOperation(operation);
         ProblemPoint point{{"batch", int64_t{2}},
                            {"heads", int64_t{8}},
                            {"heads_kv", int64_t{2}},
@@ -1048,17 +1129,16 @@ TEST(TestProblemSpace, TheShippedSdpaFacetInteractionsRefuseWhatIsDegenerateAndA
                            {"seqlen_k", c.seqlenK},
                            {"head_dim", int64_t{64}},
                            {"is_causal", c.causal},
-                           {"alignment", std::string("top_left")},
                            {"dtype", std::string("fp16")},
                            {"form", c.form},
                            {"layout", c.layout},
                            {"scale", c.scale}};
         if(operation == "sdpa_fwd")
         {
-            point["generate_stats"] = false;
             point["window"] = c.window;
         }
-        return detail::satisfiesConstraints(test::shippedOperation(operation), point);
+        return detail::satisfiesConstraints(metadata,
+                                            test::withDefaultCategoricals(metadata, point));
     };
 
     for(const std::string operation : {"sdpa_fwd", "sdpa_bwd"})
@@ -1229,14 +1309,14 @@ TEST(TestProblemSpace, EqualWeightsAreNoWeightsInTheSharesAndTheFirstPassIsTheUn
         }
         else
         {
-            // Growing splits the need exactly (largest remainder) where the unweighted search
-            // rounds each share up, so the points differ.
+            // Growing splits the need exactly (as apportion splits it) where the unweighted
+            // search rounds each share up, so the points differ.
             EXPECT_GE(equal.problems().size(), static_cast<size_t>(target));
         }
     }
 }
 
-TEST(TestProblemSpace, ApportionSplitsByLargestRemainderAndSumsExactly)
+TEST(TestProblemSpace, ApportionSplitsBySystematicSamplingAndSumsExactly)
 {
     // 5 exactly for the heavy part; the two equal ones split the other 5 as 3 and 2, and which
     // gets the odd one is the tie-break's, not a fixed position.
@@ -1282,15 +1362,15 @@ TEST(TestProblemSpace, AWeightedValueKeepsItsShareAtASmallPointsPerCombination)
 {
     // 0.75 of two points rounds to two, and 1.5 of two to three: a per-combination rounding
     // (and a per-combination ceiling when growing) puts every small value above its weight.
-    // The split of the whole first pass (2 points for each of the two dtypes) by largest
-    // remainder lands exactly on 2:1:1, and no combination is owed a point to spoil it.
+    // The split of the whole first pass (2 points for each of the two dtypes) by apportion
+    // lands exactly on 2:1:1, and no combination is owed a point to spoil it.
     ExplorationRequest request;
     request.pointsPerCombination = 2;
     request.seed = 14;
     const auto corpus
         = exploreProblemSpace(weightedToy(R"(, "weights": {"a": 2})"), request, ACCEPT_EVERYTHING);
-    // Exact for the heavy value; the two equal light ones split what is left, and a tie in the
-    // remainders goes to the earlier, so one of them may hold a point more than the other.
+    // Exact for the heavy value; the two equal light ones split what is left, so one of them
+    // may hold a point more than the other.
     EXPECT_NEAR(shareOf(corpus, "layout", "a"), 0.5, 0.01);
     EXPECT_NEAR(shareOf(corpus, "layout", "b") + shareOf(corpus, "layout", "c"), 0.5, 0.01);
 
@@ -1309,11 +1389,7 @@ TEST(TestProblemSpace, SizesAreRakedOverTheCombinationsThatCanHoldAProblem)
     // the form does not state (scale_unset, scale_tensor) other than inv_sqrt_d, and a ragged
     // form over a layout that is not token-major. The raking has to hold all three weighted
     // facets (layout, scale, window) at once over what is left. The form is not weighted.
-    std::ifstream file(hipdnn_corpus_gen::test::operationsDir() + "/sdpa_fwd.opmeta.json");
-    ASSERT_TRUE(file.good());
-    const auto parsed = parseOperationMetadata(nlohmann::json::parse(file));
-    ASSERT_TRUE(parsed.ok());
-    const auto& metadata = *parsed.metadata;
+    const auto metadata = test::shippedOperation("sdpa_fwd");
 
     size_t total = 0;
     const auto combinations = detail::categoricalCombinations(metadata.parameters, 0, total);

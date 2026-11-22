@@ -112,19 +112,10 @@ TEST(TestWorkloadSampling, EveryShippedSdpaArchetypeDrawsWhateverOrderItsKeysPar
     {
         const auto metadata = test::shippedOperation(operation);
         ASSERT_FALSE(metadata.archetypes.empty()) << operation;
-        ProblemPoint categorical{{"alignment", std::string{"top_left"}},
-                                 {"dtype", std::string{"bf16"}},
-                                 {"layout", std::string{"bshd"}},
-                                 {"scale", std::string{"inv_sqrt_d"}}};
-        if(metadata.find("window") != nullptr)
-        {
-            categorical["window"] = std::string{"none"};
-        }
-        if(metadata.find("generate_stats") != nullptr)
-        {
-            categorical["generate_stats"] = false;
-        }
-        categorical["form"] = std::string{"plain"};
+        auto categorical
+            = test::withDefaultCategoricals(metadata, ProblemPoint{{"dtype", std::string{"bf16"}}});
+        // The archetypes say whether their mask is causal.
+        categorical.erase("is_causal");
 
         std::mt19937_64 rng(4);
         for(const auto& archetype : metadata.archetypes)

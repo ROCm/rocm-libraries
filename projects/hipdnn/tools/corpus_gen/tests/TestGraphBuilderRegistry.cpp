@@ -941,20 +941,15 @@ TEST(TestGraphBuilderRegistry, TheShippedSdpaMetadataBuildsGraphsTheEnginesAccep
     ASSERT_TRUE(parsed.ok()) << (parsed.errors.empty() ? "" : parsed.errors.front());
 
     // GQA and Sq != Sk, so a wrong head count or sequence length in a stride shows.
-    const ProblemPoint point{{"batch", int64_t{2}},
-                             {"heads", int64_t{8}},
-                             {"heads_kv", int64_t{2}},
-                             {"seqlen_q", int64_t{16}},
-                             {"seqlen_k", int64_t{32}},
-                             {"head_dim", int64_t{64}},
-                             {"is_causal", false},
-                             {"alignment", std::string("top_left")},
-                             {"generate_stats", false},
-                             {"form", std::string("plain")},
-                             {"layout", std::string("bshd")},
-                             {"scale", std::string("inv_sqrt_d")},
-                             {"window", std::string("none")},
-                             {"dtype", std::string("fp16")}};
+    const auto point = test::withDefaultCategoricals(*parsed.metadata,
+                                                     ProblemPoint{{"batch", int64_t{2}},
+                                                                  {"heads", int64_t{8}},
+                                                                  {"heads_kv", int64_t{2}},
+                                                                  {"seqlen_q", int64_t{16}},
+                                                                  {"seqlen_k", int64_t{32}},
+                                                                  {"head_dim", int64_t{64}},
+                                                                  {"is_causal", false},
+                                                                  {"dtype", std::string("fp16")}});
     const auto built = buildGraphFor(*parsed.metadata, point);
     ASSERT_TRUE(built.ok()) << built.error;
     const auto* graph = asGraph(built.bytes);
@@ -1009,20 +1004,17 @@ TEST(TestGraphBuilderRegistry, ACausalSdpaGraphSaysCausalWithBoundsNotTheDepreca
             {"top_left", DiagonalAlignment::TOP_LEFT},
             {"bottom_right", DiagonalAlignment::BOTTOM_RIGHT}})
     {
-        const ProblemPoint point{{"batch", int64_t{1}},
-                                 {"heads", int64_t{8}},
-                                 {"heads_kv", int64_t{8}},
-                                 {"seqlen_q", int64_t{16}},
-                                 {"seqlen_k", int64_t{32}},
-                                 {"head_dim", int64_t{128}},
-                                 {"is_causal", true},
-                                 {"alignment", anchor},
-                                 {"generate_stats", false},
-                                 {"form", std::string("plain")},
-                                 {"layout", std::string("bshd")},
-                                 {"scale", std::string("inv_sqrt_d")},
-                                 {"window", std::string("none")},
-                                 {"dtype", std::string("bf16")}};
+        const auto point
+            = test::withDefaultCategoricals(*parsed.metadata,
+                                            ProblemPoint{{"batch", int64_t{1}},
+                                                         {"heads", int64_t{8}},
+                                                         {"heads_kv", int64_t{8}},
+                                                         {"seqlen_q", int64_t{16}},
+                                                         {"seqlen_k", int64_t{32}},
+                                                         {"head_dim", int64_t{128}},
+                                                         {"is_causal", true},
+                                                         {"alignment", anchor},
+                                                         {"dtype", std::string("bf16")}});
         const auto built = buildGraphFor(*parsed.metadata, point);
         ASSERT_TRUE(built.ok()) << anchor << ": " << built.error;
         const auto* attributes
@@ -1073,20 +1065,16 @@ TEST(TestGraphBuilderRegistry, TheTrainingForwardWritesTheStatisticsItPromises)
     const auto parsed = parseOperationMetadata(nlohmann::json::parse(file));
     ASSERT_TRUE(parsed.ok()) << (parsed.errors.empty() ? "" : parsed.errors.front());
 
-    const ProblemPoint point{{"batch", int64_t{2}},
-                             {"heads", int64_t{8}},
-                             {"heads_kv", int64_t{8}},
-                             {"seqlen_q", int64_t{64}},
-                             {"seqlen_k", int64_t{64}},
-                             {"head_dim", int64_t{128}},
-                             {"is_causal", false},
-                             {"alignment", std::string("top_left")},
-                             {"generate_stats", true},
-                             {"form", std::string("plain")},
-                             {"layout", std::string("bshd")},
-                             {"scale", std::string("inv_sqrt_d")},
-                             {"window", std::string("none")},
-                             {"dtype", std::string("bf16")}};
+    const auto point = test::withDefaultCategoricals(*parsed.metadata,
+                                                     ProblemPoint{{"batch", int64_t{2}},
+                                                                  {"heads", int64_t{8}},
+                                                                  {"heads_kv", int64_t{8}},
+                                                                  {"seqlen_q", int64_t{64}},
+                                                                  {"seqlen_k", int64_t{64}},
+                                                                  {"head_dim", int64_t{128}},
+                                                                  {"is_causal", false},
+                                                                  {"generate_stats", true},
+                                                                  {"dtype", std::string("bf16")}});
     const auto built = buildGraphFor(*parsed.metadata, point);
     ASSERT_TRUE(built.ok()) << built.error;
     const auto* graph = asGraph(built.bytes);
@@ -1229,26 +1217,18 @@ namespace
 {
 
 /// GQA with seqlen_q != seqlen_k, so a wrong head count or sequence length in any stride shows.
-ProblemPoint attentionPoint(const std::string& operation, const std::string& layout)
+ProblemPoint attentionPoint(const OperationMetadata& metadata, const std::string& layout)
 {
-    ProblemPoint point{{"batch", int64_t{2}},
-                       {"heads", int64_t{8}},
-                       {"heads_kv", int64_t{2}},
-                       {"seqlen_q", int64_t{16}},
-                       {"seqlen_k", int64_t{32}},
-                       {"head_dim", int64_t{64}},
-                       {"is_causal", false},
-                       {"alignment", std::string("top_left")},
-                       {"dtype", std::string("fp16")},
-                       {"form", std::string("plain")},
-                       {"layout", layout},
-                       {"scale", std::string("inv_sqrt_d")}};
-    if(operation == "sdpa_fwd")
-    {
-        point["generate_stats"] = false;
-        point["window"] = std::string("none");
-    }
-    return point;
+    return test::withDefaultCategoricals(metadata,
+                                         ProblemPoint{{"batch", int64_t{2}},
+                                                      {"heads", int64_t{8}},
+                                                      {"heads_kv", int64_t{2}},
+                                                      {"seqlen_q", int64_t{16}},
+                                                      {"seqlen_k", int64_t{32}},
+                                                      {"head_dim", int64_t{64}},
+                                                      {"is_causal", false},
+                                                      {"dtype", std::string("fp16")},
+                                                      {"layout", layout}});
 }
 
 std::map<std::string, std::vector<int64_t>> stridesByName(const GraphBytes& bytes)
@@ -1323,7 +1303,7 @@ TEST(TestGraphBuilderRegistry, EverySdpaLayoutStridesEachOperandAsItIsNamed)
 
         for(const auto& layout : layouts)
         {
-            const auto built = buildGraphFor(metadata, attentionPoint(operation, layout.name));
+            const auto built = buildGraphFor(metadata, attentionPoint(metadata, layout.name));
             ASSERT_TRUE(built.ok()) << operation << " " << layout.name << ": " << built.error;
             const auto strides = stridesByName(built.bytes);
             for(const auto& name : queryTensors)
@@ -1355,7 +1335,7 @@ TEST(TestGraphBuilderRegistry, EverySdpaScaleWritesTheAttributeItNames)
                                                                          {"jitter", 37, 0.2125F}};
         for(const auto& [scale, seqlenK, expected] : cases)
         {
-            auto point = attentionPoint(operation, "bshd");
+            auto point = attentionPoint(metadata, "bshd");
             point["scale"] = scale;
             point["seqlen_k"] = seqlenK;
             const auto built = buildGraphFor(metadata, point);
@@ -1389,7 +1369,7 @@ TEST(TestGraphBuilderRegistry, JitterIsNeverTheStandardScaleAndSpreadsOverTheSha
         std::set<float> residues;
         for(int64_t seqlenK = 32; seqlenK < 32 + 13; ++seqlenK)
         {
-            auto point = attentionPoint(operation, "bshd");
+            auto point = attentionPoint(metadata, "bshd");
             point["seqlen_k"] = seqlenK;
             const auto jitter = scaleFor(point, "jitter");
             EXPECT_NE(jitter, scaleFor(point, "inv_sqrt_d"))
@@ -1409,16 +1389,11 @@ TEST(TestGraphBuilderRegistry, JitterIsNeverTheStandardScaleAndSpreadsOverTheSha
         {
             for(int i = 0; i < 40; ++i)
             {
-                ProblemPoint categorical{{"alignment", std::string("top_left")},
-                                         {"dtype", std::string("fp16")},
-                                         {"form", std::string("plain")},
-                                         {"layout", std::string("bshd")}};
-                if(operation == "sdpa_fwd")
-                {
-                    categorical["generate_stats"] = false;
-                    categorical["window"] = std::string("none");
-                }
-                categorical["scale"] = std::string("jitter");
+                auto categorical = test::withDefaultCategoricals(
+                    metadata,
+                    ProblemPoint{{"dtype", std::string("fp16")}, {"scale", std::string("jitter")}});
+                // The archetypes say whether their mask is causal.
+                categorical.erase("is_causal");
                 const auto drawn = detail::drawFromArchetype(metadata, archetype, categorical, rng);
                 if(!drawn.has_value())
                 {
@@ -1442,7 +1417,7 @@ TEST(TestGraphBuilderRegistry, ASlidingWindowWritesItsLeftBoundAndNoWindowWrites
         {"none", std::nullopt}, {"local_128", 128}, {"local_1024", 1024}, {"local_4096", 4096}};
     for(const auto& [window, expected] : cases)
     {
-        auto point = attentionPoint("sdpa_fwd", "bshd");
+        auto point = attentionPoint(metadata, "bshd");
         point["is_causal"] = true;
         point["seqlen_k"] = int64_t{16};
         point["window"] = window;
@@ -1467,7 +1442,7 @@ TEST(TestGraphBuilderRegistry, SingleFloatIsADeclaredSdpaDtypeAndBuildsFloatOper
                   dtype->values.end())
             << operation << " does not declare fp32";
 
-        auto point = attentionPoint(operation, "bshd");
+        auto point = attentionPoint(metadata, "bshd");
         point["dtype"] = std::string("fp32");
         const auto built = buildGraphFor(metadata, point);
         ASSERT_TRUE(built.ok()) << operation << ": " << built.error;

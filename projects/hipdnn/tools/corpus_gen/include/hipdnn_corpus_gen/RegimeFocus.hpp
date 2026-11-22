@@ -379,7 +379,11 @@ struct RegimeSearchResult
 {
     std::vector<ProblemPoint> problems;
 
-    /// Every combination searched stopped because growing found no new point in the regime.
+    /// The regime is shown to hold no more problems than were found: the focus enumerated every
+    /// candidate, every combination's categorical values leave it empty, or the declared
+    /// constraints refuse every proposal in it. A search that only stopped, because a probe
+    /// found nothing or doubling its budget added nothing, shows nothing of an engine or a
+    /// region a walk reaches rarely, and leaves this false: the regime was not reached.
     bool saturated = false;
 
     /// A combination stopped at the budget limit while still finding points. More exist.
@@ -422,8 +426,9 @@ inline std::string focusedLabel(const OperationMetadata& metadata,
 /// @p held.
 ///
 /// Walks the parameters the focus leaves free, seeded by @p anchors (served points in any
-/// regime) projected onto them. Grows like `exploreProblemSpace`, stopping saturated or at the
-/// growth limit; the two are reported apart.
+/// regime) projected onto them. Grows like `exploreProblemSpace`, stopping at the growth limit
+/// or, short of the want, saturated only with a proof (RegimeSearchResult::saturated); the two
+/// are reported apart.
 inline RegimeSearchResult exploreRegime(const OperationMetadata& metadata,
                                         const RegimeFocus& focus,
                                         const ExplorationRequest& request,
@@ -566,6 +571,9 @@ inline RegimeSearchResult exploreRegime(const OperationMetadata& metadata,
         int64_t cells = 0;
         int64_t reached = 0;
         bool saturated = false;
+        /// The categorical values leave the lane empty (excludedByCategoricals): it holds
+        /// nothing, which a search that merely stopped does not show.
+        bool excluded = false;
         bool capped = false;
         /// Probed already; the weighted search probes a lane when it first has a share to grow.
         bool probed = false;
@@ -686,11 +694,12 @@ inline RegimeSearchResult exploreRegime(const OperationMetadata& metadata,
     };
 
     // Unweighted, every lane is probed up front and the need is split evenly. Weighted (864 lanes
-    // for SDPA), the need is split by combination size over every open lane, by largest
-    // remainder (ties broken by a seeded hash, not by position), and only a lane that receives
-    // a share is probed and run: at most `need` lanes, however many are declared, and a share
-    // each way that keeps the realised share of every value at its weight. A lane that declines
-    // hands its share back, and the next round splits what is still missing.
+    // for SDPA), the need is split by combination size over every open lane, as apportion
+    // splits it (the rounded-up units drawn in the order of a seeded hash, not by position), and
+    // only a lane that receives a share is probed and run: at most `need` lanes, however many
+    // are declared, and a share each way that keeps the realised share of every value at its
+    // weight. A lane that declines hands its share back, and the next round splits what is still
+    // missing.
     const bool weighted = detail::anyWeighted(metadata.parameters);
     const auto sizes = detail::combinationSizes(metadata, served);
     // The regime is part of the key seed: otherwise every regime draws its lanes in the same
@@ -707,8 +716,9 @@ inline RegimeSearchResult exploreRegime(const OperationMetadata& metadata,
         tieKeys[i] = detail::tieKey(request.seed ^ labelHash, i);
         // A lane its categorical values leave empty is never tried, and is not an untried lane
         // a saturated regime could be hiding.
-        if(weighted && sizes[i] <= 0.0)
+        if(sizes[i] <= 0.0)
         {
+            lanes[i].excluded = true;
             lanes[i].saturated = true;
         }
     }
@@ -716,7 +726,10 @@ inline RegimeSearchResult exploreRegime(const OperationMetadata& metadata,
     {
         for(auto& lane : lanes)
         {
-            probe(lane);
+            if(!lane.saturated)
+            {
+                probe(lane);
+            }
         }
     }
 
@@ -742,17 +755,7 @@ inline RegimeSearchResult exploreRegime(const OperationMetadata& metadata,
         {
             break;
         }
-        std::vector<int64_t> shares(open.size());
-        if(weighted)
-        {
-            shares = detail::apportion(need, openSizes, openKeys);
-        }
-        else
-        {
-            shares.assign(open.size(),
-                          (need + static_cast<int64_t>(open.size()) - 1)
-                              / static_cast<int64_t>(open.size()));
-        }
+        const auto shares = detail::splitNeed(need, weighted, openSizes, openKeys);
         for(size_t slot = 0; slot < open.size(); ++slot)
         {
             auto* lane = open[slot];
@@ -824,8 +827,13 @@ inline RegimeSearchResult exploreRegime(const OperationMetadata& metadata,
             }
         }
     }
+    // Short of the want, saturated only on a proof: no lane can hold anything, or the declared
+    // constraints refuse every proposal in the regime. A lane whose search stopped is no proof.
+    const bool shown
+        = std::all_of(lanes.begin(), lanes.end(), [](const Lane& lane) { return lane.excluded; })
+          || (outcome.inRegime > 0 && outcome.admissible == 0);
     outcome.saturated
-        = static_cast<int64_t>(outcome.problems.size()) < wanted && !outcome.searchCapped;
+        = static_cast<int64_t>(outcome.problems.size()) < wanted && !outcome.searchCapped && shown;
     return outcome;
 }
 

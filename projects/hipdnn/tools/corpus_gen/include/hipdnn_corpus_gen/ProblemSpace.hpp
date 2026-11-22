@@ -158,9 +158,13 @@ struct ProblemCorpus
     std::vector<std::string> skippedCombinations;
 
     /// The categorical combinations the declaration holds (the product of each enum's and bool's
-    /// values the request's `keep` clauses admit), and how many of them
-    /// ExplorationRequest::maxCombinations left unexplored.
+    /// values the request's `keep` clauses admit), how many of them the declared constraints
+    /// leave unable to hold a problem (see detail::excludedByCategoricals), and how many of
+    /// the rest ExplorationRequest::maxCombinations left unexplored: the combinations that
+    /// could hold a problem and were not sampled. Without a bound that binds, none is left
+    /// unexplored; constraint-empty ones are counted either way.
     size_t categoricalTotal = 0;
+    size_t categoricalConstraintEmpty = 0;
     size_t categoricalNotExplored = 0;
 
     /// Candidates a declared constraint refused and admitted. An over-strong constraint empties
@@ -194,6 +198,23 @@ struct ProblemCorpus
         return anchored;
     }
 
+    /// Every problem drawn from archetypes or their neighbourhood, over every combination.
+    std::vector<ProblemPoint> anchoredPoints() const
+    {
+        std::vector<ProblemPoint> anchored;
+        for(const auto& combination : combinations)
+        {
+            const auto count
+                = static_cast<size_t>(combination.fromArchetypes + combination.fromNeighbourhood);
+            anchored.insert(
+                anchored.end(),
+                combination.problems.begin(),
+                combination.problems.begin()
+                    + static_cast<std::ptrdiff_t>(std::min(count, combination.problems.size())));
+        }
+        return anchored;
+    }
+
     /// Anchored problems over every problem found, 0 for an empty corpus: the mixture the
     /// corpus actually realised, as against the one the declaration asks for.
     double anchoredShare() const
@@ -220,6 +241,10 @@ namespace detail
 /// excludedByCategoricals): only those are sampled, so the limit is spent on combinations that
 /// count. Declaration order keeps the result reproducible.
 ///
+/// @p constraintEmpty, when given, receives how many combinations of the admitted product @p
+/// live refuses, counted over the whole product and not only the part the sample walks: past
+/// the limit the walk goes on counting after the sample is full.
+///
 /// @p keep narrows each axis to the values it admits (admitsValue) before anything is counted,
 /// so the limit and the per-value cover are spent on combinations the caller can keep rather
 /// than on a sample the caller then discards.
@@ -228,8 +253,13 @@ inline std::vector<ProblemPoint>
                             size_t limit,
                             size_t& total,
                             const std::function<bool(const ProblemPoint&)>& live = {},
-                            const std::vector<KeepClause>& keep = {})
+                            const std::vector<KeepClause>& keep = {},
+                            size_t* constraintEmpty = nullptr)
 {
+    if(constraintEmpty != nullptr)
+    {
+        *constraintEmpty = 0;
+    }
     std::vector<std::pair<std::string, std::vector<ParameterValue>>> axes;
     total = 1;
     for(const auto& parameter : parameters)
@@ -275,6 +305,10 @@ inline std::vector<ProblemPoint>
         for(size_t index = 0; index < total; ++index)
         {
             combinations.push_back(at(index));
+            if(constraintEmpty != nullptr && live && !live(combinations.back()))
+            {
+                ++*constraintEmpty;
+            }
         }
         return combinations;
     }
@@ -297,6 +331,7 @@ inline std::vector<ProblemPoint>
     combinations.reserve(limit);
     size_t visited = 0;
     size_t cursor = 0;
+    size_t empty = 0;
     for(; visited < total && combinations.size() < limit; ++visited, cursor = next(cursor))
     {
         auto point = at(cursor);
@@ -304,6 +339,19 @@ inline std::vector<ProblemPoint>
         {
             combinations.push_back(std::move(point));
         }
+        else
+        {
+            ++empty;
+        }
+    }
+    if(constraintEmpty != nullptr)
+    {
+        auto ahead = cursor;
+        for(size_t step = visited; step < total; ++step, ahead = next(ahead))
+        {
+            empty += counts(at(ahead)) ? 0 : 1;
+        }
+        *constraintEmpty = empty;
     }
     // A value the sample missed gets the next combination of the walk that holds it, if any
     // can; failing that, the first combination with the value swapped in.
@@ -397,24 +445,26 @@ inline bool excludedByCategoricals(const OperationMetadata& metadata,
 }
 
 /// How large each of @p combinations is relative to the average over those that can hold a
-/// problem: 1 for every combination when nothing is weighted, else sized so that each weighted
-/// parameter's values hold their declared weights' shares of the whole.
+/// problem: 1 for every combination that can when nothing is weighted, else sized so that each
+/// weighted parameter's values hold their declared weights' shares of the whole.
 ///
-/// A combination its categorical values make empty (excludedByCategoricals) has size 0. Dropping
-/// one value's combinations from the sum would otherwise leave that value short of its weight
-/// (a quarter of the window-none combinations are empty, none of the windowed ones are), so the
-/// sizes start as the product of the values' relative weights and are raked: each weighted
-/// parameter's values are rescaled in turn to their weights' shares, over the values that have
-/// any combination left, until all agree. The one definition the main search and the regime
-/// focus share, so both realise the declared shares.
+/// A combination its categorical values make empty (excludedByCategoricals) has size 0, whether
+/// or not anything is weighted. Dropping one value's combinations from the sum would otherwise
+/// leave that value short of its weight (a quarter of the window-none combinations are empty,
+/// none of the windowed ones are), so the sizes start as the product of the values' relative
+/// weights and are raked: each weighted parameter's values are rescaled in turn to their
+/// weights' shares, over the values that have any combination left, until all agree. The one
+/// definition the main search and the regime focus share, so both realise the declared shares.
+///
+/// With @p evenUnweighted the values of every enum and bool parameter that declares no weights
+/// are raked too, each to an equal share, so that a value fewer combinations can hold (a form
+/// that the constraints leave in a few combinations) is not smaller than the others.
 inline std::vector<double> combinationSizes(const OperationMetadata& metadata,
-                                            const std::vector<ProblemPoint>& combinations)
+                                            const std::vector<ProblemPoint>& combinations,
+                                            bool evenUnweighted = false)
 {
     std::vector<double> sizes(combinations.size(), 1.0);
-    if(!anyWeighted(metadata.parameters))
-    {
-        return sizes;
-    }
+    const bool raked = evenUnweighted || anyWeighted(metadata.parameters);
     size_t live = 0;
     for(size_t index = 0; index < combinations.size(); ++index)
     {
@@ -433,6 +483,28 @@ inline std::vector<double> combinationSizes(const OperationMetadata& metadata,
             }
         }
     }
+    if(!raked)
+    {
+        return sizes;
+    }
+
+    // The raked parameters: the weighted ones and, when asked, the other enums and bools.
+    std::vector<const Parameter*> raking;
+    for(const auto& parameter : metadata.parameters)
+    {
+        if(!parameter.weights.empty() || (evenUnweighted && !parameter.enumerable().empty()))
+        {
+            raking.push_back(&parameter);
+        }
+    }
+    const auto keyOf = [](const ParameterValue& value) {
+        if(const auto* text = std::get_if<std::string>(&value))
+        {
+            return *text;
+        }
+        const auto* flag = std::get_if<bool>(&value);
+        return std::string(flag != nullptr && *flag ? "true" : "false");
+    };
 
     const auto normalise = [&sizes, live]() {
         double sum = 0.0;
@@ -452,19 +524,15 @@ inline std::vector<double> combinationSizes(const OperationMetadata& metadata,
     for(int round = 0; round < 200; ++round)
     {
         double change = 0.0;
-        for(const auto& parameter : metadata.parameters)
+        for(const auto* parameter : raking)
         {
-            if(parameter.weights.empty())
-            {
-                continue;
-            }
             std::map<std::string, double> mass;
             for(size_t index = 0; index < combinations.size(); ++index)
             {
-                const auto found = combinations[index].find(parameter.name);
+                const auto found = combinations[index].find(parameter->name);
                 if(found != combinations[index].end())
                 {
-                    mass[std::get<std::string>(found->second)] += sizes[index];
+                    mass[keyOf(found->second)] += sizes[index];
                 }
             }
             double total = 0.0;
@@ -474,7 +542,7 @@ inline std::vector<double> combinationSizes(const OperationMetadata& metadata,
                 if(held > 0.0)
                 {
                     total += held;
-                    weight += parameter.weightOf(value);
+                    weight += parameter->weightOf(value);
                 }
             }
             if(!(total > 0.0))
@@ -483,15 +551,15 @@ inline std::vector<double> combinationSizes(const OperationMetadata& metadata,
             }
             for(size_t index = 0; index < combinations.size(); ++index)
             {
-                const auto found = combinations[index].find(parameter.name);
+                const auto found = combinations[index].find(parameter->name);
                 if(found == combinations[index].end())
                 {
                     continue;
                 }
-                const auto& value = std::get<std::string>(found->second);
+                const auto value = keyOf(found->second);
                 if(mass[value] > 0.0)
                 {
-                    const auto factor = total * parameter.weightOf(value) / weight / mass[value];
+                    const auto factor = total * parameter->weightOf(value) / weight / mass[value];
                     change = std::max(change, std::abs(factor - 1.0));
                     sizes[index] *= factor;
                 }
@@ -904,13 +972,14 @@ inline void coverEveryValue(const OperationMetadata& metadata,
 /// Nothing weighted: pointsPerCombination for each. Weighted: the weighted parameters split a
 /// budget and do not multiply it. The budget is pointsPerCombination for each distinct live
 /// combination (one that can hold a problem) of the parameters that have no weights, so
-/// declaring a weight on layout, scale, window or form reshapes the corpus without growing it
-/// by the number of their values. It is divided by size, the units placed as apportion places
-/// them, so each weighted value holds its declared share of the first pass. No combination is
-/// owed a point: one whose share rounds to nothing is left for the growth, the regime floors and
-/// the quotas to reach. What is owed is every declared value that some live combination holds
-/// (coverEveryValue): the first pass is the budget, or more only when there are more uncovered
-/// values than points. A combination the declared constraints make empty gets none.
+/// declaring a weight on an enum such as layout, scale or window reshapes the corpus without
+/// growing it by the number of their values. It is divided by size, the units placed as
+/// apportion places them, so each weighted value holds its declared share of the first pass. No
+/// combination is owed a point: one whose share rounds to nothing is left for the growth, the
+/// regime floors and the quotas to reach. What is owed is every declared value that some live
+/// combination holds (coverEveryValue): the first pass is the budget, or more only when there
+/// are more uncovered values than points. A combination the declared constraints make empty
+/// gets none.
 inline std::vector<int64_t> firstPassTargets(const OperationMetadata& metadata,
                                              const ExplorationRequest& request,
                                              const std::vector<ProblemPoint>& combinations,
@@ -959,6 +1028,23 @@ inline std::vector<int64_t> firstPassTargets(const OperationMetadata& metadata,
     return targets;
 }
 
+/// How a growth round splits the @p need still missing over the parts that can supply it,
+/// whose sizes are @p sizes. Unweighted, equally, each part's share rounded up; weighted, by
+/// size as apportion splits it, so the shares sum to the need instead of giving every small
+/// part a whole point a round. @p keys are the tie-break of apportion.
+inline std::vector<int64_t> splitNeed(int64_t need,
+                                      bool weighted,
+                                      const std::vector<double>& sizes,
+                                      const std::vector<uint64_t>& keys)
+{
+    if(weighted)
+    {
+        return apportion(need, sizes, keys);
+    }
+    const auto parts = static_cast<int64_t>(sizes.size());
+    return std::vector<int64_t>(sizes.size(), parts == 0 ? 0 : (need + parts - 1) / parts);
+}
+
 } // namespace detail
 
 /// @brief Explores the space @p metadata declares, keeping the points @p admits accepts.
@@ -983,6 +1069,7 @@ inline ProblemCorpus exploreProblemSpace(const OperationMetadata& metadata,
     }
 
     size_t totalCombinations = 0;
+    size_t constraintEmpty = 0;
     const auto combinations = detail::categoricalCombinations(
         metadata.parameters,
         request.maxCombinations,
@@ -990,23 +1077,46 @@ inline ProblemCorpus exploreProblemSpace(const OperationMetadata& metadata,
         [&metadata](const ProblemPoint& combination) {
             return !detail::excludedByCategoricals(metadata, combination);
         },
-        request.keep);
+        request.keep,
+        &constraintEmpty);
 
     corpus.categoricalTotal = totalCombinations;
-    if(totalCombinations > combinations.size())
+    corpus.categoricalConstraintEmpty = constraintEmpty;
+    // The sample holds only combinations that can hold a problem, but for the value cover's
+    // swapped-in ones, which the constraints may empty: count the live ones it has.
+    const auto sampled = static_cast<size_t>(std::count_if(
+        combinations.begin(), combinations.end(), [&metadata](const ProblemPoint& combination) {
+            return !detail::excludedByCategoricals(metadata, combination);
+        }));
+    const auto holders = totalCombinations - constraintEmpty;
+    corpus.categoricalNotExplored = holders > sampled ? holders - sampled : 0;
+    if(corpus.categoricalNotExplored > 0)
     {
-        corpus.categoricalNotExplored = totalCombinations - combinations.size();
+        auto line = std::to_string(corpus.categoricalNotExplored) + " of " + std::to_string(holders)
+                    + " categorical combinations that can hold a problem not explored "
+                      "(maxCombinations bound)";
+        if(constraintEmpty > 0)
+        {
+            line += "; the other " + std::to_string(constraintEmpty) + " of "
+                    + std::to_string(totalCombinations)
+                    + " hold none under the declared constraints";
+        }
+        corpus.skippedCombinations.push_back(std::move(line));
+    }
+    else if(totalCombinations > 0 && constraintEmpty == totalCombinations)
+    {
         corpus.skippedCombinations.push_back(
-            std::to_string(totalCombinations - combinations.size()) + " of "
-            + std::to_string(totalCombinations)
-            + " categorical combinations not explored (maxCombinations bound)");
+            "every one of the " + std::to_string(totalCombinations)
+            + " categorical combinations is empty under the declared constraints, so no problem "
+              "can be generated");
     }
 
     // Per-combination state kept for the growth pass. The memo makes growing affordable: a
     // longer walk from the same seed retraces the shorter one, answered from here.
     std::vector<FeasibleSetRequest> searches(combinations.size());
     // How large each combination is relative to the average (Parameter::weights); 1 for every
-    // combination when nothing is weighted, and then the counts below are the unweighted ones.
+    // combination that can hold a problem when nothing is weighted, 0 for one that cannot, and
+    // then the counts below are the unweighted ones.
     const bool weighted = detail::anyWeighted(metadata.parameters);
     const auto sizes = detail::combinationSizes(metadata, combinations);
     // The first pass's per-combination problem count: pointsPerCombination for each, or, when
@@ -1019,7 +1129,7 @@ inline ProblemCorpus exploreProblemSpace(const OperationMetadata& metadata,
     {
         untried[i] = sizes[i] > 0.0 && firstPass[i] == 0;
     }
-    // The combinations that can hold a problem; all of them when nothing is weighted.
+    // The combinations that can hold a problem, weighted or not.
     const auto live = std::max<std::ptrdiff_t>(
         1, std::count_if(sizes.begin(), sizes.end(), [](double size) { return size > 0.0; }));
     const auto pointsFor = [&firstPass](size_t index) { return firstPass[index]; };
@@ -1296,27 +1406,15 @@ inline ProblemCorpus exploreProblemSpace(const OperationMetadata& metadata,
             break;
         }
 
-        // Each combination's share of what is missing: equal (rounded up) when nothing is
-        // weighted, else the need split by size with the largest remainder, so the shares sum to
-        // the need instead of giving every small combination a whole point a round.
-        std::vector<int64_t> shares(growable.size());
-        if(weighted)
+        // Each combination's share of what is missing.
+        std::vector<double> growableSizes;
+        std::vector<uint64_t> growableKeys;
+        for(const auto index : growable)
         {
-            std::vector<double> growableSizes;
-            std::vector<uint64_t> growableKeys;
-            for(const auto index : growable)
-            {
-                growableSizes.push_back(sizes[index]);
-                growableKeys.push_back(detail::tieKey(request.seed, index));
-            }
-            shares = detail::apportion(need, growableSizes, growableKeys);
+            growableSizes.push_back(sizes[index]);
+            growableKeys.push_back(detail::tieKey(request.seed, index));
         }
-        else
-        {
-            shares.assign(growable.size(),
-                          (need + static_cast<int64_t>(growable.size()) - 1)
-                              / static_cast<int64_t>(growable.size()));
-        }
+        const auto shares = detail::splitNeed(need, weighted, growableSizes, growableKeys);
         for(size_t slot = 0; slot < growable.size(); ++slot)
         {
             const auto index = growable[slot];

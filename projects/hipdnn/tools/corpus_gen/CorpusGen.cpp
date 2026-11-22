@@ -220,8 +220,10 @@ void printHelp(const char* program)
         << "                         weight where values are weighted), so the declared\n"
         << "                         mixture holds at a large --count instead of diluting\n"
         << "                         into exploration. Default off (fixed quotas).\n"
-        << "                         manifest.json's anchored_share reports the share\n"
-        << "                         realised, with or without it\n"
+        << "                         manifest.json's anchored_share reports, with or\n"
+        << "                         without it, the share of the sweep's graphs in the\n"
+        << "                         corpus (after the --count cut) drawn from archetypes\n"
+        << "                         or their neighbourhood\n"
         << "  --kdp-root <path>      A *.kdp.json pack, or a directory of them (repeatable)\n"
         << "  --model-shapes <csv>   Recorded shapes as q.<parameter> columns (repeatable). A\n"
         << "                         file with no column for a parameter the operation lists\n"
@@ -243,7 +245,8 @@ void printHelp(const char* program)
         << "                         --count below the quotas' sum does not trim them;\n"
         << "                         above it, the rest is cut as usual. 0 (default)\n"
         << "                         with quotas means the quotas alone. Exit 3 when a\n"
-        << "                         quota is short and not shown saturated.\n"
+        << "                         quota is short and the search did not show the regime\n"
+        << "                         holds no more (reported `not reached`).\n"
         << "  --regime-quotas <f>    The same as JSON: {\"<operation>\": {\"<regime>\": n}}\n"
         << "  --regime-floor <n>     At least n problems in every regime the declaration\n"
         << "                         can spell (a named quota overrides it). Searched as\n"
@@ -577,6 +580,61 @@ void addReport(nlohmann::json& reports, const char* key, const nlohmann::json& r
     {
         reports[key] = report;
     }
+}
+
+/// The mixture of the corpus delivered, after the cut: of the sweep graphs in @p chosen, how
+/// many the sweep of @p corpus drew from archetypes or their neighbourhood.
+nlohmann::json deliveredAnchoredShare(const std::vector<hipdnn_corpus_gen::PoolEntry>& chosen,
+                                      const hipdnn_corpus_gen::ProblemCorpus& corpus,
+                                      bool anchorScaling)
+{
+    std::set<std::string> anchoredKeys;
+    for(const auto& point : corpus.anchoredPoints())
+    {
+        anchoredKeys.insert(hipdnn_corpus_gen::detail::describe(point));
+    }
+    int64_t delivered = 0;
+    int64_t anchored = 0;
+    for(const auto& entry : chosen)
+    {
+        if(entry.source == "sweep")
+        {
+            ++delivered;
+            anchored += static_cast<int64_t>(
+                anchoredKeys.count(hipdnn_corpus_gen::detail::describe(entry.point)));
+        }
+    }
+    return nlohmann::json{
+        {"anchored", anchored},
+        {"delivered", delivered},
+        {"share",
+         delivered == 0 ? 0.0 : static_cast<double>(anchored) / static_cast<double>(delivered)},
+        {"anchor_scaling", anchorScaling}};
+}
+
+/// One line per operation searched against an engine: its queries, and their cost per query.
+void printQueryTiming(const std::string& operation,
+                      const hipdnn_corpus_gen::OracleTiming& timing,
+                      std::chrono::steady_clock::time_point searchStart)
+{
+    if(timing.queries == 0)
+    {
+        return;
+    }
+    const auto wall
+        = std::chrono::duration<double>(std::chrono::steady_clock::now() - searchStart).count();
+    const auto perQuery
+        = [&timing](double seconds) { return seconds * 1e6 / static_cast<double>(timing.queries); };
+    std::fprintf(stderr,
+                 "%s: %lld engine queries in %.1f s of %.1f s -- per query: build %.0f us, "
+                 "load %.0f us, ask %.0f us\n",
+                 operation.c_str(),
+                 static_cast<long long>(timing.queries),
+                 timing.buildSeconds + timing.loadSeconds + timing.askSeconds,
+                 wall,
+                 perQuery(timing.buildSeconds),
+                 perQuery(timing.loadSeconds),
+                 perQuery(timing.askSeconds));
 }
 
 int runGenerator(const std::vector<std::string>& args)
@@ -1343,13 +1401,10 @@ int runGenerator(const std::vector<std::string>& args)
         {
             result.corpus
                 = hipdnn_corpus_gen::exploreProblemSpace(metadata, request, admits, alreadyPooled);
-            anchoredShare[result.operation] = nlohmann::json{
-                {"anchored", result.corpus.anchoredProblems()},
-                {"explored", static_cast<int64_t>(result.corpus.problems().size())},
-                {"share", result.corpus.anchoredShare()},
-                {"anchor_scaling", request.anchorScaling}};
             categoricalCombinations[result.operation] = nlohmann::json{
                 {"total", static_cast<int64_t>(result.corpus.categoricalTotal)},
+                {"constraint_empty",
+                 static_cast<int64_t>(result.corpus.categoricalConstraintEmpty)},
                 {"not_explored", static_cast<int64_t>(result.corpus.categoricalNotExplored)}};
         }
         else
@@ -1358,25 +1413,7 @@ int runGenerator(const std::vector<std::string>& args)
         }
 
         const auto problems = result.corpus.problems();
-        if(timing.queries > 0)
-        {
-            const auto wall
-                = std::chrono::duration<double>(std::chrono::steady_clock::now() - searchStart)
-                      .count();
-            const auto perQuery = [&timing](double seconds) {
-                return seconds * 1e6 / static_cast<double>(timing.queries);
-            };
-            std::fprintf(stderr,
-                         "%s: %lld engine queries in %.1f s of %.1f s -- per query: build %.0f us, "
-                         "load %.0f us, ask %.0f us\n",
-                         result.operation.c_str(),
-                         static_cast<long long>(timing.queries),
-                         timing.buildSeconds + timing.loadSeconds + timing.askSeconds,
-                         wall,
-                         perQuery(timing.buildSeconds),
-                         perQuery(timing.loadSeconds),
-                         perQuery(timing.askSeconds));
-        }
+        printQueryTiming(result.operation, timing, searchStart);
         std::cerr << result.operation << ": " << problems.size() << " problems";
         if(result.buildFailures > 0)
         {
@@ -1517,6 +1554,10 @@ int runGenerator(const std::vector<std::string>& args)
                 {
                     stop = ", budget limit";
                 }
+                else if(static_cast<int64_t>(found.problems.size()) < asked - have)
+                {
+                    stop = ", not reached";
+                }
                 std::cerr << "  focus " << regime << ": " << have << " pooled, " << asked - have
                           << " wanted, " << found.problems.size() << " found (" << found.inRegime
                           << " of " << found.proposed << " proposals in the regime)" << stop
@@ -1570,6 +1611,14 @@ int runGenerator(const std::vector<std::string>& args)
             }
         }
 
+        // A cut keeps the declared weights: the sweep's pool is cut by each categorical
+        // combination's weight, not by what the first pass and the growth happened to leave.
+        // Recorded shapes (the model and kernel pools) are cut in proportion to what they hold.
+        if(const auto sweep = pools.find("sweep"); sweep != pools.end())
+        {
+            hipdnn_corpus_gen::weighGroups(sweep->second, metadata);
+        }
+
         std::map<std::string, int64_t> dropped;
         // One entry per graph: two points a builder renders identically (one differing only in
         // a parameter the graph does not carry) are one problem, whatever their names.
@@ -1603,6 +1652,11 @@ int runGenerator(const std::vector<std::string>& args)
                                                       owed,
                                                       quotaOutcome,
                                                       reserved);
+        if(searched)
+        {
+            anchoredShare[result.operation]
+                = deliveredAnchoredShare(chosen, result.corpus, request.anchorScaling);
+        }
         if(quotasAlone)
         {
             // One graph can fill a regime's quota and a form's, so the quotas' sum overstates
@@ -1646,7 +1700,7 @@ int runGenerator(const std::vector<std::string>& args)
                                      + (focusSearched && search->second.searchCapped
                                             ? " (focused search stopped at its budget limit while "
                                               "still finding points; raise --budget)"
-                                            : " (not shown saturated)"));
+                                            : " (not reached)"));
             }
         }
 

@@ -62,6 +62,18 @@ MetadataLoad loadToy(const std::string& parameters, const std::string& members =
     return parseOperationMetadata(declaration);
 }
 
+/// The budget the shipped attention declarations' focused searches run under: 600 proposals for
+/// each combination, doubled up to 4 times, and 20 first-pass points for each.
+ExplorationRequest focusedSearchRequest(uint64_t seed)
+{
+    ExplorationRequest request;
+    request.budgetPerCombination = 600;
+    request.budgetGrowthLimit = 4;
+    request.pointsPerCombination = 20;
+    request.seed = seed;
+    return request;
+}
+
 /// Multi-head by default, so the grouping facet stays fixed in the phase and context cases.
 ProblemPoint sdpaPoint(int64_t seqlenQ, int64_t seqlenK, int64_t headsKv = 32)
 {
@@ -293,9 +305,11 @@ TEST(TestRegimeFocus, HeldPointsAreNeverReturned)
     }
 }
 
-TEST(TestRegimeFocus, ARegimeTheEngineDoesNotServeIsReportedSaturated)
+TEST(TestRegimeFocus, ARegimeTheEngineDoesNotServeIsNotReachedRatherThanSaturated)
 {
-    // Long context is `seqlen_k > 2048`; with none served this is saturation, not a budget limit.
+    // Long context is `seqlen_k > 2048`; with none served the search found nothing, which shows
+    // it did not reach the regime and nothing of whether a walk could: not saturation, and not
+    // a budget limit either.
     const auto metadata = shippedSdpa();
     std::string error;
     const auto focus = compileRegimeFocus(metadata, "decode_long_mha", error);
@@ -306,8 +320,51 @@ TEST(TestRegimeFocus, ARegimeTheEngineDoesNotServeIsReportedSaturated)
     const auto found = exploreRegime(metadata, *focus, focusRequest(), 10, shortOnly, {}, {});
 
     EXPECT_TRUE(found.problems.empty());
-    EXPECT_TRUE(found.saturated);
+    EXPECT_FALSE(found.saturated);
     EXPECT_FALSE(found.searchCapped);
+}
+
+TEST(TestRegimeFocus, ARegimeInACorpusWhoseEveryCombinationIsEmptyIsSaturated)
+{
+    // The ragged form is declared only with bshd, so every combination of these two keeps is
+    // empty: nothing is left to search, which is a proof.
+    const auto metadata = shippedSdpa();
+    std::string error;
+    const auto focus = compileRegimeFocus(metadata, "decode_long_mha", error);
+    ASSERT_TRUE(focus.has_value()) << error;
+    auto request = focusRequest();
+    request.maxCombinations = 1024;
+    request.keep = {{"form", "ragged"}, {"layout", "bhsd"}};
+
+    const auto found = exploreRegime(metadata, *focus, request, 10, SERVES_EVERYTHING, {}, {});
+
+    EXPECT_TRUE(found.problems.empty());
+    EXPECT_TRUE(found.saturated);
+}
+
+TEST(TestRegimeFocus, ARegimeTheDeclaredConstraintsExcludeIsSaturatedWithoutAskingTheEngine)
+{
+    // Cross attention (more queries than keys) is admitted only under a non-causal mask, so
+    // under a causal keep every proposal in the regime breaks a constraint.
+    const auto metadata = shippedSdpa();
+    std::string error;
+    const auto focus = compileRegimeFocus(metadata, "cross_long_gqa", error);
+    ASSERT_TRUE(focus.has_value()) << error;
+    auto request = focusRequest();
+    request.keep = {{"is_causal", "true"}};
+    int64_t asked = 0;
+    const ProblemOracle counting = [&asked](const ProblemPoint&) {
+        ++asked;
+        return true;
+    };
+
+    const auto found = exploreRegime(metadata, *focus, request, 3, counting, {}, {});
+
+    EXPECT_TRUE(found.problems.empty());
+    EXPECT_GT(found.inRegime, 0);
+    EXPECT_EQ(found.admissible, 0);
+    EXPECT_EQ(asked, 0);
+    EXPECT_TRUE(found.saturated);
 }
 
 TEST(TestRegimeFocus, AnUnservedRegimeCostsOnlyTheProbe)
@@ -326,7 +383,7 @@ TEST(TestRegimeFocus, AnUnservedRegimeCostsOnlyTheProbe)
     const auto found = exploreRegime(metadata, *focus, request, 10, shortOnly, {}, {});
 
     EXPECT_TRUE(found.problems.empty());
-    EXPECT_TRUE(found.saturated);
+    EXPECT_FALSE(found.saturated);
     // The sample is capped at maxCombinations, plus one extra combination per declared value it
     // missed, so the cap is what the enumeration actually yields.
     size_t total = 0;
@@ -389,11 +446,7 @@ TEST_P(TestShippedValueWeights,
     std::string error;
     const auto focus = compileRegimeFocus(metadata, "decode_long_mha", error);
     ASSERT_TRUE(focus.has_value()) << error;
-    ExplorationRequest request;
-    request.budgetPerCombination = 600;
-    request.budgetGrowthLimit = 4;
-    request.pointsPerCombination = 20;
-    request.seed = 5;
+    const auto request = focusedSearchRequest(5);
 
     constexpr size_t ROWS = 2400;
     const auto found = exploreRegime(metadata, *focus, request, ROWS, SERVES_EVERYTHING, {}, {});
@@ -450,7 +503,7 @@ TEST_P(TestShippedValueWeights,
     }
 
     // A floor of 60 needs at most 60 lanes of the declared lanes; running each of them once would
-    // cost its whole budget, which is what the search used to do.
+    // cost its whole budget.
     const auto few = exploreRegime(metadata, *focus, request, 60, SERVES_EVERYTHING, {}, {});
     ASSERT_GE(few.problems.size(), 60u);
     size_t total = 0;
@@ -473,20 +526,11 @@ TEST(TestRegimeFocus, AFocusedSearchUnderAKeepSpendsItsLanesOnTheCombinationsThe
     std::string error;
     const auto focus = compileRegimeFocus(metadata, "decode_short_mha", error);
     ASSERT_TRUE(focus.has_value()) << error;
-    ExplorationRequest request;
-    request.budgetPerCombination = 600;
-    request.budgetGrowthLimit = 4;
-    request.pointsPerCombination = 20;
-    request.seed = 3;
-    request.keep = {{"form", "plain"},
-                    {"layout", "bshd"},
-                    {"scale", "inv_sqrt_d"},
-                    {"window", "none"},
-                    {"dtype", "fp16"}};
-    const ProblemOracle admitsKept
-        = [&request](const ProblemPoint& point) { return keeps(request.keep, point); };
+    auto request = focusedSearchRequest(3);
+    request.keep = test::narrowSdpaFwdKeeps();
 
-    const auto found = exploreRegime(metadata, *focus, request, 240, admitsKept, {}, {});
+    const auto found = exploreRegime(
+        metadata, *focus, request, 240, test::admitsOnlyWhatKeepKeeps(request.keep), {}, {});
 
     ASSERT_GE(found.problems.size(), 240U);
     std::set<std::string> combinations;
@@ -508,11 +552,7 @@ TEST(TestRegimeFocus, EveryRegimeDrawsItsOwnLanesInItsOwnOrder)
     // Lane order comes from tie keys; with only the seed in them every regime would try the same
     // lanes first and a sparse regime would be built from the same few each time.
     const auto metadata = shippedSdpa();
-    ExplorationRequest request;
-    request.budgetPerCombination = 600;
-    request.budgetGrowthLimit = 4;
-    request.pointsPerCombination = 20;
-    request.seed = 1;
+    const auto request = focusedSearchRequest(1);
 
     const auto firstLanes = [&](const std::string& regime) {
         std::string error;

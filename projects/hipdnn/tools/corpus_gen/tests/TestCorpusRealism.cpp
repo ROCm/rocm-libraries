@@ -406,9 +406,9 @@ class TestShippedSdpaRealism : public ::testing::TestWithParam<std::string>
 
 TEST_P(TestShippedSdpaRealism, CorpusCoversHeadDimsLayoutsAndSequenceRelationsAModelUses)
 {
-    // The gaps this guards: head_dim drawn log-uniformly from 1 (43% of rows at D <= 16, none of
-    // them a real head), no layout but BSHD, and seqlen_q <= seqlen_k forced everywhere, so
-    // cross attention (seqlen_q > seqlen_k) never appeared.
+    // The corpus must hold real heads (a head_dim drawn log-uniformly from 1 puts 43% of rows at
+    // D <= 16, none of them a real head), every declared layout, and cross attention
+    // (seqlen_q > seqlen_k).
     const auto metadata = test::shippedOperation(GetParam());
 
     // The default first pass: 50 points for each live combination of the unweighted parameters
@@ -446,11 +446,10 @@ TEST_P(TestShippedSdpaRealism, CorpusCoversHeadDimsLayoutsAndSequenceRelationsAM
 
     // Measured over seeds 0 to 20 no lower than 0.82 and 0.16 (sdpa_fwd) and 0.78 and 0.27
     // (sdpa_bwd), so one pair of floors holds for both. The wide floor is set well above the 0.57
-    // a log-uniform head_dim from 1 would leave at most and below the measured shares. It was 0.84 and
-    // 0.83 at 30 points for each combination while the form was weighted; with it unweighted the
-    // first pass spreads over about 180 combinations of a few points each, whose anchored quota
-    // (the mixture's share of a combination's own count, the archetypes' D of 64 and 128 among
-    // it) is small, so the share is lower for the same declared mixture.
+    // a log-uniform head_dim from 1 would leave at most and below the measured shares. The first
+    // pass spreads over about 180 combinations of a few points each, whose anchored quota (the
+    // mixture's share of a combination's own count, the archetypes' D of 64 and 128 among it) is
+    // small, so the share is lower than the declared mixture alone would give.
     constexpr double SDPA_WIDE_SHARE = 0.7;
     constexpr double SDPA_SQUARE_SHARE = 0.1;
     EXPECT_GE(narrowest, 8) << "the declared head_dim range";
@@ -464,7 +463,6 @@ TEST_P(TestShippedSdpaRealism, ArchetypesAnchorCrossAttentionAndTheHeadWidthsOfR
 {
     // The anchors are what a large corpus is mostly made of, so they must themselves hold the
     // cross-attention and the head widths the model-pinned archetypes (D of 64 and 128) lack.
-    const bool forward = GetParam() == "sdpa_fwd";
     const auto metadata = test::shippedOperation(GetParam());
 
     std::mt19937_64 rng(11);
@@ -472,17 +470,8 @@ TEST_P(TestShippedSdpaRealism, ArchetypesAnchorCrossAttentionAndTheHeadWidthsOfR
     size_t cross = 0;
     for(const bool causal : {true, false})
     {
-        ProblemPoint categorical{{"alignment", std::string("top_left")},
-                                 {"dtype", std::string("bf16")},
-                                 {"is_causal", causal},
-                                 {"form", std::string("plain")},
-                                 {"layout", std::string("bshd")},
-                                 {"scale", std::string("inv_sqrt_d")}};
-        if(forward)
-        {
-            categorical["generate_stats"] = false;
-            categorical["window"] = std::string("none");
-        }
+        const auto categorical = test::withDefaultCategoricals(
+            metadata, ProblemPoint{{"dtype", std::string("bf16")}, {"is_causal", causal}});
         for(const auto& archetype : metadata.archetypes)
         {
             for(int i = 0; i < 40; ++i)
