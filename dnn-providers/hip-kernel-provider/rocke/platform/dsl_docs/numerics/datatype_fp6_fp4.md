@@ -34,10 +34,10 @@ accumulation.
 
 ## Conversions
 
-- **Decode (host-checked tables)**: `unpack_fp4_byte_to_pair_f32` decodes
-  fp4 e2m1 from a 16-entry table, low nibble first
-  ([helpers/i4_dequant.py:216-273](../../python/rocke/helpers/i4_dequant.py)).
-  The 6-bit table `_FP6_CODEBOOK` is **e3m2** (bf6) and correct for every
+- **Decode (host-checked tables)**: rocKE has no fp4 decoder.
+  The 6-bit table `_FP6_CODEBOOK`
+  ([helpers/i4_dequant.py:163-181](../../python/rocke/helpers/i4_dequant.py))
+  is **e3m2** (bf6) and correct for every
   code, signed zeros and unflushed subnormals included; there is no e2m3
   table. The entry point `unpack_fp6_bytes_to_quad_f32` has width and naming
   defects recorded in [dtype_support.md](../reference/dtype_support.md)
@@ -59,7 +59,7 @@ state; quantized fp6 / fp4 data comes from the host.
 
 | rule | test |
 |---|---|
-| fp6 e3m2 and fp4 tables match the specification for every code; signed zeros; subnormals not flushed; all codes on the GPU | [tests/core/test_fp6_decode.py](../../tests/core/test_fp6_decode.py) |
+| the fp6 e3m2 table matches the specification for every code; signed zeros; subnormals not flushed; all codes on the GPU | [tests/core/test_fp6_decode.py](../../tests/core/test_fp6_decode.py) |
 | gfx950 MX GEMMs with fp4 and fp6 operands | [tests/instances/test_gfx950_mxfp4_numeric.py](../../tests/instances/test_gfx950_mxfp4_numeric.py), [tests/instances/test_gfx950_mxfp6_numeric.py](../../tests/instances/test_gfx950_mxfp6_numeric.py) |
 
 ## How to decide

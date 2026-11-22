@@ -68,7 +68,7 @@ A by-file map of the `rocke` package. Symbols listed are the primary contents (p
 | `helpers/scan.py` | `lds_zero_i32`, `block_histogram_i32`, `block_exclusive_scan_i32`. Block-wide cooperative scan + histogram primitives. |
 | `helpers/persistent.py` | `build_persistent_counter_init`, `persistent_tile_loop` (ctx-manager), `persistent_tile_for_each` (functional). Persistent-grid pattern shared with StreamK. |
 | `helpers/streamk.py` | `StreamKPartition`, `StreamKReductionStrategy`, `compute_streamk_grid_size`, `emit_streamk_decode`, `streamk_num_macro_tiles`. Tile-id decode + grid sizing for the StreamK GEMM family. |
-| `helpers/i4_dequant.py` | `unpack_i4_byte_to_pair_i32` / `_i8` / `_f32`, `dequant_i4_byte_to_fp8_pair`, `dequant_i4_byte_to_bf8_pair`. Packed-i4 weight unpack + sign-extend + scale-apply chain. |
+| `helpers/i4_dequant.py` | `unpack_i4_byte_to_pair_i32` / `_i8` / `_f32` / `_f16`, `dequant_i4_byte_to_f16_pair`. Packed-i4 weight unpack + sign-extend + scale-apply chain. |
 | `helpers/mx_scale.py` | `decode_mx_scale_e8m0`, `apply_mx_scale`, `add_mx_scaled_dot`, `largest_safe_mx_scale_code`, `load_and_decode_mx_scale_byte`. OCP MX shared-exponent decode + per-block fmul; a group's dot product scaled by an A and a B scale with ldexp; the largest code a scaled MFMA takes without overflow. |
 | `helpers/fp8_encoding.py` | `Fp8ElementFormat`, the four OCP / FNUZ fp8 and bf8 encodings, `fp8_element_format`. The encoding each target's fp8 / bf8 conversions produce and its matrix cores read. |
 | `helpers/preshuffle.py` | `PreshuffleBSpec`, `emit_preshuffleb_offset`, `host_preshuffle_layout`. Tile-major B-layout descriptor for FP8 / BF8 / i4 GEMM bandwidth path. |

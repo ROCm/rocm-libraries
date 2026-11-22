@@ -263,7 +263,7 @@ Gap categories: **[C]** conversion gap · **[P]** partial/plumbing gap ·
 | `fp8 fnuz` (gfx942 only) | 1 | 3 | 1 | 1 | 1 | 1 | **44%** | [P] |
 | **Sub-byte / block formats** | | | | | | | | |
 | `i4` (packed) | 1 | 1 | 1 | 2 | 2 | 2 | **50%** | [C][P] |
-| `fp4` (E2M1, MX) | 0 | 2 | 1 | 1 | 0 | 2 | **33%** | [P][M] |
+| `fp4` (E2M1, MX) | 0 | 2 | 0 | 1 | 0 | 2 | **28%** | [C][P][M] |
 | `fp6` (E2M3, MX) | 0 | 2 | 0 | 1 | 0 | 2 | **28%** | [C][P][M] |
 | `bf6` (E3M2, MX) | 0 | 2 | 0 | 1 | 0 | 2 | **28%** | [C][P][M] |
 | `e8m0` (MX scale) | 0 | 3 | 3 | 2 | 3 | 2 | **72%** | — |
@@ -335,7 +335,7 @@ mode. The missing selector and precision contract are described in §2.5.
   per-channel, so two callers can disagree about what a scale means.
 - **`i4` C1=1 / C3=1** -- `I4` is a logical IR `Type` with no LLVM rendering; its values travel packed.
   [i4_dequant.py](../../python/rocke/helpers/i4_dequant.py) provides conversions
-  from packed i4 to i32, f32, f16, fp8, and bf8, but no reverse f32→packed-i4
+  from packed i4 to i32, f32 and f16, but no reverse f32→packed-i4
   conversion. The quantization helpers accept only i8, fp8, and bf8
   (`quant.py:58-70`). This is one-direction support under C3's round-trip
   criterion. C2=1 reflects the i4 (`iu4`) WMMA on gfx1151/gfx11-generic; the MFMA targets
@@ -347,16 +347,13 @@ mode. The missing selector and precision contract are described in §2.5.
   `mfma_f32_16x16x128_fp4fp6fp8`. The hipBLASLt provider already maps
   `FP4_E2M1`→`HIP_R_4F_E2M1` and `FP6_E3M2`→`HIP_R_6F_E3M2`, so the interface and
   the silicon are both ready — but **no rocKE kernel instance ships**.
-- **`fp4` C3=1** — `unpack_fp4_byte_to_pair_f32` (`i4_dequant.py:252`) decodes a
-  packed byte to two f32 via a hand-written 16-entry codebook
-  (`_FP4_CODEBOOK`, `:216-233`) that matches OCP E2M1
-  (`±{0, 0.5, 1, 1.5, 2, 3, 4, 6}`). Partial rather than Full because there is no
-  scalar `cvt` primitive and no f32→fp4 direction.
+- **`fp4` C3=0** — no fp4 decoder or encoder: there is no scalar `cvt`
+  primitive and no packed-byte unpack helper in either direction.
 - **`fp6` (E2M3) C3=0 — there is no E2M3 decoder at all.** Despite the name,
-  `unpack_fp6_bytes_to_quad_f32` (`i4_dequant.py:315`) does not implement E2M3;
+  `unpack_fp6_bytes_to_quad_f32` (`i4_dequant.py:203`) does not implement E2M3;
   see the next entry.
 - **`bf6` (E3M2) C3=0 — a decoder exists but is defective and must not be used.**
-  `_FP6_CODEBOOK` (`i4_dequant.py:276-294`) is built as
+  `_FP6_CODEBOOK` (`i4_dequant.py:163-181`) is built as
   `2^(e-3) × (1 + m/4)` over a 3-bit exponent (bias 3) and a 2-bit mantissa, which
   is **E3M2 — i.e. `bf6`, not `fp6`** (CK-Tile is explicit about the split:
   `pk_fp6_t = pk_float6_e2m3_t` and `pk_bf6_t = pk_float6_e3m2_t`,
@@ -462,7 +459,7 @@ bucket the ticket calls out):
 | `sitofp_f32` primitive from `i8/i16` | Primitive accepts i32 only. For signed i8, use [quant.py](../../python/rocke/helpers/quant.py) `dequantize_scalar_to_f32(b, x, scale=b.const_f32(1.0))`; it emits sext + sitofp internally. For signed i16, explicitly sext to i32 first. | [P] |
 | MX scaled cvt (`cvt_scalef32_pk_*`) | E8M0 scale only → **power-of-two scales**; arbitrary scale needs unscaled cvt + `fmul` | [P] |
 | packed store `store_packed_chunk_local` | `n∈{4,8}` only (no `n=2`); `load_vec`/`store_vec` `n∈{2,4,8}` | [P] |
-| scalar `cvt_fp4_to_f32` | No dedicated scalar cvt primitive. [i4_dequant.py](../../python/rocke/helpers/i4_dequant.py) `unpack_fp4_byte_to_pair_f32` (`:252`) decodes E2M1 from a 16-entry codebook (`:216-233`) without MFMA, and is correct. | [P] |
+| scalar `cvt_fp4_to_f32` | No scalar cvt primitive and no unpack helper; fp4 reaches only the matrix-core operands. | [C] |
 | scalar `cvt_fp6_to_f32` / `cvt_bf6_to_f32` | **No usable decoder.** Do not use `unpack_fp6_bytes_to_quad_f32` for either format; its width and naming defects are detailed in [§2.5](#25-score-justifications-why-each-non-3-was-assigned). | [P][C] |
 | stochastic rounding (any quant) | not implemented ("v2 follow-on") | [M] |
 

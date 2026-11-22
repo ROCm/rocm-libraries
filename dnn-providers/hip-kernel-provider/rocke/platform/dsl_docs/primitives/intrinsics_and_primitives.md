@@ -445,13 +445,13 @@ scaled and MX GEMM kernels need:
 
 ```text
 # Packed-i4 byte unpack (sign-extend each 4-bit nibble to i32 / f32 /
-# fp8 / bf8). Lowers to ``v_bfe_i32`` (bit-field-extract signed) on
-# the AMDGPU backend.
+# f16). Lowers to ``v_bfe_i32`` (bit-field-extract signed) on the
+# AMDGPU backend.
 unpack_i4_byte_to_pair_i32(b, packed_byte)
 unpack_i4_byte_to_pair_i8(b, packed_byte) # alias of _i32 today
 unpack_i4_byte_to_pair_f32(b, packed_byte)
-dequant_i4_byte_to_fp8_pair(b, packed_byte, *, inv_scale, arch)
-dequant_i4_byte_to_bf8_pair(b, packed_byte, *, inv_scale, arch)
+unpack_i4_byte_to_pair_f16(b, packed_byte)
+dequant_i4_byte_to_f16_pair(b, packed_byte, *, scale)
 
 # OCP MX E8M0 shared-exponent decode + apply.
 # decode_mx_scale_e8m0(e8m0) -> f32 multiplier, per the OCP MX spec:

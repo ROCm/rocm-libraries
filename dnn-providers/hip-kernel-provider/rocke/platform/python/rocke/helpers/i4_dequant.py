@@ -3,33 +3,27 @@
 
 """i4-packed buffer load + dequant helper.
 
-CK Tile's i4-quant weight path (``38_block_scale_gemm`` i4-fp8 variants,
-the fused-MoE w4a8 path, and the bf8 / fp8 ``preshuffleb`` columns of
-the same example) stores B-matrix weights as 4-bit signed integers
-packed two-per-byte. The dequant pipeline is the same in every variant::
+CK Tile's i4-quant weight path stores B-matrix weights as 4-bit signed
+integers packed two-per-byte. The dequant pipeline is::
 
  1. Load a packed byte buffer (each byte holds two i4 values).
- 2. Unpack into a pair of i8 values (sign-extending the high nibble
- from 4 bits to 8 bits).
+ 2. Unpack into a pair of sign-extended integers.
  3. Cast to f32 via ``sitofp``.
- 4. Multiply by the per-block scale (fp32 or fp8 depending on the
- variant).
- 5. Cast back to the MFMA input dtype (fp8e4m3 or bf8e5m2 for the
- FP8 MFMA path).
+ 4. Multiply by the per-group scale.
+ 5. Cast to the matrix-core input dtype.
 
-This module exposes the unpack + scale-apply chain as one helper so the
-fused-MoE / block-scale-GEMM call sites don't have to re-derive the
-nibble-shift + sext sequence each time. The actual per-block scale
-load lives in :mod:`rocke.helpers.mx_scale` (when the scale buffer is
-shared-exponent format) or is a plain per-row scalar load (when the
-scale is fp32 per-tile).
+This module exposes the unpack + scale-apply chain so call sites don't
+have to re-derive the nibble-shift + sext sequence each time. The actual
+per-block scale load lives in :mod:`rocke.helpers.mx_scale` (when the
+scale buffer is shared-exponent format) or is a plain per-row scalar
+load (when the scale is fp32 per-tile).
 
-What v1 ships:
+What it ships:
 
-* :func:`unpack_i4_byte_to_pair_f32`: one packed byte -> two f32 values.
-* :func:`dequant_i4_byte_to_fp8_pair`: full chain to two
- ``fp8e4m3`` lanes (the common FP8-MFMA prep).
-* :func:`dequant_i4_byte_to_bf8_pair`: bf8e5m2 sibling.
+* :func:`unpack_i4_byte_to_pair_i32` / ``_f32`` / ``_f16``: one packed
+  byte -> two values of that type.
+* :func:`dequant_i4_byte_to_f16_pair`: full chain to two f16 lanes (the
+  WMMA prep).
 
 The helpers operate on single bytes; vector forms are composed from
 these in the kernel author's K-loop body so the per-thread unroll
@@ -41,14 +35,10 @@ from __future__ import annotations
 from typing import Tuple
 
 from ..core.ir import I32, IRBuilder, Value
-from .quant import quantize_scalar_f32
 
 
 __all__ = [
-    "dequant_i4_byte_to_bf8_pair",
     "dequant_i4_byte_to_f16_pair",
-    "dequant_i4_byte_to_fp8_pair",
-    "unpack_fp4_byte_to_pair_f32",
     "unpack_fp6_bytes_to_quad_f32",
     "unpack_i4_byte_to_pair_f16",
     "unpack_i4_byte_to_pair_f32",
@@ -148,9 +138,9 @@ def dequant_i4_byte_to_f16_pair(
         f16 = trunc_f32_to_f16(f32 * scale)
 
     Returns ``(low_f16, high_f16)`` ready to feed ``wmma_f32_16x16x16_f16``.
-    Unlike the fp8 / bf8 siblings this multiplies by the *forward* per-group
-    ``scale`` (not an inverse) because the i4 weights are being reconstructed
-    to their original magnitude, not re-quantised. The multiply runs in f32
+    It multiplies by the *forward* per-group ``scale`` (not an inverse)
+    because the i4 weights are being reconstructed to their original
+    magnitude, not re-quantised. The multiply runs in f32
     and the result is truncated once to f16 so the WMMA atom sees its native
     input dtype.
     """
@@ -160,130 +150,14 @@ def dequant_i4_byte_to_f16_pair(
     return low_f16, high_f16
 
 
-def dequant_i4_byte_to_fp8_pair(
-    b: IRBuilder,
-    packed_byte: Value,
-    *,
-    inv_scale: Value,
-    arch: str,
-) -> Tuple[Value, Value]:
-    """Full i4 -> fp8e4m3 dequant for one packed byte, in ``arch``'s fp8
-    encoding.
-
-    Pipeline (per element)::
-
-    i32 = sext(sign_extract(byte, 4-bit field))
-    f32 = sitofp(i32)
-    fp8 = quantize_scalar_f32(b, f32, inv_scale=inv_scale,
-                              qdtype="fp8e4m3", arch=arch)
-          # clamp to arch's fp8 bound, NaN kept, convert
-
-    Returns ``(low_fp8, high_fp8)``. Composes the dequant + quant
-    pipeline via :func:`rocke.helpers.quantize_scalar_f32`, which owns the
-    clamp bound of ``arch``'s encoding (:func:`~rocke.helpers.quant_max_abs`).
-    """
-    low_f32, high_f32 = unpack_i4_byte_to_pair_f32(b, packed_byte)
-    low_fp8 = quantize_scalar_f32(
-        b, low_f32, inv_scale=inv_scale, qdtype="fp8e4m3", arch=arch
-    )
-    high_fp8 = quantize_scalar_f32(
-        b, high_f32, inv_scale=inv_scale, qdtype="fp8e4m3", arch=arch
-    )
-    return low_fp8, high_fp8
-
-
-def dequant_i4_byte_to_bf8_pair(
-    b: IRBuilder,
-    packed_byte: Value,
-    *,
-    inv_scale: Value,
-    arch: str,
-) -> Tuple[Value, Value]:
-    """bf8e5m2 sibling of :func:`dequant_i4_byte_to_fp8_pair`."""
-    low_f32, high_f32 = unpack_i4_byte_to_pair_f32(b, packed_byte)
-    low_bf8 = quantize_scalar_f32(
-        b, low_f32, inv_scale=inv_scale, qdtype="bf8e5m2", arch=arch
-    )
-    high_bf8 = quantize_scalar_f32(
-        b, high_f32, inv_scale=inv_scale, qdtype="bf8e5m2", arch=arch
-    )
-    return low_bf8, high_bf8
-
-
 # ---------------------------------------------------------------------
-# OCP MX fp4 / fp6 unpack (P54)
+# OCP MX fp6 unpack (P54)
 # ---------------------------------------------------------------------
-#
-# fp4 layout per OCP MX spec (E2M1): 1 sign bit, 2 exponent bits (bias 1),
-# 1 mantissa bit. ``0000 -> +0``, ``1000 -> -0``, and the one subnormal
-# code ``0001 -> 0.5``. We implement the canonical 16-entry codebook and
-# look it up directly: simpler + faster than reconstructing the bit
-# fields, and it matches the spec's values exactly.
 #
 # The 6-bit table below is the OCP MX E3M2 format: 1 sign bit, 3 exponent
 # bits (bias 3), 2 mantissa bits, keyed by the raw 6-bit value. Exponent
 # field 0 is zero or subnormal: ``2^(1-3) * (m / 4)``; codes 0 and 32 are
 # +0 and -0. Exponent field 1..7 is normal: ``2^(e-3) * (1 + m/4)``.
-
-
-_FP4_CODEBOOK = (
-    +0.0,  # 0000
-    +0.5,  # 0001
-    +1.0,  # 0010
-    +1.5,  # 0011
-    +2.0,  # 0100
-    +3.0,  # 0101
-    +4.0,  # 0110
-    +6.0,  # 0111
-    -0.0,  # 1000
-    -0.5,  # 1001
-    -1.0,  # 1010
-    -1.5,  # 1011
-    -2.0,  # 1100
-    -3.0,  # 1101
-    -4.0,  # 1110
-    -6.0,  # 1111
-)
-
-
-def _select_fp4_value(b: IRBuilder, code_i32: Value) -> Value:
-    """Static-codebook select chain for one fp4 nibble.
-
-    Generates a ternary chain of ``b.select`` calls keyed on
-    ``code_i32 == k`` for ``k in 0..15``. Results in 16 selects;
-    AMDGPU's MachineCombiner folds the chain into ``v_cmp_eq`` +
-    ``v_cndmask`` per element which matches the codebook-lookup
-    pattern used by AITER's i4 dequant path.
-    """
-    out = b.const_f32(0.0)
-    for k, fv in enumerate(_FP4_CODEBOOK):
-        is_k = b.cmp_eq(code_i32, b.const_i32(k))
-        out = b.select(is_k, b.const_f32(float(fv)), out)
-    return out
-
-
-def unpack_fp4_byte_to_pair_f32(
-    b: IRBuilder, packed_byte: Value
-) -> Tuple[Value, Value]:
-    """One packed fp4 byte -> two f32 values via the OCP MX codebook.
-
-    Reference: OCP "MX FP4" spec — 1 sign bit + 2 exponent bits + 1
-    mantissa bit. Exponent field 0 holds +0 / -0 and the subnormal
-    +0.5 / -0.5; the codebook above lists every representable value.
-
-    Layout assumption (matches the i4 unpack convention):
-    ``low = byte & 0xF`` (bits 0..3), ``high = (byte >> 4) & 0xF``
-    (bits 4..7).
-    """
-    if packed_byte.type.name != "i8":
-        raise ValueError(
-            f"unpack_fp4_byte_to_pair_f32 expects i8 packed byte, got "
-            f"{packed_byte.type.name}"
-        )
-    byte_i32 = b.zext(packed_byte, I32)
-    low_code = b.land(byte_i32, b.const_i32(0xF))
-    high_code = b.land(b.lshr(byte_i32, b.const_i32(4)), b.const_i32(0xF))
-    return _select_fp4_value(b, low_code), _select_fp4_value(b, high_code)
 
 
 def _fp6_e3m2_value(code: int) -> float:
@@ -310,8 +184,9 @@ _FP6_CODEBOOK: Tuple[float, ...] = tuple(_fp6_e3m2_value(i) for i in range(64))
 def _select_fp6_value(b: IRBuilder, code_i32: Value) -> Value:
     """Static-codebook select chain for one fp6 6-bit value.
 
-    Same shape as :func:`_select_fp4_value` but 64 entries deep. The
-    ternary chain is unrolled at Python time; at LLVM the AMDGPU
+    Generates a ternary chain of ``b.select`` calls keyed on
+    ``code_i32 == k`` for ``k in 0..63``. The chain is unrolled at Python
+    time; at LLVM the AMDGPU
     backend folds it into ``v_cndmask`` chains. For perf-critical
     paths a future optimisation is to load the codebook from
     constant memory (``addrspace(4)``) via P17 and replace the

@@ -123,8 +123,8 @@ compute_streamk_grid_size, emit_streamk_decode, streamk_num_macro_tiles
 
 # helpers
 # i4 packed-weight dequant (helpers/i4_dequant.py)
-unpack_i4_byte_to_pair_f32, unpack_i4_byte_to_pair_i32, unpack_i4_byte_to_pair_i8
-dequant_i4_byte_to_fp8_pair, dequant_i4_byte_to_bf8_pair
+unpack_i4_byte_to_pair_f32, unpack_i4_byte_to_pair_i32, unpack_i4_byte_to_pair_i8,
+unpack_i4_byte_to_pair_f16, dequant_i4_byte_to_f16_pair
 # fp8 / bf8 element encodings (helpers/fp8_encoding.py)
 Fp8ElementFormat, FP8_E4M3_OCP, BF8_E5M2_OCP, FP8_E4M3_FNUZ, BF8_E5M2_FNUZ,
 fp8_element_format
