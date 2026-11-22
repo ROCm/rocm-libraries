@@ -2945,7 +2945,20 @@ __device__ void amd_async_global_load_to_lds(CK_TILE_LDS_ADDR T* smem_ptr,
                 global_ptr + global_offset - static_offset, smem_ptr);
         if(is_valid_element)
         {
-            if constexpr(use_asm_path)
+            // This b128 asm path encodes only the nontemporal hint, for the policy value NT; other
+            // policies (SE_NT, DEVICE_NT, ...) are dropped here, as on the other asm paths. The
+            // hint must be a literal in the asm string, so the operand list is repeated.
+            if constexpr(use_asm_path && coherence == amd_buffer_coherence_enum::NT)
+            {
+                asm volatile(
+                    "global_load_async_to_lds_b128 %0, %1, %2, offset:%3 th:TH_LOAD_NT\n\t" ::"v"(
+                        static_cast<uint32_t>(reinterpret_cast<uint64_t>(lds_ptr))),
+                    "v"(static_cast<uint32_t>((global_offset - static_offset) * sizeof(T))),
+                    "s"(reinterpret_cast<uint64_t>(global_ptr)),
+                    "n"(static_cast<uint32_t>(static_offset * sizeof(T)))
+                    : "memory");
+            }
+            else if constexpr(use_asm_path)
             {
                 asm volatile(
                     "global_load_async_to_lds_b128 %0, %1, %2, offset:%3\n\t" ::"v"(
@@ -3018,6 +3031,28 @@ CK_TILE_DEVICE void amd_async_global_store_from_lds_b128_x8(const void* global_b
 #else
     ignore = global_base;
     ignore = global_offset;
+    ignore = lds_addr;
+#endif
+}
+
+// One global_store_async_from_lds_b128: each lane copies 16 bytes from LDS byte address lds_addr
+// to global_ptr; ImmOffset bytes are added to both addresses. coherence is the cache policy (NT
+// for a nontemporal store). No bounds check; the caller waits on DScnt before and on ASYNCcnt
+// after, with s_wait_asynccnt_pinned since the store carries no asyncmark.
+template <index_t ImmOffset                   = 0,
+          amd_buffer_coherence_enum coherence = amd_buffer_coherence_enum::coherence_default>
+CK_TILE_DEVICE void amd_async_global_store_from_lds_b128(void* global_ptr, uint32_t lds_addr)
+{
+#if defined(__gfx125__)
+    // bit_cast keeps the address bits; a cast to an LDS pointer through a generic pointer would
+    // map LDS address 0 to the LDS null value.
+    __builtin_amdgcn_global_store_async_from_lds_b128(
+        __builtin_bit_cast(__attribute__((address_space(1))) int32x4_t*, global_ptr),
+        __builtin_bit_cast(__attribute__((address_space(3))) int32x4_t*, lds_addr),
+        ImmOffset,
+        static_cast<index_t>(coherence));
+#else
+    ignore = global_ptr;
     ignore = lds_addr;
 #endif
 }

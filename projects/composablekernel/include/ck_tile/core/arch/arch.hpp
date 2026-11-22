@@ -1617,6 +1617,20 @@ CK_TILE_DEVICE void s_wait_asynccnt()
 #endif
 }
 
+/// s_wait_asynccnt N on the hardware counter, exactly where it is written. Where the compiler has
+/// asyncmarks, s_wait_asynccnt is wait_asyncmark, which the compiler lowers from its own count of
+/// async copies. It emits no wait for a copy issued by inline asm, marked or not (the asm path of
+/// amd_async_global_load_to_lds), nor for a builtin copy that no asyncmark() follows
+/// (amd_async_global_store_from_lds_b128).
+template <index_t N = 0>
+CK_TILE_DEVICE void s_wait_asynccnt_pinned()
+{
+#if defined(__gfx125__)
+    static_assert(N >= 0 && N <= 0xffff, "asynccnt out of range");
+    asm volatile("s_wait_asynccnt %0" ::"n"(N) : "memory");
+#endif
+}
+
 template <index_t vmcnt   = waitcnt_arg::kMaxVmCnt,
           index_t expcnt  = waitcnt_arg::kMaxExpCnt,
           index_t lgkmcnt = waitcnt_arg::kMaxLgkmCnt>

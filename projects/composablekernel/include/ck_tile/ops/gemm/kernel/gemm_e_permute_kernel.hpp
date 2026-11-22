@@ -51,6 +51,28 @@ struct GemmEPermuteHostArgs : public GemmHostArgs
     GemmEPermuteDesc e_permute;
 };
 
+/// @brief The element span of E (largest offset + 1), or -1 if two (m, n) share an address or a
+///        stride is not positive: sorted by stride, each sub-dimension of length > 1 must start
+///        past the extent of the previous one.
+CK_TILE_HOST long_index_t gemm_e_permute_span(const GemmEPermuteDesc& p)
+{
+    std::array<std::array<long_index_t, 2>, 4> dims{
+        {{p.stride_M0, p.M0}, {p.stride_M1, p.M1}, {p.stride_N0, p.N0}, {1, p.N1}}};
+    const auto end =
+        std::partition(dims.begin(), dims.end(), [](const auto& d) { return d[1] > 1; });
+    std::sort(dims.begin(), end);
+    long_index_t span = 1;
+    for(auto d = dims.begin(); d != end; ++d)
+    {
+        if((*d)[0] < 1 || (d != dims.begin() && (*d)[0] < (*(d - 1))[0] * (*(d - 1))[1]))
+        {
+            return -1;
+        }
+        span += ((*d)[1] - 1) * (*d)[0];
+    }
+    return span;
+}
+
 /// @brief The [M, N] view of the permuted E, built on the host so that the merge's magic numbers
 ///        are computed once rather than per workgroup.
 template <index_t VecC>
@@ -136,21 +158,10 @@ struct GemmEPermuteKernel
         {
             return reject("N1 must be a multiple of the C vector size");
         }
-        // No two (m, n) may share an address: sorted by stride, each dimension of length > 1 must
-        // start past the extent of the previous one.
-        std::array<std::array<long_index_t, 2>, 4> dims{
-            {{p.stride_M0, p.M0}, {p.stride_M1, p.M1}, {p.stride_N0, p.N0}, {1, p.N1}}};
-        const auto end =
-            std::partition(dims.begin(), dims.end(), [](const auto& d) { return d[1] > 1; });
-        std::sort(dims.begin(), end);
-        long_index_t span = 1;
-        for(auto d = dims.begin(); d != end; ++d)
+        const long_index_t span = gemm_e_permute_span(p);
+        if(span < 0)
         {
-            if((*d)[0] < 1 || (d != dims.begin() && (*d)[0] < (*(d - 1))[0] * (*(d - 1))[1]))
-            {
-                return reject("strides must be positive and must not make E overlap itself");
-            }
-            span += ((*d)[1] - 1) * (*d)[0];
+            return reject("strides must be positive and must not make E overlap itself");
         }
         // A tile past M (or past N under kPadN) is masked, but its rows still fold to m0 >= M0
         // (n0 >= N0); `tail` counts the sub-indices they reach past the last valid one. The masked
