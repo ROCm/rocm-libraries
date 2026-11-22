@@ -17,13 +17,12 @@ wgrad      ``dy``, ``x``   ``dw``
 :func:`launch_direct_kernel` launches a compiled kernel over device arrays in
 that order and :func:`launch_direct_conv` over host arrays;
 :func:`poisoned` builds the initial output (a byte pattern an unwritten element
-cannot pass as). The three references compute each direction in float64 with
-:mod:`rocke.numeric.conv`, from the values the kernel reads (decode stored
-arrays with :func:`rocke.numeric.storage.decode` first), taking their operands
-by name in that module's order;
-:func:`direct_conv_geometry` is the one map from a problem's geometry to that
-module's keywords. :func:`direct_fwd_peak_error` composes the three for the
-common forward check.
+cannot pass as). The three references are the float64 ``ConvProblem``
+references of :mod:`builders.common.conv_reference` on the problem's
+``ConvGeometry`` (the one map from direct-conv names to the shared geometry),
+fed the values the kernel reads (decode stored arrays with
+:func:`rocke.numeric.storage.decode` first) and taking their operands by name.
+:func:`direct_fwd_peak_error` composes them for the common forward check.
 """
 
 from __future__ import annotations
@@ -34,12 +33,16 @@ from typing import TYPE_CHECKING
 import numpy as np
 import numpy.typing as npt
 from rocke.numeric import storage
-from rocke.numeric.conv import conv_dgrad, conv_fwd, conv_wgrad
 from rocke.runtime.device_array import DeviceArray
 from rocke.runtime.launcher import KernelLauncher, LaunchConfig
 
+from builders.common.conv_reference import (
+    conv_dgrad_reference,
+    conv_fwd_reference,
+    conv_wgrad_reference,
+)
 from kernels.common.conv_abi import conv_direct_args_signature
-from kernels.common.conv_args import ConvArgs
+from kernels.common.conv_args import ConvArgs, ConvGeometry
 from kernels.common.conv_direct_grouped import DirectConvProblem
 from kernels.conv.direct_aot_jobs import direct_storage_dtype
 
@@ -47,7 +50,6 @@ if TYPE_CHECKING:
     from rocke.helpers.compile import KernelArtifact
 
 __all__ = [
-    "direct_conv_geometry",
     "direct_dgrad_reference",
     "direct_fwd_peak_error",
     "direct_fwd_reference",
@@ -58,43 +60,28 @@ __all__ = [
 ]
 
 
-def direct_conv_geometry(problem: DirectConvProblem) -> dict[str, object]:
-    """``problem``'s stride, per-axis padding, dilation and groups, as the
-    :mod:`rocke.numeric.conv` keywords."""
-    return {
-        "stride": problem.stride,
-        "padding": (problem.PAD, problem.PAD_W),
-        "dilation": (problem.dil_h, problem.dil_w),
-        "groups": problem.groups,
-    }
-
-
 def direct_fwd_reference(
     problem: DirectConvProblem, x: npt.ArrayLike, w: npt.ArrayLike
 ) -> np.ndarray:
     """``y[N, Ho, Wo, K]`` of ``x[N, H, W, C]`` and ``w[K, KH, KW, cpg]``."""
-    return conv_fwd(x, w, **direct_conv_geometry(problem))
+    geometry = ConvGeometry.from_direct_problem(problem)
+    return conv_fwd_reference(np.asarray(x), np.asarray(w), geometry)
 
 
 def direct_dgrad_reference(
     problem: DirectConvProblem, dy: npt.ArrayLike, w: npt.ArrayLike
 ) -> np.ndarray:
     """``dx[N, H, W, C]`` of ``dy[N, Ho, Wo, K]`` and ``w[K, KH, KW, cpg]``."""
-    return conv_dgrad(
-        dy, w, in_spatial=(problem.H, problem.W), **direct_conv_geometry(problem)
-    )
+    geometry = ConvGeometry.from_direct_problem(problem)
+    return conv_dgrad_reference(np.asarray(dy), np.asarray(w), geometry)
 
 
 def direct_wgrad_reference(
     problem: DirectConvProblem, x: npt.ArrayLike, dy: npt.ArrayLike
 ) -> np.ndarray:
     """``dw[K, KH, KW, cpg]`` of ``x[N, H, W, C]`` and ``dy[N, Ho, Wo, K]``."""
-    return conv_wgrad(
-        x,
-        dy,
-        filter_spatial=(problem.KH, problem.KW),
-        **direct_conv_geometry(problem),
-    )
+    geometry = ConvGeometry.from_direct_problem(problem)
+    return conv_wgrad_reference(np.asarray(x), np.asarray(dy), geometry)
 
 
 def poisoned(shape: Sequence[int], dtype: str, byte: int = 0x7F) -> np.ndarray:
