@@ -283,7 +283,8 @@ def pytest_selection(arguments: list[str]) -> PytestSelection:
         elif argument.startswith("--ignore="):
             ignored.append(argument.removeprefix("--ignore="))
         elif not argument.startswith("-"):
-            paths.append(argument)
+            # A node id (``file.py::test``) runs part of its file: the file is in.
+            paths.append(argument.split("::", 1)[0])
     return PytestSelection(tuple(paths), tuple(ignored), marker_expression)
 
 
@@ -496,6 +497,13 @@ def test_paths_keep_their_root_when_normalized():
     assert _normalized("/src/./tests/../tests/core") == "/src/tests/core"
     assert _normalized("bin/p/./tests/../rocke") == "bin/p/rocke"
     assert _normalized("../tests") == "../tests"
+
+
+def test_a_node_id_selects_its_file():
+    selection = pytest_selection(
+        ["tests/test_a.py::test_one", "-k", "x::y", "tests/test_b.py"]
+    )
+    assert selection.paths == ("tests/test_a.py", "tests/test_b.py")
 
 
 def test_a_marker_expression_deselects_a_module_by_its_pytestmark(tmp_path):

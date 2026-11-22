@@ -422,3 +422,5 @@ test_categories:
       - "rocke_library_attention_cache_key_sweep_pytest"
       # Not registered on Windows (see rocke/library/tests/ctest_lists.cmake).
       - "rocke_library_engine_parity_exhaustive_pytest"
+      # gfx950 GPU; the score-modifier mixes (each modifier once runs in standard).
+      - "rocke_library_attention_biased_mixes_gpu_pytest"
