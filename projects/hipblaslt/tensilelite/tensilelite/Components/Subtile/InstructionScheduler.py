@@ -5838,7 +5838,7 @@ def deferBalancedCurrentCellWait(
     """Spread balanced current-cell reads behind the first MFMA and drain them at their consumer.
 
     balancedReads are the ds_reads emitted for LRPlacements with balancedCurrentCell set,
-    matched by identity. Only main-loop bodies are deferred: NGLL and NLL keep these reads
+    matched by identity. Main-loop and NGLL bodies are deferred: NLL keeps these reads
     in partition 0's prefix, behind its drain.
 
     The cell scheduler issues partition 0's current-cell reads ahead of its first MFMA,

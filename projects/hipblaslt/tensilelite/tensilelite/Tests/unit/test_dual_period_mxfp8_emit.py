@@ -802,12 +802,71 @@ def test_loads_name_their_macro_tile(base_src):
     assert "MT=n+2" in src
 
 
-def test_8x10_balances_both_main_loop_bodies(balanced_8x10):
+def test_8x10_balances_main_loop_and_ngll_bodies(balanced_8x10):
     _src, calls = balanced_8x10
-    assert len(calls) == 2, "expected the C0 and C1 main-loop bodies"
+    assert len(calls) == 4, "expected the C0 and C1 main-loop bodies and both NGLL copies"
     for body, reads, applied in calls:
         assert reads, body.name
         assert applied, body.name
+
+
+def _region_lines(src, name):
+    """Code lines between a loop region's start and end markers."""
+    lines = src.splitlines()
+    start = lines.index("/* %s start */" % name)
+    end = lines.index("/* %s end */" % name, start)
+    return [ln.split("//")[0].strip() for ln in lines[start + 1:end]]
+
+
+def _scale_read_dests(src, name):
+    lines = src.splitlines()
+    start = lines.index("/* %s start */" % name)
+    end = lines.index("/* %s end */" % name, start)
+    return sorted(ln.split()[1].rstrip(",") for ln in lines[start + 1:end]
+                  if ln.startswith("ds_read") and re.search(r"// S[AB] ", ln))
+
+
+# Each exit body runs the unroll copy of the opposite main-loop body.
+_ROLE = {"NGLL_C1": "MAINLOOP_C0", "NGLL_C0": "MAINLOOP_C1", "NLL_C0": "MAINLOOP_C0"}
+
+
+@pytest.fixture(scope="module")
+def spill_6x4_src():
+    """MIWT 6x4: C1's tail cannot refresh every entry scale, so some spill into C0."""
+    return _emit_dual_period_kernel(mi=(16, 16, 128, 1, 1, 6, 4, 2, 2))
+
+
+@pytest.fixture(scope="module", params=["8x4", "8x10", "6x4"])
+def exit_src(request, dual_src, balanced_8x10, spill_6x4_src):
+    return {"8x4": dual_src, "8x10": balanced_8x10[0], "6x4": spill_6x4_src}[request.param]
+
+
+def test_exit_bodies_read_only_their_roles_scales(exit_src):
+    """The body ahead of each exit copy, or the preloop seed on its skip paths,
+    already refreshed the entry scales, so the exits read each scale once per
+    epoch, as the main loop does. A refresh the C1 tail spills into the next C0
+    is read at the end of NGLL_C0 instead of in NLL_C0."""
+    assert _scale_read_dests(exit_src, "NGLL_C1") == _scale_read_dests(exit_src, "MAINLOOP_C0")
+    exits = _scale_read_dests(exit_src, "NGLL_C0") + _scale_read_dests(exit_src, "NLL_C0")
+    main = _scale_read_dests(exit_src, "MAINLOOP_C1") + _scale_read_dests(exit_src, "MAINLOOP_C0")
+    assert sorted(exits) == sorted(main)
+
+
+def _opening(body):
+    """(LDS reads before the first MFMA, MFMAs ahead of the opening vmcnt, that vmcnt)."""
+    first = next(k for k, c in enumerate(body) if c.startswith("v_mfma"))
+    at = next(k for k, c in enumerate(body) if "vmcnt" in c)
+    return (sum(c.startswith("ds_read") for c in body[:first]),
+            sum(c.startswith("v_mfma") for c in body[:at]), body[at])
+
+
+def test_ngll_copies_open_like_their_main_loop_role(exit_src):
+    """The NGLL's opening vmcnt keeps the previous copy's loads in flight, and
+    its first MFMA waits on the reads its main-loop role waits on."""
+    for ngll in ("NGLL_C1", "NGLL_C0"):
+        body = _region_lines(exit_src, ngll)
+        assert _opening(body) == _opening(_region_lines(exit_src, _ROLE[ngll])), ngll
+        assert _opening(body)[2] != "s_waitcnt vmcnt(0)", ngll
 
 
 def test_8x10_balanced_reads_follow_their_opening_barrier(balanced_8x10):

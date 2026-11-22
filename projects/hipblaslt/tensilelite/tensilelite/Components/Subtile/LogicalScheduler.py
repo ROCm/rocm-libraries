@@ -86,6 +86,12 @@ def _checkin_tile(tile):
     tile.regList.pool.checkIn(tile.regList.indices[0])
 
 
+def _mfmaScaleOperands(module):
+    """The scale registers of each scaled MFMA in a scheduled region, in order."""
+    return [(str(inst.mxsa), str(inst.mxsb)) for inst in module.flatitems()
+            if hasattr(inst, "mxsa") and hasattr(inst, "mxsb")]
+
+
 def _hoistSetupBeforeLastMFMA(loopBody, setupInsts):
     """Move loop-control setup (dec + compare) above the body's last MFMA.
 
@@ -811,6 +817,8 @@ class WaitGROp(BaseOp):
     # and force_drain survives _merge_preops so the min-count merge cannot
     # silently weaken the drain back to a partial vmcnt.
     force_drain: bool = False
+    # Half (0 or 1) whose opening wait this is in a half-disjoint body.
+    halfOpener: Optional[int] = None
 
     def __post_init__(self):
         self.kind = 'wait_gr'
@@ -1014,6 +1022,13 @@ class LogicalScheduler:
         self._partitions: Optional[Union[LogicalSchedule, AnnotatedSchedule, AugmentedSchedule]] = None
         self._emitted: Optional[EmittedSchedule] = None
         self._preloop_emitted: Optional[EmittedSchedule] = None
+        # GR atoms the preloop leaves in flight on its skip to NGLL, all of them
+        # younger than every MT0 load; None when the preloop does not bound them.
+        self._preloopNgllInflight: Optional[WaitGRCounts] = None
+        # Exit-body label -> C0 entry scale VGPRs the body ahead of it refreshed.
+        self._entryScalesRefreshedBefore: Dict[str, set] = {}
+        # (leftovers, C1 MFMA count) of the C1 tail refreshes NGLL_C1 re-places.
+        self._ngllC1Spill = None
         self._ngll_emitted: Optional[EmittedSchedule] = None
         self._nll_emitted: Optional[EmittedSchedule] = None
         # The four-deep tail (see build_tail_merged) and the scheduler that
@@ -1056,6 +1071,16 @@ class LogicalScheduler:
     @property
     def halfDisjoint(self) -> bool:
         return self._halfLoadHalf is not None
+
+    @staticmethod
+    def _isSteadyBody(label) -> bool:
+        """Mainloop copies and the NGLL copies: full bodies that run back to back.
+
+        The NGLL is a mainloop body without its loads, so the body passes that
+        place reads and trim waits apply to it as well.
+        """
+        return label.startswith("MAINLOOP") or (
+            label.startswith("NGLL_C") and label[len("NGLL_C"):].isdigit())
 
     # ── Place LRs ─────────────────────────────────────────
 
@@ -3488,7 +3513,7 @@ class LogicalScheduler:
             target.preOps[0:0] = [
                 WaitGROp(wait_gr_counts=by_unroll[0],
                          wait_gr_counts_by_unroll=tuple(by_unroll),
-                         has_sync=False, adjustVmcnt=True),
+                         has_sync=False, adjustVmcnt=True, halfOpener=h),
                 WaitLROp(has_sync=True),
             ]
 
@@ -3786,21 +3811,24 @@ class LogicalScheduler:
             # vmcnt and re-introduce the wrap-LR race).
             merged_force_drain = any(
                 getattr(op, 'force_drain', False) for op, _ in wait_gr_by_lr)
-            dynamic_counts = [
-                op.wait_gr_counts_by_unroll
-                for op, _ in wait_gr_by_lr
+            dynamic_ops = [
+                op for op, _ in wait_gr_by_lr
                 if op.wait_gr_counts_by_unroll is not None
             ]
-            if len(dynamic_counts) > 1:
+            if len(dynamic_ops) > 1:
                 raise ValueError(
                     "cannot merge multiple body-specific wait_gr frontiers")
+            # The emitter reads the body-specific counts, so the merged wait
+            # is still that frontier's.
             result.append(WaitGROp(wait_gr_counts=merged_counts,
                                    wait_gr_counts_by_unroll=(
-                                       dynamic_counts[0]
-                                       if dynamic_counts else None),
+                                       dynamic_ops[0].wait_gr_counts_by_unroll
+                                       if dynamic_ops else None),
                                    has_sync=has_wait_gr_sync,
                                    adjustVmcnt=adjust,
-                                   force_drain=merged_force_drain))
+                                   force_drain=merged_force_drain,
+                                   halfOpener=(dynamic_ops[0].halfOpener
+                                               if dynamic_ops else None)))
         result.extend(others)
         return result
 
@@ -4204,7 +4232,8 @@ class LogicalScheduler:
     def build_ngll(self) -> EmittedSchedule:
         """NGLL (No Global Load Loop): mainloop without GR(n+2), GR_INC.
 
-        WaitGR inflight counts are zeroed since no new GRs are in flight.
+        WaitGR inflight counts are zeroed since the NGLL issues no GRs, except
+        a half-disjoint body's first-half opener (_keepsNgllOpenerCount).
         """
         assert self._emitted is not None, "call build() first"
 
@@ -4212,6 +4241,7 @@ class LogicalScheduler:
             self._ngll_emitted = [[[]]]
             return self._ngll_emitted
 
+        keepOpener = self._keepsNgllOpenerCount()
         ngll = []
         for partition_emitted in self._emitted:
             part_ngll = []
@@ -4225,6 +4255,8 @@ class LogicalScheduler:
                     elif em.opType in ('gl2_prefetch', 'gl2_prefetch_inc'):
                         removed.add(em.moduleId)
                     elif em.opType == 'wait_gr':
+                        if keepOpener and getattr(src, 'halfOpener', None) == 0:
+                            continue
                         if src.wait_gr_counts is not None:
                             src.wait_gr_counts = WaitGRCounts()
                             src.wait_gr_counts_by_unroll = None
@@ -4233,6 +4265,37 @@ class LogicalScheduler:
 
         self._ngll_emitted = ngll
         return ngll
+
+    def _keepsNgllOpenerCount(self) -> bool:
+        """True when the NGLL can open its first half with the mainloop's count.
+
+        That count leaves the previous body's GRs in flight: they fill the NLL's
+        tile, which the NGLL first reads behind its second-half opener, and that
+        opener still drains. NGLL_C{ui} is populated at the unroll the body after
+        mainloop copy ui uses, so each exit path sees its own copy's loads. The
+        preloop's skip to NGLL enters at unroll 0 with the MT1 loads in flight;
+        the count must not exceed them, or an MT0 load could stay outstanding.
+        """
+        if not self.halfDisjoint:
+            return False
+        bound = self._preloopNgllInflight
+        if bound is None:
+            return False
+        openers = [em.source
+                   for partition_emitted in self._emitted
+                   for emitted in partition_emitted
+                   for em in emitted
+                   if em.opType == 'wait_gr'
+                   and getattr(em.source, 'halfOpener', None) == 0]
+        if len(openers) != 1 or openers[0].force_drain:
+            return False
+        opener = openers[0]
+        counts = (opener.wait_gr_counts_by_unroll[0]
+                  if opener.wait_gr_counts_by_unroll else opener.wait_gr_counts)
+        if counts is None or counts.use_num_gr_total or counts.use_gr_placement_counts:
+            return False
+        return all(getattr(counts, t) <= getattr(bound, t)
+                   for t in ('A', 'B', 'SA', 'SB'))
 
     def build_nll(self, dropRedundantSync: bool = False,
                   keepLastSync: bool = True) -> EmittedSchedule:
@@ -5300,6 +5363,7 @@ class LogicalScheduler:
 
         Returns [1 partition][1 subIterK][EmittedModules] to match emit() shape.
         """
+        self._preloopNgllInflight = None
         if self.config.pgr == 0:
             # PGR=0 has no GR/LR pipeline, but the mainloop's first MFMA still
             # accumulates into D, so the accumulators must be zeroed first.
@@ -5407,6 +5471,7 @@ class LogicalScheduler:
                         SkipOp(compare='LE', value=2, target='NGLL'),
                     ])
                 else:
+                    self._preloopNgllInflight = self._wait_gr_counts_for_ops(mt1_ops)
                     if self.config.uniformPgrEpoch:
                         mt1_counts = self._wait_gr_counts_for_ops(mt1_ops)
                         no_mt1_label = "SubtilePreloopNoMT1"
@@ -5465,6 +5530,7 @@ class LogicalScheduler:
                         SkipOp(compare='LE', value=2, target='NGLL'),
                     ])
                 else:
+                    self._preloopNgllInflight = self._wait_gr_counts_for_ops(mt1_grs)
                     if self.config.uniformPgrEpoch:
                         mt1_ops = self._make_preloop_mt1_grs()
                         mt1_counts = self._wait_gr_counts_for_ops(mt1_ops)
@@ -5599,6 +5665,14 @@ class LogicalScheduler:
                     for entry in getattr(self, "_lateScalePrefetch", [])
                 })
             write_floor = self._scaleShadowPlan.get("writeFloor", {})
+        elif (schedule and self._scaleShadowPlan
+                and label in self._entryScalesRefreshedBefore):
+            # An exit body that consumes the C0 entry scales after the tail of
+            # a C1-shaped body: only the reads that tail refreshed go; the
+            # preloop seeds every entry scale on its skip paths.
+            emitted_3d = copy.deepcopy(emitted_3d)
+            dropEntryScaleReads(emitted_3d, self._entryScalesRefreshedBefore[label])
+            write_floor = self._scaleShadowPlan.get("writeFloor", {})
         # Memory partitions split the copy's MFMAs evenly, independent of the
         # compute partition sizes. Partition pi's VMEM stream ends at the end
         # of memory partition pi.
@@ -5626,7 +5700,8 @@ class LogicalScheduler:
         # than one partition together, so its loads and reads share the
         # half's MFMA gaps.
         half_cells = {}
-        if (schedule and self.halfDisjoint and label.startswith("MAINLOOP")
+        steady = self._isSteadyBody(label)
+        if (schedule and self.halfDisjoint and steady
                 and injectAfterPartition is None and injectBeforeSlot is None):
             numP = len(emitted_3d)
             for half in (range(numP // 2), range(numP // 2, numP)):
@@ -5643,7 +5718,7 @@ class LogicalScheduler:
         numP = self.config.numPartitions
         shadow_tail = range(numP // 2 if self.halfDisjoint else numP - 1, numP)
         shadow_entries = None
-        if self._scaleShadowPlan and label == "MAINLOOP_C1":
+        if self._scaleShadowPlan and label in ("MAINLOOP_C1", "NGLL_C0"):
             shadow_entries = list(self._scaleShadowPlan["entry"])
         for pi, partition_emitted in enumerate(emitted_3d):
             # Partition 0 has no inbound drain, so it used to write straight into
@@ -5794,6 +5869,12 @@ class LogicalScheduler:
             assert placed is not None, \
                 "scale shadowing could not place C1 tail refreshes"
             leftovers, c1Mfmas = placed
+            # NGLL_C1 follows this tail like the next C0 does, so it drops every
+            # entry read and takes the same spills.
+            self._entryScalesRefreshedBefore["NGLL_C1"] = {
+                entry["canonicalVgpr"] for entry in self._scaleShadowPlan["entry"]}
+            self._ngllC1Spill = (leftovers, c1Mfmas)
+            self._c1ScaleOperands = _mfmaScaleOperands(module)
             if leftovers:
                 assert spillC0ScaleRefreshes(
                     self._mainloopC0Schedule, leftovers, c1Mfmas), \
@@ -5831,7 +5912,20 @@ class LogicalScheduler:
             # C0 leaves the current scale epoch in the entry VGPRs. NGLL
             # still consumes that epoch. NLL is the next epoch, and its
             # opening wait retires these reads before its first scaled MFMA.
-            for entry in self._scaleShadowPlan["entry"]:
+            # With C1's MFMA order the plan's last uses hold here, so the
+            # refreshes take C1's tail shadows; the rest follow the last MFMA.
+            entries = list(self._scaleShadowPlan["entry"])
+            if _mfmaScaleOperands(module) == getattr(self, "_c1ScaleOperands", None):
+                finalPartitionMfmas = sum(
+                    (r['A'][1] - r['A'][0]) * (r['B'][1] - r['B'][0])
+                    * self.config.numSubIterK
+                    for r in map(self._partition_tile_range, shadow_tail))
+                placed = appendC1ScaleShadowReads(module, entries, finalPartitionMfmas)
+                if placed is not None:
+                    entries = placed[0]
+                self._entryScalesRefreshedBefore["NLL_C0"] = {
+                    entry["canonicalVgpr"] for entry in self._scaleShadowPlan["entry"]}
+            for entry in entries:
                 read = copy.deepcopy(entry["readTemplate"])
                 read.comment = (
                     f"{getattr(read, 'comment', '')}; "
@@ -5895,7 +5989,7 @@ class LogicalScheduler:
                 module, getattr(self, "_earlyOverwriteVgprs", ()))
         # The deferral removes a drain and moves reads behind it, so it runs
         # before dropDominatedLgkmWaits proves drops against the final order.
-        if self.halfDisjoint and label.startswith("MAINLOOP"):
+        if self.halfDisjoint and steady:
             balanced_reads = lr_reads(lambda lr: lr.balancedCurrentCell)
             # The deferral skips the barrier gap and the gap after it, then keeps
             # each read minGapDsReadToWait MFMAs ahead of its consumer. Dual-period
@@ -5904,12 +5998,14 @@ class LogicalScheduler:
                 "BALANCE_MIN_LEAD_MFMAS leaves no gap for a balanced read"
             # planHalfDisjointBalance only pays off once the reads leave the
             # partition-0 prefix; kept there they are slower than no balance.
-            if balanced_reads and not deferBalancedCurrentCellWait(
-                    module, balanced_reads, minGapDsReadToWait):
+            # An NGLL that refuses keeps the prefix, as it had before.
+            if (balanced_reads and not deferBalancedCurrentCellWait(
+                    module, balanced_reads, minGapDsReadToWait)
+                    and label.startswith("MAINLOOP")):
                 raise RuntimeError(
                     f"{label}: the balanced current-cell reads could not leave "
                     "partition 0's prefix (deferBalancedCurrentCellWait refused)")
-        if (label.startswith("MAINLOOP")
+        if (steady
                 and self.config.uniformPgrEpoch
                 and self.config.dualPeriodScale):
             dropDominatedLgkmWaits(module)
@@ -5919,7 +6015,7 @@ class LogicalScheduler:
             # C1 still places scale refreshes in C0, so C0 is final only here.
             barrierAloneInGap(self._mainloopC0Schedule)
             barrierAloneInGap(module)
-        if self.halfDisjoint and label.startswith("MAINLOOP"):
+        if self.halfDisjoint and steady:
             barrier_gap_reads = (label == "MAINLOOP_C1" and self.config.dualPeriodScale
                                  and self._mainloopC0Schedule is not None)
             # The moved read can leave a VALU leading its old gap, so the
@@ -5932,7 +6028,40 @@ class LogicalScheduler:
             if barrier_gap_reads:
                 readInOpeningBarrierGap(self._mainloopC0Schedule, self._mainloopC0DataReads)
                 keepValuBehindLeader(self._mainloopC0Schedule)
+        if label == "NGLL_C1" and self._ngllC1Spill is not None:
+            self._placeNgllC1Spill(module, *self._ngllC1Spill)
+            if self.halfDisjoint:
+                keepValuBehindLeader(module)
         return module
+
+    def _placeNgllC1Spill(self, module, leftovers, c1Mfmas):
+        """Re-read in NGLL_C1 the entry scales C1's tail could not refresh.
+
+        Spilled as in the next C0 when NGLL_C1 runs C0's MFMA order, which
+        the spill's first-use positions assume; otherwise the reads go ahead
+        of partition 0's LDS drain, which retires them before the first MFMA.
+        """
+        from rocisa.instruction import SWaitCnt
+        from .InstructionScheduler import _isFullLgkmDrain, _isMfma, spillC0ScaleRefreshes
+        if not leftovers:
+            return
+        mainC0 = self._mainloopC0Schedule
+        if (mainC0 is not None and _mfmaScaleOperands(module) == _mfmaScaleOperands(mainC0)
+                and spillC0ScaleRefreshes(module, leftovers, c1Mfmas)):
+            return
+        items = list(module.flatitems())
+        first = next(k for k, inst in enumerate(items) if _isMfma(inst))
+        drain = max((k for k in range(first) if _isFullLgkmDrain(items[k])), default=None)
+        reads = []
+        for entry in leftovers:
+            read = copy.deepcopy(entry["readTemplate"])
+            read.comment = (f"{getattr(read, 'comment', '')}; entry scale C1's tail did not refresh; "
+                            f"{entry['tensor']} canonical=v{entry['canonicalVgpr']}")
+            reads.append(read)
+        if drain is None:
+            reads.append(SWaitCnt(dscnt=0, comment="Wait entry scales C1's tail did not refresh"))
+            drain = first
+        module.setItems(items[:drain] + reads + items[drain:])
 
     def _emit_pgr2_tail_lw_align(self, kernel):
         """Re-align LW_base parity with the LR vgpr at the tail entry.
@@ -7625,6 +7754,9 @@ class LogicalScheduler:
         self._earlyOverwriteVgprs = ()
         self._preloopSchedule = None
         self._mainLoopOrigins = {}
+        self._entryScalesRefreshedBefore = {}
+        self._c1ScaleOperands = None
+        self._ngllC1Spill = None
 
         module = Module("MainAndExitLoops")
         uf = self.unroll_factor
