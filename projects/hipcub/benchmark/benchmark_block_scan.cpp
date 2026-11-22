@@ -26,22 +26,28 @@
 
 constexpr unsigned int Trials = 100;
 
-template<class Runner, class T, unsigned int BlockSize, unsigned int ItemsPerThread>
+template<class Runner,
+         class T,
+         unsigned int BlockSize,
+         unsigned int ItemsPerThread,
+         unsigned int TrialCount = Trials>
 __global__ __launch_bounds__(BlockSize)
 void kernel(const T* input, T* output, const T init)
 {
-    Runner::template run<T, BlockSize, ItemsPerThread>(input, output, init);
+    Runner::template run<T, BlockSize, ItemsPerThread, TrialCount>(input, output, init);
 }
 
 template<hipcub::BlockScanAlgorithm Algorithm, class Name>
 struct inclusive_scan
 {
+    static constexpr bool exclusive = false;
+
     static const char* get_algorithm_name()
     {
         return Name::name;
     }
 
-    template<class T, unsigned int BlockSize, unsigned int ItemsPerThread>
+    template<class T, unsigned int BlockSize, unsigned int ItemsPerThread, unsigned int TrialCount>
     __device__
     static void run(const T* input, T* output, const T init)
     {
@@ -58,7 +64,7 @@ struct inclusive_scan
         __shared__ typename bscan_t::TempStorage storage;
 
 #pragma nounroll
-        for(unsigned int trial = 0; trial < Trials; trial++)
+        for(unsigned int trial = 0; trial < TrialCount; trial++)
         {
             bscan_t(storage).InclusiveScan(values, values, hipcub::Sum());
         }
@@ -73,12 +79,14 @@ struct inclusive_scan
 template<hipcub::BlockScanAlgorithm Algorithm, class Name>
 struct exclusive_scan
 {
+    static constexpr bool exclusive = true;
+
     static const char* get_algorithm_name()
     {
         return Name::name;
     }
 
-    template<class T, unsigned int BlockSize, unsigned int ItemsPerThread>
+    template<class T, unsigned int BlockSize, unsigned int ItemsPerThread, unsigned int TrialCount>
     __device__
     static void run(const T* input, T* output, const T init)
     {
@@ -94,7 +102,7 @@ struct exclusive_scan
         __shared__ typename bscan_t::TempStorage storage;
 
 #pragma nounroll
-        for(unsigned int trial = 0; trial < Trials; trial++)
+        for(unsigned int trial = 0; trial < TrialCount; trial++)
         {
             bscan_t(storage).ExclusiveScan(values, values, init, hipcub::Sum());
         }
@@ -138,6 +146,39 @@ class block_scan_benchmark : public primbench::benchmark_interface
 
         state.set_items(items * Trials);
         state.add_writes<T>(items * Trials);
+
+        state.test(
+            [&]
+            {
+                hipLaunchKernelGGL(
+                    HIP_KERNEL_NAME(kernel<Benchmark, T, BlockSize, ItemsPerThread, 1>),
+                    dim3(1),
+                    dim3(BlockSize),
+                    0,
+                    stream,
+                    d_input,
+                    d_output,
+                    input.front());
+                HIP_CHECK(hipStreamSynchronize(stream));
+
+                std::vector<T> expected(items_per_block);
+                if constexpr(Benchmark::exclusive)
+                {
+                    benchmark_utils::host_exclusive_scan(input.begin(),
+                                                         input.begin() + items_per_block,
+                                                         input.front(),
+                                                         expected.begin(),
+                                                         hipcub::Sum{});
+                }
+                else
+                {
+                    benchmark_utils::host_inclusive_scan(input.begin(),
+                                                         input.begin() + items_per_block,
+                                                         expected.begin(),
+                                                         hipcub::Sum{});
+                }
+                benchmark_utils::check_output(d_output, expected);
+            });
 
         state.run(
             [&]

@@ -123,6 +123,33 @@ class reduce_by_key_benchmark : public primbench::benchmark_interface
         state.add_writes<Key>(items);
         state.add_writes<Value>(items);
 
+        state.test(
+            [&]
+            {
+                const auto         count = benchmark_utils::validation_size(unique_count);
+                std::vector<Key>   expected_keys;
+                std::vector<Value> expected_aggregates;
+                size_t             begin = 0;
+                while(begin < items && expected_keys.size() < count)
+                {
+                    size_t end = begin + 1;
+                    while(end < items && keys_input[end] == keys_input[begin])
+                        ++end;
+
+                    expected_keys.push_back(keys_input[begin]);
+                    const auto first = values_input.begin() + begin;
+                    const auto last  = values_input.begin() + end;
+                    if constexpr(is_sum)
+                        expected_aggregates.push_back(benchmark_utils::reference_sum(first, last));
+                    else
+                        expected_aggregates.push_back(*std::min_element(first, last));
+                    begin = end;
+                }
+                PRIMBENCH_ASSERT(benchmark_utils::read_output(d_unique_count_output), unique_count);
+                benchmark_utils::check_output(d_unique_output, expected_keys);
+                benchmark_utils::check_near_output(d_aggregates_output, expected_aggregates);
+            });
+
         state.run(launch);
 
         HIP_CHECK(hipFree(d_temp_storage));

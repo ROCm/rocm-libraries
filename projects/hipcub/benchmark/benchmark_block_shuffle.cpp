@@ -194,7 +194,7 @@ class block_shuffle_benchmark : public primbench::benchmark_interface
         const auto     items
             = items_per_block * ((input_items + items_per_block - 1) / items_per_block);
 
-        std::vector<T> input(items, T(1));
+        const auto     input = benchmark_utils::get_random_data<T>(items, T(0), T(127));
         T*             d_input;
         T*             d_output;
         HIP_CHECK(hipMalloc(&d_input, items * sizeof(T)));
@@ -204,6 +204,24 @@ class block_shuffle_benchmark : public primbench::benchmark_interface
 
         state.set_items(Trials * items);
         state.add_writes<T>(Trials * items);
+
+        state.test(
+            [&]
+            {
+                std::vector<T> expected(items_per_block);
+                for(size_t i = 0; i < items_per_block; ++i)
+                {
+                    size_t source;
+                    if constexpr(std::is_same_v<Benchmark, rotate>)
+                        source = (i + Trials) % items_per_block;
+                    else if constexpr(std::is_same_v<Benchmark, up>)
+                        source = i < Trials ? 0 : i - Trials;
+                    else
+                        source = std::min(i + Trials, size_t{items_per_block - 1});
+                    expected[i] = input[source];
+                }
+                benchmark_utils::check_output(d_output, expected);
+            });
 
         state.run(
             [&]

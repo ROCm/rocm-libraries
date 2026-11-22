@@ -43,7 +43,8 @@ class reduce_benchmark : public primbench::benchmark_interface
         const size_t items  = state.size;
         const auto&  stream = state.stream;
 
-        std::vector<T> input = benchmark_utils::get_random_data<T>(items, T(0), T(1000));
+        const T              upper = std::is_same_v<T, int8_t> ? T(127) : T(1000);
+        const std::vector<T> input = benchmark_utils::get_random_data<T>(items, T(0), upper);
 
         T*       d_input;
         OutputT* d_output;
@@ -68,6 +69,32 @@ class reduce_benchmark : public primbench::benchmark_interface
         state.set_items(items);
         state.add_writes<T>(items);
 
+        state.test(
+            [&]
+            {
+                const auto output = benchmark_utils::read_output(d_output);
+                using Op          = typename ReduceKernel::operation;
+                if constexpr(std::is_same_v<Op, hipcub::Sum>)
+                {
+                    benchmark_utils::check_near(
+                        output,
+                        benchmark_utils::reference_sum(input.begin(), input.end()));
+                }
+                else
+                {
+                    const auto min = std::min_element(input.begin(), input.end());
+                    if constexpr(std::is_same_v<Op, hipcub::ArgMin>)
+                    {
+                        PRIMBENCH_ASSERT(output.key, min - input.begin());
+                        benchmark_utils::check_value(output.value, *min);
+                    }
+                    else
+                    {
+                        benchmark_utils::check_value(output, *min);
+                    }
+                }
+            });
+
         state.run(launch);
 
         HIP_CHECK(hipFree(d_input));
@@ -83,6 +110,7 @@ template<class T>
 struct sum_kernel
 {
     static constexpr const char* name = "sum";
+    using operation                   = hipcub::Sum;
 
     static constexpr hipError_t (*kernel)(void*, size_t&, T*, T*, int, hipStream_t)
         = &hipcub::DeviceReduce::Sum;
@@ -98,6 +126,7 @@ template<class T>
 struct min_kernel
 {
     static constexpr const char* name = "min";
+    using operation                   = hipcub::Min;
 
     static constexpr hipError_t (*kernel)(void*, size_t&, T*, T*, int, hipStream_t)
         = &hipcub::DeviceReduce::Min;
@@ -113,6 +142,7 @@ template<class T>
 struct argmin_kernel
 {
     static constexpr const char* name = "argmin";
+    using operation                   = hipcub::ArgMin;
 
     using Difference = int;
     using Iterator   = hipcub::ArgIndexInputIterator<T*, Difference>;

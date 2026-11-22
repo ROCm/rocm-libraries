@@ -161,6 +161,21 @@ class device_adjacent_difference_benchmark : public primbench::benchmark_interfa
         state.set_items(items);
         state.add_writes<T>(items);
 
+        state.test(
+            [&]
+            {
+                const auto     count = benchmark_utils::validation_size(items);
+                std::vector<T> expected(input.begin(), input.begin() + count);
+                for(size_t i = 0; i < count; ++i)
+                {
+                    if(left ? i != 0 : i + 1 < items)
+                    {
+                        expected[i] = hipcub::Sum{}(input[i], input[left ? i - 1 : i + 1]);
+                    }
+                }
+                benchmark_utils::check_output(copy ? d_output : d_input, expected);
+            });
+
         state.run(launch);
 
         HIP_CHECK(hipFree(d_input));

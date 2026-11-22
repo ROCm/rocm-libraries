@@ -33,18 +33,22 @@ enum class scan_type
     broadcast
 };
 
-template<class Runner, class T, unsigned int BlockSize, unsigned int WarpSize>
+template<class Runner,
+         class T,
+         unsigned int BlockSize,
+         unsigned int WarpSize,
+         unsigned int TrialCount = Trials>
 __global__ __launch_bounds__(BlockSize)
 void kernel(const T* input, T* output, const T init)
 {
-    Runner::template run<T, WarpSize>(input, output, init);
+    Runner::template run<T, WarpSize, TrialCount>(input, output, init);
 }
 
 struct inclusive_scan
 {
     static constexpr const char* name = "inclusive_scan";
 
-    template<class T, unsigned int WarpSize>
+    template<class T, unsigned int WarpSize, unsigned int TrialCount>
     __device__
     static auto run(const T* input, T* output, const T init)
         -> std::enable_if_t<benchmark_utils::device_test_enabled_for_warp_size_v<WarpSize>>
@@ -58,7 +62,7 @@ struct inclusive_scan
         __shared__ typename wscan_t::TempStorage storage;
         auto                                     scan_op = hipcub::Sum();
 #pragma nounroll
-        for(unsigned int trial = 0; trial < Trials; trial++)
+        for(unsigned int trial = 0; trial < TrialCount; trial++)
         {
             wscan_t(storage).InclusiveScan(value, value, scan_op);
         }
@@ -66,7 +70,7 @@ struct inclusive_scan
         output[i] = value;
     }
 
-    template<class T, unsigned int WarpSize>
+    template<class T, unsigned int WarpSize, unsigned int TrialCount>
     __device__
     static auto run(const T* /*input*/, T* /*output*/, const T /*init*/)
         -> std::enable_if_t<!benchmark_utils::device_test_enabled_for_warp_size_v<WarpSize>>
@@ -77,7 +81,7 @@ struct exclusive_scan
 {
     static constexpr const char* name = "exclusive_scan";
 
-    template<class T, unsigned int WarpSize>
+    template<class T, unsigned int WarpSize, unsigned int TrialCount>
     __device__
     static auto run(const T* input, T* output, const T init)
         -> std::enable_if_t<benchmark_utils::device_test_enabled_for_warp_size_v<WarpSize>>
@@ -89,14 +93,14 @@ struct exclusive_scan
         __shared__ typename wscan_t::TempStorage storage;
         auto                                     scan_op = hipcub::Sum();
 #pragma nounroll
-        for(unsigned int trial = 0; trial < Trials; trial++)
+        for(unsigned int trial = 0; trial < TrialCount; trial++)
         {
             wscan_t(storage).ExclusiveScan(value, value, init, scan_op);
         }
 
         output[i] = value;
     }
-    template<class T, unsigned int WarpSize>
+    template<class T, unsigned int WarpSize, unsigned int TrialCount>
         __device__
     static auto run(const T* /*input*/, T* /*output*/, const T /*init*/)
         -> std::enable_if_t<!benchmark_utils::device_test_enabled_for_warp_size_v<WarpSize>>
@@ -107,7 +111,7 @@ struct broadcast
 {
     static constexpr const char* name = "broadcast";
 
-    template<class T, unsigned int WarpSize>
+    template<class T, unsigned int WarpSize, unsigned int TrialCount>
     __device__
     static auto run(const T* input, T* output, const T init)
         -> std::enable_if_t<(benchmark_utils::device_test_enabled_for_warp_size_v<WarpSize>
@@ -123,7 +127,7 @@ struct broadcast
         using wscan_t = hipcub::WarpScan<T, WarpSize>;
         __shared__ typename wscan_t::TempStorage storage;
 #pragma nounroll
-        for(unsigned int trial = 0; trial < Trials; trial++)
+        for(unsigned int trial = 0; trial < TrialCount; trial++)
         {
             value = wscan_t(storage).Broadcast(value, src_lane);
         }
@@ -131,7 +135,7 @@ struct broadcast
         output[i] = value;
     }
 
-    template<class T, unsigned int WarpSize>
+    template<class T, unsigned int WarpSize, unsigned int TrialCount>
     __device__
     static auto run(const T* /*input*/, T* /*output*/, const T /*init*/)
         -> std::enable_if_t<!(benchmark_utils::device_test_enabled_for_warp_size_v<WarpSize>
@@ -160,7 +164,11 @@ class warp_scan_benchmark : public primbench::benchmark_interface
 
         const size_t items = BlockSize * ((input_items + BlockSize - 1) / BlockSize);
 
-        std::vector<T> input(items, 1.0f);
+        std::vector<T> input(items, T(1));
+        if constexpr(std::is_same_v<Benchmark, broadcast>)
+        {
+            input = benchmark_utils::get_random_data<T>(items, T(0), T(100));
+        }
 
         T* d_input;
         T* d_output;
@@ -171,6 +179,52 @@ class warp_scan_benchmark : public primbench::benchmark_interface
 
         state.set_items(items * Trials);
         state.add_writes<T>(items * Trials);
+
+        state.test(
+            [&]
+            {
+                if(!benchmark_utils::is_warp_size_supported(WarpSize))
+                    return;
+
+                if constexpr(std::is_same_v<Benchmark, broadcast>)
+                {
+                    const size_t         warp  = items > WarpSize ? 1 : 0;
+                    const size_t         start = warp * WarpSize;
+                    const std::vector<T> expected(WarpSize, input[start + warp]);
+                    benchmark_utils::check_output(d_output + start, expected);
+                }
+                else
+                {
+                    hipLaunchKernelGGL(
+                        HIP_KERNEL_NAME(kernel<Benchmark, T, BlockSize, WarpSize, 1>),
+                        dim3(1),
+                        dim3(WarpSize),
+                        0,
+                        stream,
+                        d_input,
+                        d_output,
+                        input.front());
+                    HIP_CHECK(hipStreamSynchronize(stream));
+
+                    std::vector<T> expected(WarpSize);
+                    if constexpr(std::is_same_v<Benchmark, exclusive_scan>)
+                    {
+                        benchmark_utils::host_exclusive_scan(input.begin(),
+                                                             input.begin() + WarpSize,
+                                                             input.front(),
+                                                             expected.begin(),
+                                                             hipcub::Sum{});
+                    }
+                    else
+                    {
+                        benchmark_utils::host_inclusive_scan(input.begin(),
+                                                             input.begin() + WarpSize,
+                                                             expected.begin(),
+                                                             hipcub::Sum{});
+                    }
+                    benchmark_utils::check_output(d_output, expected);
+                }
+            });
 
         state.run(
             [&]

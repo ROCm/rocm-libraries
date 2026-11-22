@@ -105,6 +105,34 @@ class encode_benchmark : public primbench::benchmark_interface
         state.set_items(items);
         state.add_writes<Key>(items);
 
+        state.test(
+            [&]
+            {
+                std::vector<Key>        expected_keys;
+                std::vector<count_type> expected_counts;
+
+                const auto count     = benchmark_utils::validation_size(items);
+                size_t     run_count = 0;
+                for(size_t begin = 0; begin < items;)
+                {
+                    size_t end = begin + 1;
+                    while(end < items && input[end] == input[begin])
+                        ++end;
+                    const auto length = end - begin;
+                    if(run_count < count)
+                    {
+                        expected_keys.push_back(input[begin]);
+                        expected_counts.push_back(static_cast<count_type>(length));
+                    }
+                    ++run_count;
+                    begin = end;
+                }
+                PRIMBENCH_ASSERT(benchmark_utils::read_output(d_runs_count_output), run_count);
+
+                benchmark_utils::check_output(d_unique_output, expected_keys);
+                benchmark_utils::check_output(d_counts_output, expected_counts);
+            });
+
         state.run(launch);
 
         HIP_CHECK(hipFree(d_temp_storage));
@@ -191,6 +219,37 @@ class non_trivial_runs_benchmark : public primbench::benchmark_interface
 
         state.set_items(items);
         state.add_writes<Key>(items);
+
+        state.test(
+            [&]
+            {
+                std::vector<offset_type> expected_offsets;
+                std::vector<count_type>  expected_counts;
+
+                const auto count     = benchmark_utils::validation_size(items);
+                size_t     run_count = 0;
+                for(size_t begin = 0; begin < items;)
+                {
+                    size_t end = begin + 1;
+                    while(end < items && input[end] == input[begin])
+                        ++end;
+                    const auto length = end - begin;
+                    if(length > 1)
+                    {
+                        if(run_count < count)
+                        {
+                            expected_offsets.push_back(static_cast<offset_type>(begin));
+                            expected_counts.push_back(static_cast<count_type>(length));
+                        }
+                        ++run_count;
+                    }
+                    begin = end;
+                }
+                PRIMBENCH_ASSERT(benchmark_utils::read_output(d_runs_count_output), run_count);
+
+                benchmark_utils::check_output(d_offsets_output, expected_offsets);
+                benchmark_utils::check_output(d_counts_output, expected_counts);
+            });
 
         state.run(launch);
 

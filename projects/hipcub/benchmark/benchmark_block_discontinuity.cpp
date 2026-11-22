@@ -205,6 +205,42 @@ class block_discontinuity_benchmark : public primbench::benchmark_interface
         state.set_items(Trials * items);
         state.add_writes<T>(Trials * items);
 
+        state.test(
+            [&]
+            {
+                constexpr bool heads = !std::is_same_v<Benchmark, flag_tails>;
+                constexpr bool tails = !std::is_same_v<Benchmark, flag_heads>;
+                constexpr T    tail_successor
+                    = std::is_same_v<Benchmark, flag_heads_and_tails> ? T(234) : T(123);
+
+                std::vector<T> expected(items_per_block);
+                const auto     striped_index = [](size_t i)
+                { return (i % ItemsPerThread) * BlockSize + i / ItemsPerThread; };
+                for(size_t i = 0; i < items_per_block; ++i)
+                    expected[i] = input[striped_index(i)];
+
+                std::vector<T> next(items_per_block);
+                for(unsigned int trial = 0; trial < Trials; ++trial)
+                {
+                    for(size_t i = 0; i < items_per_block; ++i)
+                    {
+                        const auto value = expected[i];
+                        const bool head
+                            = heads
+                              && (i == 0 ? !WithTile || value == T(123) : value == expected[i - 1]);
+                        const bool tail
+                            = tails
+                              && (i + 1 == items_per_block ? !WithTile || value == tail_successor
+                                                           : value == expected[i + 1]);
+                        next[i] = static_cast<T>(value + head + tail);
+                    }
+                    expected.swap(next);
+                }
+                for(size_t i = 0; i < items_per_block; ++i)
+                    next[striped_index(i)] = expected[i];
+                benchmark_utils::check_output(d_output, next);
+            });
+
         state.run(
             [&]
             {

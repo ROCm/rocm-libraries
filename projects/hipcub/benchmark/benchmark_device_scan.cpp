@@ -141,7 +141,8 @@ class scan_benchmark : public primbench::benchmark_interface
 
         BinaryFunction scan_op{};
 
-        std::vector<T> input         = benchmark_utils::get_random_data<T>(items, T(0), T(1000));
+        const T              upper = std::is_same_v<T, int8_t> ? T(127) : T(1000);
+        const std::vector<T> input = benchmark_utils::get_random_data<T>(items, T(0), upper);
         T              initial_value = T(123);
         T*             d_input;
         T*             d_output;
@@ -172,6 +173,30 @@ class scan_benchmark : public primbench::benchmark_interface
 
         state.set_items(items);
         state.add_writes<T>(items);
+
+        state.test(
+            [&]
+            {
+                const auto     count = benchmark_utils::validation_size(items);
+                std::vector<T> expected(count);
+
+                if constexpr(Exclusive)
+                {
+                    benchmark_utils::host_exclusive_scan(input.begin(),
+                                                         input.begin() + count,
+                                                         initial_value,
+                                                         expected.begin(),
+                                                         scan_op);
+                }
+                else
+                {
+                    benchmark_utils::host_inclusive_scan(input.begin(),
+                                                         input.begin() + count,
+                                                         expected.begin(),
+                                                         scan_op);
+                }
+                benchmark_utils::check_near_output(d_output, expected);
+            });
 
         state.run(launch);
 
@@ -209,7 +234,8 @@ class scan_by_key_benchmark : public primbench::benchmark_interface
             = benchmark_utils::get_random_segments<Key>(items,
                                                         max_segment_length,
                                                         std::random_device{}());
-        const std::vector<T> input = benchmark_utils::get_random_data<T>(items, T(0), T(1000));
+        const T              upper = std::is_same_v<T, int8_t> ? T(127) : T(1000);
+        const std::vector<T> input = benchmark_utils::get_random_data<T>(items, T(0), upper);
         const T              initial_value = T(123);
         Key*                 d_keys;
         T*                   d_input;
@@ -244,6 +270,38 @@ class scan_by_key_benchmark : public primbench::benchmark_interface
 
         state.set_items(items);
         state.add_writes<T>(items);
+
+        state.test(
+            [&]
+            {
+                const auto     count = benchmark_utils::validation_size(items);
+                std::vector<T> expected(count);
+
+                size_t begin = 0;
+                while(begin < count)
+                {
+                    size_t end = begin + 1;
+                    while(end < count && keys[end] == keys[begin])
+                        ++end;
+                    if constexpr(Exclusive)
+                    {
+                        benchmark_utils::host_exclusive_scan(input.begin() + begin,
+                                                             input.begin() + end,
+                                                             initial_value,
+                                                             expected.begin() + begin,
+                                                             scan_op);
+                    }
+                    else
+                    {
+                        benchmark_utils::host_inclusive_scan(input.begin() + begin,
+                                                             input.begin() + end,
+                                                             expected.begin() + begin,
+                                                             scan_op);
+                    }
+                    begin = end;
+                }
+                benchmark_utils::check_near_output(d_output, expected);
+            });
 
         state.run(launch);
 

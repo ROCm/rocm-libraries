@@ -71,25 +71,27 @@ template<typename T, unsigned int ItemsPerThread, unsigned int BlockSize>
 struct operation<custom_operation, T, ItemsPerThread, BlockSize>
 {
     using storage_type = empty_storage_type;
+    static constexpr unsigned int addend  = 666;
+    static constexpr unsigned int repeats = 30;
 
     HIPCUB_DEVICE
-    inline void
-        operator()(storage_type& storage,
-                   T (&input)[ItemsPerThread],
-                   T* global_mem_output = nullptr) const
+    inline void                   operator()(storage_type& storage,
+                           T (&input)[ItemsPerThread],
+                           T* global_mem_output = nullptr) const
     {
         (void)storage;
         (void)global_mem_output;
+        using unsigned_type = std::make_unsigned_t<T>;
 
 #pragma unroll
         for(unsigned int i = 0; i < ItemsPerThread; i++)
         {
-            input[i]                       = input[i] + 666;
-            constexpr unsigned int repeats = 30;
+            input[i] = static_cast<T>(static_cast<unsigned_type>(input[i]) + addend);
 #pragma unroll
             for(unsigned int j = 0; j < repeats; j++)
             {
-                input[i] = input[i] * (input[j % ItemsPerThread]);
+                input[i] = static_cast<T>(static_cast<unsigned_type>(input[i])
+                                          * static_cast<unsigned_type>(input[j % ItemsPerThread]));
             }
         }
     }
@@ -246,7 +248,7 @@ template<typename T,
          memory_operation_method MemOp,
          typename CustomOp>
 __global__ __launch_bounds__(BlockSize)
-void operation_kernel(T* input, T* output, CustomOp op)
+void operation_kernel(T* input, T* output, T* atomic_output, CustomOp op)
 {
     using mem_op     = memory_operation<MemOp>;
     using load_type  = hipcub::BlockLoad<T, BlockSize, ItemsPerThread, mem_op::load_type>;
@@ -265,7 +267,7 @@ void operation_kernel(T* input, T* output, CustomOp op)
     T items[ItemsPerThread];
     load_type(storage.load).Load(input + offset, items);
 
-    op(storage.operand, items, output);
+    op(storage.operand, items, atomic_output);
 
     // sync before re-using shared memory from load or from operand
     __syncthreads();
@@ -327,9 +329,12 @@ class device_memory_benchmark : public primbench::benchmark_interface
         const size_t bytes  = state.size;
         const auto&  stream = state.stream;
 
-        const size_t items = bytes / sizeof(T);
-
-        const size_t   grid_size = items / size_t(BlockSize * ItemsPerThread);
+        constexpr size_t items_per_block = BlockSize * ItemsPerThread;
+        constexpr bool   uses_atomics    = KernelOp == atomics_no_collision
+                                      || KernelOp == atomics_inter_block_collision
+                                      || KernelOp == atomics_inter_warp_collision;
+        const size_t   grid_size = std::max(size_t{1}, bytes / sizeof(T) / items_per_block);
+        const size_t   items     = grid_size * items_per_block;
         std::vector<T> input
             = benchmark_utils::get_random_data<T>(items,
                                                   benchmark_utils::generate_limits<T>::min(),
@@ -342,10 +347,87 @@ class device_memory_benchmark : public primbench::benchmark_interface
         HIP_CHECK(hipMemcpy(d_input, input.data(), items * sizeof(T), hipMemcpyHostToDevice));
         HIP_CHECK(hipDeviceSynchronize());
 
-        operation<KernelOp, T, ItemsPerThread, BlockSize> selected_operation;
+        T* d_atomic_output = nullptr;
+        if constexpr(uses_atomics)
+        {
+            const auto atomic_items
+                = KernelOp == atomics_inter_block_collision ? items_per_block : items;
+            HIP_CHECK(hipMalloc(&d_atomic_output, atomic_items * sizeof(T)));
+            HIP_CHECK(hipMemset(d_atomic_output, 0, atomic_items * sizeof(T)));
+        }
+
+        using operation_type = operation<KernelOp, T, ItemsPerThread, BlockSize>;
+        operation_type selected_operation;
 
         state.set_items(items);
         state.add_writes<T>(items);
+
+        state.test(
+            [&]
+            {
+                std::vector<T> expected(input.begin(), input.begin() + items_per_block);
+                const auto     memory_index = [](size_t lane, size_t item)
+                {
+                    if constexpr(MemOp == striped)
+                        return item * BlockSize + lane;
+                    else
+                        return lane * ItemsPerThread + item;
+                };
+
+                if constexpr(KernelOp == block_scan)
+                {
+                    T sum{};
+                    for(size_t lane = 0; lane < BlockSize; ++lane)
+                    {
+                        for(size_t i = 0; i < ItemsPerThread; ++i)
+                        {
+                            const auto index = memory_index(lane, i);
+                            sum              = benchmark_utils::add(sum, input[index]);
+                            expected[index]  = sum;
+                        }
+                    }
+                }
+                else if constexpr(KernelOp == custom_operation)
+                {
+                    using unsigned_type = std::make_unsigned_t<T>;
+                    for(size_t lane = 0; lane < BlockSize; ++lane)
+                    {
+                        for(size_t i = 0; i < ItemsPerThread; ++i)
+                        {
+                            auto& value = expected[memory_index(lane, i)];
+                            value       = benchmark_utils::add(value, T(operation_type::addend));
+                            for(unsigned int j = 0; j < operation_type::repeats; ++j)
+                            {
+                                value = static_cast<T>(
+                                    static_cast<unsigned_type>(value)
+                                    * static_cast<unsigned_type>(
+                                        expected[memory_index(lane, j % ItemsPerThread)]));
+                            }
+                        }
+                    }
+                }
+                benchmark_utils::check_output(d_output, expected);
+
+                if constexpr(uses_atomics)
+                {
+                    const size_t   warp_size = HIPCUB_HOST_WARP_THREADS;
+                    std::vector<T> atomic_expected(items_per_block);
+                    size_t         updated          = items_per_block;
+                    size_t         updates_per_item = 1;
+                    if constexpr(KernelOp == atomics_inter_block_collision)
+                        updates_per_item = grid_size;
+                    else if constexpr(KernelOp == atomics_inter_warp_collision)
+                    {
+                        updated          = warp_size * ItemsPerThread;
+                        updates_per_item = BlockSize / warp_size;
+                    }
+
+                    std::fill_n(atomic_expected.begin(),
+                                updated,
+                                static_cast<T>(666 * updates_per_item));
+                    benchmark_utils::check_output(d_atomic_output, atomic_expected);
+                }
+            });
 
         state.run(
             [&]
@@ -358,11 +440,16 @@ class device_memory_benchmark : public primbench::benchmark_interface
                     stream,
                     d_input,
                     d_output,
+                    d_atomic_output,
                     selected_operation);
             });
 
         HIP_CHECK(hipFree(d_input));
         HIP_CHECK(hipFree(d_output));
+        if constexpr(uses_atomics)
+        {
+            HIP_CHECK(hipFree(d_atomic_output));
+        }
     }
 };
 
@@ -383,20 +470,26 @@ class memcpy_benchmark : public primbench::benchmark_interface
         const size_t bytes  = state.size;
         const auto&  stream = state.stream;
 
-        const size_t items = bytes / sizeof(T);
+        const size_t items = std::max(size_t{1}, bytes / sizeof(T));
 
-        // Allocate device buffers
-        // Note: since this benchmark only tests memcpy performance between device
-        // buffers, we don't really need to copy data into these from the host -
-        // whatever happens to be in memory will suffice.
         T* d_input;
         T* d_output;
         HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_input), items * sizeof(T)));
         HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_output), items * sizeof(T)));
+        constexpr unsigned char pattern = 0xa5;
+        HIP_CHECK(hipMemset(d_input, pattern, items * sizeof(T)));
         HIP_CHECK(hipDeviceSynchronize());
 
         state.set_items(items);
         state.add_writes<T>(items);
+
+        state.test(
+            [&]
+            {
+                const auto count  = benchmark_utils::validation_size(items * sizeof(T));
+                const auto output = reinterpret_cast<const unsigned char*>(d_output);
+                benchmark_utils::check_output(output, std::vector<unsigned char>(count, pattern));
+            });
 
         state.run(
             [&]

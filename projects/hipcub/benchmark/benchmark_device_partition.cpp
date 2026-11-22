@@ -43,6 +43,26 @@ struct LessOp
 private:
     T pivot_;
 };
+template<class T, class Predicate>
+void check_partition(const std::vector<T>& input,
+                     const T*              d_output,
+                     const unsigned int*   d_num_selected,
+                     Predicate             select)
+{
+    std::vector<T> expected_selected;
+    std::vector<T> expected_rejected;
+    const auto     count = benchmark_utils::validation_size(input.size());
+    const auto selected  = benchmark_utils::get_selected_prefix(input, expected_selected, select);
+    for(size_t i = input.size(); i > 0 && expected_rejected.size() < count; --i)
+    {
+        if(!select(i - 1))
+            expected_rejected.push_back(input[i - 1]);
+    }
+    PRIMBENCH_ASSERT(benchmark_utils::read_output(d_num_selected), selected);
+    benchmark_utils::check_output(d_output, expected_selected);
+    benchmark_utils::check_output(d_output + selected, expected_rejected);
+}
+
 } // namespace
 
 template<typename T, typename F, int Threshold>
@@ -81,8 +101,10 @@ private:
         unsigned int* d_num_selected_output = nullptr;
         HIP_CHECK(hipMalloc(&d_input, input.size() * sizeof(T)));
         HIP_CHECK(hipMalloc(&d_flags, input.size() * sizeof(F)));
+        HIP_CHECK(hipMemcpy(d_flags, flags.data(), items * sizeof(F), hipMemcpyHostToDevice));
         HIP_CHECK(hipMalloc(&d_output, input.size() * sizeof(T)));
         HIP_CHECK(hipMalloc(&d_num_selected_output, sizeof(unsigned int)));
+        HIP_CHECK(hipMemcpy(d_input, input.data(), items * sizeof(T), hipMemcpyHostToDevice));
 
         void*  d_temp_storage = nullptr;
         size_t temp_storage_bytes;
@@ -106,6 +128,15 @@ private:
 
         state.set_items(input.size());
         state.add_writes<T>(input.size());
+
+        state.test(
+            [&]
+            {
+                check_partition(input,
+                                d_output,
+                                d_num_selected_output,
+                                [&](size_t i) { return flags[i]; });
+            });
 
         state.run(launch);
 
@@ -145,6 +176,7 @@ private:
         HIP_CHECK(hipMalloc(&d_input, input.size() * sizeof(T)));
         HIP_CHECK(hipMalloc(&d_output, input.size() * sizeof(T)));
         HIP_CHECK(hipMalloc(&d_num_selected_output, sizeof(unsigned int)));
+        HIP_CHECK(hipMemcpy(d_input, input.data(), items * sizeof(T), hipMemcpyHostToDevice));
 
         const auto select_op = LessOp<T>{T(Threshold)};
 
@@ -170,6 +202,15 @@ private:
 
         state.set_items(input.size());
         state.add_writes<T>(input.size());
+
+        state.test(
+            [&]
+            {
+                check_partition(input,
+                                d_output,
+                                d_num_selected_output,
+                                [&](size_t i) { return select_op(input[i]); });
+            });
 
         state.run(launch);
 
@@ -213,6 +254,7 @@ private:
         HIP_CHECK(hipMalloc(&d_second_output, input.size() * sizeof(T)));
         HIP_CHECK(hipMalloc(&d_unselected_output, input.size() * sizeof(T)));
         HIP_CHECK(hipMalloc(&d_num_selected_output, 2 * sizeof(unsigned int)));
+        HIP_CHECK(hipMemcpy(d_input, input.data(), items * sizeof(T), hipMemcpyHostToDevice));
 
         const auto select_first_part_op  = LessOp<T>{T(SmallThreshold)};
         const auto select_second_part_op = LessOp<T>{T(LargeThreshold)};
@@ -242,6 +284,28 @@ private:
 
         state.set_items(input.size());
         state.add_writes<T>(input.size());
+
+        state.test(
+            [&]
+            {
+                const auto     count = benchmark_utils::validation_size(items);
+                std::vector<T> expected[3];
+                unsigned int   counts[3] = {};
+                for(const auto& value : input)
+                {
+                    const auto partition = select_first_part_op(value)    ? 0
+                                           : select_second_part_op(value) ? 1
+                                                                          : 2;
+                    if(expected[partition].size() < count)
+                        expected[partition].push_back(value);
+                    ++counts[partition];
+                }
+                const auto output_counts = benchmark_utils::read_output(d_num_selected_output, 2);
+                PRIMBENCH_ASSERT(output_counts, {counts[0], counts[1]});
+                benchmark_utils::check_output(d_first_output, expected[0]);
+                benchmark_utils::check_output(d_second_output, expected[1]);
+                benchmark_utils::check_output(d_unselected_output, expected[2]);
+            });
 
         state.run(launch);
 

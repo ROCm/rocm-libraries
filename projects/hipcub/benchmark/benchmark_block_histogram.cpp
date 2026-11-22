@@ -64,9 +64,11 @@ struct histogram
         for(unsigned int trial = 0; trial < Trials; trial++)
         {
             bhistogram_t(storage).Histogram(values, histogram);
+            __syncthreads();
 
             // Stop optimizer from collapsing loop
             values[0] ^= static_cast<T>(histogram[hipThreadIdx_x] & 1);
+            __syncthreads();
         }
 
 #pragma unroll
@@ -142,6 +144,14 @@ class block_histogram_benchmark : public primbench::benchmark_interface
 
         state.set_items(Trials * items);
         state.add_writes<T>(Trials * items);
+
+        state.test(
+            [&]
+            {
+                std::vector<T> expected(BinSize);
+                expected[0] = static_cast<T>(items_per_block);
+                benchmark_utils::check_output(d_output, expected);
+            });
 
         state.run(
             [&]

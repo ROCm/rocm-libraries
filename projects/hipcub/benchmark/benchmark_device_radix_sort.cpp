@@ -153,6 +153,13 @@ class sort_keys_benchmark : public primbench::benchmark_interface
         state.set_items(items);
         state.add_writes<Key>(items);
 
+        state.test(
+            [&]
+            {
+                const std::conditional_t<Descending, std::greater<Key>, std::less<Key>> compare{};
+                benchmark_utils::check_sorted_keys(d_keys_output, keys_input, 0, items, compare);
+            });
+
         state.run(launch);
 
         HIP_CHECK(hipFree(d_temp_storage));
@@ -321,6 +328,19 @@ class sort_pairs_benchmark : public primbench::benchmark_interface
         state.set_items(items);
         state.add_writes<Key>(items);
         state.add_writes<Value>(items);
+
+        state.test(
+            [&]
+            {
+                const std::conditional_t<Descending, std::greater<Key>, std::less<Key>> compare{};
+                benchmark_utils::check_sorted_pairs(d_keys_output,
+                                                    d_values_output,
+                                                    keys_input,
+                                                    values_input,
+                                                    0,
+                                                    items,
+                                                    compare);
+            });
 
         state.run(launch);
 

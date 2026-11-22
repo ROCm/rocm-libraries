@@ -103,10 +103,9 @@ private:
     {
         using counter_type = unsigned int;
 
-        const T lower_level = 0;
-        // casting for compilation with CUB backend because
-        // there is no casting from size_t (aka unsigned long) to __half
-        const T upper_level = static_cast<T>(Bins * Scale);
+        using level_type       = std::conditional_t<std::is_same_v<T, __half>, float, T>;
+        const auto lower_level = level_type{0};
+        const auto upper_level = static_cast<level_type>(Bins * Scale);
 
         const size_t items  = state.size;
         const auto&  stream = state.stream;
@@ -117,7 +116,7 @@ private:
         T*            d_input;
         counter_type* d_histogram;
         HIP_CHECK(hipMalloc(&d_input, items * sizeof(T)));
-        HIP_CHECK(hipMalloc(&d_histogram, items * sizeof(counter_type)));
+        HIP_CHECK(hipMalloc(&d_histogram, Bins * sizeof(counter_type)));
         HIP_CHECK(hipMemcpy(d_input, input.data(), items * sizeof(T), hipMemcpyHostToDevice));
 
         void*  d_temp_storage = nullptr;
@@ -143,6 +142,34 @@ private:
 
         state.set_items(items);
         state.add_writes<T>(items);
+
+        state.test(
+            [&]
+            {
+                std::vector<counter_type> expected(Bins);
+                for(const auto value : input)
+                {
+                    const auto sample = static_cast<level_type>(value);
+                    if(sample >= upper_level)
+                        continue;
+
+                    size_t bin;
+#ifdef HIPCUB_ROCPRIM_API
+                    if constexpr(std::is_floating_point_v<level_type>)
+                    {
+                        const auto inverse_scale = static_cast<level_type>(Bins) / upper_level;
+                        bin                      = static_cast<size_t>(sample * inverse_scale);
+                    }
+                    else
+#endif
+                    {
+                        bin = static_cast<size_t>(sample / Scale);
+                    }
+                    if(bin < Bins)
+                        ++expected[bin];
+                }
+                benchmark_utils::check_output(d_histogram, expected);
+            });
 
         state.run(launch);
 
@@ -230,6 +257,22 @@ private:
         state.set_items(items * Channels);
         state.add_writes<T>(items * Channels);
 
+        state.test(
+            [&]
+            {
+                for(unsigned int channel = 0; channel < ActiveChannels; ++channel)
+                {
+                    std::vector<counter_type> expected(Bins);
+                    for(size_t i = channel; i < input.size(); i += Channels)
+                    {
+                        const auto bin = static_cast<size_t>(input[i]) / Scale;
+                        if(bin < Bins)
+                            ++expected[bin];
+                    }
+                    benchmark_utils::check_output(d_histogram[channel], expected);
+                }
+            });
+
         state.run(launch);
 
         HIP_CHECK(hipFree(d_temp_storage));
@@ -274,7 +317,7 @@ class range_benchmark : public primbench::benchmark_interface
         counter_type* d_histogram;
         HIP_CHECK(hipMalloc(&d_input, items * sizeof(T)));
         HIP_CHECK(hipMalloc(&d_levels, (Bins + 1) * sizeof(T)));
-        HIP_CHECK(hipMalloc(&d_histogram, items * sizeof(counter_type)));
+        HIP_CHECK(hipMalloc(&d_histogram, Bins * sizeof(counter_type)));
         HIP_CHECK(hipMemcpy(d_input, input.data(), items * sizeof(T), hipMemcpyHostToDevice));
         HIP_CHECK(
             hipMemcpy(d_levels, levels.data(), (Bins + 1) * sizeof(T), hipMemcpyHostToDevice));
@@ -301,6 +344,19 @@ class range_benchmark : public primbench::benchmark_interface
 
         state.set_items(items);
         state.add_writes<T>(items);
+
+        state.test(
+            [&]
+            {
+                std::vector<counter_type> expected(Bins);
+                for(const auto sample : input)
+                {
+                    const auto bin = static_cast<size_t>(sample);
+                    if(bin < Bins)
+                        ++expected[bin];
+                }
+                benchmark_utils::check_output(d_histogram, expected);
+            });
 
         state.run(launch);
 
@@ -354,7 +410,7 @@ class multi_range_benchmark : public primbench::benchmark_interface
         for(unsigned int channel = 0; channel < ActiveChannels; channel++)
         {
             HIP_CHECK(hipMalloc(&d_levels[channel], num_levels_channel * sizeof(T)));
-            HIP_CHECK(hipMalloc(&d_histogram[channel], items * sizeof(counter_type)));
+            HIP_CHECK(hipMalloc(&d_histogram[channel], Bins * sizeof(counter_type)));
         }
 
         HIP_CHECK(
@@ -390,6 +446,22 @@ class multi_range_benchmark : public primbench::benchmark_interface
 
         state.set_items(items * Channels);
         state.add_writes<T>(items * Channels);
+
+        state.test(
+            [&]
+            {
+                for(unsigned int channel = 0; channel < ActiveChannels; ++channel)
+                {
+                    std::vector<counter_type> expected(Bins);
+                    for(size_t i = channel; i < input.size(); i += Channels)
+                    {
+                        const auto bin = static_cast<size_t>(input[i]);
+                        if(bin < Bins)
+                            ++expected[bin];
+                    }
+                    benchmark_utils::check_output(d_histogram[channel], expected);
+                }
+            });
 
         state.run(launch);
 

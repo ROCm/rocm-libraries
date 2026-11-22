@@ -255,6 +255,57 @@ class block_exchange_benchmark : public primbench::benchmark_interface
         state.set_items(Trials * items);
         state.add_writes<T>(Trials * items);
 
+        state.test(
+            [&]
+            {
+                std::vector<T> expected(input.begin(), input.begin() + items_per_block);
+                std::vector<T> next(items_per_block);
+                if constexpr(std::is_same_v<Benchmark, scatter_to_blocked>
+                             || std::is_same_v<Benchmark, scatter_to_striped>)
+                {
+                    for(unsigned int trial = 0; trial < Trials; ++trial)
+                    {
+                        for(unsigned int i = 0; i < items_per_block; ++i)
+                        {
+                            const auto rank = ranks[i];
+                            const auto index
+                                = std::is_same_v<Benchmark, scatter_to_blocked>
+                                          && trial + 1 < Trials
+                                      ? (rank % ItemsPerThread) * BlockSize + rank / ItemsPerThread
+                                      : rank;
+                            next[index] = expected[i];
+                        }
+                        expected.swap(next);
+                    }
+                }
+                else
+                {
+                    constexpr bool blocked_input
+                        = std::is_same_v<Benchmark, blocked_to_striped>
+                          || std::is_same_v<Benchmark, blocked_to_warp_striped>;
+                    const auto lanes = std::is_same_v<Benchmark, blocked_to_warp_striped>
+                                               || std::is_same_v<Benchmark, warp_striped_to_blocked>
+                                           ? HIPCUB_HOST_WARP_THREADS
+                                           : BlockSize;
+                    const auto tile  = lanes * ItemsPerThread;
+                    for(unsigned int trial = 1; trial < Trials; ++trial)
+                    {
+                        for(unsigned int i = 0; i < items_per_block; ++i)
+                        {
+                            const auto offset  = i % tile;
+                            const auto striped = i - offset + (offset % ItemsPerThread) * lanes
+                                                 + offset / ItemsPerThread;
+                            if constexpr(blocked_input)
+                                next[i] = expected[striped];
+                            else
+                                next[striped] = expected[i];
+                        }
+                        expected.swap(next);
+                    }
+                }
+                benchmark_utils::check_output(d_output, expected);
+            });
+
         state.run(
             [&]
             {

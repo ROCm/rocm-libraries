@@ -111,6 +111,38 @@ class reduce_benchmark : public primbench::benchmark_interface
         state.set_items(items);
         state.add_writes<Value>(items);
 
+        state.test(
+            [&]
+            {
+                const auto count  = benchmark_utils::validation_size(segments_count);
+                const auto output = benchmark_utils::read_output(d_aggregates_output, count);
+                using Op          = typename SegmentedReduceKernel::operation;
+                for(size_t i = 0; i < count; ++i)
+                {
+                    const auto begin = values_input.begin() + offsets[i];
+                    const auto end   = values_input.begin() + offsets[i + 1];
+                    if constexpr(std::is_same_v<Op, hipcub::Sum>)
+                    {
+                        benchmark_utils::check_near(output[i],
+                                                    benchmark_utils::reference_sum(begin, end));
+                    }
+                    else
+                    {
+                        const auto min      = std::min_element(begin, end);
+                        const T    expected = min == end ? std::numeric_limits<T>::max() : *min;
+                        if constexpr(std::is_same_v<Op, hipcub::ArgMin>)
+                        {
+                            PRIMBENCH_ASSERT(output[i].key, min == end ? 1 : min - begin);
+                            benchmark_utils::check_value(output[i].value, expected);
+                        }
+                        else
+                        {
+                            benchmark_utils::check_value(output[i], expected);
+                        }
+                    }
+                }
+            });
+
         state.run(launch);
 
         HIP_CHECK(hipFree(d_temp_storage));
@@ -127,6 +159,7 @@ template<typename T>
 struct min_kernel
 {
     static constexpr const char* name = "min";
+    using operation                   = hipcub::Min;
 
     static constexpr hipError_t (*kernel)(
         void*, size_t&, T*, T*, int, OffsetType*, OffsetType*, hipStream_t)
@@ -137,6 +170,7 @@ template<typename T>
 struct sum_kernel
 {
     static constexpr const char* name = "sum";
+    using operation                   = hipcub::Sum;
 
     static constexpr hipError_t (*kernel)(
         void*, size_t&, T*, T*, int, OffsetType*, OffsetType*, hipStream_t)
@@ -151,6 +185,7 @@ struct argmin_kernel
     using KeyValue   = typename Iterator::value_type;
 
     static constexpr const char* name = "argmin";
+    using operation                   = hipcub::ArgMin;
 
     static constexpr hipError_t (*kernel)(
         void*, size_t&, T*, KeyValue*, int, OffsetType*, OffsetType*, hipStream_t)

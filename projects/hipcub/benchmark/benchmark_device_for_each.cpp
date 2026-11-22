@@ -72,10 +72,38 @@ class for_each_benchmark : public primbench::benchmark_interface
         state.set_items(items);
         state.add_reads<T>(items);
 
-        state.run(
-            [&] {
-                HIP_CHECK(hipcub::DeviceFor::ForEach(d_input, d_input + items, device_op, stream));
+        const auto launch = [&]
+        { HIP_CHECK(hipcub::DeviceFor::ForEach(d_input, d_input + items, device_op, stream)); };
+
+        state.test(
+            [&]
+            {
+                const auto output = benchmark_utils::read_output(d_count);
+                PRIMBENCH_ASSERT(output, 0u);
+
+                const T zero{};
+                HIP_CHECK(hipMemcpy(d_input, &zero, sizeof(T), hipMemcpyHostToDevice));
+                if(items > 1)
+                {
+                    HIP_CHECK(
+                        hipMemcpy(d_input + items - 1, &zero, sizeof(T), hipMemcpyHostToDevice));
+                }
+                launch();
+                HIP_CHECK(hipStreamSynchronize(stream));
+                PRIMBENCH_ASSERT(benchmark_utils::read_output(d_count), items > 1 ? 2u : 1u);
+                HIP_CHECK(
+                    hipMemcpy(d_input, values_input.data(), sizeof(T), hipMemcpyHostToDevice));
+                if(items > 1)
+                {
+                    HIP_CHECK(hipMemcpy(d_input + items - 1,
+                                        values_input.data() + items - 1,
+                                        sizeof(T),
+                                        hipMemcpyHostToDevice));
+                }
+                HIP_CHECK(hipMemset(d_count, 0, sizeof(*d_count)));
             });
+
+        state.run(launch);
 
         HIP_CHECK(hipFree(d_count));
         HIP_CHECK(hipFree(d_input));

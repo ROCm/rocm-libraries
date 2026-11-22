@@ -97,6 +97,18 @@ private:
         state.set_items(items);
         state.add_writes<T>(items);
 
+        state.test(
+            [&]
+            {
+                std::vector<T> expected;
+                const auto     selected
+                    = benchmark_utils::get_selected_prefix(input,
+                                                           expected,
+                                                           [&](size_t i) { return flags[i]; });
+                PRIMBENCH_ASSERT(benchmark_utils::read_output(d_selected_count_output), selected);
+                benchmark_utils::check_output(d_output, expected);
+            });
+
         state.run(launch);
 
         HIP_CHECK(hipFree(d_input));
@@ -113,13 +125,17 @@ private:
 template<class T>
 struct SelectOperator
 {
+    static constexpr float upper = std::is_same_v<T, int8_t>    ? 127.0f
+                                   : std::is_same_v<T, uint8_t> ? 255.0f
+                                                                : 1000.0f;
     float true_probability;
+
     SelectOperator(float true_probability_) : true_probability(true_probability_) {}
-    HIPCUB_DEVICE
-    inline constexpr bool
-        operator()(const T& value)
+
+    HIPCUB_HOST_DEVICE
+    bool operator()(const T& value) const
     {
-        return value < T(1000 * true_probability);
+        return value < T(upper * true_probability);
     }
 };
 
@@ -146,7 +162,8 @@ public:
         const size_t items  = state.size;
         const auto&  stream = state.stream;
 
-        std::vector<T> input = benchmark_utils::get_random_data<T>(items, T(0), T(1000));
+        const auto input
+            = benchmark_utils::get_random_data<T>(items, T(0), T(SelectOperator<T>::upper));
 
         SelectOperator<T> select_op(m_true_probability);
 
@@ -184,6 +201,18 @@ public:
         state.set_items(items);
         state.add_writes<T>(items);
 
+        state.test(
+            [&]
+            {
+                std::vector<T> expected;
+                const auto     selected = benchmark_utils::get_selected_prefix(
+                    input,
+                    expected,
+                    [&](size_t i) { return select_op(input[i]); });
+                PRIMBENCH_ASSERT(benchmark_utils::read_output(d_selected_count_output), selected);
+                benchmark_utils::check_output(d_output, expected);
+            });
+
         state.run(launch);
 
         HIP_CHECK(hipFree(d_input));
@@ -195,6 +224,16 @@ public:
 
 private:
     float m_true_probability;
+};
+
+template<class Flag>
+struct SelectFlag
+{
+    HIPCUB_HOST_DEVICE
+    bool operator()(Flag flag) const
+    {
+        return flag != Flag{};
+    }
 };
 
 template<class T, class FlagType>
@@ -229,7 +268,7 @@ public:
         std::vector<FlagType> flags
             = benchmark_utils::get_random_data01<FlagType>(items, m_true_probability);
 
-        SelectOperator<T> select_flag_op(m_true_probability);
+        const SelectFlag<FlagType> select_flag_op{};
 
         T*            d_input;
         FlagType*     d_flags;
@@ -271,6 +310,18 @@ public:
 
         state.set_items(items);
         state.add_writes<T>(items);
+
+        state.test(
+            [&]
+            {
+                std::vector<T> expected;
+                const auto     selected = benchmark_utils::get_selected_prefix(
+                    input,
+                    expected,
+                    [&](size_t i) { return select_flag_op(flags[i]); });
+                PRIMBENCH_ASSERT(benchmark_utils::read_output(d_selected_count_output), selected);
+                benchmark_utils::check_output(d_output, expected);
+            });
 
         state.run(launch);
 
@@ -356,6 +407,18 @@ private:
 
         state.set_items(items);
         state.add_writes<T>(items);
+
+        state.test(
+            [&]
+            {
+                std::vector<T> expected;
+                const auto     selected = benchmark_utils::get_selected_prefix(
+                    input,
+                    expected,
+                    [&](size_t i) { return i == 0 || input[i] != input[i - 1]; });
+                PRIMBENCH_ASSERT(benchmark_utils::read_output(d_selected_count_output), selected);
+                benchmark_utils::check_output(d_output, expected);
+            });
 
         state.run(launch);
 
@@ -459,6 +522,30 @@ private:
         state.set_items(items);
         state.add_writes<Key>(items);
         state.add_writes<Value>(items);
+
+        state.test(
+            [&]
+            {
+                std::vector<Key>   expected_keys;
+                std::vector<Value> expected_values;
+                size_t             selected = 0;
+                const auto         count    = benchmark_utils::validation_size(items);
+                for(size_t i = 0; i < items; ++i)
+                {
+                    if(i == 0 || input_keys[i] != input_keys[i - 1])
+                    {
+                        if(expected_keys.size() < count)
+                        {
+                            expected_keys.push_back(input_keys[i]);
+                            expected_values.push_back(input_values[i]);
+                        }
+                        ++selected;
+                    }
+                }
+                PRIMBENCH_ASSERT(benchmark_utils::read_output(d_selected_count_output), selected);
+                benchmark_utils::check_output(d_keys_output, expected_keys);
+                benchmark_utils::check_output(d_values_output, expected_values);
+            });
 
         state.run(launch);
 

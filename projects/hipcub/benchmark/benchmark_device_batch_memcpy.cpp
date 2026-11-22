@@ -320,6 +320,33 @@ class batch_memcpy_benchmark : public primbench::benchmark_interface
         state.set_items(data.items);
         state.add_writes<ValueType>(data.items);
 
+        state.test(
+            [&]
+            {
+                constexpr size_t samples = 16;
+                for(size_t sample = 0; sample < samples; ++sample)
+                {
+                    const size_t i         = sample * (num_buffers - 1) / (samples - 1);
+                    const auto   src       = benchmark_utils::read_output(data.d_buffer_srcs + i);
+                    const auto   dst       = benchmark_utils::read_output(data.d_buffer_dsts + i);
+                    const auto   size      = benchmark_utils::read_output(data.d_buffer_sizes + i);
+                    const size_t bytes     = size;
+                    const auto   src_bytes = reinterpret_cast<const unsigned char*>(src);
+                    const auto   dst_bytes = reinterpret_cast<const unsigned char*>(dst);
+                    const auto   count     = std::min(bytes, size_t{32});
+                    benchmark_utils::check_output(dst_bytes,
+                                                  benchmark_utils::read_output(src_bytes, count));
+                    if(bytes > count)
+                    {
+                        const auto tail_count = std::min(bytes - count, count);
+                        const auto offset     = bytes - tail_count;
+                        benchmark_utils::check_output(
+                            dst_bytes + offset,
+                            benchmark_utils::read_output(src_bytes + offset, tail_count));
+                    }
+                }
+            });
+
         state.run(launch);
 
         HIP_CHECK(hipFree(d_temp_storage));

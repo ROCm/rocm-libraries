@@ -226,6 +226,30 @@ struct subtract_right_partial_tile
     }
 };
 
+template<unsigned int BlockSize, unsigned int ItemsPerThread, bool Left, bool WithTile, class T>
+void check_output(const std::vector<T>& input, const T* d_output, size_t tile_size)
+{
+    constexpr auto items_per_block = BlockSize * ItemsPerThread;
+    const auto     striped_index
+        = [](size_t i) { return (i % ItemsPerThread) * BlockSize + i / ItemsPerThread; };
+    std::vector<T> expected(items_per_block);
+    for(size_t i = 0; i < items_per_block; ++i)
+    {
+        const auto index      = striped_index(i);
+        const auto value      = input[index];
+        auto       difference = value;
+        if(i < tile_size)
+        {
+            if(Left ? i != 0 : i + 1 < tile_size)
+                difference = minus<T>{}(value, input[striped_index(Left ? i - 1 : i + 1)]);
+            else if constexpr(WithTile)
+                difference = minus<T>{}(value, T(123));
+        }
+        expected[index] = benchmark_utils::add(value, difference);
+    }
+    benchmark_utils::check_output(d_output, expected);
+}
+
 template<class Benchmark,
          class T,
          unsigned int BlockSize,
@@ -269,19 +293,31 @@ class block_adjacent_difference_benchmark : public primbench::benchmark_interfac
         state.set_items(Trials * items);
         state.add_writes<T>(Trials * items);
 
-        state.run(
+        const auto launch = [&](size_t blocks, unsigned int trials)
+        {
+            hipLaunchKernelGGL(
+                HIP_KERNEL_NAME(kernel<Benchmark, BlockSize, ItemsPerThread, WithTile>),
+                dim3(blocks),
+                dim3(BlockSize),
+                0,
+                stream,
+                d_input,
+                d_output,
+                trials);
+        };
+
+        state.test(
             [&]
             {
-                hipLaunchKernelGGL(
-                    HIP_KERNEL_NAME(kernel<Benchmark, BlockSize, ItemsPerThread, WithTile>),
-                    dim3(num_blocks),
-                    dim3(BlockSize),
-                    0,
-                    stream,
-                    d_input,
-                    d_output,
-                    Trials);
+                launch(1, 1);
+                HIP_CHECK(hipStreamSynchronize(stream));
+                constexpr bool left = std::is_same_v<Benchmark, subtract_left>;
+                check_output<BlockSize, ItemsPerThread, left, WithTile>(input,
+                                                                        d_output,
+                                                                        items_per_block);
             });
+
+        state.run([&] { launch(num_blocks, Trials); });
 
         HIP_CHECK(hipFree(d_input));
         HIP_CHECK(hipFree(d_output));
@@ -340,20 +376,33 @@ class block_adjacent_difference_partial_tile_benchmark : public primbench::bench
         state.set_items(Trials * items);
         state.add_writes<T>(Trials * items);
 
-        state.run(
+        const auto launch = [&](size_t blocks, unsigned int trials)
+        {
+            hipLaunchKernelGGL(
+                HIP_KERNEL_NAME(kernel<Benchmark, BlockSize, ItemsPerThread, WithTile>),
+                dim3(blocks),
+                dim3(BlockSize),
+                0,
+                stream,
+                d_input,
+                d_tile_sizes,
+                d_output,
+                trials);
+        };
+
+        state.test(
             [&]
             {
-                hipLaunchKernelGGL(
-                    HIP_KERNEL_NAME(kernel<Benchmark, BlockSize, ItemsPerThread, WithTile>),
-                    dim3(num_blocks),
-                    dim3(BlockSize),
-                    0,
-                    stream,
-                    d_input,
-                    d_tile_sizes,
+                launch(1, 1);
+                HIP_CHECK(hipStreamSynchronize(stream));
+                constexpr bool left = std::is_same_v<Benchmark, subtract_left_partial_tile>;
+                check_output<BlockSize, ItemsPerThread, left, WithTile>(
+                    input,
                     d_output,
-                    Trials);
+                    static_cast<size_t>(tile_sizes.front()));
             });
+
+        state.run([&] { launch(num_blocks, Trials); });
 
         HIP_CHECK(hipFree(d_input));
         HIP_CHECK(hipFree(d_tile_sizes));

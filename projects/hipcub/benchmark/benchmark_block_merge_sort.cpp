@@ -51,6 +51,7 @@ void sort_keys_kernel(const T* input, T* output, CompareOp compare_op)
     {
         hipcub::BlockMergeSort<T, BlockSize, ItemsPerThread> sort;
         sort.Sort(keys, compare_op);
+        __syncthreads();
     }
 
     hipcub::StoreDirectStriped<BlockSize>(lid, output + block_offset, keys);
@@ -77,6 +78,7 @@ void sort_pairs_kernel(const T* input, T* output, CompareOp compare_op)
     {
         hipcub::BlockMergeSort<T, BlockSize, ItemsPerThread, T> sort;
         sort.Sort(keys, values, compare_op);
+        __syncthreads();
     }
 
     for(unsigned int i = 0; i < ItemsPerThread; i++)
@@ -137,6 +139,25 @@ class merge_sort_benchmark : public primbench::benchmark_interface
 
         state.set_items(Trials * items);
         state.add_writes<T>(Trials * items);
+
+        state.test(
+            [&]
+            {
+                std::vector<T> sorted(input.begin(), input.begin() + items_per_block);
+                std::sort(sorted.begin(), sorted.end(), CompareOp{});
+                std::vector<T> expected(items_per_block);
+                for(size_t i = 0; i < items_per_block; ++i)
+                {
+                    if constexpr(BenchmarkKind == benchmark_kinds::sort_pairs)
+                    {
+                        sorted[i] = benchmark_utils::add(sorted[i],
+                                                         benchmark_utils::add(sorted[i], T(1)));
+                    }
+                    const auto index = (i % ItemsPerThread) * BlockSize + i / ItemsPerThread;
+                    expected[index]  = sorted[i];
+                }
+                benchmark_utils::check_output(d_output, expected);
+            });
 
         state.run(
             [&]
