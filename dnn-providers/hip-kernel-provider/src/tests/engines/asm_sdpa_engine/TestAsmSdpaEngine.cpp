@@ -6,7 +6,7 @@
 
 #include <algorithm>
 #include <cmath>
-#include <cstring>
+#include <cstdio>
 #include <optional>
 #include <set>
 #include <string>
@@ -321,7 +321,7 @@ hipDeviceProp_t measuredDevice(std::string_view arch)
 {
     hipDeviceProp_t device{};
     const std::string name = std::string(arch) + ":sramecc+:xnack-";
-    std::strncpy(device.gcnArchName, name.c_str(), sizeof(device.gcnArchName) - 1);
+    std::snprintf(device.gcnArchName, sizeof(device.gcnArchName), "%s", name.c_str());
     const bool mi300x = arch == "gfx942";
     device.multiProcessorCount = mi300x ? 304 : 256;
     device.clockRate = mi300x ? 2100000 : 2400000;
