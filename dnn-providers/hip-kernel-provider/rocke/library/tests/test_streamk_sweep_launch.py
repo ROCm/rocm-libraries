@@ -12,20 +12,20 @@ output tile is data-parallel the workspace is zero bytes, and the helper must
 still hand the kernel valid flag / partial pointers instead of failing (an
 uncaught error there aborts the whole sweep). The host tests drive the helper
 with a recording runtime; the GPU test launches the real kernel through it
-and checks dW, and skips without a gfx942/gfx950 GPU and torch.
+and checks dW against a float64 reference, and skips without a gfx942/gfx950
+GPU.
 """
 
 from __future__ import annotations
 
-import ctypes
-import importlib.util
 import unittest
 
+import numpy as np
+from rocke.numeric import storage
 from rocke.runtime.hip_module import get_device_arch
 
 from benchmarks.common.benchmark_implicit_gemm_conv import _streamk_launch
 
-_HAS_TORCH = importlib.util.find_spec("torch") is not None
 GPU_ARCH = get_device_arch(0)
 
 # Every output tile is data-parallel under the default gfx950 pool: 1 x 9
@@ -186,8 +186,6 @@ class TestStreamKSweepLaunchHost(unittest.TestCase):
 def _gpu_skip_reason() -> str:
     if not GPU_ARCH:
         return "no ROCm GPU detected"
-    if not _HAS_TORCH:
-        return "torch not importable"
     if GPU_ARCH not in ("gfx942", "gfx950"):
         return f"stream-K wgrad is gfx942/gfx950 only; got {GPU_ARCH}"
     return ""
@@ -201,12 +199,13 @@ class TestStreamKSweepLaunchGpu(unittest.TestCase):
     """The helper's ``run()`` on the GPU for the all-data-parallel shape."""
 
     def _check(self, reduction, dtype_d):
-        import torch
-
         from rocke import compile_kernel
         from rocke.runtime import synchronize_and_release
         from rocke.runtime.hip_module import Runtime
+        from rocke.runtime.host_buffers import as_u8_buffer
         from rocke.runtime.launcher import KernelLauncher, LaunchConfig
+
+        from builders.common.conv_reference import conv_wgrad_reference
         from kernels.common.conv_implicit_gemm_wgrad import (
             build_implicit_gemm_conv_wgrad,
             wgrad_streamk_signature,
@@ -221,26 +220,20 @@ class TestStreamKSweepLaunchGpu(unittest.TestCase):
             kernel_name=art.kernel_name,
             signature=wgrad_streamk_signature(spec),
         )
-        dt = {"fp16": torch.float16, "bf16": torch.bfloat16, "fp32": torch.float32}
-        torch.manual_seed(0)
-        X = torch.empty(p.N, p.Hi, p.Wi, p.C).uniform_(-1, 1).to(dt[spec.data.dtype_b])
-        dY = torch.empty(p.N, p.Ho, p.Wo, p.K).uniform_(-1, 1).to(dt[spec.data.dtype_a])
-        dW = torch.empty(p.K, p.Y, p.X, p.C, dtype=dt[dtype_d])
-        ref = torch.nn.grad.conv2d_weight(
-            X.float().permute(0, 3, 1, 2),
-            weight_size=(p.K, p.C, p.Y, p.X),
-            grad_output=dY.float().permute(0, 3, 1, 2),
-            padding=(p.pH, p.pW),
-        ).permute(0, 2, 3, 1)
-
-        def u8(t):
-            return (ctypes.c_uint8 * t.nbytes).from_address(t.data_ptr())
+        data = spec.data
+        rng = np.random.default_rng(0)
+        X = storage.encode(rng.uniform(-1, 1, (p.N, p.Hi, p.Wi, p.C)), data.dtype_b)
+        dY = storage.encode(rng.uniform(-1, 1, (p.N, p.Ho, p.Wo, p.K)), data.dtype_a)
+        dW = np.empty((p.K, p.Y, p.X, p.C), dtype=storage.host_dtype(dtype_d))
+        ref = conv_wgrad_reference(
+            storage.decode(X, data.dtype_b), storage.decode(dY, data.dtype_a), p
+        )
 
         rt = Runtime()
         bufs = [rt.alloc(t.nbytes) for t in (dY, X, dW)]
         try:
-            rt.memcpy_h2d(bufs[0], u8(dY), dY.nbytes)
-            rt.memcpy_h2d(bufs[1], u8(X), X.nbytes)
+            rt.memcpy_h2d(bufs[0], as_u8_buffer(dY), dY.nbytes)
+            rt.memcpy_h2d(bufs[1], as_u8_buffer(X), X.nbytes)
             # Poison dW: a reduction that leaves it alone must overwrite it.
             rt.memset(bufs[2], 0xFF if reduction != "atomic" else 0, dW.nbytes)
             run, extras, _ = _streamk_launch(
@@ -260,12 +253,12 @@ class TestStreamKSweepLaunchGpu(unittest.TestCase):
                 synchronize_and_release(0)
             finally:
                 rt.free(extras["ws_ptr"])
-            rt.memcpy_d2h(u8(dW), bufs[2], dW.nbytes)
+            rt.memcpy_d2h(as_u8_buffer(dW), bufs[2], dW.nbytes)
         finally:
             for b in bufs:
                 rt.free(b)
-        out = dW.float()
-        rel = float((out - ref).abs().max() / ref.abs().max().clamp(min=1.0))
+        out = storage.decode(dW, dtype_d).astype(np.float64)
+        rel = float(np.abs(out - ref).max()) / max(1.0, float(np.abs(ref).max()))
         tol = {"fp32": 1e-4, "fp16": 2e-3, "bf16": 2e-2}[dtype_d]
         self.assertLess(rel, tol, f"{reduction}: rel_err={rel:.3e}")
 

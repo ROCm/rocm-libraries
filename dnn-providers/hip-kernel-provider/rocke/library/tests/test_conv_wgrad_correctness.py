@@ -3,8 +3,9 @@
 """Correctness tests for implicit-GEMM backward-weight convolution (wgrad).
 
 Runs a small sweep of conv shapes and pipeline/epilogue/split-K combinations,
-verifies each weight-gradient output against a float32 reference
-(``torch.nn.grad.conv2d_weight``), and asserts no failures.
+verifies each weight-gradient output against a float64 reference of the stored
+inputs (``builders.common.conv_reference.conv_wgrad_reference``), and asserts
+no failures.
 
 This suite specifically exercises the **free-axis vectorised load** added for
 wgrad: dY (NHWK) and X (NHWC) are loaded along their stride-1 free axis (K for
@@ -22,7 +23,7 @@ Coverage:
     asymmetric HW, small channel
   - Dtypes: fp16, bf16; tf32 compute over fp32 storage (``TestConvWgradTf32``:
     default/cshuffle, split-K atomic, two-stage, stream-K, grouped and 3-D,
-    against an IEEE fp32 reference)
+    against the float64 reference)
 
 The vector-load path is enabled for every sync MMA family (MFMA and WMMA); only
 the async-DMA path is excluded. The sweep runs on MFMA (gfx942/gfx950) and, for
@@ -34,26 +35,31 @@ one their arch supports. A sweep requesting the wrong epilogue skips every
 subTest -- and a test whose subTests all skip still reports *passed*, so
 ``_assert_ran`` makes an all-skipped K-outer sweep a hard failure instead.
 
-Requires a ROCm GPU and torch. Run:
-    PYTHONPATH=rocke/platform/python:rocke/library <torch-python> -m pytest \\
+Requires a ROCm GPU. Run:
+    PYTHONPATH=rocke/platform/python:rocke/library python -m pytest \\
         rocke/library/tests/test_conv_wgrad_correctness.py
 """
 
 from __future__ import annotations
 
-import ctypes
-import importlib.util
 import os
 import re
 import unittest
 from dataclasses import dataclass
 from typing import List, Tuple
 
+import numpy as np
+from rocke.numeric import storage
 from rocke.runtime.hip_module import get_device_arch
+from rocke.runtime.host_buffers import as_u8_buffer
 
-_HAS_TORCH = importlib.util.find_spec("torch") is not None
-if _HAS_TORCH:
-    from builders.common.conv_reference import tf32_reference_inputs, tf32_reference_tol
+from builders.common.conv_reference import (
+    conv_extents,
+    conv_wgrad_reference,
+    tf32_reference_inputs,
+    tf32_reference_tol,
+)
+
 GPU_ARCH = get_device_arch(0)
 _IS_MFMA = GPU_ARCH in ("gfx942", "gfx950")  # wave64 / MFMA targets
 
@@ -75,8 +81,6 @@ _KOUTER_EPILOGUE = "cshuffle" if _IS_MFMA else "default"
 def _skip_reason() -> str:
     if not GPU_ARCH:
         return "no ROCm GPU detected"
-    if not _HAS_TORCH:
-        return "torch not importable"
     if not _IS_MFMA and GPU_ARCH not in _KOUTER_ARCHES:
         return (
             f"wgrad numeric sweep needs MFMA (gfx942/gfx950) or a K-outer WMMA "
@@ -164,37 +168,20 @@ _TOL = {"fp16": 5e-2, "bf16": 5e-2}
 # ---------------------------------------------------------------------------
 
 
-def _u8(t):
-    import torch  # noqa: F401 -- only called when torch is available
+def _wgrad_inputs(problem, dtype: str, seed: int = 0, low: float = -1.0):
+    """The stored ``(X, dY)`` of ``problem`` (2-D or 3-D) a launch reads:
+    U(low, 1) drawn from ``seed``, X first, as ``dtype`` host data."""
+    p = problem
+    in_spatial, out_spatial, _ = conv_extents(p)
+    rng = np.random.default_rng(seed)
+    x = storage.encode(rng.uniform(low, 1.0, (p.N, *in_spatial, p.C)), dtype)
+    dy = storage.encode(rng.uniform(low, 1.0, (p.N, *out_spatial, p.K)), dtype)
+    return x, dy
 
-    return (ctypes.c_uint8 * t.nbytes).from_address(t.data_ptr())
 
-
-def _wgrad_reference_cpu(X_f32, dY_f32, p):
-    """float32 weight-gradient reference computed entirely on the CPU.
-
-    Mirrors ``builders.common.conv_reference.wgrad_reference`` but never touches
-    ``torch.cuda``: rocke's HIP runtime (used by the kernel launcher) and torch's
-    HIP runtime fight over the process HIP context in-process — whichever
-    initialises first wins, and rocke-first (our module-level ``get_device_arch``)
-    leaves ``torch.cuda`` unavailable. Since the rocke launcher is independent of
-    torch, computing the reference on the CPU sidesteps the conflict. 2-D only
-    (all shapes in this file are 2-D).
-    """
-    import torch
-
-    X_t = X_f32.permute(0, 3, 1, 2).contiguous()  # NHWC -> NCHW
-    dY_t = dY_f32.permute(0, 3, 1, 2).contiguous()  # NHWK -> NKHW
-    dW_nchw = torch.nn.grad.conv2d_weight(
-        X_t,
-        weight_size=(p.K, p.C // p.groups, p.Y, p.X),
-        grad_output=dY_t,
-        stride=(p.sH, p.sW),
-        padding=(p.pH, p.pW),
-        dilation=(p.dH, p.dW),
-        groups=p.groups,
-    )
-    return dW_nchw.permute(0, 2, 3, 1).contiguous()  # KCHW -> KHWC (KYXC)
+def _wgrad_reference(x, dy, dtype: str, p) -> np.ndarray:
+    """float64 dW (KYXC / KZYXC) of the stored ``dtype`` inputs ``x`` / ``dy``."""
+    return conv_wgrad_reference(storage.decode(x, dtype), storage.decode(dy, dtype), p)
 
 
 def _make_spec(
@@ -341,8 +328,6 @@ def _run_one(
 
     Returns ``(passed, reason)`` where ``reason`` is non-empty on skip or failure.
     """
-    import torch
-
     from rocke import compile_kernel
     from kernels.common.conv_args import ConvArgs
     from kernels.common.conv_abi import conv_args_signature
@@ -418,27 +403,21 @@ def _run_one(
     except Exception as e:  # noqa: BLE001
         return False, f"compile failed: {e}"
 
-    _torch_dtype = {"fp16": torch.float16, "bf16": torch.bfloat16}[dtype]
-    torch.manual_seed(0)
     p = problem
-    _lo = 0.0 if positive else -1.0
-    X_f32 = torch.empty(p.N, p.Hi, p.Wi, p.C).uniform_(_lo, 1.0)
-    dY_f32 = torch.empty(p.N, p.Ho, p.Wo, p.K).uniform_(_lo, 1.0)
-    X_t = X_f32.to(_torch_dtype)
-    dY_t = dY_f32.to(_torch_dtype)
+    X_t, dY_t = _wgrad_inputs(p, dtype, low=0.0 if positive else -1.0)
     # dW is the (grouped) weight gradient: packed KYXC with the per-group channel
     # count cpg = C // groups (== C for groups=1).
-    dW_t = torch.empty(p.K, p.Y, p.X, p.C // p.groups, dtype=_torch_dtype)
+    dW_t = np.empty((p.K, p.Y, p.X, p.C // p.groups), dtype=X_t.dtype)
 
-    # float32 reference (KYXC layout), on the CPU (see _wgrad_reference_cpu).
-    ref = _wgrad_reference_cpu(X_f32, dY_f32, p)
+    # float64 reference (KYXC layout) of the stored inputs.
+    ref = _wgrad_reference(X_t, dY_t, dtype, p)
 
     rt = Runtime()
     dY_dev = rt.alloc(dY_t.nbytes)
     X_dev = rt.alloc(X_t.nbytes)
     dW_dev = rt.alloc(dW_t.nbytes)
-    rt.memcpy_h2d(dY_dev, _u8(dY_t), dY_t.nbytes)
-    rt.memcpy_h2d(X_dev, _u8(X_t), X_t.nbytes)
+    rt.memcpy_h2d(dY_dev, as_u8_buffer(dY_t), dY_t.nbytes)
+    rt.memcpy_h2d(X_dev, as_u8_buffer(X_t), X_t.nbytes)
     rt.memset(dW_dev, 0, dW_t.nbytes)  # split-K atomic-add needs a zeroed dW
 
     sig = conv_args_signature(
@@ -485,14 +464,12 @@ def _run_one(
     )
     launcher(values, config=LaunchConfig(grid=grid, block=block, fence=True))
 
-    dW_cpu = torch.empty_like(dW_t)
-    rt.memcpy_d2h(_u8(dW_cpu), dW_dev, dW_t.nbytes)
+    rt.memcpy_d2h(as_u8_buffer(dW_t), dW_dev, dW_t.nbytes)
     rt.free(dY_dev)
     rt.free(X_dev)
     rt.free(dW_dev)
 
-    out_f32 = dW_cpu.float()
-    ref_f32 = ref.float()
+    out_values = storage.decode(dW_t, dtype).astype(np.float64)
 
     # Row coverage, checked before the tolerance test so the reason names the
     # actual failure. A grouped split-K bug that drops whole groups leaves
@@ -501,8 +478,8 @@ def _run_one(
     # false for every group above 0 and those groups' atomics were dropped.
     # A max-relative-error assertion does report that, but as a generic
     # tolerance miss that gives no hint which groups vanished.
-    nz_out = out_f32.reshape(p.K, -1).abs().sum(dim=1) > 0
-    nz_ref = ref_f32.reshape(p.K, -1).abs().sum(dim=1) > 0
+    nz_out = np.abs(out_values.reshape(p.K, -1)).sum(axis=1) > 0
+    nz_ref = np.abs(ref.reshape(p.K, -1)).sum(axis=1) > 0
     n_missing = int((nz_ref & ~nz_out).sum())
     if n_missing:
         return False, (
@@ -511,9 +488,9 @@ def _run_one(
             f"spk{split_k}) -- whole groups are not being written"
         )
 
-    abs_diff = (out_f32 - ref_f32).abs()
-    ref_scale = ref_f32.abs().max().clamp(min=1.0)
-    rel_err = float(abs_diff.max() / ref_scale)
+    abs_diff = np.abs(out_values - ref)
+    ref_scale = max(1.0, float(np.abs(ref).max()))
+    rel_err = float(abs_diff.max()) / ref_scale
     tol = _TOL[dtype]
     passed = rel_err < tol
     if not passed:
@@ -1452,29 +1429,6 @@ class TestWgradDefaultLdsKOuter(unittest.TestCase):
                     )
 
 
-def _u8_ts(t):
-    """Return a ctypes byte array backed by a torch tensor's data pointer."""
-    return (ctypes.c_uint8 * t.nbytes).from_address(t.data_ptr())
-
-
-def _cpu_wgrad_ref_ts(X_f32, dY_f32, p):
-    """CPU torch reference for weight gradient (no GPU required)."""
-    import torch
-
-    X_nchw = X_f32.float().permute(0, 3, 1, 2).contiguous()
-    dY_nchw = dY_f32.float().permute(0, 3, 1, 2).contiguous()
-    dW_nchw = torch.nn.grad.conv2d_weight(
-        X_nchw,
-        weight_size=(p.K, p.C // p.groups, p.Y, p.X),
-        grad_output=dY_nchw,
-        stride=(p.sH, p.sW),
-        padding=(p.pH, p.pW),
-        dilation=(p.dH, p.dW),
-        groups=p.groups,
-    )
-    return dW_nchw.permute(0, 2, 3, 1).contiguous()
-
-
 def _make_two_stage_spec(
     arch, N=2, Hi=8, Wi=8, C=16, K=32, Y=3, X=3, split_k=4, groups=1
 ):
@@ -1505,12 +1459,12 @@ def _make_two_stage_spec(
 
 
 def _run_two_stage_ts(spec, arch, rt, dY_t, X_t):
-    """Compile and launch the two-stage pipeline; return dW as CPU fp32.
+    """Compile and launch the two-stage pipeline on the stored ``dY_t`` /
+    ``X_t``; return the float32 values of the stored dW.
 
     Works for both grouped (groups > 1) and non-grouped conv.  Stage 2 now
     handles all groups in a single launch via block_id_z = group index.
     """
-    import torch
     from kernels.common.conv_implicit_gemm_wgrad_two_stage import (
         build_implicit_gemm_conv_wgrad_two_stage,
         wgrad_stage1_launch_values,
@@ -1525,12 +1479,8 @@ def _run_two_stage_ts(spec, arch, rt, dY_t, X_t):
     assert ws_nbytes > 0, "workspace must be non-empty for split_k > 1"
 
     p = spec.problem
-    _dw_dtype = {
-        "fp16": torch.float16,
-        "bf16": torch.bfloat16,
-        "fp32": torch.float32,
-    }.get(spec.data.dtype_d, torch.float16)
-    dW_t = torch.zeros(p.K, p.Y, p.X, p.cpg, dtype=_dw_dtype)
+    dw_dtype = spec.data.dtype_d
+    dW_t = np.zeros((p.K, p.Y, p.X, p.cpg), dtype=storage.host_dtype(dw_dtype))
 
     dY_dev = rt.alloc(dY_t.nbytes)
     X_dev = rt.alloc(X_t.nbytes)
@@ -1538,8 +1488,8 @@ def _run_two_stage_ts(spec, arch, rt, dY_t, X_t):
     ws_dev = rt.alloc(ws_nbytes)
 
     try:
-        rt.memcpy_h2d(dY_dev, _u8_ts(dY_t), dY_t.nbytes)
-        rt.memcpy_h2d(X_dev, _u8_ts(X_t), X_t.nbytes)
+        rt.memcpy_h2d(dY_dev, as_u8_buffer(dY_t), dY_t.nbytes)
+        rt.memcpy_h2d(X_dev, as_u8_buffer(X_t), X_t.nbytes)
         rt.memset(dW_dev, 0, dW_t.nbytes)
         rt.memset(ws_dev, 0, ws_nbytes)
 
@@ -1593,15 +1543,14 @@ def _run_two_stage_ts(spec, arch, rt, dY_t, X_t):
             stream=0,
         )
 
-        dW_out = torch.empty_like(dW_t)
-        rt.memcpy_d2h(_u8_ts(dW_out), dW_dev, dW_t.nbytes)
+        rt.memcpy_d2h(as_u8_buffer(dW_t), dW_dev, dW_t.nbytes)
     finally:
         rt.free(dY_dev)
         rt.free(X_dev)
         rt.free(dW_dev)
         rt.free(ws_dev)
 
-    return dW_out.float()
+    return storage.decode(dW_t, dw_dtype)
 
 
 def _check_two_stage(
@@ -1627,7 +1576,6 @@ def _check_two_stage(
     Returns ``(ok, reason)`` so callers can accumulate failures or assert inline.
     Mirrors the structure of ``_run_one`` for the atomic wgrad path.
     """
-    import torch
     from dataclasses import replace as _dc_replace
     from kernels.common.conv_implicit_gemm_wgrad import is_valid_wgrad_spec
     from rocke.runtime.hip_module import Runtime
@@ -1682,19 +1630,15 @@ def _check_two_stage(
         return False, f"two_stage spec invalid: {why}"
 
     p = ts_spec.problem
-    torch.manual_seed(seed)
-    X_f32 = torch.empty(p.N, p.Hi, p.Wi, p.C).uniform_(-1.0, 1.0)
-    dY_f32 = torch.empty(p.N, p.Ho, p.Wo, p.K).uniform_(-1.0, 1.0)
-    X_t = X_f32.to(torch.float16 if dtype == "fp16" else torch.bfloat16)
-    dY_t = dY_f32.to(torch.float16 if dtype == "fp16" else torch.bfloat16)
+    X_t, dY_t = _wgrad_inputs(p, dtype, seed)
 
     try:
         dW_ours = _run_two_stage_ts(ts_spec, arch, rt, dY_t, X_t)
     except Exception as exc:
         return False, f"runtime error: {exc}"
 
-    dW_ref = _cpu_wgrad_ref_ts(X_f32, dY_f32, p)
-    max_abs = dW_ref.abs().max().item()
+    dW_ref = _wgrad_reference(X_t, dY_t, dtype, p)
+    max_abs = float(np.abs(dW_ref).max())
     if max_abs < 1e-6:
         return True, "reference near-zero; skipped numeric check"
 
@@ -1707,8 +1651,8 @@ def _check_two_stage(
     # cannot see -- a decompaction error that writes the correct output channel
     # at the wrong (y, x, c) position, which is the new mode the block-diagonal
     # predicate introduces.
-    nz_ref_row = dW_ref.reshape(p.K, -1).abs().sum(dim=1) > 0
-    nz_out_row = dW_ours.reshape(p.K, -1).abs().sum(dim=1) > 0
+    nz_ref_row = np.abs(dW_ref.reshape(p.K, -1)).sum(axis=1) > 0
+    nz_out_row = np.abs(dW_ours.reshape(p.K, -1)).sum(axis=1) > 0
     n_missing_rows = int((nz_ref_row & ~nz_out_row).sum())
     if n_missing_rows:
         return False, (
@@ -1718,8 +1662,8 @@ def _check_two_stage(
         )
     cpg = p.C // p.groups
     n_cols = p.K * p.Y * p.X
-    nz_ref_col = dW_ref.reshape(n_cols, cpg).abs().sum(dim=1) > 0
-    nz_out_col = dW_ours.reshape(n_cols, cpg).abs().sum(dim=1) > 0
+    nz_ref_col = np.abs(dW_ref.reshape(n_cols, cpg)).sum(axis=1) > 0
+    nz_out_col = np.abs(dW_ours.reshape(n_cols, cpg)).sum(axis=1) > 0
     n_missing_cols = int((nz_ref_col & ~nz_out_col).sum())
     if n_missing_cols:
         return False, (
@@ -1729,13 +1673,13 @@ def _check_two_stage(
         )
 
     tol = 5e-2
-    rel_err = (dW_ours - dW_ref).abs().max().item() / max_abs
+    rel_err = float(np.abs(dW_ours - dW_ref).max()) / max_abs
     if rel_err >= tol:
         return False, f"rel_err={rel_err:.3e} >= tol={tol}"
     return True, ""
 
 
-@unittest.skipUnless(not _SKIP_REASON, _SKIP_REASON or "needs CDNA GPU + torch")
+@unittest.skipUnless(not _SKIP_REASON, _SKIP_REASON or "needs CDNA GPU")
 class TestConvWgradTwoStage(unittest.TestCase):
     """GPU numerical tests for the two-stage deterministic wgrad path.
 
@@ -1874,16 +1818,11 @@ class TestConvWgradTwoStage(unittest.TestCase):
         in behaviour for a fixed launch geometry, which is worth a signal even
         though a failure here is not by itself a correctness bug.
         """
-        import torch
-
         spec = _make_two_stage_spec(self.ARCH)
-        p = spec.problem
-        torch.manual_seed(99)
-        X_t = torch.empty(p.N, p.Hi, p.Wi, p.C).uniform_(-1.0, 1.0).half()
-        dY_t = torch.empty(p.N, p.Ho, p.Wo, p.K).uniform_(-1.0, 1.0).half()
+        X_t, dY_t = _wgrad_inputs(spec.problem, "fp16", seed=99)
         dW_1 = _run_two_stage_ts(spec, self.ARCH, self.rt, dY_t, X_t)
         dW_2 = _run_two_stage_ts(spec, self.ARCH, self.rt, dY_t, X_t)
-        self.assertTrue(torch.equal(dW_1, dW_2), "not bit-exact across runs")
+        self.assertTrue(np.array_equal(dW_1, dW_2), "not bit-exact across runs")
 
     # ------------------------------------------------------------------
     # OOB guard: non-tile-aligned dimensions
@@ -2737,7 +2676,7 @@ class TestWgradTwoStageWmmaNumerics(unittest.TestCase):
         self._sweep(lds_k_outer=True, async_dma=True)
 
 
-@unittest.skipUnless(not _SKIP_REASON, _SKIP_REASON or "needs CDNA GPU + torch")
+@unittest.skipUnless(not _SKIP_REASON, _SKIP_REASON or "needs CDNA GPU")
 class TestWgradGroupMergeNumerics(unittest.TestCase):
     """GPU numerics for group merging, over the two-stage path.
 
@@ -2877,7 +2816,7 @@ class TestWgradGroupMergeNumerics(unittest.TestCase):
         _assert_case_ran(self, ok, why)
 
 
-@unittest.skipUnless(not _SKIP_REASON, _SKIP_REASON or "needs CDNA GPU + torch")
+@unittest.skipUnless(not _SKIP_REASON, _SKIP_REASON or "needs CDNA GPU")
 class TestWgradPrefetchAddrNumerics(unittest.TestCase):
     """GPU numerics for ``prefetch_addr`` (carried K-loop byte offsets).
 
@@ -3020,9 +2959,7 @@ class TestWgradPrefetchAddrNumerics(unittest.TestCase):
                 _assert_case_ran(self, ok, why)
 
 
-@unittest.skipUnless(
-    not _SKIP_REASON and _IS_MFMA, _SKIP_REASON or "needs an MFMA GPU + torch"
-)
+@unittest.skipUnless(not _SKIP_REASON and _IS_MFMA, _SKIP_REASON or "needs an MFMA GPU")
 class TestWgradPrefetchGlobalRegsNumerics(unittest.TestCase):
     """GPU numerics for ``prefetch_global_regs`` (the register-prefetch K loop).
 
@@ -3165,9 +3102,8 @@ class TestWgradPrefetchGlobalRegsNumerics(unittest.TestCase):
 # A TF32 spec stores fp32 and reinterprets each LDS fragment as vec<tf32xN>:
 # gfx950 runs it as three BF16 MFMAs over a hi/lo split of the full fp32
 # payload, gfx942 as the native xf32 MFMA, which ignores the low 13 mantissa
-# bits. So the reference is fp32 computed with TF32 *disabled* (torch 2.10
-# defaults conv to tf32), and on gfx942 it is computed from inputs truncated
-# the way the hardware truncates them.
+# bits. So the reference is float64 (never TF32), and on gfx942 it is computed
+# from inputs truncated the way the hardware truncates them.
 #
 # Bounds are relative to the reference's peak |dW|. gfx950: 1e-4, which a
 # single BF16 pass misses by more than an order of magnitude
@@ -3226,47 +3162,12 @@ def _tf32_spec(problem, atom, **kw):
     return WgradConvSpec(**base)
 
 
-def _wgrad_reference_nd(X, dY, p):
-    """fp32 dW (KYXC / KZYXC) from channel-last X / dY, 2-D or 3-D, IEEE."""
-    import torch
-
-    from builders.common.conv_reference import ieee_fp32
-
-    with ieee_fp32():
-        if p.is_3d:
-            w = torch.nn.grad.conv3d_weight(
-                X.permute(0, 4, 1, 2, 3).contiguous(),
-                weight_size=(p.K, p.C // p.groups, p.Z, p.Y, p.X),
-                grad_output=dY.permute(0, 4, 1, 2, 3).contiguous(),
-                stride=(p.sD, p.sH, p.sW),
-                padding=(p.pD, p.pH, p.pW),
-                dilation=(p.dD, p.dH, p.dW),
-                groups=p.groups,
-            )
-            return w.permute(0, 2, 3, 4, 1).contiguous()
-        w = torch.nn.grad.conv2d_weight(
-            X.permute(0, 3, 1, 2).contiguous(),
-            weight_size=(p.K, p.C // p.groups, p.Y, p.X),
-            grad_output=dY.permute(0, 3, 1, 2).contiguous(),
-            stride=(p.sH, p.sW),
-            padding=(p.pH, p.pW),
-            dilation=(p.dH, p.dW),
-            groups=p.groups,
-        )
-        return w.permute(0, 2, 3, 1).contiguous()
-
-
 def _tf32_tensors(p, seed: int = 0):
-    import torch
-
-    torch.manual_seed(seed)
-    sp_in = (p.Di, p.Hi, p.Wi) if p.is_3d else (p.Hi, p.Wi)
-    sp_out = (p.Do, p.Ho, p.Wo) if p.is_3d else (p.Ho, p.Wo)
-    sp_w = (p.Z, p.Y, p.X) if p.is_3d else (p.Y, p.X)
-    X = torch.empty(p.N, *sp_in, p.C).uniform_(-1.0, 1.0)
-    dY = torch.empty(p.N, *sp_out, p.K).uniform_(-1.0, 1.0)
-    dW = torch.empty(p.K, *sp_w, p.C // p.groups, dtype=torch.float32)
-    return X, dY, dW
+    """fp32 ``(X, dY, dW)`` host arrays of ``p``: the inputs of
+    :func:`_wgrad_inputs` and an uninitialised dW."""
+    X, dY = _wgrad_inputs(p, "fp32", seed)
+    dw_shape = (p.K, *conv_extents(p).filter_spatial, p.C // p.groups)
+    return X, dY, np.empty(dw_shape, dtype=np.float32)
 
 
 def _run_tf32(spec, arch: str):
@@ -3276,8 +3177,6 @@ def _run_tf32(spec, arch: str):
     two-stage pipeline (Stage 1 into the f32 scratch, then the Stage 2 reduce),
     and the stream-K launch with its flags / partials workspace.
     """
-    import torch
-
     from rocke import compile_kernel
     from rocke.runtime.hip_module import Runtime
     from rocke.runtime.launcher import KernelLauncher, LaunchConfig
@@ -3304,7 +3203,7 @@ def _run_tf32(spec, arch: str):
 
     p = spec.problem
     X, dY, dW = _tf32_tensors(p)
-    ref = _wgrad_reference_nd(
+    ref = conv_wgrad_reference(
         tf32_reference_inputs(X, arch), tf32_reference_inputs(dY, arch), p
     )
 
@@ -3324,8 +3223,8 @@ def _run_tf32(spec, arch: str):
     rt = Runtime()
     bufs = [rt.alloc(dY.nbytes), rt.alloc(X.nbytes), rt.alloc(dW.nbytes)]
     try:
-        rt.memcpy_h2d(bufs[0], _u8(dY), dY.nbytes)
-        rt.memcpy_h2d(bufs[1], _u8(X), X.nbytes)
+        rt.memcpy_h2d(bufs[0], as_u8_buffer(dY), dY.nbytes)
+        rt.memcpy_h2d(bufs[1], as_u8_buffer(X), X.nbytes)
         rt.memset(bufs[2], 0, dW.nbytes)
         block = (spec.block_size, 1, 1)
         if streamk:
@@ -3404,8 +3303,8 @@ def _run_tf32(spec, arch: str):
                         fence=True,
                     ),
                 )
-        out = torch.empty_like(dW)
-        rt.memcpy_d2h(_u8(out), bufs[2], dW.nbytes)
+        out = np.empty_like(dW)
+        rt.memcpy_d2h(as_u8_buffer(out), bufs[2], dW.nbytes)
     finally:
         for buf in bufs:
             rt.free(buf)
@@ -3414,22 +3313,18 @@ def _run_tf32(spec, arch: str):
 
 def _tf32_rel_err(out, ref) -> float:
     """max |out - ref| relative to the reference's peak |dW|."""
-    return float((out - ref).abs().max() / ref.abs().max())
+    return float(np.abs(out - ref).max()) / float(np.abs(ref).max())
 
 
 class TestConvWgradTf32Bound(unittest.TestCase):
     """The gfx950 bound rejects what a broken TF32 path would produce. CPU only."""
 
     def test_one_bf16_pass_fails_the_bound(self):
-        if not _HAS_TORCH:
-            self.skipTest("torch not importable")
-        import torch
-
         p = _tf32_problem(_SHAPES[0])
         X, dY, _ = _tf32_tensors(p)
-        ref = _wgrad_reference_nd(X, dY, p)
-        bf16 = _wgrad_reference_nd(
-            X.to(torch.bfloat16).float(), dY.to(torch.bfloat16).float(), p
+        ref = conv_wgrad_reference(X, dY, p)
+        bf16 = conv_wgrad_reference(
+            storage.round_to(X, "bf16"), storage.round_to(dY, "bf16"), p
         )
         # More than 10x over the bound: a single BF16 pass cannot pass it.
         self.assertGreater(_tf32_rel_err(bf16, ref), 10 * tf32_reference_tol("gfx950"))
@@ -3451,8 +3346,8 @@ class TestConvWgradTf32(unittest.TestCase):
                 ok, why = is_valid_wgrad_spec(spec, GPU_ARCH)
                 self.assertTrue(ok, f"{label}: {why}")
                 out, ref = _run_tf32(spec, GPU_ARCH)
-                written = out.reshape(problem.K, -1).abs().sum(dim=1) > 0
-                expected = ref.reshape(problem.K, -1).abs().sum(dim=1) > 0
+                written = np.abs(out.reshape(problem.K, -1)).sum(axis=1) > 0
+                expected = np.abs(ref.reshape(problem.K, -1)).sum(axis=1) > 0
                 missing = int((expected & ~written).sum())
                 self.assertEqual(missing, 0, f"{label}: {missing} dW rows unwritten")
                 rel = _tf32_rel_err(out, ref)

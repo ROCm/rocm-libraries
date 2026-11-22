@@ -3,10 +3,11 @@
 """GPU numerics for stream-K implicit-GEMM backward-weight convolution.
 
 Every case builds, compiles and launches a stream-K wgrad kernel, then checks
-dW against a float32 ``torch.nn.grad.conv2d_weight`` reference computed on the
-CPU. Before the tolerance check a row-coverage guard reports whole output
-channels that were never written (a dropped group or tile reports as such
-rather than as an opaque numeric miss).
+dW against a float64 reference of the exact stored inputs
+(``builders.common.conv_reference.conv_wgrad_reference``). Before the
+tolerance check a row-coverage guard reports whole output channels that were
+never written (a dropped group or tile reports as such rather than as an
+opaque numeric miss).
 
 The shapes are chosen to exercise the partitioner, not the GEMM: several
 stream-K CTAs per tile (multi-round linear/tree fixups), a data-parallel plus
@@ -27,14 +28,12 @@ codegen instead -- ``TestConvWgradStreamKFlagOrderingIR`` checks the lowered
 ``.ll`` (host-only), ``TestConvWgradStreamKFlagOrderingIsa`` the gfx942/gfx950
 ISA (COMGR + ``llvm-objdump``, no GPU; skips when either is missing).
 
-The numeric cases require a gfx942/gfx950 GPU and torch and skip cleanly
+The numeric cases require a gfx942/gfx950 GPU and skip cleanly
 otherwise. Host-side coverage lives in ``test_conv_wgrad_streamk.py``.
 """
 
 from __future__ import annotations
 
-import ctypes
-import importlib.util
 import os
 import re
 import shutil
@@ -43,17 +42,16 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import numpy as np
+from rocke.numeric import storage
 from rocke.runtime.hip_module import get_device_arch
 
-_HAS_TORCH = importlib.util.find_spec("torch") is not None
 GPU_ARCH = get_device_arch(0)
 
 
 def _skip_reason() -> str:
     if not GPU_ARCH:
         return "no ROCm GPU detected"
-    if not _HAS_TORCH:
-        return "torch not importable"
     if GPU_ARCH not in ("gfx942", "gfx950"):
         return f"stream-K wgrad is gfx942/gfx950 only; got {GPU_ARCH}"
     return ""
@@ -61,8 +59,8 @@ def _skip_reason() -> str:
 
 _SKIP_REASON = _skip_reason()
 
-# Relative max-error bound by dW dtype: the reference is fp32 over fp16/bf16
-# inputs, so the bound is set by the output rounding.
+# Relative max-error bound by dW dtype: the reference is float64 over the
+# stored fp16/bf16 inputs, so the bound is set by the output rounding.
 _TOL = {"fp32": 1e-4, "fp16": 2e-3, "bf16": 2e-2}
 _REDUCTIONS = (
     ("linear", "fp16"),
@@ -72,37 +70,20 @@ _REDUCTIONS = (
 )
 
 
-def _u8(t):
-    return (ctypes.c_uint8 * t.nbytes).from_address(t.data_ptr())
-
-
-def _reference(X, dY, p):
-    import torch
-
-    w = torch.nn.grad.conv2d_weight(
-        X.permute(0, 3, 1, 2).contiguous(),
-        weight_size=(p.K, p.C // p.groups, p.Y, p.X),
-        grad_output=dY.permute(0, 3, 1, 2).contiguous(),
-        stride=(p.sH, p.sW),
-        padding=(p.pH, p.pW),
-        dilation=(p.dH, p.dW),
-        groups=p.groups,
-    )
-    return w.permute(0, 2, 3, 1).contiguous()
-
-
 def _run(spec, *, launches: int = 1, problem=None, artifact=None):
-    """Build, launch ``launches`` times, return (dW outputs, fp32 reference).
+    """Build, launch ``launches`` times, return (stored dW outputs, float64
+    reference).
 
     ``problem`` is the launch shape (default ``spec.problem``): the kernel is
     AOT, so one binary -- passed in as ``artifact`` to reuse it -- serves any
     shape its spec admits.
     """
-    import torch
-
     from rocke import compile_kernel
     from rocke.runtime.hip_module import Runtime
+    from rocke.runtime.host_buffers import as_u8_buffer
     from rocke.runtime.launcher import KernelLauncher, LaunchConfig
+
+    from builders.common.conv_reference import conv_wgrad_reference
     from kernels.common.conv_implicit_gemm_wgrad import (
         build_implicit_gemm_conv_wgrad,
         wgrad_streamk_grid,
@@ -128,20 +109,24 @@ def _run(spec, *, launches: int = 1, problem=None, artifact=None):
         kernel_name=art.kernel_name,
         signature=wgrad_streamk_signature(spec),
     )
-    dtypes = {"fp16": torch.float16, "bf16": torch.bfloat16, "fp32": torch.float32}
-    torch.manual_seed(0)
-    X = torch.empty(p.N, p.Hi, p.Wi, p.C).uniform_(-1, 1).to(dtypes[spec.data.dtype_b])
-    dY = torch.empty(p.N, p.Ho, p.Wo, p.K).uniform_(-1, 1).to(dtypes[spec.data.dtype_a])
-    dW = torch.empty(p.K, p.Y, p.X, p.C // p.groups, dtype=dtypes[spec.data.dtype_d])
-    ref = _reference(X.float(), dY.float(), p)
+    data = spec.data
+    rng = np.random.default_rng(0)
+    X = storage.encode(rng.uniform(-1, 1, (p.N, p.Hi, p.Wi, p.C)), data.dtype_b)
+    dY = storage.encode(rng.uniform(-1, 1, (p.N, p.Ho, p.Wo, p.K)), data.dtype_a)
+    dW = np.empty(
+        (p.K, p.Y, p.X, p.C // p.groups), dtype=storage.host_dtype(data.dtype_d)
+    )
+    ref = conv_wgrad_reference(
+        storage.decode(X, data.dtype_b), storage.decode(dY, data.dtype_a), p
+    )
 
     rt = Runtime()
     ws_bytes = wgrad_streamk_workspace_nbytes(spec, arch=arch, problem=p)
     bufs = [rt.alloc(dY.nbytes), rt.alloc(X.nbytes), rt.alloc(dW.nbytes)]
     ws = rt.alloc(max(ws_bytes, 4))
     bufs.append(ws)
-    rt.memcpy_h2d(bufs[0], _u8(dY), dY.nbytes)
-    rt.memcpy_h2d(bufs[1], _u8(X), X.nbytes)
+    rt.memcpy_h2d(bufs[0], as_u8_buffer(dY), dY.nbytes)
+    rt.memcpy_h2d(bufs[1], as_u8_buffer(X), X.nbytes)
     reduction = spec.streamk_reduction
     flags_bytes, partials_bytes = wgrad_streamk_workspace_layout(
         spec, arch=arch, problem=p
@@ -225,8 +210,8 @@ def _run(spec, *, launches: int = 1, problem=None, artifact=None):
                         fence=True,
                     ),
                 )
-            out = torch.empty_like(dW)
-            rt.memcpy_d2h(_u8(out), bufs[2], dW.nbytes)
+            out = np.empty_like(dW)
+            rt.memcpy_d2h(as_u8_buffer(out), bufs[2], dW.nbytes)
             outs.append(out)
     finally:
         for buf in bufs:
@@ -237,14 +222,14 @@ def _run(spec, *, launches: int = 1, problem=None, artifact=None):
 def _check(test, spec, *, launches: int = 1, problem=None, artifact=None):
     outs, ref = _run(spec, launches=launches, problem=problem, artifact=artifact)
     p = problem if problem is not None else spec.problem
-    out = outs[0].float()
-    written = out.reshape(p.K, -1).abs().sum(dim=1) > 0
-    expected = ref.reshape(p.K, -1).abs().sum(dim=1) > 0
+    out = storage.decode(outs[0], spec.data.dtype_d).astype(np.float64)
+    written = np.abs(out.reshape(p.K, -1)).sum(axis=1) > 0
+    expected = np.abs(ref.reshape(p.K, -1)).sum(axis=1) > 0
     missing = int((expected & ~written).sum())
     test.assertEqual(
         missing, 0, f"{missing}/{p.K} dW output-channel rows were never written"
     )
-    rel = float((out - ref).abs().max() / ref.abs().max().clamp(min=1.0))
+    rel = float(np.abs(out - ref).max()) / max(1.0, float(np.abs(ref).max()))
     test.assertLess(rel, _TOL[spec.data.dtype_d], f"rel_err={rel:.3e}")
     return outs
 
@@ -439,8 +424,6 @@ class TestConvWgradStreamKDeterminism(unittest.TestCase):
     """
 
     def test_repeat_launches_are_bit_identical(self):
-        import torch
-
         problem, ctas = _problems()["multi_partner"]
         for mode in ("dp_sk", "persistent"):
             for reduction in ("linear", "tree"):
@@ -451,7 +434,7 @@ class TestConvWgradStreamKDeterminism(unittest.TestCase):
                     outs = _check(self, spec, launches=20)
                     for i, out in enumerate(outs[1:], start=1):
                         self.assertTrue(
-                            torch.equal(out, outs[0]),
+                            np.array_equal(out, outs[0]),
                             f"launch {i} differs from launch 0",
                         )
 
