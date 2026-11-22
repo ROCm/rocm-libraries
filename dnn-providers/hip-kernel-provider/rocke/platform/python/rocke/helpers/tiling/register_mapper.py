@@ -157,6 +157,10 @@ def _slot_coordinates(
 
     An encoding is immutable and the coordinates are a pure function of it, while plan and
     issue validation ask for the slots of the same few encodings millions of times.
+
+    The cache is process-wide and unbounded: one table per distinct encoding, kept for
+    the life of the process. That is safe because a program uses only a handful of
+    encodings (one per MMA operand layout), so the cache stays small.
     """
     mapper = RegisterMapper(encoding)
     return tuple(
