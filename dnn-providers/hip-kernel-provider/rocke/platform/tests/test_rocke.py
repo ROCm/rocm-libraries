@@ -2067,9 +2067,11 @@ class TestLlvmFlavorEnumeration(unittest.TestCase):
         self.assertEqual(tuple(rocke_engine.llvm_flavors()), LLVM_FLAVORS)
 
 
-# Probe run in a child process: print the datalayout the Python resolver picks
-# for AUTO, and the one the C++ engine picks for AUTO (flavor=""). Must be a
-# child because both engines retain the first successfully loaded COMGR.
+# Probe run in a child process: print what the Python resolver does for AUTO,
+# then what the C++ engine does for AUTO (flavor=""), one line each: the
+# datalayout it picks, or the error it refuses with when no COMGR can be found.
+# Must be a child because both engines retain the first successfully loaded
+# COMGR.
 _FLAVOR_AUTO_PROBE = """
 import sys
 from rocke.core.ir import IRBuilder
@@ -2077,15 +2079,26 @@ from rocke.core.ir_serialize import serialize
 from rocke.core.lower_llvm import _datalayout_for_flavor, _resolve_llvm_flavor
 import rocke_engine
 
-b = IRBuilder("probe")
-b.kernel.attrs["max_workgroup_size"] = 64
-b.const_i32(1)
-cpp = rocke_engine.lower_serialized_ir(serialize(b.kernel), arch="gfx950", flavor="")
-cpp_dl = next(
-    ln.split('"')[1] for ln in cpp.splitlines() if ln.startswith("target datalayout")
-)
-print(_datalayout_for_flavor(_resolve_llvm_flavor()))
-print(cpp_dl)
+
+def outcome(resolve):
+    try:
+        return resolve()
+    except Exception as error:
+        return "refused: " + type(error).__name__ + ": " + " ".join(str(error).split())
+
+
+def cpp_datalayout():
+    b = IRBuilder("probe")
+    b.kernel.attrs["max_workgroup_size"] = 64
+    b.const_i32(1)
+    cpp = rocke_engine.lower_serialized_ir(serialize(b.kernel), arch="gfx950", flavor="")
+    return next(
+        ln.split('"')[1] for ln in cpp.splitlines() if ln.startswith("target datalayout")
+    )
+
+
+print(outcome(lambda: _datalayout_for_flavor(_resolve_llvm_flavor())))
+print(outcome(cpp_datalayout))
 """
 
 
@@ -2154,12 +2167,12 @@ class TestCrossEngineFlavorAutoResolution(unittest.TestCase):
         return rocm
 
     def _assert_agree(self, env_overrides):
+        """Both engines pick the same datalayout, or refuse AUTO alike."""
         py_dl, cpp_dl = self._probe(env_overrides)
         self.assertEqual(
             py_dl,
             cpp_dl,
-            f"python and cpp AUTO flavor resolution disagree for {env_overrides}: "
-            f"python picked a datalayout the engine did not",
+            f"python and cpp AUTO flavor resolution disagree for {env_overrides}",
         )
         return py_dl
 
@@ -2170,7 +2183,8 @@ class TestCrossEngineFlavorAutoResolution(unittest.TestCase):
             self.skipTest("rocke_engine extension not built")
 
     def test_agree_on_the_bare_host(self):
-        """No env pointing anywhere: whatever this machine has, both must see it."""
+        """No env pointing anywhere: whatever this machine has, both must see
+        it; a machine with no COMGR outside ``$ROCM_PATH`` makes both refuse."""
         self._assert_agree({})
 
     def test_agree_when_rocm_path_names_an_older_install(self):
