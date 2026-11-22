@@ -8,16 +8,19 @@ element type, and computes its reference from exactly the values the device
 reads back. This module is the one place that maps a storage dtype name to that
 host representation, so harnesses do not each grow their own copy:
 
-==========  ===================  ===============================================
-``dtype``   host array           rounding from fp32
-==========  ===================  ===============================================
-``"fp32"``  ``float32``          none
-``"fp16"``  ``float16``          numpy's round-to-nearest-even cast
-``"bf16"``  ``uint16`` raw bits  round-to-nearest-even (:mod:`rocke.numeric.bf16`)
-==========  ===================  ===============================================
+=============  ===================  ============================================
+``dtype``      host array           rounding from fp32
+=============  ===================  ============================================
+``"fp32"``     ``float32``          none
+``"fp16"``     ``float16``          numpy's round-to-nearest-even cast
+``"bf16"``     ``uint16`` raw bits  round-to-nearest-even (:mod:`rocke.numeric.bf16`)
+``"fp8e4m3"``  ``uint8`` raw bits   OCP e4m3, round-to-nearest-even, saturating
+                                    at 448; NaN refused (:mod:`rocke.numeric.fp8`)
+=============  ===================  ============================================
 
-numpy has no ``bfloat16``, so bf16 travels as its raw bit pattern; the bit codec
-itself lives in :mod:`rocke.numeric.bf16` and is only dispatched to from here.
+numpy has no ``bfloat16`` or fp8, so those travel as their raw bit patterns; the
+bit codecs themselves live in :mod:`rocke.numeric.bf16` and
+:mod:`rocke.numeric.fp8` and are only dispatched to from here.
 ``xf32_truncate`` is the operand rounding of a native XF32 matrix core (it reads
 the top 19 bits of each fp32 operand); which architectures do that is the
 architecture catalog's question, not this module's.
@@ -36,6 +39,7 @@ import numpy.typing as npt
 from ..core.dtypes import dtype_info
 from ..core.storage import element_bytes
 from .bf16 import bf16_to_f32, f32_to_bf16
+from .fp8 import fp8e4m3_decode_table, fp8e4m3_round
 
 __all__ = [
     "STORAGE_DTYPES",
@@ -60,7 +64,7 @@ _NUMPY_NATIVE = {
 }
 
 #: Every storage dtype name the value codec (encode / decode / round_to) accepts.
-STORAGE_DTYPES = ("fp32", "fp16", "bf16")
+STORAGE_DTYPES = ("fp32", "fp16", "bf16", "fp8e4m3")
 
 #: An fp32 bit pattern with the 13 mantissa bits a native XF32 MMA ignores cleared.
 _XF32_MASK = np.uint32(0xFFFFE000)
@@ -101,6 +105,8 @@ def encode(values: npt.ArrayLike, dtype: str) -> np.ndarray:
     fp32 = np.ascontiguousarray(values, dtype=np.float32)
     if dtype == "bf16":
         return f32_to_bf16(fp32)
+    if dtype == "fp8e4m3":
+        return fp8e4m3_round(fp32)
     return fp32.astype(array_dtype)
 
 
@@ -117,6 +123,8 @@ def decode(stored: np.ndarray, dtype: str) -> np.ndarray:
         )
     if dtype == "bf16":
         return bf16_to_f32(stored)
+    if dtype == "fp8e4m3":
+        return fp8e4m3_decode_table()[stored]
     return stored.astype(np.float32)
 
 

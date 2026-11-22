@@ -13,6 +13,7 @@ import numpy as np
 import pytest
 
 from rocke.numeric.bf16 import f32_to_bf16
+from rocke.numeric.fp8 import fp8e4m3_decode_table, fp8e4m3_round
 from rocke.numeric.storage import (
     STORAGE_DTYPES,
     decode,
@@ -27,7 +28,7 @@ VALUES = np.array([0.0, -0.0, 1.0, -2.5, 1.0 + 2.0**-9, 3.14159265, 65504.0, 1e-
 
 
 def test_host_dtype_is_numpy_native_or_raw_bits_of_the_same_width():
-    assert STORAGE_DTYPES == ("fp32", "fp16", "bf16")
+    assert STORAGE_DTYPES == ("fp32", "fp16", "bf16", "fp8e4m3")
     assert host_dtype("fp16") == np.float16 and host_dtype("half") == np.float16
     assert host_dtype("i32") == np.int32 and host_dtype("i64") == np.int64
     assert host_dtype("bf16") == np.uint16
@@ -58,6 +59,14 @@ def test_bf16_dispatches_to_the_bit_codec():
     np.testing.assert_array_equal(encode(VALUES, "bf16"), f32_to_bf16(VALUES))
 
 
+def test_fp8e4m3_dispatches_to_the_fp8_codec():
+    stored = encode(VALUES, "fp8e4m3")
+    np.testing.assert_array_equal(stored, fp8e4m3_round(VALUES))
+    np.testing.assert_array_equal(
+        decode(stored, "fp8e4m3"), fp8e4m3_decode_table()[stored]
+    )
+
+
 def test_round_to_is_what_the_kernel_reads():
     np.testing.assert_array_equal(
         round_to(VALUES, "fp16"), VALUES.astype(np.float16).astype(np.float32)
@@ -66,6 +75,9 @@ def test_round_to_is_what_the_kernel_reads():
     assert round_to(VALUES, "bf16")[4] == 1.0
     assert round_to(VALUES, "bf16")[5] == 3.140625
     np.testing.assert_array_equal(round_to(VALUES, "fp32"), VALUES.astype(np.float32))
+    # e4m3 keeps 3 mantissa bits: pi rounds to 3.25 and 65504 saturates to 448.
+    assert round_to(VALUES, "fp8e4m3")[5] == 3.25
+    assert round_to(VALUES, "fp8e4m3")[6] == 448.0
 
 
 def test_decode_refuses_a_buffer_of_another_host_dtype():
