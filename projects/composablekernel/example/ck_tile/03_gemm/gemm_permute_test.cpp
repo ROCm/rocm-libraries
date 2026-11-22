@@ -13,6 +13,7 @@
 #include <array>
 #include <cstdlib>
 #include <functional>
+#include <string>
 #include <string_view>
 
 namespace {
@@ -22,10 +23,23 @@ using namespace gemm_permute;
 // then the existing permute op, launched back to back. This GEMM op is tuned for this shape and
 // shares the library fused kernel's tile, mainloop, epilogue and tile order.
 using DenseTraits =
-    ck_tile::TileGemmUniversalTraits<true, false, false, false, Row, Row, Row, true>;
+    ck_tile::TileGemmUniversalTraits<true, false, false, DoubleSmemBuffer, Row, Row, Row, true>;
 using DenseProblem = ck_tile::UniversalGemmPipelineProblem<Bf16, Bf16, float, Shape, DenseTraits>;
-using GemmOp =
-    ck_tile::GemmKernel<Partitioner, ck_tile::GemmPipelineAgBgCrCompV3<DenseProblem>, Epilogue>;
+using GemmOp       = ck_tile::GemmKernel<Partitioner, MainPipeline<DenseProblem>, Epilogue>;
+// Per architecture: the GEMM op's pipeline name, the permute op's tile (PermuteOp below) and, on
+// gfx950, a second GEMM op.
+#if defined(CK_USE_GFX1250)
+inline constexpr const char* GemmOpName = "TDM V3";
+inline constexpr int Outputs            = 3; // library fused, A-stationary fused, two-op
+// 8 warps x 32 lanes x 8 elements x 16 repeats = one 32768-element block tile.
+using PermuteShape = ck_tile::
+    ElementWiseShape<ck_tile::sequence<8>, ck_tile::sequence<32768>, ck_tile::sequence<256>, Bf16>;
+#else
+inline constexpr const char* GemmOpName = "CompV3";
+inline constexpr int Outputs            = 4; // library fused, A-stationary fused, two-op, WP two-op
+// 4 warps x 64 lanes x 8 elements x 4 repeats = one 8192-element block tile.
+using PermuteShape = ck_tile::
+    ElementWiseShape<ck_tile::sequence<4>, ck_tile::sequence<8192>, ck_tile::sequence<512>, Bf16>;
 // Fastest existing CK-Tile GEMM op for this shape: the weight-preshuffle GEMM (WP V2 pipeline, A
 // global -> LDS async, PermuteNEpilogue), 128x256x64 tile, 1x4 warps of 16x16x32, 2 blocks per
 // CU. N tile 256, 4 N warps and 16x16 MFMA make its weight layout the one of
@@ -71,17 +85,14 @@ using WpGemmOp  = ck_tile::GemmKernel<
                                                                 WpProblem::TransposeC,
                                                                 false,
                                                                 1>>>;
+#endif
 // Best existing CK-Tile op for the permute: ElementWiseKernel as a strided PassThrough copy that
 // walks C order [t,b,d,h]; 16 B loads of the 8 heads, BF16 stores coalesced over d per wave.
-// 4 warps x 64 lanes x 8 elements x 4 repeats = one 8192-element block tile.
 using PermuteOp = ck_tile::ElementWiseKernel<
     ck_tile::ElementWisePipelineProblem<Bf16,
                                         Bf16,
                                         Bf16,
-                                        ck_tile::ElementWiseShape<ck_tile::sequence<4>,
-                                                                  ck_tile::sequence<8192>,
-                                                                  ck_tile::sequence<512>,
-                                                                  Bf16>,
+                                        PermuteShape,
                                         ck_tile::element_wise::PassThrough,
                                         true>,
     ck_tile::ElementWiseDefaultPolicy>;
@@ -125,14 +136,14 @@ bool run(hipStream_t stream, int time, int batch, bool benchmark)
 {
     const int m = time * batch, n = m * N;
     const size_t bytes = size_t(n) * sizeof(Bf16), w_bytes = size_t(K) * N * sizeof(Bf16);
-    // Y of the library fused, A-stationary fused, CompV3 two-op and WP two-op paths, each followed
-    // by a guard region; one more guard leads.
-    constexpr int Outputs = 4;
+    // Y of the Outputs paths, each followed by a guard region; one more guard leads.
     std::array<uint16_t, D> guard{};
     const int64_t stride = n + int64_t(guard.size());
-    ck_tile::DeviceMem a(size_t(m) * K * sizeof(Bf16)), w(w_bytes), wp(w_bytes), wf(w_bytes),
-        wq(w_bytes);
-    ck_tile::DeviceMem dense(bytes), wp_dense(bytes), ref(bytes),
+    ck_tile::DeviceMem a(size_t(m) * K * sizeof(Bf16)), w(w_bytes), wp(w_bytes), wf(w_bytes);
+#if !defined(CK_USE_GFX1250)
+    ck_tile::DeviceMem wq(w_bytes), wp_dense(bytes);
+#endif
+    ck_tile::DeviceMem dense(bytes), ref(bytes),
         out(Outputs * stride * sizeof(Bf16) + sizeof(guard)), first(sizeof(unsigned));
     auto y = [&](int i) { return data(out) + guard.size() + i * stride; };
     fill<<<512, 256, 0, stream>>>(data(a), m * K, 13);
@@ -143,9 +154,13 @@ bool run(hipStream_t stream, int time, int batch, bool benchmark)
     const ck_tile::stream_config config{stream};
     const auto gemm_args = GemmOp::MakeKernelArgs(
         ck_tile::GemmHostArgs(data(a), data(w), data(dense), 1, m, N, K, K, N, N));
+#if defined(CK_USE_GFX1250)
+    if(!GemmOp::IsSupportedArgument(gemm_args))
+#else
     const auto wp_args = WpGemmOp::MakeKernelArgs(
         ck_tile::GemmHostArgs(data(a), data(wq), data(wp_dense), 1, m, N, K, K, K, N));
     if(!GemmOp::IsSupportedArgument(gemm_args) || !WpGemmOp::IsSupportedArgument(wp_args))
+#endif
     {
         std::fprintf(stderr, "T=%d B=%d: a CK-Tile GEMM op rejects the problem\n", time, batch);
         return false;
@@ -174,14 +189,6 @@ bool run(hipStream_t stream, int time, int batch, bool benchmark)
                 GemmOp{}, GemmOp::GridSize(m, N, 1), GemmOp::BlockSize(), 0, gemm_args));
         HIP_CHECK_ERROR(hipGetLastError());
     };
-    auto wp_gemm_op = [&] {
-        HIP_CHECK_ERROR(astationary::repack_weight(data(w), data(wq), stream, false));
-        ck_tile::launch_kernel(
-            config,
-            ck_tile::make_kernel<2>(
-                WpGemmOp{}, WpGemmOp::GridSize(m, N, 1), WpGemmOp::BlockSize(), 0, wp_args));
-        HIP_CHECK_ERROR(hipGetLastError());
-    };
     auto permute_op = [&](const ck_tile::DeviceMem& src, Bf16* dst) {
         ck_tile::launch_kernel(config,
                                ck_tile::make_kernel<1>(PermuteOp{},
@@ -199,10 +206,20 @@ bool run(hipStream_t stream, int time, int batch, bool benchmark)
         gemm_op();
         permute_op(dense, y(2));
     };
+#if !defined(CK_USE_GFX1250)
+    auto wp_gemm_op = [&] {
+        HIP_CHECK_ERROR(astationary::repack_weight(data(w), data(wq), stream, false));
+        ck_tile::launch_kernel(
+            config,
+            ck_tile::make_kernel<2>(
+                WpGemmOp{}, WpGemmOp::GridSize(m, N, 1), WpGemmOp::BlockSize(), 0, wp_args));
+        HIP_CHECK_ERROR(hipGetLastError());
+    };
     auto wp_two_ops = [&] {
         wp_gemm_op();
         permute_op(wp_dense, y(3));
     };
+#endif
 
     // The reference GEMM runs on the null stream, which does not order with `stream`.
     HIP_CHECK_ERROR(hipStreamSynchronize(stream));
@@ -213,13 +230,17 @@ bool run(hipStream_t stream, int time, int batch, bool benchmark)
     HIP_CHECK_ERROR(hipGetLastError());
     HIP_CHECK_ERROR(hipMemsetAsync(data(out), 0xff, out.GetBufferSize(), stream));
     HIP_CHECK_ERROR(hipMemsetAsync(data(dense), 0xff, bytes, stream));
+#if !defined(CK_USE_GFX1250)
     HIP_CHECK_ERROR(hipMemsetAsync(data(wp_dense), 0xff, bytes, stream));
+#endif
     fused();
     astationary_fused();
     two_ops();
+#if !defined(CK_USE_GFX1250)
     wp_two_ops();
-    constexpr std::array<const char*, Outputs> names{
-        "library fused", "A-stationary fused", "CompV3 two-op", "WP two-op"};
+#endif
+    const std::array<std::string, 4> names{
+        "library fused", "A-stationary fused", GemmOpName + std::string(" two-op"), "WP two-op"};
     for(int i = 0; i < Outputs; ++i)
     {
         HIP_CHECK_ERROR(hipMemsetAsync(first.GetDeviceBuffer(), 0xff, sizeof(unsigned), stream));
@@ -235,7 +256,7 @@ bool run(hipStream_t stream, int time, int batch, bool benchmark)
                          "T=%d B=%d: %s first BF16 mismatch at Y[%u]\n",
                          time,
                          batch,
-                         names[i],
+                         names[i].c_str(),
                          mismatch);
             return false;
         }
@@ -250,10 +271,11 @@ bool run(hipStream_t stream, int time, int batch, bool benchmark)
             return false;
         }
     }
-    std::printf("T=%d B=%d: both fused and both two-op outputs (%d BF16) match the reference "
+    std::printf("T=%d B=%d: both fused and %s two-op outputs (%d BF16) match the reference "
                 "bit-for-bit; guards intact\n",
                 time,
                 batch,
+                Outputs == 4 ? "both" : "the",
                 n);
     if(!benchmark)
         return true;
@@ -268,13 +290,18 @@ bool run(hipStream_t stream, int time, int batch, bool benchmark)
         timer.stop(stream);
         return 1000.f * timer.duration() / Launches;
     };
-    const std::array<std::pair<const char*, std::function<void()>>, 6> paths{
+    const std::string gemm_op_name = GemmOpName;
+    const std::array<std::pair<std::string, std::function<void()>>, 2 * Outputs - 2> paths{
         {{"library fused (GemmEPermuteKernel)", fused},
          {"A-stationary fused", astationary_fused},
+#if !defined(CK_USE_GFX1250)
          {"WP GEMM + ElementWise", wp_two_ops},
-         {"CompV3 GEMM + ElementWise", two_ops},
+#endif
+         {gemm_op_name + " GEMM + ElementWise", two_ops},
+#if !defined(CK_USE_GFX1250)
          {"WP GEMM alone", wp_gemm_op},
-         {"CompV3 GEMM alone", gemm_op}}};
+#endif
+         {gemm_op_name + " GEMM alone", gemm_op}}};
     for(int i = 0; i < 3; ++i)
         for(const auto& p : paths)
             p.second();
@@ -292,15 +319,17 @@ bool run(hipStream_t stream, int time, int batch, bool benchmark)
         std::sort(t[k].begin(), t[k].end());
         median[k] = t[k][t[k].size() / 2];
     }
-    // Paths 2 and 3 are the two-op baselines.
-    const float best_two_op = std::min(median[2], median[3]);
+    // Paths 2 .. Outputs - 1 are the two-op baselines.
+    const float best_two_op = *std::min_element(&median[2], &median[Outputs]);
     std::printf("Median of %zu samples (%d launches each), weight reorder included in every call; "
                 "speedup = best two-op / path:\n",
                 t[0].size(),
                 Launches);
     for(size_t k = 0; k < t.size(); ++k)
-        std::printf(
-            "  %-36s %8.1f us  %.2fx\n", paths[k].first, median[k], best_two_op / median[k]);
+        std::printf("  %-36s %8.1f us  %.2fx\n",
+                    paths[k].first.c_str(),
+                    median[k],
+                    best_two_op / median[k]);
     return true;
 }
 } // namespace
@@ -318,16 +347,17 @@ int main(int argc, char** argv)
     HIP_CHECK_ERROR(hipGetDevice(&device));
     HIP_CHECK_ERROR(hipGetDeviceProperties(&prop, device));
     const std::string_view arch{prop.gcnArchName};
-    if(arch.substr(0, arch.find(':')) != "gfx950")
+    if(arch.substr(0, arch.find(':')) != Arch)
     {
-        std::fprintf(stderr, "requires gfx950; selected device is %s\n", prop.gcnArchName);
+        std::fprintf(stderr, "requires %s; selected device is %s\n", Arch, prop.gcnArchName);
         return EXIT_FAILURE;
     }
     hipStream_t stream;
     HIP_CHECK_ERROR(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
     const bool ok = run(stream, 1, 1, false) && run(stream, 67, 5, false) &&
-                    run(stream, BM + 3, 5, false) && run(stream, 67, 128, false) &&
-                    (!benchmark || run(stream, 768, 512, true));
+                    run(stream, BM + 3, 5, false) &&
+                    (astationary::BM == BM || run(stream, astationary::BM + 3, 5, false)) &&
+                    run(stream, 67, 128, false) && (!benchmark || run(stream, 768, 512, true));
     HIP_CHECK_ERROR(hipStreamDestroy(stream));
     return ok ? EXIT_SUCCESS : EXIT_FAILURE;
 }

@@ -15,13 +15,30 @@ namespace gemm_permute {
 
 using Bf16             = ck_tile::bf16_t;
 inline constexpr int K = 384, H = 8, D = 256, N = D * H;
-inline constexpr int BM = 128, BN = 256, BK = 32;
 
-using Shape   = ck_tile::TileGemmShape<ck_tile::sequence<BM, BN, BK>,
-                                       ck_tile::sequence<2, 2, 1>,
-                                       ck_tile::sequence<32, 32, 16>>;
-using Row     = ck_tile::tensor_layout::gemm::RowMajor;
-using Traits  = ck_tile::TileGemmUniversalTraits<false, false, false, false, Row, Row, Row, true>;
+// The library kernel's tile per architecture; on gfx1250 the fastest TDM V3 tile for this shape.
+#if defined(CK_USE_GFX1250)
+inline constexpr const char* Arch = "gfx1250";
+inline constexpr int BM = 160, BN = 256, BK = 64, WarpsM = 2, WarpsN = 8, WarpTileM = 16,
+                     WarpTileN = 16, WarpTileK = 32, TileGroups = 16, TileM01 = 8;
+inline constexpr bool DoubleSmemBuffer = true; // the TDM pipelines' LDS ping-pong
+template <typename Problem>
+using MainPipeline = ck_tile::GemmPipelineAgBgCrCompTDMV3<Problem>;
+#else
+inline constexpr const char* Arch = "gfx950";
+inline constexpr int BM = 128, BN = 256, BK = 32, WarpsM = 2, WarpsN = 2, WarpTileM = 32,
+                     WarpTileN = 32, WarpTileK = 16, TileGroups = 8, TileM01 = 16;
+inline constexpr bool DoubleSmemBuffer = false;
+template <typename Problem>
+using MainPipeline = ck_tile::GemmPipelineAgBgCrCompV3<Problem>;
+#endif
+
+using Shape = ck_tile::TileGemmShape<ck_tile::sequence<BM, BN, BK>,
+                                     ck_tile::sequence<WarpsM, WarpsN, 1>,
+                                     ck_tile::sequence<WarpTileM, WarpTileN, WarpTileK>>;
+using Row   = ck_tile::tensor_layout::gemm::RowMajor;
+using Traits =
+    ck_tile::TileGemmUniversalTraits<false, false, false, DoubleSmemBuffer, Row, Row, Row, true>;
 using Problem = ck_tile::UniversalGemmPipelineProblem<Bf16, Bf16, float, Shape, Traits>;
 
 // Contract: the weight is consumed pre-permuted, Wp[k,h,d] = W[k,d,h] (see prepermute_weight,
@@ -38,15 +55,20 @@ using Epilogue =
                                                                ck_tile::element_wise::PassThrough,
                                                                BM,
                                                                BN,
-                                                               2,
-                                                               2,
-                                                               32,
-                                                               32,
-                                                               16,
-                                                               Problem::TransposeC>>;
+                                                               WarpsM,
+                                                               WarpsN,
+                                                               WarpTileM,
+                                                               WarpTileN,
+                                                               WarpTileK,
+                                                               Problem::TransposeC,
+                                                               1,
+                                                               false,
+                                                               1,
+                                                               1,
+                                                               DoubleSmemBuffer>>;
 
-using Partitioner = ck_tile::GemmSpatiallyLocalTilePartitioner<Shape, 8, 16>;
-using Pipeline    = ck_tile::GemmPipelineAgBgCrCompV3<Problem>;
+using Partitioner = ck_tile::GemmSpatiallyLocalTilePartitioner<Shape, TileGroups, TileM01>;
+using Pipeline    = MainPipeline<Problem>;
 using Kernel      = ck_tile::GemmEPermuteKernel<Partitioner, Pipeline, Epilogue>;
 
 // One-time weight reorder W[k,d,h] -> Wp[k,h,d] (dense, same size).
