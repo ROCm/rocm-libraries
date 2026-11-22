@@ -14,6 +14,7 @@ import dataclasses
 import json
 import math
 
+import numpy as np
 import pytest
 
 from benchmarks.common import attention_bwd_bench as bb
@@ -93,7 +94,6 @@ def test_config_roundtrip_and_files(tmp_path):
     ],
 )
 def test_band_fields_follow_the_census_mask(mask, sq, skv, window):
-    torch = pytest.importorskip("torch")
     cell = bb.Cell("x", 64, 2, 2, 1, sq, skv, mask, "bf16", "bshd", window=window)
     f = ra.band_fields(cell)
     left, right, tl = resolve_diagonal_band(
@@ -103,12 +103,12 @@ def test_band_fields_follow_the_census_mask(mask, sq, skv, window):
         causal=f.get("causal", False),
         causal_bottom_right=f.get("causal_bottom_right", False),
     )
-    got = torch.tensor(
+    got = np.array(
         [[keep(i, j, sq, skv, tl, left, right) for j in range(skv)] for i in range(sq)]
     )
-    want = bb.allowed_mask(mask, sq, skv, window, "cpu")
-    want = torch.ones(sq, skv, dtype=torch.bool) if want is None else want
-    assert torch.equal(got, want)
+    want = bb.allowed_mask_array(mask, sq, skv, window)
+    want = np.ones((sq, skv), dtype=bool) if want is None else want
+    assert np.array_equal(got, want)
 
 
 # --------------------------------------------------------------------------- request
