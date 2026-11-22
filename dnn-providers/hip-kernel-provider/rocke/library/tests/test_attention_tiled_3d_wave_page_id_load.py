@@ -8,13 +8,16 @@ from __future__ import annotations
 import math
 from dataclasses import asdict, replace
 
+import numpy as np
 import pytest
-
 from kernels.gfx950.attention_tiled_3d import (
     UnifiedAttention3DTiledSpec,
     UnifiedAttentionReduceTiledSpec,
 )
+from rocke.tests.gpu import current_device_arch_in
 
+from ._attention_tiled_launch import launch_unified
+from ._attention_unified_support import decode_reference, paged_cache, random_half
 from ._tiled_3d_binding_ir import lower_like_tiled_3d_binding
 
 
@@ -155,71 +158,35 @@ def test_gfx942_dispatch_scope(kw, arch, expected):
     assert au._wave_page_id_load_3d(problem, arch) is expected
 
 
-def _reference(torch, q, k, v, lengths):
-    output = torch.zeros_like(q, dtype=torch.float32)
-    ratio = q.shape[1] // k.shape[1]
-    for batch, length in enumerate(lengths):
-        if length == 0:
-            continue
-        for head in range(q.shape[1]):
-            keys = k[batch, head // ratio, :length].float()
-            values = v[batch, head // ratio, :length].float()
-            scores = (keys @ q[batch, head].float()) / math.sqrt(q.shape[2])
-            output[batch, head] = scores.softmax(0) @ values
-    return output
+def _decode_case(seed, dtype, head_size):
+    """Q, logical K/V and ragged lengths: 2203 tokens (138 pages of 16, so a
+    one-segment split spans several 64-page windows) with a partial last tile,
+    a sequence shorter than one tile, and an empty one."""
+    batch, q_heads, kv_heads, capacity = 3, 16, 4, 2203
+    rng = np.random.default_rng(seed)
+    q = random_half(rng, (batch, q_heads, head_size), dtype)
+    k = random_half(rng, (batch, kv_heads, capacity, head_size), dtype)
+    v = random_half(rng, (batch, kv_heads, capacity, head_size), dtype)
+    return q, k, v, [capacity, 5, 0]
 
 
-def _paged_cache(torch, logical, block_size):
-    # Pages in reverse order, so neighbouring table entries are not
-    # neighbouring pages.
-    batch, heads, capacity, dim = logical.shape
-    blocks = (capacity + block_size - 1) // block_size
-    backing = torch.zeros(batch, blocks * block_size, heads, dim, dtype=logical.dtype)
-    backing[:, :capacity].copy_(logical.permute(0, 2, 1, 3))
-    pages = backing.reshape(batch * blocks, block_size, heads, dim).flip(0).contiguous()
-    table = torch.arange(batch * blocks - 1, -1, -1, dtype=torch.int32).view(
-        batch, blocks
-    )
-    return pages.cuda(), table.cuda()
-
-
-@pytest.mark.parametrize("dtype", ["fp16", "bf16"])
-@pytest.mark.parametrize(
-    "tile, num_segments, swizzle", [(16, 1, False), (16, 4, False), (64, 2, True)]
-)
-def test_wave_page_id_load_matches_reference(dtype, tile, num_segments, swizzle):
-    torch = pytest.importorskip("torch")
+def _run(arch, dtype, head_size, block_size, segment_fields, seed, reduce_type):
+    """Launch the pinned 3D pair on a paged cache whose unused table entries
+    point at an all-NaN page, and check it against the FP64 reference."""
     from dispatch.attention.common import AttentionTuningSpec
     from kernels.common import attention_unified as au
-    from rocke.runtime.hip_module import get_device_arch
 
-    if not torch.cuda.is_available() or get_device_arch() != "gfx950":
-        pytest.skip("requires a gfx950 GPU")
-    # 2203 tokens = 138 pages: a one-segment split spans three 64-page windows.
-    batch, q_heads, kv_heads, capacity, block_size = 3, 16, 4, 2203, 16
-    tdtype = torch.float16 if dtype == "fp16" else torch.bfloat16
-    rng = torch.Generator().manual_seed(17 + tile + num_segments)
-    q_host = torch.randn(batch, q_heads, 128, generator=rng).to(tdtype)
-    k_host = torch.randn(batch, kv_heads, capacity, 128, generator=rng).to(tdtype)
-    v_host = torch.randn(batch, kv_heads, capacity, 128, generator=rng).to(tdtype)
-    k, table = _paged_cache(torch, k_host, block_size)
-    v, _ = _paged_cache(torch, v_host, block_size)
-    # Ragged: a partial last tile, a sequence shorter than one tile, and an
-    # empty one.
-    lengths_host = [capacity, 5, 0]
-    # Poison: table entries past a sequence's last page point at an extra
-    # all-NaN page; a kernel that reads them returns NaN.
-    nan_page = torch.full_like(k[:1], float("nan"))
-    k = torch.cat([k, nan_page])
-    v = torch.cat([v, nan_page])
-    for i, length in enumerate(lengths_host):
-        table[i, (length + block_size - 1) // block_size :] = k.shape[0] - 1
+    q, k_logical, v_logical, lengths = _decode_case(seed, dtype, head_size)
+    batch, q_heads, _ = q.shape
+    kv_heads, capacity = k_logical.shape[1:3]
+    k, table = paged_cache(k_logical, block_size, dtype, poison_after=lengths)
+    v, _ = paged_cache(v_logical, block_size, dtype, poison_after=lengths)
     problem = au.UnifiedAttentionProblem(
         total_q=batch,
         num_seqs=batch,
         num_query_heads=q_heads,
         num_kv_heads=kv_heads,
-        head_size=128,
+        head_size=head_size,
         block_size=block_size,
         max_seqlen_q=1,
         max_seqlen_k=capacity,
@@ -227,22 +194,20 @@ def test_wave_page_id_load_matches_reference(dtype, tile, num_segments, swizzle)
         num_kv_blocks=k.shape[0],
     )
     segment = replace(
-        au._tiled_3d_spec_from_problem(problem, "gfx950"),
-        num_segments=num_segments,
-        tile_size_override=None if tile == block_size else tile,
-        use_kv_lds_swizzle=swizzle,
+        au._tiled_3d_spec_from_problem(problem, arch),
         use_wave_page_id_load=True,
+        **segment_fields,
     )
-    reduce = UnifiedAttentionReduceTiledSpec(
-        head_size=128,
+    reduce = reduce_type(
+        head_size=head_size,
         num_query_heads=q_heads,
         num_kv_heads=kv_heads,
         dtype=dtype,
-        num_segments=num_segments,
+        num_segments=segment.num_segments,
     )
     spec = AttentionTuningSpec(
         path="3d",
-        arch="gfx950",
+        arch=arch,
         builder_kind="tiled_3d",
         compile_backend="llvm",
         candidate_name="wave_page_id_load_test",
@@ -251,24 +216,44 @@ def test_wave_page_id_load_matches_reference(dtype, tile, num_segments, swizzle)
         reduce_spec=reduce,
         num_kv_blocks=k.shape[0],
     )
-    out = torch.empty_like(q_host).cuda()
-    au.run_unified_attention_torch(
-        problem=problem,
-        q=q_host.cuda(),
-        k=k,
-        v=v,
-        out=out,
-        cu_seqlens_q=torch.arange(batch + 1, dtype=torch.int32).cuda(),
-        seqused_k=torch.tensor(lengths_host, dtype=torch.int32).cuda(),
-        softmax_scale=1 / math.sqrt(128),
-        block_table=table,
-        softcap=0.0,
+    out = launch_unified(
+        problem,
+        q,
+        k,
+        v,
+        table,
+        1 / math.sqrt(head_size),
+        q_lens=[1] * batch,
+        kv_lens=lengths,
         tuning_spec=spec,
     )
-    torch.cuda.synchronize()
-    expected = _reference(torch, q_host, k_host, v_host, lengths_host)
+    expected = decode_reference(
+        q, k_logical, v_logical, lengths, 1 / math.sqrt(head_size)
+    )
     atol, rtol = (0.01, 0.02) if dtype == "bf16" else (0.003, 0.005)
-    torch.testing.assert_close(out.cpu().float(), expected, atol=atol, rtol=rtol)
+    np.testing.assert_allclose(out, expected, atol=atol, rtol=rtol)
+
+
+@pytest.mark.parametrize("dtype", ["fp16", "bf16"])
+@pytest.mark.parametrize(
+    "tile, num_segments, swizzle", [(16, 1, False), (16, 4, False), (64, 2, True)]
+)
+def test_wave_page_id_load_matches_reference(dtype, tile, num_segments, swizzle):
+    current_device_arch_in(("gfx950",), "the gfx950 wave page-id load")
+    block_size = 16
+    _run(
+        "gfx950",
+        dtype,
+        128,
+        block_size,
+        {
+            "num_segments": num_segments,
+            "tile_size_override": None if tile == block_size else tile,
+            "use_kv_lds_swizzle": swizzle,
+        },
+        17 + tile + num_segments,
+        UnifiedAttentionReduceTiledSpec,
+    )
 
 
 @pytest.mark.parametrize("dtype", ["fp16", "bf16"])
@@ -288,89 +273,22 @@ def test_wave_page_id_load_matches_reference(dtype, tile, num_segments, swizzle)
 def test_gfx942_wave_page_id_load_matches_reference(
     dtype, head_size, block_size, tile, wide, num_segments, swizzle
 ):
-    torch = pytest.importorskip("torch")
-    from dispatch.attention.common import AttentionTuningSpec
-    from kernels.common import attention_unified as au
     from kernels.gfx942.attention_tiled_3d import (
         UnifiedAttentionReduceTiledSpec as Gfx942Reduce,
     )
-    from rocke.runtime.hip_module import get_device_arch
 
-    if not torch.cuda.is_available() or get_device_arch() != "gfx942":
-        pytest.skip("requires a gfx942 GPU")
-    # 2203 tokens: a one-segment split spans several 64-page windows.
-    batch, q_heads, kv_heads, capacity = 3, 16, 4, 2203
-    tdtype = torch.float16 if dtype == "fp16" else torch.bfloat16
-    rng = torch.Generator().manual_seed(41 + num_segments + head_size + block_size)
-    q_host = torch.randn(batch, q_heads, head_size, generator=rng).to(tdtype)
-    k_host = torch.randn(batch, kv_heads, capacity, head_size, generator=rng)
-    v_host = torch.randn(batch, kv_heads, capacity, head_size, generator=rng)
-    k_host, v_host = k_host.to(tdtype), v_host.to(tdtype)
-    k, table = _paged_cache(torch, k_host, block_size)
-    v, _ = _paged_cache(torch, v_host, block_size)
-    # Ragged: a partial last tile, a sequence shorter than one tile, and an
-    # empty one.
-    lengths_host = [capacity, 5, 0]
-    # Poison: table entries past a sequence's last page point at an extra
-    # all-NaN page; a kernel that reads them returns NaN.
-    nan_page = torch.full_like(k[:1], float("nan"))
-    k = torch.cat([k, nan_page])
-    v = torch.cat([v, nan_page])
-    for i, length in enumerate(lengths_host):
-        table[i, (length + block_size - 1) // block_size :] = k.shape[0] - 1
-    problem = au.UnifiedAttentionProblem(
-        total_q=batch,
-        num_seqs=batch,
-        num_query_heads=q_heads,
-        num_kv_heads=kv_heads,
-        head_size=head_size,
-        block_size=block_size,
-        max_seqlen_q=1,
-        max_seqlen_k=capacity,
-        dtype=dtype,
-        num_kv_blocks=k.shape[0],
+    current_device_arch_in(("gfx942",), "the gfx942 wave page-id load")
+    _run(
+        "gfx942",
+        dtype,
+        head_size,
+        block_size,
+        {
+            "num_segments": num_segments,
+            "tile_size_override": None if tile == block_size else tile,
+            "use_wide_kv_load": wide,
+            "use_kv_lds_swizzle": swizzle,
+        },
+        41 + num_segments + head_size + block_size,
+        Gfx942Reduce,
     )
-    segment = replace(
-        au._tiled_3d_spec_from_problem(problem, "gfx942"),
-        num_segments=num_segments,
-        tile_size_override=None if tile == block_size else tile,
-        use_wide_kv_load=wide,
-        use_kv_lds_swizzle=swizzle,
-        use_wave_page_id_load=True,
-    )
-    reduce = Gfx942Reduce(
-        head_size=head_size,
-        num_query_heads=q_heads,
-        num_kv_heads=kv_heads,
-        dtype=dtype,
-        num_segments=num_segments,
-    )
-    spec = AttentionTuningSpec(
-        path="3d",
-        arch="gfx942",
-        builder_kind="tiled_3d",
-        compile_backend="llvm",
-        candidate_name="wave_page_id_load_test",
-        tuning_id="wave_page_id_load_test",
-        kernel_spec=segment,
-        reduce_spec=reduce,
-        num_kv_blocks=k.shape[0],
-    )
-    out = torch.empty_like(q_host).cuda()
-    au.run_unified_attention_torch(
-        problem=problem,
-        q=q_host.cuda(),
-        k=k,
-        v=v,
-        out=out,
-        cu_seqlens_q=torch.arange(batch + 1, dtype=torch.int32).cuda(),
-        seqused_k=torch.tensor(lengths_host, dtype=torch.int32).cuda(),
-        softmax_scale=1 / math.sqrt(head_size),
-        block_table=table,
-        softcap=0.0,
-        tuning_spec=spec,
-    )
-    torch.cuda.synchronize()
-    expected = _reference(torch, q_host, k_host, v_host, lengths_host)
-    atol, rtol = (0.01, 0.02) if dtype == "bf16" else (0.003, 0.005)
-    torch.testing.assert_close(out.cpu().float(), expected, atol=atol, rtol=rtol)

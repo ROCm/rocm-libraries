@@ -20,6 +20,7 @@ __all__ = [
     "decode_half",
     "encode_half",
     "paged_attention_reference",
+    "paged_attention_reference_with_lse",
     "qq_score_bias",
     "round_to_half",
     "rows_with_keys",
@@ -60,29 +61,43 @@ def round_to_half(values: npt.ArrayLike, dtype: str) -> np.ndarray:
     return decode_half(encode_half(values, dtype), dtype)
 
 
-def alibi_score_bias(slopes: npt.ArrayLike, q_len: int, kv_len: int) -> np.ndarray:
+def _context_len(q_len: int, kv_len: int, top_left: bool) -> int:
+    """The diagonal offset of a sequence: 0 for the top-left alignment, else
+    the bottom-right ``kv_len - q_len``."""
+    return 0 if top_left else kv_len - q_len
+
+
+def alibi_score_bias(
+    slopes: npt.ArrayLike, q_len: int, kv_len: int, *, top_left: bool = False
+) -> np.ndarray:
     """ALiBi as an additive score bias ``[num_query_heads, q_len, kv_len]``.
 
     The unified attention kernels add ``slopes[h] * (k - context_len)`` to every
-    score of head ``h`` (AITER's semantics), with the bottom-right offset
-    ``context_len = kv_len - q_len``; the term does not depend on the query row.
+    score of head ``h`` (AITER's semantics), with ``context_len`` the diagonal
+    offset (``kv_len - q_len`` bottom-right, 0 top-left); the term does not
+    depend on the query row.
     """
-    key_offsets = np.arange(kv_len, dtype=np.float64) - (kv_len - q_len)
+    key_offsets = np.arange(kv_len, dtype=np.float64) - _context_len(
+        q_len, kv_len, top_left
+    )
     slopes = np.asarray(slopes, dtype=np.float64)
     term = slopes[:, None] * key_offsets[None, :]
     return np.broadcast_to(term[:, None, :], (slopes.size, q_len, kv_len))
 
 
-def qq_score_bias(qq_bias: npt.ArrayLike, q_len: int, kv_len: int) -> np.ndarray:
+def qq_score_bias(
+    qq_bias: npt.ArrayLike, q_len: int, kv_len: int, *, top_left: bool = False
+) -> np.ndarray:
     """The query-to-query bias as an additive score bias ``[q_len, kv_len]``.
 
     The kernels add ``qq_bias[p, k - context_len]`` to the score of query row
     ``p`` and key ``k`` when ``0 <= k - context_len < qq_bias.shape[1]`` (the
-    bias row stride), and nothing otherwise; ``context_len = kv_len - q_len``.
-    The same matrix serves every head and sequence.
+    bias row stride), and nothing otherwise; ``context_len`` is the diagonal
+    offset (``kv_len - q_len`` bottom-right, 0 top-left). The same matrix serves
+    every head and sequence.
     """
     qq_bias = np.asarray(qq_bias, dtype=np.float64)
-    query_keys = np.arange(kv_len) - (kv_len - q_len)
+    query_keys = np.arange(kv_len) - _context_len(q_len, kv_len, top_left)
     in_range = (query_keys >= 0) & (query_keys < qq_bias.shape[1])
     out = np.zeros((q_len, kv_len))
     out[:, in_range] = qq_bias[:q_len, query_keys[in_range]]
@@ -105,7 +120,7 @@ def rows_with_keys(
     return last >= first
 
 
-def paged_attention_reference(
+def paged_attention_reference_with_lse(
     q: np.ndarray,
     k_cache: np.ndarray,
     v_cache: np.ndarray,
@@ -115,19 +130,24 @@ def paged_attention_reference(
     *,
     sliding_window: int = 0,
     top_left: bool = False,
+    right_bound: int = 0,
     score_bias: npt.ArrayLike | None = None,
     softcap: float = 0.0,
     sinks: npt.ArrayLike | None = None,
-) -> np.ndarray:
-    """FP32 output of one sequence, ``[q_len, num_query_heads, head_size]``.
+) -> tuple[np.ndarray, np.ndarray]:
+    """FP32 output ``[q_len, num_query_heads, head_size]`` and natural-log LSE
+    ``[q_len, num_query_heads]`` of one sequence (``-inf`` for a row that sees
+    no key).
 
     ``q`` is ``[q_len, num_query_heads, head_size]`` and the caches are
     ``[num_blocks, block_size, num_kv_heads, head_size]``, all float32;
     ``block_ids`` is the sequence's block-table row. Key ``k`` is visible to
-    query row ``p`` when ``k <= diag``, where ``diag`` is ``p`` for the top-left
-    causal mask and ``p + kv_len - q_len`` for the bottom-right one, and, with a
-    ``sliding_window`` above 0, also ``diag - k < sliding_window``. A row that
-    sees no key gets an output of 0.
+    query row ``p`` when ``k <= diag + right_bound``, where ``diag`` is ``p`` for
+    the top-left alignment and ``p + kv_len - q_len`` for the bottom-right one,
+    and, with a ``sliding_window`` above 0, also ``diag - k < sliding_window``.
+    ``right_bound`` 0 is the causal mask, ``R > 0`` lets a row look ``R`` keys
+    ahead and -1 removes the right bound. A row that sees no key gets an output
+    of 0.
 
     The score modifiers apply in the kernels' order: the scaled score is capped
     by ``softcap`` (0 = off), then ``score_bias`` (broadcast against
@@ -146,18 +166,34 @@ def paged_attention_reference(
     values = v_cache[blocks].reshape(-1, num_kv_heads, head_size)[:kv_len]
     # sdpa_reference's left bound L keeps the diagonal and the L keys to its
     # left, so a window of W keys is L = W - 1.
-    out, _lse = sdpa_reference(
+    out, lse = sdpa_reference(
         q,
         keys,
         values,
         scale=scale,
         bias=score_bias,
         left_bound=sliding_window - 1 if sliding_window > 0 else None,
-        right_bound=0,
+        right_bound=right_bound,
         top_left=top_left,
         q_offsets=[0, q_len],
         kv_offsets=[0, kv_len],
         softcap=softcap,
         sinks=sinks,
     )
-    return out.astype(np.float32)
+    return out.astype(np.float32), lse.astype(np.float32)
+
+
+def paged_attention_reference(
+    q: np.ndarray,
+    k_cache: np.ndarray,
+    v_cache: np.ndarray,
+    kv_len: int,
+    block_ids: np.ndarray,
+    scale: float,
+    **mask_and_modifiers,
+) -> np.ndarray:
+    """The output of :func:`paged_attention_reference_with_lse` alone."""
+    out, _ = paged_attention_reference_with_lse(
+        q, k_cache, v_cache, kv_len, block_ids, scale, **mask_and_modifiers
+    )
+    return out
