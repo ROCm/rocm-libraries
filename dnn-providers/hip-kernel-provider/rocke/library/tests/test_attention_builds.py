@@ -30,6 +30,7 @@ import unittest
 import pytest
 
 from rocke import lower_kernel_to_llvm
+from rocke.tests.compiler_tools import require_tools_or_skip
 
 from ._dense_paged_stand_ins import dense_arch_spec_class
 
@@ -92,11 +93,11 @@ def _compile_or_skip(kernel, *, arch: str):
     try:
         from rocke.helpers.compile import compile_kernel
     except Exception as e:  # pragma: no cover - env-dependent
-        pytest.skip(f"comgr toolchain unavailable: {e}")
+        require_tools_or_skip(f"comgr toolchain unavailable: {e}")
     try:
         return compile_kernel(kernel, arch=arch, capture_ir_text=False)
     except ImportError as e:  # pragma: no cover - env-dependent
-        pytest.skip(f"comgr toolchain unavailable: {e}")
+        require_tools_or_skip(f"comgr toolchain unavailable: {e}")
 
 
 # Two shipped attention kernels are tuned to sit at the VGPR ceiling their
@@ -208,7 +209,7 @@ def _assert_resources_fit(art, *, arch: str, kernel_name: str = ""):
         try:
             res = analyze_hsaco(Path(fh.name)).resources
         except (FileNotFoundError, RuntimeError) as e:  # pragma: no cover
-            pytest.skip(f"HSACO introspection tool unavailable: {e}")
+            require_tools_or_skip(f"HSACO introspection tool unavailable: {e}")
 
     name = kernel_name or "kernel"
     if kernel_name:
