@@ -144,6 +144,24 @@ bool rocke_matmul_nbits_is_valid_spec(const rocke_matmul_nbits_spec_t* spec,
         return false;
     }
 
+    /* The optimized body (LDS-staged A, LDS epilogue) is written for gfx1201's
+     * WMMA fragment and accumulator layout; on gfx1151 it computes the wrong
+     * tile, so it is refused there.
+     *   if spec.optimized and arch != "gfx1201":
+     *       return False, f"optimized=True is built for gfx1201 only; got {arch}" */
+    {
+        const char* target = arch != NULL ? arch : ROCKE_MATMUL_NBITS_V1_ARCH;
+        if(spec->optimized && strcmp(target, "gfx1201") != 0)
+        {
+            if(reason != NULL && reason_cap > 0)
+            {
+                snprintf(
+                    reason, reason_cap, "optimized=True is built for gfx1201 only; got %s", target);
+            }
+            return false;
+        }
+    }
+
     rocke_mnb_copy_msg(reason, reason_cap, "ok");
     return true;
 }

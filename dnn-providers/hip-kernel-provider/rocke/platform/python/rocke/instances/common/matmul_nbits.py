@@ -64,6 +64,11 @@ def is_valid_spec(spec: MatMulNBitsSpec, arch: str = V1_ARCH) -> Tuple[bool, str
         return False, (
             f"skinny_n is for narrow N (<= 64); N={spec.N} should use family='large_n'"
         )
+    # The optimized body (LDS-staged A, LDS epilogue) is written for gfx1201's
+    # WMMA fragment and accumulator layout; on gfx1151 it computes the wrong
+    # tile, so it is refused there.
+    if spec.optimized and arch != "gfx1201":
+        return False, f"optimized=True is built for gfx1201 only; got {arch}"
 
     return True, "ok"
 

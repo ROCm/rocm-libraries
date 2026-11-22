@@ -2,11 +2,12 @@
  * SPDX-License-Identifier: MIT
  *
  * tests/parity/matmul_nbits_emit.c -- C-side emitter for the MatMulNBits parity
- * harness. Selects one of 6 configs by argv[1] (config index 0..5), builds the
+ * harness. Selects one of 7 configs by argv[1] (config index 0..6), builds the
  * rocke_matmul_nbits_spec_t identically to the Python emitter matmul_nbits_emit.py,
  * dispatches+builds via rocke_build_matmul_nbits (after initialising the builder
  * with spec.kernel_name(), exactly as Python's IRBuilder(spec.kernel_name())),
- * lowers via rocke_lower_kernel_to_llvm (arch gfx1201, flavor AUTO) and prints the
+ * lowers via rocke_lower_kernel_to_llvm (arch gfx1201, gfx1151 for config 6,
+ * flavor AUTO) and prints the
  * .ll to stdout so the two outputs can be byte-compared. gfx1201 is one of the
  * matmul_nbits SUPPORTED_ARCHES (gfx1151/gfx1201); gfx950 is rejected by the
  * validator on both sides, so it must NOT be used here.
@@ -30,10 +31,12 @@
 #include "rocke/lower_llvm.h"
 #include "rocke/verify.h"
 
-/* Fill `spec` for config index `idx`. Returns 0 on success, -1 if unknown. */
-static int make_spec(int idx, rocke_matmul_nbits_spec_t* spec)
+/* Fill `spec` and its target `*arch` for config index `idx`. Returns 0 on
+ * success, -1 if unknown. */
+static int make_spec(int idx, rocke_matmul_nbits_spec_t* spec, const char** arch)
 {
     *spec = rocke_matmul_nbits_spec_default();
+    *arch = "gfx1201";
 
     switch(idx)
     {
@@ -127,6 +130,14 @@ static int make_spec(int idx, rocke_matmul_nbits_spec_t* spec)
         spec->family = "large_n";
         spec->optimized = true;
         break;
+    case 6: /* cfg4 on gfx1151: both engines refuse the optimized body there. */
+        if(make_spec(4, spec, arch) != 0)
+        {
+            return -1;
+        }
+        spec->name = "matmul_nbits_gfx1151_opt";
+        *arch = "gfx1151";
+        return 0;
     case 5:
         spec->name = "matmul_nbits_gfx950_12k";
         spec->N = 12288;
@@ -156,7 +167,7 @@ int main(int argc, char** argv)
 {
     if(argc < 2)
     {
-        fprintf(stderr, "usage: %s <config_index 0..5> [ll|ir|verify]\n", argv[0]);
+        fprintf(stderr, "usage: %s <config_index 0..6> [ll|ir|verify]\n", argv[0]);
         return 2;
     }
     int idx = atoi(argv[1]);
@@ -169,7 +180,8 @@ int main(int argc, char** argv)
     }
 
     rocke_matmul_nbits_spec_t spec;
-    if(make_spec(idx, &spec) != 0)
+    const char* arch = NULL;
+    if(make_spec(idx, &spec, &arch) != 0)
     {
         fprintf(stderr, "unknown config index %d\n", idx);
         return 2;
@@ -191,7 +203,7 @@ int main(int argc, char** argv)
         return 1;
     }
 
-    rocke_kernel_def_t* kernel = rocke_build_matmul_nbits(&b, &spec, "gfx1201");
+    rocke_kernel_def_t* kernel = rocke_build_matmul_nbits(&b, &spec, arch);
     if(kernel == NULL)
     {
         const char* m = rocke_ir_builder_error(&b);
@@ -204,7 +216,7 @@ int main(int argc, char** argv)
     {
         char* llvm_text = NULL;
         rocke_status_t st
-            = rocke_lower_kernel_to_llvm(kernel, ROCKE_LLVM_FLAVOR_AUTO, "gfx1201", &llvm_text);
+            = rocke_lower_kernel_to_llvm(kernel, ROCKE_LLVM_FLAVOR_AUTO, arch, &llvm_text);
         if(st != ROCKE_OK || !llvm_text)
         {
             fprintf(stderr, "lower failed: status=%d\n", (int)st);
