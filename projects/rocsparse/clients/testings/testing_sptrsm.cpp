@@ -491,6 +491,12 @@ void testing_sptrsm_bad_arg(const Arguments& arg)
 template <typename I, typename J, typename T>
 void testing_sptrsm(const Arguments& arg)
 {
+#ifndef ROCSPARSE_WITH_SPTRSM_CSC
+    if(arg.sptrsm_alg != rocsparse_sptrsm_alg_default)
+    {
+        return;
+    }
+#endif
 
     static constexpr bool verbose = false;
 

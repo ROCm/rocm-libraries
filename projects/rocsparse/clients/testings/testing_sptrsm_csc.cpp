@@ -451,6 +451,13 @@ void testing_sptrsm_csc_bad_arg(const Arguments& arg)
 template <typename I, typename J, typename T>
 void testing_sptrsm_csc(const Arguments& arg)
 {
+#ifndef ROCSPARSE_WITH_SPTRSM_CSC
+    if(arg.sptrsm_alg != rocsparse_sptrsm_alg_default)
+    {
+        return;
+    }
+#endif
+
     J M = arg.M;
     J N = arg.N;
     if(M != N)
@@ -740,7 +747,7 @@ void testing_sptrsm_csc(const Arguments& arg)
     // Set algorithm.
     //
     {
-        const rocsparse_sptrsm_alg alg = rocsparse_sptrsm_alg_default;
+        const rocsparse_sptrsm_alg alg = arg.sptrsm_alg;
         CHECK_ROCSPARSE_ERROR(rocsparse_sptrsm_set_input(
             handle, sptrsm_descr, rocsparse_sptrsm_input_alg, &alg, sizeof(alg), p_error));
     }

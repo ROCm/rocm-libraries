@@ -115,6 +115,13 @@ void testing_spsm_csc_bad_arg(const Arguments& arg)
 template <typename I, typename J, typename T>
 void testing_spsm_csc(const Arguments& arg)
 {
+#ifndef ROCSPARSE_WITH_SPTRSM_CSC
+    if(arg.spsm_alg != rocsparse_spsm_alg_default)
+    {
+        return;
+    }
+#endif
+
     J                    M               = arg.M;
     J                    N               = arg.N;
     J                    K               = arg.K;
