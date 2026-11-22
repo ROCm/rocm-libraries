@@ -11,7 +11,8 @@ compiler whose LLVM major the table records as refusing the option
 ``ROCKE_REQUIRE_COMPILER_TOOLS=1`` requires the tools, and that no other error
 is turned into a skip. They also pin that ``compile_or_skip``, the compile
 helper of the attention backward tests, applies the same policy to a real
-``compile_kernel`` call.
+``compile_kernel`` call, and that ``compiled_resources``, the GDN/KDA one,
+applies it where no ``llvm-objdump`` can read the code object.
 """
 
 from __future__ import annotations
@@ -20,10 +21,11 @@ import unittest
 
 import pytest
 from rocke.core.ir import KernelDef, Region
+from rocke.helpers.compile import compile_kernel
 from rocke.runtime import comgr
 from rocke.runtime.comgr import CompilerInfo
 from rocke.runtime.compiler_options import measured_answers, require_accepted
-from rocke.tests.compiler_tools import REQUIRE_COMPILER_TOOLS_ENV
+from rocke.tests.compiler_tools import REQUIRE_COMPILER_TOOLS_ENV, require_tools_or_skip
 
 from . import _attention_bwd_resources
 from ._attention_bwd_resources import compile_or_skip
@@ -31,6 +33,7 @@ from ._compiler_test_utils import (
     skip_where_compiler_refuses_option,
     skip_where_compiler_refuses_processor,
 )
+from ._gdn_decode_compile import compiled_resources
 
 OPTION = "-amdgpu-mfma-vgpr-form"
 # How the refusal starts, and how the policy introduces it.
@@ -190,3 +193,33 @@ def test_other_value_errors_propagate_from_the_processor_policy(
     with pytest.raises(ValueError, match="variant rejected|does not accept"):
         with skip_where_compiler_refuses_processor():
             raise ValueError(message)
+
+
+@pytest.mark.parametrize(
+    ("required", "outcome", "reason"),
+    [
+        ("0", unittest.SkipTest, "^HSACO introspection unavailable: missing tool"),
+        (
+            "1",
+            AssertionError,
+            f"^{REQUIRE_COMPILER_TOOLS_ENV}=1 but HSACO introspection unavailable",
+        ),
+    ],
+    ids=["skips", "fails-where-tools-are-required"],
+)
+def test_gdn_compiled_resources_applies_the_policy(
+    monkeypatch, tmp_path, required, outcome, reason
+):
+    # The GDN/KDA resource checks compile through COMGR, then read the code
+    # object with the llvm-objdump on PATH. An empty PATH is a host without it.
+    kernel = KernelDef("probe", [], Region("entry"))
+    try:
+        compile_kernel(kernel, arch="gfx950", capture_ir_text=False)
+    except ImportError as exc:
+        # Before the parametrized requirement is set: the run's own policy
+        # decides whether a host without COMGR skips or fails.
+        require_tools_or_skip(f"comgr toolchain unavailable: {exc}")
+    monkeypatch.setenv("PATH", str(tmp_path))
+    monkeypatch.setenv(REQUIRE_COMPILER_TOOLS_ENV, required)
+    with pytest.raises(outcome, match=reason):
+        compiled_resources(kernel)
