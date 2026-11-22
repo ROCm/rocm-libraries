@@ -39,6 +39,8 @@ from rocke.core.lower_llvm import llvm_f32_literal
 from rocke.helpers.compile import compile_kernel
 from rocke.helpers.fp8_encoding import fp8_element_format
 from rocke.helpers.spec import sig_param
+from rocke.tests.comgr import require_comgr_target
+from rocke.tests.compiler_tools import require_tools_or_skip
 from rocke.tests.engines import (
     ENGINES,
     available_engines,
@@ -47,6 +49,7 @@ from rocke.tests.engines import (
 )
 from rocke.tests.fp8_gemm_checks import Fp8HostCodec, fp8_host_codec
 from rocke.tests.gpu import current_device_arch_in, launch_with_buffers
+from rocke.tests.llc import find_llvm_tool
 from rocke.helpers.quant import (
     quant_ir_type,
     ir_to_qdtype,
@@ -592,6 +595,50 @@ def test_quant_instances_refuse_an_out_dtype_the_target_cannot_write(
         with pytest.raises(RuntimeError) as native_error:
             getattr(import_engine(), f"{family}_lower_llvm")(fields, arch=arch)
         assert str(native_error.value).endswith(message)
+
+
+# The floating-point mode every rocKE kernel runs in, from its kernel descriptor
+# (dsl_docs/numerics/README.md, "The MODE register"): round to nearest even,
+# subnormals kept, IEEE NaN handling, and FP16_OVFL clear, which is why the
+# f32 -> fp8 / bf8 conversions do not saturate and quantize_scalar_f32 clamps.
+_KERNEL_FP_MODE = {
+    ".amdhsa_float_round_mode_32": 0,
+    ".amdhsa_float_round_mode_16_64": 0,
+    ".amdhsa_float_denorm_mode_32": 3,
+    ".amdhsa_float_denorm_mode_16_64": 3,
+    ".amdhsa_dx10_clamp": 1,
+    ".amdhsa_ieee_mode": 1,
+    ".amdhsa_fp16_overflow": 0,
+}
+
+
+@pytest.mark.parametrize("arch", _QUANT_ARCHS)
+def test_quantize_kernel_descriptor_sets_the_documented_fp_mode(arch, tmp_path):
+    """Compile the quantize kernel through COMGR and read its kernel
+    descriptor back with llvm-objdump: the FP mode fields hold the values the
+    numerics policy relies on. Skips when COMGR cannot target ``arch`` or
+    llvm-objdump is missing (fails instead under
+    ``ROCKE_REQUIRE_COMPILER_TOOLS=1``)."""
+    require_comgr_target(arch)
+    objdump = find_llvm_tool("llvm-objdump")
+    if objdump is None:
+        require_tools_or_skip("llvm-objdump not found (ROCM_PATH / PATH)")
+    kernel = _quantize_kernel("fp8e4m3", arch)
+    code_object = tmp_path / "quantize.hsaco"
+    code_object.write_bytes(compile_kernel(kernel, arch=arch).hsaco)
+    descriptor = subprocess.run(
+        [objdump, "-D", f"--disassemble-symbols={kernel.name}.kd", str(code_object)],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    fields = {
+        name: int(value)
+        for name, value in re.findall(
+            r"^\s*(\.amdhsa_\w+)\s+(\d+)$", descriptor, re.MULTILINE
+        )
+    }
+    assert {name: fields.get(name) for name in _KERNEL_FP_MODE} == _KERNEL_FP_MODE
 
 
 def _host_codec(qdtype: str, arch: str) -> Fp8HostCodec:
