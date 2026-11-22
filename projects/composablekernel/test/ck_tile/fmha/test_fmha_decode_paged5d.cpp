@@ -45,7 +45,7 @@ std::vector<Param> params()
     add("swa_b2_s73728", {2, 16, 1, {73728}, 2048}, "coop/11");
     // partial last page, sequences shorter than one step, one page
     add("swa_b3_s1000", {3, 16, 1, {1000}, 2048}, "coop/16");
-    add("swa_b2_s77", {2, 16, 1, {77}, 2048}, "coop/2");
+    add("swa_b2_s77", {2, 16, 1, {77}, 2048}, "coop/1");
     add("swa_b1_s5", {1, 16, 1, {5}, 2048}, "coop/1");
     // different lengths in one batch: some splits of the shorter sequences are empty
     add("swa_mixed", {4, 16, 1, {9000, 100, 2048, 3333}, 2048}, "coop/11");
@@ -62,6 +62,19 @@ std::vector<Param> params()
     add("groups_full_b1_s32768", {1, 16, 1, {32768}, 0}, "coop/16x11");
     add("groups_mixed", {3, 16, 1, {40000, 5000, 70}, 0}, "coop/16x10");
     add("groups_forced", {2, 16, 2, {6000}, 2048, 30}, "coop/13x2");
+    // one wave-split split above 12 pages and for more kv heads than pages; with many kv heads
+    // one per started 64 pages, as many as 480 workgroups allow, two only above 192 pages
+    add("short_wave", {2, 16, 1, {250}, 0}, "wave/1");
+    add("heads_wave_one", {5, 16, 8, {500}, 512}, "wave/1");
+    add("heads_wave_four", {8, 16, 8, {4000}, 0}, "wave/4");
+    add("heads_wave_three", {10, 16, 16, {4000}, 0}, "wave/3");
+    add("heads_wave_two", {25, 8, 8, {4000}, 0}, "wave/2");
+    add("heads_wave_not_two", {25, 8, 8, {3000}, 0}, "wave/1");
+    // 513 to 1024 pages: one wave-split cluster from 3 kv heads, cooperative clusters below
+    add("full_b3_s10000", {3, 16, 1, {10000}, 0}, "wave/14");
+    add("full_b2_s10000", {2, 16, 1, {10000}, 0}, "coop/16x5");
+    // one wave-split split where two would exceed 480 workgroups
+    add("heads_wave_long", {16, 16, 16, {4200}, 0}, "wave/1");
     // forced layouts
     add("full_coop", {2, 16, 1, {5000}, 0, 0, 0, "coop"}, "coop/10");
     add("swa_wave", {2, 16, 1, {5000}, 2048, 0, 0, "wave"}, "wave/11");
@@ -106,7 +119,7 @@ std::vector<Param> params()
         for(const ck_tile::index_t w : {1, 17})
             add(name("swa_w") + std::to_string(w),
                 {3, 16, 1, {1000, 77, 3}, w, 0, 0, "auto", 0, ps},
-                "coop/2");
+                "coop/1");
         add(name("swa_mixed"),
             {4, 16, 1, {9000, 100, 2048, 3333}, 2048, 0, 0, "auto", 0, ps},
             "coop/11");

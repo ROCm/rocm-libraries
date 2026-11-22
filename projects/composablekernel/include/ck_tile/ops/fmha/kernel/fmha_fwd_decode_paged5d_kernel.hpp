@@ -79,11 +79,17 @@ CK_TILE_HOST index_t fmha_decode_paged5d_max_span(index_t max_seqlen_k,
     return std::max<index_t>(span, 1);
 }
 
-// Up to 256 pages: one cluster of cooperative splits, as many as 4-page steps allow (at most 16),
-// at least 8 pages each once the grid would exceed 256 workgroups, 16 beyond about 640. Up to 1024
-// pages: one wave-split cluster while the grid has 64 to 512 workgroups. Longer: several clusters
-// (groups) of the shortest 8-, 12- or 16-page cooperative splits within 512 workgroups, else
-// wave-split splits for about 384 workgroups.
+// Layout for key ranges of up to span pages and heads = batch * nhead_k kv heads.
+// - Up to 16 pages: one split, wave-split above 12 pages.
+// - Up to 256 pages: one cluster of cooperative splits, as many as 4-page steps allow (at most
+//   16), at least 8 pages each once the grid would exceed 256 workgroups, 16 beyond about 640.
+//   With more heads than pages (128 at most; from 64 heads above 192 pages): one wave-split
+//   split per started 64 pages within 480 workgroups, one instead of two up to 192 pages.
+// - Up to 1024 pages: one wave-split cluster within 512 workgroups; above 512 pages only for 3
+//   or more heads.
+// - Otherwise several clusters (groups) of the shortest 8-, 12- or 16-page cooperative splits
+//   within 192 splits and 512 workgroups, else wave-split splits for about 384 workgroups, at
+//   most 480.
 CK_TILE_HOST FmhaDecodePaged5dConfig fmha_decode_paged5d_config(
     index_t batch, index_t nhead_k, index_t max_seqlen_k, index_t window, index_t page_size = 16)
 {
@@ -97,8 +103,20 @@ CK_TILE_HOST FmhaDecodePaged5dConfig fmha_decode_paged5d_config(
         return FmhaDecodePaged5dConfig{ceil_div(total, groups), pps, wave_split, groups};
     };
     constexpr index_t kC = kMaxClusterSplits;
+    // the most wave-split splits per head that keep the grid within 480 workgroups
+    const index_t wave_max = std::max<index_t>(1, 480 / std::max<index_t>(1, heads));
+    if(span <= 16)
+        return make(round_up(span, span > 12 ? 16 : 4), span > 12);
     if(span <= kC * 16)
     {
+        if(heads >= (span > 192 ? 64 : std::min<index_t>(span, 128) + 1))
+        {
+            index_t n = std::min(ceil_div(span, 64), wave_max);
+            // two splits this short take longer than one, which needs no merge
+            if(n == 2 && span <= 192)
+                n = 1;
+            return make(round_up(ceil_div(span, n), 16), true);
+        }
         index_t pps = round_up(ceil_div(span, std::min<index_t>(kC, ceil_div(span, 4))), 4);
         if(heads * ceil_div(span, pps) > 256)
             pps = std::max<index_t>(pps, 8);
@@ -108,12 +126,15 @@ CK_TILE_HOST FmhaDecodePaged5dConfig fmha_decode_paged5d_config(
     }
     const index_t wave_pps = round_up(ceil_div(span, kC), 16);
     const index_t wave_wgs = heads * ceil_div(span, wave_pps);
-    if(span <= kC * 64 && wave_wgs <= 512 && (span <= 512 || wave_wgs >= 64))
+    if(span <= kC * 64 && wave_wgs <= 512 && (span <= 512 || heads >= 3))
         return make(wave_pps, true);
     for(index_t pps : {8, 12, 16})
         if(ceil_div(span, pps) <= 192 && heads * ceil_div(span, pps) <= 512)
             return make(pps, false);
-    return make(std::max<index_t>(32, round_up(ceil_div(span * heads, 384), 16)), true);
+    index_t pps = std::max<index_t>(32, round_up(ceil_div(span * heads, 384), 16));
+    if(ceil_div(span, pps) > wave_max)
+        pps = round_up(ceil_div(span, wave_max), 16);
+    return make(pps, true);
 }
 
 CK_TILE_HOST size_t fmha_decode_paged5d_workspace_bytes(index_t batch,
