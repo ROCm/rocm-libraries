@@ -113,10 +113,15 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
 
 # The exhaustive items of the conv files: the kernel-label round trip over
 # every direct identity the AOT grid produces (about a million names, minutes
-# of one core). Scheduled CI only (the comprehensive tier); the conv entry
-# above runs each capabilities row and knob setting once.
+# of one core), and the forward AOT-packaging checks over the whole bf16 sweep.
+# Scheduled CI only (the comprehensive tier); the conv entry above runs each
+# capabilities row and knob setting once, and the AOT-packaging entry below the
+# whole fp16 sweep.
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-       "add_test(rocke_library_conv_exhaustive_pytest ${_ROCKE_INSTALLED_PYTEST} \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_kernel_label.py\" -m exhaustive -v -rs --timeout=600)\n")
+       "add_test(rocke_library_conv_exhaustive_pytest ${_ROCKE_INSTALLED_PYTEST} "
+       "\"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_kernel_label.py\" "
+       "\"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_convolution_forward_aot_packaging.py\" "
+       "-m exhaustive -v -rs --timeout=600)\n")
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "set_tests_properties(rocke_library_conv_exhaustive_pytest PROPERTIES\n"
        "  LABELS \"ckc;python;conv;host;comprehensive;full\"\n"
@@ -147,11 +152,12 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
 # the sweep's identity space than the other conv files above, so its slowest cases
 # (building and comparing IR for a sampled instance) exceed the shared entry's
 # per-test pytest-timeout; the dgrad twin above stays in the shared entry only
-# because its own sample is smaller.
+# because its own sample is smaller. Its exhaustive items (the whole bf16 sweep)
+# run in rocke_library_conv_exhaustive_pytest above.
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "add_test(rocke_library_conv_fwd_aot_packaging_pytest ${_ROCKE_INSTALLED_PYTEST} "
        "\"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_convolution_forward_aot_packaging.py\" "
-       "-v -rs --timeout=600)\n")
+       "-m \"not exhaustive\" -v -rs --timeout=600)\n")
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "set_tests_properties(rocke_library_conv_fwd_aot_packaging_pytest PROPERTIES\n"
        "  LABELS \"ckc;python;conv;host\"\n"
