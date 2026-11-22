@@ -7,6 +7,7 @@ from __future__ import annotations
 import gzip
 import importlib.util
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -193,6 +194,17 @@ GTEST_TOTAL_SHARDS=4)
 def test_entry_seconds_scale_a_split_entry_by_its_shard_count(tmp_path) -> None:
     log = tmp_path / "shard3.log"
     log.write_text(_SHARD_LOG, encoding="utf-8")
+    assert check.entry_seconds_from_ctest_logs([log]) == {
+        "rocke_golden_static": 34.0,
+        "rocke_pytest_core": 122.0,
+    }
+
+
+def test_entry_seconds_read_a_log_without_timestamps(tmp_path) -> None:
+    log = tmp_path / "local.log"
+    log.write_text(
+        re.sub(r"^\S+Z ", "", _SHARD_LOG, flags=re.MULTILINE), encoding="utf-8"
+    )
     assert check.entry_seconds_from_ctest_logs([log]) == {
         "rocke_golden_static": 34.0,
         "rocke_pytest_core": 122.0,

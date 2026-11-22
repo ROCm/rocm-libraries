@@ -318,10 +318,11 @@ def lowered_ceiling(verdict: TierVerdict) -> float | None:
     return float(rounded)
 
 
-# `ctest -V` lines, after the timestamp a CI log prefixes to each line.
+# `ctest -V` lines, as ctest prints them or after the timestamp a CI log
+# prefixes to each line.
 _RESULT = re.compile(r"\d+/\d+ Test +#(\d+): (\S+) \.+.*?\s([\d.]+) sec")
-_COMMAND = re.compile(r"\s(\d+): Test command: (.*)$")
-_SHARD = re.compile(r"\s(\d+): rocke-ctest-shard: \d+/(\d+)\b")
+_COMMAND = re.compile(r"(?:^|\s)(\d+): Test command: (.*)$")
+_SHARD = re.compile(r"(?:^|\s)(\d+): rocke-ctest-shard: \d+/(\d+)\b")
 
 
 def _whole_seconds_in_log(text: str) -> dict[str, float]:
