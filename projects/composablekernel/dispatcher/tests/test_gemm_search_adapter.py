@@ -1210,6 +1210,12 @@ def test_streamk_budgets_share_one_build_and_reach_the_launch(tmp_path, monkeypa
         (k, {ENV: str(c.budget_pct)}) for k, c in zip(SK_KERNELS, SK)] * 2
     assert all(p["check_identity"] for p in tc.payloads) and ENV not in os.environ
     assert tc.loaded == [art / f"{k}.so" for k in SK_KERNELS] * 2
+    # Partial failure while setting env keys still rolls back earlier mutations.
+    monkeypatch.setenv("TEST_LAUNCH_ENV_ROLLBACK", "orig")
+    with pytest.raises(ValueError):
+        with worker._launch_env({"TEST_LAUNCH_ENV_ROLLBACK": "new", "BAD\x00KEY": "1"}):
+            pass
+    assert os.environ["TEST_LAUNCH_ENV_ROLLBACK"] == "orig"
 
 
 @pytest.mark.parametrize("mislabel,exit_code", [(False, 0), (True, 0), (False, -11)])

@@ -771,12 +771,25 @@ def test_streamk_default_configs_and_budget_option(monkeypatch, capsys, tmp_path
     assert all(n == _kernel(n) for n in kernels)
     for argv, message in (
             (["--budget-pct", "50"], "--budget-pct is for --variant gemm_streamk only"),
+            ([*STREAMK, "--budget-pct", ""], "distinct values in 1..100"),
             ([*STREAMK, "--budget-pct", "0"], "distinct values in 1..100"),
             ([*STREAMK, "--budget-pct", "50,50"], "distinct values in 1..100"),
             ([*STREAMK, "--budget-pct", "half"], "distinct values in 1..100")):
         with pytest.raises(SystemExit) as e:
             _main(monkeypatch, capsys, tmp_path, *argv, fixed=SK_BF16)
         assert e.value.code == 2 and message in capsys.readouterr().err
+    # Non-100 --budget-pct still keeps persistent kernels at full budget (100).
+    reduced, _ = _sk_listing(monkeypatch, capsys, tmp_path, "--budget-pct", "50")
+    assert {r["budget_pct"] for r in reduced.values() if r["persistent"]} == {100}
+    assert {r["budget_pct"] for r in reduced.values() if not r["persistent"]} == {50}
+    pick = tmp_path / "missing-pair.json"
+    pick.write_text(json.dumps({KEYS[0]: ["nonexistent_kernel"]}))
+    rc, cap, _, _ = _main(
+        monkeypatch, capsys, tmp_path, SK_CONFIG, *STREAMK,
+        "--budget-pct", "100,50", "--pipelines", "comp_tdm_v3",
+        "--pairs", str(pick), problems=PROBLEMS[:1], fixed=SK_BF16,
+    )
+    assert rc == 1 and "arch, --budget-pct and --pipelines?)" in cap.out
 
 
 def test_streamk_pipeline_filter_preserves_budgets_across_run_modes(

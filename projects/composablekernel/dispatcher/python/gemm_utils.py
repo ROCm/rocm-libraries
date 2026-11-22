@@ -3074,6 +3074,17 @@ class StreamKBudgetConfig(GemmKernelConfig):
 
     budget_pct: int = STREAMK_FULL_BUDGET
 
+    def __post_init__(self) -> None:
+        if (
+            isinstance(self.budget_pct, bool)
+            or not isinstance(self.budget_pct, int)
+            or not (1 <= self.budget_pct <= STREAMK_FULL_BUDGET)
+        ):
+            raise ValueError(
+                f"budget_pct must be an int in 1..{STREAMK_FULL_BUDGET}, "
+                f"got {self.budget_pct!r}"
+            )
+
     @property
     def kernel_config(self) -> GemmKernelConfig:
         return GemmKernelConfig(

@@ -395,6 +395,24 @@ def test_past_the_build_cap_launch_variants_need_no_build(tmp_path):
     assert co.ledger.trials["P1"] == 4
 
 
+def test_build_key_contract_checks(tmp_path):
+    class BadTypeAdapter(FakeAdapter):
+        def enumerate_eligible(self):
+            return {"P1": [AS.Candidate("A", "A", rec("A"), None, build_key=50)]}
+
+    class ConflictBuildAdapter(FakeAdapter):
+        def enumerate_eligible(self):
+            return {
+                "P1": [AS.Candidate("A@50", "A@50", vrec("A@50"), None, build_key="A")],
+                "P2": [AS.Candidate("A@50", "A@50", vrec("A@50"), None, build_key="B")],
+            }
+
+    s1, _, _ = run(tmp_path / "bad_type", BadTypeAdapter({"P1": ["A"]}), {})
+    assert s1.exit_code == 1 and "build_key" in s1.error and "not a str" in s1.error
+    s2, _, _ = run(tmp_path / "conflict", ConflictBuildAdapter({"P1": ["A"], "P2": ["A"]}), {})
+    assert s2.exit_code == 1 and "maps to two builds" in s2.error
+
+
 # ------------------------------------------------------------- failures
 
 

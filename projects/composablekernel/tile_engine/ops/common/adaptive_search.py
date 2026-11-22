@@ -881,14 +881,22 @@ class SearchCoordinator:
         if not isinstance(eligible, Mapping):
             raise ContractError(f"enumerate_eligible returned {type(eligible).__name__}")
         names: Dict[str, str] = {}
+        artifacts: Dict[str, str] = {}
         for i, (pkey, cands) in enumerate(eligible.items()):
             cands = list(cands)
             for c in cands:
                 if not isinstance(c, Candidate):
                     raise ContractError(f"{pkey}: candidate {c!r} is not a Candidate")
+                if not isinstance(c.build_key, str):
+                    raise ContractError(
+                        f"{pkey}: candidate {c.canonical_key!r} build_key "
+                        f"{c.build_key!r} is not a str")
                 if names.setdefault(c.canonical_key, c.kernel_name) != c.kernel_name:
                     raise ContractError(
                         f"candidate key {c.canonical_key!r} names two kernels")
+                if artifacts.setdefault(c.canonical_key, c.artifact_key) != c.artifact_key:
+                    raise ContractError(
+                        f"candidate key {c.canonical_key!r} maps to two builds")
             p = _Problem(str(pkey), i, cands)
             if len(p.by_key) != len(p.cands):
                 raise ContractError(f"{pkey}: a candidate key repeats")
@@ -1140,7 +1148,7 @@ class SearchCoordinator:
     def _one_round(self, active: List[_Problem]) -> bool:
         """Ask, admit, build, measure, tell. True when a trial got a result."""
         admitted = []  # (problem, trial, space key, candidate)
-        planned = set()  # canonical keys this round needs built
+        planned = set()  # artifact keys this round needs built
         inflight = set()  # (problem, space key) admitted this round
         told: Dict[str, list] = {p.key: [] for p in active}
         batch = self.settings.batch_per_problem

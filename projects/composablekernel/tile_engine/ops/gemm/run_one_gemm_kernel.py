@@ -226,8 +226,8 @@ def _launch_env(env):
     """``env`` (an item's launch settings) set in this process's environment,
     which the kernel library reads at each launch, then restored."""
     old = {k: os.environ.get(k) for k in env or {}}
-    os.environ.update({k: str(v) for k, v in (env or {}).items()})
     try:
+        os.environ.update({k: str(v) for k, v in (env or {}).items()})
         yield
     finally:
         for k, v in old.items():

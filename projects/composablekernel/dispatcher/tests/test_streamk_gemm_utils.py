@@ -143,6 +143,13 @@ class TestCtypesSourceRouting(unittest.TestCase):
 class TestSetupMultipleWithBudgets(unittest.TestCase):
     """Direct StreamKBudgetConfig inputs unwrap to one underlying header/build."""
 
+    def test_streamk_budget_config_rejects_invalid_budget_pct(self):
+        from gemm_utils import StreamKBudgetConfig
+
+        for bad in (0, -5, 101, True, False, "50"):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                StreamKBudgetConfig(variant="stream_k", budget_pct=bad)
+
     def test_budget_variants_build_once_and_fan_out_errors(self):
         from concurrent.futures import ThreadPoolExecutor
         from unittest import mock

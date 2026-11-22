@@ -37,7 +37,7 @@ tests is intended to drop into the same ``configs/`` directory.
 
 ``--variant gemm_streamk`` runs the Stream-K kernels of a ``gemm_streamk/
 configs`` sweep (default: ``default_config_<arch>.json``, else
-``default_config.json``) through the Stream-K worker, once per workgroup
+``default_config.json``) through the common GEMM worker, once per workgroup
 budget of ``--budget-pct`` (a launch setting: the budgets of a kernel share
 its build, see ``gemm_utils.StreamKBudgetConfig``).
 """
@@ -1059,7 +1059,9 @@ def main():
         parser.error("--budget-pct is for --variant gemm_streamk only")
     if CODEGEN_VARIANT[args.variant] == "stream_k":
         try:
-            budgets = parse_streamk_budgets(args.budget_pct or "100")
+            budgets = parse_streamk_budgets(
+                "100" if args.budget_pct is None else args.budget_pct
+            )
         except ValueError as e:
             parser.error(str(e))
     # Every file the run writes, and the pair list it reads, must be distinct:
@@ -1268,13 +1270,17 @@ def main():
             {n for v in requested.values() if v != "*" for n in v} - expanded
         )
         if unknown or absent:
+            same = ["configs", "problems", "dtype", "layout", "arch"]
+            if budgets:
+                same.append("--budget-pct")
+            if args.pipelines is not None:
+                same.append("--pipelines")
+            hint = f"same {', '.join(same[:-1])} and {same[-1]}?"
             for what, items in (("problems", unknown), ("kernels", absent)):
                 if items:
                     print(
                         f"  ERROR: --pairs lists {len(items)} {what} this run does not "
-                        f"have (same configs, problems, dtype, layout and arch"
-                        f"{', and --budget-pct' if budgets else ''}"
-                        f"{' and --pipelines' if args.pipelines is not None else ''}?): "
+                        f"have ({hint}): "
                         f"{', '.join(items[:3])}{' ...' if len(items) > 3 else ''}"
                     )
             return 1
