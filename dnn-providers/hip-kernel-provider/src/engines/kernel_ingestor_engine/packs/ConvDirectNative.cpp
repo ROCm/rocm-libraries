@@ -404,9 +404,17 @@ std::optional<Tile> zringTileFor(const DirectProblem& problem,
     {
         const int rem = a.wo % 16;
         t.tilesW = a.wo / 16;
-        t.tilesD = rem > 0
-                       ? static_cast<int>(divUp(a.ho, (config.bm / 16 / config.wm) * (16 / rem)))
-                       : 0;
+        if(rem > 0)
+        {
+            // A narrow tile's rows: bm / 16 / wm fragments of 16 / rem rows each.
+            const long long narrowRows
+                = static_cast<long long>(config.bm / 16 / config.wm) * (16 / rem);
+            t.tilesD = static_cast<int>(divUp(a.ho, narrowRows));
+        }
+        else
+        {
+            t.tilesD = 0;
+        }
         tilesPer = static_cast<long long>(t.tilesW) * t.tilesH + t.tilesD;
     }
     const long long units = tilesPer * a.n * columnBlocks * a.dout;

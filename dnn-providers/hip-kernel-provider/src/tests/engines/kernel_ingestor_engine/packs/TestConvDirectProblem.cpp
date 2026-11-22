@@ -1977,6 +1977,14 @@ TEST(TestConvDirectPlan, ZringTilesAreSixteenColumnsAndOneBlockPerUnit)
     EXPECT_EQ(wholePlan->args.tilesW, 2);
     EXPECT_EQ(wholePlan->args.tilesH, 2);
     EXPECT_EQ(wholePlan->args.tilesD, 1);
+    // Rows past whole tile rows only: no narrow tiles.
+    auto rowsOnly = shape;
+    rowsOnly.input = {37, 20, 32};
+    const auto rowsPlan = planOf(rowsOnly, zringFields(), "HALF", 8);
+    ASSERT_TRUE(rowsPlan.has_value());
+    EXPECT_EQ(rowsPlan->args.tilesW, 2);
+    EXPECT_EQ(rowsPlan->args.tilesH, 2);
+    EXPECT_EQ(rowsPlan->args.tilesD, 0);
     auto three = shape;
     three.input = {37, 81, 19};
     const auto threePlan = planOf(three, zringFields(), "HALF", 8);
