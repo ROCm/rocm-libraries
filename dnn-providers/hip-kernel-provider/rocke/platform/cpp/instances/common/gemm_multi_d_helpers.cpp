@@ -26,6 +26,7 @@
 #include <string.h>
 
 #include "rocke/arena.h"
+#include "rocke/dtypes.h"
 #include "rocke/helper_rocke.helpers.fuse.h"
 #include "rocke/helper_rocke.helpers.spec.h"
 #include "rocke/instance_gemm_universal.h"
@@ -245,6 +246,29 @@ bool rocke_gemm_multi_d_is_valid_spec(const rocke_gemm_multi_d_spec_t* spec,
                          reason_cap,
                          "D param_name '%s' collides with a reserved GEMM kernel parameter",
                          name);
+            }
+            return false;
+        }
+    }
+
+    /* if normalize_dtype(spec.d_dtype) != normalize_dtype(spec.base.data.dtype_c):
+     *     reject (the epilogue combines each D with C in C's type). */
+    {
+        char d_scratch[64];
+        char c_scratch[64];
+        const char* d_name = rocke_normalize_dtype(spec->d_dtype, d_scratch, sizeof(d_scratch));
+        const char* c_name
+            = rocke_normalize_dtype(spec->base.data.dtype_c, c_scratch, sizeof(c_scratch));
+        if(strcmp(d_name, c_name) != 0)
+        {
+            if(reason != NULL && reason_cap > 0)
+            {
+                snprintf(reason,
+                         reason_cap,
+                         "d_dtype '%s' must be the C dtype '%s': each D combines with C "
+                         "in C's type",
+                         spec->d_dtype,
+                         spec->base.data.dtype_c);
             }
             return false;
         }
