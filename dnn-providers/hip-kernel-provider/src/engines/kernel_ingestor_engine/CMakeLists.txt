@@ -342,6 +342,7 @@ if(HIPKERNELPROVIDER_ENABLE_CONV)
         "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/direct/kernels/ConvDirectArgs.h"
         "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/direct/kernels/ConvDirectCore.h"
         "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/direct/kernels/ConvDirectRows.h"
+        "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/direct/kernels/ConvDirectZring.h"
         "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/smallc/kernels/ConvSmallc.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/smallc/kernels/ConvSmallcArgs.h"
         "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/smallc/kernels/ConvSmallcCore.h"
@@ -412,6 +413,7 @@ if(HIPKERNELPROVIDER_ENABLE_CONV)
         ConvDirectArgs.h
         ConvDirectCore.h
         ConvDirectRows.h
+        ConvDirectZring.h
         kernels/ConvSmallc.cpp
         ConvSmallcArgs.h
         ConvSmallcCore.h
