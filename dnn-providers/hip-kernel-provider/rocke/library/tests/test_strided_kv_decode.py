@@ -501,14 +501,33 @@ def test_dense_decode_binding_passes_strided_views(order, monkeypatch):
     assert call["seqused_k"].tolist() == [65, 65, 65]
 
 
+def _dense_decode_stand_ins():
+    """Host-only stand-ins for BSHD decode Q/K/V/O: the adapter's shape checks
+    read only their descriptions."""
+    from rocke.tests.host_arrays import HostArray
+
+    return {
+        "q": HostArray((3, 1, 8, 128), "bf16"),
+        "k": HostArray((3, 65, 2, 128), "bf16"),
+        "v": HostArray((3, 65, 2, 128), "bf16"),
+        "out": HostArray((3, 1, 8, 128), "bf16"),
+    }
+
+
+def _with(name, shape):
+    from rocke.tests.host_arrays import HostArray
+
+    return lambda t: t.update({name: HostArray(shape, "bf16")})
+
+
 @pytest.mark.parametrize(
     "mutate, match",
     [
         (lambda t: t.pop("v"), "missing attention tensors: v"),
         (lambda t: t.update(seqused_k=t["q"]), "unsupported dense decode tensors"),
-        (lambda t: t.update(k=t["k"][:, :64]), "k must have BSHD shape"),
-        (lambda t: t.update(out=t["out"][:2]), "out must have the shape of q"),
-        (lambda t: t.update(q=t["q"][:, :, :4]), "q shape must be"),
+        (_with("k", (3, 64, 2, 128)), "k must have BSHD shape"),
+        (_with("out", (2, 1, 8, 128)), "out must have the shape of q"),
+        (_with("q", (3, 1, 4, 128)), "q shape must be"),
     ],
 )
 def test_dense_decode_binding_rejects_bad_tensors(mutate, match):
@@ -516,28 +535,72 @@ def test_dense_decode_binding_rejects_bad_tensors(mutate, match):
 
     req = _dense_decode_request("gfx950", tensor_layout="bshd")
     result = dispatch_attention(req)
-    tensors = _dense_decode_tensors("bshd")
+    tensors = _dense_decode_stand_ins()
     mutate(tensors)
     with pytest.raises(ValueError, match=match):
         result.candidate.bind_torch(result.request, result.spec, tensors)
 
 
 def test_dense_decode_binding_refuses_arrays_it_cannot_view():
-    """The dense-layout adapter reshapes torch tensor views; another array kind
-    is refused with the strided-layout alternative named, before any launch."""
+    """The dense-layout adapter views the caller's arrays; an array it cannot
+    view (here a host-only stand-in) is refused before any launch."""
     from dispatch.attention import dispatch_attention
-    from rocke.tests.host_arrays import HostArray
 
     req = _dense_decode_request("gfx950", tensor_layout="bshd")
     result = dispatch_attention(req)
-    tensors = {
-        "q": HostArray((3, 1, 8, 128), "bf16"),
-        "k": HostArray((3, 65, 2, 128), "bf16"),
-        "v": HostArray((3, 65, 2, 128), "bf16"),
-        "out": HostArray((3, 1, 8, 128), "bf16"),
-    }
-    with pytest.raises(TypeError, match="request kv_layout='strided'"):
+    tensors = _dense_decode_stand_ins()
+    with pytest.raises(TypeError, match="strided_view failed - array=HostArray"):
         result.candidate.bind_torch(result.request, result.spec, tensors)
+
+
+@pytest.mark.gpu
+@pytest.mark.parametrize("order", ["bshd", "bhsd"])
+def test_dense_decode_binding_views_device_arrays(order, monkeypatch):
+    """The adapter on ``DeviceArray`` inputs: views of the caller's buffers and
+    device metadata of the same kind. Allocates only (the launch is recorded),
+    so any GPU runs it."""
+    import numpy as np
+    from dispatch.attention import dispatch_attention
+    from kernels.common import attention_unified as au
+    from rocke.runtime.device_array import DeviceArray, host_values
+    from rocke.tests.gpu import current_device_arch
+
+    current_device_arch()
+    req = _dense_decode_request("gfx950", tensor_layout=order)
+    result = dispatch_attention(req)
+
+    def make(heads, rows):
+        shape = (3, rows, heads, 128) if order == "bshd" else (3, heads, rows, 128)
+        return DeviceArray.zeros(shape, "bf16")
+
+    tensors = {"q": make(8, 1), "k": make(2, 65), "v": make(2, 65), "out": make(8, 1)}
+    calls = []
+    monkeypatch.setattr(
+        au, "run_unified_attention_torch", lambda **kw: calls.append(kw)
+    )
+    result.candidate.bind_torch(result.request, result.spec, tensors).launch()
+    (call,) = calls
+    for name in ("q", "out"):
+        assert call[name].shape == (3, 8, 128)
+        assert call[name].data_ptr() == tensors[name].data_ptr()
+    for name in ("k", "v"):
+        view = call[name]
+        assert view.shape == (3, 2, 65, 128)
+        assert view.data_ptr() == tensors[name].data_ptr()
+        expected = (
+            (65 * 2 * 128, 128, 2 * 128, 1)
+            if order == "bshd"
+            else (
+                2 * 65 * 128,
+                65 * 128,
+                128,
+                1,
+            )
+        )
+        assert view.stride() == expected
+    assert isinstance(call["cu_seqlens_q"], DeviceArray)
+    np.testing.assert_array_equal(host_values(call["cu_seqlens_q"]), [0, 1, 2, 3])
+    np.testing.assert_array_equal(host_values(call["seqused_k"]), [65, 65, 65])
 
 
 @pytest.mark.parametrize("arch", ["gfx1250", "gfx1151", "gfx90a"])

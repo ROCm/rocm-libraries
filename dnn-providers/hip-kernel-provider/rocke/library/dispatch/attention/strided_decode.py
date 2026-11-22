@@ -39,14 +39,15 @@ def _dense_layout(req) -> bool:
 
 
 def _dense_as_strided(request, tensors):
-    """Dense-ABI decode tensors as the strided runner's views and metadata.
+    """Dense-ABI decode arrays as the strided runner's views and metadata.
 
     Q/O ``[B,1,Hq,D]`` (or ``[B,Hq,1,D]``) become ``[B,Hq,D]`` views, K/V
     become logical ``[B,Hkv,S,D]`` views of the caller's storage, and every
-    sequence takes one query row and ``seqlen_k`` keys. The views are torch
-    tensor views, so this adapter takes torch tensors only.
+    sequence takes one query row and ``seqlen_k`` keys. The views and the
+    metadata arrays are of the caller's kind (torch tensors or ``DeviceArray``).
     """
-    from rocke.runtime.torch_interop import is_torch_tensor
+    import numpy as np
+    from rocke.runtime.device_array import array_info, device_values, strided_view
 
     from .bindings import _dense_axis_order, _shape
 
@@ -58,14 +59,6 @@ def _dense_as_strided(request, tensors):
             "unsupported dense decode tensors: " + ", ".join(sorted(unknown))
         )
     q, k, v, out = (tensors[name] for name in ("q", "k", "v", "out"))
-    if not is_torch_tensor(q):
-        raise TypeError(
-            "dense-layout strided decode reshapes torch tensors; with other "
-            "arrays, request kv_layout='strided' and pass [B,Hq,D] Q/O, "
-            "[B,Hkv,S,D] K/V views and the int32 query offsets and KV lengths"
-        )
-    import torch
-
     _, _, order = _dense_axis_order(request, q)
     if _shape(out, "out") != _shape(q, "q"):
         raise ValueError("dense decode out must have the shape of q")
@@ -79,19 +72,27 @@ def _dense_as_strided(request, tensors):
                 f"{name} must have {order.upper()} shape {(batch, *kv_shape)}, "
                 f"got {_shape(tensor, name)}"
             )
-    try:
-        q3 = q.view(batch, heads, dim)
-        out3 = out.view(batch, heads, dim)
-    except RuntimeError as exc:
-        raise ValueError(f"dense decode q/out must be contiguous: {exc}") from exc
+    for name, tensor in (("q", q), ("out", out)):
+        if not array_info(tensor).is_contiguous():
+            raise ValueError(f"dense decode {name} must be contiguous")
+
+    def bhsd_view(tensor):
+        if order == "bhsd":
+            return tensor
+        info = array_info(tensor)
+        b, s, h, d = info.shape
+        sb, ss, sh, sd = info.strides
+        return strided_view(tensor, (b, h, s, d), (sb, sh, ss, sd))
+
+    rows = (batch, heads, dim)
     adapted = {
-        "q": q3,
-        "out": out3,
-        "k": k.transpose(1, 2) if order == "bshd" else k,
-        "v": v.transpose(1, 2) if order == "bshd" else v,
-        "cu_seqlens_q": torch.arange(batch + 1, dtype=torch.int32, device=q.device),
-        "seqused_k": torch.full(
-            (batch,), int(request.seqlen_k), dtype=torch.int32, device=q.device
+        "q": strided_view(q, rows, (heads * dim, dim, 1)),
+        "out": strided_view(out, rows, (heads * dim, dim, 1)),
+        "k": bhsd_view(k),
+        "v": bhsd_view(v),
+        "cu_seqlens_q": device_values(np.arange(batch + 1, dtype=np.int32), like=q),
+        "seqused_k": device_values(
+            np.full(batch, int(request.seqlen_k), np.int32), like=q
         ),
     }
     if "problem" in tensors:
