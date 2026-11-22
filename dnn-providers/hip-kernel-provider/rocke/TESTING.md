@@ -1072,7 +1072,7 @@ log.
 | Q1 | rocKE's share of the quick shard | 5 min | TheRock targets under 5 min for a whole quick shard; rocKE takes several times that today. |
 | Q2 | One item in a quick entry | 2 s | Almost every quick item is far below it; the few above it take a large share of quick time. |
 | Q3 | A new quick entry, or what one change adds to quick | 15 s | A small fraction of Q1; every entry also pays start-up and collection. |
-| G1 | One new golden case, over all golden entries and LLVM flavors | 0.25 s | Golden entries run unsplit on every CI shard of every tier. |
+| G1 | One new golden case, over all golden entries and LLVM flavors | 0.25 s | `rocke_golden_static`, `rocke_differential_golden_ll` and `rocke_differential_golden_canonical` split across CI shards under `--rocke-shard-from-gtest-env` (by case and by family), but quick runs as one shard, so each case still runs there whole. |
 | S1 | One shard key in a sharded entry | 30 s | A key runs whole on one shard; this is half of the 60 s per-item `--timeout` of the `rocke_pytest_<part>` and tiling entries. |
 | S2 | Limit headroom | pytest `--timeout` at least 2× the slowest item; CTest `TIMEOUT` at least 2× the entry's longest run, which is its unsplit run if the entry is in quick | The worst case stays under half of each limit. |
 | S3 | A new non-pytest entry in quick or standard | 1 s | It runs whole on every CI shard. The golden entries and `rocke_optimization_barrier_hip_pair` are existing exceptions. |
