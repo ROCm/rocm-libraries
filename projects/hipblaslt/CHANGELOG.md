@@ -42,6 +42,7 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
 * Workspace limits and sizes above `UINT32_MAX` (4 GiB - 1), such as `SIZE_MAX` for no limit, are clamped to `UINT32_MAX`, because kernels address the workspace with 32-bit offsets. This applies to `HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES` (which then reads back as `UINT32_MAX`), the `hipblasLtMatmul` workspace size, and the extension API `setMaxWorkspaceBytes`.
 * TensileLite problem-type inputs that were previously accepted are now refused: an `ActivationType` other than `none`, `all`, `hipblaslt_all` or a supported single activation (previously silently treated as `none`); a single activation without `BespokeNarrowing: true`; `UseBeta: false` with `GroupedGemm`; `UseBeta: false` with Stream-K without `BespokeNarrowing: true`; and a `BiasDataTypeList` that omits the problem's `DataType`.
 * `ROCBLASLT_EPILOGUE_SIGMOID` now counts as an activation epilogue (`is_act_enabled`), so a sigmoid matmul is selected and launched as an activation problem; previously its activation type was `none`.
+* A launch of a `BespokeNarrowing` solution whose narrowed facts do not hold for the call (for example a solution index pinned through `getAlgosFromIndex` or the extension `Gemm` API) returns `HIPBLAS_STATUS_INVALID_VALUE` instead of running it. On grouped GEMM and device-argument launches, a non-grouped `BespokeNarrowing` solution is always refused, and a grouped one is refused only when a group lacks the bias its `UseBias` kernel requires (see Known issues). Stock solutions are not affected.
 * The single-exit main loop that `AssertSummationElementMultiple` (a multiple of 2×`DepthU`) enables is now generated only when every workgroup provably runs an even number of iterations: not for Stream-K, persistent, `GlobalSplitU != 1` or `SupportUserGSU` kernels, whose per-workgroup K is split at run time. This can change the code of stock kernels with that combination.
 
 ### Removed
@@ -98,6 +99,11 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
 * `GemmInstance::getSolutionName()` in `hipblaslt_ext` crashed for a RocRoller solution. It looked the encoded RocRoller index up in the Tensile library and dereferenced the null result. It now returns the RocRoller short name, as `hipblaslt_ext::getSolutionNameFromAlgo()` already did.
 * The logger's destructor called `close()` on the log file, which throws out of a destructor and terminates the process at exit when the log file has failed, for example on a full disk. Reproducible with `HIPBLASLT_LOG_LEVEL=4` and a failing `HIPBLASLT_LOG_FILE`.
 * `hipblasLtMatmul` with no `algo` could return success for a GEMM that never launched. Its status already held the result of choosing the algorithm, and an exception thrown after that returned it unchanged instead of an error.
+
+### Known issues
+
+* A call with `alpha = 0` at the exact sizes of a `BespokeNarrowing` solution returns `HIPBLAS_STATUS_INVALID_VALUE` when the heuristic picked that solution: the heuristic queries with `alpha = 1`, while the launch treats `alpha = 0` as `K = 0`, which the exact-size check rejects. Libraries without bespoke solutions are not affected; a fallback to a stock kernel at launch is not implemented yet.
+* Grouped GEMM `BespokeNarrowing` solutions are checked only for bias presence at launch; their other narrowed facts (exact sizes, beta, activation, scale-alpha vector, bias types) are not checked per group, because grouped and device-argument problems can change on the device after `initialize`. `geko --specialize` never generates grouped bespoke solutions (grouped calls are refused), so this applies only to hand-written grouped logic with `BespokeNarrowing: true`.
 
 ## hipBLASLt 1.4.1 for ROCm 7.14
 

@@ -51,6 +51,7 @@
 #endif
 #include "include/rocroller_selected.hpp"
 
+#include <Tensile/ContractionProblemPredicates.hpp>
 #include <Tensile/ContractionSolution.hpp>
 #include <Tensile/Contractions.hpp>
 #include <Tensile/DataTypes.hpp>
@@ -1062,6 +1063,8 @@ namespace
             return "swish";
         case TensileLite::ActivationType::Clamp:
             return "clamp";
+        case TensileLite::ActivationType::Sigmoid:
+            return "sigmoid";
         case TensileLite::ActivationType::None:
         default:
             return "none";
@@ -5451,6 +5454,84 @@ void tuningInjectFailureForTest(int stage)
     g_injectedTuningFailure.store(stage, std::memory_order_relaxed);
 }
 
+// Launch guard for caller-supplied solution indices. Selection applies a solution's full
+// problem predicate, but a supplied index (plain matmul with an algo, ext initialize, grouped
+// and device-argument runs) launches without it. A solution whose kernel was narrowed to a
+// fact (beta == 0, no activation, no bias, ...) computes a wrong result for a problem that
+// lacks the fact, so evaluate the solution's narrowed-fact predicates (collected at library
+// load for bespokeNarrowing solutions only; null for every stock solution, which therefore
+// takes the unguarded launch path) against the problem being bound.
+static bool narrowedFactsRefused(TensileLite::ContractionSolution const&    solution,
+                                 TensileLite::ContractionProblemGemm const& problem,
+                                 const char*                                caller)
+{
+    auto const& narrowed = solution.narrowedFactPredicate;
+    if(!narrowed || (*narrowed)(problem))
+        return false;
+    if(get_logger_layer_mode() & rocblaslt_layer_mode_log_info)
+    {
+        std::ostringstream msg;
+        msg << "Software match: " << solution.description();
+        narrowed->debugEval(problem, msg);
+        msg << std::endl;
+        log_info(caller, msg.str());
+    }
+    log_error(caller, "Solution is not supported: a narrowed-fact predicate fails");
+    return true;
+}
+
+// Grouped and device-argument launches: per-problem facts may change on the device after
+// initialize, so a non-grouped bespokeNarrowing solution carrying narrowed facts is refused
+// outright. Stock solutions (null narrowedFactPredicate) keep their existing behaviour; a
+// grouped bespoke solution is refused only when a group lacks the bias its UseBias kernel
+// requires.
+static bool groupedNarrowedRefused(TensileLite::ContractionSolution const&                 solution,
+                                   std::vector<TensileLite::ContractionProblemGemm> const& gemms,
+                                   const char*                                             caller)
+{
+    if(!solution.narrowedFactPredicate)
+        return false;
+    if(solution.problemType.groupedGemm)
+    {
+        if(solution.problemType.useBias == 0)
+            return false;
+        TensileLite::Predicates::Contraction::BiasPresentCheck biasPresent;
+        for(size_t i = 0; i < gemms.size(); i++)
+        {
+            if(biasPresent(gemms[i]))
+                continue;
+            if(get_logger_layer_mode() & rocblaslt_layer_mode_log_info)
+            {
+                std::ostringstream msg;
+                msg << "Match [" << i << "]: " << solution.description();
+                biasPresent.debugEval(gemms[i], msg);
+                msg << std::endl;
+                log_info(caller, msg.str());
+            }
+            log_error(caller, "Solution is not supported: a narrowed-fact predicate fails");
+            return true;
+        }
+        return false;
+    }
+    if(get_logger_layer_mode() & rocblaslt_layer_mode_log_info)
+    {
+        TensileLite::Predicates::Contraction::GroupedGemmEqual grouped(false);
+        std::ostringstream                                     msg;
+        for(size_t i = 0; i < gemms.size(); i++)
+        {
+            msg << "Match [" << i << "]: " << solution.description();
+            grouped.debugEval(gemms[i], msg);
+            solution.narrowedFactPredicate->debugEval(gemms[i], msg);
+        }
+        msg << std::endl;
+        log_info(caller, msg.str());
+    }
+    log_error(caller,
+              "Solution is not supported: a non-grouped solution with narrowed facts cannot "
+              "run on a grouped or device-argument path");
+    return true;
+}
+
 /******************************************************************************
  * runContractionProblem calls Tensile to run a contraction problem described *
  * by RocblasltContractionProblem *
@@ -5891,6 +5972,9 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
         // choice is made here, where the solution is finally known.
         {
             auto picked = library->getSolutionByIndex(data->problem, *hardware, *solutionIndex);
+            // Refuse before the bench/profile logs below record the call as launched.
+            if(picked && narrowedFactsRefused(*picked, data->problem, __func__))
+                return rocblaslt_status_invalid_value;
             if(picked)
                 data->inputs.Synchronizer
                     = synchronizerForSolution(*picked, prob.streamKFlags, prob.Synchronizer);
@@ -6279,6 +6363,8 @@ rocblaslt_status makeArgument(rocblaslt_handle             handle,
                 log_error(__func__, "No solution for index", *solutionIndex);
                 return rocblaslt_status_invalid_value;
             }
+            if(narrowedFactsRefused(*solution, data->problem, __func__))
+                return rocblaslt_status_invalid_value;
 
             if(data->problem.getParams().uniformSummationOrder())
                 warnUniformSummationOrderBypass(__func__, tuning != nullptr);
@@ -6354,6 +6440,8 @@ rocblaslt_status makeArgument(rocblaslt_handle             handle,
                 log_error(__func__, "No solution for index", *solutionIndex);
                 return rocblaslt_status_invalid_value;
             }
+            if(groupedNarrowedRefused(*solution, data->problem.gemms, __func__))
+                return rocblaslt_status_invalid_value;
 
             if(!data->problem.gemms.empty()
                && data->problem.gemms[0].getParams().uniformSummationOrder())
@@ -6775,6 +6863,8 @@ rocblaslt_status runKernelFromNewDeviceUserArguments(rocblaslt_handle       hand
                                               false);
             }
             auto solution = library->getSolutionByIndex(*hardware, data->algoIndex);
+            if(solution && groupedNarrowedRefused(*solution, data->problem.gemms, __func__))
+                return rocblaslt_status_invalid_value;
             if(get_logger_layer_mode() & rocblaslt_layer_mode_log_extended_profile)
             {
                 logExtendedProfileFromTensileDataGemm(data->problem,
@@ -6862,6 +6952,8 @@ rocblaslt_status runKernelFromDeviceUserArguments(rocblaslt_handle             h
             auto solution = library->getSolutionByIndex(*hardware, *solutionIndex);
             std::shared_ptr<TensileDataGroupedGemm> data
                 = std::static_pointer_cast<TensileDataGroupedGemm>(gemmData);
+            if(solution && groupedNarrowedRefused(*solution, data->problem.gemms, __func__))
+                return rocblaslt_status_invalid_value;
             auto kernel = solution->solveGroupedGemmGPU(
                 data->problem.gemms, data->inputs, *hardware, deviceUserArgs, workspace, stream);
             status = hip2RocStatus(adapter->launchKernels(kernel, stream, nullptr, nullptr));
