@@ -860,10 +860,12 @@ def _run_family_hashed(name, binpath, mode, canonical, src_dir):
             range_drift = {"idx": idx, "c_end": c_end, "p_end": p_end}
             break
         verdict, shas = classify_emissions(c_emission, p_emission)
-        if canonical and verdict == "MISMATCH":
-            if c_emission.canonical_error or p_emission.canonical_error:
-                verdict = "CANON_ERROR"
-            elif c_emission.canonical_sha == p_emission.canonical_sha:
+        if canonical and _canonical_form_missing(c_emission, p_emission):
+            # Equal bytes do not excuse it: there is no canonical hash to
+            # compare, record or check.
+            verdict = "CANON_ERROR"
+        elif canonical and verdict == "MISMATCH":
+            if c_emission.canonical_sha == p_emission.canonical_sha:
                 verdict = "CANON_EQUAL"
             else:
                 verdict = "STRUCT_DRIFT"
@@ -883,6 +885,11 @@ def _run_family_hashed(name, binpath, mode, canonical, src_dir):
         if verdict in TERMINAL_VERDICTS:
             break
     return configs, range_drift, False, None
+
+
+def _canonical_form_missing(*emissions: Emission) -> bool:
+    """True when any of ``emissions`` has output and no canonical form."""
+    return any(e.has_output and e.canonical_error for e in emissions)
 
 
 def run_family(name, archive, mode, canonical=False, src_dir=None):
@@ -1388,10 +1395,29 @@ def _main():
     print(f"\ndashboard: {args.json}")
 
     if golden:
+        uncanonical = _canon_error_configs(results)
+        if args.record_golden and uncanonical:
+            # The python-only record refuses these too: a config without a
+            # canonical form has no hash to bless.
+            print(
+                "\nnothing recorded: output with no canonical form: "
+                + ", ".join(uncanonical)
+            )
+            return 1
         return _golden_step(
             args, kind, flavor, collect_ref_shas(results), scope, failures, fams
         )
     return exit_code
+
+
+def _canon_error_configs(results) -> list[str]:
+    """``family[idx]`` of every CANON_ERROR config in a dashboard."""
+    return [
+        f"{r['family']}[{c['idx']}]"
+        for r in results
+        for c in r.get("configs", [])
+        if c.get("verdict") == "CANON_ERROR"
+    ]
 
 
 def _explicit_golden_file(args) -> bool:

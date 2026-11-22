@@ -21,7 +21,9 @@ importing ``run_diff`` does create its /tmp working dir.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
+import io
 import json
 import os
 import subprocess
@@ -317,9 +319,9 @@ class TestDifferentialConcurrency(unittest.TestCase):
         self.assertEqual(result["status"], "BATCH_INCOMPLETE")
         self.assertIn("native returned 1 records", result["error"])
 
-    def test_noncanonicalizable_equal_output_records_no_reference_sha(self):
-        # Its raw bytes are not a canonical hash: recorded in their place they
-        # would anchor a value the canonical check never computes.
+    def test_noncanonicalizable_equal_output_is_canon_error(self):
+        # Equal bytes without a canonical form give no canonical hash: the
+        # config fails and records no reference, never its raw bytes.
         raw_sha = run_diff.sh(b"identical but not canonicalizable")
         invalid = run_diff.Emission(
             0,
@@ -341,7 +343,8 @@ class TestDifferentialConcurrency(unittest.TestCase):
                     result = run_diff.run_family(
                         "gemm", Path("archive.a"), "ir", canonical=True
                     )
-        self.assertEqual(result["status"], "GREEN")
+        self.assertEqual(result["status"], "DRIFT")
+        self.assertEqual(result["configs"][0]["verdict"], "CANON_ERROR")
         self.assertEqual(result["configs"][0]["ref_sha"], None)
         self.assertEqual(run_diff.collect_ref_shas([result]), {})
 
@@ -675,7 +678,7 @@ class TestModeRejection(unittest.TestCase):
 class TestMainReturnsTheGateVerdict(unittest.TestCase):
     """The pure rule is only a gate if main() actually returns it."""
 
-    def drive_main(self, family_record, tmp):
+    def drive_main(self, family_record, tmp, extra=()):
         archive = tmp / "librocke_core.a"
         archive.touch()
         argv = [
@@ -684,6 +687,7 @@ class TestMainReturnsTheGateVerdict(unittest.TestCase):
             str(archive),
             "--json",
             str(tmp / "dashboard.json"),
+            *extra,
         ]
         families = [("fake", tmp)] if family_record else []
         with mock.patch.object(run_diff, "find_families", return_value=families):
@@ -732,6 +736,43 @@ class TestMainReturnsTheGateVerdict(unittest.TestCase):
             self.assertEqual(
                 gate_verdict(json.loads((tmp / "dashboard.json").read_text())), (0, [])
             )
+
+    def test_a_record_refuses_output_without_a_canonical_form(self):
+        with TemporaryDirectory() as d:
+            tmp = Path(d)
+            golden = tmp / "golden.json"
+            record = {
+                "family": "fake",
+                "status": "DRIFT",
+                "n": 2,
+                "bad": 1,
+                "canon": 0,
+                "range_drift": None,
+                "configs": [
+                    {"idx": 0, "verdict": "IDENTICAL", "ref_sha": "ab"},
+                    {
+                        "idx": 1,
+                        "verdict": "CANON_ERROR",
+                        "ref_sha": None,
+                        "c_rc": 0,
+                        "p_rc": 0,
+                    },
+                ],
+            }
+            extra = [
+                "--mode",
+                "ir",
+                "--canonical",
+                "--record-golden",
+                "--golden-file",
+                str(golden),
+            ]
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                code = self.drive_main(record, tmp, extra)
+            self.assertEqual(code, 1)
+            self.assertIn("output with no canonical form: fake[1]", out.getvalue())
+            self.assertFalse(golden.exists())
 
     def test_discovering_no_families_exits_nonzero(self):
         with TemporaryDirectory() as d:
