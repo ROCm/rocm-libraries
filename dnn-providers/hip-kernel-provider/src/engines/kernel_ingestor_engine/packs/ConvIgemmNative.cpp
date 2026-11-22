@@ -1786,7 +1786,7 @@ bool kernelMatches(const MatchContext& context,
     }
     // The register-staged 256 x 256 tile's forward on grids of fewer tiles than units runs only
     // unsplit: its splits there are twice as deep as the 256 x 128 tile's, which measured slower.
-    // Backward data keeps both plans: its split default measured faster on small 3-D layers of
+    // Backward data keeps both plans: its split default measured faster on small 3-D maps of
     // 256-512 channels, its no-split twin on 1024 (MI300A).
     if(flexForm(*tile) == 2 && tile->bn == 256 && *direction == ConvDirection::FORWARD
        && static_cast<long long>(grid->x) * grid->y * grid->z
