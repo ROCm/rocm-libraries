@@ -13,6 +13,13 @@ Definitions:
     - { M:    24, N:    24, lda:   24, stride_a:     1024 }
     - { M:    32, N:    11, lda:   32, stride_a:     1024 }
 
+  - &gemvn_batch_loop_matrix_size_range
+    # transA == N with m < 2 * n selects rocblas_gemvn_kernel<32, 16> on gfx90a, gfx942,
+    # gfx11xx and gfx12xx. m > 32 keeps gfx90a and gfx942 off the sm_mn batched kernel.
+    - { M:     6, N:     4, lda:     6, stride_a:       24 }
+    - { M:    16, N:    16, lda:    16, stride_a:      256 }
+    - { M:    33, N:    17, lda:    33, stride_a:      561 }
+
   - &qmcpack_matrix_size_range
     # m <= 64 && batch_count > 8 (transposes only), N >= 33 to avoid sm_mn kernel
     - { M:    2 , N:    33, lda:    2, stride_a:       66 }
@@ -609,6 +616,21 @@ Tests:
     - gemv_batched: *single_precision
     - gemv_strided_batched: *single_precision
   stride_scale: 1
+
+# batch_count > c_YZ_grid_launch_limit, so each workgroup loops over several batches
+# and reuses its shared memory reduction buffer.
+- name: gemv_batched_grid_z_batch_loop
+  category: pre_checkin
+  function:
+    - gemv_batched
+    - gemv_strided_batched
+  precision: *single_double_precisions_complex_real
+  transA: [ N ]
+  matrix_size: *gemvn_batch_loop_matrix_size_range
+  incx_incy: *incx_incy_unity
+  alpha_beta: *alpha_beta_range_small
+  batch_count: [ 131071 ] # 2 * 65535 + 1
+  pointer_mode_host: false
 
 # gemv_strided_batched
 - name: gemv_strided_batched_bad_arg
