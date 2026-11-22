@@ -2335,14 +2335,14 @@ class KernelComponentFactoryGfx117(CompatibilityRuleFactory):
 # cap, then the bias, as the example's reference does).
 GFX125_TDM_PIPELINES_WITH_SOFT_CAP_BIAS = ("qr_tdm", "qr_tdm_pingpong", "qr_tdm_sched")
 
-# qr_tdm_sched (fp16/bf16) and qr_tdm_fp8_sched (fp8) take d128's small grids: fewer than two
-# 128-row query blocks a CU leave qr_tdm_pingpong no second block to overlap with, while the
-# scheduled pipelines overlap softmax and gemms inside one block (gfx1250 bf16 d128, 8/16
-# heads x 1..2 batches x 128..4096 rows: the scheduled pipeline +5..16% over pingpong's
-# 128-row tile). Everything else, including the calls they refuse, takes qr_tdm_pingpong:
-# from 512 to 32768 keys on bigger grids pingpong keeps level or ahead (bf16 d128 dense
-# -2..+3%, causal +16..31%; fp8 d64..d256 +0..15%). MX keeps pingpong: its scheduled
-# pipeline misses the reference at d128/d256.
+# gfx1250 dispatch: qr_tdm_pingpong takes every query but two, which run qr_tdm_fp8_sched:
+# - fp8 d128 small grids (GFX125_QR_TDM_SCHED_SMALL_GRID): fewer than two 128-row query blocks a
+#   CU leave pingpong no second block to overlap with, while the scheduled pipeline overlaps
+#   softmax and gemms inside one block (gfx1250 fp8 d128, 8/16 heads x 1..2 batches x 256..1024
+#   rows: pingpong -10..21%). fp16/bf16 keep pingpong there (its 128-key-trip tile).
+# - MX prefill at d64/d128/d256 (qr_tdm_mx_sched_constraint): sched +2..22% at every length.
+# Longer rows stay on pingpong (bf16/fp8 d64..d256, 32k..128k keys: dense +3..15%, causal
+# +2..54%; fp8 d192 128k the one exception, -4..7%).
 GFX125_QR_TDM_SCHED_SMALL_GRID = "a.max_seqlen_q >= 128 && 1LL * a.batch * a.nhead_q * a.max_seqlen_q < 256LL * num_cus"
 
 # Head dims qr_tdm_pingpong serves, at every input width.
@@ -2424,6 +2424,13 @@ GFX125_QR_TDM_PINGPONG_M128_MIN_WINDOW = 512
 # 256: d96 +18..28%, d128 +25..46%, d192 +0..10%, d256 +6..37%; d64 -5%). MX, the measure
 # above: -0.5% (window rule -2.8%, 128-row tiles regardless at d64 too -0.7%).
 GFX125_QR_TDM_PINGPONG_M128_ANY_WINDOW = ((96, 96), (160, 160), (192, 128))
+
+
+# 16-bit head dims whose 128-row tile takes 128-key trips without a left window: a trip's
+# sync and K/V transfers pay off half as often (gfx1250 bf16 d128, 128- over 64-key trips:
+# 128..512 rows -1..+1% dense, up to +9% causal; 1k..8k +2..10%; 16k..128k +1..8%, where the
+# 64-key trips lost 4..6% to qr_tdm_sched).
+GFX125_QR_TDM_PINGPONG_LONG_TRIPS = ((128, 128),)
 
 
 def _gfx125_seqlen_k_at_least(value):
@@ -2586,6 +2593,14 @@ def _gfx125_qr_tdm_pingpong_tiles(hdim_pair, fp8=False, mx=False):
     # VGPRs -2..7%).
     if wide_rows:
         tiles = tiles[:1]
+    if not fp8 and hdim_pair in GFX125_QR_TDM_PINGPONG_LONG_TRIPS:
+        # 128-key trips on the 128-row tile without a left window (ahead of the 64-key one)
+        long_trips = "a.max_seqlen_q >= 128 && a.window_size_left < 0"
+        tiles = tiles[:1] + (
+            _gfx125_qr_tdm_pingpong_tile(
+                hdim_pair, 128, 128, wide_slice, long_trips, k_row=k_row
+            ),
+        ) + tiles[1:]  # fmt: skip
     return short_tiles + tiles
 
 
@@ -2627,14 +2642,12 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
     # Pipelines whose tiles carry F_pipeline_tag (see check_tile_owner).
     _PIPELINES_WITH_OWN_TILES = ("qr_tdm_pingpong",)
 
-    # The scheduled pipelines' d128 tiles (GFX125_QR_TDM_SCHED_SMALL_GRID); the fp8 one runs
-    # one workgroup a CU with an elementwise bias. Must match kFmhaTdmSchedFp8{,Bias}BlockPerCu
-    # in the policy.
-    _QR_TDM_SCHED_TILES = {
-        (128, 128): (
-            FmhaFwdTileSize(128, 128, 32, 128, 32, 128, 4, 1, 1, 4, 1, 1, 16, 16, 32, 16, 16, 32, 1),
-        ),
-    }  # fmt: skip
+    # qr_tdm_fp8_sched's d128 tiles (GFX125_QR_TDM_SCHED_SMALL_GRID: fp8 small grids, where
+    # qr_tdm_pingpong trails it by 10..21%), one workgroup a CU with an elementwise bias. Must
+    # match kFmhaTdmSchedFp8{,Bias}BlockPerCu in the policy. fp16/bf16 run qr_tdm_pingpong
+    # everywhere: its 128-key-trip d128 tile matches or beats qr_tdm_sched on small grids too
+    # (gfx1250 bf16 d128 b1..2 x h8..16, 256..4096 rows: -3..+21%) and on long rows
+    # (32k..128k: dense +3..5%, causal +54%).
     _QR_TDM_SCHED_FP8_TILES = {
         (128, 128): (
             FmhaFwdTileSize(128, 128, 128, 128, 128, 128, 4, 1, 1, 4, 1, 1, 16, 16, 128, 16, 16, 128, 2),
@@ -2642,13 +2655,45 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
         ),
     }  # fmt: skip
 
+    # MX prefill (more than 16 query rows) at d64/d128/d256 runs qr_tdm_fp8_sched, whose 128-row
+    # tiles split the scaled WMMA's 128-deep K over 128-key trips (gfx1250 MX, the scheduled
+    # pipeline over qr_tdm_pingpong: d64 causal +13..21%, d128 +2..9%, d256 +12..24%); d256
+    # one workgroup a CU (kFmhaTdmSchedFp8D256BlockPerCu).
+    _QR_TDM_SCHED_MX_TILES = {
+        (64, 64): (
+            FmhaFwdTileSize(128, 128, 64, 64, 128, 64, 4, 1, 1, 4, 1, 1, 16, 16, 64, 16, 16, 128, 2),
+        ),
+        (128, 128): (
+            FmhaFwdTileSize(128, 128, 128, 128, 128, 128, 4, 1, 1, 4, 1, 1, 16, 16, 128, 16, 16, 128, 2),
+        ),
+        (256, 256): (
+            FmhaFwdTileSize(128, 128, 256, 256, 128, 256, 4, 1, 1, 4, 1, 1, 16, 16, 128, 16, 16, 128, 1),
+        ),
+    }  # fmt: skip
+
     @classmethod
     def _sched_tiles(cls, dtype: str) -> dict:
-        if dtype in cls._DT_FP16_BF16:
-            return cls._QR_TDM_SCHED_TILES
         if dtype in cls._DT_FP8_FP8BF16:
             return cls._QR_TDM_SCHED_FP8_TILES
+        if dtype in cls._DT_MXFP8:
+            return cls._QR_TDM_SCHED_MX_TILES
         return {}
+
+    @classmethod
+    def qr_tdm_mx_sched_constraint(cls, hdim: int, sink: str) -> CppConstraint:
+        # MX prefill; Q/K E8M0 rows read an int16 per K64 step (d64), else int32s
+        row = 2 if hdim % 128 else 4
+        sink_expr = "a.sink_ptr == nullptr && " if sink == "f" else ""
+        return CppConstraint(
+            f"a.hdim_q == {hdim} && a.hdim_v == {hdim} && {sink_expr}"
+            f"t.hdim_q == {hdim} && t.hdim_v == {hdim} && a.max_seqlen_q > 16"
+            f" && reinterpret_cast<uintptr_t>(a.q_descale_ptr) % {row} == 0"
+            f" && reinterpret_cast<uintptr_t>(a.k_descale_ptr) % {row} == 0"
+            f" && a.stride_q_descale % {row} == 0 && a.stride_k_descale % {row} == 0"
+            f" && a.nhead_stride_q_descale % {row} == 0 && a.nhead_stride_k_descale % {row} == 0"
+            f" && (t.is_group_mode || (a.batch_stride_q_descale % {row} == 0"
+            f" && a.batch_stride_k_descale % {row} == 0))"
+        )
 
     @classmethod
     def is_sched_tile(cls, dtype: str, tile: FmhaFwdTileSize, hdim: int) -> bool:
@@ -2715,19 +2760,18 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
         def check_sched_tiles(
             problem_ctx: ProblemContext, kernel_ctx: KernelContext
         ) -> bool:
-            # A scheduled pipeline runs on its tiles (row-major V; the fp16/bf16 one padded
-            # only, the fp8 one at its bias occupancy), and no other pipeline on them.
+            # qr_tdm_fp8_sched runs on its tiles (row-major V, one workgroup a CU with an
+            # elementwise bias or at d256), and no other pipeline on them.
             sched_tile = cls.is_sched_tile(
                 problem_ctx.dtype, kernel_ctx.tile, problem_ctx.hdim
             )
             p = kernel_ctx.pipeline
-            if p.tag not in ("qr_tdm_sched", "qr_tdm_fp8_sched"):
+            if p.tag != "qr_tdm_fp8_sched":
                 return not sched_tile
             if not sched_tile or p.F_vlayout != "row" or p.F_packgqa == "t":
                 return False
-            if p.tag == "qr_tdm_sched":
-                return (p.F_spad, p.F_skpad, p.F_dpad, p.F_dvpad) == ("t",) * 4
-            return kernel_ctx.tile.F_occupancy == (1 if p.F_bias == "bias" else 2)
+            one_per_cu = p.F_bias == "bias" or problem_ctx.hdim == 256
+            return kernel_ctx.tile.F_occupancy == (1 if one_per_cu else 2)
 
         rules.extend([check_tile_owner, check_sched_tiles])
         return rules
@@ -2777,33 +2821,15 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
             pipelines += qr_tdm_pingpong_feature_pipelines(
                 (hdim, hdim_v), mask_impl, qscales
             )
+        if dtype in cls._DT_MXFP8 and (hdim, hdim_v) in cls._QR_TDM_SCHED_MX_TILES:
+            for mask, lse, sink in itertools.product(
+                get_mask_map(mask_impl).keys(), ["f", "t"], ["f", "t"]
+            ):
+                constraint = cls.qr_tdm_mx_sched_constraint(hdim, sink)
+                pipelines.append(FmhaFwdPipeline("qr_tdm_fp8_sched", "row", "t", "t", "f", "f", "f", "no", lse, "f", "mx", mask, "f", "f", sink, F_constraint=constraint))  # fmt: skip
         if (hdim, hdim_v) != (128, 128):
             return pipelines
-        if dtype in cls._DT_FP16_BF16:
-            for logits, bias, mask, lse, dropout, sink in itertools.product(
-                ["f", "t"],
-                BIAS_MAP.keys(),
-                get_mask_map(mask_impl).keys(),
-                ["t", "f"],
-                ["f", "t"],
-                ["f", "t"],
-            ):
-                constraint = CppConstraint(
-                    f"a.hdim_q == 128 && a.hdim_v == 128 && {GFX125_QR_TDM_SCHED_SMALL_GRID}"
-                    " && t.hdim_q == 128 && t.hdim_v == 128"
-                )
-                if sink == "f":
-                    # without the virtual sink IsSupportedArgument refuses a sink_ptr
-                    constraint &= CppConstraint("a.sink_ptr == nullptr")
-                # O layouts its async O store (kUseAsyncLdsOStore) addresses
-                constraint &= CppConstraint(
-                    "reinterpret_cast<uintptr_t>(a.o_ptr) % 16 == 0 && a.stride_o >= 0 && "
-                    "a.stride_o % 8 == 0 && a.nhead_stride_o % 8 == 0 && "
-                    "(t.is_group_mode || a.batch_stride_o % 8 == 0) && "
-                    "127 * static_cast<uint64_t>(a.stride_o) * 2 + 256 <= (uint64_t{1} << 32)"
-                )
-                pipelines.append(FmhaFwdPipeline("qr_tdm_sched", "row", "t", "t", "t", "t", logits, bias, lse, dropout, "no", mask, "f", "f", sink, F_constraint=constraint))  # fmt: skip
-        elif dtype in cls._DT_FP8_FP8BF16:
+        if dtype in cls._DT_FP8_FP8BF16:
             # no dropout or ALiBi; an elementwise bias runs one workgroup a CU
             for mask, lse, qscale, sink, bias in itertools.product(
                 get_mask_map(mask_impl).keys(),
