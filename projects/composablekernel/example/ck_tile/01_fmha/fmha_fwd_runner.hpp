@@ -182,16 +182,19 @@ int override_num_splits_if_necessary(int batch,
         if(is_gfx125)
         {
             // qr_tdm_pingpong's decode tile (16 query rows; GQA folds a KV head's query heads
-            // into them): split a grid of fewer workgroups than WGPs to about 1.5 of them a WGP,
-            // each split keeping at least 1024 keys (gfx1250 bf16 decode, d64..d256).
+            // into them): split a grid of fewer workgroups than WGPs to about 2 of them a WGP,
+            // each split keeping at least 512 keys, at most 32 splits (the combine's cost grows
+            // with them). gfx1250 bf16 d128 32/8 heads, batch 1..8 x 4k..128k keys, end to end
+            // (main + combine): geomean 0.992 of the best split count, worst 0.947 (1.5 a WGP,
+            // 1024 keys, 128 splits: 0.962, worst 0.863, short keys).
             const int rows   = max_seqlen_q * (nhead / std::max(nhead_k, 1));
             const int blocks = batch * std::max(nhead_k, 1) * ck_tile::integer_divide_ceil(rows, 16);
             const int wgps   = props.multiProcessorCount;
             if(blocks >= wgps)
                 return 1;
-            const int by_grid = ck_tile::integer_divide_ceil(3 * wgps, 2 * blocks);
-            const int by_keys = std::max(1, ck_tile::integer_divide_ceil(max_seqlen_k, 1024));
-            return std::min({by_grid, by_keys, 128});
+            const int by_grid = ck_tile::integer_divide_ceil(2 * wgps, blocks);
+            const int by_keys = std::max(1, ck_tile::integer_divide_ceil(max_seqlen_k, 512));
+            return std::min({by_grid, by_keys, 32});
         }
 
         return num_splits_heuristic(batch * nhead * num_m_blocks,
