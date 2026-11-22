@@ -29,8 +29,8 @@ _SUITES = {
 }
 # ``rocke.heuristics.tests`` and ``test_wavescope_pmc.py`` run in no lane.
 # ``TESTING.md`` gap G7 gives the reasons and the step that enrolls them.
-# ``test_fp16_rcr_multigpu.py`` is installed under ``tests/benchmark``, where the
-# ``rocke_pytest_*`` entries collect it, so it is not run a second time here.
+# ``test_fp16_rcr_multigpu.py`` runs from its installed copy under ``tests/benchmark``,
+# which the installed ``rocke_pytest_*`` entries collect, so it is not run a second time here.
 _EXCLUDED_FILES = ("test_wavescope_pmc.py", "test_fp16_rcr_multigpu.py")
 
 
