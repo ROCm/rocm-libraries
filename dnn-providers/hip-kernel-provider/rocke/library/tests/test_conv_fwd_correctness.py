@@ -28,9 +28,12 @@ from typing import List, Optional, Tuple
 
 import numpy as np
 
-from builders.common.conv_reference import tf32_reference_inputs, tf32_reference_tol
+from builders.common.conv_reference import (
+    conv_fwd_reference,
+    tf32_reference_inputs,
+    tf32_reference_tol,
+)
 from rocke.numeric import storage
-from rocke.numeric.conv import conv_fwd
 from rocke.runtime.hip_module import get_device_arch
 
 GPU_ARCH = get_device_arch(0)
@@ -234,17 +237,7 @@ def _reference(problem, a_stored, b_stored, dtype: str, arch: str) -> np.ndarray
     storage_dtype = _STORAGE[dtype]
     a = tf32_reference_inputs(storage.decode(a_stored, storage_dtype), arch, dtype)
     b = tf32_reference_inputs(storage.decode(b_stored, storage_dtype), arch, dtype)
-    p = problem
-    spatial = (
-        {
-            "stride": (p.sD, p.sH, p.sW),
-            "padding": (p.pD, p.pH, p.pW),
-            "dilation": (p.dD, p.dH, p.dW),
-        }
-        if p.is_3d
-        else {"stride": (p.sH, p.sW), "padding": (p.pH, p.pW), "dilation": (p.dH, p.dW)}
-    )
-    reference = conv_fwd(a, b, groups=p.groups, **spatial)
+    reference = conv_fwd_reference(a, b, problem)
     if storage_dtype == "fp32":
         return reference
     return storage.round_to(reference, storage_dtype).astype(np.float64)

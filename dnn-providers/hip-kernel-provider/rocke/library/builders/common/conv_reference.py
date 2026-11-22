@@ -2,7 +2,17 @@
 # SPDX-License-Identifier: MIT
 """Reference convolutions for verify paths.
 
-Five forward/backward implementations are provided:
+The float64 references of a ``ConvProblem`` -- :func:`conv_fwd_reference`,
+:func:`conv_dgrad_reference` and :func:`conv_wgrad_reference` -- run
+:mod:`rocke.numeric.conv` on numpy arrays in the kernel layouts (NHWC / NDHWC
+activations, KYXC / KZYXC weights), over image slices that bound their host
+memory. They need neither torch nor a GPU.
+
+The TF32 helpers (:func:`tf32_reference_inputs`, :func:`tf32_reference_tol`)
+say which operand values and which bound a TF32 kernel is judged with.
+
+The torch references below remain for the benchmarks and tests that still
+call them:
 
 * ``conv_reference``         — torch-based (``F.conv2d`` / ``F.conv3d``), works
   on any GPU target.
@@ -11,6 +21,8 @@ Five forward/backward implementations are provided:
   NHWC forward convolution.
 * ``dgrad_reference``        — torch-based backward-data reference via
   ``torch.nn.grad.conv2d_input``.
+* ``wgrad_reference``        — torch-based backward-weight reference via
+  ``torch.nn.grad.conv{2,3}d_weight``.
 * ``dgrad_reference_gfx1250`` — hand-written numpy reference for gfx1250.
   Accumulates in float32 with no GPU driver dependency.  Only supports 2-D
   NHWK/KYXC → NHWC dgrad convolution.
@@ -23,24 +35,33 @@ from __future__ import annotations
 
 import contextlib
 import functools
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NamedTuple
 
+import numpy as np
+from rocke.numeric.conv import conv_dgrad, conv_fwd, conv_wgrad
 from rocke.numeric.storage import xf32_truncate
 
 # torch is optional for the library: each reference imports it when called, so
 # the torch-free helpers here (batch slicing, tolerances) and the modules that
 # import this one load without it.
 if TYPE_CHECKING:
-    import numpy as np
     import torch
+    from kernels.common.conv_implicit_gemm import ConvProblem
+
 
 # torch's GPU convolutions mis-compute an fp32 operand larger than 2^32 bytes:
 # the batch images past that offset come back wrong (measured with MIOpen on a
-# 4.8 GB fp32 activation). The forward and backward-data references therefore
-# run batch slices whose fp32 operands stay below a 2^31-byte cap -- well under
-# the 2^32 break point, so a slice can never straddle it -- and concatenate
-# them; every image is independent in those two directions.
+# 4.8 GB fp32 activation). The torch forward and backward-data references
+# therefore run batch slices whose fp32 operands stay below a 2^31-byte cap --
+# well under the 2^32 break point, so a slice can never straddle it -- and
+# concatenate them; every image is independent in those two directions.
 _MAX_SLICE_BYTES = 2**31 - 1
+
+#: Default cap on the float64 bytes of one image slice's input or output
+#: activation in the numpy references. They hold a few float64 copies of the
+#: activations they work on, so a larger batch runs as image slices: this
+#: bounds their host memory, not their result.
+REFERENCE_SLICE_BYTES = 2**28
 
 
 def _out_extent(i: int, f: int, s: int, pad: int, d: int) -> int:
@@ -61,10 +82,117 @@ def _image_elems(p) -> int:
     return max(out, inp)
 
 
-def _batch_slices(p, n: int):
-    """``[(n0, count), ...]`` covering a batch of ``n`` in fp32-safe slices."""
-    step = max(1, _MAX_SLICE_BYTES // (4 * _image_elems(p)))
+def _batch_slices(
+    p, n: int, *, element_bytes: int = 4, max_bytes: int = _MAX_SLICE_BYTES
+):
+    """``[(n0, count), ...]`` covering a batch of ``n`` in slices whose larger
+    activation, at ``element_bytes`` per element, stays within ``max_bytes``
+    (one image per slice at least). The defaults are the torch references'
+    fp32 cap."""
+    step = max(1, max_bytes // (element_bytes * _image_elems(p)))
     return [(n0, min(step, n - n0)) for n0 in range(0, n, step)]
+
+
+class ConvExtents(NamedTuple):
+    """Spatial extents of a ``ConvProblem``, one per axis, depth first for 3-D."""
+
+    in_spatial: tuple[int, ...]
+    out_spatial: tuple[int, ...]
+    filter_spatial: tuple[int, ...]
+
+
+def conv_extents(problem: ConvProblem) -> ConvExtents:
+    """The input, output and filter extents of ``problem``."""
+    p = problem
+    if p.is_3d:
+        return ConvExtents((p.Di, p.Hi, p.Wi), (p.Do, p.Ho, p.Wo), (p.Z, p.Y, p.X))
+    return ConvExtents((p.Hi, p.Wi), (p.Ho, p.Wo), (p.Y, p.X))
+
+
+def conv_geometry(problem: ConvProblem) -> dict[str, tuple[int, ...] | int]:
+    """``stride`` / ``padding`` / ``dilation`` (one per spatial axis, depth
+    first for 3-D) and ``groups`` of ``problem``: the keyword arguments of the
+    :mod:`rocke.numeric.conv` references."""
+    p = problem
+    if p.is_3d:
+        return {
+            "stride": (p.sD, p.sH, p.sW),
+            "padding": (p.pD, p.pH, p.pW),
+            "dilation": (p.dD, p.dH, p.dW),
+            "groups": p.groups,
+        }
+    return {
+        "stride": (p.sH, p.sW),
+        "padding": (p.pH, p.pW),
+        "dilation": (p.dH, p.dW),
+        "groups": p.groups,
+    }
+
+
+def _image_batches(problem: ConvProblem, n: int, max_slice_bytes: int):
+    """The batch of ``n`` images as slices of float64 activations of at most
+    ``max_slice_bytes`` each."""
+    return [
+        slice(n0, n0 + count)
+        for n0, count in _batch_slices(
+            problem, n, element_bytes=8, max_bytes=max_slice_bytes
+        )
+    ]
+
+
+def conv_fwd_reference(
+    x: np.ndarray,
+    w: np.ndarray,
+    problem: ConvProblem,
+    *,
+    max_slice_bytes: int = REFERENCE_SLICE_BYTES,
+) -> np.ndarray:
+    """float64 forward output ``[N, (Do,) Ho, Wo, K]`` of ``problem`` for the
+    activations ``x [N, (Di,) Hi, Wi, C]`` and the weights
+    ``w [K, (Z,) Y, X, C/groups]``, computed over image slices of at most
+    ``max_slice_bytes`` float64 activation bytes."""
+    geometry = conv_geometry(problem)
+    batches = _image_batches(problem, x.shape[0], max_slice_bytes)
+    return np.concatenate([conv_fwd(x[batch], w, **geometry) for batch in batches])
+
+
+def conv_dgrad_reference(
+    dy: np.ndarray,
+    w: np.ndarray,
+    problem: ConvProblem,
+    *,
+    max_slice_bytes: int = REFERENCE_SLICE_BYTES,
+) -> np.ndarray:
+    """float64 data gradient ``[N, (Di,) Hi, Wi, C]`` of ``problem`` for the
+    output gradient ``dy [N, (Do,) Ho, Wo, K]`` and the weights
+    ``w [K, (Z,) Y, X, C/groups]``, computed over image slices of at most
+    ``max_slice_bytes`` float64 activation bytes."""
+    geometry = conv_geometry(problem)
+    in_spatial = conv_extents(problem).in_spatial
+    batches = _image_batches(problem, dy.shape[0], max_slice_bytes)
+    return np.concatenate(
+        [conv_dgrad(dy[b], w, in_spatial=in_spatial, **geometry) for b in batches]
+    )
+
+
+def conv_wgrad_reference(
+    x: np.ndarray,
+    dy: np.ndarray,
+    problem: ConvProblem,
+    *,
+    max_slice_bytes: int = REFERENCE_SLICE_BYTES,
+) -> np.ndarray:
+    """float64 weight gradient ``[K, (Z,) Y, X, C/groups]`` of ``problem`` for
+    the activations ``x [N, (Di,) Hi, Wi, C]`` and the output gradient
+    ``dy [N, (Do,) Ho, Wo, K]``: the sum of the image slices' gradients, each
+    slice at most ``max_slice_bytes`` float64 activation bytes."""
+    geometry = conv_geometry(problem)
+    filter_spatial = conv_extents(problem).filter_spatial
+    batches = _image_batches(problem, x.shape[0], max_slice_bytes)
+    return sum(
+        conv_wgrad(x[b], dy[b], filter_spatial=filter_spatial, **geometry)
+        for b in batches
+    )
 
 
 @contextlib.contextmanager
