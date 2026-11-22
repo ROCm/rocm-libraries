@@ -429,8 +429,15 @@ class GSUOn(GSU):
         module.add(gsucLabel)
         gsuOffsetStr = "gsuOffset = DepthU*accumulatedNumOfLoopCounterL"
         loopCounterName = writer.loopCounterName(kernel, writer.states.unrollIdx)
-        module.add(SLShiftRightB32(dst=sgpr(loopCounterName), src=sgpr("SizesSum"), shiftHex=log2(depthU), \
-                                    comment="s[%s] = s[sgprSizesSum] / %s"%(loopCounterName, depthU)))
+        if kernel.get("_TailFolding", False) and not kernel["ReuseAcrossPersistent"]:
+            # tail folding: GSU distributes ceil(K / DepthU) k-tiles (the partial one included)
+            module.add(SAddU32(dst=sgpr(loopCounterName), src0=sgpr("SizesSum"), src1=depthU - 1, \
+                               comment="TailFolding: SizesSum + DepthU - 1"))
+            module.add(SLShiftRightB32(dst=sgpr(loopCounterName), src=sgpr(loopCounterName), shiftHex=log2(depthU), \
+                                        comment="TailFolding: s[%s] = ceil(s[sgprSizesSum] / %s)"%(loopCounterName, depthU)))
+        else:
+            module.add(SLShiftRightB32(dst=sgpr(loopCounterName), src=sgpr("SizesSum"), shiftHex=log2(depthU), \
+                                        comment="s[%s] = s[sgprSizesSum] / %s"%(loopCounterName, depthU)))
         tmpSgprInfo = ContinuousRegister(idx=stmp, size=2)
         module.add(writer.calculateLoopNumIterOffsetGsu(kernel, loopCounterName, tmpSgprInfo))
         module.addModuleAsFlatItems(writer.s_mul_u64_u32(sgpr(stmp+0), sgpr(stmp+1), sgpr(stmp+0), depthUDiv, comment=gsuOffsetStr))
