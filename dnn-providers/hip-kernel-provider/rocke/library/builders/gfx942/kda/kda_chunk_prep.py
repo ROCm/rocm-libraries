@@ -5,8 +5,8 @@
 (``kernels/gfx942/kda_chunkwise.py``).
 
 Owns the host path: spec construction, compilation, ABI signature, workspace
-allocation and launch -- plus a torch parity check of all six output tiles and a
-throughput report.
+allocation and launch -- plus a float64 parity check of all six output tiles
+(:func:`rocke.numeric.gated_delta.chunkwise_tiles`) and a throughput report.
 
 The six tiles this kernel emits are exactly the state-independent part of the
 chunkwise KDA body, so it can be validated (and benchmarked) on its own, ahead of
@@ -27,8 +27,11 @@ _RK = os.path.abspath(os.path.join(_HERE, "../../../.."))
 sys.path.insert(0, _RK + "/platform/python")
 sys.path.insert(0, _RK + "/library")
 
-import torch  # noqa: E402
+from rocke.helpers.compile import compile_kernel  # noqa: E402
+from rocke.runtime import KernelLauncher, LaunchConfig, time_launches  # noqa: E402
+from rocke.runtime.device_array import DeviceArray  # noqa: E402
 
+from builders.common.kda_host import ChunkTiles, check_prep, tile_inputs  # noqa: E402
 from kernels.gfx942.kda_chunkwise import (  # noqa: E402
     KdaChunkPrepSpec,
     KdaTileSpec,
@@ -37,8 +40,6 @@ from kernels.gfx942.kda_chunkwise import (  # noqa: E402
     kda_chunk_prep_grid,
     kda_chunk_prep_signature,
 )
-from rocke.helpers.compile import compile_kernel  # noqa: E402
-from rocke.runtime import KernelLauncher, LaunchConfig, time_launches  # noqa: E402
 
 _LAUNCHER_CACHE = {}
 
@@ -63,37 +64,17 @@ def make_launcher(spec: KdaChunkPrepSpec) -> KernelLauncher:
     return _LAUNCHER_CACHE[key]
 
 
-def alloc_tiles(num_tiles: int, spec: KdaChunkPrepSpec, device="cuda"):
-    """The six per-chunk tiles, carved from one pool.
-
-    Six separate allocations show up on the host critical path at short
-    sequences, and the tiles are always produced and consumed together.
-    """
-    C, DK = spec.tile.chunk, spec.head_k
-    shapes = [
-        ("a", (num_tiles, C, C)),
-        ("gk", (num_tiles, C, DK)),
-        ("gq", (num_tiles, C, DK)),
-        ("aqk", (num_tiles, C, C)),
-        ("kt", (num_tiles, DK, C)),
-    ]
-    counts = [s[0] * s[1] * s[2] for _, s in shapes]
-    pool = torch.empty(sum(counts), dtype=torch.bfloat16, device=device)
-    ws, off = {}, 0
-    for (name, shape), cnt in zip(shapes, counts):
-        ws[name] = pool[off : off + cnt].view(*shape)
-        off += cnt
-    ws["dec"] = torch.empty(num_tiles, DK, dtype=torch.float32, device=device)
-    ws["_pool"] = pool
-    return ws
+def alloc_tiles(num_tiles: int, spec: KdaChunkPrepSpec) -> ChunkTiles:
+    """The six per-chunk tiles ``spec``'s prep kernel writes for ``num_tiles``
+    chunks (:class:`builders.common.kda_host.ChunkTiles`)."""
+    return ChunkTiles(num_tiles, spec.tile.chunk, spec.head_k)
 
 
-def run_prep(spec, q, k, g, beta, ws, scale, stream=None):
-    """Launch the prep kernel over ``q/k/g/beta`` already packed by chunk."""
+def run_prep(spec, q, k, g, beta, ws, scale, stream=0):
+    """Launch the prep kernel over device ``q/k/g/beta`` already packed by
+    chunk, on ``stream`` (0: the default stream)."""
     num_tiles = q.shape[0]
     launcher = make_launcher(spec)
-    if stream is None:
-        stream = torch.cuda.current_stream().cuda_stream
     cfg = LaunchConfig(
         grid=kda_chunk_prep_grid(spec, num_tiles),
         block=(spec.tile.block_size, 1, 1),
@@ -118,134 +99,28 @@ def run_prep(spec, q, k, g, beta, ws, scale, stream=None):
 
 
 # ---------------------------------------------------------------------
-# reference + parity
+# parity
 # ---------------------------------------------------------------------
 
 
-def ref_prep_tiles(q, k, g, beta, scale, nt_block=32):
-    """float64 torch oracle for the six tiles. q/k/g: [NT, C, DK], beta: [NT, C].
-
-    ``Akk`` and ``Aqk`` are formed from the pairwise exponent *difference*
-    ``Gcum_i - Gcum_j`` rather than the ratio ``Gamma_i / Gamma_j``, so the
-    oracle never materializes the overflowing intermediate the kernel is
-    designed to avoid -- and it does so by a different route (explicit
-    ``C x C x DK`` outer product, no midpoint factoring), which is what makes it
-    an independent check of the factoring rather than a restatement of it.
-
-    Only the retained triangle is meaningful: for ``i >= j`` the exponent is
-    already ``<= 0``, so clamping it there is exact and keeps the discarded
-    upper triangle from going to inf. Blocked over NT to bound the
-    ``C x C x DK`` temporary.
-    """
-    NT, C, _ = q.shape
-    ar = torch.arange(C, device=q.device)
-    lower = (ar[:, None] > ar[None, :]).unsqueeze(0)
-    lower_eq = (ar[:, None] >= ar[None, :]).unsqueeze(0)
-    zero = torch.zeros((), device=q.device, dtype=torch.float64)
-
-    out = {n: [] for n in ("a", "gk", "gq", "aqk", "kt", "dec")}
-    for s in range(0, NT, nt_block):
-        e = min(s + nt_block, NT)
-        qb, kb = q[s:e].double(), k[s:e].double()
-        gcum = g[s:e].double().cumsum(dim=1)
-        gl = gcum[:, -1:, :]
-        gam = gcum.exp()
-        bb = beta[s:e].double()
-
-        # [n, i, j, d] pairwise exponent, clamped where it is discarded anyway.
-        dif = (gcum[:, :, None, :] - gcum[:, None, :, :]).clamp(max=0.0).exp()
-        akk = (kb[:, :, None, :] * kb[:, None, :, :] * dif).sum(-1)
-        # ``dif`` already carries the whole Gamma_i / Gamma_j ratio, so the
-        # query side enters as bare q * scale -- folding Gamma_i in via ``gq``
-        # here would count the decay twice.
-        aqk = (qb[:, :, None, :] * scale * kb[:, None, :, :] * dif).sum(-1)
-        gq = qb * gam * scale
-
-        tprime = torch.where(lower, bb[:, :, None] * akk, zero)
-        eye = torch.eye(C, device=q.device, dtype=torch.float64).expand_as(tprime)
-        out["a"].append(
-            torch.linalg.solve_triangular(
-                eye + tprime, torch.diag_embed(bb), upper=False
-            )
-        )
-        out["aqk"].append(torch.where(lower_eq, aqk, zero))
-        out["gk"].append(kb * gam)
-        out["gq"].append(gq)
-        out["kt"].append((kb * (gl - gcum).exp()).transpose(1, 2))
-        out["dec"].append(gl.squeeze(1).exp())
-    return {n: torch.cat(v, 0) for n, v in out.items()}
-
-
-def make_inputs(num_tiles, C, DK, gate_low=-0.5, seed=0, device="cuda"):
-    gen = torch.Generator(device=device).manual_seed(seed)
-    kw = dict(device=device, generator=gen)
-    q = torch.nn.functional.normalize(
-        torch.randn(num_tiles, C, DK, dtype=torch.float32, **kw), dim=-1
-    ).to(torch.bfloat16)
-    k = torch.nn.functional.normalize(
-        torch.randn(num_tiles, C, DK, dtype=torch.float32, **kw), dim=-1
-    ).to(torch.bfloat16)
-    # Per-channel log decay in the reference range (gate_lower_bound = -5), which is
-    # what stresses the factored C x C construction.
-    g = gate_low * torch.rand(num_tiles, C, DK, dtype=torch.float32, **kw)
-    beta = torch.rand(num_tiles, C, dtype=torch.float32, **kw)
-    return q, k, g, beta
-
-
 def check(spec, num_tiles, gate_low=-0.5, tol=2e-2, verbose=True):
-    C, DK = spec.tile.chunk, spec.head_k
-    q, k, g, beta = make_inputs(num_tiles, C, DK, gate_low)
-    scale = DK**-0.5
-    ws = alloc_tiles(num_tiles, spec)
-    run_prep(
-        spec,
-        q.reshape(num_tiles, -1),
-        k.reshape(num_tiles, -1),
-        g.reshape(num_tiles, -1),
-        beta,
-        ws,
-        scale,
+    """All six tiles of ``num_tiles`` chunks against the float64 reference
+    (:func:`builders.common.kda_host.check_prep`)."""
+    return check_prep(
+        spec, run_prep, num_tiles, gate_low=gate_low, tol=tol, verbose=verbose
     )
-    torch.cuda.synchronize()
-
-    ref = ref_prep_tiles(q.float(), k.float(), g, beta, scale)
-    pairs = [(n, ws[n].float(), ref[n].float()) for n in ref]
-    # A's diagonal is beta and dominates its magnitude, so scoring the whole
-    # tile against its own absmax would hide the off-diagonal terms -- which are
-    # the part that actually came out of the solve. Score them separately.
-    pairs.append(("a_low", ws["a"].float().tril(-1), ref["a"].float().tril(-1)))
-
-    worst, worst_name = 0.0, ""
-    for name, got, exp in pairs:
-        d = (got - exp).abs()
-        denom = exp.abs().max().clamp_min(1e-30)
-        rel = (d.max() / denom).item()
-        if verbose:
-            print(
-                f"  {name:<5} max_abs={d.max().item():.3e} rel={rel:.3e} "
-                f"ref_absmax={exp.abs().max().item():.3e} "
-                f"finite={torch.isfinite(got).all().item()}"
-            )
-        if rel > worst:
-            worst, worst_name = rel, name
-    ok = worst <= tol
-    print(
-        f"  -> worst rel {worst:.3e} on {worst_name!r}  tol {tol:.1e}  "
-        f"{'PASS' if ok else 'FAIL'}"
-    )
-    return ok
 
 
 def bench(spec, num_tiles, warmup=15, iters=50):
     C, DK = spec.tile.chunk, spec.head_k
-    q, k, g, beta = make_inputs(num_tiles, C, DK)
+    q, k, g, beta = tile_inputs(num_tiles, C, DK)
     ws = alloc_tiles(num_tiles, spec)
     args = (
         spec,
-        q.reshape(num_tiles, -1),
-        k.reshape(num_tiles, -1),
-        g.reshape(num_tiles, -1),
-        beta,
+        DeviceArray(q.reshape(num_tiles, -1), "bf16"),
+        DeviceArray(k.reshape(num_tiles, -1), "bf16"),
+        DeviceArray(g.reshape(num_tiles, -1)),
+        DeviceArray(beta),
         ws,
         DK**-0.5,
     )

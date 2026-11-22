@@ -35,27 +35,48 @@ except ImportError:  # running as a bare script outside the editable install
     _RK = os.path.abspath(os.path.join(_HERE, "../../../.."))
     sys.path[:0] = [_RK + "/library", _RK + "/platform/python"]
 
-import torch  # noqa: E402
+import numpy as np  # noqa: E402
+from rocke.core.dtypes import dtype_info  # noqa: E402
+from rocke.helpers.compile import compile_kernel  # noqa: E402
+from rocke.numeric import storage  # noqa: E402
+from rocke.numeric.gated_delta import (  # noqa: E402
+    gated_delta_recurrence,
+    kda_log_decay,
+    l2_normalize,
+    sigmoid,
+)
+from rocke.runtime import KernelLauncher, LaunchConfig, time_launches  # noqa: E402
+from rocke.runtime.device_array import DeviceArray  # noqa: E402
 
+from builders.common.kda_host import dense_inputs, initial_state, score  # noqa: E402
 from kernels.gfx950.kda_chunkwise import (  # noqa: E402
     KdaChunkPrepSpec,
     KdaChunkScanSpec,
     KdaTileSpec,
     build_kda_chunk_scan,
+    g_elem_dtype,
     is_valid_scan_spec,
     is_valid_spec,
     kda_chunk_scan_grid,
     kda_chunk_scan_signature,
 )
-from rocke.helpers.compile import compile_kernel  # noqa: E402
-from rocke.runtime import KernelLauncher, LaunchConfig, time_launches  # noqa: E402
 
 if __package__:
     from . import kda_chunk_prep as prep_mod  # noqa: E402
-    from .kda_chunk_fused import make_inputs, ref_token_serial  # noqa: E402
+    from .kda_chunk_fused import (  # noqa: E402
+        device_state,
+        read_state,
+        reference,
+        upload_chunked,
+    )
 else:
     import kda_chunk_prep as prep_mod  # noqa: E402
-    from kda_chunk_fused import make_inputs, ref_token_serial  # noqa: E402
+    from kda_chunk_fused import (  # noqa: E402
+        device_state,
+        read_state,
+        reference,
+        upload_chunked,
+    )
 
 _LAUNCHER_CACHE: dict = {}
 TOL = 3e-2
@@ -139,18 +160,17 @@ def run_scan(
     bh,
     nc,
     h0=None,
-    stream=None,
+    stream=0,
     *,
     batch=None,
     heads=None,
     tseq=None,
 ):
-    """Launch the scan over tiles already materialized by the prep kernel."""
+    """Launch the scan over tiles already materialized by the prep kernel, on
+    ``stream`` (0: the default stream)."""
     if h0 is None:
         assert not spec.has_initial_state, "h0=None but the kernel reads h0_ptr"
     launcher = make_launcher(spec)
-    if stream is None:
-        stream = torch.cuda.current_stream().cuda_stream
     cfg = LaunchConfig(
         grid=kda_chunk_scan_grid(spec, bh),
         block=(spec.tile.block_size, 1, 1),
@@ -279,6 +299,22 @@ def run_raw_split(
     return ws
 
 
+def upload_raw(spec, q, k, v, g, beta, a_log, dt_bias):
+    """Host token-major raw inputs as the raw split path's device arrays, each
+    in the element type the kernels read: ``q``/``k``/``v`` in ``spec.dtype``,
+    ``g`` in the raw prep kernel's gate type, the rest fp32."""
+    gate_type = g_elem_dtype(prep_spec_of(spec, raw=True))
+    return (
+        DeviceArray(q, spec.dtype),
+        DeviceArray(k, spec.dtype),
+        DeviceArray(v, spec.dtype),
+        DeviceArray(g, gate_type),
+        DeviceArray(beta, "fp32"),
+        DeviceArray(a_log, "fp32"),
+        DeviceArray(dt_bias, "fp32"),
+    )
+
+
 def launch_raw(
     spec,
     q,
@@ -290,23 +326,24 @@ def launch_raw(
     dt_bias,
     h0=None,
 ):
-    """Token-major [B,T,H,D] in/out with V-first final state."""
+    """Host token-major ``[B,T,H,D]`` raw inputs in, host ``(o [B,T,H,DV]``
+    bf16 bits, V-first final state ``[B,H,DK,DV]`` fp32) out."""
     B, T, H, DK = q.shape
-    DV = v.shape[-1]
-    o = torch.empty_like(v)
-    ht = torch.zeros(B * H, DV, DK, dtype=torch.float32, device=q.device)
-    h0t = None
-    if h0 is not None:
-        h0t = h0.transpose(-1, -2).contiguous().view(B * H, DV, DK)
+    q_d, k_d, v_d, g_d, beta_d, a_log_d, dt_bias_d = upload_raw(
+        spec, q, k, v, g, beta, a_log, dt_bias
+    )
+    o = DeviceArray.zeros(v.shape, spec.dtype)
+    ht = device_state(spec, B, H)
+    h0t = None if h0 is None else device_state(spec, B, H, h0)
     run_raw_split(
         spec,
-        q,
-        k,
-        v,
-        g,
-        beta,
-        a_log,
-        dt_bias,
+        q_d,
+        k_d,
+        v_d,
+        g_d,
+        beta_d,
+        a_log_d,
+        dt_bias_d,
         o,
         ht,
         DK**-0.5,
@@ -315,10 +352,11 @@ def launch_raw(
         T,
         h0=h0t,
     )
-    return o, ht.view(B, H, DV, DK).transpose(-1, -2)
+    return o.values(), read_state(ht, B, H)
 
 
 def ref_aligned_raw(
+    spec,
     q,
     k,
     v,
@@ -330,25 +368,39 @@ def ref_aligned_raw(
     lower_bound=-5.0,
     h0=None,
 ):
-    """Float64 oracle for the aligned raw contract (Aiter preprocessing + KDA)."""
-    import torch.nn.functional as F
+    """Float64 oracle for the aligned raw contract (Aiter preprocessing + KDA)
+    on the host inputs :func:`launch_raw` takes, stored as ``spec``'s kernels
+    read them: ``(o [B,H,T,DV], final state [B,H,DK,DV])``.
 
-    qn = F.normalize(q.float(), dim=-1)
-    kn = F.normalize(k.float(), dim=-1)
+    q/k are L2-normalised and rounded to the I/O type, as the raw prep kernel
+    stores them, then the token-serial recurrence runs on the cooked gate and
+    beta.
+    """
+    io = dtype_info(spec.dtype).name
+    gate_type = dtype_info(g_elem_dtype(prep_spec_of(spec, raw=True))).name
     B, T, H, DK = q.shape
-    db = dt_bias.view(H, DK)
-    al = a_log.view(H)
-    gf = g.float()
-    gate = lower_bound * torch.sigmoid(
-        torch.exp(al)[None, None, :, None] * (gf + db[None, None, :, :])
+    q, k, v = (storage.decode(x, io) for x in (q, k, v))
+    gate = kda_log_decay(
+        storage.decode(g, gate_type),
+        dt_bias.reshape(H, DK),
+        a_log.reshape(H, 1),
+        lower_bound,
     )
-    bb = torch.sigmoid(beta.float())
-    qbh = qn.permute(0, 2, 1, 3).to(torch.bfloat16)
-    kbh = kn.permute(0, 2, 1, 3).to(torch.bfloat16)
-    vbh = v.permute(0, 2, 1, 3)
-    gbh = gate.permute(0, 2, 1, 3)
-    bbh = bb.permute(0, 2, 1)
-    return ref_token_serial(qbh, kbh, vbh, gbh, bbh, scale, h0=h0)
+
+    def head_major(x):
+        return np.swapaxes(x, 1, 2)
+
+    qn = storage.round_to(l2_normalize(q), io)
+    kn = storage.round_to(l2_normalize(k), io)
+    return gated_delta_recurrence(
+        head_major(qn),
+        head_major(kn),
+        head_major(v),
+        head_major(gate),
+        head_major(sigmoid(beta)),
+        scale=scale,
+        initial_state=h0,
+    )
 
 
 # ---------------------------------------------------------------------
@@ -357,62 +409,33 @@ def ref_aligned_raw(
 
 
 def launch_packed(spec, q, k, v, g, beta, h0=None):
-    """Reshape dense [B,H,T,D] inputs into the kernels' chunk-major views."""
+    """Run dense host ``[B,H,T,D]`` inputs through prep + scan; returns host
+    ``(o [B,H,T,DV] bf16 bits, final state [B,H,DK,DV] fp32)``."""
     B, H, T, DK = q.shape
     DV = v.shape[-1]
     C = spec.tile.chunk
     BH, NC = B * H, T // C
     nt = BH * NC
     ws = prep_mod.alloc_tiles(nt, prep_spec_of(spec))
-    o = torch.empty(nt, C * DV, dtype=torch.bfloat16, device=q.device)
-    ht = torch.zeros(BH, DV, DK, dtype=torch.float32, device=q.device)
-    h0t = None if h0 is None else h0.transpose(-1, -2).contiguous().view(BH, DV, DK)
-    run_split(
-        spec,
-        q.view(nt, C * DK),
-        k.view(nt, C * DK),
-        g.view(nt, C * DK),
-        beta.view(nt, C),
-        v.view(nt, C * DV),
-        o,
-        ws,
-        ht,
-        DK**-0.5,
-        BH,
-        NC,
-        h0=h0t,
-    )
-    return o.view(B, H, T, DV), ht.view(B, H, DV, DK).transpose(-1, -2)
+    q_d, k_d, g_d, beta_d, v_d = upload_chunked(spec, q, k, v, g, beta)
+    o = DeviceArray.zeros((nt, C * DV), "bf16")
+    ht = device_state(spec, B, H)
+    h0t = None if h0 is None else device_state(spec, B, H, h0)
+    run_split(spec, q_d, k_d, g_d, beta_d, v_d, o, ws, ht, DK**-0.5, BH, NC, h0=h0t)
+    return o.values().reshape(B, H, T, DV), read_state(ht, B, H)
 
 
 def check(spec, B, H, T, gate_low=-0.5, tol=TOL, with_h0=False, verbose=True):
     DK, DV = spec.head_k, spec.head_v
-    q, k, v, g, beta = make_inputs(B, H, T, DK, DV, gate_low)
-    h0 = None
-    if with_h0:
-        gen = torch.Generator(device="cuda").manual_seed(7)
-        h0 = 0.1 * torch.randn(
-            B, H, DK, DV, dtype=torch.float32, device="cuda", generator=gen
-        )
+    q, k, v, g, beta = dense_inputs(B, H, T, DK, DV, gate_low=gate_low)
+    h0 = initial_state(B, H, DK, DV) if with_h0 else None
     o_got, ht_got = launch_packed(spec, q, k, v, g, beta, h0=h0)
-    torch.cuda.synchronize()
-    o_ref, s_ref = ref_token_serial(q, k, v, g, beta, DK**-0.5, h0=h0)
-
-    worst = 0.0
-    for name, got, ref in (("out", o_got, o_ref), ("final_state", ht_got, s_ref)):
-        d = (got.double() - ref).abs().max().item()
-        den = max(ref.abs().max().item(), 1e-30)
-        rel = d / den
-        worst = max(worst, rel)
-        if verbose:
-            print(
-                f"  {name:12s} max_abs={d:.3e} rel={rel:.3e} "
-                f"ref_absmax={den:.3e} finite={bool(torch.isfinite(got).all())}"
-            )
-    verdict = "PASS" if worst <= tol else "FAIL"
-    if verbose:
-        print(f"  -> worst rel {worst:.3e}  tol {tol:.1e}  {verdict}")
-    return worst
+    o_ref, s_ref = reference(q, k, v, g, beta, DK**-0.5, h0=h0)
+    pairs = (
+        ("out", storage.decode(o_got, "bf16"), o_ref),
+        ("final_state", ht_got, s_ref),
+    )
+    return score(pairs, tol, verbose=verbose)
 
 
 def bench(spec, B, H, T, warmup=10, iters=30, split=True):
@@ -423,15 +446,14 @@ def bench(spec, B, H, T, warmup=10, iters=30, split=True):
     serial chain whose only lever is occupancy.
     """
     DK, DV = spec.head_k, spec.head_v
-    q, k, v, g, beta = make_inputs(B, H, T, DK, DV)
+    q, k, v, g, beta = dense_inputs(B, H, T, DK, DV)
     C = spec.tile.chunk
     BH, NC = B * H, T // C
     nt = BH * NC
     ws = prep_mod.alloc_tiles(nt, prep_spec_of(spec))
-    o = torch.empty(nt, C * DV, dtype=torch.bfloat16, device="cuda")
-    ht = torch.zeros(BH, DV, DK, dtype=torch.float32, device="cuda")
-    qf, kf, gf = (x.view(nt, C * DK) for x in (q, k, g))
-    bf, vf = beta.view(nt, C), v.view(nt, C * DV)
+    qf, kf, gf, bf, vf = upload_chunked(spec, q, k, v, g, beta)
+    o = DeviceArray.zeros((nt, C * DV), "bf16")
+    ht = device_state(spec, B, H)
     scale = DK**-0.5
 
     def do_prep():

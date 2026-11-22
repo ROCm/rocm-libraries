@@ -249,7 +249,6 @@ class TestScanSpec:
         assert "tm" in spec.kernel_name()
 
     def test_raw_prep_preserves_scan_tile_knobs(self):
-        pytest.importorskip("torch")
         from builders.gfx950.kda.kda_chunk_split import prep_spec_of
 
         tile = KdaTileSpec(

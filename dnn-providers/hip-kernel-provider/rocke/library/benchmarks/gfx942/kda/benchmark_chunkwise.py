@@ -24,8 +24,9 @@ So the answer should have the shape "fused wins wherever
 ``batch * heads * v_partitions`` already fills the device, split wins below
 that", with sequence length setting how much work prep can spread.
 
-Torch-free by construction: inputs, packing and the float64 oracle come from
-``builders/gfx942/kda/hostpack.py`` (numpy), kernels are selected through
+Torch-free by construction: packing comes from ``builders/gfx942/kda/hostpack.py``,
+inputs from ``builders/common/kda_host.py`` and the float64 oracle from
+``rocke.numeric.gated_delta`` (numpy), kernels are selected through
 ``dispatch.kda`` so this exercises the registered path rather than a private
 copy of it, and launches go straight at ``rocke.runtime.hip_module`` with
 HIP-event timing. That lets the sweep run on a bare cluster node, and since it
@@ -64,18 +65,9 @@ for _p in (os.path.join(_RK, "platform", "python"), os.path.join(_RK, "library")
         sys.path.insert(0, _p)
 
 import numpy as np  # noqa: E402
-
-from builders.gfx942.kda.hostpack import (  # noqa: E402
-    bf16_bits_to_f32,
-    make_inputs,
-    pack_initial_state,
-    pack_v_partitions,
-    ref_token_serial,
-    unpack_outputs,
-)
-from dispatch.kda import KDA_PARTITION_HEAD_V, KdaRequest, dispatch_kda  # noqa: E402
 from rocke.helpers.compile import compile_kernel  # noqa: E402
-from rocke.runtime.host_buffers import as_u8_buffer, nbytes  # noqa: E402
+from rocke.numeric import storage  # noqa: E402
+from rocke.numeric.gated_delta import gated_delta_recurrence  # noqa: E402
 from rocke.runtime.hip_module import (  # noqa: E402
     HipError,
     Runtime,
@@ -83,7 +75,20 @@ from rocke.runtime.hip_module import (  # noqa: E402
     get_device_name,
     get_device_num_cus,
 )
+from rocke.runtime.host_buffers import as_u8_buffer, nbytes  # noqa: E402
 from rocke.runtime.packing import pack_args  # noqa: E402
+
+from builders.common.kda_host import (  # noqa: E402
+    dense_inputs,
+    initial_state,
+    worst_relative_error,
+)
+from builders.gfx942.kda.hostpack import (  # noqa: E402
+    pack_initial_state,
+    pack_v_partitions,
+    unpack_outputs,
+)
+from dispatch.kda import KDA_PARTITION_HEAD_V, KdaRequest, dispatch_kda  # noqa: E402
 
 ARCH = "gfx942"
 GIB = float(2**30)
@@ -367,7 +372,7 @@ class Problem:
             raise
 
     def _allocate(self, shape: Shape, *, has_initial_state: bool, seed: int) -> None:
-        self._dense = make_inputs(
+        self._dense = dense_inputs(
             shape.batch,
             shape.heads,
             shape.seqlen,
@@ -391,10 +396,8 @@ class Problem:
         self.h0_dense = None
         h0_packed = None
         if has_initial_state:
-            rng = np.random.default_rng(seed + 7)
-            self.h0_dense = np.float32(0.1) * rng.standard_normal(
-                (shape.batch, shape.heads, shape.head_k, shape.head_v),
-                dtype=np.float32,
+            self.h0_dense = initial_state(
+                shape.batch, shape.heads, shape.head_k, shape.head_v, seed=seed + 7
             )
             h0_packed = pack_initial_state(
                 KDA_PARTITION_HEAD_V, self.h0_dense, packed.parts
@@ -454,14 +457,9 @@ class Problem:
         """The float64 token-serial reference, computed once and reused."""
         if self._oracle is None:
             q, k, v, g, beta = self._dense
-            self._oracle = ref_token_serial(
-                bf16_bits_to_f32(q),
-                bf16_bits_to_f32(k),
-                bf16_bits_to_f32(v),
-                g,
-                beta,
-                self.scale,
-                h0=self.h0_dense,
+            q, k, v = (storage.decode(x, "bf16") for x in (q, k, v))
+            self._oracle = gated_delta_recurrence(
+                q, k, v, g, beta, scale=self.scale, initial_state=self.h0_dense
             )
         return self._oracle
 
@@ -489,15 +487,11 @@ class Problem:
             parts=packed.parts,
         )
         o_ref, s_ref = self.oracle()
-        worst = 0.0
-        for got, ref in (
-            (bf16_bits_to_f32(o_bits).astype(np.float64), o_ref),
-            (ht_got.astype(np.float64), s_ref),
-        ):
-            err = float(np.abs(got - ref).max()) if got.size else 0.0
-            den = max(float(np.abs(ref).max()) if ref.size else 0.0, 1e-30)
-            worst = max(worst, err / den)
-        return worst
+        pairs = (
+            ("out", storage.decode(o_bits, "bf16"), o_ref),
+            ("final_state", ht_got, s_ref),
+        )
+        return worst_relative_error(pairs)
 
 
 # ---------------------------------------------------------------------

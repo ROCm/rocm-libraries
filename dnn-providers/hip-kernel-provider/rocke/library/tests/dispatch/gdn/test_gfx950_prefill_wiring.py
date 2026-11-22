@@ -15,7 +15,6 @@ import numpy as np
 import pytest
 
 from dispatch.gdn import (
-    GDN_PREFILL_REGISTRY,
     GdnPrefillRequest,
     dispatch_gdn_prefill,
     gdn_prefill_candidates,
@@ -77,7 +76,6 @@ def test_dispatched_prep_matches_the_builder_prep_spec():
     """
     import dataclasses
 
-    pytest.importorskip("torch", reason="builder module imports torch")
     from builders.gfx950.kda.kda_chunk_split import prep_spec_of
     from dispatch.gdn.prefill_gfx950 import _prep_spec, _scan_spec
 
@@ -280,13 +278,10 @@ def test_split_tile_agrees_with_the_builder_it_mirrors():
     so they compare the copy to the copy: change the builder's geometry and they
     still pass while dispatch ships the stale numbers. This reads both sources.
     """
-    # the builder module imports torch at module scope; skip rather than error
-    # where torch is absent -- this is a source-agreement check, not a kernel run
-    pytest.importorskip("torch", reason="builders.kda_chunk_split imports torch")
 
     from builders.gfx950.kda.kda_chunk_split import aligned_split_specs
-    from kernels.gfx950.kda_chunkwise import KdaTileSpec
     from dispatch.gdn.prefill_gfx950 import _SPLIT_TILE
+    from kernels.gfx950.kda_chunkwise import KdaTileSpec
 
     for vs, listed in sorted(_SPLIT_TILE.items()):
         scan, _ = aligned_split_specs(vs)

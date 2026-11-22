@@ -6,7 +6,7 @@
 The chunkwise stabilization is sized for the reference gate lower bound (-5);
 past that range the steepest-decay head degrades. The degradation is otherwise
 silent, so ``reject_if_decay_out_of_range`` raises on the launch path instead.
-It is pure tensor math, so it runs on a CPU box.
+It is pure host math on numpy arrays, so it runs on a CPU box.
 """
 
 from __future__ import annotations
@@ -14,12 +14,13 @@ from __future__ import annotations
 import math
 import warnings
 
+import numpy as np
 import pytest
-
-torch = pytest.importorskip("torch", reason="torch required (CPU build is fine)")
 
 from builders.gfx950.kda.gdn_prefill import (
     decay_limit_for_chunk,
+    gdn_specs,
+    launch_gdn,
     reject_if_decay_out_of_range,
 )
 
@@ -29,9 +30,9 @@ def _inputs(peak_target: float, hv: int = 4, b: int = 1, t: int = 8):
 
     With a=0 and dt_bias=0, softplus(0)=ln2, so the peak is exp(a_log)*ln2.
     """
-    a = torch.zeros(b, t, hv)
-    dt_bias = torch.zeros(hv)
-    a_log = torch.full((hv,), math.log(peak_target / math.log(2.0)))
+    a = np.zeros((b, t, hv), dtype=np.float32)
+    dt_bias = np.zeros(hv, dtype=np.float32)
+    a_log = np.full(hv, math.log(peak_target / math.log(2.0)), dtype=np.float32)
     return a_log, a, dt_bias
 
 
@@ -59,29 +60,18 @@ def test_accepts_within_the_design_range():
 def test_ragged_seqlen_is_rejected_at_the_launch_boundary():
     """T not a multiple of chunk must raise, not silently drop the tail.
 
-    Before this guard, launch_gdn computed NC = T // C and allocated `o` with
-    torch.empty_like, so the rows the kernel never wrote came back
-    uninitialised: wrong numbers with no fault and no error. Every numeric case
-    uses T=256, which divides 32 exactly, so no existing test could see it.
+    Before this guard, launch_gdn computed NC = T // C and left `o`
+    uninitialised, so the rows the kernel never wrote came back as garbage:
+    wrong numbers with no fault and no error. Every numeric case uses T=256,
+    which divides 32 exactly, so no existing test could see it. The guard runs
+    before anything is uploaded, so no device is needed.
     """
-    import pytest
-    import torch
-
-    from builders.gfx950.kda.gdn_prefill import gdn_specs, launch_gdn
-
     scan, prep = gdn_specs(128, 128, 1, False)
     B, Hv, Hk, T, DK, DV = 1, 4, 4, 250, 128, 128  # 250 % 32 == 26
-    dev = "meta"  # no device needed: the guard runs before any allocation
-    q = torch.empty(B, T, Hk, DK, dtype=torch.bfloat16, device=dev)
-    k = torch.empty(B, T, Hk, DK, dtype=torch.bfloat16, device=dev)
-    v = torch.empty(B, T, Hv, DV, dtype=torch.bfloat16, device=dev)
-    a = torch.empty(B, T, Hv, dtype=torch.float32, device=dev)
-    beta = torch.empty(B, T, Hv, dtype=torch.float32, device=dev)
-    a_log = torch.empty(Hv, dtype=torch.float32, device=dev)
-    dt_bias = torch.empty(Hv, dtype=torch.float32, device=dev)
+    inputs = _raw_inputs(B, Hv, Hk, T, DK, DV)
 
     with pytest.raises(ValueError, match="must be a multiple of chunk"):
-        launch_gdn(scan, prep, q, k, v, a, beta, a_log, dt_bias)
+        launch_gdn(scan, prep, **inputs)
 
 
 def test_head_counts_that_do_not_divide_are_rejected():
@@ -92,12 +82,24 @@ def test_head_counts_that_do_not_divide_are_rejected():
     number. is_valid_spec only checks kv_group >= 1, and every numeric case
     uses (4,4), (8,4) or (32,8), all exact multiples.
     """
-    import pytest
-
     from builders.gfx950.kda.gdn_prefill import check_gdn
 
     with pytest.raises(ValueError, match="must be a multiple of num_k_heads"):
         check_gdn(1, 6, 4, 256, 128, 128)
+
+
+def _raw_inputs(B, Hv, Hk, T, DK, DV):
+    """Zero host inputs of the raw GDN prefill shapes and storage types."""
+    bf16, f32 = np.uint16, np.float32
+    return dict(
+        q=np.zeros((B, T, Hk, DK), dtype=bf16),
+        k=np.zeros((B, T, Hk, DK), dtype=bf16),
+        v=np.zeros((B, T, Hv, DV), dtype=bf16),
+        a=np.zeros((B, T, Hv), dtype=f32),
+        beta=np.zeros((B, T, Hv), dtype=f32),
+        a_log=np.zeros(Hv, dtype=f32),
+        dt_bias=np.zeros(Hv, dtype=f32),
+    )
 
 
 def test_the_limit_is_chunk_aware_not_a_constant():
@@ -110,8 +112,6 @@ def test_the_limit_is_chunk_aware_not_a_constant():
     load-bearing. The bound is still derived per chunk because a fixed one
     would be wrong the moment that changes.
     """
-    import pytest
-
     assert decay_limit_for_chunk(32) == pytest.approx(5.46, abs=0.01)
     assert decay_limit_for_chunk(16) == pytest.approx(10.92, abs=0.01)
 
@@ -131,30 +131,14 @@ def test_mis_shaped_tensor_is_rejected_before_launch():
     and attention do not check this today; GDN decode does, and prefill follows
     decode.
     """
-    import pytest
-    import torch
-
-    from builders.gfx950.kda.gdn_prefill import gdn_specs, launch_gdn
-
     scan, prep = gdn_specs(128, 128, 1, False)
     B, Hv, Hk, T, DK, DV = 1, 4, 4, 256, 128, 128
-    dev = "meta"
-    mk = lambda *sh, dt=torch.bfloat16: torch.empty(*sh, dtype=dt, device=dev)
-    f32 = torch.float32
-    good = dict(
-        q=mk(B, T, Hk, DK),
-        k=mk(B, T, Hk, DK),
-        v=mk(B, T, Hv, DV),
-        a=mk(B, T, Hv, dt=f32),
-        beta=mk(B, T, Hv, dt=f32),
-        a_log=mk(Hv, dt=f32),
-        dt_bias=mk(Hv, dt=f32),
-    )
+    good = _raw_inputs(B, Hv, Hk, T, DK, DV)
 
-    bad_v = dict(good, v=mk(B, T, Hv, DV // 2))  # half the value extent
+    half_v = np.zeros((B, T, Hv, DV // 2), dtype=np.uint16)  # half the value extent
     with pytest.raises(ValueError, match="read past its end"):
-        launch_gdn(scan, prep, **bad_v)
+        launch_gdn(scan, prep, **dict(good, v=half_v))
 
-    bad_dt = dict(good, a=mk(B, T, Hv, dt=torch.float16))  # 16-bit, addresses fine
+    a_f16 = np.zeros((B, T, Hv), dtype=np.float16)  # 16-bit, addresses fine
     with pytest.raises(ValueError, match="reinterpret these bytes"):
-        launch_gdn(scan, prep, **bad_dt)
+        launch_gdn(scan, prep, **dict(good, a=a_f16))
