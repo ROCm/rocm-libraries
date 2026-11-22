@@ -47,7 +47,7 @@ from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 from rocke.numeric import storage
-from rocke.runtime.host_buffers import as_u8_buffer, pin, pinned_empty
+from rocke.runtime.host_buffers import as_u8_buffer, pinned_copy, pinned_empty
 
 from benchmarks.common import conv_fill
 
@@ -396,7 +396,7 @@ class WinogradPipeline:
         items = [(self.xs[i], x[i * nc : (i + 1) * nc]) for i in range(self.chunks)]
         items.append((self.bufs["w"], w))
         for ptr, host in items:
-            staged = pin(host)
+            staged = pinned_copy(host)
             self.rt.memcpy_h2d(ptr, as_u8_buffer(staged), staged.nbytes)
             self.rt.sync()
             del staged

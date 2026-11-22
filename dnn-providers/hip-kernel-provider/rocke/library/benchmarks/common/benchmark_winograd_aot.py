@@ -312,7 +312,7 @@ class Case:
     """Device buffers of one case: x / y (all chunks) and w are shared by the tiles."""
 
     def __init__(self, rt, problem, io: str, seed: int, verify: bool):
-        from rocke.runtime.host_buffers import as_u8_buffer, pin
+        from rocke.runtime.host_buffers import as_u8_buffer, pinned_copy
 
         from benchmarks.common.benchmark_winograd_conv import make_inputs, reference
 
@@ -331,7 +331,7 @@ class Case:
 
         rt.sync()
         for ptr, host in ((self.x, x), (self.w, w)):
-            staged = pin(host)
+            staged = pinned_copy(host)
             rt.memcpy_h2d(ptr, as_u8_buffer(staged), staged.nbytes)
             rt.sync()
             del staged

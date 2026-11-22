@@ -241,7 +241,7 @@ class TestGemmGpu(unittest.TestCase):
     def _check(self, dims, dtype, steps):
         from rocke import compile_kernel
         from rocke.runtime.hip_module import Runtime
-        from rocke.runtime.host_buffers import as_u8_buffer, pin, pinned_empty
+        from rocke.runtime.host_buffers import as_u8_buffer, pinned_copy, pinned_empty
 
         from benchmarks.common import winograd_k3_wmma as K3W
 
@@ -261,8 +261,8 @@ class TestGemmGpu(unittest.TestCase):
             reduce_art = K3W.build_reduce(dtype, GPU_ARCH)
         rng = np.random.default_rng(0)
         # Pinned host buffers: pageable copies near in-flight kernels hang gfx1250.
-        V = pin(storage.encode(rng.uniform(-1, 1, (T, G, Cg)), dtype))
-        U = pin(storage.encode(rng.uniform(-1, 1, (G, Kg, Cg)), dtype))
+        V = pinned_copy(storage.encode(rng.uniform(-1, 1, (T, G, Cg)), dtype))
+        U = pinned_copy(storage.encode(rng.uniform(-1, 1, (G, Kg, Cg)), dtype))
         M = pinned_empty((T, G, Kg), storage.host_dtype(dtype))
         rt = Runtime()
         ws_bytes = plan.workspace_bytes(prob)

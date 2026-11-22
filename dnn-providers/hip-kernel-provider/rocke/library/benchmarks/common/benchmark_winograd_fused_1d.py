@@ -62,7 +62,7 @@ def run_case(problem, variant, cfgs, args, arch, ref_cache):
     from rocke.numeric import storage
     from rocke.runtime import time_launches
     from rocke.runtime.hip_module import Runtime
-    from rocke.runtime.host_buffers import as_u8_buffer, pin, pinned_empty
+    from rocke.runtime.host_buffers import as_u8_buffer, pinned_copy, pinned_empty
     from rocke.runtime.launcher import KernelLauncher, LaunchConfig
 
     from kernels.common import conv_winograd_gen as WG
@@ -105,7 +105,7 @@ def run_case(problem, variant, cfgs, args, arch, ref_cache):
     try:
         rt.sync()
         for key, host in (("x", x), ("w", w)):
-            staged = pin(host)
+            staged = pinned_copy(host)
             rt.memcpy_h2d(bufs[key], as_u8_buffer(staged), staged.nbytes)
             rt.sync()
         k1 = KernelLauncher(

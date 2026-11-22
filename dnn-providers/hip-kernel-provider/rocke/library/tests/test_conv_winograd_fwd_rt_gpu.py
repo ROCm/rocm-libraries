@@ -47,7 +47,7 @@ def _run(req, spec):
     """Run ``spec`` (an AOT Winograd plan selected for ``req``); ``err``."""
     from rocke.numeric import storage
     from rocke.runtime.hip_module import Runtime
-    from rocke.runtime.host_buffers import as_u8_buffer, pin, pinned_empty
+    from rocke.runtime.host_buffers import as_u8_buffer, pinned_copy, pinned_empty
     from rocke.runtime.launcher import KernelLauncher, LaunchConfig
 
     from benchmarks.common.benchmark_winograd_conv import (
@@ -78,7 +78,7 @@ def _run(req, spec):
     try:
         rt.sync()
         for key, host in (("x", x), ("w", w)):
-            staged = pin(host)
+            staged = pinned_copy(host)
             rt.memcpy_h2d(ptrs[key], as_u8_buffer(staged), staged.nbytes)
             rt.sync()
             del staged

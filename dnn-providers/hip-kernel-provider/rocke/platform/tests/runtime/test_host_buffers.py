@@ -15,7 +15,7 @@ import weakref
 import numpy as np
 import pytest
 from rocke.numeric.storage import encode
-from rocke.runtime.host_buffers import as_u8_buffer, pin, pinned_empty
+from rocke.runtime.host_buffers import as_u8_buffer, pinned_copy, pinned_empty
 from rocke.tests.gpu import current_device_arch
 
 
@@ -37,7 +37,7 @@ def test_gpu_pinned_arrays_round_trip_through_the_device():
     from rocke.runtime.launcher import DeviceMem
 
     values = encode(np.linspace(-1.0, 1.0, 24).reshape(2, 3, 4), "bf16")
-    source = pin(values)
+    source = pinned_copy(values)
     assert source.dtype == values.dtype and source.shape == values.shape
     assert source.flags["C_CONTIGUOUS"] and source.flags["WRITEABLE"]
     device = DeviceMem(source.nbytes)
@@ -55,7 +55,7 @@ def test_gpu_pinned_empty_takes_an_empty_shape():
 
 def test_gpu_the_allocation_lives_until_the_last_view_is_gone():
     current_device_arch()
-    array = pin(np.arange(8, dtype=np.float32))
+    array = pinned_copy(np.arange(8, dtype=np.float32))
     allocation = weakref.ref(_allocation(array))
     view = array[2:4]
     del array

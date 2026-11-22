@@ -225,6 +225,9 @@ _hipStreamWaitValue32 = _b(
 _hipDeviceSynchronize = _b("hipDeviceSynchronize")
 _hipStreamSynchronize = _b("hipStreamSynchronize", ctypes.c_void_p)
 _hipStreamCreate = _b("hipStreamCreate", ctypes.POINTER(ctypes.c_void_p))
+_hipStreamCreateWithFlags = _b(
+    "hipStreamCreateWithFlags", ctypes.POINTER(ctypes.c_void_p), ctypes.c_uint
+)
 _hipStreamDestroy = _b("hipStreamDestroy", ctypes.c_void_p)
 _hipStreamWaitEvent = _b(
     "hipStreamWaitEvent", ctypes.c_void_p, _HipEventHandle, ctypes.c_uint
@@ -252,6 +255,8 @@ HIP_ERROR_NOT_FOUND = 500
 HIP_ERROR_NOT_READY = 600
 # hipStreamCaptureStatus: the stream is not being captured.
 HIP_STREAM_CAPTURE_STATUS_NONE = 0
+# hipStreamCreateWithFlags: no implicit ordering against the null stream.
+HIP_STREAM_NON_BLOCKING = 1
 
 
 def _check(s: int, where: str) -> None:
@@ -837,14 +842,14 @@ class Runtime:
 
     def host_alloc(self, nbytes: int) -> int:
         """``nbytes`` of page-locked host memory (``hipHostMalloc``, default
-        flags): the copies to and from it are DMA transfers, never staged
-        through a driver bounce buffer. Release it with :meth:`host_free`;
+        flags). Release it with :meth:`host_free`;
         :func:`rocke.runtime.host_buffers.pinned_empty` wraps both."""
-        p = ctypes.c_void_p(0)
-        _check(_hipHostMalloc(ctypes.byref(p), nbytes, 0), f"hipHostMalloc({nbytes})")
-        return int(p.value)
+        ptr = ctypes.c_void_p(0)
+        _check(_hipHostMalloc(ctypes.byref(ptr), nbytes, 0), f"hipHostMalloc({nbytes})")
+        return int(ptr.value)
 
     def host_free(self, ptr: int) -> None:
+        """Release a :meth:`host_alloc` block (``hipHostFree``)."""
         _check(_hipHostFree(ctypes.c_void_p(ptr)), "hipHostFree")
 
     def memcpy_h2d(self, dst: int, src_buf: ctypes.Array, nbytes: int) -> None:
@@ -907,9 +912,14 @@ class Runtime:
         if not bucket:
             self._pending_args.pop(s, None)
 
-    def create_stream(self) -> int:
-        """A new HIP stream (``hipStreamCreate``), as the int handle every
-        launch and wait takes. Destroy it with :meth:`destroy_stream`.
+    def create_stream(self, *, non_blocking: bool = False) -> int:
+        """A new HIP stream, as the int handle every launch and wait takes.
+        Destroy it with :meth:`destroy_stream`.
+
+        By default (``hipStreamCreate``) its work is ordered against the null
+        stream (stream 0) both ways. With ``non_blocking`` it is not
+        (``hipStreamNonBlocking``): it runs alongside stream 0, and only
+        explicit waits (:meth:`stream_wait_event`) order the two.
 
         A launch on it is not mapped to torch's current stream, as one on
         stream 0 is (``torch_interop.resolve_stream``), so a caller that does
@@ -917,7 +927,15 @@ class Runtime:
         """
         _ensure_hip_init()
         handle = ctypes.c_void_p(0)
-        _check(_hipStreamCreate(ctypes.byref(handle)), "hipStreamCreate")
+        if non_blocking:
+            _check(
+                _hipStreamCreateWithFlags(
+                    ctypes.byref(handle), HIP_STREAM_NON_BLOCKING
+                ),
+                "hipStreamCreateWithFlags",
+            )
+        else:
+            _check(_hipStreamCreate(ctypes.byref(handle)), "hipStreamCreate")
         return int(handle.value)
 
     def destroy_stream(self, stream: int) -> None:
@@ -935,8 +953,7 @@ class Runtime:
     def stream_wait_event(self, stream: int, event: Event) -> None:
         """Make work queued on ``stream`` after this call wait until ``event``
         (recorded on any stream) completes (``hipStreamWaitEvent``). The host
-        does not block: this is the device-side fork / join between streams,
-        and it is recorded into a HIP graph when ``stream`` is capturing."""
+        does not block: this is the device-side fork / join between streams."""
         _check(
             _hipStreamWaitEvent(ctypes.c_void_p(int(stream)), event.handle, 0),
             "hipStreamWaitEvent",

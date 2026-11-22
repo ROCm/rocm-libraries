@@ -9,12 +9,13 @@ array into the raw byte view that :meth:`Runtime.memcpy_h2d` /
 buffer :class:`rocke.runtime.launcher.DeviceMem` owns the allocation and the
 transfer itself lives on :class:`rocke.runtime.hip_module.Runtime`. Together
 they let a harness allocate, upload, launch, and read back without pulling
-torch into the process (they import only ``ctypes`` + ``numpy`` on demand).
+torch into the process (the byte helpers import only ``ctypes`` + ``numpy``
+on demand).
 
-:func:`pinned_empty` / :func:`pin` give a host array in page-locked memory
-(:meth:`Runtime.host_alloc`), for a harness whose copies must be DMA
-transfers rather than pageable ones; the memory is released when the array
-and every view of it are gone.
+:func:`pinned_empty` / :func:`pinned_copy` give a host array in page-locked
+memory (:meth:`Runtime.host_alloc`, so they load the HIP runtime), for a
+harness whose host copies must not be pageable; the memory is released when
+the array and every view of it are gone.
 
 ``as_u8_buffer`` returns a ``ctypes`` *view* over the array's storage via
 ``from_buffer``; the array must therefore be C-contiguous and must outlive the
@@ -40,7 +41,7 @@ if TYPE_CHECKING:
     import numpy as np
     import numpy.typing as npt
 
-__all__ = ["as_u8_buffer", "nbytes", "pin", "pinned_empty", "require_numpy"]
+__all__ = ["as_u8_buffer", "nbytes", "pinned_copy", "pinned_empty", "require_numpy"]
 
 
 def require_numpy():
@@ -87,7 +88,7 @@ def pinned_empty(shape: Sequence[int], dtype: npt.DTypeLike) -> np.ndarray:
     return np.frombuffer(block, dtype=array_dtype, count=count).reshape(extents)
 
 
-def pin(array: npt.ArrayLike) -> np.ndarray:
+def pinned_copy(array: npt.ArrayLike) -> np.ndarray:
     """A copy of ``array`` in page-locked host memory (:func:`pinned_empty`)."""
     np = require_numpy()
     source = np.asarray(array)
