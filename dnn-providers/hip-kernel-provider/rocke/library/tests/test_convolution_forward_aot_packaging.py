@@ -15,9 +15,9 @@ features the packaged launch does not model are refused with their reason.
 
 from __future__ import annotations
 
+import functools
 import itertools
 import json
-import os
 import random
 from collections import OrderedDict
 from dataclasses import replace
@@ -56,7 +56,12 @@ from kernels.common.conv_direct_nongrouped import _OOB_BASE
 from rocke.core.arch import ArchTarget
 from rocke.core.lower_llvm import LLVM_FLAVORS, _lower_kernel_to_llvm_python
 
+from ._worker_process import available_cpus
+
 _SEED = 2026
+#: The packaged dtypes. Tests over the whole sweep take one as a parameter, so each
+#: dtype's tests share a CI shard and the sweep is enumerated once per dtype.
+_DTYPES = ("fp16", "bf16")
 _SAMPLE_PER_K_LOOP = 3
 
 
@@ -169,29 +174,53 @@ def _knob_class(identity: KernelIdentity) -> tuple:
 
 
 @pytest.fixture(scope="module")
-def knob_class_jobs():
-    """One valid job of every knob class of the AOT sweep's gfx950 forward grid, per
-    dtype, drawn by a seeded shuffle: every pipeline, epilogue, K loop (with each
-    async chunk pair) and load/store width combination the shipped catalog holds."""
+def forward_sweep():
+    """The AOT sweep's valid gfx950 forward jobs the packaged launch models, of one
+    dtype, in rocKE's order: the sweep without its group-merged kernels.
+
+    A function of the dtype, enumerated on first use: a CI shard that runs only one
+    dtype's tests enumerates only that dtype. The pool takes the CPUs this process
+    may use, not the host's count."""
     target = ArchTarget.from_gfx("gfx950")
-    rng = random.Random(_SEED + 2)
-    sample = []
-    for dtype in ("fp16", "bf16"):
+    workers = min(available_cpus(), 32)
+
+    @functools.cache
+    def jobs_of(dtype: str) -> tuple:
+        return tuple(
+            job
+            for job in kernel_sweep.enumerate_jobs(
+                arch="gfx950",
+                dtype=dtype,
+                target=target,
+                directions=("fwd",),
+                jobs=workers,
+            )
+            if _unmerged(job.identity)
+        )
+
+    return jobs_of
+
+
+@pytest.fixture(scope="module")
+def knob_class_jobs(forward_sweep):
+    """One valid job of every knob class of the AOT sweep's gfx950 forward grid, of
+    one dtype, drawn by a seeded shuffle: every pipeline, epilogue, K loop (with each
+    async chunk pair) and load/store width combination the shipped catalog holds."""
+
+    @functools.cache
+    def sample_of(dtype: str) -> list:
+        rng = random.Random(_SEED + 2)
         by_class: dict = {}
-        for job in kernel_sweep._direction_jobs(
-            "fwd", "gfx950", dtype, target, (2,), 64
-        ):
-            if _unmerged(job.identity) and kernel_sweep._spec_is_valid(
-                job, "gfx950", dtype
-            ):
-                by_class.setdefault(_knob_class(job.identity), []).append(job)
-        for key in sorted(by_class, key=repr):
-            sample.append((dtype, rng.choice(by_class[key])))
-    return sample
+        for job in forward_sweep(dtype):
+            by_class.setdefault(_knob_class(job.identity), []).append(job)
+        return [rng.choice(by_class[key]) for key in sorted(by_class, key=repr)]
+
+    return sample_of
 
 
-def test_the_knob_class_sample_covers_every_knob_value(knob_class_jobs):
-    classes = {_knob_class(job.identity) for _, job in knob_class_jobs}
+@pytest.mark.parametrize("dtype", _DTYPES)
+def test_the_knob_class_sample_covers_every_knob_value(knob_class_jobs, dtype):
+    classes = {_knob_class(job.identity) for job in knob_class_jobs(dtype)}
     assert {c[0] for c in classes} == {"mem", "compv3", "compv4"}
     assert {c[1] for c in classes} == {"default", "cshuffle"}
     assert {c[2] for c in classes} == {"plain", "unroll", "async_dma"}
@@ -201,10 +230,11 @@ def test_the_knob_class_sample_covers_every_knob_value(knob_class_jobs):
     assert len({c[6:] for c in classes if c[2] == "async_dma"}) > 1
 
 
-def test_every_knob_class_is_packageable_with_the_sweeps_ir(knob_class_jobs):
+@pytest.mark.parametrize("dtype", _DTYPES)
+def test_every_knob_class_is_packageable_with_the_sweeps_ir(knob_class_jobs, dtype):
     """The packaged kernel is the sweep's, byte for byte up to its symbol, for one
     instance of every knob class in each dtype."""
-    for dtype, job in knob_class_jobs:
+    for job in knob_class_jobs(dtype):
         spec = _spec(job.identity)
         assert supports_gfx950_conv_fwd_aot(spec) == (True, "ok"), job.identity.label()
         ours = build_gfx950_conv_fwd_aot(spec)
@@ -548,79 +578,57 @@ _SELECTION_GRID = (
 )
 
 
-@pytest.fixture(scope="module")
-def full_sweep():
-    """Every valid gfx950 forward identity of the AOT sweep the packaged launch models,
-    per dtype, in rocKE's order: the sweep without its group-merged kernels."""
-    target = ArchTarget.from_gfx("gfx950")
-    jobs = max(1, min(os.cpu_count() or 1, 32))
-    return {
-        dtype: [
-            job.identity
-            for job in kernel_sweep.enumerate_jobs(
-                arch="gfx950",
-                dtype=dtype,
-                target=target,
-                directions=("fwd",),
-                jobs=jobs,
-            )
-            if _unmerged(job.identity)
-        ]
-        for dtype in ("fp16", "bf16")
-    }
-
-
-def test_runtime_candidates_are_rockes_runtime_selection(full_sweep):
+@pytest.mark.parametrize("dtype", _DTYPES)
+def test_runtime_candidates_are_rockes_runtime_selection(forward_sweep, dtype):
     """Over the whole packaged sweep, the instances selected for a problem are exactly
     the ones rocKE's --run-from-cache benchmark runs by default from a cache holding
     them: KernelCache.compatible, then _widest_vector_sizes. Both functions are rocKE's
     own, called on the identities."""
     from benchmarks.common.benchmark_implicit_gemm_conv import _widest_vector_sizes
 
+    identities = [job.identity for job in forward_sweep(dtype)]
+    cache = KernelCache.__new__(KernelCache)
+    # compatible() needs the in-memory state __init__ sets up; _entries is the
+    # only thing it reads through, so no disk-backed state is needed here.
+    cache._groups = {}
+    cache._compatible = OrderedDict()
+    cache._compatible_rows = 0
+    cache._entries = lambda direction: [(i, None, {}) for i in identities]
+    specs = [_spec(identity) for identity in identities]
     narrowed = kept_default = 0
-    for dtype, identities in full_sweep.items():
-        cache = KernelCache.__new__(KernelCache)
-        # compatible() needs the in-memory state __init__ sets up; _entries is the
-        # only thing it reads through, so no disk-backed state is needed here.
-        cache._groups = {}
-        cache._compatible = OrderedDict()
-        cache._compatible_rows = 0
-        cache._entries = lambda direction, ids=identities: [(i, None, {}) for i in ids]
-        specs = [_spec(identity) for identity in identities]
-        for values in _SELECTION_GRID:
-            n, c, k, hi, wi, y, x, sh, sw, ph, pw, dh, dw, groups = values
-            problem = Gfx950ConvFwdSpec(
-                N=n, C=c, K=k, Hi=hi, Wi=wi, Y=y, X=x, sH=sh, sW=sw, pH=ph, pW=pw,
-                dH=dh, dW=dw, groups=groups, dtype=dtype,
-            )  # fmt: skip
-            compatible = [
-                entry
-                for entry in cache.compatible(problem.to_problem(), direction="fwd")
-                if entry[0].dtype_a == dtype
-            ]
-            theirs = {
-                ident.stable_hash() for ident, *_ in _widest_vector_sizes(compatible)
-            }
-            ours = gfx950_conv_fwd_aot_runtime_candidates(problem, specs)
-            assert [s.instance_id for s in ours] == [
-                s.instance_id for s in specs if s.instance_id in theirs
-            ], (dtype, values)
-            assert len(ours) == len(theirs), (dtype, values)
-            narrowed += len(ours) < len(compatible)
-            kept_default += any(s.epilogue == "default" for s in ours)
-    # The policy narrows wherever some width is wider than 1, and keeps the scalar-store
-    # epilogue where nothing stores wider.
-    assert narrowed > len(_SELECTION_GRID) and kept_default > 0
+    for values in _SELECTION_GRID:
+        n, c, k, hi, wi, y, x, sh, sw, ph, pw, dh, dw, groups = values
+        problem = Gfx950ConvFwdSpec(
+            N=n, C=c, K=k, Hi=hi, Wi=wi, Y=y, X=x, sH=sh, sW=sw, pH=ph, pW=pw,
+            dH=dh, dW=dw, groups=groups, dtype=dtype,
+        )  # fmt: skip
+        compatible = [
+            entry
+            for entry in cache.compatible(problem.to_problem(), direction="fwd")
+            if entry[0].dtype_a == dtype
+        ]
+        theirs = {ident.stable_hash() for ident, *_ in _widest_vector_sizes(compatible)}
+        ours = gfx950_conv_fwd_aot_runtime_candidates(problem, specs)
+        assert [s.instance_id for s in ours] == [
+            s.instance_id for s in specs if s.instance_id in theirs
+        ], values
+        assert len(ours) == len(theirs), values
+        narrowed += len(ours) < len(compatible)
+        kept_default += any(s.epilogue == "default" for s in ours)
+    # The policy narrows wherever some width is wider than 1, which is most of the
+    # grid, and keeps the scalar-store epilogue where nothing stores wider.
+    assert narrowed > len(_SELECTION_GRID) // 2 and kept_default > 0
 
 
-def test_runtime_candidates_fall_back_to_every_serving_instance(full_sweep):
+@pytest.mark.parametrize("dtype", ["fp16"])
+def test_runtime_candidates_fall_back_to_every_serving_instance(forward_sweep, dtype):
     """A catalog that does not build the problem's widest combination runs every
     instance that serves the problem, not a narrower combination of its choosing."""
-    specs = [_spec(identity) for identity in full_sweep["fp16"]]
+    specs = [_spec(job.identity) for job in forward_sweep(dtype)]
     # C/groups 16 admits loads of 8 and K/groups 6 stores of 2.
     problem = Gfx950ConvFwdSpec(
         N=2, C=16, K=6, Hi=14, Wi=14, Y=3, X=3, sH=1, sW=1, pH=1, pW=1,
-        dH=1, dW=1, groups=1, dtype="fp16",
+        dH=1, dW=1, groups=1, dtype=dtype,
     )  # fmt: skip
     widest = gfx950_conv_fwd_aot_runtime_candidates(problem, specs)
     assert widest
@@ -793,10 +801,15 @@ def test_every_direct_sweep_identity_is_packageable_on_the_sweeps_probe(direct_j
     }
 
 
-def test_packaged_direct_ir_is_the_sweep_kernel_up_to_its_symbol(direct_jobs):
+@pytest.mark.parametrize("algorithm", sorted(_DIRECT_COUNTS))
+def test_packaged_direct_ir_is_the_sweep_kernel_up_to_its_symbol(
+    direct_jobs, algorithm
+):
     sample = _sampled(direct_jobs)
     assert {job.identity.algorithm for _, job in sample} == set(_DIRECT_COUNTS)
     for dtype, job in sample:
+        if job.identity.algorithm != algorithm:
+            continue
         spec = _direct_spec(job.identity)
         ours = build_gfx950_conv_fwd_aot(spec)
         theirs, _ = direct_kernel_sweep.direct_kernel_for_job(job, "gfx950", dtype)
