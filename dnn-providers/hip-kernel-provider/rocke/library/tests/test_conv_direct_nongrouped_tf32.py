@@ -33,6 +33,7 @@ from pathlib import Path
 import numpy as np
 from rocke.core.lower_llvm import lower_kernel_to_llvm
 from rocke.numeric import storage
+from rocke.numeric.compare import peak_relative_error
 from rocke.runtime.hip_module import get_device_arch
 from rocke.tests.llc import find_llvm_tool
 
@@ -530,25 +531,25 @@ def run_f32_spec(arch: str, spec, artifact=None):
         )
 
     rng = np.random.default_rng(0)
-    a = storage.encode(rng.uniform(-1.0, 1.0, (p.N, p.H, p.W, p.cpg)), "fp32")
-    b = storage.encode(rng.uniform(-1.0, 1.0, (p.kpg, p.KH, p.KW, p.cpg)), "fp32")
+    x = storage.encode(rng.uniform(-1.0, 1.0, (p.N, p.H, p.W, p.cpg)), "fp32")
+    w = storage.encode(rng.uniform(-1.0, 1.0, (p.kpg, p.KH, p.KW, p.cpg)), "fp32")
     ref = direct_fwd_reference(
         p,
-        tf32_reference_inputs(a, arch, p.dtype),
-        tf32_reference_inputs(b, arch, p.dtype),
+        tf32_reference_inputs(x, arch, p.dtype),
+        tf32_reference_inputs(w, arch, p.dtype),
     )
     # NaN fill: an output the kernel never writes cannot pass as zero.
     out = launch_direct_conv(
         artifact,
         p,
-        (a, b),
+        (x, w),
         poisoned((p.N, p.Ho, p.Wo, p.kpg), "fp32", 0xFF),
         grid=spec.grid(),
         block=(spec.threads_per_block, 1, 1),
     )
     if not np.isfinite(out).all():
         return False, float("inf")
-    rel = float(np.abs(out - ref).max() / max(np.abs(ref).max(), 1.0))
+    rel = peak_relative_error(out, ref, floor=1.0)
     return rel < _tolerance(p.dtype, arch), rel
 
 

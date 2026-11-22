@@ -38,11 +38,15 @@ import os
 import struct
 import sys
 from dataclasses import dataclass
-from typing import List
+from typing import TYPE_CHECKING, List
 
 import numpy as np
 from rocke.numeric import storage
+from rocke.numeric.compare import peak_relative_error
 from rocke.runtime.host_buffers import as_u8_buffer
+
+if TYPE_CHECKING:
+    from rocke.runtime.hip_module import Runtime
 
 os.environ.setdefault("ROCKE_CPP_QUIET_FALLBACK", "1")
 
@@ -63,6 +67,7 @@ from builders.common.conv_reference import (
     conv_fwd_reference,
     conv_wgrad_reference,
 )
+from kernels.common.conv_abi import conv_direct_output_dtype
 from kernels.common.conv_args import ConvGeometry
 
 # ---------------------------------------------------------------------------
@@ -145,13 +150,15 @@ class DepthwiseResult:
 # ---------------------------------------------------------------------------
 
 
-def _uniform(rng: np.random.Generator, shape: tuple, dtype: str) -> np.ndarray:
+def _uniform(
+    rng: np.random.Generator, shape: tuple[int, ...], dtype: str
+) -> np.ndarray:
     """U(-1, 1) draws of ``shape`` stored in the direct problem dtype ``dtype``'s
     storage (fp32 for tf32)."""
     return storage.encode(rng.uniform(-1.0, 1.0, shape), direct_storage_dtype(dtype))
 
 
-def _host_like(shape: tuple, dtype: str) -> np.ndarray:
+def _host_like(shape: tuple[int, ...], dtype: str) -> np.ndarray:
     """A zeroed host array of ``shape`` in ``dtype``'s storage (fp32 for tf32,
     or for ``"fp32"`` itself: wgrad's dW)."""
     return np.zeros(shape, storage.host_dtype(direct_storage_dtype(dtype)))
@@ -162,16 +169,11 @@ def _values(stored: np.ndarray, dtype: str) -> np.ndarray:
     return storage.decode(stored, direct_storage_dtype(dtype))
 
 
-def _read_back(rt, host_like: np.ndarray, dev: int, dtype: str) -> np.ndarray:
+def _read_back(rt: Runtime, host_like: np.ndarray, dev: int, dtype: str) -> np.ndarray:
     """The values of device buffer ``dev``, laid out like ``host_like``."""
     out = np.empty_like(host_like)
     rt.memcpy_d2h(as_u8_buffer(out), dev, out.nbytes)
     return _values(out, dtype)
-
-
-def _peak_rel_err(out: np.ndarray, ref: np.ndarray, floor: float) -> float:
-    """max|out - ref| over max|ref| floored at ``floor``."""
-    return float(np.abs(out - ref).max() / max(np.abs(ref).max(), floor))
 
 
 def _abi_dtype(dtype: str) -> str:
@@ -474,7 +476,7 @@ def _verify_kernel(
     launcher(values, config=LaunchConfig(grid=grid, block=block, fence=True))
 
     out = _read_back(rt, out_like, out_dev, out_dtype)
-    rel_err = _peak_rel_err(out, ref_out, ref_floor)
+    rel_err = peak_relative_error(out, ref_out, floor=ref_floor)
     status = "PASS" if rel_err < tol else f"FAIL(rel_err={rel_err:.2e})"
     print(f"  verify {kernel_name}: {status}", flush=True)
 
@@ -1409,7 +1411,8 @@ def _run_wgrad_sweep(
     rng = np.random.default_rng(42)
     X_host = _uniform(rng, (p.N, p.H, p.W, p.total_c), dtype)
     dY_host = _uniform(rng, (p.N, p.Ho, p.Wo, p.total_k), dtype)
-    dW_host = _host_like((p.total_k, p.KH, p.KW, p.cpg), "fp32")
+    dW_dtype = conv_direct_output_dtype(dtype, "wgrad")
+    dW_host = _host_like((p.total_k, p.KH, p.KW, p.cpg), dW_dtype)
 
     bytes_xfer = float(X_host.nbytes + dY_host.nbytes + dW_host.nbytes)
     flop = float(p.flops)
@@ -1546,8 +1549,8 @@ def _run_wgrad_sweep(
             launcher(
                 values, config=LaunchConfig(grid=grid, block=block_dim, fence=True)
             )
-            dW_out = _read_back(rt, dW_host, dW_dev, "fp32")
-            rel_err = _peak_rel_err(dW_out, ref_out_wg, 1.0)
+            dW_out = _read_back(rt, dW_host, dW_dev, dW_dtype)
+            rel_err = peak_relative_error(dW_out, ref_out_wg, floor=1.0)
             tol = direct_verify_tol(dtype, arch)
             kernel_passed = rel_err < tol
             status = "PASS" if kernel_passed else f"FAIL(rel_err={rel_err:.2e})"
@@ -2123,7 +2126,7 @@ def _run_dgrad_sweep(
                 synchronize_and_release(0)
                 dX_out = _read_back(rt, dX_host, dX_dev, dtype)
                 if ref_out is not None:
-                    rel_err = _peak_rel_err(dX_out, ref_out, 1.0)
+                    rel_err = peak_relative_error(dX_out, ref_out, floor=1.0)
                     tol = direct_verify_tol(dtype, arch)
                     kernel_passed = rel_err < tol
                     status = "PASS" if kernel_passed else f"FAIL(rel_err={rel_err:.2e})"
@@ -2392,7 +2395,7 @@ def _measure_plans(
         run()
         synchronize_and_release(0)
         out = _read_back(rt, out_like, ptrs[out_name], out_dtype)
-        rel_err = _peak_rel_err(out, ref_out, ref_floor)
+        rel_err = peak_relative_error(out, ref_out, floor=ref_floor)
         passed = rel_err < tol
         if not passed:
             rc = 1
@@ -2770,7 +2773,8 @@ def _run_from_cache(args, arch: str, cases: list, cache, directions) -> int:
                 X_host = _uniform(rng, x_shape, dtype)
                 dY_host = _uniform(rng, y_shape, dtype)
                 inputs = {"dy": dY_host, "x": X_host}
-                out_name, out_dtype = "dw", "fp32"
+                out_name = "dw"
+                out_dtype = conv_direct_output_dtype(dtype, direction)
                 out_like = _host_like(w_shape, out_dtype)
             else:
                 out_dtype = dtype

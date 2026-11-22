@@ -40,6 +40,7 @@ from pathlib import Path
 import numpy as np
 from rocke.core.lower_llvm import lower_kernel_to_llvm
 from rocke.numeric import storage
+from rocke.numeric.compare import peak_relative_error
 from rocke.tests.llc import find_llvm_tool
 
 from builders.common.conv_reference import tf32_reference_inputs, tf32_reference_tol
@@ -706,10 +707,6 @@ def _launch_transform(art, sig, values, spec):
     )
 
 
-def _rel_err(out, ref) -> float:
-    return float(np.abs(out - ref).max() / max(np.abs(ref).max(), 1.0))
-
-
 def _run_fwd(spec, build, arch: str) -> float:
     from rocke import compile_kernel
     from rocke.runtime.device_array import DeviceArray
@@ -717,21 +714,21 @@ def _run_fwd(spec, build, arch: str) -> float:
     p = spec.problem
     art = compile_kernel(build(spec, arch=arch), arch=arch)
     rng = np.random.default_rng(0)
-    a = storage.encode(rng.uniform(-1.0, 1.0, (p.N, p.H, p.W, p.total_c)), "fp32")
-    b = storage.encode(rng.uniform(-1.0, 1.0, (p.total_k, p.KH, p.KW, p.cpg)), "fp32")
+    x = storage.encode(rng.uniform(-1.0, 1.0, (p.N, p.H, p.W, p.total_c)), "fp32")
+    w = storage.encode(rng.uniform(-1.0, 1.0, (p.total_k, p.KH, p.KW, p.cpg)), "fp32")
     ref = direct_fwd_reference(
         p,
-        tf32_reference_inputs(a, arch, p.dtype),
-        tf32_reference_inputs(b, arch, p.dtype),
+        tf32_reference_inputs(x, arch, p.dtype),
+        tf32_reference_inputs(w, arch, p.dtype),
     )
     # 0x7F bytes: an unwritten output shows up huge.
     y = DeviceArray(poisoned((p.N, p.Ho, p.Wo, p.total_k), "fp32"))
     grid, block = _launch_geometry(spec)
     # fp32 and tf32 share the fp32 storage ABI.
     launch_direct_kernel(
-        art, p, (DeviceArray(a), DeviceArray(b), y), grid=grid, block=block
+        art, p, (DeviceArray(x), DeviceArray(w), y), grid=grid, block=block
     )
-    return _rel_err(y.read(), ref)
+    return peak_relative_error(y.read(), ref, floor=1.0)
 
 
 def _run_dgrad(problem, fprop, arch: str) -> float:
@@ -739,22 +736,12 @@ def _run_dgrad(problem, fprop, arch: str) -> float:
     from rocke import compile_kernel
     from rocke.runtime.device_array import DeviceArray
 
-    from kernels.common.conv_direct_grouped import DIRECT_WEIGHT_TRANSFORM_RTC_ARGS
+    from kernels.common.conv_abi import conv_direct_transform_signature
 
     p = problem
     rtc = fprop.runtime_channels
     coalesced = fprop.waves_k > 1 or fprop.runtime_k_loop
-    xform_sig = [
-        {"name": "A", "type": "ptr<f32, global>", "size_bytes": 8},
-        {"name": "D", "type": "ptr<f32, global>", "size_bytes": 8},
-        {"name": "A_bytes", "type": "i32", "size_bytes": 4},
-        {"name": "D_bytes", "type": "i32", "size_bytes": 4},
-    ]
-    if rtc:
-        xform_sig += [
-            {"name": n, "type": "i32", "size_bytes": 4}
-            for n in DIRECT_WEIGHT_TRANSFORM_RTC_ARGS
-        ]
+    xform_sig = conv_direct_transform_signature("fp32", runtime_channels=rtc)
     scalars = {"p_cpg": p.cpg, "p_kpg": p.kpg} if rtc else {}
 
     t_spec = DirectTransposeWeightsDgradSpec(problem=p, runtime_channels=rtc)
@@ -812,7 +799,7 @@ def _run_dgrad(problem, fprop, arch: str) -> float:
     launch_direct_kernel(
         f_art, fprop.problem, (dy_dev, weights, dx_dev), grid=grid, block=block
     )
-    return _rel_err(dx_dev.read(), ref)
+    return peak_relative_error(dx_dev.read(), ref, floor=1.0)
 
 
 # These read B in the reorganized (W_coa) layout the dgrad weight transforms

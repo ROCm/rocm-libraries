@@ -6,8 +6,9 @@
 CPU: the spec validators and the AOT grid. GPU (gfx1250): patch sizes with and
 without an uncovered border, padded GEMM columns, several patch-row blocks;
 3x3 stride 1 / 2 and 7x7 stride 2 small-C stems with image edges -- checked
-numerically against a float64 numpy dgrad of the stored operands, both hand-built and as the AOT cache's
-binaries (every shipped knob of the 7x7 stem and of the /14 patch embedding).
+numerically against a float64 numpy dgrad of the stored operands, both
+hand-built and as the AOT cache's binaries (every shipped knob of the 7x7 stem
+and of the /14 patch embedding).
 
 Run:
     PYTHONPATH=rocke/platform/python:rocke/library python -m pytest \\
@@ -22,6 +23,7 @@ import unittest
 import numpy as np
 import pytest
 from rocke.numeric import storage
+from rocke.numeric.compare import peak_relative_error
 from rocke.runtime.hip_module import get_device_arch
 
 from kernels.common.conv_dgrad_patch_wmma import (
@@ -589,7 +591,7 @@ class TestStemGpu(unittest.TestCase):
         rng = np.random.default_rng(0)
         dy = storage.encode(rng.uniform(-1, 1, (p.N, p.Ho, p.Wo, p.total_k)), p.dtype)
         w = storage.encode(rng.uniform(-1, 1, (p.total_k, p.KH, p.KW, p.cpg)), p.dtype)
-        # Poison: every element is written.
+        # A poisoned dX: an element the kernel does not write fails.
         host = {"dy": dy, "w": w, "dx": poisoned((p.N, p.H, p.W, p.total_c), p.dtype)}
         device = {name: DeviceArray(array, p.dtype) for name, array in host.items()}
         launch(
@@ -600,7 +602,7 @@ class TestStemGpu(unittest.TestCase):
         ref = direct_dgrad_reference(
             p, storage.decode(dy, p.dtype), storage.decode(w, p.dtype)
         )
-        err = float(np.abs(dx - ref).max() / np.abs(ref).max())
+        err = peak_relative_error(dx, ref)
         self.assertLess(err, 1e-2, f"{label}: rel err {err:.3g}")
 
     def _check(self, spec, build):

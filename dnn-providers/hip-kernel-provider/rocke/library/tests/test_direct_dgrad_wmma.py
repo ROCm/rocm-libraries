@@ -23,6 +23,7 @@ import unittest
 import numpy as np
 import pytest
 from rocke.numeric import storage
+from rocke.numeric.compare import peak_relative_error
 from rocke.runtime.hip_module import get_device_arch
 
 from kernels.common.conv_direct_dgrad_wmma import (
@@ -735,7 +736,8 @@ class TestDgradWmmaGpu(unittest.TestCase):
             art,
             p,
             (dy, w),
-            poisoned((p.N, p.H, p.W, p.total_c), p.dtype),  # every element is written
+            # Poisoned: an element the kernel does not write fails.
+            poisoned((p.N, p.H, p.W, p.total_c), p.dtype),
             grid=spec.grid(),
             block=(spec.threads_per_block, 1, 1),
             direction="dgrad",
@@ -743,7 +745,7 @@ class TestDgradWmmaGpu(unittest.TestCase):
         ref = direct_dgrad_reference(
             p, storage.decode(dy, p.dtype), storage.decode(w, p.dtype)
         )
-        err = float(np.abs(storage.decode(dx, p.dtype) - ref).max() / np.abs(ref).max())
+        err = peak_relative_error(storage.decode(dx, p.dtype), ref)
         self.assertLess(err, 1e-2, f"{pkw} {knobs}: rel err {err:.3g}")
 
     def test_cases(self):

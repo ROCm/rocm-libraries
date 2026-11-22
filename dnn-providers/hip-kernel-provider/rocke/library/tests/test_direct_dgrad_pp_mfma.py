@@ -23,6 +23,7 @@ from dataclasses import replace
 import numpy as np
 import pytest
 from rocke.numeric import storage
+from rocke.numeric.compare import peak_relative_error
 from rocke.tests.gpu import current_device_arch_in
 
 from kernels.common.conv_direct_dgrad_pp_mfma import (
@@ -525,5 +526,5 @@ def test_dgrad_matches_the_reference(dtype, kh, block_k, C, K):
     ref = direct_dgrad_reference(p, storage.decode(dy, dtype), storage.decode(w, dtype))
     assert not np.isnan(dx).any()
     tol = 2e-2 if dtype == "bf16" else 5e-3
-    rel = float(np.abs(dx - ref).max() / max(np.abs(ref).max(), 1.0))
+    rel = peak_relative_error(dx, ref, floor=1.0)
     assert rel < tol, rel

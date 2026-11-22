@@ -23,6 +23,7 @@ from dataclasses import replace
 import numpy as np
 import pytest
 from rocke.numeric import storage
+from rocke.numeric.compare import peak_relative_error
 from rocke.tests.gpu import current_device_arch_in
 
 from kernels.common.conv_direct_fwd_flex_mfma import (
@@ -565,5 +566,5 @@ def test_forward_matches_the_reference(
     ref = direct_fwd_reference(p, storage.decode(x, dtype), storage.decode(w, dtype))
     assert not np.isnan(out).any()
     tol = 2e-2 if dtype == "bf16" else 5e-3
-    rel = float(np.abs(out - ref).max() / max(np.abs(ref).max(), 1.0))
+    rel = peak_relative_error(out, ref, floor=1.0)
     assert rel < tol, rel

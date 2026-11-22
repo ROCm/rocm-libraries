@@ -42,13 +42,13 @@ from typing import Tuple
 
 import numpy as np
 from rocke.numeric import storage
+from rocke.numeric.compare import peak_relative_error
 from rocke.runtime.hip_module import get_device_arch
 
 from ._direct_conv_numeric import (
     direct_dgrad_reference,
     direct_fwd_reference,
     launch_direct_conv,
-    poisoned,
 )
 
 GPU_ARCH = get_device_arch(0)
@@ -442,14 +442,14 @@ def _run_direct_fwd(arch: str, cpg: int, dtype: str) -> Tuple[bool, str]:
             artifact,
             p,
             (x, w),
-            poisoned((N, p.Ho, p.Wo, groups * cpg), dtype, 0),
+            np.zeros((N, p.Ho, p.Wo, groups * cpg), storage.host_dtype(dtype)),
             grid=grid,
             block=block,
         )
     except HipError as e:
         return False, f"launch failed: {e}"
     out = storage.decode(y, dtype)
-    rel = float(np.abs(out - ref).max() / max(np.abs(ref).max(), 1.0))
+    rel = peak_relative_error(out, ref, floor=1.0)
     tol = _TOL_BF16 if dtype == "bf16" else _TOL_FP16
     return (rel < tol), f"rel_err={rel:.3e} tol={tol:.1e}"
 
@@ -503,7 +503,7 @@ def _run_direct_dgrad(arch: str, cpg: int, dtype: str) -> Tuple[bool, str]:
             artifact,
             p,
             (dy, w),
-            poisoned((N, H, W, total_c), dtype, 0),
+            np.zeros((N, H, W, total_c), storage.host_dtype(dtype)),
             grid=grid,
             block=block,
             direction="dgrad",
@@ -511,7 +511,7 @@ def _run_direct_dgrad(arch: str, cpg: int, dtype: str) -> Tuple[bool, str]:
     except HipError as e:
         return False, f"launch failed: {e}"
     out = storage.decode(dx, dtype)
-    rel = float(np.abs(out - ref).max() / max(np.abs(ref).max(), 1.0))
+    rel = peak_relative_error(out, ref, floor=1.0)
     tol = _TOL_BF16 if dtype == "bf16" else _TOL_FP16
     return (rel < tol), f"rel_err={rel:.3e} tol={tol:.1e}"
 

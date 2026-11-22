@@ -2809,3 +2809,21 @@ def test_cache_applies_runtime_launch_limits(tmp_path):
     ok, why = cache.supports_problem(replace(split_k_dgrad, dtype_d="bf16"), odd_cpg)
     assert not ok and "even channels-per-group" in why
     assert cache.supports_problem(replace(split_k_dgrad, dtype_d="fp32"), odd_cpg)[0]
+
+
+@pytest.mark.parametrize(
+    "direction, output, pointer",
+    [
+        ("fwd", "bf16", "ptr<bf16, global>"),
+        ("dgrad", "bf16", "ptr<bf16, global>"),
+        ("wgrad", "fp32", "ptr<f32, global>"),
+    ],
+)
+def test_direct_output_dtype_is_fp32_only_for_wgrad(direction, output, pointer):
+    """The direct kernels write their io dtype, except wgrad's dW, which
+    accumulates through fp32 atomics; the launch signature's D says the same."""
+    from kernels.common.conv_abi import conv_direct_output_dtype
+
+    assert conv_direct_output_dtype("bf16", direction) == output
+    signature = conv_direct_args_signature("bf16", direction=direction)
+    assert [arg["type"] for arg in signature if arg["name"] == "D"] == [pointer]

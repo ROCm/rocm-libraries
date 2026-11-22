@@ -27,7 +27,7 @@ import unittest
 from typing import Callable, List, Tuple
 
 import numpy as np
-from rocke.numeric import storage
+from rocke.numeric.compare import peak_relative_error
 from rocke.tests.llc import find_llvm_tool
 
 from builders.common.conv_reference import (
@@ -42,6 +42,7 @@ from ._direct_conv_numeric import (
     direct_fwd_reference,
     direct_wgrad_reference,
     launch_direct_conv,
+    stored_uniform,
 )
 
 _ARCHS = ("gfx950", "gfx942")
@@ -386,14 +387,6 @@ def _launch(spec, build, arch: str, direction: str, inputs, output_shape):
     )
 
 
-def _rel_err(out, ref) -> float:
-    return float(np.abs(out - ref).max() / max(np.abs(ref).max(), 1e-30))
-
-
-def _uniform(rng, shape) -> np.ndarray:
-    return storage.encode(rng.uniform(-1, 1, shape), "fp32")
-
-
 _GPU = _gpu_arch()
 _GPU_SKIP = "" if _GPU in _ARCHS else f"no gfx950/gfx942 GPU (got {_GPU!r})"
 
@@ -411,9 +404,9 @@ class TestGpuCorrectness(unittest.TestCase):
                     p = spec.problem
                     ok, why = valid(spec, arch=_GPU)
                     self.assertTrue(ok, why)
-                    W = _uniform(self.rng, (p.total_k, p.KH, p.KW, p.cpg))
+                    W = stored_uniform(self.rng, (p.total_k, p.KH, p.KW, p.cpg), "fp32")
                     if direction == "fwd":
-                        X = _uniform(self.rng, (p.N, p.H, p.W, p.total_c))
+                        X = stored_uniform(self.rng, (p.N, p.H, p.W, p.total_c), "fp32")
                         out = _launch(
                             spec,
                             build,
@@ -424,7 +417,9 @@ class TestGpuCorrectness(unittest.TestCase):
                         )
                         ref = direct_fwd_reference(p, X, W)
                     else:
-                        dY = _uniform(self.rng, (p.N, p.Ho, p.Wo, p.total_k))
+                        dY = stored_uniform(
+                            self.rng, (p.N, p.Ho, p.Wo, p.total_k), "fp32"
+                        )
                         out = _launch(
                             spec,
                             build,
@@ -434,7 +429,7 @@ class TestGpuCorrectness(unittest.TestCase):
                             (p.N, p.H, p.W, p.total_c),
                         )
                         ref = direct_dgrad_reference(p, dY, W)
-                    err = _rel_err(out, ref)
+                    err = peak_relative_error(out, ref, floor=1e-30)
                     print(f"  {dtype:5s} {label:18s} rel_err={err:.2e}", flush=True)
                     self.assertLess(err, 1e-5)
                     ran += 1
@@ -447,8 +442,8 @@ class TestGpuCorrectness(unittest.TestCase):
                 with self.subTest(dtype=dtype, case=label):
                     spec = _wgrad_spec(label, pkw, skw, dtype)
                     p = spec.problem
-                    X = _uniform(self.rng, (p.N, p.H, p.W, p.total_c))
-                    dY = _uniform(self.rng, (p.N, p.Ho, p.Wo, p.total_k))
+                    X = stored_uniform(self.rng, (p.N, p.H, p.W, p.total_c), "fp32")
+                    dY = stored_uniform(self.rng, (p.N, p.Ho, p.Wo, p.total_k), "fp32")
                     out = _launch(
                         spec,
                         cdg.build_direct_conv_wgrad,
@@ -462,7 +457,7 @@ class TestGpuCorrectness(unittest.TestCase):
                         tf32_reference_inputs(X, _GPU, dtype),
                         tf32_reference_inputs(dY, _GPU, dtype),
                     )
-                    err = _rel_err(out, ref)
+                    err = peak_relative_error(out, ref, floor=1e-30)
                     print(
                         f"  {dtype:5s} wgrad {label:14s} rel_err={err:.2e}", flush=True
                     )

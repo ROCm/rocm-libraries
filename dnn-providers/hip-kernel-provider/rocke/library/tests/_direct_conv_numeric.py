@@ -22,7 +22,8 @@ references of :mod:`builders.common.conv_reference` on the problem's
 ``ConvGeometry`` (the one map from direct-conv names to the shared geometry),
 fed the values the kernel reads (decode stored arrays with
 :func:`rocke.numeric.storage.decode` first) and taking their operands by name.
-:func:`direct_fwd_peak_error` composes them for the common forward check.
+:func:`direct_fwd_peak_error` composes them for the common forward check;
+:func:`stored_uniform` draws operands.
 """
 
 from __future__ import annotations
@@ -33,6 +34,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 import numpy.typing as npt
 from rocke.numeric import storage
+from rocke.numeric.compare import peak_relative_error
 from rocke.runtime.device_array import DeviceArray
 from rocke.runtime.launcher import KernelLauncher, LaunchConfig
 
@@ -41,7 +43,10 @@ from builders.common.conv_reference import (
     conv_fwd_reference,
     conv_wgrad_reference,
 )
-from kernels.common.conv_abi import conv_direct_args_signature
+from kernels.common.conv_abi import (
+    conv_direct_args_signature,
+    conv_direct_output_dtype,
+)
 from kernels.common.conv_args import ConvArgs, ConvGeometry
 from kernels.common.conv_direct_grouped import DirectConvProblem
 from kernels.conv.direct_aot_jobs import direct_storage_dtype
@@ -57,6 +62,7 @@ __all__ = [
     "launch_direct_conv",
     "launch_direct_kernel",
     "poisoned",
+    "stored_uniform",
 ]
 
 
@@ -82,6 +88,13 @@ def direct_wgrad_reference(
     """``dw[K, KH, KW, cpg]`` of ``x[N, H, W, C]`` and ``dy[N, Ho, Wo, K]``."""
     geometry = ConvGeometry.from_direct_problem(problem)
     return conv_wgrad_reference(np.asarray(x), np.asarray(dy), geometry)
+
+
+def stored_uniform(
+    rng: np.random.Generator, shape: Sequence[int], dtype: str, bound: float = 1.0
+) -> np.ndarray:
+    """U(-bound, bound) draws of ``shape``, stored as ``dtype``."""
+    return storage.encode(rng.uniform(-bound, bound, shape), dtype)
 
 
 def poisoned(shape: Sequence[int], dtype: str, byte: int = 0x7F) -> np.ndarray:
@@ -142,7 +155,7 @@ def launch_direct_conv(
     ``dtype``)."""
     dtype = dtype or direct_storage_dtype(problem.dtype)
     first, second = (DeviceArray(array, dtype) for array in inputs)
-    out = DeviceArray(output, "fp32" if direction == "wgrad" else dtype)
+    out = DeviceArray(output, conv_direct_output_dtype(dtype, direction))
     launch_direct_kernel(
         artifact,
         problem,
@@ -170,12 +183,9 @@ def direct_fwd_peak_error(
     fails; ``ref`` is :func:`direct_fwd_reference` of the stored values."""
     dtype = direct_storage_dtype(problem.dtype)
     rng = np.random.default_rng(seed)
-    x = storage.encode(
-        rng.uniform(-1, 1, (problem.N, problem.H, problem.W, problem.total_c)), dtype
-    )
-    w = storage.encode(
-        rng.uniform(-1, 1, (problem.total_k, problem.KH, problem.KW, problem.cpg)),
-        dtype,
+    x = stored_uniform(rng, (problem.N, problem.H, problem.W, problem.total_c), dtype)
+    w = stored_uniform(
+        rng, (problem.total_k, problem.KH, problem.KW, problem.cpg), dtype
     )
     y_shape = (problem.N, problem.Ho, problem.Wo, problem.total_k)
     y = launch_direct_conv(
@@ -184,4 +194,4 @@ def direct_fwd_peak_error(
     ref = direct_fwd_reference(
         problem, storage.decode(x, dtype), storage.decode(w, dtype)
     )
-    return float(np.abs(storage.decode(y, dtype) - ref).max() / np.abs(ref).max())
+    return peak_relative_error(storage.decode(y, dtype), ref)

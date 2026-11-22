@@ -5,7 +5,7 @@
 Covers all four grouped variants (cpg = 4, 8, 16, 32), the depthwise
 variant (cpg = 1), and the non-grouped (groups == 1) ``DirectNongroupedConvSpec``.  Each test builds a kernel, compiles it, launches it on
 GPU, and compares the output against a float64 numpy reference of the
-stored operands (``rocke.numeric.conv``).
+stored operands (``tests._direct_conv_numeric``).
 
 The test shapes are kept intentionally small (fast compile + run) while
 hitting the branch points that differ across implementations:
@@ -25,6 +25,7 @@ from typing import List, Optional, Tuple
 
 import numpy as np
 from rocke.numeric import storage
+from rocke.numeric.compare import peak_relative_error
 from rocke.runtime.hip_module import get_device_arch
 
 from ._direct_conv_numeric import (
@@ -34,6 +35,7 @@ from ._direct_conv_numeric import (
     launch_direct_conv,
     launch_direct_kernel,
     poisoned,
+    stored_uniform,
 )
 
 GPU_ARCH = get_device_arch(0)
@@ -494,16 +496,6 @@ _COL_TOL = {"fp16": _TOL, "bf16": _TOL_BF16}
 # ---------------------------------------------------------------------------
 
 
-def _stored_uniform(rng, shape, dtype: str, bound: float) -> np.ndarray:
-    """U(-bound, bound) draws stored as ``dtype``."""
-    return storage.encode(rng.uniform(-bound, bound, shape), dtype)
-
-
-def _peak_rel_err(out: np.ndarray, ref: np.ndarray) -> float:
-    """max|out - ref| over max|ref| floored at 1."""
-    return float(np.abs(out - ref).max() / max(np.abs(ref).max(), 1.0))
-
-
 def _run_grouped_one(arch: str, shape: _Shape, dtype: str = "fp16") -> Tuple[bool, str]:
     """Build, compile, launch, and verify one grouped direct-conv kernel.
 
@@ -701,8 +693,8 @@ def _run_forward_device(
     from rocke.runtime.hip_module import HipError
 
     rng = np.random.default_rng(0)
-    x = _stored_uniform(rng, (p.N, p.H, p.W, p.total_c), dtype, 1.0)
-    w = _stored_uniform(rng, (p.total_k, p.KH, p.KW, p.cpg), dtype, 1.0)
+    x = stored_uniform(rng, (p.N, p.H, p.W, p.total_c), dtype, 1.0)
+    w = stored_uniform(rng, (p.total_k, p.KH, p.KW, p.cpg), dtype, 1.0)
     ref = direct_fwd_reference(p, storage.decode(x, dtype), storage.decode(w, dtype))
     # Zero D rather than leaving it uninitialised: the tail guards are supposed
     # to leave the out-of-range lanes alone, and a garbage-filled D is the only
@@ -715,7 +707,7 @@ def _run_forward_device(
     except HipError as e:
         return False, f"kernel load failed: {e}"
 
-    rel_err = _peak_rel_err(storage.decode(y, dtype), ref)
+    rel_err = peak_relative_error(storage.decode(y, dtype), ref, floor=1.0)
     if not rel_err < tol:
         return False, f"rel_err={rel_err:.3e} > tol={tol:.1e}"
     print(f"  PASS  {label}  {arch}  rel_err={rel_err:.2e}", flush=True)
@@ -1286,8 +1278,8 @@ def _run_dgrad_device(
     from rocke.runtime.hip_module import HipError
 
     rng = np.random.default_rng(42)
-    dy = _stored_uniform(rng, (p.N, p.Ho, p.Wo, p.total_k), dtype, 0.5)
-    w = _stored_uniform(rng, (p.total_k, p.KH, p.KW, p.cpg), dtype, 0.5)
+    dy = stored_uniform(rng, (p.N, p.Ho, p.Wo, p.total_k), dtype, 0.5)
+    w = stored_uniform(rng, (p.total_k, p.KH, p.KW, p.cpg), dtype, 0.5)
     ref = direct_dgrad_reference(p, storage.decode(dy, dtype), storage.decode(w, dtype))
     dx = np.zeros((p.N, p.H, p.W, p.total_c), storage.host_dtype(dtype))
     try:
@@ -1297,7 +1289,7 @@ def _run_dgrad_device(
     except HipError as e:
         return False, f"kernel load failed: {e}"
 
-    rel_err = _peak_rel_err(storage.decode(dx, dtype), ref)
+    rel_err = peak_relative_error(storage.decode(dx, dtype), ref, floor=1.0)
     tol = _TOL_BF16 if dtype == "bf16" else _TOL
     if not rel_err < tol:
         return False, f"rel_err={rel_err:.3e} > tol={tol:.1e}"
@@ -1683,8 +1675,8 @@ def _run_nongrouped_spec(
             return False, f"build/compile failed: {e}"
 
     rng = np.random.default_rng(0)
-    x = _stored_uniform(rng, (p.N, p.H, p.W, p.total_c), p.dtype, 1.0)
-    w = _stored_uniform(rng, (p.total_k, p.KH, p.KW, p.cpg), p.dtype, 1.0)
+    x = stored_uniform(rng, (p.N, p.H, p.W, p.total_c), p.dtype, 1.0)
+    w = stored_uniform(rng, (p.total_k, p.KH, p.KW, p.cpg), p.dtype, 1.0)
     ref = direct_fwd_reference(
         p, storage.decode(x, p.dtype), storage.decode(w, p.dtype)
     )
@@ -1717,7 +1709,7 @@ def _run_nongrouped_spec(
     except HipError as e:
         return False, f"kernel load failed: {e}"
 
-    rel_err = _peak_rel_err(storage.decode(y_dev.read(), p.dtype), ref)
+    rel_err = peak_relative_error(storage.decode(y_dev.read(), p.dtype), ref, floor=1.0)
     tol = _TOL_BF16 if p.dtype == "bf16" else _TOL
     # `not <` so a NaN rel_err (an unwritten workspace slab) fails too.
     if not rel_err < tol:
@@ -2399,9 +2391,9 @@ def _run_wgrad_one(
 
     rng = np.random.default_rng(42)
     # X:  input          [N, H, W, C]
-    x = _stored_uniform(rng, (p.N, p.H, p.W, p.total_c), dtype, 0.5)
+    x = stored_uniform(rng, (p.N, p.H, p.W, p.total_c), dtype, 0.5)
     # dY: output gradient [N, Ho, Wo, K]
-    dy = _stored_uniform(rng, (p.N, p.Ho, p.Wo, p.total_k), dtype, 0.5)
+    dy = stored_uniform(rng, (p.N, p.Ho, p.Wo, p.total_k), dtype, 0.5)
     ref = direct_wgrad_reference(
         p, storage.decode(x, dtype), storage.decode(dy, dtype)
     )  # [K, KH, KW, cpg]
@@ -2426,7 +2418,7 @@ def _run_wgrad_one(
         return False, f"kernel load failed: {e}"
     dw = dw_dev.read().sum(axis=1).reshape(ref.shape)
 
-    rel_err = _peak_rel_err(dw, ref)
+    rel_err = peak_relative_error(dw, ref, floor=1.0)
     tol = _TOL_BF16 if dtype == "bf16" else _TOL
     passed = rel_err < tol
     if not passed:
@@ -2495,8 +2487,8 @@ def _run_dw_wgrad_one(
         return False, f"build/compile failed: {e}"
 
     rng = np.random.default_rng(42)
-    x = _stored_uniform(rng, (p.N, p.H, p.W, C), dtype, 0.5)
-    dy = _stored_uniform(rng, (p.N, p.Ho, p.Wo, C), dtype, 0.5)
+    x = stored_uniform(rng, (p.N, p.H, p.W, C), dtype, 0.5)
+    dy = stored_uniform(rng, (p.N, p.Ho, p.Wo, C), dtype, 0.5)
     ref = direct_wgrad_reference(
         p, storage.decode(x, dtype), storage.decode(dy, dtype)
     ).reshape(C, p.KH * p.KW)
@@ -2512,7 +2504,7 @@ def _run_dw_wgrad_one(
         block=block,
         direction="wgrad",
     )
-    rel_err = _peak_rel_err(workspace.read().sum(axis=0), ref)
+    rel_err = peak_relative_error(workspace.read().sum(axis=0), ref, floor=1.0)
     tol = _TOL_BF16 if dtype == "bf16" else _TOL
     # `not <` so a NaN rel_err (non-finite output) fails too.
     if not rel_err < tol:
@@ -2867,8 +2859,8 @@ def _run_mfma_dgrad_pipeline(arch, problem, fprop_spec, kernels, dtype):
     from rocke.runtime.device_array import DeviceArray
     from rocke.runtime.launcher import KernelLauncher
 
+    from kernels.common.conv_abi import conv_direct_transform_signature
     from kernels.common.conv_direct_grouped import (
-        DIRECT_WEIGHT_TRANSFORM_RTC_ARGS,
         DirectReorganizeWeightsSpec,
         DirectTransposeWeightsDgradSpec,
         direct_dgrad_coalesced_workspace_bytes,
@@ -2879,23 +2871,12 @@ def _run_mfma_dgrad_pipeline(arch, problem, fprop_spec, kernels, dtype):
     p = problem
     rtc = fprop_spec.runtime_channels
     coalesced = fprop_spec.waves_k > 1 or fprop_spec.runtime_k_loop
-    elem = "bf16" if dtype == "bf16" else "f16"
-    xform_sig = [
-        {"name": "A", "type": f"ptr<{elem}, global>", "size_bytes": 8},
-        {"name": "D", "type": f"ptr<{elem}, global>", "size_bytes": 8},
-        {"name": "A_bytes", "type": "i32", "size_bytes": 4},
-        {"name": "D_bytes", "type": "i32", "size_bytes": 4},
-    ]
-    if rtc:
-        xform_sig += [
-            {"name": n, "type": "i32", "size_bytes": 4}
-            for n in DIRECT_WEIGHT_TRANSFORM_RTC_ARGS
-        ]
+    xform_sig = conv_direct_transform_signature(dtype, runtime_channels=rtc)
     scalars = {"p_cpg": p.cpg, "p_kpg": p.kpg} if rtc else {}
 
     rng = np.random.default_rng(7)
-    dy = _stored_uniform(rng, (p.N, p.Ho, p.Wo, p.total_k), dtype, 0.5)
-    w = _stored_uniform(rng, (p.total_k, p.KH, p.KW, p.cpg), dtype, 0.5)
+    dy = stored_uniform(rng, (p.N, p.Ho, p.Wo, p.total_k), dtype, 0.5)
+    w = stored_uniform(rng, (p.total_k, p.KH, p.KW, p.cpg), dtype, 0.5)
     ref = direct_dgrad_reference(p, storage.decode(dy, dtype), storage.decode(w, dtype))
 
     ws_t_bytes = direct_dgrad_workspace_bytes(p)
@@ -2951,7 +2932,7 @@ def _run_mfma_dgrad_pipeline(arch, problem, fprop_spec, kernels, dtype):
         block=block,
         dtype=dtype,
     )
-    return _peak_rel_err(storage.decode(dx_dev.read(), dtype), ref)
+    return peak_relative_error(storage.decode(dx_dev.read(), dtype), ref, floor=1.0)
 
 
 def _dw_wgrad_skip_reason(arch: str | None) -> str:
@@ -3447,15 +3428,17 @@ def _run_aot_wgrad_one(
         x = storage.encode(rng.integers(-2, 3, x_shape), p.dtype)
         dy = storage.encode(rng.integers(-2, 3, dy_shape), p.dtype)
     else:
-        x = _stored_uniform(rng, x_shape, p.dtype, 0.5)
-        dy = _stored_uniform(rng, dy_shape, p.dtype, 0.5)
+        x = stored_uniform(rng, x_shape, p.dtype, 0.5)
+        dy = stored_uniform(rng, dy_shape, p.dtype, 0.5)
     ref = direct_wgrad_reference(
         p, storage.decode(x, p.dtype), storage.decode(dy, p.dtype)
     )  # [K, KH, KW, cpg]
 
     # The atomic kernel adds into a zeroed dW; the fold writes dW whole,
     # so poison it to catch an element the fold misses.
-    dw = DeviceArray(poisoned(ref.shape, "fp32", 0xFF if folded else 0))
+    dw = DeviceArray(
+        poisoned(ref.shape, "fp32", 0xFF) if folded else np.zeros(ref.shape, np.float32)
+    )
     out = DeviceArray(np.zeros(spec.workspace_bytes(), np.uint8)) if folded else dw
     grid, block = spec.launch_geometry()
     launch_direct_kernel(
@@ -3489,7 +3472,7 @@ def _run_aot_wgrad_one(
         }
         fold(fvalues, config=LaunchConfig(grid=fgrid, block=fblock, fence=True))
 
-    rel_err = _peak_rel_err(dw.read(), ref)
+    rel_err = peak_relative_error(dw.read(), ref, floor=1.0)
     return float("inf") if np.isnan(rel_err) else rel_err
 
 
