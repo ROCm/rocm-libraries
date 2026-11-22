@@ -47,6 +47,7 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
 ### Resolved Issues
 
 * Fixed incorrect output in `device_segmented_topk_air.hpp:choose_pivot_bin` when `radix_bits` does not divide the `key` width.
+* Fixed `rocprim::radix_sort_keys`, `rocprim::radix_sort_pairs` and the segmented radix sorts ordering 32-bit and 64-bit keys by the wrong bits when `end_bit` is the key width and `begin_bit` is greater than 0.
 
 ## rocPRIM 5.0.0 for ROCm 10.2.0
 

@@ -21,6 +21,7 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
 ### Resolved Issues
 
 * Incorrect miscategorization of RDNA4 and CDNA5 GPUs.
+* Fixed `rocprim::radix_sort_keys`, `rocprim::radix_sort_pairs` and the segmented radix sorts ordering 32-bit and 64-bit keys by the wrong bits when `end_bit` is the key width and `begin_bit` is greater than 0.
 
 ### Upcoming changes
 

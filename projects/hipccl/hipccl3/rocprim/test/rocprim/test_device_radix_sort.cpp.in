@@ -98,6 +98,12 @@ using __custom__uint64_t2 = common::custom_type<uint64_t, uint64_t, true>;
     INSTANTIATE(params<unsigned int,        rocprim::bfloat16,                      true,   0, 12>)
     INSTANTIATE(params<unsigned short,      rocprim::bfloat16,                      false,  3, 11>)
     INSTANTIATE(params<unsigned long long,  char,                                   false,  8, 20>)
+
+    // end_bit equal to the key width with start_bit > 0
+    INSTANTIATE(params<unsigned int,        short,                                  false,  8, 32>)
+    INSTANTIATE(params<int,                 int,                                    true,   31, 32>)
+    INSTANTIATE(params<unsigned long long,  char,                                   false,  32, 64>)
+    INSTANTIATE(params<int64_t,             int,                                    true,   1, 64>)
 #elif ROCPRIM_TEST_TYPE_SLICE == 2
     INSTANTIATE(params<unsigned short,      __custom_double2,   false,  8, 11>)
 
