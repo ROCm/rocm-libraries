@@ -26,6 +26,7 @@
 
 #include "../rocsparse_sptrsm_descr.hpp"
 #include "rocsparse_coosm.hpp"
+#include "rocsparse_csc_to_csr_descr.hpp"
 #include "rocsparse_cscsm.hpp"
 #include "rocsparse_csrsm.hpp"
 
@@ -49,6 +50,9 @@ inline bool rocsparse::enum_utils::is_invalid(rocsparse_sptrsm_alg value)
     switch(value)
     {
     case rocsparse_sptrsm_alg_default:
+#if defined(ROCSPARSE_WITH_SPTRSM_CSC)
+    case rocsparse_sptrsm_alg_limited_memory:
+#endif
     {
         return false;
     }
@@ -135,14 +139,42 @@ namespace rocsparse
         const size_t Z_data_size_in_nbytes = rocsparse::align_size(
             rocsparse::datatype_sizeof(Z->data_type) * Z->rows * Z->cols * Z->batch_count);
 
+        // The diagonal solve mode reads the transposed analysis.
+        const bool limited_memory
+            = rocsparse::is_limited_memory(sptrsm_descr->get_alg())
+              && (sptrsm_descr->get_solve_mode() == rocsparse_solve_mode_triangular);
         switch(A_format)
         {
         case rocsparse_format_csr:
         {
+            // A CSR matrix with (conjugate) transpose is the CSC matrix without transpose that
+            // shares its arrays.
+            _rocsparse_mat_descr   descr_csc;
+            _rocsparse_spmat_descr mat_csc;
+            rocsparse::build_csc_from_csr(*A, mat_csc, descr_csc);
+            const bool csc_view
+                = (A_op != rocsparse_operation_none)
+                  && rocsparse::cscsm_use_limited_memory(
+                      rocsparse_operation_none, X_op, alpha, &mat_csc, Z, limited_memory);
             switch(sptrsm_stage)
             {
             case rocsparse_sptrsm_stage_analysis:
             {
+                if(csc_view)
+                {
+                    RETURN_IF_ROCSPARSE_ERROR(
+                        rocsparse::cscsm_analysis_buffer_size(handle,
+                                                              Y->cols,
+                                                              rocsparse_operation_none,
+                                                              X_op,
+                                                              alpha,
+                                                              &mat_csc,
+                                                              Z,
+                                                              p_buffer_size_in_bytes,
+                                                              nullptr,
+                                                              true));
+                    return rocsparse_status_success;
+                }
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrsm_analysis_buffer_size(
                     handle, Y->cols, A_op, X_op, alpha, A, Z, p_buffer_size_in_bytes, nullptr));
                 return rocsparse_status_success;
@@ -150,8 +182,25 @@ namespace rocsparse
 
             case rocsparse_sptrsm_stage_compute:
             {
-                RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrsm_solve_buffer_size(
-                    handle, Y->cols, A_op, X_op, alpha, A, Z, p_buffer_size_in_bytes, nullptr));
+                if(csc_view)
+                {
+                    RETURN_IF_ROCSPARSE_ERROR(
+                        rocsparse::cscsm_solve_buffer_size(handle,
+                                                           Y->cols,
+                                                           rocsparse_operation_none,
+                                                           X_op,
+                                                           alpha,
+                                                           &mat_csc,
+                                                           Z,
+                                                           p_buffer_size_in_bytes,
+                                                           nullptr,
+                                                           true));
+                }
+                else
+                {
+                    RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrsm_solve_buffer_size(
+                        handle, Y->cols, A_op, X_op, alpha, A, Z, p_buffer_size_in_bytes, nullptr));
+                }
 
                 if(is_Y_column_order)
                 {
@@ -200,15 +249,32 @@ namespace rocsparse
             {
             case rocsparse_sptrsm_stage_analysis:
             {
-                RETURN_IF_ROCSPARSE_ERROR(rocsparse::cscsm_analysis_buffer_size(
-                    handle, Y->cols, A_op, X_op, alpha, A, Z, p_buffer_size_in_bytes, nullptr));
+                RETURN_IF_ROCSPARSE_ERROR(
+                    rocsparse::cscsm_analysis_buffer_size(handle,
+                                                          Y->cols,
+                                                          A_op,
+                                                          X_op,
+                                                          alpha,
+                                                          A,
+                                                          Z,
+                                                          p_buffer_size_in_bytes,
+                                                          nullptr,
+                                                          limited_memory));
                 return rocsparse_status_success;
             }
 
             case rocsparse_sptrsm_stage_compute:
             {
-                RETURN_IF_ROCSPARSE_ERROR(rocsparse::cscsm_solve_buffer_size(
-                    handle, Y->cols, A_op, X_op, alpha, A, Z, p_buffer_size_in_bytes, nullptr));
+                RETURN_IF_ROCSPARSE_ERROR(rocsparse::cscsm_solve_buffer_size(handle,
+                                                                             Y->cols,
+                                                                             A_op,
+                                                                             X_op,
+                                                                             alpha,
+                                                                             A,
+                                                                             Z,
+                                                                             p_buffer_size_in_bytes,
+                                                                             nullptr,
+                                                                             limited_memory));
                 if(is_Y_column_order)
                 {
                     p_buffer_size_in_bytes[0] += Z_data_size_in_nbytes;

@@ -30,6 +30,7 @@
 #include "rocsparse_coosm.hpp"
 #include "rocsparse_csrsm.hpp"
 
+#include "rocsparse_csc_to_csr_descr.hpp"
 #include "rocsparse_cscsm.hpp"
 
 #include "../rocsparse_sptrsm_descr.hpp"
@@ -56,6 +57,9 @@ inline bool rocsparse::enum_utils::is_invalid(rocsparse_sptrsm_alg value)
     switch(value)
     {
     case rocsparse_sptrsm_alg_default:
+#if defined(ROCSPARSE_WITH_SPTRSM_CSC)
+    case rocsparse_sptrsm_alg_limited_memory:
+#endif
     {
         return false;
     }
@@ -197,6 +201,22 @@ namespace rocsparse
         //
         // Call the corresponding analysis.
         //
+        // The diagonal solve mode reads the transposed analysis.
+        const bool limited_memory
+            = rocsparse::is_limited_memory(sptrsm_descr->get_alg())
+              && (sptrsm_descr->get_solve_mode() == rocsparse_solve_mode_triangular);
+        // A CSR matrix with (conjugate) transpose is the CSC matrix without transpose that
+        // shares its arrays.
+        _rocsparse_mat_descr   descr_csc;
+        _rocsparse_spmat_descr mat_csc;
+        bool                   csc_view = false;
+        if(A->format == rocsparse_format_csr && A_op != rocsparse_operation_none)
+        {
+            rocsparse::build_csc_from_csr(*A, mat_csc, descr_csc);
+            csc_view = rocsparse::cscsm_use_limited_memory(
+                rocsparse_operation_none, X_op, alpha, &mat_csc, Z, limited_memory);
+        }
+
         switch(A->format)
         {
         case rocsparse_format_csc:
@@ -212,12 +232,30 @@ namespace rocsparse
                                                                 &csrsm_info,
                                                                 csrsm_buffer_size_in_bytes,
                                                                 csrsm_buffer,
-                                                                p_error));
+                                                                p_error,
+                                                                limited_memory));
             break;
         }
 
         case rocsparse_format_csr:
         {
+            if(csc_view)
+            {
+                RETURN_IF_ROCSPARSE_ERROR(rocsparse::cscsm_analysis(handle,
+                                                                    nrhs,
+                                                                    rocsparse_operation_none,
+                                                                    X_op,
+                                                                    alpha,
+                                                                    &mat_csc,
+                                                                    Z,
+                                                                    analysis_policy,
+                                                                    &csrsm_info,
+                                                                    csrsm_buffer_size_in_bytes,
+                                                                    csrsm_buffer,
+                                                                    p_error,
+                                                                    true));
+                break;
+            }
             RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrsm_analysis(handle,
                                                                 nrhs,
                                                                 A_op,
@@ -469,6 +507,22 @@ namespace rocsparse
         //
         // Compute
         //
+        // The diagonal solve mode reads the transposed analysis.
+        const bool limited_memory
+            = rocsparse::is_limited_memory(sptrsm_descr->get_alg())
+              && (sptrsm_descr->get_solve_mode() == rocsparse_solve_mode_triangular);
+        // A CSR matrix with (conjugate) transpose is the CSC matrix without transpose that
+        // shares its arrays.
+        _rocsparse_mat_descr   descr_csc;
+        _rocsparse_spmat_descr mat_csc;
+        bool                   csc_view = false;
+        if(A->format == rocsparse_format_csr && A_op != rocsparse_operation_none)
+        {
+            rocsparse::build_csc_from_csr(*A, mat_csc, descr_csc);
+            csc_view = rocsparse::cscsm_use_limited_memory(
+                rocsparse_operation_none, X_op, alpha, &mat_csc, Z, limited_memory);
+        }
+
         switch(A->format)
         {
         case rocsparse_format_csc:
@@ -484,12 +538,32 @@ namespace rocsparse
                                                                sptrsm_descr->get_csrsm_info(),
                                                                buffer_size_in_bytes,
                                                                buffer,
-                                                               p_error));
+                                                               p_error,
+                                                               limited_memory,
+                                                               false));
             break;
         }
 
         case rocsparse_format_csr:
         {
+            if(csc_view)
+            {
+                RETURN_IF_ROCSPARSE_ERROR(
+                    rocsparse::cscsm_compute(handle,
+                                             nrhs,
+                                             rocsparse_operation_none,
+                                             X_op,
+                                             alpha,
+                                             &mat_csc,
+                                             Z,
+                                             sptrsm_descr->get_csrsm_info(),
+                                             buffer_size_in_bytes,
+                                             buffer,
+                                             p_error,
+                                             true,
+                                             A_op == rocsparse_operation_conjugate_transpose));
+                break;
+            }
 
             RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrsm_compute(handle,
                                                                nrhs,

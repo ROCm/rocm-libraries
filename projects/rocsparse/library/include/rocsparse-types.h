@@ -929,6 +929,10 @@ typedef enum rocsparse_spitsv_stage_
 typedef enum rocsparse_spsm_alg_
 {
     rocsparse_spsm_alg_default = 0, /**< Default SpSM algorithm for the given format. */
+#if defined(ROCSPARSE_WITH_SPTRSM_CSC)
+    rocsparse_spsm_alg_limited_memory
+    = 1, /**< SpSM algorithm with limited memory usage for CSC matrices without transpose and CSR matrices with (conjugate) transpose. Not bitwise reproducible. */
+#endif
 } rocsparse_spsm_alg;
 
 /*! \ingroup types_module
@@ -1133,6 +1137,10 @@ typedef enum rocsparse_sptrsv_output_
 typedef enum rocsparse_sptrsm_alg_
 {
     rocsparse_sptrsm_alg_default = 0, /**< Default SpTRSM algorithm for the given format. */
+#if defined(ROCSPARSE_WITH_SPTRSM_CSC)
+    rocsparse_sptrsm_alg_limited_memory
+    = 1, /**< SpTRSM algorithm with limited memory usage for CSC matrices without transpose and CSR matrices with (conjugate) transpose. Not bitwise reproducible. */
+#endif
 } rocsparse_sptrsm_alg;
 
 /*! \ingroup types_module

@@ -123,6 +123,10 @@ option(BUILD_WITH_OFFLOAD_COMPRESS
 option(BUILD_WITH_SPSORT "Build rocsparse_spsort and the rocsparse_spsort_descr auxiliary routines for the COO, CSR, and CSC formats" ON)
 option(BUILD_WITH_TRSM_REFACTORING "Build rocSPARSE with the refactored triangular solve (SpTRSM/SpSM) implementation" ON)
 option(BUILD_WITH_SPTRSV_CSC "Build the limited-memory algorithms of rocsparse_sptrsv and rocsparse_spsv for the CSC and CSR formats" ON)
+option(BUILD_WITH_SPTRSM_CSC "Build the limited-memory algorithms of rocsparse_sptrsm and rocsparse_spsm for the CSC and CSR formats" ON)
+if(BUILD_WITH_SPTRSM_CSC AND NOT BUILD_WITH_SPTRSV_CSC)
+  message(FATAL_ERROR "BUILD_WITH_SPTRSM_CSC requires BUILD_WITH_SPTRSV_CSC")
+endif()
 
 # Clients utilize rocsparse fortran API and a fortran compiler
 if( NOT BUILD_FORTRAN_CLIENTS )

@@ -466,6 +466,14 @@ void rocsparse_arguments_config::set_description(options_description& desc)
       value<rocsparse_int>(&this->b_sptrsv_alg)->default_value(rocsparse_sptrsv_alg_default),
       "Indicates what algorithm to use when running SpTRSV. Possibly choices are default: 0, limited memory: 1 (default:0)")
 
+    ("spsm_alg",
+      value<rocsparse_int>(&this->b_spsm_alg)->default_value(rocsparse_spsm_alg_default),
+      "Indicates what algorithm to use when running SpSM. Possibly choices are default: 0, limited memory: 1 (default:0)")
+
+    ("sptrsm_alg",
+      value<rocsparse_int>(&this->b_sptrsm_alg)->default_value(rocsparse_sptrsm_alg_default),
+      "Indicates what algorithm to use when running SpTRSM. Possibly choices are default: 0, limited memory: 1 (default:0)")
+
     ("itilu0_alg",
       value<rocsparse_int>(&this->b_itilu0_alg)->default_value(rocsparse_itilu0_alg_default),
       "Indicates what algorithm to use when running Iterative ILU0. see documentation.")
@@ -599,6 +607,26 @@ int rocsparse_arguments_config::parse(int& argc, char**& argv, options_descripti
         return -1;
     }
 
+    if(this->b_spsm_alg != rocsparse_spsm_alg_default
+#if defined(ROCSPARSE_WITH_SPTRSM_CSC)
+       && this->b_spsm_alg != rocsparse_spsm_alg_limited_memory
+#endif
+    )
+    {
+        std::cerr << "Invalid value for --spsm_alg" << std::endl;
+        return -1;
+    }
+
+    if(this->b_sptrsm_alg != rocsparse_sptrsm_alg_default
+#if defined(ROCSPARSE_WITH_SPTRSM_CSC)
+       && this->b_sptrsm_alg != rocsparse_sptrsm_alg_limited_memory
+#endif
+    )
+    {
+        std::cerr << "Invalid value for --sptrsm_alg" << std::endl;
+        return -1;
+    }
+
     if(this->b_spmm_alg != rocsparse_spmm_alg_default && this->b_spmm_alg != rocsparse_spmm_alg_csr
        && this->b_spmm_alg != rocsparse_spmm_alg_bsr
        && this->b_spmm_alg != rocsparse_spmm_alg_coo_segmented
@@ -718,6 +746,8 @@ int rocsparse_arguments_config::parse(int& argc, char**& argv, options_descripti
     this->spmv_alg             = (rocsparse_spmv_alg)this->b_spmv_alg;
     this->spsv_alg             = (rocsparse_spsv_alg)this->b_spsv_alg;
     this->sptrsv_alg           = (rocsparse_sptrsv_alg)this->b_sptrsv_alg;
+    this->spsm_alg             = (rocsparse_spsm_alg)this->b_spsm_alg;
+    this->sptrsm_alg           = (rocsparse_sptrsm_alg)this->b_sptrsm_alg;
     this->itilu0_alg           = (rocsparse_itilu0_alg)this->b_itilu0_alg;
     this->spmm_alg             = (rocsparse_spmm_alg)this->b_spmm_alg;
     this->sddmm_alg            = (rocsparse_sddmm_alg)this->b_sddmm_alg;

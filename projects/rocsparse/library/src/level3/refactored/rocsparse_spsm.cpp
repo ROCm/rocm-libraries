@@ -33,6 +33,7 @@
 #include "rocsparse_utility.hpp"
 
 #include "rocsparse_coosm.hpp"
+#include "rocsparse_csc_to_csr_descr.hpp"
 #include "rocsparse_cscsm.hpp"
 #include "rocsparse_csrsm.hpp"
 
@@ -46,6 +47,9 @@ const char* rocsparse::enum_utils::to_string(rocsparse_spsm_alg value_)
     switch(value_)
     {
         CASE(rocsparse_spsm_alg_default);
+#if defined(ROCSPARSE_WITH_SPTRSM_CSC)
+        CASE(rocsparse_spsm_alg_limited_memory);
+#endif
 #undef CASE
     }
     THROW_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
@@ -74,6 +78,9 @@ bool rocsparse::enum_utils::is_invalid(rocsparse_spsm_alg value_)
     switch(value_)
     {
     case rocsparse_spsm_alg_default:
+#if defined(ROCSPARSE_WITH_SPTRSM_CSC)
+    case rocsparse_spsm_alg_limited_memory:
+#endif
     {
         return false;
     }
@@ -119,6 +126,24 @@ namespace rocsparse
             1, 1, alpha_datatype, alpha_pointer, nullptr, 1, 0, handle->pointer_mode);
         rocsparse_dnvec_descr alpha = &alpha_st;
 
+        // A CSR matrix with (conjugate) transpose is solved as the CSC matrix without transpose
+        // that shares its arrays, with conjugated values.
+        const bool             limited_memory = rocsparse::is_limited_memory(alg);
+        bool                   conj           = false;
+        _rocsparse_mat_descr   descr_csc;
+        _rocsparse_spmat_descr mat_csc;
+        if(matA->format == rocsparse_format_csr && trans_A != rocsparse_operation_none)
+        {
+            rocsparse::build_csc_from_csr(*matA, mat_csc, descr_csc);
+            if(rocsparse::cscsm_use_limited_memory(
+                   rocsparse_operation_none, trans_B, alpha, &mat_csc, matC, limited_memory))
+            {
+                conj    = (trans_A == rocsparse_operation_conjugate_transpose);
+                trans_A = rocsparse_operation_none;
+                matA    = &mat_csc;
+            }
+        }
+
         const bool is_C_column_order = (matC->order == rocsparse_order_column);
         switch(stage)
         {
@@ -147,7 +172,8 @@ namespace rocsparse
                                                                        matA,
                                                                        &matC_row_order,
                                                                        buffer_size,
-                                                                       nullptr));
+                                                                       nullptr,
+                                                                       limited_memory));
                 break;
             }
             case rocsparse_format_csr:
@@ -239,7 +265,12 @@ namespace rocsparse
 
                 auto csrsm_info = matA->info->get_csrsm_info();
 
-                const bool has_trm_info = (csrsm_info->get(op_csr, fill_mode_csr) != nullptr);
+                const bool push = rocsparse::cscsm_use_limited_memory(
+                    trans_A, trans_B, alpha, matA, &local_Z, limited_memory);
+                const bool has_trm_info
+                    = push ? (csrsm_info->get(rocsparse_operation_none, matA->descr->fill_mode)
+                              != nullptr)
+                           : (csrsm_info->get(op_csr, fill_mode_csr) != nullptr);
 
                 if(has_trm_info == false)
                 {
@@ -260,7 +291,8 @@ namespace rocsparse
                                                   &csrsm_info,
                                                   std::numeric_limits<size_t>::max(),
                                                   csrsm_buffer,
-                                                  nullptr));
+                                                  nullptr,
+                                                  limited_memory));
                 }
                 return rocsparse_status_success;
             }
@@ -422,7 +454,9 @@ namespace rocsparse
                                                                    matA->info->get_csrsm_info(),
                                                                    matsm_buffer_size_in_bytes,
                                                                    matsm_buffer,
-                                                                   p_error));
+                                                                   p_error,
+                                                                   limited_memory,
+                                                                   conj));
 
                 break;
             }

@@ -71,6 +71,15 @@ public:
                                     size_t              sizeof_begin,
                                     hipStream_t         stream);
 
+    // PROTOTYPE: hands the task arrays of a fill mode over to the caller.
+    void release_tasks(rocsparse_fill_mode fill_mode, void** task_col, void** task_begin)
+    {
+        *task_col                     = this->m_task_col[fill_mode];
+        *task_begin                   = this->m_task_begin[fill_mode];
+        this->m_task_col[fill_mode]   = nullptr;
+        this->m_task_begin[fill_mode] = nullptr;
+    }
+
     rocsparse::singular_info_t* get_singularity_numeric_exact()
     {
         return &this->m_singularity_numeric_exact;

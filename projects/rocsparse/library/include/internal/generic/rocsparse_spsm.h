@@ -80,6 +80,14 @@ extern "C" {
 *  temporary storage buffers, use row order for the matrix \f$C\f$ and row order for the matrix \f$B\f$ (or column order if
 *  \f$B\f$ is being transposed).
 *
+*  \p rocsparse_spsm supports the following algorithms:
+*
+*  <table>
+*  <tr><th>Algorithm                                  <th>Deterministic  <th>Notes
+*  <tr><td>rocsparse_spsm_alg_default</td>         <td>Yes</td>        <td>For a CSC matrix without transpose or a CSR matrix with transpose or conjugate transpose, the analysis builds the transposed structure and every solve gathers the matrix values. </td>
+*  <tr><td>rocsparse_spsm_alg_limited_memory</td>  <td>No</td>         <td>For a CSC matrix without transpose or a CSR matrix with transpose or conjugate transpose, the transposed structure is not built: once an unknown is computed, its column of \f$op(A)\f$ updates the unknowns that depend on it, and the partial sums are accumulated in the output matrix. The analysis requires a single pass over the matrix. Atomic additions are used, so the results are not bitwise reproducible. Other formats and operations, and the diagonal solve mode, use \ref rocsparse_spsm_alg_default. </td>
+*  </table>
+*
 *  \p rocsparse_spsm supports \ref rocsparse_indextype_i32 and \ref rocsparse_indextype_i64 index precisions for storing the
 *  row pointer and column indices arrays of the sparse matrices. \p rocsparse_spsm supports the following data types for
 *  \f$op(A)\f$, \f$op(B)\f$, \f$C\f$, and compute types for \f$\alpha\f$:

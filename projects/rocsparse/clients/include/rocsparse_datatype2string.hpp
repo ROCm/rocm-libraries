@@ -417,6 +417,10 @@ constexpr auto rocsparse_spsmalg2string(rocsparse_spsm_alg alg)
     {
     case rocsparse_spsm_alg_default:
         return "default";
+#if defined(ROCSPARSE_WITH_SPTRSM_CSC)
+    case rocsparse_spsm_alg_limited_memory:
+        return "limited_memory";
+#endif
     }
     return "invalid";
 }
@@ -427,6 +431,10 @@ constexpr auto rocsparse_sptrsmalg2string(rocsparse_sptrsm_alg alg)
     {
     case rocsparse_sptrsm_alg_default:
         return "default";
+#if defined(ROCSPARSE_WITH_SPTRSM_CSC)
+    case rocsparse_sptrsm_alg_limited_memory:
+        return "limited_memory";
+#endif
     }
     return "invalid";
 }

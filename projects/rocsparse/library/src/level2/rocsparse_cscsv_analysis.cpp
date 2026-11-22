@@ -40,17 +40,6 @@
 #if defined(ROCSPARSE_WITH_SPTRSV_CSC)
 namespace rocsparse
 {
-    // Lanes per task: smallest power of two >= min_lanes, at least 2, at most the wavefront size.
-    static uint32_t cscsv_num_lanes(int64_t min_lanes, uint32_t wavefront_size)
-    {
-        uint32_t num_lanes = 2;
-        while(static_cast<int64_t>(num_lanes) < min_lanes && num_lanes < wavefront_size)
-        {
-            num_lanes *= 2;
-        }
-        return num_lanes;
-    }
-
     // One thread per nonzero, so that a long column does not serialize the analysis. The
     // diagonal offsets are 0-based offsets into csc_row_ind and csc_val.
     template <uint32_t BLOCKSIZE, typename I, typename J>
@@ -191,6 +180,16 @@ rocsparse_status rocsparse::cscsv_analysis_launch_find(rocsparse::cscsv_analysis
     return rocsparse_status_success;
 }
 #endif
+
+uint32_t rocsparse::cscsv_num_lanes(int64_t min_lanes, uint32_t wavefront_size)
+{
+    uint32_t num_lanes = 2;
+    while(static_cast<int64_t>(num_lanes) < min_lanes && num_lanes < wavefront_size)
+    {
+        num_lanes *= 2;
+    }
+    return num_lanes;
+}
 
 rocsparse_status rocsparse::cscsv_analysis(rocsparse_handle            handle,
                                            rocsparse_operation         trans,

@@ -86,6 +86,9 @@ namespace rocsparse
     // through the csrsv checks.
     rocsparse_status cscsv_checkarg_matrix_properties(rocsparse_const_spmat_descr A);
 
+    // Lanes per task: smallest power of two >= min_lanes, at least 2, at most the wavefront size.
+    uint32_t cscsv_num_lanes(int64_t min_lanes, uint32_t wavefront_size);
+
     // Buffer of the solve without transpose: ticket, remaining dependencies and partial sums of
     // each batch instance.
     struct cscsv_solve_buffer_layout_t

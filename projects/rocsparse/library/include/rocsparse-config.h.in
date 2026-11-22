@@ -40,5 +40,6 @@
 
 /* rocSPARSE 5.3 */
 #cmakedefine ROCSPARSE_WITH_SPTRSV_CSC
+#cmakedefine ROCSPARSE_WITH_SPTRSM_CSC
 
 #endif /* ROCSPARSE_CONFIG_H */
