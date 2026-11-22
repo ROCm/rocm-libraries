@@ -137,19 +137,14 @@ def test_unknown_dtype_is_refused(dtype):
         dks.direct_verify_tol(dtype, _ARCH)
 
 
-def test_torch_dtype_map():
-    """The benchmark's torch host dtype is the storage dtype (fp32 for tf32).
-    ``_torch_dtype_of`` reads the dtypes off the module its caller passes, so
-    a module with just those three attributes shows the map without torch."""
-    from types import SimpleNamespace
+def test_abi_dtype_is_the_storage_dtype():
+    """The launch signature spells a direct problem in its storage dtype:
+    fp32 for tf32, the dtype itself otherwise."""
+    from benchmarks.common.benchmark_direct_conv import _abi_dtype
 
-    from benchmarks.common.benchmark_direct_conv import _abi_dtype, _torch_dtype_of
-
-    module = SimpleNamespace(float16="float16", bfloat16="bfloat16", float32="float32")
-    assert _torch_dtype_of(module, "fp16") == "float16"
-    assert _torch_dtype_of(module, "bf16") == "bfloat16"
-    assert _torch_dtype_of(module, "fp32") == "float32"
-    assert _torch_dtype_of(module, "tf32") == "float32"
+    assert _abi_dtype("fp16") == "fp16"
+    assert _abi_dtype("bf16") == "bf16"
+    assert _abi_dtype("fp32") == "fp32"
     assert _abi_dtype("tf32") == "fp32"
 
 
