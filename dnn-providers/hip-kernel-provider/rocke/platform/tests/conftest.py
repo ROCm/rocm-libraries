@@ -116,8 +116,11 @@ point_locators_at_staged_payload(_HERE)
 
 
 def pytest_configure(config):
-    """Declare the shard-cost mark for runs that do not load the
-    ``rocke.tests.ctest_shard`` plugin."""
+    """Apply the test session's garbage collector setting
+    (``rocke.tests.session_gc``) and declare the shard-cost mark for runs that
+    do not load the ``rocke.tests.ctest_shard`` plugin."""
     from rocke.tests.ctest_shard import register_shard_cost_marker
+    from rocke.tests.session_gc import use_test_session_gc
 
+    use_test_session_gc()
     register_shard_cost_marker(config)

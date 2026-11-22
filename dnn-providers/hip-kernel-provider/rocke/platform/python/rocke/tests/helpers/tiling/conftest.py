@@ -18,6 +18,7 @@ from typing import TypeVar
 import pytest
 
 from rocke.tests.gpu import current_device_arch, current_device_arch_in
+from rocke.tests.session_gc import use_test_session_gc
 
 _Fixture = TypeVar("_Fixture", bound=Callable[..., object])
 
@@ -32,6 +33,7 @@ def _gpu_fixture(function: _Fixture) -> _Fixture:
 
 
 def pytest_configure(config: pytest.Config) -> None:
+    use_test_session_gc()
     config.addinivalue_line(
         "markers", "gpu: launches a kernel on the current GPU (asks for a GPU fixture)"
     )
