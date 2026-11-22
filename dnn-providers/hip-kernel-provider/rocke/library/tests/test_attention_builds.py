@@ -24,6 +24,7 @@ All tests are pure codegen (no GPU, no subprocess).
 from __future__ import annotations
 
 import importlib
+import itertools
 import unittest
 
 import pytest
@@ -1474,6 +1475,43 @@ class TestAttentionHelpers(unittest.TestCase):
                 art = _compile_or_skip(k, arch="gfx950")
                 self.assertGreater(art.hsaco_bytes, 0)
                 _assert_resources_fit(art, arch="gfx950", kernel_name=k.name)
+
+    def test_gfx942_dispatched_dense_prefill_compiles_and_fits_budget(self):
+        """comgr build + resource-budget net for the gfx942 dense prefill kernels
+        the dispatcher ships (D64 / D128 x fp16 / bf16, with and without LSE).
+
+        The specs come from the gfx942 dense dispatch factory, so the check
+        follows the shipped ``waves_per_eu``, persistent-grid and LDS-pad choices
+        rather than a hand-built geometry. Those choices pin occupancy through
+        ``amdgpu-waves-per-eu``: a register-pressure regression there does not
+        fail the compile, it spills to scratch, which ``_assert_resources_fit``
+        refuses. Torch-free; comgr targets gfx942 via its triple.
+        """
+        from dispatch.attention import AttentionRequest, attention_tuning_spec
+        from kernels.gfx942.attention_dense import build_attention_dense
+
+        for head_size, dtype, emit_lse in itertools.product(
+            (64, 128), ("fp16", "bf16"), (False, True)
+        ):
+            with self.subTest(head_size=head_size, dtype=dtype, emit_lse=emit_lse):
+                request = AttentionRequest(
+                    batch=1,
+                    nhead_q=32,
+                    nhead_k=8,
+                    seqlen_q=4096,
+                    seqlen_k=4096,
+                    hdim_q=head_size,
+                    hdim_v=head_size,
+                    arch="gfx942",
+                    mask_type=1,
+                    dtype=dtype,
+                    emit_lse=emit_lse,
+                )
+                spec = attention_tuning_spec(request, "gfx942_dense").kernel_spec
+                k = build_attention_dense(spec, arch="gfx942")
+                art = _compile_or_skip(k, arch="gfx942")
+                self.assertGreater(art.hsaco_bytes, 0)
+                _assert_resources_fit(art, arch="gfx942", kernel_name=k.name)
 
     def test_gfx950_dense_paged_spec_admission(self):
         """Paged spec fields + validation: accept the fp16/bf16 D64/D128 causal
