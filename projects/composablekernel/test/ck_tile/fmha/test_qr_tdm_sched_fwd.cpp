@@ -954,9 +954,36 @@ constexpr std::array<ForwardCase, 16> kD64ExpandedCases = [] {
     return cases;
 }();
 
-constexpr int kCaseCount = static_cast<int>(
-    kCases.size() + kAdditionalCases.size() + kVirtualSinkCases.size() + kSelectorCases.size() +
-    kPartialQueryCases.size() + kD64WideTileCases.size() + kD64ExpandedCases.size());
+// D64 N128 inputs whose M128 grid exceeds the CU count, so the M64 tile's grid predicate fails
+// and the M128xN128 scheduled tile runs (every other D64 N128 input here takes M64). Appended so
+// every earlier case index remains stable.
+constexpr std::array<ForwardCase, 2> kD64M128GridCases{{
+    {"D64GroupGridAboveCuM128Dense",
+     64,
+     128,
+     1024,
+     mask_enum::no_mask,
+     false,
+     1,
+     1,
+     SequencePointers::AboveCuGrid,
+     128},
+    {"D64GroupGridAboveCuM128BottomRight",
+     64,
+     128,
+     1024,
+     mask_enum::mask_bottom_right,
+     false,
+     1,
+     1,
+     SequencePointers::AboveCuGrid,
+     128},
+}};
+
+constexpr int kCaseCount =
+    static_cast<int>(kCases.size() + kAdditionalCases.size() + kVirtualSinkCases.size() +
+                     kSelectorCases.size() + kPartialQueryCases.size() + kD64WideTileCases.size() +
+                     kD64ExpandedCases.size() + kD64M128GridCases.size());
 
 const ForwardCase& GetCase(int index)
 {
@@ -977,7 +1004,10 @@ const ForwardCase& GetCase(int index)
     index -= static_cast<int>(kPartialQueryCases.size());
     if(index < static_cast<int>(kD64WideTileCases.size()))
         return kD64WideTileCases[index];
-    return kD64ExpandedCases[index - kD64WideTileCases.size()];
+    index -= static_cast<int>(kD64WideTileCases.size());
+    if(index < static_cast<int>(kD64ExpandedCases.size()))
+        return kD64ExpandedCases[index];
+    return kD64M128GridCases[index - kD64ExpandedCases.size()];
 }
 
 enum class ValuePattern
@@ -1137,14 +1167,24 @@ std::vector<float> Decode(const std::vector<Data>& data)
     return decoded;
 }
 
-std::string ExpectedKernel(const ForwardCase& c, bool lse, bool group)
+std::string ExpectedKernel(const ForwardCase& c,
+                           bool lse,
+                           bool group,
+                           std::size_t m128_blocks,
+                           int num_cus,
+                           int max_seqlen_q)
 {
     const int value_dimension = c.dimension == 64 ? 64 : 128;
-    const int m               = c.scheduled ? 128 : 64;
     const int n               = c.virtual_sink ? 64 : c.expected_n;
     // Finite virtual sinks use the qr_tdm fallback; sched is specialized for null sink.
     const bool use_scheduled = c.scheduled && !c.virtual_sink;
-    std::string name         = "fmha_fwd_d" + std::to_string(c.dimension) + "_" + kDataType +
+    // D64 scheduled N128 takes the M64 tile when the M128 grid leaves CUs idle, or fills each CU
+    // once with at least 2048 query rows (GFX125_D64_SCHED_M64_CONSTRAINT in the codegen).
+    const std::size_t cus = static_cast<std::size_t>(num_cus);
+    const bool sched_m64  = use_scheduled && c.dimension == 64 && n == 128 &&
+                           (m128_blocks < cus || (m128_blocks <= cus && max_seqlen_q >= 2048));
+    const int m      = c.scheduled && !sched_m64 ? 128 : 64;
+    std::string name = "fmha_fwd_d" + std::to_string(c.dimension) + "_" + kDataType +
                        (group ? "_group_b" : "_batch_b") + std::to_string(m) + "x" +
                        std::to_string(n) + "x32x" + std::to_string(value_dimension) + "x32x" +
                        std::to_string(c.dimension) + "_r4x1x1_r4x1x1_w16x16x32_w16x16x32";
@@ -1444,13 +1484,15 @@ TEST_P(QrTdmSchedForward, GeneratedDispatcherAndIndependentFp32)
     }
     if(c.pointers == SequencePointers::AboveCuGrid)
     {
-        // Every N128 predicate except grid<=CU is true. No fabricated maximum or
-        // empty sequence is used to make this branch reachable on any CU count.
+        // D192: every N128 predicate except grid<=CU is true. D64: every N128 predicate is
+        // true and only the M64 grid predicate fails. No fabricated maximum or empty sequence
+        // is used to make this branch reachable on any CU count.
         ASSERT_EQ(args.max_seqlen_q, 128);
-        ASSERT_EQ(args.seqlen_k, 512 * batch);
+        ASSERT_EQ(args.seqlen_k, c.key_length * batch);
         ASSERT_EQ(args.seqlen_k_ptr, nullptr);
         ASSERT_EQ(args.cu_seqlen_k_ptr, nullptr);
-        ASSERT_EQ(c.mask, mask_enum::no_mask);
+        if(c.dimension == 192)
+            ASSERT_EQ(c.mask, mask_enum::no_mask);
         ASSERT_EQ(grid_blocks, static_cast<std::size_t>(properties.multiProcessorCount) + 1);
     }
     fmha_fwd_traits traits{};
@@ -1476,7 +1518,13 @@ TEST_P(QrTdmSchedForward, GeneratedDispatcherAndIndependentFp32)
     ASSERT_GE(result, 0) << "Generated dispatcher has no supported instance";
     ASSERT_EQ(hipGetLastError(), hipSuccess);
     ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
-    ASSERT_EQ(selected_kernel, ExpectedKernel(c, lse, sequences.group));
+    ASSERT_EQ(selected_kernel,
+              ExpectedKernel(c,
+                             lse,
+                             sequences.group,
+                             grid_blocks,
+                             properties.multiProcessorCount,
+                             args.max_seqlen_q));
     o_device.FromDevice(o.data());
     if(lse)
         lse_device.FromDevice(lse_data.data());
