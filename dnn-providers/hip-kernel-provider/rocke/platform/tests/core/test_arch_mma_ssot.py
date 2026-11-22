@@ -875,6 +875,26 @@ def test_partial_query_rejects_ambiguity_but_enumeration_and_existence_are_valid
         catalog.enumerate(**query, scales=(None,))
 
 
+def test_editing_an_enumeration_leaves_the_next_answer_unchanged():
+    """A repeated query is answered from the catalog's memo; each call still
+    returns a list of its own, so a caller that edits one cannot change what
+    the next caller gets."""
+    catalog = MmaCatalog(_contracts())
+    query = {
+        "family": "wmma_scaled",
+        "a_dtype": "fp8",
+        "b_dtype": "bf8",
+        "c_dtype": "fp32",
+        "m": 16,
+        "n": 16,
+    }
+    first = catalog.enumerate(**query)
+    expected = list(first)
+    first.clear()
+    assert catalog.enumerate(**query) == expected
+    assert len(expected) == 7
+
+
 def test_scale_alias_selects_the_same_contract():
     catalog = MmaCatalog(_contracts())
     query = dict(

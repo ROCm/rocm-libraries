@@ -1879,6 +1879,9 @@ class MmaCatalog:
 
     def __init__(self, ops: List[MmaOp]) -> None:
         self._ops = tuple(ops)
+        # Normalized query -> its matching atoms. The catalog is immutable and the
+        # sweeps and spec validators repeat the same few queries many times.
+        self._matches: dict[tuple, tuple[MmaOp, ...]] = {}
 
     @property
     def ops(self) -> Tuple[MmaOp, ...]:
@@ -1914,6 +1917,23 @@ class MmaCatalog:
         # Preserve the historical three-dtype query by defaulting dst to src2.
         # Indexed callers can state a distinct result.
         dst_key = normalize_dtype(src_dtypes[2] if dst_dtype is None else dst_dtype)
+        query = (family, src_keys, dst_key, scales, m, n)
+        matches = self._matches.get(query)
+        if matches is None:
+            matches = tuple(self._scan(*query))
+            self._matches[query] = matches
+        return list(matches)
+
+    def _scan(
+        self,
+        family: str,
+        src_keys: tuple[str, str, str],
+        dst_key: str,
+        scales: tuple[str | None, str | None, int | None] | None,
+        m: int | None,
+        n: int | None,
+    ) -> list[MmaOp]:
+        """The atoms matching one normalized :meth:`enumerate` query, natives preferred."""
         out = []
         for op in self._ops:
             if op.family != family:
