@@ -1,8 +1,9 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-// GemmEPermuteKernel cases, shared by the XDL and WMMA tests. The including file defines
-// EPermuteTestConfig: the block, warp and warp tiles, TransposeC and DeviceSupported().
+// GemmEPermuteKernel cases, shared by the XDL, WMMA and TDM tests. The including file defines
+// EPermuteTestConfig: the block, warp and warp tiles, TransposeC, DoubleSmemBuffer, PadN (kPadN),
+// the Pipeline<Problem> template and DeviceSupported().
 
 #include <cstdint>
 #include <cstring>
@@ -28,10 +29,16 @@ using Shape =
     ck_tile::TileGemmShape<ck_tile::sequence<Cfg::M_Tile, Cfg::N_Tile, Cfg::K_Tile>,
                            ck_tile::sequence<Cfg::M_Warp, Cfg::N_Warp, 1>,
                            ck_tile::sequence<Cfg::M_Warp_Tile, Cfg::N_Warp_Tile, Cfg::K_Warp_Tile>>;
-using Traits =
-    ck_tile::TileGemmUniversalTraits<false, false, false, false, Row, Row, Row, Cfg::TransposeC>;
+using Traits   = ck_tile::TileGemmUniversalTraits<false,
+                                                  Cfg::PadN,
+                                                  false,
+                                                  Cfg::DoubleSmemBuffer,
+                                                  Row,
+                                                  Row,
+                                                  Row,
+                                                  Cfg::TransposeC>;
 using Problem  = ck_tile::UniversalGemmPipelineProblem<Bf16, Bf16, float, Shape, Traits>;
-using Pipeline = ck_tile::GemmPipelineAgBgCrCompV3<Problem>;
+using Pipeline = Cfg::Pipeline<Problem>;
 using Epilogue =
     ck_tile::CShuffleEpilogue<ck_tile::CShuffleEpilogueProblem<Bf16,
                                                                Bf16,
@@ -48,7 +55,12 @@ using Epilogue =
                                                                Cfg::M_Warp_Tile,
                                                                Cfg::N_Warp_Tile,
                                                                Cfg::K_Warp_Tile,
-                                                               Problem::TransposeC>>;
+                                                               Problem::TransposeC,
+                                                               1,
+                                                               false,
+                                                               1,
+                                                               1,
+                                                               Cfg::DoubleSmemBuffer>>;
 using Partitioner = ck_tile::GemmSpatiallyLocalTilePartitioner<Shape, 8, 16>;
 using Kernel      = ck_tile::GemmEPermuteKernel<Partitioner, Pipeline, Epilogue>;
 using Dense       = ck_tile::GemmKernel<Partitioner, Pipeline, Epilogue>;
@@ -192,12 +204,14 @@ TEST_F(GemmEPermute, RejectsNegativeStrideUnderMaskedTail)
     EXPECT_FALSE(Kernel::IsSupportedArgument(kargs));
 }
 
-// Without kPadN, a ragged N would fold the columns past N into E unmasked.
-TEST_F(GemmEPermute, RejectsRaggedNWithoutPadN)
+// Without kPadN, a ragged N would fold the columns past N into E unmasked; with it they are masked.
+TEST_F(GemmEPermute, RaggedN)
 {
-    static_assert(!Pipeline::kPadN);
-    EXPECT_FALSE(
-        Kernel::IsSupportedArgument(host_kargs(meta_desc(4, 128, 3, Cfg::N_Tile / 2), 64)));
+    const auto p = meta_desc(4, 128, 3, Cfg::N_Tile / 2);
+    if constexpr(Pipeline::kPadN)
+        run_and_check(p, 64);
+    else
+        EXPECT_FALSE(Kernel::IsSupportedArgument(host_kargs(p, 64)));
 }
 
 TEST_F(GemmEPermute, RejectsSpanOf2GB)

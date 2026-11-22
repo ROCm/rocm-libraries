@@ -63,9 +63,9 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
                        std::is_same_v<typename Base::BLayout, tensor_layout::gemm::ColumnMajor>),
                   "comp_tdm_v3 with 8-bit A/B supports A row-major, B column-major only");
 
-    // Only tested in the plain, batched, Stream-K and MX GEMM kernels; the multi-D, grouped,
-    // multi-ABD and batched-contraction kernels reject a pipeline that sets this
-    // (UniversalGemmKernel::kIsPlainGemmOnlyPipeline).
+    // Only tested in the plain, batched, Stream-K, MX and E-permute (test_gemm_e_permute_tdm)
+    // GEMM kernels; the multi-D, grouped, multi-ABD and batched-contraction kernels reject a
+    // pipeline that sets this (UniversalGemmKernel::kIsPlainGemmOnlyPipeline).
     static constexpr bool kPlainGemmOnly = true;
 
 #if defined(__gfx125__)

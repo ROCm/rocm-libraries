@@ -298,6 +298,19 @@ if(GPU_TARGETS MATCHES "gfx94|gfx95|gfx90a|gfx11|gfx12")
             target_compile_options(test_ck_tile_gemm_e_permute_wmma PRIVATE ${EXAMPLE_GEMM_COMPILE_OPTIONS})
             ck_tile_restrict_archs(test_ck_tile_gemm_e_permute_wmma "^gfx125")
             list(APPEND CK_TILE_GEMM_TEST_TARGETS test_ck_tile_gemm_e_permute_wmma)
+            # The same cases with TDM pipelines: the run-ahead ring (RunAheadPolicy<2, 1>), and
+            # comp_tdm_v3 with kPadN (E_PERMUTE_TDM_V3). A mismatched barrier count
+            # would hang, hence the cap (as for tdm_run_ahead_wmma).
+            set(CK_TILE_GEMM_E_PERMUTE_TDM_TARGETS
+                test_ck_tile_gemm_e_permute_tdm test_ck_tile_gemm_e_permute_tdm_v3)
+            foreach(test_target ${CK_TILE_GEMM_E_PERMUTE_TDM_TARGETS})
+                add_gtest_executable(${test_target} test_gemm_e_permute_tdm.cpp)
+                target_compile_options(${test_target} PRIVATE ${EXAMPLE_GEMM_COMPILE_OPTIONS})
+                ck_tile_restrict_archs(${test_target} "^gfx125")
+                set_tests_properties(${test_target} PROPERTIES TIMEOUT 900)
+            endforeach()
+            target_compile_definitions(test_ck_tile_gemm_e_permute_tdm_v3 PRIVATE E_PERMUTE_TDM_V3)
+            list(APPEND CK_TILE_GEMM_TEST_TARGETS ${CK_TILE_GEMM_E_PERMUTE_TDM_TARGETS})
         endif()
     endif()
 
@@ -306,10 +319,10 @@ if(GPU_TARGETS MATCHES "gfx94|gfx95|gfx90a|gfx11|gfx12")
         set_tests_properties(${test_target} PROPERTIES LABELS "CK_TILE_GEMM_TESTS")
     endforeach()
     # The loop above replaces the SMOKE_TEST label, and the gfx1250 CI stage only runs "ninja smoke".
-    # Keep the gfx125 async-LDS tests, the TDM LDS padding test and the E-permute test in that set;
+    # Keep the gfx125 async-LDS tests, the TDM LDS padding test and the E-permute tests in that set;
     # all of them fit the smoke time budget on the gfx1250 emulator.
     foreach(test_target ${CK_TILE_GEMM_ASYNC_WMMA_TARGETS} test_ck_tile_gemm_pipeline_tdm_lds_padding_wmma
-                        test_ck_tile_gemm_e_permute_wmma)
+                        test_ck_tile_gemm_e_permute_wmma ${CK_TILE_GEMM_E_PERMUTE_TDM_TARGETS})
         if(TEST ${test_target})
             set_property(TEST ${test_target} APPEND PROPERTY LABELS "SMOKE_TEST")
         endif()
