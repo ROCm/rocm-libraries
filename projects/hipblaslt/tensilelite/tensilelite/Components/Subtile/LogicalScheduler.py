@@ -1082,6 +1082,10 @@ class LogicalScheduler:
         return label.startswith("MAINLOOP") or (
             label.startswith("NGLL_C") and label[len("NGLL_C"):].isdigit())
 
+    @staticmethod
+    def _isNllBody(label) -> bool:
+        return label.startswith("NLL_C") and label[len("NLL_C"):].isdigit()
+
     # ── Place LRs ─────────────────────────────────────────
 
     def _partition_tile_range(self, pi: int) -> dict:
@@ -5987,9 +5991,12 @@ class LogicalScheduler:
         if label.startswith("NGLL") or label.startswith("NLL"):
             module = guardExitOverwriteReread(
                 module, getattr(self, "_earlyOverwriteVgprs", ()))
+        # The NLL keeps its exit schedule but takes the same body post-passes.
+        # Its FUSED copy is excluded: the woven stores are placed against it.
+        bodyPasses = steady or self._isNllBody(label)
         # The deferral removes a drain and moves reads behind it, so it runs
         # before dropDominatedLgkmWaits proves drops against the final order.
-        if self.halfDisjoint and steady:
+        if self.halfDisjoint and bodyPasses:
             balanced_reads = lr_reads(lambda lr: lr.balancedCurrentCell)
             # The deferral skips the barrier gap and the gap after it, then keeps
             # each read minGapDsReadToWait MFMAs ahead of its consumer. Dual-period
@@ -5998,14 +6005,14 @@ class LogicalScheduler:
                 "BALANCE_MIN_LEAD_MFMAS leaves no gap for a balanced read"
             # planHalfDisjointBalance only pays off once the reads leave the
             # partition-0 prefix; kept there they are slower than no balance.
-            # An NGLL that refuses keeps the prefix, as it had before.
+            # An exit body that refuses keeps the prefix, as it had before.
             if (balanced_reads and not deferBalancedCurrentCellWait(
                     module, balanced_reads, minGapDsReadToWait)
                     and label.startswith("MAINLOOP")):
                 raise RuntimeError(
                     f"{label}: the balanced current-cell reads could not leave "
                     "partition 0's prefix (deferBalancedCurrentCellWait refused)")
-        if (steady
+        if (bodyPasses
                 and self.config.uniformPgrEpoch
                 and self.config.dualPeriodScale):
             dropDominatedLgkmWaits(module)
@@ -6015,7 +6022,7 @@ class LogicalScheduler:
             # C1 still places scale refreshes in C0, so C0 is final only here.
             barrierAloneInGap(self._mainloopC0Schedule)
             barrierAloneInGap(module)
-        if self.halfDisjoint and steady:
+        if self.halfDisjoint and bodyPasses:
             barrier_gap_reads = (label == "MAINLOOP_C1" and self.config.dualPeriodScale
                                  and self._mainloopC0Schedule is not None)
             # The moved read can leave a VALU leading its old gap, so the

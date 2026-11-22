@@ -802,9 +802,9 @@ def test_loads_name_their_macro_tile(base_src):
     assert "MT=n+2" in src
 
 
-def test_8x10_balances_main_loop_and_ngll_bodies(balanced_8x10):
+def test_8x10_balances_main_loop_and_exit_bodies(balanced_8x10):
     _src, calls = balanced_8x10
-    assert len(calls) == 4, "expected the C0 and C1 main-loop bodies and both NGLL copies"
+    assert len(calls) == 6, "expected the C0 and C1 main-loop bodies and both NGLL and NLL copies"
     for body, reads, applied in calls:
         assert reads, body.name
         assert applied, body.name
@@ -867,6 +867,15 @@ def test_ngll_copies_open_like_their_main_loop_role(exit_src):
         body = _region_lines(exit_src, ngll)
         assert _opening(body) == _opening(_region_lines(exit_src, _ROLE[ngll])), ngll
         assert _opening(body)[2] != "s_waitcnt vmcnt(0)", ngll
+
+
+def test_nll_copies_wait_behind_their_first_mfma(exit_src):
+    """The NLL drains every load, but behind its first MFMA, as the main loop
+    waits; that MFMA waits on no LDS read issued in the body."""
+    for nll, role in (("NLL_C1", "MAINLOOP_C1"), ("NLL_C0", "MAINLOOP_C0")):
+        reads, at, opener = _opening(_region_lines(exit_src, nll))
+        assert (reads, opener) == (0, "s_waitcnt vmcnt(0)"), nll
+        assert at == _opening(_region_lines(exit_src, role))[1], nll
 
 
 def test_8x10_balanced_reads_follow_their_opening_barrier(balanced_8x10):
