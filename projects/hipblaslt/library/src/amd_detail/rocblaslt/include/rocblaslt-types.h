@@ -610,6 +610,9 @@ struct RocblasltContractionProblem
     // threaded through a 60-argument constructor that every caller spells out.
     // HIPBLASLT_MATMUL_DESC_A_INT4_ENCODING_EXT. Set after construction, like streamKFlags.
     int32_t     int4EncodingA = 0;
+    // HIPBLASLT_MATMUL_DESC_POINTER_MODE, raw. Set after construction, like int4EncodingA;
+    // only the mask-128 log reads it.
+    rocblaslt_pointer_mode pointer_mode = rocblaslt_pointer_mode_host;
     void*       streamKFlags = nullptr;
     bool        swizzleA;
     bool        swizzleB;

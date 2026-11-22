@@ -48,6 +48,22 @@ You can enable the hipBLASLt logging mechanism by setting the following environm
    everything above it. ``HIPBLASLT_LOG_MASK`` is only consulted when ``HIPBLASLT_LOG_LEVEL`` is unset,
    and unlike a level it selects exactly the flags you list.
 
+   The extended profile (``128``) aggregates identical matmul calls and, when the process exits,
+   writes one ``matmul`` record per distinct call with its ``call_count``. Besides the problem,
+   solution and kernel fields of the profile record, each single (non-grouped) GEMM record carries
+   the fields below. Grouped GEMM records do not include them; a reader must treat them as unknown
+   when they are absent.
+
+   * ``pointer_mode``: the raw ``HIPBLASLT_MATMUL_DESC_POINTER_MODE`` value of the call (``0`` for
+     the default host pointer mode).
+   * ``activation_arg0`` and ``activation_arg1``: the epilogue activation arguments
+     (``HIPBLASLT_MATMUL_DESC_EPILOGUE_ACT_ARG0_EXT`` and ``..._ARG1_EXT``, for example the Clamp
+     bounds), printed with enough digits to parse back to the same ``float``.
+
+   These fields are part of the record identity: calls that differ only in them are counted in
+   separate records. Every NaN activation argument, whatever its sign or payload, is treated as one value and
+   printed as ``nan``; ``inf`` and ``-inf`` stay distinct.
+
 *  ``HIPBLASLT_LOG_FILE=<file_name>``: The ``file_name`` is a path to a logging file. The file name can contain ``%i``,
    which is replaced with the process ID, for example, ``<file_name>_%i.log``.
    If ``HIPBLASLT_LOG_FILE`` is not defined, the log messages are printed to stderr.

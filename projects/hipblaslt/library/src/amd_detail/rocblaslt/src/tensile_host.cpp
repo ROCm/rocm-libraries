@@ -72,12 +72,15 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <complex>
 #include <cstdint>
+#include <cstdio>
 #include <exception>
 #include <filesystem>
 #include <iomanip>
 #include <iostream>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -98,6 +101,46 @@
 #endif
 
 #define INTERNAL_HIPHOSTMEM_SIZE 32768
+
+// A binary32 value in a mask-128 (log_profile) record. The aggregation key
+// compares and hashes the exact float, except that every NaN (any sign or
+// payload) is one value printed as geko's canonical "nan"; infinities keep
+// their sign. Other values print with max_digits10 significant digits so the
+// logged value parses back to the same float. A YAML float needs a '.', so
+// "1e+10" is printed as "1.0e+10".
+struct RoundTripFloat
+{
+    float value;
+    bool  operator==(const RoundTripFloat& other) const
+    {
+        return value == other.value || (std::isnan(value) && std::isnan(other.value));
+    }
+};
+
+inline std::ostream& operator<<(std::ostream& os, const RoundTripFloat& x)
+{
+    if(std::isnan(x.value))
+        return os << "nan";
+    char buf[32];
+    std::snprintf(buf, sizeof(buf), "%.*g", std::numeric_limits<float>::max_digits10, x.value);
+    std::string text(buf);
+    auto        exponent = text.find('e');
+    if(exponent != std::string::npos && text.find('.') == std::string::npos)
+        text.insert(exponent, ".0");
+    return os << text;
+}
+
+namespace std
+{
+    template <>
+    struct hash<RoundTripFloat>
+    {
+        size_t operator()(const RoundTripFloat& x) const
+        {
+            return std::isnan(x.value) ? 0 : hash<float>{}(x.value);
+        }
+    };
+}
 
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
 // Declared in rocblaslt-auxiliary.h, and defined here because this is the only
@@ -1473,7 +1516,10 @@ namespace
                                               const int32_t&     rotatingBufferSize,
                                               const int32_t&     coldIterations,
                                               const int32_t&     hotIterations,
-                                              bool               isCpp)
+                                              bool               isCpp,
+                                              int32_t            pointerMode,
+                                              float              activationArg0,
+                                              float              activationArg1)
     {
         bool isComplexInput = (problem.a().dataType() == rocisa::DataType::ComplexFloat
                                || problem.a().dataType() == rocisa::DataType::ComplexDouble);
@@ -1579,7 +1625,13 @@ namespace
                     "solution_Name",
                     solutionName,
                     "kernel_name",
-                    kernelName);
+                    kernelName,
+                    "pointer_mode",
+                    pointerMode,
+                    "activation_arg0",
+                    RoundTripFloat{activationArg0},
+                    "activation_arg1",
+                    RoundTripFloat{activationArg1});
     }
 
     inline void
@@ -6023,7 +6075,10 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
                                                   rotatingBufferSize,
                                                   coldIterations,
                                                   hotIterations,
-                                                  false);
+                                                  false,
+                                                  static_cast<int32_t>(prob.pointer_mode),
+                                                  prob.act0,
+                                                  prob.act1);
         }
 
         auto solution = library->getSolutionByIndex(data->problem, *hardware, *solutionIndex);

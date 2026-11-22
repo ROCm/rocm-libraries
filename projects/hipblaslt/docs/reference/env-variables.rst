@@ -45,7 +45,8 @@ For more information, see :doc:`Use logging and heuristics <../how-to/use-loggin
         | 16: API trace
         | 32: Bench
         | 64: Profile
-        | 128: Extended profile
+        | 128: Extended profile (one record per distinct call with ``call_count``; single GEMM records
+        | also carry ``pointer_mode``, ``activation_arg0`` and ``activation_arg1``; see :ref:`logging-heuristics`)
 
     * - | ``HIPBLASLT_LOG_FILE``
         | Specifies path to logging file. Can contain ``%i`` for process ID replacement.

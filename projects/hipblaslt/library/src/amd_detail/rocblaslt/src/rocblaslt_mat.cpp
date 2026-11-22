@@ -253,6 +253,7 @@ rocblaslt_status rocblaslt_matmul_impl(const rocblaslt_handle       handle,
                                         effective_uniform_summation_order(handle, matmul_descr)};
     problem.streamKFlags  = streamKFlags;
     problem.int4EncodingA = matmul_descr->int4_encoding_a_ext;
+    problem.pointer_mode  = matmul_descr->pointermode;
 
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
     problem.fused_epilogue      = matmul_descr->fused_epilogue;
