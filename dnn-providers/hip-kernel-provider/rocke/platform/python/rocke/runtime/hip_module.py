@@ -226,6 +226,9 @@ _hipDeviceSynchronize = _b("hipDeviceSynchronize")
 _hipStreamSynchronize = _b("hipStreamSynchronize", ctypes.c_void_p)
 _hipStreamCreate = _b("hipStreamCreate", ctypes.POINTER(ctypes.c_void_p))
 _hipStreamDestroy = _b("hipStreamDestroy", ctypes.c_void_p)
+_hipStreamWaitEvent = _b(
+    "hipStreamWaitEvent", ctypes.c_void_p, _HipEventHandle, ctypes.c_uint
+)
 _hipStreamIsCapturing = _b(
     "hipStreamIsCapturing", ctypes.c_void_p, ctypes.POINTER(ctypes.c_int)
 )
@@ -928,6 +931,16 @@ class Runtime:
             self.wait_stream(stream)
         finally:
             _check(_hipStreamDestroy(ctypes.c_void_p(int(stream))), "hipStreamDestroy")
+
+    def stream_wait_event(self, stream: int, event: Event) -> None:
+        """Make work queued on ``stream`` after this call wait until ``event``
+        (recorded on any stream) completes (``hipStreamWaitEvent``). The host
+        does not block: this is the device-side fork / join between streams,
+        and it is recorded into a HIP graph when ``stream`` is capturing."""
+        _check(
+            _hipStreamWaitEvent(ctypes.c_void_p(int(stream)), event.handle, 0),
+            "hipStreamWaitEvent",
+        )
 
     def stream_sync(self, stream: int) -> None:
         """``hipStreamSynchronize(stream)`` -- the cheap per-stream drain.
