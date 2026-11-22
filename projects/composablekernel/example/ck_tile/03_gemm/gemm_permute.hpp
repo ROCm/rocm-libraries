@@ -16,14 +16,17 @@ namespace gemm_permute {
 using Bf16             = ck_tile::bf16_t;
 inline constexpr int K = 384, H = 8, D = 256, N = D * H;
 
-// The library kernel's tile per architecture; on gfx1250 the fastest TDM V3 tile for this shape.
+// The library kernel's tile per architecture; on gfx1250 the fastest TDM pipeline and tile for
+// this shape, run-ahead with two LDS slots filled one K step ahead (TDM clips the M tail).
 #if defined(CK_USE_GFX1250)
 inline constexpr const char* Arch = "gfx1250";
-inline constexpr int BM = 160, BN = 256, BK = 64, WarpsM = 2, WarpsN = 8, WarpTileM = 16,
+inline constexpr int BM = 192, BN = 256, BK = 64, WarpsM = 2, WarpsN = 8, WarpTileM = 16,
                      WarpTileN = 16, WarpTileK = 32, TileGroups = 16, TileM01 = 8;
 inline constexpr bool DoubleSmemBuffer = true; // the TDM pipelines' LDS ping-pong
 template <typename Problem>
-using MainPipeline = ck_tile::GemmPipelineAgBgCrCompTDMV3<Problem>;
+using MainPipeline = ck_tile::GemmPipelineAgBgCrCompTDMRunAhead<
+    Problem,
+    ck_tile::GemmPipelineAgBgCrCompTDMRunAheadPolicy<2, 1>>;
 #else
 inline constexpr const char* Arch = "gfx950";
 inline constexpr int BM = 128, BN = 256, BK = 32, WarpsM = 2, WarpsN = 2, WarpTileM = 32,

@@ -21,15 +21,16 @@ using namespace gemm_permute;
 
 // Unfused baselines: an existing CK-Tile GEMM op writing the dense intermediate C[t*B+b, d*H+h],
 // then the existing permute op, launched back to back. This GEMM op is tuned for this shape and
-// shares the library fused kernel's tile, mainloop, epilogue and tile order.
-using DenseTraits =
-    ck_tile::TileGemmUniversalTraits<true, false, false, DoubleSmemBuffer, Row, Row, Row, true>;
+// shares the library fused kernel's tile, mainloop, epilogue and tile order. M is padded except
+// with TDM (the double LDS buffer here), which clips the M tail; the run-ahead ring pads nothing.
+using DenseTraits = ck_tile::
+    TileGemmUniversalTraits<!DoubleSmemBuffer, false, false, DoubleSmemBuffer, Row, Row, Row, true>;
 using DenseProblem = ck_tile::UniversalGemmPipelineProblem<Bf16, Bf16, float, Shape, DenseTraits>;
 using GemmOp       = ck_tile::GemmKernel<Partitioner, MainPipeline<DenseProblem>, Epilogue>;
 // Per architecture: the GEMM op's pipeline name, the permute op's tile (PermuteOp below) and, on
 // gfx950, a second GEMM op.
 #if defined(CK_USE_GFX1250)
-inline constexpr const char* GemmOpName = "TDM V3";
+inline constexpr const char* GemmOpName = "TDM run-ahead";
 inline constexpr int Outputs            = 3; // library fused, A-stationary fused, two-op
 // 8 warps x 32 lanes x 8 elements x 16 repeats = one 32768-element block tile.
 using PermuteShape = ck_tile::
