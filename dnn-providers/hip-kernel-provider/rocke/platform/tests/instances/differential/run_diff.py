@@ -1484,33 +1484,34 @@ def _golden_step(args, kind, flavor, cur, scope, failures, fams, shard=None):
     for golden_file, names in files.items():
         file_scope = None if scope is None else [f for f in scope if f in names]
         file_cur = {f: v for f, v in cur.items() if f in names}
+        store = GoldenStore.load(golden_file)
         if shard is not None:
-            file_scope = _shard_scope(shard, golden_file, file_cur, file_scope)
+            file_scope = _shard_scope(shard, store, file_cur, file_scope)
         if file_scope == []:
             if shard is not None:
                 print(f"\nno family of {golden_file} falls in this shard")
             continue
         status |= _golden_step_file(
-            args, kind, flavor, golden_file, file_cur, file_scope, failures
+            args, kind, flavor, golden_file, store, file_cur, file_scope, failures
         )
     return status
 
 
 def _shard_scope(
-    shard: Shard, golden_file: Path, cur: dict, scope: list[str] | None
+    shard: Shard, store: GoldenStore, cur: dict, scope: list[str] | None
 ) -> list[str]:
-    """The families of `golden_file` a sharded check compares: those `shard`
-    owns among `scope`, or, with no `scope`, among every family the file names
-    or the run produced. The shards of one run thus split exactly what an
+    """The families of `store` a sharded check compares: those `shard` owns
+    among `scope`, or, with no `scope`, among every family the file names or
+    the run produced. The shards of one run thus split exactly what an
     unsharded check compares."""
     if scope is None:
-        scope = GoldenStore.load(golden_file).families() | set(cur)
+        scope = store.families() | set(cur)
     return sorted(family for family in scope if shard.owns(family))
 
 
-def _golden_step_file(args, kind, flavor, golden_file, cur, scope, failures):
-    """Record `cur` into `golden_file`, or check it against that file."""
-    store = GoldenStore.load(golden_file)
+def _golden_step_file(args, kind, flavor, golden_file, store, cur, scope, failures):
+    """Record `cur` into `golden_file` (loaded as `store`), or check it
+    against that file."""
     where = f"{kind}[{flavor}]" if kind == LL else kind
     if args.record_golden:
         # The golden records the PYTHON reference sha per config, which is the
