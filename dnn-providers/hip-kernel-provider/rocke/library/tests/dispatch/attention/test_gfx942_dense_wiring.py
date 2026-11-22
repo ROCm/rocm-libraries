@@ -2,7 +2,8 @@
 # SPDX-License-Identifier: MIT
 """Unit tests for the gfx942 ``attention_dense`` dispatcher wiring.
 
-Required by ``library/dispatch/AGENTS.md`` step 4. Covers:
+Required by ``library/dispatch/AGENTS.md`` step 5 of "How to add a new
+specialized candidate". Covers:
   - the candidate is registered and discoverable, with the right spec_id/algorithm
   - OPT-IN ONLY: nothing short of pinning ``algorithm`` + ``spec_id`` selects it,
     despite priority 3 outranking every other attention candidate
