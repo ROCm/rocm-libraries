@@ -667,6 +667,25 @@ if(HIPKERNELPROVIDER_ENABLE_ROCKE)
     # component of the hipkernelprovider artifact and nothing in the provider
     # consumes them, so a provider build does not install them.
     set(ROCKE_INSTALL_DEVELOPMENT OFF)
+    # The C++ engine's Python modules (rocke_engine, rocke_library_engine) let
+    # the installed pytest entries run the C++ engine and compare it with the
+    # Python one; without them those tests skip. They install beside the rocke
+    # package and build whenever the build's Python has pybind11, unless
+    # ROCKE_BUILD_PYBIND is set explicitly. Not on Windows: TheRock's test
+    # artifact does not capture .pyd modules, and the modules have not been
+    # built or run there.
+    if(HIPKERNELPROVIDER_ENABLE_TESTS AND NOT WIN32 AND NOT DEFINED ROCKE_BUILD_PYBIND)
+        include("${CMAKE_CURRENT_SOURCE_DIR}/rocke/platform/cmake/rocke_pybind11.cmake")
+        rocke_locate_pybind11(_hkp_have_pybind11)
+        if(_hkp_have_pybind11)
+            set(ROCKE_BUILD_PYBIND ON)
+        else()
+            message(WARNING
+                "rocKE: ${Python3_EXECUTABLE} has no pybind11, so the C++ engine's "
+                "Python modules are not built and the installed tests that need "
+                "them skip. Install pybind11 there to build them.")
+        endif()
+    endif()
 
     # Scope BUILD_TESTING to rocke/ so the rocKE C++ test targets follow the
     # provider's own test switch without changing the rest of this project.

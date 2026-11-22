@@ -196,6 +196,20 @@ set(_ROCKE_DEFAULT_PYTHON_INSTALL_DIR
 set(ROCKE_PYTHON_INSTALL_DIR "${_ROCKE_DEFAULT_PYTHON_INSTALL_DIR}"
     CACHE STRING "Relative install destination for rocke and rocke_engine")
 
+# Where the rocke package and the engine's Python modules (rocke_engine,
+# rocke_library_engine) install, side by side so one sys.path entry finds all
+# of them. Provider mode co-locates them with the installed tests
+# (bin/<subdir>), whose CTest entries put that directory on PYTHONPATH and
+# whose files TheRock's test artifact captures (paired with a matching include
+# in ml-libs/artifact-hipkernelprovider.toml for bin/<subdir>/rocke/**; the
+# modules, as .so files, are claimed by the artifact's lib component). A
+# standalone install keeps the site-packages layout.
+if(ROCKE_INSTALL_PROVIDER_CTEST_SUBDIR)
+  set(ROCKE_PYTHON_PACKAGE_INSTALL_DIR "${ROCKE_TEST_INSTALL_DIR}")
+else()
+  set(ROCKE_PYTHON_PACKAGE_INSTALL_DIR "${ROCKE_PYTHON_INSTALL_DIR}")
+endif()
+
 # Sources live under cpp/, in subfolders mirroring the rocke Python package
 # (cpp/core/{ir,arch,isa,lower_llvm,lower_hip}, cpp/helpers, cpp/instances/{common,gfxNNNN},
 # cpp/support). GLOB_RECURSE picks up every .cpp regardless of depth; the
@@ -402,18 +416,10 @@ if(ROCKE_INSTALL_DEVELOPMENT)
 endif()
 
 if(ROCKE_INSTALL_PYTHON_PACKAGE)
-  # In provider mode, co-locate the rocke package under the test subdir
-  # (bin/<subdir>/rocke) next to rocke_installed_smoke.py so the Python smoke is
-  # self-contained inside TheRock's test artifact (paired with a matching include
-  # in ml-libs/artifact-hipkernelprovider.toml for bin/<subdir>/rocke/**).
-  # Standalone keeps the lib/pythonX.Y/site-packages layout.
-  if(ROCKE_INSTALL_PROVIDER_CTEST_SUBDIR)
-    set(_ROCKE_PKG_DEST "${ROCKE_TEST_INSTALL_DIR}")
-  else()
-    set(_ROCKE_PKG_DEST "${ROCKE_PYTHON_INSTALL_DIR}")
-  endif()
+  # In provider mode the package lands next to rocke_installed_smoke.py, so the
+  # Python smoke is self-contained inside TheRock's test artifact.
   install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/python/rocke"
-          DESTINATION "${_ROCKE_PKG_DEST}"
+          DESTINATION "${ROCKE_PYTHON_PACKAGE_INSTALL_DIR}"
           PATTERN "__pycache__" EXCLUDE
           REGEX "\\.pyc$" EXCLUDE)
 

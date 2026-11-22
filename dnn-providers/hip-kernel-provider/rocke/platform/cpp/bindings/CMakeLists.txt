@@ -51,16 +51,12 @@ if(NOT EXISTS "${ROCKE_INCLUDE_DIR}/rocke/ir.h")
 endif()
 
 # --- pybind11 ----------------------------------------------------------------
-if(NOT pybind11_DIR)
-  execute_process(
-    COMMAND "${Python3_EXECUTABLE}" -m pybind11 --cmakedir
-    OUTPUT_VARIABLE _ROCKE_PYBIND11_CMAKEDIR
-    RESULT_VARIABLE _ROCKE_PYBIND11_CMAKEDIR_RESULT
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-    ERROR_QUIET)
-  if(_ROCKE_PYBIND11_CMAKEDIR_RESULT EQUAL 0 AND EXISTS "${_ROCKE_PYBIND11_CMAKEDIR}")
-    set(pybind11_DIR "${_ROCKE_PYBIND11_CMAKEDIR}" CACHE PATH "pybind11 CMake package directory")
-  endif()
+include("${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/rocke_pybind11.cmake")
+rocke_locate_pybind11(_ROCKE_HAVE_PYBIND11)
+if(NOT _ROCKE_HAVE_PYBIND11)
+  message(FATAL_ERROR
+    "rocke_engine needs pybind11, which ${Python3_EXECUTABLE} does not have: "
+    "install it there (python -m pip install 'pybind11>=3.0') or set pybind11_DIR.")
 endif()
 find_package(pybind11 CONFIG REQUIRED)
 
@@ -84,7 +80,12 @@ if(NOT DEFINED ROCKE_PYTHON_INSTALL_DIR)
       "${CMAKE_INSTALL_LIBDIR}/python${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}/site-packages"
       CACHE STRING "Relative install destination for rocke_engine")
 endif()
+# Inside the rocKE build, platform/CMakeLists.txt sets where the rocke package
+# installs; the module goes beside it so whatever imports rocke imports it too.
+if(NOT DEFINED ROCKE_PYTHON_PACKAGE_INSTALL_DIR)
+  set(ROCKE_PYTHON_PACKAGE_INSTALL_DIR "${ROCKE_PYTHON_INSTALL_DIR}")
+endif()
 
 install(TARGETS rocke_engine
-        LIBRARY DESTINATION "${ROCKE_PYTHON_INSTALL_DIR}"
-        RUNTIME DESTINATION "${ROCKE_PYTHON_INSTALL_DIR}")
+        LIBRARY DESTINATION "${ROCKE_PYTHON_PACKAGE_INSTALL_DIR}"
+        RUNTIME DESTINATION "${ROCKE_PYTHON_PACKAGE_INSTALL_DIR}")
