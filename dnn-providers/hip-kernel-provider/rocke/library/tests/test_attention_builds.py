@@ -2303,17 +2303,18 @@ class TestAttentionHelpers(unittest.TestCase):
             kwargs.update(accept)
             ok, reason = supports_tiled_2d(**kwargs)
             self.assertTrue(ok, msg=f"expected accept for {accept}, got: {reason}")
-        # FP8, unsupported head_size, and unsupported block_size still gated.
-        for override in [
-            dict(head_size=72),
-            dict(block_size=24),
-            dict(use_fp8=True),
+        # FP8, unsupported head_size, and unsupported block_size still gated,
+        # each by its own check: the reason names the rejected field.
+        for override, reason_pattern in [
+            (dict(head_size=72), r"only supports head_size in .*\(got 72\)"),
+            (dict(block_size=24), r"only supports block_size in .*\(got 24\)"),
+            (dict(use_fp8=True), r"use_fp8=True requires kv_storage_dtype"),
         ]:
             kwargs = dict(base)
             kwargs.update(override)
             ok, reason = supports_tiled_2d(**kwargs)
             self.assertFalse(ok, msg=f"expected reject for {override}, got: {reason}")
-            self.assertTrue(reason)
+            self.assertRegex(reason, reason_pattern)
 
     def test_tiled_2d_dispatch_gate_accepts_block_m_per_warp_per_arch(self):
         """Regression: the shared dispatch entry
@@ -2925,10 +2926,11 @@ class TestAttentionHelpers(unittest.TestCase):
     def test_tiled_3d_support_gate_rejects_unsupported(self):
         """Mirror of ``test_tiled_2d_support_gate_rejects_unsupported`` for the
         per-arch ``supports_tiled_3d`` gate. Both arches share the same
-        accept/reject contract, so the cases are driven for each arch via the
-        ``arch=`` kwarg.
+        accept/reject contract, so the cases are driven for each arch through
+        that arch's own gate module, the one dispatch and pack-time validation
+        call (``_tiled_3d_impl(arch)``).
         """
-        from kernels import supports_tiled_3d
+        import kernels.common.attention_unified as au
 
         base = dict(
             head_size=128,
@@ -2941,6 +2943,7 @@ class TestAttentionHelpers(unittest.TestCase):
             q_dtype=None,
         )
         for arch in ("gfx942", "gfx950"):
+            *_, supports_tiled_3d = au._tiled_3d_impl(arch)
             ok_fp16, _ = supports_tiled_3d(arch=arch, **base)
             self.assertTrue(ok_fp16, msg=f"{arch}: base fp16 D128 should accept")
             # head_size {64,128,256}, block_size {16,32,64}, bf16, and every
@@ -2965,11 +2968,11 @@ class TestAttentionHelpers(unittest.TestCase):
                 )
             # Bad head_size, bad block_size, fp8-without-kv_storage, and an
             # unsupported dtype are gated on both arches.
-            for override in [
-                dict(head_size=72),
-                dict(block_size=24),
-                dict(use_fp8=True),
-                dict(dtype="fp8"),
+            for override, reason_pattern in [
+                (dict(head_size=72), r"only supports head_size in .*\(got 72\)"),
+                (dict(block_size=24), r"only supports block_size in .*\(got 24\)"),
+                (dict(use_fp8=True), r"use_fp8=True requires kv_storage_dtype"),
+                (dict(dtype="fp8"), r"supports fp16/bf16 \(got 'fp8'\)"),
             ]:
                 kwargs = dict(base)
                 kwargs.update(override)
@@ -2977,7 +2980,7 @@ class TestAttentionHelpers(unittest.TestCase):
                 self.assertFalse(
                     ok, msg=f"{arch}: expected reject for {override}, got: {reason}"
                 )
-                self.assertTrue(reason)
+                self.assertRegex(reason, reason_pattern)
 
     def test_gfx942_3d_dispatch_specs_fit_lds(self):
         """Every gfx942 3D segment spec default dispatch builds fits the 64 KiB
