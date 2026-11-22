@@ -39,7 +39,6 @@ Each result prints one tab-separated ``WINO_RESULT`` line.
 from __future__ import annotations
 
 import argparse
-import ctypes
 import os
 import sys
 import time
@@ -47,6 +46,8 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
+from rocke.numeric import storage
+from rocke.runtime.host_buffers import as_u8_buffer, pin, pinned_empty
 
 from benchmarks.common import conv_fill
 
@@ -124,10 +125,6 @@ def k3_sweep_configs(sweep: str, arch: str) -> Tuple[tuple, ...]:
         "tiny": K3_CONFIGS_TINY,
         "first": k3_configs(arch)[:1],
     }[sweep]
-
-
-def _u8(t):
-    return (ctypes.c_uint8 * t.nbytes).from_address(t.data_ptr())
 
 
 def _pow2_vec(n: int, cap: int = 8) -> int:
@@ -317,6 +314,9 @@ class WinogradPipeline:
     k3_run: Optional[object] = None
     # (plan, problem) of the WMMA K3, to re-bind it on another stream.
     k3_plan: Optional[tuple] = None
+    # Streams and events bound_two_streams created; free() releases them.
+    side_streams: list[int] = field(default_factory=list)
+    events: list[object] = field(default_factory=list)
 
     @property
     def gemm_problem(self):
@@ -365,6 +365,12 @@ class WinogradPipeline:
         from rocke.runtime import synchronize_and_release
 
         synchronize_and_release(0)
+        for event in self.events:
+            event.destroy()
+        for stream in self.side_streams:
+            self.rt.destroy_stream(stream)
+        self.events.clear()
+        self.side_streams.clear()
         for k, ptr in list(self.bufs.items()):
             if k not in ("x", "y"):
                 self.rt.free(ptr)
@@ -379,19 +385,21 @@ class WinogradPipeline:
     def _nc(self) -> int:
         return self.spec.problem.N
 
-    def upload(self, x_t, w_t):
+    def upload(self, x, w):
+        """Copy the stored activations ``x`` (every chunk) and weights ``w``
+        (:func:`make_inputs`) to the device."""
         # Pinned host staging, device drained around each copy: a pageable copy
         # registers host memory through KFD's SVM path, and that page-table
         # update while one of our kernels is in flight hangs gfx1250.
         self.rt.sync()
         nc = self._nc()
-        items = [(self.xs[i], x_t[i * nc : (i + 1) * nc]) for i in range(self.chunks)]
-        items.append((self.bufs["w"], w_t))
-        for ptr, t in items:
-            h = t.contiguous().pin_memory()
-            self.rt.memcpy_h2d(ptr, _u8(h), h.nbytes)
+        items = [(self.xs[i], x[i * nc : (i + 1) * nc]) for i in range(self.chunks)]
+        items.append((self.bufs["w"], w))
+        for ptr, host in items:
+            staged = pin(host)
+            self.rt.memcpy_h2d(ptr, as_u8_buffer(staged), staged.nbytes)
             self.rt.sync()
-            del h
+            del staged
 
     def poison(self, byte: int = 0x7F):
         for k in ("U", "V", "M", "e"):
@@ -562,49 +570,44 @@ class WinogradPipeline:
         """K1 on a second stream, overlapping K2 of the first chunk; K3 waits
         for it. Each call starts K1 only after the previous call's work on
         the main stream (a fork / join per call), so calls do not overlap.
-        ``stream``: main stream handle (0: torch's current stream); usable
-        inside a HIP graph capture on that stream."""
-        import torch
-
-        if stream:
-            s1 = torch.cuda.ExternalStream(stream)
-        else:
-            s1 = torch.cuda.current_stream()
-        s2 = torch.cuda.Stream()
-        k1 = self.bound("K1", 0, s2.cuda_stream)
+        ``stream``: main stream handle; usable inside a HIP graph capture on
+        that stream. The side stream and the events live until :meth:`free`."""
+        side = self.rt.create_stream()
+        fork, filters_done = self.rt.event(), self.rt.event()
+        self.side_streams.append(side)
+        self.events += [fork, filters_done]
+        k1 = self.bound("K1", 0, side)
         rest = []
         for name, i in self.sequence(infer=True):
             rest.append((name, self.bound(name, i, stream)))
-        ev_fork = torch.cuda.Event()
-        ev_u = torch.cuda.Event()
 
         def run():
-            ev_fork.record(s1)
-            s2.wait_event(ev_fork)
+            fork.record(stream)
+            self.rt.stream_wait_event(side, fork)
             k1()
-            ev_u.record(s2)
+            filters_done.record(side)
             joined = False
             for name, f in rest:
                 if name == "K3" and not joined:
-                    s1.wait_event(ev_u)
+                    self.rt.stream_wait_event(stream, filters_done)
                     joined = True
                 f()
 
         return run
 
-    def read_y(self, like):
-        import torch
-
+    def read_y(self) -> np.ndarray:
+        """The output of every chunk, ``[N, Ho, Wo, K]``, as float32 values of
+        what the pipeline stored."""
+        io_dtype = self.spec.io_dtype
+        p = self.spec.problem
         self.rt.sync()
-        nc = self._nc()
-        out = torch.empty_like(like, device="cpu")
-        for i in range(self.chunks):
-            h = torch.empty_like(like[i * nc : (i + 1) * nc], device="cpu")
-            h = h.pin_memory()
-            self.rt.memcpy_d2h(_u8(h), self.ys[i], h.nbytes)
+        chunks = []
+        for ptr in self.ys:
+            staged = pinned_empty((p.N, p.Ho, p.Wo, p.K), storage.host_dtype(io_dtype))
+            self.rt.memcpy_d2h(as_u8_buffer(staged), ptr, staged.nbytes)
             self.rt.sync()
-            out[i * nc : (i + 1) * nc] = h
-        return out
+            chunks.append(storage.decode(staged, io_dtype))
+        return np.concatenate(chunks)
 
 
 def time_graph(fn, *, warmup: int, iters: int) -> float:
@@ -639,39 +642,43 @@ def time_graph(fn, *, warmup: int, iters: int) -> float:
     return us
 
 
-def verify_error(out, ref) -> Tuple[float, float]:
-    """``(rocke metric, relL2)``: max|out-ref| / max(max|ref|, 1) as the other
-    conv benchmarks compute it, plus the relative L2 error for context."""
-    o = out.float().cpu()
-    r = ref.float().cpu()
-    d = (o - r).abs()
-    err = float(d.max() / r.abs().max().clamp(min=conv_fill.ref_floor()))
+def verify_error(out: np.ndarray, ref: np.ndarray) -> tuple[float, float]:
+    """``(rocke metric, relL2)``: max|out-ref| / max(max|ref|, floor) as the
+    other conv benchmarks compute it (floor: :func:`conv_fill.ref_floor`),
+    plus the relative L2 error for context. Both are values, not stored bits."""
+    out = np.asarray(out, dtype=np.float64)
+    ref = np.asarray(ref, dtype=np.float64)
+    diff = out - ref
+    err = float(np.abs(diff).max() / max(np.abs(ref).max(), conv_fill.ref_floor()))
     if err != err:  # NaN
         err = float("inf")
-    l2 = float((o - r).norm() / r.norm().clamp(min=1e-30))
+    l2 = float(np.linalg.norm(diff) / max(np.linalg.norm(ref), 1e-30))
     return err, l2
 
 
-def make_inputs(problem, io_dtype: str, seed: int = 42):
-    import torch
-
-    tdt = {"fp16": torch.float16, "bf16": torch.bfloat16}[io_dtype]
+def make_inputs(
+    problem, io_dtype: str, seed: int = 42
+) -> tuple[np.ndarray, np.ndarray]:
+    """``(x, w)`` of a forward: NHWC activations and KYXC weights drawn per
+    ``--fill`` (:mod:`conv_fill`) from ``seed``, stored as ``io_dtype``."""
     x, w = conv_fill.fwd_operands(
         (problem.N, problem.Hi, problem.Wi, problem.C),
         (problem.K, problem.Y, problem.X, problem.cpg),
         io_dtype,
         np.random.default_rng(seed),
     )
-    y = torch.empty(problem.N, problem.Ho, problem.Wo, problem.K, dtype=tdt)
-    return torch.from_numpy(x).to(tdt), torch.from_numpy(w).to(tdt), y
+    return storage.encode(x, io_dtype), storage.encode(w, io_dtype)
 
 
-def reference(x, w, problem, io_dtype: str):
-    import torch
-    from builders.common import conv_reference as _cr
+def reference(x: np.ndarray, w: np.ndarray, problem, io_dtype: str) -> np.ndarray:
+    """The forward output of the stored ``x`` / ``w``, as float32 values
+    rounded to ``io_dtype`` the way the pipeline stores y."""
+    from builders.common.conv_reference import conv_fwd_reference
 
-    tdt = {"fp16": torch.float16, "bf16": torch.bfloat16}[io_dtype]
-    return _cr.conv_reference(x, w, problem, out_dtype=tdt).cpu()
+    out = conv_fwd_reference(
+        storage.decode(x, io_dtype), storage.decode(w, io_dtype), problem
+    )
+    return storage.round_to(out, io_dtype)
 
 
 # ---------------------------------------------------------------------------
@@ -679,14 +686,14 @@ def reference(x, w, problem, io_dtype: str):
 # ---------------------------------------------------------------------------
 
 
-def _k3_verify(pipe, ref, y_t) -> float:
+def _k3_verify(pipe, ref) -> float:
     pipe.poison()
     pipe.run_once()
-    err, _ = verify_error(pipe.read_y(y_t), ref)
+    err, _ = verify_error(pipe.read_y(), ref)
     return err
 
 
-def _k3_sweep_implicit(pipe, cands, args, ref, y_t):
+def _k3_sweep_implicit(pipe, cands, args, ref):
     """The implicit-GEMM K3: time each candidate alone, verify the pipeline
     with it; ``(us, label, install)`` of the fastest passing one."""
     from rocke.runtime import time_launches
@@ -700,7 +707,7 @@ def _k3_sweep_implicit(pipe, cands, args, ref, y_t):
             continue
         err = None
         if args.verify:
-            err = _k3_verify(pipe, ref, y_t)
+            err = _k3_verify(pipe, ref)
             if not err < 5e-2:
                 print(f"  K3 {k3_label(cfg):40s} FAIL err={err:.2e}", flush=True)
                 continue
@@ -719,7 +726,7 @@ def _k3_sweep_implicit(pipe, cands, args, ref, y_t):
     return us, "implicit:" + k3_label(cfg), lambda: pipe.set_k3(cfg, kspec, art)
 
 
-def _k3_sweep_wmma(pipe, cands, args, ref, y_t):
+def _k3_sweep_wmma(pipe, cands, args, ref):
     """The WMMA batched-GEMM K3: time every plan (single configs and
     main + tail batch splits), verify the finalists through the pipeline;
     ``(us, label, install)`` of the fastest passing plan."""
@@ -735,7 +742,7 @@ def _k3_sweep_wmma(pipe, cands, args, ref, y_t):
 
     def verify(run):
         pipe.set_k3_run(run)
-        return _k3_verify(pipe, ref, y_t)
+        return _k3_verify(pipe, ref)
 
     def time_fn(run):
         return time_launches(run, warmup=args.warmup, iters=args.iters) * 1e3
@@ -876,27 +883,27 @@ def run_case(problem, io_dtype: str, m, args, arch: str, ref_cache: dict):
         print("  no K3 candidate built", file=sys.stderr)
         return None
 
-    x_t, w_t, y_t = make_inputs(problem, io_dtype, seed=args.seed)
+    x, w = make_inputs(problem, io_dtype, seed=args.seed)
     ref = None
     if args.verify:
         key = (problem, io_dtype)
         if key not in ref_cache:
-            ref_cache[key] = reference(x_t, w_t, problem, io_dtype)
+            ref_cache[key] = reference(x, w, problem, io_dtype)
         ref = ref_cache[key]
 
     pipe.alloc()
     try:
-        pipe.upload(x_t, w_t)
+        pipe.upload(x, w)
         pipe.make_launchers(transforms)
         # K3 sweep per implementation: (us, label, install) of the fastest
         # candidate that verifies through the whole pipeline.
         choices = []
         if built.get("implicit"):
-            c = _k3_sweep_implicit(pipe, built["implicit"], args, ref, y_t)
+            c = _k3_sweep_implicit(pipe, built["implicit"], args, ref)
             if c:
                 choices.append(c)
         if built.get("wmma"):
-            c = _k3_sweep_wmma(pipe, built["wmma"], args, ref, y_t)
+            c = _k3_sweep_wmma(pipe, built["wmma"], args, ref)
             if c:
                 choices.append(c)
         if not choices:
@@ -911,7 +918,7 @@ def run_case(problem, io_dtype: str, m, args, arch: str, ref_cache: dict):
         if args.verify:
             pipe.poison()
             pipe.run_once()
-            err, l2 = verify_error(pipe.read_y(y_t), ref)
+            err, l2 = verify_error(pipe.read_y(), ref)
 
         def timed(fn):
             return time_launches(fn, warmup=args.warmup, iters=args.iters) * 1e3
@@ -1085,7 +1092,11 @@ def main(argv=None) -> int:
     args = ap.parse_args(argv)
     conv_fill.set_mode(args.fill)
 
-    import torch  # noqa: F401 -- claim the HIP context first
+    if args.graph == "on":
+        # time_graph captures with torch: let it claim the HIP context first.
+        import torch
+
+        torch.cuda.is_available()
 
     from benchmarks.common.benchmark_implicit_gemm_conv import parse_miopen_cmd
     from rocke.runtime.hip_module import get_device_arch

@@ -43,6 +43,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Dict, List, Optional, Tuple
 
+import numpy as np
+
 os.environ.setdefault("ROCKE_CPP_QUIET_FALLBACK", "1")
 
 VECS = (8, 4, 2, 1)
@@ -310,38 +312,40 @@ class Case:
     """Device buffers of one case: x / y (all chunks) and w are shared by the tiles."""
 
     def __init__(self, rt, problem, io: str, seed: int, verify: bool):
+        from rocke.runtime.host_buffers import as_u8_buffer, pin
+
         from benchmarks.common.benchmark_winograd_conv import make_inputs, reference
 
         self.rt = rt
         self.problem = problem
         self.io = io
-        self.x_t, self.w_t, self.y_t = make_inputs(problem, io, seed=seed)
-        self.ref = reference(self.x_t, self.w_t, problem, io) if verify else None
-        self.xb = self.x_t.numel() * 2
-        self.wb = self.w_t.numel() * 2
-        self.yb = self.y_t.numel() * 2
+        x, w = make_inputs(problem, io, seed=seed)
+        self.ref = reference(x, w, problem, io) if verify else None
+        self.y_shape = (problem.N, problem.Ho, problem.Wo, problem.K)
+        self.xb = x.nbytes
+        self.wb = w.nbytes
+        self.yb = int(np.prod(self.y_shape)) * x.itemsize
         self.x = int(rt.alloc(max(self.xb, 4)))
         self.w = int(rt.alloc(max(self.wb, 4)))
         self.y = int(rt.alloc(max(self.yb, 4)))
-        from benchmarks.common.benchmark_winograd_conv import _u8
 
         rt.sync()
-        for ptr, t in ((self.x, self.x_t), (self.w, self.w_t)):
-            h = t.contiguous().pin_memory()
-            rt.memcpy_h2d(ptr, _u8(h), h.nbytes)
+        for ptr, host in ((self.x, x), (self.w, w)):
+            staged = pin(host)
+            rt.memcpy_h2d(ptr, as_u8_buffer(staged), staged.nbytes)
             rt.sync()
-            del h
+            del staged
 
-    def read_y(self):
-        import torch
-
-        from benchmarks.common.benchmark_winograd_conv import _u8
+    def read_y(self) -> np.ndarray:
+        """y as float32 values of what the pipeline stored."""
+        from rocke.numeric import storage
+        from rocke.runtime.host_buffers import as_u8_buffer, pinned_empty
 
         self.rt.sync()
-        h = torch.empty_like(self.y_t, device="cpu").pin_memory()
-        self.rt.memcpy_d2h(_u8(h), self.y, h.nbytes)
+        staged = pinned_empty(self.y_shape, storage.host_dtype(self.io))
+        self.rt.memcpy_d2h(as_u8_buffer(staged), self.y, staged.nbytes)
         self.rt.sync()
-        return h.clone()
+        return storage.decode(staged, self.io)
 
     def free(self):
         from rocke.runtime import synchronize_and_release
@@ -745,8 +749,6 @@ def run_from_cache(args) -> int:
         return 0
     # Read before the writer opens --results: the two may name one file.
     done = measured_keys(args.skip_measured, "winograd", args.timing)
-
-    import torch  # noqa: F401 -- claim the HIP context first
 
     from rocke.runtime.hip_module import Runtime
 

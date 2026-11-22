@@ -10,8 +10,6 @@ from __future__ import annotations
 
 import pytest
 
-torch = pytest.importorskip("torch")
-
 
 def _gfx1250():
     try:

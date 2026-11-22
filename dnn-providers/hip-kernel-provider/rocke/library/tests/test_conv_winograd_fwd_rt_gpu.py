@@ -13,39 +13,22 @@ force the other binaries of the AOT grid (register runs of 2 tiles, the LDS
 region, the split prescale, 1-wide channel vectors) on the same pipeline.
 
 Workspaces and y are poisoned (bytes 0x7F) first, so an element no kernel
-writes shows up. Requires a gfx1250 GPU and torch.
+writes shows up. Requires a gfx1250 GPU.
 """
 
 from __future__ import annotations
 
 import dataclasses
-import importlib.util
 
 import pytest
-
-_HAS_TORCH = importlib.util.find_spec("torch") is not None
-if _HAS_TORCH:
-    import torch
-
-    torch.cuda.is_available()  # let torch claim the HIP context first
-
-from rocke.runtime.hip_module import get_device_arch  # noqa: E402
+from rocke.runtime.hip_module import get_device_arch
 
 GPU_ARCH = get_device_arch(0)
 
-pytestmark = pytest.mark.skipif(
-    not _HAS_TORCH or GPU_ARCH != "gfx1250",
-    reason="needs torch and a gfx1250 GPU",
-)
+pytestmark = pytest.mark.skipif(GPU_ARCH != "gfx1250", reason="needs a gfx1250 GPU")
 
 _TOL = 5e-2
 _ARTIFACTS: dict = {}
-
-
-def _u8(t):
-    import ctypes
-
-    return (ctypes.c_uint8 * t.nbytes).from_address(t.data_ptr())
 
 
 def _artifact(step):
@@ -62,14 +45,17 @@ def _artifact(step):
 
 def _run(req, spec):
     """Run ``spec`` (an AOT Winograd plan selected for ``req``); ``err``."""
+    from rocke.numeric import storage
+    from rocke.runtime.hip_module import Runtime
+    from rocke.runtime.host_buffers import as_u8_buffer, pin, pinned_empty
+    from rocke.runtime.launcher import KernelLauncher, LaunchConfig
+
     from benchmarks.common.benchmark_winograd_conv import (
         make_inputs,
         reference,
         verify_error,
     )
     from dispatch.grouped_convolution import launch_plan_for
-    from rocke.runtime.hip_module import Runtime
-    from rocke.runtime.launcher import KernelLauncher, LaunchConfig
 
     problem, dtype = spec.problem, spec.dtype
     plan = launch_plan_for(req, spec)
@@ -81,18 +67,21 @@ def _run(req, spec):
                 hsaco=art.hsaco, kernel_name=art.kernel_name, signature=step.signature
             )
         )
-    x_t, w_t, y_t = make_inputs(problem, dtype, seed=7)
-    ref = reference(x_t, w_t, problem, dtype)
-    sizes = {"x": x_t.nbytes, "w": w_t.nbytes, "y": y_t.nbytes, **plan.workspaces}
+    x, w = make_inputs(problem, dtype, seed=7)
+    ref = reference(x, w, problem, dtype)
+    y = pinned_empty(
+        (problem.N, problem.Ho, problem.Wo, problem.K), storage.host_dtype(dtype)
+    )
+    sizes = {"x": x.nbytes, "w": w.nbytes, "y": y.nbytes, **plan.workspaces}
     rt = Runtime()
     ptrs = {k: int(rt.alloc(max(int(v), 4))) for k, v in sizes.items()}
     try:
         rt.sync()
-        for key, t in (("x", x_t), ("w", w_t)):
-            h = t.contiguous().pin_memory()
-            rt.memcpy_h2d(ptrs[key], _u8(h), h.nbytes)
+        for key, host in (("x", x), ("w", w)):
+            staged = pin(host)
+            rt.memcpy_h2d(ptrs[key], as_u8_buffer(staged), staged.nbytes)
             rt.sync()
-            del h
+            del staged
         for key in (*plan.workspaces, "y"):
             rt.memset(ptrs[key], 0x7F, sizes[key])
         rt.sync()
@@ -102,14 +91,13 @@ def _run(req, spec):
                 config=LaunchConfig(grid=step.grid, block=step.block, fence=True),
             )
         rt.sync()
-        out = torch.empty_like(y_t, device="cpu").pin_memory()
-        rt.memcpy_d2h(_u8(out), ptrs["y"], out.nbytes)
+        rt.memcpy_d2h(as_u8_buffer(y), ptrs["y"], y.nbytes)
         rt.sync()
     finally:
         rt.sync()
         for p in ptrs.values():
             rt.free(p)
-    err, _ = verify_error(out, ref)
+    err, _ = verify_error(storage.decode(y, dtype), ref)
     return err
 
 
