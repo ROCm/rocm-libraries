@@ -21,6 +21,7 @@ X coordinate is reconstructed mixed-radix with the innermost H level at stride 1
 
 from __future__ import annotations
 
+import functools
 from dataclasses import dataclass
 from math import prod
 
@@ -54,6 +55,8 @@ class RegisterMapper:
         self._register_lengths = tuple(
             self._bucket_length(major, minor) for major, minor in self._register_buckets
         )
+        # Every slot's coordinate, filled on the first lookup from the per-encoding table.
+        self._slot_table: tuple[tuple[tuple[int, ...], ...], ...] | None = None
 
     def _bucket_length(self, major: int, minor: int) -> int:
         if major == 0:
@@ -109,6 +112,12 @@ class RegisterMapper:
                 f"register out of range -- register={register}, "
                 f"expected 0..{self.num_vector_items - 1}"
             )
+        if self._slot_table is None:
+            self._slot_table = _slot_coordinates(self._encoding)
+        return self._slot_table[lane][register]
+
+    def _compute_coordinates(self, lane: int, register: int) -> tuple[int, ...]:
+        """The coordinate of one in-range slot, by the decomposition rule in the module docstring."""
         contributor: dict[tuple[int, int], int] = {}
         for bucket, value in zip(
             self._lane_buckets, self._split_last_fastest(lane, self._lane_lengths)
@@ -138,3 +147,22 @@ class RegisterMapper:
                 key = self.matrix_coordinates(lane, register)
                 mapping.setdefault(key, LaneRegister(lane=lane, register=register))
         return mapping
+
+
+@functools.cache
+def _slot_coordinates(
+    encoding: WarpDistributionEncoding,
+) -> tuple[tuple[tuple[int, ...], ...], ...]:
+    """Every slot's matrix coordinate, ``[lane][register]``, computed once per encoding.
+
+    An encoding is immutable and the coordinates are a pure function of it, while plan and
+    issue validation ask for the slots of the same few encodings millions of times.
+    """
+    mapper = RegisterMapper(encoding)
+    return tuple(
+        tuple(
+            mapper._compute_coordinates(lane, register)
+            for register in range(mapper.num_vector_items)
+        )
+        for lane in range(mapper.num_lanes)
+    )
