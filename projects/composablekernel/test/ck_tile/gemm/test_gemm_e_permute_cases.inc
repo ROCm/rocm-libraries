@@ -257,6 +257,10 @@ TEST_F(GemmEPermute, PackedTileAligned) { run_and_check(meta_desc(4, 128, 2, 256
 // would otherwise fold back into Y.
 TEST_F(GemmEPermute, StraddlingTilesAndMTail) { run_and_check(meta_desc(67, 5, 2, 256), 64); }
 
+// Several K tiles (an odd count): a multi-buffered mainloop refills and reuses every LDS buffer
+// (the run-ahead ring wraps twice) while the tiles straddle t and the last one passes M.
+TEST_F(GemmEPermute, SeveralKTiles) { run_and_check(meta_desc(67, 5, 2, 256), 5 * Cfg::K_Tile); }
+
 TEST_F(GemmEPermute, TileSpansSeveralHeads) { run_and_check(meta_desc(67, 5, 8, 64), 64); }
 
 // Gaps between heads must keep the sentinel.
