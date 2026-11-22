@@ -216,7 +216,11 @@ With the flag off (the default) nothing is emitted, so every bias-off kernel is
 byte-identical and the gate is unaffected. With it on, the C++ engine has no
 equivalent and `rocke_ir_parity_harness.py` has no bias-on case. The C++ provider
 cannot request bias either, so Python and C++ selection agree on every problem
-the provider can express.
+the provider can express. The selector binding
+(`rocke_engine.gfx950_attn_tiled_spec_from_problem`) refuses a problem with the
+flag on rather than selecting it as bias-off, as it refuses the other problem
+fields its struct cannot carry (`emit_lse`, a pinned `waves_per_eu`, a top-left
+or right-bounded mask); `library/tests/test_selector_cpp_parity.py` checks both.
 
 | Area | What's missing | Why blocked / what unblocks it |
 |---|---|---|
@@ -274,7 +278,8 @@ additive bias + LSE is built by Python only. That belongs to the additive-bias
 gap (5).
 
 **Why deferred:** the C entry points take selector output, and no C caller
-requests LSE today; the Python host and dispatcher are the only request path.
+requests LSE today; the Python host and dispatcher are the only request path. The
+selector binding refuses an LSE request (see 5).
 
 **What closes it:** an `emit_lse` field on `rocke_unified_attn_problem_t`, the
 support-gate refusals mirrored into the C selectors, `!emit_lse` mirrored into
@@ -384,6 +389,34 @@ mirrors are not maintained for attention bodies added after the port.
 
 **What closes it:** a decision to restore per-family C++ builder mirrors, or
 retiring the C engine.
+
+---
+
+## 10. gfx950 D256 bf16 prefill fast route — Python-only selection
+
+**Subsystem:** `instances/common/attention_unified_selectors.cpp`, the gfx950
+tiled 2D instance
+
+For the gfx950 bf16 D256 prefill cohort (`_d256_gfx950_cohort` in
+`library/kernels/common/attention_unified.py`: no window, softcap, sinks or score
+bias, `max_seqlen_q > 1`) the Python selector narrows the launch geometry
+(`num_warps`, `tile_size`, `block_m_per_warp`) and applies the knob set of
+`_d256_gfx950_spec_overrides` (Q-direct-register body, softmax/MFMA interleave
+mode 2, K_lds pad, reversed query blocks, ...). The C selector has the cohort
+predicate (`d256_gfx950_fast`) but narrows only the tile size and applies none of
+the knobs, so the two engines pick different specs for these problems, and the C
+tiled 2D twin rejects the Q-direct-register body and the interleave in
+`validate()`.
+
+**What is gated:** `library/tests/test_selector_cpp_parity.py` compares the two
+selectors through the `rocke_engine` binding and names this cohort as the one
+expected divergence: it fails if those problems stop differing, so the
+exception is deleted with the port.
+
+**What closes it:** the warp-count and rows-per-warp narrowing in the C
+selectors, the override knobs in the C spec assembly, and the Q-direct-register
+and interleave bodies in the gfx950 tiled 2D C twin (or a decision to keep the
+route Python-only and refuse it in C).
 
 ---
 
