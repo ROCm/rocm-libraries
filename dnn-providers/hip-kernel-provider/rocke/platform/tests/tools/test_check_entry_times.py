@@ -331,9 +331,9 @@ def test_committed_ceilings_only_go_down() -> None:
         name: column.get("ceilings", {})
         for name, column in check.load_entry_times().items()
     }
-    assert ceilings["linux"].keys() == {"standard"}
+    # The Linux standard tier fits its budget, so it has no ceiling.
+    assert ceilings["linux"] == {}
     assert ceilings["windows"].keys() == {"standard"}
-    assert ceilings["linux"]["standard"] <= 560.0
     assert ceilings["windows"]["standard"] <= 540.0
 
 
