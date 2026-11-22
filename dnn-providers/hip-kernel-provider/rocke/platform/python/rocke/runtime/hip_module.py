@@ -185,6 +185,10 @@ _hipDrvLaunchKernelEx = _b(
 )
 _hipMalloc = _b("hipMalloc", ctypes.POINTER(ctypes.c_void_p), ctypes.c_size_t)
 _hipFree = _b("hipFree", ctypes.c_void_p)
+_hipHostMalloc = _b(
+    "hipHostMalloc", ctypes.POINTER(ctypes.c_void_p), ctypes.c_size_t, ctypes.c_uint
+)
+_hipHostFree = _b("hipHostFree", ctypes.c_void_p)
 _hipMemcpy = _b(
     "hipMemcpy", ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int
 )
@@ -827,6 +831,18 @@ class Runtime:
 
     def free(self, ptr: int) -> None:
         _check(_hipFree(ctypes.c_void_p(ptr)), "hipFree")
+
+    def host_alloc(self, nbytes: int) -> int:
+        """``nbytes`` of page-locked host memory (``hipHostMalloc``, default
+        flags): the copies to and from it are DMA transfers, never staged
+        through a driver bounce buffer. Release it with :meth:`host_free`;
+        :func:`rocke.runtime.host_buffers.pinned_empty` wraps both."""
+        p = ctypes.c_void_p(0)
+        _check(_hipHostMalloc(ctypes.byref(p), nbytes, 0), f"hipHostMalloc({nbytes})")
+        return int(p.value)
+
+    def host_free(self, ptr: int) -> None:
+        _check(_hipHostFree(ctypes.c_void_p(ptr)), "hipHostFree")
 
     def memcpy_h2d(self, dst: int, src_buf: ctypes.Array, nbytes: int) -> None:
         _check(
