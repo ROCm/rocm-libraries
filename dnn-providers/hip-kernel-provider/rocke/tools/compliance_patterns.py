@@ -33,6 +33,7 @@ __all__ = [
     "ComplianceHit",
     "ComplianceRule",
     "find_hits",
+    "forbidden_matches",
     "load_rules",
     "rules_from_entries",
     "scan_paths",
@@ -121,19 +122,26 @@ def load_rules(path: Path = PATTERN_FILE) -> tuple[ComplianceRule, ...]:
     return rules_from_entries(entries, path)
 
 
+def forbidden_matches(
+    text: str, rules: Iterable[ComplianceRule]
+) -> Iterator[tuple[ComplianceRule, re.Match[str]]]:
+    """Every match in ``text`` whose matched text is not on its rule's ``allowed``
+    list, rule by rule: the one place a match is judged against the allowlist."""
+    for rule in rules:
+        for match in rule.pattern.finditer(text):
+            if match.group(0).lower() not in rule.allowed:
+                yield rule, match
+
+
 def find_hits(text: str, rules: Iterable[ComplianceRule]) -> list[ComplianceHit]:
     """Every forbidden match in ``text``, in line order."""
     hits: list[ComplianceHit] = []
     rules = tuple(rules)
     for line_number, line in enumerate(text.splitlines(), 1):
-        for rule in rules:
-            for match in rule.pattern.finditer(line):
-                if match.group(0).lower() not in rule.allowed:
-                    hits.append(
-                        ComplianceHit(
-                            rule.rule_id, rule.message, match.group(0), line_number
-                        )
-                    )
+        hits.extend(
+            ComplianceHit(rule.rule_id, rule.message, match.group(0), line_number)
+            for rule, match in forbidden_matches(line, rules)
+        )
     return hits
 
 
