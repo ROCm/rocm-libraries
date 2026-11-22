@@ -16,10 +16,14 @@ include("${CMAKE_CURRENT_LIST_DIR}/../../../cmake/HkpSourceDigest.cmake")
 # The revision is a digest of the source text, so any edit to an input moves it, a
 # behavior-neutral one included, and expires both shipped L1 models
 # (descriptors/predict_engine/<arch>/asm_sdpa_engine_tflops.uhd.json). A change that moves
-# it must, in the same PR, retrain both: the UHD pipeline's uhd-engine-build for
-# ASM_SDPA_ENGINE on gfx942-mi300x and gfx950-mi355x at the new revision, carrying the old
-# measurements forward only for kernels and applicability shown to be unchanged. Until it
-# does, the loader refuses both models, the engine gives no estimate, and
+# it must, in the same PR, retrain both with hipDNN's UHD tooling (projects/hipdnn/tools/
+# uhd_gen, README "Regenerating a shipped model"; the hipdnn-uhd skill): at the new
+# revision, on an MI300X for gfx942 and an MI355X for gfx950, `python -m uhd_gen generate
+# --engine ASM_SDPA_ENGINE --role predict_engine --arch <arch> --metric tflops --uhd-id
+# <the arch's AsmSdpaEngine::L1_MODEL_IDS id> ...`, then `python -m uhd_gen promote` with
+# the same --uhd-id, carrying the old measurements forward only for kernels and
+# applicability shown to be unchanged. Until it does, the loader refuses both models, the
+# engine gives no estimate, and
 # TestAsmSdpaEngineDeclaration.ShippedL1ModelsRecordTheRevisionThisBuildComputes
 # (ShippedL1ModelGate.hpp) fails.
 #
