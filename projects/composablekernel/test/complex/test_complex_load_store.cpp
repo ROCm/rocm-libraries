@@ -1,9 +1,6 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-#include <cmath>
-#include <cstring>
-#include <limits>
 #include <vector>
 
 #include "gtest/gtest.h"
@@ -11,11 +8,14 @@
 #include "ck/utility/common_header.hpp"
 #include "ck/utility/dtype_complex.hpp"
 #include "ck/library/utility/device_memory.hpp"
+#include "complex_test_data.hpp"
 
 namespace {
 
 using ck::complex_t;
 using ck::index_t;
+using ck_complex_test::same_bits;
+using ck_complex_test::special_values;
 
 // Values in [-4, 4) with different real and imaginary parts, so that a lost or swapped part shows.
 template <typename T>
@@ -31,12 +31,6 @@ std::vector<complex_t<T>> make_data(std::size_t count, unsigned seed)
         x         = complex_t<T>{r - T{4}, i - T{4}};
     }
     return v;
-}
-
-template <typename T>
-bool same_bits(const complex_t<T>& a, const complex_t<T>& b)
-{
-    return std::memcmp(&a, &b, sizeof(a)) == 0;
 }
 
 template <typename T>
@@ -110,27 +104,6 @@ TYPED_TEST(ComplexLoadStore, CopyVectorWidths)
     {
         check_copy<TypeParam, 8>();
     }
-}
-
-// Zeros of both signs, subnormals, the smallest normal, the largest finite value, values whose
-// square overflows or underflows, infinities and NaN.
-template <typename T>
-std::vector<T> special_values()
-{
-    using L = std::numeric_limits<T>;
-    return {T{0},
-            -T{0},
-            T{1},
-            T{-1.5},
-            L::min(),
-            L::denorm_min(),
-            -L::denorm_min(),
-            L::max(),
-            std::sqrt(L::max()) * T{2},
-            std::sqrt(L::min()) / T{4},
-            L::infinity(),
-            -L::infinity(),
-            L::quiet_NaN()};
 }
 
 // Every pair of special values as (real, imag), twice, so that two elements per vector divide it.
