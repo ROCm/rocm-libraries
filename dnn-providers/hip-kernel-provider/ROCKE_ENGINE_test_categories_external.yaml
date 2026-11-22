@@ -252,6 +252,7 @@ test_categories:
       - "rocke_hip_source_identity"
       - "rocke_hip_lowering_parity"
       - "rocke_library_conv_pytest"
+      - "rocke_library_host_pytest"
       - "rocke_library_conv_fwd_aot_packaging_pytest"
       - "rocke_library_conv_ir_pytest"
       - "rocke_library_conv_tf32_pytest"
@@ -297,6 +298,7 @@ test_categories:
       - "rocke_pytest_[a-z0-9_]+"
       - "rocke_tiling_pytest"
       - "rocke_library_conv_pytest"
+      - "rocke_library_host_pytest"
       - "rocke_library_conv_ir_pytest"
       - "rocke_library_conv_tf32_pytest"
       # Not registered on Windows (see rocke/library/tests/ctest_lists.cmake); the
@@ -401,3 +403,4 @@ test_categories:
     description: "rocKE checks run by scheduled CI only"
     test_patterns:
       - "rocke_tiling_visualization_pytest"
+      - "rocke_library_conv_exhaustive_pytest"

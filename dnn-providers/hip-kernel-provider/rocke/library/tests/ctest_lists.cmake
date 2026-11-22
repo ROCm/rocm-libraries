@@ -82,7 +82,17 @@ set(_ROCKE_LIBRARY_CONV_TEST_RELPATHS
     "tests/library/tests/test_capability_keys.py"
     "tests/library/tests/test_module_cache.py"
     "tests/library/tests/test_run_conv_shards.py"
-    "tests/library/tests/test_convolution_backward_data_aot_packaging.py")
+    "tests/library/tests/test_convolution_backward_data_aot_packaging.py"
+    "tests/library/tests/test_conv_abi.py"
+    "tests/library/tests/test_conv_batch_and_miopen_parse.py"
+    "tests/library/tests/test_conv_dgrad_patch.py"
+    "tests/library/tests/test_conv_dgrad_uniform_k_decode.py"
+    "tests/library/tests/test_conv_fwd_group_merge_gate.py"
+    "tests/library/tests/test_conv_implicit_gemm_vector_width.py"
+    "tests/library/tests/test_conv_wgrad_group_merge_gate.py"
+    "tests/library/tests/test_direct_depthwise_col_validate.py"
+    "tests/library/tests/test_fwd_merge_window.py"
+    "tests/library/tests/test_kernel_label.py")
 set(_ROCKE_LIBRARY_CONV_TESTS "")
 foreach(_rocke_conv_test ${_ROCKE_LIBRARY_CONV_TEST_RELPATHS})
   string(APPEND _ROCKE_LIBRARY_CONV_TESTS
@@ -91,14 +101,47 @@ endforeach()
 # pytest-timeout applies per test item and is intentionally well below the
 # CTest limit so a hung import or structural check produces pytest diagnostics.
 # CTest remains the hard backstop for collection, cumulative runtime, and
-# failures outside an individual test item.
+# failures outside an individual test item. The exhaustive items of these files
+# run in rocke_library_conv_exhaustive_pytest below instead.
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-       "add_test(rocke_library_conv_pytest ${_ROCKE_INSTALLED_PYTEST}${_ROCKE_LIBRARY_CONV_TESTS} -v -rs --timeout=30)\n")
+       "add_test(rocke_library_conv_pytest ${_ROCKE_INSTALLED_PYTEST}${_ROCKE_LIBRARY_CONV_TESTS} -m \"not exhaustive\" -v -rs --timeout=30)\n")
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "set_tests_properties(rocke_library_conv_pytest PROPERTIES\n"
        "  LABELS \"ckc;python;conv;host;standard\"\n"
        "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
         "  TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})\n")
+
+# The exhaustive items of the conv files: the kernel-label round trip over
+# every direct identity the AOT grid produces (about a million names, minutes
+# of one core). Scheduled CI only (the comprehensive tier); the conv entry
+# above runs each capabilities row and knob setting once.
+string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+       "add_test(rocke_library_conv_exhaustive_pytest ${_ROCKE_INSTALLED_PYTEST} \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_kernel_label.py\" -m exhaustive -v -rs --timeout=600)\n")
+string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+       "set_tests_properties(rocke_library_conv_exhaustive_pytest PROPERTIES\n"
+       "  LABELS \"ckc;python;conv;host;comprehensive;full\"\n"
+       "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
+       "  TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})\n")
+
+# Library host unit tests that belong to no operator family: the shared
+# dispatch helpers (rocke.dispatch.core), the benchmarks' early-stop rule and
+# the occupancy calibration tool's parse/compare logic. No GPU, no compiler.
+set(_ROCKE_LIBRARY_HOST_TEST_RELPATHS
+    "tests/library/tests/dispatch/test_core_helpers.py"
+    "tests/library/tests/test_early_stop.py"
+    "tests/library/tests/test_calibrate_occupancy.py")
+set(_ROCKE_LIBRARY_HOST_TESTS "")
+foreach(_rocke_host_test ${_ROCKE_LIBRARY_HOST_TEST_RELPATHS})
+  string(APPEND _ROCKE_LIBRARY_HOST_TESTS
+         " \"${ROCKE_TEST_CTEST_REL}${_rocke_host_test}\"")
+endforeach()
+string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+       "add_test(rocke_library_host_pytest ${_ROCKE_INSTALLED_PYTEST}${_ROCKE_LIBRARY_HOST_TESTS} -v -rs --timeout=30)\n")
+string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+       "set_tests_properties(rocke_library_host_pytest PROPERTIES\n"
+       "  LABELS \"ckc;python;host;standard\"\n"
+       "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
+       "  TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})\n")
 
 # The forward AOT-packaging cross-check gets its own entry: it samples far more of
 # the sweep's identity space than the other conv files above, so its slowest cases
@@ -556,7 +599,9 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
 
 # GDN/KDA decode CPU tests: spec validation, IR emission and load order,
 # the golden IR hashes, the performance knobs, dispatch selection, and the
-# sweep / defaults-report tools and their shared timing helpers. None
+# sweep / defaults-report tools and their shared timing helpers; the GDN
+# decode and prefill host guards; the KDA chunkwise specs, decode reference
+# and resources, host packing, golden IR hashes and dispatch wiring. None
 # needs a GPU. The fp32 pass test and the rotation sizing are torch-free
 # (dispatch/gdn/gate_rules.py) and tested without torch, as is how the
 # sweep and both benchmarks act on a failed verdict. The tests that build
@@ -587,7 +632,18 @@ set(_ROCKE_LIBRARY_GDN_TEST_RELPATHS
     "tests/library/tests/dispatch/gdn/test_tuning_contract.py"
     "tests/library/tests/dispatch/gdn/test_cli_args.py"
     "tests/library/tests/dispatch/gdn/test_gate_rules.py"
-    "tests/library/tests/dispatch/gdn/test_gfx950_prefill_wiring.py")
+    "tests/library/tests/dispatch/gdn/test_gfx950_prefill_wiring.py"
+    "tests/library/tests/test_gdn_decode_prepare.py"
+    "tests/library/tests/test_gdn_prefill_decay_guard.py"
+    "tests/library/tests/test_kda_chunkwise_spec.py"
+    "tests/library/tests/test_kda_chunkwise_gfx942_spec.py"
+    "tests/library/tests/test_kda_decode_reference.py"
+    "tests/library/tests/test_kda_decode_resources.py"
+    "tests/library/tests/test_kda_gfx942_golden.py"
+    "tests/library/tests/test_kda_gfx950_golden.py"
+    "tests/library/tests/test_kda_hostpack.py"
+    "tests/library/tests/dispatch/kda/test_gfx942_wiring.py"
+    "tests/library/tests/dispatch/kda/test_gfx950_wiring.py")
 set(_ROCKE_LIBRARY_GDN_TESTS "")
 foreach(_rocke_gdn_test ${_ROCKE_LIBRARY_GDN_TEST_RELPATHS})
   string(APPEND _ROCKE_LIBRARY_GDN_TESTS
