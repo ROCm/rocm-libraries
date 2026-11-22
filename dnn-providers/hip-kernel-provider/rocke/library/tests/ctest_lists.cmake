@@ -686,7 +686,10 @@ endif()
 set(_ROCKE_LIBRARY_ATTENTION_GPU_TEST_RELPATHS
     "tests/library/tests/test_attention_dense_gfx950_numeric.py"
     "tests/library/tests/test_attn_tiled_2d_gfx950_fp8_k_lds_numeric.py"
-    "tests/library/tests/test_extended_parity_attention.py")
+    "tests/library/tests/test_extended_parity_attention.py"
+    # Each score modifier and each transposed 32x32 route once; the mixes run
+    # in rocke_library_attention_biased_mixes_gpu_pytest below.
+    "tests/library/tests/test_attention_tiled_2d_gfx950_biased_numeric.py::test_each_modifier_on_each_route")
 set(_ROCKE_LIBRARY_ATTENTION_GPU_TESTS "")
 foreach(_rocke_attn_gpu_test ${_ROCKE_LIBRARY_ATTENTION_GPU_TEST_RELPATHS})
   string(APPEND _ROCKE_LIBRARY_ATTENTION_GPU_TESTS
@@ -697,6 +700,17 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "set_tests_properties(rocke_library_attention_gpu_pytest PROPERTIES\n"
        "  LABELS \"ckc;python;attention;gpu\"\n"
+       "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
+       "  TIMEOUT ${ROCKE_TEST_TIMEOUT_GPU})\n")
+
+# The score-modifier mixes of the gfx950 transposed 32x32 routes (the exhaustive
+# items of test_attention_tiled_2d_gfx950_biased_numeric.py). Scheduled CI only
+# (the comprehensive tier); the entry above runs each modifier and route once.
+string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+       "add_test(rocke_library_attention_biased_mixes_gpu_pytest ${_ROCKE_INSTALLED_PYTEST} \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_attention_tiled_2d_gfx950_biased_numeric.py::test_modifier_mixes\" -v -rs)\n")
+string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+       "set_tests_properties(rocke_library_attention_biased_mixes_gpu_pytest PROPERTIES\n"
+       "  LABELS \"ckc;python;attention;gpu;comprehensive;full\"\n"
        "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
        "  TIMEOUT ${ROCKE_TEST_TIMEOUT_GPU})\n")
 
