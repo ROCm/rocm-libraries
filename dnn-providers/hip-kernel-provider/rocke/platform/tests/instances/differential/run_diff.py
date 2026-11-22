@@ -14,12 +14,13 @@
 #                                                  of .ll; needs emitter mode arg)
 #   L1  mode=verify  verifier diagnostics        (needs emitter mode arg)
 #
-# An emitter that does not yet accept a mode arg is exercised in its default
-# (.ll) mode for L3 and reported as MODE_UNSUPPORTED for L2/L1 -- so this runner
-# already works against the current emitters and gains L2/L1 coverage family by
-# family as emitters are extended. MODE_UNSUPPORTED is also the one gate-passing
-# status that means "not compared" (see GATE_PASS below), which is admissible
-# only because the gating L3/ll lane cannot produce it.
+# An emitter that refuses a mode arg is exercised in its default (.ll) mode for
+# L3 and reported as MODE_UNSUPPORTED for L2/L1: a family whose output has no
+# such form (conv_abi prints kernarg lists, which are not IR) has nothing to
+# compare there. MODE_UNSUPPORTED is the one gate-passing status that means "not
+# compared" (see GATE_PASS below). The run lists those families in a NOT
+# COMPARED block, so a pass never hides them, and the ll lane cannot produce
+# the status at all.
 #
 # Two levels, and the words are not interchangeable: a VERDICT classifies one
 # (family, config); a STATUS rolls a family's verdicts up, and the gate rules on
@@ -946,11 +947,13 @@ GATE_PASS = {
     "GREEN": "every sampled config agreed -- identical bytes, or both engines "
     "rejected the spec",
     "CANON_ONLY": "differs only in incidental SSA-id numbering",
-    # ll mode -- the gating mode -- never yields this; only the non-gating
-    # ir/verify modes can, where an emitter that predates the mode arg is a
-    # known coverage gap rather than a parity failure.
-    "MODE_UNSUPPORTED": "emitter does not accept this mode yet",
+    # ll mode never yields this; only the ir/verify modes can, for a family
+    # whose emitter refuses the mode because its output has no such form. It
+    # passes, compared nothing, and is listed by uncompared_families().
+    "MODE_UNSUPPORTED": "the emitter refuses this mode, so nothing was compared",
 }
+# The gate-passing statuses that compared no bytes.
+GATE_PASS_UNCOMPARED = ("MODE_UNSUPPORTED",)
 GATE_FAIL = {
     "DRIFT": "configs diverge between the engines",
     "RANGE_DRIFT": "the engines disagree about how many configs exist",
@@ -1017,6 +1020,29 @@ def gate_verdict(results):
                 )
             )
     return (1 if failures else 0), failures
+
+
+class UncomparedFamily(NamedTuple):
+    """One family the gate passes although it compared nothing, and why."""
+
+    family: str
+    status: str
+    reason: str
+
+
+def uncompared_families(results) -> list[UncomparedFamily]:
+    """The families that passed without comparing anything.
+
+    The gate lets them pass, so the summary prints them in their own block,
+    where a reader cannot mistake them for compared families.
+    """
+    return [
+        UncomparedFamily(
+            r.get("family", "<unnamed>"), r["status"], GATE_PASS[r["status"]]
+        )
+        for r in results
+        if r.get("status") in GATE_PASS_UNCOMPARED
+    ]
 
 
 def _print_family_result(result: dict) -> None:
@@ -1388,6 +1414,11 @@ def _main():
     for k in sorted(by):
         print(f"  {k:16s} {by[k]}")
     exit_code, failures = gate_verdict(results)
+    uncompared = uncompared_families(results)
+    if uncompared:
+        print("\n=== NOT COMPARED (passes; no bytes compared) ===")
+        for family, status, reason in uncompared:
+            print(f"  {status:16s} {family}: {reason}")
     if failures:
         print("\n=== GATE FAILURES ===")
         for family, status, reason in failures:

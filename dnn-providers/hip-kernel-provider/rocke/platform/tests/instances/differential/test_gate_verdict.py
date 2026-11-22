@@ -2,10 +2,9 @@
 # SPDX-License-Identifier: MIT
 """Unit tests for the byte-identity gate's pass/fail rule (run_diff.py).
 
-The gate prints "RESULT: GREEN - engine builds and .ll emission is
-byte-identical to Python" on a zero exit code, so every way the runner can exit
-zero is a sentence the gate asserts. These tests pin the rule to the dashboards
-it is allowed to say that about.
+The gate prints "RESULT: GREEN - ... byte-identical to Python" on a zero exit
+code, so every way the runner can exit zero is a sentence the gate asserts.
+These tests pin the rule to the dashboards it is allowed to say that about.
 
 Lives beside its subject: the differential harness needs a compiler and the
 source tree, so CMake excludes this directory from the installed test tree, and
@@ -160,11 +159,33 @@ class TestGateVerdict(unittest.TestCase):
         self.assertEqual(gate_verdict(results), (0, []))
 
     def test_mode_unsupported_passes(self):
-        # Admissible only because the gating mode cannot produce it -- an
-        # emitter predating the mode arg is a coverage gap in the non-gating
-        # ir/verify lanes. TestLlModeInvariant pins that guard.
+        # A family whose output has no IR form (conv_abi) has nothing to compare
+        # in ir mode. It passes, and uncompared_families() names it so the
+        # summary does not hide it. TestLlModeInvariant pins that ll mode cannot
+        # produce the status.
         results = [{"family": "conv_fwd", "status": "MODE_UNSUPPORTED", "mode": "ir"}]
         self.assertEqual(gate_verdict(results), (0, []))
+
+    def test_uncompared_families_names_only_the_passes_that_compared_nothing(self):
+        results = [
+            {"family": "conv_abi", "status": "MODE_UNSUPPORTED", "mode": "ir"},
+            {"family": "gemm_fp16", "status": "GREEN", "n": 4, "bad": 0},
+            {"family": "gemm_bf16", "status": "CANON_ONLY", "n": 4, "bad": 0},
+            {"family": "gemm_fp8", "status": "DRIFT", "n": 4, "bad": 1},
+        ]
+        self.assertEqual(
+            run_diff.uncompared_families(results),
+            [
+                run_diff.UncomparedFamily(
+                    "conv_abi", "MODE_UNSUPPORTED", GATE_PASS["MODE_UNSUPPORTED"]
+                )
+            ],
+        )
+
+    def test_every_uncompared_status_is_a_pass(self):
+        # A failing status is already reported as a failure; listing it again
+        # as "not compared" would only blur the two blocks.
+        self.assertTrue(set(run_diff.GATE_PASS_UNCOMPARED) <= set(GATE_PASS))
 
     def test_every_failure_is_reported_not_just_the_first(self):
         results = [
@@ -558,12 +579,12 @@ class TestBatchAndBuildReuse(unittest.TestCase):
 
 
 class TestLlModeInvariant(unittest.TestCase):
-    """MODE_UNSUPPORTED passes only because ll mode cannot produce it."""
+    """The ll lane, which every family supports, cannot report MODE_UNSUPPORTED."""
 
     def test_ll_mode_never_reports_mode_unsupported(self):
-        # An emitter that fumbles argv prints a usage line. In ir/verify that is
-        # a known coverage gap; in ll -- the gating mode -- it must not be able
-        # to masquerade as one.
+        # An emitter that fumbles argv prints a usage line. In ir/verify that
+        # reads as the family refusing the mode; in ll, which every family
+        # supports, it must not be able to masquerade as one.
         usage = (2, b"", "usage: gemm_emit <idx> [mode]")
 
         def status(mode):

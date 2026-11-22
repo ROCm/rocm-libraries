@@ -31,7 +31,9 @@ the second needs comgr.
 
 `check_byte_identity.py` builds the engine fresh as a Release static archive
 (`librocke_core.a`) and then proves its LLVM-IR emission is byte-identical to the
-Python engine across every kernel family. A green run means the dual-engine
+Python engine across every kernel family. A last lane compares the two engines'
+serialized IR (what the builders make, before lowering) once, at the
+host's LLVM flavor; it gates like the `.ll` lanes. A green run means the dual-engine
 contract holds. It writes everything under a build root (default
 `$TMPDIR/rocke_verify`); nothing is written back into the source tree.
 
@@ -41,7 +43,7 @@ Common options:
 |---|---|
 | `--build-root DIR` | Where the engine is built (use local disk; never NFS). |
 | `--only SUBSTR` | Restrict the gate to families containing SUBSTR (comma-separated). |
-| `--ir` | Also run the IR-canonical diff (diagnostic). |
+| `--no-ir` | Skip the serialized-IR lane (quick local loops only; a gate run keeps it). |
 | `--ref-pyroot DIR` / `--ref-shim DIR` | Compare against another tree's Python engine. |
 
 > Build on a **local filesystem**. NFS makes the compiler and `comgr`

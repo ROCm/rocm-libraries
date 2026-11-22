@@ -138,7 +138,7 @@ you changed:
 | Mode | Compares | Use when you changed… |
 |------|----------|------------------------|
 | `--mode ll` | final LLVM-IR text (the contract) | anything in lowering or builders — this is the gate of record |
-| `--mode ir` | the `ck.dsl.ir/v1` serialized IR (upstream of lowering) | a builder, to see drift *before* the lowerer absorbs it |
+| `--mode ir` | the `ck.dsl.ir/v1` serialized IR (upstream of lowering) | a builder, to see drift *before* the lowerer absorbs it; `check_byte_identity.py` gates on its bytes |
 | `--mode verify` | the IR verifier's diagnostics | the verifier or validity gates |
 
 Add `--canonical` to `--mode ir` to re-triage byte differences into "real" vs

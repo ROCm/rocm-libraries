@@ -159,8 +159,11 @@ the tier and CTest entry of a new test, see
    pytest stage reports a skip and GREEN does not imply that it ran. No configured
    test build or no built registered native tests is reported explicitly as a
    skipped stage.
-2. **Diagnostics** (opt-in, not in the gate): `run_diff.py --ir` (IR-canonical
-   diff), `fuzz_diff.py`, `ir_artifact_diff.py`.
+2. **Diagnostics** (opt-in, not in the gate): `fuzz_diff.py`,
+   `ir_artifact_diff.py`, and `run_diff.py --mode ir --canonical`, which
+   separates structural IR drift from SSA-id renumbering. The serialized-IR
+   byte comparison (`--mode ir`) is part of the gate: `check_byte_identity.py`
+   runs it as a lane.
 3. **GPU / manual numeric lanes** (need a HIP device; skipped/not-collected
    otherwise): `differential/numeric.py`, `instances/test_rocke_numeric.py`.
 4. **Manual C++ demos / tools** (not built or registered by CMake/CTest --
