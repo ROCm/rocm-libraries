@@ -357,6 +357,13 @@ bool rocke_pooling2d_is_valid_spec(const rocke_pooling2d_spec_t* spec,
     }
     rocke_arena_destroy(&arena);
 
+    /* if spec.dtype == "bf16": reject (store_tile has an f16 buffer store only). */
+    if(strcmp(spec->dtype, "bf16") == 0)
+    {
+        POOL_REASON("bf16 output is not supported (the store is f16 only); use f16");
+        return false;
+    }
+
     /* if spec.op not in ("max","avg","sum"): reject. */
     if(strcmp(spec->op, "max") != 0 && strcmp(spec->op, "avg") != 0 && strcmp(spec->op, "sum") != 0)
     {
