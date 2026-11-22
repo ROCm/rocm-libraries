@@ -20,7 +20,6 @@
 #include <hipdnn_plugin_sdk/heuristics/uhd/EnginePredictor.hpp>
 #include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/GbdtModelTestBuilder.hpp>
-#include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
 
 #include "../../TestResourcePaths.hpp"
 
@@ -521,75 +520,6 @@ TEST_F(TestEnginePredictor, BindingSelectsByMetricAndFallsBackWithinIt)
     binding.markUnusable("time", "gfx942", PredictionStatus::INVALID, "refused");
     EXPECT_EQ(ask("time", "gfx942").status, PredictionStatus::INVALID);
     EXPECT_EQ(ask("tflops", "gfx942").status, PredictionStatus::AVAILABLE);
-}
-
-/// An engine with an L1 for some architecture is asked about one it has none on: the answer
-/// stays UNAVAILABLE, and the gap is logged once per (engine, metric, architecture).
-TEST_F(TestEnginePredictor, AnArchitectureWithoutAnL1IsReportedOncePerEngineMetricAndArch)
-{
-    auto recorder
-        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
-    EngineModelBinding binding;
-    binding.bind("tflops", "gfx942", config(document()));
-    const auto ask = [&](const std::string& arch, bool evaluate = true) {
-        return binding.predict(
-            17, "test:opaque", "selector-1", "tflops", arch, _features, evaluate);
-    };
-    const std::string expected
-        = "engine prediction: engine 'test:opaque' has no predict_engine UHD for metric 'tflops' "
-          "on "
-          "arch 'gfx1102' (it has one on: gfx942); the engine is ranked without an estimate there";
-
-    EXPECT_EQ(ask("gfx942").status, PredictionStatus::AVAILABLE);
-    EXPECT_EQ(recorder.countLogsAtLevel(HIPDNN_SEV_ERROR), 0U)
-        << recorder.getRecordedLogsAsString();
-
-    const auto missing = ask("gfx1102");
-    EXPECT_EQ(missing.status, PredictionStatus::UNAVAILABLE);
-    EXPECT_EQ(missing.reason, "no predict_engine UHD for metric 'tflops' on arch 'gfx1102'");
-    EXPECT_EQ(recorder.countLogsAtLevel(HIPDNN_SEV_ERROR), 1U)
-        << recorder.getRecordedLogsAsString();
-    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, expected))
-        << recorder.getRecordedLogsAsString();
-
-    // The same request again, and the same architecture under another feature suffix.
-    ask("gfx1102");
-    ask("gfx1102:sramecc+:xnack-");
-    EXPECT_EQ(recorder.countLogsAtLevel(HIPDNN_SEV_ERROR), 1U)
-        << recorder.getRecordedLogsAsString();
-
-    // Another architecture is a new report.
-    ask("gfx1151");
-    EXPECT_EQ(recorder.countLogsAtLevel(HIPDNN_SEV_ERROR), 2U)
-        << recorder.getRecordedLogsAsString();
-
-    // A description call ranks nothing, so it reports nothing, and consumes no report.
-    ask("gfx1200", false);
-    EXPECT_EQ(recorder.countLogsAtLevel(HIPDNN_SEV_ERROR), 2U)
-        << recorder.getRecordedLogsAsString();
-    ask("gfx1200");
-    EXPECT_EQ(recorder.countLogsAtLevel(HIPDNN_SEV_ERROR), 3U)
-        << recorder.getRecordedLogsAsString();
-}
-
-/// An engine that binds nothing for the metric (no L1 at all) never reports a gap, whatever it
-/// binds for another metric.
-TEST_F(TestEnginePredictor, AnEngineWithNoL1ForTheMetricStaysSilent)
-{
-    auto recorder
-        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
-    EngineModelBinding empty;
-    EngineModelBinding timeOnly;
-    timeOnly.bind("time", "gfx942", timeConfig());
-    for(const auto* binding : {&empty, &timeOnly})
-    {
-        const auto prediction = binding->predict(
-            17, "test:opaque", "selector-1", "tflops", "gfx942", _features, true);
-        EXPECT_EQ(prediction.status, PredictionStatus::UNAVAILABLE);
-        EXPECT_EQ(prediction.reason, "no predict_engine UHD for metric 'tflops' on arch 'gfx942'");
-    }
-    EXPECT_EQ(recorder.countLogsAtLevel(HIPDNN_SEV_ERROR), 0U)
-        << recorder.getRecordedLogsAsString();
 }
 
 /// RFC 0019 §11.4: a value must be strictly positive in every metric; a 0 throughput is

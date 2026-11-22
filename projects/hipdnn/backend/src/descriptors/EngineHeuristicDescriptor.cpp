@@ -28,13 +28,49 @@
 #include <cerrno>
 #include <cstdlib>
 #include <cstring>
+#include <mutex>
 #include <set>
 #include <sstream>
+#include <string>
 #include <tuple>
 #include <unordered_map>
 
 namespace hipdnn_backend
 {
+
+namespace
+{
+
+// Warns that an applicable engine has no L1 prediction in `metric` on `architecture`, once per
+// (engine name, metric, architecture) for the process. The architecture is the device's
+// gcnArchName without its feature suffix (e.g. "gfx90a:sramecc+:xnack-" reports "gfx90a").
+void warnOnceMissingEnginePrediction(
+    const std::string& engineName,
+    const std::string& metric,
+    const std::string& architecture,
+    const hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT& prediction)
+{
+    static std::mutex reportedMutex;
+    static std::set<std::tuple<std::string, std::string, std::string>> reported;
+
+    const std::string archName = architecture.substr(0, architecture.find(':'));
+    {
+        const std::lock_guard<std::mutex> guard(reportedMutex);
+        if(!reported.emplace(engineName, metric, archName).second)
+        {
+            return;
+        }
+    }
+
+    HIPDNN_BACKEND_LOG_WARN("engine '{}' is missing a '{}' prediction for {}{}{}",
+                            engineName,
+                            metric,
+                            archName,
+                            prediction.reason.empty() ? "" : ": ",
+                            prediction.reason);
+}
+
+} // namespace
 
 std::vector<int64_t> EngineHeuristicDescriptor::resolveHeuristicPolicyOrder()
 {
@@ -253,18 +289,27 @@ void EngineHeuristicDescriptor::finalize()
     const hipdnnPluginConstData_t serializedGraph = _graph->getSerializedGraph();
     // Predictions are requested in the effective metric; answers in another metric come back
     // INVALID (RFC 0019 §11.4).
-    const heuristics::SelectionHeuristic::PredictionProvider predict
-        = [&](int64_t engineId, hipdnnEnginePredictionKind_t kind) {
-              hipdnn_flatbuffers_sdk::data_objects::EngineConfigT config;
-              config.engine_id = engineId;
-              config.ranking_metric = _effectiveRankingMetric;
-              flatbuffers::FlatBufferBuilder builder;
-              builder.Finish(
-                  hipdnn_flatbuffers_sdk::data_objects::EngineConfig::Pack(builder, &config));
-              const hipdnnPluginConstData_t configBytes{builder.GetBufferPointer(),
-                                                        builder.GetSize()};
-              return engineRm->getEnginePrediction(configBytes, serializedGraph, kind);
-          };
+    const heuristics::SelectionHeuristic::PredictionProvider predict =
+        [&](int64_t engineId, hipdnnEnginePredictionKind_t kind) {
+            hipdnn_flatbuffers_sdk::data_objects::EngineConfigT config;
+            config.engine_id = engineId;
+            config.ranking_metric = _effectiveRankingMetric;
+            flatbuffers::FlatBufferBuilder builder;
+            builder.Finish(
+                hipdnn_flatbuffers_sdk::data_objects::EngineConfig::Pack(builder, &config));
+            const hipdnnPluginConstData_t configBytes{builder.GetBufferPointer(),
+                                                      builder.GetSize()};
+            auto prediction = engineRm->getEnginePrediction(configBytes, serializedGraph, kind);
+            if(kind == HIPDNN_ENGINE_PREDICTION_ENGINE
+               && prediction.status
+                      != hipdnn_flatbuffers_sdk::data_objects::PredictionStatus::AVAILABLE)
+            {
+                const std::string engineName = engineRm->resolveEngineName(engineId, std::nullopt);
+                warnOnceMissingEnginePrediction(
+                    engineName, _effectiveRankingMetric, devProps.architecture_name, prediction);
+            }
+            return prediction;
+        };
 
     // Resolve ordered policy IDs
     auto orderedPolicyIds = resolveHeuristicPolicyOrder();

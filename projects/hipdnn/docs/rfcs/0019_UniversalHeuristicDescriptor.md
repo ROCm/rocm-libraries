@@ -2661,9 +2661,10 @@ It is not encoded as a value: "zero" is the worst throughput but the best time, 
 means *bad* in every metric. Absence means "I do not answer this question"; invalid means "I answer, and
 the answer is not to be trusted."
 
-An engine with an L1 for some architectures and none for the requesting one reports *unavailable* there,
-and the provider logs that gap once per (engine, metric, architecture), naming the architectures the
-engine does have an L1 on. An engine with no L1 for the metric at all is silent.
+When engine selection asks an applicable engine for its L1 prediction in a metric and the engine has none
+(any status but *available*), the backend logs a warning naming the engine, the metric and the
+architecture, once per (engine, metric, architecture) per process. The engine is ranked after the scored
+engines, as below.
 
 An engine that supplies no estimate is ordered by the existing static rules and simply does not
 participate in metric-based comparison — the mixed case has to work, since it is the near-term reality

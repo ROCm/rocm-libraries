@@ -1377,7 +1377,7 @@ re-stamped to the current one afterwards; `TestFlydslModelBinding` checks every 
 
 Elsewhere an SDPA engine orders its kernels by descriptor `priority` (the native ranker),
 its UED binds no engine estimate for that architecture (it reports UNAVAILABLE when asked,
-logged once per architecture), and autotune measures the
+and engine selection logs a warning once per architecture), and autotune measures the
 order. Each installed model records the selector revision it was trained against, which
 digests the engine's kernel catalog and ranker: a change to an SDPA catalog, its kernel
 fields or a ranker makes those models refused at run time, so such a change retrains or

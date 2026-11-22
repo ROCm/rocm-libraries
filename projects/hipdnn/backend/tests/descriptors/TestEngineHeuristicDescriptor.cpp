@@ -1,6 +1,7 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
+#include "../ScopedBackendWarningCapture.hpp"
 #include "DescriptorTestUtils.hpp"
 #include "HipdnnException.hpp"
 #include "TestMacros.hpp"
@@ -9,6 +10,7 @@
 #include "descriptors/EngineHeuristicDescriptor.hpp"
 #include "descriptors/GraphDescriptor.hpp"
 #include "descriptors/ScopedDescriptor.hpp"
+#include "heuristics/DeviceProperties.hpp"
 #include "heuristics/SelectionHeuristic.hpp"
 #include "heuristics/prediction/PredictionBuiltIn.hpp"
 #include "hipdnn_backend.h"
@@ -27,6 +29,7 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/engine_details_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/engine_prediction_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
+#include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
 #include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
@@ -1502,6 +1505,34 @@ protected:
     hipdnn_data_sdk::utilities::ScopedResource<hipdnnHeuristicHandle_t> _predictionHandle;
     flatbuffers::DetachedBuffer _serializedGraph;
 
+    // Serves the built-in prediction policy @p policyName to the heuristic resource manager
+    // mock and the empty serialized graph to the graph mock, after setGraph(). Returns the
+    // policy ID.
+    int64_t installPredictionPolicy(const char* policyName)
+    {
+        namespace fb = hipdnn_flatbuffers_sdk::data_objects;
+        _predictionPlugin = HeuristicPlugin::createBuiltIn(
+            hipdnn_backend::heuristics::prediction::populateFunctionTable(),
+            "prediction-wiring-test");
+        _predictionHandle = hipdnn_data_sdk::utilities::ScopedResource<hipdnnHeuristicHandle_t>(
+            _predictionPlugin->createHandle(),
+            [this](auto handle) { _predictionPlugin->destroyHandle(handle); });
+        const int64_t policyId = hipdnn_data_sdk::utilities::policyNameToId(policyName);
+
+        const fb::GraphT graph{};
+        flatbuffers::FlatBufferBuilder graphBuilder;
+        graphBuilder.Finish(fb::Graph::Pack(graphBuilder, &graph));
+        _serializedGraph = graphBuilder.Release();
+        const hipdnnPluginConstData_t graphBytes{_serializedGraph.data(), _serializedGraph.size()};
+
+        EXPECT_CALL(*getMockGraph(), getSerializedGraph()).WillRepeatedly(Return(graphBytes));
+        EXPECT_CALL(*_mockHeuristicPluginResourceManager, getPluginForPolicyId(policyId))
+            .WillRepeatedly(Return(_predictionPlugin.get()));
+        EXPECT_CALL(*_mockHeuristicPluginResourceManager, getHeuristicHandleForPolicyId(policyId))
+            .WillRepeatedly(Return(_predictionHandle.get()));
+        return policyId;
+    }
+
     // Finalizes under a built-in prediction policy and checks that every candidate is
     // predicted in the descriptor's metric and that the predictions decide the order. Any
     // prediction request outside the expectations (another metric, engine or kind) fails.
@@ -1527,29 +1558,11 @@ protected:
         const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter fallbackGuard(
             "HIPDNN_HEUR_FALLBACK_ENGINE_ORDER", "");
 
-        _predictionPlugin = HeuristicPlugin::createBuiltIn(
-            hipdnn_backend::heuristics::prediction::populateFunctionTable(),
-            "prediction-wiring-test");
-        _predictionHandle = hipdnn_data_sdk::utilities::ScopedResource<hipdnnHeuristicHandle_t>(
-            _predictionPlugin->createHandle(),
-            [this](auto handle) { _predictionPlugin->destroyHandle(handle); });
-        const int64_t policyId = hipdnn_data_sdk::utilities::policyNameToId(policyName);
-
-        const fb::GraphT graph{};
-        flatbuffers::FlatBufferBuilder graphBuilder;
-        graphBuilder.Finish(fb::Graph::Pack(graphBuilder, &graph));
-        _serializedGraph = graphBuilder.Release();
-        const hipdnnPluginConstData_t graphBytes{_serializedGraph.data(), _serializedGraph.size()};
-
         auto heur = getEngineHeuristicDescriptor();
         setRankingMetric(*heur, "time");
         setGraph();
         setHeuristicMode(viaMode.value_or(HIPDNN_HEUR_MODE_FALLBACK));
-        EXPECT_CALL(*getMockGraph(), getSerializedGraph()).WillRepeatedly(Return(graphBytes));
-        EXPECT_CALL(*_mockHeuristicPluginResourceManager, getPluginForPolicyId(policyId))
-            .WillRepeatedly(Return(_predictionPlugin.get()));
-        EXPECT_CALL(*_mockHeuristicPluginResourceManager, getHeuristicHandleForPolicyId(policyId))
-            .WillRepeatedly(Return(_predictionHandle.get()));
+        const int64_t policyId = installPredictionPolicy(policyName);
         if(!viaMode.has_value())
         {
             ASSERT_NO_THROW(heur->setAttribute(
@@ -1642,6 +1655,91 @@ TEST_F(TestGpuPredictionPolicyWiring, ModeAPredictsEachCandidateInTheRankingMetr
 TEST_F(TestGpuPredictionPolicyWiring, ModeBPredictsEachCandidateInTheRankingMetric)
 {
     expectRankedByPredictions(hipdnn_data_sdk::utilities::MODE_B_POLICY_NAME, true);
+}
+
+// An applicable engine without an engine prediction in the ranking metric is reported once per
+// (engine, metric, architecture) for the process, by name, and the ranking is unchanged. The
+// engine IDs and names are unique to this case because the report's dedup spans the process.
+TEST_F(TestGpuPredictionPolicyWiring,
+       MissingEnginePredictionWarnsOncePerEngineMetricAndArchitecture)
+{
+    namespace fb = hipdnn_flatbuffers_sdk::data_objects;
+    constexpr int64_t SCORED_ID = 0x7E57A001;
+    constexpr int64_t MISSING_ID = 0x7E57A002;
+    const std::string missingName = "missing_estimate_test_engine";
+    const std::string missingReason = "no L1 model for this architecture";
+
+    auto recorder
+        = hipdnn_test_sdk::utilities::IsolatedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
+    const ScopedBackendWarningCapture capture;
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter policyGuard(
+        "HIPDNN_HEUR_POLICY_ORDER", "");
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter metricGuard(
+        "HIPDNN_HEUR_RANKING_METRIC", "");
+
+    auto heur = getEngineHeuristicDescriptor();
+    setRankingMetric(*heur, "time");
+    setGraph();
+    setHeuristicMode(HIPDNN_HEUR_MODE_A);
+    installPredictionPolicy(hipdnn_data_sdk::utilities::MODE_A_POLICY_NAME);
+    EXPECT_CALL(*_mockEnginePluginResourceManager, getApplicableEngineIds(_, _))
+        .WillRepeatedly(Return(std::vector<int64_t>{SCORED_ID, MISSING_ID}));
+    ON_CALL(*_mockEnginePluginResourceManager, resolveEngineName(SCORED_ID, _))
+        .WillByDefault(Return("scored_estimate_test_engine"));
+    ON_CALL(*_mockEnginePluginResourceManager, resolveEngineName(MISSING_ID, _))
+        .WillByDefault(Return(missingName));
+    EXPECT_CALL(*_mockEnginePluginResourceManager,
+                getEnginePrediction(_, _, HIPDNN_ENGINE_PREDICTION_ENGINE, _))
+        .WillRepeatedly(Invoke([&](const hipdnnPluginConstData_t& config,
+                                   const hipdnnPluginConstData_t&,
+                                   hipdnnEnginePredictionKind_t,
+                                   bool) {
+            const int64_t engineId = fb::GetEngineConfig(config.ptr)->engine_id();
+            fb::EnginePredictionT prediction;
+            prediction.engine_id = engineId;
+            prediction.kind = fb::PredictionKind::ENGINE;
+            prediction.metric = "time";
+            if(engineId == SCORED_ID)
+            {
+                prediction.status = fb::PredictionStatus::AVAILABLE;
+                prediction.value = 10.0;
+            }
+            else
+            {
+                prediction.status = fb::PredictionStatus::UNAVAILABLE;
+                prediction.reason = missingReason;
+            }
+            return prediction;
+        }));
+
+    const std::string fullArchitecture
+        = hipdnn_backend::heuristics::queryDeviceProperties(_mockHandle.get()).architecture_name;
+    const std::string architecture = fullArchitecture.substr(0, fullArchitecture.find(':'));
+
+    ASSERT_NO_THROW(heur->finalize());
+
+    EXPECT_EQ(recorder.countLogsAtLevel(HIPDNN_SEV_WARN), 1U) << recorder.getRecordedLogsAsString();
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN,
+                                          "engine '" + missingName
+                                              + "' is missing a 'time' prediction for "
+                                              + architecture + ": " + missingReason))
+        << recorder.getRecordedLogsAsString();
+    EXPECT_FALSE(recorder.hasLogContaining("scored_estimate_test_engine"))
+        << recorder.getRecordedLogsAsString();
+
+    // A second selection for the same engine, metric and architecture is silent.
+    auto second = createDescriptor<EngineHeuristicDescriptor>();
+    auto* secondHeur = second->asDescriptor<EngineHeuristicDescriptor>().get();
+    setRankingMetric(*secondHeur, "time");
+    const hipdnnBackendHeurMode_t mode = HIPDNN_HEUR_MODE_A;
+    ASSERT_NO_THROW(secondHeur->setAttribute(HIPDNN_ATTR_ENGINEHEUR_OPERATION_GRAPH,
+                                             HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                             1,
+                                             &_mockGraphWrapper));
+    ASSERT_NO_THROW(
+        secondHeur->setAttribute(HIPDNN_ATTR_ENGINEHEUR_MODE, HIPDNN_TYPE_HEUR_MODE, 1, &mode));
+    ASSERT_NO_THROW(secondHeur->finalize());
+    EXPECT_EQ(recorder.countLogsAtLevel(HIPDNN_SEV_WARN), 1U) << recorder.getRecordedLogsAsString();
 }
 
 // Mode A with no policy order selects ModeA ahead of the static fallback.

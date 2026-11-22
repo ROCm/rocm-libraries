@@ -12,14 +12,12 @@
 #include <mutex>
 #include <set>
 #include <string>
-#include <tuple>
 #include <utility>
 #include <vector>
 
 #include <hipdnn_data_sdk/utilities/RankingMetrics.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/engine_prediction_generated.h>
 #include <hipdnn_plugin_sdk/ArchMatch.hpp>
-#include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <hipdnn_plugin_sdk/heuristics/uhd/AdapterFactory.hpp>
 #include <hipdnn_plugin_sdk/heuristics/uhd/ScoreTransform.hpp>
 #include <hipdnn_plugin_sdk/heuristics/uhd/UhdParser.hpp>
@@ -361,10 +359,6 @@ public:
                 }
             }
         }
-        if(evaluate && selected == nullptr && refused == nullptr)
-        {
-            reportMissingEstimate(engineName, metric, arch);
-        }
         const bool evaluateModel = evaluate && refused == nullptr;
         auto result = predictEngine(engineId,
                                     engineName,
@@ -390,51 +384,6 @@ public:
     }
 
 private:
-    /// Logs that this engine has an L1 for @p metric on some architecture but none for @p arch,
-    /// once per (engine, metric, architecture without feature suffix) for the binding's
-    /// lifetime. Silent for an engine that binds nothing for @p metric.
-    void reportMissingEstimate(const std::string& engineName,
-                               const std::string& metric,
-                               const std::string& arch) const
-    {
-        std::set<std::string> covered;
-        if(const auto models = _byMetric.find(metric); models != _byMetric.end())
-        {
-            for(const auto& entry : models->second)
-            {
-                covered.insert(entry.first);
-            }
-        }
-        if(const auto refusals = _refused.find(metric); refusals != _refused.end())
-        {
-            for(const auto& entry : refusals->second)
-            {
-                covered.insert(entry.first);
-            }
-        }
-        if(covered.empty())
-        {
-            return;
-        }
-        const std::string baseArch{stripArchFeatures(arch)};
-        {
-            const std::lock_guard<std::mutex> lock(_reportMutex);
-            if(!_reported.emplace(engineName, metric, baseArch).second)
-            {
-                return;
-            }
-        }
-        std::string covers;
-        for(const auto& key : covered)
-        {
-            covers += covers.empty() ? key : ", " + key;
-        }
-        HIPDNN_PLUGIN_LOG_ERROR("engine prediction: engine '"
-                                << engineName << "' has no predict_engine UHD for metric '"
-                                << metric << "' on arch '" << baseArch << "' (it has one on: "
-                                << covers << "); the engine is ranked without an estimate there");
-    }
-
     struct Refusal
     {
         hipdnn_flatbuffers_sdk::data_objects::PredictionStatus status;
@@ -473,10 +422,6 @@ private:
     mutable std::map<std::pair<std::string, std::string>,
                      std::shared_ptr<const prediction_detail::Model>>
         _modelCache;
-    /// (engine name, metric, architecture without feature suffix) already reported by
-    /// reportMissingEstimate().
-    mutable std::mutex _reportMutex;
-    mutable std::set<std::tuple<std::string, std::string, std::string>> _reported;
 };
 } // namespace hipdnn_plugin_sdk::uhd
 
