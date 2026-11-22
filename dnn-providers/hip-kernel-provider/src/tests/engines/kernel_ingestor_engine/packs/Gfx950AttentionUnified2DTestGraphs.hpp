@@ -27,6 +27,7 @@
 
 #include "core/Handle.hpp"
 #include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
+#include "tests/engines/kernel_ingestor_engine/EmptyDescriptorTree.hpp"
 #include "tests/engines/kernel_ingestor_engine/packs/UnifiedAttentionTestGraphs.hpp"
 
 /**
@@ -222,8 +223,8 @@ inline KernelDefinition makeKpackKernel(const KernelSpec& spec,
     kernel.source.tocKey = "toc#0";
     kernel.source.symbol = "attention_unified_2d";
     kernel.source.signature = recorded;
-    kernel.originDirectory = "/tmp/hkp-unified-2d-no-such-tree";
-    kernel.treeRoot = "/tmp/hkp-unified-2d-no-such-tree";
+    kernel.originDirectory = emptyDescriptorTree();
+    kernel.treeRoot = emptyDescriptorTree();
     return kernel;
 }
 

@@ -28,6 +28,7 @@
 
 #include "core/Handle.hpp"
 #include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
+#include "tests/engines/kernel_ingestor_engine/EmptyDescriptorTree.hpp"
 #include "tests/engines/kernel_ingestor_engine/packs/UnifiedAttentionTestGraphs.hpp"
 
 /**
@@ -235,8 +236,8 @@ inline KernelDefinition makeKpackKernel(const KernelSpec& spec,
         source.symbol = isReduce ? "rocke_uattn_reduce_tiled" : "rocke_uattn3d_tiled";
         source.signature = isReduce ? reduce : segment;
     }
-    kernel.originDirectory = "/tmp/hkp-unified-3d-no-such-tree";
-    kernel.treeRoot = "/tmp/hkp-unified-3d-no-such-tree";
+    kernel.originDirectory = emptyDescriptorTree();
+    kernel.treeRoot = emptyDescriptorTree();
     return kernel;
 }
 

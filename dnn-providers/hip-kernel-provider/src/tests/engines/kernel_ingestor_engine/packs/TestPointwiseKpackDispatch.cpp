@@ -37,6 +37,7 @@
 #include "engines/kernel_ingestor_engine/IngestorKernelCode.hpp"
 #include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
 #include "engines/kernel_ingestor_engine/packs/PointwiseTestGraphs.hpp"
+#include "tests/engines/kernel_ingestor_engine/EmptyDescriptorTree.hpp"
 
 /**
  * @file TestPointwiseKpackDispatch.cpp
@@ -63,6 +64,7 @@ using hip_kernel_provider::kernel_ingestor_engine::testing::BLOCK_SIZE_FIELD;
 using hip_kernel_provider::kernel_ingestor_engine::testing::buildPointwiseGraph;
 using hip_kernel_provider::kernel_ingestor_engine::testing::dispatchHandler;
 using hip_kernel_provider::kernel_ingestor_engine::testing::DTYPE_FIELD;
+using hip_kernel_provider::kernel_ingestor_engine::testing::emptyDescriptorTree;
 using hip_kernel_provider::kernel_ingestor_engine::testing::GraphFixture;
 using hip_kernel_provider::kernel_ingestor_engine::testing::matchesGraph;
 using hip_kernel_provider::kernel_ingestor_engine::testing::POINTWISE_ADD;
@@ -142,10 +144,11 @@ TEST(TestPointwiseKpackDispatch, QueriesWorkspaceForAKpackKernel)
 
     // 256 is the pack's large-block kernel, the one that reports scratch; 64 is not.
     // Not named `small`: Windows' rpcndr.h defines that as a macro.
-    const auto largeBlock = makeKpackKernel(
-        "/nonexistent", "/nonexistent", "pack.kpack", "toc#0", "PointwiseAdd", 256, 0x40);
-    const auto smallBlock = makeKpackKernel(
-        "/nonexistent", "/nonexistent", "pack.kpack", "toc#0", "PointwiseAdd", 64, 0x50);
+    const auto& tree = emptyDescriptorTree();
+    const auto largeBlock
+        = makeKpackKernel(tree, tree, "pack.kpack", "toc#0", "PointwiseAdd", 256, 0x40);
+    const auto smallBlock
+        = makeKpackKernel(tree, tree, "pack.kpack", "toc#0", "PointwiseAdd", 64, 0x50);
 
     // Metadata only, so this never reaches a loader and needs no device.
     EXPECT_EQ(handler.workspaceBytes(fixture.context(), *bound, largeBlock), 1024U);

@@ -35,6 +35,7 @@
 
 #include "core/Handle.hpp"
 #include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
+#include "tests/engines/kernel_ingestor_engine/EmptyDescriptorTree.hpp"
 #include "tests/engines/kernel_ingestor_engine/packs/IngestorPackTestSupport.hpp"
 
 /**
@@ -334,9 +335,8 @@ inline KernelDefinition kpackDescriptor(const KernelSpec& spec,
     kernel.source.tocKey = "toc#0";
     kernel.source.symbol = isDecode(spec) ? "wmma_fmha_decode" : "wmma_fmha_fwd_v2";
     kernel.source.signature = recorded;
-    const auto tree = std::filesystem::temp_directory_path().string();
-    kernel.originDirectory = tree;
-    kernel.treeRoot = tree;
+    kernel.originDirectory = emptyDescriptorTree();
+    kernel.treeRoot = emptyDescriptorTree();
     return kernel;
 }
 

@@ -33,6 +33,7 @@
 
 #include "core/Handle.hpp"
 #include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
+#include "tests/engines/kernel_ingestor_engine/EmptyDescriptorTree.hpp"
 #include "tests/engines/kernel_ingestor_engine/packs/AttentionDenseTestArch.hpp"
 #include "tests/engines/kernel_ingestor_engine/packs/SdpaLayoutTestSupport.hpp"
 
@@ -687,8 +688,8 @@ inline KernelDefinition kpackKernel(const AttentionDenseTestArch& arch,
     kernel.source.tocKey = "toc#0";
     kernel.source.symbol = "attention_dense";
     kernel.source.signature = signature;
-    kernel.originDirectory = "/nonexistent";
-    kernel.treeRoot = "/nonexistent";
+    kernel.originDirectory = emptyDescriptorTree();
+    kernel.treeRoot = emptyDescriptorTree();
     kernel.metadata = completedAttentionDenseMetadata(arch, HEAD_SIZE, blockM, blockN);
     return kernel;
 }

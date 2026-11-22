@@ -53,6 +53,7 @@
 #include "engines/kernel_ingestor_engine/packs/FlydslSdpaRngDump.hpp"
 #include "engines/kernel_ingestor_engine/packs/FlydslSdpaRngDumpTestSupport.hpp"
 #include "engines/kernel_ingestor_engine/packs/FlydslSdpaShared.hpp"
+#include "tests/engines/kernel_ingestor_engine/EmptyDescriptorTree.hpp"
 
 /**
  * @file TestFlydslSdpaCdnaEngine.cpp
@@ -2824,8 +2825,8 @@ TEST(TestFlydslSdpaCdnaKernelMatch, RunsADumpOnlyBesideTheWriter)
         EXPECT_TRUE(matchesKernel(FLYDSL_SDPA_CDNA, dumping.context(), kernel, *dumpBound))
             << kernel.name;
         auto moved = kernel;
-        moved.originDirectory = std::filesystem::path("/nonexistent") / "FlyDSL" / "sdpa_cdna"
-                                / kernel.originDirectory.filename();
+        moved.originDirectory
+            = emptyDescriptorTree() / "FlyDSL" / "sdpa_cdna" / kernel.originDirectory.filename();
         EXPECT_FALSE(matchesKernel(FLYDSL_SDPA_CDNA, dumping.context(), moved, *dumpBound))
             << kernel.name;
         EXPECT_TRUE(matchesKernel(FLYDSL_SDPA_CDNA, dropping.context(), moved, *dropBound))

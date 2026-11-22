@@ -15,6 +15,7 @@
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
 
 #include "Gfx942AttentionUnified3dTestGraphs.hpp"
+#include "tests/engines/kernel_ingestor_engine/EmptyDescriptorTree.hpp"
 
 /**
  * @file TestGfx942AttentionUnified3dSignature.cpp
@@ -124,8 +125,8 @@ KernelDefinition makeTwoLaunchKernel(std::vector<KernelArgument> segment,
     KernelDefinition kernel = makeKernel(KernelSpec{});
     kernel.sources = {{"segment", launchSource(SEGMENT_SYMBOL, std::move(segment))},
                       {"reduce", launchSource(REDUCE_SYMBOL, std::move(reduce))}};
-    kernel.originDirectory = "/nonexistent";
-    kernel.treeRoot = "/nonexistent";
+    kernel.originDirectory = emptyDescriptorTree();
+    kernel.treeRoot = emptyDescriptorTree();
     return kernel;
 }
 
