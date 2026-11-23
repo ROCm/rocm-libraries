@@ -18,17 +18,10 @@ namespace
     {
         po::variables_map args;
         args["num-elements-to-validate"].value() = -1;
-        args["print-max"].value()                = 0;
-        for(auto name : {"print-valids",
-                         "print-tensor-a",
-                         "print-tensor-b",
-                         "print-tensor-c",
-                         "print-tensor-d",
-                         "print-tensor-ref",
-                         "print-tensor-bias",
-                         "print-tensor-gate",
-                         "print-tensor-scale-alpha-vec",
-                         "print-tensor-amaxd"})
+        args["print-max"].value() = 0;
+        for(auto name : {"print-valids", "print-tensor-a", "print-tensor-b", "print-tensor-c",
+                         "print-tensor-d", "print-tensor-ref", "print-tensor-bias",
+                         "print-tensor-gate", "print-tensor-scale-alpha-vec", "print-tensor-amaxd"})
             args[name].value() = false;
         return args;
     }
@@ -54,7 +47,7 @@ namespace
 TEST(ReferenceValidatorLifecycle, EnqueuesAreUncheckedByDefault)
 {
     RecordingValidator validator(validationArgs());
-    TimingEvents       events({}, 0, 0);
+    TimingEvents events({}, 0, 0);
     validator.preSolution(nullptr);
     validator.validateWarmups({0}, events, events);
     validator.validateEnqueues({0, 1}, events, events);
@@ -63,10 +56,10 @@ TEST(ReferenceValidatorLifecycle, EnqueuesAreUncheckedByDefault)
 
 TEST(ReferenceValidatorLifecycle, OptInChecksEveryGroupAfterWarmup)
 {
-    auto args                               = validationArgs();
+    auto args = validationArgs();
     args["validate-after-enqueues"].value() = true;
-    RecordingValidator        validator(args);
-    TimingEvents              events({}, 0, 0);
+    RecordingValidator validator(args);
+    TimingEvents events({}, 0, 0);
     std::vector<size_t> const warmup{0}, firstGroup{1, 2}, secondGroup{3, 0};
     validator.preSolution(nullptr);
     validator.validateWarmups(warmup, events, events);
@@ -85,20 +78,20 @@ TEST(ReferenceValidatorLifecycle, OptInChecksEveryGroupAfterWarmup)
 
 TEST(ReferenceValidatorLifecycle, OptInRespectsDisabledReferenceValidation)
 {
-    auto args                                = validationArgs();
-    args["validate-after-enqueues"].value()  = true;
+    auto args = validationArgs();
+    args["validate-after-enqueues"].value() = true;
     args["num-elements-to-validate"].value() = 0;
     RecordingValidator validator(args);
-    TimingEvents       events({}, 0, 0);
+    TimingEvents events({}, 0, 0);
     validator.validateEnqueues({0}, events, events);
     EXPECT_TRUE(validator.checkedSlots.empty());
 }
 
 TEST(ReferenceValidatorLifecycle, OptInRejectsAliasedReferenceInputs)
 {
-    auto args                               = validationArgs();
+    auto args = validationArgs();
     args["validate-after-enqueues"].value() = true;
-    args["c-equal-d"].value()               = true;
+    args["c-equal-d"].value() = true;
     EXPECT_THROW(RecordingValidator{args}, std::runtime_error);
 
     args["validate-after-enqueues"].value() = false;
