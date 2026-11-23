@@ -113,6 +113,9 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedPageTile
 
     // IsSupportedProblem above pins Geometry == FmhaTdmSchedGeometryFor<Problem>.
     using Geometry = typename Policy::Geometry;
+    // Partial-count barriers with the workgroup LDS fences (fmha_page_tile_fenced_barriers_v).
+    static constexpr bool kFencedBarriers =
+        detail::fmha_page_tile_fenced_barriers_v<Problem, Geometry>;
     static_assert(Geometry::kM == kM0 && Geometry::kN == kN0 && Geometry::kDv == kN1);
 
     // Page transfer budget. The physical page size selects how many native tensor
@@ -650,8 +653,9 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedPageTile
             // here and in the scheduled-TDM loop): once at most the K0 and V0 issues remain, Q has
             // landed. K1 is issued only after this wait, so no wave has more tensor loads
             // in flight than in the Q-in-K0 order.
-            s_wait_tensorcnt_barrier<PagedTransfer::kKPrefetchTensorCount +
-                                     PagedTransfer::kVPrefetchTensorCount>();
+            fmha_page_tile_tensorcnt_barrier<kFencedBarriers,
+                                             PagedTransfer::kKPrefetchTensorCount +
+                                                 PagedTransfer::kVPrefetchTensorCount>();
             q_tile = load_tile(q_lds_read_window);
         }
         k_lds_write_window.set_bottom_tensor_view_data_ptr(
@@ -674,8 +678,9 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedPageTile
         }
         else
         {
-            s_wait_tensorcnt_barrier<PagedTransfer::kKPrefetchTensorCount,
-                                     kKPrefetchBarrierDsCount>();
+            fmha_page_tile_tensorcnt_barrier<kFencedBarriers,
+                                             PagedTransfer::kKPrefetchTensorCount,
+                                             kKPrefetchBarrierDsCount>();
         }
         auto initial_k_lds_su_read_window =
             make_tile_window(k_lds_read_view,
@@ -865,7 +870,7 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedPageTile
                 __builtin_amdgcn_sched_barrier(0);
 
                 // Reuse the V LDS buffer only after the preceding reads have completed.
-                block_sync_lds<k_lds_insts>();
+                fmha_page_tile_block_sync_lds<kFencedBarriers, k_lds_insts>();
                 // The barrier also ends all reads of the previous page-ID slot.
                 // Issue the next ID before QK/PV without exposing its result.
                 if constexpr(Problem::kPageBlockSize >= 64)
@@ -1027,7 +1032,8 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedPageTile
                 constexpr bool kDeferTensorReady = Mode::kDeferTensorReady;
                 if constexpr(!kDeferTensorReady &&
                              !Policy::template WaitTensorReadyAtLoadNextK<Problem>())
-                    s_wait_tensorcnt_barrier<PagedTransfer::kVPrefetchTensorCount>();
+                    fmha_page_tile_tensorcnt_barrier<kFencedBarriers,
+                                                     PagedTransfer::kVPrefetchTensorCount>();
 
                 // Sink-aware k_origin (prefill path)
                 const auto k_origin = [&]() {
@@ -1188,7 +1194,11 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedPageTile
                             Policy::template RunSplitSoftmaxPart01<Problem>(
                                 s_new, m, kScoresInLog2Domain ? 1.0f : scale_s, delta_m0, delta_m1);
                         },
-                        [&]() { s_wait_tensorcnt_barrier<PagedTransfer::kVPrefetchTensorCount>(); },
+                        [&]() {
+                            fmha_page_tile_tensorcnt_barrier<
+                                kFencedBarriers,
+                                PagedTransfer::kVPrefetchTensorCount>();
+                        },
                         [&](auto ordinal) {
                             const float scale_m0 = Mode::kEarlyOutputRescale
                                                        ? SplitSoftmax::Exp2(delta_m0)
@@ -1231,7 +1241,7 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedPageTile
                     // that K tile to every wave.
                     s_wait_tensorcnt<PagedTransfer::kVPrefetchTensorCount>();
                 }
-                block_sync_lds<v_lds_insts>();
+                fmha_page_tile_block_sync_lds<kFencedBarriers, v_lds_insts>();
                 if constexpr(Problem::kPageBlockSize >= 64)
                 {
                     if constexpr(!kPageIdBatch)
@@ -1263,8 +1273,9 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedPageTile
 
             auto advance_iteration = [&]() {
                 // PV separates the page-ID LDS load from its first use.
-                s_wait_tensorcnt_barrier<PagedTransfer::kKPrefetchTensorCount,
-                                         kKPrefetchBarrierDsCount>();
+                fmha_page_tile_tensorcnt_barrier<kFencedBarriers,
+                                                 PagedTransfer::kKPrefetchTensorCount,
+                                                 kKPrefetchBarrierDsCount>();
                 if constexpr(kPageIdBatch)
                 {
                     const index_t tile = page_tile_i + 3;

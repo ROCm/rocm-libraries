@@ -35,6 +35,20 @@ inline constexpr bool fmha_page_tile_d64_quad_reads_v =
     Geometry::kM == 128 && Geometry::kN == 128 && Geometry::kHeadDimQK == 64 &&
     Geometry::kDv == 64 && !fmha_tdm_is_split_partial_v<Problem>;
 
+// Page tiles whose partial-count barriers keep the workgroup LDS fences
+// (fmha_page_tile_block_sync_lds): the D64 M128 vectorized-KV tiles with the logits soft cap. With
+// LDS loads left in flight across those barriers, clang 24 holds 8 more VGPRs in this tile (338
+// instead of 330 for P128), one over the limit of occupancy 3, and the tile takes 4 % longer at
+// full occupancy. The other page tiles keep the unfenced barriers, which are faster for them.
+#ifndef CK_TILE_FMHA_PAGE_TILE_FENCE_ALL_PARTIAL_BARRIERS
+#define CK_TILE_FMHA_PAGE_TILE_FENCE_ALL_PARTIAL_BARRIERS 0
+#endif
+template <typename Problem, typename Geometry>
+inline constexpr bool fmha_page_tile_fenced_barriers_v =
+    CK_TILE_FMHA_PAGE_TILE_FENCE_ALL_PARTIAL_BARRIERS ||
+    (Geometry::kHeadDimQK == 64 && Geometry::kM == 128 && Problem::kHasLogitsSoftCap &&
+     fmha_tdm_is_vectorized_kv<Problem>::value);
+
 // D128 M128 page tiles without prepared tile bases: the shape class whose code spills on gfx1250.
 // Of its 354 generated instances (production flags), 280 spill, 40 more spill once the stage-end
 // drain of FmhaBatchPrefillPageTileGroupedDrainPlacement is added, 8 (the P16 elementwise-bias

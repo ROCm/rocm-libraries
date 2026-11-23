@@ -52,6 +52,41 @@ CK_TILE_DEVICE void fmha_page_tile_wait_page_id_dma()
 #endif
 }
 
+// A page-tile barrier that waits for at most lgkmcnt outstanding LDS operations. block_sync_lds
+// drops its workgroup LDS fences for a nonzero count, so LDS loads stay in flight across the
+// barrier. Fenced keeps the fences (block_sync_lds of every count before that change): the
+// release fence drains the LDS loads (s_wait_dscnt 0), so no load result stays live across the
+// barrier. Tiles whose register pressure sits at an occupancy limit use it
+// (fmha_page_tile_fenced_barriers_v).
+template <bool Fenced, index_t lgkmcnt>
+CK_TILE_DEVICE void fmha_page_tile_block_sync_lds()
+{
+    if constexpr(Fenced && lgkmcnt != 0)
+    {
+        s_waitcnt_lgkm<lgkmcnt>();
+        __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup", "local");
+#if defined(__gfx12__)
+        __builtin_amdgcn_s_barrier_signal(-1);
+        __builtin_amdgcn_s_barrier_wait(-1);
+#else
+        __builtin_amdgcn_s_barrier();
+#endif
+        __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup", "local");
+    }
+    else
+    {
+        block_sync_lds<lgkmcnt>();
+    }
+}
+
+// s_wait_tensorcnt_barrier with the barrier of fmha_page_tile_block_sync_lds.
+template <bool Fenced, index_t tensorcnt, index_t lgkmcnt = waitcnt_arg::kMaxLgkmCnt>
+CK_TILE_DEVICE void fmha_page_tile_tensorcnt_barrier()
+{
+    s_wait_tensorcnt<tensorcnt>();
+    fmha_page_tile_block_sync_lds<Fenced, lgkmcnt>();
+}
+
 // Whether the page tiles issue the WMMA operand guard's own waits (full drains, RAW fences): only
 // when the compiler does not protect the hazard
 // (CK_TILE_FMHA_PAGE_TILE_COMPILER_GUARDS_WMMA_OPERANDS).
