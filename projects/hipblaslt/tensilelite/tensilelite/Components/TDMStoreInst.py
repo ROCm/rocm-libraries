@@ -142,6 +142,8 @@ def tdmStoreRejectReason(state):
     return "TDMStoreInst does not support OutputPeerD"
   if state["StreamKAtomic"]:
     return "TDMStoreInst does not support StreamKAtomic: the kernel adds its tiles to D atomically instead of storing them"
+  if len(state["PackedC0IndicesX"]) != 1 or len(state["PackedC1IndicesX"]) != 1:
+    return "TDMStoreInst requires one free index per operand, not packed free indices"
   if _tileDim0(state) > TDM_TILE_DIM_MAX or _waveColumns(state) > TDM_TILE_DIM_MAX:
     return "TDMStoreInst requires the staged tile's tile_dim0 (data_size units) and tile_dim1 (columns per wave) to fit 16 bits"
   return None
@@ -434,7 +436,8 @@ def _tdmStoreDescriptor(gwb, module: Module, tdm, g0, g1, tmp, tc):
   other temporaries live in group1+5 and group1+6 until setTensorStride0 writes them last, so the block needs
   two SGPRs of any alignment besides the descriptor: the epilogue of a kernel with many live SGPRs may have no
   aligned run of four left. The block assumes one free index per operand, as every GEMM problem
-  type has, so PackedC0IndicesX and PackedC1IndicesX hold one index each. TDM data_size is at most 8 bytes, so a
+  type has, so PackedC0IndicesX and PackedC1IndicesX hold one index each; tdmStoreRejectReason rejects any
+  other kernel before its descriptor is built. TDM data_size is at most 8 bytes, so a
   complex double element is two 8-byte units, in which tensor_dim0, tile0 and the stride count, the doubled stride in
   the 48 bits of its field; the byte offsets and the staged tile do not change.
   """
