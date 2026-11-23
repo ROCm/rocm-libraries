@@ -364,6 +364,14 @@ _CASES = (
         dict(block_w=8, block_h=2),
     ),
     (dict(H=10, W=11, KH=3, PAD=0), "tiled", dict(block_w=4, block_h=1)),
+    # Spatial kernel (groups below the wave), whole image and row blocks.
+    (dict(H=21, W=30, KH=5, PAD=2, C=3), "spatial", dict(block_waves=2)),
+    (dict(H=21, W=30, KH=5, PAD=2, C=3), "spatial", dict(block_waves=2, block_h=4)),
+    (
+        dict(N=1, H=40, W=19, KH=11, PAD=5, C=3, dtype="fp16"),
+        "spatial",
+        dict(block_waves=1, block_h=16),
+    ),
 )
 
 
@@ -416,6 +424,15 @@ class TestDepthwiseDgradGpu(unittest.TestCase):
             spec = dc.DirectDepthwiseDgradStreamSpec(problem=p, wave_size=wave, **knobs)
             ok, why = dc.is_valid_depthwise_dgrad_stream_spec(spec, GPU_ARCH)
             build = dc.build_direct_depthwise_dgrad_streaming
+        elif kind == "spatial":
+            spec = dc.DirectDepthwiseSpatialSpec(
+                problem=p, wave_size=wave, dgrad=True, **knobs
+            )
+            ok, why = dc.is_valid_depthwise_spatial_spec(spec, GPU_ARCH)
+
+            def build(spec, arch):
+                return dc.build_direct_depthwise_spatial(spec, arch=arch)
+
         else:
             spec = dc.DirectDepthwiseTiledSpec(
                 problem=p, wave_size=wave, dgrad=True, **knobs

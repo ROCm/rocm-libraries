@@ -76,6 +76,24 @@ class TestDepthwiseFwdCplSpecs(unittest.TestCase):
         self.assertTrue(ok(_tiled(_problem(KH=7, PAD=3), **big), "gfx1250")[0])
         self.assertFalse(ok(_tiled(_problem(KH=7, PAD=3), cpl=2, **big), "gfx1250")[0])
 
+    def test_stride_skip_validation(self):
+        ok = dc.is_valid_depthwise_spec
+        s2 = _problem(KH=5, PAD=2, stride=2)
+        self.assertTrue(ok(_stream(s2, cpl=2, stride_skip=True), "gfx1250")[0])
+        self.assertFalse(ok(_stream(s2, stride_skip=True), "gfx1250")[0])
+        self.assertFalse(ok(_stream(_problem(), cpl=2, stride_skip=True), "gfx1250")[0])
+        # 3 accumulator rows instead of 5: block_w 24 fits only when skipping.
+        self.assertFalse(ok(_stream(s2, block_w=24, cpl=2), "gfx1250")[0])
+        self.assertTrue(
+            ok(_stream(s2, block_w=24, cpl=2, stride_skip=True), "gfx1250")[0]
+        )
+        self.assertIn("_ss", _stream(s2, cpl=2, stride_skip=True).kernel_name())
+        # Row blocks are a packed-kernel knob.
+        self.assertTrue(ok(_stream(s2, cpl=2, block_h=4), "gfx1250")[0])
+        self.assertFalse(ok(_stream(s2, block_h=4), "gfx1250")[0])
+        grid, _ = dc.direct_launch_geometry(_stream(s2, cpl=2, block_h=4))
+        self.assertEqual(grid[2], s2.N * -(-s2.Ho // 4))
+
     def test_cpl1_name_unchanged(self):
         p = _problem()
         self.assertEqual(_stream(p).kernel_name(), _stream(p, cpl=1).kernel_name())
@@ -125,6 +143,59 @@ _CASES = (
         dict(H=11, W=17, KH=5, PAD=2, stride=2, C=40),
         "stream",
         dict(block_w=4, block_waves=2, cpl=4),
+    ),
+    # stride_skip: output-row accumulators only (period S * ceil(KH / S)).
+    (
+        dict(H=13, W=17, KH=5, PAD=2, stride=2),
+        "stream",
+        dict(block_w=4, block_waves=1, cpl=2, stride_skip=True),
+    ),
+    (
+        dict(N=1, H=56, W=56, KH=5, PAD=2, stride=2, C=96, dtype="fp16"),
+        "stream",
+        dict(block_w=16, block_waves=2, cpl=2, stride_skip=True),
+    ),
+    (
+        dict(H=14, W=9, stride=2),
+        "stream",
+        dict(block_w=8, block_waves=1, cpl=2, stride_skip=True),
+    ),
+    (
+        dict(H=15, W=19, KH=7, PAD=3, stride=2, C=32),
+        "stream",
+        dict(block_w=4, block_waves=1, cpl=4, stride_skip=True),
+    ),
+    (
+        dict(H=10, W=11, stride=3),
+        "stream",
+        dict(block_w=4, block_waves=1, cpl=2, stride_skip=True),
+    ),
+    # Row blocks (block_h, grid z = n * row blocks): ragged last block,
+    # stride 2 with and without stride_skip, a block shorter than the filter.
+    (
+        dict(H=13, W=17, KH=5, PAD=2, C=96),
+        "stream",
+        dict(block_w=4, block_waves=1, cpl=2, block_h=4),
+    ),
+    (
+        dict(H=29, W=17, KH=5, PAD=2, stride=2),
+        "stream",
+        dict(block_w=4, block_waves=2, cpl=2, stride_skip=True, block_h=3),
+    ),
+    (
+        dict(H=14, W=9, stride=2, dtype="fp16"),
+        "stream",
+        dict(block_w=2, block_waves=1, cpl=2, block_h=2),
+    ),
+    (
+        dict(N=3, H=31, W=19, KH=7, PAD=3, stride=2, C=32),
+        "stream",
+        dict(block_w=4, block_waves=1, cpl=4, stride_skip=True, block_h=5),
+    ),
+    (
+        dict(H=11, W=12, KH=5, PAD=2),
+        "stream",
+        dict(block_w=8, block_waves=1, cpl=2, block_h=1),
     ),
     (dict(), "tiled", dict(block_w=8, block_h=2, block_waves=1, cpl=2)),
     (

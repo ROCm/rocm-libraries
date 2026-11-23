@@ -12008,6 +12008,16 @@ class DirectDepthwiseSpec:
     # channels: input and output move as one ``cpl``-wide vector per lane and
     # the taps run as packed ``<2 x f32>`` FMAs over channel pairs.
     cpl: int = 1
+    # Stride > 1, cpl > 1: keep accumulators only for the streaming rows that
+    # are output rows (ceil(KH / stride) slots per column instead of KH) and
+    # issue only their taps. The row loop then walks stride * ceil(KH /
+    # stride) rows per iteration so every slot index stays static.
+    stride_skip: bool = False
+    # cpl > 1: output rows per block, 0 = the whole image. Row blocks run as
+    # z = n * ceil(Ho / block_h) + row block, so a launch whose whole-image
+    # blocks are too few to hide the row stream's latency trades
+    # KH - stride re-read halo rows per block for more of them.
+    block_h: int = 0
 
     @property
     def threads_per_block(self) -> int:
@@ -12017,6 +12027,12 @@ class DirectDepthwiseSpec:
     def block_ch(self) -> int:
         return self.block_waves * self.wave_size * self.cpl
 
+    @property
+    def acc_rows(self) -> int:
+        """Accumulator slots per output column."""
+        p = self.problem
+        return -(-p.KH // p.stride) if self.stride_skip else p.KH
+
     def kernel_name(self) -> str:
         from rocke.helpers.spec import kernel_name_join
 
@@ -12024,6 +12040,10 @@ class DirectDepthwiseSpec:
         parts = [self.name, p.short(), f"bw{self.block_w}", f"bw{self.block_waves}wv"]
         if self.cpl > 1:
             parts.append(f"cpl{self.cpl}")
+        if self.stride_skip:
+            parts.append("ss")
+        if self.block_h:
+            parts.append(f"bh{self.block_h}")
         return kernel_name_join(*parts, flags=_scalar_name_flags(p.dtype))
 
     def validate(self) -> None:
@@ -12101,14 +12121,18 @@ def is_valid_depthwise_spec(
     why = _depthwise_cpl_reason(spec.cpl, p.groups, p.dtype)
     if why is not None:
         return False, why
+    if spec.stride_skip and (spec.cpl == 1 or p.stride == 1):
+        return False, "stride_skip needs cpl > 1 and stride > 1"
+    if spec.block_h < 0 or (spec.block_h and spec.cpl == 1):
+        return False, f"block_h {spec.block_h} needs cpl > 1 (and >= 0)"
     if spec.cpl > 1 and (
         spec.cpl * taps > _DW_MAX_PRELOAD_TAPS
-        or spec.cpl * spec.block_w * p.KH > _DW_CPL_MAX_ACC
+        or spec.cpl * spec.block_w * spec.acc_rows > _DW_CPL_MAX_ACC
     ):
         # Past these the packed weights or accumulator slots spill.
         return False, (
             f"cpl={spec.cpl} holds {spec.cpl * taps} weights and "
-            f"{spec.cpl * spec.block_w * p.KH} accumulator-rows per lane "
+            f"{spec.cpl * spec.block_w * spec.acc_rows} accumulator-rows per lane "
             f"(max {_DW_MAX_PRELOAD_TAPS} / {_DW_CPL_MAX_ACC})"
         )
     return True, "ok"
@@ -12493,7 +12517,20 @@ def _build_direct_depthwise_packed(spec: "DirectDepthwiseSpec", arch: str) -> Ke
     tid = b.thread_id_x()
     bx = b.block_id_x()
     by = b.block_id_y()
-    n = b.block_id_z()
+    BH = spec.block_h
+    if BH:
+        # z = n * n_h + row block (see direct_launch_geometry).
+        c_bh = b.const_i32(BH)
+        n_h = b.div(b.add(params["p_Ho"], b.const_i32(BH - 1)), c_bh)
+        bz = b.block_id_z()
+        n = b.div(bz, n_h)
+        y0 = b.mul(b.mul(b.mod(bz, n_h), c_bh), b.const_i32(S))
+    else:
+        n = b.block_id_z()
+    # Streaming row index of the first loaded row: a whole-image block skips
+    # the top padding rows (zeros); a row block counts block-local rows from
+    # its first input row y0 and bounds-checks every load.
+    Y0 = 0 if BH else p.PAD
     q_tile_start = b.mul(bx, b.const_i32(BLOCK_W))
     ch = b.mul(b.add(b.mul(by, b.const_i32(THREADS)), tid), b.const_i32(CPL))
     ch_in_range = b.cmp_lt(ch, params["p_groups"])
@@ -12522,11 +12559,29 @@ def _build_direct_depthwise_packed(spec: "DirectDepthwiseSpec", arch: str) -> Ke
         weights.append(row)
 
     # Streaming loop bounds and column terms as in build_direct_depthwise.
-    c_KH = b.const_i32(p.KH)
+    # SS (stride_skip): NA accumulator rows, one per output row in flight,
+    # and a loop period of PER = S * NA streaming rows, a multiple of S whose
+    # output rows advance the slot ring by exactly NA -- so whether row j of
+    # an iteration is an output row, and its slot, are static.
+    SS = spec.stride_skip
+    NA = spec.acc_rows
+    PER = S * NA if SS else p.KH
+    c_KH = b.const_i32(PER)
     c_stride_rv = b.const_i32(S)
     n_iters_v = b.add(p_Hi, b.const_i32(p.KH - 1))
-    n_fma_groups_v = b.div(b.add(p_Hi, b.const_i32(p.KH - 1)), c_KH)
-    n_groups_v = b.div(b.add(p_Hi, b.const_i32(p.PAD + p.KH - 1)), c_KH)
+    if BH:
+        # Rows [y0, y0 + (BH - 1) * S + KH) clipped to the image; one loop
+        # covers them (no load-free tail loop).
+        y_end = b.smin(n_iters_v, b.add(y0, b.const_i32((BH - 1) * S + p.KH)))
+        n_iters_v = b.sub(y_end, y0)
+        n_fma_groups_v = b.div(b.add(n_iters_v, b.const_i32(PER - 1)), c_KH)
+        n_groups_v = n_fma_groups_v
+    elif SS:
+        n_fma_groups_v = b.div(b.add(p_Hi, b.const_i32(PER - 1)), c_KH)
+        n_groups_v = b.div(b.add(p_Hi, b.const_i32(p.KH - 1 - p.PAD + PER - 1)), c_KH)
+    else:
+        n_fma_groups_v = b.div(b.add(p_Hi, b.const_i32(p.KH - 1)), c_KH)
+        n_groups_v = b.div(b.add(p_Hi, b.const_i32(p.PAD + p.KH - 1)), c_KH)
 
     row_cols: Dict[int, Tuple[int, int]] = {}
     for w_out in range(BLOCK_W):
@@ -12547,8 +12602,12 @@ def _build_direct_depthwise_packed(spec: "DirectDepthwiseSpec", arch: str) -> Ke
 
     def load_row(y: Value) -> List[Value]:
         """Raw <CPL x elem> input vectors of streaming row ``y``, one per column."""
-        hi = b.add(y, b.const_i32(-p.PAD))
-        row_ok = b.cmp_lt(hi, p_Hi)
+        if BH:
+            hi = b.add(b.add(y0, y), b.const_i32(-p.PAD))
+            row_ok = b.land(b.cmp_ge(hi, c0), b.cmp_lt(hi, p_Hi))
+        else:
+            hi = b.add(y, b.const_i32(-p.PAD))
+            row_ok = b.cmp_lt(hi, p_Hi)
         row_off = b.mul(b.add(n_off, b.mul(hi, params["p_A_stride_hi"])), c_half)
         return [
             loadv(
@@ -12558,17 +12617,27 @@ def _build_direct_depthwise_packed(spec: "DirectDepthwiseSpec", arch: str) -> Ke
         ]
 
     def row_y(grp_iv: Value, j: int) -> Value:
-        return b.add(b.mul(grp_iv, c_KH), b.const_i32(p.PAD + j))
+        return b.add(b.mul(grp_iv, c_KH), b.const_i32(Y0 + j))
 
     def flush(grp_iv: Value, j: int, y_j: Value, slots: List[List[Value]]) -> None:
+        if SS:
+            # Streaming row Y0 + j completes output row Y0 + j - (KH - 1)
+            # of this iteration's frame; only multiples of S are output rows.
+            rel = Y0 + j - (p.KH - 1)
+            if rel % S:
+                return
+            P_FLUSH_j = (rel // S) % NA
+        else:
+            P_FLUSH_j = (Y0 + j + 1) % p.KH
         j_valid = b.cmp_lt(y_j, n_iters_v)
-        P_FLUSH_j = (p.PAD + j + 1) % p.KH
         p_flush_rv = b.add(y_j, b.const_i32(-(p.KH - 1)))
-        if j >= p.PAD:
+        if BH:
+            p_flush_rv = b.add(y0, p_flush_rv)
+        if Y0 + j - (p.KH - 1) >= 0 if SS or BH else j >= p.PAD:
             flush_ge = j_valid
         else:
             flush_ge = b.land(b.cmp_lt(c0, grp_iv), j_valid)
-        if S == 1:
+        if S == 1 or SS:
             should_flush = flush_ge
         else:
             should_flush = b.land(
@@ -12587,11 +12656,11 @@ def _build_direct_depthwise_packed(spec: "DirectDepthwiseSpec", arch: str) -> Ke
             slots[P_FLUSH_j * BLOCK_W + w_out] = [zero2] * NP
 
     PF = min(p.KH, -(-16 // n_cols))
-    n_flat = p.KH * BLOCK_W
+    n_flat = NA * BLOCK_W
     slot_args = [(f"dwp_acc_{f}_k{k}", zero2) for f in range(n_flat) for k in range(NP)]
     row_args = []
     for k in range(PF):
-        for col, v in zip(row_cols, load_row(b.const_i32(p.PAD + k))):
+        for col, v in zip(row_cols, load_row(b.const_i32(Y0 + k))):
             row_args.append((f"dwp_a_r{k}_c{col}", v))
     n_acc = len(slot_args)
 
@@ -12612,7 +12681,7 @@ def _build_direct_depthwise_packed(spec: "DirectDepthwiseSpec", arch: str) -> Ke
             list(loop_vals[n_acc + k * n_cols : n_acc + (k + 1) * n_cols])
             for k in range(PF)
         ]
-        for j in range(p.KH):
+        for j in range(PER):
             y_j = row_y(grp_iv, j)
             window.append(load_row(b.add(y_j, b.const_i32(PF))))
             a_row = [to_pairs(v) for v in window.pop(0)]
@@ -12620,7 +12689,14 @@ def _build_direct_depthwise_packed(spec: "DirectDepthwiseSpec", arch: str) -> Ke
                 for s_const in range(p.KW):
                     a = a_row[col_idx[w_out * S + s_const]]
                     for r_const in range(p.KH):
-                        idx = ((p.PAD + j - r_const) % p.KH) * BLOCK_W + w_out
+                        if SS:
+                            # Output row Y0 + j - r of the frame, if any.
+                            rel = Y0 + j - r_const
+                            if rel % S:
+                                continue
+                            idx = ((rel // S) % NA) * BLOCK_W + w_out
+                        else:
+                            idx = ((Y0 + j - r_const) % p.KH) * BLOCK_W + w_out
                         w = weights[r_const][s_const]
                         acc = slots[idx]
                         slots[idx] = [
@@ -12641,7 +12717,7 @@ def _build_direct_depthwise_packed(spec: "DirectDepthwiseSpec", arch: str) -> Ke
     )
     with flush_loop as (grp_iv, loop_vals):
         slots = unflat(loop_vals)
-        for j in range(p.KH):
+        for j in range(PER):
             flush(grp_iv, j, row_y(grp_iv, j), slots)
         b.scf_yield(*(v for sl in slots for v in sl))
 
@@ -12678,7 +12754,8 @@ def depthwise_stream_register_reason(spec) -> Optional[str]:
     n_cols = (cols - 1) * p.stride + p.KW
     pf = min(p.KH, -(-16 // n_cols))
     cpl = getattr(spec, "cpl", 1)
-    live = (p.KH * p.KW + p.KH * cols + pf * n_cols) * cpl
+    acc_rows = getattr(spec, "acc_rows", p.KH)
+    live = (p.KH * p.KW + acc_rows * cols + pf * n_cols) * cpl
     budget = _DW_STREAM_REG_BUDGET if cpl == 1 else _DW_STREAM_CPL_REG_BUDGET
     if live > budget:
         return (
@@ -13825,7 +13902,8 @@ class DirectDepthwiseSpatialSpec:
     Block geometry:
       ``threads_per_block = block_waves * wave_size``
       ``block_w = block_waves * n_w_per_wave``
-      Grid: ``(ceil(Wo / block_w), 1, N)``  — no channel tile.
+      Grid: ``(ceil(Wo / block_w), ceil(Ho / block_h), N)``  — no channel
+      tile; ``block_h = 0`` streams the whole image (one row block).
     """
 
     problem: DirectConvProblem
@@ -13838,6 +13916,11 @@ class DirectDepthwiseSpatialSpec:
     # the dgrad kernarg block; "same" padding keeps the rotated padding
     # KH - 1 - PAD equal to PAD, so the row stream is unchanged.
     dgrad: bool = False
+    # Output rows per block (grid y), 0 = the whole image. A block streams
+    # (block_h - 1) * stride + KH input rows, so a few-image launch, whose
+    # whole-image blocks are too few to fill the GPU, trades KH - stride
+    # re-read halo rows per block for more blocks.
+    block_h: int = 0
 
     @property
     def n_w_per_wave(self) -> int:
@@ -13859,6 +13942,7 @@ class DirectDepthwiseSpatialSpec:
             self.name,
             p.short(),
             f"bwv{self.block_waves}",
+            f"bh{self.block_h}" if self.block_h else "",
             flags={"dg": self.dgrad, **_scalar_name_flags(p.dtype)},
         )
 
@@ -13885,6 +13969,8 @@ class DirectDepthwiseSpatialSpec:
             raise ValueError(
                 f"DirectDepthwiseSpatialSpec(dgrad=True) needs stride 1 (got {p.stride})"
             )
+        if self.block_h < 0:
+            raise ValueError(f"block_h must be >= 0 (got {self.block_h})")
 
 
 def is_valid_depthwise_spatial_spec(
@@ -13919,6 +14005,8 @@ def is_valid_depthwise_spatial_spec(
         return False, f"groups={p.groups} == wave_size: no W positions per wave"
     if spec.dgrad and p.stride != 1:
         return False, f"the dgrad mode needs stride 1 (got {p.stride})"
+    if spec.block_h < 0:
+        return False, f"block_h must be >= 0 (got {spec.block_h})"
     return True, "ok"
 
 
@@ -14037,6 +14125,19 @@ def build_direct_depthwise_spatial(
     c_stride_rv = b.const_i32(c_stride_dw)
     # n_iters = H + KH - 1 rows; the loop walks them KH at a time.
     n_iters_v = b.add(p_Hi, b.const_i32(p.KH - 1))
+    BH = spec.block_h
+    if BH:
+        # Row block by: output rows [by * BH, by * BH + BH) are the streaming
+        # rows [y0, y0 + (BH - 1) * stride + KH), clipped to the image. The
+        # loop counts block-local rows from 0, so the static accumulator
+        # slots, the prologue and the "row KH - 1 is the first flush" test
+        # are those of a whole-image block; the row loads and the stored
+        # output row add y0 back.
+        y0 = b.mul(b.mul(b.block_id_y(), b.const_i32(BH)), c_stride_rv)
+        y_end = b.smin(
+            n_iters_v, b.add(y0, b.const_i32((BH - 1) * c_stride_dw + p.KH))
+        )
+        n_iters_v = b.sub(y_end, y0)
     n_groups_v = b.div(b.add(n_iters_v, b.const_i32(p.KH - 1)), c_KH)
 
     # Split each input offset into a per-lane column part and a wave-uniform
@@ -14061,6 +14162,8 @@ def build_direct_depthwise_spatial(
         invalid row also drops its scalar offset so the sentinel stays the
         whole offset.
         """
+        if BH:
+            y = b.add(y0, y)
         hi = b.add(y, b.const_i32(-p.PAD))
         row_ok = b.land(b.cmp_ge(hi, c0), b.cmp_lt(hi, p_Hi))
         row_off = b.mul(
@@ -14113,6 +14216,8 @@ def build_direct_depthwise_spatial(
 
             P_FLUSH_j = (j + 1) % p.KH  # STATIC
             p_flush_rv = b.add(y_j, b.const_i32(-(p.KH - 1)))
+            if BH:
+                p_flush_rv = b.add(y0, p_flush_rv)
 
             if j >= p.KH - 1:
                 flush_ge = j_valid
@@ -14609,10 +14714,20 @@ def direct_launch_geometry(spec) -> Tuple[Tuple[int, int, int], Tuple[int, int, 
         return grid, (spec.threads_per_block, 1, 1)
     if isinstance(spec, DirectDepthwiseSpatialSpec):
         # Every channel of the image lives in one wavefront; dgrad tiles dX.
-        out_w = p.W if spec.dgrad else p.Wo
-        return (ceil_div(out_w, spec.block_w), 1, p.N), (spec.threads_per_block, 1, 1)
+        out_h, out_w = (p.H, p.W) if spec.dgrad else (p.Ho, p.Wo)
+        n_h = ceil_div(out_h, spec.block_h) if spec.block_h else 1
+        return (ceil_div(out_w, spec.block_w), n_h, p.N), (
+            spec.threads_per_block,
+            1,
+            1,
+        )
     if isinstance(spec, DirectDepthwiseSpec):
-        grid = (ceil_div(p.Wo, spec.block_w), ceil_div(p.groups, spec.block_ch), p.N)
+        n_h = ceil_div(p.Ho, spec.block_h) if spec.block_h else 1
+        grid = (
+            ceil_div(p.Wo, spec.block_w),
+            ceil_div(p.groups, spec.block_ch),
+            p.N * n_h,
+        )
         return grid, (spec.threads_per_block, 1, 1)
     if isinstance(spec, DirectDepthwiseTiledSpec):
         out_h, out_w = spec.out_hw
