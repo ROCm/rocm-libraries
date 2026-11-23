@@ -38,27 +38,27 @@
 
 using namespace rocsparse_ut;
 
-// Slot j of every row stores column j, which is unique and inside [0, n).
-__global__ void check_matrix_ell_large_fill_columns(rocsparse_int* col, int64_t m, int64_t width)
-{
-    const int64_t row = static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
-    if(row >= m)
-    {
-        return;
-    }
-
-    for(int64_t j = 0; j < width; ++j)
-    {
-        col[m * j + row] = static_cast<rocsparse_int>(j);
-    }
-}
-
 class CheckMatrixEllLarge : public HandleTest
 {
 };
 
 namespace
 {
+    // Slot j of every row stores column j, which is unique and inside [0, n).
+    __global__ void fill_columns(rocsparse_int* col, int64_t m, int64_t width)
+    {
+        const int64_t row = static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+        if(row >= m)
+        {
+            return;
+        }
+
+        for(int64_t j = 0; j < width; ++j)
+        {
+            col[m * j + row] = static_cast<rocsparse_int>(j);
+        }
+    }
+
     // m * ell_width = 2^32: the 32-bit product is exactly 0.
     constexpr rocsparse_int m_wrap_zero = 65536;
     constexpr rocsparse_int w_wrap_zero = 65536;
@@ -138,7 +138,7 @@ TEST_F(CheckMatrixEllLarge, kernel_indexes_beyond_int32_max)
     ASSERT_NE(col.ptr, nullptr);
     ASSERT_NE(val.ptr, nullptr);
     // Sorted storage rejects repeated columns, so every row holds 0, 1, ..., w - 1.
-    check_matrix_ell_large_fill_columns<<<(m + 255) / 256, 256>>>(col.ptr, m, w);
+    hipLaunchKernelGGL((fill_columns), dim3((m - 1) / 256 + 1), dim3(256), 0, 0, col.ptr, m, w);
     UT_CHECK_HIP(hipGetLastError());
     UT_CHECK_HIP(hipDeviceSynchronize());
     UT_CHECK_HIP(hipMemset(val.ptr, 0, static_cast<size_t>(total) * sizeof(float)));
