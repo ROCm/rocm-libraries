@@ -946,15 +946,17 @@ def test_e_kernel_tdm_blocks_keep_the_masked_side_effects(gp_gfx1250, gfx1250_ii
       assert sum("stage D element" in l for l in v) == len(pick(ref[k], "D", "buffer_store")), k
 
 
-def test_compact_loop_store_tdm_block_outside_the_loop(gp_gfx1250, gfx1250_iim, assembler, capsys):
-  """The CompactLoopStore E kernel of bbs_bias_gelu_aux_cls_gfx1250.yaml: each TDM block runs its stores in the CompactLoopStore loop. It sets up the
+@pytest.mark.parametrize("problem", ["aux_e", "pure_gemm"])
+def test_compact_loop_store_tdm_block_outside_the_loop(gp_gfx1250, gfx1250_iim, assembler, capsys, problem):
+  """The CompactLoopStore E kernel of bbs_bias_gelu_aux_cls_gfx1250.yaml, and a pure GEMM kernel with CompactLoopStore
+  on: each TDM block runs its stores in the CompactLoopStore loop. It sets up the
   staged tile (and loads C) before the loop label, stages every element inside the loop, steps the staged tile's base
   once an iteration when the loop runs more than once, and stores the tile once, after the loop exits; no D
   buffer_store is left in any TDM block."""
   tdm = 1
-  sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=tdm, ProblemType=_AUX_E,
-                       **dict(_AUX_E_SOLUTION, CompactLoopStore=True))
-  assert sol.get("Valid"), capsys.readouterr().out
+  setup = dict(_AUX_E_SOLUTION, ProblemType=_AUX_E) if problem == "aux_e" else {}
+  sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=tdm, **dict(setup, CompactLoopStore=True))
+  assert sol.get("Valid") and sol["CompactLoopStore"], capsys.readouterr().out
   blocks = _storeBlocks(asm)
   tdm = {k: v for k, v in blocks.items() if any(l.startswith("tensor_store_from_lds ") for l in v)}
   assert tdm
@@ -1505,3 +1507,105 @@ def test_lds_split_is_not_the_masking_form_that_emitted_offset_65536():
   high, low = tdmStoreLdsSplit(offset, span)
   assert high + low == offset
   assert low + span <= DS_OFFSET_MAX
+
+
+@pytest.mark.parametrize("policy", [{"StreamK": 0}, {"StreamK": 3}, dict(_PAP, mi=_MT128)], ids=["sk0", "sk3", "pap"])
+def test_c_load_wait_is_kept_before_the_barrier(gp_gfx1250, gfx1250_iim, assembler, capsys, policy):
+  """In every beta TDM block the tensor_load_to_lds of C is waited for, with a wait StinkyTofu keeps, before the
+  barrier after which the threads read C from the staged tile."""
+  sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=True, TDMInst=3, **policy)
+  assert sol.get("Valid"), capsys.readouterr().out
+  lines, loads, block = asm.splitlines(), [], None
+  for i, line in enumerate(lines):
+    if line.startswith("label_GW_"):
+      block = re.match(r"label_GW_B1_\w+_(?:Then|NonEdge):$", line)
+    elif block and _code(line).startswith("tensor_load_to_lds"):
+      loads.append(i)
+  assert loads, "no tensor_load_to_lds of C in a beta store block"
+  for load in loads:
+    barrier = _nextLine(lines, load, ("s_barrier",))
+    assert barrier is not None, lines[load]
+    waits = [line for line in lines[load + 1:barrier] if _code(line).startswith("s_wait_tensorcnt")]
+    assert any(STINKY_KEEP in line for line in waits), (lines[load], waits)
+
+
+@pytest.mark.parametrize("term", ["UseE", "Gradient", "UseGateResidual", "OutputAmaxD"])
+def test_each_term_has_epilogue_side_effects(term):
+  """Each per-element output beyond C and D makes a kernel one whose edge TDM blocks keep the edge block."""
+  pt = {"UseE": False, "Gradient": False, "UseGateResidual": False, "OutputAmaxD": False}
+  assert not hasEpilogueSideEffects(pt)
+  assert hasEpilogueSideEffects(dict(pt, **{term: True}))
+
+
+# ProblemType additions, over the bf16 kernel of _params, of per-element outputs beyond C and D other than E. AmaxD
+# needs fp8 D, which that kernel does not support, so test_each_term_has_epilogue_side_effects covers its term.
+_SIDE_EFFECTS = {
+  "gate_residual": {"UseGateResidual": True},
+  "gradient_bias": {"Gradient": True, "UseBias": 1, "BiasSrc": "D", "BiasDataTypeList": ["s"]},
+}
+
+
+@pytest.mark.parametrize("effect", sorted(_SIDE_EFFECTS))
+def test_side_effect_kernels_keep_the_edge_blocks(gp_gfx1250, gfx1250_iim, assembler, capsys, effect):
+  """With UseGateResidual or Gradient with UseBias each edge TDM block is the edge block of the kernel with the switch
+  off, with its vector width and its C loads, and stages D in place of its D stores."""
+  _, base = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=False, ProblemType=_SIDE_EFFECTS[effect])
+  sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=True, ProblemType=_SIDE_EFFECTS[effect])
+  assert base and sol.get("Valid"), capsys.readouterr().out
+  ref, blocks = _storeBlocks(base), _storeBlocks(asm)
+  tdm = {k: v for k, v in blocks.items() if any(line.startswith("tensor_store_from_lds ") for line in v)}
+  edges = [k for k in tdm if k.endswith("_Then")]
+  assert edges and set(tdm) <= set(ref), sorted(tdm)
+  pick = lambda lines, tc, op: _sameRegs([line for line in lines if line.startswith(op) and "s[sgprSrd%s:" % tc in line])
+  for k in edges:
+    assert not pick(tdm[k], "D", "buffer_store"), k
+    assert sum("stage D element" in line for line in tdm[k]) == len(pick(ref[k], "D", "buffer_store")), k
+    if k.startswith("B1_"):
+      assert pick(tdm[k], "C", "buffer_load") == pick(ref[k], "C", "buffer_load") != [], k
+
+
+@pytest.mark.parametrize("tdmInst", [1, 2])
+def test_one_sided_tdm_loads_are_rejected(gp_gfx1250, gfx1250_iim, assembler, capsys, tdmInst):
+  """TDMInst 1 and 2 load only A or only B with TDM, and Solution rejects both, so the TDM term of the handoff, which
+  _handoffBarriersLds reads as A or B, only ever sees both."""
+  sol, asm = _emit_asm(gfx1250_iim, assembler, mi=_MT128, TDMStoreInst=True, TDMInst=tdmInst, StreamK=3)
+  assert not sol.get("Valid") and asm is None
+  assert "Currently TDMA and TDMB must be enabled simultaneously" in capsys.readouterr().out
+
+
+def _dsBytes(module):
+  """The bytes of each DS store and load of an emitted module, from its mnemonics."""
+  return [int(m.group(1)) // 8 for line in str(module).splitlines()
+          for m in [re.match(r"\s*ds_(?:store|load)_[bu](\d+)", line)] if m]
+
+
+@pytest.mark.parametrize("beta", [0, 1])
+@pytest.mark.parametrize("svw", [3, 6])
+@pytest.mark.parametrize("dest", sorted(_UNCOVERED))
+def test_store_vector_widths_3_and_6_are_staged_whole_or_rejected(gp_gfx1250, gfx1250_iim, dest, svw, beta):
+  """At store vector widths 3 and 6, with beta 0 and 1: a D vector tdmStoreVectorRejectReason accepts is staged by
+  emitTDMStoreStaging, and with beta read back by emitTDMStoreLoadCElement, in DS instructions whose bytes add up to
+  the vector; a vector it rejects is one the staging does not write whole."""
+  from types import SimpleNamespace
+  from toolchain_test_helpers import use_isa
+  from tensilelite.Components.TDMStoreInst import emitTDMStoreLoadCElement, emitTDMStoreStaging
+
+  use_isa((12, 5, 0), 32)
+  bpe = int(DataType(dest).numBytes())
+  states = SimpleNamespace(bpeCexternalGSU1=bpe, bpr=4, c=SimpleNamespace(startVgprValu=0), HHH_WMMA=False,
+                           memTokenLdsBuffer0=0, memTokenEpilogue=0)
+  gwb = SimpleNamespace(parentWriter=SimpleNamespace(states=states), gwvw=svw, tdmStoreLdsBase=10, tmpVgpr=11,
+                        kernel={"MacroTile0": 256, "_TDMStoreOverMainLoop": True,
+                                "ProblemType": {"DestDataType": DataType(dest)}})
+
+  def whole(emit):
+    try:
+      return sum(_dsBytes(emit())) == bpe * svw
+    except Exception:  # a width dsStore or dsLoad does not take
+      return False
+
+  accepted = tdmStoreVectorRejectReason(_state(DestDataType=DataType(dest), StoreVectorWidth=svw)) is None
+  assert accepted == (svw not in _UNCOVERED[dest])
+  assert whole(lambda: emitTDMStoreStaging(gwb, [(0, 0, 0)])) == accepted
+  if beta and accepted:
+    assert whole(lambda: emitTDMStoreLoadCElement(gwb, SimpleNamespace(coordOffset0=0, coordOffset1=0), 20, 0))
