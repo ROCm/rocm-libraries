@@ -304,7 +304,7 @@ a review of each suite confirms that the unit tests cover all of its checks, on 
 in every CI job that runs the suite. A suite that is covered is then deleted, not maintained next to
 the unit tests. The `local_matrix_allocations`, `local_matrix_zero`, `local_matrix_set_data_ptr`
 and `local_matrix_multicoloring` suites and the ItLUSolve case of `local_matrix_itsolve` have been
-deleted on that basis. The Jenkins test command runs both unit-test binaries after
+deleted on that basis. The Jenkins test command runs both unit-test binaries before
 `rocalution-test`, so the Jenkins lanes still run these checks. Clients-only builds and
 `rtest.xml` runs no longer run them (see [Known Gaps Summary](#known-gaps-summary)). The
 solver, preconditioner and AMG suites stay as the integration layer.
@@ -376,8 +376,8 @@ Internal AMD **Jenkins** pipelines (`.jenkins/`) are legacy, running on older GP
 HIP+OpenMP), host (`--host`), and MPI (`--host --mpi=on --no-openmp`).
 
 > **Important nuance:** the Jenkins `runTestCommand` GTest filter is commented out, so those legacy
-> lanes run the **full** `rocalution-test` suite (no emulation subset), followed by
-> `rocalution-unit-test` and `rocalution-unit-test-lifecycle`. The intended
+> lanes run the **full** `rocalution-test` suite (no emulation subset), after
+> `rocalution-unit-test` and `rocalution-unit-test-lifecycle`, which run unfiltered. The intended
 > `*checkin*` / `*nightly*` filters match no current test names. The modern TheRock gate, by
 > contrast, selects the subset through the `ROCALUTION_EMULATION_*` env var of the CTest category.
 
