@@ -3260,25 +3260,6 @@ namespace
         return tensile;
     }
 
-    // Helper to compute spatial cluster blocks.
-    size_t computeSpatialClusterBlocks(const TensileLite::ContractionSolution&    solution,
-                                       const TensileLite::ContractionProblemGemm& tensile)
-    {
-        // Get physical tile dimensions
-        TensileLite::dim3 workGroupSize, tiles;
-        solution.calculateGrid(workGroupSize, tiles, tensile);
-
-        // Get cluster dimensions from solution
-        const auto& clusterDim = solution.sizeMapping.clusterDim;
-
-        // Compute spatial blocks: divide tiles by cluster dimensions
-        const size_t blocksX = (tiles.x + clusterDim.x - 1) / clusterDim.x;  // divideUp
-        const size_t blocksY = (tiles.y + clusterDim.y - 1) / clusterDim.y;  // divideUp
-        const size_t blocksZ = tiles.z;
-
-        return blocksX * blocksY * blocksZ;
-    }
-
     StreamKResolution resolveStreamK(const TensileLite::ContractionSolution&    solution,
                                      const TensileLite::ContractionProblemGemm& tensile,
                                      const TensileLite::Hardware&               hardware)
@@ -3288,6 +3269,35 @@ namespace
             return out;
 
         out.streamK = true;
+
+        // Clustered Stream-K schedules spatial blocks and may switch parallel
+        // reduction to tree or fall back to whole blocks, so read the launch
+        // solve() performs instead of re-deriving it.
+        if(solution.usesStreamKSpatialCluster())
+        {
+            const auto  launch  = solution.resolvePersistentSettings(tensile, hardware);
+            const auto& cluster = launch.clusterSchedule;
+            out.staticPacking   = true;
+            out.tree            = launch.reduction == origami::reduction_t::tree;
+            out.tiles           = cluster.blocks;
+            out.itersPerTile    = cluster.itersPerTile;
+            out.grid            = launch.grid;
+            if(!out.tree || out.grid == 0)
+                return out;
+            out.split             = cluster.split;
+            out.perTileExtraIters = solution.internalArgsSupport.perTileExtraIters;
+            out.rowUniform        = TensileLite::StreamK::Static::isRowUniform(
+                out.split,
+                out.tiles,
+                out.itersPerTile,
+                out.grid,
+                out.perTileExtraIters,
+                tensile.getParams().uniformSummationOrder(),
+                solution.skKGranularity());
+            out.newlyAdmitted
+                = out.rowUniform && out.split.args.skTiles != 0 && out.tiles % out.grid != 0;
+            return out;
+        }
 
         const bool effectiveDynamic = solution.sizeMapping.workAssignment == TensileLite::WorkAssignment::Hybrid
                                           ? solution.streamK5EffectiveDynamic(tensile, hardware)
@@ -3299,13 +3309,7 @@ namespace
             = effectiveDynamic ? origami::reduction_t::tree
                                : solution.getSKReduction(tensile, hardware);
 
-        // For PLAV2, the tile count for row-uniformity validation is the number
-        // of spatial blocks.
-        const bool usesSpatialCluster = solution.usesStreamKSpatialCluster();
-        const size_t physicalTiles = tensile.getNumTiles(solution.sizeMapping, 1);
-
-        out.tiles = usesSpatialCluster ? computeSpatialClusterBlocks(solution, tensile)
-                                       : physicalTiles;
+        out.tiles = tensile.getNumTiles(solution.sizeMapping, 1);
         out.itersPerTile = std::max(size_t{1}, tensile.getItersPerTile(solution.sizeMapping));
 
         out.grid = solution.getSKGrid(tensile, hardware, out.tiles, rawReduction);
