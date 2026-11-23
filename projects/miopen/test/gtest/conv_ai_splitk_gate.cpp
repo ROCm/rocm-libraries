@@ -145,7 +145,8 @@ TEST_F(CPU_SplitKAutodeduceEndToEnd_NONE, Wrw2DPicksAutodeduceWithRealGate)
     EXPECT_EQ(pick->second, miopen::solver::conv::CkSplitkAutoDeduce)
         << "Expected split_k=-1 (autodeduce) but got " << pick->second << ". "
         << "Most likely supports_split_k_autodeduce was set back to false in the 2D Wrw solver "
-           "config (k2DWrwSolverConfig in conv_hip_implicit_gemm_grouped_wrw_xdlops.cpp); a shipped "
+           "config (k2DWrwSolverConfig in conv_hip_implicit_gemm_grouped_wrw_xdlops.cpp); a "
+           "shipped "
            "model refresh that changes this shape's top-1 could also cause it.";
 }
 
