@@ -31,8 +31,9 @@
 //   C = alpha * A * B              (beta == nullptr)
 //   C = beta * D                   (alpha == nullptr)
 //
-// For every case the whole of C (row pointer, column indices, block values) is
-// compared with a host reference.
+// For every compute case the whole of C (row pointer, column indices, block
+// values) is compared with a host reference. The buffer size tests compare
+// the sizes the library reports and check that the reported buffer is enough.
 //
 #include "unit_test_extra_common.hpp"
 
@@ -62,6 +63,9 @@ namespace
         bool                 empty_B      = false;
         bool                 empty_D      = false;
         uint64_t             seed         = 1;
+        // Bytes allocated after the buffer the library asks for, filled with a guard
+        // value that the nnz and compute stages must leave untouched.
+        size_t guard_tail = 0;
     };
 
     std::string describe(const GemmCase& c)
@@ -195,8 +199,11 @@ namespace
                                                   &bsz),
                       rocsparse_status_success);
         }
-        DevBuf<char> buffer(bsz);
+        DevBuf<char> buffer(bsz + c.guard_tail);
         ASSERT_TRUE(buffer.ptr);
+        constexpr char guard = static_cast<char>(0xA5);
+        if(c.guard_tail > 0)
+            ASSERT_EQ(hipMemset(buffer.ptr, guard, bsz + c.guard_tail), hipSuccess);
 
         rocsparse_int         nnzb_host = -1;
         DevBuf<rocsparse_int> nnzb_dev(size_t{1});
@@ -335,6 +342,13 @@ namespace
         ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
 
         expect_bsr_equal<T>(pC.host(), iC.host(), vC.host(), want, c.dir, c.base_C, !c.bsr);
+        if(c.guard_tail > 0)
+        {
+            const std::vector<char> b = buffer.host();
+            EXPECT_EQ(std::count(b.begin() + bsz, b.begin() + bsz + c.guard_tail, guard),
+                      static_cast<std::ptrdiff_t>(c.guard_tail))
+                << "written past the " << bsz << " byte buffer";
+        }
     }
 
     template <typename T>
@@ -805,6 +819,36 @@ TEST_F(ExtraGemm, argument_errors)
         for(Mode m : {Mode::multadd, Mode::mult, Mode::add})
         {
             gemm_argument_errors(handle, bsr, m);
+            if(HasFatalFailure())
+                return;
+        }
+}
+
+// ---------------------------------------------------------------------------
+// The buffer the library asks for is enough: the nnz and compute stages leave a
+// guard tail after it untouched, and C is right. The second shape has rows with
+// more than 32 intermediate products and more than 16 entries of C, which go
+// through the grouped kernels of both stages.
+// ---------------------------------------------------------------------------
+TEST_F(ExtraGemm, csrgemm_buffer_is_large_enough)
+{
+    struct Shape
+    {
+        int64_t m, n, k, max_row_nnz;
+    };
+    for(const Shape& s : {Shape{300, 7, 5, 3}, Shape{300, 64, 64, 12}})
+        for(Mode mode : {Mode::multadd, Mode::mult, Mode::add})
+        {
+            GemmCase c;
+            c.bsr          = false;
+            c.bd           = 1;
+            c.mode         = mode;
+            c.mb           = s.m;
+            c.nb           = s.n;
+            c.kb           = s.k;
+            c.max_row_nnzb = s.max_row_nnz;
+            c.guard_tail   = 4096;
+            run_gemm<float>(handle, c);
             if(HasFatalFailure())
                 return;
         }
