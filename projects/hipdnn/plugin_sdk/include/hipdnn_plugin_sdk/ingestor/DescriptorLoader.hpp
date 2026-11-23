@@ -2187,7 +2187,7 @@ inline constexpr std::array FILE_TYPES{
              }},
     FileType{SUFFIX_UHD,
              1,
-             1,
+             uhd::parser_detail::UHD_VERSION_MINOR,
              false,
              [](DescriptorCatalog& c, const DescriptorFile& f) {
                  insertCatalogEntry(

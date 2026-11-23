@@ -932,21 +932,30 @@ def _string(value, where):
         raise HkpPackError(f"{where} must be a nonempty string")
 
 
-def _validate_trained_against(value, where, slot_forms):
+def _validate_trained_against(value, where, version):
     # RFC 0019 §4.1: names either the descriptor set (ued/kmd/umd, all or none) or,
     # for a model bound by provider-declared UUID, a selector_revision. Either may add
-    # feature_semantics_revision (integer >= 1) and codegen_revision (nonempty string);
-    # neither stands in for the descriptor set or selector_revision. RFC 0021 §9 adds
-    # the slot forms, valid only in a 1.1 UHD (@p slot_forms): `slot` beside `kmd`, or
-    # `kmds` in place of `kmd`. Loader is authoritative: UhdParser.hpp.
+    # feature_semantics_revision (integer >= 1) and codegen_revision (nonempty string,
+    # from UHD 1.2); neither stands in for the descriptor set or selector_revision.
+    # RFC 0021 §9 adds the slot forms, valid from UHD 1.1: `slot` beside `kmd`, or
+    # `kmds` in place of `kmd`. @p version is the UHD's own. Loader is authoritative:
+    # UhdParser.hpp.
     if (
-        not slot_forms
+        version == "1.0"
         and isinstance(value, dict)
         and ("slot" in value or "kmds" in value)
     ):
         raise HkpPackError(
             f"{where} uses slot provenance ('slot' or 'kmds'), which requires "
             "UHD version 1.1"
+        )
+    if (
+        version in ("1.0", "1.1")
+        and isinstance(value, dict)
+        and "codegen_revision" in value
+    ):
+        raise HkpPackError(
+            f"{where} records codegen_revision, which requires UHD version 1.2"
         )
     _known_keys(
         value,
@@ -973,9 +982,7 @@ def _validate_trained_against(value, where, slot_forms):
                 f"{where}.feature_semantics_revision must be an integer >= 1"
             )
     if "codegen_revision" in value:
-        codegen = value["codegen_revision"]
-        if not isinstance(codegen, str) or not codegen:
-            raise HkpPackError(f"{where}.codegen_revision must be a nonempty string")
+        _string(value["codegen_revision"], f"{where}.codegen_revision")
     names_descriptor_set = _names_descriptor_set(value)
     if "selector_revision" in value:
         revision = value["selector_revision"]
@@ -1063,7 +1070,7 @@ def _validate_uhd(desc, source_root, require_dvc=False):
         where,
     )
     _require(doc, ("version", "id", "name", "adapter"), where)
-    if doc["version"] not in ("1.0", "1.1"):
+    if doc["version"] not in ("1.0", "1.1", "1.2"):
         raise HkpPackError(
             f"{where}: unsupported file-format version {doc['version']!r}"
         )
@@ -1102,7 +1109,7 @@ def _validate_uhd(desc, source_root, require_dvc=False):
             raise HkpPackError(f"{where}.features_hash must be a sha256 digest")
     if "trained_against" in doc:
         _validate_trained_against(
-            doc["trained_against"], f"{where}.trained_against", doc["version"] == "1.1"
+            doc["trained_against"], f"{where}.trained_against", doc["version"]
         )
     if "categorical_encoding" in doc:
         encoding = doc["categorical_encoding"]

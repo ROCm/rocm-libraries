@@ -1159,10 +1159,17 @@ The binding's `provider_build` (the loaded plugin's name, version and API versio
 diagnostic, never a compatibility key: measurements from two builds reporting one selector
 revision are repeats of each other. A model recording a different revision, or none, is
 refused -- the engine stays applicable and reports UNAVAILABLE naming both revisions.
+Start a fresh consumer process after installing a model: a compiled model is cached
+for the lifetime of the engine that owns it.
 
-`trained_against.codegen_revision` is recorded, never a compatibility key. It digests the
-bytes of the engine's code objects, so a compiler change moves it while the selector revision
-stays put. The runtime binds a model whose `codegen_revision` differs from the engine's and
+`trained_against.codegen_revision` is published by the generic (descriptor) engine and is
+recorded, never a compatibility key. It digests the bytes of the engine's code objects. A code
+object that carries a packer `identity` (one the packer compiled from rocKE IR) enters the
+selector revision by that compiler-independent identity instead, so a compiler bump within one
+LLVM flavor moves only the codegen revision (an LLVM-major bump that changes the IR flavor
+rocKE emits moves both). A prebuilt code object (FlyDSL) or a HIP-compiled one still enters
+by its `sha256`: a prebuilt one moves both only when it is regenerated, and a HIP-compiled one
+moves both on every compiler change. The runtime binds a model whose `codegen_revision` differs from the engine's and
 logs one warning. `uhd_gen` does the same where it checks a model against the bindings
 measurements or runtime predictions carry (`evaluate`), and never refuses measurements that
 differ only in it (collections, datasets, repeats of one shape). A model
@@ -1170,9 +1177,8 @@ records the `codegen_revision` only when every measurement it trains on reports 
 one; measurements from different compilers train together, the model records none, and the
 evaluation report's `warnings` says so. A `--provenance` or `--descriptor-tree` snapshot
 names the contract only: a `codegen_revision` it records that differs from the
-measurements' is warned about, and the model records the measurements'.
-Start a fresh consumer process after installing a model: a compiled model is cached
-for the lifetime of the engine that owns it.
+measurements' is warned about, and the model records the measurements'. A model that records
+a `codegen_revision` is written as UHD 1.2, the first version that carries the key.
 
 Install the intended catalog-ranking model before collecting L1 measurements.
 Changing that model changes the descriptor engine's immediate selector and can

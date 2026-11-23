@@ -116,8 +116,9 @@ matches the fingerprint the configs record.
 No L1 `predict_engine` (predicts the engine's TFLOPS) ships yet, and
 `TestGfx942AttentionDenseModelBinding.TheBoundL1EnginePredictorLoadsAndMatchesThisBuild` checks that
 none loads. An L1's selector revision digests the code identity of every kernel packed at build time,
-so retrain it when the L2, the catalog or the kernels' code changes. A compiler that only rebuilds
-the code objects moves its codegen revision instead: the runtime still binds it and logs a warning.
+so retrain it when the L2, the catalog or the kernels' code changes. A compiler bump within one
+LLVM flavor only rebuilds the code objects, which moves its codegen revision instead: the runtime
+still binds it and logs a warning.
 
 How the L2 was trained (the `hipdnn-uhd` skill; `hipdnn_corpus_gen`, `hipdnn_bench`, `uhd_gen`), on
 one gfx942 device with the catalog compiled by CI's COMGR:

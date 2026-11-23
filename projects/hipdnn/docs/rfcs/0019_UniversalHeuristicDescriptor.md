@@ -2,7 +2,7 @@
 
 - Contributors: Jason Campbell, Chris Erb
 - **Status**: In progress
-- **Status notes**: The UHD runtime ships (#13028): the UHD parser, the UED role maps, feature extraction, the `static_order`, `native`, `tree_data`, `table`, `linear_data`, `mlp_data`, and `custom_library` adapters, ranking metrics, engine estimates, and the winner cache (`plugin_sdk/include/hipdnn_plugin_sdk/heuristics/`, `ingestor/DescriptorLoader.hpp`, `ingestor/UhdKernelHeuristic.hpp`). The `onnx` adapter, a consumer for `predict_applicable_kernels`, and a persistent cache of model rankings are not built. The generation tool (`tools/uhd_gen`) trains and installs models: trained `sort_kernel_catalog` models ship for the gfx942 and gfx950 rocKE attention engines, and trained `predict_engine` models for the FlyDSL rmsnorm engines. A `predict_engine` model records the generic engine's `selector_revision`, which names kernels the packager compiled from rocKE IR by a compiler-independent identity, and its `codegen_revision`, which only warns ([Section 8.1](#81-descriptor-versions-and-uhd-coupling)).
+- **Status notes**: The UHD runtime ships (#13028): the UHD parser, the UED role maps, feature extraction, the `static_order`, `native`, `tree_data`, `table`, `linear_data`, `mlp_data`, and `custom_library` adapters, ranking metrics, engine estimates, and the winner cache (`plugin_sdk/include/hipdnn_plugin_sdk/heuristics/`, `ingestor/DescriptorLoader.hpp`, `ingestor/UhdKernelHeuristic.hpp`). The `onnx` adapter, a consumer for `predict_applicable_kernels`, and a persistent cache of model rankings are not built. The generation tool (`tools/uhd_gen`) trains and installs models: 38 trained `predict_engine` models ship across ten FlyDSL engines, and trained `sort_kernel_catalog` models for the gfx942 and gfx950 rocKE attention engines and three FlyDSL SDPA engines.
 - **Last verified**: 2026-11-18 against `develop` (d63dd6ed3f5)
 - Parent: [RFC 0017 Universal Kernel Descriptor](0017_UniversalKernelDescriptor.md) — the "UHD + kernel selection" follow-up named in [RFC 0017 §14.2](0017_UniversalKernelDescriptor.md#142-follow-up-rfcs).
 - Siblings:
@@ -524,7 +524,7 @@ The normative header. A loader can validate every row here without instantiating
 | `features_signature` | if the adapter features | ordered list | Model inputs, in training order ([Section 6.2](#62-the-features_signature)). |
 | `categorical_encoding` | if a feature reads a string field | field → (value → code) | Generated during training; makes string→number conversion explicit ([Section 6.5](#65-categorical-encoding)). |
 | `features_hash` | if `features_signature` | `sha256:` + 16 hex | Fingerprint of the **resolved feature contract** — the canonicalized signature *and* `categorical_encoding`, truncated to 64 bits ([Section 6.3](#63-contract-enforcement)). |
-| `trained_against` | if the adapter features | descriptor refs, `selector_revision`, or both; optionally `codegen_revision` and `feature_semantics_revision` | What this heuristic was generated against: the `{id, revision}` **content revisions** of the `ued`, `kmd`, and every `umd`, and/or the selector revision whose behaviour was measured — the provider's, for an engine that has no descriptor set, or the generic engine's own, which an engine estimate (`predict_engine`) of a descriptor engine must record beside its descriptor refs ([Section 8.1](#81-descriptor-versions-and-uhd-coupling)). Either form may also record the integer revision of the feature semantics the model was trained on; absent means 1 ([Section 6.9](#69-feature-semantics-revision)). An engine estimate of a descriptor engine also records the `codegen_revision` of the code objects it was measured on, which the engine only warns about ([Section 8.1](#81-descriptor-versions-and-uhd-coupling)). |
+| `trained_against` | if the adapter features | descriptor refs, `selector_revision`, or both; optionally `codegen_revision` and `feature_semantics_revision` | What this heuristic was generated against: the `{id, revision}` **content revisions** of the `ued`, `kmd`, and every `umd`, and/or the selector revision whose behaviour was measured — the provider's, for an engine that has no descriptor set, or the generic engine's own, which an engine estimate (`predict_engine`) of a descriptor engine must record beside its descriptor refs ([Section 8.1](#81-descriptor-versions-and-uhd-coupling)). Either form may also record the integer revision of the feature semantics the model was trained on; absent means 1 ([Section 6.9](#69-feature-semantics-revision)). An engine estimate of a descriptor engine also records the `codegen_revision` of the code objects it was measured on, which the engine only warns about and which needs UHD 1.2 ([Section 8.1](#81-descriptor-versions-and-uhd-coupling)). |
 | `objective` | if the adapter scores | `max` \| `min` | Direction of the winning score, applied when the ranking is ordered. An adapter returns its model's raw value; the sign is the consumer's to apply, so a `min` model needs no trainer-side negation ([Section 5](#5-selection-flow)). |
 | `score` | no | object | `metric`, `calibrated`, and a `transform` drawn from the closed invertible set — lets a consumer recover the metric's value in its registered units ([Section 4.4](#44-ranking-metrics), [Section 11.3](#113-cross-engine-comparison)). `metric` names a registered ranking metric and fixes the units and the winning direction, so `objective` must agree with it. A `calibrated` score requires a `metric`. |
 | `<adapter>` | yes | object | Adapter-scoped body; its key **must** equal `adapter`. A body naming a model file names it by a relative path that stays inside the descriptor's directory, and may also carry that file's `hash`: its SHA-256 as 64 lowercase hexadecimal digits. A `custom_library` body must ([Section 7.2](#72-default-tree_data)). |
@@ -590,7 +590,7 @@ hold the schema and the packer together (below).
     }
   },
   "properties": {
-    "version": {"const": "1.0"},
+    "version": {"enum": ["1.0", "1.1", "1.2"]},
     "id": {"$ref": "#/definitions/uuid"},
     "name": {"type": "string", "minLength": 1},
     "adapter": {"enum": ["static_order", "native", "table", "tree_data", "linear_data", "mlp_data", "onnx", "custom_library"]},
@@ -690,6 +690,8 @@ hold the schema and the packer together (below).
     {"required": ["custom_library"], "properties": {"adapter": {"const": "custom_library"}}}
   ],
   "allOf": [
+    {"if": {"properties": {"version": {"enum": ["1.0", "1.1"]}}},
+     "then": {"properties": {"trained_against": {"not": {"required": ["codegen_revision"]}}}}},
     {"oneOf": [
       {"required": ["static_order"]}, {"required": ["native"]},
       {"required": ["table"]}, {"required": ["tree_data"]},
@@ -762,7 +764,8 @@ naming, because each needs an explicit construct rather than falling out of the 
   An optional `feature_semantics_revision` may accompany either shape but satisfies neither, so a
   document recording only it still lacks provenance; it is an integer, so `"1"` and `true` are refused
   ([Section 6.9](#69-feature-semantics-revision)). An optional `codegen_revision`, a non-empty string,
-  likewise satisfies neither form ([Section 8.1](#81-descriptor-versions-and-uhd-coupling)).
+  needs UHD 1.2 and likewise satisfies neither form
+  ([Section 8.1](#81-descriptor-versions-and-uhd-coupling)).
 - **Direction is the metric's, not the author's.** A `score` naming a `metric` requires the
   `objective` that metric's registry entry fixes ([Section 4.4](#44-ranking-metrics)) — `max` for
   `tflops`, `min` for `time` — and a `calibrated` score must name its metric. The pairing is checked
@@ -2167,7 +2170,8 @@ selector's inputs, so a revision over itself would expire every ranker at every 
 object of an unchanged kernel usually performs as before, so the selector revision does not see it. The
 generic engine also computes a `codegen_revision` (`generic-codegen-v1/<sha256>`) over the `sha256` of
 every code object it loads, and a `predict_engine` model records the one it was measured on beside its
-`selector_revision`:
+`selector_revision`. The key needs UHD 1.2, so a provider that predates it skips such a model at the
+version gate rather than refusing an unknown key, and a 1.0 or 1.1 document recording it is refused:
 
 ```jsonc
 "trained_against": {"ued": {...}, "kmd": {...}, "umd": [...],
@@ -2176,7 +2180,7 @@ every code object it loads, and a `predict_engine` model records the one it was 
 ```
 
 A different recorded `codegen_revision` does not refuse the model: the estimate stays *available*, and
-the engine logs one warning per engine, metric and architecture per process, naming both revisions, so the owners of
+the engine logs one warning per engine, metric, architecture and pair of revisions per process, naming both revisions, so the owners of
 the model decide when a compiler change warrants a retrain. A model that records none is not checked.
 Two compiler changes do move the selector revision: a new LLVM major version that changes the IR a
 generator emits, and a compiler that accepts another target ISA.

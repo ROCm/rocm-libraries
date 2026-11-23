@@ -142,7 +142,7 @@ engine's code objects, which a compiler change moves) is not part of any path.
 - **Codegen revision.** A collection's `trained_against` may also carry the engine's
   `codegen_revision`. Each contribution keeps its own, and a dataset may hold contributions
   measured with different compilers: `dataset add` accepts them and warns (stderr, and
-  `warnings` in its JSON output). A model trained on them records no `codegen_revision`, and
+  `warnings` in its JSON output) when its `training` contributions differ. A model trained on them records no `codegen_revision`, and
   its evaluation report warns too; one trained on contributions that agree records it. The
   runtime binds a model whose `codegen_revision` differs from the engine's and warns; when to
   re-measure after a compiler change is the team's decision.

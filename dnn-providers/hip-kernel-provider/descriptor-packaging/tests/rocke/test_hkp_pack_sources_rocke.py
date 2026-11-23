@@ -127,6 +127,7 @@ class _FakeArtifact:
         self.llvm_text = llvm_texts[0]
         self.llvm_texts = llvm_texts
         self.isa = isa
+        self.options = _OPTIONS
 
 
 def _ir(name):
@@ -138,11 +139,14 @@ def _isa(arch):
     return f"amdgcn-amd-amdhsa--{arch}"
 
 
+#: The COMGR options the stub compilers report, rocke's for a kernel that sets no
+#: attribute implying another.
+_OPTIONS = ("-O3",)
+
+
 def _identity(*names):
-    """The identity of an object compiled from kernels `names`, in link order. The
-    toy kernels set no attribute implying a COMGR option, so rocke compiles them
-    with `-O3` alone."""
-    return code_object_identity([_ir(n) for n in names], _isa(ARCH), ["-O3"])
+    """The identity of an object compiled from kernels `names`, in link order."""
+    return code_object_identity([_ir(n) for n in names], _isa(ARCH), _OPTIONS)
 
 
 class _FakeComgrError(Exception):

@@ -61,9 +61,9 @@ inline const std::string* findUndeclaredKnob(const std::vector<std::string>& kno
 namespace detail
 {
 
-/// Whether this process sees @p key for the first time, so a condition every Container of
-/// an engine meets is logged once rather than once per handle.
-inline bool firstInProcess(const std::string& key)
+/// Whether to log the warning @p key names: true only the first time this process sees it, so
+/// a condition every Container of an engine meets is logged once rather than once per handle.
+inline bool warnOnceInProcess(const std::string& key)
 {
     static std::mutex s_mutex;
     static std::set<std::string> s_seen;
@@ -91,6 +91,11 @@ public:
     using IGraph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph;
     using IEngineConfig = hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig;
 
+    /// @param provenance The engine's own `trained_against`: pass engineBindingProvenance(set).
+    ///        Its `codegen_revision` is compared with each L1 model's recorded one, logging a
+    ///        warning when they differ, and is published in the binding's `trained_against`, so
+    ///        a model trained from those bindings records it. Without the key the engine never
+    ///        warns and publishes none.
     /// @throws std::invalid_argument if a knob names no field in the metadata schema, or, for a
     ///         slotted engine, in its slot's schema.
     GenericEngine(
@@ -176,11 +181,15 @@ public:
                     // Either side recording none leaves nothing to compare.
                     if(!trainedCodegen.empty() && !codegenRevision.empty()
                        && trainedCodegen != codegenRevision
-                       && detail::firstInProcess(std::string(_engine.name)
-                                                     .append("|")
-                                                     .append(metric)
-                                                     .append("|")
-                                                     .append(arch)))
+                       && detail::warnOnceInProcess(std::string(_engine.name)
+                                                        .append("|")
+                                                        .append(metric)
+                                                        .append("|")
+                                                        .append(arch)
+                                                        .append("|")
+                                                        .append(trainedCodegen)
+                                                        .append("|")
+                                                        .append(codegenRevision)))
                     {
                         HIPDNN_PLUGIN_LOG_WARN(
                             "ingestor: engine '"

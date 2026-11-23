@@ -1248,9 +1248,9 @@ TEST(TestIngestorGenericEngine, UnslottedGoldenDefaultSelectorRevisionIsTheUedId
 }
 
 /// A model measured on other code objects of the same selector still binds: only a compiler
-/// rebuilt them. The engine warns once per process and arch, not once per Container, and
-/// publishes its codegen_revision in the binding so a collection records it. A model that
-/// records no codegen revision, or an engine that reports none, is not compared.
+/// rebuilt them. The engine warns once per process, arch and pair of codegen revisions, not once
+/// per Container, and publishes its codegen_revision in the binding so a collection records it.
+/// A model that records no codegen revision, or an engine that reports none, is not compared.
 TEST(TestIngestorGenericEngine, AnEngineModelMeasuredOnOtherCodeObjectsBindsAndWarnsOnce)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
@@ -1327,6 +1327,12 @@ TEST(TestIngestorGenericEngine, AnEngineModelMeasuredOnOtherCodeObjectsBindsAndW
     EXPECT_FALSE(recorder.hasLogContaining(HIPDNN_SEV_WARN, "model for gfx90a"));
     EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN, "codegen-old"));
     EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN, "codegen-new"));
+
+    // A different mismatch for the same engine, metric and arch warns again, once per arch.
+    (void)makeEngine("codegen-newer");
+    (void)makeEngine("codegen-newer");
+    EXPECT_EQ(countWarnings(), 4);
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN, "codegen-newer"));
 
     const auto described
         = first->getPrediction(handle, graph, config, HIPDNN_ENGINE_PREDICTION_ENGINE, false);

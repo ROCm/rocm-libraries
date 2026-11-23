@@ -271,8 +271,10 @@ def _shared(entry: dict[str, Any]) -> dict[str, Any]:
 
 
 def codegen_warning(contributions: Iterable[dict[str, Any]]) -> str | None:
-    """Why `contributions` measured with different code objects, or None when they did not."""
-    return shared_provenance(c.get("trained_against") for c in contributions)[1]
+    """Why `contributions` measured with different code objects, or None when they did not
+    or there are none."""
+    snapshots = [c.get("trained_against") for c in contributions]
+    return shared_provenance(snapshots)[1] if snapshots else None
 
 
 def _agree(manifest: dict[str, Any], entry: dict[str, Any]) -> None:
@@ -987,7 +989,8 @@ def main(argv: list[str] | None = None) -> int:
     except (DatasetError, ValidationError, ValueError, OSError) as error:
         print(f"uhd_gen.dataset add: {error}", file=sys.stderr)
         return 1
-    warning = codegen_warning(read_manifest(args.into)["contributions"])
+    # Over what a model trains on by default, as `load_dataset` decides its codegen_revision.
+    warning = codegen_warning(training_contributions(read_manifest(args.into)))
     if warning:
         print(f"uhd_gen.dataset add: warning: {warning}", file=sys.stderr)
     print(

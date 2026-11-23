@@ -404,7 +404,9 @@ def _as_trained(frame: pd.DataFrame, provenance: dict) -> pd.DataFrame:
         )
         return json.dumps(binding)
 
-    return frame.assign(binding=frame["binding"].map(recorded))
+    # Rows share a handful of bindings: rewrite each distinct one once.
+    rewritten = {text: recorded(text) for text in frame["binding"].unique()}
+    return frame.assign(binding=frame["binding"].map(rewritten))
 
 
 def write_collection(

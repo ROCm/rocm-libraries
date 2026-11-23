@@ -219,6 +219,9 @@ def test_another_compilers_code_objects_are_warned_about_not_refused(caplog):
     trained = {"selector_revision": "aiter-fwd-1", "codegen_revision": "cg-A"}
     compare_provenance(trained, {**trained})
     assert "codegen_revision" not in caplog.text
+    # A model that records none, as every shipped FlyDSL one, is not checked.
+    compare_provenance({"selector_revision": "aiter-fwd-1"}, {**trained})
+    assert "codegen_revision" not in caplog.text
     compare_provenance(trained, {**trained, "codegen_revision": "cg-B"})
     assert "'cg-A'" in caplog.text and "'cg-B'" in caplog.text
     with pytest.raises(ProvenanceError, match="selector_revision"):

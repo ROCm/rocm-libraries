@@ -547,6 +547,21 @@ def restamp_authored_spec(doc):
     evidence["descriptor_digest"] = agreement.descriptor_binding(doc)
 
 
+def restamp_identity(identity):
+    """A mutation that sets the packed `identity` (dropping it for None) and re-stamps the
+    descriptor digest over it, so the identity's own binding to the evidence speaks."""
+
+    def mutate(doc):
+        if identity is None:
+            del doc["kernel_source"]["identity"]
+        else:
+            doc["kernel_source"]["identity"] = identity
+        evidence = doc["provenance"]["effective_spec"]
+        evidence["descriptor_digest"] = agreement.descriptor_binding(doc)
+
+    return mutate
+
+
 class TestProducerEvidenceReservation:
     """Only the compiler writes the record, and nothing overwrites it."""
 
@@ -614,6 +629,23 @@ class TestPackedVerification:
                 ),
                 "code-object binding mismatch",
                 id="observed-code-object",
+            ),
+            pytest.param(
+                lambda d: observations_of(d).__setitem__(
+                    "code_object_identity", "0" * 64
+                ),
+                "code-object identity binding mismatch",
+                id="observed-identity",
+            ),
+            pytest.param(
+                restamp_identity("1" * 64),
+                "code-object identity binding mismatch",
+                id="restamped-identity",
+            ),
+            pytest.param(
+                restamp_identity(None),
+                "code-object identity binding mismatch",
+                id="dropped-identity",
             ),
             pytest.param(
                 lambda d: observations_of(d).__setitem__("symbol", "other"),

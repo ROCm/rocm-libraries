@@ -15,6 +15,8 @@ _REVISION = re.compile(r"^[0-9]+\.[0-9]+$")
 _SLOT_NAME = re.compile(r"^[a-z][a-z0-9_]*$")
 #: Descriptor file-format versions the tooling reads; 1.1 adds the RFC 0021 slot members.
 SUPPORTED_FILE_VERSIONS = ("1.0", "1.1")
+#: UHD file-format versions the tooling reads; 1.2 adds `trained_against.codegen_revision`.
+UHD_FILE_VERSIONS = (*SUPPORTED_FILE_VERSIONS, "1.2")
 #: UED and KDP members that exist only from file-format 1.1.
 _SLOT_MEMBERS = frozenset({"slots", "slot", "shared_workspace"})
 _UUID = re.compile(r"^[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}$")

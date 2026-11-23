@@ -59,7 +59,7 @@
     }
   },
   "properties": {
-    "version": {"enum": ["1.0", "1.1"]},
+    "version": {"enum": ["1.0", "1.1", "1.2"]},
     "id": {"$ref": "#/definitions/uuid"},
     "name": {"type": "string", "minLength": 1},
     "adapter": {"enum": ["static_order", "native", "table", "tree_data", "linear_data", "mlp_data", "onnx", "custom_library"]},
@@ -85,7 +85,7 @@
       }
     },
     "trained_against": {
-      "description": "`slot` (beside `kmd`, for one slot's ranker) and `kmds` (in place of `kmd`, for a slotted engine's predict_engine model) are RFC 0021 slot provenance and need version 1.1.",
+      "description": "`slot` (beside `kmd`, for one slot's ranker) and `kmds` (in place of `kmd`, for a slotted engine's predict_engine model) are RFC 0021 slot provenance and need version 1.1. `codegen_revision` needs version 1.2.",
       "type": "object",
       "additionalProperties": false,
       "patternProperties": {"^(x-|_)": {}},
@@ -173,6 +173,8 @@
     {"if": {"properties": {"version": {"const": "1.0"}}},
      "then": {"properties": {"trained_against": {"not": {"anyOf": [
        {"required": ["slot"]}, {"required": ["kmds"]}]}}}}},
+    {"if": {"properties": {"version": {"enum": ["1.0", "1.1"]}}},
+     "then": {"properties": {"trained_against": {"not": {"required": ["codegen_revision"]}}}}},
     {"oneOf": [
       {"required": ["static_order"]}, {"required": ["native"]},
       {"required": ["table"]}, {"required": ["tree_data"]},

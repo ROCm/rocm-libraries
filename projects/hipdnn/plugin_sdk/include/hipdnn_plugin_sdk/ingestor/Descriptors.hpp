@@ -385,9 +385,12 @@ struct HeuristicDescriptor
     /// measured on, for engines with no UED. Empty unless authored. A mismatch is refused, not
     /// warned about, because a stale L1 estimate changes which engine is selected.
     std::string trainedAgainstSelectorRevision;
-    /// RFC 0019 §4.1 `trained_against.codegen_revision`: the code objects this model was
-    /// measured on. Empty unless recorded. A mismatch is warned about, not refused: it moves
-    /// when only the compiler changes, which leaves the selector revision alone.
+    /// RFC 0019 §4.1 `trained_against.codegen_revision` (UHD 1.2): the code objects this model
+    /// was measured on. Empty unless recorded. A mismatch is warned about, not refused: it moves
+    /// when only the compiler changes, which within one LLVM flavor leaves the selector revision
+    /// alone for a code object that carries a packer `identity` (rocKE). A prebuilt (FlyDSL) or HIP-compiled code
+    /// object enters the selector revision by its `sha256`: regenerating a prebuilt one moves
+    /// both, and a HIP-compiled one moves both on every compiler change.
     std::string trainedAgainstCodegenRevision;
     /// The role-map entry that resolved this model: backfilled by
     /// DescriptorLoader::resolveRole from the owning UED, never authored in the UHD
@@ -716,8 +719,8 @@ struct KernelSource
     std::vector<KernelArgument> signature;
     /// KPACK, optional (UKD 1.2): a compiler-independent digest of what the packager handed the
     /// compiler, for a code object it compiled from rocKE IR. It moves when the kernel's code
-    /// changes but not when only the compiler does, so the selector revision hashes it in place
-    /// of @ref sha256 (RFC 0019 §8.1). Empty for a prebuilt or HIP-compiled code object.
+    /// changes but not on a compiler bump within one LLVM flavor, so the selector revision
+    /// hashes it in place of @ref sha256 (RFC 0019 §8.1). Empty for a prebuilt or HIP-compiled code object.
     std::string identity;
 };
 

@@ -194,6 +194,24 @@ def test_contributions_built_by_different_compilers_join_one_dataset_with_a_warn
         store.add(dataset, *store.from_collection(built_by("c", "cg-A", selector="s")))
 
 
+def test_a_holdout_from_another_compiler_does_not_warn_about_training(tmp_path, capsys):
+    """The warning is over the training contributions, as `load_dataset` decides the
+    model's `codegen_revision` over them: a holdout from another compiler leaves it, and a
+    dataset that holds no training contribution yet has nothing to warn about."""
+    dataset = tmp_path / "ds"
+    for name, codegen, purpose in (("b", "cg-B", "holdout"), ("a", "cg-A", "training")):
+        collection = _collection(
+            tmp_path,
+            name,
+            trained_against={"selector_revision": "r", "codegen_revision": codegen},
+        )
+        command = ["--into", str(dataset), "--collection", str(collection)]
+        assert store.main([*command, "--purpose", purpose]) == 0
+        printed = capsys.readouterr()
+        assert json.loads(printed.out)["warnings"] == []
+        assert "warning" not in printed.err
+
+
 def test_knob_addressing_that_contradicts_the_dataset_is_refused_and_nothing_is_written(
     tmp_path,
 ):

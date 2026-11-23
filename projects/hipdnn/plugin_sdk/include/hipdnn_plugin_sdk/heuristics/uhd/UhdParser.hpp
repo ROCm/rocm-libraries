@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <limits>
 #include <set>
 #include <string>
@@ -32,6 +33,13 @@ namespace parser_detail
 inline constexpr size_t MAX_DOCUMENT_BYTES = size_t{8} * 1024 * 1024;
 inline constexpr size_t MAX_DOCUMENT_NODES = 131072;
 inline constexpr size_t MAX_DOCUMENT_DEPTH = 2 * ExpressionSet::MAX_EXPRESSION_DEPTH + 8;
+/// The UHD minor this build reads, under major 1. An older reader skips a newer file at the
+/// version gate; provenance() refuses a key under a document that declares an older minor.
+inline constexpr int UHD_VERSION_MINOR = 2;
+/// The first UHD minor whose `trained_against` may use the RFC 0021 §9 slot forms.
+inline constexpr int UHD_SLOT_MINOR = 1;
+/// The first UHD minor whose `trained_against` may record `codegen_revision`.
+inline constexpr int UHD_CODEGEN_MINOR = 2;
 
 [[noreturn]] inline void fail(const std::string& message)
 {
@@ -223,16 +231,23 @@ inline bool isSlotName(std::string_view name)
 /// three) for UED-bound models, and/or a `selector_revision` for engines without a UED.
 /// `feature_semantics_revision` is optional and does not satisfy either form on its own.
 ///
-/// RFC 0021 §9 adds two slot forms, valid only in a 1.1 document (@p slotForms): `slot`
-/// beside `kmd` for one slot's ranker, and `kmds: [{slot, id, revision}]` in place of `kmd`
-/// for a slotted engine's `predict_engine` model. A 1.0 document naming either is rejected
-/// with "uses slot provenance".
-inline void provenance(const nlohmann::json& value, const std::string& where, bool slotForms)
+/// RFC 0021 §9 adds two slot forms, valid from UHD 1.1: `slot` beside `kmd` for one slot's
+/// ranker, and `kmds: [{slot, id, revision}]` in place of `kmd` for a slotted engine's
+/// `predict_engine` model. `codegen_revision` is valid from UHD 1.2. @p minor is the minor of
+/// the document's version; a document below the minor a key needs is rejected, naming the
+/// version it requires.
+inline void provenance(const nlohmann::json& value, const std::string& where, int minor)
 {
-    if(!slotForms && value.is_object() && (value.contains("slot") || value.contains("kmds")))
+    if(minor < UHD_SLOT_MINOR && value.is_object()
+       && (value.contains("slot") || value.contains("kmds")))
     {
         fail("trained_against uses slot provenance ('slot' or 'kmds') in " + where
              + ", which requires UHD version 1.1");
+    }
+    if(minor < UHD_CODEGEN_MINOR && value.is_object() && value.contains("codegen_revision"))
+    {
+        fail("trained_against records codegen_revision in " + where
+             + ", which requires UHD version 1.2");
     }
     keys(value,
          {"ued",
@@ -493,12 +508,16 @@ inline UhdConfig parseUhdConfig(const nlohmann::json& root, const std::filesyste
           // Free-form authoring notes, never read; root only (RFC 0019 §4.1).
           "provenance"},
          where);
+    // Major 1, minor 0 through UHD_VERSION_MINOR; the minor gates provenance().
+    static constexpr std::array<std::string_view, UHD_VERSION_MINOR + 1> VERSIONS
+        = {"1.0", "1.1", "1.2"};
     const auto declaredVersion = text(root, "version", where);
-    if(declaredVersion != "1.0" && declaredVersion != "1.1")
+    const auto minor = static_cast<int>(std::distance(
+        VERSIONS.begin(), std::find(VERSIONS.begin(), VERSIONS.end(), declaredVersion)));
+    if(minor > UHD_VERSION_MINOR)
     {
         fail("unsupported UHD version in " + where);
     }
-    const bool slotProvenance = declaredVersion == "1.1";
     UhdConfig result;
     result.uhdId = text(root, "id", where);
     (void)hipdnn_flatbuffers_sdk::utilities::parseUuid(result.uhdId);
@@ -656,7 +675,7 @@ inline UhdConfig parseUhdConfig(const nlohmann::json& root, const std::filesyste
     if(root.contains("trained_against"))
     {
         result.trainedAgainst = root.at("trained_against");
-        provenance(result.trainedAgainst, where + " trained_against", slotProvenance);
+        provenance(result.trainedAgainst, where + " trained_against", minor);
     }
     if(!result.featuresSignature.empty()
        && (result.featuresHash.empty() || result.trainedAgainst.is_null()))

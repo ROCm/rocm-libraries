@@ -345,9 +345,12 @@ parameters changed while its bytes stayed internally consistent.
 
 A rocKE kernel also carries an optional sixth key, `identity`: 64 lowercase hex digesting
 what COMGR compiled (the LLVM IR of every kernel in the object, the COMGR ISA name and the
-COMGR options), but not the COMGR library itself. A compiler change that only rebuilds the
-bytes moves `sha256` and keeps `identity`, which the selector revision of a trained model
-hashes in its place. HIP and hsaco kernels carry none. A UKD whose kernel source (or any
+COMGR options), but not the COMGR library itself. A compiler bump within one LLVM flavor
+only rebuilds the bytes: it moves `sha256` and keeps `identity`, which the selector revision
+of a trained model hashes in its place. An LLVM-major bump that changes the IR flavor rocKE
+emits moves `identity` too (RFC 0019 §8.1). With `ROCKE_DEBUG_LOC` set the IR embeds absolute
+source paths, so `identity`, and an L1 trained on such a build, depends on the checkout path;
+CI never sets it. HIP and hsaco kernels carry none. A UKD whose kernel source (or any
 `sources` entry) carries `identity` reads at version 1.2: the packer raises an earlier
 version to 1.2, the packer and the loader refuse `identity` under an earlier one, and a
 runtime that predates the key skips a 1.2 file at its version gate.

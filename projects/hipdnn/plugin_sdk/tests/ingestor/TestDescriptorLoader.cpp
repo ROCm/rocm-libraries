@@ -2958,15 +2958,16 @@ TEST(TestDescriptorLoader, DisablesAPredictionModelWhoseArtifactEscapesTheTree)
         << recorder.getRecordedLogsAsString();
 }
 
-/// `trained_against.codegen_revision` is read beside the selector revision. It only qualifies
-/// the model, so the declared path, whose engine revision is opaque provider text, still binds
-/// on the selector revision alone.
+/// `trained_against.codegen_revision` is read beside the selector revision, from a UHD 1.2. It
+/// only qualifies the model, so the declared path, whose engine revision is opaque provider text,
+/// still binds on the selector revision alone.
 TEST(TestDescriptorLoader, ReadsARecordedCodegenRevision)
 {
     const ScopedL1Scorer scorer;
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("declared_l1_codegen"));
     const auto modelId = testUuid('e', '1');
     auto document = declaredL1Document(modelId);
+    document["version"] = "1.2";
     document["trained_against"]["codegen_revision"] = "codegen-old";
     writeDocument(dir.path(), {".uhd.json", document});
 
@@ -2980,6 +2981,31 @@ TEST(TestDescriptorLoader, ReadsARecordedCodegenRevision)
     const auto& model = resolved.byMetric.at("tflops").at("default");
     EXPECT_EQ(model.trainedAgainstSelectorRevision, L1_SELECTOR_REVISION);
     EXPECT_EQ(model.trainedAgainstCodegenRevision, "codegen-old");
+}
+
+/// UHD 1.2 is the first version that carries `codegen_revision`: a 1.1 document recording it is
+/// refused as malformed, naming the version it needs, and a 1.3 one is skipped at the version
+/// gate, as a newer toolchain's file is.
+TEST(TestDescriptorLoader, ReadsACodegenRevisionOnlyFromAUhd12)
+{
+    const auto expectSkipped
+        = [](const std::string& version, hipdnnSeverity_t severity, const std::string& expected) {
+              SCOPED_TRACE(version);
+              auto recorder
+                  = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(severity);
+              const hipdnn_test_sdk::utilities::ScopedDirectory dir(
+                  uniqueDirectory("declared_l1_codegen_version"));
+              auto document = declaredL1Document(testUuid('e', '1'));
+              document["version"] = version;
+              document["trained_against"]["codegen_revision"] = "codegen-old";
+              writeDocument(dir.path(), {".uhd.json", document});
+
+              EXPECT_TRUE(loadDescriptorCatalog(dir.path()).heuristics.empty());
+              EXPECT_TRUE(recorder.hasLogContaining(severity, expected))
+                  << recorder.getRecordedLogsAsString();
+          };
+    expectSkipped("1.1", HIPDNN_SEV_ERROR, "which requires UHD version 1.2");
+    expectSkipped("1.3", HIPDNN_SEV_WARN, "declares version 1.3; this build reads 1.2");
 }
 
 /// RFC 0019 Open Question 7: an engine with no UED declares its L1 model's UUID in code.
@@ -6002,33 +6028,47 @@ TEST(TestDescriptorLoader, RefusesAKernelWithBothOrNeitherOfKernelSourceAndSourc
 namespace
 {
 
-/// Writes a packaged kernel whose only departure from the shape above is `sha256`, so a
-/// rejection can only be the digest and not some other part of the document.
-void writePackagedKernelWithSha256(const std::filesystem::path& where, const std::string& digest)
+/// The conforming packaged `kernel_source` of the shape above; a test changes only the key it
+/// is about.
+nlohmann::json packagedKernelSource()
 {
-    auto packaged = makeSetDocuments('1', "test:sha256");
-    documentOfType(packaged, ".kdp.json").at("kernelDescriptors").front()["kernel_source"]
-        = {{"kind", "kpack"},
-           {"library", "kpack/hip_kernel_provider_gfx942.kpack"},
-           {"toc_key", "PointwiseAdd/block64"},
-           {"symbol", "PointwiseAdd"},
-           {"sha256", digest},
-           {"signature", packagedSignature()}};
+    return {{"kind", "kpack"},
+            {"library", "kpack/hip_kernel_provider_gfx942.kpack"},
+            {"toc_key", "PointwiseAdd/block64"},
+            {"symbol", "PointwiseAdd"},
+            {"sha256", std::string(64, 'a')},
+            {"signature", packagedSignature()}};
+}
+
+/// Writes a UKD 1.2 packaged kernel whose only departure from packagedKernelSource() is @p key
+/// (`sha256`, or the `identity` 1.2 admits) set to @p digest, so a rejection can only be that
+/// digest and not some other part of the document.
+void writePackagedKernelWithDigest(const std::filesystem::path& where,
+                                   const std::string& key,
+                                   const std::string& digest)
+{
+    auto packaged = makeSetDocuments('1', "test:" + key);
+    auto& kernel = documentOfType(packaged, ".kdp.json").at("kernelDescriptors").front();
+    kernel["version"] = "1.2";
+    kernel["kernel_source"] = packagedKernelSource();
+    kernel["kernel_source"][key] = digest;
     writeDocuments(where, packaged);
 }
 
 /// Asserts the digest is refused and that the message can be acted on: it names the key, the
 /// locator, and the text that was wrong. A rejection whose message carries none of the three
 /// sends the reader to grep the loader rather than to their own descriptor.
-void expectSha256Rejected(const std::string& digest, const std::string& scratchLabel)
+void expectDigestRejected(const std::string& key,
+                          const std::string& digest,
+                          const std::string& scratchLabel)
 {
     auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory(scratchLabel));
-    writePackagedKernelWithSha256(dir.path(), digest);
+    writePackagedKernelWithDigest(dir.path(), key, digest);
 
     EXPECT_TRUE(loadFrom(dir.path()).empty());
-    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "key 'sha256' in"))
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "key '" + key + "' in"))
         << recorder.getRecordedLogsAsString();
     EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "kernel_source"))
         << recorder.getRecordedLogsAsString();
@@ -6042,24 +6082,24 @@ TEST(TestDescriptorLoader, RejectsASha256ThatIsTooShort)
 {
     // One character short is what a truncated copy-paste produces, and it is the case a plain
     // non-empty check cannot see.
-    expectSha256Rejected(std::string(63, 'a'), "sha256_short");
+    expectDigestRejected("sha256", std::string(63, 'a'), "sha256_short");
 }
 
 TEST(TestDescriptorLoader, RejectsASha256ThatIsTooLong)
 {
-    expectSha256Rejected(std::string(65, 'a'), "sha256_long");
+    expectDigestRejected("sha256", std::string(65, 'a'), "sha256_long");
 }
 
 TEST(TestDescriptorLoader, RejectsASha256WithUppercaseHex)
 {
     // Rejected rather than folded: the packer emits `hexdigest()` and nothing else, and two
     // spellings of one digest compare unequal wherever the field is compared as text.
-    expectSha256Rejected(std::string(64, 'A'), "sha256_upper");
+    expectDigestRejected("sha256", std::string(64, 'A'), "sha256_upper");
 }
 
 TEST(TestDescriptorLoader, RejectsASha256WithANonHexCharacter)
 {
-    expectSha256Rejected(std::string(63, 'a') + "z", "sha256_nonhex");
+    expectDigestRejected("sha256", std::string(63, 'a') + "z", "sha256_nonhex");
 }
 
 TEST(TestDescriptorLoader, RejectsASha256ThatIsEmpty)
@@ -6069,7 +6109,7 @@ TEST(TestDescriptorLoader, RejectsASha256ThatIsEmpty)
     auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("sha256_empty"));
-    writePackagedKernelWithSha256(dir.path(), "");
+    writePackagedKernelWithDigest(dir.path(), "sha256", "");
 
     EXPECT_TRUE(loadFrom(dir.path()).empty());
     EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "sha256"))
@@ -6082,7 +6122,7 @@ TEST(TestDescriptorLoader, AcceptsAConformingSha256)
     // is ever tightened past "64 of [0-9a-f]".
     const std::string digest = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("sha256_ok"));
-    writePackagedKernelWithSha256(dir.path(), digest);
+    writePackagedKernelWithDigest(dir.path(), "sha256", digest);
 
     const auto sets = loadFrom(dir.path());
 
@@ -6099,17 +6139,7 @@ TEST(TestDescriptorLoader, CarriesAPackagedCodeObjectIdentity)
     const std::string identity(64, 'c');
     {
         const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("identity_ok"));
-        auto packaged = makeSetDocuments('1', "test:identity");
-        auto& kernel = documentOfType(packaged, ".kdp.json").at("kernelDescriptors").front();
-        kernel["version"] = "1.2";
-        kernel["kernel_source"] = {{"kind", "kpack"},
-                                   {"library", "kpack/hip_kernel_provider_gfx942.kpack"},
-                                   {"toc_key", "PointwiseAdd/block64"},
-                                   {"symbol", "PointwiseAdd"},
-                                   {"sha256", std::string(64, 'a')},
-                                   {"signature", packagedSignature()},
-                                   {"identity", identity}};
-        writeDocuments(dir.path(), packaged);
+        writePackagedKernelWithDigest(dir.path(), "identity", identity);
 
         const auto sets = loadFrom(dir.path());
 
@@ -6155,13 +6185,8 @@ TEST(TestDescriptorLoader, RefusesAnIdentityUnderAVersionBeforeItsMinor)
         else
         {
             kernel["version"] = "1.1";
-            kernel["kernel_source"] = {{"kind", "kpack"},
-                                       {"library", "kpack/hip_kernel_provider_gfx942.kpack"},
-                                       {"toc_key", "PointwiseAdd/block64"},
-                                       {"symbol", "PointwiseAdd"},
-                                       {"sha256", std::string(64, 'a')},
-                                       {"signature", packagedSignature()},
-                                       {"identity", std::string(64, 'c')}};
+            kernel["kernel_source"] = packagedKernelSource();
+            kernel["kernel_source"]["identity"] = std::string(64, 'c');
         }
         writeDocuments(dir.path(), documents);
 
@@ -6175,30 +6200,21 @@ TEST(TestDescriptorLoader, RefusesAnIdentityUnderAVersionBeforeItsMinor)
 /// with the key, the locator and the value, not as a silent selector change.
 TEST(TestDescriptorLoader, RejectsAnIdentityThatIsNotASha256Digest)
 {
-    for(const auto& identity : {std::string(), std::string(63, 'c'), std::string(64, 'C')})
-    {
-        SCOPED_TRACE("identity '" + identity + "'");
-        auto recorder
-            = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
-        const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("identity_bad"));
-        auto packaged = makeSetDocuments('1', "test:identity_bad");
-        auto& kernel = documentOfType(packaged, ".kdp.json").at("kernelDescriptors").front();
-        kernel["version"] = "1.2";
-        kernel["kernel_source"] = {{"kind", "kpack"},
-                                   {"library", "kpack/hip_kernel_provider_gfx942.kpack"},
-                                   {"toc_key", "PointwiseAdd/block64"},
-                                   {"symbol", "PointwiseAdd"},
-                                   {"sha256", std::string(64, 'a')},
-                                   {"signature", packagedSignature()},
-                                   {"identity", identity}};
-        writeDocuments(dir.path(), packaged);
+    expectDigestRejected("identity", std::string(63, 'c'), "identity_short");
+    expectDigestRejected("identity", std::string(64, 'C'), "identity_upper");
 
-        EXPECT_TRUE(loadFrom(dir.path()).empty());
-        EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "identity"))
-            << recorder.getRecordedLogsAsString();
-        EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "kernel_source"))
-            << recorder.getRecordedLogsAsString();
-    }
+    // An empty one is refused as an empty string, before its shape is read, so the message
+    // quotes no value.
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("identity_empty"));
+    writePackagedKernelWithDigest(dir.path(), "identity", "");
+
+    EXPECT_TRUE(loadFrom(dir.path()).empty());
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "key 'identity' in"))
+        << recorder.getRecordedLogsAsString();
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "must not be empty"))
+        << recorder.getRecordedLogsAsString();
 }
 
 namespace
@@ -6210,13 +6226,10 @@ void writePackagedKernelWithSignature(const std::filesystem::path& where,
                                       const nlohmann::json& signature)
 {
     auto packaged = makeSetDocuments('1', "test:signature");
-    documentOfType(packaged, ".kdp.json").at("kernelDescriptors").front()["kernel_source"]
-        = {{"kind", "kpack"},
-           {"library", "kpack/hip_kernel_provider_gfx942.kpack"},
-           {"toc_key", "PointwiseAdd/block64"},
-           {"symbol", "PointwiseAdd"},
-           {"sha256", std::string(64, 'a')},
-           {"signature", signature}};
+    auto& source
+        = documentOfType(packaged, ".kdp.json").at("kernelDescriptors").front()["kernel_source"];
+    source = packagedKernelSource();
+    source["signature"] = signature;
     writeDocuments(where, packaged);
 }
 

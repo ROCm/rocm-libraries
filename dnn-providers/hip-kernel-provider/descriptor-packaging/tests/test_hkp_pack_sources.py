@@ -24,6 +24,7 @@ from hkp_pack.descriptors import (
 )
 from hkp_pack.errors import HkpPackError
 from hkp_pack.kernel_signature import exported_kernels, kernel_signature
+from hkp_pack.rocke_compile import code_object_identity
 from pack_helpers import GENERIC_TARGETS, _kdp, _restamp, _silent, _write_json
 from synthesised_objects import _arg, _kernel, _object, requires_msgpack
 from test_specialization_agreement import (
@@ -306,6 +307,25 @@ class TestShippedSources:
         )
 
 
+@pytest.mark.quick
+def test_identity_digests_the_documented_canonical_json():
+    """The runtime's selector revision hashes this digest, so it is pinned. Derived
+    by hand from the documented form, sha256 of the compact sorted-key JSON
+    `{"isa": isa, "llvm": [sha256 of each IR text], "options": options}`:
+
+        sha256(b"; ir")
+          = 43c92120e820d267cd330838aaf9629cc10033e1725933a4286391e2fda98382
+        sha256(b'{"isa":"amdgcn-amd-amdhsa--gfx942","llvm":["43c9...8382"],'
+               b'"options":["-O3"]}')   # the full IR digest in place of 43c9...8382
+
+    Here rather than under `tests/rocke/`: the function needs no rocKE, so a build with
+    rocKE off still pins it.
+    """
+    assert code_object_identity(["; ir"], "amdgcn-amd-amdhsa--gfx942", ["-O3"]) == (
+        "c7ac4b0c9a56d0f9fe3deca3df317be3cb2ab2607e5663715bde6295574d78ce"
+    )
+
+
 class TestVerifyBindsEachEntryToItsOwnEvidence:
     def test_a_swapped_symbol_across_entries_fails(self):
         doc, records, payload = shipped()
@@ -348,6 +368,15 @@ class TestVerifyBindsEachEntryToItsOwnEvidence:
         with pytest.raises(HkpPackError, match="decode_gone") as info:
             agreement.verify(doc, records, payload)
         assert PRIMARY in str(info.value) and MERGE in str(info.value)
+
+    def test_an_entry_whose_identity_is_not_its_evidences_fails(self):
+        doc, records, payload = shipped()
+        doc["sources"]["merge"]["identity"] = "1" * 64
+        _restamp(doc)
+        with pytest.raises(
+            HkpPackError, match="launch 'merge': .*code-object identity binding"
+        ):
+            agreement.verify(doc, records, payload)
 
     def test_an_entry_bound_to_another_launchs_code_object_fails(self):
         doc, records, payload = shipped(TWO_BUILDERS)

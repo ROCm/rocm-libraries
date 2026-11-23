@@ -207,6 +207,21 @@ def test_a_model_trained_against_every_slots_kmd_is_uhd_1_1(tmp_path, evaluator)
     assert _trained_version(output) == "1.1"
 
 
+def test_a_model_that_records_a_codegen_revision_is_uhd_1_2(tmp_path, evaluator):
+    """`trained_against.codegen_revision` is a UHD 1.2 key: a model whose measurements
+    agree on one records it and is written as 1.2."""
+    corpus = _l1_corpus(tmp_path / "corpus.json")
+    rows = json.loads(corpus.read_text("utf-8"))
+    for row in rows:
+        row["binding"]["trained_against"]["codegen_revision"] = "cg-A"
+    corpus.write_text(json.dumps(rows), encoding="utf-8")
+    output = tmp_path / "model"
+    assert _l1_train(corpus, output, "--feature-evaluator", evaluator) == 0
+    descriptor = json.loads((output / "heuristic.uhd.json").read_text("utf-8"))
+    assert descriptor["version"] == "1.2"
+    assert descriptor["trained_against"]["codegen_revision"] == "cg-A"
+
+
 def test_rows_collected_under_another_metric_cannot_train_a_model(
     tmp_path, evaluator, caplog
 ):

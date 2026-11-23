@@ -142,11 +142,12 @@ _EDITABLE_MODULE = """
 
 
 class _FakeRockeArtifact:
-    def __init__(self, name, data, llvm_text, isa):
+    def __init__(self, name, data, llvm_text, isa, options):
         self.kernel_name = name
         self.hsaco = data
         self.llvm_text = llvm_text
         self.isa = isa
+        self.options = options
 
 
 class _FakeComgrError(Exception):
@@ -197,13 +198,11 @@ def editable_producer(tmp_path, monkeypatch):
             b"\x7fELF-stub",
             f"; tile {spec.tile}",
             f"amdgcn-amd-amdhsa--{arch}",
+            ("-O3",),
         )
 
     monkeypatch.setattr(
         rocke_compile, "_load_compiler", lambda: (_fake_compile, _FakeComgrError)
-    )
-    monkeypatch.setattr(
-        rocke_compile, "_load_comgr_options", lambda: lambda _kernel: ["-O3"]
     )
 
     try:

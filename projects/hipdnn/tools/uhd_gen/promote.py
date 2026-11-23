@@ -39,8 +39,9 @@ from .features import (
 )
 from .optional import require_safe_signature
 from .provenance import (
+    CODEGEN_REVISION,
     ROLES,
-    SUPPORTED_FILE_VERSIONS,
+    UHD_FILE_VERSIONS,
     ProvenanceError,
     compare_provenance,
     declared_slots,
@@ -1248,7 +1249,7 @@ def _validate_descriptor(document: dict, path: Path) -> None:
         raise PromoteError(
             f"{path}: unknown UHD fields {sorted(set(document) - known)}"
         )
-    if document.get("version") not in SUPPORTED_FILE_VERSIONS:
+    if document.get("version") not in UHD_FILE_VERSIONS:
         raise PromoteError(
             f"{path}: unsupported UHD file-format version {document.get('version')!r}"
         )
@@ -1261,6 +1262,15 @@ def _validate_descriptor(document: dict, path: Path) -> None:
         raise PromoteError(
             f"{path}: trained_against uses slot provenance ('slot' or 'kmds'), which "
             "requires UHD version 1.1"
+        )
+    if (
+        document["version"] in ("1.0", "1.1")
+        and isinstance(recorded, dict)
+        and CODEGEN_REVISION in recorded
+    ):
+        raise PromoteError(
+            f"{path}: trained_against records {CODEGEN_REVISION}, which requires UHD "
+            "version 1.2"
         )
     if not isinstance(document.get("name"), str) or not document["name"]:
         raise PromoteError(f"{path}: missing required name")

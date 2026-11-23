@@ -506,7 +506,7 @@ def prediction_scorer(descriptor: dict, responses: list[dict]):
     identity = descriptor["id"]
     metric = validate_model(descriptor).name
     selected = {}
-    compared = []
+    compared = set()
     for response in responses:
         if response.get("model") != identity:
             continue
@@ -525,11 +525,12 @@ def prediction_scorer(descriptor: dict, responses: list[dict]):
             raise ValueError(f"runtime prediction has an unknown status {status!r}")
         binding = validate_binding(response.get("binding"))
         # Once per distinct provenance: a codegen difference warns, once.
-        if binding["trained_against"] not in compared:
+        provenance = json.dumps(binding["trained_against"], sort_keys=True)
+        if provenance not in compared:
             compare_provenance(
                 descriptor["trained_against"], binding["trained_against"]
             )
-            compared.append(binding["trained_against"])
+            compared.add(provenance)
         engine = response.get("engine_id")
         if isinstance(engine, bool) or not isinstance(engine, int):
             raise ValueError("runtime prediction engine_id must be an integer")

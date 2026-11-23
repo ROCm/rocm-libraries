@@ -1320,7 +1320,7 @@ def _fit_mlp(
 
 
 def _run_train(args: argparse.Namespace) -> int:
-    from .provenance import record_feature_semantics
+    from .provenance import CODEGEN_REVISION, record_feature_semantics
     from .immediate import ROLE, check_signature_evaluates, validate_signature
 
     immediate = args.role == ROLE
@@ -1525,8 +1525,13 @@ def _run_train(args: argparse.Namespace) -> int:
         if not args.keep_lgbm:
             lgbm_path.unlink()
     descriptor = {
-        # Slot provenance (`slot`, or `kmds` for a slotted engine's L1 model) is a 1.1 feature.
-        "version": "1.1" if {"slot", "kmds"} & set(trained_against) else "1.0",
+        # Slot provenance (`slot`, or `kmds` for a slotted engine's L1 model) is a 1.1
+        # feature and `codegen_revision` a 1.2 one; each version admits the earlier ones.
+        "version": (
+            "1.2"
+            if CODEGEN_REVISION in trained_against
+            else "1.1" if {"slot", "kmds"} & set(trained_against) else "1.0"
+        ),
         "id": uhd_id,
         "name": args.name,
         "adapter": args.adapter,

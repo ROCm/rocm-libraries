@@ -302,26 +302,14 @@ def _load_module_compiler():
     return KernelModule, compile_module
 
 
-def _load_comgr_options():
-    """Lazy handle for rocke's `accepted_comgr_options`, which names the COMGR
-    options a kernel compiles with.
-
-    `compile_kernel` passes COMGR exactly what it returns, and `compile_module`
-    passes what it returns for the primary (it refuses a module whose kernels
-    imply different options). Behind a function so tests can substitute a stub.
-    """
-    from rocke.helpers.compile import accepted_comgr_options
-
-    return accepted_comgr_options
-
-
 def code_object_identity(llvm_texts, isa, options):
     """A compiler-independent digest of what a code object is compiled from.
 
     rocKE's `ComgrInput` contract is that the HSACO is a pure function of the LLVM
     IR, the COMGR ISA name, the COMGR options and the COMGR library. This digests
-    the first three, so it stays fixed when only the COMGR library changes while
-    the code object's sha256 moves. `llvm_texts` holds one IR text per kernel the
+    the first three, so it stays fixed when the COMGR library changes within one
+    LLVM flavor while the code object's sha256 moves; an LLVM-major bump that
+    changes the IR flavor rocKE emits moves it. `llvm_texts` holds one IR text per kernel the
     object is built from, in the order they are linked.
     """
     return digest(
@@ -660,7 +648,7 @@ def compile_rocke_variant(
     observations["code_object_identity"] = code_object_identity(
         artifact.llvm_texts if is_module else (artifact.llvm_text,),
         artifact.isa,
-        _load_comgr_options()(kernel.primary if is_module else kernel),
+        artifact.options,
     )
     if is_module:
         # Only a module records companions, so a single-kernel compile's

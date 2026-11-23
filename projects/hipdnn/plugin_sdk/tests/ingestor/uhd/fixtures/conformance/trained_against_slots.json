@@ -2,11 +2,13 @@
 "bases": {
 "slot": {"version":"1.1","trained_against":{"ued":{"id":"20112233-4455-6677-8899-aabbccddeeff","revision":"1.0"},"kmd":{"id":"30112233-4455-6677-8899-aabbccddeeff","revision":"1.0"},"slot":"dkdv","umd":[]}},
 "kmds": {"version":"1.1","trained_against":{"ued":{"id":"20112233-4455-6677-8899-aabbccddeeff","revision":"1.0"},"kmds":[{"slot":"prep","id":"31112233-4455-6677-8899-aabbccddeeff","revision":"1.0"},{"slot":"dkdv","id":"32112233-4455-6677-8899-aabbccddeeff","revision":"1.2"}],"umd":[]}},
-"v10": {"version":"1.0","trained_against":{"ued":{"id":"20112233-4455-6677-8899-aabbccddeeff","revision":"1.0"},"kmd":{"id":"30112233-4455-6677-8899-aabbccddeeff","revision":"1.0"},"umd":[]}}
+"v10": {"version":"1.0","trained_against":{"ued":{"id":"20112233-4455-6677-8899-aabbccddeeff","revision":"1.0"},"kmd":{"id":"30112233-4455-6677-8899-aabbccddeeff","revision":"1.0"},"umd":[]}},
+"v12": {"version":"1.2","trained_against":{"ued":{"id":"20112233-4455-6677-8899-aabbccddeeff","revision":"1.0"},"kmd":{"id":"30112233-4455-6677-8899-aabbccddeeff","revision":"1.0"},"umd":[]}}
 },
 "rows": [
 {"name":"slot_provenance","base":"slot","patch":[]},
 {"name":"kmds_provenance","base":"kmds","patch":[]},
+{"name":"slot_provenance_in_1_2","base":"slot","patch":[{"op":"replace","path":"/version","value":"1.2"}]},
 {"name":"slot_in_1_0","base":"v10","patch":[{"op":"add","path":"/trained_against/slot","value":"dkdv"}],"reject":true,"skip":["uhd_gen"]},
 {"name":"kmds_in_1_0","base":"kmds","patch":[{"op":"replace","path":"/version","value":"1.0"}],"reject":true,"skip":["uhd_gen"]},
 {"name":"kmds_names_a_slot_twice","base":"kmds","patch":[{"op":"add","path":"/trained_against/kmds/-","value":{"slot":"prep","id":"31112233-4455-6677-8899-aabbccddeeff","revision":"1.0"}}],"reject":true,"skip":["schema"],"uhd_gen":"kmds names slot 'prep' twice"},
@@ -30,10 +32,12 @@
 {"name":"single_slot_has_an_uppercase_letter","base":"slot","patch":[{"op":"replace","path":"/trained_against/slot","value":"Prep"}],"reject":true,"uhd_gen":"trained_against.slot 'Prep' is not a valid slot name"},
 {"name":"single_slot_is_not_a_string","base":"slot","patch":[{"op":"replace","path":"/trained_against/slot","value":3}],"reject":true,"uhd_gen":"is not a valid slot name"},
 {"name":"selector_revision_with_a_slot","base":"slot","patch":[{"op":"replace","path":"/trained_against","value":{"selector_revision":"r","slot":"dkdv"}}],"reject":true,"uhd_gen":"slot requires kmd"},
-{"name":"codegen_revision_beside_selector_revision","base":"v10","patch":[{"op":"replace","path":"/trained_against","value":{"selector_revision":"r","codegen_revision":"c"}}]},
-{"name":"codegen_revision_beside_descriptor_refs","base":"v10","patch":[{"op":"add","path":"/trained_against/codegen_revision","value":"c"}]},
-{"name":"codegen_revision_alone","base":"v10","patch":[{"op":"replace","path":"/trained_against","value":{"codegen_revision":"c"}}],"reject":true},
-{"name":"codegen_revision_is_empty","base":"v10","patch":[{"op":"add","path":"/trained_against/codegen_revision","value":""}],"reject":true},
-{"name":"codegen_revision_is_not_a_string","base":"v10","patch":[{"op":"add","path":"/trained_against/codegen_revision","value":3}],"reject":true}
+{"name":"codegen_revision_beside_selector_revision","base":"v12","patch":[{"op":"replace","path":"/trained_against","value":{"selector_revision":"r","codegen_revision":"c"}}]},
+{"name":"codegen_revision_beside_descriptor_refs","base":"v12","patch":[{"op":"add","path":"/trained_against/codegen_revision","value":"c"}]},
+{"name":"codegen_revision_alone","base":"v12","patch":[{"op":"replace","path":"/trained_against","value":{"codegen_revision":"c"}}],"reject":true},
+{"name":"codegen_revision_is_empty","base":"v12","patch":[{"op":"add","path":"/trained_against/codegen_revision","value":""}],"reject":true},
+{"name":"codegen_revision_is_not_a_string","base":"v12","patch":[{"op":"add","path":"/trained_against/codegen_revision","value":3}],"reject":true},
+{"name":"codegen_revision_in_1_0","base":"v12","patch":[{"op":"replace","path":"/version","value":"1.0"},{"op":"add","path":"/trained_against/codegen_revision","value":"c"}],"reject":true,"skip":["uhd_gen"]},
+{"name":"codegen_revision_in_1_1","base":"v12","patch":[{"op":"replace","path":"/version","value":"1.1"},{"op":"add","path":"/trained_against/codegen_revision","value":"c"}],"reject":true,"skip":["uhd_gen"]}
 ]
 }
