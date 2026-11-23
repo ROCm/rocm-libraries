@@ -131,6 +131,11 @@ TEST_F(IntegrationGpuGfx1250ConvDgradAot, ServesGraphsDeclaringWiderAlignments)
     servesGraphsDeclaringWiderAlignments();
 }
 
+TEST_F(IntegrationGpuGfx1250ConvDgradAot, BuildingAPlanKeepsAnotherThreadsCaptureValid)
+{
+    buildingAPlanKeepsAnotherThreadsCaptureValid();
+}
+
 // ---- Per dtype: every catalog instance pinned and checked ----
 
 class IntegrationGpuGfx1250ConvDgradAotCatalog : public ConvDgradAotHarness<Gfx1250Traits>

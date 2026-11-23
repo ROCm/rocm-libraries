@@ -38,7 +38,6 @@
 #include "compilation/KpackKernelLoader.hpp"
 #include "compilation/KpackModuleCache.hpp"
 #include "core/Handle.hpp"
-#include "device/ScopedDevice.hpp"
 #include "engines/kernel_ingestor_engine/IngestorKernelCode.hpp"
 #include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvAotGraphPredicates.hpp"
@@ -719,83 +718,32 @@ struct PreparedStep
     dgrad::Step step;
 };
 
-/// The plan's SUB_GEMM region, owned by the prepared plan: every implicit step's record
-/// table, uploaded once when the plan is prepared, as the rocKE sweep uploads it once
-/// before timing. A table depends on the problem and the instance only, so no launch
-/// re-uploads it, and the caller's workspace (which it may reuse between launches)
-/// never holds it.
-class DeviceTables
+/// The host image of the plan's SUB_GEMM region: every implicit step's record table at
+/// its tableOffset. The region lives in the caller's workspace and launch() uploads the
+/// image there on the launch stream, ahead of the steps: a provider allocates nothing
+/// outside the caller's buffers, and a device allocation or a blocking copy at plan build
+/// or destroy would invalidate another thread's global-mode stream capture. Empty when no
+/// step is implicit GEMM.
+std::vector<int32_t> tableImage(const dgrad::Plan& plan)
 {
-public:
-    DeviceTables(int deviceOrdinal,
-                 const dgrad::Workspace& region,
-                 const std::vector<PreparedStep>& steps)
-        : _deviceOrdinal(deviceOrdinal)
+    const auto region = plan.workspace(dgrad::Buffer::SUB_GEMM);
+    if(!region)
     {
-        // The table must land on the kernel's launch device: prepare() runs on whatever
-        // device happens to be current, which HandleDeviceResolver may resolve to a
-        // different one than the stream's (it prefers the stream's device over the
-        // current one), and kernelFor() admits another device of the same architecture.
-        const device::ScopedDevice scope(_deviceOrdinal);
-        if(!scope.bound())
+        return {};
+    }
+    std::vector<int32_t> image(static_cast<size_t>(region->bytes) / sizeof(int32_t));
+    for(const auto& step : plan.steps)
+    {
+        if(step.abi == dgrad::Abi::IMPLICIT)
         {
-            checkHip(hipErrorInvalidDevice, "sub-GEMM table alloc: binding device");
-        }
-        checkHip(hipMalloc(&_data, static_cast<size_t>(region.bytes)), "sub-GEMM table alloc");
-        for(const auto& [code, step] : steps)
-        {
-            if(step.abi != dgrad::Abi::IMPLICIT)
-            {
-                continue;
-            }
-            const auto status = hipMemcpy(static_cast<char*>(_data) + step.tableOffset,
-                                          step.table.data(),
-                                          step.table.size() * sizeof(int32_t),
-                                          hipMemcpyHostToDevice);
-            if(status != hipSuccess)
-            {
-                static_cast<void>(hipFree(_data));
-                checkHip(status, "sub-GEMM table upload");
-            }
+            std::copy(step.table.begin(),
+                      step.table.end(),
+                      image.begin()
+                          + static_cast<std::ptrdiff_t>(step.tableOffset)
+                                / static_cast<std::ptrdiff_t>(sizeof(int32_t)));
         }
     }
-    DeviceTables(const DeviceTables&) = delete;
-    DeviceTables& operator=(const DeviceTables&) = delete;
-    DeviceTables(DeviceTables&&) = delete;
-    DeviceTables& operator=(DeviceTables&&) = delete;
-    ~DeviceTables()
-    {
-        // Same device the allocation was made on: hipFree is bound to the allocating
-        // context, not whatever device happens to be current when this runs.
-        const device::ScopedDevice scope(_deviceOrdinal);
-        // A failure here (a device already reset) leaves nothing to release.
-        static_cast<void>(hipFree(_data));
-    }
-
-    char* data() const
-    {
-        return static_cast<char*>(_data);
-    }
-
-private:
-    void* _data = nullptr;
-    int _deviceOrdinal;
-};
-
-/// The workspace the caller provides for @p plan: every region but SUB_GEMM, which the
-/// prepared plan owns (DeviceTables). An implicit-GEMM plan lays out SUB_GEMM alone, a
-/// direct plan never does, so no other region moves.
-int64_t callerWorkspaceBytes(const dgrad::Plan& plan)
-{
-    int64_t end = 0;
-    for(const auto& region : plan.workspaces)
-    {
-        if(region.name != dgrad::Buffer::SUB_GEMM)
-        {
-            end = std::max(end, region.offset + region.bytes);
-        }
-    }
-    return end;
+    return image;
 }
 
 class PreparedConvDgrad : public PreparedDispatch
@@ -805,7 +753,7 @@ public:
                       std::array<int64_t, 3> bytes,
                       std::vector<PreparedStep> steps,
                       std::vector<dgrad::Workspace> workspaces,
-                      std::unique_ptr<DeviceTables> tables,
+                      std::vector<int32_t> tables,
                       bool zeroDx)
         : _binding(binding)
         , _bytes(bytes)
@@ -829,15 +777,15 @@ public:
     {
         return _steps;
     }
-    /// The caller-workspace regions (every one but SUB_GEMM).
+    /// The plan's regions of the caller's workspace, SUB_GEMM among them.
     const std::vector<dgrad::Workspace>& workspaces() const
     {
         return _workspaces;
     }
-    /// The SUB_GEMM region, or null when no step is implicit GEMM.
-    char* tables() const
+    /// The SUB_GEMM region's image (tableImage), empty when no step is implicit GEMM.
+    const std::vector<int32_t>& tables() const
     {
-        return _tables ? _tables->data() : nullptr;
+        return _tables;
     }
     bool zeroDx() const
     {
@@ -850,7 +798,7 @@ private:
     // Holds every program/module and kernel view; owns no MatchContext data.
     std::vector<PreparedStep> _steps;
     std::vector<dgrad::Workspace> _workspaces;
-    std::unique_ptr<DeviceTables> _tables;
+    std::vector<int32_t> _tables;
     bool _zeroDx;
 };
 
@@ -871,17 +819,16 @@ public:
     {
     }
 
-    /// The plan's caller workspace: the MFMA pipelines' transposed (and reorganized)
-    /// weights; none for implicit GEMM (the prepared plan owns its record tables) or the
-    /// single-kernel direct pipelines. A kernel the graph does not admit needs none:
-    /// prepare() refuses it.
+    /// The plan's caller workspace: implicit GEMM's record tables (SUB_GEMM), the MFMA
+    /// pipelines' transposed (and reorganized) weights; none for the single-kernel direct
+    /// pipelines. A kernel the graph does not admit needs none: prepare() refuses it.
     size_t workspaceBytes(const MatchContext& context,
                           const BoundTokens& /*bound*/,
                           const KernelDefinition& kernel) const override
     {
         const auto matched = matchProblem(E, context);
         const auto plan = matched ? aotKernelPlan<E>(*matched, kernel) : std::nullopt;
-        return plan ? static_cast<size_t>(callerWorkspaceBytes(*plan)) : 0;
+        return plan ? static_cast<size_t>(plan->workspaceBytes()) : 0;
     }
 
     std::unique_ptr<PreparedDispatch> prepare(const MatchContext& context,
@@ -900,6 +847,8 @@ public:
         requireBindings(E, bound, matched->binding);
         AotPrepared scratch;
         const auto& prepared = preparedOf<E>(kernel, scratch);
+        // Read before the loop below moves each step (and its table) away.
+        auto tables = tableImage(*plan);
         // This pack ships prebuilt code objects only; aotKernelPlan already refused every
         // other source kind. Each step loads its own kernel under its ABI's signature.
         std::vector<PreparedStep> steps;
@@ -920,21 +869,10 @@ public:
             }
             steps.push_back({loadKernel(_loader, context, *helper, step), std::move(step)});
         }
-        std::unique_ptr<DeviceTables> tables;
-        std::vector<dgrad::Workspace> workspaces;
-        for(const auto& region : plan->workspaces)
-        {
-            if(region.name == dgrad::Buffer::SUB_GEMM)
-            {
-                tables = std::make_unique<DeviceTables>(context.deviceId, region, steps);
-                continue;
-            }
-            workspaces.push_back(region);
-        }
         return std::make_unique<PreparedConvDgrad>(matched->binding,
                                                    matched->geometry.tensorBytes,
                                                    std::move(steps),
-                                                   std::move(workspaces),
+                                                   std::move(plan->workspaces),
                                                    std::move(tables),
                                                    plan->zeroDx);
     }
@@ -988,7 +926,7 @@ public:
                 engineMessage(E, "requires a workspace aligned to 16 bytes"));
         }
         // Each buffer a step can bind, with its size: the graph tensors and the regions
-        // of the caller's workspace (SUB_GEMM is the prepared plan's own).
+        // of the caller's workspace.
         const auto region = [&](dgrad::Buffer name) -> std::pair<char*, int64_t> {
             switch(name)
             {
@@ -1020,12 +958,26 @@ public:
             // filter misses a residue): _dx_fully_written.
             checkHip(hipMemsetAsync(dx, 0, static_cast<size_t>(bytes[2]), stream), "dX zero-fill");
         }
+        // Every launch uploads the record tables: the caller may reuse its workspace for
+        // anything between launches. The image is immutable and a pageable source is
+        // staged by the runtime before the call returns, so concurrent launches of one
+        // plan share it safely. A graph captured from this launch copies from the image,
+        // so the plan must outlive the graph, as it must for the kernels it launches.
+        char* tables = nullptr;
+        if(const auto& image = dgradPrepared.tables(); !image.empty())
+        {
+            tables = region(dgrad::Buffer::SUB_GEMM).first;
+            checkHip(hipMemcpyAsync(tables,
+                                    image.data(),
+                                    image.size() * sizeof(int32_t),
+                                    hipMemcpyHostToDevice,
+                                    stream),
+                     "sub-GEMM table upload");
+        }
         for(const auto& [code, step] : dgradPrepared.steps())
         {
-            // The step's record table, already on the device (DeviceTables).
-            void* table = step.abi == dgrad::Abi::IMPLICIT
-                              ? dgradPrepared.tables() + step.tableOffset
-                              : nullptr;
+            // The step's record table, uploaded above.
+            void* table = step.abi == dgrad::Abi::IMPLICIT ? tables + step.tableOffset : nullptr;
             // The operands, each through the step's view of it where it has one.
             std::array<void*, 3> pointers{};
             std::array<int32_t, 3> sizes{};
