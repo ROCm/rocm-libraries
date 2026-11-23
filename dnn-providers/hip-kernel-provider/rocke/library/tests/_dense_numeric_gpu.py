@@ -11,10 +11,12 @@
   oracle in the runners' ``[B, S, H, D]`` layout, on exactly the stored values. It
   runs one head per worker thread and remembers each result by its inputs, so
   parametrized rows on the same seeded inputs compute it once.
-* Comparisons: :func:`max_abs_error` (NaN propagates), :func:`assert_close`,
-  :func:`same_values` (equal elements) and :func:`same_bits` (equal bit patterns).
-* :class:`Alias`: a second view of another array's memory, for the launch checks
-  that refuse overlapping arguments.
+* Comparisons: :func:`assert_close` and :func:`same_values` (equal elements). The
+  error metric is ``rocke.numeric.compare.max_abs_error`` on :func:`values`; equal
+  bit patterns are ``rocke.tests.ieee_compare.same_bits`` on
+  ``rocke.runtime.device_array.host_values``.
+* :class:`Alias`: a second view of another array's memory under another element
+  type, for the launch checks that refuse overlapping arguments.
 * fp8 K/V (:func:`fp8_kv`) and a paged cache (:func:`paged_cache`,
   :func:`run_dispatched_paged`).
 """
@@ -274,11 +276,6 @@ def window64_analytic_lse(num_heads: int, sinks=None) -> np.ndarray:
         return np.log(mass)
 
 
-def max_abs_error(out, ref) -> float:
-    """``max |out - ref|``; NaN anywhere makes it NaN, so ``error < tol`` fails."""
-    return float(np.abs(values(out) - values(ref)).max())
-
-
 def assert_close(out, ref, *, atol: float, rtol: float, msg: str = "") -> None:
     """``|out - ref| <= atol + rtol * |ref|`` element-wise; a NaN fails."""
     np.testing.assert_allclose(
@@ -291,21 +288,14 @@ def same_values(a, b) -> bool:
     return bool(np.array_equal(values(a), values(b)))
 
 
-def same_bits(a, b) -> bool:
-    """Same shape and the same stored bit patterns."""
-    a_bits, b_bits = host_values(a), host_values(b)
-    width = f"u{a_bits.dtype.itemsize}"
-    return bool(np.array_equal(a_bits.view(width), b_bits.view(width)))
-
-
 class Alias:
     """``shape`` elements of another element type ``dtype`` laid over the start of
     ``base``'s memory, as torch's ``Tensor.view(dtype)`` reinterprets a storage: a
     second view of one allocation, which launch checks must refuse as overlapping.
 
-    :meth:`DeviceArray.view` keeps the buffer's element type, and every overlap
-    case pairs an fp32 LSE with a 16-bit or int32 array, so this stand-in only
-    describes the memory: :meth:`values` returns ``read_values`` (what a check
+    It exists because :meth:`DeviceArray.view` cannot reinterpret the element
+    type: a view keeps its buffer's, and every overlap case pairs an fp32 LSE with
+    a 16-bit or int32 array. So this stand-in only describes the memory: :meth:`values` returns ``read_values`` (what a check
     that reads the elements back sees), and it must never reach a launch.
     """
 
