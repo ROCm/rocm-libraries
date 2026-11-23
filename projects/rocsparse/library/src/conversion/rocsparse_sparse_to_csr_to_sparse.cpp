@@ -399,25 +399,26 @@ rocsparse_status rocsparse::sparse_to_csr_to_sparse(rocsparse_handle            
             case rocsparse_format_coo:
             case rocsparse_format_coo_aos:
             {
-                // With zero items, convert_array only checks that the pair is supported.
-                RETURN_IF_ROCSPARSE_ERROR(rocsparse::convert_array(handle_,
-                                                                   0,
-                                                                   target_->data_type,
-                                                                   target_->val_data,
-                                                                   source_->data_type,
-                                                                   source_->const_val_data));
+                RETURN_IF_ROCSPARSE_ERROR(
+                    rocsparse::convert_array_supported(target_->data_type, source_->data_type));
                 break;
             }
-            case rocsparse_format_csr:
             case rocsparse_format_csc:
             case rocsparse_format_ell:
-            case rocsparse_format_bell:
             case rocsparse_format_bsr:
-            case rocsparse_format_sell:
             {
                 RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(
                     rocsparse_status_not_implemented,
                     "the conversion into this format requires the same data type");
+            }
+            case rocsparse_format_bell:
+            case rocsparse_format_sell:
+            {
+                RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
+            }
+            case rocsparse_format_csr:
+            {
+                RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_internal_error);
             }
             }
         }

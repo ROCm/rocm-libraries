@@ -740,6 +740,26 @@ namespace rocsparse
         return rocsparse_status_success;
     }
 
+    struct convert_data_array_supported_t
+    {
+    };
+
+    template <typename TARGET, typename SOURCE>
+    static rocsparse_status convert_data_array_compute_core(convert_data_array_supported_t)
+    {
+        ROCSPARSE_ROUTINE_TRACE;
+
+        using kernel_t = rocsparse::copy_farray_mix_safe_kernel_t<TARGET, SOURCE>;
+        static constexpr uint32_t BLOCKSIZE = 1024;
+        if constexpr(!rocsparse::has_run_kernel_t<kernel_t, BLOCKSIZE>::value)
+        {
+            RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(
+                rocsparse_status_not_implemented,
+                "the conversion between these two data types is not implemented");
+        }
+        return rocsparse_status_success;
+    }
+
     template <typename T, typename... P>
     static rocsparse_status convert_data_array_compute_dispatch(rocsparse_datatype source_datatype_,
                                                                 P... p)
@@ -1052,6 +1072,16 @@ rocsparse_status rocsparse::convert_array(rocsparse_handle   handle_,
         rocsparse::log_debug(handle_, message.str());
         return rocsparse_status_success;
     }
+}
+
+rocsparse_status rocsparse::convert_array_supported(rocsparse_datatype target_datatype_,
+                                                    rocsparse_datatype source_datatype_)
+{
+    ROCSPARSE_ROUTINE_TRACE;
+
+    RETURN_IF_ROCSPARSE_ERROR(rocsparse::convert_data_array_compute(
+        target_datatype_, source_datatype_, rocsparse::convert_data_array_supported_t{}));
+    return rocsparse_status_success;
 }
 
 rocsparse_status rocsparse::dnvec_transfer_from(rocsparse_handle            handle,

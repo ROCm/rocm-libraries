@@ -34,6 +34,7 @@
 //   CSR and CSC to CSR conversions, and the target pointer checks that run before any
 //   target array is written.
 
+#include "unit_test_conversion_grid_clamp.hpp"
 #include "unit_test_device_conv_common.hpp"
 
 #include "rocsparse_convert_array.hpp"
@@ -274,6 +275,7 @@ namespace
                     = rocsparse::convert_array(handle, n, t, dst.get(), s, src.get());
                 // The type check runs before the zero-item return, so an unsupported pair fails at zero items too.
                 EXPECT_EQ(rocsparse::convert_array(handle, 0, t, dst.get(), s, src.get()), st);
+                EXPECT_EQ(rocsparse::convert_array_supported(t, s), st);
                 const bool must_convert
                     = t == s
                       || std::find(std::begin(converted), std::end(converted), std::make_pair(t, s))
@@ -1712,6 +1714,22 @@ namespace
                     EXPECT_EQ(t_ptr.read(), zeros);
             }
         }
+    }
+
+    // The compute stage of a permissive conversion into COO checks the value types without
+    // converting, so the debug log has a single conversion error, from the values.
+    TEST_F(ConvInternal, SparseToSparsePermissiveLogsOneConversionError)
+    {
+        S2sMat<double>               source(rocsparse_format_csc, rocsparse_datatype_f64_r, false);
+        S2sMat<float>                target(rocsparse_format_coo, f32, true);
+        rocsparse_ut::ScopedDebugLog log(handle);
+        ASSERT_EQ(sparse_to_sparse(handle, source.descr, target.descr, true), st_ok);
+        const std::string text  = log.sink.str();
+        const std::string line  = "rocsparse_convert_array numerical conversion error";
+        size_t            count = 0;
+        for(size_t pos = text.find(line); pos != std::string::npos; pos = text.find(line, pos + 1))
+            ++count;
+        EXPECT_EQ(count, 1u) << text;
     }
 
     // f64 into single precision: each value is rounded to nearest, a value that overflows
