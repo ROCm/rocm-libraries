@@ -96,7 +96,7 @@ from .Components.TDMFuse import tdmFusePaired, tdmGroupPartner, \
                                 tdmSharedScaleSetOwner, tdmSetOwner, tdmSetGroup, \
                                 tdmGrouping, tdmSharedSetOrder, tdmSharedScaleSetActive, \
                                 TdmArrangementNotEmittable, tdmHalfPlrMaskedIncs, \
-                                tdmHintDeciders, tdmKDimField, tdmKDimStepIsAddrInc, \
+                                tdmHintDeciders, tdmKDimField, tdmKDimStepIsAddrInc, tdmKDimStepsInElements, \
                                 tdmMemberIsLive, tdmPairOnEveryWave, tdmRidesEveryWave, \
                                 tdmStashedMembers, tdmWaveComponents, tdmWaveGuard, \
                                 tdmWavePartition, tdmWaveRangeText, tdmWaveResident
@@ -608,8 +608,7 @@ class KernelWriterAssembly(KernelWriter):
     mod.add(SAddCU32(dst=sgpr(loopCounter), src0=sgpr(loopCounter), src1=0, comment="TailFolding: loop count = ceil(K / DU)"))
     if not self.tailFoldNeedsStepSgpr(kernel):
       return mod
-    fields = [tdmKDimField(kernel, tc) for tc in ("A", "B")]
-    if not (fields[0][1] == fields[1][1] == du):
+    if not tdmKDimStepsInElements(kernel):   # Solution never auto-folds such a kernel
       raise RuntimeError("tail folding: the A/B K dim step must be DepthU")
     if self.tailFoldGsu(kernel):
       mod.add(SAndB32(dst=sgpr("TailFoldStep"), src0=sgpr("GSU"), src1=self.gsuMaskHex(kernel), comment="TailFolding: GSU"))

@@ -3,7 +3,7 @@
 
 """Tail folding of the K tail into the TDM unroll loop (gfx1250), fixed at codegen.
 
-Every kernel whose structure allows it (any input type, TDM A/B, PGR 2, ...) folds: the unroll loop runs
+Every kernel whose structure allows it (any input type but packed sub-byte F4/F6, TDM A/B, PGR 2, ...) folds: the unroll loop runs
 ceil(K/DU) iterations, the TDM K dim (shrunk at every address step) zero-fills the partial last k-tile, and
 no tail loop is emitted. Any other kernel keeps the develop tail loop. With GSU the folded k-tile count is
 distributed; each split's K dim starts at its own first k-tile (GSUC 0: interleaved, GSUC 1: contiguous).
@@ -74,10 +74,10 @@ def _config(extra=(), mi=(16, 16, 32, 1, 1, 1, 1, 2, 1), wg=(32, 1, 1)):
     }
 
 
-def _emit(tmp_path, config, name):
+def _emit(tmp_path, config, name, limit=1):
     path = tmp_path / name
     path.write_text(yaml.safe_dump(config))
-    return emit_kernels_from_config(path, limit=1, arch="gfx1250")
+    return emit_kernels_from_config(path, limit=limit, arch="gfx1250")
 
 
 def _emit_one(tmp_path, config, name):
@@ -138,18 +138,55 @@ def test_fold_8bit(tmp_path):
     assert CEIL in asm and "label_TailLoopBeginL" not in asm
 
 
-def test_fold_subbyte_falls_back(tmp_path):
-    # Packed sub-byte inputs (F6 here): the TDM K dim does not step in elements, so codegen falls
-    # back to the tail loop; never a reject.
+FALLBACK = "tail folding does not fit"
+
+
+def _f6_config():
     import pathlib
     src = pathlib.Path(__file__).resolve().parents[1] / "common" / "gemm" / "gfx12" / "f6_tdm_gfx1250.yaml"
     config = yaml.safe_load(src.read_text())
     config["BenchmarkProblems"] = config["BenchmarkProblems"][:1]
-    results = _emit(tmp_path, config, "tf_f6.yaml")
-    assert results
+    return config
+
+
+def _record_fold(monkeypatch):
+    # The _TailFolding each kernel reaches codegen with, i.e. what Solution decided.
+    from tensilelite.KernelWriter import KernelWriter
+    seen = []
+    source = KernelWriter._getKernelSource
+
+    def recording(self, kernel):
+        seen.append(kernel.get("_TailFolding", False))
+        return source(self, kernel)
+
+    monkeypatch.setattr(KernelWriter, "_getKernelSource", recording)
+    return seen
+
+
+def test_fold_subbyte_keeps_tail_loop(tmp_path, monkeypatch, capsys):
+    # Packed sub-byte inputs (F6 here): the TDM K dim does not step in elements, so Solution does not
+    # fold them and codegen emits the tail loop directly (no fallback); never a reject.
+    seen = _record_fold(monkeypatch)
+    results = _emit(tmp_path, _f6_config(), "tf_f6.yaml", limit=64)
+    assert results and seen and not any(seen)
     for _, assembly, error in results:
         assert error == 0
         assert CEIL not in assembly and "label_TailLoopBeginL" in assembly
+    assert FALLBACK not in capsys.readouterr().out
+
+
+def test_fold_subbyte_forced_is_an_error(tmp_path, monkeypatch, capsys):
+    # The codegen check stays an internal error: a sub-byte kernel forced to fold is rejected, not
+    # silently regenerated with the tail loop.
+    import sys
+    import tensilelite.SolutionStructs.Solution  # noqa: F401
+    monkeypatch.setattr(sys.modules["tensilelite.SolutionStructs.Solution"], "tdmKDimStepsInElements", lambda state: True)
+    seen = _record_fold(monkeypatch)
+    results = _emit(tmp_path, _f6_config(), "tf_f6_forced.yaml", limit=64)
+    out = capsys.readouterr().out
+    assert any(seen)
+    assert any(error != 0 for _, _, error in results)
+    assert "the A/B K dim step must be DepthU" in out and FALLBACK not in out
 
 
 def test_fold_off_when_illegal(tmp_path):
@@ -359,7 +396,7 @@ def test_fold_store_kernargs_reuse_loop_sgprs(tmp_path, monkeypatch, amaxd, pgl)
     assert _next_free_sgpr(fold) - _next_free_sgpr(dev) <= 4
 
 
-def test_fold_overflow_falls_back(tmp_path, monkeypatch):
+def test_fold_overflow_falls_back(tmp_path, monkeypatch, capsys):
     # A kernel whose fold SGPRs do not fit is generated again with the tail loop (develop code):
     # never a reject. The overflow verdict makes the first generation raise; simulated by 40 extra
     # SGPRs defined only when the kernel folds.
@@ -375,3 +412,22 @@ def test_fold_overflow_falls_back(tmp_path, monkeypatch):
     monkeypatch.setattr(KernelWriterAssembly, "defineVariableSgprs", bloated)
     asm = _emit_one(tmp_path, _config(), "tf_overflow.yaml")
     assert CEIL not in asm and "label_TailLoopBeginL" in asm and "TailFoldTestBloat" not in asm
+    assert FALLBACK in capsys.readouterr().out
+
+
+def test_fold_vgpr_overflow_not_retried(tmp_path, monkeypatch, capsys):
+    # Only an SGPR overflow falls back to the tail loop. Any other verdict (a VGPR overflow here,
+    # simulated on the fold attempt only) rejects the kernel as it would without folding.
+    from tensilelite.KernelWriterAssembly import KernelWriterAssembly
+    judge = KernelWriterAssembly.judgeRegisterBudget
+
+    def overflowing(self, kernel, *args, **kwargs):
+        judge(self, kernel, *args, **kwargs)
+        if kernel.get("_TailFolding", False):
+            self.states.overflowedResources = 1
+
+    monkeypatch.setattr(KernelWriterAssembly, "judgeRegisterBudget", overflowing)
+    results = _emit(tmp_path, _config(), "tf_vgpr_overflow.yaml")
+    out = capsys.readouterr().out
+    assert len(results) == 1 and results[0][2] != 0
+    assert "resulted in error 1" in out and FALLBACK not in out

@@ -56,7 +56,7 @@ from ..Components.DecouplePGR import pgrLevelsForTensors, ldsBlocksForPgrLevel, 
                                        pgrAutoPairRequested, \
                                        resolvePrefetchGlobalReadSpecialValues
 from ..Components.TDMFuse import TDM_FUSE_GROUPING, TDM_SCALE_TENSORS, tdmBothTensors, \
-                                       tdmGroupingName, tdmKDimTrackable, tdmLiveScales, \
+                                       tdmGroupingName, tdmKDimStepsInElements, tdmKDimTrackable, tdmLiveScales, \
                                        tdmPairOnEveryWave, \
                                        tdmPapRejectReason, tdmSeparateABDescriptors, tdmWavePartition, \
                                        tdmWaveSeparated
@@ -4437,9 +4437,8 @@ class Solution(collections.abc.Mapping):
     # Tail folding (fixed at codegen): every kernel whose structure allows it folds a K tail into the
     # unroll loop -- ceil(K/DepthU) unroll iterations, TDM zero-fills the partial last k-tile -- and
     # emits no tail loop (NoTailLoop), the way RAP folds (RAP sets its own _TailFolding above). Any
-    # other kernel keeps the tail loop -- this never rejects a kernel. Any input type: MX scales and
-    # sparse metadata keep the tail loop; a type whose TDM K dim does not step in elements (packed
-    # sub-byte F6/F4) falls back to the tail loop at codegen.
+    # other kernel keeps the tail loop -- this never rejects a kernel. MX scales, sparse metadata and
+    # packed sub-byte types (F4/F6, whose TDM K dim does not step in elements) keep the tail loop.
     if not state["ReuseAcrossPersistent"]:
       state.pop("_TailFolding", None)
       du = state["DepthU"]
@@ -4451,6 +4450,7 @@ class Solution(collections.abc.Mapping):
         or du & (du - 1) != 0
         or not tdmWaveSeparated(state) or tdmSeparateABDescriptors(state) or tdmPairOnEveryWave(state, "A", "B")
         or not tdmKDimTrackable(state)                             # TDMIterateMode
+        or not tdmKDimStepsInElements(state)                       # packed sub-byte F4/F6
         or state["ProblemType"]["MXBlockA"] or state["ProblemType"]["MXBlockB"] or state["ProblemType"]["Sparse"]
         or state.get("TDMSplit", 0) or state["DirectToVgprA"] or state["DirectToVgprB"]
         or state.get("UseSubtileImpl", False))

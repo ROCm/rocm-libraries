@@ -100,6 +100,17 @@ import itertools
 from pprint import pprint
 
 
+class KernelSourceError(RuntimeError):
+  """The kernel body's final verdict is an error: `error` holds its states.overflowedResources code."""
+  def __init__(self, error):
+    super().__init__("Generating kernel source resulted in error {}".format(error))
+    self.error = error
+
+
+# The overflowedResources code of "too many sgprs".
+SGPR_OVERFLOW = 2
+
+
 def _needsPreLoopLocalReadDrain(kernel, numItersPLR, preLoopLocalReadDrainEmitted):
   # CMS schedules the loop body independently of the prologue. Any effective
   # local prefetch therefore needs an explicit drain unless an earlier path
@@ -12800,14 +12811,14 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
 
   def _getKernelSource(self, kernel: Solution):
     """
-    Returns the source of the kernel, either C++ or assembly. A kernel whose tail folding does not
-    fit (any code-generation error, e.g. an SGPR overflow) is generated again with the tail loop
-    (develop code): tail folding never rejects a kernel.
+    Returns the source of the kernel, either C++ or assembly. A tail-folding kernel whose final
+    verdict is an SGPR overflow (the fold's own SGPRs) is generated again with the tail loop
+    (develop code). Any other error is raised unchanged.
     """
     try:
       return KernelWriter._getKernelSourceOnce(self, kernel)
-    except RuntimeError:
-      if not (kernel.get("_TailFolding", False) and not kernel["ReuseAcrossPersistent"]):
+    except KernelSourceError as e:
+      if e.error != SGPR_OVERFLOW or not (kernel.get("_TailFolding", False) and not kernel["ReuseAcrossPersistent"]):
         raise
       printWarning("%s: tail folding does not fit, generated with the tail loop" % self.states.kernelName)
       kernel["_TailFolding"] = False
@@ -12872,7 +12883,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       if self.debugConfig.forceGenerateKernel:
         printWarning("Generating kernel source resulted in error {}, but ForceGenerateKernel=1 so saving source".format(error))
       else:
-        raise RuntimeError("Generating kernel source resulted in error {}".format(error))
+        raise KernelSourceError(error)
     return fileString
 
 

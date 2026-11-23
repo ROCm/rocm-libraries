@@ -296,6 +296,15 @@ def tdmKDimField(ks, tc):
     return 1, du
 
 
+def tdmKDimStepsInElements(ks):
+    """True when A's and B's TDM K dims both step DepthU per k-tile, i.e. count elements.
+
+    Packed sub-byte types (F4, F6) count K in packed units, so they do not.
+    """
+    du = ks["DepthU"]
+    return all((tdmKDimField(ks, tc) or (None, None))[1] == du for tc in ("A", "B"))
+
+
 def tdmKDimStepIsAddrInc(ks, tc):
     """True when `tc`'s K dim counts bytes, so its step is its own per-k-tile address increment."""
     return tc not in TDM_SCALE_TENSORS and ks["ProblemType"]["DataType%s" % tc].numBytes() <= 1
