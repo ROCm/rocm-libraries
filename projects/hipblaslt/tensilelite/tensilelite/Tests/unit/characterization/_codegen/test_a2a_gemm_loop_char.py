@@ -9,8 +9,9 @@ loop copy's exit under ExpandPointerSwap or UnrollLoopSwapGlobalReadOrder, their
 step-backs and branch targets, the A2ASubRounds-dependent round count, flag-slot
 and sub-round instructions, no tail loop and no StaggerU wrap iteration, that the
 segment switches touch no VGPR but lane 0 of Serial under EXEC=1 and restore it,
-no LDS or barrier, that the drain-send wait runs right before s_endpgm, and that
-the result assembles for gfx950. UseSubtileImpl kernels switch before the PGR=2
+no LDS or barrier, that the drain-send wait runs right before s_endpgm, that no
+instruction reads an SGPR written by v_readfirstlane or v_readlane fewer wait
+states later than gfx950 requires, and that the result assembles for gfx950. UseSubtileImpl kernels switch before the PGR=2
 batch-1 skip and after the loop exit label, never inside the loop body, leave
 the fixed Srd+2 window alone, and count the work-group out after the loop. The
 enqueuer's lanes stop at the group start, and a2aBatchSpan, run on a grid of
@@ -27,7 +28,7 @@ import re
 
 import pytest
 
-from config_harness import assert_assembles, emit_kernels_from_config
+from config_harness import assert_assembles, assert_no_sgpr_hazards, emit_kernels_from_config
 from tensilelite.Components.Signature import fusedA2AKernArgLayout
 
 pytestmark = pytest.mark.unit
@@ -220,6 +221,7 @@ def _group_of(i, sizes):
     raise AssertionError((i, sizes))
 
 
+
 @pytest.mark.parametrize("group", _GROUPS)
 def test_a2a_gemm_gfx950_emits_assembly(group):
     results = emit_kernels_from_config(_CONFIG, limit=_LIMIT, arch=_ARCH, size_group_index=group)
@@ -293,6 +295,7 @@ def test_a2a_gemm_gfx950_emits_assembly(group):
         assert src.count("label_a2a_drain_send_end:") == 1 and \
             re.search(r"^label_a2a_drain_send_end:\n^s_endpgm\b", src, re.M), \
             f"Kernel {base!r}: drain-send wait does not end the kernel"
+        assert_no_sgpr_hazards(src, base)
 
 
 def test_a2a_gemm_gfx950_batch_span():
@@ -334,7 +337,8 @@ def test_a2a_gemm_gfx950_group_walk():
         loReg = re.search(r"^s_add_u32 (\S+), \1, (s\d+) +// first block of group g$", pre, re.M).group(2)
         rowReg, nBlkReg = re.search(r"^s_sub_u32 (\S+), \1, (\S+) +// first block of this group$",
                                     head, re.M).groups()
-        setup, head = _insts(seed.group(1)) + _insts(pre), _insts(head)
+        seedText = re.sub(r"^.*// (?:peer group|cursor pair) offset = .*\n", "", seed.group(1), flags=re.M)
+        setup, head = _insts(seedText) + _insts(pre), _insts(head)
         bLo = 1000
         for W in range(2, 9):
             for n in range(1, 71):

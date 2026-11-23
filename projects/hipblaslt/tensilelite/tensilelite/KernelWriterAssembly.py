@@ -10136,7 +10136,6 @@ class KernelWriterAssembly(KernelWriter):
             tmpVgprRes=ContinuousRegister(idx=tmpVgpr, size=4),
             wavewidth=kernel["WavefrontSize"], doRemainder=False,
             comment="GK = ceil(count / (W-1))"))
-        module.add(VMovB32(dst=vgpr(vGK), src=sgpr(gk), comment="GK -> packet state"))
         module.add(SAddU32(dst=sgpr(wm1), src0=sgpr("A2ABlockCount"), src1=sgpr(gk),
                            comment="count + GK"))
         module.add(SSubU32(dst=sgpr(wm1), src0=sgpr(wm1), src1=1, comment="count + GK - 1"))
@@ -10146,7 +10145,7 @@ class KernelWriterAssembly(KernelWriter):
             wavewidth=kernel["WavefrontSize"], doRemainder=False,
             comment="non-empty groups = ceil(count / GK)"))
       elif peerGroups == 1:
-        module.add(VMovB32(dst=vgpr(vGK), src=sgpr("A2ABlockCount"), comment="GK -> packet state"))
+        gk = "A2ABlockCount"
         module.add(SMovB32(dst=sgpr(size), src=1, comment="NG = 1"))
       else:
         module.add(SSubU32(dst=sgpr(wm1), src0=sgpr("A2AW"), src1=1, comment="W - 1"))
@@ -10162,15 +10161,14 @@ class KernelWriterAssembly(KernelWriter):
             tmpVgprRes=ContinuousRegister(idx=tmpVgpr, size=4),
             wavewidth=kernel["WavefrontSize"], doRemainder=False,
             comment="GK = ceil(count / NG)"))
-        module.add(VMovB32(dst=vgpr(vGK), src=sgpr(gk), comment="GK -> packet state"))
+      module.add(SMulI32(dst=sgpr(peerGrp), src0=sgpr(srank), src1=PEER_GROUP_BYTES,
+                         comment="peer group offset = s * %u" % PEER_GROUP_BYTES))
+      module.add(SLShiftLeftB32(dst=sgpr(curOff), shiftHex=int(log2(CURSOR_PAIR_BYTES)),
+                                src=sgpr(srank),
+                                comment="cursor pair offset = s * %u" % CURSOR_PAIR_BYTES))
+      module.add(VMovB32(dst=vgpr(vGK), src=sgpr(gk), comment="GK -> packet state"))
       module.add(VWritelaneB32(dst=vgpr(vGK), src0=sgpr(size), src1=1, comment="NG -> lane 1"))
     self.vgprPool.checkIn(tmpVgpr)
-
-    module.add(SMulI32(dst=sgpr(peerGrp), src0=sgpr(srank), src1=PEER_GROUP_BYTES,
-                       comment="peer group offset = s * %u" % PEER_GROUP_BYTES))
-    module.add(SLShiftLeftB32(dst=sgpr(curOff), shiftHex=int(log2(CURSOR_PAIR_BYTES)),
-                              src=sgpr(srank),
-                              comment="cursor pair offset = s * %u" % CURSOR_PAIR_BYTES))
     ring.emitSeedCursorsAndCache(module, self, peerGrp, "FusedCounterPtr", curOff, cached)
     module.add(SMulI32(dst=sgpr(size), src0=sgpr(size), src1=ATOMIC_PACKET_DWORDS * 4,
                        comment="one ATOMIC per group"))
