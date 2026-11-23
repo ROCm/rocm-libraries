@@ -62,6 +62,19 @@ namespace
 {
     using cd = std::complex<double>;
 
+    template <typename T>
+    struct is_complex : std::false_type
+    {
+    };
+    template <>
+    struct is_complex<rocsparse_float_complex> : std::true_type
+    {
+    };
+    template <>
+    struct is_complex<rocsparse_double_complex> : std::true_type
+    {
+    };
+
     // ---- data -------------------------------------------------------------
 
     // CSR pattern with zero-based indices. Values, x and y0 are generated

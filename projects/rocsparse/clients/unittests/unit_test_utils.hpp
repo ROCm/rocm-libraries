@@ -44,7 +44,6 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
-#include <type_traits>
 #include <vector>
 #ifdef _WIN32
 #include <process.h>
@@ -143,19 +142,6 @@ namespace rocsparse_ut
     {
         return rocsparse_datatype_i32_r;
     }
-
-    template <typename T>
-    struct is_complex : std::false_type
-    {
-    };
-    template <>
-    struct is_complex<rocsparse_float_complex> : std::true_type
-    {
-    };
-    template <>
-    struct is_complex<rocsparse_double_complex> : std::true_type
-    {
-    };
 
     template <typename I>
     rocsparse_indextype it_of();
