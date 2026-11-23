@@ -234,13 +234,12 @@ rocsparse_status rocsparse_sparse_to_sparse_buffer_size(rocsparse_handle        
 *  <tr><td>rocsparse_datatype_f64_r <td>rocsparse_datatype_f64_c
 *  </table>
 *
-*  CSC, ELL and BSR to COO with an \ref rocsparse_datatype_f16_r or
-*  \ref rocsparse_datatype_bf16_r source still go through the existing same-type CSR
-*  conversion, which does not support those two types:
+*  CSC, ELL, and BSR to COO or COO AoS do not support a \ref rocsparse_datatype_f16_r or
+*  \ref rocsparse_datatype_bf16_r source. The intermediate CSR matrix keeps the source
+*  data type, and the conversion into it does not support these two types:
 *  \ref rocsparse_sparse_to_sparse_buffer_size for
 *  \ref rocsparse_sparse_to_sparse_stage_analysis returns
-*  \ref rocsparse_status_not_implemented. COO AoS from CSC, ELL and BSR uses the same
-*  intermediate conversion.
+*  \ref rocsparse_status_not_implemented.
 *
 *  \subsection sparse_to_sparse_permissive_a Permissive (a)
 *  These pairs require \ref rocsparse_sparse_to_sparse_permissive. The conversion goes through
