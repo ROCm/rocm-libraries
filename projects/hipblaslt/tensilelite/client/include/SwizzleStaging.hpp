@@ -85,11 +85,20 @@ namespace TensileLite
                 PackK = 16 / MiKv / rocisa::GetElementSize(datatype);
             }
 
+            // Whether the K of a swizzled tensor is padded to 64 bytes rather than to its swizzle K block.
+            // The kernel's K stride is 64 B for every swizzle path except the gfx950 subtile swizzle of
+            // F4 (UseSubtileImpl; MXF4 -> bf16, TN), whose pre-shuffled block stride (swizzleGeometry
+            // layoutK = miInput * 16 / (miKv * bpe), 64 F4 elements for wave64) is 32 B. 64 B is also what
+            // the public orders say (COL16_4R32 for F4: 128 K elements; 4R16 F8: 64; 4R8 F16: 32).
+            // gfx1250 does not take the subtile swizzle (Solution rejects it), so no wave-size term here.
+            inline bool swizzledKPadsTo64Bytes(rocisa::DataType dtype, bool subtileSwizzle)
+            {
+                return !(subtileSwizzle && dtype == rocisa::DataType::Float4);
+            }
+
             // K elements a swizzled tensor's rows are padded to: its swizzle K block, or 64 bytes when
-            // padTo64Bytes is set (gfx1250; hipblasLtOrder_t COL16_4R* pads K to 64 B). For the 1- and
-            // 2-byte types the swizzle K block is already 64 B, so the flag only matters for F4, whose
-            // gfx942/gfx950 kernels pad to 32 B (their swizzleGeometry layoutK is 64 elements) and must
-            // keep doing so.
+            // padTo64Bytes is set. For the 1- and 2-byte types the swizzle K block is already 64 B, so the
+            // flag only matters for F4 (swizzle K block 32 B, see swizzledKPadsTo64Bytes).
             inline size_t swizzledPaddedKUnit(size_t swizzleK, float elementBytes, bool padTo64Bytes)
             {
                 if(!padTo64Bytes)

@@ -617,9 +617,8 @@ TEST(DataInitializationSwizzle, UploadsTheStagedLayoutForAAndB)
     using TensileLite::Client::detail::stageSwizzledTensor;
     using TensileLite::Client::detail::swizzleStageGeometry;
 
-    hipDeviceProp_t prop{};
-    ASSERT_EQ(hipGetDeviceProperties(&prop, 0), hipSuccess);
-    const bool isGfx1250 = std::string(prop.gcnArchName).find("gfx1250") != std::string::npos;
+    // The default solution is not a subtile one: K is padded to 64 bytes whatever the device.
+    const bool padTo64Bytes = true;
 
     auto args = makeMXLaunchArgs({{48, 40, 1, 100}});
     setOption(args, "mx-a-block", 0);
@@ -654,7 +653,7 @@ TEST(DataInitializationSwizzle, UploadsTheStagedLayoutForAAndB)
                              {ContractionProblemGemm::TENSOR::B, gemmInputs->b, gemm.b()}};
         for(auto const& t : tensors)
         {
-            const auto geom     = swizzleStageGeometry(t.desc, isGfx1250);
+            const auto geom     = swizzleStageGeometry(t.desc, padTo64Bytes);
             auto       expected = stageSwizzledTensor(t.desc, dataInit.cpuSource(t.tensor), geom);
             auto       got      = readDevice(t.device, expected.getNumBytes());
             EXPECT_EQ(std::memcmp(got.data(), expected.as<void>(), got.size()), 0)
@@ -1152,6 +1151,7 @@ namespace
     using TensileLite::Client::detail::stageSwizzledTensor;
     using TensileLite::Client::detail::swizzleStageGeometry;
     using TensileLite::Client::detail::swizzledPaddedKUnit;
+    using TensileLite::Client::detail::swizzledKPadsTo64Bytes;
 
     constexpr size_t kMi = 16; // swizzled free-dimension block (MiM / MiN)
 
@@ -1215,6 +1215,29 @@ TEST(SwizzledPaddedK, Gfx1250PadsToSixtyFourBytes)
     EXPECT_EQ(swizzledPaddedKUnit(16, 2.0f, true), 32u);  // BF16
     EXPECT_EQ(swizzledPaddedKUnit(64, 0.5f, true), 128u); // F4: byte-packed, 64 B = 128 elements
     EXPECT_EQ(swizzledPaddedKUnit(256, 1.0f, true), 256u) << "a larger block is never narrowed";
+}
+
+TEST(SwizzledPaddedK, FollowsTheSwizzlePathOfTheKernel)
+{
+    // Only the subtile swizzle of F4 (gfx950 MXF4) pads K to its 32-byte block; every other swizzle
+    // path (TDM, classic) and every other type pads to 64 bytes.
+    EXPECT_FALSE(swizzledKPadsTo64Bytes(rocisa::DataType::Float4, true));
+    EXPECT_TRUE(swizzledKPadsTo64Bytes(rocisa::DataType::Float4, false));
+    for(auto dtype : {rocisa::DataType::Float8, rocisa::DataType::BFloat8, rocisa::DataType::Int8,
+                      rocisa::DataType::BFloat16, rocisa::DataType::Half})
+    {
+        EXPECT_TRUE(swizzledKPadsTo64Bytes(dtype, true)) << int(dtype);
+        EXPECT_TRUE(swizzledKPadsTo64Bytes(dtype, false)) << int(dtype);
+    }
+
+    // F4, K = 40 elements (20 B): 64 elements (32 B) for the subtile swizzle, 128 (64 B) otherwise.
+    TensorDescriptor desc("a", rocisa::DataType::Float4, {40, 16, 1});
+    EXPECT_EQ(swizzleStageGeometry(desc, swizzledKPadsTo64Bytes(rocisa::DataType::Float4, true))
+                  .paddedShape[1],
+              32u);
+    EXPECT_EQ(swizzleStageGeometry(desc, swizzledKPadsTo64Bytes(rocisa::DataType::Float4, false))
+                  .paddedShape[1],
+              64u);
 }
 
 TEST(SwizzledKBlock, IsTheSameOnEveryArchitecture)

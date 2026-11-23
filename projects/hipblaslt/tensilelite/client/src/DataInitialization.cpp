@@ -122,8 +122,9 @@ namespace TensileLite
         using Size            = uint64_t;
         // Key includes the tensor index so A and B (which can share dtype+sizes on a square
         // problem) get distinct swizzle entries instead of aliasing each other's data, plus the
-        // batch count, batch stride and leading dimension that shape the staged buffer.
-        using SwizzleCacheKey = std::tuple<size_t, BitWidth, Size, Size, Size, Size, Size>;
+        // batch count, batch stride and leading dimension that shape the staged buffer, and the K padding
+        // unit (the selected kernel decides it: see swizzledKPadsTo64Bytes).
+        using SwizzleCacheKey = std::tuple<size_t, BitWidth, Size, Size, Size, Size, Size, Size>;
         using SwizzleCacheVal = ::Tensor::Manipulation::Tensor;
         using SwizzleCache    = LRUCache<SwizzleCacheKey, SwizzleCacheVal>;
         static thread_local SwizzleCache g_swizzleCache;
@@ -959,7 +960,6 @@ namespace TensileLite
                 HIP_CHECK_EXC(hipGetDevice(&m_deviceId));
                 HIP_CHECK_EXC(hipGetDeviceProperties(&prop, m_deviceId));
                 m_mxScaleLayout = mxScaleLayoutForArchName(prop.gcnArchName);
-                m_padSwizzledKTo64B = std::string(prop.gcnArchName).find("gfx1250") != std::string::npos;
             }
 
             m_rotatingBuffer
@@ -1037,7 +1037,7 @@ namespace TensileLite
                             size_t MiM_N = 16, MiK = 0, MiKv = 0, PackK = 0;
                             detail::calculateKforSwizzling(dataType, MiK, MiKv, PackK);
                             numAllocatedElements = detail::getSwizzledTensorNumAllocatedElements(
-                                problem.tensors()[i], MiM_N, MiK, PackK, m_padSwizzledKTo64B);
+                                problem.tensors()[i], MiM_N, MiK, PackK, /*padTo64Bytes=*/true);
                             numAllocatedBytes = multiplyElementSize(
                                 numAllocatedElements, rocisa::GetElementSize(dataType));
                         }
@@ -1667,7 +1667,7 @@ namespace TensileLite
                         detail::calculateKforSwizzling(problem.tensors()[i].dataType(), MiK, MiKv, PackK);
                         padding = pUnit.maxElements
                                   - detail::getSwizzledTensorNumAllocatedElements(
-                                      problem.tensors()[i], MiM_N, MiK, PackK, m_padSwizzledKTo64B);
+                                      problem.tensors()[i], MiM_N, MiK, PackK, /*padTo64Bytes=*/true);
                     }
                 }
                 padding = multiplyElementSize(
@@ -2845,7 +2845,7 @@ namespace TensileLite
                             detail::calculateKforSwizzling(desc.dataType(), MiK, MiKv, PackK);
                             swizzlePadding
                                 = detail::getSwizzledTensorNumAllocatedElements(
-                                      desc, MiM_N, MiK, PackK, m_padSwizzledKTo64B)
+                                      desc, MiM_N, MiK, PackK, /*padTo64Bytes=*/true)
                                   - desc.totalAllocatedElements();
                         }
 
@@ -3102,7 +3102,13 @@ namespace TensileLite
                 if(needSwizzle)
                 {
                     using Tensor = Tensor::Manipulation::Tensor;
-                    const auto geom = detail::swizzleStageGeometry(desc, m_padSwizzledKTo64B);
+                    // The K padding follows the selected kernel (subtile swizzle of F4: 32 B, else 64 B); with
+                    // no solution yet (first call of a problem) use the 64 B layout, the next call restages.
+                    const bool subtileSwizzle
+                        = m_currentSolution != nullptr && m_currentSolution->sizeMapping.useSubtileImpl;
+                    const bool padTo64Bytes
+                        = detail::swizzledKPadsTo64Bytes(desc.dataType(), subtileSwizzle);
+                    const auto geom = detail::swizzleStageGeometry(desc, padTo64Bytes);
 
                     auto swizzleKey = std::make_tuple(i,
                                                       toBitWidth(desc.dataType()),
@@ -3110,7 +3116,8 @@ namespace TensileLite
                                                       geom.tiledSize,
                                                       Size(geom.numBatch),
                                                       Size(geom.batchStride),
-                                                      Size(geom.srcLd));
+                                                      Size(geom.srcLd),
+                                                      Size(geom.padUnitK));
 
                     if(g_swizzleCache.count(swizzleKey))
                     {
