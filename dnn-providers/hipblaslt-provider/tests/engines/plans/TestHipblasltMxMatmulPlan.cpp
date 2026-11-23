@@ -798,10 +798,8 @@ MxExecution execute(const HipdnnEnginePluginHandle& handle,
     result.workspaceSize = plan->getWorkspaceSize(handle);
     result.scaleAPrepared = !plan->bScalePrep().isPassThrough();
     result.scaleBPrepared = !plan->aScalePrep().isPassThrough();
-    result.preparedScaleBytes = hipblaslt_utils::alignUp(plan->aScalePrep().workspaceSize(),
-                                                         hipblaslt_utils::WORKSPACE_ALIGNMENT)
-                                + hipblaslt_utils::alignUp(plan->bScalePrep().workspaceSize(),
-                                                           hipblaslt_utils::WORKSPACE_ALIGNMENT);
+    result.preparedScaleBytes
+        = plan->aScalePrep().workspaceSize() + plan->bScalePrep().workspaceSize();
 
     auto a = upload(inMemoryOrder(in.a, m, k, s.aKContiguous));
     auto b = upload(inMemoryOrder(in.b, k, n, !s.bKContiguous));

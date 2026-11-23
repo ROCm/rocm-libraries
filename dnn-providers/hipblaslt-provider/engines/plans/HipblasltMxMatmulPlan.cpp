@@ -356,11 +356,10 @@ MxMatmulPlan::MxMatmulPlan(const HipdnnEnginePluginHandle& handle, MxMatmulParam
                               scaleFormat,
                               _params.bScale().mn,
                               _params.bScale().kBlocks);
-    _bScalePrepOffset = hipblaslt_utils::alignUp(_aScalePrep.workspaceSize(),
-                                                 hipblaslt_utils::WORKSPACE_ALIGNMENT);
-    _matmulWorkspaceOffset = _bScalePrepOffset
-                             + hipblaslt_utils::alignUp(_bScalePrep.workspaceSize(),
-                                                        hipblaslt_utils::WORKSPACE_ALIGNMENT);
+    // Each prep's size is a multiple of WORKSPACE_ALIGNMENT, so both regions after the
+    // first stay aligned.
+    _bScalePrepOffset = _aScalePrep.workspaceSize();
+    _matmulWorkspaceOffset = _bScalePrepOffset + _bScalePrep.workspaceSize();
 
     HIPDNN_PLUGIN_LOG_INFO("MX matmul plan: scale format "
                            << toString(scaleFormat) << ", A_SCALE prep [" << _aScalePrep.describe()

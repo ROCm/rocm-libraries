@@ -121,6 +121,15 @@ TEST(TestMxScaleLayout, NaturalMismatchedOrderTransposes)
     }
 }
 
+// The plan places the next workspace region right after this one, so the size is
+// rounded up to hipMalloc's alignment: a 16 x 8 scale (128 bytes) takes 256.
+TEST(TestMxScaleLayout, WorkspaceSizeIsRoundedToTheWorkspaceAlignment)
+{
+    MxScalePrep const prep(
+        MxOrder::MN_CONTIGUOUS, MxOrder::K_CONTIGUOUS, MxScaleFormat::NATURAL, 16, 8);
+    EXPECT_EQ(prep.workspaceSize(), hipblaslt_utils::WORKSPACE_ALIGNMENT);
+}
+
 // A vector scale (one row or one column) reads the same in either order.
 TEST(TestMxScaleLayout, NaturalVectorScaleIsPassThrough)
 {

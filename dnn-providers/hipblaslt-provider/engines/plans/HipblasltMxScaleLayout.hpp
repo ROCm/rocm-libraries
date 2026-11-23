@@ -89,7 +89,8 @@ public:
     MxScalePrep& operator=(MxScalePrep&&) = default;
     ~MxScalePrep() = default;
 
-    // Bytes of workspace run() needs (0 for a pass-through).
+    // Bytes of workspace run() needs (0 for a pass-through), rounded up to
+    // hipblaslt_utils::WORKSPACE_ALIGNMENT so a region placed after it stays aligned.
     size_t workspaceSize() const;
 
     Method method() const;
