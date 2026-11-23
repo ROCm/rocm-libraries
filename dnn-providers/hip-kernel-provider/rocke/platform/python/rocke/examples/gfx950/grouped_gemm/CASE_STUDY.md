@@ -1,7 +1,7 @@
 # Case Study: Grouped GEMM on gfx950 (CDNA4), bf16
 
 Hand-scheduled grouped (per-expert / batched) GEMM built with the rocKE
-`IRBuilder` and lowered to HIP C++ via `hipcc --genco`. Target: AMD Instinct
+`IRBuilder` and lowered to HIP C++ via `amdclang++ --offload-device-only`. Target: AMD Instinct
 gfx950 (CDNA4), bf16 inputs / f32 accumulate. Kernel: `grouped_gemm_hip.py`.
 
 **Results** (benchmark shape below, verified vs `torch.bmm`, `max_abs ≈ 0.0156`):
@@ -134,7 +134,7 @@ larger change with real correctness risk.
 
 From the rocKE platform root
 (`.../dnn-providers/hip-kernel-provider/rocke/platform`), with a ROCm 7.x
-toolchain (`hipcc` on `PATH`) and a Python env that has `torch` (ROCm build):
+toolchain (`amdclang++` on `PATH`) and a Python env that has `torch` (ROCm build):
 
 ```bash
 # NT / RCR layout (default) -> ~808 TF median, ~815 TF peak

@@ -1819,7 +1819,7 @@ class TestLlvmFlavorEnumeration(unittest.TestCase):
         endianness field AND address spaces ``p10``-``p15`` (upstream
         ``5bf967cb132b``) spliced in after ``p9``.
 
-        The toolchain drift guard needs a host with hipcc; this pins the same
+        The toolchain drift guard needs a host with amdclang++; this pins the same
         contract on the bare CI gate, so an accidental re-alias (or a stray edit
         to either constant) fails here with a precise message instead of
         surfacing as an opaque byte-identity golden diff.
@@ -6354,7 +6354,7 @@ class TestCkTileLowering(unittest.TestCase):
     composition -- ``GemmKernel<...>`` (for ``UniversalGemmSpec``) or
     ``GroupedConvolutionForwardKernel<...>`` (for ``ImplicitGemmConvSpec``).
 
-    Pure-Python checks; the actual compile through hipcc happens in
+    Pure-Python checks; the actual compile through HIP happens in
     `examples/lower_cktile_smoke` (out of scope here because it needs
     a working amdclang + CK Tile include dir).
     """
@@ -6645,7 +6645,7 @@ class TestHipLoweringCoverage(unittest.TestCase):
     the resulting source has the expected structural markers: the
     typedef prologue, the ``__global__`` signature, and at least one
     of the kernel's signature ops (MFMA / async DMA / smem_alloc /
-    arith.fmul / ...). Doesn't actually compile through hipcc -- that
+    arith.fmul / ...). Doesn't actually compile through HIP -- that
     requires a working AMDGPU toolchain and lives in
     ``examples/ck_tile_parity`` / its peers.
     """

@@ -1,13 +1,13 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 """Hand-authored grouped bf16 GEMM built directly on the raw ``IRBuilder``
-(NO ``gemm_universal`` emitter) and lowered through the HIP-C++ -> hipcc
-backend (``compile_kernel_via_hipcc``).
+(NO ``gemm_universal`` emitter) and lowered through the HIP-C++ -> amdclang++
+backend (``compile_kernel_via_hip``).
 
 Instead of declaring a ``TileSpec`` and letting the generic emitter + comgr
 schedule the kernel, we author the warp tiling, LDS staging, double-buffered
 software pipeline, and the ``s_setprio`` MFMA-priority hints by hand, and rely
-on the hipcc toolchain to preserve that schedule. The kernel borrows the
+on the amdclang++ toolchain to preserve that schedule. The kernel borrows the
 *correct* MFMA lane-mapping helpers from ``helpers.mfma_gemm_inner``
 (``mfma_atom_for_dtype`` / ``decode_mfma_lanes`` / ``atom.lane_to_output``) so
 the operand-frag and epilogue layouts are exact.
@@ -24,7 +24,7 @@ disable a boolean lever:
 * ``--dtl``   async direct-to-LDS DMA (``async_buffer_load_lds_addr``,
               DRAM->LDS, double-buffered, vmcnt-overlapped). Best path.
 * ``--db``    register-prefetch double buffer (used when ``--no-dtl``).
-* ``--prio``  ``s_setprio(1/0)`` around the MFMA cluster (survives hipcc;
+* ``--prio``  ``s_setprio(1/0)`` around the MFMA cluster (survives amdclang++;
               the comgr/LLVM-IR path could not keep this hint).
 * ``--tm/--tn/--tk/--wm/--wn`` tile + warp-grid geometry.
 * ``--swz``   st_16x32 LDS XOR swizzle (bank-conflict-free ds_reads); default on.
@@ -53,7 +53,7 @@ from __future__ import annotations
 import argparse
 import math
 
-from rocke.helpers.compile import compile_kernel_via_hipcc
+from rocke.helpers.compile import compile_kernel_via_hip
 
 # The kernel builder now lives in the instance module. Re-exported here so
 # scripts that historically did ``from grouped_gemm_hip import
@@ -139,8 +139,8 @@ def _main(argv=None) -> int:
         f"chiplet={spec.chiplet} wgm={spec.chiplet_wgm} xcds={spec.chiplet_xcds} "
         f"brrr={spec.b_rrr} tpb={spec.tpb}"
     )
-    art = compile_kernel_via_hipcc(kernel, arch="gfx950")
-    print(f"[ggemm] hipcc built {kernel.name}: {len(art.hsaco)} B")
+    art = compile_kernel_via_hip(kernel, arch="gfx950")
+    print(f"[ggemm] HIP built {kernel.name}: {len(art.hsaco)} B")
 
     from rocke.instances.gfx950.grouped_gemm import grouped_gemm_signature
 

@@ -14,7 +14,7 @@ import argparse
 import numpy as np
 
 from ....helpers import compile_kernel
-from ....helpers.compile import compile_kernel_via_hipcc
+from ....helpers.compile import compile_kernel_via_hip
 from ....instances.gfx1250.nvfp4_gemm import (
     NvFp4GemmSpec,
     build_nvfp4_gemm,
@@ -139,7 +139,7 @@ def run_cases(
         raise RuntimeError(f"visible HIP device 0 must be gfx1250, got {arch!r}")
     kernel = build_nvfp4_gemm(spec, arch=arch)
     compile_fn = (
-        compile_kernel if compile_route == "comgr" else compile_kernel_via_hipcc
+        compile_kernel if compile_route == "comgr" else compile_kernel_via_hip
     )
     art = compile_fn(kernel, arch=arch)
     rt = Runtime()

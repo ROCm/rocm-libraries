@@ -696,7 +696,7 @@ class TestGfx950UnifiedLegality(unittest.TestCase):
 
     def test_a_pad_the_kernel_lays_out_as_none_names_the_unpadded_spec(self):
         req = _request(mask_type=1, kv_block_size=64)
-        variant = _gfx950_variant("gfx950_u2d_transposed32_nw2_mw32_t2xb_hipcc")
+        variant = _gfx950_variant("gfx950_u2d_transposed32_nw2_mw32_t2xb_hip")
         unpadded, _why = canonicalize_tuning_spec(attention_problem(req), variant, {})
         for halves in (8, 16, 24, 32):
             with self.subTest(halves=halves):

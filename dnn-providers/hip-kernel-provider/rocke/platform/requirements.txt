@@ -6,7 +6,7 @@
 # C++ engine binding, on-GPU launch/numeric, and the test harness.
 #
 # ROCm is NOT a pip package and cannot be pinned here. It is a system dependency
-# (libamd_comgr, libamdhip64, hipcc/amdclang) that must be installed separately.
+# (libamd_comgr, libamdhip64, amdclang++) that must be installed separately.
 #   Required:    ROCm 7.x with comgr + HIP discoverable by the dynamic linker.
 #   Recommended: ROCm 7.2. AUTO queries the loaded COMGR compiler to select
 #                the LLVM IR flavor; package-release metadata is not that evidence.

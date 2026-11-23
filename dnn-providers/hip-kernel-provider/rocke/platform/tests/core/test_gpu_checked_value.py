@@ -32,7 +32,7 @@ What is pinned here:
   lowers every accepted case to the same LLVM IR and HIP source and refuses a
   failure path that is not bare with the same text;
 - when a GPU that they have run on is present (``_RUN_ON``), on the LLVM and
-  the hipcc route, each in a child process that loads a code object compiled
+  the HIP route, each in a child process that loads a code object compiled
   once in the test process: a launch whose loaded value meets the facts runs
   to its store; one whose value breaks them raises ``GpuCheckFailed`` with
   the store not done, and the same process then launches again and stores;
@@ -84,7 +84,7 @@ from rocke.core.lower_llvm import lower_kernel_to_llvm
 from rocke.core.passes import optimize_kernel
 from rocke.core.value_sources import MEMORY_READ_OPS
 from rocke.core.verify import verify
-from rocke.helpers.compile import compile_kernel, compile_kernel_via_hipcc
+from rocke.helpers.compile import compile_kernel, compile_kernel_via_hip
 from rocke.tests.built_programs import assert_refuses_arguments, built_program
 from rocke.tests.gpu import probe_device_arch
 from rocke.tests.subprocess_launcher import rocke_python_command, rocke_subprocess_env
@@ -1003,8 +1003,8 @@ def _kernel_for(case: str, route: str, wave: int) -> KernelDef:
 
 
 # How each route compiles a kernel: rocKE's LLVM lowering and COMGR, or its
-# HIP lowering and hipcc.
-_COMPILE_ON_ROUTE = {"llvm": compile_kernel, "hipcc": compile_kernel_via_hipcc}
+# HIP lowering and amdclang++.
+_COMPILE_ON_ROUTE = {"llvm": compile_kernel, "hip": compile_kernel_via_hip}
 
 
 def _code_object(kernel: KernelDef, route: str, arch: str) -> bytes:
@@ -1197,7 +1197,7 @@ _CHILD = textwrap.dedent(
 # this file, so a child that never finishes fails its own test instead of ending
 # the whole run. A case's time also holds any compile of its code object, which
 # counts toward the same per-test limit; prepare_before_tests normally keeps the
-# slow hipcc compiles out of every case's time.
+# slow amdclang++ compiles out of every case's time.
 _CHILD_TIMEOUT_S = 45
 
 
@@ -1206,12 +1206,12 @@ _CHILD_TIMEOUT_S = 45
 _RUN_ON = ("gfx90a", "gfx942", "gfx1100", "gfx1201")
 
 # The routes a code object is built by: rocKE's LLVM lowering and COMGR, or its
-# HIP lowering and hipcc. The cases whose result depends on the lowering run on
-# both: a true fact stores, a false one stops its lane and fails the launch, and
-# a wave or lane that returns at its check does not hold the rest at a barrier.
-# Each test parametrized on _ROUTES names its case in a ``case`` parameter,
-# which prepare_before_tests reads to compile the hipcc code objects.
-_ROUTES = ("llvm", "hipcc")
+# HIP lowering and amdclang++. The cases whose result depends on the lowering
+# run on both: a true fact stores, a false one stops its lane and fails the
+# launch, and a wave or lane that returns at its check does not hold the rest at
+# a barrier. Each test parametrized on _ROUTES names its case in a ``case``
+# parameter, which prepare_before_tests reads to compile the HIP code objects.
+_ROUTES = ("llvm", "hip")
 
 # The route of the cases that test how rocke.runtime reads the GPU-check word
 # (streams, a stale word, explicit reads, unload, a kernel without a check,
@@ -1235,24 +1235,24 @@ def _gpu_case_target(route: str) -> tuple[str, int] | str:
     processor = (get_device_target_id(current_device()) or arch).split(":")[0]
     if processor not in _RUN_ON:
         return f"has not run on {processor} hardware yet; enable once it has"
-    if route == "hipcc" and shutil.which("hipcc") is None:
-        return "hipcc not found"
+    if route == "hip" and shutil.which("amdclang++") is None:
+        return "amdclang++ not found"
     return arch, ArchTarget.from_gfx(arch).wave_size
 
 
 def prepare_before_tests(items: list[pytest.Item]) -> None:
-    """Compile the hipcc route's kernels once, before any test runs, when a
+    """Compile the HIP route's kernels once, before any test runs, when a
     collected GPU case that is not skipped will launch one (tests/conftest.py
     calls this after collection).
 
-    hipcc parses the HIP headers for every kernel, which on a slow host takes a
-    large share of a case's per-test limit, so no case's time should hold it.
-    A skipped target compiles nothing, and a compile error is kept for the case
-    that needs the code object, which raises it. Only a routed test without a
-    ``case`` parameter raises here (a ``KeyError``), which the conftest hook
-    reports as a warning.
+    amdclang++ parses the HIP headers for every kernel, which on a slow host
+    takes a large share of a case's per-test limit, so no case's time should
+    hold it. A skipped target compiles nothing, and a compile error is kept for
+    the case that needs the code object, which raises it. Only a routed test
+    without a ``case`` parameter raises here (a ``KeyError``), which the
+    conftest hook reports as a warning.
     """
-    # The cases the hipcc route will launch, read off the collected items: each
+    # The cases the HIP route will launch, read off the collected items: each
     # test parametrized on _ROUTES names its case in its ``case`` parameter.
     cases = sorted(
         {
@@ -1261,27 +1261,27 @@ def prepare_before_tests(items: list[pytest.Item]) -> None:
             if item.name.startswith("test_gpu_")
             and item.get_closest_marker("skip") is None
             and hasattr(item, "callspec")
-            and item.callspec.params.get("route") == "hipcc"
+            and item.callspec.params.get("route") == "hip"
         }
     )
     if not cases:
         return
     try:
-        target = _gpu_case_target("hipcc")
+        target = _gpu_case_target("hip")
         if isinstance(target, str):
             return
         arch, wave = target
         kernels = {
             kernel.name: kernel
-            for kernel in (_kernel_for(case, "hipcc", wave) for case in cases)
+            for kernel in (_kernel_for(case, "hip", wave) for case in cases)
         }
     except Exception:  # noqa: BLE001 - each case looks up its target and reports this
         return
     for name, kernel in kernels.items():
         try:
-            _PREBUILT[("hipcc", name)] = _code_object(kernel, "hipcc", arch)
+            _PREBUILT[("hip", name)] = _code_object(kernel, "hip", arch)
         except Exception as error:  # noqa: BLE001 - re-raised by the case that needs it
-            _PREBUILT[("hipcc", name)] = error
+            _PREBUILT[("hip", name)] = error
 
 
 @pytest.fixture(scope="module")

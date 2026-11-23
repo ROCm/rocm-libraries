@@ -90,7 +90,7 @@ def test_scale_selector_fixed_bytes_numeric(gpu_env, dtype, operand, block_k, ro
         pack_fp6_codes,
     )
     from rocke.helpers import compile_kernel
-    from rocke.helpers.compile import compile_kernel_via_hipcc
+    from rocke.helpers.compile import compile_kernel_via_hip
     from rocke.instances.gfx1250.block_scaled_gemm import (
         BlockScaledGemmSpec,
         build_block_scaled_gemm,
@@ -138,7 +138,7 @@ def test_scale_selector_fixed_bytes_numeric(gpu_env, dtype, operand, block_k, ro
             block_k=block_k,
             matrix_path="wmma_scale16" if block_k == 16 else "wmma_scale",
         )
-        compiler = compile_kernel if route == "comgr" else compile_kernel_via_hipcc
+        compiler = compile_kernel if route == "comgr" else compile_kernel_via_hip
         artifact = compiler(build_block_scaled_gemm(spec), arch="gfx1250")
         module = rt.load_module(artifact.hsaco)
         try:

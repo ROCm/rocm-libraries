@@ -8,7 +8,7 @@ After steps 6–10 we have a much stronger DSL kernel:
   ground-truth-inspired (step 07):    13.5 µs   31.0% HBM    (3.6x speedup)
   + preshuffle_b (step 09):           13.3 µs   31.5% HBM
   + lever combos (step 08):           13.5 µs   31.2% HBM    (noise)
-  + hipcc backend (step 10):          13.4 µs   31.4% HBM    (noise)
+  + HIP backend (step 10):            13.4 µs   31.4% HBM    (noise)
 
 rocBLAS reference:                    11.0 µs   38.1% HBM
 

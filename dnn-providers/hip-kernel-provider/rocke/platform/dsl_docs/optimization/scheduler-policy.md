@@ -154,7 +154,7 @@ for persistent dispatch or autotune decisions.
 ## Limitations
 
 - The policy applies to the LLVM-direct COMGR path used by `compile_kernel()`.
-  `compile_kernel_via_hipcc()` rejects an explicit scheduler policy because the
+  `compile_kernel_via_hip()` rejects an explicit scheduler policy because the
   HIP lowering path does not currently carry this LLVM function attribute.
 - Strategy names are an LLVM backend interface. Revalidate generated code and
   numeric correctness when changing the LLVM or ROCm toolchain.

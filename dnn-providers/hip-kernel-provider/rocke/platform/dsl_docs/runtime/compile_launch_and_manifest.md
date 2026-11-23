@@ -171,7 +171,7 @@ first_supported([aligned, ragged], values)          # the first launcher that ac
 ```
 
 - `from_artifact(artifact, kernel_name=None)` takes a `KernelArtifact` (from `compile_kernel` or
-  `compile_kernel_via_hipcc`, checked alike) or a `ModuleArtifact` (`kernel_name` picks a kernel; the primary
+  `compile_kernel_via_hip`, checked alike) or a `ModuleArtifact` (`kernel_name` picks a kernel; the primary
   by default). The signature and `cluster_dims` come from the kernel; the caller restates nothing.
 - Every launch, `__call__` and `bind` alike, goes through one check-and-pack step. A failed row raises
   `LaunchRefused` (a `ValueError`) listing every failed row before anything reaches the GPU:

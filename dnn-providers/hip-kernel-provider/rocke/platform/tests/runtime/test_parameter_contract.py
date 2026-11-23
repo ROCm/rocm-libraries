@@ -36,7 +36,7 @@ from rocke.helpers.compile import (
     KernelArtifact,
     KernelModule,
     compile_kernel,
-    compile_kernel_via_hipcc,
+    compile_kernel_via_hip,
     compile_module,
 )
 from rocke.helpers.manifest import write_artifact
@@ -407,15 +407,15 @@ def test_gpu_from_artifact_checks_a_kernel_compiled_through_llvm(stream):
     )
 
 
-def test_gpu_from_artifact_checks_a_kernel_compiled_through_hipcc(stream):
+def test_gpu_from_artifact_checks_a_kernel_compiled_through_hip(stream):
     """The contract is read from the KernelDef the artifact holds, so a kernel
-    compiled through hipcc is checked exactly like one compiled through LLVM."""
+    compiled through amdclang++ is checked exactly like one compiled through LLVM."""
     arch = current_device_arch()
-    if shutil.which("hipcc") is None:
-        pytest.skip("hipcc is not on PATH")
+    if shutil.which("amdclang++") is None:
+        pytest.skip("amdclang++ is not on PATH")
     _check_door(
         KernelLauncher.from_artifact(
-            compile_kernel_via_hipcc(_fill_kernel(), arch=arch)
+            compile_kernel_via_hip(_fill_kernel(), arch=arch)
         ),
         stream,
     )

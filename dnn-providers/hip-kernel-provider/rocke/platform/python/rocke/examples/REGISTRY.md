@@ -46,7 +46,7 @@ For each registered example `run_all.py`:
    env (`PYTHONHASHSEED=0`, fixed `TMPDIR`).
 3. Distills stdout to a **DIGEST**: only the numeric-verdict lines
    (`max_abs_diff`, `bad=`, `max_abs=`, `margin=`, `-> PASS|FAIL`) are kept;
-   volatile fields (hipcc/total timings, `ms`/`tflops`/`gbps` perf numbers,
+   volatile fields (amdclang++/total timings, `ms`/`tflops`/`gbps` perf numbers,
    byte counts, device-name banners, `/tmp` paths) are dropped or scrubbed.
    The digest is `sha256` over those lines.
 4. `--bless` writes the digest+lines as the golden; `--check` asserts the

@@ -29,7 +29,7 @@ class DeviceInfo:
 
     ``compiler_target`` is derived by
     :func:`~rocke.core.arch.compiler_target_from_target_id`. The compile
-    helpers use this name in the COMGR ISA name or hipcc's ``--offload-arch``.
+    helpers use this name in the COMGR ISA name or amdclang++'s ``--offload-arch``.
 
     ``asic_revision`` comes from ``asicRevision`` in the same HIP properties
     result. A successful query may return zero.

@@ -13,10 +13,10 @@ global pointer; the HIP route lowers it to an integer cast.
 Covers the LLVM IR and HIP source of both engines (the same text at every LLVM
 flavor), the builder's, the verifier's and the lowerings' refusals (including a
 parameter whose ``addr_space`` override makes it a constant pointer), the device
-IR hipcc makes from the HIP source (no ``inbounds`` step; a ``global_ptr_add``
+IR amdclang++ makes from the HIP source (no ``inbounds`` step; a ``global_ptr_add``
 control shows the check can see one), and, when a GPU is present, addresses
 and loads through offset pointers -- one of them outside the allocation -- on
-the LLVM and the hipcc route.
+the LLVM and the HIP route.
 """
 
 from __future__ import annotations
@@ -92,21 +92,21 @@ def test_hip_offsets_in_integer_arithmetic_and_casts_the_pointer_to_int64():
 
 
 # --------------------------------------------------------------------------
-# hipcc: the compiled device IR has no inbounds step
+# amdclang++: the compiled device IR has no inbounds step
 # --------------------------------------------------------------------------
 
 
 def _device_ir(tmp_path, kernel):
-    """hipcc's optimized device LLVM IR of the HIP source of ``kernel``."""
-    hipcc = shutil.which("hipcc")
-    if hipcc is None:
-        pytest.skip("hipcc not found")
+    """amdclang++'s optimized device LLVM IR of the HIP source of ``kernel``."""
+    amdclangxx = shutil.which("amdclang++")
+    if amdclangxx is None:
+        pytest.skip("amdclang++ not found")
     source = tmp_path / f"{kernel.name}.hip"
     source.write_text(lower_kernel_to_hip(kernel, arch="gfx942"))
     output = tmp_path / f"{kernel.name}.ll"
     subprocess.run(
-        [hipcc, "--offload-arch=gfx942", "--cuda-device-only", "-O3", "-S",
-         "-emit-llvm", str(source), "-o", str(output)],
+        [amdclangxx, "--offload-arch=gfx942", "--offload-device-only", "-x", "hip",
+         "-O3", "-S", "-emit-llvm", str(source), "-o", str(output)],
         check=True,
         capture_output=True,
         timeout=240,
@@ -127,7 +127,7 @@ def _step_kernel(name, *, inbounds):
     return b.kernel
 
 
-def test_hipcc_device_ir_has_no_inbounds_step(tmp_path):
+def test_amdclangxx_device_ir_has_no_inbounds_step(tmp_path):
     offset_ir = _device_ir(tmp_path, _step_kernel("gpo_step", inbounds=False))
     assert "getelementptr inbounds" not in offset_ir
     # The control: the same kernel through global_ptr_add steps inbounds, so
@@ -327,7 +327,7 @@ def _run(blob, kernel_name, x):
     return buffers[0], y, z
 
 
-@pytest.mark.parametrize("route", ["llvm", "hipcc"])
+@pytest.mark.parametrize("route", ["llvm", "hip"])
 def test_gpu_offset_pointers(route):
     arch = _gpu_arch()
     if not arch:
@@ -338,11 +338,11 @@ def test_gpu_offset_pointers(route):
 
         blob = compile_kernel(kernel, arch=arch).hsaco
     else:
-        if shutil.which("hipcc") is None:
-            pytest.skip("hipcc not found")
-        from rocke.helpers.compile import compile_kernel_via_hipcc
+        if shutil.which("amdclang++") is None:
+            pytest.skip("amdclang++ not found")
+        from rocke.helpers.compile import compile_kernel_via_hip
 
-        blob = compile_kernel_via_hipcc(kernel, arch=arch).hsaco
+        blob = compile_kernel_via_hip(kernel, arch=arch).hsaco
     x = np.arange(1, X_ELEMS + 1, dtype=np.float32) * np.float32(1.5)
     x_address, y, z = _run(blob, kernel.name, x)
     # hipMalloc aligns an allocation to far more than 4 bytes, so X + 2 has

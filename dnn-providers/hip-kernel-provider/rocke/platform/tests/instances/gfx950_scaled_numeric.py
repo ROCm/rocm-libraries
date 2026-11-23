@@ -106,7 +106,7 @@ def run_numeric(monkeypatch, a, b, output, route, M, N, K, cases=None):
     # Check dependencies before compiling or importing the numeric harness.
     _require_tool("llvm-objdump")
     if route == "hip":
-        _require_tool("hipcc")
+        _require_tool("amdclang++")
     from rocke.examples.gfx950.gemm import block_scaled_gemm_verify as verifier
     from rocke.instances.gfx950.block_scaled_gemm import BlockScaledGemmSpec
 
@@ -115,7 +115,7 @@ def run_numeric(monkeypatch, a, b, output, route, M, N, K, cases=None):
         ("neutral", "a-only", "b-only", "mixed", "positive")
         + tuple(f"group-{i}" for i in range(K // 32))
     )
-    key = "compile_kernel" if route == "comgr" else "compile_kernel_via_hipcc"
+    key = "compile_kernel" if route == "comgr" else "compile_kernel_via_hip"
     original = getattr(verifier, key)
 
     def compile_checked(kernel, **kwargs):

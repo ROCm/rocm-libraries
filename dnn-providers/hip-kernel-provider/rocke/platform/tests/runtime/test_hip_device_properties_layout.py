@@ -3,7 +3,7 @@
 
 """Check the ctypes ABI against installed HIP headers without loading HIP.
 
-Set ROCM_PATH, ROCM_HOME, or HIP_PATH, or put hipcc on PATH. The test skips
+Set ROCM_PATH, ROCM_HOME, or HIP_PATH, or put amdclang++ on PATH. The test skips
 if the headers or a host C++ compiler are unavailable, and the launch-config
 check skips on headers that predate cluster launch. Layout mismatches and
 compiler errors fail the test.
@@ -42,10 +42,14 @@ def _hip_toolchain() -> tuple[Path, str]:
         None,
     )
     if root is None:
-        hipcc = shutil.which("hipcc")
-        if hipcc is None:
-            pytest.skip("set ROCM_PATH or put hipcc on PATH to check the HIP layout")
-        root = str(Path(hipcc).resolve().parent.parent)
+        # amdclang++ lives at <rocm>/lib/llvm/bin/amdclang++, so walk up 4
+        # levels to reach the ROCm root.
+        amdclangpp = shutil.which("amdclang++")
+        if amdclangpp is None:
+            pytest.skip(
+                "set ROCM_PATH or put amdclang++ on PATH to check the HIP layout"
+            )
+        root = str(Path(amdclangpp).resolve().parent.parent.parent.parent)
     include = Path(root) / "include"
     if not (include / "hip" / "hip_runtime_api.h").is_file():
         pytest.skip(f"HIP headers unavailable under {include}")

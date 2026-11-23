@@ -146,7 +146,7 @@ REGISTRY: List[Example] = [
 # ---------------------------------------------------------------------
 # Digest: distill an example's stdout to a stable, seed-deterministic blob
 # ---------------------------------------------------------------------
-# We do NOT digest the whole stdout (it carries hipcc/total timings, byte
+# We do NOT digest the whole stdout (it carries hip/total timings, byte
 # counts that vary with the compiler, device-name banners, tmp paths). We
 # keep only the lines that encode the *numeric verdict*, which is what
 # repeatability is actually about.
@@ -161,7 +161,7 @@ _DEFAULT_KEEP = (
 )
 # Lines to always drop even if a keep-pattern matches (volatile fields).
 _DROP = (
-    r"hipcc=\d",
+    r"hip=\d",
     r"total=\d",
     r"\d+\s*ms",
     r"\bB,\s*isa=",
@@ -171,7 +171,7 @@ _DROP = (
 # otherwise-stable verdict line).
 _SCRUB = [
     (re.compile(r"\(\d+ B[^)]*\)"), "(<bytes>)"),
-    (re.compile(r"hipcc=[0-9.]+ms"), "hipcc=<t>"),
+    (re.compile(r"hip=[0-9.]+ms"), "hip=<t>"),
     (re.compile(r"total=[0-9.]+ms"), "total=<t>"),
     (re.compile(r"[0-9]+ms"), "<t>ms"),
     (re.compile(r"device=[^\n]+"), "device=<dev>"),

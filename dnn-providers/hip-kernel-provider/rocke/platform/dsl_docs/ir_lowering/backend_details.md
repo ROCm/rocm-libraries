@@ -12,7 +12,7 @@ There are two interchangeable lowering engines that emit byte-identical AMDGPU L
 
 The backend emits AMDGPU LLVM IR text directly. Benefits:
 
-- very fast iteration vs hipcc / template instantiation (typical end-to-end build under 30 ms warm);
+- very fast iteration vs amdclang++ / template instantiation (typical end-to-end build under 30 ms warm);
 - primitives map closely to AMDGPU intrinsics;
 - generated text can be inspected, disassembled, and diffed;
 - no external compiler frontend needed.

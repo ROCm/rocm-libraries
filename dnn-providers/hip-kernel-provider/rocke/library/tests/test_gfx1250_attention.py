@@ -753,7 +753,7 @@ class TestGfx1250Gpu(unittest.TestCase):
     def test_attention_fwd_causal(self):
         # Causal currently verifies through the HIP/clang path. The direct LLVM
         # path still has a WMMA scheduling/codegen issue that produces
-        # deterministic NaNs; hipcc emits a correct code object for the same IR.
+        # deterministic NaNs; HIP emits a correct code object for the same IR.
         rc, out = self._run(
             "builders.gfx1250.attention.wmma_attention_fwd_verify",
             "--seqlen-q",

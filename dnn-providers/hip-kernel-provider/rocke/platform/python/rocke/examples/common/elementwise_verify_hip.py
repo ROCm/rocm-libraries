@@ -1,9 +1,9 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""HIP-path (hipcc) elementwise-add numeric verify -- the "simple op" check.
+"""HIP-path elementwise-add numeric verify -- the "simple op" check.
 
 Builds a binary elementwise-add f16 kernel, compiles it through the HIP-C++ ->
-hipcc backend (``compile_kernel_via_hipcc``), runs it on the GPU, and compares
+amdclang++ backend (``compile_kernel_via_hip``), runs it on the GPU, and compares
 to numpy. Confirms the non-MMA portion of the HIP lowering path (loads, vec
 pack/store, f32 promote, store) is numerically correct on the target arch.
 
@@ -18,7 +18,7 @@ import struct
 
 import numpy as np
 
-from rocke.helpers.compile import compile_kernel_via_hipcc
+from rocke.helpers.compile import compile_kernel_via_hip
 from rocke.instances.common.elementwise import (
     ElementwiseSpec,
     build_elementwise,
@@ -47,10 +47,10 @@ def main() -> int:
         vec=args.vec,
         name="ew_hipverify",
     )
-    art = compile_kernel_via_hipcc(build_elementwise(spec), arch=args.arch)
+    art = compile_kernel_via_hip(build_elementwise(spec), arch=args.arch)
     print(
         f"[{args.arch}] HIP-path built {art.kernel_name} ({art.hsaco_bytes} B) "
-        f"hipcc={art.timings.get('hipcc', 0):.0f}ms"
+        f"hip={art.timings.get('hip', 0):.0f}ms"
     )
 
     rng = np.random.default_rng(0x1234)

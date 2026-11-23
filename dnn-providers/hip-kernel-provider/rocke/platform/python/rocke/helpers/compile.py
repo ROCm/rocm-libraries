@@ -105,7 +105,7 @@ COMGR_FRESH_PROCESS_ATTR = "comgr_fresh_process"
 
 @dataclass
 class KernelArtifact:
-    """Output from ``compile_kernel`` or ``compile_kernel_via_hipcc``.
+    """Output from ``compile_kernel`` or ``compile_kernel_via_hip``.
 
     ``isa`` records the COMGR ISA name for the compiler target used to build
     ``hsaco``, including any target features. It is not a device query result.
@@ -593,35 +593,35 @@ def _is_zero_agpr_alloc(value: object) -> bool:
         return False
 
 
-def compile_kernel_via_hipcc(
+def compile_kernel_via_hip(
     kernel: KernelDef,
     *,
     arch: str = "gfx950",
     extra_flags: Optional[List[str]] = None,
     timeout_s: int = 240,
 ) -> KernelArtifact:
-    """Lower ``kernel`` to HIP C++ and compile it with ``hipcc --genco``.
+    """Lower ``kernel`` to HIP C++ and compile it with ``amdclang++``.
 
     ``arch`` accepts the same target IDs as :func:`compile_kernel`. The base
     architecture is passed to ``lower_kernel_to_hip``; the compiler target
-    is passed to hipcc as ``--offload-arch``. Neither is discovered from a GPU.
-    The compiler target is chosen for hipcc's own clang
+    is passed to amdclang++ as ``--offload-arch``. Neither is discovered from
+    a GPU.  The compiler target is chosen for amdclang++'s clang
     (:func:`~rocke.core.arch.compiler_target_for_llvm_major`), as
     :func:`compile_kernel` does for the compiler COMGR loads: a clang newer
     than every qualified lane was never measured, so the processor keeps its
-    name and hipcc decides whether to take it.
+    name.
 
-    Requires hipcc on ``PATH`` and a kernel supported by the HIP lowerer.
+    Requires amdclang++ on ``PATH`` and a kernel supported by the HIP lowerer.
     An explicit scheduler policy is rejected because this path does not emit
     the LLVM function attribute used by the COMGR path.
 
-    Returns a :class:`KernelArtifact` with hipcc's output in ``hsaco``, an
-    empty ``llvm_text``, and timings for HIP lowering and compilation.
+    Returns a :class:`KernelArtifact` with the compiled output in ``hsaco``,
+    an empty ``llvm_text``, and timings for HIP lowering and compilation.
     """
     policy = codegen_policy_for_kernel(kernel)
     if policy.scheduler_strategy is not None:
         raise ValueError(
-            "compile_kernel_via_hipcc does not support scheduler_strategy; "
+            "compile_kernel_via_hip does not support scheduler_strategy; "
             "use compile_kernel so the policy is emitted as an LLVM function attribute"
         )
 
@@ -630,7 +630,7 @@ def compile_kernel_via_hipcc(
     ir_text = print_ir(kernel)
     t1 = time.perf_counter()
     lower_arch = base_arch_from_target_id(arch)
-    compiler_target = compiler_target_for_llvm_major(arch, _hipcc_llvm_major())
+    compiler_target = compiler_target_for_llvm_major(arch, _hip_compiler_llvm_major())
     hip_src = lower_kernel_to_hip(kernel, arch=lower_arch)
     t2 = time.perf_counter()
     flags = ["-O3"]
@@ -643,9 +643,10 @@ def compile_kernel_via_hipcc(
         src_path.write_text(hip_src, encoding="utf-8")
         proc = subprocess.run(
             [
-                "hipcc",
+                "amdclang++",
+                "--offload-device-only",
+                "-x", "hip",
                 f"--offload-arch={compiler_target}",
-                "--genco",
                 *flags,
                 str(src_path),
                 "-o",
@@ -657,7 +658,7 @@ def compile_kernel_via_hipcc(
         )
         if proc.returncode != 0:
             raise RuntimeError(
-                f"hipcc failed for kernel '{kernel.name}' (arch={arch}):\n"
+                f"amdclang++ failed for kernel '{kernel.name}' (arch={arch}):\n"
                 f"--- stdout ---\n{proc.stdout[-2000:]}\n"
                 f"--- stderr ---\n{proc.stderr[-2000:]}"
             )
@@ -665,7 +666,7 @@ def compile_kernel_via_hipcc(
     t3 = time.perf_counter()
     timings["ir_build"] = (t1 - t0) * 1000.0
     timings["ir_lower_hip"] = (t2 - t1) * 1000.0
-    timings["hipcc"] = (t3 - t2) * 1000.0
+    timings["hip"] = (t3 - t2) * 1000.0
     timings["total"] = (t3 - t0) * 1000.0
     isa = f"amdgcn-amd-amdhsa--{compiler_target}"
     return KernelArtifact(
@@ -679,58 +680,65 @@ def compile_kernel_via_hipcc(
     )
 
 
-def _hipcc_llvm_major() -> int:
-    """The LLVM major of the clang that ``hipcc`` on ``PATH`` runs.
+compile_kernel_via_hipcc = compile_kernel_via_hip  # backward compat alias
 
-    Read from ``hipcc --version``: the compiler COMGR loads and
+
+def _hip_compiler_llvm_major() -> int:
+    """The LLVM major of ``amdclang++`` on ``PATH``.
+
+    Read from ``amdclang++ --version``: the compiler COMGR loads and
     ``ROCKE_LLVM_FLAVOR`` describe a different compiler, so they say nothing
-    about the names hipcc accepts.
+    about the names amdclang++ accepts.
     """
     proc = subprocess.run(
-        ["hipcc", "--version"], capture_output=True, text=True, timeout=60, check=False
+        ["amdclang++", "--version"], capture_output=True, text=True, timeout=60, check=False
     )
     match = re.search(r"clang version (\d+)\.", proc.stdout)
     if proc.returncode != 0 or match is None:
         raise RuntimeError(
-            "cannot read the LLVM version of hipcc's clang - `hipcc --version` "
+            "cannot read the LLVM version of amdclang++ - `amdclang++ --version` "
             f"exited {proc.returncode}, expected a line 'clang version "
             f"<major>.<minor>...'; output:\n{proc.stdout[-2000:]}{proc.stderr[-2000:]}"
         )
     return int(match.group(1))
 
 
-def emit_device_llvm_ir_via_hipcc(
+_hipcc_llvm_major = _hip_compiler_llvm_major  # backward compat alias
+
+
+def emit_device_llvm_ir_via_hip(
     kernel: KernelDef,
     *,
     arch: str = "gfx950",
     extra_flags: Optional[List[str]] = None,
     timeout_s: int = 120,
 ) -> str:
-    """Lower ``kernel`` to HIP C++ and ask hipcc to emit device LLVM IR.
+    """Lower ``kernel`` to HIP C++ and ask amdclang++ to emit device LLVM IR.
 
-    Target selection matches :func:`compile_kernel_via_hipcc`: the base
+    Target selection matches :func:`compile_kernel_via_hip`: the base
     architecture selects HIP lowering and the compiler target becomes
-    hipcc's ``--offload-arch`` argument.
+    amdclang++'s ``--offload-arch`` argument.
 
-    Uses ``-S -emit-llvm --cuda-device-only``. Tests can compare the returned
-    ``target datalayout`` with rocKE's LLVM lowering for the same target.
+    Uses ``-S -emit-llvm --offload-device-only``. Tests can compare the
+    returned ``target datalayout`` with rocKE's LLVM lowering for the same
+    target.
 
     Args:
         kernel: The kernel to lower.
         arch: Target ID, such as ``gfx950`` or ``gfx1250-strict``.
-        extra_flags: hipcc flags appended after ``-O3``.
+        extra_flags: amdclang++ flags appended after ``-O3``.
         timeout_s: Subprocess timeout in seconds.
 
     Returns:
         The generated ``.ll`` files joined with filename comments.
 
     Raises:
-        RuntimeError: If hipcc fails or produces no ``.ll`` files.
-        FileNotFoundError: If hipcc cannot be located.
-        subprocess.TimeoutExpired: If hipcc exceeds ``timeout_s``.
+        RuntimeError: If amdclang++ fails or produces no ``.ll`` files.
+        FileNotFoundError: If amdclang++ cannot be located.
+        subprocess.TimeoutExpired: If amdclang++ exceeds ``timeout_s``.
     """
     lower_arch = base_arch_from_target_id(arch)
-    compiler_target = compiler_target_for_llvm_major(arch, _hipcc_llvm_major())
+    compiler_target = compiler_target_for_llvm_major(arch, _hip_compiler_llvm_major())
     hip_src = lower_kernel_to_hip(kernel, arch=lower_arch)
     flags = ["-O3"]
     if extra_flags:
@@ -742,11 +750,12 @@ def emit_device_llvm_ir_via_hipcc(
         src_path.write_text(hip_src, encoding="utf-8")
         proc = subprocess.run(
             [
-                "hipcc",
+                "amdclang++",
+                "--offload-device-only",
+                "-x", "hip",
                 f"--offload-arch={compiler_target}",
                 "-S",
                 "-emit-llvm",
-                "--cuda-device-only",
                 *flags,
                 str(src_path),
                 "-o",
@@ -758,19 +767,22 @@ def emit_device_llvm_ir_via_hipcc(
         )
         if proc.returncode != 0:
             raise RuntimeError(
-                f"hipcc -emit-llvm failed for kernel '{kernel.name}' (arch={arch}):\n"
+                f"amdclang++ -emit-llvm failed for kernel '{kernel.name}' (arch={arch}):\n"
                 f"--- stdout ---\n{proc.stdout[-2000:]}\n"
                 f"--- stderr ---\n{proc.stderr[-2000:]}"
             )
-        # hipcc may emit multiple .ll files (per-arch or per-module splits);
+        # amdclang++ may emit multiple .ll files (per-arch or per-module splits);
         # collect all of them.
         ll_files = sorted(Path(td).glob("*.ll"))
         if not ll_files:
             raise RuntimeError(
-                f"hipcc -emit-llvm produced no .ll files in {td} (expected at least one)"
+                f"amdclang++ -emit-llvm produced no .ll files in {td} (expected at least one)"
             )
         parts = []
         for f in ll_files:
             parts.append(f"; ===== {f.name} =====\n")
             parts.append(f.read_text(encoding="utf-8"))
         return "".join(parts)
+
+
+emit_device_llvm_ir_via_hipcc = emit_device_llvm_ir_via_hip  # backward compat alias

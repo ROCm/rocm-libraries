@@ -195,7 +195,7 @@ out of the repository.
 ### Reproducing the case study, Part 2
 
 On a gfx1250 host with ROCm installed (`ROCM_PATH`; the probes compile with
-its `hipcc`) and numpy:
+its `amdclang++`) and numpy:
 
 ```sh
 export PYTHONPATH=<platform>/python ROCM_PATH=<rocm>

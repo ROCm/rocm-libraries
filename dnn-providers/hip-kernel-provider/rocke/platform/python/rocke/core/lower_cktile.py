@@ -5,7 +5,7 @@
 
 Distinct from :mod:`rocke.core.lower_hip`, which lowers the **post-IR**
 ``KernelDef`` to a flat ``__global__`` body that mirrors the SSA one-to-one
-(useful for IR inspection and quick hipcc validation). The CK Tile lowering
+(useful for IR inspection and quick HIP validation). The CK Tile lowering
 operates **before** the IR exists -- it walks the high-level Python
 dataclass spec (e.g. :class:`UniversalGemmSpec`) and emits a C++ source
 that composes the same CK Tile templates a hand-written CK Tile kernel

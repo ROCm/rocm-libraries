@@ -1539,7 +1539,7 @@ def build_direct_conv_16c(
                         # path. Mixing a 16x16x16 residual into the same
                         # accumulator as a 16x16x32 atom is a read-after-write
                         # accumulator hazard that both the comgr LLVM-direct
-                        # backend and hipcc miscompile here, silently
+                        # backend and HIP miscompile here, silently
                         # corrupting the H-edge output rows in a
                         # shape-dependent way.
                         acc_in = _mfma(

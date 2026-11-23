@@ -41,7 +41,7 @@ Modules:
                      `name_of`, `GemmLowerResult`, `Backend*` errors).
   - ``lower_hip``  : `lower_kernel_to_hip(kernel) -> str` raw HIP C++
                      that mirrors the SSA IR one-to-one (compiles via
-                     hipcc; useful for IR inspection and ISA diffs).
+                     amdclang++; useful for IR inspection and ISA diffs).
   - ``lower_cktile``: `lower_spec_to_cktile(spec) -> str` CK Tile-shaped
                      C++ source that composes the same templates
                      (``GemmKernel<TilePartitioner, GemmPipeline,

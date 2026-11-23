@@ -71,7 +71,7 @@ class TestAttentionTuningContract(unittest.TestCase):
             self,
             [
                 "attention_gfx950_u2d_narrow_nw2_mw16_t4xb_llvm",
-                "attention_gfx950_u2d_transposed32_nw1_mw32_t2xb_hipcc",
+                "attention_gfx950_u2d_transposed32_nw1_mw32_t2xb_hip",
             ],
             [_req()],
             other_requests=[_req(batch=4, seqlen_q=2048, seqlen_k=2048)],

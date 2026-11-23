@@ -8,8 +8,8 @@ bit ``W - 1``. The HIP lowering reads the value, or each lane, through the
 unsigned type of its width before shifting, so a negative i8 or i16 does not
 shift its sign bits in and an i64 keeps its high word. Covers each engine's
 HIP source (the C++ engine's must equal the Python engine's) and its refusal
-of a non-integer shift, that hipcc accepts the source, and, when a GPU is
-present, that the LLVM route and hipcc on the HIP source compute the same
+of a non-integer shift, that amdclang++ accepts the source, and, when a GPU is
+present, that the LLVM route and HIP on the HIP source compute the same
 values as numpy, on negative and positive values alike.
 """
 
@@ -146,22 +146,22 @@ def test_hip_refuses_a_shift_of_a_non_integer(op_name, engine):
     )
 
 
-def _compile_via_hipcc(kernel, arch):
-    """``kernel`` compiled from its HIP source by hipcc; skip without hipcc."""
-    if shutil.which("hipcc") is None:
-        pytest.skip("hipcc not found")
-    from rocke.helpers.compile import compile_kernel_via_hipcc
+def _compile_via_hip(kernel, arch):
+    """``kernel`` compiled from its HIP source by amdclang++; skip without amdclang++."""
+    if shutil.which("amdclang++") is None:
+        pytest.skip("amdclang++ not found")
+    from rocke.helpers.compile import compile_kernel_via_hip
 
-    return compile_kernel_via_hipcc(kernel, arch=arch)
+    return compile_kernel_via_hip(kernel, arch=arch)
 
 
 @pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
 def test_hip_source_compiles(arch):
     for case in CASES:
-        assert _compile_via_hipcc(_lshr_kernel(case), arch).hsaco, _id(case)
+        assert _compile_via_hip(_lshr_kernel(case), arch).hsaco, _id(case)
 
 
-@pytest.mark.parametrize("route", ["llvm", "hipcc"])
+@pytest.mark.parametrize("route", ["llvm", "hip"])
 def test_gpu_matches_a_logical_shift(route):
     arch = current_device_arch()
     from rocke.helpers.compile import compile_kernel
@@ -173,7 +173,7 @@ def test_gpu_matches_a_logical_shift(route):
         if route == "llvm":
             artifact = compile_kernel(kernel, arch=arch)
         else:
-            artifact = _compile_via_hipcc(kernel, arch)
+            artifact = _compile_via_hip(kernel, arch)
         np_dtype = case.numpy_dtype
         bits = np.dtype(np_dtype).itemsize * 8
         unsigned_dtype = np.dtype(f"u{bits // 8}")

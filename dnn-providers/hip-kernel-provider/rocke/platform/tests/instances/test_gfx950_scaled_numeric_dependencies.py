@@ -21,7 +21,7 @@ def helper():
 
 @pytest.mark.parametrize(
     "route,missing",
-    [("comgr", "llvm-objdump"), ("hip", "llvm-objdump"), ("hip", "hipcc")],
+    [("comgr", "llvm-objdump"), ("hip", "llvm-objdump"), ("hip", "amdclang++")],
 )
 def test_missing_tools_skip(helper, monkeypatch, route, missing):
     monkeypatch.setattr(helper, "require_gpu", lambda: None)
@@ -45,8 +45,8 @@ def test_available_tools_reach_harness_and_preserve_failures(
     from rocke.examples.gfx950.gemm import block_scaled_gemm_verify as verifier
 
     monkeypatch.setattr(helper, "require_gpu", lambda: None)
-    # COMGR must remain usable without hipcc.
-    available = {"llvm-objdump", "hipcc"} if route == "hip" else {"llvm-objdump"}
+    # COMGR must remain usable without amdclang++.
+    available = {"llvm-objdump", "amdclang++"} if route == "hip" else {"llvm-objdump"}
     monkeypatch.setattr(
         helper.shutil, "which", lambda name: name if name in available else None
     )

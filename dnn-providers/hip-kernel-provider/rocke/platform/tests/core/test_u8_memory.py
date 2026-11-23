@@ -123,16 +123,18 @@ def test_native_lds_vector_access_matches_the_python_builder(direction, elem, n)
 
 @pytest.mark.parametrize("kernel_builder", [_byte_copy_kernel, _lds_byte_store_kernel])
 def test_u8_hip_source_compiles(kernel_builder, tmp_path):
-    if not shutil.which("hipcc"):
-        pytest.skip("hipcc not in PATH")
+    if not shutil.which("amdclang++"):
+        pytest.skip("amdclang++ not in PATH")
     path = tmp_path / "kernel.hip"
     path.write_text(lower_kernel_to_hip(kernel_builder(U8), arch="gfx90a"))
     subprocess.run(
         [
-            "hipcc",
-            "--offload-arch=gfx90a",
+            "amdclang++",
             "--cuda-device-only",
             "-fsyntax-only",
+            "-x",
+            "hip",
+            "--offload-arch=gfx90a",
             str(path),
         ],
         check=True,

@@ -21,7 +21,7 @@ from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
 from rocke.helpers.autotune import AutotuneConfig
 from rocke.helpers.compile import (
     _comgr_options_for_kernel,
-    compile_kernel_via_hipcc,
+    compile_kernel_via_hip,
 )
 
 
@@ -151,11 +151,11 @@ class TestCodegenPolicy(unittest.TestCase):
         apply_codegen_policy(kernel, CodegenPolicy(scheduler_strategy="max-ilp"))
         self.assertEqual(_comgr_options_for_kernel(kernel), ["-O3"])
 
-    def test_hipcc_rejects_a_policy_it_cannot_honor(self):
+    def test_hip_compiler_rejects_a_policy_it_cannot_honor(self):
         kernel = _kernel()
         apply_codegen_policy(kernel, CodegenPolicy(scheduler_strategy="max-ilp"))
         with self.assertRaisesRegex(ValueError, "does not support scheduler_strategy"):
-            compile_kernel_via_hipcc(kernel)
+            compile_kernel_via_hip(kernel)
 
     def test_autotune_extra_carries_policy_without_api_change(self):
         policy = CodegenPolicy(scheduler_strategy="iterative-maxocc")

@@ -624,7 +624,7 @@ if(ROCKE_INSTALL_TESTS)
            "${_rocke_barrier_parity_entries}")
 
     # Compiler tool locations for Python entries that compile and disassemble
-    # kernels: hipcc in ROCm's bin/, llvm-objdump and llvm-readelf in its
+    # kernels: amdclang++ in ROCm's lib/llvm/bin/, llvm-objdump and llvm-readelf in its
     # lib/llvm/bin/ (neither is on the CI image's PATH), and the device-library
     # bitcode. CTest resolves these lists at test time; they stay empty off Linux
     # or without ROCM_PATH. Tool discovery is separate from enforcement policy:

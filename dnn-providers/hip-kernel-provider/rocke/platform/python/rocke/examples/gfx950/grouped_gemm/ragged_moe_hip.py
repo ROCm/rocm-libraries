@@ -29,7 +29,7 @@ from __future__ import annotations
 import argparse
 import math
 
-from rocke.helpers.compile import compile_kernel, compile_kernel_via_hipcc
+from rocke.helpers.compile import compile_kernel, compile_kernel_via_hip
 from rocke.instances.gfx950.ragged_moe import (
     RaggedMoeSpec,
     build_ragged_moe,
@@ -193,7 +193,7 @@ def _main(argv=None) -> int:
     art = (
         compile_kernel(kernel, arch="gfx950")
         if combine_needs_llvm
-        else compile_kernel_via_hipcc(kernel, arch="gfx950")
+        else compile_kernel_via_hip(kernel, arch="gfx950")
     )
     sig = ragged_moe_signature()
     L = KernelLauncher(

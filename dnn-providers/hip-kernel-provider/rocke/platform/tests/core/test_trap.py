@@ -16,7 +16,7 @@ says.
 Covers the LLVM IR and HIP source of each engine (the same text at every LLVM
 flavor), the refusal of a trap with operands or results by the verifier and
 every lowering, the instruction in the compiled code object, and, when a GPU is
-present, on the LLVM and the hipcc route, in a child process: a launch whose
+present, on the LLVM and the HIP route, in a child process: a launch whose
 trap branch is not taken runs to its store.
 """
 
@@ -241,8 +241,8 @@ _CHILD = textwrap.dedent(
         from rocke.helpers.compile import compile_kernel
         blob = compile_kernel(kernel, arch=arch).hsaco
     else:
-        from rocke.helpers.compile import compile_kernel_via_hipcc
-        blob = compile_kernel_via_hipcc(kernel, arch=arch).hsaco
+        from rocke.helpers.compile import compile_kernel_via_hip
+        blob = compile_kernel_via_hip(kernel, arch=arch).hsaco
     runtime = Runtime()
     function = runtime.load_module(blob).get_function(kernel.name)
     y_dev = runtime.alloc(4)
@@ -255,11 +255,11 @@ _CHILD = textwrap.dedent(
 )
 
 
-@pytest.mark.parametrize("route", ["llvm", "hipcc"])
+@pytest.mark.parametrize("route", ["llvm", "hip"])
 def test_gpu_kernel_runs_to_its_store_when_the_trap_is_not_taken(route):
     arch = current_device_arch()
-    if route == "hipcc" and shutil.which("hipcc") is None:
-        pytest.skip("hipcc not found")
+    if route == "hip" and shutil.which("amdclang++") is None:
+        pytest.skip("amdclang++ not found")
     child = subprocess.run(
         rocke_python_command("-c", _CHILD, route, arch, str(Path(__file__).parent)),
         check=False,  # the child's output is the result, read below

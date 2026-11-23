@@ -17,7 +17,7 @@ Run on visible HIP device 0 (must be gfx1250), for example::
         --matrix-path wmma_scale --m 32 --n 48 --k 256 --compile-route hip
 
 Native COMGR lowering requires ROCKE_LLVM_FLAVOR=llvm23 and a matching
-compiler. HIP verification requires a hipcc supporting the scaled builtins.
+compiler. HIP verification requires an amdclang++ supporting the scaled builtins.
 NumPy and ml_dtypes are required; torch is not used.
 """
 
@@ -31,7 +31,7 @@ import numpy as np
 
 from ....core.dtypes import normalize_dtype
 from ....helpers import compile_kernel
-from ....helpers.compile import compile_kernel_via_hipcc
+from ....helpers.compile import compile_kernel_via_hip
 from ....instances.gfx1250.block_scaled_gemm import (
     _LOWBIT_DTYPES,
     BlockScaledGemmSpec,
@@ -152,7 +152,7 @@ def run_cases(
         raise RuntimeError(f"visible HIP device 0 must be gfx1250, got {arch!r}")
     kernel = build_block_scaled_gemm(spec, arch=arch)
     compile_fn = (
-        compile_kernel if compile_route == "comgr" else compile_kernel_via_hipcc
+        compile_kernel if compile_route == "comgr" else compile_kernel_via_hip
     )
     art = compile_fn(kernel, arch=arch)
     print(

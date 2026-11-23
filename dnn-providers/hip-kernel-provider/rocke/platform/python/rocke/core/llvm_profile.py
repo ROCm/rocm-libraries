@@ -31,7 +31,7 @@ from dataclasses import dataclass
 #         LLVM 20:       ...-p8:128:128-...
 #         LLVM 22 / 23:  ...-p8:128:128:128:48-...
 #
-# Each constant reflects what the installed hipcc actually produces for that
+# Each constant reflects what the installed amdclang++ actually produces for that
 # LLVM vintage; the drift guard re-derives them from the toolchain.
 #
 # (Confirmed against clang 20 and current clang 22 amdgcn output.) On the
@@ -42,7 +42,7 @@ from dataclasses import dataclass
 # or a stricter verifier can reject a mismatch, so we emit the correct
 # string up front. Pick by :data:`LLVM_FLAVOR_*` via
 # :func:`_datalayout_for_flavor`. A drift guard
-# (``test_datalayout_matches_hipcc_emitted_ir``) re-derives both from the
+# (``test_datalayout_matches_amdclangpp_emitted_ir``) re-derives both from the
 # installed toolchain; if it fails, regenerate with the clang command above.
 _DATALAYOUT_LLVM20 = (
     "e-p:64:64-p1:64:64-p2:32:32-p3:32:32-p4:64:64-p5:32:32-p6:32:32"
@@ -69,7 +69,7 @@ _DATALAYOUT_LLVM22 = (
 # This is rocKE's flavor constant, NOT a claim about what every LLVM 23+ /
 # ROCm 7.13+ build emits: compiler builds vary, and older ones -- including some
 # builds numbered LLVM 23 or later -- omit ``p10``-``p15``. The drift guard
-# ``test_datalayout_matches_hipcc_emitted_ir`` accommodates exactly that
+# ``test_datalayout_matches_amdclangpp_emitted_ir`` accommodates exactly that
 # variation.
 #
 # Why we carry the longer form. LLVM's backend has long rejected a module whose
@@ -89,8 +89,8 @@ _DATALAYOUT_LLVM22 = (
 #
 # That is an observation about the builds we exercised, not a proof about every
 # toolchain. It is still the right trade: do NOT "fix" a mismatch against an
-# older hipcc by deleting ``p10``-``p15``, since that re-breaks every kernel on a
-# current toolchain. Regenerate via ``test_datalayout_matches_hipcc_emitted_ir``
+# older amdclang++ by deleting ``p10``-``p15``, since that re-breaks every kernel on a
+# current toolchain. Regenerate via ``test_datalayout_matches_amdclangpp_emitted_ir``
 # if a future build drifts further.
 _DATALAYOUT_LLVM23 = (
     "e-m:e-p:64:64-p1:64:64-p2:32:32-p3:32:32-p4:64:64-p5:32:32-p6:32:32"

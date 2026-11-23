@@ -195,7 +195,7 @@ which reads the rejections the build generates from the same columns through
 `tools/gen_arch_domain_cpp.py`) compiles it as the
 generic its row points at, with a message saying so, and refuses a target with
 no such generic. Each compile helper passes the flavor of the compiler it runs:
-the one COMGR loads for `compile_kernel`, hipcc's own clang for the hipcc helpers.
+the one COMGR loads for `compile_kernel`, amdclang++'s own clang for the HIP helpers.
 `compiler_target_from_target_id()` only removes the profile and never replaces
 the processor. The C++ engine has no compile path yet; its function exists for
 API parity.

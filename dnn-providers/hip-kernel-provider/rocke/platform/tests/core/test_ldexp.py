@@ -12,7 +12,7 @@ overflow or flush the factor.
 Covers the LLVM IR and HIP source of both engines (the same text at every LLVM
 flavor), the refusals of the builder, the verifier and every lowering with
 their exact texts, the instruction in the compiled code object, and, when a GPU
-is present, on the LLVM and the hipcc route, the results for values and
+is present, on the LLVM and the HIP route, the results for values and
 exponents at and beyond the f32 range against numpy's ldexp.
 """
 
@@ -182,20 +182,20 @@ _CASES = [
 ]
 
 
-@pytest.mark.parametrize("route", ["llvm", "hipcc"])
+@pytest.mark.parametrize("route", ["llvm", "hip"])
 def test_gpu_results_equal_numpy_ldexp(route):
     arch = current_device_arch()
-    if route == "hipcc" and shutil.which("hipcc") is None:
-        pytest.skip("hipcc not found")
+    if route == "hip" and shutil.which("amdclang++") is None:
+        pytest.skip("amdclang++ not found")
     kernel = _ldexp_kernel(f"ldexp_gpu_{route}")
     if route == "llvm":
         from rocke.helpers.compile import compile_kernel
 
         artifact = compile_kernel(kernel, arch=arch)
     else:
-        from rocke.helpers.compile import compile_kernel_via_hipcc
+        from rocke.helpers.compile import compile_kernel_via_hip
 
-        artifact = compile_kernel_via_hipcc(kernel, arch=arch)
+        artifact = compile_kernel_via_hip(kernel, arch=arch)
     x = np.array([v for v, _ in _CASES], dtype=np.float32)
     e = np.array([k for _, k in _CASES], dtype=np.int32)
     with np.errstate(over="ignore", under="ignore"):

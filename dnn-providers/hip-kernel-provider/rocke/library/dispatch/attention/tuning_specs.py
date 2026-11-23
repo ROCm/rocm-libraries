@@ -219,8 +219,8 @@ def make_explicit_attention_2d_spec(
         raise ValueError(f"block_m_per_warp must be one of {BLOCK_M_PER_WARP}")
     if config.waves_per_eu not in WAVES_PER_EU:
         raise ValueError(f"waves_per_eu must be one of {WAVES_PER_EU}")
-    if config.compile_backend not in ("llvm", "hipcc"):
-        raise ValueError("compile_backend must be 'llvm' or 'hipcc'")
+    if config.compile_backend not in ("llvm", "hip"):
+        raise ValueError("compile_backend must be 'llvm' or 'hip'")
     if arch == "gfx942" and config.compile_backend != "llvm":
         raise ValueError(
             "gfx942 explicit attention supports only the validated llvm backend"

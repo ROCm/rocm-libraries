@@ -114,7 +114,7 @@ pytest rocke/platform/tests rocke/library/tests
 
 Expected residual on a box whose `/opt/rocm` clang is a *different* LLVM vintage
 than rocke's hardcoded datalayout constants: the 7
-`TestDatalayoutDriftGuard::test_datalayout_matches_hipcc_emitted_ir` subtests
+`TestDatalayoutDriftGuard::test_datalayout_matches_hip_compiler_emitted_ir` subtests
 fail with an `e-m:` datalayout diff. This is a toolchain-vs-constant drift the
 guard is designed to catch (regenerate `_DATALAYOUT_*` in
 `core/lower_llvm.py` for the local toolchain) — it is independent of the
