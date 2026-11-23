@@ -26,6 +26,8 @@ enum class GroupLengths
     /// A batch with more queries than keys (fully masked rows under bottom-right causal), a
     /// batch with no queries and a batch with no keys.
     EDGE,
+    /// One batch that spans several Q-tiles and has at least as many keys as queries.
+    SINGLE_BATCH,
 };
 
 /**
@@ -41,6 +43,8 @@ struct GraphTestCase
 
     int64_t batch = 2;
     int64_t numHeads = 4;
+    /// K/V head count; unset means numHeads (multi-head attention).
+    std::optional<int64_t> numHeadsKv;
     int64_t seqQ = 256;
     int64_t seqKv = 128;
 

@@ -3200,7 +3200,6 @@ double compute_total_latency(const problem_t& problem,
   size_t M     = problem.size.m;
   size_t N     = problem.size.n;
   size_t K     = problem.size.k;
-  size_t batch = problem.batch;
 
   bool a_trans = problem.a_transpose == transpose_t::T;
   bool b_trans = problem.b_transpose == transpose_t::T;
@@ -3219,13 +3218,6 @@ double compute_total_latency(const problem_t& problem,
   // We don't need to compute latency for all MTs. With this, we can shortcut.
   bool shortCircuit = true;
   if (shortCircuit) {
-    // When problem dimensions are small enough that we can fit them in one tile, we should do
-    // so. This short circuit condition also decreases selection latency when problems are very
-    // small :)
-    // TODO 256 and 256 here should be largest M and N tile dimensions in library
-    if (M <= 256 && N <= 256 && K < 1024 && batch != 1 && (MT_M < M || MT_N < N))
-      return std::numeric_limits<double>::max();
-
     // Use Dot2 only for M < 3
     if (MI_M == 1 && MI_N == 1 && MI_K == 64 && M > 2) return std::numeric_limits<double>::max();
 

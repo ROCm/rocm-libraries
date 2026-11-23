@@ -8,6 +8,7 @@
 #include "conv_kernel.h"
 #include "direct_conv_kernel.h"
 #include "mathutil.h"
+#include "grid_limits.h"
 #include "launch_params.h"
 #include "types.h"
 #include "hipconv/conv_params.hpp"
@@ -748,14 +749,18 @@ public:
         return true;
     }
 
-    bool is_valid_config(const hipconv::Device& /*dev*/,
-                         const hipconv::ConvParams& par) const override
+    bool is_valid_config(const hipconv::Device& dev, const hipconv::ConvParams& par) const override
     {
         if(par.kh != cfg_.kh)
             return false;
         if(par.kw != cfg_.kw)
             return false;
-        return true;
+        // The int row and column counters stay below h + pad_h + 2 × ring_size_p and
+        // w + pad_w + 2 × wmma_size_q.
+        if(int64_t(par.h) + par.pad_h + 2 * cfg_.ring_size_p > INT32_MAX ||
+           int64_t(par.w) + par.pad_w + 2 * cfg_.wmma_size_q > INT32_MAX)
+            return false;
+        return grid_fits(get_launch_params(dev, par));
     }
 
     // Every config adds into dW atomically.
@@ -770,14 +775,15 @@ public:
     {
         constexpr auto NUM_WGP = 256; // hardcoded for now...
 
-        const auto blocks_c = divup(par.channels_per_group(), cfg_.tile_size_c);
-        const auto blocks_k = divup(par.filters_per_group(), cfg_.tile_size_k);
-        const auto blocks_g = par.groups;
-        const auto blocks_split =
-            std::min(par.n, std::max(1, NUM_WGP / (blocks_c * blocks_k * blocks_g)));
+        const int64_t blocks_c     = divup(par.channels_per_group(), cfg_.tile_size_c);
+        const int64_t blocks_k     = divup(par.filters_per_group(), cfg_.tile_size_k);
+        const int64_t blocks_g     = par.groups;
+        const int64_t blocks_split = std::min<int64_t>(
+            par.n, std::max<int64_t>(1, NUM_WGP / (blocks_c * blocks_k * blocks_g)));
 
         LaunchParams launch;
-        launch.grid       = dim3(blocks_c, blocks_k * blocks_g, blocks_split);
+        launch.grid = dim3(
+            grid_extent(blocks_c), grid_extent(blocks_k * blocks_g), grid_extent(blocks_split));
         launch.block_size = dim3(cfg_.tiles() * arch::wave_size, 1, 1);
         return launch;
     }

@@ -496,6 +496,11 @@ CloneBackend
 
 .. doxygenfunction:: rocalution::BaseRocalution::CloneBackend(const BaseRocalution<ValueType>&)
 
+MoveToBackend
+-------------
+
+.. doxygenfunction:: rocalution::BaseRocalution::MoveToBackend
+
 Check
 =====
 

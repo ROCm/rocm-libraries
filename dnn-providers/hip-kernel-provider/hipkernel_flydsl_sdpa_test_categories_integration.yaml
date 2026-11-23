@@ -8,6 +8,8 @@
 # name. Engine pinning and support claims do the rest: a claimed case the engine declines
 # fails its lane, an unclaimed one it declines skips, and an unclaimed one it accepts runs
 # and is reported as unclaimed support.
+# It also selects the SdpaFwdPlan suites: the generic SDPA forward tests every SDPA
+# engine runs (integration-tests/docs/test-plans/sdpa-fwd.md).
 # No FlyDSL device test runs in quick or ffm-quick, so the lane registers standard,
 # comprehensive and full only. Tiers cascade: standard runs the quick_* and standard_*
 # bundles, comprehensive adds the comprehensive_* ones; only "full" runs the full-tier bundles.
@@ -29,6 +31,8 @@ test_categories:
     test_patterns:
       - "quick_SdpaFwd_*.*"
       - "standard_SdpaFwd_*.*"
+      - "quick_SdpaFwdPlan_*.*"
+      - "standard_SdpaFwdPlan_*.*"
     exclude: *fast_excludes
     labels:
       - "standard"
@@ -41,6 +45,9 @@ test_categories:
       - "quick_SdpaFwd_*.*"
       - "standard_SdpaFwd_*.*"
       - "comprehensive_SdpaFwd_*.*"
+      - "quick_SdpaFwdPlan_*.*"
+      - "standard_SdpaFwdPlan_*.*"
+      - "comprehensive_SdpaFwdPlan_*.*"
     exclude: *common_excludes
     labels:
       - "comprehensive"
@@ -51,6 +58,7 @@ test_categories:
     description: "Full FlyDSL SdpaFwd coverage"
     test_patterns:
       - "*_SdpaFwd_*.*"
+      - "*_SdpaFwdPlan_*.*"
     exclude: *common_excludes
     labels:
       - "full"

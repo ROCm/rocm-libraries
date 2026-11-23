@@ -53,8 +53,9 @@
 #include <thrust/complex.h>
 #include <thrust/detail/complex/math_private.h>
 
-#include <cfloat>
-#include <cmath>
+#include _THRUST_STD_INCLUDE(cfloat)
+#include _THRUST_STD_INCLUDE(cmath)
+#include _THRUST_STD_INCLUDE(limits)
 
 THRUST_NAMESPACE_BEGIN
 namespace detail
@@ -278,7 +279,7 @@ THRUST_HOST_DEVICE inline complex<float> cacosf(complex<float> z)
   {
     if (isinf(x))
     {
-      return (complex<float>(y + y, -infinity<float>()));
+      return (complex<float>(y + y, -_THRUST_STD::numeric_limits<float>::infinity()));
     }
     if (isinf(y))
     {
@@ -410,9 +411,9 @@ THRUST_HOST_DEVICE inline complex<float> clog_for_large_values(complex<float> z)
 }
 
 /*
- *				=================
- *				| catanh, catan |
- *				=================
+ *        =================
+ *        | catanh, catan |
+ *        =================
  */
 
 /*
@@ -444,9 +445,9 @@ THRUST_HOST_DEVICE inline float real_part_reciprocal(float x, float y)
   ix = hx & 0x7f800000;
   get_float_word(hy, y);
   iy = hy & 0x7f800000;
-  // #define	BIAS	(FLT_MAX_EXP - 1)
+  // #define  BIAS  (FLT_MAX_EXP - 1)
   const int BIAS = FLT_MAX_EXP - 1;
-  // #define	CUTOFF	(FLT_MANT_DIG / 2 + 1)
+  // #define  CUTOFF  (FLT_MANT_DIG / 2 + 1)
   const int CUTOFF = (FLT_MANT_DIG / 2 + 1);
   if (ix - iy >= CUTOFF << 23 || isinf(x))
   {

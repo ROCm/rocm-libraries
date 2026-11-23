@@ -296,17 +296,16 @@ typedef MoeGroupedMatmulMode MoeGroupedMatmulMode_t; ///< @brief MoE routing mod
  * @enum HeuristicMode
  * @brief Specifies the heuristic mode for engine selection
  *
- * Controls how the hipDNN backend selects execution plans and engines.
- *
- * A and B request the SelectionHeuristic::ModeA / ModeB prediction policies through the
- * heuristic descriptor's policy order; the backend mode stays HIPDNN_HEUR_MODE_FALLBACK.
+ * Controls how the hipDNN backend ranks the applicable engines. Each mode is sent as the
+ * backend heuristic mode, which selects the policy list (unless HIPDNN_HEUR_POLICY_ORDER
+ * overrides it). A list of modes runs one query per mode, in order, as cudnn-frontend does.
  */
 enum class HeuristicMode
 {
-    A = 0, ///< Request the ModeA policy: rank calibrated no-search engine predictions
-    B = 1, ///< Request the ModeB policy: rank exact configuration predictions, engine fallback
-    FALLBACK = 2, ///< Use fallback heuristics for engine selection
-    OPENSOURCE = 3, ///< cuDNN open-source heuristic mode (mapped to fallback for now)
+    A = 0, ///< SelectionHeuristic::ModeA: rank engines by engine-level (L1) predictions
+    B = 1, ///< SelectionHeuristic::ModeB: configuration-level (L2) predictions, L1 fallback
+    FALLBACK = 2, ///< Model-free static engine order (Config, then StaticOrdering)
+    OPENSOURCE = 3, ///< cuDNN open-source heuristic mode; runs as FALLBACK
 };
 typedef HeuristicMode HeurMode_t; ///< @brief Type alias for HeuristicMode
 
@@ -1044,11 +1043,11 @@ inline hipdnnBackendHeurMode_t toBackendType(const HeuristicMode& type)
 {
     switch(type)
     {
-    // Every frontend mode maps to the one backend mode; A and B select prediction policies
-    // through the policy order instead (see createEngineHeuristicDescriptorForGraph).
-    case HeuristicMode::FALLBACK:
     case HeuristicMode::A:
+        return hipdnnBackendHeurMode_t::HIPDNN_HEUR_MODE_A;
     case HeuristicMode::B:
+        return hipdnnBackendHeurMode_t::HIPDNN_HEUR_MODE_B;
+    case HeuristicMode::FALLBACK:
     case HeuristicMode::OPENSOURCE:
     default:
         return hipdnnBackendHeurMode_t::HIPDNN_HEUR_MODE_FALLBACK;
