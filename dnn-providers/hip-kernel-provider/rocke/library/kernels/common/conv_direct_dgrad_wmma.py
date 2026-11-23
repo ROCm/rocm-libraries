@@ -53,7 +53,11 @@ tap's WMMAs run while the slower waves catch up.
 With ``pingpong`` (the forward kernel's schedule) the waves form two ranks
 one barrier apart: each group of ``pp_group`` steps reads its fragments, meets
 a barrier, multiplies and meets another, so one rank's LDS reads overlap the
-other rank's WMMAs. The TDM issuers are all in rank 0.
+other rank's WMMAs. The TDM issuers are all in rank 0. With ``row_ring`` /
+``tap_ring`` the weight slots hold one filter row / one tap, and the weight
+ring advances per tap group inside the ping-pong phases (as in
+direct_fwd_wmma): the halo keeps two slots, and 256-channel tiles and deeper
+chunks fit in LDS.
 
 Every lane of the accumulator holds one pixel and 8 consecutive dX channels.
 The epilogue stages the dX tile in LDS as [image][row][col][channel] and
@@ -111,6 +115,7 @@ from kernels.common.conv_direct_grouped import (
     emit_direct_params,
     pad_w_reason,
 )
+from kernels.common.conv_direct_fwd_wmma import _tdm_ring_wait
 from kernels.common.conv_fwd_wmma_gate import CH_PAD, I32_MAX, WMMA_K, wmma_fwd_op
 
 DGRAD_WMMA_VGPR_BUDGET = 448
@@ -216,6 +221,19 @@ class DirectDgradWmmaSpec:
     pingpong: bool = False
     # Steps (k-step, halo shift) per ping-pong phase: one barrier pair per group.
     pp_group: int = 1
+    # With pingpong: stage the weights one filter row (KW taps) / one tap per
+    # slot; the weight ring advances per tap group while a chunk's halo stays
+    # (in two slots) for all taps.
+    row_ring: bool = False
+    tap_ring: bool = False
+
+    @property
+    def ring_taps(self) -> int:
+        """Taps per weight slot."""
+        p = self.problem
+        if self.tap_ring:
+            return 1
+        return p.KW if self.row_ring else p.KH * p.KW
 
     @property
     def block_c(self) -> int:
@@ -260,8 +278,7 @@ class DirectDgradWmmaSpec:
 
     @property
     def wei_elems(self) -> int:
-        p = self.problem
-        return p.KH * p.KW * self.ck * self.w_pitch
+        return self.ring_taps * self.ck * self.w_pitch
 
     @property
     def halo_slack(self) -> int:
@@ -270,7 +287,12 @@ class DirectDgradWmmaSpec:
 
     def lds_bytes(self) -> int:
         # Each halo slot carries its own wrap slack (see the module docstring).
-        ring = self.stages * (self.halo_elems + self.halo_slack + self.wei_elems)
+        if self.row_ring or self.tap_ring:
+            ring = (
+                2 * (self.halo_elems + self.halo_slack) + self.stages * self.wei_elems
+            )
+        else:
+            ring = self.stages * (self.halo_elems + self.halo_slack + self.wei_elems)
         epi = self.phases * self.block_p * self.w_pitch  # the staged dX tile
         if self.wave_epilogue:
             n_waves = self.waves_c * self.waves_p
@@ -302,6 +324,8 @@ class DirectDgradWmmaSpec:
             "we" if self.wave_epilogue else "",
             "pp" if self.pingpong else "",
             f"pg{self.pp_group}" if self.pp_group > 1 else "",
+            "rr" if self.row_ring else "",
+            "tr" if self.tap_ring else "",
             flags={"bf16": p.dtype == "bf16"},
         )
 
@@ -419,6 +443,13 @@ def dgrad_wmma_reason(spec: DirectDgradWmmaSpec, arch: str = "gfx1250") -> str |
             return "pingpong uses the block epilogue"
     if spec.pp_group < 1 or (spec.pp_group > 1 and not spec.pingpong):
         return f"pp_group {spec.pp_group}: >= 1, and > 1 only with pingpong"
+    if spec.row_ring or spec.tap_ring:
+        # Strided phases share B fragments across the taps of one shift,
+        # which a per-tap weight slot would split.
+        if not spec.pingpong or p.stride > 1 or G > 1:
+            return "row_ring / tap_ring serve stride-1 unpacked pingpong tiles"
+        if spec.row_ring and spec.tap_ring:
+            return "row_ring and tap_ring are exclusive"
     if spec.threads_per_block > target.limits.max_threads_per_block:
         return f"{spec.threads_per_block} threads per block"
     if spec.waves_c * spec.waves_p < 2:
@@ -537,6 +568,10 @@ def build_direct_dgrad_wmma(
     NB, IMG = spec.tile_n, spec.image_elems
     HALO_STAGE = HALO + spec.halo_slack
     TAPS = KH * KW
+    RR = spec.row_ring or spec.tap_ring
+    NHS = 2 if RR else NS  # halo slots
+    WTAPS = spec.ring_taps  # taps per weight slot
+    NG = TAPS // WTAPS  # weight slots (ring steps) per chunk
 
     b = IRBuilder(spec.kernel_name())
     b.kernel.attrs["max_workgroup_size"] = THREADS
@@ -601,7 +636,7 @@ def build_direct_dgrad_wmma(
 
     # One LDS block: the halo ring, then the weight ring; the TDM epilogue
     # reuses it from offset 0 once the last chunk is consumed.
-    WEI0 = NS * HALO_STAGE
+    WEI0 = NHS * HALO_STAGE
     lds = b.smem_alloc(io_type, [1, spec.lds_bytes() // 2], name_hint="dg_lds")
     halo_lds = wei_lds = lds
     halo_addr = b.trunc(b.smem_addr_of(lds), I32)
@@ -637,18 +672,52 @@ def build_direct_dgrad_wmma(
             v = b.add(tid, b.const_i32(j))
             with b.scf_if(b.cmp_lt(v, z_vecs)):
                 flat = b.mul(v, b.const_i32(8))
-                for st in range(NS):
+                for st in range(NHS):
                     for im in range(NB):
                         off = st * HALO_STAGE + im * IMG
                         b.smem_store_vN(
                             halo_lds, [c0, b.add(flat, b.const_i32(off))], zero_v, n=8
                         )
 
-    def _issue(chunk: Value) -> None:
-        """TDM chunk ``chunk`` into ring slot chunk % NS."""
-        stage = b.mod(chunk, b.const_i32(NS))
+    def _issue(
+        chunk: Value,
+        stage: Value | None = None,
+        *,
+        halo: bool = True,
+        wei: bool = True,
+        grp: Value | None = None,
+    ) -> None:
+        """TDM chunk ``chunk`` into ring slot chunk % NS (or ``stage``): its
+        halo and / or its weights (all taps, or tap group ``grp`` of WTAPS
+        consecutive taps)."""
+        if stage is None:
+            stage = b.mod(chunk, b.const_i32(NS))
         k0 = b.mul(chunk, c_CK)
         k_ext = b.smax(b.smin(b.sub(c_kpg, k0), c_CK), c0)
+        if halo:
+            _issue_halo(stage, k0, k_ext)
+        if G > 1 or not wei:
+            return  # the packed weights are staged once, before the loop
+        with b.scf_if(b.cmp_eq(wave_id, b.const_i32(NB))):
+            off = b.add(w_base, b.mul(k0, w_row))
+            if grp is not None:
+                off = b.add(off, b.mul(grp, b.mul(c_cpg, b.const_i32(WTAPS))))
+            src = b.global_ptr_add(Bp, b.mul(off, c2))
+            dst = b.add(wei_addr, b.mul(stage, b.const_i32(WEI * 2)))
+            b.tensor_load_to_lds(
+                *_tdm_descriptor_3d(
+                    b,
+                    src,
+                    dst,
+                    dims=(c_ext, k_ext, b.const_i32(WTAPS)),
+                    strides=(w_row, c_cpg),
+                    tile0=WPITCH,
+                    tile1=CK,
+                    tile2=b.const_i32(WTAPS),
+                )
+            )
+
+    def _issue_halo(stage: Value, k0: Value, k_ext: Value) -> None:
         stage_off = b.mul(stage, b.const_i32(HALO_STAGE))
         for im in range(NB):
             # Wave im moves image im's halo; an image past N transfers zeros.
@@ -676,23 +745,6 @@ def build_direct_dgrad_wmma(
                         tile2=dy_tile2,
                     )
                 )
-        if G > 1:
-            return  # the packed weights are staged once, before the loop
-        with b.scf_if(b.cmp_eq(wave_id, b.const_i32(NB))):
-            src = b.global_ptr_add(Bp, b.mul(b.add(w_base, b.mul(k0, w_row)), c2))
-            dst = b.add(wei_addr, b.mul(stage, b.const_i32(WEI * 2)))
-            b.tensor_load_to_lds(
-                *_tdm_descriptor_3d(
-                    b,
-                    src,
-                    dst,
-                    dims=(c_ext, k_ext, b.const_i32(TAPS)),
-                    strides=(w_row, c_cpg),
-                    tile0=WPITCH,
-                    tile1=CK,
-                    tile2=b.const_i32(TAPS),
-                )
-            )
 
     # ---- per-lane LDS read offsets.
     # B (dY): lane l reads pixel l % 16 of its tile, k (l // 16) * 16 .. +15.
@@ -834,21 +886,14 @@ def build_direct_dgrad_wmma(
         b.s_barrier_bare(fence="compiler")
         b.sched_barrier(0)
 
-    def _chunk_pp(kc: Value, accs: list[Value]) -> list[Value]:
-        """``pingpong``: multiply chunk ``kc``, which has landed (the issuers
-        waited for it before the barrier that starts it). Rank 1 runs this a
-        barrier behind rank 0."""
-        # Ring slot (kc + NS - 1) % NS held chunk kc - 1, whose last reads
-        # (rank 1's) drained before the barrier rank 0 just passed.
-        nxt = b.add(kc, b.const_i32(NS - 1))
-        with b.scf_if(b.cmp_lt(nxt, n_chunks)):
-            _issue(nxt)
-        stage = b.mod(kc, b.const_i32(NS))
-        halo_base = b.mul(stage, b.const_i32(HALO_STAGE))
-        wei_base = b.mul(stage, b.const_i32(WEI))
+    def _pp_steps(st_list, halo_base, wei_base, accs, wait_next):
+        """The ping-pong phases of ``st_list`` (``pp_group`` steps each) from
+        one halo slot and one weight slot. ``wait_next`` runs after the last
+        phase's WMMAs: the issuers wait for the next slots to land before the
+        barrier that starts them."""
         accs = list(accs)
         PG = spec.pp_group
-        groups = [steps[i : i + PG] for i in range(0, len(steps), PG)]
+        groups = [st_list[i : i + PG] for i in range(0, len(st_list), PG)]
         for j, grp in enumerate(groups):
             frags = []
             for ks, (dh, dw), tl in grp:
@@ -856,7 +901,9 @@ def build_direct_dgrad_wmma(
                 bf = [_read_b(halo_base, tn, tap_off) for tn in range(TN)]
                 af = [
                     [
-                        _read_a(wei_base, m, (tap * CK + ks * WMMA_K) * WPITCH)
+                        _read_a(
+                            wei_base, m, ((tap % WTAPS) * CK + ks * WMMA_K) * WPITCH
+                        )
                         for m in range(TM)
                     ]
                     for tap, _ in tl
@@ -877,10 +924,71 @@ def build_direct_dgrad_wmma(
                             accs[i] = b.mma(wmma_op, aft[m], bf[tn], accs[i])
             b.s_setprio(0)
             if last:
-                # The issuers wait for chunk kc + 1 before the barrier that
-                # starts it.
-                _wait_landed(b.add(kc, c1))
+                wait_next()
             _pp_bar()
+        return accs
+
+    def _chunk_pp(kc: Value, accs: list[Value]) -> list[Value]:
+        """``pingpong``: multiply chunk ``kc``, which has landed (the issuers
+        waited for it before the barrier that starts it). Rank 1 runs this a
+        barrier behind rank 0."""
+        # Ring slot (kc + NS - 1) % NS held chunk kc - 1, whose last reads
+        # (rank 1's) drained before the barrier rank 0 just passed.
+        nxt = b.add(kc, b.const_i32(NS - 1))
+        with b.scf_if(b.cmp_lt(nxt, n_chunks)):
+            _issue(nxt)
+        stage = b.mod(kc, b.const_i32(NS))
+        halo_base = b.mul(stage, b.const_i32(HALO_STAGE))
+        wei_base = b.mul(stage, b.const_i32(WEI))
+        # The issuers wait for chunk kc + 1 before the barrier that starts it.
+        return _pp_steps(
+            steps, halo_base, wei_base, accs, lambda: _wait_landed(b.add(kc, c1))
+        )
+
+    n_steps = b.mul(n_chunks, b.const_i32(NG)) if RR else None
+
+    def _pp_ring_wait(u: Value, chunk_end: bool) -> None:
+        """Ring variant: the weight issuer waits for ring step ``u``; at a
+        chunk boundary the halo issuers wait for the next halo (their only
+        transfer in flight)."""
+        with b.scf_if(b.cmp_eq(wave_id, b.const_i32(NB))):
+            _tdm_ring_wait(b, u, NS, n_steps)
+        if chunk_end:
+            with b.scf_if(b.cmp_ne(wave_id, b.const_i32(NB))):
+                b.s_wait_tensorcnt(0)
+
+    def _chunk_pp_rr(kc: Value, accs: list[Value]) -> list[Value]:
+        """``pingpong`` with ``row_ring`` / ``tap_ring``: chunk ``kc`` as NG
+        ring steps, each a run of ping-pong phases on its own weight slot.
+        A slot is refilled at the start of a step, after the barrier by which
+        both ranks drained the step that held it (as ``_chunk_pp`` per chunk);
+        the next chunk's halo goes out at the chunk's first step."""
+        hslot = b.mod(kc, c2)
+        halo_base = b.mul(hslot, b.const_i32(HALO_STAGE))
+        for r in range(NG):
+            u = b.add(b.mul(kc, b.const_i32(NG)), b.const_i32(r))
+            nxt = b.add(u, b.const_i32(NS - 1))
+            with b.scf_if(b.cmp_lt(nxt, n_steps)):
+                _issue(
+                    b.div(nxt, b.const_i32(NG)),
+                    b.mod(nxt, b.const_i32(NS)),
+                    halo=False,
+                    grp=b.mod(nxt, b.const_i32(NG)),
+                )
+            if r == 0:
+                nc = b.add(kc, c1)
+                with b.scf_if(b.cmp_lt(nc, n_chunks)):
+                    _issue(nc, b.mod(nc, c2), wei=False)
+            wslot = b.mod(u, b.const_i32(NS))
+            # Stride 1: one tap per step, k-steps outermost as in ``steps``.
+            ring_steps = [st for st in steps if st[2][0][0] // WTAPS == r]
+            accs = _pp_steps(
+                ring_steps,
+                halo_base,
+                b.mul(wslot, b.const_i32(WEI)),
+                accs,
+                lambda u=u, r=r: _pp_ring_wait(b.add(u, c1), r == NG - 1),
+            )
         return accs
 
     def _epilogue(accs: list[Value]) -> None:
@@ -1059,15 +1167,29 @@ def build_direct_dgrad_wmma(
                 )
 
     # ---- main loop over dY channel chunks.
-    for st in range(NS - 1):
-        with b.scf_if(b.cmp_lt(b.const_i32(st), n_chunks)):
-            _issue(b.const_i32(st))
+    if RR:
+        _issue(c0, c0, wei=False)
+        for st in range(NS - 1):
+            with b.scf_if(b.cmp_lt(b.const_i32(st), n_steps)):
+                _issue(
+                    b.const_i32(st // NG),
+                    b.const_i32(st),
+                    halo=False,
+                    grp=b.const_i32(st % NG),
+                )
+    else:
+        for st in range(NS - 1):
+            with b.scf_if(b.cmp_lt(b.const_i32(st), n_chunks)):
+                _issue(b.const_i32(st))
     if SB:
         b.s_waitcnt(lgkmcnt=0)  # the edge zeroing
         _wait_landed(c0)
         b.s_barrier_signal(0xFFFFFFFF)
     if PP:
-        _wait_landed(c0)
+        if RR:
+            _pp_ring_wait(c0, True)
+        else:
+            _wait_landed(c0)
         b.sync_lds_only()  # chunk 0 and the edge zeroing are visible
         with b.scf_if(b.cmp_eq(rank, c1)):
             _pp_bar()  # rank 1 runs one barrier behind
@@ -1080,7 +1202,8 @@ def build_direct_dgrad_wmma(
         iv_name="kc",
     )
     with loop as (kc, carried):
-        b.scf_yield(*(_chunk_pp if PP else _chunk)(kc, list(carried)))
+        chunk_fn = _chunk_pp_rr if RR else _chunk_pp if PP else _chunk
+        b.scf_yield(*chunk_fn(kc, list(carried)))
     if SB:
         b.s_barrier_wait(0xFFFF)
     if PP:

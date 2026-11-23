@@ -53,6 +53,7 @@ def _problem(
     dil_h=1,
     dil_w=1,
     KW=None,
+    pad_w=-1,
 ):
     return DirectConvProblem(
         N=N,
@@ -68,6 +69,7 @@ def _problem(
         dtype=dtype,
         dil_h=dil_h,
         dil_w=dil_w,
+        pad_w=pad_w,
     )
 
 
@@ -720,6 +722,50 @@ _PP_CASES = (
     ),
 )
 
+# Ping-pong with a weight ring (tap_ring / row_ring): several chunks and ring
+# steps, ragged K and C, 3 stages, pp_group not dividing a step (row_ring:
+# 3 steps per slot), two images per block, fp16, a 256-channel tile, 1x3 /
+# 3x1 per-axis padding and PAD 0.
+_PP_RING_CASES = (
+    (
+        dict(N=2, H=13, W=21, C=64, K=96),
+        dict(tiles_c=2, tiles_p=2, pingpong=True, tap_ring=True),
+    ),
+    (
+        dict(N=1, H=18, W=33, C=88, K=200, dtype="fp16"),
+        dict(tiles_c=2, tiles_p=2, pingpong=True, row_ring=True, stages=3, pp_group=2),
+    ),
+    (
+        dict(N=1, H=11, W=19, C=160, K=136),
+        dict(tiles_c=2, tiles_p=2, ck=64, pingpong=True, tap_ring=True, stages=3),
+    ),
+    (
+        dict(N=3, H=7, W=9, C=64, K=96, PAD=0),
+        dict(tiles_c=2, tiles_p=2, tile_w=8, tile_n=2, pingpong=True, row_ring=True),
+    ),
+    (
+        dict(N=1, H=12, W=20, C=384, K=96),
+        dict(
+            waves_c=2,
+            waves_p=4,
+            tiles_c=8,
+            tiles_p=2,
+            ck=32,
+            pingpong=True,
+            tap_ring=True,
+            pp_group=2,
+        ),
+    ),
+    (
+        dict(N=2, H=9, W=14, C=64, K=64, KH=1, KW=3, PAD=0, pad_w=1),
+        dict(tiles_c=2, tiles_p=2, pingpong=True, tap_ring=True, stages=3),
+    ),
+    (
+        dict(N=2, H=9, W=14, C=64, K=96, KH=3, KW=1, PAD=1, pad_w=0, dtype="fp16"),
+        dict(tiles_c=2, tiles_p=2, pingpong=True, row_ring=True),
+    ),
+)
+
 # Packed small groups at stride 2 with the widest pack: 8 groups of 4
 # channels per super-group (cpg = kpg = 4, pack_groups 8), one case per dtype
 # on ragged extents (odd H and W, an odd W alone), with the knobs of two
@@ -775,6 +821,42 @@ class TestDgradWmmaPingpong(unittest.TestCase):
             self.assertIn(needle, why)
 
 
+class TestDgradWmmaPingpongRing(unittest.TestCase):
+    def test_cases_validate_and_lower(self):
+        for pkw, knobs in _PP_RING_CASES:
+            with self.subTest(problem=pkw, knobs=knobs):
+                spec = DirectDgradWmmaSpec(problem=_problem(**pkw), **knobs)
+                self.assertIsNone(dgrad_wmma_reason(spec, "gfx1250"))
+                self.assertRegex(spec.kernel_name(), "_pp.*_(rr|tr)")
+                build_direct_dgrad_wmma(spec, "gfx1250")
+
+    def test_ring_shrinks_the_weight_slots(self):
+        p = _problem(C=512, K=512)
+        knobs = dict(waves_c=2, waves_p=4, tiles_c=8, tiles_p=2, pingpong=True)
+        full = DirectDgradWmmaSpec(problem=p, **knobs)
+        tap = DirectDgradWmmaSpec(problem=p, tap_ring=True, **knobs)
+        self.assertEqual(full.wei_elems, 9 * tap.wei_elems)
+        self.assertIn("LDS", dgrad_wmma_reason(full))
+        self.assertIsNone(dgrad_wmma_reason(tap))
+
+    def test_rejects(self):
+        for pkw, knobs, needle in (
+            ({}, dict(tap_ring=True), "pingpong"),
+            (dict(stride=2), dict(pingpong=True, tap_ring=True, tiles_c=2), "stride-1"),
+            (
+                dict(C=32, K=32, groups=8),
+                dict(pingpong=True, row_ring=True, pack_groups=4),
+                "stride-1",
+            ),
+            ({}, dict(pingpong=True, tap_ring=True, row_ring=True), "exclusive"),
+        ):
+            why = dgrad_wmma_reason(
+                DirectDgradWmmaSpec(problem=_problem(**pkw), **knobs)
+            )
+            self.assertIsNotNone(why, (pkw, knobs))
+            self.assertIn(needle, why)
+
+
 class TestDgradWmmaPack8Strided(unittest.TestCase):
     def test_cases_validate_and_lower(self):
         for pkw, knobs in _PACK8_STRIDED_CASES:
@@ -821,6 +903,11 @@ class TestDgradWmmaGpu(unittest.TestCase):
 
     def test_pingpong_cases(self):
         for pkw, knobs in _PP_CASES:
+            with self.subTest(problem=pkw, knobs=knobs):
+                self._check(pkw, knobs)
+
+    def test_pingpong_ring_cases(self):
+        for pkw, knobs in _PP_RING_CASES:
             with self.subTest(problem=pkw, knobs=knobs):
                 self._check(pkw, knobs)
 
