@@ -11956,6 +11956,64 @@ TEST_F(TestGraph, BuildPlansAllSkipsPlanWithOtherFailure)
     EXPECT_EQ(*graph.selectedEngineIdForTest(), 20);
 }
 
+TEST_F(TestGraph, BuildPlansAllDoesNotFinalizeAgainAPlanWhoseWorkspaceQueryFailed)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    graph.injectValidCompiledPlan(/*engineId=*/10, /*workspaceSize=*/-1, /*barred=*/false);
+    graph.injectValidCompiledPlan(/*engineId=*/20, /*workspaceSize=*/-1, /*barred=*/false);
+    graph.setActivePlanForTest(0);
+
+    mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(1));
+    mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/16);
+    EXPECT_CALL(*_mockBackend,
+                backendGetAttribute(GraphTestUtils::executionPlanHandleFor(10),
+                                    HIPDNN_ATTR_EXECUTION_PLAN_WORKSPACE_SIZE,
+                                    HIPDNN_TYPE_INT64,
+                                    1,
+                                    _,
+                                    _))
+        .WillOnce(Return(HIPDNN_STATUS_INTERNAL_ERROR));
+
+    auto result = graph.build_plans(BuildPlanPolicy::ALL);
+    ASSERT_TRUE(result.is_good()) << result.get_message();
+    EXPECT_EQ(graph.getActivePlanIndex(), 1u);
+
+    result = graph.build_plans(BuildPlanPolicy::ALL);
+    ASSERT_TRUE(result.is_good()) << result.get_message();
+    EXPECT_EQ(graph.getActivePlanIndex(), 1u);
+}
+
+TEST_F(TestGraph, BuildPlansAllFinalizesAPlanWithACachedWorkspaceThatWasNeverFinalized)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    graph.injectValidCompiledPlan(/*engineId=*/10, /*workspaceSize=*/0, /*barred=*/false);
+    graph.setActivePlanForTest(0);
+
+    mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/16);
+
+    auto result = graph.build_plans(BuildPlanPolicy::ALL);
+    ASSERT_TRUE(result.is_good()) << result.get_message();
+    EXPECT_EQ(graph.getActivePlanIndex(), 0u);
+    EXPECT_TRUE(graph.isExecutionPlanFinalized());
+}
+
+TEST_F(TestGraph, BuildPlanAtIndexFinalizesAPlanWithACachedWorkspaceThatWasNeverFinalized)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    graph.injectValidCompiledPlan(/*engineId=*/10, /*workspaceSize=*/0, /*barred=*/false);
+    graph.setActivePlanForTest(0);
+
+    mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/16);
+
+    auto result = graph.build_plan_at_index(0);
+    ASSERT_TRUE(result.is_good()) << result.get_message();
+    EXPECT_EQ(graph.getActivePlanIndex(), 0u);
+    EXPECT_TRUE(graph.isExecutionPlanFinalized());
+}
+
 // ============================================================================
 // Engine filters: note filters, evaluation, persistence
 //

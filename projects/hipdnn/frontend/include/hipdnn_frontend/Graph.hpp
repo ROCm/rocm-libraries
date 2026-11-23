@@ -3960,7 +3960,7 @@ public:
 
                 // The active plan, and any plan an earlier ALL or build_plan_at_index()
                 // finalized, is already built: finalizing it again fails in the backend.
-                if(isFinalizedActivePlan(i) || plan.workspaceSize != -1)
+                if(plan.executionPlanFinalized)
                 {
                     continue;
                 }
@@ -5277,9 +5277,8 @@ public:
                         + " is filtered: " + verdict.skipReason};
         }
 
-        // If workspace size is still -1, the plan has not been finalized yet.
-        // Compile it using the same pattern as build_plans(ALL).
-        if(plan.workspaceSize == -1)
+        // Finalize the plan unless it already is, using the same pattern as build_plans(ALL).
+        if(!plan.executionPlanFinalized)
         {
             std::string rejection;
             HIPDNN_CHECK_ERROR(finalizePlanWithinLimit(planIndex, rejection));
