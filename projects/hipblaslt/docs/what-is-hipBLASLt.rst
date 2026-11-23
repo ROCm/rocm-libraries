@@ -213,8 +213,9 @@ pass requires values the forward pass has to save.
   **bias gradient**, this layer's contribution to updating the bias, and ``BGRADA`` and ``BGRADB``
   produce that sum with respect to ``A`` or ``B``.
 
-The two directions are meant to be paired. Choose an ``_AUX`` epilogue on the forward pass so the
-matching ``D``-prefixed epilogue can consume its output on the backward pass.
+The two directions are meant to be paired. Choose an ``_AUX`` epilogue on the forward pass to save
+the activation input. On the backward pass, use a matching ``D``-prefixed epilogue when one is
+available; otherwise, callers must compute the activation derivative from the saved auxiliary tensor.
 
 Running many GEMMs at once
 ==========================
