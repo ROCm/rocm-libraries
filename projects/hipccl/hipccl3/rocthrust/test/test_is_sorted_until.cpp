@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -59,24 +59,24 @@ TYPED_TEST(IsSortedUntilVectorTests, TestIsSortedUntilSimple)
 
   last = v.begin() + 3;
   ref  = v.begin() + 3;
-  ASSERT_EQ_QUIET(ref, thrust::is_sorted_until(first, last, thrust::less<T>()));
+  ASSERT_EQ_QUIET(ref, thrust::is_sorted_until(first, last, _THRUST_STD::less<T>()));
 
   last = v.begin() + 4;
   ref  = v.begin() + 3;
-  ASSERT_EQ_QUIET(ref, thrust::is_sorted_until(first, last, thrust::less<T>()));
+  ASSERT_EQ_QUIET(ref, thrust::is_sorted_until(first, last, _THRUST_STD::less<T>()));
 
   last = v.begin() + 1;
   ref  = v.begin() + 1;
-  ASSERT_EQ_QUIET(ref, thrust::is_sorted_until(first, last, thrust::greater<T>()));
+  ASSERT_EQ_QUIET(ref, thrust::is_sorted_until(first, last, _THRUST_STD::greater<T>()));
 
   last = v.begin() + 4;
   ref  = v.begin() + 1;
-  ASSERT_EQ_QUIET(ref, thrust::is_sorted_until(first, last, thrust::greater<T>()));
+  ASSERT_EQ_QUIET(ref, thrust::is_sorted_until(first, last, _THRUST_STD::greater<T>()));
 
   first = v.begin() + 2;
   last  = v.begin() + 4;
   ref   = v.begin() + 4;
-  ASSERT_EQ_QUIET(ref, thrust::is_sorted_until(first, last, thrust::greater<T>()));
+  ASSERT_EQ_QUIET(ref, thrust::is_sorted_until(first, last, _THRUST_STD::greater<T>()));
 }
 
 TYPED_TEST(IsSortedUntilVectorTests, TestIsSortedUntilRepeatedElements)

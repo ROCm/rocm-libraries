@@ -26,6 +26,13 @@
 
 #pragma once
 
+// --partitions runs through the experimental PartitionedGemm, so a target that includes this
+// header links roc::hipblaslt_experimental (hipblaslt-clients-common does).
+#if !defined(ROCM_ENABLE_EXPERIMENTAL_APIS) || !ROCM_ENABLE_EXPERIMENTAL_APIS
+#error "testing_matmul.hpp needs roc::hipblaslt_experimental (ROCM_ENABLE_EXPERIMENTAL_APIS=1)"
+#endif
+#include <hipblaslt/hipblaslt-experimental.h>
+
 #include "allclose.hpp"
 #include "candidate_search.hpp"
 #include "cblas_interface.hpp"
@@ -1294,7 +1301,7 @@ inline std::string fast_check_unsupported_reason(const Arguments&     arg,
 }
 
 // Returns why --partitions cannot run this configuration, or an empty string when it can.
-// hipblaslt_ext::experimental::PartitionedGemm runs a plain GEMM, so whatever it has no input for is refused.
+// hipblaslt_experimental::PartitionedGemm runs a plain GEMM, so whatever it has no input for is refused.
 inline std::string partitioned_unsupported_reason(const Arguments& arg,
                                                   hipDataType      TiA,
                                                   hipDataType      TiB,
@@ -2001,6 +2008,18 @@ void testing_matmul(const Arguments& arg)
     hipblasltSetColdIterationsValue(arg.cold_iters);
     hipblasltSetHotIterationsValue(arg.iters);
 
+    // maf2_0_unit_scale is the MAF2.0 plan for block-scaled FP8 and FP4 (all scales 1, N(0,1)
+    // data); reject block-scaled FP6 before any resources are created.
+    auto const unitScaleType = [](hipDataType t) {
+        return t == HIP_R_8F_E4M3 || t == HIP_R_8F_E5M2
+               || t == static_cast<hipDataType>(HIP_R_4F_E2M1);
+    };
+    if(arg.initialization == hipblaslt_initialization::maf2_0_unit_scale
+       && ((isBlockScaling(arg.scaleA) && !unitScaleType(arg.a_type))
+           || (isBlockScaling(arg.scaleB) && !unitScaleType(arg.b_type))))
+        throw std::invalid_argument(
+            "maf2_0_unit_scale applies to block-scaled fp8 and fp4 inputs only; use maf2_0");
+
     // integer_exact: skip gfx11 only for 16-bit A (fp16/bf16)—GPU vs CPU exact match unreliable there;
     // f32/f64 (and TF32x1 f32 path) still run on Navi.
     if(arg.initialization == hipblaslt_initialization::integer_exact)
@@ -2283,11 +2302,11 @@ private:
     hipStream_t m_stream = nullptr;
 };
 
-// --partitions N: one GEMM run as N slices with hipblaslt_ext::experimental::PartitionedGemm. The slices run on the
+// --partitions N: one GEMM run as N slices with hipblaslt_experimental::PartitionedGemm. The slices run on the
 // partitions of a GPU in DPX mode when the current device is one of them (see partition_devices.hpp),
 // and all on the current device otherwise (SPX: the same result, only for checking results, not for speed).
 // Partition 0 runs on the caller's handle and stream; this holds the others (handle, stream,
-// workspace, events). A, B, C and D live in the caller's device 0 buffers. A tensor placed Shared
+// workspace, counters). A, B, C and D live in the caller's device 0 buffers. A tensor placed Shared
 // is read (or written) by the other partitions over peer access; a Replicated one gets a full
 // copy on every partition device (inputs copied from device 0 in initialize(), the slices of a
 // replicated D gathered back into the device 0 D by gatherD()), so the copy-back, the check and
@@ -2301,9 +2320,9 @@ public:
                    hipStream_t        stream0,
                    hipblasOperation_t transA,
                    hipblasOperation_t transB)
-        : m_dim(arg.split_dim == 'M'   ? hipblaslt_ext::experimental::SplitDim::M
-                : arg.split_dim == 'B' ? hipblaslt_ext::experimental::SplitDim::Batch
-                                       : hipblaslt_ext::experimental::SplitDim::N)
+        : m_dim(arg.split_dim == 'M'   ? hipblaslt_experimental::SplitDim::M
+                : arg.split_dim == 'B' ? hipblaslt_experimental::SplitDim::Batch
+                                       : hipblaslt_experimental::SplitDim::N)
         , m_dElem(realDataTypeSize(arg.d_type))
     {
         for(int t = 0; t < 4; t++)
@@ -2318,7 +2337,18 @@ public:
         {
             std::vector<hipblasLtHandle_t> handles{handle0};
             m_streams.push_back(stream0);
-            check(hipEventCreate(&m_start), "hipEventCreate");
+            // One counter per partition plus one for checkpoint(), in host memory every device
+            // can reach: the partitions are ordered with stream writes and waits on them.
+            // Created here, so that run() only enqueues.
+            for(int i = 0; i <= int(arg.partitions); i++)
+            {
+                void* word = nullptr;
+                check(hipHostMalloc(
+                          &word, sizeof(uint64_t), hipHostMallocCoherent | hipHostMallocPortable),
+                      "hipHostMalloc");
+                m_counters.push_back(static_cast<uint64_t*>(word));
+                *m_counters.back() = 0;
+            }
             for(int i = 1; i < int(arg.partitions); i++)
             {
                 check(hipSetDevice(m_devices[i]), "hipSetDevice");
@@ -2338,14 +2368,14 @@ public:
                 }
             }
             check(hipSetDevice(previous), "hipSetDevice");
-            m_gemm = std::make_unique<hipblaslt_ext::experimental::PartitionedGemm>(handles,
-                                                                      transA,
-                                                                      transB,
-                                                                      arg.a_type,
-                                                                      arg.b_type,
-                                                                      arg.c_type,
-                                                                      arg.d_type,
-                                                                      arg.compute_type);
+            m_gemm = std::make_unique<hipblaslt_experimental::PartitionedGemm>(handles,
+                                                                               transA,
+                                                                               transB,
+                                                                               arg.a_type,
+                                                                               arg.b_type,
+                                                                               arg.c_type,
+                                                                               arg.d_type,
+                                                                               arg.compute_type);
         }
         catch(...)
         {
@@ -2375,12 +2405,9 @@ public:
                     static_cast<void>(hipFree(replica[i - 1]));
         }
         static_cast<void>(hipSetDevice(previous));
-        if(m_start != nullptr)
-            static_cast<void>(hipEventDestroy(m_start));
-        m_start = nullptr;
-        for(hipEvent_t event : m_done)
-            static_cast<void>(hipEventDestroy(event));
-        m_done.clear();
+        for(uint64_t* word : m_counters)
+            static_cast<void>(hipHostFree(word));
+        m_counters.clear();
         m_streams.resize(std::min<size_t>(m_streams.size(), 1));
         m_workspaces.clear();
         for(auto& replica : m_replica)
@@ -2479,7 +2506,7 @@ public:
         if(!m_replicated[3])
             return;
         check(hipStreamSynchronize(m_streams[0]), "hipStreamSynchronize");
-        const bool   splitM = m_dim == hipblaslt_ext::experimental::SplitDim::M;
+        const bool   splitM = m_dim == hipblaslt_experimental::SplitDim::M;
         const size_t pitch  = size_t(m_ldd) * m_dElem;
         for(size_t i = 1; i < m_streams.size(); i++)
         {
@@ -2488,7 +2515,7 @@ public:
                 throw std::runtime_error("getSlice failed");
             // A column-major D: an M slice is `size` rows of every column, an N slice is `size`
             // whole columns, and a batch slice is `size` whole matrices.
-            if(m_dim == hipblaslt_ext::experimental::SplitDim::Batch)
+            if(m_dim == hipblaslt_experimental::SplitDim::Batch)
             {
                 for(int64_t b = offset; b < offset + size; b++)
                 {
@@ -2559,36 +2586,56 @@ public:
         return m_gemm->initialize(algo, workspaces, true, m_streams);
     }
 
-    // One launch of every partition. Partitions wait for work already queued on stream0, and
-    // stream0 waits for every other partition at the end (PartitionedGemm::run does not join
-    // them), so stream0 sees the whole span.
-    hipblasStatus_t run()
+    // Ready, set, go: the other partitions wait for the work already queued on stream0 (a
+    // sentinel fill of D, for example). Needed once after such work, not on every launch.
+    void checkpoint()
     {
-        check(hipEventRecord(m_start, m_streams[0]), "hipEventRecord");
+        const uint64_t gate = ++m_gate;
+        check(hipStreamWriteValue64(m_streams[0], m_counters.back(), gate, 0),
+              "hipStreamWriteValue64");
         for(size_t i = 1; i < m_streams.size(); i++)
-            check(hipStreamWaitEvent(m_streams[i], m_start, 0), "hipStreamWaitEvent");
-        auto status = m_gemm->run(m_streams);
-        if(status != HIPBLAS_STATUS_SUCCESS)
-            return status;
-        // An event belongs to the device that is current when it is created, and is recorded on
-        // a stream of that device.
+            check(hipStreamWaitValue64(
+                      m_streams[i], m_counters.back(), gate, hipStreamWaitValueGte),
+                  "hipStreamWaitValue64");
+    }
+
+    // The instruction cache flush of --flush on the other partitions; the caller's stream gets
+    // its own from the timing loop. So every partition starts its next slice after a flush.
+    void flushOthers(int32_t grid)
+    {
         int previous = 0;
         check(hipGetDevice(&previous), "hipGetDevice");
         for(size_t i = 1; i < m_streams.size(); i++)
         {
             check(hipSetDevice(m_devices[i]), "hipSetDevice");
-            if(m_done.size() < i)
-            {
-                hipEvent_t event = nullptr;
-                check(hipEventCreateWithFlags(&event, hipEventDisableTiming),
-                      "hipEventCreateWithFlags");
-                m_done.push_back(event);
-            }
-            check(hipEventRecord(m_done[i - 1], m_streams[i]), "hipEventRecord");
+            hipblaslt_bench::launch_flush_icache(grid, m_streams[i]);
         }
         check(hipSetDevice(previous), "hipSetDevice");
-        for(size_t i = 1; i < m_streams.size(); i++)
-            check(hipStreamWaitEvent(m_streams[0], m_done[i - 1], 0), "hipStreamWaitEvent");
+    }
+
+    // One launch of every partition, joined on the GPU (PartitionedGemm::run does not join
+    // them), the way the TensileLite client joins a split: after its slice every partition
+    // writes the launch number into its own counter and waits for the other counters. So
+    // stream0 sees the whole span, and the next launch starts when this one has finished
+    // everywhere.
+    hipblasStatus_t run()
+    {
+        auto status = m_gemm->run(m_streams);
+        if(status != HIPBLAS_STATUS_SUCCESS || m_streams.size() < 2)
+            return status;
+        const uint64_t launch = ++m_launch;
+        const size_t count = m_streams.size();
+        for(size_t i = 0; i < count; i++)
+        {
+            check(hipStreamWriteValue64(m_streams[i], m_counters[i], launch, 0),
+                  "hipStreamWriteValue64");
+            for(size_t k = 1; k < count; k++)
+                check(hipStreamWaitValue64(m_streams[i],
+                                           m_counters[(i + k) % count],
+                                           launch,
+                                           hipStreamWaitValueGte),
+                      "hipStreamWaitValue64");
+        }
         return status;
     }
 
@@ -2599,7 +2646,7 @@ private:
             throw std::runtime_error(std::string(what) + ": " + hipGetErrorString(e));
     }
 
-    hipblaslt_ext::experimental::SplitDim                                m_dim;
+    hipblaslt_experimental::SplitDim                       m_dim;
     size_t                                                 m_dElem = 0;
     bool                                                   m_replicated[4] = {};
     std::vector<void*>                                     m_replica[4]; // partitions 1..N-1
@@ -2610,9 +2657,10 @@ private:
     std::vector<int>                                       m_devices; // device of each partition
     std::vector<hipStream_t>                               m_streams; // [0] is the caller's
     std::vector<void*>                                     m_workspaces; // partitions 1..N-1
-    hipEvent_t                                             m_start = nullptr;
-    std::vector<hipEvent_t>                                m_done; // partitions 1.. finished
-    std::unique_ptr<hipblaslt_ext::experimental::PartitionedGemm>        m_gemm;
+    std::vector<uint64_t*>                                 m_counters; // per partition + gate, host memory
+    uint64_t                                               m_launch = 0;
+    uint64_t                                               m_gate   = 0;
+    std::unique_ptr<hipblaslt_experimental::PartitionedGemm> m_gemm;
 };
 
 void testing_matmul_with_bias(const Arguments& arg,
@@ -3966,6 +4014,9 @@ void testing_matmul_with_bias(const Arguments& arg,
                && arg.initialization != hipblaslt_initialization::norm_dist
                && arg.initialization != hipblaslt_initialization::rand_int
                && arg.initialization != hipblaslt_initialization::uniform_low_precision
+               && arg.initialization != hipblaslt_initialization::maf1_0
+               && arg.initialization != hipblaslt_initialization::maf2_0
+               && arg.initialization != hipblaslt_initialization::maf2_0_unit_scale
                && !(arg.initialization == hipblaslt_initialization::integer_exact
                     && integer_exact_mx_element_type(TiA)))
             {
@@ -3975,7 +4026,8 @@ void testing_matmul_with_bias(const Arguments& arg,
 #else
                 hipblaslt_cout
                     << "Initialization of microscaling data only allows hpl, trig_float, "
-                       "uniform_01, zero, norm_dist, rand_int or uniform_low_precision, "
+                       "uniform_01, zero, norm_dist, rand_int, uniform_low_precision, "
+                       "maf1_0, maf2_0, maf2_0_unit_scale, "
                        "or integer_exact with fp8 or fp6 elements, not "
                     << hipblaslt_initialization2string(arg.initialization) << std::endl;
                 return;
@@ -4015,7 +4067,9 @@ void testing_matmul_with_bias(const Arguments& arg,
                                       scaleLayoutA,
                                       hipblaslt_initialization2string(arg.initialization),
                                       /*min_val=*/-1.0f,
-                                      /*max_val=*/1.0f);
+                                      /*max_val=*/1.0f,
+                                      /*scaleInitMethod=*/"",
+                                      mxSeedIndex(/*isMatrixA=*/true, b, stride_a[i]));
                 refAAll.insert(refAAll.end(), batchRef.begin(), batchRef.end());
             }
             refA.emplace_back(std::move(refAAll));
@@ -4081,6 +4135,9 @@ void testing_matmul_with_bias(const Arguments& arg,
                && arg.initialization != hipblaslt_initialization::norm_dist
                && arg.initialization != hipblaslt_initialization::rand_int
                && arg.initialization != hipblaslt_initialization::uniform_low_precision
+               && arg.initialization != hipblaslt_initialization::maf1_0
+               && arg.initialization != hipblaslt_initialization::maf2_0
+               && arg.initialization != hipblaslt_initialization::maf2_0_unit_scale
                && !(arg.initialization == hipblaslt_initialization::integer_exact
                     && integer_exact_mx_element_type(TiB)))
             {
@@ -4090,7 +4147,8 @@ void testing_matmul_with_bias(const Arguments& arg,
 #else
                 hipblaslt_cout
                     << "Initialization of microscaling data only allows hpl, trig_float, "
-                       "uniform_01, zero, norm_dist, rand_int or uniform_low_precision, "
+                       "uniform_01, zero, norm_dist, rand_int, uniform_low_precision, "
+                       "maf1_0, maf2_0, maf2_0_unit_scale, "
                        "or integer_exact with fp8 or fp6 elements, not "
                     << hipblaslt_initialization2string(arg.initialization) << std::endl;
                 return;
@@ -4132,7 +4190,9 @@ void testing_matmul_with_bias(const Arguments& arg,
                                       scaleLayoutB,
                                       hipblaslt_initialization2string(arg.initialization),
                                       /*min_val=*/-1.0f,
-                                      /*max_val=*/1.0f);
+                                      /*max_val=*/1.0f,
+                                      /*scaleInitMethod=*/"",
+                                      mxSeedIndex(/*isMatrixA=*/false, b, stride_b[i]));
                 refBAll.insert(refBAll.end(), batchRef.begin(), batchRef.end());
             }
             refB.emplace_back(std::move(refBAll));
@@ -6864,6 +6924,9 @@ void testing_matmul_with_bias(const Arguments& arg,
         if(arg.amaxD)
             for(auto& amax : dAmaxD)
                 CHECK_HIP_ERROR(hipMemsetAsync(amax.buf(), 0xFF, amax.getNumBytes(), stream));
+        // The fills are queued on this stream only; hold the other partitions until they ran.
+        if(partitionedRun)
+            partitionedRun->checkpoint();
     };
     // The checks compare the first launch of each solution. Copy its outputs to the host before a
     // later launch can change them: under c_equal_d each launch reads the previous launch's D as
@@ -7986,6 +8049,8 @@ void testing_matmul_with_bias(const Arguments& arg,
                         .launch([&](size_t, int64_t i) {
                             int b = static_cast<int>(i % block_count);
                             runCandidate(b);
+                            if(partitioned && searchCfg.flush)
+                                partitionedRun->flushOthers(searchCfg.flush_grid);
                         }),
                     timingAbort);
             }
