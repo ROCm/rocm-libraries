@@ -5,9 +5,11 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <limits>
 
 #include "origami/heuristics.hpp"
+#include "origami/math.hpp"
 #include "origami/origami.hpp"
 
 namespace origami {
@@ -168,7 +170,47 @@ gemm_intermediates_t compute_gemm_intermediates(const problem_t&  problem,
   r.mem_l2_share   = ratio(t.memory.L_mem_l2, L_mem);
   r.mem_dram_share = ratio(t.memory.L_mem_dram, L_mem);
   r.lds_over_mfma  = ratio(t.L_lds_read, t.L_mt_compute);
+
+  // ---- Stream-K launch ---------------------------------------------------------------------------
+  r.launch          = compute_context_launch(problem, hardware, config, ctx);
+  r.launch_partials = streamk::launch_partials(r.launch);
+  r.launch_terms    = streamk::launch_terms(problem, r.launch);
   return r;
+}
+
+streamk::launch_t compute_context_launch(const problem_t&  problem,
+                                         const hardware_t& hardware,
+                                         const config_t&   config,
+                                         const context_t&  context) {
+  streamk::launch_t L;
+  L.valid      = true;
+  L.is_streamk = config.stream_k > 0;
+  if (!L.is_streamk) return L;
+  L.final_grid = context.num_wgs;
+  L.tiles      = context.num_output_tiles;
+  L.reduction  = context.reduction_strategy;
+  L.is_dynamic = config.stream_k == 4 ||
+                 (config.stream_k == 5 &&
+                  streamk::select_hybrid_mode(problem, hardware, config, problem.num_cus) ==
+                      hybrid_mode_t::dynamic);
+  L.iters_per_tile = std::max<std::uint64_t>(math::safe_ceil_div(problem.size.k, config.mt.k), 1);
+  L.mt_x           = config.mt.m;
+  L.mt_y           = config.mt.n;
+  L.workspace_size_per_elem_c = config.workspace_size_per_elem_c;
+  L.cu_occupancy              = config.occupancy;
+  L.cu_count                  = hardware.N_CU;
+  if (L.is_dynamic) {
+    const auto items = streamk::dynamic_items(L.tiles, L.iters_per_tile);
+    L.sk_tiles       = items.sk_tiles;
+    L.sk_split       = items.sk_split;
+  } else if (L.reduction == reduction_t::parallel && L.tiles > 0) {
+    L.sk_split = L.final_grid / L.tiles;
+    L.sk_tiles = L.sk_split;
+  } else {
+    L.sk_tiles = streamk::static_split(L.tiles, L.iters_per_tile, L.final_grid, 1, false).sk_tiles;
+    L.sk_split = 1;
+  }
+  return L;
 }
 
 }  // namespace gemm

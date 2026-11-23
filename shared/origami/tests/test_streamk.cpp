@@ -6,8 +6,12 @@
  *******************************************************************************/
 
 #include <catch2/catch_test_macros.hpp>
+#include <algorithm>
+#include <array>
 #include <limits>
+#include <vector>
 #include "common.hpp"
+#include "origami/gemm_intermediates.hpp"
 
 namespace {
 
@@ -757,4 +761,118 @@ TEST_CASE("Origami streamk: context_t launches hipBLASLt's uniform-summation-ord
   }
   REQUIRE(snapped > 100);
   REQUIRE(unchanged > 100);
+}
+
+TEST_CASE("Origami streamk: launch_partials", "[origami][streamk][launch]") {
+  // Partial tiles of the static split by brute force (no whole-tile shortcut): distinct cut
+  // tiles, every cut a partial.
+  auto brute = [](std::uint64_t sk, std::uint64_t iters, std::uint64_t G) {
+    origami::streamk::partials_t out;
+    if (G == 0 || sk == 0 || iters == 0) return out;
+    const std::uint64_t T = sk * iters, W = T / G, E = T % G;
+    std::vector<std::uint64_t> cut;
+    for (std::uint64_t g = 1; g < G; ++g) {
+      const std::uint64_t s = g * W + std::min(g, E);
+      if (s % iters) cut.push_back(s / iters);
+    }
+    out.partials = cut.size();
+    std::sort(cut.begin(), cut.end());
+    out.split_tiles =
+        static_cast<std::uint64_t>(std::unique(cut.begin(), cut.end()) - cut.begin());
+    return out;
+  };
+  using origami::streamk::launch_partials;
+  origami::streamk::launch_t base;
+  base.valid = base.is_streamk = true;
+  base.reduction               = origami::reduction_t::tree;
+  base.sk_split                = 1;
+
+  SECTION("static split: hand example and brute force") {
+    auto d  = base;
+    d.tiles = d.sk_tiles = 10;
+    d.iters_per_tile     = 4;
+    d.final_grid         = 3;  // T 40, W 13, E 1: starts 14 and 27 cut tiles 3 and 6
+    auto pt              = launch_partials(d);
+    REQUIRE(pt.partials == 2);
+    REQUIRE(pt.split_tiles == 2);
+    int with_cuts = 0, shortcut = 0;
+    for (std::uint64_t sk : {1, 2, 7, 64, 255, 256, 1000})
+      for (std::uint64_t iters : {1, 2, 3, 8, 13, 64})
+        for (std::uint64_t G : {1, 2, 3, 100, 256, 512, 999, 1024}) {
+          d.tiles = d.sk_tiles = sk;
+          d.iters_per_tile     = iters;
+          d.final_grid         = G;
+          const auto mine = launch_partials(d), ref = brute(sk, iters, G);
+          INFO("sk " << sk << " iters " << iters << " G " << G);
+          REQUIRE(mine.partials == ref.partials);
+          REQUIRE(mine.split_tiles == ref.split_tiles);
+          with_cuts += ref.partials > 0;
+          shortcut += (sk * iters) % G == 0 && ((sk * iters) / G) % iters == 0;
+        }
+    REQUIRE(with_cuts > 50);
+    REQUIRE(shortcut > 20);
+  }
+  SECTION("parallel, dynamic, DP-only and non-Stream-K launches") {
+    auto d       = base;
+    d.tiles      = 40;
+    d.sk_tiles   = 3;
+    d.sk_split   = 3;
+    d.final_grid = 120;
+    d.reduction  = origami::reduction_t::parallel;
+    auto pt      = launch_partials(d);
+    REQUIRE(pt.partials == 120);
+    REQUIRE(pt.split_tiles == 40);
+    d.is_dynamic = true;
+    REQUIRE(launch_partials(d).partials == 0);
+    d       = base;
+    d.tiles = d.sk_tiles = 10;
+    d.iters_per_tile     = 4;
+    d.final_grid         = 3;
+    d.dp_only            = true;
+    REQUIRE(launch_partials(d).partials == 0);
+    d.dp_only    = false;
+    d.is_streamk = false;
+    REQUIRE(launch_partials(d).partials == 0);
+  }
+}
+
+TEST_CASE("Origami streamk: compute_context_launch packs the context's launch",
+          "[origami][streamk][launch]") {
+  const auto hw = make_hardware(950);
+  int parallel = 0, tree = 0, not_streamk = 0;
+  for (const auto& s : std::vector<std::array<size_t, 4>>{
+           {4096, 4224, 512, 1}, {512, 512, 16384, 1}, {1024, 1024, 8192, 1}, {3072, 3200, 1024, 2}})
+    for (int sk : {0, 3, 5}) {
+      auto p = make_problem(s[0], s[1], s[2], origami::transpose_t::N, origami::transpose_t::T, s[3]);
+      p.uniform_summation_order = true;
+      auto c                      = make_config(128, 128, 64, 16, 16, 32, false, 1, 2, 0, 0, sk);
+      c.workspace_size            = std::numeric_limits<size_t>::max();
+      c.workspace_size_per_elem_c = 4;
+      const origami::gemm::context_t ctx(p, hw, c);
+      const auto L = origami::gemm::compute_context_launch(p, hw, c, ctx);
+      REQUIRE(L.valid);
+      if (sk == 0) {
+        REQUIRE_FALSE(L.is_streamk);
+        ++not_streamk;
+        continue;
+      }
+      REQUIRE(L.final_grid == ctx.num_wgs);
+      REQUIRE(L.tiles == ctx.num_output_tiles);
+      REQUIRE(L.reduction == ctx.reduction_strategy);
+      REQUIRE(L.iters_per_tile == (s[2] + 63) / 64);
+      REQUIRE(L.workspace_size_per_elem_c == 4);
+      if (L.reduction == origami::reduction_t::parallel) {
+        REQUIRE(L.sk_split == L.final_grid / L.tiles);
+        REQUIRE(L.sk_split >= 2);
+        ++parallel;
+      } else {
+        REQUIRE(L.sk_tiles ==
+                origami::streamk::static_split(L.tiles, L.iters_per_tile, L.final_grid, 1, false)
+                    .sk_tiles);
+        ++tree;
+      }
+    }
+  REQUIRE(parallel > 0);
+  REQUIRE(tree > 0);
+  REQUIRE(not_streamk > 0);
 }

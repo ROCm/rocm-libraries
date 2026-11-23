@@ -8,6 +8,7 @@
 #include "origami/gemm.hpp"
 #include "origami/hardware.hpp"
 #include "origami/origami_export.h"
+#include "origami/streamk.hpp"
 #include "origami/types.hpp"
 
 namespace origami {
@@ -130,7 +131,30 @@ struct ORIGAMI_EXPORT gemm_intermediates_t {
   double mem_dram_share       = 0.0;  ///< ratio(L_mem_dram, L_mem)
   double lds_over_mfma        = 0.0;  ///< ratio(L_lds_read, L_mt_compute)
   /// @}
+
+  /// @name Stream-K launch
+  /// @{
+  streamk::launch_t       launch{};           ///< compute_context_launch(problem, hardware, config, context)
+  streamk::partials_t     launch_partials{};  ///< streamk::launch_partials(launch)
+  streamk::launch_terms_t launch_terms{};     ///< streamk::launch_terms(problem, launch)
+  /// @}
 };
+
+/**
+ * @brief The Stream-K launch a context models, in the form of hipBLASLt's launch summary.
+ *
+ * final_grid, tiles and reduction are the context's num_wgs, num_output_tiles and
+ * reduction_strategy. The split is packed as hipBLASLt packs it: dynamic (StreamK=4, or StreamK=5
+ * resolving dynamic by streamk::select_hybrid_mode) streamk::dynamic_items without overrides;
+ * parallel reduction sk_split = sk_tiles = num_wgs / tiles; otherwise streamk::static_split with
+ * one full tile per workgroup. iters_per_tile = max(ceil(K / MT_K), 1); dp_only is false and the
+ * K granularity 1 (no host-preswizzled MX scales). Not Stream-K (config.stream_k == 0): only valid
+ * is set.
+ */
+ORIGAMI_EXPORT streamk::launch_t compute_context_launch(const problem_t&  problem,
+                                                        const hardware_t& hardware,
+                                                        const config_t&   config,
+                                                        const context_t&  context);
 
 /**
  * @brief Origami's intermediates of one GEMM prediction (@see gemm_intermediates_t).

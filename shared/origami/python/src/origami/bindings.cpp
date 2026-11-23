@@ -632,6 +632,42 @@ NB_MODULE(origami, m) {
       .def_ro("weight_tile_total", &tile_terms_t::weight_tile_total)
       .def_ro("L_tile_total", &tile_terms_t::L_tile_total);
 
+  using launch_t = origami::streamk::launch_t;
+  nanobind::class_<launch_t>(m, "streamk_launch_t")
+      .def(nanobind::init<>())
+      .def_ro("valid", &launch_t::valid)
+      .def_ro("is_streamk", &launch_t::is_streamk)
+      .def_ro("final_grid", &launch_t::final_grid)
+      .def_ro("tiles", &launch_t::tiles)
+      .def_ro("sk_tiles", &launch_t::sk_tiles)
+      .def_ro("sk_split", &launch_t::sk_split)
+      // reduction as a number: reduction_t::none is not an exported value.
+      .def_prop_ro("reduction_code",
+                   [](const launch_t& l) {
+                     return l.reduction == origami::reduction_t::none ? -1
+                                                                      : static_cast<long>(l.reduction);
+                   })
+      .def_ro("is_dynamic", &launch_t::is_dynamic)
+      .def_ro("dp_only", &launch_t::dp_only)
+      .def_ro("iters_per_tile", &launch_t::iters_per_tile)
+      .def_ro("mt_x", &launch_t::mt_x)
+      .def_ro("mt_y", &launch_t::mt_y)
+      .def_ro("workspace_size_per_elem_c", &launch_t::workspace_size_per_elem_c)
+      .def_ro("cu_occupancy", &launch_t::cu_occupancy)
+      .def_ro("cu_count", &launch_t::cu_count);
+  nanobind::class_<origami::streamk::partials_t>(m, "streamk_partials_t")
+      .def(nanobind::init<>())
+      .def_ro("partials", &origami::streamk::partials_t::partials)
+      .def_ro("split_tiles", &origami::streamk::partials_t::split_tiles);
+  using launch_terms_t = origami::streamk::launch_terms_t;
+  nanobind::class_<launch_terms_t>(m, "streamk_launch_terms_t")
+      .def(nanobind::init<>())
+      .def_ro("grid_over_tiles", &launch_terms_t::grid_over_tiles)
+      .def_ro("split_tiles_frac", &launch_terms_t::split_tiles_frac)
+      .def_ro("fixup_bytes_over_output", &launch_terms_t::fixup_bytes_over_output)
+      .def_ro("num_wgs", &launch_terms_t::num_wgs)
+      .def_ro("timesteps", &launch_terms_t::timesteps);
+
   using intermediates_t = origami::gemm::gemm_intermediates_t;
   nanobind::class_<intermediates_t>(m, "gemm_intermediates_t")
       .def(nanobind::init<>())
@@ -708,7 +744,10 @@ NB_MODULE(origami, m) {
       .def_ro("overhead_frac", &intermediates_t::overhead_frac)
       .def_ro("mem_l2_share", &intermediates_t::mem_l2_share)
       .def_ro("mem_dram_share", &intermediates_t::mem_dram_share)
-      .def_ro("lds_over_mfma", &intermediates_t::lds_over_mfma);
+      .def_ro("lds_over_mfma", &intermediates_t::lds_over_mfma)
+      .def_ro("launch", &intermediates_t::launch)
+      .def_ro("launch_partials", &intermediates_t::launch_partials)
+      .def_ro("launch_terms", &intermediates_t::launch_terms);
 
   m.def(
       "compute_memory_latency_terms",
