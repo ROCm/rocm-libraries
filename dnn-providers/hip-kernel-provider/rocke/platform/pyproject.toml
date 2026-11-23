@@ -27,8 +27,9 @@ dependencies = [
 # torch must be the ROCm build for your system (install from the ROCm wheel
 # index, not here); see requirements.txt / BUILD.md.
 dev = [
-    "pytest>=7.0",
-    "pytest-subtests>=0.11",
+    # pytest 9 runs subtests itself; rocke.tests.sweep_guard needs its
+    # subtest reports.
+    "pytest>=9.0",
     "pytest-timeout>=2.4",
     # Independent low-bit numerical reference types:
     "ml_dtypes>=0.6.0",

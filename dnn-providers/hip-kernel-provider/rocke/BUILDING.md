@@ -111,7 +111,7 @@ ROCm PyTorch must come from the ROCm wheel index for your system (see
 The sweep needs the test/heuristics extras plus a ROCm PyTorch:
 
 ```sh
-# test runner + heuristics ML deps (pytest, pytest-subtests, pandas,
+# test runner + heuristics ML deps (pytest 9 or newer, pandas,
 # scikit-learn, lightgbm) come from the platform `dev` extra:
 pip install --config-settings editable_mode=compat -e "rocke/platform[dev]"
 pip install --config-settings editable_mode=compat --no-deps -e rocke/library

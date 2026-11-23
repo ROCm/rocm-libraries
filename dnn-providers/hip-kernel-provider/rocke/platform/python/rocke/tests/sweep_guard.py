@@ -19,8 +19,9 @@ whose combinations report as subtests only when they fail or skip must report
 every combination (a ``with subtests.test(...)`` per case), or the guard sees
 only its skips.
 
-The guard reads the subtest reports pytest 9 makes (``pytest.SubtestReport``);
-with an older pytest it sees none and does nothing.
+The guard reads the subtest reports pytest 9 makes (``pytest.SubtestReport``).
+An older pytest makes none, so the guard could not see a sweep that checked
+nothing: registering it there fails the session instead (``pytest.UsageError``).
 
 A sweep whose runner reports each case as ``(ok, why)``, with a case it stepped
 past (an arch that cannot build the spec) as ``(True, "skip (...)")``, checks
@@ -38,10 +39,6 @@ import pytest
 __all__ = ["assert_case_ran", "register_sweep_guard"]
 
 _PLUGIN_NAME = "rocke-sweep-guard"
-# pytest reports subtests with this report type from pytest 9 on (also with the
-# pytest-subtests 0.15 shim installed); with an older pytest the guard sees no
-# subtest reports and does nothing.
-_SUBTEST_REPORT = getattr(pytest, "SubtestReport", None)
 
 
 def assert_case_ran(test: unittest.TestCase, ok: bool, why: str) -> None:
@@ -57,12 +54,13 @@ class _EverySubtestSkippedFails:
     """Turns the passing report of a test whose subtests all skipped into a
     failure."""
 
-    def __init__(self) -> None:
+    def __init__(self, subtest_report_type: type[pytest.TestReport]) -> None:
+        self._subtest_report_type = subtest_report_type
         self._subtest_outcomes: dict[str, collections.Counter[str]] = {}
 
     @pytest.hookimpl(tryfirst=True)
     def pytest_runtest_logreport(self, report: pytest.TestReport) -> None:
-        if _SUBTEST_REPORT is not None and isinstance(report, _SUBTEST_REPORT):
+        if isinstance(report, self._subtest_report_type):
             outcomes = self._subtest_outcomes.setdefault(
                 report.nodeid, collections.Counter()
             )
@@ -88,6 +86,20 @@ class _EverySubtestSkippedFails:
 
 def register_sweep_guard(config: pytest.Config) -> None:
     """Install the guard in this pytest session, once (see the module
-    docstring)."""
-    if not config.pluginmanager.has_plugin(_PLUGIN_NAME):
-        config.pluginmanager.register(_EverySubtestSkippedFails(), _PLUGIN_NAME)
+    docstring). Raises ``pytest.UsageError`` when this pytest makes no subtest
+    reports (it is older than 9), since the guard could not see a sweep that
+    checked nothing."""
+    if config.pluginmanager.has_plugin(_PLUGIN_NAME):
+        return
+    subtest_report_type = getattr(pytest, "SubtestReport", None)
+    if subtest_report_type is None:
+        raise pytest.UsageError(
+            "rocke sweep guard failed - "
+            f"pytest={pytest.__version__}, expected 9 or newer, which reports "
+            "subtests (without them a sweep whose every case skipped would "
+            "pass); install the test requirements in "
+            "rocke/platform/requirements.txt"
+        )
+    config.pluginmanager.register(
+        _EverySubtestSkippedFails(subtest_report_type), _PLUGIN_NAME
+    )

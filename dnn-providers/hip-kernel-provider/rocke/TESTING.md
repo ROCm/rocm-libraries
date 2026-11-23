@@ -1470,11 +1470,14 @@ records (`rocke.tests.run_records`) of the CI lanes: it fails on each case no
 lane ran that no record covers.
 
 **A sweep that checked nothing fails.** The same pytest roots fail a test whose
-subtests all skipped (`rocke.tests.sweep_guard`, on pytest 9): skip such a test
-as a whole before its first subtest when none of its cases can run here, and
-report every combination as a subtest, not only those that fail or skip. A
-lane a subtest declares does not book its test, which ran. A sweep whose
-runner reports each case as `(ok, why)` checks it with
+subtests all skipped (`rocke.tests.sweep_guard`): skip such a test as a whole
+before its first subtest when none of its cases can run here, and report every
+combination as a subtest, not only those that fail or skip. A lane a subtest
+declares does not book its test, which ran. The guard reads the subtest reports
+of pytest 9, which runs subtests itself; the test requirements
+(`platform/requirements.txt`, the platform `dev` extra) declare pytest 9 or
+newer, and an older pytest fails the session at start rather than run without
+the guard. A sweep whose runner reports each case as `(ok, why)` checks it with
 `rocke.tests.sweep_guard.assert_case_ran`, so a case stepped past fails.
 
 ## 6. Invariants & contracts

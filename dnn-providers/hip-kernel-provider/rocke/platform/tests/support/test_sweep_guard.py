@@ -1,7 +1,8 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 """rocke.tests.sweep_guard: a sweep that checked nothing fails instead of
-passing, in a real pytest run."""
+passing, in a real pytest run, and a pytest too old to report subtests fails
+the session rather than run without the guard."""
 
 from __future__ import annotations
 
@@ -57,16 +58,27 @@ def pytest_configure(config):
 """
 
 
-@pytest.mark.skipif(
-    not hasattr(pytest, "SubtestReport"),
-    reason="this pytest reports no subtests (pytest 9 does)",
-)
-def test_a_test_whose_subtests_all_skipped_fails(tmp_path: Path):
-    tree = tmp_path / "tree"
+# A pytest older than 9 has no SubtestReport. The child session removes it from
+# its own pytest module before the guard registers, to stand in for one.
+_CONFTEST_WITHOUT_SUBTEST_REPORTS = """
+import pytest
+
+del pytest.SubtestReport
+
+from rocke.tests.sweep_guard import register_sweep_guard
+
+
+def pytest_configure(config):
+    register_sweep_guard(config)
+"""
+
+
+def _run_pytest_in_tree(tree: Path, conftest: str) -> subprocess.CompletedProcess:
+    """Run pytest on the sweeps above in a fresh ``tree`` with ``conftest``."""
     tree.mkdir()
-    (tree / "conftest.py").write_text(textwrap.dedent(_CONFTEST), encoding="utf-8")
+    (tree / "conftest.py").write_text(textwrap.dedent(conftest), encoding="utf-8")
     (tree / "test_sweeps.py").write_text(textwrap.dedent(_SWEEPS), encoding="utf-8")
-    result = subprocess.run(
+    return subprocess.run(
         [sys.executable, "-m", "pytest", "-p", "no:cacheprovider", "-rfE", "-q"],
         cwd=tree,
         env=rocke_subprocess_env(),
@@ -75,6 +87,10 @@ def test_a_test_whose_subtests_all_skipped_fails(tmp_path: Path):
         check=False,
         timeout=_CHILD_TIMEOUT_SECONDS,
     )
+
+
+def test_a_test_whose_subtests_all_skipped_fails(tmp_path: Path):
+    result = _run_pytest_in_tree(tmp_path / "tree", _CONFTEST)
     failed = {
         line.split()[1].partition(" ")[0]
         for line in result.stdout.splitlines()
@@ -88,6 +104,18 @@ def test_a_test_whose_subtests_all_skipped_fails(tmp_path: Path):
     assert "every subtest skipped (3 of them): the sweep checked nothing" in (
         result.stdout
     )
+
+
+def test_a_pytest_without_subtest_reports_fails_the_session(tmp_path: Path):
+    result = _run_pytest_in_tree(tmp_path / "tree", _CONFTEST_WITHOUT_SUBTEST_REPORTS)
+    assert result.returncode == pytest.ExitCode.USAGE_ERROR, (
+        result.stdout[-3000:] + result.stderr[-3000:]
+    )
+    assert (
+        f"rocke sweep guard failed - pytest={pytest.__version__}, expected 9 or newer"
+        in result.stderr
+    ), result.stderr[-3000:]
+    assert "passed" not in result.stdout, result.stdout[-3000:]
 
 
 class TestAssertCaseRan(unittest.TestCase):
