@@ -177,8 +177,10 @@ namespace rocsparse_ut
 
     // ----- NaN probes ---------------------------------------------------------
     // A quiet NaN of type T (both parts for a complex type). Used to pre-fill an
-    // output that a routine is documented to overwrite without reading (beta == 0,
-    // alpha == 0 with beta == 1): any NaN left in the result shows that it was read.
+    // output that is overwritten without being read (beta == 0: the BLAS convention
+    // these tests enforce; the rocSPARSE headers do not state it), or inputs that must
+    // not be read (A and x when alpha == 0 and beta == 1). A NaN in the result shows
+    // that the buffer was read.
     template <typename T>
     inline T nan_of()
     {

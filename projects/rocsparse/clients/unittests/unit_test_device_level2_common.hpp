@@ -805,8 +805,9 @@ namespace level2
 
     // ----- NaN probes -------------------------------------------------------
     // A vector of quiet NaN (real and imaginary parts for a complex type). Used as
-    // the initial y of a product with beta == 0, which is documented to overwrite y
-    // without reading it: any NaN left in the result shows that y was read.
+    // the initial y of a product with beta == 0, which these tests require to
+    // overwrite y without reading it (the BLAS convention; the rocSPARSE headers do
+    // not state it): any NaN left in the result shows that y was read.
     using rocsparse_ut::has_nan;
     using rocsparse_ut::nan_of;
 
