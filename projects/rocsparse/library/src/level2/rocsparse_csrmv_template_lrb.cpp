@@ -144,7 +144,8 @@ rocsparse_status rocsparse::csrmv_analysis_lrb_template_dispatch(rocsparse_handl
         p_csrmv_info[0] = nullptr;
         RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(
             rocsparse_status_not_implemented,
-            "the LRB algorithm does not support rows with more than 2^31 non-zeros");
+            "the LRB algorithm does not support rows with more than 2^31 non-zeros; use the row "
+            "split algorithm instead");
     }
 
     for(int i = 0; i < rocsparse::lrb_num_bins; i++)
