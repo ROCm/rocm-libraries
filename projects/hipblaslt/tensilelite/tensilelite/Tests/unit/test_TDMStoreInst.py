@@ -75,6 +75,8 @@ def _state(**overrides):
     "VectorWidthA": 1,
     "AdaptiveGemm": 0,
     "LocalSplitU": 1,
+    "PackedC0IndicesX": [0],
+    "PackedC1IndicesX": [1],
     "ProblemType": problemType,
   }
   for key, value in overrides.items():
@@ -184,6 +186,8 @@ _ZGEMM_STATE = {"DestDataType": DataType("z"), "ComputeDataType": DataType("z"),
   ({"OutputPeerD": True}, "TDMStoreInst does not support OutputPeerD"),
   (dict(_STREAMK, StreamKAtomic=1),
    "TDMStoreInst does not support StreamKAtomic: the kernel adds its tiles to D atomically instead of storing them"),
+  ({"PackedC0IndicesX": [0, 2]}, "TDMStoreInst requires one free index per operand, not packed free indices"),
+  ({"PackedC1IndicesX": [1, 3]}, "TDMStoreInst requires one free index per operand, not packed free indices"),
   ({"MacroTile0": TDM_TILE_DIM_MAX + 1}, _TILE),
   (dict(_ZGEMM_STATE, MacroTile0=TDM_TILE_DIM_MAX // 2 + 1), _TILE),
   ({"MacroTile1": 4 * TDM_TILE_DIM_MAX + 1}, _TILE),
