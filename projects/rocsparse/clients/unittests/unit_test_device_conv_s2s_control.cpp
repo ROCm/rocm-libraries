@@ -1000,10 +1000,10 @@ namespace
         rocsparse_format target;
     };
 
-    // A null target value pointer is a symbolic conversion between the COO, COO AoS,
-    // CSR, and CSC formats, including an identity copy, and in an ELL or BSR identity
-    // copy. The index arrays are still written. The other ELL and BSR routes store
-    // values unconditionally and are not listed.
+    // A null target value array requests a symbolic conversion when the source and
+    // target both use the COO, COO AoS, CSR, or CSC format, or both use ELL, or both
+    // use BSR. Only the target index arrays are written. The other ELL and BSR routes
+    // store values unconditionally and are not listed.
     constexpr SymbolicPair k_symbolic[] = {
         {rocsparse_format_coo_aos, rocsparse_format_coo},
         {rocsparse_format_coo_aos, rocsparse_format_csr},
