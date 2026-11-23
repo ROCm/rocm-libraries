@@ -357,3 +357,21 @@ def test_fold_store_kernargs_reuse_loop_sgprs(tmp_path, monkeypatch, amaxd, pgl)
     dev = _emit_one(tmp_path, config, "tf_store_dev.yaml")
     assert CEIL not in dev and "label_TailLoopBeginL" in dev
     assert _next_free_sgpr(fold) - _next_free_sgpr(dev) <= 4
+
+
+def test_fold_overflow_falls_back(tmp_path, monkeypatch):
+    # A kernel whose fold SGPRs do not fit is generated again with the tail loop (develop code):
+    # never a reject. The overflow verdict makes the first generation raise; simulated by 40 extra
+    # SGPRs defined only when the kernel folds.
+    from tensilelite.KernelWriterAssembly import KernelWriterAssembly
+    define = KernelWriterAssembly.defineVariableSgprs
+
+    def bloated(self, kernel):
+        module = define(self, kernel)
+        if kernel.get("_TailFolding", False):
+            module.add(self.defineSgpr("TailFoldTestBloat", 40))
+        return module
+
+    monkeypatch.setattr(KernelWriterAssembly, "defineVariableSgprs", bloated)
+    asm = _emit_one(tmp_path, _config(), "tf_overflow.yaml")
+    assert CEIL not in asm and "label_TailLoopBeginL" in asm and "TailFoldTestBloat" not in asm
