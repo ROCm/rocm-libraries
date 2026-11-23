@@ -4,10 +4,13 @@
 
 """Unit tests for gen_node_operands.py's operand policy, on hand-built schemas."""
 
+import os
 import re
+import shutil
 import unittest
 
-from gen_node_operands import OperandsEmitter
+from gen_cache_key import _HIPDNN_DIR, SDK_DIR, _resolve_flatc
+from gen_node_operands import OperandsEmitter, generated_headers, sdk_emitter
 from test_gen_cache_key import field, schema, table
 
 NS = "test_ns"
@@ -255,6 +258,148 @@ class TestAttributeOperands(unittest.TestCase):
     def test_strings_payloads_and_deprecated_fields_are_not_visited(self):
         for name in ("name", "payload", "labels", "old"):
             self.assertNotIn(f'"{name}"', self.visitor)
+
+
+class TestOperandTable(unittest.TestCase):
+    """OPERANDS marks an operand optional when a valid node may leave it out; the UHD tools
+    read each such operand through a default, so a wrong flag either hides an unguarded read
+    or demands a default for an operand that is always there."""
+
+    @staticmethod
+    def rows(fields, tensor_fields=None):
+        emitter = OperandsEmitter(
+            node_schema([("Op", fields)], tensor_fields), f"{NS}.Root", f"{NS}.Node"
+        )
+        return {
+            name: (kind, optional) for _, name, kind, optional in emitter.operand_rows()
+        }
+
+    def test_a_required_tensor_reference_stays_required(self):
+        rows = self.rows([field("x_tensor_uid", "Long", 0, uid=True)])
+        self.assertEqual(rows, {"x": ("TENSOR", False)})
+
+    def test_an_optional_tensor_reference_is_optional(self):
+        rows = self.rows([field("bias_tensor_uid", "Long", 0, uid=True, optional=True)])
+        self.assertEqual(rows, {"bias": ("TENSOR", True)})
+
+    def test_a_vector_of_tensor_references_is_optional_though_the_field_is_not(self):
+        # The schema fixes no length, so any element index may be missing.
+        rows = self.rows(
+            [field("input_tensor_uids", "Vector", 0, element="Long", uid=True)]
+        )
+        self.assertEqual(rows, {"input": ("TENSORS", True)})
+
+    def test_an_optional_scalar_is_optional_and_a_required_one_is_not(self):
+        rows = self.rows(
+            [
+                field("alpha", "Float", 0, optional=True),
+                field("groups", "Int", 1),
+                field("causal", "Bool", 2),
+            ]
+        )
+        self.assertEqual(
+            rows,
+            {
+                "alpha": ("SCALAR", True),
+                "groups": ("SCALAR", False),
+                "causal": ("SCALAR", False),
+            },
+        )
+
+    def test_a_vector_attribute_is_optional_though_the_field_is_not(self):
+        rows = self.rows([field("stride", "Vector", 0, element="Long")])
+        self.assertEqual(rows, {"stride": ("ELEMENTS", True)})
+
+    def test_operands_without_a_published_name_have_no_row(self):
+        rows = self.rows(
+            [
+                field("label", "String", 0),
+                field("payload", "Vector", 1, element="UByte"),
+                field("old", "Int", 2, deprecated=True),
+            ]
+        )
+        self.assertEqual(rows, {})
+
+    def test_the_emitted_table_carries_each_flag(self):
+        emitter = OperandsEmitter(
+            node_schema(
+                [
+                    (
+                        "Op",
+                        [
+                            field("x_tensor_uid", "Long", 0, uid=True),
+                            field(
+                                "input_tensor_uids",
+                                "Vector",
+                                1,
+                                element="Long",
+                                uid=True,
+                            ),
+                        ],
+                    )
+                ]
+            ),
+            f"{NS}.Root",
+            f"{NS}.Node",
+        )
+        table_text = emitter.emit_table()
+        self.assertIn('{"Op", "x", OperandKind::TENSOR, false},', table_text)
+        self.assertIn('{"Op", "input", OperandKind::TENSORS, true},', table_text)
+        self.assertIn("std::array<OperandEntry, 2> OPERANDS", table_text)
+
+
+class TestGeneratedHeaders(unittest.TestCase):
+    """One run writes two committed headers; flatbuffers_sdk/CMakeLists.txt declares both as
+    the rule's outputs, so a path that drifts leaves a declared output unwritten."""
+
+    @staticmethod
+    def declared_outputs():
+        with open(
+            os.path.join(_HIPDNN_DIR, SDK_DIR, "CMakeLists.txt"), encoding="utf-8"
+        ) as f:
+            text = f.read()
+        paths = {}
+        for variable in ("_node_operands_header", "_node_operand_table_header"):
+            match = re.search(
+                rf'set\({variable}\s+"\$\{{CMAKE_CURRENT_SOURCE_DIR\}}/([^"]+)"', text
+            )
+            if match is None:
+                raise AssertionError(
+                    f"flatbuffers_sdk/CMakeLists.txt does not set {variable}"
+                )
+            paths[variable] = os.path.normpath(
+                os.path.join(_HIPDNN_DIR, SDK_DIR, match.group(1))
+            )
+        return paths
+
+    def test_both_headers_land_where_the_cmake_rule_declares_them(self):
+        emitter = OperandsEmitter(
+            node_schema([("Op", [field("x_tensor_uid", "Long", 0, uid=True)])]),
+            f"{NS}.Root",
+            f"{NS}.Node",
+        )
+        written = [os.path.normpath(path) for path, _ in generated_headers(emitter)]
+        declared = self.declared_outputs()
+        self.assertEqual(
+            written,
+            [declared["_node_operands_header"], declared["_node_operand_table_header"]],
+        )
+        for path in written:
+            self.assertTrue(os.path.isfile(path), path)
+
+    def test_the_committed_headers_equal_a_fresh_generation(self):
+        # The pre-commit hook proves this too; here the table is held to the schema in a
+        # plain test run, where flatc is on PATH at the pinned version.
+        if shutil.which("flatc") is None:
+            self.skipTest("flatc is not on PATH")
+        try:
+            flatc_path = _resolve_flatc()
+        except SystemExit:
+            self.skipTest("flatc is not the pinned version")
+        for path, text in generated_headers(sdk_emitter(flatc_path)):
+            with open(path, "rb") as f:
+                committed = f.read().replace(b"\r\n", b"\n")
+            self.assertEqual(committed, text.encode("utf-8"), path)
 
 
 class TestRejectedSchemas(unittest.TestCase):

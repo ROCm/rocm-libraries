@@ -490,6 +490,10 @@ It differs for each lane:
 Because `-L` is a regex, `-L quick` also selects these suites
 ([above](#1-ctest-by-tier-what-ci-does)).
 
+The hip-kernel-provider FlyDSL lanes (`hipkernel_flydsl_*_test_categories_integration.yaml`)
+define neither `quick` nor `ffm-quick`: no FlyDSL device test runs in those tiers, so
+each lane registers `standard`, `comprehensive` and `full` only.
+
 The timeouts come from `execution_settings.category_timeouts` in each YAML file.
 They are different in each file.
 

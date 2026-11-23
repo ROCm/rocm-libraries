@@ -18,6 +18,7 @@ import pytest
 from dispatch.sdpa.bind_dense import (
     _DECLINED,
     SDPA_DENSE_FEATURES,
+    _dense_candidates,
     sdpa_dense_admits,
     sdpa_dense_candidates,
 )
@@ -87,6 +88,18 @@ def test_every_sdpa_feature_is_classified_exactly_once():
 def test_decline_reasons_start_with_their_feature():
     for feature, reason in _DECLINED.items():
         assert reason.startswith(f"{feature}: "), feature
+
+
+@pytest.mark.parametrize("arch", ARCHES)
+def test_bias_declines_do_not_deny_that_dense_candidates_declare_attn_bias(arch):
+    """The shared bias text says no candidate declares additive-bias support. Some
+    dense candidates do (``attn_bias``); the refusal is this binding's, so the dense
+    text must not deny it, and must stop saying "declare" if none ever does."""
+    assert any(
+        "attn_bias" in c.capability.supports_features for c in _dense_candidates(arch)
+    )
+    for feature in ("bias", "bias_broadcast"):
+        assert "no dense candidate declares" not in _DECLINED[feature]
 
 
 _BASE = _dense_request(right_bound=0)

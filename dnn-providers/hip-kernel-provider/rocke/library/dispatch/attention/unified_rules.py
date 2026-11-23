@@ -16,10 +16,12 @@ from functools import lru_cache
 from typing import Any, Callable, Iterable, Mapping, NamedTuple, Optional, Tuple
 
 from kernels.common.attention_unified import (
+    _3d_workspace_max_index,
     _enable_gfx942_3d_wide_kv_load,
     _kv_cache_policy_3d,
     _kv_lds_swizzle_3d,
     _wave_page_id_load_3d,
+    _WORKSPACE_I32_INDEX_LIMIT,
 )
 
 from rocke.dispatch.tuning import WavesPerEuSpace
@@ -399,6 +401,19 @@ class UnifiedSpace(WavesPerEuSpace):
         return {} if why is None else dict.fromkeys(_KQ_PAD_KNOBS, why)
 
     def validate(self, base, kernel):
+        if self.path == "3d":
+            # A fixed-segment variant names its own count, so the split rule's
+            # cap never sees it. Without this the dispatcher would select a
+            # variant whose segment workspace overruns i32 and only find out at
+            # launch, where it raises.
+            segments = getattr(kernel.kernel_spec, "num_segments", 0)
+            if segments and _3d_workspace_max_index(base, segments) >= (
+                _WORKSPACE_I32_INDEX_LIMIT
+            ):
+                return False, (
+                    f"num_segments={segments} puts the split-KV segment workspace "
+                    "past i32 element addressing for this problem"
+                )
         if not self._gfx950_2d():
             return True, "ok"
         return _gfx950_2d_legality(kernel.kernel_spec)

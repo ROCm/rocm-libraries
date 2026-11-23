@@ -13,16 +13,6 @@
       "default_value": 128
     },
     {
-      "name": "num_query_heads",
-      "type": "int",
-      "default_value": 8
-    },
-    {
-      "name": "num_kv_heads",
-      "type": "int",
-      "default_value": 8
-    },
-    {
       "name": "causal",
       "type": "int",
       "default_value": 1
@@ -61,6 +51,11 @@
       "name": "block_n",
       "type": "int",
       "default_value": 64
+    },
+    {
+      "name": "use_additive_bias",
+      "type": "int",
+      "default_value": 0
     }
   ]
 }

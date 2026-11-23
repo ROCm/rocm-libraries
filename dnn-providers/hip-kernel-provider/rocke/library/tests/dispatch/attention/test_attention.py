@@ -36,7 +36,9 @@ _GFX950_DENSE_FEATURES = {
     "sinks",
     "sliding_window",
 }
+# The additive bias is served by the grid body only.
 _GFX950_DENSE_GRID_BODY_FEATURES = _GFX950_DENSE_FEATURES | {
+    "attn_bias",
     "causal_bottom_right",
     "layout_paged",
 }
@@ -74,6 +76,7 @@ EXPECTED_FEATURES = {
         "sliding_window",
     },
     "attention_gfx942_dense": {
+        "attn_bias",
         "causal",
         "causal_bottom_right",
         "layout_dense",
@@ -83,6 +86,7 @@ EXPECTED_FEATURES = {
         "sliding_window",
     },
     "attention_gfx942_dense_qbminor": {
+        "attn_bias",
         "causal",
         "causal_bottom_right",
         "layout_dense",

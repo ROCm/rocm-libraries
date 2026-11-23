@@ -3,8 +3,10 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -47,6 +49,7 @@ namespace
 {
 
 namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
+using attention_dense_graphs::BIAS_UID;
 using attention_dense_graphs::dispatchHandler;
 using attention_dense_graphs::Graph;
 using attention_dense_graphs::GraphSpec;
@@ -54,10 +57,14 @@ using attention_dense_graphs::ieee754Bits;
 using attention_dense_graphs::kpackKernel;
 using attention_dense_graphs::prepareFailure;
 using attention_dense_graphs::pythonAbi;
+using attention_dense_graphs::pythonBiasAbi;
 using attention_dense_graphs::pythonLseAbi;
+using attention_dense_graphs::pythonLseBiasAbi;
 using attention_dense_graphs::TensorSpec;
+using attention_dense_graphs::withBias;
 using attention_dense_graphs::withStats;
 using hipdnn_plugin_sdk::ingestor::BoundTokens;
+using hipdnn_plugin_sdk::ingestor::KernelArgument;
 using hipdnn_plugin_sdk::ingestor::KernelDefinition;
 using hipdnn_plugin_sdk::ingestor::KernelSourceKind;
 using hipdnn_plugin_sdk::ingestor::tryGetBoundInt;
@@ -79,6 +86,13 @@ constexpr std::string_view CAUSAL_TOKEN = ".causal";
 constexpr std::string_view SLIDING_WINDOW_TOKEN = ".sliding_window";
 constexpr std::string_view SCALE_BITS_TOKEN = ".scale_bits";
 constexpr std::string_view STATS_TOKEN = ".stats.uid";
+/// An arch that serves a bias: the flag every graph binds (1 with a bias, else 0), and the
+/// four a graph with a bias binds besides.
+constexpr std::string_view BIAS_TOKEN = ".bias";
+constexpr std::string_view BIAS_UID_TOKEN = ".bias.uid";
+constexpr std::string_view BIAS_STRIDE_BATCH_TOKEN = ".bias.stride_batch";
+constexpr std::string_view BIAS_STRIDE_HEAD_TOKEN = ".bias.stride_head";
+constexpr std::string_view BIAS_STRIDE_QUERY_TOKEN = ".bias.stride_query";
 
 /// @p arch's spelling of @p suffix.
 std::string tokenName(const AttentionDenseTestArch& arch, std::string_view suffix)
@@ -99,6 +113,10 @@ std::vector<std::string> allTokens(const AttentionDenseTestArch& arch)
     if(arch.bindsStats)
     {
         tokens.push_back(tokenName(arch, STATS_TOKEN));
+    }
+    if(arch.servesBias)
+    {
+        tokens.push_back(tokenName(arch, BIAS_TOKEN));
     }
     return tokens;
 }
@@ -601,6 +619,392 @@ TEST(TestGfx942AttentionDenseDispatch, RefusesToPrepareWhenTheStatsTokenNamesATe
         ASSERT_FALSE(failure.empty()) << "prepare() did not fail at all";
         EXPECT_NE(failure.find(STATS_MARKER), std::string::npos) << failure;
     }
+}
+
+// =============================================================================
+// The additive bias
+// =============================================================================
+
+namespace
+{
+
+/// The fragment only the graph/candidate bias disagreement carries.
+constexpr const char* BIAS_MARKER = "disagree on the additive bias";
+
+/// The fragment only the out-of-range bias stride refusal carries.
+constexpr const char* BIAS_STRIDE_RANGE_MARKER = "is outside [0, 2^31)";
+
+/// The fragment only the bias reach refusal carries.
+constexpr const char* BIAS_REACH_MARKER = "reach element 2^31";
+
+/// The four further tokens a graph with a bias binds.
+std::vector<std::string> biasTokens(const AttentionDenseTestArch& arch)
+{
+    std::vector<std::string> tokens;
+    for(const std::string_view suffix :
+        {BIAS_UID_TOKEN, BIAS_STRIDE_BATCH_TOKEN, BIAS_STRIDE_HEAD_TOKEN, BIAS_STRIDE_QUERY_TOKEN})
+    {
+        tokens.push_back(tokenName(arch, suffix));
+    }
+    return tokens;
+}
+
+/// servedGraph with an fp32 [B, 1, Sq, Skv] attn_mask: the head axis broadcasts.
+GraphSpec servedBiasGraph()
+{
+    auto spec = servedGraph();
+    const auto bias = withBias({BATCH, 1, SEQ, SEQ});
+    spec.unnamedTensors = bias.unnamedTensors;
+    spec.attnMaskUid = bias.attnMaskUid;
+    return spec;
+}
+
+/// A descriptor of @p arch's engine that records the ABI a bias (or plain) kernel declares,
+/// with the LSE pointer before the bias tail when @p writesLse, and carries the
+/// use_additive_bias field of a completed record.
+KernelDefinition makeBiasKernel(const AttentionDenseTestArch& arch,
+                                bool bias,
+                                bool writesLse = false,
+                                int64_t blockM = 256,
+                                int64_t blockN = 64)
+{
+    auto abi = writesLse ? pythonLseAbi() : pythonAbi();
+    if(bias)
+    {
+        abi = writesLse ? pythonLseBiasAbi() : pythonBiasAbi();
+    }
+    auto kernel = kpackKernel(arch, abi, blockM, blockN);
+    kernel.metadata[std::string("use_additive_bias")] = int64_t{bias ? 1 : 0};
+    return kernel;
+}
+
+/// The arches that serve an additive bias.
+class TestAttentionDenseBiasDispatch
+    : public ::testing::TestWithParam<const AttentionDenseTestArch*>
+{
+protected:
+    static const AttentionDenseTestArch& arch()
+    {
+        return *GetParam();
+    }
+};
+
+} // namespace
+
+/// The bias uid launch() resolves the buffer by, and the strides it passes: the batch and
+/// query-row pitches as the tensor carries them, and zero on the broadcast head axis
+/// whatever stride the tensor writes there. A plain graph binds the flag at zero and
+/// nothing else.
+TEST_P(TestAttentionDenseBiasDispatch, BindsTheBiasUidAndItsKernelStrides)
+{
+    const Graph biased(arch(), servedBiasGraph());
+    const auto bound = bindingsFor(biased);
+    EXPECT_EQ(tokenValue(bound, tokenName(arch(), BIAS_TOKEN)), 1);
+    EXPECT_EQ(tokenValue(bound, tokenName(arch(), BIAS_UID_TOKEN)), BIAS_UID);
+    EXPECT_EQ(tokenValue(bound, tokenName(arch(), BIAS_STRIDE_BATCH_TOKEN)), SEQ * SEQ);
+    EXPECT_EQ(tokenValue(bound, tokenName(arch(), BIAS_STRIDE_HEAD_TOKEN)), 0);
+    EXPECT_EQ(tokenValue(bound, tokenName(arch(), BIAS_STRIDE_QUERY_TOKEN)), SEQ);
+
+    const Graph plain(arch(), servedGraph());
+    const auto plainBound = bindingsFor(plain);
+    EXPECT_EQ(tokenValue(plainBound, tokenName(arch(), BIAS_TOKEN)), 0);
+    for(const auto& token : biasTokens(arch()))
+    {
+        EXPECT_EQ(tokenValue(plainBound, token), NOT_BOUND) << token;
+    }
+}
+
+/// A bias graph on a bias candidate reaches the loader: the binding is read in full and
+/// the fourteen-argument signature is the one expected.
+TEST_P(TestAttentionDenseBiasDispatch, ReachesTheLoaderForABiasGraphOnABiasCandidate)
+{
+    const Graph graph(arch(), servedBiasGraph());
+    const std::string failure
+        = prepareFailure(graph, bindingsFor(graph), makeBiasKernel(arch(), /*bias=*/true));
+    ASSERT_FALSE(failure.empty()) << "prepare() cannot succeed without the archive";
+    EXPECT_EQ(failure.find(BIAS_MARKER), std::string::npos) << failure;
+    EXPECT_EQ(failure.find(SIGNATURE_MARKER), std::string::npos) << failure;
+    EXPECT_NE(failure.find("does not exist"), std::string::npos) << failure;
+}
+
+/// kernel_match never pairs a bias graph with a plain candidate or the reverse; prepare()
+/// refuses both by name, because either would launch with the wrong argument list.
+TEST_P(TestAttentionDenseBiasDispatch, RefusesToPrepareWhenGraphAndCandidateDisagreeOnBias)
+{
+    const Graph biased(arch(), servedBiasGraph());
+    const std::string onPlain
+        = prepareFailure(biased, bindingsFor(biased), makeBiasKernel(arch(), /*bias=*/false));
+    EXPECT_NE(onPlain.find(BIAS_MARKER), std::string::npos) << onPlain;
+
+    const Graph plain(arch(), servedGraph());
+    const std::string onBias
+        = prepareFailure(plain, bindingsFor(plain), makeBiasKernel(arch(), /*bias=*/true));
+    EXPECT_NE(onBias.find(BIAS_MARKER), std::string::npos) << onBias;
+
+    // A record written before the field reads as a plain candidate (the KMD default 0).
+    auto legacy = makeBiasKernel(arch(), /*bias=*/false);
+    legacy.metadata.erase(std::string("use_additive_bias"));
+    const std::string onLegacy = prepareFailure(biased, bindingsFor(biased), legacy);
+    EXPECT_NE(onLegacy.find(BIAS_MARKER), std::string::npos) << onLegacy;
+}
+
+/// Each bias token removed on its own from a bias graph's binding is refused by name, as
+/// the operand tokens are.
+TEST_P(TestAttentionDenseBiasDispatch, RefusesToPrepareWhenAnyOneBiasTokenIsMissing)
+{
+    const Graph graph(arch(), servedBiasGraph());
+    const auto bound = bindingsFor(graph);
+    ASSERT_EQ(bound.size(), allTokens(arch()).size() + biasTokens(arch()).size());
+
+    for(const auto& token : biasTokens(arch()))
+    {
+        SCOPED_TRACE(token);
+        BoundTokens tampered = bound;
+        tampered.erase(token);
+
+        const std::string failure
+            = prepareFailure(graph, tampered, makeBiasKernel(arch(), /*bias=*/true));
+        EXPECT_NE(failure.find(MISSING_TOKEN_MARKER), std::string::npos) << failure;
+        EXPECT_NE(failure.find(token), std::string::npos) << failure;
+    }
+}
+
+/// graph_match binds every bias stride in [0, 2^31) and bounds the reach they give over the
+/// graph's extents. prepare() checks both again, so a binding it did not produce cannot wrap
+/// an i32 kernarg: each stride token at -1 or 2^31 is refused by name, and at 0 or the
+/// largest stride whose reach still fits accepted; one more is refused for its reach.
+TEST_P(TestAttentionDenseBiasDispatch, RefusesToPrepareABiasStrideOutsideTheI32Range)
+{
+    const Graph graph(arch(), servedBiasGraph());
+    const auto bound = bindingsFor(graph);
+    const std::vector<std::string> strideTokens{tokenName(arch(), BIAS_STRIDE_BATCH_TOKEN),
+                                                tokenName(arch(), BIAS_STRIDE_HEAD_TOKEN),
+                                                tokenName(arch(), BIAS_STRIDE_QUERY_TOKEN)};
+
+    for(const auto& token : strideTokens)
+    {
+        for(const int64_t value : {int64_t{-1}, int64_t{1} << 31})
+        {
+            SCOPED_TRACE(token + " = " + std::to_string(value));
+            BoundTokens tampered = bound;
+            ASSERT_EQ(tampered.count(token), 1U);
+            tampered[token] = value;
+
+            const std::string failure
+                = prepareFailure(graph, tampered, makeBiasKernel(arch(), /*bias=*/true));
+            EXPECT_NE(failure.find(BIAS_STRIDE_RANGE_MARKER), std::string::npos) << failure;
+            EXPECT_NE(failure.find(token), std::string::npos) << failure;
+        }
+        // The boundary values themselves are accepted: the binding is read and
+        // prepare() goes on to the loader, which fails only for want of the archive. The
+        // largest stride is the one whose reach, (Skv - 1) plus (extent - 1) * stride per
+        // axis, is 2^31 - 1 with the other two strides as the graph binds them.
+        const auto axis = static_cast<size_t>(&token - strideTokens.data());
+        const std::array<int64_t, 3> extents{BATCH, HEADS, SEQ};
+        std::array<int64_t, 3> others{SEQ * SEQ, 0, SEQ};
+        others[axis] = 0;
+        int64_t reachWithoutAxis = SEQ - 1;
+        for(size_t i = 0; i < others.size(); ++i)
+        {
+            reachWithoutAxis += (extents[i] - 1) * others[i];
+        }
+        const int64_t largest
+            = (std::numeric_limits<int32_t>::max() - reachWithoutAxis) / (extents[axis] - 1);
+        for(const int64_t value : {int64_t{0}, largest})
+        {
+            SCOPED_TRACE(token + " = " + std::to_string(value));
+            BoundTokens tampered = bound;
+            tampered[token] = value;
+
+            const std::string failure
+                = prepareFailure(graph, tampered, makeBiasKernel(arch(), /*bias=*/true));
+            EXPECT_EQ(failure.find(BIAS_STRIDE_RANGE_MARKER), std::string::npos) << failure;
+            EXPECT_EQ(failure.find(BIAS_REACH_MARKER), std::string::npos) << failure;
+            EXPECT_NE(failure.find("does not exist"), std::string::npos) << failure;
+        }
+        SCOPED_TRACE(token + " = " + std::to_string(largest + 1));
+        BoundTokens tooFar = bound;
+        tooFar[token] = largest + 1;
+        const std::string pastIt
+            = prepareFailure(graph, tooFar, makeBiasKernel(arch(), /*bias=*/true));
+        EXPECT_NE(pastIt.find(BIAS_REACH_MARKER), std::string::npos) << pastIt;
+    }
+}
+
+namespace
+{
+
+using attention_dense::AttentionDenseAbi;
+using attention_dense::AttentionDenseContract;
+
+/// What requireBiasBindingMatchesContract does with a binding and a contract: SUCCESS and an
+/// empty message when it accepts them, else the status and text it throws.
+struct ContractCheck
+{
+    hipdnnPluginStatus_t status = HIPDNN_PLUGIN_STATUS_SUCCESS;
+    std::string message;
+};
+
+ContractCheck checkBiasAgainstContract(const AttentionDenseTestArch& arch,
+                                       const AttentionDenseBinding& binding,
+                                       const AttentionDenseContract& contract)
+{
+    try
+    {
+        attention_dense::requireBiasBindingMatchesContract(
+            binding, contract, arch.label, "test_kernel");
+    }
+    catch(const hipdnn_plugin_sdk::HipdnnPluginException& error)
+    {
+        return {error.getStatus(), error.getMessage()};
+    }
+    return {};
+}
+
+AttentionDenseBinding biasBinding()
+{
+    AttentionDenseBinding binding;
+    binding.bias = AttentionDenseBias{BIAS_UID, {7, 3, 5}};
+    return binding;
+}
+
+/// The contracts that pass no bias (the arch's plain one, and the baked-head-count form a
+/// legacy handler launches) and the one that does, each under the arch's own name.
+struct ArchContracts
+{
+    std::string legacySymbol;
+    AttentionDenseContract plain;
+    AttentionDenseContract legacy;
+    AttentionDenseContract bias;
+};
+
+ArchContracts contractsOf(const AttentionDenseTestArch& arch)
+{
+    ArchContracts contracts;
+    contracts.legacySymbol = std::string(arch.dispatchSymbol) + ".v1";
+    contracts.plain = {arch.plainContractSymbol, AttentionDenseAbi::RUNTIME_HEAD_COUNTS};
+    contracts.legacy = {contracts.legacySymbol, AttentionDenseAbi::BAKED_HEAD_COUNTS};
+    contracts.bias = {arch.biasContractSymbol, AttentionDenseAbi::RUNTIME_HEAD_COUNTS_WITH_BIAS};
+    return contracts;
+}
+
+} // namespace
+
+/// The binding-versus-contract check is a pure function, because makePreparedAttentionDense,
+/// the one place that calls it, runs only after a code object has loaded and prepare() cannot
+/// get that far here. A plan is consistent exactly when its binding has a bias and its
+/// contract passes the bias arguments, or neither does.
+TEST_P(TestAttentionDenseBiasDispatch, AcceptsABindingThatAgreesWithItsContractOnTheBias)
+{
+    const auto contracts = contractsOf(arch());
+
+    const auto biased = checkBiasAgainstContract(arch(), biasBinding(), contracts.bias);
+    EXPECT_EQ(biased.status, HIPDNN_PLUGIN_STATUS_SUCCESS) << biased.message;
+
+    for(const auto* plain : {&contracts.plain, &contracts.legacy})
+    {
+        const auto result = checkBiasAgainstContract(arch(), AttentionDenseBinding{}, *plain);
+        EXPECT_EQ(result.status, HIPDNN_PLUGIN_STATUS_SUCCESS)
+            << plain->symbol << ": " << result.message;
+    }
+}
+
+/// A bias binding under a contract that passes no bias arguments would launch a kernel that
+/// adds nothing: a wrong result with no fault. It is refused as an internal error (the
+/// graph is fine; the code that paired the two is not), naming the contract and the bias.
+TEST_P(TestAttentionDenseBiasDispatch, RefusesABiasBindingUnderAContractWithoutBiasArguments)
+{
+    const auto contracts = contractsOf(arch());
+    for(const auto* plain : {&contracts.plain, &contracts.legacy})
+    {
+        SCOPED_TRACE(plain->symbol);
+        const auto result = checkBiasAgainstContract(arch(), biasBinding(), *plain);
+        EXPECT_EQ(result.status, HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR) << result.message;
+        EXPECT_NE(result.message.find(std::string(plain->symbol)), std::string::npos)
+            << result.message;
+        EXPECT_NE(result.message.find("passes no bias arguments"), std::string::npos)
+            << result.message;
+        EXPECT_NE(result.message.find("ignore"), std::string::npos) << result.message;
+        EXPECT_NE(result.message.find("uid " + std::to_string(BIAS_UID)), std::string::npos)
+            << result.message;
+    }
+}
+
+/// The reverse: the contract passes a bias pointer and strides, and the plan has no bias to
+/// pass them from (launch() would find no buffer for the uid).
+TEST_P(TestAttentionDenseBiasDispatch, RefusesABiasContractWithoutABiasBinding)
+{
+    const auto contracts = contractsOf(arch());
+    const auto result = checkBiasAgainstContract(arch(), AttentionDenseBinding{}, contracts.bias);
+    EXPECT_EQ(result.status, HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR) << result.message;
+    EXPECT_NE(result.message.find(std::string(contracts.bias.symbol)), std::string::npos)
+        << result.message;
+    EXPECT_NE(result.message.find("binds no additive bias"), std::string::npos) << result.message;
+}
+
+INSTANTIATE_TEST_SUITE_P(,
+                         TestAttentionDenseBiasDispatch,
+                         ::testing::ValuesIn(biasServingArches()),
+                         attentionDenseArchName);
+
+/// A gfx942 graph can carry a bias and write the LSE at once, and the two tensors are
+/// different uids the launch resolves apart: the bias flag and uid and the stats uid are
+/// each bound, and the launch passes lse_ptr before the bias tail, so a kernel recording the
+/// LSE form with the bias tail last is prepared and one with the tail first is refused.
+TEST(TestGfx942AttentionDenseDispatch, BindsAndPreparesTheBiasAlongsideTheStatsOutput)
+{
+    const auto& arch = GFX942_ATTENTION_DENSE;
+    ASSERT_NE(BIAS_UID, STATS_UID);
+    const Graph graph(arch, withStats(servedBiasGraph(), STATS_UID));
+    const auto bound = bindingsFor(graph);
+    EXPECT_EQ(tokenValue(bound, tokenName(arch, BIAS_TOKEN)), 1);
+    EXPECT_EQ(tokenValue(bound, tokenName(arch, BIAS_UID_TOKEN)), BIAS_UID);
+    EXPECT_EQ(tokenValue(bound, tokenName(arch, STATS_TOKEN)), STATS_UID);
+
+    const std::string accepted
+        = prepareFailure(graph, bound, makeBiasKernel(arch, /*bias=*/true, /*writesLse=*/true));
+    ASSERT_FALSE(accepted.empty()) << "prepare() cannot succeed without the archive";
+    EXPECT_EQ(accepted.find(SIGNATURE_MARKER), std::string::npos) << accepted;
+    EXPECT_NE(accepted.find("does not exist"), std::string::npos) << accepted;
+
+    auto biasFirst = makeBiasKernel(arch, /*bias=*/true);
+    biasFirst.source.signature.push_back(KernelArgument{
+        attention_dense_graphs::BUFFER_KIND, attention_dense_graphs::POINTER_BYTES, 0, "lse_ptr"});
+    const std::string refused = prepareFailure(graph, bound, biasFirst);
+    EXPECT_NE(refused.find(SIGNATURE_MARKER), std::string::npos) << refused;
+
+    // The plain LSE form has no bias tail, which the graph's bias needs.
+    auto noTail = makeBiasKernel(arch, /*bias=*/true, /*writesLse=*/true);
+    noTail.source.signature = pythonLseAbi();
+    const std::string tailless = prepareFailure(graph, bound, noTail);
+    EXPECT_NE(tailless.find(SIGNATURE_MARKER), std::string::npos) << tailless;
+}
+
+/// The v1 handler is registered only for plans saved before the head counts became runtime
+/// arguments, and has no bias form: a bias graph prepared on it is refused by name, before
+/// any code object is loaded, rather than launched with the wrong argument list. (gfx942
+/// has no legacy handler: its v1 handler is its current one and also serves v2.)
+TEST(TestGfx950AttentionDenseDispatch, RefusesToPrepareABiasPlanOnTheLegacyHandler)
+{
+    const auto& arch = GFX950_ATTENTION_DENSE;
+    registerNativeIngestorSymbols();
+    const auto* legacy = hipdnn_plugin_sdk::ingestor::DispatchRegistry<Handle>::resolve(
+        std::string("hipkernel.gfx950_attention_dense.dispatch.v1"));
+    ASSERT_NE(legacy, nullptr);
+
+    const Graph graph(arch, servedBiasGraph());
+    std::string failure;
+    try
+    {
+        legacy->prepare(graph.context(), bindingsFor(graph), makeBiasKernel(arch, /*bias=*/true));
+    }
+    catch(const std::exception& error)
+    {
+        failure = error.what();
+    }
+    ASSERT_FALSE(failure.empty()) << "prepare() cannot succeed without the archive";
+    EXPECT_NE(failure.find("has no additive bias form"), std::string::npos) << failure;
+    EXPECT_EQ(failure.find("does not exist"), std::string::npos) << failure;
 }
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine::testing

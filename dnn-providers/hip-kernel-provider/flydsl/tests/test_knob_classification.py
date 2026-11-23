@@ -186,7 +186,9 @@ def test_the_prep_schema_holds_vec_tail_whether_or_not_a_row_spells_it() -> None
         == list(spelled)
         == ["dtype", "head_dim", "sink", "vec_tail", "grid"]
     )
-    kmd = gen_descriptors.OpDescriptors("sdpa_bwd_prep", plain)._documents()
+    kmd = gen_descriptors.OpDescriptors(
+        "sdpa_bwd_prep", plain, ued="split-engine-id"
+    )._documents()
     (fields,) = (d["fields"] for n, d in kmd.items() if n.endswith(".kmd.json"))
     assert {f["name"]: f.get("default_value") for f in fields}["vec_tail"] == -1
 

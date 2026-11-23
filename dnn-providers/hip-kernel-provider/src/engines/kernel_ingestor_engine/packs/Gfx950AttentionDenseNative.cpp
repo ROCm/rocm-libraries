@@ -34,9 +34,11 @@
  * `build_attention_dense`, packaged (kind: rocke -> kpack) for gfx950 only. Matching and
  * dispatch, the [2^-64, 2^4] scale range included, are shared with the gfx942 twin
  * (AttentionDenseNative.cpp); what is gfx950's own is bound here: the block_m {128, 256}
- * tiles with their LDS budget, no sliding window, a head-count comparison because the
- * catalog lists each head configuration as its own entry, and the v1 (8-argument) and v2
- * (10-argument) launch contracts.
+ * tiles with their LDS budget, no sliding window, and the v1 (8-argument) and v2
+ * (10-argument) launch contracts. A kernel built with an additive bias (the
+ * use_additive_bias KMD field) takes the v3 contract, which adds the bias pointer and its
+ * strides: 14 arguments. No head count is compared: the kernel reads both as kernargs
+ * taken from the graph.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine
 {
@@ -51,10 +53,6 @@ constexpr std::string_view GRAPH_MATCHER_SYMBOL = "hipkernel.gfx950_attention_de
 constexpr std::string_view KERNEL_MATCHER_SYMBOL = "hipkernel.gfx950_attention_dense.kernel_match";
 constexpr std::string_view SCORE_SYMBOL = "hipkernel.gfx950_attention_dense.score";
 constexpr std::string_view DISPATCH_SYMBOL = "hipkernel.gfx950_attention_dense.dispatch";
-
-/// The tile every legacy record completes to, and the one cold selection prefers.
-constexpr int64_t BASELINE_BLOCK_M = 256;
-constexpr int64_t BASELINE_BLOCK_N = 64;
 
 attention_dense::AttentionDenseGeometry gfx950Geometry(int64_t blockM,
                                                        int64_t seqLenQ,
@@ -82,22 +80,32 @@ constexpr attention_dense::AttentionDenseArch gfx950Arch()
     // asks for one. Bound anyway, so a variant built with a window is never matched.
     arch.tokens.slidingWindow = "gfx950_attention_dense.sliding_window";
     arch.tokens.scaleBits = "gfx950_attention_dense.scale_bits";
-    arch.matchesHeadCounts = true;
+    arch.tokens.bias = "gfx950_attention_dense.bias";
+    arch.tokens.biasUid = "gfx950_attention_dense.bias.uid";
+    arch.tokens.biasStrideBatch = "gfx950_attention_dense.bias.stride_batch";
+    arch.tokens.biasStrideHead = "gfx950_attention_dense.bias.stride_head";
+    arch.tokens.biasStrideQuery = "gfx950_attention_dense.bias.stride_query";
     arch.isSupportedTile = &isSupportedGfx950AttentionDenseTile;
     arch.geometry = &gfx950Geometry;
     // No catalog variant carries a non-zero sliding_window, so a windowed mask has no
     // spelling here.
-    arch.windowReachesKeys = nullptr;
+    arch.servesWindows = false;
     // No catalog variant writes LSE, so every stats output declines under 'stats'.
     arch.candidateWritesLse = nullptr;
+    arch.candidateAddsBias = &attention_dense::candidateAdditiveBias;
     arch.currentContract = {GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V2,
                             attention_dense::AttentionDenseAbi::RUNTIME_HEAD_COUNTS};
     arch.legacyContract = {GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V1,
                            attention_dense::AttentionDenseAbi::BAKED_HEAD_COUNTS};
+    arch.biasContract = {GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V3,
+                         attention_dense::AttentionDenseAbi::RUNTIME_HEAD_COUNTS_WITH_BIAS};
     return arch;
 }
 
 constexpr attention_dense::AttentionDenseArch GFX950_ARCH = gfx950Arch();
+static_assert(GFX950_ARCH.isConsistent(),
+              "gfx950Arch(): a served feature's token is unspelled, or the bias hook and the bias "
+              "contract do not come together (their tokens, name and kernel-argument form)");
 
 std::optional<BoundTokens> gfx950AttentionDenseGraphMatches(const MatchContext& context)
 {
@@ -111,10 +119,11 @@ bool kernelMatches(const MatchContext& context,
     return attention_dense::kernelMatches(context, bound, kernel, GFX950_ARCH);
 }
 
-/// Scores for the cold ranking. Every alternative scores `ALTERNATIVE_CEILING - key /
-/// KEY_SPAN`, which lies strictly between zero and ALTERNATIVE_CEILING, so the baseline
-/// sits strictly above the whole alternative band.
-constexpr double BASELINE_TILE_SCORE = 2.0;
+/// Scores for the ranking. A tile earns one bonus per axis it matches the measured
+/// preference on, plus a lexicographic remainder strictly inside (0, ALTERNATIVE_CEILING)
+/// so two distinct tiles can never score equal.
+constexpr double BLOCK_M_MATCH_BONUS = 2.0;
+constexpr double BLOCK_N_MATCH_BONUS = 1.0;
 constexpr double ALTERNATIVE_CEILING = 1.0;
 /// Weight of block_m in the lexicographic key; exceeds every legal block_n (block_n
 /// divides block_m, so it is at most 256).
@@ -125,18 +134,104 @@ constexpr double KEY_SPAN = 262144.0; // 2^18
 /// Below every legal candidate: only a tile kernelMatches already declined gets it.
 constexpr double UNSUPPORTED_TILE_SCORE = 0.0;
 
+/// seqlen_q at or above which block_m 256 measured faster than 128, per cohort.
+///
+/// From the gfx950 tile sweep: 282 shapes (the LLM suite's 101 servable shapes and a
+/// 192-shape coverage grid, 11 of which the suite also carries), every legal tile timed
+/// against a torch SDPA reference, three
+/// alternating rounds, median per configuration. Each threshold sits on a plateau rather
+/// than a fitted edge -- for D128 causal every value in (2048, 4096] scores identically --
+/// so these are round numbers inside a wide band, not tuned constants.
+///
+/// Non-causal does the full seqlen_q x seqlen_kv work with no triangular saving, so a
+/// given length is a larger problem than the causal case and wants the fat tile sooner.
+/// At D128 that is every measured length.
+constexpr int64_t BLOCK_M_256_FROM_D64_CAUSAL = 8192;
+constexpr int64_t BLOCK_M_256_FROM_D64_NONCAUSAL = 1024;
+constexpr int64_t BLOCK_M_256_FROM_D128_CAUSAL = 4096;
+constexpr int64_t BLOCK_M_256_FROM_D128_NONCAUSAL = 0;
+
+/// block_n 64 won only for D128 causal; 128 won in all three other cohorts.
+constexpr int64_t PREFERRED_BLOCK_N_D128_CAUSAL = 64;
+constexpr int64_t PREFERRED_BLOCK_N_OTHERWISE = 128;
+
+/// The candidate's own causal metadata. kernelMatches has already required it to agree
+/// with the graph, so for anything scored it is the graph's value too.
+constexpr std::string_view CAUSAL_FIELD = "causal";
+
+/// The query length from which block_m 256 wins for this cohort.
+int64_t fatTileFrom(bool d128, bool causal)
+{
+    if(d128)
+    {
+        return causal ? BLOCK_M_256_FROM_D128_CAUSAL : BLOCK_M_256_FROM_D128_NONCAUSAL;
+    }
+    return causal ? BLOCK_M_256_FROM_D64_CAUSAL : BLOCK_M_256_FROM_D64_NONCAUSAL;
+}
+
+/// The tile the sweep measured fastest for this cohort at this query length.
+///
+/// Cohort is (head_size, causal) only. dtype was measured and makes no difference:
+/// splitting the fit on it changes nothing. Batch and the GQA ratio do carry some signal
+/// but are deliberately left out, since the rule is already inside its target and there is
+/// no held-out set left to tell a real effect from a fitted one.
+attention_dense::AttentionDenseTile preferredTile(int64_t headSize, bool causal, int64_t seqLenQ)
+{
+    const bool d128 = headSize == 128;
+    return attention_dense::AttentionDenseTile{seqLenQ >= fatTileFrom(d128, causal) ? 256 : 128,
+                                               d128 && causal ? PREFERRED_BLOCK_N_D128_CAUSAL
+                                                              : PREFERRED_BLOCK_N_OTHERWISE};
+}
+
+/**
+ * @brief Preference among tiles that can serve this problem. Higher wins.
+ *
+ * Scores how close a candidate is to @ref preferredTile: a bonus per matching axis, with
+ * block_m weighted above block_n, then the historical ascending (block_m, block_n) order
+ * as the remainder. The preferred tile is often not in the catalog for a given shape --
+ * kernelMatches drops every tile that does not divide both lengths -- so the ranking has
+ * to degrade sensibly rather than name one winner.
+ *
+ * Two properties the selector depends on, both asserted by
+ * ScoresEveryTileDeterministicallyAsAPositiveFiniteWeight: every score is positive and
+ * finite, and two distinct tiles never score equal, or the descriptor-id tie-break
+ * silently decides between them. The remainder is what guarantees the second.
+ *
+ * Divisibility is not this function's problem. kernelMatches rejects a tile that does not
+ * divide both lengths (@ref tileDivides) before anything is scored, so every tile here can
+ * already serve the shape and the question is only which is fastest.
+ */
+double tilePreference(const attention_dense::AttentionDenseTile& tile,
+                      const AttentionDenseProblem& problem,
+                      bool causal)
+{
+    const auto want = preferredTile(problem.headSize, causal, problem.seqLenQ);
+    const double match = (tile.blockM == want.blockM ? BLOCK_M_MATCH_BONUS : 0.0)
+                         + (tile.blockN == want.blockN ? BLOCK_N_MATCH_BONUS : 0.0);
+    const int64_t key = tile.blockM * BLOCK_M_KEY_WEIGHT + tile.blockN;
+    return match + ALTERNATIVE_CEILING - static_cast<double>(key) / KEY_SPAN;
+}
+
 /**
  * @brief Ranks candidates that survived kernelMatches. Higher wins.
  *
- * A stable fallback order for cold selection, not a performance model:
+ * Orders by closeness to the tile the gfx950 sweep measured fastest for this shape; see
+ * @ref preferredTile for the rule and @ref tilePreference for how a catalog without that
+ * exact tile degrades. Every distinct tile gets a distinct score, so the selector's
+ * descriptor-id tie-break never decides between two tiles.
  *
- *  1. The baseline 256/64 tile -- every legacy record's -- above every alternative.
- *  2. The alternatives in ascending lexicographic (block_m, block_n) order.
+ * `causal` is read from the candidate's own metadata rather than the bound tokens:
+ * kernelMatches has already required the two to agree, so for anything scored here they
+ * are the same value and the metadata needs no graph lookup.
  *
- * Every distinct tile gets a distinct score, so the selector's descriptor-id tie-break
- * never decides between two tiles.
+ * A graph this scorer cannot read the shape from scores every tile as a zero-length
+ * problem rather than refusing: applicability is kernelMatches' job and anything reaching
+ * here already passed it. That makes 128/128 preferred, the small tile being the safe
+ * choice for an unknown shape. The rest fall in by how much of that tile they match, not
+ * by size: the other block_m 128 tiles on the block_m bonus, then 256/128 on the block_n
+ * bonus alone, then the remaining block_m 256 tiles, each group ordered by the remainder.
  */
-double scoreKernel(const MatchContext& /*context*/,
+double scoreKernel(const MatchContext& context,
                    const BoundTokens& /*bound*/,
                    const KernelDefinition& kernel)
 {
@@ -145,12 +240,19 @@ double scoreKernel(const MatchContext& /*context*/,
     {
         return UNSUPPORTED_TILE_SCORE;
     }
-    if(tile->blockM == BASELINE_BLOCK_M && tile->blockN == BASELINE_BLOCK_N)
+
+    AttentionDenseProblem problem;
+    if(const auto* attributes = sdpa_graph::sdpaNode(context); attributes != nullptr)
     {
-        return BASELINE_TILE_SCORE;
+        const auto* q = sdpa_graph::findTensor(context, attributes->q_tensor_uid());
+        const auto* k = sdpa_graph::findTensor(context, attributes->k_tensor_uid());
+        if(q != nullptr && k != nullptr)
+        {
+            problem = sdpa_graph::problemFor(*q, *k);
+        }
     }
-    const int64_t key = tile->blockM * BLOCK_M_KEY_WEIGHT + tile->blockN;
-    return ALTERNATIVE_CEILING - static_cast<double>(key) / KEY_SPAN;
+    const auto causal = attention_dense::integerMetadata(kernel, CAUSAL_FIELD);
+    return tilePreference(*tile, problem, causal.value_or(0) != 0);
 }
 
 } // namespace
@@ -182,8 +284,8 @@ void resetGfx950AttentionDenseModuleCache()
 namespace
 {
 
-/// This engine's dispatch handler for the current (v2) or the legacy (v1) contract,
-/// process-lifetime. Both share one module cache and loader.
+/// This engine's dispatch handler for the current (v2, which also serves v3) or the legacy
+/// (v1) contract, process-lifetime. Both share one module cache and loader.
 const IKernelDispatchHandler<Handle>& gfx950AttentionDenseDispatchHandler(bool legacy)
 {
     static const compilation::KpackKernelLoader s_kpackLoader(
@@ -202,9 +304,12 @@ void registerGfx950AttentionDenseSymbols(SymbolScope<Handle>& scope)
     scope.add(std::string(GRAPH_MATCHER_SYMBOL), &gfx950AttentionDenseGraphMatches);
     scope.add(std::string(KERNEL_MATCHER_SYMBOL), &kernelMatches);
     scope.add(std::string(SCORE_SYMBOL), &scoreKernel);
-    // The UDD's unversioned name dispatches the catalog, all of which takes v2.
+    // The UDD's unversioned name dispatches the catalog: plain kernels take v2 and bias
+    // kernels v3, both served (and saved under) by the current handler.
     scope.add(std::string(DISPATCH_SYMBOL), &gfx950AttentionDenseDispatchHandler(/*legacy=*/false));
     scope.add(std::string(GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V2),
+              &gfx950AttentionDenseDispatchHandler(/*legacy=*/false));
+    scope.add(std::string(GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V3),
               &gfx950AttentionDenseDispatchHandler(/*legacy=*/false));
     // Kept so plans saved under v1 still load and launch their 8-argument code object.
     scope.add(std::string(GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V1),
