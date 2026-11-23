@@ -350,7 +350,7 @@ void RealTransEvenNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
             prePlan->dimension = 1;
             prePlan->length    = *complexLength;
             // output of the prePlan is in complex units
-            prePlan->outputLength = outputLength;
+            prePlan->outputLength = *realLength;
             prePlan->outputLength.front() /= 2;
             childNodes.emplace_back(std::move(prePlan));
         }
@@ -2147,6 +2147,8 @@ void Real3DPPNode::AssignParams_internal()
 
 size_t PrePostKernelNode::GetTwiddleTableLength()
 {
+    assert(outputLength.size() == length.size());
+
     if(scheme == CS_KERNEL_R_TO_CMPLX || scheme == CS_KERNEL_R_TO_CMPLX_TRANSPOSE)
         return 2 * length[0];
     if(scheme == CS_KERNEL_CMPLX_TO_R)

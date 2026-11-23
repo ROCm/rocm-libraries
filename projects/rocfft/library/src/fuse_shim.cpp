@@ -444,15 +444,9 @@ std::unique_ptr<TreeNode> R2CTrans_FuseShim::FuseKernels()
     fused->placement    = rocfft_placement_notinplace;
     fused->outArrayType = transpose->outArrayType;
     // fused->obOut            = transpose->obOut;
-    fused->oDist     = transpose->oDist;
+    fused->oDist = transpose->oDist;
+    // Keep the copied R2C output lengths; the strides are already in the same order.
     fused->outStride = transpose->outStride;
-    if(transpose->scheme == CS_KERNEL_TRANSPOSE)
-        std::swap(fused->outStride[0], fused->outStride[1]);
-    else if(transpose->scheme == CS_KERNEL_TRANSPOSE_Z_XY)
-    {
-        std::swap(fused->outStride[0], fused->outStride[1]);
-        std::swap(fused->outStride[1], fused->outStride[2]);
-    }
     fused->comments.push_back("R2CTrans_FuseShim: fused " + PrintScheme(CS_KERNEL_R_TO_CMPLX)
                               + " and following " + PrintScheme(transpose->scheme));
 
@@ -471,14 +465,10 @@ std::unique_ptr<TreeNode> R2CTrans_FuseShim::FuseKernels()
         nextLeaf->placement = (nextLeaf->obIn == nextLeaf->obOut) ? rocfft_placement_inplace
                                                                   : rocfft_placement_notinplace;
     }
-    fused->outputLength = transpose->outputLength;
-    TreeNode::PermuteOutputAxes(transpose->legacyOutputOrder, fused->outputLength);
-    fused->dimension    = transpose->dimension;
+    fused->dimension = transpose->dimension;
 
-    // This fusion is crossing sub-trees of the plan, so adjust the
-    // parent CS_REAL_TRANSFORM_EVEN to output what this fused kernel
-    // says it outputs.  Otherwise the plan won't make sense when
-    // other things look at it.
+    // The fusion crosses subtrees. The real-even parent and the fused
+    // kernel share the same axis order, but write with the transpose strides.
     r2c->parent->outputLength = fused->outputLength;
     r2c->parent->outStride    = fused->outStride;
     r2c->parent->oDist        = fused->oDist;
@@ -546,6 +536,7 @@ std::unique_ptr<TreeNode> TransC2R_FuseShim::FuseKernels()
     fused->CopyNodeData(*transpose);
     if(transpose->scheme == CS_KERNEL_TRANSPOSE_XY_Z)
     {
+        // Move the Hermitian axis from the middle to the end for the fused kernel.
         std::swap(fused->inStride[1], fused->inStride[2]);
         std::swap(fused->length[1], fused->length[2]);
     }
@@ -555,6 +546,15 @@ std::unique_ptr<TreeNode> TransC2R_FuseShim::FuseKernels()
     // fused->obOut            = c2r->obOut; // move to later with comment
     fused->oDist     = c2r->oDist;
     fused->outStride = c2r->outStride;
+    fused->outputLength = c2r->outputLength;
+    fused->dimension    = transpose->dimension;
+    // Move the standalone C2R's leading real-transform axis to the end.
+    std::rotate(fused->outStride.begin(),
+                fused->outStride.begin() + 1,
+                fused->outStride.begin() + fused->dimension);
+    std::rotate(fused->outputLength.begin(),
+                fused->outputLength.begin() + 1,
+                fused->outputLength.begin() + fused->dimension);
     fused->comments.push_back("TransC2R_FuseShim: fused " + PrintScheme(transpose->scheme)
                               + " and following " + PrintScheme(CS_KERNEL_CMPLX_TO_R));
 
@@ -573,15 +573,11 @@ std::unique_ptr<TreeNode> TransC2R_FuseShim::FuseKernels()
         nextLeaf->placement = (nextLeaf->obIn == nextLeaf->obOut) ? rocfft_placement_inplace
                                                                   : rocfft_placement_notinplace;
     }
-    fused->outputLength = c2r->outputLength;
-    fused->dimension    = transpose->dimension;
 
-    // This fusion is crossing sub-trees of the plan, so adjust the
-    // parent CS_REAL_TRANSFORM_EVEN to expect what this fused kernel
-    // says it outputs.  Otherwise the plan won't make sense when
-    // other things look at it.
-    c2r->parent->length   = fused->outputLength;
-    c2r->parent->inStride = fused->outStride;
+    // The fusion crosses subtrees. The parent still sees the standalone C2R's
+    // output axes, not the fused kernel's permuted view of the same buffer.
+    c2r->parent->length   = c2r->outputLength;
+    c2r->parent->inStride = c2r->outStride;
     c2r->parent->iDist    = fused->oDist;
 
     return fused;
