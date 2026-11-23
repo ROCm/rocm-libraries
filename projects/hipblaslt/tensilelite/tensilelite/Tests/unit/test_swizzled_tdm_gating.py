@@ -33,6 +33,10 @@ ALLOWED = [
     *[_c("dt_%s_%s" % (dt, side), side=side, dtype=dt)
       for dt in ("f8", "bf16", "f16", "i8", "f4", "mxf8", "mxf4") for side in ("A", "B", "AB")],
     # vector width (swizzled side, VW>1 pads the LDS tile via TDM iterate-mode)
+    # VW=1: an automatic (-1) LDS pad on the swizzled side resolves to none (see test_swizzled_tdm_auto_ldspad)
+    _c("auto_ldspad_B", LdsPadB=-1, LdsBlockSizePerPadB=-1),
+    _c("auto_ldspad_A", side="A", LdsPadA=-1, LdsBlockSizePerPadA=-1),
+    _c("auto_ldspad_AB", side="AB", LdsPadA=-1, LdsBlockSizePerPadA=-1, LdsPadB=-1, LdsBlockSizePerPadB=-1),
     _c("vwb2", VectorWidthB=2), _c("vwa2_A", side="A", VectorWidthA=2),
     _c("vwb4", wt=(4, 4), VectorWidthB=4), _c("f4_vwb2", dtype="f4", VectorWidthB=2),
     # wave layouts, including a one-nO free dim over two wave components
@@ -70,6 +74,8 @@ REJECTED = [
     (_c("layout_TT_A_ldstr", side="A", pt={"TransposeB": True}, LDSTrInst=True), "supports TN only"),
     (_c("ldspad_B", LdsPadB=16, LdsBlockSizePerPadB=-1), "requires LdsPadB==0"),
     (_c("ldspad_A", side="A", LdsPadA=16, LdsBlockSizePerPadA=-1), "requires LdsPadA==0"),
+    (_c("ldspad_B_blk_only", LdsPadB=-1, LdsBlockSizePerPadB=1024), "requires LdsPadB==0"),
+    (_c("ldspad_A_pad_only", side="A", LdsPadA=16, LdsBlockSizePerPadA=0), "requires LdsPadA==0"),
     (_c("iterate_B", TDMIterateMode=2), "incompatible with TDMIterateMode"),
     (_c("iterate_A", side="A", TDMIterateMode=1), "incompatible with TDMIterateMode"),
     (_c("tdm0_B", TDMInst=0), "requires DirectToVgprB"),
@@ -111,3 +117,22 @@ def test_swizzled_tdm_rejected(_gp_gfx1250, gfx1250_iim, assembler, capsys, case
     assert not sol["Valid"], ("swizzled-TDM combination '%s' is accepted but has not been validated; "
                               "validate it and move it to ALLOWED" % case["name"])
     assert reason in out, "rejected for another reason (expected %r):\n%s" % (reason, out[-2000:])
+
+
+@pytest.mark.parametrize("side", ["A", "B"])
+@pytest.mark.parametrize("pad,block", [(-1, -1), (-1, 0), (0, -1), (0, 0)])
+def test_swizzled_tdm_auto_ldspad(_gp_gfx1250, gfx1250_iim, assembler, capsys, side, pad, block):
+    """VW=1: automatic (-1) LdsPad / LdsBlockSizePerPad on the swizzled side resolve to 0."""
+    case = _c("auto", side=side, **{"LdsPad" + side: pad, "LdsBlockSizePerPad" + side: block})
+    sol, out = _derive(case, gfx1250_iim, assembler, capsys)
+    assert sol["Valid"], "automatic LDS pad on a VW=1 swizzled tensor must be accepted:\n" + out[-2000:]
+    assert sol["LdsPad" + side] == 0 and sol["LdsBlockSizePerPad" + side] == 0
+
+
+def test_swizzled_tdm_auto_ldspad_leaves_the_other_tensor_automatic(_gp_gfx1250, gfx1250_iim, assembler, capsys):
+    """Only the swizzled side is forced to 0; the plain tensor keeps its own automatic resolution."""
+    case = _c("auto_other", side="B", LdsPadA=-1, LdsPadB=-1, LdsBlockSizePerPadA=-1, LdsBlockSizePerPadB=-1)
+    sol, out = _derive(case, gfx1250_iim, assembler, capsys)
+    assert sol["Valid"], out[-2000:]
+    assert sol["LdsPadB"] == 0 and sol["LdsBlockSizePerPadB"] == 0
+    assert sol["LdsPadA"] != -1 and sol["LdsBlockSizePerPadA"] != -1, "plain tensor A must still resolve its auto pad"

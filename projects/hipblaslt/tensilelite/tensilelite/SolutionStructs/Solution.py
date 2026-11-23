@@ -5750,6 +5750,10 @@ class Solution(collections.abc.Mapping):
           elif swizzleAIsTDM:
             # Swizzle reads from a contiguous, unpadded LDS layout at fixed offsets; any LDS pad shifts
             # the data out from under those offsets. And the swizzle builds its own TDM descriptor.
+            # An automatic (-1) pad therefore resolves to none; only an explicit pad is rejected.
+            for padParam in ("LdsPadA", "LdsBlockSizePerPadA"):
+              if state[padParam] == -1:
+                state[padParam] = 0
             if state["LdsPadA"] != 0 or state["LdsBlockSizePerPadA"] != 0:
               reject(state, printRejectionReason, f"SwizzleTensorA requires LdsPadA==0 and LdsBlockSizePerPadA==0 (got {state['LdsPadA']}, {state['LdsBlockSizePerPadA']})")
               return
@@ -5790,6 +5794,10 @@ class Solution(collections.abc.Mapping):
           elif swizzleBIsTDM:
             # Swizzle reads from a contiguous, unpadded LDS layout at fixed offsets; any LDS pad shifts
             # the data out from under those offsets. And the swizzle builds its own TDM descriptor.
+            # An automatic (-1) pad therefore resolves to none; only an explicit pad is rejected.
+            for padParam in ("LdsPadB", "LdsBlockSizePerPadB"):
+              if state[padParam] == -1:
+                state[padParam] = 0
             if state["LdsPadB"] != 0 or state["LdsBlockSizePerPadB"] != 0:
               reject(state, printRejectionReason, f"SwizzleTensorB requires LdsPadB==0 and LdsBlockSizePerPadB==0 (got {state['LdsPadB']}, {state['LdsBlockSizePerPadB']})")
               return
