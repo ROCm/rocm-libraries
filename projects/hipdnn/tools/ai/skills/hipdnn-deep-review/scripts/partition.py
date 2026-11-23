@@ -74,10 +74,19 @@ APPL_PREFIXES = (
 )
 
 # Path segments that mark test code and data (lanes/test-tiers.md): a changed file under one of
-# them, a test source or a tier YAML is in the TIER lane's scope. Documentation never is.
-TIER_DIRS = ("test", "tests", "integration-test-bundles", "integration-tests")
+# them, a test source or a tier YAML is in the TIER lane's scope. Documentation never is. The
+# providers keep their GTest integration suites under `integration_tests/` and name them
+# `Integration<Feature>.cpp`; unit tests are `Test<Feature>.cpp` or `test_<x>.py`.
+TIER_DIRS = (
+    "test",
+    "tests",
+    "integration-test-bundles",
+    "integration-tests",
+    "integration_tests",
+)
 TIER_NAME = re.compile(
-    r"(?:.*test_categories.*\.yaml|test_.*\.py|.*_tests?\.(?:py|cpp|cc|cxx)|.*Tests?\.(?:cpp|cc|cxx))"
+    r"(?:.*test_categories.*\.yaml|test_.*\.py|.*_tests?\.(?:py|cpp|cc|cxx)|.*Tests?\.(?:cpp|cc|cxx)"
+    r"|(?:Test|Integration)[A-Z0-9][^/]*\.(?:cpp|cc|cxx|hpp|h))"
 )
 
 PROJECT_ROOTS = ("projects", "dnn-providers", "shared")

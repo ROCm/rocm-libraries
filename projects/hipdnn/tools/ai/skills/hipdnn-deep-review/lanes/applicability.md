@@ -55,7 +55,11 @@ no guard: it does not run on the raw backend API, deserialized or JSON graphs, o
    graph at the smallest block size and at the largest the engine can pick (the engine's own cap, else the device's `maxThreadsPerBlock`).
    - The rule is the runtime's per-axis work-item limit (*Launch geometry* row), not the device's `maxGridSize`: the current runtime
      reports y and z limits of 65535 and does not enforce them. Older runtimes that limited grid y and z are out of scope. A hardcoded
-     limit names its source in a comment: the HIP launch rule it mirrors.
+     limit names its source in a comment: the HIP launch rule or the architecture limit it mirrors.
+   - A bound stricter than every limit that applies on the engine's target architectures is `over-decline`, at `SUGGESTION` or
+     `FUTURE WORK`, when it refuses a graph each target can serve. Architecture limits count: on gfx12, gfx12.5 and gfx13 the compiler
+     reads `blockIdx.y` and `blockIdx.z` as 16-bit values (`llvm/lib/Target/AMDGPU/SIISelLowering.cpp`, architected SGPRs), so a grid y
+     or z bound of 65536 or less is justified for an engine that targets them, not an over-decline.
    - A bound that exists in plan build but not in applicability is `accept-then-fail`; one that is missing is the hazard.
    - A refusal inside the kernel launcher (a launch-time guard that turns the runtime error into a named exception) is a backstop, not a
      bound in applicability: the graph is still accepted and the plan built, so a missing per-engine bound stays `accept-then-fail` at the

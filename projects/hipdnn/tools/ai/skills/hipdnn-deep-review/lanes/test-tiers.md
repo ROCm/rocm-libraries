@@ -42,6 +42,9 @@ row of a sweep counts).
    label or `category_timeouts`. Count cases: expand every parametrized instantiation and every sweep row; read the sweep file, do not
    count files.
    - A rename that leaves a test in its tier is not an addition; a rename or edit that changes its tier is a move.
+   - A deleted test, or a case a regenerated sweep or catalog no longer produces, is a removal: count it from the `$BASE` tree, record it
+     as a negative count in its tier's `Tier:` line, and subtract its base time in `TIER-f1` (0 when unmeasured). A removal is a credit,
+     never a finding here; whether it weakens coverage is `TESTQ`'s (M3).
    - A case that skipped on an arch (an `onlyOn` or arch gate) and executes there at `$HEAD` counts as added for that arch. Record the
      count per arch.
    - Rows inside the body of one test (a table it iterates) add no instance. Record `rows +<added> -<removed>` for that test; for any other
@@ -69,7 +72,9 @@ row of a sweep counts).
    - **Lane narrowing:** a lane YAML can narrow a tier's patterns (ASM_SDPA selects `*Sdpa*`; the gfx950 attention lanes select
      `*_SdpaFwd_Default.*` in every tier). A test the narrowed pattern does not select runs in no tier of that lane.
    - **Split check, every YAML the change touches.** A YAML is touched when a changed test source (an edit counts, an added test is not
-     needed) belongs to a binary it categorizes. Compare its `quick` and `standard` patterns and excludes. When `standard` selects exactly
+     needed) belongs to a binary it categorizes, or when an added or edited bundle file (a sweep, a graph, a sidecar) sits under a suite
+     prefix the YAML's patterns select (every consumer lane's YAML that selects `quick_*` for a bundle under `quick/`, and so on). Compare
+     its `quick` and `standard` patterns and excludes. When `standard` selects exactly
      what `quick` selects (the hip-kernel-provider `HIP_MLOPS_ENGINE_test_categories.yaml` says "No distinct Standard* prefix exists, so
      standard runs the same tests as quick"), the tier split does not exist: a `Standard` prefix or directory runs in `quick` too, so
      nothing can be moved out of `quick` without leaving PR CI. Record `split: missing` once for the YAML, with every binary it
