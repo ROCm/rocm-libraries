@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 import yaml
 
+from geko.bench.log import ADAPTIVE_ROW_KEYS
 from geko.library import Library, LibraryCollection
 from geko.library.library import SUPPORTED_INITIALIZATIONS
 
@@ -72,6 +73,30 @@ def test_create_bench_input_generates_bench_and_verify(tmp_path: Path) -> None:
     assert Path(bench_file).is_file()
     assert verify_file is not None
     assert Path(verify_file).is_file()
+
+
+def test_create_bench_input_adaptive_by_default_and_verify_has_no_adaptive_keys(tmp_path: Path) -> None:
+    lib = _mk_lib()
+    bench_file, verify_file = lib.create_bench_input(tmp_path, verify=True, duration=0.5)
+    bench_rows = yaml.safe_load(Path(bench_file).read_text())
+    assert bench_rows[0]["adaptive"] is True
+    assert bench_rows[0]["measure_time"] == pytest.approx(500.0)
+    assert "iters" in bench_rows[0]
+
+    verify_rows = yaml.safe_load(Path(verify_file).read_text())
+    assert verify_rows[0]["iters"] == 1
+    assert verify_rows[0]["cold_iters"] == 0
+    for key in ADAPTIVE_ROW_KEYS:
+        assert key not in verify_rows[0]
+
+
+def test_create_bench_input_non_adaptive_has_no_adaptive_keys(tmp_path: Path) -> None:
+    lib = _mk_lib()
+    bench_file, _ = lib.create_bench_input(tmp_path, verify=False, duration=0.5, adaptive=False)
+    rows = yaml.safe_load(Path(bench_file).read_text())
+    for key in ADAPTIVE_ROW_KEYS:
+        assert key not in rows[0]
+    assert "iters" in rows[0]
 
 
 def test_create_bench_input_no_compute_dtype_path(tmp_path: Path) -> None:
