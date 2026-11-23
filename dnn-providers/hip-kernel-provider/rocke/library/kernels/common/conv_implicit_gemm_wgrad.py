@@ -600,6 +600,11 @@ class WgradConvSpec:
     # single workgroup overlaps its own loads with its own math (the CK
     # "compute v3" register prefetch). Costs the A+B tile's per-thread
     # elements in VGPRs and one extra (discarded) tile read per slice.
+    # prefetch_global_regs ("pgr") is the same idea in its basic form; this
+    # loop peels the slice's last tile (1 and 2 read nothing past the slice)
+    # and adds carried addresses, two LDS buffers, two tiles in flight, xwin
+    # and the ping-pong variants, so the two keep separate loops (exclusive
+    # knobs).
     #
     # Default False: strictly additive, so every existing config emits
     # byte-identical IR and keeps its kernel name.
@@ -2017,6 +2022,29 @@ def _register_prefetch_conflict(spec: "WgradConvSpec") -> str:
             f"pipeline={spec.pipeline!r}"
         )
     return ""
+
+
+def emit_wgrad_xcd_order(
+    b: IRBuilder, flat: Value, total: Value, num_xcds: int
+) -> Value:
+    """Logical id of hardware workgroup ``flat`` under the wgrad ``xcd_remap``.
+
+    The dispatcher hands ``flat`` to XCD ``i = flat % num_xcds``; XCD ``i``
+    gets the contiguous run starting at ``i * q + min(i, r)`` (``q, r =
+    divmod(total, num_xcds)``). This is the same bijection as
+    ``rocke.helpers.grid.xcd_remap(mode="contiguous")`` (the tests check it
+    against ``python_xcd_remap``), written as ``q``/``min`` instead of that
+    helper's ``ceil``/``max`` form; the shipped wgrad kernels keep this
+    instruction sequence.
+    """
+    cx = b.const_i32(num_xcds)
+    q = b.div(total, cx)
+    r = b.mod(total, cx)
+    xi = b.mod(flat, cx)
+    return b.add(
+        b.add(b.mul(xi, q), b.select(b.cmp_lt(xi, r), xi, r)),
+        b.div(flat, cx),
+    )
 
 
 def _prefetch_global_regs_conflict(spec: "WgradConvSpec") -> str:
@@ -3546,14 +3574,7 @@ def build_implicit_gemm_conv_wgrad(
             b.block_id_x(),
         )
         _total = b.mul(b.mul(_gx, _gy), _gz)
-        _cx = b.const_i32(spec.xcd_remap)
-        _q = b.div(_total, _cx)
-        _r = b.mod(_total, _cx)
-        _xi = b.mod(_flat, _cx)
-        _new = b.add(
-            b.add(b.mul(_xi, _q), b.select(b.cmp_lt(_xi, _r), _xi, _r)),
-            b.div(_flat, _cx),
-        )
+        _new = emit_wgrad_xcd_order(b, _flat, _total, spec.xcd_remap)
         _nx = b.mod(_new, _gx)
         _t = b.div(_new, _gx)
         _ny = b.to_sgpr_u32(b.mod(_t, _gy))

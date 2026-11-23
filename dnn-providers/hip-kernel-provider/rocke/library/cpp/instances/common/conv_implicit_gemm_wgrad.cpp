@@ -4132,8 +4132,10 @@ static bool wgrad_build_ctx_init(rocke_conv_build_ctx_t* ctx,
      * item (wgrad_emit_streamk). */
     rocke_value_t* k_lo = c0_node;
     rocke_value_t* k_hi_v = c_wg_K;
-    /* xcd_remap (Python _xcd_tile): flat = (z*gy + y)*gx + x is dealt to XCD
-     * flat % X; give XCD i the contiguous run [i*q + min(i, r), +count). */
+    /* xcd_remap (Python _xcd_tile, emit_wgrad_xcd_order): flat = (z*gy + y)*gx + x
+     * is dealt to XCD flat % X; give XCD i the contiguous run [i*q + min(i, r),
+     * +count). The same map as rocke_xcd_remap_contiguous, in its own (q, min)
+     * instruction sequence. */
     rocke_value_t* xcd_nx = NULL;
     rocke_value_t* xcd_ny = NULL;
     rocke_value_t* xcd_nz = NULL;

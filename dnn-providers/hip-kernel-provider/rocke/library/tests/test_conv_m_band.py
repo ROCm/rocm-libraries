@@ -2,13 +2,62 @@
 # SPDX-License-Identifier: MIT
 """CPU: the output-plane band order (m_band) is a bijection of the M tiles,
 whole-tile planes and planes that are not a whole number of tiles alike, and
-the spec rules / name tags of the fwd and dgrad knobs."""
+the spec rules / name tags of the fwd and dgrad knobs. Also the wgrad
+xcd_remap order it is walked in: the shared contiguous XCD remap."""
 
 from __future__ import annotations
 
 import unittest
 
+from kernels.common.conv_implicit_gemm_wgrad import emit_wgrad_xcd_order
 from kernels.conv.conv_m_band import python_m_band_order
+from rocke.helpers.grid import python_xcd_remap
+
+
+class _IntBuilder:
+    """The IRBuilder ops emit_wgrad_xcd_order uses, on Python ints."""
+
+    def const_i32(self, v):
+        return int(v)
+
+    def add(self, a, b):
+        return a + b
+
+    def mul(self, a, b):
+        return a * b
+
+    def div(self, a, b):
+        return a // b
+
+    def mod(self, a, b):
+        return a % b
+
+    def cmp_lt(self, a, b):
+        return a < b
+
+    def select(self, c, a, b):
+        return a if c else b
+
+
+class TestWgradXcdOrder(unittest.TestCase):
+    def test_is_the_shared_contiguous_remap(self):
+        """The wgrad xcd_remap emitter is xcd_remap(mode="contiguous") of
+        rocke.helpers.grid, in its own instruction sequence."""
+        b = _IntBuilder()
+        for xcds in (2, 6, 8):
+            for total in list(range(1, 70)) + [255, 256, 257, 1000]:
+                with self.subTest(xcds=xcds, total=total):
+                    got = [
+                        emit_wgrad_xcd_order(b, f, total, xcds) for f in range(total)
+                    ]
+                    want = [
+                        python_xcd_remap(
+                            f, num_wgs=total, num_xcds=xcds, mode="contiguous"
+                        )
+                        for f in range(total)
+                    ]
+                    self.assertEqual(got, want)
+                    self.assertEqual(sorted(got), list(range(total)))
 
 
 class TestMBandOrder(unittest.TestCase):
