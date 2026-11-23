@@ -1,6 +1,6 @@
 packaging
 pyyaml
-msgpack>=1.0
+msgpack>=1.2.3
 joblib>=1.4.0
 filelock
 numpy
