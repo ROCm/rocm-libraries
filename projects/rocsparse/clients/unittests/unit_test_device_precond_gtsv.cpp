@@ -224,8 +224,8 @@ namespace
 
     // Absolute error of the solution entries (about 1.0 .. 1.2), and residual relative to
     // max|b|: about ten times the largest measured on gfx1201 over the diagonally dominant
-    // and row-swap systems of this file (the zero-diagonal and infinite-entry systems added
-    // later run under the same bound without a new measurement). Solution error:
+    // and row-swap systems of this file (the zero-diagonal and infinite-entry systems were
+    // not part of that measurement and run under the same bound). Solution error:
     // float/cfloat 1.31e-6 (the systems that force row swaps), double/cdouble 2.7e-15.
     // Residual / max|b|: float/cfloat 1.36e-6, double/cdouble 2.25e-15.
     template <typename T>
