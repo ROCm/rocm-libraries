@@ -14,8 +14,8 @@ reference in pieces (:func:`chunked_paged_reference`).
 
 from __future__ import annotations
 
+import functools
 import itertools
-from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 from rocke.numeric.sdpa_reference import sdpa_reference
@@ -27,7 +27,7 @@ from ._attention_paged_reference import (
     paged_attention_reference,
     round_to_half,
 )
-from ._worker_process import available_cpus
+from ._reference_threads import run_reference_pieces
 
 __all__ = [
     "chunked_paged_reference",
@@ -145,14 +145,6 @@ def sparse_paged_cache(
     return DeviceArray(bits.view(host_dtype(dtype)), dtype)
 
 
-#: Worker threads for :func:`chunked_paged_reference`. Each (KV head, row chunk)
-#: piece is computed on its own, in numpy passes that release the GIL, so the
-#: pieces run in parallel; each worker holds one piece's float64 score
-#: temporaries (``rows_per_chunk`` rows of every head in the group against up to
-#: ``kv_len`` keys), so four keep the transient to a few of them.
-_CHUNK_WORKERS = min(4, available_cpus())
-
-
 def chunked_paged_reference(
     q: np.ndarray,
     k_cache: np.ndarray,
@@ -166,8 +158,8 @@ def chunked_paged_reference(
 ) -> np.ndarray:
     """:func:`paged_attention_reference` of one bottom-right-causal sequence,
     computed one KV head and ``rows_per_chunk`` query rows at a time so a long
-    sequence's score matrix stays small. The pieces run on
-    :data:`_CHUNK_WORKERS` threads; each writes only its own rows and heads.
+    sequence's score matrix stays small. The pieces run on the reference
+    threads (``_reference_threads``); each writes only its own rows and heads.
 
     A chunk of rows ``[r0, r1)`` sees the keys a full sequence's rows see when
     it is given ``kv_len - q_len + r1`` keys: its bottom-right diagonal then
@@ -190,12 +182,9 @@ def chunked_paged_reference(
             sliding_window=sliding_window,
         )
 
-    with ThreadPoolExecutor(_CHUNK_WORKERS) as pool:
-        pieces = [
-            pool.submit(one_piece, head, start)
-            for head in range(num_kv_heads)
-            for start in range(0, q_len, rows_per_chunk)
-        ]
-        for piece in pieces:
-            piece.result()
+    run_reference_pieces(
+        functools.partial(one_piece, head, start)
+        for head in range(num_kv_heads)
+        for start in range(0, q_len, rows_per_chunk)
+    )
     return out

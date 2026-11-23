@@ -23,11 +23,10 @@
 
 from __future__ import annotations
 
+import functools
 import hashlib
-import os
 from collections import OrderedDict
 from collections.abc import Sequence
-from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 from rocke.core.storage import element_bytes
@@ -43,6 +42,7 @@ from rocke.runtime.device_array import (
 )
 
 from ._dense_paged_stand_ins import pinned
+from ._reference_threads import run_reference_pieces
 
 #: The largest finite OCP e4m3 magnitude.
 _FP8E4M3_MAX = float(np.nanmax(fp8e4m3_decode_table()))
@@ -136,22 +136,6 @@ def dense_reference(
     return _REFERENCE_MEMO[key]
 
 
-#: Worker threads for :func:`dense_reference`. At these sizes ``sdpa_reference``
-#: spends its time in numpy's elementwise passes over each head's score matrix,
-#: which run on one core and release the GIL, so independent heads run in parallel.
-#: Each worker holds its head's score temporaries (up to ~240 MiB at Sq 6144 x
-#: Skv 2048), so four workers keep the transient at ~1.3 GiB on the largest
-#: reference while giving most of the speedup (2.1x there; 16 workers: 3.1x for
-#: 3.9 GiB).
-_REFERENCE_WORKERS = min(
-    4,
-    (
-        len(os.sched_getaffinity(0))
-        if hasattr(os, "sched_getaffinity")
-        else os.cpu_count() or 1
-    ),
-)
-
 #: Computed references by input digest, least recently used first:
 #: parametrized rows and reruns on the same seeded inputs (both grids, every block
 #: size of a paged cache) reuse one computation.
@@ -198,7 +182,8 @@ def _reference(q, k, v, scale, band, sink_values, q_offsets, kv_offsets):
     """``sdpa_reference`` of float64 ``[B, S, H, D]`` (or packed ``[T, H, D]``)
     values as ``(O, LSE[..., 1])`` in the input layout.
 
-    One call per (batch, query head), with that head's K and V, on the worker pool:
+    One call per (batch, query head), with that head's K and V, on the reference
+    threads (``_reference_threads``):
     ``sdpa_reference`` computes each (batch, head) on its own, so the split changes
     no value. K and V must have the same head count (the dense runners' layout), so
     one KV head index serves both."""
@@ -231,14 +216,11 @@ def _reference(q, k, v, scale, band, sink_values, q_offsets, kv_offsets):
             **band,
         )
 
-    with ThreadPoolExecutor(_REFERENCE_WORKERS) as pool:
-        jobs = [
-            pool.submit(one_head, batch, q_head)
-            for batch in batches
-            for q_head in range(num_q_heads)
-        ]
-        for job in jobs:
-            job.result()
+    run_reference_pieces(
+        functools.partial(one_head, batch, q_head)
+        for batch in batches
+        for q_head in range(num_q_heads)
+    )
     if not packed:
         o = o.transpose(0, 2, 1, 3)
     return o, lse[..., None]
