@@ -2358,6 +2358,12 @@ inline __device__ void batched_transpose_64x4(T* dst,
     }
 }
 
+// The gfx1250 kernels below are built for every gfx1250 target. The gfx1250-strict target (reported
+// by some nodes) defines __gfx1250_strict__ instead of __gfx1250__.
+#if defined(__gfx1250__) || defined(__gfx1250_strict__)
+#define BATCHED_TRANSPOSE_GFX1250 1
+#endif
+
 // The helpers of the gfx1250 transposes added below live in namespace impl; the kernels
 // (batched_transpose_reg / _lds / _lds_thin), the traits and the extern "C" instances are in the
 // global namespace.
@@ -2380,7 +2386,7 @@ inline __device__ bt32_t* bt_raw_ptr(T* p)
 // handled by the 256 threads. A block is either completely inside or completely outside of the
 // tensor because width % VL == 0 and height % VS == 0 (ediv), so one test per block is enough.
 // Consecutive threads take consecutive blocks along the height (strided loads, coalesced stores).
-#if defined(__gfx1250__)
+#if defined(BATCHED_TRANSPOSE_GFX1250)
 // Buffer instructions: 32-bit byte offsets, an offset beyond the range makes a load return 0 and a
 // store be dropped (that is how invalid blocks are skipped without branches). The resource covers
 // one batch, so height * width * 2 has to be below 2^31 (checked by the heuristic).
@@ -2584,7 +2590,7 @@ inline __device__ void batched_transpose_reg(T* dst,
                                              uint32_t magic_w,
                                              uint32_t shift_w)
 {
-#if defined(__gfx1250__)
+#if defined(BATCHED_TRANSPOSE_GFX1250)
     using namespace impl;
     static_assert(sizeof(T) == 2 || sizeof(T) == 4, "2 or 4 byte elements");
     static_assert(TH % VS == 0 && TW % VL == 0, "the tile has to be a multiple of the blocks");
@@ -2700,7 +2706,7 @@ inline __device__ void batched_transpose_lds(T* dst,
                                              uint32_t magic_w,
                                              uint32_t shift_w)
 {
-#if defined(__gfx1250__)
+#if defined(BATCHED_TRANSPOSE_GFX1250)
     using namespace impl;
     static_assert(sizeof(T) == 2 || sizeof(T) == 4, "2 or 4 byte elements");
     constexpr bool PAIR   = sizeof(T) == 2;
@@ -2922,7 +2928,7 @@ inline __device__ void batched_transpose_lds_thin(ushort* dst,
                                                   uint32_t shift_w)
 {
     static_assert((VL == 1) != (VS == 1), "exactly one of the vector sizes has to be 1");
-#if defined(__gfx1250__)
+#if defined(BATCHED_TRANSPOSE_GFX1250)
     using namespace impl;
     constexpr int VEC    = (VL == 1) ? VS : VL;
     constexpr int NW     = bt_nw<ushort, VEC>; // dwords per vector

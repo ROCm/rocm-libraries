@@ -221,6 +221,14 @@ static inline std::size_t GetExtraPaddingSize(uint32_t /* batch */,
     return static_cast<std::size_t>(padded_h) * padded_w - static_cast<std::size_t>(height) * width;
 }
 
+// The gfx1250 kernels are used on every gfx1250 target: the runtime can report "gfx1250-strict"
+// instead of "gfx1250" (see the kernel guard in batched_transpose.cpp).
+static inline bool IsGfx1250(const ExecutionContext& ctx)
+{
+    const auto device_name = ctx.GetStream().GetDeviceName();
+    return device_name == "gfx1250" || device_name == "gfx1250-strict";
+}
+
 // gfx1250 only: for 2-byte data where one dimension is a small multiple of 32 (32 or 64: e.g. the
 // channel count of an NCHW<->NHWC transpose) and the other one is large, use the thin LDS kernels
 // (256x32_pack_1x8_ediv_1x32 for the small dimension on the height, 32x512_pack_8x1_ediv_32x1 on
@@ -235,7 +243,7 @@ static inline bool TryGetThinKernel(const ExecutionContext& ctx,
 {
     if(data_size != 2)
         return false;
-    if(ctx.GetStream().GetDeviceName() != "gfx1250")
+    if(!IsGfx1250(ctx))
         return false;
     constexpr uint32_t min_spatial  = 1024; // smaller spatial sizes: generic kernels are as fast
     constexpr uint64_t min_elements = 1u << 22; // small tensors: generic kernels are as fast
@@ -674,7 +682,7 @@ static inline bool TryGetFittedKernel(const ExecutionContext& ctx,
 {
     if(data_size != 2 && data_size != 4)
         return false;
-    if(ctx.GetStream().GetDeviceName() != "gfx1250")
+    if(!IsGfx1250(ctx))
         return false;
     // Small tensors: the large tiles of the fitted kernels give too few blocks to fill the GPU and
     // the generic kernels are faster.

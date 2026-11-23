@@ -171,9 +171,10 @@ void RunInstance(const Instance& inst, uint32_t batch, uint32_t height, uint32_t
     ASSERT_EQ(width % inst.ediv_x, 0u);
     ASSERT_EQ(height % inst.ediv_y, 0u);
 
-    auto&& handle = get_handle();
-    if(handle.GetDeviceName() != "gfx1250")
-        GTEST_SKIP() << "gfx1250 only";
+    auto&& handle          = get_handle();
+    const auto device_name = handle.GetDeviceName();
+    if(device_name != "gfx1250" && device_name != "gfx1250-strict")
+        GTEST_SKIP() << "gfx1250 only, the device is " << device_name;
 
     const uint64_t n = static_cast<uint64_t>(batch) * height * width;
     // The kernels must not write outside of the n output elements (tiles that stick out of the
