@@ -219,10 +219,6 @@ public:
     {
         return true;
     }
-    bool OutputLengthMatchesOutStride() const override
-    {
-        return true;
-    }
 };
 
 /*****************************************************

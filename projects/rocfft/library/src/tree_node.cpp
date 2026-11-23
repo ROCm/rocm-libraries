@@ -437,29 +437,6 @@ void TreeNode::PermuteOutputAxes(OutputAxisOrder order, std::vector<size_t>& axe
     }
 }
 
-void TreeNode::SetTransposeOutputLength()
-{
-    switch(scheme)
-    {
-    case CS_KERNEL_STOCKHAM_TRANSPOSE_XY_Z:
-    {
-        outputLength = length;
-        std::swap(outputLength[1], outputLength[2]);
-        std::swap(outputLength[0], outputLength[1]);
-        break;
-    }
-    case CS_KERNEL_STOCKHAM_TRANSPOSE_Z_XY:
-    {
-        outputLength = length;
-        std::swap(outputLength[0], outputLength[1]);
-        std::swap(outputLength[1], outputLength[2]);
-        break;
-    }
-    default:
-        throw std::runtime_error("can't set transpose output length on non-transpose node");
-    }
-}
-
 void TreeNode::CollapseContiguousDims()
 {
     // collapse children

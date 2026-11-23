@@ -6233,14 +6233,17 @@ void GetNodeToken(const TreeNode& probNode, std::string& min_token, std::string&
                             ? ("")
                             : (PrintKernelSchemeAbbr(probNode.scheme) + "_");
 
-    // Solutions are keyed on complex length.  So for C2R transforms,
-    // use the output length to search for solutions.
-    auto& probLength = (array_type_is_complex(probNode.inArrayType)
-                        && probNode.outArrayType == rocfft_array_type_real)
-                           ? probNode.outputLength
-                           : probNode.length;
+    // C2R tokens use the output lengths when present. Tuning can serialize
+    // nodes before all output metadata is assigned.
+    const bool useOutputLength = array_type_is_complex(probNode.inArrayType)
+                                 && probNode.outArrayType == rocfft_array_type_real
+                                 && !probNode.outputLength.empty();
+    const auto& probLength = useOutputLength ? probNode.outputLength : probNode.length;
     for(size_t i = 0; i < probNode.dimension; ++i)
-        token += std::to_string(probLength[i]) + "_";
+    {
+        const size_t axis = useOutputLength ? probNode.LegacySBRCOutputAxis(i) : i;
+        token += std::to_string(probLength[axis]) + "_";
+    }
 
     std::string precision_str;
     if(probNode.precision == rocfft_precision_single)
@@ -6278,9 +6281,10 @@ void GetNodeToken(const TreeNode& probNode, std::string& min_token, std::string&
     for(size_t i = 0; i < probNode.inStride.size(); ++i)
         token += "_" + std::to_string(probNode.inStride[i]);
 
+    // Keep the serialized output axis order used by existing solution maps.
     token += "_ostride";
     for(size_t i = 0; i < probNode.outStride.size(); ++i)
-        token += "_" + std::to_string(probNode.outStride[i]);
+        token += "_" + std::to_string(probNode.outStride[probNode.LegacySBRCOutputAxis(i)]);
 
     token += "_idist_" + std::to_string(probNode.iDist);
     token += "_odist_" + std::to_string(probNode.oDist);

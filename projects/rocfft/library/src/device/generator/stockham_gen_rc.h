@@ -45,8 +45,6 @@ struct StockhamKernelRC : public StockhamKernel
     Variable stride_in{"stride_in", "const integer_type", true};
     Variable stride_out{"stride_out", "const integer_type", true};
 
-    Variable stride0_out{"stride0_out", "const integer_type"};
-
     //
     //
     //
@@ -55,7 +53,7 @@ struct StockhamKernelRC : public StockhamKernel
     Variable len_along_plane{"len_along_plane",
                              "const " + std::string(rtc_kint_type(KIntType::U32))};
     Variable stride_load_in{"stride_load_in", "const integer_type"};
-    Variable stride_store_out{"stride_store_out", "const integer_type"};
+    Variable stride_tile_out{"stride_tile_out", "const integer_type"};
     Variable stride_plane_in{"stride_plane_in", "const integer_type"};
     Variable stride_plane_out{"stride_plane_out", "const integer_type"};
 
@@ -124,8 +122,8 @@ struct StockhamKernelRC : public StockhamKernel
             }
 
             work += StoreGlobal{buf,
-                                offset + tid_hor * stride0
-                                    + Parens{Expression{idx}} * stride_store_out,
+                                offset + tid_hor * stride_tile_out
+                                    + Parens{Expression{idx}} * stride_out[0],
                                 R[hr * width + w]};
         }
         return work;
@@ -153,10 +151,10 @@ struct StockhamKernelRC : public StockhamKernel
             stride_load_in,
             Ternary{Parens{sbrc_type == "SBRC_3D_FFT_TRANS_XY_Z"}, stride_in[2], stride_in[1]}};
         stmts += Declaration{
-            stride_store_out,
-            Ternary{Parens{sbrc_type == "SBRC_3D_FFT_TRANS_XY_Z" || sbrc_type == "SBRC_2D"},
-                    stride_out[1],
-                    stride_out[2]}};
+            stride_tile_out,
+            Ternary{Parens{stride_type == "SB_UNIT"},
+                    1,
+                    stride_out[Ternary{Parens{sbrc_type == "SBRC_3D_FFT_TRANS_XY_Z"}, 2, 1}]}};
 
         stmts += LineBreak{};
         stmts += Declaration{num_of_tiles_in_batch};
@@ -198,7 +196,8 @@ struct StockhamKernelRC : public StockhamKernel
         offset_2d += Declaration{index_along_d};
 
         offset_2d += Assign{offset_in, tile_index_in_plane * transforms_per_block * stride_load_in};
-        offset_2d += Assign{offset_out, tile_index_in_plane * transforms_per_block * stride0_out};
+        offset_2d
+            += Assign{offset_out, tile_index_in_plane * transforms_per_block * stride_tile_out};
 
         if(emitGlobalId)
         {
@@ -261,7 +260,7 @@ struct StockhamKernelRC : public StockhamKernel
             Ternary{Parens{sbrc_type == "SBRC_3D_FFT_TRANS_XY_Z"}, stride_in[1], stride_in[2]}};
         offset_3d += Declaration{
             stride_plane_out,
-            Ternary{Parens{sbrc_type == "SBRC_3D_FFT_TRANS_XY_Z"}, stride_out[2], stride_out[1]}};
+            Ternary{Parens{sbrc_type == "SBRC_3D_FFT_TRANS_XY_Z"}, stride_out[1], stride_out[2]}};
         stmts += Declaration{plane_id};
         stmts += Declaration{tile_serial_in_batch};
 
@@ -321,7 +320,7 @@ struct StockhamKernelRC : public StockhamKernel
                                 + tile_index_in_plane * transforms_per_block * stride_load_in};
         offset_3d += Assign{offset_out,
                             plane_id * stride_plane_out
-                                + tile_index_in_plane * transforms_per_block * stride0_out};
+                                + tile_index_in_plane * transforms_per_block * stride_tile_out};
 
         stmts += If{sbrc_type == "SBRC_2D", offset_2d};
         stmts += Else{offset_3d};
@@ -585,10 +584,10 @@ struct StockhamKernelRC : public StockhamKernel
             //  indivisible: need extra div and mod, otherwise each store will have some elements un-set:
             auto offset_tile_wbuf = [&](unsigned int i) {
                 if(divisible)
-                    return tid_hor * stride0 + (thread + i * tid0_inc_step) * stride_store_out;
+                    return tid_hor * stride_tile_out + (thread + i * tid0_inc_step) * stride_out[0];
                 else
-                    return ((thread_id + i * workgroup_size) % store_block_w) * stride0
-                           + (thread + i * tid0_inc_step) * stride_store_out;
+                    return ((thread_id + i * workgroup_size) % store_block_w) * stride_tile_out
+                           + (thread + i * tid0_inc_step) * stride_out[0];
             };
             auto offset_tile_rlds = [&](unsigned int i) {
                 if(divisible)

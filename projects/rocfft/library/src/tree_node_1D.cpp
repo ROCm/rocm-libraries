@@ -372,7 +372,6 @@ void CC1DNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
         row2colPlan->length.push_back(length[index]);
     }
     row2colPlan->outputLength = row2colPlan->length;
-    std::swap(row2colPlan->outputLength[0], row2colPlan->outputLength[1]);
 
     // CC , RC
     childNodes.emplace_back(std::move(col2colPlan));
@@ -425,8 +424,8 @@ void CC1DNode::AssignParams_internal()
         row2colPlan->inStride.push_back(row2colPlan->length[0]);
         row2colPlan->iDist = length[0];
 
-        row2colPlan->outStride.push_back(outStride[0]);
         row2colPlan->outStride.push_back(outStride[0] * row2colPlan->length[1]);
+        row2colPlan->outStride.push_back(outStride[0]);
         row2colPlan->oDist = oDist;
 
         for(size_t index = 1; index < length.size(); index++)
@@ -441,8 +440,11 @@ void CC1DNode::AssignParams_internal()
         {
             for(auto io : {io_data_label::INPUT, io_data_label::OUTPUT})
             {
-                const auto& lens
-                    = io == io_data_label::INPUT ? row2colPlan->length : row2colPlan->outputLength;
+                // The convolution workspace is described in packed order. Only
+                // its higher-axis strides and distance are passed to the kernel.
+                auto lens = row2colPlan->length;
+                if(io == io_data_label::OUTPUT)
+                    std::swap(lens[0], lens[1]);
                 std::vector<size_t> row2col_strides(lens.size(), 1);
                 row2col_strides[1] = lens[0];
                 auto tmp           = lens[0] * lens[1];
@@ -537,8 +539,8 @@ void CC1DNode::AssignParams_internal()
             }
         }
 
-        row2colPlan->outStride.push_back(outStride[0]);
         row2colPlan->outStride.push_back(outStride[0] * row2colPlan->length[1]);
+        row2colPlan->outStride.push_back(outStride[0]);
         row2colPlan->oDist = oDist;
 
         for(size_t index = 1; index < length.size(); index++)
@@ -575,11 +577,11 @@ void CC1DNode::AssignParams_internal()
 
         // again, make batch the second dimension
         std::swap(row2colPlan->length.back(), row2colPlan->batch);
-        row2colPlan->outputLength = {row2colPlan->length.back(), row2colPlan->length.front()};
+        row2colPlan->outputLength = row2colPlan->length;
         row2colPlan->inStride     = {inStride.front(), 1};
         row2colPlan->iDist        = row2colPlan->length.front() * inStride.front();
         row2colPlan->oDist        = outStride.front();
-        row2colPlan->outStride    = {1, row2colPlan->batch * outStride.front()};
+        row2colPlan->outStride    = {row2colPlan->batch * outStride.front(), 1};
     }
 }
 

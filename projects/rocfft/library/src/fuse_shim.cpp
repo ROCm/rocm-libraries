@@ -306,12 +306,9 @@ std::unique_ptr<TreeNode> RT_ZXY_FuseShim::FuseKernels()
     fused->obOut        = transpose->obOut;
     fused->oDist        = transpose->oDist;
     fused->outStride    = transpose->outStride;
-    std::swap(fused->outStride[0], fused->outStride[1]);
-    std::swap(fused->outStride[1], fused->outStride[2]);
     fused->comments.push_back("RT_ZXY_FuseShim: fused " + PrintScheme(CS_KERNEL_STOCKHAM)
                               + " and following " + PrintScheme(CS_KERNEL_TRANSPOSE_Z_XY));
-    fused->outputLength = transpose->outputLength;
-    TreeNode::PermuteOutputAxes(transpose->legacyOutputOrder, fused->outputLength);
+    fused->outputLength = fused->length;
 
     return fused;
 }
@@ -367,7 +364,9 @@ std::unique_ptr<TreeNode> RT_XYZ_FuseShim::FuseKernels()
     fused->outArrayType = transXYZ->outArrayType;
     fused->obOut        = transXYZ->obOut;
     fused->oDist        = transXYZ->oDist;
-    fused->outStride    = transXYZ->outStride;
+    // The legacy fused kernel took these strides in [2, 0, 1] output order.
+    fused->outStride    = {transXYZ->outStride[1], transXYZ->outStride[2], transXYZ->outStride[0]};
+    fused->outputLength = fused->length;
     fused->comments.push_back("RT_XYZ_FuseShim: fused " + PrintScheme(CS_KERNEL_STOCKHAM)
                               + " and following " + PrintScheme(CS_KERNEL_TRANSPOSE_XY_Z));
     return fused;
@@ -635,7 +634,6 @@ std::unique_ptr<TreeNode> STK_R2CTrans_FuseShim::FuseKernels()
     auto stockham  = nodes[0];
     auto r2c       = nodes[1];
     auto transpose = nodes[2];
-    // auto& r2c       = nodes[1];
 
     if(!PlacementFusable(stockham->obIn, stockham->obOut, transpose->obOut))
         return nullptr;
@@ -652,28 +650,24 @@ std::unique_ptr<TreeNode> STK_R2CTrans_FuseShim::FuseKernels()
     fused->obOut        = transpose->obOut;
     fused->oDist        = transpose->oDist;
     fused->outStride    = transpose->outStride;
-    std::swap(fused->outStride[0], fused->outStride[1]);
-    // it's possible that we're using a 3D SBRC kernel in here.  only
-    // adjust for the third dimension if we're inside a 3D plan.
-    if(transpose->parent->length.size() > 2)
-        std::swap(fused->outStride[1], fused->outStride[2]);
     fused->comments.push_back("STK_R2CTrans_FuseShim: fused " + PrintScheme(CS_KERNEL_STOCKHAM)
                               + ", " + PrintScheme(CS_KERNEL_R_TO_CMPLX) + " and following "
                               + PrintScheme(transpose->scheme));
 
-    fused->outputLength = transpose->outputLength;
-    TreeNode::PermuteOutputAxes(transpose->legacyOutputOrder, fused->outputLength);
+    fused->outputLength = r2c->outputLength;
 
-    // This fusion is crossing sub-trees of the plan, so adjust the
-    // parent CS_REAL_TRANSFORM_EVEN to expect what this fused kernel
-    // says it outputs.  Otherwise the plan won't make sense when
-    // other things look at it.
-    r2c->parent->outputLength = fused->outputLength;
-    r2c->parent->outStride    = fused->outStride;
-    r2c->parent->oDist        = fused->oDist;
-    // Adjust strides in case we're using a 3D kernel for a 2D case
-    r2c->parent->outStride.resize(r2c->parent->length.size());
-    r2c->parent->outputLength.resize(r2c->parent->length.size());
+    // Only the fused SBRC leaf is normalized here; its real-even parent still
+    // exposes this stage in the transpose's legacy output order.
+    auto* realEven         = r2c->parent;
+    realEven->outputLength = transpose->outputLength;
+    TreeNode::PermuteOutputAxes(transpose->legacyOutputOrder, realEven->outputLength);
+    realEven->outStride    = fused->outStride;
+    realEven->oDist        = fused->oDist;
+    std::swap(realEven->outStride[0], realEven->outStride[1]);
+    if(transpose->parent->length.size() > 2)
+        std::swap(realEven->outStride[1], realEven->outStride[2]);
+    realEven->outStride.resize(realEven->length.size());
+    realEven->outputLength.resize(realEven->length.size());
 
     return fused;
 }

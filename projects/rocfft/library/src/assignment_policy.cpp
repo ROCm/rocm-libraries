@@ -304,7 +304,8 @@ static std::pair<std::vector<size_t>, std::vector<size_t>> OutputFootprint(const
     {
         len.erase(len.begin(), len.begin() + 2);
         len.insert(len.begin(), node.blue->get_transform_length());
-        stride.erase(stride.begin() + 1);
+        // The flattened transform uses the stride of the old fastest output axis.
+        stride.erase(stride.begin());
     }
     return {len, stride};
 }
@@ -328,6 +329,20 @@ bool AssignmentPolicy::ValidOutBuffer(ExecPlan&           execPlan,
         auto [nodeLen, nodeStride] = OutputFootprint(node);
         auto bufLen                = buffer == OB_USER_OUT ? execPlan.rootPlan->GetOutputLength()
                                                            : execPlan.rootPlan->length;
+
+        // The shape check below consumes the legacy output order. Keep that
+        // view for SBRC, including which axis is doubled for a real buffer.
+        // Fused inverse Bluestein has already flattened the two SBRC axes.
+        const bool legacySBRCOrder
+            = node.LegacySBRCOutputAxis(0) != 0 && node.GetBluesteinFuseType() != BFT_INV_CHIRP_MUL;
+        if(legacySBRCOrder)
+        {
+            const auto& span = node.outputLength.empty() ? node.length : node.outputLength;
+            for(size_t i = 0; i < nodeLen.size(); ++i)
+                nodeLen[i] = span[node.LegacySBRCOutputAxis(i)];
+            for(size_t i = 0; i < nodeStride.size(); ++i)
+                nodeStride[i] = node.outStride[node.LegacySBRCOutputAxis(i)];
+        }
 
         // if node's output is complex and buffer's format is real,
         // adjust output length to be 2x to make the units of
@@ -359,10 +374,9 @@ bool AssignmentPolicy::ValidOutBuffer(ExecPlan&           execPlan,
             return true;
 
         // Enumerate tests candidate buffers before assigning their strides.
-        // Keep the packed-buffer decomposition order without storing it in
-        // outputLength. Unconverted schemes still use their legacy ordering;
-        // fused Bluestein keeps its special footprint.
-        if(node.GetBluesteinFuseType() == BFT_NONE)
+        // Preserve the packed order for decomposition; SBRC and fused Bluestein
+        // already use the desired view above.
+        if(node.GetBluesteinFuseType() == BFT_NONE && !legacySBRCOrder)
         {
             nodeLen = node.GetOutputLength();
             TreeNode::PermuteOutputAxes(node.legacyOutputOrder, nodeLen);
@@ -1399,10 +1413,17 @@ void AssignmentPolicy::PadPlan(ExecPlan& execPlan)
             // 2D strides are slower with padding
             if(is_device_gcn_arch(execPlan.deviceProp, "gfx906"))
             {
-                const auto& stride = users.front().stride;
-                if(stride.size() == 3 && IsPo2(stride[0]) && stride[0] > 2048 && IsPo2(stride[1])
-                   && stride[1] > 2048)
-                    return;
+                const auto& op = users.front();
+                if(op.stride.size() == 3)
+                {
+                    const auto stride = [&](size_t i) {
+                        return op
+                            .stride[op.op == TempBufOp::BufWrite ? op.node.LegacySBRCOutputAxis(i)
+                                                                 : i];
+                    };
+                    if(IsPo2(stride(0)) && stride(0) > 2048 && IsPo2(stride(1)) && stride(1) > 2048)
+                        return;
+                }
             }
 
             // standalone real-complex kernels can't handle arbitrary

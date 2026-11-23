@@ -389,9 +389,9 @@ void BLOCKRC3DNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
             if(!noSolution && (child_scheme_trees[childNodes.size()]->curScheme != sbrcScheme))
                 throw std::runtime_error(
                     "BLOCKRC3DNode: Unexpected child scheme from solution map");
-            auto sbrc_node    = NodeFactory::CreateNodeFromScheme(sbrcScheme, this);
-            sbrc_node->length = cur_length;
-            sbrc_node->SetTransposeOutputLength();
+            auto sbrc_node          = NodeFactory::CreateNodeFromScheme(sbrcScheme, this);
+            sbrc_node->length       = cur_length;
+            sbrc_node->outputLength = sbrc_node->length;
             childNodes.emplace_back(std::move(sbrc_node));
         }
         else
@@ -424,6 +424,7 @@ void BLOCKRC3DNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
             childNodes.emplace_back(std::move(trans_plan));
         }
 
+        // Rebase the next partition's input lengths so its transform axis is first.
         if(use_ZXY_sbrc)
         {
             std::swap(cur_length[1], cur_length[0]);
@@ -465,18 +466,14 @@ void BLOCKRC3DNode::AssignParams_internal()
         {
         case CS_KERNEL_STOCKHAM_TRANSPOSE_XY_Z:
         {
-            node->outStride.push_back(1);
-            node->outStride.push_back(node->length[2]);
-            node->outStride.push_back(node->outStride[1] * node->length[0]);
-            node->oDist = node->outStride[2] * node->length[1];
+            node->outStride = {node->length[2], node->length[2] * node->length[0], 1};
+            node->oDist     = node->outStride[1] * node->length[1];
             break;
         }
         case CS_KERNEL_STOCKHAM_TRANSPOSE_Z_XY:
         {
-            node->outStride.push_back(1);
-            node->outStride.push_back(node->length[1]);
-            node->outStride.push_back(node->outStride[1] * node->length[2]);
-            node->oDist = node->outStride[2] * node->length[0];
+            node->outStride = {node->length[1] * node->length[2], 1, node->length[1]};
+            node->oDist     = node->outStride[0] * node->length[0];
             break;
         }
         case CS_KERNEL_TRANSPOSE_XY_Z:
@@ -504,11 +501,18 @@ void BLOCKRC3DNode::AssignParams_internal()
             break;
         }
         }
+        // Rebase the strides for the next partition without changing the producer's outStride.
         prev_outStride = node->outStride;
         prev_oDist     = node->oDist;
         if(node->scheme == CS_KERNEL_TRANSPOSE_XY_Z)
             std::swap(prev_outStride[0], prev_outStride[1]);
-        else if(node->scheme == CS_KERNEL_TRANSPOSE_Z_XY)
+        else if(node->scheme == CS_KERNEL_STOCKHAM_TRANSPOSE_XY_Z)
+        {
+            std::swap(prev_outStride[2], prev_outStride[1]);
+            std::swap(prev_outStride[1], prev_outStride[0]);
+        }
+        else if(node->scheme == CS_KERNEL_TRANSPOSE_Z_XY
+                || node->scheme == CS_KERNEL_STOCKHAM_TRANSPOSE_Z_XY)
         {
             std::swap(prev_outStride[0], prev_outStride[1]);
             std::swap(prev_outStride[1], prev_outStride[2]);
@@ -988,8 +992,10 @@ bool RealCmplxTransZ_XYNode::CreateDevKernelArgs()
     if(length.size() == 2)
     {
         length.push_back(1);
+        outputLength.push_back(1);
         inStride.push_back(inStride.back());
-        outStride.push_back(outStride.back());
+        // In input-axis order, axis 0 supplies the legacy dummy output stride.
+        outStride.push_back(outStride.front());
     }
     return SBRCTranspose3DNode::CreateDevKernelArgs();
 }

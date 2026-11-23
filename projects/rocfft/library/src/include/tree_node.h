@@ -582,10 +582,8 @@ public:
     // Length of the FFT in each dimension, internal value
     std::vector<size_t> length;
 
-    // Plain transposes keep the same length and axis order on both sides.
-    // inStride[i] and outStride[i] describe the same axis; the strides alone
-    // express the transposition. Real transforms can change the span of an axis.
-    // Legacy nodes may still store lengths in output order or leave this empty
+    // Plain transposes and SBRC use the same axis order on both sides.
+    // Other legacy nodes may still use output order or leave this empty
     // to mean "same as length"; use LengthForOutStride() to pair with outStride.
     std::vector<size_t> outputLength;
 
@@ -986,18 +984,12 @@ public:
     // nullptr if there is no such ancestor
     TreeNode* GetPartialPassAncestor() const;
 
-    // Set the legacy output-axis lengths of a fused Stockham transpose.
-    // Plain transpose lengths on both sides are in the node's input-axis order.
-    void SetTransposeOutputLength();
-
     // Get row-major output length of this node.
     std::vector<size_t> GetOutputLength() const
     {
         return outputLength.empty() ? length : outputLength;
     }
-    // True if outStride is indexed in outputLength order rather than length
-    // order (e.g. fused SBRC transposes, embedded r2c/c2r).  Anything pairing
-    // a length vector with outStride should go through LengthForOutStride().
+    // Legacy opt-in for nodes that must pair outStride with the output lengths.
     virtual bool OutputLengthMatchesOutStride() const
     {
         return false;
@@ -1005,7 +997,32 @@ public:
     // The length vector that pairs with outStride.
     std::vector<size_t> LengthForOutStride() const
     {
-        return OutputLengthMatchesOutStride() ? GetOutputLength() : length;
+        // The fused R2C SBRC kernel writes an additional Hermitian bin.
+        return (scheme == CS_KERNEL_STOCKHAM_R_TO_CMPLX_TRANSPOSE_Z_XY
+                || OutputLengthMatchesOutStride())
+                   ? GetOutputLength()
+                   : length;
+    }
+
+    // Map a legacy SBRC output axis to its input-axis index.
+    size_t LegacySBRCOutputAxis(size_t axis) const
+    {
+        switch(scheme)
+        {
+        case CS_KERNEL_STOCKHAM_BLOCK_RC:
+            return axis < 2 ? 1 - axis : axis;
+        case CS_KERNEL_STOCKHAM_TRANSPOSE_XY_Z:
+            return axis < 3 ? (axis + 2) % 3 : axis;
+        case CS_KERNEL_STOCKHAM_R_TO_CMPLX_TRANSPOSE_Z_XY:
+            // ERC can use a 3D kernel on a 2D layout.
+            if(length.size() == 2)
+                return axis < 2 ? 1 - axis : axis;
+            [[fallthrough]];
+        case CS_KERNEL_STOCKHAM_TRANSPOSE_Z_XY:
+            return axis < 3 ? (axis + 1) % 3 : axis;
+        default:
+            return axis;
+        }
     }
 
     virtual bool KernelCheck(std::vector<FMKey>& kernel_keys = EmptyFMKeyVec) = 0;
