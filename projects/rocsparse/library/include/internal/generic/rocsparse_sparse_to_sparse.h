@@ -169,10 +169,10 @@ rocsparse_status rocsparse_sparse_to_sparse_buffer_size(rocsparse_handle        
 *  <tr><td>rocsparse_datatype_f64_r <td>rocsparse_datatype_f32_r
 *  <tr><td>rocsparse_datatype_f32_r <td>rocsparse_datatype_f32_c
 *  <tr><td>rocsparse_datatype_f64_r <td>rocsparse_datatype_f32_c
-*  <tr><td>rocsparse_datatype_f32_c <td>rocsparse_datatype_f64_c
-*  <tr><td>rocsparse_datatype_f64_c <td>rocsparse_datatype_f32_c
 *  <tr><td>rocsparse_datatype_f32_r <td>rocsparse_datatype_f64_c
 *  <tr><td>rocsparse_datatype_f64_r <td>rocsparse_datatype_f64_c
+*  <tr><td>rocsparse_datatype_f32_c <td>rocsparse_datatype_f64_c
+*  <tr><td>rocsparse_datatype_f64_c <td>rocsparse_datatype_f32_c
 *  <tr><td>rocsparse_datatype_f16_r <td>rocsparse_datatype_f32_r
 *  <tr><td>rocsparse_datatype_f16_r <td>rocsparse_datatype_f64_r
 *  <tr><td>rocsparse_datatype_f16_r <td>rocsparse_datatype_f32_c
@@ -183,9 +183,16 @@ rocsparse_status rocsparse_sparse_to_sparse_buffer_size(rocsparse_handle        
 *  <tr><td>rocsparse_datatype_bf16_r <td>rocsparse_datatype_f64_c
 *  </table>
 *
-*  These real widenings are exact: every source value is representable in the target, and a
-*  real value stored in a complex target has an imaginary part of zero.
-*  \ref rocsparse_datatype_f64_r into \ref rocsparse_datatype_f32_c rounds the real part.
+*  The rows with a \ref rocsparse_datatype_f16_r or \ref rocsparse_datatype_bf16_r source,
+*  \ref rocsparse_datatype_f32_r into \ref rocsparse_datatype_f64_r,
+*  \ref rocsparse_datatype_f32_c, or \ref rocsparse_datatype_f64_c,
+*  \ref rocsparse_datatype_f32_c into \ref rocsparse_datatype_f64_c, and
+*  \ref rocsparse_datatype_f64_r into \ref rocsparse_datatype_f64_c are exact: every source
+*  value is representable in the target, and a real value stored in a complex target has an
+*  imaginary part of zero. The rows with a double-precision source and a single-precision
+*  target, \ref rocsparse_datatype_f64_r into \ref rocsparse_datatype_f32_r or
+*  \ref rocsparse_datatype_f32_c, and \ref rocsparse_datatype_f64_c into
+*  \ref rocsparse_datatype_f32_c, round as described above.
 *
 *  \subsection sparse_to_sparse_same_a Same (a)
 *  <table>
@@ -228,11 +235,15 @@ rocsparse_status rocsparse_sparse_to_sparse_buffer_size(rocsparse_handle        
 *  <tr><td>rocsparse_datatype_f64_r <td>rocsparse_datatype_f32_r
 *  <tr><td>rocsparse_datatype_f32_r <td>rocsparse_datatype_f32_c
 *  <tr><td>rocsparse_datatype_f64_r <td>rocsparse_datatype_f32_c
-*  <tr><td>rocsparse_datatype_f32_c <td>rocsparse_datatype_f64_c
-*  <tr><td>rocsparse_datatype_f64_c <td>rocsparse_datatype_f32_c
 *  <tr><td>rocsparse_datatype_f32_r <td>rocsparse_datatype_f64_c
 *  <tr><td>rocsparse_datatype_f64_r <td>rocsparse_datatype_f64_c
+*  <tr><td>rocsparse_datatype_f32_c <td>rocsparse_datatype_f64_c
+*  <tr><td>rocsparse_datatype_f64_c <td>rocsparse_datatype_f32_c
 *  </table>
+*
+*  The rows with a double-precision source and a single-precision target round as described
+*  above. The other rows are exact, as in
+*  \ref sparse_to_sparse_mixed_conversions "Mixed conversions".
 *
 *  CSC, ELL, and BSR to COO or COO AoS do not support a \ref rocsparse_datatype_f16_r or
 *  \ref rocsparse_datatype_bf16_r source. The intermediate CSR matrix keeps the source
