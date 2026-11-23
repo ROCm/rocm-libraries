@@ -422,6 +422,8 @@ test_categories:
     description: "rocKE checks run by scheduled CI only"
     test_patterns:
       - "rocke_tiling_visualization_pytest"
+      # Needs the packages of rocke/heuristics/tests/requirements.txt; skips without them.
+      - "rocke_heuristics_pytest"
       - "rocke_library_conv_exhaustive_pytest"
       - "rocke_library_attention_cache_key_sweep_pytest"
       # Not registered on Windows (see rocke/library/tests/ctest_lists.cmake).

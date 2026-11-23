@@ -35,14 +35,17 @@ recorded as waiting for that lane (``rocke.tests.run_records``).
 from __future__ import annotations
 
 import importlib
+import importlib.metadata
 import os
 import re
 from collections.abc import Collection
 from dataclasses import dataclass
+from pathlib import Path
 from types import ModuleType
 from typing import NoReturn
 
 import pytest
+from packaging.requirements import Requirement
 
 from ..core.arch.target import known_arches
 
@@ -60,7 +63,6 @@ __all__ = [
     "MULTI_GPU_RUNNER",
     "NIGHTLY_GPU",
     "NIGHTLY_SOURCE",
-    "OWNER_DECISION",
     "PR_16482",
     "REQUIRE_CPP_ENGINE_ENV",
     "SHARED_LIBRARY_LANE",
@@ -75,6 +77,7 @@ __all__ = [
     "runner_lanes_for",
     "skip_needing_arch",
     "skip_until",
+    "skip_until_installed",
     "skip_until_reason",
     "skip_until_shared_engine",
 ]
@@ -149,11 +152,6 @@ WEEKLY_EXHAUSTIVE = Lane(
 NIGHTLY_GPU = Lane(
     "nightly-gpu",
     "a scheduled GPU stage on gfx942 and gfx950, which does not exist yet",
-    enrolled=False,
-)
-OWNER_DECISION = Lane(
-    "owner-decision",
-    "an owner decision between a lane with optional dependencies, a rewrite and a drop",
     enrolled=False,
 )
 BINDING_LANE = Lane(
@@ -240,8 +238,10 @@ SHARED_LIBRARY_LANE = Lane(
 CI_TEST_TOOLS = Lane(
     "ci-test-tools",
     "the optional packages and LLVM tools these cases use, in the CI test "
-    "environment: the file is in a CI-run entry, but TheRock's test step installs "
-    "no jsonschema or matplotlib and puts no LLVM tools on PATH, so they skip",
+    "environment: the file is in a CI-run entry (the heuristics tests: a "
+    "comprehensive-tier one), but TheRock's test step installs no jsonschema or "
+    "matplotlib, none of the packages of rocke/heuristics/tests/requirements.txt, "
+    "and puts no LLVM tools on PATH, so they skip",
     enrolled=True,
 )
 
@@ -251,7 +251,6 @@ LANES: tuple[Lane, ...] = (
     NIGHTLY_SOURCE,
     WEEKLY_EXHAUSTIVE,
     NIGHTLY_GPU,
-    OWNER_DECISION,
     BINDING_LANE,
     TORCH_IN_CI,
     GFX950_RUNNER,
@@ -347,6 +346,29 @@ def import_or_skip_until(module_name: str, lane: Lane) -> ModuleType:
         if not _is_missing_module(error, module_name):
             raise
         skip_until(lane, reason=f"could not import {module_name!r}: {error}")
+
+
+def skip_until_installed(requirements: Path, lane: Lane) -> None:
+    """Skip the running case (or module) as waiting for ``lane`` unless every
+    distribution the pip requirements file ``requirements`` lists is installed
+    at a version its specifier allows. The file holds one requirement per line
+    (``name>=1.0``); ``#`` starts a comment."""
+    __tracebackhide__ = True  # pytest reports the skip at the caller
+    unmet = []
+    for line in requirements.read_text(encoding="utf-8").splitlines():
+        text = line.partition("#")[0].strip()
+        if not text:
+            continue
+        requirement = Requirement(text)
+        try:
+            found = importlib.metadata.version(requirement.name)
+        except importlib.metadata.PackageNotFoundError:
+            unmet.append(f"{requirement.name} is not installed")
+            continue
+        if not requirement.specifier.contains(found, prereleases=True):
+            unmet.append(f"{requirement.name} {found} does not satisfy {requirement}")
+    if unmet:
+        skip_until(lane, reason=f"{requirements.name}: {'; '.join(unmet)}")
 
 
 def _is_missing_module(error: ModuleNotFoundError, module_name: str) -> bool:

@@ -21,6 +21,7 @@ from rocke.tests.lanes import (
     runner_lanes_for,
     skip_needing_arch,
     skip_until,
+    skip_until_installed,
     skip_until_reason,
 )
 
@@ -87,6 +88,25 @@ def test_import_or_skip_until_returns_the_module_or_declares_its_lane():
     assert missing.value.msg.startswith(
         "waits for ci-test-tools: could not import 'a_module_that_is_not_installed'"
     )
+
+
+def test_skip_until_installed_reads_the_requirements_file(tmp_path):
+    """A requirements file every line of which is met runs on; one with a
+    package missing, or installed at a version its specifier refuses, skips
+    the case as waiting for the lane and names each unmet line."""
+    met = tmp_path / "met.txt"
+    met.write_text("# comment line\npytest>=1.0  # trailing comment\n\nnumpy\n")
+    skip_until_installed(met, CI_TEST_TOOLS)
+    unmet = tmp_path / "unmet.txt"
+    unmet.write_text("pytest<1.0\na-distribution-that-is-not-installed\n")
+    with pytest.raises(pytest.skip.Exception) as skipped:
+        skip_until_installed(unmet, CI_TEST_TOOLS)
+    assert skipped.value.msg.startswith("waits for ci-test-tools: unmet.txt: pytest ")
+    assert skipped.value.msg.endswith(
+        " does not satisfy pytest<1.0; a-distribution-that-is-not-installed is not "
+        "installed"
+    )
+    assert skipped.value.allow_module_level
 
 
 def test_a_module_that_is_installed_but_fails_to_import_is_not_a_lane_wait(

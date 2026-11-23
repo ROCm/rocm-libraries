@@ -126,7 +126,6 @@ from .lanes import (
     MULTI_GPU_RUNNER,
     NIGHTLY_GPU,
     NIGHTLY_SOURCE,
-    OWNER_DECISION,
     PR_16482,
     SHARED_LIBRARY_LANE,
     SOURCE_TREE_CASES,
@@ -692,11 +691,13 @@ PENDING: tuple[PendingTest, ...] = (
         "library/tests/test_library_test_tiers.py",
     ),
     *_waiting(
-        OWNER_DECISION,
-        "needs pandas, scikit-learn, lightgbm and pyarrow, which no CI lane "
-        "installs: a nightly lane with the dependencies, or leave them out",
+        NIGHTLY_SOURCE,
+        "registered only in rocke_heuristics_pytest, a comprehensive-tier entry; "
+        "no scheduled job runs that tier yet, and one that does installs the "
+        "packages of rocke/heuristics/tests/requirements.txt (without them the "
+        "cases skip, waiting for ci-test-tools)",
         "rocKE heuristics; issue: none filed yet",
-        "2026-12-15",
+        "2027-01-31",
         "platform/python/rocke/heuristics/tests/test_data_pipeline.py",
         "platform/python/rocke/heuristics/tests/test_evaluate.py",
         "platform/python/rocke/heuristics/tests/test_feature_engine.py",

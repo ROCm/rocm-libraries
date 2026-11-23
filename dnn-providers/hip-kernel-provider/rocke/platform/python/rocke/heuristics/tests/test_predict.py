@@ -13,6 +13,10 @@ import json
 import sys
 from pathlib import Path
 
+from ._requirements import skip_without_requirements
+
+skip_without_requirements()
+
 import lightgbm as lgb
 import numpy as np
 import pytest

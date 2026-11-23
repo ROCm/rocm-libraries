@@ -1083,29 +1083,45 @@ if(ROCKE_INSTALL_TESTS)
       # pyproject.toml above the install (a CI workspace has one whose
       # python_files collects nothing here). -c names the installed
       # tests/pytest.ini, the configuration the rocke_pytest_* parts run under.
+      # The launcher and options serve every entry that runs a test directory
+      # of the installed package (the tiling and heuristics entries below).
       set(_ROCKE_TILING_TESTS "${_ROCKE_INSTALLED_PYTHONPATH}/rocke/tests/helpers/tiling")
       set(_ROCKE_TILING_VISUALIZATION_TESTS "${_ROCKE_TILING_TESTS}/visualization")
-      set(_rocke_tiling_pytest_launcher "${_ROCKE_INSTALLED_PYTEST} -c \"${ROCKE_TEST_CTEST_REL}tests/pytest.ini\"")
-      set(_rocke_tiling_pytest_options "-v -rs --timeout=60")
+      set(_rocke_package_pytest_launcher "${_ROCKE_INSTALLED_PYTEST} -c \"${ROCKE_TEST_CTEST_REL}tests/pytest.ini\"")
+      set(_rocke_package_pytest_options "-v -rs --timeout=60")
       string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
              "set(_rocke_tiling_pytest_environment \"PYTHONPATH=${_ROCKE_INSTALLED_PYTHONPATH}\")\n"
              "list(APPEND _rocke_tiling_pytest_environment \${_rocke_compiler_tool_environment})\n"
-             "add_test(rocke_tiling_pytest ${_rocke_tiling_pytest_launcher} ${_ROCKE_INSTALLED_PYTEST_WORKERS} \"${_ROCKE_TILING_TESTS}\" --ignore \"${_ROCKE_TILING_VISUALIZATION_TESTS}\" ${_rocke_tiling_pytest_options} -m \"not gpu\")\n"
+             "add_test(rocke_tiling_pytest ${_rocke_package_pytest_launcher} ${_ROCKE_INSTALLED_PYTEST_WORKERS} \"${_ROCKE_TILING_TESTS}\" --ignore \"${_ROCKE_TILING_VISUALIZATION_TESTS}\" ${_rocke_package_pytest_options} -m \"not gpu\")\n"
              "set_tests_properties(rocke_tiling_pytest PROPERTIES\n"
              "  LABELS \"ckc;python;standard\"\n"
              "  ENVIRONMENT \"\${_rocke_tiling_pytest_environment}\"\n"
              "  TIMEOUT ${ROCKE_TEST_TIMEOUT_TOOLCHAIN})\n"
-             "add_test(rocke_tiling_visualization_pytest ${_rocke_tiling_pytest_launcher} \"${_ROCKE_TILING_VISUALIZATION_TESTS}\" ${_rocke_tiling_pytest_options} -m \"not gpu\")\n"
+             "add_test(rocke_tiling_visualization_pytest ${_rocke_package_pytest_launcher} \"${_ROCKE_TILING_VISUALIZATION_TESTS}\" ${_rocke_package_pytest_options} -m \"not gpu\")\n"
              "set_tests_properties(rocke_tiling_visualization_pytest PROPERTIES\n"
              "  LABELS \"ckc;python\"\n"
              "  ENVIRONMENT \"\${_rocke_tiling_pytest_environment}\"\n"
              "  TIMEOUT ${ROCKE_TEST_TIMEOUT_TOOLCHAIN})\n"
-             "add_test(rocke_tiling_gpu_pytest ${_rocke_tiling_pytest_launcher} \"${_ROCKE_TILING_TESTS}\" ${_rocke_tiling_pytest_options} ${_ROCKE_INSTALLED_PYTEST_GPU_TIMEOUT_METHOD} -m gpu)\n"
+             "add_test(rocke_tiling_gpu_pytest ${_rocke_package_pytest_launcher} \"${_ROCKE_TILING_TESTS}\" ${_rocke_package_pytest_options} ${_ROCKE_INSTALLED_PYTEST_GPU_TIMEOUT_METHOD} -m gpu)\n"
              "set_tests_properties(rocke_tiling_gpu_pytest PROPERTIES\n"
              "  LABELS \"ckc;python;gpu\"\n"
              "  ENVIRONMENT \"\${_rocke_tiling_pytest_environment}\"\n"
              "  RESOURCE_LOCK ${_ROCKE_INSTALLED_GPU_RESOURCE_LOCK}\n"
              "  TIMEOUT ${ROCKE_TEST_TIMEOUT_GPU})\n")
+      # The kernel-selection heuristics tests live inside the package
+      # (rocke/heuristics/tests) and need packages that are not rocKE
+      # dependencies: rocke/heuristics/tests/requirements.txt, installed beside
+      # the tests, lists them, and each test module reads it, skipping where one
+      # is missing (waiting for the ci-test-tools lane). A job that runs this
+      # entry installs them with `pip install -r <that requirements.txt>`.
+      # Scheduled CI only (the comprehensive tier).
+      set(_ROCKE_HEURISTICS_TESTS "${_ROCKE_INSTALLED_PYTHONPATH}/rocke/heuristics/tests")
+      string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+             "add_test(rocke_heuristics_pytest ${_rocke_package_pytest_launcher} \"${_ROCKE_HEURISTICS_TESTS}\" ${_rocke_package_pytest_options})\n"
+             "set_tests_properties(rocke_heuristics_pytest PROPERTIES\n"
+             "  LABELS \"ckc;python;host;comprehensive;full\"\n"
+             "  ENVIRONMENT \"PYTHONPATH=${_ROCKE_INSTALLED_PYTHONPATH}\"\n"
+             "  TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})\n")
       # check_backend_access_width.py compiles a few copy kernels through COMGR
       # and reads their disassembly. A host module that does that is kept out of
       # ordinary test discovery (TESTING.md, section 5.0.1), so this entry names
@@ -1117,7 +1133,7 @@ if(ROCKE_INSTALL_TESTS)
       string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
              "set(_rocke_tiling_backend_width_pytest_environment \${_rocke_tiling_pytest_environment})\n"
              "list(APPEND _rocke_tiling_backend_width_pytest_environment \${_rocke_compiler_requirement_environment})\n"
-             "add_test(rocke_tiling_backend_width_pytest ${_rocke_tiling_pytest_launcher} \"${_ROCKE_TILING_TESTS}/check_backend_access_width.py\" ${_rocke_tiling_pytest_options})\n"
+             "add_test(rocke_tiling_backend_width_pytest ${_rocke_package_pytest_launcher} \"${_ROCKE_TILING_TESTS}/check_backend_access_width.py\" ${_rocke_package_pytest_options})\n"
              "set_tests_properties(rocke_tiling_backend_width_pytest PROPERTIES\n"
              "  LABELS \"ckc;python;standard\"\n"
              "  ENVIRONMENT \"\${_rocke_tiling_backend_width_pytest_environment}\"\n"
