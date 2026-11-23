@@ -17,8 +17,10 @@
 
 #if defined(_WIN32)
 #include <system_error>
-#include <tlhelp32.h>
 #include <windows.h>
+
+// Tool Help declarations require the types defined by windows.h.
+#include <tlhelp32.h>
 #else
 #include <dlfcn.h>
 #endif
