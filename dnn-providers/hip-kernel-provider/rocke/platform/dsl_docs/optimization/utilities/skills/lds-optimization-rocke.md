@@ -50,10 +50,23 @@ Run `/kernel-trace-analysis` first. Apply this skill when the trace shows:
 - LDS latency: **~2-64 cycles** (2 cycles best case, 64 cycles worst case with full conflict)
 - LDS allocation granularity: **1280 bytes** on **1280-byte alignment**
 
-**Key difference**: gfx950 has 64 banks instead of 32, so stride-based conflict patterns change:
-- gfx942: stride = 128 bytes → full conflict (all hit same bank)
-- gfx950: stride = 128 bytes → only 2-way conflict (threads alternate between 2 banks)
-- gfx950: stride = 256 bytes → full conflict
+**Predict conflicts by opcode and lane phase.** A hardware bank-index formula
+alone does not determine which accesses conflict. In the gfx950 wave64 predictor,
+`ds_read_b64` and `ds_read_b128` use a 256-byte address-class period;
+`ds_read_b32` and `ds_write_b{32,64,128}` use 128 bytes. Accesses to distinct
+addresses conflict only when both their address classes and lane phases match.
+
+For example, lanes 0 and 1 reading eight bytes at addresses 0 and 128 belong to
+different address classes and do not conflict. Changing that instruction to
+`ds_write_b64` makes them conflict. For a whole wave, the number of address
+classes visited by a stride is not the number of accesses in each conflict
+group; active lanes and phase membership also matter. A stride larger than the
+address-class period can still conflict.
+
+Use the [gfx950 predictor guide](lds-bank-conflict-expert/references/gfx950.md)
+for exact phase keys and a runnable example. These are scoped prediction rules;
+see [validation boundaries](lds-bank-conflict-expert/references/validation-boundaries.md)
+before drawing conclusions about physical bank organization or execution time.
 
 See `/empirical-case-studies` Case Study 2 for measured performance data on LDS swizzle strategies.
 
@@ -244,6 +257,45 @@ If performance is still poor after default swizzle, consider:
 1. Switch to padding swizzle (`lds_k_pad`)
 2. Adjust tile_k to avoid power-of-2 strides
 3. Check if pipeline type affects LDS layout (try `compv4` vs `basic_v1`)
+
+### Variant: XOR on the DMA source (gfx9 async copies)
+
+On gfx942/gfx950 an async `buffer_load ... lds` writes lane `n` of the wave to LDS
+slot `n`, so the destination address cannot be swizzled (gfx1250's
+`global_load_async_to_lds` takes a per-lane LDS address and can). Swizzle the *source*
+instead: the lane that writes LDS chunk `c` of row `r` fetches global chunk
+`c ^ (r % chunks_per_row)` (XOR is its own inverse), and every LDS read applies the
+same permutation to its column. The copies stay contiguous and the tile needs no
+padding. `chunks_per_row` must be a power of two, or the XOR can leave the row (with 24
+chunks, row 8 and chunk 16 map to chunk 24). The attention 3D decode kernels use this
+(`use_kv_lds_swizzle`) and enforce it: the spec needs `head_size / 8` to be a power of
+two, so head size 192 cannot use it. See runbook
+[§6.4a](../../optimization_runbook.md#64a-lds-swizzle-strategy-selection-xor-vs-padding)
+and [§12.1.K2](../../optimization_runbook.md#121k2-attention-3d-split-kv-levers-ua-3d-specific).
+
+### Variant: XOR on the LDS store (register-staged loads)
+
+`CoalescedTileLoader` stores each chunk from registers, so it can write it to a
+swizzled LDS column. Pass `col_xor=lds_col_xor_params(tile_cols)` (both in
+`rocke.helpers.loads`): every store then writes logical `[row, col]` to
+`[row, swizzle_lds_col(row, col)]`, which XORs the 16-byte chunk index of a row
+with `((row >> row_shift) & (C - 1)) ^ ((row >> 3) & 1)` for `C = tile_cols / 8`
+chunks per row (a power of two, 2 to 16). For 16-bit elements an unpadded tile is
+then free of conflicts both for the rows a `ds_load_b128` phase reads at one
+chunk and for the chunks a row-major store phase writes, at 32 and at 64 banks,
+so the K pad and its LDS go away. The consumer must read through the same
+`swizzle_lds_col`. In `"col"` mode `load_vec` must divide the 8-element chunk;
+in `"row"` mode (transpose-on-store) each scattered element takes its own row's
+XOR. The default (`col_xor=None`) emits the historical, unswizzled stores; the
+C++ engine mirrors the option (`rocke_coalesced_tile_loader_set_col_xor`).
+
+`lds_col_xor_params` also takes another power-of-two `chunk`; that still
+permutes each row's columns, but the bank claim above is only made (and tested)
+for 16-byte chunks. This row/column form exists next to the byte-offset
+`XOR_SWIZZLE_TABLE` / `LdsLayout.xor_swizzled` of `rocke.helpers.layouts`
+because that table is fixed to five MFMA-atom tile shapes, while a
+register-staged tile has any row count and 2 to 16 chunks per row. Use one
+form per tile, on both the producer and the consumer side.
 
 ---
 

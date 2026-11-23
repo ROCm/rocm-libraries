@@ -7,6 +7,7 @@
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/Types.hpp>
 #include <nanobind/nanobind.h>
+#include <nanobind/stl/optional.h>
 #include <nanobind/stl/string.h>
 
 namespace nb = nanobind;
@@ -140,7 +141,10 @@ void typesBindings(nb::module_& m)
         .value("TRAINING", NormFwdPhase::TRAINING);
 
     // Bind HeuristicMode enum
-    nb::enum_<HeuristicMode>(m, "HeuristicMode").value("FALLBACK", HeuristicMode::FALLBACK);
+    nb::enum_<HeuristicMode>(m, "HeuristicMode")
+        .value("FALLBACK", HeuristicMode::FALLBACK)
+        .value("A", HeuristicMode::A)
+        .value("B", HeuristicMode::B);
 
     // Bind BehaviorNote enum
     nb::enum_<BehaviorNote>(m, "BehaviorNote")
@@ -150,6 +154,21 @@ void typesBindings(nb::module_& m)
         .value("EXTERNAL_LIBRARY_DEPENDENCY", BehaviorNote::EXTERNAL_LIBRARY_DEPENDENCY)
         .value("SUPPORTS_EXECUTION_PLAN_SERIALIZATION",
                BehaviorNote::SUPPORTS_EXECUTION_PLAN_SERIALIZATION);
+
+    // Bind NumericalNote enum
+    auto numericalNote
+        = nb::enum_<NumericalNote>(m, "NumericalNote")
+              .value("TENSOR_CORE", NumericalNote::TENSOR_CORE)
+              .value("DOWN_CONVERT_INPUTS", NumericalNote::DOWN_CONVERT_INPUTS)
+              .value("REDUCED_PRECISION_REDUCTION", NumericalNote::REDUCED_PRECISION_REDUCTION)
+              .value("FFT", NumericalNote::FFT)
+              .value("NONDETERMINISTIC", NumericalNote::NONDETERMINISTIC)
+              .value("WINOGRAD", NumericalNote::WINOGRAD)
+              .value("WINOGRAD_TILE_4x4", NumericalNote::WINOGRAD_TILE_4x4)
+              .value("WINOGRAD_TILE_6x6", NumericalNote::WINOGRAD_TILE_6x6)
+              .value("WINOGRAD_TILE_13x13", NumericalNote::WINOGRAD_TILE_13x13)
+              .value("STRICT_NAN_PROP", NumericalNote::STRICT_NAN_PROP);
+    m.attr("numerical_note") = numericalNote;
 
     // Bind BuildPlanPolicy enum
     nb::enum_<BuildPlanPolicy>(m, "BuildPlanPolicy")
@@ -194,6 +213,18 @@ void typesBindings(nb::module_& m)
         .def("get_code", &Error::get_code)
         .def("is_good", &Error::is_good)
         .def("is_bad", &Error::is_bad);
+
+    // Timing method and per-attempt timeout are independent of execution success.
+    nb::enum_<TimingQuality>(m, "TimingQuality")
+        .value("DEVICE_ONLY", TimingQuality::DEVICE_ONLY)
+        .value("UNSTALLED", TimingQuality::UNSTALLED)
+        .value("INVALID", TimingQuality::INVALID);
+
+    nb::class_<ExecutionTiming>(m, "ExecutionTiming")
+        .def(nb::init<>())
+        .def_ro("elapsed_ms", &ExecutionTiming::elapsedMs)
+        .def_ro("quality", &ExecutionTiming::quality)
+        .def_ro("timed_out", &ExecutionTiming::timedOut);
 
     // Bind PluginLoadingMode enum
     nb::enum_<hipdnnPluginLoadingMode_ext_t>(m, "PluginLoadingMode")

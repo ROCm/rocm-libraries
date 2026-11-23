@@ -275,9 +275,10 @@ TEST(TestGpuHandleDeviceResolver, CachesCompletePropertiesFromTheCurrentDevice)
     EXPECT_EQ(first.gcnArchName, reported.gcnArchName);
     EXPECT_EQ(first.warpSize, reported.warpSize);
     EXPECT_EQ(first.multiProcessorCount, reported.multiProcessorCount);
-    ASSERT_LE(reported.sharedMemPerBlock,
-              static_cast<uint64_t>(std::numeric_limits<int64_t>::max()));
-    EXPECT_EQ(first.ldsSize, static_cast<int64_t>(reported.sharedMemPerBlock));
+    EXPECT_EQ(first.sharedMemPerBlock, reported.sharedMemPerBlock);
+    EXPECT_EQ(first.totalGlobalMem, reported.totalGlobalMem);
+    EXPECT_EQ(first.memoryBusWidth, reported.memoryBusWidth);
+    EXPECT_EQ(first.memoryClockRate, reported.memoryClockRate);
 }
 
 TEST(TestHandleDeviceResolver, ACacheHitDoesNotQueryHipAgain)
@@ -291,7 +292,7 @@ TEST(TestHandleDeviceResolver, ACacheHitDoesNotQueryHipAgain)
     const auto& second = resolver.deviceProperties(7);
 
     EXPECT_EQ(&first, &second);
-    EXPECT_EQ(first.ldsSize, 65536);
+    EXPECT_EQ(first.sharedMemPerBlock, 65536U);
     EXPECT_EQ(resolver.queryCount.load(), 1);
 }
 
@@ -308,7 +309,7 @@ TEST(TestHandleDeviceResolver, ReferencesStayValidAcrossCacheGrowth)
 
     const auto& sameEntryAfterGrowth = resolver.deviceProperties(1000);
     EXPECT_EQ(&firstInserted, &sameEntryAfterGrowth);
-    EXPECT_EQ(firstInserted.ldsSize, 65536 + 1000);
+    EXPECT_EQ(firstInserted.sharedMemPerBlock, 65536U + 1000U);
     EXPECT_EQ(resolver.queryCount.load(), 64);
 }
 
@@ -324,7 +325,7 @@ TEST(TestHandleDeviceResolver, RetriesFailedQueriesAndCachesTheFirstSuccess)
 
     resolver.status = hipSuccess;
     const auto& recovered = resolver.deviceProperties(7);
-    EXPECT_EQ(recovered.ldsSize, 65536);
+    EXPECT_EQ(recovered.sharedMemPerBlock, 65536U);
     EXPECT_EQ(&resolver.deviceProperties(7), &recovered);
     EXPECT_EQ(resolver.queryCount.load(), 3);
 }
@@ -337,7 +338,7 @@ TEST(TestHandleDeviceResolver, RejectsInvalidDeviceFactsAndRetries)
         const char* arch;
         int warpSize;
         int multiProcessorCount;
-        uint64_t ldsSize;
+        std::size_t sharedMemPerBlock;
     };
     const std::array<InvalidFacts, 6> cases = {{
         {"missing identity", "", 64, 48, 65536},
@@ -345,7 +346,7 @@ TEST(TestHandleDeviceResolver, RejectsInvalidDeviceFactsAndRetries)
         {"negative warp", "gfx000", -1, 48, 65536},
         {"zero count", "gfx000", 64, 0, 65536},
         {"negative count", "gfx000", 64, -1, 65536},
-        {"capacity above int64 max", "gfx000", 64, 48, uint64_t{1} << 63},
+        {"zero LDS capacity", "gfx000", 64, 48, 0},
     }};
     for(const auto& invalid : cases)
     {
@@ -354,7 +355,7 @@ TEST(TestHandleDeviceResolver, RejectsInvalidDeviceFactsAndRetries)
         std::memcpy(resolver.properties.gcnArchName, invalid.arch, std::strlen(invalid.arch) + 1);
         resolver.properties.warpSize = invalid.warpSize;
         resolver.properties.multiProcessorCount = invalid.multiProcessorCount;
-        resolver.properties.sharedMemPerBlock = invalid.ldsSize;
+        resolver.properties.sharedMemPerBlock = invalid.sharedMemPerBlock;
 
         EXPECT_THROW(static_cast<void>(resolver.deviceProperties(7)),
                      hipdnn_plugin_sdk::HipdnnPluginException);
@@ -364,7 +365,7 @@ TEST(TestHandleDeviceResolver, RejectsInvalidDeviceFactsAndRetries)
 
         resolver.properties = validHipProperties();
         const auto& recovered = resolver.deviceProperties(7);
-        EXPECT_EQ(recovered.ldsSize, 65536);
+        EXPECT_EQ(recovered.sharedMemPerBlock, 65536U);
         EXPECT_EQ(&resolver.deviceProperties(7), &recovered);
         EXPECT_EQ(resolver.queryCount.load(), 3);
     }
@@ -395,15 +396,14 @@ TEST(TestHandleDeviceResolver, AcceptsIdentityFillingTheArchBuffer)
 
 TEST(TestHandleDeviceResolver, AcceptsLdsCapacityAtBothEndsOfTheRange)
 {
-    const std::array<uint64_t, 2> capacities
-        = {0, static_cast<uint64_t>(std::numeric_limits<int64_t>::max())};
+    const std::array<std::size_t, 2> capacities = {1, std::numeric_limits<std::size_t>::max()};
     for(const auto capacity : capacities)
     {
         SCOPED_TRACE(capacity);
         FakeQueryResolver resolver;
         resolver.properties.sharedMemPerBlock = capacity;
         const auto& resolved = resolver.deviceProperties(7);
-        EXPECT_EQ(resolved.ldsSize, static_cast<int64_t>(capacity));
+        EXPECT_EQ(resolved.sharedMemPerBlock, capacity);
         EXPECT_EQ(&resolver.deviceProperties(7), &resolved);
         EXPECT_EQ(resolver.queryCount.load(), 1);
     }
@@ -416,7 +416,7 @@ TEST(TestHandleDeviceResolver, NoDeviceStaysUnresolvedWithoutQueryingHip)
     EXPECT_TRUE(unresolved.gcnArchName.empty());
     EXPECT_EQ(unresolved.warpSize, 0);
     EXPECT_EQ(unresolved.multiProcessorCount, 0);
-    EXPECT_EQ(unresolved.ldsSize, -1);
+    EXPECT_EQ(unresolved.sharedMemPerBlock, 0U);
     EXPECT_EQ(&resolver.deviceProperties(hipdnn_plugin_sdk::ingestor::NO_DEVICE), &unresolved);
     EXPECT_EQ(resolver.queryCount.load(), 0);
 }
@@ -437,8 +437,9 @@ TEST(TestHandleDeviceResolver, ConcurrentDevicePropertyLookupsAreSafe)
             for(int i = 0; i < 200; ++i)
             {
                 const auto& properties = resolver.deviceProperties(deviceId);
-                if(properties.ldsSize != 65536 + deviceId || properties.warpSize != 64
-                   || properties.multiProcessorCount != 48 || properties.gcnArchName != "gfx000")
+                if(properties.sharedMemPerBlock != static_cast<std::size_t>(65536 + deviceId)
+                   || properties.warpSize != 64 || properties.multiProcessorCount != 48
+                   || properties.gcnArchName != "gfx000")
                 {
                     mismatches.fetch_add(1, std::memory_order_relaxed);
                 }

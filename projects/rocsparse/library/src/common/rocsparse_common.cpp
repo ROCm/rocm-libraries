@@ -24,120 +24,40 @@
 
 #include "rocsparse_common.h"
 #include "rocsparse_common.hpp"
+#include "rocsparse_grid.hpp"
 #include "rocsparse_utility.hpp"
 
 #include <hip/hip_runtime.h>
 
 namespace rocsparse
 {
+    //
+    // AISPARSE-699. Two invariants hold for the 2-D and axpby kernels below.
+    //
+    // 1. A dense element count is the product of two index-typed extents, so it must
+    //    be formed in int64_t. The int32_t product overflows at m = n = 46341, which
+    //    is 8.6 GB in single precision and therefore reachable on one MI300X. The
+    //    host already sized the grid from the 64-bit product, but the kernels
+    //    recomputed the same product in the template index type I for their bounds
+    //    check, so the guard rejected every thread of an otherwise correct grid and
+    //    the matrix was left untouched.
+    //
+    // 2. The flattened element index has to be 64-bit too. Widening the bound alone
+    //    achieves nothing: hipBlockIdx_x * BLOCKSIZE is unsigned-int arithmetic that
+    //    wraps at 2^32 whatever I is, and narrowing the result into a 32-bit I wraps
+    //    sooner still.
+    //
+    // Every grid-stride trip count depends only on hipBlockIdx_x, hipGridDim_x,
+    // BLOCKSIZE and the element count, all block uniform, so all threads of a block
+    // run the same number of iterations.
+    //
 
-    template <uint32_t BLOCKSIZE, typename I, typename T>
-    ROCSPARSE_DEVICE_ILF void valset_2d_device(
-        I m, I n, int64_t ld, T value, T* __restrict__ array, rocsparse_order order)
+    template <typename I, typename A, typename T>
+    ROCSPARSE_DEVICE_ILF void scale_2d_device(
+        int64_t gid, I m, I n, int64_t ld, T value, A* __restrict__ array, rocsparse_order order)
     {
-        I gid = hipBlockIdx_x * BLOCKSIZE + hipThreadIdx_x;
-
-        if(gid >= m * n)
-        {
-            return;
-        }
-
-        I wid = (order == rocsparse_order_column) ? gid / m : gid / n;
-        I lid = (order == rocsparse_order_column) ? gid % m : gid % n;
-
-        array[lid + ld * wid] = value;
-    }
-
-    template <uint32_t BLOCKSIZE, typename I, typename A, typename T>
-    ROCSPARSE_DEVICE_ILF void scale_device(I length, T scalar, A* __restrict__ array)
-    {
-        const I gid = hipBlockIdx_x * BLOCKSIZE + hipThreadIdx_x;
-
-        if(gid >= length)
-        {
-            return;
-        }
-
-        if(scalar == static_cast<T>(0))
-        {
-            array[gid] = static_cast<A>(0);
-        }
-        else
-        {
-            array[gid] *= scalar;
-        }
-    }
-
-    template <uint32_t BLOCKSIZE, typename I, typename X, typename Y, typename T>
-    ROCSPARSE_DEVICE_ILF void axpby_device(
-        I length, T alpha, const X* __restrict__ x_array, T beta, Y* __restrict__ y_array)
-    {
-        const I gid = hipBlockIdx_x * BLOCKSIZE + hipThreadIdx_x;
-
-        if(gid >= length)
-        {
-            return;
-        }
-
-        T tmp = static_cast<T>(0);
-        if(beta != static_cast<T>(0))
-        {
-            tmp = fma(beta, static_cast<T>(y_array[gid]), tmp);
-        }
-        if(alpha != static_cast<T>(0))
-        {
-            tmp = fma(alpha, static_cast<T>(x_array[gid]), tmp);
-        }
-        y_array[gid] = static_cast<Y>(tmp);
-    }
-
-    template <uint32_t BLOCKSIZE, typename I, typename X, typename Y, typename T>
-    ROCSPARSE_DEVICE_ILF void axpby_batched_device(I               length,
-                                                   rocsparse_int   num_extra,
-                                                   const T*        gamma_values,
-                                                   const X* const* x_arrays,
-                                                   T               beta,
-                                                   Y* __restrict__ y_array)
-    {
-        const I gid = hipBlockIdx_x * BLOCKSIZE + hipThreadIdx_x;
-
-        if(gid >= length)
-        {
-            return;
-        }
-
-        T tmp = static_cast<T>(0);
-        if(beta != static_cast<T>(0))
-        {
-            tmp = fma(beta, static_cast<T>(y_array[gid]), tmp);
-        }
-
-        // Add contributions from all extra vectors, each with its own gamma
-        for(rocsparse_int i = 0; i < num_extra; ++i)
-        {
-            T gamma = gamma_values[i]; // gamma is a scalar value from the array
-            if(gamma != static_cast<T>(0))
-            {
-                tmp = rocsparse::fma<T>(gamma, rocsparse::nontemporal_load(x_arrays[i] + gid), tmp);
-            }
-        }
-
-        y_array[gid] = static_cast<Y>(tmp);
-    }
-
-    template <uint32_t BLOCKSIZE, typename I, typename A, typename T>
-    ROCSPARSE_DEVICE_ILF void
-        scale_2d_device(I m, I n, int64_t ld, T value, A* __restrict__ array, rocsparse_order order)
-    {
-        I gid = hipBlockIdx_x * BLOCKSIZE + hipThreadIdx_x;
-
-        if(gid >= m * n)
-        {
-            return;
-        }
-
-        I wid = (order == rocsparse_order_column) ? gid / m : gid / n;
-        I lid = (order == rocsparse_order_column) ? gid % m : gid % n;
+        const int64_t wid = (order == rocsparse_order_column) ? gid / m : gid / n;
+        const int64_t lid = (order == rocsparse_order_column) ? gid % m : gid % n;
 
         if(value == static_cast<T>(0))
         {
@@ -153,10 +73,24 @@ namespace rocsparse
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void valset_2d_kernel(I m, I n, int64_t ld, T value, T* array, rocsparse_order order)
     {
-        rocsparse::valset_2d_device<BLOCKSIZE>(m, n, ld, value, array, order);
+        // Character for character the expression the host used to size grid.x.
+        const int64_t nelm = static_cast<int64_t>(m) * n;
+
+        for(int64_t base = static_cast<int64_t>(hipBlockIdx_x) * BLOCKSIZE; base < nelm;
+            base += static_cast<int64_t>(hipGridDim_x) * BLOCKSIZE)
+        {
+            const int64_t gid = base + hipThreadIdx_x;
+            if(gid < nelm)
+            {
+                const int64_t wid = (order == rocsparse_order_column) ? gid / m : gid / n;
+                const int64_t lid = (order == rocsparse_order_column) ? gid % m : gid % n;
+
+                array[lid + ld * wid] = value;
+            }
+        }
     }
 
-    template <uint32_t BLOCKSIZE, typename I, typename A, typename T>
+    template <uint32_t BLOCKSIZE, bool GRID_STRIDE, typename I, typename A, typename T>
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void scale_kernel(I length,
                       ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, scalar),
@@ -164,25 +98,31 @@ namespace rocsparse
                       bool is_host_mode)
     {
         ROCSPARSE_DEVICE_HOST_SCALAR_GET(scalar);
-        if(scalar != static_cast<T>(1))
+        if(scalar == static_cast<T>(1))
         {
-            rocsparse::scale_device<BLOCKSIZE>(length, scalar, array);
+            return;
         }
-    }
 
-    template <uint32_t BLOCKSIZE, typename I, typename X, typename Y, typename T>
-    ROCSPARSE_KERNEL(BLOCKSIZE)
-    void axpby_kernel(I length,
-                      ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
-                      const X* __restrict__ x_array,
-                      ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, beta),
-                      Y* __restrict__ y_array,
-                      bool is_host_mode)
-    {
-        ROCSPARSE_DEVICE_HOST_SCALAR_GET(alpha);
-        ROCSPARSE_DEVICE_HOST_SCALAR_GET(beta);
+        const int64_t stride = static_cast<int64_t>(hipGridDim_x) * BLOCKSIZE;
 
-        rocsparse::axpby_device<BLOCKSIZE>(length, alpha, x_array, beta, y_array);
+        for(int64_t gid = static_cast<int64_t>(hipBlockIdx_x) * BLOCKSIZE + hipThreadIdx_x;
+            gid < length;
+            gid += stride)
+        {
+            if(scalar == static_cast<T>(0))
+            {
+                array[gid] = static_cast<A>(0);
+            }
+            else
+            {
+                array[gid] *= scalar;
+            }
+
+            if constexpr(!GRID_STRIDE)
+            {
+                break;
+            }
+        }
     }
 
     template <uint32_t BLOCKSIZE, typename I, typename X, typename Y, typename T>
@@ -197,8 +137,37 @@ namespace rocsparse
     {
         ROCSPARSE_DEVICE_HOST_SCALAR_GET(beta);
 
-        rocsparse::axpby_batched_device<BLOCKSIZE>(
-            length, num_extra, gamma_values, x_arrays, beta, y_array);
+        // length is a single extent rather than a product, so it cannot overflow the
+        // way m * n can. It is widened so that the index arithmetic cannot wrap and
+        // so that this kernel shares one indexing idiom with the 2-D ones.
+        const int64_t len = static_cast<int64_t>(length);
+
+        for(int64_t base = static_cast<int64_t>(hipBlockIdx_x) * BLOCKSIZE; base < len;
+            base += static_cast<int64_t>(hipGridDim_x) * BLOCKSIZE)
+        {
+            const int64_t gid = base + hipThreadIdx_x;
+            if(gid < len)
+            {
+                T tmp = static_cast<T>(0);
+                if(beta != static_cast<T>(0))
+                {
+                    tmp = fma(beta, static_cast<T>(y_array[gid]), tmp);
+                }
+
+                // Add contributions from all extra vectors, each with its own gamma
+                for(rocsparse_int i = 0; i < num_extra; ++i)
+                {
+                    T gamma = gamma_values[i]; // gamma is a scalar value from the array
+                    if(gamma != static_cast<T>(0))
+                    {
+                        tmp = rocsparse::fma<T>(
+                            gamma, rocsparse::nontemporal_load(x_arrays[i] + gid), tmp);
+                    }
+                }
+
+                y_array[gid] = static_cast<Y>(tmp);
+            }
+        }
     }
 
     template <uint32_t BLOCKSIZE, typename I, typename A, typename T>
@@ -214,13 +183,26 @@ namespace rocsparse
                          bool            is_host_mode)
     {
         ROCSPARSE_DEVICE_HOST_SCALAR_GET(scalar);
-
-        if(scalar != static_cast<T>(1))
+        if(scalar == static_cast<T>(1))
         {
-            for(int64_t batch = hipBlockIdx_y; batch < batch_count; batch += hipGridDim_y)
+            return;
+        }
+
+        // Character for character the expression the host used to size grid.x.
+        const int64_t nelm = static_cast<int64_t>(m) * n;
+
+        for(int64_t batch = hipBlockIdx_y; batch < batch_count; batch += hipGridDim_y)
+        {
+            A* batch_array = rocsparse::load_pointer(array, batch, stride);
+
+            for(int64_t base = static_cast<int64_t>(hipBlockIdx_x) * BLOCKSIZE; base < nelm;
+                base += static_cast<int64_t>(hipGridDim_x) * BLOCKSIZE)
             {
-                rocsparse::scale_2d_device<BLOCKSIZE>(
-                    m, n, ld, scalar, rocsparse::load_pointer(array, batch, stride), order);
+                const int64_t gid = base + hipThreadIdx_x;
+                if(gid < nelm)
+                {
+                    rocsparse::scale_2d_device(gid, m, n, ld, scalar, batch_array, order);
+                }
             }
         }
     }
@@ -230,17 +212,21 @@ template <typename I, typename T>
 rocsparse_status rocsparse::valset_2d(
     rocsparse_handle handle, I m, I n, int64_t ld, T value, T* array, rocsparse_order order)
 {
-    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::valset_2d_kernel<256>),
-                                       dim3((int64_t(m) * n - 1) / 256 + 1),
-                                       dim3(256),
-                                       0,
-                                       handle->stream,
-                                       m,
-                                       n,
-                                       ld,
-                                       value,
-                                       array,
-                                       order);
+    // 64-bit element count, shared with the kernel bound (AISPARSE-699).
+    const int64_t nelm = static_cast<int64_t>(m) * n;
+
+    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+        (rocsparse::valset_2d_kernel<256>),
+        dim3(rocsparse::get_grid_size_x(handle, (nelm - 1) / 256 + 1, 256)),
+        dim3(256),
+        0,
+        handle->stream,
+        m,
+        n,
+        ld,
+        value,
+        array,
+        order);
 
     return rocsparse_status_success;
 }
@@ -262,16 +248,30 @@ rocsparse_status rocsparse::scale_array(rocsparse_handle       handle,
         }
         else if((on_host && *scalar_device_host != static_cast<T>(1)) || on_host == false)
         {
-            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-                (rocsparse::scale_kernel<256>),
-                dim3((length - 1) / 256 + 1),
-                dim3(256),
-                0,
-                handle->stream,
-                length,
-                ROCSPARSE_SCALAR_HOST_DEVICE_ARGUMENT(pointer_mode, scalar_device_host),
-                array,
-                on_host);
+#define LAUNCH_SCALE(GRID_STRIDE)                                                \
+    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                          \
+        (rocsparse::scale_kernel<256, GRID_STRIDE>),                             \
+        dim3(grid_size),                                                         \
+        dim3(256),                                                               \
+        0,                                                                       \
+        handle->stream,                                                          \
+        length,                                                                  \
+        ROCSPARSE_SCALAR_HOST_DEVICE_ARGUMENT(pointer_mode, scalar_device_host), \
+        array,                                                                   \
+        on_host)
+
+            // Only a clamped grid needs the grid-stride loop.
+            const int64_t  num_blocks = (static_cast<int64_t>(length) - 1) / 256 + 1;
+            const uint32_t grid_size  = rocsparse::get_grid_size_x(handle, num_blocks, 256);
+            if(grid_size < num_blocks)
+            {
+                LAUNCH_SCALE(true);
+            }
+            else
+            {
+                LAUNCH_SCALE(false);
+            }
+#undef LAUNCH_SCALE
         }
     }
     return rocsparse_status_success;
@@ -297,7 +297,8 @@ rocsparse_status rocsparse::axpby_array_batched(rocsparse_handle handle,
     {
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
             (rocsparse::axpby_batched_kernel<256>),
-            dim3((length - 1) / 256 + 1),
+            dim3(rocsparse::get_grid_size_x(
+                handle, (static_cast<int64_t>(length) - 1) / 256 + 1, 256)),
             dim3(256),
             0,
             handle->stream,
@@ -332,9 +333,13 @@ rocsparse_status rocsparse::scale_2d_array(rocsparse_handle handle,
     const bool on_host = handle->pointer_mode == rocsparse_pointer_mode_host;
     if((on_host && *scalar_device_host != 1) || on_host == false)
     {
+        // 64-bit element count, shared with the kernel bound (AISPARSE-699).
+        const int64_t nelm = static_cast<int64_t>(m) * n;
+
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
             (rocsparse::scale_2d_kernel<256>),
-            dim3((int64_t(m) * n - 1) / 256 + 1, (batch_count > 65535) ? 65535 : batch_count),
+            dim3(rocsparse::get_grid_size_x(handle, (nelm - 1) / 256 + 1, 256),
+                 rocsparse::get_grid_size_y(handle, batch_count)),
             dim3(256),
             0,
             handle->stream,

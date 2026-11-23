@@ -29,10 +29,17 @@
 #include "hipblaslt_ostream.hpp"
 #include "hipblaslt_random.hpp"
 #include "hipblaslt_test.hpp"
+#include <algorithm>
+#include <array>
+#include <cmath>
+#include <cstring>
 #include <hip/hip_runtime.h>
 #include <hipblaslt/hipblaslt.h>
-#include <array>
+#include <hipblaslt_benchmark/benchmark_stats.hpp>
 #include <limits>
+#include <omp.h>
+#include <random>
+#include <stdexcept>
 #include <type_traits>
 #include <vector>
 
@@ -72,6 +79,39 @@ void set_ulp_positive_init_state(bool enable)
 bool ulp_positive_init()
 {
     return ulp_positive_init_state();
+}
+
+namespace
+{
+    struct IntegerExactPatternState
+    {
+        IntegerExactPattern pattern    = IntegerExactPattern::standard;
+        size_t              K          = 0;
+        bool                a_k_is_row = false;
+    };
+    IntegerExactPatternState& integer_exact_pattern_state()
+    {
+        static thread_local IntegerExactPatternState state;
+        return state;
+    }
+}
+
+bool parse_integer_exact_pattern(const char* name, IntegerExactPattern& pattern)
+{
+    if(!name || !*name || !strcmp(name, "standard"))
+        pattern = IntegerExactPattern::standard;
+    else if(!strcmp(name, "ternary"))
+        pattern = IntegerExactPattern::ternary;
+    else if(!strcmp(name, "sparse_k"))
+        pattern = IntegerExactPattern::sparse_k;
+    else
+        return false;
+    return true;
+}
+
+void set_integer_exact_pattern_state(IntegerExactPattern pattern, size_t K, bool a_k_is_row)
+{
+    integer_exact_pattern_state() = {pattern, K, a_k_is_row};
 }
 
 template <typename T, typename F>
@@ -121,6 +161,129 @@ void fill_batch(T* A, size_t M, size_t N, size_t lda, size_t stride, size_t batc
         fill_kernel<<<dim3(grid_size), dim3(block_size), 0, hipStreamDefault>>>(A, size, offset, f);
     }
     CHECK_HIP_ERROR(hipGetLastError());
+}
+
+// Rounds a double once to T, to nearest even (FP8 saturating finite values). hip_bfloat16 has no
+// double constructor: the double is first rounded to odd in float, which keeps the later float to
+// BF16 nearest-even rounding equal to a direct double to BF16 rounding (float has 16 more mantissa
+// bits than BF16).
+template <typename T>
+static T maf_round(double v)
+{
+    if constexpr(std::is_same_v<T, hip_bfloat16>)
+    {
+        float f = static_cast<float>(v);
+        if(static_cast<double>(f) != v)
+        {
+            if(std::fabs(static_cast<double>(f)) > std::fabs(v))
+                f = std::nextafter(f, 0.0f);
+            uint32_t bits;
+            std::memcpy(&bits, &f, sizeof(bits));
+            bits |= 1u;
+            std::memcpy(&f, &bits, sizeof(bits));
+        }
+        return hip_bfloat16(f);
+    }
+    else
+        return T(v);
+}
+
+// The elements a MAF fill may copy: its extent, capped at what testing_matmul allocates for the
+// layout (rotating_tensor_elements). A batch stride below lda gets a single lda * N buffer, which
+// is shorter than the extent once the interleaved batches reach past column N - 1.
+static size_t maf_copy_elements(size_t extent, size_t lda, size_t N, size_t batches, size_t stride)
+{
+    const int64_t allocated = hipblaslt_bench::rotating_tensor_elements(
+        int64_t(lda), int64_t(N), int64_t(batches), int64_t(stride));
+    return std::min(extent, size_t(allocated));
+}
+
+// MAF1.0 trig data: A = sin(idx), B and C = cos(idx), idx = i + j*M + b*M*N with b the batch
+// (batch_index + the batch within this call, so pointer-array batches differ too). The index is
+// logical, so ld padding does not shift it; padding cells are set to 0. Values are computed in
+// double on the host, like the generateMXInput path, and rounded once to T.
+template <typename T>
+static void maf1_0_fill_trig(T*       A,
+                             size_t   M,
+                             size_t   N,
+                             size_t   lda,
+                             size_t   stride,
+                             size_t   batch_count,
+                             ABC_dims abc,
+                             size_t   batch_index)
+{
+    if(batch_count == 0 || M == 0 || N == 0)
+        return;
+    // Same extent as maf2_0_fill_normal below. Stride 0 broadcasts one matrix; any other stride,
+    // including one below lda (interleaved batches), has batch_count matrices. Batches that share
+    // memory are written in order, so the last one wins. Only the part the caller allocated is
+    // copied (maf_copy_elements).
+    const size_t   batches = stride != 0 ? batch_count : 1;
+    const size_t   extent  = M + lda * (N - 1);
+    const size_t   size_64 = extent + (batches - 1) * stride;
+    const bool     use_cos = abc != ABC_dims::A;
+    const bool     overlap = batches > 1 && stride < extent;
+    std::vector<T> h(size_64, T(0.0f));
+#pragma omp parallel for collapse(2) if(!overlap)
+    for(size_t b = 0; b < batches; b++)
+        for(size_t j = 0; j < N; j++)
+        {
+            const size_t first = (batch_index + b) * M * N + j * M;
+            for(size_t i = 0; i < M; i++)
+            {
+                const double arg = static_cast<double>(first + i);
+                h[b * stride + j * lda + i] = maf_round<T>(use_cos ? std::cos(arg) : std::sin(arg));
+            }
+        }
+    CHECK_HIP_ERROR(hipMemcpy(A,
+                              h.data(),
+                              maf_copy_elements(size_64, lda, N, batches, stride) * sizeof(T),
+                              hipMemcpyHostToDevice));
+}
+
+// maf2_0 seeding mirrors mxDataGenerator (DataGenerator.hpp) so runs are reproducible: a fixed
+// base seed and one std::mt19937 per OpenMP thread seeded seed + tid, using
+// min(32, omp_get_max_threads()) threads that each draw a contiguous chunk. A, B, C and each
+// pointer-array batch get disjoint seed ranges so their data differ.
+constexpr uint32_t kMaf2_0Seed       = 1713573849u; // generateMXInput's fixed seed
+constexpr int      kMaf2_0MaxThreads = 32;
+
+static uint32_t maf2_0_seed(ABC_dims abc, size_t batch_index)
+{
+    constexpr uint32_t num_matrices = 3; // A, B, C
+    return kMaf2_0Seed
+           + kMaf2_0MaxThreads
+                 * (static_cast<uint32_t>(abc) + num_matrices * uint32_t(batch_index));
+}
+
+// Fills every element up to the last one used, ld padding between columns and batches included:
+// M + lda*(N-1) + (batch_count-1)*stride (stride 0 broadcasts one matrix; a stride below lda
+// interleaves the batches). This is the extent TensileLite fills, so both projects draw the same
+// data; only the part the caller allocated is copied (maf_copy_elements).
+// Values are N(0, 1) drawn in double precision on the host, rounded once to T (maf_round) and
+// copied to the device.
+template <typename T>
+static void maf2_0_fill_normal(
+    T* A, size_t M, size_t N, size_t lda, size_t stride, size_t batch_count, uint32_t seed)
+{
+    if(batch_count == 0 || M == 0 || N == 0)
+        return;
+    const size_t   size_64 = M + lda * (N - 1) + size_t(batch_count - 1) * stride;
+    std::vector<T> h(size_64);
+    const int      num_threads = std::min(kMaf2_0MaxThreads, omp_get_max_threads());
+#pragma omp parallel num_threads(num_threads)
+    {
+        std::mt19937                     gen(seed + static_cast<uint32_t>(omp_get_thread_num()));
+        std::normal_distribution<double> dist(0.0, 1.0);
+#pragma omp for schedule(static)
+        for(size_t i = 0; i < size_64; i++)
+            h[i] = maf_round<T>(dist(gen));
+    }
+    const size_t batches = stride != 0 ? batch_count : 1;
+    CHECK_HIP_ERROR(hipMemcpy(A,
+                              h.data(),
+                              maf_copy_elements(size_64, lda, N, batches, stride) * sizeof(T),
+                              hipMemcpyHostToDevice));
 }
 
 __host__ __device__ uint32_t pseudo_random_device(size_t idx)
@@ -187,6 +350,13 @@ template <>
 __host__ __device__ int8_t small_int_positive<int8_t>(size_t idx)
 {
     return static_cast<int8_t>(pseudo_random_device(idx) % 3);
+}
+
+/*! \brief  generate a random number in range [-1, 0, 1] for the ternary integer_exact pattern */
+template <typename T>
+__host__ __device__ T small_int_ternary(size_t idx)
+{
+    return T(float(int(pseudo_random_device(idx) % 3) - 1));
 }
 
 #if defined(HIPBLASLT_USE_FP4)
@@ -672,7 +842,8 @@ void hipblaslt_init_device(ABC_dims                 abc,
                            size_t                   lda,
                            size_t                   stride,
                            size_t                   batch_count,
-                           int                      norm_dist_one_special_type = -1)
+                           int                      norm_dist_one_special_type = -1,
+                           size_t                   batch_index                = 0)
 {
     using T_real = get_real_type_t<T>;
 
@@ -980,14 +1151,91 @@ void hipblaslt_init_device(ABC_dims                 abc,
                                << std::endl;
             }
             break;
+        case hipblaslt_initialization::maf1_0:
+            if constexpr(std::is_same_v<T, double> || std::is_same_v<T, float>
+                         || std::is_same_v<T, hipblasLtHalf> || std::is_same_v<T, hip_bfloat16>
+#if HIP_FP8_TYPE_OCP
+                         || std::is_same_v<T, hipblaslt_f8> || std::is_same_v<T, hipblaslt_bf8>
+#endif
+#if HIP_FP8_TYPE_FNUZ
+                         || std::is_same_v<T, hipblaslt_f8_fnuz>
+                         || std::is_same_v<T, hipblaslt_bf8_fnuz>
+#endif
+                         )
+                maf1_0_fill_trig(A, M, N, lda, stride, batch_count, abc, batch_index);
+            else
+                throw std::invalid_argument(
+                    "hipblaslt_init_device: maf1_0 is not supported for this data type yet");
+            break;
+        // maf2_0_unit_scale only changes block-scaled (MX) operands, which go through
+        // generateMXInput; every other operand is filled as maf2_0.
+        case hipblaslt_initialization::maf2_0:
+        case hipblaslt_initialization::maf2_0_unit_scale:
+            if constexpr(std::is_same_v<T, double> || std::is_same_v<T, float>
+                         || std::is_same_v<T, hipblasLtHalf> || std::is_same_v<T, hip_bfloat16>
+#if HIP_FP8_TYPE_OCP
+                         || std::is_same_v<T, hipblaslt_f8> || std::is_same_v<T, hipblaslt_bf8>
+#endif
+#if HIP_FP8_TYPE_FNUZ
+                         || std::is_same_v<T, hipblaslt_f8_fnuz>
+                         || std::is_same_v<T, hipblaslt_bf8_fnuz>
+#endif
+                         )
+                maf2_0_fill_normal(
+                    A, M, N, lda, stride, batch_count, maf2_0_seed(abc, batch_index));
+            else
+                throw std::invalid_argument(
+                    "hipblaslt_init_device: maf2_0 is not supported for this data type yet");
+            break;
         case hipblaslt_initialization::uniform_01:
             fill_batch(A, M, N, lda, stride, batch_count, [] __host__ __device__ (size_t idx) -> T {
                 return uniform_01<T>(idx);
             });
             break;
         case hipblaslt_initialization::integer_exact:
-            // A and C: [0,1,2] (C with beta); B: checkerboard ±[0,1,2]
-            if(abc == ABC_dims::A || abc == ABC_dims::C)
+        {
+            // A and C: [0,1,2] (C with beta); B: checkerboard ±[0,1,2]. The ternary and sparse_k
+            // patterns are described with IntegerExactPattern in hipblaslt_init.hpp.
+            const IntegerExactPatternState pat = integer_exact_pattern_state();
+            if(pat.pattern == IntegerExactPattern::ternary)
+            {
+                // B's PRNG offset keeps its values independent of A's.
+                const size_t offset = abc == ABC_dims::B ? 1000003 : 0;
+                fill_batch(A,
+                           M,
+                           N,
+                           lda,
+                           stride,
+                           batch_count,
+                           [offset] __host__ __device__(size_t idx) -> T {
+                               return small_int_ternary<T>(idx + offset);
+                           });
+            }
+            else if(abc == ABC_dims::A && pat.pattern == IntegerExactPattern::sparse_k)
+            {
+                // A stride of 0 means packed batches. Any other stride is the allocation's layout,
+                // which must not be widened: overlapping batches would be written past the end.
+                const size_t fill_stride  = stride ? stride : lda * N;
+                const size_t index_stride = std::max(fill_stride, lda * N);
+                const size_t K            = pat.K;
+                const bool   k_is_row     = pat.a_k_is_row;
+                fill_batch(A,
+                           M,
+                           N,
+                           lda,
+                           fill_stride,
+                           batch_count,
+                           [index_stride, lda, K, k_is_row] __host__ __device__(size_t idx) -> T {
+                               auto in_batch = idx % index_stride;
+                               auto j        = in_batch / lda;
+                               auto i        = in_batch - j * lda;
+                               return integer_exact_sparse_k_kept(
+                                          k_is_row ? i : j, K, k_is_row ? j : i)
+                                          ? T(float(1 + pseudo_random_device(idx) % 2))
+                                          : T(0);
+                           });
+            }
+            else if(abc == ABC_dims::A || abc == ABC_dims::C)
             {
                 fill_batch(A, M, N, lda, stride, batch_count, [] __host__ __device__ (size_t idx) -> T {
                     return small_int_positive<T>(idx);
@@ -1012,6 +1260,7 @@ void hipblaslt_init_device(ABC_dims                 abc,
                 });
             }
             break;
+        }
         case hipblaslt_initialization::fp16_accumulator_probe:
             if constexpr(std::is_same_v<T, hipblasLtHalf>)
             {
@@ -1129,81 +1378,82 @@ void hipblaslt_init_device(ABC_dims                 abc,
                            hipDataType              type,
                            size_t                   stride,
                            size_t                   batch_count,
-                           int                      norm_dist_one_special_type)
+                           int                      norm_dist_one_special_type,
+                           size_t                   batch_index)
 {
     switch(type)
     {
     case HIP_R_32F:
         hipblaslt_init_device<float>(
-            abc, init, is_nan, static_cast<float*>(A), M, N, lda, stride, batch_count, norm_dist_one_special_type);
+            abc, init, is_nan, static_cast<float*>(A), M, N, lda, stride, batch_count, norm_dist_one_special_type, batch_index);
         break;
     case HIP_R_64F:
         hipblaslt_init_device<double>(
-            abc, init, is_nan, static_cast<double*>(A), M, N, lda, stride, batch_count, norm_dist_one_special_type);
+            abc, init, is_nan, static_cast<double*>(A), M, N, lda, stride, batch_count, norm_dist_one_special_type, batch_index);
         break;
     case HIP_R_16F:
         hipblaslt_init_device<hipblasLtHalf>(
-            abc, init, is_nan, static_cast<hipblasLtHalf*>(A), M, N, lda, stride, batch_count, norm_dist_one_special_type);
+            abc, init, is_nan, static_cast<hipblasLtHalf*>(A), M, N, lda, stride, batch_count, norm_dist_one_special_type, batch_index);
         break;
     case HIP_R_16BF:
         hipblaslt_init_device<hip_bfloat16>(
-            abc, init, is_nan, static_cast<hip_bfloat16*>(A), M, N, lda, stride, batch_count, norm_dist_one_special_type);
+            abc, init, is_nan, static_cast<hip_bfloat16*>(A), M, N, lda, stride, batch_count, norm_dist_one_special_type, batch_index);
         break;
 #if HIP_FP8_TYPE_FNUZ
     case HIP_R_8F_E4M3_FNUZ:
         hipblaslt_init_device<hipblaslt_f8_fnuz>(
-            abc, init, is_nan, static_cast<hipblaslt_f8_fnuz*>(A), M, N, lda, stride, batch_count, norm_dist_one_special_type);
+            abc, init, is_nan, static_cast<hipblaslt_f8_fnuz*>(A), M, N, lda, stride, batch_count, norm_dist_one_special_type, batch_index);
         break;
     case HIP_R_8F_E5M2_FNUZ:
         hipblaslt_init_device<hipblaslt_bf8_fnuz>(
-            abc, init, is_nan, static_cast<hipblaslt_bf8_fnuz*>(A), M, N, lda, stride, batch_count, norm_dist_one_special_type);
+            abc, init, is_nan, static_cast<hipblaslt_bf8_fnuz*>(A), M, N, lda, stride, batch_count, norm_dist_one_special_type, batch_index);
         break;
 #endif
 #if HIP_FP8_TYPE_OCP
     case HIP_R_8F_E4M3:
         hipblaslt_init_device<hipblaslt_f8>(
-            abc, init, is_nan, static_cast<hipblaslt_f8*>(A), M, N, lda, stride, batch_count, norm_dist_one_special_type);
+            abc, init, is_nan, static_cast<hipblaslt_f8*>(A), M, N, lda, stride, batch_count, norm_dist_one_special_type, batch_index);
         break;
     case HIP_R_8F_E5M2:
         hipblaslt_init_device<hipblaslt_bf8>(
-            abc, init, is_nan, static_cast<hipblaslt_bf8*>(A), M, N, lda, stride, batch_count, norm_dist_one_special_type);
+            abc, init, is_nan, static_cast<hipblaslt_bf8*>(A), M, N, lda, stride, batch_count, norm_dist_one_special_type, batch_index);
         break;
 #endif
     case HIP_R_32I:
         hipblaslt_init_device<int32_t>(
-            abc, init, is_nan, static_cast<int32_t*>(A), M, N, lda, stride, batch_count, norm_dist_one_special_type);
+            abc, init, is_nan, static_cast<int32_t*>(A), M, N, lda, stride, batch_count, norm_dist_one_special_type, batch_index);
         break;
     case HIP_R_8I:
         hipblaslt_init_device<hipblasLtInt8>(
-            abc, init, is_nan, static_cast<hipblasLtInt8*>(A), M, N, lda, stride, batch_count, norm_dist_one_special_type);
+            abc, init, is_nan, static_cast<hipblasLtInt8*>(A), M, N, lda, stride, batch_count, norm_dist_one_special_type, batch_index);
         break;
     case HIP_R_8F_UE8M0:
         hipblaslt_init_device<hipblaslt_e8>(
-            abc, init, is_nan, static_cast<hipblaslt_e8*>(A), M, N, lda, stride, batch_count, norm_dist_one_special_type);
+            abc, init, is_nan, static_cast<hipblaslt_e8*>(A), M, N, lda, stride, batch_count, norm_dist_one_special_type, batch_index);
         break;
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wswitch"
     case HIP_R_8F_E5M3_EXT:
 #pragma GCC diagnostic pop
         hipblaslt_init_device<hipblaslt_e5m3>(
-            abc, init, is_nan, static_cast<hipblaslt_e5m3*>(A), M, N, lda, stride, batch_count, norm_dist_one_special_type);
+            abc, init, is_nan, static_cast<hipblaslt_e5m3*>(A), M, N, lda, stride, batch_count, norm_dist_one_special_type, batch_index);
         break;
 #if defined(HIPBLASLT_USE_FP6)
     case static_cast<hipDataType>(HIP_R_6F_E2M3):
         hipblaslt_init_device<hipblaslt_f6x16>(
-            abc, init, is_nan, static_cast<hipblaslt_f6x16*>(A), M, N, lda, stride, batch_count, norm_dist_one_special_type);
+            abc, init, is_nan, static_cast<hipblaslt_f6x16*>(A), M, N, lda, stride, batch_count, norm_dist_one_special_type, batch_index);
         break;
 #endif
 #if defined(HIPBLASLT_USE_BF6)
     case static_cast<hipDataType>(HIP_R_6F_E3M2):
         hipblaslt_init_device<hipblaslt_bf6x16>(
-            abc, init, is_nan, static_cast<hipblaslt_bf6x16*>(A), M, N, lda, stride, batch_count, norm_dist_one_special_type);
+            abc, init, is_nan, static_cast<hipblaslt_bf6x16*>(A), M, N, lda, stride, batch_count, norm_dist_one_special_type, batch_index);
         break;
 #endif
 #if defined(HIPBLASLT_USE_FP4)
     case static_cast<hipDataType>(HIP_R_4F_E2M1):
         hipblaslt_init_device<hipblaslt_f4x2>(
-            abc, init, is_nan, static_cast<hipblaslt_f4x2*>(A), M, N, lda, stride, batch_count, norm_dist_one_special_type);
+            abc, init, is_nan, static_cast<hipblaslt_f4x2*>(A), M, N, lda, stride, batch_count, norm_dist_one_special_type, batch_index);
         break;
 #endif
     case HIP_C_32F:

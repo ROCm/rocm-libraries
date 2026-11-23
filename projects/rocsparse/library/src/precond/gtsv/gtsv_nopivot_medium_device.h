@@ -28,24 +28,32 @@
 
 namespace rocsparse
 {
+    // n_remaining is the number of right-hand sides left from the base of the block
+    // of NUM_RHS handled by this call, so the tail block is bounded by rhs <
+    // n_remaining.
+    //
+    // col is the first right-hand side of the block, and B is not offset to it. B is
+    // read at ldb * (col + rhs) so that the column offsets stay scalar multiplies; with
+    // the offset folded into the pointer the compiler forms them with vector
+    // multiply-adds, which on gfx942 serializes the loads of B in single precision.
     template <uint32_t BLOCKSIZE, uint32_t NUM_RHS, typename T>
-    ROCSPARSE_KERNEL(BLOCKSIZE)
-    void gtsv_no_pivot_pcr_tiled_forward_kernel(rocsparse_int m,
-                                                rocsparse_int n,
-                                                int64_t       ldb,
-                                                rocsparse_int num_spikes,
-                                                const T* __restrict__ dl,
-                                                const T* __restrict__ d,
-                                                const T* __restrict__ du,
-                                                const T* __restrict__ B,
-                                                T* __restrict__ dl_modified,
-                                                T* __restrict__ d_modified,
-                                                T* __restrict__ du_modified,
-                                                T* __restrict__ B_modified,
-                                                T* __restrict__ dl_spike,
-                                                T* __restrict__ d_spike,
-                                                T* __restrict__ du_spike,
-                                                T* __restrict__ B_spike)
+    ROCSPARSE_DEVICE_ILF void gtsv_no_pivot_pcr_tiled_forward_device(rocsparse_int m,
+                                                                     rocsparse_int n_remaining,
+                                                                     uint32_t      col,
+                                                                     int64_t       ldb,
+                                                                     rocsparse_int num_spikes,
+                                                                     const T* __restrict__ dl,
+                                                                     const T* __restrict__ d,
+                                                                     const T* __restrict__ du,
+                                                                     const T* __restrict__ B,
+                                                                     T* __restrict__ dl_modified,
+                                                                     T* __restrict__ d_modified,
+                                                                     T* __restrict__ du_modified,
+                                                                     T* __restrict__ B_modified,
+                                                                     T* __restrict__ dl_spike,
+                                                                     T* __restrict__ d_spike,
+                                                                     T* __restrict__ du_spike,
+                                                                     T* __restrict__ B_spike)
     {
         const rocsparse_int tid = hipThreadIdx_x;
         const rocsparse_int bid = hipBlockIdx_x;
@@ -58,9 +66,8 @@ namespace rocsparse
         T x[NUM_RHS];
         for(int rhs = 0; rhs < NUM_RHS; ++rhs)
         {
-            x[rhs] = (gid < m && (NUM_RHS * hipBlockIdx_y + rhs) < n)
-                         ? B[ldb * (NUM_RHS * hipBlockIdx_y + rhs) + gid]
-                         : static_cast<T>(0);
+            x[rhs]
+                = (gid < m && rhs < n_remaining) ? B[ldb * (col + rhs) + gid] : static_cast<T>(0);
         }
 
         __shared__ T a_shared[BLOCKSIZE];
@@ -136,9 +143,9 @@ namespace rocsparse
             du_modified[gid] = c_shared[tid];
             for(int rhs = 0; rhs < NUM_RHS; ++rhs)
             {
-                if((NUM_RHS * hipBlockIdx_y + rhs) < n)
+                if(rhs < n_remaining)
                 {
-                    B_modified[m * (NUM_RHS * hipBlockIdx_y + rhs) + gid] = x[rhs];
+                    B_modified[static_cast<int64_t>(m) * rhs + gid] = x[rhs];
                 }
             }
         }
@@ -215,13 +222,57 @@ namespace rocsparse
 
             for(int rhs = 0; rhs < NUM_RHS; rhs++)
             {
-                if((NUM_RHS * hipBlockIdx_y + rhs) < n)
+                if(rhs < n_remaining)
                 {
-                    B_spike[num_spikes * (NUM_RHS * hipBlockIdx_y + rhs) + row]
-                        = x_shared[tid + rhs * BLOCKSIZE];
+                    B_spike[num_spikes * rhs + row] = x_shared[tid + rhs * BLOCKSIZE];
                 }
             }
         }
+    }
+
+    // The host launches over chunks of right-hand sides that fit in grid.y, with the
+    // pointers already offset to the first column of the chunk and n the column count
+    // of the chunk, so the per-block offsets below stay in 32 bits.
+    template <uint32_t BLOCKSIZE, uint32_t NUM_RHS, typename T>
+    ROCSPARSE_KERNEL(BLOCKSIZE)
+    void gtsv_no_pivot_pcr_tiled_forward_kernel(rocsparse_int m,
+                                                rocsparse_int n,
+                                                int64_t       ldb,
+                                                rocsparse_int num_spikes,
+                                                const T* __restrict__ dl,
+                                                const T* __restrict__ d,
+                                                const T* __restrict__ du,
+                                                const T* __restrict__ B,
+                                                T* __restrict__ dl_modified,
+                                                T* __restrict__ d_modified,
+                                                T* __restrict__ du_modified,
+                                                T* __restrict__ B_modified,
+                                                T* __restrict__ dl_spike,
+                                                T* __restrict__ d_spike,
+                                                T* __restrict__ du_spike,
+                                                T* __restrict__ B_spike)
+    {
+        const uint32_t bidy = hipBlockIdx_y;
+        const uint32_t col  = NUM_RHS * bidy;
+
+        rocsparse::gtsv_no_pivot_pcr_tiled_forward_device<BLOCKSIZE, NUM_RHS>(
+            m,
+            n - col,
+            col,
+            ldb,
+            num_spikes,
+            dl,
+            d,
+            du,
+            B,
+            dl_modified,
+            d_modified,
+            du_modified,
+            load_pointer(B_modified, bidy, m * NUM_RHS),
+            dl_spike,
+            d_spike,
+            du_spike,
+            load_pointer(B_spike, bidy, num_spikes * NUM_RHS));
     }
 
     template <uint32_t BLOCKSIZE, uint32_t NUM_RHS, typename T>
@@ -326,18 +377,21 @@ namespace rocsparse
         }
     }
 
+    // n_remaining is the number of right-hand sides left from the base of the block
+    // of NUM_RHS handled by this call, so the tail block is bounded by rhs <
+    // n_remaining.
     template <uint32_t BLOCKSIZE, uint32_t NUM_RHS, typename T>
-    ROCSPARSE_KERNEL(BLOCKSIZE)
-    void gtsv_no_pivot_pcr_tiled_backward_kernel(rocsparse_int m,
-                                                 rocsparse_int n,
-                                                 int64_t       ldb,
-                                                 int           num_spikes,
-                                                 const T* __restrict__ dl_modified,
-                                                 const T* __restrict__ d_modified,
-                                                 const T* __restrict__ du_modified,
-                                                 const T* __restrict__ B_modified,
-                                                 const T* __restrict__ B_spike,
-                                                 T* __restrict__ B)
+    ROCSPARSE_DEVICE_ILF void
+        gtsv_no_pivot_pcr_tiled_backward_device(rocsparse_int m,
+                                                rocsparse_int n_remaining,
+                                                int64_t       ldb,
+                                                int           num_spikes,
+                                                const T* __restrict__ dl_modified,
+                                                const T* __restrict__ d_modified,
+                                                const T* __restrict__ du_modified,
+                                                const T* __restrict__ B_modified,
+                                                const T* __restrict__ B_spike,
+                                                T* __restrict__ B)
     {
         const rocsparse_int tid = hipThreadIdx_x;
         const rocsparse_int gid = hipBlockIdx_x * BLOCKSIZE + tid;
@@ -356,22 +410,59 @@ namespace rocsparse
 
         for(int rhs = 0; rhs < NUM_RHS; rhs++)
         {
-            if((NUM_RHS * hipBlockIdx_y + rhs) < n)
+            if(rhs < n_remaining)
             {
-                const T d_mod = B_modified[m * (NUM_RHS * hipBlockIdx_y + rhs) + gid];
+                const T d_mod = B_modified[static_cast<int64_t>(m) * rhs + gid];
+                T       x_final;
 
-                // These are the solved x_interface values that affect this tile
-                const T x_interface_left
-                    = B_spike[num_spikes * (NUM_RHS * hipBlockIdx_y + rhs) + row_left];
-                const T x_interface_right
-                    = B_spike[num_spikes * (NUM_RHS * hipBlockIdx_y + rhs) + row_right];
+                // A diagonal row has no coupling to either interface, so the forward
+                // phase already solved it. The reduced spike system then has zero
+                // diagonal entries and its no-pivot solve can contain NaNs.
+                if(a_mod == static_cast<T>(0) && c_mod == static_cast<T>(0))
+                {
+                    x_final = d_mod / b_mod;
+                }
+                else
+                {
+                    const T x_interface_left  = B_spike[num_spikes * rhs + row_left];
+                    const T x_interface_right = B_spike[num_spikes * rhs + row_right];
 
-                const T x_final
-                    = (d_mod - (a_mod * x_interface_left) - (c_mod * x_interface_right)) / b_mod;
+                    x_final = (d_mod - (a_mod * x_interface_left) - (c_mod * x_interface_right))
+                              / b_mod;
+                }
 
                 // Store result to global memory
-                B[ldb * (NUM_RHS * hipBlockIdx_y + rhs) + gid] = x_final;
+                B[ldb * rhs + gid] = x_final;
             }
         }
+    }
+
+    // Launched over the same chunks as the forward kernel.
+    template <uint32_t BLOCKSIZE, uint32_t NUM_RHS, typename T>
+    ROCSPARSE_KERNEL(BLOCKSIZE)
+    void gtsv_no_pivot_pcr_tiled_backward_kernel(rocsparse_int m,
+                                                 rocsparse_int n,
+                                                 int64_t       ldb,
+                                                 int           num_spikes,
+                                                 const T* __restrict__ dl_modified,
+                                                 const T* __restrict__ d_modified,
+                                                 const T* __restrict__ du_modified,
+                                                 const T* __restrict__ B_modified,
+                                                 const T* __restrict__ B_spike,
+                                                 T* __restrict__ B)
+    {
+        const uint32_t bidy = hipBlockIdx_y;
+
+        rocsparse::gtsv_no_pivot_pcr_tiled_backward_device<BLOCKSIZE, NUM_RHS>(
+            m,
+            n - NUM_RHS * bidy,
+            ldb,
+            num_spikes,
+            dl_modified,
+            d_modified,
+            du_modified,
+            load_pointer(B_modified, bidy, m * NUM_RHS),
+            load_pointer(B_spike, bidy, num_spikes * NUM_RHS),
+            load_pointer(B, bidy, ldb * NUM_RHS));
     }
 }

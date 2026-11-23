@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -25,6 +25,7 @@
 #include "rocsparse_common.h"
 #include "rocsparse_common.hpp"
 #include "rocsparse_control.hpp"
+#include "rocsparse_grid.hpp"
 #include "rocsparse_utility.hpp"
 
 #include "rocsparse_csrgeam_symbolic.hpp"
@@ -120,7 +121,8 @@ namespace rocsparse
         {
             RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                 (rocsparse::csrgeam_fill_symbolic_multipass_kernel<CSRGEAM_DIM, 32>),
-                dim3((m - 1) / (CSRGEAM_DIM / 32) + 1),
+                dim3(rocsparse::get_grid_size_x(
+                    handle, (static_cast<int64_t>(m) - 1) / (CSRGEAM_DIM / 32) + 1, CSRGEAM_DIM)),
                 dim3(CSRGEAM_DIM),
                 0,
                 stream,
@@ -140,7 +142,8 @@ namespace rocsparse
         {
             RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                 (rocsparse::csrgeam_fill_symbolic_multipass_kernel<CSRGEAM_DIM, 64>),
-                dim3((m - 1) / (CSRGEAM_DIM / 64) + 1),
+                dim3(rocsparse::get_grid_size_x(
+                    handle, (static_cast<int64_t>(m) - 1) / (CSRGEAM_DIM / 64) + 1, CSRGEAM_DIM)),
                 dim3(CSRGEAM_DIM),
                 0,
                 stream,

@@ -3,16 +3,16 @@
 
 #pragma once
 
-// Benchmark logic for the fused GEMM + all-to-all epilogue. One rank per
-// process, started by an external launcher; identity and rendezvous come from
-// the environment variables torchrun sets.
+// Benchmark logic for the fused GEMM + all-to-all epilogue and prologue. One
+// rank per process, started by an external launcher; identity and rendezvous
+// come from the environment variables torchrun sets.
 
 #include "allclose.hpp"
-#include "benchmark_timing.hpp"
-#include "collective_rendezvous.hpp"
+#include "benchmark_hooks.hpp"
 #include "hipblaslt_arguments.hpp"
 #include "hipblaslt_init.hpp"
 #include "hipblaslt_ostream.hpp"
+#include "multi_gpu.hpp"
 #include "norm.hpp"
 
 #include <hip/hip_runtime.h>
@@ -20,22 +20,70 @@
 
 #include <SdmaQueue.hpp>
 
+#include <linux/mempolicy.h>
+#include <sys/syscall.h>
+#include <unistd.h>
+
+#include <cerrno>
 #include <cstdint>
+#include <cstring>
 #include <exception>
+#include <fstream>
 #include <memory>
+#include <string>
 #include <vector>
 
 namespace hipblaslt_bench
 {
-    constexpr int    kRendezvousTimeoutSec = 60;
-    constexpr size_t kWorkspaceSize        = 128ull * 1024 * 1024;
+    constexpr size_t kWorkspaceSize = 128ull * 1024 * 1024;
 
     constexpr uint32_t kCommChannels = 2;
 
+    constexpr uint32_t kRecvSlices = 2;
+
+    constexpr int kSdmaRotateDefault = -1;
+
+    // GemmA2A scatters D's leading features after the GEMM; A2AGemm gathers B
+    // before it.
+    enum class Collective
+    {
+        GemmA2A,
+        A2AGemm,
+        Unknown,
+    };
+
+    constexpr const char* kCollectiveGemmA2A = "gemm-a2a";
+    constexpr const char* kCollectiveA2AGemm = "a2a-gemm";
+
+    // An unset name selects GemmA2A.
+    inline Collective parse_collective(const char* name)
+    {
+        if(name == nullptr || name[0] == '\0' || std::strcmp(name, kCollectiveGemmA2A) == 0)
+            return Collective::GemmA2A;
+        if(std::strcmp(name, kCollectiveA2AGemm) == 0)
+            return Collective::A2AGemm;
+        return Collective::Unknown;
+    }
+
+    inline const char* collective_name(Collective c)
+    {
+        switch(c)
+        {
+        case Collective::GemmA2A:
+            return kCollectiveGemmA2A;
+        case Collective::A2AGemm:
+            return kCollectiveA2AGemm;
+        case Collective::Unknown:
+            break;
+        }
+        return "";
+    }
+
     struct RankResources
     {
+        Collective                         collective = Collective::GemmA2A;
         hipblasLtHandle_t                  handle    = nullptr;
-        hipblasLtFusedEpilogueDescriptor_t fused     = nullptr;
+        hipblasLtFusionDescriptor_t        fused      = nullptr;
         hipblasLtMatmulDesc_t              mm        = nullptr;
         hipblasLtMatrixLayout_t            lay[4]    = {};
         hipblasLtMatmulPreference_t        pref      = nullptr;
@@ -44,9 +92,19 @@ namespace hipblaslt_bench
         void*                              dB        = nullptr;
         void*                              dC        = nullptr;
         void*                              dD        = nullptr;
-        void*                              dRecv     = nullptr;
         void*                              workspace = nullptr;
-        void*                recvPtrs[HIPBLASLT_DEVICE_COMM_MAX_WORLD] = {};
+
+        void* dRecv[kRecvSlices]                                     = {};
+        void* recvPtrs[kRecvSlices][HIPBLASLT_DEVICE_COMM_MAX_WORLD] = {};
+
+        // A2AGemm only. peerB[rank] aliases dB; the rest are IPC maps.
+        void*                            dGather                                = nullptr;
+        void*                            peerB[HIPBLASLT_DEVICE_COMM_MAX_WORLD] = {};
+        hipblasLtMatmulDesc_t            plainMm                                = nullptr;
+        hipblasLtMatmulHeuristicResult_t plainHeur                              = {};
+        void*                            dRefB                                  = nullptr;
+        void*                            dRefD                                  = nullptr;
+
         hipblasLtSdmaQueue_t queues[HIPBLASLT_DEVICE_COMM_MAX_WORLD]   = {};
         std::vector<std::unique_ptr<TensileLite::Client::SdmaQueue>> ownedQueues;
         TcpRendezvous*                                               rendezvous = nullptr;
@@ -60,9 +118,13 @@ namespace hipblaslt_bench
             if(stream != nullptr)
                 static_cast<void>(hipStreamSynchronize(stream));
 
-            // recvPtrs[rank] aliases dRecv; the rest are IPC maps.
-            for(void* p : recvPtrs)
-                if(p != nullptr && p != dRecv)
+            // recvPtrs[s][rank] aliases dRecv[s]; the rest are IPC maps.
+            for(uint32_t s = 0; s < kRecvSlices; ++s)
+                for(void* p : recvPtrs[s])
+                    if(p != nullptr && p != dRecv[s])
+                        static_cast<void>(hipIpcCloseMemHandle(p));
+            for(void* p : peerB)
+                if(p != nullptr && p != dB)
                     static_cast<void>(hipIpcCloseMemHandle(p));
 
             for(hipblasLtMatrixLayout_t l : lay)
@@ -72,14 +134,20 @@ namespace hipblaslt_bench
                 static_cast<void>(hipblasLtMatmulPreferenceDestroy(pref));
             if(mm != nullptr)
                 static_cast<void>(hipblasLtMatmulDescDestroy(mm));
+            if(plainMm != nullptr)
+                static_cast<void>(hipblasLtMatmulDescDestroy(plainMm));
             if(fused != nullptr)
-                static_cast<void>(hipblasLtFusedEpilogueDestroy(fused));
+                static_cast<void>(hipblasLtFusionDestroy(fused));
 
             static_cast<void>(hipFree(dA));
             static_cast<void>(hipFree(dB));
             static_cast<void>(hipFree(dC));
             static_cast<void>(hipFree(dD));
-            static_cast<void>(hipFree(dRecv));
+            for(void* p : dRecv)
+                static_cast<void>(hipFree(p));
+            static_cast<void>(hipFree(dGather));
+            static_cast<void>(hipFree(dRefB));
+            static_cast<void>(hipFree(dRefD));
             static_cast<void>(hipFree(workspace));
 
             ownedQueues.clear();
@@ -113,12 +181,148 @@ namespace hipblaslt_bench
         }                                                                         \
     } while(0)
 
+    // Sets the calling thread's memory policy to MPOL_PREFERRED on `device`'s NUMA
+    // node, if it has one; threads created earlier, such as the HIP runtime's, keep
+    // theirs. Warns if the node cannot be read or the kernel refuses.
+    inline bool prefer_device_numa_node(int device)
+    {
+        char busId[64] = {};
+        CHECK_HIP_RC(hipDeviceGetPCIBusId(busId, sizeof(busId), device));
+        std::ifstream numaNode(std::string("/sys/bus/pci/devices/") + busId + "/numa_node");
+        int           node = -1;
+        if(!(numaNode >> node))
+        {
+            hipblaslt_cerr << "warning: cannot read " << busId
+                           << "'s NUMA node; memory is not bound\n";
+            return true;
+        }
+        if(node < 0)
+            return true;
+
+        std::vector<unsigned long> mask(node / 64 + 1);
+        mask[node / 64] = 1ul << (node % 64);
+        if(syscall(SYS_set_mempolicy, MPOL_PREFERRED, mask.data(), mask.size() * 64) != 0)
+        {
+            const int err = errno;
+            hipblaslt_cerr << "warning: set_mempolicy(MPOL_PREFERRED, node " << node
+                           << ") -> errno " << err
+                           << "; memory is not bound (in a container, add --cap-add SYS_NICE)\n";
+        }
+        return true;
+    }
+
     inline int64_t shard_of(const Arguments& arg)
     {
         return arg.a2a_extent / arg.a2a_world;
     }
 
-    inline bool fill_operands(const LauncherEnv& env, const Arguments& arg, RankResources& res)
+    // Integers in [-2, 2], a pure function of (rank, launch).
+    inline std::vector<hipblasLtBfloat16>
+        a2a_gemm_values(size_t count, uint32_t rank, int64_t launchIndex)
+    {
+        std::vector<hipblasLtBfloat16> values(count);
+        uint64_t state = (uint64_t(rank) + 1) * 0x9E3779B97F4A7C15ull + uint64_t(launchIndex);
+        for(hipblasLtBfloat16& v : values)
+        {
+            state = state * 6364136223846793005ull + 1442695040888963407ull;
+            v     = hipblasLtBfloat16(float(int((state >> 33) % 5) - 2));
+        }
+        return values;
+    }
+
+    // Rank `rank`'s B for launch `launchIndex`, laid out [destination, token, k].
+    inline std::vector<hipblasLtBfloat16>
+        a2a_gemm_b(const Arguments& arg, uint32_t rank, int64_t launchIndex)
+    {
+        return a2a_gemm_values(size_t(arg.K[0]) * arg.N[0], rank, launchIndex);
+    }
+
+    // Writes this rank's B for the launch, and C when beta is nonzero, and poisons
+    // the gather buffer.
+    inline bool a2a_gemm_write_input(const LauncherEnv& env,
+                                     const Arguments&   arg,
+                                     RankResources&     res,
+                                     int64_t            launchIndex)
+    {
+        const std::vector<hipblasLtBfloat16> b = a2a_gemm_b(arg, env.rank, launchIndex);
+        CHECK_HIP_RC(hipMemcpy(res.dB, b.data(), b.size() * sizeof(b[0]), hipMemcpyHostToDevice));
+        CHECK_HIP_RC(hipMemset(res.dGather, 0xC7, b.size() * sizeof(b[0])));
+        if(arg.beta != 0.0)
+        {
+            const std::vector<hipblasLtBfloat16> c
+                = a2a_gemm_values(size_t(arg.M[0]) * arg.N[0], env.rank, -2 - launchIndex);
+            CHECK_HIP_RC(
+                hipMemcpy(res.dC, c.data(), c.size() * sizeof(c[0]), hipMemcpyHostToDevice));
+        }
+        return true;
+    }
+
+    // D must equal a plain GEMM of A with the gathered B, and the same C: K block s
+    // of the gathered B is block `rank` of rank s's B.
+    inline bool a2a_gemm_check(const LauncherEnv& env,
+                               const Arguments&   arg,
+                               RankResources&     res,
+                               int64_t            launchIndex)
+    {
+        const size_t world = arg.a2a_world, n = arg.N[0], k = arg.K[0], kLocal = k / world;
+        std::vector<hipblasLtBfloat16> gathered(k * n);
+        for(uint32_t s = 0; s < world; ++s)
+        {
+            const std::vector<hipblasLtBfloat16> peer = a2a_gemm_b(arg, s, launchIndex);
+            for(size_t t = 0; t < n; ++t)
+                std::memcpy(gathered.data() + t * k + s * kLocal,
+                            peer.data() + (size_t(env.rank) * n + t) * kLocal,
+                            kLocal * sizeof(hipblasLtBfloat16));
+        }
+        CHECK_HIP_RC(hipMemcpy(res.dRefB,
+                               gathered.data(),
+                               gathered.size() * sizeof(hipblasLtBfloat16),
+                               hipMemcpyHostToDevice));
+
+        const float alpha = 1.0f, beta = float(arg.beta);
+        CHECK_LT_RC(hipblasLtMatmul(res.handle,
+                                    res.plainMm,
+                                    &alpha,
+                                    res.dA,
+                                    res.lay[0],
+                                    res.dRefB,
+                                    res.lay[1],
+                                    &beta,
+                                    beta != 0.0f ? res.dC : res.dRefD,
+                                    res.lay[2],
+                                    res.dRefD,
+                                    res.lay[3],
+                                    &res.plainHeur.algo,
+                                    res.workspace,
+                                    kWorkspaceSize,
+                                    res.stream));
+        CHECK_HIP_RC(hipStreamSynchronize(res.stream));
+
+        const size_t                   count = size_t(arg.M[0]) * n;
+        std::vector<hipblasLtBfloat16> fused(count), reference(count);
+        CHECK_HIP_RC(
+            hipMemcpy(fused.data(), res.dD, count * sizeof(fused[0]), hipMemcpyDeviceToHost));
+        CHECK_HIP_RC(hipMemcpy(
+            reference.data(), res.dRefD, count * sizeof(reference[0]), hipMemcpyDeviceToHost));
+
+        size_t mismatches = 0, nonzero = 0;
+        for(size_t i = 0; i < count; ++i)
+        {
+            mismatches += std::memcmp(&fused[i], &reference[i], sizeof(fused[i])) != 0;
+            nonzero += float(reference[i]) != 0.0f;
+        }
+        if(nonzero == 0)
+        {
+            hipblaslt_cerr << "error: rank " << env.rank << " reference D is all zero\n";
+            return false;
+        }
+        if(mismatches != 0)
+            hipblaslt_cerr << "error: rank " << env.rank << " launch " << launchIndex << ": "
+                           << mismatches << " of " << count << " D elements differ\n";
+        return mismatches == 0;
+    }
+
+    inline bool fill_hpl(const LauncherEnv& env, const Arguments& arg, RankResources& res)
     {
         std::vector<hipblasLtBfloat16> hostA(size_t(arg.K[0]) * arg.M[0]);
         std::vector<hipblasLtBfloat16> hostB(size_t(arg.K[0]) * arg.N[0]);
@@ -139,12 +343,27 @@ namespace hipblaslt_bench
         return true;
     }
 
+    inline bool fill_operands(const LauncherEnv& env, const Arguments& arg, RankResources& res)
+    {
+        if(res.collective == Collective::A2AGemm && (arg.norm_check || arg.allclose_check))
+        {
+            const std::vector<hipblasLtBfloat16> a
+                = a2a_gemm_values(size_t(arg.K[0]) * arg.M[0], env.rank, -1);
+            CHECK_HIP_RC(
+                hipMemcpy(res.dA, a.data(), a.size() * sizeof(a[0]), hipMemcpyHostToDevice));
+            return a2a_gemm_write_input(env, arg, res, 0);
+        }
+        return fill_hpl(env, arg, res);
+    }
+
     // Rank s hands peer p the feature shard [p*shard, (p+1)*shard) of all its
-    // tokens, landing at recv_p[(s*tokens + t)*shard + fw]. Both buffers are
-    // resized to one such block, laid out [token, feature].
+    // tokens, landing at recv_p[(s*tokens + t)*shard + fw] in slice
+    // launchIndex % kRecvSlices. Both buffers are resized to one such block,
+    // laid out [token, feature].
     inline bool check_recv(const LauncherEnv&              env,
                            const Arguments&                arg,
                            RankResources&                  res,
+                           int64_t                         launchIndex,
                            std::vector<hipblasLtBfloat16>& gold,
                            std::vector<hipblasLtBfloat16>& landed)
     {
@@ -174,18 +393,19 @@ namespace hipblaslt_bench
                                      size_t(shard) * sizeof(hipblasLtBfloat16),
                                      size_t(arg.N[0]),
                                      hipMemcpyDeviceToHost));
-            CHECK_HIP_RC(hipMemcpy(landed.data(),
-                                   static_cast<const hipblasLtBfloat16*>(res.recvPtrs[p])
-                                       + size_t(env.rank) * block,
-                                   block * sizeof(hipblasLtBfloat16),
-                                   hipMemcpyDeviceToHost));
+            CHECK_HIP_RC(hipMemcpy(
+                landed.data(),
+                static_cast<const hipblasLtBfloat16*>(res.recvPtrs[launchIndex % kRecvSlices][p])
+                    + size_t(env.rank) * block,
+                block * sizeof(hipblasLtBfloat16),
+                hipMemcpyDeviceToHost));
 
             for(size_t i = 0; i < block; ++i)
                 if(float(gold[i]) != 0.0f)
                     ++nonzero;
 
-            // allclose_check_general takes 1 as the sentinel for "no tolerance
-            // passed yet" and reports back the loosest pair it needed.
+            // allclose_check_general reports the tightest pair this block passes,
+            // or 1 when none does.
             double atol = 1.0, rtol = 1.0;
             allClose = allclose_check_general(
                            'F', shard, arg.N[0], shard, gold.data(), landed.data(), atol, rtol)
@@ -208,60 +428,11 @@ namespace hipblaslt_bench
         return normError == 0.0 && allClose;
     }
 
-    inline bool peers_reachable(const LauncherEnv& env, const Arguments& arg)
-    {
-        if(env.world == 1)
-            return true;
-
-        if(env.local_rank != int(env.rank))
-        {
-            hipblaslt_cerr << "error: LOCAL_RANK " << env.local_rank << " must equal RANK "
-                           << env.rank << " when every rank shares a host\n";
-            return false;
-        }
-
-        int visible = 0;
-        if(hipGetDeviceCount(&visible) != hipSuccess || visible < int(env.world))
-        {
-            hipblaslt_cerr << "error: " << visible << " device(s) visible, need " << env.world
-                           << "\n";
-            return false;
-        }
-
-        if(hipSetDevice(env.local_rank) != hipSuccess)
-        {
-            hipblaslt_cerr << "error: hipSetDevice(" << env.local_rank << ") failed\n";
-            return false;
-        }
-
-        for(uint32_t j = 0; j < arg.a2a_world; ++j)
-        {
-            if(int(j) == env.local_rank)
-                continue;
-
-            int canAccess = 0;
-            if(hipDeviceCanAccessPeer(&canAccess, env.local_rank, int(j)) != hipSuccess
-               || canAccess == 0)
-            {
-                hipblaslt_cerr << "error: device " << env.local_rank << " cannot peer with " << j
-                               << "\n";
-                return false;
-            }
-
-            const hipError_t e = hipDeviceEnablePeerAccess(int(j), 0);
-            if(e != hipSuccess && e != hipErrorPeerAccessAlreadyEnabled)
-            {
-                hipblaslt_cerr << "error: hipDeviceEnablePeerAccess(" << env.local_rank << " -> "
-                               << j << ") -> " << hipGetErrorString(e) << "\n";
-                return false;
-            }
-        }
-        return true;
-    }
-
     // Reports only the local outcome.
-    inline bool
-        setup_rank_resources(const LauncherEnv& env, const Arguments& arg, RankResources& res)
+    inline bool setup_rank_resources(const LauncherEnv& env,
+                                     const Arguments&   arg,
+                                     RankResources&     res,
+                                     int                sdmaRotate)
     {
         CHECK_HIP_RC(hipSetDevice(env.local_rank));
         CHECK_HIP_RC(hipStreamCreate(&res.stream));
@@ -276,18 +447,37 @@ namespace hipblaslt_bench
         CHECK_HIP_RC(hipMalloc(&res.dB, bytesB));
         CHECK_HIP_RC(hipMalloc(&res.dC, bytesD));
         CHECK_HIP_RC(hipMalloc(&res.dD, bytesD));
-        CHECK_HIP_RC(hipMalloc(&res.dRecv, bytesRecv));
         CHECK_HIP_RC(hipMalloc(&res.workspace, kWorkspaceSize));
-        CHECK_HIP_RC(hipMemset(res.dRecv, 0, bytesRecv));
+        if(res.collective == Collective::A2AGemm)
+        {
+            CHECK_HIP_RC(hipMalloc(&res.dGather, bytesB));
+            if(arg.norm_check || arg.allclose_check)
+            {
+                CHECK_HIP_RC(hipMalloc(&res.dRefB, bytesB));
+                CHECK_HIP_RC(hipMalloc(&res.dRefD, bytesD));
+            }
+        }
+        else
+        {
+            for(void*& p : res.dRecv)
+            {
+                CHECK_HIP_RC(hipMalloc(&p, bytesRecv));
+                CHECK_HIP_RC(hipMemset(p, 0, bytesRecv));
+            }
+        }
 
         try
         {
             const uint32_t srcNode = TensileLite::Client::sdmaNodeIdForDevice(env.local_rank);
+            size_t         remote  = 0;
             for(uint32_t j = 0; j < arg.a2a_world; ++j)
             {
-                const uint32_t dstNode = TensileLite::Client::sdmaNodeIdForDevice(j);
+                const uint32_t dstNode
+                    = j == env.rank ? srcNode : TensileLite::Client::sdmaNodeIdForDevice(j);
                 res.ownedQueues.push_back(std::make_unique<TensileLite::Client::SdmaQueue>(
-                    srcNode, TensileLite::Client::sdmaSelectEngine(srcNode, dstNode)));
+                    srcNode,
+                    TensileLite::Client::sdmaQueueEngine(
+                        srcNode, dstNode, srcNode == dstNode ? 0 : remote++, sdmaRotate)));
                 const HsaQueueResource& q = res.ownedQueues.back()->queueResource();
                 res.queues[j] = {res.ownedQueues.back()->ringBase(),
                                  (void*)q.Queue_read_ptr_aql,
@@ -305,81 +495,13 @@ namespace hipblaslt_bench
         return true;
     }
 
-    inline bool exchange_recv_pointers(const LauncherEnv& env,
-                                       const Arguments&   arg,
-                                       TcpRendezvous&     rendezvous,
-                                       RankResources&     res)
+    inline bool setup_rank(const LauncherEnv& env,
+                           const Arguments&   arg,
+                           RankResources&     res,
+                           int                sdmaRotate = kSdmaRotateDefault)
     {
-        if(env.world == 1)
-        {
-            res.recvPtrs[0] = res.dRecv;
-            return true;
-        }
-
-        struct HandleContribution
-        {
-            uint8_t           ok;
-            hipIpcMemHandle_t handle;
-        };
-        HandleContribution mine{};
-        mine.ok = hipIpcGetMemHandle(&mine.handle, res.dRecv) == hipSuccess ? 1 : 0;
-
-        std::vector<HandleContribution> all(env.world);
-        if(rendezvous.allgather(&mine, all.data(), sizeof(mine)) != HIPBLAS_STATUS_SUCCESS)
-        {
-            hipblaslt_cerr << "error: recv-pointer handle allgather failed\n";
-            return false;
-        }
-        bool gotAllHandles = true;
-        for(uint32_t j = 0; j < env.world; ++j)
-            gotAllHandles = gotAllHandles && all[j].ok != 0;
-        if(!gotAllHandles)
-        {
-            hipblaslt_cerr << "error: hipIpcGetMemHandle failed on at least one rank\n";
-            return false;
-        }
-
-        uint8_t openedAll = 1;
-        for(uint32_t j = 0; j < arg.a2a_world; ++j)
-        {
-            if(j == env.rank)
-                res.recvPtrs[j] = res.dRecv;
-            else if(hipIpcOpenMemHandle(
-                        &res.recvPtrs[j], all[j].handle, hipIpcMemLazyEnablePeerAccess)
-                    != hipSuccess)
-                openedAll = 0;
-        }
-
-        std::vector<uint8_t> allOpened(env.world);
-        if(rendezvous.allgather(&openedAll, allOpened.data(), sizeof(openedAll))
-           != HIPBLAS_STATUS_SUCCESS)
-        {
-            hipblaslt_cerr << "error: recv-pointer open-result allgather failed\n";
-            return false;
-        }
-        bool groupOpened = true;
-        for(uint32_t j = 0; j < env.world; ++j)
-            groupOpened = groupOpened && allOpened[j] != 0;
-        if(!groupOpened)
-            hipblaslt_cerr << "error: hipIpcOpenMemHandle failed on at least one rank\n";
-        return groupOpened;
-    }
-
-    inline bool setup_rank(const LauncherEnv& env, const Arguments& arg, RankResources& res)
-    {
-        const uint8_t ready = setup_rank_resources(env, arg, res) ? 1 : 0;
-
-        std::vector<uint8_t> allReady(env.world);
-        if(res.rendezvous->allgather(&ready, allReady.data(), sizeof(ready))
-           != HIPBLAS_STATUS_SUCCESS)
-        {
-            hipblaslt_cerr << "error: rank-readiness allgather failed\n";
-            return false;
-        }
-        bool groupReady = true;
-        for(uint32_t j = 0; j < env.world; ++j)
-            groupReady = groupReady && allReady[j] != 0;
-        if(!groupReady)
+        const bool ready = setup_rank_resources(env, arg, res, sdmaRotate);
+        if(!make_agreement(*res.rendezvous, env.world).agree(ready, std::logical_and<>{}))
         {
             hipblaslt_cerr << "error: rank-local setup failed on at least one rank\n";
             return false;
@@ -392,33 +514,49 @@ namespace hipblaslt_bench
                                            rendezvous_allgather_trampoline,
                                            res.rendezvous));
 
-        if(!exchange_recv_pointers(env, arg, *res.rendezvous, res))
-            return false;
+        const bool a2aGemm = res.collective == Collective::A2AGemm;
+        if(a2aGemm)
+        {
+            if(!exchange_ipc_pointers(env, *res.rendezvous, res.dB, res.peerB))
+                return false;
+        }
+        else
+        {
+            for(uint32_t s = 0; s < kRecvSlices; ++s)
+                if(!exchange_ipc_pointers(env, *res.rendezvous, res.dRecv[s], res.recvPtrs[s]))
+                    return false;
+        }
 
-        CHECK_LT_RC(hipblasLtFusedEpilogueCreate(&res.fused));
-        CHECK_LT_RC(hipblasLtFusedEpilogueAdd(res.fused,
-                                              HIPBLASLT_FUSEABLE_EPILOGUE_A2A_PREFIX));
-        CHECK_LT_RC(
-            hipblasLtFusedEpilogueSetAttribute(res.fused,
-                                               HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_SDMA_QUEUES,
-                                               res.queues,
-                                               arg.a2a_world * sizeof(res.queues[0])));
-        CHECK_LT_RC(
-            hipblasLtFusedEpilogueSetAttribute(res.fused,
-                                               HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_RECV_PTRS,
-                                               res.recvPtrs,
-                                               arg.a2a_world * sizeof(res.recvPtrs[0])));
-        CHECK_LT_RC(hipblasLtFusedEpilogueSetAttribute(
-            res.fused,
-            HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_EXTENT,
-            &arg.a2a_extent,
-            sizeof(arg.a2a_extent)));
+        CHECK_LT_RC(hipblasLtFusionCreate(&res.fused));
+        if(a2aGemm)
+        {
+            CHECK_LT_RC(
+                hipblasLtFusionAddPrologue(res.fused, HIPBLASLT_FUSEABLE_PROLOGUE_A2A_PREFIX));
+            CHECK_LT_RC(hipblasLtFusionSetAttribute(res.fused,
+                                                    HIPBLASLT_FUSION_A2A_PEER_B_PTRS,
+                                                    res.peerB,
+                                                    arg.a2a_world * sizeof(res.peerB[0])));
+            CHECK_LT_RC(hipblasLtFusionSetAttribute(
+                res.fused, HIPBLASLT_FUSION_A2A_GATHER_BUFFER, &res.dGather, sizeof(res.dGather)));
+        }
+        else
+        {
+            CHECK_LT_RC(
+                hipblasLtFusionAddEpilogue(res.fused, HIPBLASLT_FUSEABLE_EPILOGUE_A2A_PREFIX));
+            CHECK_LT_RC(hipblasLtFusionSetAttribute(res.fused,
+                                                    HIPBLASLT_FUSION_A2A_RECV_PTRS,
+                                                    res.recvPtrs[0],
+                                                    arg.a2a_world * sizeof(res.recvPtrs[0][0])));
+        }
+        CHECK_LT_RC(hipblasLtFusionSetAttribute(res.fused,
+                                                HIPBLASLT_FUSION_A2A_SDMA_QUEUES,
+                                                res.queues,
+                                                arg.a2a_world * sizeof(res.queues[0])));
+        CHECK_LT_RC(hipblasLtFusionSetAttribute(
+            res.fused, HIPBLASLT_FUSION_A2A_EXTENT, &arg.a2a_extent, sizeof(arg.a2a_extent)));
         const hipblasLtA2ACompletionMode_t mode = HIPBLASLT_A2A_COMPLETION_IN_KERNEL_FULL;
-        CHECK_LT_RC(hipblasLtFusedEpilogueSetAttribute(
-            res.fused,
-            HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_COMPLETION_MODE,
-            &mode,
-            sizeof(mode)));
+        CHECK_LT_RC(hipblasLtFusionSetAttribute(
+            res.fused, HIPBLASLT_FUSION_A2A_COMPLETION_MODE, &mode, sizeof(mode)));
 
         CHECK_LT_RC(hipblasLtMatrixLayoutCreate(
             &res.lay[0], HIP_R_16BF, arg.K[0], arg.M[0], arg.K[0]));
@@ -435,8 +573,11 @@ namespace hipblaslt_bench
             res.mm, HIPBLASLT_MATMUL_DESC_TRANSA, &opT, sizeof(opT)));
         CHECK_LT_RC(hipblasLtMatmulDescSetAttribute(
             res.mm, HIPBLASLT_MATMUL_DESC_TRANSB, &opN, sizeof(opN)));
-        CHECK_LT_RC(hipblasLtMatmulDescSetAttribute(
-            res.mm, HIPBLASLT_MATMUL_DESC_FUSED_EPILOGUE, &res.fused, sizeof(res.fused)));
+        CHECK_LT_RC(hipblasLtMatmulDescSetAttribute(res.mm,
+                                                    a2aGemm ? HIPBLASLT_MATMUL_DESC_FUSED_PROLOGUE
+                                                            : HIPBLASLT_MATMUL_DESC_FUSED_EPILOGUE,
+                                                    &res.fused,
+                                                    sizeof(res.fused)));
 
         CHECK_LT_RC(hipblasLtMatmulPreferenceCreate(&res.pref));
         CHECK_LT_RC(hipblasLtMatmulPreferenceSetAttribute(
@@ -444,6 +585,29 @@ namespace hipblaslt_bench
             HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES,
             &kWorkspaceSize,
             sizeof(kWorkspaceSize)));
+
+        if(a2aGemm && (arg.norm_check || arg.allclose_check))
+        {
+            CHECK_LT_RC(hipblasLtMatmulDescCreate(&res.plainMm, HIPBLAS_COMPUTE_32F, HIP_R_32F));
+            CHECK_LT_RC(hipblasLtMatmulDescSetAttribute(
+                res.plainMm, HIPBLASLT_MATMUL_DESC_TRANSA, &opT, sizeof(opT)));
+            int plainCount = 0;
+            CHECK_LT_RC(hipblasLtMatmulAlgoGetHeuristic(res.handle,
+                                                        res.plainMm,
+                                                        res.lay[0],
+                                                        res.lay[1],
+                                                        res.lay[2],
+                                                        res.lay[3],
+                                                        res.pref,
+                                                        1,
+                                                        &res.plainHeur,
+                                                        &plainCount));
+            if(plainCount == 0)
+            {
+                hipblaslt_cerr << "error: no plain GEMM solution for the reference\n";
+                return false;
+            }
+        }
 
         return fill_operands(env, arg, res);
     }
@@ -468,14 +632,15 @@ namespace hipblaslt_bench
     inline auto make_launch(RankResources&                          res,
                             const hipblasLtMatmulHeuristicResult_t& heur,
                             uint32_t&                               launchCount,
-                            hipblasStatus_t&                        lastStatus)
+                            hipblasStatus_t&                        lastStatus,
+                            float                                   beta)
     {
-        return [&res, &heur, &launchCount, &lastStatus](int64_t) {
-            const float    alpha = 1.0f, beta = 0.0f;
+        return [&res, &heur, &launchCount, &lastStatus, beta](int64_t) {
+            const float    alpha   = 1.0f;
             const uint32_t channel = launchCount++ % kCommChannels;
 
-            const hipblasStatus_t attrStatus = hipblasLtFusedEpilogueSetAttribute(
-                res.fused, HIPBLASLT_FUSED_EPILOGUE_COMM_CHANNEL, &channel, sizeof(channel));
+            const hipblasStatus_t attrStatus = hipblasLtFusionSetAttribute(
+                res.fused, HIPBLASLT_FUSION_COMM_CHANNEL, &channel, sizeof(channel));
             if(attrStatus != HIPBLAS_STATUS_SUCCESS)
             {
                 lastStatus = attrStatus;
@@ -501,15 +666,5 @@ namespace hipblaslt_bench
             if(status != HIPBLAS_STATUS_SUCCESS)
                 lastStatus = status;
         };
-    }
-
-    inline CollectiveAgreement make_agreement(TcpRendezvous& rendezvous, uint32_t world)
-    {
-        CollectiveAgreement agreement;
-        agreement.world     = world;
-        agreement.allgather = [&rendezvous](const void* send, void* recv, size_t bytes) {
-            return rendezvous.allgather(send, recv, bytes) == HIPBLAS_STATUS_SUCCESS;
-        };
-        return agreement;
     }
 } // namespace hipblaslt_bench

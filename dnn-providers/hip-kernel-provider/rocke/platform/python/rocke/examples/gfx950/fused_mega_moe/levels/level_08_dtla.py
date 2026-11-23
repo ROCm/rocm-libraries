@@ -1121,7 +1121,7 @@ def build_moe_fused_mega_gemm_fp8(
     atom = spec.gate_up_atom()
     # L6: the unscaled fp8 16x16x128 hero atom reuses the (catalog-registered)
     # ``mfma.scale.f32.16x16x128.f8f6f4`` intrinsic with the in-instruction E8M0
-    # scales pinned to the neutral value (verified numerically standalone), so it
+    # scales at literal 0 (unscaled instruction; verified numerically standalone), so it
     # is gfx950-valid even though the plain unscaled 16x16x128 fp8 SHAPE is not a
     # separate JSON catalog row. Only run the per-arch catalog guard for atoms
     # that ARE catalog shapes (the legacy 16x16x32 path); skip it for the hero

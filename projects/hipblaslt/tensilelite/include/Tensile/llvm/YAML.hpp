@@ -134,6 +134,14 @@ namespace TensileLite
         {
             using IO = llvm::yaml::IO;
 
+            static bool hasKey(IO& io, const char* key)
+            {
+                for(auto const& present : io.keys())
+                    if(present == key)
+                        return true;
+                return false;
+            }
+
             template <typename T>
             static void mapRequired(IO& io, const char* key, T& obj)
             {
@@ -156,6 +164,15 @@ namespace TensileLite
             static void mapOptional(IO& io, const char* key, T& obj, Context& ctx)
             {
                 io.mapOptional(key, obj, ctx);
+            }
+
+            /// Omits the key on output when the value is the one an absent key
+            /// would produce. llvm::yaml::IO already behaves this way; this only
+            /// routes the shared traits' call to it.
+            template <typename T>
+            static void mapOptional(IO& io, const char* key, T& obj, T const& defaultValue)
+            {
+                io.mapOptional(key, obj, defaultValue);
             }
 
             // YAML has no binary scalar, and the indexed library format is only
@@ -333,4 +350,3 @@ namespace llvm
             "fdsa");
     } // namespace yaml
 } // namespace llvm
-

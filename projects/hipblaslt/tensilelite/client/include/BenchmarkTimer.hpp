@@ -26,10 +26,12 @@
 
 #pragma once
 
+#include "DeviceContext.hpp"
 #include "RunListener.hpp"
 
 #include <chrono>
 #include <cstddef>
+#include <vector>
 
 #include "ProgramOptions.hpp"
 
@@ -40,6 +42,8 @@ namespace TensileLite
 {
     namespace Client
     {
+
+        class ClientProblemFactory;
 
         class BenchmarkTimer : public RunListener
         {
@@ -66,11 +70,10 @@ namespace TensileLite
             virtual void   setNumWarmupRuns(size_t count) override;
             virtual void   preWarmup() override;
             virtual void   postWarmup(TimingEvents const& startEvents,
-                                      TimingEvents const& stopEvents,
-                                      hipStream_t const&  stream) override;
-            virtual void   validateWarmups(std::shared_ptr<ProblemInputs> inputs,
-                                           TimingEvents const&            startEvents,
-                                           TimingEvents const&            stopEvents) override;
+                                      TimingEvents const& stopEvents) override;
+            virtual void   validateWarmups(std::vector<size_t> const& slots,
+                                           TimingEvents const&        startEvents,
+                                           TimingEvents const&        stopEvents) override;
 
             virtual size_t numSyncs() override;
             virtual void   setNumSyncs(size_t count) override;
@@ -79,13 +82,12 @@ namespace TensileLite
 
             virtual size_t numEnqueuesPerSync() override;
             virtual void   setNumEnqueuesPerSync(size_t count) override;
-            virtual void   preEnqueues(hipStream_t const& stream) override;
+            virtual void   preEnqueues() override;
             virtual void   postEnqueues(TimingEvents const& startEvents,
-                                        TimingEvents const& stopEvents,
-                                        hipStream_t const&  stream) override;
-            virtual void   validateEnqueues(std::shared_ptr<ProblemInputs> inputs,
-                                            TimingEvents const&            startEvents,
-                                            TimingEvents const&            stopEvents) override;
+                                        TimingEvents const& stopEvents) override;
+            virtual void   validateEnqueues(std::vector<size_t> const& slots,
+                                            TimingEvents const&        startEvents,
+                                            TimingEvents const&        stopEvents) override;
 
             virtual void finalizeReport() override;
             virtual int  error() const override;
@@ -94,7 +96,19 @@ namespace TensileLite
                 m_flushTimeUs = timeUs;
             }
 
+            // --split-devices: m_problem is the full problem; each device runs a slice.
+            void setSplit(ClientProblemFactory const* split)
+            {
+                m_split = split;
+            }
+
+        protected:
+            virtual double takeBatchTimeMs();
+
         private:
+            ContractionProblem* deviceProblem() const;
+            ClientProblemFactory const* m_split = nullptr;
+
             const int    m_numWarmups;
             const int    m_numBenchmarks;
             const int    m_numEnqueuesPerSync;
@@ -120,8 +134,8 @@ namespace TensileLite
             clock::time_point m_startTime;
             clock::time_point m_endTime;
 
-            hipEvent_t start = nullptr;
-            hipEvent_t stop  = nullptr;
+            std::vector<hipEvent_t>                     m_start;
+            std::vector<hipEvent_t>                     m_stop;
 
             using double_millis = std::chrono::duration<double, std::milli>;
             using double_micros = std::chrono::duration<double, std::micro>;

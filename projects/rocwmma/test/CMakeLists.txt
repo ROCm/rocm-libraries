@@ -2,7 +2,7 @@
  #
  # MIT License
  #
- # Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights reserved.
+ # Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
  #
  # Permission is hereby granted, free of charge, to any person obtaining a copy
  # of this software and associated documentation files (the "Software"), to deal
@@ -115,6 +115,8 @@ set(ROCWMMA_TEST_INCLUDE_DIRS ${CMAKE_CURRENT_SOURCE_DIR})
 set(ROCWMMA_COMMON_TEST_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/hip_device.cpp
                                 ${CMAKE_CURRENT_SOURCE_DIR}/rocwmma_gtest_main.cpp)
 
+include(cmake/ShareTestSources.cmake)
+
 set(INSTALL_TEST_FILE "${CMAKE_CURRENT_BINARY_DIR}/install_CTestTestfile.cmake")
 file(WRITE "${INSTALL_TEST_FILE}"
 [=[
@@ -138,9 +140,8 @@ file(WRITE "${INSTALL_REGRESSION_TEST_FILE}"
 )
 
 
-# Regular gtests that don't require any special
-# designation for validation or benchmarking
-function(add_rocwmma_test TEST_TARGET TEST_SOURCE)
+# Build and install binaries for unit tests, validation tests, and benchmarks.
+function(add_rocwmma_test_target TEST_TARGET TEST_SOURCE)
 
   list(APPEND TEST_SOURCE ${ARGN})
   add_executable(${TEST_TARGET} ${TEST_SOURCE})
@@ -181,13 +182,20 @@ function(add_rocwmma_test TEST_TARGET TEST_SOURCE)
     endforeach()
   endif()
 
-  add_test(NAME ${TEST_TARGET} COMMAND ${TEST_TARGET})
-  set_property(TEST ${TEST_TARGET} PROPERTY SKIP_REGULAR_EXPRESSION "no ROCm-capable device" "unsupported host device")
-
   rocm_install_targets(
     TARGETS ${TEST_TARGET}
     COMPONENT tests
   )
+endfunction()
+
+# Regular gtests that don't require any special
+# designation for validation or benchmarking
+function(add_rocwmma_test TEST_TARGET TEST_SOURCE)
+  list(APPEND TEST_SOURCE ${ARGN})
+  add_rocwmma_test_target(${TEST_TARGET} ${TEST_SOURCE})
+
+  add_test(NAME ${TEST_TARGET} COMMAND ${TEST_TARGET})
+  set_property(TEST ${TEST_TARGET} PROPERTY SKIP_REGULAR_EXPRESSION "no ROCm-capable device" "unsupported host device")
 
   get_target_property(EXE_NAME ${TEST_TARGET} RUNTIME_OUTPUT_NAME)
   if(EXE_NAME STREQUAL "EXE_NAME-NOTFOUND")
@@ -217,10 +225,10 @@ function(add_rocwmma_validation_test TEST_TARGET TEST_SOURCE)
   target_compile_definitions(${TEST_TARGET} PRIVATE ROCWMMA_VALIDATION_TESTS)
 endfunction()
 
-# Targets that implement specifically benchmarking configuration
+# Benchmarks are built and installed, but are not registered with CTest.
 function(add_rocwmma_benchmark_test TEST_TARGET TEST_SOURCE)
   list(APPEND TEST_SOURCE ${ARGN})
-  add_rocwmma_test(${TEST_TARGET} ${TEST_SOURCE})
+  add_rocwmma_test_target(${TEST_TARGET} ${TEST_SOURCE})
   target_compile_definitions(${TEST_TARGET} PRIVATE ROCWMMA_BENCHMARK_TESTS)
 endfunction()
 

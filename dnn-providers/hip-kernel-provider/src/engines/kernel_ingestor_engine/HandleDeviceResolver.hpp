@@ -6,9 +6,7 @@
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
 #include <algorithm>
-#include <cstdint>
 #include <iterator>
-#include <limits>
 #include <mutex>
 #include <string>
 #include <unordered_map>
@@ -80,7 +78,7 @@ public:
                             + ": " + hipGetErrorString(status));
         }
 
-        // Check each fact separately so the error names the bad field and its value.
+        // Check each required fact separately so the error names the bad field and its value.
         const auto rejectFact = [deviceId](const std::string& fact) {
             failDeviceQuery("hipGetDeviceProperties returned an invalid device fact for device "
                             + std::to_string(deviceId) + ": " + fact);
@@ -107,19 +105,22 @@ public:
             rejectFact("multiProcessorCount is " + std::to_string(properties.multiProcessorCount)
                        + ", expected a positive count");
         }
-        if(properties.sharedMemPerBlock
-           > static_cast<uint64_t>(std::numeric_limits<int64_t>::max()))
+        if(properties.sharedMemPerBlock == 0)
         {
-            rejectFact("sharedMemPerBlock is " + std::to_string(properties.sharedMemPerBlock)
-                       + " bytes, above the " + std::to_string(std::numeric_limits<int64_t>::max())
-                       + " byte limit");
+            rejectFact("sharedMemPerBlock is 0, expected a positive byte count");
         }
 
-        hipdnn_plugin_sdk::ingestor::DeviceProperties resolved{
-            std::string(std::begin(properties.gcnArchName), archEnd),
-            properties.warpSize,
-            properties.multiProcessorCount,
-            static_cast<int64_t>(properties.sharedMemPerBlock)};
+        hipdnn_plugin_sdk::ingestor::DeviceProperties resolved;
+        resolved.gcnArchName = std::string(std::begin(properties.gcnArchName), archEnd);
+        resolved.warpSize = properties.warpSize;
+        resolved.multiProcessorCount = properties.multiProcessorCount;
+        // Memory facts tell apart boards that share an arch and CU count (e.g. MI300X,
+        // MI325X, MI308X), which a UHD trained on a merged corpus needs. They are not
+        // required: a zero only means "unknown" to the UHD.
+        resolved.totalGlobalMem = properties.totalGlobalMem;
+        resolved.memoryBusWidth = properties.memoryBusWidth;
+        resolved.memoryClockRate = properties.memoryClockRate;
+        resolved.sharedMemPerBlock = properties.sharedMemPerBlock;
 
         return _properties.emplace(deviceId, std::move(resolved)).first->second;
     }

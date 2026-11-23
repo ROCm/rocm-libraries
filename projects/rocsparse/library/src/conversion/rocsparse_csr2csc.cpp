@@ -26,6 +26,7 @@
 #include "rocsparse_common.hpp"
 #include "rocsparse_control.hpp"
 #include "rocsparse_csr2csc.hpp"
+#include "rocsparse_grid.hpp"
 #include "rocsparse_utility.hpp"
 
 #include "csr2csc_device.h"
@@ -148,8 +149,16 @@ rocsparse_status rocsparse::csr2csc_core(rocsparse_handle     handle,
             handle, csr_row_ptr_begin, csr_row_ptr_end, nnz, m, tmp_work1, idx_base));
 
 // Permute row indices and values
+//
+// AISPARSE-685. nnz is the template index type I, instantiated as int64_t for the
+// 64-bit entry points, and this grid was already sized correctly from it. The
+// kernel, however, formed its global id in a rocsparse_int and had no grid-stride
+// loop, so it simply could not address past INT_MAX non-zeros. The id is the index
+// type now; the grid is clamped here so the stride loop behind it has something to
+// stride over.
 #define CSR2CSC_DIM 512
-        dim3 csr2csc_blocks((nnz - 1) / CSR2CSC_DIM + 1);
+        dim3 csr2csc_blocks(
+            rocsparse::get_grid_size_x(handle, (nnz - 1) / CSR2CSC_DIM + 1, CSR2CSC_DIM));
         dim3 csr2csc_threads(CSR2CSC_DIM);
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::csr2csc_permute_kernel<CSR2CSC_DIM>),
                                            csr2csc_blocks,

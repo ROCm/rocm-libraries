@@ -40,12 +40,12 @@ rocblas_status rocsolver_getf2_batched_impl(rocblas_handle handle,
                                             const rocblas_stride strideP,
                                             I* info,
                                             const bool pivot,
-                                            const I batch_count)
+                                            const I batch_count_arg)
 try
 {
     const char* name = (pivot ? "getf2_batched" : "getf2_npvt_batched");
     ROCSOLVER_ENTER_TOP(name, "-m", m, "-n", n, "--lda", lda, "--strideP", strideP, "--batch_count",
-                        batch_count);
+                        batch_count_arg);
 
     using S = decltype(std::real(T{}));
 
@@ -54,7 +54,7 @@ try
 
     // argument checking
     rocblas_status st
-        = rocsolver_getf2_getrf_argCheck(handle, m, n, lda, A, ipiv, info, pivot, batch_count);
+        = rocsolver_getf2_getrf_argCheck(handle, m, n, lda, A, ipiv, info, pivot, batch_count_arg);
     if(st != rocblas_status_continue)
         return st;
 
@@ -66,36 +66,42 @@ try
     I inca = 1;
     rocblas_stride strideA = 0;
 
+    // split batch
+    I const nsweep = ceildiv(batch_count_arg, MAX_BATCH_COUNT);
+    I const batch_count_split = (nsweep == 0) ? 0 : ceildiv(batch_count_arg, nsweep);
+
     // memory workspace sizes:
-    // size for constants in rocblas calls
-    size_t size_scalars;
-    // sizes to store pivots in intermediate computations
-    size_t size_pivotval;
-    size_t size_pivotidx;
-    rocsolver_getf2_getMemorySize<true, T>(m, n, pivot, batch_count, &size_scalars, &size_pivotval,
-                                           &size_pivotidx);
+    rocsolver_workspace_helper work_helper;
+    rocsolver_getf2_getMemorySize<true, T>(handle, m, n, A, shiftA, inca, lda, strideA, ipiv, shiftP,
+                                           strideP, info, batch_count_split, &work_helper, pivot);
 
     if(rocblas_is_device_memory_size_query(handle))
-        return rocblas_set_optimal_device_memory_size(handle, size_scalars, size_pivotval,
-                                                      size_pivotidx);
+        return rocblas_set_optimal_device_memory_size(handle, work_helper.get_total_size<T>());
 
     // memory workspace allocation
-    void *scalars, *pivotidx, *pivotval;
-    rocblas_device_malloc mem(handle, size_scalars, size_pivotval, size_pivotidx);
+    rocblas_device_malloc mem(handle, work_helper.get_total_size<T>());
 
     if(!mem)
         return rocblas_status_memory_error;
 
-    scalars = mem[0];
-    pivotval = mem[1];
-    pivotidx = mem[2];
-    if(size_scalars > 0)
-        init_scalars(handle, (T*)scalars);
+    ROCBLAS_CHECK(work_helper.assign_buffer<T>(handle, mem[0]));
 
-    // execution
-    return rocsolver_getf2_template<true, T>(handle, m, n, A, shiftA, inca, lda, strideA, ipiv,
-                                             shiftP, strideP, info, batch_count, (T*)scalars,
-                                             (T*)pivotval, (I*)pivotidx, pivot);
+    for(I isweep = 0; isweep < nsweep; isweep++)
+    {
+        I const bid = isweep * batch_count_split;
+        I const batch_count = std::min(batch_count_arg - bid, batch_count_split);
+
+        auto const A_sweep = (A == nullptr) ? nullptr : A + bid;
+        auto const ipiv_sweep = (ipiv == nullptr) ? nullptr : ipiv + bid * strideP;
+        auto const info_sweep = (info == nullptr) ? nullptr : info + bid;
+
+        // execution
+        ROCBLAS_CHECK(rocsolver_getf2_template<true, T>(
+            handle, m, n, A_sweep, shiftA, inca, lda, strideA, ipiv_sweep, shiftP, strideP,
+            info_sweep, batch_count, &work_helper, pivot));
+    }
+
+    return rocblas_status_success;
 }
 catch(...)
 {

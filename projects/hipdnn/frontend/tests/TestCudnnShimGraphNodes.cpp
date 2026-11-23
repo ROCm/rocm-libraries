@@ -26,13 +26,13 @@ namespace
 namespace fe = hipdnn_frontend::compatibility::cudnn_frontend;
 
 // A fail-stub node records GRAPH_NOT_SUPPORTED on the composition graph; it
-// surfaces at the next validate() with a message pointing at the issue tracker.
+// surfaces at the next validate().
 void expectGraphNotSupported(fe::graph::Graph& graph)
 {
     auto error = graph.validate();
     EXPECT_TRUE(error.is_bad());
     EXPECT_EQ(error.get_code(), fe::error_code_t::GRAPH_NOT_SUPPORTED);
-    EXPECT_NE(error.get_message().find("github.com/ROCm/rocm-libraries/issues"), std::string::npos);
+    EXPECT_NE(error.get_message().find("has no hipDNN equivalent yet"), std::string::npos);
 }
 
 // --- (a) Supported / Tier-1 nodes: a well-shaped graph validates good --------

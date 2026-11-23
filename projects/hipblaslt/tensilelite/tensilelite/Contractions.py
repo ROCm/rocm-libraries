@@ -1,0 +1,1337 @@
+################################################################################
+#
+# Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+#
+################################################################################
+
+from .ExecutionPolicy import isPersistent, isStreamK, isPersistentDataParallel, normalize_execution_policy
+
+from typing import Dict
+
+from .Activation import ActivationType
+from . import Hardware
+from . import Properties
+from .Common import state, state_key_ordering, IsaInfo
+from .Common.Architectures import gfxToIsa
+from .Common.DataType import DataType
+from .Common.GlobalParameters import internalParameters
+from .Common.ValidParameters import (
+    ASSERT_DIM_MULTIPLE_PARAMETERS,
+    checkAssertAnySizeLessThanIsValid,
+    checkAssertMultipleMapIsValid,
+    checkAssertSizeMapIsValid,
+)
+from .SolutionStructs import Solution as OriginalSolution
+from .SolutionStructs.Problem import getBiasDataTypeListDefault, getGateResidualDataTypeListDefault
+from .Toolchain.Component import Assembler
+from math import ceil
+
+MIN_K_FOR_GSU = 32
+
+def _operandIsPerInputMxType(dtype):
+    """True for FP8, BF8 (including fnuz), FP6, BF6, and FP4."""
+    return dtype.isAnyFloat8() or dtype.isAnyBFloat8() or dtype.is6bitFloat() or dtype.isFloat4()
+
+def _computeInputsFromOperandTypes(d, srcType, computeA, computeB):
+    """Use DataTypeA/B as compute inputs for mixed MX operands.
+
+    rocRoller custom kernels set DataTypeA and DataTypeB and leave MacDataType
+    unset. Tensile then copies DataType onto both MAC inputs, so TypesEqual
+    advertises operand A's type as computeInputTypeB. hipBLASLt queries each
+    compute input as that operand for FP8/BF8/FP6/BF6/FP4.
+
+    Follow DataTypeA and DataTypeB when both are those types, they differ, and
+    both compute inputs are still the DataType default. An explicit MAC type
+    that already differs from DataType is kept. A same-type problem is unchanged.
+    A memory/compute conversion (for example DataType half with DataTypeA FP8)
+    is unchanged because its other operand is not an MX type.
+    """
+    if "DataTypeA" not in d or "DataTypeB" not in d:
+        return computeA, computeB
+    operandA = DataType(d["DataTypeA"])
+    operandB = DataType(d["DataTypeB"])
+    if operandA == operandB:
+        return computeA, computeB
+    if not (_operandIsPerInputMxType(operandA) and _operandIsPerInputMxType(operandB)):
+        return computeA, computeB
+    if computeA != srcType or computeB != srcType:
+        return computeA, computeB
+    if srcType != operandA and srcType != operandB:
+        return computeA, computeB
+    return operandA, operandB
+
+@state_key_ordering
+class FreeIndex:
+    StateKeys = ['isA', 'i', 'c', 'd']
+
+    def __init__(self, isA, i=None, c=None, d=None):
+        self.isA = isA
+        self.i = i # index into A or B (depending on isA)
+        self.c = c
+        self.d = d
+
+@state_key_ordering
+class BatchIndex:
+    StateKeys = ['a', 'b', 'c', 'd']
+    def __init__(self, a=None, b=None, c=None, d=None):
+        self.a = a
+        self.b = b
+        self.c = c
+        self.d = d
+
+@state_key_ordering
+class BoundIndex:
+    StateKeys = ['a', 'b', 'aMirror', 'bMirror']
+    def __init__(self, a=None, b=None, aMirror=False, bMirror=False):
+        self.a = a
+        self.b = b
+        self.aMirror = aMirror
+        self.bMirror = bMirror
+
+
+class ProblemType:
+    StateKeys = ['operationIdentifier', 'transA', 'transB', 'computeInputTypeA', 'computeInputTypeB', 'aType', 'bType', 'cType', 'dType', 'eType', 'computeType',
+                 'useBeta', 'useBias', 'biasSrcWhiteList', 'useE', 'useGateResidual', 'gateResidualDataTypeWhiteList', 'useScaleAB', 'useScaleCD', 'useScaleAlphaVec', 'biasDataTypeWhiteList',
+                 'highPrecisionAccumulate', 'useInitialStridesAB', 'useInitialStridesCD', 'stridedBatched', 'groupedGemm',
+                 'useGradient', 'activationType', 'activationArgLength', 'activationComputeDataType', 'activationNoGuard',
+                 'sparse', 'f32XdlMathOp', 'supportDeviceUserArguments', 'outputAmaxD', 'outputPeerD', 'swizzleTensorA', 'swizzleTensorB', 'metadataLayout',
+                 'mxBlockA', 'mxBlockB', 'mxBlockFreeA', 'mxBlockFreeB', 'mxTypeA', 'mxTypeB', 'mxScaleFormat', 'fusedA2A', 'stochasticRounding']
+    @classmethod
+    def FromOriginalState(cls, d):
+        indices = [None]*d['TotalIndices']
+        freeIndices  = []
+        batchIndices = []
+        boundIndices = []
+
+        for i in d['IndicesSummation']:
+            bi = BoundIndex(aMirror=('MirrorDimsA' in d and i in d['MirrorDimsA']),
+                            bMirror=('MirrorDimsB' in d and i in d['MirrorDimsB']))
+            indices[i] = bi
+            boundIndices.append(bi)
+
+        for i in range(0,d["NumIndicesC"]):
+            if i in d['IndicesBatch']:
+                bi = BatchIndex(c=i, d=i)
+                indices[i] = bi
+                batchIndices.append(bi)
+            else:
+                assert i in d['IndicesFree']
+                if i in d['IndexAssignmentsA']:
+                    fi = FreeIndex(isA=True, i=d["IndexAssignmentsA"].index(i), c=i, d=i)
+                elif i in d['IndexAssignmentsB']:
+                    fi = FreeIndex(isA=False, i=d["IndexAssignmentsB"].index(i), c=i, d=i)
+                else:
+                    raise RuntimeError("free index %u not in ia or ib"%i)
+                indices[i] = fi
+                freeIndices.append(fi)
+
+        for ia, ic in enumerate(d['IndexAssignmentsA']):
+            indices[ic].a = ia
+
+        for ib, ic in enumerate(d['IndexAssignmentsB']):
+            indices[ic].b = ib
+
+        for idx in indices:
+            assert idx is not None
+            idxState = state(idx)
+            for (key, value) in list(idxState.items()):
+                assert value is not None
+
+        rv = cls()
+        rv.indices = indices
+        rv.freeIndices = freeIndices
+        rv.batchIndices = batchIndices
+        rv.boundIndices = boundIndices
+        rv.aDims = len(d['IndexAssignmentsA'])
+        rv.bDims = len(d['IndexAssignmentsB'])
+        rv.cDims = d['NumIndicesC']
+        rv.dDims = rv.cDims
+
+        rv.aConjugate = d['ComplexConjugateA']
+        rv.bConjugate = d['ComplexConjugateB']
+
+        srcType = DataType(d['DataType'])
+        dstType = DataType(d['DestDataType']) if 'DestDataType' in d else srcType
+        computeType = DataType(d['ComputeDataType']) if 'ComputeDataType' in d else dstType
+
+        rv.transA = bool(d['TransposeA'])
+        rv.transB = bool(d['TransposeB'])
+
+        if 'MacDataTypeA' in d: #it will either be set as d['MacDataType'] or a specified input
+            rv.computeInputTypeA = DataType(d['MacDataTypeA'])
+        else:
+            rv.computeInputTypeA = srcType
+        if 'MacDataTypeB' in d:
+            rv.computeInputTypeB = DataType(d['MacDataTypeB'])
+        else:
+            rv.computeInputTypeB = srcType
+
+        if 'DataTypeA' in d: #it will either be set as d['DataType'] or a specified input
+            rv.aType = DataType(d['DataTypeA'])
+        else:
+            rv.aType = rv.computeInputTypeA
+        if 'DataTypeB' in d:
+            rv.bType = DataType(d['DataTypeB'])
+        else:
+            rv.bType = rv.computeInputTypeB
+
+        if rv.aType.isFloat8BFloat8() or rv.bType.isFloat8BFloat8():
+            rv.aType = DataType("F8")
+            rv.bType = DataType("B8")
+        elif rv.aType.isFloat8BFloat8_fnuz() or rv.bType.isFloat8BFloat8_fnuz():
+            rv.aType = DataType("F8N")
+            rv.bType = DataType("B8N")
+        elif rv.aType.isBFloat8Float8() or rv.bType.isBFloat8Float8():
+            rv.aType = DataType("B8")
+            rv.bType = DataType("F8")
+        elif rv.aType.isBFloat8Float8_fnuz() or rv.bType.isBFloat8Float8_fnuz():
+            rv.aType = DataType("B8N")
+            rv.bType = DataType("F8N")
+
+        rv.computeInputTypeA, rv.computeInputTypeB = _computeInputsFromOperandTypes(
+            d, srcType, rv.computeInputTypeA, rv.computeInputTypeB)
+
+        if 'DataTypeE' in d:
+            rv.eType = DataType(d['DataTypeE'])
+        else:
+            rv.eType = dstType
+
+        if 'DataTypeAmaxD' in d:
+            rv.amaxDType = DataType(d['DataTypeAmaxD'])
+        else:
+            rv.amaxDType = computeType
+
+        rv.cType = dstType
+        rv.dType = dstType
+        # we already checked the src/dst/compute types are supported and well-assigned in SolutionStruct
+        rv.alphaType = computeType
+        rv.betaType  = computeType
+        rv.computeType = computeType
+
+        rv.highPrecisionAccumulate = False
+        if 'HighPrecisionAccumulate' in d:
+            rv.highPrecisionAccumulate = d['HighPrecisionAccumulate']
+
+        rv.useInitialStridesAB = False
+        if 'UseInitialStridesAB' in d:
+            rv.useInitialStridesAB = d['UseInitialStridesAB']
+        rv.useInitialStridesCD = False
+        if 'UseInitialStridesCD' in d:
+            rv.useInitialStridesCD = d['UseInitialStridesCD']
+
+        rv.stridedBatched = True
+        if 'StridedBatched' in d:
+          rv.stridedBatched = d['StridedBatched']
+
+        rv.groupedGemm = False
+        if 'GroupedGemm' in d:
+          rv.groupedGemm = d['GroupedGemm']
+
+        rv.setConstStrideA = []
+        if 'SetConstStrideA' in d:
+            rv.setConstStrideA = d['SetConstStrideA']
+        rv.setConstStrideB = []
+        if 'SetConstStrideB' in d:
+            rv.setConstStrideB = d['SetConstStrideB']
+
+        rv.mirrorDimsA = d['MirrorDimsA'] if 'MirrorDimsA' in d else []
+        rv.mirrorDimsB = d['MirrorDimsB'] if 'MirrorDimsB' in d else []
+
+        rv.useBeta = True
+        if 'UseBeta' in d:
+            rv.useBeta = d['UseBeta']
+
+        rv.useBias               = 0
+        rv.biasDataTypeWhiteList = []
+        rv.biasSrcWhiteList = []
+        rv.setConstStrideBias = []
+
+        if 'UseBias' in d:
+            rv.useBias = d['UseBias']
+            if 'BiasDataTypeList' in d:
+                d["BiasDataTypeList"].sort()  # Sort to make sure names are unique
+                rv.biasDataTypeWhiteList = d['BiasDataTypeList']
+            else:
+                rv.biasDataTypeWhiteList = getBiasDataTypeListDefault(d)
+            if 'BiasSrc' in d:
+                m = ["A", "B", "C", "D"]
+                rv.biasSrcWhiteList = [m.index(d['BiasSrc'])]
+            if 'SetConstStrideBias' in d:
+                rv.setConstStrideBias = d['SetConstStrideBias']
+
+        rv.useE = False
+        if 'UseE' in d:
+            rv.useE = d['UseE']
+
+        rv.useGateResidual = False
+        rv.gateResidualDataTypeWhiteList = []
+        rv.setConstStrideGate = []
+        if 'UseGateResidual' in d:
+            rv.useGateResidual = bool(d['UseGateResidual'])
+            if 'GateResidualDataTypeList' in d:
+                d["GateResidualDataTypeList"].sort()  # Sort to make sure names are unique
+                rv.gateResidualDataTypeWhiteList = d['GateResidualDataTypeList']
+            else:
+                rv.gateResidualDataTypeWhiteList = getGateResidualDataTypeListDefault(d)
+            if 'SetConstStrideGate' in d:
+                rv.setConstStrideGate = d['SetConstStrideGate']
+
+        rv.useGradient = False
+        if 'Gradient' in d:
+            rv.useGradient = d["Gradient"]
+
+        rv.outputAmaxD = False
+        if 'OutputAmaxD' in d:
+            rv.outputAmaxD = d['OutputAmaxD']
+
+        rv.outputPeerD = False
+        if 'OutputPeerD' in d:
+            rv.outputPeerD = d['OutputPeerD']
+
+        rv.useScaleAB = ""
+        if 'UseScaleAB' in d:
+            rv.useScaleAB = d['UseScaleAB']
+        # W4A16 group scaling is independent of scalar/vector operand scales.
+        # Required for int4 A: one entry = fixed group; several = runtime group.
+        groups = d.get('ScaleBlockSizesA', [])
+        if not isinstance(groups, (list, tuple)):
+            raise ValueError("ScaleBlockSizesA must be a list of supported groups")
+        if any(type(g) is not int or g not in (32, 64, 128) for g in groups):
+            raise ValueError("ScaleBlockSizesA entries must be 32, 64 or 128")
+        if rv.aType.isInt4() and not groups:
+            raise ValueError("ScaleBlockSizesA must be non-empty for int4 A (W4A16)")
+        if groups and not rv.aType.isInt4():
+            raise ValueError("ScaleBlockSizesA requires int4 A")
+        rv.scaleBlockSizesA = tuple(sorted(set(groups)))
+        rv.scaleZeroPointA = bool(d.get('ScaleZeroPointA', False))
+        rv.int4EncodingA = d.get('Int4EncodingA', 'Signed')
+        rv.useScaleCD = False
+        if 'UseScaleCD' in d:
+            rv.useScaleCD = d['UseScaleCD']
+
+        rv.useScaleAlphaVec = 0
+        if 'UseScaleAlphaVec' in d:
+            rv.useScaleAlphaVec = d['UseScaleAlphaVec']
+
+        rv.batched = d['Batched']
+
+        rv.activationType      = ActivationType('none')
+        rv.activationArgLength = 0
+        if 'ActivationType' in d:
+            rv.activationType = ActivationType(d['ActivationType'])
+            rv.activationArgLength = len(rv.activationType.getAdditionalArgStringList())
+        rv.activationComputeDataType = DataType(d['ActivationComputeDataType'])
+        rv.activationNoGuard = False
+        if 'ActivationNoGuard' in d:
+            rv.activationNoGuard = d["ActivationNoGuard"]
+        rv.sparse = 0
+        if 'Sparse' in d:
+            rv.sparse = int(d['Sparse'])
+
+        rv.f32XdlMathOp = DataType(d['F32XdlMathOp']) if 'F32XdlMathOp' in d else DataType(0)
+
+        rv.supportDeviceUserArguments = False
+        if 'SupportUserArgs' in d:
+            rv.supportDeviceUserArguments = d['SupportUserArgs']
+
+        rv.swizzleTensorA = d.get('SwizzleTensorA', False)
+        rv.swizzleTensorB = d.get('SwizzleTensorB', False)
+
+        rv.fusedA2A = d.get('FusedA2A', 'Disabled')
+
+        rv.mxBlockA = d.get('MXBlockA', 0)
+        rv.mxBlockB = d.get('MXBlockB', 0)
+        # Free-dimension extent of the scaling tile; 1 == the original 1xMXBlock.
+        rv.mxBlockFreeA = d.get('MXBlockFreeA', 1)
+        rv.mxBlockFreeB = d.get('MXBlockFreeB', 1)
+        rv.mxTypeA = DataType(d['DataTypeMXSA']) if 'DataTypeMXSA' in d else DataType(0)
+        rv.mxTypeB = DataType(d['DataTypeMXSB']) if 'DataTypeMXSB' in d else DataType(0)
+        # mxScaleFormat is a Solution-level parameter and is populated by
+        # Solution.FromOriginalState, which has access to the parent dict.
+
+        rv.metadataLayout = 0
+        if 'MetadataLayout' in d:
+            rv.metadataLayout = d['MetadataLayout']
+
+        rv.stochasticRounding = bool(d.get('StochasticRounding', False))
+        return rv
+
+    def __init__(self, freeIndices=None, batchIndices=None, boundIndices=None, aDims=None, bDims=None, cDims=None, dDims=None):
+        self.freeIndices  = freeIndices
+        self.batchIndices = batchIndices
+        self.boundIndices = boundIndices
+        self.aDims = aDims
+        self.bDims = bDims
+        self.cDims = cDims
+        self.dDims = dDims
+
+    @property
+    def indexNames(self):
+        aNames = ['_'] * self.aDims
+        bNames = ['_'] * self.bDims
+        cNames = ['_'] * self.cDims
+
+        allIndexNames = 'ijklmnopqrstuvwxyz'
+        index = 0
+
+        dNames = list([allIndexNames[index+i] for i in range(self.cDims)])
+        index += len(dNames)
+
+        sumNames = list([allIndexNames[index+i] for i in range(len(self.boundIndices))])
+        index += len(sumNames)
+
+        for free in self.freeIndices:
+            if free.isA:
+                aNames[free.i ] = dNames[free.d]
+            else:
+                bNames[free.i ] = dNames[free.d]
+            cNames[free.c] = dNames[free.d]
+
+        for batch in self.batchIndices:
+            name = dNames[batch.d]
+            aNames[batch.a] = name
+            bNames[batch.b] = name
+            cNames[batch.c] = name
+
+        for i, bound in enumerate(self.boundIndices):
+            name = sumNames[i]
+            aNames[bound.a] = name.upper() if bound.aMirror else name
+            bNames[bound.b] = name.upper() if bound.bMirror else name
+
+        aNames = ''.join(aNames)
+        bNames = ''.join(bNames)
+        cNames = ''.join(cNames)
+        dNames = ''.join(dNames)
+        sumNames = ''.join(sumNames)
+
+        return (aNames, bNames, cNames, dNames, sumNames)
+
+    @property
+    def operationIdentifier(self):
+        (aNames, bNames, cNames, dNames, sumNames) = self.indexNames
+
+        aOp = 'C' if self.aConjugate else ''
+        bOp = 'C' if self.bConjugate else ''
+
+        return '_'.join(['Contraction', sumNames,
+                         'A' + aNames + aOp,
+                         'B' + bNames + bOp,
+                         'C' + cNames,
+                         'D' + dNames])
+
+    def placeholderStr(self, includeBatch=False, includeOperation=False, includeType=False):
+        ret = ""
+        if includeOperation:
+            ret = self.operationIdentifier
+            if not self.useBeta:
+                ret += "_Beta0"
+            ret += "_StridedBatched{}".format(int(self.stridedBatched))
+        if includeType:
+            ret += "_Type_{}{}".format(DataType(self.aType).toChar(), DataType(self.cType).toChar())
+            if self.highPrecisionAccumulate:
+                ret += "_HPA"
+
+        return ret
+
+    def predicates(self, includeBatch=False, includeOperation=False, includeType=False):
+        predicates = []
+
+        #if includeBatch and not self.batched:
+        #    predicates.append(ProblemPredicate("BatchSizeEqual", index=0, value=1))
+
+        if includeOperation:
+            predicates.append(ProblemPredicate("OperationIdentifierEqual", value=self.operationIdentifier))
+            if not self.useBeta:
+                predicates.append(ProblemPredicate("BetaZero"))
+            predicates.append(ProblemPredicate("BiasDataTypeWhiteList", value=self.biasDataTypeWhiteList))
+            predicates.append(ProblemPredicate("GateResidualDataTypeWhiteList", value=self.gateResidualDataTypeWhiteList))
+            predicates.append(ProblemPredicate("BiasSrcWhiteList", value=self.biasSrcWhiteList))
+            predicates.append(ProblemPredicate("AmaxDCheck", value=self.outputAmaxD))
+            predicates.append(ProblemPredicate("PeerDCheck", value=self.outputPeerD))
+            if self.activationType in ['all', 'hipblaslt_all']:
+                exportType = ActivationType.Export.GRADONLY if self.useGradient else ActivationType.Export.NORMAL
+                supportedBy = ActivationType.SupportedBy.ALL if self.activationType == 'all' else ActivationType.SupportedBy.HIPBLASLT
+                enumList = [actEnum.capitalize() for actEnum in ActivationType.getEnumStrList(self.activationComputeDataType, supportedBy, exportType=exportType)]
+                predicates.append(ProblemPredicate("ActivationEnumWhiteList", value=enumList))
+            # predicates.append(ProblemPredicate("UseScaleAlphaVec", value=self.useScaleAlphaVec))
+            # predicates.append(ProblemPredicate("GroupedGemm", value=self.groupedGemm))
+
+        if includeType:
+            predicates.append(ProblemPredicate("TypesEqual", value=(self.aType, self.bType, self.cType, self.dType, self.computeInputTypeA, self.computeInputTypeB)))
+            predicates.append(ProblemPredicate("HighPrecisionAccumulate", value=self.highPrecisionAccumulate))
+            predicates.append(ProblemPredicate("Activation", value=self.activationType))
+            predicates.append(ProblemPredicate("ActivationComputeType", value=self.activationComputeDataType))
+            predicates.append(ProblemPredicate("ActivationNoGuard", value=self.activationNoGuard))
+            predicates.append(ProblemPredicate("UseGradient", value=self.useGradient))
+            predicates.append(ProblemPredicate("UseBias", value=self.useBias))
+            predicates.append(ProblemPredicate("UseE", value=self.useE))
+            predicates.append(ProblemPredicate("UseGateResidual", value=self.useGateResidual))
+            predicates.append(ProblemPredicate("DataTypeE", value=self.eType))
+            predicates.append(ProblemPredicate("StridedBatched", value=self.stridedBatched))
+            predicates.append(ProblemPredicate("GroupedGemm", value=self.groupedGemm))
+            predicates.append(ProblemPredicate("UseScaleAB", value=self.useScaleAB))
+            if self.scaleBlockSizesA:
+                if len(self.scaleBlockSizesA) > 1:
+                    predicates.append(ProblemPredicate("Or", value=[
+                        ProblemPredicate("ScaleBlockSizeA", value=g)
+                        for g in self.scaleBlockSizesA]))
+                else:
+                    predicates.append(ProblemPredicate("ScaleBlockSizeA", value=self.scaleBlockSizesA[0]))
+                predicates.append(ProblemPredicate("ScaleZeroPointA", value=self.scaleZeroPointA))
+                predicates.append(ProblemPredicate("Int4EncodingA", value=self.int4EncodingA))
+            predicates.append(ProblemPredicate("UseScaleCD", value=self.useScaleCD))
+            predicates.append(ProblemPredicate("UseScaleAlphaVec", value=self.useScaleAlphaVec))
+            predicates.append(ProblemPredicate("Sparse", value=self.sparse))
+            predicates.append(ProblemPredicate("F32XdlMathOp", value=self.f32XdlMathOp))
+            predicates.append(ProblemPredicate("SupportDeviceUserArguments", value=self.supportDeviceUserArguments))
+            predicates.append(ProblemPredicate("SwizzleTensorA", value=self.swizzleTensorA))
+            predicates.append(ProblemPredicate("SwizzleTensorB", value=self.swizzleTensorB))
+            predicates.append(ProblemPredicate("FusedA2A", value=self.fusedA2A))
+            if self.fusedA2A != 'Disabled' and self.batched:
+                predicates.append(ProblemPredicate("BatchSizeEqual", index=0, value=1))
+            predicates.append(ProblemPredicate("MXBlockA", value=self.mxBlockA))
+            if self.mxBlockA:
+                predicates.append(ProblemPredicate("DataTypeMXSA", value=self.mxTypeA))
+                predicates.append(ProblemPredicate("MXBlockFreeA", value=self.mxBlockFreeA))
+            predicates.append(ProblemPredicate("MXBlockB", value=self.mxBlockB))
+            if self.mxBlockB:
+                predicates.append(ProblemPredicate("DataTypeMXSB", value=self.mxTypeB))
+                predicates.append(ProblemPredicate("MXBlockFreeB", value=self.mxBlockFreeB))
+        return predicates
+
+# Dict-valued Assert* keys and the runtime predicate each one emits per index.
+ASSERT_DIM_MAP_PREDICATES = {
+    "AssertSizeEqual": "SizeEqual",
+    "AssertSizeGreaterThan": "SizeGreaterThan",
+    "AssertSizeLessThan": "SizeLessThan",
+    "AssertStrideAEqual": "StrideAEqual",
+    "AssertStrideBEqual": "StrideBEqual",
+    "AssertStrideAMultiple": "StrideAMultiple",
+    "AssertStrideBMultiple": "StrideBMultiple",
+    "AssertStrideCEqual": "StrideCEqual",
+    "AssertStrideDEqual": "StrideDEqual",
+}
+
+# Integer ids of the MXScaleFormat values, as the C++ ProblemType and the
+# MXScaleFormatEquals predicate read them. Append only.
+MX_SCALE_FORMAT_IDS = {
+    "NoSwizzle": 0,
+    "HostPreSwizzle": 1,
+    "InMemorySwizzle": 2,
+    "HostPreSwizzle128x4": 3,
+}
+
+def mxScaleFormatId(state):
+    return MX_SCALE_FORMAT_IDS.get(state.get("MXScaleFormat", "NoSwizzle"), 0)
+
+# Serialized names of the C++ ScalarValue enum, keyed by AssertAlphaValue values.
+ASSERT_ALPHA_VALUE_NAMES = {1: "1"}
+
+def extractDimPredicate(cls, value, predicateName):
+    """
+    Extract predicates for dict-valued Assert* maps (AssertSizeEqual, ...).
+    Value is a dictionary of {index: size}. A value of -1 skips that index.
+    """
+    predicates = []
+    for pos, val in value.items():
+        if val != -1:
+            predicates.append(cls(predicateName, index=pos, value=val))
+    if len(predicates) == 1:
+        return predicates[0]
+    elif len(predicates) > 1:
+        return cls.And(predicates)
+
+class TaskPredicate(Properties.Predicate):
+    @classmethod
+    def FromOriginalKeyPair(cls, pair):
+        (key, value) = pair
+        if key == "_WorkspaceSizePerElemC" and value > 0:
+            return cls("WorkspaceCheck")
+        return None
+
+    @classmethod
+    def ExtraPredicates(cls, state):
+        rv = []
+
+        # LaunchLimits predicate checks that launch grid will not overflow hip API limits
+        # TODO This predicate could also verify limits on some kernel arguments
+        # Stream-k kernels currently do not need limit check since launch grid should be limited by the grid model
+        if not isPersistent(state):
+            rv += [cls('LaunchLimits')]
+
+        return rv
+
+    @classmethod
+    def FromOriginalState(cls, d, problemType, morePreds=[]):
+        extraPredicates = cls.ExtraPredicates(d)
+        predicates = [p for p in map(cls.FromOriginalKeyPair, d.items()) if p is not None] + extraPredicates
+        return cls.And(predicates)
+
+class ProblemPredicate(Properties.Predicate):
+    @classmethod
+    def FromOriginalKeyPair(cls, pair):
+        (key, value) = pair
+        # Arithmetic intensity assertions
+        if key == "AssertAIGreaterThanEqual":
+            return cls("AIGreaterThanEqual", value=value) if value > 0 else None
+        if key == "AssertAILessThanEqual":
+            return cls("AILessThanEqual", value=value) if value > 0 else None
+        if key == "AssertAnySizeLessThan":
+            if value == -1:
+                return None
+            if not isinstance(value, dict):
+                raise RuntimeError(
+                    "{} must be a dict of {{index: value}}, got {!r}".format(key, value)
+                )
+            try:
+                checkAssertAnySizeLessThanIsValid(key, value)
+            except Exception as e:
+                raise RuntimeError(str(e)) from e
+            predicates = [
+                cls("SizeLessThan", index=pos, value=val) for pos, val in value.items() if val != -1
+            ]
+            return cls.Or(predicates) if predicates else None
+        if key in ASSERT_DIM_MAP_PREDICATES:
+            if not isinstance(value, dict):
+                raise RuntimeError(
+                    "{} must be a dict of {{index: value}}, got {!r}".format(key, value)
+                )
+            if key in ASSERT_DIM_MULTIPLE_PARAMETERS:
+                # Checked here as well as on the YAML inputs because logic-file
+                # and custom.config values reach the predicate without that gate.
+                try:
+                    checkAssertSizeMapIsValid(key, value)
+                    checkAssertMultipleMapIsValid(key, value)
+                except Exception as e:
+                    raise RuntimeError(str(e)) from e
+            return extractDimPredicate(cls, value, ASSERT_DIM_MAP_PREDICATES[key])
+        if key == "AssertAlphaValue":
+            if value not in ASSERT_ALPHA_VALUE_NAMES:
+                raise RuntimeError(
+                    "AssertAlphaValue must be one of {}, got {!r}".format(
+                        sorted(ASSERT_ALPHA_VALUE_NAMES), value))
+            return cls("AlphaValue", value=ASSERT_ALPHA_VALUE_NAMES[value])
+
+        if key == "AssertTensorBytesLessThan":
+            if value == -1:
+                return None
+            if type(value) is not int or value <= 0:
+                raise RuntimeError(
+                    "{} must be a positive int or -1, got {!r}".format(key, value)
+                )
+            return cls("TensorBytesLessThan", value=value)
+
+        if key == "AssertMXScalesPreSwizzled":
+            if value == -1:
+                return None
+            if value is not True:
+                raise RuntimeError(
+                    "{} must be True or -1, got {!r}".format(key, value)
+                )
+            return cls("MXScalesPreSwizzled")
+
+        if key.endswith('Multiple'):
+            if value == 1:
+                return None
+
+            if key == "AssertFree0ElementMultiple":
+                tag = "Free0SizeMultiple"
+                index = 0
+            elif key == "AssertFree1ElementMultiple":
+                tag = "Free1SizeMultiple"
+                index = 0
+            elif key == "AssertSummationElementMultiple":
+                tag = "BoundSizeMultiple"
+                index = -1
+            else:
+                raise RuntimeError("Unknown Multiple Value: {}".format(key))
+
+            return cls(tag, index=index, value=value)
+
+        if key.startswith('Assert'):
+            raise RuntimeError("Unknown assertion key: {}".format(key))
+
+    @classmethod
+    def CompoundPredicates(cls, state, problemType):
+        rv = []
+
+        if "BatchSizeEqual" in state:
+            rv += [cls('BatchSizeEqual', index=0, value=state["BatchSizeEqual"])]
+
+        if "SynchronizerSizeCheck" in state:
+            if state["SynchronizerSizeCheck"]:
+                valuepredicates = []
+                valuepredicates.append(state["MacroTile0"])
+                valuepredicates.append(state["MacroTile1"])
+                if state["EnableMatrixInstruction"]:
+                    valuepredicates.append(state["MIWaveTile"][0]*state["MIWaveTile"][1])
+                else:
+                    valuepredicates.append(state["ThreadTile0"]*state["ThreadTile1"])
+                if state["NumElementsPerBatchStore"] != 0:
+                    valuepredicates.append(int((state["NumElementsPerThread"])/state["NumElementsPerBatchStore"]))
+                else:
+                    valuepredicates.append(state["NumElementsPerThread"])
+                valuepredicates.append(ceil(state["NumThreads"] / state["WavefrontSize"]))
+                valuepredicates.append(state["GlobalSplitU"])
+
+                rv += [cls('SynchronizerSizeCheck', index=0, value=valuepredicates)]
+
+        if state["InternalSupportParams"]["KernArgsVersion"] >= 1 and \
+                 not isPersistent(state):
+            valuepredicates = []
+            valuepredicates.append(state["MacroTile0"])
+            valuepredicates.append(state["MacroTile1"])
+            valuepredicates.append(state["GlobalSplitU"])
+            rv += [cls('WorkgroupNumberCheck', index=0, value=valuepredicates)]
+
+        if not problemType.aType.isInt8x4():
+            # calculate the minimum supported free dimension size
+            TLUA = state['ProblemType']['TLUA']
+            TLUB = state['ProblemType']['TLUB']
+            minFree0 = state['GlobalReadVectorWidthA'] if TLUA else 1
+            minFree1 = state['GlobalReadVectorWidthB'] if TLUB else 1
+            rv += [cls('LeadingFree0SizesGreaterOrEqual', value=minFree0)]
+            rv += [cls('LeadingFree1SizesGreaterOrEqual', value=minFree1)]
+
+        if len(state["PackedC0IndicesX"]) > 1:
+          rv += [cls("CDStridesEqual")]
+
+        if "KernelLanguage" in state:
+            rv += [cls("KernelLanguageCompatible", value=state["KernelLanguage"])]
+
+        if ('GlobalSplitU' in state) and (state['GlobalSplitU'] > 1 or state['GlobalSplitU'] == -1):
+            if ('_GlobalAccumulation' not in state) or (state['_GlobalAccumulation'] != 'MultipleBuffer'):
+                rv += [cls("DeterministicMode", value = False)]
+
+        if isStreamK(state) and ('StreamKAtomic' in state) and (state['StreamKAtomic'] == 1):
+            # StreamKAtomic = 1 uses atomic for partial tiles
+            rv += [cls("DeterministicMode", value = False)]
+
+        # if bufferload is performed, we output some predication info for host side,
+        # to prevent from some extremely large problems from launching and causing bufferload offset limit < 2^32
+        # thoses cases will not satisfy the assertion thus won't use the kernel.
+        # See Common.py for more details, we will need four values:
+        # TODO - haven't been fully tested for FP16 and BF, need to verify the false-positive
+        if 'BufferLoad' in state and state['BufferLoad'] == True:
+            TLUA = state['ProblemType']['TLUA']
+            TLUB = state['ProblemType']['TLUB']
+            MayShiftA = TLUA and state['AssertFree0ElementMultiple'] < state['GlobalReadVectorWidthA']
+            MayShiftB = TLUB and state['AssertFree1ElementMultiple'] < state['GlobalReadVectorWidthB']
+            subrv={}
+            subrv['ShiftPtrElemB'] = state['GlobalReadVectorWidthB'] if MayShiftB else 0
+            subrv['ShiftPtrElemA'] = state['GlobalReadVectorWidthA'] if MayShiftA else 0
+            subrv['DUorMT1'] = state['DepthU'] if TLUB else state['MacroTile1']
+            subrv['DUorMT0'] = state['DepthU'] if TLUA else state['MacroTile0']
+            # value is also a dict for better readibility, client side need to handel the serialization
+            rv += [cls('BufferLoadOffsetLimitCheck', value=subrv)]
+
+        # When doing globol write, may need to load matrix C if beta !=0
+        if 'BufferLoad' in state and state['BufferLoad'] == True:
+            rv += [cls('BufferLoadOffsetLimitCheck_Beta', value=state['MacroTile1'])]
+
+        # similiar check is applied for bufferstore,
+        # for bufferstore offset, test if the bot-right offset < 2^32,
+        # it should be StrideA*MT1, so we need to output MT1 and use the StrideA of problem in host-side for predication
+        if 'BufferStore' in state and state['BufferStore'] == True:
+            rv += [cls('BufferStoreOffsetLimitCheck', value=state['MacroTile1'])]
+
+        # PrefetchGL2SAddr keeps each lane's prefetch offset in 32 bits. The cluster
+        # prefetches all ClusterDim tiles it consumes, so the free extent is
+        # MacroTile * ClusterDim. See Components/GL2Prefetch.py for the footprint.
+        if state.get('PrefetchGL2', 0) > 0 and state.get('PrefetchGL2SAddr', False):
+            pt = state['ProblemType']
+            clusterDim = state.get('ClusterDim', [1, 1])
+            metadataIdx = 1 if pt.get('Sparse', 0) == 2 else 0
+            metadata = bool(state.get('enableTDMMetadata', False))
+            rv += [cls('GL2PrefetchSAddrOffsetLimitCheck', value={
+                'TLUA': bool(pt['TLUA']),
+                'TLUB': bool(pt['TLUB']),
+                'DepthUA': state.get('_DepthUA', state['DepthU']),
+                'DepthUB': state.get('_DepthUB', state['DepthU']),
+                'ClusterMT0': state['MacroTile0'] * clusterDim[0],
+                'ClusterMT1': state['MacroTile1'] * clusterDim[1],
+                'DepthU': state['DepthU'],
+                'MatrixInstK': state.get('MatrixInstK', 0),
+                'MXBlockA': pt.get('MXBlockA', 0) or 0,
+                'MXBlockB': pt.get('MXBlockB', 0) or 0,
+                'MXBlockFreeA': max(1, pt.get('MXBlockFreeA', 1) or 1),
+                'MXBlockFreeB': max(1, pt.get('MXBlockFreeB', 1) or 1),
+                'Metadata': metadata,
+                'TLUMetadata': bool(pt.get('TLUMetadata', False)) if metadata else False,
+                'DepthUMetadata': state.get('_DepthUMetadata', state['DepthU']) if metadata else 0,
+                'ClusterMTMetadata': state['MacroTileMetadata'] * clusterDim[metadataIdx] if metadata else 0,
+            })]
+
+        if '_GlobalAccumulation' in state and state['_GlobalAccumulation'] != None and not isPersistent(state):
+            value = MIN_K_FOR_GSU
+            rv += [cls('GlobalSplitUCheckMinK', value=[value, state["GlobalSplitU"]])]
+
+        if ('WorkGroupMappingXCC' in state) and ('WorkGroupMappingXCCGroup' in state):
+            rv += [cls("WorkgroupMappingXCCCheck", value=[state['WorkGroupMappingXCC'], state['WorkGroupMappingXCCGroup']])]
+
+        if state['ProblemType']['SwizzleTensorA']:
+            rv += [cls('SwizzleTensorA', value=state['ProblemType']['SwizzleTensorA'])]
+
+        if state['ProblemType']['SwizzleTensorB']:
+            rv += [cls('SwizzleTensorB', value=state['ProblemType']['SwizzleTensorB'])]
+
+        # The host scale modes do not tell NoSwizzle, HostPreSwizzle and InMemorySwizzle
+        # apart, so the predicate matches those loosely and only pins the later formats.
+        if problemType.mxBlockA or problemType.mxBlockB:
+            rv += [cls('MXScaleFormatEquals', value=mxScaleFormatId(state))]
+
+        # Develop names this FusedA2A ('GemmA2A', 'A2AGemm', or 'Disabled').
+        # Older states used a bool FusedGemmA2A. A missing key, and 'Disabled',
+        # are not a fused GEMM.
+        fusedA2A = state['ProblemType'].get('FusedA2A')
+        fusedGemm = state['ProblemType'].get('FusedGemmA2A')
+        if fusedA2A == 'GemmA2A' or fusedGemm is True:
+            rv += [cls('GemmA2AShape', value=state['MacroTile0'])]
+
+        # A rocRoller custom kernel is a pre-assembled object captured at one tile.
+        # It carries no generated edge handling in M and no partial-k-tile drain, so
+        # it is correct only where M is a whole number of its MacroTile0 and K a
+        # whole number of its DepthU. Without these predicates a GridBased lookup
+        # hands the kernel neighbouring sizes it was not captured for.
+        #
+        # Measured on gfx950 across the FP8, BF8 and FP4 families: with M % tile
+        # and K % depthU both zero the result is stable and correct; break either
+        # and the result is wrong and nondeterministic run to run.
+        #
+        # N is deliberately not constrained: N = 160, 192 and 320 against a
+        # 128-wide tile all verify clean, so the kernels do handle the N edge, and
+        # constraining it would reject working sizes. The rocRoller-off path
+        # (getRocRollerSelectedSolutions) guards all three; that is stricter than
+        # correctness requires.
+        customKernel = state.get('CustomKernel') if hasattr(state, 'get') else None
+        if customKernel and str(customKernel.get('name', '')).startswith('RR_GEMM_'):
+            # [MacroTile0, MacroTile1, DepthU], computed in CustomKernels.py from
+            # the kernel's own MatrixInstruction/WaveTile/WorkGroup. Scoped by the
+            # RR_GEMM_ prefix, which is how matchesRocRollerSelectedKernel in
+            # tensile_host.cpp identifies the same family. Other custom-kernel
+            # families are deliberately untouched: no equivalent measurement.
+            macroTile = customKernel.get('macrotile') or []
+            if len(macroTile) == 3:
+                tileM, _, depthU = macroTile
+                if tileM and tileM > 1:
+                    rv += [cls('Free0SizeMultiple', index=0, value=tileM)]
+                if depthU and depthU > 1:
+                    rv += [cls('BoundSizeMultiple', index=-1, value=depthU)]
+            else:
+                # A macrotile that is not [M, N, K] used to skip both guards
+                # and still publish the kernel. Name it: one logic file
+                # predicates every custom kernel in the same pass.
+                raise ValueError(
+                    "custom kernel {!r} has macrotile {!r}; expected 3 elements "
+                    "[MacroTile0, MacroTile1, DepthU]".format(
+                        customKernel.get('name', ''), macroTile))
+
+            # The kernels are 2-D. They carry no batch strides and never read
+            # workgroup_id_z, but their grid is [TilesX, TilesY, Batch], so every
+            # z-slice recomputes batch 0 and batches 1..N-1 come back wrong.
+            rv += [cls('BatchSizeEqual', index=0, value=1)]
+
+            # Each tensor gets one buffer descriptor sized over the whole tensor
+            # with a 32-bit num_records, so at 4 GiB the output is zeroed rather
+            # than the launch failing. The rocRoller-on path rejects the same
+            # problems in RocRollerGemmKernel::exceedsBufferAddressingLimit.
+            rv += [cls('BufferAddressingLimitCheck')]
+
+        # Exact-size custom kernels record the M/N/K window they won. Without
+        # it, a multi-solution lookup also accepts the neighboring tile.
+        size_bounds = state.get("CustomKernelSizePredicate") if hasattr(state, "get") else None
+        if size_bounds:
+            for bound in size_bounds:
+                rv += [cls(bound["tag"], index=bound["index"], value=bound["value"])]
+
+        if state.get('ReuseAcrossPersistent', 0):
+            # A stays in VGPRs for the whole persistent loop, so the kernel is only
+            # correct where every tile a workgroup visits reads the same A. K is the
+            # only dim needing a predicate for that: the entry guard handles M by
+            # comparing (M-tile, batch), A does not depend on N, and a partial
+            # M-tile is safe because row m of C depends only on row m of A and the
+            # edge store masks the rows past M.
+            #
+            # K is a range: the loop runs ceil(K / DepthU) resident k-tiles, a
+            # partial last one included because TDM clamps it at K, so any K up to
+            # the block the kernel holds works and ASEM's BoundSizeMultiple sets the
+            # granularity. K = 0 is out: the InitCIterWmma clone that zeroes C lives
+            # inside the loop. SizeLessThan is strict, hence the +1.
+            kIdx = state['ProblemType']['NumIndicesC']
+            kTiles = state['_RAPNumResidentKTiles']
+            rv += [cls('SizeGreaterThan', index=kIdx, value=0)]
+            rv += [cls('SizeLessThan', index=kIdx,
+                       value=kTiles * state['DepthU'] + 1)]
+
+        if state['ProblemType'].get('FusedA2A') == 'A2AGemm':
+            rv += [cls('A2AGemmShape', value=state['DepthU'] * state['A2ASubRounds'])]
+
+        return rv
+
+    @classmethod
+    def FromOriginalState(cls, d, problemType, morePreds=[]):
+        problemTypePreds = problemType.predicates(True, True, True)
+        compoundPreds = cls.CompoundPredicates(d, problemType)
+        extraPreds = problemTypePreds + compoundPreds + morePreds
+
+        predicates = [p for p in map(cls.FromOriginalKeyPair, d.items()) if p is not None] + extraPreds
+        return cls.And(predicates)
+
+class CustomKernel:
+    StateKeys = ['name',
+                 'args',
+                 'macrotile',
+                 'threads',
+                 'grid',
+                 'workspaceType',
+                 'workspaceSizePerElemC',
+                 'workspaceSizePerElemBias',
+                 'generated',
+                 'uniformSummationOrder']
+
+    @classmethod
+    def FromOriginalState(cls, d):
+        return cls(name=d['name'],
+                   args=d['args'],
+                   macrotile=d['macrotile'],
+                   threads=d['threads'],
+                   grid=d['grid'],
+                   workspaceType=d.get('workspaceType', 'None'),
+                   workspaceSizePerElemC=d.get('workspaceSizePerElemC', 0),
+                   workspaceSizePerElemBias=d.get('workspaceSizePerElemBias', 0),
+                   generated=d.get('generated', False),
+                   uniformSummationOrder=d.get('uniformSummationOrder', False))
+
+    def __init__(self, **kwargs):
+        for (key, value) in list(kwargs.items()):
+            setattr(self, key, value)
+
+class SizeMapping:
+    StateKeys = ['a2aSubRounds',
+                 'activationFused',
+                 'adaptiveGemm',
+                 'adaptiveGemmGSUA',
+                 'adaptiveGemmNTAB',
+                 'BufferLoad',
+                 'BufferStore',
+                 'clusterDim',
+                 'CUOccupancy',
+                 'customMainLoopScheduling',
+                 'depthU',
+                 'DirectToLdsA',
+                 'DirectToLdsB',
+                 'DirectToVgprA',
+                 'DirectToVgprB',
+                 'enableLDSTrA',
+                 'enableLDSTrB',
+                 'ExpertSchedulingMode',
+                 'globalAccumulation',
+                 'globalSplitU',
+                 'globalSplitUCoalesced',
+                 'globalSplitUPGR',
+                 'globalSplitUWorkGroupMappingRoundRobin',
+                 'grvwA',
+                 'grvwB',
+                 'gwvwC',
+                 'gwvwD',
+                 'HalfPLR',
+                 'hasTemporalHint',
+                 'LocalSplitU',
+                 'macroTile',
+                 'magicDivAlg',
+                 'MathClocksUnrolledLoop',
+                 'matrixInstruction',
+                 'Multicast',
+                 'nonTemporalA',
+                 'nonTemporalB',
+                 'NonTemporalD',
+                 'NumLoadsCoalescedA',
+                 'NumLoadsCoalescedB',
+                 'OneLDSBuffer',
+                 'packBatchDims',
+                 'prefetchAcrossPersistent',
+                 'PrefetchGL2',
+                 'PrefetchGlobalRead',
+                 'PrefetchLocalRead',
+                 'sourceKernel',
+                 'SourceSwap',
+                 'staggerStrideShift',
+                 'staggerU',
+                 'staggerUMapping',
+                 'streamKAtomic',
+                 'synchronizerSizePerWG',
+                 'TDMInst',
+                 'temporalHintA',
+                 'temporalHintB',
+                 'temporalHintD',
+                 'threadTile',
+                 'tileProcessingStrategy',
+                 'UnrollLoopSwapGlobalReadOrder',
+                 'UnrollMajorLDSA',
+                 'UnrollMajorLDSB',
+                 'useSubtileImpl',
+                 'VectorWidthA',
+                 'VectorWidthB',
+                 'WavefrontSize',
+                 'WaveGroup',
+                 'waveNum',
+                 'WaveSeparateGlobalReadA',
+                 'WaveSeparateGlobalReadB',
+                 'workAssignment',
+                 'workGroup',
+                 'workGroupMapping',
+                 'workGroupMappingXCC',
+                 'workGroupMappingXCCGroup',
+                 'workspaceSizePerElemBias',
+                 'workspaceSizePerElemC'
+                 ]
+
+    @classmethod
+    def FromOriginalState(cls, d):
+        # This describes an existing artifact: preserve its argument version
+        # while translating selectors and inactive legacy options together.
+        d = normalize_execution_policy(d, regenerate=False)
+        globalAccum = 0
+        if d['_GlobalAccumulation'] == 'SingleBuffer':
+            globalAccum = 1
+        if d['_GlobalAccumulation'] == 'MultipleBuffer':
+            globalAccum = 2
+        if d['_GlobalAccumulation'] == 'MultipleBufferSingleKernel':
+            globalAccum = 3
+        if d['_GlobalAccumulation'] == 'PartialsBuffer':
+            globalAccum = 4
+        pgr = int(d['PrefetchGlobalRead'])
+        synchronizerSizePerWG = ceil((d['MIWaveTile'][0]*d['MIWaveTile'][1] if d['EnableMatrixInstruction'] else d['ThreadTile0']*d['ThreadTile1'])        \
+                                    * (ceil((d['NumElementsPerThread'])/d['NumElementsPerBatchStore']) if d['NumElementsPerBatchStore'] != 0 else d['NumElementsPerThread'])        \
+                                    * ceil(d["NumThreads"] / d["WavefrontSize"]))
+
+
+        # Converts list of list specified in SFCWGM to a 32bit signed integer that is passed to the WGM arg
+        # Input: nested list in the form [[GridDimM_L1, GridDimN_L1], [GridDimM_L2, GridDimN_L2]], all values are 8bit unsigned
+        # Output: to be stored in 32bit WGM kernel arg - (msb)[GridDimN_L2, GridDimM_L2, GridDimN_L1, GridDimM_L1](lsb)
+        def convertSFCWGMListToHex(value):
+            import ctypes
+            output = 0
+            for idx in range(len(value)):
+                gridDims = value[idx]
+                output = output | gridDims[0] << (16 * idx)
+                output = output | (gridDims[1] << (8 + 16 * idx))
+            # WGM kernel param is interpreted as int so, 32bit output to 32b int
+            return ctypes.c_int(output & 0xFFFFFFFF).value
+
+        dtva = bool(d['DirectToVgprA'])
+        dtvb = bool(d['DirectToVgprB'])
+        dtlA = bool(d['DirectToLdsA'])
+        dtlB = bool(d['DirectToLdsB'])
+
+        return cls(a2aSubRounds             = d.get('A2ASubRounds', 1),
+                   activationFused          = d['ActivationFused'],
+                   adaptiveGemm             = int(d.get('AdaptiveGemm', 0)),
+                   adaptiveGemmGSUA         = d['AdaptiveGemmGSUA'] if 'AdaptiveGemmGSUA' in d else 0,
+                   adaptiveGemmNTAB         = d['AdaptiveGemmNTAB'] if 'AdaptiveGemmNTAB' in d else 0,
+                   # BufferLoad/BufferStore were only added to SizeMapping's
+                   # serialized state by this change, so libraries built before
+                   # it won't have these keys; default to True (the prior,
+                   # implicit behavior) for backward compatibility, matching
+                   # the other newly-added-but-optional fields above (e.g.
+                   # PrefetchAcrossPersistent, TemporalHintA/B).
+                   BufferLoad               = bool(d.get('BufferLoad', True)),
+                   BufferStore              = bool(d.get('BufferStore', True)),
+                   clusterDim               = d['ClusterDim'],
+                   CUOccupancy              = d['CUOccupancy'],
+                   customMainLoopScheduling = d['UseCustomMainLoopSchedule'],
+                   depthU                   = d['DepthU'],
+                   DirectToLdsA             = dtlA,
+                   DirectToLdsB             = dtlB,
+                   DirectToVgprA            = dtva,
+                   DirectToVgprB            = dtvb,
+                   enableLDSTrA             = bool(d.get('enableLDSTrA', False)),
+                   enableLDSTrB             = bool(d.get('enableLDSTrB', False)),
+                   ExpertSchedulingMode     = d.get('ExpertSchedulingMode', 0),
+                   globalAccumulation       = globalAccum,
+                   globalSplitU             = d['GlobalSplitU'],
+                   globalSplitUCoalesced    = d['GlobalSplitUCoalesced'],
+                   globalSplitUPGR          = internalParameters["GlobalSplitUPGR"],
+                   globalSplitUWorkGroupMappingRoundRobin = d['GlobalSplitUWorkGroupMappingRoundRobin'],
+                   grvwA                    = d['GlobalReadVectorWidthA'],
+                   grvwB                    = d['GlobalReadVectorWidthB'],
+                   gwvwC                    = d['StoreVectorWidth'],
+                   gwvwD                    = d['StoreVectorWidth'],
+                   HalfPLR                  = int(d.get('HalfPLR', 0)),
+                   hasTemporalHint          = bool(d.get('_HasTemporalHint', False)),
+                   LocalSplitU              = d["LocalSplitU"],
+                   macroTile                = cls.ReadOriginalMacroTile(d),
+                   magicDivAlg              = d.get('MagicDivAlg', 1),
+                   MathClocksUnrolledLoop   = d['MathClocksUnrolledLoop'],
+                   matrixInstruction        = d['MatrixInstruction'],
+                   Multicast                = int(bool(d.get('Multicast', False))),
+                   nonTemporalA             = d['NonTemporalA'],
+                   nonTemporalB             = d['NonTemporalB'],
+                   NonTemporalD             = d['NonTemporalD'],
+                   NumLoadsCoalescedA       = d['NumLoadsCoalescedA'],
+                   NumLoadsCoalescedB       = d['NumLoadsCoalescedB'],
+                   OneLDSBuffer             = d.get('1LDSBuffer', 0) == 1,
+                   packBatchDims            = 0,
+                   prefetchAcrossPersistent = d.get('PrefetchAcrossPersistent', 0),
+                   PrefetchGL2              = int(d.get('PrefetchGL2', 0)),
+                   PrefetchGlobalRead       = pgr,
+                   PrefetchLocalRead        = int(d.get('PrefetchLocalRead', 1)),
+                   sourceKernel             = d['KernelLanguage'] == 'Source',
+                   SourceSwap               = bool(d.get('SourceSwap', False)),
+                   staggerStrideShift       = d['_staggerStrideShift'] if '_staggerStrideShift' in d else 0,
+                   staggerU                 = d['StaggerU'] if 'StaggerU' in d else 0,
+                   staggerUMapping          = d['StaggerUMapping'] if 'StaggerUMapping' in d else 0,
+                   streamKAtomic            = d['StreamKAtomic'] if 'StreamKAtomic' in d else 0,
+                   synchronizerSizePerWG    = synchronizerSizePerWG,
+                   TDMInst                  = int(d.get('TDMInst', 0)),
+                   temporalHintA            = d.get('TemporalHintA', 0),
+                   temporalHintB            = d.get('TemporalHintB', 0),
+                   temporalHintD            = d.get('TemporalHintD', 0),
+                   threadTile               = d['ThreadTile'],
+                   tileProcessingStrategy   = d['TileProcessingStrategy'],
+                   UnrollLoopSwapGlobalReadOrder = d['UnrollLoopSwapGlobalReadOrder'],
+                   UnrollMajorLDSA          = int(bool(d['UnrollMajorLDSA'])) if 'UnrollMajorLDSA' in d else -1,
+                   UnrollMajorLDSB          = int(bool(d['UnrollMajorLDSB'])) if 'UnrollMajorLDSB' in d else -1,
+                   useSubtileImpl           = bool(d.get('UseSubtileImpl', False)),
+                   VectorWidthA             = d["VectorWidthA"],
+                   VectorWidthB             = d["VectorWidthB"],
+                   WavefrontSize            = d['WavefrontSize'],
+                   WaveGroup                = d["MIWaveGroup"],
+                   waveNum                  = d['NumThreads'] // d['WavefrontSize'],
+                   WaveSeparateGlobalReadA  = d['WaveSeparateGlobalReadA'],
+                   WaveSeparateGlobalReadB  = d['WaveSeparateGlobalReadB'],
+                   workAssignment           = d['WorkAssignment'],
+                   workGroup                = d['WorkGroup'],
+                   workGroupMapping         = d['WorkGroupMapping'] if len(d['SpaceFillingAlgo']) == 0 else convertSFCWGMListToHex(d['SFCWGM']),
+                   workGroupMappingXCC      = d['WorkGroupMappingXCC'],
+                   workGroupMappingXCCGroup = d['WorkGroupMappingXCCGroup'],
+                   workspaceSizePerElemBias = d['_WorkspaceSizePerElemBias'],
+                   workspaceSizePerElemC    = d['_WorkspaceSizePerElemC']
+                   )
+    @classmethod
+    def ReadOriginalMacroTile(cls, d):
+        rv = [1,1,1]
+        rv[0] = d['MacroTile0']
+        rv[1] = d['MacroTile1']
+        return rv
+
+    def __init__(self, **kwargs):
+        for (key, value) in list(kwargs.items()):
+            setattr(self, key, value)
+
+class InternalArgsSupport:
+    StateKeys = ['version',
+                 'persistentLoopArgsVersion',
+                 'gsu',
+                 'wgm',
+                 'staggerU',
+                 'perTileExtraIters',
+                 'useUniversalArgs',
+                 'useSFC'
+                 ]
+
+    @classmethod
+    def FromOriginalState(cls, d):
+        # Set useSFC to True if SpaceFillingAlgo is non-empty, regardless of
+        # the explicit InternalSupportParams setting
+        useSFC = d['InternalSupportParams']['UseSFC'] or len(d.get('SpaceFillingAlgo', [])) > 0
+        isp = d['InternalSupportParams']
+        return cls(version = isp['KernArgsVersion'],
+                   persistentLoopArgsVersion = isp.get('PersistentLoopArgsVersion', 0),
+                   gsu = isp['SupportUserGSU'],
+                   wgm = isp['SupportCustomWGM'],
+                   staggerU = isp['SupportCustomStaggerU'],
+                   perTileExtraIters = isp.get('SupportStreamKPerTileExtraIters', False),
+                   occupancyProbe = isp.get('SupportOccupancyProbe', False),
+                   useUniversalArgs = isp['UseUniversalArgs'],
+                   useSFC = useSFC)
+
+    def state(self):
+        rv = {key: getattr(self, key) for key in self.StateKeys}
+        # Emitted only when set so libraries built without the probe are unchanged.
+        if getattr(self, 'occupancyProbe', False):
+            rv['occupancyProbe'] = True
+        return rv
+
+    def __init__(self, **kwargs):
+        for (key, value) in list(kwargs.items()):
+            setattr(self, key, value)
+
+class Solution:
+    StateKeys = ['name',
+                 'kernelName',
+                 'problemType',
+                 'hardwarePredicate',
+                 'problemPredicate',
+                 'taskPredicate',
+                 'sizeMapping',
+                 'customKernel',
+                 'internalArgsSupport',
+                 'debugKernel',
+                 'libraryLogicIndex',
+                 'index',
+                 'ideals',
+                 'linearModel']
+    HiddenKeys = ['originalSolution']
+
+    @classmethod
+    def FromSolutionStruct(
+        cls,
+        solution,
+        splitGSU: bool,
+        printSolutionRejectionReason: bool,
+        printIndexAssignmentInfo: bool,
+        assembler: Assembler,
+        isaInfoMap: Dict[str, IsaInfo]
+    ):
+        return cls.FromOriginalState(
+                   solution._state,
+                   splitGSU,
+                   printSolutionRejectionReason,
+                   printIndexAssignmentInfo,
+                   assembler,
+                   isaInfoMap,
+                   solution.srcName,
+                   raiseProblemTypeOnTypeMismatch=False,
+               )
+
+    @classmethod
+    def FromOriginalState(
+            cls,
+            d,
+            splitGSU: bool,
+            printSolutionRejectionReason: bool,
+            printIndexAssignmentInfo: bool,
+            #mink
+            assembler,
+            isaInfoMap,
+            srcName = "",
+            deviceInfo=None,
+            *,
+            raiseProblemTypeOnTypeMismatch: bool = True,
+        ):
+        rv = cls.RecordFromOriginalState(d, srcName, deviceInfo)
+        rv.originalSolution = OriginalSolution(
+                                  d,
+                                  splitGSU,
+                                  printSolutionRejectionReason,
+                                  printIndexAssignmentInfo,
+                                  assembler,
+                                  isaInfoMap,
+                                  srcName,
+                                  raiseProblemTypeOnTypeMismatch=raiseProblemTypeOnTypeMismatch,
+                              )
+        rv.srcName = srcName
+
+        return rv
+
+    @classmethod
+    def RecordFromOriginalState(cls, d, srcName="", deviceInfo=None):
+        """The library record FromOriginalState writes, without the OriginalSolution.
+
+        Fills in d['ISA'] and d['CUCount'] as FromOriginalState does, so the
+        OriginalSolution built from d afterwards sees the same state.
+        """
+        rv = cls()
+
+        if 'SolutionNameMin' in d:
+            rv.name = d['SolutionNameMin']
+
+        if 'KernelNameMin' in d:
+            rv.kernelName = d['KernelNameMin']
+
+        rv.problemType = ProblemType.FromOriginalState(d['ProblemType'])
+
+        # MXScaleFormat is a Solution-level knob (lives in d, not d['ProblemType']),
+        # but it describes the in-device MX scale layout the kernel expects, which
+        # the host (DataInitialization) needs to know to pick an upload layout.
+        # Plumb it onto problemType so the host can read it post-solution-pick.
+        # The values are TensileLite::MXScaleFormat (include/Tensile/MXScaleFormat.hpp).
+        rv.problemType.mxScaleFormat = mxScaleFormatId(d)
+
+        rv.problemPredicate = ProblemPredicate.FromOriginalState(d, rv.problemType)
+        rv.taskPredicate = TaskPredicate.FromOriginalState(d, rv.problemType)
+
+        if 'DebugKernel' in d:
+            rv.debugKernel = d['DebugKernel']
+
+        if 'SolutionIndex' in d:
+            rv.index = d['SolutionIndex']
+
+        info = cls.ReadOriginalInfo(d)
+        rv.libraryLogicIndex = int(info.get("SolutionIndex", -1))
+
+        rv.sizeMapping = SizeMapping.FromOriginalState(d)
+        if 'CustomKernel' in d:
+            rv.customKernel = CustomKernel.FromOriginalState(d['CustomKernel'])
+        else:
+            rv.customKernel = {}
+
+        rv.internalArgsSupport = InternalArgsSupport.FromOriginalState(d)
+
+        if 'Ideals' in d:
+            rv.ideals = d['Ideals']
+        else:
+            rv.ideals = {}
+
+        if 'LinearModel' in d:
+            rv.linearModel = d['LinearModel']
+        else:
+            rv.linearModel = {}
+
+        if 'ISA' not in d:
+            if d['KernelLanguage'] == 'Assembly':
+                d['ISA'] = gfxToIsa(deviceInfo[1])
+
+        if 'CUCount' not in d:
+            d['CUCount'] = None
+
+        rv.hardwarePredicate = Hardware.HardwarePredicate.FromHardware(
+            d['ISA'], d['CUCount'], d.get('DeviceNames', None), logicFile=srcName
+        )
+        return rv
+
+    @classmethod
+    def ReadOriginalInfo(cls, d):
+        return dict([(key, str(value)) for (key, value) in list(d.items()) if key != 'ProblemType'])
+
+    def __init__(self, **kwargs):
+        self.name = None
+        self.problemType = None
+        self.hardwarePredicate = Hardware.HardwarePredicate('TruePred')
+        self.problemPredicate = ProblemPredicate('TruePred')
+        self.taskPredicate = TaskPredicate('TruePred')
+        self.sizeMapping = None
+        self.customKernel = None
+        self.debugKernel = False
+        self.libraryLogicIndex = {}
+        self.index = None
+        self.ideals = {}
+        self.srcName = ""
+
+        for key, value in kwargs:
+            if key not in Solution.StateKeys and key not in Solution.HiddenKeys:
+                raise KeyError("{0} is not a property of Solution.".format(key))
+
+            setattr(self, key, value)
+
+    def getSolutionKeys(self):
+        return self.originalSolution.keys()

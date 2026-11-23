@@ -3,6 +3,9 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
+#include <cstddef>
+#include <set>
+#include <string>
 #include <unordered_map>
 
 #include <gtest/gtest.h>
@@ -17,14 +20,14 @@ namespace
 
 DeviceProperties propertiesFor(std::string arch,
                                int warpSize = 64,
-                               int multiProcessorCount = 48,
-                               int64_t ldsSize = 65536)
+                               int multiProcessorCount = 304,
+                               std::size_t sharedMemPerBlock = 65536)
 {
     DeviceProperties properties;
     properties.gcnArchName = std::move(arch);
     properties.warpSize = warpSize;
     properties.multiProcessorCount = multiProcessorCount;
-    properties.ldsSize = ldsSize;
+    properties.sharedMemPerBlock = sharedMemPerBlock;
     return properties;
 }
 
@@ -36,12 +39,50 @@ DeviceProperties propertiesFor(std::string arch,
 TEST(TestIngestorDeviceKey, TheHashedFieldSetIsPinnedAtCompileTime)
 {
     const auto properties = propertiesFor("gfx942");
-    const auto& [gcnArchName, warpSize, multiProcessorCount, ldsSize] = properties;
+    const auto& [gcnArchName,
+                 warpSize,
+                 multiProcessorCount,
+                 totalGlobalMem,
+                 memoryBusWidth,
+                 memoryClockRate,
+                 sharedMemPerBlock]
+        = properties;
 
     EXPECT_EQ(gcnArchName, "gfx942");
     EXPECT_EQ(warpSize, 64);
-    EXPECT_EQ(multiProcessorCount, 48);
-    EXPECT_EQ(ldsSize, 65536);
+    EXPECT_EQ(multiProcessorCount, 304);
+    EXPECT_EQ(totalGlobalMem, 0U);
+    EXPECT_EQ(memoryBusWidth, 0);
+    EXPECT_EQ(memoryClockRate, 0);
+    EXPECT_EQ(sharedMemPerBlock, 65536U);
+}
+
+TEST(TestIngestorDeviceKey, TwoBoardsOfOneArchSharingCuCountStillGetDifferentKeys)
+{
+    // Same arch and CU count, different memory: a shared key would serve one board's
+    // measured ranking to the other.
+    auto slower = propertiesFor("gfx942");
+    slower.totalGlobalMem = 192ULL * 1024 * 1024 * 1024;
+    slower.memoryBusWidth = 8192;
+    slower.memoryClockRate = 2600000;
+
+    auto faster = propertiesFor("gfx942");
+    faster.totalGlobalMem = 256ULL * 1024 * 1024 * 1024;
+    faster.memoryBusWidth = 8192;
+    faster.memoryClockRate = 3000000;
+
+    ASSERT_EQ(slower.multiProcessorCount, faster.multiProcessorCount)
+        << "the fixture must model the collision it is testing";
+    EXPECT_NE(DeviceKey{slower}, DeviceKey{faster});
+    EXPECT_NE(DeviceKey{slower}.hash(), DeviceKey{faster}.hash());
+}
+
+TEST(TestIngestorDeviceKey, DevicesDifferingOnlyInLdsCapacityCompareUnequal)
+{
+    const DeviceKey lowerCapacity{propertiesFor("gfx942", 64, 304, std::size_t{64} * 1024)};
+    const DeviceKey higherCapacity{propertiesFor("gfx942", 64, 304, std::size_t{160} * 1024)};
+    EXPECT_NE(lowerCapacity, higherCapacity);
+    EXPECT_NE(lowerCapacity.hash(), higherCapacity.hash());
 }
 
 TEST(TestIngestorDeviceKey, IdenticalPropertiesCompareEqual)
@@ -64,14 +105,6 @@ TEST(TestIngestorDeviceKey, DevicesDifferingOnlyInMultiProcessorCountCompareUneq
 TEST(TestIngestorDeviceKey, DevicesDifferingOnlyInWarpSizeCompareUnequal)
 {
     EXPECT_NE(DeviceKey{propertiesFor("gfx942", 32)}, DeviceKey{propertiesFor("gfx942", 64)});
-}
-
-TEST(TestIngestorDeviceKey, DevicesDifferingOnlyInLdsCapacityCompareUnequal)
-{
-    const DeviceKey lowerCapacity{propertiesFor("gfx942", 64, 48, 32768)};
-    const DeviceKey higherCapacity{propertiesFor("gfx942", 64, 48, 65536)};
-    EXPECT_NE(lowerCapacity, higherCapacity);
-    EXPECT_NE(lowerCapacity.hash(), higherCapacity.hash());
 }
 
 TEST(TestIngestorDeviceKey, ADifferentArchComparesUnequal)
@@ -144,7 +177,7 @@ INSTANTIATE_TEST_SUITE_P(,
                          ::testing::Values(propertiesFor("gfx950"),
                                            propertiesFor("gfx942", /*warpSize=*/32),
                                            propertiesFor("gfx942", 64, 228),
-                                           propertiesFor("gfx942", 64, 48, 32768)),
+                                           propertiesFor("gfx942", 64, 304, 32768)),
                          [](const ::testing::TestParamInfo<DeviceProperties>& info) {
                              switch(info.index)
                              {
@@ -159,6 +192,61 @@ INSTANTIATE_TEST_SUITE_P(,
                              }
                          });
 
+// ---- the $device.* vocabulary ------------------------------------------------------
+//
+// FeatureExtractor binds these names at scoring time and the benchmark recorder writes them
+// as `device.*` corpus columns; the two must agree name for name.
+
+TEST(TestIngestorDeviceVocabulary, EveryNameIsBoundExactlyOnce)
+{
+    auto properties = propertiesFor("gfx942");
+    properties.totalGlobalMem = 192ULL * 1024 * 1024 * 1024;
+    properties.memoryBusWidth = 8192;
+    properties.memoryClockRate = 2600000;
+    properties.sharedMemPerBlock = std::size_t{64} * 1024;
+
+    std::set<std::string> names;
+    for(const auto& entry : deviceFeatureValues(properties))
+    {
+        EXPECT_TRUE(names.insert(entry.first).second)
+            << entry.first << " is emitted twice; one of them silently wins";
+    }
+
+    // Both spellings of the CU count, because signatures exist against each.
+    EXPECT_EQ(names.count("cu_count"), 1U);
+    EXPECT_EQ(names.count("multi_processor_count"), 1U);
+    // The fields that separate boards of one arch.
+    EXPECT_EQ(names.count("total_global_mem"), 1U);
+    EXPECT_EQ(names.count("memory_bus_width"), 1U);
+    EXPECT_EQ(names.count("memory_clock_rate"), 1U);
+    EXPECT_EQ(names.count("peak_memory_bandwidth"), 1U);
+    EXPECT_EQ(names.count("lds_size"), 1U);
+    // Never the arch: it selects which UHD runs, so a model splitting on it would be
+    // splitting on the thing that chose it (RFC 0019 3.1).
+    EXPECT_EQ(names.count("arch"), 0U);
+    EXPECT_EQ(names.count("gcn_arch_name"), 0U);
+}
+
+TEST(TestIngestorDeviceVocabulary, PeakBandwidthIsDerivedFromClockAndWidth)
+{
+    auto properties = propertiesFor("gfx942");
+    properties.memoryBusWidth = 8192;
+    properties.memoryClockRate = 2600000; // kHz
+
+    // 2 (DDR) * 2.6e9 Hz * 1024 bytes.
+    EXPECT_DOUBLE_EQ(peakMemoryBandwidth(properties), 2.0 * 2600000.0 * 1000.0 * 1024.0);
+}
+
+TEST(TestIngestorDeviceVocabulary, PeakBandwidthIsZeroRatherThanWrongWhenUnresolved)
+{
+    // hipGetDeviceProperties leaves unknown fields 0; the derived value must stay 0
+    // (unknown) whenever an input is.
+    auto properties = propertiesFor("gfx942");
+    EXPECT_DOUBLE_EQ(peakMemoryBandwidth(properties), 0.0);
+
+    properties.memoryBusWidth = 8192;
+    EXPECT_DOUBLE_EQ(peakMemoryBandwidth(properties), 0.0) << "clock still unresolved";
+}
 } // namespace
 } // namespace hipdnn_plugin_sdk::ingestor::testing
 

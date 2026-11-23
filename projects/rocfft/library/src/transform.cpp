@@ -272,9 +272,9 @@ void rocfft_plan_t::LogFields(const char* description, const std::vector<rocfft_
         const auto& f = fields[fieldIdx];
 
         os << description << " field " << fieldIdx << ":" << std::endl;
-        for(size_t brickIdx = 0; brickIdx < f.bricks.size(); ++brickIdx)
+        for(size_t brickIdx = 0; brickIdx < f.num_bricks(); ++brickIdx)
         {
-            const auto& b = f.bricks[brickIdx];
+            const auto& b = f.get_brick(brickIdx);
             os << "  brick " << brickIdx << ":" << std::endl;
             os << "    comm_rank: " << b.location.comm_rank << std::endl;
             os << "    device: " << b.location.device << std::endl;
@@ -502,9 +502,14 @@ try
     {
         rocfft_execution_info_internal info_internal(info, *plan);
 
-        // disallow combining JIT callbacks and legacy callbacks
-        if((plan->desc.loadOps.has_spirv() || plan->desc.storeOps.has_spirv())
-           && (info_internal.get_load_cb_fns() || info_internal.get_store_cb_fns()))
+        // disallow combining legacy function pointer callbacks with:
+        // - JIT callbacks
+        // - multi-GPU transforms
+        bool have_funcptr_callbacks
+            = info_internal.get_load_cb_fns() || info_internal.get_store_cb_fns();
+        bool have_jit_callbacks = plan->desc.loadOps.has_spirv() || plan->desc.storeOps.has_spirv();
+        bool have_multigpu_plan = !plan->desc.inFields.empty() || !plan->desc.outFields.empty();
+        if(have_funcptr_callbacks && (have_jit_callbacks || have_multigpu_plan))
         {
             return rocfft_status_invalid_arg_value;
         }
@@ -543,41 +548,19 @@ void ExecPlan::ExecuteAsync(const rocfft_plan                     plan,
         execStream = this->stream;
     }
 
-    // TransformPowX below needs in_buffer, out_buffer to work with.
-    // But we need to potentially override pointers in those arrays.
-    // So copy them to temporary vectors.
-    // This is not necessary for single-device plans.
-    std::vector<void*> in_buffer_copy;
-    std::vector<void*> out_buffer_copy;
-
+    // planar data is unsupported with fields, so one pointer per side suffices
+    void* mgpu_item_input  = nullptr;
+    void* mgpu_item_output = nullptr;
     if(mgpuPlan)
     {
-        auto local_comm_rank = plan->desc.get_local_comm_rank();
-        std::copy_n(
-            in_buffer,
-            plan->desc.count_pointers(plan->desc.inFields, plan->desc.inArrayType, local_comm_rank),
-            std::back_inserter(in_buffer_copy));
-
-        // if input/output are overridden, override now
-        if(inputPtr)
-            in_buffer_copy[0] = inputPtr.get(in_buffer, out_buffer, local_comm_rank, exec_info);
-
+        const auto local_comm_rank = plan->desc.get_local_comm_rank();
+        mgpu_item_input = inputPtr.get(in_buffer, out_buffer, local_comm_rank, exec_info);
         if(rootPlan->placement == rocfft_placement_notinplace)
-        {
-            std::copy_n(out_buffer,
-                        plan->desc.count_pointers(
-                            plan->desc.outFields, plan->desc.outArrayType, local_comm_rank),
-                        std::back_inserter(out_buffer_copy));
-            if(outputPtr)
-                out_buffer_copy[0]
-                    = outputPtr.get(in_buffer, out_buffer, local_comm_rank, exec_info);
-        }
+            mgpu_item_output = outputPtr.get(in_buffer, out_buffer, local_comm_rank, exec_info);
     }
 
-    // select the input and output buffers based on whether
-    // we have a single or multi device plan.
-    auto in_transform_ptrs  = mgpuPlan ? in_buffer_copy.data() : in_buffer;
-    auto out_transform_ptrs = mgpuPlan ? out_buffer_copy.data() : out_buffer;
+    auto in_transform_ptrs  = mgpuPlan ? &mgpu_item_input : in_buffer;
+    auto out_transform_ptrs = mgpuPlan ? &mgpu_item_output : out_buffer;
 
     // Callbacks do not currently support planar format
     if((array_type_is_planar(rootPlan->inArrayType) || array_type_is_planar(rootPlan->outArrayType))

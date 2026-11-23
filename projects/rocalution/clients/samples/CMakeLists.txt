@@ -32,10 +32,6 @@ function(add_rocalution_example EXAMPLE_SOURCE)
   # Link rocALUTION library
   target_link_libraries(${EXAMPLE_TARGET} PRIVATE roc::rocalution)
 
-  if (BUILD_CODE_COVERAGE)
-    target_link_libraries(${EXAMPLE_TARGET} PRIVATE -lgcov)
-  endif()
-
   # Examples output directory
   if(NOT TARGET rocalution)
     set_target_properties(${EXAMPLE_TARGET} PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/staging")
@@ -57,6 +53,7 @@ add_rocalution_example(cg-amg.cpp)
 add_rocalution_example(cg-rsamg.cpp)
 add_rocalution_example(cg-rsamg-mm.cpp)
 add_rocalution_example(cg-saamg.cpp)
+add_rocalution_example(cg-uaamg-rsamg.cpp)
 add_rocalution_example(cg.cpp)
 add_rocalution_example(cmk.cpp)
 if(BUILD_SUPPORT_COMPLEX)

@@ -24,79 +24,6 @@
 namespace hipdnn_frontend::autotune::detail
 {
 
-// Run one timed iteration using a fresh profiling control descriptor.
-// Creates descriptor, records START -> execute -> STOP -> finalize ->
-// ELAPSED_MS. A new descriptor is created each call because
-// ProfilingControlDescriptor does not support reset - setAttribute throws
-// after finalize.
-inline Error
-    benchmarkOnce(hipdnnHandle_t handle,
-                  ::hipdnn_frontend::detail::ScopedHipdnnBackendDescriptor& execPlan,
-                  ::hipdnn_frontend::detail::ScopedHipdnnBackendDescriptor& variantPackDesc,
-                  float& elapsedMs)
-{
-    elapsedMs = 0.0f;
-
-    // Create a fresh profiling descriptor for this iteration
-    // NOLINTNEXTLINE(misc-const-correctness)
-    ::hipdnn_frontend::detail::ScopedHipdnnBackendDescriptor profilingDesc(
-        HIPDNN_BACKEND_PROFILING_CONTROL_EXT);
-    if(!profilingDesc.valid())
-    {
-        return {ErrorCode::HIPDNN_BACKEND_ERROR, "Failed to create profiling control descriptor"};
-    }
-
-    // Set handle (creates HIP events)
-    HIPDNN_RETURN_ON_BACKEND_FAILURE(
-        ::hipdnn_frontend::detail::hipdnnBackend()->backendSetAttribute(
-            profilingDesc.get(),
-            HIPDNN_ATTR_PROFILING_HANDLE_EXT,
-            HIPDNN_TYPE_HANDLE,
-            1,
-            static_cast<const void*>(&handle)),
-        "Failed to set handle on profiling descriptor");
-
-    // Record start event
-    bool startVal = true;
-    HIPDNN_RETURN_ON_BACKEND_FAILURE(
-        ::hipdnn_frontend::detail::hipdnnBackend()->backendSetAttribute(
-            profilingDesc.get(),
-            HIPDNN_ATTR_PROFILING_START_EXT,
-            HIPDNN_TYPE_BOOLEAN,
-            1,
-            &startVal),
-        "Failed to set profiling start");
-
-    // Execute
-    HIPDNN_CHECK_ERROR(
-        ::hipdnn_frontend::detail::executeWithPlan(handle, execPlan, variantPackDesc));
-
-    // Record stop event
-    bool stopVal = true;
-    HIPDNN_RETURN_ON_BACKEND_FAILURE(
-        ::hipdnn_frontend::detail::hipdnnBackend()->backendSetAttribute(
-            profilingDesc.get(), HIPDNN_ATTR_PROFILING_STOP_EXT, HIPDNN_TYPE_BOOLEAN, 1, &stopVal),
-        "Failed to set profiling stop");
-
-    // Finalize synchronizes events and computes elapsed time
-    HIPDNN_RETURN_ON_BACKEND_FAILURE(
-        ::hipdnn_frontend::detail::hipdnnBackend()->backendFinalize(profilingDesc.get()),
-        "Failed to finalize profiling descriptor");
-
-    // Read elapsed time
-    HIPDNN_RETURN_ON_BACKEND_FAILURE(
-        ::hipdnn_frontend::detail::hipdnnBackend()->backendGetAttribute(
-            profilingDesc.get(),
-            HIPDNN_ATTR_PROFILING_ELAPSED_MS_EXT,
-            HIPDNN_TYPE_FLOAT,
-            1,
-            nullptr,
-            &elapsedMs),
-        "Failed to get profiling elapsed ms");
-
-    return {ErrorCode::OK, ""};
-}
-
 // Initializes an AutotuneResult with the sub-set identity and config fields known
 // before a candidate is benchmarked. The benchmark loop fills the timing, succeeded,
 // rank, and compiledPlanIndex fields during/after timing.
@@ -197,17 +124,22 @@ inline AutotuneResult makeSkippedResult(int64_t engineId,
     return result;
 }
 
-// Non-benchmarked result for a plan barred by a persistent user filter (deselect_engines()
-// engine ID or deselect_workspace_greater_than()). compiledWorkspaceSize is -1
+// Non-benchmarked result for a plan barred by an engine filter (deselect_engines(), the note
+// filters, deselect_workspace_greater_than()) or by an earlier evaluation. `reason` is the
+// skip reason; the message is "Plan barred: <reason>". compiledWorkspaceSize is -1
 // when the plan was never compiled.
 //
-// Sets excludedByCaller: both deselect filters are caller-applied, so clearing them
-// admits this engine.
+// Sets excludedByCaller: every barring filter is caller-applied. On the compiled-plan path
+// a barred plan stays barred when a filter is relaxed or cleared,
+// until the plans are recreated (create_execution_plans(), create_execution_plan_ext(),
+// rebuilding the operation graph, deserialization or plan-spec autotune()); the plan-spec
+// path marks nothing.
 inline AutotuneResult makeBarredResult(int64_t engineId,
                                        const std::vector<KnobSetting>& knobSettings,
                                        int64_t estimatedWorkspaceSize,
                                        int64_t compiledWorkspaceSize,
                                        const AutotuneConfig& config,
+                                       const std::string& reason,
                                        bool supportsExhaustive,
                                        bool ranExhaustive,
                                        const std::string& exhaustiveNotRunReason,
@@ -218,7 +150,7 @@ inline AutotuneResult makeBarredResult(int64_t engineId,
                                            estimatedWorkspaceSize,
                                            compiledWorkspaceSize,
                                            config,
-                                           "Plan barred (engine ID or workspace deselect filter).",
+                                           "Plan barred: " + reason,
                                            supportsExhaustive,
                                            ranExhaustive,
                                            exhaustiveNotRunReason,

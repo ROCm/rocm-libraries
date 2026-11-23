@@ -20,6 +20,7 @@
  *
  * ************************************************************************ */
 
+#include <algorithm>
 #include <limits>
 
 #ifndef DISABLE_ROCTX
@@ -29,6 +30,7 @@
 #endif
 
 #include "logging.hpp"
+#include "utility.hpp"
 
 /*************************************************
  * Bench log scalar values pointed to by pointer *
@@ -74,6 +76,11 @@ template std::string rocblas_internal_log_bench_scalar_value(rocblas_handle     
  *************************************************/
 
 inline float rocblas_internal_log_trace_scalar_value(const rocblas_half* value)
+{
+    return value ? float(*value) : std::numeric_limits<float>::quiet_NaN();
+}
+
+inline float rocblas_internal_log_trace_scalar_value(const rocblas_bfloat16* value)
 {
     return value ? float(*value) : std::numeric_limits<float>::quiet_NaN();
 }
@@ -167,6 +174,12 @@ rocblas_status rocblas_internal_log_trace_alpha_beta_ex(rocblas_datatype        
         betass << rocblas_internal_log_trace_scalar_value(
             reinterpret_cast<const rocblas_half*>(beta));
         break;
+    case rocblas_datatype_bf16_r:
+        alphass << rocblas_internal_log_trace_scalar_value(
+            reinterpret_cast<const rocblas_bfloat16*>(alpha));
+        betass << rocblas_internal_log_trace_scalar_value(
+            reinterpret_cast<const rocblas_bfloat16*>(beta));
+        break;
     case rocblas_datatype_f32_r:
         alphass << rocblas_internal_log_trace_scalar_value(reinterpret_cast<const float*>(alpha));
         betass << rocblas_internal_log_trace_scalar_value(reinterpret_cast<const float*>(beta));
@@ -210,6 +223,12 @@ rocblas_status rocblas_internal_log_bench_alpha_beta_ex(rocblas_datatype compute
             "alpha", reinterpret_cast<const rocblas_half*>(alpha));
         betas = rocblas_internal_log_bench_scalar_value(
             "beta", reinterpret_cast<const rocblas_half*>(beta));
+        break;
+    case rocblas_datatype_bf16_r:
+        alphas = rocblas_internal_log_bench_scalar_value(
+            "alpha", reinterpret_cast<const rocblas_bfloat16*>(alpha));
+        betas = rocblas_internal_log_bench_scalar_value(
+            "beta", reinterpret_cast<const rocblas_bfloat16*>(beta));
         break;
     case rocblas_datatype_f32_r:
         alphas = rocblas_internal_log_bench_scalar_value("alpha",
@@ -300,3 +319,59 @@ template double rocblas_internal_value_category(const rocblas_float_complex* bet
                                                 rocblas_datatype             compute_type);
 template double rocblas_internal_value_category(const rocblas_double_complex* beta,
                                                 rocblas_datatype              compute_type);
+
+void rocblas_internal_log_kernel_select(rocblas_handle                       handle,
+                                        const rocblas_internal_gemm_problem& p,
+                                        const char*                          source,
+                                        const char*                          kernel,
+                                        const char*                          fallback_from)
+{
+    std::string alphas, betas;
+    (void)rocblas_internal_log_bench_alpha_beta_ex(p.compute_type, p.alpha, p.beta, alphas, betas);
+
+    const bool strided = !p.pointer_array && p.batch_count > 1;
+    const bool batched = p.pointer_array || strided;
+
+    constexpr int64_t i32_max = std::numeric_limits<int32_t>::max();
+    const bool        api_64
+        = std::max({p.m, p.n, p.k, p.lda, p.ldb, p.ldc, p.ldd, p.batch_count}) > i32_max;
+
+    const char* in_type  = rocblas_datatype_string(p.input_type);
+    const char* out_type = rocblas_datatype_string(p.output_type);
+
+    rocblas_internal_ostream bench;
+    bench << "./rocblas-bench" << (api_64 ? " --api 1" : "") << " -f "
+          << (p.pointer_array ? "gemm_batched_ex"
+              : strided       ? "gemm_strided_batched_ex"
+                              : "gemm_ex")
+          << " --transposeA " << rocblas_transpose_letter(p.trans_a) << " --transposeB "
+          << rocblas_transpose_letter(p.trans_b) << " -m " << p.m << " -n " << p.n << " -k " << p.k
+          << " " << alphas << " --a_type " << in_type << " --lda " << p.lda;
+    if(strided)
+        bench << " --stride_a " << p.stride_a;
+    bench << " --b_type " << in_type << " --ldb " << p.ldb;
+    if(strided)
+        bench << " --stride_b " << p.stride_b;
+    bench << " " << betas << " --c_type " << out_type << " --ldc " << p.ldc;
+    if(strided)
+        bench << " --stride_c " << p.stride_c;
+    bench << " --d_type " << out_type << " --ldd " << p.ldd;
+    if(strided)
+        bench << " --stride_d " << p.stride_d;
+    if(batched)
+        bench << " --batch_count " << p.batch_count;
+    bench << " --compute_type " << rocblas_datatype_string(p.compute_type) << " --algo "
+          << int32_t(p.algo) << " --solution_index " << p.solution_index << " --flags " << p.flags;
+    if(handle->atomics_mode == rocblas_atomics_allowed)
+        bench << " --atomics_allowed";
+
+    rocblas_internal_ostream meta;
+    meta << "# source=" << source;
+    if(kernel && *kernel)
+        meta << " kernel=" << kernel;
+    meta << " fallback_from=" << fallback_from
+         << " parent_api=" << (handle->current_api_name ? handle->current_api_name : "unknown");
+
+    rocblas_internal_logger logger;
+    logger.log_arguments(*handle->log_trace_os, " ", bench.str(), meta.str());
+}

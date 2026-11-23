@@ -65,6 +65,9 @@ RUN for tool in /usr/bin/llvm*-20; do \
 # Example build command for default tarball build using the ASIC and Git tag specified in the dockerfile:
 # docker build -f Dockerfile.ubuntu24.prebuilt -t rocblas:prebuilt .
 # This will download and install prebuilt binaries using therock-dist-linux-<THEROCK_ASIC><suffix>-<THEROCK_GIT_TAG>.tar.gz
+# THEROCK_ASIC defaults to "multiarch" (a single tarball covering every gfx), so the
+# default build works on any GPU. Pass --build-arg THEROCK_ASIC=<gfx> for a smaller
+# arch-specific tarball.
 #
 # Example build command when specifying a different ASIC and Git tag:
 # docker build -f Dockerfile.ubuntu24.prebuilt --build-arg THEROCK_ASIC=gfx950 --build-arg THEROCK_GIT_TAG=7.13.0a20260401 -t rocblas:prebuilt .
@@ -94,7 +97,7 @@ RUN for tool in /usr/bin/llvm*-20; do \
 # ============================================================================
 FROM base AS install_therock_prebuilt
 
-ARG THEROCK_ASIC=gfx94X
+ARG THEROCK_ASIC=multiarch
 ARG THEROCK_GIT_TAG=latest
 ARG THEROCK_PREBUILT_ID=
 ARG THEROCK_URL_BASE=https://nightly.repo.amd.com/rocm/core/tarball/

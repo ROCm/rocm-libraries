@@ -271,13 +271,15 @@ class TestDerive(unittest.TestCase):
 
 class TestParseAndSelect(unittest.TestCase):
     def test_parse_both_formats_and_select(self):
-        text = "Name:\tgfx950\nCounter_Name        :\tTCC_HIT\nName:\tGRBM_COUNT\n"
-        avail = counters.parse_list_avail(text)
-        self.assertIn("TCC_HIT", avail)
-        self.assertIn("GRBM_COUNT", avail)
-        sel = counters.select("gfx950", avail)
-        self.assertEqual(sel.get("l2_hit"), "TCC_HIT")
-        self.assertEqual(sel.get("total_clocks"), "GRBM_COUNT")
+        for arch in ("gfx942", "gfx950"):
+            with self.subTest(arch=arch):
+                text = f"Name:\t{arch}\nCounter_Name        :\tTCC_HIT\nName:\tGRBM_COUNT\n"
+                avail = counters.parse_list_avail(text)
+                self.assertIn("TCC_HIT", avail)
+                self.assertIn("GRBM_COUNT", avail)
+                sel = counters.select(arch, avail)
+                self.assertEqual(sel.get("l2_hit"), "TCC_HIT")
+                self.assertEqual(sel.get("total_clocks"), "GRBM_COUNT")
 
 
 if __name__ == "__main__":

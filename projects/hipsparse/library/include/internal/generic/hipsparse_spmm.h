@@ -28,6 +28,7 @@
 extern "C" {
 #endif
 
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
 /*! \ingroup generic_module
 *  \details
 *  \p hipsparseSpMM_bufferSize computes the required user-allocated buffer size needed when computing the
@@ -48,13 +49,13 @@ extern "C" {
 *  @param[in]
 *  opB                 matrix operation type.
 *  @param[in]
-*  alpha               scalar \f$\alpha\f$.
+*  alpha               scalar \f$\alpha\f$, which can be in host or device memory.
 *  @param[in]
 *  matA                sparse matrix descriptor.
 *  @param[in]
 *  matB                dense matrix descriptor.
 *  @param[in]
-*  beta                scalar \f$\beta\f$.
+*  beta                scalar \f$\beta\f$, which can be in host or device memory.
 *  @param[in]
 *  matC                dense matrix descriptor.
 *  @param[in]
@@ -63,6 +64,7 @@ extern "C" {
 *  alg                 SpMM algorithm for the SpMM computation.
 *  @param[out]
 *  pBufferSizeInBytes  number of bytes of the temporary storage buffer.
+*                      \p pBufferSizeInBytes is always a host variable, regardless of the pointer mode.
 *
 *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
@@ -70,7 +72,6 @@ extern "C" {
 *          \p pBufferSizeInBytes is nullptr, or \p opA or \p opB is invalid.
 *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p opA, \p opB, \p computeType, or \p alg is currently not supported.
 */
-#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSpMM_bufferSize(hipsparseHandle_t           handle,
                                            hipsparseOperation_t        opA,
@@ -98,6 +99,7 @@ hipsparseStatus_t hipsparseSpMM_bufferSize(hipsparseHandle_t           handle,
                                            size_t*                     pBufferSizeInBytes);
 #endif
 
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
 /*! \ingroup generic_module
 *  \details
 *  \p hipsparseSpMM_preprocess performs the required preprocessing used when computing the
@@ -118,13 +120,13 @@ hipsparseStatus_t hipsparseSpMM_bufferSize(hipsparseHandle_t           handle,
 *  @param[in]
 *  opB             matrix operation type.
 *  @param[in]
-*  alpha           scalar \f$\alpha\f$.
+*  alpha           scalar \f$\alpha\f$, which can be in host or device memory.
 *  @param[in]
 *  matA            matrix descriptor.
 *  @param[in]
 *  matB            matrix descriptor.
 *  @param[in]
-*  beta            scalar \f$\beta\f$.
+*  beta            scalar \f$\beta\f$, which can be in host or device memory.
 *  @param[in]
 *  matC            matrix descriptor.
 *  @param[in]
@@ -140,7 +142,6 @@ hipsparseStatus_t hipsparseSpMM_bufferSize(hipsparseHandle_t           handle,
 *  \retval      HIPSPARSE_STATUS_NOT_SUPPORTED \p opA, \p opB, \p computeType, or \p alg is
 *               currently not supported.
 */
-#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSpMM_preprocess(hipsparseHandle_t           handle,
                                            hipsparseOperation_t        opA,
@@ -168,6 +169,7 @@ hipsparseStatus_t hipsparseSpMM_preprocess(hipsparseHandle_t           handle,
                                            void*                       externalBuffer);
 #endif
 
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
 /*! \ingroup generic_module
 *  \brief Compute the sparse matrix multiplication with a dense matrix.
 *
@@ -217,7 +219,6 @@ hipsparseStatus_t hipsparseSpMM_preprocess(hipsparseHandle_t           handle,
 *  be performed.
 *
 *  <table>
-*  <caption id="spmm_csr_algorithms">CSR/CSC Algorithms</caption>
 *  <tr><th>CSR/CSC Algorithms
 *  <tr><td>HIPSPARSE_SPMM_CSR_ALG1</td>
 *  <tr><td>HIPSPARSE_SPMM_CSR_ALG2</td>
@@ -225,7 +226,6 @@ hipsparseStatus_t hipsparseSpMM_preprocess(hipsparseHandle_t           handle,
 *  </table>
 *
 *  <table>
-*  <caption id="spmm_coo_algorithms">COO Algorithms</caption>
 *  <tr><th>COO Algorithms
 *  <tr><td>HIPSPARSE_SPMM_COO_ALG1</td>
 *  <tr><td>HIPSPARSE_SPMM_COO_ALG2</td>
@@ -234,13 +234,11 @@ hipsparseStatus_t hipsparseSpMM_preprocess(hipsparseHandle_t           handle,
 *  </table>
 *
 *  <table>
-*  <caption id="spmm_bell_algorithms">Blocked-ELL Algorithms</caption>
 *  <tr><th>ELL Algorithms
 *  <tr><td>HIPSPARSE_SPMM_BLOCKED_ELL_ALG1</td>
 *  </table>
 *
 *  <table>
-*  <caption id="spmm_bsr_algorithms">BSR Algorithms</caption>
 *  <tr><th>BSR Algorithms
 *  <tr><td>HIPSPARSE_SPMM_BSR_ALG1</td>
 *  </table>
@@ -258,7 +256,6 @@ hipsparseStatus_t hipsparseSpMM_preprocess(hipsparseHandle_t           handle,
 *
 *  \par Uniform Precisions:
 *  <table>
-*  <caption id="spmm_uniform">Uniform Precisions</caption>
 *  <tr><th>A / B / C / compute_type
 *  <tr><td>HIP_R_32F
 *  <tr><td>HIP_R_64F
@@ -268,7 +265,6 @@ hipsparseStatus_t hipsparseSpMM_preprocess(hipsparseHandle_t           handle,
 *
 *  \par Mixed Precisions:
 *  <table>
-*  <caption id="spmm_mixed">Mixed Precisions</caption>
 *  <tr><th>A / B      <th>C         <th>compute_type
 *  <tr><td>HIP_R_8I   <td>HIP_R_32I <td>HIP_R_32I
 *  <tr><td>HIP_R_8I   <td>HIP_R_32F <td>HIP_R_32F
@@ -329,13 +325,13 @@ hipsparseStatus_t hipsparseSpMM_preprocess(hipsparseHandle_t           handle,
 *  @param[in]
 *  opB             matrix operation type.
 *  @param[in]
-*  alpha           scalar \f$\alpha\f$.
+*  alpha           scalar \f$\alpha\f$, which can be in host or device memory.
 *  @param[in]
 *  matA            matrix descriptor.
 *  @param[in]
 *  matB            matrix descriptor.
 *  @param[in]
-*  beta            scalar \f$\beta\f$.
+*  beta            scalar \f$\beta\f$, which can be in host or device memory.
 *  @param[in]
 *  matC            matrix descriptor.
 *  @param[in]
@@ -351,7 +347,6 @@ hipsparseStatus_t hipsparseSpMM_preprocess(hipsparseHandle_t           handle,
 *  \retval      HIPSPARSE_STATUS_NOT_SUPPORTED \p opA, \p opB, \p computeType, or \p alg is
 *               currently not supported.
 */
-#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSpMM(hipsparseHandle_t           handle,
                                 hipsparseOperation_t        opA,

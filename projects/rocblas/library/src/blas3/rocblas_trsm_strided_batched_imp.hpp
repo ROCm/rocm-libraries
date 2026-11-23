@@ -76,6 +76,8 @@ namespace
         if(!handle)
             return rocblas_status_invalid_handle;
 
+        rocblas_internal_api_scope api_scope(handle, rocblas_trsm_name<T>);
+
         auto                    check_numerics = handle->check_numerics;
         rocblas_internal_logger logger;
         /////////////

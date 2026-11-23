@@ -207,6 +207,7 @@ def _make_manifest(artifact, spec, *, seed: int, tol: int, warmup: int, iters: i
         kpg=conv.K,
         grid_explicit=grid,
         conv_layout="deep_fused_conv_pool_i8i4",
+        args_signature=_deep_fused_args_signature(),
         warmup_iters=warmup,
         timed_iters=iters,
         atoms=atoms,
@@ -217,7 +218,6 @@ def _make_manifest(artifact, spec, *, seed: int, tol: int, warmup: int, iters: i
         ),
         extra={
             "kind": "deep_fused_conv_pool_i8i4",
-            "args_signature": _deep_fused_args_signature(),
             "sig_has_bytes": 0,
             "pool": [
                 problem.pool_y,

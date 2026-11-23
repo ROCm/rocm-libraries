@@ -38,13 +38,23 @@
 #include "csrsv_device.h"
 #include "rocsparse_assign_async.hpp"
 #include "rocsparse_common.h"
+#include "rocsparse_grid.hpp"
 
 #include "rocsparse_csrsv_solve_kernel.hpp"
 #include "rocsparse_determine_indextype.hpp"
 
 namespace rocsparse
 {
-    template <uint32_t BLOCKSIZE, uint32_t WF_SIZE, bool SLEEP, typename I, typename J, typename T>
+    template <uint32_t BLOCKSIZE,
+              uint32_t WF_SIZE,
+              bool     SLEEP,
+              bool     CHUNKED,
+#ifdef ROCSPARSE_WITH_TRSM_REFACTORING
+              bool A_OP_CONJUGATE,
+#endif
+              typename I,
+              typename J,
+              typename T>
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void csrsv_kernel(J m,
                       ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
@@ -70,29 +80,98 @@ namespace rocsparse
                       rocsparse_diag_type  diag_type,
                       bool                 is_host_mode)
     {
+        // The host launches at most maxGridSize[1] batches per call, so a single
+        // block row per batch is enough. A loop over the batch here slows down the
+        // one-wavefront-per-row solve on matrices with very short rows.
         const uint32_t batch_index = blockIdx.y;
         ROCSPARSE_DEVICE_HOST_SCALAR_GET(alpha);
-        rocsparse::csrsv_device<BLOCKSIZE, WF_SIZE, SLEEP>(m,
-                                                           alpha,
-                                                           csr_row_ptr,
-                                                           csr_col_ind,
-                                                           csr_val + batch_index * csr_val_stride,
-                                                           csr_val_inc,
-                                                           x + batch_index * x_stride,
-                                                           x_inc,
-                                                           y + batch_index * y_stride,
-                                                           y_inc,
-                                                           done_array + batch_index * m,
-                                                           map,
-                                                           offset,
-                                                           zero_pivot
-                                                               + batch_index * zero_pivot_stride,
-                                                           idx_base,
-                                                           fill_mode,
-                                                           diag_type);
+
+        // grid.x is clamped, so walk the contiguous chunk of row blocks
+        // grid_x_chunk gives this block. No barrier is needed between row blocks:
+        // diagonal[wid] is only touched by its own wavefront. The two calls are
+        // spelled out because sharing them through a lambda changes the code
+        // generated for complex alpha.
+        if constexpr(CHUNKED)
+        {
+            int64_t first;
+            int64_t last;
+            rocsparse::grid_x_chunk(rocsparse::ceil_div(m, BLOCKSIZE / WF_SIZE),
+                                    hipGridDim_x,
+                                    hipBlockIdx_x,
+                                    first,
+                                    last);
+            for(int64_t block_id = first; block_id < last; ++block_id)
+            {
+                rocsparse::csrsv_device<BLOCKSIZE,
+                                        WF_SIZE,
+                                        SLEEP,
+                                        true
+#ifdef ROCSPARSE_WITH_TRSM_REFACTORING
+                                        ,
+                                        A_OP_CONJUGATE
+#endif
+                                        >(
+                    block_id,
+                    m,
+                    alpha,
+                    csr_row_ptr,
+                    csr_col_ind,
+                    rocsparse::load_pointer(csr_val, batch_index, csr_val_stride),
+                    csr_val_inc,
+                    rocsparse::load_pointer(x, batch_index, x_stride),
+                    x_inc,
+                    rocsparse::load_pointer(y, batch_index, y_stride),
+                    y_inc,
+                    rocsparse::load_pointer(done_array, batch_index, static_cast<int64_t>(m)),
+                    map,
+                    offset,
+                    rocsparse::load_pointer(zero_pivot, batch_index, zero_pivot_stride),
+                    idx_base,
+                    fill_mode,
+                    diag_type);
+            }
+        }
+        else
+        {
+            rocsparse::csrsv_device<BLOCKSIZE,
+                                    WF_SIZE,
+                                    SLEEP,
+                                    false
+#ifdef ROCSPARSE_WITH_TRSM_REFACTORING
+                                    ,
+                                    A_OP_CONJUGATE
+#endif
+                                    >(
+                hipBlockIdx_x,
+                m,
+                alpha,
+                csr_row_ptr,
+                csr_col_ind,
+                rocsparse::load_pointer(csr_val, batch_index, csr_val_stride),
+                csr_val_inc,
+                rocsparse::load_pointer(x, batch_index, x_stride),
+                x_inc,
+                rocsparse::load_pointer(y, batch_index, y_stride),
+                y_inc,
+                rocsparse::load_pointer(done_array, batch_index, static_cast<int64_t>(m)),
+                map,
+                offset,
+                rocsparse::load_pointer(zero_pivot, batch_index, zero_pivot_stride),
+                idx_base,
+                fill_mode,
+                diag_type);
+        }
     }
 
-    template <uint32_t BLOCKSIZE, uint32_t WF_SIZE, bool SLEEP, typename I, typename J, typename T>
+    template <uint32_t BLOCKSIZE,
+              uint32_t WF_SIZE,
+              bool     SLEEP,
+#ifdef ROCSPARSE_WITH_TRSM_REFACTORING
+              bool A_OP_CONJUGATE,
+#endif
+              typename I,
+              typename J,
+              typename T>
     static rocsparse_status launch_csrsv_kernel(rocsparse_handle handle,
                                                 int64_t          batch_count,
                                                 int64_t          m,
@@ -120,42 +199,70 @@ namespace rocsparse
                                                 bool                 is_host_mode)
     {
         auto alpha = reinterpret_cast<const T*>(alpha_);
-        dim3 csrsv_blocks((m * handle->wavefront_size - 1) / BLOCKSIZE + 1, batch_count);
         dim3 csrsv_threads(BLOCKSIZE);
-        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-            (rocsparse::csrsv_kernel<BLOCKSIZE, WF_SIZE, SLEEP, I, J, T>),
-            csrsv_blocks,
-            csrsv_threads,
-            0,
-            handle->stream,
-            static_cast<J>(m),
-            ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha),
-            alpha_stride,
-            reinterpret_cast<const I* __restrict__>(csr_row_ptr),
-            reinterpret_cast<const J* __restrict__>(csr_col_ind),
-            reinterpret_cast<const T* __restrict__>(csr_val),
-            csr_val_inc,
-            csr_val_stride,
-            reinterpret_cast<const T* __restrict__>(x),
-            x_inc,
-            x_stride,
-            reinterpret_cast<T*>(y),
-            y_inc,
-            y_stride,
-            done_array,
-            reinterpret_cast<const J* __restrict__>(map),
-            0,
-            reinterpret_cast<J*>(zero_pivot),
-            zero_pivot_stride,
-            idx_base,
-            fill_mode,
-            diag_type,
-            handle->pointer_mode == rocsparse_pointer_mode_host);
+        for(int64_t first = 0; first < batch_count;)
+        {
+            const uint32_t chunk = rocsparse::get_grid_size_y(handle, batch_count - first);
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse::dispatch_grid_stride_x(
+                handle,
+                rocsparse::ceil_div(m, BLOCKSIZE / WF_SIZE),
+                BLOCKSIZE,
+                [&](auto chunked, uint32_t grid) -> rocsparse_status {
+                    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+                        (rocsparse::csrsv_kernel<BLOCKSIZE,
+                                                 WF_SIZE,
+                                                 SLEEP,
+                                                 decltype(chunked)::value,
+#ifdef ROCSPARSE_WITH_TRSM_REFACTORING
+                                                 A_OP_CONJUGATE,
+#endif
+                                                 I,
+                                                 J,
+                                                 T>),
+                        dim3(grid, chunk),
+                        csrsv_threads,
+                        0,
+                        handle->stream,
+                        static_cast<J>(m),
+                        ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha),
+                        alpha_stride,
+                        reinterpret_cast<const I* __restrict__>(csr_row_ptr),
+                        reinterpret_cast<const J* __restrict__>(csr_col_ind),
+                        reinterpret_cast<const T* __restrict__>(csr_val) + first * csr_val_stride,
+                        csr_val_inc,
+                        csr_val_stride,
+                        reinterpret_cast<const T* __restrict__>(x) + first * x_stride,
+                        x_inc,
+                        x_stride,
+                        reinterpret_cast<T*>(y) + first * y_stride,
+                        y_inc,
+                        y_stride,
+                        done_array + first * m,
+                        reinterpret_cast<const J* __restrict__>(map),
+                        0,
+                        reinterpret_cast<J*>(zero_pivot) + first * zero_pivot_stride,
+                        zero_pivot_stride,
+                        idx_base,
+                        fill_mode,
+                        diag_type,
+                        handle->pointer_mode == rocsparse_pointer_mode_host);
+                    return rocsparse_status_success;
+                }));
+            first += chunk;
+        }
 
         return rocsparse_status_success;
     }
 
-    template <uint32_t BLOCKSIZE, uint32_t WF_SIZE, bool SLEEP, typename I, typename J, typename T>
+    template <uint32_t BLOCKSIZE,
+              uint32_t WF_SIZE,
+              bool     SLEEP,
+#ifdef ROCSPARSE_WITH_TRSM_REFACTORING
+              bool A_OP_CONJUGATE,
+#endif
+              typename I,
+              typename J,
+              typename T>
     static rocsparse_status launch_csrsv_kernel(rocsparse_handle            handle,
                                                 int64_t                     batch_count,
                                                 int64_t                     m,
@@ -172,81 +279,143 @@ namespace rocsparse
                                                 bool    is_host_mode)
     {
         auto          alpha = reinterpret_cast<const T*>(alpha_);
-        dim3          csrsv_blocks((m * handle->wavefront_size - 1) / BLOCKSIZE + 1, batch_count);
         dim3          csrsv_threads(BLOCKSIZE);
         const int64_t csr_val_inc = static_cast<int64_t>(1);
-        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-            (rocsparse::csrsv_kernel<BLOCKSIZE, WF_SIZE, SLEEP, I, J, T>),
-            csrsv_blocks,
-            csrsv_threads,
-            0,
-            handle->stream,
-            static_cast<J>(m),
-            ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha),
-            alpha_stride,
-            A->const_row_data,
-            A->const_col_data,
-            A->const_val_data,
-            csr_val_inc,
-            A->batch_stride,
-            x->const_values,
-            x->inc,
-            x->batch_stride,
-            y->values,
-            y->inc,
-            y->batch_stride,
-            done_array,
-            map,
-            0,
-            zero_pivot,
-            zero_pivot_stride,
-            A->descr->base,
-            A->descr->fill_mode,
-            A->descr->diag_type,
-            handle->pointer_mode == rocsparse_pointer_mode_host);
+        for(int64_t first = 0; first < batch_count;)
+        {
+            const uint32_t chunk = rocsparse::get_grid_size_y(handle, batch_count - first);
+            dim3           csrsv_blocks((m * handle->wavefront_size - 1) / BLOCKSIZE + 1, chunk);
+            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+                (rocsparse::csrsv_kernel<BLOCKSIZE,
+                                         WF_SIZE,
+                                         SLEEP,
+#ifdef ROCSPARSE_WITH_TRSM_REFACTORING
+                                         A_OP_CONJUGATE,
+#endif
+                                         I,
+                                         J,
+                                         T>),
+                csrsv_blocks,
+                csrsv_threads,
+                0,
+                handle->stream,
+                static_cast<J>(m),
+                ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha),
+                alpha_stride,
+                reinterpret_cast<const I*>(A->const_row_data),
+                reinterpret_cast<const J*>(A->const_col_data),
+                reinterpret_cast<const T*>(A->const_val_data) + first * A->batch_stride,
+                csr_val_inc,
+                A->batch_stride,
+                reinterpret_cast<const T*>(x->const_values) + first * x->batch_stride,
+                x->inc,
+                x->batch_stride,
+                reinterpret_cast<T*>(y->values) + first * y->batch_stride,
+                y->inc,
+                y->batch_stride,
+                done_array + first * m,
+                reinterpret_cast<const J*>(map),
+                0,
+                reinterpret_cast<J*>(zero_pivot) + first * zero_pivot_stride,
+                zero_pivot_stride,
+                A->descr->base,
+                A->descr->fill_mode,
+                A->descr->diag_type,
+                handle->pointer_mode == rocsparse_pointer_mode_host);
+            first += chunk;
+        }
         return rocsparse_status_success;
     }
 
     using tpl_t = std::tuple<uint32_t,
                              uint32_t,
                              bool,
+#ifdef ROCSPARSE_WITH_TRSM_REFACTORING
+                             bool,
+#endif
                              rocsparse_indextype,
                              rocsparse_indextype,
                              rocsparse_datatype>;
+
     // clang-format off
-#define CONFIG(A_, B_, C_, I_, J_, T_)                                     \
-    {tpl_t(A_, B_, C_, I_, J_, T_),                                        \
-     launch_csrsv_kernel<A_,                                               \
-                         B_,                                               \
-                         C_,                                               \
+#ifdef ROCSPARSE_WITH_TRSM_REFACTORING
+#define CONFIG(A_, B_, C_, D_, I_, J_, T_)				\
+  {tpl_t(A_, B_, C_, D_, I_, J_, T_),					\
+      launch_csrsv_kernel<A_,						\
+			  B_,						\
+			  C_,						\
+			  D_,						\
+			  typename rocsparse::indextype_traits<I_>::type_t, \
+			  typename rocsparse::indextype_traits<J_>::type_t, \
+			  typename rocsparse::datatype_traits<T_>::type_t>}
+#else
+#define CONFIG(A_, B_, C_, D_, I_, J_, T_)                                 \
+    {tpl_t(A_, B_, C_, I_, J_, T_),                                       \
+     launch_csrsv_kernel<A_,                                              \
+                         B_,                                             \
+                         C_,                                             \
                          typename rocsparse::indextype_traits<I_>::type_t, \
                          typename rocsparse::indextype_traits<J_>::type_t, \
                          typename rocsparse::datatype_traits<T_>::type_t>}
+#endif
     // clang-format on
+
 #define BLOCKSIZE 1024
-    static const std::map<tpl_t, rocsparse::csrsv_launch_kernel_t> s_spmm_template_dispatch{{
+    static const std::map<tpl_t, rocsparse::csrsv_launch_kernel_t> s_kernel_dispatch{{
 
         CONFIG(BLOCKSIZE,
                64,
                true,
+               false,
                rocsparse_indextype_i32,
                rocsparse_indextype_i32,
                rocsparse_datatype_f32_r),
         CONFIG(BLOCKSIZE,
                64,
                false,
+               false,
+
                rocsparse_indextype_i32,
                rocsparse_indextype_i32,
                rocsparse_datatype_f32_r),
         CONFIG(BLOCKSIZE,
                32,
                false,
+               false,
+
                rocsparse_indextype_i32,
                rocsparse_indextype_i32,
                rocsparse_datatype_f32_r),
 
         CONFIG(BLOCKSIZE,
                64,
+               true,
+               false,
+
+               rocsparse_indextype_i32,
+               rocsparse_indextype_i32,
+               rocsparse_datatype_f32_c),
+        CONFIG(BLOCKSIZE,
+               64,
+               false,
+               false,
+
+               rocsparse_indextype_i32,
+               rocsparse_indextype_i32,
+               rocsparse_datatype_f32_c),
+        CONFIG(BLOCKSIZE,
+               32,
+               false,
+               false,
+
+               rocsparse_indextype_i32,
+               rocsparse_indextype_i32,
+               rocsparse_datatype_f32_c),
+
+#ifdef ROCSPARSE_WITH_TRSM_REFACTORING
+        CONFIG(BLOCKSIZE,
+               64,
+               true,
                true,
                rocsparse_indextype_i32,
                rocsparse_indextype_i32,
@@ -254,37 +423,73 @@ namespace rocsparse
         CONFIG(BLOCKSIZE,
                64,
                false,
+               true,
                rocsparse_indextype_i32,
                rocsparse_indextype_i32,
                rocsparse_datatype_f32_c),
         CONFIG(BLOCKSIZE,
                32,
                false,
+               true,
                rocsparse_indextype_i32,
                rocsparse_indextype_i32,
                rocsparse_datatype_f32_c),
+#endif
 
         CONFIG(BLOCKSIZE,
                64,
                true,
+               false,
+
                rocsparse_indextype_i32,
                rocsparse_indextype_i32,
                rocsparse_datatype_f64_r),
         CONFIG(BLOCKSIZE,
                64,
                false,
+               false,
+
                rocsparse_indextype_i32,
                rocsparse_indextype_i32,
                rocsparse_datatype_f64_r),
         CONFIG(BLOCKSIZE,
                32,
                false,
+               false,
+
                rocsparse_indextype_i32,
                rocsparse_indextype_i32,
                rocsparse_datatype_f64_r),
 
         CONFIG(BLOCKSIZE,
                64,
+               true,
+               false,
+
+               rocsparse_indextype_i32,
+               rocsparse_indextype_i32,
+               rocsparse_datatype_f64_c),
+        CONFIG(BLOCKSIZE,
+               64,
+               false,
+               false,
+
+               rocsparse_indextype_i32,
+               rocsparse_indextype_i32,
+               rocsparse_datatype_f64_c),
+        CONFIG(BLOCKSIZE,
+               32,
+               false,
+               false,
+
+               rocsparse_indextype_i32,
+               rocsparse_indextype_i32,
+               rocsparse_datatype_f64_c),
+
+#ifdef ROCSPARSE_WITH_TRSM_REFACTORING
+        CONFIG(BLOCKSIZE,
+               64,
+               true,
                true,
                rocsparse_indextype_i32,
                rocsparse_indextype_i32,
@@ -292,37 +497,73 @@ namespace rocsparse
         CONFIG(BLOCKSIZE,
                64,
                false,
+               true,
                rocsparse_indextype_i32,
                rocsparse_indextype_i32,
                rocsparse_datatype_f64_c),
         CONFIG(BLOCKSIZE,
                32,
                false,
+               true,
                rocsparse_indextype_i32,
                rocsparse_indextype_i32,
                rocsparse_datatype_f64_c),
+#endif
 
         CONFIG(BLOCKSIZE,
                64,
                true,
+               false,
+
                rocsparse_indextype_i64,
                rocsparse_indextype_i64,
                rocsparse_datatype_f32_r),
         CONFIG(BLOCKSIZE,
                64,
                false,
+               false,
+
                rocsparse_indextype_i64,
                rocsparse_indextype_i64,
                rocsparse_datatype_f32_r),
         CONFIG(BLOCKSIZE,
                32,
                false,
+               false,
+
                rocsparse_indextype_i64,
                rocsparse_indextype_i64,
                rocsparse_datatype_f32_r),
 
         CONFIG(BLOCKSIZE,
                64,
+               true,
+               false,
+
+               rocsparse_indextype_i64,
+               rocsparse_indextype_i64,
+               rocsparse_datatype_f32_c),
+        CONFIG(BLOCKSIZE,
+               64,
+               false,
+               false,
+
+               rocsparse_indextype_i64,
+               rocsparse_indextype_i64,
+               rocsparse_datatype_f32_c),
+        CONFIG(BLOCKSIZE,
+               32,
+               false,
+               false,
+
+               rocsparse_indextype_i64,
+               rocsparse_indextype_i64,
+               rocsparse_datatype_f32_c),
+
+#ifdef ROCSPARSE_WITH_TRSM_REFACTORING
+        CONFIG(BLOCKSIZE,
+               64,
+               true,
                true,
                rocsparse_indextype_i64,
                rocsparse_indextype_i64,
@@ -330,31 +571,40 @@ namespace rocsparse
         CONFIG(BLOCKSIZE,
                64,
                false,
+               true,
                rocsparse_indextype_i64,
                rocsparse_indextype_i64,
                rocsparse_datatype_f32_c),
         CONFIG(BLOCKSIZE,
                32,
                false,
+               true,
                rocsparse_indextype_i64,
                rocsparse_indextype_i64,
                rocsparse_datatype_f32_c),
+#endif
 
         CONFIG(BLOCKSIZE,
                64,
                true,
+               false,
+
                rocsparse_indextype_i64,
                rocsparse_indextype_i64,
                rocsparse_datatype_f64_r),
         CONFIG(BLOCKSIZE,
                64,
                false,
+               false,
+
                rocsparse_indextype_i64,
                rocsparse_indextype_i64,
                rocsparse_datatype_f64_r),
         CONFIG(BLOCKSIZE,
                32,
                false,
+               false,
+
                rocsparse_indextype_i64,
                rocsparse_indextype_i64,
                rocsparse_datatype_f64_r),
@@ -362,37 +612,73 @@ namespace rocsparse
         CONFIG(BLOCKSIZE,
                64,
                true,
+               false,
+
                rocsparse_indextype_i64,
                rocsparse_indextype_i64,
                rocsparse_datatype_f64_c),
         CONFIG(BLOCKSIZE,
                64,
                false,
+               false,
+
                rocsparse_indextype_i64,
                rocsparse_indextype_i64,
                rocsparse_datatype_f64_c),
         CONFIG(BLOCKSIZE,
                32,
                false,
+               false,
+
                rocsparse_indextype_i64,
                rocsparse_indextype_i64,
                rocsparse_datatype_f64_c),
 
+#ifdef ROCSPARSE_WITH_TRSM_REFACTORING
         CONFIG(BLOCKSIZE,
                64,
                true,
+               true,
+               rocsparse_indextype_i64,
+               rocsparse_indextype_i64,
+               rocsparse_datatype_f64_c),
+        CONFIG(BLOCKSIZE,
+               64,
+               false,
+               true,
+               rocsparse_indextype_i64,
+               rocsparse_indextype_i64,
+               rocsparse_datatype_f64_c),
+        CONFIG(BLOCKSIZE,
+               32,
+               false,
+               true,
+               rocsparse_indextype_i64,
+               rocsparse_indextype_i64,
+               rocsparse_datatype_f64_c),
+#endif
+
+        CONFIG(BLOCKSIZE,
+               64,
+               true,
+               false,
+
                rocsparse_indextype_i32,
                rocsparse_indextype_i64,
                rocsparse_datatype_f32_r),
         CONFIG(BLOCKSIZE,
                64,
                false,
+               false,
+
                rocsparse_indextype_i32,
                rocsparse_indextype_i64,
                rocsparse_datatype_f32_r),
         CONFIG(BLOCKSIZE,
                32,
                false,
+               false,
+
                rocsparse_indextype_i32,
                rocsparse_indextype_i64,
                rocsparse_datatype_f32_r),
@@ -400,43 +686,106 @@ namespace rocsparse
         CONFIG(BLOCKSIZE,
                64,
                true,
+               false,
+
                rocsparse_indextype_i32,
                rocsparse_indextype_i64,
                rocsparse_datatype_f32_c),
         CONFIG(BLOCKSIZE,
                64,
                false,
+               false,
+
                rocsparse_indextype_i32,
                rocsparse_indextype_i64,
                rocsparse_datatype_f32_c),
         CONFIG(BLOCKSIZE,
                32,
                false,
+               false,
+
                rocsparse_indextype_i32,
                rocsparse_indextype_i64,
                rocsparse_datatype_f32_c),
+
+#ifdef ROCSPARSE_WITH_TRSM_REFACTORING
+        CONFIG(BLOCKSIZE,
+               64,
+               true,
+               true,
+               rocsparse_indextype_i32,
+               rocsparse_indextype_i64,
+               rocsparse_datatype_f32_c),
+        CONFIG(BLOCKSIZE,
+               64,
+               false,
+               true,
+               rocsparse_indextype_i32,
+               rocsparse_indextype_i64,
+               rocsparse_datatype_f32_c),
+        CONFIG(BLOCKSIZE,
+               32,
+               false,
+               true,
+               rocsparse_indextype_i32,
+               rocsparse_indextype_i64,
+               rocsparse_datatype_f32_c),
+#endif
 
         CONFIG(BLOCKSIZE,
                64,
                true,
+               false,
+
                rocsparse_indextype_i32,
                rocsparse_indextype_i64,
                rocsparse_datatype_f64_r),
         CONFIG(BLOCKSIZE,
                64,
                false,
+               false,
+
                rocsparse_indextype_i32,
                rocsparse_indextype_i64,
                rocsparse_datatype_f64_r),
         CONFIG(BLOCKSIZE,
                32,
                false,
+               false,
+
                rocsparse_indextype_i32,
                rocsparse_indextype_i64,
                rocsparse_datatype_f64_r),
 
         CONFIG(BLOCKSIZE,
                64,
+               true,
+               false,
+
+               rocsparse_indextype_i32,
+               rocsparse_indextype_i64,
+               rocsparse_datatype_f64_c),
+        CONFIG(BLOCKSIZE,
+               64,
+               false,
+               false,
+
+               rocsparse_indextype_i32,
+               rocsparse_indextype_i64,
+               rocsparse_datatype_f64_c),
+        CONFIG(BLOCKSIZE,
+               32,
+               false,
+               false,
+
+               rocsparse_indextype_i32,
+               rocsparse_indextype_i64,
+               rocsparse_datatype_f64_c),
+
+#ifdef ROCSPARSE_WITH_TRSM_REFACTORING
+        CONFIG(BLOCKSIZE,
+               64,
+               true,
                true,
                rocsparse_indextype_i32,
                rocsparse_indextype_i64,
@@ -444,37 +793,73 @@ namespace rocsparse
         CONFIG(BLOCKSIZE,
                64,
                false,
+               true,
                rocsparse_indextype_i32,
                rocsparse_indextype_i64,
                rocsparse_datatype_f64_c),
         CONFIG(BLOCKSIZE,
                32,
                false,
+               true,
                rocsparse_indextype_i32,
                rocsparse_indextype_i64,
                rocsparse_datatype_f64_c),
+#endif
 
         CONFIG(BLOCKSIZE,
                64,
                true,
+               false,
+
                rocsparse_indextype_i64,
                rocsparse_indextype_i32,
                rocsparse_datatype_f32_r),
         CONFIG(BLOCKSIZE,
                64,
                false,
+               false,
+
                rocsparse_indextype_i64,
                rocsparse_indextype_i32,
                rocsparse_datatype_f32_r),
         CONFIG(BLOCKSIZE,
                32,
                false,
+               false,
+
                rocsparse_indextype_i64,
                rocsparse_indextype_i32,
                rocsparse_datatype_f32_r),
 
         CONFIG(BLOCKSIZE,
                64,
+               true,
+               false,
+
+               rocsparse_indextype_i64,
+               rocsparse_indextype_i32,
+               rocsparse_datatype_f32_c),
+        CONFIG(BLOCKSIZE,
+               64,
+               false,
+               false,
+
+               rocsparse_indextype_i64,
+               rocsparse_indextype_i32,
+               rocsparse_datatype_f32_c),
+        CONFIG(BLOCKSIZE,
+               32,
+               false,
+               false,
+
+               rocsparse_indextype_i64,
+               rocsparse_indextype_i32,
+               rocsparse_datatype_f32_c),
+
+#ifdef ROCSPARSE_WITH_TRSM_REFACTORING
+        CONFIG(BLOCKSIZE,
+               64,
+               true,
                true,
                rocsparse_indextype_i64,
                rocsparse_indextype_i32,
@@ -482,37 +867,73 @@ namespace rocsparse
         CONFIG(BLOCKSIZE,
                64,
                false,
+               true,
                rocsparse_indextype_i64,
                rocsparse_indextype_i32,
                rocsparse_datatype_f32_c),
         CONFIG(BLOCKSIZE,
                32,
                false,
+               true,
                rocsparse_indextype_i64,
                rocsparse_indextype_i32,
                rocsparse_datatype_f32_c),
+#endif
 
         CONFIG(BLOCKSIZE,
                64,
                true,
+               false,
+
                rocsparse_indextype_i64,
                rocsparse_indextype_i32,
                rocsparse_datatype_f64_r),
         CONFIG(BLOCKSIZE,
                64,
                false,
+               false,
+
                rocsparse_indextype_i64,
                rocsparse_indextype_i32,
                rocsparse_datatype_f64_r),
         CONFIG(BLOCKSIZE,
                32,
                false,
+               false,
+
                rocsparse_indextype_i64,
                rocsparse_indextype_i32,
                rocsparse_datatype_f64_r),
 
         CONFIG(BLOCKSIZE,
                64,
+               true,
+               false,
+
+               rocsparse_indextype_i64,
+               rocsparse_indextype_i32,
+               rocsparse_datatype_f64_c),
+        CONFIG(BLOCKSIZE,
+               64,
+               false,
+               false,
+
+               rocsparse_indextype_i64,
+               rocsparse_indextype_i32,
+               rocsparse_datatype_f64_c),
+        CONFIG(BLOCKSIZE,
+               32,
+               false,
+               false,
+
+               rocsparse_indextype_i64,
+               rocsparse_indextype_i32,
+               rocsparse_datatype_f64_c),
+
+#ifdef ROCSPARSE_WITH_TRSM_REFACTORING
+        CONFIG(BLOCKSIZE,
+               64,
+               true,
                true,
                rocsparse_indextype_i64,
                rocsparse_indextype_i32,
@@ -520,38 +941,55 @@ namespace rocsparse
         CONFIG(BLOCKSIZE,
                64,
                false,
+               true,
                rocsparse_indextype_i64,
                rocsparse_indextype_i32,
                rocsparse_datatype_f64_c),
         CONFIG(BLOCKSIZE,
                32,
                false,
+               true,
                rocsparse_indextype_i64,
                rocsparse_indextype_i32,
-               rocsparse_datatype_f64_c)}};
+               rocsparse_datatype_f64_c)
+#endif
 
-    rocsparse_status csrsv_launch_kernel_find(rocsparse::csrsv_launch_kernel_t* spmm_function_,
-                                              uint32_t                          A,
-                                              uint32_t                          B,
-                                              bool                              C,
-                                              rocsparse_indextype               i_type_,
-                                              rocsparse_indextype               j_type_,
-                                              rocsparse_datatype                a_type_)
+    }};
+
+    rocsparse_status csrsv_launch_kernel_find(rocsparse::csrsv_launch_kernel_t* kernel_,
+                                              uint32_t                          blocksize,
+                                              uint32_t                          wfsize,
+                                              bool                              sleep,
+#ifdef ROCSPARSE_WITH_TRSM_REFACTORING
+                                              bool conjugate,
+#endif
+                                              rocsparse_indextype i_type_,
+                                              rocsparse_indextype j_type_,
+                                              rocsparse_datatype  a_type_)
     {
-        const auto& it = rocsparse::s_spmm_template_dispatch.find(
-            rocsparse::tpl_t(A, B, C, i_type_, j_type_, a_type_));
+        const auto& it = rocsparse::s_kernel_dispatch.find(rocsparse::tpl_t(blocksize,
+                                                                            wfsize,
+                                                                            sleep,
+#ifdef ROCSPARSE_WITH_TRSM_REFACTORING
+                                                                            conjugate,
+#endif
+                                                                            i_type_,
+                                                                            j_type_,
+                                                                            a_type_));
 
-        if(it != rocsparse::s_spmm_template_dispatch.end())
+        if(it != rocsparse::s_kernel_dispatch.end())
         {
-            spmm_function_[0] = it->second;
+            kernel_[0] = it->second;
         }
         // LCOV_EXCL_START
         else
         {
-
             std::stringstream sstr;
             sstr << "invalid precision configuration: "
-                 << ", blocksize: " << A << ", wfsize: " << B << ", sleep: " << C
+                 << ", blocksize: " << blocksize << ", wfsize: " << wfsize << ", sleep: " << sleep
+#ifdef ROCSPARSE_WITH_TRSM_REFACTORING
+                 << ", conjugate: " << conjugate
+#endif
                  << ", i_type: " << rocsparse::enum_utils::to_string(i_type_)
                  << ", j_type: " << rocsparse::enum_utils::to_string(j_type_)
                  << ", a_type: " << rocsparse::enum_utils::to_string(a_type_);

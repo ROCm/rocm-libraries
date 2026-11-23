@@ -24,6 +24,8 @@ import argparse
 import itertools
 import json
 import logging
+import math
+import re
 import concurrent.futures
 from dataclasses import dataclass
 from pathlib import Path
@@ -113,11 +115,25 @@ class TraitConfigBase:
             ("basic_async_v1", "cshuffle", "interwave"),
             ("basic_async_v1", "default", "interwave"),
             ("comp_tdm", "tdm", "interwave"),
+            ("comp_tdm", "tdmstaged", "interwave"),
             ("comp_tdm", "cshuffle", "interwave"),
             ("comp_tdm", "default", "interwave"),
             ("comp_tdm_v2", "tdm", "interwave"),
+            ("comp_tdm_v2", "tdmstaged", "interwave"),
             ("comp_tdm_v2", "cshuffle", "interwave"),
             ("comp_tdm_v2", "default", "interwave"),
+            ("comp_tdm_pc", "tdm", "interwave"),
+            ("comp_tdm_pc", "tdmstaged", "interwave"),
+            ("comp_tdm_pc", "cshuffle", "interwave"),
+            ("comp_tdm_pc", "default", "interwave"),
+            ("comp_tdm_v3", "tdm", "interwave"),
+            ("comp_tdm_v3", "tdmstaged", "interwave"),
+            ("comp_tdm_v3", "cshuffle", "interwave"),
+            ("comp_tdm_v3", "default", "interwave"),
+            ("comp_tdm_ra", "tdm", "interwave"),
+            ("comp_tdm_ra", "tdmstaged", "interwave"),
+            ("comp_tdm_ra", "cshuffle", "interwave"),
+            ("comp_tdm_ra", "default", "interwave"),
         }
     )
 
@@ -191,9 +207,20 @@ class CommonTypeMappings:
         "compv5": "GemmPipelineAgBgCrCompV5",
         "preshufflev2": "WeightPreshufflePipelineAGmemBGmemCRegV2",
         "comp_async": "GemmPipelineAgBgCrCompAsync",
-        # gfx1250 only (Tensor Data Mover); always paired with the tdm epilogue.
+        # gfx1250 only (Tensor Data Mover); see tdm_pipeline_epilogues for the epilogues.
         "comp_tdm": "GemmPipelineAgBgCrCompTDMV1",
         "comp_tdm_v2": "GemmPipelineAgBgCrCompTDMV2",
+        "comp_tdm_pc": "GemmPipelineAgBgCrCompTDMProducerConsumer",
+        "comp_tdm_v3": "GemmPipelineAgBgCrCompTDMV3",
+        "comp_tdm_ra": "GemmPipelineAgBgCrCompTDMRunAhead",
+        "preshuffle_tdm": "WeightPreshufflePipelineAGmemBGmemCRegTDM",
+    }
+
+    # Policy template of the ring-configurable pipelines (RING_PIPELINES), taking
+    # <NumSlots, ring parameter>; emitted only for a non-default ring.
+    PIPELINE_TO_RING_POLICY = {
+        "comp_tdm_pc": "GemmPipelineAgBgCrCompTDMProducerConsumerPolicy",
+        "comp_tdm_ra": "GemmPipelineAgBgCrCompTDMRunAheadPolicy",
     }
 
     PIPELINE_TO_BASE = {
@@ -205,6 +232,10 @@ class CommonTypeMappings:
         "comp_async": "BaseGemmPipelineAgBgCrCompAsync",
         "comp_tdm": "BaseGemmPipelineAgBgCrCompTDM",
         "comp_tdm_v2": "BaseGemmPipelineAgBgCrCompTDM",
+        "comp_tdm_pc": "BaseGemmPipelineAgBgCrCompTDM",
+        "comp_tdm_v3": "BaseGemmPipelineAgBgCrCompTDM",
+        "comp_tdm_ra": "BaseGemmPipelineAgBgCrCompTDM",
+        "preshuffle_tdm": "BaseWeightPreshufflePipelineAGmemBGmemCRegTDM",
     }
 
     PIPELINE_TO_DISPATCHER = {
@@ -216,6 +247,10 @@ class CommonTypeMappings:
         "comp_async": "Pipeline::CompAsync",
         "comp_tdm": "Pipeline::CompTDMV1",
         "comp_tdm_v2": "Pipeline::CompTDMV2",
+        "comp_tdm_pc": "Pipeline::CompTDMPC",
+        "comp_tdm_v3": "Pipeline::CompTDMV3",
+        "comp_tdm_ra": "Pipeline::CompTDMRA",
+        "preshuffle_tdm": "Pipeline::PreShuffleTDM",
     }
 
     SCHEDULER_TO_CK = {
@@ -234,6 +269,7 @@ class CommonTypeMappings:
         "cshuffle": "Epilogue::CShuffle",
         "default": "Epilogue::Default",
         "tdm": "Epilogue::Tdm",
+        "tdmstaged": "Epilogue::TdmStaged",
     }
 
     @staticmethod
@@ -258,6 +294,29 @@ class CommonTypeMappings:
         fp32.
         """
         return "int32" if dtype == "int8" else "fp32"
+
+    # A/B element dtypes whose (A, B, Acc) triple the GEMM arch validator can
+    # resolve. Anything else (e.g. pk_fp4) must fail loudly rather than be
+    # validated under another dtype's warp-tile and LDS rules.
+    ARCH_VALIDATION_DTYPES = ("fp16", "bf16", "fp32", "fp8", "bf8", "int8")
+
+    # Subset of ARCH_VALIDATION_DTYPES that must have an explicit warp-tile
+    # entry for the target arch. The arch filter treats a missing entry as
+    # "unknown, allow", which would let every warp tile through unchecked.
+    WARP_TILE_ENTRY_REQUIRED_DTYPES = ("fp32",)
+
+    @classmethod
+    def get_arch_dtype_triple(cls, dtype: str) -> Tuple[str, str, str]:
+        """Return the (A, B, Acc) dtype triple used for arch validation.
+
+        Raises ValueError naming *dtype* when it has no mapping.
+        """
+        if dtype not in cls.ARCH_VALIDATION_DTYPES:
+            raise ValueError(
+                f"Unsupported GEMM datatype {dtype!r} for arch validation; "
+                f"supported: {', '.join(cls.ARCH_VALIDATION_DTYPES)}"
+            )
+        return (dtype, dtype, cls.get_acc_dtype(dtype))
 
 
 # ============================================================================
@@ -482,9 +541,15 @@ def make_quant_kernel_name(
     pipeline: str,
     epilogue: str,
     scheduler: str,
-    tile_m: int, tile_n: int, tile_k: int,
-    warp_m: int, warp_n: int, warp_k: int,
-    warp_tile_m: int, warp_tile_n: int, warp_tile_k: int,
+    tile_m: int,
+    tile_n: int,
+    tile_k: int,
+    warp_m: int,
+    warp_n: int,
+    warp_k: int,
+    warp_tile_m: int,
+    warp_tile_n: int,
+    warp_tile_k: int,
     group_segments: Sequence[str] = (),
     flags: Sequence[Tuple[bool, str]] = (),
 ) -> str:
@@ -543,8 +608,29 @@ def bquant_effective_epilogue(
     Returns "permute_n" when PermuteNEpilogue is selected, "cshuffle" otherwise.
     """
     return quant_effective_epilogue(
-        tile_n, warp_n, warp_tile_n, quant_group_n,
+        tile_n,
+        warp_n,
+        warp_tile_n,
+        quant_group_n,
         tiled_mma_permute_n=preshuffle_b,
+    )
+
+
+def gemm_bquant_effective_epilogue(
+    tile_n: int,
+    warp_n: int,
+    warp_tile_n: int,
+    quant_group_n: int,
+    *,
+    pipeline: str,
+    requested_epilogue: str,
+    preshuffle_b: bool = False,
+) -> str:
+    """Honor native CompV3 default epilogues for non-grouped BQuant."""
+    if pipeline == "compv3" and not preshuffle_b and requested_epilogue == "default":
+        return "default"
+    return bquant_effective_epilogue(
+        tile_n, warp_n, warp_tile_n, quant_group_n, preshuffle_b
     )
 
 
@@ -552,11 +638,17 @@ def make_bquant_kernel_name(
     variant_key: str,
     layout: str,
     pipeline: str,
-    epilogue: str,  # ignored — actual epilogue is computed from tile params via bquant_effective_epilogue
+    epilogue: str,
     scheduler: str,
-    tile_m: int, tile_n: int, tile_k: int,
-    warp_m: int, warp_n: int, warp_k: int,
-    warp_tile_m: int, warp_tile_n: int, warp_tile_k: int,
+    tile_m: int,
+    tile_n: int,
+    tile_k: int,
+    warp_m: int,
+    warp_n: int,
+    warp_k: int,
+    warp_tile_m: int,
+    warp_tile_n: int,
+    warp_tile_k: int,
     quant_group_m: int,
     quant_group_n: int,
     quant_group_k: int,
@@ -569,28 +661,46 @@ def make_bquant_kernel_name(
     Both BQuantKernelConfig (utils) and BQuantKernelSpec (codegen) delegate to this
     function so the two sides are guaranteed to stay byte-exact.
 
-    The epilogue segment in the name reflects the epilogue the codegen actually emits
-    (computed via bquant_effective_epilogue from tile params) rather than the
-    user-specified epilogue string, so the name always matches the compiled kernel.
-    The ``epilogue`` parameter is accepted for call-site compatibility but not used.
+    The epilogue segment reflects the emitted kernel. Non-grouped CompV3 honors
+    the native default trait when PreshuffleB is disabled. Grouped kernels and
+    weight-preshuffle paths retain their existing effective-epilogue policy.
 
     ``name_prefix`` selects the operator family. It defaults to
     ``"grouped_gemm_bquant"`` for backward compatibility with the quant-grouped
     (single-problem) BQuant bridge already in tree; the plain non-grouped
     ``gemm_bquant`` bridge under 38_block_scale_gemm passes ``"gemm_bquant"``.
     """
+    effective_epilogue = (
+        gemm_bquant_effective_epilogue(
+            tile_n,
+            warp_n,
+            warp_tile_n,
+            quant_group_n,
+            pipeline=pipeline,
+            requested_epilogue=epilogue,
+            preshuffle_b=preshuffle_b,
+        )
+        if name_prefix == "gemm_bquant"
+        else bquant_effective_epilogue(
+            tile_n, warp_n, warp_tile_n, quant_group_n, preshuffle_b
+        )
+    )
     return make_quant_kernel_name(
         prefix=name_prefix,
         variant_key=variant_key,
         layout=layout,
         pipeline=pipeline,
-        epilogue=bquant_effective_epilogue(
-            tile_n, warp_n, warp_tile_n, quant_group_n, preshuffle_b
-        ),
+        epilogue=effective_epilogue,
         scheduler=scheduler,
-        tile_m=tile_m, tile_n=tile_n, tile_k=tile_k,
-        warp_m=warp_m, warp_n=warp_n, warp_k=warp_k,
-        warp_tile_m=warp_tile_m, warp_tile_n=warp_tile_n, warp_tile_k=warp_tile_k,
+        tile_m=tile_m,
+        tile_n=tile_n,
+        tile_k=tile_k,
+        warp_m=warp_m,
+        warp_n=warp_n,
+        warp_k=warp_k,
+        warp_tile_m=warp_tile_m,
+        warp_tile_n=warp_tile_n,
+        warp_tile_k=warp_tile_k,
         group_segments=(f"qg{quant_group_m}x{quant_group_n}x{quant_group_k}",),
         flags=(
             (preshuffle_b, "preshuffleb"),
@@ -619,9 +729,15 @@ def make_gemm_rowcolquant_kernel_name(
     pipeline: str,
     epilogue: str,
     scheduler: str,
-    tile_m: int, tile_n: int, tile_k: int,
-    warp_m: int, warp_n: int, warp_k: int,
-    warp_tile_m: int, warp_tile_n: int, warp_tile_k: int,
+    tile_m: int,
+    tile_n: int,
+    tile_k: int,
+    warp_m: int,
+    warp_n: int,
+    warp_k: int,
+    warp_tile_m: int,
+    warp_tile_n: int,
+    warp_tile_k: int,
 ) -> str:
     """Return the canonical RowColQuant kernel name used as KERNEL_NAME in headers.
 
@@ -640,9 +756,15 @@ def make_gemm_rowcolquant_kernel_name(
         pipeline=pipeline,
         epilogue=epilogue,
         scheduler=scheduler,
-        tile_m=tile_m, tile_n=tile_n, tile_k=tile_k,
-        warp_m=warp_m, warp_n=warp_n, warp_k=warp_k,
-        warp_tile_m=warp_tile_m, warp_tile_n=warp_tile_n, warp_tile_k=warp_tile_k,
+        tile_m=tile_m,
+        tile_n=tile_n,
+        tile_k=tile_k,
+        warp_m=warp_m,
+        warp_n=warp_n,
+        warp_k=warp_k,
+        warp_tile_m=warp_tile_m,
+        warp_tile_n=warp_tile_n,
+        warp_tile_k=warp_tile_k,
     )
 
 
@@ -678,6 +800,490 @@ def normalize_gfx_arch(arch: str) -> str:
 
 
 # ============================================================================
+# Global-memory vector widths (A / B / C)
+# ============================================================================
+#
+# By default every GEMM kernel picks the widest global vector the tile allows
+# (16 bytes for A/B), so ``IsSupportedArgument`` rejects any problem whose
+# contiguous extent is not a multiple of that width. A kernel may instead be
+# generated with fixed, narrower widths (``FixedVectorSize`` in the pipeline
+# problem and the CShuffle epilogue). These helpers are the single source of
+# truth for which widths a kernel gets, how it is named, and which widths a
+# problem needs.
+#
+# Canonical form: a trait triple ``(a, b, c)`` is either all 0 (native widths,
+# no name suffix, FixedVectorSize=false) or all three explicit effective
+# widths. ``resolve_gemm_vector_sizes`` is idempotent on canonical input.
+
+# Pipelines / GEMM variants whose problem and epilogue honour fixed vector sizes.
+# Not preshuffle: its pre-shuffled B needs K and N to be warp-tile multiples,
+# which already implies native alignment, so narrower widths never help it.
+VECTOR_SIZE_PIPELINES: FrozenSet[str] = frozenset(
+    {"mem", "compv3", "compv4", "compv5", "comp_async"}
+)
+VECTOR_SIZE_VARIANTS: FrozenSet[str] = frozenset(
+    {"standard", "batched", "grouped", "multi_d", "multi_abd", "stream_k"}
+)
+
+_VEC_ELEMENT_BYTES = {
+    "fp16": 2,
+    "bf16": 2,
+    "fp32": 4,
+    "fp64": 8,
+    "fp8": 1,
+    "bf8": 1,
+    "int8": 1,
+    "int32": 4,
+}
+# Smallest C store, in bytes, that Stream-K's atomic reduction can add into C.
+_STREAMK_ATOMIC_MIN_C_BYTES = 4
+
+
+def streamk_c_reject_reason(
+    reduction_strategy: Optional[str], vector_size_c: int, dtype_c: str, layout_c: str
+) -> Optional[str]:
+    """Why Stream-K cannot store C for ``reduction_strategy`` (None if it can).
+
+    Every Stream-K kernel stores C through the CShuffle epilogue, which only
+    supports a row-major C (``layout_c`` "r"), so a column-major C is rejected for
+    every strategy. Only the atomic strategy adds partial C tiles into C, and its
+    atomic adds need at least 4 bytes per store (a narrower atomic C does not
+    compile). Linear and tree reduce the partials in the accumulator-type
+    workspace and store C with a plain store (MemoryOperation ``set`` in
+    StreamKTilePartitionerBase), so any width works for them.
+    ``vector_size_c`` of 0 means native, and a None strategy defers the width
+    check to the caller. An unknown strategy gets the atomic rules.
+    """
+    if layout_c != "r":
+        return "stream_k needs a row-major C (CShuffle epilogue)"
+    if reduction_strategy in (None, "linear", "tree") or not vector_size_c:
+        return None
+    if vector_size_c * _VEC_ELEMENT_BYTES[dtype_c] < _STREAMK_ATOMIC_MIN_C_BYTES:
+        return (
+            f"stream_k atomic C store needs >= {_STREAMK_ATOMIC_MIN_C_BYTES} bytes, "
+            f"got vector_size_c={vector_size_c}"
+        )
+    return None
+
+
+def _native_ab_vector_size(
+    elem: int, mn_per_block: int, x_per_tile: int, tile_k: int, block_size: int
+) -> int:
+    """Mirror of ``GetGlobalVectorLoadSize`` in the universal GEMM policy.
+
+    Like CK, the 4- and 2-byte steps are only tried for elements at least that
+    wide, so e.g. fp16 falls from 4 straight to 1.
+    """
+    elems_per_thread = mn_per_block * tile_k // block_size
+    for nbytes in (16, 8, 4, 2):
+        width = nbytes // elem
+        if nbytes >= 8 or elem >= nbytes:
+            if width >= 1 and x_per_tile % width == 0 and elems_per_thread % width == 0:
+                return width
+    return 1
+
+
+def _pattern_2d_y2(y: int, x: int, vec: int, block_size: int, warp_size: int) -> int:
+    """Y2 of the thread-raked ``tile_distribution_encoding_pattern_2d``, 0 if
+    its static_asserts would fail."""
+    if x % vec:
+        return 0
+    x1 = min(vec, x * y // block_size)
+    if x1 <= 0:
+        return 0
+    x0 = min(warp_size, x // x1)
+    if x0 <= 0 or warp_size % x0:
+        return 0
+    y1, y0 = warp_size // x0, block_size // warp_size
+    x2, y2 = x // (x0 * x1), y // (y1 * y0)
+    return y2 if y0 * y1 * y2 == y and x0 * x1 * x2 == x else 0
+
+
+def gemm_vector_size_suffix(vec: Sequence[int]) -> str:
+    """Kernel-name suffix for a canonical width triple ("" when native)."""
+    return "_vec{}_{}_{}".format(*vec) if any(vec) else ""
+
+
+def gemm_lockstep_vector_bytes(
+    vec: Sequence[int],
+    dtype_a: str,
+    dtype_b: str,
+    layout: str = "rc",
+    gpu_target: str = "",
+) -> int:
+    """``TileGemmUniversalTraits::_VectorSize`` (bytes) for a fixed width triple.
+
+    On gfx9 the LDS write width (``GetSmemPackA/B``) is derived from this single
+    byte knob, not from ``VectorSizeA/B``, so it must shrink together with the
+    global widths: an 8-wide LDS store fed by a 1-wide global load is a
+    structural mismatch. One knob serves both tensors, hence the min.
+
+    gfx1250 reads a column-major A / row-major B (8/16-bit) from LDS with
+    ``ds_load_tr*_b128``, which needs the full 16-byte pack. The knob is shared,
+    so if either operand is transpose-loaded it stays at 16 bytes even when the
+    other operand is narrowed (lowering it breaks the transpose read).
+    """
+    tr_load = normalize_gfx_arch(gpu_target) == GFX1250_ARCH
+    operands = (
+        (vec[0], dtype_a, layout[0] == "c"),
+        (vec[1], dtype_b, layout[1] == "r"),
+    )
+    if tr_load and any(t and _VEC_ELEMENT_BYTES[d] <= 2 for _, d, t in operands):
+        return 16
+    return min(v * _VEC_ELEMENT_BYTES[d] for v, d, _ in operands)
+
+
+def gemm_vector_size_sweep(
+    vec: Sequence[int], dtype_a: str, dtype_b: str, dtype_c: str, tune_c: bool = False
+) -> List[Tuple[int, int, int]]:
+    """Every width triple worth building for a problem that needs ``vec``.
+
+    ``vec`` is ``gemm_problem_vector_sizes`` (largest legal width per tensor,
+    capped at 16 bytes). An aligned tensor stays native (0); a misaligned one
+    sweeps every power-of-two divisor of its largest legal width, so the tuner
+    can pick the fastest one. Only the offending tensor is narrowed. With
+    ``tune_c`` an aligned C sweeps too: C width only changes the epilogue
+    stores, while narrower A/B loads slow down the main loop.
+    """
+    full = tuple(16 // _VEC_ELEMENT_BYTES[d] for d in (dtype_a, dtype_b, dtype_c))
+    axes = [
+        [f]
+        if v >= f and not (tune_c and i == 2)
+        else [1 << j for j in range(v.bit_length())]
+        for i, (v, f) in enumerate(zip(vec, full))
+    ]
+    sweep = [
+        (a, b, c)
+        for a in axes[0]
+        for b in axes[1]
+        for c in axes[2]
+        if (a, b, c) != full
+    ]
+    return sweep or [(0, 0, 0)]
+
+
+#: The eight layouts gemm_contiguous_dims resolves: A, B and C each r or c.
+_GEMM_LAYOUTS = frozenset(a + b + c for a in "rc" for b in "rc" for c in "rc")
+#: The ones Stream-K can build (streamk_c_reject_reason; width 0 reads no dtype).
+STREAMK_GEMM_LAYOUTS = tuple(
+    sorted(
+        lay for lay in _GEMM_LAYOUTS if not streamk_c_reject_reason(None, 0, "", lay[2])
+    )
+)
+
+
+def gemm_contiguous_dims(layout: str) -> Tuple[str, str, str]:
+    """Contiguous dim (``"m"``/``"n"``/``"k"``) of A/B/C for a layout like ``"rcr"``."""
+    return (
+        "k" if layout[0] == "r" else "m",
+        "n" if layout[1] == "r" else "k",
+        "n" if layout[2] == "r" else "m",
+    )
+
+
+def gemm_problem_vector_sizes(
+    m: int, n: int, k: int, layout: str, dtype_a: str, dtype_b: str, dtype_c: str
+) -> Tuple[int, int, int]:
+    """Widest width per operand that divides the problem's contiguous extent.
+
+    ``layout`` is the A/B/C layout string (e.g. ``"rcr"``). A kernel whose
+    widths divide these values accepts the problem.
+    """
+    extents = tuple(dict(m=m, n=n, k=k)[d] for d in gemm_contiguous_dims(layout))
+    dtypes = (dtype_a, dtype_b, dtype_c)
+    return tuple(
+        math.gcd(e, 16 // _VEC_ELEMENT_BYTES[d]) for e, d in zip(extents, dtypes)
+    )
+
+
+def gemm_tile_divides_problem(
+    m: int,
+    n: int,
+    k: int,
+    layout: str,
+    tile_m: int,
+    tile_n: int,
+    tile_k: int,
+    *,
+    pad_m: bool,
+    pad_n: bool,
+    pad_k: bool,
+    k_batch: int = 1,
+) -> bool:
+    """Does the tile divide the problem as ``IsSupportedArgument`` requires?
+
+    Each tensor is checked on its contiguous dimension only, and only when that
+    dimension's pad flag is false::
+
+        A RowMajor  K % (KPerBlock * k_batch)   A ColMajor  M % MPerBlock
+        B RowMajor  N % NPerBlock               B ColMajor  K % (KPerBlock * k_batch)
+        C RowMajor  N % NPerBlock               C ColMajor  M % MPerBlock
+
+    so ``rcr``/``rrr`` check {k, n}, ``crr`` {m, n} and ``ccr`` {m, n, k}.
+
+    The vector-size, split-K warp-tile and D-tensor checks are not modelled:
+    ``True`` is necessary for a launch to be accepted, not sufficient.
+    """
+    if k_batch < 1:
+        raise ValueError(f"k_batch must be >= 1, got {k_batch}")
+    if layout not in _GEMM_LAYOUTS:
+        raise ValueError(
+            f"unknown layout {layout!r}; expected one of {sorted(_GEMM_LAYOUTS)}"
+        )
+    for name, extent in (("m", m), ("n", n), ("k", k)):
+        if extent is None or extent < 1:
+            raise ValueError(f"problem extent {name} must be >= 1, got {extent}")
+    for tile in (tile_m, tile_n, tile_k):
+        if tile is None or tile <= 0:
+            raise ValueError(
+                f"tile extents must be positive, got "
+                f"({tile_m}, {tile_n}, {tile_k}) -- a falsy tile would otherwise "
+                f"silently accept every problem"
+            )
+    extents = {
+        "m": (m, tile_m, pad_m),
+        "n": (n, tile_n, pad_n),
+        "k": (k, tile_k * k_batch, pad_k),
+    }
+    for d in set(gemm_contiguous_dims(layout)):
+        extent, tile, padded = extents[d]
+        if not padded and extent % tile != 0:
+            return False
+    return True
+
+
+def gemm_default_epilogue_vector_size(dtype_a, layout, gfx_arch):
+    """DefaultGemm2DEpilogue::GetVectorSizeC for codegen's TransposeC=false.
+
+    Row-major C uses kCNLane * kBNBlock / kN, which is 1 for the
+    supported MFMA/WMMA distributions. Column-major C uses kCM1PerLane:
+    4 for MFMA (1 for fp64), 1 for gfx11 WMMA, and 8 for gfx12 WMMA.
+    See warp_gemm_attribute_mfma_impl.hpp and WmmaTraitsBase.
+    """
+    if layout[2] == "r":
+        return 1
+    arch = normalize_gfx_arch(gfx_arch)
+    if arch.startswith("gfx12"):
+        return 8
+    if arch.startswith("gfx11") or dtype_a == "fp64":
+        return 1
+    return 4
+
+
+def _vector_geometry(
+    dtype_a,
+    dtype_b,
+    dtype_c,
+    layout,
+    tile,
+    waves,
+    warp_tile,
+    gfx_arch,
+    epilogue="cshuffle",
+    pipeline="",
+):
+    """Shared derivation for the vector-size helpers below.
+
+    Returns ``(native, a_yx, b_yx, c_row, block_size, warp_size, elem_bytes)``;
+    ``(Y, X)`` is the DRAM tile of A/B with X the contiguous dim.
+    """
+    tile_m, tile_n, tile_k = tile
+    warp_m, warp_n, warp_k = waves
+    warp_size = 64 if normalize_gfx_arch(gfx_arch).startswith("gfx9") else 32
+    block_size = warp_m * warp_n * warp_k * warp_size
+    ea, eb, ec = (_VEC_ELEMENT_BYTES[d] for d in (dtype_a, dtype_b, dtype_c))
+    a_row, b_row, c_row = (ch == "r" for ch in layout[:3])
+    a_yx = (tile_m, tile_k) if a_row else (tile_k, tile_m)
+    b_yx = (tile_k, tile_n) if b_row else (tile_n, tile_k)
+    # TDM moves A/B (and, with a TDM epilogue, C) with the Tensor Data Mover, not
+    # per-thread vector loads: GetVectorSizeA/B/C all return 1, so no extent needs
+    # alignment. A TDM epilogue implies a TDM pipeline (gfx1250_pipeline_reject_reason);
+    # a TDM pipeline with CShuffle (Stream-K) still stores C at the CShuffle width.
+    tdm_ab = epilogue in TDM_EPILOGUES or pipeline in TDM_PIPELINES
+    if epilogue in TDM_EPILOGUES:
+        native_c = 1
+    elif epilogue == "default":
+        native_c = gemm_default_epilogue_vector_size(dtype_a, layout, gfx_arch)
+    else:
+        native_c = min(
+            (warp_tile[1] * warp_n) if c_row else (warp_tile[0] * warp_m), 16 // ec
+        )
+    if tdm_ab:
+        native = (1, 1, native_c)
+    else:
+        native = (
+            _native_ab_vector_size(ea, tile_m, a_yx[1], tile_k, block_size),
+            _native_ab_vector_size(eb, tile_n, b_yx[1], tile_k, block_size),
+            native_c,
+        )
+    return native, a_yx, b_yx, c_row, block_size, warp_size, (ea, eb, ec)
+
+
+def gemm_native_vector_sizes(
+    *,
+    dtype_a,
+    dtype_b,
+    dtype_c,
+    layout,
+    tile,
+    waves,
+    warp_tile,
+    gfx_arch,
+    epilogue="cshuffle",
+    pipeline="",
+) -> Tuple[int, int, int]:
+    """A/B/C global vector widths a kernel uses when no widths are fixed.
+
+    An empty ``pipeline`` means a non-TDM one (per-thread A/B vector loads)."""
+    return _vector_geometry(
+        dtype_a,
+        dtype_b,
+        dtype_c,
+        layout,
+        tile,
+        waves,
+        warp_tile,
+        gfx_arch,
+        epilogue,
+        pipeline,
+    )[0]
+
+
+def resolve_gemm_vector_sizes(
+    *,
+    dtype_a: str,
+    dtype_b: str,
+    dtype_c: str,
+    layout: str,
+    tile: Sequence[int],
+    waves: Sequence[int],
+    warp_tile: Sequence[int],
+    gfx_arch: str,
+    requested: Sequence[int] = (0, 0, 0),
+    pipeline: str = "compv3",
+    epilogue: str = "cshuffle",
+    variant: str = "standard",
+    reduction_strategy: Optional[str] = "atomic",
+) -> Tuple[Tuple[int, int, int], Optional[str]]:
+    """Resolve requested A/B/C global vector widths to the canonical triple.
+
+    ``requested`` entries of 0 mean "native". The effective width of each
+    operand is ``min(requested, native)``. Returns ``(triple, reject_reason)``
+    where ``triple`` is ``(0, 0, 0)`` when every effective width equals the
+    native one, and ``reject_reason`` is None when the widths are legal for
+    this tile (otherwise a short human-readable string).
+
+    ``reduction_strategy`` only matters for ``variant="stream_k"``; see
+    ``streamk_c_reject_reason``. None defers the strategy-dependent check to the
+    caller, which applies it per strategy. Widths that resolve to native return
+    before the Stream-K C check, so callers (codegen, ``with_vector_sizes``) apply it.
+    """
+    native, a_yx, b_yx, c_row, block_size, warp_size, (ea, eb, ec) = _vector_geometry(
+        dtype_a,
+        dtype_b,
+        dtype_c,
+        layout,
+        tile,
+        waves,
+        warp_tile,
+        gfx_arch,
+        epilogue,
+        pipeline,
+    )
+    tile_m, tile_n, tile_k = tile
+    warp_tile_m, warp_tile_n, warp_tile_k = warp_tile
+    eff = tuple(min(r, nv) if r else nv for r, nv in zip(requested, native))
+    if eff == native:
+        return (0, 0, 0), None
+
+    for name, width, elem in zip("ABC", eff, (ea, eb, ec)):
+        if width < 1 or width & (width - 1) or width * elem > 16:
+            return (
+                eff,
+                f"vector_size_{name.lower()}={width} is not a power of two <= 16 bytes",
+            )
+    if variant not in VECTOR_SIZE_VARIANTS:
+        return eff, f"variant {variant} does not support fixed vector sizes"
+    if pipeline not in VECTOR_SIZE_PIPELINES:
+        return eff, f"pipeline {pipeline} does not support fixed vector sizes"
+    # The fixed A/B widths live in the pipeline problem, so any epilogue keeps
+    # them. Only CShuffle can also store C narrower than its native width; the
+    # default epilogue's C width is fixed by the warp-tile layout.
+    if epilogue == "default" and eff[2] != native[2]:
+        return eff, f"epilogue {epilogue} cannot use a fixed vector_size_c"
+    if epilogue not in ("cshuffle", "default"):
+        return eff, f"epilogue {epilogue} cannot use fixed vector sizes"
+    # comp_async copies A/B global->LDS asynchronously, and that copy only exists
+    # in 4/8/12/16-byte chunks plus a 1-byte one (amd_async_global_load_to_lds).
+    if pipeline == "comp_async":
+        for name, width, elem in (("a", eff[0], ea), ("b", eff[1], eb)):
+            if width * elem < 4 and not (elem == 1 and width == 1):
+                return (
+                    eff,
+                    f"comp_async async copy cannot move {width * elem} bytes "
+                    f"(vector_size_{name}={width})",
+                )
+    if variant == "stream_k":
+        c_reason = streamk_c_reject_reason(
+            reduction_strategy, eff[2], dtype_c, layout[2]
+        )
+        if c_reason:
+            return eff, c_reason
+    # K-major-in-LDS operands (col-major A / row-major B) on wave64 need
+    # (tile_k / Y2) >= warp_size / warp_tile_mn in the LDS descriptor.
+    for name, width, (y, x), xdl, k_out in (
+        ("A", eff[0], a_yx, warp_tile_m, layout[0] == "c"),
+        ("B", eff[1], b_yx, warp_tile_n, layout[1] == "r"),
+    ):
+        if warp_tile_k % width:
+            return (
+                eff,
+                f"warp_tile_k={warp_tile_k} not divisible by vector_size_{name.lower()}={width}",
+            )
+        y2 = _pattern_2d_y2(y, x, width, block_size, warp_size)
+        if not y2:
+            return (
+                eff,
+                f"{name} tile {y}x{x} cannot be distributed with vector_size_{name.lower()}={width}",
+            )
+        if k_out and warp_size == 64 and (y // y2) < warp_size // xdl:
+            return (
+                eff,
+                f"{name} LDS layout needs more warps for vector_size_{name.lower()}={width}",
+            )
+    per_thread = warp_tile_m * warp_tile_n // warp_size
+    if epilogue == "cshuffle" and per_thread > eff[2]:
+        shuffles = per_thread // eff[2]
+        if per_thread % eff[2] or (tile_m if c_row else tile_n) % shuffles:
+            return (
+                eff,
+                f"CShuffle cannot split {per_thread} elements/thread by vector_size_c={eff[2]}",
+            )
+
+    # The sweep's ctypes validator checks warp/trait legality, not LDS capacity.
+    # Reject over-budget fixed widths here so they are counted before codegen
+    # rather than reported as failed builds when codegen emits no header.
+    # gfx9's packed/XOR descriptors still hold M*K and N*K elements after
+    # narrowing; GetSmemSizeA/B round each operand up to 16 bytes. This is a
+    # lower bound for architectures whose descriptors add bank padding.
+    from arch_specs_generated import get_lds_limit
+
+    staging_bytes = sum(
+        (mn * tile_k * elem + 15) // 16 * 16
+        for mn, elem in ((tile_m, ea), (tile_n, eb))
+    )
+    # CompV4's budget already accounts for its two staging buffers.
+    arch = normalize_gfx_arch(gfx_arch)
+    limit = get_lds_limit(arch, pipeline)
+    if staging_bytes > limit:
+        return eff, (
+            f"fixed-width LDS staging needs {staging_bytes} bytes > "
+            f"{arch}/{pipeline} limit {limit} bytes"
+        )
+    return eff, None
+
+
+# ============================================================================
 # Arch-derived warp tile K
 # ============================================================================
 
@@ -689,18 +1295,29 @@ def fp8_warp_tile_k_for_arch(gfx_arch: str, *, preshuffle_quant: bool = False) -
     (include/ck_tile/ops/gemm/pipeline/tile_gemm_shape.hpp)::
 
         gfx950                        -> 128  (both plain and preshufflequant)
+        gfx1250 (EXACT match)         -> 128  (see below -- a divergence, not a mirror)
         gfx942/other, plain           ->  32
         gfx942/other, preshufflequant ->  64
+
+    gfx1250 is the one arch where this does NOT mirror ``get_k_warp_tile``: that
+    function's WMMA branch returns ``is_8bit ? 64 : 32`` at ``M_Warp_Tile==16``,
+    i.e. 64.  128 is used because ``warp_gemm_dispatcher.hpp`` provides the
+    16x16x128 fp8/bf8 WMMA fragment under ``__gfx125__`` and it is GPU-verified on
+    MI400.  The match is EXACT (suffix-tolerant), never ``"gfx12" in ...``:
+    gfx1200/gfx1201 expose only a 16x16x16 8-bit fragment, so K=128 would compile
+    and then silently mis-execute there.
 
     This rule must exist exactly once. Using 128 on gfx942 compiles cleanly and
     then produces **all-zeros output** -- there is no valid 16x16x128 fp8/bf8
     warp-gemm on gfx942 -- so a second, drifting copy is a silent-wrong-answer
-    bug rather than a build failure.
+    bug rather than a build failure.  The five ``gemm_*quant_utils`` bridges keep
+    a private ``_is_gfx1250()`` carrying the same rule; those are candidates to
+    collapse onto ``normalize_gfx_arch()`` in a follow-up.
 
     ``preshuffle_quant`` applies to AQuant's preshufflequant configs; every
     other quant operator passes the default.
     """
-    if "gfx950" in gfx_arch:
+    if "gfx950" in gfx_arch or normalize_gfx_arch(gfx_arch or "") == "gfx1250":
         return 128
     return 64 if preshuffle_quant else 32
 
@@ -774,29 +1391,514 @@ def gfx1250_comp_async_8bit_warp_tile_k_rejected(dtype_a, dtype_b, warp_tile_k) 
     return is_8bit and warp_tile_k < GFX1250_COMP_ASYNC_8BIT_MIN_WARP_TILE_K
 
 
+# Non-MX comp_async on gfx1250 with 8-bit A/B does not compile with the 32x32
+# warp tile: its A/B LDS register tile distribution is empty (static_assert
+# "0 < kThreadElementSpaceSize" in static_distributed_tensor.hpp). Only the
+# 16x16 warp tile is supported. Shared like
+# GFX1250_COMP_ASYNC_PAD_REJECT_REASON above.
+GFX1250_COMP_ASYNC_8BIT_MAX_WARP_TILE_MN = 16
+GFX1250_COMP_ASYNC_8BIT_WARP_TILE_MN_REJECT_REASON = (
+    "comp_async on gfx1250 with fp8/bf8 A/B does not compile with a 32x32 "
+    "warp tile (empty LDS register tile distribution), so it requires "
+    "warp_tile_m = warp_tile_n = 16"
+)
+
+
+def gfx1250_comp_async_8bit_warp_tile_mn_rejected(
+    dtype_a, dtype_b, warp_tile_m, warp_tile_n
+) -> bool:
+    """True if a gfx1250 non-MX comp_async config has fp8/bf8 A or B and a
+    warp_tile_m or warp_tile_n above GFX1250_COMP_ASYNC_8BIT_MAX_WARP_TILE_MN."""
+    is_8bit = (
+        dtype_a in GFX1250_COMP_ASYNC_8BIT_DTYPES
+        or dtype_b in GFX1250_COMP_ASYNC_8BIT_DTYPES
+    )
+    return (
+        is_8bit
+        and max(warp_tile_m, warp_tile_n) > GFX1250_COMP_ASYNC_8BIT_MAX_WARP_TILE_MN
+    )
+
+
 # gfx1250 pipelines: the Tensor Data Mover pipelines (gfx1250-only; off gfx1250
 # the TDM path compiles to a no-op and the kernel silently writes zeros, so the
 # arch gate is exact) plus non-MX comp_async (MX comp_async on gfx950 is a
 # separate kernel family and is not gated here).
 GFX1250_ARCH = "gfx1250"
-TDM_PIPELINES = ("comp_tdm", "comp_tdm_v2")
+TDM_PIPELINES = ("comp_tdm", "comp_tdm_v2", "comp_tdm_pc", "comp_tdm_v3", "comp_tdm_ra")
+# Epilogues that store C with TDM: "tdm" is TdmEpilogue (whole tile through LDS),
+# "tdmstaged" is TdmEpilogueStagedForPipeline<EpilogueProblem, 1, GemmPipeline>
+# (M slabs in the pipeline's LDS). tdmstaged follows every tdm rule and also needs
+# a row-major C. Mirrored in tile_engine/ops/gemm/gemm_validation_utils.py.
+TDM_STAGED_EPILOGUE = "tdmstaged"
+TDM_EPILOGUES = ("tdm", TDM_STAGED_EPILOGUE)
+TDM_STAGED_LAYOUT_REJECT_REASON = (
+    "epilogue=tdmstaged requires a row-major C (TdmEpilogueStaged static_asserts it)"
+)
+
+
+def tdm_staged_layout_reject_reason(epilogue: str, layout: str) -> str:
+    """Reason string if the tdmstaged epilogue gets a column-major C, else "".
+
+    An empty layout means the caller did not provide one and is not checked.
+    Mirrors tdm_staged_layout_reject_reason in tile_engine/ops/gemm/gemm_validation_utils.py.
+    """
+    if epilogue == TDM_STAGED_EPILOGUE and len(layout) >= 3 and layout[2] != "r":
+        return TDM_STAGED_LAYOUT_REJECT_REASON
+    return ""
+
+
+def gemm_pipeline_skips_launch_checks(pipeline: str) -> bool:
+    """Mirror of a pipeline's ``skipCheckValidLaunchParams`` (the TDM pipelines).
+
+    For these ``UniversalGemmKernel::IsSupportedArgument`` accepts every problem
+    without checking tile divisibility or vector alignment: TDM clips each box to
+    the tensor's real extent and moves A/B/C at width 1, so an unpadded kernel
+    serves any M, N, K. The exception is a non-TDM (CShuffle) epilogue, used by
+    ``comp_tdm_v3`` and Stream-K: its C store does not clip, so an unpadded
+    contiguous C extent must be a tile multiple. Pairing and the dispatcher's own
+    gate follow the kernel.
+    """
+    return pipeline in TDM_PIPELINES
+
+
 GFX1250_ONLY_PIPELINES = ("comp_async",) + TDM_PIPELINES
 TDM_PAD_REJECT_REASON = (
-    "TDM bounds-clips on real descriptor extents; kPad right-pad transforms "
-    "inflate them, so TDM requires pad_m=pad_n=pad_k=False"
+    "TDM clips every box to the pre-pad extent (tdm_real_lengths), so kPad is a "
+    "no-op and a padded TDM kernel would duplicate the unpadded one, which already "
+    "serves every shape: TDM requires pad_m=pad_n=pad_k=False"
+)
+# GemmPipelineAgBgCrCompV5 sizes its C LDS view with BlockGemm::Traits::KPack, but
+# its block GEMM (BlockGemmARegBRegCRegV1) defines only KPackA/KPackB, so no compv5
+# kernel compiles. Verified on gfx1250; the block GEMM is the same on every arch.
+GFX1250_COMPV5_REJECT_REASON = (
+    "compv5 does not compile on gfx1250: its pipeline reads BlockGemm::Traits::KPack, "
+    "which BlockGemmARegBRegCRegV1 does not define"
 )
 GFX1250_COMP_ASYNC_LAYOUT_REJECT_REASON = (
     "comp_async on gfx1250 requires A row-major and B col-major (transpose-load "
     "path incompatible with WMMA 16x16x32 K distribution)"
 )
+GFX1250_TDM_FP32_LAYOUT_REJECT_REASON = (
+    "comp_tdm/comp_tdm_v2 with fp32 A/B on gfx1250 gives wrong results for "
+    "every layout but rcr, so fp32 TDM requires layout=rcr"
+)
+# fp32 C tile per lane (tile_m*tile_n / (num_waves*32)) at or above this
+# spills VGPRs on gfx1250 (256x256 on 4 waves: 512 acc/lane) and gives wrong
+# results; 256 acc/lane (256x128, 128x256) is correct.
+GFX1250_FP32_MAX_ACC_PER_LANE = 512
+GFX1250_FP32_ACC_REJECT_REASON = (
+    f"fp32 on gfx1250 spills VGPRs at >= {GFX1250_FP32_MAX_ACC_PER_LANE} "
+    "accumulators per lane (tile_m*tile_n/(num_waves*32)) and gives wrong results"
+)
+
+
+# comp_tdm_pc (producer/consumer TDM): the C tile lives on the consumer waves
+# only (the two producer waves hold no accumulator), one fp32 VGPR per element.
+# Past 256 accumulators per lane occupancy collapses; same cap as the Tile
+# Engine MAX_ACC_VGPRS_PER_LANE. The plain, batched and Stream-K GEMM kernels
+# arm the pipeline's named barriers.
+COMP_TDM_PC_MAX_ACC_VGPRS_PER_LANE = 256
+# BlockGemm and the epilogue spread the C tile over warp_m x warp_n waves only,
+# with no K-wave reduction, so a K wave would be a consumer whose work is lost.
+# Mirrors the static_assert in GemmPipelineAgBgCrCompTDMProducerConsumer.
+COMP_TDM_PC_WARP_K_REJECT_REASON = (
+    "comp_tdm_pc requires warp_k=1: the consumer waves have no K-wave reduction"
+)
+# TDM pipelines whose plain GEMM may also store C through the cshuffle epilogue,
+# which can accumulate split-K partials (TdmEpilogue overwrites C). Mirrors
+# GEMM_TDM_CSHUFFLE_PIPELINES in tile_engine/ops/gemm/gemm_validation_utils.py.
+GEMM_TDM_CSHUFFLE_PIPELINES = ("comp_tdm_pc",)
+
+# comp_tdm_ra (GemmPipelineAgBgCrCompTDMRunAhead): the math waves fill the LDS
+# ring themselves, RunAhead K steps ahead, with no producer waves. It is built for
+# large per-wave C tiles (128x128 per wave, e.g. 256x256 on 4 waves), one wave per
+# SIMD, so comp_tdm_pc's accumulator cap (COMP_TDM_PC_MAX_ACC_VGPRS_PER_LANE) does
+# not apply. It hands off through an ordinary workgroup barrier rather than named
+# barriers, so it is not a wavelet pipeline and UniversalGemmKernel rejects
+# k_batch > 1 for it. It is validated with the plain GemmKernel only.
+COMP_TDM_RA_BATCHED_REJECT_REASON = (
+    "comp_tdm_ra is not supported for batched GEMM: the run-ahead pipeline is "
+    "validated with the plain GemmKernel only"
+)
+COMP_TDM_RA_WARP_K_REJECT_REASON = (
+    "comp_tdm_ra requires warp_k=1: it is validated with K-wave-free layouts "
+    "(2x2x1, 1x1x1) only"
+)
+
+# Ring-configurable TDM pipelines. Configs name a non-default ring as a pipeline
+# variant, "{pipeline}_s{slots}{letter}{param}", whose ring parameter is the
+# comp_tdm_pc PublishLag ("l") or the comp_tdm_ra RunAhead ("r"); the plain name
+# is the policy default. Traits carry the ring as num_slots (0 = the default, so
+# default kernels keep their names) plus the pipeline's own publish_lag or
+# run_ahead field (pipeline_ring_fields). Mirrors split_pipeline_ring /
+# pipeline_ring_reject_reason in tile_engine/ops/gemm/gemm_validation_utils.py.
+#
+# comp_tdm_pc (GemmPipelineAgBgCrCompTDMProducerConsumerPolicy<NumSlots,
+# PublishLag>, default <4, 0>): two producer waves need 3 * NumSlots named
+# barriers out of 15 (ring_spec), which caps the ring at 5 slots.
+COMP_TDM_PC = "comp_tdm_pc"
+COMP_TDM_PC_DEFAULT_RING = (4, 0)
+COMP_TDM_PC_MIN_SLOTS = 2
+COMP_TDM_PC_MAX_SLOTS = 5
+# comp_tdm_ra (GemmPipelineAgBgCrCompTDMRunAheadPolicy<NumSlots, RunAhead>,
+# default <4, 3>): the policy static_asserts NumSlots >= 2 and
+# 1 <= RunAhead < NumSlots. Only the LDS budget, split over the slots, bounds
+# NumSlots from above.
+COMP_TDM_RA = "comp_tdm_ra"
+COMP_TDM_RA_DEFAULT_RING = (4, 3)
+COMP_TDM_RA_MIN_SLOTS = 2
+# Base pipeline -> (ring parameter letter of its variant names, default ring).
+RING_PIPELINES = {
+    COMP_TDM_PC: ("l", COMP_TDM_PC_DEFAULT_RING),
+    COMP_TDM_RA: ("r", COMP_TDM_RA_DEFAULT_RING),
+}
+_PIPELINE_RING_RES = {
+    pipeline: re.compile(rf"^{pipeline}_s(\d+){letter}(\d+)$")
+    for pipeline, (letter, _) in RING_PIPELINES.items()
+}
+
+
+def split_pipeline_ring(pipeline: str) -> Tuple[str, int, int]:
+    """(base pipeline, num_slots, ring_param) of a pipeline name.
+
+    ring_param is the PublishLag of comp_tdm_pc and the RunAhead of comp_tdm_ra:
+    "comp_tdm_pc_s2l1" -> ("comp_tdm_pc", 2, 1), "comp_tdm_ra_s3r2" ->
+    ("comp_tdm_ra", 3, 2). The default ring (e.g. "comp_tdm_ra_s4r3") and every
+    other name, including a ring letter that does not match the pipeline
+    ("comp_tdm_ra_s2l1"), give num_slots = ring_param = 0. The ring is not
+    validated here; see pipeline_ring_reject_reason.
+    """
+    for base, ring_re in _PIPELINE_RING_RES.items():
+        m = ring_re.match(pipeline)
+        if m:
+            ring = (int(m.group(1)), int(m.group(2)))
+            return (base, 0, 0) if ring == RING_PIPELINES[base][1] else (base, *ring)
+    return pipeline, 0, 0
+
+
+def pipeline_ring_fields(
+    pipeline: str, num_slots: int, ring_param: int
+) -> Dict[str, int]:
+    """Trait fields of a split_pipeline_ring ring: num_slots plus the ring
+    parameter as the comp_tdm_ra run_ahead or, for any other pipeline, the
+    comp_tdm_pc publish_lag."""
+    if pipeline == COMP_TDM_RA:
+        return dict(num_slots=num_slots, publish_lag=0, run_ahead=ring_param)
+    return dict(num_slots=num_slots, publish_lag=ring_param, run_ahead=0)
+
+
+def pipeline_ring_param(pipeline: str, publish_lag: int, run_ahead: int) -> int:
+    """The split_pipeline_ring ring parameter of the trait fields (the inverse
+    of pipeline_ring_fields). The other ring pipeline's field must be 0: it
+    reaches neither the policy nor split_pipeline_ring, only the kernel name."""
+    is_ra = pipeline == COMP_TDM_RA
+    param, stray = (run_ahead, publish_lag) if is_ra else (publish_lag, run_ahead)
+    if stray:
+        raise ValueError(
+            f"pipeline={pipeline} takes {'run_ahead' if is_ra else 'publish_lag'}, "
+            f"got publish_lag={publish_lag}, run_ahead={run_ahead}"
+        )
+    return param
+
+
+def pipeline_ring_suffix(pipeline: str, num_slots: int, ring_param: int) -> str:
+    """Name suffix of a non-default ring ("" for the default): "_s{S}{letter}{P}"
+    with the pipeline's RING_PIPELINES letter, the inverse of split_pipeline_ring.
+
+    Must match KernelKey::encode_identifier() in kernel_key.hpp.
+    """
+    if not num_slots:
+        return ""
+    letter = RING_PIPELINES.get(pipeline, RING_PIPELINES[COMP_TDM_PC])[0]
+    return f"_s{num_slots}{letter}{ring_param}"
+
+
+def pipeline_ring_reject_reason(pipeline: str, num_slots: int, ring_param: int) -> str:
+    """Why a (pipeline, num_slots, ring_param) ring is rejected ("" when accepted).
+
+    Takes the split_pipeline_ring tuple, so it accepts exactly the pipeline
+    names the Tile Engine pipeline_ring_reject_reason accepts. num_slots = 0 is
+    the default ring of every pipeline; a non-default ring is only valid for
+    RING_PIPELINES, each under its own policy's rule.
+    """
+    if pipeline == COMP_TDM_RA:
+        return comp_tdm_ra_ring_reject_reason(pipeline, num_slots, ring_param)
+    if num_slots and pipeline not in RING_PIPELINES:
+        return (
+            f"num_slots/publish_lag/run_ahead only apply to "
+            f"{'/'.join(RING_PIPELINES)}, got pipeline={pipeline}"
+        )
+    return comp_tdm_pc_ring_reject_reason(pipeline, num_slots, ring_param)
+
+
+def comp_tdm_ra_ring_reject_reason(
+    pipeline: str, num_slots: int, run_ahead: int
+) -> str:
+    """Why a (pipeline, comp_tdm_ra ring) pair is rejected ("" when accepted)."""
+    if not num_slots:
+        return "" if not run_ahead else "run_ahead needs an explicit num_slots"
+    if pipeline != COMP_TDM_RA:
+        return (
+            f"num_slots/run_ahead only apply to {COMP_TDM_RA}, got pipeline={pipeline}"
+        )
+    if num_slots < COMP_TDM_RA_MIN_SLOTS:
+        return (
+            f"{COMP_TDM_RA} num_slots={num_slots} is below {COMP_TDM_RA_MIN_SLOTS} "
+            "(the ring needs a slot to fill while another is read)"
+        )
+    if not 1 <= run_ahead < num_slots:
+        return (
+            f"{COMP_TDM_RA} run_ahead={run_ahead} must be in [1, num_slots={num_slots})"
+        )
+    return ""
+
+
+def comp_tdm_pc_ring_reject_reason(
+    pipeline: str, num_slots: int, publish_lag: int
+) -> str:
+    """Why a (pipeline, ring) pair is rejected ("" when accepted)."""
+    if not num_slots:
+        return "" if not publish_lag else "publish_lag needs an explicit num_slots"
+    if pipeline != COMP_TDM_PC:
+        return f"num_slots/publish_lag only apply to {COMP_TDM_PC}, got pipeline={pipeline}"
+    if not COMP_TDM_PC_MIN_SLOTS <= num_slots <= COMP_TDM_PC_MAX_SLOTS:
+        return (
+            f"{COMP_TDM_PC} num_slots={num_slots} is outside "
+            f"[{COMP_TDM_PC_MIN_SLOTS}, {COMP_TDM_PC_MAX_SLOTS}] (3 * num_slots named "
+            "barriers must fit in 15)"
+        )
+    if not 0 <= publish_lag < num_slots:
+        return f"{COMP_TDM_PC} publish_lag={publish_lag} must be in [0, num_slots={num_slots})"
+    return ""
+
+
+def pipeline_ring_lds_limit(pipeline: str, lds_total: int, num_slots: int) -> int:
+    """A+B staging budget of one slot of a RING_PIPELINES ring: the LDS split
+    over its slots (num_slots = 0 is the policy default)."""
+    return lds_total // (num_slots or RING_PIPELINES[pipeline][1][0])
+
+
+# comp_tdm_v3 (GemmPipelineAgBgCrCompTDMV3). Same rules as the Tile Engine
+# (tile_engine/ops/gemm/gemm_validation_utils.py; tests/test_gfx1250_gate_equivalence.py
+# pins the two copies): the CShuffle epilogue outside Stream-K, the 2x2x1 and 4x4x1
+# wave maps ([4, 4, 1] for this pipeline only, the shared table is unchanged), fp8/bf8
+# A/B with layout rcr or fp16/bf16 A/B with any A/B layout and row-major C, plain,
+# batched and Stream-K GEMM only. These rules stay mirrored because TE cannot import
+# the dispatcher and new shared infrastructure must not live in deprecated TE.
+# Its kernels build with the post-RA machine scheduler on, as the Tile Engine
+# gemm_universal build and the comp_tdm_v3 gtests do.
+COMP_TDM_V3 = "comp_tdm_v3"
+TDM_PIPELINE_EPILOGUE = {COMP_TDM_V3: "cshuffle"}
+try:
+    from arch_specs_generated import PIPELINE_EXTRA_WARP_COMBINATIONS
+except ImportError:
+    PIPELINE_EXTRA_WARP_COMBINATIONS = {COMP_TDM_V3: {GFX1250_ARCH: [[4, 4, 1]]}}
+PIPELINE_EXTRA_COMPILE_FLAGS = {COMP_TDM_V3: ("-mllvm", "-enable-post-misched=1")}
+COMP_TDM_V3_WAVES = ((2, 2, 1), (4, 4, 1))
+COMP_TDM_V3_8BIT_DTYPES = ("fp8", "bf8")
+COMP_TDM_V3_16BIT_DTYPES = ("fp16", "bf16")
+COMP_TDM_V3_8BIT_LAYOUT = "rcr"
+
+
+def tdm_pipeline_epilogue(pipeline: str) -> str:
+    """The epilogue a TDM pipeline takes outside Stream-K: "cshuffle" for
+    comp_tdm_v3, "tdm" for the others."""
+    return TDM_PIPELINE_EPILOGUE.get(pipeline, "tdm")
+
+
+def tdm_pipeline_epilogues(pipeline: str) -> Tuple[str, ...]:
+    """The epilogues a TDM pipeline accepts outside Stream-K: "cshuffle" for
+    comp_tdm_v3, either TDM epilogue (TDM_EPILOGUES) for the others. Mirrors
+    tdm_pipeline_epilogues in tile_engine/ops/gemm/gemm_validation_utils.py."""
+    want = tdm_pipeline_epilogue(pipeline)
+    return TDM_EPILOGUES if want == "tdm" else (want,)
+
+
+def pipeline_warp_combos(pipeline: str, arch: str, shared: Sequence) -> List[List[int]]:
+    """The arch's shared wave maps plus the extra maps of ``pipeline``."""
+    extra = PIPELINE_EXTRA_WARP_COMBINATIONS.get(pipeline, {})
+    return [list(w) for w in shared] + extra.get(normalize_gfx_arch(arch).lower(), [])
+
+
+def comp_tdm_v3_reject_reason(
+    dtype_a: str,
+    dtype_b: str,
+    waves: Optional[Sequence[int]] = None,
+    layout: str = "",
+    tile_k: Optional[int] = None,
+    warp_tile_k: Optional[int] = None,
+) -> str:
+    """Why a comp_tdm_v3 config is rejected ("" when accepted). Empty dtypes,
+    None waves / tile_k / warp_tile_k and an empty layout skip their rule."""
+    pair = {dtype_a, dtype_b} - {""}
+    is_8bit = bool(pair) and pair <= set(COMP_TDM_V3_8BIT_DTYPES)
+    if pair and not (is_8bit or pair <= set(COMP_TDM_V3_16BIT_DTYPES)):
+        return (
+            f"comp_tdm_v3 requires fp8/bf8 or fp16/bf16 A and B, got {dtype_a}/{dtype_b}"
+        )
+    if waves is not None and tuple(waves) not in COMP_TDM_V3_WAVES:
+        return "comp_tdm_v3 supports the 2x2x1 and 4x4x1 wave maps only, got " + "x".join(
+            map(str, waves)
+        )
+    # The pipeline splits a K tile into 1, 2 or 4 sub-tiles of whole warp-tile K
+    # steps, so tile_k / warp_tile_k must be a power of two (e.g. no 192 with 32).
+    if tile_k and warp_tile_k:
+        k_steps = tile_k // warp_tile_k
+        if tile_k % warp_tile_k or k_steps & (k_steps - 1):
+            return (
+                f"comp_tdm_v3 needs tile_k / warp_tile_k to be a power of two, got "
+                f"{tile_k} / {warp_tile_k}"
+            )
+    if is_8bit and layout and layout != COMP_TDM_V3_8BIT_LAYOUT:
+        return (
+            f"comp_tdm_v3 with 8-bit A/B supports layout {COMP_TDM_V3_8BIT_LAYOUT!r} "
+            f"only, got {layout!r}"
+        )
+    if layout[2:3] not in ("", "r"):
+        return "comp_tdm_v3 supports row-major C only"
+    return ""
+
+# Stream-K (StreamKKernel). Atomic reduction adds every workgroup's partial tile into C
+# through the epilogue, so it needs an epilogue that accumulates (CShuffle); the TDM
+# epilogue overwrites C. Linear and tree reduction sum the partials in a workspace and
+# store C once, so either epilogue works; the TDM one also clips a ragged N/M tile.
+# comp_tdm, comp_tdm_v2, comp_tdm_pc and comp_tdm_v3 are the gfx1250-only pipelines
+# StreamKKernel has been validated with.
+STREAMK_REDUCTION_STRATEGIES = ("atomic", "linear", "tree")
+STREAMK_GFX1250_PIPELINES = ("comp_tdm", "comp_tdm_v2", "comp_tdm_pc", COMP_TDM_V3)
+# StreamKKernel static_asserts a row-major C for these pipelines, and the
+# CShuffle epilogue stores nothing else (streamk_c_reject_reason).
+STREAMK_TDM_C_LAYOUT_REJECT_REASON = (
+    "stream_k with a TDM pipeline supports row-major C only"
+)
+# The block GEMM and the CShuffle epilogue (kBlockSize = MWave * NWave * warp size) spread
+# the C tile over warp_m x warp_n waves only. Plain comp_tdm GEMM survives extra K waves
+# because the TDM store clips them; the Stream-K partial tiles and CShuffle store do not.
+STREAMK_TDM_WARP_K_REJECT_REASON = (
+    "stream_k with a TDM pipeline requires warp_k=1: there is no K-wave reduction"
+)
+
+
+def streamk_trait_reject_reason(
+    pipeline: str,
+    epilogue: str,
+    reduction_strategy: str,
+    pads: Optional[Tuple[bool, bool, bool]] = None,
+) -> str:
+    """Why a Stream-K (pipeline, epilogue, reduction strategy) is rejected ("" when accepted).
+
+    Single source of truth for the Stream-K trait rules shared by unified_gemm_codegen and
+    python/gemm_utils; gfx1250_pipeline_reject_reason applies the arch and pipeline rules.
+    ``pads`` is (pad_m, pad_n, pad_k); None skips the pad rule.
+    """
+    if reduction_strategy not in STREAMK_REDUCTION_STRATEGIES:
+        return (
+            f"stream_k reduction_strategy={reduction_strategy} is not one of "
+            f"{STREAMK_REDUCTION_STRATEGIES}"
+        )
+    if pipeline in GFX1250_ONLY_PIPELINES and pipeline not in STREAMK_GFX1250_PIPELINES:
+        return f"pipeline={pipeline} is not supported for stream_k"
+    if reduction_strategy == "atomic":
+        if epilogue != "cshuffle":
+            return (
+                "stream_k atomic reduction adds partial tiles into C and needs "
+                f"epilogue=cshuffle, got {epilogue} (the TDM store overwrites C)"
+            )
+    elif epilogue not in ("cshuffle", "tdm"):
+        return (
+            f"stream_k {reduction_strategy} reduction requires epilogue=cshuffle or tdm, "
+            f"got {epilogue}"
+        )
+    if pipeline in TDM_PIPELINES and pads is not None and any(pads):
+        return TDM_PAD_REJECT_REASON
+    return ""
+
+
+def comp_tdm_pc_acc_reject_reason(tile_m: int, tile_n: int, num_waves: int) -> str:
+    """Why a comp_tdm_pc tile exceeds the accumulator budget ("" when accepted)."""
+    if num_waves <= 0:
+        return f"comp_tdm_pc needs a positive wave count, got {num_waves}"
+    acc = -(-(tile_m * tile_n) // (num_waves * 32))
+    if acc > COMP_TDM_PC_MAX_ACC_VGPRS_PER_LANE:
+        return (
+            f"comp_tdm_pc C accumulator needs {acc} VGPRs per lane "
+            f"({tile_m}x{tile_n} over {num_waves} wave(s)), exceeding "
+            f"{COMP_TDM_PC_MAX_ACC_VGPRS_PER_LANE}"
+        )
+    return ""
+
+
+def gfx1250_fp32_tile_reject_reason(
+    gpu_target: str, dtype: str, tile_m: int, tile_n: int, num_waves: int
+) -> str:
+    """Why an fp32 GEMM tile is rejected on gfx1250 ("" when accepted)."""
+    if dtype != "fp32" or normalize_gfx_arch(gpu_target).lower() != GFX1250_ARCH:
+        return ""
+    if tile_m * tile_n >= GFX1250_FP32_MAX_ACC_PER_LANE * num_waves * 32:
+        return GFX1250_FP32_ACC_REJECT_REASON
+    return ""
+
+
+# gfx1250 LDS geometry the C++ LDS descriptors are built from.
+GFX1250_LDS_BANKS = 64
+# supports_transpose_load in gemm_universal_pipeline_ag_bg_cr_policy.hpp (fp32 has
+# no transpose load).
+GFX1250_TR_LOAD_DTYPES = ("fp16", "bf16", "fp8", "bf8", "int8")
+
+
+def gfx1250_lds_operand_transposed(operand: str, dtype: str, layout: str) -> bool:
+    """is_a_load_tr / is_b_load_tr: column-major A or row-major B of a
+    transpose-load dtype is staged MN-contiguous in LDS."""
+    if dtype not in GFX1250_TR_LOAD_DTYPES or len(layout) < 2:
+        return False
+    return layout[0] == "c" if operand == "a" else layout[1] == "r"
+
+
+def gfx1250_lds_operand_bytes(
+    mn: int, tile_k: int, elem_bytes: int, transposed: bool
+) -> int:
+    """GetSmemSizeA/B of the gfx1250 TDM / comp_async LDS descriptors for one
+    operand of an mn x tile_k block.
+
+    Mirrors MakeA/BLdsBlockDescriptor (K-contiguous rows, 16 bytes of padding
+    after every group of rows spanning 256 bytes) and
+    MakeA/BLdsBlockDescriptorForTrLoad (MN-contiguous rows padded as
+    GetLdsPaddingConfig proposes), rounded up to 16 bytes. The TDM policy may
+    drop that padding but never adds any, so this never under-counts.
+    """
+    if not transposed:
+        layer = max(1, 256 // (tile_k * elem_bytes))
+        size = mn * tile_k * elem_bytes + max(0, mn // layer - 1) * 16
+        return -(-size // 16) * 16
+    banks_per_mn = mn * elem_bytes // 4
+    if banks_per_mn * 8 <= GFX1250_LDS_BANKS:
+        elems = tile_k * mn
+    else:
+        pad_elems = 16  # (pad_amount + 1) dwords of padding, in elements
+        interval = (
+            GFX1250_LDS_BANKS.bit_length() - 2
+            if banks_per_mn < GFX1250_LDS_BANKS
+            else banks_per_mn.bit_length() - 2
+        )
+        stride = (1 << (interval + 1)) * 4 // elem_bytes
+        if stride > mn:
+            k_layer = max(1, GFX1250_LDS_BANKS * 4 // mn // elem_bytes)
+            row = mn * k_layer
+            elems = (tile_k // k_layer - 1) * (row + pad_elems) + row
+        else:
+            m_layer = mn // stride
+            row = mn // m_layer
+            elems = (tile_k * m_layer - 1) * (row + pad_elems) + row
+    return -(-(elems * elem_bytes) // 16) * 16
 
 
 # The grouped quant GEMM kernels have no async (comp_async) or TDM (comp_tdm,
-# comp_tdm_v2 + tdm epilogue) implementation: the quant pipeline problem is
-# synchronous and the kernel uses a CShuffle-style epilogue. Their codegens
-# reject these traits on every arch instead of skipping or mislabelling a kernel.
+# comp_tdm_v2 + tdm / tdmstaged epilogue) implementation: the quant pipeline
+# problem is synchronous and the kernel uses a CShuffle-style epilogue. Their
+# codegens reject these traits on every arch instead of skipping or mislabelling
+# a kernel.
 UNSUPPORTED_ASYNC_TDM_PIPELINES = GFX1250_ONLY_PIPELINES
-UNSUPPORTED_ASYNC_TDM_EPILOGUES = ("tdm",)
+UNSUPPORTED_ASYNC_TDM_EPILOGUES = TDM_EPILOGUES
 
 
 def reject_async_tdm_traits(op_name: str, pipeline: str, epilogue: str) -> None:
@@ -827,8 +1929,17 @@ def gfx1250_pipeline_reject_reason(
     variant_name: str = "",
     persistent: bool = False,
     pads: Optional[Tuple[bool, bool, bool]] = None,
+    warp_tile_m: int = 0,
+    warp_tile_n: int = 0,
+    batched: bool = False,
+    tile_mn: Optional[Tuple[int, int]] = None,
+    warp_k: Optional[int] = None,
+    streamk: bool = False,
+    waves: Optional[Sequence[int]] = None,
+    tile_k: Optional[int] = None,
+    ring: Tuple[int, int] = (0, 0),
 ) -> str:
-    """Why a comp_async / comp_tdm* / tdm-epilogue GEMM config is rejected.
+    """Why a comp_async / comp_tdm* / TDM-epilogue (or gfx1250 compv5) GEMM config is rejected.
 
     Single source of truth for the non-MX GEMM rules shared by
     unified_gemm_codegen, arch_filter and python/gemm_utils. Returns "" when
@@ -836,31 +1947,98 @@ def gfx1250_pipeline_reject_reason(
     immediately, so existing kernel sets are unchanged.
 
     ``variant_supported`` is False for GEMM variants the pipelines do not
-    support (only plain and batched GEMM are). ``pads`` is (pad_m, pad_n,
-    pad_k); None means unknown and skips the pad rules. An empty ``layout``
-    skips the comp_async layout rule and empty dtypes skip the 8-bit
-    warp_tile_k rule.
+    support (only plain, batched and preshuffle GEMM are, and Stream-K GEMM for
+    STREAMK_GFX1250_PIPELINES). ``pads``
+    is (pad_m, pad_n, pad_k); None means unknown and skips the pad rules.
+    ``batched`` marks the batched GEMM variant, which does not take the cshuffle
+    pairing below nor comp_tdm_ra, and ``tile_mn`` (tile_m, tile_n) enables the
+    comp_tdm_pc accumulator rule (None skips it). ``warp_k`` enables the
+    comp_tdm_pc / comp_tdm_ra warp_k=1 rule (None skips it); ``waves`` (warp_m,
+    warp_n, warp_k) enables the comp_tdm_v3 wave-map rule and ``tile_k`` its
+    K-tile rule (None skips them).
+    A TDM pipeline needs one of tdm_pipeline_epilogues(pipeline) ("cshuffle" for
+    comp_tdm_v3, a TDM epilogue (TDM_EPILOGUES) otherwise), except that plain
+    GEMM may also pair GEMM_TDM_CSHUFFLE_PIPELINES with cshuffle. ``ring`` is
+    (num_slots, ring_param) as split_pipeline_ring returns them: the comp_tdm_pc
+    PublishLag or the comp_tdm_ra RunAhead. (0, 0) is the default ring; a
+    non-default ring is checked by pipeline_ring_reject_reason, which rejects it
+    on any pipeline outside RING_PIPELINES.
+    ``streamk`` marks the Stream-K variant: only STREAMK_GFX1250_PIPELINES are
+    accepted, with a row-major C and warp_k=1, and the epilogue rules are
+    streamk_trait_reject_reason's (they depend on the reduction strategy); Stream-K
+    has no persistence restriction.
+    An empty ``layout`` skips the comp_async layout and tdmstaged row-major C
+    rules, and empty dtypes skip the 8-bit warp_tile_k and warp_tile_m/n rules.
+    ``warp_tile_m``/``warp_tile_n`` of 0 (unknown) skip the 8-bit
+    warp_tile_m/n rule.
     """
     is_tdm = pipeline in TDM_PIPELINES
-    if pipeline not in GFX1250_ONLY_PIPELINES and epilogue != "tdm":
+    is_tdm_epilogue = epilogue in TDM_EPILOGUES
+    ring_reason = pipeline_ring_reject_reason(pipeline, *ring)
+    if ring_reason:
+        return ring_reason
+    if pipeline == "compv5" and normalize_gfx_arch(gpu_target).lower() == GFX1250_ARCH:
+        return GFX1250_COMPV5_REJECT_REASON
+    if pipeline not in GFX1250_ONLY_PIPELINES and not is_tdm_epilogue:
         return ""
-    if epilogue == "tdm" and not is_tdm:
-        return f"epilogue=tdm requires a TDM pipeline {TDM_PIPELINES}"
+    if is_tdm_epilogue and not is_tdm:
+        return f"epilogue={epilogue} requires a TDM pipeline {TDM_PIPELINES}"
     if normalize_gfx_arch(gpu_target).lower() != GFX1250_ARCH:
         return f"pipeline={pipeline} requires {GFX1250_ARCH}, got {gpu_target}"
     if scheduler != "intrawave":
         return f"pipeline={pipeline} requires scheduler=intrawave"
+    if streamk and pipeline not in STREAMK_GFX1250_PIPELINES:
+        return f"pipeline={pipeline} is not supported for stream_k"
     if not variant_supported:
         return f"pipeline={pipeline} is not supported for {variant_name}"
+    if batched and pipeline == COMP_TDM_RA:
+        return COMP_TDM_RA_BATCHED_REJECT_REASON
     if is_tdm:
-        if epilogue != "tdm":
-            return f"pipeline={pipeline} requires epilogue=tdm"
-        if persistent:
+        # StreamKKernel takes a TDM pipeline with either epilogue and persistent or not;
+        # streamk_trait_reject_reason decides the epilogue per reduction strategy. Plain
+        # GEMM also takes cshuffle for GEMM_TDM_CSHUFFLE_PIPELINES; batched GEMM does not
+        # (GEMM_TDM_CSHUFFLE_OPS in the Tile Engine), and preshuffle has no comp_tdm_pc
+        # or comp_tdm_v3 kernel at all.
+        want_epilogues = tdm_pipeline_epilogues(pipeline)
+        cshuffle_ok = (
+            epilogue == "cshuffle"
+            and pipeline in GEMM_TDM_CSHUFFLE_PIPELINES
+            and not batched
+        )
+        if not streamk and epilogue not in want_epilogues and not cshuffle_ok:
+            return (
+                f"pipeline={pipeline} requires epilogue={' or '.join(want_epilogues)}"
+            )
+        staged_reason = tdm_staged_layout_reject_reason(epilogue, layout)
+        if staged_reason:
+            return staged_reason
+        if not streamk and persistent:
             return f"pipeline={pipeline} does not support the persistent kernel"
+        if streamk and layout[2:3] not in ("", "r"):
+            return STREAMK_TDM_C_LAYOUT_REJECT_REASON
+        if streamk and warp_k not in (None, 1):
+            return STREAMK_TDM_WARP_K_REJECT_REASON
         if pads is not None and any(pads):
             return TDM_PAD_REJECT_REASON
         if pipeline == "comp_tdm_v2" and num_waves != 4:
             return "comp_tdm_v2 requires exactly 4 waves"
+        if pipeline == COMP_TDM_V3:
+            reason = comp_tdm_v3_reject_reason(
+                dtype_a, dtype_b, waves, layout, tile_k, warp_tile_k
+            )
+            if reason:
+                return reason
+        if pipeline == "comp_tdm_pc":
+            if warp_k is not None and warp_k != 1:
+                return COMP_TDM_PC_WARP_K_REJECT_REASON
+            if tile_mn is not None:
+                reason = comp_tdm_pc_acc_reject_reason(*tile_mn, num_waves)
+                if reason:
+                    return reason
+        if pipeline == COMP_TDM_RA and warp_k is not None and warp_k != 1:
+            return COMP_TDM_RA_WARP_K_REJECT_REASON
+        if "fp32" in (dtype_a, dtype_b) and layout and layout != "rcr":
+            return GFX1250_TDM_FP32_LAYOUT_REJECT_REASON
         return ""
     # Only the cshuffle epilogue carries DoubleSmemBuffer, matching the Tile
     # Engine trait rules.
@@ -872,6 +2050,10 @@ def gfx1250_pipeline_reject_reason(
         return GFX1250_COMP_ASYNC_PAD_REJECT_REASON
     if gfx1250_comp_async_8bit_warp_tile_k_rejected(dtype_a, dtype_b, warp_tile_k):
         return GFX1250_COMP_ASYNC_8BIT_WARP_TILE_K_REJECT_REASON
+    if gfx1250_comp_async_8bit_warp_tile_mn_rejected(
+        dtype_a, dtype_b, warp_tile_m, warp_tile_n
+    ):
+        return GFX1250_COMP_ASYNC_8BIT_WARP_TILE_MN_REJECT_REASON
     return ""
 
 
@@ -885,6 +2067,319 @@ def rcr_only_layout_guard(layout: str) -> Optional[str]:
     if layout != "rcr":
         return f"Unsupported layout {layout} (only rcr) -- skipping"
     return None
+
+
+# ============================================================================
+# gfx1250 preshuffle pipelines
+# ============================================================================
+# preshufflev2 / preshuffle_tdm read B packed by the host shuffle_b_v0; the
+# gfx1250 compute pipelines read ordinary B (Preshuffle=false) and follow the
+# plain GEMM gfx1250 rules above. Mirrors preshuffle_pipeline_reject_reason in
+# tile_engine/ops/gemm/gemm_validation_utils.py (tile_engine cannot be imported
+# here, see normalize_gfx_arch); tests/test_preshuffle_gfx1250_pipelines.py
+# pins the two copies to identical behaviour.
+PACKED_B_PIPELINES = ("preshufflev2", "preshuffle_tdm")
+# Listed explicitly: comp_tdm_pc and comp_tdm_ra are TDM pipelines without
+# preshuffle wiring.
+PRESHUFFLE_GFX1250_PIPELINES = (
+    "preshuffle_tdm",
+    "comp_async",
+    "comp_tdm",
+    "comp_tdm_v2",
+)
+PRESHUFFLE_GFX1250_LAYOUT = "rcr"
+# The host shuffle_b_v0 packs whole N x K tiles: a partial N tile overflows the
+# packed buffer and a partial K tile packs the wrong elements.
+PRESHUFFLE_PAD_NK_REJECT_REASON = "preshuffled B holds whole N/K tiles, so gfx1250 preshuffle requires pad_n=pad_k=False"
+# These block GEMMs ignore K warps while the launch still counts them, so the
+# extra waves run as M warps past the tile and corrupt C (comp_tdm* only survive
+# through their TDM store), on every arch.
+PRESHUFFLE_WARP_K1_PIPELINES = PACKED_B_PIPELINES + ("comp_async",)
+
+
+def is_true(value) -> bool:
+    """Accept both JSON booleans and their string spellings."""
+    return value is True or str(value).lower() == "true"
+
+
+def packed_b_pipeline_reject_reason(pipeline: str, preshuffle: bool) -> str:
+    """Reason string if a packed-B pipeline is used outside the preshuffle op, else "".
+
+    These pipelines read B packed by the host shuffle_b_v0, which only the
+    preshuffle variant performs; any other GEMM would compute from unpacked B.
+    """
+    if pipeline in PACKED_B_PIPELINES and not preshuffle:
+        return (
+            f"{pipeline} reads preshuffled B, so only the preshuffle variant can use it"
+        )
+    return ""
+
+
+def preshuffle_pipeline_reject_reason(
+    pipeline: str,
+    gpu_target: str = "",
+    layout: str = "",
+    pad_m=None,
+    pad_n=None,
+    pad_k=None,
+    num_waves: Optional[int] = None,
+    dtype: str = "",
+    scheduler: str = "",
+    epilogue: str = "",
+    persistent: bool = False,
+    warp_tile_k: Optional[int] = None,
+    warp_k: Optional[int] = None,
+    tile_k: Optional[int] = None,
+) -> str:
+    """Reason string if a gemm_preshuffle pipeline config is not allowed, else "".
+
+    Pipelines outside PRESHUFFLE_GFX1250_PIPELINES (preshufflev2) only get the
+    scheduler, TDM-epilogue and warp_k checks, plus the pad_n/pad_k check on
+    gfx1250. Empty gpu_target / layout / dtype / scheduler / epilogue and None
+    pads / num_waves / warp_tile_k / warp_k / tile_k mean "not known yet" and
+    are not checked, so the helper can run at trait level and at tile level.
+    """
+    unwired = set(UNSUPPORTED_ASYNC_TDM_PIPELINES) - set(PRESHUFFLE_GFX1250_PIPELINES)
+    if pipeline in unwired:
+        return f"gemm_preshuffle has no {pipeline} kernel"
+    # comp_* pipelines are Intrawave-only, the weight-preshuffle ones Default.
+    want_scheduler = "intrawave" if pipeline.startswith("comp_") else "default"
+    if scheduler and scheduler != want_scheduler:
+        return f"preshuffle {pipeline} requires scheduler {want_scheduler!r}, got {scheduler!r}"
+    if epilogue in TDM_EPILOGUES and pipeline not in TDM_PIPELINES:
+        return f"preshuffle {pipeline} cannot use the {epilogue} epilogue"
+    if pipeline in PRESHUFFLE_WARP_K1_PIPELINES and warp_k not in (None, 1):
+        return f"preshuffle {pipeline} requires warp_k=1, got {warp_k}"
+    arch = normalize_gfx_arch(gpu_target)
+    pads = (pad_m, pad_n, pad_k)
+    if pipeline not in PRESHUFFLE_GFX1250_PIPELINES:
+        pad_nk = is_true(pad_n) or is_true(pad_k)
+        return (
+            PRESHUFFLE_PAD_NK_REJECT_REASON if pad_nk and arch == GFX1250_ARCH else ""
+        )
+    if arch and arch != GFX1250_ARCH:
+        return f"pipeline {pipeline!r} requires {GFX1250_ARCH}, got {arch!r}"
+    # rcr also covers the comp_async A row-major / B col-major requirement.
+    if layout and layout != PRESHUFFLE_GFX1250_LAYOUT:
+        return f"preshuffle {pipeline} requires layout {PRESHUFFLE_GFX1250_LAYOUT!r}, got {layout!r}"
+    if persistent:
+        return f"preshuffle {pipeline} has no persistent kernel"
+    want_epilogues = TDM_EPILOGUES if pipeline in TDM_PIPELINES else ("cshuffle",)
+    if epilogue and epilogue not in want_epilogues:
+        return (
+            f"preshuffle {pipeline} requires epilogue "
+            f"{' or '.join(map(repr, want_epilogues))}, got {epilogue!r}"
+        )
+    if pipeline != "comp_async" and any(is_true(p) for p in pads):
+        return TDM_PAD_REJECT_REASON
+    if (
+        pipeline == "comp_async"
+        and None not in pads
+        and not all(is_true(p) for p in pads)
+    ):
+        return GFX1250_COMP_ASYNC_PAD_REJECT_REASON
+    if pipeline == "comp_tdm_v2" and num_waves is not None and num_waves != 4:
+        return f"comp_tdm_v2 requires exactly 4 waves, got {num_waves}"
+    # The TDM LDS descriptors put one pad per K row; the LDS pad interval only
+    # lands there when the row (tile_k elements) is a power of two.
+    if pipeline in TDM_PIPELINES and tile_k is not None and tile_k & (tile_k - 1):
+        return f"preshuffle {pipeline} requires a power-of-two tile_k, got {tile_k}"
+    if (
+        pipeline == "comp_async"
+        and warp_tile_k is not None
+        and gfx1250_comp_async_8bit_warp_tile_k_rejected(dtype, dtype, warp_tile_k)
+    ):
+        return GFX1250_COMP_ASYNC_8BIT_WARP_TILE_K_REJECT_REASON
+    return ""
+
+
+# =============================================================================
+# Preshuffle Validation (copied from tile_engine/ops/gemm/gemm_validation_utils.py)
+# =============================================================================
+
+ELEMENT_SIZE_MAP = {
+    "fp16": 2,
+    "bf16": 2,
+    "fp32": 4,
+    "fp64": 8,
+    "fp8": 1,
+    "bf8": 1,
+    "int8": 1,
+}
+
+
+def _validate_preshuffle_vector_load(
+    warp_tile_m: int,
+    warp_tile_k: int,
+    datatype: str,
+    m_iter_per_warp: float,
+    wave_size: int = 64,
+    vector_load_size: int = 16,
+) -> bool:
+    """
+    Validate vector load alignment for preshuffle pipeline.
+
+    Checks: (warp_tile_m * warp_tile_k * elem_size * m_iter_per_warp / wave_size) % vector_load_size == 0
+    """
+    elem_size = ELEMENT_SIZE_MAP.get(datatype, 2)
+    access_size = (warp_tile_m * warp_tile_k * elem_size * m_iter_per_warp) / wave_size
+    return access_size % vector_load_size == 0
+
+
+def _validate_preshuffle_m0_m1_m2(
+    tile_m: int,
+    tile_k: int,
+    warp_m: int,
+    warp_n: int,
+    warp_k: int,
+    datatype: str,
+    vector_load_size: int = 16,
+    warp_size: int = 64,
+) -> bool:
+    """
+    Validate M0, M1, M2 configuration for preshuffle matrix A row-major layout.
+    Ensures proper memory access pattern alignment.
+    """
+    try:
+        elem_size = ELEMENT_SIZE_MAP.get(datatype, 2)
+        MPerBlock = tile_m
+
+        # Calculate K1
+        K1 = vector_load_size / elem_size
+        if K1 != int(K1):
+            return False
+        K1 = int(K1)
+
+        # Calculate K0
+        if tile_k % K1 != 0:
+            return False
+        K0 = tile_k // K1
+
+        # Calculate M2
+        if warp_size % K0 != 0:
+            return False
+        M2 = warp_size // K0
+
+        # Calculate number of warps
+        NumWarps = warp_m * warp_n * warp_k
+        M0 = NumWarps
+
+        # Calculate M1
+        if (M2 * M0) == 0:
+            return False
+        if MPerBlock % (M2 * M0) != 0:
+            return False
+        M1 = MPerBlock // (M2 * M0)
+
+        # Validate: M0 * M1 * M2 == MPerBlock
+        return (M0 * M1 * M2) == MPerBlock
+
+    except (ZeroDivisionError, ValueError):
+        return False
+
+
+def is_preshuffle_config_valid(
+    tile_m: int,
+    tile_n: int,
+    tile_k: int,
+    warp_m: int,
+    warp_n: int,
+    warp_k: int,
+    warp_tile_m: int,
+    warp_tile_n: int,
+    warp_tile_k: int,
+    datatype: str,
+    warp_size: int = 64,
+) -> bool:
+    """
+    Comprehensive preshuffle configuration validation.
+    Copied from tile_engine/ops/gemm/gemm_validation_utils.py
+    """
+    # Basic divisibility checks
+    if tile_m % (warp_m * warp_tile_m) != 0:
+        return False
+    if tile_n % (warp_n * warp_tile_n) != 0:
+        return False
+    if tile_k % (warp_k * warp_tile_k) != 0:
+        return False
+
+    # Calculate m_iter_per_warp
+    m_iter_per_warp = tile_m / (warp_m * warp_tile_m)
+
+    # Validate vector load alignment
+    if not _validate_preshuffle_vector_load(
+        warp_tile_m,
+        warp_tile_k,
+        datatype,
+        m_iter_per_warp,
+        wave_size=warp_size,
+        vector_load_size=16,
+    ):
+        return False
+
+    # Validate M0/M1/M2 configuration
+    if not _validate_preshuffle_m0_m1_m2(
+        tile_m,
+        tile_k,
+        warp_m,
+        warp_n,
+        warp_k,
+        datatype,
+        vector_load_size=16,
+        warp_size=warp_size,
+    ):
+        return False
+
+    return True
+
+
+def warp_size_for_arch(gpu_target: str) -> int:
+    return 64 if gpu_target.startswith("gfx9") else 32
+
+
+def preshuffle_tile_reject_reason(
+    pipeline,
+    gpu_target,
+    dtype,
+    tile_m,
+    tile_n,
+    tile_k,
+    warp_m,
+    warp_n,
+    warp_k,
+    warp_tile_m,
+    warp_tile_n,
+    warp_tile_k,
+) -> str:
+    """Tile rules the preshuffle kernels static_assert on; "" when the tile is valid."""
+    warp_size = warp_size_for_arch(gpu_target)
+    if pipeline in PACKED_B_PIPELINES and not is_preshuffle_config_valid(
+        tile_m,
+        tile_n,
+        tile_k,
+        warp_m,
+        warp_n,
+        warp_k,
+        warp_tile_m,
+        warp_tile_n,
+        warp_tile_k,
+        dtype,
+        warp_size,
+    ):
+        return (
+            f"preshuffle {pipeline} packed-B M0/M1/M2 or vector-load rule rejects "
+            f"{tile_m}x{tile_n}x{tile_k}"
+        )
+    # comp_async loads A (tile_m x tile_k) and B (tile_n x tile_k) through
+    # warp-raked distributions whose K threads must tile a whole wave.
+    if pipeline == "comp_async" and not all(
+        _validate_preshuffle_m0_m1_m2(
+            mn, tile_k, warp_m, warp_n, warp_k, dtype, warp_size=warp_size
+        )
+        for mn in (tile_m, tile_n)
+    ):
+        return f"preshuffle comp_async tile {tile_m}x{tile_n}x{tile_k} does not cover a whole wave"
+    return ""
 
 
 def iter_quant_axes(
@@ -961,10 +2456,17 @@ def quant_decode_default_config(*, warp_tile_k: int, **overrides) -> dict:
         "scheduler": "intrawave",
         "tile_configs": [
             # GemmConfigQuantDecode<fp8_t>: M=16, N=64, K=256/sizeof(8bit)=256
-            {"tile_m": 16, "tile_n": 64, "tile_k": 256,
-             "warp_m": 1, "warp_n": 4, "warp_k": 1,
-             "warp_tile_m": 16, "warp_tile_n": 16,
-             "warp_tile_k": warp_tile_k},
+            {
+                "tile_m": 16,
+                "tile_n": 64,
+                "tile_k": 256,
+                "warp_m": 1,
+                "warp_n": 4,
+                "warp_k": 1,
+                "warp_tile_m": 16,
+                "warp_tile_n": 16,
+                "warp_tile_k": warp_tile_k,
+            },
         ],
         "pad_m": False,
         "pad_n": False,
@@ -1000,7 +2502,11 @@ def aquant_effective_epilogue(
     as-is -- see TestQuantEffectiveEpilogue, which pins the asymmetry.
     """
     return quant_effective_epilogue(
-        tile_n, warp_n, warp_tile_n, quant_group_n, tiled_mma_permute_n=True,
+        tile_n,
+        warp_n,
+        warp_tile_n,
+        quant_group_n,
+        tiled_mma_permute_n=True,
     )
 
 
@@ -1010,9 +2516,15 @@ def make_aquant_kernel_name(
     pipeline: str,
     epilogue: str,  # ignored — actual epilogue is computed from tile params
     scheduler: str,
-    tile_m: int, tile_n: int, tile_k: int,
-    warp_m: int, warp_n: int, warp_k: int,
-    warp_tile_m: int, warp_tile_n: int, warp_tile_k: int,
+    tile_m: int,
+    tile_n: int,
+    tile_k: int,
+    warp_m: int,
+    warp_n: int,
+    warp_k: int,
+    warp_tile_m: int,
+    warp_tile_n: int,
+    warp_tile_k: int,
     quant_group_m: int,
     quant_group_n: int,
     quant_group_k: int,
@@ -1030,9 +2542,15 @@ def make_aquant_kernel_name(
         pipeline=pipeline,
         epilogue=aquant_effective_epilogue(tile_n, warp_n, warp_tile_n, quant_group_n),
         scheduler=scheduler,
-        tile_m=tile_m, tile_n=tile_n, tile_k=tile_k,
-        warp_m=warp_m, warp_n=warp_n, warp_k=warp_k,
-        warp_tile_m=warp_tile_m, warp_tile_n=warp_tile_n, warp_tile_k=warp_tile_k,
+        tile_m=tile_m,
+        tile_n=tile_n,
+        tile_k=tile_k,
+        warp_m=warp_m,
+        warp_n=warp_n,
+        warp_k=warp_k,
+        warp_tile_m=warp_tile_m,
+        warp_tile_n=warp_tile_n,
+        warp_tile_k=warp_tile_k,
         group_segments=(f"aqg{quant_group_m}x{quant_group_n}x{quant_group_k}",),
         flags=((preshuffle_aq, "preshuffleaq"),),
     )
@@ -1059,7 +2577,10 @@ def abquant_effective_epilogue(
     in the C++ test fixtures for both GemmConfigEightWaves and GemmConfigPreshuffleB_ABQuant_Prefill).
     """
     return quant_effective_epilogue(
-        tile_n, warp_n, warp_tile_n, bquant_group_n,
+        tile_n,
+        warp_n,
+        warp_tile_n,
+        bquant_group_n,
         tiled_mma_permute_n=pipeline not in ("eightwaves", "preshuffleb"),
     )
 
@@ -1070,9 +2591,15 @@ def make_abquant_kernel_name(
     pipeline: str,
     epilogue: str,  # ignored — actual epilogue is computed from tile params
     scheduler: str,
-    tile_m: int, tile_n: int, tile_k: int,
-    warp_m: int, warp_n: int, warp_k: int,
-    warp_tile_m: int, warp_tile_n: int, warp_tile_k: int,
+    tile_m: int,
+    tile_n: int,
+    tile_k: int,
+    warp_m: int,
+    warp_n: int,
+    warp_k: int,
+    warp_tile_m: int,
+    warp_tile_n: int,
+    warp_tile_k: int,
     aquant_group_m: int,
     aquant_group_n: int,
     aquant_group_k: int,
@@ -1098,9 +2625,15 @@ def make_abquant_kernel_name(
             tile_n, warp_n, warp_tile_n, bquant_group_n, pipeline
         ),
         scheduler=scheduler,
-        tile_m=tile_m, tile_n=tile_n, tile_k=tile_k,
-        warp_m=warp_m, warp_n=warp_n, warp_k=warp_k,
-        warp_tile_m=warp_tile_m, warp_tile_n=warp_tile_n, warp_tile_k=warp_tile_k,
+        tile_m=tile_m,
+        tile_n=tile_n,
+        tile_k=tile_k,
+        warp_m=warp_m,
+        warp_n=warp_n,
+        warp_k=warp_k,
+        warp_tile_m=warp_tile_m,
+        warp_tile_n=warp_tile_n,
+        warp_tile_k=warp_tile_k,
         group_segments=(
             f"aqg{aquant_group_m}x{aquant_group_n}x{aquant_group_k}",
             f"bqg{bquant_group_m}x{bquant_group_n}x{bquant_group_k}",
@@ -1156,9 +2689,15 @@ ROWCOL_TENSOR_QUANT_SUPPORTED_LAYOUTS = ("rcr",)
 # Mirrors tile_engine/ops/gemm/grouped_gemm_quant/grouped_gemm_{rowcolquant,
 # tensorquant}/configs/default_ci_config.json.
 ROWCOL_TENSOR_QUANT_DEFAULT_TILE = {
-    "tile_m": 128, "tile_n": 128, "tile_k": 64,
-    "warp_m": 2, "warp_n": 2, "warp_k": 1,
-    "warp_tile_m": 32, "warp_tile_n": 32, "warp_tile_k": 16,
+    "tile_m": 128,
+    "tile_n": 128,
+    "tile_k": 64,
+    "warp_m": 2,
+    "warp_n": 2,
+    "warp_k": 1,
+    "warp_tile_m": 32,
+    "warp_tile_n": 32,
+    "warp_tile_k": 16,
 }
 
 # gfx1250 (RDNA-style WMMA, MI400) cannot use the tile above: it is sized
@@ -1166,9 +2705,15 @@ ROWCOL_TENSOR_QUANT_DEFAULT_TILE = {
 # kernel compiles but produces all-zero output. The 8-bit WMMA fragment is 16x16x128,
 # and the FlatMM 8-bit tile below is the shape validated against it.
 ROWCOL_TENSOR_QUANT_DEFAULT_TILE_GFX1250 = {
-    "tile_m": 16, "tile_n": 64, "tile_k": 256,
-    "warp_m": 1, "warp_n": 4, "warp_k": 1,
-    "warp_tile_m": 16, "warp_tile_n": 16, "warp_tile_k": 128,
+    "tile_m": 16,
+    "tile_n": 64,
+    "tile_k": 256,
+    "warp_m": 1,
+    "warp_n": 4,
+    "warp_k": 1,
+    "warp_tile_m": 16,
+    "warp_tile_n": 16,
+    "warp_tile_k": 128,
 }
 
 
@@ -1195,7 +2740,92 @@ def rowcol_tensor_quant_default_tile(gfx_arch: str = "") -> dict:
 ROWCOL_TENSOR_QUANT_SUPPORTED_ARCHES = ("gfx942", "gfx950", "gfx1250")
 
 
-def validate_rowcol_tensor_quant_gfx_arch(gfx_arch: str, *, require_explicit: bool = False) -> str:
+def validate_gfx1250_quant_warp_tile(
+    warp_tile_m, warp_tile_n, warp_tile_k, gfx_arch, *, bridge, logical_k32=False
+):
+    """Reject unsupported WMMA fragments without changing an explicit request.
+
+    Only TensorQuant opts into the validated logical-K32 adapter. The other
+    quant bridges retain their native K64/K128 boundary.
+    """
+    if normalize_gfx_arch(gfx_arch or "") != "gfx1250":
+        return
+    allowed_k = (32, 64, 128) if logical_k32 else (64, 128)
+    if (warp_tile_m, warp_tile_n) != (16, 16) or warp_tile_k not in allowed_k:
+        raise ValueError(
+            f"{bridge} on {gfx_arch!r} requires a 16x16 WMMA tile with "
+            f"warp_tile_k in {allowed_k}; got "
+            f"{warp_tile_m}x{warp_tile_n}x{warp_tile_k}."
+        )
+
+
+def validate_abquant_eight_waves_target(
+    pipeline, eight_waves, gfx_arch, *, bridge="ABQuant"
+):
+    """Reject the ABQuant EightWaves pipeline on any target other than gfx950.
+
+    ABQuantGemmPipelineAgBgCrEightWaves is only available under ``__gfx950__``;
+    elsewhere its device body compiles to nothing, so the kernel launches and
+    leaves C untouched. CompV3 with eight warps is a different pipeline and is
+    not affected. An empty target is left to the caller's arch resolution.
+    """
+    target = normalize_gfx_arch(gfx_arch or "")
+    if target and target != "gfx950" and (pipeline == "eightwaves" or eight_waves):
+        raise ValueError(
+            f"{bridge}: the EightWaves pipeline requires gfx950; got {gfx_arch!r}."
+        )
+
+
+def validate_quant_codegen_target(
+    config,
+    gfx_arch,
+    build_specs,
+    *,
+    bridge,
+    supported_archs,
+    gfx1250_unsupported_variants=(),
+    gfx950_only_variants=(),
+):
+    """Target check for a block-scale quant codegen CLI before any header is written.
+
+    The codegen CLIs are a second entry point next to the Python bridges, so
+    they re-run the same op-local rules: a supported target, no conflicting
+    recorded ``gfx_arch``, variants the target can run, and the gfx1250 WMMA
+    warp-tile boundary. gfx9 targets are only checked for support, which keeps
+    their previous output unchanged.
+    """
+    target = normalize_gfx_arch(gfx_arch or "")
+    if target not in supported_archs:
+        raise ValueError(
+            f"{bridge}: unsupported GPU architecture {gfx_arch!r}; "
+            f"supported: {', '.join(supported_archs)}."
+        )
+    recorded = config.get("gfx_arch")
+    if recorded and normalize_gfx_arch(recorded) != target:
+        raise ValueError(
+            f"{bridge}: config gfx_arch {recorded!r} does not match target {gfx_arch!r}."
+        )
+    for spec in build_specs(config):
+        if target == "gfx1250" and spec.variant_key in gfx1250_unsupported_variants:
+            raise ValueError(
+                f"{bridge} variant {spec.variant_key!r} is not supported on gfx1250."
+            )
+        if target != "gfx950" and spec.variant_key in gfx950_only_variants:
+            raise ValueError(
+                f"{bridge} variant {spec.variant_key!r} requires gfx950; got {gfx_arch!r}."
+            )
+        validate_gfx1250_quant_warp_tile(
+            spec.tile.warp_tile_m,
+            spec.tile.warp_tile_n,
+            spec.tile.warp_tile_k,
+            target,
+            bridge=bridge,
+        )
+
+
+def validate_rowcol_tensor_quant_gfx_arch(
+    gfx_arch: str, *, require_explicit: bool = False
+) -> str:
     """Normalize and check a caller-supplied gfx target; return the bare target.
 
     Raises ``ValueError`` for anything outside
@@ -1253,9 +2883,15 @@ def _make_rowcol_tensor_quant_kernel_name(
     pad_n: bool,
     pad_k: bool,
     persistent: bool,
-    tile_m: int, tile_n: int, tile_k: int,
-    warp_m: int, warp_n: int, warp_k: int,
-    warp_tile_m: int, warp_tile_n: int, warp_tile_k: int,
+    tile_m: int,
+    tile_n: int,
+    tile_k: int,
+    warp_m: int,
+    warp_n: int,
+    warp_k: int,
+    warp_tile_m: int,
+    warp_tile_n: int,
+    warp_tile_k: int,
 ) -> str:
     """Shared implementation behind make_{rowcolquant,tensorquant}_kernel_name."""
     tile_str = (
@@ -1280,9 +2916,15 @@ def make_rowcolquant_kernel_name(
     pad_n: bool,
     pad_k: bool,
     persistent: bool,
-    tile_m: int, tile_n: int, tile_k: int,
-    warp_m: int, warp_n: int, warp_k: int,
-    warp_tile_m: int, warp_tile_n: int, warp_tile_k: int,
+    tile_m: int,
+    tile_n: int,
+    tile_k: int,
+    warp_m: int,
+    warp_n: int,
+    warp_k: int,
+    warp_tile_m: int,
+    warp_tile_n: int,
+    warp_tile_k: int,
 ) -> str:
     """Return the canonical RowColQuant kernel name used as KERNEL_NAME.
 
@@ -1292,11 +2934,25 @@ def make_rowcolquant_kernel_name(
     tile_engine/.../grouped_gemm_rowcolquant_instance_builder.py.
     """
     return _make_rowcol_tensor_quant_kernel_name(
-        "rowcolquant", dtype, layout, pipeline, epilogue, scheduler,
-        pad_m, pad_n, pad_k, persistent,
-        tile_m, tile_n, tile_k,
-        warp_m, warp_n, warp_k,
-        warp_tile_m, warp_tile_n, warp_tile_k,
+        "rowcolquant",
+        dtype,
+        layout,
+        pipeline,
+        epilogue,
+        scheduler,
+        pad_m,
+        pad_n,
+        pad_k,
+        persistent,
+        tile_m,
+        tile_n,
+        tile_k,
+        warp_m,
+        warp_n,
+        warp_k,
+        warp_tile_m,
+        warp_tile_n,
+        warp_tile_k,
     )
 
 
@@ -1310,22 +2966,41 @@ def make_tensorquant_kernel_name(
     pad_n: bool,
     pad_k: bool,
     persistent: bool,
-    tile_m: int, tile_n: int, tile_k: int,
-    warp_m: int, warp_n: int, warp_k: int,
-    warp_tile_m: int, warp_tile_n: int, warp_tile_k: int,
+    tile_m: int,
+    tile_n: int,
+    tile_k: int,
+    warp_m: int,
+    warp_n: int,
+    warp_k: int,
+    warp_tile_m: int,
+    warp_tile_n: int,
+    warp_tile_k: int,
 ) -> str:
     """Return the canonical TensorQuant kernel name used as KERNEL_NAME.
 
     See make_rowcolquant_kernel_name; the two differ only in the operator segment.
     """
     return _make_rowcol_tensor_quant_kernel_name(
-        "tensorquant", dtype, layout, pipeline, epilogue, scheduler,
-        pad_m, pad_n, pad_k, persistent,
-        tile_m, tile_n, tile_k,
-        warp_m, warp_n, warp_k,
-        warp_tile_m, warp_tile_n, warp_tile_k,
+        "tensorquant",
+        dtype,
+        layout,
+        pipeline,
+        epilogue,
+        scheduler,
+        pad_m,
+        pad_n,
+        pad_k,
+        persistent,
+        tile_m,
+        tile_n,
+        tile_k,
+        warp_m,
+        warp_n,
+        warp_k,
+        warp_tile_m,
+        warp_tile_n,
+        warp_tile_k,
     )
-
 
 
 # Non-grouped gemm_aquant kernel name construction
@@ -1367,9 +3042,15 @@ def make_gemm_aquant_kernel_name(
     pipeline: str,
     epilogue: str,  # "cshuffle" or "default" -- sweep epilogue trait, mirrors Old-TE
     scheduler: str,
-    tile_m: int, tile_n: int, tile_k: int,
-    warp_m: int, warp_n: int, warp_k: int,
-    warp_tile_m: int, warp_tile_n: int, warp_tile_k: int,
+    tile_m: int,
+    tile_n: int,
+    tile_k: int,
+    warp_m: int,
+    warp_n: int,
+    warp_k: int,
+    warp_tile_m: int,
+    warp_tile_n: int,
+    warp_tile_k: int,
     quant_group_m: int,
     quant_group_n: int,
     quant_group_k: int,
@@ -1398,9 +3079,15 @@ def make_gemm_aquant_kernel_name(
             tile_n, warp_n, warp_tile_n, quant_group_n, requested_epilogue=epilogue
         ),
         scheduler=scheduler,
-        tile_m=tile_m, tile_n=tile_n, tile_k=tile_k,
-        warp_m=warp_m, warp_n=warp_n, warp_k=warp_k,
-        warp_tile_m=warp_tile_m, warp_tile_n=warp_tile_n, warp_tile_k=warp_tile_k,
+        tile_m=tile_m,
+        tile_n=tile_n,
+        tile_k=tile_k,
+        warp_m=warp_m,
+        warp_n=warp_n,
+        warp_k=warp_k,
+        warp_tile_m=warp_tile_m,
+        warp_tile_n=warp_tile_n,
+        warp_tile_k=warp_tile_k,
         group_segments=(f"qg{quant_group_m}x{quant_group_n}x{quant_group_k}",),
         flags=((preshuffle_aquant, "preshufflequant"),),
     )
@@ -1417,15 +3104,36 @@ def make_gemm_aquant_kernel_name(
 # name make_abquant_kernel_name in this module.
 
 
+def abquant_uses_column_major_aq(
+    bquant_group_n: int,
+    warp_m: int,
+    warp_n: int,
+    warp_k: int,
+    apreshuffle_quant: bool = False,
+) -> bool:
+    """AQ layout rule shared by generated ABQuant headers and the public runner."""
+    return (
+        not apreshuffle_quant
+        and bquant_group_n == 128
+        and warp_m * warp_n * warp_k == 8
+    )
+
+
 def make_gemm_abquant_kernel_name(
     variant_key: str,
     layout: str,
     pipeline: str,
-    epilogue: str,  # ignored — actual epilogue is computed from tile params via bquant_effective_epilogue
+    epilogue: str,
     scheduler: str,
-    tile_m: int, tile_n: int, tile_k: int,
-    warp_m: int, warp_n: int, warp_k: int,
-    warp_tile_m: int, warp_tile_n: int, warp_tile_k: int,
+    tile_m: int,
+    tile_n: int,
+    tile_k: int,
+    warp_m: int,
+    warp_n: int,
+    warp_k: int,
+    warp_tile_m: int,
+    warp_tile_n: int,
+    warp_tile_k: int,
     aquant_group_k: int,
     bquant_group_n: int,
     bquant_group_k: int,
@@ -1462,7 +3170,16 @@ def make_gemm_abquant_kernel_name(
     # this family. Pinned by TestQuantKernelNames.
     # test_gemm_abquant_never_emits_permute_n; fixing it changes emitted kernel
     # names and needs its own commit, not this refactor.
-    if preshuffle_b and not eight_waves:
+    if (
+        epilogue == "default"
+        and pipeline == "compv3"
+        and not preshuffle_b
+        and not eight_waves
+    ):
+        # Native CompV3 instance builders emit DefaultGemm2DEpilogue for this
+        # explicit trait; its name must remain distinct from CShuffle.
+        effective_epilogue = "default"
+    elif preshuffle_b and not eight_waves:
         effective_epilogue = bquant_effective_epilogue(
             tile_n, warp_n, warp_tile_n, bquant_group_n
         )
@@ -1475,9 +3192,15 @@ def make_gemm_abquant_kernel_name(
         pipeline=pipeline,
         epilogue=effective_epilogue,
         scheduler=scheduler,
-        tile_m=tile_m, tile_n=tile_n, tile_k=tile_k,
-        warp_m=warp_m, warp_n=warp_n, warp_k=warp_k,
-        warp_tile_m=warp_tile_m, warp_tile_n=warp_tile_n, warp_tile_k=warp_tile_k,
+        tile_m=tile_m,
+        tile_n=tile_n,
+        tile_k=tile_k,
+        warp_m=warp_m,
+        warp_n=warp_n,
+        warp_k=warp_k,
+        warp_tile_m=warp_tile_m,
+        warp_tile_n=warp_tile_n,
+        warp_tile_k=warp_tile_k,
         group_segments=(
             f"aqg1x1x{aquant_group_k}",
             f"bqg1x{bquant_group_n}x{bquant_group_k}",
@@ -1509,7 +3232,11 @@ def tensor_quant_effective_epilogue(tile_n: int, warp_n: int, warp_tile_n: int) 
     # quant_group_n is fixed at 1 for TensorQuant (a single scalar scale), and
     # tiled_mma_permute_n=False short-circuits the parity check regardless.
     return quant_effective_epilogue(
-        tile_n, warp_n, warp_tile_n, quant_group_n=1, tiled_mma_permute_n=False,
+        tile_n,
+        warp_n,
+        warp_tile_n,
+        quant_group_n=1,
+        tiled_mma_permute_n=False,
     )
 
 
@@ -1519,9 +3246,15 @@ def make_tensor_quant_kernel_name(
     pipeline: str,
     epilogue: str,  # ignored -- actual epilogue computed via tensor_quant_effective_epilogue
     scheduler: str,
-    tile_m: int, tile_n: int, tile_k: int,
-    warp_m: int, warp_n: int, warp_k: int,
-    warp_tile_m: int, warp_tile_n: int, warp_tile_k: int,
+    tile_m: int,
+    tile_n: int,
+    tile_k: int,
+    warp_m: int,
+    warp_n: int,
+    warp_k: int,
+    warp_tile_m: int,
+    warp_tile_n: int,
+    warp_tile_k: int,
 ) -> str:
     """Return the canonical TensorQuant kernel name used as KERNEL_NAME.
 
@@ -1537,9 +3270,15 @@ def make_tensor_quant_kernel_name(
         pipeline=pipeline,
         epilogue=tensor_quant_effective_epilogue(tile_n, warp_n, warp_tile_n),
         scheduler=scheduler,
-        tile_m=tile_m, tile_n=tile_n, tile_k=tile_k,
-        warp_m=warp_m, warp_n=warp_n, warp_k=warp_k,
-        warp_tile_m=warp_tile_m, warp_tile_n=warp_tile_n, warp_tile_k=warp_tile_k,
+        tile_m=tile_m,
+        tile_n=tile_n,
+        tile_k=tile_k,
+        warp_m=warp_m,
+        warp_n=warp_n,
+        warp_k=warp_k,
+        warp_tile_m=warp_tile_m,
+        warp_tile_n=warp_tile_n,
+        warp_tile_k=warp_tile_k,
     )
 
 
@@ -1555,7 +3294,9 @@ def make_tensor_quant_kernel_name(
 # epilogue / QuantType) and the per-op config sweep stay in the per-op scripts.
 
 
-def emit_generated_header_preamble(title: str, module_name: str, extra: str = "") -> str:
+def emit_generated_header_preamble(
+    title: str, module_name: str, extra: str = ""
+) -> str:
     """Emit the shared auto-generated-header prologue: license, DO-NOT-EDIT line,
     ``#pragma once`` and the four ck_tile includes every quant kernel header needs.
 
@@ -1634,6 +3375,7 @@ using AccDataType = {ck_acc};
 
 
 _QUANT_EPILOGUE_TAIL = {
+    "default": "",
     "cshuffle": "",
     "permute_n": ",\n                    false,\n                    1",
 }
@@ -1642,18 +3384,20 @@ _QUANT_EPILOGUE_TAIL = {
 def emit_quant_epilogue_block(kind: str, ns: str) -> str:
     """Emit the ``using GemmEpilogue = ...`` block for a quant kernel body.
 
-    ``kind`` is the *effective* epilogue tag -- ``"cshuffle"`` or ``"permute_n"``,
-    i.e. what quant_effective_epilogue returned, not what the user requested. The
-    two forms differ only in the class name and in PermuteN's two extra trailing
-    template arguments (``false, 1``).
+    ``kind`` is the effective epilogue tag. DefaultGemm2D takes padding flags
+    where CShuffle and PermuteN take warp counts; PermuteN also has two extra
+    trailing template arguments (``false, 1``).
     """
     try:
         tail = _QUANT_EPILOGUE_TAIL[kind]
     except KeyError:
         raise ValueError(
-            f"unknown epilogue kind {kind!r}; expected 'cshuffle' or 'permute_n'"
+            f"unknown epilogue kind {kind!r}; expected 'default', 'cshuffle', or 'permute_n'"
         ) from None
-    cls = "CShuffle" if kind == "cshuffle" else "PermuteN"
+    cls = {"default": "DefaultGemm2D", "cshuffle": "CShuffle", "permute_n": "PermuteN"}[
+        kind
+    ]
+    geometry = "kPadM, kPadN" if kind == "default" else "WarpM, WarpN"
     return f"""\
             using GemmEpilogue = ck_tile::{cls}Epilogue<
                 ck_tile::{cls}EpilogueProblem<
@@ -1667,7 +3411,7 @@ def emit_quant_epilogue_block(kind: str, ns: str) -> str:
                     ck_tile::element_wise::PassThrough,
                     TilePartitioner::MPerBlock,
                     TilePartitioner::NPerBlock,
-                    WarpM, WarpN,
+                    {geometry},
                     WarpTileM, WarpTileN, WarpTileK,
                     TransposeC{tail}>>;"""
 
@@ -1688,7 +3432,9 @@ def emit_quant_tile_dims(tile: Any, *, block_size: int, k_block_per_cu: int) -> 
     static constexpr int               kBlockPerCu = {k_block_per_cu};"""
 
 
-def emit_quant_tile_shape(partitioner: str = "ck_tile::GemmTile1DPartitioner<TileShape>") -> str:
+def emit_quant_tile_shape(
+    partitioner: str = "ck_tile::GemmTile1DPartitioner<TileShape>",
+) -> str:
     """Emit the ``TileShape`` / ``TilePartitioner`` aliases.
 
     ``TileShape`` is identical in every operator. ``partitioner`` is the only
@@ -1827,7 +3573,9 @@ def generate_kernels_generic(
         )
         return []
 
-    log.info("Generating %d %s kernel headers into %s", len(specs), op_label, output_dir)
+    log.info(
+        "Generating %d %s kernel headers into %s", len(specs), op_label, output_dir
+    )
     generated: List[Path] = []
 
     def _generate_one(spec: Any) -> Path:
@@ -1865,34 +3613,48 @@ def run_codegen_cli(
     default_config: Callable[..., dict],
     arch_aware: bool = False,
     default_gfx_arch: str = "gfx950",
+    validate_target_config: Optional[Callable[[dict, str], None]] = None,
 ) -> int:
     """Shared argparse + config-load + list/generate driver for the quant codegen CLIs.
 
     ``arch_aware`` adds ``--gfx-arch`` and mirrors the existing per-op behavior
     exactly: generation always uses ``default_config()`` (no arch arg), while
     ``--list-names`` uses ``default_config(gfx_arch)``.
+
+    An optional ``validate_target_config`` opts into target-aware generation:
+    explicit ``--gfx-arch``, JSON ``gfx_arch``, then ``default_gfx_arch`` choose
+    the target for both listing and generation, including explicit JSON configs.
     """
     parser = argparse.ArgumentParser(description=description)
     parser.add_argument(
-        "--output-dir", type=Path,
-        help="Directory to write generated .hpp files (required unless --list-names)")
+        "--output-dir",
+        type=Path,
+        help="Directory to write generated .hpp files (required unless --list-names)",
+    )
     parser.add_argument(
-        "--config", type=Path,
-        help="JSON config file (defaults to built-in sweep)")
+        "--config", type=Path, help="JSON config file (defaults to built-in sweep)"
+    )
+    parser.add_argument("--config-json", type=str, help="Inline JSON config string")
     parser.add_argument(
-        "--config-json", type=str,
-        help="Inline JSON config string")
+        "--no-parallel", action="store_true", help="Disable parallel generation"
+    )
     parser.add_argument(
-        "--no-parallel", action="store_true",
-        help="Disable parallel generation")
-    parser.add_argument(
-        "--list-names", action="store_true",
-        help="Print kernel names that would be generated and exit")
+        "--list-names",
+        action="store_true",
+        help="Print kernel names that would be generated and exit",
+    )
     if arch_aware:
         parser.add_argument(
-            "--gfx-arch", type=str, default=default_gfx_arch,
-            help="Target GPU arch for the built-in default config's arch-derived "
-                 "WarpTileK. Ignored when --config/--config-json is given.")
+            "--gfx-arch",
+            type=str,
+            default=None if validate_target_config is not None else default_gfx_arch,
+            help=(
+                "Target GPU arch; validates explicit JSON configs as well as defaults."
+                if validate_target_config is not None
+                else "Target GPU arch for the built-in default config's arch-derived "
+                "WarpTileK. Ignored when --config/--config-json is given."
+            ),
+        )
     args = parser.parse_args()
 
     cfg: Optional[dict] = None
@@ -1906,8 +3668,27 @@ def run_codegen_cli(
         with open(args.config) as f:
             cfg = json.load(f)
 
+    if validate_target_config is not None:
+        target = (
+            getattr(args, "gfx_arch", None)
+            or (cfg or {}).get("gfx_arch")
+            or default_gfx_arch
+        )
+        if cfg is None:
+            cfg = default_config(target) if arch_aware else default_config()
+        try:
+            validate_target_config(cfg, target)
+        except ValueError as e:
+            log.error("%s", e)
+            return 1
+
     if args.list_names:
-        list_cfg = cfg or (default_config(args.gfx_arch) if arch_aware else default_config())
+        list_cfg = (
+            cfg
+            if validate_target_config is not None
+            else cfg
+            or (default_config(args.gfx_arch) if arch_aware else default_config())
+        )
         for s in build_specs(list_cfg):
             print(s.name)
         return 0
@@ -1915,7 +3696,9 @@ def run_codegen_cli(
     if args.output_dir is None:
         parser.error("--output-dir is required unless --list-names is given")
 
-    specs = build_specs(cfg or default_config())
+    specs = build_specs(
+        cfg if validate_target_config is not None else cfg or default_config()
+    )
     paths = generate_kernels_generic(
         op_label=op_label,
         generator=make_generator(),

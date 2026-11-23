@@ -3,7 +3,6 @@
 
 #include "HipFlash2FwdPlan.hpp"
 
-#include <cmath>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <limits>
 #include <stdexcept>
@@ -69,10 +68,7 @@ void HipFlash2FwdPlan::execute(const Handle& handle,
     args.headDim = _params.headDim;
     args.causal = _params.causal ? 1 : 0;
 
-    // Attention scale: use provided value or default to 1/sqrt(headDim)
-    args.scale = (_params.attnScale != 0.0f)
-                     ? _params.attnScale
-                     : 1.0f / std::sqrt(static_cast<float>(_params.headDim));
+    args.scale = _params.attnScale;
 
     // Strides (in elements, BHSD layout).
     // Guard against int64_t -> int truncation (I9): strides must fit in int.

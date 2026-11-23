@@ -28,11 +28,13 @@
 
 #include <hip/hip_fp16.h>          // __half_raw
 #include <iostream>
+#include <string>
 
 #define HIP_HOST_DEVICE __host__ __device__
 #define HIP_HOST __host__
 #define HIP_DEVICE __device__
 
+// gfx1250-strict (v0) has no e5m3 conversion instructions; it takes the software path.
 #if defined(__gfx1250__) && __HIP_DEVICE_COMPILE__
 #define HIP_E5M3_CVT_FAST_PATH 1
 #else

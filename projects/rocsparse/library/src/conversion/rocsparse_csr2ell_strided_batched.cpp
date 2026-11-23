@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -26,6 +26,7 @@
 #include "internal/conversion/rocsparse_csr2ell.h"
 #include "rocsparse_control.hpp"
 #include "rocsparse_csr2ell.hpp"
+#include "rocsparse_grid.hpp"
 #include "rocsparse_utility.hpp"
 
 #include "csr2ell_device.h"
@@ -148,7 +149,10 @@ rocsparse_status rocsparse::csr2ell_strided_batched_core(rocsparse_handle       
     hipStream_t stream = handle->stream;
 
 #define CSR2ELL_STRIDED_BATCHED_DIM 512
-    dim3 csr2ell_strided_batched_blocks((m - 1) / CSR2ELL_STRIDED_BATCHED_DIM + 1, batch_count);
+    // Clamp the batch extent to the device grid.y limit; the kernel
+    // grid-strides over batch_count so the whole batch is still covered.
+    dim3 csr2ell_strided_batched_blocks((m - 1) / CSR2ELL_STRIDED_BATCHED_DIM + 1,
+                                        rocsparse::get_grid_size_y(handle, batch_count));
     dim3 csr2ell_strided_batched_threads(CSR2ELL_STRIDED_BATCHED_DIM);
 
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
@@ -158,6 +162,7 @@ rocsparse_status rocsparse::csr2ell_strided_batched_core(rocsparse_handle       
         0,
         stream,
         m,
+        batch_count,
         csr_val,
         csr_val_stride,
         csr_row_ptr,

@@ -185,9 +185,10 @@ void testing_rot_extra(const Arguments& arg)
     //
     // This drives the 64-bit-index path of rocsparse_rot with nnz just past the
     // 2^32 boundary and checks that an element beyond that boundary is actually
-    // rotated. To stay within a single device allocation (host mirrors of the
-    // full arrays would need tens of GB) everything is initialized on the device
-    // and a single element is probed.
+    // rotated. At this nnz the unclamped grid exceeds the 32-bit work-item
+    // dispatch limit, so the launch must be clamped and grid-strided. Host
+    // mirrors of the full arrays would need tens of GB, so everything is
+    // initialized on the device and a single element is probed.
     using I = int64_t;
     using T = float;
 
@@ -195,8 +196,10 @@ void testing_rot_extra(const Arguments& arg)
 
     // nnz just beyond 2^32 so at least one block has a block index whose
     // (blockIdx * BLOCKSIZE) product overflows 32-bit arithmetic.
-    const I nnz  = two_pow_32 + 512;
-    const I size = 2;
+    const I nnz = two_pow_32 + 512;
+
+    // A sparse-vector descriptor requires nnz <= size.
+    const I size = nnz;
 
     const rocsparse_index_base base = rocsparse_index_base_zero;
 

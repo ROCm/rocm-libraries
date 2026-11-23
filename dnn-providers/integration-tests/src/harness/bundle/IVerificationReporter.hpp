@@ -8,13 +8,15 @@
 #include "harness/bundle/SupportClaimReport.hpp"
 #include "harness/bundle/SupportVerdict.hpp"
 #include "harness/bundle/UnverifiableBundleReport.hpp"
+#include "harness/bundle/VerificationOutcome.hpp"
+#include "harness/bundle/VerifierTally.hpp"
 
 namespace hipdnn_integration_tests::bundle
 {
 
 /// Where a test body's findings go once they are decided.
 ///
-/// All three destinations behind it are process-wide singletons. Reached through
+/// All four destinations behind it are process-wide singletons. Reached through
 /// this seam, a test asserts on what the harness published instead of clearing
 /// global state in SetUp and hoping no other suite wrote to it in between.
 ///
@@ -50,10 +52,19 @@ public:
     virtual void recordVerdict(const SupportResult& record) = 0;
     virtual void recordUnverifiable(const std::string& bundlePath, const std::string& reason) = 0;
     virtual void recordReferenceError(const std::string& bundlePath, const std::string& reason) = 0;
+
+    /// The oracle that graded this test body's outputs, NONE when nothing was
+    /// compared. `detail` is the stage an EXPECTED_REJECTION refused the bundle at, and
+    /// empty for every other verifier. Called once per verification body, including one
+    /// that throws before it reaches an outcome. Support-claim authoring runs do not
+    /// call it.
+    virtual void
+        recordVerifier(const std::string& bundlePath, Verifier verifier, const std::string& detail)
+        = 0;
 };
 
-/// The production sinks: the run's coverage counters, verdict table, and
-/// unverifiable-bundle report.
+/// The production sinks: the run's coverage counters, verdict table,
+/// unverifiable-bundle report, and verifier tally.
 class GlobalVerificationReporter : public IVerificationReporter
 {
 public:
@@ -97,6 +108,13 @@ public:
     void recordReferenceError(const std::string& bundlePath, const std::string& reason) override
     {
         UnverifiableBundleReport::get().record(bundlePath, reason, UnverifiableSeverity::REF_ERROR);
+    }
+
+    void recordVerifier(const std::string& bundlePath,
+                        Verifier verifier,
+                        const std::string& detail) override
+    {
+        VerifierTally::get().record(bundlePath, verifier, detail);
     }
 };
 

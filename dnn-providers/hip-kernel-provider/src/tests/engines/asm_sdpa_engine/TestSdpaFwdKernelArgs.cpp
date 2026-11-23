@@ -2,12 +2,44 @@
 // SPDX-License-Identifier:  MIT
 
 #include <cstddef>
+#include <initializer_list>
+#include <utility>
+#include <vector>
 
 #include <gtest/gtest.h>
+#include <hipdnn_plugin_sdk/PluginException.hpp>
+#include <string>
 
 #include "engines/asm_sdpa_engine/asm/SdpaFwdKernelArgs.hpp"
+#include "engines/asm_sdpa_engine/plans/SdpaFwdArgsBuilder.hpp"
 
+using asm_sdpa_engine::buildFwdKernelArgs;
 using asm_sdpa_engine::fmha_fwd_v3_args;
+using asm_sdpa_engine::SdpaFwdParams;
+
+namespace
+{
+// The execute-time buffer array a plan receives: one (uid, pointer) entry per supplied tensor.
+std::vector<hipdnnPluginDeviceBuffer_t>
+    makeBuffers(std::initializer_list<std::pair<int64_t, void*>> entries)
+{
+    std::vector<hipdnnPluginDeviceBuffer_t> buffers;
+    for(const auto& entry : entries)
+    {
+        hipdnnPluginDeviceBuffer_t buffer{};
+        buffer.uid = entry.first;
+        buffer.ptr = entry.second;
+        buffers.push_back(buffer);
+    }
+    return buffers;
+}
+
+fmha_fwd_v3_args buildArgs(const SdpaFwdParams& params,
+                           const std::vector<hipdnnPluginDeviceBuffer_t>& buffers)
+{
+    return buildFwdKernelArgs(params, buffers.data(), static_cast<uint32_t>(buffers.size()));
+}
+} // namespace
 
 // Verify the packed struct has the exact binary layout expected by the
 // pre-compiled ASM kernel.  Each field must sit at the byte offset that
@@ -105,4 +137,247 @@ TEST(TestSdpaFwdKernelArgs, DescaleStrideFieldOffsets)
     EXPECT_EQ(offsetof(fmha_fwd_v3_args, s_descale_k_Hs), 608u);
     EXPECT_EQ(offsetof(fmha_fwd_v3_args, s_descale_v_Bs), 624u);
     EXPECT_EQ(offsetof(fmha_fwd_v3_args, s_descale_v_Hs), 640u);
+}
+
+// ---------------------------------------------------------------------------
+// buildFwdKernelArgs: pure kernel-argument construction (no GPU required).
+// ---------------------------------------------------------------------------
+
+namespace
+{
+// Params with distinct strides so byte-scaling is observable; batch mode, no mask.
+SdpaFwdParams makeBaseParams()
+{
+    SdpaFwdParams params{};
+    params.qUid = 1;
+    params.kUid = 2;
+    params.vUid = 3;
+    params.oUid = 4;
+    params.batchSize = 2;
+    params.numHeadsQ = 8;
+    params.numHeadsKv = 8;
+    params.seqLenQ = 256;
+    params.seqLenKv = 128;
+    params.headDimQk = 128;
+    params.headDimV = 128;
+    params.qStrideSeq = 128;
+    params.qStrideRow = 128;
+    params.qStrideHead = 1000;
+    params.qStrideBatch = 2000;
+    params.kStrideSeq = 128;
+    params.kStrideHead = 1100;
+    params.kStrideBatch = 2100;
+    params.vStrideSeq = 128;
+    params.vStrideHead = 1200;
+    params.vStrideBatch = 2200;
+    params.oStrideSeq = 128;
+    params.oStrideHead = 1300;
+    params.oStrideBatch = 2300;
+    params.tileSizeQo = 256;
+    // attnScale (a ScalarOperand) is resolved at execute, not by buildFwdKernelArgs,
+    // so it is left default-constructed here; these tests never read args.scalar.
+    params.archString = "gfx942";
+    params.maskType = asm_sdpa_engine::plan_utils::MaskType::NO_MASK;
+    return params;
+}
+} // namespace
+
+TEST(TestSdpaFwdKernelArgs, BuildArgsBf16UsesTwoByteStridesAndNoDescale)
+{
+    SdpaFwdParams params = makeBaseParams();
+    params.inBytesPerElement = 2;
+
+    int qBuf = 0;
+    int kBuf = 0;
+    int vBuf = 0;
+    int oBuf = 0;
+    const auto buffers = makeBuffers({{1, &qBuf}, {2, &kBuf}, {3, &vBuf}, {4, &oBuf}});
+
+    const fmha_fwd_v3_args args = buildArgs(params, buffers);
+
+    EXPECT_EQ(args.ptr_q, &qBuf);
+    EXPECT_EQ(args.ptr_o, &oBuf);
+    // Input strides scaled by 2 bytes.
+    EXPECT_EQ(args.s_Seqs, params.qStrideSeq * 2u);
+    EXPECT_EQ(args.s_Hs, params.qStrideHead * 2u);
+    EXPECT_EQ(args.s_k_Bs, params.kStrideBatch * 2u);
+    EXPECT_EQ(args.s_v_Hs, params.vStrideHead * 2u);
+    // Output strides scaled by 2 bytes (BF16).
+    EXPECT_EQ(args.s_o_Seqs, params.oStrideSeq * 2u);
+    // No descales on the bf16 path.
+    EXPECT_EQ(args.ptr_q_descale, nullptr);
+    EXPECT_EQ(args.ptr_k_descale, nullptr);
+    EXPECT_EQ(args.ptr_v_descale, nullptr);
+}
+
+TEST(TestSdpaFwdKernelArgs, BuildArgsFp8UsesOneByteInputStridesAndWiresDescales)
+{
+    SdpaFwdParams params = makeBaseParams();
+    params.inBytesPerElement = 1;
+    params.descaleUids = SdpaFwdParams::DescaleUids{5, 6, 7};
+
+    int qBuf = 0;
+    int kBuf = 0;
+    int vBuf = 0;
+    int oBuf = 0;
+    int dqBuf = 0;
+    int dkBuf = 0;
+    int dvBuf = 0;
+    const auto buffers = makeBuffers(
+        {{1, &qBuf}, {2, &kBuf}, {3, &vBuf}, {4, &oBuf}, {5, &dqBuf}, {6, &dkBuf}, {7, &dvBuf}});
+
+    const fmha_fwd_v3_args args = buildArgs(params, buffers);
+
+    // FP8 input strides scaled by 1 byte.
+    EXPECT_EQ(args.s_Seqs, params.qStrideSeq * 1u);
+    EXPECT_EQ(args.s_k_Seqs, params.kStrideSeq * 1u);
+    EXPECT_EQ(args.s_v_Hs, params.vStrideHead * 1u);
+    // Output remains BF16 (2 bytes) even for fp8 inputs.
+    EXPECT_EQ(args.s_o_Seqs, params.oStrideSeq * 2u);
+    EXPECT_EQ(args.s_o_Hs, params.oStrideHead * 2u);
+    // Descale pointers wired from the variant pack.
+    EXPECT_EQ(args.ptr_q_descale, &dqBuf);
+    EXPECT_EQ(args.ptr_k_descale, &dkBuf);
+    EXPECT_EQ(args.ptr_v_descale, &dvBuf);
+    // Per-tensor descales carry zero strides.
+    EXPECT_EQ(args.s_descale_q_Bs, 0u);
+    EXPECT_EQ(args.s_descale_q_Hs, 0u);
+    EXPECT_EQ(args.s_descale_v_Hs, 0u);
+}
+
+TEST(TestSdpaFwdKernelArgs, BuildArgsGroupModeWiresSharedSeqstartsAndZeroBatchStrides)
+{
+    SdpaFwdParams params = makeBaseParams();
+    params.inBytesPerElement = 2;
+    params.group = asm_sdpa_engine::SdpaFwdGroupModeParams{10, 11};
+
+    int qBuf = 0;
+    int kBuf = 0;
+    int vBuf = 0;
+    int oBuf = 0;
+    int qoSeqstartBuf = 0;
+    int kvSeqstartBuf = 0;
+    const auto buffers = makeBuffers({{1, &qBuf},
+                                      {2, &kBuf},
+                                      {3, &vBuf},
+                                      {4, &oBuf},
+                                      {10, &qoSeqstartBuf},
+                                      {11, &kvSeqstartBuf}});
+
+    const fmha_fwd_v3_args args = buildArgs(params, buffers);
+
+    EXPECT_EQ(args.ptr_qseq_padding, &qoSeqstartBuf);
+    EXPECT_EQ(args.ptr_qseq, &qoSeqstartBuf);
+    EXPECT_EQ(args.ptr_kseq_padding, &kvSeqstartBuf);
+    EXPECT_EQ(args.ptr_kseq, &kvSeqstartBuf);
+    EXPECT_EQ(args.s_Bs, 0u);
+    EXPECT_EQ(args.s_k_Bs, 0u);
+    EXPECT_EQ(args.s_v_Bs, 0u);
+    EXPECT_EQ(args.s_o_Bs, 0u);
+    EXPECT_EQ(args.s_Seqs, params.qStrideSeq * 2u);
+    EXPECT_EQ(args.s_k_Seqs, params.kStrideSeq * 2u);
+    EXPECT_EQ(args.s_v_Seqs, params.vStrideSeq * 2u);
+    EXPECT_EQ(args.s_o_Seqs, params.oStrideSeq * 2u);
+}
+
+// A missing buffer must surface as a plugin error that names the uid, not as std::out_of_range.
+TEST(TestSdpaFwdKernelArgs, BuildArgsThrowsPluginErrorNamingTheMissingUid)
+{
+    SdpaFwdParams params = makeBaseParams();
+    params.inBytesPerElement = 1;
+    params.descaleUids = SdpaFwdParams::DescaleUids{5, 6, 7};
+
+    int buf = 0;
+    const auto complete = makeBuffers(
+        {{1, &buf}, {2, &buf}, {3, &buf}, {4, &buf}, {5, &buf}, {6, &buf}, {7, &buf}});
+    ASSERT_NO_THROW(buildArgs(params, complete));
+
+    for(int64_t missingUid = 1; missingUid <= 7; ++missingUid)
+    {
+        SCOPED_TRACE("missing uid " + std::to_string(missingUid));
+        std::vector<hipdnnPluginDeviceBuffer_t> buffers;
+        for(const auto& buffer : complete)
+        {
+            if(buffer.uid != missingUid)
+            {
+                buffers.push_back(buffer);
+            }
+        }
+        try
+        {
+            buildArgs(params, buffers);
+            ADD_FAILURE() << "expected a HipdnnPluginException";
+        }
+        catch(const hipdnn_plugin_sdk::HipdnnPluginException& ex)
+        {
+            EXPECT_EQ(ex.getStatus(), HIPDNN_PLUGIN_STATUS_INVALID_VALUE);
+            EXPECT_NE(std::string(ex.what()).find("uid: " + std::to_string(missingUid) + " "),
+                      std::string::npos)
+                << ex.what();
+        }
+    }
+}
+
+// With cu_seq_len the sequence pointers take the logical cumulative lengths and the padding
+// pointers keep the physical starts from the ragged offset tensors.
+TEST(TestSdpaFwdKernelArgs, BuildArgsGroupModeWiresCumulativeLengthsAndPhysicalStarts)
+{
+    SdpaFwdParams params = makeBaseParams();
+    params.group = asm_sdpa_engine::SdpaFwdGroupModeParams{
+        10, 11, asm_sdpa_engine::SdpaFwdGroupModeParams::CumulativeLengthUids{12, 13}};
+
+    int qBuf = 0;
+    int kBuf = 0;
+    int vBuf = 0;
+    int oBuf = 0;
+    int qoSeqstartBuf = 0;
+    int kvSeqstartBuf = 0;
+    int cuSeqLenQBuf = 0;
+    int cuSeqLenKvBuf = 0;
+    const auto buffers = makeBuffers({{1, &qBuf},
+                                      {2, &kBuf},
+                                      {3, &vBuf},
+                                      {4, &oBuf},
+                                      {10, &qoSeqstartBuf},
+                                      {11, &kvSeqstartBuf},
+                                      {12, &cuSeqLenQBuf},
+                                      {13, &cuSeqLenKvBuf}});
+
+    const fmha_fwd_v3_args args = buildArgs(params, buffers);
+
+    EXPECT_EQ(args.ptr_qseq, &cuSeqLenQBuf);
+    EXPECT_EQ(args.ptr_kseq, &cuSeqLenKvBuf);
+    EXPECT_EQ(args.ptr_qseq_padding, &qoSeqstartBuf);
+    EXPECT_EQ(args.ptr_kseq_padding, &kvSeqstartBuf);
+}
+
+// Group-mode LSE is AITER's head-major [H, total_q] FP32 layout; the kernel takes its head
+// stride in bytes.
+TEST(TestSdpaFwdKernelArgs, BuildArgsGroupModeLseWiresPointerAndHeadByteStride)
+{
+    SdpaFwdParams params = makeBaseParams();
+    params.group = asm_sdpa_engine::SdpaFwdGroupModeParams{10, 11};
+    params.lseUid = 20;
+    params.lseStrideHead = params.batchSize * params.seqLenQ;
+
+    int qBuf = 0;
+    int kBuf = 0;
+    int vBuf = 0;
+    int oBuf = 0;
+    int qoSeqstartBuf = 0;
+    int kvSeqstartBuf = 0;
+    float lseBuf = 0.f;
+    const auto buffers = makeBuffers({{1, &qBuf},
+                                      {2, &kBuf},
+                                      {3, &vBuf},
+                                      {4, &oBuf},
+                                      {10, &qoSeqstartBuf},
+                                      {11, &kvSeqstartBuf},
+                                      {20, &lseBuf}});
+
+    const fmha_fwd_v3_args args = buildArgs(params, buffers);
+
+    EXPECT_EQ(args.ptr_lse, &lseBuf);
+    EXPECT_EQ(args.s_lse, 1u);
+    EXPECT_EQ(args.s_lse_Hs, 2u * 256u * 4u);
 }

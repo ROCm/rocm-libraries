@@ -29,6 +29,12 @@ or directly with the atom-venv python::
     /workspace/atom-venv/bin/python \\
         rocke/library/benchmarks/gfx950/attention/prefill/benchmark_dense_prefill_live.py \\
         --mode causal --iterations 5 --warmup 2
+
+``--emit-shapes PATH`` writes every shape this benchmark measures as JSONL in the
+rocKE benchmark-trace schema that
+``projects/hipdnn/tools/IngestorGenerator/tools/mine_shapes.py --rocke-bench``
+reads, then exits. It needs neither a GPU nor torch: torch is imported only on
+the paths that build inputs and launch kernels.
 """
 from __future__ import annotations
 
@@ -47,17 +53,17 @@ _RK = os.path.abspath(os.path.join(_HERE, "../../../../.."))
 sys.path.insert(0, _RK + "/platform/python")
 sys.path.insert(0, _RK + "/library")
 
-import torch  # noqa: E402
-
 from kernels.gfx950.attention_dense import (  # noqa: E402
     AttentionDenseSpec,
     attention_dense_block,
     attention_dense_grid,
+    attention_dense_runtime_args,
+    attention_dense_signature,
     build_attention_dense,
     supports_attention_dense,
 )
 from rocke.helpers.compile import compile_kernel  # noqa: E402
-from rocke.helpers.spec import SignatureBuilder  # noqa: E402
+from rocke.helpers.quant import quant_max_abs  # noqa: E402
 from rocke.runtime import (  # noqa: E402
     KernelLauncher,
     LaunchConfig,
@@ -65,8 +71,20 @@ from rocke.runtime import (  # noqa: E402
     time_launches,
 )
 
-_TORCH_DT = {"bf16": torch.bfloat16, "fp16": torch.float16}
 _TOL = 2e-2
+_FP8_E4M3_MAX = quant_max_abs("fp8e4m3")
+
+
+def _quantize_fp8(t):
+    """Per-tensor fp8 e4m3 quantization. Returns ``(fp8_tensor, scale)`` where
+    ``fp8_tensor.float() * scale`` reconstructs ``t`` up to fp8 rounding. The
+    scale maps the tensor's max-abs onto the fp8 dynamic range."""
+    import torch
+
+    amax = t.abs().max().clamp(min=1e-8)
+    scale = (amax / _FP8_E4M3_MAX).item()
+    q = (t.float() / scale).clamp(-_FP8_E4M3_MAX, _FP8_E4M3_MAX).to(torch.float8_e4m3fn)
+    return q, scale
 
 
 # --------------------------------------------------------------------------- #
@@ -92,6 +110,8 @@ def _gm(vals) -> float:
 
 
 def _bench_stream_handle() -> int:
+    import torch
+
     return int(torch.cuda.current_stream().cuda_stream)
 
 
@@ -121,24 +141,13 @@ def _dense_launcher(spec: AttentionDenseSpec) -> KernelLauncher:
         backend="python",
         capture_ir_text=False,
     )
-    sb = (
-        SignatureBuilder()
-        .ptr("q_ptr", spec.dtype)
-        .ptr("k_ptr", spec.dtype)
-        .ptr("v_ptr", spec.dtype)
-        .ptr("o_ptr", spec.dtype)
-        .scalar("scale", "f32")
-    )
-    if spec.runtime_shape:
-        sb = (
-            sb.scalar("batch", "i32")
-            .scalar("seqlen_q", "i32")
-            .scalar("seqlen_kv", "i32")
-        )
-    if spec.varlen:
-        sb = sb.ptr("cu_seqlens_q", "i32").ptr("cu_seqlens_kv", "i32")
+    # The kernel module owns the ABI. A hand-rolled copy here gated the shape
+    # scalars on runtime_shape, which is narrower than _has_shape_params
+    # (varlen/ragged/paged/SWA), so those launches packed misaligned kernargs.
     lch = KernelLauncher(
-        hsaco=art.hsaco, kernel_name=art.kernel_name, signature=sb.build()
+        hsaco=art.hsaco,
+        kernel_name=art.kernel_name,
+        signature=attention_dense_signature(spec),
     )
     _LAUNCHER_CACHE[key] = lch
     return lch
@@ -165,8 +174,13 @@ def bench_dense(
     seed: int,
 ):
     """Returns (dense_ms, tflops, max_abs, kernel_name)."""
+    import torch
+
     dev = "cuda"
-    dt = _TORCH_DT[dtype]
+    # fp8 = fp8 KV storage with a bf16 compute/output dtype (Q stays bf16).
+    is_fp8 = dtype == "fp8"
+    compute_dtype = "bf16" if is_fp8 else dtype
+    dt = {"bf16": torch.bfloat16, "fp16": torch.float16}[compute_dtype]
     B = len(seqlens)
     max_s = max(seqlens)
     total = sum(seqlens)
@@ -175,6 +189,8 @@ def bench_dense(
     torch.manual_seed(seed)
     # packed ragged batch when >1 sequence (or a single non-uniform packing).
     varlen = B > 1 or (total != B * max_s)
+    if is_fp8 and varlen:
+        raise ValueError("fp8 dense prefill is aligned-KV only (no varlen batch)")
 
     if varlen:
         # packed [total_tok, H, D] + int32 cu_seqlens[B+1].
@@ -221,6 +237,17 @@ def bench_dense(
         k = (torch.randn(1, S, Hkv, D, dtype=dt, device=dev) * 0.2).contiguous()
         v = (torch.randn(1, S, Hkv, D, dtype=dt, device=dev) * 0.2).contiguous()
         out = torch.zeros(1, S, Hq, D, dtype=dt, device=dev)
+        k_dev, v_dev = k, v  # tensors handed to the kernel (fp8 when is_fp8)
+        k_scale = v_scale = None
+        if is_fp8:
+            k_fp8, k_scale = _quantize_fp8(k)
+            v_fp8, v_scale = _quantize_fp8(v)
+            # Reference attends over the SAME dequantized values the kernel reads
+            # (fp8*scale), so the check isolates kernel correctness from the
+            # quantization loss.
+            k = (k_fp8.float() * k_scale).to(dt).contiguous()
+            v = (v_fp8.float() * v_scale).to(dt).contiguous()
+            k_dev, v_dev = k_fp8, v_fp8
         spec = AttentionDenseSpec(
             batch=1,
             seqlen_q=S,
@@ -229,13 +256,14 @@ def bench_dense(
             num_kv_heads=Hkv,
             head_size=D,
             causal=True,
-            dtype=dtype,
+            dtype=compute_dtype,
             block_n=block_n,
             waves_per_eu=waves_per_eu,
             lds_k_group_pad=lds_k_group_pad,
             sliding_window=W,
             persistent=persistent,
             num_persistent=num_persistent,
+            kv_storage_dtype="fp8e4m3" if is_fp8 else None,
         )
         lch = _dense_launcher(spec)
         cfg = LaunchConfig(
@@ -243,11 +271,17 @@ def bench_dense(
             block=attention_dense_block(spec),
             stream=stream,
         )
-        vals = {"q_ptr": q, "k_ptr": k, "v_ptr": v, "o_ptr": out, "scale": scale}
-        if spec.runtime_shape:
-            vals["batch"] = int(spec.batch)
-            vals["seqlen_q"] = int(spec.seqlen_q)
-            vals["seqlen_kv"] = int(spec.seqlen_kv)
+        vals = {
+            "q_ptr": q,
+            "k_ptr": k_dev,
+            "v_ptr": v_dev,
+            "o_ptr": out,
+            "scale": scale,
+        }
+        if is_fp8:
+            vals["k_scale"] = float(k_scale)
+            vals["v_scale"] = float(v_scale)
+    vals.update(attention_dense_runtime_args(spec))
 
     def call():
         lch(vals, config=cfg)
@@ -382,6 +416,41 @@ def _record(mode, variant, label, seqlens, Hq, Hkv, D, W, knobs, res, err_note=N
     return rec
 
 
+def shape_records(dtype: str, Hq: int, Hkv: int, D: int) -> list[dict]:
+    """Every shape the benchmark measures (``--mode all``), as rocKE
+    benchmark-trace records: the schema ``mine_shapes.py --rocke-bench`` reads.
+
+    Every mode here is causal (``bench_dense`` builds ``causal=True``), so
+    ``window_size`` is ``[-1, 0]`` or ``[W - 1, 0]`` for a W-token window. A
+    packed ragged batch (more than one sequence) is flagged ``varlen`` with its
+    ``seqlens``; it is not a dense request. The persistent mode re-measures the
+    causal cohort on another grid, so its rows repeat request shapes.
+    """
+    records = []
+    for mode, variant, label, seqlens, hq, hkv, W, _ in _configs("all", Hq, Hkv, D):
+        record = {
+            "model": "benchmark_dense_prefill_live",
+            "variant": f"{mode}/{variant}",
+            "label": label,
+            "num_seqs": len(seqlens),
+            "max_seqlen_q": max(seqlens),
+            "max_seqlen_k": max(seqlens),
+            "num_query_heads": hq,
+            "num_kv_heads": hkv,
+            "head_size": D,
+            "q_dtype": dtype,
+            "causal": True,
+            "window_size": [W - 1, 0] if W else [-1, 0],
+            "has_sinks": False,
+        }
+        # bench_dense's own rule for the packed path.
+        if len(seqlens) > 1 or sum(seqlens) != len(seqlens) * max(seqlens):
+            record["varlen"] = True
+            record["seqlens"] = list(seqlens)
+        records.append(record)
+    return records
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument(
@@ -389,7 +458,7 @@ def main() -> int:
         choices=["causal", "mha", "swa", "varlen", "persistent", "all"],
         default="all",
     )
-    ap.add_argument("--dtype", choices=["bf16", "fp16"], default="bf16")
+    ap.add_argument("--dtype", choices=["bf16", "fp16", "fp8"], default="bf16")
     ap.add_argument("--hq", type=int, default=128, help="query heads (GQA/SWA/varlen)")
     ap.add_argument("--hkv", type=int, default=8, help="kv heads (GQA/SWA/varlen)")
     ap.add_argument("--d", type=int, default=128, help="head size")
@@ -411,7 +480,34 @@ def main() -> int:
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--output-json", type=str, default="/tmp/dense_prefill_live.json")
     ap.add_argument("--output-csv", type=str, default=None)
+    ap.add_argument(
+        "--emit-shapes",
+        metavar="PATH",
+        help="write every shape of --mode all as JSONL for mine_shapes.py "
+        "--rocke-bench and exit (no GPU, no torch)",
+    )
     args = ap.parse_args()
+
+    if args.emit_shapes:
+        if args.dtype == "fp8":
+            # The record schema carries one q_dtype and no KV-storage field, but
+            # this mode is bf16 Q with fp8 K/V. "fp8" is in neither of
+            # mine_shapes.normalise_dtype's spelling tables, so the consumer
+            # aborts on it, and writing "bf16" instead would silently drop the
+            # fp8 requirement. Refuse rather than emit a record that lies.
+            ap.error(
+                "--emit-shapes does not support --dtype fp8: the trace schema "
+                "has no KV-storage dtype, so an fp8 run cannot be represented "
+                "without losing it. Emit bf16/fp16 shapes, or extend the schema "
+                "and mine_shapes.DTYPE_SPELLINGS together."
+            )
+        records = shape_records(args.dtype, args.hq, args.hkv, args.d)
+        with open(args.emit_shapes, "w") as fh:
+            fh.write("".join(json.dumps(r) + "\n" for r in records))
+        print(f"wrote {args.emit_shapes}  ({len(records)} shapes)")
+        return 0
+
+    import torch
 
     if not torch.cuda.is_available():
         print("no GPU", file=sys.stderr)

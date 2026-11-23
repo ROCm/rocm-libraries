@@ -34,13 +34,10 @@ class Tuner(TunerSelect):
     def _get_default_args(cls) -> TunerArgs:
         return TunerArgs(algo_full_name="device_select_unique")
 
-    def _get_value_type_name(self) -> str:
-        return ""
-
     def tune_all(self) -> None:
-        """Tune for all key types"""
-        for key_type in COMMON_KEY_TYPES:
-            self.tune_type(key_type)
+        """Tune for all data types"""
+        for data_type in COMMON_KEY_TYPES:
+            self.tune_type({"data_type": data_type})
 
 
 if __name__ == "__main__":

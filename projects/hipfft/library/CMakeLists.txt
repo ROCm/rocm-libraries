@@ -44,6 +44,7 @@ set( hipfft_headers_public
   include/hipfft/hipfft.h
   include/hipfft/hipfftXt.h
   include/hipfft/hipfftMp.h
+  include/hipfft/hiplibxt.h
   ${PROJECT_BINARY_DIR}/include/hipfft/hipfft-version.h
   )
 
@@ -51,6 +52,15 @@ source_group( "Header Files\\Public" FILES ${hipfft_headers_public} )
 
 # Include sources
 include( src/CMakeLists.txt )
+
+# Add a definition for internal library targets so code can be
+# conditional on being in-library or not
+function( rocfft_add_internal_build_flag target )
+  get_target_property( target_is_imported ${target} IMPORTED )
+  if( NOT target_is_imported )
+    target_compile_definitions( ${target} PRIVATE ROCFFT_BUILD_INTERNAL )
+  endif()
+endfunction()
 
 # Create hipFFT library (and hipfftw on ROCm)
 add_library( hipfft ${hipfft_source} ${hipfft_headers_public} )
@@ -89,6 +99,10 @@ else()
   list( APPEND HIPFFT_EXPORT_TARGETS hip::hipfftw )
   # hipfftw.h header uses the same hipfft-export.h as hipfft.h
   target_compile_definitions( hipfftw PRIVATE hipfft_EXPORTS )
+
+  rocfft_add_internal_build_flag( hipfft )
+  rocfft_add_internal_build_flag( hipfftw )
+
 endif()
 
 if( WIN32 )
@@ -155,6 +169,14 @@ foreach( lib ${HIPFFT_LIBRARY_TARGETS} )
     target_link_options( ${lib} PUBLIC -fprofile-instr-generate )
   endif()
 
+  #TODO:
+  # hipcc(with nvcc backend) build has problem for share library visibility,
+  # need to figure out the reason and enable visibility "hidden" for nvcc eventually.
+  if( NOT BUILD_WITH_COMPILER STREQUAL "HIP-NVCC" )
+    set_target_properties( ${lib}
+      PROPERTIES CXX_VISIBILITY_PRESET "hidden" VISIBILITY_INLINES_HIDDEN ON )
+  endif()
+
 endforeach()
 
 if( BUILD_WITH_LIB STREQUAL "CUDA" )
@@ -166,14 +188,6 @@ endif()
 if (BUILD_WITH_COMPILER STREQUAL "HIP-NVCC" )
   set_property(TARGET hipfft PROPERTY POSITION_INDEPENDENT_CODE ON)
   set ( CXX_FLAGS "${CXX_FLAGS} -Xcompiler=-fPIC" )
-endif()
-
-#TODO:
-# hipcc(with nvcc backend) build has problem for share library visibility,
-# need to figure out the reason and enable visibility "hidden" for nvcc eventually.
-if( NOT BUILD_WITH_COMPILER STREQUAL "HIP-NVCC" )
-  set_target_properties( hipfft
-    PROPERTIES CXX_VISIBILITY_PRESET "hidden" VISIBILITY_INLINES_HIDDEN ON )
 endif()
 
 # nvcc can not recognize shared library file name with suffix other than *.so when linking.

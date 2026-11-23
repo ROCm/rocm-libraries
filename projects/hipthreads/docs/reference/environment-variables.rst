@@ -18,7 +18,7 @@ The following environment variables affect the hipThreads runtime.
      - Value
    * - ``HIPTHREADS_VCORES_PER_WGP``
      - | Sets the number of scheduler virtual cores (vcores) launched per workgroup processor (WGP).
-       | Must be a positive integer greater than zero. Non-numeric, zero, or empty values are treated as invalid and ignored.
+       | Must be an integer greater than 0. Non-numeric, zero, or empty values are treated as invalid and ignored.
        | Default: ``16``, or the value of ``-DHIPTHREADS_DEFAULT_VCORES_PER_WGP`` when hipThreads is built from source.
 
 The test suite reads a separate set of environment variables when it runs under `lit, the LLVM Integrated Tester <https://llvm.org/docs/CommandGuide/lit.html>`_.

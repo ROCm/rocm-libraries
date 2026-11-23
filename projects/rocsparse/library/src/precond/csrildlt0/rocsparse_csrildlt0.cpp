@@ -27,14 +27,21 @@
 #include "rocsparse_csrildlt0_kernel_launch.hpp"
 #include "rocsparse_utility.hpp"
 
-rocsparse_status rocsparse::csrildlt0(rocsparse_handle         handle,
-                                      rocsparse_csrildlt0_info csrildlt0_info,
-                                      rocsparse_spmat_descr    A,
-                                      void*                    diag,
-                                      size_t                   buffer_size,
-                                      void*                    buffer)
+rocsparse_status rocsparse::csrildlt0(rocsparse_handle                handle,
+                                      rocsparse_csrildlt0_info        csrildlt0_info,
+                                      rocsparse_spmat_descr           A,
+                                      const rocsparse::numeric_boost* boost,
+                                      void*                           diag,
+                                      size_t                          buffer_size,
+                                      void*                           buffer)
 {
-    if(A->rows == 0)
+    //
+    // A batch count of zero has nothing to factorize. rocsparse::bsric0,
+    // rocsparse::bsrilu0 and rocsparse::csrilu0 all quick return on it, and every
+    // launch below puts the batch count on grid.y, which is an illegal extent at
+    // zero, so treat it the same way here rather than reaching the launch.
+    //
+    if(A->rows == 0 || A->batch_count == 0)
     {
         return rocsparse_status_success;
     }
@@ -72,8 +79,8 @@ rocsparse_status rocsparse::csrildlt0(rocsparse_handle         handle,
             handle->stream));
     }
 
-    RETURN_IF_ROCSPARSE_ERROR(
-        rocsparse::csrildlt0_kernel_launch(handle, csrildlt0_info, A, diag, buffer_size, buffer));
+    RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrildlt0_kernel_launch(
+        handle, csrildlt0_info, A, boost, diag, buffer_size, buffer));
 
     return rocsparse_status_success;
 }

@@ -133,7 +133,7 @@ namespace rocsparse
         }
         }
 
-        ROCSPARSE_CHECKARG_ARRAY(7, m * n, A);
+        ROCSPARSE_CHECKARG_ARRAY(7, (static_cast<int64_t>(m) * n), A);
         //
         // Quick return if possible, before checking for invalid pointers.
         //
@@ -186,8 +186,13 @@ namespace rocsparse
         //     hipMemset2DAsync(A, sizeof(T) * lda, 0, sizeof(T) * mn, nm, handle->stream));
 
         // Set memory to zero.
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::valset_2d(
-            handle, static_cast<I>(m), static_cast<I>(n), lda, static_cast<T>(0), A, order));
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse::valset_2d(handle,
+                                                       static_cast<int64_t>(m),
+                                                       static_cast<int64_t>(n),
+                                                       lda,
+                                                       static_cast<T>(0),
+                                                       A,
+                                                       order));
 
         //
         // Compute the conversion.

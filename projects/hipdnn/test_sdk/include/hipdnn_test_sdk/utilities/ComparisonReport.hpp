@@ -61,6 +61,11 @@ void appendComparisonDiff(std::ostream& os,
                           float atol,
                           float rtol)
 {
+    if(expected.raggedIterationInfo() != actual.raggedIterationInfo())
+    {
+        printRaggedLayoutMismatch(os, tensorLabel, expected, actual);
+        return;
+    }
     const auto summary = computeTensorDiff<T>(expected, actual, atol, rtol);
     printTensorDiffSummary(os, tensorLabel, summary);
 }

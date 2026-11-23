@@ -337,11 +337,11 @@ def main() -> int:
     cap_gb = args.cap_gb or _auto_cap_gb()
 
     if args.flavor == "auto":
-        from rocke.core.lower_llvm import _flavor_for_rocm
-        from rocke.runtime.comgr import resolved_lib_rocm_version
+        from rocke.core.lower_llvm import _flavor_for_llvm
+        from rocke.runtime.comgr import _require_compiler_info
 
-        ver = resolved_lib_rocm_version()
-        flavor = _flavor_for_rocm(*ver) if ver else "llvm20"
+        info = _require_compiler_info()
+        flavor = _flavor_for_llvm(info.llvm_version[0])
     else:
         flavor = args.flavor
     os.environ["ROCKE_LLVM_FLAVOR"] = flavor

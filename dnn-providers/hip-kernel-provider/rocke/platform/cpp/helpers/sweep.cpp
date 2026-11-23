@@ -18,6 +18,8 @@
 #include "rocke/arena.h"
 #include "rocke/ir_internal.h" /* rocke_i_set_err for Python-ValueError parity */
 
+#include <string.h>
+
 /* ------------------------------------------------------------------------
  * sweep_row_chunks
  *
@@ -34,7 +36,10 @@
  *   for k in range(chunks_per_thread):
  *       n_off = b.add(b.mul(b.const_i32(k * block_size), c_vec),
  *                     b.mul(tid, c_vec))
- *       x_scalars = tile.load_vec_as_f32(b, b.const_i32(0), n_off, n=vec)
+ *       if tile.dtype.name == "f64":
+ *           x_scalars = tile.load_vec_scalars(b, b.const_i32(0), n_off, n=vec)
+ *       else:
+ *           x_scalars = tile.load_vec_as_f32(b, b.const_i32(0), n_off, n=vec)
  *       if cache: cached.extend(x_scalars)
  *       if body is not None: body(n_off, x_scalars)
  *   return RowChunkSweepResult(cached=cached, chunks_per_thread=...)
@@ -130,7 +135,10 @@ rocke_row_chunk_sweep_result_t rocke_sweep_row_chunks(rocke_ir_builder_t* b,
          * which spells the literal-0 column index inline at the load. */
         local_indices[0] = rocke_b_const_i32(b, 0);
         local_indices[1] = n_off;
-        rocke_tile_window_load_vec_as_f32(b, t, local_indices, 2, vec, scratch);
+        if(strcmp(rocke_tile_window_dtype(t)->name, "f64") == 0)
+            rocke_tile_window_load_vec_scalars(b, t, local_indices, 2, vec, scratch);
+        else
+            rocke_tile_window_load_vec_as_f32(b, t, local_indices, 2, vec, scratch);
 
         if(cache && res.cached != NULL)
         {

@@ -1,16 +1,15 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
-#include "hipdnn-gpu-ref/detail/GpuRefHelpers.hpp"
 #include <cstring>
 #include <hipdnn-gpu-ref/GpuReferencePointwise.hpp>
 
-#include <hipdnn-gpu-ref/detail/GpuRefHipError.hpp>
+#include <hipdnn-gpu-ref/detail/GpuRefHelpers.hpp>
 #include <hipdnn-gpu-ref/detail/GpuRefKernelCompiler.hpp>
+#include <hipdnn-gpu-ref/detail/GpuRefLaunch.hpp>
 
 #include <cstdint>
 #include <functional>
 #include <hip/hip_runtime.h>
-#include <limits>
 #include <numeric>
 #include <stdexcept>
 #include <string>
@@ -20,40 +19,6 @@ namespace hipdnn_gpu_ref
 {
 namespace
 {
-
-// Shared argument and stride structs — single definition used by both host and device (HipRTC).
-#include <GpuRefPointwiseArgs.h> // NOLINT(misc-include-cleaner)
-
-void launchKernel(hipFunction_t function, int64_t numBlocks, void* argsPtr, size_t argsSize)
-{
-    detail::assertValidGridSize(numBlocks, 1, 1);
-    if(numBlocks > static_cast<int64_t>(std::numeric_limits<unsigned>::max()))
-    {
-        throw std::runtime_error("Grid size exceeds hipModuleLaunchKernel limit");
-    }
-
-    // NOLINTNEXTLINE(modernize-avoid-c-arrays)
-    void* config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER,
-                      argsPtr,
-                      HIP_LAUNCH_PARAM_BUFFER_SIZE,
-                      &argsSize,
-                      HIP_LAUNCH_PARAM_END};
-
-    detail::throwOnHipError(hipModuleLaunchKernel(function,
-                                                  static_cast<unsigned int>(numBlocks),
-                                                  1,
-                                                  1,
-                                                  GpuReferencePointwise::BLOCK_SIZE,
-                                                  1,
-                                                  1,
-                                                  0,
-                                                  nullptr,
-                                                  nullptr,
-                                                  config),
-                            "hipModuleLaunchKernel failed");
-
-    detail::throwOnHipError(hipDeviceSynchronize(), "hipDeviceSynchronize failed");
-}
 
 // For each input tensor, compute broadcast-aware strides to enable each thread in the HIP kernel
 // execution grid can to load the correct input element.
@@ -96,31 +61,31 @@ void GpuReferencePointwise::launchUnary(
     switch(operation)
     {
     case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::IDENTITY:
-        opCode = POINTWISE_UNARY_OP_IDENTITY;
+        opCode = detail::POINTWISE_UNARY_OP_IDENTITY;
         break;
     case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::ABS:
-        opCode = POINTWISE_UNARY_OP_ABS;
+        opCode = detail::POINTWISE_UNARY_OP_ABS;
         break;
     case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::NEG:
-        opCode = POINTWISE_UNARY_OP_NEG;
+        opCode = detail::POINTWISE_UNARY_OP_NEG;
         break;
     case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD:
-        opCode = POINTWISE_UNARY_OP_RELU_FWD;
+        opCode = detail::POINTWISE_UNARY_OP_RELU_FWD;
         break;
     case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::SIGMOID_FWD:
-        opCode = POINTWISE_UNARY_OP_SIGMOID_FWD;
+        opCode = detail::POINTWISE_UNARY_OP_SIGMOID_FWD;
         break;
     case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::TANH_FWD:
-        opCode = POINTWISE_UNARY_OP_TANH_FWD;
+        opCode = detail::POINTWISE_UNARY_OP_TANH_FWD;
         break;
     case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::GELU_FWD:
-        opCode = POINTWISE_UNARY_OP_GELU_FWD;
+        opCode = detail::POINTWISE_UNARY_OP_GELU_FWD;
         break;
     case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::GELU_APPROX_TANH_FWD:
-        opCode = POINTWISE_UNARY_OP_GELU_APPROX_TANH_FWD;
+        opCode = detail::POINTWISE_UNARY_OP_GELU_APPROX_TANH_FWD;
         break;
     case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::SWISH_FWD:
-        opCode = POINTWISE_UNARY_OP_SWISH_FWD;
+        opCode = detail::POINTWISE_UNARY_OP_SWISH_FWD;
         break;
     default:
         throw std::invalid_argument("Unsupported unary pointwise operation: "
@@ -133,15 +98,14 @@ void GpuReferencePointwise::launchUnary(
         = compiler.getOrCompile("GpuRefPointwiseUnary.cpp", defines, "PointwiseUnaryRef");
 
     // Use output dims to calculate launch grid dimensions due to broadcasting rules
-    const int64_t numElements
-        = std::accumulate(outputDims.begin(), outputDims.end(), int64_t{1}, std::multiplies<>());
+    const int64_t numElements = detail::elementCount(outputDims);
     int64_t numBlocks = numElements / GpuReferencePointwise::BLOCK_SIZE;
     numBlocks += (numElements % GpuReferencePointwise::BLOCK_SIZE == 0) ? 0 : 1;
 
     // Calculate the strides to access input elements at
     auto broadCastStrides = makeBroadcastStrides(inputDims, inputStrides, outputDims);
 
-    PointwiseUnaryArgs args{};
+    detail::PointwiseUnaryArgs args{};
     args.input = inputPtr;
     args.output = outputPtr;
     args.size = numElements;
@@ -155,7 +119,7 @@ void GpuReferencePointwise::launchUnary(
     args.upperClip = upperClip;
     args.swishBeta = swishBeta;
 
-    launchKernel(kernel.function(), numBlocks, &args, sizeof(args));
+    detail::launchKernel1d(kernel.function(), numBlocks, BLOCK_SIZE, &args, sizeof(args));
 }
 
 void GpuReferencePointwise::launchBinary(
@@ -178,22 +142,22 @@ void GpuReferencePointwise::launchBinary(
     switch(operation)
     {
     case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::ADD:
-        opCode = POINTWISE_BINARY_OP_ADD;
+        opCode = detail::POINTWISE_BINARY_OP_ADD;
         break;
     case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::SUB:
-        opCode = POINTWISE_BINARY_OP_SUB;
+        opCode = detail::POINTWISE_BINARY_OP_SUB;
         break;
     case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::MUL:
-        opCode = POINTWISE_BINARY_OP_MUL;
+        opCode = detail::POINTWISE_BINARY_OP_MUL;
         break;
     case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::SIGMOID_BWD:
-        opCode = POINTWISE_BINARY_OP_SIGMOID_BWD;
+        opCode = detail::POINTWISE_BINARY_OP_SIGMOID_BWD;
         break;
     case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::TANH_BWD:
-        opCode = POINTWISE_BINARY_OP_TANH_BWD;
+        opCode = detail::POINTWISE_BINARY_OP_TANH_BWD;
         break;
     case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_BWD:
-        opCode = POINTWISE_BINARY_OP_RELU_BWD;
+        opCode = detail::POINTWISE_BINARY_OP_RELU_BWD;
         break;
     default:
         throw std::invalid_argument("Unsupported binary pointwise operation: "
@@ -205,8 +169,7 @@ void GpuReferencePointwise::launchBinary(
         = compiler.getOrCompile("GpuRefPointwiseBinary.cpp", defines, "PointwiseBinaryRef");
 
     // Use output dims to calculate launch grid dimensions due to broadcasting rules
-    const int64_t numElements
-        = std::accumulate(outputDims.begin(), outputDims.end(), int64_t{1}, std::multiplies<>());
+    const int64_t numElements = detail::elementCount(outputDims);
     int64_t numBlocks = numElements / GpuReferencePointwise::BLOCK_SIZE;
     numBlocks += (numElements % GpuReferencePointwise::BLOCK_SIZE == 0) ? 0 : 1;
 
@@ -214,7 +177,7 @@ void GpuReferencePointwise::launchBinary(
     auto broadCast0Strides = makeBroadcastStrides(input0Dims, input0Strides, outputDims);
     auto broadCast1Strides = makeBroadcastStrides(input1Dims, input1Strides, outputDims);
 
-    PointwiseBinaryArgs args{};
+    detail::PointwiseBinaryArgs args{};
     args.input0 = input0Ptr;
     args.input1 = input1Ptr;
     args.output = outputPtr;
@@ -230,7 +193,7 @@ void GpuReferencePointwise::launchBinary(
     args.lowerSlope = lowerSlope;
     args.upperClip = upperClip;
 
-    launchKernel(kernel.function(), numBlocks, &args, sizeof(args));
+    detail::launchKernel1d(kernel.function(), numBlocks, BLOCK_SIZE, &args, sizeof(args));
 }
 
 } // namespace hipdnn_gpu_ref

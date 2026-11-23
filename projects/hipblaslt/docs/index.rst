@@ -9,7 +9,7 @@ hipBLASLt documentation
 ===========================
 
 hipBLASLt is a library that provides General Matrix-Matrix (GEMM) operations with flexible APIs and extends functionality beyond the traditional BLAS library.
-To learn more, see :doc:`What is hipBLASLt?<./what-is-hipBLASLt>`
+To learn more, see :doc:`What is hipBLASLt?<./what-is-hipBLASLt>`.
 
 The hipBLASLt public repository is located at `<https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipblaslt>`_.
 
@@ -56,6 +56,7 @@ The hipBLASLt public repository is located at `<https://github.com/ROCm/rocm-lib
     * :doc:`hipBLASLt API <./reference/api-reference>`
     * :doc:`hipBLASLtExt API <./reference/ext-reference>`
     * :doc:`hipBLASLtExt operation API <./reference/ext-ops>`
+    * :doc:`hipBLASLt experimental API <./reference/experimental-api>`
 
 To contribute to the documentation, see
 `Contributing to ROCm  <https://rocm.docs.amd.com/en/latest/contribute/contributing.html>`_.

@@ -1,0 +1,25 @@
+{% extends "config_template" %}
+
+{% macro get_header_guard() %}
+ROCPRIM_DEVICE_DETAIL_CONFIG_DEVICE_ADJACENT_DIFFERENCE_HPP_
+{%- endmacro %}
+
+{% macro kernel_configuration(measurement) -%}
+adjacent_difference_config_params{ { {{ measurement['cfg']['bs'] }}, {{ measurement['cfg']['ipt'] }} } }
+{%- endmacro %}
+
+{% macro config_picker() -%}
+template<class Target, class value_type> constexpr auto adjacent_difference_config_picker()
+{%- endmacro %}
+
+{% macro enable_if(benchmark_of_target) -%}
+{{ benchmark_of_target.get_enable_if("adjacent_difference_config_params") }}
+{%- endmacro %}
+
+{% macro default_case() -%}
+return adjacent_difference_config_params_base<value_type>();
+{%- endmacro %}
+
+{% macro fallback_config(fallback_target) -%}
+    return adjacent_difference_config_picker<comp_target<{{ fallback_target.target.as_str() }}>, value_type>();
+{%- endmacro %}

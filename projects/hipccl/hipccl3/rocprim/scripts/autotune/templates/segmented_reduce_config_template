@@ -1,0 +1,25 @@
+{% extends "config_template" %}
+
+{% macro get_header_guard() %}
+ROCPRIM_DEVICE_DETAIL_CONFIG_DEVICE_SEGMENTED_REDUCE_HPP_
+{%- endmacro %}
+
+{% macro kernel_configuration(measurement) -%}
+reduce_config_params{ { {{ measurement['cfg']['bs'] }}, {{ measurement['cfg']['ipt'] }} }, ::rocprim::block_reduce_algorithm::{{ measurement['cfg']['method'] }} }
+{%- endmacro %}
+
+{% macro config_picker() -%}
+template<class Target, class key_type> constexpr auto segmented_reduce_config_picker()
+{%- endmacro %}
+
+{% macro enable_if(benchmark_of_target) -%}
+{{ benchmark_of_target.get_enable_if("reduce_config_params") }}
+{%- endmacro %}
+
+{% macro default_case() -%}
+return reduce_config_params_base<key_type>();
+{%- endmacro %}
+
+{% macro fallback_config(fallback_target) -%}
+    return segmented_reduce_config_picker<comp_target<{{ fallback_target.target.as_str() }}>, key_type>();
+{%- endmacro %}

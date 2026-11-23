@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <gtest/gtest.h>
 #include <hipdnn-gpu-ref/GpuFpReferenceBatchnorm.hpp>
+#include <hipdnn-gpu-ref/GpuFpReferenceCommon.hpp>
 #include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceBatchnorm.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
@@ -22,6 +23,7 @@ using namespace hipdnn_data_sdk::utilities;
 using namespace hipdnn_test_sdk::utilities;
 using namespace hipdnn_test_sdk::utilities::batchnorm;
 using namespace hipdnn_gpu_ref;
+using namespace hipdnn_gpu_ref::common::gpu_fp_reference_tensor;
 using namespace gpu_batchnorm_ref_test;
 
 // Used to generate random values for input tensor in a normal distribution around a mean
@@ -90,14 +92,20 @@ void runGpuVsCpuBatchnormFwdInf(const std::vector<int64_t>& ioDims, const Tensor
 
     unsigned int seed = getGlobalTestSeed();
     inputTensor.fillWithValues(NormalDistGenerator<InputDataType>(seed++, MEAN, STDDEV), true);
-    scaleTensor.fillWithRandomValues(static_cast<ScaleBiasDataType>(-SCALE_BIAS_RANGE),
-                                     static_cast<ScaleBiasDataType>(SCALE_BIAS_RANGE),
-                                     seed++);
-    biasTensor.fillWithRandomValues(static_cast<ScaleBiasDataType>(-SCALE_BIAS_RANGE),
-                                    static_cast<ScaleBiasDataType>(SCALE_BIAS_RANGE),
-                                    seed++);
+    fillWithRandomValues(scaleTensor,
+                         static_cast<ScaleBiasDataType>(-SCALE_BIAS_RANGE),
+                         static_cast<ScaleBiasDataType>(SCALE_BIAS_RANGE),
+                         seed++);
+    fillWithRandomValues(biasTensor,
+                         static_cast<ScaleBiasDataType>(-SCALE_BIAS_RANGE),
+                         static_cast<ScaleBiasDataType>(SCALE_BIAS_RANGE),
+                         seed++);
     estimatedMeanTensor.fillWithValue(static_cast<MeanVarDataType>(MEAN));
     invVarTensor.fillWithValue(static_cast<MeanVarDataType>(INV_VARIANCE));
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    scaleTensor.memory().hostData();
+    biasTensor.memory().hostData();
 
     CpuFpReferenceBatchnorm::fwdInference<InputDataType,
                                           ScaleBiasDataType,
@@ -150,14 +158,21 @@ void runGpuVsCpuBatchnormFwdInfWithVariance(const std::vector<int64_t>& ioDims,
     */
     unsigned int seed = getGlobalTestSeed();
     inputTensor.fillWithValues(NormalDistGenerator<InputDataType>(seed++, MEAN, STDDEV), true);
-    scaleTensor.fillWithRandomValues(static_cast<ScaleBiasDataType>(-SCALE_BIAS_RANGE),
-                                     static_cast<ScaleBiasDataType>(SCALE_BIAS_RANGE),
-                                     seed++);
-    biasTensor.fillWithRandomValues(static_cast<ScaleBiasDataType>(-SCALE_BIAS_RANGE),
-                                    static_cast<ScaleBiasDataType>(SCALE_BIAS_RANGE),
-                                    seed++);
+    fillWithRandomValues(scaleTensor,
+                         static_cast<ScaleBiasDataType>(-SCALE_BIAS_RANGE),
+                         static_cast<ScaleBiasDataType>(SCALE_BIAS_RANGE),
+                         seed++);
+    fillWithRandomValues(biasTensor,
+                         static_cast<ScaleBiasDataType>(-SCALE_BIAS_RANGE),
+                         static_cast<ScaleBiasDataType>(SCALE_BIAS_RANGE),
+                         seed++);
     estimatedMeanTensor.fillWithValue(static_cast<MeanVarDataType>(MEAN));
     varianceTensor.fillWithValue(static_cast<MeanVarDataType>(VARIANCE));
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    scaleTensor.memory().hostData();
+    biasTensor.memory().hostData();
+
     CpuFpReferenceBatchnorm::fwdInferenceWithVariance<InputDataType,
                                                       ScaleBiasDataType,
                                                       MeanVarDataType,

@@ -11,7 +11,8 @@ namespace hipconv
 // Only checks the data invariants every depthwise kernel requires: a supported dtype
 // combination and NHWC layout. The depthwise-shape gate (groups == C == K) lives in the
 // backend's is_applicable; everything else is checked by the concrete kernel that overrides
-// this -- including whether it implements tf32, which only the CDNA5 1D Toeplitz one does.
+// this -- including whether it implements tf32, which the CDNA4 and CDNA5 1D Toeplitz ones and
+// the CDNA4 Hankel wgrad one do.
 class DepthwiseConvKernel : public ConvKernel
 {
 public:
@@ -21,7 +22,8 @@ public:
 
     hipconv::Algorithm algorithm() const override { return hipconv::Algorithm::Depthwise; }
 
-    bool is_applicable(const hipconv::ConvParams& par) const override
+    bool is_applicable(const hipconv::Device& /*dev*/,
+                       const hipconv::ConvParams& par) const override
     {
         using namespace hipconv;
         const bool ok_fp16bf16 =
@@ -37,7 +39,49 @@ public:
     }
 
     // A valid depthwise config is the dedicated 1c path for this shape.
-    float get_weighted_throughput_index(const hipconv::ConvParams& /*par*/) const override
+    float get_weighted_throughput_index(const hipconv::Device& /*dev*/,
+                                        const hipconv::ConvParams& /*par*/) const override
+    {
+        return 1.0f;
+    }
+};
+
+// Shared base for depthwise weights-gradient kernels. The two contraction
+// operands remain fp16/bf16, while dW is accumulated and returned as fp32.
+class DepthwiseWgradConvKernel : public ConvKernel
+{
+public:
+    using ConvKernel::ConvKernel;
+
+    std::string_view name() const override { return "depthwise_wgrad_hankel"; }
+
+    hipconv::Algorithm algorithm() const override { return hipconv::Algorithm::Depthwise; }
+
+    bool is_applicable(const hipconv::Device& /*dev*/,
+                       const hipconv::ConvParams& par) const override
+    {
+        using namespace hipconv;
+        if(par.direction != Direction::Wgrad)
+            return false;
+        if(par.input_type != DataType::fp16 && par.input_type != DataType::bf16)
+            return false;
+        if(par.output_grad_type() != par.input_type)
+            return false;
+        if(par.weight_grad_type != DataType::fp32)
+            return false;
+        if(par.order != TensorOrder::NHWC)
+            return false;
+        if(par.stride_h != par.stride_w || (par.stride_h != 1 && par.stride_h != 2))
+            return false;
+        if(par.dilation_h != 1 || par.dilation_w != 1)
+            return false;
+        if(par.pad_h > par.kh - 1 || par.pad_w > par.kw - 1)
+            return false;
+        return true;
+    }
+
+    float get_weighted_throughput_index(const hipconv::Device& /*dev*/,
+                                        const hipconv::ConvParams&) const override
     {
         return 1.0f;
     }

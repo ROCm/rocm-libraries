@@ -423,7 +423,7 @@ struct MIOpenBatchNormBwdSpatialHIPImpl<1, FpType, FpPrecType, FpAccumType>
         if constexpr(!mio_config::layout_nhwc && mio_bn_config::hw >= 4096)
         {
             fp_prec_read_vec_type read4;
-            for(unsigned int k = lid << 2; k < less4; k += grprd)
+            for(unsigned int k = lid * read_size; k < less4; k += grprd)
             {
                 read4 = cast<fp_prec_read_vec_type>(
                     *(reinterpret_cast<const fp_read_vec_type*>(x_in + getTensorIndex(k))));
@@ -435,7 +435,7 @@ struct MIOpenBatchNormBwdSpatialHIPImpl<1, FpType, FpPrecType, FpAccumType>
             {
                 if(lid < rem4)
                 {
-                    unsigned int index = getTensorIndex((lid << 2) + less4);
+                    unsigned int index = getTensorIndex((lid * read_size) + less4);
                     if(index + read_size - 1 < mio_bn_config::nchw)
                     {
                         read4 = cast<fp_prec_read_vec_type>(
@@ -918,7 +918,7 @@ __launch_bounds__(MIO_BN_GRP0_FINAL* MIO_BN_GRP1_FINAL* MIO_BN_GRP2_FINAL)
         }
     }
 
-    if constexpr(!mio_bn_config::use_amdgcn || mio_bn_config::launch_dim.grp0 > 1 ||
+    if constexpr(!mio_bn_config::use_gfx9_dpp || mio_bn_config::launch_dim.grp0 > 1 ||
                  (mio_bn_config::lds_gcn_size == 1) || mio_bn_config::vec_size_x > 1)
     {
         __shared__ fp_accum_c_type
@@ -1018,7 +1018,7 @@ extern "C" __global__ void __launch_bounds__(
         }
     }
 
-    if constexpr(!mio_bn_config::use_amdgcn || mio_bn_config::launch_dim.grp0 > 1 ||
+    if constexpr(!mio_bn_config::use_gfx9_dpp || mio_bn_config::launch_dim.grp0 > 1 ||
                  (mio_bn_config::lds_gcn_size == 1) || mio_bn_config::vec_size_x > 1)
     {
         __shared__ fp_accum_c_type lcl_data[2 * mio_bn_config::lds_size];
@@ -1179,7 +1179,7 @@ extern "C" __global__ void __launch_bounds__(
         }
     }
 
-    if constexpr(!mio_bn_config::use_amdgcn || mio_bn_config::launch_dim.grp0 > 1 ||
+    if constexpr(!mio_bn_config::use_gfx9_dpp || mio_bn_config::launch_dim.grp0 > 1 ||
                  (mio_bn_config::lds_gcn_size == 1) || mio_bn_config::vec_size_x > 1)
     {
         __shared__ fp_accum_c_type lcl_data[2 * mio_bn_config::lds_size];
@@ -1278,7 +1278,7 @@ __launch_bounds__(MIO_BN_GRP0_FINAL* MIO_BN_GRP1_FINAL* MIO_BN_GRP2_FINAL)
         }
     }
 
-    if constexpr(!mio_bn_config::use_amdgcn || mio_bn_config::launch_dim.grp0 > 1 ||
+    if constexpr(!mio_bn_config::use_gfx9_dpp || mio_bn_config::launch_dim.grp0 > 1 ||
                  (mio_bn_config::lds_gcn_size == 1) || mio_bn_config::vec_size_x > 1)
     {
         __shared__ fp_accum_c_type

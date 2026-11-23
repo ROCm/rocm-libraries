@@ -28,25 +28,54 @@
 
 #include <Tensile/Activation.hpp>
 #include <Tensile/ContractionProblem.hpp>
+#include <Tensile/FusedA2A.hpp>
 #include <Tensile/KernelLanguageTypes.hpp>
+#include <Tensile/SliceAlignment.hpp>
 #include <Tensile/Tensile.hpp>
 
 #include "ProgramOptions.hpp"
 
 #include <cstddef>
+#include <memory>
+#include <unordered_map>
 
 namespace TensileLite
 {
     namespace Client
     {
 
+        std::vector<int> resolveHybridAssignmentPolicies(po::variables_map const& args);
+
         class ClientProblemFactory
         {
         public:
             ClientProblemFactory(po::variables_map const& args);
+            // One slice of --split-devices: device `sliceIdx` of `sliceCount` gets its share of M
+            // (or N), rounded so its D slice starts on 256 bytes when that is nearly free.
+            ClientProblemFactory(po::variables_map const& args, size_t sliceIdx, size_t sliceCount);
             ~ClientProblemFactory();
 
             std::vector<std::shared_ptr<ContractionProblem>> const& problems() const;
+
+            // --split-devices: the problem device `device` runs for `full` (a pointer from
+            // problems()), and the factory holding that device's problems. Both return the
+            // full problem / this factory when the split is off.
+            size_t                      numSlices() const;
+            ContractionProblem*         sliceProblem(ContractionProblem const* full,
+                                                     size_t                    device) const;
+            ClientProblemFactory const& sliceFactory(size_t device) const;
+
+
+            // --split-devices: each device writes its slice into its own full-size D. The element
+            // offset of device `device`'s slice inside that D for the problem `full` (0 when off).
+            size_t sliceOffsetInD(ContractionProblem const* full, size_t device) const;
+
+            // Pointer-array batches: the byte offset of every batch of `tensor` (A, B, C or D of
+            // ContractionProblemGemm::TENSOR) from its batch 0, in the problem device `device`
+            // runs for `full`. Entry b of a batch pointer array is the tensor's base plus entry b.
+            std::vector<size_t> sliceBatchOffsets(ContractionProblem const* full,
+                                                  size_t                    device,
+                                                  size_t                    tensor) const;
 
             size_t workspaceSize() const
             {
@@ -55,6 +84,8 @@ namespace TensileLite
 
         private:
             void createProblems(std::vector<ContractionProblemGemm>& rv);
+
+            size_t splitShare(ContractionProblemGemm const& full) const;
 
             std::vector<std::shared_ptr<ContractionProblem>> m_problems;
 
@@ -67,6 +98,7 @@ namespace TensileLite
 
             std::vector<rocisa::DataType> m_constantTypes;
             std::vector<double>           m_constantValues;
+            std::vector<bool>             m_constantRandom;
 
             bool        m_stridedBatched;
             int         m_batchMode;
@@ -74,16 +106,18 @@ namespace TensileLite
             bool        m_highPrecisionAccumulate;
             bool        m_deterministicMode;
             bool        m_cEqualsD;
-            int         m_useBias;
-            int         m_biasSrc;
+            bool        m_deviceScalarAlpha;
+            int         m_uniformSummationOrder;
+            int         m_useBias = 0;
+            int         m_biasSrc = static_cast<int>(ContractionProblemGemm::TENSOR::D);
             std::string m_useScaleAB;
-            bool        m_useScaleCD;
-            int         m_useScaleAlphaVec;
-            bool        m_useSynchronizer;
-            bool        m_useE;
-            bool        m_useGradient     = false;
-            bool        m_useGateResidual = false;
-            bool        m_outputAmaxD;
+            bool        m_useScaleCD       = false;
+            int         m_useScaleAlphaVec = 0;
+            bool        m_useE             = false;
+            bool        m_useGradient      = false;
+            bool        m_useGateResidual  = false;
+            bool        m_outputAmaxD      = false;
+            bool        m_outputPeerD      = false;
 
             int                              m_sparse;
             KernelLanguage                   m_kernelLanguage;
@@ -108,13 +142,31 @@ namespace TensileLite
             rocisa::DataType                 m_f32XdlMathOp;
             rocisa::DataType                 m_activationComputeType;
             std::vector<std::vector<size_t>> m_problemSizes;
+            std::vector<std::vector<size_t>> m_fullProblemSizes;
+            ContractionProblemGemm::FreeIndex m_splitFree{};
+            size_t                            m_sliceIdx   = 0;
+            size_t                            m_sliceCount = 1;
+            bool                              m_splitN     = false;
+            SliceAlignment::Mode              m_splitAlign = SliceAlignment::Mode::Auto;
+            // Per problem, the share of the split dimension devices 0..N-2 take (the last device
+            // takes the rest). Cut once per problem from the full problem's D, so the slice sizes
+            // and sliceOffsetInD agree.
+            std::vector<size_t>               m_splitShares;
+            std::vector<std::unique_ptr<ClientProblemFactory>> m_slices;
+            // Index of each problem in m_problems, built once with the slices (read-only after
+            // that, so devices can look their slice up concurrently).
+            std::unordered_map<ContractionProblem const*, size_t> m_problemIndex;
             bool                             m_useUserArgs;
             bool                             m_swizzleTensorA;
             bool                             m_swizzleTensorB;
-            bool                             m_fusedGemmA2A;
+            FusedA2A                         m_fusedA2A;
+            std::vector<int>                 m_worlds;
+            std::vector<int>                 m_fusedA2AExtents;
             int                              m_metadataLayout;
             int                              m_mxBlockA;
             int                              m_mxBlockB;
+            int                              m_mxBlockFreeA;
+            int                              m_mxBlockFreeB;
             bool                             m_padMXScaleTensorFreeDim;
 
             TensorOps m_aOps;

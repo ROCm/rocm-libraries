@@ -571,32 +571,26 @@ namespace TensileLite
         appendCustomType(name, static_cast<float>(value), type);
     }
 
-#if !defined(_WIN32) && defined(TENSILE_USE_FP6)
+#ifndef _WIN32
     template <>
     inline void KernelArguments::appendCustomType<Float6x32>(std::string const& name, Float6x32 value, CustomArgType type)
     {
         // Use first packed element for scalar custom argument conversion.
         appendCustomType(name, value.getElement(0), type);
     }
-#endif // !_WIN32 && TENSILE_USE_FP6
-
-#if !defined(_WIN32) && defined(TENSILE_USE_BF6)
     template <>
     inline void KernelArguments::appendCustomType<BFloat6x32>(std::string const& name, BFloat6x32 value, CustomArgType type)
     {
         // Use first packed element for scalar custom argument conversion.
         appendCustomType(name, value.getElement(0), type);
     }
-#endif // !_WIN32 && TENSILE_USE_BF6
-
-#if !defined(_WIN32) && defined(TENSILE_USE_FP4)
     template <>
     inline void KernelArguments::appendCustomType<Float4x2>(std::string const& name, Float4x2 value, CustomArgType type)
     {
         // Use first packed element for scalar custom argument conversion.
         appendCustomType(name, value.getElement(0), type);
     }
-#endif // !_WIN32 && TENSILE_USE_FP4
+#endif // !_WIN32
 
     template <>
     inline void KernelArguments::appendCustomType<E8>(std::string const& name, E8 value, CustomArgType type)

@@ -175,7 +175,6 @@ template <index_t NDimSpatial,
           typename DsDataTypes  = Tuple<>,
           typename OutElementOp = PassThrough>
 using device_grouped_conv_fwd_wmma_cshufflev3_bf16_instances_large_tiles = std::tuple<
-#if defined(CK_USE_GFX1250)
     // clang-format off
     DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle_V3<NDimSpatial, ALayout, BLayout,    DsLayout, ELayout,  BF16,  BF16,     F32,     BF16,    DsDataTypes,  BF16, PassThrough, PassThrough, OutElementOp,       ConvSpec, GemmMNKPadding,   512,   512,    64,    128,   8,   8,   16,   16,     2,     4,     S<16, 32, 1>,     S<1, 0, 2>,     S<1, 0, 2>,              2,              8,              8,         1,     S<16, 32, 1>,     S<1, 0, 2>,     S<1, 0, 2>,             2,              8,              8,         1,            1,            1,               S<1, 256, 1, 2>,               8, BlockGemmPipelineScheduler::Intrawave, BlockGemmPipelineVersion::v1>,
     DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle_V3<NDimSpatial, ALayout, BLayout,    DsLayout, ELayout,  BF16,  BF16,     F32,     BF16,    DsDataTypes,  BF16, PassThrough, PassThrough, OutElementOp,       ConvSpec, GemmMNKPadding,   512,   512,   128,     64,   8,   8,   16,   16,     4,     4,     S< 8, 64, 1>,     S<1, 0, 2>,     S<1, 0, 2>,              2,              8,              8,         1,     S< 8, 64, 1>,     S<1, 0, 2>,     S<1, 0, 2>,             2,              8,              8,         1,            1,            1,               S<1, 128, 1, 4>,               8, BlockGemmPipelineScheduler::Intrawave, BlockGemmPipelineVersion::v1>,
@@ -187,8 +186,7 @@ using device_grouped_conv_fwd_wmma_cshufflev3_bf16_instances_large_tiles = std::
     DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle_V3<NDimSpatial, ALayout, BLayout,    DsLayout, ELayout,  BF16,  BF16,     F32,     BF16,    DsDataTypes,  BF16, PassThrough, PassThrough, OutElementOp,       ConvSpec, GemmMNKPadding,   512,   256,   256,    128,   8,   8,   16,   16,     8,     2,     S<16, 32, 1>,     S<1, 0, 2>,     S<1, 0, 2>,              2,              8,              8,         1,     S<16, 32, 1>,     S<1, 0, 2>,     S<1, 0, 2>,             2,              8,              8,         1,            1,            1,               S<1,  32, 1,16>,               8, BlockGemmPipelineScheduler::Intrawave, BlockGemmPipelineVersion::v1>,
     DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle_V3<NDimSpatial, ALayout, BLayout,    DsLayout, ELayout,  BF16,  BF16,     F32,     BF16,    DsDataTypes,  BF16, PassThrough, PassThrough, OutElementOp,       ConvSpec, GemmMNKPadding,   256,   256,   128,     64,   8,   8,   16,   16,    16,     1,      S<8, 32, 1>,     S<1, 0, 2>,     S<1, 0, 2>,              2,              8,              8,         1,     S<8, 32, 1>,      S<1, 0, 2>,     S<1, 0, 2>,             2,              8,              8,         1,            1,            1,               S<1, 16, 1, 16>,               8, BlockGemmPipelineScheduler::Intrawave, BlockGemmPipelineVersion::v1>,
     DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle_V3<NDimSpatial, ALayout, BLayout,    DsLayout, ELayout,  BF16,  BF16,     F32,     BF16,    DsDataTypes,  BF16, PassThrough, PassThrough, OutElementOp,       ConvSpec, GemmMNKPadding,   256,   128,   256,     64,   8,   8,   16,   16,     8,     2,      S<8, 32, 1>,     S<1, 0, 2>,     S<1, 0, 2>,              2,              8,              8,         1,     S<8, 32, 1>,      S<1, 0, 2>,     S<1, 0, 2>,             2,              8,              8,         1,            1,            1,               S<1, 16, 1, 16>,               8, BlockGemmPipelineScheduler::Intrawave, BlockGemmPipelineVersion::v1>
-// clang-format on
-#endif
+    // clang-format on
     >;
 
 template <index_t NDimSpatial,
@@ -328,6 +326,19 @@ using device_grouped_conv_fwd_wmma_cshufflev3_f16_instances_part4 = std::tuple<
     DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle_V3<NDimSpatial, ALayout, BLayout,    DsLayout, ELayout,   F16,   F16,     F32,      F16,    DsDataTypes,   F16, PassThrough, PassThrough, OutElementOp,       ConvSpec, GemmMNKPadding,   256,    64,    64,    32,   8,   8,   16,   16,     1,     2,     S<4, 64, 1>,     S<1, 0, 2>,     S<1, 0, 2>,              2,              1,              8,         1,     S<4, 64, 1>,     S<1, 0, 2>,     S<1, 0, 2>,             2,              2,              8,         1,            1,            1,               S<1, 32, 1, 4>,               1, BlockGemmPipelineScheduler::Intrawave, BlockGemmPipelineVersion::v1>,
     DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle_V3<NDimSpatial, ALayout, BLayout,    DsLayout, ELayout,   F16,   F16,     F32,      F16,    DsDataTypes,   F16, PassThrough, PassThrough, OutElementOp,       ConvSpec, GemmMNKPadding,   256,    64,    64,    32,   8,   8,   16,   16,     1,     2,     S<4, 64, 1>,     S<1, 0, 2>,     S<1, 0, 2>,              2,              8,              8,         1,     S<4, 64, 1>,     S<1, 0, 2>,     S<1, 0, 2>,             2,              8,              8,         1,            1,            1,               S<1, 32, 1, 4>,               8, BlockGemmPipelineScheduler::Intrawave, BlockGemmPipelineVersion::v1>
 #endif
+    // clang-format on
+    >;
+
+template <index_t NDimSpatial,
+          typename ALayout,
+          typename BLayout,
+          typename DsLayout,
+          typename ELayout,
+          typename DataType,
+          ConvolutionForwardSpecialization ConvSpec>
+using device_grouped_conv_fwd_wmma_cshufflev3_instances_part5 = std::tuple<
+    // clang-format off
+    DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle_V3<NDimSpatial, ALayout, BLayout, DsLayout, ELayout, DataType, DataType, F32, DataType, Empty_Tuple, DataType, PassThrough, PassThrough, PassThrough, ConvSpec, GemmMNKPadding, 128, 128, 32, 32, 8, 8, 16, 16, 2, 2, S<4, 32, 1>, S<1, 0, 2>, S<1, 0, 2>, 2, 1, 8, 1, S<4, 32, 1>, S<1, 0, 2>, S<1, 0, 2>, 2, 1, 8, 1, 1, 1, S<1, 64, 1, 2>, 8, BlockGemmPipelineScheduler::Intrawave, ck::BlockGemmPipelineVersion::v1>
     // clang-format on
     >;
 

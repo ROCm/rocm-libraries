@@ -20,7 +20,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-from typing import Optional, OrderedDict, Callable
+from typing import OrderedDict, Callable, Dict, Any
 import sys
 import os
 
@@ -51,11 +51,12 @@ class Tuner(BaseTuner):
     def __init__(self, args: TunerArgs) -> None:
         super().__init__(args)
 
-    def _get_tune_params(self, key_type: str, value_type: Optional[str] = None) -> OrderedDict:
+    def _get_tune_params(self, types: Dict[str, Any]) -> OrderedDict:
         params = OrderedDict()
         params['radix_bits'] = RADIX_BITS
         params['block_size_x'] = BLOCK_SIZES
         params['ipt'] = IPT
+        params['warp_partitioning_allowed'] = [1]
         params['warp_small_lws'] = WARP_SMALL_LWS
         params['warp_small_ipt'] = WARP_SMALL_IPT
         params['warp_small_bs'] = WARP_SMALL_BS
@@ -63,15 +64,11 @@ class Tuner(BaseTuner):
         params['warp_medium_lws'] = WARP_MEDIUM_LWS
         params['warp_medium_ipt'] = WARP_MEDIUM_IPT
         params['warp_medium_bs'] = WARP_MEDIUM_BS
-        params['warp_partitioning_allowed'] = [1]
 
         return params
 
-    def _get_restrictions(
-        self, key_type: str, val_type: Optional[str] = None
-    ) -> Callable[[dict], bool]:
-
-        key_size = TYPE_CONFIGS[key_type].size
+    def _get_restrictions(self, types: Dict[str, Any]) -> Callable[[dict], bool]:
+        key_size = TYPE_CONFIGS[types["key_type"]].size
         TUNING_SHARED_MAX = 65536
 
         def validate(params):
@@ -89,10 +86,10 @@ class Tuner(BaseTuner):
             if 1 << rb > bs:
                 return False
 
-            if not val_type:
+            if types["value_type"] == "rocprim::empty_type":
                 return key_size * bs * ipt < TUNING_SHARED_MAX 
             else:
-                val_size = TYPE_CONFIGS[val_type].size
+                val_size = TYPE_CONFIGS[types["value_type"]].size
                 return (key_size + val_size) * bs * ipt <= TUNING_SHARED_MAX
 
         return validate
@@ -100,13 +97,12 @@ class Tuner(BaseTuner):
     def tune_all(self) -> None:
         """Tune for all value type combinations"""
 
-        VALUE_TYPES = COMMON_VALUE_TYPES + [None]
+        VALUE_TYPES = COMMON_VALUE_TYPES + ["rocprim::empty_type"]
 
         for key_type in COMMON_KEY_TYPES:
             for value_type in VALUE_TYPES:
-                self.tune_type(key_type, value_type)
+                self.tune_type({"key_type": key_type, "value_type": value_type})
 
 
 if __name__ == "__main__":
     Tuner.cli()
-    

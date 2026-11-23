@@ -237,6 +237,8 @@ public:
                               MeanInvVarianceDataTypeEnum);
         }
 
+        CHECK_NO_RAGGED_TENSORS(tensorMap);
+
         return !anyOperandIsRuntimePassByValue(tensorMap, operandUids);
     }
 

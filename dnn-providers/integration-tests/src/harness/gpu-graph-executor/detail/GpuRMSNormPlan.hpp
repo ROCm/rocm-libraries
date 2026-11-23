@@ -282,6 +282,8 @@ public:
             operandUids.push_back(nodeAttributes->bias_tensor_uid().value());
         }
 
+        CHECK_NO_RAGGED_TENSORS(tensorMap);
+
         // Reject if any operand is runtime pass-by-value
         // The plan cannot resolve a PBV host scalar
         return !anyOperandIsRuntimePassByValue(tensorMap, operandUids);
@@ -369,6 +371,8 @@ public:
                 tensorMap, nodeAttributes->dbias_tensor_uid().value(), ScaleDataTypeEnum);
             operandUids.push_back(nodeAttributes->dbias_tensor_uid().value());
         }
+
+        CHECK_NO_RAGGED_TENSORS(tensorMap);
 
         // Reject if any operand is runtime pass-by-value
         // The plan cannot resolve a PBV host scalar

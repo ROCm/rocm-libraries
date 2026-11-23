@@ -133,6 +133,50 @@ TEST(KernelKeyTest, EncodeIdentifierWithSplitK)
     EXPECT_NE(id.find("_splitk4"), std::string::npos);
 }
 
+TEST(KernelKeyTest, EncodeIdentifierWithVectorSizes)
+{
+    KernelKey native            = make_test_key(256, 256, 32, "gfx950");
+    KernelKey key               = native;
+    key.algorithm.vector_size_a = 1;
+    key.algorithm.vector_size_b = 1;
+    key.algorithm.vector_size_c = 8;
+
+    // Native widths leave the identifier untouched; fixed widths add a suffix
+    // (same spelling as the codegen kernel name) and a distinct key.
+    EXPECT_EQ(native.encode_identifier().find("_vec"), std::string::npos);
+    EXPECT_NE(key.encode_identifier().find("32x32x16_vec1_1_8"), std::string::npos);
+    EXPECT_NE(key, native);
+}
+
+TEST(KernelKeyTest, VectorWidthsDivide)
+{
+    // fp16 rcr: contiguous extents are A->K, B->K, C->N.
+    KernelKey native            = make_test_key(256, 256, 32, "gfx950");
+    KernelKey vec               = native;
+    vec.algorithm.vector_size_a = 1;
+    vec.algorithm.vector_size_b = 1;
+    vec.algorithm.vector_size_c = 8;
+
+    // Aligned problem: both run.
+    EXPECT_TRUE(vector_widths_divide(native, 512, 512, 512, 8, 8, 8));
+    EXPECT_TRUE(vector_widths_divide(vec, 512, 512, 512, 1, 1, 8));
+    // K=257: native 8-wide A/B loads cannot run, the vec1_1_8 kernel can.
+    EXPECT_FALSE(vector_widths_divide(native, 512, 512, 257, 8, 8, 8));
+    EXPECT_TRUE(vector_widths_divide(vec, 512, 512, 257, 1, 1, 8));
+    // N=129 misaligns C, which vec1_1_8 still stores 8 wide.
+    EXPECT_FALSE(vector_widths_divide(vec, 512, 129, 257, 1, 1, 8));
+    // M does not gate rcr at all.
+    EXPECT_TRUE(vector_widths_divide(native, 257, 512, 512, 8, 8, 8));
+    EXPECT_TRUE(vector_widths_divide(native, 256, 256, 516, 4, 4, 8));
+    EXPECT_TRUE(vector_widths_divide(native, 256, 257, 512, 8, 8, 1));
+    EXPECT_FALSE(vector_widths_divide(native, 256, 256, 512, 0, 8, 8));
+    native.signature.layout_a = LayoutTag::ColMajor;
+    native.signature.layout_b = LayoutTag::RowMajor;
+    native.signature.layout_c = LayoutTag::ColMajor;
+    EXPECT_TRUE(vector_widths_divide(native, 260, 264, 257, 4, 8, 4));
+    EXPECT_FALSE(vector_widths_divide(native, 258, 264, 257, 4, 8, 4));
+}
+
 TEST(KernelKeyTest, EncodeIdentifierWithSparsity)
 {
     KernelKey key;
@@ -154,4 +198,57 @@ TEST(KernelKeyTest, EncodeIdentifierWithSparsity)
     std::string id = key.encode_identifier();
 
     EXPECT_NE(id.find("_sparse"), std::string::npos);
+}
+
+TEST(KernelKeyTest, Gfx1250PipelineIdentity)
+{
+    const std::array<std::pair<const char*, Pipeline>, 8> pipelines = {{
+        {"preshufflev2", Pipeline::PreShuffleV2},
+        {"comp_tdm", Pipeline::CompTDMV1},
+        {"comp_tdm_v2", Pipeline::CompTDMV2},
+        {"comp_tdm_pc", Pipeline::CompTDMPC},
+        {"comp_tdm_v3", Pipeline::CompTDMV3},
+        {"comp_tdm_ra", Pipeline::CompTDMRA},
+        {"preshuffle_tdm", Pipeline::PreShuffleTDM},
+        {"comp_async", Pipeline::CompAsync},
+    }};
+    for(const auto& [name, pipeline] : pipelines)
+    {
+        EXPECT_EQ(string_to_pipeline(name), pipeline);
+        EXPECT_EQ(to_string(pipeline), name);
+        EXPECT_NE(pipeline, Pipeline::Mem);
+    }
+    EXPECT_EQ(string_to_epilogue("tdm"), Epilogue::Tdm);
+    EXPECT_EQ(to_string(Epilogue::Tdm), "tdm");
+    EXPECT_EQ(string_to_epilogue("tdmstaged"), Epilogue::TdmStaged);
+    EXPECT_EQ(to_string(Epilogue::TdmStaged), "tdmstaged");
+    // Existing values form part of the dispatcher ABI; new values are appended.
+    EXPECT_EQ(static_cast<unsigned>(Pipeline::Wavelet), 9u);
+    EXPECT_EQ(static_cast<unsigned>(Pipeline::PreShuffleTDM), 14u);
+    EXPECT_EQ(static_cast<unsigned>(Pipeline::CompTDMV3), 15u);
+    EXPECT_EQ(static_cast<unsigned>(Pipeline::CompTDMRA), 16u);
+    EXPECT_EQ(static_cast<unsigned>(Epilogue::BiasActivation), 5u);
+    EXPECT_EQ(static_cast<unsigned>(Epilogue::Tdm), 6u);
+    EXPECT_EQ(static_cast<unsigned>(Epilogue::TdmStaged), 7u);
+}
+
+TEST(KernelKeyTest, EncodeIdentifierRunAheadRing)
+{
+    KernelKey key             = make_test_key(256, 256, 64, "gfx1250");
+    key.algorithm.pipeline    = Pipeline::CompTDMRA;
+    const std::string base_id = key.encode_identifier();
+    EXPECT_NE(base_id.find("comp_tdm_ra"), std::string::npos);
+    EXPECT_EQ(base_id.find("_s"), std::string::npos);
+
+    // A RunAhead without NumSlots is the default ring: no suffix, as pipeline_ring_suffix().
+    key.algorithm.run_ahead = 2;
+    EXPECT_EQ(key.encode_identifier(), base_id);
+
+    key.algorithm.num_slots = 3;
+    EXPECT_EQ(key.encode_identifier(), base_id + "_s3r2");
+
+    KernelKey other           = key;
+    other.algorithm.run_ahead = 1;
+    EXPECT_FALSE(key == other);
+    EXPECT_EQ(other.encode_identifier(), base_id + "_s3r1");
 }

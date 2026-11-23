@@ -30,12 +30,15 @@ add_custom_command(
 
 add_library(
     hipdnn_gpu_ref STATIC
+    src/GpuFpReferenceBlockScale.cpp
     src/GpuReferencePointwise.cpp
     src/GpuFpReferenceConvolution.cpp
     src/GpuFpReferenceLayernorm.cpp
     src/GpuFpReferenceMatmul.cpp
     src/GpuFpReferenceSdpa.cpp
     src/GpuFpReferenceReduction.cpp
+    src/GpuFpReferenceResample.cpp
+    src/GpuFpReferenceSdpaRagged.cpp
     src/GpuFpReferenceRMSNorm.cpp
     src/GpuFpReferenceBatchnorm.cpp
     src/GpuFpReferenceRmsValidation.cpp
@@ -43,6 +46,7 @@ add_library(
     src/GpuIntReferenceValidation.cpp
     src/GpuReferenceValidationFactory.cpp
     src/GpuRefKernelCompiler.cpp
+    src/GpuRefLaunch.cpp
     src/GpuRefValidatorHelpers.cpp
     ${CMAKE_CURRENT_BINARY_DIR}/kernels/GpuRefKernelSources.cpp
 )
@@ -57,7 +61,7 @@ target_include_directories(
 target_link_libraries(
     hipdnn_gpu_ref
     PUBLIC hipdnn_test_sdk
-    PRIVATE hiprtc::hiprtc hip::host
+    PRIVATE hiprtc::hiprtc hip::host ${CMAKE_DL_LIBS}
 )
 
 target_compile_options(hipdnn_gpu_ref PRIVATE ${INTEGRATION_TESTS_WARNING_COMPILE_OPTIONS})

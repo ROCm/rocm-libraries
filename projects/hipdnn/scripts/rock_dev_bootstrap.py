@@ -107,8 +107,20 @@ def validate_component(name: str) -> None:
 
 
 def gpu_short(gpu_family: str) -> str:
-    """Extract short GPU name (strip everything after first hyphen)."""
-    return gpu_family.split("-")[0]
+    """Short GPU name for build-dir naming.
+
+    A concrete target (e.g. ``gfx1250-strict``) is returned whole; a family or
+    generic name (e.g. ``gfx94X-dcgpu``, ``gfx950-dcgpu-asan``, ``gfx11-generic``)
+    is cut at its first hyphen. A family is any name with a hyphen-separated word
+    of ``all``, ``dcgpu``, ``dgpu``, ``igpu`` or ``generic``. A feature suffix
+    (``gfx1250-strict:sramecc+``) is dropped before the name is classified.
+    """
+    target = gpu_family.split(":")[0]
+    if re.fullmatch(r"gfx[0-9a-f]+(-[a-z]+)*", target) and not re.search(
+        r"-(generic|all|dcgpu|dgpu|igpu)(-|$)", target
+    ):
+        return target
+    return target.split("-")[0]
 
 
 def config_path(build_dir: Path) -> Path:

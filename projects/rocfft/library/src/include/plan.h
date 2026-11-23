@@ -21,16 +21,19 @@
 #ifndef PLAN_H
 #define PLAN_H
 
+#include <algorithm>
 #include <array>
 #include <complex>
 #include <cstring>
 #include <list>
+#include <numeric>
 #include <optional>
 #include <set>
+#include <stdexcept>
 #include <vector>
 
 #include "../../../shared/array_predicate.h"
-#include "data_layout.h"
+#include "data_set.h"
 #include "exec_info.h"
 #include "function_pool.h"
 #include "load_store_ops.h"
@@ -91,14 +94,14 @@ struct rocfft_brick_t
         , location(location)
     {
     }
-    rocfft_brick_t(const data_layout_t& brick_layout, const rocfft_location_t& location)
+    rocfft_brick_t(const data_set_t& brick_layout, const rocfft_location_t& location)
         : layout(brick_layout)
         , location(location)
     {
     }
 
-    // Data layout of the brick
-    data_layout_t layout;
+    // Data set of the brick
+    data_set_t layout;
     // Location of the brick
     rocfft_location_t location;
 
@@ -112,55 +115,40 @@ struct rocfft_brick_t
 
 struct rocfft_field_t
 {
-    std::vector<rocfft_brick_t> bricks;
+    /**
+     * @return The field's global data range (as a contiguous layout), i.e.,
+     * the minimal full layout that logically includes all bricks' partial layouts.
+     * @note In-buffer strides are meaningless in this object.
+    */
+    const data_set_t& get_global_data_range() const
+    {
+        return global_data_range;
+    }
 
     /**
-     * @return the minimal full (i.e., non-partial) data layout that logically includes
-     * all bricks' partial layouts. The returned layout is set with contiguous in-buffer
-     * strides.
-     * 
-     * @throw An `std::logic_error` is thrown if the field has no brick or some
-     * dimensionally inconsistent bricks. 
+     * @return An `std::set<size_t>` of the length dimensions whose logical range
+     * in every brick matches the field's global data range.
      */
-    data_layout_t get_full_data_range() const;
+    const std::set<size_t>& get_undistributed_length_dimensions() const
+    {
+        return undistributed_length_dimensions;
+    }
 
     /**
-     * @brief Finalizes all the field's bricks, i.e., sorts them by increasing rank (stable
-     * sort) and sets the `is_partial` flags for all axes of their layouts.
+     * @return `true` iff all length dimensions of the field are undistributed (i.e.,
+     * all bricks have full length axes)
      */
-    void finalize();
-
-    /**
-     * @return true iff all parts of the field's full range of logical indices are covered
-     * once and only once by the field's bricks.
-     */
-    bool has_valid_tessellation() const;
-
-    /**
-     * @param[in] dim dimension index of interest (flattened: length axes
-     * followed by batch axes)
-     * @return `true` iff the corresponding length dimension is not partial
-     * in any of the field's bricks.
-     * 
-     * @throw An `std::logic_error` is thrown if the field has no bricks. An
-     * `std::invalid_argument` is thrown if `dim` is out of range.
-     */
-    bool has_undistributed_axis(size_t dim) const;
-
-    /**
-     * @return An `std::set<size_t>` of the length dimensions that are not
-     * partial in any of the field's bricks.
-     * 
-     * @throw An `std::logic_error` is thrown if the field has no bricks.
-     */
-    std::set<size_t> get_undistributed_length_dimensions() const;
+    inline bool has_undistributed_length_axes() const
+    {
+        return undistributed_length_dimensions.size() == global_data_range.get_len_rank();
+    }
 
     /**
      * @brief Verifies whether this field is consistent as input (resp. output)
      * for embarrassingly-parallel computations of specific types of Fourier
      * Transforms and, if so, returns the corresponding output (resp. input)
-     * field. All of this object's bricks must have full (i.e., non-partial)
-     * length axes in their layouts.
+     * field. All of this object's length axes must be undistributed (see
+     * `has_undistributed_length_axes()`).
      * 
      * @param[in] other_io I/O label for the field to be returned. Explicitly,
      * the calling object's layout is considered an input (resp. output) layout
@@ -182,7 +170,8 @@ struct rocfft_field_t
      * (sharing the same locations, brick-wise).
      * 
      * @throw An `std::logic_error` is thrown if the current object has no brick,
-     * or if any of its bricks has some partial length axis in its data layout.
+     * or if any of its length axes is distributed (see
+     * `has_undistributed_length_axes()`).
      */
     std::optional<rocfft_field_t>
         get_other_embarrassingly_parallel_io_field(io_data_label           other_io,
@@ -193,8 +182,103 @@ struct rocfft_field_t
 
     inline bool operator==(const rocfft_field_t& other) const
     {
-        return bricks == other.bricks;
+        // all other members are derived from the bricks
+        return get_bricks() == other.get_bricks();
     }
+
+    /**
+     * @brief Constructs a field from a collection of bricks.
+     *
+     * The constructor computes the field's global data range as the supremum of
+     * all bricks' upper bounds, validates that the bricks form a valid tessellation
+     * (complete, non-overlapping coverage of the global data range), identifies
+     * undistributed length dimensions, and sorts bricks by increasing comm rank.
+     *
+     * @note The bricks are taken by value: callers may `std::move` their vector
+     * in to transfer ownership, or pass an lvalue to keep their own copy.
+     *
+     * @param[in] field_bricks vector of bricks composing the field. Must be
+     * non-empty and dimensionally consistent (all bricks must have the same
+     * length rank and batch rank).
+     *
+     * @throw std::invalid_argument if @p field_bricks is empty, if bricks are
+     * not dimensionally consistent, or if the bricks do not form a valid
+     * tessellation of the field's global data range.
+     */
+    rocfft_field_t(std::vector<rocfft_brick_t> field_bricks);
+
+    rocfft_field_t(const rocfft_field_t&) = default;
+    rocfft_field_t& operator=(const rocfft_field_t&) = default;
+    rocfft_field_t(rocfft_field_t&&)                 = default;
+    rocfft_field_t& operator=(rocfft_field_t&&) = default;
+
+    inline const std::vector<rocfft_brick_t>& get_bricks() const
+    {
+        return bricks;
+    }
+    inline const rocfft_brick_t& get_brick(size_t brick_idx) const
+    {
+        if(brick_idx >= bricks.size())
+            throw std::out_of_range("Brick index out of range in " + ROCFFT_CURRENT_FUNCTION);
+        return bricks[brick_idx];
+    }
+    inline size_t num_bricks() const
+    {
+        return bricks.size();
+    }
+    inline bool empty() const
+    {
+        return bricks.empty();
+    }
+
+private:
+    /**
+     * @return true iff all parts of the field's full range of logical indices are covered
+     * once and only once by the field's bricks.
+     */
+    bool has_valid_tessellation() const;
+
+    // default constructor is private, accessible only to the user-facing friend function(s).
+    // Regular construction, e.g., internally to the library, should be done via the
+    // public constructor taking ownership of a complete vector of bricks (given all at once).
+    rocfft_field_t() = default;
+
+    /**
+     * @brief Validates and refreshes the derived state of a field whose bricks were
+     * added incrementally (and thus unvalidated) through the public C API
+     * (`rocfft_field_create` + `rocfft_field_add_brick`), by re-running the
+     * brick-vector constructor over the current bricks. Intended solely for
+     * finalizing such externally, incrementally-defined fields.
+     *
+     * @note If validation fails, the object is left in an undefined state.
+     */
+    inline void finalize()
+    {
+        rocfft_field_t finalized_field(std::move(bricks));
+        std::swap(*this, finalized_field);
+    }
+
+    void erase_unit_length_axis(size_t len_dim);
+    void reorder_length_axes(const std::vector<size_t>& len_axis_order);
+
+    std::vector<rocfft_brick_t> bricks;
+    std::set<size_t>            undistributed_length_dimensions;
+    data_set_t                  global_data_range;
+
+    // Internal brick-adding API used by the public C API and MPI allgather
+    static void add_brick_internal(rocfft_field_t& field, const rocfft_brick_t& brick);
+
+    // User-facing APIs require users to build fields incrementally, brick by brick.
+    // They're given access to the private default constructor and allowed to expand
+    // the `bricks` member directly.
+    friend rocfft_status rocfft_field_create(rocfft_field* field);
+    friend rocfft_status rocfft_field_add_brick(rocfft_field, rocfft_brick);
+    // The `rocfft_plan_description_t` finalizes the user-defined fields by
+    // - all-gathering bricks across all processes in the description's communicator;
+    // - erasing non-distributed unit-length axes from all bricks;
+    // - re-ordering length axes by increasing in-buffer strides.
+    // These operations require access to the private members of this class.
+    friend struct rocfft_plan_description_t;
 };
 
 struct rocfft_plan_description_t
@@ -202,8 +286,8 @@ struct rocfft_plan_description_t
     rocfft_array_type inArrayType  = rocfft_array_type_unset;
     rocfft_array_type outArrayType = rocfft_array_type_unset;
 
-    data_layout_t input_layout;
-    data_layout_t output_layout;
+    data_set_t input_layout;
+    data_set_t output_layout;
 
     std::array<size_t, 2> inOffset  = {0, 0};
     std::array<size_t, 2> outOffset = {0, 0};
@@ -250,7 +334,7 @@ struct rocfft_plan_description_t
      * - gathering all the fields' bricks on all processes involved in the description's
      *   communicator, if any;
      * 
-     * - finalizing bricks for all member fields (see `rocfft_field_t::finalize()`);
+     * - finalizing, and validating all member fields;
      * 
      * - removing trivial unit-span axes from all layouts (including bricks' if any)
      * and sorting length axes by increasing strides if that can be done consistently
@@ -267,7 +351,7 @@ struct rocfft_plan_description_t
      * 
      * - Usage of multiple I/O fields in descriptors is reported as unsupported;
      * 
-     * - I/O array types are not planar if the corresponding field(s) are set;
+     * - I/O array types are not planar if any (input or output) field is set;
      * 
      * - I/O array types are consistent with the expected data types;
      * 
@@ -325,7 +409,7 @@ struct rocfft_plan_description_t
     bool has_undistributed_io_on_current_location() const;
 
     /**
-     * @brief Returns a read accessor for the input (resp. output) data layout that must take
+     * @brief Returns a read accessor for the input (resp. output) data set that must take
      * precedence. If a lone-brick input (resp. output) field is used, this returns a (const)
      * reference to that brick's layout. Otherwise, a (const) reference to `input_layout`
      * (resp. `output_layout`) is returned.
@@ -338,7 +422,7 @@ struct rocfft_plan_description_t
      * layout on input (resp. output). An `std::invalid_argument` exception is thrown if `io`
      * is not an expected value.
      */
-    const data_layout_t& undistributed_layout_for(io_data_label io) const;
+    const data_set_t& undistributed_layout_for(io_data_label io) const;
 
     // Count the number of pointers required for either input or output
     // - planar data requires two pointers, real + complex require one.
@@ -354,7 +438,7 @@ struct rocfft_plan_description_t
         for(auto& f : fields)
         {
             fieldPtrs += std::count_if(
-                f.bricks.begin(), f.bricks.end(), [comm_rank](const rocfft_brick_t& b) {
+                f.get_bricks().begin(), f.get_bricks().end(), [comm_rank](const rocfft_brick_t& b) {
                     return b.location.comm_rank == comm_rank;
                 });
         }
@@ -407,11 +491,11 @@ struct rocfft_plan_t
     rocfft_plan_description_t desc;
 
 #ifdef ROCFFT_RCCL_ENABLE
-    // RCCL communicator used by GlobalTransposeRCCL.  Populated only
-    // when the plan runs in a single process (local_comm_size == 1)
-    // and has >= 2 local devices; empty otherwise, in which case
-    // GlobalTransposeP2P / GlobalTransposeA2A handle the transpose.
-    // Value-semantic handle; copies share state via shared_ptr<Impl>.
+    // RCCL communicator used by GlobalTransposeRCCL.  Populated for
+    // single-process multi-GPU plans, and for multi-process plans when
+    // every MPI rank's bricks use exactly one device. Empty otherwise,
+    // in which case GlobalTransposeP2P / GlobalTransposeA2A handle the
+    // transpose.
     rocfft_rccl_comm_t rccl;
 #endif
 
@@ -444,11 +528,17 @@ struct rocfft_plan_t
     // was set up
     bool BuildMultiDevicePlan();
 
+    // Returns `true` iff a communication-free plan was set up, i.e., outside of standard,
+    // single-device usage, every input brick pairs with a same-location output brick of
+    // identical batch range (and buffer, if in-place)
+    bool BuildEmbarrassinglyParallelPlan();
+
 #ifdef ROCFFT_RCCL_ENABLE
-    // populate the rccl communicator from the description's local devices,
-    // before any plan-building path is chosen,  empty when not applicable.
-    // any failure is swallowed internally, leaving rccl empty so
-    // the caller falls back to the P2P / A2A paths
+    // populate the rccl communicator from the plan's brick locations
+    // before any plan-building path is chosen. empty when not applicable.
+    // multi-process init is collective; local failure is synchronized so
+    // no rank enters ncclCommInitRank alone. on failure rccl is left
+    // empty so the caller falls back to P2P / A2A.
     void InitRCCLCommunicator() noexcept;
 #endif
 
@@ -512,10 +602,11 @@ private:
     // (non-std::exception) throws.
     void discard_failed_multi_device_plan(const std::string& calling_func, const char* except_what);
 
-    // Temp buffers allocated during plan creation for multi-device
-    // plans are remembered here.  Mapped per-location.  Individual
-    // plan items can have void*'s that point to these buffers.
-    std::multimap<rocfft_location_t, std::shared_ptr<InternalTempBuffer>> tempBuffers;
+    // Temp buffers requested during plan creation, one per request.
+    // DetermineTempBufferUserAllocs places them in the per-device
+    // work buffers, overlapping only buffers that are never in use
+    // at the same time.
+    TempBufferRegistry tempBuffers;
 
     // Per-device temp buffer size that we'll ask users to allocate - we
     // roll up all of the individual allocations into a single number
@@ -531,16 +622,14 @@ private:
      * 
      * @param[in] exec_plan_metadata single-device execution plan's metadata.
      * @param[in] exec_plan_location location of the single-device execution plan.
-     * @param[in] antecedents indices of the plan items that must complete before
-     * the gather steps may be initiated.
-     * @return An `std::vector<size_t>` of indices of the created plan items. When these
-     * items complete, the execution plan's input buffer is set for computing the desired
-     * transform.
+     * @return An `std::vector<size_t>` of indices of the created
+     * plan items that the execution plan would need to wait for before beginning.
+     * Note that other items for packing/unpacking data may be added
+     * to the multi-plan that these returned items depend on.
      */
     std::vector<size_t>
-        CreateInputGatheringItemsIfNeeded(const NodeMetaData&        exec_plan_metadata,
-                                          const rocfft_location_t&   exec_plan_location,
-                                          const std::vector<size_t>& antecedents = {});
+        CreateInputGatheringItemsIfNeeded(const NodeMetaData&      exec_plan_metadata,
+                                          const rocfft_location_t& exec_plan_location);
 
     /**
      * @brief Creates the plan items required to scatter the output buffer of the (single-device)
@@ -551,16 +640,18 @@ private:
      * 
      * @param[in] exec_plan_metadata single-device execution plan's metadata.
      * @param[in] exec_plan_location location of the single-device execution plan.
-     * @param[in] antecedents indices of the plan items that must complete before
-     * the scatter steps may be initiated. 
-     * @return An `std::vector<size_t>` of indices of the created plan items. When these items
-     * complete, the user's output buffers are set with the corresponding portions of the
-     * transform's results.
+     * @param[in] device_specific_ops store ops that are bound to specific output bricks
+     * (i.e. JIT callbacks)
+     * @return An `std::vector<size_t>` of indices of the created
+     * plan items that read the execution plan's output (and hence
+     * would need to depend on the execution plan completing first).
+     * Note that other items for packing/unpacking data may be added
+     * to the multi-plan that depend on these returned items.
      */
     std::vector<size_t>
-        CreateOutputScatteringItemsIfNeeded(const NodeMetaData&        exec_plan_metadata,
-                                            const rocfft_location_t&   exec_plan_location,
-                                            const std::vector<size_t>& antecedents);
+        CreateOutputScatteringItemsIfNeeded(const NodeMetaData&            exec_plan_metadata,
+                                            const rocfft_location_t&       exec_plan_location,
+                                            const std::optional<StoreOps>& dev_specific_store_ops);
 
     // Transform (complex-complex FFT) a whole field along specified
     // dimensions.  Input and output ptrs are provided as a vector of
@@ -600,78 +691,6 @@ private:
                                                     const std::optional<StoreOps>& storeOps,
                                                     bool                           partOfMultiPlan);
 
-    // RAII struct to 'lease' a temp buffer from a multimap of per-device
-    // buffers.  When this struct is destroyed, the buffer is returned to
-    // the map for reuse.
-    struct TempBufferLease
-    {
-        TempBufferLease(
-            std::multimap<rocfft_location_t, std::shared_ptr<InternalTempBuffer>>& _tempBuffers,
-            int                                                                    local_comm_rank,
-            rocfft_location_t                                                      _location,
-            size_t                                                                 byte_size)
-            : location(_location)
-            , tempBuffers(&_tempBuffers)
-        {
-            // no need to allocate anything for non-local ranks
-            if(local_comm_rank != location.comm_rank)
-            {
-                // instead allocate a placeholder that remembers which
-                // rank this was for, to aid debugging
-                buf = std::make_shared<InternalTempBuffer>(location);
-                return;
-            }
-
-            // return an existing buffer that's big enough, if one exists
-            auto i = tempBuffers->lower_bound(location);
-            if(i != tempBuffers->upper_bound(location))
-            {
-                // found a buffer, ensure it's big enough
-                i->second->ensure_size_bytes(byte_size);
-
-                // leasing out this temp buffer, remove it from the map
-                buf = i->second;
-                tempBuffers->erase(i);
-                return;
-            }
-            // no buffer was found, allocate a new one
-            buf = std::make_shared<InternalTempBuffer>(location);
-            buf->ensure_size_bytes(byte_size);
-        }
-        ~TempBufferLease()
-        {
-            // return the buffer to the map
-            if(buf)
-                tempBuffers->emplace(std::make_pair(location, std::move(buf)));
-        }
-        // allow moves, disallow copies
-        TempBufferLease(TempBufferLease&& other)
-            : location(other.location)
-            , tempBuffers(other.tempBuffers)
-            , buf(std::move(other.buf))
-        {
-        }
-        TempBufferLease& operator=(TempBufferLease&& other)
-        {
-            location    = other.location;
-            tempBuffers = other.tempBuffers;
-            buf         = std::move(other.buf);
-            return *this;
-        }
-        TempBufferLease(const TempBufferLease& other) = delete;
-        TempBufferLease& operator=(const TempBufferLease& other) = delete;
-
-        std::shared_ptr<InternalTempBuffer> data()
-        {
-            return buf;
-        }
-
-    private:
-        rocfft_location_t                                                      location;
-        std::multimap<rocfft_location_t, std::shared_ptr<InternalTempBuffer>>* tempBuffers;
-        std::shared_ptr<InternalTempBuffer>                                    buf;
-    };
-
     /**
      * @brief Creates and returns the metadata configuring the single-device execution
      * plan item used for tackling the plan's task. If the plan's task cannot be handled
@@ -681,25 +700,19 @@ private:
      * - read (resp. write) directly from (resp. into) the user's input (resp. output)
      *   data buffer, if that data is undistributed and expected on the given location at
      *   execution. If not, default packed layouts for in-place operations are set on
-     *   input and output (possibly requiring temporary, leased I/O);
+     *   input and output (possibly requiring temporary I/O);
      * 
      * - operate in-place, unless the above made that impossible or if the plan's
      *   configuration does not guarantee that it is safe to do so.
      * 
      * If the returned configuration is such that reading (resp. writing) directly from
      * (resp. to) a user-provided input (resp. output) data buffer cannot or should not
-     * be done, leased temporary buffers of appropriate sizes are created instead and
-     * appended to the given `leased_io`.
+     * be done, temporary buffers of appropriate sizes are created instead.
      * 
-     * @param[inout] leased_io vector of leased temporary buffers. If a temporary buffer
-     * needs to be leased for the input and/or output of the single-device execution plan
-     * that the returned object configures, that leased buffer is created and appended to
-     * this vector.
      * @param[in] exec_plan_location location where the single-device execution plan
      * configured by the returned object is meant to reside.
      */
-    NodeMetaData get_single_dev_exec_plan_metadata(std::vector<TempBufferLease>& leased_io,
-                                                   const rocfft_location_t& exec_plan_location);
+    NodeMetaData get_single_dev_exec_plan_metadata(const rocfft_location_t& exec_plan_location);
 
     struct field_view_t
     {
@@ -775,17 +788,16 @@ private:
         {
             // validation checks at object's construction guarantee
             // it's identical for all I/O bricks
-            return input.field.bricks[0].layout.corresponding_axes_in_embedding();
+            return input.field.get_brick(0).layout.corresponding_axes_in_embedding();
         }
         std::optional<LoadOps>  load_ops  = std::nullopt;
         std::optional<StoreOps> store_ops = std::nullopt;
     };
 
     template <io_data_label field_view_label>
-    embarrassingly_parallel_fft make_embarrassingly_parallel_fft_from_user_field(
-        const std::set<size_t>        fft_len_dims,
-        std::vector<TempBufferLease>& leased_buffers,
-        bool                          prefer_in_place_if_possible);
+    embarrassingly_parallel_fft
+        make_embarrassingly_parallel_fft_from_user_field(const std::set<size_t> fft_len_dims,
+                                                         bool prefer_in_place_if_possible);
 
     std::vector<size_t> create_plan_items_for(const embarrassingly_parallel_fft& parallel_fft,
                                               const std::vector<size_t>&         antecedents);
@@ -804,9 +816,8 @@ private:
                                            const std::vector<size_t>& antecedents);
 
 #ifdef ROCFFT_RCCL_ENABLE
-    // RCCL-based global transpose for single-process multi-GPU plans.
-    // Dispatches to ncclAllToAll for uniform NxN patterns and to a
-    // grouped ncclSend/ncclRecv path for everything else.
+    // RCCL-based global transpose. Dispatches to ncclAllToAll for
+    // uniform NxN patterns and to grouped ncclSend/ncclRecv otherwise.
     std::vector<size_t> GlobalTransposeRCCL(const field_view_t&        input,
                                             const field_view_t&        output,
                                             const std::vector<size_t>& antecedents);

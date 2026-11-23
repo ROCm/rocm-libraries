@@ -24,7 +24,9 @@ from rocke.instances.gfx1250.block_scaled_gemm import build_block_scaled_gemm
 def test_mxfp8_formats_and_hip_selectors(dtype, selector, ml_name, path):
     ml = pytest.importorskip("ml_dtypes")
     spec = mxfp8_gemm.make_spec(
-        argparse.Namespace(m=32, n=48, k=256, dtype=dtype, matrix_path=path)
+        argparse.Namespace(
+            m=32, n=48, k=256, dtype=dtype, matrix_path=path, output_dtype="bf16"
+        )
     )
     assert spec.dtype_a == spec.dtype_b == normalize_dtype(dtype)
     kernel = build_block_scaled_gemm(spec)

@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -111,8 +111,7 @@ namespace rocalution
             assert(*ptr != NULL);
         }
 
-        DISCARD_HIP_ERROR(hipDeviceSynchronize());
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
+        CHECK_HIP_STATUS(hipDeviceSynchronize());
 
         this->vec_  = *ptr;
         this->size_ = size;
@@ -123,8 +122,7 @@ namespace rocalution
     {
         assert(this->size_ >= 0);
 
-        DISCARD_HIP_ERROR(hipDeviceSynchronize());
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
+        CHECK_HIP_STATUS(hipDeviceSynchronize());
         *ptr       = this->vec_;
         this->vec_ = NULL;
 
@@ -810,9 +808,8 @@ namespace rocalution
             CHECK_ROCBLAS_ERROR(status, __FILE__, __LINE__);
 
             // Synchronize stream to make sure, result is available on the host
-            DISCARD_HIP_ERROR(
+            CHECK_HIP_STATUS(
                 hipStreamSynchronize(HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
-            CHECK_HIP_ERROR(__FILE__, __LINE__);
         }
 
         return res;
@@ -863,9 +860,8 @@ namespace rocalution
             CHECK_ROCBLAS_ERROR(status, __FILE__, __LINE__);
 
             // Synchronize stream to make sure, result is available on the host
-            DISCARD_HIP_ERROR(
+            CHECK_HIP_STATUS(
                 hipStreamSynchronize(HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
-            CHECK_HIP_ERROR(__FILE__, __LINE__);
         }
 
         return res;
@@ -908,9 +904,8 @@ namespace rocalution
             CHECK_ROCBLAS_ERROR(status, __FILE__, __LINE__);
 
             // Synchronize stream to make sure, result is available on the host
-            DISCARD_HIP_ERROR(
+            CHECK_HIP_STATUS(
                 hipStreamSynchronize(HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
-            CHECK_HIP_ERROR(__FILE__, __LINE__);
         }
 
         return res;
@@ -950,25 +945,23 @@ namespace rocalution
             ValueType* dres = NULL;
             allocate_hip(1, &dres);
 
-            DISCARD_HIP_ERROR(
+            CHECK_HIP_STATUS(
                 rocprimTreduce(buffer,
                                size,
                                this->vec_,
                                dres,
                                this->size_,
                                HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
-            CHECK_HIP_ERROR(__FILE__, __LINE__);
 
             allocate_hip(size, &buffer);
 
-            DISCARD_HIP_ERROR(
+            CHECK_HIP_STATUS(
                 rocprimTreduce(buffer,
                                size,
                                this->vec_,
                                dres,
                                this->size_,
                                HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
-            CHECK_HIP_ERROR(__FILE__, __LINE__);
 
             free_hip(&buffer);
 
@@ -1000,26 +993,24 @@ namespace rocalution
             char*  buffer = NULL;
             size_t size   = 0;
 
-            DISCARD_HIP_ERROR(
+            CHECK_HIP_STATUS(
                 rocprimTinclusivesum(buffer,
                                      size,
                                      cast_vec->vec_,
                                      this->vec_,
                                      this->size_,
                                      HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
-            CHECK_HIP_ERROR(__FILE__, __LINE__);
 
             allocate_hip(size, &buffer);
             CHECK_HIP_ERROR(__FILE__, __LINE__);
 
-            DISCARD_HIP_ERROR(
+            CHECK_HIP_STATUS(
                 rocprimTinclusivesum(buffer,
                                      size,
                                      cast_vec->vec_,
                                      this->vec_,
                                      this->size_,
                                      HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
-            CHECK_HIP_ERROR(__FILE__, __LINE__);
 
             free_hip(&buffer);
             CHECK_HIP_ERROR(__FILE__, __LINE__);
@@ -1055,26 +1046,24 @@ namespace rocalution
             char*  buffer = NULL;
             size_t size   = 0;
 
-            DISCARD_HIP_ERROR(
+            CHECK_HIP_STATUS(
                 rocprimTexclusivesum(buffer,
                                      size,
                                      cast_vec->vec_,
                                      this->vec_,
                                      this->size_,
                                      HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
-            CHECK_HIP_ERROR(__FILE__, __LINE__);
 
             allocate_hip(size, &buffer);
             CHECK_HIP_ERROR(__FILE__, __LINE__);
 
-            DISCARD_HIP_ERROR(
+            CHECK_HIP_STATUS(
                 rocprimTexclusivesum(buffer,
                                      size,
                                      cast_vec->vec_,
                                      this->vec_,
                                      this->size_,
                                      HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
-            CHECK_HIP_ERROR(__FILE__, __LINE__);
 
             free_hip(&buffer);
             CHECK_HIP_ERROR(__FILE__, __LINE__);
@@ -1113,9 +1102,8 @@ namespace rocalution
             CHECK_ROCBLAS_ERROR(status, __FILE__, __LINE__);
 
             // Synchronize stream to make sure, result is available on the host
-            DISCARD_HIP_ERROR(
+            CHECK_HIP_STATUS(
                 hipStreamSynchronize(HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
-            CHECK_HIP_ERROR(__FILE__, __LINE__);
         }
 
         return res;
@@ -1158,12 +1146,193 @@ namespace rocalution
                                   &index);
             CHECK_ROCBLAS_ERROR(status, __FILE__, __LINE__);
 
+            // rocBLAS returns a 1-based index
+            --index;
+
             copy_d2h(1, this->vec_ + index, &value);
         }
 
         value = std::abs(value);
         return index;
     }
+
+#ifdef SUPPORT_COMPLEX
+    // Complex Asum and Amax use the modulus |z|, as the host. The rocBLAS complex asum and
+    // amax use |re| + |im| instead. The modulus uses hypot, as the squares of the parts can
+    // overflow.
+    template <typename T>
+    struct hip_complex_modulus
+    {
+        __device__ T operator()(const std::complex<T>& z) const
+        {
+            return hypot(z.real(), z.imag());
+        }
+    };
+
+    template <typename T>
+    struct hip_index_modulus
+    {
+        int64_t index;
+        T       value;
+    };
+
+    // A NaN modulus ranks below every other one, so that NaN entries are skipped, as on the
+    // host, and hip_max_modulus stays commutative, which rocprim::reduce requires
+    template <typename T>
+    struct hip_entry_modulus
+    {
+        const std::complex<T>* vec;
+
+        __device__ hip_index_modulus<T> operator()(int64_t i) const
+        {
+            const T modulus = hip_complex_modulus<T>()(vec[i]);
+            return {i, isnan(modulus) ? static_cast<T>(-1) : modulus};
+        }
+    };
+
+    // The larger modulus, and the smaller index of equal ones
+    template <typename T>
+    struct hip_max_modulus
+    {
+        __device__ hip_index_modulus<T> operator()(const hip_index_modulus<T>& a,
+                                                   const hip_index_modulus<T>& b) const
+        {
+            return (b.value > a.value || (b.value == a.value && b.index < a.index)) ? b : a;
+        }
+    };
+
+    template <typename T>
+    static T hip_complex_asum(const std::complex<T>* vec, int64_t size, hipStream_t stream)
+    {
+        T res = static_cast<T>(0);
+
+        if(size > 0)
+        {
+            auto in = rocprim::make_transform_iterator(vec, hip_complex_modulus<T>());
+
+            char*  buffer      = NULL;
+            size_t buffer_size = 0;
+
+            T* dres = NULL;
+            allocate_hip(1, &dres);
+
+            CHECK_HIP_STATUS(rocprim::reduce(buffer,
+                                             buffer_size,
+                                             in,
+                                             dres,
+                                             static_cast<T>(0),
+                                             size,
+                                             rocprim::plus<T>(),
+                                             stream));
+
+            allocate_hip(buffer_size, &buffer);
+
+            CHECK_HIP_STATUS(rocprim::reduce(buffer,
+                                             buffer_size,
+                                             in,
+                                             dres,
+                                             static_cast<T>(0),
+                                             size,
+                                             rocprim::plus<T>(),
+                                             stream));
+
+            free_hip(&buffer);
+
+            copy_d2h(1, dres, &res);
+
+            free_hip(&dres);
+        }
+
+        return res;
+    }
+
+    template <typename T>
+    static int64_t
+        hip_complex_amax(const std::complex<T>* vec, int64_t size, T& value, hipStream_t stream)
+    {
+        hip_index_modulus<T> res = {0, static_cast<T>(0)};
+
+        if(size > 0)
+        {
+            auto in = rocprim::make_transform_iterator(rocprim::counting_iterator<int64_t>(0),
+                                                       hip_entry_modulus<T>{vec});
+
+            char*  buffer      = NULL;
+            size_t buffer_size = 0;
+
+            char* dres = NULL;
+            allocate_hip(sizeof(hip_index_modulus<T>), &dres);
+
+            hip_index_modulus<T>* out = reinterpret_cast<hip_index_modulus<T>*>(dres);
+
+            CHECK_HIP_STATUS(rocprim::reduce(
+                buffer, buffer_size, in, out, res, size, hip_max_modulus<T>(), stream));
+
+            allocate_hip(buffer_size, &buffer);
+
+            CHECK_HIP_STATUS(rocprim::reduce(
+                buffer, buffer_size, in, out, res, size, hip_max_modulus<T>(), stream));
+
+            free_hip(&buffer);
+
+            CHECK_HIP_STATUS(hipMemcpy(&res, out, sizeof(res), hipMemcpyDeviceToHost));
+
+            free_hip(&dres);
+
+            // The modulus of the entry as the host computes it, with std::hypot as the host
+            // std::abs does: the device hypot and std::abs of a complex value in HIP code can
+            // round differently. A zero modulus stays zero even if entry 0 is NaN, as on the
+            // host.
+            if(res.value > static_cast<T>(0))
+            {
+                std::complex<T> entry;
+                copy_d2h(1, vec + res.index, &entry);
+                res.value = std::hypot(entry.real(), entry.imag());
+            }
+        }
+
+        value = res.value;
+        return res.index;
+    }
+
+    template <>
+    std::complex<float> HIPAcceleratorVector<std::complex<float>>::Asum(void) const
+    {
+        return std::complex<float>(hip_complex_asum(
+            this->vec_, this->size_, HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
+    }
+
+    template <>
+    std::complex<double> HIPAcceleratorVector<std::complex<double>>::Asum(void) const
+    {
+        return std::complex<double>(hip_complex_asum(
+            this->vec_, this->size_, HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
+    }
+
+    template <>
+    int64_t HIPAcceleratorVector<std::complex<float>>::Amax(std::complex<float>& value) const
+    {
+        float   amax  = 0.0f;
+        int64_t index = hip_complex_amax(this->vec_,
+                                         this->size_,
+                                         amax,
+                                         HIPSTREAM(_get_backend_descriptor()->HIP_stream_current));
+        value         = std::complex<float>(amax);
+        return index;
+    }
+
+    template <>
+    int64_t HIPAcceleratorVector<std::complex<double>>::Amax(std::complex<double>& value) const
+    {
+        double  amax  = 0.0;
+        int64_t index = hip_complex_amax(this->vec_,
+                                         this->size_,
+                                         amax,
+                                         HIPSTREAM(_get_backend_descriptor()->HIP_stream_current));
+        value         = std::complex<double>(amax);
+        return index;
+    }
+#endif
 
     template <>
     int64_t HIPAcceleratorVector<bool>::Amax(bool& value) const
@@ -1479,6 +1648,7 @@ namespace rocalution
                  HIPSTREAM(_get_backend_descriptor()->HIP_stream_current));
     }
 
+    // COVERAGE_EXCL_NO_MPI_START
     template <typename ValueType>
     void HIPAcceleratorVector<ValueType>::RSPMISUpdateCFmap(const BaseVector<int>& index,
                                                             BaseVector<ValueType>* values)
@@ -1509,6 +1679,7 @@ namespace rocalution
                 cast_idx->size_, cast_idx->vec_, cast_vec->vec_, this->vec_);
         CHECK_HIP_ERROR(__FILE__, __LINE__);
     }
+    // COVERAGE_EXCL_NO_MPI_STOP
 
     template <typename ValueType>
     void HIPAcceleratorVector<ValueType>::ExtractCoarseMapping(
@@ -1693,8 +1864,8 @@ namespace rocalution
 
             assert(cast_sort != NULL);
 
-            void*  buffer = NULL;
-            size_t size;
+            char*  buffer = NULL;
+            size_t size   = 0;
 
             unsigned int begin_bit = 0;
             unsigned int end_bit   = 8 * sizeof(ValueType);
@@ -1702,7 +1873,7 @@ namespace rocalution
             if(cast_perm == NULL)
             {
                 // Sort without permutation
-                DISCARD_HIP_ERROR(rocprim::radix_sort_keys(
+                CHECK_HIP_STATUS(rocprim::radix_sort_keys(
                     buffer,
                     size,
                     this->vec_,
@@ -1711,12 +1882,10 @@ namespace rocalution
                     begin_bit,
                     end_bit,
                     HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
-                CHECK_HIP_ERROR(__FILE__, __LINE__);
 
-                DISCARD_HIP_ERROR(hipMalloc(&buffer, size));
-                CHECK_HIP_ERROR(__FILE__, __LINE__);
+                allocate_hip(size, &buffer);
 
-                DISCARD_HIP_ERROR(rocprim::radix_sort_keys(
+                CHECK_HIP_STATUS(rocprim::radix_sort_keys(
                     buffer,
                     size,
                     this->vec_,
@@ -1725,10 +1894,8 @@ namespace rocalution
                     begin_bit,
                     end_bit,
                     HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
-                CHECK_HIP_ERROR(__FILE__, __LINE__);
 
-                DISCARD_HIP_ERROR(hipFree(buffer));
-                CHECK_HIP_ERROR(__FILE__, __LINE__);
+                free_hip(&buffer);
             }
             else
             {
@@ -1746,7 +1913,7 @@ namespace rocalution
                 CHECK_ROCSPARSE_ERROR(status, __FILE__, __LINE__);
 
                 // Radix sort pairs
-                DISCARD_HIP_ERROR(rocprim::radix_sort_pairs(
+                CHECK_HIP_STATUS(rocprim::radix_sort_pairs(
                     buffer,
                     size,
                     this->vec_,
@@ -1757,12 +1924,10 @@ namespace rocalution
                     begin_bit,
                     end_bit,
                     HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
-                CHECK_HIP_ERROR(__FILE__, __LINE__);
 
-                DISCARD_HIP_ERROR(hipMalloc(&buffer, size));
-                CHECK_HIP_ERROR(__FILE__, __LINE__);
+                allocate_hip(size, &buffer);
 
-                DISCARD_HIP_ERROR(rocprim::radix_sort_pairs(
+                CHECK_HIP_STATUS(rocprim::radix_sort_pairs(
                     buffer,
                     size,
                     this->vec_,
@@ -1773,10 +1938,8 @@ namespace rocalution
                     begin_bit,
                     end_bit,
                     HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
-                CHECK_HIP_ERROR(__FILE__, __LINE__);
 
-                DISCARD_HIP_ERROR(hipFree(buffer));
-                CHECK_HIP_ERROR(__FILE__, __LINE__);
+                free_hip(&buffer);
             }
         }
     }

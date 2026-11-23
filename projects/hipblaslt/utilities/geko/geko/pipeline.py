@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import shutil
 from pathlib import Path
-from typing import List, Sequence
+from typing import Any, List, Mapping, Sequence
 
 import pandas as pd
 
@@ -29,7 +29,7 @@ from geko import bench, library, logger, optim, search, _set_log_level
 from geko.config_generator.load_input_config import gemm_configs_from_gemm_dataframe, validate_mx_arch_support
 from geko.bench.utils import update_lib_source
 from geko.config_generator.constants import VALID_BACKENDS
-from geko.constants import SUPPORTED_ARCH
+from geko.constants import SUPPORTED_ARCH, canonical_arch
 from geko.schemas import GemmConfig, RunState
 from geko.utils import parse_devices
 
@@ -74,18 +74,21 @@ def run_bench(
     device: int | None = None,
     custom_lib_src: str | Path | None = None,
     custom_lib_dir: str | Path | None = None,
+    adaptive_benchmark: bool = True,
 ) -> int:
     """Summarize a workload log into output_dir (benchmark path only; no tuning).
 
     Parses the workload, materializes a bench YAML, runs bench.standard_benchmark
-    (probe then scaled iterations), and leaves summary artifacts under output_dir.
+    (a single adaptive pass, or probe then scaled iterations when adaptive timing
+    is disabled), and leaves summary artifacts under output_dir.
 
     Args:
         hipblaslt_path: hipBLASLt checkout root.
         workload_path: GEMM workload YAML or CSV with GEMM_LOG_FIELDS.
         output_dir: Writes summary.csv, gemms.csv, and intermediate YAML here.
         devices: GPU indices for summarizing.
-        benchmark_duration: Target seconds per cold and per timed phase for standard_benchmark.
+        benchmark_duration: Measurement time in seconds per GEMM with adaptive
+            timing; otherwise target seconds per cold and per timed phase.
         bench_freq: Passed to bench.standard_benchmark (HIPBLASLT_BENCH_FREQ).
         device: Backward-compatible single-device alias. If set, overrides devices.
         custom_lib_src: Optional source library directory to build into
@@ -93,6 +96,8 @@ def run_bench(
         custom_lib_dir: Optional pre-built custom library directory. If both
             custom_lib_src and custom_lib_dir are provided, this one takes
             precedence.
+        adaptive_benchmark: Whether to benchmark with adaptive timing.
+            Defaults to True.
 
     Returns:
         0 on success; 1 if hipBLASLt or workload path is missing (logged).
@@ -133,7 +138,11 @@ def run_bench(
         )
         library.operations.create(hip_path, custom_lib_src, custom_lib_dir)
 
-    data = bench.log.update(bench.log.parse(log_path, as_df=False))[0]
+    data = bench.log.update(
+        bench.log.parse(log_path, as_df=False),
+        duration=benchmark_duration,
+        adaptive=adaptive_benchmark,
+    )[0]
     logger.info(f"Working on '{log_path}' with {len(data)} GEMMs...")
     bench_yaml = out / f"{log_path.stem}.yaml"
     bench.log.dump(data, bench_yaml)
@@ -146,6 +155,7 @@ def run_bench(
         devices=devices,
         duration=benchmark_duration,
         bench_freq=bench_freq,
+        adaptive=adaptive_benchmark,
     )
     logger.info(f"Benchmark outputs under '{out.resolve()}'")
 
@@ -164,7 +174,7 @@ def run_search(
     up_thr: float = 1.03,
     workdir: str = "workdir",
     verbose: int = 1,
-    duration: float = 0.04,
+    profile: str = "thorough",
     bench_freq: bool = False,
     custom_lib_src: str | Path | None = None,
 ) -> None:
@@ -194,8 +204,9 @@ def run_search(
             absent. Defaults to "workdir".
         verbose (int, optional): Logging verbosity passed to
             _set_log_level (0 = WARNING, 1 = INFO). Defaults to 1.
-        duration (float, optional): Per-config benchmark duration (seconds)
-            used by search.configure. Defaults to 0.04.
+        profile (str, optional): Search profile name forwarded to
+            search.configure -- a key of search.SEARCH_PROFILES ("fast",
+            "balanced", or "thorough"). Defaults to "thorough".
         bench_freq (bool, optional): Forwarded to bench.log.summarize,
             search.run, and optim.analyze (controls HIPBLASLT_BENCH_FREQ).
             Defaults to False.
@@ -225,6 +236,7 @@ def run_search(
     logger.info(f"Full output directory: '{full_output_dir}'")
     logger.info(f"Keep threshold: {keep_thr}")
     logger.info(f"Performance threshold: {up_thr}")
+    logger.info(f"Search profile: {profile}")
 
     match_table_path = hipblaslt_path / "build/release/device-library/MatchTable.yaml"
     if custom_lib_src is not None:
@@ -257,12 +269,14 @@ def run_search(
         cache=True,
         bench_freq=bench_freq,
         custom_lib_dir=ref_custom_lib_dir,
+        force_benchmark=True,
+        adaptive=False,  # fast probe to rank GEMMs, not an accurate measurement
     )
     if uniq_df.empty:
         logger.warning("No GEMM operations found after filtering. Consider lowering keep_thr")
         return
 
-    configs = search.configure(summary_df, duration=duration)
+    configs = search.configure(summary_df, profile=profile)
     state.configured = True
     state.optimized = False
     state.dump(state_path)
@@ -279,6 +293,7 @@ def run_search(
         custom_lib_dir=ref_custom_lib_dir,
         devices=devices,
         bench_freq=bench_freq,
+        profile=profile,
     )
     if winners.empty:
         raise ValueError("All benchmarks failed!")
@@ -301,7 +316,11 @@ def run_search(
 
     winners.to_csv(winners_file, index=False)
 
-    libs = library.operations.extract_solutions(winners, match_table_path)
+    libs = library.operations.extract_solutions(
+        winners,
+        match_table_path,
+        hipblaslt_path=hipblaslt_path,
+    )
     libs.dump(lib_dir)
     logger.info(f"Extracted library available in: '{lib_dir}'")
 
@@ -360,6 +379,7 @@ def run_configure(
     verbose: int = 1,
     bench_freq: bool = False,
     device: int | None = None,
+    config_overrides: Mapping[str, Any] | None = None,
 ) -> None:
     """Summarize the workload log, then write tuning YAML under workdir/optimizations.
 
@@ -382,6 +402,8 @@ def run_configure(
             because that branch skips benchmarking.
 
         device: Backward-compatible single-device alias. If set, overrides devices.
+        config_overrides: Input-config keys for optim.configure, e.g. the
+            LIST_FORWARDED_KEYS of a ``--list`` YAML.
 
     Raises:
         FileNotFoundError: hipBLASLt or log_file missing.
@@ -399,6 +421,7 @@ def run_configure(
                 f"Device ID must be 0-7, got {d}. Use -d or --device to specify the device ID."
             )
 
+    arch = canonical_arch(arch)
     if arch not in SUPPORTED_ARCH:
         raise ValueError(f"Must be one of {SUPPORTED_ARCH}")
 
@@ -425,6 +448,7 @@ def run_configure(
         keep_thr=keep_thr,
         cache=True,
         bench_freq=bench_freq,
+        adaptive=False,  # fast probe to rank GEMMs, not an accurate measurement
     )
 
     if uniq_df.empty:
@@ -447,6 +471,7 @@ def run_configure(
         arch=arch,
         backend=backend,
         search_space=search_space,
+        config_overrides=config_overrides,
     )
     n_configs = len(gemm_configs)
 
@@ -468,6 +493,9 @@ def run_optimize(
     retry: bool = True,
     verbose: int = 1,
     bench_freq: bool = False,
+    stall_timeout: float = 900.0,
+    abort_after_consecutive_failures: int = 8,
+    max_shape_failures: int = 0,
 ) -> None:
     """Run optim.run, merge 3_LibraryLogic YAMLs, analyze, and optionally write final_libs.
 
@@ -487,6 +515,15 @@ def run_optimize(
         verbose: Logger level via _set_log_level.
         bench_freq: Forwarded to optim.analyze (controls HIPBLASLT_BENCH_FREQ
             during the post-optim benchmark sweep).
+        stall_timeout: Seconds a worker may go without writing to its
+            tensilelite log before it is killed and its slot released. 0
+            disables. Forwarded to optim.run.
+        abort_after_consecutive_failures: Stop scheduling new jobs after
+            this many consecutive job failures across all devices; 0
+            disables. Forwarded to optim.run.
+        max_shape_failures: Retire a shape after this many failed attempts
+            (tracked in a persistent .failcount file); 0 disables
+            retirement. Forwarded to optim.run.
 
     Raises:
         FileNotFoundError: hipBLASLt, workdir, optimizations/, or state file missing.
@@ -565,6 +602,9 @@ def run_optimize(
         client_build_dir=client_build_dir,
         n_slots=n_slots,
         retry=retry,
+        stall_timeout=stall_timeout,
+        abort_after_consecutive_failures=abort_after_consecutive_failures,
+        max_shape_failures=max_shape_failures,
     )
 
     _, n_completed, _ = optim.utils.check_progress(input_dir)
@@ -572,6 +612,8 @@ def run_optimize(
 
     if n_completed == 0:
         raise ValueError(f"No GEMMs completed out of {n_gemms} in {input_dir}")
+
+    optim.process_duplicates(hipblaslt_path, input_dir, devices)
 
     merged_libs = library.merge_solutions(input_dir, epilogues=True)
 

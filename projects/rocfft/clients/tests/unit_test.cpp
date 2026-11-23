@@ -348,9 +348,85 @@ struct LocalCleanup
     std::function<void()> f;
 };
 
+// TODO: move the rocFFT RAII wrappers out of hipFFT's library details into shared/ and use them
+// across tests instead of LocalCleanup
+TEST(rocfft_UnitTest, planar_with_field_on_other_side)
+{
+    // planar array types are rejected if a field is set on either side
+
+    PROB_SKIP_UNITTEST();
+
+    try
+    {
+        const size_t length = 64;
+        // column-major; the field side is never Hermitian, so the brick spans the full length
+        const size_t lower[]  = {0, 0};
+        const size_t upper[]  = {length, 1};
+        const size_t stride[] = {1, length};
+
+        const std::tuple<rocfft_transform_type, rocfft_array_type, rocfft_array_type> cases[] = {
+            {rocfft_transform_type_complex_forward,
+             rocfft_array_type_complex_interleaved,
+             rocfft_array_type_complex_planar},
+            {rocfft_transform_type_complex_forward,
+             rocfft_array_type_complex_planar,
+             rocfft_array_type_complex_interleaved},
+            {rocfft_transform_type_real_forward,
+             rocfft_array_type_real,
+             rocfft_array_type_hermitian_planar},
+            {rocfft_transform_type_real_inverse,
+             rocfft_array_type_hermitian_planar,
+             rocfft_array_type_real},
+        };
+        for(const auto& [transform_type, itype, otype] : cases)
+        {
+            rocfft_plan_description desc = nullptr;
+            LocalCleanup desc_cleanup([&desc]() { rocfft_plan_description_destroy(desc); });
+            ASSERT_EQ(rocfft_plan_description_create(&desc), rocfft_status_success);
+            ASSERT_EQ(rocfft_plan_description_set_data_layout(
+                          desc, itype, otype, nullptr, nullptr, 0, nullptr, 0, 0, nullptr, 0),
+                      rocfft_status_success);
+
+            rocfft_field field = nullptr;
+            LocalCleanup field_cleanup([&field]() { rocfft_field_destroy(field); });
+            ASSERT_EQ(rocfft_field_create(&field), rocfft_status_success);
+            rocfft_brick brick = nullptr;
+            LocalCleanup brick_cleanup([&brick]() { rocfft_brick_destroy(brick); });
+            ASSERT_EQ(rocfft_brick_create(
+                          &brick, lower, upper, stride, 2, rocfft_scoped_device::current_device()),
+                      rocfft_status_success);
+            ASSERT_EQ(rocfft_field_add_brick(field, brick), rocfft_status_success);
+            if(array_type_is_planar(itype))
+            {
+                ASSERT_EQ(rocfft_plan_description_add_outfield(desc, field), rocfft_status_success);
+            }
+            else
+            {
+                ASSERT_EQ(rocfft_plan_description_add_infield(desc, field), rocfft_status_success);
+            }
+
+            rocfft_plan  plan = nullptr;
+            LocalCleanup plan_cleanup([&plan]() { rocfft_plan_destroy(plan); });
+            EXPECT_EQ(rocfft_plan_create(&plan,
+                                         rocfft_placement_notinplace,
+                                         transform_type,
+                                         rocfft_precision_single,
+                                         1,
+                                         &length,
+                                         1,
+                                         desc),
+                      rocfft_status_invalid_array_type)
+                << "transform type " << transform_type << ", input type " << itype
+                << ", output type " << otype;
+        }
+    }
+    ROCFFT_CATCH_TEST_EXCEPTIONS;
+}
+
 // run a transform with all log levels enabled
 TEST(rocfft_UnitTest, log_levels)
 {
+    SKIP_ON_QUICK_TESTS();
     PROB_SKIP_UNITTEST();
 
     try
@@ -1125,6 +1201,12 @@ TEST(rocfft_UnitTest, rtc_test_harness)
     ROCFFT_CATCH_TEST_EXCEPTIONS;
 }
 
+// Plan capacity tests are stress tests and aren't really adding
+// extra code path coverage over other test cases.  ASAN can hit
+// problems with address space fragmentation with a huge number of
+// plans, so disable these test cases in that build.
+#if !__has_feature(address_sanitizer) && !defined(__SANITIZE_ADDRESS__)
+
 // Create M identical Bluestein plans concurrently to stress the
 // hipModule refcount cache.  Plans destroyed before returning.
 static void run_plan_capacity_test(size_t M)
@@ -1185,6 +1267,7 @@ static void run_plan_capacity_test(size_t M)
 // rocFFT fails around 65k plans due to vm.max_map_count exhaustion.
 TEST(rocfft_UnitTest, plan_capacity_100k)
 {
+    SKIP_ON_QUICK_TESTS();
     PROB_SKIP_UNITTEST();
     run_plan_capacity_test(100'000);
 }
@@ -1193,6 +1276,51 @@ TEST(rocfft_UnitTest, plan_capacity_100k)
 // run manually with --gtest_also_run_disabled_tests.
 TEST(rocfft_UnitTest, DISABLED_plan_capacity_1m)
 {
+    SKIP_ON_QUICK_TESTS();
     PROB_SKIP_UNITTEST();
     run_plan_capacity_test(1'000'000);
+}
+
+#endif
+
+// Test calling rocfft_destroy after any library singletons are torn down
+TEST(rocfft_DeathTest, plan_destroyed_at_exit)
+{
+    SKIP_ON_QUICK_TESTS();
+    PROB_SKIP_UNITTEST();
+
+    struct exit_time_plan
+    {
+        rocfft_plan plan = nullptr;
+        ~exit_time_plan()
+        {
+            if(plan)
+                (void)rocfft_plan_destroy(plan);
+        }
+    };
+
+    auto create_plan_destroyed_at_exit = []() -> void {
+        // Create object with static lifetime - we're aiming to have this
+        // be destroyed after any library singleton that might do device
+        // memory accounting.
+        static exit_time_plan holder;
+
+        size_t length = 64;
+        if(rocfft_plan_create(&holder.plan,
+                              rocfft_placement_inplace,
+                              rocfft_transform_type_complex_forward,
+                              rocfft_precision_single,
+                              1,
+                              &length,
+                              1,
+                              nullptr)
+           != rocfft_status_success)
+            std::exit(2);
+        std::exit(0);
+    };
+
+    // Death tests run in a fresh process, so library singletons are
+    // created after the static plan holder.
+    ::testing::GTEST_FLAG(death_test_style) = "threadsafe";
+    EXPECT_EXIT(create_plan_destroyed_at_exit(), ::testing::ExitedWithCode(0), "");
 }

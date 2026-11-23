@@ -171,6 +171,7 @@ def main() -> int:
         kpg=conv.K,
         grid_explicit=grid,
         conv_layout="deep_fused_conv_pool",
+        args_signature=deep_fused_conv_pool_signature(spec),
         atoms=[f"tile.{_WMMA_ATOM}"],
         notes=(
             "Experimental gfx1201 (RDNA4 WMMA) deep-fusion prototype: implicit-GEMM "
@@ -179,7 +180,6 @@ def main() -> int:
         ),
         extra={
             "kind": "deep_fused_conv_pool_fp16",
-            "args_signature": deep_fused_conv_pool_signature(spec),
             "pool": [
                 problem.pool_y,
                 problem.pool_x,

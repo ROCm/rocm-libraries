@@ -44,10 +44,10 @@ struct MIOpenBatchNormFwdTrainSpatialImpl<0, FpType, FpPrecType, FpAccumType>
     static constexpr unsigned int nloopm = nloop - 1;
     static constexpr unsigned int snhw   = nloopm * segihw;
 
-    constexpr __forceinline__ __device__ void operator()(const FpType* __restrict in,
-                                                         FpType* __restrict out,
-                                                         const FpPrecType* __restrict scale,
-                                                         const FpPrecType* __restrict bias,
+    constexpr __forceinline__ __device__ void operator()(const FpType* __restrict__ in,
+                                                         FpType* __restrict__ out,
+                                                         const FpPrecType* __restrict__ scale,
+                                                         const FpPrecType* __restrict__ bias,
                                                          FpPrecType INHW,
                                                          double epsilon,
                                                          FpPrecType& mean,
@@ -187,10 +187,10 @@ struct MIOpenBatchNormFwdTrainSpatialImpl<1, FpType, FpPrecType, FpAccumType>
     static constexpr unsigned int lessout = mio_bn_config::nhw - remout;
 
     // Kernel
-    constexpr __forceinline__ __device__ void operator()(const FpType* __restrict in,
-                                                         FpType* __restrict out,
-                                                         const FpPrecType* __restrict scale,
-                                                         const FpPrecType* __restrict bias,
+    constexpr __forceinline__ __device__ void operator()(const FpType* __restrict__ in,
+                                                         FpType* __restrict__ out,
+                                                         const FpPrecType* __restrict__ scale,
+                                                         const FpPrecType* __restrict__ bias,
                                                          FpPrecType INHW,
                                                          double epsilon,
                                                          FpPrecType& mean,
@@ -473,10 +473,10 @@ template <typename FpType, typename FpPrecType, typename FpAccumType>
 struct MIOpenBatchNormFwdTrainSpatialImpl<3, FpType, FpPrecType, FpAccumType>
 {
 
-    constexpr __forceinline__ __device__ void operator()(const FpType* __restrict in,
-                                                         FpType* __restrict out,
-                                                         const FpPrecType* __restrict scale,
-                                                         const FpPrecType* __restrict bias,
+    constexpr __forceinline__ __device__ void operator()(const FpType* __restrict__ in,
+                                                         FpType* __restrict__ out,
+                                                         const FpPrecType* __restrict__ scale,
+                                                         const FpPrecType* __restrict__ bias,
                                                          FpPrecType INHW,
                                                          double epsilon,
                                                          FpPrecType& mean,
@@ -759,7 +759,7 @@ struct MIOpenBatchNormFwdTrainSpatialImplVar2
         // Total workgroup size for final kernel - reused in condition and array declarations
         constexpr auto grp_final_total = MIO_BN_GRP0_FINAL * MIO_BN_GRP1_FINAL * MIO_BN_GRP2_FINAL;
 
-        if constexpr(!mio_bn_config::use_amdgcn || mio_bn_config::launch_dim.grp0 > 1 ||
+        if constexpr(!mio_bn_config::use_gfx9_dpp || mio_bn_config::launch_dim.grp0 > 1 ||
                      (mio_bn_config::lds_gcn_size == 1) || mio_bn_config::vec_size_x > 1 ||
                      (grp_final_total < 64))
         {
@@ -861,7 +861,7 @@ struct MIOpenBatchNormFwdTrainSpatialImplVar2
             }
         }
 
-        if constexpr(!mio_bn_config::use_amdgcn || mio_bn_config::launch_dim.grp0 > 1 ||
+        if constexpr(!mio_bn_config::use_gfx9_dpp || mio_bn_config::launch_dim.grp0 > 1 ||
                      (mio_bn_config::lds_gcn_size == 1) || mio_bn_config::vec_size_x > 1)
         {
             __shared__ FpAccumCType lcl_data[2 * mio_bn_config::lds_size];
@@ -929,10 +929,10 @@ using MIOpenBNFwdTrainSpatialVar2 =
 extern "C" __global__ void __launch_bounds__(
     mio_bn_config::launch_dim.grp0* mio_bn_config::launch_dim.grp1* mio_bn_config::launch_dim.grp2)
     MIOpenBatchNormFwdTrainSpatial(
-        const typename mio_bn_config::fp_type* __restrict in,
-        typename mio_bn_config::fp_type* __restrict out,
-        const typename mio_bn_config::fp_prec_type* __restrict scale,
-        const typename mio_bn_config::fp_prec_type* __restrict bias,
+        const typename mio_bn_config::fp_type* __restrict__ in,
+        typename mio_bn_config::fp_type* __restrict__ out,
+        const typename mio_bn_config::fp_prec_type* __restrict__ scale,
+        const typename mio_bn_config::fp_prec_type* __restrict__ bias,
         typename mio_bn_config::fp_prec_type INHW,
 // TODO: should find a better way of doing this
 // but it's hard becasue C does not support function
@@ -940,16 +940,16 @@ extern "C" __global__ void __launch_bounds__(
 // [[deprecated]]
 #if(MIO_RUNNING_RESULT == 1)
         double expAvgFactor,
-        const typename mio_bn_config::fp_prec_type* __restrict prevResultRunningMean,
-        const typename mio_bn_config::fp_prec_type* __restrict prevResultRunningVariance,
-        typename mio_bn_config::fp_prec_type* __restrict nextResultRunningMean,
-        typename mio_bn_config::fp_prec_type* __restrict nextResultRunningVariance,
+        const typename mio_bn_config::fp_prec_type* __restrict__ prevResultRunningMean,
+        const typename mio_bn_config::fp_prec_type* __restrict__ prevResultRunningVariance,
+        typename mio_bn_config::fp_prec_type* __restrict__ nextResultRunningMean,
+        typename mio_bn_config::fp_prec_type* __restrict__ nextResultRunningVariance,
 #endif
         double epsilon
 #if(MIO_SAVE_MEAN_VARIANCE == 1)
         ,
-        typename mio_bn_config::fp_prec_type* __restrict resultSaveMean,
-        typename mio_bn_config::fp_prec_type* __restrict resultSaveInvVariance
+        typename mio_bn_config::fp_prec_type* __restrict__ resultSaveMean,
+        typename mio_bn_config::fp_prec_type* __restrict__ resultSaveInvVariance
 #endif
         ,
         typename mio_bn_config::fp_prec_type alpha,

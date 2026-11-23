@@ -20,17 +20,18 @@ namespace hip_kernel_provider::kernel_ingestor_engine::integration
 class ScopedPluginLogCapture
 {
 public:
-    explicit ScopedPluginLogCapture(void* userHandle)
+    explicit ScopedPluginLogCapture(void* userHandle, hipdnnSeverity_t level = HIPDNN_SEV_INFO)
         : _userHandle(userHandle)
+        , _recorder(hipdnn_test_sdk::utilities::IsolatedLogRecorder::withOverrideLevel(level))
     {
         const auto levelRead = hipdnn_frontend::getGlobalLogLevel(_previousLevel);
         EXPECT_EQ(levelRead.code, hipdnn_frontend::ErrorCode::OK) << levelRead.err_msg;
 
-        const auto registered = setCallback(HIPDNN_SEV_INFO);
+        const auto registered = setCallback(level);
         EXPECT_EQ(registered.code, hipdnn_frontend::ErrorCode::OK) << registered.err_msg;
         _registered = registered.code == hipdnn_frontend::ErrorCode::OK;
 
-        const auto levelSet = hipdnn_frontend::setGlobalLogLevel(HIPDNN_SEV_INFO);
+        const auto levelSet = hipdnn_frontend::setGlobalLogLevel(level);
         EXPECT_EQ(levelSet.code, hipdnn_frontend::ErrorCode::OK) << levelSet.err_msg;
     }
 
@@ -63,12 +64,13 @@ private:
             _userHandle);
     }
 
-    // Declared before the recorder so the recorder's own saved-level restore runs first.
+    // The recorder is a member, so it is destroyed after this destructor body runs. The
+    // body restores the frontend log level. The recorder then restores the data-SDK log
+    // level, so the level the recorder saved is the final one.
     hipdnnSeverity_t _previousLevel = HIPDNN_SEV_OFF;
     void* _userHandle;
     bool _registered = false;
-    mutable hipdnn_test_sdk::utilities::IsolatedLogRecorder _recorder
-        = hipdnn_test_sdk::utilities::IsolatedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+    mutable hipdnn_test_sdk::utilities::IsolatedLogRecorder _recorder;
 };
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine::integration

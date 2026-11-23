@@ -332,3 +332,193 @@ rocke_super_tile_swizzle_result_t rocke_chiplet_aware_super_tile(rocke_ir_builde
         = rocke_i_chiplet_transform_chunked(b, wgid, num_wgs, num_xcds, chunk_size);
     return rocke_i_super_tile_swizzle(b, remapped, num_pid_m, num_pid_n, wgm);
 }
+
+/* ------------------------------------------------------------------------
+ * chiplet_transform_chunked_runtime (public)
+ *
+ *   c_num_xcds = b.const_i32(int(num_xcds))
+ *   c_one      = b.const_i32(1)
+ *   if chunk_size is None: chunk_size = b.div(num_wgs, c_num_xcds)
+ *   chunk      = b.smax(chunk_size, c_one)
+ *   block      = b.mul(chunk, c_num_xcds)
+ *   limit      = b.mul(b.div(num_wgs, block), block)
+ *   xcd          = b.mod(wgid, c_num_xcds)
+ *   local_pid    = b.div(wgid, c_num_xcds)
+ *   chunk_idx    = b.div(local_pid, chunk)
+ *   pos_in_chunk = b.mod(local_pid, chunk)
+ *   new_wgid = b.add(b.add(b.mul(chunk_idx, block), b.mul(xcd, chunk)),
+ *                    pos_in_chunk)
+ *   in_full_block = b.cmp_lt(wgid, limit)
+ *   return b.select(in_full_block, new_wgid, wgid)
+ * ------------------------------------------------------------------------ */
+rocke_value_t* rocke_chiplet_transform_chunked_runtime(rocke_ir_builder_t* b,
+                                                       rocke_value_t* wgid,
+                                                       rocke_value_t* num_wgs,
+                                                       int num_xcds,
+                                                       rocke_value_t* chunk_size)
+{
+    rocke_value_t* c_num_xcds;
+    rocke_value_t* c_one;
+    rocke_value_t* chunk;
+    rocke_value_t* block;
+    rocke_value_t* limit;
+    rocke_value_t* xcd;
+    rocke_value_t* local_pid;
+    rocke_value_t* chunk_idx;
+    rocke_value_t* pos_in_chunk;
+    rocke_value_t* new_wgid;
+    rocke_value_t* in_full_block;
+
+    if(num_xcds <= 0)
+    {
+        return (rocke_value_t*)rocke_i_set_err(
+            b,
+            ROCKE_ERR_VALUE,
+            "chiplet_transform_chunked_runtime: invalid args num_xcds=%d",
+            num_xcds);
+    }
+
+    c_num_xcds = rocke_b_const_i32(b, (int64_t)num_xcds);
+    c_one = rocke_b_const_i32(b, 1);
+    if(chunk_size == NULL)
+    {
+        chunk_size = rocke_b_div(b, num_wgs, c_num_xcds);
+    }
+    chunk = rocke_b_smax(b, chunk_size, c_one);
+    block = rocke_b_mul(b, chunk, c_num_xcds);
+
+    /* limit = (num_wgs / block) * block  (largest full-block boundary) */
+    {
+        rocke_value_t* n_blocks = rocke_b_div(b, num_wgs, block);
+        limit = rocke_b_mul(b, n_blocks, block);
+    }
+
+    xcd = rocke_b_mod(b, wgid, c_num_xcds);
+    local_pid = rocke_b_div(b, wgid, c_num_xcds);
+    chunk_idx = rocke_b_div(b, local_pid, chunk);
+    pos_in_chunk = rocke_b_mod(b, local_pid, chunk);
+
+    /* Same SSA order as the Python: mul(chunk_idx, block), mul(xcd, chunk),
+     * add, add -- pinned with temporaries. */
+    {
+        rocke_value_t* mul_chunk = rocke_b_mul(b, chunk_idx, block);
+        rocke_value_t* mul_xcd = rocke_b_mul(b, xcd, chunk);
+        rocke_value_t* sum = rocke_b_add(b, mul_chunk, mul_xcd);
+        new_wgid = rocke_b_add(b, sum, pos_in_chunk);
+    }
+
+    in_full_block = rocke_b_cmp_lt(b, wgid, limit);
+    return rocke_b_select(b, in_full_block, new_wgid, wgid);
+}
+
+/* ------------------------------------------------------------------------
+ * xcd_remap(mode="gated") (public)
+ *
+ *   zero, one = b.const_i32(0), b.const_i32(1)
+ *   on  = b.land(b.cmp_gt(n, zero), b.cmp_gt(chunk, zero))
+ *   n1  = b.select(on, n, one)
+ *   c1  = b.select(on, chunk, one)
+ *   block = b.mul(n1, c1)
+ *   limit = b.mul(b.div(num_wgs, block), block)
+ *   xcd   = b.mod(wgid, n1)
+ *   local = b.div(wgid, n1)
+ *   new   = b.add(b.add(b.mul(b.div(local, c1), block), b.mul(xcd, c1)),
+ *                 b.mod(local, c1))
+ *   return b.select(b.land(on, b.cmp_lt(wgid, limit)), new, wgid)
+ *
+ * C leaves the evaluation order of call arguments unspecified, so every op
+ * that emits is bound to a local in the Python's order.
+ * ------------------------------------------------------------------------ */
+rocke_value_t* rocke_xcd_remap_gated(rocke_ir_builder_t* b,
+                                     rocke_value_t* wgid,
+                                     rocke_value_t* num_wgs,
+                                     rocke_value_t* n,
+                                     rocke_value_t* chunk)
+{
+    rocke_value_t* zero = rocke_b_const_i32(b, 0);
+    rocke_value_t* one = rocke_b_const_i32(b, 1);
+    rocke_value_t* n_pos = rocke_b_cmp_gt(b, n, zero);
+    rocke_value_t* chunk_pos = rocke_b_cmp_gt(b, chunk, zero);
+    rocke_value_t* on = rocke_b_land(b, n_pos, chunk_pos);
+    rocke_value_t* n1 = rocke_b_select(b, on, n, one);
+    rocke_value_t* c1 = rocke_b_select(b, on, chunk, one);
+    rocke_value_t* block = rocke_b_mul(b, n1, c1);
+    rocke_value_t* n_blocks = rocke_b_div(b, num_wgs, block);
+    rocke_value_t* limit = rocke_b_mul(b, n_blocks, block);
+    rocke_value_t* xcd = rocke_b_mod(b, wgid, n1);
+    rocke_value_t* local = rocke_b_div(b, wgid, n1);
+    rocke_value_t* chunk_idx = rocke_b_div(b, local, c1);
+    rocke_value_t* mul_chunk = rocke_b_mul(b, chunk_idx, block);
+    rocke_value_t* mul_xcd = rocke_b_mul(b, xcd, c1);
+    rocke_value_t* sum = rocke_b_add(b, mul_chunk, mul_xcd);
+    rocke_value_t* pos_in_chunk = rocke_b_mod(b, local, c1);
+    rocke_value_t* new_wgid = rocke_b_add(b, sum, pos_in_chunk);
+    rocke_value_t* below = rocke_b_cmp_lt(b, wgid, limit);
+    rocke_value_t* use = rocke_b_land(b, on, below);
+    return rocke_b_select(b, use, new_wgid, wgid);
+}
+
+/* ------------------------------------------------------------------------
+ * xcd_remap(mode="contiguous") (public)
+ *
+ *   n     = b.const_i32(num_xcds)
+ *   xcd   = b.mod(pid, n)
+ *   tall  = b.add(b.mod(b.sub(npid, b.const_i32(1)), n), b.const_i32(1))
+ *   per   = b.div(b.add(npid, b.const_i32(num_xcds - 1)), n)
+ *   short = b.smax(b.sub(xcd, tall), b.const_i32(0))
+ *   return b.sub(b.add(b.div(pid, n), b.mul(xcd, per)), short)
+ * ------------------------------------------------------------------------ */
+rocke_value_t* rocke_xcd_remap_contiguous(rocke_ir_builder_t* b,
+                                          rocke_value_t* pid,
+                                          rocke_value_t* npid,
+                                          int num_xcds)
+{
+    if(num_xcds <= 0)
+    {
+        return (rocke_value_t*)rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "xcd_remap(mode='contiguous'): invalid num_xcds=%d", num_xcds);
+    }
+
+    rocke_value_t* n = rocke_b_const_i32(b, (int64_t)num_xcds);
+    rocke_value_t* xcd = rocke_b_mod(b, pid, n);
+    rocke_value_t* one_a = rocke_b_const_i32(b, 1);
+    rocke_value_t* npid_m1 = rocke_b_sub(b, npid, one_a);
+    rocke_value_t* tall_m = rocke_b_mod(b, npid_m1, n);
+    rocke_value_t* one_b = rocke_b_const_i32(b, 1);
+    rocke_value_t* tall = rocke_b_add(b, tall_m, one_b);
+    rocke_value_t* n_m1 = rocke_b_const_i32(b, (int64_t)(num_xcds - 1));
+    rocke_value_t* npid_up = rocke_b_add(b, npid, n_m1);
+    rocke_value_t* per = rocke_b_div(b, npid_up, n);
+    rocke_value_t* over = rocke_b_sub(b, xcd, tall);
+    rocke_value_t* zero = rocke_b_const_i32(b, 0);
+    rocke_value_t* short_ = rocke_b_smax(b, over, zero);
+    rocke_value_t* base = rocke_b_div(b, pid, n);
+    rocke_value_t* start = rocke_b_mul(b, xcd, per);
+    rocke_value_t* sum = rocke_b_add(b, base, start);
+    return rocke_b_sub(b, sum, short_);
+}
+
+/* ------------------------------------------------------------------------
+ * xcd_remap_plane (public)
+ *
+ *   plane = xcd_remap(b, b.add(x, b.mul(gx, y)), num_wgs=b.mul(gx, gy),
+ *                     num_xcds=n, chunk=chunk, mode="gated")
+ *   return b.mod(plane, gx), b.div(plane, gx)
+ * ------------------------------------------------------------------------ */
+rocke_xcd_remap_plane_result_t rocke_xcd_remap_plane(rocke_ir_builder_t* b,
+                                                     rocke_value_t* x,
+                                                     rocke_value_t* y,
+                                                     rocke_value_t* gx,
+                                                     rocke_value_t* gy,
+                                                     rocke_value_t* n,
+                                                     rocke_value_t* chunk)
+{
+    rocke_xcd_remap_plane_result_t out;
+    rocke_value_t* row = rocke_b_mul(b, gx, y);
+    rocke_value_t* plane_id = rocke_b_add(b, x, row);
+    rocke_value_t* num_wgs = rocke_b_mul(b, gx, gy);
+    rocke_value_t* plane = rocke_xcd_remap_gated(b, plane_id, num_wgs, n, chunk);
+    out.x = rocke_b_mod(b, plane, gx);
+    out.y = rocke_b_div(b, plane, gx);
+    return out;
+}

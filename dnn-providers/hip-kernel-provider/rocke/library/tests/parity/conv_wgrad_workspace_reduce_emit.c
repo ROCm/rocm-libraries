@@ -87,6 +87,22 @@ static int make_cfg(int idx, rocke_wgrad_reduce_spec_t* spec, const char** arch)
         spec->tile_n = 32;
         spec->problem_short = "N1H4W4C64_K64Y3X3";
         return 0;
+    case 7:
+        /* ws_replicas=1: fold elided, body collapses to a single load. */
+        spec->wg_M = 64;
+        spec->wg_N = 576;
+        spec->dtype_d = "fp16";
+        spec->ws_replicas = 1;
+        spec->problem_short = "N1H4W4C64_K64Y3X3";
+        return 0;
+    case 8:
+        /* Non-default replica count: proves it reaches the emitted body. */
+        spec->wg_M = 32;
+        spec->wg_N = 72;
+        spec->dtype_d = "bf16";
+        spec->ws_replicas = 4;
+        spec->problem_short = "N1H4W4C8_K32Y3X3";
+        return 0;
     default:
         return -1;
     }

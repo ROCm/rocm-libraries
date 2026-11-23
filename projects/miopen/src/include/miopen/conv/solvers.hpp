@@ -17,21 +17,12 @@
 
 #include <initializer_list>
 #include <string>
+#include <string_view>
 #include <tuple>
 #include <unordered_map>
 #include <vector>
 
 namespace miopen {
-
-namespace debug {
-
-/// If set to true, then always enable ConvDirectNaive* solver, regardless of environment value
-/// MIOPEN_DEBUG_CONV_DIRECT_NAIVE_CONV_* that control enable/disable of these solvers.
-/// Currently used during driver using naive kernel as gpu reference.
-MIOPEN_EXPORT extern bool
-    AlwaysEnableConvDirectNaive; // NOLINT (cppcoreguidelines-avoid-non-const-global-variables)
-
-} // namespace debug
 
 struct AnyInvokeParams;
 
@@ -3360,14 +3351,13 @@ struct PerformanceConfigAsmImplicitGemmGTCWrwXdlopsNHWC : PerformanceConfigAsmIm
     void HeuristicInit(const ExecutionContext&, const miopen::conv::ProblemDescription&);
     bool SetNextValue(const miopen::conv::ProblemDescription&);
     bool IsValidValue() const;
-    bool IsValid(const ExecutionContext&, const miopen::conv::ProblemDescription& problem) const
-    {
-        return IsValid(problem);
-    }
+    bool IsValid(const ExecutionContext&, const miopen::conv::ProblemDescription& problem) const;
     bool IsValid(const miopen::conv::ProblemDescription&) const;
     size_t ComputeKernelOccupancy() const;
 
 private:
+    void HeuristicInitIgnoringBatchPadding(const ExecutionContext&,
+                                           const miopen::conv::ProblemDescription&);
     void SetParamsForKSplit(const miopen::conv::ProblemDescription& problem,
                             const size_t& occupancy);
 };
@@ -3776,13 +3766,13 @@ struct PerformanceConfigHipImplicitGemmGroupFwdXdlops
     void DefaultKernelFromList(const ExecutionContext& ctx);
     MIOPEN_INTERNALS_EXPORT void HeuristicInit(const ExecutionContext&,
                                                const miopen::conv::ProblemDescription&);
-    bool SetNextValue(const miopen::conv::ProblemDescription&);
+    MIOPEN_INTERNALS_EXPORT bool SetNextValue(const miopen::conv::ProblemDescription&);
     bool IsValidValue() const;
     bool IsValid(const ExecutionContext&, const miopen::conv::ProblemDescription& problem) const
     {
         return IsValid(problem);
     }
-    bool IsValid(const miopen::conv::ProblemDescription&) const;
+    MIOPEN_INTERNALS_EXPORT bool IsValid(const miopen::conv::ProblemDescription&) const;
     bool operator==(const PerformanceConfigHipImplicitGemmGroupFwdXdlops& other) const;
     MIOPEN_INTERNALS_EXPORT bool
     IsModelApplicable(const ExecutionContext& ctx,
@@ -3955,6 +3945,17 @@ struct PerformanceConfigHipImplicitGemm3DGroupWrwXdlops
 private:
     void InitValidKernels(const miopen::conv::ProblemDescription& problem);
     mutable bool use_tf32 = false;
+
+    template <class Config, class State, class RunAI>
+    friend void InitHeuristicConfigFromCache(Config&,
+                                             State&,
+                                             const ExecutionContext&,
+                                             const miopen::conv::ProblemDescription&,
+                                             std::string_view,
+                                             bool,
+                                             bool,
+                                             bool,
+                                             RunAI&&);
 };
 
 struct MIOPEN_INTERNALS_EXPORT ConvHipImplicitGemm3DGroupWrwXdlops final
@@ -3992,6 +3993,7 @@ struct MIOPEN_INTERNALS_EXPORT ConvHipImplicitGemm3DGroupWrwXdlops final
     size_t GetWorkspaceSize(const ExecutionContext&,
                             const miopen::conv::ProblemDescription&) const override;
     bool MayNeedWorkspace() const override { return true; }
+    bool WorkspaceDependsOnConfig() const override { return true; }
 
 private:
     size_t GetCKMaxWorkspaceSize(const miopen::conv::ProblemDescription& problem) const;
@@ -4100,7 +4102,7 @@ struct PerformanceConfigHipImplicitGemmGroupBwdXdlops
     {
         return IsValid(problem);
     }
-    bool IsValid(const miopen::conv::ProblemDescription&) const;
+    MIOPEN_INTERNALS_EXPORT bool IsValid(const miopen::conv::ProblemDescription&) const;
     bool operator==(const PerformanceConfigHipImplicitGemmGroupBwdXdlops& other) const;
     MIOPEN_INTERNALS_EXPORT bool
     IsModelApplicable(const ExecutionContext& ctx,
@@ -4170,9 +4172,6 @@ struct MIOPEN_INTERNALS_EXPORT ConvHipImplicitGemmGroupBwdXdlops final
     size_t GetWorkspaceSize(const ExecutionContext&,
                             const miopen::conv::ProblemDescription&) const override;
     bool MayNeedWorkspace() const override { return true; }
-
-private:
-    size_t GetCKMaxWorkspaceSize(const miopen::conv::ProblemDescription& problem) const;
 };
 
 struct PerformanceConfigHipImplicitGemmGroupWrwXdlops
@@ -4204,7 +4203,7 @@ struct PerformanceConfigHipImplicitGemmGroupWrwXdlops
     {
         return IsValid(problem);
     }
-    bool IsValid(const miopen::conv::ProblemDescription&) const;
+    MIOPEN_INTERNALS_EXPORT bool IsValid(const miopen::conv::ProblemDescription&) const;
     bool operator==(const PerformanceConfigHipImplicitGemmGroupWrwXdlops& other) const;
     MIOPEN_INTERNALS_EXPORT bool
     IsModelApplicable(const ExecutionContext& ctx,
@@ -4238,6 +4237,17 @@ private:
     template <typename DataType>
     bool CheckIsSupportCKArgs(const miopen::conv::ProblemDescription&) const;
     mutable bool use_tf32 = false;
+
+    template <class Config, class State, class RunAI>
+    friend void InitHeuristicConfigFromCache(Config&,
+                                             State&,
+                                             const ExecutionContext&,
+                                             const miopen::conv::ProblemDescription&,
+                                             std::string_view,
+                                             bool,
+                                             bool,
+                                             bool,
+                                             RunAI&&);
 };
 
 struct MIOPEN_INTERNALS_EXPORT ConvHipImplicitGemmGroupWrwXdlops final
@@ -4274,6 +4284,7 @@ struct MIOPEN_INTERNALS_EXPORT ConvHipImplicitGemmGroupWrwXdlops final
     size_t GetWorkspaceSize(const ExecutionContext&,
                             const miopen::conv::ProblemDescription&) const override;
     bool MayNeedWorkspace() const override { return true; }
+    bool WorkspaceDependsOnConfig() const override { return true; }
 
 private:
     size_t GetCKMaxWorkspaceSize(const miopen::conv::ProblemDescription& problem) const;
@@ -4628,6 +4639,21 @@ extern template struct TransposedConvMPBidirectWinograd_xdlops<6, 3>;
 #pragma clang diagnostic pop
 #endif
 
+/// Forward 2D depthwise convolution (channels-per-group == 1) for RDNA.
+struct MIOPEN_INTERNALS_EXPORT ConvDirectDepthwiseFwd2D final : ConvSolver
+{
+    const std::string& SolverDbId() const override
+    {
+        return GetSolverDbId<ConvDirectDepthwiseFwd2D>();
+    }
+
+    bool IsApplicable(const ExecutionContext&,
+                      const miopen::conv::ProblemDescription&) const override;
+    bool IsDynamic() const override { return true; }
+    ConvSolution GetSolution(const ExecutionContext&,
+                             const miopen::conv::ProblemDescription&) const override;
+};
+
 /// Placeholder forward 3D depthwise convolution (FP16/BF16, default/NCDHW layout); stub kernel.
 struct MIOPEN_INTERNALS_EXPORT ConvDepthwiseFwd3D final : ConvSolver
 {
@@ -4649,24 +4675,31 @@ struct MIOPEN_INTERNALS_EXPORT ConvDepthwiseFwd3D final : ConvSolver
                              const miopen::conv::ProblemDescription&) const override;
 };
 
-// Tuning state for the vendored hipconv solver.
-//
-// hipconv exposes its per-shape kernels as an ordered, deterministic list
-// (hipconv::get_valid_configs), already filtered to the layer and ranked, so the list
-// index is the entire key and a stored index survives only as long as the list order
-// does. Keying on hipconv::describe_config() would remove that dependence, and waits on
-// descriptor coverage across every family.
-struct PerformanceConfigConvHipConv : PerfConfigBase<PerformanceConfigConvHipConv>
+// ConvHipConv tuning state: a hipconv config record, resolved to a kernel at runtime.
+// Serialized whole because PerfConfigBase's field-wise format splits on the record's commas.
+struct PerformanceConfigConvHipConv : PerfConfig
 {
-    int index = -1;
+    // Perf-db record, "<hipconv config_version>:family[field=value,...]" with every field.
+    // mutable because IsValid() sets it from `index` on a const config after a search.
+    mutable std::string descriptor;
+
+    // Position in the config list during a tuning search; -1 for a record loaded from the perf
+    // db. Not serialized.
+    mutable int index = -1;
+
+    // Kernel resolved by IsValid() or HeuristicInit(), a hipconv::ConvKernelHandle held as void*
+    // to keep hipconv types out of this header. Not serialized.
+    mutable void* kernel = nullptr;
 
     PerformanceConfigConvHipConv() = default;
-    PerformanceConfigConvHipConv(bool) {}
+    // GenericSearch's config iterator starts here; index 0 makes IsValid() enumerate the configs.
+    PerformanceConfigConvHipConv(bool) : index(0) {}
 
-    template <class Self, class F>
-    static void Visit(Self&& self, F f)
+    void Serialize(std::ostream& stream) const override { stream << descriptor; }
+    bool Deserialize(const std::string& s) override
     {
-        f(self.index, "index");
+        descriptor = s;
+        return true;
     }
 
     void HeuristicInit(const ExecutionContext&, const miopen::conv::ProblemDescription&);
@@ -4676,16 +4709,13 @@ struct PerformanceConfigConvHipConv : PerfConfigBase<PerformanceConfigConvHipCon
     bool operator==(const PerformanceConfigConvHipConv& other) const;
 
 private:
-    // Populate index from a resolved arch handle (as const void* to keep hipconv
-    // types out of this header).
-    void InitFromArch(const void* arch, const miopen::conv::ProblemDescription&);
+    // `device` points to a hipconv::Device, passed as const void* to keep hipconv types out of
+    // this header.
+    void InitFromDevice(const void* device, const miopen::conv::ProblemDescription&);
 
-    // Length of the config list for this enumeration, filled by IsValid() and read by
-    // SetNextValue(), which has no ExecutionContext of its own to resolve the arch.
+    // Config list length, set by IsValid() for SetNextValue(), which has no device to query.
     //
-    // ComputedIterator (generic_search.hpp) calls IsValid on this same object before
-    // every SetNextValue, so the length is always in place by the time it is read.
-    //
+    // ComputedIterator (generic_search.hpp) calls IsValid() before every SetNextValue().
     // maybe_unused because the !MIOPEN_USE_HIPCONV stubs read nothing.
     [[maybe_unused]] mutable int config_count = -1;
 };
@@ -4701,6 +4731,7 @@ struct MIOPEN_INTERNALS_EXPORT ConvHipConv final : ConvTunableSolver<Performance
     size_t GetWorkspaceSize(const ExecutionContext&,
                             const miopen::conv::ProblemDescription&) const override;
     bool MayNeedWorkspace() const override { return true; }
+    bool WorkspaceDependsOnConfig() const override { return true; }
     PerformanceConfigConvHipConv
     GetDefaultPerformanceConfig(const ExecutionContext&,
                                 const miopen::conv::ProblemDescription&) const override;

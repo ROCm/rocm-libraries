@@ -72,6 +72,8 @@ int run_bench_test(Arguments&         arg,
     // disable unit_check in client benchmark, it is only used in gtest unit test
     arg.unit_check = 0;
 
+    hipblaslt_bench_options::apply_to(arg);
+
     // enable timing check,otherwise no performance data collected
     arg.timing = 1;
 
@@ -214,6 +216,16 @@ int hipblaslt_bench_datafile(const std::string& filter, bool any_stride, hipDevi
     return ret;
 }
 
+int verification_exit(int ret)
+{
+    const int code = hipblaslt_bench_options::verification_exit_code(ret);
+    if(code != ret)
+        hipblaslt_cerr << "hipblaslt-bench: " << hipblaslt_bench_options::verification_failures()
+                       << " --verify check(s) failed; exiting with code " << code
+                       << " (--verify_strict)" << std::endl;
+    return code;
+}
+
 // Replace --batch with --batch_count for backward compatibility
 void fix_batch(int argc, char* argv[])
 {
@@ -289,6 +301,7 @@ try
     std::string filter;
     std::string activation_type;
     std::string aux_type;
+    std::string int4_encoding;
     int         scaleAFormat;
     int         scaleBFormat;
     int         scaleCFormat;
@@ -303,6 +316,10 @@ try
     int         api_method      = 0;
     std::string api_method_str  = "";
     std::string algo_method_str = "";
+
+    int         partitions_opt = 1;
+    std::string split_dim_str  = "N";
+    std::string part_place_str[4] = {"shared", "shared", "shared", "shared"};
 
     bool verify = 0;
     bool ulp    = 0;
@@ -427,11 +444,11 @@ try
 
         ("compute_input_typeA",
          value<std::string>(&compute_input_typeA), "Precision of computation input A. "
-         "Options: f32_r, f16_r, bf16_r, f8_r, bf8_r, f8_fnuz_r, bf8_fnuz_r, The default value indicates that the compute_input_typeA has no effect.")
+         "Options: f32_r, f16_r, bf16_r, f8_r, bf8_r, f8_fnuz_r, bf8_fnuz_r, f6_r, bf6_r, f4_r. The default value indicates that the compute_input_typeA has no effect.")
 
         ("compute_input_typeB",
          value<std::string>(&compute_input_typeB), "Precision of computation input B. "
-         "Options: f32_r, f16_r, bf16_r, f8_r, bf8_r, f8_fnuz_r, bf8_fnuz_r, The default value indicates that the compute_input_typeA has no effect.")
+         "Options: f32_r, f16_r, bf16_r, f8_r, bf8_r, f8_fnuz_r, bf8_fnuz_r, f6_r, bf6_r, f4_r. The default value indicates that the compute_input_typeB has no effect.")
 
         ("scale_type",
          value<std::string>(&scale_type), "Precision of scalar. "
@@ -441,7 +458,7 @@ try
          value<std::string>(&initialization)->default_value("hpl"),
          "Initialize matrix data."
          "Options: rand_int, trig_float, hpl(floating), special, zero, norm_dist, uniform_01, integer_exact, "
-         "fp16_accumulator_probe")
+         "fp16_accumulator_probe, maf1_0, maf2_0, maf2_0_unit_scale")
 
         ("transA",
          value<char>(&arg.transA)->default_value('N'),
@@ -474,6 +491,21 @@ try
         ("verify,v",
          value<bool>(&verify)->default_value(false),
          "Validate GPU results with CPU?")
+
+        ("verify_strict",
+         value<bool>(&hipblaslt_bench_options::verify_strict())->default_value(false),
+         "Exit with code 2 if a --verify check of D fails (norm_error above its limit, or allclose "
+         "failed). Checks D only. Implies --verify. Computes a CPU reference per problem and "
+         "copies and compares D on the host for each solution.")
+
+        ("post_bench_verify_iters",
+         value<int32_t>(&hipblaslt_bench_options::post_bench_verify_iters())->default_value(0),
+         "After timing, relaunch each solution this many more times, untimed and without host "
+         "synchronization between relaunches, and check on the GPU that every relaunch gives the "
+         "same D, bit for bit, as the first launch, which --verify compares with the CPU. The "
+         "timed launches are not checked. A difference counts as a failed check for "
+         "--verify_strict, but the solution stays in the ranking. 0 turns it off. Implies "
+         "--verify, so it also runs the CPU reference.")
 
         ("ulp",
          value<bool>(&ulp)->default_value(false),
@@ -588,11 +620,23 @@ try
 
         ("scaleA",
          value<int>(&scaleAFormat)->default_value(0),
-         "Apply scale for A buffer. 0 = None, 1 = scalar, 2 = vector, 3 = B32E8, 4 = B16E8, 5 = B32E4M3, 6 = B16E4M3, 7 = B32E5M3, 8 = B16E5M3, 1001 = block_preswizzled_32x8.")
+         "Apply scale for A buffer. 0 = None, 1 = scalar, 2 = vector, 3 = B32E8, 4 = B16E8, 5 = B32E4M3, 6 = B16E4M3, 7 = B32E5M3, 8 = B16E5M3, 1001 = block_preswizzled_32x8, "
+         "1018 = B32E8 in 128x4 tiles (f6_r/bf6_r TN with --swizzleA and optionally --swizzleB, on A and B). "
+         "w4a16 group scales (require --a_type i4_r), numbered as hipblasLtMatmulMatrixScale_t: "
+         "bf16 scales: 1006 = VEC32, 1007 = VEC64, 1008 = VEC128, 1009 = VEC32_ZP, "
+         "1010 = VEC64_ZP, 1011 = VEC128_ZP; fp16 scales: 1012..1017 in the same "
+         "order. The named scale type must match --b_type.")
+
+        ("int4_encoding",
+         value<std::string>(&int4_encoding)->default_value("signed"),
+         "w4a16 only: encoding of the int4 weights in A (hipblasLtInt4Encoding_t). "
+         "signed = two's complement, unsigned_bias8 = unsigned with an implicit "
+         "zero-point of 8 (GPTQ). The numerals 0 and 1 are also accepted.")
 
         ("scaleB",
          value<int>(&scaleBFormat)->default_value(0),
-         "Apply scale for B buffer. 0 = None, 1 = scalar, 2 = vector, 3 = B32E8, 4 = B16E8, 5 = B32E4M3, 6 = B16E4M3, 7 = B32E5M3, 8 = B16E5M3, 1001 = block_preswizzled_32x8.")
+         "Apply scale for B buffer. 0 = None, 1 = scalar, 2 = vector, 3 = B32E8, 4 = B16E8, 5 = B32E4M3, 6 = B16E4M3, 7 = B32E5M3, 8 = B16E5M3, 1001 = block_preswizzled_32x8, "
+         "1018 = B32E8 in 128x4 tiles (f6_r/bf6_r TN with --swizzleA and optionally --swizzleB, on A and B).")
 
         ("scaleC",
          value<int>(&scaleCFormat)->default_value(0),
@@ -605,6 +649,10 @@ try
         ("scaleAlpha_vector",
          bool_switch(&arg.scaleAlpha_vector)->default_value(false),
          "Apply scaleAlpha vector")
+
+        ("device_scalar_alpha",
+         bool_switch(&arg.device_scalar_alpha)->default_value(false),
+         "Read alpha as one scalar from device memory")
 
         ("amaxScaleA",
          bool_switch(&arg.amaxScaleA)->default_value(false),
@@ -661,7 +709,43 @@ try
         ("api_method",
          value<std::string>(&api_method_str)->default_value("c"),
          "Use extension API. c: C style API. mix: declaration with C hipblasLtMatmul Layout/Desc but set, initialize, and run the problem with C++ extension API. cpp: Using C++ extension API only. "
-         "Options: c, mix, cpp.")
+         "grouped_gemm_c: with --grouped_gemm, grouped matrix layouts and hipblasLtMatmul instead of the C++ GroupedGemm class. "
+         "Options: c, mix, cpp, grouped_gemm_c.")
+
+        ("partitions",
+         value<int>(&partitions_opt)->default_value(1),
+         "Run each GEMM as slices on this many partitions, one stream each, with "
+         "hipblaslt_experimental::PartitionedGemm. The devices are the DPX group of the current "
+         "device when it is in one (the current device is partition 0), otherwise the current device "
+         "once per partition (SPX: correct results, only for checking them, not for speed). The time "
+         "is the full span, first launch to last partition done. Data placement follows "
+         "--part_place_a/b/c/d: shared (one copy in the first partition's buffers, which the other "
+         "partitions read over peer access) or replicated (a copy per partition). Needs plain GEMM "
+         "and the heuristic solution selection; 1 = off.")
+
+        ("split_dim",
+         value<std::string>(&split_dim_str)->default_value("N"),
+         "With --partitions: the dimension to split, M, N or B (the batch). The first partitions take "
+         "size/partitions and the last takes the rest.")
+
+        ("part_place_a",
+         value<std::string>(&part_place_str[0])->default_value("shared"),
+         "With --partitions: shared (one copy of A in the first partition's buffer, read by every "
+         "partition over peer access) or replicated (a copy on each partition device).")
+
+        ("part_place_b",
+         value<std::string>(&part_place_str[1])->default_value("shared"),
+         "With --partitions: shared or replicated B, as --part_place_a.")
+
+        ("part_place_c",
+         value<std::string>(&part_place_str[2])->default_value("shared"),
+         "With --partitions: shared or replicated C, as --part_place_a.")
+
+        ("part_place_d",
+         value<std::string>(&part_place_str[3])->default_value("shared"),
+         "With --partitions: shared (every partition writes its slice into the device 0 D) or "
+         "replicated (a D on each partition device; the slices are gathered into the device 0 D "
+         "after a verified run, outside the timing).")
 
         ("print_kernel_info",
          value<bool>(&arg.print_kernel_info)->default_value(false),
@@ -697,6 +781,14 @@ try
         value<bool>(&arg.dump_matrix)->default_value(false),
         "Dump input and output matrices to a file.")
 
+        ("cotenant-cus",
+         value<int32_t>(&hipblaslt_bench_options::cotenant_cus())->default_value(0),
+         "Cotenant workgroup count on a separate stream; 0 (default) disables it. Must not exceed the device CU count. With max occupancy > 1, workgroups may share CUs.")
+
+        ("cotenant-max-occupancy",
+         value<int32_t>(&hipblaslt_bench_options::cotenant_max_occupancy())->default_value(1),
+         "Cotenant LDS-based workgroups-per-CU limit, 1-64 (default: 1).")
+
         ("sm_count_target",
          value<int32_t>(&hipblaslt_bench_options::sm_count_target())->default_value(0),
          "Target compute-unit (CU) count for the matmul kernel selection and "
@@ -705,17 +797,24 @@ try
 
         ("streamk_tile_scheduling",
          value<std::string>(&hipblaslt_bench_options::streamk_tile_scheduling_mode_str())->default_value(""),
-         "Select the StreamK=5 tile scheduling sub-path via the "
+         "Legacy alias for hybrid_assignment_policy via the "
          "HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT extension attribute. "
          "Accepts off|0, on|1, auto|2 (case-insensitive). When omitted the bench "
-         "leaves the attribute unset so the library default (auto) applies.")
+         "leaves the attribute unset so the library default applies.")
+
+        ("hybrid_assignment_policy",
+         value<std::string>(&hipblaslt_bench_options::hybrid_assignment_policy_str())->default_value(""),
+         "Launch policy for a selected WorkAssignment=Hybrid kernel: Default, DynamicWorkQueue, or Auto. "
+         "Default preserves the existing behavior, including the heuristic with a positive sm_count_target. "
+         "This option does not select a kernel family.")
 
         ("uniform_summation_order",
          value<std::string>(&hipblaslt_bench_options::uniform_summation_order_str())->default_value(""),
-         "Set the HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT extension attribute. "
+         "Set the handle-level uniform summation order request for every API method. "
          "Accepts off|0, on|1 (case-insensitive). When on, the matmul returns "
          "HIPBLAS_STATUS_INVALID_VALUE if no configuration honoring the guarantee exists. "
-         "When omitted the bench leaves the attribute unset so the library default (off) applies.")
+         "A YAML case's explicit 0 or 1 overrides the command-line value. "
+         "When neither specifies a value, the library default for the device applies.")
 
         ("help,h", "produces this help message")
 
@@ -796,6 +895,9 @@ try
         return 0;
     }
 
+    if(!hipblaslt_timing_allowed_with_adaptive_sm_count())
+        return EXIT_FAILURE;
+
     if(api_method_str.compare("c") == 0)
     {
         api_method = 0;
@@ -808,11 +910,40 @@ try
     {
         api_method = 2;
     }
+    else if(api_method_str.compare("grouped_gemm_c") == 0)
+    {
+        api_method = kApiMethodGroupedC;
+    }
     else
     {
         hipblaslt_cerr << "Invalid api method: " << api_method_str << std::endl;
         return 1;
     }
+
+    if(partitions_opt < 1 || partitions_opt > 255)
+    {
+        hipblaslt_cerr << "Invalid --partitions: " << partitions_opt << std::endl;
+        return 1;
+    }
+    if(split_dim_str.size() != 1
+       || std::string("MNBmnb").find(split_dim_str[0]) == std::string::npos)
+    {
+        hipblaslt_cerr << "Invalid --split_dim: " << split_dim_str << " (M, N or B)" << std::endl;
+        return 1;
+    }
+    for(int t = 0; t < 4; t++)
+    {
+        if(part_place_str[t] != "shared" && part_place_str[t] != "replicated")
+        {
+            hipblaslt_cerr << "Invalid --part_place_" << char('a' + t) << ": " << part_place_str[t]
+                           << " (shared or replicated)" << std::endl;
+            return 1;
+        }
+        arg.part_place[t] = part_place_str[t] == "replicated" ? 'R' : 'S';
+    }
+    arg.part_place[4] = 0;
+    arg.partitions = static_cast<uint8_t>(partitions_opt);
+    arg.split_dim     = char(std::toupper(static_cast<unsigned char>(split_dim_str[0])));
 
     if(algo_method_str.compare("heuristic") == 0)
     {
@@ -879,6 +1010,15 @@ try
         return 1;
     }
 
+    if(const auto err = hipblaslt_cotenant::validate_options(
+           hipblaslt_bench_options::cotenant_cus(),
+           hipblaslt_bench_options::cotenant_max_occupancy());
+       !err.empty())
+    {
+        hipblaslt_cerr << err << std::endl;
+        return 1;
+    }
+
     if(hipblaslt_bench_options::sm_count_target() < 0)
     {
         hipblaslt_cerr << "sm_count_target must be >= 0 (0 means \"use all CUs\")." << std::endl;
@@ -902,13 +1042,17 @@ try
         return -2;
     };
 
+    try
     {
-        const int32_t resolved = parseModeFlag(hipblaslt_bench_options::streamk_tile_scheduling_mode_str(),
-                                               true,
-                                               "streamk_tile_scheduling must be one of off|0, on|1, auto|2.");
-        if(resolved == -2)
-            return 1;
-        hipblaslt_bench_options::streamk_tile_scheduling_mode() = resolved;
+        hipblaslt_bench_options::streamk_tile_scheduling_mode()
+            = hipblaslt_bench_options::resolve_hybrid_assignment_policy(
+                hipblaslt_bench_options::hybrid_assignment_policy_str(),
+                hipblaslt_bench_options::streamk_tile_scheduling_mode_str());
+    }
+    catch(std::invalid_argument const& error)
+    {
+        hipblaslt_cerr << error.what() << std::endl;
+        return 1;
     }
 
     {
@@ -992,12 +1136,16 @@ try
         throw std::invalid_argument("Invalid Device ID");
     set_device(device_id);
 
+    if(hipblaslt_bench_options::cotenant_cus() > props.multiProcessorCount)
+        throw std::invalid_argument("cotenant-cus must not exceed the device CU count ("
+                                    + std::to_string(props.multiProcessorCount) + ").");
+
     auto perf_monitor = EfficiencyMonitor::create();
     if(perf_monitor->enabled())
         perf_monitor->setDeviceId(device_id);
 
     if(datafile)
-        return hipblaslt_bench_datafile(filter, any_stride, props);
+        return verification_exit(hipblaslt_bench_datafile(filter, any_stride, props));
 
     // single bench run
 
@@ -1065,9 +1213,14 @@ try
     else
         arg.bias_type = string_to_hip_datatype(bias_type);
 
-    arg.initialization = string2hipblaslt_initialization(initialization);
-    if(arg.initialization == static_cast<hipblaslt_initialization>(0))
+    if(auto parsed = string2hipblaslt_initialization(initialization))
+    {
+        arg.initialization = *parsed;
+    }
+    else
+    {
         throw std::invalid_argument("Invalid value for --initialization " + initialization);
+    }
 
     if(vm["initialization"].defaulted()
        && (arg.a_type == HIP_R_4F_E2M1 || arg.b_type == HIP_R_4F_E2M1))
@@ -1105,9 +1258,12 @@ try
                && arg.a_type != string_to_hip_datatype("f8_fnuz_r")
                && arg.a_type != string_to_hip_datatype("f8_r")
                && arg.a_type != string_to_hip_datatype("bf16_r")
+               && arg.a_type != string_to_hip_datatype("f6_r")
+               && arg.a_type != string_to_hip_datatype("bf6_r")
                && arg.b_type != string_to_hip_datatype("f4_r"))))
     {
-        hipblaslt_cerr << "For swizzle-A, problem type must be FP16 or BF16 or FP8 TN" << std::endl;
+        hipblaslt_cerr << "For swizzle-A, problem type must be FP16 or BF16 or FP8 or FP4 or FP6 TN"
+                       << std::endl;
         return 1;
     }
 
@@ -1117,9 +1273,12 @@ try
                && arg.b_type != string_to_hip_datatype("f8_fnuz_r")
                && arg.b_type != string_to_hip_datatype("f8_r")
                && arg.b_type != string_to_hip_datatype("bf16_r")
+               && arg.b_type != string_to_hip_datatype("f6_r")
+               && arg.b_type != string_to_hip_datatype("bf6_r")
                && arg.b_type != string_to_hip_datatype("f4_r"))))
     {
-        hipblaslt_cerr << "For swizzle-B, problem type must be FP16 or BF16 or FP8 TN" << std::endl;
+        hipblaslt_cerr << "For swizzle-B, problem type must be FP16 or BF16 or FP8 or FP4 or FP6 TN"
+                       << std::endl;
         return 1;
     }
 
@@ -1144,6 +1303,11 @@ try
             return hipblaslt_scaling_format::Block_16_UE5M3;
         if(s == 1001)
             return hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT;
+        if(s == 1018)
+            return hipblaslt_scaling_format::Block_32_UE8M0_128_4_EXT;
+        // w4a16 group scales; numbered as hipblasLtMatmulMatrixScale_t.
+        if(s >= 1006 && s <= 1017)
+            return static_cast<hipblaslt_scaling_format>(s);
         return hipblaslt_scaling_format::none;
     };
     arg.scaleA = scaleInt2Enum(scaleAFormat);
@@ -1163,7 +1327,8 @@ try
                             || arg.scaleA == hipblaslt_scaling_format::Block_16_UE4M3
                             || arg.scaleA == hipblaslt_scaling_format::Block_32_UE5M3
                             || arg.scaleA == hipblaslt_scaling_format::Block_16_UE5M3
-                            || arg.scaleA == hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT)) 
+                            || arg.scaleA == hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT
+                            || arg.scaleA == hipblaslt_scaling_format::Block_32_UE8M0_128_4_EXT))
         throw std::invalid_argument("Only Tensorwide scaling is supported when batch_mode is HIPBLASLT_BATCH_MODE_POINTER_ARRAY (General Batched Gemm) for matrix A.");
     if(arg.batch_mode == 1 && (arg.scaleB == hipblaslt_scaling_format::Vector
                             || arg.scaleB == hipblaslt_scaling_format::Block_32_UE8M0
@@ -1172,7 +1337,8 @@ try
                             || arg.scaleB == hipblaslt_scaling_format::Block_16_UE4M3
                             || arg.scaleB == hipblaslt_scaling_format::Block_32_UE5M3
                             || arg.scaleB == hipblaslt_scaling_format::Block_16_UE5M3
-                            || arg.scaleB == hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT)) 
+                            || arg.scaleB == hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT
+                            || arg.scaleB == hipblaslt_scaling_format::Block_32_UE8M0_128_4_EXT))
         throw std::invalid_argument("Only Tensorwide scaling is supported when batch_mode is HIPBLASLT_BATCH_MODE_POINTER_ARRAY (General Batched Gemm) for matrix B.");
 
     // Block scaling only allows F8/F6/F4
@@ -1207,6 +1373,34 @@ try
                                         + hip_datatype_to_string(arg.d_type));
     }
 
+    // Require int4 A, 16-bit B, and group scales together.
+    {
+        const auto encoding = string_to_int4_encoding(int4_encoding);
+        if(encoding == HIPBLASLT_INT4_ENCODING_END_EXT)
+            throw std::invalid_argument("Invalid --int4_encoding "s + int4_encoding
+                                        + "; expected one of " + c_int4_encoding_names);
+        arg.int4_encoding = static_cast<int32_t>(encoding);
+
+        // w4a16 modes are A-only; reject here rather than surface a bare B_SCALE_MODE status.
+        if(isW4A16Scaling(arg.scaleB))
+            throw std::invalid_argument(
+                "--scaleB does not accept the w4a16 group-scale modes 1006..1017; got "s
+                + std::to_string(static_cast<int>(arg.scaleB)));
+
+        const bool int4A = (arg.a_type == HIP_R_4I);
+        if(int4A != isW4A16Scaling(arg.scaleA))
+            throw std::invalid_argument(
+                "w4a16 needs --a_type i4_r together with --scaleA 1006..1017; got --a_type "s
+                + hip_datatype_to_string(arg.a_type) + " --scaleA "
+                + std::to_string(static_cast<int>(arg.scaleA)));
+        if(int4A)
+        {
+            if(arg.b_type != HIP_R_16BF && arg.b_type != HIP_R_16F)
+                throw std::invalid_argument("w4a16 requires --b_type bf16_r or f16_r, got "s
+                                            + hip_datatype_to_string(arg.b_type));
+        }
+    }
+
     if(arg.M[0] < 0)
         throw std::invalid_argument("Invalid value for -m " + std::to_string(arg.M[0]));
     if(arg.N[0] < 0)
@@ -1222,7 +1416,14 @@ try
         throw std::invalid_argument(
             "Valid value for --skip_slow_solution_ratio is in range (0.0 ~ 1.0).");
 
-    if(verify || ulp)
+    if(hipblaslt_bench_options::post_bench_verify_iters() < 0)
+        throw std::invalid_argument("--post_bench_verify_iters must be 0 or more");
+    if(hipblaslt_bench_options::post_bench_verify_iters() > 0 && arg.c_equal_d && arg.beta != 0)
+        throw std::invalid_argument("--post_bench_verify_iters does not support --c_equal_d with "
+                                    "a nonzero beta, since each launch then reads the D the "
+                                    "previous launch wrote");
+
+    if(verify || ulp || hipblaslt_bench_options::post_bench_verify_iters() > 0)
     {
         arg.norm_check     = 1;
         arg.allclose_check = 1;
@@ -1232,9 +1433,11 @@ try
         arg.ulp_check = 1;
     }
 
+    arg.api_method = api_method;
     switch(api_method)
     {
     case 0:
+    case kApiMethodGroupedC:
         arg.use_ext            = false;
         arg.use_ext_setproblem = false;
         break;
@@ -1252,9 +1455,14 @@ try
     }
 
     arg.norm_check_assert = false;
-    return run_bench_test(arg, filter, any_stride, props);
+    return verification_exit(run_bench_test(arg, filter, any_stride, props));
 }
 catch(const std::invalid_argument& exp)
+{
+    hipblaslt_cerr << exp.what() << std::endl;
+    return -1;
+}
+catch(const std::runtime_error& exp)
 {
     hipblaslt_cerr << exp.what() << std::endl;
     return -1;

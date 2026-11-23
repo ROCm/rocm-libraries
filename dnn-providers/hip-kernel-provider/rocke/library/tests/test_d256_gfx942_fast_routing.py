@@ -20,11 +20,15 @@ without a gfx942 GPU.
 
 from __future__ import annotations
 
+import dataclasses
 import inspect
 import unittest
 
 import kernels.common.attention_unified as au
 import kernels.gfx942.attention_tiled_2d as t2d
+
+from ._bounds_check_ir import clamped_to_last_of as _clamped_to_last_of
+from ._bounds_check_ir import global_loads as _global_loads
 
 
 class _PinArch:
@@ -62,34 +66,57 @@ def _d256_problem(**kw) -> "au.UnifiedAttentionProblem":
 class TestD256Gfx942FastGate(unittest.TestCase):
     def test_gate_accepts_d256_bf16_prefill(self):
         with _PinArch("gfx942"):
-            self.assertTrue(au._d256_gfx942_fast(_d256_problem()))
+            self.assertTrue(au._d256_gfx942_fast(_d256_problem(), "gfx942"))
 
     def test_gate_accepts_block_size_16(self):
         with _PinArch("gfx942"):
-            self.assertTrue(au._d256_gfx942_fast(_d256_problem(block_size=16)))
+            self.assertTrue(
+                au._d256_gfx942_fast(_d256_problem(block_size=16), "gfx942")
+            )
 
     def test_gate_rejects_non_gfx942_arch(self):
         # Same problem must NOT take the gfx942 fast path on another arch.
         with _PinArch("gfx950"):
-            self.assertFalse(au._d256_gfx942_fast(_d256_problem()))
+            self.assertFalse(au._d256_gfx942_fast(_d256_problem(), "gfx950"))
 
     def test_gate_rejects_non_bf16(self):
         with _PinArch("gfx942"):
-            self.assertFalse(au._d256_gfx942_fast(_d256_problem(dtype="fp16")))
+            self.assertFalse(
+                au._d256_gfx942_fast(_d256_problem(dtype="fp16"), "gfx942")
+            )
 
     def test_gate_rejects_wrong_head_size(self):
         with _PinArch("gfx942"):
-            self.assertFalse(au._d256_gfx942_fast(_d256_problem(head_size=128)))
+            self.assertFalse(
+                au._d256_gfx942_fast(_d256_problem(head_size=128), "gfx942")
+            )
+
+    def test_gate_accepts_d192_bf16_prefill(self):
+        # D192 rides the lean 4-warp body (MHA and GQA alike).
+        with _PinArch("gfx942"):
+            for hq, hkv in ((96, 96), (16, 2)):
+                self.assertTrue(
+                    au._d256_gfx942_fast(
+                        _d256_problem(
+                            head_size=192, num_query_heads=hq, num_kv_heads=hkv
+                        ),
+                        "gfx942",
+                    )
+                )
 
     def test_gate_rejects_block_size_64(self):
         # block_size=64 cleanly falls back to the default builder (tile%block).
         with _PinArch("gfx942"):
-            self.assertFalse(au._d256_gfx942_fast(_d256_problem(block_size=64)))
+            self.assertFalse(
+                au._d256_gfx942_fast(_d256_problem(block_size=64), "gfx942")
+            )
 
     def test_gate_rejects_decode(self):
         # max_seqlen_q == 1 is decode, not prefill.
         with _PinArch("gfx942"):
-            self.assertFalse(au._d256_gfx942_fast(_d256_problem(max_seqlen_q=1)))
+            self.assertFalse(
+                au._d256_gfx942_fast(_d256_problem(max_seqlen_q=1), "gfx942")
+            )
 
     def test_gate_rejects_feature_flags(self):
         with _PinArch("gfx942"):
@@ -102,7 +129,7 @@ class TestD256Gfx942FastGate(unittest.TestCase):
                 dict(use_fp8=True),
             ):
                 self.assertFalse(
-                    au._d256_gfx942_fast(_d256_problem(**kw)),
+                    au._d256_gfx942_fast(_d256_problem(**kw), "gfx942"),
                     msg=f"fast path must exclude {kw}",
                 )
 
@@ -151,7 +178,7 @@ class TestD256Gfx942BuilderContract(unittest.TestCase):
 
         self.assertTrue(hasattr(t2d, "_build_gfx942_4warp_gqa_lean"))
         with _PinArch("gfx942"):
-            spec = au._tiled_spec_from_problem(_d256_problem())
+            spec = au._tiled_spec_from_problem(_d256_problem(), "gfx942")
             via_entry = _lower_kernel_to_llvm_python(
                 t2d.build_gfx942_4warp_gqa(spec, arch="gfx942"),
                 arch="gfx942",
@@ -166,6 +193,31 @@ class TestD256Gfx942BuilderContract(unittest.TestCase):
             via_entry, via_lean, "D256 entry must delegate to the lean natural-QK body"
         )
 
+    def test_d192_entry_delegates_to_lean_natural_qk_body(self):
+        """HD==192 builds via the lean body too; the general 4-warp body exceeds
+        the 256-VGPR budget at 192."""
+        from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
+
+        with _PinArch("gfx942"):
+            spec = au._tiled_spec_from_problem(_d256_problem(head_size=192), "gfx942")
+            via_entry = _lower_kernel_to_llvm_python(
+                t2d.build_gfx942_4warp_gqa(spec, arch="gfx942"),
+                arch="gfx942",
+                llvm_flavor="llvm20",
+            )
+            via_lean = _lower_kernel_to_llvm_python(
+                t2d._build_gfx942_4warp_gqa_lean(spec, arch="gfx942"),
+                arch="gfx942",
+                llvm_flavor="llvm20",
+            )
+        self.assertEqual(via_entry, via_lean)
+
+    def test_lean_body_rejects_unserved_head_size(self):
+        with _PinArch("gfx942"):
+            spec = au._tiled_spec_from_problem(_d256_problem(head_size=128), "gfx942")
+            with self.assertRaises(NotImplementedError):
+                t2d._build_gfx942_4warp_gqa_lean(spec, arch="gfx942")
+
     def test_lean_body_rejects_sliding_window(self):
         """The lean D256 body is causal-only -- it has no sliding-window mask and
         never reads ``spec.sliding_window``. It must fail loud on a windowed spec
@@ -173,9 +225,144 @@ class TestD256Gfx942BuilderContract(unittest.TestCase):
         the external ``_d256_gfx942_fast`` gate enforces ``window == 0``; this guard
         makes the builder self-protecting if a future D256+SWA routing is wired up."""
         with _PinArch("gfx942"):
-            spec = au._tiled_spec_from_problem(_d256_problem(sliding_window=256))
+            spec = au._tiled_spec_from_problem(
+                _d256_problem(sliding_window=256), "gfx942"
+            )
             with self.assertRaises(NotImplementedError):
                 t2d._build_gfx942_4warp_gqa_lean(spec, arch="gfx942")
+
+
+class TestLeanBodyBoundsReads(unittest.TestCase):
+    """Every block-table and Q read of the lean body is bounded to its sequence.
+
+    The 64-key tiles and the 128-row Q block run past the sequence when its length
+    is not a tile multiple. An unbounded block-table read returns an arbitrary page
+    id and the K/V load built from it faults (D256 q=129 did). The GPU oracle is
+    ``test_gfx942_4wgqa_bounds_numeric``; this structural check runs anywhere.
+    """
+
+    def _kernel(self, head_size, hq=16, hkv=2):
+        with _PinArch("gfx942"):
+            spec = au._tiled_spec_from_problem(
+                _d256_problem(
+                    head_size=head_size, num_query_heads=hq, num_kv_heads=hkv
+                ),
+                "gfx942",
+            )
+            return t2d._build_gfx942_4warp_gqa_lean(spec, arch="gfx942")
+
+    def test_block_table_reads_clamped_to_last_key(self):
+        for hd in t2d._4WGQA_LEAN_HEAD_SIZES:
+            loads = _global_loads(self._kernel(hd), "block_tables_ptr")
+            self.assertTrue(loads)
+            for op in loads:
+                self.assertTrue(
+                    _clamped_to_last_of(op.operands[1], "seq_lens_ptr"),
+                    f"D{hd}: block-table read not bounded by seq_len - 1",
+                )
+
+    def test_query_reads_clamped_to_last_token(self):
+        for hd in t2d._4WGQA_LEAN_HEAD_SIZES:
+            loads = _global_loads(self._kernel(hd, hq=64, hkv=64), "query_ptr")
+            self.assertTrue(loads)
+            for op in loads:
+                self.assertTrue(
+                    _clamped_to_last_of(op.operands[1], "query_start_len_ptr"),
+                    f"D{hd}: Q read not bounded by the sequence's last token",
+                )
+
+    def test_kv_reads_go_through_the_block_table(self):
+        for hd in t2d._4WGQA_LEAN_HEAD_SIZES:
+            k = self._kernel(hd)
+            for param in ("key_cache_ptr", "value_cache_ptr"):
+                for op in _global_loads(k, param):
+                    self.assertTrue(
+                        _clamped_to_last_of(op.operands[1], "seq_lens_ptr"),
+                        f"D{hd}: {param} read not bounded by seq_len - 1",
+                    )
+
+
+class TestD128BodyBoundsReads(unittest.TestCase):
+    """The same reads in the D128 body of ``build_gfx942_4warp_gqa``, which bounds
+    the block-table page rather than the key. A one-token decode sequence otherwise
+    reads 127 Q rows past its token. Covers the head-fold, plain and block-size-64
+    single-buffer variants."""
+
+    # (dtype, num_query_heads, num_kv_heads, block_size); bf16 4:1 bs<=32 folds.
+    _VARIANTS = (
+        ("bf16", 32, 8, 16),
+        ("fp16", 32, 8, 16),
+        ("bf16", 64, 8, 32),
+        ("bf16", 32, 8, 64),
+    )
+
+    def _kernels(self):
+        for dt, hq, hkv, bs in self._VARIANTS:
+            problem = _d256_problem(
+                head_size=128,
+                dtype=dt,
+                num_query_heads=hq,
+                num_kv_heads=hkv,
+                block_size=bs,
+                sliding_window=512,
+            )
+            with _PinArch("gfx942"):
+                spec = au._tiled_spec_from_problem(problem, "gfx942")
+                kernel = t2d.build_gfx942_4warp_gqa(spec, arch="gfx942")
+            yield f"{dt} {hq}/{hkv} bs{bs}", kernel, bs
+
+    def test_rejects_unsupported_block_sizes(self):
+        # Dispatch admits only 16/32/64; these guard the builder's page split (a
+        # power-of-two shift, BN // BS pages per tile) if admission is ever widened.
+        with _PinArch("gfx942"):
+            spec = au._tiled_spec_from_problem(
+                _d256_problem(head_size=128, block_size=16, sliding_window=512),
+                "gfx942",
+            )
+            for bs, message in (
+                (48, "power-of-two block_size, got 48"),
+                (128, "divide the 64-key tile, got 128"),
+            ):
+                with self.subTest(block_size=bs):
+                    bad = dataclasses.replace(spec, block_size=bs, tile_size=bs)
+                    with self.assertRaisesRegex(NotImplementedError, message):
+                        t2d.build_gfx942_4warp_gqa(bad, arch="gfx942")
+
+    def test_variants_cover_fold_and_plain(self):
+        names = [k.name for _, k, _ in self._kernels()]
+        self.assertTrue(names[0].endswith("_4wgqa_fold"), names[0])
+        self.assertTrue(all(n.endswith("_4wgqa") for n in names[1:]), names)
+
+    def test_block_table_reads_clamped_to_last_page(self):
+        for tag, k, bs in self._kernels():
+            loads = _global_loads(k, "block_tables_ptr")
+            self.assertTrue(loads)
+            for op in loads:
+                self.assertTrue(
+                    _clamped_to_last_of(op.operands[1], "seq_lens_ptr", bs),
+                    f"{tag}: block-table read not bounded by the last page",
+                )
+
+    def test_query_reads_clamped_to_last_token(self):
+        for tag, k, _ in self._kernels():
+            loads = _global_loads(k, "query_ptr")
+            self.assertTrue(loads)
+            for op in loads:
+                self.assertTrue(
+                    _clamped_to_last_of(op.operands[1], "query_start_len_ptr"),
+                    f"{tag}: Q read not bounded by the sequence's last token",
+                )
+
+    def test_kv_reads_go_through_the_block_table(self):
+        for tag, k, bs in self._kernels():
+            for param in ("key_cache_ptr", "value_cache_ptr"):
+                loads = _global_loads(k, param)
+                self.assertTrue(loads)
+                for op in loads:
+                    self.assertTrue(
+                        _clamped_to_last_of(op.operands[1], "seq_lens_ptr", bs),
+                        f"{tag}: {param} read not bounded by the last page",
+                    )
 
 
 if __name__ == "__main__":

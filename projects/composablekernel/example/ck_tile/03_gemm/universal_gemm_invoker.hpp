@@ -75,7 +75,7 @@ struct UniversalInvoker
                                              GemmConfig::DataCachePrefetchA,
                                              GemmConfig::DataCachePrefetchB,
                                              GemmConfig::Async,
-                                             false>; // LargeTensors
+                                             GemmConfig::LargeTensors>;
 
         constexpr auto scheduler = GemmConfig::Scheduler;
 
@@ -136,7 +136,9 @@ struct UniversalInvoker
                                              1,                            /*BlockedXDLN_PerWarp_*/
                                              GemmConfig::DoubleSmemBuffer, /*DoubleSmemBuffer*/
                                              AComputeDataType,
-                                             BComputeDataType>>::Epilogue;
+                                             BComputeDataType>,
+            GemmPipeline,
+            GemmConfig::TdmMIterPerStage>::Epilogue;
 
         using Kernel = ck_tile::GemmKernel<TilePartitioner, GemmPipeline, GemmEpilogue>;
 
@@ -270,7 +272,8 @@ struct UniversalInvoker
                                              VectorSize,
                                              GemmConfig::DataCachePrefetchA,
                                              GemmConfig::DataCachePrefetchB,
-                                             GemmConfig::Async>;
+                                             GemmConfig::Async,
+                                             GemmConfig::LargeTensors>;
 
         constexpr auto scheduler = GemmConfig::Scheduler;
         using AComputeDataType =

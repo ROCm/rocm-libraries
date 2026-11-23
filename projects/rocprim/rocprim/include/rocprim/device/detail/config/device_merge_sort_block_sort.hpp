@@ -84,7 +84,7 @@ constexpr auto merge_sort_block_sort_config_picker()
     {
         return merge_sort_block_sort_config_params{256, 4};
     }
-    // CONFIG: {'key_type': 'double', 'value_type': 'empty_type', 'block_size_x': 256, 'ipt': 4}
+    // CONFIG: {'key_type': 'double', 'value_type': 'rocprim::empty_type', 'block_size_x': 256, 'ipt': 4}
     if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                   && (sizeof(key_type) > 4)
                   && (std::is_same<value_type, rocprim::empty_type>::value)))
@@ -126,7 +126,7 @@ constexpr auto merge_sort_block_sort_config_picker()
     {
         return merge_sort_block_sort_config_params{512, 4};
     }
-    // CONFIG: {'key_type': 'float', 'value_type': 'empty_type', 'block_size_x': 256, 'ipt': 8}
+    // CONFIG: {'key_type': 'float', 'value_type': 'rocprim::empty_type', 'block_size_x': 256, 'ipt': 8}
     if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
                   && (sizeof(key_type) > 2)
                   && (std::is_same<value_type, rocprim::empty_type>::value)))
@@ -164,7 +164,7 @@ constexpr auto merge_sort_block_sort_config_picker()
     {
         return merge_sort_block_sort_config_params{256, 4};
     }
-    // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'empty_type', 'block_size_x': 512, 'ipt': 8}
+    // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'rocprim::empty_type', 'block_size_x': 512, 'ipt': 8}
     if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                   && (std::is_same<value_type, rocprim::empty_type>::value)))
     {
@@ -205,7 +205,7 @@ constexpr auto merge_sort_block_sort_config_picker()
     {
         return merge_sort_block_sort_config_params{512, 4};
     }
-    // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'empty_type', 'block_size_x': 256, 'ipt': 4}
+    // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'rocprim::empty_type', 'block_size_x': 256, 'ipt': 4}
     if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 16)
                   && (sizeof(key_type) > 8)
                   && (std::is_same<value_type, rocprim::empty_type>::value)))
@@ -247,7 +247,7 @@ constexpr auto merge_sort_block_sort_config_picker()
     {
         return merge_sort_block_sort_config_params{256, 4};
     }
-    // CONFIG: {'key_type': 'int64_t', 'value_type': 'empty_type', 'block_size_x': 256, 'ipt': 4}
+    // CONFIG: {'key_type': 'int64_t', 'value_type': 'rocprim::empty_type', 'block_size_x': 256, 'ipt': 4}
     if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                   && (sizeof(key_type) > 4)
                   && (std::is_same<value_type, rocprim::empty_type>::value)))
@@ -289,7 +289,7 @@ constexpr auto merge_sort_block_sort_config_picker()
     {
         return merge_sort_block_sort_config_params{512, 4};
     }
-    // CONFIG: {'key_type': 'int', 'value_type': 'empty_type', 'block_size_x': 256, 'ipt': 8}
+    // CONFIG: {'key_type': 'int', 'value_type': 'rocprim::empty_type', 'block_size_x': 256, 'ipt': 8}
     if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
                   && (sizeof(key_type) > 2)
                   && (std::is_same<value_type, rocprim::empty_type>::value)))
@@ -331,7 +331,7 @@ constexpr auto merge_sort_block_sort_config_picker()
     {
         return merge_sort_block_sort_config_params{256, 4};
     }
-    // CONFIG: {'key_type': 'short', 'value_type': 'empty_type', 'block_size_x': 256, 'ipt': 32}
+    // CONFIG: {'key_type': 'short', 'value_type': 'rocprim::empty_type', 'block_size_x': 256, 'ipt': 32}
     if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                   && (sizeof(key_type) > 1)
                   && (std::is_same<value_type, rocprim::empty_type>::value)))
@@ -369,7 +369,7 @@ constexpr auto merge_sort_block_sort_config_picker()
     {
         return merge_sort_block_sort_config_params{256, 8};
     }
-    // CONFIG: {'key_type': 'int8_t', 'value_type': 'empty_type', 'block_size_x': 256, 'ipt': 32}
+    // CONFIG: {'key_type': 'int8_t', 'value_type': 'rocprim::empty_type', 'block_size_x': 256, 'ipt': 32}
     if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
                   && (std::is_same<value_type, rocprim::empty_type>::value)))
     {
@@ -423,7 +423,7 @@ constexpr auto merge_sort_block_sort_config_picker()
     {
         return merge_sort_block_sort_config_params{1024, 4};
     }
-    // CONFIG: {'key_type': 'double', 'value_type': 'empty_type', 'block_size_x': 512, 'ipt': 8}
+    // CONFIG: {'key_type': 'double', 'value_type': 'rocprim::empty_type', 'block_size_x': 512, 'ipt': 8}
     if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                   && (sizeof(key_type) > 4)
                   && (std::is_same<value_type, rocprim::empty_type>::value)))
@@ -465,7 +465,7 @@ constexpr auto merge_sort_block_sort_config_picker()
     {
         return merge_sort_block_sort_config_params{1024, 4};
     }
-    // CONFIG: {'key_type': 'float', 'value_type': 'empty_type', 'block_size_x': 256, 'ipt': 16}
+    // CONFIG: {'key_type': 'float', 'value_type': 'rocprim::empty_type', 'block_size_x': 256, 'ipt': 16}
     if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
                   && (sizeof(key_type) > 2)
                   && (std::is_same<value_type, rocprim::empty_type>::value)))
@@ -503,7 +503,7 @@ constexpr auto merge_sort_block_sort_config_picker()
     {
         return merge_sort_block_sort_config_params{512, 8};
     }
-    // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'empty_type', 'block_size_x': 256, 'ipt': 8}
+    // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'rocprim::empty_type', 'block_size_x': 256, 'ipt': 8}
     if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                   && (std::is_same<value_type, rocprim::empty_type>::value)))
     {
@@ -544,7 +544,7 @@ constexpr auto merge_sort_block_sort_config_picker()
     {
         return merge_sort_block_sort_config_params{512, 4};
     }
-    // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'empty_type', 'block_size_x': 256, 'ipt': 4}
+    // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'rocprim::empty_type', 'block_size_x': 256, 'ipt': 4}
     if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 16)
                   && (sizeof(key_type) > 8)
                   && (std::is_same<value_type, rocprim::empty_type>::value)))
@@ -586,7 +586,7 @@ constexpr auto merge_sort_block_sort_config_picker()
     {
         return merge_sort_block_sort_config_params{1024, 4};
     }
-    // CONFIG: {'key_type': 'int64_t', 'value_type': 'empty_type', 'block_size_x': 256, 'ipt': 4}
+    // CONFIG: {'key_type': 'int64_t', 'value_type': 'rocprim::empty_type', 'block_size_x': 256, 'ipt': 4}
     if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                   && (sizeof(key_type) > 4)
                   && (std::is_same<value_type, rocprim::empty_type>::value)))
@@ -628,7 +628,7 @@ constexpr auto merge_sort_block_sort_config_picker()
     {
         return merge_sort_block_sort_config_params{512, 8};
     }
-    // CONFIG: {'key_type': 'int', 'value_type': 'empty_type', 'block_size_x': 256, 'ipt': 8}
+    // CONFIG: {'key_type': 'int', 'value_type': 'rocprim::empty_type', 'block_size_x': 256, 'ipt': 8}
     if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
                   && (sizeof(key_type) > 2)
                   && (std::is_same<value_type, rocprim::empty_type>::value)))
@@ -670,7 +670,7 @@ constexpr auto merge_sort_block_sort_config_picker()
     {
         return merge_sort_block_sort_config_params{256, 4};
     }
-    // CONFIG: {'key_type': 'short', 'value_type': 'empty_type', 'block_size_x': 256, 'ipt': 8}
+    // CONFIG: {'key_type': 'short', 'value_type': 'rocprim::empty_type', 'block_size_x': 256, 'ipt': 8}
     if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                   && (sizeof(key_type) > 1)
                   && (std::is_same<value_type, rocprim::empty_type>::value)))
@@ -708,7 +708,7 @@ constexpr auto merge_sort_block_sort_config_picker()
     {
         return merge_sort_block_sort_config_params{256, 8};
     }
-    // CONFIG: {'key_type': 'int8_t', 'value_type': 'empty_type', 'block_size_x': 256, 'ipt': 32}
+    // CONFIG: {'key_type': 'int8_t', 'value_type': 'rocprim::empty_type', 'block_size_x': 256, 'ipt': 32}
     if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
                   && (std::is_same<value_type, rocprim::empty_type>::value)))
     {
@@ -762,7 +762,7 @@ constexpr auto merge_sort_block_sort_config_picker()
     {
         return merge_sort_block_sort_config_params{512, 4};
     }
-    // CONFIG: {'key_type': 'double', 'value_type': 'empty_type', 'block_size_x': 512, 'ipt': 8}
+    // CONFIG: {'key_type': 'double', 'value_type': 'rocprim::empty_type', 'block_size_x': 512, 'ipt': 8}
     if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                   && (sizeof(key_type) > 4)
                   && (std::is_same<value_type, rocprim::empty_type>::value)))
@@ -804,7 +804,7 @@ constexpr auto merge_sort_block_sort_config_picker()
     {
         return merge_sort_block_sort_config_params{512, 4};
     }
-    // CONFIG: {'key_type': 'float', 'value_type': 'empty_type', 'block_size_x': 256, 'ipt': 16}
+    // CONFIG: {'key_type': 'float', 'value_type': 'rocprim::empty_type', 'block_size_x': 256, 'ipt': 16}
     if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
                   && (sizeof(key_type) > 2)
                   && (std::is_same<value_type, rocprim::empty_type>::value)))
@@ -842,7 +842,7 @@ constexpr auto merge_sort_block_sort_config_picker()
     {
         return merge_sort_block_sort_config_params{1024, 8};
     }
-    // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'empty_type', 'block_size_x': 256, 'ipt': 32}
+    // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'rocprim::empty_type', 'block_size_x': 256, 'ipt': 32}
     if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                   && (std::is_same<value_type, rocprim::empty_type>::value)))
     {
@@ -883,7 +883,7 @@ constexpr auto merge_sort_block_sort_config_picker()
     {
         return merge_sort_block_sort_config_params{512, 4};
     }
-    // CONFIG: {'key_type': 'int64_t', 'value_type': 'empty_type', 'block_size_x': 512, 'ipt': 8}
+    // CONFIG: {'key_type': 'int64_t', 'value_type': 'rocprim::empty_type', 'block_size_x': 512, 'ipt': 8}
     if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                   && (sizeof(key_type) > 4)
                   && (std::is_same<value_type, rocprim::empty_type>::value)))
@@ -925,7 +925,7 @@ constexpr auto merge_sort_block_sort_config_picker()
     {
         return merge_sort_block_sort_config_params{512, 4};
     }
-    // CONFIG: {'key_type': 'int', 'value_type': 'empty_type', 'block_size_x': 256, 'ipt': 16}
+    // CONFIG: {'key_type': 'int', 'value_type': 'rocprim::empty_type', 'block_size_x': 256, 'ipt': 16}
     if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
                   && (sizeof(key_type) > 2)
                   && (std::is_same<value_type, rocprim::empty_type>::value)))
@@ -967,7 +967,7 @@ constexpr auto merge_sort_block_sort_config_picker()
     {
         return merge_sort_block_sort_config_params{512, 8};
     }
-    // CONFIG: {'key_type': 'short', 'value_type': 'empty_type', 'block_size_x': 256, 'ipt': 32}
+    // CONFIG: {'key_type': 'short', 'value_type': 'rocprim::empty_type', 'block_size_x': 256, 'ipt': 32}
     if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                   && (sizeof(key_type) > 1)
                   && (std::is_same<value_type, rocprim::empty_type>::value)))
@@ -1005,7 +1005,7 @@ constexpr auto merge_sort_block_sort_config_picker()
     {
         return merge_sort_block_sort_config_params{512, 8};
     }
-    // CONFIG: {'key_type': 'int8_t', 'value_type': 'empty_type', 'block_size_x': 256, 'ipt': 32}
+    // CONFIG: {'key_type': 'int8_t', 'value_type': 'rocprim::empty_type', 'block_size_x': 256, 'ipt': 32}
     if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
                   && (std::is_same<value_type, rocprim::empty_type>::value)))
     {
@@ -1052,7 +1052,7 @@ constexpr auto merge_sort_block_sort_config_picker()
     {
         return merge_sort_block_sort_config_params{512, 4};
     }
-    // CONFIG: {'key_type': 'double', 'value_type': 'empty_type', 'block_size_x': 256, 'ipt': 8}
+    // CONFIG: {'key_type': 'double', 'value_type': 'rocprim::empty_type', 'block_size_x': 256, 'ipt': 8}
     if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                   && (sizeof(key_type) > 4)
                   && (std::is_same<value_type, rocprim::empty_type>::value)))
@@ -1087,7 +1087,7 @@ constexpr auto merge_sort_block_sort_config_picker()
     {
         return merge_sort_block_sort_config_params{512, 4};
     }
-    // CONFIG: {'key_type': 'float', 'value_type': 'empty_type', 'block_size_x': 256, 'ipt': 16}
+    // CONFIG: {'key_type': 'float', 'value_type': 'rocprim::empty_type', 'block_size_x': 256, 'ipt': 16}
     if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
                   && (sizeof(key_type) > 2)
                   && (std::is_same<value_type, rocprim::empty_type>::value)))
@@ -1119,7 +1119,7 @@ constexpr auto merge_sort_block_sort_config_picker()
     {
         return merge_sort_block_sort_config_params{256, 4};
     }
-    // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'empty_type', 'block_size_x': 512, 'ipt': 16}
+    // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'rocprim::empty_type', 'block_size_x': 512, 'ipt': 16}
     if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                   && (std::is_same<value_type, rocprim::empty_type>::value)))
     {
@@ -1153,7 +1153,7 @@ constexpr auto merge_sort_block_sort_config_picker()
     {
         return merge_sort_block_sort_config_params{512, 4};
     }
-    // CONFIG: {'key_type': 'int64_t', 'value_type': 'empty_type', 'block_size_x': 256, 'ipt': 8}
+    // CONFIG: {'key_type': 'int64_t', 'value_type': 'rocprim::empty_type', 'block_size_x': 256, 'ipt': 8}
     if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                   && (sizeof(key_type) > 4)
                   && (std::is_same<value_type, rocprim::empty_type>::value)))
@@ -1188,7 +1188,7 @@ constexpr auto merge_sort_block_sort_config_picker()
     {
         return merge_sort_block_sort_config_params{512, 4};
     }
-    // CONFIG: {'key_type': 'int', 'value_type': 'empty_type', 'block_size_x': 256, 'ipt': 16}
+    // CONFIG: {'key_type': 'int', 'value_type': 'rocprim::empty_type', 'block_size_x': 256, 'ipt': 16}
     if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
                   && (sizeof(key_type) > 2)
                   && (std::is_same<value_type, rocprim::empty_type>::value)))
@@ -1223,7 +1223,7 @@ constexpr auto merge_sort_block_sort_config_picker()
     {
         return merge_sort_block_sort_config_params{256, 4};
     }
-    // CONFIG: {'key_type': 'short', 'value_type': 'empty_type', 'block_size_x': 256, 'ipt': 32}
+    // CONFIG: {'key_type': 'short', 'value_type': 'rocprim::empty_type', 'block_size_x': 256, 'ipt': 32}
     if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                   && (sizeof(key_type) > 1)
                   && (std::is_same<value_type, rocprim::empty_type>::value)))
@@ -1255,7 +1255,7 @@ constexpr auto merge_sort_block_sort_config_picker()
     {
         return merge_sort_block_sort_config_params{512, 8};
     }
-    // CONFIG: {'key_type': 'int8_t', 'value_type': 'empty_type', 'block_size_x': 256, 'ipt': 32}
+    // CONFIG: {'key_type': 'int8_t', 'value_type': 'rocprim::empty_type', 'block_size_x': 256, 'ipt': 32}
     if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
                   && (std::is_same<value_type, rocprim::empty_type>::value)))
     {
@@ -1316,7 +1316,7 @@ constexpr auto merge_sort_block_sort_config_picker()
     {
         return merge_sort_block_sort_config_params{256, 4};
     }
-    // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'empty_type', 'block_size_x': 256, 'ipt': 4}
+    // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'rocprim::empty_type', 'block_size_x': 256, 'ipt': 4}
     if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 16)
                   && (sizeof(key_type) > 8)
                   && (std::is_same<value_type, rocprim::empty_type>::value)))
@@ -1397,7 +1397,7 @@ constexpr auto merge_sort_block_sort_config_picker()
     {
         return merge_sort_block_sort_config_params{256, 4};
     }
-    // CONFIG: {'key_type': 'double', 'value_type': 'empty_type', 'block_size_x': 256, 'ipt': 4}
+    // CONFIG: {'key_type': 'double', 'value_type': 'rocprim::empty_type', 'block_size_x': 256, 'ipt': 4}
     if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                   && (sizeof(key_type) > 4)
                   && (std::is_same<value_type, rocprim::empty_type>::value)))
@@ -1439,7 +1439,7 @@ constexpr auto merge_sort_block_sort_config_picker()
     {
         return merge_sort_block_sort_config_params{256, 4};
     }
-    // CONFIG: {'key_type': 'float', 'value_type': 'empty_type', 'block_size_x': 256, 'ipt': 8}
+    // CONFIG: {'key_type': 'float', 'value_type': 'rocprim::empty_type', 'block_size_x': 256, 'ipt': 8}
     if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
                   && (sizeof(key_type) > 2)
                   && (std::is_same<value_type, rocprim::empty_type>::value)))
@@ -1477,7 +1477,7 @@ constexpr auto merge_sort_block_sort_config_picker()
     {
         return merge_sort_block_sort_config_params{256, 4};
     }
-    // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'empty_type', 'block_size_x': 256, 'ipt': 16}
+    // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'rocprim::empty_type', 'block_size_x': 256, 'ipt': 16}
     if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                   && (std::is_same<value_type, rocprim::empty_type>::value)))
     {
@@ -1518,7 +1518,7 @@ constexpr auto merge_sort_block_sort_config_picker()
     {
         return merge_sort_block_sort_config_params{256, 4};
     }
-    // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'empty_type', 'block_size_x': 256, 'ipt': 4}
+    // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'rocprim::empty_type', 'block_size_x': 256, 'ipt': 4}
     if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 16)
                   && (sizeof(key_type) > 8)
                   && (std::is_same<value_type, rocprim::empty_type>::value)))
@@ -1560,7 +1560,7 @@ constexpr auto merge_sort_block_sort_config_picker()
     {
         return merge_sort_block_sort_config_params{256, 4};
     }
-    // CONFIG: {'key_type': 'int64_t', 'value_type': 'empty_type', 'block_size_x': 256, 'ipt': 4}
+    // CONFIG: {'key_type': 'int64_t', 'value_type': 'rocprim::empty_type', 'block_size_x': 256, 'ipt': 4}
     if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                   && (sizeof(key_type) > 4)
                   && (std::is_same<value_type, rocprim::empty_type>::value)))
@@ -1602,7 +1602,7 @@ constexpr auto merge_sort_block_sort_config_picker()
     {
         return merge_sort_block_sort_config_params{256, 8};
     }
-    // CONFIG: {'key_type': 'int', 'value_type': 'empty_type', 'block_size_x': 256, 'ipt': 8}
+    // CONFIG: {'key_type': 'int', 'value_type': 'rocprim::empty_type', 'block_size_x': 256, 'ipt': 8}
     if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
                   && (sizeof(key_type) > 2)
                   && (std::is_same<value_type, rocprim::empty_type>::value)))
@@ -1644,7 +1644,7 @@ constexpr auto merge_sort_block_sort_config_picker()
     {
         return merge_sort_block_sort_config_params{1024, 8};
     }
-    // CONFIG: {'key_type': 'short', 'value_type': 'empty_type', 'block_size_x': 256, 'ipt': 16}
+    // CONFIG: {'key_type': 'short', 'value_type': 'rocprim::empty_type', 'block_size_x': 256, 'ipt': 16}
     if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                   && (sizeof(key_type) > 1)
                   && (std::is_same<value_type, rocprim::empty_type>::value)))
@@ -1682,7 +1682,7 @@ constexpr auto merge_sort_block_sort_config_picker()
     {
         return merge_sort_block_sort_config_params{256, 8};
     }
-    // CONFIG: {'key_type': 'int8_t', 'value_type': 'empty_type', 'block_size_x': 256, 'ipt': 16}
+    // CONFIG: {'key_type': 'int8_t', 'value_type': 'rocprim::empty_type', 'block_size_x': 256, 'ipt': 16}
     if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
                   && (std::is_same<value_type, rocprim::empty_type>::value)))
     {
@@ -1735,7 +1735,7 @@ constexpr auto merge_sort_block_sort_config_picker()
     {
         return merge_sort_block_sort_config_params{256, 4};
     }
-    // CONFIG: {'key_type': 'double', 'value_type': 'empty_type', 'block_size_x': 256, 'ipt': 8}
+    // CONFIG: {'key_type': 'double', 'value_type': 'rocprim::empty_type', 'block_size_x': 256, 'ipt': 8}
     if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                   && (sizeof(key_type) > 4)
                   && (std::is_same<value_type, rocprim::empty_type>::value)))
@@ -1777,7 +1777,7 @@ constexpr auto merge_sort_block_sort_config_picker()
     {
         return merge_sort_block_sort_config_params{256, 8};
     }
-    // CONFIG: {'key_type': 'float', 'value_type': 'empty_type', 'block_size_x': 256, 'ipt': 16}
+    // CONFIG: {'key_type': 'float', 'value_type': 'rocprim::empty_type', 'block_size_x': 256, 'ipt': 16}
     if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
                   && (sizeof(key_type) > 2)
                   && (std::is_same<value_type, rocprim::empty_type>::value)))
@@ -1815,7 +1815,7 @@ constexpr auto merge_sort_block_sort_config_picker()
     {
         return merge_sort_block_sort_config_params{1024, 8};
     }
-    // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'empty_type', 'block_size_x': 256, 'ipt': 16}
+    // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'rocprim::empty_type', 'block_size_x': 256, 'ipt': 16}
     if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                   && (std::is_same<value_type, rocprim::empty_type>::value)))
     {
@@ -1856,7 +1856,7 @@ constexpr auto merge_sort_block_sort_config_picker()
     {
         return merge_sort_block_sort_config_params{256, 4};
     }
-    // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'empty_type', 'block_size_x': 256, 'ipt': 4}
+    // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'rocprim::empty_type', 'block_size_x': 256, 'ipt': 4}
     if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 16)
                   && (sizeof(key_type) > 8)
                   && (std::is_same<value_type, rocprim::empty_type>::value)))
@@ -1898,7 +1898,7 @@ constexpr auto merge_sort_block_sort_config_picker()
     {
         return merge_sort_block_sort_config_params{512, 4};
     }
-    // CONFIG: {'key_type': 'int64_t', 'value_type': 'empty_type', 'block_size_x': 256, 'ipt': 8}
+    // CONFIG: {'key_type': 'int64_t', 'value_type': 'rocprim::empty_type', 'block_size_x': 256, 'ipt': 8}
     if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                   && (sizeof(key_type) > 4)
                   && (std::is_same<value_type, rocprim::empty_type>::value)))
@@ -1940,7 +1940,7 @@ constexpr auto merge_sort_block_sort_config_picker()
     {
         return merge_sort_block_sort_config_params{256, 8};
     }
-    // CONFIG: {'key_type': 'int', 'value_type': 'empty_type', 'block_size_x': 256, 'ipt': 8}
+    // CONFIG: {'key_type': 'int', 'value_type': 'rocprim::empty_type', 'block_size_x': 256, 'ipt': 8}
     if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
                   && (sizeof(key_type) > 2)
                   && (std::is_same<value_type, rocprim::empty_type>::value)))
@@ -1982,7 +1982,7 @@ constexpr auto merge_sort_block_sort_config_picker()
     {
         return merge_sort_block_sort_config_params{256, 8};
     }
-    // CONFIG: {'key_type': 'short', 'value_type': 'empty_type', 'block_size_x': 256, 'ipt': 8}
+    // CONFIG: {'key_type': 'short', 'value_type': 'rocprim::empty_type', 'block_size_x': 256, 'ipt': 8}
     if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                   && (sizeof(key_type) > 1)
                   && (std::is_same<value_type, rocprim::empty_type>::value)))
@@ -2020,7 +2020,7 @@ constexpr auto merge_sort_block_sort_config_picker()
     {
         return merge_sort_block_sort_config_params{256, 8};
     }
-    // CONFIG: {'key_type': 'int8_t', 'value_type': 'empty_type', 'block_size_x': 256, 'ipt': 16}
+    // CONFIG: {'key_type': 'int8_t', 'value_type': 'rocprim::empty_type', 'block_size_x': 256, 'ipt': 16}
     if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
                   && (std::is_same<value_type, rocprim::empty_type>::value)))
     {
@@ -2073,7 +2073,7 @@ constexpr auto merge_sort_block_sort_config_picker()
     {
         return merge_sort_block_sort_config_params{512, 4};
     }
-    // CONFIG: {'key_type': 'double', 'value_type': 'empty_type', 'block_size_x': 256, 'ipt': 4}
+    // CONFIG: {'key_type': 'double', 'value_type': 'rocprim::empty_type', 'block_size_x': 256, 'ipt': 4}
     if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                   && (sizeof(key_type) > 4)
                   && (std::is_same<value_type, rocprim::empty_type>::value)))
@@ -2115,7 +2115,7 @@ constexpr auto merge_sort_block_sort_config_picker()
     {
         return merge_sort_block_sort_config_params{256, 8};
     }
-    // CONFIG: {'key_type': 'float', 'value_type': 'empty_type', 'block_size_x': 256, 'ipt': 8}
+    // CONFIG: {'key_type': 'float', 'value_type': 'rocprim::empty_type', 'block_size_x': 256, 'ipt': 8}
     if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
                   && (sizeof(key_type) > 2)
                   && (std::is_same<value_type, rocprim::empty_type>::value)))
@@ -2153,7 +2153,7 @@ constexpr auto merge_sort_block_sort_config_picker()
     {
         return merge_sort_block_sort_config_params{256, 8};
     }
-    // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'empty_type', 'block_size_x': 256, 'ipt': 16}
+    // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'rocprim::empty_type', 'block_size_x': 256, 'ipt': 16}
     if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                   && (std::is_same<value_type, rocprim::empty_type>::value)))
     {
@@ -2194,7 +2194,7 @@ constexpr auto merge_sort_block_sort_config_picker()
     {
         return merge_sort_block_sort_config_params{256, 4};
     }
-    // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'empty_type', 'block_size_x': 256, 'ipt': 4}
+    // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'rocprim::empty_type', 'block_size_x': 256, 'ipt': 4}
     if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 16)
                   && (sizeof(key_type) > 8)
                   && (std::is_same<value_type, rocprim::empty_type>::value)))
@@ -2236,7 +2236,7 @@ constexpr auto merge_sort_block_sort_config_picker()
     {
         return merge_sort_block_sort_config_params{512, 4};
     }
-    // CONFIG: {'key_type': 'int64_t', 'value_type': 'empty_type', 'block_size_x': 256, 'ipt': 4}
+    // CONFIG: {'key_type': 'int64_t', 'value_type': 'rocprim::empty_type', 'block_size_x': 256, 'ipt': 4}
     if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                   && (sizeof(key_type) > 4)
                   && (std::is_same<value_type, rocprim::empty_type>::value)))
@@ -2278,7 +2278,7 @@ constexpr auto merge_sort_block_sort_config_picker()
     {
         return merge_sort_block_sort_config_params{256, 8};
     }
-    // CONFIG: {'key_type': 'int', 'value_type': 'empty_type', 'block_size_x': 256, 'ipt': 8}
+    // CONFIG: {'key_type': 'int', 'value_type': 'rocprim::empty_type', 'block_size_x': 256, 'ipt': 8}
     if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
                   && (sizeof(key_type) > 2)
                   && (std::is_same<value_type, rocprim::empty_type>::value)))
@@ -2320,7 +2320,7 @@ constexpr auto merge_sort_block_sort_config_picker()
     {
         return merge_sort_block_sort_config_params{256, 8};
     }
-    // CONFIG: {'key_type': 'short', 'value_type': 'empty_type', 'block_size_x': 256, 'ipt': 16}
+    // CONFIG: {'key_type': 'short', 'value_type': 'rocprim::empty_type', 'block_size_x': 256, 'ipt': 16}
     if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                   && (sizeof(key_type) > 1)
                   && (std::is_same<value_type, rocprim::empty_type>::value)))
@@ -2358,7 +2358,7 @@ constexpr auto merge_sort_block_sort_config_picker()
     {
         return merge_sort_block_sort_config_params{256, 8};
     }
-    // CONFIG: {'key_type': 'int8_t', 'value_type': 'empty_type', 'block_size_x': 256, 'ipt': 32}
+    // CONFIG: {'key_type': 'int8_t', 'value_type': 'rocprim::empty_type', 'block_size_x': 256, 'ipt': 32}
     if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
                   && (std::is_same<value_type, rocprim::empty_type>::value)))
     {
@@ -2411,7 +2411,7 @@ constexpr auto merge_sort_block_sort_config_picker()
     {
         return merge_sort_block_sort_config_params{512, 4};
     }
-    // CONFIG: {'key_type': 'double', 'value_type': 'empty_type', 'block_size_x': 256, 'ipt': 8}
+    // CONFIG: {'key_type': 'double', 'value_type': 'rocprim::empty_type', 'block_size_x': 256, 'ipt': 8}
     if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                   && (sizeof(key_type) > 4)
                   && (std::is_same<value_type, rocprim::empty_type>::value)))
@@ -2453,7 +2453,7 @@ constexpr auto merge_sort_block_sort_config_picker()
     {
         return merge_sort_block_sort_config_params{512, 4};
     }
-    // CONFIG: {'key_type': 'float', 'value_type': 'empty_type', 'block_size_x': 256, 'ipt': 8}
+    // CONFIG: {'key_type': 'float', 'value_type': 'rocprim::empty_type', 'block_size_x': 256, 'ipt': 8}
     if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
                   && (sizeof(key_type) > 2)
                   && (std::is_same<value_type, rocprim::empty_type>::value)))
@@ -2491,7 +2491,7 @@ constexpr auto merge_sort_block_sort_config_picker()
     {
         return merge_sort_block_sort_config_params{256, 8};
     }
-    // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'empty_type', 'block_size_x': 256, 'ipt': 16}
+    // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'rocprim::empty_type', 'block_size_x': 256, 'ipt': 16}
     if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                   && (std::is_same<value_type, rocprim::empty_type>::value)))
     {
@@ -2532,7 +2532,7 @@ constexpr auto merge_sort_block_sort_config_picker()
     {
         return merge_sort_block_sort_config_params{256, 4};
     }
-    // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'empty_type', 'block_size_x': 256, 'ipt': 4}
+    // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'rocprim::empty_type', 'block_size_x': 256, 'ipt': 4}
     if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 16)
                   && (sizeof(key_type) > 8)
                   && (std::is_same<value_type, rocprim::empty_type>::value)))
@@ -2574,7 +2574,7 @@ constexpr auto merge_sort_block_sort_config_picker()
     {
         return merge_sort_block_sort_config_params{512, 4};
     }
-    // CONFIG: {'key_type': 'int64_t', 'value_type': 'empty_type', 'block_size_x': 256, 'ipt': 8}
+    // CONFIG: {'key_type': 'int64_t', 'value_type': 'rocprim::empty_type', 'block_size_x': 256, 'ipt': 8}
     if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                   && (sizeof(key_type) > 4)
                   && (std::is_same<value_type, rocprim::empty_type>::value)))
@@ -2616,7 +2616,7 @@ constexpr auto merge_sort_block_sort_config_picker()
     {
         return merge_sort_block_sort_config_params{512, 4};
     }
-    // CONFIG: {'key_type': 'int', 'value_type': 'empty_type', 'block_size_x': 256, 'ipt': 8}
+    // CONFIG: {'key_type': 'int', 'value_type': 'rocprim::empty_type', 'block_size_x': 256, 'ipt': 8}
     if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
                   && (sizeof(key_type) > 2)
                   && (std::is_same<value_type, rocprim::empty_type>::value)))
@@ -2658,7 +2658,7 @@ constexpr auto merge_sort_block_sort_config_picker()
     {
         return merge_sort_block_sort_config_params{512, 4};
     }
-    // CONFIG: {'key_type': 'short', 'value_type': 'empty_type', 'block_size_x': 256, 'ipt': 32}
+    // CONFIG: {'key_type': 'short', 'value_type': 'rocprim::empty_type', 'block_size_x': 256, 'ipt': 32}
     if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                   && (sizeof(key_type) > 1)
                   && (std::is_same<value_type, rocprim::empty_type>::value)))
@@ -2696,7 +2696,7 @@ constexpr auto merge_sort_block_sort_config_picker()
     {
         return merge_sort_block_sort_config_params{1024, 8};
     }
-    // CONFIG: {'key_type': 'int8_t', 'value_type': 'empty_type', 'block_size_x': 256, 'ipt': 32}
+    // CONFIG: {'key_type': 'int8_t', 'value_type': 'rocprim::empty_type', 'block_size_x': 256, 'ipt': 32}
     if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
                   && (std::is_same<value_type, rocprim::empty_type>::value)))
     {

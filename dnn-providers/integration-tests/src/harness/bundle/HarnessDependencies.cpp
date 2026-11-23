@@ -10,7 +10,8 @@
 namespace hipdnn_integration_tests::bundle
 {
 
-HarnessDependencies productionDependencies(TensorPlacement placement)
+HarnessDependencies productionDependencies(TensorPlacement placement,
+                                           std::shared_ptr<DeviceInputFiller> deviceFiller)
 {
     HarnessDependencies deps;
     deps.engineRunner = std::make_shared<FrontendGraphEngineRunner>();
@@ -18,6 +19,7 @@ HarnessDependencies productionDependencies(TensorPlacement placement)
     deps.claimObserver = std::make_shared<DefaultSupportClaimObserver>();
     deps.reporter = std::make_shared<GlobalVerificationReporter>();
     deps.policy = productionPolicy(placement);
+    deps.deviceFiller = std::move(deviceFiller);
     return deps;
 }
 

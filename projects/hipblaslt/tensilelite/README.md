@@ -1,4 +1,4 @@
-# Tensilelite
+# TensileLite
 
 ## Building and Running Tests
 
@@ -13,13 +13,13 @@ The standard workflow for running the entire test suite is to use `tox`. This co
 
 ```
 cd rocm-libraries/projects/hipblaslt/tensilelite
-tox -e py3 -- Tensile/Tests -m common
+tox -e py3 -- tensilelite/Tests -m common
 ```
 
-Subsequently, you can run just the Tensile unit tests via:
+Subsequently, you can run just the TensileLite unit tests via:
 
 ```
-tox -e unit -- Tensile/Tests/unit
+tox -e unit -- tensilelite/Tests/unit
 ```
 
 ### Generate coverage report with Tox
@@ -49,12 +49,9 @@ your staged TensileLite changes and blocks the commit on real failures (it falls
 back to the full unit + characterization suite when it cannot narrow the set). It
 runs `uv run pytest`, which imports rocisa (a HIP native extension), so install and
 commit from inside a ROCm dev container (HIP at `/opt/rocm`, a Python with dev
-headers). Editable rocisa currently rebuilds on import for compatibility, but
-that behavior is deprecated; use `invoke rocisa --no-rebuild-on-import` to opt
-out now, and use the explicit `invoke build --rebuild-rocisa` path after native
-changes. Mount the repo at the same absolute path inside the container as on the
-host — git worktrees use an absolute gitdir pointer, so a different mount breaks
-git.
+headers). Run `invoke rocisa` explicitly after native rocisa changes. Mount the
+repo at the same absolute path inside the container as on the host — git
+worktrees use an absolute gitdir pointer, so a different mount breaks git.
 
 ```
 cd rocm-libraries/projects/hipblaslt/tensilelite
@@ -69,7 +66,7 @@ with `git commit --no-verify`. On a snapshot mismatch the hook prints a
 ### Build client with invoke and Run a Test (Default Path)
 
 This workflow uses `invoke` to build the C++ client into the default `build_tmp` directory.
-Tensile will search for `tensilelite-client` in `tensilelite/build_tmp` if `--prebuilt-client`
+TensileLite will search for `tensilelite-client` in `tensilelite/build_tmp` if `--prebuilt-client`
 is not specified.
 
 ```
@@ -91,7 +88,7 @@ invoke build-client \
   --export-compile-commands
 
 # run an individual test directly — no wrapper script needed
-Tensile/bin/Tensile Tensile/Tests/common/exception/<test>.yaml tensile-out
+tensilelite/bin/Tensile tensilelite/Tests/common/exception/<test>.yaml tensile-out
 ```
 
 ### Rebuilding after C++ changes
@@ -146,7 +143,7 @@ cmake --preset tensilelite -S .. -B my-custom-build
 cmake --build my-custom-build --parallel
 
 # run a test directly
-Tensile/bin/Tensile Tensile/Tests/pre_checkin/<test>.yaml tensile-out \
+tensilelite/bin/Tensile tensilelite/Tests/pre_checkin/<test>.yaml tensile-out \
                            --prebuilt-client=my-custom-build/tensilelite-client/tensilelite-client
 ```
 
@@ -158,10 +155,10 @@ specialized builds (e.g., Debug builds) and setting the architecture.
 ```
 # build the client using tox with custom CMake flags
 cd rocm-libraries/projects/hipblaslt/tensilelite
-TENSILELITE_CLIENT_ARGS="--build-type Debug --gpu-targets gfx90a --clean" tox -e py3 -- Tensile/Tests -m common
+TENSILELITE_CLIENT_ARGS="--build-type Debug --gpu-targets gfx90a --clean" tox -e py3 -- tensilelite/Tests -m common
 
 # run tests with a single pytest worker (useful for debugging)
-TENSILE_NUM_PYTEST_WORKERS=1 tox -e py3 -- Tensile/Tests -m common
+TENSILE_NUM_PYTEST_WORKERS=1 tox -e py3 -- tensilelite/Tests -m common
 ```
 
 `invoke build-client` follows the existing `tensilelite` CMake preset by default.
@@ -194,8 +191,8 @@ and use it as the compiler launcher. No additional configuration is needed.
 
 * `TENSILELITE_ENABLE_HOST`: Enables generation of tensilelite host (default: `ON`)
 * `TENSILELITE_ENABLE_CLIENT`: Enables generation of tensilelite client application (default: `ON`)
-* `TENSILELITE_ENABLE_AUTOBUILD`: Generate wrapper scripts (e.g. `Tensile.sh`) for the cmake build tree. **Deprecated** — run `Tensile/bin/Tensile` directly instead (default: `OFF`)
 * `TENSILELITE_BUILD_TESTING`: Build tensilelite host library tests (default: `OFF`)
+* `TENSILELITE_CLIENT_FORCE_RPATH`: Tags the client's library search path as DT_RPATH, so `LD_LIBRARY_PATH` cannot replace the libraries it was built against, HIP and HSA included. Needs `patchelf`; without it, configure warns and the client keeps DT_RUNPATH (default: `ON`)
 * `GPU_TARGETS:` Semicolon separated list of gfx targets to build
 
 ## How to Rebuild Object Codes Directly from Assembly
@@ -208,33 +205,21 @@ Assumptions:
 
 - Each problem directory contains a library directory with one co file corresponding to one architecture
 
-**Edit**(2025/3/31) ``rocisa`` use the CMake build system instead of the ``virtualenv``. The behavior of the TensileLite changed a bit with only one extra line.
-
-Example:
-
-```cmake -DTENSILE_BIN=Tensile -DDEVELOP_MODE=ON -S <path-to-tensilelite-root> -B <tensile-out>```
-
-The script will be created in the build folder and will be named in Tensile.bat or Tensile.sh depending on the platform. Then you can then run the script under the ``tensile-out`` folder as usual:
-
-> **Deprecated:** `Tensile.sh` / `Tensile.bat` will be removed in a future release.
-> Run `Tensile/bin/Tensile` directly instead.
+Install rocisa with `invoke rocisa`, then run the source entry point directly:
 
 ```
-Tensile.sh <abs-path>/Tensile/Tests/gemm/fp16_use_e.yaml tensile-out
+tensilelite/bin/Tensile <abs-path>/tensilelite/Tests/common/gemm/fp16_use_e.yaml tensile-out
 ```
-
-or
-
-```
-Tensile.bat <abs-path>/Tensile/Tests/gemm/fp16_use_e.yaml tensile-out
-```
-
-**You don't need to rerun CMake unless you delete the ``tensile-out`` folder.**
 
 To build asm only:
 
 ```
-# modify an assembly file in tensile-out/1_BenchmarkProblems/Cijk_Ailk_Bjlk_DB_UserArgs_00/00_Final/source/build_tmp/SOURCE/assembly
+# modify an assembly file in
+# tensile-out/1_BenchmarkProblems/Cijk_Ailk_Bjlk_DB_UserArgs_00/00_Final/caches/<key>/source/build_tmp/SOURCE/assembly
+# The scratch directory is SOURCE, except when a silicon stepping was asked for.
+# A stepping shares its ISA with the architecture it steps, so both would otherwise
+# claim the same directory; it gets SOURCE-<stepping> instead, and only it does
+# (gfx1250 -> SOURCE, gfx1250-strict -> SOURCE-gfx1250-strict).
 make co TENSILE_OUT=tensile-out
 # re-run the client
 ```

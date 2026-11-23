@@ -60,6 +60,13 @@ struct GemmConfigBase
     static constexpr ck_tile::index_t VectorSizeC = 1;
 
     static constexpr bool EnableSmallerVectorLoadFallback = false;
+    static constexpr bool LargeTensors                    = false;
+
+    // COMPUTE_TDM_V1 / COMPUTE_TDM_V2 with UniversalInvoker only (EpilogueTypeTraits).
+    // 0: TdmEpilogue writes the whole C tile through LDS at once.
+    // N > 0: TdmEpilogueStagedForPipeline writes it in slabs of N M iterations, with as many
+    // slab buffers as fit in the pipeline's LDS.
+    static constexpr ck_tile::index_t TdmMIterPerStage = 0;
 };
 
 // A,B vector sizes must divide K_Warp_Tile. Used directly by test_gemm_unaligned_k.cpp; the
@@ -168,6 +175,10 @@ struct GemmConfigComputeV3_1 : public GemmConfigBase
 template <typename PrecType>
 struct GemmConfigComputeV3_2 : public GemmConfigBase
 {
+    static constexpr bool kPadM = true;
+    static constexpr bool kPadN = true;
+    static constexpr bool kPadK = true;
+
     static constexpr ck_tile::index_t M_Tile = 128;
     static constexpr ck_tile::index_t N_Tile = 128;
     static constexpr ck_tile::index_t K_Tile = 128 / sizeof(PrecType);
@@ -185,6 +196,9 @@ struct GemmConfigComputeV3_2 : public GemmConfigBase
     static constexpr ck_tile::GemmPipeline Pipeline = ck_tile::GemmPipeline::COMPUTE_V3;
 
     static constexpr int kBlockPerCu = 2;
+    static constexpr bool EnableSmallerVectorLoadFallback =
+        !std::is_same_v<PrecType, ck_tile::int8_t>;
+    static constexpr bool LargeTensors = !std::is_same_v<PrecType, ck_tile::int8_t>;
 };
 
 template <typename PrecType>
@@ -240,6 +254,7 @@ struct GemmConfigComputeV3_WMMA : public GemmConfigBase
     static constexpr int kBlockPerCu = 2;
 
     static constexpr bool EnableSmallerVectorLoadFallback = true;
+    static constexpr bool LargeTensors = !std::is_same_v<PrecType, ck_tile::int8_t>;
 };
 
 template <typename PrecType>
@@ -669,22 +684,40 @@ struct PipelineTypeTraits<ck_tile::GemmPipeline::PRESHUFFLE_TDM>
             PipelineProblem::Traits::DataCachePrefetchB>>;
 };
 
-template <ck_tile::GemmPipeline PipelineId, typename Problem>
+template <ck_tile::GemmPipeline PipelineId,
+          typename Problem,
+          typename GemmPipeline_         = void,
+          ck_tile::index_t MIterPerStage = 0>
 struct EpilogueTypeTraits
 {
+    static_assert(MIterPerStage == 0,
+                  "TdmMIterPerStage applies to COMPUTE_TDM_V1 / COMPUTE_TDM_V2 only");
     using Epilogue = ck_tile::CShuffleEpilogue<Problem>;
 };
 
-template <typename Problem>
-struct EpilogueTypeTraits<ck_tile::GemmPipeline::COMPUTE_TDM_V1, Problem>
+// TdmEpilogue, or its staged form when MIterPerStage > 0.
+template <typename Problem, typename GemmPipeline_, ck_tile::index_t MIterPerStage>
+using TdmEpilogueFor = std::conditional_t<
+    MIterPerStage == 0,
+    ck_tile::TdmEpilogue<Problem>,
+    ck_tile::TdmEpilogueStagedForPipeline<Problem, MIterPerStage, GemmPipeline_>>;
+
+template <typename Problem, typename GemmPipeline_, ck_tile::index_t MIterPerStage>
+struct EpilogueTypeTraits<ck_tile::GemmPipeline::COMPUTE_TDM_V1,
+                          Problem,
+                          GemmPipeline_,
+                          MIterPerStage>
 {
-    using Epilogue = ck_tile::TdmEpilogue<Problem>;
+    using Epilogue = TdmEpilogueFor<Problem, GemmPipeline_, MIterPerStage>;
 };
 
-template <typename Problem>
-struct EpilogueTypeTraits<ck_tile::GemmPipeline::COMPUTE_TDM_V2, Problem>
+template <typename Problem, typename GemmPipeline_, ck_tile::index_t MIterPerStage>
+struct EpilogueTypeTraits<ck_tile::GemmPipeline::COMPUTE_TDM_V2,
+                          Problem,
+                          GemmPipeline_,
+                          MIterPerStage>
 {
-    using Epilogue = ck_tile::TdmEpilogue<Problem>;
+    using Epilogue = TdmEpilogueFor<Problem, GemmPipeline_, MIterPerStage>;
 };
 
 inline auto create_args()

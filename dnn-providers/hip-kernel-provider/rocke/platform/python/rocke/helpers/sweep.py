@@ -95,7 +95,8 @@ def sweep_row_chunks(
 
     The :class:`TileWindow` ``tile`` must be 2D with the row dim first;
     each call to ``tile.load_vec_as_f32(b, 0, n_off, n=vec)`` reads a
-    contiguous vec-wide slice of the current row, promoted to f32. The
+    contiguous vec-wide slice of the current row, promoted to f32 (f64
+    tiles are read without promotion). The
     ``row`` argument shifts the tile's row origin in-place (matching
     CK Tile's ``set_window_origin``); pass ``None`` to leave the
     current origin alone (e.g. when the caller already moved the tile
@@ -140,7 +141,10 @@ def sweep_row_chunks(
             b.mul(b.const_i32(k * block_size), c_vec),
             b.mul(tid, c_vec),
         )
-        x_scalars = tile.load_vec_as_f32(b, b.const_i32(0), n_off, n=vec)
+        if tile.dtype.name == "f64":
+            x_scalars = tile.load_vec_scalars(b, b.const_i32(0), n_off, n=vec)
+        else:
+            x_scalars = tile.load_vec_as_f32(b, b.const_i32(0), n_off, n=vec)
         if cache:
             cached.extend(x_scalars)
         if body is not None:

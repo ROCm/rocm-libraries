@@ -44,7 +44,8 @@ namespace rocsparse
                                    rocsparse_int*       zero_pivot,
                                    rocsparse_index_base idx_base,
                                    rocsparse_diag_type  diag_type,
-                                   rocsparse_direction  dir)
+                                   rocsparse_direction  dir,
+                                   int64_t              row_group)
     {
         static_assert(WFSIZE > 0 && (WFSIZE & (WFSIZE - 1)) == 0, "WFSIZE must be a power of two.");
         static_assert(BLOCKSIZE > 0, "BLOCKSIZE must be positive.");
@@ -53,8 +54,10 @@ namespace rocsparse
         const int lid = hipThreadIdx_x & (WFSIZE - 1);
         const int wid = hipThreadIdx_x / WFSIZE;
 
-        // Index into the row map
-        const rocsparse_int idx = hipBlockIdx_x * BLOCKSIZE / WFSIZE + wid;
+        // Index into the row map. One group of BLOCKSIZE / WFSIZE consecutive
+        // rows, one row per wavefront; the caller supplies the group so the
+        // kernel can walk a chunk of groups when grid.x is clamped.
+        const int64_t idx = row_group * (BLOCKSIZE / WFSIZE) + wid;
 
         // Do not run out of bounds
         if(idx >= mb)
@@ -64,6 +67,9 @@ namespace rocsparse
 
         // Get the BSR row this wavefront will operate on
         const rocsparse_int row = map[idx];
+
+        // row * block_dim can exceed INT32_MAX.
+        const int64_t row_offset = static_cast<int64_t>(row) * block_dim;
 
         // Current row entry and exit point
         const rocsparse_int row_begin = bsr_row_ptr[row] - idx_base;
@@ -75,7 +81,7 @@ namespace rocsparse
         // Initialize y with alpha and x
         for(rocsparse_int bi = lid; bi < block_dim; bi += WFSIZE)
         {
-            y[row * block_dim + bi] = alpha * x[row * block_dim + bi];
+            y[row_offset + bi] = alpha * x[row_offset + bi];
         }
 
         // Loop over the current row
@@ -94,7 +100,7 @@ namespace rocsparse
             }
 
             // Spin loop until dependency has been resolved
-            rocsparse::spin_loop<SLEEP>(&done_array[local_col], __HIP_MEMORY_SCOPE_AGENT);
+            rocsparse::spin_loop<SLEEP>(&done_array[local_col], __MEMORY_SCOPE_DEVICE);
 
             // Wait for y to be visible globally
             __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "agent");
@@ -107,12 +113,13 @@ namespace rocsparse
 
                 for(rocsparse_int bj = 0; bj < block_dim; ++bj)
                 {
-                    local_sum = rocsparse::fma(
-                        bsr_val[BSR_IND(j, bi, bj, dir)], y[local_col * block_dim + bj], local_sum);
+                    local_sum = rocsparse::fma(bsr_val[BSR_IND(j, bi, bj, dir)],
+                                               y[static_cast<int64_t>(local_col) * block_dim + bj],
+                                               local_sum);
                 }
 
                 // Write local sum to y
-                y[row * block_dim + bi] -= local_sum;
+                y[row_offset + bi] -= local_sum;
             }
         }
 
@@ -125,11 +132,11 @@ namespace rocsparse
             {
                 // Load diagonal matrix entry
                 const T diag = (diag_type == rocsparse_diag_type_non_unit)
-                                   ? bsr_val[block_dim * block_dim * j + bi + bi * block_dim]
+                                   ? bsr_val[BSR_IND_C(j, bi, bi)]
                                    : static_cast<T>(1);
 
                 // Load result of bi-th BSR row
-                T val = y[row * block_dim + bi];
+                T val = y[row_offset + bi];
                 // Check for numerical pivot
                 if(diag == static_cast<T>(0))
                 {
@@ -138,13 +145,13 @@ namespace rocsparse
                 else
                 {
                     // Divide result of bi-th BSR row by diagonal entry
-                    y[row * block_dim + bi] = val /= diag;
+                    y[row_offset + bi] = val /= diag;
                 }
 
                 // Update remaining non-diagonal entries
                 for(rocsparse_int bj = bi + lid + 1; bj < block_dim; bj += WFSIZE)
                 {
-                    y[row * block_dim + bj] -= val * bsr_val[BSR_IND(j, bj, bi, dir)];
+                    y[row_offset + bj] -= val * bsr_val[BSR_IND(j, bj, bi, dir)];
                 }
             }
         }
@@ -152,7 +159,7 @@ namespace rocsparse
         // Write "row is done" flag
         if(lid == 0)
         {
-            __hip_atomic_store(&done_array[row], 1, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_AGENT);
+            rocsparse::atomic_store(&done_array[row], 1, __ATOMIC_RELEASE, __MEMORY_SCOPE_DEVICE);
 
             if(pivot == true)
             {
@@ -176,7 +183,8 @@ namespace rocsparse
                                    rocsparse_int*       zero_pivot,
                                    rocsparse_index_base idx_base,
                                    rocsparse_diag_type  diag_type,
-                                   rocsparse_direction  dir)
+                                   rocsparse_direction  dir,
+                                   int64_t              row_group)
     {
         static_assert(WFSIZE > 0 && (WFSIZE & (WFSIZE - 1)) == 0, "WFSIZE must be a power of two.");
         static_assert(BLOCKSIZE > 0, "BLOCKSIZE must be positive.");
@@ -185,8 +193,10 @@ namespace rocsparse
         const int lid = hipThreadIdx_x & (WFSIZE - 1);
         const int wid = hipThreadIdx_x / WFSIZE;
 
-        // Index into the row map
-        const rocsparse_int idx = hipBlockIdx_x * BLOCKSIZE / WFSIZE + wid;
+        // Index into the row map. One group of BLOCKSIZE / WFSIZE consecutive
+        // rows, one row per wavefront; the caller supplies the group so the
+        // kernel can walk a chunk of groups when grid.x is clamped.
+        const int64_t idx = row_group * (BLOCKSIZE / WFSIZE) + wid;
 
         // Do not run out of bounds
         if(idx >= mb)
@@ -196,6 +206,9 @@ namespace rocsparse
 
         // Get the BSR row this wavefront will operate on
         const rocsparse_int row = map[idx];
+
+        // row * block_dim can exceed INT32_MAX.
+        const int64_t row_offset = static_cast<int64_t>(row) * block_dim;
 
         // Current row entry and exit point
         const rocsparse_int row_begin = bsr_row_ptr[row] - idx_base;
@@ -207,7 +220,7 @@ namespace rocsparse
         // Initialize y with alpha and x
         for(rocsparse_int bi = lid; bi < block_dim; bi += WFSIZE)
         {
-            y[row * block_dim + bi] = alpha * x[row * block_dim + bi];
+            y[row_offset + bi] = alpha * x[row_offset + bi];
         }
 
         // Loop over the current row
@@ -226,7 +239,7 @@ namespace rocsparse
             }
 
             // Spin loop until dependency has been resolved
-            rocsparse::spin_loop<SLEEP>(&done_array[local_col], __HIP_MEMORY_SCOPE_AGENT);
+            rocsparse::spin_loop<SLEEP>(&done_array[local_col], __MEMORY_SCOPE_DEVICE);
 
             // Wait for y to be visible globally
             __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "agent");
@@ -239,12 +252,13 @@ namespace rocsparse
 
                 for(rocsparse_int bj = 0; bj < block_dim; ++bj)
                 {
-                    local_sum = rocsparse::fma(
-                        bsr_val[BSR_IND(j, bi, bj, dir)], y[local_col * block_dim + bj], local_sum);
+                    local_sum = rocsparse::fma(bsr_val[BSR_IND(j, bi, bj, dir)],
+                                               y[static_cast<int64_t>(local_col) * block_dim + bj],
+                                               local_sum);
                 }
 
                 // Write local sum to y
-                y[row * block_dim + bi] -= local_sum;
+                y[row_offset + bi] -= local_sum;
             }
         }
 
@@ -257,11 +271,11 @@ namespace rocsparse
             {
                 // Load diagonal matrix entry
                 const T diag = (diag_type == rocsparse_diag_type_non_unit)
-                                   ? bsr_val[block_dim * block_dim * j + bi + bi * block_dim]
+                                   ? bsr_val[BSR_IND_C(j, bi, bi)]
                                    : static_cast<T>(1);
 
                 // Load result of bi-th BSR row
-                T val = y[row * block_dim + bi];
+                T val = y[row_offset + bi];
 
                 // Check for numerical pivot
                 if(diag == static_cast<T>(0))
@@ -271,13 +285,13 @@ namespace rocsparse
                 else
                 {
                     // Divide result of bi-th BSR row by diagonal entry
-                    y[row * block_dim + bi] = val /= diag;
+                    y[row_offset + bi] = val /= diag;
                 }
 
                 // Update remaining non-diagonal entries
                 for(rocsparse_int bj = lid; bj < bi; bj += WFSIZE)
                 {
-                    y[row * block_dim + bj] -= val * bsr_val[BSR_IND(j, bj, bi, dir)];
+                    y[row_offset + bj] -= val * bsr_val[BSR_IND(j, bj, bi, dir)];
                 }
             }
         }
@@ -285,7 +299,7 @@ namespace rocsparse
         // Write "row is done" flag
         if(lid == 0)
         {
-            __hip_atomic_store(&done_array[row], 1, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_AGENT);
+            rocsparse::atomic_store(&done_array[row], 1, __ATOMIC_RELEASE, __MEMORY_SCOPE_DEVICE);
 
             if(pivot == true)
             {
@@ -309,7 +323,8 @@ namespace rocsparse
                                   rocsparse_int*       zero_pivot,
                                   rocsparse_index_base idx_base,
                                   rocsparse_diag_type  diag_type,
-                                  rocsparse_direction  dir)
+                                  rocsparse_direction  dir,
+                                  int64_t              row_group)
     {
         static_assert(WFSIZE > 0 && (WFSIZE & (WFSIZE - 1)) == 0, "WFSIZE must be a power of two.");
         static_assert(BLOCKSIZE > 0, "BLOCKSIZE must be positive.");
@@ -319,8 +334,10 @@ namespace rocsparse
         const int lid = hipThreadIdx_x & (WFSIZE - 1);
         const int wid = hipThreadIdx_x / WFSIZE;
 
-        // Index into the row map
-        const rocsparse_int idx = hipBlockIdx_x * BLOCKSIZE / WFSIZE + wid;
+        // Index into the row map. One group of BLOCKSIZE / WFSIZE consecutive
+        // rows, one row per wavefront; the caller supplies the group so the
+        // kernel can walk a chunk of groups when grid.x is clamped.
+        const int64_t idx = row_group * (BLOCKSIZE / WFSIZE) + wid;
 
         // Do not run out of bounds
         if(idx >= mb)
@@ -331,6 +348,9 @@ namespace rocsparse
         // Get the BSR row this wavefront will operate on
         const rocsparse_int row = map[idx];
 
+        // row * block_dim can exceed INT32_MAX.
+        const int64_t row_offset = static_cast<int64_t>(row) * block_dim;
+
         // Current row entry and exit point
         const rocsparse_int row_begin = bsr_row_ptr[row] - idx_base;
         const rocsparse_int row_end   = bsr_row_ptr[row + 1] - idx_base;
@@ -339,7 +359,7 @@ namespace rocsparse
         rocsparse_int local_col = mb;
 
         // Initialize local summation variable with alpha and x
-        T local_sum = alpha * ((lid < block_dim) ? x[row * block_dim + lid] : static_cast<T>(0));
+        T local_sum = alpha * ((lid < block_dim) ? x[row_offset + lid] : static_cast<T>(0));
 
         // Shared memory to hold BSR blocks and updated sums
         __shared__ T sdata1[BLOCKSIZE / WFSIZE * BSRDIM * BSRDIM];
@@ -377,16 +397,17 @@ namespace rocsparse
             }
 
             // Spin loop until dependency has been resolved
-            rocsparse::spin_loop<SLEEP>(&done_array[local_col], __HIP_MEMORY_SCOPE_AGENT);
+            rocsparse::spin_loop<SLEEP>(&done_array[local_col], __MEMORY_SCOPE_DEVICE);
 
-            // Wait for y to be visible globally
-            __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "agent");
+            // Read the results of the dependencies only after their done flags
+            rocsparse::acquire_done_rows();
 
             // Load all updated dependencies into shared memory
             if(lid < BSRDIM)
             {
-                bsr_updates[lid]
-                    = (lid < block_dim) ? y[local_col * block_dim + lid] : static_cast<T>(0);
+                bsr_updates[lid] = (lid < block_dim) ? rocsparse::load_done_row_data(
+                                       &y[static_cast<int64_t>(local_col) * block_dim + lid])
+                                                     : static_cast<T>(0);
             }
 
             __threadfence_block();
@@ -447,13 +468,13 @@ namespace rocsparse
         if(lid < block_dim)
         {
             // Store the rows results in y
-            y[row * block_dim + lid] = local_sum;
+            rocsparse::store_done_row_data(&y[row_offset + lid], local_sum);
         }
 
         if(lid == 0)
         {
             // Write "row is done" flag
-            __hip_atomic_store(&done_array[row], 1, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_AGENT);
+            rocsparse::set_done_flag(&done_array[row], 1);
 
             // Find the minimum pivot, if applicable
             if(pivot == true)
@@ -478,7 +499,8 @@ namespace rocsparse
                                   rocsparse_int*       zero_pivot,
                                   rocsparse_index_base idx_base,
                                   rocsparse_diag_type  diag_type,
-                                  rocsparse_direction  dir)
+                                  rocsparse_direction  dir,
+                                  int64_t              row_group)
     {
         static_assert(WFSIZE > 0 && (WFSIZE & (WFSIZE - 1)) == 0, "WFSIZE must be a power of two.");
         static_assert(BLOCKSIZE > 0, "BLOCKSIZE must be positive.");
@@ -488,8 +510,10 @@ namespace rocsparse
         const int lid = hipThreadIdx_x & (WFSIZE - 1);
         const int wid = hipThreadIdx_x / WFSIZE;
 
-        // Index into the row map
-        const rocsparse_int idx = hipBlockIdx_x * BLOCKSIZE / WFSIZE + wid;
+        // Index into the row map. One group of BLOCKSIZE / WFSIZE consecutive
+        // rows, one row per wavefront; the caller supplies the group so the
+        // kernel can walk a chunk of groups when grid.x is clamped.
+        const int64_t idx = row_group * (BLOCKSIZE / WFSIZE) + wid;
 
         // Do not run out of bounds
         if(idx >= mb)
@@ -500,6 +524,9 @@ namespace rocsparse
         // Get the BSR row this wavefront will operate on
         const rocsparse_int row = map[idx];
 
+        // row * block_dim can exceed INT32_MAX.
+        const int64_t row_offset = static_cast<int64_t>(row) * block_dim;
+
         // Current row entry and exit point
         const rocsparse_int row_begin = bsr_row_ptr[row] - idx_base;
         const rocsparse_int row_end   = bsr_row_ptr[row + 1] - idx_base;
@@ -508,7 +535,7 @@ namespace rocsparse
         rocsparse_int local_col = mb;
 
         // Initialize local summation variable with alpha and x
-        T local_sum = alpha * ((lid < block_dim) ? x[row * block_dim + lid] : static_cast<T>(0));
+        T local_sum = alpha * ((lid < block_dim) ? x[row_offset + lid] : static_cast<T>(0));
 
         // Shared memory to hold BSR blocks and updated sums
         __shared__ T sdata1[BLOCKSIZE / WFSIZE * BSRDIM * BSRDIM];
@@ -546,16 +573,17 @@ namespace rocsparse
             }
 
             // Spin loop until dependency has been resolved
-            rocsparse::spin_loop<SLEEP>(&done_array[local_col], __HIP_MEMORY_SCOPE_AGENT);
+            rocsparse::spin_loop<SLEEP>(&done_array[local_col], __MEMORY_SCOPE_DEVICE);
 
-            // Wait for y to be visible globally
-            __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "agent");
+            // Read the results of the dependencies only after their done flags
+            rocsparse::acquire_done_rows();
 
             // Load all updated dependencies into shared memory
             if(lid < BSRDIM)
             {
-                bsr_updates[lid]
-                    = (lid < block_dim) ? y[local_col * block_dim + lid] : static_cast<T>(0);
+                bsr_updates[lid] = (lid < block_dim) ? rocsparse::load_done_row_data(
+                                       &y[static_cast<int64_t>(local_col) * block_dim + lid])
+                                                     : static_cast<T>(0);
             }
 
             __threadfence_block();
@@ -616,13 +644,13 @@ namespace rocsparse
         if(lid < block_dim)
         {
             // Store the rows results in y
-            y[row * block_dim + lid] = local_sum;
+            rocsparse::store_done_row_data(&y[row_offset + lid], local_sum);
         }
 
         if(lid == 0)
         {
             // Write "row is done" flag
-            __hip_atomic_store(&done_array[row], 1, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_AGENT);
+            rocsparse::set_done_flag(&done_array[row], 1);
 
             // Find the minimum pivot, if applicable
             if(pivot == true)

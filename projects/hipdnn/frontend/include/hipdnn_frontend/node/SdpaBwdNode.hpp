@@ -12,6 +12,12 @@
 #include <hipdnn_frontend/detail/SdpaBwdUnpacker.hpp>
 #include <hipdnn_frontend/node/detail/Utilities.hpp>
 
+#include <cstddef>
+#include <cstdint>
+#include <memory>
+#include <string>
+#include <vector>
+
 namespace hipdnn_frontend::graph
 {
 
@@ -25,11 +31,12 @@ namespace hipdnn_frontend::graph
  * - Softmax statistics (logsumexp) from the forward pass
  *
  * The backward pass uses the flash attention algorithm to compute:
- *   dV = softmax(Q * K^T / sqrt(d_k))^T * dO
- *   dP = dO * V^T         (where P = softmax(Q * K^T / sqrt(d_k)))
+ *   dV = softmax(scale * Q * K^T)^T * dO
+ *   dP = dO * V^T         (where P = softmax(scale * Q * K^T))
  *   dS = P * (dP - rowsum(dO * O))
- *   dQ = dS * K / sqrt(d_k)
- *   dK = dS^T * Q / sqrt(d_k)
+ *   dQ = scale * dS * K
+ *   dK = scale * dS^T * Q
+ * where scale is the attention scale, 1.0 (no scaling) when none is set.
  */
 class SdpaBwdNode : public BaseNode<SdpaBwdNode, NodeType::SDPA_BWD>
 {
@@ -47,6 +54,14 @@ public:
         HIPDNN_RETURN_IF_TRUE(attributes.hasUnsupportedUsage(),
                               ErrorCode::INVALID_VALUE,
                               attributes.getUnsupportedReason());
+
+        // Band domain (SdpaSemanticsRegister SEM-005): left_bound -1 or >= 1, right_bound >= -1.
+        HIPDNN_CHECK_ERROR(detail::validateSdpaDiagonalBand(
+            attributes.left_bound, attributes.right_bound, "SdpaBwdNode"));
+
+        // The deprecated causal flags name different alignments; both set is invalid (SEM-002).
+        HIPDNN_CHECK_ERROR(detail::validateSdpaDeprecatedCausalFlags(
+            attributes.causal_mask, attributes.causal_mask_bottom_right, "SdpaBwdNode"));
 
         const auto q = attributes.get_q();
         const auto k = attributes.get_k();
@@ -276,71 +291,11 @@ public:
                 ErrorCode::ATTRIBUTE_NOT_SET,
                 std::string("SdpaBwdNode: padding_mask=true requires seq_len_kv tensor to be set"));
 
-            const auto& sqDims = seqLenQ->get_dim();
-            const auto& skvDims = seqLenKv->get_dim();
             const auto batch = qDims[0];
-
-            HIPDNN_RETURN_IF_NE(sqDims.size(),
-                                static_cast<size_t>(4),
-                                ErrorCode::INVALID_VALUE,
-                                "SdpaBwdNode: seq_len_q must be rank-4, got rank="
-                                    + std::to_string(sqDims.size()));
-            HIPDNN_RETURN_IF_NE(sqDims[0],
-                                batch,
-                                ErrorCode::INVALID_VALUE,
-                                "SdpaBwdNode: seq_len_q dim[0] must equal batch ("
-                                    + std::to_string(batch) + "), got "
-                                    + std::to_string(sqDims[0]));
-            HIPDNN_RETURN_IF_NE(sqDims[1],
-                                static_cast<int64_t>(1),
-                                ErrorCode::INVALID_VALUE,
-                                "SdpaBwdNode: seq_len_q dim[1] must be 1, got "
-                                    + std::to_string(sqDims[1]));
-            HIPDNN_RETURN_IF_NE(sqDims[2],
-                                static_cast<int64_t>(1),
-                                ErrorCode::INVALID_VALUE,
-                                "SdpaBwdNode: seq_len_q dim[2] must be 1, got "
-                                    + std::to_string(sqDims[2]));
-            HIPDNN_RETURN_IF_NE(sqDims[3],
-                                static_cast<int64_t>(1),
-                                ErrorCode::INVALID_VALUE,
-                                "SdpaBwdNode: seq_len_q dim[3] must be 1, got "
-                                    + std::to_string(sqDims[3]));
-            HIPDNN_RETURN_IF_TRUE(seqLenQ->get_data_type() != DataType::INT32,
-                                  ErrorCode::INVALID_VALUE,
-                                  std::string("SdpaBwdNode: seq_len_q must have INT32 data "
-                                              "type"));
-
-            HIPDNN_RETURN_IF_NE(skvDims.size(),
-                                static_cast<size_t>(4),
-                                ErrorCode::INVALID_VALUE,
-                                "SdpaBwdNode: seq_len_kv must be rank-4, got rank="
-                                    + std::to_string(skvDims.size()));
-            HIPDNN_RETURN_IF_NE(skvDims[0],
-                                batch,
-                                ErrorCode::INVALID_VALUE,
-                                "SdpaBwdNode: seq_len_kv dim[0] must equal batch ("
-                                    + std::to_string(batch) + "), got "
-                                    + std::to_string(skvDims[0]));
-            HIPDNN_RETURN_IF_NE(skvDims[1],
-                                static_cast<int64_t>(1),
-                                ErrorCode::INVALID_VALUE,
-                                "SdpaBwdNode: seq_len_kv dim[1] must be 1, got "
-                                    + std::to_string(skvDims[1]));
-            HIPDNN_RETURN_IF_NE(skvDims[2],
-                                static_cast<int64_t>(1),
-                                ErrorCode::INVALID_VALUE,
-                                "SdpaBwdNode: seq_len_kv dim[2] must be 1, got "
-                                    + std::to_string(skvDims[2]));
-            HIPDNN_RETURN_IF_NE(skvDims[3],
-                                static_cast<int64_t>(1),
-                                ErrorCode::INVALID_VALUE,
-                                "SdpaBwdNode: seq_len_kv dim[3] must be 1, got "
-                                    + std::to_string(skvDims[3]));
-            HIPDNN_RETURN_IF_TRUE(seqLenKv->get_data_type() != DataType::INT32,
-                                  ErrorCode::INVALID_VALUE,
-                                  std::string("SdpaBwdNode: seq_len_kv must have INT32 data "
-                                              "type"));
+            HIPDNN_CHECK_ERROR(
+                detail::validateIndexTensor(seqLenQ, "SdpaBwdNode", "seq_len_q", batch, "batch"));
+            HIPDNN_CHECK_ERROR(
+                detail::validateIndexTensor(seqLenKv, "SdpaBwdNode", "seq_len_kv", batch, "batch"));
         }
 
         // Rule 10: attn_scale may be given as a tensor or a baked value, not both
@@ -356,6 +311,52 @@ public:
             HIPDNN_CHECK_ERROR(detail::validateScalarParameter(scale, "SCALE tensor"));
         }
 
+        // Rule 11: a gradient has the shape of the tensor it differentiates. Dims and strides
+        // left empty are inferred, so only caller-supplied ones are checked. As in cuDNN, the
+        // head dimension of dQ, dK and dV must be contiguous.
+        HIPDNN_CHECK_ERROR(validateGradientOutput(dq, qDims, "dQ", "Q", true));
+        HIPDNN_CHECK_ERROR(validateGradientOutput(dk, kDims, "dK", "K", true));
+        HIPDNN_CHECK_ERROR(validateGradientOutput(dv, vDims, "dV", "V", true));
+
+        // Rule 12: dBias has the bias tensor's shape (SdpaSemanticsRegister SEM-014), so it
+        // needs a bias to take that shape from. cuDNN's last-stride-1 check does not list
+        // dBias, so it is not held to that rule.
+        const auto dBias = attributes.get_dbias();
+        if(dBias)
+        {
+            HIPDNN_RETURN_IF_FALSE(
+                attnMask,
+                ErrorCode::ATTRIBUTE_NOT_SET,
+                std::string("SdpaBwdNode: dBias requires a Bias tensor, whose shape it takes"));
+            HIPDNN_CHECK_ERROR(
+                validateGradientOutput(dBias, attnMask->get_dim(), "dBias", "Bias", false));
+            // An unset dtype on either side is inferred, so only two explicit ones can differ.
+            const auto dBiasType = dBias->get_data_type();
+            const auto biasType = attnMask->get_data_type();
+            HIPDNN_RETURN_IF_TRUE(dBiasType != DataType::NOT_SET && biasType != DataType::NOT_SET
+                                      && dBiasType != biasType,
+                                  ErrorCode::INVALID_VALUE,
+                                  std::string("SdpaBwdNode: dBias data type must equal the Bias "
+                                              "data type"));
+        }
+
+        // Rule 13: as in cuDNN, the last dimension of each input is contiguous. Stats is held
+        // to it only at rank 4 ([B, H, Sq, 1]): the rank-3 and ragged forms that hipDNN also
+        // accepts are left unchecked.
+        HIPDNN_CHECK_ERROR(validateLastStrideIsOne(q, "Q"));
+        HIPDNN_CHECK_ERROR(validateLastStrideIsOne(k, "K"));
+        HIPDNN_CHECK_ERROR(validateLastStrideIsOne(v, "V"));
+        HIPDNN_CHECK_ERROR(validateLastStrideIsOne(o, "O"));
+        HIPDNN_CHECK_ERROR(validateLastStrideIsOne(dOut, "dO"));
+        if(attnMask)
+        {
+            HIPDNN_CHECK_ERROR(validateLastStrideIsOne(attnMask, "Bias"));
+        }
+        if(stats->get_dim().size() == reqRank)
+        {
+            HIPDNN_CHECK_ERROR(validateLastStrideIsOne(stats, "Stats"));
+        }
+
         return {};
     }
 
@@ -367,6 +368,16 @@ public:
         const auto dq = attributes.get_dq();
         const auto dk = attributes.get_dk();
         const auto dv = attributes.get_dv();
+        const auto dBias = attributes.get_dbias();
+        const auto bias = attributes.get_bias();
+
+        // dBias takes the Bias dtype. This runs before fill_from_context(), which would give
+        // an unset dBias dtype the graph IO type instead.
+        if(dBias && bias && dBias->get_data_type() == DataType::NOT_SET
+           && bias->get_data_type() != DataType::NOT_SET)
+        {
+            dBias->set_data_type(bias->get_data_type());
+        }
 
         HIPDNN_CHECK_ERROR(attributes.fill_from_context(graph_attributes));
 
@@ -400,6 +411,20 @@ public:
             dv->set_stride(hipdnn_data_sdk::utilities::generateStrides(dv->get_dim()));
         }
 
+        // dBias has same shape as Bias. It is never inferred from Q, K and V: a bias may
+        // broadcast over batch, heads or queries, and only the bias tensor says which.
+        if(dBias && bias)
+        {
+            if(dBias->get_dim().empty())
+            {
+                dBias->set_dim(bias->get_dim());
+            }
+            if(dBias->get_stride().empty())
+            {
+                dBias->set_stride(hipdnn_data_sdk::utilities::generateStrides(dBias->get_dim()));
+            }
+        }
+
         return {};
     }
 
@@ -417,6 +442,84 @@ public:
         SdpaBackwardAttributes sdpaAttr;
         HIPDNN_CHECK_ERROR(detail::unpackSdpaBwdOperation(opDesc, tensorMap, sdpaAttr));
         attributes = std::move(sdpaAttr);
+        return {};
+    }
+
+private:
+    // Checks the caller-supplied dims and strides of a gradient output against the tensor it
+    // differentiates. Empty dims or strides are skipped: infer_properties_node() fills them.
+    static Error validateGradientOutput(const std::shared_ptr<TensorAttributes>& grad,
+                                        const std::vector<int64_t>& sourceDims,
+                                        const std::string& gradName,
+                                        const std::string& sourceName,
+                                        bool lastDimMustBeContiguous)
+    {
+        const auto& dims = grad->get_dim();
+        if(!dims.empty())
+        {
+            HIPDNN_RETURN_IF_NE(dims.size(),
+                                sourceDims.size(),
+                                ErrorCode::INVALID_VALUE,
+                                "SdpaBwdNode: " + gradName + " rank must equal " + sourceName
+                                    + " rank (" + std::to_string(sourceDims.size()) + "), got "
+                                    + std::to_string(dims.size()));
+            for(size_t i = 0; i < dims.size(); ++i)
+            {
+                if(dims[i] != sourceDims[i])
+                {
+                    const auto index = std::to_string(i);
+                    std::string message = "SdpaBwdNode: ";
+                    message.append(gradName).append(" dim[").append(index);
+                    message.append("] must equal ").append(sourceName);
+                    message.append(" dim[").append(index).append("] (");
+                    message.append(std::to_string(sourceDims[i])).append("), got ");
+                    message.append(std::to_string(dims[i]));
+                    return {ErrorCode::INVALID_VALUE, message};
+                }
+            }
+        }
+
+        const auto& strides = grad->get_stride();
+        if(strides.empty())
+        {
+            return {};
+        }
+        HIPDNN_RETURN_IF_NE(strides.size(),
+                            sourceDims.size(),
+                            ErrorCode::INVALID_VALUE,
+                            "SdpaBwdNode: " + gradName + " needs one stride per dimension ("
+                                + std::to_string(sourceDims.size()) + "), got "
+                                + std::to_string(strides.size()));
+        for(size_t i = 0; i < strides.size(); ++i)
+        {
+            if(strides[i] <= 0)
+            {
+                std::string message = "SdpaBwdNode: ";
+                message.append(gradName).append(" stride[").append(std::to_string(i));
+                message.append("] must be positive, got ").append(std::to_string(strides[i]));
+                return {ErrorCode::INVALID_VALUE, message};
+            }
+        }
+        if(lastDimMustBeContiguous)
+        {
+            HIPDNN_CHECK_ERROR(validateLastStrideIsOne(grad, gradName));
+        }
+        return {};
+    }
+
+    // cuDNN's rule for the SDPA tensors: the last dimension is contiguous. A layout that
+    // breaks it is legal but no kernel addresses it, hence cuDNN's code for the same check.
+    // Empty strides are skipped, and no other stride is checked: a zero stride on another
+    // dimension is a valid broadcast for an input.
+    static Error validateLastStrideIsOne(const std::shared_ptr<TensorAttributes>& tensor,
+                                         const std::string& tensorName)
+    {
+        const auto& strides = tensor->get_stride();
+        HIPDNN_RETURN_IF_TRUE(!strides.empty() && strides.back() != 1,
+                              ErrorCode::GRAPH_NOT_SUPPORTED,
+                              "SdpaBwdNode: " + tensorName
+                                  + " stride for the last dimension must be 1, got "
+                                  + std::to_string(strides.back()));
         return {};
     }
 };

@@ -42,6 +42,21 @@ struct TileFmhaTraits
     static constexpr bool kHasSink          = kHasSink_;
 };
 
+// Fwd traits that fold the query heads of one KV head into the query rows: row = g * seqlen_q + s.
+template <typename BaseTraits_>
+struct TileFmhaMergeHeadsTraits : BaseTraits_
+{
+    static constexpr bool kMergeNumHeadGroupsSeqLenQ = true;
+};
+
+template <typename Traits, typename = void>
+inline constexpr bool kTraitsMergeNumHeadGroupsSeqLenQ = false;
+template <typename Traits>
+inline constexpr bool
+    kTraitsMergeNumHeadGroupsSeqLenQ<Traits,
+                                     std::void_t<decltype(Traits::kMergeNumHeadGroupsSeqLenQ)>> =
+        Traits::kMergeNumHeadGroupsSeqLenQ;
+
 template <bool kPadSeqLenQ_ /* padding for seqlen_q */,
           bool kPadSeqLenK_ /* padding for seqlen_k */,
           bool kPadHeadDimQ_ /* padding for hdim_q */,
@@ -92,7 +107,8 @@ template <index_t kPadHeadDimQ_ /* paddding for hdim_q */,
           index_t kPadHeadDimV_ /* paddding for hdim_v */,
           BlockAttentionBiasEnum BiasEnum_,
           bool kHasBiasGrad_,
-          index_t kBlockPerCu_ = -1 /* overwrite occupancy if not -1 */>
+          index_t kBlockPerCu_ = -1, /* overwrite occupancy if not -1 */
+          index_t kQDOSlots_   = 0 /* 0: policy default */>
 struct TileFmhaBwdTraits
 {
     static constexpr index_t kPadHeadDimQ = kPadHeadDimQ_;
@@ -100,6 +116,7 @@ struct TileFmhaBwdTraits
     static constexpr auto BiasEnum        = BiasEnum_;
     static constexpr bool kHasBiasGrad    = kHasBiasGrad_;
     static constexpr index_t kBlockPerCu  = kBlockPerCu_;
+    static constexpr index_t kQDOSlots    = kQDOSlots_;
 
     static_assert(kPadHeadDimQ == 0 || kPadHeadDimQ == 8 || kPadHeadDimQ == 1);
     static_assert(kPadHeadDimV == 0 || kPadHeadDimV == 8 || kPadHeadDimV == 1);

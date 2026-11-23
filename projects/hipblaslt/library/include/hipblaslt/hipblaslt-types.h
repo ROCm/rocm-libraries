@@ -29,9 +29,6 @@
  */
 
 #pragma once
-#ifndef _HIPBLASLT_TYPES_H_
-#define _HIPBLASLT_TYPES_H_
-
 
 #if defined(__HIPCC__)
 #include <hip/hip_fp8.h>
@@ -43,10 +40,14 @@
 #include "hipblaslt_float6.h"
 #include "hipblaslt_float4.h"
 #endif
+#ifdef __cplusplus
 #include "hipblaslt_e8.h"
 #include "hipblaslt_e5m3.h"
+#endif
 #include <float.h>
+#ifdef __cplusplus
 #include <complex>
+#endif
 
 // Generic API
 
@@ -81,8 +82,19 @@ typedef int32_t hipblasLtInt32;
 }
 #endif
 
+#ifdef __cplusplus
 int const HIP_R_6F_E2M3_EXT = 31;
 int const HIP_R_6F_E3M2_EXT = 32;
 int const HIP_R_4F_E2M1_EXT = 33;
 int const HIP_R_8F_E5M3_EXT = 34;
-#endif /* _HIPBLASLT_TYPES_H_ */
+#else
+// A file-scope const object has external linkage in C, so define constants
+// that every C file including this header can share.
+enum
+{
+    HIP_R_6F_E2M3_EXT = 31,
+    HIP_R_6F_E3M2_EXT = 32,
+    HIP_R_4F_E2M1_EXT = 33,
+    HIP_R_8F_E5M3_EXT = 34
+};
+#endif

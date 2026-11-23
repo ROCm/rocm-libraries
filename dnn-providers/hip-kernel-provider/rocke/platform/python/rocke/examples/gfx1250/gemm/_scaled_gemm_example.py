@@ -20,6 +20,12 @@ def argument_parser(description: str) -> argparse.ArgumentParser:
         default="wmma_scale",
         help="SCALE uses K=32 scale blocks; SCALE16 uses K=16 blocks",
     )
+    parser.add_argument(
+        "--output-dtype",
+        choices=("bf16", "fp16"),
+        default="bf16",
+        help="output storage and reference rounding (default: bf16)",
+    )
     parser.add_argument("--compile-route", choices=("comgr", "hip"), default="comgr")
     parser.add_argument(
         "--case",

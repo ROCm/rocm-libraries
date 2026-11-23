@@ -23,12 +23,13 @@
  * ************************************************************************ */
 
 #include "internal/level1/rocsparse_roti.h"
+#include "rocsparse_grid.hpp"
 #include "rocsparse_roti.hpp"
 #include "roti_device.h"
 
 namespace rocsparse
 {
-    template <uint32_t BLOCKSIZE, typename I, typename T>
+    template <uint32_t BLOCKSIZE, bool GRID_STRIDE, typename I, typename T>
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void roti_kernel(I nnz,
                      T* __restrict__ x_val,
@@ -45,7 +46,7 @@ namespace rocsparse
         {
             return;
         }
-        rocsparse::roti_device<BLOCKSIZE>(nnz, x_val, x_ind, y, c, s, idx_base);
+        rocsparse::roti_device<BLOCKSIZE, GRID_STRIDE>(nnz, x_val, x_ind, y, c, s, idx_base);
     }
 }
 
@@ -94,13 +95,12 @@ rocsparse_status rocsparse::roti_template(rocsparse_handle     handle, //0
     hipStream_t stream = handle->stream;
 
 #define ROTI_DIM 512
-    // Clamp the grid size against the device limit; the kernel uses a grid-stride
-    // loop so a clamped grid still covers all nnz elements (supports large nnz).
-    const int64_t num_blocks
-        = rocsparse::min((static_cast<int64_t>(nnz) - 1) / ROTI_DIM + 1,
-                         static_cast<int64_t>(handle->properties.maxGridSize[0]));
-    dim3 roti_blocks(static_cast<uint32_t>(num_blocks));
-    dim3 roti_threads(ROTI_DIM);
+    // Clamp to both the device limit and the dispatch packet's work-item limit.
+    // Only a clamped grid needs the grid-stride kernel.
+    const int64_t  num_blocks_needed = (static_cast<int64_t>(nnz) - 1) / ROTI_DIM + 1;
+    const uint32_t num_blocks = rocsparse::get_grid_size_x(handle, num_blocks_needed, ROTI_DIM);
+    dim3           roti_blocks(num_blocks);
+    dim3           roti_threads(ROTI_DIM);
 
     const bool on_host = (handle->pointer_mode == rocsparse_pointer_mode_host);
     if(on_host && (*c == static_cast<T>(1) && *s == static_cast<T>(0)))
@@ -108,19 +108,30 @@ rocsparse_status rocsparse::roti_template(rocsparse_handle     handle, //0
         return rocsparse_status_success;
     }
 
-    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::roti_kernel<ROTI_DIM>),
-                                       roti_blocks,
-                                       roti_threads,
-                                       0,
-                                       stream,
-                                       nnz,
-                                       x_val,
-                                       x_ind,
-                                       y,
-                                       ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, c),
-                                       ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, s),
-                                       idx_base,
-                                       handle->pointer_mode == rocsparse_pointer_mode_host);
+#define ROTI_LAUNCH(GRID_STRIDE)                                                        \
+    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::roti_kernel<ROTI_DIM, GRID_STRIDE>), \
+                                       roti_blocks,                                     \
+                                       roti_threads,                                    \
+                                       0,                                               \
+                                       stream,                                          \
+                                       nnz,                                             \
+                                       x_val,                                           \
+                                       x_ind,                                           \
+                                       y,                                               \
+                                       ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, c),    \
+                                       ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, s),    \
+                                       idx_base,                                        \
+                                       handle->pointer_mode == rocsparse_pointer_mode_host)
+
+    if(num_blocks < num_blocks_needed)
+    {
+        ROTI_LAUNCH(true);
+    }
+    else
+    {
+        ROTI_LAUNCH(false);
+    }
+#undef ROTI_LAUNCH
 #undef ROTI_DIM
     return rocsparse_status_success;
 }

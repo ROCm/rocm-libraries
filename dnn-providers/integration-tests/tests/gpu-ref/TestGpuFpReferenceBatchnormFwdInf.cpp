@@ -15,6 +15,9 @@ using namespace hipdnn_gpu_ref;
 using namespace gpu_batchnorm_ref_test;
 using namespace gpu_batchnorm_fwd_ref_test;
 
+using HalfType = hipdnn_data_sdk::types::half;
+using BFloat16Type = hipdnn_data_sdk::types::bfloat16;
+
 // --- Validation configurations ---
 
 TEST(TestGpuBatchnormFwdInfRefValidation, ThrowsOnInputRankTooSmall)
@@ -254,11 +257,18 @@ TEST(TestGpuBatchnormFwdInf3DShapes, Broadcast2D)
 
     unsigned int seed = getGlobalTestSeed();
     const float fillRange = 1.0f;
-    x.fillWithRandomValues(-fillRange, fillRange, seed++);
-    scale.fillWithRandomValues(-fillRange, fillRange, seed++);
-    bias.fillWithRandomValues(-fillRange, fillRange, seed++);
-    estMean.fillWithRandomValues(-fillRange, fillRange, seed++);
-    invVar.fillWithRandomValues(-fillRange, fillRange, seed++);
+    fillWithRandomValues(x, -fillRange, fillRange, seed++);
+    fillWithRandomValues(scale, -fillRange, fillRange, seed++);
+    fillWithRandomValues(bias, -fillRange, fillRange, seed++);
+    fillWithRandomValues(estMean, -fillRange, fillRange, seed++);
+    fillWithRandomValues(invVar, -fillRange, fillRange, seed++);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    x.memory().hostData();
+    scale.memory().hostData();
+    bias.memory().hostData();
+    estMean.memory().hostData();
+    invVar.memory().hostData();
 
     CpuFpReferenceBatchnorm::fwdInference(x, scale, bias, estMean, invVar, yCpu);
     GpuFpReferenceBatchnorm::fwdInference(x, scale, bias, estMean, invVar, yGpu);
@@ -280,11 +290,18 @@ TEST(TestGpuBatchnormFwdInf4DShapes, Broadcast2D)
 
     unsigned int seed = getGlobalTestSeed();
     const float fillRange = 1.0f;
-    x.fillWithRandomValues(-fillRange, fillRange, seed++);
-    scale.fillWithRandomValues(-fillRange, fillRange, seed++);
-    bias.fillWithRandomValues(-fillRange, fillRange, seed++);
-    estMean.fillWithRandomValues(-fillRange, fillRange, seed++);
-    invVar.fillWithRandomValues(-fillRange, fillRange, seed++);
+    fillWithRandomValues(x, -fillRange, fillRange, seed++);
+    fillWithRandomValues(scale, -fillRange, fillRange, seed++);
+    fillWithRandomValues(bias, -fillRange, fillRange, seed++);
+    fillWithRandomValues(estMean, -fillRange, fillRange, seed++);
+    fillWithRandomValues(invVar, -fillRange, fillRange, seed++);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    x.memory().hostData();
+    scale.memory().hostData();
+    bias.memory().hostData();
+    estMean.memory().hostData();
+    invVar.memory().hostData();
 
     CpuFpReferenceBatchnorm::fwdInference(x, scale, bias, estMean, invVar, yCpu);
     GpuFpReferenceBatchnorm::fwdInference(x, scale, bias, estMean, invVar, yGpu);
@@ -306,11 +323,18 @@ TEST(TestGpuBatchnormFwdInf4DShapes, Broadcast3D)
 
     unsigned int seed = getGlobalTestSeed();
     const float fillRange = 1.0f;
-    x.fillWithRandomValues(-fillRange, fillRange, seed++);
-    scale.fillWithRandomValues(-fillRange, fillRange, seed++);
-    bias.fillWithRandomValues(-fillRange, fillRange, seed++);
-    estMean.fillWithRandomValues(-fillRange, fillRange, seed++);
-    invVar.fillWithRandomValues(-fillRange, fillRange, seed++);
+    fillWithRandomValues(x, -fillRange, fillRange, seed++);
+    fillWithRandomValues(scale, -fillRange, fillRange, seed++);
+    fillWithRandomValues(bias, -fillRange, fillRange, seed++);
+    fillWithRandomValues(estMean, -fillRange, fillRange, seed++);
+    fillWithRandomValues(invVar, -fillRange, fillRange, seed++);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    x.memory().hostData();
+    scale.memory().hostData();
+    bias.memory().hostData();
+    estMean.memory().hostData();
+    invVar.memory().hostData();
 
     CpuFpReferenceBatchnorm::fwdInference(x, scale, bias, estMean, invVar, yCpu);
     GpuFpReferenceBatchnorm::fwdInference(x, scale, bias, estMean, invVar, yGpu);
@@ -332,11 +356,18 @@ TEST(TestGpuBatchnormFwdInf5DShapes, Broadcast2D)
 
     unsigned int seed = getGlobalTestSeed();
     const float fillRange = 1.0f;
-    x.fillWithRandomValues(-fillRange, fillRange, seed++);
-    scale.fillWithRandomValues(-fillRange, fillRange, seed++);
-    bias.fillWithRandomValues(-fillRange, fillRange, seed++);
-    estMean.fillWithRandomValues(-fillRange, fillRange, seed++);
-    invVar.fillWithRandomValues(-fillRange, fillRange, seed++);
+    fillWithRandomValues(x, -fillRange, fillRange, seed++);
+    fillWithRandomValues(scale, -fillRange, fillRange, seed++);
+    fillWithRandomValues(bias, -fillRange, fillRange, seed++);
+    fillWithRandomValues(estMean, -fillRange, fillRange, seed++);
+    fillWithRandomValues(invVar, -fillRange, fillRange, seed++);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    x.memory().hostData();
+    scale.memory().hostData();
+    bias.memory().hostData();
+    estMean.memory().hostData();
+    invVar.memory().hostData();
 
     CpuFpReferenceBatchnorm::fwdInference(x, scale, bias, estMean, invVar, yCpu);
     GpuFpReferenceBatchnorm::fwdInference(x, scale, bias, estMean, invVar, yGpu);
@@ -358,11 +389,18 @@ TEST(TestGpuBatchnormFwdInf5DShapes, Broadcast3D)
 
     unsigned int seed = getGlobalTestSeed();
     const float fillRange = 1.0f;
-    x.fillWithRandomValues(-fillRange, fillRange, seed++);
-    scale.fillWithRandomValues(-fillRange, fillRange, seed++);
-    bias.fillWithRandomValues(-fillRange, fillRange, seed++);
-    estMean.fillWithRandomValues(-fillRange, fillRange, seed++);
-    invVar.fillWithRandomValues(-fillRange, fillRange, seed++);
+    fillWithRandomValues(x, -fillRange, fillRange, seed++);
+    fillWithRandomValues(scale, -fillRange, fillRange, seed++);
+    fillWithRandomValues(bias, -fillRange, fillRange, seed++);
+    fillWithRandomValues(estMean, -fillRange, fillRange, seed++);
+    fillWithRandomValues(invVar, -fillRange, fillRange, seed++);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    x.memory().hostData();
+    scale.memory().hostData();
+    bias.memory().hostData();
+    estMean.memory().hostData();
+    invVar.memory().hostData();
 
     CpuFpReferenceBatchnorm::fwdInference(x, scale, bias, estMean, invVar, yCpu);
     GpuFpReferenceBatchnorm::fwdInference(x, scale, bias, estMean, invVar, yGpu);
@@ -384,11 +422,18 @@ TEST(TestGpuBatchnormFwdInf5DShapes, Broadcast4D)
 
     unsigned int seed = getGlobalTestSeed();
     const float fillRange = 1.0f;
-    x.fillWithRandomValues(-fillRange, fillRange, seed++);
-    scale.fillWithRandomValues(-fillRange, fillRange, seed++);
-    bias.fillWithRandomValues(-fillRange, fillRange, seed++);
-    estMean.fillWithRandomValues(-fillRange, fillRange, seed++);
-    invVar.fillWithRandomValues(-fillRange, fillRange, seed++);
+    fillWithRandomValues(x, -fillRange, fillRange, seed++);
+    fillWithRandomValues(scale, -fillRange, fillRange, seed++);
+    fillWithRandomValues(bias, -fillRange, fillRange, seed++);
+    fillWithRandomValues(estMean, -fillRange, fillRange, seed++);
+    fillWithRandomValues(invVar, -fillRange, fillRange, seed++);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    x.memory().hostData();
+    scale.memory().hostData();
+    bias.memory().hostData();
+    estMean.memory().hostData();
+    invVar.memory().hostData();
 
     CpuFpReferenceBatchnorm::fwdInference(x, scale, bias, estMean, invVar, yCpu);
     GpuFpReferenceBatchnorm::fwdInference(x, scale, bias, estMean, invVar, yGpu);
@@ -403,26 +448,33 @@ TEST(TestGpuBatchnormFwdInf5DShapes, DISABLED_ExceedsUInt32MaxElements)
 {
     SKIP_IF_NO_DEVICES();
     // Test with 4,974,412,500 elements, which is greater than 4,294,967,295 UINT32_MAX
-    Tensor<half> x({255, 255, 255, 50, 6});
-    Tensor<half> scale({1, 255, 1, 1, 1});
-    Tensor<half> bias({1, 255, 1, 1, 1});
-    Tensor<half> estMean({1, 255, 1, 1, 1});
-    Tensor<half> invVar({1, 255, 1, 1, 1});
-    Tensor<half> yCpu({255, 255, 255, 50, 6});
-    Tensor<half> yGpu({255, 255, 255, 50, 6});
+    Tensor<HalfType> x({255, 255, 255, 50, 6});
+    Tensor<HalfType> scale({1, 255, 1, 1, 1});
+    Tensor<HalfType> bias({1, 255, 1, 1, 1});
+    Tensor<HalfType> estMean({1, 255, 1, 1, 1});
+    Tensor<HalfType> invVar({1, 255, 1, 1, 1});
+    Tensor<HalfType> yCpu({255, 255, 255, 50, 6});
+    Tensor<HalfType> yGpu({255, 255, 255, 50, 6});
 
     unsigned int seed = getGlobalTestSeed();
-    const half fillRange(1.0);
-    x.fillWithRandomValues(-fillRange, fillRange, seed++);
-    scale.fillWithRandomValues(-fillRange, fillRange, seed++);
-    bias.fillWithRandomValues(-fillRange, fillRange, seed++);
-    estMean.fillWithRandomValues(-fillRange, fillRange, seed++);
-    invVar.fillWithRandomValues(-fillRange, fillRange, seed++);
+    const HalfType fillRange(1.0);
+    fillWithRandomValues(x, -fillRange, fillRange, seed++);
+    fillWithRandomValues(scale, -fillRange, fillRange, seed++);
+    fillWithRandomValues(bias, -fillRange, fillRange, seed++);
+    fillWithRandomValues(estMean, -fillRange, fillRange, seed++);
+    fillWithRandomValues(invVar, -fillRange, fillRange, seed++);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    x.memory().hostData();
+    scale.memory().hostData();
+    bias.memory().hostData();
+    estMean.memory().hostData();
+    invVar.memory().hostData();
 
     CpuFpReferenceBatchnorm::fwdInference(x, scale, bias, estMean, invVar, yCpu);
     GpuFpReferenceBatchnorm::fwdInference(x, scale, bias, estMean, invVar, yGpu);
 
-    assertAllClose(yCpu, yGpu, getToleranceInference<half>());
+    assertAllClose(yCpu, yGpu, getToleranceInference<HalfType>());
 }
 
 // --- Test mixed precision ---
@@ -431,7 +483,7 @@ TEST(TestGpuBatchnormFwdInfMixedPrecision, UpcastX)
 {
     SKIP_IF_NO_DEVICES();
 
-    using XDataType = bfloat16;
+    using XDataType = BFloat16Type;
     using ScaleBiasType = float;
     using MeanVarType = float;
     using YDataType = float;
@@ -447,16 +499,27 @@ TEST(TestGpuBatchnormFwdInfMixedPrecision, UpcastX)
 
     unsigned int seed = getGlobalTestSeed();
     const float fillRange = 1.0f;
-    x.fillWithRandomValues(
-        static_cast<XDataType>(-fillRange), static_cast<XDataType>(fillRange), seed++);
-    scale.fillWithRandomValues(
-        static_cast<ScaleBiasType>(-fillRange), static_cast<ScaleBiasType>(fillRange), seed++);
-    bias.fillWithRandomValues(
-        static_cast<ScaleBiasType>(-fillRange), static_cast<ScaleBiasType>(fillRange), seed++);
-    estMean.fillWithRandomValues(
-        static_cast<MeanVarType>(-fillRange), static_cast<MeanVarType>(fillRange), seed++);
-    invVar.fillWithRandomValues(
-        static_cast<MeanVarType>(-fillRange), static_cast<MeanVarType>(fillRange), seed++);
+    fillWithRandomValues(
+        x, static_cast<XDataType>(-fillRange), static_cast<XDataType>(fillRange), seed++);
+    fillWithRandomValues(scale,
+                         static_cast<ScaleBiasType>(-fillRange),
+                         static_cast<ScaleBiasType>(fillRange),
+                         seed++);
+    fillWithRandomValues(bias,
+                         static_cast<ScaleBiasType>(-fillRange),
+                         static_cast<ScaleBiasType>(fillRange),
+                         seed++);
+    fillWithRandomValues(
+        estMean, static_cast<MeanVarType>(-fillRange), static_cast<MeanVarType>(fillRange), seed++);
+    fillWithRandomValues(
+        invVar, static_cast<MeanVarType>(-fillRange), static_cast<MeanVarType>(fillRange), seed++);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    x.memory().hostData();
+    scale.memory().hostData();
+    bias.memory().hostData();
+    estMean.memory().hostData();
+    invVar.memory().hostData();
 
     CpuFpReferenceBatchnorm::
         fwdInference<XDataType, ScaleBiasType, MeanVarType, YDataType, ComputeDataType>(
@@ -473,9 +536,9 @@ TEST(TestGpuBatchnormFwdInfMixedPrecision, DowncastX)
     SKIP_IF_NO_DEVICES();
 
     using XDataType = float;
-    using ScaleBiasType = half;
-    using MeanVarType = half;
-    using YDataType = half;
+    using ScaleBiasType = HalfType;
+    using MeanVarType = HalfType;
+    using YDataType = HalfType;
     using ComputeDataType = float;
 
     Tensor<XDataType> x({1, 2, 2, 2});
@@ -488,16 +551,27 @@ TEST(TestGpuBatchnormFwdInfMixedPrecision, DowncastX)
 
     unsigned int seed = getGlobalTestSeed();
     const float fillRange = 1.0f;
-    x.fillWithRandomValues(
-        static_cast<XDataType>(-fillRange), static_cast<XDataType>(fillRange), seed++);
-    scale.fillWithRandomValues(
-        static_cast<ScaleBiasType>(-fillRange), static_cast<ScaleBiasType>(fillRange), seed++);
-    bias.fillWithRandomValues(
-        static_cast<ScaleBiasType>(-fillRange), static_cast<ScaleBiasType>(fillRange), seed++);
-    estMean.fillWithRandomValues(
-        static_cast<MeanVarType>(-fillRange), static_cast<MeanVarType>(fillRange), seed++);
-    invVar.fillWithRandomValues(
-        static_cast<MeanVarType>(-fillRange), static_cast<MeanVarType>(fillRange), seed++);
+    fillWithRandomValues(
+        x, static_cast<XDataType>(-fillRange), static_cast<XDataType>(fillRange), seed++);
+    fillWithRandomValues(scale,
+                         static_cast<ScaleBiasType>(-fillRange),
+                         static_cast<ScaleBiasType>(fillRange),
+                         seed++);
+    fillWithRandomValues(bias,
+                         static_cast<ScaleBiasType>(-fillRange),
+                         static_cast<ScaleBiasType>(fillRange),
+                         seed++);
+    fillWithRandomValues(
+        estMean, static_cast<MeanVarType>(-fillRange), static_cast<MeanVarType>(fillRange), seed++);
+    fillWithRandomValues(
+        invVar, static_cast<MeanVarType>(-fillRange), static_cast<MeanVarType>(fillRange), seed++);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    x.memory().hostData();
+    scale.memory().hostData();
+    bias.memory().hostData();
+    estMean.memory().hostData();
+    invVar.memory().hostData();
 
     CpuFpReferenceBatchnorm::
         fwdInference<XDataType, ScaleBiasType, MeanVarType, YDataType, ComputeDataType>(
@@ -513,9 +587,9 @@ TEST(TestGpuBatchnormFwdInfMixedPrecision, UpcastY)
 {
     SKIP_IF_NO_DEVICES();
 
-    using XDataType = half;
-    using ScaleBiasType = half;
-    using MeanVarType = half;
+    using XDataType = HalfType;
+    using ScaleBiasType = HalfType;
+    using MeanVarType = HalfType;
     using YDataType = float;
     using ComputeDataType = float;
 
@@ -529,16 +603,27 @@ TEST(TestGpuBatchnormFwdInfMixedPrecision, UpcastY)
 
     unsigned int seed = getGlobalTestSeed();
     const float fillRange = 1.0f;
-    x.fillWithRandomValues(
-        static_cast<XDataType>(-fillRange), static_cast<XDataType>(fillRange), seed++);
-    scale.fillWithRandomValues(
-        static_cast<ScaleBiasType>(-fillRange), static_cast<ScaleBiasType>(fillRange), seed++);
-    bias.fillWithRandomValues(
-        static_cast<ScaleBiasType>(-fillRange), static_cast<ScaleBiasType>(fillRange), seed++);
-    estMean.fillWithRandomValues(
-        static_cast<MeanVarType>(-fillRange), static_cast<MeanVarType>(fillRange), seed++);
-    invVar.fillWithRandomValues(
-        static_cast<MeanVarType>(-fillRange), static_cast<MeanVarType>(fillRange), seed++);
+    fillWithRandomValues(
+        x, static_cast<XDataType>(-fillRange), static_cast<XDataType>(fillRange), seed++);
+    fillWithRandomValues(scale,
+                         static_cast<ScaleBiasType>(-fillRange),
+                         static_cast<ScaleBiasType>(fillRange),
+                         seed++);
+    fillWithRandomValues(bias,
+                         static_cast<ScaleBiasType>(-fillRange),
+                         static_cast<ScaleBiasType>(fillRange),
+                         seed++);
+    fillWithRandomValues(
+        estMean, static_cast<MeanVarType>(-fillRange), static_cast<MeanVarType>(fillRange), seed++);
+    fillWithRandomValues(
+        invVar, static_cast<MeanVarType>(-fillRange), static_cast<MeanVarType>(fillRange), seed++);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    x.memory().hostData();
+    scale.memory().hostData();
+    bias.memory().hostData();
+    estMean.memory().hostData();
+    invVar.memory().hostData();
 
     CpuFpReferenceBatchnorm::
         fwdInference<XDataType, ScaleBiasType, MeanVarType, YDataType, ComputeDataType>(
@@ -557,7 +642,7 @@ TEST(TestGpuBatchnormFwdInfMixedPrecision, DowncastY)
     using XDataType = float;
     using ScaleBiasType = float;
     using MeanVarType = float;
-    using YDataType = bfloat16;
+    using YDataType = BFloat16Type;
     using ComputeDataType = float;
 
     Tensor<XDataType> x({1, 2, 2, 2});
@@ -570,16 +655,27 @@ TEST(TestGpuBatchnormFwdInfMixedPrecision, DowncastY)
 
     unsigned int seed = getGlobalTestSeed();
     const float fillRange = 1.0f;
-    x.fillWithRandomValues(
-        static_cast<XDataType>(-fillRange), static_cast<XDataType>(fillRange), seed++);
-    scale.fillWithRandomValues(
-        static_cast<ScaleBiasType>(-fillRange), static_cast<ScaleBiasType>(fillRange), seed++);
-    bias.fillWithRandomValues(
-        static_cast<ScaleBiasType>(-fillRange), static_cast<ScaleBiasType>(fillRange), seed++);
-    estMean.fillWithRandomValues(
-        static_cast<MeanVarType>(-fillRange), static_cast<MeanVarType>(fillRange), seed++);
-    invVar.fillWithRandomValues(
-        static_cast<MeanVarType>(-fillRange), static_cast<MeanVarType>(fillRange), seed++);
+    fillWithRandomValues(
+        x, static_cast<XDataType>(-fillRange), static_cast<XDataType>(fillRange), seed++);
+    fillWithRandomValues(scale,
+                         static_cast<ScaleBiasType>(-fillRange),
+                         static_cast<ScaleBiasType>(fillRange),
+                         seed++);
+    fillWithRandomValues(bias,
+                         static_cast<ScaleBiasType>(-fillRange),
+                         static_cast<ScaleBiasType>(fillRange),
+                         seed++);
+    fillWithRandomValues(
+        estMean, static_cast<MeanVarType>(-fillRange), static_cast<MeanVarType>(fillRange), seed++);
+    fillWithRandomValues(
+        invVar, static_cast<MeanVarType>(-fillRange), static_cast<MeanVarType>(fillRange), seed++);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    x.memory().hostData();
+    scale.memory().hostData();
+    bias.memory().hostData();
+    estMean.memory().hostData();
+    invVar.memory().hostData();
 
     CpuFpReferenceBatchnorm::
         fwdInference<XDataType, ScaleBiasType, MeanVarType, YDataType, ComputeDataType>(
@@ -595,10 +691,10 @@ TEST(TestGpuBatchnormFwdInfMixedPrecision, UpcastAffine)
 {
     SKIP_IF_NO_DEVICES();
 
-    using XDataType = bfloat16;
+    using XDataType = BFloat16Type;
     using ScaleBiasType = float;
     using MeanVarType = float;
-    using YDataType = half;
+    using YDataType = HalfType;
     using ComputeDataType = float;
 
     Tensor<XDataType> x({1, 2, 2, 2});
@@ -611,16 +707,27 @@ TEST(TestGpuBatchnormFwdInfMixedPrecision, UpcastAffine)
 
     unsigned int seed = getGlobalTestSeed();
     const float fillRange = 1.0f;
-    x.fillWithRandomValues(
-        static_cast<XDataType>(-fillRange), static_cast<XDataType>(fillRange), seed++);
-    scale.fillWithRandomValues(
-        static_cast<ScaleBiasType>(-fillRange), static_cast<ScaleBiasType>(fillRange), seed++);
-    bias.fillWithRandomValues(
-        static_cast<ScaleBiasType>(-fillRange), static_cast<ScaleBiasType>(fillRange), seed++);
-    estMean.fillWithRandomValues(
-        static_cast<MeanVarType>(-fillRange), static_cast<MeanVarType>(fillRange), seed++);
-    invVar.fillWithRandomValues(
-        static_cast<MeanVarType>(-fillRange), static_cast<MeanVarType>(fillRange), seed++);
+    fillWithRandomValues(
+        x, static_cast<XDataType>(-fillRange), static_cast<XDataType>(fillRange), seed++);
+    fillWithRandomValues(scale,
+                         static_cast<ScaleBiasType>(-fillRange),
+                         static_cast<ScaleBiasType>(fillRange),
+                         seed++);
+    fillWithRandomValues(bias,
+                         static_cast<ScaleBiasType>(-fillRange),
+                         static_cast<ScaleBiasType>(fillRange),
+                         seed++);
+    fillWithRandomValues(
+        estMean, static_cast<MeanVarType>(-fillRange), static_cast<MeanVarType>(fillRange), seed++);
+    fillWithRandomValues(
+        invVar, static_cast<MeanVarType>(-fillRange), static_cast<MeanVarType>(fillRange), seed++);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    x.memory().hostData();
+    scale.memory().hostData();
+    bias.memory().hostData();
+    estMean.memory().hostData();
+    invVar.memory().hostData();
 
     CpuFpReferenceBatchnorm::
         fwdInference<XDataType, ScaleBiasType, MeanVarType, YDataType, ComputeDataType>(
@@ -637,8 +744,8 @@ TEST(TestGpuBatchnormFwdInfMixedPrecision, DowncastAffine)
     SKIP_IF_NO_DEVICES();
 
     using XDataType = float;
-    using ScaleBiasType = half;
-    using MeanVarType = bfloat16;
+    using ScaleBiasType = HalfType;
+    using MeanVarType = BFloat16Type;
     using YDataType = float;
     using ComputeDataType = float;
 
@@ -652,16 +759,27 @@ TEST(TestGpuBatchnormFwdInfMixedPrecision, DowncastAffine)
 
     unsigned int seed = getGlobalTestSeed();
     const float fillRange = 1.0f;
-    x.fillWithRandomValues(
-        static_cast<XDataType>(-fillRange), static_cast<XDataType>(fillRange), seed++);
-    scale.fillWithRandomValues(
-        static_cast<ScaleBiasType>(-fillRange), static_cast<ScaleBiasType>(fillRange), seed++);
-    bias.fillWithRandomValues(
-        static_cast<ScaleBiasType>(-fillRange), static_cast<ScaleBiasType>(fillRange), seed++);
-    estMean.fillWithRandomValues(
-        static_cast<MeanVarType>(-fillRange), static_cast<MeanVarType>(fillRange), seed++);
-    invVar.fillWithRandomValues(
-        static_cast<MeanVarType>(-fillRange), static_cast<MeanVarType>(fillRange), seed++);
+    fillWithRandomValues(
+        x, static_cast<XDataType>(-fillRange), static_cast<XDataType>(fillRange), seed++);
+    fillWithRandomValues(scale,
+                         static_cast<ScaleBiasType>(-fillRange),
+                         static_cast<ScaleBiasType>(fillRange),
+                         seed++);
+    fillWithRandomValues(bias,
+                         static_cast<ScaleBiasType>(-fillRange),
+                         static_cast<ScaleBiasType>(fillRange),
+                         seed++);
+    fillWithRandomValues(
+        estMean, static_cast<MeanVarType>(-fillRange), static_cast<MeanVarType>(fillRange), seed++);
+    fillWithRandomValues(
+        invVar, static_cast<MeanVarType>(-fillRange), static_cast<MeanVarType>(fillRange), seed++);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    x.memory().hostData();
+    scale.memory().hostData();
+    bias.memory().hostData();
+    estMean.memory().hostData();
+    invVar.memory().hostData();
 
     CpuFpReferenceBatchnorm::
         fwdInference<XDataType, ScaleBiasType, MeanVarType, YDataType, ComputeDataType>(
@@ -681,7 +799,7 @@ TEST(TestGpuBatchnormFwdInfMixedPrecision, DowncastComputeHalf)
     using ScaleBiasType = float;
     using MeanVarType = float;
     using YDataType = float;
-    using ComputeDataType = half;
+    using ComputeDataType = HalfType;
 
     Tensor<XDataType> x({1, 2, 2, 2});
     Tensor<ScaleBiasType> scale({1, 2, 1, 1});
@@ -693,16 +811,27 @@ TEST(TestGpuBatchnormFwdInfMixedPrecision, DowncastComputeHalf)
 
     unsigned int seed = getGlobalTestSeed();
     const float fillRange = 1.0f;
-    x.fillWithRandomValues(
-        static_cast<XDataType>(-fillRange), static_cast<XDataType>(fillRange), seed++);
-    scale.fillWithRandomValues(
-        static_cast<ScaleBiasType>(-fillRange), static_cast<ScaleBiasType>(fillRange), seed++);
-    bias.fillWithRandomValues(
-        static_cast<ScaleBiasType>(-fillRange), static_cast<ScaleBiasType>(fillRange), seed++);
-    estMean.fillWithRandomValues(
-        static_cast<MeanVarType>(-fillRange), static_cast<MeanVarType>(fillRange), seed++);
-    invVar.fillWithRandomValues(
-        static_cast<MeanVarType>(-fillRange), static_cast<MeanVarType>(fillRange), seed++);
+    fillWithRandomValues(
+        x, static_cast<XDataType>(-fillRange), static_cast<XDataType>(fillRange), seed++);
+    fillWithRandomValues(scale,
+                         static_cast<ScaleBiasType>(-fillRange),
+                         static_cast<ScaleBiasType>(fillRange),
+                         seed++);
+    fillWithRandomValues(bias,
+                         static_cast<ScaleBiasType>(-fillRange),
+                         static_cast<ScaleBiasType>(fillRange),
+                         seed++);
+    fillWithRandomValues(
+        estMean, static_cast<MeanVarType>(-fillRange), static_cast<MeanVarType>(fillRange), seed++);
+    fillWithRandomValues(
+        invVar, static_cast<MeanVarType>(-fillRange), static_cast<MeanVarType>(fillRange), seed++);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    x.memory().hostData();
+    scale.memory().hostData();
+    bias.memory().hostData();
+    estMean.memory().hostData();
+    invVar.memory().hostData();
 
     CpuFpReferenceBatchnorm::
         fwdInference<XDataType, ScaleBiasType, MeanVarType, YDataType, ComputeDataType>(
@@ -725,7 +854,7 @@ TEST(TestGpuBatchnormFwdInfMixedPrecision, DowncastComputeBfloat)
     using ScaleBiasType = float;
     using MeanVarType = float;
     using YDataType = float;
-    using ComputeDataType = bfloat16;
+    using ComputeDataType = BFloat16Type;
 
     Tensor<XDataType> x({1, 2, 2, 2});
     Tensor<ScaleBiasType> scale({1, 2, 1, 1});
@@ -737,16 +866,27 @@ TEST(TestGpuBatchnormFwdInfMixedPrecision, DowncastComputeBfloat)
 
     unsigned int seed = getGlobalTestSeed();
     const float fillRange = 1.0f;
-    x.fillWithRandomValues(
-        static_cast<XDataType>(-fillRange), static_cast<XDataType>(fillRange), seed++);
-    scale.fillWithRandomValues(
-        static_cast<ScaleBiasType>(-fillRange), static_cast<ScaleBiasType>(fillRange), seed++);
-    bias.fillWithRandomValues(
-        static_cast<ScaleBiasType>(-fillRange), static_cast<ScaleBiasType>(fillRange), seed++);
-    estMean.fillWithRandomValues(
-        static_cast<MeanVarType>(-fillRange), static_cast<MeanVarType>(fillRange), seed++);
-    invVar.fillWithRandomValues(
-        static_cast<MeanVarType>(-fillRange), static_cast<MeanVarType>(fillRange), seed++);
+    fillWithRandomValues(
+        x, static_cast<XDataType>(-fillRange), static_cast<XDataType>(fillRange), seed++);
+    fillWithRandomValues(scale,
+                         static_cast<ScaleBiasType>(-fillRange),
+                         static_cast<ScaleBiasType>(fillRange),
+                         seed++);
+    fillWithRandomValues(bias,
+                         static_cast<ScaleBiasType>(-fillRange),
+                         static_cast<ScaleBiasType>(fillRange),
+                         seed++);
+    fillWithRandomValues(
+        estMean, static_cast<MeanVarType>(-fillRange), static_cast<MeanVarType>(fillRange), seed++);
+    fillWithRandomValues(
+        invVar, static_cast<MeanVarType>(-fillRange), static_cast<MeanVarType>(fillRange), seed++);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    x.memory().hostData();
+    scale.memory().hostData();
+    bias.memory().hostData();
+    estMean.memory().hostData();
+    invVar.memory().hostData();
 
     CpuFpReferenceBatchnorm::
         fwdInference<XDataType, ScaleBiasType, MeanVarType, YDataType, ComputeDataType>(
@@ -764,14 +904,14 @@ TEST(TestGpuBatchnormFwdInfMixedPrecision, DowncastComputeBfloat)
 // --- Test suite instantiations ---
 
 using TestGpuBatchnormFwdInfRef3DFp32 = BatchnormFwdInfTestSuite<float>;
-using TestGpuBatchnormFwdInfRef3DFp16 = BatchnormFwdInfTestSuite<half>;
-using TestGpuBatchnormFwdInfRef3DBfp16 = BatchnormFwdInfTestSuite<bfloat16>;
+using TestGpuBatchnormFwdInfRef3DFp16 = BatchnormFwdInfTestSuite<HalfType>;
+using TestGpuBatchnormFwdInfRef3DBfp16 = BatchnormFwdInfTestSuite<BFloat16Type>;
 using TestGpuBatchnormFwdInfRef4DFp32 = BatchnormFwdInfTestSuite<float>;
-using TestGpuBatchnormFwdInfRef4DFp16 = BatchnormFwdInfTestSuite<half>;
-using TestGpuBatchnormFwdInfRef4DBfp16 = BatchnormFwdInfTestSuite<bfloat16>;
+using TestGpuBatchnormFwdInfRef4DFp16 = BatchnormFwdInfTestSuite<HalfType>;
+using TestGpuBatchnormFwdInfRef4DBfp16 = BatchnormFwdInfTestSuite<BFloat16Type>;
 using TestGpuBatchnormFwdInfRef5DFp32 = BatchnormFwdInfTestSuite<float>;
-using TestGpuBatchnormFwdInfRef5DFp16 = BatchnormFwdInfTestSuite<half>;
-using TestGpuBatchnormFwdInfRef5DBfp16 = BatchnormFwdInfTestSuite<bfloat16>;
+using TestGpuBatchnormFwdInfRef5DFp16 = BatchnormFwdInfTestSuite<HalfType>;
+using TestGpuBatchnormFwdInfRef5DBfp16 = BatchnormFwdInfTestSuite<BFloat16Type>;
 
 TEST_P(TestGpuBatchnormFwdInfRef3DFp32, MatchesCpuRef)
 {
@@ -818,53 +958,27 @@ INSTANTIATE_TEST_SUITE_P(Quick,
                          TestGpuBatchnormFwdInfRef3DFp32,
                          testing::Combine(testing::Values(TensorLayout::NCL, TensorLayout::NLC),
                                           ::testing::ValuesIn(getBatchnormSmall3DTestCases())));
-INSTANTIATE_TEST_SUITE_P(Quick,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuBatchnormFwdInfRef3DFp16,
                          testing::Combine(testing::Values(TensorLayout::NCL, TensorLayout::NLC),
                                           ::testing::ValuesIn(getBatchnormSmall3DTestCases())));
-INSTANTIATE_TEST_SUITE_P(Quick,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuBatchnormFwdInfRef3DBfp16,
                          testing::Combine(testing::Values(TensorLayout::NCL, TensorLayout::NLC),
                                           ::testing::ValuesIn(getBatchnormSmall3DTestCases())));
+// Medium shapes (3D/4D/5D) are fp32-only: dtype only affects per-element load/store
+// conversion, already covered by the standard tier's small-shape fp16/bfp16 runs (cull principle P1).
 INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuBatchnormFwdInfRef3DFp32,
                          testing::Combine(testing::Values(TensorLayout::NCL, TensorLayout::NLC),
                                           ::testing::ValuesIn(getBatchnormMedium3DTestCases())));
-INSTANTIATE_TEST_SUITE_P(Standard,
-                         TestGpuBatchnormFwdInfRef3DFp16,
-                         testing::Combine(testing::Values(TensorLayout::NCL, TensorLayout::NLC),
-                                          ::testing::ValuesIn(getBatchnormMedium3DTestCases())));
-INSTANTIATE_TEST_SUITE_P(Standard,
-                         TestGpuBatchnormFwdInfRef3DBfp16,
-                         testing::Combine(testing::Values(TensorLayout::NCL, TensorLayout::NLC),
-                                          ::testing::ValuesIn(getBatchnormMedium3DTestCases())));
 INSTANTIATE_TEST_SUITE_P(Comprehensive,
                          TestGpuBatchnormFwdInfRef3DFp32,
-                         testing::Combine(testing::Values(TensorLayout::NCL, TensorLayout::NLC),
-                                          ::testing::ValuesIn(getBatchnormLargeEdge3DTestCases())));
-INSTANTIATE_TEST_SUITE_P(Comprehensive,
-                         TestGpuBatchnormFwdInfRef3DFp16,
-                         testing::Combine(testing::Values(TensorLayout::NCL, TensorLayout::NLC),
-                                          ::testing::ValuesIn(getBatchnormLargeEdge3DTestCases())));
-INSTANTIATE_TEST_SUITE_P(Comprehensive,
-                         TestGpuBatchnormFwdInfRef3DBfp16,
                          testing::Combine(testing::Values(TensorLayout::NCL, TensorLayout::NLC),
                                           ::testing::ValuesIn(getBatchnormLargeEdge3DTestCases())));
 INSTANTIATE_TEST_SUITE_P(
     Full,
     TestGpuBatchnormFwdInfRef3DFp32,
-    testing::Combine(testing::Values(TensorLayout::NCL, TensorLayout::NLC),
-                     ::testing::ValuesIn(getBatchnormLargeStress3DTestCases())));
-
-INSTANTIATE_TEST_SUITE_P(
-    Full,
-    TestGpuBatchnormFwdInfRef3DFp16,
-    testing::Combine(testing::Values(TensorLayout::NCL, TensorLayout::NLC),
-                     ::testing::ValuesIn(getBatchnormLargeStress3DTestCases())));
-
-INSTANTIATE_TEST_SUITE_P(
-    Full,
-    TestGpuBatchnormFwdInfRef3DBfp16,
     testing::Combine(testing::Values(TensorLayout::NCL, TensorLayout::NLC),
                      ::testing::ValuesIn(getBatchnormLargeStress3DTestCases())));
 
@@ -876,11 +990,11 @@ INSTANTIATE_TEST_SUITE_P(Quick,
                          TestGpuBatchnormFwdInfRef4DFp32,
                          testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
                                           ::testing::ValuesIn(getBatchnormSmall4DTestCases())));
-INSTANTIATE_TEST_SUITE_P(Quick,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuBatchnormFwdInfRef4DFp16,
                          testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
                                           ::testing::ValuesIn(getBatchnormSmall4DTestCases())));
-INSTANTIATE_TEST_SUITE_P(Quick,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuBatchnormFwdInfRef4DBfp16,
                          testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
                                           ::testing::ValuesIn(getBatchnormSmall4DTestCases())));
@@ -888,41 +1002,13 @@ INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuBatchnormFwdInfRef4DFp32,
                          testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
                                           ::testing::ValuesIn(getBatchnormMedium4DTestCases())));
-INSTANTIATE_TEST_SUITE_P(Standard,
-                         TestGpuBatchnormFwdInfRef4DFp16,
-                         testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
-                                          ::testing::ValuesIn(getBatchnormMedium4DTestCases())));
-INSTANTIATE_TEST_SUITE_P(Standard,
-                         TestGpuBatchnormFwdInfRef4DBfp16,
-                         testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
-                                          ::testing::ValuesIn(getBatchnormMedium4DTestCases())));
 INSTANTIATE_TEST_SUITE_P(Comprehensive,
                          TestGpuBatchnormFwdInfRef4DFp32,
-                         testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
-                                          ::testing::ValuesIn(getBatchnormLargeEdge4DTestCases())));
-INSTANTIATE_TEST_SUITE_P(Comprehensive,
-                         TestGpuBatchnormFwdInfRef4DFp16,
-                         testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
-                                          ::testing::ValuesIn(getBatchnormLargeEdge4DTestCases())));
-INSTANTIATE_TEST_SUITE_P(Comprehensive,
-                         TestGpuBatchnormFwdInfRef4DBfp16,
                          testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
                                           ::testing::ValuesIn(getBatchnormLargeEdge4DTestCases())));
 INSTANTIATE_TEST_SUITE_P(
     Full,
     TestGpuBatchnormFwdInfRef4DFp32,
-    testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
-                     ::testing::ValuesIn(getBatchnormLargeStress4DTestCases())));
-
-INSTANTIATE_TEST_SUITE_P(
-    Full,
-    TestGpuBatchnormFwdInfRef4DFp16,
-    testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
-                     ::testing::ValuesIn(getBatchnormLargeStress4DTestCases())));
-
-INSTANTIATE_TEST_SUITE_P(
-    Full,
-    TestGpuBatchnormFwdInfRef4DBfp16,
     testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
                      ::testing::ValuesIn(getBatchnormLargeStress4DTestCases())));
 
@@ -934,11 +1020,11 @@ INSTANTIATE_TEST_SUITE_P(Quick,
                          TestGpuBatchnormFwdInfRef5DFp32,
                          testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
                                           ::testing::ValuesIn(getBatchnormSmall5DTestCases())));
-INSTANTIATE_TEST_SUITE_P(Quick,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuBatchnormFwdInfRef5DFp16,
                          testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
                                           ::testing::ValuesIn(getBatchnormSmall5DTestCases())));
-INSTANTIATE_TEST_SUITE_P(Quick,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuBatchnormFwdInfRef5DBfp16,
                          testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
                                           ::testing::ValuesIn(getBatchnormSmall5DTestCases())));
@@ -946,40 +1032,12 @@ INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuBatchnormFwdInfRef5DFp32,
                          testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
                                           ::testing::ValuesIn(getBatchnormMedium5DTestCases())));
-INSTANTIATE_TEST_SUITE_P(Standard,
-                         TestGpuBatchnormFwdInfRef5DFp16,
-                         testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
-                                          ::testing::ValuesIn(getBatchnormMedium5DTestCases())));
-INSTANTIATE_TEST_SUITE_P(Standard,
-                         TestGpuBatchnormFwdInfRef5DBfp16,
-                         testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
-                                          ::testing::ValuesIn(getBatchnormMedium5DTestCases())));
 INSTANTIATE_TEST_SUITE_P(Comprehensive,
                          TestGpuBatchnormFwdInfRef5DFp32,
-                         testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
-                                          ::testing::ValuesIn(getBatchnormLargeEdge5DTestCases())));
-INSTANTIATE_TEST_SUITE_P(Comprehensive,
-                         TestGpuBatchnormFwdInfRef5DFp16,
-                         testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
-                                          ::testing::ValuesIn(getBatchnormLargeEdge5DTestCases())));
-INSTANTIATE_TEST_SUITE_P(Comprehensive,
-                         TestGpuBatchnormFwdInfRef5DBfp16,
                          testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
                                           ::testing::ValuesIn(getBatchnormLargeEdge5DTestCases())));
 INSTANTIATE_TEST_SUITE_P(
     Full,
     TestGpuBatchnormFwdInfRef5DFp32,
-    testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
-                     ::testing::ValuesIn(getBatchnormLargeStress5DTestCases())));
-
-INSTANTIATE_TEST_SUITE_P(
-    Full,
-    TestGpuBatchnormFwdInfRef5DFp16,
-    testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
-                     ::testing::ValuesIn(getBatchnormLargeStress5DTestCases())));
-
-INSTANTIATE_TEST_SUITE_P(
-    Full,
-    TestGpuBatchnormFwdInfRef5DBfp16,
     testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
                      ::testing::ValuesIn(getBatchnormLargeStress5DTestCases())));

@@ -1,0 +1,99 @@
+{
+  "version": "1.0",
+  "id": "4b8e7a0b-7f24-49ba-8e3d-801b8b786184",
+  "name": "hipkernel:verify_multi_launch",
+  "matchers": [
+    "b24b6ed6-14cb-40fe-9f6c-fcb065086edd"
+  ],
+  "engine": "dd037c41-6153-44d5-ad35-ad0213a4241d",
+  "dispatch": "17b95352-c85e-4a7d-9c09-aa2810d55612",
+  "provenance": {
+    "specialization_contract": {
+      "schema_version": 1,
+      "consumers": [
+        {
+          "engine_id": "dd037c41-6153-44d5-ad35-ad0213a4241d",
+          "kmd_id": "b374b5a4-d900-49f5-bd81-968933c9295d",
+          "metadata_fields": [
+            "head_size"
+          ],
+          "matcher_only_fields": [
+            "dtype",
+            "seqlen_q"
+          ],
+          "bindings": {
+            "head_size": {
+              "field": "head_size"
+            }
+          },
+          "vocabulary": {}
+        }
+      ]
+    }
+  },
+  "kernelDescriptors": [
+    {
+      "version": "1.1",
+      "id": "e5718f40-c231-4e00-ac9c-4ab5eb33e75c",
+      "name": "decode.fp16_d64",
+      "sources": {
+        "decode": {
+          "kind": "rocke",
+          "source": "kernels/gfx1151/wmma_fmha_decode.py",
+          "builder": "build_wmma_fmha_decode_module",
+          "spec": {
+            "head_size": 64
+          }
+        },
+        "merge": {
+          "kind": "rocke",
+          "source": "kernels/gfx1151/wmma_fmha_decode.py",
+          "builder": "build_wmma_fmha_decode_module",
+          "spec": {
+            "head_size": 64
+          },
+          "role": "merge"
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 64,
+        "seqlen_q": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.1",
+      "id": "c780903a-4e8e-4152-af2e-3e78ab3f1cfd",
+      "name": "decode.fp16_d128",
+      "sources": {
+        "decode": {
+          "kind": "rocke",
+          "source": "kernels/gfx1151/wmma_fmha_decode.py",
+          "builder": "build_wmma_fmha_decode_module",
+          "spec": {
+            "head_size": 128
+          }
+        },
+        "merge": {
+          "kind": "rocke",
+          "source": "kernels/gfx1151/wmma_fmha_decode.py",
+          "builder": "build_wmma_fmha_decode_module",
+          "spec": {
+            "head_size": 128
+          },
+          "role": "merge"
+        }
+      },
+      "metadata": {
+        "dtype": "FP16",
+        "head_size": 128,
+        "seqlen_q": 1
+      },
+      "priority": 0
+    }
+  ],
+  "arch": [
+    "gfx1151"
+  ]
+}

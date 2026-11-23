@@ -1,0 +1,17 @@
+{% extends "common/base.h.jinja2" %}
+
+{% block tparams %}
+class data_type
+{% endblock %}
+
+{% block config_guard scoped %}
+    {{ mk_type_trait_guard(type.data_type) }}{{ mk_type_sz_check(type.data_type) }}
+{% endblock %}
+
+{% block config_constructor -%}
+search_n_config_params{ { {{ config.block_size_x }}, {{ config.ipt }} }, {{ config.threshold }} }
+{%- endblock %}
+
+{% block config_base_type -%}
+search_n_config_params_base<data_type>
+{%- endblock %}

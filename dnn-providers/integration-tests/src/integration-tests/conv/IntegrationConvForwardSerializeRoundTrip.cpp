@@ -12,6 +12,8 @@
 
 #include <hip/hip_runtime.h>
 
+#include <stdexcept>
+
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_frontend/Logging.hpp>
 #include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
@@ -95,9 +97,6 @@ public:
 protected:
     void runGraphTest() override
     {
-        // rocBLAS/Tensile heap-buffer-overflow on gfx90a; CK ASAN stall on gfx942
-        SKIP_IF_ASAN();
-
         const auto& testCase = this->GetParam();
         const auto& [layout, convTestCase] = testCase;
 
@@ -203,15 +202,15 @@ protected:
             refTensor->markDeviceModified();
         }
 
-        const float tolerance = this->getTolerance(graphObj, outputs.y);
+        const auto tolerance = this->getTolerance(graphObj, outputs.y);
         const auto site = resolveValidationSite(TestConfig::get().getValidatorDevice(),
                                                 referenceUsesDevice ? ValidationSite::DEVICE
                                                                     : ValidationSite::HOST);
-        auto selection
-            = bundle::makeValidator(frontendToSdkDataType(outputs.y->get_data_type()),
-                                    bundle::tensorLabel(yUid, outputs.y->get_name()),
-                                    bundle::ComparisonTolerance::allClose(tolerance, tolerance),
-                                    site);
+        auto selection = bundle::makeValidator(
+            frontendToSdkDataType(outputs.y->get_data_type()),
+            bundle::tensorLabel(yUid, outputs.y->get_name()),
+            bundle::ComparisonTolerance::allClose(tolerance.atol, tolerance.rtol),
+            site);
         ASSERT_NE(selection.validator, nullptr) << selection.error;
         ASSERT_TRUE(selection.validator->allClose(*refTensor, *gpuTensor))
             << "Mismatch in output tensor after serialize round-trip (uid: " << yUid << ")";

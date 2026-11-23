@@ -26,32 +26,32 @@ struct arch_mi400
 
     template <fpfmt Fmt, int Rows, int Cols, use Use>
     struct layout_config;
-    template <>
-    struct layout_config<fpfmt::e4m3, 16, 128, use::A>
+    template <fpfmt Fmt>
+    requires(bits_per_item(Fmt) == 8) struct layout_config<Fmt, 16, 128, use::A>
     {
         __device__ static constexpr auto map(std::array<int, 2> const& x) -> std::array<int, 2>
         {
             return {x[0] % 16, x[0] / 16 * 16 ^ x[1] / 16 * 32 ^ x[1] % 16};
         }
     };
-    template <>
-    struct layout_config<fpfmt::e4m3, 128, 16, use::B>
+    template <fpfmt Fmt>
+    requires(bits_per_item(Fmt) == 8) struct layout_config<Fmt, 128, 16, use::B>
     {
         __device__ static constexpr auto map(std::array<int, 2> const& x) -> std::array<int, 2>
         {
             return {x[0] / 16 * 16 ^ x[1] / 16 * 32 ^ x[1] % 16, x[0] % 16};
         }
     };
-    template <>
-    struct layout_config<fpfmt::e4m3, 32, 128, use::A>
+    template <fpfmt Fmt>
+    requires(bits_per_item(Fmt) == 8) struct layout_config<Fmt, 32, 128, use::A>
     {
         __device__ static constexpr auto map(std::array<int, 2> const& x) -> std::array<int, 2>
         {
             return {x[0] % 16 ^ x[1] / 64 * 16, x[0] / 16 * 16 ^ x[1] / 16 % 4 * 32 ^ x[1] % 16};
         }
     };
-    template <>
-    struct layout_config<fpfmt::e4m3, 128, 32, use::B>
+    template <fpfmt Fmt>
+    requires(bits_per_item(Fmt) == 8) struct layout_config<Fmt, 128, 32, use::B>
     {
         __device__ static constexpr auto map(std::array<int, 2> const& x) -> std::array<int, 2>
         {
@@ -464,8 +464,24 @@ struct arch_mi400
                                     matrix<fpfmt::e4m3, 128, 16, use::B>& b,
                                     matrix<fpfmt::e8m23, 16, 16, use::Acc>& c)
         {
-            d.data = __builtin_amdgcn_wmma_f32_16x16x128_fp8_fp8(
-                a.data, b.data, 0, c.data, A_reuse, B_reuse);
+            d.data = __builtin_amdgcn_wmma_f32_16x16x128_fp8_fp8(std::bit_cast<int32x16>(a.data),
+                                                                 std::bit_cast<int32x16>(b.data),
+                                                                 0,
+                                                                 c.data,
+                                                                 A_reuse,
+                                                                 B_reuse);
+        }
+        __device__ static void wmma(matrix<fpfmt::e8m23, 16, 16, use::Acc>& d,
+                                    matrix<fpfmt::e5m2, 16, 128, use::A>& a,
+                                    matrix<fpfmt::e5m2, 128, 16, use::B>& b,
+                                    matrix<fpfmt::e8m23, 16, 16, use::Acc>& c)
+        {
+            d.data = __builtin_amdgcn_wmma_f32_16x16x128_bf8_bf8(std::bit_cast<int32x16>(a.data),
+                                                                 std::bit_cast<int32x16>(b.data),
+                                                                 0,
+                                                                 c.data,
+                                                                 A_reuse,
+                                                                 B_reuse);
         }
         __device__ static void wmma_scale(matrix<fpfmt::e8m23, 16, 16, use::Acc>& d,
                                           matrix<fpfmt::e4m3, 16, 128, use::A>& a,
@@ -474,20 +490,21 @@ struct arch_mi400
                                           matrix<fpfmt::ue8m0, 16, 4, use::A>& a_scale,
                                           matrix<fpfmt::ue8m0, 4, 16, use::B>& b_scale)
         {
-            d.data = __builtin_amdgcn_wmma_scale_f32_16x16x128_f8f6f4(0,
-                                                                      a.data,
-                                                                      0,
-                                                                      b.data,
-                                                                      0,
-                                                                      c.data,
-                                                                      0,
-                                                                      0,
-                                                                      a_scale.data[0],
-                                                                      0,
-                                                                      0,
-                                                                      b_scale.data[0],
-                                                                      A_reuse,
-                                                                      B_reuse);
+            d.data =
+                __builtin_amdgcn_wmma_scale_f32_16x16x128_f8f6f4(0,
+                                                                 std::bit_cast<int32x16>(a.data),
+                                                                 0,
+                                                                 std::bit_cast<int32x16>(b.data),
+                                                                 0,
+                                                                 c.data,
+                                                                 0,
+                                                                 0,
+                                                                 a_scale.data[0],
+                                                                 0,
+                                                                 0,
+                                                                 b_scale.data[0],
+                                                                 A_reuse,
+                                                                 B_reuse);
         }
         __device__ static void wmma_scale(matrix<fpfmt::e8m23, 32, 32, use::Acc>& d,
                                           matrix<fpfmt::e4m3, 32, 128, use::A>& a,
@@ -498,8 +515,8 @@ struct arch_mi400
         {
             static_unroll<2>([&](auto nb) {
                 static_unroll<2>([&](auto mb) {
-                    auto asub             = reinterpret_cast<uint32x16*>(&a.data) + mb;
-                    auto bsub             = reinterpret_cast<uint32x16*>(&b.data) + nb;
+                    auto asub             = reinterpret_cast<int32x16*>(&a.data) + mb;
+                    auto bsub             = reinterpret_cast<int32x16*>(&b.data) + nb;
                     auto csub             = reinterpret_cast<floatx8*>(&c.data) + mb + 2 * nb;
                     auto dsub             = reinterpret_cast<floatx8*>(&d.data) + mb + 2 * nb;
                     constexpr int opsel_b = nb;
@@ -1107,6 +1124,22 @@ struct arch_mi400
             tensor_stride3_lo = stride;
             tensor_stride3_hi = stride >> 32;
         }
+        __device__ inline auto get_lds_addr_increment() const { return get_tensor_dim3(); }
+        __device__ inline void set_lds_addr_increment(uint32_t increment)
+        {
+            set_tensor_dim3(increment);
+        }
+        __device__ inline auto get_global_addr_increment() const { return get_tensor_stride3(); }
+        __device__ inline void set_global_addr_increment(uint64_t increment)
+        {
+            set_tensor_stride3(increment);
+        }
+        __device__ inline auto get_iterate_count() const { return tile_dim3 + 1; }
+        // iterate_count must be greater than 0
+        __device__ inline void set_iterate_count(uint16_t iterate_count)
+        {
+            tile_dim3 = iterate_count - 1;
+        }
     };
 
     union __attribute__((__packed__)) tdm_group3
@@ -1175,6 +1208,42 @@ struct arch_mi400
         RT_NT = 5,
         NT_HT = 6,
     };
+    template <scope S, th T>
+    __device__ constexpr static auto make_cache_flags() -> int
+    {
+        return (static_cast<int>(S) << 3) | static_cast<int>(T);
+    }
+
+    // Use make_cache_flags for setting CachePolicy
+    template <int CachePolicy = make_cache_flags<scope::WGP, th::RT>()>
+    __device__ static void tensor_load_to_lds(tdm_group0 const& d0,
+                                              tdm_group1 const& d1,
+                                              tdm_group2 const& d2,
+                                              tdm_group3 const& d3,
+                                              tdm_group4 const& d4)
+    {
+        __builtin_amdgcn_tensor_load_to_lds(d0.data,
+                                            std::bit_cast<uint32x8>(d1.data),
+                                            std::bit_cast<uint32x4>(d2.data),
+                                            std::bit_cast<uint32x4>(d3.data),
+                                            std::bit_cast<uint32x8>(d4.data),
+                                            CachePolicy);
+    }
+    template <int CachePolicy = make_cache_flags<scope::WGP, th::RT>()>
+    __device__ static void tensor_store_from_lds(tdm_group0 const& d0,
+                                                 tdm_group1 const& d1,
+                                                 tdm_group2 const& d2,
+                                                 tdm_group3 const& d3,
+                                                 tdm_group4 const& d4)
+    {
+        __builtin_amdgcn_tensor_store_from_lds(d0.data,
+                                               std::bit_cast<uint32x8>(d1.data),
+                                               std::bit_cast<uint32x4>(d2.data),
+                                               std::bit_cast<uint32x4>(d3.data),
+                                               std::bit_cast<uint32x8>(d4.data),
+                                               CachePolicy);
+    }
+
     template <scope S, th T, bool Speculative>
     __device__ constexpr static auto make_prefetch_flags() -> int
     {
@@ -1227,19 +1296,20 @@ struct arch_mi400
         template <int IOffset>
         inline __device__ static void fetch(uint8_t const* ptr, int32_t v_offset)
         {
-#define PF_CASE(SCOPE, TH)                                                                        \
-    else if constexpr((Flags & 0x7) == static_cast<int>(th::TH) &&                                \
-                      (Flags >> 3) == static_cast<int>(scope::SCOPE))                             \
-    {                                                                                             \
-        asm volatile("global_prefetch_b8 %0, %1 offset:%2 scope:SCOPE_" #SCOPE " th:TH_LOAD_" #TH \
-                     :                                                                            \
-                     : "v"(v_offset), "s"(ptr), "i"(IOffset));                                    \
+#define PF_CASE(SCOPE, LLVM_SCOPE, TH)                                              \
+    else if constexpr((Flags & 0x7) == static_cast<int>(th::TH) &&                  \
+                      (Flags >> 3) == static_cast<int>(scope::SCOPE))               \
+    {                                                                               \
+        asm volatile("global_prefetch_b8 %0, %1 offset:%2 scope:SCOPE_" #LLVM_SCOPE \
+                     " th:TH_LOAD_" #TH                                             \
+                     :                                                              \
+                     : "v"(v_offset), "s"(ptr), "i"(IOffset));                      \
     }
 #define PF_CASE_ALL_SCOPES(TH) \
-    PF_CASE(WGP, TH)           \
-    PF_CASE(SE, TH)            \
-    PF_CASE(DEV, TH)           \
-    PF_CASE(SYS, TH)
+    PF_CASE(WGP, CU, TH)       \
+    PF_CASE(SE, SE, TH)        \
+    PF_CASE(DEV, DEV, TH)      \
+    PF_CASE(SYS, SYS, TH)
 
             if constexpr(false) {}
             PF_CASE_ALL_SCOPES(RT)

@@ -9,6 +9,10 @@ find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
 # Define paths for code generation
 set(ASM_CODEGEN_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/asm/asm_kernels/codegen.py")
+set(ASM_CODEGEN_SOURCES
+    ${ASM_CODEGEN_SCRIPT}
+    "${CMAKE_CURRENT_SOURCE_DIR}/asm/asm_kernels/co_metadata.py"
+)
 set(ASM_CODEGEN_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated")
 set(ASM_FMHA_FWD_CONFIG_HEADER "${ASM_CODEGEN_OUTPUT_DIR}/asm_fmha_v3_fwd_configs.hpp")
 set(ASM_FMHA_BWD_CONFIG_HEADER "${ASM_CODEGEN_OUTPUT_DIR}/asm_fmha_v3_bwd_configs.hpp")
@@ -16,13 +20,19 @@ set(ASM_FMHA_BWD_CONFIG_HEADER "${ASM_CODEGEN_OUTPUT_DIR}/asm_fmha_v3_bwd_config
 # Define supported GPU architectures (used for both glob patterns and AITER_GPU_ARCHS)
 set(ASM_SDPA_GPU_ARCHS gfx942 gfx950)
 
-# CSV files that the codegen script depends on (iterate over all architectures)
+# CSV files and code objects that the codegen script reads (iterate over all
+# architectures). It records each kernel's .max_flat_workgroup_size from its .co.
 set(ASM_KERNEL_CSV_FILES "")
+set(ASM_KERNEL_CO_FILES "")
 foreach(ARCH ${ASM_SDPA_GPU_ARCHS})
     file(GLOB_RECURSE ARCH_CSV_FILES
         "${CMAKE_CURRENT_SOURCE_DIR}/asm/asm_kernels/${ARCH}/**/*.csv"
     )
     list(APPEND ASM_KERNEL_CSV_FILES ${ARCH_CSV_FILES})
+    file(GLOB_RECURSE ARCH_CO_FILES
+        "${CMAKE_CURRENT_SOURCE_DIR}/asm/asm_kernels/${ARCH}/**/*.co"
+    )
+    list(APPEND ASM_KERNEL_CO_FILES ${ARCH_CO_FILES})
 endforeach()
 
 # Create the output directory
@@ -31,11 +41,12 @@ file(MAKE_DIRECTORY ${ASM_CODEGEN_OUTPUT_DIR})
 # Custom command to generate ASM kernel config headers (forward path)
 add_custom_command(
     OUTPUT ${ASM_FMHA_FWD_CONFIG_HEADER}
-    COMMAND ${CMAKE_COMMAND} -E env "AITER_GPU_ARCHS=${ASM_SDPA_GPU_ARCHS}" --
+    COMMAND ${CMAKE_COMMAND} -E env "AITER_GPU_ARCHS=${ASM_SDPA_GPU_ARCHS}"
+            "PYTHONDONTWRITEBYTECODE=1" --
             ${Python3_EXECUTABLE} ${ASM_CODEGEN_SCRIPT}
             -m fmha_v3_fwd
             -o ${ASM_CODEGEN_OUTPUT_DIR}
-    DEPENDS ${ASM_CODEGEN_SCRIPT} ${ASM_KERNEL_CSV_FILES}
+    DEPENDS ${ASM_CODEGEN_SOURCES} ${ASM_KERNEL_CSV_FILES} ${ASM_KERNEL_CO_FILES}
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/asm/asm_kernels
     COMMENT "Generating ASM fwd kernel configuration header for ${ASM_SDPA_GPU_ARCHS}"
     VERBATIM
@@ -44,11 +55,12 @@ add_custom_command(
 # Custom command to generate ASM kernel config headers (backward path)
 add_custom_command(
     OUTPUT ${ASM_FMHA_BWD_CONFIG_HEADER}
-    COMMAND ${CMAKE_COMMAND} -E env "AITER_GPU_ARCHS=${ASM_SDPA_GPU_ARCHS}" --
+    COMMAND ${CMAKE_COMMAND} -E env "AITER_GPU_ARCHS=${ASM_SDPA_GPU_ARCHS}"
+            "PYTHONDONTWRITEBYTECODE=1" --
             ${Python3_EXECUTABLE} ${ASM_CODEGEN_SCRIPT}
             -m fmha_v3_bwd
             -o ${ASM_CODEGEN_OUTPUT_DIR}
-    DEPENDS ${ASM_CODEGEN_SCRIPT} ${ASM_KERNEL_CSV_FILES}
+    DEPENDS ${ASM_CODEGEN_SOURCES} ${ASM_KERNEL_CSV_FILES} ${ASM_KERNEL_CO_FILES}
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/asm/asm_kernels
     COMMENT "Generating ASM bwd kernel configuration header for ${ASM_SDPA_GPU_ARCHS}"
     VERBATIM
@@ -70,6 +82,7 @@ target_include_directories(hip_kernel_provider_impl PRIVATE
 
 target_sources(hip_kernel_provider_impl PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/AsmSdpaEngine.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/asm/PluginModuleDir.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/plans/SdpaBwdPlanBuilder.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/plans/SdpaFwdPlanBuilder.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/plans/SdpaBwdPlan.cpp
@@ -81,23 +94,13 @@ target_include_directories(hip_kernel_provider_impl PRIVATE
 )
 
 target_compile_definitions(hip_kernel_provider_impl PUBLIC HIPDNN_ENGINE_ASM_SDPA=1)
-target_compile_definitions(hip_kernel_provider_impl PRIVATE
-    AITER_ASM_DIR="${CMAKE_INSTALL_PREFIX}/${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/hip_kernel_provider/asm_kernels"
-)
-
-# Copy ASM kernel binaries to build directory for local testing
-file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/asm/asm_kernels/
-     DESTINATION ${CMAKE_BINARY_DIR}/hip_kernel_provider/asm_kernels
-     FILES_MATCHING PATTERN "*.co"
-)
 
 # ============================================================================
-# Kpack Packing (Phase 1 — build-time .co → .kpack)
+# Kpack Packing (build-time .co → .kpack)
 # ============================================================================
 #
-# Nothing reads these archives yet: the runtime still loads the loose .co files
-# (SdpaModuleCache / loadKernelModule). Hence the skip below rather than a hard
-# error. Make it fatal when Phase 2 loads .kpack at runtime.
+# The runtime loads kernels exclusively from .kpack archives (AsmKpackArchive).
+# Loose .co files are neither installed nor loaded. Packing failures are fatal.
 
 include(KpackPython)
 
@@ -106,17 +109,15 @@ kpack_resolve_python_dir(_KPACK_PYTHON_DIR)
 set(ASM_KPACK_ENABLED TRUE)
 if("${_KPACK_PYTHON_DIR}" STREQUAL "")
     kpack_unset_reason(_kpack_reason)
-    message(STATUS "ASM SDPA: skipping .kpack packing -- ${_kpack_reason}.")
-    set(ASM_KPACK_ENABLED FALSE)
+    message(FATAL_ERROR "ASM SDPA: .kpack packing is required but failed -- ${_kpack_reason}.")
 else()
     kpack_check_python_deps("${Python3_EXECUTABLE}" "${_KPACK_PYTHON_DIR}"
                             _KPACK_MISSING_DEPS)
     if(_KPACK_MISSING_DEPS)
         string(REPLACE ";" ", " _missing_csv "${_KPACK_MISSING_DEPS}")
-        message(STATUS "ASM SDPA: skipping .kpack packing -- "
+        message(FATAL_ERROR "ASM SDPA: .kpack packing is required but "
             "${Python3_EXECUTABLE} cannot import ${_missing_csv} from "
             "${_KPACK_PYTHON_DIR} (rocm_kpack needs zstandard>=0.20.0 and msgpack).")
-        set(ASM_KPACK_ENABLED FALSE)
     endif()
 endif()
 
@@ -124,14 +125,6 @@ if(ASM_KPACK_ENABLED)
     # --- Per-arch kpack packing custom commands ---
     set(ASM_KPACK_PACK_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/asm/asm_kernels/pack.py")
     set(ASM_KPACK_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/.kpack")
-
-    # Collect all .co files as dependencies for the packing step
-    set(ASM_KERNEL_CO_FILES "")
-    foreach(ARCH ${ASM_SDPA_GPU_ARCHS})
-        file(GLOB_RECURSE ARCH_CO_FILES
-            "${CMAKE_CURRENT_SOURCE_DIR}/asm/asm_kernels/${ARCH}/**/*.co")
-        list(APPEND ASM_KERNEL_CO_FILES ${ARCH_CO_FILES})
-    endforeach()
 
     set(ASM_KPACK_OUTPUTS "")
     foreach(ARCH ${ASM_SDPA_GPU_ARCHS})
@@ -160,10 +153,12 @@ if(ASM_KPACK_ENABLED)
     )
     add_dependencies(asm_kernel_kpack asm_kernel_codegen)
 
-    # --- Copy .kpack files to build directory for local testing ---
+    # --- Copy .kpack files next to the plugin .so for build-tree testing ---
+    # The runtime resolves kpack archives relative to the plugin directory
+    # (currentPluginDirectory() / "arch_content" / "asm_sdpa" / <arch> / "<file>.kpack").
     foreach(ARCH ${ASM_SDPA_GPU_ARCHS})
         set(_SRC "${ASM_KPACK_OUTPUT_DIR}/hip_kernel_provider_sdpa_${ARCH}.kpack")
-        set(_DST "${CMAKE_BINARY_DIR}/hip_kernel_provider/asm_kernels/.kpack/")
+        set(_DST "${HIPDNN_BUILD_PLUGIN_ENGINE_DIR}/arch_content/asm_sdpa/${ARCH}/")
         add_custom_command(TARGET asm_kernel_kpack POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E make_directory "${_DST}"
             COMMAND ${CMAKE_COMMAND} -E copy_if_different "${_SRC}" "${_DST}"
@@ -171,8 +166,10 @@ if(ASM_KPACK_ENABLED)
         )
     endforeach()
 
-    # --- Install .kpack archives (Phase 2 runtime will load from these) ---
-    install(FILES ${ASM_KPACK_OUTPUTS}
-        DESTINATION ${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/hip_kernel_provider/asm_kernels/.kpack
-    )
+    # --- Install .kpack archives next to the installed plugin ---
+    foreach(ARCH ${ASM_SDPA_GPU_ARCHS})
+        install(FILES "${ASM_KPACK_OUTPUT_DIR}/hip_kernel_provider_sdpa_${ARCH}.kpack"
+            DESTINATION ${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/arch_content/asm_sdpa/${ARCH}
+        )
+    endforeach()
 endif()

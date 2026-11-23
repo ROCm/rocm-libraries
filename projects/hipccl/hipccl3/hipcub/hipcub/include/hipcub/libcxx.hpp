@@ -1,0 +1,113 @@
+// MIT License
+//
+// Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
+#ifndef HIPCUB_LIBCXX_HPP_
+#define HIPCUB_LIBCXX_HPP_
+
+#pragma once
+
+// This is a utility file that helps managing which
+// 'std' implementation we're using. The provided
+// macros are for internal use only and may change
+// in future versions.
+//
+// Example usage:
+//     #include _HIPCUB_STD_INCLUDE(optional)
+//     using optional_int = _HIPCUB_STD::optional<int>;
+
+// Minimum version that we depend on.
+#define _HIPCUB_REQUIRED_LIBCXX_VERSION_MAJOR 3
+#define _HIPCUB_REQUIRED_LIBCXX_VERSION_MINOR 1
+#define _HIPCUB_REQUIRED_LIBCXX_VERSION_PATCH 4
+
+#define _HIPCUB_REQUIRED_LIBCXX_VERSION                                                            \
+    _HIPCUB_REQUIRED_LIBCXX_VERSION_MAJOR * 1000000 + _HIPCUB_REQUIRED_LIBCXX_VERSION_MINOR * 1000 \
+        + _HIPCUB_REQUIRED_LIBCXX_VERSION_PATCH
+
+#ifdef __has_include
+    #define HIPCUB_HAS_INCLUDE(_X) __has_include(_X)
+#else
+    #define HIPCUB_HAS_INCLUDE(_X) 0
+#endif
+
+#define _HIPCUB_STRINGIFY_IMPL(x) #x
+#define _HIPCUB_STRINGIFY(x) _HIPCUB_STRINGIFY_IMPL(x)
+
+// Newer versions (e.g. 3.4) no longer define '_CUDA_VSTD' and
+// '_LIBCUDACXX_{BEGIN,END}_NAMESPACE_STD', replacing them with
+// '_CCCL_{BEGIN,END}_NAMESPACE_CUDA_STD'. Both spellings are supported.
+
+// clang-format off
+
+// If the '::cuda::std' namespace from 'libcudacxx' or 'libhipcxx' is available.
+#if HIPCUB_HAS_INCLUDE(<cuda/std/version>)
+    #include <cuda/std/version>
+    #if defined(_LIBCUDACXX_CUDA_API_VERSION) && (_LIBCUDACXX_CUDA_API_VERSION >= _HIPCUB_REQUIRED_LIBCXX_VERSION) \
+        && (defined(_CUDA_VSTD) || defined(_CCCL_BEGIN_NAMESPACE_CUDA_STD))
+        #define _HIPCUB_LIBCXX_INCLUDE(LIB) _HIPCUB_STRINGIFY(cuda/LIB)
+        #define _HIPCUB_STD_INCLUDE(LIB) _HIPCUB_STRINGIFY(cuda/std/LIB)
+        #define _HIPCUB_LIBCXX ::cuda
+        #define _HIPCUB_HAS_DEVICE_SYSTEM_STD 1
+    #endif
+#endif
+// Otherwise, if the '::hip::std' namespace from 'libhipcxx' is available.
+#if !defined(_HIPCUB_HAS_DEVICE_SYSTEM_STD) && HIPCUB_HAS_INCLUDE(<hip/std/version>)
+    #include <hip/std/version>
+    #if defined(_LIBCUDACXX_CUDA_API_VERSION) && (_LIBCUDACXX_CUDA_API_VERSION >= _HIPCUB_REQUIRED_LIBCXX_VERSION) \
+        && (defined(_CUDA_VSTD) || defined(_CCCL_BEGIN_NAMESPACE_CUDA_STD))
+        #define _HIPCUB_LIBCXX_INCLUDE(LIB) _HIPCUB_STRINGIFY(hip/LIB)
+        #define _HIPCUB_STD_INCLUDE(LIB) _HIPCUB_STRINGIFY(hip/std/LIB)
+        // In 'libhipcxx' the '::hip' namespace is synonymous with '::cuda'.
+        #define _HIPCUB_LIBCXX ::hip
+        #define _HIPCUB_HAS_DEVICE_SYSTEM_STD 1
+    #endif
+#endif
+
+#ifdef _HIPCUB_HAS_DEVICE_SYSTEM_STD
+    #ifdef _CCCL_BEGIN_NAMESPACE_CUDA_STD
+        #define _HIPCUB_STD ::cuda::std
+        #define _HIPCUB_STD_EXEC ::cuda::std::execution
+        #define _HIPCUB_STD_NAMESPACE_BEGIN _CCCL_BEGIN_NAMESPACE_CUDA_STD
+        #define _HIPCUB_STD_NAMESPACE_END _CCCL_END_NAMESPACE_CUDA_STD
+    #else
+        #define _HIPCUB_STD _CUDA_VSTD
+        #define _HIPCUB_STD_EXEC _CUDA_STD_EXEC
+        #define _HIPCUB_STD_NAMESPACE_BEGIN _LIBCUDACXX_BEGIN_NAMESPACE_STD
+        #define _HIPCUB_STD_NAMESPACE_END _LIBCUDACXX_END_NAMESPACE_STD
+    #endif
+#endif
+
+// If 'libcudacxx' or 'libhipcxx' is not found:
+#ifndef _HIPCUB_HAS_DEVICE_SYSTEM_STD
+    #if defined(__CUDACC__) || defined(_NVHPC_CUDA)
+        #error "libcudacxx could not be found"
+    #else
+        #error "libhipcxx could not be found"
+    #endif  // defined(__CUDACC__) || defined(_NVHPC_CUDA)
+#endif // _HIPCUB_HAS_DEVICE_SYSTEM_STD
+
+#include _HIPCUB_STD_INCLUDE(__cccl/cuda_toolkit.h)
+#define HIPCUB_CTK_AT_LEAST(...) _CCCL_CTK_AT_LEAST(__VA_ARGS__)
+
+// clang-format on
+
+#endif // HIPCUB_LIBCXX_HPP_
