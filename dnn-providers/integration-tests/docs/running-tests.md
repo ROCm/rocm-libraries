@@ -129,6 +129,24 @@ build/bin/hipdnn_integration_tests \
   runs anything.
 - Standard GTest sharding (`GTEST_TOTAL_SHARDS` / `GTEST_SHARD_INDEX`) works.
 
+#### HIP headers for GPU reference kernel compilation
+
+Block-scale GPU reference kernels need the HIP FP4/FP6/FP8 headers. The compiler
+checks `HIP_PATH/include`, then `ROCM_PATH/include`, then `../include` relative
+to the loaded hiprtc library's directory. On Windows, it identifies that DLL by
+its `hiprtcCompileProgram` export, not by the imported function's address in
+the test executable. No environment override is needed when the headers are
+installed alongside hiprtc in the usual ROCm layout.
+
+The quick-tier regression
+`TestGpuRefKernelCompiler.CompilesLowPrecisionKernelWithoutEnvironmentPaths`
+unsets both variables and compiles an uncached block-scale kernel. To run it
+alone (with a GPU available):
+
+```bash
+build/bin/hipdnn_gpu_ref_tests --gtest_filter=TestGpuRefKernelCompiler.CompilesLowPrecisionKernelWithoutEnvironmentPaths
+```
+
 ### 4. Time the engine (`--benchmark`)
 
 `--benchmark` adds a performance measurement to each test. The test first

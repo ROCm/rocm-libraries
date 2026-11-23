@@ -16,6 +16,8 @@
 #include <string>
 
 #if defined(_WIN32)
+#include <system_error>
+#include <tlhelp32.h>
 #include <windows.h>
 #else
 #include <dlfcn.h>
@@ -81,28 +83,66 @@ std::filesystem::path hipIncludeDir()
     }
 
 #if defined(_WIN32)
-    HMODULE module = nullptr;
-    if(GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS
-                              | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-                          reinterpret_cast<LPCSTR>(&hiprtcCompileProgram),
-                          &module)
-       != 0)
+    const auto snapshotHandle = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE, 0);
+    if(snapshotHandle == INVALID_HANDLE_VALUE)
     {
-        std::array<char, 32768> libraryPath{};
-        const auto length = GetModuleFileNameA(
-            module, libraryPath.data(), static_cast<DWORD>(libraryPath.size()));
-        if(length > 0 && length < libraryPath.size())
+        throw std::system_error(static_cast<int>(GetLastError()),
+                                std::system_category(),
+                                "Failed to enumerate loaded modules for hiprtc");
+    }
+    const std::unique_ptr<void, decltype(&CloseHandle)> snapshot(snapshotHandle, &CloseHandle);
+    MODULEENTRY32W entry{};
+    entry.dwSize = static_cast<DWORD>(sizeof(entry));
+    if(Module32FirstW(snapshot.get(), &entry) == 0)
+    {
+        throw std::system_error(static_cast<int>(GetLastError()),
+                                std::system_category(),
+                                "Failed to read loaded modules for hiprtc");
+    }
+
+    // hiprtc.h does not use dllimport, so &hiprtcCompileProgram can point at an
+    // import thunk in this executable rather than into the hiprtc DLL.
+    HMODULE module = nullptr;
+    do
+    {
+        if(GetProcAddress(entry.hModule, "hiprtcCompileProgram") != nullptr)
         {
-            auto includeDir = std::filesystem::path(
-                                  std::string(libraryPath.data(), static_cast<size_t>(length)))
-                                  .parent_path()
-                                  .parent_path()
-                              / "include";
-            if(hasLowPrecisionHeaders(includeDir))
+            if(module != nullptr)
             {
-                return includeDir;
+                throw std::runtime_error("Multiple loaded modules export hiprtcCompileProgram; "
+                                         "unable to locate HIP headers.");
             }
+            module = entry.hModule;
         }
+    } while(Module32NextW(snapshot.get(), &entry) != 0);
+    if(const auto error = GetLastError(); error != ERROR_NO_MORE_FILES)
+    {
+        throw std::system_error(static_cast<int>(error),
+                                std::system_category(),
+                                "Failed to finish enumerating loaded modules for hiprtc");
+    }
+    if(module == nullptr)
+    {
+        throw std::runtime_error("No loaded module exports hiprtcCompileProgram.");
+    }
+
+    std::array<wchar_t, 32768> libraryPath{};
+    const auto length
+        = GetModuleFileNameW(module, libraryPath.data(), static_cast<DWORD>(libraryPath.size()));
+    if(length == 0 || length >= libraryPath.size())
+    {
+        throw std::system_error(static_cast<int>(GetLastError()),
+                                std::system_category(),
+                                "Failed to get hiprtc module path");
+    }
+    auto includeDir
+        = std::filesystem::path(std::wstring(libraryPath.data(), static_cast<size_t>(length)))
+              .parent_path()
+              .parent_path()
+          / "include";
+    if(hasLowPrecisionHeaders(includeDir))
+    {
+        return includeDir;
     }
 #else
     Dl_info libraryInfo{};
