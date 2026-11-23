@@ -85,7 +85,8 @@ def tdmStoreRejectReason(state):
   tensor_store_from_lds per wave. That needs fp32 D, fp64 or complex float D from accumulators of their type, int32 or
   int8 D from int32 accumulators, or bf16, fp16, fp8 or bf8 D converted from fp32 accumulators, written directly to D, by a GlobalSplitU=1 kernel, by
   the workgroup that reduces a MultipleBufferSingleKernel tile (below), or by a persistent kernel,
-  which stores each tile it completes, and no LDS data kept from one persistent tile to the next.
+  which stores each tile it completes, and no LDS data kept from one persistent tile to the next. A StreamKAtomic
+  kernel adds its tiles to D with atomics, so none of its blocks would store through the TDM block.
   With PrefetchAcrossPersistent the next tile's loads write the main-loop buffers during the epilogue,
   so the staged tile lies after them (_TDMStoreOverMainLoop is False) and its LDS accesses carry the
   epilogue's memory token. ReuseAcrossPersistent keeps A in VGPRs from one tile to the next, so the
@@ -139,6 +140,8 @@ def tdmStoreRejectReason(state):
     # collects its elements and stages them instead. The TDM block writes one tensor, SrdD or
     # SrdTD, so the peer partition's D would keep its initial value.
     return "TDMStoreInst does not support OutputPeerD"
+  if state["StreamKAtomic"]:
+    return "TDMStoreInst does not support StreamKAtomic: the kernel adds its tiles to D atomically instead of storing them"
   if _tileDim0(state) > TDM_TILE_DIM_MAX or _waveColumns(state) > TDM_TILE_DIM_MAX:
     return "TDMStoreInst requires the staged tile's tile_dim0 (data_size units) and tile_dim1 (columns per wave) to fit 16 bits"
   return None
