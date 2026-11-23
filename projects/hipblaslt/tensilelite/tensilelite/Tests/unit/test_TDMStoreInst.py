@@ -1599,7 +1599,7 @@ def test_store_vector_widths_3_and_6_are_staged_whole_or_rejected(gp_gfx1250, gf
 
   use_isa((12, 5, 0), 32)
   bpe = int(DataType(dest).numBytes())
-  states = SimpleNamespace(bpeCexternalGSU1=bpe, bpr=4, c=SimpleNamespace(startVgprValu=0), HHH_WMMA=False,
+  states = SimpleNamespace(bpeCexternalGSU1=bpe, bpr=4, c=SimpleNamespace(startVgprValu=0),
                            memTokenLdsBuffer0=0, memTokenEpilogue=0)
   gwb = SimpleNamespace(parentWriter=SimpleNamespace(states=states), gwvw=svw, tdmStoreLdsBase=10, tmpVgpr=11,
                         kernel={"MacroTile0": 256, "_TDMStoreOverMainLoop": True,

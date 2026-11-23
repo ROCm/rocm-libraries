@@ -365,7 +365,8 @@ def emitTDMStoreLoadCElement(gwb, addrCalc, data, vc0) -> Module:
   """Read this element's C vector from the staged tile, where its D is staged later.
 
   An odd 2-byte fp16 element goes to the high half of its own VGPR, where readInput loads it, with
-  ds_load_u16_d16_hi. A 1-byte element, fp8, bf8 or int8 C at vector width 1, goes to the low byte of its VGPR with
+  ds_load_u16_d16_hi. tdmStoreRejectReason admits fp16 D only from fp32 accumulators, so readInput's low-half
+  rule for HHH_WMMA kernels never applies here. A 1-byte element, fp8, bf8 or int8 C at vector width 1, goes to the low byte of its VGPR with
   ds_load_u8, which zero-fills the rest as readInput's byte load does on gfx1250. Only that half is read afterwards, so it does not matter that a d16 load writes
   all 32 bits of its VGPR on gfx1250, where ECC zero-fills the other half. A DS load reads at most
   16 bytes, so a wider vector, such as bf16 at store vector width 16, is read 16 bytes at a time.
@@ -379,7 +380,7 @@ def emitTDMStoreLoadCElement(gwb, addrCalc, data, vc0) -> Module:
                                      span=max(0, bpl - min(bpl, 16)))
   comment = "load C element (%u, %u)" % (addrCalc.coordOffset0, addrCalc.coordOffset1)
   memToken = MemTokenData([_stagedTileToken(gwb)])
-  if bpl == 2 and gwb.kernel["ProblemType"]["DestDataType"].isHalf() and not kw.states.HHH_WMMA and vc0 % 2:
+  if bpl == 2 and gwb.kernel["ProblemType"]["DestDataType"].isHalf() and vc0 % 2:
     inst = DSLoadD16HIU16(dst=vgpr(data), src=vgpr(addr), ds=DSModifiers(offset=offset), comment=comment)
     inst.setMemToken(memToken)
     module.add(inst)
