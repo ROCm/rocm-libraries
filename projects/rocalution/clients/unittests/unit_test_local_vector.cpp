@@ -1377,11 +1377,11 @@ TEST(local_vector_moves, a_vector_can_be_destroyed_after_an_async_move_without_s
 TEST(local_vector_moves, a_vector_destroyed_after_an_async_move_without_sync_frees_both_objects)
 {
     REQUIRE_BACKEND(Backend::Accelerator);
-#ifndef __SANITIZE_ADDRESS__
-    GTEST_SKIP() << "only an ASAN build shows whether the destructor frees both backend objects";
-#endif
     KNOWN_BUG("~LocalVector frees only the current backend object, so a vector destroyed after "
               "an async move without Sync() leaks the other one");
+#ifndef ROCALUTION_UNIT_ASAN
+    GTEST_SKIP() << "only an ASAN build shows whether the destructor frees both backend objects";
+#endif
     for_each_type<RealTypes>([&](auto type) {
         using T = typename decltype(type)::type;
 
