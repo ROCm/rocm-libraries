@@ -628,10 +628,12 @@ bool isStrictlyInLayout(const TensorInfo& tensor, bool channelsLast)
 // declined, which keeps the failing degenerate shapes of ALMIOPEN-3017 declined. Common shapes
 // this accepts: a 1x1 convolution on a [N, C, 1, 1] input whose output is channels-last (what
 // PyTorch allocates for such an input), and a batch-1 channel slice whose batch stride is that of
-// its parent. Only packed graphs are accepted this way; no non-packed one was tested.
+// its parent. Only packed graphs of rank 5 or below are accepted this way: no non-packed one was
+// tested, and MIOpen names no layout above rank 5. A packed tensor can still have elements that
+// share an address (see hasDisjointElements); checkForwardPacking declines it.
 void checkForwardLayout(const TensorInfo& x, const TensorInfo& w, const TensorInfo& y)
 {
-    if(x.packed && w.packed && y.packed)
+    if(x.packed && w.packed && y.packed && x.dims.size() <= 5)
     {
         for(const bool channelsLast : {false, true})
         {
@@ -645,12 +647,14 @@ void checkForwardLayout(const TensorInfo& x, const TensorInfo& w, const TensorIn
     checkLayout(FWD_OPERATION, x, w, y);
 }
 
-// True when no two elements of the tensor share an address: the dimensions of extent above 1,
-// taken by increasing stride, each start at or beyond the span of the ones inside them, starting
-// from stride 1. A broadcast axis (stride 0), a negative stride and strides that interleave two
-// dimensions fail it. A tensor with a zero extent has no elements and passes. The strides passed
-// packingArithmeticFits, so only the span of the last dimension can overflow, and it needs no
-// room for another dimension.
+// True when the elements of the tensor provably do not share an address: the dimensions of extent
+// above 1, taken by increasing stride, each start at or beyond the span of the ones inside them,
+// starting from stride 1. A broadcast axis (stride 0), a negative stride and strides that
+// interleave two dimensions fail it. The check is conservative, not exact: it also fails some
+// strides whose elements are all distinct, for example [2, 4, 2, 2] with strides [16, 4, 3, 2]
+// (addresses 0, 2, 3 and 5 in each plane). A tensor with a zero extent has no elements and
+// passes. The strides passed packingArithmeticFits, so only the span of the last dimension can
+// overflow, and it needs no room for another dimension.
 bool hasDisjointElements(const std::vector<int64_t>& dims, const std::vector<int64_t>& strides)
 {
     std::vector<size_t> axes;
@@ -687,9 +691,9 @@ bool hasDisjointElements(const std::vector<int64_t>& dims, const std::vector<int
 }
 
 // Packing, forward. A non-packed tensor is accepted when the convolution is ungrouped, not 3D
-// channels-last, and the tensor has no two elements at one address: MIOpen computed every such
-// graph tested correctly (padded rows, channel and batch slices, an output written into a wider
-// buffer), also next to a packed problem of the same shape in either order. The declined cases:
+// channels-last, and hasDisjointElements holds for the tensor: MIOpen computed every such graph
+// tested correctly (padded rows, channel and batch slices, an output written into a wider buffer),
+// also next to a packed problem of the same shape in either order. The declined cases:
 // - grouped: ConvDirectNaiveConvFwd and ConvHipImplicitGemm3DGroupFwdXdlops return wrong output
 //   and write outside the logical output tensor. Workaround tracked by ALMIOPEN-3018; remove it
 //   when the MIOpen defect ALMIOPEN-3013 is fixed.
@@ -697,8 +701,11 @@ bool hasDisjointElements(const std::vector<int64_t>& dims, const std::vector<int
 //   the invoker of a same-shape packed problem run before it in the process, and the packed one
 //   reuses its invoker when it runs first: MIOpen's invoker cache key leaves out the strides
 //   (ALMIOPEN-3356). Remove it when that is fixed.
-// - elements that share an address (a broadcast axis, interleaved strides): not tested, and an
-//   output of that kind cannot be written correctly at all.
+// - elements that may share an address (a broadcast axis, interleaved strides), packed or not:
+//   isTensorPacked only compares the span of the strides with the element count, so overlapping
+//   strides such as [256, 64, 5, 4] on [2, 4, 8, 8] count as packed (and MIOpen counts them as
+//   packed too), and the strict layout path of checkForwardLayout accepts them. Not tested on a
+//   GPU; an output of that kind cannot be written correctly at all.
 void checkForwardPacking(const TensorInfo& x, const TensorInfo& w, const TensorInfo& y)
 {
     const bool grouped = x.dims[1] != w.dims[1];
@@ -708,16 +715,12 @@ void checkForwardPacking(const TensorInfo& x, const TensorInfo& w, const TensorI
 
     for(const TensorInfo* tensor : {&x, &w, &y})
     {
-        if(tensor->packed)
-        {
-            continue;
-        }
         const std::string prefix = std::string(FWD_OPERATION) + ": tensor " + tensor->name;
-        if(grouped)
+        if(!tensor->packed && grouped)
         {
             decline(prefix + " is not packed; a grouped convolution needs x, w and y packed");
         }
-        if(channelsLast3d)
+        if(!tensor->packed && channelsLast3d)
         {
             decline(prefix
                     + " is not packed; a 3D channels-last convolution needs x, w and y packed");
@@ -725,8 +728,8 @@ void checkForwardPacking(const TensorInfo& x, const TensorInfo& w, const TensorI
         if(!hasDisjointElements(tensor->dims, tensor->strides))
         {
             decline(prefix
-                    + " is not packed and has elements that share an address (a zero, negative "
-                      "or overlapping stride)");
+                    + " may have elements that share an address (a zero, negative or "
+                      "overlapping stride)");
         }
     }
 }

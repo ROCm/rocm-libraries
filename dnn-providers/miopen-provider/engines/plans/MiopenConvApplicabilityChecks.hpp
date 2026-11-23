@@ -53,10 +53,12 @@ void checkConvFwdBiasActivLayouts(
 //   - share one data type, one of FLOAT, HALF, BFLOAT16;
 //   - share one layout class: all channels-first or all channels-last (see the .cpp for how a
 //     tensor is classified, including tensors with extent-1 dimensions). Three packed tensors
-//     whose strides MIOpen's strict layout check places in one layout are accepted as well, even
-//     when the strides of their extent-1 dimensions differ from the canonical ones;
-//   - for a non-packed tensor: belong to an ungrouped convolution that is not 3D channels-last,
-//     and have no two elements at one address.
+//     of rank 5 or below whose strides MIOpen's strict layout check places in one layout are
+//     accepted as well, even when the strides of their extent-1 dimensions differ from the
+//     canonical ones;
+//   - for a non-packed tensor: belong to an ungrouped convolution that is not 3D channels-last;
+//   - packed or not, have strides that provably keep every element at its own address (a
+//     conservative check: it also declines some strides whose elements are all distinct).
 //
 // Backward data (dy, w, dx) and backward weights (x, dy, dw): the three tensors must
 //   - share one data type, one of FLOAT, HALF, BFLOAT16;

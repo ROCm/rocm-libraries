@@ -63,8 +63,7 @@ constexpr const char* GROUPED_REASON
     = "is not packed; a grouped convolution needs x, w and y packed";
 constexpr const char* CHANNELS_LAST_3D_REASON
     = "is not packed; a 3D channels-last convolution needs x, w and y packed";
-constexpr const char* SHARED_ADDRESS_REASON
-    = "is not packed and has elements that share an address";
+constexpr const char* SHARED_ADDRESS_REASON = "may have elements that share an address";
 
 struct TensorSpec
 {
@@ -1655,6 +1654,67 @@ TEST(TestMiopenConvApplicabilityChecks, ForwardDeclinesNonPackedTensorsWhoseElem
         ASSERT_FALSE(isTensorPacked(disjoint.dims, disjoint.strides));
         expectAccepted(withTensorAt(base, Role::DX, disjoint), FORWARD_OPS);
     }
+}
+
+// A packed tensor can still have elements that share an address: isTensorPacked compares only the
+// span of the strides with the element count. These strides decrease strictly, so the strict
+// layout path accepts their layout, and forward must decline them for the shared address, in the
+// x role and in the y role. The canonical packed graph stays accepted.
+TEST(TestMiopenConvApplicabilityChecks, ForwardDeclinesPackedTensorsWhoseElementsShareAnAddress)
+{
+    const ConvCase base = uniformCase(convShapes(), /*channelsLastLayout=*/false);
+    expectAccepted(base, FORWARD_OPS);
+
+    // W steps by 4 over 8 columns while H steps by 5: rows overlap. Span 512 = 2 * 4 * 8 * 8.
+    const TensorSpec overlappingInput = withStrides(convXDims, {256, 64, 5, 4});
+    ASSERT_TRUE(isTensorPacked(overlappingInput.dims, overlappingInput.strides));
+    expectDeclinedAtRole(withTensorAt(base, Role::DX, overlappingInput),
+                         Role::DX,
+                         packedRuleReason(SHARED_ADDRESS_REASON),
+                         FORWARD_OPS);
+
+    // W steps by 3 over 6 columns while H steps by 4. Span 288 = 2 * 4 * 6 * 6.
+    const TensorSpec overlappingOutput = withStrides(convYDims, {144, 36, 4, 3});
+    ASSERT_TRUE(isTensorPacked(overlappingOutput.dims, overlappingOutput.strides));
+    expectDeclinedAtRole(withTensorAt(base, Role::DY, overlappingOutput),
+                         Role::DY,
+                         packedRuleReason(SHARED_ADDRESS_REASON),
+                         FORWARD_OPS);
+}
+
+// MIOpen names no layout above rank 5, so the strict layout path stops there: a batch-1 channel
+// slice of rank 5 is accepted and the same slice of rank 6 is declined by the layout rule.
+TEST(TestMiopenConvApplicabilityChecks, ForwardStrictLayoutStopsAtRankFive)
+{
+    const TensorSpec slice5 = withStrides({1, 4, 2, 2, 2}, {64, 8, 4, 2, 1});
+    ASSERT_TRUE(isTensorPacked(slice5.dims, slice5.strides));
+    expectAccepted(forwardCase("rank 5 batch-1 slice",
+                               slice5,
+                               channelsFirst({4, 4, 1, 1, 1}),
+                               channelsFirst({1, 4, 2, 2, 2})),
+                   FORWARD_OPS);
+
+    const TensorSpec slice6 = withStrides({1, 4, 2, 2, 2, 2}, {128, 16, 8, 4, 2, 1});
+    ASSERT_TRUE(isTensorPacked(slice6.dims, slice6.strides));
+    expectForwardDeclined(slice6,
+                          channelsFirst({4, 4, 1, 1, 1, 1}),
+                          channelsFirst({1, 4, 2, 2, 2, 2}),
+                          LAYOUT_REASON);
+}
+
+// The span of the dimension with the largest stride may overflow a 64-bit integer without any
+// element sharing an address: no other dimension has to fit beyond it. A non-packed channels-last
+// output whose length span is 14 * 7e17 is accepted by forward, not declined for overflow or for a
+// shared address.
+TEST(TestMiopenConvApplicabilityChecks, ForwardAcceptsDisjointTensorWhoseOutermostSpanOverflows)
+{
+    constexpr int64_t LENGTH_STRIDE = 700000000000000000;
+    const ConvCase base = uniformCase(rankShapes().front(), /*channelsLastLayout=*/true);
+    const TensorSpec output = withStrides({1, 4, 14}, {LENGTH_STRIDE + 1, 1, LENGTH_STRIDE});
+    ASSERT_FALSE(isTensorPacked(output.dims, output.strides));
+    ASSERT_GT(LENGTH_STRIDE, std::numeric_limits<int64_t>::max() / 14);
+
+    expectAccepted(withTensorAt(base, Role::DY, output), FORWARD_OPS);
 }
 
 // Packed tensors whose strides differ from the canonical ones only on extent-1 dimensions, and
