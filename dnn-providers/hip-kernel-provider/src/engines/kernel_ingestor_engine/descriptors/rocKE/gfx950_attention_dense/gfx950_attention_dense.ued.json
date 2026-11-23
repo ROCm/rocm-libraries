@@ -20,10 +20,5 @@
   ],
   "behavior_notes": [
     "supports_graph_capture"
-  ],
-  "predict_engine": {
-    "gfx950": [
-      "2fe8569d-c1f3-42bb-80ce-6e287ec751ed"
-    ]
-  }
+  ]
 }

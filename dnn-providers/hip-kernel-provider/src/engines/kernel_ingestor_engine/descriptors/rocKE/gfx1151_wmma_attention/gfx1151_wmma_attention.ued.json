@@ -13,22 +13,8 @@
   "knobs": [
     "head_size",
     "head_size_v"
-  ],
+    ],
   "behavior_notes": [
     "supports_graph_capture"
-  ],
-  "predict_engine": {
-    "gfx1151": [
-      "319ce5c0-d9f4-4c4d-9452-761ed7275d75"
-    ],
-    "gfx1100": [
-      "0694b5e1-01fb-4fc1-91a2-4fe81ebcac5a"
-    ],
-    "gfx1201": [
-      "a3eef274-65c6-4eda-9a7d-4d5c9d16128e"
-    ],
-    "gfx1101": [
-      "52506bc7-0df7-41c1-abcb-c3e1cd608c9a"
-    ]
-  }
+  ]
 }
