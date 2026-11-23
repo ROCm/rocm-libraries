@@ -21,13 +21,21 @@
  *
  * ************************************************************************ */
 
+#include "hipsparse_local_dnvec.hpp"
+#include "hipsparse_local_handle.hpp"
+#include "hipsparse_local_spmat.hpp"
+#include "hipsparse_test_unique_ptr.hpp"
 #include "utility.hpp"
 
 #include <gtest/gtest.h>
 #include <hip/hip_runtime_api.h>
 
 #include <cstdint>
+#include <memory>
+#include <type_traits>
 #include <vector>
+
+using namespace hipsparse_test;
 
 // hipsparseSpMV after hipsparseCsrSetPointers, hipsparseCscSetPointers or
 // hipsparseCooSetPointers on a matrix descriptor that SpMV already analyzed: new
@@ -39,25 +47,31 @@ class spmv_set_pointers : public testing::TestWithParam<int>
 
 namespace
 {
-    template <typename T>
-    struct device_array
-    {
-        T*     ptr = nullptr;
-        size_t n   = 0;
+    using stream_ptr
+        = std::unique_ptr<std::remove_pointer_t<hipStream_t>, hipError_t (*)(hipStream_t)>;
 
-        explicit device_array(const std::vector<T>& host)
-            : n(host.size())
-        {
-            CHECK_HIP_ERROR(hipMalloc(&ptr, n * sizeof(T)));
-            CHECK_HIP_ERROR(hipMemcpy(ptr, host.data(), n * sizeof(T), hipMemcpyHostToDevice));
-        }
-        device_array(const device_array&) = delete;
-        device_array& operator=(const device_array&) = delete;
-        ~device_array()
-        {
-            (void)hipFree(ptr);
-        }
-    };
+    stream_ptr new_stream()
+    {
+        hipStream_t stream = nullptr;
+        CHECK_HIP_ERROR(hipStreamCreate(&stream));
+        return stream_ptr(stream, hipStreamDestroy);
+    }
+
+    template <typename T>
+    hipsparse_unique_ptr to_device(const std::vector<T>& host)
+    {
+        auto d = hipsparse_unique_ptr{device_malloc(sizeof(T) * host.size()), device_free};
+        CHECK_HIP_ERROR(
+            hipMemcpy(d.get(), host.data(), sizeof(T) * host.size(), hipMemcpyHostToDevice));
+        return d;
+    }
+
+    // The matrices of #15871, row-major m x n. a3 has the pattern of a2 with other values.
+    constexpr int64_t         m = 3;
+    constexpr int64_t         n = 2;
+    const std::vector<double> a1{2, 3, 0, 4, 0, 0};
+    const std::vector<double> a2{0, 2, 3, 4, 0, 0};
+    const std::vector<double> a3{0, 5, -1, 6, 0, 0};
 
     // The CSR arrays (or the CSC arrays, by_column) of a row-major m x n matrix.
     struct compressed
@@ -66,7 +80,7 @@ namespace
         std::vector<int32_t> ind;
         std::vector<double>  val;
 
-        compressed(const std::vector<double>& a, int64_t m, int64_t n, bool by_column)
+        compressed(const std::vector<double>& a, bool by_column)
         {
             const int64_t outer = by_column ? n : m;
             const int64_t inner = by_column ? m : n;
@@ -86,153 +100,6 @@ namespace
         }
     };
 
-    std::vector<double> gemv(const std::vector<double>& a,
-                             int64_t                    m,
-                             int64_t                    n,
-                             bool                       trans,
-                             double                     alpha,
-                             const std::vector<double>& x,
-                             double                     beta,
-                             std::vector<double>        y)
-    {
-        for(size_t r = 0; r < y.size(); ++r)
-        {
-            double sum = 0.0;
-            for(size_t c = 0; c < x.size(); ++c)
-            {
-                sum += (trans ? a[c * n + r] : a[r * n + c]) * x[c];
-            }
-            y[r] = alpha * sum + beta * y[r];
-        }
-        return y;
-    }
-
-    void run(bool by_column, hipsparseOperation_t op, hipsparseSpMVAlg_t alg)
-    {
-        SCOPED_TRACE(testing::Message() << "csc=" << by_column << " op=" << op << " alg=" << alg);
-
-        // The matrices of #15871. a3 has the pattern of a2 with other values.
-        const int64_t             m = 3;
-        const int64_t             n = 2;
-        const std::vector<double> a1{2, 3, 0, 4, 0, 0};
-        const std::vector<double> a2{0, 2, 3, 4, 0, 0};
-        const std::vector<double> a3{0, 5, -1, 6, 0, 0};
-        const bool                trans = op != HIPSPARSE_OPERATION_NON_TRANSPOSE;
-
-        const compressed h1(a1, m, n, by_column), h2(a2, m, n, by_column), h3(a3, m, n, by_column);
-        ASSERT_EQ(h1.val.size(), h2.val.size());
-        ASSERT_EQ(h2.val.size(), h3.val.size());
-
-        const std::vector<double> x
-            = trans ? std::vector<double>{5, 7, -2} : std::vector<double>{5, 7};
-        const std::vector<double> y0
-            = trans ? std::vector<double>{1, 2} : std::vector<double>{1, 2, 3};
-        const double alpha = 2.0;
-        const double beta  = 3.0;
-
-        device_array<int32_t> p1(h1.ptr), i1(h1.ind), p2(h2.ptr), i2(h2.ind);
-        device_array<double>  v1(h1.val), v2(h2.val), v3(h3.val), dx(x), dy(y0);
-
-        hipsparseHandle_t handle = nullptr;
-        ASSERT_EQ(hipsparseCreate(&handle), HIPSPARSE_STATUS_SUCCESS);
-
-        hipsparseSpMatDescr_t   mat    = nullptr;
-        const hipsparseStatus_t create = by_column ? hipsparseCreateCsc(&mat,
-                                                                        m,
-                                                                        n,
-                                                                        h1.val.size(),
-                                                                        p1.ptr,
-                                                                        i1.ptr,
-                                                                        v1.ptr,
-                                                                        HIPSPARSE_INDEX_32I,
-                                                                        HIPSPARSE_INDEX_32I,
-                                                                        HIPSPARSE_INDEX_BASE_ZERO,
-                                                                        HIP_R_64F)
-                                                   : hipsparseCreateCsr(&mat,
-                                                                        m,
-                                                                        n,
-                                                                        h1.val.size(),
-                                                                        p1.ptr,
-                                                                        i1.ptr,
-                                                                        v1.ptr,
-                                                                        HIPSPARSE_INDEX_32I,
-                                                                        HIPSPARSE_INDEX_32I,
-                                                                        HIPSPARSE_INDEX_BASE_ZERO,
-                                                                        HIP_R_64F);
-        ASSERT_EQ(create, HIPSPARSE_STATUS_SUCCESS);
-
-        hipsparseDnVecDescr_t vx = nullptr;
-        hipsparseDnVecDescr_t vy = nullptr;
-        ASSERT_EQ(hipsparseCreateDnVec(&vx, x.size(), dx.ptr, HIP_R_64F), HIPSPARSE_STATUS_SUCCESS);
-        ASSERT_EQ(hipsparseCreateDnVec(&vy, y0.size(), dy.ptr, HIP_R_64F),
-                  HIPSPARSE_STATUS_SUCCESS);
-
-        void*  buffer = nullptr;
-        size_t bytes  = 0;
-
-        auto set_pointers = [&](int32_t* ptr, int32_t* ind, double* val) {
-            return by_column ? hipsparseCscSetPointers(mat, ptr, ind, val)
-                             : hipsparseCsrSetPointers(mat, ptr, ind, val);
-        };
-
-        // SpMV, after the buffer size query and the preprocessing when preprocess is set.
-        auto spmv = [&](const std::vector<double>& a, bool preprocess, const char* what) {
-            SCOPED_TRACE(what);
-            if(preprocess)
-            {
-                size_t need = 0;
-                ASSERT_EQ(hipsparseSpMV_bufferSize(
-                              handle, op, &alpha, mat, vx, &beta, vy, HIP_R_64F, alg, &need),
-                          HIPSPARSE_STATUS_SUCCESS);
-                // rocSPARSE rejects a buffer that is not null when the size is zero.
-                if(need != bytes)
-                {
-                    ASSERT_EQ(hipFree(buffer), hipSuccess);
-                    buffer = nullptr;
-                    bytes  = need;
-                    if(bytes > 0)
-                    {
-                        ASSERT_EQ(hipMalloc(&buffer, bytes), hipSuccess);
-                    }
-                }
-                ASSERT_EQ(hipsparseSpMV_preprocess(
-                              handle, op, &alpha, mat, vx, &beta, vy, HIP_R_64F, alg, buffer),
-                          HIPSPARSE_STATUS_SUCCESS);
-            }
-            ASSERT_EQ(
-                hipMemcpy(dy.ptr, y0.data(), y0.size() * sizeof(double), hipMemcpyHostToDevice),
-                hipSuccess);
-            ASSERT_EQ(hipsparseSpMV(handle, op, &alpha, mat, vx, &beta, vy, HIP_R_64F, alg, buffer),
-                      HIPSPARSE_STATUS_SUCCESS);
-            std::vector<double> got(y0.size());
-            ASSERT_EQ(
-                hipMemcpy(got.data(), dy.ptr, got.size() * sizeof(double), hipMemcpyDeviceToHost),
-                hipSuccess);
-            const std::vector<double> want = gemv(a, m, n, trans, alpha, x, beta, y0);
-            for(size_t k = 0; k < want.size(); ++k)
-            {
-                EXPECT_DOUBLE_EQ(got[k], want[k]) << "y[" << k << "]";
-            }
-        };
-
-        spmv(a1, true, "first arrays");
-        EXPECT_EQ(set_pointers(p2.ptr, i2.ptr, v2.ptr), HIPSPARSE_STATUS_SUCCESS);
-        spmv(a2, true, "new arrays");
-        EXPECT_EQ(set_pointers(p2.ptr, i2.ptr, v3.ptr), HIPSPARSE_STATUS_SUCCESS);
-        spmv(a3, true, "new values only");
-        EXPECT_EQ(set_pointers(p1.ptr, i1.ptr, v1.ptr), HIPSPARSE_STATUS_SUCCESS);
-        spmv(a1, false, "first arrays again, without a new preprocessing");
-
-        EXPECT_EQ(hipFree(buffer), hipSuccess);
-        EXPECT_EQ(hipsparseDestroyDnVec(vx), HIPSPARSE_STATUS_SUCCESS);
-        EXPECT_EQ(hipsparseDestroyDnVec(vy), HIPSPARSE_STATUS_SUCCESS);
-        EXPECT_EQ(hipsparseDestroySpMat(mat), HIPSPARSE_STATUS_SUCCESS);
-        EXPECT_EQ(hipsparseDestroy(handle), HIPSPARSE_STATUS_SUCCESS);
-    }
-}
-
-namespace
-{
     // The COO arrays (row, column and value of each nonzero) of a row-major m x n matrix.
     struct coo
     {
@@ -240,7 +107,7 @@ namespace
         std::vector<int32_t> col;
         std::vector<double>  val;
 
-        coo(const std::vector<double>& a, int64_t m, int64_t n)
+        explicit coo(const std::vector<double>& a)
         {
             for(int64_t r = 0; r < m; ++r)
             {
@@ -257,112 +124,218 @@ namespace
         }
     };
 
+    // x, y, the scalars and the buffer of y = alpha * op(A) * x + beta * y with
+    // hipsparseSpMV on the m x n matrices above, checked against a dense product.
+    class spmv_check
+    {
+        hipsparseHandle_t    m_handle;
+        hipsparseOperation_t m_op;
+        hipsparseSpMVAlg_t   m_alg;
+        bool                 m_trans;
+        std::vector<double>  m_x;
+        std::vector<double>  m_y0;
+        hipsparse_unique_ptr m_dx;
+        hipsparse_unique_ptr m_dy;
+        hipsparseLocalDnVec  m_vx;
+        hipsparseLocalDnVec  m_vy;
+        hipsparse_unique_ptr m_buffer{nullptr, device_free};
+        size_t               m_bytes = 0;
+
+    public:
+        const double alpha = 2.0;
+        const double beta  = 3.0;
+
+        spmv_check(hipsparseHandle_t handle, hipsparseOperation_t op, hipsparseSpMVAlg_t alg)
+            : m_handle(handle)
+            , m_op(op)
+            , m_alg(alg)
+            , m_trans(op != HIPSPARSE_OPERATION_NON_TRANSPOSE)
+            , m_x(m_trans ? std::vector<double>{5, 7, -2} : std::vector<double>{5, 7})
+            , m_y0(m_trans ? std::vector<double>{1, 2} : std::vector<double>{1, 2, 3})
+            , m_dx(to_device(m_x))
+            , m_dy(to_device(m_y0))
+            , m_vx(m_x.size(), m_dx.get(), HIP_R_64F)
+            , m_vy(m_y0.size(), m_dy.get(), HIP_R_64F)
+        {
+        }
+
+        hipsparseStatus_t buffer_size(hipsparseSpMatDescr_t mat, size_t* bytes)
+        {
+            return hipsparseSpMV_bufferSize(
+                m_handle, m_op, &alpha, mat, m_vx, &beta, m_vy, HIP_R_64F, m_alg, bytes);
+        }
+
+        hipsparseStatus_t preprocess(hipsparseSpMatDescr_t mat)
+        {
+            return hipsparseSpMV_preprocess(
+                m_handle, m_op, &alpha, mat, m_vx, &beta, m_vy, HIP_R_64F, m_alg, m_buffer.get());
+        }
+
+        hipsparseStatus_t spmv(hipsparseSpMatDescr_t mat)
+        {
+            return hipsparseSpMV(
+                m_handle, m_op, &alpha, mat, m_vx, &beta, m_vy, HIP_R_64F, m_alg, m_buffer.get());
+        }
+
+        // The buffer size query, and a buffer of that size.
+        void size_buffer(hipsparseSpMatDescr_t mat)
+        {
+            size_t need = 0;
+            ASSERT_EQ(buffer_size(mat, &need), HIPSPARSE_STATUS_SUCCESS);
+            // rocSPARSE rejects a buffer that is not null when the size is zero.
+            if(need != m_bytes)
+            {
+                m_buffer.reset(need > 0 ? device_malloc(need) : nullptr);
+                m_bytes = need;
+            }
+        }
+
+        void reset_y()
+        {
+            ASSERT_EQ(
+                hipMemcpy(
+                    m_dy.get(), m_y0.data(), m_y0.size() * sizeof(double), hipMemcpyHostToDevice),
+                hipSuccess);
+        }
+
+        // y against the product of the row-major matrix a.
+        void check(const std::vector<double>& a)
+        {
+            ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+            std::vector<double> got(m_y0.size());
+            ASSERT_EQ(
+                hipMemcpy(
+                    got.data(), m_dy.get(), got.size() * sizeof(double), hipMemcpyDeviceToHost),
+                hipSuccess);
+            for(size_t r = 0; r < m_y0.size(); ++r)
+            {
+                double sum = 0.0;
+                for(size_t c = 0; c < m_x.size(); ++c)
+                {
+                    sum += (m_trans ? a[c * n + r] : a[r * n + c]) * m_x[c];
+                }
+                EXPECT_DOUBLE_EQ(got[r], alpha * sum + beta * m_y0[r]) << "y[" << r << "]";
+            }
+        }
+
+        // SpMV, after the buffer size query and the preprocessing when preprocess is
+        // set, compared with the product of a.
+        void run(hipsparseSpMatDescr_t      mat,
+                 const std::vector<double>& a,
+                 bool                       preprocess,
+                 const char*                what)
+        {
+            SCOPED_TRACE(what);
+            if(preprocess)
+            {
+                size_buffer(mat);
+                ASSERT_FALSE(testing::Test::HasFatalFailure());
+                ASSERT_EQ(this->preprocess(mat), HIPSPARSE_STATUS_SUCCESS);
+            }
+            reset_y();
+            ASSERT_EQ(spmv(mat), HIPSPARSE_STATUS_SUCCESS);
+            check(a);
+        }
+    };
+
+    void run(bool by_column, hipsparseOperation_t op, hipsparseSpMVAlg_t alg)
+    {
+        SCOPED_TRACE(testing::Message() << "csc=" << by_column << " op=" << op << " alg=" << alg);
+
+        const compressed h1(a1, by_column), h2(a2, by_column), h3(a3, by_column);
+        ASSERT_EQ(h1.val.size(), h2.val.size());
+        ASSERT_EQ(h2.val.size(), h3.val.size());
+
+        auto p1 = to_device(h1.ptr), i1 = to_device(h1.ind), p2 = to_device(h2.ptr),
+             i2 = to_device(h2.ind);
+        auto v1 = to_device(h1.val), v2 = to_device(h2.val), v3 = to_device(h3.val);
+
+        hipsparseLocalHandle_t             handle;
+        std::unique_ptr<hipsparseLocalCsr> csr;
+        std::unique_ptr<hipsparseLocalCsc> csc;
+        if(by_column)
+        {
+            csc.reset(new hipsparseLocalCsc(m,
+                                            n,
+                                            h1.val.size(),
+                                            p1.get(),
+                                            i1.get(),
+                                            v1.get(),
+                                            HIPSPARSE_INDEX_32I,
+                                            HIPSPARSE_INDEX_32I,
+                                            HIPSPARSE_INDEX_BASE_ZERO,
+                                            HIP_R_64F));
+        }
+        else
+        {
+            csr.reset(new hipsparseLocalCsr(m,
+                                            n,
+                                            h1.val.size(),
+                                            p1.get(),
+                                            i1.get(),
+                                            v1.get(),
+                                            HIPSPARSE_INDEX_32I,
+                                            HIPSPARSE_INDEX_32I,
+                                            HIPSPARSE_INDEX_BASE_ZERO,
+                                            HIP_R_64F));
+        }
+        const hipsparseSpMatDescr_t mat
+            = by_column ? hipsparseSpMatDescr_t(*csc) : hipsparseSpMatDescr_t(*csr);
+
+        auto set_pointers = [&](void* ptr, void* ind, void* val) {
+            return by_column ? hipsparseCscSetPointers(mat, ptr, ind, val)
+                             : hipsparseCsrSetPointers(mat, ptr, ind, val);
+        };
+
+        spmv_check s(handle, op, alg);
+        s.run(mat, a1, true, "first arrays");
+        EXPECT_EQ(set_pointers(p2.get(), i2.get(), v2.get()), HIPSPARSE_STATUS_SUCCESS);
+        s.run(mat, a2, true, "new arrays");
+        EXPECT_EQ(set_pointers(p2.get(), i2.get(), v3.get()), HIPSPARSE_STATUS_SUCCESS);
+        s.run(mat, a3, true, "new values only");
+        EXPECT_EQ(set_pointers(p1.get(), i1.get(), v1.get()), HIPSPARSE_STATUS_SUCCESS);
+        s.run(mat, a1, false, "first arrays again, without a new preprocessing");
+    }
+
     // hipsparseSpMV on COO arrays after hipsparseCooSetPointers: new arrays, new
     // values only, and SpMV without a new preprocessing for the arrays of the first
-    // matrix again. Each product is checked against the dense reference.
+    // matrix again.
     void run_coo(hipsparseSpMVAlg_t alg)
     {
         SCOPED_TRACE(testing::Message() << "coo alg=" << alg);
 
-        const int64_t             m = 3;
-        const int64_t             n = 2;
-        const std::vector<double> a1{2, 3, 0, 4, 0, 0};
-        const std::vector<double> a2{0, 2, 3, 4, 0, 0};
-        const std::vector<double> a3{0, 5, -1, 6, 0, 0};
-        const coo                 h1(a1, m, n), h2(a2, m, n), h3(a3, m, n);
+        const coo h1(a1), h2(a2), h3(a3);
         ASSERT_EQ(h1.val.size(), h2.val.size());
         ASSERT_EQ(h2.val.size(), h3.val.size());
 
-        const std::vector<double>  x{5, 7};
-        const std::vector<double>  y0{1, 2, 3};
-        const double               alpha = 2.0;
-        const double               beta  = 3.0;
-        const hipsparseOperation_t op    = HIPSPARSE_OPERATION_NON_TRANSPOSE;
+        auto r1 = to_device(h1.row), c1 = to_device(h1.col), r2 = to_device(h2.row),
+             c2 = to_device(h2.col);
+        auto v1 = to_device(h1.val), v2 = to_device(h2.val), v3 = to_device(h3.val);
 
-        device_array<int32_t> r1(h1.row), c1(h1.col), r2(h2.row), c2(h2.col);
-        device_array<double>  v1(h1.val), v2(h2.val), v3(h3.val), dx(x), dy(y0);
+        hipsparseLocalHandle_t handle;
+        hipsparseLocalCoo      mat(m,
+                              n,
+                              h1.val.size(),
+                              r1.get(),
+                              c1.get(),
+                              v1.get(),
+                              HIPSPARSE_INDEX_32I,
+                              HIPSPARSE_INDEX_BASE_ZERO,
+                              HIP_R_64F);
 
-        hipsparseHandle_t handle = nullptr;
-        ASSERT_EQ(hipsparseCreate(&handle), HIPSPARSE_STATUS_SUCCESS);
-
-        hipsparseSpMatDescr_t mat = nullptr;
-        ASSERT_EQ(hipsparseCreateCoo(&mat,
-                                     m,
-                                     n,
-                                     h1.val.size(),
-                                     r1.ptr,
-                                     c1.ptr,
-                                     v1.ptr,
-                                     HIPSPARSE_INDEX_32I,
-                                     HIPSPARSE_INDEX_BASE_ZERO,
-                                     HIP_R_64F),
+        spmv_check s(handle, HIPSPARSE_OPERATION_NON_TRANSPOSE, alg);
+        s.run(mat, a1, true, "first arrays");
+        EXPECT_EQ(hipsparseCooSetPointers(mat, r2.get(), c2.get(), v2.get()),
                   HIPSPARSE_STATUS_SUCCESS);
-        hipsparseDnVecDescr_t vx = nullptr;
-        hipsparseDnVecDescr_t vy = nullptr;
-        ASSERT_EQ(hipsparseCreateDnVec(&vx, x.size(), dx.ptr, HIP_R_64F), HIPSPARSE_STATUS_SUCCESS);
-        ASSERT_EQ(hipsparseCreateDnVec(&vy, y0.size(), dy.ptr, HIP_R_64F),
+        s.run(mat, a2, true, "new arrays");
+        EXPECT_EQ(hipsparseCooSetPointers(mat, r2.get(), c2.get(), v3.get()),
                   HIPSPARSE_STATUS_SUCCESS);
-
-        void*  buffer = nullptr;
-        size_t bytes  = 0;
-
-        // SpMV, after the buffer size query and the preprocessing when preprocess is set.
-        auto spmv = [&](const std::vector<double>& a, bool preprocess, const char* what) {
-            SCOPED_TRACE(what);
-            if(preprocess)
-            {
-                size_t need = 0;
-                ASSERT_EQ(hipsparseSpMV_bufferSize(
-                              handle, op, &alpha, mat, vx, &beta, vy, HIP_R_64F, alg, &need),
-                          HIPSPARSE_STATUS_SUCCESS);
-                if(need != bytes)
-                {
-                    ASSERT_EQ(hipFree(buffer), hipSuccess);
-                    buffer = nullptr;
-                    bytes  = need;
-                    if(bytes > 0)
-                    {
-                        ASSERT_EQ(hipMalloc(&buffer, bytes), hipSuccess);
-                    }
-                }
-                ASSERT_EQ(hipsparseSpMV_preprocess(
-                              handle, op, &alpha, mat, vx, &beta, vy, HIP_R_64F, alg, buffer),
-                          HIPSPARSE_STATUS_SUCCESS);
-            }
-            ASSERT_EQ(
-                hipMemcpy(dy.ptr, y0.data(), y0.size() * sizeof(double), hipMemcpyHostToDevice),
-                hipSuccess);
-            ASSERT_EQ(hipsparseSpMV(handle, op, &alpha, mat, vx, &beta, vy, HIP_R_64F, alg, buffer),
-                      HIPSPARSE_STATUS_SUCCESS);
-            std::vector<double> got(y0.size());
-            ASSERT_EQ(
-                hipMemcpy(got.data(), dy.ptr, got.size() * sizeof(double), hipMemcpyDeviceToHost),
-                hipSuccess);
-            const std::vector<double> want = gemv(a, m, n, false, alpha, x, beta, y0);
-            for(size_t k = 0; k < want.size(); ++k)
-            {
-                EXPECT_DOUBLE_EQ(got[k], want[k]) << "y[" << k << "]";
-            }
-        };
-
-        spmv(a1, true, "first arrays");
-        EXPECT_EQ(hipsparseCooSetPointers(mat, r2.ptr, c2.ptr, v2.ptr), HIPSPARSE_STATUS_SUCCESS);
-        spmv(a2, true, "new arrays");
-        EXPECT_EQ(hipsparseCooSetPointers(mat, r2.ptr, c2.ptr, v3.ptr), HIPSPARSE_STATUS_SUCCESS);
-        spmv(a3, true, "new values only");
-        EXPECT_EQ(hipsparseCooSetPointers(mat, r1.ptr, c1.ptr, v1.ptr), HIPSPARSE_STATUS_SUCCESS);
-        spmv(a1, false, "first arrays again, without a new preprocessing");
-
-        EXPECT_EQ(hipFree(buffer), hipSuccess);
-        EXPECT_EQ(hipsparseDestroyDnVec(vx), HIPSPARSE_STATUS_SUCCESS);
-        EXPECT_EQ(hipsparseDestroyDnVec(vy), HIPSPARSE_STATUS_SUCCESS);
-        EXPECT_EQ(hipsparseDestroySpMat(mat), HIPSPARSE_STATUS_SUCCESS);
-        EXPECT_EQ(hipsparseDestroy(handle), HIPSPARSE_STATUS_SUCCESS);
+        s.run(mat, a3, true, "new values only");
+        EXPECT_EQ(hipsparseCooSetPointers(mat, r1.get(), c1.get(), v1.get()),
+                  HIPSPARSE_STATUS_SUCCESS);
+        s.run(mat, a1, false, "first arrays again, without a new preprocessing");
     }
-}
 
-namespace
-{
     // The first hipsparseSpMV after hipsparseCsrSetPointers would analyze the new
     // arrays, which synchronizes the device. While the handle stream is being
     // captured, it returns HIPSPARSE_STATUS_INVALID_VALUE and leaves the capture
@@ -371,108 +344,55 @@ namespace
     {
         SCOPED_TRACE(testing::Message() << "alg=" << alg);
 
-        const int64_t             m = 3;
-        const int64_t             n = 2;
-        const std::vector<double> a1{2, 3, 0, 4, 0, 0};
-        const std::vector<double> a2{0, 2, 3, 4, 0, 0};
-        const compressed          h1(a1, m, n, false), h2(a2, m, n, false);
+        const compressed h1(a1, false), h2(a2, false);
         ASSERT_EQ(h1.val.size(), h2.val.size());
 
-        const std::vector<double>  x{5, 7};
-        const std::vector<double>  y0{1, 2, 3};
-        const double               alpha = 2.0;
-        const double               beta  = 3.0;
-        const hipsparseOperation_t op    = HIPSPARSE_OPERATION_NON_TRANSPOSE;
+        auto p1 = to_device(h1.ptr), i1 = to_device(h1.ind), p2 = to_device(h2.ptr),
+             i2 = to_device(h2.ind);
+        auto v1 = to_device(h1.val), v2 = to_device(h2.val);
 
-        device_array<int32_t> p1(h1.ptr), i1(h1.ind), p2(h2.ptr), i2(h2.ind);
-        device_array<double>  v1(h1.val), v2(h2.val), dx(x), dy(y0);
+        const stream_ptr       stream = new_stream();
+        hipsparseLocalHandle_t handle;
+        ASSERT_EQ(hipsparseSetStream(handle, stream.get()), HIPSPARSE_STATUS_SUCCESS);
+        hipsparseLocalCsr mat(m,
+                              n,
+                              h1.val.size(),
+                              p1.get(),
+                              i1.get(),
+                              v1.get(),
+                              HIPSPARSE_INDEX_32I,
+                              HIPSPARSE_INDEX_32I,
+                              HIPSPARSE_INDEX_BASE_ZERO,
+                              HIP_R_64F);
 
-        hipsparseHandle_t handle = nullptr;
-        ASSERT_EQ(hipsparseCreate(&handle), HIPSPARSE_STATUS_SUCCESS);
-        hipStream_t stream = nullptr;
-        ASSERT_EQ(hipStreamCreate(&stream), hipSuccess);
-        ASSERT_EQ(hipsparseSetStream(handle, stream), HIPSPARSE_STATUS_SUCCESS);
-
-        hipsparseSpMatDescr_t mat = nullptr;
-        ASSERT_EQ(hipsparseCreateCsr(&mat,
-                                     m,
-                                     n,
-                                     h1.val.size(),
-                                     p1.ptr,
-                                     i1.ptr,
-                                     v1.ptr,
-                                     HIPSPARSE_INDEX_32I,
-                                     HIPSPARSE_INDEX_32I,
-                                     HIPSPARSE_INDEX_BASE_ZERO,
-                                     HIP_R_64F),
+        spmv_check s(handle, HIPSPARSE_OPERATION_NON_TRANSPOSE, alg);
+        s.size_buffer(mat);
+        ASSERT_FALSE(testing::Test::HasFatalFailure());
+        ASSERT_EQ(s.preprocess(mat), HIPSPARSE_STATUS_SUCCESS);
+        s.reset_y();
+        ASSERT_EQ(s.spmv(mat), HIPSPARSE_STATUS_SUCCESS);
+        s.check(a1);
+        ASSERT_EQ(hipsparseCsrSetPointers(mat, p2.get(), i2.get(), v2.get()),
                   HIPSPARSE_STATUS_SUCCESS);
-        hipsparseDnVecDescr_t vx = nullptr;
-        hipsparseDnVecDescr_t vy = nullptr;
-        ASSERT_EQ(hipsparseCreateDnVec(&vx, x.size(), dx.ptr, HIP_R_64F), HIPSPARSE_STATUS_SUCCESS);
-        ASSERT_EQ(hipsparseCreateDnVec(&vy, y0.size(), dy.ptr, HIP_R_64F),
-                  HIPSPARSE_STATUS_SUCCESS);
-
-        size_t bytes = 0;
-        ASSERT_EQ(hipsparseSpMV_bufferSize(
-                      handle, op, &alpha, mat, vx, &beta, vy, HIP_R_64F, alg, &bytes),
-                  HIPSPARSE_STATUS_SUCCESS);
-        void* buffer = nullptr;
-        if(bytes > 0)
-        {
-            ASSERT_EQ(hipMalloc(&buffer, bytes), hipSuccess);
-        }
-        ASSERT_EQ(hipsparseSpMV_preprocess(
-                      handle, op, &alpha, mat, vx, &beta, vy, HIP_R_64F, alg, buffer),
-                  HIPSPARSE_STATUS_SUCCESS);
-
-        auto spmv = [&]() {
-            return hipsparseSpMV(handle, op, &alpha, mat, vx, &beta, vy, HIP_R_64F, alg, buffer);
-        };
-        auto check = [&](const std::vector<double>& a, const char* what) {
-            SCOPED_TRACE(what);
-            std::vector<double> got(y0.size());
-            ASSERT_EQ(hipStreamSynchronize(stream), hipSuccess);
-            ASSERT_EQ(
-                hipMemcpy(got.data(), dy.ptr, got.size() * sizeof(double), hipMemcpyDeviceToHost),
-                hipSuccess);
-            const std::vector<double> want = gemv(a, m, n, false, alpha, x, beta, y0);
-            for(size_t k = 0; k < want.size(); ++k)
-            {
-                EXPECT_DOUBLE_EQ(got[k], want[k]) << "y[" << k << "]";
-            }
-            ASSERT_EQ(
-                hipMemcpy(dy.ptr, y0.data(), y0.size() * sizeof(double), hipMemcpyHostToDevice),
-                hipSuccess);
-        };
-
-        ASSERT_EQ(spmv(), HIPSPARSE_STATUS_SUCCESS);
-        check(a1, "first arrays");
-        ASSERT_EQ(hipsparseCsrSetPointers(mat, p2.ptr, i2.ptr, v2.ptr), HIPSPARSE_STATUS_SUCCESS);
         ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
 
-        ASSERT_EQ(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal), hipSuccess);
+        ASSERT_EQ(hipStreamBeginCapture(stream.get(), hipStreamCaptureModeGlobal), hipSuccess);
         hipsparseStatus_t captured = HIPSPARSE_STATUS_SUCCESS;
-        EXPECT_NO_THROW(captured = spmv());
+        EXPECT_NO_THROW(captured = s.spmv(mat));
         EXPECT_EQ(captured, HIPSPARSE_STATUS_INVALID_VALUE) << "SpMV during the capture";
         hipStreamCaptureStatus status = hipStreamCaptureStatusNone;
-        EXPECT_EQ(hipStreamIsCapturing(stream, &status), hipSuccess);
+        EXPECT_EQ(hipStreamIsCapturing(stream.get(), &status), hipSuccess);
         EXPECT_EQ(status, hipStreamCaptureStatusActive);
         hipGraph_t graph = nullptr;
-        EXPECT_EQ(hipStreamEndCapture(stream, &graph), hipSuccess);
+        EXPECT_EQ(hipStreamEndCapture(stream.get(), &graph), hipSuccess);
         if(graph != nullptr)
         {
             EXPECT_EQ(hipGraphDestroy(graph), hipSuccess);
         }
 
-        EXPECT_EQ(spmv(), HIPSPARSE_STATUS_SUCCESS) << "SpMV after the capture";
-        check(a2, "new arrays, after the capture");
-
-        EXPECT_EQ(hipFree(buffer), hipSuccess);
-        EXPECT_EQ(hipsparseDestroyDnVec(vx), HIPSPARSE_STATUS_SUCCESS);
-        EXPECT_EQ(hipsparseDestroyDnVec(vy), HIPSPARSE_STATUS_SUCCESS);
-        EXPECT_EQ(hipsparseDestroySpMat(mat), HIPSPARSE_STATUS_SUCCESS);
-        EXPECT_EQ(hipsparseDestroy(handle), HIPSPARSE_STATUS_SUCCESS);
-        EXPECT_EQ(hipStreamDestroy(stream), hipSuccess);
+        s.reset_y();
+        EXPECT_EQ(s.spmv(mat), HIPSPARSE_STATUS_SUCCESS) << "SpMV after the capture";
+        s.check(a2);
     }
 }
 
