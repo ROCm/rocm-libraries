@@ -1391,6 +1391,9 @@
       "name": "resnet50_stem",
       "source": "RFC 0019.13 \u00a712.2",
       "values": {
+        "spatial": [
+          "2d"
+        ],
         "N": [
           1,
           4,
@@ -1461,6 +1464,9 @@
       "name": "resnet50_bottleneck_1x1",
       "source": "RFC 0019.13 \u00a712.2",
       "values": {
+        "spatial": [
+          "2d"
+        ],
         "N": [
           1,
           4,
@@ -1544,6 +1550,9 @@
       "name": "resnet50_downsample_1x1",
       "note": "the projection shortcut between stages",
       "values": {
+        "spatial": [
+          "2d"
+        ],
         "N": [
           1,
           4,
@@ -1620,6 +1629,9 @@
       "name": "resnet50_bottleneck_3x3",
       "source": "RFC 0019.13 \u00a712.2",
       "values": {
+        "spatial": [
+          "2d"
+        ],
         "N": [
           1,
           4,
@@ -1699,6 +1711,9 @@
     {
       "name": "vgg_3x3_same",
       "values": {
+        "spatial": [
+          "2d"
+        ],
         "N": [
           1,
           4,
@@ -1778,6 +1793,9 @@
     {
       "name": "inception_5x5_same",
       "values": {
+        "spatial": [
+          "2d"
+        ],
         "N": [
           1,
           4,
@@ -1856,6 +1874,9 @@
     {
       "name": "detection_7x7_same",
       "values": {
+        "spatial": [
+          "2d"
+        ],
         "N": [
           1,
           4,
@@ -1933,6 +1954,9 @@
       "name": "valid_3x3",
       "note": "VALID padding: the output shrinks by R-1 rather than holding the extent",
       "values": {
+        "spatial": [
+          "2d"
+        ],
         "N": [
           1,
           4,
@@ -2013,6 +2037,9 @@
     {
       "name": "valid_5x5",
       "values": {
+        "spatial": [
+          "2d"
+        ],
         "N": [
           1,
           4,
@@ -2088,6 +2115,9 @@
     {
       "name": "valid_7x7",
       "values": {
+        "spatial": [
+          "2d"
+        ],
         "N": [
           1,
           4,
@@ -2164,6 +2194,9 @@
       "name": "valid_1x1_stride4",
       "note": "aggressive spatial downsampling, as some detection necks do",
       "values": {
+        "spatial": [
+          "2d"
+        ],
         "N": [
           1,
           4,
@@ -2245,6 +2278,9 @@
       "name": "dilated_3x3_d2",
       "note": "atrous convolution; pad = dilation * (R-1) / 2",
       "values": {
+        "spatial": [
+          "2d"
+        ],
         "N": [
           1,
           4,
@@ -2319,6 +2355,9 @@
     {
       "name": "dilated_3x3_d3",
       "values": {
+        "spatial": [
+          "2d"
+        ],
         "N": [
           1,
           4,
@@ -2391,6 +2430,9 @@
     {
       "name": "dilated_3x3_d4",
       "values": {
+        "spatial": [
+          "2d"
+        ],
         "N": [
           1,
           4,
@@ -2463,6 +2505,9 @@
     {
       "name": "dilated_5x5_d2",
       "values": {
+        "spatial": [
+          "2d"
+        ],
         "N": [
           1,
           4,
@@ -2536,6 +2581,9 @@
       "name": "dilated_3x3_d2_valid",
       "note": "dilated and unpadded; the output shrinks by dilation * (R-1)",
       "values": {
+        "spatial": [
+          "2d"
+        ],
         "N": [
           1,
           4,
@@ -2609,6 +2657,9 @@
       "name": "vit_patch_embed",
       "note": "non-overlapping patch projection",
       "values": {
+        "spatial": [
+          "2d"
+        ],
         "N": [
           1,
           4,
@@ -2680,6 +2731,9 @@
       "name": "convnext_stem_4x4",
       "note": "4x4 stride-4 stem",
       "values": {
+        "spatial": [
+          "2d"
+        ],
         "N": [
           1,
           4,
@@ -2749,6 +2803,9 @@
     {
       "name": "alexnet_11x11",
       "values": {
+        "spatial": [
+          "2d"
+        ],
         "N": [
           1,
           4,
@@ -2820,6 +2877,9 @@
       "name": "downsample_2x2",
       "note": "even filter at matching stride; a non-overlapping reduction",
       "values": {
+        "spatial": [
+          "2d"
+        ],
         "N": [
           1,
           4,
@@ -2897,6 +2957,9 @@
     {
       "name": "unet_encoder_3x3",
       "values": {
+        "spatial": [
+          "2d"
+        ],
         "N": [
           1,
           2,
@@ -2972,6 +3035,9 @@
       "name": "mobilenet_depthwise_3x3",
       "note": "depthwise: one filter per input channel, so groups == C == K",
       "values": {
+        "spatial": [
+          "2d"
+        ],
         "N": [
           1,
           4,
@@ -3052,6 +3118,9 @@
       "name": "mobilenet_depthwise_5x5",
       "note": "the 5x5 depthwise EfficientNet uses",
       "values": {
+        "spatial": [
+          "2d"
+        ],
         "N": [
           1,
           4,
@@ -3125,9 +3194,398 @@
       }
     },
     {
+      "name": "efficientnet_depthwise_3x3",
+      "note": "MobileNetV2 / EfficientNet inverted-residual depthwise at the expanded widths, which run past the 1024 channels mobilenet_depthwise_3x3 stops at",
+      "values": {
+        "spatial": [
+          "2d"
+        ],
+        "N": [
+          1,
+          4,
+          8,
+          16,
+          32,
+          64,
+          128,
+          256
+        ],
+        "C": [
+          16,
+          24,
+          96,
+          144,
+          192,
+          384,
+          576,
+          960,
+          1152
+        ],
+        "K": [
+          "$q.C"
+        ],
+        "groups": [
+          "$q.C"
+        ],
+        "H": [
+          112,
+          56,
+          28,
+          14,
+          7
+        ],
+        "R": [
+          3
+        ],
+        "pad_h": [
+          1
+        ],
+        "stride_h": [
+          1,
+          2
+        ],
+        "W": [
+          "$q.H"
+        ],
+        "S": [
+          "$q.R"
+        ],
+        "pad_w": [
+          "$q.pad_h"
+        ],
+        "stride_w": [
+          "$q.stride_h"
+        ],
+        "dilation_h": [
+          1
+        ],
+        "dilation_w": [
+          "$q.dilation_h"
+        ],
+        "D": [
+          1
+        ],
+        "T": [
+          1
+        ],
+        "pad_d": [
+          0
+        ],
+        "stride_d": [
+          1
+        ],
+        "dilation_d": [
+          1
+        ]
+      }
+    },
+    {
+      "name": "segformer_spatial_reduction",
+      "note": "SegFormer / PVT efficient attention: keys and values are reduced by a conv whose filter equals its stride (8, 4 or 2 by stage)",
+      "values": {
+        "spatial": [
+          "2d"
+        ],
+        "N": [
+          1,
+          4,
+          8,
+          16
+        ],
+        "C": [
+          32,
+          64,
+          160,
+          256
+        ],
+        "K": [
+          "$q.C"
+        ],
+        "groups": [
+          1
+        ],
+        "H": [
+          128,
+          64,
+          32,
+          16
+        ],
+        "R": [
+          8,
+          4,
+          2
+        ],
+        "pad_h": [
+          0
+        ],
+        "stride_h": [
+          "$q.R"
+        ],
+        "W": [
+          "$q.H"
+        ],
+        "S": [
+          "$q.R"
+        ],
+        "pad_w": [
+          "$q.pad_h"
+        ],
+        "stride_w": [
+          "$q.stride_h"
+        ],
+        "dilation_h": [
+          1
+        ],
+        "dilation_w": [
+          "$q.dilation_h"
+        ],
+        "D": [
+          1
+        ],
+        "T": [
+          1
+        ],
+        "pad_d": [
+          0
+        ],
+        "stride_d": [
+          1
+        ],
+        "dilation_d": [
+          1
+        ]
+      }
+    },
+    {
+      "name": "segformer_overlap_patch_7x7",
+      "note": "SegFormer stem: overlapping 7x7 stride-4 patch embedding",
+      "values": {
+        "spatial": [
+          "2d"
+        ],
+        "N": [
+          1,
+          4,
+          8,
+          16
+        ],
+        "C": [
+          3
+        ],
+        "K": [
+          32,
+          64
+        ],
+        "groups": [
+          1
+        ],
+        "H": [
+          224,
+          512
+        ],
+        "R": [
+          7
+        ],
+        "pad_h": [
+          3
+        ],
+        "stride_h": [
+          4
+        ],
+        "W": [
+          "$q.H"
+        ],
+        "S": [
+          "$q.R"
+        ],
+        "pad_w": [
+          "$q.pad_h"
+        ],
+        "stride_w": [
+          "$q.stride_h"
+        ],
+        "dilation_h": [
+          1
+        ],
+        "dilation_w": [
+          "$q.dilation_h"
+        ],
+        "D": [
+          1
+        ],
+        "T": [
+          1
+        ],
+        "pad_d": [
+          0
+        ],
+        "stride_d": [
+          1
+        ],
+        "dilation_d": [
+          1
+        ]
+      }
+    },
+    {
+      "name": "dinov2_patch_14x14",
+      "note": "DINOv2 / CLIP ViT-L/14 patch embedding: 14x14 stride 14",
+      "values": {
+        "spatial": [
+          "2d"
+        ],
+        "N": [
+          1,
+          4,
+          8,
+          16,
+          32,
+          64
+        ],
+        "C": [
+          3
+        ],
+        "K": [
+          384,
+          768,
+          1024,
+          1536
+        ],
+        "groups": [
+          1
+        ],
+        "H": [
+          224,
+          518
+        ],
+        "R": [
+          14
+        ],
+        "pad_h": [
+          0
+        ],
+        "stride_h": [
+          14
+        ],
+        "W": [
+          "$q.H"
+        ],
+        "S": [
+          "$q.R"
+        ],
+        "pad_w": [
+          "$q.pad_h"
+        ],
+        "stride_w": [
+          "$q.stride_h"
+        ],
+        "dilation_h": [
+          1
+        ],
+        "dilation_w": [
+          "$q.dilation_h"
+        ],
+        "D": [
+          1
+        ],
+        "T": [
+          1
+        ],
+        "pad_d": [
+          0
+        ],
+        "stride_d": [
+          1
+        ],
+        "dilation_d": [
+          1
+        ]
+      }
+    },
+    {
+      "name": "x3d_channelwise_3x3x3",
+      "note": "X3D: channel-wise (depthwise) 3x3x3 video convolution",
+      "values": {
+        "spatial": [
+          "3d"
+        ],
+        "N": [
+          1,
+          4,
+          8
+        ],
+        "C": [
+          24,
+          48,
+          96,
+          192,
+          432
+        ],
+        "K": [
+          "$q.C"
+        ],
+        "groups": [
+          "$q.C"
+        ],
+        "D": [
+          4,
+          8,
+          16
+        ],
+        "H": [
+          56,
+          28,
+          14,
+          7
+        ],
+        "W": [
+          "$q.H"
+        ],
+        "T": [
+          3
+        ],
+        "R": [
+          3
+        ],
+        "S": [
+          3
+        ],
+        "pad_d": [
+          1
+        ],
+        "pad_h": [
+          1
+        ],
+        "pad_w": [
+          1
+        ],
+        "stride_d": [
+          1
+        ],
+        "stride_h": [
+          1
+        ],
+        "stride_w": [
+          1
+        ],
+        "dilation_d": [
+          1
+        ],
+        "dilation_h": [
+          1
+        ],
+        "dilation_w": [
+          1
+        ]
+      }
+    },
+    {
       "name": "resnext_grouped_3x3",
       "note": "ResNeXt's cardinality-32 grouped convolution",
       "values": {
+        "spatial": [
+          "2d"
+        ],
         "N": [
           1,
           4,
@@ -3204,6 +3662,9 @@
       "name": "grouped_3x3_c8",
       "note": "an intermediate group count, as ShuffleNet-style blocks use",
       "values": {
+        "spatial": [
+          "2d"
+        ],
         "N": [
           1,
           4,
@@ -3278,6 +3739,9 @@
       "name": "convnext_depthwise_7x7",
       "note": "the 7x7 same-padded depthwise of ConvNeXt-style blocks, from narrow to ConvNeXt widths; groups == C == K",
       "values": {
+        "spatial": [
+          "2d"
+        ],
         "N": [
           1,
           2,
@@ -3362,6 +3826,9 @@
       "name": "narrow_depthwise_3x3",
       "note": "narrow 3x3 depthwise, as the early blocks of mobile networks use; complements mobilenet_depthwise_3x3",
       "values": {
+        "spatial": [
+          "2d"
+        ],
         "N": [
           1,
           2,
@@ -3442,6 +3909,9 @@
       "name": "grouped_3x3_cpg4",
       "note": "4 channels per group in and out: ResNeXt 32x4d's first stage",
       "values": {
+        "spatial": [
+          "2d"
+        ],
         "N": [
           1,
           2,
@@ -3513,6 +3983,9 @@
       "name": "grouped_3x3_cpg8",
       "note": "8 channels per group in and out: ResNeXt 32x4d's second stage",
       "values": {
+        "spatial": [
+          "2d"
+        ],
         "N": [
           1,
           2,
@@ -3584,6 +4057,9 @@
       "name": "grouped_3x3_cpg16",
       "note": "16 channels per group in and out: ResNeXt 32x4d's third stage",
       "values": {
+        "spatial": [
+          "2d"
+        ],
         "N": [
           1,
           2,
@@ -3655,6 +4131,9 @@
       "name": "grouped_3x3_cpg24",
       "note": "24 channels per group in and out: a RegNet-style group width",
       "values": {
+        "spatial": [
+          "2d"
+        ],
         "N": [
           1,
           2,
@@ -3726,6 +4205,9 @@
       "name": "dense_3x3_c48_k192",
       "note": "a dense 3x3 expansion from 48 channels to 192, the exact channel pair a direct MFMA kernel serves (those kernels refuse groups > 1)",
       "values": {
+        "spatial": [
+          "2d"
+        ],
         "N": [
           1,
           2,
@@ -3798,6 +4280,9 @@
       "name": "dense_3x3_c4_k320",
       "note": "a dense 3x3 expansion from a thin 4-channel input to 320, the exact channel pair a direct MFMA kernel serves (those kernels refuse groups > 1)",
       "values": {
+        "spatial": [
+          "2d"
+        ],
         "N": [
           1,
           2,
@@ -3870,6 +4355,9 @@
       "name": "video_3x3x3",
       "note": "a 3-D (video) convolution stage: 3x3x3 filter, same padding, short clip depth",
       "values": {
+        "spatial": [
+          "3d"
+        ],
         "N": [
           1,
           4,
@@ -3939,6 +4427,9 @@
       "name": "volumetric_3x3x3_down",
       "note": "a 3-D (medical imaging) encoder downsample: 3x3x3, stride 2",
       "values": {
+        "spatial": [
+          "3d"
+        ],
         "N": [
           1,
           2
@@ -4067,8 +4558,8 @@
     "neighbourhood": 0.6,
     "exploration": 0.2
   },
-  "// archetypes": "Correlated tuples from real networks (RFC 0019.13 \u00a712.2). Realism is a joint fact: C=3 is a real convolution beside K=64, a 7x7 filter and a 224x224 image, and meaningless beside K=905. Each archetype fixes one coherent geometry -- filter size, dilation and padding together -- and varies stride inside it, because padding is chosen to suit the filter and dilation while stride is chosen independently of both. Between them these cover stride 1/2/4/16, padding 0 through 5, dilation 1 through 4, and group counts from 1 through depthwise.",
+  "// archetypes": "Correlated tuples from real networks (RFC 0019.13 \u00a712.2). Realism is a joint fact: C=3 is a real convolution beside K=64, a 7x7 filter and a 224x224 image, and meaningless beside K=905. Each archetype fixes one coherent geometry -- filter size, dilation and padding together -- and varies stride inside it, because padding is chosen to suit the filter and dilation while stride is chosen independently of both. Between them these cover stride 1/2/4/8/14/16, padding 0 through 5, dilation 1 through 4, and group counts from 1 through depthwise.",
   "// neighbourhood": "How a draw may drift and stay a layer. R, S, stride, padding and dilation are all deliberately absent: they form one coupled geometry, and moving any of them alone breaks the pairing the archetypes exist to record -- a 7x7 that drifts to 3x3 while pad stays 3, or a 16x16 patch projection whose stride falls to 1, is valid and is in no network. Coverage of those axes comes from declaring more geometries, not from perturbing one. W repeats the 1 ratio because most images are square and a uniform draw over {1, 1.33, 2} would say otherwise.",
   "// mixture": "Anchors alone memorise a handful of shapes; the wide net alone put 0.04% of ten thousand draws anywhere near a real layer. The exploration share is \u00a75.4's floor -- an engine still has to answer for problems nobody wrote down.",
-  "// spatial": "spatial and layout are axes of the problem: 3-D problems add a depth to every tensor and to the geometry, and channels_last stores activations NHWC/NDHWC and the filter KRSC. 2-D problems pin every depth parameter to its identity."
+  "// spatial": "spatial and layout are axes of the problem: 3-D problems add a depth to every tensor and to the geometry, and channels_last stores activations NHWC/NDHWC and the filter KRSC. 2-D problems pin every depth parameter to its identity. Each archetype names its rank, so a recorded 2-D layer is never offered as a 3-D convolution of depth 1, which no network runs."
 }

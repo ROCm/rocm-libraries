@@ -12,8 +12,10 @@ target_sources(hip_kernel_provider_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/TestRankingTraceSupport.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/TestUnpulledModelsRecord.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/TestRestoredIngestorPlan.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/TestShippedDescriptorSets.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestPointwiseAddDispatchHandler.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestPointwiseAddMatchers.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestPointwiseModelPack.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestConvFwdPack.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestAttentionDensePersistent.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx950AttentionDenseMatchers.cpp
@@ -138,6 +140,7 @@ target_sources(hip_kernel_provider_census_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx950ConvDgradAotPacks.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx1250ConvDgradAotPacks.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx1250ConvDgradAotModelBinding.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestShippedEnginePredictors.cpp
 )
 
 # FlyDSL's suites ride FlyDSL's gate, not the ingestor's: they read a shard only FlyDSL

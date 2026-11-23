@@ -10,6 +10,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <set>
 #include <string>
 #include <utility>
@@ -316,6 +317,18 @@ public:
         _refused[metric].insert_or_assign(arch, Refusal{status, std::move(reason)});
     }
 
+    /// @brief The architecture key whose refusal predict() applies for @p metric on device
+    ///        @p arch, or nullopt when the model that serves it was not refused.
+    std::optional<std::string> refusedArch(const std::string& metric, const std::string& arch) const
+    {
+        const auto resolved = resolve(metric, arch);
+        if(resolved.refused == nullptr)
+        {
+            return std::nullopt;
+        }
+        return resolved.refusedArch;
+    }
+
     /// @brief This engine's L1 prediction in @p metric for @p arch, described or evaluated.
     /// @param metric The requested metric; arch fallback never crosses to another metric.
     /// @param arch The device `gcnArchName`, feature suffix included.
@@ -329,36 +342,10 @@ public:
                 const FeatureExtractionContext& features,
                 bool evaluate) const
     {
-        // Longest matching architecture wins; `default` only as fallback (RFC 0019 §8.3).
-        std::string selectedArch;
-        const UhdConfig* selected = nullptr;
-        const Refusal* refused = nullptr;
-        if(const auto models = _byMetric.find(metric); models != _byMetric.end())
-        {
-            for(const auto& [target, model] : models->second)
-            {
-                if((target == "default" && selectedArch.empty())
-                   || (target != "default" && archMatches(arch, target, ArchMatchMode::PREFIX)
-                       && (selectedArch == "default" || target.size() > selectedArch.size())))
-                {
-                    selected = &model;
-                    selectedArch = target;
-                }
-            }
-        }
-        // `>=`, not `>`: a refusal at the same specificity as a bound model wins.
-        if(const auto refusals = _refused.find(metric); refusals != _refused.end())
-        {
-            for(const auto& [target, refusal] : refusals->second)
-            {
-                if((target == "default" && selectedArch.empty())
-                   || (target != "default" && archMatches(arch, target, ArchMatchMode::PREFIX)
-                       && (selectedArch == "default" || target.size() >= selectedArch.size())))
-                {
-                    refused = &refusal;
-                }
-            }
-        }
+        const auto resolved = resolve(metric, arch);
+        const auto* selected = resolved.selected;
+        const auto* refused = resolved.refused;
+        const auto& selectedArch = resolved.selectedArch;
         const bool evaluateModel = evaluate && refused == nullptr;
         auto result = predictEngine(engineId,
                                     engineName,
@@ -389,6 +376,57 @@ private:
         hipdnn_flatbuffers_sdk::data_objects::PredictionStatus status;
         std::string reason;
     };
+
+    struct Resolution
+    {
+        const UhdConfig* selected = nullptr;
+        std::string selectedArch;
+        const Refusal* refused = nullptr;
+        std::string refusedArch;
+    };
+
+    /// The bound model and the refusal that serve @p metric on device @p arch.
+    Resolution resolve(const std::string& metric, const std::string& arch) const
+    {
+        // Longest matching architecture wins; `default` only as fallback (RFC 0019 §8.3).
+        Resolution resolved;
+        if(const auto models = _byMetric.find(metric); models != _byMetric.end())
+        {
+            for(const auto& [target, model] : models->second)
+            {
+                if((target == "default" && resolved.selectedArch.empty())
+                   || (target != "default" && archMatches(arch, target, ArchMatchMode::PREFIX)
+                       && (resolved.selectedArch == "default"
+                           || target.size() > resolved.selectedArch.size())))
+                {
+                    resolved.selected = &model;
+                    resolved.selectedArch = target;
+                }
+            }
+        }
+        // `>=`, not `>`: a refusal at the same specificity as a bound model wins. Among
+        // refusals the most specific is the one applied.
+        if(const auto refusals = _refused.find(metric); refusals != _refused.end())
+        {
+            for(const auto& [target, refusal] : refusals->second)
+            {
+                const bool beatsBound
+                    = (target == "default" && resolved.selectedArch.empty())
+                      || (target != "default" && archMatches(arch, target, ArchMatchMode::PREFIX)
+                          && (resolved.selectedArch == "default"
+                              || target.size() >= resolved.selectedArch.size()));
+                const bool beatsRefused = resolved.refused == nullptr
+                                          || resolved.refusedArch == "default"
+                                          || target.size() > resolved.refusedArch.size();
+                if(beatsBound && beatsRefused)
+                {
+                    resolved.refused = &refusal;
+                    resolved.refusedArch = target;
+                }
+            }
+        }
+        return resolved;
+    }
 
     /// Caches every compile except one still awaiting its artifact, so a model being deployed
     /// recovers (RFC 0019 §5) while a broken one is read, hashed and reported once. Compiles

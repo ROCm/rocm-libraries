@@ -11,17 +11,10 @@
 
 /**
  * @file TestGfx942AttentionUnified3dModelBinding.cpp
- * @brief Census of the trained models hipkernel:Gfx942AttentionUnified3d binds in its UED
- *        for gfx942: each one the packed tree holds must survive the loader's pre-flight,
- *        and a bound engine predictor (L1) must record the selector revision this build
- *        computes.
- *
- * The engine selector's revision digests, among other things, every launch's code-object
- * hash. Those are compiled at pack time, so a build that compiles them differently (a
- * compiler bump, a rocKE change) reports another revision, and GenericEngine then refuses
- * an L1 (PredictionStatus::UNAVAILABLE) with nothing but a log line. Engine selection
- * falls back to priority as if no model shipped, and every other census case stays green.
- * This suite reads the revision the way makeEngine() does and fails the build instead.
+ * @brief Census of the trained ranker hipkernel:Gfx942AttentionUnified3d binds in its UED for
+ *        gfx942: the one the packed tree holds must survive the loader's pre-flight. Its
+ *        engine-prediction (L1) models are censused with every other engine's by
+ *        TestShippedEnginePredictors.
  *
  * A bound model the packed tree lacks (its `model.bin` never pulled) is judged as
  * ModelBindingTestSupport.hpp describes.
@@ -50,7 +43,6 @@ TEST(TestGfx942AttentionUnified3dModelBinding, TheBoundL1EnginePredictorLoadsAnd
     expectBoundPredictorMatchesThisBuild(
         loadedSet(GFX942_ATTENTION_UNIFIED_3D_ENGINE_NAME), METRIC, ARCH);
 }
-
 } // namespace
 
 #endif // HIPDNN_ENABLE_KERNEL_INGESTOR

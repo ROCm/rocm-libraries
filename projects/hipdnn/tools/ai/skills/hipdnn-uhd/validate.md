@@ -159,7 +159,7 @@ serves every product of its arch once installed; say which products it was valid
 | Symptom | Fix |
 |---|---|
 | `identity` fails | another document carries the declared id in the tree, or the installed copy differs from the model |
-| `selector_revision` fails | the engine changed since training; collect at the current revision and retrain |
+| `selector_revision` fails | the engine changed since training. If the change cannot move a prediction (a moved kernel path, an unrelated source edit), `python -m uhd_gen restamp` re-stamps the model with proof (see the uhd_gen README, "Re-stamping a model"); it refuses anything else, and then you collect at the current revision and retrain |
 | `available` fails | the engine did not predict for some executed graphs; read `unavailable_sample` for its reasons |
 | L1 opaque model never read | trained without the id its binding declares (`--uhd-id`) |
 | L2 `read` fails | the runtime refused the ranker (a knob axis missing from the UED's knobs or the KMD fields, a features hash from another `hipdnn_uhd_features`); see [triage.md](triage.md) |

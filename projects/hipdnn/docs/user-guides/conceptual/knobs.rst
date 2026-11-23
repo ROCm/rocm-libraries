@@ -110,7 +110,7 @@ These are the global knobs available in hipDNN:
    * - ``global.workspace_size_limit``
      - Integer (int64)
      - The maximum size needed for optimal performance.
-     - Limits the maximum workspace memory that solvers can use for convolution operations (Forward, Backward Data, Backward Weights). Refer to :ref:`plugin-support` for specific details.
+     - Limits the maximum workspace memory that solvers can use for convolution operations (Forward, Backward Data, Backward Weights). The hip-kernel-provider ASM SDPA engine also honors it when an engine config sets it: the engine is still reported as applicable, but a plan that needs more workspace fails to build, and a negative value is rejected as invalid. Refer to :ref:`plugin-support` for specific details.
 
 .. note::
 

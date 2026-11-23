@@ -32,6 +32,7 @@ pd = pytest.importorskip("pandas")
 
 from uhd_gen import train_uhd  # noqa: E402
 from uhd_gen.evaluate import _flatbuffer_scorer  # noqa: E402
+from uhd_gen.optional import feature_name  # noqa: E402
 
 _HEURISTICS_ROOT = (
     Path(__file__).resolve().parents[5]
@@ -129,7 +130,9 @@ def test_vectorized_store_outranks_scalar_store_for_the_same_problem(model_dir):
     (descriptor_path,) = model_dir.glob("*.uhd.json")
     descriptor = json.loads(descriptor_path.read_text())
     signature = descriptor["features_signature"]
-    features = [reference.removeprefix("$") for reference in signature]
+    # An entry is a bare reference or one read through value_or_default; either names its
+    # input by the reference it reads.
+    features = [feature_name(entry, index) for index, entry in enumerate(signature)]
     categorical_encoding = {
         reference.removeprefix("$"): codes
         for reference, codes in descriptor["categorical_encoding"].items()

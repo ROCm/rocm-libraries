@@ -208,21 +208,32 @@ def safe_signature(
     """`signature` reading every optional feature through `value_or_default`, and what was
     wrapped. On a graph that binds a feature the value is unchanged, so a model's predictions
     on every graph it could already score are too; a graph without it now gets its default.
+
+    Repeated until the lint is clean: it infers a node's type from the operands read bare at
+    it, so guarding one round of reads widens the types a node may be and can expose operands
+    optional only in the wider set. Each round wraps only new references, so this ends.
     """
-    unguarded = lint(signature, metric, executable)
-    if not unguarded:
-        return list(signature), []
-    targets = {
-        found["reference"]: default_for(found["reference"], found)
-        for found in unguarded
-    }
-    wrapped = [_wrap(parse_signature_entry(entry), targets) for entry in signature]
-    remaining = lint(wrapped, metric, executable)
-    if remaining:
+    targets: dict = {}
+    wrapped = [parse_signature_entry(entry) for entry in signature]
+    while True:
+        unguarded = lint(wrapped, metric, executable)
+        new = {
+            item["reference"]: default_for(item["reference"], item)
+            for item in unguarded
+            if item["reference"] not in targets
+        }
+        if not new:
+            break
+        targets.update(new)
+        wrapped = [_wrap(entry, new) for entry in wrapped]
+    if unguarded:
+        # Wrapped already, yet still read bare: a read _wrap cannot reach.
         raise ValueError(
             "wrapping left optional features unguarded: "
-            + ", ".join(found["reference"] for found in remaining)
+            + ", ".join(found["reference"] for found in unguarded)
         )
+    if not targets:
+        return list(signature), []
     return wrapped, [
         {"reference": reference, "default": default}
         for reference, default in targets.items()

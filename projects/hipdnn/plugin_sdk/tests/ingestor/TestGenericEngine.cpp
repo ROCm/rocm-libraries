@@ -5,6 +5,9 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
+#include <filesystem>
+#include <fstream>
 #include <memory>
 #include <optional>
 #include <stdexcept>
@@ -23,6 +26,8 @@
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
 #include <hipdnn_plugin_sdk/ingestor/GenericEngine.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MakeEngine.hpp>
+#include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
+#include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
 
 #include "KernelIngestorTestFixtures.hpp"
 
@@ -398,12 +403,21 @@ TEST(TestIngestorGenericEngine, AnEngineModelAnswersOnlyForTheSelectorItWasTrain
     EXPECT_EQ(current.status, PredictionStatus::AVAILABLE) << current.reason;
     EXPECT_DOUBLE_EQ(current.value, 304.0);
 
-    // Wrong build, not a bad model: UNAVAILABLE, naming both revisions.
+    // Wrong build, not a bad model: UNAVAILABLE, naming both revisions, and logged once as an
+    // error under the model's declared key (`default`), whatever the device's gcnArchName. The
+    // log is once per process per (engine, metric, key), so only this test asserts it.
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
     const auto stale = evaluate("selector-old");
     EXPECT_EQ(stale.status, PredictionStatus::UNAVAILABLE);
     EXPECT_NE(stale.reason.find("selector-old"), std::string::npos) << stale.reason;
     EXPECT_NE(stale.reason.find("selector-new"), std::string::npos) << stale.reason;
     EXPECT_DOUBLE_EQ(stale.value, 0.0);
+    EXPECT_TRUE(recorder.hasLogContaining(
+        HIPDNN_SEV_ERROR, "was trained against selector-old, engine reports selector-new"))
+        << recorder.getRecordedLogsAsString();
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "arch='default'"))
+        << recorder.getRecordedLogsAsString();
 
     // Nothing to compare against is a contract failure, as on the opaque-engine path.
     const auto unrecorded = evaluate("");
@@ -1064,6 +1078,32 @@ TEST(TestIngestorGenericEngine, UnslottedGoldenSelectorRevisionPinsTheSetWithAnd
     EXPECT_EQ(
         engineSelectorRevision(makeUnslottedGoldenSet(/*withRanker=*/true)),
         "generic-untuned-v1/08d0a086e080663548bcda1ae0e01b557cd58734e6d8281839e337ae6de179b2");
+}
+
+/// The written selector is what `uhd_gen restamp` diffs between a training build and this
+/// one, so it must reproduce the revision the engine reports, under a file name any
+/// filesystem accepts whatever the engine is called.
+TEST(TestIngestorGenericEngine, WrittenSelectorReproducesTheRevisionUnderAPortableFileName)
+{
+    auto set = makeUnslottedGoldenSet(/*withRanker=*/true);
+    set.engine.name = "hipkernel:golden/engine";
+    const auto dir
+        = std::filesystem::temp_directory_path()
+          / ("selector_dump_"
+             + std::to_string(std::chrono::system_clock::now().time_since_epoch().count()));
+    const hipdnn_test_sdk::utilities::ScopedDirectory scoped(dir);
+
+    const auto path = writeEngineSelector(set, dir);
+
+    EXPECT_EQ(path.filename().string(), "hipkernel_golden_engine.selector.json");
+    std::ifstream file(path);
+    const auto document = nlohmann::json::parse(file);
+    const auto revision = engineSelectorRevision(set);
+    EXPECT_EQ(document.at("engine").get<std::string>(), set.engine.name);
+    EXPECT_EQ(document.at("selector_revision").get<std::string>(), revision);
+    EXPECT_EQ(GENERIC_SELECTOR_REVISION_PREFIX
+                  + hipdnn_plugin_sdk::uhd::sha256(document.at("selector").dump()),
+              revision);
 }
 
 /// No ranker: no UHD id, no model hash, and nothing a cached ranking could be invalidated
