@@ -2038,10 +2038,9 @@ TEST_P(local_matrix_formats, multi_coloring_gives_independent_color_classes)
             = {{"pentadiagonal", pentadiagonal<T>(), 3},
                {"upper bidiagonal", upper_bidiagonal<T>(), 2}};
 
-        for(const auto& c : cases)
+        for(const auto& [name, ref, min_colors] : cases)
         {
-            SCOPED_TRACE(std::get<0>(c));
-            const Csr<T>& ref = std::get<1>(c);
+            SCOPED_TRACE(name);
 
             auto             A           = make(ref);
             int              num_colors  = 0;
@@ -2054,34 +2053,14 @@ TEST_P(local_matrix_formats, multi_coloring_gives_independent_color_classes)
             A->MultiColoring(num_colors, &size_colors, &perm);
             EXPECT_EQ(backend_of(perm), backend_name(backend()));
             ASSERT_NE(size_colors, nullptr);
-            EXPECT_GE(num_colors, std::get<2>(c));
+            EXPECT_GE(num_colors, min_colors);
 
-            std::vector<int> offset(num_colors + 1, 0);
-            for(int k = 0; k < num_colors; ++k)
-            {
-                offset[k + 1] = offset[k] + size_colors[k];
-            }
+            std::vector<int> sizes(size_colors, size_colors + num_colors);
             rocalution::free_host(&size_colors);
-            EXPECT_EQ(offset[num_colors], ref.n);
 
             const std::vector<int> p = values_of(perm);
             expect_permutation(p, ref.n);
-            auto color = [&](int i) {
-                return static_cast<int>(std::upper_bound(offset.begin(), offset.end(), p[i])
-                                        - offset.begin())
-                       - 1;
-            };
-            for(int i = 0; i < ref.n; ++i)
-            {
-                for(PtrType k = ref.row_offset[i]; k < ref.row_offset[i + 1]; ++k)
-                {
-                    if(ref.col[k] != i)
-                    {
-                        EXPECT_NE(color(i), color(ref.col[k]))
-                            << "nodes " << i << " and " << ref.col[k];
-                    }
-                }
-            }
+            expect_valid_coloring(ref, num_colors, sizes, p);
             expect_kept(*A, ref);
         }
     });
