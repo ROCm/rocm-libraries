@@ -13,6 +13,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -106,6 +107,21 @@ hkp_register_tests("" unused "")
 
     def build(self):
         self.run(self.cmake, "--build", self.build_dir, "--target", "hkp_packaging_off")
+
+    def advance_file_clock(self):
+        """Wait until the filesystem clock is past every file the last pack wrote, so an
+        input edited next is newer than the pack's stamp. Back-to-back writes can share
+        a timestamp on a coarse clock, and ninja then sees nothing to redo."""
+        packed = [p for p in (self.build_dir / "off").rglob("*") if p.is_file()]
+        newest = max(p.stat().st_mtime_ns for p in packed)
+        clock = self.root / "filesystem-clock"
+        deadline = time.monotonic() + 10
+        while True:
+            clock.touch()
+            if clock.stat().st_mtime_ns > newest:
+                return
+            assert time.monotonic() < deadline, "filesystem clock did not advance"
+            time.sleep(0.01)
 
     def invocation(self):
         return json.loads(
@@ -214,6 +230,7 @@ def test_a_staged_file_lands_in_the_packed_tree_and_follows_its_source(consumer)
     assert staged.read_bytes() == b"first model"
     assert (consumer.build_dir / "off" / "invocation.json").is_file()
 
+    consumer.advance_file_clock()
     (consumer.source / "m.bin").write_bytes(b"second model")
     consumer.build()
     assert staged.read_bytes() == b"second model"
@@ -229,6 +246,7 @@ def test_a_dropped_stage_pair_repacks_and_leaves_its_file_out(consumer):
     staged = consumer.build_dir / "off" / _STAGED
     assert staged.is_file()
 
+    consumer.advance_file_clock()
     consumer.wire("ENABLE_ROCKE OFF")
     consumer.configure()
     consumer.build()
