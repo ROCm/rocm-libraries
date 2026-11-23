@@ -31,6 +31,7 @@ Documentation for rocThrust available at
 ### Resolved issues
 
 * Fixed `BUILD_TEST`, `BUILD_BENCHMARK`, and `BUILD_EXAMPLE` being set to `OFF` in the CMake cache when rocThrust fetches rocPRIM in the same configure.
+* Fixed `thrust::copy_if` on value types of 512 bytes or more: it launched its scatter kernel on the NULL stream instead of the execution policy's stream, wrote out of bounds once more than 255 elements were selected, and read out of bounds on empty input.
 * Fixed build failures when libhipcxx is not on the include path. The OMP and TBB backends included `<cuda/std/...>` headers directly and `thrust/unique_ptr.h` included `<compare>` unconditionally. They now use the standard library fallback, and `<compare>` is only included for C++20 and later.
 
 ## rocThrust 5.0.0 for ROCm 10.2.0
