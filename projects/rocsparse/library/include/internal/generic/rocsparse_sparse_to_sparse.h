@@ -54,9 +54,10 @@ extern "C" {
 *
 *  \retval      rocsparse_status_success the operation completed successfully.
 *  \retval      rocsparse_status_invalid_handle the library context was not initialized.
-*  \retval      rocsparse_status_invalid_value if any required enumeration is invalid.
-*  \retval      rocsparse_status_invalid_pointer \p mat_A, \p mat_B, or \p buffer_size_in_bytes
-*               pointer is invalid.
+*  \retval      rocsparse_status_invalid_value \p stage or another required enumeration is
+*               invalid.
+*  \retval      rocsparse_status_invalid_pointer \p descr, \p source, \p target, or
+*               \p buffer_size_in_bytes pointer is invalid.
 *  \retval      rocsparse_status_invalid_size \p source has a batch count greater than one.
 *  \retval      rocsparse_status_type_mismatch \p source and \p target differ in matrix type,
 *               fill mode, diagonal type, index base, or storage mode.
