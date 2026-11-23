@@ -12,15 +12,15 @@
 // Provider source always spells the public entry-point names; which library
 // those names bind to is a build-time choice. By default MIOpen is a single
 // library and they bind it directly. Under MIOPEN_ENABLE_HIPDNN_WRAPPER=ON the
-// provider links libMIOpen_private.so, whose miopen.h entry points carry an
-// _impl suffix, and CMakeLists.txt force-includes MiopenApiPrivateRename.hpp to
-// rewrite those names to their _impl form before this header is parsed. Keeping
-// the rename out of the source is what lets one set of call sites serve both
-// configurations.
+// provider links libMIOpen_private.so, whose entry points carry an _impl suffix,
+// and CMakeLists.txt force-includes MiopenApiPrivateRename.hpp to rewrite those
+// names to their _impl form before this header is parsed. Keeping the rename out
+// of the source is what lets one set of call sites serve both configurations.
 //
-// The three GetWorkSpaceSizeRange entry points below sit outside that scheme:
-// they are not part of the miopen.h contract, so they keep their original names
-// on libMIOpen_private.so and these declarations bind the same symbol either way.
+// The three GetWorkSpaceSizeRange entry points below are renamed like the
+// miopen.h ones, because MIOpen declares them in miopen_internal.h, which the
+// rename list is generated from too. Their declarations bind the _impl symbols
+// under the split.
 #pragma once
 
 #include <miopen/miopen.h>

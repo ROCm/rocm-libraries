@@ -12,6 +12,7 @@
 #include "MiopenConvDescriptor.hpp"
 #include "MiopenConvPlanBuilder.hpp"
 #include "MiopenUtils.hpp"
+#include "engines/plans/MiopenConvApplicabilityChecks.hpp"
 #include "engines/plans/MiopenConvBwdPlan.hpp"
 #include "engines/plans/MiopenConvFwdPlan.hpp"
 #include "engines/plans/MiopenConvWrwPlan.hpp"
@@ -38,7 +39,14 @@ bool isApplicableFwd(const HipdnnMiopenHandle& handle,
     size_t solutionCount = 0;
     try
     {
-        const ConvFwdParams params(attr, opGraph.getTensorMap(), deterministicEnabled);
+        // Reject tensor combinations MIOpen mis-computes before any descriptor or MIOpen call.
+        const auto& tensorMap = opGraph.getTensorMap();
+        conv_applicability::validateConvFwdIoTensors(
+            miopen_utils::findTensorAttributes(tensorMap, attr.x_tensor_uid()),
+            miopen_utils::findTensorAttributes(tensorMap, attr.w_tensor_uid()),
+            miopen_utils::findTensorAttributes(tensorMap, attr.y_tensor_uid()));
+
+        const ConvFwdParams params(attr, tensorMap, deterministicEnabled);
 
         if(!params.validTensors())
         {
@@ -76,7 +84,17 @@ bool isApplicableBwd(const HipdnnMiopenHandle& handle,
     size_t solutionCount = 0;
     try
     {
-        const ConvBwdParams params(attr, opGraph.getTensorMap(), deterministicEnabled);
+        // Reject tensor combinations MIOpen mis-computes before any descriptor or MIOpen call. The
+        // size check reads only dims and runs first: it enforces the 2^31 - 1 element limit, which
+        // the io validators do not.
+        const auto& tensorMap = opGraph.getTensorMap();
+        const auto& dy = miopen_utils::findTensorAttributes(tensorMap, attr.dy_tensor_uid());
+        const auto& w = miopen_utils::findTensorAttributes(tensorMap, attr.w_tensor_uid());
+        const auto& dx = miopen_utils::findTensorAttributes(tensorMap, attr.dx_tensor_uid());
+        conv_applicability::validateConvBwdDataSize(dy, dx);
+        conv_applicability::validateConvBwdDataIoTensors(dy, w, dx);
+
+        const ConvBwdParams params(attr, tensorMap, deterministicEnabled);
 
         if(!params.validTensors())
         {
@@ -114,7 +132,14 @@ bool isApplicableWrw(const HipdnnMiopenHandle& handle,
     size_t solutionCount = 0;
     try
     {
-        const ConvWrwParams params(attr, opGraph.getTensorMap(), deterministicEnabled);
+        // Reject tensor combinations MIOpen mis-computes before any descriptor or MIOpen call.
+        const auto& tensorMap = opGraph.getTensorMap();
+        conv_applicability::validateConvWrwIoTensors(
+            miopen_utils::findTensorAttributes(tensorMap, attr.x_tensor_uid()),
+            miopen_utils::findTensorAttributes(tensorMap, attr.dy_tensor_uid()),
+            miopen_utils::findTensorAttributes(tensorMap, attr.dw_tensor_uid()));
+
+        const ConvWrwParams params(attr, tensorMap, deterministicEnabled);
 
         if(!params.validTensors())
         {
@@ -344,9 +369,8 @@ void buildPlanWrw(const HipdnnMiopenHandle& handle,
 
 } // namespace
 
-bool MiopenConvPlanBuilder::isApplicable(
-    const HipdnnMiopenHandle& handle,
-    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
+bool MiopenConvPlanBuilder::isGraphApplicable(
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph)
 {
     // Execute-time override shapes can diverge from the compile-time dims this
     // builder matched exactly; the plan bakes those dims into the MIOpen
@@ -366,11 +390,29 @@ bool MiopenConvPlanBuilder::isApplicable(
         return false;
     }
 
+    if(conv_applicability::hasPassByValueTensor(opGraph.getTensorMap()))
+    {
+        HIPDNN_PLUGIN_LOG_INFO("Convolution plan builder does not support pass-by-value tensors");
+        return false;
+    }
+
     if(opGraph.getNode(0).compute_data_type()
        != hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT)
     {
         HIPDNN_PLUGIN_LOG_ERROR("Convolution plan builder only supports nodes with an fp32 "
                                 "compute_data_type");
+        return false;
+    }
+
+    return true;
+}
+
+bool MiopenConvPlanBuilder::isApplicable(
+    const HipdnnMiopenHandle& handle,
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
+{
+    if(!isGraphApplicable(opGraph))
+    {
         return false;
     }
 

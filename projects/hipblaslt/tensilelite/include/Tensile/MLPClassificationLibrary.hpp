@@ -61,7 +61,6 @@ namespace TensileLite
         std::shared_ptr<MLPNet>                    model;
         SolutionFeatures                           solFeatures;
         ProblemFeatures                            probFeatures;
-        mutable std::atomic<bool>                  lastFindTopRetAll = false;
 
         static std::string Type()
         {
@@ -196,14 +195,7 @@ namespace TensileLite
                 }
             }
 
-            // can't reach the requested number, means findTop already done its best
-            lastFindTopRetAll = (rv.size() < numSolutions);
             return rv;
-        }
-
-        virtual bool lastFindTopAlreadyRetAll() const override
-        {
-            return lastFindTopRetAll;
         }
 
         virtual SolutionSet<MySolution>

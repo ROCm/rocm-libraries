@@ -42,6 +42,7 @@
 #include <hipsparselt/hipsparselt.h>
 #include <memory>
 #include <omp.h>
+#include <optional>
 #include <type_traits>
 #include <utility>
 
@@ -619,6 +620,8 @@ void testing_spmm(const Arguments& arg)
     device_vector<TGate> dGate(size_gate, 1, HMM);
     CHECK_DEVICE_ALLOCATION(dGate.memcheck());
     host_vector<TGate> hGate(size_gate);
+    // The matmul descriptor references the gate descriptor until the plan is initialized.
+    std::optional<hipsparselt_local_mat_descr> matGate;
     if(arg.gate_residual)
     {
         hipsparselt_init<TGate>(hGate,
@@ -629,20 +632,19 @@ void testing_spmm(const Arguments& arg)
                                 num_batches);
         CHECK_HIP_ERROR(dGate.transfer_from(hGate));
         // Create a mat descriptor for the gate using arg.gate_type
-        hipsparselt_local_mat_descr matGate(
-            hipsparselt_matrix_type_dense, handle, M, N, ldg, arg.gate_type, orderD);
+        matGate.emplace(hipsparselt_matrix_type_dense, handle, M, N, ldg, arg.gate_type, orderD);
         if(do_batched || do_strided_batched)
         {
             EXPECT_HIPSPARSE_STATUS(
                 hipsparseLtMatDescSetAttribute(
-                    handle, matGate, HIPSPARSELT_MAT_NUM_BATCHES, &num_batches, sizeof(int)),
+                    handle, *matGate, HIPSPARSELT_MAT_NUM_BATCHES, &num_batches, sizeof(int)),
                 HIPSPARSE_STATUS_SUCCESS);
         }
         if(do_strided_batched)
         {
             EXPECT_HIPSPARSE_STATUS(
                 hipsparseLtMatDescSetAttribute(
-                    handle, matGate, HIPSPARSELT_MAT_BATCH_STRIDE, &stride_gate, sizeof(int64_t)),
+                    handle, *matGate, HIPSPARSELT_MAT_BATCH_STRIDE, &stride_gate, sizeof(int64_t)),
                 HIPSPARSE_STATUS_SUCCESS);
         }
         void* _dGate = dGate;
@@ -657,7 +659,7 @@ void testing_spmm(const Arguments& arg)
             hipsparseLtMatmulDescSetAttribute(handle,
                                               matmul,
                                               HIPSPARSELT_MATMUL_GATE_RESIDUAL_DESC,
-                                              &matGate,
+                                              &*matGate,
                                               sizeof(hipsparseLtMatDescriptor_t*)),
             HIPSPARSE_STATUS_SUCCESS);
     }
@@ -827,7 +829,7 @@ void testing_spmm(const Arguments& arg)
     {
         if(arg.initialization == hipsparselt_initialization::rand_int)
         {
-            hipsparselt_init<Ti>(hA, A_row_r, A_col_r, lda, stride_a, num_batches);
+            hipsparselt_init_idx<Ti>(hA, A_row_r, A_col_r, lda, stride_a, num_batches);
             hipsparselt_init_alternating_sign<Ti>(hB, B_row_r, B_col_r, ldb, stride_b, num_batches);
         }
         else if(arg.initialization == hipsparselt_initialization::trig_float)
@@ -854,7 +856,7 @@ void testing_spmm(const Arguments& arg)
     else
     {
         if(arg.initialization == hipsparselt_initialization::rand_int)
-            hipsparselt_init<To>(hC, C_row_r, C_col_r, ldc, stride_c, num_batches);
+            hipsparselt_init_idx<To>(hC, C_row_r, C_col_r, ldc, stride_c, num_batches);
         else if(arg.initialization == hipsparselt_initialization::trig_float)
             hipsparselt_init_sin<To>(hC, C_row_r, C_col_r, ldc, stride_c, num_batches);
         else if(arg.initialization == hipsparselt_initialization::hpl)
@@ -1489,7 +1491,7 @@ void testing_aux_plan_assign(const Arguments& arg)
     {
         if(arg.initialization == hipsparselt_initialization::rand_int)
         {
-            hipsparselt_init<Ti>(hA, A_row, A_col, lda, stride_a, num_batches);
+            hipsparselt_init_idx<Ti>(hA, A_row, A_col, lda, stride_a, num_batches);
             hipsparselt_init_alternating_sign<Ti>(hB, B_row, B_col, ldb, stride_b, num_batches);
         }
         else if(arg.initialization == hipsparselt_initialization::trig_float)
@@ -1516,7 +1518,7 @@ void testing_aux_plan_assign(const Arguments& arg)
     else
     {
         if(arg.initialization == hipsparselt_initialization::rand_int)
-            hipsparselt_init<To>(hC, M, N, ldc, stride_c, num_batches);
+            hipsparselt_init_idx<To>(hC, M, N, ldc, stride_c, num_batches);
         else if(arg.initialization == hipsparselt_initialization::trig_float)
             hipsparselt_init_sin<To>(hC, M, N, ldc, stride_c, num_batches);
         else if(arg.initialization == hipsparselt_initialization::hpl)

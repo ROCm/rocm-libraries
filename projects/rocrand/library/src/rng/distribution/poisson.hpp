@@ -203,6 +203,11 @@ inline void calculate_poisson_size(const double lambda, unsigned int& size, unsi
 // Handles caching of precomputed tables for the distribution and recomputes
 // them only when lambda is changed (as these computations, device memory
 // allocations and copying take time).
+// The cache is keyed on the lambda of the last update enqueued in the stream,
+// not the last one executed, so work issued after an update always sees it.
+// Once the stream has been captured, caching is disabled: a graph containing an
+// update can be launched at any time and overwrite the table without the
+// manager knowing, so every call must enqueue its own update.
 template<discrete_method Method = DISCRETE_METHOD_ALIAS, class System = system::device_system>
 class poisson_distribution_manager
 {
@@ -222,7 +227,8 @@ public:
         , m_probability(std::exchange(other.m_probability, nullptr))
         , m_alias(std::exchange(other.m_alias, nullptr))
         , m_cdf(std::exchange(other.m_cdf, nullptr))
-        , m_lambda(other.m_lambda)
+        , m_enqueued_lambda(other.m_enqueued_lambda)
+        , m_is_cache_disabled(other.m_is_cache_disabled)
         , m_distribution(std::exchange(other.m_distribution, {}))
     {}
 
@@ -233,7 +239,8 @@ public:
         m_initialized           = other.m_initialized;
         m_is_host_func_blocking = other.m_is_host_func_blocking;
         m_stream                = other.m_stream;
-        m_lambda                = other.m_lambda;
+        m_enqueued_lambda       = other.m_enqueued_lambda;
+        m_is_cache_disabled     = other.m_is_cache_disabled;
         std::swap(m_probability, other.m_probability);
         std::swap(m_alias, other.m_alias);
         std::swap(m_cdf, other.m_cdf);
@@ -315,6 +322,10 @@ public:
         {
             return status;
         }
+        if(stream != m_stream)
+        {
+            m_enqueued_lambda = 0; // force a re-enqueue on the new stream
+        }
         m_stream = stream;
         return ROCRAND_STATUS_SUCCESS;
     }
@@ -342,10 +353,23 @@ public:
             lock.lock();
         }
 
-        const bool changed = lambda != m_lambda;
+        bool                 is_capturing;
+        const rocrand_status capture_status = System::is_stream_capturing(m_stream, is_capturing);
+        if(capture_status != ROCRAND_STATUS_SUCCESS)
+        {
+            return capture_status;
+        }
+        if(is_capturing)
+        {
+            m_is_cache_disabled = true;
+        }
+
+        const bool changed = m_is_cache_disabled || lambda != m_enqueued_lambda;
         if(changed)
         {
-            auto arg = std::make_unique<update_discrete_distribution_arg>(
+            // Lambda must be positive, so 0 never matches until the update is fully enqueued.
+            m_enqueued_lambda = 0;
+            auto arg          = std::make_unique<update_discrete_distribution_arg>(
                 update_discrete_distribution_arg{lambda, this});
             const rocrand_status status
                 = System::launch_host_func(m_stream, update_discrete_distribution, arg.release());
@@ -388,6 +412,7 @@ public:
                     return ROCRAND_STATUS_INTERNAL_ERROR;
                 }
             }
+            m_enqueued_lambda = lambda;
         }
 
         rocrand_discrete_distribution_st distribution_copy = m_distribution;
@@ -396,15 +421,17 @@ public:
     }
 
 private:
-    bool                             m_initialized           = false;
-    bool                             m_is_host_func_blocking = true;
-    hipStream_t                      m_stream                = 0;
-    std::mutex                       m_mutex;
-    double*                          m_probability  = nullptr;
-    unsigned int*                    m_alias        = nullptr;
-    double*                          m_cdf          = nullptr;
-    double                           m_lambda       = 0;
-    rocrand_discrete_distribution_st m_distribution = {};
+    bool          m_initialized           = false;
+    bool          m_is_host_func_blocking = true;
+    hipStream_t   m_stream                = 0;
+    std::mutex    m_mutex;
+    double*       m_probability = nullptr;
+    unsigned int* m_alias       = nullptr;
+    double*       m_cdf         = nullptr;
+    // Only accessed from the API thread, never from the host function.
+    double                           m_enqueued_lambda   = 0;
+    bool                             m_is_cache_disabled = false;
+    rocrand_discrete_distribution_st m_distribution      = {};
 
     struct update_discrete_distribution_arg
     {
@@ -438,7 +465,6 @@ private:
         {
             factory_t::create_cdf(poisson_probabilities, size, arg->manager->m_cdf);
         }
-        arg->manager->m_lambda = arg->lambda;
         if constexpr(!System::is_device())
         {
             if constexpr((Method & DISCRETE_METHOD_ALIAS) != 0)

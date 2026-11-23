@@ -13,7 +13,7 @@ added address-arithmetic op costs TFLOP/s). The helper primitives it reuses:
     carries the per-head stride (which cannot fold into the token stride) and
     whose token axis folds the batch offset.
   * :class:`~rocke.helpers.WmmaAtom` (``wmma_f32_16x16x16_f16``) for the WMMA
-    contract, with its hardware-verified ``a_layout``/``b_layout``/``c_layout``
+    contract, with its hardware-verified source and result layouts
     maps driving every lane decode.
   * :class:`~rocke.helpers.WmmaTensor` — a packed distributed tensor carrying
     one lane's fragment/accumulator as a single SSA vector — together with
@@ -149,8 +149,9 @@ def _declare_params(b: IRBuilder):
 def build_wmma_fmha_singlewave(cfg: SingleWaveCfg, arch: str = "gfx1151") -> KernelDef:
     atom = WmmaAtom.f16_16x16x16()
     wave = atom.wave_size  # 32
-    a_map = atom.a_layout(arch)
-    c_map = atom.c_layout(arch)
+    op = atom.mma_op(arch)
+    a_map = op.src_layout(0)
+    dst_map = op.dst_layout()
     a_frag = atom.a_per_lane  # 16
     c_frag = atom.c_per_lane  # 8
     n_dk = cfg.head_size // 16
@@ -371,7 +372,7 @@ def build_wmma_fmha_singlewave(cfg: SingleWaveCfg, arch: str = "gfx1151") -> Ker
 
         # ---- transpose P (acc layout -> PV A-operand layout) ----
         p_a = _transpose_p(
-            b, cfg, ps, lane, a_row, c_map, a_frag, c_frag, dtype_ir, P_lds
+            b, cfg, ps, lane, a_row, dst_map, a_frag, c_frag, dtype_ir, P_lds
         )
         p_tiles = [WmmaTensor(atom, "a", pa, arch) for pa in p_a]
 
@@ -440,7 +441,7 @@ def build_wmma_fmha_singlewave(cfg: SingleWaveCfg, arch: str = "gfx1151") -> Ker
     return b.kernel
 
 
-def _transpose_p(b, cfg, ps, lane, a_row, c_map, a_frag, c_frag, dtype_ir, P_lds):
+def _transpose_p(b, cfg, ps, lane, a_row, dst_map, a_frag, c_frag, dtype_ir, P_lds):
     """Return a list of BM PV A-operand fragments (one per Q-tile).
 
     Uses the CK Tile :func:`make_lds_view` ``P_lds`` view: scatter each score
@@ -453,7 +454,7 @@ def _transpose_p(b, cfg, ps, lane, a_row, c_map, a_frag, c_frag, dtype_ir, P_lds
         for t in range(BM):
             ct = b.const_i32(t)
             for r in range(c_frag):
-                row_rel, col_k = c_map.coord(b, lane, r)
+                row_rel, col_k = dst_map.coord(b, lane, r)
                 P_lds.store_scalar(
                     b, [ct, row_rel, col_k], b.cast_f32_to(ps[t][r], dtype_ir)
                 )

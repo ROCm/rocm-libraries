@@ -1,0 +1,101 @@
+[
+  {
+    "name": "flatA_unit",
+    "lhs_shape": 8,
+    "lhs_stride": 1,
+    "rhs_shape": 4,
+    "rhs_stride": 2,
+    "composition_shape": 4,
+    "composition_stride": 2
+  },
+  {
+    "name": "flatA_nonunit",
+    "lhs_shape": 8,
+    "lhs_stride": 3,
+    "rhs_shape": 4,
+    "rhs_stride": 2,
+    "composition_shape": 4,
+    "composition_stride": 6
+  },
+  {
+    "name": "rhs_stride0",
+    "lhs_shape": 8,
+    "lhs_stride": 1,
+    "rhs_shape": 4,
+    "rhs_stride": 0,
+    "composition_shape": 4,
+    "composition_stride": 0
+  },
+  {
+    "name": "span_boundary",
+    "lhs_shape": [4,3],
+    "lhs_stride": [1,4],
+    "rhs_shape": 6,
+    "rhs_stride": 2,
+    "composition_shape": 6,
+    "composition_stride": 2
+  },
+  {
+    "name": "unwrap",
+    "lhs_shape": [4,3],
+    "lhs_stride": [1,4],
+    "rhs_shape": 4,
+    "rhs_stride": 1,
+    "composition_shape": 4,
+    "composition_stride": 1
+  },
+  {
+    "name": "skip_first",
+    "lhs_shape": [4,3],
+    "lhs_stride": [1,4],
+    "rhs_shape": 3,
+    "rhs_stride": 4,
+    "composition_shape": 3,
+    "composition_stride": 4
+  },
+  {
+    "name": "wrapup_empty",
+    "lhs_shape": [4,3],
+    "lhs_stride": [1,4],
+    "rhs_shape": 12,
+    "rhs_stride": 1,
+    "composition_shape": 12,
+    "composition_stride": 1
+  },
+  {
+    "name": "tupleB",
+    "lhs_shape": 8,
+    "lhs_stride": 1,
+    "rhs_shape": [2,4],
+    "rhs_stride": [1,2],
+    "composition_shape": [2,4],
+    "composition_stride": [1,2]
+  },
+  {
+    "name": "multi_multi",
+    "lhs_shape": [8,4],
+    "lhs_stride": [4,1],
+    "rhs_shape": [4,2],
+    "rhs_stride": [1,4],
+    "composition_shape": [4,2],
+    "composition_stride": [4,16]
+  },
+  {
+    "name": "perm_evens",
+    "lhs_shape": 8,
+    "lhs_stride": 1,
+    "rhs_shape": 4,
+    "rhs_stride": 2,
+    "composition_shape": 4,
+    "composition_stride": 2
+  },
+  {
+    "name": "noninjective_lhs",
+    "lhs_shape": [4,4],
+    "lhs_stride": [1,0],
+    "rhs_shape": 4,
+    "rhs_stride": 1,
+    "composition_shape": 4,
+    "composition_stride": 1
+  }
+]
