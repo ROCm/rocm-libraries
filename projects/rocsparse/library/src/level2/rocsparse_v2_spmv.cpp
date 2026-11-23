@@ -37,6 +37,8 @@
 #include "rocsparse_spmv.hpp"
 #include "rocsparse_spmv_helpers.h"
 
+#include <algorithm>
+
 // Include the helper function
 #include "rocsparse_csrmv_helpers.cpp"
 
@@ -251,6 +253,8 @@ public:
         size_t device_array_size;
         bool   device_arrays_allocated;
         bool   enabled; // Flag to enable/disable extra computations
+        // Every gamma read by extract_device_arrays is zero. Only known in host pointer mode.
+        bool gamma_all_zero;
 
     public:
         extra_vectors()
@@ -262,6 +266,7 @@ public:
             , device_array_size(0)
             , device_arrays_allocated(false)
             , enabled(true) // Default to enabled when extras are set
+            , gamma_all_zero(false)
         {
         }
 
@@ -310,6 +315,11 @@ public:
             return device_arrays_allocated;
         }
 
+        bool has_all_zero_gamma() const
+        {
+            return gamma_all_zero;
+        }
+
         // Check if extras are available (set but possibly disabled)
         bool has_extras() const
         {
@@ -355,9 +365,10 @@ public:
                 device_array_size       = 0;
             }
 
-            count     = 0;
-            gamma_vec = nullptr;
-            z_vecs    = nullptr;
+            count          = 0;
+            gamma_vec      = nullptr;
+            z_vecs         = nullptr;
+            gamma_all_zero = false;
         }
 
         rocsparse_status set(int64_t                      num_extras,
@@ -422,6 +433,13 @@ public:
 
             RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrmv_extract_gamma_and_z_arrays(
                 handle, static_cast<rocsparse_int>(count), gamma_vec, z_vecs, gamma_ptr, z_ptr));
+
+            if(handle->pointer_mode == rocsparse_pointer_mode_host)
+            {
+                const T* gamma = reinterpret_cast<const T*>(gamma_vec->const_values);
+                gamma_all_zero = std::all_of(
+                    gamma, gamma + count, [](const T& g) { return g == static_cast<T>(0); });
+            }
 
             return rocsparse_status_success;
         }
@@ -1399,6 +1417,15 @@ bool rocsparse::spmv_has_device_arrays(void* spmv_descr_ptr)
 
     auto* descr = static_cast<_rocsparse_spmv_descr*>(spmv_descr_ptr);
     return descr->extras.has_device_arrays();
+}
+
+bool rocsparse::spmv_has_all_zero_gamma(void* spmv_descr_ptr)
+{
+    if(!spmv_descr_ptr)
+        return false;
+
+    auto* descr = static_cast<_rocsparse_spmv_descr*>(spmv_descr_ptr);
+    return descr->extras.has_all_zero_gamma();
 }
 
 // Template helper functions for accessing pre-extracted arrays from template files

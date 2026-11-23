@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -30,6 +30,10 @@
 namespace rocsparse
 {
     bool spmv_has_device_arrays(void* spmv_descr_ptr);
+
+    // True when rocsparse_spmv_set_extra read every gamma as zero, which it can only tell in
+    // host pointer mode.
+    bool spmv_has_all_zero_gamma(void* spmv_descr_ptr);
 
     // Template helpers that directly call the template functions from v2_spmv.cpp
     template <typename T>

@@ -334,26 +334,10 @@ rocsparse_status rocsparse::csrmv_template(rocsparse_handle             handle,
     if(handle->pointer_mode == rocsparse_pointer_mode_host
        && *alpha_device_host == static_cast<T>(0) && *beta_device_host == static_cast<T>(1))
     {
-        if(num_extra == 0)
+        // gamma is the copy rocsparse_spmv_set_extra made, not the caller's buffer.
+        if(num_extra == 0 || rocsparse::spmv_has_all_zero_gamma(handle->temp_spmv_descr))
         {
             return rocsparse_status_success;
-        }
-        else
-        {
-            bool all_gamma_zero = true;
-            for(rocsparse_int i = 0; i < num_extra; ++i)
-            {
-                if(reinterpret_cast<const T*>(gamma_vec->const_values)[i] != static_cast<T>(0))
-                {
-                    all_gamma_zero = false;
-                    break;
-                }
-            }
-
-            if(all_gamma_zero)
-            {
-                return rocsparse_status_success;
-            }
         }
     }
 

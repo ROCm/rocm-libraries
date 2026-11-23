@@ -956,6 +956,50 @@ namespace
                            << static_cast<int64_t>(first) - y_guard << "]";
     }
 
+    // rocsparse_spmv_set_extra copies gamma, read with the pointer mode of that call. A host
+    // mode compute with alpha = 0 and beta = 1 uses the copy too, after the caller zeros its
+    // gamma buffer, whether the copy was read from host or from device memory.
+    template <typename C, typename I, typename J>
+    void run_captured_gamma_case(rocsparse_handle handle, const extra_case& c, bool set_on_device)
+    {
+        using A = typename C::A;
+        using T = typename C::T;
+        SCOPED_TRACE(::testing::Message() << c << " set_on_device=" << set_on_device);
+
+        const host_matrix<A> a = make_matrix<A>(c.shape);
+        extra_case           e = c;
+        e.extras               = 1;
+        e.special              = special_alpha_zero_beta_one;
+        const case_data<C>   d(e, a.n, a.m);
+        const std::vector<T> want
+            = reference<C>(a, rocsparse_operation_none, d.alpha, d.x, d.beta, d.y0, d.gamma, d.z);
+
+        device_problem<C, I, J> p(a, c.base, d.x, d.y0);
+        std::vector<T>          host_gamma = d.gamma;
+        device_extras<T>        ex(host_gamma, d.z, a.m, set_on_device);
+        if(::testing::Test::HasFailure())
+            return;
+
+        spmv_descr_guard descr;
+        ASSERT_TRUE(descr.d);
+        ASSERT_EQ(set_basic_inputs(
+                      handle, descr.d, c.alg, rocsparse_operation_none, type_of<T>(), type_of<T>()),
+                  rocsparse_status_success);
+        {
+            scoped_pointer_mode mode(handle, set_on_device);
+            ASSERT_EQ(ex.set(handle, descr.d), rocsparse_status_success);
+        }
+        ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+        std::fill(host_gamma.begin(), host_gamma.end(), make<T>(0, 0));
+        ASSERT_EQ(hipMemset(ex.dgamma.ptr, 0, sizeof(T) * host_gamma.size()), hipSuccess);
+
+        scoped_pointer_mode mode(handle, false);
+        run_v2_spmv(handle, descr.d, p.mat.d, p.vx.d, p.vy.d, &d.alpha, &d.beta);
+        if(::testing::Test::HasFailure())
+            return;
+        p.expect_y(want);
+    }
+
     template <typename C>
     void run_extra_case(rocsparse_handle handle, const extra_case& c)
     {
@@ -1248,6 +1292,32 @@ namespace
                     if(::testing::Test::HasFailure())
                         return;
                 }
+    }
+
+    TYPED_TEST(L2DeviceV2SpmvExtraTypes, gamma_copied_from_host_buffer)
+    {
+        for(const auto alg : all_csr_algs)
+        {
+            extra_case c;
+            c.shape = shape_irregular;
+            c.alg   = alg;
+            run_captured_gamma_case<TypeParam, int32_t, int32_t>(this->handle, c, false);
+            if(::testing::Test::HasFailure())
+                return;
+        }
+    }
+
+    TYPED_TEST(L2DeviceV2SpmvExtraTypes, gamma_set_in_device_mode_computed_in_host_mode)
+    {
+        for(const auto alg : all_csr_algs)
+        {
+            extra_case c;
+            c.shape = shape_irregular;
+            c.alg   = alg;
+            run_captured_gamma_case<TypeParam, int32_t, int32_t>(this->handle, c, true);
+            if(::testing::Test::HasFailure())
+                return;
+        }
     }
 
     TYPED_TEST(L2DeviceV2SpmvExtraTypes, enable_extra_toggle)
