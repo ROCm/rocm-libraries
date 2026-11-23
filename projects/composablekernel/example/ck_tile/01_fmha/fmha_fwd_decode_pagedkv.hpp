@@ -91,6 +91,9 @@ inline bool fmha_fwd_decode_pagedkv_is_valid(const fmha_fwd_decode_pagedkv_trait
     if(!a.q_ptr || !a.k_ptr || !a.v_ptr || !a.o_ptr || !a.block_table_ptr || !a.seqlen_k_ptr ||
        !a.k_descale_ptr || !a.v_descale_ptr || !a.workspace_ptr || !a.counters_ptr)
         return false;
+    // several clusters merge what each cluster merged: a cluster of one split merges nothing
+    if(a.num_groups > 1 && t.num_splits < 2)
+        return false;
     return 1 <= t.num_splits && t.num_splits <= ck_tile::kFmhaFwdDecodeMaxClusterSplits;
 }
 

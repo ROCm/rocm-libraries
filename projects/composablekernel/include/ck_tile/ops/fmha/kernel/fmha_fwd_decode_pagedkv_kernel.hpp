@@ -76,16 +76,28 @@ CK_TILE_HOST index_t fmha_fwd_decode_pagedkv_split_pages(index_t span,
 // - Otherwise several clusters (groups) of the shortest 8-, 12- or 16-page cooperative splits
 //   within 192 splits and 512 workgroups, else wave-split splits for about 384 workgroups, at
 //   most 480.
-CK_TILE_HOST FmhaFwdDecodePagedKVConfig fmha_fwd_decode_pagedkv_config(
-    index_t batch, index_t nhead_k, index_t max_seqlen_k, index_t window, index_t page_size = 16)
+// The workgroup limits keep the grid resident at once: the workgroups of a cluster take one
+// workgroup processor each, a processor's LDS holds two wave-split workgroups, and a shader
+// engine runs at most 15 clusters.
+// max_cluster_splits: workgroups a cluster holds on the device (ck_tile::get_max_cluster_size);
+// a cluster takes no more splits than that, and below 2 every (batch, kv head) is one split.
+CK_TILE_HOST FmhaFwdDecodePagedKVConfig
+fmha_fwd_decode_pagedkv_config(index_t batch,
+                               index_t nhead_k,
+                               index_t max_seqlen_k,
+                               index_t window,
+                               index_t page_size          = 16,
+                               index_t max_cluster_splits = kFmhaFwdDecodeMaxClusterSplits)
 {
     const index_t span  = fmha_fwd_decode_pagedkv_max_span(max_seqlen_k, window, page_size);
     const auto round_up = [](index_t x, index_t m) { return (x + m - 1) / m * m; };
     const auto ceil_div = [](index_t x, index_t y) { return (x + y - 1) / y; };
     const index_t heads = batch * nhead_k;
-    const auto make     = [&](index_t pps, bool wave_split) {
+    // splits one cluster takes on this device
+    const index_t kC = std::clamp<index_t>(max_cluster_splits, 1, kFmhaFwdDecodeMaxClusterSplits);
+    const auto make  = [&](index_t pps, bool wave_split) {
         const index_t total  = ceil_div(span, pps);
-        const index_t groups = ceil_div(total, kFmhaFwdDecodeMaxClusterSplits);
+        const index_t groups = ceil_div(total, kC);
         const index_t splits = ceil_div(total, groups);
         return FmhaFwdDecodePagedKVConfig{
             splits,
@@ -93,16 +105,18 @@ CK_TILE_HOST FmhaFwdDecodePagedKVConfig fmha_fwd_decode_pagedkv_config(
             wave_split,
             groups};
     };
-    constexpr index_t kC = kFmhaFwdDecodeMaxClusterSplits;
+    // the splits merge across a cluster: without clusters a (batch, kv head) is one split
+    if(kC < 2)
+        return make(round_up(span, span > 12 ? 16 : 4), span > 12);
     // the most wave-split splits per head that keep the grid within 480 workgroups
     const index_t wave_max = std::max<index_t>(1, 480 / std::max<index_t>(1, heads));
     if(span <= 16)
         return make(round_up(span, span > 12 ? 16 : 4), span > 12);
-    if(span <= kC * 16)
+    if(span <= 256)
     {
         if(heads >= (span > 192 ? 64 : std::min<index_t>(span, 128) + 1))
         {
-            index_t n = std::min(ceil_div(span, 64), wave_max);
+            index_t n = std::min({ceil_div(span, 64), wave_max, kC});
             // two splits this short take longer than one, which needs no merge
             if(n == 2 && span <= 192)
                 n = 1;
@@ -117,7 +131,7 @@ CK_TILE_HOST FmhaFwdDecodePagedKVConfig fmha_fwd_decode_pagedkv_config(
     }
     const index_t wave_pps = round_up(ceil_div(span, kC), 16);
     const index_t wave_wgs = heads * ceil_div(span, wave_pps);
-    if(span <= kC * 64 && wave_wgs <= 512 && (span <= 512 || heads >= 3))
+    if(span <= 1024 && wave_wgs <= 512 && (span <= 512 || heads >= 3))
         return make(wave_pps, true);
     for(index_t pps : {8, 12, 16})
         if(ceil_div(span, pps) <= 192 && heads * ceil_div(span, pps) <= 512)
@@ -148,18 +162,23 @@ CK_TILE_HOST size_t fmha_fwd_decode_pagedkv_workspace_bytes(index_t batch,
 // the largest batch serves every call. Per kv head fmha_fwd_decode_pagedkv_config makes at most 16
 // splits in one cluster (up to 128 heads), at most 192 and 512 / heads cooperative splits, or
 // about 384 / heads and at most 480 / heads wave-split splits; a test checks the bound.
-CK_TILE_HOST size_t fmha_fwd_decode_pagedkv_max_workspace_bytes(index_t batch, index_t nhead_k)
+// max_cluster_splits as for fmha_fwd_decode_pagedkv_config.
+CK_TILE_HOST size_t fmha_fwd_decode_pagedkv_max_workspace_bytes(
+    index_t batch, index_t nhead_k, index_t max_cluster_splits = kFmhaFwdDecodeMaxClusterSplits)
 {
     if(batch <= 0 || nhead_k <= 0)
         return 0;
+    const size_t cluster =
+        std::clamp<index_t>(max_cluster_splits, 1, kFmhaFwdDecodeMaxClusterSplits);
+    if(cluster < 2)
+        return fmha_fwd_decode_pagedkv_workspace_bytes(batch, nhead_k, 1);
     // split slots of all kv heads; with several groups splits * groups < total + groups, plus one
     // merge slot per group
-    const auto slots = [](size_t h) {
+    const auto slots = [cluster](size_t h) {
         const size_t one_cluster = h <= 128 ? 16 : 1;
         const size_t total       = std::max<size_t>(
             {one_cluster, std::min<size_t>(192, 512 / h), (384 + h - 1) / h, 480 / h});
-        const size_t groups =
-            (total + kFmhaFwdDecodeMaxClusterSplits - 1) / kFmhaFwdDecodeMaxClusterSplits;
+        const size_t groups = (total + cluster - 1) / cluster;
         return h * (groups > 1 ? total + 2 * groups : total);
     };
     // fewer heads can need more in total (more splits per head)

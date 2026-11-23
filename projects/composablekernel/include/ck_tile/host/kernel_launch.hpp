@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <numeric>
@@ -109,6 +110,14 @@ KENTRY_LAUNCH_BOUNDS __attribute__((cluster_dims(ClusterX, 1, 1))) __global__ vo
 kentry_cluster(Args... args)
 {
     KENTRY_BODY;
+}
+#endif
+
+#if CK_TILE_ENABLE_CLUSTER_LAUNCH
+// An empty kernel to ask the runtime about clusters with (see get_max_cluster_size).
+template <typename = void>
+__global__ void kentry_cluster_probe()
+{
 }
 #endif
 
@@ -268,6 +277,40 @@ CK_TILE_HOST auto make_cluster_kernel(
     };
 }
 #endif
+
+// Workgroups one cluster can hold on the current device: at most 16, fewer when the device (or
+// the partition it runs in) has fewer workgroup processors per shader engine, 1 without cluster
+// launch. A launch with a larger cluster fails with hipErrorInvalidClusterSize.
+CK_TILE_HOST int get_max_cluster_size()
+{
+    static std::array<std::atomic<int>, 64> per_device{};
+    int dev = 0;
+    if(hipGetDevice(&dev) != hipSuccess)
+        return 1;
+    const bool cached = 0 <= dev && dev < static_cast<int>(per_device.size());
+    if(cached)
+        if(const int size = per_device[dev].load(std::memory_order_relaxed); size > 0)
+            return size;
+    int size = 1;
+#if CK_TILE_ENABLE_CLUSTER_LAUNCH
+    hipDeviceProp_t props{};
+    if(hipGetDeviceProperties(&props, dev) == hipSuccess && props.clusterLaunch != 0)
+    {
+        hipLaunchConfig_t config{};
+        config.gridDim  = dim3(1);
+        config.blockDim = dim3(1);
+        int limit       = 0;
+        if(hipOccupancyMaxPotentialClusterSize(
+               &limit, reinterpret_cast<const void*>(&kentry_cluster_probe<>), &config) ==
+               hipSuccess &&
+           limit > 1)
+            size = std::min(limit, 16);
+    }
+#endif
+    if(cached)
+        per_device[dev].store(size, std::memory_order_relaxed);
+    return size;
+}
 
 template <typename... Callables>
 CK_TILE_HOST void launch_and_check(const stream_config& sc, Callables&&... callables)

@@ -23,6 +23,7 @@ int main(int argc, char* argv[])
         .insert("splits", "0", "workgroups per (batch, kv head); 0 = heuristic")
         .insert("pages_per_split", "0", "pages per split the grid is sized for; 0 = heuristic")
         .insert("layout", "auto", "auto, coop or wave")
+        .insert("max_cluster", "0", "cap on the splits per cluster; 0 = what the device takes")
         .insert("v", "1", "validate against the CPU reference")
         .insert("seed", "1", "random seed")
         .insert("needles", "0", "inputs that count every key instead of random ones")
@@ -42,6 +43,7 @@ int main(int argc, char* argv[])
     c.splits            = arg_parser.get_int("splits");
     c.pages_per_split   = arg_parser.get_int("pages_per_split");
     c.layout            = arg_parser.get_str("layout");
+    c.max_cluster       = arg_parser.get_int("max_cluster");
     c.max_seqlen_k      = arg_parser.get_int("max_s_k");
     c.page_size         = arg_parser.get_int("page_size");
     c.fp16              = arg_parser.get_str("prec") == "fp16";

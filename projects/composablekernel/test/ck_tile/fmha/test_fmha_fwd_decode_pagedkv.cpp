@@ -75,6 +75,17 @@ std::vector<Param> params()
     add("full_b2_s10000", {2, 16, 1, {10000}, 0}, "coop/16x5");
     // one wave-split split where two would exceed 480 workgroups
     add("heads_wave_long", {16, 16, 16, {4200}, 0}, "wave/1");
+    // a device whose clusters hold fewer than 16 workgroups: no cluster above the cap, more
+    // clusters instead; without clusters one split
+    const auto capped = [](Case c, ck_tile::index_t cap) {
+        c.max_cluster = cap;
+        return c;
+    };
+    add("cap8_swa_b8_s8192", capped({8, 16, 1, {8192}, 2048}, 8), "coop/7");
+    add("cap8_full_b8_s8192", capped({8, 16, 1, {8192}, 0}, 8), "wave/8");
+    add("cap4_full_b1_s20000", capped({1, 16, 1, {20000}, 0}, 4), "coop/4x40");
+    add("cap2_full_b2_s3000", capped({2, 16, 1, {3000}, 0}, 2), "coop/2");
+    add("cap1_swa_b2_s8192", capped({2, 16, 1, {8192}, 2048}, 1), "wave/1");
     // forced layouts
     add("full_coop", {2, 16, 1, {5000}, 0, 0, 0, "coop"}, "coop/10");
     add("swa_wave", {2, 16, 1, {5000}, 2048, 0, 0, "wave"}, "wave/11");
@@ -180,26 +191,32 @@ TEST(FwdDecodePagedKVHost, MaxWorkspaceBoundsSelector)
     for(ck_tile::index_t s = 40000; s <= 1 << 20; s += s / 7)
         lengths.push_back(s);
     size_t checked = 0;
-    for(const ck_tile::index_t nhead_k : {1, 8})
-        for(const ck_tile::index_t batch :
-            {1,  2,  3,  4,   5,   8,   13,  16,  24,  31,  32,  33,  48,
-             64, 65, 96, 128, 129, 160, 192, 255, 256, 384, 480, 481, 512})
-        {
-            const size_t bound =
-                ck_tile::fmha_fwd_decode_pagedkv_max_workspace_bytes(batch, nhead_k);
-            for(const ck_tile::index_t ps : {16, 64, 128})
-                for(const ck_tile::index_t w : {0, 1, 300, 2048, 4000, 23040})
-                    for(const ck_tile::index_t s : lengths)
-                    {
-                        const auto c =
-                            ck_tile::fmha_fwd_decode_pagedkv_config(batch, nhead_k, s, w, ps);
-                        const size_t need = ck_tile::fmha_fwd_decode_pagedkv_workspace_bytes(
-                            batch, nhead_k, c.num_splits, c.num_groups);
-                        ASSERT_LE(need, bound) << "b " << batch << " h_k " << nhead_k << " s_k "
-                                               << s << " window " << w << " page " << ps;
-                        ++checked;
-                    }
-        }
+    // cap: the workgroups a cluster holds on the device
+    for(const ck_tile::index_t cap : {16, 15, 8, 4, 2, 1})
+        for(const ck_tile::index_t nhead_k : {1, 8})
+            for(const ck_tile::index_t batch :
+                {1,  2,  3,  4,   5,   8,   13,  16,  24,  31,  32,  33,  48,
+                 64, 65, 96, 128, 129, 160, 192, 255, 256, 384, 480, 481, 512})
+            {
+                const size_t bound =
+                    ck_tile::fmha_fwd_decode_pagedkv_max_workspace_bytes(batch, nhead_k, cap);
+                for(const ck_tile::index_t ps : {16, 64, 128})
+                    for(const ck_tile::index_t w : {0, 1, 300, 2048, 4000, 23040})
+                        for(const ck_tile::index_t s : lengths)
+                        {
+                            const auto c = ck_tile::fmha_fwd_decode_pagedkv_config(
+                                batch, nhead_k, s, w, ps, cap);
+                            const size_t need = ck_tile::fmha_fwd_decode_pagedkv_workspace_bytes(
+                                batch, nhead_k, c.num_splits, c.num_groups);
+                            ASSERT_LE(need, bound)
+                                << "cap " << cap << " b " << batch << " h_k " << nhead_k << " s_k "
+                                << s << " window " << w << " page " << ps;
+                            ASSERT_LE(c.num_splits, cap);
+                            // clusters merge only what a cluster of several splits merged
+                            ASSERT_TRUE(c.num_groups == 1 || c.num_splits >= 2);
+                            ++checked;
+                        }
+            }
     EXPECT_GT(checked, 0u);
     for(ck_tile::index_t heads = 1; heads < 2048; ++heads)
         ASSERT_LE(ck_tile::fmha_fwd_decode_pagedkv_max_workspace_bytes(heads, 1),

@@ -19,8 +19,8 @@ size_t ck_fmha_fwd_decode_pagedkv_workspace_bytes(
 {
     if(max_seqlen_k < 0 || (page_size != 16 && page_size != 64 && page_size != 128))
         return 0;
-    const auto c =
-        ck_tile::fmha_fwd_decode_pagedkv_config(batch, nhead_k, max_seqlen_k, window, page_size);
+    const auto c = ck_tile::fmha_fwd_decode_pagedkv_config(
+        batch, nhead_k, max_seqlen_k, window, page_size, ck_tile::get_max_cluster_size());
     return ck_tile::fmha_fwd_decode_pagedkv_workspace_bytes(
         batch, nhead_k, c.num_splits, c.num_groups);
 }
@@ -29,7 +29,8 @@ size_t ck_fmha_fwd_decode_pagedkv_workspace_bytes(
 // and page sizes; it grows with batch * nhead_k. 0 for invalid sizes.
 size_t ck_fmha_fwd_decode_pagedkv_max_workspace_bytes(int batch, int nhead_k)
 {
-    return ck_tile::fmha_fwd_decode_pagedkv_max_workspace_bytes(batch, nhead_k);
+    return ck_tile::fmha_fwd_decode_pagedkv_max_workspace_bytes(
+        batch, nhead_k, ck_tile::get_max_cluster_size());
 }
 
 // int32 counters for this batch; zero them once, calls of any shape share them (not concurrently).
@@ -65,8 +66,8 @@ int ck_fmha_fwd_decode_pagedkv(const void* q,
 {
     if(batch <= 0 || nhead_k <= 0 || max_seqlen_k < 0)
         return hipErrorInvalidValue;
-    const auto c =
-        ck_tile::fmha_fwd_decode_pagedkv_config(batch, nhead_k, max_seqlen_k, window, page_size);
+    const auto c = ck_tile::fmha_fwd_decode_pagedkv_config(
+        batch, nhead_k, max_seqlen_k, window, page_size, ck_tile::get_max_cluster_size());
 
     fmha_fwd_decode_pagedkv_args args{};
     args.q_ptr              = q;

@@ -57,6 +57,7 @@ struct Case
     bool fp16               = false;     // fp16 Q and output instead of bf16
     unsigned seed           = 1;
     bool needles            = false; // needle keys instead of random inputs, see run()
+    index_t max_cluster     = 0;     // cap on the splits per cluster; 0 = what the device takes
 };
 
 struct Result
@@ -102,7 +103,11 @@ inline Result run(const Case& c, bool validate, int warmup = 0, int repeat = 0)
         res.error = "page_size must be 16, 64 or 128";
         return res;
     }
-    auto cfg = ck_tile::fmha_fwd_decode_pagedkv_config(batch, c.nhead_k, max_seqlen, c.window, ps);
+    index_t max_cluster = ck_tile::get_max_cluster_size();
+    if(c.max_cluster > 0)
+        max_cluster = std::min(max_cluster, c.max_cluster);
+    auto cfg = ck_tile::fmha_fwd_decode_pagedkv_config(
+        batch, c.nhead_k, max_seqlen, c.window, ps, max_cluster);
     if(c.layout == "coop" || c.layout == "wave")
         cfg.wave_split = c.layout == "wave";
     const index_t lo_align = ps > kPage ? 4 : 1;
@@ -115,9 +120,8 @@ inline Result run(const Case& c, bool validate, int warmup = 0, int repeat = 0)
     {
         cfg.pages_per_split = (cfg.pages_per_split + lo_align - 1) / lo_align * lo_align;
         const index_t total = (span + cfg.pages_per_split - 1) / cfg.pages_per_split;
-        cfg.num_groups      = (total + ck_tile::kFmhaFwdDecodeMaxClusterSplits - 1) /
-                         ck_tile::kFmhaFwdDecodeMaxClusterSplits;
-        cfg.num_splits = (total + cfg.num_groups - 1) / cfg.num_groups;
+        cfg.num_groups      = (total + max_cluster - 1) / max_cluster;
+        cfg.num_splits      = (total + cfg.num_groups - 1) / cfg.num_groups;
     }
     // what the kernel uses for the bound after the overrides above
     cfg.pages_per_split = ck_tile::fmha_fwd_decode_pagedkv_split_pages(
