@@ -317,10 +317,10 @@ namespace
         }
         case SddmmFmt::ell:
         {
-            // Column-major ELL, padding marked with -1 (zero based) / 0 (one based).
+            // Column-major ELL, padding marked with -1 whatever the index base.
             for(const Entry& e : entries)
-                v_a.push_back(e.col);
-            d_ptr_or_row = up_idx<I>(v_a, b);
+                v_a.push_back(e.col < 0 ? -1 : e.col + b);
+            d_ptr_or_row = up_idx<I>(v_a);
             ASSERT_TRUE(d_ptr_or_row.ptr);
             ASSERT_EQ(rocsparse_create_ell_descr(&sC.p,
                                                  c.m,
