@@ -414,10 +414,8 @@ public:
                 return rocsparse_status_success;
             }
 
-            // The z pointers follow the gamma values, aligned for a pointer load.
-            const size_t gamma_size
-                = ((count * sizeof(T) - 1) / sizeof(const Z*) + 1) * sizeof(const Z*);
-            device_array_size = gamma_size + count * sizeof(const Z*);
+            const size_t gamma_size = rocsparse::spmv_extra_z_array_offset(count, sizeof(T));
+            device_array_size       = gamma_size + count * sizeof(const Z*);
 
             // Allocate device memory. The flag is set before the copies so a later failure
             // still frees this buffer from clear().

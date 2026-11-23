@@ -33,6 +33,8 @@
 //
 #include "unit_test_device_level2_common.hpp"
 
+#include "rocsparse_spmv_helpers.h"
+
 #include <cstring>
 #include <deque>
 #include <limits>
@@ -1347,6 +1349,27 @@ namespace
                 this->sweep_reuse(c);
                 if(::testing::Test::HasFailure())
                     return;
+            }
+    }
+
+    // The z pointers that rocsparse_spmv_set_extra stores after the gamma values start at a
+    // pointer-aligned offset. With a 4-byte gamma an odd count used to leave them 4-byte
+    // aligned; 8- and 16-byte gammas keep their offset.
+    TEST(L2DeviceV2SpmvExtraLayout, z_array_offset_is_pointer_aligned)
+    {
+        EXPECT_EQ(rocsparse::spmv_extra_z_array_offset(1, sizeof(float)), 8u);
+        EXPECT_EQ(rocsparse::spmv_extra_z_array_offset(2, sizeof(float)), 8u);
+        EXPECT_EQ(rocsparse::spmv_extra_z_array_offset(3, sizeof(int32_t)), 16u);
+        EXPECT_EQ(rocsparse::spmv_extra_z_array_offset(1, sizeof(double)), 8u);
+        EXPECT_EQ(rocsparse::spmv_extra_z_array_offset(3, sizeof(double)), 24u);
+        EXPECT_EQ(rocsparse::spmv_extra_z_array_offset(3, sizeof(rocsparse_double_complex)), 48u);
+        for(size_t count = 1; count <= 9; ++count)
+            for(const size_t bytes : {size_t(4), size_t(8), size_t(16)})
+            {
+                const size_t offset = rocsparse::spmv_extra_z_array_offset(count, bytes);
+                EXPECT_EQ(offset % alignof(const float*), 0u) << count << " x " << bytes;
+                EXPECT_GE(offset, count * bytes) << count << " x " << bytes;
+                EXPECT_LT(offset, count * bytes + sizeof(const float*)) << count << " x " << bytes;
             }
     }
 }
