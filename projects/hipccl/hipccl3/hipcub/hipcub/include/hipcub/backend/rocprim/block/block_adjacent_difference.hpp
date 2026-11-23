@@ -52,18 +52,20 @@ class BlockAdjacentDifference
 public:
     using TempStorage = typename base_type::storage_type;
 
-    HIPCUB_DEVICE inline
-    BlockAdjacentDifference() : temp_storage_(private_storage())
+    _CCCL_DEVICE
+    inline BlockAdjacentDifference()
+        : temp_storage_(private_storage())
     {
     }
 
-    HIPCUB_DEVICE inline
-    BlockAdjacentDifference(TempStorage& temp_storage) : temp_storage_(temp_storage)
+    _CCCL_DEVICE
+    inline BlockAdjacentDifference(TempStorage& temp_storage)
+        : temp_storage_(temp_storage)
     {
     }
 
     template<int ItemsPerThread, typename OutputType, typename DifferenceOpT>
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     inline void SubtractLeft(T (&input)[ItemsPerThread],
                              OutputType (&output)[ItemsPerThread],
                              DifferenceOpT difference_op)
@@ -74,7 +76,7 @@ public:
     }
 
     template<int ItemsPerThread, typename OutputT, typename DifferenceOpT>
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     inline void SubtractLeft(T (&input)[ItemsPerThread],
                              OutputT (&output)[ItemsPerThread],
                              DifferenceOpT difference_op,
@@ -86,7 +88,7 @@ public:
     }
 
     template<int ItemsPerThread, typename OutputType, typename DifferenceOpT>
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     inline void SubtractLeftPartialTile(T (&input)[ItemsPerThread],
                                         OutputType (&output)[ItemsPerThread],
                                         DifferenceOpT difference_op,
@@ -98,7 +100,7 @@ public:
     }
 
     template<int ItemsPerThread, typename OutputType, typename DifferenceOpT>
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     inline void SubtractLeftPartialTile(T (&input)[ItemsPerThread],
                                         OutputType (&output)[ItemsPerThread],
                                         DifferenceOpT difference_op,
@@ -114,7 +116,7 @@ public:
     }
 
     template<int ItemsPerThread, typename OutputT, typename DifferenceOpT>
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     inline void SubtractRight(T (&input)[ItemsPerThread],
                               OutputT (&output)[ItemsPerThread],
                               DifferenceOpT difference_op)
@@ -125,7 +127,7 @@ public:
     }
 
     template<int ItemsPerThread, typename OutputT, typename DifferenceOpT>
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     inline void SubtractRight(T (&input)[ItemsPerThread],
                               OutputT (&output)[ItemsPerThread],
                               DifferenceOpT difference_op,
@@ -137,7 +139,7 @@ public:
     }
 
     template<int ItemsPerThread, typename OutputT, typename DifferenceOpT>
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     inline void SubtractRightPartialTile(T (&input)[ItemsPerThread],
                                          OutputT (&output)[ItemsPerThread],
                                          DifferenceOpT difference_op,
@@ -149,8 +151,8 @@ public:
     }
 
 private:
-    HIPCUB_DEVICE inline
-    TempStorage& private_storage()
+    _CCCL_DEVICE
+    inline TempStorage& private_storage()
     {
         HIPCUB_SHARED_MEMORY TempStorage private_storage;
         return private_storage;

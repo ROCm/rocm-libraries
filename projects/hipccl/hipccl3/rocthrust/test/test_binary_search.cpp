@@ -526,9 +526,9 @@ struct init_scalar
 template <typename T>
 struct init_tuple
 {
-  thrust::tuple<T, T> operator()(T t)
+  _THRUST_STD::tuple<T, T> operator()(T t)
   {
-    return thrust::make_tuple(t, t);
+    return _THRUST_STD::make_tuple(t, t);
   }
 };
 
@@ -564,11 +564,11 @@ TEST(BinarySearchTests, TestTupleLowerBoundSimple)
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
   {
-    using Vector = thrust::device_vector<thrust::tuple<int, int>>;
+    using Vector = thrust::device_vector<_THRUST_STD::tuple<int, int>>;
     TestScalarLowerBoundSimple<Vector>(init_tuple<int>());
   }
   {
-    using Vector = thrust::host_vector<thrust::tuple<int, int>>;
+    using Vector = thrust::host_vector<_THRUST_STD::tuple<int, int>>;
     TestScalarLowerBoundSimple<Vector>(init_tuple<int>());
   }
 }
@@ -599,7 +599,7 @@ TEST(BinarySearchTests, TestTupleLowerBoundHayStack)
     test_scalar_lower_bound_haystack<Vector>(init_scalar<int>());
   }
   {
-    using Vector = thrust::device_vector<thrust::tuple<int, int>>;
+    using Vector = thrust::device_vector<_THRUST_STD::tuple<int, int>>;
     test_scalar_lower_bound_haystack<Vector>(init_tuple<int>());
   }
 }
@@ -674,11 +674,11 @@ TEST(BinarySearchTests, TestTupleUpperBoundSimple)
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
   {
-    using Vector = thrust::device_vector<thrust::tuple<int, int>>;
+    using Vector = thrust::device_vector<_THRUST_STD::tuple<int, int>>;
     TestScalarUpperBoundSimple<Vector>(init_tuple<int>());
   }
   {
-    using Vector = thrust::host_vector<thrust::tuple<int, int>>;
+    using Vector = thrust::host_vector<_THRUST_STD::tuple<int, int>>;
     TestScalarUpperBoundSimple<Vector>(init_tuple<int>());
   }
 }
@@ -709,7 +709,7 @@ TEST(BinarySearchTests, TestTupleUpperBoundHayStack)
     test_scalar_upper_bound_haystack<Vector>(init_scalar<int>());
   }
   {
-    using Vector = thrust::device_vector<thrust::tuple<int, int>>;
+    using Vector = thrust::device_vector<_THRUST_STD::tuple<int, int>>;
     test_scalar_upper_bound_haystack<Vector>(init_tuple<int>());
   }
 }
@@ -784,11 +784,11 @@ TEST(BinarySearchTests, TestTupleBinarySearchSimple)
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
   {
-    using Vector = thrust::device_vector<thrust::tuple<int, int>>;
+    using Vector = thrust::device_vector<_THRUST_STD::tuple<int, int>>;
     TestScalarBinarySearchSimple<Vector>(init_tuple<int>());
   }
   {
-    using Vector = thrust::host_vector<thrust::tuple<int, int>>;
+    using Vector = thrust::host_vector<_THRUST_STD::tuple<int, int>>;
     TestScalarBinarySearchSimple<Vector>(init_tuple<int>());
   }
 }
@@ -819,7 +819,7 @@ TEST(BinarySearchTests, TestTupleBinarySearchHayStack)
     test_scalar_binary_search_haystack<Vector>(init_scalar<int>());
   }
   {
-    using Vector = thrust::device_vector<thrust::tuple<int, int>>;
+    using Vector = thrust::device_vector<_THRUST_STD::tuple<int, int>>;
     test_scalar_binary_search_haystack<Vector>(init_tuple<int>());
   }
 }

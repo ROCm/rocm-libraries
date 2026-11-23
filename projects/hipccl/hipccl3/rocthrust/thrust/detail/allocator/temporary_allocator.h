@@ -1,19 +1,6 @@
-/*
- *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
- *
- *  Licensed under the Apache License, Version 2.0 (the "License");
- *  you may not use this file except in compliance with the License.
- *  You may obtain a copy of the License at
- *
- *      http://www.apache.org/licenses/LICENSE-2.0
- *
- *  Unless required by applicable law or agreed to in writing, software
- *  distributed under the License is distributed on an "AS IS" BASIS,
- *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- *  See the License for the specific language governing permissions and
- *  limitations under the License.
- */
+// SPDX-FileCopyrightText: Copyright (c) 2008-2013, NVIDIA Corporation. All rights reserved.
+// SPDX-FileCopyrightText: Modifications Copyright (c) 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
 
 #pragma once
 
@@ -27,7 +14,6 @@
 #  pragma system_header
 #endif // no system header
 
-#include <thrust/detail/allocator/allocator_traits.h>
 #include <thrust/detail/allocator/tagged_allocator.h>
 #include <thrust/detail/allocator/temporary_allocator.h>
 #include <thrust/detail/execution_policy.h>
@@ -35,6 +21,8 @@
 #include <thrust/memory.h>
 #include <thrust/system/detail/bad_alloc.h>
 
+#include _THRUST_STD_INCLUDE(__exception/exception_macros.h)
+#include _THRUST_STD_INCLUDE(__memory/allocator_traits.h)
 #include _THRUST_STD_INCLUDE(__utility/pair.h)
 #include _THRUST_STD_INCLUDE(cassert)
 
@@ -109,7 +97,23 @@ public:
 
   THRUST_HOST_DEVICE void deallocate(pointer p, size_type n) noexcept
   {
-    return thrust::return_temporary_buffer(system(), p, n);
+    _CCCL_TRY
+    {
+      thrust::return_temporary_buffer(system(), p, n);
+    }
+    _CCCL_CATCH_ALL
+    {
+      _CCCL_ASSERT(false, "Exception thrown in deallocate");
+      // Swallow all exceptions to maintain noexcept contract per C++ allocator requirements.
+      // Deallocate must be noexcept to be safe in destructors and during exception unwinding.
+      // Clear CUDA/HIP error state and leak the memory rather than propagating exception.
+      // Memory is leaked, but this matches standard allocator behavior when deallocation fails.
+#if THRUST_CUDA_COMPILATION()
+      NV_IF_TARGET(NV_IS_HOST, cudaGetLastError();)
+#elif THRUST_HAS_HIP_COMPILER()
+      _THRUST_IF_TARGET(_THRUST_IS_HOST, ((void) hipGetLastError();));
+#endif // THRUST_CUDA_COMPILATION()
+    }
   }
 
   THRUST_HOST_DEVICE inline System& system()

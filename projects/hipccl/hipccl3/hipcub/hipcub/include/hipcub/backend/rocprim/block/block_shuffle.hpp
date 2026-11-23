@@ -52,20 +52,22 @@ class BlockShuffle : public ::rocprim::block_shuffle<T, BlockDimX, BlockDimY, Bl
 public:
   using TempStorage = typename base_type::storage_type;
 
-  HIPCUB_DEVICE inline
-  BlockShuffle()  :      temp_storage_(private_storage())
+  _CCCL_DEVICE
+  inline BlockShuffle()
+      : temp_storage_(private_storage())
   {}
 
-
-  HIPCUB_DEVICE inline
-  BlockShuffle(TempStorage &temp_storage)             ///< [in] Reference to memory allocation having layout type TempStorage
-  :      temp_storage_(temp_storage)
+  _CCCL_DEVICE
+  inline BlockShuffle(
+      TempStorage&
+          temp_storage) ///< [in] Reference to memory allocation having layout type TempStorage
+      : temp_storage_(temp_storage)
   {}
 
   /**
    * \brief Each <em>thread<sub>i</sub></em> obtains the \p input provided by <em>thread</em><sub><em>i</em>+<tt>distance</tt></sub>. The offset \p distance may be negative.
    */
-  HIPCUB_DEVICE
+  _CCCL_DEVICE
   inline void Offset(
       T input, ///< [in] The input item from the calling thread (<em>thread<sub>i</sub></em>)
       T& output, ///< [out] The \p input item from the successor (or predecessor) thread <em>thread</em><sub><em>i</em>+<tt>distance</tt></sub> (may be aliased to \p input).  This value is only updated for for <em>thread<sub>i</sub></em> when 0 <= (<em>i</em> + \p distance) < <tt>BlockThreads-1</tt>
@@ -77,7 +79,7 @@ public:
   /**
  * \brief Each <em>thread<sub>i</sub></em> obtains the \p input provided by <em>thread</em><sub><em>i</em>+<tt>distance</tt></sub>.
  */
-  HIPCUB_DEVICE
+  _CCCL_DEVICE
   inline void Rotate(
       T input, ///< [in] The calling thread's input item
       T& output, ///< [out] The \p input item from thread <em>thread</em><sub>(<em>i</em>+<tt>distance></tt>)%<tt>\<BlockThreads\></tt></sub> (may be aliased to \p input).  This value is not updated for <em>thread</em><sub>BlockThreads-1</sub>
@@ -89,7 +91,7 @@ public:
   * \brief The thread block rotates its [<em>blocked arrangement</em>](index.html#sec5sec3) of \p input items, shifting it up by one item
   */
   template<int ItemsPerThread>
-  HIPCUB_DEVICE
+  _CCCL_DEVICE
   inline void Up(
       T (&input)[ItemsPerThread], ///< [in] The calling thread's input items
       T (&prev)
@@ -102,7 +104,7 @@ public:
    * \brief The thread block rotates its [<em>blocked arrangement</em>](index.html#sec5sec3) of \p input items, shifting it up by one item.  All threads receive the \p input provided by <em>thread</em><sub><tt>BlockThreads-1</tt></sub>.
    */
   template<int ItemsPerThread>
-  HIPCUB_DEVICE
+  _CCCL_DEVICE
   inline void Up(
       T (&input)[ItemsPerThread], ///< [in] The calling thread's input items
       T (&prev)
@@ -116,7 +118,7 @@ public:
    * \brief The thread block rotates its [<em>blocked arrangement</em>](index.html#sec5sec3) of \p input items, shifting it down by one item
    */
   template<int ItemsPerThread>
-  HIPCUB_DEVICE
+  _CCCL_DEVICE
   inline void Down(
       T (&input)[ItemsPerThread], ///< [in] The calling thread's input items
       T (&next)
@@ -129,7 +131,7 @@ public:
    * \brief The thread block rotates its [<em>blocked arrangement</em>](index.html#sec5sec3) of input items, shifting it down by one item.  All threads receive \p input[0] provided by <em>thread</em><sub><tt>0</tt></sub>.
    */
   template<int ItemsPerThread>
-  HIPCUB_DEVICE
+  _CCCL_DEVICE
   inline void Down(
       T (&input)[ItemsPerThread], ///< [in] The calling thread's input items
       T (&next)
@@ -140,8 +142,8 @@ public:
   }
 
 private:
-    HIPCUB_DEVICE inline
-    TempStorage& private_storage()
+    _CCCL_DEVICE
+    inline TempStorage& private_storage()
     {
         HIPCUB_SHARED_MEMORY TempStorage private_storage;
         return private_storage;

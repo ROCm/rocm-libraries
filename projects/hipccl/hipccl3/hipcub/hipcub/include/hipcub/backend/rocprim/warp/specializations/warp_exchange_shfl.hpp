@@ -43,26 +43,28 @@ public:
     using TempStorage = NullType;
 
 public:
-    explicit HIPCUB_DEVICE __forceinline__ WarpExchangeShfl(TempStorage& /*temp_storage*/) {}
+    explicit _CCCL_DEVICE __forceinline__
+    WarpExchangeShfl(TempStorage& /*temp_storage*/)
+    {}
 
     template<typename OutputT>
-    HIPCUB_DEVICE __forceinline__ void
-        BlockedToStriped(const InputT (&input_items)[ITEMS_PER_THREAD],
-                         OutputT (&output_items)[ITEMS_PER_THREAD])
+    _CCCL_DEVICE __forceinline__
+    void BlockedToStriped(const InputT (&input_items)[ITEMS_PER_THREAD],
+                          OutputT (&output_items)[ITEMS_PER_THREAD])
     {
         warp_exchange{}.blocked_to_striped_shuffle(input_items, output_items);
     }
 
     template<typename OutputT>
-    HIPCUB_DEVICE __forceinline__ void
-        StripedToBlocked(const InputT (&input_items)[ITEMS_PER_THREAD],
-                         OutputT (&output_items)[ITEMS_PER_THREAD])
+    _CCCL_DEVICE __forceinline__
+    void StripedToBlocked(const InputT (&input_items)[ITEMS_PER_THREAD],
+                          OutputT (&output_items)[ITEMS_PER_THREAD])
     {
         warp_exchange{}.striped_to_blocked_shuffle(input_items, output_items);
     }
 
     template<typename OffsetT>
-    HIPCUB_DEVICE __forceinline__ void
+    _CCCL_DEVICE __forceinline__ void
         ScatterToStriped([[maybe_unused]] InputT (&items)[ITEMS_PER_THREAD],
                          [[maybe_unused]]
                          OffsetT (&ranks)[ITEMS_PER_THREAD])
@@ -76,7 +78,7 @@ public:
     }
 
     template<typename OutputT, typename OffsetT>
-    HIPCUB_DEVICE __forceinline__
+    _CCCL_DEVICE __forceinline__
     void ScatterToStriped([[maybe_unused]] const InputT (&input_items)[ITEMS_PER_THREAD],
                           [[maybe_unused]] OutputT (&output_items)[ITEMS_PER_THREAD],
                           [[maybe_unused]] OffsetT (&ranks)[ITEMS_PER_THREAD])

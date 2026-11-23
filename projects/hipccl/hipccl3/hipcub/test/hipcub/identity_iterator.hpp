@@ -40,97 +40,97 @@ public:
 
     using iterator_category = std::random_access_iterator_tag;
 
-    HIPCUB_HOST_DEVICE inline
-    identity_iterator(T * ptr)
+    _CCCL_HOST_DEVICE
+    inline identity_iterator(T* ptr)
         : ptr_(ptr)
     { }
 
     inline ~identity_iterator() = default;
 
-    HIPCUB_HOST_DEVICE inline
-    identity_iterator& operator++()
+    _CCCL_HOST_DEVICE
+    inline identity_iterator& operator++()
     {
         ptr_++;
         return *this;
     }
 
-    HIPCUB_HOST_DEVICE inline
-    identity_iterator operator++(int)
+    _CCCL_HOST_DEVICE
+    inline identity_iterator operator++(int)
     {
         identity_iterator old = *this;
         ptr_++;
         return old;
     }
 
-    HIPCUB_HOST_DEVICE inline
-    identity_iterator& operator--()
+    _CCCL_HOST_DEVICE
+    inline identity_iterator& operator--()
     {
         ptr_--;
         return *this;
     }
 
-    HIPCUB_HOST_DEVICE inline
-    identity_iterator operator--(int)
+    _CCCL_HOST_DEVICE
+    inline identity_iterator operator--(int)
     {
         identity_iterator old = *this;
         ptr_--;
         return old;
     }
 
-    HIPCUB_HOST_DEVICE inline
-    reference operator*() const
+    _CCCL_HOST_DEVICE
+    inline reference operator*() const
     {
         return *ptr_;
     }
 
-    HIPCUB_HOST_DEVICE inline
-    reference operator[](const difference_type& n) const
+    _CCCL_HOST_DEVICE
+    inline reference operator[](const difference_type& n) const
     {
         return *(ptr_ + n);
     }
 
-    HIPCUB_HOST_DEVICE inline
-    identity_iterator operator+(const difference_type& distance) const
+    _CCCL_HOST_DEVICE
+    inline identity_iterator operator+(const difference_type& distance) const
     {
         auto i = ptr_ + distance;
         return identity_iterator(i);
     }
 
-    HIPCUB_HOST_DEVICE inline
-    identity_iterator& operator+=(const difference_type& distance)
+    _CCCL_HOST_DEVICE
+    inline identity_iterator& operator+=(const difference_type& distance)
     {
         ptr_ += distance;
         return *this;
     }
 
-    HIPCUB_HOST_DEVICE inline
-    identity_iterator operator-(const difference_type& distance) const
+    _CCCL_HOST_DEVICE
+    inline identity_iterator operator-(const difference_type& distance) const
     {
         auto i = ptr_ - distance;
         return identity_iterator(i);
     }
 
-    HIPCUB_HOST_DEVICE inline
-    identity_iterator& operator-=(const difference_type& distance)
+    _CCCL_HOST_DEVICE
+    inline identity_iterator& operator-=(const difference_type& distance)
     {
         ptr_ -= distance;
         return *this;
     }
 
-    HIPCUB_HOST_DEVICE inline
-    difference_type operator-(identity_iterator other) const
+    _CCCL_HOST_DEVICE
+    inline difference_type operator-(identity_iterator other) const
     {
         return ptr_ - other.ptr_;
     }
 
-    HIPCUB_HOST_DEVICE inline
-    bool operator==(identity_iterator other) const
+    _CCCL_HOST_DEVICE
+    inline bool operator==(identity_iterator other) const
     {
         return ptr_ == other.ptr_;
     }
 
-    HIPCUB_HOST_DEVICE inline
-    bool operator!=(identity_iterator other) const
+    _CCCL_HOST_DEVICE
+    inline bool operator!=(identity_iterator other) const
     {
         return ptr_ != other.ptr_;
     }

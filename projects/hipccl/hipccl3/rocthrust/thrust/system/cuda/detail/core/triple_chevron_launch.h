@@ -1,4 +1,5 @@
 // SPDX-FileCopyrightText: Copyright (c) 2024, NVIDIA CORPORATION. All rights reserved.
+// SPDX-FileCopyrightText: Modifications Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3
 #pragma once
 
@@ -15,7 +16,6 @@
 #include <thrust/system/cuda/config.h>
 
 #include <cuda/cmath>
-#include <cuda/std/__cccl/cuda_capabilities.h>
 
 THRUST_NAMESPACE_BEGIN
 

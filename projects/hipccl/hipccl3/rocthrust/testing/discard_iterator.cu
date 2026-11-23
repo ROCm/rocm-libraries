@@ -15,16 +15,12 @@
  *  limitations under the License.
  */
 
-#include <thrust/detail/libcxx_wrapper/std/__iterator/iterator_traits.h>
 #include <thrust/iterator/discard_iterator.h>
 
-#include <unittest/unittest.h>
-
+#include _THRUST_STD_INCLUDE(tuple)
 #include _THRUST_STD_INCLUDE(type_traits)
 
-#if !_THRUST_HAS_DEVICE_SYSTEM_STD
-#  include <iterator>
-#endif
+#include <unittest/unittest.h>
 
 // ensure that we properly support thrust::discard_iterator from _THRUST_STD
 void TestDiscardIteratorTraits()
@@ -45,14 +41,12 @@ void TestDiscardIteratorTraits()
 
   static_assert(_THRUST_STD::__has_random_access_traversal<it>);
 
-#if _THRUST_HAS_DEVICE_SYSTEM_STD || THRUST_STD_VER >= 2020
   static_assert(_THRUST_STD::output_iterator<it, int>);
   static_assert(_THRUST_STD::input_iterator<it>);
   static_assert(_THRUST_STD::forward_iterator<it>);
   static_assert(_THRUST_STD::bidirectional_iterator<it>);
   static_assert(_THRUST_STD::random_access_iterator<it>);
   static_assert(!_THRUST_STD::contiguous_iterator<it>);
-#endif
 }
 DECLARE_UNITTEST(TestDiscardIteratorTraits);
 
@@ -126,12 +120,10 @@ DECLARE_UNITTEST(TestMakeDiscardIterator);
 
 void TestZippedDiscardIterator()
 {
-  using namespace thrust;
+  using IteratorTuple1 = _THRUST_STD::tuple<thrust::discard_iterator<>>;
+  using ZipIterator1   = thrust::zip_iterator<IteratorTuple1>;
 
-  using IteratorTuple1 = tuple<discard_iterator<>>;
-  using ZipIterator1   = zip_iterator<IteratorTuple1>;
-
-  IteratorTuple1 t = thrust::make_tuple(thrust::make_discard_iterator());
+  IteratorTuple1 t = _THRUST_STD::tuple(thrust::make_discard_iterator());
 
   ZipIterator1 z_iter1_first = thrust::make_zip_iterator(t);
   ZipIterator1 z_iter1_last  = z_iter1_first + 10;
@@ -140,10 +132,10 @@ void TestZippedDiscardIterator()
     ;
   }
 
-  ASSERT_EQUAL(10, thrust::get<0>(z_iter1_first.get_iterator_tuple()) - thrust::make_discard_iterator());
+  ASSERT_EQUAL(10, _THRUST_STD::get<0>(z_iter1_first.get_iterator_tuple()) - thrust::make_discard_iterator());
 
-  using IteratorTuple2 = tuple<int*, discard_iterator<>>;
-  using ZipIterator2   = zip_iterator<IteratorTuple2>;
+  using IteratorTuple2 = _THRUST_STD::tuple<int*, thrust::discard_iterator<>>;
+  using ZipIterator2   = thrust::zip_iterator<IteratorTuple2>;
 
   ZipIterator2 z_iter_first = thrust::make_zip_iterator((int*) 0, thrust::make_discard_iterator());
   ZipIterator2 z_iter_last  = z_iter_first + 10;
@@ -153,6 +145,6 @@ void TestZippedDiscardIterator()
     ;
   }
 
-  ASSERT_EQUAL(10, thrust::get<1>(z_iter_first.get_iterator_tuple()) - thrust::make_discard_iterator());
+  ASSERT_EQUAL(10, _THRUST_STD::get<1>(z_iter_first.get_iterator_tuple()) - thrust::make_discard_iterator());
 }
 DECLARE_UNITTEST(TestZippedDiscardIterator);

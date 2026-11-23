@@ -1,18 +1,6 @@
-/*
- *  Copyright 2008-2013 NVIDIA Corporation
- *
- *  Licensed under the Apache License, Version 2.0 (the "License");
- *  you may not use this file except in compliance with the License.
- *  You may obtain a copy of the License at
- *
- *      http://www.apache.org/licenses/LICENSE-2.0
- *
- *  Unless required by applicable law or agreed to in writing, software
- *  distributed under the License is distributed on an "AS IS" BASIS,
- *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- *  See the License for the specific language governing permissions and
- *  limitations under the License.
- */
+// SPDX-FileCopyrightText: Copyright (c) 2008-2013, NVIDIA Corporation. All rights reserved.
+// SPDX-FileCopyrightText: Modifications Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
 
 /*! \file thrust/iterator/counting_iterator.h
  *  \brief An iterator which returns an increasing incrementable value
@@ -162,6 +150,10 @@ using unit_stride = compile_time_value<1>;
 //! \endcode
 //!
 //! \see make_counting_iterator
+/*! \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
+ */
 template <typename Incrementable,
           typename System       = use_default,
           typename Traversal    = use_default,
@@ -269,11 +261,7 @@ private:
   THRUST_HOST_DEVICE bool equal(
     counting_iterator<Incrementable, OtherSystem, OtherTraversal, OtherDifference, OtherStrideHolder> const& y) const
   {
-#if _THRUST_HAS_DEVICE_SYSTEM_STD
     if constexpr (_THRUST_LIBCXX::is_floating_point_v<Incrementable>)
-#else
-    if constexpr (::rocprim::is_floating_point<Incrementable>::value)
-#endif
     {
       return distance_to(y) == 0;
     }

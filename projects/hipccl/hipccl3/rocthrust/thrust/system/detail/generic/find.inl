@@ -1,18 +1,6 @@
-/*
- *  Copyright 2008-2013 NVIDIA Corporation
- *
- *  Licensed under the Apache License, Version 2.0 (the "License");
- *  you may not use this file except in compliance with the License.
- *  You may obtain a copy of the License at
- *
- *      http://www.apache.org/licenses/LICENSE-2.0
- *
- *  Unless required by applicable law or agreed to in writing, software
- *  distributed under the License is distributed on an "AS IS" BASIS,
- *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- *  See the License for the specific language governing permissions and
- *  limitations under the License.
- */
+// SPDX-FileCopyrightText: Copyright (c) 2008-2013, NVIDIA Corporation. All rights reserved.
+// SPDX-FileCopyrightText: Modifications Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
 
 #pragma once
 
@@ -31,9 +19,9 @@
 #include <thrust/iterator/transform_iterator.h>
 #include <thrust/iterator/zip_iterator.h>
 #include <thrust/reduce.h>
-#include <thrust/tuple.h>
 
 #include _THRUST_STD_INCLUDE(__algorithm/min.h)
+#include _THRUST_STD_INCLUDE(tuple)
 
 // Contributed by Erich Elsen
 
@@ -55,11 +43,11 @@ struct find_if_functor
   THRUST_HOST_DEVICE TupleType operator()(const TupleType& lhs, const TupleType& rhs) const
   {
     // select the smallest index among true results
-    if (thrust::get<0>(lhs) && thrust::get<0>(rhs))
+    if (_THRUST_STD::get<0>(lhs) && _THRUST_STD::get<0>(rhs))
     {
-      return TupleType(true, (_THRUST_STD::min)(thrust::get<1>(lhs), thrust::get<1>(rhs)));
+      return TupleType(true, (_THRUST_STD::min)(_THRUST_STD::get<1>(lhs), _THRUST_STD::get<1>(rhs)));
     }
-    else if (thrust::get<0>(lhs))
+    else if (_THRUST_STD::get<0>(lhs))
     {
       return lhs;
     }
@@ -75,7 +63,7 @@ THRUST_HOST_DEVICE InputIterator
 find_if(thrust::execution_policy<DerivedPolicy>& exec, InputIterator first, InputIterator last, Predicate pred)
 {
   using difference_type = thrust::detail::it_difference_t<InputIterator>;
-  using result_type     = typename thrust::tuple<bool, difference_type>;
+  using result_type     = typename _THRUST_STD::tuple<bool, difference_type>;
 
   // empty sequence
   if (first == last)
@@ -94,11 +82,11 @@ find_if(thrust::execution_policy<DerivedPolicy>& exec, InputIterator first, Inpu
 
   // force transform_iterator output to bool
   using XfrmIterator  = thrust::transform_iterator<Predicate, InputIterator, bool>;
-  using IteratorTuple = thrust::tuple<XfrmIterator, thrust::counting_iterator<difference_type>>;
+  using IteratorTuple = _THRUST_STD::tuple<XfrmIterator, thrust::counting_iterator<difference_type>>;
   using ZipIterator   = thrust::zip_iterator<IteratorTuple>;
 
   IteratorTuple iter_tuple =
-    thrust::make_tuple(XfrmIterator(first, pred), thrust::counting_iterator<difference_type>(0));
+    _THRUST_STD::make_tuple(XfrmIterator(first, pred), thrust::counting_iterator<difference_type>(0));
 
   ZipIterator begin = thrust::make_zip_iterator(iter_tuple);
   ZipIterator end   = begin + n;
@@ -115,9 +103,9 @@ find_if(thrust::execution_policy<DerivedPolicy>& exec, InputIterator first, Inpu
       exec, interval_begin, interval_end, result_type(false, interval_end - begin), find_if_functor<result_type>());
 
     // see if we found something
-    if (thrust::get<0>(result))
+    if (_THRUST_STD::get<0>(result))
     {
-      return first + thrust::get<1>(result);
+      return first + _THRUST_STD::get<1>(result);
     }
   }
 

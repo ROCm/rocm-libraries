@@ -156,7 +156,8 @@ private:
     }; // union TempStorage
 
     /// Internal storage allocator (used when the user does not provide pre-allocated shared memory)
-    HIPCUB_DEVICE __forceinline__ _TempStorage &PrivateStorage()
+    _CCCL_DEVICE __forceinline__
+    _TempStorage& PrivateStorage()
     {
         __shared__ _TempStorage private_storage;
         return private_storage;
@@ -183,7 +184,7 @@ public:
    * <b>RunLengthDecode</b> calls.
    */
     template<typename RunLengthT, typename TotalDecodedSizeT>
-    HIPCUB_DEVICE __forceinline__
+    _CCCL_DEVICE __forceinline__
     BlockRunLengthDecode(TempStorage& temp_storage,
                          ItemT (&run_values)[RunsPerThread],
                          RunLengthT (&run_lengths)[RunsPerThread],
@@ -200,7 +201,7 @@ public:
    * <b>RunLengthDecode</b> calls.
    */
     template<typename UserRunOffsetT>
-    HIPCUB_DEVICE __forceinline__
+    _CCCL_DEVICE __forceinline__
     BlockRunLengthDecode(TempStorage& temp_storage,
                          ItemT (&run_values)[RunsPerThread],
                          UserRunOffsetT (&run_offsets)[RunsPerThread])
@@ -214,7 +215,7 @@ public:
    * \brief Constructor specialised for static temporary storage, initializing using the runs' lengths.
    */
     template<typename RunLengthT, typename TotalDecodedSizeT>
-    HIPCUB_DEVICE __forceinline__
+    _CCCL_DEVICE __forceinline__
     BlockRunLengthDecode(ItemT (&run_values)[RunsPerThread],
                          RunLengthT (&run_lengths)[RunsPerThread],
                          TotalDecodedSizeT& total_decoded_size)
@@ -227,7 +228,7 @@ public:
    * \brief Constructor specialised for static temporary storage, initializing using the runs' offsets.
    */
     template<typename UserRunOffsetT>
-    HIPCUB_DEVICE __forceinline__ BlockRunLengthDecode(ItemT (&run_values)[RunsPerThread],
+    _CCCL_DEVICE __forceinline__ BlockRunLengthDecode(ItemT (&run_values)[RunsPerThread],
                                                       UserRunOffsetT (&run_offsets)[RunsPerThread])
         : temp_storage(PrivateStorage()), linear_tid(RowMajorTid(BlockDimX, BlockDimY, BlockDimZ))
     {
@@ -240,13 +241,14 @@ private:
    * \p MAX_NUM_ITEMS, an upper bound of the array size, which will be used to determine the number of binary search
    * iterations at compile time.
    */
-    template <int MAX_NUM_ITEMS,
-              typename InputIteratorT,
-              typename OffsetT,
-              typename T>
-    HIPCUB_DEVICE __forceinline__ OffsetT StaticUpperBound(InputIteratorT input, ///< [in] Input sequence
-                                                           OffsetT num_items,    ///< [in] Input sequence length
-                                                           T val)                ///< [in] Search key
+    template<int MAX_NUM_ITEMS,
+             typename InputIteratorT,
+             typename OffsetT,
+             typename T>
+    _CCCL_DEVICE __forceinline__
+    OffsetT StaticUpperBound(InputIteratorT input, ///< [in] Input sequence
+                             OffsetT        num_items, ///< [in] Input sequence length
+                             T              val) ///< [in] Search key
     {
         OffsetT lower_bound = 0;
         OffsetT upper_bound = num_items;
@@ -270,7 +272,7 @@ private:
     }
 
     template<typename RunOffsetT>
-    HIPCUB_DEVICE __forceinline__
+    _CCCL_DEVICE __forceinline__
     void InitWithRunOffsets(ItemT (&run_values)[RunsPerThread],
                             RunOffsetT (&run_offsets)[RunsPerThread])
     {
@@ -290,7 +292,7 @@ private:
     }
 
     template<typename RunLengthT, typename TotalDecodedSizeT>
-    HIPCUB_DEVICE __forceinline__
+    _CCCL_DEVICE __forceinline__
     void InitWithRunLengths(ItemT (&run_values)[RunsPerThread],
                             RunLengthT (&run_lengths)[RunsPerThread],
                             TotalDecodedSizeT& total_decoded_size)
@@ -330,7 +332,7 @@ public:
    * in undefined behavior.
    */
     template<typename RelativeOffsetT>
-    HIPCUB_DEVICE __forceinline__
+    _CCCL_DEVICE __forceinline__
     void RunLengthDecode(ItemT (&decoded_items)[DECODED_ItemsPerThread],
                          RelativeOffsetT (&item_offsets)[DECODED_ItemsPerThread],
                          DecodedOffsetT from_decoded_offset = 0)
@@ -389,7 +391,7 @@ public:
    * \param[in] from_decoded_offset If invoked with from_decoded_offset that is larger than total_decoded_size results
    * in undefined behavior.
    */
-    HIPCUB_DEVICE __forceinline__
+    _CCCL_DEVICE __forceinline__
     void RunLengthDecode(ItemT (&decoded_items)[DECODED_ItemsPerThread],
                          DecodedOffsetT from_decoded_offset = 0)
     {

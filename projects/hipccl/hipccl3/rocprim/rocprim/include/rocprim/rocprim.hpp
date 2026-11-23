@@ -62,6 +62,7 @@
 #include "device/device_copy.hpp"
 #include "device/device_find_end.hpp"
 #include "device/device_find_first_of.hpp"
+#include "device/device_find_if.hpp"
 #include "device/device_histogram.hpp"
 #include "device/device_memcpy.hpp"
 #include "device/device_merge.hpp"

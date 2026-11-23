@@ -49,15 +49,17 @@ struct dummy
     T y;
 
 #ifdef HIPCUB_ROCPRIM_API
-    HIPCUB_HOST_DEVICE
+    _CCCL_HOST_DEVICE
 #endif
     dummy() = default;
 
     template<class U>
-    HIPCUB_HOST_DEVICE dummy(U a) : x(a + 1), y(a * 2)
+    _CCCL_HOST_DEVICE
+    dummy(U a)
+        : x(a + 1), y(a * 2)
     {}
 
-    HIPCUB_HOST_DEVICE
+    _CCCL_HOST_DEVICE
     bool operator==(const dummy& rhs) const
     {
         return x == rhs.x && y == rhs.y;

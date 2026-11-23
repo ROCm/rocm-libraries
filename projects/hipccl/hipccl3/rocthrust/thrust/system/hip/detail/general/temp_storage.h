@@ -23,9 +23,9 @@
 #include <thrust/detail/config.h>
 
 #include <thrust/system/hip/detail/general/various.h>
-#include <thrust/tuple.h>
 
 #include _THRUST_STD_INCLUDE(cstddef)
+#include _THRUST_STD_INCLUDE(tuple)
 
 THRUST_NAMESPACE_BEGIN
 namespace system
@@ -124,7 +124,7 @@ template <typename... Ts>
 struct linear_partition
 {
   /// \brief The sub-partitions in this `linear_partition`.
-  thrust::tuple<Ts...> sub_partitions;
+  _THRUST_STD::tuple<Ts...> sub_partitions;
 
   /// \brief Constructor.
   linear_partition(Ts... sub_partitions)
@@ -191,7 +191,7 @@ template <typename... Ts>
 struct union_partition
 {
   /// \brief The sub-partitions in this `union_partition`.
-  thrust::tuple<Ts...> sub_partitions;
+  _THRUST_STD::tuple<Ts...> sub_partitions;
 
   /// \brief Constructor.
   union_partition(Ts... sub_partitions)

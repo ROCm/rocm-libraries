@@ -59,9 +59,8 @@
 // clang-format off
 
 // If the '::cuda::std' namespace from 'libcudacxx' or 'libhipcxx' is available.
-#if HIPCUB_HAS_INCLUDE(<cuda/std/__internal/version.h>)
-    #include <cuda/std/__internal/version.h>
-    #include <cuda/std/__internal/namespaces.h> // for _CCCL_[BEGIN,END]_NAMESPACE_CUDA_STD
+#if HIPCUB_HAS_INCLUDE(<cuda/std/version>)
+    #include <cuda/std/version>
     // If version matches.
     #if defined(_LIBCUDACXX_CUDA_API_VERSION) && (_LIBCUDACXX_CUDA_API_VERSION >= _HIPCUB_REQUIRED_LIBCXX_VERSION)
         #define _HIPCUB_LIBCXX_INCLUDE(LIB) _HIPCUB_STRINGIFY(cuda/LIB)
@@ -71,14 +70,11 @@
         #define _HIPCUB_STD _HIPCUB_LIBCXX::std
         #define _HIPCUB_STD_EXEC _HIPCUB_STD::execution
         #define _HIPCUB_HAS_DEVICE_SYSTEM_STD 1
-        #define _HIPCUB_STD_NAMESPACE_BEGIN _CCCL_BEGIN_NAMESPACE_CUDA_STD
-        #define _HIPCUB_STD_NAMESPACE_END _CCCL_END_NAMESPACE_CUDA_STD
     #endif
 #endif
 // Otherwise, if the '::hip::std' namespace from 'libhipcxx' is available.
-#if !defined(_HIPCUB_HAS_DEVICE_SYSTEM_STD) && HIPCUB_HAS_INCLUDE(<hip/std/__internal/version.h>)
-    #include <hip/std/__internal/version.h>
-    #include <cuda/std/__internal/namespaces.h> // for _CCCL_[BEGIN,END]_NAMESPACE_CUDA_STD
+#if !defined(_HIPCUB_HAS_DEVICE_SYSTEM_STD) && HIPCUB_HAS_INCLUDE(<hip/std/version>)
+    #include <hip/std/version>
     // If version matches and '_CUDA_VSTD' is available.
     #if defined(_LIBCUDACXX_CUDA_API_VERSION) && (_LIBCUDACXX_CUDA_API_VERSION >= _HIPCUB_REQUIRED_LIBCXX_VERSION)
         #define _HIPCUB_LIBCXX_INCLUDE(LIB) _HIPCUB_STRINGIFY(hip/LIB)
@@ -89,8 +85,6 @@
         #define _HIPCUB_STD _HIPCUB_LIBCXX::std
         #define _HIPCUB_STD_EXEC _HIPCUB_STD::execution
         #define _HIPCUB_HAS_DEVICE_SYSTEM_STD 1
-        #define _HIPCUB_STD_NAMESPACE_BEGIN _CCCL_BEGIN_NAMESPACE_CUDA_STD
-        #define _HIPCUB_STD_NAMESPACE_END _CCCL_END_NAMESPACE_CUDA_STD
     #endif
 #endif
 

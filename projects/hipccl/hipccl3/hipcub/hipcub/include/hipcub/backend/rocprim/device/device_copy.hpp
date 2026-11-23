@@ -47,7 +47,7 @@ namespace detail
 {
 template<typename MappingLhsType, typename MappingRhsType>
 [[nodiscard]]
-HIPCUB_HOST
+_CCCL_HOST
 bool have_same_strides(const MappingLhsType& mapping_lhs, const MappingRhsType& mapping_rhs)
 {
     static_assert(MappingLhsType::extents_type::rank() == MappingRhsType::extents_type::rank(),
@@ -72,14 +72,14 @@ struct copy_mdspan_t
     MdspanIn  mdspan_in;
     MdspanOut mdspan_out;
 
-    HIPCUB_HOST_DEVICE
+    _CCCL_HOST_DEVICE
     copy_mdspan_t(MdspanIn mdspan_in, MdspanOut mdspan_out)
         : mdspan_in{mdspan_in}, mdspan_out{mdspan_out}
     {}
 
     template<typename Idx, typename... Indices>
-  HIPCUB_DEVICE
-    HIPCUB_FORCEINLINE void operator()(Idx, Indices... indices)
+  _CCCL_DEVICE
+    _CCCL_FORCEINLINE void operator()(Idx, Indices... indices)
     {
         mdspan_out(indices...) = mdspan_in(indices...);
     }
@@ -95,9 +95,9 @@ template<typename T_In,
          typename A_Out>
 [[nodiscard]]
 HIPCUB_RUNTIME_FUNCTION
-HIPCUB_FORCEINLINE hipError_t copy(_HIPCUB_STD::mdspan<T_In, E_In, L_In, A_In>     mdspan_in,
-                                   _HIPCUB_STD::mdspan<T_Out, E_Out, L_Out, A_Out> mdspan_out,
-                                   hipStream_t                                     stream)
+_CCCL_FORCEINLINE hipError_t copy(_HIPCUB_STD::mdspan<T_In, E_In, L_In, A_In>     mdspan_in,
+                                  _HIPCUB_STD::mdspan<T_Out, E_Out, L_Out, A_Out> mdspan_out,
+                                  hipStream_t                                     stream)
 {
     if(mdspan_in.is_exhaustive() && mdspan_out.is_exhaustive() && mdspan_in.is_unique()
        && mdspan_out.is_unique()
@@ -159,14 +159,14 @@ struct DeviceCopy
              _HIPCUB_STD::mdspan<T_Out, Extents_Out, Layout_Out, Accessor_Out> mdspan_out,
              hipStream_t                                                       stream = nullptr)
     {
-        HIPCUB_ASSERT(mdspan_in.extents() == mdspan_out.extents(),
-                      "input and output mdspan extents must be equal");
+        _CCCL_ASSERT(mdspan_in.extents() == mdspan_out.extents(),
+                     "input and output mdspan extents must be equal");
         if(mdspan_in.size() != 0)
         {
-            HIPCUB_ASSERT(mdspan_in.data_handle() != nullptr,
-                          "input mdspan data handle must not be nullptr if the size is not 0");
-            HIPCUB_ASSERT(mdspan_out.data_handle() != nullptr,
-                          "output mdspan data handle must not be nullptr if the size is not 0");
+            _CCCL_ASSERT(mdspan_in.data_handle() != nullptr,
+                         "input mdspan data handle must not be nullptr if the size is not 0");
+            _CCCL_ASSERT(mdspan_out.data_handle() != nullptr,
+                         "output mdspan data handle must not be nullptr if the size is not 0");
             auto in_start  = mdspan_in.data_handle();
             auto out_start = mdspan_out.data_handle();
             [[maybe_unused]]
@@ -175,8 +175,8 @@ struct DeviceCopy
             [[maybe_unused]]
             auto out_end
                 = out_start + mdspan_out.mapping().required_span_size();
-            HIPCUB_ASSERT((in_end <= out_start) || (out_end <= in_start),
-                          "input and output mdspan data ranges must not overlap");
+            _CCCL_ASSERT((in_end <= out_start) || (out_end <= in_start),
+                         "input and output mdspan data ranges must not overlap");
         }
         if(d_temp_storage == nullptr)
         {

@@ -26,9 +26,6 @@
 
 #include <cub/thread/thread_store.cuh> // CUB thread store
 
-#include <cuda/std/cstdint> // IWYU pragma: export
-#include <cuda/std/type_traits> // IWYU pragma: export
-
 BEGIN_HIPCUB_NAMESPACE
 
 enum CacheStoreModifier
@@ -48,15 +45,17 @@ struct cub_cache_store_modifier_map
 };
 
 template<typename T, typename Fundamental>
-HIPCUB_DEVICE
-HIPCUB_FORCEINLINE void ThreadStoreVolatilePtr(T* ptr, T val, Fundamental /*is_fundamental*/)
+HIPCUB_DEPRECATED_BECAUSE("Use ThreadStore<STORE_VOLATILE>(ptr, val) instead")
+_CCCL_DEVICE
+_CCCL_FORCEINLINE void ThreadStoreVolatilePtr(T* ptr, T val, Fundamental /*is_fundamental*/)
 {
     ::cub::ThreadStore<::cub::STORE_VOLATILE>(ptr, val);
 }
 
 template<int MODIFIER, typename T>
-HIPCUB_DEVICE
-HIPCUB_FORCEINLINE void ThreadStore(T* ptr,
+HIPCUB_DEPRECATED_BECAUSE("Use ThreadStore<MODIFIER>(ptr, val) instead")
+_CCCL_DEVICE
+_CCCL_FORCEINLINE void ThreadStore(T* ptr,
                                     T  val,
                                     _HIPCUB_STD::integral_constant<int, MODIFIER> /*modifier*/,
                                     _HIPCUB_STD::true_type /*is_pointer*/)
@@ -65,8 +64,9 @@ HIPCUB_FORCEINLINE void ThreadStore(T* ptr,
 }
 
 template<int MODIFIER, typename OutputIteratorT, typename T>
-HIPCUB_DEVICE
-HIPCUB_FORCEINLINE void ThreadStore(OutputIteratorT itr,
+HIPCUB_DEPRECATED_BECAUSE("Use ThreadStore<MODIFIER>(ptr, val) instead")
+_CCCL_DEVICE
+_CCCL_FORCEINLINE void ThreadStore(OutputIteratorT itr,
                                     T               val,
                                     _HIPCUB_STD::integral_constant<int, MODIFIER> /*modifier*/,
                                     _HIPCUB_STD::false_type /*is_pointer*/)
@@ -77,14 +77,11 @@ HIPCUB_FORCEINLINE void ThreadStore(OutputIteratorT itr,
                           _HIPCUB_STD::true_type{});
 }
 
-template<CacheStoreModifier MODIFIER = STORE_DEFAULT, typename OutputIteratorT, typename T>
-HIPCUB_DEVICE
-HIPCUB_FORCEINLINE void ThreadStore(OutputIteratorT itr, T val)
+template<CacheStoreModifier MODIFIER, typename OutputIteratorT, typename T>
+_CCCL_DEVICE
+_CCCL_FORCEINLINE void ThreadStore(OutputIteratorT itr, T val)
 {
-    ThreadStore(itr,
-                val,
-                _HIPCUB_STD::integral_constant<int, MODIFIER>{},
-                _HIPCUB_STD::bool_constant<_HIPCUB_STD::is_pointer<OutputIteratorT>::value>());
+    ::cub::ThreadStore<cub_cache_store_modifier_map<MODIFIER>::value>(itr, val);
 }
 
 namespace detail
@@ -94,8 +91,8 @@ template<int COUNT, int MAX>
 struct iterate_thread_store
 {
     template<CacheStoreModifier MODIFIER, typename T>
-    static HIPCUB_DEVICE
-    HIPCUB_FORCEINLINE void Store(T* ptr, T* vals)
+    static _CCCL_DEVICE
+    _CCCL_FORCEINLINE void Store(T* ptr, T* vals)
     {
         ThreadStore<MODIFIER>(ptr + COUNT,
                               vals[COUNT],
@@ -105,8 +102,8 @@ struct iterate_thread_store
     }
 
     template<typename OutputIteratorT, typename T>
-    static HIPCUB_DEVICE
-    HIPCUB_FORCEINLINE void Dereference(OutputIteratorT ptr, T* vals)
+    static _CCCL_DEVICE
+    _CCCL_FORCEINLINE void Dereference(OutputIteratorT ptr, T* vals)
     {
         ptr[COUNT] = vals[COUNT];
         iterate_thread_store<COUNT + 1, MAX>::Dereference(ptr, vals);
@@ -117,13 +114,13 @@ template<int MAX>
 struct iterate_thread_store<MAX, MAX>
 {
     template<CacheStoreModifier MODIFIER, typename T>
-    static HIPCUB_DEVICE
-    HIPCUB_FORCEINLINE void Store(T* /*ptr*/, T* /*vals*/)
+    static _CCCL_DEVICE
+    _CCCL_FORCEINLINE void Store(T* /*ptr*/, T* /*vals*/)
     {}
 
     template<typename OutputIteratorT, typename T>
-    static HIPCUB_DEVICE
-    HIPCUB_FORCEINLINE void Dereference(OutputIteratorT /*ptr*/, T* /*vals*/)
+    static _CCCL_DEVICE
+    _CCCL_FORCEINLINE void Dereference(OutputIteratorT /*ptr*/, T* /*vals*/)
     {}
 };
 

@@ -29,7 +29,7 @@ struct op_t
 {
     unsigned int* d_count;
 
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     void          operator()(T i)
     {
         // The data is non zero so atomic will never be activated.

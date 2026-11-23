@@ -15,6 +15,7 @@
  *  limitations under the License.
  */
 
+#include <thrust/execution_policy.h>
 #include <thrust/iterator/constant_iterator.h>
 #include <thrust/iterator/counting_iterator.h>
 #include <thrust/iterator/retag.h>
@@ -194,7 +195,7 @@ TYPED_TEST(ReduceIntoIntegerTests, TestReduceIntoWithOperator)
       thrust::reduce_into(h_data.begin(), h_data.end(), h_result.begin(), init, plus_mod_10<T>());
       thrust::reduce_into(d_data.begin(), d_data.end(), d_result.begin(), init, plus_mod_10<T>());
 
-      ASSERT_EQ(h_result, d_result);
+      ASSERT_EQ(h_result[0], d_result[0]);
     }
   }
 }
@@ -262,4 +263,111 @@ TYPED_TEST(ReduceIntoPrimitiveTests, TestReduceIntoCountingIterator)
   {
     ASSERT_EQ(h_result[0], d_result[0]);
   }
+}
+
+template <typename ExecutionPolicy, typename InputIter, typename OutputIter, typename T>
+__global__ THRUST_HIP_LAUNCH_BOUNDS_DEFAULT void
+reduce_into_kernel(ExecutionPolicy exec, InputIter first, InputIter last, OutputIter result, T init)
+{
+  if (threadIdx.x == 0)
+  {
+    thrust::reduce_into(exec, first, last, result, init);
+  }
+}
+
+template <typename T, typename ExecutionPolicy>
+void TestReduceIntoDevice(ExecutionPolicy exec)
+{
+  for (auto size : get_sizes())
+  {
+    SCOPED_TRACE(testing::Message() << "with size= " << size);
+
+    for (auto seed : get_seeds())
+    {
+      SCOPED_TRACE(testing::Message() << "with seed= " << seed);
+
+      thrust::host_vector<T> h_data   = get_random_data<T>(size, 0, 15, seed);
+      thrust::device_vector<T> d_data = h_data;
+
+      thrust::host_vector<T> h_result(1);
+      thrust::device_vector<T> d_result(1);
+
+      T init = 13;
+
+      thrust::reduce_into(h_data.begin(), h_data.end(), h_result.begin(), init);
+
+      hipLaunchKernelGGL(
+        reduce_into_kernel,
+        dim3(1, 1, 1),
+        dim3(128, 1, 1),
+        0,
+        0,
+        exec,
+        d_data.begin(),
+        d_data.end(),
+        d_result.begin(),
+        init);
+      HIP_CHECK(hipGetLastError());
+      HIP_CHECK(hipDeviceSynchronize());
+
+      ASSERT_EQ(h_result[0], d_result[0]);
+    }
+  }
+}
+
+TEST(ReduceIntoTests, TestReduceIntoDeviceSeq)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  TestReduceIntoDevice<int>(thrust::seq);
+}
+
+TEST(ReduceIntoTests, TestReduceIntoDeviceDevice)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  TestReduceIntoDevice<int>(thrust::hip::par);
+}
+
+template <typename ExecutionPolicy>
+void TestReduceIntoHipStreams(ExecutionPolicy policy)
+{
+  using Vector = thrust::device_vector<int>;
+
+  Vector v = {1, -2, 3};
+
+  Vector o(1);
+
+  hipStream_t s;
+  HIP_CHECK(hipStreamCreate(&s));
+
+  auto streampolicy = policy.on(s);
+
+  // no initializer
+  thrust::reduce_into(streampolicy, v.begin(), v.end(), o.begin());
+
+  HIP_CHECK(hipStreamSynchronize(s));
+  ASSERT_EQ(o[0], 2);
+
+  // with initializer
+  thrust::reduce_into(streampolicy, v.begin(), v.end(), o.begin(), 10);
+
+  HIP_CHECK(hipStreamSynchronize(s));
+  ASSERT_EQ(o[0], 12);
+
+  HIP_CHECK(hipStreamDestroy(s));
+}
+
+TEST(ReduceIntoTests, TestReduceIntoHipStreamsSync)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  TestReduceIntoHipStreams(thrust::hip::par);
+}
+
+TEST(ReduceIntoTests, TestReduceIntoHipStreamsNoSync)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  TestReduceIntoHipStreams(thrust::hip::par_nosync);
 }

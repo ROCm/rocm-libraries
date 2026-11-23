@@ -309,6 +309,25 @@ public:
     static constexpr bool value = is_tuple_of_references::is_tuple_of_references_impl<0>();
 };
 
+template<class T>
+struct is_any_void : std::is_void<T>
+{};
+
+template<class... Ts>
+struct is_any_void<::rocprim::tuple<Ts...>> : std::disjunction<std::is_void<Ts>...>
+{};
+
+template<class T>
+struct is_any_reference_void
+{
+    static_assert(sizeof(T) == 0, "is_any_reference_void is only implemented for rocprim::tuple");
+};
+
+template<class... Ts>
+struct is_any_reference_void<::rocprim::tuple<Ts...>>
+    : is_any_void<::rocprim::tuple<typename std::iterator_traits<Ts>::reference...>>
+{};
+
 template<class Tuple, class Function, size_t... Indices>
 ROCPRIM_HOST_DEVICE
 inline void for_each_in_tuple_impl(Tuple&& t, Function&& f, ::rocprim::index_sequence<Indices...>)

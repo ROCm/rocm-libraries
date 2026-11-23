@@ -31,5 +31,6 @@ API reference for rocPRIM device-level operations.
    * :ref:`dev-topk`
    * :ref:`dev-partial_sort`
    * :ref:`dev-find_first_of`
+   * :ref:`dev-find_if`
    * :ref:`dev-find_end`
    * :ref:`dev-search`

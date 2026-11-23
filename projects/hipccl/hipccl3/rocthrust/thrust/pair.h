@@ -1,19 +1,6 @@
-/*
- *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright (c) 2024-2026, Advanced Micro Devices, Inc.  All rights reserved.
- *
- *  Licensed under the Apache License, Version 2.0 (the "License");
- *  you may not use this file except in compliance with the License.
- *  You may obtain a copy of the License at
- *
- *      http://www.apache.org/licenses/LICENSE-2.0
- *
- *  Unless required by applicable law or agreed to in writing, software
- *  distributed under the License is distributed on an "AS IS" BASIS,
- *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- *  See the License for the specific language governing permissions and
- *  limitations under the License.
- */
+// SPDX-FileCopyrightText: Copyright (c) 2008-2013, NVIDIA Corporation. All rights reserved.
+// SPDX-FileCopyrightText: Modifications Copyright (c) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
 
 /*! \file pair.h
  *  \brief A type encapsulating a heterogeneous pair of elements
@@ -52,6 +39,10 @@ THRUST_NAMESPACE_BEGIN
  *
  *  \tparam N This parameter selects the member of interest.
  *  \tparam T A \c pair type of interest.
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
  */
 #ifdef THRUST_DOXYGEN_INVOKED // Provide a fake alias for doxygen
 template <size_t N, class T>
@@ -65,6 +56,10 @@ using _THRUST_STD::tuple_element;
  *  in its nested data member, \c value.
  *
  *  \tparam Pair A \c pair type of interest.
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
  */
 #ifdef THRUST_DOXYGEN_INVOKED // Provide a fake alias for doxygen
 template <class T>
@@ -83,6 +78,10 @@ using _THRUST_STD::tuple_size;
  *  \tparam T2 The type of \p pair's second object type.  There are no
  *          requirements on the type of \p T2. <tt>T2</tt>'s type is
  *          provided by <tt>pair::second_type</tt>.
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
  */
 #ifdef THRUST_DOXYGEN_INVOKED // Provide a fake alias for doxygen
 template <class T, class U>

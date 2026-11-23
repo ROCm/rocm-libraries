@@ -1,18 +1,6 @@
-/*
- *  Copyright 2008-2013 NVIDIA Corporation
- *
- *  Licensed under the Apache License, Version 2.0 (the "License");
- *  you may not use this file except in compliance with the License.
- *  You may obtain a copy of the License at
- *
- *      http://www.apache.org/licenses/LICENSE-2.0
- *
- *  Unless required by applicable law or agreed to in writing, software
- *  distributed under the License is distributed on an "AS IS" BASIS,
- *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- *  See the License for the specific language governing permissions and
- *  limitations under the License.
- */
+// SPDX-FileCopyrightText: Copyright (c) 2008-2013, NVIDIA Corporation. All rights reserved.
+// SPDX-FileCopyrightText: Modifications Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
 
 #pragma once
 
@@ -26,13 +14,14 @@
 #  pragma system_header
 #endif // no system header
 
-#include <thrust/detail/allocator/allocator_traits.h>
+#include <thrust/detail/allocator/allocator_system.h>
 #include <thrust/detail/type_traits.h>
 #include <thrust/detail/type_traits/pointer_traits.h>
 #include <thrust/for_each.h>
 #include <thrust/uninitialized_fill.h>
 
 #include _THRUST_STD_INCLUDE(__type_traits/is_trivially_default_constructible.h)
+#include _THRUST_STD_INCLUDE(__memory/allocator_traits.h)
 
 THRUST_NAMESPACE_BEGIN
 namespace detail
@@ -45,7 +34,7 @@ struct construct1_via_allocator
   template <typename T>
   inline THRUST_HOST_DEVICE void operator()(T& x)
   {
-    allocator_traits<Allocator>::construct(a, &x);
+    _THRUST_STD::allocator_traits<Allocator>::construct(a, &x);
   }
 };
 
@@ -53,8 +42,7 @@ struct construct1_via_allocator
 // does something interesting
 template <typename Allocator, typename T>
 inline constexpr bool needs_default_construct_via_allocator =
-  allocator_traits_detail::has_member_construct1<Allocator, T>::value
-  || !_THRUST_STD::is_trivially_default_constructible_v<T>;
+  _THRUST_STD::__has_construct<Allocator, T*> || !_THRUST_STD::is_trivially_default_constructible_v<T>;
 
 // we know that std::allocator::construct's only effect is to call T's
 // default constructor, so we needn't use it for default construction

@@ -52,6 +52,7 @@
 // Device
 #include "device/device_adjacent_difference.hpp"
 #include "device/device_copy.hpp"
+#include "device/device_find.hpp"
 #include "device/device_for.hpp"
 #include "device/device_histogram.hpp"
 #include "device/device_memcpy.hpp"
@@ -64,6 +65,7 @@
 #include "device/device_scan.hpp"
 #include "device/device_segmented_radix_sort.hpp"
 #include "device/device_segmented_reduce.hpp"
+#include "device/device_segmented_scan.hpp"
 #include "device/device_segmented_sort.hpp"
 #include "device/device_select.hpp"
 #include "device/device_topk.hpp"

@@ -30,6 +30,14 @@
 #  endif // THRUST_NO_EXCEPTIONS
 #endif
 
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+// TODO(libhipcxx): libhipcxx only exports __throw_runtime_error as a legacy
+// (deprecated) symbol through this forwarding header; include it so the
+// using-declaration below resolves. Drop this alongside the ::internal
+// migration once libhipcxx provides __throw_runtime_error unconditionally.
+#  include _THRUST_STD_INCLUDE(detail/libcxx/include/stdexcept)
+#endif
+
 namespace internal
 {
 

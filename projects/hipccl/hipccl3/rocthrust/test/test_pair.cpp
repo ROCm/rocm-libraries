@@ -25,10 +25,6 @@
 
 #include _THRUST_STD_INCLUDE(type_traits)
 
-#if !_THRUST_HAS_DEVICE_SYSTEM_STD
-#  include <utility>
-#endif
-
 TESTS_DEFINE(PairTests, NumericalTestsParams);
 TYPED_TEST(PairTests, TestTriviallyCopyable)
 {
@@ -275,8 +271,8 @@ TYPED_TEST(PairTests, TestPairGet)
 
     thrust::pair<T, T> p(data[0], data[1]);
 
-    ASSERT_EQ(data[0], thrust::get<0>(p));
-    ASSERT_EQ(data[1], thrust::get<1>(p));
+    ASSERT_EQ(data[0], _THRUST_STD::get<0>(p));
+    ASSERT_EQ(data[1], _THRUST_STD::get<1>(p));
   }
 }
 

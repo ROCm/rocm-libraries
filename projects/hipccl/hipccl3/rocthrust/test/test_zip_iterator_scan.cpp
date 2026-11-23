@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -29,8 +29,8 @@ struct TuplePlus
 {
   THRUST_HOST_DEVICE Tuple operator()(Tuple x, Tuple y) const
   {
-    using namespace thrust;
-    return make_tuple(get<0>(x) + get<0>(y), get<1>(x) + get<1>(y));
+    return _THRUST_STD::make_tuple(
+      _THRUST_STD::get<0>(x) + _THRUST_STD::get<0>(y), _THRUST_STD::get<1>(x) + _THRUST_STD::get<1>(y));
   }
 }; // end SumTuple
 
@@ -57,7 +57,7 @@ TYPED_TEST(ZipIteratorScanVariablesTests, TestZipIteratorScan)
       device_vector<T> d_data0 = h_data0;
       device_vector<T> d_data1 = h_data1;
 
-      using Tuple = tuple<T, T>;
+      using Tuple = _THRUST_STD::tuple<T, T>;
 
       host_vector<Tuple> h_result(size);
       device_vector<Tuple> d_result(size);
@@ -76,8 +76,8 @@ TYPED_TEST(ZipIteratorScanVariablesTests, TestZipIteratorScan)
       host_vector<Tuple> h_result_d(d_result);
       for (size_t i = 0; i < h_result.size(); ++i)
       {
-        test_equality(thrust::get<0>(h_result[i]), thrust::get<0>(h_result_d[i]), i);
-        test_equality(thrust::get<1>(h_result[i]), thrust::get<1>(h_result_d[i]), i);
+        test_equality(_THRUST_STD::get<0>(h_result[i]), _THRUST_STD::get<0>(h_result_d[i]), i);
+        test_equality(_THRUST_STD::get<1>(h_result[i]), _THRUST_STD::get<1>(h_result_d[i]), i);
       }
 
       // exclusive_scan (tuple output)
@@ -85,19 +85,19 @@ TYPED_TEST(ZipIteratorScanVariablesTests, TestZipIteratorScan)
         make_zip_iterator(h_data0.begin(), h_data1.begin()),
         make_zip_iterator(h_data0.end(), h_data1.end()),
         h_result.begin(),
-        make_tuple<T, T>(0, 0),
+        _THRUST_STD::make_tuple<T, T>(0, 0),
         TuplePlus<Tuple>());
       thrust::exclusive_scan(
         make_zip_iterator(d_data0.begin(), d_data1.begin()),
         make_zip_iterator(d_data0.end(), d_data1.end()),
         d_result.begin(),
-        make_tuple<T, T>(0, 0),
+        _THRUST_STD::make_tuple<T, T>(0, 0),
         TuplePlus<Tuple>());
       h_result_d = d_result;
       for (size_t i = 0; i < h_result.size(); ++i)
       {
-        test_equality(thrust::get<0>(h_result[i]), thrust::get<0>(h_result_d[i]), i);
-        test_equality(thrust::get<1>(h_result[i]), thrust::get<1>(h_result_d[i]), i);
+        test_equality(_THRUST_STD::get<0>(h_result[i]), _THRUST_STD::get<0>(h_result_d[i]), i);
+        test_equality(_THRUST_STD::get<1>(h_result[i]), _THRUST_STD::get<1>(h_result_d[i]), i);
       }
 
       host_vector<T> h_result0(size);
@@ -124,13 +124,13 @@ TYPED_TEST(ZipIteratorScanVariablesTests, TestZipIteratorScan)
         make_zip_iterator(h_data0.begin(), h_data1.begin()),
         make_zip_iterator(h_data0.end(), h_data1.end()),
         make_zip_iterator(h_result0.begin(), h_result1.begin()),
-        make_tuple<T, T>(0, 0),
+        _THRUST_STD::make_tuple<T, T>(0, 0),
         TuplePlus<Tuple>());
       thrust::exclusive_scan(
         make_zip_iterator(d_data0.begin(), d_data1.begin()),
         make_zip_iterator(d_data0.end(), d_data1.end()),
         make_zip_iterator(d_result0.begin(), d_result1.begin()),
-        make_tuple<T, T>(0, 0),
+        _THRUST_STD::make_tuple<T, T>(0, 0),
         TuplePlus<Tuple>());
       test_equality_scan(h_result0, d_result0);
       test_equality_scan(h_result1, d_result1);

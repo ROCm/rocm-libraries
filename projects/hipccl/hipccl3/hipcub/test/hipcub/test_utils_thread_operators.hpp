@@ -38,35 +38,43 @@ struct ExtendedFloatBoolOp
 {
     BoolOpT eq_op;
 
-    HIPCUB_HOST_DEVICE inline ExtendedFloatBoolOp() {}
+    _CCCL_HOST_DEVICE
+    inline ExtendedFloatBoolOp()
+    {}
 
     template<class T>
-    HIPCUB_HOST_DEVICE bool operator()(T a, T b) const
+    _CCCL_HOST_DEVICE
+    bool operator()(T a, T b) const
     {
         return eq_op(a.raw(), b.raw());
     }
 
-    HIPCUB_HOST_DEVICE bool operator()(float a, float b) const
+    _CCCL_HOST_DEVICE
+    bool operator()(float a, float b) const
     {
         return eq_op(a, b);
     }
 
-    HIPCUB_HOST_DEVICE bool operator()(test_utils::half a, test_utils::half b) const
+    _CCCL_HOST_DEVICE
+    bool operator()(test_utils::half a, test_utils::half b) const
     {
         return this->operator()(test_utils::native_half(a), test_utils::native_half(b));
     }
 
-    HIPCUB_HOST_DEVICE bool operator()(test_utils::bfloat16 a, test_utils::bfloat16 b) const
+    _CCCL_HOST_DEVICE
+    bool operator()(test_utils::bfloat16 a, test_utils::bfloat16 b) const
     {
         return this->operator()(test_utils::native_bfloat16(a), test_utils::native_bfloat16(b));
     }
 
-    HIPCUB_HOST_DEVICE bool operator()(float a, test_utils::half b) const
+    _CCCL_HOST_DEVICE
+    bool operator()(float a, test_utils::half b) const
     {
         return this->operator()(a, float(b));
     }
 
-    HIPCUB_HOST_DEVICE bool operator()(float a, test_utils::bfloat16 b) const
+    _CCCL_HOST_DEVICE
+    bool operator()(float a, test_utils::bfloat16 b) const
     {
         return this->operator()(a, float(b));
     }
@@ -89,53 +97,58 @@ struct ExtendedFloatBinOp
 {
     BinOpT alg_op;
 
-    HIPCUB_HOST_DEVICE inline ExtendedFloatBinOp() {}
+    _CCCL_HOST_DEVICE
+    inline ExtendedFloatBinOp()
+    {}
 
     template<class T>
-    HIPCUB_HOST_DEVICE T operator()(T a, T b) const
+    _CCCL_HOST_DEVICE
+    T operator()(T a, T b) const
     {
         T result{};
         result.__x = alg_op(a.raw(), b.raw());
         return result;
     }
 
-    HIPCUB_HOST_DEVICE float operator()(float a, float b) const
+    _CCCL_HOST_DEVICE
+    float operator()(float a, float b) const
     {
         return alg_op(a, b);
     }
 
-    HIPCUB_HOST_DEVICE test_utils::half operator()(test_utils::half a, test_utils::half b) const
+    _CCCL_HOST_DEVICE
+    test_utils::half operator()(test_utils::half a, test_utils::half b) const
     {
         return test_utils::native_to_half(
             this->operator()(test_utils::native_half(a), test_utils::native_half(b)));
     }
 
-    HIPCUB_HOST_DEVICE test_utils::bfloat16 operator()(test_utils::bfloat16 a,
-                                                       test_utils::bfloat16 b) const
+    _CCCL_HOST_DEVICE
+    test_utils::bfloat16 operator()(test_utils::bfloat16 a, test_utils::bfloat16 b) const
     {
         return test_utils::native_to_bfloat16(
             this->operator()(test_utils::native_bfloat16(a), test_utils::native_bfloat16(b)));
     }
 
-    HIPCUB_HOST_DEVICE
+    _CCCL_HOST_DEVICE
     float operator()(test_utils::half a, float b) const
     {
         return this->operator()(float(a), b);
     }
 
-    HIPCUB_HOST_DEVICE
+    _CCCL_HOST_DEVICE
     float operator()(test_utils::bfloat16 a, float b) const
     {
         return this->operator()(float(a), b);
     }
 
-    HIPCUB_HOST_DEVICE
+    _CCCL_HOST_DEVICE
     float operator()(float a, test_utils::half b) const
     {
         return this->operator()(a, float(b));
     }
 
-    HIPCUB_HOST_DEVICE
+    _CCCL_HOST_DEVICE
     float operator()(float a, test_utils::bfloat16 b) const
     {
         return this->operator()(a, float(b));
@@ -153,7 +166,7 @@ struct ArgMax
                                   || std::is_same_v<T, test_utils::bfloat16>,
                               bool>
              = true>
-    HIPCUB_HOST_DEVICE __forceinline__
+    _CCCL_HOST_DEVICE __forceinline__
     hipcub::KeyValuePair<OffsetT, T> operator()(const hipcub::KeyValuePair<OffsetT, T>& a,
                                                 const hipcub::KeyValuePair<OffsetT, T>& b) const
     {
@@ -177,7 +190,7 @@ struct ArgMin
                                   || std::is_same_v<T, test_utils::bfloat16>,
                               bool>
              = true>
-    HIPCUB_HOST_DEVICE __forceinline__
+    _CCCL_HOST_DEVICE __forceinline__
     hipcub::KeyValuePair<OffsetT, T> operator()(const hipcub::KeyValuePair<OffsetT, T>& a,
                                                 const hipcub::KeyValuePair<OffsetT, T>& b) const
     {
@@ -200,12 +213,14 @@ struct CustomTestOp
 {
     BinaryOpT binary_op;
 
-    HIPCUB_HOST_DEVICE inline CustomTestOp() {}
+    _CCCL_HOST_DEVICE
+    inline CustomTestOp()
+    {}
 
     template<typename T, typename U>
-    HIPCUB_HOST_DEVICE inline constexpr auto operator()(test_utils::custom_test_type<T> t,
-                                                        test_utils::custom_test_type<U> u) const
-        -> decltype(auto)
+    _CCCL_HOST_DEVICE
+    inline constexpr auto operator()(test_utils::custom_test_type<T> t,
+                                     test_utils::custom_test_type<U> u) const -> decltype(auto)
     {
         using common_type = typename std::common_type<test_utils::custom_test_type<T>,
                                                       test_utils::custom_test_type<U>>::type;

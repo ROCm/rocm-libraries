@@ -422,6 +422,170 @@ TYPED_TEST(RocprimDeviceTransformTests, TernaryTransform)
     }
 }
 
+template<typename T, typename U, typename enable = void>
+struct binary_to_ternary_transform;
+
+template<typename T, typename U>
+struct binary_to_ternary_transform<
+    T,
+    U,
+    std::enable_if_t<!common::is_custom_type<T>::value
+                     && !test_utils::is_custom_test_array_type<T>::value>>
+{
+    ROCPRIM_HOST_DEVICE
+    auto operator()(T a, T b) const
+    {
+        return rocprim::tuple<U, U, U>{a + b, a * b, -a};
+    }
+};
+
+template<typename T, typename U>
+struct binary_to_ternary_transform<
+    T,
+    U,
+    std::enable_if_t<common::is_custom_type<T>::value
+                     || test_utils::is_custom_test_array_type<T>::value>>
+{
+    ROCPRIM_HOST_DEVICE
+    auto operator()(T a, T b) const
+    {
+        return rocprim::tuple<U, U, U>{a + b, a - b, a};
+    }
+};
+
+template<typename T, typename U, typename enable = void>
+struct binary_to_ternary_host_transform;
+
+template<typename T, typename U>
+struct binary_to_ternary_host_transform<
+    T,
+    U,
+    std::enable_if_t<!common::is_custom_type<T>::value
+                     && !test_utils::is_custom_test_array_type<T>::value>>
+{
+    ROCPRIM_HOST
+    auto operator()(T a, T b) const
+    {
+        return std::tuple<U, U, U>{a + b, a * b, -a};
+    }
+};
+
+template<typename T, typename U>
+struct binary_to_ternary_host_transform<
+    T,
+    U,
+    std::enable_if_t<common::is_custom_type<T>::value
+                     || test_utils::is_custom_test_array_type<T>::value>>
+{
+    ROCPRIM_HOST
+    auto operator()(T a, T b) const
+    {
+        return std::tuple<U, U, U>{a + b, a - b, a};
+    }
+};
+
+TYPED_TEST(RocprimDeviceTransformTests, BinaryToTernaryTransform)
+{
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
+    using T      = typename TestFixture::input_type;
+    using U      = typename TestFixture::output_type;
+    using TupleT = std::tuple<U, U, U>;
+
+    const bool debug_synchronous = TestFixture::debug_synchronous;
+    using Config                 = size_limit_config_t<TestFixture::size_limit>;
+
+    for(size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
+    {
+        unsigned int seed_value
+            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+        SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
+
+        for(auto size : test_utils::get_sizes(seed_value))
+        {
+            hipStream_t stream = 0; // default
+            if(TestFixture::use_graphs)
+            {
+                // Default stream does not support hipGraph stream capture, so create one
+                HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
+            }
+
+            SCOPED_TRACE(testing::Message() << "with size = " << size);
+
+            // Generate data
+            std::vector<T> input1
+                = test_utils::get_random_data_wrapped<T>(size, 1, 100, seed_value);
+            std::vector<T> input2
+                = test_utils::get_random_data_wrapped<T>(size, 1, 100, seed_value);
+
+            common::device_ptr<T> d_input1(input1);
+            common::device_ptr<T> d_input2(input2);
+            common::device_ptr<U> d_output1(size);
+            common::device_ptr<U> d_output2(size);
+            common::device_ptr<U> d_output3(size);
+
+            // Calculate expected results on host
+            std::vector<TupleT> expected(size, TupleT{0, 0, 0});
+
+            transform_nary(binary_to_ternary_host_transform<T, U>(),
+                           size,
+                           expected.begin(),
+                           input1.begin(),
+                           input2.begin());
+
+            test_utils::GraphHelper gHelper;
+            if(TestFixture::use_graphs)
+            {
+                gHelper.startStreamCapture(stream);
+            }
+
+            // Run
+            HIP_CHECK(rocprim::transform<Config>(
+                rocprim::tuple(d_input1.get(), d_input2.get()),
+                rocprim::tuple(d_output1.get(), d_output2.get(), d_output3.get()),
+                // test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_output.get()),
+                size,
+                binary_to_ternary_transform<T, U>(),
+                stream,
+                debug_synchronous));
+
+            if(TestFixture::use_graphs)
+            {
+                gHelper.createAndLaunchGraph(stream, true, false);
+            }
+
+            HIP_CHECK(hipGetLastError());
+            HIP_CHECK(hipDeviceSynchronize());
+
+            // Copy output to host
+            const auto output1 = d_output1.load();
+            const auto output2 = d_output2.load();
+            const auto output3 = d_output3.load();
+
+            // Check if output values are as expected
+            for(decltype(size) i = 0; i < size; ++i)
+            {
+                auto e = expected[i];
+
+                ASSERT_NO_FATAL_FAILURE(
+                    test_utils::assert_near(output1[i], std::get<0>(e), test_utils::precision<U>));
+                ASSERT_NO_FATAL_FAILURE(
+                    test_utils::assert_near(output2[i], std::get<1>(e), test_utils::precision<U>));
+                ASSERT_NO_FATAL_FAILURE(
+                    test_utils::assert_near(output3[i], std::get<2>(e), test_utils::precision<U>));
+            }
+
+            if(TestFixture::use_graphs)
+            {
+                gHelper.cleanupGraphHelper();
+                HIP_CHECK(hipStreamDestroy(stream));
+            }
+        }
+    }
+}
+
 template<class T>
 struct predicate_t
 {

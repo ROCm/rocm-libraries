@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -16,7 +16,7 @@
  */
 
 #include <thrust/binary_search.h>
-#include <thrust/detail/allocator/allocator_traits.h>
+#include <thrust/detail/allocator/allocator_system.h>
 #include <thrust/iterator/discard_iterator.h>
 #include <thrust/iterator/retag.h>
 #include <thrust/sequence.h>
@@ -33,7 +33,7 @@ template <class ExampleVector, typename NewType>
 struct vector_like
 {
   using alloc        = typename ExampleVector::allocator_type;
-  using alloc_traits = typename thrust::detail::allocator_traits<alloc>;
+  using alloc_traits = typename _THRUST_STD::allocator_traits<alloc>;
   using new_alloc    = typename alloc_traits::template rebind_alloc<NewType>;
   using type         = thrust::detail::vector_base<NewType, new_alloc>;
 };

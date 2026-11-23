@@ -53,7 +53,7 @@ public:
 struct custom_op1
 {
     template<class T>
-    HIPCUB_HOST_DEVICE
+    _CCCL_HOST_DEVICE
     T operator()(const T& a, const T& b) const
     {
         return a - b;
@@ -63,7 +63,7 @@ struct custom_op1
 struct custom_op2
 {
     template<class T>
-    HIPCUB_HOST_DEVICE
+    _CCCL_HOST_DEVICE
     T operator()(const T& a, const T& b) const
     {
         return (b + b) - a;

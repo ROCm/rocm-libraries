@@ -27,8 +27,8 @@
  *
  ******************************************************************************/
 
-#ifndef HIPCUB_DEVICE_PARTITION_HPP_
-#define HIPCUB_DEVICE_PARTITION_HPP_
+#ifndef _CCCL_DEVICE_PARTITION_HPP_
+#define _CCCL_DEVICE_PARTITION_HPP_
 
 #include <hip/hip_common.h>
 

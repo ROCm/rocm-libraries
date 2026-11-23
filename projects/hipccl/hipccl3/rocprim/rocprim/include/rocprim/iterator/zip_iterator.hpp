@@ -27,6 +27,7 @@
 
 #include "../config.hpp"
 #include "../detail/various.hpp"
+#include "../type_traits_functions.hpp"
 #include "../types/tuple.hpp"
 
 /// \addtogroup iteratormodule
@@ -44,6 +45,32 @@ template<class... Types>
 struct tuple_of_references<::rocprim::tuple<Types...>>
 {
     using type = ::rocprim::tuple<typename std::iterator_traits<Types>::reference...>;
+};
+
+// Reference-like struct that holds the underlying iterators tuple.
+// This proxy is assignable to ::rocprim::tuple<Us...> elements, and is necessary when any of
+// the iterators is only writeable (e.g. transform_output_iterator).
+template<class IteratorTuple>
+struct proxy_tuple_of_references
+{
+    IteratorTuple iters;
+
+    template<class... Us>
+    ROCPRIM_HOST_DEVICE
+    inline proxy_tuple_of_references& operator=(const ::rocprim::tuple<Us...>& others)
+    {
+        return assign_impl(others, std::index_sequence_for<Us...>{});
+    }
+
+private:
+    template<class... Us, std::size_t... Is>
+    ROCPRIM_HOST_DEVICE
+    inline proxy_tuple_of_references& assign_impl(const ::rocprim::tuple<Us...>& others,
+                                                  std::index_sequence<Is...>)
+    {
+        ((*rocprim::get<Is>(iters) = ::rocprim::get<Is>(others)), ...);
+        return *this;
+    }
 };
 
 template<class T>
@@ -131,7 +158,9 @@ public:
     ///
     /// The type of the tuple made of the reference types of the iterator
     /// types in the IteratorTuple argument.
-    using reference = typename detail::tuple_of_references<IteratorTuple>::type;
+    using reference = std::conditional_t<detail::is_any_reference_void<IteratorTuple>::value,
+                                         detail::proxy_tuple_of_references<IteratorTuple>,
+                                         typename detail::tuple_of_references<IteratorTuple>::type>;
     /// The type of the value that can be obtained by dereferencing the iterator.
     using value_type = typename detail::tuple_of_values<IteratorTuple>::type;
     /// \brief A pointer type of the type iterated over (\p value_type).
@@ -192,7 +221,14 @@ public:
     ROCPRIM_HOST_DEVICE inline
     reference operator*() const
     {
-        return detail::dereference_iterator_tuple<reference>(iterator_tuple_);
+        if constexpr(detail::is_any_reference_void<IteratorTuple>::value)
+        {
+            return reference{iterator_tuple_};
+        }
+        else
+        {
+            return detail::dereference_iterator_tuple<reference>(iterator_tuple_);
+        }
     }
 
     ROCPRIM_HOST_DEVICE

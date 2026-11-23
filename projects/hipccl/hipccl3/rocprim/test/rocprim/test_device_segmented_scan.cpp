@@ -120,7 +120,97 @@ struct RocprimDeviceSegmentedScanNameGenerator
 
 TYPED_TEST_SUITE(RocprimDeviceSegmentedScan, Params, RocprimDeviceSegmentedScanNameGenerator);
 
-TYPED_TEST(RocprimDeviceSegmentedScan, InclusiveScan)
+template<bool Exclusive,
+         bool WithInit,
+         class InputIterator,
+         class OutputIterator,
+         class InitValueType,
+         class BinaryFunction,
+         class... Offsets>
+auto invoke_segmented_scan(void*          temporary_storage,
+                           size_t&        storage_size,
+                           InputIterator  input,
+                           OutputIterator output,
+                           unsigned int   segments,
+                           const InitValueType /*initial_value*/,
+                           BinaryFunction scan_op,
+                           hipStream_t    stream,
+                           bool           debug_synchronous,
+                           Offsets... offsets) -> std::enable_if_t<!WithInit && !Exclusive, void>
+{
+    HIP_CHECK(rocprim::segmented_inclusive_scan(temporary_storage,
+                                                storage_size,
+                                                input,
+                                                output,
+                                                segments,
+                                                std::forward<Offsets>(offsets)...,
+                                                scan_op,
+                                                stream,
+                                                debug_synchronous));
+}
+
+template<bool Exclusive,
+         bool WithInit,
+         class InputIterator,
+         class OutputIterator,
+         class InitValueType,
+         class BinaryFunction,
+         class... Offsets>
+auto invoke_segmented_scan(void*               temporary_storage,
+                           size_t&             storage_size,
+                           InputIterator       input,
+                           OutputIterator      output,
+                           unsigned int        segments,
+                           const InitValueType initial_value,
+                           BinaryFunction      scan_op,
+                           hipStream_t         stream,
+                           bool                debug_synchronous,
+                           Offsets... offsets) -> std::enable_if_t<WithInit && !Exclusive, void>
+{
+    HIP_CHECK(rocprim::segmented_inclusive_scan(temporary_storage,
+                                                storage_size,
+                                                input,
+                                                output,
+                                                segments,
+                                                std::forward<Offsets>(offsets)...,
+                                                initial_value,
+                                                scan_op,
+                                                stream,
+                                                debug_synchronous));
+}
+
+template<bool Exclusive,
+         bool WithInit,
+         class InputIterator,
+         class OutputIterator,
+         class InitValueType,
+         class BinaryFunction,
+         class... Offsets>
+auto invoke_segmented_scan(void*               temporary_storage,
+                           size_t&             storage_size,
+                           InputIterator       input,
+                           OutputIterator      output,
+                           unsigned int        segments,
+                           const InitValueType initial_value,
+                           BinaryFunction      scan_op,
+                           hipStream_t         stream,
+                           bool                debug_synchronous,
+                           Offsets... offsets) -> std::enable_if_t<Exclusive, void>
+{
+    HIP_CHECK(rocprim::segmented_exclusive_scan(temporary_storage,
+                                                storage_size,
+                                                input,
+                                                output,
+                                                segments,
+                                                std::forward<Offsets>(offsets)...,
+                                                initial_value,
+                                                scan_op,
+                                                stream,
+                                                debug_synchronous));
+}
+
+template<typename TestFixture, bool WithInit = false, bool WithOutOffsets = false>
+void test_inclusive_scan()
 {
     int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
@@ -134,6 +224,9 @@ TYPED_TEST(RocprimDeviceSegmentedScan, InclusiveScan)
 
     constexpr bool use_identity_iterator = TestFixture::params::use_identity_iterator;
     const bool     debug_synchronous     = false;
+
+    const input_type init = input_type{TestFixture::params::init};
+    SCOPED_TRACE(testing::Message() << "with init = " << init);
 
     scan_op_type scan_op;
 
@@ -157,34 +250,47 @@ TYPED_TEST(RocprimDeviceSegmentedScan, InclusiveScan)
             = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
+        const offset_type output_pad
+            = WithOutOffsets ? test_utils::get_random_value<offset_type>(1, 100, seed_value) : 0;
+        SCOPED_TRACE(testing::Message() << "with output_pad = " << output_pad);
+
         for(size_t size : test_utils::get_sizes(seed_value))
         {
             SCOPED_TRACE(testing::Message() << "with size = " << size);
+            const size_t output_size = size + output_pad;
 
             // Generate data and calculate expected results
-            std::vector<output_type> values_expected(size);
+            std::vector<output_type> values_expected(output_size);
             std::vector<input_type>  values_input
                 = test_utils::get_random_data_wrapped<input_type>(size, 0, 100, seed_value);
 
             std::vector<offset_type> offsets;
+            std::vector<offset_type> output_offsets;
             std::vector<size_t>      sizes;
             unsigned int             segments_count     = 0;
             size_t                   offset             = 0;
             size_t                   max_segment_length = 0;
             while(offset < size)
             {
-                const size_t segment_length = segment_length_dis(gen);
+                const size_t segment_length = std::min(segment_length_dis(gen), size - offset);
                 sizes.push_back(segment_length);
                 offsets.push_back(offset);
 
-                const size_t end   = std::min(size, offset + segment_length);
-                max_segment_length = std::max(max_segment_length, end - offset);
+                const auto output_offset = offset + output_pad;
+                output_offsets.push_back(output_offset);
 
-                input_type aggregate    = values_input[offset];
-                values_expected[offset] = aggregate;
-                for(size_t i = offset + 1; i < end; i++)
+                const size_t end   = std::min(output_size, output_offset + segment_length);
+                max_segment_length = std::max(max_segment_length, end - output_offset);
+
+                input_type aggregate = values_input[offset];
+                if constexpr(WithInit)
                 {
-                    aggregate          = scan_op(aggregate, values_input[i]);
+                    aggregate = scan_op(init, aggregate);
+                }
+                values_expected[output_offset] = aggregate;
+                for(size_t i = output_offset + 1; i < end; i++)
+                {
+                    aggregate          = scan_op(aggregate, values_input[i - output_pad]);
                     values_expected[i] = aggregate;
                 }
 
@@ -192,13 +298,14 @@ TYPED_TEST(RocprimDeviceSegmentedScan, InclusiveScan)
                 offset += segment_length;
             }
             offsets.push_back(size);
+            output_offsets.push_back(output_size);
 
-            // intermediate results of inclusive scan are stored as input_type,
+            // intermediate results of inclusive scan are stored as decltype(init),
             // not as is_plus_op::value_type
             const float precision
                 = is_plus_op::value
                       ? std::max(test_utils::precision<typename is_plus_op::value_type>,
-                                 test_utils::precision<input_type>)
+                                 test_utils::precision<decltype(init)>)
                             * max_segment_length
                       : 0;
             if(precision > 0.5)
@@ -212,20 +319,49 @@ TYPED_TEST(RocprimDeviceSegmentedScan, InclusiveScan)
 
             common::device_ptr<input_type>  d_values_input(values_input);
             common::device_ptr<offset_type> d_offsets(offsets);
-            common::device_ptr<output_type> d_values_output(size);
+            common::device_ptr<offset_type> d_output_offsets(output_offsets);
+            common::device_ptr<output_type> d_values_output(output_size);
+            d_values_output.memset(0, 0, output_size * sizeof(output_type));
+
+            auto call = [&](void* d_temp_storage, size_t& temp_storage_bytes)
+            {
+                if constexpr(WithOutOffsets)
+                {
+                    invoke_segmented_scan<false /*Exclusive*/, WithInit>(
+                        d_temp_storage,
+                        temp_storage_bytes,
+                        d_values_input.get(),
+                        test_utils::wrap_in_identity_iterator<use_identity_iterator>(
+                            d_values_output.get()),
+                        segments_count,
+                        init,
+                        scan_op,
+                        stream,
+                        debug_synchronous,
+                        d_offsets.get(),
+                        d_offsets.get() + 1,
+                        d_output_offsets.get());
+                }
+                else
+                {
+                    invoke_segmented_scan<false /*Exclusive*/, WithInit>(
+                        d_temp_storage,
+                        temp_storage_bytes,
+                        d_values_input.get(),
+                        test_utils::wrap_in_identity_iterator<use_identity_iterator>(
+                            d_values_output.get()),
+                        segments_count,
+                        init,
+                        scan_op,
+                        stream,
+                        debug_synchronous,
+                        d_offsets.get(),
+                        d_offsets.get() + 1);
+                }
+            };
 
             size_t temporary_storage_bytes;
-            HIP_CHECK(rocprim::segmented_inclusive_scan(
-                nullptr,
-                temporary_storage_bytes,
-                d_values_input.get(),
-                test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_values_output.get()),
-                segments_count,
-                d_offsets.get(),
-                d_offsets.get() + 1,
-                scan_op,
-                stream,
-                debug_synchronous));
+            call(nullptr, temporary_storage_bytes);
 
             ASSERT_GT(temporary_storage_bytes, 0);
             common::device_ptr<void> d_temporary_storage(temporary_storage_bytes);
@@ -236,17 +372,7 @@ TYPED_TEST(RocprimDeviceSegmentedScan, InclusiveScan)
                 gHelper.startStreamCapture(stream);
             }
 
-            HIP_CHECK(rocprim::segmented_inclusive_scan(
-                d_temporary_storage.get(),
-                temporary_storage_bytes,
-                d_values_input.get(),
-                test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_values_output.get()),
-                segments_count,
-                d_offsets.get(),
-                d_offsets.get() + 1,
-                scan_op,
-                stream,
-                debug_synchronous));
+            call(d_temporary_storage.get(), temporary_storage_bytes);
 
             if(TestFixture::params::use_graphs)
             {
@@ -259,21 +385,27 @@ TYPED_TEST(RocprimDeviceSegmentedScan, InclusiveScan)
 
             if(size > 0)
             {
-                const float single_op_precision = precision / max_segment_length;
+                for(size_t i = 0; i < output_offsets[0]; ++i)
+                {
+                    ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(values_output[i], output_type{0}))
+                        << " with i = " << i;
+                }
 
-                size_t current_offset     = 0;
+                const float single_op_precision = precision / max_segment_length;
+                size_t      current_offset      = output_offsets[0];
                 size_t current_size_index = 0;
-                for(size_t i = 0; i < values_output.size(); ++i)
+                for(size_t i = output_offsets[0]; i < output_size; ++i)
                 {
                     if((i - current_offset) == sizes[current_size_index])
                     {
-                        current_offset += sizes[current_size_index];
                         ++current_size_index;
+                        current_offset = output_offsets[current_size_index];
                     }
                     ASSERT_NO_FATAL_FAILURE(
                         test_utils::assert_near(values_output[i],
                                                 values_expected[i],
-                                                single_op_precision * (i - current_offset)));
+                                                single_op_precision * (i - current_offset)))
+                        << " with i = " << i;
                 }
             }
 
@@ -290,7 +422,28 @@ TYPED_TEST(RocprimDeviceSegmentedScan, InclusiveScan)
     }
 }
 
-TYPED_TEST(RocprimDeviceSegmentedScan, ExclusiveScan)
+TYPED_TEST(RocprimDeviceSegmentedScan, InclusiveScan)
+{
+    test_inclusive_scan<TestFixture>();
+}
+
+TYPED_TEST(RocprimDeviceSegmentedScan, InclusiveScanOutputOffsets)
+{
+    test_inclusive_scan<TestFixture, false /*WithInit*/, true /*WithOutputOffsets*/>();
+}
+
+TYPED_TEST(RocprimDeviceSegmentedScan, InclusiveScanInit)
+{
+    test_inclusive_scan<TestFixture, true /*WithInit*/>();
+}
+
+TYPED_TEST(RocprimDeviceSegmentedScan, InclusiveScanInitOutputOffsets)
+{
+    test_inclusive_scan<TestFixture, true /*WithInit*/, true /*WithOutputOffsets*/>();
+}
+
+template<typename TestFixture, bool WithOutOffsets = false>
+void test_exclusive_scan()
 {
     int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
@@ -306,6 +459,7 @@ TYPED_TEST(RocprimDeviceSegmentedScan, ExclusiveScan)
     const bool     debug_synchronous     = false;
 
     const input_type init = input_type{TestFixture::params::init};
+    SCOPED_TRACE(testing::Message() << "with init = " << init);
 
     scan_op_type scan_op;
 
@@ -329,34 +483,43 @@ TYPED_TEST(RocprimDeviceSegmentedScan, ExclusiveScan)
             = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
+        const offset_type output_pad
+            = WithOutOffsets ? test_utils::get_random_value<offset_type>(1, 100, seed_value) : 0;
+        SCOPED_TRACE(testing::Message() << "with output_pad = " << output_pad);
+
         for(size_t size : test_utils::get_sizes(seed_value))
         {
             SCOPED_TRACE(testing::Message() << "with size = " << size);
+            const size_t output_size = size + output_pad;
 
             // Generate data and calculate expected results
-            std::vector<output_type> values_expected(size);
+            std::vector<output_type> values_expected(output_size);
             std::vector<input_type>  values_input
                 = test_utils::get_random_data_wrapped<input_type>(size, 0, 100, seed_value);
 
             std::vector<offset_type> offsets;
+            std::vector<offset_type> output_offsets;
             std::vector<size_t>      sizes;
             unsigned int             segments_count     = 0;
             size_t                   offset             = 0;
             size_t                   max_segment_length = 0;
             while(offset < size)
             {
-                const size_t segment_length = segment_length_dis(gen);
+                const size_t segment_length = std::min(segment_length_dis(gen), size - offset);
                 sizes.push_back(segment_length);
                 offsets.push_back(offset);
 
-                const size_t end   = std::min(size, offset + segment_length);
-                max_segment_length = std::max(max_segment_length, end - offset);
+                const auto output_offset = offset + output_pad;
+                output_offsets.push_back(output_offset);
+
+                const size_t end   = std::min(output_size, output_offset + segment_length);
+                max_segment_length = std::max(max_segment_length, end - output_offset);
 
                 input_type aggregate    = init;
-                values_expected[offset] = aggregate;
-                for(size_t i = offset + 1; i < end; i++)
+                values_expected[output_offset] = aggregate;
+                for(size_t i = output_offset + 1; i < end; i++)
                 {
-                    aggregate          = scan_op(aggregate, values_input[i - 1]);
+                    aggregate          = scan_op(aggregate, values_input[i - output_pad - 1]);
                     values_expected[i] = output_type(aggregate);
                 }
 
@@ -364,6 +527,7 @@ TYPED_TEST(RocprimDeviceSegmentedScan, ExclusiveScan)
                 offset += segment_length;
             }
             offsets.push_back(size);
+            output_offsets.push_back(output_size);
 
             // intermediate results of exclusive scan are stored as decltype(init),
             // not as is_plus_op::value_type
@@ -384,21 +548,49 @@ TYPED_TEST(RocprimDeviceSegmentedScan, ExclusiveScan)
 
             common::device_ptr<input_type>  d_values_input(values_input);
             common::device_ptr<offset_type> d_offsets(offsets);
-            common::device_ptr<output_type> d_values_output(size);
+            common::device_ptr<offset_type> d_output_offsets(output_offsets);
+            common::device_ptr<output_type> d_values_output(output_size);
+            d_values_output.memset(0, 0, output_size * sizeof(output_type));
+
+            auto call = [&](void* d_temp_storage, size_t& temp_storage_bytes)
+            {
+                if constexpr(WithOutOffsets)
+                {
+                    invoke_segmented_scan<true /*Exclusive*/, true /*WithInit*/>(
+                        d_temp_storage,
+                        temp_storage_bytes,
+                        d_values_input.get(),
+                        test_utils::wrap_in_identity_iterator<use_identity_iterator>(
+                            d_values_output.get()),
+                        segments_count,
+                        init,
+                        scan_op,
+                        stream,
+                        debug_synchronous,
+                        d_offsets.get(),
+                        d_offsets.get() + 1,
+                        d_output_offsets.get());
+                }
+                else
+                {
+                    invoke_segmented_scan<true /*Exclusive*/, true /*WithInit*/>(
+                        d_temp_storage,
+                        temp_storage_bytes,
+                        d_values_input.get(),
+                        test_utils::wrap_in_identity_iterator<use_identity_iterator>(
+                            d_values_output.get()),
+                        segments_count,
+                        init,
+                        scan_op,
+                        stream,
+                        debug_synchronous,
+                        d_offsets.get(),
+                        d_offsets.get() + 1);
+                }
+            };
 
             size_t temporary_storage_bytes;
-            HIP_CHECK(rocprim::segmented_exclusive_scan(
-                nullptr,
-                temporary_storage_bytes,
-                d_values_input.get(),
-                test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_values_output.get()),
-                segments_count,
-                d_offsets.get(),
-                d_offsets.get() + 1,
-                init,
-                scan_op,
-                stream,
-                debug_synchronous));
+            call(nullptr, temporary_storage_bytes);
 
             HIP_CHECK(hipDeviceSynchronize());
 
@@ -410,18 +602,7 @@ TYPED_TEST(RocprimDeviceSegmentedScan, ExclusiveScan)
                 gHelper.startStreamCapture(stream);
             }
 
-            HIP_CHECK(rocprim::segmented_exclusive_scan(
-                d_temporary_storage.get(),
-                temporary_storage_bytes,
-                d_values_input.get(),
-                test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_values_output.get()),
-                segments_count,
-                d_offsets.get(),
-                d_offsets.get() + 1,
-                init,
-                scan_op,
-                stream,
-                debug_synchronous));
+            call(d_temporary_storage.get(), temporary_storage_bytes);
 
             if(TestFixture::params::use_graphs)
             {
@@ -434,21 +615,27 @@ TYPED_TEST(RocprimDeviceSegmentedScan, ExclusiveScan)
 
             if(size > 0)
             {
-                const float single_op_precision = precision / max_segment_length;
+                for(size_t i = 0; i < output_offsets[0]; ++i)
+                {
+                    ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(values_output[i], output_type{0}))
+                        << " with i = " << i;
+                }
 
-                size_t current_offset     = 0;
+                const float single_op_precision = precision / max_segment_length;
+                size_t      current_offset      = output_offsets[0];
                 size_t current_size_index = 0;
-                for(size_t i = 0; i < values_output.size(); ++i)
+                for(size_t i = output_offsets[0]; i < output_size; ++i)
                 {
                     if((i - current_offset) == sizes[current_size_index])
                     {
-                        current_offset += sizes[current_size_index];
                         ++current_size_index;
+                        current_offset = output_offsets[current_size_index];
                     }
                     ASSERT_NO_FATAL_FAILURE(
                         test_utils::assert_near(values_output[i],
                                                 values_expected[i],
-                                                single_op_precision * (i - current_offset)));
+                                                single_op_precision * (i - current_offset)))
+                        << " with i = " << i;
                 }
             }
 
@@ -463,6 +650,16 @@ TYPED_TEST(RocprimDeviceSegmentedScan, ExclusiveScan)
     {
         HIP_CHECK(hipStreamDestroy(stream));
     }
+}
+
+TYPED_TEST(RocprimDeviceSegmentedScan, ExclusiveScan)
+{
+    test_exclusive_scan<TestFixture>();
+}
+
+TYPED_TEST(RocprimDeviceSegmentedScan, ExclusiveScanOutputOffsets)
+{
+    test_exclusive_scan<TestFixture, true /*WithOutputOffsets*/>();
 }
 
 TYPED_TEST(RocprimDeviceSegmentedScan, InclusiveScanUsingHeadFlags)
@@ -647,6 +844,7 @@ TYPED_TEST(RocprimDeviceSegmentedScan, ExclusiveScanUsingHeadFlags)
     const bool debug_synchronous = false;
 
     const input_type init = input_type{TestFixture::params::init};
+    SCOPED_TRACE(testing::Message() << "with init = " << init);
 
     // scan function
     scan_op_type scan_op;

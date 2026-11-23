@@ -97,8 +97,8 @@ void TestCopyToDiscardIteratorZipped()
   thrust::device_vector<T> d_output(5);
   thrust::discard_iterator<> reference(5);
 
-  using Tuple1 = thrust::tuple<thrust::discard_iterator<>, thrust::host_vector<T>::iterator>;
-  using Tuple2 = thrust::tuple<thrust::discard_iterator<>, thrust::device_vector<T>::iterator>;
+  using Tuple1 = _THRUST_STD::tuple<thrust::discard_iterator<>, thrust::host_vector<T>::iterator>;
+  using Tuple2 = _THRUST_STD::tuple<thrust::discard_iterator<>, thrust::device_vector<T>::iterator>;
 
   using ZipIterator1 = thrust::zip_iterator<Tuple1>;
   using ZipIterator2 = thrust::zip_iterator<Tuple2>;
@@ -117,8 +117,8 @@ void TestCopyToDiscardIteratorZipped()
 
   ASSERT_EQUAL(h_output, h_input);
   ASSERT_EQUAL(d_output, d_input);
-  ASSERT_EQUAL_QUIET(reference, thrust::get<0>(h_result.get_iterator_tuple()));
-  ASSERT_EQUAL_QUIET(reference, thrust::get<0>(d_result.get_iterator_tuple()));
+  ASSERT_EQUAL_QUIET(reference, _THRUST_STD::get<0>(h_result.get_iterator_tuple()));
+  ASSERT_EQUAL_QUIET(reference, _THRUST_STD::get<0>(d_result.get_iterator_tuple()));
 }
 DECLARE_UNITTEST(TestCopyToDiscardIteratorZipped);
 
@@ -566,8 +566,8 @@ void TestCopyConstantIteratorToZipIterator()
   Vector v1(3, T(0));
   Vector v2(3, T(0));
 
-  thrust::copy(thrust::make_constant_iterator(thrust::tuple<T, T>(4, 7)),
-               thrust::make_constant_iterator(thrust::tuple<T, T>(4, 7)) + v1.size(),
+  thrust::copy(thrust::make_constant_iterator(_THRUST_STD::tuple<T, T>(4, 7)),
+               thrust::make_constant_iterator(_THRUST_STD::tuple<T, T>(4, 7)) + v1.size(),
                thrust::make_zip_iterator(v1.begin(), v2.begin()));
 
   Vector ref1{4, 4, 4};

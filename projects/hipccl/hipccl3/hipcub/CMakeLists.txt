@@ -50,8 +50,8 @@ endif()
 set(VERSION_STRING "5.1.0")
 # Set the CCCL-compatible version.
 set(HIPCUB_CCCL_VERSION_MAJOR 3)
-set(HIPCUB_CCCL_VERSION_MINOR 2)
-set(HIPCUB_CCCL_VERSION_PATCH 1)
+set(HIPCUB_CCCL_VERSION_MINOR 3)
+set(HIPCUB_CCCL_VERSION_PATCH 4)
 # Set the minimum required rocPRIM version
 set(MIN_ROCPRIM_PACKAGE_VERSION "5.1.0" CACHE STRING "Minimum version of rocPRIM to search for when ROCPRIM_FETCH_METHOD is set to PACKAGE.")
 # Set the minimum required libhipcxx version

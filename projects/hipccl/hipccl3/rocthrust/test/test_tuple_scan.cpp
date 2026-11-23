@@ -17,7 +17,7 @@
 
 #include <thrust/scan.h>
 #include <thrust/transform.h>
-#include <thrust/tuple.h>
+#include _THRUST_STD_INCLUDE(tuple)
 
 #include "test_param_fixtures.hpp"
 #include "test_real_assertions.hpp"
@@ -43,18 +43,18 @@ struct SumTupleFunctor
   template <typename Tuple>
   THRUST_HOST_DEVICE Tuple operator()(const Tuple& lhs, const Tuple& rhs)
   {
-    using thrust::get;
+    using _THRUST_STD::get;
 
-    return thrust::make_tuple(get<0>(lhs) + get<0>(rhs), get<1>(lhs) + get<1>(rhs));
+    return _THRUST_STD::tuple(get<0>(lhs) + get<0>(rhs), get<1>(lhs) + get<1>(rhs));
   }
 };
 
 struct MakeTupleFunctor
 {
   template <typename T1, typename T2>
-  THRUST_HOST_DEVICE thrust::tuple<T1, T2> operator()(T1& lhs, T2& rhs)
+  THRUST_HOST_DEVICE _THRUST_STD::tuple<T1, T2> operator()(T1& lhs, T2& rhs)
   {
-    return thrust::make_tuple(lhs, rhs);
+    return _THRUST_STD::tuple(lhs, rhs);
   }
 };
 
@@ -73,14 +73,14 @@ TYPED_TEST(TupleScanTests, TestTupleScan)
     host_vector<T> h_t2 = random_integers<T>(size);
 
     // initialize input
-    host_vector<tuple<T, T>> h_input(size);
+    host_vector<_THRUST_STD::tuple<T, T>> h_input(size);
     thrust::transform(h_t1.begin(), h_t1.end(), h_t2.begin(), h_input.begin(), MakeTupleFunctor());
-    device_vector<tuple<T, T>> d_input = h_input;
+    device_vector<_THRUST_STD::tuple<T, T>> d_input = h_input;
 
     // allocate output
-    tuple<T, T> zero(0, 0);
-    host_vector<tuple<T, T>> h_output(size, zero);
-    device_vector<tuple<T, T>> d_output(size, zero);
+    _THRUST_STD::tuple<T, T> zero(0, 0);
+    host_vector<_THRUST_STD::tuple<T, T>> h_output(size, zero);
+    device_vector<_THRUST_STD::tuple<T, T>> d_output(size, zero);
 
     // inclusive_scan
     thrust::inclusive_scan(h_input.begin(), h_input.end(), h_output.begin(), SumTupleFunctor());
@@ -88,7 +88,7 @@ TYPED_TEST(TupleScanTests, TestTupleScan)
     ASSERT_EQ_QUIET(h_output, d_output);
 
     // exclusive_scan
-    tuple<T, T> init(13, 17);
+    _THRUST_STD::tuple<T, T> init(13, 17);
     thrust::exclusive_scan(h_input.begin(), h_input.end(), h_output.begin(), init, SumTupleFunctor());
     thrust::exclusive_scan(d_input.begin(), d_input.end(), d_output.begin(), init, SumTupleFunctor());
 

@@ -29,6 +29,7 @@
 
 #include "../../functional.hpp"
 #include "../../intrinsics.hpp"
+#include "../../type_traits_functions.hpp"
 #include "../../types.hpp"
 
 #include "../../block/block_load.hpp"
@@ -147,7 +148,7 @@ auto transform_kernel_impl(InputIterator  input,
         conditional<std::is_void<_input_type>::value, op_result_type, _input_type>::type;
     using output_type = typename std::iterator_traits<OutputIterator>::value_type;
     using result_type = typename std::
-        conditional<std::is_void<output_type>::value, op_result_type, output_type>::type;
+        conditional<detail::is_any_void<output_type>::value, op_result_type, output_type>::type;
 
     constexpr unsigned int items_per_block = BlockSize * ItemsPerThread;
 
@@ -252,7 +253,7 @@ auto transform_kernel_impl(InputIterator  input,
         conditional<std::is_void<_input_type>::value, op_result_type, _input_type>::type;
     using output_type = typename std::iterator_traits<OutputIterator>::value_type;
     using result_type = typename std::
-        conditional<std::is_void<output_type>::value, op_result_type, output_type>::type;
+        conditional<detail::is_any_void<output_type>::value, op_result_type, output_type>::type;
 
     constexpr unsigned int items_per_block = BlockSize * ItemsPerThread;
 
