@@ -125,7 +125,8 @@ rocsparse_status rocsparse::sparse_to_csr_to_sparse(rocsparse_handle            
             RETURN_IF_ROCSPARSE_ERROR(
                 rocsparse::counted_product(source_->cols, source_->block_dim, csr_n));
             // The expansion computes the CSR row and column indices in col_type, so
-            // an int32_t source must stay within int32_t once expanded.
+            // an int32_t source must stay within int32_t once expanded. This covers
+            // the expanded indices, not the nonzero loop of the block_dim == 1 kernel.
             RETURN_ROCSPARSE_ERROR_IF(rocsparse_status_invalid_size,
                                       col_type == rocsparse_indextype_i32
                                           && (csr_m > std::numeric_limits<int32_t>::max()
