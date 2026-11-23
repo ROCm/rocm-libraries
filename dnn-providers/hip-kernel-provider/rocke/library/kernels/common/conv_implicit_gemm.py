@@ -74,7 +74,7 @@ from rocke.helpers.atoms import MfmaAtom, mfma_atom
 from rocke.helpers.epilogues import CShuffleEpilogue, DirectEpilogue
 from rocke.helpers.geometry import WarpGrid
 from rocke.helpers.layouts import LdsLayout
-from rocke.helpers.loads import AsyncTileLoader, CoalescedTileLoader
+from rocke.helpers.loads import AsyncTileLoader, CoalescedTileLoader, swizzle_lds_col
 from rocke.helpers.mfma_gemm_inner import decode_mfma_lanes
 from rocke.helpers.pipeline import SoftwarePipeline
 from rocke.helpers.schedule import DS_READ, DS_WRITE, MFMA, VMEM_READ, SchedulePolicy
@@ -3914,10 +3914,10 @@ def _build_implicit_gemm_conv_impl(
             sh = 0 if spec.lds_xor_rowkey else {32: 1}.get(block_k, 0)
         else:
             sh = {32: 2, 64: 1}.get(block_k, 0)
-        if sh:
-            row = b_.lshr(row, b_.const_i32(sh))
-        rmask = b_.land(row, b_.const_i32(block_k // 8 - 1))
-        return b_.xor(col, b_.shl(rmask, b_.const_i32(3)))
+        # The shared row/column XOR swizzle without its bit-3 flip term
+        # (flip_shift -1): lds_col_xor_params keys on the 128-byte line and
+        # adds the flip, which is a different LDS image.
+        return swizzle_lds_col(b_, row, col, (sh, block_k // 8 - 1, 3, -1))
 
     _xa_ring = {"off": None}
 

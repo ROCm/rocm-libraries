@@ -105,18 +105,29 @@ def lds_col_xor_params(tile_cols: int, chunk: int = 8) -> Tuple[int, int, int, i
     return rows_per_cycle.bit_length() - 1, c - 1, chunk.bit_length() - 1, 3
 
 
-def swizzle_lds_col(b: IRBuilder, row: Value, col: Value, col_xor) -> Value:
-    """``col ^ ((((row >> row_shift) & chunk_mask) ^ ((row >> flip_shift) & 1))
-    << chunk_log2)``: the physical LDS column of logical column ``col`` of tile
-    row ``row`` (both i32). ``col_xor`` is a :func:`lds_col_xor_params` tuple.
-    Writers (:attr:`CoalescedTileLoader.col_xor`) and readers must use the same
-    tuple."""
+def lds_col_xor_key(b: IRBuilder, row: Value, col_xor) -> Value:
+    """``(((row >> row_shift) & chunk_mask) ^ ((row >> flip_shift) & 1)) <<
+    chunk_log2``: the column XOR mask (in elements) of tile row ``row``.
+    ``col_xor`` is a :func:`lds_col_xor_params` tuple, or a hand-built
+    ``(row_shift, chunk_mask, chunk_log2, flip_shift)`` whose ``flip_shift < 0``
+    drops the flip term (a key on a wider bank line than
+    :func:`lds_col_xor_params` picks, or on the row alone)."""
     row_shift, chunk_mask, chunk_log2, flip_shift = col_xor
     r = b.lshr(row, b.const_i32(row_shift)) if row_shift else row
     sel = b.land(r, b.const_i32(chunk_mask))
-    flip = b.land(b.lshr(row, b.const_i32(flip_shift)), b.const_i32(1))
-    sel = b.xor(sel, flip)
-    return b.xor(col, b.shl(sel, b.const_i32(chunk_log2)))
+    if flip_shift >= 0:
+        flip = b.land(b.lshr(row, b.const_i32(flip_shift)), b.const_i32(1))
+        sel = b.xor(sel, flip)
+    return b.shl(sel, b.const_i32(chunk_log2))
+
+
+def swizzle_lds_col(b: IRBuilder, row: Value, col: Value, col_xor) -> Value:
+    """``col ^ lds_col_xor_key(row)``: the physical LDS column of logical
+    column ``col`` of tile row ``row`` (both i32). ``col_xor`` is a
+    :func:`lds_col_xor_params` tuple (or see :func:`lds_col_xor_key`).
+    Writers (:attr:`CoalescedTileLoader.col_xor`) and readers must use the same
+    tuple."""
+    return b.xor(col, lds_col_xor_key(b, row, col_xor))
 
 
 # The two admissible ``vector_axis`` values.  Kept as a module constant so the
@@ -137,9 +148,7 @@ def xor8_params(tile_cols: int, elem_bytes: int = 2) -> Tuple[int, int, int]:
 
 def xor8_key(b: IRBuilder, row: Value, *, tile_cols: int, elem_bytes: int = 2) -> Value:
     """Column XOR mask (in elements) of LDS row ``row``; see :func:`xor8_swizzle_rc`."""
-    sh, mask, ush = xor8_params(tile_cols, elem_bytes)
-    key = b.lshr(row, b.const_i32(sh)) if sh else row
-    return b.shl(b.land(key, b.const_i32(mask)), b.const_i32(ush))
+    return lds_col_xor_key(b, row, (*xor8_params(tile_cols, elem_bytes), -1))
 
 
 def xor8_swizzle_rc(

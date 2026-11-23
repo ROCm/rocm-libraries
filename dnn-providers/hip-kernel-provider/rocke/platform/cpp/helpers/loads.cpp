@@ -148,15 +148,11 @@ rocke_status_t rocke_lds_col_xor_params(int tile_cols, int chunk, int out[4])
     return ROCKE_OK;
 }
 
-rocke_value_t* rocke_swizzle_lds_col(rocke_ir_builder_t* b,
-                                     rocke_value_t* row,
-                                     rocke_value_t* col,
-                                     const int col_xor[4])
+rocke_value_t*
+    rocke_lds_col_xor_key(rocke_ir_builder_t* b, rocke_value_t* row, const int col_xor[4])
 {
     rocke_value_t* r;
     rocke_value_t* sel;
-    rocke_value_t* flip;
-    rocke_value_t* shifted;
 
     if(b != NULL && b->status != ROCKE_OK)
     {
@@ -164,14 +160,15 @@ rocke_value_t* rocke_swizzle_lds_col(rocke_ir_builder_t* b,
     }
     if(col_xor == NULL)
     {
-        return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "swizzle_lds_col: NULL col_xor");
+        return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "lds_col_xor_key: NULL col_xor");
     }
     /* Python (each const_i32 is created right before the op that takes it):
      *   r = b.lshr(row, b.const_i32(row_shift)) if row_shift else row
      *   sel = b.land(r, b.const_i32(chunk_mask))
-     *   flip = b.land(b.lshr(row, b.const_i32(flip_shift)), b.const_i32(1))
-     *   sel = b.xor(sel, flip)
-     *   return b.xor(col, b.shl(sel, b.const_i32(chunk_log2)))
+     *   if flip_shift >= 0:
+     *       flip = b.land(b.lshr(row, b.const_i32(flip_shift)), b.const_i32(1))
+     *       sel = b.xor(sel, flip)
+     *   return b.shl(sel, b.const_i32(chunk_log2))
      */
     r = row;
     if(col_xor[0] != 0)
@@ -183,18 +180,34 @@ rocke_value_t* rocke_swizzle_lds_col(rocke_ir_builder_t* b,
         rocke_value_t* c_mask = rocke_b_const_i32(b, col_xor[1]);
         sel = rocke_b_land(b, r, c_mask);
     }
+    if(col_xor[3] >= 0)
     {
         rocke_value_t* c_flip = rocke_b_const_i32(b, col_xor[3]);
         rocke_value_t* hi = rocke_b_lshr(b, row, c_flip);
         rocke_value_t* c_one = rocke_b_const_i32(b, 1);
-        flip = rocke_b_land(b, hi, c_one);
+        rocke_value_t* flip = rocke_b_land(b, hi, c_one);
+        sel = rocke_b_xor(b, sel, flip);
     }
-    sel = rocke_b_xor(b, sel, flip);
+    rocke_value_t* c_log2 = rocke_b_const_i32(b, col_xor[2]);
+    return rocke_b_shl(b, sel, c_log2);
+}
+
+rocke_value_t* rocke_swizzle_lds_col(rocke_ir_builder_t* b,
+                                     rocke_value_t* row,
+                                     rocke_value_t* col,
+                                     const int col_xor[4])
+{
+    if(b != NULL && b->status != ROCKE_OK)
     {
-        rocke_value_t* c_log2 = rocke_b_const_i32(b, col_xor[2]);
-        shifted = rocke_b_shl(b, sel, c_log2);
+        return NULL;
     }
-    return rocke_b_xor(b, col, shifted);
+    if(col_xor == NULL)
+    {
+        return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "swizzle_lds_col: NULL col_xor");
+    }
+    /* Python: return b.xor(col, lds_col_xor_key(b, row, col_xor)) */
+    rocke_value_t* key = rocke_lds_col_xor_key(b, row, col_xor);
+    return rocke_b_xor(b, col, key);
 }
 
 rocke_status_t rocke_coalesced_tile_loader_set_col_xor(rocke_coalesced_tile_loader_t* self,

@@ -340,11 +340,9 @@ rocke_value_t*
         sh = spec->lds_xor_rowkey ? 0 : (block_k == 32 ? 1 : 0);
     else
         sh = block_k == 32 ? 2 : (block_k == 64 ? 1 : 0);
-    if(sh)
-        row = rocke_b_lshr(b, row, rocke_b_const_i32(b, sh));
-    rocke_value_t* rmask = rocke_b_land(b, row, rocke_b_const_i32(b, block_k / 8 - 1));
-    rocke_value_t* key = rocke_b_shl(b, rmask, rocke_b_const_i32(b, 3));
-    return rocke_b_xor(b, col, key);
+    /* The shared swizzle without its bit-3 flip term (flip_shift -1). */
+    const int col_xor[4] = {sh, block_k / 8 - 1, 3, -1};
+    return rocke_swizzle_lds_col(b, row, col, col_xor);
 }
 
 /* ====================================================================== *

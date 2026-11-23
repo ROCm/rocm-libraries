@@ -6817,10 +6817,8 @@ static rocke_kernel_def_t*
             auto xh_swz_b = [&](rocke_value_t* row, rocke_value_t* col) -> rocke_value_t* {
                 if(!b_swz)
                     return col;
-                rocke_value_t* r
-                    = xor_sh ? rocke_b_lshr(b, row, rocke_b_const_i32(b, xor_sh)) : row;
-                rocke_value_t* key = rocke_b_land(b, r, rocke_b_const_i32(b, block_k / 8 - 1));
-                return rocke_b_xor(b, col, rocke_b_shl(b, key, rocke_b_const_i32(b, 3)));
+                const int col_xor[4] = {xor_sh, block_k / 8 - 1, 3, -1};
+                return rocke_swizzle_lds_col(b, row, col, col_xor);
             };
             /* _ak4_row (xh_stride_m) */
             auto ak4_row = [&](rocke_value_t* row) -> rocke_value_t* {
@@ -8084,12 +8082,14 @@ static rocke_kernel_def_t*
         auto pp_swz = [&](rocke_value_t* row, rocke_value_t* col) -> rocke_value_t* {
             if(!spec->lds_xor)
                 return col;
-            rocke_value_t* r = block_k == 32 ? rocke_b_lshr(b, row, rocke_b_const_i32(b, 1)) : row;
-            if(spec->tapk_pingpong >= 3)
+            if(spec->tapk_pingpong < 3)
             {
-                rocke_value_t* r8 = rocke_b_lshr(b, row, rocke_b_const_i32(b, 3));
-                r = rocke_b_xor(b, r, r8);
+                const int col_xor[4] = {block_k == 32 ? 1 : 0, block_k / 8 - 1, 3, -1};
+                return rocke_swizzle_lds_col(b, row, col, col_xor);
             }
+            rocke_value_t* r = block_k == 32 ? rocke_b_lshr(b, row, rocke_b_const_i32(b, 1)) : row;
+            rocke_value_t* r8 = rocke_b_lshr(b, row, rocke_b_const_i32(b, 3));
+            r = rocke_b_xor(b, r, r8);
             rocke_value_t* key = rocke_b_land(b, r, rocke_b_const_i32(b, block_k / 8 - 1));
             rocke_value_t* ks = rocke_b_shl(b, key, rocke_b_const_i32(b, 3));
             return rocke_b_xor(b, col, ks);

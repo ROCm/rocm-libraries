@@ -73,7 +73,7 @@ from rocke.helpers.epilogues import CShuffleEpilogue, DirectEpilogue
 from rocke.helpers.geometry import WarpGrid
 from rocke.helpers.grid import chiplet_transform_chunked_runtime
 from rocke.helpers.layouts import LdsLayout
-from rocke.helpers.loads import CoalescedTileLoader
+from rocke.helpers.loads import CoalescedTileLoader, swizzle_lds_col
 from rocke.helpers.magic_division import (
     calculate_magic_numbers,
     do_magic_division_dynamic,
@@ -4705,9 +4705,8 @@ def _build_tilde_dgrad(
     def xh_swz(b_: IRBuilder, row: Value, col: Value) -> Value:
         if not spec.lds_xor:
             return col
-        r = b_.lshr(row, b_.const_i32(_xor_sh)) if _xor_sh else row
-        key = b_.land(r, b_.const_i32(block_k // 8 - 1))
-        return b_.xor(col, b_.shl(key, b_.const_i32(3)))
+        # loads.swizzle_lds_col without the flip term (see the fwd lds_swz).
+        return swizzle_lds_col(b_, row, col, (_xor_sh, block_k // 8 - 1, 3, -1))
 
     def xh_swz_b(b_: IRBuilder, row: Value, col: Value) -> Value:
         """xh_swz for the B tiles (unswizzled when they are padded)."""
@@ -6123,11 +6122,14 @@ def _build_tilde_dgrad(
         # 64-byte rows (tile_k 32) pair up in a 128-byte bank window: the
         # key is row // 2 there, so the 8 rows of one fragment read cover
         # the window's 8 chunks.
-        r = b.lshr(row, b.const_i32(1)) if block_k == 32 else row
-        if spec.tapk_pingpong >= 3:
-            # Also the row's 8-row group: lanes storing rows 8 apart (the
-            # n-fast B loader) land on different chunks too.
-            r = b.xor(r, b.lshr(row, b.const_i32(3)))
+        _sh = 1 if block_k == 32 else 0
+        if spec.tapk_pingpong < 3:
+            return swizzle_lds_col(b, row, col, (_sh, block_k // 8 - 1, 3, -1))
+        # Also the row's 8-row group: lanes storing rows 8 apart (the n-fast B
+        # loader) land on different chunks too. The group (row >> 3) is XORed
+        # in before the chunk mask, unlike the 1-bit flip of swizzle_lds_col.
+        r = b.lshr(row, b.const_i32(1)) if _sh else row
+        r = b.xor(r, b.lshr(row, b.const_i32(3)))
         key = b.land(r, b.const_i32(block_k // 8 - 1))
         return b.xor(col, b.shl(key, b.const_i32(3)))
 
@@ -6779,9 +6781,8 @@ def _build_tilde_dgrad(
                 return _pp_swz(row, col)
             if not spec.lds_xor or gap:
                 return col
-            r = b.lshr(row, b.const_i32(1)) if block_k == 32 else row
-            key = b.land(r, b.const_i32(block_k // 8 - 1))
-            return b.xor(col, b.shl(key, b.const_i32(3)))
+            _sh = 1 if block_k == 32 else 0
+            return swizzle_lds_col(b, row, col, (_sh, block_k // 8 - 1, 3, -1))
 
         def _xh_store(staged) -> None:
             for row, col, v in staged:
