@@ -19,6 +19,22 @@
 
 namespace ck_tile {
 
+// Waits until every asynchronous global-to-LDS load of the wave has completed, marked or not. The
+// page tiles publish the next tile's page ids with amd_async_global_load_to_lds, which on gfx1250
+// issues the DMA as inline assembly without an asyncmark. ck_tile::s_wait_asynccnt becomes
+// wait_asyncmark when the compiler has the asyncmark builtins, and that waits for marked DMAs
+// only: clang 24 then emitted no wait before the barrier that publishes the ids, so waves read an
+// id the DMA had not yet written (a wrong page: launch-to-launch different output, page faults).
+// Clang 23 emitted s_wait_asynccnt 0 there. The hardware counter covers every DMA.
+CK_TILE_DEVICE void fmha_page_tile_wait_page_id_dma()
+{
+#if defined(__gfx125__)
+    __builtin_amdgcn_s_wait_asynccnt(0);
+#else
+    s_wait_asynccnt<0>();
+#endif
+}
+
 // Independent page-size / tile-size geometry for gfx1250 batch prefill.
 //
 // The logical KV tile stays N128 (with M128 or M64 query tiles); only the physical KV allocation

@@ -1221,8 +1221,9 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedPageTile
             auto load_next_k = [&]() {
                 // Fixed boundary: the next K TDM transfer follows softmax.
                 // The existing V-read barrier also publishes the async page ID.
-                // Read it here so PV can cover the LDS-to-VGPR latency.
-                s_wait_asynccnt<0>();
+                // Read it here so PV can cover the LDS-to-VGPR latency. The page-id DMA carries
+                // no asyncmark: wait on the hardware counter (fmha_page_tile_wait_page_id_dma).
+                fmha_page_tile_wait_page_id_dma();
                 if constexpr(Policy::template WaitTensorReadyAtLoadNextK<Problem>())
                 {
                     // The K tile issued in the previous iteration must be complete; only the V

@@ -769,8 +769,9 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedFp8PageTile
 
             auto load_next_k = [&]() {
                 // Fixed boundary: the next K TDM transfer follows softmax. The page-id slot read of
-                // the BF16 page tile compiles out with the page-id batch; its async wait stays.
-                s_wait_asynccnt<0>();
+                // the BF16 page tile compiles out with the page-id batch; its async wait stays (on
+                // the hardware counter: fmha_page_tile_wait_page_id_dma).
+                fmha_page_tile_wait_page_id_dma();
                 // The K tile issued in the previous iteration must be complete; only the V tile
                 // issued after it may stay in flight. The barrier below then publishes that K
                 // tile to every wave. The K buffer the transfer below overwrites has no read
