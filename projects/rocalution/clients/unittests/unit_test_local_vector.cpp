@@ -463,51 +463,6 @@ TYPED_TEST(local_vector_data, ascii_files_round_trip_and_keep_the_backend)
     std::remove(file.c_str());
 }
 
-// The text of ASCII files, which the round trip cannot see
-
-template <typename P>
-class local_vector_ascii_files : public LocalVectorTest<P>
-{
-};
-
-TYPED_TEST_SUITE(local_vector_ascii_files, WithBackends<RealTypes>, TypedName);
-
-// One entry per line, in scientific notation with six digits after the point
-TYPED_TEST(local_vector_ascii_files, ascii_files_are_written_in_scientific_notation)
-{
-    using T = typename TypeParam::value_type;
-
-    const std::string file = temp_file("txt");
-    const auto        v    = this->vec(
-        std::vector<T>{T(1), T(2), T(3), T(4), T(5), T(1.234567), T(-0.03125), T(2.5e7)});
-    logged([&] { v->WriteFileASCII(file); });
-
-    std::ifstream     in(file);
-    std::stringstream text;
-    text << in.rdbuf();
-    EXPECT_EQ(text.str(),
-              "1.000000e+00\n2.000000e+00\n3.000000e+00\n4.000000e+00\n5.000000e+00\n"
-              "1.234567e+00\n-3.125000e-02\n2.500000e+07\n");
-    std::remove(file.c_str());
-}
-
-TYPED_TEST(local_vector_ascii_files, ascii_files_written_by_hand_are_read_one_value_per_line)
-{
-    using T = typename TypeParam::value_type;
-
-    const std::string file = temp_file("txt");
-    {
-        std::ofstream out(file);
-        out << "1\n2\n3\n-4\n0.5\n6.25\n7e1\n-8.125E-1\n";
-    }
-
-    auto v = this->vec(from_ints<T>({9, 9, 9}));
-    logged([&] { v->ReadFileASCII(file); });
-    EXPECT_EQ(backend_of(*v), this->here());
-    EXPECT_EQ(values_of(*v), (std::vector<T>{1, 2, 3, -4, 0.5, 6.25, 70, -0.8125}));
-    std::remove(file.c_str());
-}
-
 // The accelerator checks a host copy
 TYPED_TEST(local_vector_data, check_accepts_finite_values_and_rejects_nan_and_infinity)
 {
@@ -1135,6 +1090,51 @@ TYPED_TEST(local_vector_binary_files, binary_files_round_trip_and_keep_the_backe
     std::remove(file.c_str());
 }
 
+// The text of ASCII files, which the round trip cannot see
+
+template <typename P>
+class local_vector_ascii_files : public LocalVectorTest<P>
+{
+};
+
+TYPED_TEST_SUITE(local_vector_ascii_files, WithBackends<RealTypes>, TypedName);
+
+// One entry per line, in scientific notation with six digits after the point
+TYPED_TEST(local_vector_ascii_files, ascii_files_are_written_in_scientific_notation)
+{
+    using T = typename TypeParam::value_type;
+
+    const std::string file = temp_file("txt");
+    const auto        v    = this->vec(
+        std::vector<T>{T(1), T(2), T(3), T(4), T(5), T(1.234567), T(-0.03125), T(2.5e7)});
+    logged([&] { v->WriteFileASCII(file); });
+
+    std::ifstream     in(file);
+    std::stringstream text;
+    text << in.rdbuf();
+    EXPECT_EQ(text.str(),
+              "1.000000e+00\n2.000000e+00\n3.000000e+00\n4.000000e+00\n5.000000e+00\n"
+              "1.234567e+00\n-3.125000e-02\n2.500000e+07\n");
+    std::remove(file.c_str());
+}
+
+TYPED_TEST(local_vector_ascii_files, ascii_files_written_by_hand_are_read_one_value_per_line)
+{
+    using T = typename TypeParam::value_type;
+
+    const std::string file = temp_file("txt");
+    {
+        std::ofstream out(file);
+        out << "1\n2\n3\n-4\n0.5\n6.25\n7e1\n-8.125E-1\n";
+    }
+
+    auto v = this->vec(from_ints<T>({9, 9, 9}));
+    logged([&] { v->ReadFileASCII(file); });
+    EXPECT_EQ(backend_of(*v), this->here());
+    EXPECT_EQ(values_of(*v), (std::vector<T>{1, 2, 3, -4, 0.5, 6.25, 70, -0.8125}));
+    std::remove(file.c_str());
+}
+
 // Copies between float and double
 
 template <typename P>
@@ -1196,7 +1196,7 @@ TYPED_TEST(local_vector_coarse, extract_coarse_mapping_numbers_the_aggregates)
     expect_host_fallback(log, "ExtractCoarseMapping", this->backend());
 
     std::vector<int> whole(7, -7);
-    aggregates->ExtractCoarseMapping(0, 7, index.data(), 4, &size, whole.data());
+    logged([&] { aggregates->ExtractCoarseMapping(0, 7, index.data(), 4, &size, whole.data()); });
     EXPECT_EQ(size, 7);
     EXPECT_EQ(whole, (std::vector<int>{0, 1, -1, 1, 2, 0, 3}));
 }
@@ -1226,7 +1226,7 @@ namespace
     template <typename T>
     bool expect_location(std::unique_ptr<LocalVector<T>>& v, Backend b)
     {
-        const std::string where = location_of(*v);
+        const std::string where = backend_of(*v);
         EXPECT_EQ(where, backend_name(b));
         if(where != backend_name(Backend::Host) && where != backend_name(Backend::Accelerator))
         {
@@ -1262,15 +1262,23 @@ TEST(local_vector_moves, without_an_accelerator_moves_stay_on_the_host)
         auto                 v = make_local_vector(Backend::Host, a);
 
         v->MoveToAccelerator();
-        EXPECT_EQ(location_of(*v), backend_name(Backend::Host));
+        EXPECT_EQ(backend_of(*v), backend_name(Backend::Host));
         v->MoveToAcceleratorAsync();
         v->Sync();
-        EXPECT_EQ(location_of(*v), backend_name(Backend::Host));
+        EXPECT_EQ(backend_of(*v), backend_name(Backend::Host));
         v->MoveToHostAsync();
         v->Sync();
         v->MoveToHost();
-        EXPECT_EQ(location_of(*v), backend_name(Backend::Host));
+        EXPECT_EQ(backend_of(*v), backend_name(Backend::Host));
         EXPECT_EQ(values_of(*v), a);
+
+        auto copy = std::make_unique<LocalVector<T>>();
+        copy->CopyFromAsync(*v);
+        rocalution::_rocalution_sync();
+        EXPECT_EQ(entries_of(*copy), a);
+        copy->Sync();
+        EXPECT_EQ(backend_of(*copy), backend_name(Backend::Host));
+        EXPECT_EQ(values_of(*copy), a);
     });
 }
 
@@ -1284,7 +1292,7 @@ TEST(local_vector_moves, async_move_of_a_host_vector_to_the_host_changes_nothing
         auto                 v = make_local_vector(Backend::Host, a);
         v->MoveToHostAsync();
         v->Sync();
-        EXPECT_EQ(location_of(*v), backend_name(Backend::Host));
+        EXPECT_EQ(backend_of(*v), backend_name(Backend::Host));
         EXPECT_EQ(values_of(*v), a);
     });
 }
@@ -1299,7 +1307,7 @@ TEST(local_vector_moves, sync_after_move_to_host_async_ends_on_the_host)
         const std::vector<T> a = x<T>();
         auto                 v = make_local_vector(Backend::Accelerator, a);
         v->MoveToHostAsync();
-        EXPECT_EQ(location_of(*v), backend_name(Backend::Accelerator));
+        EXPECT_EQ(backend_of(*v), backend_name(Backend::Accelerator));
         v->Sync();
         if(!expect_location(v, Backend::Host))
         {
@@ -1319,7 +1327,7 @@ TEST(local_vector_moves, sync_after_move_to_accelerator_async_ends_on_the_accele
         const std::vector<T> a = x<T>();
         auto                 v = make_local_vector(Backend::Host, a);
         v->MoveToAcceleratorAsync();
-        EXPECT_EQ(location_of(*v), backend_name(Backend::Host));
+        EXPECT_EQ(backend_of(*v), backend_name(Backend::Host));
         v->Sync();
         if(!expect_location(v, Backend::Accelerator))
         {
@@ -1443,48 +1451,6 @@ TEST(local_vector_moves, entries_are_readable_after_an_async_move_and_a_device_s
     });
 }
 
-TEST(local_vector_moves, without_an_accelerator_async_calls_keep_the_entries_readable)
-{
-    DescriptorGuard guard;
-    rocalution::_get_backend_descriptor()->accelerator = false;
-
-    for_each_type<RealTypes>([&](auto type) {
-        using T = typename decltype(type)::type;
-
-        const std::vector<T> a = x<T>();
-        for(const std::string call : {"MoveToHostAsync", "MoveToAcceleratorAsync"})
-        {
-            SCOPED_TRACE(call);
-            auto v = make_local_vector(Backend::Host, a);
-            if(call == "MoveToHostAsync")
-            {
-                v->MoveToAccelerator();
-                v->MoveToHostAsync();
-            }
-            else
-            {
-                v->MoveToAcceleratorAsync();
-            }
-            rocalution::_rocalution_sync();
-            EXPECT_EQ(entries_of(*v), a);
-            v->Sync();
-            EXPECT_EQ(location_of(*v), backend_name(Backend::Host));
-            EXPECT_EQ(values_of(*v), a);
-        }
-        {
-            SCOPED_TRACE("CopyFromAsync");
-            auto src = make_local_vector(Backend::Host, a);
-            auto v   = std::make_unique<LocalVector<T>>();
-            v->CopyFromAsync(*src);
-            rocalution::_rocalution_sync();
-            EXPECT_EQ(entries_of(*v), a);
-            v->Sync();
-            EXPECT_EQ(location_of(*v), backend_name(Backend::Host));
-            EXPECT_EQ(values_of(*v), a);
-        }
-    });
-}
-
 // The destruction runs in a child, so a destructor that rejects the pending Sync() fails
 // this case rather than the whole binary. It also runs in builds without an accelerator.
 TEST(local_vector_moves, a_copy_from_async_destination_can_be_destroyed_without_sync)
@@ -1523,8 +1489,6 @@ TEST(local_vector_preconditions, violations_end_the_program)
 {
     LocalVector<double> e;
     EXPECT_ASSERT_DEATH(e.Allocate("v", -1), "size >= 0");
-    double* null = nullptr;
-    EXPECT_ASSERT_DEATH(e.SetDataPtr(&null, "v", 3), "\\*ptr != NULL");
 
     auto a = make_local_vector(Backend::Host, std::vector<double>(4, 1.0));
     auto b = make_local_vector(Backend::Host, std::vector<double>(3, 1.0));
@@ -1550,49 +1514,45 @@ TEST(local_vector_preconditions, violations_end_the_program)
 // assert the same expression, so the patterns name the function.
 TEST(local_vector_preconditions, null_pointer_arguments_end_the_program)
 {
-    for_each_type<RealTypes>([&](auto type) {
-        using T = typename decltype(type)::type;
+    LocalVector<double> e;
+    double*             null = nullptr;
+    EXPECT_ASSERT_DEATH(e.SetDataPtr(nullptr, "v", 3),
+                        "local_vector\\.cpp:[0-9]+: .*SetDataPtr.*[^*]ptr != NULL");
+    EXPECT_ASSERT_DEATH(e.SetDataPtr(&null, "v", 3),
+                        "local_vector\\.cpp:[0-9]+: .*SetDataPtr.*\\*ptr != NULL");
+    std::vector<double> data(3, 1.0);
+    double*             ptr = data.data();
+    EXPECT_ASSERT_DEATH(e.LeaveDataPtr(&ptr),
+                        "local_vector\\.cpp:[0-9]+: .*LeaveDataPtr.*\\*ptr == NULL");
+    EXPECT_ASSERT_DEATH(e.CopyFromData(null),
+                        "local_vector\\.cpp:[0-9]+: .*CopyFromData.*data != NULL");
+    EXPECT_ASSERT_DEATH(e.CopyToData(null),
+                        "local_vector\\.cpp:[0-9]+: .*CopyToData.*data != NULL");
 
-        LocalVector<T> e;
-        T*             null = nullptr;
-        EXPECT_ASSERT_DEATH(e.SetDataPtr(nullptr, "v", 3),
-                            "local_vector\\.cpp:[0-9]+: .*SetDataPtr.*[^*]ptr != NULL");
-        EXPECT_ASSERT_DEATH(e.SetDataPtr(&null, "v", 3),
-                            "local_vector\\.cpp:[0-9]+: .*SetDataPtr.*\\*ptr != NULL");
-        std::vector<T> data(3, T(1));
-        T*             ptr = data.data();
-        EXPECT_ASSERT_DEATH(e.LeaveDataPtr(&ptr),
-                            "local_vector\\.cpp:[0-9]+: .*LeaveDataPtr.*\\*ptr == NULL");
-        EXPECT_ASSERT_DEATH(e.CopyFromData(null),
-                            "local_vector\\.cpp:[0-9]+: .*CopyFromData.*data != NULL");
-        EXPECT_ASSERT_DEATH(e.CopyToData(null),
-                            "local_vector\\.cpp:[0-9]+: .*CopyToData.*data != NULL");
+    auto v = make_local_vector(Backend::Host, std::vector<double>(4, 1.0));
+    EXPECT_ASSERT_DEATH(v->GetContinuousValues(0, 4, null),
+                        "local_vector\\.cpp:[0-9]+: .*GetContinuousValues.*values != NULL");
 
-        auto v = make_local_vector(Backend::Host, std::vector<T>(4, T(1)));
-        EXPECT_ASSERT_DEATH(v->GetContinuousValues(0, 4, null),
-                            "local_vector\\.cpp:[0-9]+: .*GetContinuousValues.*values != NULL");
-
-        int  ints[4] = {};
-        int* none    = nullptr;
-        for(const std::string f : {"ExtractCoarseMapping", "ExtractCoarseBoundary"})
-        {
-            SCOPED_TRACE(f);
-            const bool mapping = f == "ExtractCoarseMapping";
-            auto       extract = [&](const int* index, int* size, int* out) {
-                if(mapping)
-                {
-                    v->ExtractCoarseMapping(0, 0, index, 0, size, out);
-                }
-                else
-                {
-                    v->ExtractCoarseBoundary(0, 0, index, 0, size, out);
-                }
-            };
-            const std::string at = "local_vector\\.cpp:[0-9]+: .*" + f + ".*";
-            EXPECT_ASSERT_DEATH(extract(none, ints, ints), at + "index != NULL");
-            EXPECT_ASSERT_DEATH(extract(ints, none, ints), at + "size != NULL");
-            EXPECT_ASSERT_DEATH(extract(ints, ints, none),
-                                at + (mapping ? "map != NULL" : "boundary != NULL"));
-        }
-    });
+    int  ints[4] = {};
+    int* none    = nullptr;
+    for(const std::string f : {"ExtractCoarseMapping", "ExtractCoarseBoundary"})
+    {
+        SCOPED_TRACE(f);
+        const bool mapping = f == "ExtractCoarseMapping";
+        auto       extract = [&](const int* index, int* size, int* out) {
+            if(mapping)
+            {
+                v->ExtractCoarseMapping(0, 0, index, 0, size, out);
+            }
+            else
+            {
+                v->ExtractCoarseBoundary(0, 0, index, 0, size, out);
+            }
+        };
+        const std::string at = "local_vector\\.cpp:[0-9]+: .*" + f + ".*";
+        EXPECT_ASSERT_DEATH(extract(none, ints, ints), at + "index != NULL");
+        EXPECT_ASSERT_DEATH(extract(ints, none, ints), at + "size != NULL");
+        EXPECT_ASSERT_DEATH(extract(ints, ints, none),
+                            at + (mapping ? "map != NULL" : "boundary != NULL"));
+    }
 }

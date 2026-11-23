@@ -308,9 +308,9 @@ the unit tests. The `local_matrix_allocations`, `local_matrix_zero`, `local_matr
 suites have been deleted on that basis. The Jenkins test command runs both unit-test binaries
 before `rocalution-test`, so the Jenkins lanes still run these checks. Clients-only builds and
 `rtest.xml` runs no longer run them (see [Known Gaps Summary](#known-gaps-summary)).
-`local_vector_amax_ties` is kept for that reason: it runs in every category and every `rtest.xml`
-set, including the emulation sets. The solver, preconditioner and AMG suites stay as the
-integration layer.
+`local_vector_amax_ties` is kept for that reason: it runs in every category and in the `smoke`,
+`regression`, `extended` and `custom` `rtest.xml` sets. The solver, preconditioner and AMG suites
+stay as the integration layer.
 
 ---
 
@@ -537,7 +537,6 @@ device configurations are not ASAN-covered.
 | New host-backend algorithm or fix (solver/preconditioner logic) | A parameterized host-backend case in `test_<component>.cpp`; runnable with `--host`, no GPU |
 | New or changed GPU-backend behavior | A parameterized case exercised on the HIP backend, cross-checked against the host reference |
 | New solver / preconditioner / AMG variant | A `test_<name>.cpp` with float and double `TEST_P` cases across backends; add matching sample if useful |
-| New `local_matrix` operation | A `TEST_F` structure case (GPU; skipped under emulation tiers) |
 | MPI / multi-node change | A `global_*` or `parallel_manager` case (guarded by `SUPPORT_MPI`) |
 | Bug fix | A regression case that fails before the fix |
 | Performance-sensitive change | Run `rocalution-bench` before/after; render with `scripts/rocalution_bench_gnuplot_helper.py`; note the delta in the PR |
