@@ -253,7 +253,7 @@ transfers and multi-node communication behave as expected.
 | Preconditioners | Jacobi, GS/SGS, ILU/ILUT/IC, ItILU0, (AI)Chebyshev, FSAI, SPAI, TNS, AS/RAS, multi-colored GS/SGS/ILU, multi-elimination, variable |
 | Structures (GPU) | `local_matrix` ops / conversions / multicoloring / itsolve / solve, `local_vector`, `local_stencil` |
 | Other | Chebyshev iteration, mixed precision, iterative-solver integration (`test_itersolver`, coverage-only) |
-| MPI (`SUPPORT_MPI`) | `global_matrix`, `global_vector`, `parallel_manager`, `global_amg` (multi-rank AMG setup) |
+| MPI (`SUPPORT_MPI`) | `global_matrix`, `global_vector`, `parallel_manager`, `global_amg` (multi-rank AMG setup, and `ReBuildNumeric()` with host levels) |
 
 **Tiers (environment-variable driven, mapped to CTest categories when built inside the monorepo with
 `shared/ctest/`):**
@@ -364,12 +364,19 @@ vars: `quick` → `ROCALUTION_EMULATION_SMOKE=1`, `comprehensive` → `ROCALUTIO
 (`test:rocalution`, `test_type:comprehensive` / `test_type:full`); doc-only changes (`*.md`,
 `docs/*`) skip CI.
 
-Internal AMD **Jenkins** pipelines (`.jenkins/`) are legacy, running on older GPUs
-(gfx900 / gfx906 / gfx908) via cron across three build variants — default (`./install.sh -c`,
-HIP+OpenMP), host (`--host`), and MPI (`--host --mpi=on --no-openmp`).
+Internal AMD **Jenkins** pipelines (`.jenkins/`) run on math-ci, which reports
+`mci/rocm-libraries/precheckin(rocalution)` and `mci/rocm-libraries/codecov(rocalution)` on pull
+requests. math-ci replaces the node lists of the `.jenkins/` files with the architectures of its
+machine config (currently gfx90a, gfx942 and gfx950 on `ubuntu24-therock`). Each pipeline runs three
+build variants one after another: default (`./install.sh -c`, HIP+OpenMP) on every architecture,
+and host (`--host`) and MPI (`--host --mpi=on --no-openmp`), which are CPU-only, once each on
+whichever of those agents is free. The host build keeps OpenMP with `omp_get_max_threads()` threads,
+so its thread count depends on the agent it lands on, and a failure that depends on the thread count
+can look intermittent.
 
-> **Important nuance:** the Jenkins `runTestCommand` GTest filter is commented out, so those legacy
-> lanes run the **full** `rocalution-test` suite (no emulation subset). The intended
+> **Important nuance:** the Jenkins `runTestCommand` GTest filter is commented out, so those
+> lanes run the **full** `rocalution-test` suite (no emulation subset), after
+> `rocalution-unit-test` and `rocalution-unit-test-lifecycle`, which run unfiltered. The intended
 > `*checkin*` / `*nightly*` filters match no current test names. The modern TheRock gate, by
 > contrast, selects the subset through the `ROCALUTION_EMULATION_*` env var of the CTest category.
 
@@ -377,9 +384,9 @@ HIP+OpenMP), host (`--host`), and MPI (`--host --mpi=on --no-openmp`).
 
 | Validation Area | Required Before Merge | Owner | Notes |
 |---|---|---|---|
-| Build (HIP, host, static; MPI variant) | Yes | CI / DevOps | TheRock CI; Jenkins `precheckin`/`debug`/`staticlibrary` (legacy) |
+| Build (HIP, host, static; MPI variant) | Yes | CI / DevOps | TheRock CI; Jenkins `precheckin`/`debug`/`staticlibrary` |
 | Unit / host-backend tests | Yes | Component team | The host-backend runs of `rocalution-test` are in the CTest `standard` category (regression subset). Both unit-test binaries are installed next to the installed `CTestTestfile.cmake` in `bin/rocalution`, which runs them in every category; the emulation variables do not apply to them |
-| Integration tests | Yes | Component team | TheRock `standard` = regression subset (`ROCALUTION_EMULATION_REGRESSION=1`); legacy Jenkins runs the full suite (filter commented out) |
+| Integration tests | Yes | Component team | TheRock `standard` = regression subset (`ROCALUTION_EMULATION_REGRESSION=1`); Jenkins runs the full suite (filter commented out) |
 | Formatting | Yes | CI / DevOps | Repo-wide `pre-commit` |
 | Static analysis | No (informational) | CI / DevOps | `clang-tidy`, `codeql`, Jenkins `staticanalysis.groovy` |
 | Code coverage | No | Component team / CI | `codecov.groovy`, informational (Codecov, `rocALUTION`) |
@@ -388,15 +395,18 @@ HIP+OpenMP), host (`--host`), and MPI (`--host --mpi=on --no-openmp`).
 | Release qualification | N/A | Component team + QA + TPM | Readiness and known-gap review |
 
 **Jenkins build variants:** default `./install.sh -c` (HIP + OpenMP); host `./install.sh -c --host`;
-MPI `./install.sh -c --host --mpi=on --no-openmp`. Test path:
-`build/release/clients/staging/rocalution-test`. On gfx90a, HMM tests run with `HSA_XNACK=0/1`.
+MPI `./install.sh -c --host --mpi=on --no-openmp`. The test step runs `rocalution-unit-test`,
+`rocalution-unit-test-lifecycle` and `rocalution-test`, in that order, from
+`build/release/clients/staging` and stops at the first binary that fails. In the default build on gfx90a, it then runs
+`rocalution-test` again with `HSA_XNACK=0` and `HSA_XNACK=1` for the HMM cases; the host and MPI
+builds skip those runs.
 
 ### PR Test Classification
 
 | Status | Applies to |
 |---|---|
 | Trusted gate | TheRock CI `standard` category (regression subset) on changed projects |
-| Informational | Coverage upload (Codecov); TheRock nightly / comprehensive results; legacy Jenkins full-suite lanes |
+| Informational | Coverage upload (Codecov); TheRock nightly / comprehensive results; Jenkins full-suite lanes |
 | Unstable / flaky | No quarantine mechanism for `rocalution-test`; the unit tests skip known bugs with `KNOWN_BUG` |
 
 **Flaky / known-bug policy:** in `rocalution-test`, there is **no `known_bugs.yaml`** and no test
@@ -471,8 +481,9 @@ self-tests, `scripts/test_filter_lcov_exclusions.py`, run as part of `make cover
 
 Beyond PR validation, the intended nightly tier is `comprehensive`
 (`ROCALUTION_EMULATION_EXTENDED=1`, timeout 4 h) with broader parameter sweeps, plus additional GPU
-architectures. In practice the Jenkins `extended.groovy` lane runs the full suite because the tier
-filter is not applied via test names (see the note under CI Gates). The `full` sweep (no emulation
+architectures. In practice the Jenkins `extended.groovy` lane runs the full `rocalution-test` suite,
+because the tier filter is not applied via test names (see the note under CI Gates), plus both
+unit-test binaries. The `full` sweep (no emulation
 var) is the weekly / release-scope run.
 
 ---

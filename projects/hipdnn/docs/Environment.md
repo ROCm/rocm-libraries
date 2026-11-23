@@ -157,10 +157,10 @@ Overrides the heuristic policy order for the outer loop. Read by every `EngineHe
 
 | Value      | Description                                                |
 |------------|------------------------------------------------------------|
-| (unset)    | Use the descriptor's `HIPDNN_ATTR_ENGINEHEUR_POLICY_ORDER_EXT` attribute if set; otherwise fall back to the built-in default `[SelectionHeuristic::Config, SelectionHeuristic::StaticOrdering]`. |
+| (unset)    | Use the descriptor's `HIPDNN_ATTR_ENGINEHEUR_POLICY_ORDER_EXT` attribute if set; otherwise use the list the descriptor's heuristic mode (`HIPDNN_ATTR_ENGINEHEUR_MODE`) selects. `HIPDNN_HEUR_MODE_FALLBACK`: `[SelectionHeuristic::Config, SelectionHeuristic::StaticOrdering]`. `HIPDNN_HEUR_MODE_A` / `HIPDNN_HEUR_MODE_INSTANT`: `[SelectionHeuristic::Config, SelectionHeuristic::ModeA, SelectionHeuristic::StaticOrdering]`. `HIPDNN_HEUR_MODE_B`: `[SelectionHeuristic::Config, SelectionHeuristic::ModeB, SelectionHeuristic::StaticOrdering]`. There is no mode-independent default list. `ModeA` ranks engines by their engine-level (L1) prediction and declines, leaving `StaticOrdering` to decide, when no applicable engine has one. |
 | `<list>`   | Comma-separated tokens consulted in the order written. Each token is either a policy name (hashed via `policyNameToId`) or a raw decimal int64 policy ID. Whitespace around tokens is trimmed; empty tokens are skipped. |
 
-This variable has the **highest priority**: it overrides both the descriptor attribute and the built-in default.
+This variable has the **highest priority**: it overrides both the descriptor attribute and the list the heuristic mode selects.
 
 The list **replaces** the defaults: nothing is appended, so `SelectionHeuristic::StaticOrdering` runs only if it is listed. When the graph has applicable engines and no listed policy succeeds (each one declines, throws or is not loaded), `finalize()` fails with `HIPDNN_STATUS_INTERNAL_ERROR` ("No heuristic policy succeeded"). A value with no usable token (for example `,`) is an empty list and fails the same way. The default list is used only when the variable is unset or empty and the descriptor attribute is not set.
 
@@ -474,9 +474,9 @@ lookup.
 
 **A lookup never creates anything.** A key with no stored ranking is an ordinary miss. It leaves
 no file behind and holds no open file handle; only a write creates the versioned subtree and its
-shards. This matters because the lookup runs for every graph on the default heuristic policy list
-over an unbounded key space, so a lookup that created files would leave one empty file per distinct
-graph ever looked up.
+shards. This matters because `Config` heads every mode's heuristic policy list, so the lookup runs
+for every graph, over an unbounded key space: a lookup that created files would leave one empty
+file per distinct graph ever looked up.
 
 **Decline modes visible in `HIPDNN_LOG_LEVEL=info` logging**, each with its own distinguishable
 `[BuiltInConfig] policyFinalize:` log fragment:

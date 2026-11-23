@@ -40,6 +40,20 @@ if testdir not in sys.path:
     sys.path.insert(0, testdir)
 sys.path.append(rootdir)
 
+
+def pytest_report_header(config):
+    # pytest captures the workers' "Launching N threads" lines; show each worker's pool budget.
+    import importlib
+
+    # One --tx entry per pytest-xdist worker, after -n auto and --maxprocesses are applied.
+    workers = len(getattr(config.option, "tx", None) or []) or 1
+    try:
+        parallel = importlib.import_module("tensilelite.Common.Parallel")
+        return parallel.describePoolSizeBudget(workers)
+    except Exception as e:  # a header must never fail the session
+        return "TensileLite pool budget: unavailable (%s)" % e
+
+
 def pytest_addoption(parser):
     parser.addoption("--tensile-options")
     parser.addoption("--global-parameters")
@@ -246,28 +260,9 @@ def worker_lock_instance(worker_lock_path):
 
 @pytest.fixture
 def tensile_args(request, pytestconfig, builddir, worker_lock_path):
-    rv = []
-    if worker_lock_path:
-        rv += ["--client-lock", str(worker_lock_path)]
-
-    extraOptions = pytestconfig.getoption("--tensile-options")
-    if extraOptions is not None:
-        rv += extraOptions.split(",")
-    if pytestconfig.getoption("--global-parameters"):
-        rv += ["--global-parameters", pytestconfig.getoption("--global-parameters")]
+    from tensile_args import tensileArgs
     world = request.node.get_closest_marker("world")
-    if world:
-        rv += ["--global-parameters", f"WorldFilter={list(world.args)}"]
-    if not pytestconfig.getoption("--no-common-build"):
-        if pytestconfig.getoption("--prebuilt-client"):
-            rv += ["--prebuilt-client", pytestconfig.getoption("--prebuilt-client")]
-
-    # Forward --gpu-targets to tensilelite. Do NOT forward --build-only or
-    # --use-cache here — those are hardcoded in each test function's args.
-    if pytestconfig.getoption("--gpu-targets"):
-        rv += ["--gpu-targets", pytestconfig.getoption("--gpu-targets")]
-
-    return rv
+    return tensileArgs(pytestconfig.getoption, worker_lock_path, world.args if world else None)
 
 def visibleDeviceCount():
     """
