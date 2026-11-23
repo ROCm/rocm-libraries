@@ -53,7 +53,7 @@ if _SOURCE_PACKAGE_ROOT.is_dir() and str(_SOURCE_PACKAGE_ROOT) not in sys.path:
 
 from rocke.core.arch.target import known_arches
 from rocke.tests.pending_lanes import TEST_FILE_ROOTS, waiting_entry
-from rocke.tests.run_records import RunRecord, read_run_records
+from rocke.tests.run_records import OTHER_SHARD, RunRecord, read_run_records
 
 __all__ = [
     "LaneRun",
@@ -162,8 +162,11 @@ def lane_run(
     name: str, records: Iterable[RunRecord], source_paths: SourcePaths
 ) -> LaneRun:
     """One lane's records, by source test file and node name. A lane named by a
-    known GPU arch had that GPU; any other name, none."""
+    known GPU arch had that GPU; any other name, none. A test a shard left to
+    another shard of its entry has its verdict in that shard's records; when
+    those are missing (a lane run in part), the lane did not observe it."""
     lane = LaneRun(name, name if name in known_arches() else None)
+    other_shard: set[TestId] = set()
     for record in records:
         source = source_paths.source_of(record.file)
         if source is None:
@@ -172,8 +175,13 @@ def lane_run(
             lane.skipped_files[source] = record.reason
         elif record.event == "collect_error":
             lane.failed_files.add(source)
+        elif record.event == "deselected" and record.reason == OTHER_SHARD:
+            other_shard.add((source, record.node))
         else:
             lane.note((source, record.node), record.event, record.reason)
+    for test in other_shard:
+        if lane.progress.get(test) == "collected":
+            del lane.progress[test]
     return lane
 
 

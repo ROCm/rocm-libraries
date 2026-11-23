@@ -67,19 +67,27 @@ def _tree_with(tmp_path: Path, files: dict[str, str]) -> Path:
     return tree
 
 
-def _run_lane(tree: Path, records: Path, lane: str, *arguments: str) -> Path:
+def _run_lane(
+    tree: Path,
+    records: Path,
+    lane: str,
+    *arguments: str,
+    environment: dict[str, str] | None = None,
+) -> Path:
     """Run pytest over ``tree`` as the CI lane ``lane`` (the tests read it
-    from ``FAKE_LANE``), writing run records into ``records``."""
-    environment = rocke_subprocess_env()
-    environment.update(
+    from ``FAKE_LANE``), writing run records into ``records``, with
+    ``environment`` added to the child's."""
+    child_environment = rocke_subprocess_env()
+    child_environment.update(
         PYTEST_PLUGINS="rocke.tests.run_records",
         FAKE_LANE=lane,
         **{RECORDS_DIR_ENV: str(records)},
+        **(environment or {}),
     )
     result = subprocess.run(
         [sys.executable, "-m", "pytest", "-p", "no:cacheprovider", "-q", *arguments],
         cwd=tree,
-        env=environment,
+        env=child_environment,
         capture_output=True,
         text=True,
         check=False,
@@ -184,6 +192,39 @@ def test_each_lane_leaves_it_to_the_other():
         (BINDING_FILE, "test_unexplained_where_its_gpu_is"),
         (BINDING_FILE, "test_each_lane_leaves_it_to_the_other"),
     }
+
+
+def test_a_lane_run_in_part_leaves_the_other_shards_tests_to_the_other_lanes(
+    tmp_path,
+):
+    """A lane whose records hold one shard of an entry has no verdict on the
+    tests the other shards run: the other lanes decide those."""
+    tree = _tree_with(
+        tmp_path,
+        {
+            GFX950_FILE: _SKIPS_BY_LANE
+            + "".join(
+                f"""
+def test_waits_for_gfx950_{index}():
+    skip_for({{
+        "gfx942": skip_until_reason(GFX950_RUNNER, reason="needs a gfx950 GPU"),
+        "gfx1100": skip_until_reason(GFX950_RUNNER, reason="needs a gfx950 GPU"),
+    }})
+"""
+                for index in range(6)
+            ),
+        },
+    )
+    shard_lane = _run_lane(
+        tree,
+        tmp_path / "gfx942",
+        "gfx942",
+        "-p",
+        "rocke.tests.ctest_shard",
+        environment={"ROCKE_TEST_SHARD": "0/3"},
+    )
+    full_lane = _run_lane(tree, tmp_path / "gfx1100", "gfx1100")
+    assert _audit(tree, {"gfx942": shard_lane, "gfx1100": full_lane}) == {}
 
 
 def test_a_test_no_lane_collected_is_seen_through_the_universe(tmp_path):

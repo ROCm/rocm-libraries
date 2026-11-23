@@ -28,8 +28,10 @@ after the file (``[Class::]test[params]``). Its ``event`` is one of:
   name); ``reason`` is pytest's skip reason;
 - ``collect_error``: its file failed to collect (no node name).
 
-A test with a ``collected`` record and no other was dropped by another filter
-(a CI shard runs only its share of an entry's tests).
+A test a CI shard leaves to another shard of its entry is ``deselected`` with
+the reason :data:`OTHER_SHARD` (``rocke.tests.ctest_shard``): the run of that
+other shard has its verdict. A test with a ``collected`` record and no other
+was dropped by another filter.
 """
 
 from __future__ import annotations
@@ -49,6 +51,7 @@ from .lanes import LANES, skip_until_reason
 
 __all__ = [
     "EVENTS",
+    "OTHER_SHARD",
     "RECORDS_DIR_ENV",
     "RunRecord",
     "note_deselection",
@@ -61,6 +64,8 @@ RECORDS_DIR_ENV = "ROCKE_RUN_RECORDS_DIR"
 EVENTS = frozenset(
     {"collected", "deselected", "ran", "skipped", "module_skipped", "collect_error"}
 )
+# The deselection reason of a test a CI shard leaves to another shard.
+OTHER_SHARD = "deselected: another shard of this entry runs it"
 _SKIP_PREFIX = "Skipped: "
 _DESELECTION_REASON = pytest.StashKey[str]()
 

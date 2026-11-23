@@ -83,6 +83,7 @@ from .ci_shard import (
     shard_of,
     unsharded_environment,
 )
+from .run_records import OTHER_SHARD, note_deselection
 
 __all__ = [
     "ACTIVATION_FLAG",
@@ -207,6 +208,8 @@ def select_items(
     for item, key in zip(items, keys):
         (keep if key in kept else drop).append(item)
     if drop:
+        for item in drop:
+            note_deselection(item, OTHER_SHARD)
         config.hook.pytest_deselected(items=drop)
         items[:] = keep
 

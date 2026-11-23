@@ -17,7 +17,12 @@ from pathlib import Path
 
 import pytest
 from rocke.tests.lanes import EXHAUSTIVE_CASES, SOURCE_TREE_CASES, skip_until_reason
-from rocke.tests.run_records import RECORDS_DIR_ENV, RunRecord, read_run_records
+from rocke.tests.run_records import (
+    OTHER_SHARD,
+    RECORDS_DIR_ENV,
+    RunRecord,
+    read_run_records,
+)
 from rocke.tests.subprocess_launcher import rocke_subprocess_env
 
 _CHILD_TIMEOUT_SECONDS = 120
@@ -309,3 +314,40 @@ def test_reading_a_run_needs_its_records_directory(tmp_path):
         ValueError, match="expected the directory ROCKE_RUN_RECORDS_DIR"
     ):
         list(read_run_records(tmp_path / "absent"))
+
+
+def test_a_test_another_shard_runs_is_recorded_as_left_to_it(tmp_path):
+    """The shard plugin says why it deselects a test: another shard of the
+    entry runs it, so a lane run in part does not read as one that left the
+    test out."""
+    tree = tmp_path / "tree"
+    tree.mkdir()
+    _write(
+        tree, "test_many.py", "".join(f"def test_{i}():\n    pass\n" for i in range(8))
+    )
+    records = tmp_path / "records"
+    environment = rocke_subprocess_env()
+    environment.update(
+        PYTEST_PLUGINS="rocke.tests.run_records",
+        ROCKE_TEST_SHARD="0/2",
+        **{RECORDS_DIR_ENV: str(records)},
+    )
+    result = subprocess.run(
+        [sys.executable, "-m", "pytest", "-p", "no:cacheprovider"]
+        + ["-p", "rocke.tests.ctest_shard"],
+        cwd=tree,
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=_CHILD_TIMEOUT_SECONDS,
+    )
+    assert result.returncode == 0, result.stdout[-3000:] + result.stderr[-3000:]
+    events = _events(records)
+    ran = {node for _, node, event, _ in events if event == "ran"}
+    left = {node for _, node, event, why in events if event == "deselected"}
+    assert ran and left and ran.isdisjoint(left)
+    assert ran | left == {f"test_{i}" for i in range(8)}
+    assert {why for _, _, event, why in events if event == "deselected"} == {
+        OTHER_SHARD
+    }
