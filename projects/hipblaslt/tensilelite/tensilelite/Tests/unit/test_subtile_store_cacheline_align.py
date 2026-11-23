@@ -129,7 +129,7 @@ def test_blend_is_in_place_and_ordered(rebuildMask):
     w = _writer()
     m = Module("align")
     X = ("c", 8)
-    w._emitCachelineAlignBlendAndStores(m, _addr(128), 4, False, H_EVEN, X, "ValuC+12", marker=14,
+    w._emitCachelineAlignBlendAndStores(m, _addr(128), 4, False, H_EVEN, X, "ValuC+12",
                               rebuildMask=rebuildMask)
     insts = _insts(m)
     texts = [_text(i) for i in insts]

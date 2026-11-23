@@ -4789,7 +4789,7 @@ class GlobalWriteBatchWriter:
     if _soffTmp is not None:
       self._epilogScratchFree(_soffTmp)
 
-  def _emitCachelineAlignBlendAndStores(self, module, addrCalcA, tt0A, forceSlc, H, X, W, marker, rebuildMask):
+  def _emitCachelineAlignBlendAndStores(self, module, addrCalcA, tt0A, forceSlc, H, X, W, rebuildMask):
     """In-place DPP blend of two permlaned pack quads and the two full-line stores.
     H = pair A's quad (m-rows 0-31 of the line), X = pair B's quad (m-rows 32-63), W = a
     scratch vgpr name, T = vgprCachelineAlignTmp, address = vgprAddrScratch (only read).
@@ -4802,8 +4802,6 @@ class GlobalWriteBatchWriter:
     unit there, so nothing but H may be carried across)."""
     T = self.cvtVgprStruct.vgprCachelineAlignTmp
     addr = self.cvtVgprStruct.vgprAddrScratch
-    if __import__("os").environ.get("STORE_CACHELINE_ALIGN_MARK"):
-      module.add(SNop(waitState=marker, comment=f"STORE_CACHELINE_ALIGN_MARK={marker}"))
     module.add(VAndB32(dst=vgpr(T), src0=1, src1=vgpr("Serial"), comment="lane parity"))
     module.add(VCmpEQU32(dst=VCC(), src0=vgpr(T), src1=0, comment="VCC = even lanes"))
     for k in range(4):
@@ -4853,7 +4851,7 @@ class GlobalWriteBatchWriter:
         ac, s0, s1, prefixOffset, tt0=t, blockIdxM=t, blockIdxN=blockIdxN, interior=True, vPackOverride=q))
       module.add(self._emit16bitSubtilePairedStorePhase2(ac, tt0=t, interior=True, forceSlc=forceSlc,
                                                          vPackOverride=q, emitStore=False))
-    self._emitCachelineAlignBlendAndStores(module, addrA, tt0A, forceSlc, H, X, W, marker=16, rebuildMask=False)
+    self._emitCachelineAlignBlendAndStores(module, addrA, tt0A, forceSlc, H, X, W, rebuildMask=False)
     # gfx940+: a VALU that overwrites the data of a store wider than 8 bytes needs 2 wait
     # states. The next line's first convert writes H straight after the store that read it.
     module.add(SNop(waitState=1, comment="2 wait states: WAR hazard between store src and next pack dst"))
@@ -4923,7 +4921,7 @@ class GlobalWriteBatchWriter:
     if hold is not None:
       prep(X)
       self._emitCachelineAlignBlendAndStores(module, hold["addrCalc"], hold["tt0"], forceSlc, H, X, W,
-                                   marker=14, rebuildMask=True)
+                                   rebuildMask=True)
       states.subtileStagedHold = None
       return module
 
