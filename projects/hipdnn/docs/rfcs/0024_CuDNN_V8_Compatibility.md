@@ -147,8 +147,8 @@ finalized operation descriptors, so the control flow maps one to one. The data d
 - cuDNN's parameter descriptors (convolution, pointwise, matmul, reduction, resample, RNG) don't exist;
   hipDNN sets those attributes on the operation;
 - pointwise slots differ (X/B/T/Y/DX/DY vs IN_0/IN_1/IN_2/OUT_0);
-- hipDNN's heuristic descriptor has one mode, FALLBACK; cuDNN's modes A and B correspond to hipDNN
-  prediction policies, set as a policy order;
+- hipDNN's heuristic descriptor has the modes FALLBACK, A (alias INSTANT) and B, which match cuDNN's and
+  select the hipDNN policy list (modes A and B select the prediction policies);
 - hipDNN has no JSON plans, alpha/beta or unified norm operation, and reports numerical notes only per engine ([RFC 0025](./0025_NumericalNotes.md)); knobs are strings and
   engine IDs are 64-bit hashes;
 - hipDNN allocates new descriptors on get, where cuDNN fills the caller's.
@@ -243,8 +243,9 @@ runs no heuristics and needs no GPU.
 
 ### 3.5 Engine selection
 
-- **Modes.** As on the v9 graph API, A and B select hipDNN's ModeA and ModeB prediction policies, sent
-  as the policy order `[Config, ModeA|ModeB, StaticOrdering]` on a FALLBACK-mode heuristic; the v0.x
+- **Modes.** As on the v9 graph API, A and B select hipDNN's ModeA and ModeB prediction policies, by setting the
+  backend heuristic mode (`HIPDNN_HEUR_MODE_A` / `_B`, whose policy list is `[Config, ModeA|ModeB,
+  StaticOrdering]`; FALLBACK sets `HIPDNN_HEUR_MODE_FALLBACK`, the static order); the v0.x
   builders treat INSTANT as A (NVIDIA's alias). They only reorder: every mode returns the FALLBACK
   engines, each with its default config, so mode B's predicted knobs and the policies' ranking metric
   are not carried. `get_heuristics_list` accepts `HeurMode_t::OPENSOURCE`, which runs fallback
@@ -461,7 +462,7 @@ Each phase builds and is tested on its own. Each adds its own `KNOWN_DIVERGENCES
 | Compile-only targets | JSON-off builds; `find_plan.h`, `get_plan.h` and `EngineConfigGenerator.h` alone, under each JSON opt-out; logging and SDPA off; the public surface pins as C++20 |
 | Integration, real backend, no GPU | Every lowered operation passes hipDNN's descriptor validation |
 | Integration, test plugins, GPU | Engine enumeration, plans, execute (including on another handle), knobs, multiple engines, plan search |
-| GPU samples (`samples/cudnn_shim/*V8.cpp`; MIOpen, hipBLASLt, hip-kernel) | Numerical results against a CPU reference for conv fprop / dgrad / wgrad, conv + bias + ReLU, pointwise ReLU, matmul + bias + activation, batch norm forward training and backward, layer norm forward and backward, and resample forward and backward. Each test fails when fewer variants run than its `--require-ran` floor or when a variant named by `--require-variant` (the fp32 NCHW variants of every sample with a non-zero floor) does not run, unless `--waive-arch` names a stem the device's base arch starts with; `conv_bias_relu_v8` waives gfx90a, where the MIOpen provider disables conv + bias + activation fusion. Variants with no engine are skipped: matmul (hipBLASLt only; none on gfx115x under Windows), layer norm and resample (hip-kernel-provider only), `CUDNN_CONVOLUTION` mode and asymmetric padding (MIOpen rejects them). The reduction sample is built but no provider runs reduction, so it always reports Skipped. TheRock's hipdnn-samples job loads only the MIOpen provider, so CI skips matmul, layer norm and resample (their floors are 0) until a TheRock change that loads the hipBLASLt and hip-kernel providers reaches this repository's pin; until then manual gfx942 runs cover them. Overhead (§2) is reported under ctest label `perf`. The v8 samples reject `--engine-id` and `--engine-name` |
+| GPU samples (`samples/cudnn_shim/*V8.cpp`; MIOpen, hipBLASLt, hip-kernel) | Numerical results against a CPU reference for conv fprop / dgrad / wgrad, conv + bias + ReLU, pointwise ReLU, matmul + bias + activation, batch norm forward training and backward, layer norm forward and backward, resample forward and backward, and fp32 ADD and MAX reduction. Each test fails when fewer variants run than its `--require-ran` floor or when a variant named by `--require-variant` (the fp32 NCHW variants of every sample with a non-zero floor) does not run, unless `--waive-arch` names a stem the device's base arch starts with; `conv_bias_relu_v8` waives gfx90a, where the MIOpen provider disables conv + bias + activation fusion. Variants with no engine are skipped: matmul (hipBLASLt only; none on gfx115x under Windows), layer norm and resample (hip-kernel-provider only), `CUDNN_CONVOLUTION` mode and asymmetric padding (MIOpen rejects them), and fp16 and bf16 reduction (the sample writes y in fp32, and the MIOpen provider needs x and y in one data type). TheRock's hipdnn-samples job loads only the MIOpen provider, so CI skips matmul, layer norm and resample (their floors are 0) until a TheRock change that loads the hipBLASLt and hip-kernel providers reaches this repository's pin; until then manual gfx942 runs cover them. Overhead (§2) is reported under ctest label `perf`. The v8 samples reject `--engine-id` and `--engine-name` |
 | v9 sample corpus | Existing v9 behavior unchanged |
 | NVIDIA legacy samples | Source compatibility; each case is judged against its manifest tier: `RUN_CLEAN`, `XFAIL_RUN`, or `VACUOUS`, which must run without crashing and is reported as skipped ([Reference §5](./0024_CuDNN_V8_Compatibility_Reference.md#5-legacy-sample-catalogue)). The corpus is pinned by commit: configure fails with E22 when a git checkout is at any other commit; a supplied corpus that is not a readable git checkout only warns, and the E20 version check still applies |
 | PyTorch | Not tested in CI: a PyTorch build against the compatibility layer is planned for TheRock's PyTorch CI. The PyTorch-facing surface is pinned by the compile-only `TestCudnnCompatibilityV8Tu` |

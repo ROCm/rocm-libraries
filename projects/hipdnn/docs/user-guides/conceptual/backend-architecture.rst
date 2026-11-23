@@ -118,8 +118,8 @@ Frontend API control flow
                                                                      prediction-ranked policies only]
               [No engine details are loaded here; see get_knobs_for_engine()]
         e. initializeEngineConfig() [selects best engine config from heuristic results]
-     4. graph.check_support()         [validates descriptors exist]
-     5. graph.build_plans()          [finalizes the active plan; on failure tries the other ranked plans]
+     4. graph.check_support()         [validates descriptors exist; with an engine filter set, checks that a created plan passes the filters]
+     5. graph.build_plans()          [finalizes the active plan; if a filter removes it or it fails, tries the other ranked plans]
         a. Backend: hipdnnBackendSetAttribute(execPlan, ENGINE_CONFIG, engineConfig)
         b. Backend: hipdnnBackendFinalize(execPlan)
            -> ExecutionPlanDescriptor::finalize()
@@ -127,9 +127,10 @@ Frontend API control flow
               -> Plugin: hipdnnEnginePluginGetWorkspaceSize()
               -> Record the device of the graph handle's stream
         c. If finalize fails (any error), log a warning and repeat a-b for another
-           ranked plan (the list is scanned from the top) until one finalizes. If none
-           does, build_plans() returns GRAPH_EXECUTION_PLAN_CREATION_FAILED listing
-           every attempted engine's failure.
+           ranked plan (the list is scanned from the top) until one finalizes. A plan
+           an engine filter removes is skipped before a-b. If none finalizes,
+           build_plans() returns GRAPH_EXECUTION_PLAN_CREATION_FAILED listing every
+           skipped or failed engine and its reason.
 
 
 ``graph.get_workspace_size()``
@@ -231,26 +232,30 @@ partial metadata.
 .. code::
 
    Frontend: graph.get_ranked_engine_ids(ids, modes)
+      for each requested mode, in the order given:
       -> detail::createEngineHeuristicDescriptorForGraph()
          -> Backend: hipdnnBackendCreateDescriptor(HEURISTIC)
          -> Backend: hipdnnBackendSetAttribute(heuristic, GRAPH, graphDesc)
-         -> Backend: hipdnnBackendSetAttribute(heuristic, HEURISTIC_MODE, modes)
-         -> Backend: hipdnnBackendSetAttribute(heuristic, POLICY_ORDER_EXT, policyIds)
-            [only when HeuristicMode::A or ::B is requested]
+         -> Backend: hipdnnBackendSetAttribute(heuristic, HEURISTIC_MODE, mode)
+            [HIPDNN_HEUR_MODE_A, _B or _FALLBACK]
          -> Backend: hipdnnBackendSetAttribute(heuristic, RANKING_METRIC_EXT, metric)
             [only when graph.set_ranking_metric() was called]
          -> Backend: hipdnnBackendFinalize(heuristic)
             -> Plugin: hipdnnEnginePluginGetApplicableEngineIds()  [one pass across plugins]
             -> Prediction policy: query engine/configuration predictions in the metric
-               [only when ModeA or ModeB is reached in the policy order]
+               [only when ModeA or ModeB is reached in the policy list]
       -> detail::getEngineConfigs(configs, ids, heuristicDesc)
+      -> results concatenated across modes; an engine an earlier mode returned is skipped
 
-``HeuristicMode::A`` and ``HeuristicMode::B`` are policy requests, not backend modes.
-The frontend hashes them into the descriptor's ordered policy list
-(``HIPDNN_ATTR_ENGINEHEUR_POLICY_ORDER_EXT``) as ``SelectionHeuristic::ModeA`` and
-``SelectionHeuristic::ModeB``, bracketed by ``SelectionHeuristic::Config`` first and
-``SelectionHeuristic::StaticOrdering`` last; ``HIPDNN_ATTR_ENGINEHEUR_MODE`` still
-carries a single ``HIPDNN_HEUR_MODE_FALLBACK``. Mode A requests graph-level predictions
+``HeuristicMode::A``, ``HeuristicMode::B`` and ``HeuristicMode::FALLBACK`` map to the
+backend heuristic modes ``HIPDNN_HEUR_MODE_A``, ``HIPDNN_HEUR_MODE_B`` and
+``HIPDNN_HEUR_MODE_FALLBACK`` set through ``HIPDNN_ATTR_ENGINEHEUR_MODE``
+(``HeuristicMode::OPENSOURCE`` maps to fallback). The frontend does not set
+``HIPDNN_ATTR_ENGINEHEUR_POLICY_ORDER_EXT``; that attribute, like the
+``HIPDNN_HEUR_POLICY_ORDER`` environment variable, is only an explicit override of the
+list the mode selects. The frontend runs one heuristic query per requested mode, in the
+order given, and concatenates the results without repeating an engine; an empty mode
+list is an error. Mode A requests graph-level predictions
 without materializing candidate catalogs. Mode B first requests an exact, calibrated
 configuration prediction for each engine and uses its graph-level prediction if that is
 unavailable or invalid. Both rank usable predictions best first in the ranking
@@ -259,6 +264,19 @@ unscored applicable engines afterward. The metric comes from ``HIPDNN_HEUR_RANKI
 else ``HIPDNN_ATTR_ENGINEHEUR_RANKING_METRIC_EXT``, else ``tflops``; an engine with no
 model for it is unscored rather than ranked by another metric. If all predictions are
 unusable, the policy declines and the next policy in the order runs.
+
+When no explicit policy order is set, the heuristic mode selects the list; there is
+no mode-independent default list. ``HIPDNN_HEUR_MODE_FALLBACK`` is model-free:
+``SelectionHeuristic::Config``, then ``SelectionHeuristic::StaticOrdering``.
+``HIPDNN_HEUR_MODE_A`` (alias ``HIPDNN_HEUR_MODE_INSTANT``) uses
+``SelectionHeuristic::Config``, ``SelectionHeuristic::ModeA``, then
+``SelectionHeuristic::StaticOrdering``; ``HIPDNN_HEUR_MODE_B`` uses
+``SelectionHeuristic::Config``, ``SelectionHeuristic::ModeB``, then
+``SelectionHeuristic::StaticOrdering``. ``SelectionHeuristic::Config`` runs first in
+every list, so ``HIPDNN_HEUR_CONFIG_PATH`` rules and the exact-match autotune cache win.
+The frontend's default mode list is ``{HeuristicMode::A}``, so a call that names no mode
+ranks engines by their graph-level predictions and selects as ``FALLBACK`` does wherever
+no applicable engine has one.
 
 Heuristic results carry the engine ID, the ranking metric and, for scored
 configurations, the owned knob tuple. Plan construction preserves those settings to

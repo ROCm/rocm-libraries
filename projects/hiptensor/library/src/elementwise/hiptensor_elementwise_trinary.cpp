@@ -51,7 +51,6 @@ hiptensorStatus_t hiptensorElementwiseTrinaryExecute(const hiptensorHandle_t han
 
     using hiptensor::PlancacheAutotuneMgr;
     auto& autotuneMgr = PlancacheAutotuneMgr::instance();
-    autotuneMgr->startAutotune(hiptensor::AutotuneOps::Autotune_TrinaryOp);
 
     hiptensorOperationDescriptor_t    opDes      = plan->mOpDesc;
     const hiptensorTensorDescriptor_t descA      = opDes->mDescA;
@@ -163,12 +162,13 @@ hiptensorStatus_t hiptensorElementwiseTrinaryExecute(const hiptensorHandle_t han
         gammaD = hiptensor::readVal<double>(gamma, hiptensor::convertToComputeType(typeScalar));
     }
 
-    autotuneMgr->setAutotune<hiptensor::ElementwiseSolution>(
+    auto trial = autotuneMgr->setAutotune<hiptensor::ElementwiseSolution>(
         hiptensor::AutotuneOps::Autotune_TrinaryOp, handle, plan);
 
     std::vector<hiptensor::ElementwiseSolution*> solutions;
-    if(plan->mPref->mSolution != nullptr)
-        solutions.push_back((hiptensor::ElementwiseSolution*)plan->mPref->mSolution);
+    // Use the trial's solution: another thread sharing this plan may update the plan's.
+    if(auto* planSolution = trial.solution())
+        solutions.push_back(planSolution);
     else
     {
         auto& instances = hiptensor::ElementwiseSolutionInstances::instance();
@@ -184,23 +184,23 @@ hiptensorStatus_t hiptensorElementwiseTrinaryExecute(const hiptensorHandle_t han
                                      hiptensor::ElementwiseExecutionSpaceType_t::DEVICE);
     }
 
-    bool canRun = false;
     for(auto pSolution : solutions)
     {
-        canRun = pSolution->initArgs({alphaD, betaD, gammaD},
-                                     {descA->mLengths, descB->mLengths, descC->mLengths},
-                                     {descA->mStrides, descB->mStrides, descC->mStrides},
-                                     {std::vector<int32_t>(modeA, modeA + descA->mLengths.size()),
-                                      std::vector<int32_t>(modeB, modeB + descB->mLengths.size()),
-                                      std::vector<int32_t>(modeC, modeC + descC->mLengths.size())},
-                                     {descD->mLengths},
-                                     {descD->mStrides},
-                                     {std::vector<int32_t>(modeD, modeD + descD->mLengths.size())},
-                                     {opABC, opAB, opA, opB, opC},
-                                     {A, B, C},
-                                     {D});
+        auto args
+            = pSolution->makeArgs({alphaD, betaD, gammaD},
+                                  {descA->mLengths, descB->mLengths, descC->mLengths},
+                                  {descA->mStrides, descB->mStrides, descC->mStrides},
+                                  {std::vector<int32_t>(modeA, modeA + descA->mLengths.size()),
+                                   std::vector<int32_t>(modeB, modeB + descB->mLengths.size()),
+                                   std::vector<int32_t>(modeC, modeC + descC->mLengths.size())},
+                                  {descD->mLengths},
+                                  {descD->mStrides},
+                                  {std::vector<int32_t>(modeD, modeD + descD->mLengths.size())},
+                                  {opABC, opAB, opA, opB, opC},
+                                  {A, B, C},
+                                  {D});
 
-        if(canRun)
+        if(args.mValid)
         {
             float time = 0.0f;
             // Perform elementwise trinary with timing if LOG_LEVEL_PERF_TRACE
@@ -209,24 +209,25 @@ hiptensorStatus_t hiptensorElementwiseTrinaryExecute(const hiptensorHandle_t han
                 using hiptensor::HiptensorOptions;
                 auto& options = HiptensorOptions::instance();
 
-                time = (*pSolution)(StreamConfig{
-                    stream, // stream id
-                    true, // time_kernel
-                    0, // log_level
-                    options->coldRuns(), // cold_niters
-                    options->hotRuns(), // nrepeat
-                });
+                time = pSolution->run(args,
+                                      StreamConfig{
+                                          stream, // stream id
+                                          true, // time_kernel
+                                          0, // log_level
+                                          options->coldRuns(), // cold_niters
+                                          options->hotRuns(), // nrepeat
+                                      });
                 if(time < 0)
                 {
                     return HIPTENSOR_STATUS_CK_ERROR;
                 }
 
-                auto flops = std::size_t(8) * pSolution->problemSize();
+                auto flops = std::size_t(8) * args.mSize;
                 auto bytes = (hiptensor::hiptensorDataTypeSize(descA->mType)
                               + hiptensor::hiptensorDataTypeSize(descB->mType)
                               + hiptensor::hiptensorDataTypeSize(descC->mType)
                               + hiptensor::hiptensorDataTypeSize(descD->mType))
-                             * pSolution->problemSize();
+                             * args.mSize;
 
                 hiptensor::PerfMetrics metrics = {
                     pSolution->uid(), // id
@@ -250,16 +251,15 @@ hiptensorStatus_t hiptensorElementwiseTrinaryExecute(const hiptensorHandle_t han
             // Perform elementwise trinary without timing
             else
             {
-                time = (*pSolution)(StreamConfig{stream, false});
+                time = pSolution->run(args, StreamConfig{stream, false});
                 if(time < 0)
                 {
                     return HIPTENSOR_STATUS_CK_ERROR;
                 }
             }
 
-            plan->mPref->mSolution = pSolution;
-            autotuneMgr->saveAutotune<hiptensor::ElementwiseSolution>(
-                hiptensor::AutotuneOps::Autotune_TrinaryOp, time, handle, plan);
+            plan->mPref->mSolution.store(pSolution);
+            trial.save(pSolution, time);
 
             return HIPTENSOR_STATUS_SUCCESS;
         }

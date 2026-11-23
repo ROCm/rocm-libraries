@@ -248,7 +248,6 @@ namespace rocalution
 
             Rocalution_Backend_Descriptor backend       = this->local_backend_;
             unsigned int                  matrix_format = this->GetFormat();
-            int                           blockdim      = this->GetBlockDimension();
 
             // init host matrix
             if(this->matrix_ == this->matrix_host_)
@@ -860,10 +859,10 @@ namespace rocalution
         if(this->GetFormat() != BCSR)
         {
             assert(blockdim > 1);
-        }
 
-        //  this->MoveToHost();
-        this->ConvertToBCSR(blockdim);
+            //  this->MoveToHost();
+            this->ConvertToBCSR(blockdim);
+        }
 
         this->matrix_->LeaveDataPtrBCSR(row_offset, col, val, blockdim);
     }
@@ -1506,7 +1505,9 @@ namespace rocalution
         case rocsparseio_format_sparse_gebsx:
         {
             LOG_INFO("ReadFileRSIO: filename=" << filename << "; format=BCSR");
-            this->ConvertToBCSR(blockdim);
+
+            // Any valid block dimension, the file sets it
+            this->ConvertToBCSR(2);
             break;
         }
         case rocsparseio_format_sparse_coo:
@@ -2112,11 +2113,19 @@ namespace rocalution
                || (matrix_format == BCSR) || (matrix_format == COO) || (matrix_format == DIA)
                || (matrix_format == ELL) || (matrix_format == HYB));
 
+        if((matrix_format == BCSR) && (blockdim <= 1) && (this->GetFormat() == BCSR))
+        {
+            blockdim = this->GetBlockDimension();
+        }
+
+        assert((matrix_format != BCSR) || (blockdim > 1));
+
         LOG_VERBOSE_INFO(5,
                          "Converting " << _matrix_format_names[matrix_format] << " <- "
                                        << _matrix_format_names[this->GetFormat()]);
 
-        if(this->GetFormat() != matrix_format)
+        if(this->GetFormat() != matrix_format
+           || (matrix_format == BCSR && this->GetBlockDimension() != blockdim))
         {
             if((this->GetFormat() != CSR) && (matrix_format != CSR))
             {
@@ -5138,10 +5147,12 @@ namespace rocalution
         if(err == false)
         {
             LocalMatrix<ValueType> mat_host;
-            mat_host.ConvertTo(mat.GetFormat(), this->GetBlockDimension());
+            mat_host.ConvertTo(mat.GetFormat(), mat.GetBlockDimension());
             mat_host.CopyFrom(mat);
 
             this->MoveToHost();
+
+            int blockdim = this->GetBlockDimension();
 
             this->ConvertToCSR();
             mat_host.ConvertToCSR();
@@ -5158,7 +5169,7 @@ namespace rocalution
                 LOG_VERBOSE_INFO(
                     2, "*** warning: LocalMatrix::MatrixAdd() is performed in CSR format");
 
-                this->ConvertTo(mat.GetFormat(), this->GetBlockDimension());
+                this->ConvertTo(mat.GetFormat(), blockdim);
             }
 
             if(mat.is_accel_() == true)
@@ -6450,7 +6461,7 @@ namespace rocalution
                 LocalMatrix<ValueType> mat_host;
                 LocalVector<int>       conn_host;
 
-                mat_host.ConvertTo(this->GetFormat());
+                mat_host.ConvertTo(this->GetFormat(), this->GetBlockDimension());
                 mat_host.CopyFrom(*this);
                 conn_host.CopyFrom(connections);
 
@@ -7222,7 +7233,7 @@ namespace rocalution
             if(err == false)
             {
                 LocalMatrix<ValueType> mat_host;
-                mat_host.ConvertTo(this->GetFormat());
+                mat_host.ConvertTo(this->GetFormat(), this->GetBlockDimension());
                 mat_host.CopyFrom(*this);
 
                 // Move to host
@@ -7306,6 +7317,7 @@ namespace rocalution
             // S_ij = { 1   if i != j and -a_ij > eps * max(-a_ik) for k != i }
             //        { 0   otherwise                                         }
             //
+            // where row i is scaled by -1 first if its diagonal is negative.
             // This means, S_ij is 1, only if i strongly depends on j.
             // S has been extended to also work with matrices that do not have
             // fully non-positive off-diagonal entries.
@@ -8696,6 +8708,7 @@ namespace rocalution
 
         assert(vec.GetSize() == this->GetM());
         assert(idx >= 0);
+        assert(idx < this->GetN());
 
         assert(((this->matrix_ == this->matrix_host_) && (vec.vector_ == vec.vector_host_))
                || ((this->matrix_ == this->matrix_accel_) && (vec.vector_ == vec.vector_accel_)));
@@ -8704,66 +8717,62 @@ namespace rocalution
         this->Check();
 #endif
 
-        if(this->GetNnz() > 0)
+        bool err = this->matrix_->ReplaceColumnVector(idx, *vec.vector_);
+
+        // LCOV_EXCL_START
+
+        if((err == false) && (this->is_host_() == true) && (this->GetFormat() == CSR))
         {
-            bool err = this->matrix_->ReplaceColumnVector(idx, *vec.vector_);
+            LOG_INFO("Computation of LocalMatrix::ReplaceColumnVector() failed");
+            this->Info();
+            FATAL_ERROR(__FILE__, __LINE__);
+        }
 
-            // LCOV_EXCL_START
+        if(err == false)
+        {
+            LocalVector<ValueType> vec_host;
+            vec_host.CopyFrom(vec);
 
-            if((err == false) && (this->is_host_() == true) && (this->GetFormat() == CSR))
-            {
-                LOG_INFO("Computation of LocalMatrix::ReplaceColumnVector() failed");
-                this->Info();
-                FATAL_ERROR(__FILE__, __LINE__);
-            }
+            // Move to host
+            this->MoveToHost();
+
+            // try again
+            err = this->matrix_->ReplaceColumnVector(idx, *vec_host.vector_);
 
             if(err == false)
             {
-                LocalVector<ValueType> vec_host;
-                vec_host.CopyFrom(vec);
+                // Convert to CSR
+                unsigned int format   = this->GetFormat();
+                int          blockdim = this->GetBlockDimension();
+                this->ConvertToCSR();
 
-                // Move to host
-                this->MoveToHost();
-
-                // try again
-                err = this->matrix_->ReplaceColumnVector(idx, *vec_host.vector_);
-
-                if(err == false)
+                if(this->matrix_->ReplaceColumnVector(idx, *vec_host.vector_) == false)
                 {
-                    // Convert to CSR
-                    unsigned int format   = this->GetFormat();
-                    int          blockdim = this->GetBlockDimension();
-                    this->ConvertToCSR();
-
-                    if(this->matrix_->ReplaceColumnVector(idx, *vec_host.vector_) == false)
-                    {
-                        LOG_INFO("Computation of LocalMatrix::ReplaceColumnVector() failed");
-                        this->Info();
-                        FATAL_ERROR(__FILE__, __LINE__);
-                    }
-
-                    if(format != CSR)
-                    {
-                        LOG_VERBOSE_INFO(2,
-                                         "*** warning: LocalMatrix::ReplaceColumnVector() is "
-                                         "performed in CSR format");
-
-                        this->ConvertTo(format, blockdim);
-                    }
+                    LOG_INFO("Computation of LocalMatrix::ReplaceColumnVector() failed");
+                    this->Info();
+                    FATAL_ERROR(__FILE__, __LINE__);
                 }
 
-                if(vec.is_accel_() == true)
+                if(format != CSR)
                 {
-                    LOG_VERBOSE_INFO(
-                        2,
-                        "*** warning: LocalMatrix::ReplaceColumnVector() is performed on the host");
+                    LOG_VERBOSE_INFO(2,
+                                     "*** warning: LocalMatrix::ReplaceColumnVector() is "
+                                     "performed in CSR format");
 
-                    this->MoveToAccelerator();
+                    this->ConvertTo(format, blockdim);
                 }
             }
 
-            // LCOV_EXCL_STOP
+            if(vec.is_accel_() == true)
+            {
+                LOG_VERBOSE_INFO(
+                    2, "*** warning: LocalMatrix::ReplaceColumnVector() is performed on the host");
+
+                this->MoveToAccelerator();
+            }
         }
+
+        // LCOV_EXCL_STOP
 
 #ifdef DEBUG_MODE
         this->Check();
@@ -8778,6 +8787,7 @@ namespace rocalution
         assert(vec != NULL);
         assert(vec->GetSize() == this->GetM());
         assert(idx >= 0);
+        assert(idx < this->GetN());
 
         assert(((this->matrix_ == this->matrix_host_) && (vec->vector_ == vec->vector_host_))
                || ((this->matrix_ == this->matrix_accel_) && (vec->vector_ == vec->vector_accel_)));
@@ -8786,57 +8796,53 @@ namespace rocalution
         this->Check();
 #endif
 
-        if(this->GetNnz() > 0)
+        bool err = this->matrix_->ExtractColumnVector(idx, vec->vector_);
+
+        // LCOV_EXCL_START
+
+        if((err == false) && (this->is_host_() == true) && (this->GetFormat() == CSR))
         {
-            bool err = this->matrix_->ExtractColumnVector(idx, vec->vector_);
+            LOG_INFO("Computation of LocalMatrix::ExtractColumnVector() failed");
+            this->Info();
+            FATAL_ERROR(__FILE__, __LINE__);
+        }
 
-            // LCOV_EXCL_START
+        if(err == false)
+        {
+            LocalMatrix<ValueType> mat_host;
+            mat_host.ConvertTo(this->GetFormat(), this->GetBlockDimension());
+            mat_host.CopyFrom(*this);
 
-            if((err == false) && (this->is_host_() == true) && (this->GetFormat() == CSR))
+            // Move to host
+            vec->MoveToHost();
+
+            // Convert to CSR
+            mat_host.ConvertToCSR();
+
+            if(mat_host.matrix_->ExtractColumnVector(idx, vec->vector_) == false)
             {
                 LOG_INFO("Computation of LocalMatrix::ExtractColumnVector() failed");
-                this->Info();
+                mat_host.Info();
                 FATAL_ERROR(__FILE__, __LINE__);
             }
 
-            if(err == false)
+            if(this->GetFormat() != CSR)
             {
-                LocalMatrix<ValueType> mat_host;
-                mat_host.ConvertTo(this->GetFormat(), this->GetBlockDimension());
-                mat_host.CopyFrom(*this);
-
-                // Move to host
-                vec->MoveToHost();
-
-                // Convert to CSR
-                mat_host.ConvertToCSR();
-
-                if(mat_host.matrix_->ExtractColumnVector(idx, vec->vector_) == false)
-                {
-                    LOG_INFO("Computation of LocalMatrix::ExtractColumnVector() failed");
-                    mat_host.Info();
-                    FATAL_ERROR(__FILE__, __LINE__);
-                }
-
-                if(this->GetFormat() != CSR)
-                {
-                    LOG_VERBOSE_INFO(2,
-                                     "*** warning: LocalMatrix::ExtractColumnVector() is performed "
-                                     "in CSR format");
-                }
-
-                if(this->is_accel_() == true)
-                {
-                    LOG_VERBOSE_INFO(
-                        2,
-                        "*** warning: LocalMatrix::ExtractColumnVector() is performed on the host");
-
-                    vec->MoveToAccelerator();
-                }
+                LOG_VERBOSE_INFO(2,
+                                 "*** warning: LocalMatrix::ExtractColumnVector() is performed "
+                                 "in CSR format");
             }
 
-            // LCOV_EXCL_STOP
+            if(this->is_accel_() == true)
+            {
+                LOG_VERBOSE_INFO(
+                    2, "*** warning: LocalMatrix::ExtractColumnVector() is performed on the host");
+
+                vec->MoveToAccelerator();
+            }
         }
+
+        // LCOV_EXCL_STOP
     }
 
     template <typename ValueType>
@@ -8846,6 +8852,7 @@ namespace rocalution
 
         assert(vec.GetSize() == this->GetN());
         assert(idx >= 0);
+        assert(idx < this->GetM());
 
         assert(((this->matrix_ == this->matrix_host_) && (vec.vector_ == vec.vector_host_))
                || ((this->matrix_ == this->matrix_accel_) && (vec.vector_ == vec.vector_accel_)));
@@ -8854,65 +8861,62 @@ namespace rocalution
         this->Check();
 #endif
 
-        if(this->GetNnz() > 0)
+        bool err = this->matrix_->ReplaceRowVector(idx, *vec.vector_);
+
+        // LCOV_EXCL_START
+
+        if((err == false) && (this->is_host_() == true) && (this->GetFormat() == CSR))
         {
-            bool err = this->matrix_->ReplaceRowVector(idx, *vec.vector_);
+            LOG_INFO("Computation of LocalMatrix::ReplaceRowVector() failed");
+            this->Info();
+            FATAL_ERROR(__FILE__, __LINE__);
+        }
 
-            // LCOV_EXCL_START
+        if(err == false)
+        {
+            LocalVector<ValueType> vec_host;
+            vec_host.CopyFrom(vec);
 
-            if((err == false) && (this->is_host_() == true) && (this->GetFormat() == CSR))
-            {
-                LOG_INFO("Computation of LocalMatrix::ReplaceRowVector() failed");
-                this->Info();
-                FATAL_ERROR(__FILE__, __LINE__);
-            }
+            // Move to host
+            this->MoveToHost();
+
+            // try again
+            err = this->matrix_->ReplaceRowVector(idx, *vec_host.vector_);
 
             if(err == false)
             {
-                LocalVector<ValueType> vec_host;
-                vec_host.CopyFrom(vec);
+                // Convert to CSR
+                unsigned int format   = this->GetFormat();
+                int          blockdim = this->GetBlockDimension();
+                this->ConvertToCSR();
 
-                // Move to host
-                this->MoveToHost();
-
-                // try again
-                err = this->matrix_->ReplaceRowVector(idx, *vec_host.vector_);
-
-                if(err == false)
+                if(this->matrix_->ReplaceRowVector(idx, *vec_host.vector_) == false)
                 {
-                    // Convert to CSR
-                    unsigned int format   = this->GetFormat();
-                    int          blockdim = this->GetBlockDimension();
-                    this->ConvertToCSR();
-
-                    if(this->matrix_->ReplaceRowVector(idx, *vec_host.vector_) == false)
-                    {
-                        LOG_INFO("Computation of LocalMatrix::ReplaceRowVector() failed");
-                        this->Info();
-                        FATAL_ERROR(__FILE__, __LINE__);
-                    }
-
-                    if(format != CSR)
-                    {
-                        LOG_VERBOSE_INFO(2,
-                                         "*** warning: LocalMatrix::ReplaceRowVector() is "
-                                         "performed in CSR format");
-
-                        this->ConvertTo(format, blockdim);
-                    }
+                    LOG_INFO("Computation of LocalMatrix::ReplaceRowVector() failed");
+                    this->Info();
+                    FATAL_ERROR(__FILE__, __LINE__);
                 }
 
-                if(vec.is_accel_() == true)
+                if(format != CSR)
                 {
-                    LOG_VERBOSE_INFO(
-                        2, "*** warning: LocalMatrix::ReplaceRowVector() is performed on the host");
+                    LOG_VERBOSE_INFO(2,
+                                     "*** warning: LocalMatrix::ReplaceRowVector() is "
+                                     "performed in CSR format");
 
-                    this->MoveToAccelerator();
+                    this->ConvertTo(format, blockdim);
                 }
             }
 
-            // LCOV_EXCL_STOP
+            if(vec.is_accel_() == true)
+            {
+                LOG_VERBOSE_INFO(
+                    2, "*** warning: LocalMatrix::ReplaceRowVector() is performed on the host");
+
+                this->MoveToAccelerator();
+            }
         }
+
+        // LCOV_EXCL_STOP
 
 #ifdef DEBUG_MODE
         this->Check();
@@ -8927,6 +8931,7 @@ namespace rocalution
         assert(vec != NULL);
         assert(vec->GetSize() == this->GetN());
         assert(idx >= 0);
+        assert(idx < this->GetM());
 
         assert(((this->matrix_ == this->matrix_host_) && (vec->vector_ == vec->vector_host_))
                || ((this->matrix_ == this->matrix_accel_) && (vec->vector_ == vec->vector_accel_)));
@@ -8935,56 +8940,52 @@ namespace rocalution
         this->Check();
 #endif
 
-        if(this->GetNnz() > 0)
+        bool err = this->matrix_->ExtractRowVector(idx, vec->vector_);
+
+        // LCOV_EXCL_START
+
+        if((err == false) && (this->is_host_() == true) && (this->GetFormat() == CSR))
         {
-            bool err = this->matrix_->ExtractRowVector(idx, vec->vector_);
+            LOG_INFO("Computation of LocalMatrix::ExtractRowVector() failed");
+            this->Info();
+            FATAL_ERROR(__FILE__, __LINE__);
+        }
 
-            // LCOV_EXCL_START
+        if(err == false)
+        {
+            LocalMatrix<ValueType> mat_host;
+            mat_host.ConvertTo(this->GetFormat(), this->GetBlockDimension());
+            mat_host.CopyFrom(*this);
 
-            if((err == false) && (this->is_host_() == true) && (this->GetFormat() == CSR))
+            // Move to host
+            vec->MoveToHost();
+
+            // Convert to CSR
+            mat_host.ConvertToCSR();
+
+            if(mat_host.matrix_->ExtractRowVector(idx, vec->vector_) == false)
             {
                 LOG_INFO("Computation of LocalMatrix::ExtractRowVector() failed");
-                this->Info();
+                mat_host.Info();
                 FATAL_ERROR(__FILE__, __LINE__);
             }
 
-            if(err == false)
+            if(this->GetFormat() != CSR)
             {
-                LocalMatrix<ValueType> mat_host;
-                mat_host.ConvertTo(this->GetFormat(), this->GetBlockDimension());
-                mat_host.CopyFrom(*this);
-
-                // Move to host
-                vec->MoveToHost();
-
-                // Convert to CSR
-                mat_host.ConvertToCSR();
-
-                if(mat_host.matrix_->ExtractRowVector(idx, vec->vector_) == false)
-                {
-                    LOG_INFO("Computation of LocalMatrix::ExtractRowVector() failed");
-                    mat_host.Info();
-                    FATAL_ERROR(__FILE__, __LINE__);
-                }
-
-                if(this->GetFormat() != CSR)
-                {
-                    LOG_VERBOSE_INFO(
-                        2,
-                        "*** warning: LocalMatrix::ExtractRowVector() is performed in CSR format");
-                }
-
-                if(this->is_accel_() == true)
-                {
-                    LOG_VERBOSE_INFO(
-                        2, "*** warning: LocalMatrix::ExtractRowVector() is performed on the host");
-
-                    vec->MoveToAccelerator();
-                }
+                LOG_VERBOSE_INFO(
+                    2, "*** warning: LocalMatrix::ExtractRowVector() is performed in CSR format");
             }
 
-            // LCOV_EXCL_STOP
+            if(this->is_accel_() == true)
+            {
+                LOG_VERBOSE_INFO(
+                    2, "*** warning: LocalMatrix::ExtractRowVector() is performed on the host");
+
+                vec->MoveToAccelerator();
+            }
         }
+
+        // LCOV_EXCL_STOP
     }
 
     // COVERAGE_EXCL_NO_MPI_START
