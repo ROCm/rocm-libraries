@@ -29,6 +29,7 @@
 
 #include "common/misc/client_util.hpp"
 #include "common/misc/clientcommon.hpp"
+#include "common/misc/generate.hpp"
 #include "common/misc/lapack_host_reference.hpp"
 #include "common/misc/norm.hpp"
 #include "common/misc/rocsolver.hpp"
@@ -182,13 +183,13 @@ double sytf2_sytrf_residual(const rocblas_fill uplo,
     {
         // a 2-by-2 block is the pair (k-1, k) (upper) or (k, k+1) (lower), with the same negative
         // pivot -kp: the row k-1 (upper) or k+1 (lower) is interchanged with the row kp
-        const bool two = ipiv[k] < 0;
-        const rocblas_int s = two ? 2 : 1;
+        const bool is_two_pivot = ipiv[k] < 0;
+        const rocblas_int s = is_two_pivot ? 2 : 1;
         const rocblas_int kb = upper ? k - s + 1 : k;
-        if(two && (kb < 0 || kb + 1 >= n || ipiv[kb] != ipiv[kb + 1]))
+        if(is_two_pivot && (kb < 0 || kb + 1 >= n || ipiv[kb] != ipiv[kb + 1]))
             return 1;
         const rocblas_int kx = upper ? kb : kb + s - 1;
-        const rocblas_int kp = (two ? -ipiv[k] : ipiv[k]) - 1;
+        const rocblas_int kp = (is_two_pivot ? -ipiv[k] : ipiv[k]) - 1;
         // the interchange is within the rows not yet factored: kp <= kx (upper), kp >= kx (lower)
         if(kp < 0 || kp >= n || (upper ? kp > kx : kp < kx))
             return 1;
@@ -262,19 +263,15 @@ void sytf2_sytrf_initData(const rocblas_handle handle,
         {
             if(singular == 3)
             {
-                // a symmetric indefinite matrix with random entries, whose factorization has
-                // 1-by-1 and 2-by-2 blocks and interchanges in no particular pattern
-                for(rocblas_int j = 0; j < n; j++)
-                {
-                    for(rocblas_int i = 0; i <= j; i++)
-                    {
-                        const size_t ij = i + size_t(j) * lda;
-                        const size_t ji = j + size_t(i) * lda;
-                        tmp = hA[b][ij] - T(5.5) + T(0.001 * ((i * 31 + j * 17) % 97));
-                        hA[b][ij] = tmp;
-                        hA[b][ji] = tmp;
-                    }
-                }
+                // a random symmetric indefinite matrix (as in the SYTRS tests), with small diagonal
+                // entries to force interchanges and 2-by-2 pivots; only the triangle uplo is set,
+                // and the rest of the storage (the other triangle and the rows beyond n) is NaN,
+                // which the factorization must not read
+                memset((void*)hA[b], 0xFF, sizeof(T) * size_t(lda) * n);
+                syrand(uplo, n, hA[b], lda);
+                const T alpha = std::numeric_limits<decltype(std::real(T{}))>::epsilon();
+                for(rocblas_int i = 0; i < n; i++)
+                    hA[b][i + size_t(i) * lda] = alpha;
             }
             else
             {

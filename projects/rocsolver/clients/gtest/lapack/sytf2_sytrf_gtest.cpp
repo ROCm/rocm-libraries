@@ -66,10 +66,7 @@ const vector<vector<int>> matrix_size_range = {
     {5, 5, 2, 3},
     {40, 40, 2, 3},
     {40, 40, 3, 3},
-    {100, 110, 3, 3},
-    {300, 300, 3, 3},
-    {40, 40, 4, 3},
-    {150, 150, 4, 3}};
+    {40, 40, 4, 3}};
 
 // for daily_lapack tests
 const vector<vector<int>> large_matrix_size_range = {
@@ -77,6 +74,10 @@ const vector<vector<int>> large_matrix_size_range = {
     {640, 640, 0, 3},
     {1000, 1024, 1, 3},
     {1000, 1024, 0, 3},
+    // random indefinite matrices, and a column that becomes zero in the panel factorization
+    {100, 110, 3, 3},
+    {300, 300, 3, 3},
+    {150, 150, 4, 3},
 };
 
 // for weekly_lapack tests
