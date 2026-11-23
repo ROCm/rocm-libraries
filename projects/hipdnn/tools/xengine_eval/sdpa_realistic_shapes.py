@@ -5,8 +5,9 @@
 
 Attention geometry (query heads, KV heads, head dim) comes from the published configurations of
 the models below; batch and sequence lengths are the serving and training settings those models
-are typically run at. Each row is one problem, named <model>/<phase>/..., so a result can be
-split by model and phase.
+are typically run at. Each row is one problem, named <model>/<phase>/.../<layout>, so a result can
+be split by model, phase and layout. Each shape appears in every memory layout a caller would hand
+hipDNN for it (`layouts()`); the layouts need the declarations add_sdpa_layouts.py writes.
 
 Phases:
   prefill   inference forward over the prompt (causal, square)
@@ -17,7 +18,7 @@ Phases:
             matching backward, square and causal for decoders, unmasked for encoders
 
 usage: sdpa_realistic_shapes.py <out prefix>   (writes <prefix>sdpa_fwd.csv and <prefix>sdpa_bwd.csv;
-each file carries only the parameters its operation declares)
+each file carries only the parameters its operation declares, `q.layout` included)
 """
 import csv
 import sys
@@ -72,12 +73,35 @@ TRAIN_ENCODER = {
 COMMON = ["q.batch", "q.heads", "q.heads_kv", "q.seqlen_q", "q.seqlen_k", "q.head_dim",
           "q.is_causal", "q.alignment"]
 COLUMNS = {
-    "sdpa_fwd": ["name", "op", *COMMON, "q.generate_stats", "q.dtype", "q.form"],
-    "sdpa_bwd": ["name", "op", *COMMON, "q.dtype", "q.form"],
+    "sdpa_fwd": ["name", "op", *COMMON, "q.generate_stats", "q.dtype", "q.form", "q.layout"],
+    "sdpa_bwd": ["name", "op", *COMMON, "q.dtype", "q.form", "q.layout"],
 }
 
 
+def layouts(phase, self_attention):
+    """The memory layouts a caller hands hipDNN for one shape (add_sdpa_layouts.py names them).
+
+    Every shape comes token-major (bshd: FlashAttention, AITER, vLLM) and head-major (bhsd:
+    PyTorch eager, Hugging Face after .contiguous()); training also sequence-major (sbhd:
+    Megatron); self-attention also as views of a fused QKV projection (qkv_packed)."""
+    out = ["bshd", "bhsd"]
+    if phase == "train":
+        out.append("sbhd")
+    if self_attention:
+        out.append("qkv_packed")
+    return out
+
+
 def rows():
+    for op, out in _shapes():
+        name = out[0]
+        phase = name.split("/")[1]
+        self_attention = out[5] == out[6]  # seqlen_q == seqlen_k
+        for layout in layouts(phase, self_attention):
+            yield op, [f"{name}/{layout}", *out[1:], layout]
+
+
+def _shapes():
     def row(name, op, b, h, hk, sq, sk, d, causal, align, stats, dtype):
         out = [name, op, b, h, hk, sq, sk, d, str(causal).lower(), align]
         if op == "sdpa_fwd":
