@@ -95,12 +95,20 @@ class PersistentKernelState:
     def papLocalReadEntry(self, kernel, reads, packs):
         """Keep normal pointer increments outside the already-primed read skip."""
         from rocisa.instruction import Instruction
-        if not self.papLocalReadPayloadRanges(kernel):
-            return reads
-        # Reject actual pack work too, rather than assuming every unroll-major
-        # format has no conversion. Such formats retain the ordinary entry PLR.
-        if any(isinstance(item, Instruction) for pack in packs for item in pack.flatitems()):
-            return reads
+        # The second-group route may already have tested bit4 on the only
+        # edge where it can be set; its target must follow the cold reads.
+        routed = getattr(self.states, "papFirstPlrReady", None)
+        self.states.papFirstPlrReady = None
+        if not self.papLocalReadPayloadRanges(kernel) or any(
+                isinstance(item, Instruction) for pack in packs for item in pack.flatitems()):
+            # Reject actual pack work too, rather than assuming every unroll-major
+            # format has no conversion. Such formats retain the ordinary entry PLR.
+            if routed is None:
+                return reads
+            module = Module("PAP ordinary first PLR")
+            module.add(reads)
+            module.add(routed)
+            return module
         from rocisa.instruction import DSLoadInstruction
         for item in reads.flatitems():
             if isinstance(item, DSLoadInstruction):
@@ -108,11 +116,13 @@ class PersistentKernelState:
                 item.setMemToken(MemTokenData(tokens + [self.states.memTokenPapPlr]))
         self.states.papFirstPlrReads = deepcopy(reads)
         module = Module("PAP consume retained first PLR operands")
-        ready = Label(self.labels.getNameInc("PapFirstPlrReady"), "")
-        module.add(SBitcmp1B32(src0=sgpr("PersistentPrefetchState"), src1=4,
-                              comment="PAP first PLR operands already ready?"))
-        module.add(SCBranchSCC1(labelName=ready.getLabelName(),
-                               comment="PAP skip redundant first local reads"))
+        ready = routed
+        if ready is None:
+            ready = Label(self.labels.getNameInc("PapFirstPlrReady"), "")
+            module.add(SBitcmp1B32(src0=sgpr("PersistentPrefetchState"), src1=4,
+                                  comment="PAP first PLR operands already ready?"))
+            module.add(SCBranchSCC1(labelName=ready.getLabelName(),
+                                   comment="PAP skip redundant first local reads"))
         module.add(reads)
         module.add(ready)
         module.add(SAndB32(dst=sgpr("PersistentPrefetchState"),
@@ -369,6 +379,35 @@ class PersistentKernelState:
                 and not kernel.get("DirectToVgprB", False)
                 and not kernel.get("AdaptiveGemmNTAB", 0)
                 and bool(self.papLocalReadPayloadRanges(kernel)))
+
+    def papPgr2SecondGroupRoute(self, kernel, tPA, tPB, merge):
+        """Give each entry state its own unconditional edge into the first PLR.
+
+        The native wait pass relaxes a join only when every predecessor has a
+        single successor. A shared bit3 merge lets the cold group0-only path
+        reach the first PLR without the younger group1, so the join drained
+        the group1 that every other cold or partly primed entry issued.
+        Separate edges keep the join's partial wait; strict drains move onto
+        the single-trip and bit3 edges.
+        """
+        module = Module("PAP second PGR group route")
+        self.states.papFirstPlrReady = None
+        if any(kernel.get("DirectToLds%s" % tc, False) for tc in ("A", "B", "MXSA", "MXSB")):
+            # DTL pointer swaps follow the merge; keep the shared fallthrough.
+            module.add(merge)
+            return module
+        join = Label(self.rapGetName("skipPGR%d_%d" % (kernel["PrefetchGlobalRead"], kernel["PrefetchGlobalRead"])), "")
+        module.add(SBranch(labelName=join.getLabelName(), comment="PAP group1 issued at entry"))
+        module.add(merge)
+        if self.papLocalReadPayloadRanges(kernel):
+            ready = Label(self.labels.getNameInc("PapFirstPlrReady"), "")
+            self.states.papFirstPlrReady = ready
+            module.add(self.papPgr2EntryMerge(kernel, tPA, tPB))
+            module.add(SBitcmp1B32(src0=sgpr("PersistentPrefetchState"), src1=4,
+                                  comment="PAP first PLR operands already ready?"))
+            module.add(SCBranchSCC1(labelName=ready.getLabelName(),
+                                   comment="PAP skip redundant first local reads"))
+        return module
 
     def papPgr2EntryMerge(self, kernel, tPA, tPB):
         """Keep only operand readiness and this entry's pending publication."""

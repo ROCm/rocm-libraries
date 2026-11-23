@@ -336,6 +336,31 @@ def test_classic_pap_load_is_not_drained_in_no_load_loop(tmp_path, monkeypatch):
                 _assert_classic_pap_overlaps_nll(corrupted)
 
 
+@pytest.mark.parametrize("asem", [32, 256], ids=["tail", "notail"])
+def test_cold_first_plr_keeps_entry_group1_in_flight(tmp_path, asem):
+    # Remainder launches take this read on every tile. Only group0 must be
+    # complete; a full drain here would expose the group1 issued just before.
+    results = emit_kernels_from_config(
+        _config(tmp_path, AssertSummationElementMultiple=asem), limit=1, arch="gfx1250")
+    assert_real_gfx1250_kernels(results)
+    for name, src, _ in results:
+        assert_assembles(src, name)
+        lines = [line.strip() for line in src.splitlines()]
+        join = lines.index("label_skipPGR2_2:")
+        first_read = next(i for i in range(join, len(lines)) if lines[i].startswith("ds_load"))
+        assert not any(line.startswith(("label_", "s_branch", "s_cbranch"))
+                       for line in lines[join + 1:first_read])
+        waits = [line.split("//")[0].split() for line in lines[join:first_read]
+                 if line.startswith("s_wait_tensorcnt")]
+        assert waits == [["s_wait_tensorcnt", "2"]]
+        group1 = max(i for i in range(join) if lines[i].startswith("tensor_load_to_lds"))
+        assert lines[group1 + 1].startswith("s_branch label_skipPGR2_2")
+        # Stricter drains stay on the single-trip and both-groups-carried edges.
+        for i in range(group1 + 1, join):
+            if lines[i].startswith("s_wait_tensorcnt"):
+                assert lines[i + 1].startswith(("s_branch label_skipPGR2_2", "label_skipPGR2_2:"))
+
+
 def test_prepared_entry_does_not_publish_when_carrier_is_unavailable(tmp_path, monkeypatch):
     monkeypatch.setattr(PersistentKernelState, "papAddressCarrierPlan", lambda *args, **kwargs: None)
     results = emit_kernels_from_config(

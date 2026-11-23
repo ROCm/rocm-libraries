@@ -6276,7 +6276,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
             module.add(self.directToLdsM0Update(kernel, 1, tPM))
             module.add(self.globalReadDo(kernel, 0, tPM, g2lBufIdx=0))
           if papSecondMerge is not None:
-            module.add(papSecondMerge)
+            module.add(self.papPgr2SecondGroupRoute(kernel, tensorParametersA, tensorParametersB, papSecondMerge))
           if idxPgr < kernel["PrefetchGlobalRead"] - 1:
             # generate GR inc code except for the last prefetch
             prefetchIdx = kernel["PrefetchGlobalRead"] - 1 - idxPgr
