@@ -27,9 +27,10 @@
 //   y = alpha * op(A) * x + beta * y + sum_i gamma_i * z_i,
 // for every A / X / Y / compute type combination of the v2 SpMV type table. gamma
 // has the scalar type and z the compute type, which differs from the type of y for
-// the half precision outputs. Every CSR algorithm, both index widths, both index
-// bases and both pointer modes are crossed with 0, 1 and 3 extra terms. The data
-// are small integers, so the host reference in the compute type is exact.
+// the half precision outputs. Every CSR algorithm and both pointer modes are crossed
+// with 0, 1 and 3 extra terms, over three index width and base pairs that cover both
+// row offset widths, both column index widths and both bases. The data are small
+// integers, so the host reference in the compute type is exact.
 //
 #include "unit_test_device_level2_common.hpp"
 
@@ -1101,12 +1102,10 @@ namespace
         int        base;
     };
 
-    const std::vector<index_and_base> all_indices_and_bases = {{index_i32_i32, 0},
-                                                               {index_i32_i32, 1},
-                                                               {index_i64_i32, 0},
-                                                               {index_i64_i32, 1},
-                                                               {index_i64_i64, 0},
-                                                               {index_i64_i64, 1}};
+    // 32- and 64-bit row offsets, 32- and 64-bit column indices, and both bases, each with
+    // every algorithm, operation and pointer mode.
+    const std::vector<index_and_base> indices_and_bases
+        = {{index_i32_i32, 0}, {index_i64_i32, 1}, {index_i64_i64, 0}};
 
     // csrmv returns before choosing an algorithm for a matrix without entries, so its index
     // types and base only reach the analysis.
@@ -1155,7 +1154,7 @@ namespace
         }
 
         void sweep(const extra_case&                  c,
-                   const std::vector<index_and_base>& indices = all_indices_and_bases)
+                   const std::vector<index_and_base>& indices = indices_and_bases)
         {
             sweep_with(
                 c,
@@ -1168,13 +1167,13 @@ namespace
             sweep_with(
                 c,
                 [](rocsparse_handle h, const extra_case& e) { run_reuse_case<C>(h, e); },
-                all_indices_and_bases);
+                indices_and_bases);
         }
 
         // Sweeps `shape` with 0, 1 and 3 extras and every special case of alpha and beta.
         void sweep_specials(shape_kind                         shape,
                             rocsparse_operation                trans,
-                            const std::vector<index_and_base>& indices = all_indices_and_bases)
+                            const std::vector<index_and_base>& indices = indices_and_bases)
         {
             for(const int extras : {0, 1, 3})
                 for(const auto special : all_specials)
