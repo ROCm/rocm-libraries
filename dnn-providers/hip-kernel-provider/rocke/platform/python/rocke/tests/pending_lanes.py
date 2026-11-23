@@ -1483,6 +1483,8 @@ _SGPR_SPLIT_SPILL = (
     "it never copied (a compiler defect: rocKE's IR is the same for every "
     "LLVM 24 build, and LLVM 20 builds these kernels correctly)"
 )
+# The compiler issue that tracks _SGPR_SPLIT_SPILL.
+_SGPR_SPLIT_SPILL_ISSUE = "LCOMPILER-3317"
 
 
 QUARANTINED: tuple[QuarantinedTest, ...] = (
@@ -1505,7 +1507,7 @@ QUARANTINED: tuple[QuarantinedTest, ...] = (
         "platform/tests/portable_ir/test_portable_ir.py::test_parity_matrix",
     ),
     *_quarantined(
-        NO_ISSUE_FILED,
+        _SGPR_SPLIT_SPILL_ISSUE,
         "built by the LLVM 24 compiler a ROCm install ships, the gfx950 dgrad kouter "
         "and ukd kernels (16x16x32 and 32x32x16 atoms) fault with an illegal "
         "memory access or miscompare (rel_err 1.17, depthwise 11x3): "
@@ -1520,7 +1522,7 @@ QUARANTINED: tuple[QuarantinedTest, ...] = (
         compilers=_LLVM_24_ROCM_INSTALL,
     ),
     *_quarantined(
-        NO_ISSUE_FILED,
+        _SGPR_SPLIT_SPILL_ISSUE,
         "built by the LLVM 24 compiler CI pins, the gfx950 dgrad kernel at tile "
         "256x64x32, warp tile 32x32x16, compv4 miscompares on the fp16 depthwise "
         f"stride-2 shape (rel_err 0.88): {_SGPR_SPLIT_SPILL}",
