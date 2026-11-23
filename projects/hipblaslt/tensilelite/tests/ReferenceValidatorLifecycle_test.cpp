@@ -6,6 +6,7 @@
 #include <gtest/gtest.h>
 #include <memory>
 #include <stdexcept>
+#include <string>
 #include <vector>
 
 using namespace TensileLite;
@@ -95,4 +96,19 @@ TEST(ReferenceValidatorLifecycle, OptInRejectsAliasedReferenceInputs)
 
     args["validate-after-enqueues"].value() = false;
     EXPECT_NO_THROW(RecordingValidator{args});
+}
+
+TEST(ReferenceValidatorLifecycle, ReadsTheSplitPlacementForEverySplitDim)
+{
+    // The sharing rules are read from --split-dim and --split-placement: a split of M may share B,
+    // of N may share A, of the batch neither (a shared D does not matter to the validator).
+    for(auto const* dim : {"M", "N", "B"})
+        for(auto const* placement : {"RRRR", "SRRR", "RSRR", "RRRS", "RRR"})
+        {
+            auto args                       = validationArgs();
+            args["split-devices"].value()   = 2;
+            args["split-dim"].value()       = std::string(dim);
+            args["split-placement"].value() = std::string(placement);
+            EXPECT_NO_THROW(RecordingValidator{args}) << dim << " " << placement;
+        }
 }

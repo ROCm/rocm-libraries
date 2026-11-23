@@ -277,6 +277,58 @@ TEST(ClientProblemFactorySplit, RejectsMoreDevicesThanBatches)
     EXPECT_THROW(ClientProblemFactory(makeArgs({96, 96, 1, 64}, 2, "B")), std::runtime_error);
 }
 
+TEST(ClientProblemFactorySplit, RejectsABatchSplitOfSeveralBatchIndices)
+{
+    auto args = makeArgs({64, 64, 2, 3, 32}, 2, "B");
+    TensileLite::TestUtils::setOption(
+        args, "problem-identifier", std::string("Contraction_l_Ailkm_Bljkm_Cijkm_Dijkm"));
+    EXPECT_THROW(ClientProblemFactory{args}, std::runtime_error);
+}
+
+TEST(ClientProblemFactorySplit, BatchSplitBatchOffsetsFollowEachSlicesStrides)
+{
+    // 5 batches over 2 devices (2 + 3), float. Every tensor is cut on the batch, so the batch
+    // pointer array of each slice starts at the slice's own first batch.
+    ClientProblemFactory factory(makeArgs({128, 96, 5, 64}, 2, "B"));
+    auto*                full      = factory.problems()[0].get();
+    const size_t         bpe       = sizeof(float);
+    const size_t         batches[] = {2, 3};
+    for(size_t d = 0; d < 2; d++)
+    {
+        for(auto tensor : {ContractionProblemGemm::TENSOR::A,
+                           ContractionProblemGemm::TENSOR::B,
+                           ContractionProblemGemm::TENSOR::C})
+        {
+            auto const& desc = gemm(factory.sliceProblem(full, d)).tensors()[tensor];
+            auto const  offs = factory.sliceBatchOffsets(full, d, tensor);
+            ASSERT_EQ(offs.size(), batches[d]) << "device " << d;
+            for(size_t b = 0; b < offs.size(); b++)
+                EXPECT_EQ(offs[b], b * desc.strides()[2] * bpe) << "device " << d;
+        }
+        // D keeps the full strides: its batches are a full 128 x 96 matrix apart.
+        auto const offs = factory.sliceBatchOffsets(full, d, ContractionProblemGemm::TENSOR::D);
+        ASSERT_EQ(offs.size(), batches[d]);
+        for(size_t b = 0; b < offs.size(); b++)
+            EXPECT_EQ(offs[b], b * 128 * 96 * bpe) << "device " << d;
+    }
+}
+
+TEST(ClientProblemFactorySplit, ABatchSplitOfAPaddedDKeepsTheFullStrides)
+{
+    const size_t useDefault = TensorDescriptor::UseDefaultStride;
+    auto         args       = makeArgs({128, 96, 4, 64}, 2, "B");
+    TensileLite::TestUtils::setOption(
+        args, "d-strides", std::vector<std::vector<size_t>>{{useDefault, 160, useDefault}});
+    ClientProblemFactory factory(args);
+    auto*                full = factory.problems()[0].get();
+    for(size_t d = 0; d < 2; d++)
+        EXPECT_EQ(gemm(factory.sliceProblem(full, d)).d().strides(),
+                  (std::vector<size_t>{1, 160, 160 * 96}))
+            << "device " << d;
+    // Each device writes its batches after the previous device's.
+    EXPECT_EQ(factory.sliceOffsetInD(full, 1), 2u * 160u * 96u);
+}
+
 TEST(ClientProblemFactorySplit, RejectsAnUnknownSplitDim)
 {
     for(auto dim : {"K", "", "m", "MN"})
