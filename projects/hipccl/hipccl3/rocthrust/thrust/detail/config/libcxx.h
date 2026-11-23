@@ -69,11 +69,9 @@
 #    define _THRUST_USE_ROCPRIM           0
 #  endif
 
-// Otherwise, if the '::cuda::std' namespace from 'libcudacxx' is available, or libhipcxx's
-// source tree is (no <hip/...> alias there; its HIP atomics tell it apart from NVIDIA's).
-#elif (THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA \
-	&& THRUST_HAS_INCLUDE(<cuda/std/version>) && USE_LIBCUDACXX) \
-	|| (THRUST_HAS_INCLUDE(<cuda/std/__atomic/functions/atomic_hip_generated.h>) && USE_LIBHIPCXX)
+// Otherwise, if the '::cuda::std' namespace from 'libcudacxx' is available.
+#elif THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA \
+	&& THRUST_HAS_INCLUDE(<cuda/std/version>) && USE_LIBCUDACXX
 #  include <cuda/std/version>
 // If version matches.
 #  if _LIBCUDACXX_CUDA_API_VERSION_MAJOR == _THRUST_REQUIRED_LIBCXX_VERSION_MAJOR \
