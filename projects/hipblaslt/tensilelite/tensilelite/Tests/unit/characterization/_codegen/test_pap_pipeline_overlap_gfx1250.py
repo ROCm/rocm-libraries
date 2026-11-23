@@ -273,13 +273,29 @@ def test_carried_first_plr_operands_survive_epilogue(tmp_path, wave_tile):
         assert not clobbers, "\n".join(clobbers[:8])
 
 
-def test_tail_entry_keeps_ordinary_tile_setup(tmp_path):
-    results = emit_kernels_from_config(_config(tmp_path), limit=1, arch="gfx1250")
+def _next_free_vgpr(src):
+    return max(int(value) for value in re.findall(r"\.amdhsa_next_free_vgpr\s+(\d+)", src))
+
+
+def test_tail_kernel_withholds_group1_when_tail_runs(tmp_path):
+    # A fixed store batch keeps the VGPR comparison about the tail loop.
+    (notail_name, notail, _), = emit_kernels_from_config(
+        _config(tmp_path, AssertSummationElementMultiple=256, NumElementsPerBatchStore=8),
+        limit=1, arch="gfx1250")
+    results = emit_kernels_from_config(_config(tmp_path, NumElementsPerBatchStore=8), limit=1, arch="gfx1250")
     assert_real_gfx1250_kernels(results)
     for name, src, _ in results:
         assert_assembles(src, name)
-        assert "PAP activate retained" not in src
-        assert "PAP publish durable next coordinates" not in src
+        assert "label_TailLoopBeginL" in src
+        assert "PAP publish durable next coordinates" in src
+        assert "PAP skip redundant first local reads" in src
+        lines = src.splitlines()
+        guard = [i for i, line in enumerate(lines) if "PAP K remainder selects the tail loop" in line]
+        assert len(guard) == 1
+        assert lines[guard[0] + 1].startswith("s_cbranch_scc1 ")
+        # The tail lends the retained first-PLR operands back to its value pool.
+        assert _next_free_vgpr(src) <= _next_free_vgpr(notail)
+    assert "PAP K remainder selects the tail loop" not in notail
 
 
 def _assert_classic_pap_overlaps_nll(lines):
@@ -355,7 +371,7 @@ def _bf16_config(tmp_path, cluster):
     ({"TileProcessingStrategy": "StreamK"}, [False]),
     ({"ClusterDim": [2, 2], "PrefetchGlobalRead": 1}, []),
     ({"PrefetchAcrossPersistent": 0}, []),
-    ({"AssertSummationElementMultiple": 32}, []),
+    ({"AssertSummationElementMultiple": 32}, [False]),
 ], ids=["dp-cluster", "dp-noncluster", "streamk", "pgr1", "pap-off", "tail"])
 def test_retained_plr_completion_caller_eligibility(tmp_path, monkeypatch, overrides, expected):
     calls = []

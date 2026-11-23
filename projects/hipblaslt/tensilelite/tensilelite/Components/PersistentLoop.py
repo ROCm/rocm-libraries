@@ -77,6 +77,21 @@ class PersistentKernelState:
             operation(first, last - first, tag)
 
 
+    def papTailBorrowedPayloadRanges(self, kernel):
+        """Retained PLR operands that a running tail loop may use as scratch.
+
+        Bit4 is published only after group1 issues, and the K-remainder guard
+        withholds group1 whenever the tail runs; that entry performs the
+        ordinary first PLR instead.
+        """
+        if not self.papPgr2RuntimeTailSplit(kernel):
+            return ()
+        start, size = self.rapReclaimableValuABRange(kernel)
+        end = start + size
+        return tuple((max(held, start), min(held + count, end) - max(held, start))
+                     for held, count in self.papLocalReadPayloadRanges(kernel)
+                     if held < end and start < held + count)
+
     def papLocalReadEntry(self, kernel, reads, packs):
         """Keep normal pointer increments outside the already-primed read skip."""
         from rocisa.instruction import Instruction
