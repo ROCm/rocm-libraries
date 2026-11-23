@@ -262,6 +262,9 @@ Function name                                           yes no
 Utility functions
 -----------------
 
+The matrix check functions report one issue in ``data_status``. When a matrix has more than one issue, which
+of them is reported can differ from run to run.
+
 =================================================================================================== === ==
 Function name                                                                                       yes no
 =================================================================================================== === ==

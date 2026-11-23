@@ -68,7 +68,9 @@ extern "C" {
 *  @param[out]
 *  buffer_size number of bytes of the temporary storage buffer required by
 *              \ref rocsparse_scheck_matrix_coo "rocsparse_Xcheck_matrix_coo()".
-*              The size can be larger for \ref rocsparse_storage_mode_unsorted.
+*              The size depends on \p storage and can be larger for
+*              \ref rocsparse_storage_mode_unsorted, so query it with the storage mode
+*              that is passed to the check.
 *
 *  \retval rocsparse_status_success the operation completed successfully.
 *  \retval rocsparse_status_invalid_handle the library context was not initialized.

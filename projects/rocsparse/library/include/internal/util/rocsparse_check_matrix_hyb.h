@@ -49,8 +49,8 @@ extern "C" {
 *  @param[in]
 *  idx_base    \ref rocsparse_index_base_zero or \ref rocsparse_index_base_one.
 *  @param[in]
-*  matrix_type \ref rocsparse_matrix_type_general, \ref rocsparse_matrix_type_symmetric,
-*              \ref rocsparse_matrix_type_hermitian, or \ref rocsparse_matrix_type_triangular.
+*  matrix_type \ref rocsparse_matrix_type_general. The other matrix types return
+*              \ref rocsparse_status_invalid_value.
 *  @param[in]
 *  uplo        \ref rocsparse_fill_mode_lower or \ref rocsparse_fill_mode_upper.
 *  @param[in]
@@ -58,7 +58,9 @@ extern "C" {
 *  @param[out]
 *  buffer_size number of bytes of the temporary storage buffer required by
 *              rocsparse_check_matrix_hyb().
-*              The size can be larger for \ref rocsparse_storage_mode_unsorted.
+*              The size depends on \p storage and can be larger for
+*              \ref rocsparse_storage_mode_unsorted, so query it with the storage mode
+*              that is passed to the check.
 *
 *  \retval rocsparse_status_success the operation completed successfully.
 *  \retval rocsparse_status_invalid_handle the library context was not initialized.
@@ -80,7 +82,7 @@ rocsparse_status rocsparse_check_matrix_hyb_buffer_size(rocsparse_handle        
 *  \details
 *  \p rocsparse_check_matrix_hyb checks whether the input HYB matrix is valid. It performs basic sanity checks on the input
 *  matrix and tries to detect issues in the data. This includes looking for 'nan' or 'inf' values in the data arrays,
-*  invalid row/column indices, whether the matrix is triangular or not, whether there are duplicate indices, or whether
+*  invalid row/column indices, whether there are duplicate indices, or whether
 *  the row/column indices are not sorted when they should be. If an issue is found, it is written to the \p data_status
 *  parameter.
 *
@@ -102,8 +104,8 @@ rocsparse_status rocsparse_check_matrix_hyb_buffer_size(rocsparse_handle        
 *  @param[in]
 *  idx_base    \ref rocsparse_index_base_zero or \ref rocsparse_index_base_one.
 *  @param[in]
-*  matrix_type \ref rocsparse_matrix_type_general, \ref rocsparse_matrix_type_symmetric,
-*              \ref rocsparse_matrix_type_hermitian, or \ref rocsparse_matrix_type_triangular.
+*  matrix_type \ref rocsparse_matrix_type_general. The other matrix types return
+*              \ref rocsparse_status_invalid_value.
 *  @param[in]
 *  uplo        \ref rocsparse_fill_mode_lower or \ref rocsparse_fill_mode_upper.
 *  @param[in]

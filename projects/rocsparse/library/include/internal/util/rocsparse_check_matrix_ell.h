@@ -57,8 +57,8 @@ extern "C" {
 *  @param[in]
 *  idx_base    \ref rocsparse_index_base_zero or \ref rocsparse_index_base_one.
 *  @param[in]
-*  matrix_type \ref rocsparse_matrix_type_general, \ref rocsparse_matrix_type_symmetric,
-*              \ref rocsparse_matrix_type_hermitian, or \ref rocsparse_matrix_type_triangular.
+*  matrix_type \ref rocsparse_matrix_type_general. The other matrix types return
+*              \ref rocsparse_status_invalid_value.
 *  @param[in]
 *  uplo        \ref rocsparse_fill_mode_lower or \ref rocsparse_fill_mode_upper.
 *  @param[in]
@@ -67,7 +67,9 @@ extern "C" {
 *  buffer_size number of bytes of the temporary storage buffer required by
 *              rocsparse_scheck_matrix_ell(), rocsparse_dcheck_matrix_ell(),
 *              rocsparse_ccheck_matrix_ell(), and rocsparse_zcheck_matrix_ell().
-*              The size can be larger for \ref rocsparse_storage_mode_unsorted.
+*              The size depends on \p storage and can be larger for
+*              \ref rocsparse_storage_mode_unsorted, so query it with the storage mode
+*              that is passed to the check.
 *
 *  \retval rocsparse_status_success the operation completed successfully.
 *  \retval rocsparse_status_invalid_handle the library context was not initialized.
@@ -164,8 +166,8 @@ rocsparse_status rocsparse_zcheck_matrix_ell_buffer_size(rocsparse_handle       
 *  @param[in]
 *  idx_base    \ref rocsparse_index_base_zero or \ref rocsparse_index_base_one.
 *  @param[in]
-*  matrix_type \ref rocsparse_matrix_type_general, \ref rocsparse_matrix_type_symmetric,
-*              \ref rocsparse_matrix_type_hermitian, or \ref rocsparse_matrix_type_triangular.
+*  matrix_type \ref rocsparse_matrix_type_general. The other matrix types return
+*              \ref rocsparse_status_invalid_value.
 *  @param[in]
 *  uplo        \ref rocsparse_fill_mode_lower or \ref rocsparse_fill_mode_upper.
 *  @param[in]

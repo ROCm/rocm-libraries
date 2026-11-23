@@ -28,12 +28,11 @@
 //
 // A HYB matrix is an ELL part (the first ell_width entries of every row) and a COO part
 // (the remaining entries). The defects of the check tests are placed in the COO part:
-// rocsparse_check_matrix_hyb checks the ELL part, then the COO part, and the second check
-// overwrites the data status of the first one, so a defect in the ELL part is not
-// reported (library behavior that is not pinned here). Only general matrices are checked:
-// the ELL checker rejects the other matrix types with rocsparse_status_invalid_value
-// although the HYB documentation lists them. Duplicate entries are not reported by the
-// COO checker either and are not tested.
+// rocsparse_check_matrix_hyb checks the COO part only when the ELL part has no issue, so
+// these tests reach the COO checker. Only general matrices are checked: the ELL checker
+// rejects the other matrix types with rocsparse_status_invalid_value. ELL-part defects and
+// duplicate entries are covered by CheckMatrixDefects.Hyb* in
+// unit_test_internal_util_checkmatrix_duplicates.cpp.
 
 #include "unit_test_device_conv_common.hpp"
 
