@@ -24,6 +24,49 @@ data (the `dsl_docs/` tree, the platform `tools/` scripts and the loose
 `ROCKE_DSL_DOCS` / `ROCKE_PLATFORM_TOOLS_DIR` (`shape_utils_dir()` derives from
 `dsl_docs_dir()`) — never via per-file `parents[N]` math.
 
+## CI-matched environment (perf, parity and AOT work)
+
+CI compiles rocKE kernels with the COMGR of the TheRock revision pinned as
+`therock-ref` in `.github/actions/ci-env/action.yml`. A local `/opt/rocm` or a
+ROCm torch wheel usually brings a different LLVM, so register use and timings
+measured there are not what CI ships. `tools/setup_dev_env.py` builds a venv
+whose only COMGR is CI's:
+
+```sh
+VENV=$(python3 tools/setup_dev_env.py)        # Linux; stdout is the venv path
+. "$VENV/bin/activate"
+```
+
+```powershell
+$venv = py -3.12 tools\setup_dev_env.py        # Windows
+& "$venv\Scripts\Activate.ps1"
+```
+
+It resolves CI's LLVM commit from the pin, installs ROCm, ROCm torch and the
+device wheel for the visible GPU from the newest nightly built with that LLVM
+into a shared base venv, gives this checkout its own small venv on top of it
+with `platform[dev]` and `library` editable-installed, and pins
+`ROCKE_COMGR_LIB` / `ROCKE_HIP_LIB` to the venv's runtime for every process that
+runs the venv's Python. Venvs live under `$ROCKE_VENV_ROOT` (default
+`~/rocke-venvs`) as `<arch>-llvm-<commit>/{base,<checkout>-<hash>}`; a re-run
+reuses complete ones, and a pin with a new LLVM gets new ones. Run it where the
+GPU is (inside the Slurm job, not on a login node). It fails rather than install
+a nightly built with a different LLVM.
+
+For AOT packaging builds pass the same COMGR to CMake:
+`-DHIPKERNELPROVIDER_ROCKE_COMGR_LIB=$ROCKE_COMGR_LIB`. A process that also
+loads C++ libraries linked against `/opt/rocm` (e.g. a hipDNN you built there)
+before rocKE cannot use the venv's COMGR; in that process point both variables
+at `/opt/rocm/lib` (an explicit value wins over the venv's).
+
+The base venv takes several GB (more on Windows, which also installs
+`rocm-sdk-devel`, the `ROCM_PATH` for the hipDNN superbuild), so point
+`ROCKE_VENV_ROOT` at shared storage with room when the home quota is small.
+Some wheel files sit about 200 characters deep, so on Windows either enable long
+paths (`projects/hipdnn/scripts/windows/windows_build_setup.ps1`, needs
+Administrator) or use a short root such as `ROCKE_VENV_ROOT=C:\rv`; the script
+checks this before downloading.
+
 ## Quick start (CMake-managed environment)
 
 When the rocke features are enabled, the build creates and maintains the
