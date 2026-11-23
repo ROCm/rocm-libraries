@@ -223,7 +223,7 @@ namespace rocalution
                     cast_w->vec_,
                     cast_S->vec_);
         }
-        else // COVERAGE_EXCL_NO_MPI_START
+        else
         {
             kernel_csr_rs_pmis_strong_influences<true, 256, 8>
                 <<<(this->nrow_ - 1) / (256 / 8) + 1,
@@ -241,7 +241,6 @@ namespace rocalution
                     eps,
                     cast_w->vec_,
                     cast_S->vec_);
-            // COVERAGE_EXCL_NO_MPI_STOP
         }
         CHECK_HIP_ERROR(__FILE__, __LINE__);
 

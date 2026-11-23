@@ -31,6 +31,14 @@ SOFTWARE.
 #include <string>
 #include <vector>
 
+// The suite gates HIP code on #if RPP_BACKEND_HIP, which reads an undefined macro as 0 and would
+// silently drop every HIP case. rpp_backend.h always defines it (#cmakedefine01).
+#ifndef RPP_BACKEND_HIP
+#error "RPP_BACKEND_HIP is undefined -- rpp.h did not include the generated rpp_backend.h"
+#endif
+static_assert(RPP_BACKEND_HIP == 0 || RPP_BACKEND_HIP == 1,
+              "RPP_BACKEND_HIP must expand to 0 or 1");
+
 namespace rpptest {
 
 // Backends the suite can be instantiated against. HIP is added only when the

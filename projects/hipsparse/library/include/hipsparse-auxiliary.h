@@ -86,6 +86,10 @@ const char* hipsparseGetErrorString(hipsparseStatus_t status);
  *  - patch = version % 100
  *  - minor = version / 100 % 1000
  *  - major = version / 100000
+ *
+ *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
+ *  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
+ *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p version pointer is invalid.
  */
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseGetVersion(hipsparseHandle_t handle, int* version);
@@ -95,6 +99,11 @@ hipsparseStatus_t hipsparseGetVersion(hipsparseHandle_t handle, int* version);
  *
  *  \details
  *  \p hipsparseGetGitRevision gets the hipSPARSE library git commit revision (SHA-1).
+ *  \p rev must point to a buffer of at least 256 bytes.
+ *
+ *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
+ *  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
+ *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p rev pointer is invalid.
  */
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseGetGitRevision(hipsparseHandle_t handle, char* rev);

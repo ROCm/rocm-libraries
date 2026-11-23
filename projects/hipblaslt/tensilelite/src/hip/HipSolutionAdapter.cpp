@@ -245,7 +245,43 @@ namespace TensileLite
             // Reset the error code from the failed hipModuleLoad.
             (void)m_moduleApi.getLastError();
             std::cout << "Clearing modules and retrying hipModuleLoad" << std::endl;
-            for(auto module : m_modules)
+
+            // Taken under the lock every module and cache writer holds, so a
+            // concurrent load is neither lost nor unloaded here. Once the
+            // caches are reset, a new lookup cannot reach these modules, so
+            // they are unloaded after the lock is released. A launch that
+            // read a kernel handle before the reset may still use it after
+            // the unload.
+            std::vector<hipModule_t>              modules;
+            std::vector<std::vector<hipModule_t>> extraModuleCopies;
+            // In-memory images of those modules, released after the unloads.
+            std::vector<ModuleImage> images;
+            {
+                std::lock_guard<std::mutex> guard(m_access);
+                modules.swap(m_modules);
+                extraModuleCopies.swap(m_extraModuleCopies);
+                auto detachImage = [&](hipModule_t module) {
+                    if(auto node = m_moduleImages.extract(module))
+                        images.push_back(std::move(node.mapped()));
+                };
+                for(auto module : modules)
+                    detachImage(module);
+                for(auto const& copyModules : extraModuleCopies)
+                    for(auto module : copyModules)
+                        detachImage(module);
+                m_loadedModuleNames.clear();
+                m_loadedCOFiles.forEachValue([](std::atomic<bool>& loaded) {
+                    loaded.store(false, std::memory_order_release);
+                });
+                m_helperKernelPath.clear();
+                m_kernels.forEachValue([](std::atomic<hipFunction_t>& kernel) {
+                    kernel.store(nullptr, std::memory_order_release);
+                });
+                m_extraKernels.clear();
+                m_currentRotationCopy.store(0);
+            }
+
+            for(auto module : modules)
             {
                 HIP_CHECK_PRINT(m_moduleApi.unload(module), [&](hipError_t error_t) {
                     std::cerr << "hipModuleUnload failed: " << std::endl
@@ -254,14 +290,14 @@ namespace TensileLite
             }
 
             // Extra rotation copies are not recreated by recovery.
-            if(!m_extraModuleCopies.empty())
+            if(!extraModuleCopies.empty())
             {
                 std::cerr << "[icache-rotate] WARNING: out-of-memory retry is dropping "
-                          << m_extraModuleCopies.size()
+                          << extraModuleCopies.size()
                           << " rotation copy set(s); I-cache rotation is now disabled "
                           << "until loadCodeObjectFileExtraCopies() is called again." << std::endl;
             }
-            for(auto const& copyModules : m_extraModuleCopies)
+            for(auto const& copyModules : extraModuleCopies)
             {
                 for(auto module : copyModules)
                 {
@@ -270,23 +306,6 @@ namespace TensileLite
                                   << " error: " << hipGetErrorString(error_t) << std::endl;
                     });
                 }
-            }
-
-            {
-                std::lock_guard<std::mutex> guard(m_access);
-                for(auto module : m_modules)
-                    m_moduleImages.erase(module);
-                for(auto const& copyModules : m_extraModuleCopies)
-                    for(auto module : copyModules)
-                        m_moduleImages.erase(module);
-                m_modules.clear();
-                m_loadedModuleNames.clear();
-                m_loadedCOFiles.clear();
-                m_helperKernelPath.clear();
-                m_kernels.clear();
-                m_extraModuleCopies.clear();
-                m_extraKernels.clear();
-                m_currentRotationCopy.store(0);
             }
 
             hipError_t lazyLoadingError = initializeLazyLoading(lazyArch, lazyDir);
@@ -332,7 +351,8 @@ namespace TensileLite
                 std::string fileName(path.begin() + start, path.end());
                 if(fileName.rfind("Kernels.so-000-", 0) == 0)
                     m_helperKernelPath = path;
-                m_loadedCOFiles.insert(removeXnack(fileName));
+                m_loadedCOFiles.insert(removeXnack(fileName), true)
+                    .store(true, std::memory_order_release);
             }
             Debug::Instance().markerStop();
             return hipSuccess;
@@ -557,7 +577,7 @@ namespace TensileLite
                 std::lock_guard<std::mutex> guard(m_access);
                 if(m_localModules.count(path) != 0)
                     return hipSuccess;
-                auto& slot = m_localLoadMutexes[path];
+                auto& slot = m_loadMutexes[path];
                 if(!slot)
                     slot = std::make_shared<std::mutex>();
                 pathMutex = slot;
@@ -625,7 +645,7 @@ namespace TensileLite
                 return err == hipErrorNotFound ? hipErrorFileNotFound : err;
 
             std::lock_guard<std::mutex> guard(m_access);
-            err = hipModuleGetFunction(&rv, m_localModules.at(path), name.c_str());
+            err = m_moduleApi.getFunction(&rv, m_localModules.at(path), name.c_str());
             if(err == hipSuccess)
                 m_localKernels.emplace(std::move(key), rv);
             else
@@ -654,15 +674,35 @@ namespace TensileLite
                 return false;
             }
 #endif
-            //If required code object file hasn't yet been loaded, load it now
-            m_access.lock();
-            bool loaded = m_loadedCOFiles.find(removeXnack(codeObjectFile))
-                          != m_loadedCOFiles.end();
-            std::string codeObjectDir = m_codeObjectDirectory;
-            m_access.unlock();
+            // If required code object file hasn't yet been loaded, load it now.
+            // Loads of one file are serialized so it is loaded once; the key is
+            // the m_loadedCOFiles name, shared by its xnack variants.
+            std::string const key      = removeXnack(codeObjectFile);
+            auto              isLoaded = [this, &key] {
+                auto const* entry = m_loadedCOFiles.find(key);
+                return entry && entry->load(std::memory_order_acquire);
+            };
+            if(isLoaded())
+                return true;
+
+            std::shared_ptr<std::mutex> fileMutex;
+            {
+                std::lock_guard<std::mutex> guard(m_access);
+                auto&                       slot = m_loadMutexes[key];
+                if(!slot)
+                    slot = std::make_shared<std::mutex>();
+                fileMutex = slot;
+            }
+
+            std::lock_guard<std::mutex> loadGuard(*fileMutex);
+            bool                        loaded = isLoaded();
 
             if(!loaded)
             {
+                m_access.lock();
+                std::string codeObjectDir = m_codeObjectDirectory;
+                m_access.unlock();
+
                 //Try other xnack versions
                 size_t     loc = codeObjectFile.rfind('.');
                 hipError_t err;
@@ -702,9 +742,24 @@ namespace TensileLite
             return hipSuccess;
         }
 
+        hipFunction_t SolutionAdapter::cachedKernel(std::string const& name) const
+        {
+            auto const* entry = m_kernels.find(name);
+            return entry ? entry->load(std::memory_order_acquire) : nullptr;
+        }
+
         hipError_t SolutionAdapter::getKernel(hipFunction_t& rv, std::string const& name)
         {
             int copyIdx = m_currentRotationCopy.load();
+
+            if(copyIdx == 0)
+            {
+                if(hipFunction_t cached = cachedKernel(name))
+                {
+                    rv = cached;
+                    return hipSuccess;
+                }
+            }
 
             std::unique_lock<std::mutex> guard(m_access);
             hipError_t                   err = hipErrorNotFound;
@@ -717,23 +772,34 @@ namespace TensileLite
             if(copyIdx <= 0 || copyIdx > (int)m_extraModuleCopies.size())
                 copyIdx = 0;
 
-            auto&       cache   = copyIdx ? m_extraKernels[copyIdx - 1] : m_kernels;
             auto const& modules = copyIdx ? m_extraModuleCopies[copyIdx - 1] : m_modules;
 
-            auto it = cache.find(name);
-            if(it != cache.end())
+            if(copyIdx)
             {
-                rv = it->second;
+                auto& cache = m_extraKernels[copyIdx - 1];
+                auto  it    = cache.find(name);
+                if(it != cache.end())
+                {
+                    rv = it->second;
+                    return hipSuccess;
+                }
+            }
+            else if(hipFunction_t cached = cachedKernel(name))
+            {
+                rv = cached;
                 return hipSuccess;
             }
 
             for(auto module : modules)
             {
-                err = hipModuleGetFunction(&rv, module, name.c_str());
+                err = m_moduleApi.getFunction(&rv, module, name.c_str());
 
                 if(err == hipSuccess)
                 {
-                    cache[name] = rv;
+                    if(copyIdx)
+                        m_extraKernels[copyIdx - 1][name] = rv;
+                    else
+                        m_kernels.insert(name, rv).store(rv, std::memory_order_release);
                     return err;
                 }
                 else if(err != hipErrorNotFound)
@@ -750,20 +816,19 @@ namespace TensileLite
             // original m_modules so multi-kernel launches still resolve.
             if(copyIdx > 0)
             {
-                auto origIt = m_kernels.find(name);
-                if(origIt != m_kernels.end())
+                if(hipFunction_t cached = cachedKernel(name))
                 {
-                    rv = origIt->second;
+                    rv = cached;
                     return hipSuccess;
                 }
 
                 for(auto module : m_modules)
                 {
-                    err = hipModuleGetFunction(&rv, module, name.c_str());
+                    err = m_moduleApi.getFunction(&rv, module, name.c_str());
 
                     if(err == hipSuccess)
                     {
-                        m_kernels[name] = rv;
+                        m_kernels.insert(name, rv).store(rv, std::memory_order_release);
                         return err;
                     }
                     else if(err != hipErrorNotFound)
@@ -917,8 +982,8 @@ namespace TensileLite
                 lazyDir                      = m_codeObjectDirectory;
                 std::string helperKernelName = std::string("Kernels.so-000-") + lazyArch;
                 // If required code object file hasn't yet been loaded, load it now.
-                loaded = m_loadedCOFiles.find(removeXnack(helperKernelName) + ".hsaco")
-                         != m_loadedCOFiles.end();
+                auto const* entry = m_loadedCOFiles.find(removeXnack(helperKernelName) + ".hsaco");
+                loaded            = entry && entry->load(std::memory_order_acquire);
             }
 
             if(!loaded)
@@ -986,11 +1051,69 @@ namespace TensileLite
             return launchKernel(kernel, nullptr, nullptr, nullptr);
         }
 
+        namespace
+        {
+            // swallowed is set when a best-effort record fails.
+            hipError_t recordLaunchEvent(hipEvent_t     event,
+                                         hipStream_t    stream,
+                                         EventRecording recording,
+                                         bool&          swallowed)
+            {
+                if(event == nullptr)
+                    return hipSuccess;
+
+                const bool       bestEffort = recording == EventRecording::BestEffort;
+                const hipError_t before     = bestEffort ? hipPeekAtLastError() : hipSuccess;
+
+                const hipError_t status = hipEventRecord(event, stream);
+                if(status == hipSuccess || !bestEffort)
+                    return status;
+
+                // An error the thread already had is the caller's and stays.
+                if(before == hipSuccess)
+                    static_cast<void>(hipGetLastError());
+                swallowed = true;
+                return hipSuccess;
+            }
+
+            // Skipped after a swallowed start: a fresh stop against a reused
+            // pair's older start would read as a plausible positive duration.
+            hipError_t recordStopEvent(hipEvent_t     stopEvent,
+                                       hipStream_t    stream,
+                                       EventRecording recording,
+                                       bool&          startSwallowed)
+            {
+                if(startSwallowed)
+                    return hipSuccess;
+
+                bool stopSwallowed = false;
+                return recordLaunchEvent(stopEvent, stream, recording, stopSwallowed);
+            }
+        }
+
         hipError_t SolutionAdapter::launchKernel(KernelInvocation const& kernel,
                                                  hipStream_t             stream,
                                                  hipEvent_t              startEvent,
                                                  hipEvent_t              stopEvent,
                                                  bool                    isKernelLoaded)
+        {
+            bool startSwallowed = false;
+            return launchKernelMeasured(kernel,
+                                        stream,
+                                        startEvent,
+                                        stopEvent,
+                                        isKernelLoaded,
+                                        EventRecording::Strict,
+                                        startSwallowed);
+        }
+
+        hipError_t SolutionAdapter::launchKernelMeasured(KernelInvocation const& kernel,
+                                                         hipStream_t             stream,
+                                                         hipEvent_t              startEvent,
+                                                         hipEvent_t              stopEvent,
+                                                         bool                    isKernelLoaded,
+                                                         EventRecording          recording,
+                                                         bool&                   startSwallowed)
         {
 #ifdef HIP_HAS_CLUSTER_LAUNCH
             const bool enableCluster = (kernel.clusterDim.x > 1 || kernel.clusterDim.y > 1);
@@ -1082,10 +1205,8 @@ namespace TensileLite
             if(m_debugSkipLaunch)
             {
                 std::cout << "DEBUG: Skip kernel execution" << std::endl;
-                if(startEvent != nullptr)
-                    HIP_CHECK_RETURN(hipEventRecord(startEvent, stream));
-                if(stopEvent != nullptr)
-                    HIP_CHECK_RETURN(hipEventRecord(stopEvent, stream));
+                HIP_CHECK_RETURN(recordLaunchEvent(startEvent, stream, recording, startSwallowed));
+                HIP_CHECK_RETURN(recordStopEvent(stopEvent, stream, recording, startSwallowed));
                 return hipSuccess;
             }
 
@@ -1122,8 +1243,7 @@ namespace TensileLite
                                        &argsSize,
                                        HIP_LAUNCH_PARAM_END};
 
-            if(startEvent != nullptr)
-                HIP_CHECK_RETURN(hipEventRecord(startEvent, stream));
+            HIP_CHECK_RETURN(recordLaunchEvent(startEvent, stream, recording, startSwallowed));
 
 #ifdef HIP_HAS_CLUSTER_LAUNCH
             if(enableCluster)
@@ -1190,8 +1310,7 @@ namespace TensileLite
                 );
             }
 
-            if(stopEvent != nullptr)
-                HIP_CHECK_RETURN(hipEventRecord(stopEvent, stream));
+            HIP_CHECK_RETURN(recordStopEvent(stopEvent, stream, recording, startSwallowed));
             return hipSuccess;
         }
 
@@ -1218,8 +1337,21 @@ namespace TensileLite
                                                   hipEvent_t                           stopEvent,
                                                   bool                                 isKernelLoaded)
         {
+            return launchKernels(
+                kernels, stream, startEvent, stopEvent, isKernelLoaded, EventRecording::Strict);
+        }
+
+        hipError_t SolutionAdapter::launchKernels(std::vector<KernelInvocation> const& kernels,
+                                                  hipStream_t                          stream,
+                                                  hipEvent_t                           startEvent,
+                                                  hipEvent_t                           stopEvent,
+                                                  bool           isKernelLoaded,
+                                                  EventRecording recording)
+        {
             auto first = kernels.begin();
             auto last  = kernels.end() - 1;
+
+            bool startSwallowed = false;
 
             for(auto iter = kernels.begin(); iter != kernels.end(); iter++)
             {
@@ -1231,7 +1363,13 @@ namespace TensileLite
                 if(iter == last)
                     kStop = stopEvent;
 
-                HIP_CHECK_RETURN_WITH_LOG(launchKernel(*iter, stream, kStart, kStop, isKernelLoaded),
+                HIP_CHECK_RETURN_WITH_LOG(launchKernelMeasured(*iter,
+                                                               stream,
+                                                               kStart,
+                                                               kStop,
+                                                               isKernelLoaded,
+                                                               recording,
+                                                               startSwallowed),
                     [&](hipError_t error) {
                         std::cerr << "launchKernel failed: " << iter->kernelName << std::endl
                                 << " with workgroup size: " << iter->workGroupSize << std::endl
