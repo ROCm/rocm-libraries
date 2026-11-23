@@ -164,7 +164,6 @@ jobs:
       # Keyed on the changed paths rather than changed_projects: the latter is
       # a derived classification that can widen to every configured project or
       # collapse to empty, neither of which means "this PR touched hipBLASLt".
-      # No test_type_for_family: gfx950 takes the same test tier as gfx94X.
       - name: Resolve gfx950 family override
         id: family-override
         env:
