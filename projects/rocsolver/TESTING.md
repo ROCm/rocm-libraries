@@ -28,6 +28,12 @@ instantiated across:
 - precision — `float`, `double`, `rocblas_float_complex`, `rocblas_double_complex`
 - index type — `rocblas_int`, `int64_t`
 - where applicable, blocked and unblocked variants (for example `getf2` vs `getrf`)
+- where a routine offers a choice of algorithm, each option — `syevd`/`heevd`
+  and `sygvd`/`hegvd` instantiate both the 1-stage and 2-stage tridiagonalization
+  (`hetrd_alg_mode`); `gesvd`, `bdsqr`, `syev`/`heev` and `steqr` each
+  instantiate a GPU-only class alongside a parallel `*_HYBRID` class built from
+  the same `alg_mode`-templated base (for example `GESVD` vs `GESVD_HYBRID` in
+  `clients/gtest/lapack/gesvd_gtest.cpp`)
 
 That expansion is driven by the `INSTANTIATE` / `FOREACH_*` / `APPLY_STAMP`
 macro pipeline in `clients/common/misc/client_util.hpp`.
