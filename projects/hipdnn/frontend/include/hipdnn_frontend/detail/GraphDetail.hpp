@@ -3,11 +3,16 @@
 #pragma once
 
 #include <hipdnn_frontend/Error.hpp>
+#include <hipdnn_frontend/Types.hpp>
 #include <hipdnn_frontend/Utilities.hpp>
 #include <hipdnn_frontend/detail/BackendWrapper.hpp>
+#include <hipdnn_frontend/detail/CreateBackendDescriptor.hpp>
 #include <hipdnn_frontend/detail/ScopedHipdnnBackendDescriptor.hpp>
 
+#include <algorithm>
+#include <cstdint>
 #include <memory>
+#include <string_view>
 #include <vector>
 
 namespace hipdnn_frontend::detail
@@ -131,6 +136,54 @@ inline Error
             "Failed to get engine id from engine descriptor.");
     }
 
+    return {ErrorCode::OK, ""};
+}
+
+/// Ranked engine configurations for @p modes, as cudnn-frontend's get_heuristics_list builds
+/// them: one heuristic query per mode, in the order given, results concatenated. An engine an
+/// earlier mode returned is not repeated, since hipDNN returns one configuration per engine,
+/// and modes that select the same backend mode are queried once.
+inline Error getEngineConfigsForModes(
+    std::vector<std::unique_ptr<ScopedHipdnnBackendDescriptor>>& engineConfigs,
+    std::vector<int64_t>& engineIds,
+    hipdnnBackendDescriptor_t graphDesc,
+    const std::vector<HeuristicMode>& modes,
+    std::string_view rankingMetric)
+{
+    engineConfigs.clear();
+    engineIds.clear();
+    if(modes.empty())
+    {
+        return {ErrorCode::INVALID_VALUE, "No heuristic mode was requested."};
+    }
+
+    std::vector<hipdnnBackendHeurMode_t> queried;
+    for(const HeuristicMode mode : modes)
+    {
+        const hipdnnBackendHeurMode_t backendMode = toBackendType(mode);
+        if(std::find(queried.begin(), queried.end(), backendMode) != queried.end())
+        {
+            continue;
+        }
+        queried.push_back(backendMode);
+
+        ScopedHipdnnBackendDescriptor engineHeuristicDesc;
+        HIPDNN_CHECK_ERROR(createEngineHeuristicDescriptorForGraph(
+            engineHeuristicDesc, graphDesc, mode, /*findFirst=*/false, rankingMetric));
+
+        std::vector<std::unique_ptr<ScopedHipdnnBackendDescriptor>> modeConfigs;
+        std::vector<int64_t> modeIds;
+        HIPDNN_CHECK_ERROR(
+            getEngineConfigs(modeConfigs, modeIds, engineHeuristicDesc.get(), /*getAll=*/true));
+        for(size_t i = 0; i < modeIds.size(); ++i)
+        {
+            if(std::find(engineIds.begin(), engineIds.end(), modeIds[i]) == engineIds.end())
+            {
+                engineIds.push_back(modeIds[i]);
+                engineConfigs.push_back(std::move(modeConfigs[i]));
+            }
+        }
+    }
     return {ErrorCode::OK, ""};
 }
 

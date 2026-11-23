@@ -9,9 +9,12 @@ target_sources(hip_kernel_provider_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/TestKernelIngestorEngine.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/TestLaunchKernelDefinition.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/TestMultiLaunchEndToEnd.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/TestRankingTraceSupport.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/TestUnpulledModelsRecord.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/TestRestoredIngestorPlan.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestPointwiseAddDispatchHandler.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestPointwiseAddMatchers.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestStandalonePointwise.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestConvFwdPack.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestAttentionDensePersistent.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx950AttentionDenseMatchers.cpp
@@ -114,6 +117,7 @@ set_property(
 # stays above: it reads across the unit and unit_shared shards, so no single-shard entry
 # can carry it and it states its inventory through the ordinary host run instead.
 target_sources(hip_kernel_provider_census_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestStandalonePointwisePacks.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestPointwisePacks.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx950AttentionDensePacks.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx950ConvFwdAotPacks.cpp
@@ -129,6 +133,7 @@ target_sources(hip_kernel_provider_census_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx950AttentionUnified3DCatalogTiles.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx942AttentionDensePacks.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx942AttentionDenseCatalogTiles.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx942AttentionDenseModelBinding.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx1151WmmaAttentionPacks.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx1151WmmaAttentionCatalog.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx1151WmmaAttentionDecodePacks.cpp
@@ -219,5 +224,6 @@ if(HIPKERNELPROVIDER_FLYDSL_ACTIVE)
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslSdpaCdnaPacks.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslSdpaBwdPacks.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslSdpaBwdSplitPacks.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslModelBinding.cpp
     )
 endif()
