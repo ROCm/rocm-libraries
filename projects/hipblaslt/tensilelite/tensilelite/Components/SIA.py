@@ -26,8 +26,9 @@ from rocisa.base import Item
 from rocisa.code import Module, TextBlock
 from rocisa.container import DSModifiers, HolderContainer, replaceHolder
 
-from rocisa.instruction import SWaitCnt, SWaitAlu, DSStoreB128, DSStoreB64, DSStoreB32, TensorLoadToLds
+from rocisa.instruction import SWaitCnt, SWaitAlu, DSStoreB128, DSStoreB64, DSStoreB32
 
+from ..ir import sched_is_tensor_load_to_lds
 from ..Common import roundUp, print2
 from ..Common.MxScaleLayout import splatFirst
 from ..Component import SIA
@@ -532,8 +533,8 @@ def _splitTdmLoad(grCode):
     nonTdmMod = Module()
     grAItems = grCode.items() if hasattr(grCode, 'items') else []
     for item in grAItems:
-        hasTdm = isinstance(item, TensorLoadToLds) or \
-                 (hasattr(item, 'flatitems') and any(isinstance(f, TensorLoadToLds) for f in item.flatitems()))
+        hasTdm = sched_is_tensor_load_to_lds(item) or \
+                 (hasattr(item, 'flatitems') and any(sched_is_tensor_load_to_lds(f) for f in item.flatitems()))
         if hasTdm:
             tdmLoadMod.add(item)
         else:

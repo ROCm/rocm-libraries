@@ -149,6 +149,11 @@ def sched_is_mxmfma(item):
   return isinstance(item, _rocisa_instruction.MXMFMAInstruction)
 
 
+def sched_is_tensor_load_to_lds(item):
+  """True for a tensor_load_to_lds (TDM direct-to-LDS) instruction."""
+  return isinstance(item, _rocisa_instruction.TensorLoadToLds)
+
+
 class _LogicalBackend:
   """Construction backend that builds StinkyTofu logical IR instead of rocisa.
 

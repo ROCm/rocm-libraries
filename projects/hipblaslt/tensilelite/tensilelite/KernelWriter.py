@@ -44,7 +44,7 @@ from .ir import BranchInstruction, BufferLoadB128, BufferLoadB192, BufferLoadB32
   MFMAInstruction, MXMFMAInstruction, SAddU32, SAndB32, SBarrier, SBranch, SCBranchSCC0, SCBranchSCC1, SCBranchVCCNZ, SCmpEQU32, SCmpEQU64, SCmpGeU32, SCmpLeU32, \
   SCSelectB32, SLShiftLeftB32, SLShiftRightB32, SMFMAInstruction, SMovB32, SMovB64, SNop, SEndpgm, SOrB32, SSetPrior, SSetRegIMM32B32, SSubU32, SWaitCnt, SWaitAlu, \
   SLongBranchPositive, VFmaMixF32, VMadMixF32, VMovB32, VAndB32, VCmpEQU32, VCndMaskB32, VMovB64, VNop, VReadfirstlaneB32, TensorLoadToLds, SCMovB32, SCMovB64, t16
-from .ir import sched_is_mfma
+from .ir import sched_is_mfma, sched_is_smfma, sched_is_mxmfma, sched_is_tensor_load_to_lds
 from .ir import SSchedulingFence
 from .ir import set_active_version as _set_active_ir_version
 from rocisa.register import RegisterPool
@@ -921,7 +921,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     if ((self.codes.globalReadA is None or not self.codes.globalReadA.middle.itemsSize())
         and (self.codes.globalReadB is None or not self.codes.globalReadB.middle.itemsSize())):
       return
-    assert any(isinstance(item, TensorLoadToLds) for item in src.flatitems()), \
+    assert any(sched_is_tensor_load_to_lds(item) for item in src.flatitems()), \
       "decoupled PGR: the fill group to re-slot carries no tensor_load_to_lds"
 
     assert self.isTdmWaveSeparated(kernel), \
