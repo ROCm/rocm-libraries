@@ -39,4 +39,11 @@ bool same_bits(const ck::complex_t<T>& a, const ck::complex_t<T>& b)
     return std::memcmp(&a, &b, sizeof(a)) == 0;
 }
 
+// The same bits, or NaN in both: the sign and payload of a NaN are not specified.
+template <typename T>
+bool same_part(T x, T y)
+{
+    return std::memcmp(&x, &y, sizeof(T)) == 0 || (std::isnan(x) && std::isnan(y));
+}
+
 } // namespace ck_complex_test

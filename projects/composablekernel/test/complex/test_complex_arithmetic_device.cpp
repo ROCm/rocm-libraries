@@ -16,6 +16,7 @@ namespace {
 
 using ck::complex_t;
 using ck::index_t;
+using ck_complex_test::same_part;
 using ck_complex_test::special_values;
 
 struct Add
@@ -102,13 +103,6 @@ apply_on_device(const std::vector<complex_t<T>>& a, const std::vector<complex_t<
     std::vector<Elem> c(a.size());
     c_dev.FromDevice(c.data());
     return c;
-}
-
-// The same bits, or NaN in both: the sign and payload of a NaN are not specified.
-template <typename T>
-bool same_part(T x, T y)
-{
-    return std::memcmp(&x, &y, sizeof(T)) == 0 || (std::isnan(x) && std::isnan(y));
 }
 
 template <typename T>

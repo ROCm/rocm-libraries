@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include <cmath>
+#include <complex>
 #include <cstring>
 #include <limits>
 #include <type_traits>
@@ -14,6 +15,7 @@
 #include "ck/utility/dtype_complex.hpp"
 #include "ck/utility/functional2.hpp"
 #include "ck/utility/type_convert.hpp"
+#include "complex_test_data.hpp"
 
 using ck::complex_t;
 
@@ -197,27 +199,39 @@ TYPED_TEST(ComplexType, MultiplyOverflowOnlyWhenTooLarge)
 }
 
 // C11 Annex G.5.1: an infinity times a nonzero value is an infinity (a complex value with an
-// infinite part), never NaN + iNaN. NaN times a finite value stays NaN.
-TYPED_TEST(ComplexType, MultiplyInfinityFollowsAnnexG)
+// infinite part), never NaN + iNaN. NaN times a finite value stays NaN. The reference is the host
+// compiler's own complex multiply (std::complex, which calls __mulsc3 / __muldc3): every pair of
+// special values with an infinite or NaN part must give the same bits in each part, or NaN in
+// both. Pairs of finite factors are not compared: there CK rescales a product that overflows,
+// where Annex G's code may return an infinity (see MultiplyOverflowOnlyWhenTooLarge).
+TYPED_TEST(ComplexType, MultiplyNonFiniteMatchesStdComplex)
 {
-    using T              = TypeParam;
-    using C              = complex_t<T>;
-    const T inf          = std::numeric_limits<T>::infinity();
-    const T nan          = std::numeric_limits<T>::quiet_NaN();
-    const C factors[][2] = {{C{inf, T{0}}, C{T{1}, T{0}}},
-                            {C{inf, inf}, C{T{1}, T{1}}},
-                            {C{inf, nan}, C{T{1}, T{0}}},
-                            {C{nan, inf}, C{T{0}, T{1}}},
-                            {C{inf, T{0}}, C{nan, T{1}}},
-                            {C{T{2}, T{-3}}, C{-inf, inf}}};
-    for(const auto& f : factors)
+    using T       = TypeParam;
+    using C       = complex_t<T>;
+    using S       = std::complex<T>;
+    const auto v  = ck_complex_test::special_values<T>();
+    const auto m  = v.size();
+    const auto mm = m * m;
+    long bad      = 0;
+    for(std::size_t i = 0; i < mm * mm; ++i)
     {
-        const C p = f[0] * f[1];
-        EXPECT_TRUE(std::isinf(p.real) || std::isinf(p.imag))
-            << "(" << f[0].real << ", " << f[0].imag << ") * (" << f[1].real << ", " << f[1].imag
-            << ") = (" << p.real << ", " << p.imag << ")";
+        const std::size_t x = i % mm, y = i / mm;
+        const T a = v[x % m], b = v[x / m], c = v[y % m], d = v[y / m];
+        const bool finite =
+            std::isfinite(a) && std::isfinite(b) && std::isfinite(c) && std::isfinite(d);
+        const C p = C{a, b} * C{c, d};
+        const S q = S{a, b} * S{c, d};
+        if(!finite && !(ck_complex_test::same_part(p.real, q.real()) &&
+                        ck_complex_test::same_part(p.imag, q.imag())))
+        {
+            if(bad < 5)
+            {
+                ADD_FAILURE() << "(" << a << ", " << b << ") * (" << c << ", " << d << "): ck ("
+                              << p.real << ", " << p.imag << "), std::complex (" << q.real() << ", "
+                              << q.imag() << ")";
+            }
+            ++bad;
+        }
     }
-
-    const C n = C{nan, T{0}} * C{T{1}, T{0}};
-    EXPECT_TRUE(std::isnan(n.real) && std::isnan(n.imag));
+    EXPECT_EQ(bad, 0);
 }
