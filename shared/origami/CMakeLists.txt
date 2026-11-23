@@ -181,6 +181,11 @@ if(ORIGAMI_ENABLE_NN)
                     OR CMAKE_POLICY_VERSION_MINIMUM VERSION_LESS 3.5)
                 set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
             endif()
+            # yaml-cpp follows BUILD_SHARED_LIBS, which is ON for a shared origami.
+            # A shared yaml-cpp would be a dependency of liborigami that is not in
+            # origami-targets, and install(EXPORT) fails at generate time. Link the
+            # fetched copy in statically (position independent by default) instead.
+            set(YAML_BUILD_SHARED_LIBS OFF CACHE BOOL "Build the fetched yaml-cpp statically" FORCE)
             FetchContent_MakeAvailable(yaml-cpp)
         else()
             message(FATAL_ERROR "yaml-cpp not found (set ORIGAMI_ENABLE_FETCH=ON to auto-fetch)")
