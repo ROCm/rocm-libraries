@@ -2125,7 +2125,7 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
                 4, 1, 1, 4, 1, 1,
                 16, 16, 32, 16, 16, 32,
                 3,
-                F_constraint=CppConstraint() & GFX125_D64_SCHED_M64_CONSTRAINT,
+                F_constraint=GFX125_D64_SCHED_M64_CONSTRAINT,
             ),
         ),
         (128, 128): (
@@ -2136,7 +2136,7 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
                 4, 1, 1, 4, 1, 1,
                 16, 16, 32, 16, 16, 32,
                 1,
-                F_constraint=CppConstraint() & GFX125_D128_SCHED_M64_CONSTRAINT,
+                F_constraint=GFX125_D128_SCHED_M64_CONSTRAINT,
             ),
         ),
         (192, 128): (
