@@ -242,6 +242,12 @@ def tdmStoreBlocks(kernel, edge, atomic, vectorWidths):
   return set(vectorWidths) if edge else {max(vectorWidths)}
 
 
+def storeRemapVectorWidth(kernel, tdmStoreLdsBase):
+  """The StoreRemapVectorWidth of a store block: a TDM block, which has the base of the staged tile in
+  tdmStoreLdsBase, stages D itself, so only a buffer_store block remaps D through LDS."""
+  return kernel["StoreRemapVectorWidth"] if tdmStoreLdsBase is None else 0
+
+
 def tdmStoreModifiers(asmCaps, kernel, tc="D"):
   """Return the TENSORModifiers of the TDM block's transfer of tensor tc, from its hints as addStore and
   addLoad decode them: the tensor_store_from_lds of D, or the tensor_load_to_lds of C."""

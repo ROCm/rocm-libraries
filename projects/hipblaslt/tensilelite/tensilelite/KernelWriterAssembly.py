@@ -100,7 +100,7 @@ from .Components.TDMFuse import tdmFusePaired, tdmGroupPartner, \
                                 tdmMemberIsLive, tdmPairOnEveryWave, tdmRidesEveryWave, \
                                 tdmStashedMembers, tdmWaveComponents, tdmWaveGuard, \
                                 tdmWavePartition, tdmWaveRangeText, tdmWaveResident
-from .Components.TDMStoreInst import hasEpilogueSideEffects, tdmStoreBlocks
+from .Components.TDMStoreInst import hasEpilogueSideEffects, storeRemapVectorWidth, tdmStoreBlocks
 from .SolutionStructs import isPackedIndex
 from .AsmStoreState import StoreState, VectorDataTypes
 from .Activation import ActivationType
@@ -21797,8 +21797,7 @@ class KernelWriterAssembly(KernelWriter):
 
     # for storeRemap edge case, non-beta still can enable vector stores
     gwvw = vectorWidth
-    # A TDM block stages D itself, so only a buffer_store block remaps it through LDS.
-    storeRemap = kernel["StoreRemapVectorWidth"] if tdmStoreLdsBase is None else 0
+    storeRemap = storeRemapVectorWidth(kernel, tdmStoreLdsBase)
 
     #print "globalWriteElements: edge=", edge, "beta=", beta, "atomic=", atomic
 
