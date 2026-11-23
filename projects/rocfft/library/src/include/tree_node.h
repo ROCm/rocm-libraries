@@ -977,10 +977,8 @@ public:
     // nullptr if there is no such ancestor
     TreeNode* GetPartialPassAncestor() const;
 
-    // Set length of transpose kernel node, since those are easily
-    // knowable just by looking at the scheme and they're used in
-    // many plans.  Throws an exception if this is not a transpose
-    // node.
+    // Set the legacy output-axis lengths of a fused Stockham transpose.
+    // Plain transpose lengths on both sides are in the node's input-axis order.
     void SetTransposeOutputLength();
 
     // Get row-major output length of this node.
@@ -1331,6 +1329,10 @@ protected:
     void SetupGridParam_internal(GridParam& gp) override;
 
 public:
+    // Order for a packed output buffer, independent of the assigned strides.
+    // Returns false without touching axes for non-plain-transpose schemes.
+    static bool PermuteToPackedOutput(ComputeScheme scheme, std::vector<size_t>& axes);
+
     // Transpose tiles read more row-ish and write more column-ish.  So
     // assume output benefits more from padding than input.
     bool PaddingBenefitsOutput() override

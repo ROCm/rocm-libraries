@@ -65,7 +65,7 @@ void TRTRT1DNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
     {
         trans1Plan->length.push_back(length[index]);
     }
-    trans1Plan->SetTransposeOutputLength();
+    trans1Plan->outputLength = trans1Plan->length;
 
     // first row fft
     NodeMetaData row1PlanData(this);
@@ -92,7 +92,7 @@ void TRTRT1DNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
     {
         trans2Plan->length.push_back(length[index]);
     }
-    trans2Plan->SetTransposeOutputLength();
+    trans2Plan->outputLength = trans2Plan->length;
 
     // second row fft
     auto row2Plan = NodeFactory::CreateNodeFromScheme(CS_KERNEL_STOCKHAM, this);
@@ -113,7 +113,7 @@ void TRTRT1DNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
     {
         trans3Plan->length.push_back(length[index]);
     }
-    trans3Plan->SetTransposeOutputLength();
+    trans3Plan->outputLength = trans3Plan->length;
 
     // --------------------------------
     // Fuse Shims
@@ -642,7 +642,7 @@ void CRT1DNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
     {
         transPlan->length.push_back(length[index]);
     }
-    transPlan->SetTransposeOutputLength();
+    transPlan->outputLength = transPlan->length;
 
     // --------------------------------
     // Fuse Shims

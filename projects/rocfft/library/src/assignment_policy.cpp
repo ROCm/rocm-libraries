@@ -337,6 +337,7 @@ bool AssignmentPolicy::ValidOutBuffer(ExecPlan&           execPlan,
             = (buffer == OB_USER_OUT && execPlan.rootPlan->outArrayType == rocfft_array_type_real)
               || (buffer == OB_USER_IN && execPlan.rootPlan->inArrayType == rocfft_array_type_real);
         const bool doubleFront = outBufferIsReal && !kernelOutputIsReal;
+        const auto front       = nodeLen.front();
         if(doubleFront)
             nodeLen.front() *= 2;
 
@@ -358,18 +359,15 @@ bool AssignmentPolicy::ValidOutBuffer(ExecPlan&           execPlan,
                                                       : execPlan.rootPlan->inStride))
             return true;
 
-        // nodeLen was paired with nodeStride for MatchingLengthStride, but the
-        // decomposition below always needs the output lengths, which may differ
-        // (fused Bluestein nodes writing to user buffers are excluded as they have
-        // a behavior of their own that OutputFootprint handles).
-        // TODO: maintain consistency of axis ordering between input and output
-        // for all nodes (e.g. implicit-stride transpose AxB -> BxA can be made
-        // self-explanatory with explicit strides [1, A] -> [B, 1] without
-        // changing the ordering of axes). That would remove the ambiguity of
-        // "which length to use in this context?"
+        // Enumerate tests candidate buffers before assigning their strides.
+        // Keep the packed-buffer decomposition order without storing it in
+        // a plain transpose's outputLength. Other schemes still have their
+        // legacy output ordering; fused Bluestein keeps its special footprint.
         if(node.GetBluesteinFuseType() == BFT_NONE)
         {
-            nodeLen = node.GetOutputLength();
+            nodeLen.front() = front;
+            if(!TransposeNode::PermuteToPackedOutput(node.scheme, nodeLen))
+                nodeLen = node.GetOutputLength();
             if(doubleFront)
                 nodeLen.front() *= 2;
         }
@@ -1272,6 +1270,8 @@ void CollectTempBufOps(TreeNode&               node,
             CollectTempBufOps(**child, buf, users);
 
         // Store this write
+        // Keep lengths paired with the actual strides, not the packed order
+        // used by the user-buffer decomposition check.
         insertOp(
             {node.LengthForOutStride(), node.outStride, node.oDist, TempBufOp::BufWrite, node});
 

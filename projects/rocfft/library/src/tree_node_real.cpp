@@ -168,8 +168,7 @@ void RealTransCmplxNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
     // head copy plan
     copyHeadPlan->dimension = dimension;
     copyHeadPlan->length    = length;
-    if(!r2c)
-        copyHeadPlan->outputLength = *realLength;
+    copyHeadPlan->outputLength = *realLength;
     childNodes.emplace_back(std::move(copyHeadPlan));
 
     // complex fft
@@ -192,8 +191,7 @@ void RealTransCmplxNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
     auto copyTailPlan       = NodeFactory::CreateNodeFromScheme(copyTailScheme, this);
     copyTailPlan->dimension = dimension;
     copyTailPlan->length    = *realLength;
-    if(r2c)
-        copyTailPlan->outputLength = *complexLength;
+    copyTailPlan->outputLength = r2c ? *complexLength : *realLength;
 
     childNodes.emplace_back(std::move(copyTailPlan));
 }
@@ -209,8 +207,7 @@ void RealTransCmplxNode::AssignParams_internal()
     copyHeadPlan->iDist    = iDist;
 
     copyHeadPlan->outStride.push_back(1);
-    copyHeadPlan->oDist = copyHeadPlan->outputLength.empty() ? copyHeadPlan->length[0]
-                                                             : copyHeadPlan->outputLength[0];
+    copyHeadPlan->oDist = copyHeadPlan->outputLength[0];
     for(size_t index = 1; index < length.size(); index++)
     {
         copyHeadPlan->outStride.push_back(copyHeadPlan->oDist);
@@ -665,11 +662,12 @@ void Real2DEvenNode::BuildTree_internal_TR_pair(SchemeTreeVec& child_scheme_tree
         auto trans1Plan       = NodeFactory::CreateNodeFromScheme(CS_KERNEL_TRANSPOSE, this);
         trans1Plan->length    = row1Plan->outputLength;
         trans1Plan->dimension = 2;
-        trans1Plan->SetTransposeOutputLength();
+        trans1Plan->outputLength = trans1Plan->length;
 
         // second row fft
         NodeMetaData row2PlanData(this);
-        row2PlanData.length       = trans1Plan->outputLength;
+        row2PlanData.length = trans1Plan->outputLength;
+        std::swap(row2PlanData.length[0], row2PlanData.length[1]);
         row2PlanData.dimension    = 1;
         row2PlanData.outputLength = row2PlanData.length;
         auto row2Plan = NodeFactory::CreateExplicitNode(row2PlanData, this, determined_scheme_2);
@@ -677,9 +675,9 @@ void Real2DEvenNode::BuildTree_internal_TR_pair(SchemeTreeVec& child_scheme_tree
 
         // second transpose
         auto trans2Plan       = NodeFactory::CreateNodeFromScheme(CS_KERNEL_TRANSPOSE, this);
-        trans2Plan->length    = trans1Plan->outputLength;
+        trans2Plan->length       = row2PlanData.outputLength;
         trans2Plan->dimension = 2;
-        trans2Plan->SetTransposeOutputLength();
+        trans2Plan->outputLength = trans2Plan->length;
 
         // --------------------------------
         // Fuse Shims:
@@ -737,21 +735,22 @@ void Real2DEvenNode::BuildTree_internal_TR_pair(SchemeTreeVec& child_scheme_tree
         // first transpose
         auto trans1Plan    = NodeFactory::CreateNodeFromScheme(CS_KERNEL_TRANSPOSE, this);
         trans1Plan->length = length;
-        trans1Plan->SetTransposeOutputLength();
+        trans1Plan->outputLength = trans1Plan->length;
         trans1Plan->dimension = 2;
 
         // c2c row transform
         NodeMetaData c2cPlanData(this);
-        c2cPlanData.dimension    = 1;
-        c2cPlanData.length       = trans1Plan->outputLength;
+        c2cPlanData.dimension = 1;
+        c2cPlanData.length    = trans1Plan->outputLength;
+        std::swap(c2cPlanData.length[0], c2cPlanData.length[1]);
         c2cPlanData.outputLength = c2cPlanData.length;
         auto c2cPlan = NodeFactory::CreateExplicitNode(c2cPlanData, this, determined_scheme_1);
         c2cPlan->RecursiveBuildTree((noSolution) ? nullptr : child_scheme_trees[1].get());
 
         // second transpose
         auto trans2plan    = NodeFactory::CreateNodeFromScheme(CS_KERNEL_TRANSPOSE, this);
-        trans2plan->length = trans1Plan->outputLength;
-        trans2plan->SetTransposeOutputLength();
+        trans2plan->length       = c2cPlanData.outputLength;
+        trans2plan->outputLength = trans2plan->length;
         trans2plan->dimension = 2;
         // NOTE
 
@@ -1179,6 +1178,7 @@ void Real3DEvenNode::BuildTree_internal_2D_SINGLE_CC()
 
         auto xyPlan       = NodeFactory::CreateNodeFromScheme(CS_KERNEL_2D_SINGLE, this);
         xyPlan->length    = {outputLength[0] / 2, outputLength[1], outputLength[2]};
+        xyPlan->outputLength = xyPlan->length;
         xyPlan->dimension = 2;
         xyPlan->RecursiveBuildTree();
         xyPlan->ebtype = EmbeddedType::C2Real_PRE;
@@ -1381,12 +1381,14 @@ void Real3DEvenNode::BuildTree_internal_TR_pairs(SchemeTreeVec& child_scheme_tre
         // first transpose
         auto trans1    = NodeFactory::CreateNodeFromScheme(CS_KERNEL_TRANSPOSE_Z_XY, this);
         trans1->length = rcplan->outputLength;
-        trans1->SetTransposeOutputLength();
+        trans1->outputLength = trans1->length;
         trans1->dimension = 3;
 
         // first column
         NodeMetaData c1planData(this);
-        c1planData.length       = trans1->outputLength;
+        c1planData.length = trans1->outputLength;
+        std::swap(c1planData.length[0], c1planData.length[1]);
+        std::swap(c1planData.length[1], c1planData.length[2]);
         c1planData.dimension    = 1;
         c1planData.outputLength = c1planData.length;
         auto c1plan = NodeFactory::CreateExplicitNode(c1planData, this, determined_scheme_2);
@@ -1395,13 +1397,15 @@ void Real3DEvenNode::BuildTree_internal_TR_pairs(SchemeTreeVec& child_scheme_tre
 
         // second transpose
         auto trans2    = NodeFactory::CreateNodeFromScheme(CS_KERNEL_TRANSPOSE_Z_XY, this);
-        trans2->length = trans1->outputLength;
-        trans2->SetTransposeOutputLength();
+        trans2->length       = c1planData.outputLength;
+        trans2->outputLength = trans2->length;
         trans2->dimension = 3;
 
         // second column
         NodeMetaData c2planData(this);
-        c2planData.length       = trans2->outputLength;
+        c2planData.length = trans2->outputLength;
+        std::swap(c2planData.length[0], c2planData.length[1]);
+        std::swap(c2planData.length[1], c2planData.length[2]);
         c2planData.dimension    = 1;
         c2planData.outputLength = c2planData.length;
         auto c2plan = NodeFactory::CreateExplicitNode(c2planData, this, determined_scheme_4);
@@ -1410,8 +1414,8 @@ void Real3DEvenNode::BuildTree_internal_TR_pairs(SchemeTreeVec& child_scheme_tre
 
         // third transpose
         auto trans3    = NodeFactory::CreateNodeFromScheme(CS_KERNEL_TRANSPOSE_Z_XY, this);
-        trans3->length = trans2->outputLength;
-        trans3->SetTransposeOutputLength();
+        trans3->length       = c2planData.outputLength;
+        trans3->outputLength = trans3->length;
         trans3->dimension = 3;
 
         // --------------------------------
@@ -1497,13 +1501,15 @@ void Real3DEvenNode::BuildTree_internal_TR_pairs(SchemeTreeVec& child_scheme_tre
         // transpose
         auto trans3    = NodeFactory::CreateNodeFromScheme(CS_KERNEL_TRANSPOSE_XY_Z, this);
         trans3->length = length;
-        trans3->SetTransposeOutputLength();
         std::swap(trans3->length[1], trans3->length[2]);
+        trans3->outputLength = trans3->length;
         trans3->dimension = 3;
 
         // column
         NodeMetaData c2planData(this);
-        c2planData.length       = trans3->outputLength;
+        c2planData.length = trans3->outputLength;
+        // The transpose input already has axes 1 and 2 swapped.
+        std::swap(c2planData.length[0], c2planData.length[1]);
         c2planData.dimension    = 1;
         c2planData.outputLength = c2planData.length;
         auto c2plan = NodeFactory::CreateExplicitNode(c2planData, this, determined_scheme_1);
@@ -1512,14 +1518,15 @@ void Real3DEvenNode::BuildTree_internal_TR_pairs(SchemeTreeVec& child_scheme_tre
 
         // transpose
         auto trans2    = NodeFactory::CreateNodeFromScheme(CS_KERNEL_TRANSPOSE_XY_Z, this);
-        trans2->length = trans3->outputLength;
-        trans2->SetTransposeOutputLength();
+        trans2->length = c2planData.outputLength;
         std::swap(trans2->length[1], trans2->length[2]);
+        trans2->outputLength = trans2->length;
         trans2->dimension = 3;
 
         // column
         NodeMetaData c1planData(this);
-        c1planData.length       = trans2->outputLength;
+        c1planData.length = trans2->outputLength;
+        std::swap(c1planData.length[0], c1planData.length[1]);
         c1planData.dimension    = 1;
         c1planData.outputLength = c1planData.length;
         auto c1plan = NodeFactory::CreateExplicitNode(c1planData, this, determined_scheme_3);
@@ -1528,9 +1535,9 @@ void Real3DEvenNode::BuildTree_internal_TR_pairs(SchemeTreeVec& child_scheme_tre
 
         // transpose
         auto trans1    = NodeFactory::CreateNodeFromScheme(CS_KERNEL_TRANSPOSE_XY_Z, this);
-        trans1->length = trans2->outputLength;
-        trans1->SetTransposeOutputLength();
+        trans1->length = c1planData.outputLength;
         std::swap(trans1->length[1], trans1->length[2]);
+        trans1->outputLength = trans1->length;
         trans1->dimension = 3;
 
         // --------------------------------

@@ -59,8 +59,8 @@ void RTRT3DNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
     // first transpose
     auto trans1Plan    = NodeFactory::CreateNodeFromScheme(CS_KERNEL_TRANSPOSE_XY_Z, this);
     trans1Plan->length = length;
-    trans1Plan->SetTransposeOutputLength();
     std::swap(trans1Plan->length[1], trans1Plan->length[2]);
+    trans1Plan->outputLength = trans1Plan->length;
     trans1Plan->dimension = 2;
 
     // z fft
@@ -76,7 +76,7 @@ void RTRT3DNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
     // second transpose
     auto trans2Plan    = NodeFactory::CreateNodeFromScheme(CS_KERNEL_TRANSPOSE_Z_XY, this);
     trans2Plan->length = zPlan->length;
-    trans2Plan->SetTransposeOutputLength();
+    trans2Plan->outputLength = trans2Plan->length;
     trans2Plan->dimension = 2;
 
     // --------------------------------
@@ -186,7 +186,7 @@ void TRTRTR3DNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
         // transpose Z_XY
         auto trans_plan    = NodeFactory::CreateNodeFromScheme(CS_KERNEL_TRANSPOSE_Z_XY, this);
         trans_plan->length = cur_length;
-        trans_plan->SetTransposeOutputLength();
+        trans_plan->outputLength = trans_plan->length;
         trans_plan->dimension = 2;
 
         std::swap(cur_length[0], cur_length[1]);
@@ -414,9 +414,9 @@ void BLOCKRC3DNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
                     "BLOCKRC3DNode: Unexpected child scheme from solution map");
             auto trans_plan    = NodeFactory::CreateNodeFromScheme(transScheme, this);
             trans_plan->length = cur_length;
-            trans_plan->SetTransposeOutputLength();
             if(!use_ZXY_sbrc)
                 std::swap(trans_plan->length[1], trans_plan->length[2]);
+            trans_plan->outputLength = trans_plan->length;
             trans_plan->dimension = 2;
 
             // RT

@@ -407,17 +407,27 @@ void LeafNode::SetupGridParam(GridParam& gp)
 // grid params are set up by RTC
 void TransposeNode::SetupGridParam_internal(GridParam& gp) {}
 
-void TreeNode::SetTransposeOutputLength()
+bool TransposeNode::PermuteToPackedOutput(ComputeScheme scheme, std::vector<size_t>& axes)
 {
     switch(scheme)
     {
     case CS_KERNEL_TRANSPOSE:
-    {
-        outputLength = length;
-        std::swap(outputLength[0], outputLength[1]);
-        break;
-    }
     case CS_KERNEL_TRANSPOSE_XY_Z:
+        // XY_Z builders already exchange Y and Z in the node's input axes.
+        std::swap(axes[0], axes[1]);
+        return true;
+    case CS_KERNEL_TRANSPOSE_Z_XY:
+        std::rotate(axes.begin(), axes.begin() + 1, axes.begin() + 3);
+        return true;
+    default:
+        return false;
+    }
+}
+
+void TreeNode::SetTransposeOutputLength()
+{
+    switch(scheme)
+    {
     case CS_KERNEL_STOCKHAM_TRANSPOSE_XY_Z:
     {
         outputLength = length;
@@ -425,7 +435,6 @@ void TreeNode::SetTransposeOutputLength()
         std::swap(outputLength[0], outputLength[1]);
         break;
     }
-    case CS_KERNEL_TRANSPOSE_Z_XY:
     case CS_KERNEL_STOCKHAM_TRANSPOSE_Z_XY:
     {
         outputLength = length;

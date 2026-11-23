@@ -255,6 +255,7 @@ std::unique_ptr<TreeNode> RTFuseShim::FuseKernels()
         fused->outStride[2] = transpose->outStride[0];
     }
     fused->outputLength = transpose->outputLength;
+    TransposeNode::PermuteToPackedOutput(transpose->scheme, fused->outputLength);
 
     return fused;
 }
@@ -310,6 +311,7 @@ std::unique_ptr<TreeNode> RT_ZXY_FuseShim::FuseKernels()
     fused->comments.push_back("RT_ZXY_FuseShim: fused " + PrintScheme(CS_KERNEL_STOCKHAM)
                               + " and following " + PrintScheme(CS_KERNEL_TRANSPOSE_Z_XY));
     fused->outputLength = transpose->outputLength;
+    TransposeNode::PermuteToPackedOutput(transpose->scheme, fused->outputLength);
 
     return fused;
 }
@@ -471,6 +473,7 @@ std::unique_ptr<TreeNode> R2CTrans_FuseShim::FuseKernels()
                                                                   : rocfft_placement_notinplace;
     }
     fused->outputLength = transpose->outputLength;
+    TransposeNode::PermuteToPackedOutput(transpose->scheme, fused->outputLength);
     fused->dimension    = transpose->dimension;
 
     // This fusion is crossing sub-trees of the plan, so adjust the
@@ -659,6 +662,7 @@ std::unique_ptr<TreeNode> STK_R2CTrans_FuseShim::FuseKernels()
                               + PrintScheme(transpose->scheme));
 
     fused->outputLength = transpose->outputLength;
+    TransposeNode::PermuteToPackedOutput(transpose->scheme, fused->outputLength);
 
     // This fusion is crossing sub-trees of the plan, so adjust the
     // parent CS_REAL_TRANSFORM_EVEN to expect what this fused kernel

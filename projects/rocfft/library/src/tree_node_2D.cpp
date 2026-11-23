@@ -69,7 +69,7 @@ void RTRT2DNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
     {
         trans1Plan->length.push_back(length[index]);
     }
-    trans1Plan->SetTransposeOutputLength();
+    trans1Plan->outputLength = trans1Plan->length;
 
     // second row fft
     NodeMetaData row2PlanData(this);
@@ -93,7 +93,7 @@ void RTRT2DNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
     {
         trans2Plan->length.push_back(length[index]);
     }
-    trans2Plan->SetTransposeOutputLength();
+    trans2Plan->outputLength = trans2Plan->length;
 
     // --------------------------------
     // Fuse Shims
