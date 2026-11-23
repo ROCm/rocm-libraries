@@ -4,6 +4,7 @@
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
 #include <cstddef>
+#include <functional>
 #include <set>
 #include <string>
 #include <unordered_map>
@@ -133,6 +134,13 @@ TEST(TestIngestorDeviceKey, AnUnresolvedDeviceStillKeysDistinctlyFromAResolvedOn
     const DeviceProperties unresolved;
 
     EXPECT_NE(DeviceKey{unresolved}, DeviceKey{propertiesFor("gfx942")});
+}
+
+TEST(TestIngestorDeviceKey, StdHashAgreesWithTheKeysOwnHash)
+{
+    const DeviceKey key{propertiesFor("gfx942")};
+
+    EXPECT_EQ(std::hash<DeviceKey>{}(key), static_cast<std::size_t>(key.hash()));
 }
 
 /// The hash narrows; the fields decide. Each case forces the fold to agree and varies

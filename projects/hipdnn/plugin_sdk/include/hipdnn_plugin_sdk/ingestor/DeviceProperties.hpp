@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -47,15 +48,20 @@ struct DeviceProperties
     std::size_t sharedMemPerBlock = 0;
 };
 
-/// Does @p properties describe a device matching can use? Requires a nonempty arch and a
-/// positive warp size, multiprocessor count and LDS capacity. The memory-bandwidth facts
-/// are optional: they key the winner cache but a zero only means "unknown" to the UHD.
-/// Default-constructed properties are unresolved. Every device-keyed ingestor path checks
-/// this before it matches or caches.
+/// Does @p properties describe a device matching can use? Requires a nonempty arch, a
+/// positive warp size and multiprocessor count, and an LDS capacity in
+/// `[1, INT64_MAX]`. The memory facts may be zero, which means "unknown" to the UHD, but
+/// `totalGlobalMem` must not exceed `INT64_MAX` and the bus width and clock must not be
+/// negative: the UHD reads every fact as `int64_t`, and the winner-cache reader drops
+/// records whose memory facts are negative. Default-constructed properties are
+/// unresolved. Every device-keyed ingestor path checks this before it matches or caches.
 inline bool isResolved(const DeviceProperties& properties)
 {
+    constexpr auto MAX_INT64 = static_cast<std::size_t>(std::numeric_limits<std::int64_t>::max());
     return !properties.gcnArchName.empty() && properties.warpSize > 0
-           && properties.multiProcessorCount > 0 && properties.sharedMemPerBlock > 0;
+           && properties.multiProcessorCount > 0 && properties.sharedMemPerBlock > 0
+           && properties.sharedMemPerBlock <= MAX_INT64 && properties.totalGlobalMem <= MAX_INT64
+           && properties.memoryBusWidth >= 0 && properties.memoryClockRate >= 0;
 }
 
 /// Theoretical peak HBM bandwidth in bytes/second, or 0 when either input is

@@ -359,12 +359,11 @@ protected:
         ASSERT_NO_FATAL_FAILURE(
             readShippedSignature(source.originDirectory / PACKED_UKD_DESCRIPTOR, _shipped));
 
-        // Built from the stripped arch rather than currentDeviceProperties(), which keeps
-        // the feature flags hipGetDeviceProperties reports ("gfx1152:xnack-"). The packer
-        // names shards with the bare arch, so the archive lookup has to be asked in that
-        // spelling.
+        // hipGetDeviceProperties reports the arch with its feature flags ("gfx1152:xnack-"),
+        // while the packer names its shards with the bare arch. Override the resolved name
+        // with the stripped spelling so the archive lookup asks for a shard that exists.
+        _deviceProperties = currentDeviceProperties();
         _deviceProperties.gcnArchName = _arch;
-        _deviceProperties.warpSize = _properties.warpSize;
 
         // Set as makeKpackConvKernel does in TestConvFwdPack.cpp: originDirectory is the
         // descriptor's own (nested) folder, and the arch root is the tree the archive sits

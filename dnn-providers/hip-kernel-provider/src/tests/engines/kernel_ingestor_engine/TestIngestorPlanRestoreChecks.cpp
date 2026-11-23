@@ -65,7 +65,7 @@ constexpr const char* DEVICE_ARCH = "gfx90a:sramecc+:xnack-";
 constexpr const char* FOREIGN_TARGET = "gfx942";
 constexpr const char* UNKNOWN_ALIAS = "hipkernel.conv_fwd.dispatch.v9";
 
-// Reports one device with a chosen arch, or no device at all.
+// Reports one device with a chosen arch and otherwise valid facts, or no device at all.
 class FakeDeviceResolver : public IDeviceResolver<Handle>
 {
 public:
@@ -74,6 +74,8 @@ public:
     {
         _properties.gcnArchName = std::move(arch);
         _properties.warpSize = 64;
+        _properties.multiProcessorCount = 104;
+        _properties.sharedMemPerBlock = 65536;
     }
 
     DeviceId deviceId(const Handle& /*handle*/) const override
@@ -81,8 +83,13 @@ public:
         return _deviceId;
     }
 
-    const DeviceProperties& deviceProperties(DeviceId /*deviceId*/) const override
+    const DeviceProperties& deviceProperties(DeviceId deviceId) const override
     {
+        if(deviceId == hipdnn_plugin_sdk::ingestor::NO_DEVICE)
+        {
+            static const DeviceProperties s_noDevice{};
+            return s_noDevice;
+        }
         return _properties;
     }
 

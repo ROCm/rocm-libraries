@@ -5,6 +5,7 @@
 
 #include <array>
 #include <atomic>
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <limits>
@@ -69,6 +70,28 @@ public:
         return hipSuccess;
     }
 };
+
+/// The largest byte count the ingestor accepts: facts travel on as int64_t.
+std::size_t maxByteCount()
+{
+    return static_cast<std::size_t>(std::numeric_limits<std::int64_t>::max());
+}
+
+/// The message @p resolver refuses @p deviceId with, or a test failure if it resolves.
+std::string refusalMessage(const HandleDeviceResolver& resolver,
+                           hipdnn_plugin_sdk::ingestor::DeviceId deviceId)
+{
+    try
+    {
+        static_cast<void>(resolver.deviceProperties(deviceId));
+    }
+    catch(const hipdnn_plugin_sdk::HipdnnPluginException& error)
+    {
+        return error.what();
+    }
+    ADD_FAILURE() << "device " << deviceId << " was not refused";
+    return {};
+}
 
 /// Distinguishes a concrete stream's owner from the caller's changing current device.
 class ChangingCurrentDeviceResolver : public HandleDeviceResolver
@@ -330,57 +353,71 @@ TEST(TestHandleDeviceResolver, RetriesFailedQueriesAndCachesTheFirstSuccess)
     EXPECT_EQ(resolver.queryCount.load(), 3);
 }
 
-TEST(TestHandleDeviceResolver, RejectsInvalidDeviceFactsAndRetries)
+TEST(TestHandleDeviceResolver, RemembersTheRefusalOfInvalidDeviceFacts)
 {
     struct InvalidFacts
     {
         const char* name;
-        const char* arch;
-        int warpSize;
-        int multiProcessorCount;
-        std::size_t sharedMemPerBlock;
+        const char* field;
+        void (*corrupt)(hipDeviceProp_t&);
     };
-    const std::array<InvalidFacts, 6> cases = {{
-        {"missing identity", "", 64, 48, 65536},
-        {"zero warp", "gfx000", 0, 48, 65536},
-        {"negative warp", "gfx000", -1, 48, 65536},
-        {"zero count", "gfx000", 64, 0, 65536},
-        {"negative count", "gfx000", 64, -1, 65536},
-        {"zero LDS capacity", "gfx000", 64, 48, 0},
+    const std::array<InvalidFacts, 14> cases = {{
+        {"missing identity", "gcnArchName", [](hipDeviceProp_t& p) { p.gcnArchName[0] = '\0'; }},
+        {"unterminated identity",
+         "gcnArchName",
+         [](hipDeviceProp_t& p) { std::memset(p.gcnArchName, 'x', sizeof(p.gcnArchName)); }},
+        {"zero warp", "warpSize", [](hipDeviceProp_t& p) { p.warpSize = 0; }},
+        {"negative warp", "warpSize", [](hipDeviceProp_t& p) { p.warpSize = -1; }},
+        {"zero count",
+         "multiProcessorCount",
+         [](hipDeviceProp_t& p) { p.multiProcessorCount = 0; }},
+        {"negative count",
+         "multiProcessorCount",
+         [](hipDeviceProp_t& p) { p.multiProcessorCount = -1; }},
+        {"zero LDS capacity",
+         "sharedMemPerBlock",
+         [](hipDeviceProp_t& p) { p.sharedMemPerBlock = 0; }},
+        {"LDS capacity past int64",
+         "sharedMemPerBlock",
+         [](hipDeviceProp_t& p) { p.sharedMemPerBlock = maxByteCount() + 1; }},
+        {"maximal LDS capacity",
+         "sharedMemPerBlock",
+         [](hipDeviceProp_t& p) { p.sharedMemPerBlock = std::numeric_limits<std::size_t>::max(); }},
+        {"global memory past int64",
+         "totalGlobalMem",
+         [](hipDeviceProp_t& p) { p.totalGlobalMem = maxByteCount() + 1; }},
+        {"maximal global memory",
+         "totalGlobalMem",
+         [](hipDeviceProp_t& p) { p.totalGlobalMem = std::numeric_limits<std::size_t>::max(); }},
+        {"negative bus width", "memoryBusWidth", [](hipDeviceProp_t& p) { p.memoryBusWidth = -1; }},
+        {"negative memory clock",
+         "memoryClockRate",
+         [](hipDeviceProp_t& p) { p.memoryClockRate = -1; }},
+        {"most negative memory clock",
+         "memoryClockRate",
+         [](hipDeviceProp_t& p) { p.memoryClockRate = std::numeric_limits<int>::min(); }},
     }};
     for(const auto& invalid : cases)
     {
         SCOPED_TRACE(invalid.name);
         FakeQueryResolver resolver;
-        std::memcpy(resolver.properties.gcnArchName, invalid.arch, std::strlen(invalid.arch) + 1);
-        resolver.properties.warpSize = invalid.warpSize;
-        resolver.properties.multiProcessorCount = invalid.multiProcessorCount;
-        resolver.properties.sharedMemPerBlock = invalid.sharedMemPerBlock;
+        invalid.corrupt(resolver.properties);
 
-        EXPECT_THROW(static_cast<void>(resolver.deviceProperties(7)),
-                     hipdnn_plugin_sdk::HipdnnPluginException);
-        EXPECT_THROW(static_cast<void>(resolver.deviceProperties(7)),
-                     hipdnn_plugin_sdk::HipdnnPluginException);
-        EXPECT_EQ(resolver.queryCount.load(), 2);
+        const auto refusal = refusalMessage(resolver, 7);
+        EXPECT_NE(refusal.find(invalid.field), std::string::npos) << refusal;
 
+        // The device answered, so its refusal stands even once the runtime reports
+        // valid facts: the same id is refused again without asking HIP.
         resolver.properties = validHipProperties();
-        const auto& recovered = resolver.deviceProperties(7);
-        EXPECT_EQ(recovered.sharedMemPerBlock, 65536U);
-        EXPECT_EQ(&resolver.deviceProperties(7), &recovered);
-        EXPECT_EQ(resolver.queryCount.load(), 3);
+        EXPECT_EQ(refusalMessage(resolver, 7), refusal);
+        EXPECT_EQ(resolver.queryCount.load(), 1);
+
+        // Another device is queried and cached on its own facts.
+        const auto& other = resolver.deviceProperties(8);
+        EXPECT_EQ(other.sharedMemPerBlock, 65536U);
+        EXPECT_EQ(&resolver.deviceProperties(8), &other);
+        EXPECT_EQ(resolver.queryCount.load(), 2);
     }
-}
-
-TEST(TestHandleDeviceResolver, RejectsUnterminatedIdentityAndRetries)
-{
-    FakeQueryResolver resolver;
-    std::memset(resolver.properties.gcnArchName, 'x', sizeof(resolver.properties.gcnArchName));
-    EXPECT_THROW(static_cast<void>(resolver.deviceProperties(7)),
-                 hipdnn_plugin_sdk::HipdnnPluginException);
-
-    resolver.properties = validHipProperties();
-    EXPECT_EQ(resolver.deviceProperties(7).gcnArchName, "gfx000");
-    EXPECT_EQ(resolver.queryCount.load(), 2);
 }
 
 TEST(TestHandleDeviceResolver, AcceptsIdentityFillingTheArchBuffer)
@@ -394,16 +431,41 @@ TEST(TestHandleDeviceResolver, AcceptsIdentityFillingTheArchBuffer)
     EXPECT_EQ(resolver.deviceProperties(7).gcnArchName, std::string(archBufferSize - 1, 'x'));
 }
 
-TEST(TestHandleDeviceResolver, AcceptsLdsCapacityAtBothEndsOfTheRange)
+TEST(TestHandleDeviceResolver, AcceptsEachFactAtTheEndsOfItsRange)
 {
-    const std::array<std::size_t, 2> capacities = {1, std::numeric_limits<std::size_t>::max()};
-    for(const auto capacity : capacities)
+    struct Boundary
     {
-        SCOPED_TRACE(capacity);
+        const char* name;
+        void (*apply)(hipDeviceProp_t&);
+    };
+    const std::array<Boundary, 10> cases = {{
+        {"smallest LDS capacity", [](hipDeviceProp_t& p) { p.sharedMemPerBlock = 1; }},
+        {"largest LDS capacity", [](hipDeviceProp_t& p) { p.sharedMemPerBlock = maxByteCount(); }},
+        {"unknown global memory", [](hipDeviceProp_t& p) { p.totalGlobalMem = 0; }},
+        {"largest global memory", [](hipDeviceProp_t& p) { p.totalGlobalMem = maxByteCount(); }},
+        {"unknown bus width", [](hipDeviceProp_t& p) { p.memoryBusWidth = 0; }},
+        {"largest bus width",
+         [](hipDeviceProp_t& p) { p.memoryBusWidth = std::numeric_limits<int>::max(); }},
+        {"unknown memory clock", [](hipDeviceProp_t& p) { p.memoryClockRate = 0; }},
+        {"largest memory clock",
+         [](hipDeviceProp_t& p) { p.memoryClockRate = std::numeric_limits<int>::max(); }},
+        {"largest warp", [](hipDeviceProp_t& p) { p.warpSize = std::numeric_limits<int>::max(); }},
+        {"largest count",
+         [](hipDeviceProp_t& p) { p.multiProcessorCount = std::numeric_limits<int>::max(); }},
+    }};
+    for(const auto& boundary : cases)
+    {
+        SCOPED_TRACE(boundary.name);
         FakeQueryResolver resolver;
-        resolver.properties.sharedMemPerBlock = capacity;
+        boundary.apply(resolver.properties);
+
         const auto& resolved = resolver.deviceProperties(7);
-        EXPECT_EQ(resolved.sharedMemPerBlock, capacity);
+        EXPECT_EQ(resolved.warpSize, resolver.properties.warpSize);
+        EXPECT_EQ(resolved.multiProcessorCount, resolver.properties.multiProcessorCount);
+        EXPECT_EQ(resolved.sharedMemPerBlock, resolver.properties.sharedMemPerBlock);
+        EXPECT_EQ(resolved.totalGlobalMem, resolver.properties.totalGlobalMem);
+        EXPECT_EQ(resolved.memoryBusWidth, resolver.properties.memoryBusWidth);
+        EXPECT_EQ(resolved.memoryClockRate, resolver.properties.memoryClockRate);
         EXPECT_EQ(&resolver.deviceProperties(7), &resolved);
         EXPECT_EQ(resolver.queryCount.load(), 1);
     }
@@ -437,7 +499,7 @@ TEST(TestHandleDeviceResolver, ConcurrentDevicePropertyLookupsAreSafe)
             for(int i = 0; i < 200; ++i)
             {
                 const auto& properties = resolver.deviceProperties(deviceId);
-                if(properties.sharedMemPerBlock != static_cast<std::size_t>(65536 + deviceId)
+                if(properties.sharedMemPerBlock != 65536U + static_cast<std::size_t>(deviceId)
                    || properties.warpSize != 64 || properties.multiProcessorCount != 48
                    || properties.gcnArchName != "gfx000")
                 {

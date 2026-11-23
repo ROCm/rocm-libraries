@@ -6,15 +6,19 @@
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
 #include <algorithm>
+#include <cstddef>
+#include <cstdint>
 #include <iterator>
+#include <limits>
 #include <mutex>
 #include <string>
 #include <unordered_map>
+#include <utility>
 
 #include <hip/hip_runtime_api.h>
 #include <hipdnn_plugin_sdk/DeviceQuery.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
-#include <hipdnn_plugin_sdk/PluginLogging.hpp>
+#include <hipdnn_plugin_sdk/ingestor/DeviceProperties.hpp>
 #include <hipdnn_plugin_sdk/ingestor/IDeviceResolver.hpp>
 
 #include "core/Handle.hpp"
@@ -24,7 +28,10 @@ namespace hip_kernel_provider::kernel_ingestor_engine
 
 /// Resolves a call's device from the stream its handle carries; a handle can be
 /// rebound between calls, so this reads per call rather than caching per-thread.
-/// Successful device-property queries are cached for this resolver's lifetime.
+/// Device-property lookups are remembered per device id for this resolver's lifetime:
+/// valid facts are cached and returned by reference, and a device whose query succeeded
+/// but reported invalid facts is refused again with the same message without asking HIP.
+/// A failed HIP query is not remembered, so the next lookup asks HIP again.
 class HandleDeviceResolver : public hipdnn_plugin_sdk::ingestor::IDeviceResolver<Handle>
 {
 public:
@@ -70,6 +77,12 @@ public:
             return it->second;
         }
 
+        auto refusal = _refusals.find(deviceId);
+        if(refusal != _refusals.end())
+        {
+            failDeviceQuery(refusal->second);
+        }
+
         hipDeviceProp_t properties{};
         const auto status = queryDeviceProperties(&properties, deviceId);
         if(status != hipSuccess)
@@ -78,11 +91,19 @@ public:
                             + ": " + hipGetErrorString(status));
         }
 
-        // Check each required fact separately so the error names the bad field and its value.
-        const auto rejectFact = [deviceId](const std::string& fact) {
-            failDeviceQuery("hipGetDeviceProperties returned an invalid device fact for device "
-                            + std::to_string(deviceId) + ": " + fact);
+        // HIP answered, so invalid facts are a property of the device: remember the refusal.
+        const auto refuse = [this, deviceId](std::string message) {
+            failDeviceQuery(_refusals.emplace(deviceId, std::move(message)).first->second);
         };
+        // Check each fact separately so the error names the bad field and its value.
+        const auto rejectFact = [&refuse, deviceId](const std::string& fact) {
+            refuse("hipGetDeviceProperties returned an invalid device fact for device "
+                   + std::to_string(deviceId) + ": " + fact);
+        };
+
+        // Byte counts reach the winner cache and the UHD as int64_t.
+        constexpr auto MAX_BYTE_COUNT
+            = static_cast<std::size_t>(std::numeric_limits<std::int64_t>::max());
 
         const auto archEnd
             = std::find(std::begin(properties.gcnArchName), std::end(properties.gcnArchName), '\0');
@@ -105,22 +126,47 @@ public:
             rejectFact("multiProcessorCount is " + std::to_string(properties.multiProcessorCount)
                        + ", expected a positive count");
         }
-        if(properties.sharedMemPerBlock == 0)
+        if(properties.sharedMemPerBlock == 0 || properties.sharedMemPerBlock > MAX_BYTE_COUNT)
         {
-            rejectFact("sharedMemPerBlock is 0, expected a positive byte count");
+            rejectFact("sharedMemPerBlock is " + std::to_string(properties.sharedMemPerBlock)
+                       + ", expected a positive byte count no larger than "
+                       + std::to_string(MAX_BYTE_COUNT));
+        }
+        // Memory facts tell apart boards that share an arch and CU count (e.g. MI300X,
+        // MI325X, MI308X), which a UHD trained on a merged corpus needs. A zero only means
+        // "unknown" to the UHD, so zero is accepted; a negative or out-of-range value is not.
+        if(properties.totalGlobalMem > MAX_BYTE_COUNT)
+        {
+            rejectFact("totalGlobalMem is " + std::to_string(properties.totalGlobalMem)
+                       + ", expected a byte count no larger than "
+                       + std::to_string(MAX_BYTE_COUNT));
+        }
+        if(properties.memoryBusWidth < 0)
+        {
+            rejectFact("memoryBusWidth is " + std::to_string(properties.memoryBusWidth)
+                       + ", expected a non-negative bit count");
+        }
+        if(properties.memoryClockRate < 0)
+        {
+            rejectFact("memoryClockRate is " + std::to_string(properties.memoryClockRate)
+                       + ", expected a non-negative kHz rate");
         }
 
         hipdnn_plugin_sdk::ingestor::DeviceProperties resolved;
         resolved.gcnArchName = std::string(std::begin(properties.gcnArchName), archEnd);
         resolved.warpSize = properties.warpSize;
         resolved.multiProcessorCount = properties.multiProcessorCount;
-        // Memory facts tell apart boards that share an arch and CU count (e.g. MI300X,
-        // MI325X, MI308X), which a UHD trained on a merged corpus needs. They are not
-        // required: a zero only means "unknown" to the UHD.
         resolved.totalGlobalMem = properties.totalGlobalMem;
         resolved.memoryBusWidth = properties.memoryBusWidth;
         resolved.memoryClockRate = properties.memoryClockRate;
         resolved.sharedMemPerBlock = properties.sharedMemPerBlock;
+
+        // The ingestor's own rule is the authority; the checks above only name the field.
+        if(!hipdnn_plugin_sdk::ingestor::isResolved(resolved))
+        {
+            refuse("hipGetDeviceProperties returned facts for device " + std::to_string(deviceId)
+                   + " that fail the ingestor's device validity rule");
+        }
 
         return _properties.emplace(deviceId, std::move(resolved)).first->second;
     }
@@ -146,11 +192,10 @@ protected:
     }
 
 private:
-    /// Logs before throwing so the reason survives in the plugin log even when a caller
-    /// turns the exception into a status code and drops its message.
+    /// Callers log the exception: plan building through its applicability-failure log,
+    /// and the plugin boundary through the plugin's last-error record.
     [[noreturn]] static void failDeviceQuery(const std::string& message)
     {
-        HIPDNN_PLUGIN_LOG_ERROR("ingestor: " << message);
         throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
                                                        message);
     }
@@ -159,6 +204,7 @@ private:
     mutable std::unordered_map<hipdnn_plugin_sdk::ingestor::DeviceId,
                                hipdnn_plugin_sdk::ingestor::DeviceProperties>
         _properties;
+    mutable std::unordered_map<hipdnn_plugin_sdk::ingestor::DeviceId, std::string> _refusals;
 };
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine

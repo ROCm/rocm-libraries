@@ -580,6 +580,26 @@ TEST(TestSlottedWinnerRecordsOwnSetup, AnUnkeyableGraphsRecordsAreNeitherCachedN
     EXPECT_TRUE(shardLines(shardPath(properties)).empty()) << "no shard is opened for it";
 }
 
+/// As the unslotted path: the reader rejects records for an unresolved device, so writing
+/// them would add unreadable lines on every miss, and looking one up would only create the
+/// shard file.
+TEST_F(TestSlottedWinnerRecords, AnUnresolvedDevicesRecordsAreNeitherCachedNorWritten)
+{
+    auto unresolved = properties;
+    unresolved.sharedMemPerBlock = 0;
+    const auto unresolvedKey = baseKeyFor(graph, unresolved);
+    const auto manager = makeManager(namedEngine());
+
+    EXPECT_FALSE(manager->programFor(unresolvedKey).has_value());
+    EXPECT_FALSE(std::filesystem::exists(shardPath(unresolved))) << "a lookup opened the shard";
+
+    recordGood(*manager, unresolvedKey);
+
+    EXPECT_EQ(manager->winnerCacheSize(), 0U);
+    EXPECT_FALSE(std::filesystem::exists(shardPath(unresolved))) << "a record reached the shard";
+    EXPECT_FALSE(manager->programFor(unresolvedKey).has_value());
+}
+
 TEST_F(TestSlottedWinnerRecords, ARacingWritersProgramLineIsKeptWhenTheCallersProgramIsDropped)
 {
     // The loser has already read the (empty) shard when the winner appends its records.

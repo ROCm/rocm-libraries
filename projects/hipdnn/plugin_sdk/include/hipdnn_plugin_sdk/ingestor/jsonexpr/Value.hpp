@@ -98,7 +98,12 @@ public:
     }
 
     Value(const Value&) = default;
-    Value& operator=(const Value&) = default;
+    Value& operator=(const Value& other)
+    {
+        // @p other may be an element of this value's own array, which assigning frees.
+        Value copy(other);
+        return *this = std::move(copy);
+    }
 
     /// A defaulted move would leave the source holding a null ArrayStorage, so
     /// isArray() would still be true and asArray() would dereference null. Moves

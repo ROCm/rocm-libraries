@@ -117,6 +117,21 @@ TEST(TestJsonValue, ArrayMovesLeaveReusableNullSourcesAndPreserveOtherOwners)
     EXPECT_EQ(target, expected);
 }
 
+TEST(TestJsonValue, AssigningAnElementOfItsOwnArrayKeepsTheElement)
+{
+    // The assignment releases the only owner of the array the source lives in. A scalar
+    // element is copied after the old value is destroyed unless the source is copied
+    // first, so a regression shows up as a use-after-free under AddressSanitizer.
+    const V::Array elements{V(42), V(2.5), V(true), V()};
+    for(std::size_t index = 0; index < elements.size(); ++index)
+    {
+        SCOPED_TRACE(index);
+        V value(elements);
+        value = value.asArray()[index];
+        EXPECT_EQ(value, elements[index]);
+    }
+}
+
 TEST(TestJsonValue, CopiesOfAnArrayShareItsStorage)
 {
     // Sharing storage is what makes copying an array Value cheap. The copies below are

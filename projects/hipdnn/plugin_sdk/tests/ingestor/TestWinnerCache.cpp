@@ -5,12 +5,14 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <limits>
 #include <random>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -552,11 +554,45 @@ TEST(TestIngestorWinnerCacheStateManager, ACoveringRecordOrdersTheCatalogWithout
         << "a covering record must decide the order, not the heuristic";
 }
 
-/// A resolved device that names no arch cannot be told apart from another one: folding
-/// two of them into one winner-cache key would serve a measurement taken elsewhere.
-/// `GenericPlanBuilder::contextFor` throws on this, so the guard here defends callers
-/// that build a MatchContext directly.
-TEST(TestIngestorWinnerCacheStateManager, AnEmptyArchNameYieldsAnEmptyCatalog)
+/// The largest device fact isResolved() accepts, as the `size_t` the facts are held in.
+constexpr auto MAX_INT64_FACT = static_cast<std::size_t>(std::numeric_limits<std::int64_t>::max());
+
+/// One way a device fails isResolved(): `unresolve` breaks exactly one fact of otherwise
+/// resolved properties.
+struct UnresolvedFact
+{
+    std::string name;
+    void (*unresolve)(DeviceProperties&);
+};
+
+std::vector<UnresolvedFact> unresolvedFacts()
+{
+    return {
+        {"EmptyArch", [](DeviceProperties& properties) { properties.gcnArchName.clear(); }},
+        {"ZeroWarpSize", [](DeviceProperties& properties) { properties.warpSize = 0; }},
+        {"ZeroMultiProcessorCount",
+         [](DeviceProperties& properties) { properties.multiProcessorCount = 0; }},
+        {"ZeroLdsCapacity", [](DeviceProperties& properties) { properties.sharedMemPerBlock = 0; }},
+        {"LdsCapacityBeyondInt64",
+         [](DeviceProperties& properties) { properties.sharedMemPerBlock = MAX_INT64_FACT + 1; }},
+        {"TotalGlobalMemBeyondInt64",
+         [](DeviceProperties& properties) { properties.totalGlobalMem = MAX_INT64_FACT + 1; }},
+        {"NegativeMemoryBusWidth",
+         [](DeviceProperties& properties) { properties.memoryBusWidth = -1; }},
+        {"NegativeMemoryClockRate",
+         [](DeviceProperties& properties) { properties.memoryClockRate = -1; }},
+    };
+}
+
+class TestIngestorWinnerCacheUnresolvedDevice : public ::testing::TestWithParam<UnresolvedFact>
+{
+};
+
+/// A device whose facts fail isResolved() cannot key the winner cache: two devices that name
+/// no arch cannot be told apart, and the reader drops a record whose facts are out of range.
+/// `GenericPlanBuilder::contextFor` throws on these, so the guard here defends callers that
+/// build a MatchContext directly.
+TEST_P(TestIngestorWinnerCacheUnresolvedDevice, AnUnresolvedDeviceYieldsAnEmptyCatalog)
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
     const auto manager = makeStateManager();
@@ -564,19 +600,20 @@ TEST(TestIngestorWinnerCacheStateManager, AnEmptyArchNameYieldsAnEmptyCatalog)
 
     auto properties = testDeviceProperties();
     ASSERT_FALSE(manager->sortedDefinitions(MatchContext{graph, 0, properties}).empty())
-        << "this test needs a catalog that is non-empty when the arch is named";
+        << "this test needs a catalog that is non-empty for a resolved device";
 
-    properties.gcnArchName.clear();
+    GetParam().unresolve(properties);
+    ASSERT_FALSE(isResolved(properties)) << "the case must break the rule it is named for";
 
     EXPECT_TRUE(manager->sortedDefinitions(MatchContext{graph, 0, properties}).empty())
-        << "an unidentified device must match no kernel";
+        << "an unresolved device must match no kernel";
 
-    // The catalog cache is keyed on (graph, device ordinal), not arch: an empty-arch
-    // lookup that wrote its rejected, empty catalog under that key would permanently
-    // hide this device's real catalog once the arch is known again.
-    properties.gcnArchName = testDeviceProperties().gcnArchName;
+    // The catalog cache is keyed on (graph, device ordinal), not on the facts: an
+    // unresolved lookup that wrote its rejected, empty catalog under that key would
+    // permanently hide this device's real catalog once its facts resolve again.
+    properties = testDeviceProperties();
     EXPECT_FALSE(manager->sortedDefinitions(MatchContext{graph, 0, properties}).empty())
-        << "an unresolved-arch lookup must not poison this device's cached catalog";
+        << "an unresolved lookup must not poison this device's cached catalog";
 }
 
 /// The production sequence, on ONE manager: sort (heuristic, memoized), then record,
@@ -883,7 +920,7 @@ TEST(TestIngestorWinnerCacheStateManager, CapacityBoundariesRetainDistinctWinner
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
     const ScopedCacheDir cacheDir("capacity_boundaries");
     const ContentCarryingTestGraph graph{ContentCarryingTestGraph::Spec{}};
-    const std::vector<std::size_t> capacities{1, 65'536, std::numeric_limits<std::size_t>::max()};
+    const std::vector<std::size_t> capacities{1, 65'536, MAX_INT64_FACT};
     {
         const auto writer = makeNamedStateManager("test:CapacityBoundaries");
         for(size_t i = 0; i < capacities.size(); ++i)
@@ -926,12 +963,17 @@ std::vector<InvalidDeviceField> invalidDeviceFields()
         {"MultiProcessorCountZero", "multi_processor_count", nlohmann::json(0)},
         {"SharedMemPerBlockZero", "shared_mem_per_block", nlohmann::json(0)},
         {"SharedMemPerBlockNegative", "shared_mem_per_block", nlohmann::json(-1)},
-        {"WarpSizeBeyondInt",
-         "warp_size",
-         nlohmann::json(static_cast<int64_t>(std::numeric_limits<int>::max()) + 1)},
+        // A reader that truncated to int would decode these as a valid 64 and 304.
+        {"WarpSizeBeyondInt", "warp_size", nlohmann::json((int64_t{1} << 32) + 64)},
         {"MultiProcessorCountBeyondInt",
          "multi_processor_count",
-         nlohmann::json(static_cast<int64_t>(std::numeric_limits<int>::max()) + 1)},
+         nlohmann::json((int64_t{1} << 32) + 304)},
+        {"SharedMemPerBlockBeyondInt64",
+         "shared_mem_per_block",
+         nlohmann::json(MAX_INT64_FACT + 1)},
+        {"TotalGlobalMemBeyondInt64", "total_global_mem", nlohmann::json(MAX_INT64_FACT + 1)},
+        {"MemoryBusWidthNegative", "memory_bus_width", nlohmann::json(-1)},
+        {"MemoryClockRateNegative", "memory_clock_rate", nlohmann::json(-1)},
     };
 }
 
@@ -956,16 +998,61 @@ INSTANTIATE_TEST_SUITE_P(,
                              return info.param.name;
                          });
 
+/// Every device isResolved() accepts survives the codec unchanged, at both ends of each
+/// fact's range: the writer persists exactly these devices, so a reader bounded tighter than
+/// the rule would drop records the writer kept.
+TEST(TestIngestorWinnerCache, EveryBoundaryOfTheResolvedRangeRoundTrips)
+{
+    const ContentCarryingTestGraph graph{ContentCarryingTestGraph::Spec{}};
+    constexpr int MAX_INT = std::numeric_limits<int>::max();
+
+    auto lowest = suffixedDeviceProperties();
+    lowest.warpSize = 1;
+    lowest.multiProcessorCount = 1;
+    lowest.sharedMemPerBlock = 1;
+    lowest.totalGlobalMem = 0;
+    lowest.memoryBusWidth = 0;
+    lowest.memoryClockRate = 0;
+
+    auto highest = suffixedDeviceProperties();
+    highest.warpSize = MAX_INT;
+    highest.multiProcessorCount = MAX_INT;
+    highest.sharedMemPerBlock = MAX_INT64_FACT;
+    highest.totalGlobalMem = MAX_INT64_FACT;
+    highest.memoryBusWidth = MAX_INT;
+    highest.memoryClockRate = MAX_INT;
+
+    for(const auto& [name, device] : {std::pair{"Lowest", lowest}, std::pair{"Highest", highest}})
+    {
+        SCOPED_TRACE(name);
+        ASSERT_TRUE(isResolved(device)) << "the case must sit inside the rule";
+        const auto key = keyFor(graph, device);
+        const auto record = recordFor(0x41, 2.5);
+
+        const auto decoded = decodeWinnerRecordLine(encodeWinnerRecordLine(key, record));
+
+        ASSERT_TRUE(decoded.has_value());
+        EXPECT_EQ(decoded->first, key);
+        ASSERT_EQ(decoded->second.size(), 1U);
+        EXPECT_EQ(decoded->second.front().kernelId, record.front().kernelId);
+        EXPECT_EQ(decoded->second.front().packId, record.front().packId);
+        EXPECT_EQ(decoded->second.front().dispatchId, record.front().dispatchId);
+        EXPECT_DOUBLE_EQ(decoded->second.front().timeMs, record.front().timeMs);
+    }
+}
+
 // The reader rejects records for an unresolved device, so writing one would add an
 // unreadable line to the shard on every miss.
-TEST(TestIngestorWinnerCacheStateManager, AnUnresolvedDeviceIsNeitherPersistedNorCached)
+TEST_P(TestIngestorWinnerCacheUnresolvedDevice, AnUnresolvedDeviceIsNeitherPersistedNorCached)
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
     const ScopedCacheDir cacheDir("unresolved_device");
     const ContentCarryingTestGraph graph{ContentCarryingTestGraph::Spec{}};
     auto unresolved = suffixedDeviceProperties();
-    unresolved.sharedMemPerBlock = 0;
+    // The resolved arch's shard: the empty-arch case has no shard of its own to check.
     const auto path = winnerCacheShardPath({"test:UnresolvedDevice"}, unresolved.gcnArchName);
+    GetParam().unresolve(unresolved);
+    ASSERT_FALSE(isResolved(unresolved)) << "the case must break the rule it is named for";
 
     const auto manager = makeNamedStateManager("test:UnresolvedDevice");
     for(int i = 0; i < 2; ++i)
@@ -977,6 +1064,13 @@ TEST(TestIngestorWinnerCacheStateManager, AnUnresolvedDeviceIsNeitherPersistedNo
     EXPECT_EQ(manager->winnerCacheSize(), 0U);
     EXPECT_FALSE(std::filesystem::exists(path));
 }
+
+INSTANTIATE_TEST_SUITE_P(,
+                         TestIngestorWinnerCacheUnresolvedDevice,
+                         ::testing::ValuesIn(unresolvedFacts()),
+                         [](const ::testing::TestParamInfo<UnresolvedFact>& info) {
+                             return info.param.name;
+                         });
 
 /// Proves the codec plus the read-once path across two manager lifetimes; the
 /// cross-process case is a separate ctest-driven pair below.

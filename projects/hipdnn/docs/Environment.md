@@ -407,10 +407,13 @@ export HIPDNN_CACHE_DIR=$PWD/.hipdnn-cache
   rate, and local data share (LDS) capacity in bytes per block. The multiprocessor count is the
   raw value HIP reports: compute units (CUs) in CU mode, workgroup processors (WGPs) in WGP
   mode. It is not converted to physical CUs.
-- A cached record is used only if it has a nonempty architecture name and a positive warp
-  size, multiprocessor count, and LDS capacity. The memory fields must be present and
-  nonnegative; zero means the device did not report them. Records with missing or invalid
-  values are skipped, even when the version stamps match.
+- A cached record is used only if it has a nonempty architecture name, a positive warp size
+  and multiprocessor count, and an LDS capacity from 1 to 2^63 - 1 bytes. The memory fields
+  must be present: the bus width and clock must be nonnegative, and the HBM capacity at most
+  2^63 - 1 bytes. Zero in a memory field means the device did not report it. Records with
+  missing or invalid values are skipped, even when the version stamps match. The ingestor
+  applies the same rule before it writes: a device whose facts fail it is neither matched nor
+  cached.
 - The winner cache is append-only and is never compacted, so a long-lived cache directory grows with the number of distinct graphs benchmarked.
 - A lookup in the ingestor winner cache can create a file. A read miss still leaves an empty shard file, stamped with the version, behind. A lookup in the autotune ranking cache creates nothing (see [Autotune Ranking Cache](#autotune-ranking-cache-autotune-rankings)).
 
