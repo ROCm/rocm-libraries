@@ -477,7 +477,8 @@ separately and writes `coverage-report/coverage-unit.info` and
 `coverage-report/coverage-integration.info`. Jenkins uploads `coverage-unit.info` as the Codecov
 flag `rocALUTION-unit`, only if `coverage_split` succeeds. `coverage-integration.info` is left for a
 local look and is not uploaded. The combined `rocALUTION` flag is `coverage.info`, which includes
-both runs. `make coverage_cleanup` deletes the profiles of a previous run.
+both runs. `make coverage_cleanup` deletes `coverage-report/`, including the profiles and reports
+of a previous run.
 
 The flag rules are in the root [`codecov.yml`](../../../../codecov.yml). `rocALUTION` and
 `rocALUTION-unit` carry forward, and each has a project status with an 80% target. Codecov reports a
