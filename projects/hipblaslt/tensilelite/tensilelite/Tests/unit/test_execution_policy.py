@@ -378,21 +378,17 @@ def test_inherited_streamk_cluster_payload_is_rederived_when_source_policy_chang
 ], ids=["tdm", "no_tdm", "queue", "hybrid", "queue_debug", "epilogue_lds", "one_wave"])
 def test_handoff_fences_lds(strategy, assignment, overrides, fences):
     """The persistent tile handoff ends with a workgroup barrier with TDM loads on more than one
-    wave, with the epilogue vectors in LDS or in a spatial cluster; the TDM flush relies on it and
-    emits none of its own (_handoffBarriersLds).
+    wave, with the epilogue vectors in LDS, in a spatial cluster or with the dynamic work queue; the
+    TDM flush relies on it and emits none of its own. _handoffBarriersLds mirrors the predicate of
+    WorkAssignment.splitPersistentTileHandoff, and the rows below pin it.
 
-    This used to call WorkAssignment.handoffFencesLds, which develop's AIHPBLAS-5469 (#15103)
-    replaced with splitPersistentTileHandoff. _handoffBarriersLds mirrors that predicate, so the
-    rows below now pin it instead.
-
-    The DynamicWorkQueue row expects True: DynamicWorkQueue.closeLoop emits both phases of the
-    handoff before its back-edge and checks the next work item only after re-entry, so every tile
-    ends with the queue barrier. The Hybrid row stays False: its static arm runs StaticGrid.closeLoop,
-    which has no queue barrier, and emitTDMStoreFlush fences that arm at run time. With
+    The DynamicWorkQueue row is True: DynamicWorkQueue.closeLoop emits both phases of the handoff
+    before its back-edge and checks the next work item only after re-entry, so every tile ends with
+    the queue barrier. The Hybrid row is False: its static arm runs StaticGrid.closeLoop, which has
+    no queue barrier, and emitTDMStoreFlush fences that arm at run time. With
     DebugPersistentKernelLoopForever the handoff drops the queue barrier, so that row is False.
-    DataParallel pairs only with StaticGrid --
-    resolve_policy rejects every other assignment -- so the queue and hybrid rows exercise those
-    assignments under StreamK.
+    DataParallel pairs only with StaticGrid -- resolve_policy rejects every other assignment -- so
+    the queue and hybrid rows exercise those assignments under StreamK.
     """
     kernel = {"TileProcessingStrategy": strategy, "WorkAssignment": assignment, "ClusterDim": [1, 1],
               "NumThreads": 128, "WavefrontSize": 32, "PrefetchAcrossPersistent": 0,

@@ -294,17 +294,17 @@ _VECTOR_WIDTHS = {0: (8, 1), 1: (8, 4, 2, 1)}
 @pytest.mark.parametrize("adaptive", [0, 1])
 @pytest.mark.parametrize("svw", [1, 2, 4, 8])
 def test_the_switch_picks_blocks_of_the_store_width_cascade(svw, adaptive):
-  """TDMStoreInst 1 picks every block of the store-width cascade: with edge blocks the masked ones
+  """TDMStoreInst on picks every block of the store-width cascade: with edge blocks the masked ones
   narrower than the store vector width, the narrowest one (EdgeM) and the masked block of the store
   vector width (EdgeN) - which together are the whole cascade - and without edge blocks the unmasked
-  one (NonEdge). TDMStoreInst 0 picks none, so every block keeps its buffer_store."""
+  one (NonEdge). TDMStoreInst off picks none, so every block keeps its buffer_store."""
   cascade = [svw, 1] if adaptive == 0 else [w for w in (8, 4, 2, 1) if w <= svw]
   edgeM = {w for w in cascade if w < svw} | {min(cascade)}
   expected = {0: set(), 1: edgeM | {svw}}
   for tdm in (False, True):
     assert _blocks(tdm, vectorWidths=cascade) == expected[tdm], (tdm, cascade)
     assert _blocks(tdm, edge=False, vectorWidths=cascade[:1]) == ({svw} if tdm else set()), tdm
-  # With edge blocks the picked set is now the whole cascade, at every store vector width.
+  # With edge blocks the picked set is the whole cascade, at every store vector width.
   assert _blocks(1, vectorWidths=cascade) == set(cascade)
 
 
@@ -748,7 +748,7 @@ def test_one_byte_d_stages_with_ds_store_b8_at_vw1(gp_gfx1250, gfx1250_iim, asse
 
 
 def _fp64_params(**overrides):
-  """An fp64 VALU kernel shaped like those of develop's f64_gfx1250.yaml: ThreadTile 4x4 over one wave."""
+  """An fp64 VALU kernel shaped like those of f64_gfx1250.yaml: ThreadTile 4x4 over one wave."""
   from tensilelite.Common.Architectures import gfxToIsa
   params = {
     "ProblemType": {"OperationType": "GEMM", "DataType": "D", "DestDataType": "D", "ComputeDataType": "D",
@@ -939,7 +939,7 @@ def _sameRegs(lines):
 
 
 def test_e_kernel_tdm_blocks_keep_the_masked_side_effects(gp_gfx1250, gfx1250_iim, assembler, capsys):
-  """Develop's forward E kernel of bbs_bias_gelu_aux_cls_gfx1250.yaml: each TDM block stages D in place of its stores
+  """The forward E kernel of bbs_bias_gelu_aux_cls_gfx1250.yaml: each TDM block stages D in place of its stores
   and keeps the E stores of the switched-off block; an edge TDM block is that edge block, with its vector width, its masks
   and its C loads, so no element outside D reaches E or the epilogue."""
   tdm = 1
@@ -959,7 +959,7 @@ def test_e_kernel_tdm_blocks_keep_the_masked_side_effects(gp_gfx1250, gfx1250_ii
 
 
 def test_compact_loop_store_tdm_block_outside_the_loop(gp_gfx1250, gfx1250_iim, assembler, capsys):
-  """Develop's CompactLoopStore E kernel: each TDM block runs its stores in the CompactLoopStore loop. It sets up the
+  """The CompactLoopStore E kernel of bbs_bias_gelu_aux_cls_gfx1250.yaml: each TDM block runs its stores in the CompactLoopStore loop. It sets up the
   staged tile (and loads C) before the loop label, stages every element inside the loop, steps the staged tile's base
   once an iteration when the loop runs more than once, and stores the tile once, after the loop exits; no D
   buffer_store is left in any TDM block."""
@@ -1112,7 +1112,7 @@ def test_c_load_takes_the_hints_of_c(gp_gfx1250, gfx1250_iim, assembler, capsys)
   solOff, asmOff = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=False, **hints)
   assert solOff.get("Valid"), capsys.readouterr().out
   bufferLoad = re.search(r"^\s*buffer_load\S* [^\n]*s\[sgprSrdC:[^\n]*", asmOff, re.M)
-  assert bufferLoad, "TDMStoreInst 0 must still read C with buffer_load"
+  assert bufferLoad, "TDMStoreInst off must still read C with buffer_load"
   expected = _cacheTokens(bufferLoad.group(0))
   assert "th" in expected
 
@@ -1193,7 +1193,7 @@ def test_rap_with_tdm_store_generates(gp_gfx1250, gfx1250_iim, assembler, capsys
 
 
 def test_pap_oversized_tile_hits_max_lds(gp_gfx1250, gfx1250_iim, assembler, capsys):
-  """Under PrefetchAcrossPersistent the staged tile adds to the main-loop LDS, and develop's MaxLDS reject
+  """Under PrefetchAcrossPersistent the staged tile adds to the main-loop LDS, and the MaxLDS reject
   sees the sum: at DepthU 128 the main loop fits without TDMStoreInst and the sum does not."""
   sol, _ = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=True, DepthU=128, **_PAP)
   out = capsys.readouterr().out
@@ -1348,7 +1348,7 @@ _VECTORS = {"ProblemType": {"UseBias": 1, "UseScaleAlphaVec": 1}}
 def test_staged_tile_over_main_loop_property(gp_gfx1250, gfx1250_iim, assembler, capsys, overrides):
   """Without PrefetchAcrossPersistent the staged tile lies over the main-loop buffers (_TDMStoreOverMainLoop):
   it starts at 0, or at the first 256-byte boundary after the epilogue vectors, and the setup fences the
-  main-loop LDS. TDMStoreInst 0 reserves no tile."""
+  main-loop LDS. TDMStoreInst off reserves no tile."""
   for tdm in (False, True):
     sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=tdm, **deepcopy(overrides))
     assert sol.get("Valid"), capsys.readouterr().out
