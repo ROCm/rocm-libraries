@@ -44,9 +44,11 @@
 #   AMG:    hybrid_amg, pairwise_amg, ruge_stueben_amg, saamg, uaamg
 #   Other:  preconditioner, itersolver, chebyshev, mixed_precision
 #   Local:  local_matrix_*                               (skip in emulation)
-#           local_vector_amax_ties                       (runs in every tier)
-#   Infra:  backend, backend_init_order                   (skip in emulation, except
-#           backend_omp_parallel_region and backend_omp_restore_state)
+#           local_vector_amax_ties                       (runs in every category)
+#   Infra:  backend, backend_init_order,                 (skip in emulation)
+#           backend_disable_accelerator_after_stop
+#   OpenMP: backend_omp_parallel_region,                 (run in every category)
+#           backend_omp_restore_state
 
 test_categories:
   quick:

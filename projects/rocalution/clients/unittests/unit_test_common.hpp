@@ -221,6 +221,14 @@ namespace rocalution_unit
     else                                  \
         GTEST_SKIP() << "known bug: " << reason
 
+    // utils/def.hpp enables assert with NDEBUG, but the HIP sources include ROCm
+    // headers afterwards that disable it again, so release builds have no asserts there
+#ifdef NDEBUG
+    constexpr bool hip_has_asserts = false;
+#else
+    constexpr bool hip_has_asserts = true;
+#endif
+
     // Restores the backend descriptor, the OpenMP thread count and the CPU
     // affinity on destruction, also after fatal failures and exceptions. Setting
     // the thread count pins the calling thread to cores, and the threads it

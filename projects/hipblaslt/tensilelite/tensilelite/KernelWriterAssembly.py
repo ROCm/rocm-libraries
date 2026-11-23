@@ -75,7 +75,7 @@ from .ir import BranchInstruction, BufferLoadB128, BufferLoadB32, \
 
 from .Component import Component, TensorDataMover, GL2Prefetch
 from .Components.TensorDataMover import TensorDataMoverLoad
-from .Common.MxScaleLayout import mxFreePhase, mxFreeTile, mxIssueTpList, mxLdsKStride, mxTdmTile0, mxTdmTileM, \
+from .Common.MxScaleLayout import mxFreePhase, mxFreeTile, mxIssueTpList, mxLdsKStride, mxReadVectorWidth, mxTdmTile0, mxTdmTileM, \
   mxLraFreeShift, mxSegmentSplit
 from .Components.LraTileAssignment import mx2dFreeOffset
 from .Components.GL2Prefetch import GL2PrefetchLoad
@@ -111,6 +111,7 @@ from .Common import print2, printExit, printWarning, INDEX_CHARS, DebugConfig, D
 from .Components.NonTemporal import decodeNonTemporal, forceCoherentNonTemporal, tdmCacheModifiers
 from .Common.DataType import DataType
 from .Common.ScaleAlphaVec import scaleAlphaSupportsDeviceScalar
+from .Common.LdsReadPlan import fp32_lds_read_bytes, validate_gfx1250_fp32_lds_read_width
 from .Common.MatrixInstructionNaming import dataTypeNameAbbrevToInstType, matrixInstructionTypes
 from .Common.RegisterPool import RegisterPool, allocTmpGpr, allocTmpGprList
 from .Components.WorkGroupMappingAlgos import DefaultWGM, wgmXCC, SpaceFillingCurveWalk, \
@@ -996,7 +997,8 @@ class KernelWriterAssembly(KernelWriter):
         localReadWidth = (self.states.lrvwUnrollB * tP["bpeDS"]) / bpr
       elif tChar == "MXSA":
         if self.states.asmCaps["HasWMMA_V3"] and kernel["MXScaleFormat"] == "InMemorySwizzle":
-          localReadWidth = (self.states.lrvwUnrollMXSA * kernel["VectorWidthA"] * tP["bpeDS"]) / bpr
+          vectorWidth = mxReadVectorWidth(kernel, tChar) if kernel.get("WaveTileContiguousA") else kernel["VectorWidthA"]
+          localReadWidth = (self.states.lrvwUnrollMXSA * vectorWidth * tP["bpeDS"]) / bpr
         else:
           localReadWidth = (self.states.lrvwUnrollMXSA * tP["bpeDS"]) / bpr
       elif tChar == "MXSB":
@@ -1056,6 +1058,18 @@ class KernelWriterAssembly(KernelWriter):
     tP["localRead2Perpendicular"]  = localRead2Perpendicular
     tP["localReadStrideCoalesced"] = localReadStrideCoalesced
     tP["localReadInstruction"]     = instructions[lrInstPoolName][localReadInstructionIdx]
+
+    if (tChar in ("A", "B") and self.states.asmCaps["HasWMMA_V3"]
+        and tP["bpeDS"] == 4 and kernel.get("enableTDM%s" % tChar, False)
+        and not kernel["UnrollMajorLDS%s" % tChar]):
+      lrvwTile = getattr(self.states, "lrvwTile%s" % tChar)
+      if kernel["LdsPad%s" % tChar] != 0:
+        validate_gfx1250_fp32_lds_read_width(lrvwTile, kernel["UseF32XEmulation"])
+      readBytes = fp32_lds_read_bytes(lrvwTile)
+      actual = tP["localReadInstruction"]
+      if (actual.inst.__name__ != f"DSLoadB{readBytes * 8}"
+          or actual.blockWidth * bpr != readBytes or actual.numOffsets != 1):
+        raise RuntimeError(f"FP32 LDS padding/read instruction mismatch for {tChar}")
 
   def _reportTmpSgprOverflow(self, num, tag):
     """A temporary allocation past MaxSgpr is an SGPR overflow; say so as the defined-SGPR check does."""
@@ -6162,7 +6176,7 @@ class KernelWriterAssembly(KernelWriter):
   # K_pad = 1 for A/B, 256 for MX scale (matches host rearrangePaddedMXScaleLayout).
   # Precondition: upstream Srd+2 is computeLoadSrd's tile-boundary limit
   # (useFixedSrd2 + non-isConstUnitStride); PGR/mainloop GR_INC only touch Srd+0/+1.
-  # tPs must share kPad and bpe_K_byteStride (delta emitted once, reused).
+  # tPs must share kPad (delta_K emitted once); bpe_K_byteStride may differ.
   ##############################################################################
   def computeTailLoopSrdLimit(self, kernel, tPs):
     module = Module("computeTailLoopSrdLimit")
@@ -6184,8 +6198,8 @@ class KernelWriterAssembly(KernelWriter):
     MX_PAD_K = 256
     depthU = int(kernel["DepthU"])
 
-    # Gather per-tc (kPad, bpeForLimit, kRowStride). kPad and bpeForLimit must
-    # agree across tPs, otherwise bail. kRowStride is None when K is the
+    # Gather per-tc (kPad, bpeForLimit, kRowStride). kPad must agree across
+    # tPs, otherwise bail. kRowStride is None when K is the
     # contiguous dimension and the unroll stride when it is not (TLU=1), where
     # the window set up in computeLoadSrd spans DepthU K rows.
     tcKpadBpeList = []
@@ -6224,11 +6238,13 @@ class KernelWriterAssembly(KernelWriter):
           kRowStride = self.strideRef(tc, kernel["ProblemType"]["IndexUnroll"])
       tcKpadBpeList.append((tc, kPad, bpeForLimit, kRowStride))
 
-    # Joint emission requires uniform kPad/bpe across all tPs (true for A/B
-    # symmetric configs and for MXSA/MXSB scale pairs in the gauntlet).
+    # Joint emission requires uniform kPad across all tPs (true for A/B and for
+    # MXSA/MXSB scale pairs). bpe may differ between A and B with mixed MX
+    # operands (e.g. MXFP4 x MXFP8); delta_K is shared and delta_bytes is
+    # computed per bpe.
     kPad = tcKpadBpeList[0][1]
     bpeForLimit = tcKpadBpeList[0][2]
-    if any(kp != kPad or bp != bpeForLimit for _, kp, bp, _ in tcKpadBpeList):
+    if any(kp != kPad for _, kp, _, _ in tcKpadBpeList):
       return module
     tcs = [t for t, _, _, _ in tcKpadBpeList]
     isMx = tcs[0] in ("MXSA", "MXSB")
@@ -6257,15 +6273,15 @@ class KernelWriterAssembly(KernelWriter):
         module.add(SSubU32(dst=sgpr(stmp), src0=depthU, src1=sgpr(loopCounterName),
                            comment="delta_K = DepthU - K_rem"))
 
-      for tc, _, _, kRowStride in tcKpadBpeList:
+      for tc, _, bpe, kRowStride in tcKpadBpeList:
         # delta_bytes = delta_K [* K-row stride] * bpe (handles bpe=0.5 via SShr 1)
         if kRowStride is None:
-          module.add(scalarMultiplyBpe(sbytes, stmp, bpeForLimit,
+          module.add(scalarMultiplyBpe(sbytes, stmp, bpe,
                                        comment="delta_bytes"))
         else:
           module.add(SMulI32(dst=sgpr(sbytes), src0=sgpr(stmp), src1=kRowStride,
                              comment="delta_K rows * %s K-row stride" % tc))
-          module.add(scalarMultiplyBpe(sbytes, sbytes, bpeForLimit,
+          module.add(scalarMultiplyBpe(sbytes, sbytes, bpe,
                                        comment="delta_bytes"))
         module.add(SSubU32(dst=sgpr("Srd%s+2" % tc), src0=sgpr("Srd%s+2" % tc),
                            src1=sgpr(sbytes),
@@ -16808,7 +16824,27 @@ class KernelWriterAssembly(KernelWriter):
 
       with self.allocTmpSgpr(1, tag="localReadInc_tmpSgprInfo") as tmpSgprInfo:
         tmpSgpr = tmpSgprInfo.idx
-        module.add(SMovB32(dst=sgpr(tmpSgpr), src=int(inc + padd), comment="inc"))
+        scaleBlock = kernel["LdsBlockSizePerPad%s" % tc]
+        if tc in ("MXSA", "MXSB") and scaleBlock and kernel["LdsPad%s" % tc] and inc % scaleBlock:
+          # The tail body repeats at runtime; iui alone cannot track padding crossings.
+          innerUnroll = kernel["InnerUnroll"] if kernel["AssertSummationElementMultiple"] % (kernel["MatrixInstK"] * kernel["InnerUnroll"]) == 0 else 1
+          coalesced = max(self.states.numReadsIterCoalescedMXSA, self.states.numReadsIterCoalescedMXSB)
+          module.add(SLShiftRightB32(dst=sgpr(tmpSgpr), src=sgpr("OrigLoopCounter"),
+                                    shiftHex=log2(kernel["MatrixInstK"]), comment="completed scale K steps"))
+          module.add(SMulI32(dst=sgpr(tmpSgpr), src0=sgpr(tmpSgpr), src1=inc // coalesced,
+                             comment="raw scale K offset"))
+          if iui % innerUnroll:
+            module.add(SAddU32(dst=sgpr(tmpSgpr), src0=sgpr(tmpSgpr), src1=(iui % innerUnroll) * inc))
+          module.add(SAndB32(dst=sgpr(tmpSgpr), src0=sgpr(tmpSgpr), src1=scaleBlock - 1,
+                            comment="scale padding phase"))
+          module.add(SAddU32(dst=sgpr(tmpSgpr), src0=sgpr(tmpSgpr), src1=inc))
+          module.add(SLShiftRightB32(dst=sgpr(tmpSgpr), src=sgpr(tmpSgpr), shiftHex=log2(scaleBlock)))
+          module.add(SMulI32(dst=sgpr(tmpSgpr), src0=sgpr(tmpSgpr),
+                             src1=int(kernel["LdsPad%s" % tc] * tP["bpeDS"])))
+          module.add(SAddU32(dst=sgpr(tmpSgpr), src0=sgpr(tmpSgpr), src1=inc,
+                            comment="scale increment with crossed padding blocks"))
+        else:
+          module.add(SMovB32(dst=sgpr(tmpSgpr), src=int(inc + padd), comment="inc"))
         numLra = 0
         if tP["isA"]:
           numLra = self.states.a.numVgprLocalReadAddr
