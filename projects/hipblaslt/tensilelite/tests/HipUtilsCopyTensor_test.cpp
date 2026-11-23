@@ -70,3 +70,91 @@ TEST(HipUtilsCopyTensor, TypedCopyDoesNotReadPastAZeroStrideTensor)
 
     EXPECT_EQ(dst, (std::array<int32_t, 6>{1, 2, -1, -1, -1, -1}));
 }
+
+TEST(HipUtilsCopyTensor, VoidCopyRepeatsAZeroStrideDimension)
+{
+    // TypedCopyRepeatsAZeroStrideDimension through CopyTensorVoid.
+    std::array<int32_t, 4> const src{1, 2, 3, 4};
+    std::array<int32_t, 5>       dst;
+    dst.fill(-1);
+
+    TensileLite::TensorDescriptor const desc("copy", rocisa::DataType::Int32, {4, 3}, {1, 0});
+    TensileLite::hip::CopyTensorVoid(dst.data(), src.data(), desc, hipMemcpyHostToHost);
+    ASSERT_EQ(hipStreamSynchronize(nullptr), hipSuccess);
+
+    EXPECT_EQ(dst, (std::array<int32_t, 5>{1, 2, 3, 4, -1}));
+}
+
+TEST(HipUtilsCopyTensor, VoidCopyDoesNotReadPastAZeroStrideTensor)
+{
+    // TypedCopyDoesNotReadPastAZeroStrideTensor through CopyTensorVoid.
+    std::array<int32_t, 6> const src{1, 2, 77, 77, 77, 77};
+    std::array<int32_t, 6>       dst;
+    dst.fill(-1);
+
+    TensileLite::TensorDescriptor const desc("copy", rocisa::DataType::Int32, {2, 5}, {1, 0});
+    TensileLite::hip::CopyTensorVoid(dst.data(), src.data(), desc, hipMemcpyHostToHost);
+    ASSERT_EQ(hipStreamSynchronize(nullptr), hipSuccess);
+
+    EXPECT_EQ(dst, (std::array<int32_t, 6>{1, 2, -1, -1, -1, -1}));
+}
+
+TEST(HipUtilsCopyTensor, TypedCopyOfAZeroStrideFirstDimensionCopiesOneElement)
+{
+    // One element shared by every coordinate of the only dimension. Coalescing that
+    // dimension would copy zero bytes.
+    std::array<int32_t, 4> const src{7, 77, 77, 77};
+    std::array<int32_t, 4>       dst;
+    dst.fill(-1);
+
+    TensileLite::TensorDescriptor const desc("copy", rocisa::DataType::Int32, {4}, {0});
+    TensileLite::hip::CopyTensor(dst.data(), src.data(), desc, hipMemcpyHostToHost);
+    ASSERT_EQ(hipStreamSynchronize(nullptr), hipSuccess);
+
+    EXPECT_EQ(dst, (std::array<int32_t, 4>{7, -1, -1, -1}));
+}
+
+TEST(HipUtilsCopyTensor, TypedCopyOfAZeroStrideFirstDimensionKeepsTheOtherStrides)
+{
+    // Element (i, j) is at 4 * j, so only the first of every 4 elements is read.
+    // Coalescing the zero-stride first dimension would copy zero bytes.
+    std::array<int32_t, 8> const src{1, 77, 77, 77, 5, 77, 77, 77};
+    std::array<int32_t, 8>       dst;
+    dst.fill(-1);
+
+    TensileLite::TensorDescriptor const desc("copy", rocisa::DataType::Int32, {4, 2}, {0, 4});
+    TensileLite::hip::CopyTensor(dst.data(), src.data(), desc, hipMemcpyHostToHost);
+    ASSERT_EQ(hipStreamSynchronize(nullptr), hipSuccess);
+
+    EXPECT_EQ(dst, (std::array<int32_t, 8>{1, -1, -1, -1, 5, -1, -1, -1}));
+}
+
+TEST(HipUtilsCopyTensor, VoidCopyOfAZeroStrideFirstDimensionCopiesOneElement)
+{
+    // One element shared by every coordinate of the only dimension. Coalescing that
+    // dimension would copy zero bytes.
+    std::array<int32_t, 4> const src{7, 77, 77, 77};
+    std::array<int32_t, 4>       dst;
+    dst.fill(-1);
+
+    TensileLite::TensorDescriptor const desc("copy", rocisa::DataType::Int32, {4}, {0});
+    TensileLite::hip::CopyTensorVoid(dst.data(), src.data(), desc, hipMemcpyHostToHost);
+    ASSERT_EQ(hipStreamSynchronize(nullptr), hipSuccess);
+
+    EXPECT_EQ(dst, (std::array<int32_t, 4>{7, -1, -1, -1}));
+}
+
+TEST(HipUtilsCopyTensor, VoidCopyOfAZeroStrideFirstDimensionKeepsTheOtherStrides)
+{
+    // Element (i, j) is at 4 * j, so only the first of every 4 elements is read.
+    // Coalescing the zero-stride first dimension would copy zero bytes.
+    std::array<int32_t, 8> const src{1, 77, 77, 77, 5, 77, 77, 77};
+    std::array<int32_t, 8>       dst;
+    dst.fill(-1);
+
+    TensileLite::TensorDescriptor const desc("copy", rocisa::DataType::Int32, {4, 2}, {0, 4});
+    TensileLite::hip::CopyTensorVoid(dst.data(), src.data(), desc, hipMemcpyHostToHost);
+    ASSERT_EQ(hipStreamSynchronize(nullptr), hipSuccess);
+
+    EXPECT_EQ(dst, (std::array<int32_t, 8>{1, -1, -1, -1, 5, -1, -1, -1}));
+}
