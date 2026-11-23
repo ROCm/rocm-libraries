@@ -67,6 +67,9 @@ extern "C" {
 *               expanded rows or columns of a BSR \p source with 32-bit column indices
 *               do not fit in \c int32_t, or \p source is batched. A batched \p target is
 *               not checked by this query; \ref rocsparse_sparse_to_sparse rejects it.
+*  \retval      rocsparse_status_type_mismatch \p source and \p target differ in matrix type,
+*               fill mode, diagonal type, index base, or storage mode, or an index value or
+*               nonzero count does not fit in the index type that stores it.
 *  \retval      rocsparse_status_not_implemented the conversion is not supported for the formats or data types of \p source and \p target.
 */
 ROCSPARSE_EXPORT
@@ -287,6 +290,11 @@ rocsparse_status rocsparse_sparse_to_sparse_buffer_size(rocsparse_handle        
 *               index array is set and the corresponding target array is null. In that
 *               case nothing is written to \p target. A null target value array that
 *               requests a symbolic conversion is not an error.
+*  \retval      rocsparse_status_invalid_size a conversion to the same format has a
+*               \p source and a \p target with different numbers of rows or columns.
+*  \retval      rocsparse_status_type_mismatch \p source and \p target differ in matrix type,
+*               fill mode, diagonal type, index base, or storage mode, or an index value
+*               does not fit in the target index type.
 *  \retval      rocsparse_status_not_implemented the conversion is not supported for the formats
 *               or data types of \p source and \p target, or \p source or \p target is batched.
 *  \par Example
