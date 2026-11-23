@@ -62,11 +62,16 @@ struct BlockFmhaBwdConvertQGrad
     }
 
     // Reduce + Convert
+    // dq_acc_dram_block_window_tmp views split 0 only; split i starts split_stride * i elements
+    // later. Each split is reached by moving the view's base pointer in 64 bits, not by moving
+    // the window inside one view of all splits: that view can span more than 4 GiB, past what
+    // 32-bit buffer offsets can address.
     template <typename QGradAccDramBlockWindowTmp, typename QGradDramBlockWindowTmp>
     CK_TILE_HOST_DEVICE void
     operator()(const QGradAccDramBlockWindowTmp& dq_acc_dram_block_window_tmp,
                QGradDramBlockWindowTmp& dq_dram_block_window_tmp,
-               index_t nsplits) const
+               index_t nsplits,
+               long_index_t split_stride) const
     {
         static_assert(
             std::is_same_v<AccDataType,
@@ -87,11 +92,10 @@ struct BlockFmhaBwdConvertQGrad
         clear_tile(dq_acc);
 
         constexpr auto dq_acc_spans = decltype(dq_acc)::get_distributed_spans();
-        index_t i_total_loops       = 0;
-        auto dq_acc_buf             = load_tile(dq_acc_dram_window);
-        move_tile_window(dq_acc_dram_window, {1, 0, 0});
+        auto split_ptr = dq_acc_dram_window.get_bottom_tensor_view().get_buffer_view().p_data_;
+        auto dq_acc_buf = load_tile(dq_acc_dram_window);
 
-        do
+        for(index_t i_split = 1; i_split < nsplits; ++i_split)
         {
             sweep_tile_span(dq_acc_spans[number<0>{}], [&](auto idx0) {
                 sweep_tile_span(dq_acc_spans[number<1>{}], [&](auto idx1) {
@@ -102,11 +106,10 @@ struct BlockFmhaBwdConvertQGrad
                 });
             });
 
+            split_ptr += split_stride;
+            dq_acc_dram_window.set_bottom_tensor_view_data_ptr(split_ptr);
             dq_acc_buf = load_tile(dq_acc_dram_window);
-            move_tile_window(dq_acc_dram_window, {1, 0, 0});
-
-            i_total_loops += 1;
-        } while(i_total_loops < (nsplits - 1));
+        }
 
         sweep_tile_span(dq_acc_spans[number<0>{}], [&](auto idx0) {
             sweep_tile_span(dq_acc_spans[number<1>{}], [&](auto idx1) {

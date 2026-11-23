@@ -3111,9 +3111,12 @@ struct FmhaBwdConvertQGradKernel
                         static_cast<long_index_t>(i_nhead_) * nhead_stride_dq_acc +
                         batch_offset_dq_acc;
 
+                    // The view covers one split only. The pipeline steps to the next split by
+                    // moving the base pointer (64-bit), so buffer offsets stay below
+                    // one split (split_stride_dq_acc elements) however many splits there are.
                     auto dq_acc_dram_naive = make_naive_tensor_view<address_space_enum::global>(
                         dq_acc_ptr,
-                        make_tuple(nsplits, kargs.seqlen_q, kargs.hdim_q),
+                        make_tuple(1, kargs.seqlen_q, kargs.hdim_q),
                         make_tuple(split_stride_dq_acc, dq_acc_hdim, 1),
                         number<kAlign>{},
                         number<1>{});
@@ -3173,7 +3176,8 @@ struct FmhaBwdConvertQGradKernel
 
             if constexpr(kIsDeterministic)
             {
-                FmhaBwdConvertQGrad{}(dq_acc_dram_window, dq_dram_window, nsplits);
+                FmhaBwdConvertQGrad{}(
+                    dq_acc_dram_window, dq_dram_window, nsplits, split_stride_dq_acc);
             }
             else
             {
