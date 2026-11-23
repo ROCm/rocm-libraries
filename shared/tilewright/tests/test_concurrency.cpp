@@ -1,0 +1,408 @@
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
+#include "model_writer.hpp"
+#include "test_util.hpp"
+
+#include <catch2/catch_test_macros.hpp>
+
+#include <algorithm>
+#include <atomic>
+#include <cstdint>
+#include <limits>
+#include <random>
+#include <thread>
+#include <vector>
+
+namespace tw = tilewright;
+using namespace tilewright_test;
+
+TEST_CASE("concurrent loads and ranks agree with a serial run", "[concurrency]") {
+  TempDir dir("concurrency");
+  ModelSpec spec_a = grid_model(tw::WeightType::Int4);
+  for (CellSpec& c : spec_a.cells) c.signatures = {{128, 128, 64, 16, 16, 32, 0, 0}};
+  const Image a     = write_model(spec_a);
+  const Image b     = write_model(grid_model(tw::WeightType::Bf16));
+  const auto path_a = (dir.path() / "a.bin").string();
+  const auto path_b = (dir.path() / "b.bin").string();
+  write_file(path_a, a.bytes);
+  write_file(path_b, b.bytes);
+
+  std::vector<tw::Config> pool;
+  for (std::size_t mt : {16, 32, 64, 128, 256})
+    for (std::size_t nt : {32, 64, 128}) pool.push_back(make_config(mt, nt, 64));
+  for (std::size_t i = 0; i < 15; i += 2) {
+    tw::Config copy = pool[i];
+    copy.index      = 100 + i;
+    copy.attributes = {{"workgroup_mapping", static_cast<std::int64_t>(i)}};
+    pool.push_back(copy);
+  }
+  std::vector<double> prior;
+  for (std::size_t i = 0; i < pool.size(); ++i)
+    prior.push_back(i % 5 == 0 ? std::numeric_limits<double>::quiet_NaN()
+                               : static_cast<double>(i % 3));
+  std::mt19937_64 rng(5);
+  std::vector<tw::Problem> problems;
+  std::vector<std::size_t> depth;
+  for (int i = 0; i < 48; ++i) {
+    problems.push_back(
+        make_problem(1 + rng() % 5000, 1 + rng() % 5000, 1 + rng() % 5000, rng() % 3 == 0 ? 4 : 1));
+    depth.push_back(rng() % 2 ? 0 : 20);
+  }
+
+  const tw::ModelPtr reference = tw::load_model_from_memory(a.bytes.data(), a.bytes.size());
+  REQUIRE(reference);
+  std::vector<std::vector<tw::Result>> expect, expect_prior;
+  for (std::size_t i = 0; i < problems.size(); ++i) {
+    expect.push_back(tw::rank_configs(*reference, problems[i], test_hardware(), pool, depth[i]));
+    expect_prior.push_back(tw::rank_configs(
+        *reference, problems[i], test_hardware(), {}, pool, depth[i], tw::TieBreak::Prior, &prior));
+  }
+  const tw::ExecutionContext budgeted{test_hardware().N_CU / 2, tw::Schedule::Default};
+  const tw::ExecutionContext unlisted{0, tw::Schedule::Dynamic};
+
+  // Fresh model and sets: dequantization and the per-cell caches are built by
+  // the racing threads.
+  const tw::ModelPtr held = tw::load_model(path_a);
+  REQUIRE(held);
+  const tw::ModelPtr shared = tw::load_model_from_memory(a.bytes.data(), a.bytes.size());
+  const tw::CandidateSet set(shared, pool);
+  const tw::CandidateSet prior_set(shared, pool, tw::PoolOptions{tw::TieBreak::Prior});
+
+  std::atomic<int> failures{0};
+  std::atomic<int> work{0};
+  const unsigned n_threads = std::max(4u, std::min(16u, std::thread::hardware_concurrency()));
+  std::vector<std::thread> threads;
+  for (unsigned t = 0; t < n_threads; ++t) {
+    threads.emplace_back([&, t] {
+      for (int iter = 0; iter < 120; ++iter) {
+        const std::size_t i = (t * 7 + static_cast<std::size_t>(iter)) % problems.size();
+        switch ((t + static_cast<unsigned>(iter)) % 7) {
+          case 0:
+            if (tw::load_model(path_a) != held) ++failures;
+            break;
+          case 1: {
+            const tw::ModelPtr m = tw::load_model(path_b);
+            if (!m || tw::describe(*m).weight_type != tw::WeightType::Bf16) ++failures;
+            break;
+          }
+          case 2:
+            if (!same_results(set.rank(problems[i], test_hardware(), depth[i]), expect[i]))
+              ++failures;
+            break;
+          case 3:
+            if (!same_results(
+                    tw::rank_configs(*shared, problems[i], test_hardware(), pool, depth[i]),
+                    expect[i]))
+              ++failures;
+            break;
+          case 4:
+            if (!same_results(prior_set.rank(problems[i], test_hardware(), {}, depth[i], &prior),
+                              expect_prior[i]))
+              ++failures;
+            break;
+          case 5: {
+            // A budget a v2 model was not trained for ranks as every CU; a
+            // schedule it does not list leaves every config unscored.
+            if (!same_results(
+                    prior_set.rank(problems[i], test_hardware(), budgeted, depth[i], &prior),
+                    expect_prior[i]))
+              ++failures;
+            const std::vector<tw::Result> r =
+                prior_set.rank(problems[i], test_hardware(), unlisted, depth[i], &prior);
+            for (std::size_t j = 0; j < r.size(); ++j)
+              if (r[j].scored || r[j].config_index != j) ++failures;
+            break;
+          }
+          default: {
+            const tw::ModelPtr m = tw::load_model_from_memory(a.bytes.data(), a.bytes.size());
+            if (!m ||
+                !same_results(tw::rank_configs(*m, problems[i], test_hardware(), pool, depth[i]),
+                              expect[i]))
+              ++failures;
+            break;
+          }
+        }
+        ++work;
+      }
+    });
+  }
+  for (std::thread& th : threads) th.join();
+  CHECK(work.load() == static_cast<int>(n_threads) * 120);
+  CHECK(failures.load() == 0);
+}
+
+TEST_CASE("concurrent rankings that release and rebuild cached cells agree with a serial run",
+          "[concurrency][cache]") {
+  const std::size_t saved = tw::cache_limit();
+  ModelSpec spec          = grid_model(tw::WeightType::Int4);
+  for (CellSpec& c : spec.cells) c.signatures = {{128, 128, 64, 16, 16, 32, 0, 0}};
+  const tw::ModelPtr model = load_spec(spec);
+  std::vector<tw::Config> pool;
+  for (std::size_t mt : {16, 32, 64, 128, 256})
+    for (std::size_t nt : {32, 64, 128}) pool.push_back(make_config(mt, nt, 64));
+  std::mt19937_64 rng(9);
+  std::vector<tw::Problem> problems;
+  std::vector<std::size_t> depth;
+  for (int i = 0; i < 64; ++i) {
+    problems.push_back(make_problem(1 + rng() % 5000, 1 + rng() % 5000, 1 + rng() % 5000));
+    depth.push_back(rng() % 2 ? 1 : 30);
+  }
+  std::vector<std::vector<tw::Result>> expect;
+  for (std::size_t i = 0; i < problems.size(); ++i)
+    expect.push_back(tw::rank_configs(*model, problems[i], test_hardware(), pool, depth[i]));
+
+  // Room for about two cells: rankings of other cells release the ones in use.
+  tw::set_cache_limit(2 * tw::detail::cell_weight_bytes(*model, 0));
+  const tw::ModelPtr fresh = load_spec(spec);
+  const tw::CandidateSet set(fresh, pool);
+  std::atomic<int> failures{0};
+  const unsigned n_threads = std::max(4u, std::min(16u, std::thread::hardware_concurrency()));
+  std::vector<std::thread> threads;
+  for (unsigned t = 0; t < n_threads; ++t)
+    threads.emplace_back([&, t] {
+      std::vector<tw::Result> top;
+      for (int iter = 0; iter < 200; ++iter) {
+        const std::size_t i  = (t * 13 + static_cast<std::size_t>(iter) * 7) % problems.size();
+        const tw::Problem& p = problems[i];
+        bool ok              = false;
+        switch ((t + static_cast<unsigned>(iter)) % 4) {
+          case 0: ok = same_results(set.rank(p, test_hardware(), depth[i]), expect[i]); break;
+          case 1:
+            set.rank_top(p, test_hardware(), {}, depth[i], top);
+            ok = same_results(top, scored_prefix(expect[i], depth[i]));
+            break;
+          case 2:
+            set.prepare(p, test_hardware());
+            ok = true;
+            break;
+          default:
+            ok = same_results(tw::rank_configs(*fresh, p, test_hardware(), pool, depth[i]),
+                              expect[i]);
+        }
+        if (!ok) ++failures;
+      }
+    });
+  for (std::thread& th : threads) th.join();
+  tw::set_cache_limit(saved);
+  CHECK(failures.load() == 0);
+}
+
+TEST_CASE("rankings racing CandidateSet::prepare() agree with a serial run",
+          "[concurrency][cache]") {
+  ModelSpec spec = grid_model();
+  for (CellSpec& c : spec.cells)
+    c.signatures = {{128, 128, 64, 16, 16, 32, 0, 0}, {64, 64, 64, 16, 16, 32, 0, 0}};
+  const tw::ModelPtr model = load_spec(spec);
+  std::vector<tw::Config> pool;
+  for (std::size_t mt : {16, 32, 64, 128, 256})
+    for (std::size_t nt : {32, 64, 128}) pool.push_back(make_config(mt, nt, 64));
+  std::mt19937_64 rng(11);
+  std::vector<tw::Problem> problems;
+  std::vector<std::size_t> depth;
+  for (int i = 0; i < 48; ++i) {
+    problems.push_back(make_problem(1 + rng() % 5000, 1 + rng() % 5000, 1 + rng() % 5000));
+    depth.push_back(rng() % 2 ? 1 : 30);
+  }
+  std::vector<std::vector<tw::Result>> expect;
+  for (std::size_t i = 0; i < problems.size(); ++i)
+    expect.push_back(tw::rank_configs(*model, problems[i], test_hardware(), pool, depth[i]));
+
+  // Each round a fresh set: prepare() publishes its copy while other threads
+  // rank it, and one of them may build the kernel part that is copied in.
+  // `prepared` is relaxed so that only the engine's own publication orders the
+  // threads' reads of the copy after prepare() wrote it; each thread keeps
+  // ranking until it has seen prepare() return.
+  for (int round = 0; round < 6; ++round) {
+    const tw::CandidateSet set(model, pool);
+    std::atomic<bool> go{false}, prepared{false};
+    std::atomic<int> failures{0};
+    std::vector<std::thread> threads;
+    for (unsigned t = 0; t < 4; ++t)
+      threads.emplace_back([&, t] {
+        while (!go.load()) std::this_thread::yield();
+        std::vector<tw::Result> top;
+        int after = 0;
+        for (int iter = 0; iter < 40 || after < 20; ++iter) {
+          if (prepared.load(std::memory_order_relaxed)) ++after;
+          const std::size_t i = (t * 11 + static_cast<std::size_t>(iter) * 5) % problems.size();
+          bool ok             = false;
+          if (iter % 2 == 0) {
+            ok = same_results(set.rank(problems[i], test_hardware(), depth[i]), expect[i]);
+          } else {
+            set.rank_top(problems[i], test_hardware(), {}, depth[i], top);
+            ok = same_results(top, scored_prefix(expect[i], depth[i]));
+          }
+          if (!ok) ++failures;
+        }
+      });
+    go.store(true);
+    set.prepare();
+    prepared.store(true, std::memory_order_relaxed);
+    for (std::thread& th : threads) th.join();
+    CHECK(failures.load() == 0);
+  }
+}
+
+TEST_CASE("degraded and other cells ranked from many threads agree with a serial run",
+          "[concurrency][drift]") {
+  // A v3 grid whose cells list keys of the pool by view-key hash, served with the drift
+  // fallback at keep_ppm 1000000: the pool lacks some listed keys, so some cells are degraded.
+  std::vector<tw::Config> pool;
+  for (std::size_t mt : {16, 32, 64, 128, 256})
+    for (std::size_t nt : {16, 32, 64, 128, 256})
+      for (std::size_t kt : {32, 64}) pool.push_back(make_config(mt, nt, kt));
+  for (std::size_t i = 0; i < pool.size(); ++i) pool[i].index = i;
+  // FNV-1a 64 over each signature field as 8 little-endian bytes: the view-key hash.
+  std::vector<std::uint64_t> hashes;
+  for (const tw::Config& c : pool) {
+    std::uint64_t h         = 0xCBF29CE484222325ull;
+    const std::int64_t v[8] = {static_cast<std::int64_t>(c.mt.m),
+                               static_cast<std::int64_t>(c.mt.n),
+                               static_cast<std::int64_t>(c.mt.k),
+                               static_cast<std::int64_t>(c.mi.m),
+                               static_cast<std::int64_t>(c.mi.n),
+                               static_cast<std::int64_t>(c.mi.k),
+                               c.cache_hints_a,
+                               c.cache_hints_b};
+    for (std::int64_t x : v)
+      for (int b = 0; b < 8; ++b)
+        h = (h ^ static_cast<unsigned char>(static_cast<std::uint64_t>(x) >> (8 * b))) *
+            0x100000001B3ull;
+    hashes.push_back(h);
+  }
+  ModelSpec spec        = as_v3(grid_model());
+  spec.v3_serving_flags = 0x400;
+  spec.drift_keep_ppm   = 1000000;
+  spec.v3_cascade_keys  = 4;
+  // Odd cells list kernels the variant pool below lacks; even cells do not.
+  for (std::size_t c = 0; c < spec.cells.size(); ++c) {
+    std::vector<std::uint64_t> listed;
+    for (std::size_t i = 0; i < hashes.size(); ++i)
+      if ((i + c) % 3 == 0 && (c % 2 != 0 || i % 7 != 0)) listed.push_back(hashes[i]);
+    std::sort(listed.begin(), listed.end());
+    spec.cells[c].view_key_hashes = listed;
+  }
+  const tw::ModelPtr model = load_spec(spec);
+  std::vector<tw::Config> variant;
+  for (std::size_t i = 0; i < pool.size(); ++i)
+    if (i % 7 != 0) variant.push_back(pool[i]);
+  for (std::size_t i = 0; i < variant.size(); ++i) variant[i].index = i;
+
+  std::mt19937_64 rng(13);
+  std::vector<tw::Problem> problems;
+  std::vector<std::size_t> depth;
+  for (int i = 0; i < 64; ++i) {
+    problems.push_back(
+        make_problem(1 + rng() % 5000, 1 + rng() % 5000, 1 + rng() % 5000, rng() % 3 == 0 ? 4 : 1));
+    depth.push_back(rng() % 3 == 0 ? 0 : rng() % 2 ? 1 : 40);
+  }
+  std::vector<std::vector<tw::Result>> expect;
+  for (std::size_t i = 0; i < problems.size(); ++i)
+    expect.push_back(tw::rank_configs(*model, problems[i], test_hardware(), variant, depth[i]));
+
+  const tw::CandidateSet set(model, variant);
+  REQUIRE_FALSE(set.degraded_cells().empty());
+  REQUIRE(set.degraded_cells().size() < spec.cells.size());
+  std::atomic<int> mismatches{0};
+  std::vector<std::thread> threads;
+  for (int t = 0; t < 8; ++t)
+    threads.emplace_back([&, t] {
+      for (int round = 0; round < 6; ++round)
+        for (std::size_t i = 0; i < problems.size(); ++i) {
+          const std::size_t j = (i + static_cast<std::size_t>(t) * 7) % problems.size();
+          if (!same_results(set.rank(problems[j], test_hardware(), depth[j]), expect[j]))
+            ++mismatches;
+          if (t % 2 == 0 && round == 2 && i == 5) set.prepare();
+        }
+    });
+  for (std::thread& th : threads) th.join();
+  CHECK(mismatches.load() == 0);
+}
+
+TEST_CASE("cells with stand-ins ranked from many threads agree with a serial run",
+          "[concurrency][standins]") {
+  // A v3 grid with the trained-key gate whose cells list keys of the pool by view-key hash,
+  // with stand-ins for every listed key: the variant pool lacks some listed keys, so stand-ins
+  // join some cells' whitelists, and in some cells (listing the tiles whose 2-byte operands
+  // never fit in the LDS) no listed key survives.
+  std::vector<tw::Config> pool;
+  for (std::size_t mt : {16, 32, 64, 128, 256})
+    for (std::size_t nt : {16, 32, 64, 128, 256})
+      for (std::size_t kt : {32, 64, 128}) pool.push_back(make_config(mt, nt, kt));
+  for (std::size_t i = 0; i < pool.size(); ++i) pool[i].index = i;
+  // FNV-1a 64 over each signature field as 8 little-endian bytes: the view-key hash.
+  std::vector<std::uint64_t> hashes;
+  for (const tw::Config& c : pool) {
+    std::uint64_t h         = 0xCBF29CE484222325ull;
+    const std::int64_t v[8] = {static_cast<std::int64_t>(c.mt.m),
+                               static_cast<std::int64_t>(c.mt.n),
+                               static_cast<std::int64_t>(c.mt.k),
+                               static_cast<std::int64_t>(c.mi.m),
+                               static_cast<std::int64_t>(c.mi.n),
+                               static_cast<std::int64_t>(c.mi.k),
+                               c.cache_hints_a,
+                               c.cache_hints_b};
+    for (std::int64_t x : v)
+      for (int b = 0; b < 8; ++b)
+        h = (h ^ static_cast<unsigned char>(static_cast<std::uint64_t>(x) >> (8 * b))) *
+            0x100000001B3ull;
+    hashes.push_back(h);
+  }
+  std::vector<std::uint64_t> trained = hashes;
+  std::sort(trained.begin(), trained.end());
+  ModelSpec spec        = as_v3(grid_model());
+  spec.v3_serving_flags = 0x80 | 0x1000;
+  spec.trained_keys     = trained;
+  spec.v3_cascade_keys  = 8;
+  for (std::size_t c = 0; c < spec.cells.size(); ++c) {
+    std::vector<std::uint64_t> listed;
+    for (std::size_t i = 0; i < pool.size(); ++i)
+      if (c % 5 == 0 ? pool[i].mt.m == 256 && pool[i].mt.k == 128 : (i + c) % 4 == 0)
+        listed.push_back(hashes[i]);
+    std::sort(listed.begin(), listed.end());
+    spec.cells[c].view_key_hashes = listed;
+    std::vector<std::uint64_t> others;
+    for (const std::uint64_t h : trained)
+      if (!std::binary_search(listed.begin(), listed.end(), h)) others.push_back(h);
+    for (std::size_t i = 0; i < listed.size(); ++i)
+      spec.standins.push_back(
+          {static_cast<std::uint32_t>(c),
+           listed[i],
+           {others[(i * 7 + c) % others.size()], others[(i * 7 + c + 1) % others.size()]}});
+  }
+  const tw::ModelPtr model = load_spec(spec);
+  std::vector<tw::Config> variant;
+  for (std::size_t i = 0; i < pool.size(); ++i)
+    if (i % 5 != 0) variant.push_back(pool[i]);
+  for (std::size_t i = 0; i < variant.size(); ++i) variant[i].index = i;
+
+  std::mt19937_64 rng(17);
+  std::vector<tw::Problem> problems;
+  std::vector<std::size_t> depth;
+  for (int i = 0; i < 64; ++i) {
+    problems.push_back(
+        make_problem(1 + rng() % 5000, 1 + rng() % 5000, 1 + rng() % 5000, rng() % 3 == 0 ? 4 : 1));
+    depth.push_back(rng() % 3 == 0 ? 0 : rng() % 2 ? 1 : 40);
+  }
+  std::vector<std::vector<tw::Result>> expect;
+  for (std::size_t i = 0; i < problems.size(); ++i)
+    expect.push_back(tw::rank_configs(*model, problems[i], test_hardware(), variant, depth[i]));
+
+  const tw::CandidateSet set(model, variant);
+  REQUIRE_FALSE(set.standin_cells().empty());
+  std::atomic<int> mismatches{0};
+  std::vector<std::thread> threads;
+  for (int t = 0; t < 8; ++t)
+    threads.emplace_back([&, t] {
+      for (int round = 0; round < 6; ++round)
+        for (std::size_t i = 0; i < problems.size(); ++i) {
+          const std::size_t j = (i + static_cast<std::size_t>(t) * 7) % problems.size();
+          if (!same_results(set.rank(problems[j], test_hardware(), depth[j]), expect[j]))
+            ++mismatches;
+          if (t % 2 == 0 && round == 2 && i == 5) set.prepare();
+        }
+    });
+  for (std::thread& th : threads) th.join();
+  CHECK(mismatches.load() == 0);
+}

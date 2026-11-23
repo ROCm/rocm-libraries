@@ -25,6 +25,7 @@
  *******************************************************************************/
 
 #include <Tensile/ContractionSolution.hpp>
+#include <Tensile/DefaultPersistentLaunch.hpp>
 #include <Tensile/FusedA2AKernArg.hpp>
 #include <Tensile/MagicDivision.hpp>
 #include <Tensile/RocRollerWgmKernargs.hpp>
@@ -5076,7 +5077,15 @@ namespace TensileLite
         // Retain the legacy DP tile count used by prediction and diagnostics;
         // its spatial block cap below uses calculateGrid's output-index ordering.
         launch.totalTiles = problem.getNumTiles(sizeMapping, 1);
-        if(sizeMapping.isPersistentDataParallel())
+        if(sizeMapping.isPersistentDataParallel()
+           && decidesDefaultPersistentLaunch(problem, hardware))
+        {
+            DefaultPersistentLaunch const decided
+                = resolveDefaultLaunch(problem, hardware, launch.totalTiles, nullptr);
+            launch.grid         = decided.grid;
+            launch.selectedGrid = decided.selectedGrid;
+        }
+        else if(sizeMapping.isPersistentDataParallel())
             launch.grid = getPersistentGridImpl(*this, problem, hardware, launch.totalTiles,
                                                 origami::reduction_t::none, nullptr,
                                                 nullptr, nullptr, &launch.clusterGridClamp,
@@ -5998,10 +6007,32 @@ namespace TensileLite
         // helpers later in this file. getSKReduction consults it when deciding
         // whether parallel remains eligible under uniform summation order, and
         // wants only the yes/no, so obstacleToken defaults to unrequested.
-        std::string streamKUniformSummationOrderObstacle(
-            ContractionSolution const&              solution,
-            ContractionSolution::Problem const&     problem,
-            char const**                            obstacleToken = nullptr);
+        std::string
+            streamKUniformSummationOrderObstacle(ContractionSolution const&          solution,
+                                                 ContractionSolution::Problem const* problem,
+                                                 char const** obstacleToken = nullptr);
+
+        // The M, N, K and batch origami's Stream-K selection reads of `problem`,
+        // with `numCus` as its CU budget.
+        origami::problem_t origamiShape(ContractionProblemGemm const& problem, size_t numCus)
+        {
+            size_t x = 1, y = 1, z = 1, batch = 1;
+            for(size_t i = 0; i < problem.freeIndicesA().size(); ++i)
+                x *= problem.freeSizeA(i);
+            for(size_t i = 0; i < problem.freeIndicesB().size(); ++i)
+                y *= problem.freeSizeB(i);
+            for(size_t i = 0; i < problem.boundIndices().size(); ++i)
+                z *= problem.boundSize(i);
+            for(size_t i = 0; i < problem.batchIndices().size(); ++i)
+                batch *= problem.batchSize(i);
+            return {.size = {x, y, z}, .batch = batch, .num_cus = numCus};
+        }
+
+        inline origami::hardware_t const* analyticalHardwareOf(Hardware const& hardware)
+        {
+            auto const* hipAMDGPU = dynamic_cast<hip::HipAMDGPU const*>(&hardware);
+            return hipAMDGPU ? hipAMDGPU->analyticalHardware.get() : nullptr;
+        }
     } // namespace
 
     origami::reduction_t ContractionSolution::getSKReduction(Problem const&  problem,
@@ -6099,7 +6130,7 @@ namespace TensileLite
                     = reductionStrat == origami::reduction_t::parallel
                       && sizeMapping.streamKAtomic == 0
                       && streamKUniformSummationOrderObstacle(
-                             *this, problem)
+                             *this, &problem)
                              .empty();
                 if(!keepParallel)
                     reductionStrat = origami::reduction_t::tree;
@@ -6488,45 +6519,67 @@ namespace TensileLite
         else
             tiles = problem.getNumTiles(sizeMapping, 1);
 
-        // Take the caller's already-resolved sub-mode when offered: resolving it
-        // is not free (see the note in getPersistentGridImpl), and solve() has it.
-        const bool effectiveDynamic
-            = (sizeMapping.hasHybridAssignment())
-                  ? (effectiveDynamicHint != nullptr ? *effectiveDynamicHint
-                                                     : streamK5EffectiveDynamic(problem, hardware))
-                  : false;
-
-        sk.tileProcessingStrategy = TileProcessingStrategy::StreamK;
-        sk.workAssignment = sizeMapping.workAssignment;
-        sk.effectiveWorkAssignment = sizeMapping.hasDynamicAssignment() || effectiveDynamic
-                                        ? WorkAssignment::DynamicWorkQueue : WorkAssignment::StaticGrid;
-        sk.totalTiles = tiles;
-        sk.argsVersion = internalArgsSupport.persistentLoopArgsVersion;
-
-        // Pinning SK4 and SK5-resolved-dynamic to tree is a launch-site rule:
-        // requiredWorkspaceSize() always asks getSKReduction() and has no such
-        // special case, so a dynamic-queue launch can be sized for parallel and
-        // then run tree -- see the note there on why that is not a memory-safety
-        // problem.
-        if(sizeMapping.hasDynamicAssignment())
-            sk.reduction = origami::reduction_t::tree;
-        else if(sizeMapping.hasHybridAssignment())
-            sk.reduction = effectiveDynamic ? origami::reduction_t::tree
-                                            : getSKReduction(problem, hardware);
+        if(sizeMapping.isStreamK() && decidesDefaultPersistentLaunch(problem, hardware))
+        {
+            DefaultPersistentLaunch const decided
+                = resolveDefaultLaunch(problem, hardware, tiles, effectiveDynamicHint);
+            sk.tileProcessingStrategy  = TileProcessingStrategy::StreamK;
+            sk.workAssignment          = sizeMapping.workAssignment;
+            sk.effectiveWorkAssignment = decided.effectiveWorkAssignment;
+            sk.totalTiles              = tiles;
+            sk.argsVersion             = internalArgsSupport.persistentLoopArgsVersion;
+            sk.reduction               = decided.reduction;
+            sk.smCountTarget           = problem.getParams().smCountTarget();
+            sk.grid                    = decided.grid;
+            sk.selectedGrid            = decided.selectedGrid;
+        }
         else
-            sk.reduction = getSKReduction(problem, hardware);
-        sk.smCountTarget             = problem.getParams().smCountTarget();
-        sk.grid = getPersistentGridImpl(*this,
-                                problem,
-                                hardware,
-                                tiles,
-                                sk.reduction,
-                                sizeMapping.hasHybridAssignment() ? &effectiveDynamic : nullptr,
-                                nullptr, nullptr, &sk.clusterGridClamp, &sk.selectedGrid);
-        // Same reconciliation, same helper, same triple as
-        // requiredWorkspaceSize(). Must run before the workspace-fit fallback
-        // below so that fallback sees the reduction the launch will use.
-        sk.reduction = StreamK::reconcileReduction(sk.reduction, sk.grid, tiles);
+        {
+            // Take the caller's already-resolved sub-mode when offered: resolving it
+            // is not free (see the note in getPersistentGridImpl), and solve() has it.
+            const bool effectiveDynamic = (sizeMapping.hasHybridAssignment())
+                                              ? (effectiveDynamicHint != nullptr
+                                                     ? *effectiveDynamicHint
+                                                     : streamK5EffectiveDynamic(problem, hardware))
+                                              : false;
+
+            sk.tileProcessingStrategy  = TileProcessingStrategy::StreamK;
+            sk.workAssignment          = sizeMapping.workAssignment;
+            sk.effectiveWorkAssignment = sizeMapping.hasDynamicAssignment() || effectiveDynamic
+                                             ? WorkAssignment::DynamicWorkQueue
+                                             : WorkAssignment::StaticGrid;
+            sk.totalTiles              = tiles;
+            sk.argsVersion             = internalArgsSupport.persistentLoopArgsVersion;
+
+            // Pinning SK4 and SK5-resolved-dynamic to tree is a launch-site rule:
+            // requiredWorkspaceSize() always asks getSKReduction() and has no such
+            // special case, so a dynamic-queue launch can be sized for parallel and
+            // then run tree -- see the note there on why that is not a memory-safety
+            // problem.
+            if(sizeMapping.hasDynamicAssignment())
+                sk.reduction = origami::reduction_t::tree;
+            else if(sizeMapping.hasHybridAssignment())
+                sk.reduction = effectiveDynamic ? origami::reduction_t::tree
+                                                : getSKReduction(problem, hardware);
+            else
+                sk.reduction = getSKReduction(problem, hardware);
+            sk.smCountTarget = problem.getParams().smCountTarget();
+            sk.grid          = getPersistentGridImpl(*this,
+                                            problem,
+                                            hardware,
+                                            tiles,
+                                            sk.reduction,
+                                            sizeMapping.hasHybridAssignment() ? &effectiveDynamic
+                                                                                       : nullptr,
+                                            nullptr,
+                                            nullptr,
+                                            &sk.clusterGridClamp,
+                                            &sk.selectedGrid);
+            // Same reconciliation, same helper, same triple as
+            // requiredWorkspaceSize(). Must run before the workspace-fit fallback
+            // below so that fallback sees the reduction the launch will use.
+            sk.reduction = StreamK::reconcileReduction(sk.reduction, sk.grid, tiles);
+        }
 
         const bool streamKDP   = Debug::Instance().useStreamKDataParrallel();
         const bool forceDPOnly = sizeMapping.isPersistentDataParallel();
@@ -6644,10 +6697,13 @@ namespace TensileLite
         //
         // Keep layout-specific scale alignment separate from the reduction
         // checks: a uniform K partition must also preserve the scale indices.
-        std::string streamKUniformSummationOrderObstacle(
-            ContractionSolution const&                solution,
-            ContractionSolution::Problem const&       problem,
-            char const**                              obstacleToken)
+        //
+        // A null problem leaves out its packed free indices, so that only what
+        // the kernel decides is asked (uniformSummationOrderKernelObstacle()).
+        std::string
+            streamKUniformSummationOrderObstacle(ContractionSolution const&          solution,
+                                                 ContractionSolution::Problem const* problem,
+                                                 char const**                        obstacleToken)
         {
             const auto& sizeMapping = solution.sizeMapping;
             const auto& problemType = solution.problemType;
@@ -6680,11 +6736,13 @@ namespace TensileLite
             // dimension 1 selects per-element ones (AsmStoreState.py). This is
             // the expression the file already uses for the same question in
             // projectedPerformance()/calculateDimensionM().
-            if(problem.freeIndicesA().size() > 1 || (sizeMapping.packBatchDims & 0x1))
+            if((problem != nullptr && problem->freeIndicesA().size() > 1)
+               || (sizeMapping.packBatchDims & 0x1))
                 return refuse("PackedC0Index",
                               "a packed C0 index set disables the coordinate-agnostic store "
                               "addressing the StreamK partials path relies on");
-            if(problem.freeIndicesB().size() > 1 || (sizeMapping.packBatchDims & 0x2))
+            if((problem != nullptr && problem->freeIndicesB().size() > 1)
+               || (sizeMapping.packBatchDims & 0x2))
                 return refuse("PackedC1Index",
                               "a packed C1 index set disables the coordinate-agnostic store "
                               "addressing the StreamK partials path relies on");
@@ -6769,6 +6827,13 @@ namespace TensileLite
 
             return {};
         }
+    }
+
+    char const* ContractionSolution::uniformSummationOrderKernelObstacle() const
+    {
+        char const* token = nullptr;
+        return streamKUniformSummationOrderObstacle(*this, nullptr, &token).empty() ? nullptr
+                                                                                    : token;
     }
 
     bool ContractionSolution::uniformSummationOrderSupported(Problem const&  problem,
@@ -6905,8 +6970,8 @@ namespace TensileLite
             // UseInitialStridesCD, packed C0/C1, WaveSplitK, MX scale granule).
             // That helper tags itself, so the token is already set when it
             // objects.
-            const std::string obstacle = streamKUniformSummationOrderObstacle(
-                *this, problem, obstacleToken);
+            const std::string obstacle
+                = streamKUniformSummationOrderObstacle(*this, &problem, obstacleToken);
             if(!obstacle.empty())
                 return obstacle;
 
@@ -7633,6 +7698,98 @@ namespace TensileLite
             return grid;
         }
     } // namespace
+
+    bool hasDefaultPersistentSettings(Hardware const& hardware)
+    {
+        auto const* device = dynamic_cast<hip::HipAMDGPU const*>(&hardware);
+        return device != nullptr && device->analyticalHardware != nullptr
+               && device->persistentFixedGrid <= 0
+               && device->persistentDynamicGrid
+                      == static_cast<int>(origami::grid_selection_t::k_split_aware)
+               && device->persistentMaxCUs <= 0;
+    }
+
+    DefaultPersistentLaunchDebug defaultPersistentLaunchDebug()
+    {
+        Debug const& debug = Debug::Instance();
+        return {.streamK5ForceMode         = debug.streamK5ForceMode(),
+                .printStreamKModeSelection = debug.printStreamKModeSelection(),
+                .printPropertyEvaluation   = debug.printPropertyEvaluation()};
+    }
+
+    bool ContractionSolution::followsDefaultPersistentLaunch() const
+    {
+        // A cluster launch keeps getPersistentGridImpl(): a DataParallel
+        // cluster walks whole tile blocks, and a static Stream-K cluster
+        // rounds its worker grid to whole clusters there.
+        return (sizeMapping.isStreamK() || sizeMapping.isPersistentDataParallel())
+               && !handwrittenCustomKernel()
+               && sizeMapping.clusterDim.x * sizeMapping.clusterDim.y <= 1;
+    }
+
+    origami::config_t ContractionSolution::persistentLaunchConfig() const
+    {
+        return {
+            .mt                = {static_cast<size_t>(sizeMapping.macroTile.x),
+                                  static_cast<size_t>(sizeMapping.macroTile.y),
+                                  static_cast<size_t>(sizeMapping.depthU)},
+            .mi                = {static_cast<size_t>(sizeMapping.matrixInstruction[0]),
+                                  static_cast<size_t>(sizeMapping.matrixInstruction[1]),
+                                  static_cast<size_t>(sizeMapping.matrixInstruction[2])},
+            .occupancy         = std::max(sizeMapping.CUOccupancy, static_cast<int>(1)),
+            .workgroup_mapping = sizeMapping.workGroupMapping,
+            .workspace_size_per_elem_c
+            = sizeMapping.isPersistentDataParallel()
+                  ? static_cast<size_t>(DataTypeInfo::Get(problemType.computeType).elementSize)
+                  : sizeMapping.workspaceSizePerElemC,
+        };
+    }
+
+    bool ContractionSolution::decidesDefaultPersistentLaunch(Problem const&  problem,
+                                                             Hardware const& hardware) const
+    {
+        return !problem.getParams().uniformSummationOrder() && followsDefaultPersistentLaunch()
+               && hasDefaultPersistentSettings(hardware);
+    }
+
+    DefaultPersistentLaunch
+        ContractionSolution::resolveDefaultLaunch(Problem const&  problem,
+                                                  Hardware const& hardware,
+                                                  size_t          tiles,
+                                                  bool const*     effectiveDynamicHint) const
+    {
+        origami::config_t const  config = persistentLaunchConfig();
+        origami::problem_t const shape  = origamiShape(problem, 0);
+
+        DefaultPersistentLaunchInputs in;
+        in.m                = shape.size.m;
+        in.n                = shape.size.n;
+        in.k                = shape.size.k;
+        in.batch            = shape.batch;
+        in.transA           = problem.transA();
+        in.transB           = problem.transB();
+        in.aType            = problem.a().dataType();
+        in.bType            = problem.b().dataType();
+        in.computeInputType = problem.computeInputTypeA();
+        in.tiles            = tiles;
+        in.itersPerTile     = problem.getItersPerTile(sizeMapping);
+        in.workspaceSize    = problem.workspaceSize();
+        in.smCountTarget    = problem.getParams().smCountTarget();
+        in.schedulingMode   = problem.getParams().streamKTileSchedulingMode();
+        in.kernel           = &config;
+        in.threads          = sizeMapping.workGroupSize.x * sizeMapping.workGroupSize.y
+                     * sizeMapping.workGroupSize.z;
+        in.occupancy        = sizeMapping.CUOccupancy;
+        in.workAssignment   = sizeMapping.workAssignment;
+        in.streamK          = sizeMapping.isStreamK();
+        in.atomic           = sizeMapping.streamKAtomic != 0;
+        in.kernelName       = kernelName.c_str();
+        in.hardware         = analyticalHardwareOf(hardware);
+        in.computeUnits     = dynamic_cast<AMDGPU const&>(hardware).computeUnitCount;
+        in.effectiveDynamic = effectiveDynamicHint;
+        in.debug            = defaultPersistentLaunchDebug();
+        return TensileLite::resolveDefaultPersistentLaunch(in);
+    }
 
     size_t ContractionSolution::getSKGrid(Problem const&       problem,
                                           Hardware const&      hardware,

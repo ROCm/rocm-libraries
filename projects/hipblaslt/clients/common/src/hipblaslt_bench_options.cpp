@@ -123,4 +123,16 @@ namespace hipblaslt_bench_options
         static int32_t v = 0;
         return v;
     }
+
+    float& preheat_ms()
+    {
+        static float v = 0.0f;
+        return v;
+    }
+
+    int32_t& candidate_passes()
+    {
+        static int32_t v = 1;
+        return v;
+    }
 }

@@ -1,0 +1,7 @@
+# Python 3.10 - 3.13. The tilewright engine module is built from this
+# repository: pip install shared/tilewright/python
+numpy>=1.26,<2.3
+pyyaml>=6.0,<7
+msgpack>=1.0,<2
+torch>=2.3,<3
+lightgbm>=4.0,<5

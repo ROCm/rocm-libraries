@@ -27,7 +27,9 @@
 #pragma once
 
 #include <array>
+#include <cassert>
 #include <cstddef>
+#include <cstdint>
 #include <functional>
 #include <iomanip>
 #include <iostream>
@@ -106,6 +108,36 @@ namespace TensileLite
             virtual std::string description() const = 0;
 
             virtual std::string distanceType() const = 0;
+
+            /// Whether the table returns only an entry whose key equals the
+            /// object's (Equality distance).
+            virtual bool exactKeysOnly() const
+            {
+                return false;
+            }
+
+            /// For a table that returns only exact key matches: whether no entry
+            /// has the key of `object`, so that it returns nothing for it.
+            ///
+            /// Precondition: every key property is defined for `object`: its
+            /// evaluation neither throws nor reads past the object's indices.
+            /// ExactLogicLibrary::findTopRows asks (through
+            /// SolutionLibrary::returnsNothing) before the predicates of the rows
+            /// above the table have accepted the object, so this must hold for
+            /// every object that reaches the table, not only for those the
+            /// predicates accept. It holds for the Equality tables of
+            /// TensileCreateLibrary's libraries: their keys are FreeSizeA(0),
+            /// FreeSizeB(0), BoundSize(0) and BatchSize(0), and they lie below
+            /// the ProblemMapLibrary that dispatches on the OperationIdentifier,
+            /// so a problem that reaches one has the table's operation: at
+            /// least one free index of A and of B, one bound index and one
+            /// batch index. A table keyed by a property that some object
+            /// reaching it lacks (an index beyond its tensors) must not answer
+            /// exactKeysOnly().
+            virtual bool lacksKey(Object const& object) const
+            {
+                return false;
+            }
 
             Properties properties;
         };
@@ -299,6 +331,105 @@ namespace TensileLite
             }
 
             std::size_t numPoints{};
+        };
+
+        /**
+         * A blocked Bloom filter of the keys of a table: mayHold() is false
+         * only for a key that no entry of the table has, and reads one cache
+         * line to say so. Each key sets two bits of one 512-bit block that its
+         * hash chooses; the filter has at least 16 bits per entry. It also
+         * keeps a fingerprint of the keys that does not depend on their order,
+         * so that madeFrom() can tell a table whose keys changed after the
+         * filter was made, even with as many entries.
+         */
+        template <typename Key>
+        class KeyFilter
+        {
+        public:
+            /// Holds the keys of `entries` (elements with a `key`); answers for
+            /// a table of as many entries.
+            template <typename Entries>
+            void build(Entries const& entries)
+            {
+                size_t blocks = 1;
+                while(blocks * BlockBits < entries.size() * BitsPerEntry)
+                    blocks *= 2;
+                m_blocks.assign(blocks, Block{});
+                for(auto const& entry : entries)
+                {
+                    std::uint64_t const h     = hash(entry.key);
+                    Block&              block = m_blocks[(h >> 20) & (blocks - 1)];
+                    block.words[(h & 511) >> 6] |= std::uint64_t(1) << (h & 63);
+                    block.words[((h >> 9) & 511) >> 6] |= std::uint64_t(1) << ((h >> 9) & 63);
+                }
+                m_entries     = entries.size();
+                m_fingerprint = fingerprint(entries);
+            }
+
+            /// Whether a table of `entries` entries may have `key`: false only
+            /// when the filter holds the keys of such a table and not `key`.
+            bool mayHold(Key const& key, size_t entries) const noexcept
+            {
+                if(m_blocks.empty() || entries != m_entries)
+                    return true;
+                std::uint64_t const h     = hash(key);
+                Block const&        block = m_blocks[(h >> 20) & (m_blocks.size() - 1)];
+                return ((block.words[(h & 511) >> 6] >> (h & 63)) & 1) != 0
+                       && ((block.words[((h >> 9) & 511) >> 6] >> ((h >> 9) & 63)) & 1) != 0;
+            }
+
+            bool built() const noexcept
+            {
+                return !m_blocks.empty();
+            }
+
+            /// Whether the filter holds the keys of `entries`: it was made from
+            /// as many entries with the same keys, in any order. It reads every
+            /// key; mayHold() compares the number of entries only.
+            template <typename Entries>
+            bool madeFrom(Entries const& entries) const noexcept
+            {
+                return built() && entries.size() == m_entries
+                       && fingerprint(entries) == m_fingerprint;
+            }
+
+        private:
+            static constexpr size_t BlockBits    = 512;
+            static constexpr size_t BitsPerEntry = 16;
+
+            struct alignas(64) Block
+            {
+                std::uint64_t words[BlockBits / 64] = {};
+            };
+
+            static std::uint64_t hash(Key const& key) noexcept
+            {
+                std::uint64_t h = 0x9E3779B97F4A7C15ull;
+                for(auto const value : key)
+                {
+                    h ^= static_cast<std::uint64_t>(value);
+                    h *= 0xBF58476D1CE4E5B9ull;
+                    h ^= h >> 31;
+                }
+                h *= 0x94D049BB133111EBull;
+                return h ^ (h >> 29);
+            }
+
+            // The sum of the keys' hashes: the same for the same keys in any
+            // order, and, unlike an exclusive or, not cancelled by a repeated
+            // key.
+            template <typename Entries>
+            static std::uint64_t fingerprint(Entries const& entries) noexcept
+            {
+                std::uint64_t sum = 0;
+                for(auto const& entry : entries)
+                    sum += hash(entry.key);
+                return sum;
+            }
+
+            std::vector<Block> m_blocks;
+            size_t             m_entries     = 0;
+            std::uint64_t      m_fingerprint = 0;
         };
 
         /**
@@ -822,6 +953,44 @@ namespace TensileLite
                     solutions.push_back(solution);
                 return solutions;
             }
+
+            virtual bool exactKeysOnly() const
+            {
+                return true;
+            }
+
+            /// The lookup of findBestKeyMatch: true when it returns nullValue
+            /// without calling the transform. Requires what
+            /// MatchingTable::lacksKey requires of `object`. A key that
+            /// keyFilter does not hold is in no entry and needs no search.
+            virtual bool lacksKey(Object const& object) const
+            {
+                Key const key = ProblemKey::keyForProblem<Key, Object>(object, this->properties);
+                if(!keyFilter.mayHold(key, table.size()))
+                {
+                    // Only a filter made from other keys, as many as the
+                    // table's, can turn away a key the table holds.
+                    assert(keyFilter.madeFrom(table));
+                    return true;
+                }
+                auto comp = [](Entry const& e, Key const& key) { return e.key < key; };
+                auto iter = std::lower_bound(table.begin(), table.end(), key, comp);
+                return iter == table.end() || !(iter->key == key);
+            }
+
+            /// Makes keyFilter hold the keys of the table. Deserialization does
+            /// so once the table is sorted. A table whose keys change afterwards
+            /// must make it again: a filter answers for a table of as many
+            /// entries as it was made from, and with any other number lets
+            /// every key through to the search. In builds with assertions,
+            /// lacksKey() checks that the filter holds the table's keys
+            /// (KeyFilter::madeFrom()) whenever the filter turns a key away.
+            void buildKeyFilter()
+            {
+                keyFilter.build(table);
+            }
+
+            KeyFilter<Key> keyFilter;
         };
 
         /**

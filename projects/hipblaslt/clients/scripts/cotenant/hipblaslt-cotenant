@@ -51,6 +51,29 @@ def probe_cus(env: dict[str, str]) -> int | None:
     return None
 
 
+def probe_rocr_devices(env: dict[str, str]) -> str | None:
+    """ROCR_VISIBLE_DEVICES that makes rocminfo's first GPU the first device
+    HIP_VISIBLE_DEVICES selects, or None to probe with the environment as it is.
+
+    HIP_VISIBLE_DEVICES holds ordinals among the devices ROCR_VISIBLE_DEVICES
+    exposes, so an ordinal names that list's entry when the list is set.
+    """
+    hip_visible = env.get("HIP_VISIBLE_DEVICES")
+    if hip_visible is None:
+        return None
+    first = hip_visible.split(",")[0].strip()
+    rocr_visible = env.get("ROCR_VISIBLE_DEVICES")
+    if rocr_visible is None or not first.isdigit():
+        return first
+    exposed = [d.strip() for d in rocr_visible.split(",") if d.strip()]
+    if int(first) >= len(exposed):
+        sys.exit(
+            f"ERROR: HIP_VISIBLE_DEVICES={hip_visible} selects device {first}, but "
+            f"ROCR_VISIBLE_DEVICES={rocr_visible} exposes {len(exposed)} device(s)."
+        )
+    return exposed[int(first)]
+
+
 def resolve_binary(explicit: str | None) -> Path:
     """Locate the cotenant kernel binary: --binary, else the one beside this script."""
     path = Path(explicit) if explicit else KERNEL_BIN
@@ -199,9 +222,9 @@ def main() -> int:
     # will actually use (HIP_VISIBLE_DEVICES, from --device or the environment)
     # so the CU probe targets that GPU on heterogeneous multi-GPU hosts.
     probe_env = env.copy()
-    hip_visible = env.get("HIP_VISIBLE_DEVICES")
-    if hip_visible is not None:
-        probe_env["ROCR_VISIBLE_DEVICES"] = hip_visible
+    probe_rocr = probe_rocr_devices(env)
+    if probe_rocr is not None:
+        probe_env["ROCR_VISIBLE_DEVICES"] = probe_rocr
     total_cus = probe_cus(probe_env)
 
     if total_cus is None:

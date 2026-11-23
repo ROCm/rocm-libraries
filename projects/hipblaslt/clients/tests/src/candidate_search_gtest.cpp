@@ -63,6 +63,7 @@ namespace
         std::vector<bool>                    eligible; // measured's answers, empty for all yes
         std::function<bool()>                should_stop;
         std::function<void(size_t, int64_t)> on_launch;
+        std::vector<double>                  measured_us; // each measured()'s median
 
         // The candidate whose cold or timed launches the clock cannot time: the first
         // read after them fails.
@@ -110,8 +111,9 @@ namespace
                     .skipped(
                         [&](size_t sol, double, double) { log.push_back(entry("skipped", sol)); })
                     .measuring([&](size_t sol) { log.push_back(entry("measuring", sol)); })
-                    .measured([&](size_t sol, hipblaslt_bench::TimingResult&) {
+                    .measured([&](size_t sol, hipblaslt_bench::TimingResult& timing) {
                         log.push_back(entry("measured", sol));
+                        measured_us.push_back(timing.median_us);
                         return eligible.empty() || eligible[sol];
                     })
                     .should_stop([&] { return should_stop && should_stop(); }),
@@ -192,6 +194,80 @@ TEST(CandidateSearch_pre_checkin, SkipSlowDropsOnlyACandidateWithSlowColdLaunche
     EXPECT_EQ(host.count(entry("measuring", 1)), 0);
     EXPECT_EQ(host.count(entry("measured", 0)), 1);
     EXPECT_EQ(host.count(entry("measured", 2)), 1);
+}
+
+// With the screen prepass, every candidate's cold launches are timed, after one untimed
+// launch, before any candidate is timed, and each is compared with the best cold time of
+// them all: the first candidate's slow cold launches drop it although nothing faster had
+// been seen when it was screened without the prepass.
+TEST(CandidateSearch_pre_checkin, ScreenPrepassComparesEveryCandidateBeforeTimingAny)
+{
+    hipblaslt_bench::SearchConfig search;
+    search.cold_calls      = 2;
+    search.skip_slow_ratio = 0.5f;
+
+    HostSearch inOrder;
+    inOrder.cold_us   = {800, 200, 240};
+    inOrder.launch_us = {50, 300, 200};
+    EXPECT_EQ(inOrder.run(search, cpu_timing(2)).best, 0u)
+        << "without the prepass the first candidate is screened against itself";
+
+    search.screen_prepass = true;
+    HostSearch host;
+    host.cold_us   = {800, 200, 240};
+    host.launch_us = {50, 300, 200};
+
+    const auto result = host.run(search, cpu_timing(2));
+    EXPECT_FALSE(result.aborted);
+    EXPECT_EQ(result.best, 2u);
+
+    std::vector<std::string> expected;
+    for(size_t sol = 0; sol < 3; sol++)
+    {
+        expected.push_back(entry("prepare", sol));
+        for(int64_t i = 0; i < 3; i++)
+            expected.push_back(entry("cold", sol, i));
+    }
+    expected.push_back(entry("skipped", 0));
+    for(size_t sol = 1; sol < 3; sol++)
+    {
+        expected.push_back(entry("prepare", sol));
+        expected.push_back(entry("cold", sol, 0));
+        expected.push_back(entry("cold", sol, 1));
+        expected.push_back(entry("measuring", sol));
+        expected.push_back(entry("launch", sol, 0));
+        expected.push_back(entry("launch", sol, 1));
+        expected.push_back(entry("measured", sol));
+    }
+    EXPECT_EQ(host.log, expected);
+}
+
+// The screen prepass leaves each candidate's first cold launch untimed: a candidate whose
+// first launch is slow, as when its code object loads, but whose other cold launches are
+// as fast as the others' stays in the screen and can win.
+TEST(CandidateSearch_pre_checkin, ScreenPrepassLeavesTheFirstColdLaunchUntimed)
+{
+    hipblaslt_bench::SearchConfig search;
+    search.cold_calls      = 2;
+    search.skip_slow_ratio = 0.5f;
+    search.screen_prepass  = true;
+
+    HostSearch host;
+    host.cold_us   = {100, 100, 100};
+    host.launch_us = {50, 300, 200};
+    bool loaded    = false;
+    host.on_cold   = [&](size_t sol, int32_t) {
+        if(sol == 0 && !loaded)
+        {
+            loaded = true;
+            FakeClock::now_us += 100000.0; // the code object loads
+        }
+    };
+
+    const auto result = host.run(search, cpu_timing(2));
+    EXPECT_FALSE(result.aborted);
+    EXPECT_EQ(host.count(entry("skipped", 0)), 0);
+    EXPECT_EQ(result.best, 0u);
 }
 
 // A fatal failure while a candidate is prepared ends the search there.
@@ -445,4 +521,242 @@ TEST(CandidateSearch_pre_checkin, ShouldStopEndsTheSearchBetweenCandidates)
     EXPECT_TRUE(result.stopped);
     EXPECT_EQ(result.best, 1u);
     EXPECT_EQ(host.count(entry("prepare", 2)), 0);
+}
+
+// With a preheat time, the first candidate runs back to back, untimed, after it is
+// prepared and before its cold launches, until the time has passed; no other candidate
+// is preheated. The first launch is not counted in the time, the next is timed alone,
+// and the batch after it is sized from that launch to end the preheat.
+TEST(CandidateSearch_pre_checkin, PreheatRunsTheFirstCandidateBeforeItsColdLaunches)
+{
+    HostSearch host;
+    host.launch_us = {300, 100};
+
+    hipblaslt_bench::SearchConfig search;
+    search.cold_calls = 1;
+    search.preheat_ms = 1.0f;
+
+    double preheat_end_us = -1.0;
+    host.on_cold          = [&](size_t sol, int32_t i) {
+        if(sol == 0 && i == 0)
+            preheat_end_us = FakeClock::now_us;
+    };
+
+    const auto result = host.run(search, cpu_timing(2));
+    EXPECT_EQ(result.preheat_launches, 5);
+    EXPECT_EQ(result.best, 1u);
+    EXPECT_EQ(preheat_end_us, 1500.0) << "an uncounted launch, one launch, then three to pass "
+                                         "1000 us";
+
+    const std::vector<std::string> expected = {entry("prepare", 0),
+                                               entry("launch", 0, 0),
+                                               entry("launch", 0, 1),
+                                               entry("launch", 0, 2),
+                                               entry("launch", 0, 3),
+                                               entry("launch", 0, 4),
+                                               entry("cold", 0, 0),
+                                               entry("measuring", 0),
+                                               entry("launch", 0, 0),
+                                               entry("launch", 0, 1),
+                                               entry("measured", 0),
+                                               entry("prepare", 1),
+                                               entry("cold", 1, 0),
+                                               entry("measuring", 1),
+                                               entry("launch", 1, 0),
+                                               entry("launch", 1, 1),
+                                               entry("measured", 1)};
+    EXPECT_EQ(host.log, expected);
+}
+
+// The preheat goes to the first candidate that prepares, and the timings are those
+// without a preheat.
+TEST(CandidateSearch_pre_checkin, PreheatSkipsACandidateThatDoesNotPrepare)
+{
+    HostSearch host;
+    host.launch_us = {300, 200, 100};
+    host.runnable  = {false, true, true};
+
+    hipblaslt_bench::SearchConfig search;
+    search.preheat_ms = 0.5f;
+
+    const auto result = host.run(search, cpu_timing(2));
+    EXPECT_EQ(result.preheat_launches, 4) << "an uncounted launch, one, then two to pass 500 us";
+    EXPECT_EQ(result.best, 2u);
+    EXPECT_EQ(result.best_timing.median_us, 100.0);
+    EXPECT_EQ(host.count(entry("launch", 0, 0)), 0);
+    EXPECT_EQ(host.count(entry("launch", 1, 3)), 1) << "preheat launch 3 of candidate 1";
+    EXPECT_EQ(host.count(entry("launch", 2, 3)), 0) << "candidate 2 is not preheated";
+}
+
+// Without a preheat time nothing runs before the cold launches.
+TEST(CandidateSearch_pre_checkin, NoPreheatByDefault)
+{
+    HostSearch host;
+    host.launch_us = {300};
+
+    hipblaslt_bench::SearchConfig search;
+    search.cold_calls = 1;
+
+    const auto result = host.run(search, cpu_timing(1));
+    EXPECT_EQ(result.preheat_launches, 0);
+    const std::vector<std::string> expected = {entry("prepare", 0),
+                                               entry("cold", 0, 0),
+                                               entry("measuring", 0),
+                                               entry("launch", 0, 0),
+                                               entry("measured", 0)};
+    EXPECT_EQ(host.log, expected);
+}
+
+// A failure the preheat's launches report ends the search there.
+TEST(CandidateSearch_pre_checkin, AFailureDuringThePreheatEndsTheSearch)
+{
+    HostSearch host;
+    host.launch_us = {100, 50};
+    bool failed    = false;
+    host.on_launch = [&](size_t, int64_t i) {
+        if(i == 1)
+            failed = true;
+    };
+    host.should_abort = [&] { return failed; };
+
+    hipblaslt_bench::SearchConfig search;
+    search.cold_calls = 1;
+    search.preheat_ms = 1.0f;
+
+    const auto result = host.run(search, cpu_timing(1));
+    EXPECT_TRUE(result.aborted);
+    EXPECT_EQ(host.count(entry("cold", 0, 0)), 0);
+    EXPECT_EQ(host.count(entry("prepare", 1)), 0);
+}
+
+// With two passes, every candidate is prepared, given its cold launches and timed in the
+// reversed order, then again in the listed order, and measured once, after its second
+// timing, with the median of the two.
+TEST(CandidateSearch_pre_checkin, TwoPassesTimeEachCandidateReversedThenInOrder)
+{
+    HostSearch host;
+    host.launch_us = {300, 100, 200};
+
+    hipblaslt_bench::SearchConfig search;
+    search.cold_calls = 1;
+    search.passes     = 2;
+
+    const auto result = host.run(search, cpu_timing(2));
+    EXPECT_FALSE(result.aborted);
+    EXPECT_EQ(result.best, 1u);
+    EXPECT_EQ(result.best_timing.median_us, 100.0);
+    EXPECT_EQ(result.best_timing.hot_iters, 4) << "the launches of both passes";
+    EXPECT_EQ(result.best_timing.samples, 2);
+
+    std::vector<std::string> expected;
+    for(size_t sol : {size_t(2), size_t(1), size_t(0)})
+    {
+        expected.push_back(entry("prepare", sol));
+        expected.push_back(entry("cold", sol, 0));
+        expected.push_back(entry("launch", sol, 0));
+        expected.push_back(entry("launch", sol, 1));
+    }
+    for(size_t sol = 0; sol < 3; sol++)
+    {
+        expected.push_back(entry("prepare", sol));
+        expected.push_back(entry("cold", sol, 0));
+        expected.push_back(entry("measuring", sol));
+        expected.push_back(entry("launch", sol, 0));
+        expected.push_back(entry("launch", sol, 1));
+        expected.push_back(entry("measured", sol));
+    }
+    EXPECT_EQ(host.log, expected);
+}
+
+// A candidate's time is the median of its passes: one that reads fast in one pass and
+// slow in the other loses to one that reads a little slower in both.
+TEST(CandidateSearch_pre_checkin, PassesReportTheMedianOfTheirTimings)
+{
+    HostSearch host;
+    host.launch_us    = {100, 180};
+    int prepares_of_0 = 0;
+    host.on_prepare   = [&](size_t sol) {
+        if(sol == 0 && ++prepares_of_0 == 2)
+            host.launch_us[0] = 300;
+    };
+
+    hipblaslt_bench::SearchConfig search;
+    search.passes = 2;
+
+    const auto result = host.run(search, cpu_timing(1));
+    EXPECT_EQ(result.best, 1u);
+    EXPECT_EQ(result.best_timing.median_us, 180.0);
+    const std::vector<double> expected = {200.0, 180.0};
+    EXPECT_EQ(host.measured_us, expected);
+}
+
+// The passes alternate between the reversed and the listed order and end in the listed
+// order; each candidate is measured once.
+TEST(CandidateSearch_pre_checkin, PassesAlternateTheOrderAndEndInTheListedOrder)
+{
+    HostSearch host;
+    host.launch_us = {100, 200};
+
+    hipblaslt_bench::SearchConfig search;
+    search.passes = 3;
+
+    const auto result = host.run(search, cpu_timing(1));
+    EXPECT_EQ(result.best, 0u);
+    std::vector<std::string> prepares;
+    for(const auto& e : host.log)
+        if(e.rfind("prepare", 0) == 0)
+            prepares.push_back(e);
+    const std::vector<std::string> expected = {entry("prepare", 0),
+                                               entry("prepare", 1),
+                                               entry("prepare", 1),
+                                               entry("prepare", 0),
+                                               entry("prepare", 0),
+                                               entry("prepare", 1)};
+    EXPECT_EQ(prepares, expected);
+    EXPECT_EQ(host.count(entry("measured", 0)), 1);
+    EXPECT_EQ(host.count(entry("measured", 1)), 1);
+}
+
+// With more than one pass, the skip screen runs as the prepass, once, before the passes,
+// even when the prepass is not asked for; the last pass reports the candidates it drops.
+TEST(CandidateSearch_pre_checkin, PassesScreenOnceBeforeThePasses)
+{
+    HostSearch host;
+    host.cold_us   = {200, 800, 240};
+    host.launch_us = {300, 50, 200};
+
+    hipblaslt_bench::SearchConfig search;
+    search.cold_calls      = 1;
+    search.skip_slow_ratio = 0.5f;
+    search.passes          = 2;
+
+    const auto result = host.run(search, cpu_timing(1));
+    EXPECT_EQ(result.best, 2u) << "the fastest launch belongs to the skipped candidate";
+    EXPECT_EQ(host.count(entry("skipped", 1)), 1);
+    EXPECT_EQ(host.count(entry("measuring", 1)), 0);
+    EXPECT_EQ(host.count(entry("prepare", 1)), 1) << "prepared by the prepass alone";
+    EXPECT_EQ(host.count(entry("prepare", 0)), 3) << "the prepass and two passes";
+    const auto first_launch = std::find(host.log.begin(), host.log.end(), entry("launch", 2, 0));
+    const auto last_screen  = std::find(host.log.begin(), host.log.end(), entry("cold", 2, 1));
+    EXPECT_LT(last_screen - host.log.begin(), first_launch - host.log.begin())
+        << "every cold launch is screened before any candidate is timed";
+}
+
+// A candidate a pass before the last cannot time is passed over in the passes after it:
+// it is neither prepared again nor measured.
+TEST(CandidateSearch_pre_checkin, ACandidateAPassCannotTimeIsPassedOver)
+{
+    HostSearch host;
+    host.launch_us      = {100, 200};
+    host.untimed_launch = 0;
+
+    hipblaslt_bench::SearchConfig search;
+    search.passes = 2;
+
+    const auto result = host.run(search, cpu_timing(1));
+    EXPECT_FALSE(result.aborted);
+    EXPECT_EQ(result.best, 1u);
+    EXPECT_EQ(host.count(entry("prepare", 0)), 1);
+    EXPECT_EQ(host.count(entry("measured", 0)), 0);
+    EXPECT_EQ(host.count(entry("measured", 1)), 1);
 }

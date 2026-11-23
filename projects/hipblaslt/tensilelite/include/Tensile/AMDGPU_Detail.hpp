@@ -31,6 +31,26 @@
 
 #include <tensilelitehost/export.h>
 
+namespace TensileLite
+{
+    template <>
+    struct CacheKey<AMDGPU>
+    {
+        enum
+        {
+            implemented = true
+        };
+
+        // The fields AMDGPU::operator== compares.
+        static void append(std::string& key, AMDGPU const& gpu)
+        {
+            auto const chipId = gpu.pciChipId();
+            AppendCacheKeys(
+                key, gpu.processor, gpu.computeUnitCount, chipId.has_value(), chipId.value_or(0));
+        }
+    };
+} // namespace TensileLite
+
 namespace std
 {
     template <>

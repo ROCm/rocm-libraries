@@ -1,0 +1,34 @@
+BasedOnStyle:  Google
+BinPackArguments: false
+BinPackParameters: false
+ColumnLimit:     100
+IndentWidth:     2
+BreakConstructorInitializers: BeforeComma
+IncludeBlocks: Preserve
+
+
+AlignAfterOpenBracket: Align
+AlignConsecutiveAssignments: true
+AlignOperands: true
+AlignTrailingComments: true
+
+AllowAllArgumentsOnNextLine: true
+AllowAllParametersOfDeclarationOnNextLine : false
+AllowShortBlocksOnASingleLine : true
+AllowShortCaseLabelsOnASingleLine: true
+AllowShortFunctionsOnASingleLine : All
+AllowShortIfStatementsOnASingleLine: true
+AllowShortLambdasOnASingleLine : All
+AllowShortLoopsOnASingleLine: true
+AlwaysBreakAfterDefinitionReturnType: None
+AlwaysBreakBeforeMultilineStrings : false
+AlwaysBreakTemplateDeclarations: Yes
+
+BreakBeforeBinaryOperators: None
+Cpp11BracedListStyle: true
+IndentWrappedFunctionNames : false
+KeepEmptyLinesAtTheStartOfBlocks : false
+PointerAlignment: Left
+ReflowComments : true
+ExperimentalAutoDetectBinPacking: false
+BreakBeforeBraces: Attach

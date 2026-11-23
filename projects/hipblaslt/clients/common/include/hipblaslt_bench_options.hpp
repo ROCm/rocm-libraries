@@ -40,6 +40,13 @@ struct Arguments;
 //
 // post_bench_verify_iters is the number of untimed relaunches of each solution after timing
 // (0 turns them off); every relaunch must give the same D, bit for bit, as the first launch.
+//
+// preheat_ms is how long the first solution of each problem runs back to back, untimed, after
+// the inputs are generated and before the first solution is timed (0 turns it off).
+//
+// candidate_passes is how many times each solution of a problem is timed, in passes that
+// take the solutions in the reversed and the listed order by turns and end in the listed
+// order; each solution reports the median of its passes (1 times each once).
 namespace hipblaslt_bench_options
 {
     int32_t&     cotenant_cus();
@@ -61,4 +68,6 @@ namespace hipblaslt_bench_options
     // hipblaslt_bench_options.cpp without the headers required by Arguments.
     void         apply_to(Arguments& arg);
     int32_t&     post_bench_verify_iters();
+    float&       preheat_ms();
+    int32_t&     candidate_passes();
 }
