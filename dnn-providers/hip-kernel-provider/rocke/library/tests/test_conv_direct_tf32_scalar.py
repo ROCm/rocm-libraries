@@ -371,7 +371,11 @@ class TestWgradBuild(unittest.TestCase):
 
 def _launch(spec, build, arch: str, direction: str, inputs, output_shape):
     """Compile ``spec`` and launch it on the fp32 host ``inputs`` (ABI order)
-    with a zeroed output (wgrad accumulates into it); return the output."""
+    with a zeroed output (wgrad accumulates into it); return the output.
+
+    The element type is fp32 for every case here (TF32 is fp32 storage). It
+    is named rather than read off ``spec.problem``: the column-streamed spec
+    carries its own ``dtype`` and leaves its problem's at the fp16 default."""
     from rocke import compile_kernel
 
     art = compile_kernel(build(spec, arch=arch), arch=arch)
@@ -384,6 +388,7 @@ def _launch(spec, build, arch: str, direction: str, inputs, output_shape):
         grid=grid,
         block=block,
         direction=direction,
+        dtype="fp32",
     )
 
 
