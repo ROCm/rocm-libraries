@@ -1262,6 +1262,36 @@ namespace
         }
     }
 
+    // Runs stage while the handle stream is being captured in global mode, checks
+    // that the capture is still active after it, and returns its status.
+    template <typename F>
+    rocsparse_status during_handle_stream_capture(rocsparse_handle handle, F&& stage)
+    {
+        rocsparse_status st    = rocsparse_status_internal_error;
+        hipStream_t      saved = nullptr;
+        EXPECT_EQ(rocsparse_get_stream(handle, &saved), rocsparse_status_success);
+        hipStream_t capture = nullptr;
+        EXPECT_EQ(hipStreamCreate(&capture), hipSuccess);
+        EXPECT_EQ(rocsparse_set_stream(handle, capture), rocsparse_status_success);
+        EXPECT_EQ(hipDeviceSynchronize(), hipSuccess);
+
+        EXPECT_EQ(hipStreamBeginCapture(capture, hipStreamCaptureModeGlobal), hipSuccess);
+        EXPECT_NO_THROW(st = stage());
+        hipStreamCaptureStatus status = hipStreamCaptureStatusNone;
+        EXPECT_EQ(hipStreamIsCapturing(capture, &status), hipSuccess);
+        EXPECT_EQ(status, hipStreamCaptureStatusActive) << "the capture was invalidated";
+        hipGraph_t graph = nullptr;
+        EXPECT_EQ(hipStreamEndCapture(capture, &graph), hipSuccess);
+        if(graph != nullptr)
+        {
+            EXPECT_EQ(hipGraphDestroy(graph), hipSuccess);
+        }
+
+        EXPECT_EQ(rocsparse_set_stream(handle, saved), rocsparse_status_success);
+        EXPECT_EQ(hipStreamDestroy(capture), hipSuccess);
+        return st;
+    }
+
     // The first preprocess after set_pointers frees the analysis of the previous
     // arrays. For CSR, CSC and BSR the free synchronizes the device; for COO only
     // the atomic analysis of a non-transposed matrix that replaces it does. While
@@ -1300,30 +1330,11 @@ namespace
             buffer.reset(new device_vector<char>(std::max<size_t>(bytes, 1)));
         }
 
-        hipStream_t saved = nullptr;
-        ASSERT_EQ(rocsparse_get_stream(handle, &saved), rocsparse_status_success);
-        hipStream_t capture = nullptr;
-        ASSERT_EQ(hipStreamCreate(&capture), hipSuccess);
-        ASSERT_EQ(rocsparse_set_stream(handle, capture), rocsparse_status_success);
-        ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
-
-        ASSERT_EQ(hipStreamBeginCapture(capture, hipStreamCaptureModeGlobal), hipSuccess);
-        rocsparse_status st = rocsparse_status_internal_error;
-        EXPECT_NO_THROW(st = c.v2 ? s.analysis_stage(bytes, bytes ? buffer->ptr : nullptr)
-                                  : s.preprocess_stage());
+        const rocsparse_status st = during_handle_stream_capture(handle, [&] {
+            return c.v2 ? s.analysis_stage(bytes, bytes ? buffer->ptr : nullptr)
+                        : s.preprocess_stage();
+        });
         EXPECT_EQ(st, expected) << "preprocess during the capture";
-        hipStreamCaptureStatus status = hipStreamCaptureStatusNone;
-        EXPECT_EQ(hipStreamIsCapturing(capture, &status), hipSuccess);
-        EXPECT_EQ(status, hipStreamCaptureStatusActive);
-        hipGraph_t graph = nullptr;
-        EXPECT_EQ(hipStreamEndCapture(capture, &graph), hipSuccess);
-        if(graph != nullptr)
-        {
-            EXPECT_EQ(hipGraphDestroy(graph), hipSuccess);
-        }
-
-        EXPECT_EQ(rocsparse_set_stream(handle, saved), rocsparse_status_success);
-        EXPECT_EQ(hipStreamDestroy(capture), hipSuccess);
         ASSERT_FALSE(::testing::Test::HasFailure());
 
         if(expected != rocsparse_status_success)
@@ -1430,6 +1441,55 @@ namespace
         EXPECT_EQ(rocsparse_set_stream(handle, saved), rocsparse_status_success);
     }
 
+    // The counterpart of values_only: rocsparse_spmat_set_values replaces only the
+    // values and keeps the analysis. The v2 compute stage still succeeds, and the
+    // v1 preprocess stage has nothing to free, so it succeeds while the handle
+    // stream is being captured, where it returns invalid_value after set_pointers.
+    template <typename T>
+    void set_values_keeps_analysis(rocsparse_handle handle, fmt f, const config& c)
+    {
+        SCOPED_TRACE(::testing::Message()
+                     << fmt_name(f) << " alg=" << c.alg << " trans=" << c.trans << " v2=" << c.v2);
+
+        const scenario<T, int32_t> sc = make_scenario<T, int32_t>(f, 0);
+        device_problem<T, int32_t> d1(sc.p1), d3(sc.p3);
+
+        spmat_guard mat;
+        create(mat, sc.p1, d1);
+        ASSERT_FALSE(::testing::Test::HasFatalFailure());
+        session<T> s(handle, c, mat.d, sc.p1.rows, sc.p1.cols);
+        s.preprocess();
+        ASSERT_FALSE(::testing::Test::HasFatalFailure());
+        ASSERT_EQ(s.compute(), rocsparse_status_success);
+        EXPECT_TRUE(expect_near(s.want(sc.p1), s.y(), "initial product"));
+
+        ASSERT_EQ(rocsparse_spmat_set_values(mat.d, d3.val.ptr), rocsparse_status_success);
+        if(!c.v2)
+        {
+            const rocsparse_status st
+                = during_handle_stream_capture(handle, [&] { return s.preprocess_stage(); });
+            EXPECT_EQ(st, rocsparse_status_success) << "preprocess during the capture";
+            ASSERT_FALSE(::testing::Test::HasFailure());
+        }
+        ASSERT_EQ(s.compute(), rocsparse_status_success);
+        EXPECT_TRUE(expect_near(s.want(sc.p3), s.y(), "product after set_values"));
+    }
+
+    TEST_F(L2DeviceSpmvSetPointers, set_values_keeps_the_analysis)
+    {
+        for(const bool v2 : {false, true})
+            for(const auto& fc : cases_with_analysis())
+            {
+                config c;
+                c.alg   = fc.second.alg;
+                c.trans = fc.second.trans;
+                c.v2    = v2;
+                set_values_keeps_analysis<double>(handle, fc.first, c);
+                if(HasFailure())
+                    return;
+            }
+    }
+
     // A second analysis on the same v2 descriptor, after set_pointers, must not
     // adopt the CSR, CSC or BSR info built for the previous arrays. That analysis is
     // refused by the existing rule that a rocsparse_spmv_descr is analyzed only
@@ -1473,46 +1533,70 @@ namespace
         }
     }
 
-    // Destroying an analysis synchronizes the device, which fails while another
-    // stream is being captured in global mode. The destructor must not throw.
-    TEST_F(L2DeviceSpmvSetPointers, destroy_spmv_descr_during_stream_capture)
+    // Destroying an analysis synchronizes the device and frees its buffers, which
+    // fails while another stream is being captured in global mode. Neither the
+    // rocsparse_spmv_descr of a v2 analysis nor the matrix descriptor of a v1
+    // preprocessing may throw from its destructor, for every info that holds
+    // device buffers.
+    TEST_F(L2DeviceSpmvSetPointers, destroy_analysis_during_stream_capture)
     {
-        using T                 = double;
-        using I                 = int32_t;
-        const scenario<T, I> sc = make_scenario<T, I>(fmt::csr, 0);
-        device_problem<T, I> d1(sc.p1);
+        using T = double;
+        using I = int32_t;
+        const std::pair<fmt, rocsparse_spmv_alg> cases[]
+            = {{fmt::csr, rocsparse_spmv_alg_csr_adaptive},
+               {fmt::csr, rocsparse_spmv_alg_csr_lrb},
+               {fmt::csr, rocsparse_spmv_alg_csr_nnzsplit},
+               {fmt::bsr, rocsparse_spmv_alg_default}};
+        for(const auto& fc : cases)
+            for(const bool v2 : {false, true})
+            {
+                SCOPED_TRACE(::testing::Message()
+                             << fmt_name(fc.first) << " alg=" << fc.second << " v2=" << v2);
+                const scenario<T, I> sc = make_scenario<T, I>(fc.first, 0);
+                device_problem<T, I> d1(sc.p1);
 
-        spmat_guard mat;
-        create(mat, sc.p1, d1);
-        ASSERT_FALSE(HasFatalFailure());
-        config c;
-        c.alg = rocsparse_spmv_alg_csr_lrb;
-        c.v2  = true;
-        session<T> s(handle, c, mat.d, sc.p1.rows, sc.p1.cols);
-        s.preprocess();
-        ASSERT_FALSE(HasFatalFailure());
-        ASSERT_EQ(s.compute(), rocsparse_status_success);
-        ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+                spmat_guard mat;
+                create(mat, sc.p1, d1);
+                ASSERT_FALSE(HasFatalFailure());
+                config c;
+                c.alg = fc.second;
+                c.v2  = v2;
+                session<T> s(handle, c, mat.d, sc.p1.rows, sc.p1.cols);
+                s.preprocess();
+                ASSERT_FALSE(HasFatalFailure());
+                ASSERT_EQ(s.compute(), rocsparse_status_success);
+                ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
 
-        hipStream_t capture = nullptr;
-        ASSERT_EQ(hipStreamCreate(&capture), hipSuccess);
-        device_vector<char> scratch(size_t(256));
-        ASSERT_EQ(hipStreamBeginCapture(capture, hipStreamCaptureModeGlobal), hipSuccess);
-        EXPECT_EQ(hipMemsetAsync(scratch.ptr, 0, scratch.n, capture), hipSuccess);
+                hipStream_t capture = nullptr;
+                ASSERT_EQ(hipStreamCreate(&capture), hipSuccess);
+                device_vector<char> scratch(size_t(256));
+                ASSERT_EQ(hipStreamBeginCapture(capture, hipStreamCaptureModeGlobal), hipSuccess);
+                EXPECT_EQ(hipMemsetAsync(scratch.ptr, 0, scratch.n, capture), hipSuccess);
 
-        rocsparse_status st = rocsparse_status_internal_error;
-        EXPECT_NO_THROW(st = s.destroy_v2_descr());
-        EXPECT_EQ(st, rocsparse_status_success);
+                rocsparse_status st = rocsparse_status_internal_error;
+                if(v2)
+                {
+                    EXPECT_NO_THROW(st = s.destroy_v2_descr());
+                }
+                else
+                {
+                    EXPECT_NO_THROW(st = rocsparse_destroy_spmat_descr(mat.d));
+                    mat.d = nullptr;
+                }
+                EXPECT_EQ(st, rocsparse_status_success);
 
-        // The synchronization attempt may have invalidated the capture.
-        hipGraph_t graph = nullptr;
-        (void)hipStreamEndCapture(capture, &graph);
-        if(graph != nullptr)
-        {
-            (void)hipGraphDestroy(graph);
-        }
-        (void)hipGetLastError();
-        EXPECT_EQ(hipStreamDestroy(capture), hipSuccess);
-        EXPECT_EQ(hipDeviceSynchronize(), hipSuccess);
+                // The synchronization attempt may have invalidated the capture.
+                hipGraph_t graph = nullptr;
+                (void)hipStreamEndCapture(capture, &graph);
+                if(graph != nullptr)
+                {
+                    (void)hipGraphDestroy(graph);
+                }
+                (void)hipGetLastError();
+                EXPECT_EQ(hipStreamDestroy(capture), hipSuccess);
+                EXPECT_EQ(hipDeviceSynchronize(), hipSuccess);
+                if(HasFailure())
+                    return;
+            }
     }
 }
