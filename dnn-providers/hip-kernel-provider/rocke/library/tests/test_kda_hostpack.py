@@ -71,14 +71,6 @@ def test_manifest_adapter_does_not_import_dispatch():
     assert out.stdout.strip() == "[]", out.stdout + out.stderr
 
 
-@pytest.mark.skip(
-    "hostpack's bf16 codec was replaced by rocke.numeric.storage, which "
-    "platform/tests/numeric/test_storage_codec.py covers"
-)
-def test_bf16_roundtrip_preserves_magnitude():
-    """hostpack's own bf16 round trip (kept as a skip until its removal is decided)."""
-
-
 def test_oracle_identity_query_on_one_token():
     B, H, T, DK, DV = 1, 1, 1, 4, 8
     q = np.zeros((B, H, T, DK), dtype=np.float32)
@@ -219,12 +211,3 @@ def test_runner_geometry_without_gpu():
     )
     # 8 pointers + f32 + i32, naturally aligned, 72 bytes.
     assert len(packed) == 72
-
-
-@pytest.mark.skip(
-    "the gfx942 builders pack through hostpack.pack_v_partitions now, so there "
-    "is no second packing to cross-check"
-)
-def test_numpy_pack_matches_torch_builder_layout():
-    """The torch builders' packing against hostpack's (kept as a skip until its
-    removal is decided)."""

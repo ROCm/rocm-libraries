@@ -1285,7 +1285,6 @@ PENDING: tuple[PendingTest, ...] = (
         "library/tests/dispatch/gdn/test_gfx950_prefill_wiring.py",
         "library/tests/test_attention_dense_decode.py",
         "library/tests/test_attention_tiled_3d_kv_cache_policy.py",
-        "library/tests/test_gdn_decode_prepare.py",
     ),
     *_waiting(
         DROP_REVIEW,

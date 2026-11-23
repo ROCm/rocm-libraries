@@ -20,24 +20,11 @@ import re
 import numpy as np
 import pytest
 from rocke.numeric import storage
-from rocke.tests.lanes import DROP_REVIEW, skip_until_reason
 
 from builders.gfx950.gdn.gdn_decode import input_dtypes, make_inputs, validate_inputs
 from kernels.gfx950.gdn_decode import GdnDecodeSpec, gdn_decode_pointer_alignment
 
 FAILED = "gdn_decode input failed - "
-
-# The driver took device tensors before; some of its refusals were of a tensor on
-# another device or a base pointer off the kernel's alignment. Inputs are host
-# arrays now and prepare() allocates every device buffer, so neither state can be
-# built. Those tests stay listed as skips until their removal is decided.
-_RULED_OUT = pytest.mark.skip(
-    reason=skip_until_reason(
-        DROP_REVIEW,
-        reason="inputs are host numpy arrays and prepare() allocates every device "
-        "buffer, so this state cannot be built",
-    )
-)
 
 
 def _refused(match: str):
@@ -216,28 +203,6 @@ def test_kda_gate_input_contract_is_rejected_before_launch(key, mutate, match):
     inp[key] = mutate(inp[key])
     with _refused(match):
         validate_inputs(spec, inp, batch)
-
-
-@_RULED_OUT
-@pytest.mark.parametrize("key", ["a", "dt_bias"])
-def test_kda_gate_inputs_must_match_query_device(key):
-    """A gate buffer on another device than the query (see ``_RULED_OUT``)."""
-
-
-@_RULED_OUT
-def test_unfused_query_must_be_aligned():
-    """A query base pointer off the 16 B alignment (see ``_RULED_OUT``)."""
-
-
-@pytest.mark.skip(
-    reason=skip_until_reason(
-        DROP_REVIEW,
-        reason="prepare() no longer takes validate_indices: the index range is "
-        "checked on host arrays, with no device sync to avoid",
-    )
-)
-def test_validate_indices_flag_skips_the_range_check():
-    """The flag that let a hot loop skip the index-range check."""
 
 
 def test_gdn_gate_input_contract_stays_scalar():
@@ -487,21 +452,9 @@ _FUSED_BAD_INPUTS = [
 ]
 
 
-_FUSED_RULED_OUT = [
-    *(f"{name}_device" for name in ("conv_state", "conv_weight", "out_gate")),
-    *(f"{name}_device" for name in ("norm_weight", "state")),
-    *(f"{name}_misaligned" for name in ("mixed_qkv", "conv_state", "conv_weight")),
-    "dt_bias_misaligned",
-]
-
-
 @pytest.mark.parametrize(
     "mutate,error,match",
-    [pytest.param(*c[1:], id=c[0]) for c in _FUSED_BAD_INPUTS]
-    + [
-        pytest.param(None, None, None, id=name, marks=_RULED_OUT)
-        for name in _FUSED_RULED_OUT
-    ],
+    [pytest.param(*c[1:], id=c[0]) for c in _FUSED_BAD_INPUTS],
 )
 def test_fused_input_contract_is_rejected_before_launch(mutate, error, match):
     spec = _fused_spec()
