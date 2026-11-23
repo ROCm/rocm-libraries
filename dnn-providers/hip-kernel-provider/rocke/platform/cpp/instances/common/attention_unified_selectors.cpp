@@ -302,9 +302,8 @@ static bool d256_gfx942_fast(const rocke_unified_attn_problem_t* p)
     /* d192 rides the same lean 4-warp body as d256. */
     return arch_is("gfx942") && (p->head_size == 192 || p->head_size == 256)
            && strcmp(p->dtype, "bf16") == 0 && !p->use_fp8 && p->sliding_window == 0
-           && p->softcap == 0 && !p->use_sinks && !p->use_alibi && !p->use_qq_bias
-           && p->max_seqlen_q > 1 && (p->block_size == 16 || p->block_size == 32)
-           && !enable_i64_kv_addr(p);
+           && p->softcap == 0 && !p->use_sinks && !p->use_qq_bias && p->max_seqlen_q > 1
+           && (p->block_size == 16 || p->block_size == 32) && !enable_i64_kv_addr(p);
 }
 
 /* Python: _enable_transposed_qk_32x32(problem). */
@@ -423,21 +422,25 @@ static bool enable_transposed_subflags(const rocke_unified_attn_problem_t* p)
     return enable_transposed_qk_32x32(p);
 }
 
-/* Python: _enable_gfx942_small_q_narrow(problem). */
+/* Python: _enable_gfx942_small_q_narrow(problem). The gate decides the same with
+ * ALiBi as without it: ALiBi keeps the narrow route (register-P is decided by its
+ * own gate). */
 static bool enable_gfx942_small_q_narrow(const rocke_unified_attn_problem_t* p)
 {
     return arch_is("gfx942") && (strcmp(p->dtype, "fp16") == 0 || strcmp(p->dtype, "bf16") == 0)
            && !p->use_fp8 && (p->head_size == 64 || p->head_size == 128)
            && (p->max_seqlen_q > 1 && p->max_seqlen_q <= 768) && p->sliding_window == 0
-           && !p->use_sinks && p->softcap == 0 && !p->use_alibi && !p->use_qq_bias;
+           && !p->use_sinks && p->softcap == 0 && !p->use_qq_bias;
 }
 
-/* Python: _enable_gfx942_fp16_flash(problem). */
+/* Python: _enable_gfx942_fp16_flash(problem). The gate decides the same with
+ * ALiBi as without it: the x8 flash kernel applies ALiBi (mask-limit softmax
+ * arms). */
 static bool enable_gfx942_fp16_flash(const rocke_unified_attn_problem_t* p)
 {
     return arch_is("gfx942") && (p->head_size == 64 || p->head_size == 128)
            && strcmp(p->dtype, "fp16") == 0 && !p->use_fp8 && p->sliding_window == 0
-           && !p->use_sinks && p->softcap == 0 && !p->use_alibi && !p->use_qq_bias
+           && !p->use_sinks && p->softcap == 0 && !p->use_qq_bias
            && !enable_gfx942_small_q_narrow(p);
 }
 
@@ -883,8 +886,9 @@ static bool enable_register_pv(const rocke_unified_attn_problem_t* p)
     {
         return false;
     }
-    /* gfx950 applies ALiBi on register-P; gfx942 keeps ALiBi off it until its
-     * arms are ported. */
+    /* Both arches' kernels apply ALiBi on register-P, but on gfx942 the 16x16
+     * config without register-P is faster with ALiBi, so gfx942 keeps ALiBi off
+     * it. */
     if(p->use_alibi && !arch_is("gfx950"))
     {
         return false;

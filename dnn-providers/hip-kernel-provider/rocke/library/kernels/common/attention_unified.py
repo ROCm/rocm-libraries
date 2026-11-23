@@ -985,7 +985,7 @@ def _has_non_alibi_score_bias(problem: "UnifiedAttentionProblem") -> bool:
     """A score term other than ALiBi: QQ bias or the additive bias.
 
     For the gates of paths that apply ALiBi themselves but no other score term,
-    so ALiBi takes the same path as the problem without it.
+    so such a gate decides the same with ALiBi as without it.
     """
     return problem.use_qq_bias or problem.use_additive_bias
 
@@ -1172,7 +1172,7 @@ def _gfx942_4warp_eligible(problem: "UnifiedAttentionProblem", arch: str) -> boo
         and not problem.use_fp8
         and problem.softcap == 0
         and not problem.use_sinks
-        and not _has_score_bias(problem)
+        and not _has_non_alibi_score_bias(problem)
         and problem.max_seqlen_q > 1
         # The natural-QK builder uses i32 paged element addressing (like the
         # shipped default builder). Exclude caches > 2 GiB, which need the i64
@@ -2368,7 +2368,7 @@ def _enable_gfx942_small_q_narrow(problem: UnifiedAttentionProblem, arch: str) -
         and problem.sliding_window == 0
         and not problem.use_sinks
         and problem.softcap == 0
-        and not _has_score_bias(problem)
+        and not _has_non_alibi_score_bias(problem)
     )
 
 
@@ -2444,7 +2444,7 @@ def _enable_gfx942_fp16_flash(problem: UnifiedAttentionProblem, arch: str) -> bo
         and (problem.sliding_window == 0 or problem.head_size == 128)
         and not problem.use_sinks
         and problem.softcap == 0
-        and not _has_score_bias(problem)
+        and not _has_non_alibi_score_bias(problem)
         # For GQA (num_queries_per_kv > 1) the light narrow path wins at short
         # context because the ring overhead is not amortised over a 1-2-tile KV
         # loop. For MHA (num_queries_per_kv == 1) the narrow path is pathologically
@@ -2491,7 +2491,7 @@ def _enable_gfx942_bf16_flash(problem: UnifiedAttentionProblem, arch: str) -> bo
         and (problem.sliding_window == 0 or problem.head_size == 128)
         and not problem.use_sinks
         and problem.softcap == 0
-        and not _has_score_bias(problem)
+        and not _has_non_alibi_score_bias(problem)
         # Prefill only (the wide 32x32 atom processes a 32-row M tile; decode
         # q=1 has no rows to fill and routes to the 3D split-KV / narrow path).
         and problem.max_seqlen_q > 1
@@ -2901,8 +2901,9 @@ def _enable_register_pv(problem: UnifiedAttentionProblem, arch: str) -> bool:
     if _kv_storage_dtype(problem) is not None:
         return False
     # register-pv v1 does not implement softcap, QQ bias or additive bias (the
-    # spec __post_init__ enforces this). gfx950 applies ALiBi there; gfx942
-    # keeps ALiBi off it until its arms are ported.
+    # spec __post_init__ enforces this). Both arches' kernels apply ALiBi there,
+    # but on gfx942 the 16x16 config without register-P is faster with ALiBi,
+    # so gfx942 keeps ALiBi off it.
     score_bias = (
         _has_non_alibi_score_bias(problem)
         if arch == "gfx950"

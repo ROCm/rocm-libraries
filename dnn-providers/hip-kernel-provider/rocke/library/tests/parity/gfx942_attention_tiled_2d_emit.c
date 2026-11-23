@@ -21,6 +21,9 @@
 #include "rocke/lower_llvm.h"
 #include "rocke/verify.h"
 
+static const char* const alibi_design_order[4]
+    = {"seed_tile", "fma_tile", "seed_split", "fma_split"};
+
 /* Fill `s` for config index `idx`. Returns 0 on success, -1 on unknown idx. */
 static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
 {
@@ -346,6 +349,120 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         s->use_mfma_32x32x8 = true;
         s->use_transposed_qk_32x32 = true;
         s->use_transposed_mask_once = true;
+        break;
+    /* cfg22-25: each ALiBi arm on the x8 k1buf mask-limit softmax (bf16 D128);
+     * cfg26: x8 cfvst fp16 D128 default arm; cfg33: the k1buf default + LSE. */
+    case 22:
+    case 23:
+    case 24:
+    case 25:
+    case 26:
+    case 33:
+        s->head_size = 128;
+        s->block_size = 64;
+        s->num_query_heads = 32;
+        s->num_kv_heads = 8;
+        s->dtype = idx == 26 ? "fp16" : "bf16";
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->use_alibi = true;
+        s->num_seqs = 1;
+        s->num_warps = idx == 26 ? 4 : 2;
+        s->has_waves_per_eu = true;
+        s->waves_per_eu = 2;
+        s->has_tile_size = true;
+        s->tile_size = 64;
+        s->block_m_per_warp = 32;
+        s->use_mfma_32x32x8 = true;
+        s->use_transposed_qk_32x32 = true;
+        s->use_transposed_scalar_state = true;
+        s->use_transposed_invariant_hoist = true;
+        s->use_transposed_mask_once = true;
+        s->use_transposed_mask_limit = true;
+        s->use_k_single_buffer = idx != 26;
+        s->use_conflict_free_v_store = idx == 26;
+        s->kv_cache_policy = "all";
+        s->emit_lse = idx == 33;
+        if(idx <= 25)
+            s->alibi_design = alibi_design_order[idx - 22];
+        break;
+    /* cfg27: register-P D128 default arm; cfg29-32: each arm on the 16x16 path
+     * (fp16 D128). */
+    case 27:
+    case 29:
+    case 30:
+    case 31:
+    case 32:
+        s->head_size = 128;
+        s->block_size = 64;
+        s->num_query_heads = 64;
+        s->num_kv_heads = 8;
+        s->dtype = idx == 27 ? "bf16" : "fp16";
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->use_alibi = true;
+        s->num_seqs = 1;
+        s->num_warps = 2;
+        s->has_waves_per_eu = true;
+        s->waves_per_eu = 2;
+        s->has_tile_size = true;
+        s->tile_size = 64;
+        s->use_register_pv = idx == 27;
+        if(idx >= 29)
+            s->alibi_design = alibi_design_order[idx - 29];
+        break;
+    case 28: /* register-P D256 mw32, seed_tile. */
+        s->head_size = 256;
+        s->block_size = 16;
+        s->num_query_heads = 16;
+        s->num_kv_heads = 2;
+        s->dtype = "bf16";
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->use_alibi = true;
+        s->num_seqs = 1;
+        s->has_waves_per_eu = true;
+        s->waves_per_eu = 2;
+        s->use_register_pv = true;
+        s->has_tile_size = true;
+        s->tile_size = 32;
+        s->block_m_per_warp = 32;
+        s->alibi_design = "seed_tile";
+        break;
+    /* cfg35-36: the x8 k1buf spec dispatch picks for bf16 D192 at block_size 64
+     * (full-mask transposed softmax, inline per-lane slope): 35 the per-score
+     * add, 36 fma_tile. */
+    case 35:
+    case 36:
+        s->head_size = 192;
+        s->block_size = 64;
+        s->num_query_heads = 32;
+        s->num_kv_heads = 8;
+        s->dtype = "bf16";
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->use_alibi = true;
+        s->num_seqs = 1;
+        s->num_warps = 2;
+        s->has_waves_per_eu = true;
+        s->waves_per_eu = 2;
+        s->has_tile_size = true;
+        s->tile_size = 64;
+        s->block_m_per_warp = 32;
+        s->use_mfma_32x32x8 = true;
+        s->use_transposed_qk_32x32 = true;
+        s->use_k_single_buffer = true;
+        s->kv_cache_policy = "all";
+        if(idx == 36)
+            s->alibi_design = "fma_tile";
+        break;
+    case 34: /* cfg21 (x8 mask-once, no mask limit) with seed_split. */
+        make_spec(21, s);
+        s->alibi_design = "seed_split";
         break;
     default:
         return -1;

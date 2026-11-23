@@ -363,6 +363,110 @@ _CONFIGS = {
     ),
 }
 
+# cfg22-34: the ALiBi arms (alibi_design) on the corpus specs of each family:
+# 22-25 each arm on the x8 k1buf mask-limit softmax (bf16 D128); default arms
+# 26 x8 cfvst fp16 D128 (mask-limit) and 27 register-P D128; 28 register-P D256
+# mw32 with seed_tile; 29-32 each arm on the 16x16 path (fp16 D128); 33 LSE on
+# the x8 k1buf default; 34 seed_split on the x8 mask-once softmax (no mask limit).
+_X8_MLIM_ALIBI = dict(
+    head_size=128,
+    block_size=64,
+    num_query_heads=32,
+    num_kv_heads=8,
+    dtype="bf16",
+    use_sinks=False,
+    sliding_window=0,
+    has_softcap=False,
+    use_alibi=True,
+    num_seqs=1,
+    num_warps=2,
+    waves_per_eu=2,
+    tile_size=64,
+    block_m_per_warp=32,
+    use_mfma_32x32x8=True,
+    use_transposed_qk_32x32=True,
+    use_transposed_scalar_state=True,
+    use_transposed_invariant_hoist=True,
+    use_transposed_mask_once=True,
+    use_transposed_mask_limit=True,
+    use_k_single_buffer=True,
+    kv_cache_policy="all",
+)
+_ALIBI_16X16 = dict(
+    head_size=128,
+    block_size=64,
+    num_query_heads=64,
+    num_kv_heads=8,
+    dtype="fp16",
+    use_sinks=False,
+    sliding_window=0,
+    has_softcap=False,
+    use_alibi=True,
+    num_seqs=1,
+    num_warps=2,
+    waves_per_eu=2,
+    tile_size=64,
+)
+_CONFIGS[22] = dict(_X8_MLIM_ALIBI, alibi_design="seed_tile")
+_CONFIGS[23] = dict(_X8_MLIM_ALIBI, alibi_design="fma_tile")
+_CONFIGS[24] = dict(_X8_MLIM_ALIBI, alibi_design="seed_split")
+_CONFIGS[25] = dict(_X8_MLIM_ALIBI, alibi_design="fma_split")
+_CONFIGS[26] = {
+    **{k: v for k, v in _X8_MLIM_ALIBI.items() if k != "use_k_single_buffer"},
+    "dtype": "fp16",
+    "num_warps": 4,
+    "use_conflict_free_v_store": True,
+}
+_CONFIGS[27] = dict(_ALIBI_16X16, dtype="bf16", use_register_pv=True)
+_CONFIGS[28] = dict(
+    head_size=256,
+    block_size=16,
+    num_query_heads=16,
+    num_kv_heads=2,
+    dtype="bf16",
+    use_sinks=False,
+    sliding_window=0,
+    has_softcap=False,
+    use_alibi=True,
+    num_seqs=1,
+    waves_per_eu=2,
+    use_register_pv=True,
+    tile_size=32,
+    block_m_per_warp=32,
+    alibi_design="seed_tile",
+)
+_CONFIGS[29] = dict(_ALIBI_16X16, alibi_design="seed_tile")
+_CONFIGS[30] = dict(_ALIBI_16X16, alibi_design="fma_tile")
+_CONFIGS[31] = dict(_ALIBI_16X16, alibi_design="seed_split")
+_CONFIGS[32] = dict(_ALIBI_16X16, alibi_design="fma_split")
+_CONFIGS[33] = dict(_X8_MLIM_ALIBI, emit_lse=True)
+_CONFIGS[34] = dict(_CONFIGS[21], alibi_design="seed_split")
+# cfg35-36: the x8 k1buf spec dispatch picks for bf16 D192 at block_size 64, whose
+# transposed softmax has no sub-flags (full mask, inline per-lane slope): 35 the
+# per-score add (no design), 36 fma_tile on the same full-mask softmax.
+_D192_X8_FULL_MASK_ALIBI = dict(
+    head_size=192,
+    block_size=64,
+    num_query_heads=32,
+    num_kv_heads=8,
+    dtype="bf16",
+    use_sinks=False,
+    sliding_window=0,
+    has_softcap=False,
+    use_alibi=True,
+    num_seqs=1,
+    num_warps=2,
+    waves_per_eu=2,
+    tile_size=64,
+    block_m_per_warp=32,
+    use_mfma_32x32x8=True,
+    use_transposed_qk_32x32=True,
+    use_k_single_buffer=True,
+    kv_cache_policy="all",
+)
+_CONFIGS[35] = dict(_D192_X8_FULL_MASK_ALIBI)
+_CONFIGS[36] = dict(_D192_X8_FULL_MASK_ALIBI, alibi_design="fma_tile")
+
 
 def _kernel(idx: int):
     if idx not in _CONFIGS:

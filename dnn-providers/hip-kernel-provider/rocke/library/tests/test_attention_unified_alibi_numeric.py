@@ -24,7 +24,12 @@ from kernels.common.attention_unified import (  # noqa: E402
     UnifiedAttentionProblem,
     run_unified_attention_torch,
 )
-from kernels.gfx950.attention_tiled_2d import _alibi_design  # noqa: E402
+from kernels.gfx942.attention_tiled_2d import (  # noqa: E402
+    _alibi_design as _alibi_design_gfx942,
+)
+from kernels.gfx950.attention_tiled_2d import (  # noqa: E402
+    _alibi_design as _alibi_design_gfx950,
+)
 from rocke.numeric.sdpa_reference import alibi_slopes  # noqa: E402
 
 
@@ -36,6 +41,9 @@ def _arch():
 
 
 _ARCH = _arch()
+_alibi_design = {"gfx942": _alibi_design_gfx942, "gfx950": _alibi_design_gfx950}.get(
+    _ARCH
+)
 pytestmark = [
     pytest.mark.gpu,
     pytest.mark.skipif(_ARCH is None, reason="needs a gfx942 or gfx950 GPU"),
@@ -47,11 +55,22 @@ def _tolerance(dtype):
 
 
 def _reference(
-    q, k_cache, v_cache, q_lens, kv_lens, block_table, scale, slopes, tl, sinks=None
+    q,
+    k_cache,
+    v_cache,
+    q_lens,
+    kv_lens,
+    block_table,
+    scale,
+    slopes,
+    tl,
+    sinks=None,
+    window=0,
 ):
     """FP32 O and natural-log LSE; causal on the bottom-right diagonal, or the
-    top-left one when ``tl``; ALiBi measured from the query's diagonal. A sink
-    logit joins each row's denominator with no ALiBi term and no value (SEM-022)."""
+    top-left one when ``tl``, limited to the last ``window`` keys when set; ALiBi
+    measured from the query's diagonal. A sink logit joins each row's
+    denominator with no ALiBi term and no value (SEM-022)."""
     hq, d = q.shape[1], q.shape[2]
     hkv, bs = k_cache.shape[2], k_cache.shape[1]
     slope = slopes.float().view(hq, 1, 1)
@@ -68,7 +87,10 @@ def _reference(
         kk = torch.arange(kl, device=q.device).view(1, -1)
         diag = p if tl else p + (kl - ql)
         s = s + slope * (kk - diag)
-        s = s.masked_fill(~(kk <= diag), float("-inf"))
+        visible = kk <= diag
+        if window:
+            visible = visible & (diag - kk < window)
+        s = s.masked_fill(~visible, float("-inf"))
         if sinks is not None:
             sink_col = sinks.float().view(hq, 1, 1).expand(hq, ql, 1)
             lse = torch.logsumexp(torch.cat([s, sink_col], dim=-1), dim=-1)
@@ -99,11 +121,14 @@ def _run_case(
     sinks=False,
     alibi_design=None,
     family=None,
+    window=0,
+    off_kernel=False,
     seed=0,
 ):
     """``family``: a 2D spec flag the dispatched kernel must set (or
     ``_PER_SCORE_ADD``), so the case runs the path it names; ``alibi_design``
-    forces that arm on it."""
+    forces that arm on it. ``off_kernel``: run ALiBi on the kernel the problem
+    without ALiBi dispatches to (a path dispatch keeps ALiBi off)."""
     g = torch.Generator(device="cuda").manual_seed(seed)
     tdt = torch.float16 if dtype == "fp16" else torch.bfloat16
     total_q, num_seqs = sum(q_lens), len(q_lens)
@@ -140,17 +165,26 @@ def _run_case(
         causal_top_left=top_left,
         right_bound=0,
         emit_lse=lse,
+        sliding_window=window,
     )
     sink_t = torch.randn(hq, device="cuda", dtype=tdt, generator=g) if sinks else None
     tuning_spec = None
-    if family is not None or alibi_design is not None:
+    if family is not None or alibi_design is not None or off_kernel:
         assert au.select_auto_path(problem, _ARCH) == "2d"
-        spec = au._tiled_spec_from_problem(problem, _ARCH)
+        if off_kernel:
+            spec = replace(
+                au._tiled_spec_from_problem(replace(problem, use_alibi=False), _ARCH),
+                use_alibi=True,
+            )
+        else:
+            spec = au._tiled_spec_from_problem(problem, _ARCH)
         if family == _PER_SCORE_ADD:
             assert _alibi_design(spec) is None, spec.kernel_name()
+        elif family == _4WARP:
+            assert au._gfx942_4warp_fast(problem, _ARCH), spec.kernel_name()
         elif family is not None:
             assert getattr(spec, family), f"{spec.kernel_name()} is not on {family}"
-        if alibi_design is not None:
+        if alibi_design is not None or off_kernel:
             tuning_spec = AttentionTuningSpec(
                 path="2d",
                 arch=_ARCH,
@@ -158,7 +192,11 @@ def _run_case(
                 compile_backend=au._select_2d_compile_backend(problem, _ARCH),
                 candidate_name="alibi_design",
                 tuning_id=alibi_design,
-                kernel_spec=replace(spec, alibi_design=alibi_design),
+                kernel_spec=(
+                    spec
+                    if alibi_design is None
+                    else replace(spec, alibi_design=alibi_design)
+                ),
                 num_kv_blocks=num_blocks,
             )
     out = torch.empty_like(q)
@@ -183,7 +221,7 @@ def _run_case(
     )
     torch.cuda.synchronize()
     o_ref, lse_ref = _reference(
-        q, kc, vc, q_lens, kv_lens, bt, scale, slopes, top_left, sink_t
+        q, kc, vc, q_lens, kv_lens, bt, scale, slopes, top_left, sink_t, window
     )
     tol = _tolerance(dtype)
     assert (out.float() - o_ref).abs().max().item() < tol
@@ -225,6 +263,8 @@ def test_bottom_right_lse_is_refused():
 
 # The paths that kept the per-score add from before the design arms.
 _PER_SCORE_ADD = "per-score add"
+# The gfx942 4-warp GQA kernels (a dispatch route, not a spec flag).
+_4WARP = "4-warp"
 
 # gfx950 tiled 2D families ALiBi reaches through dispatch: (case kwargs, the spec
 # flag of the family). Square prefill rows keep both diagonals equal.
@@ -299,6 +339,91 @@ def test_sinks_on_the_top_left_diagonal(case, design):
         family=family,
         alibi_design=design,
         **kw,
+    )
+
+
+# gfx942 tiled 2D families ALiBi reaches through dispatch. Bottom-right causal, the
+# only band the gfx942 kernels have; the reference anchors on the same diagonal.
+_GFX942_FAMILIES = {
+    "x8 single buffer": (
+        dict(q_lens=[1024, 512], kv_lens=[1024, 700], hq=32, hkv=8, bs=64),
+        "use_transposed_mask_limit",
+    ),
+    "x8 ring": (
+        dict(q_lens=[1024], kv_lens=[1024], hq=32, hkv=8, bs=64, dtype="fp16"),
+        "use_transposed_mask_limit",
+    ),
+    "x8 q direct": (
+        dict(q_lens=[2048], kv_lens=[2048], hq=64, hkv=8, d=64, bs=32),
+        "use_transposed_mask_limit",
+    ),
+    # Block size 64 keeps D192 off the 4-warp cohort.
+    "x8 d192": (
+        dict(q_lens=[1024], kv_lens=[1024], hq=32, hkv=8, d=192, bs=64),
+        "use_mfma_32x32x8",
+    ),
+    "4-warp d256": (
+        dict(q_lens=[1024, 512], kv_lens=[1024, 600], hq=16, hkv=2, d=256),
+        _4WARP,
+    ),
+    "4-warp d192": (
+        dict(q_lens=[700], kv_lens=[900], hq=32, hkv=8, d=192, bs=32),
+        _4WARP,
+    ),
+    "4-warp window head fold": (
+        dict(q_lens=[600, 300], kv_lens=[1500, 300], hq=32, hkv=8, window=512),
+        _4WARP,
+    ),
+    "4-warp window": (
+        dict(q_lens=[900], kv_lens=[1300], hq=32, hkv=4, window=256),
+        _4WARP,
+    ),
+    "4-warp window bs64": (
+        dict(q_lens=[900], kv_lens=[1300], hq=32, hkv=8, bs=64, window=256),
+        _4WARP,
+    ),
+    "16x16 short": (
+        dict(q_lens=[512], kv_lens=[512], hq=32, hkv=8, bs=64, dtype="fp16"),
+        _PER_SCORE_ADD,
+    ),
+}
+
+
+def _gfx942_only():
+    if _ARCH != "gfx942":
+        pytest.skip("gfx942 tiled 2D families")
+
+
+@pytest.mark.parametrize("name", list(_GFX942_FAMILIES))
+def test_gfx942_family_default_design(name):
+    _gfx942_only()
+    kw, family = _GFX942_FAMILIES[name]
+    _run_case(backend="tiled", family=family, **kw)
+
+
+@pytest.mark.parametrize("design", sorted(ALIBI_DESIGNS))
+@pytest.mark.parametrize("name", ["x8 single buffer", "x8 d192", "16x16 short"])
+def test_gfx942_designs(name, design):
+    _gfx942_only()
+    kw, family = _GFX942_FAMILIES[name]
+    _run_case(backend="tiled", family=family, alibi_design=design, **kw)
+
+
+@pytest.mark.parametrize("design", [None, "seed_split"])
+def test_gfx942_register_p(design):
+    # Dispatch keeps ALiBi off register-P on gfx942 (the 16x16 kernel without
+    # it is faster with ALiBi); the kernel applies it all the same.
+    _gfx942_only()
+    _run_case(
+        [512, 200],
+        [512, 300],
+        backend="tiled",
+        hq=32,
+        hkv=8,
+        bs=64,
+        off_kernel=True,
+        family="use_register_pv",
+        alibi_design=design,
     )
 
 

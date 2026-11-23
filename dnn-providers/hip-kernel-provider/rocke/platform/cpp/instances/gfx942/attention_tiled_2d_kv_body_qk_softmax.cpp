@@ -302,6 +302,80 @@ void rocke_gfx942_attn2d_reset_softmax_scratch(void)
     memset(p_regs_f32_buf, 0, sizeof(p_regs_f32_buf));
 }
 
+/* ===================================================================== *
+ *  ALiBi arm helpers (Python _ad_tile_base / _ad_tile_term / _ad_qk_init).
+ * ===================================================================== */
+
+/* ``*_tile`` arms: the term of the tile's first key per query, in ad_u units.
+ * Transposed: one value (out[0]); 16x16: one per row slot. */
+static void fh_ad_tile_base(rocke_gfx942_attn2d_build_ctx_t* ctx,
+                            rocke_value_t* tile_off,
+                            rocke_value_t** out)
+{
+    rocke_ir_builder_t* b = ctx->b;
+    if(ctx->AD_TRANSPOSED)
+    {
+        rocke_value_t* key0 = rocke_b_add(b, tile_off, ctx->ad_key_off);
+        rocke_value_t* dist = rocke_b_sub(b, key0, ctx->ad_anchor);
+        out[0] = rocke_b_fmul(b, ctx->ad_u, rocke_b_sitofp_f32(b, dist));
+        return;
+    }
+    for(int reg = 0; reg < ctx->REGS_PER_LANE; ++reg)
+    {
+        rocke_value_t* dist = rocke_b_add(b, tile_off, ctx->ad_rel_r[reg]);
+        out[reg] = rocke_b_fmul(b, ctx->ad_u_r[reg], rocke_b_sitofp_f32(b, dist));
+    }
+}
+
+/* ``*_tile`` arms: the term of element (n, reg), one FMA against a compile-time
+ * key offset, emitted at its use to keep live ranges short. */
+static rocke_value_t* fh_ad_tile_term(rocke_gfx942_attn2d_build_ctx_t* ctx,
+                                      rocke_value_t* const* base,
+                                      int n,
+                                      int reg)
+{
+    int c;
+    rocke_value_t* u;
+    rocke_value_t* b0;
+    if(ctx->AD_TRANSPOSED)
+    {
+        c = n * 32 + (reg / 4) * 8 + reg % 4;
+        u = ctx->ad_u;
+        b0 = base[0];
+    }
+    else
+    {
+        c = n * 16;
+        u = ctx->ad_u_r[reg];
+        b0 = base[reg];
+    }
+    if(c == 0)
+        return b0;
+    rocke_value_t* c_f = rocke_b_const_f32(ctx->b, (double)c);
+    return rocke_b_fma(ctx->b, u, c_f, b0);
+}
+
+/* QK accumulator init of block ``n`` (``atom`` on 16x16): the seed arms' term
+ * in raw score units, else zero. */
+static rocke_value_t* fh_ad_qk_init(rocke_gfx942_attn2d_build_ctx_t* ctx,
+                                    rocke_value_t* const* seed_base,
+                                    int n,
+                                    int atom)
+{
+    rocke_ir_builder_t* b = ctx->b;
+    if(ctx->ALIBI_DESIGN == ROCKE_GFX942_ATTN2D_AD_SEED_TILE)
+    {
+        rocke_value_t* vals[16];
+        int cnt = ctx->AD_TRANSPOSED ? 16 : 4;
+        for(int i = 0; i < cnt; ++i)
+            vals[i] = fh_ad_tile_term(ctx, seed_base, n, ctx->AD_TRANSPOSED ? i : atom * 4 + i);
+        return rocke_gfx942_attn2d_f32_vec(b, vals, cnt);
+    }
+    if(ctx->ALIBI_DESIGN == ROCKE_GFX942_ATTN2D_AD_SEED_SPLIT)
+        return ctx->AD_TRANSPOSED ? ctx->ad_seed : ctx->ad_seed16[atom][n];
+    return rocke_b_zero_vec_f32(b, ctx->USE_MFMA_32X32 ? 16 : 4);
+}
+
 void rocke_gfx942_attn2d_emit_kv_body(rocke_gfx942_attn2d_build_ctx_t* ctx)
 {
     rocke_ir_builder_t* b = ctx->b;
@@ -348,6 +422,9 @@ void rocke_gfx942_attn2d_emit_kv_body(rocke_gfx942_attn2d_build_ctx_t* ctx)
         = ctx->K_SINGLE_BUF ? ctx->cur_buf : rocke_b_sub(b, rocke_b_const_i32(b, 1), ctx->cur_buf);
 
     rocke_value_t* tile_off = rocke_b_mul(b, ctx->kv_tile_iv, rocke_b_const_i32(b, ctx->T));
+    rocke_value_t* ad_seed_base[ROCKE_GFX942_ATTN2D_MAX_REGS_PER_LANE];
+    if(ctx->ALIBI_DESIGN == ROCKE_GFX942_ATTN2D_AD_SEED_TILE)
+        fh_ad_tile_base(ctx, tile_off, ad_seed_base);
 
     /* GROUPED_KV2 second-tile index + tile_off_g1 (Python 3723-3729). Python
      * emits this block BEFORE the st_*_iter mask hoist and BEFORE next_tile_iv,
@@ -398,7 +475,7 @@ void rocke_gfx942_attn2d_emit_kv_body(rocke_gfx942_attn2d_build_ctx_t* ctx)
             st_row_ok_iter = st_ok_inner;
         }
         st_causal_lim_iter = rocke_b_add(b, ctx->context_len, st_qp_iter);
-        if(ctx->USE_ALIBI)
+        if(ctx->LEGACY_ALIBI)
         {
             st_alibi_slope_iter
                 = rocke_attn_alibi_slope(b, st_qh_iter, ctx->num_qh_p, ctx->alibi_slopes_ptr);
@@ -484,7 +561,7 @@ void rocke_gfx942_attn2d_emit_kv_body(rocke_gfx942_attn2d_build_ctx_t* ctx)
         rocke_value_t* ST32_n_g1[ROCKE_GFX942_ATTN2D_MAX_N_TILES];
         for(int n = 0; n < QK_N_TILES; ++n)
         {
-            rocke_value_t* acc32 = rocke_b_zero_vec_f32(b, 16);
+            rocke_value_t* acc32 = fh_ad_qk_init(ctx, ad_seed_base, n, 0);
             rocke_value_t* k_row_t = rocke_b_add(b, rocke_b_const_i32(b, n * 32), lane_col32_qk);
             for(int k = 0; k < QK_K_ITERS; ++k)
             {
@@ -545,14 +622,68 @@ void rocke_gfx942_attn2d_emit_kv_body(rocke_gfx942_attn2d_build_ctx_t* ctx)
         /* ============================================================ *
          *  Transposed softmax (Python 2667-2899).
          *
-         *  Config family: TRANSPOSED_MASK_LIMIT=False, INVARIANT_HOIST=False,
-         *  MASK_ONCE=True. Per-element mask via st_*_iter (the else branch of the
-         *  Python mask switch). skip_mask is always False here.
+         *  The per-element mask is the mask-limit threshold compare
+         *  (TRANSPOSED_MASK_LIMIT) or the full mask over the hoisted
+         *  (INVARIANT_HOIST), per-iter (MASK_ONCE) or inline query invariants.
+         *  skip_mask is always False here (no causal phase split).
          * ============================================================ */
         rocke_value_t* st_local_max = neg_inf;
         /* st_scores[group][n][reg] (group 0/1). */
         rocke_value_t* st_scores0[ROCKE_GFX942_ATTN2D_MAX_N_TILES][16];
         rocke_value_t* st_scores1[ROCKE_GFX942_ATTN2D_MAX_N_TILES][16];
+        /* Split arms: per-block max of the scores without the block's row
+         * offset. */
+        rocke_value_t* ad_nmax[ROCKE_GFX942_ATTN2D_MAX_N_TILES];
+        for(int n = 0; n < QK_N_TILES; ++n)
+            ad_nmax[n] = neg_inf;
+        rocke_value_t* ad_fma_base[1] = {NULL};
+        if(ctx->ALIBI_DESIGN == ROCKE_GFX942_ATTN2D_AD_FMA_TILE)
+            fh_ad_tile_base(ctx, tile_off, ad_fma_base);
+        rocke_value_t* st_mask_thresh[16];
+        rocke_value_t* st_row_half_base = NULL;
+        if(ctx->TRANSPOSED_MASK_LIMIT)
+        {
+            rocke_value_t* ml_row_ok
+                = ctx->TRANSPOSED_INVARIANT_HOIST ? ctx->st_row_ok : st_row_ok_iter;
+            rocke_value_t* ml_causal_lim
+                = ctx->TRANSPOSED_INVARIANT_HOIST ? ctx->st_causal_lim : st_causal_lim_iter;
+            rocke_value_t* prefix_tail
+                = rocke_b_sub(b, max_seq_prefix_len, rocke_b_const_i32(b, 1));
+            rocke_value_t* tail_lt = rocke_b_cmp_lt(b, ml_causal_lim, prefix_tail);
+            rocke_value_t* valid_tail = rocke_b_select(b, tail_lt, ml_causal_lim, prefix_tail);
+            st_row_half_base = rocke_b_mul(b, fh_lane_half32(ctx), rocke_b_const_i32(b, 4));
+            /* Fold row_ok into the threshold (invalid row -> -BIG, always masked)
+             * and pre-subtract each reg's compile-time row offset, so the
+             * per-element mask is one compare. */
+            rocke_value_t* neg_big = rocke_b_const_i32(b, -(1 << 30));
+            rocke_value_t* valid_tail_eff = rocke_b_select(b, ml_row_ok, valid_tail, neg_big);
+            for(int reg = 0; reg < 16; ++reg)
+            {
+                rocke_value_t* row_off = rocke_b_const_i32(b, (reg / 4) * 8 + (reg % 4));
+                st_mask_thresh[reg] = rocke_b_sub(b, valid_tail_eff, row_off);
+            }
+        }
+        /* Per-lane slope of the per-score add: hoisted, per-iter, or inline. */
+        rocke_value_t* slope_for_lane = NULL;
+        if(ctx->LEGACY_ALIBI)
+        {
+            if(ctx->TRANSPOSED_INVARIANT_HOIST)
+                slope_for_lane = ctx->st_alibi_slope;
+            else if(ctx->TRANSPOSED_MASK_ONCE)
+                slope_for_lane = st_alibi_slope_iter;
+            else
+            {
+                rocke_value_t* q_row_t_alibi
+                    = rocke_b_add(b, ctx->wave_row_base, rocke__mfma_32x32_c_col(b, ctx->lane, 0));
+                rocke_value_t* qh_mul
+                    = rocke_b_mul(b, ctx->kv_head_idx, rocke_b_const_i32(b, ctx->NQK));
+                rocke_value_t* qh_mod
+                    = rocke_b_mod(b, q_row_t_alibi, rocke_b_const_i32(b, ctx->NQK));
+                rocke_value_t* qh_t_alibi = rocke_b_add(b, qh_mul, qh_mod);
+                slope_for_lane
+                    = rocke_attn_alibi_slope(b, qh_t_alibi, ctx->num_qh_p, ctx->alibi_slopes_ptr);
+            }
+        }
         int n_groups = ctx->GROUPED_KV2 ? 2 : 1;
         for(int group_idx = 0; group_idx < n_groups; ++group_idx)
         {
@@ -560,77 +691,111 @@ void rocke_gfx942_attn2d_emit_kv_body(rocke_gfx942_attn2d_build_ctx_t* ctx)
             rocke_value_t* group_tile_off = (group_idx == 0) ? tile_off : tile_off_g1;
             for(int n = 0; n < QK_N_TILES; ++n)
             {
+                rocke_value_t* col_abs_base = NULL;
+                if(ctx->TRANSPOSED_MASK_LIMIT)
+                {
+                    rocke_value_t* n_off = rocke_b_const_i32(b, n * 32);
+                    col_abs_base
+                        = rocke_b_add(b, rocke_b_add(b, group_tile_off, n_off), st_row_half_base);
+                }
                 for(int reg = 0; reg < 16; ++reg)
                 {
-                    /* else branch (non-mask-limit): per-element mask.
-                     * Python emits const(n*32) before _mfma_32x32_c_row (left-to-
-                     * right); bind it first to keep the value numbering. */
-                    rocke_value_t* k_local_base = rocke_b_const_i32(b, n * 32);
-                    rocke_value_t* k_local
-                        = rocke_b_add(b, k_local_base, rocke__mfma_32x32_c_row(b, ctx->lane, reg));
-                    /* row_ok / qp_r / causal_lim. The MASK_ONCE path hoists these
-                     * once (st_*_iter); otherwise (Python 4086-4105) recompute the
-                     * per-lane query row inline, in source order: q_row_t, qp_r,
-                     * qh_r, row_ok BEFORE col_abs, then causal_lim AFTER col_abs. */
-                    rocke_value_t* row_ok = st_row_ok_iter;
-                    rocke_value_t* causal_lim = st_causal_lim_iter;
-                    rocke_value_t* qp_r = st_qp_iter;
-                    bool mask_fallback = (st_row_ok_iter == NULL);
-                    if(mask_fallback)
+                    rocke_value_t* m_ok;
+                    rocke_value_t* row_ok = NULL;
+                    rocke_value_t* col_abs = NULL;
+                    rocke_value_t* causal_lim = NULL;
+                    rocke_value_t* qp_r = NULL;
+                    if(ctx->TRANSPOSED_MASK_LIMIT)
                     {
-                        rocke_value_t* q_row_t = rocke_b_add(
-                            b, ctx->wave_row_base, rocke__mfma_32x32_c_col(b, ctx->lane, 0));
-                        qp_r = rocke_b_add(b,
-                                           ctx->qb_start_pos,
-                                           rocke_b_div(b, q_row_t, rocke_b_const_i32(b, ctx->NQK)));
-                        /* qh_r = kv_head*NQK + q_row_t%NQK (mul before mod). */
-                        rocke_value_t* qh_mul
-                            = rocke_b_mul(b, ctx->kv_head_idx, rocke_b_const_i32(b, ctx->NQK));
-                        rocke_value_t* qh_mod
-                            = rocke_b_mod(b, q_row_t, rocke_b_const_i32(b, ctx->NQK));
-                        rocke_value_t* qh_r = rocke_b_add(b, qh_mul, qh_mod);
-                        /* row_ok = land(qp<q_len, qh<NUM_QH[, q_row_t<VALID_ROWS]).
-                         * Skip the VALID_ROWS guard when VALID_ROWS == BLOCK_M. */
-                        rocke_value_t* ok_pos = rocke_b_cmp_lt(b, qp_r, ctx->cur_batch_q_len);
-                        rocke_value_t* ok_qh = rocke_b_cmp_lt(b, qh_r, ctx->num_qh_p);
-                        rocke_value_t* ok_inner = rocke_b_land(b, ok_pos, ok_qh);
-                        if(ctx->VALID_ROWS < ctx->BLOCK_M)
-                        {
-                            rocke_value_t* ok_vr
-                                = rocke_b_cmp_lt(b, q_row_t, rocke_b_const_i32(b, ctx->VALID_ROWS));
-                            row_ok = rocke_b_land(b, ok_inner, ok_vr);
-                        }
-                        else
-                        {
-                            row_ok = ok_inner;
-                        }
+                        m_ok = rocke_b_cmp_le(b, col_abs_base, st_mask_thresh[reg]);
                     }
-                    rocke_value_t* col_abs = rocke_b_add(b, group_tile_off, k_local);
-                    if(mask_fallback)
-                        causal_lim = rocke_b_add(b, ctx->context_len, qp_r);
-                    rocke_value_t* causal_ok = rocke_b_cmp_le(b, col_abs, causal_lim);
-                    rocke_value_t* in_prefix = rocke_b_cmp_lt(b, col_abs, max_seq_prefix_len);
-                    rocke_value_t* m_ok
-                        = rocke_b_land(b, rocke_b_land(b, row_ok, causal_ok), in_prefix);
-                    if(ctx->SLIDING_WINDOW > 0)
+                    else
                     {
-                        rocke_value_t* dist = rocke_b_sub(b, causal_lim, col_abs);
-                        m_ok = rocke_b_land(b, m_ok, rocke_b_cmp_lt(b, dist, sw_const));
+                        /* Full per-element mask. Python emits const(n*32) before
+                         * _mfma_32x32_c_row (left-to-right); bind it first to keep
+                         * the value numbering. */
+                        rocke_value_t* k_local_base = rocke_b_const_i32(b, n * 32);
+                        rocke_value_t* k_local = rocke_b_add(
+                            b, k_local_base, rocke__mfma_32x32_c_row(b, ctx->lane, reg));
+                        /* row_ok / qp_r / causal_lim: hoisted (INVARIANT_HOIST), per
+                         * iter (MASK_ONCE, st_*_iter), or (Python 4086-4105) the
+                         * per-lane query row recomputed inline, in source order:
+                         * q_row_t, qp_r, qh_r, row_ok BEFORE col_abs, then
+                         * causal_lim AFTER col_abs. */
+                        row_ok = st_row_ok_iter;
+                        causal_lim = st_causal_lim_iter;
+                        qp_r = st_qp_iter;
+                        if(ctx->TRANSPOSED_INVARIANT_HOIST)
+                        {
+                            row_ok = ctx->st_row_ok;
+                            causal_lim = ctx->st_causal_lim;
+                            qp_r = ctx->st_qp;
+                        }
+                        bool mask_fallback
+                            = !ctx->TRANSPOSED_INVARIANT_HOIST && st_row_ok_iter == NULL;
+                        if(mask_fallback)
+                        {
+                            rocke_value_t* q_row_t = rocke_b_add(
+                                b, ctx->wave_row_base, rocke__mfma_32x32_c_col(b, ctx->lane, 0));
+                            qp_r = rocke_b_add(
+                                b,
+                                ctx->qb_start_pos,
+                                rocke_b_div(b, q_row_t, rocke_b_const_i32(b, ctx->NQK)));
+                            /* qh_r = kv_head*NQK + q_row_t%NQK (mul before mod). */
+                            rocke_value_t* qh_mul
+                                = rocke_b_mul(b, ctx->kv_head_idx, rocke_b_const_i32(b, ctx->NQK));
+                            rocke_value_t* qh_mod
+                                = rocke_b_mod(b, q_row_t, rocke_b_const_i32(b, ctx->NQK));
+                            rocke_value_t* qh_r = rocke_b_add(b, qh_mul, qh_mod);
+                            /* row_ok = land(qp<q_len, qh<NUM_QH[, q_row_t<VALID_ROWS]).
+                             * Skip the VALID_ROWS guard when VALID_ROWS == BLOCK_M. */
+                            rocke_value_t* ok_pos = rocke_b_cmp_lt(b, qp_r, ctx->cur_batch_q_len);
+                            rocke_value_t* ok_qh = rocke_b_cmp_lt(b, qh_r, ctx->num_qh_p);
+                            rocke_value_t* ok_inner = rocke_b_land(b, ok_pos, ok_qh);
+                            if(ctx->VALID_ROWS < ctx->BLOCK_M)
+                            {
+                                rocke_value_t* ok_vr = rocke_b_cmp_lt(
+                                    b, q_row_t, rocke_b_const_i32(b, ctx->VALID_ROWS));
+                                row_ok = rocke_b_land(b, ok_inner, ok_vr);
+                            }
+                            else
+                            {
+                                row_ok = ok_inner;
+                            }
+                        }
+                        col_abs = rocke_b_add(b, group_tile_off, k_local);
+                        if(mask_fallback)
+                            causal_lim = rocke_b_add(b, ctx->context_len, qp_r);
+                        rocke_value_t* causal_ok = rocke_b_cmp_le(b, col_abs, causal_lim);
+                        rocke_value_t* in_prefix = rocke_b_cmp_lt(b, col_abs, max_seq_prefix_len);
+                        m_ok = rocke_b_land(b, rocke_b_land(b, row_ok, causal_ok), in_prefix);
+                        if(ctx->SLIDING_WINDOW > 0)
+                        {
+                            rocke_value_t* dist = rocke_b_sub(b, causal_lim, col_abs);
+                            m_ok = rocke_b_land(b, m_ok, rocke_b_cmp_lt(b, dist, sw_const));
+                        }
                     }
                     rocke_value_t* s_raw = rocke_b_vec_extract(b, st_regs[n], reg);
-                    rocke_value_t* s_scaled = rocke_b_fmul(b, s_raw, qk_scale);
+                    rocke_value_t* s_scaled;
+                    if(ctx->ALIBI_DESIGN == ROCKE_GFX942_ATTN2D_AD_FMA_TILE)
+                        s_scaled = rocke_b_fma(
+                            b, s_raw, qk_scale, fh_ad_tile_term(ctx, ad_fma_base, n, reg));
+                    else if(ctx->ALIBI_DESIGN == ROCKE_GFX942_ATTN2D_AD_FMA_SPLIT)
+                        s_scaled = rocke_b_fma(b, s_raw, qk_scale, ctx->ad_e[reg]);
+                    else
+                        s_scaled = rocke_b_fmul(b, s_raw, qk_scale);
                     if(ctx->USE_SOFTCAP)
                     {
                         s_scaled = rocke_b_fmul(b, fh_apply_softcap(ctx, s_scaled), rcp_ln2);
                     }
                     rocke_value_t* score = rocke_b_select(b, m_ok, s_scaled, neg_inf);
-                    if(ctx->USE_ALIBI)
+                    if(ctx->LEGACY_ALIBI)
                     {
                         /* slope * (col_abs - causal_lim) * RCP_LN2 (2825-2829). */
                         rocke_value_t* pos_off = rocke_b_sub(b, col_abs, causal_lim);
                         rocke_value_t* pos_f = rocke_b_sitofp_f32(b, pos_off);
                         rocke_value_t* add_term
-                            = rocke_b_fmul(b, rocke_b_fmul(b, st_alibi_slope_iter, pos_f), rcp_ln2);
+                            = rocke_b_fmul(b, rocke_b_fmul(b, slope_for_lane, pos_f), rcp_ln2);
                         score = rocke_b_fadd(b, score, add_term);
                     }
                     if(ctx->USE_QQ_BIAS)
@@ -660,9 +825,23 @@ void rocke_gfx942_attn2d_emit_kv_body(rocke_gfx942_attn2d_build_ctx_t* ctx)
                         st_scores0[n][reg] = score;
                     else
                         st_scores1[n][reg] = score;
-                    st_local_max = rocke_b_fmax(b, st_local_max, score);
+                    if(ctx->AD_SPLIT)
+                        ad_nmax[n] = rocke_b_fmax(b, ad_nmax[n], score);
+                    else
+                        st_local_max = rocke_b_fmax(b, st_local_max, score);
                 }
             }
+        }
+        /* Split arms: the scores lack the per-row offset of each 32-key block;
+         * add it to the block's max and fold it into the exp2 offset below, so m
+         * and l stay exact. */
+        rocke_value_t* ad_T[ROCKE_GFX942_ATTN2D_MAX_N_TILES];
+        if(ctx->AD_SPLIT)
+        {
+            rocke_attn_alibi_split_tile_offsets(
+                b, ctx->ad_slope_l2, tile_off, ctx->ad_anchor, QK_N_TILES, ad_T);
+            for(int n = 0; n < QK_N_TILES; ++n)
+                st_local_max = rocke_b_fmax(b, st_local_max, rocke_b_fadd(b, ad_nmax[n], ad_T[n]));
         }
         /* cross-half max exchange + online max (Python 2853-2858). */
         rocke_value_t* st_remote_max = rocke_b_warp_shuffle_xor(b, st_local_max, 32);
@@ -670,6 +849,10 @@ void rocke_gfx942_attn2d_emit_kv_body(rocke_gfx942_attn2d_build_ctx_t* ctx)
         rocke_value_t* st_m_raw = rocke_b_fmax(b, ctx->m_cur[0], st_tile_max);
         rocke_value_t* st_ok = rocke_b_fcmp(b, "ogt", st_m_raw, neg_inf);
         rocke_value_t* st_m_new = rocke_b_select(b, st_ok, st_m_raw, zero_f);
+        rocke_value_t* ad_moff[ROCKE_GFX942_ATTN2D_MAX_N_TILES];
+        if(ctx->AD_SPLIT)
+            for(int n = 0; n < QK_N_TILES; ++n)
+                ad_moff[n] = rocke_b_fsub(b, st_m_new, ad_T[n]);
         /* Split cfvst: issue the V loads now so they overlap the exp2 pass. */
         void* cfvst_payload = (ctx->TRANSPOSED_V_STORE && ctx->CFV_STORE_SPLIT)
                                   ? rocke_gfx942_attn2d_cfvst_load_v_regs(ctx, ctx->kv_tile_iv)
@@ -686,7 +869,8 @@ void rocke_gfx942_attn2d_emit_kv_body(rocke_gfx942_attn2d_build_ctx_t* ctx)
                 {
                     rocke_value_t* score
                         = (group_idx == 0) ? st_scores0[n][reg] : st_scores1[n][reg];
-                    rocke_value_t* p_t = rocke_b_exp2(b, rocke_b_fsub(b, score, st_m_new));
+                    rocke_value_t* p_off = ctx->AD_SPLIT ? ad_moff[n] : st_m_new;
+                    rocke_value_t* p_t = rocke_b_exp2(b, rocke_b_fsub(b, score, p_off));
                     pt32[n * 16 + reg] = p_t;
                     st_l_local = rocke_b_fadd(b, st_l_local, p_t);
                 }
@@ -888,7 +1072,7 @@ void rocke_gfx942_attn2d_emit_kv_body(rocke_gfx942_attn2d_build_ctx_t* ctx)
                     s_scaled = rocke_b_fmul(b, fh_apply_softcap(ctx, s_scaled), rcp_ln2);
                 }
                 rocke_value_t* score = rocke_b_select(b, m_ok, s_scaled, neg_inf);
-                if(ctx->USE_ALIBI)
+                if(ctx->LEGACY_ALIBI)
                 {
                     rocke_value_t* pos_off = rocke_b_sub(b, col_abs, causal_lim);
                     rocke_value_t* pos_f = rocke_b_sitofp_f32(b, pos_off);
@@ -981,7 +1165,7 @@ void rocke_gfx942_attn2d_emit_kv_body(rocke_gfx942_attn2d_build_ctx_t* ctx)
             rocke_value_t* acc_per_atom[ROCKE_GFX942_ATTN2D_MAX_REGS_PER_LANE];
             for(int atom = 0; atom < M_ATOMS_PER_WARP; ++atom)
             {
-                acc_per_atom[atom] = rocke_b_zero_vec_f32(b, 4);
+                acc_per_atom[atom] = fh_ad_qk_init(ctx, ad_seed_base, n, atom);
             }
             for(int k = 0; k < QK_K_ITERS; ++k)
             {
@@ -1069,6 +1253,9 @@ void rocke_gfx942_attn2d_emit_kv_body(rocke_gfx942_attn2d_build_ctx_t* ctx)
          * ============================================================ */
         rocke_value_t* masked[ROCKE_GFX942_ATTN2D_MAX_N_TILES]
                              [ROCKE_GFX942_ATTN2D_MAX_REGS_PER_LANE]; /* [n][reg] */
+        rocke_value_t* ad_fma_base[ROCKE_GFX942_ATTN2D_MAX_REGS_PER_LANE];
+        if(ctx->ALIBI_DESIGN == ROCKE_GFX942_ATTN2D_AD_FMA_TILE)
+            fh_ad_tile_base(ctx, tile_off, ad_fma_base);
         for(int reg = 0; reg < REGS_PER_LANE; ++reg)
         {
             int atom = reg / 4;
@@ -1100,13 +1287,20 @@ void rocke_gfx942_attn2d_emit_kv_body(rocke_gfx942_attn2d_build_ctx_t* ctx)
                     m_ok = rocke_b_land(b, m_ok, rocke_b_cmp_lt(b, dist, sw_const));
                 }
                 rocke_value_t* s_raw = rocke_b_vec_extract(b, S_n[n][atom], in_atom);
-                rocke_value_t* s_scaled = rocke_b_fmul(b, s_raw, qk_scale);
+                rocke_value_t* s_scaled;
+                if(ctx->ALIBI_DESIGN == ROCKE_GFX942_ATTN2D_AD_FMA_TILE)
+                    s_scaled = rocke_b_fma(
+                        b, s_raw, qk_scale, fh_ad_tile_term(ctx, ad_fma_base, n, reg));
+                else if(ctx->ALIBI_DESIGN == ROCKE_GFX942_ATTN2D_AD_FMA_SPLIT)
+                    s_scaled = rocke_b_fma(b, s_raw, qk_scale, ctx->ad_e16[reg][n]);
+                else
+                    s_scaled = rocke_b_fmul(b, s_raw, qk_scale);
                 if(ctx->USE_SOFTCAP)
                 {
                     s_scaled = rocke_b_fmul(b, fh_apply_softcap(ctx, s_scaled), rcp_ln2);
                 }
                 rocke_value_t* score = rocke_b_select(b, m_ok, s_scaled, neg_inf);
-                if(ctx->USE_ALIBI)
+                if(ctx->LEGACY_ALIBI)
                 {
                     /* slope * (col_abs - causal_lim) * RCP_LN2 (lines 4415-4418). */
                     rocke_value_t* pos_off = rocke_b_sub(b, col_abs, causal_lim);
@@ -1147,6 +1341,7 @@ void rocke_gfx942_attn2d_emit_kv_body(rocke_gfx942_attn2d_build_ctx_t* ctx)
          *  per-row max via cross-lane butterfly (lines 4446-4462)
          * ============================================================ */
         rocke_value_t* m_new[ROCKE_GFX942_ATTN2D_MAX_REGS_PER_LANE];
+        rocke_value_t* ad_T16[ROCKE_GFX942_ATTN2D_MAX_REGS_PER_LANE];
         rocke_value_t* s_local[ROCKE_GFX942_ATTN2D_MAX_REGS_PER_LANE]
                               [ROCKE_GFX942_ATTN2D_MAX_N_TILES];
         for(int reg = 0; reg < REGS_PER_LANE; ++reg)
@@ -1159,6 +1354,18 @@ void rocke_gfx942_attn2d_emit_kv_body(rocke_gfx942_attn2d_build_ctx_t* ctx)
                 local_max = rocke_b_fmax(b, local_max, v);
             }
             rocke_value_t* tile_max = fh_warp_xor_reduce_max(ctx, local_max);
+            if(ctx->AD_SPLIT)
+            {
+                /* Split arms: add the row's tile offset (log2 units) to the max;
+                 * the exp2 below subtracts it from m (exact m and l). */
+                rocke_attn_alibi_split_tile_offsets(b,
+                                                    ctx->ad_slope_l2_r[reg],
+                                                    tile_off,
+                                                    ctx->hoist_state_row[reg],
+                                                    1,
+                                                    &ad_T16[reg]);
+                tile_max = rocke_b_fadd(b, tile_max, ad_T16[reg]);
+            }
             /* online-softmax update: full_max_raw = fmax(m_vals[reg], tile_max);
              * ok = full_max_raw > -inf; m_new = select(ok, full_max_raw, 0). */
             rocke_value_t* full_max_raw = rocke_b_fmax(b, ctx->m_cur[reg], tile_max);
@@ -1176,7 +1383,9 @@ void rocke_gfx942_attn2d_emit_kv_body(rocke_gfx942_attn2d_build_ctx_t* ctx)
             rocke_value_t* sum_p = zero_f;
             for(int n = 0; n < QK_N_TILES; ++n)
             {
-                rocke_value_t* p = rocke_b_exp2(b, rocke_b_fsub(b, s_local[reg][n], m_new[reg]));
+                rocke_value_t* p_off
+                    = ctx->AD_SPLIT ? rocke_b_fsub(b, m_new[reg], ad_T16[reg]) : m_new[reg];
+                rocke_value_t* p = rocke_b_exp2(b, rocke_b_fsub(b, s_local[reg][n], p_off));
                 /* Python stores p_regs_f32[reg][n] = p ALWAYS (line 4474), then
                  * only writes P_lds when not REGISTER_PV. The register-P PV bucket
                  * consumes p_regs_f32 flattened [reg*QK_N_TILES + n]. */

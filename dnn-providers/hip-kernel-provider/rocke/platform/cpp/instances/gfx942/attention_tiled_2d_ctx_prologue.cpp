@@ -100,6 +100,32 @@ static bool rocke_a2d_require_tiled_attention_arch(rocke_ir_builder_t* b, const 
     return false;
 }
 
+/* Python _alibi_design(spec): the spec's alibi_design, else the measured
+ * default of the paths that took ALiBi only with the arms (mask-limit softmax of
+ * the x8 flash family, 16x16 register-P). NONE keeps the per-score add of the
+ * paths that took ALiBi before. Runs after validation, so a set design is a
+ * known one. */
+static int rocke_gfx942_attn2d_resolve_alibi_design(const rocke_attention_tiled_2d_spec_t* spec)
+{
+    const char* design = spec->alibi_design;
+    if(design == NULL && spec->use_alibi)
+    {
+        if(spec->use_transposed_mask_limit)
+            design = "fma_split";
+        else if(spec->use_register_pv && !spec->use_mfma_32x32x8)
+            design = "fma_tile";
+    }
+    if(design == NULL)
+        return ROCKE_GFX942_ATTN2D_AD_NONE;
+    if(strcmp(design, "seed_tile") == 0)
+        return ROCKE_GFX942_ATTN2D_AD_SEED_TILE;
+    if(strcmp(design, "fma_tile") == 0)
+        return ROCKE_GFX942_ATTN2D_AD_FMA_TILE;
+    if(strcmp(design, "seed_split") == 0)
+        return ROCKE_GFX942_ATTN2D_AD_SEED_SPLIT;
+    return ROCKE_GFX942_ATTN2D_AD_FMA_SPLIT;
+}
+
 /* ===================================================================== *
  *  rocke_gfx942_attn2d_build_ctx_init -- the prologue (lines 1104-1912)
  * ===================================================================== */
@@ -118,6 +144,59 @@ bool rocke_gfx942_attn2d_build_ctx_init(rocke_gfx942_attn2d_build_ctx_t* ctx,
     ctx->b = b;
     ctx->spec = spec;
     ctx->arch = arch;
+
+    /* ---- alibi_design (Python __post_init__): a known design, on ALiBi, and
+     * only where the arms run. The arms fold the term into the scale op or the
+     * QK accumulator, so nothing may sit between the scale and the term. ---- */
+    if(spec->alibi_design != NULL)
+    {
+        const char* why = NULL;
+        char msg[ROCKE_ERR_MSG_CAP];
+        if(rocke_attn_alibi_design_token(spec->alibi_design) == NULL)
+        {
+            snprintf(msg,
+                     sizeof(msg),
+                     "alibi_design must be one of ['fma_split', 'fma_tile', 'seed_split', "
+                     "'seed_tile'] or None (got '%s')",
+                     spec->alibi_design);
+            why = msg;
+        }
+        else if(!spec->use_alibi)
+            why = "alibi_design requires use_alibi";
+        else if(spec->has_softcap)
+        {
+            snprintf(msg,
+                     sizeof(msg),
+                     "alibi_design=%s is not supported on softcap: softcap applies between "
+                     "the scale and the ALiBi term",
+                     spec->alibi_design);
+            why = msg;
+        }
+        else if(spec->use_qq_bias)
+        {
+            snprintf(msg,
+                     sizeof(msg),
+                     "alibi_design=%s is not supported with QQ bias: ALiBi plus a score bias "
+                     "is out of scope",
+                     spec->alibi_design);
+            why = msg;
+        }
+        else if((spec->use_mfma_32x32 || spec->use_mfma_32x32x8) && !spec->use_transposed_qk_32x32)
+        {
+            snprintf(msg,
+                     sizeof(msg),
+                     "alibi_design=%s is not supported on the non-transposed 32x32 path: no "
+                     "fast variant runs on it",
+                     spec->alibi_design);
+            why = msg;
+        }
+        if(why != NULL)
+        {
+            b->status = ROCKE_ERR_VALUE;
+            snprintf(b->err, ROCKE_ERR_MSG_CAP, "%s", why);
+            return false;
+        }
+    }
 
     /* ---- require_tiled_attention_arch(arch) (lines 1139-1141) ---- */
     if(!rocke_a2d_require_tiled_attention_arch(b, arch))
@@ -190,6 +269,12 @@ bool rocke_gfx942_attn2d_build_ctx_init(rocke_gfx942_attn2d_build_ctx_t* ctx,
     ctx->USE_SINKS = spec->use_sinks;
     ctx->USE_ALIBI = spec->use_alibi;
     ctx->USE_QQ_BIAS = spec->use_qq_bias;
+    ctx->ALIBI_DESIGN = rocke_gfx942_attn2d_resolve_alibi_design(spec);
+    ctx->LEGACY_ALIBI = spec->use_alibi && ctx->ALIBI_DESIGN == ROCKE_GFX942_ATTN2D_AD_NONE;
+    ctx->AD_SEED = ctx->ALIBI_DESIGN == ROCKE_GFX942_ATTN2D_AD_SEED_TILE
+                   || ctx->ALIBI_DESIGN == ROCKE_GFX942_ATTN2D_AD_SEED_SPLIT;
+    ctx->AD_SPLIT = ctx->ALIBI_DESIGN == ROCKE_GFX942_ATTN2D_AD_SEED_SPLIT
+                    || ctx->ALIBI_DESIGN == ROCKE_GFX942_ATTN2D_AD_FMA_SPLIT;
 
     ctx->TRANSPOSED_SCALAR_STATE = spec->use_transposed_scalar_state;
     ctx->TRANSPOSED_INVARIANT_HOIST = spec->use_transposed_invariant_hoist;
@@ -979,6 +1064,85 @@ rocke_value_t* rocke_gfx942_attn2d_pack_p_a32(rocke_gfx942_attn2d_build_ctx_t* c
     }
 }
 
+rocke_value_t* rocke_gfx942_attn2d_f32_vec(rocke_ir_builder_t* b, rocke_value_t* const* vals, int n)
+{
+    rocke_value_t* v = rocke_b_zero_vec_f32(b, n);
+    for(int i = 0; i < n; ++i)
+        v = rocke_b_vec_insert(b, v, vals[i], i);
+    return v;
+}
+
+/* ALiBi arm state, loop-invariant (Python ad_* before the KV loop). Transposed
+ * 32x32: one query per lane; the key of C element ``reg`` of 32-key block ``n``
+ * is ``tile_off + n*32 + (lane / 32) * 4 + (reg / 4) * 8 + reg % 4``. 16x16: one
+ * query per row slot, key ``tile_off + n*16 + lane % 16``. The anchor is the
+ * query's causal diagonal, as in the per-score add (hipDNN SEM-021, top-left). */
+static void rocke_gfx942_attn2d_emit_alibi_arm_state(rocke_gfx942_attn2d_build_ctx_t* ctx)
+{
+    rocke_ir_builder_t* b = ctx->b;
+    if(ctx->ALIBI_DESIGN == ROCKE_GFX942_ATTN2D_AD_NONE)
+        return;
+    rocke_value_t* qk_scale = ctx->qk_scale_v;
+    if(ctx->AD_TRANSPOSED)
+    {
+        rocke_value_t* row
+            = rocke_b_add(b, ctx->wave_row_base, rocke__mfma_32x32_c_col(b, ctx->lane, 0));
+        rocke_value_t* nqk_a = rocke_b_const_i32(b, ctx->NQK);
+        rocke_value_t* qp = rocke_b_add(b, ctx->qb_start_pos, rocke_b_div(b, row, nqk_a));
+        rocke_value_t* qh_mul = rocke_b_mul(b, ctx->kv_head_idx, rocke_b_const_i32(b, ctx->NQK));
+        rocke_value_t* qh_mod = rocke_b_mod(b, row, rocke_b_const_i32(b, ctx->NQK));
+        rocke_value_t* qh = rocke_b_add(b, qh_mul, qh_mod);
+        ctx->ad_anchor = rocke_b_add(b, ctx->context_len, qp);
+        ctx->ad_slope_l2 = rocke_attn_alibi_slope_log2(b, qh, ctx->num_qh_p, ctx->alibi_slopes_ptr);
+        ctx->ad_u = ctx->AD_SEED ? rocke_b_fdiv(b, ctx->ad_slope_l2, qk_scale) : ctx->ad_slope_l2;
+        rocke_value_t* lane_half32 = (ctx->lane_half32_v != NULL)
+                                         ? ctx->lane_half32_v
+                                         : rocke_b_div(b, ctx->lane, rocke_b_const_i32(b, 32));
+        ctx->ad_key_off = rocke_b_mul(b, lane_half32, rocke_b_const_i32(b, 4));
+        if(ctx->AD_SPLIT)
+        {
+            rocke_attn_alibi_split_lane_terms(b, ctx->ad_u, ctx->ad_key_off, ctx->ad_e);
+            /* One accumulator init shared by every 32-key block. */
+            if(ctx->AD_SEED)
+                ctx->ad_seed = rocke_gfx942_attn2d_f32_vec(b, ctx->ad_e, 16);
+        }
+        return;
+    }
+    const int REGS_PER_LANE = ctx->REGS_PER_LANE;
+    const int QK_N_TILES = ctx->QK_N_TILES;
+    for(int r = 0; r < REGS_PER_LANE; ++r)
+        ctx->ad_slope_l2_r[r] = rocke_b_fmul(b, ctx->hoist_q_head[r], ctx->rcp_ln2_v);
+    for(int r = 0; r < REGS_PER_LANE; ++r)
+        ctx->ad_u_r[r] = ctx->AD_SEED ? rocke_b_fdiv(b, ctx->ad_slope_l2_r[r], qk_scale)
+                                      : ctx->ad_slope_l2_r[r];
+    rocke_value_t* lane_col = (ctx->lane_col_v != NULL)
+                                  ? ctx->lane_col_v
+                                  : rocke_b_mod(b, ctx->lane, rocke_b_const_i32(b, 16));
+    if(ctx->AD_SPLIT)
+    {
+        for(int r = 0; r < REGS_PER_LANE; ++r)
+            for(int n = 0; n < QK_N_TILES; ++n)
+            {
+                rocke_value_t* key = rocke_b_add(b, lane_col, rocke_b_const_i32(b, n * 16));
+                ctx->ad_e16[r][n] = rocke_b_fmul(b, ctx->ad_u_r[r], rocke_b_sitofp_f32(b, key));
+            }
+        if(ctx->AD_SEED)
+            for(int atom = 0; atom < ctx->M_ATOMS_PER_WARP; ++atom)
+                for(int n = 0; n < QK_N_TILES; ++n)
+                {
+                    rocke_value_t* vals[4];
+                    for(int i = 0; i < 4; ++i)
+                        vals[i] = ctx->ad_e16[atom * 4 + i][n];
+                    ctx->ad_seed16[atom][n] = rocke_gfx942_attn2d_f32_vec(b, vals, 4);
+                }
+    }
+    else
+    {
+        for(int r = 0; r < REGS_PER_LANE; ++r)
+            ctx->ad_rel_r[r] = rocke_b_sub(b, lane_col, ctx->hoist_state_row[r]);
+    }
+}
+
 /* ===================================================================== *
  *  LICM hoist of per-reg invariants (Python lines 3609-3651).
  *
@@ -1033,7 +1197,10 @@ void rocke_gfx942_attn2d_emit_licm_hoist(rocke_gfx942_attn2d_build_ctx_t* ctx)
         ctx->hoist_state_row[reg] = causal_lim;
     }
 
-    if(ctx->USE_ALIBI)
+    /* The transposed arms take one slope per lane below, not per reg. */
+    ctx->AD_TRANSPOSED = ctx->ALIBI_DESIGN != ROCKE_GFX942_ATTN2D_AD_NONE && ctx->USE_MFMA_32X32
+                         && ctx->TRANSPOSED_QK_32X32;
+    if(ctx->USE_ALIBI && !ctx->AD_TRANSPOSED)
     {
         rocke_value_t* slopes = ctx->alibi_slopes_ptr;
         for(reg = 0; reg < ctx->REGS_PER_LANE; ++reg)
@@ -1044,4 +1211,37 @@ void rocke_gfx942_attn2d_emit_licm_hoist(rocke_gfx942_attn2d_build_ctx_t* ctx)
             ctx->hoist_q_head[reg] = slope;
         }
     }
+
+    /* Transposed-32x32 per-lane query invariants (Python st_*), hoisted out of the
+     * KV loop under TRANSPOSED_INVARIANT_HOIST. */
+    rocke_value_t* st_qh = NULL;
+    if(ctx->USE_MFMA_32X32 && ctx->TRANSPOSED_QK_32X32 && ctx->TRANSPOSED_INVARIANT_HOIST)
+    {
+        rocke_value_t* st_q_row
+            = rocke_b_add(b, ctx->wave_row_base, rocke__mfma_32x32_c_col(b, ctx->lane, 0));
+        rocke_value_t* nqk_a = rocke_b_const_i32(b, ctx->NQK);
+        ctx->st_qp = rocke_b_add(b, ctx->qb_start_pos, rocke_b_div(b, st_q_row, nqk_a));
+        rocke_value_t* qh_mul = rocke_b_mul(b, ctx->kv_head_idx, rocke_b_const_i32(b, ctx->NQK));
+        rocke_value_t* qh_mod = rocke_b_mod(b, st_q_row, rocke_b_const_i32(b, ctx->NQK));
+        st_qh = rocke_b_add(b, qh_mul, qh_mod);
+        rocke_value_t* ok_pos = rocke_b_cmp_lt(b, ctx->st_qp, ctx->cur_batch_q_len);
+        rocke_value_t* ok_qh = rocke_b_cmp_lt(b, st_qh, ctx->num_qh_p);
+        rocke_value_t* ok_inner = rocke_b_land(b, ok_pos, ok_qh);
+        if(ctx->VALID_ROWS < ctx->BLOCK_M)
+        {
+            rocke_value_t* ok_vr
+                = rocke_b_cmp_lt(b, st_q_row, rocke_b_const_i32(b, ctx->VALID_ROWS));
+            ctx->st_row_ok = rocke_b_land(b, ok_inner, ok_vr);
+        }
+        else
+        {
+            ctx->st_row_ok = ok_inner;
+        }
+        ctx->st_causal_lim = rocke_b_add(b, ctx->context_len, ctx->st_qp);
+        if(ctx->LEGACY_ALIBI)
+            ctx->st_alibi_slope
+                = rocke_attn_alibi_slope(b, st_qh, ctx->num_qh_p, ctx->alibi_slopes_ptr);
+    }
+
+    rocke_gfx942_attn2d_emit_alibi_arm_state(ctx);
 }
