@@ -7961,7 +7961,10 @@ class Solution(collections.abc.Mapping):
     state["LdsNumBytes"] = ldsNumBytes
     ldsSize = ldsNumBytes
     if ldsSize > state["MaxLDS"]:
-      reject(state, printRejectionReason, "Kernel Uses %u > %u bytes of LDS" % ( ldsSize, state["MaxLDS"]))
+      ldsWhy = ""
+      if tdmStoreBytes:
+        ldsWhy = "; TDMStoreInst stages a %u-byte D tile from LDS offset %u" % (tdmStoreBytes, state["_TDMStoreLdsOffset"])
+      reject(state, printRejectionReason, "Kernel Uses %u > %u bytes of LDS%s" % ( ldsSize, state["MaxLDS"], ldsWhy))
       state["ValidDepthU"] = False
       state[Solution.DCP_LDS_CAPACITY_REFUSED] = ldsSize
       return
