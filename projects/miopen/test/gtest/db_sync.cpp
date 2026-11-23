@@ -45,6 +45,7 @@
 #include <miopen/filesystem.hpp>
 
 #include <algorithm>
+#include <cctype>
 #include <cstdlib>
 #include <regex>
 #include <iterator>
@@ -832,6 +833,8 @@ void CheckFDBEntry(size_t thread_index,
                    miopen::RamDb& perf_db_rw,
                    WorkspaceFixes& workspace_fixes,
                    const miopen::ExecutionContext& _ctx,
+                   miopen::Handle* coop_handle,
+                   std::atomic<size_t>& coop_workspace_skips,
                    std::atomic<size_t>& counter)
 {
     fs::path fdb_file_path, pdb_file_path, kdb_file_path;
@@ -908,6 +911,28 @@ void CheckFDBEntry(size_t thread_index,
 #endif
                 if(fdb_data.workspace == solution.workspace_sz)
                     return;
+                // Some solvers size their workspace by cooperative launch support (ConvWinoFuryRxS
+                // adds a sync buffer). The system find-dbs come from devices that support it. On a
+                // device that doesn't, skip the comparison when the find-db value is what a
+                // cooperative launch device would compute.
+                if(coop_handle != nullptr)
+                {
+                    auto coop_ctx = ctx;
+                    coop_ctx.SetStream(coop_handle);
+                    const auto coop_solution =
+                        solv.FindSolution(coop_ctx, problem, db, {}, perf_cfg);
+                    if(coop_solution.Succeeded() &&
+                       fdb_data.workspace == coop_solution.workspace_sz)
+                    {
+                        MIOPEN_LOG_I("Skipping workspace check fdb-key:"
+                                     << kinder.first << ", solver:" << val.solver_id << ", find-db "
+                                     << fdb_data.workspace
+                                     << " needs cooperative launch, this device needs "
+                                     << solution.workspace_sz);
+                        ++coop_workspace_skips;
+                        return;
+                    }
+                }
                 if(env::enabled(MIOPEN_DBSYNC_CLEAN))
                 {
                     MIOPEN_LOG_W("Wrong workspace found fdb-key:"
@@ -1096,7 +1121,13 @@ struct TestHandle : Handle
     }
 #endif
 
-    size_t num_cu = 0;
+    bool CooperativeLaunchSupported() const override
+    {
+        return assume_cooperative_launch || Handle::CooperativeLaunchSupported();
+    }
+
+    size_t num_cu                  = 0;
+    bool assume_cooperative_launch = false;
 };
 } // namespace miopen
 
@@ -1170,6 +1201,20 @@ void StaticFDBSync(const std::string& arch, const size_t num_cu)
     auto _ctx = miopen::ExecutionContext{};
     _ctx.SetStream(&handle);
 
+    // On a device without cooperative launch, compare workspaces that depend on it against a
+    // handle that reports cooperative launch support (see CheckFDBEntry).
+    miopen::Handle* coop_handle = nullptr;
+    if(!handle.CooperativeLaunchSupported())
+    {
+        // NOLINTNEXTLINE (cppcoreguidelines-avoid-non-const-global-variables)
+        static miopen::TestHandle coop{num_cu};
+        coop.num_cu                    = num_cu;
+        coop.assume_cooperative_launch = true;
+        coop_handle                    = &coop;
+        std::cout << "Device has no cooperative launch support" << std::endl;
+    }
+    std::atomic<size_t> coop_workspace_skips = 0;
+
     std::atomic<size_t> counter = 0;
     const int total_threads =
         MIOPEN_DBSYNC_MAX_THREADS
@@ -1187,11 +1232,16 @@ void StaticFDBSync(const std::string& arch, const size_t num_cu)
                             std::ref(perf_db_rw),
                             std::ref(workspace_fixes),
                             std::ref(_ctx),
+                            coop_handle,
+                            std::ref(coop_workspace_skips),
                             std::ref(counter));
 
     for(auto idx = 0; idx < total_threads; ++idx)
         agents.at(idx).join();
     workspace_fixes.Apply(fdb_file_path);
+    if(coop_handle != nullptr)
+        std::cout << "Skipped workspace check for " << coop_workspace_skips
+                  << " find-db entries that match a cooperative launch device" << std::endl;
     EXPECT_TRUE(counter == fdb_data.size())
         << "Multi-threading error, work done is not equal to total work" << counter << " : "
         << fdb_data.size();
@@ -1215,6 +1265,18 @@ TEST_P(CPU_DBSync_NONE, StaticFDBSync)
 #endif
 }
 
+// Names each param <arch>_<num_cu> (for example gfx1151_0) instead of its position in the list, so
+// a filter that names one param, such as an arch exclusion in test_categories.yaml, keeps naming
+// the same arch when a param is added. Characters gtest rejects in a name become '_'.
+static std::string
+StaticFDBSyncParamName(const testing::TestParamInfo<CPU_DBSync_NONE::ParamType>& info)
+{
+    auto name = info.param.first + "_" + std::to_string(info.param.second);
+    std::replace_if(
+        name.begin(), name.end(), [](unsigned char c) { return std::isalnum(c) == 0; }, '_');
+    return name;
+}
+
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          CPU_DBSync_NONE,
                          testing::Values(std::make_pair("gfx908", 120),
@@ -1225,6 +1287,10 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
                                          std::make_pair("gfx950", 256),
                                          std::make_pair("gfx1030", 36),
                                          std::make_pair("gfx1100", 0),
+                                         // Only the 54-CU (27-WGP) gfx1101 ships a system DB
+                                         // (gfx110136). 27 makes StaticFDBSync skip the 24- and
+                                         // 30-WGP parts instead of failing on a missing file.
+                                         std::make_pair("gfx1101", 27),
                                          std::make_pair("gfx1102", 0),
                                          std::make_pair("gfx1151", 0),
                                          std::make_pair("gfx1200", 0),
@@ -1232,4 +1298,5 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
                                          // (gfx120140). 32 makes StaticFDBSync skip other CU
                                          // counts, such as the 56-CU part (28 WGP), instead of
                                          // failing on a missing file.
-                                         std::make_pair("gfx1201", 32)));
+                                         std::make_pair("gfx1201", 32)),
+                         StaticFDBSyncParamName);
