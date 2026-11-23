@@ -32,6 +32,7 @@
 
 #include "unit_test_device_precond_common.hpp"
 
+#include <optional>
 #include <string>
 
 using namespace precond_ut;
@@ -64,16 +65,16 @@ namespace
     };
 
     // Diagonally dominant pentadiagonal system. `offdiag` false keeps only the
-    // main diagonal. Imaginary parts are zero for real types. `diag` (when not zero)
+    // main diagonal. Imaginary parts are zero for real types. `diag` (when given)
     // replaces the main diagonal 4 + 0.25 * batch.
     template <typename T>
-    band_t make_band(int32_t m, int32_t batch, bool offdiag, double diag = 0.0)
+    band_t make_band(int32_t m, int32_t batch, bool offdiag, std::optional<double> diag = {})
     {
         band_t a;
         a.m = m;
         a.ds.resize(m);
         a.dl.resize(m);
-        a.d.assign(m, diag != 0.0 ? diag : 4.0 + 0.25 * batch);
+        a.d.assign(m, diag.value_or(4.0 + 0.25 * batch));
         a.du.resize(m);
         a.dw.resize(m);
         a.ds_i.resize(m);
@@ -153,7 +154,7 @@ namespace
                     << what << " padding row " << row << " batch " << b;
     }
 
-    // `diag` (when not zero) is the main diagonal of every system, see make_band.
+    // `diag` (when given) is the main diagonal of every system, see make_band.
     template <typename T>
     void run_case(rocsparse_handle               handle,
                   rocsparse_gpsv_interleaved_alg alg,
@@ -162,14 +163,14 @@ namespace
                   int32_t                        batch_stride,
                   bool                           offdiag,
                   bool                           check_solution,
-                  double                         diag = 0.0)
+                  std::optional<double>          diag = {})
     {
         SCOPED_TRACE(std::string(is_cplx<T> ? (is_single_precision<T> ? "c" : "z")
                                             : (is_single_precision<T> ? "s" : "d"))
                      + " alg=" + std::to_string(static_cast<int>(alg)) + " m=" + std::to_string(m)
                      + " batch=" + std::to_string(batch_count) + " stride="
                      + std::to_string(batch_stride) + (offdiag ? " pentadiagonal" : " diagonal")
-                     + (diag != 0.0 ? " diag=" + std::to_string(diag) : ""));
+                     + (diag ? " diag=" + std::to_string(*diag) : ""));
 
         band_t layout;
         layout.m            = m;
