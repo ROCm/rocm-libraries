@@ -649,6 +649,37 @@ def test_orient_gate_checks_context_orient_links_against_the_round(
     )
 
 
+def test_orient_gate_reports_extra_count_for_a_citation_in_two_places(
+    part, tmp_path, capsys
+):
+    clone = tmp_path / "clone"
+    (clone / "src").mkdir(parents=True)
+    (clone / "src" / "old.cpp").write_text("x\n")
+    env = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t"}
+    env.update(GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@t", HOME=str(tmp_path))
+    for args in (["init", "-q"], ["add", "."], ["commit", "-qm", "base"]):
+        subprocess.run(["git", "-C", str(clone), *args], check=True, env=env)
+    base = subprocess.run(
+        ["git", "-C", str(clone), "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    (tmp_path / "r1").mkdir()
+    rd = make_round(tmp_path / "r1", [(1, 0, "src/new.hpp")])
+    (rd / "PIN.md").write_text(f"CLONE: {clone}\nBASE: {base}\n")
+    (rd / "orient").mkdir()
+    (rd / "orient" / "a.md").write_text("Also touches `src/gone.hpp`.\n")
+    (rd / "CONTEXT.md").write_text("Removes `src/gone.hpp`.\n")
+    with pytest.raises(SystemExit) as exc:
+        run(part, "orient-gate", rd)
+    assert exc.value.code == 1
+    assert (
+        capsys.readouterr().out
+        == "not at base: src/gone.hpp (cited at CONTEXT.md:1, +1 more)\n"
+    )
+
+
 def test_every_ingestor_impact_surface_pattern_triggers_the_impact_lane(part):
     """IMPACT_PREFIXES must cover each non-outside SURFACE_TABLE pattern's literal prefix,
     or a change to that surface never reaches the IMPACT lane."""
