@@ -1,5 +1,42 @@
 # Changelog for hipconv
 
+## v0.5.1 - 2026-11-20
+
+### Added
+
+* `ConvParams::expected_output_size()` gives the output size p, q and e in 64 bits, and
+  `ConvParams::output_size_matches()` is true when the layer passes `is_valid()` and p, q and e
+  equal `expected_output_size()`.
+
+### Changed
+
+* Every function that takes a `Device` rejects a `cu_count` above `MAX_CU_COUNT`, 1024, as it
+  rejects one below 1.
+* `get_valid_configs` returns no kernel, and `is_applicable` returns false, for a layer with a
+  tensor above `MAX_TENSOR_ELEMENTS`, 2^38 elements.
+* `get_workspace_size`, `is_deterministic`, `get_weighted_throughput_index`, `get_tolerance` and
+  `get_recursive_summation_tolerance` throw `std::invalid_argument` for a layer that
+  `get_valid_configs` rejects as invalid.
+* `ConvParams::unfolded()` returns a layer unchanged if it fails `is_valid()`, sets a p, q or e
+  that differs from the computed size, or has a computed size past `INT_MAX`.
+
+### Fixed
+
+* `get_valid_configs`, `find_config`, `is_applicable`, `ConvLaunch::make` and `launch` reject a
+  layer that fails `is_valid()` or whose p, q or e is unset (-1) or differs from the computed
+  size; such layers had matched kernels or divided by zero.
+* `ConvParams::compute_output_size()` computes in 64 bits, so a layer whose w + 2 × pad_w, or the
+  same sum on another axis, exceeds `INT_MAX` gets the correct output size.
+* `ConvParams::compute_output_size_checked()` returns false when an output size exceeds `INT_MAX`.
+* `direct_wgrad` (CDNA 4) rejects a wgrad layer whose kh × kw × C/g exceeds `INT_MAX`. Before, it
+  accepted such a layer and the launch faulted.
+* CDNA 4 `direct`, `direct_flex`, `direct_l1`, `direct_wgrad`, `patch_embed`, `grouped`,
+  `grouped_wgrad` and `depthwise_wgrad_hankel` reject a layer whose tile counts, byte spans or grid
+  size overflow 32 bits; it had written wrong output or failed to run.
+* CDNA 5 `direct_wgrad`, `grouped`, `grouped_wgrad`, `depthwise_1d_toeplitz` and
+  `depthwise_wgrad_hankel` reject a layer within a few rows or columns of 2^31, with 2^32 or more dW
+  elements, or past HIP's grid limits; such a layer had written wrong output or failed to launch.
+
 ## v0.5.0 - 2026-11-04
 
 ### Added

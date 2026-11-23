@@ -41,6 +41,10 @@ namespace hipblaslt_ext
     class GemmInstance;
     class Gemm;
     class GroupedGemm;
+    namespace detail
+    {
+        struct GemmInputsAccess;
+    }
 
     using HipBufferDeleter = hipError_t (*)(void*);
     using HipBufferPtr     = std::unique_ptr<void, HipBufferDeleter>;
@@ -381,6 +385,7 @@ namespace hipblaslt_ext
     private:
         friend Gemm;
         friend GroupedGemm;
+        friend detail::GemmInputsAccess; // library-internal fields without a public setter
         class GemmInputsImpl;
         std::unique_ptr<GemmInputsImpl> pimpl;
     };

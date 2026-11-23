@@ -35,6 +35,7 @@ from ..Common import roundUp, log2, ceilDivide
 from ..Common.DataType import DataType
 from ..Common.MxScaleLayout import mxFreePhase, mxFreeTile, mxLraFreeShift, mxSegmentSplit
 from ..SolutionStructs.segment_interleave import wave_tile_span
+from ..Common.LdsReadPlan import local_read_input_per_thread
 from dataclasses import dataclass
 
 
@@ -848,7 +849,8 @@ class LraTileAssignmentMFMA(LraTileAssignment):
             noUnrollOffset = False
 
         lrvw             = kernel["LocalReadVectorWidthMXS"] if ("MXS" in tc) else kernel[f"LocalReadVectorWidth{tc}"]
-        inputPerThread   = lrvw if not writer.states.inTailLoop else kernel["MIInputPerThread%s"%tc]
+        inputPerThread   = local_read_input_per_thread(
+            lrvw, kernel["MIInputPerThread%s"%tc], writer.states.inTailLoop)
         # workaround for gfx950 + fp4
         # use MIInputPerThread if lrvw < MIInputPerThread
         if isgfx950 and tP["bpeDS"] == 0.5 and lrvw < kernel["MIInputPerThread%s"%tc]:
@@ -869,7 +871,8 @@ class LraTileAssignmentMFMA(LraTileAssignment):
         else:
             dividedForBlkId  = (matrixInstTO * kernel["MatrixInstBN"]) if (tile01 == 0) else matrixInstTO
         dividedForWaveId = waveWidth if (tile01 == 0) else (waveWidth * kernel["MIWaveGroup"][0])
-        vectorWidth      = 1 if enableLDSTr else kernel["VectorWidth%s"%tc]
+        contiguousA = kernel.get("WaveTileContiguousA", False) and tc in ("A", "MXSA")
+        vectorWidth      = 1 if enableLDSTr or contiguousA else kernel["VectorWidth%s"%tc]
         if isDTVAB:
             if tP["tlu"]:
                 # DTV + TLU case, glvw and vw are applied to the same direction. No need to apply both.
@@ -924,11 +927,11 @@ class LraTileAssignmentMFMA(LraTileAssignment):
                 strideK = 16
             else:
                 strideK = (mt + LdsPad) * 16
-        elif kernel["UseF32XEmulation"] and not (kernel["MatrixInstM"] == 16 and kernel["MatrixInstK"] == 16):
-            if umlds:
-                strideK = 4
-            else:
-                strideK = (mt + LdsPad) * 4
+        elif kernel["UseF32XEmulation"]:
+            inputPerThread = local_read_input_per_thread(
+                lrvw, kernel["MIInputPerThread%s"%tc], writer.states.inTailLoop,
+                True, kernel["MatrixInstM"], kernel["MatrixInstK"])
+            strideK = inputPerThread if umlds else (mt + LdsPad) * inputPerThread
         # sparse
         if writer.states.asmCaps["HasSWMMAC"] and writer.states.asmCaps["HasSWMMAC_gfx1250"]:
             if (kernel["ProblemType"]["Sparse"] == 1 and tP["isB"]) or (kernel["ProblemType"]["Sparse"] == 2 and tP["isA"]) or tP["isM"]:
@@ -941,6 +944,9 @@ class LraTileAssignmentMFMA(LraTileAssignment):
            strideWave = matrixInstT * vectorWidth
         else:
            strideWave = matrixInstT * num1DBlocks * strideTile * vectorWidth
+
+        if contiguousA:
+            strideWave *= kernel["MIWaveTile"][tile01]
 
         # When one wave's read spans a whole LDS component, the component jump lives in the wave
         # stride. A narrower VW straddles components; then LocalRead applies the jump instead, so
@@ -955,7 +961,7 @@ class LraTileAssignmentMFMA(LraTileAssignment):
                 (tc == "B" and not _segOff.get("bBaseline", False)))
         if segILActive:
             _compCols  = kernel["MacroTile%u" % tile01] // (kernel["NumWaves"] // 2)
-            segILWaveSpansComp = wave_tile_span(kernel, tc, vectorWidth) >= _compCols
+            segILWaveSpansComp = contiguousA or wave_tile_span(kernel, tc, vectorWidth) >= _compCols
             # portSplitA (VWA==WaveTileA/2): the A0->A1 segment jump is carried on the wave stride, so force it on.
             if tc == "A" and _segOff.get("portSplitA", False):
                 segILWaveSpansComp = True
@@ -1165,6 +1171,8 @@ class LraTileAssignmentMFMA(LraTileAssignment):
                     # both blocks (lower/upper half-wave), which the WMMA then selects between
                     # via matrix_{a,b}_scale. hiOffset = full tile-half span in bytes.
                     hiOffset = matrixInstT * num1DBlocks * num1DWaves * vectorWidth * strideTile
+                    if contiguousA:
+                        hiOffset = matrixInstT * vectorWidth * strideTile
                     # axis-neutral: tile01==0 -> M axis (MXSA), tile01==1 -> N axis (MXSB)
                     tileDim = "M" if tile01 == 0 else "N"
                     module.add(vectorStaticDivide(dummy, dividendReg, matrixInstTO, tmpVgprRes, \

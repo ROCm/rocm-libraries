@@ -45,7 +45,24 @@ using namespace hip_kernel_provider;
 using namespace hip_kernel_provider::kernel_ingestor_engine::testing;
 using namespace hip_kernel_provider::kernel_ingestor_engine::testing::bwd_device;
 
-/// Skips the running test unless the device is a gfx950; a test already skipped stays as it is.
+/// Skips the running test unless the device is a gfx950, a gfx90a or a gfx942; a test already skipped stays
+/// as it is.
+void skipUnlessLowestFiniteBiasArch()
+{
+    if(::testing::Test::IsSkipped())
+    {
+        return;
+    }
+    const auto arch = packedArchDeviceProperties().gcnArchName;
+    if(arch.rfind("gfx950", 0) != 0 && arch.rfind("gfx90a", 0) != 0 && arch.rfind("gfx942", 0) != 0)
+    {
+        GTEST_SKIP() << "the bias edge-value cases run on a gfx950, a gfx90a or a gfx942 device; "
+                     << arch << " is covered by the gfx11 parity suite or ships no such engine";
+    }
+}
+
+/// Skips the running test unless the device is a gfx950 (the merged engine's only arch); a test already
+/// skipped stays as it is.
 void skipUnlessGfx950()
 {
     if(::testing::Test::IsSkipped())
@@ -55,8 +72,8 @@ void skipUnlessGfx950()
     const auto arch = packedArchDeviceProperties().gcnArchName;
     if(arch.rfind("gfx950", 0) != 0)
     {
-        GTEST_SKIP() << "the bias edge-value cases run on a gfx950 device; " << arch
-                     << " is covered by the gfx11 parity suite or ships no such engine";
+        GTEST_SKIP() << "the merged keyless-row cases run on a gfx950 device; " << arch
+                     << " ships no merged engine";
     }
 }
 
@@ -87,9 +104,10 @@ protected:
     }
 };
 
-/// A bias that masks whole rows at the lowest finite value of its dtype. The cases run on a
-/// gfx950 device only: the gfx11 split kernels' lowest-finite bias cases are in the gfx11
-/// parity suite (TestFlydslSdpaBwdParity.cpp), and no other architecture ships these engines.
+/// A bias that masks whole rows at the lowest finite value of its dtype. The merged engine ships
+/// on gfx950 only, so these cases run there (FlydslSdpaBwdDevice::SetUp skips a device that ships
+/// none of MERGED_OPS); the split engine's cases below also run on gfx90a and gfx942, and the gfx11
+/// split kernels' cases are in the gfx11 parity suite (TestFlydslSdpaBwdParity.cpp).
 class TestGpuFlydslSdpaBwdMergedLowestFiniteBias : public FlydslSdpaBwdDevice
 {
 protected:
@@ -101,7 +119,7 @@ protected:
     void SetUp() override
     {
         FlydslSdpaBwdDevice::SetUp();
-        skipUnlessGfx950();
+        skipUnlessLowestFiniteBiasArch();
     }
 };
 
@@ -116,13 +134,13 @@ protected:
     void SetUp() override
     {
         FlydslSdpaBwdDevice::SetUp();
-        skipUnlessGfx950();
+        skipUnlessLowestFiniteBiasArch();
     }
 };
 
-/// Bottom-right causal graphs with more queries than keys, so the leading query rows see no key.
-/// gfx950 only, as the lowest-finite bias cases: the gfx11 split kernels' keyless-row cases are in the
-/// parity suite (TestFlydslSdpaBwdParity.cpp).
+/// Bottom-right causal graphs with more queries than keys, so the leading query rows see no key. The
+/// merged suite runs on gfx950 only; the split suite on the lowest-finite bias arches (gfx950, gfx90a,
+/// gfx942), whose split kernels share these rows' masking.
 class TestGpuFlydslSdpaBwdMergedKeylessRows : public FlydslSdpaBwdDevice
 {
 protected:
@@ -149,7 +167,7 @@ protected:
     void SetUp() override
     {
         FlydslSdpaBwdDevice::SetUp();
-        skipUnlessGfx950();
+        skipUnlessLowestFiniteBiasArch();
     }
 };
 
@@ -1033,22 +1051,29 @@ std::string valueHeadsName(const ::testing::TestParamInfo<ValueHeadsParam>& info
            + (p.causal ? "Causal" : "Plain") + (p.dropout > 0.0F ? "Dropout" : "");
 }
 
+// Standard keeps one shape per axis: both head orders, key/value group ratios 4, 8, 4 and 3
+// (Hq / Hk), causal and not, dropout, head dim 128 and both dtypes.
 INSTANTIATE_TEST_SUITE_P(
-    ,
+    Standard,
     TestGpuFlydslSdpaBwdSplitValueHeads,
     ::testing::Values(ValueHeadsParam{DataType::BFLOAT16, 32, 8, 4, false, 0.0F},
-                      ValueHeadsParam{DataType::BFLOAT16, 32, 8, 4, true, 0.0F},
+                      ValueHeadsParam{DataType::BFLOAT16, 32, 4, 8, true, 0.2F},
+                      ValueHeadsParam{DataType::HALF, 32, 8, 4, true, 0.2F, 128},
+                      ValueHeadsParam{DataType::HALF, 24, 8, 6, true, 0.0F}),
+    valueHeadsName);
+
+INSTANTIATE_TEST_SUITE_P(
+    Comprehensive,
+    TestGpuFlydslSdpaBwdSplitValueHeads,
+    ::testing::Values(ValueHeadsParam{DataType::BFLOAT16, 32, 8, 4, true, 0.0F},
                       ValueHeadsParam{DataType::BFLOAT16, 32, 4, 8, false, 0.0F},
                       ValueHeadsParam{DataType::BFLOAT16, 32, 4, 8, true, 0.0F},
                       ValueHeadsParam{DataType::BFLOAT16, 32, 8, 4, false, 0.2F},
                       ValueHeadsParam{DataType::BFLOAT16, 32, 8, 4, true, 0.2F},
                       ValueHeadsParam{DataType::BFLOAT16, 32, 4, 8, false, 0.2F},
-                      ValueHeadsParam{DataType::BFLOAT16, 32, 4, 8, true, 0.2F},
                       ValueHeadsParam{DataType::HALF, 32, 8, 4, true, 0.2F},
                       ValueHeadsParam{DataType::HALF, 32, 4, 8, false, 0.2F},
-                      ValueHeadsParam{DataType::HALF, 32, 8, 4, true, 0.2F, 128},
-                      ValueHeadsParam{DataType::BFLOAT16, 24, 8, 6, false, 0.2F},
-                      ValueHeadsParam{DataType::HALF, 24, 8, 6, true, 0.0F}),
+                      ValueHeadsParam{DataType::BFLOAT16, 24, 8, 6, false, 0.2F}),
     valueHeadsName);
 
 TEST_F(TestGpuFlydslSdpaBwdSplitDispatch, PaddedBatchWithDistinctKeyAndValueHeadsZeroesItsTails)

@@ -55,7 +55,16 @@ UNIQ_COLS = (
     "lowest_avg_freq", 
     "lowest_median_freq", 
     "avg_MCLK", 
-    "median_MCLK"
+    "median_MCLK",
+    # Adaptive timing outputs: measured per run, so they must not be merge keys.
+    "batch",
+    "samples",
+    "hot_iters",
+    "mean_us",
+    "min_us",
+    "cv",
+    "rel_iqr",
+    "status",
 )
 
 
@@ -248,13 +257,16 @@ def standard_benchmark(
     initial_iters: int = 10,
     initial_cold_iters: int = 2,
     bench_freq: bool = False,
+    adaptive: bool = True,
 ) -> pd.DataFrame:
-    """Run a probe benchmark then scale cold and timed iterations from latency.
+    """Run a standard benchmark of every row in a benchmark file.
 
-    Executes hipblaslt-bench with initial_iters and initial_cold_iters, parses
-    per-GEMM latency (us), then sets cold_iters and iters on each row so the cold
-    and timed phases each approximate duration seconds, using the same scaling
-    rule as bench.log.update.
+    With adaptive timing (default) every row is run once with adaptive timing
+    fields derived from duration, so no probe pass is needed. Without it, a probe
+    benchmark runs first with initial_iters and initial_cold_iters, per-GEMM
+    latency (us) is parsed, and cold_iters and iters are set on each row so the
+    cold and timed phases each approximate duration seconds, using the same
+    scaling rule as bench.log.update.
 
     Args:
         hipblaslt_path (str | Path): Path to hipBLASLt installation.
@@ -264,17 +276,21 @@ def standard_benchmark(
             Defaults to None.
         devices (Sequence[int], optional): GPU device IDs used by the 
             concurrency runner. Defaults to None, which is interpreted as [0] if not specified.
-        duration (float, optional): Target seconds for the cold phase and for the timed phase.
-            Defaults to 0.5.
-        initial_iters (int, optional): Timed iterations for the probe run.
-            Defaults to 10.
-        initial_cold_iters (int, optional): Cold iterations for the probe run.
-            Defaults to 2.
+        duration (float, optional): With adaptive timing, the measurement time
+            in seconds. Otherwise the target seconds for the cold phase and for
+            the timed phase. Defaults to 0.5.
+        initial_iters (int, optional): Timed iterations for the probe run
+            (non-adaptive only). Defaults to 10.
+        initial_cold_iters (int, optional): Cold iterations for the probe run
+            (non-adaptive only). Defaults to 2.
         bench_freq (bool, optional): Forwarded to run for both probe and
             scaled passes. Defaults to False.
+        adaptive (bool, optional): Whether to use adaptive timing. Rows may
+            carry either timing style; the one selected here replaces it.
+            Defaults to True.
 
     Returns:
-        pd.DataFrame: DataFrame from the scaled benchmark (same columns as run).
+        pd.DataFrame: DataFrame from the final benchmark (same columns as run).
 
     Raises:
         ValueError: If the YAML is not a non-empty list, hipblaslt-bench fails, the device
@@ -282,8 +298,11 @@ def standard_benchmark(
         FileNotFoundError: If hipBLASLt path or benchmark file does not exist.
 
     Note:
-        Both benchmark passes call run with cache=False. Writes probe and scaled YAML
-        files in the same directory as output_file, using output_file's stem in the filenames.
+        Benchmark passes call run with cache=False. Writes the scaled YAML (and, when
+        not adaptive, the probe YAML) in the same directory as output_file, using
+        output_file's stem in the filenames.
+        Adaptive timing is about 2.4x faster than the 1 s fixed-iteration setting
+        and its ratios are about 3.8x more repeatable.
     """
     if devices is None:
         devices = [0]
@@ -296,6 +315,33 @@ def standard_benchmark(
         rows = yaml.safe_load(f)
     if not isinstance(rows, list) or len(rows) == 0:
         raise ValueError(f"Benchmark file must be a non-empty YAML list: '{bench_file}'")
+
+    # Rows may carry either timing style; the requested one replaces it.
+    rows = copy.deepcopy(rows)
+    for row in rows:
+        for key in log.ADAPTIVE_ROW_KEYS:
+            row.pop(key, None)
+
+    scaled_yaml = output_file.parent / f"{output_file.stem}_standard_scaled.yaml"
+
+    if adaptive:
+        adaptive_row = log.adaptive_fields(duration * 1000.0)  # duration is in seconds, measure_time in ms
+        scaled_rows = copy.deepcopy(rows)
+        for row in scaled_rows:
+            row.update(adaptive_row)
+        dump_bench_yaml(scaled_rows, scaled_yaml)
+        logger.info(
+            f"standard_benchmark adaptive run: measure_time={duration}s, yaml='{scaled_yaml}'"
+        )
+        return run(
+            hipblaslt_path,
+            scaled_yaml,
+            output_file,
+            custom_lib_dir=custom_lib_dir,
+            devices=devices,
+            cache=False,
+            bench_freq=bench_freq,
+        )
 
     probe_rows = copy.deepcopy(rows)
     for row in probe_rows:
@@ -342,7 +388,6 @@ def standard_benchmark(
                 f"keeping probe iteration counts"
             )
 
-    scaled_yaml = output_file.parent / f"{output_file.stem}_standard_scaled.yaml"
     dump_bench_yaml(scaled_rows, scaled_yaml)
     logger.info(
         f"standard_benchmark final run: duration={duration}s per phase, yaml='{scaled_yaml}'"
@@ -355,6 +400,35 @@ def standard_benchmark(
         devices=devices,
         cache=False,
         bench_freq=bench_freq,
+    )
+
+
+def _merge_reference_tuned(dfr: pd.DataFrame, dft: pd.DataFrame) -> pd.DataFrame:
+    """Merge reference and tuned results on every column that is not a per-run result.
+
+    Columns in UNIQ_COLS (already suffixed with _reference/_tuned) are results
+    and are kept side by side; every other column is a benchmark input and a
+    merge key. A result column missing from UNIQ_COLS makes the keys disagree
+    between both runs and silently drops rows, so that case raises instead.
+
+    Raises:
+        ValueError: If the merge loses rows, naming the key columns whose
+            values differ between both runs.
+    """
+    keys = [c for c in dfr.columns if c.split("_reference")[0] not in UNIQ_COLS]
+    df = dfr.merge(dft, on=keys)
+    if len(df) >= min(len(dfr), len(dft)):
+        return df
+
+    unstable = [
+        c for c in keys
+        if c in dft.columns
+        and sorted(dfr[c].astype(str)) != sorted(dft[c].astype(str))
+    ]
+    raise ValueError(
+        f"Merging reference and tuned results kept {len(df)} of {len(dfr)} rows. "
+        f"These columns differ between both runs and are probably results that "
+        f"should be listed in UNIQ_COLS: {unstable}"
     )
 
 
@@ -394,8 +468,8 @@ def compare(
             Defaults to True.
         cache (bool, optional): Whether to reuse existing TensileLite library and results.
             Defaults to False.
-        duration (float, optional): Target benchmark duration in seconds.  
-            This is the duration of each benchmark. It will be used to calculate the number of iterations.
+        duration (float, optional): Measurement time in seconds of each benchmark
+            (adaptive timing is always used).
             Defaults to 0.5 seconds.
         beta (bool, optional): Whether to use non-zero beta values in benchmarks.
             Defaults to False.
@@ -455,6 +529,7 @@ def compare(
                 duration=duration,
                 verify=verify,
                 beta=beta,
+                adaptive=True,
             )
 
             # Benchmark default library
@@ -521,7 +596,7 @@ def compare(
         dft["error_tuned"] = dft.merge(dfv, on=[c for c in dfv.columns if c not in ["norm_error", "atol", "rtol"]])["norm_error"]
         dft["error_tuned"] = dft["error_tuned"] / dft["batch_count"] # normalized by batch_count
 
-    df = dfr.merge(dft, on=[c for c in dfr.columns if c.split("_reference")[0] not in UNIQ_COLS])
+    df = _merge_reference_tuned(dfr, dft)
     df["ratio"] = df["us_reference"] / df["us_tuned"]
     logger.debug(
         f"Benchmark compare result: rows={len(df)} ratio_mean={df['ratio'].mean():.6f} "

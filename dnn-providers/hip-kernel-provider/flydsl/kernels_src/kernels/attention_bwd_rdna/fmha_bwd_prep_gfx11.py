@@ -2,7 +2,7 @@
 # Copyright (c) 2025 FlyDSL Project Contributors
 # Not vendored: written for this provider from the FlyDSL SDPA backward sweep (see README.md); it has no upstream.
 
-"""FlyDSL backward prep for the split backward (gfx11-generic / gfx12-generic): Delta and the workspace LSE'.
+"""FlyDSL backward prep for the split backward (gfx11-generic, gfx12-generic, and the 16-bit rows of gfx942 / gfx90a): Delta and the workspace LSE'.
 
 The gfx950 prep (`fmha_bwd_prep_gfx950.py`) with `WARP_SIZE = 32` and no sink twin (`sink` is a gfx950 knob). Per query row:
 
@@ -59,7 +59,10 @@ def _elem(dtype_str):
     return {"f16": fx.Float16, "bf16": fx.BFloat16}[dtype_str]
 
 
-def build_fmha_bwd_prep_gfx11_module_primary(dtype_str, tile, padded):
+def build_fmha_bwd_prep_gfx11_module_primary(dtype_str, tile, padded, vec_tail=False):
+    """`vec_tail`: a padded build loads every column vector as one 8-wide access, the vector that
+    straddles `hdim_vo` re-based to end at `hdim_vo` with the columns an earlier vector already summed masked off (`hdim_vo` < 8: the first 8
+    columns, the tail masked). Off: the element-wise masked loop."""
     if dtype_str not in ("f16", "bf16"):
         raise ValueError(dtype_str)
     if tile % 16 or tile <= 0:
@@ -70,7 +73,8 @@ def build_fmha_bwd_prep_gfx11_module_primary(dtype_str, tile, padded):
     NVEC = tile // VEC // TPR  # vectors per lane per row
     PADDED = bool(padded)
     LOG2_TPR = TPR.bit_length() - 1
-    _cache_tag = (KERNEL_NAME, dtype_str, tile, PADDED)
+    VEC_TAIL = bool(vec_tail) and PADDED
+    _cache_tag = (KERNEL_NAME, dtype_str, tile, PADDED, VEC_TAIL)
 
     def _ptr_ty(ty, align):
         return fx.PointerType.get(
@@ -142,7 +146,27 @@ def build_fmha_bwd_prep_gfx11_module_primary(dtype_str, tile, padded):
         do_p = fx.recast_iter(_ptr_ty(elem, 2), DO)
 
         acc = fx.Float32(0.0)
-        if const_expr(PADDED):
+        if const_expr(VEC_TAIL):
+            for i in range_constexpr(NVEC):
+                col = (lane + fx.Int32(i * TPR)) * fx.Int32(VEC)
+                # window start: the vector's own column, or `hdim_vo - VEC` (0 at the least) when it would run past the extent
+                hd = fx.Int32(hdim_vo)
+                last = hd - fx.Int32(VEC)
+                m = (col < last).select(col, last)
+                s0 = (m > fx.Int32(0)).select(m, fx.Int32(0))
+                vt = Vec.make_type(VEC, elem)
+                ov = fx.ptr_load(o_p + fx.Int64(o_row + fx.Index(s0)), vt).to(
+                    fx.Float32
+                )
+                dv = fx.ptr_load(do_p + fx.Int64(do_row + fx.Index(s0)), vt).to(
+                    fx.Float32
+                )
+                prod = ov * dv
+                for j in range_constexpr(VEC):
+                    g = s0 + fx.Int32(j)
+                    live = (g >= col) & (g < hd)
+                    acc = acc + live.select(prod[j], fx.Float32(0.0))
+        elif const_expr(PADDED):
             # element-wise, tail masked: the column is clamped to 0 (legal) and the value zeroed. A real loop over the NVEC
             # vector slots, so at most one slot's loads are in flight rather than the whole row's.
             for i_slot, inner in range(

@@ -106,6 +106,7 @@ set(TENSILELITE_HOST_SOURCES
     "${CMAKE_CURRENT_LIST_DIR}/src/MLPNet.cpp"
     "${CMAKE_CURRENT_LIST_DIR}/src/PerformanceMetricTypes.cpp"
     "${CMAKE_CURRENT_LIST_DIR}/src/ScalarValueTypes.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/src/StreamK.cpp"
     "${CMAKE_CURRENT_LIST_DIR}/src/TensorDescriptor.cpp"
     "${CMAKE_CURRENT_LIST_DIR}/src/TensorOps.cpp"
     "${CMAKE_CURRENT_LIST_DIR}/src/Tensile.cpp"
@@ -115,6 +116,7 @@ set(TENSILELITE_HOST_SOURCES
 )
 set(TENSILELITE_HOST_MSGPACK_SOURCES
     "${CMAKE_CURRENT_LIST_DIR}/src/msgpack/MessagePack.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/src/msgpack/SolutionState.cpp"
     "${CMAKE_CURRENT_LIST_DIR}/src/msgpack/Writing.cpp"
 )
 
@@ -138,7 +140,7 @@ if(TENSILELITE_ENABLE_HOST)
         target_link_options(tensilelite-host PRIVATE "LINKER:--exclude-libs,ALL")
     endif()
 
-    target_compile_features(tensilelite-host PUBLIC cxx_std_17)
+    target_compile_features(tensilelite-host PUBLIC cxx_std_20)
 
     include(GenerateExportHeader)
     generate_export_header(tensilelite-host

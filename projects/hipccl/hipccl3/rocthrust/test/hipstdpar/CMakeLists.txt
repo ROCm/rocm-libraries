@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright 2024-2025 Advanced Micro Devices, Inc.
+# Copyright 2024-2026 Advanced Micro Devices, Inc.
 # ########################################################################
 
 function(add_hipstdpar_test TEST TEST_TYPE INTERPOSE_ALLOC)
