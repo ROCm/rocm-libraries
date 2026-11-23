@@ -136,63 +136,95 @@ def region_active():
 # Vocabulary note: the category names mirror the logical-IR taxonomy on purpose
 # (so the Phase 2 leaf branch maps 1:1 to a logical opcode/flag).
 
+# Phase 2 leaf answers: a LogicalLeaf reports its wrapped logical instruction's
+# scheduling category (coarse) and opcode name (fine) via the C++ seam. The
+# predicates below consult these so a mixed rocisa/logical tree schedules the
+# same way an all-rocisa tree does.
+_LogicalLeaf = _rocisa_code.LogicalLeaf
+_SchedCategory = _rocisa_code.SchedCategory
+
+
+def _leaf_category(item):
+  """SchedCategory of a logical leaf, or None when item is not a leaf."""
+  if isinstance(item, _LogicalLeaf):
+    return item.schedCategory()
+  return None
+
+
+def _leaf_opcode(item):
+  """Logical opcode name of a leaf ("DSLoadB128", ...), or None when not a leaf."""
+  if isinstance(item, _LogicalLeaf):
+    return item.schedOpcodeName()
+  return None
+
+
 def sched_is_mfma(item):
   """True for a plain MFMA instruction (not SMFMA / MXMFMA)."""
-  return isinstance(item, _rocisa_instruction.MFMAInstruction)
+  return (isinstance(item, _rocisa_instruction.MFMAInstruction)
+          or _leaf_opcode(item) == "MFMA")
 
 
 def sched_is_smfma(item):
   """True for a scaled-MFMA (SMFMA) instruction."""
-  return isinstance(item, _rocisa_instruction.SMFMAInstruction)
+  return (isinstance(item, _rocisa_instruction.SMFMAInstruction)
+          or _leaf_opcode(item) == "SMFMA")
 
 
 def sched_is_mxmfma(item):
   """True for a mixed-precision MFMA (MXMFMA) instruction."""
-  return isinstance(item, _rocisa_instruction.MXMFMAInstruction)
+  return (isinstance(item, _rocisa_instruction.MXMFMAInstruction)
+          or _leaf_opcode(item) == "MXMFMA")
 
 
 def sched_is_tensor_load_to_lds(item):
   """True for a tensor_load_to_lds (TDM direct-to-LDS) instruction."""
-  return isinstance(item, _rocisa_instruction.TensorLoadToLds)
+  return (isinstance(item, _rocisa_instruction.TensorLoadToLds)
+          or _leaf_opcode(item) == "TensorLoadToLds")
 
 
 def sched_is_ds_load(item):
   """True for any LDS (DS) read instruction."""
-  return isinstance(item, _rocisa_instruction.DSLoadInstruction)
+  return (isinstance(item, _rocisa_instruction.DSLoadInstruction)
+          or _leaf_category(item) == _SchedCategory.LocalRead)
 
 
 def sched_is_ds_load_b128(item):
   """True specifically for a 128-bit LDS read (ds_load_b128)."""
-  return isinstance(item, _rocisa_instruction.DSLoadB128)
+  return (isinstance(item, _rocisa_instruction.DSLoadB128)
+          or _leaf_opcode(item) == "DSLoadB128")
 
 
 def sched_is_ds_store(item):
   """True for any LDS (DS) write instruction."""
-  return isinstance(item, _rocisa_instruction.DSStoreInstruction)
+  return (isinstance(item, _rocisa_instruction.DSStoreInstruction)
+          or _leaf_category(item) == _SchedCategory.LocalWrite)
 
 
 def sched_is_ds_store_b128(item):
   """True specifically for a 128-bit LDS write (ds_store_b128)."""
-  return isinstance(item, _rocisa_instruction.DSStoreB128)
+  return (isinstance(item, _rocisa_instruction.DSStoreB128)
+          or _leaf_opcode(item) == "DSStoreB128")
 
 
 def sched_is_waitcnt(item):
   """True for an s_waitcnt instruction."""
-  return isinstance(item, _rocisa_instruction.SWaitCnt)
+  return (isinstance(item, _rocisa_instruction.SWaitCnt)
+          or _leaf_opcode(item) == "SWaitCnt")
 
 
 def sched_is_nop(item):
   """True for an s_nop instruction."""
-  return isinstance(item, _rocisa_instruction.SNop)
+  return (isinstance(item, _rocisa_instruction.SNop)
+          or _leaf_opcode(item) == "SNop")
 
 
 def sched_is_instruction(item):
   """True for a schedulable leaf instruction (as opposed to a Module subtree).
 
   This is the structural "is this an instruction, not a container" test the
-  scheduler uses when walking a module's items. In Phase 2 a logical leaf must
-  answer True here even though it is not a rocisa ``Instruction``."""
-  return isinstance(item, _rocisa_instruction.Instruction)
+  scheduler uses when walking a module's items. A logical leaf answers True
+  here even though it is not a rocisa ``Instruction``."""
+  return isinstance(item, (_rocisa_instruction.Instruction, _LogicalLeaf))
 
 
 def sched_is_module(item):

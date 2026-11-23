@@ -154,12 +154,26 @@ void init_code(nb::module_ m)
                  self.name = std::get<0>(state);
              });
 
+    // Scheduler-introspection seam category (logical-IR migration). Exposed so
+    // the Python scheduler's sched_is_* predicates can classify a LogicalLeaf.
+    nb::enum_<rocisa::SchedCategory>(m_code, "SchedCategory")
+        .value("NONE", rocisa::SchedCategory::None)
+        .value("Other", rocisa::SchedCategory::Other)
+        .value("GlobalRead", rocisa::SchedCategory::GlobalRead)
+        .value("SMemLoad", rocisa::SchedCategory::SMemLoad)
+        .value("LocalRead", rocisa::SchedCategory::LocalRead)
+        .value("LocalWrite", rocisa::SchedCategory::LocalWrite)
+        .value("MFMA", rocisa::SchedCategory::MFMA);
+
     // Carrier leaf for StinkyTofu logical-IR instructions inside a rocisa Module
     // tree. Instances are built on the C++ side (the conversion glue); Python only
     // needs the type registered so isinstance/downcast work once leaves appear in
-    // a tree. No constructor is exposed here on purpose.
+    // a tree. No constructor is exposed here on purpose. schedCategory() /
+    // schedOpcodeName() let the scheduler classify the leaf (see ir.py).
     nb::class_<rocisa::LogicalLeaf, rocisa::Item>(m_code, "LogicalLeaf")
-        .def("__str__", &rocisa::LogicalLeaf::toString);
+        .def("__str__", &rocisa::LogicalLeaf::toString)
+        .def("schedCategory", &rocisa::LogicalLeaf::schedCategory)
+        .def("schedOpcodeName", &rocisa::LogicalLeaf::schedOpcodeName);
 
     nb::class_<rocisa::Module, rocisa::Item>(m_code, "Module")
         .def(nb::init<const std::string&>(), nb::arg("name") = "")

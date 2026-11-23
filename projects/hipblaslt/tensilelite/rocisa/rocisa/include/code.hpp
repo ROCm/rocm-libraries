@@ -215,6 +215,13 @@ namespace rocisa
         SchedExactKind schedExactKind() const override;
         int            schedWeight() const override;
 
+        // Logical opcode name of the wrapped instruction (e.g. "DSLoadB128",
+        // "SWaitCnt", "SNop"), or "" if none. Exposed to Python so the
+        // scheduler's fine-grained sched_is_* predicates can recognise a leaf
+        // the same way they recognise the rocisa class it replaces. Defined
+        // out-of-line in ToStinkyTofuUtils.cpp.
+        std::string schedOpcodeName() const;
+
         std::string toString() const override
         {
             return name;

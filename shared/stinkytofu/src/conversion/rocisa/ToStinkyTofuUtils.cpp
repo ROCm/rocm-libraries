@@ -137,6 +137,11 @@ int LogicalLeaf::schedWeight() const {
             return 1;
     }
 }
+
+std::string LogicalLeaf::schedOpcodeName() const {
+    if (!logicalInst) return "";
+    return stinkytofu::logical::getOpcodeName(logicalInst->getOpcode());
+}
 }  // namespace rocisa
 
 namespace {
