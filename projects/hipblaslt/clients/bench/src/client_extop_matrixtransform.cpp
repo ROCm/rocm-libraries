@@ -31,6 +31,7 @@
 #include <iostream>
 #include <memory>
 #include <numeric>
+#include <stdexcept>
 #include <vector>
 
 struct MatrixTransformIO
@@ -82,6 +83,11 @@ private:
     {
         std::vector<DType> ref(len);
 
+        // GEMM-only inits (e.g. maf2_0) need the GEMM A/B/C layout; the argument parser already
+        // rejects them, so fail loudly here instead of leaving the buffer unfilled.
+        if(hipblaslt_initialization_is_gemm_only(initMethod))
+            throw std::invalid_argument(std::string(hipblaslt_initialization2string(initMethod))
+                                        + " is not supported by this client; use hipblaslt-bench");
         switch(initMethod)
         {
         case hipblaslt_initialization::rand_int:

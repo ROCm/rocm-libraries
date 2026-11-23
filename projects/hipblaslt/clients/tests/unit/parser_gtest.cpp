@@ -256,6 +256,17 @@ TEST(HostUnitInitParser, smoke_EveryEnumeratorIsRegistered)
 // the old silent integer-0 sentinel, forcing callers to handle the bad-input
 // case. This is the safe contract David asked for in PR #6514 review
 // observation #3.
+// Only the MAF inits are GEMM-only; every other registered init stays available to the ext-op
+// and grouped-GEMM clients.
+TEST(HostUnitInitParser, smoke_GemmOnlyInitializations)
+{
+    for(const auto& [name, init] : known_init_modes())
+    {
+        const bool maf = name == "maf1_0" || name == "maf2_0" || name == "maf2_0_unit_scale";
+        EXPECT_EQ(hipblaslt_initialization_is_gemm_only(init), maf) << name;
+    }
+}
+
 TEST(HostUnitInitParser, smoke_UnknownStringReturnsNullopt)
 {
     EXPECT_FALSE(string2hipblaslt_initialization("not_a_real_init_mode").has_value());
