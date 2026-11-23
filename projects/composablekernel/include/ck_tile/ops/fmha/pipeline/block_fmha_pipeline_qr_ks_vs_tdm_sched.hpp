@@ -41,10 +41,9 @@ struct BlockFmhaPipelineQRKSVSTdmSched
     using ODataType             = remove_cvref_t<typename Problem::ODataType>;
     using AttentionVariant      = remove_cvref_t<typename Problem::AttentionVariant>;
     using FmhaMask              = remove_cvref_t<typename Problem::FmhaMask>;
-    using SplitSoftmax =
-        FmhaTdmSchedSplitSoftmaxFor<Policy::Geometry::kQkStages, Policy::Geometry::kQkMIter>;
-    using Schedule = typename Policy::Schedule;
-    using Mode     = FmhaTdmSchedMode<Problem, Policy>;
+    using SplitSoftmax          = typename Policy::ScoreSoftmax;
+    using Schedule              = typename Policy::Schedule;
+    using Mode                  = FmhaTdmSchedMode<Problem, Policy>;
     static_assert(Mode::kIsLegal,
                   "qr_tdm_sched schedule geometry or output-rescale placement is incompatible");
 

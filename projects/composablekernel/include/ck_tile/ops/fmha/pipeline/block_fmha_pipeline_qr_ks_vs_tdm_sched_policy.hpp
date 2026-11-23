@@ -256,7 +256,8 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
 #endif
     }
 
-    // The B (K) slice that RunQkSuWmma<WmmaOrdinal> passes to the warp GEMM.
+    // The B (K) slice that RunQkSuWmma<WmmaOrdinal> passes to the warp GEMM. RunQkSuWmma takes its
+    // B operand from here, so the keep-alive below holds exactly the slice the WMMA reads.
     template <index_t WmmaOrdinal, typename BlockGemm, typename BBlockTensor>
     CK_TILE_DEVICE static auto GetQkBSlice(const BBlockTensor& b_block_tensor)
     {
@@ -285,7 +286,6 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
     {
         using WarpGemm    = typename BlockGemm::WarpGemm;
         using AWarpDstr   = typename WarpGemm::AWarpDstr;
-        using BWarpDstr   = typename WarpGemm::BWarpDstr;
         using CWarpDstr   = typename WarpGemm::CWarpDstr;
         using AWarpTensor = typename WarpGemm::AWarpTensor;
         using BWarpTensor = typename WarpGemm::BWarpTensor;
@@ -293,12 +293,9 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
 
         constexpr auto a_warp_y_lengths =
             to_sequence(AWarpDstr{}.get_ys_to_d_descriptor().get_lengths());
-        constexpr auto b_warp_y_lengths =
-            to_sequence(BWarpDstr{}.get_ys_to_d_descriptor().get_lengths());
         constexpr auto c_warp_y_lengths =
             to_sequence(CWarpDstr{}.get_ys_to_d_descriptor().get_lengths());
         constexpr auto a_warp_y_index_zeros = uniform_sequence_gen_t<AWarpDstr::NDimY, 0>{};
-        constexpr auto b_warp_y_index_zeros = uniform_sequence_gen_t<BWarpDstr::NDimY, 0>{};
         constexpr auto c_warp_y_index_zeros = uniform_sequence_gen_t<CWarpDstr::NDimY, 0>{};
 
         static_assert(WmmaOrdinal >= 0 && WmmaOrdinal < BlockGemm::NIterPerWarp *
@@ -316,9 +313,7 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
             merge_sequences(sequence<1, 1>{}, a_warp_y_lengths));
 
         BWarpTensor b_warp_tensor;
-        b_warp_tensor.get_thread_buffer() = b_block_tensor.get_y_sliced_thread_data(
-            merge_sequences(sequence<n_iter, k_iter>{}, b_warp_y_index_zeros),
-            merge_sequences(sequence<1, 1>{}, b_warp_y_lengths));
+        b_warp_tensor.get_thread_buffer() = GetQkBSlice<WmmaOrdinal, BlockGemm>(b_block_tensor);
 
         CWarpTensor c_warp_tensor;
         c_warp_tensor.get_thread_buffer() = c_block_tensor.get_y_sliced_thread_data(
