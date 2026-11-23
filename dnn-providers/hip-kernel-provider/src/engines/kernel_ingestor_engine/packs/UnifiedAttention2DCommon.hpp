@@ -294,15 +294,13 @@ bool kernelMatches(const MatchContext& context,
     }
     const auto& attributes = *attributesPtr;
 
-    const auto* q = findTensor(context, attributes.q_tensor_uid());
-    const auto* k = findTensor(context, attributes.k_tensor_uid());
-    // problemFor reads dims without checking them, so a direct caller (not behind
-    // graph_match) must not reach it with a malformed operand.
-    if(q == nullptr || k == nullptr || !isWellFormedOperand(*q) || !isWellFormedOperand(*k))
+    // Checked, since a direct caller (not behind graph_match) may pass a malformed operand.
+    const auto read = readProblem(context, attributes.q_tensor_uid(), attributes.k_tensor_uid());
+    if(!read.has_value())
     {
         return false;
     }
-    const auto problem = problemFor(*q, *k);
+    const auto& problem = *read;
 
     // Before any comparison that could divide by it.
     const auto candidate = arch.candidateFor(kernel);
@@ -470,13 +468,12 @@ inline SdpaShape boundProblem(const MatchContext& context,
                               const UnifiedAttentionBinding& binding,
                               std::string_view label)
 {
-    const auto* q = findTensor(context, binding.q);
-    const auto* k = findTensor(context, binding.k);
-    if(q == nullptr || k == nullptr || !isWellFormedOperand(*q) || !isWellFormedOperand(*k))
+    const auto problem = readProblem(context, binding.q, binding.k);
+    if(!problem.has_value())
     {
         refuse(label, "the bound Q or K tensor is missing or malformed");
     }
-    return problemFor(*q, *k);
+    return *problem;
 }
 
 /// The layout for a candidate's @p blockSize over @p problem, or a refusal that says which rule

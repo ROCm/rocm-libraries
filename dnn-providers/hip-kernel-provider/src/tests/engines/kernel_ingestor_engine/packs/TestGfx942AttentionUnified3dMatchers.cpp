@@ -283,8 +283,8 @@ TEST(TestGfx942AttentionUnified3dMatchers, DeclinesUnsupportedHeadSizesAndGqaRat
         spec.headSize = headSize;
         EXPECT_FALSE(graphMatches(spec)) << "D" << headSize;
     }
-    for(const auto& [hq, hkv] :
-        std::vector<std::pair<int64_t, int64_t>>{{12, 4}, {32, 1}, {64, 2}, {6, 4}, {8, 16}})
+    for(const auto& [hq, hkv] : std::vector<std::pair<int64_t, int64_t>>{
+            {12, 4}, {32, 1}, {64, 2}, {6, 4}, {8, 16}, {12, 8}})
     {
         auto spec = base();
         spec.numQueryHeads = hq;

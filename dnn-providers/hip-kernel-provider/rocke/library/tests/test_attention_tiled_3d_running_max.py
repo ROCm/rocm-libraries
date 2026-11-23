@@ -29,9 +29,10 @@ as the Python ones for these specs.
 
 from __future__ import annotations
 
+import importlib
 import math
 import os
-from dataclasses import asdict
+from dataclasses import asdict, replace
 
 import numpy as np
 import pytest
@@ -42,6 +43,7 @@ from dispatch.attention.tuning_specs import (
     make_explicit_attention_3d_specs,
 )
 from kernels.common import attention_unified as au
+from kernels.common.attention_split_kv_reduce import reduce_max_segments
 from rocke.numeric.bf16 import bf16_to_f32, f32_to_bf16
 from rocke.numeric.sdpa_reference import sdpa_reference
 from rocke.runtime.hip_module import Runtime, get_device_arch, get_device_num_cus
@@ -126,6 +128,30 @@ def _decode_inputs(kv_len, hot, hot_token=0):
     k = np.zeros((NUM_KV_HEADS, kv_len, HEAD_SIZE), np.float32)
     k[:, hot_token] = hot
     v = rng.standard_normal((NUM_KV_HEADS, kv_len, HEAD_SIZE), np.float32)
+    return q, _bf16(k), _bf16(v)
+
+
+def _uniform_ramp_inputs(kv_len):
+    """Decode inputs with every key's logit alike (K all zero: each of ``kv_len``
+    keys gets the same 1/kv_len softmax weight) and V a ramp from -4 to 4 across
+    the token axis, so the correct output is the ramp's mean, 0. A reduce that
+    drops, zeroes or mis-weights any one segment's partial sum then averages a
+    different sub-range of a monotonic signal, which is detectably not 0 (every
+    one-of-{2,4,8}-segments drop or zero-out case clears this test's tolerance
+    several times over). A single dominant key, as ``_decode_inputs``'s ``hot``
+    is, leaves most segments carrying negligible weight, so dropping one of
+    them would barely move the output and this check would not catch it.
+
+    Channel 0 of V is the constant 1 instead, so its correct output is 1. A
+    zero-mean ramp alone cannot tell a correct reduce from one that writes
+    zeros or skips the final 1/sum normalization (equal weights on a zero-mean
+    signal sum to 0 either way); the constant channel can. The other channels
+    keep the ramp and its expected 0, where ``ATOL`` alone bounds the error."""
+    q = np.ones((1, NUM_QUERY_HEADS, HEAD_SIZE), np.float32)
+    k = np.zeros((NUM_KV_HEADS, kv_len, HEAD_SIZE), np.float32)
+    ramp = np.linspace(-4.0, 4.0, kv_len, dtype=np.float32)
+    v = np.broadcast_to(ramp[None, :, None], (NUM_KV_HEADS, kv_len, HEAD_SIZE)).copy()
+    v[..., 0] = 1.0
     return q, _bf16(k), _bf16(v)
 
 
@@ -334,6 +360,38 @@ def test_decode_sink(gpu):
     sinks = np.full(NUM_QUERY_HEADS, 100.0, np.float32)
     out = _attention(problem, arch, q, k, v, tuning_spec=spec, sinks=sinks)
     _assert_close(out, _reference(q, k, v, sinks))
+
+
+# The (segment, reduce) pair hkp_pack ships: the module predicate gates it, and
+# its reduce half is the shared split-KV reduce predicate
+# (``supports_split_kv_reduce``, via the arch's ``supports_tiled_reduce_spec``).
+# The launch runs exactly that pair, so the numeric check covers what the
+# predicate admits; the same reduce one segment past the arch's LDS cap, or
+# with heads that do not group evenly, is refused.
+@pytest.mark.gpu
+@pytest.mark.parametrize("num_segments", [2, 4, 8], ids=["seg2", "seg4", "seg8"])
+def test_shipped_module_pair_numeric(gpu, num_segments):
+    arch, num_cus = gpu
+    module = importlib.import_module(f"kernels.{arch}.attention_tiled_3d")
+    kv_len = 4096
+    problem = _problem(num_cus, q_len=1, kv_len=kv_len)
+    spec = _explicit_spec(problem, arch, num_segments)
+    segment, reduce = spec.kernel_spec, spec.reduce_spec
+    assert reduce == module.reduce_spec_for(segment)
+    assert module.supports_tiled_reduce_spec(reduce, arch=arch) == (True, "supported")
+    ok, why = module.supports_unified_attention_3d_tiled_module(segment, arch=arch)
+    assert ok, why
+
+    over_cap = replace(reduce, num_segments=reduce_max_segments(arch) + 1)
+    ok, why = module.supports_tiled_reduce_spec(over_cap, arch=arch)
+    assert not ok and "LDS" in why, why
+    ungrouped = replace(reduce, num_query_heads=12, num_kv_heads=8)
+    ok, why = module.supports_tiled_reduce_spec(ungrouped, arch=arch)
+    assert not ok and "divisible" in why, why
+
+    q, k, v = _uniform_ramp_inputs(kv_len)
+    out = _attention(problem, arch, q, k, v, tuning_spec=spec)
+    _assert_close(out, _reference(q, k, v))
 
 
 @pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
