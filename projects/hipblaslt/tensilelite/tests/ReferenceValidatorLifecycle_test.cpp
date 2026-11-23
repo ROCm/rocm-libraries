@@ -6,6 +6,7 @@
 #include <gtest/gtest.h>
 #include <memory>
 #include <stdexcept>
+#include <string>
 #include <vector>
 
 using namespace TensileLite;
@@ -17,10 +18,17 @@ namespace
     {
         po::variables_map args;
         args["num-elements-to-validate"].value() = -1;
-        args["print-max"].value() = 0;
-        for(auto name : {"print-valids", "print-tensor-a", "print-tensor-b", "print-tensor-c",
-                         "print-tensor-d", "print-tensor-ref", "print-tensor-bias",
-                         "print-tensor-gate", "print-tensor-scale-alpha-vec", "print-tensor-amaxd"})
+        args["print-max"].value()                = 0;
+        for(auto name : {"print-valids",
+                         "print-tensor-a",
+                         "print-tensor-b",
+                         "print-tensor-c",
+                         "print-tensor-d",
+                         "print-tensor-ref",
+                         "print-tensor-bias",
+                         "print-tensor-gate",
+                         "print-tensor-scale-alpha-vec",
+                         "print-tensor-amaxd"})
             args[name].value() = false;
         return args;
     }
@@ -46,7 +54,7 @@ namespace
 TEST(ReferenceValidatorLifecycle, EnqueuesAreUncheckedByDefault)
 {
     RecordingValidator validator(validationArgs());
-    TimingEvents events({}, 0, 0);
+    TimingEvents       events({}, 0, 0);
     validator.preSolution(nullptr);
     validator.validateWarmups({0}, events, events);
     validator.validateEnqueues({0, 1}, events, events);
@@ -55,10 +63,10 @@ TEST(ReferenceValidatorLifecycle, EnqueuesAreUncheckedByDefault)
 
 TEST(ReferenceValidatorLifecycle, OptInChecksEveryGroupAfterWarmup)
 {
-    auto args = validationArgs();
+    auto args                               = validationArgs();
     args["validate-after-enqueues"].value() = true;
-    RecordingValidator validator(args);
-    TimingEvents events({}, 0, 0);
+    RecordingValidator        validator(args);
+    TimingEvents              events({}, 0, 0);
     std::vector<size_t> const warmup{0}, firstGroup{1, 2}, secondGroup{3, 0};
     validator.preSolution(nullptr);
     validator.validateWarmups(warmup, events, events);
@@ -77,22 +85,37 @@ TEST(ReferenceValidatorLifecycle, OptInChecksEveryGroupAfterWarmup)
 
 TEST(ReferenceValidatorLifecycle, OptInRespectsDisabledReferenceValidation)
 {
-    auto args = validationArgs();
-    args["validate-after-enqueues"].value() = true;
+    auto args                                = validationArgs();
+    args["validate-after-enqueues"].value()  = true;
     args["num-elements-to-validate"].value() = 0;
     RecordingValidator validator(args);
-    TimingEvents events({}, 0, 0);
+    TimingEvents       events({}, 0, 0);
     validator.validateEnqueues({0}, events, events);
     EXPECT_TRUE(validator.checkedSlots.empty());
 }
 
 TEST(ReferenceValidatorLifecycle, OptInRejectsAliasedReferenceInputs)
 {
-    auto args = validationArgs();
+    auto args                               = validationArgs();
     args["validate-after-enqueues"].value() = true;
-    args["c-equal-d"].value() = true;
+    args["c-equal-d"].value()               = true;
     EXPECT_THROW(RecordingValidator{args}, std::runtime_error);
 
     args["validate-after-enqueues"].value() = false;
     EXPECT_NO_THROW(RecordingValidator{args});
+}
+
+TEST(ReferenceValidatorLifecycle, ReadsTheSplitPlacementForEverySplitDim)
+{
+    // The sharing rules are read from --split-dim and --split-placement: a split of M may share B,
+    // of N may share A, of the batch neither (a shared D does not matter to the validator).
+    for(auto const* dim : {"M", "N", "B"})
+        for(auto const* placement : {"RRRR", "SRRR", "RSRR", "RRRS", "RRR"})
+        {
+            auto args                       = validationArgs();
+            args["split-devices"].value()   = 2;
+            args["split-dim"].value()       = std::string(dim);
+            args["split-placement"].value() = std::string(placement);
+            EXPECT_NO_THROW(RecordingValidator{args}) << dim << " " << placement;
+        }
 }
