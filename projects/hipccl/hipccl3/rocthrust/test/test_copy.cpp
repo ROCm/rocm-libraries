@@ -537,6 +537,160 @@ TYPED_TEST(CopyIfStencilSimpleTest, TestCopyIfStencilSimple)
   ASSERT_EQ_QUIET(dest.end(), dest_end);
 }
 
+// A value type of 512 bytes or more takes copy_if's flag/scan/scatter path instead of rocprim::select.
+struct copy_if_large_value
+{
+  int value;
+  int padding[127];
+};
+static_assert(sizeof(copy_if_large_value) >= 512, "must take the large-type copy_if path");
+
+struct copy_if_large_value_is_even
+{
+  THRUST_HOST_DEVICE bool operator()(const copy_if_large_value& x) const
+  {
+    return (x.value % 2) == 0;
+  }
+};
+
+TEST(CopyLargeTypesTests, TestCopyIfLargeType)
+{
+  using T = copy_if_large_value;
+
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  // More than 255 selected elements must not wrap the positions computed from the flags.
+  for (size_t size : {size_t(0), size_t(1), size_t(510), size_t(512), size_t(1000), size_t(70000)})
+  {
+    SCOPED_TRACE(testing::Message() << "with size= " << size);
+
+    thrust::host_vector<T> h_data(size);
+    for (size_t i = 0; i < size; ++i)
+    {
+      h_data[i].value = static_cast<int>(i);
+    }
+    thrust::device_vector<T> d_data = h_data;
+    thrust::device_vector<T> d_result(size);
+
+    auto d_new_end = thrust::copy_if(d_data.begin(), d_data.end(), d_result.begin(), copy_if_large_value_is_even());
+
+    const size_t expected = (size + 1) / 2;
+    ASSERT_EQ(static_cast<size_t>(d_new_end - d_result.begin()), expected);
+
+    thrust::host_vector<T> h_result = d_result;
+    for (size_t k = 0; k < expected; ++k)
+    {
+      ASSERT_EQ(h_result[k].value, static_cast<int>(2 * k)) << "at index " << k;
+    }
+  }
+}
+
+__global__ void copy_if_spin_kernel(unsigned long long ticks)
+{
+  if (threadIdx.x == 0 && blockIdx.x == 0)
+  {
+    const unsigned long long start = wall_clock64();
+    while (wall_clock64() - start < ticks)
+    {
+    }
+  }
+}
+
+// Hands out pieces of a zeroed buffer and never frees them, so the temporary flags start
+// zeroed and releasing them does not synchronize the device.
+struct copy_if_zeroed_arena
+{
+  using value_type = char;
+
+  char* base;
+  size_t capacity;
+  size_t offset = 0;
+
+  char* allocate(std::ptrdiff_t n)
+  {
+    const size_t aligned = (offset + 255) & ~size_t(255);
+    if (aligned + static_cast<size_t>(n) > capacity)
+    {
+      throw std::bad_alloc();
+    }
+    offset = aligned + static_cast<size_t>(n);
+    return base + aligned;
+  }
+
+  void deallocate(char*, size_t) {}
+};
+
+TEST(CopyLargeTypesTests, TestCopyIfLargeTypeStreamOrder)
+{
+  using T = copy_if_large_value;
+
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  int device_id = 0;
+  HIP_CHECK(hipGetDevice(&device_id));
+  int wall_clock_khz = 0;
+  HIP_CHECK(hipDeviceGetAttribute(&wall_clock_khz, hipDeviceAttributeWallClockRate, device_id));
+  const unsigned long long spin_ticks = static_cast<unsigned long long>(wall_clock_khz) * 100; // 100 ms
+
+  const size_t size     = 500;
+  const size_t expected = size / 2;
+
+  thrust::host_vector<T> h_data(size);
+  for (size_t i = 0; i < size; ++i)
+  {
+    h_data[i].value = static_cast<int>(i);
+  }
+  thrust::device_vector<T> d_data = h_data;
+  thrust::host_vector<T> h_sentinel(size);
+  for (size_t i = 0; i < size; ++i)
+  {
+    h_sentinel[i].value = -1;
+  }
+
+  copy_if_zeroed_arena arena{};
+  arena.capacity = size_t(1) << 24;
+  HIP_CHECK(hipMalloc(&arena.base, arena.capacity));
+  HIP_CHECK(hipMemset(arena.base, 0, arena.capacity));
+
+  hipStream_t stream;
+  HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
+
+  // Work already queued on the policy's stream and on the NULL stream: every step of copy_if
+  // has to wait for the former and must not depend on the latter.
+  for (bool spin_on_policy_stream : {true, false})
+  {
+    SCOPED_TRACE(testing::Message() << "with spin_on_policy_stream= " << spin_on_policy_stream);
+
+    thrust::device_vector<T> d_result = h_sentinel;
+    HIP_CHECK(hipDeviceSynchronize());
+
+    copy_if_spin_kernel<<<1, 1, 0, spin_on_policy_stream ? stream : hipStream_t(0)>>>(spin_ticks);
+    HIP_CHECK(hipGetLastError());
+
+    auto d_new_end = thrust::copy_if(
+      thrust::hip::par_nosync(arena).on(stream),
+      d_data.begin(),
+      d_data.end(),
+      d_result.begin(),
+      copy_if_large_value_is_even());
+    ASSERT_EQ(static_cast<size_t>(d_new_end - d_result.begin()), expected);
+
+    thrust::host_vector<T> h_result(size);
+    HIP_CHECK(hipMemcpyAsync(
+      h_result.data(), thrust::raw_pointer_cast(d_result.data()), sizeof(T) * size, hipMemcpyDeviceToHost, stream));
+    HIP_CHECK(hipStreamSynchronize(stream));
+    for (size_t k = 0; k < expected; ++k)
+    {
+      ASSERT_EQ(h_result[k].value, static_cast<int>(2 * k)) << "at index " << k;
+    }
+
+    HIP_CHECK(hipDeviceSynchronize());
+  }
+
+  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipFree(arena.base));
+}
+
 TEST(CopyLargeTypesTests, TestCopyIfStencilLargeType)
 {
   using T = large_data;
