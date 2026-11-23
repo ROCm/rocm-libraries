@@ -55,7 +55,7 @@ hipsparseSpMVDescr_st::Entry::~Entry()
     // Destructors cannot propagate status codes, so the rocsparse / hip
     // return values are intentionally discarded here. Entries are destroyed
     // at sparse-matrix-descriptor tear-down time (via m_entries.clear() in
-    // the implicit destructor), or by release_discarded_entries, which frees
+    // the implicit destructor), or by release_retired_entries, which frees
     // the compute buffers first, so failures here would only mean a leaked
     // rocsparse descriptor or hip buffer.
     if(this->spmv_descr != nullptr)
@@ -71,7 +71,7 @@ hipsparseSpMVDescr_st::Entry::~Entry()
     }
 }
 
-void hipsparseSpMVDescr_st::discard_entries()
+void hipsparseSpMVDescr_st::retire_entries()
 {
     // Moving an Entry frees nothing: the rocSPARSE descriptor and the compute
     // buffer move with it, so this is safe while the stream is being captured.
@@ -82,12 +82,15 @@ void hipsparseSpMVDescr_st::discard_entries()
     this->m_entries.clear();
 }
 
-hipsparseStatus_t hipsparseSpMVDescr_st::release_discarded_entries(hipStream_t stream)
+hipsparseStatus_t hipsparseSpMVDescr_st::release_retired_entries(hipsparseHandle_t handle)
 {
     if(this->m_retired_entries.empty())
     {
         return HIPSPARSE_STATUS_SUCCESS;
     }
+
+    hipStream_t stream{};
+    RETURN_IF_ROCSPARSE_ERROR(rocsparse_get_stream((rocsparse_handle)handle, &stream));
 
     // Destroying a rocSPARSE SpMV descriptor synchronizes the device, and so does
     // the analysis a fresh entry would run. Both are illegal while the stream is
@@ -1172,7 +1175,7 @@ hipsparseStatus_t hipsparseCsrSetPointers(hipsparseSpMatDescr_t spMatDescr,
 {
     RETURN_IF_ROCSPARSE_ERROR(rocsparse_csr_set_pointers(
         to_rocsparse_spmat_descr(spMatDescr), csrRowOffsets, csrColInd, csrValues));
-    spMatDescr->get_hip_spmv_descr()->discard_entries();
+    spMatDescr->get_hip_spmv_descr()->retire_entries();
     return HIPSPARSE_STATUS_SUCCESS;
 }
 
@@ -1259,7 +1262,7 @@ hipsparseStatus_t hipsparseCscSetPointers(hipsparseSpMatDescr_t spMatDescr,
 {
     RETURN_IF_ROCSPARSE_ERROR(rocsparse_csc_set_pointers(
         to_rocsparse_spmat_descr(spMatDescr), cscColOffsets, cscRowInd, cscValues));
-    spMatDescr->get_hip_spmv_descr()->discard_entries();
+    spMatDescr->get_hip_spmv_descr()->retire_entries();
     return HIPSPARSE_STATUS_SUCCESS;
 }
 
@@ -1270,7 +1273,7 @@ hipsparseStatus_t hipsparseCooSetPointers(hipsparseSpMatDescr_t spMatDescr,
 {
     RETURN_IF_ROCSPARSE_ERROR(rocsparse_coo_set_pointers(
         to_rocsparse_spmat_descr(spMatDescr), cooRowInd, cooColInd, cooValues));
-    spMatDescr->get_hip_spmv_descr()->discard_entries();
+    spMatDescr->get_hip_spmv_descr()->retire_entries();
     return HIPSPARSE_STATUS_SUCCESS;
 }
 
