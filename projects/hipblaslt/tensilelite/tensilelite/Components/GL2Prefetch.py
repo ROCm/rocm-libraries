@@ -370,7 +370,7 @@ class GL2PrefetchLoad(GL2Prefetch):
             foldKClamp: bool = kernel.get("_TailFolding", False) and not kernel["ReuseAcrossPersistent"]
             if foldKClamp:
                 assert not isMX, "TailFolding has no MX scales"
-                mod.add(SSubU32(sgpr(tmpSgprIdx2), sgpr("SizesSum+0"), 1, comment="TailFolding: last K index"))
+                mod.add(SSubU32(sgpr(tmpSgprIdx2), sgpr("SizesSum+%u" % writer.states.unrollIdx), 1, comment="TailFolding: last K index"))
                 if writer.tailFoldGsu(kernel):
                     # this GSU split's first k-tile (calculateGSUIterOffset: GSUC ? contiguous : GSUSumIdx) * DU
                     assert gsuIterSgpr is not None, "TailFolding with GSU needs the GSU start iteration"

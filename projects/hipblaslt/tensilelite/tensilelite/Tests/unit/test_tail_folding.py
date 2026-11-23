@@ -7,6 +7,8 @@ Every kernel whose structure allows it (any input type but packed sub-byte F4/F6
 ceil(K/DU) iterations, the TDM K dim (shrunk at every address step) zero-fills the partial last k-tile, and
 no tail loop is emitted. Any other kernel keeps the develop tail loop. With GSU the folded k-tile count is
 distributed; each split's K dim starts at its own first k-tile (GSUC 0: interleaved, GSUC 1: contiguous).
+The K dim step is the wave's TDM address increment shifted into the field, so a kernel whose step cannot be
+derived that way (swizzled / mirrored K, non-unit K stride, A/B element sizes that differ, ...) keeps the tail loop.
 """
 
 import re
@@ -99,13 +101,6 @@ def _steps(asm):
     return asm.count("// TDM increment hi (carry)")
 
 
-def _no_step_sgpr(monkeypatch, derive):
-    # derive=False: force the TailFoldStep SGPR fallback (a kernel whose K dim step is not its address increment)
-    if not derive:
-        import tensilelite.KernelWriterAssembly as kwa
-        monkeypatch.setattr(kwa.KernelWriterAssembly, "tailFoldStepShift", lambda self, kernel: None)
-
-
 def _instructions(asm):
     return [l.strip() for l in asm.split("\n") if l.strip() and not l.strip().startswith(("//", ".", "label_")) and not l.strip().endswith(":")]
 
@@ -142,17 +137,6 @@ def test_fold_codegen(tmp_path, hplr):
     assert asm.index(CEIL) < first_tdm
     shrink = re.findall(r"// TailFolding: K dim -= \S.* \(low half\)", asm)
     assert _steps(asm) and len([x for x in shrink if "stagger" not in x]) == _steps(asm)
-
-
-def test_fold_no_gsu_immediate_step(tmp_path):
-    # GlobalSplitU 0 (no runtime GSU) and a cluster (no StaggerU): the K dim step is a codegen constant, no SGPRs.
-    results = _emit(tmp_path, _config([("GlobalSplitU", 0)]), "tf_gsu0.yaml")
-    if len(results) != 1:
-        pytest.skip("GlobalSplitU 0 is rejected for this config")
-    _, asm, error = results[0]
-    assert error == 0
-    assert CEIL in asm and "label_TailLoopBeginL" not in asm and "sgprTailFoldStep" not in asm
-    assert asm.count("// TailFolding: K dim -= 128 (low half)") == _steps(asm)
 
 
 def test_fold_8bit(tmp_path):
@@ -219,18 +203,17 @@ def test_fold_subbyte_keeps_tail_loop(tmp_path, monkeypatch, capsys):
     assert FALLBACK not in capsys.readouterr().out
 
 
-def test_fold_subbyte_forced_is_an_error(tmp_path, monkeypatch, capsys):
-    # The codegen check stays an internal error: a sub-byte kernel forced to fold is rejected, not
-    # silently regenerated with the tail loop.
-    import sys
-    import tensilelite.SolutionStructs.Solution  # noqa: F401
-    monkeypatch.setattr(sys.modules["tensilelite.SolutionStructs.Solution"], "tdmKDimStepsInElements", lambda state: True)
+def test_fold_gate_gap_is_an_error(tmp_path, monkeypatch, capsys):
+    # A kernel Solution folds although the writer cannot derive its K dim step (simulated here) is an
+    # internal error, not silently regenerated with the tail loop.
+    from tensilelite.KernelWriterAssembly import KernelWriterAssembly
+    monkeypatch.setattr(KernelWriterAssembly, "tailFoldStepShift", lambda self, kernel: None)
     seen = _record_fold(monkeypatch)
-    results = _emit(tmp_path, _f6_config(), "tf_f6_forced.yaml", limit=64)
+    results = _emit(tmp_path, _config(), "tf_gap.yaml")
     out = capsys.readouterr().out
     assert any(seen)
-    assert any(error != 0 for _, _, error in results)
-    assert "the A/B K dim step must be DepthU" in out and FALLBACK not in out
+    assert len(results) == 1 and results[0][2] != 0
+    assert "the K dim step cannot be derived from the TDM increment" in out and FALLBACK not in out
 
 
 def test_fold_off_when_illegal(tmp_path):
@@ -239,23 +222,17 @@ def test_fold_off_when_illegal(tmp_path):
     assert "TailFold" not in asm and "label_TailLoopBeginL" in asm
 
 
-@pytest.mark.parametrize("derive", [True, False], ids=["from_inc", "step_sgpr"])
 @pytest.mark.parametrize("gsu", [1, 3])
-def test_fold_stagger(tmp_path, monkeypatch, gsu, derive):
+def test_fold_stagger(tmp_path, gsu):
     # No cluster -> StaggerU: the split starts StaggerUIter steps in and the wrap back to its first k-tile adds
-    # (splitIters-1)*step to the K dim. from_inc: both are the stagger offset / the selected increment (WrapU on
-    # the wrapIter) in K dim units, so neither TailFoldStep nor TailFoldWrapK exists.
-    _no_step_sgpr(monkeypatch, derive)
+    # (splitIters-1)*step to the K dim. Both are the stagger offset / the selected increment (WrapU on the
+    # wrapIter) in K dim units: no SGPR is kept for them.
     asm = _emit_one(tmp_path, _config([("ClusterDim", [1, 1]), ("GlobalSplitU", gsu), ("GlobalSplitUAlgorithm", "MultipleBuffer")]),
                     "tf_stagger.yaml")
-    if derive:
-        tags = ("// TailFolding: stagger start = stagger offset << 15", "// TailFolding: K dim step = (wrapIter ? WrapU : inc) << 15")
-        assert "sgprTailFold" not in asm
-        assert len(re.findall(r"^s_lshl_b64 .*// TailFolding: K dim step = \(wrapIter \? WrapU : inc\) << 15", asm, re.M)) \
-            == asm.count("TailFolding: K dim -= wrapIter ? -(splitIters-1)*step : step (low half)")
-    else:
-        tags = ("// TailFolding: stagger start = StaggerUIter * step", "// TailFolding: wrap K step = -(splitIters - 1) * step",
-                "// TailFolding: K dim step = wrapIter ? -(splitIters-1)*step : step (low)")
+    tags = ("// TailFolding: stagger start = stagger offset << 15", "// TailFolding: K dim step = (wrapIter ? WrapU : inc) << 15")
+    assert "sgprTailFold" not in asm
+    assert len(re.findall(r"^s_lshl_b64 .*// TailFolding: K dim step = \(wrapIter \? WrapU : inc\) << 15", asm, re.M)) \
+        == asm.count("TailFolding: K dim -= wrapIter ? -(splitIters-1)*step : step (low half)")
     for tag in tags + ("// TailFolding: K dim -= stagger start (low half)", CEIL):
         assert tag in asm, tag
     _check_borrow_pairs(asm)
@@ -264,21 +241,16 @@ def test_fold_stagger(tmp_path, monkeypatch, gsu, derive):
     assert asm.count("TailFolding: K dim -= wrapIter ? -(splitIters-1)*step : step (low half)") >= 1
 
 
-@pytest.mark.parametrize("derive", [True, False], ids=["from_inc", "step_sgpr"])
 @pytest.mark.parametrize("gsu", [2, 3, 4, -1])
-def test_fold_gsu(tmp_path, monkeypatch, gsu, derive):
+def test_fold_gsu(tmp_path, gsu):
     # GSUC is a run-time bit: the k-tile step is GSUC ? 1 : GSU k-tiles and every GSUC == 1 start offset is
-    # taken from the folded count ceil(K/DU). from_inc: the step is the wave's TDM address increment
-    # ((GSUC ? 1 : GSU) * DU * 2 bytes) << 15, low and high half, at every address step; no TailFoldStep.
-    _no_step_sgpr(monkeypatch, derive)
+    # taken from the folded count ceil(K/DU). The step is the wave's TDM address increment
+    # ((GSUC ? 1 : GSU) * DU * 2 bytes) << 15, low and high half, at every address step; no SGPR is kept for it.
     asm = _emit_one(tmp_path, _config([("GlobalSplitU", gsu), ("GlobalSplitUAlgorithm", "MultipleBuffer"), ("PrefetchGL2", 1)]), "tf_gsu.yaml")
-    if derive:
-        assert "sgprTailFold" not in asm
-        lo = re.findall(r"^s_lshl_b32 (s\d+), s\[sgprtdmABIncs\], 0xf +// TailFolding: K dim step = address increment << 15 \(low half\)", asm, re.M)
-        hi = re.findall(r"^s_lshr_b32 (s\d+), s\[sgprtdmABIncs\], 0x11 +// TailFolding: K dim step = address increment << 15 \(high half\)", asm, re.M)
-        assert len(lo) == len(hi) == _steps(asm) > 0
-    else:
-        assert "// TailFolding: k-tiles per step = GSUC ? 1 : GSU" in asm
+    assert "sgprTailFold" not in asm
+    lo = re.findall(r"^s_lshl_b32 (s\d+), s\[sgprtdmABIncs\], 0xf +// TailFolding: K dim step = address increment << 15 \(low half\)", asm, re.M)
+    hi = re.findall(r"^s_lshr_b32 (s\d+), s\[sgprtdmABIncs\], 0x11 +// TailFolding: K dim step = address increment << 15 \(high half\)", asm, re.M)
+    assert len(lo) == len(hi) == _steps(asm) > 0
     _check_borrow_pairs(asm)
     for tag in (CEIL,
                 "// TailFolding: split start = start k-tile * DU, in the K dim field",
@@ -306,14 +278,6 @@ def test_fold_gl2_threshold(tmp_path, pgl):
     _check_borrow_pairs(asm)
     # K < DepthU still prefetches k-tile 0 in the folded iteration: its K index is clamped to K - 1
     assert "// TailFolding: past K?" in asm and "// TailFolding: last K index from the split start" in asm
-
-
-def test_fold_asm_tag(tmp_path):
-    # every instruction using a fold SGPR carries a "TailFolding:" comment
-    asm = _emit_one(tmp_path, _config([("PrefetchGL2", 1)]), "tf_tag.yaml")
-    for line in asm.split("\n"):
-        if re.search(r"sgprTailFold(Step|WrapK)", line) and not line.startswith(".set"):
-            assert "// TailFolding:" in line, line
 
 
 def _split_model(K, DU, G, gsuc):
@@ -351,7 +315,7 @@ def _simulate(K, DU, G, gsuc):
             else:
                 assert kdim >= remaining >= DU                 # unchanged init: never clamps a full k-tile
             covered.append((t * DU, t * DU + min(DU, kdim)))
-            kdim -= tile_step * DU                             # TailFoldStep
+            kdim -= tile_step * DU                             # the K dim step
         if count and r and start + (count - 1) * tile_step == -(-K // DU) - 1:
             assert idx == max(i for i, (_, c) in enumerate(_split_model(K, DU, G, gsuc)) if c) or not gsuc
     _check_cover(covered, K, (K, DU, G, gsuc))
@@ -440,48 +404,70 @@ def test_rap_keeps_its_k_dim_shrink(tmp_path):
         assert "RAP: K dim -=" in assembly and "TailFolding:" not in assembly
 
 
-@pytest.mark.parametrize("stagger", [0, 1], ids=["cluster", "stagger"])
-def test_fold_sgprs_released_before_store(tmp_path, monkeypatch, stagger):
-    # The fold SGPRs are dead after the loop: endSummation releases all of them, so the store's
-    # SGPR block can reuse them (an alignment hole tagged with a fold name used to keep one live).
-    # (TailFoldStep / TailFoldWrapK only exist where the step is not derived from the address increment.)
-    _no_step_sgpr(monkeypatch, False)
-    extra = [("ClusterDim", [1, 1])] if stagger else []
-    asm = _emit_one(tmp_path, _config(extra), "tf_rel%u.yaml" % stagger)
-    names = ["TailFoldStep"] + (["TailFoldWrapK"] if stagger else [])
-    if re.search(r"^\.set sgprTailFoldPad,", asm, re.M):
-        names.append("TailFoldPad")
-    for n in names:
-        assert re.search(r"^\.set sgpr%s, UNDEF" % n, asm, re.M), n
-
-
 def _next_free_sgpr(asm):
     return int(re.search(r"\.amdhsa_next_free_sgpr (\d+)", asm).group(1))
 
 
-@pytest.mark.parametrize("amaxd", [0, 1], ids=["bias_sav_act", "amaxd"])
-@pytest.mark.parametrize("pgl", [0, 1])
-def test_fold_store_kernargs_reuse_loop_sgprs(tmp_path, monkeypatch, amaxd, pgl):
-    # bias + ScaleAlphaVec + activation (+ amaxD) kernels load 13 store-kernarg SGPRs after the loop
-    # into the SGPRs endSummation frees. An alignment hole tagged with the next SGPR's name must not
-    # keep that SGPR live, or the store block moves past every loop SGPR (+9..+12 SGPRs). The fold
-    # kernel stays within the develop SGPR count (+ alignment).
+def _store_kernarg_config(pgl, amaxd):
+    # bias + ScaleAlphaVec + activation (+ amaxD): the store loads 13 kernarg SGPRs after the loop into the SGPRs
+    # endSummation frees
     config = _config([("PrefetchGL2", pgl), ("PrefetchGL2SAddr", bool(pgl)), ("MatrixInstruction", [16, 16, 32, 1, 1, 4, 4, 2, 2])])
     problem = config["BenchmarkProblems"][0][0]
     problem.update(UseBias=1, BiasDataTypeList=["b"], UseScaleAB="Scalar", UseScaleAlphaVec=1, Activation=True,
                    ActivationType="all")
-    final = [{"BiasTypeArgs": ["b"]}, {"ActivationArgs": [[{"Enum": "none"}]]}]
     if amaxd:
         problem.update(OutputAmaxD=True, DataTypeAmaxD="s", UseScaleCD=True)
-    config["BenchmarkProblems"][0][1]["BenchmarkFinalParameters"] += final
-    fold = _emit_one(tmp_path, config, "tf_store_fold.yaml")
+    config["BenchmarkProblems"][0][1]["BenchmarkFinalParameters"] += [{"BiasTypeArgs": ["b"]}, {"ActivationArgs": [[{"Enum": "none"}]]}]
+    return config
+
+
+_SGPR_CASES = {
+    "cluster": lambda: _config(),
+    "cluster_gsu_gl2": lambda: _config([("GlobalSplitU", 3), ("GlobalSplitUAlgorithm", "MultipleBuffer"), ("PrefetchGL2", 1)]),
+    "stagger_gsu": lambda: _config([("ClusterDim", [1, 1]), ("GlobalSplitU", 3), ("GlobalSplitUAlgorithm", "MultipleBuffer")]),
+    "bias_sav_act": lambda: _store_kernarg_config(0, 0),
+    "bias_sav_act_gl2_amaxd": lambda: _store_kernarg_config(1, 1),
+}
+
+
+@pytest.mark.parametrize("case", list(_SGPR_CASES))
+def test_fold_sgprs_match_tail_loop_kernel(tmp_path, monkeypatch, case):
+    # Folding keeps no SGPR across the loop (only short-lived temporaries), so a folding kernel uses as many
+    # SGPRs as the same kernel with the tail loop.
+    config = _SGPR_CASES[case]()
+    fold = _emit_one(tmp_path, config, "tf_sgpr_fold.yaml")
     assert CEIL in fold and "label_TailLoopBeginL" not in fold
     import sys
     import tensilelite.SolutionStructs.Solution  # noqa: F401  (the package re-exports the class under the same name)
     monkeypatch.setattr(sys.modules["tensilelite.SolutionStructs.Solution"], "tdmSeparateABDescriptors", lambda state: True)   # fold unsupported -> develop code
-    dev = _emit_one(tmp_path, config, "tf_store_dev.yaml")
+    dev = _emit_one(tmp_path, config, "tf_sgpr_dev.yaml")
     assert CEIL not in dev and "label_TailLoopBeginL" in dev
-    assert _next_free_sgpr(fold) - _next_free_sgpr(dev) <= 4
+    assert _next_free_sgpr(fold) == _next_free_sgpr(dev)
+
+
+def _excluded(kind):
+    config = _config()
+    problem = config["BenchmarkProblems"][0][0]
+    if kind == "mirror_k":
+        problem["MirrorDimsA"] = [3]                       # 3 = the unroll (K) index of a batched GEMM
+    elif kind == "mixed_bytes":
+        problem.update(DataTypeA="f8", DataTypeB="b")
+    return config
+
+
+@pytest.mark.parametrize("kind", ["mirror_k", "mixed_bytes"])
+def test_fold_step_not_derivable_keeps_tail_loop(tmp_path, monkeypatch, capsys, kind):
+    # Solution does not fold a kernel whose K dim step cannot be derived from its TDM address increment: it
+    # keeps the tail loop (never a reject, never the overflow fallback). (Swizzled tensors also need
+    # DirectToVgpr, UseInitialStridesAB is rejected on gfx1250 and BufferLoad 0 rejects PGR 2, so those
+    # never reach the gate in a valid config.)
+    seen = _record_fold(monkeypatch)
+    results = _emit(tmp_path, _excluded(kind), "tf_excl_%s.yaml" % kind)
+    assert results and seen and not any(seen)
+    for _, assembly, error in results:
+        assert error == 0
+        assert CEIL not in assembly and "TailFolding:" not in assembly and "label_TailLoopBeginL" in assembly
+    assert FALLBACK not in capsys.readouterr().out
 
 
 def test_fold_overflow_falls_back(tmp_path, monkeypatch, capsys):

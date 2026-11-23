@@ -4439,9 +4439,14 @@ class Solution(collections.abc.Mapping):
     # emits no tail loop (NoTailLoop), the way RAP folds (RAP sets its own _TailFolding above). Any
     # other kernel keeps the tail loop -- this never rejects a kernel. MX scales, sparse metadata and
     # packed sub-byte types (F4/F6, whose TDM K dim does not step in elements) keep the tail loop.
+    # The K dim step is derived from the TDM address increment (KernelWriterAssembly.tailFoldStepShift),
+    # so A and B must also keep K contiguous at unit stride, unmirrored and unswizzled, with one
+    # power-of-2 element size, and the increments must stay in SGPRs (BufferLoad).
     if not state["ReuseAcrossPersistent"]:
       state.pop("_TailFolding", None)
       du = state["DepthU"]
+      pt = state["ProblemType"]
+      elemBytes = {pt["DataType%s" % tc].numBytes() for tc in ("A", "B")}
       unsupported = (
         state["NoTailLoop"]                                        # no K tail to fold
         or not (state["enableTDMA"] and state["enableTDMB"])       # the K dim lives in the TDM descriptor
@@ -4453,7 +4458,13 @@ class Solution(collections.abc.Mapping):
         or not tdmKDimStepsInElements(state)                       # packed sub-byte F4/F6
         or state["ProblemType"]["MXBlockA"] or state["ProblemType"]["MXBlockB"] or state["ProblemType"]["Sparse"]
         or state.get("TDMSplit", 0) or state["DirectToVgprA"] or state["DirectToVgprB"]
-        or state.get("UseSubtileImpl", False))
+        or state.get("UseSubtileImpl", False)
+        or not state["BufferLoad"]                                 # global read increments in VGPRs
+        or pt["SwizzleTensorA"] or pt["SwizzleTensorB"]
+        or pt["UseInitialStridesAB"]                               # runtime (non-unit) K stride
+        or any(pt["IndexAssignments%s" % tc][0] != pt["IndexUnroll"] or pt["IndexUnroll"] in pt["MirrorDims%s" % tc]
+               for tc in ("A", "B"))
+        or len(elemBytes) != 1 or next(iter(elemBytes)) not in (1, 2, 4, 8, 16))
       if not unsupported:
         state["_TailFolding"] = True
         state["NoTailLoop"] = True
