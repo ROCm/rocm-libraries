@@ -29,7 +29,9 @@
 namespace rocsparse
 {
     // True iff mb == ceil(m / block_dim), i.e. (mb - 1) * block_dim < m <= mb * block_dim.
-    // Evaluated without products so it cannot overflow at any index width.
+    // Evaluated without products so it cannot overflow at any index width. This equals
+    // mb == rocsparse::ceil_div(m, block_dim) from rocsparse_grid.hpp, which this header
+    // does not include so that the host-only unit test can use it.
     // Requires m >= 0, mb >= 0 and block_dim > 0.
     template <typename I>
     constexpr bool bsr_block_count_matches(I m, I mb, I block_dim)

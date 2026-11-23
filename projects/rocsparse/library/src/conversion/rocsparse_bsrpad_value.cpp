@@ -26,6 +26,7 @@
 #include "rocsparse_bsr_dims.hpp"
 #include "rocsparse_bsrpad_value.hpp"
 #include "rocsparse_control.hpp"
+#include "rocsparse_grid.hpp"
 #include "rocsparse_utility.hpp"
 
 #include "bsrpad_value_device.h"
@@ -85,7 +86,7 @@ rocsparse_status rocsparse::bsrpad_value_template(rocsparse_handle          hand
     }
 
     constexpr rocsparse_int block_size = 1024;
-    const rocsparse_int     grid_size  = (block_dim + block_size - 1) / block_size;
+    const int64_t           grid_size  = rocsparse::ceil_div(block_dim, block_size);
 
     // Check matrix sorting mode
     if(bsr_descr->storage_mode == rocsparse_storage_mode_sorted)
