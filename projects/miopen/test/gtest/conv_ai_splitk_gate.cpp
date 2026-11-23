@@ -25,7 +25,6 @@
 #include <miopen/conv/heuristics/ai_conv_nd_kernel_tuning_utils.hpp>
 #include <miopen/conv/heuristics/ai_candidate_selection.hpp>
 #include <miopen/conv/problem_description.hpp>
-#include <miopen/conv/solvers.hpp>
 #include <miopen/convolution.hpp>
 #include <miopen/db_path.hpp>
 #include <miopen/filesystem.hpp>
