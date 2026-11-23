@@ -11,14 +11,14 @@ the input already carries its depth halo) can be served three ways:
     One pinned implicit-GEMM launch on the padded problem itself (what
     :mod:`dispatch.conv_pins` serves).
 ``padcopy_halo``
-    (fwd) A rocKE pad copy (:func:`kernels.common.conv_winograd3d.build_pad_copy`)
+    (fwd) A rocKE pad copy (:func:`kernels.conv.conv_winograd3d.build_pad_copy`)
     of the input into a zero-haloed workspace, then a pinned *halo-form* kernel
     (padding 0, input = output + 2) on that workspace. The halo-form kernels
     refuse padded problems; on the zero-haloed copy they compute the padded
     convolution exactly (same products, same reduction order).
 ``winograd``
     The 3-D yx Winograd drop-in
-    (:class:`kernels.common.conv_winograd3d_dropin.Winograd3dDropin`, fwd and
+    (:class:`kernels.conv.conv_winograd3d_dropin.Winograd3dDropin`, fwd and
     dgrad) with a stored kernel spec: relayout + weight transform, main kernel,
     and the ordered split-K reduction when the spec splits K.
 
@@ -46,7 +46,7 @@ Table format (one file, several selection modes, like a pin table)::
   the *halo problem* (:func:`halo_request`). Leaving ``kernel`` out defers to
   a pin table passed to :func:`dispatch_conv_route` (``pins=``), looked up by
   the padded problem (direct) or the halo problem (padcopy_halo).
-* ``winograd.spec`` holds the :class:`~kernels.common.conv_winograd3d.WinogradYxSpec`
+* ``winograd.spec`` holds the :class:`~kernels.conv.conv_winograd3d.WinogradYxSpec`
   fields except the extents (derived from the problem), ``winograd.wtv`` the
   weight-transform variant.
 * A route serves NDHWC requests of the table's arch and (when the table names
@@ -290,7 +290,7 @@ class PadCopySpec:
 
     def build(self, arch: str = "gfx942"):
         """The pad-copy ``KernelDef`` (``arch``-independent IR)."""
-        from kernels.common import conv_winograd3d as cw
+        from kernels.conv import conv_winograd3d as cw
 
         return cw.build_pad_copy(
             cw.PadCopyKernelSpec(
@@ -305,7 +305,7 @@ class PadCopySpec:
         )
 
     def grid(self) -> tuple:
-        from kernels.common import conv_winograd3d as cw
+        from kernels.conv import conv_winograd3d as cw
 
         return cw.pad_copy_grid(self.D, self.H, self.W, self.C, unroll=self.unroll)
 
@@ -470,8 +470,8 @@ def _pins_label(pins: ConvPins | None, req) -> str | None:
 
 def winograd_route_plan(route: ConvRoute, problem, direction: str, dtype: str = "bf16"):
     """The :class:`Winograd3dPlan` of a ``winograd`` route (validated)."""
-    from kernels.common import conv_winograd3d as cw
-    from kernels.common import conv_winograd3d_select as sel
+    from kernels.conv import conv_winograd3d as cw
+    from kernels.conv import conv_winograd3d_select as sel
 
     why = sel.winograd3d_ineligible_reason(problem, direction, _norm_dtype(dtype))
     if why:
@@ -503,8 +503,8 @@ def winograd_route_plan(route: ConvRoute, problem, direction: str, dtype: str = 
 
 def winograd_workspaces(problem, direction: str, spec) -> tuple:
     """Workspaces of :class:`Winograd3dDropin` for ``spec`` (same sizes it allocates)."""
-    from kernels.common import conv_winograd3d as cw
-    from kernels.common import conv_winograd3d_select as sel
+    from kernels.conv import conv_winograd3d as cw
+    from kernels.conv import conv_winograd3d_select as sel
 
     hz, h = sel._relayout_halos(problem, direction)
     src = (spec.Di - 2 * hz, spec.Hi - 2 * h, spec.Wi - 2 * h, spec.C)
@@ -529,8 +529,8 @@ def winograd_steps(plan, problem, direction: str) -> tuple:
     and the split-K reduction when the spec splits K."""
     from rocke.helpers.spec import SignatureBuilder
 
-    from kernels.common import conv_winograd3d as cw
-    from kernels.common import conv_winograd3d_select as sel
+    from kernels.conv import conv_winograd3d as cw
+    from kernels.conv import conv_winograd3d_select as sel
 
     hz, h = sel._relayout_halos(problem, direction)
     Di, Hi, Wi, C, K = sel._winograd_problem(problem, direction)

@@ -112,7 +112,7 @@ def _req(case):
 
 @pytest.mark.parametrize("case", ["fwd_pad1", "fwd_pad1_ks", "dgrad_pad011"])
 def test_winograd_route_matches_dropin_and_reference(case):
-    from kernels.common.conv_winograd3d_dropin import Winograd3dDropin
+    from kernels.conv.conv_winograd3d_dropin import Winograd3dDropin
 
     plan = cr.dispatch_conv_route(_req(case), ROUTES)
     p = plan.problem

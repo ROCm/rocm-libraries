@@ -86,7 +86,7 @@ from rocke.helpers.transforms import (
     pad,
     unmerge_magic,
 )
-from kernels.common.conv_m_band import emit_m_band_order
+from kernels.conv.conv_m_band import emit_m_band_order
 from kernels.common.conv_abi import conv_fwd_problem_block
 from kernels.common.conv_fwd_split_k_reduce import FwdSplitKReduceSpec
 
@@ -777,7 +777,7 @@ class ImplicitGemmConvSpec:
     # the tiles an XCD runs at one time cover a compact z-y block whose input
     # rows (the z/y taps) stay in that XCD's L2. A plane need not be a whole
     # number of tiles (rows of round(Ho*Wo / tile_m) tiles, a narrower last
-    # band; kernels/common/conv_m_band.py). 0 = off. Tags ``mb<n>``.
+    # band; kernels/conv/conv_m_band.py). 0 = off. Tags ``mb<n>``.
     m_band: int = 0
     # x-halo M-strided wave rows: MFMA fragment mi, atom row r of a wave holds
     # output pixel wave_m0 + mfmas_m * r + mi (not mi * 16 + r). Tap x of
@@ -3170,7 +3170,7 @@ def _build_implicit_gemm_conv_impl(
                 _mt,
             )
         elif spec.m_band:
-            # Output-plane band order (kernels/common/conv_m_band.py).
+            # Output-plane band order (kernels/conv/conv_m_band.py).
             _mt = emit_m_band_order(
                 b,
                 _mt,

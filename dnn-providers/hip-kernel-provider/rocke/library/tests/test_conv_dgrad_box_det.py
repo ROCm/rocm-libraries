@@ -10,7 +10,7 @@ import math
 import unittest
 
 from kernels.common._conv_implicit_gemm_common import ConvProblem
-from kernels.common.conv_dgrad_box_det import (
+from kernels.conv.conv_dgrad_box_det import (
     PBD_ENTRY_WORDS,
     DgradBoxDetReduceSpec,
     build_dgrad_box_det_reduce,
@@ -204,7 +204,7 @@ class TestBuild(unittest.TestCase):
         # of conv_dgrad_box_det_reduce_emit pin the cap).
         from rocke.core.ir_serialize import serialize
 
-        from kernels.common.conv_dgrad_box_det import PBD_MAX_UNROLL
+        from kernels.conv.conv_dgrad_box_det import PBD_MAX_UNROLL
 
         def ir(**kw):
             s = DgradBoxDetReduceSpec(tile_m=128, tile_n=256, warp_m=2, warp_n=4, **kw)

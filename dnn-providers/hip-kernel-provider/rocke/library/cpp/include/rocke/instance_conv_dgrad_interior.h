@@ -3,7 +3,7 @@
  *
  * rocke/instance_conv_dgrad_interior.h
  *
- * C++ port of library/kernels/common/conv_dgrad_interior.py: interior-only dX
+ * C++ port of library/kernels/conv/conv_dgrad_interior.py: interior-only dX
  * for halo-form dgrad (KernelIdentity.dx_interior / dx_interior_axes, the
  * x-halo W-column store mask view) and the halo shell zero-fill kernel
  * (DgradHaloZeroSpec + build_dgrad_halo_zero).

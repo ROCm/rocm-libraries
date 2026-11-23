@@ -637,7 +637,7 @@ class WgradConvSpec:
     # Output-plane band order of the split-K slices (with xcd_remap): slice s
     # covers output pixels [s*ks, (s+1)*ks); the slices are walked in bands of
     # ``m_band`` slice positions of one output plane through every plane
-    # (kernels/common/conv_m_band.py), so the X rows of a slice's z taps are
+    # (kernels/conv/conv_m_band.py), so the X rows of a slice's z taps are
     # still in the XCD's L2 from the slices of the planes before. Each slice
     # is still computed once (a bijection). 0 = off. Tags ``mb<n>``.
     m_band: int = 0
@@ -3594,7 +3594,7 @@ def build_implicit_gemm_conv_wgrad(
         else:
             slice_id = b.mod(z_id, _ks_count_param)
         if spec.m_band:
-            from kernels.common.conv_m_band import emit_m_band_order
+            from kernels.conv.conv_m_band import emit_m_band_order
 
             slice_id = emit_m_band_order(
                 b,

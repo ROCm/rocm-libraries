@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import unittest
 
-from kernels.common.conv_m_band import python_m_band_order
+from kernels.conv.conv_m_band import python_m_band_order
 
 
 class TestMBandOrder(unittest.TestCase):

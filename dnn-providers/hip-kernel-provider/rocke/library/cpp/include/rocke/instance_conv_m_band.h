@@ -1,7 +1,7 @@
 /* Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
  * SPDX-License-Identifier: MIT
  *
- * C port of library/kernels/common/conv_m_band.py: the output-plane band
+ * C port of library/kernels/conv/conv_m_band.py: the output-plane band
  * order of a conv's M tiles (m_band), shared by the fwd / dgrad / wgrad
  * implicit-GEMM builders. Byte-identical to the Python emitter.
  */

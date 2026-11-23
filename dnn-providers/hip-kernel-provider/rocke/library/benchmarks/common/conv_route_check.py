@@ -124,7 +124,7 @@ def main(argv=None) -> int:
     ap.add_argument(
         "--ref-dropin",
         action="store_true",
-        help="winograd routes: also run kernels.common.conv_winograd3d_dropin.Winograd3dDropin on the "
+        help="winograd routes: also run kernels.conv.conv_winograd3d_dropin.Winograd3dDropin on the "
         "same plan and buffers -- its output must equal the route's bitwise -- and time it "
         "interleaved (ms_dropin)",
     )
@@ -298,7 +298,7 @@ def main(argv=None) -> int:
         if a.ref_dropin and plan.route == "winograd":
             from types import SimpleNamespace
 
-            from kernels.common.conv_winograd3d_dropin import Winograd3dDropin
+            from kernels.conv.conv_winograd3d_dropin import Winograd3dDropin
 
             dobj = Winograd3dDropin(p, plan.direction, plan.winograd, arch=a.arch)
             Dd = D.view(dobj.out)

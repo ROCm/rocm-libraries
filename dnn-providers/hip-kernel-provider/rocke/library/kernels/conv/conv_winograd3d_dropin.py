@@ -3,7 +3,7 @@
 
 """Drop-in call of the 3-D yx Winograd kernels (opt-in; not wired into any default path).
 
-:class:`Winograd3dDropin` turns a :class:`~kernels.common.conv_winograd3d_select.Winograd3dPlan`
+:class:`Winograd3dDropin` turns a :class:`~kernels.conv.conv_winograd3d_select.Winograd3dPlan`
 (``mode="dropin"``) for a 3-D conv problem into the launches of one NDHWC-in / NDHWC-out call:
 
 1. one auxiliary launch (``build_yx_aux``): X (FWD) or dY (BWD-data) relayout NDHWC -> c8 into
@@ -49,8 +49,8 @@ class Winograd3dDropin:
     ):
         import torch
 
-        from kernels.common import conv_winograd3d as cw
-        from kernels.common import conv_winograd3d_select as sel
+        from kernels.conv import conv_winograd3d as cw
+        from kernels.conv import conv_winograd3d_select as sel
         from rocke.helpers import compile_kernel
         from rocke.helpers.spec import SignatureBuilder
         from rocke.runtime.launcher import KernelLauncher, LaunchConfig

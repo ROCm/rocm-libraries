@@ -459,7 +459,7 @@ class KernelIdentity:
     pp_box_order: int = 0
     # Dgrad only (DgradConvSpec.pp_box_det). Left out of the hash at 0.
     pp_box_det: int = 0
-    # Dgrad only, launch-time (kernels/common/conv_dgrad_interior.py): on a
+    # Dgrad only, launch-time (kernels/conv/conv_dgrad_interior.py): on a
     # halo-form problem compute dX on the interior only (1 = the halo shell
     # is not written, 2 = it is zero-filled). The binary is the base
     # identity's. Left out of the hash at 0.
@@ -1284,7 +1284,7 @@ def identity_supports_problem(
         and getattr(identity, "xh_dx_wmask", False)
         and not getattr(identity, "dx_interior", 0)
     ):
-        from kernels.common.conv_dgrad_interior import (
+        from kernels.conv.conv_dgrad_interior import (
             dx_interior_launch_conflict,
             wmask_view,
         )
@@ -1299,10 +1299,10 @@ def identity_supports_problem(
         )
 
     # dx_interior: the launch runs the interior view problem (see
-    # kernels/common/conv_dgrad_interior.py); only the families and
+    # kernels/conv/conv_dgrad_interior.py); only the families and
     # reductions that write dX without a zeroed buffer.
     if identity.direction == "dgrad" and getattr(identity, "dx_interior", 0):
-        from kernels.common.conv_dgrad_interior import (
+        from kernels.conv.conv_dgrad_interior import (
             dx_interior_keeps_w,
             dx_interior_launch_conflict,
             interior_view_problem,

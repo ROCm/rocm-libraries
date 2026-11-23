@@ -10,7 +10,7 @@ import unittest
 import numpy as np
 
 from kernels.common._conv_implicit_gemm_common import ConvProblem
-from kernels.common.conv_dgrad_interior import (
+from kernels.conv.conv_dgrad_interior import (
     DgradHaloZeroSpec,
     build_dgrad_halo_zero,
     halo_zero_launch,
@@ -170,7 +170,7 @@ class ZeroFill(unittest.TestCase):
 
 class PpBoxInterior(unittest.TestCase):
     def test_records_cover_interior(self):
-        from kernels.common.conv_dgrad_box_det import _record_pixels
+        from kernels.conv.conv_dgrad_box_det import _record_pixels
         from kernels.common.conv_implicit_gemm_dgrad import pp_box_sub_gemms
 
         p = ConvProblem(
@@ -230,7 +230,7 @@ class Axes(unittest.TestCase):
     """dx_interior_axes: the shell skipped on some axes only (3 = H and W)."""
 
     def test_view_and_records(self):
-        from kernels.common.conv_dgrad_box_det import _record_pixels
+        from kernels.conv.conv_dgrad_box_det import _record_pixels
         from kernels.common.conv_implicit_gemm_dgrad import pp_box_sub_gemms
 
         p = _halo()

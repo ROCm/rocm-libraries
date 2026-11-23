@@ -13,7 +13,7 @@
 #   1  block 128, gfx942
 #   2  block 512, gfx942
 #   3  block 256, gfx950
-from kernels.common.conv_dgrad_interior import DgradHaloZeroSpec, build_dgrad_halo_zero
+from kernels.conv.conv_dgrad_interior import DgradHaloZeroSpec, build_dgrad_halo_zero
 from _emit_common import run_emit
 
 _CFGS = {

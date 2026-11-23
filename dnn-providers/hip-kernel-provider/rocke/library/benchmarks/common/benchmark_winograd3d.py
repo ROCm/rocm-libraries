@@ -3,7 +3,7 @@
 
 """Opt-in benchmark for the 3-D Winograd F(2x2x2,3x3x3) forward prototype.
 
-Runs ``kernels.common.conv_winograd3d`` on halo-form NDHWC bf16 problems (N=1, valid
+Runs ``kernels.conv.conv_winograd3d`` on halo-form NDHWC bf16 problems (N=1, valid
 conv, stride 1), verifies against a float32 torch conv3d with scale-free metrics
 (``max|out-ref| / max|ref|`` below 5e-2 and ``mean|out-ref| / mean|ref|`` below
 ``VERIFY_MEAN_REL``, so scaled data modes are judged like unscaled ones; the exit status
@@ -191,7 +191,7 @@ def run_one(
 ):
     import torch
 
-    from kernels.common import conv_winograd3d as cw
+    from kernels.conv import conv_winograd3d as cw
     from rocke.helpers import compile_kernel
     from rocke.helpers.spec import SignatureBuilder
     from rocke.runtime.launcher import KernelLauncher, LaunchConfig

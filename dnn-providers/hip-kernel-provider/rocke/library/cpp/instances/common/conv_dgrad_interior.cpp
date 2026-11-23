@@ -1,7 +1,7 @@
 /* Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
  * SPDX-License-Identifier: MIT
  *
- * C++ port of library/kernels/common/conv_dgrad_interior.py: the host-side
+ * C++ port of library/kernels/conv/conv_dgrad_interior.py: the host-side
  * algebra of interior-only dX launches (dx_interior / dx_interior_axes and the
  * xh_dx_wmask W-extended view) and the halo shell zero-fill kernel. Every
  * operand of the kernel is bound to a temporary in Python's left-to-right

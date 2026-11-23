@@ -1,6 +1,6 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""CPU tests of the dgrad ``pp_boxes`` 8 planner (kernels/common/conv_dgrad_box_plan):
+"""CPU tests of the dgrad ``pp_boxes`` 8 planner (kernels/conv/conv_dgrad_box_plan):
 every dX pixel in exactly one record, each record's tap box holds its pixels' taps,
 the launch within the CU budget, deterministic, and a planned makespan no longer than
 that of the ``pp_boxes`` 7 packing."""
@@ -10,7 +10,7 @@ from __future__ import annotations
 import unittest
 import warnings
 
-import kernels.common.conv_dgrad_box_plan as P
+import kernels.conv.conv_dgrad_box_plan as P
 from kernels.common._conv_implicit_gemm_common import ConvProblem
 from kernels.common.conv_implicit_gemm_dgrad import DgradConvSpec, pp_box_sub_gemms
 

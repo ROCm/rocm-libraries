@@ -1,6 +1,6 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""The C++ twin of kernels/common/conv_dgrad_interior.py agrees with Python.
+"""The C++ twin of kernels/conv/conv_dgrad_interior.py agrees with Python.
 
 No GPU needed. dx_interior / dx_interior_axes are launch-time fields (the
 dgrad binary is unchanged): the C++ engine carries the launch algebra (view
@@ -18,7 +18,7 @@ import unittest
 from types import SimpleNamespace
 
 from kernels.common._conv_implicit_gemm_common import ConvProblem
-from kernels.common.conv_dgrad_interior import (
+from kernels.conv.conv_dgrad_interior import (
     DgradHaloZeroSpec,
     build_dgrad_halo_zero,
     dx_interior_launch_conflict,

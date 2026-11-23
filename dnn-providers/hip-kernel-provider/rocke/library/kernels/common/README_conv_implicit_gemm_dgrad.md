@@ -424,7 +424,7 @@ must compute its internal D faces' halo dX).
 The interior of the halo problem is itself a dgrad: voxel `(d+hd, h+hh, w+hw)`
 reads the dY pixels voxel `(d, h, w)` of the padded same-size problem reads
 (pads `(hd, hh, hw)`, input extents = output extents, same dY and W). Launch
-forms (`kernels/common/conv_dgrad_interior.py`):
+forms (`kernels/conv/conv_dgrad_interior.py`):
 
 - `pp_boxes` kernels keep the halo problem and get records over the interior
   only (`pp_box_sub_gemms(..., interior=mask)`): their box epilogue stores

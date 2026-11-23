@@ -3,7 +3,7 @@
  *
  * rocke/instance_conv_dgrad_box_det.h
  *
- * C++ port of library/kernels/common/conv_dgrad_box_det.py
+ * C++ port of library/kernels/conv/conv_dgrad_box_det.py
  * (DgradBoxDetReduceSpec + build_dgrad_box_det_reduce): Stage 2 of the dgrad
  * pp_box_det deterministic split-K. One workgroup per split tile (grid x =
  * n_tiles, y = msplit, z = the stage-1 wave under wave_wg) with the stage-1

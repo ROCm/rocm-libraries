@@ -1,6 +1,6 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""The 3-D Winograd family (kernels/common/conv_winograd3d.py) on a gfx942 device.
+"""The 3-D Winograd family (kernels/conv/conv_winograd3d.py) on a gfx942 device.
 
 * every distinct Winograd spec of the shipped route tables (``xpf``, the per-axis
   prescale halo, split-K), on a reduced problem of its own padding form, at input scales
@@ -21,8 +21,8 @@ import pytest
 torch = pytest.importorskip("torch")
 
 from dispatch import conv_routes as cr
-from kernels.common import conv_winograd3d as cw
-from kernels.common import conv_winograd3d_select as sel
+from kernels.conv import conv_winograd3d as cw
+from kernels.conv import conv_winograd3d_select as sel
 
 
 def _gfx942():
@@ -129,7 +129,7 @@ def _run_twice(call, a, w):
 def test_shipped_winograd_specs(key):
     """The shipped specs at input scales 1, 2^-30 (below the f16 window: scaled loop) and
     2^13 (above it): accurate and deterministic."""
-    from kernels.common.conv_winograd3d_dropin import Winograd3dDropin
+    from kernels.conv.conv_winograd3d_dropin import Winograd3dDropin
 
     F, pd, spec_json, wtv = key
     spec = json.loads(spec_json)
@@ -147,7 +147,7 @@ def test_halo_form_dgrad_lin():
     """Halo-form BWD-data (pad 0): dY relayouted with a zero halo of 2, the lin tiling
     (TX = 2^n + 1), prescale halo 2."""
     from kernels.common._conv_implicit_gemm_common import ConvProblem
-    from kernels.common.conv_winograd3d_dropin import Winograd3dDropin
+    from kernels.conv.conv_winograd3d_dropin import Winograd3dDropin
 
     p = ConvProblem(
         N=1, Hi=18, Wi=18, C=128, K=128, Y=3, X=3, Di=34, Z=3, sD=1, pD=0, dD=1
@@ -235,7 +235,7 @@ def test_same_volume_routes_in_one_process():
 def test_dropin_refuses_mismatched_tensors():
     """The kernels address the problem's extents, not the tensors': a y or w of another
     shape, dtype or layout is refused instead of written or read out of bounds."""
-    from kernels.common.conv_winograd3d_dropin import Winograd3dDropin
+    from kernels.conv.conv_winograd3d_dropin import Winograd3dDropin
 
     F, pd, spec_json, wtv = next(k for k, _ in SHIPPED if k[0] == 1)
     plan = _routed(F, pd, json.loads(spec_json), wtv)

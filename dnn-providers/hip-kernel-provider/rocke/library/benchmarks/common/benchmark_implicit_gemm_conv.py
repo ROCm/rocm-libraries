@@ -641,7 +641,7 @@ def _verify_interior(
     import numpy as np
     import torch
 
-    from kernels.common.conv_dgrad_interior import (
+    from kernels.conv.conv_dgrad_interior import (
         DXI_ZERO,
         dx_interior_axes,
         dx_interior_writes_w,
@@ -6485,7 +6485,7 @@ def _pbd_stage2_run(
     compiled once per tile geometry in a run (``compiled`` memoises it)."""
     from rocke import compile_kernel
     from benchmarks.common.det_classify import pbd_slot_bytes
-    from kernels.common.conv_dgrad_box_det import (
+    from kernels.conv.conv_dgrad_box_det import (
         DgradBoxDetReduceSpec,
         build_dgrad_box_det_reduce,
         dgrad_box_det_reduce_signature,
@@ -7324,7 +7324,7 @@ def _cached_bind_interior(
     the interior view problem (dX pointer at the view origin, the full
     tensor's dX strides), then the pp_box_det stage 2 (rows mapped to full
     pixel indices, the full dX) and, in zero-fill mode, the shell zero-fill."""
-    from kernels.common.conv_dgrad_interior import (
+    from kernels.conv.conv_dgrad_interior import (
         DXI_ZERO,
         DgradHaloZeroSpec,
         dx_interior_axes,
@@ -7454,7 +7454,7 @@ def _cached_bind(
 
     dxi = getattr(ident, "dx_interior", 0) if direction == "dgrad" else 0
     if dxi or (direction == "dgrad" and getattr(ident, "xh_dx_wmask", False)):
-        # Interior-only dX (kernels/common/conv_dgrad_interior.py): the
+        # Interior-only dX (kernels/conv/conv_dgrad_interior.py): the
         # binary runs the interior view problem, its dX the full tensor's
         # interior (offset pointer, full strides).
         return _cached_bind_interior(
@@ -7833,7 +7833,7 @@ def _extras_and_grid(
             # (conv_dgrad_box_det.pp_box_det_pack); the slots are fully
             # written by stage 1, never cleared.
             from benchmarks.common.det_classify import pbd_slot_bytes
-            from kernels.common.conv_dgrad_box_det import pp_box_det_pack
+            from kernels.conv.conv_dgrad_box_det import pp_box_det_pack
 
             _w, _lay = pp_box_det_pack(
                 sub_gemms,

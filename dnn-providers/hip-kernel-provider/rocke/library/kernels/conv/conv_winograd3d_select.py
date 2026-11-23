@@ -649,7 +649,7 @@ def winograd3d_ineligible_reason(
         return "channels: C % 8 and K % 32 (of the conv the kernel runs)"
     # 32-bit buffers: the caller's input / output, the relayouted input and the output of
     # the conv the kernel runs (cw.is_valid_yx_spec also checks each spec's own buffers)
-    from kernels.common import conv_winograd3d as cw
+    from kernels.conv import conv_winograd3d as cw
 
     Di, Hi, Wi, C, K = _winograd_problem(p, direction)
     why = cw._buffer_error(
@@ -683,7 +683,7 @@ def _specs(direction: str, mode: str, pad: int = 0):
 def _producer_geometry(producer, C: int) -> dict:
     """bps=2 map geometry of a chained producer plan (its z_tile, n blocks, my, waves);
     only the fields that differ from the consumer's own are set by the caller."""
-    from kernels.common import conv_winograd3d as cw
+    from kernels.conv import conv_winograd3d as cw
 
     s = producer.spec_dict
     dflt = {f.name: f.default for f in fields(cw.WinogradYxSpec)}
@@ -717,7 +717,7 @@ def winograd3d_candidates(
     """Valid yx specs (WinogradYxSpec) for the problem, with their names and wtv
     (``xpf``: the unrolled-prefetch main loop where valid; ``producer``: the chained
     producer's plan, whose geometry indexes the bps=2 map)."""
-    from kernels.common import conv_winograd3d as cw
+    from kernels.conv import conv_winograd3d as cw
 
     Di, Hi, Wi, C, K = _winograd_problem(p, direction)
     out = []
@@ -952,7 +952,7 @@ def unet3d_plans(mode: str = "dropin", form: str = "halo", **kw):
 
 if (
     __name__ == "__main__"
-):  # python -m kernels.common.conv_winograd3d_select [dropin|chained] [--range-safe]
+):  # python -m kernels.conv.conv_winograd3d_select [dropin|chained] [--range-safe]
     # [--adapter | --adapter011] [--pad-copy] [--xpf]
     import json
     import sys

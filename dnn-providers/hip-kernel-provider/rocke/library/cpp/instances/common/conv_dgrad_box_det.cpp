@@ -1,7 +1,7 @@
 /* Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
  * SPDX-License-Identifier: MIT
  *
- * C++ port of library/kernels/common/conv_dgrad_box_det.py
+ * C++ port of library/kernels/conv/conv_dgrad_box_det.py
  * (build_dgrad_box_det_reduce): Stage 2 of the dgrad pp_box_det
  * deterministic split-K. Every operand is bound to a temporary in Python's
  * left-to-right evaluation order (the emitted IR is byte-compared).

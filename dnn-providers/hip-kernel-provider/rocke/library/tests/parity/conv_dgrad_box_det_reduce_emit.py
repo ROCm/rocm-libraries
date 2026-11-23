@@ -17,7 +17,7 @@
 #   5  t128x256 w2x4, msplit 4, pix_pre, bf16 slots
 #   6  t128x256 w2x4, unroll 8 (the most slices per trip)
 #   7  t128x256 w2x4, unroll 9: rejected by both engines
-from kernels.common.conv_dgrad_box_det import (
+from kernels.conv.conv_dgrad_box_det import (
     DgradBoxDetReduceSpec,
     build_dgrad_box_det_reduce,
 )

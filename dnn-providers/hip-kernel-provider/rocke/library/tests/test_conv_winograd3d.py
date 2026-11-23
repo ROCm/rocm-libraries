@@ -1,7 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""CPU-only checks of the Winograd conv3d research prototype (kernels/common/conv_winograd3d.py).
+"""CPU-only checks of the Winograd conv3d research prototype (kernels/conv/conv_winograd3d.py).
 
 GPU correctness: ``test_conv_winograd3d_gpu.py`` (the shipped route specs, the scaled
 prescale path, determinism, the pad copy) and ``benchmarks/common/benchmark_winograd3d.py``.
@@ -9,7 +9,7 @@ prescale path, determinism, the pad copy) and ``benchmarks/common/benchmark_wino
 
 import pytest
 
-from kernels.common import conv_winograd3d as cw
+from kernels.conv import conv_winograd3d as cw
 
 UNET3D_SHAPES = {
     1: (258, 130, 130, 64, 64),
@@ -434,7 +434,7 @@ def _cp(sid, **kw):
 
 
 def test_selector_eligibility():
-    from kernels.common import conv_winograd3d_select as sel
+    from kernels.conv import conv_winograd3d_select as sel
 
     assert sel.select_winograd3d(_cp(10), "fwd").kind == "direct"  # 16 tiles per plane
     assert "wgrad" in sel.select_winograd3d(_cp(3), "wgrad").reason
@@ -470,7 +470,7 @@ def test_selector_adapter_form(sid):
     """pad (1,1,1): the drop-in relayout adds halo 1 (FWD) / 1 (BWD-data, 2 - pad), so the
     yx problem is the halo form's (FWD) / the forward-shaped C <-> K problem (BWD-data).
     """
-    from kernels.common import conv_winograd3d_select as sel
+    from kernels.conv import conv_winograd3d_select as sel
 
     p = _cp_adapter(sid)
     D, H, W, C, K = UNET3D_SHAPES[sid]
@@ -492,7 +492,7 @@ def test_selector_adapter_form(sid):
 
 def test_selector_adapter_pad_copy_baseline():
     """direct_pad_copy: the padded FWD direct baseline may be pad copy + halo-form kernel."""
-    from kernels.common import conv_winograd3d_select as sel
+    from kernels.conv import conv_winograd3d_select as sel
 
     p = _cp_adapter(1)
     a = sel.select_winograd3d(p, "fwd")
@@ -510,7 +510,7 @@ def test_selector_adapter_pad_copy_baseline():
 @pytest.mark.parametrize("sid", [3, 4, 9])
 def test_selector_adapter_011(sid):
     """pad (0,1,1) with a D+2 input (a D-split run): relayout halos (0, 1) FWD, (2, 1) BWD-data."""
-    from kernels.common import conv_winograd3d_select as sel
+    from kernels.conv import conv_winograd3d_select as sel
 
     D, H, W, C, K = UNET3D_SHAPES[sid]
     p = _cp(sid, pH=1, pW=1)
@@ -547,7 +547,7 @@ def test_selector_adapter_011(sid):
 @pytest.mark.parametrize("mode", ["dropin", "chained"])
 @pytest.mark.parametrize("sid", [1, 2, 3, 4, 5, 6, 7, 8, 9])
 def test_selector_plans_are_valid_specs(sid, mode):
-    from kernels.common import conv_winograd3d_select as sel
+    from kernels.conv import conv_winograd3d_select as sel
 
     for d in ("fwd", "dgrad"):
         plan = sel.select_winograd3d(_cp(sid), d, mode=mode)
@@ -565,7 +565,7 @@ def test_selector_plans_are_valid_specs(sid, mode):
 
 
 def test_selector_tuned_table(monkeypatch):
-    from kernels.common import conv_winograd3d_select as sel
+    from kernels.conv import conv_winograd3d_select as sel
 
     key = ("fwd",) + UNET3D_SHAPES[3]
     monkeypatch.setitem(
@@ -595,8 +595,8 @@ def test_selector_tuned_table(monkeypatch):
 
 def test_dropin_wrapper_rejects_direct_plans():
     """Winograd3dDropin takes yx drop-in plans only (CPU: refused before any allocation)."""
-    from kernels.common import conv_winograd3d_select as sel
-    from kernels.common.conv_winograd3d_dropin import Winograd3dDropin
+    from kernels.conv import conv_winograd3d_select as sel
+    from kernels.conv.conv_winograd3d_dropin import Winograd3dDropin
 
     p = _cp_adapter(1)
     plan = sel.select_winograd3d(p, "dgrad")  # BWD-data s1 adapter: direct (tuned)
@@ -624,7 +624,7 @@ def test_pad_copy_kernel_builds(halo):
 def test_selector_pad_copy_rocke_baseline():
     """With the rocKE pad copy as the direct alternative, adapter FWD s1 / s2 / s7-s9 go direct,
     s3-s6 stay Winograd (gfx942 decision tables)."""
-    from kernels.common import conv_winograd3d_select as sel
+    from kernels.conv import conv_winograd3d_select as sel
 
     for form in ("adapter", "adapter011"):
         plans = sel.unet3d_plans("dropin", form=form, direct_pad_copy=True)
@@ -715,7 +715,7 @@ def test_ndhwc_direct_xs_ring_fits_lds():
 
 def test_xpf_option_plans():
     # opt-in: yx plans carry the unrolled-prefetch loop where valid; defaults never do
-    from kernels.common import conv_winograd3d_select as sel
+    from kernels.conv import conv_winograd3d_select as sel
 
     for form in ("halo", "adapter", "adapter011"):
         base = sel.unet3d_plans("dropin", form=form)
@@ -739,7 +739,7 @@ def _cp_pad1(D, H, W, C, K):
 def test_buffer_limit_refuses_large_problems():
     """A problem whose relayouted input reaches BUFFER_LIMIT bytes takes the direct path:
     32-bit buffer descriptors would wrap and the kernels return garbage."""
-    from kernels.common import conv_winograd3d_select as sel
+    from kernels.conv import conv_winograd3d_select as sel
 
     big = _cp_pad1(256, 256, 256, 128, 128)  # X8: 258^3 * 128 * 2 bytes > 2^32
     for d in ("fwd", "dgrad"):
@@ -776,7 +776,7 @@ def test_buffer_limit_refuses_large_problems():
 
 def test_buffer_limit_keeps_the_route_and_table_problems():
     """Every shipped route problem and decision-table cell stays eligible."""
-    from kernels.common import conv_winograd3d_select as sel
+    from kernels.conv import conv_winograd3d_select as sel
 
     assert cw.BUFFER_LIMIT == 1 << 31
     for sid in range(1, 10):
@@ -856,7 +856,7 @@ def test_relayout_names_without_halo_are_unchanged():
 # --- selector: decision tables only, chained output contract, producer geometry ------------
 def test_selector_has_no_analytic_fallback():
     """Problems without a decision table entry get the direct plan (no estimate)."""
-    from kernels.common import conv_winograd3d_select as sel
+    from kernels.conv import conv_winograd3d_select as sel
 
     assert not hasattr(sel, "Winograd3dCostModel")
     p = sel.select_winograd3d(_cp(10), "dgrad")  # valid tiling, no table cell
@@ -871,7 +871,7 @@ def test_selector_has_no_analytic_fallback():
 
 
 def test_selector_never_substitutes_the_tuned_candidate(monkeypatch):
-    from kernels.common import conv_winograd3d_select as sel
+    from kernels.conv import conv_winograd3d_select as sel
 
     key = ("fwd",) + UNET3D_SHAPES[3]
     monkeypatch.setitem(
@@ -885,7 +885,7 @@ def test_chained_plans_state_their_output():
     """chained names the input: a split-K chained plan writes NDHWC and no map (it ends
     the chain); every other chained yx plan writes c8 and, with the prescale, the map.
     """
-    from kernels.common import conv_winograd3d_select as sel
+    from kernels.conv import conv_winograd3d_select as sel
 
     plans = sel.unet3d_plans("chained")
     p8 = plans[("fwd", 8)]
@@ -905,7 +905,7 @@ def test_chained_producer_geometry(monkeypatch):
     """bps=2 indexes the producer's map: a B consumer (z_tile 2, n_tile 64) behind a Z
     producer (z_tile 4, n_tile 32) carries the producer's geometry; a producer that writes
     no c8 output / no map cannot feed a chained plan."""
-    from kernels.common import conv_winograd3d_select as sel
+    from kernels.conv import conv_winograd3d_select as sel
 
     key = ("fwd",) + UNET3D_SHAPES[9]  # a B consumer its decision table selects
     monkeypatch.setitem(
@@ -974,8 +974,8 @@ def test_dropin_spec_error_accepts_the_plain_forms():
 def test_dropin_wrapper_refuses_unrunnable_specs(extra):
     """Refused before anything is compiled or allocated (CPU)."""
     pytest.importorskip("torch")
-    from kernels.common import conv_winograd3d_select as sel
-    from kernels.common.conv_winograd3d_dropin import Winograd3dDropin
+    from kernels.conv import conv_winograd3d_select as sel
+    from kernels.conv.conv_winograd3d_dropin import Winograd3dDropin
 
     p = _cp_adapter(3)
     plan = sel.select_winograd3d(p, "fwd")

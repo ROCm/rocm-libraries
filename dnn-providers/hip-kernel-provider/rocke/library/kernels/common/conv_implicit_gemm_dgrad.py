@@ -96,7 +96,7 @@ from rocke.helpers.transforms import (
     unmerge_magic,
     unmerge_magic_dynamic,
 )
-from kernels.common.conv_m_band import emit_m_band_order
+from kernels.conv.conv_m_band import emit_m_band_order
 from kernels.common.conv_abi import conv_arg_names
 from kernels.common._conv_layouts import ConvKOuterFragmentReader
 from kernels.common._conv_implicit_gemm_common import (
@@ -685,7 +685,7 @@ def pp_box_sub_gemms(
         return out
 
     if nclass == 8:
-        from kernels.common.conv_dgrad_box_plan import records_makespan
+        from kernels.conv.conv_dgrad_box_plan import records_makespan
 
         sgs = _pp_planned_sub_gemms(
             p,
@@ -824,9 +824,9 @@ def _pp_planned_sub_gemms(
     interior=False,
 ) -> Optional[List[SubGemmParams]]:
     """``pp_boxes`` 8: pixel-list records of the makespan plan of
-    :func:`kernels.common.conv_dgrad_box_plan.plan_boxes` (one record per tap
+    :func:`kernels.conv.conv_dgrad_box_plan.plan_boxes` (one record per tap
     box, its split degree from the plan's slice length), or None."""
-    from kernels.common.conv_dgrad_box_plan import plan_boxes
+    from kernels.conv.conv_dgrad_box_plan import plan_boxes
 
     if not p.is_3d or p.groups != 1:
         return None
@@ -1614,7 +1614,7 @@ class DgradConvSpec:
     # Output-plane band order of the M tiles on top of the XCD tile order:
     # each XCD's run of tiles walks bands of ``m_band`` tiles of one dX plane
     # (Hi*Wi pixels) through every plane, so its concurrent tiles' dY rows
-    # stay in its L2 (kernels/common/conv_m_band.py). Needs the XCD tile
+    # stay in its L2 (kernels/conv/conv_m_band.py). Needs the XCD tile
     # order and the folded (stride-1) record. 0 = off. Tags ``mb<n>``.
     m_band: int = 0
     # With tapk_xhalo (tapk_lds_ahead / xh_defer emitter, xh_a_k4, xh_epi 1):

@@ -40,7 +40,7 @@ operands with a per-block prescale); every route is bitwise deterministic run to
 - `kernel` (`direct`, `padcopy_halo`) is a pin label; for `padcopy_halo` it is the halo-form kernel. A row without
   `kernel` takes the kernel of a pin table passed with the routes (`pins=`): the padded problem's pin (`direct`) or the
   halo problem's pin (`padcopy_halo`).
-- `winograd.spec` holds the `kernels.common.conv_winograd3d.WinogradYxSpec` fields except the extents, which follow
+- `winograd.spec` holds the `kernels.conv.conv_winograd3d.WinogradYxSpec` fields except the extents, which follow
   from the problem; `wtv` is the weight-transform variant. The prescale halo of the spec (`bps_halo`, `bps_halo_z`)
   must equal the relayout halo of the problem (fwd: the padding; dgrad: 2 - the padding).
 - `calls` is the number of calls per training step (replay weight).

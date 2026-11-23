@@ -90,7 +90,7 @@ static const rocke_type_t* _dtype_to_ir(const char* dtype)
 /* pp_boxes 7 / 77 / 8: the records' rows are pixel lists (one binary; 77
  * and 8 differ from 7 in the host-side records only: 77 fills the launch's
  * partial tile with the cheapest class, 8 packs the records by the makespan
- * plan of kernels/common/conv_dgrad_box_plan.py). */
+ * plan of kernels/conv/conv_dgrad_box_plan.py). */
 static bool _dgrad_pp_pixel_lists(int pp_boxes)
 {
     return pp_boxes == 7 || pp_boxes == 77 || pp_boxes == 8;

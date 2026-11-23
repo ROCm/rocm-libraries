@@ -1,7 +1,7 @@
 /* Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
  * SPDX-License-Identifier: MIT
  *
- * C port of library/kernels/common/conv_m_band.py (emit_m_band_order). Every
+ * C port of library/kernels/conv/conv_m_band.py (emit_m_band_order). Every
  * operand is bound to a temporary in Python's left-to-right order: the SSA ids
  * follow it.
  */

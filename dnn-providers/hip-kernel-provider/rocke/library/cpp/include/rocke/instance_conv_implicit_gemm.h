@@ -232,7 +232,7 @@ typedef struct rocke_implicit_gemm_conv_spec
      * one L2. A bijection of the launch grid. 0 (default) = launch order. */
     int xcd_remap; /* default 0 */
     /* Output-plane band order of the M tiles on top of xcd_remap
-     * (kernels/common/conv_m_band.py). 0 (default) = off. */
+     * (kernels/conv/conv_m_band.py). 0 (default) = off. */
     int m_band; /* default 0 */
 
     /* Register-staged global prefetch of the next K tile (Python
