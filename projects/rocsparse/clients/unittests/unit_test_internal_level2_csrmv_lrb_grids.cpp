@@ -582,6 +582,12 @@ namespace
         }
     }
 
+    enum class SpmvApi
+    {
+        v1,
+        v2
+    };
+
     // SpMV preprocess with LRB on a matrix whose only row (CSR, 1 x len) or only
     // column (CSC, len x 1) is full. The analysis reads only the row or column
     // pointers, so one-element index, value and vector arrays are enough.
@@ -589,7 +595,8 @@ namespace
                                        rocsparse_format    format,
                                        rocsparse_operation trans,
                                        int64_t             len,
-                                       rocsparse_status    expected)
+                                       rocsparse_status    expected,
+                                       SpmvApi             api = SpmvApi::v1)
     {
         device_vector<int64_t> d_ptr(std::vector<int64_t>{0, len});
         device_vector<int64_t> d_ind(std::vector<int64_t>{0});
@@ -631,7 +638,66 @@ namespace
 
         const float alpha = 1.0f;
         const float beta  = 0.0f;
-        auto        spmv  = [&](rocsparse_spmv_stage stage, size_t* size, void* buffer) {
+
+        if(api == SpmvApi::v2)
+        {
+            rocsparse_spmv_descr     spmv     = nullptr;
+            const rocsparse_spmv_alg alg      = rocsparse_spmv_alg_csr_lrb;
+            const rocsparse_datatype datatype = rocsparse_datatype_f32_r;
+            ASSERT_EQ(rocsparse_create_spmv_descr(&spmv), rocsparse_status_success);
+            EXPECT_EQ(rocsparse_spmv_set_input(
+                          handle, spmv, rocsparse_spmv_input_alg, &alg, sizeof(alg), nullptr),
+                      rocsparse_status_success);
+            EXPECT_EQ(
+                rocsparse_spmv_set_input(
+                    handle, spmv, rocsparse_spmv_input_operation, &trans, sizeof(trans), nullptr),
+                rocsparse_status_success);
+            EXPECT_EQ(rocsparse_spmv_set_input(handle,
+                                               spmv,
+                                               rocsparse_spmv_input_scalar_datatype,
+                                               &datatype,
+                                               sizeof(datatype),
+                                               nullptr),
+                      rocsparse_status_success);
+            EXPECT_EQ(rocsparse_spmv_set_input(handle,
+                                               spmv,
+                                               rocsparse_spmv_input_compute_datatype,
+                                               &datatype,
+                                               sizeof(datatype),
+                                               nullptr),
+                      rocsparse_status_success);
+
+            auto v2_spmv = [&](rocsparse_v2_spmv_stage stage) {
+                size_t buffer_size = 0;
+                EXPECT_EQ(
+                    rocsparse_v2_spmv_buffer_size(
+                        handle, spmv, descrs.mat, descrs.x, descrs.y, stage, &buffer_size, nullptr),
+                    rocsparse_status_success);
+                device_vector<char> buffer(buffer_size > 0 ? buffer_size : size_t(1));
+                return rocsparse_v2_spmv(handle,
+                                         spmv,
+                                         &alpha,
+                                         descrs.mat,
+                                         descrs.x,
+                                         &beta,
+                                         descrs.y,
+                                         stage,
+                                         buffer_size,
+                                         buffer_size > 0 ? buffer.ptr : nullptr,
+                                         nullptr);
+            };
+
+            EXPECT_EQ(v2_spmv(rocsparse_v2_spmv_stage_analysis), expected);
+            if(expected != rocsparse_status_success)
+            {
+                // rocsparse_v2_spmv records the stage only after a successful analysis.
+                EXPECT_EQ(v2_spmv(rocsparse_v2_spmv_stage_compute), rocsparse_status_invalid_value);
+            }
+            EXPECT_EQ(rocsparse_destroy_spmv_descr(spmv), rocsparse_status_success);
+            return;
+        }
+
+        auto spmv = [&](rocsparse_spmv_stage stage, size_t* size, void* buffer) {
             return rocsparse_spmv(handle,
                                   trans,
                                   &alpha,
@@ -721,6 +787,26 @@ TEST_F(CsrmvLrbAnalysis, rejects_row_longer_than_2_pow_31)
                                   rocsparse_operation_none,
                                   (int64_t(1) << 31) + 1,
                                   rocsparse_status_not_implemented);
+}
+
+// INT64_MAX non-zeros is bin 63, the last of the lrb_num_bin_counters counters.
+TEST_F(CsrmvLrbAnalysis, rejects_row_in_bin_63)
+{
+    check_lrb_preprocess_one_line(handle,
+                                  rocsparse_format_csr,
+                                  rocsparse_operation_none,
+                                  std::numeric_limits<int64_t>::max(),
+                                  rocsparse_status_not_implemented);
+}
+
+TEST_F(CsrmvLrbAnalysis, v2_rejects_row_longer_than_2_pow_31)
+{
+    check_lrb_preprocess_one_line(handle,
+                                  rocsparse_format_csr,
+                                  rocsparse_operation_none,
+                                  (int64_t(1) << 31) + 1,
+                                  rocsparse_status_not_implemented,
+                                  SpmvApi::v2);
 }
 
 // A row of exactly 2^31 non-zeros is in bin 31, the last bin LRB processes.
