@@ -37,13 +37,19 @@
 #include "unit_test_utils.hpp"
 
 #include "axpyi_device.h"
+#include "dotci_device.h"
+#include "doti_device.h"
 #include "gthr_device.h"
 #include "gthrz_device.h"
 #include "roti_device.h"
 #include "sctr_device.h"
 
+#include <chrono>
+#include <cstdlib>
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
+#include <limits>
+#include <thread>
 #include <vector>
 
 namespace
@@ -369,4 +375,152 @@ TEST(device_level1_roti, identity)
 
     EXPECT_EQ(rocsparse_ut::to_host(d_xval), (std::vector<T>{3, 4}));
     EXPECT_EQ(rocsparse_ut::to_host(d_y), (std::vector<T>{0, 7, 0, 0, 8}));
+}
+
+// ---------------------------------------------------------------------------
+// doti / dotci : sum of y[x_ind[i]] * x_val[i]  (conj(x_val[i]) for dotci)
+//
+// Regression tests for AISPARSE-1104. Before the fix, both kernels kept their
+// grid-stride index in the 32-bit index type. On the 256 x 256 grid that
+// rocsparse_doti and rocsparse_dotci launch, the index wrapped negative once
+// nnz exceeded 2147352576 (doti) or 2147418112 (dotci), so the kernels read
+// out of bounds or never terminated.
+//
+// These launch both kernel parts on that grid with 32-bit indices and
+// nnz = INT32_MAX. The public API cannot reach the dotci wrap cheaply: spvv
+// sends real types to doti even for a conjugate transpose, and complex data of
+// this size needs about 26 GB. The int8 data here needs about 10 GiB. It is
+// zero except for probes past each old wrap point and at the last element, so
+// an exact result shows that the kernel terminated and read each probe once.
+// ---------------------------------------------------------------------------
+namespace
+{
+    constexpr uint32_t DOT_DIM    = 256;
+    constexpr uint32_t DOTI_LOOPS = 2;
+
+    // A kernel that never terminates cannot be cancelled, and freeing its
+    // buffers would block, so a timeout aborts the process.
+    void synchronize_or_abort(std::chrono::seconds limit)
+    {
+        hipEvent_t done;
+        UT_CHECK_HIP(hipEventCreateWithFlags(&done, hipEventDisableTiming));
+        UT_CHECK_HIP(hipEventRecord(done, 0));
+
+        const auto deadline = std::chrono::steady_clock::now() + limit;
+        hipError_t status;
+        while((status = hipEventQuery(done)) == hipErrorNotReady)
+        {
+            if(std::chrono::steady_clock::now() > deadline)
+            {
+                ADD_FAILURE() << "kernel did not finish within " << limit.count() << " s";
+                std::abort();
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+        UT_CHECK_HIP(status);
+        UT_CHECK_HIP(hipEventDestroy(done));
+    }
+
+    template <bool CONJ>
+    void dot_int32_max_nnz()
+    {
+        using I = int32_t;
+        using X = int8_t;
+        using T = int32_t;
+
+        const I      nnz  = std::numeric_limits<I>::max();
+        const size_t need = static_cast<size_t>(nnz) * (sizeof(I) + sizeof(X));
+
+        size_t free_bytes  = 0;
+        size_t total_bytes = 0;
+        if(hipMemGetInfo(&free_bytes, &total_bytes) != hipSuccess
+           || free_bytes < need + (size_t(256) << 20))
+        {
+            GTEST_SKIP() << "Insufficient device memory: need about " << (need >> 20) << " MiB";
+        }
+
+        rocsparse_ut::device_vector<I> d_xind(static_cast<size_t>(nnz));
+        rocsparse_ut::device_vector<X> d_xval(static_cast<size_t>(nnz));
+        UT_CHECK_HIP(hipMemset(d_xind.ptr, 0, sizeof(I) * nnz));
+        UT_CHECK_HIP(hipMemset(d_xval.ptr, 0, sizeof(X) * nnz));
+
+        // The first index past the old doti wrap, the first past the old dotci
+        // wrap, and the last element. Each probe reads its own entry of y, and
+        // a missed or repeated probe changes the sum.
+        const I              probe[3]     = {2147352576, 2147418112, nnz - 1};
+        const X              probe_val[3] = {2, 3, 4};
+        const std::vector<X> y{0, 5, 7, 11};
+
+        T expected = 0;
+        for(I p = 0; p < 3; ++p)
+        {
+            const I ind = p + 1;
+            UT_CHECK_HIP(hipMemcpy(d_xind.ptr + probe[p], &ind, sizeof(I), hipMemcpyHostToDevice));
+            UT_CHECK_HIP(
+                hipMemcpy(d_xval.ptr + probe[p], &probe_val[p], sizeof(X), hipMemcpyHostToDevice));
+            expected += static_cast<T>(probe_val[p]) * y[ind];
+        }
+
+        rocsparse_ut::device_vector<X> d_y(y);
+        rocsparse_ut::device_vector<T> d_workspace(DOT_DIM);
+        rocsparse_ut::device_vector<T> d_result(1);
+
+        (void)hipGetLastError();
+        if(CONJ)
+        {
+            hipLaunchKernelGGL((rocsparse::dotci_kernel_part1<DOT_DIM, I, X, X, T>),
+                               dim3(DOT_DIM),
+                               dim3(DOT_DIM),
+                               0,
+                               0,
+                               nnz,
+                               d_xval.ptr,
+                               d_xind.ptr,
+                               d_y.ptr,
+                               d_workspace.ptr,
+                               rocsparse_index_base_zero);
+            hipLaunchKernelGGL((rocsparse::dotci_kernel_part2<DOT_DIM, T>),
+                               dim3(1),
+                               dim3(DOT_DIM),
+                               0,
+                               0,
+                               d_workspace.ptr,
+                               d_result.ptr);
+        }
+        else
+        {
+            hipLaunchKernelGGL((rocsparse::doti_kernel_part1<DOT_DIM, DOTI_LOOPS, I, X, X, T>),
+                               dim3(DOT_DIM),
+                               dim3(DOT_DIM),
+                               0,
+                               0,
+                               nnz,
+                               d_xval.ptr,
+                               d_xind.ptr,
+                               d_y.ptr,
+                               d_workspace.ptr,
+                               rocsparse_index_base_zero);
+            hipLaunchKernelGGL((rocsparse::doti_kernel_part2<DOT_DIM, T>),
+                               dim3(1),
+                               dim3(DOT_DIM),
+                               0,
+                               0,
+                               d_workspace.ptr,
+                               d_result.ptr);
+        }
+        UT_CHECK_HIP(hipGetLastError());
+        synchronize_or_abort(std::chrono::seconds(60));
+
+        EXPECT_EQ(rocsparse_ut::to_host(d_result), std::vector<T>{expected});
+    }
+} // namespace
+
+TEST(device_level1_doti, int32_max_nnz)
+{
+    dot_int32_max_nnz<false>();
+}
+
+TEST(device_level1_dotci, int32_max_nnz)
+{
+    dot_int32_max_nnz<true>();
 }
