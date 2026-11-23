@@ -56,9 +56,9 @@ def test_unsupported_geometry_keeps_old_pipeline(scales, key, value):
 
 @pytest.mark.parametrize("scales", [False, True])
 @pytest.mark.parametrize("key,value,enabled", [
-    (None, None, True), ("TileProcessingStrategy", "StreamK", False),
+    (None, None, True), ("TileProcessingStrategy", "StreamK", True),
     ("DepthU", 192, False), ("HalfPLR", True, False)])
-def test_compiled_tail_needs_launch_uniform_remainder(scales, key, value, enabled):
+def test_compiled_tail_needs_uniform_remainder_guard(scales, key, value, enabled):
     kernel, tensors, writer = _setup(scales)
     kernel["NoTailLoop"] = False
     if key is not None:
@@ -66,8 +66,10 @@ def test_compiled_tail_needs_launch_uniform_remainder(scales, key, value, enable
     assert writer.papPgr2PipelineEnabled(kernel, tensors["A"], tensors["B"]) == enabled
 
 
-def test_compiled_tail_keeps_multicast_on_old_pipeline():
+@pytest.mark.parametrize("strategy", ["DataParallel", "StreamK"])
+def test_compiled_tail_keeps_multicast_on_old_pipeline(strategy):
     kernel, tensors, writer = _setup(cluster=(2, 2))
+    kernel["TileProcessingStrategy"] = strategy
     assert writer.papPgr2PipelineEnabled(kernel, tensors["A"], tensors["B"])
     kernel["NoTailLoop"] = False
     assert not writer.papPgr2PipelineEnabled(kernel, tensors["A"], tensors["B"])
@@ -481,3 +483,59 @@ def test_streamk_two_group_guard_checks_next_range_and_restores_current(
     issued = int(current >= 2 and next_end - next_start >= 2)
     assert machine["Group0Issues"] == machine["Group1Issues"] == issued
     assert [machine[name] for name in writer.papPackedIdentityNames(kernel)] == [31, 32, 33, 2, 6]
+
+
+@pytest.mark.parametrize("parked", [False, True])
+@pytest.mark.parametrize("k", [512, 544])
+@pytest.mark.parametrize("current_end", [5, 6])
+@pytest.mark.parametrize("next_start,next_end", [(0, 2), (0, 3), (3, 6), (4, 6), (0, 6), (1, 5)])
+def test_streamk_tail_guards_follow_current_and_next_range(
+        monkeypatch, parked, k, current_end, next_start, next_end):
+    from tensilelite.Components.StreamK import StreamKTwoTileDPFirst
+    from test_PapAddressPipeline import _lane_instructions
+    kernel, tensors, writer = _setup()
+    kernel.update(TileProcessingStrategy="StreamK", NoTailLoop=False)
+    writer.states.unrollIdx = 2
+    writer.states.papAddressCarrier = {"packed": True}
+    writer.states.papNextTileVgpr = 12
+    writer.states.persistentConstVgprs = {"ItersPerTile": 13}
+    writer.states.regCaps = {"MaxSgpr": 128}
+    monkeypatch.setattr(Component.TileProcessingStrategy, "find", lambda _: StreamKTwoTileDPFirst())
+    monkeypatch.setattr(Component.WorkAssignment, "find", lambda _: StaticGrid())
+    writer.isPersistentConstantsToVgprEnabled = lambda kernel, name=None: parked
+    writer.papTdmUpdateDescriptor = lambda *args, **kwargs: Module()
+    writer.papPgr2AdvanceDescriptor = lambda *args: Module()
+    writer.tdmSwapLdsOffset = lambda *args: Module()
+    writer.papSaveNextTileDescriptors = lambda *args: Module()
+    writer.papTdmSaveLdsBank = lambda *args: Module()
+    writer.papPgr2IssueGroup = lambda k, a, b, group: SAddU32(
+        sgpr(f"Group{group}Issues"), sgpr(f"Group{group}Issues"), 1)
+    assert writer.papPgr2RuntimeTailSplit(kernel)
+    module = Module()
+    for group in (0, 1):
+        module.add(PersistentLoopOn().prefetchPgr2Group(writer, kernel, tensors["A"], tensors["B"], group))
+    text = _lane_instructions(module)
+    if parked:
+        assert "s[sgprItersPerTile]" not in text
+        text = text.replace("v_readfirstlane_b32", "s_mov_b32").replace("v13", "s[sgprIptVgpr]")
+    # ItersPerTile is 6. The current range [2, current_end) has OrigLoopCounter
+    # main-loop chunks; its tail runs only when it reaches the partial last one.
+    remainder = k % 256 != 0
+    current_tail = remainder and current_end == 6
+    current = current_end - 2 - current_tail
+    machine = _PipelineMachine(PersistentPrefetchState=0x80000004, OrigLoopCounter=current,
+                               PersistentIteration=10, PersistentIterationEnd=20, AddressFlags=1,
+                               WorkGroup0=31, WorkGroup1=32, WorkGroup2=33,
+                               StreamKLocalStart=2, StreamKLocalEnd=current_end,
+                               ItersPerTile=0 if parked else 6, IptVgpr=6 if parked else 0,
+                               **{"SizesSum+2": k})
+    machine.registers[str(sgpr("AddressFlags", 2))] = 1
+    for i, value in enumerate((41, 42, 43, next_start, next_end)):
+        machine[f"Lane12_{i}"] = value
+    machine.run(text)
+    next_main = next_end - next_start - (remainder and next_end == 6)
+    group0 = int(current >= 2 and next_main >= 2)
+    assert machine["Group0Issues"] == group0
+    assert machine["Group1Issues"] == int(group0 and not current_tail)
+    assert machine["PersistentPrefetchState"] & 9 == (0 if not group0 else 1 if current_tail else 9)
+    assert [machine[name] for name in writer.papPackedIdentityNames(kernel)] == [31, 32, 33, 2, current_end]

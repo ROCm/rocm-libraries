@@ -244,18 +244,38 @@ class PersistentKernelState:
 
     @staticmethod
     def papPgr2RuntimeTailSplit(kernel):
-        """A compiled tail loop keeps group1 for launches with no K remainder.
+        """A compiled tail loop keeps group1 for work that has no K remainder.
 
         A running tail needs the final bank that group1 would fill. Every
-        DataParallel tile of a launch shares K, so the guard is uniform across
-        waves and persistent iterations. Multicast peers would also need the
-        group0 readiness phase that the bit3-keyed PLR site skips.
+        DataParallel tile of a launch shares K, so its guard is launch-uniform.
+        A StreamK range runs the tail only when it ends on its tile's partial
+        last iteration, so its guards test the current and next range. Both are
+        uniform across waves. Multicast peers would also need the group0
+        readiness phase that the bit3-keyed PLR site skips.
         """
         depthU = kernel["DepthU"]
         return (not kernel["NoTailLoop"] and not kernel["HalfPLR"]
-                and kernel["TileProcessingStrategy"] == "DataParallel"
+                and kernel["TileProcessingStrategy"] in ("DataParallel", "StreamK")
                 and not persistentSpatialCluster(kernel)
                 and depthU & (depthU - 1) == 0)
+
+    def papStreamKRangeRunsTail(self, kernel, dst, end):
+        """Set dst to 1 when a StreamK range ending at `end` runs the tail loop.
+
+        This mirrors calculateLoopNumIterCommon: the tile's last iteration is
+        partial and the range ends there.
+        """
+        module = Module("PAP StreamK range runs tail loop")
+        module.add(SAndB32(dst=sgpr(dst), src0=sgpr("SizesSum+%u" % self.states.unrollIdx),
+                           src1=kernel["DepthU"] - 1, comment="PAP K remainder?"))
+        module.add(SCSelectB32(dst=sgpr(dst), src0=1, src1=0))
+        iters = self.acquirePersistentConstSgpr(kernel, "ItersPerTile")
+        if isinstance(iters, int):
+            module.add(VReadfirstlaneB32(dst=sgpr(iters), src=vgpr(self.states.persistentConstVgprs["ItersPerTile"])))
+        module.add(SCmpEQU32(src0=end, src1=sgpr(iters), comment="PAP range ends on the tile's final iteration?"))
+        self.releasePersistentConstSgpr(iters)
+        module.add(SCSelectB32(dst=sgpr(dst), src0=sgpr(dst), src1=0, comment="PAP range runs the tail loop"))
+        return module
 
     @staticmethod
     def papPgr2TensorCount(kernel):
@@ -1514,10 +1534,16 @@ class PersistentLoop(Component):
         module.add(SCmpGeU32(src0=sgpr("OrigLoopCounter"), src1=2,
                             comment="PAP PGR2 requires two full K chunks"))
         module.add(SCBranchSCC0(labelName=skip.getLabelName()))
-        if group == 1 and writer.papPgr2RuntimeTailSplit(kernel):
+        tailSplit = writer.papPgr2RuntimeTailSplit(kernel)
+        if group == 1 and tailSplit:
             with writer.allocTmpSgpr(1, tag="PAP PGR2 K remainder") as remainder:
-                module.add(SAndB32(dst=sgpr(remainder.idx), src0=sgpr("SizesSum+%u" % writer.states.unrollIdx),
-                                   src1=kernel["DepthU"] - 1, comment="PAP K remainder selects the tail loop"))
+                if isStreamK(kernel):
+                    module.add(writer.papStreamKRangeRunsTail(kernel, remainder.idx, sgpr("StreamKLocalEnd")))
+                    module.add(SCmpEQU32(src0=sgpr(remainder.idx), src1=1,
+                                         comment="PAP current StreamK range selects the tail loop"))
+                else:
+                    module.add(SAndB32(dst=sgpr(remainder.idx), src0=sgpr("SizesSum+%u" % writer.states.unrollIdx),
+                                       src1=kernel["DepthU"] - 1, comment="PAP K remainder selects the tail loop"))
             module.add(SCBranchSCC1(labelName=skip.getLabelName(),
                                     comment="PAP tail loop keeps the final bank; group1 waits for entry"))
         if isStreamK(kernel):
@@ -1525,7 +1551,16 @@ class PersistentLoop(Component):
                 for i in range(2):
                     module.add(VReadlaneB32(dst=sgpr(count.idx + i), src0=vgpr(writer.states.papNextTileVgpr), src1=3 + i))
                 module.add(SSubU32(dst=sgpr(count.idx), src0=sgpr(count.idx + 1), src1=sgpr(count.idx)))
-                module.add(SCmpGeU32(src0=sgpr(count.idx), src1=2, comment="PAP next StreamK range contains both groups"))
+                if tailSplit:
+                    # Both groups must be main-loop chunks; a final partial
+                    # iteration belongs to the next range's own tail loop.
+                    with writer.allocTmpSgpr(1, tag="PAP next range tail") as tail:
+                        module.add(writer.papStreamKRangeRunsTail(kernel, tail.idx, sgpr(count.idx + 1)))
+                        module.add(SAddU32(dst=sgpr(tail.idx), src0=sgpr(tail.idx), src1=2))
+                        module.add(SCmpGeU32(src0=sgpr(count.idx), src1=sgpr(tail.idx),
+                                             comment="PAP next StreamK range has two main-loop chunks"))
+                else:
+                    module.add(SCmpGeU32(src0=sgpr(count.idx), src1=2, comment="PAP next StreamK range contains both groups"))
                 module.add(SCBranchSCC0(labelName=skip.getLabelName()))
         module.add(SSchedulingFence(comment="PAP PGR2 released-bank issue begins"))
 

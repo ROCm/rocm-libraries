@@ -277,12 +277,15 @@ def _next_free_vgpr(src):
     return max(int(value) for value in re.findall(r"\.amdhsa_next_free_vgpr\s+(\d+)", src))
 
 
-def test_tail_kernel_withholds_group1_when_tail_runs(tmp_path):
+@pytest.mark.parametrize("strategy,guard_comment", [
+    ("DataParallel", "PAP K remainder selects the tail loop"),
+    ("StreamK", "PAP current StreamK range selects the tail loop")])
+def test_tail_kernel_withholds_group1_when_tail_runs(tmp_path, strategy, guard_comment):
     # A fixed store batch keeps the VGPR comparison about the tail loop.
+    overrides = dict(TileProcessingStrategy=strategy, NumElementsPerBatchStore=8)
     (notail_name, notail, _), = emit_kernels_from_config(
-        _config(tmp_path, AssertSummationElementMultiple=256, NumElementsPerBatchStore=8),
-        limit=1, arch="gfx1250")
-    results = emit_kernels_from_config(_config(tmp_path, NumElementsPerBatchStore=8), limit=1, arch="gfx1250")
+        _config(tmp_path, AssertSummationElementMultiple=256, **overrides), limit=1, arch="gfx1250")
+    results = emit_kernels_from_config(_config(tmp_path, **overrides), limit=1, arch="gfx1250")
     assert_real_gfx1250_kernels(results)
     for name, src, _ in results:
         assert_assembles(src, name)
@@ -290,12 +293,19 @@ def test_tail_kernel_withholds_group1_when_tail_runs(tmp_path):
         assert "PAP publish durable next coordinates" in src
         assert "PAP skip redundant first local reads" in src
         lines = src.splitlines()
-        guard = [i for i, line in enumerate(lines) if "PAP K remainder selects the tail loop" in line]
+        guard = [i for i, line in enumerate(lines) if guard_comment in line]
         assert len(guard) == 1
         assert lines[guard[0] + 1].startswith("s_cbranch_scc1 ")
+        if strategy == "StreamK":
+            # The current range's tail test reads its own end, not the next one.
+            tail_test = max(i for i in range(guard[0]) if "PAP range ends on the tile's final iteration" in lines[i])
+            assert "s[sgprStreamKLocalEnd]" in lines[tail_test]
+            # Both groups need two main-loop chunks in the next range.
+            assert sum("PAP next StreamK range has two main-loop chunks" in line for line in lines) == 2
         # The tail lends the retained first-PLR operands back to its value pool.
         assert _next_free_vgpr(src) <= _next_free_vgpr(notail)
-    assert "PAP K remainder selects the tail loop" not in notail
+    assert guard_comment not in notail
+    assert "PAP next StreamK range has two main-loop chunks" not in notail
 
 
 def _assert_classic_pap_overlaps_nll(lines):
@@ -336,12 +346,14 @@ def test_classic_pap_load_is_not_drained_in_no_load_loop(tmp_path, monkeypatch):
                 _assert_classic_pap_overlaps_nll(corrupted)
 
 
+@pytest.mark.parametrize("strategy", ["DataParallel", "StreamK"])
 @pytest.mark.parametrize("asem", [32, 256], ids=["tail", "notail"])
-def test_cold_first_plr_keeps_entry_group1_in_flight(tmp_path, asem):
-    # Remainder launches take this read on every tile. Only group0 must be
+def test_cold_first_plr_keeps_entry_group1_in_flight(tmp_path, asem, strategy):
+    # Remainder work takes this read on every tile. Only group0 must be
     # complete; a full drain here would expose the group1 issued just before.
     results = emit_kernels_from_config(
-        _config(tmp_path, AssertSummationElementMultiple=asem), limit=1, arch="gfx1250")
+        _config(tmp_path, AssertSummationElementMultiple=asem, TileProcessingStrategy=strategy),
+        limit=1, arch="gfx1250")
     assert_real_gfx1250_kernels(results)
     for name, src, _ in results:
         assert_assembles(src, name)
