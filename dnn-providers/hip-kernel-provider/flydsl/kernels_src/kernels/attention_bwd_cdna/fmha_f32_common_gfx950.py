@@ -66,13 +66,30 @@ import flydsl.expr as fx  # noqa: E402
 from flydsl._mlir import ir  # noqa: E402
 from flydsl._mlir.dialects import rocdl as R  # noqa: E402
 from flydsl._mlir.dialects import scf as _scf  # noqa: E402
-from flydsl.expr.rocdl import _blgp_attr  # noqa: E402
+from flydsl.expr.rocdl import _blgp_attr, cdna3  # noqa: E402
 from flydsl.expr.typing import Vector as Vec  # noqa: E402
 
 ELEM_BYTES = 4
 VEC = 4  # fp32 per 128-bit access
 WAVE = 64
-LDS_BYTES_LIMIT = 163840
+ARCHES = ("gfx950", "gfx942", "gfx90a")
+# Per arch: bytes of one buffer->LDS DMA lane (gfx950 moves 16 B; gfx90a / gfx942 only 4 B, so a 16 x 16 chunk is four DMAs) and the workgroup LDS cap.
+DMA_BYTES = {"gfx950": 16, "gfx942": 4, "gfx90a": 4}
+LDS_LIMIT_BYTES = {"gfx950": 163840, "gfx942": 65536, "gfx90a": 65536}
+# D-split tiles (block_q 16) whose q tile is staged in two halves of each wave's head-dim slice, per arch: only on the 64 KiB arches (t512 needs
+# 77,824 B whole, 43,008 B halved); gfx950 never halves.
+HALF_TILES = {"gfx950": (), "gfx942": (512,), "gfx90a": (512,)}
+
+
+def dma_bytes(arch):
+    """Bytes per lane of a buffer->LDS DMA on `arch` (16 or 4)."""
+    return DMA_BYTES[arch]
+
+
+def lds_limit(arch):
+    """Workgroup LDS cap of `arch`, in bytes."""
+    return LDS_LIMIT_BYTES[arch]
+
 
 PANEL = 16  # rows and columns of one chunk
 CHUNK = PANEL * PANEL  # words
@@ -196,6 +213,7 @@ def bank_conflict_degree(words, banks, group=16):
 class Family:
     """One fp32 variant's layout parameters.
 
+    `arch` selects the DMA width, the LDS cap and the half-head tiles (`DMA_BYTES`, `LDS_LIMIT_BYTES`, `HALF_TILES`).
     kernel 'dkdv' | 'dq'; `tile` = head dim (hdim rides the tile; tile % 32 == 0); `bq` = q rows of the staged tile (dK/dV `block_q`) or of the
     workgroup (dQ `block_m`), 16 or 32 (geometry (BLOCK_M, BLOCK_N) = (bq, 16)); `sched` 'pw' (per-wave dK/dV: wave owns 16 KV rows x full d)
     or 'ds' (D-split: workgroup owns 16 KV rows (dK/dV) / `bq` q rows (dQ), wave owns a d-slice; dQ is always 'ds'); `waves` 2 or 4.
@@ -206,8 +224,11 @@ class Family:
     bq: int
     sched: str
     waves: int
+    arch: str
 
     def __post_init__(self):
+        if self.arch not in ARCHES:
+            raise ValueError(f"arch {self.arch!r} is not one of {ARCHES}")
         if (
             self.kernel not in ("dkdv", "dq")
             or self.bq not in (16, 32)
@@ -219,6 +240,16 @@ class Family:
             raise ValueError(f"tile {self.tile}")
         if self.kernel == "dq" and self.sched != "ds":
             raise ValueError("dQ is a d-split at every tile")
+
+    @property
+    def dma_bytes(self):
+        """Bytes per lane of this variant's buffer->LDS DMA."""
+        return DMA_BYTES[self.arch]
+
+    @property
+    def lds_limit(self):
+        """Workgroup LDS cap of this variant's arch, in bytes."""
+        return LDS_LIMIT_BYTES[self.arch]
 
     @property
     def rb(self):
@@ -253,9 +284,27 @@ class Family:
         return self.sched == "ds" and self.d_wave * self.waves != self.tile
 
     @property
+    def halves(self):
+        """Passes over a wave's head-dim slice per staged tile: 2 stages the slice in two halves through one half-size buffer (`HALF_TILES` of the arch), else 1."""
+        if not (
+            self.sched == "ds" and self.bq == 16 and self.tile in HALF_TILES[self.arch]
+        ):
+            return 1
+        if self.uneven or self.dsu % 2:
+            raise ValueError(
+                f"tile {self.tile}: a wave's {self.dsu} panels do not split in two halves"
+            )
+        return 2
+
+    @property
+    def dsu_h(self):
+        """Panels of a wave's slice resident in LDS at once."""
+        return self.dsu // self.halves
+
+    @property
     def panels_lds(self):
-        """Panels of one staged tensor tile in LDS: the head dim for per-wave, `dsu * waves` for a d-split (an uneven split pads the last slices)."""
-        return self.panels_total if self.sched == "pw" else self.dsu * self.waves
+        """Panels of one staged tensor tile in LDS: the head dim for per-wave, `dsu_h * waves` for a d-split (an uneven split pads the last slices)."""
+        return self.panels_total if self.sched == "pw" else self.dsu_h * self.waves
 
     @property
     def block(self):
@@ -285,22 +334,6 @@ class Family:
         if self.kernel == "dkdv":
             return {"mfma_rows": 16, "block_q": self.bq, "num_stream_buffers": 1}
         return {"block_m": self.bq, "block_n": 16}
-
-    @staticmethod
-    def from_spec(spec, sched, waves):
-        """Layout parameters of an fp32 dkdv / dq Spec. The geometry knob (`block_q` / `block_m`) must be pinned; the other fp32 knobs, when
-        set, must have their only legal value."""
-        if spec.dtype != "fp32" or spec.kernel not in ("dkdv", "dq"):
-            raise ValueError(f"not an fp32 dkdv/dq spec: {spec.key()}")
-        knob = "block_q" if spec.kernel == "dkdv" else "block_m"
-        bq = getattr(spec, knob)
-        if bq is None:
-            raise ValueError(f"{knob} is not pinned: {spec.key()}")
-        legal = {"mfma_rows": 16, "num_stream_buffers": 1, "block_n": 16}
-        for k, v in legal.items():
-            if getattr(spec, k, None) not in (None, v):
-                raise ValueError(f"knob {k} must be {v}: {spec.key()}")
-        return Family(spec.kernel, spec.tile, bq, sched, waves)
 
 
 # ------------------------------------------------------------------ lane coordinates
@@ -349,7 +382,7 @@ def slab_span(ops, rows, stride_seq, hdim):
 
 
 # A bounded buffer DMA describes its slab by `num_records` = 4 `slab_span` bytes and addresses a lane by the byte offset `4 off`: both are 32-bit fields,
-# so a slab of 2^30 elements or more (4 GiB) cannot be described and its staged rows would read wrong. Exact objects stage through 64-bit pointers.
+# so a slab of 2^30 elements or more (4 GiB) cannot be described and its staged rows would read wrong. Exact objects stage through 64-bit pointers (`global_load_lds`: 16 B on gfx950, 4 B on gfx942; gfx90a has no such instruction and refuses exact fp32 objects, `BwdDkDvKnobs` / `BwdDqKnobs`).
 SLAB_SPAN_LIMIT = 1 << 30
 
 
@@ -431,10 +464,29 @@ def stg_v4_masked(ops, name, row_off, col, limit, whole, v, pred=None):
 
 
 def stage_row_off(ops, row, row_last, stride_seq, lane):
-    """Element offset, from the slab base, of the row the lane fetches when staging chunks of the 16 rows starting at `row`: row `row + lane//4`
-    clamped to `row_last` (a row past the sequence end reads the last valid row, whose data the caller's softmax masks). Loop-invariant across
-    the panels of a tile: compute once per (tensor, 16-row block)."""
+    """Element offset, from the slab base, of the row the lane fetches when staging chunks of the 16 rows starting at `row`. 16 B DMA: row
+    `row + lane//4`. 4 B DMA (`ops.dma_bytes == 4`, gfx90a / gfx942) j (word 64 j + lane of the chunk): a list of four, row `row + 4 j + lane//16`. Rows clamp to `row_last`.
+    """
+    if ops.dma_bytes == 4:
+        return [
+            ops.i64(ops.imin(row + 4 * j + lane // 16, row_last)) * ops.i64(stride_seq)
+            for j in range(4)
+        ]
     return ops.i64(ops.imin(row + lane // 4, row_last)) * ops.i64(stride_seq)
+
+
+def stage_panel_rsrc(ops, rsrc, lds_off, row_off, panel_col, lane, pred=None):
+    """Stage one 16 x 16 chunk through the buffer resource `rsrc` (`ops.buf_rsrc`)."""
+    if ops.dma_bytes == 4:
+        for j in range(4):
+            ops.dma_rsrc(
+                rsrc,
+                row_off[j] + ops.i64(panel_col + lane % 16),
+                lds_off + 64 * j,
+                pred,
+            )
+    else:
+        ops.dma_rsrc(rsrc, row_off + ops.i64(panel_col + (lane % 4) * 4), lds_off, pred)
 
 
 def stage_panel(
@@ -445,6 +497,27 @@ def stage_panel(
     columns in memory). Otherwise a bounded buffer DMA through a resource of `4 * bound` bytes over the slab (`bound` = `slab_span`): lanes
     whose 16 B lie past it read 0 and touch no memory. `pred` (wave-uniform) skips the DMA of a chunk the wave does not own.
     """
+    if ops.dma_bytes == 4:
+        if bound is None:
+            # exact head: four 64-bit-pointer 4 B DMAs (gfx942 `global_load_lds_dword`); no buffer resource, so no 2^30-element slab limit
+            for j in range(4):
+                ops.dma(
+                    name,
+                    base + row_off[j] + ops.i64(panel_col + lane % 16),
+                    lds_off + 64 * j,
+                    pred,
+                )
+            return
+        stage_panel_rsrc(
+            ops,
+            ops.buf_rsrc(name, base, bound),
+            lds_off,
+            row_off,
+            panel_col,
+            lane,
+            pred,
+        )
+        return
     off = row_off + ops.i64(panel_col + (lane % 4) * 4)
     if bound is None:
         ops.dma(name, base + off, lds_off, pred)
@@ -460,15 +533,16 @@ def mfma_dot_panel(ops, acc, a_v4, b_v4):
     return acc
 
 
-def scores_block(ops, L, tq, s, rb, ncols, tile_f, K, V, p_first=0, mq=None, mv=None):
+def scores_block(
+    ops, L, tq, s, rb, ncols, tile_f, K, V, p_first=0, mq=None, mv=None, init=None
+):
     """S and dP accumulators of 16-row block s of a staged q tile at LDS word `tq` (this wave's first panel), over `ncols` resident panels.
 
     A = the tile rows `row_perm` read b128 (Q, dO), B = the resident K, V panels: lane (g, i) of the result holds S[tile row 16 s + g + 4 i][kv m].
     Chunk of (panel c, block s) is `c * rb + s`; the dO tile is `tile_f` words after the Q tile. `p_first` = head-dim panel of the first resident panel;
     `mq` / `mv`: `ColMask` of the Q / dO side (A reads masked past the head dim, see the module docstring).
     """
-    sa = ops.zero(4)
-    da = ops.zero(4)
+    sa, da = (ops.zero(4), ops.zero(4)) if init is None else init
     a = a_read(L.lane)
     for c in range(ncols):
         off = tq + chunk_off(c * rb + s) + a
@@ -537,9 +611,12 @@ class DeviceOps:
     """FlyDSL backend of the emitters. `lbuf`: pointer to the workgroup's fp32 LDS buffer; `gptrs`: name -> global fp32 pointer
     (`fx.recast_iter(f32 global ptr type, arg)`), indexed by 64-bit element offsets."""
 
-    def __init__(self, lbuf, gptrs):
+    def __init__(self, lbuf, gptrs, dma_bytes=16):
         self.lbuf = lbuf
         self.g = gptrs
+        self.dma_bytes = (
+            dma_bytes  # bytes per lane of a buffer->LDS DMA (`Family.dma_bytes`)
+        )
 
     # integers and predicates
     @staticmethod
@@ -593,7 +670,7 @@ class DeviceOps:
             R.global_load_lds(
                 (self.g[name] + goff).llvm_ptr,
                 (self.lbuf + fx.Int32(lds_off)).llvm_ptr,
-                16,
+                self.dma_bytes,
                 0,
             )
             return
@@ -602,7 +679,7 @@ class DeviceOps:
             R.global_load_lds(
                 (self.g[name] + goff).llvm_ptr,
                 (self.lbuf + fx.Int32(lds_off)).llvm_ptr,
-                16,
+                self.dma_bytes,
                 0,
             )
             _scf.YieldOp([])
@@ -628,7 +705,7 @@ class DeviceOps:
             fx.rocdl.raw_ptr_buffer_load_lds(
                 rsrc,
                 lds_ptr,
-                fx.Int32(16),
+                fx.Int32(self.dma_bytes),
                 fx.Int32(off * 4),
                 fx.Int32(0),
                 fx.Int32(0),
@@ -683,6 +760,11 @@ class DeviceOps:
     def wait_dma():
         """Wait for this wave's outstanding global->LDS DMA (no barrier)."""
         dualwave._waitcnt_vm_n(0)
+
+    @staticmethod
+    def wait_lds():
+        """Wait for this wave's outstanding LDS reads and writes (`s_waitcnt lgkmcnt(0)`)."""
+        cdna3.s_waitcnt(lgkmcnt=0)
 
     @staticmethod
     def barrier():

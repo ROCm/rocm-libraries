@@ -92,6 +92,7 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         IntegrationGpuGfx950AttentionUnifiedKnobs.cpp
             Gfx950AttentionUnified2D,Gfx950AttentionUnified3D
         IntegrationGpuGfx942AttentionUnified3dKnobs.cpp Gfx942AttentionUnified3d
+        IntegrationGpuGfx942AttentionUnified2DKnobs.cpp Gfx942AttentionUnified2D
         IntegrationGpuGfx942AttentionDenseKnobs.cpp Gfx942AttentionDense
     )
     while(_knob_suites)
@@ -115,6 +116,25 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
             )
         endif()
     endwhile()
+    # The packaged convolution suites follow the same rule as the knobs suite above, one
+    # define per engine: the AOT-instance engine is its own product bundle. The AOT seed
+    # is test content of this build's own integration root, so its gate is arch-aware
+    # instead.
+    hkp_product_offers_engine(_hkp_conv_fwd_aot_bundle "hipkernel:Gfx950ConvFwdAot")
+    hkp_gfx950_conv_fwd_aot_seed_available(_hkp_conv_fwd_aot_seed_bundle)
+    if(_hkp_conv_fwd_aot_bundle OR _hkp_conv_fwd_aot_seed_bundle)
+        target_sources(hip_kernel_provider_integration_tests PRIVATE
+            kernel_ingestor_engine/IntegrationGpuGfx950ConvFwd.cpp
+        )
+    endif()
+    foreach(_hkp_conv_suite IN ITEMS conv_fwd_aot conv_fwd_aot_seed)
+        if(_hkp_${_hkp_conv_suite}_bundle)
+            string(TOUPPER "HKP_TEST_GFX950_${_hkp_conv_suite}" _hkp_conv_define)
+            target_compile_definitions(hip_kernel_provider_integration_tests
+                PRIVATE ${_hkp_conv_define}=1
+            )
+        endif()
+    endforeach()
     # The dgrad AOT-instance engine is a product bundle of its own, gated like the knob
     # suites; it needs no SDPA.
     hkp_product_offers_engine(_hkp_conv_dgrad_aot_bundle "hipkernel:Gfx950ConvDgradAot")
@@ -157,6 +177,19 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     target_compile_definitions(hip_kernel_provider_integration_tests
         PRIVATE HIPKERNELPROVIDER_FLYDSL_SDPA_ARCHS="${_flydsl_sdpa_archs}"
     )
+    # The paged-K/V suite of the RDNA prefill engine, gated like the knob suites; it
+    # GTEST_SKIPs on devices the engine's objects are not built for.
+    hkp_product_offers_engine(_hkp_rdna_attention_bundle "hipkernel:Gfx1151WmmaAttention")
+    if(_hkp_rdna_attention_bundle AND NOT HIPDNN_ENABLE_SDPA)
+        message(WARNING
+                "HIPDNN_ENABLE_KERNEL_INGESTOR is ON but hipDNN was built with "
+                "HIPDNN_ENABLE_SDPA=OFF. Skipping IntegrationGpuGfx1151WmmaAttentionPaged.cpp. "
+                "Rebuild hipDNN with -DHIPDNN_ENABLE_SDPA=ON to enable it.")
+    elseif(_hkp_rdna_attention_bundle)
+        target_sources(hip_kernel_provider_integration_tests PRIVATE
+            kernel_ingestor_engine/IntegrationGpuGfx1151WmmaAttentionPaged.cpp
+        )
+    endif()
     target_sources(hip_kernel_provider_integration_tests PRIVATE
         kernel_ingestor_engine/IntegrationGpuKernelIngestor.cpp
         kernel_ingestor_engine/IntegrationGpuKernelIngestorKpack.cpp
@@ -315,7 +348,7 @@ while(_engines)
 endwhile()
 
 # The FlyDSL SDPA backward engines, one gpu-reference target per (engine, architecture)
-# the product ships. Split ships gfx950 content and gfx11-generic content, which the pack
+# the product ships. Split ships gfx950, gfx90a, gfx942 and gfx11-generic content, which the pack
 # expands to every gfx11 member this build targets; merged ships gfx950 only. Gated and
 # routed per architecture exactly as the pinned attention targets above: the predicate is
 # the one the census uses, and the entry installs into that architecture's shard so a

@@ -5,7 +5,7 @@
 
 Tree mode, the one a regeneration from this repository alone uses (REGEN.md §2):
 
-    python tools/sdpa_bwd_s1.py --from-content <content root> --arch <gfx950|gfx11-generic> --reference-dir <new dir>
+    python tools/sdpa_bwd_s1.py --from-content <content root> --arch <gfx950|gfx11-generic|gfx942|gfx90a> --reference-dir <new dir>
 
 It writes ``<hash>.hsaco`` into the new dir for every pin of the arch's reference CSV (``tests/data``) whose object the shipped content
 holds: the pin's sha256 is the object's. The content roots are the arch folders of the ``sdpa_bwd_*`` ops (the objects and the
@@ -53,11 +53,11 @@ must be absent at the end.
 Outputs in ``--out``:
 
 * ``manifest.csv``: the resolved membership (hash, spec, kernel, group, sha256,
-  old_sha256, resource row, source, reason, object_state, object_path, rmir_scan). A gfx950
+  old_sha256, resource row, source, reason, object_state, object_path, rmir_scan). A gfx950, gfx942 or gfx90a
   member's ``rmir_scan`` is ``exception`` for a row of ``sdpa_bwd_pinned_exceptions.csv``, else
   ``clean`` when the sweep's ``objs/<hash>/rmir.json`` beside a candidate object is a scan of the
   pin (``pinned_sha256``) whose dump build was the pinned object (``matched``) with no finding;
-  a gfx950 member with a binary and neither fails the run;
+  a member of those arches with a binary and neither fails the run;
 * ``known-flaky.csv``: hash, spec, source of every known-nondeterministic pin;
 * ``rebuild-required.csv``: members with no binary in any root (each must be rebuilt
   and equal its sha256, then supplied through ``--object-root``);
@@ -95,8 +95,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from generators._sdpa_bwd_rdna_build import RESOURCE_COLUMNS  # noqa: E402
 
 PIN_COLUMNS = ("hash", "spec", "sha256", *RESOURCE_COLUMNS)
-# gfx950 pins also record their R-MIR scan (``tests/data/sdpa_bwd_reference.csv``): ``clean`` is a scan whose dump build is the pinned object
-# with no finding, ``exception`` a row of ``sdpa_bwd_pinned_exceptions.csv`` (a device screen stands in). The detector reads gfx950 MIR only.
+# The pins of the arches the R-MIR detector reads (gfx950, gfx942, gfx90a) also record their R-MIR scan (the arch's reference CSV): ``clean`` is
+# a scan whose dump build is the pinned object with no finding, ``exception`` a row of ``sdpa_bwd_pinned_exceptions.csv`` (a device screen
+# stands in). gfx11 pins record none.
+RMIR_ARCHES = ("gfx950", "gfx942", "gfx90a")
 RMIR_CLEAN = "clean"
 RMIR_EXCEPTION = "exception"
 RMIR_SCANS = (RMIR_CLEAN, RMIR_EXCEPTION)
@@ -135,14 +137,15 @@ def kernel_of(spec: str) -> str:
     return spec.split(",", 1)[0]
 
 
-def is_gfx950(spec: str) -> bool:
-    """Whether the Spec key names gfx950 (the arch is spelled only when it is another: ``;arch=gfx11-generic``)."""
-    return ";arch=" not in spec
+def scans_rmir(spec: str) -> bool:
+    """Whether the Spec key names an arch whose pins record an R-MIR scan (the arch is spelled only when it is not gfx950: ``;arch=gfx11-generic``)."""
+    match = re.search(r";arch=([^;]+)", spec)
+    return (match.group(1) if match else "gfx950") in RMIR_ARCHES
 
 
 def pin_columns(arch: str) -> tuple[str, ...]:
     """The columns of the reference CSV of @p arch."""
-    return (*PIN_COLUMNS, RMIR_COLUMN) if arch == "gfx950" else PIN_COLUMNS
+    return (*PIN_COLUMNS, RMIR_COLUMN) if arch in RMIR_ARCHES else PIN_COLUMNS
 
 
 def sha256_file(path: Path) -> str:
@@ -647,9 +650,9 @@ def resolve_objects(
     index: ObjectIndex,
     exceptions: frozenset[str] | set[str] = frozenset(),
 ) -> tuple[list[dict], list[dict], list[str], list[str]]:
-    """(manifest rows, rebuild-required rows, sha-mismatch diagnoses, gfx950 pins with no clean scan on record).
+    """(manifest rows, rebuild-required rows, sha-mismatch diagnoses, pins of the R-MIR arches with no clean scan on record).
 
-    A gfx950 member with a binary records ``rmir_scan``: ``exception`` for a row of @p exceptions, ``clean`` for a matched clean sweep scan of the
+    A member of an R-MIR arch (``RMIR_ARCHES``) with a binary records ``rmir_scan``: ``exception`` for a row of @p exceptions, ``clean`` for a matched clean sweep scan of the
     pin (``ObjectIndex.scan_is_clean``), else it is listed as unscanned and its ``rmir_scan`` stays empty. A gfx11 member records none.
     """
     rows: list[dict] = []
@@ -680,7 +683,7 @@ def resolve_objects(
                 }
             )
         scan = ""
-        if is_gfx950(m.row["spec"]) and state == "found":
+        if scans_rmir(m.row["spec"]) and state == "found":
             if h in exceptions:
                 scan = RMIR_EXCEPTION
             elif index.scan_is_clean(h, m.row["sha256"]):
@@ -756,7 +759,7 @@ def reference_dir_from_content(
 ) -> tuple[int, int]:
     """Write the pins of @p arch the content ships to ``<hash>.hsaco`` under the new dir @p target; (objects written, pins named by a function digest).
 
-    A gfx950 pin is taken only when its row records a scan (``rmir_scan``: ``clean`` or ``exception``); one without fails and nothing is written.
+    A pin of an R-MIR arch is taken only when its row records a scan (``rmir_scan``: ``clean`` or ``exception``); one without fails and nothing is written.
     Every reference row either has its object in the content (verified against the row's sha256) or is a pin the content never holds
     (``sdpa_bwd_pins.holds_no_shipped_object``) with a row in ``sdpa_bwd_pin_functions.csv``; anything else fails and nothing is written.
     """
@@ -773,7 +776,7 @@ def reference_dir_from_content(
         newline="", encoding="utf-8"
     ) as handle:
         rows = list(csv.DictReader(handle))
-    if arch == "gfx950":
+    if arch in RMIR_ARCHES:
         unscanned = [
             f"{r['hash']} ({r['spec']}): {r.get(RMIR_COLUMN)!r}"
             for r in rows
@@ -781,7 +784,7 @@ def reference_dir_from_content(
         ]
         if unscanned:
             raise fail(
-                f"{len(unscanned)} gfx950 pins record no clean R-MIR scan ({RMIR_COLUMN} is {'/'.join(RMIR_SCANS)}):\n  "
+                f"{len(unscanned)} {arch} pins record no clean R-MIR scan ({RMIR_COLUMN} is {'/'.join(RMIR_SCANS)}):\n  "
                 + "\n  ".join(unscanned[:20])
             )
     functions = pins.read_pin_functions(data_dir / pins.PIN_FUNCTIONS_CSV.name)
@@ -970,7 +973,7 @@ def run(
 
     if unscanned:
         raise fail(
-            f"{len(unscanned)} gfx950 pins have no matched clean R-MIR scan of the pinned object on record "
+            f"{len(unscanned)} pins of an R-MIR arch have no matched clean R-MIR scan of the pinned object on record "
             "(objs/<hash>/rmir.json beside the object) and are no pinned exception:\n  "
             + "\n  ".join(unscanned[:20])
         )

@@ -74,6 +74,8 @@ class TestSdpaAttributeBindings:
             ("attn_scale", "attn_scale"),
             ("seq_len_q", "seq_len_q"),
             ("seq_len_kv", "seq_len_kv"),
+            ("cu_seq_len_q", "cu_seq_len_q"),
+            ("cu_seq_len_kv", "cu_seq_len_kv"),
             ("seed", "seed"),
             ("offset", "offset"),
             ("dropout_mask", "dropout_mask"),

@@ -124,13 +124,21 @@ def _companion_of(companions: list[dict], role: str, dtype: str) -> dict | None:
     )
 
 
+def _launches_reduce(companions: list[dict], record: dict) -> bool:
+    """Whether the row @p record launches a standalone dBias reduce companion: it names a reduce symbol and the manifest has reduce
+    companions. A combined row (gfx942, gfx90a: the fp32 rows beside 16-bit rows with standalone reduces) holds its reduce kernel inside its own object.
+    """
+    return bool(
+        record["knobs"].get("reduce_symbol")
+        and record.get("ship") != "combined"
+        and _companions_of(companions, REDUCE_ROLE)
+    )
+
+
 def _launches_companions(companions: list[dict], record: dict) -> bool:
     """Whether the manifest gives the row @p record a companion launch (a reduce it names, or a tail-zero of its dtype)."""
-    reduce_symbol = record["knobs"].get("reduce_symbol", "")
-    return bool(
-        reduce_symbol
-        and _companions_of(companions, REDUCE_ROLE)
-        or _companion_of(companions, _tailzero_role(record), record["dtype"])
+    return _launches_reduce(companions, record) or bool(
+        _companion_of(companions, _tailzero_role(record), record["dtype"])
     )
 
 
@@ -144,7 +152,7 @@ def _launch_problems(
     companions = manifest.get("companions", [])
     wanted = {main_launch: (record["file"], record["sha256"], record["symbol"])}
     reduce_symbol = record["knobs"].get("reduce_symbol", "")
-    if reduce_symbol and _companions_of(companions, REDUCE_ROLE):
+    if _launches_reduce(companions, record):
         reduce = _companion_of(companions, REDUCE_ROLE, _bias_dtype(record))
         if reduce is None or reduce["symbol"] != reduce_symbol:
             return [

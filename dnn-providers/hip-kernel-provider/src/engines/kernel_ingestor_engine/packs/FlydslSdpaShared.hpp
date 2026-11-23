@@ -28,6 +28,7 @@
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
 
+#include "compilation/LaunchLimits.hpp"
 #include "engines/kernel_ingestor_engine/packs/SdpaGraphMatch.hpp"
 
 /**
@@ -54,6 +55,7 @@ inline constexpr uint32_t HEAD_AXIS = 1;
 inline constexpr uint32_t SEQ_AXIS = 2;
 inline constexpr uint32_t HEAD_DIM_AXIS = 3;
 
+using compilation::launchAxisFits;
 using sdpa_graph::INT32_LIMIT;
 inline constexpr int64_t BYTES_PER_ELEMENT = 2; // bf16 and f16 only
 
@@ -101,10 +103,11 @@ using sdpa_graph::computesInFloat;
  *        matcher has seen; and a ragged offset multiplier (1.4.0) on a tensor with no ragged
  *        offset, which no dense tensor can mean.
  *
- * The engines claim every graph schema through 1.4.0 (their UEDs' `sdk_version`), so every
+ * The engines claim every graph schema through 1.6.0 (their UEDs' `sdk_version`), so every
  * field up to it is gated: these two here, and the rest where each tensor is read --
  * pass-by-value (1.2.0), ragged offsets and declared alignments (1.3.0), and a ragged
- * tensor's multiplier (1.4.0, isPackedThrough).
+ * tensor's multiplier (1.4.0, isPackedThrough); cumulative sequence lengths (1.6.0) are declined
+ * in the CDNA and RDNA matchers.
  */
 inline bool usesUnreadSchemaFields(const MatchContext& context)
 {

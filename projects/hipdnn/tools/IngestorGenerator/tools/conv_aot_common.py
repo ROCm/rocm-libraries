@@ -79,6 +79,32 @@ def read_excludes(path: Path) -> dict:
     return out
 
 
+def apply_excludes(
+    identities: list, excludes: dict, excludes_path: Path, catalog_name: str
+) -> list | None:
+    """``identities`` without every label ``excludes`` names, or None (after
+    printing the offending label(s) to stderr) when ``excludes`` names a label
+    ``identities`` does not carry: a stale exclude must mean the instance it
+    names already dropped out some other way, and a plain dict lookup would
+    silently stop applying the exclusion instead of surfacing that."""
+    labels = {identity_label(i) for i in identities}
+    stale = set(excludes) - labels
+    if stale:
+        print(
+            f"{excludes_path}: exclude(s) not in {catalog_name}: {sorted(stale)}",
+            file=sys.stderr,
+        )
+        return None
+    kept = []
+    for identity in identities:
+        reason = excludes.get(identity_label(identity))
+        if reason is None:
+            kept.append(identity)
+        else:
+            print(f"excluded {identity_label(identity)}: {reason}", file=sys.stderr)
+    return kept
+
+
 def stable_hash(identity: dict) -> str:
     from benchmarks.common.kernel_cache import KernelIdentity
 
@@ -246,7 +272,9 @@ def stabilize_ids(kdp_path: Path, engine_name: str, product_engine: str) -> int:
 
 def _kernels(node):
     if isinstance(node, dict):
-        if isinstance(node.get("kernel_source"), dict) and "metadata" in node:
+        # A multi-launch (split-C) kernel carries ``sources`` instead.
+        source = node.get("kernel_source", node.get("sources"))
+        if isinstance(source, dict) and "metadata" in node:
             yield node
             return
         for value in node.values():

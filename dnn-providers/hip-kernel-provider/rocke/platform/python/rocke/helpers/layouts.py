@@ -39,6 +39,9 @@ from ..core.ir import IRBuilder, Value
 # Each entry is bank-conflict-free for the corresponding
 # (tile_rows × tile_cols × 2-byte) physical layout when consumed by the
 # matching MFMA atom (16x16, 16x32, 32x16, 32x32, ...).
+# For a tile of any width staged through registers, see the row/column form
+# ``rocke.helpers.loads.lds_col_xor_params`` / ``swizzle_lds_col`` (used by
+# ``CoalescedTileLoader.col_xor``); its docstring says when to use which.
 XOR_SWIZZLE_TABLE = {
     # (tile_rows, tile_cols, elem_bytes) -> [(period, shift, bits), ...]
     # Multiple stages compose by left-to-right XOR application.

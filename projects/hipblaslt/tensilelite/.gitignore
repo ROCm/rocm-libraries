@@ -36,6 +36,7 @@ unit.json
 unit_tests.xml
 char_tests.xml
 common_tests.xml
+comm_tests.xml
 MatchTable.yaml
 
 # FFM runtime artifacts (generated at client runtime; not source)

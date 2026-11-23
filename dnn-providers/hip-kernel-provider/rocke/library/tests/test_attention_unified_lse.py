@@ -6,7 +6,7 @@
 import importlib
 import sys
 from contextlib import nullcontext
-from dataclasses import replace
+from dataclasses import fields as dataclass_fields, replace
 from types import SimpleNamespace
 
 import pytest
@@ -45,6 +45,14 @@ def _reduce_ir(arch, spec):
 def test_reduce_spec_rejects_non_boolean_emit_lse(arch, bad):
     with pytest.raises(ValueError, match="emit_lse must be a bool"):
         _reduce_spec(arch, emit_lse=bad)
+
+
+@pytest.mark.parametrize("arch", _ARCHES)
+def test_reduce_spec_emit_lse_is_a_keyword_only_flag_that_defaults_off(arch):
+    """Both reduce specs take the field from ``emit_lse_field``: off by default, and
+    keyword-only so it cannot shift a positional argument."""
+    emit_lse = {f.name: f for f in dataclass_fields(_reduce_spec(arch))}["emit_lse"]
+    assert emit_lse.default is False and emit_lse.kw_only
 
 
 @pytest.mark.parametrize("arch", _ARCHES)

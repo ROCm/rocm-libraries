@@ -36,7 +36,7 @@ import multiprocessing
 import subprocess
 import tempfile
 from concurrent.futures import ProcessPoolExecutor, as_completed
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
@@ -66,6 +66,7 @@ try:
     from dispatcher_common import fp8_uses_ocp as _fp8_uses_ocp
     from dispatcher_common import ocp_arch_defines as _ocp_arch_defines
 except Exception:  # noqa: BLE001 - standalone use without dispatcher_common on path
+
     def _detect_gpu_arch_via_amd_smi() -> Optional[str]:
         return None
 
@@ -214,6 +215,8 @@ def _cshuffle_store_ok(
         return repeat > 1 and repeat % 2 == 1 and warp_tile == 32
 
     return not (_dim_bad(m_repeat, warp_tile_m) or _dim_bad(n_repeat, warp_tile_n))
+
+
 # --- end bridge shared helpers ---
 
 
@@ -358,6 +361,13 @@ class GemmKernelConfig:
     vector_size_a: int = 0
     vector_size_b: int = 0
     vector_size_c: int = 0
+    # comp_tdm_pc ring (NumSlots, PublishLag) or comp_tdm_ra ring (NumSlots,
+    # RunAhead); num_slots=0 is the policy default (<4, 0> / <4, 3>). Sweep
+    # configs spell a non-default ring as the pipeline "comp_tdm_pc_s{S}l{L}" /
+    # "comp_tdm_ra_s{S}r{R}" (codegen_common.split_pipeline_ring).
+    num_slots: int = 0
+    publish_lag: int = 0
+    run_ahead: int = 0
 
     # No silent default: the arch must be resolved (rocminfo-detected or passed
     # explicitly) before this config feeds the compiler. expand_sweep /
@@ -416,10 +426,12 @@ class GemmKernelConfig:
     def codegen_layout(self) -> str:
         """Layout string passed to unified_gemm_codegen.py --layout.
 
-        Multi-D takes a 4-char layout (A,B,C + D); the codegen splits off the
-        4th char as the D-tensor layout. Every other variant uses the 3-char
-        A,B,C layout.
+        Multi-D takes a 4-char layout (A,B,C + D) and multi-ABD the 4-char
+        (A,B,E,D) one; the codegen splits off the 4th char as the D-tensor
+        layout. Every other variant uses the 3-char A,B,C layout.
         """
+        if self.variant == "multi_abd":
+            return self.layout4
         if self.variant == "multi_d":
             return self.layout + _LAYOUT_CHAR[self.d_layout]
         return self.layout
@@ -439,6 +451,21 @@ class GemmKernelConfig:
     @property
     def vector_sizes(self) -> Tuple[int, int, int]:
         return (self.vector_size_a, self.vector_size_b, self.vector_size_c)
+
+    @property
+    def ring_suffix(self) -> str:
+        """ "_s{S}l{L}" / "_s{S}r{R}" for a non-default comp_tdm_pc / comp_tdm_ra
+        ring, else ""."""
+        return _codegen_common().pipeline_ring_suffix(
+            self.pipeline, self.num_slots, self.ring_param
+        )
+
+    @property
+    def ring_param(self) -> int:
+        """The ring parameter of the pipeline's policy (PublishLag / RunAhead)."""
+        return _codegen_common().pipeline_ring_param(
+            self.pipeline, self.publish_lag, self.run_ahead
+        )
 
     def _vector_args(self) -> Dict[str, Any]:
         return dict(
@@ -493,7 +520,11 @@ class GemmKernelConfig:
         # Fixed widths only serve misaligned extents, which always need padding.
         pads = dict(pad_m=True, pad_n=True, pad_k=True) if any(vec) else {}
         cfg = replace(
-            self, vector_size_a=vec[0], vector_size_b=vec[1], vector_size_c=vec[2], **pads
+            self,
+            vector_size_a=vec[0],
+            vector_size_b=vec[1],
+            vector_size_c=vec[2],
+            **pads,
         )
         return cfg, reason
 
@@ -525,6 +556,7 @@ class GemmKernelConfig:
         )
         if any(self.vector_sizes):
             name += _codegen_common().gemm_vector_size_suffix(self.vector_sizes)
+        name += self.ring_suffix
         if self.variant == "preshuffle":
             name += "_preshuffle"
             if self.permute_n:
@@ -576,7 +608,7 @@ class GemmKernelConfig:
                 "warp_tile_k": [self.warp_tile_k],
             },
             "trait_config": {
-                "pipeline": [self.pipeline],
+                "pipeline": [self.pipeline + self.ring_suffix],
                 "epilogue": [self.epilogue],
                 "scheduler": [self.scheduler],
                 "pad_m": [self.pad_m],
@@ -634,6 +666,8 @@ class GemmKernelConfig:
             "pad": [self.pad_m, self.pad_n, self.pad_k],
             "persistent": self.persistent,
             "vector_sizes": list(self.vector_sizes),
+            # (num_slots, PublishLag / RunAhead), as split_pipeline_ring.
+            "ring": [self.num_slots, self.ring_param],
             "gfx_arch": self.gfx_arch,
             "variant": self.variant,
             "name": self.name,
@@ -669,6 +703,8 @@ class GemmKernelConfig:
             variant=self.variant,
             persistent=self.persistent,
         )
+
+
 # ============================================================================
 # Problem
 # ============================================================================
@@ -705,9 +741,7 @@ class GroupedGemmProblem:
     groups: List[Tuple[int, int, int]]
 
     @classmethod
-    def uniform(
-        cls, group_count: int, M: int, N: int, K: int
-    ) -> "GroupedGemmProblem":
+    def uniform(cls, group_count: int, M: int, N: int, K: int) -> "GroupedGemmProblem":
         """All groups share the same (M, N, K) shape."""
         return cls(groups=[(int(M), int(N), int(K)) for _ in range(int(group_count))])
 
@@ -990,8 +1024,8 @@ class GemmDispatcherLib:
             )
 
         g = len(A_list)
-        c_int64_arr = (ctypes.c_int64 * g)
-        c_void_arr = (ctypes.c_void_p * g)
+        c_int64_arr = ctypes.c_int64 * g
+        c_void_arr = ctypes.c_void_p * g
 
         ms = c_int64_arr(*[int(m) for m in Ms])
         ns = c_int64_arr(*[int(n) for n in Ns])
@@ -1194,8 +1228,11 @@ def _fp8_encode_ladder(
     is_zero = sorted_mag[chosen] == 0
     out = np.where((xf < 0) & ~is_zero, out | sign_byte, out)
     # NaN byte: 0x80 under FNUZ, all-1s exponent and mantissa under OCP.
-    nan_byte = np.uint8(((1 << exp_bits) - 1) << mant_bits | ((1 << mant_bits) - 1)) \
-        if use_ocp else sign_byte
+    nan_byte = (
+        np.uint8(((1 << exp_bits) - 1) << mant_bits | ((1 << mant_bits) - 1))
+        if use_ocp
+        else sign_byte
+    )
     out = np.where(np.isnan(xf), nan_byte, out)
     return out.astype(np.uint8).reshape(np.shape(x))
 
@@ -1279,13 +1316,23 @@ def _bf8_u8_to_fp32(u8: np.ndarray, use_ocp: Optional[bool] = None) -> np.ndarra
 def _fp32_to_fp8_ocp_u8(x):
     """Encode fp32 -> fp8 E4M3 **OCP** (gfx950/gfx12xx) bit pattern (uint8)."""
     import ml_dtypes
-    return np.ascontiguousarray(x, dtype=np.float32).astype(ml_dtypes.float8_e4m3fn).view(np.uint8)
+
+    return (
+        np.ascontiguousarray(x, dtype=np.float32)
+        .astype(ml_dtypes.float8_e4m3fn)
+        .view(np.uint8)
+    )
 
 
 def _fp32_to_bf8_ocp_u8(x):
     """Encode fp32 -> bf8 E5M2 **OCP** (gfx950/gfx12xx) bit pattern (uint8)."""
     import ml_dtypes
-    return np.ascontiguousarray(x, dtype=np.float32).astype(ml_dtypes.float8_e5m2).view(np.uint8)
+
+    return (
+        np.ascontiguousarray(x, dtype=np.float32)
+        .astype(ml_dtypes.float8_e5m2)
+        .view(np.uint8)
+    )
 
 
 _OCP_FP8_CACHE = {}
@@ -1345,7 +1392,9 @@ def _input_codec(dtype: str):
     return _INPUT_CODEC[dtype]
 
 
-def _encode_operand(x: np.ndarray, dtype: str, use_ocp: Optional[bool] = None) -> np.ndarray:
+def _encode_operand(
+    x: np.ndarray, dtype: str, use_ocp: Optional[bool] = None
+) -> np.ndarray:
     """Encode an A/B host operand into the kernel's element dtype; raise if unknown."""
     return _input_codec(dtype)[0](x, use_ocp)
 
@@ -1525,9 +1574,7 @@ class GpuGemmRunner:
         Aq, Bq = (decode(encode(X, self._use_ocp), self._use_ocp) for X in (A, B))
         return Aq @ Bq
 
-    def run(
-        self, A: np.ndarray, B: np.ndarray, problem: GemmProblem
-    ) -> GemmResult:
+    def run(self, A: np.ndarray, B: np.ndarray, problem: GemmProblem) -> GemmResult:
         return self.run_encoded(*self.encode_inputs(A, B), problem)
 
     def encode_inputs(
@@ -1550,9 +1597,7 @@ class GpuGemmRunner:
         la, lb, _ = _layout_from_kernel_name(self._kernel_name)
         # A/B host buffers in the kernel's element dtype and layout; the kernels
         # of a sweep worker's shape reuse them (see _sweep_inputs).
-        return _encode_ab_cached(
-            A, B, dtype, la, lb, self._use_ocp, self._kernel_name
-        )
+        return _encode_ab_cached(A, B, dtype, la, lb, self._use_ocp, self._kernel_name)
 
     def run_encoded(
         self, A_h: np.ndarray, B_h: np.ndarray, problem: GemmProblem
@@ -1790,11 +1835,11 @@ class GpuMultiDGemmRunner:
         la, lb, lc, ld = layout4[0], layout4[1], layout4[2], layout4[3]
 
         if dtype != "fp16":
-            raise ValueError(f"multi_d bridge currently supports fp16 only, got {dtype}")
-        if len(Ds) != self._num_d:
             raise ValueError(
-                f"kernel expects {self._num_d} D tensors, got {len(Ds)}"
+                f"multi_d bridge currently supports fp16 only, got {dtype}"
             )
+        if len(Ds) != self._num_d:
+            raise ValueError(f"kernel expects {self._num_d} D tensors, got {len(Ds)}")
 
         # A/B host buffers, transposed for column-major operands (see GpuGemmRunner).
         A_lay = A if la == "r" else A.T
@@ -1830,7 +1875,15 @@ class GpuMultiDGemmRunner:
 
 # Element size (bytes) per CK dtype -- mirrors the codegen's ELEMENT_SIZE_MAP and
 # lets the ctypes shim size its device buffers without knowing the CK type.
-_ELEM_BYTES = {"fp16": 2, "bf16": 2, "fp32": 4, "fp8": 1, "bf8": 1, "int8": 1, "int32": 4}
+_ELEM_BYTES = {
+    "fp16": 2,
+    "bf16": 2,
+    "fp32": 4,
+    "fp8": 1,
+    "bf8": 1,
+    "int8": 1,
+    "int32": 4,
+}
 
 
 class MultiABDDispatcherLib:
@@ -2149,7 +2202,9 @@ class GpuMultiABDRunner:
             for _ in range(n_tensors):
                 x = rng.uniform(lo, hi, size=(rows, cols)).astype(np.float32)
                 if dtype != "fp16":
-                    raise ValueError(f"multi_abd runner supports fp16 only, got {dtype}")
+                    raise ValueError(
+                        f"multi_abd runner supports fp16 only, got {dtype}"
+                    )
                 x16 = x.astype(np.float16)
                 logical.append(x16)
                 x_lay = x16 if layout_char == "r" else x16.T
@@ -2241,10 +2296,14 @@ class GpuMultiABDRunner:
 # NOTE: -enable-noalias-to-md-conversion=0 is NOT a Tile Engine GEMM flag (it only
 # appears in the standalone CK examples/tests), so it deliberately is NOT here.
 _TILE_ENGINE_CODEGEN_FLAGS = (
-    "-mllvm", "--lsr-drop-solution=1",
-    "-mllvm", "-enable-post-misched=0",
-    "-mllvm", "-amdgpu-early-inline-all=true",
-    "-mllvm", "-amdgpu-function-calls=false",
+    "-mllvm",
+    "--lsr-drop-solution=1",
+    "-mllvm",
+    "-enable-post-misched=0",
+    "-mllvm",
+    "-amdgpu-early-inline-all=true",
+    "-mllvm",
+    "-amdgpu-function-calls=false",
     "-fno-offload-uniform-block",
 )
 
@@ -2252,9 +2311,7 @@ _TILE_ENGINE_CODEGEN_FLAGS = (
 # (newer -mllvm options that some clang builds reject). We mirror that probe so
 # the bridge stays matched to Tile Engine on every toolchain: the flag is present
 # exactly where TE would have it, and absent where TE's CMake would also skip it.
-_PROBED_CODEGEN_FLAGS = (
-    ("-mllvm", "-amdgpu-coerce-illegal-types=1"),
-)
+_PROBED_CODEGEN_FLAGS = (("-mllvm", "-amdgpu-coerce-illegal-types=1"),)
 
 # The single hipcc used for BOTH the flag-acceptance probe and the actual
 # compile/link. Pinned to match Old-TE, which builds via CMake's
@@ -2279,7 +2336,8 @@ def _hipcc_accepts(flag_tuple: Tuple[str, ...]) -> bool:
             src.write_text("int main(){}\n")
             r = subprocess.run(
                 [hipcc, *flag_tuple, "-c", str(src), "-o", str(Path(d) / "probe.o")],
-                capture_output=True, timeout=120,
+                capture_output=True,
+                timeout=120,
             )
             return r.returncode == 0
     except Exception:
@@ -2324,6 +2382,42 @@ def _ctypes_source_name(config: GemmKernelConfig) -> str:
     return "gemm_ctypes_lib.cpp"
 
 
+def _kernel_codegen_flags(config: GemmKernelConfig) -> Tuple[str, ...]:
+    """AMDGPU codegen flags of the kernel ``config`` describes, whatever ctypes
+    library hosts it.
+
+    The regular path matches Tile Engine's gemm_universal build via
+    _tile_engine_codegen_flags(). Stream-K must instead match TE's gemm_streamk
+    build EXACTLY for a fair A/B: -enable-post-misched=0 is applied
+    unconditionally (not persistent-gated) and it does NOT use
+    -enable-noalias-to-md-conversion=0. Pipeline-specific flags go last so they
+    override the ones above (e.g. comp_tdm_v3 turns the post-RA machine
+    scheduler back on, as the Tile Engine gemm_universal build does for it).
+    """
+    if getattr(config, "variant", "") == "stream_k":
+        variant_flags = (
+            "-std=c++20",
+            "-fno-offload-uniform-block",
+            "-mllvm",
+            "--lsr-drop-solution=1",
+            "-mllvm",
+            "-enable-post-misched=0",
+            "-mllvm",
+            "-amdgpu-early-inline-all=true",
+            "-mllvm",
+            "-amdgpu-function-calls=false",
+            "--offload-compress",
+        )
+    else:
+        variant_flags = _tile_engine_codegen_flags()
+    return (
+        *variant_flags,
+        *_codegen_common().PIPELINE_EXTRA_COMPILE_FLAGS.get(
+            getattr(config, "pipeline", ""), ()
+        ),
+    )
+
+
 def _build_compile_jobs(
     config: GemmKernelConfig, header: Path
 ) -> Tuple[Dict[str, Any], Path]:
@@ -2346,26 +2440,7 @@ def _build_compile_jobs(
     # directory, so ensure it exists before hipcc writes the object/.so here.
     lib_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # Per-variant AMDGPU codegen flags. The regular path matches Tile Engine's
-    # gemm_universal build via _tile_engine_codegen_flags(). Stream-K must instead
-    # match TE's gemm_streamk build EXACTLY for a fair A/B: -enable-post-misched=0
-    # is applied unconditionally (not persistent-gated) and it does NOT use
-    # -enable-noalias-to-md-conversion=0.
     is_streamk = getattr(config, "variant", "") == "stream_k"
-    variant_flags = (
-        [
-            "-std=c++20",
-            "-fno-offload-uniform-block",
-            "-mllvm", "--lsr-drop-solution=1",
-            "-mllvm", "-enable-post-misched=0",
-            "-mllvm", "-amdgpu-early-inline-all=true",
-            "-mllvm", "-amdgpu-function-calls=false",
-            "--offload-compress",
-        ]
-        if is_streamk
-        else list(_tile_engine_codegen_flags())
-    )
-
     compile_cmd = [
         _resolve_hipcc(),
         "-c",
@@ -2384,13 +2459,13 @@ def _build_compile_jobs(
         # Keep host/device fp8 encodings consistent and enable the target's
         # WMMA/MX features, matching the CMake build.
         *arch_feature_defines(config.gfx_arch),
-        # Match Tile Engine's AMDGPU codegen flags exactly (see variant_flags /
-        # _tile_engine_codegen_flags). Without them the kernel is compiled with
+        # Match Tile Engine's AMDGPU codegen flags exactly (see
+        # _kernel_codegen_flags). Without them the kernel is compiled with
         # different inlining/register allocation, which changes occupancy;
         # persistent kernels size their grid by occupancy
         # (UniversalGemmKernel::MaxOccupancyGridSize = #CUs x occupancy), so a
         # mismatch shows up as large perf gaps vs Tile Engine on persistent tiles.
-        *variant_flags,
+        *_kernel_codegen_flags(config),
         "-Wno-undefined-func-template",
         "-Wno-float-equal",
         str(ctypes_source),
@@ -2565,9 +2640,6 @@ def setup_multiple_gemm_dispatchers(
                 "output_dir": str(output_dir),
                 "dtype": c.dtype_a,
                 "layout": c.codegen_layout,
-                # Multi-ABD codegen expects the 4-char (A,B,E,D) layout so it can
-                # split off the D layout; every other variant uses 3-char.
-                "layout": c.layout4 if c.variant == "multi_abd" else c.layout,
                 "gpu_target": c.gfx_arch,
                 "tile_config_json": c.to_codegen_json(),
                 "hpp_glob_pattern": f"{c.name}.hpp",
@@ -2626,8 +2698,7 @@ def setup_multiple_gemm_dispatchers(
 
     if verbose and compile_jobs:
         print(
-            f"[gemm-bridge] compile: {len(compile_jobs)} .so "
-            f"(workers={max_workers})..."
+            f"[gemm-bridge] compile: {len(compile_jobs)} .so (workers={max_workers})..."
         )
 
     with ProcessPoolExecutor(max_workers=max_workers) as ex:
@@ -2693,10 +2764,6 @@ def _expand_values(entry: Optional[Dict[str, Any]], default: List[Any]) -> List[
     return list(entry.get("values", default))
 
 
-def _is_power_of_two(x: int) -> bool:
-    return x > 0 and (x & (x - 1)) == 0
-
-
 def _cshuffle_store_ok(
     m_repeat: int, n_repeat: int, warp_tile_m: int, warp_tile_n: int
 ) -> bool:
@@ -2723,7 +2790,17 @@ _WARP_SUPPORTED_COMBINATIONS_FALLBACK = {
     "gfx90a": [[1, 4, 1], [2, 2, 1], [4, 1, 1]],
     "gfx942": [[1, 4, 1], [2, 2, 1], [4, 1, 1]],
     "gfx950": [[1, 4, 1], [2, 2, 1], [4, 1, 1]],
-    "gfx1250": [[2, 4, 1], [1, 8, 1], [8, 1, 1], [4, 2, 1], [2, 1, 1], [1, 2, 2], [4, 1, 1], [1, 4, 1], [2, 2, 1]],
+    "gfx1250": [
+        [2, 4, 1],
+        [1, 8, 1],
+        [8, 1, 1],
+        [4, 2, 1],
+        [2, 1, 1],
+        [1, 2, 2],
+        [4, 1, 1],
+        [1, 4, 1],
+        [2, 2, 1],
+    ],
     "gfx1201": [[2, 4, 1], [1, 8, 1], [8, 1, 1], [4, 2, 1]],
 }
 
@@ -2733,23 +2810,28 @@ def _warp_supported_table():
     hardcoded fallback so the bridge never silently skips the gate."""
     try:
         from gemm_validation_utils import WARP_SUPPORTED_COMBINATIONS as _t
+
         return _t
     except Exception:  # pragma: no cover - fallback keeps the gate active
         return _WARP_SUPPORTED_COMBINATIONS_FALLBACK
 
 
-def _warp_config_supported(wave_m: int, wave_n: int, wave_k: int, arch: str) -> bool:
+def _warp_config_supported(
+    wave_m: int, wave_n: int, wave_k: int, arch: str, pipeline: str = ""
+) -> bool:
     """True iff [wave_m, wave_n, wave_k] is an allowed warps-per-block triple
-    for ``arch`` (mirrors Old-TE validate_warp_configuration). Unknown arch =>
-    permissive (matches Old-TE's log-and-allow behavior)."""
+    for ``arch`` and ``pipeline`` (mirrors Old-TE validate_warp_configuration,
+    including the pipeline's own extra maps). Unknown arch => permissive
+    (matches Old-TE's log-and-allow behavior)."""
     allowed = _warp_supported_table().get(arch)
     if not allowed:
         return True
+    allowed = _codegen_common().pipeline_warp_combos(pipeline, arch, allowed)
     return [wave_m, wave_n, wave_k] in allowed
 
 
 # --- gfx1250 pipeline gate (parity with unified_gemm_codegen) --------------
-# Non-MX comp_async / comp_tdm / comp_tdm_v2 / comp_tdm_pc are only generated
+# Non-MX comp_async / comp_tdm / comp_tdm_v2 / comp_tdm_pc / comp_tdm_ra are only generated
 # for gfx1250 by unified_gemm_codegen. expand_sweep must drop the same combinations up front,
 # otherwise it hands back configs whose header is never emitted. The rules live
 # in codegen_common.gfx1250_pipeline_reject_reason (single source of truth
@@ -2791,15 +2873,21 @@ def _gfx1250_pipeline_supported(
     warp_tile_m: int = 0,
     warp_tile_n: int = 0,
     tile_mn: Optional[Tuple[int, int]] = None,
+    tile_k: Optional[int] = None,
+    ring: Tuple[int, int] = (0, 0),
 ) -> bool:
     """False iff the (pipeline, epilogue) pair is a gfx1250 combination that
     the codegen would reject for this arch/variant/trait.
 
     ``layout`` is the A/B/C layout code (e.g. ``rcr``); empty skips the
-    comp_async layout rule. ``dtype``/``warp_tile_k`` feed the comp_async
+    comp_async layout and tdmstaged row-major C rules. ``dtype``/``warp_tile_k``
+    feed the comp_async
     8-bit warp_tile_k rule; an empty dtype skips it. ``warp_tile_m``/
     ``warp_tile_n`` feed the comp_async 8-bit warp_tile_m/n rule; 0 skips it.
-    ``tile_mn`` feeds the comp_tdm_pc accumulator rule; None skips it."""
+    ``tile_mn`` feeds the comp_tdm_pc accumulator rule and ``tile_k`` the
+    comp_tdm_v3 K-tile rule; None skips them. ``ring`` is the (num_slots,
+    ring_param) of split_pipeline_ring: the comp_tdm_pc PublishLag or the
+    comp_tdm_ra RunAhead; (0, 0) is the default."""
     reason = _codegen_common().gfx1250_pipeline_reject_reason(
         arch,
         pipeline,
@@ -2820,6 +2908,9 @@ def _gfx1250_pipeline_supported(
         tile_mn=tile_mn,
         warp_k=wave_k,
         streamk=variant == "stream_k",
+        waves=(wave_m, wave_n, wave_k),
+        tile_k=tile_k,
+        ring=ring,
     )
     return not reason
 
@@ -2844,6 +2935,8 @@ def _arch_filter_accepts(
     pipeline: str,
     epilogue: str,
     scheduler: str,
+    num_slots: int = 0,
+    ring_param: int = 0,
 ) -> bool:
     """Mirror of unified_gemm_codegen's _is_tile_arch_valid ArchFilter call
     (LDS capacity, warp and trait rules), so expand_sweep drops every config
@@ -2880,11 +2973,62 @@ def _arch_filter_accepts(
         scheduler=scheduler,
         layout=layout[:3],
         operator=operator,
+        num_slots=num_slots,
+        ring_param=ring_param,
     )
 
 
 # Stream-K reduction strategies the codegen can emit (atomic/linear/tree).
 STREAMK_REDUCTION_STRATEGIES = ("atomic", "linear", "tree")
+# The Stream-K and batched ctypes libs read a Stream-K kernel's workgroup budget
+# from this variable at each launch, in percent of CUs x occupancy (default 100).
+STREAMK_BUDGET_ENV = "CK_TILE_STREAMK_BUDGET_PCT"
+
+
+def add_streamk_args(parser) -> None:
+    """--reduction-strategy and --budget-pct of the full-benchmark drivers that run
+    Stream-K kernels; read --budget-pct back with streamk_budgets_arg()."""
+    parser.add_argument(
+        "--reduction-strategy",
+        choices=STREAMK_REDUCTION_STRATEGIES,
+        default=None,
+        help="Override the reduction strategy of the Stream-K configs; linear/tree "
+        "reduce partials in FP32",
+    )
+    parser.add_argument(
+        "--budget-pct",
+        default="100",
+        help="Comma-list of distinct integer Stream-K workgroup budgets in 1..100, in "
+        "percent of the kernel's default (CUs x occupancy, 100); each Stream-K kernel "
+        "x problem runs once per value (e.g. 100,75,50,25), any other kernel once",
+    )
+
+
+def streamk_budgets_arg(parser, args) -> List[int]:
+    """The --budget-pct values (parse_streamk_budgets); a parser error if invalid."""
+    try:
+        return parse_streamk_budgets(args.budget_pct)
+    except ValueError as exc:
+        parser.error(str(exc))
+
+
+def streamk_work_units(problems, pairs, built_kernels, batch_size, budget_pcts, dims):
+    """(problem index, problem, kernel batch, Stream-K budget) units of a
+    full-benchmark driver: per problem, its kernels (``pairs``, indices into
+    ``built_kernels`` = [(config, lib)]) in batches of ``batch_size``; a batch of
+    Stream-K kernels once per budget in ``budget_pcts``, any other batch once with
+    budget None. The problem keeps the keys in ``dims``."""
+    units = []
+    for prob_idx, (prob, idx) in enumerate(zip(problems, pairs)):
+        prob_dict = {k: int(prob[k]) for k in dims}
+        for budgets, streamk in ((budget_pcts, True), ([None], False)):
+            kernels = [
+                i for i in idx if (built_kernels[i][0].variant == "stream_k") == streamk
+            ]
+            for start in range(0, len(kernels), batch_size):
+                batch = [(i, *built_kernels[i]) for i in kernels[start : start + batch_size]]
+                units.extend((prob_idx, prob_dict, batch, b) for b in budgets)
+    return units
 
 
 def unique_by_name(configs: List[GemmKernelConfig]) -> List[GemmKernelConfig]:
@@ -2896,6 +3040,18 @@ def unique_by_name(configs: List[GemmKernelConfig]) -> List[GemmKernelConfig]:
     for c in configs:
         first.setdefault(c.name, c)
     return list(first.values())
+
+
+def parse_streamk_budgets(text) -> List[int]:
+    """A ``--budget-pct`` comma list: distinct percents in 1..100, in order.
+    Raises ValueError otherwise."""
+    try:
+        pcts = [int(p) for p in str(text).split(",") if p.strip()]
+    except ValueError:
+        pcts = []
+    if not pcts or any(not 0 < p <= 100 for p in pcts) or len(set(pcts)) < len(pcts):
+        raise ValueError(f"--budget-pct {text!r}: expected distinct values in 1..100")
+    return pcts
 
 
 def expand_sweep(
@@ -3163,6 +3319,11 @@ def expand_sweep(
         persistents,
         reductions,
     ):
+        # "comp_tdm_pc_s{S}l{L}" / "comp_tdm_ra_s{S}r{R}" name a non-default ring.
+        pipe, num_slots, ring_param = _codegen_common().split_pipeline_ring(pipe)
+        ring_fields = _codegen_common().pipeline_ring_fields(
+            pipe, num_slots, ring_param
+        )
         # Tile/CShuffle correctness gate. A block tile must split evenly across
         # its waves -- tile % (wave * warp_tile) == 0 -- else the kernel is
         # genuinely invalid.
@@ -3183,7 +3344,7 @@ def expand_sweep(
             continue
         # Parity gate: only emit warps-per-block triples Old-TE allows
         # (WARP_SUPPORTED_COMBINATIONS[arch]); see _warp_config_supported.
-        if not _warp_config_supported(wm, wn, wk, arch):
+        if not _warp_config_supported(wm, wn, wk, arch, pipe):
             continue
         if _codegen_common().gfx1250_fp32_tile_reject_reason(
             arch, dtype, tm, tn, wm * wn * wk
@@ -3208,6 +3369,8 @@ def expand_sweep(
             warp_tile_m=wtm,
             warp_tile_n=wtn,
             tile_mn=(tm, tn),
+            tile_k=tk,
+            ring=(num_slots, ring_param),
         ):
             continue
         if epi == "cshuffle" and not _cshuffle_store_ok(
@@ -3224,7 +3387,7 @@ def expand_sweep(
         ):
             continue
 
-        for (m_na, m_nb, m_nd, m_aop, m_bop, m_cdeop) in mabd_combos:
+        for m_na, m_nb, m_nd, m_aop, m_bop, m_cdeop in mabd_combos:
             for ew_op, md_nd in md_combos:
                 c = GemmKernelConfig(
                     dtype_a=dtype,
@@ -3250,6 +3413,7 @@ def expand_sweep(
                     pad_n=bool(pn),
                     pad_k=bool(pk),
                     persistent=bool(persist),
+                    **ring_fields,
                     gfx_arch=arch,
                     variant=variant,
                     reduction_strategy=red,
@@ -3267,9 +3431,21 @@ def expand_sweep(
                 # gfx1250 preshuffle pipelines (arch/layout/pad/wave/dtype
                 # rules): same helper the codegen applies, so the sweep never
                 # hands back a config whose header is never emitted.
-                if variant == "preshuffle" and _codegen_common().preshuffle_pipeline_reject_reason(
-                    pipe, arch, layout[:3], pm, pn, pk, wm * wn * wk, dtype,
-                    warp_tile_k=wtk, warp_k=wk, tile_k=tk,
+                if (
+                    variant == "preshuffle"
+                    and _codegen_common().preshuffle_pipeline_reject_reason(
+                        pipe,
+                        arch,
+                        layout[:3],
+                        pm,
+                        pn,
+                        pk,
+                        wm * wn * wk,
+                        dtype,
+                        warp_tile_k=wtk,
+                        warp_k=wk,
+                        tile_k=tk,
+                    )
                 ):
                     continue
                 val = None
@@ -3294,6 +3470,8 @@ def expand_sweep(
                             pipe,
                             epi,
                             sched,
+                            num_slots,
+                            ring_param,
                         )
                     if not val:
                         # Keep counting the later widths' rejects, as the codegen does.
