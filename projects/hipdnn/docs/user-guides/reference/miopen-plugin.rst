@@ -214,8 +214,8 @@ The MIOpen provider does not report ``SUPPORTS_GRAPH_CAPTURE``. Benchmarking ins
 Caching
 ~~~~~~~
 
-Benchmark results are cached in MIOpen's performance database. The default location is ``~/.config/miopen/`` on Linux.
-The cache persists across application runs. It's specific to the GPU model, operation parameters, tensor dimensions, and data types.
+MIOpen stores measured solver selections in its user find-db and tuned solver configurations in its user perf-db. The default location is ``~/.config/miopen/`` on Linux; when that directory is on a network filesystem, MIOpen uses ``.config/miopen/`` in the node's temporary directory instead, which is local to the node and may be cleared. ``MIOPEN_USER_DB_PATH`` sets the location.
+Both persist across application runs and are specific to the GPU model, operation parameters, tensor dimensions, and data types. With benchmarking disabled, a stored selection is used without measuring. With benchmarking enabled, a new process measures the convolution solvers again and reuses the stored configurations instead of tuning them again.
 
 Code sample
 ~~~~~~~~~~~

@@ -224,10 +224,11 @@ constexpr size_t paddedConvSpatialDimCount(size_t spatialDimCount)
 /// When benchmarking is enabled, sets the descriptor's find mode to
 /// miopenConvolutionFindModeNormal. The default (DYNAMIC_HYBRID) returns an installed
 /// find-db entry without measuring it and, on a miss, considers only dynamic solvers.
-/// Normal mode skips the installed find-db and, on a user find-db miss, measures every
-/// applicable solver. An existing user find-db entry is reused unmeasured, including one
-/// written by a non-benchmarking run; PyTorch behaves the same. Callers also pass
-/// exhaustiveSearch=true to Find so that solvers without a perf-db entry are tuned.
+/// Normal mode skips the installed find-db and measures every applicable solver. It reuses a
+/// user find-db entry unmeasured only when the handle already holds an invoker for every solver
+/// in the entry (FindDbRecord::Validate), so a new process measures again; PyTorch behaves the
+/// same. Callers also pass exhaustiveSearch=true to Find so that solvers without a perf-db entry
+/// are tuned; a solver with one reuses it.
 /// When benchmarking is disabled the descriptor keeps MIOpen's default find mode.
 void setBenchmarkingFindMode(miopenConvolutionDescriptor_t convDescriptor,
                              bool benchmarkingEnabled);

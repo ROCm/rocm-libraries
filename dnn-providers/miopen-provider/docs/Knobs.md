@@ -69,10 +69,13 @@ When **disabled** (default):
 When **enabled**:
 - MIOpen benchmarks multiple solver candidates
 - Convolution Find runs in MIOpen's Normal find mode with exhaustive search, matching
-  PyTorch's `torch.backends.cudnn.benchmark = True`: the installed find-db is skipped, every
-  applicable solver is measured, and solvers without a perf-db entry are tuned. A result already
-  in the user find-db (`~/.config/miopen/`) is reused, including one from a run without
-  benchmarking; delete it to force a new measurement
+  PyTorch's `torch.backends.cudnn.benchmark = True`: the installed find-db is skipped and every
+  applicable solver is measured. A user find-db entry does not skip this: MIOpen reuses an entry
+  without measuring only when the handle already holds a compiled kernel for every solver in it,
+  so a new process always measures again. Solvers without a perf-db entry are tuned. A solver
+  with an entry reuses that configuration and is not tuned again, including an entry that a
+  `MIOPEN_ENGINE_DETERMINISTIC` plan wrote from its narrower search. To tune again, set
+  `MIOPEN_FIND_ENFORCE=DB_UPDATE`
 - First execution is significantly slower (seconds to minutes)
 - Subsequent executions use the cached optimal solver
 - Provides best performance for production workloads
@@ -109,14 +112,21 @@ their find mode; PyTorch has no equivalent fused path.
 > [Capture hipDNN graphs in a hipGraph](../../../projects/hipdnn/docs/user-guides/how-to/capture-hipgraph.rst).
 
 **Caching**:
-- Benchmark results are cached in MIOpen's performance database
-- Default location: `~/.config/miopen/` on Linux
-- Cache persists across application runs
-- Cache is specific to: GPU model, operation parameters, tensor dimensions, and data types
+- Measured solver selections are stored in MIOpen's user find-db, tuned solver configurations
+  in its user perf-db
+- Default location: `~/.config/miopen/` on Linux. When that directory is on a network
+  filesystem, MIOpen uses `.config/miopen/` in the node's temporary directory instead, which
+  is local to the node and may be cleared. `MIOPEN_USER_DB_PATH` sets the location
+- Both persist across application runs. With benchmarking disabled, a stored selection is used
+  without measuring. With benchmarking enabled, a new process measures the convolution solvers
+  again and reuses the stored configurations
+- Entries are specific to: GPU model, operation parameters, tensor dimensions, and data types
 
 **Performance Impact**:
 - **First run with benchmarking**: Can take seconds to minutes depending on operation complexity
-- **Subsequent runs**: Minimal overhead (cache lookup)
+- **Later executions of the same plan**: no Find; the plan reuses its selected solver
+- **Later processes with benchmarking**: convolution Find measures the solvers again but skips
+  tuning for solvers with a perf-db entry
 - **Production benefit**: Typically 10-50% performance improvement over heuristic selection
 
 **Example**:
