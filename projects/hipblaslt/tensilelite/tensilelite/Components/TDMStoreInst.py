@@ -55,11 +55,6 @@ from .NonTemporal import tdmCacheModifiers
 # PackData and TensorDataMover are imported where they are used: they load every component
 # (Component.py), and GlobalWriteBatch imports Solution, which imports this module.
 
-TDM_STORE_PATHS = {
-  False: (),
-  True: ("EdgeM", "EdgeN", "NonEdge"),
-}
-
 # StinkyRemoveWaitCntPass never removes a wait whose comment contains this tag. The TDM block tags
 # the waits that WaitCntInsertion does not re-derive.
 STINKY_KEEP = "[stinky-keep]"
@@ -228,25 +223,23 @@ def storesFinalD(kernel, atomic):
   return not atomic and kernel["_GlobalAccumulation"] in (None, "PartialsBuffer")
 
 
-def tdmStoreBlocks(kernel, edge, atomic, bpe, vectorWidths):
+def tdmStoreBlocks(kernel, edge, atomic, vectorWidths):
   """Return the vector widths of the store blocks of one beta that store through the TDM block.
 
   vectorWidths are the store blocks generateBetaModules builds, the store-width cascade: the widest,
   of the store vector width, holds the NonEdge path and, with edge, the masked EdgeN path; the
   narrower ones are masked. EdgeM is every masked block narrower than the store vector width and the
   narrowest one; without edge the one block is unmasked, NonEdge, and generateBetaModules picks the
-  NonEdge path of a store with edge the same way, with edge=False. In a picked block the TDM block
-  replaces the store; it is generated like the NonEdge path (widest vector width, no per-element
-  mask). Only a block that storesFinalD uses it, not a GSU or StreamK partial-tile store, and it stages
-  D at the size of D (bpe).
+  NonEdge path of a store with edge the same way, with edge=False. TDMStoreInst on sends every path
+  through the TDM block, so with edge that is every block of the cascade. In a picked block the TDM
+  block replaces the store; it is generated like the NonEdge path (widest vector width, no per-element
+  mask), except for the edge blocks of a kernel with per-element outputs beyond C and D
+  (hasEpilogueSideEffects), which keep their own. Only a block that storesFinalD uses it, not a GSU or
+  StreamK partial-tile store.
   """
-  paths = TDM_STORE_PATHS[kernel["TDMStoreInst"]] if storesFinalD(kernel, atomic) else ()
-  assert not paths or "ProblemType" not in kernel or bpe == int(kernel["ProblemType"]["DestDataType"].numBytes()), \
-    "a TDM store block stages D at the size of D"
-  storeVectorWidth = max(vectorWidths)
-  blocks = {"EdgeM": {w for w in vectorWidths if w < storeVectorWidth} | {min(vectorWidths)},
-            "EdgeN": {storeVectorWidth}} if edge else {"NonEdge": {storeVectorWidth}}
-  return set().union(*(blocks.get(path, ()) for path in paths))
+  if not (kernel["TDMStoreInst"] and storesFinalD(kernel, atomic)):
+    return set()
+  return set(vectorWidths) if edge else {max(vectorWidths)}
 
 
 def tdmStoreModifiers(asmCaps, kernel, tc="D"):

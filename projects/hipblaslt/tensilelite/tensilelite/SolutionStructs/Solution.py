@@ -4534,7 +4534,7 @@ class Solution(collections.abc.Mapping):
     storeOverhead = 40
     # With TDMStoreInst on the NonEdge store goes through the TDM block, which holds one more VGPR:
     # the staged tile's base.
-    if state.get("TDMStoreInst", 0):
+    if state.get("TDMStoreInst", False):
       storeOverhead += 1
     slack = (isaInfoMap[isa].regCaps["MaxVgpr"] - valuC
              - elementsPerThread * vgprsPerElement - storeOverhead)

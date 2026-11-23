@@ -16,7 +16,7 @@ from tensilelite.Common.DataType import DataType
 from tensilelite.Common.GlobalParameters import defaultSolution
 from tensilelite.Common.ValidParameters import validParameters
 from tensilelite.Components.GlobalWriteBatch import GlobalWriteBatchWriter
-from tensilelite.Components.TDMStoreInst import DS_OFFSET_MAX, STINKY_KEEP, hasEpilogueSideEffects, TDM_STORE_PATHS, \
+from tensilelite.Components.TDMStoreInst import DS_OFFSET_MAX, STINKY_KEEP, hasEpilogueSideEffects, \
   TDM_TILE_DIM_MAX, storesFinalD, tdmStoreBlocks, tdmStoreLdsBytes, tdmStoreLdsSplit, tdmStoreModifiers, \
   tdmStoreRejectReason, tdmStoreVectorRejectReason
 from tensilelite.SolutionStructs.Naming import getKernelNameMin
@@ -273,17 +273,19 @@ def test_the_vector_check_follows_the_first_store_width(overrides, rejected):
 def test_the_switch_matches_the_valid_values_and_on_covers_every_path():
   """TDMStoreInst is False or True only, and True sends every store path of a final-D store through
   the TDM block, so the epilogue keeps one store path and splits only on beta / non-beta."""
-  assert list(TDM_STORE_PATHS) == validParameters["TDMStoreInst"] == [False, True]
+  assert validParameters["TDMStoreInst"] == [False, True]
   # bool == int in python, so the list comparison alone passes against [0, 1] too. The validator
   # keys on type() rather than isinstance, so the type is the thing that has to be pinned.
   assert [type(v) for v in validParameters["TDMStoreInst"]] == [bool, bool]
-  assert TDM_STORE_PATHS[False] == ()
-  assert set(TDM_STORE_PATHS[True]) == {"EdgeM", "EdgeN", "NonEdge"}
+  cascade = [8, 4, 2, 1]
+  assert _blocks(False, vectorWidths=cascade) == _blocks(False, edge=False, vectorWidths=cascade) == set()
+  assert _blocks(True, vectorWidths=cascade) == set(cascade)
+  assert _blocks(True, edge=False, vectorWidths=cascade) == {8}
 
 
-def _blocks(tdm, edge=True, atomic=False, accumulation=None, vectorWidths=(8, 1), bpe=2, mpm=0):
+def _blocks(tdm, edge=True, atomic=False, accumulation=None, vectorWidths=(8, 1), mpm=0):
   return tdmStoreBlocks({"TDMStoreInst": tdm, "_GlobalAccumulation": accumulation, "MbskPrefetchMethod": mpm},
-                        edge, atomic, bpe, list(vectorWidths))
+                        edge, atomic, list(vectorWidths))
 
 
 # The store blocks generateBetaModules gets with StoreVectorWidth 8: AdaptiveGemm=0 keeps the
@@ -324,26 +326,12 @@ def test_partial_and_atomic_stores_keep_buffer_store(accumulation, atomic):
 @pytest.mark.parametrize("mpm", [0, 1])
 def test_stores_final_d_predicate(accumulation, atomic, mpm):
   """A block writes D's final elements unless it is atomic or a GSU workspace store, the reduced tile of
-  MultipleBufferSingleKernel with MbskPrefetchMethod 0 only, and tdmStoreBlocks lets such a block, of 16-bit or
-  fp32 elements, store through the TDM block."""
+  MultipleBufferSingleKernel with MbskPrefetchMethod 0 only, and tdmStoreBlocks lets such a block store through the
+  TDM block."""
   final = not atomic and (accumulation in (None, "PartialsBuffer")
                           or (accumulation == "MultipleBufferSingleKernel" and mpm == 0))
   assert storesFinalD({"_GlobalAccumulation": accumulation, "MbskPrefetchMethod": mpm}, atomic) == final
-  for bpe in (2, 4):
-    assert bool(_blocks(1, atomic=atomic, accumulation=accumulation, bpe=bpe, mpm=mpm)) == final, bpe
-
-
-def test_fp32_final_store_uses_the_tdm_block():
-  """A final store of fp32 D picks the blocks a 16-bit one picks."""
-  tdm = 1
-  assert _blocks(tdm, bpe=4) == _blocks(tdm)
-  assert _blocks(tdm, edge=False, vectorWidths=(8,), bpe=4) == _blocks(tdm, edge=False, vectorWidths=(8,))
-
-
-@pytest.mark.parametrize("accumulation, atomic", [("MultipleBuffer", False), (None, True)])
-def test_gsu_partials_keep_buffer_store_at_fp32(accumulation, atomic):
-  """GSU>1 partials, at the compute type, and atomic stores keep buffer_store."""
-  assert _blocks(1, accumulation=accumulation, atomic=atomic, bpe=4) == set()
+  assert bool(_blocks(True, atomic=atomic, accumulation=accumulation, mpm=mpm)) == final
 
 
 def test_streamk_final_store_uses_the_tdm_block():
