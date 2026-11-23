@@ -7280,7 +7280,7 @@ class KernelWriterAssembly(KernelWriter):
         segOffAB = kernel["LDSSegInterleaveOffsets"] if kernel.get("LDSSegmentInterleave") == 1 else {}
         segSpansComp = bool(segOffAB) and segOffAB.get("footprintPacked", False) \
             and not segOffAB.get("bBaseline", False) \
-            and min(kernel["MatrixInstM"], kernel["MatrixInstN"]) * vw \
+            and geom.mi * geom.stack * vw \
                 >= kernel["MacroTile%u" % tile01] // (kernel["NumWaves"] // 2)
         if segSpansComp:
           segOff = self.vgprPool.checkOut(1, "segWaveByteOffSwizTDM")   # checked in by lraFinalOffset

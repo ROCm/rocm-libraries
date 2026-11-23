@@ -63,6 +63,21 @@ ALLOWED = [
     _c("lsi_vidx_brot", wt=(2, 4), VectorWidthA=2, VectorWidthB=2, LDSSegmentInterleave=1, LDSSegmentBRotate=1),
     # LSI on swizzle-A (A must be coarse: VWA == MIWaveTile[0], so VWA > 1 with the iterate-mode pad) and A+B
     _c("lsi_A", side="A", VectorWidthA=2, VectorWidthB=2, LDSSegmentInterleave=1),
+    # ... with F4 data (validated end to end on real HW: F4 and MXF4, VWA 2 and 4)
+    *[_c("lsi_A_%s" % dt, side="A", dtype=dt, VectorWidthA=2, VectorWidthB=2, LDSSegmentInterleave=1) for dt in ("f4", "mxf4")],
+    # swizzle-B / A+B with F4 data (real HW: F4, MXF4, B-rotate), and with a stacked 32x16x128 WMMA (real HW: SS1 B, SS0 A)
+    _c("lsi_B_f4", dtype="f4", VectorWidthA=2, VectorWidthB=2, LDSSegmentInterleave=1),
+    _c("lsi_B_mxf4", dtype="mxf4", VectorWidthA=2, VectorWidthB=2, LDSSegmentInterleave=1),
+    _c("lsi_AB_mxf4", side="AB", dtype="mxf4", VectorWidthA=2, VectorWidthB=2, LDSSegmentInterleave=1),
+    _c("lsi_B_mxf4_brot", dtype="mxf4", wt=(2, 4), VectorWidthA=2, VectorWidthB=2, LDSSegmentInterleave=1,
+       LDSSegmentBRotate=1),
+    _c("lsi_B_mxf4_32x16", dtype="mxf4", VectorWidthA=2, VectorWidthB=2, LDSSegmentInterleave=1, miMN=(32, 16)),
+    _c("lsi_B_mxf4_32x16_vidx", dtype="mxf4", wt=(2, 4), VectorWidthA=2, VectorWidthB=2, LDSSegmentInterleave=1,
+       miMN=(32, 16)),
+    _c("lsi_A_mxf4_32x16", side="A", dtype="mxf4", VectorWidthA=2, VectorWidthB=2, LDSSegmentInterleave=1,
+       miMN=(32, 16), SourceSwap=False),
+    _c("lsi_AB_mxf4_32x16", side="AB", dtype="mxf4", VectorWidthA=2, VectorWidthB=2, LDSSegmentInterleave=1,
+       miMN=(32, 16)),
     _c("lsi_A_wt4", side="A", wt=(4, 2), VectorWidthA=4, VectorWidthB=2, LDSSegmentInterleave=1),
     _c("lsi_AB", side="AB", VectorWidthA=2, VectorWidthB=2, LDSSegmentInterleave=1),
     _c("lsi_A_bf16_du512", side="A", dtype="bf16", DepthU=512, VectorWidthA=2, LDSSegmentInterleave=1),
@@ -87,9 +102,6 @@ REJECTED = [
     (_c("tdm_onlyA", TDMInst=1), "TDMA and TDMB must be enabled simultaneously"),
     (_c("tdmsplit", TDMSplit=True), "TDMSplit is currently disabled"),
     (_c("1lds", **{"1LDSBuffer": 1}), "1LDSBuffer must be 0 for TDM"),
-    (_c("lsi_B_f4", dtype="f4", VectorWidthA=2, VectorWidthB=2, LDSSegmentInterleave=1), "swizzle-B LSI: F4 not validated"),
-    (_c("mxf4_32x16_A_lsi", side="A", dtype="mxf4", VectorWidthA=2, VectorWidthB=2, LDSSegmentInterleave=1,
-        miMN=(32, 16), SourceSwap=False), "swizzle-A LSI: stacked (32-row) WMMA not supported"),
     (_c("lsi_B_wg41", wt=(1, 2), wg=(4, 1), VectorWidthB=2, LDSSegmentInterleave=1),
      "swizzle-B LSI: only MIWaveGroup=[2,2]"),
     # LSI, B not spanning its LDS component, with the nO rows of a vIdx group not dividing evenly over

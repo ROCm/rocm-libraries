@@ -406,14 +406,7 @@ def evaluate(state):
     # is always the coarse case (A must span its component, see below); swizzle-B is validated for the tight
     # MIWaveGroup=[2,2] symmetric case, gated below.
     _swzB = bool(pt.get("SwizzleTensorB"))
-    _dtB = pt.get("DataTypeB")
-    if _swzB and hasattr(_dtB, "numBytes") and _dtB.numBytes() < 1:
-        return _no("swizzle-B LSI: F4 not validated")
     if tuple(state.get("ISA", ()))[:2] != (12, 5):             return _no("not gfx1250")
-    # A stacked (32-row) swizzled operand reads several nO tiles per WMMA tile; the component maths here assumes one.
-    for _tc in "AB":
-        if pt.get("SwizzleTensor" + _tc) and state["MatrixInst" + ("M" if _tc == "A" else "N")] > 16:
-            return _no("swizzle-%s LSI: stacked (32-row) WMMA not supported" % _tc)
     if not (state.get("enableTDMA") and state.get("enableTDMB") and state["NumWaves"] > 1):
         return _no("not wave-separated TDM")
     if state.get("LocalSplitU", 1) > 1:
@@ -457,7 +450,7 @@ def evaluate(state):
     if _swzB:
         if _portSplit:                                        return _no("swizzle-B LSI: portSplit (TDMSplit) path unsupported")
         _compColsB = state["MacroTile1"] // (state["NumWaves"] // 2)
-        if min(state["MatrixInstM"], state["MatrixInstN"]) * state["VectorWidthB"] < _compColsB:
+        if wave_tile_span(state, "B") < _compColsB:   # B's whole tile (a stacked 32-row one included)
             _compNO = _compColsB // state["MatrixInstN"]
             if _compNO % (state["VectorWidthB"] * state["MIWaveGroup"][1]) != 0:
                 return _no("swizzle-B LSI: a vIdx group straddles an LDS component (MIWaveTile[1]/VectorWidthB must be even)")
