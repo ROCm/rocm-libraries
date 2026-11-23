@@ -1836,7 +1836,7 @@ TEST_F(CsrmvNnzsplit, symmetric_upper_shapes)
     };
     const int64_t      W = wavefront();
     std::vector<Shape> shapes;
-    shapes.push_back({"upper_first_row_full", make_upper({5, 1, 0, 2, 1}), 1});
+    shapes.push_back({"upper_first_row_full", make_upper({5, 1, 0, 0, 1}), 1});
     {
         std::vector<int64_t> lens(static_cast<size_t>(W), 0);
         lens[0] = W / 2;
