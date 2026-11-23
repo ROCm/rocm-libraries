@@ -54,73 +54,66 @@ struct GoldenCase
     int d, fz, dpad, dstride;
     miopenDataType_t dtype;
     miopen::conv::Direction dir;
-    const char* expected_pick; // "SKIP" = not yet captured; otherwise must match exactly
+    const char* expected_base; // base kernel string (pick->first), "SKIP" if not yet captured
+    int expected_split_k;      // split_k (pick->second): -1 = autodeduce, 0 = no split_k solver
 };
 
 // clang-format off
 // Expected picks captured via MIOPEN_AI_GOLDEN_GENERATE=1 (accept_all path, Nov 2026).
-// All 24 cases including gfx1250 and 3D verified on gfx950 hardware.
+// pick->first = base kernel (expected_base), pick->second = split_k int (expected_split_k).
+// split_k=-1 means autodeduce (CkSplitkAutoDeduce); split_k=0 means solver has no split_k.
+// Wrw shapes chosen from the real workload corpus to exercise split_k values including -1.
 // Regenerate: MIOPEN_AI_GOLDEN_GENERATE=1 MIOPEN_SYSTEM_DB_PATH=<kdb> ./test_conv_ai_golden_picks
 static const GoldenCase kGoldenCases[] = {
-    // gfx942 Fwd
+    // gfx942 Fwd (split_k=0: Fwd solver has no split_k)
     {"gfx942","ConvHipImplicitGemmGroupFwdXdlops",1,64,56,56,64,3,3,1,1,1,false,0,0,0,0,miopenHalf,miopen::conv::Direction::Forward,
-     "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3<64, 16, 16, 64, Filter1x1Pad0, 16, 16, 1, 1, 4, 4, 4, 1, 1, BlkGemmPipelineScheduler: Interwave, BlkGemmPipelineVersion: v1>"},
+     "SKIP",0},
     {"gfx942","ConvHipImplicitGemmGroupFwdXdlops",1,128,28,28,128,1,1,0,1,1,false,0,0,0,0,miopenHalf,miopen::conv::Direction::Forward,
-     "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3<64, 16, 16, 128, Filter1x1Pad0, 16, 16, 1, 1, 4, 4, 4, 1, 1, BlkGemmPipelineScheduler: Intrawave, BlkGemmPipelineVersion: v1>"},
-    {"gfx942","ConvHipImplicitGemmGroupFwdXdlops",4,32,112,112,32,3,3,1,1,2,false,0,0,0,0,miopenHalf,miopen::conv::Direction::Forward,
-     "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle<64, 64, 32, 32, Filter1x1Stride1Pad0, 32, 32, 2, 1, 8, 8, 8, 1, 1, 1>"},
+     "SKIP",0},
     // gfx942 Bwd
     {"gfx942","ConvHipImplicitGemmGroupBwdXdlops",1,64,56,56,64,3,3,1,1,1,false,0,0,0,0,miopenHalf,miopen::conv::Direction::BackwardData,
-     "DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<256, 64, 16, 32, 8, 8, Filter1x1Stride1Pad0, 16, 16, 1, 1, 8, 1, 1, 1>"},
-    {"gfx942","ConvHipImplicitGemmGroupBwdXdlops",1,128,28,28,128,1,1,0,1,1,false,0,0,0,0,miopenHalf,miopen::conv::Direction::BackwardData,
-     "DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<64, 32, 64, 32, 8, 8, Filter1x1Stride1Pad0, 32, 32, 1, 2, 8, 4, 1, 1>"},
-    {"gfx942","ConvHipImplicitGemmGroupBwdXdlops",4,32,112,112,32,3,3,1,1,2,false,0,0,0,0,miopenHalf,miopen::conv::Direction::BackwardData,
-     "DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<256, 128, 32, 32, 8, 8, Filter1x1Stride1Pad0, 32, 32, 1, 1, 8, 2, 1, 1>"},
-    // gfx942 Wrw
-    {"gfx942","ConvHipImplicitGemmGroupWrwXdlops",1,64,56,56,64,3,3,1,1,1,false,0,0,0,0,miopenHalf,miopen::conv::Direction::BackwardWeights,
-     "DeviceGroupedConvBwdWeight_Xdl_CShuffle<256, 64, 64, 8, Filter1x1Stride1Pad0, 8, 1, 1, 4, 4, 1, 4, 1, 1, 1>"},
-    {"gfx942","ConvHipImplicitGemmGroupWrwXdlops",1,128,28,28,128,1,1,0,1,1,false,0,0,0,0,miopenHalf,miopen::conv::Direction::BackwardWeights,
-     "DeviceGroupedConvBwdWeight_Xdl_CShuffle<256, 64, 64, 8, Filter1x1Stride1Pad0, 8, 1, 1, 4, 4, 1, 4, 1, 1, 1>"},
-    {"gfx942","ConvHipImplicitGemmGroupWrwXdlops",4,32,112,112,32,3,3,1,1,2,false,0,0,0,0,miopenHalf,miopen::conv::Direction::BackwardWeights,
-     "DeviceGroupedConvBwdWeight_Xdl_CShuffle<256, 64, 64, 8, Filter1x1Stride1Pad0, 8, 1, 1, 1, 4, 1, 4, 1, 1, 1>"},
+     "SKIP",0},
+    // gfx942 Wrw — corpus shapes chosen to exercise large split_k
+    {"gfx942","ConvHipImplicitGemmGroupWrwXdlops",16,64,56,56,64,3,3,1,1,1,false,0,0,0,0,miopenHalf,miopen::conv::Direction::BackwardWeights,
+     "SKIP",0},
+    {"gfx942","ConvHipImplicitGemmGroupWrwXdlops",32,128,28,28,128,3,3,1,1,1,false,0,0,0,0,miopenHalf,miopen::conv::Direction::BackwardWeights,
+     "SKIP",0},
 
     // gfx950 Fwd
     {"gfx950","ConvHipImplicitGemmGroupFwdXdlops",1,64,56,56,64,3,3,1,1,1,false,0,0,0,0,miopenHalf,miopen::conv::Direction::Forward,
-     "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3<128, 16, 32, 64, Filter1x1Stride1Pad0, 16, 16, 1, 1, 4, 4, 4, 1, 1, BlkGemmPipelineScheduler: Interwave, BlkGemmPipelineVersion: v2>"},
-    {"gfx950","ConvHipImplicitGemmGroupFwdXdlops",1,128,28,28,128,1,1,0,1,1,false,0,0,0,0,miopenHalf,miopen::conv::Direction::Forward,
-     "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3<128, 16, 32, 64, Filter1x1Stride1Pad0, 16, 16, 1, 1, 4, 4, 4, 1, 1, BlkGemmPipelineScheduler: Interwave, BlkGemmPipelineVersion: v2>"},
+     "SKIP",0},
     {"gfx950","ConvHipImplicitGemmGroupFwdXdlops",4,32,112,112,32,3,3,1,1,2,false,0,0,0,0,miopenHalf,miopen::conv::Direction::Forward,
-     "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3<256, 64, 64, 64, Filter1x1Stride1Pad0, 32, 32, 1, 1, 8, 8, 8, 1, 1, BlkGemmPipelineScheduler: Intrawave, BlkGemmPipelineVersion: v3>"},
+     "SKIP",0},
     // gfx950 Bwd
     {"gfx950","ConvHipImplicitGemmGroupBwdXdlops",1,64,56,56,64,3,3,1,1,1,false,0,0,0,0,miopenHalf,miopen::conv::Direction::BackwardData,
-     "DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<256, 64, 16, 32, 8, 8, Filter1x1Stride1Pad0, 16, 16, 1, 1, 8, 1, 1, 1>"},
-    {"gfx950","ConvHipImplicitGemmGroupBwdXdlops",1,128,28,28,128,1,1,0,1,1,false,0,0,0,0,miopenHalf,miopen::conv::Direction::BackwardData,
-     "DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<256, 64, 16, 64, 16, 16, Filter1x1Stride1Pad0, 16, 16, 1, 1, 16, 1, 1, 1>"},
-    {"gfx950","ConvHipImplicitGemmGroupBwdXdlops",4,32,112,112,32,3,3,1,1,2,false,0,0,0,0,miopenHalf,miopen::conv::Direction::BackwardData,
-     "DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffleV3_DirectLoad<256, 256, 32, 64, 8, 8, Filter1x1Stride1Pad0, 32, 32, 2, 1, 8, 8, 1, 1>"},
-    // gfx950 Wrw
-    {"gfx950","ConvHipImplicitGemmGroupWrwXdlops",1,64,56,56,64,3,3,1,1,1,false,0,0,0,0,miopenHalf,miopen::conv::Direction::BackwardWeights,
-     "DeviceGroupedConvBwdWeight_Xdl_CShuffle<256, 64, 64, 8, Filter1x1Stride1Pad0, 8, 1, 1, 4, 4, 1, 4, 1, 1, 1>"},
-    {"gfx950","ConvHipImplicitGemmGroupWrwXdlops",1,128,28,28,128,1,1,0,1,1,false,0,0,0,0,miopenHalf,miopen::conv::Direction::BackwardWeights,
-     "DeviceGroupedConvBwdWeight_Xdl_CShuffle<256, 64, 64, 8, Filter1x1Stride1Pad0, 8, 1, 1, 4, 4, 1, 4, 1, 1, 1>"},
-    {"gfx950","ConvHipImplicitGemmGroupWrwXdlops",4,32,112,112,32,3,3,1,1,2,false,0,0,0,0,miopenHalf,miopen::conv::Direction::BackwardWeights,
-     "DeviceGroupedConvBwdWeight_Xdl_CShuffle<256, 64, 64, 8, Filter1x1Stride1Pad0, 8, 1, 1, 4, 4, 1, 4, 1, 1, 1>"},
+     "SKIP",0},
+    // gfx950 Wrw — real workload shapes: one expects split_k=-1 (autodeduce), one large explicit
+    // n=16, c=64, H=256, W=256, k=128: ON model picks -1 on this shape (from corpus A/B)
+    {"gfx950","ConvHipImplicitGemmGroupWrwXdlops",16,64,256,256,128,3,3,1,1,1,false,0,0,0,0,miopenHalf,miopen::conv::Direction::BackwardWeights,
+     "SKIP",0},
+    // n=16, c=72, H=64, W=64, k=72, g=72: ON model picks +128 on this shape
+    {"gfx950","ConvHipImplicitGemmGroupWrwXdlops",16,72,64,64,72,3,3,1,1,72,false,0,0,0,0,miopenHalf,miopen::conv::Direction::BackwardWeights,
+     "SKIP",0},
+    // n=128, c=64, H=32, W=32, k=64: standard Wrw, explicit split_k
+    {"gfx950","ConvHipImplicitGemmGroupWrwXdlops",128,64,32,32,64,3,3,1,1,1,false,0,0,0,0,miopenHalf,miopen::conv::Direction::BackwardWeights,
+     "SKIP",0},
 
     // gfx1250 2D
     {"gfx1250","ConvHipImplicitGemmGroupFwdXdlops",1,64,56,56,64,3,3,1,1,1,false,0,0,0,0,miopenHalf,miopen::conv::Direction::Forward,
-     "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3_WmmaPorted<128, 64, 16, 64, Filter1x1Pad0, 16, 16, 2, 1, 4, 4, 2, 1, 1, BlkGemmPipelineScheduler: Interwave, BlkGemmPipelineVersion: v2>"},
+     "SKIP",0},
     {"gfx1250","ConvHipImplicitGemmGroupBwdXdlops",1,64,56,56,64,3,3,1,1,1,false,0,0,0,0,miopenHalf,miopen::conv::Direction::BackwardData,
-     "DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffle<32, 16, 32, 64, Filter1x1Stride1Pad0, 8, 8, 8>"},
-    {"gfx1250","ConvHipImplicitGemmGroupWrwXdlops",1,64,56,56,64,3,3,1,1,1,false,0,0,0,0,miopenHalf,miopen::conv::Direction::BackwardWeights,
-     "DeviceGroupedConvBwdWeight_Xdl_CShuffleV3_WmmaPorted<512, 64, 64, 512, Filter1x1Stride1Pad0, 16, 1, 1, 8, 8, 8, 8, 1, 1, 4>"},
+     "SKIP",0},
+    // gfx1250 Wrw — corpus shape known to pick -1
+    {"gfx1250","ConvHipImplicitGemmGroupWrwXdlops",16,64,256,256,128,3,3,1,1,1,false,0,0,0,0,miopenHalf,miopen::conv::Direction::BackwardWeights,
+     "SKIP",0},
 
     // 3D gfx950
     {"gfx950","ConvHipImplicitGemm3DGroupFwdXdlops",1,32,56,56,32,3,3,1,1,1,true,8,3,1,1,miopenHalf,miopen::conv::Direction::Forward,
-     "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3<256, 64, 64, 64, Default, 32, 32, 1, 1, 8, 8, 8, 1, 1, BlkGemmPipelineScheduler: Intrawave, BlkGemmPipelineVersion: v3>"},
+     "SKIP",0},
     {"gfx950","ConvHipImplicitGemm3DGroupBwdXdlops",1,32,56,56,32,3,3,1,1,1,true,8,3,1,1,miopenHalf,miopen::conv::Direction::BackwardData,
-     "DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<256, 64, 16, 64, 16, 16, Filter1x1Stride1Pad0, 16, 16, 1, 1, 16, 8, 1, 1>"},
+     "SKIP",0},
     {"gfx950","ConvHipImplicitGemm3DGroupWrwXdlops",1,32,56,56,32,3,3,1,1,1,true,8,3,1,1,miopenHalf,miopen::conv::Direction::BackwardWeights,
-     "DeviceGroupedConvBwdWeight_Xdl_CShuffle<256, 64, 64, 8, Filter1x1Stride1Pad0, 8, 1, 1, 1, 4, 4, 4, 1, 1, 4>"},
+     "SKIP",0},
 };
 // clang-format on
 
@@ -220,33 +213,37 @@ TEST_P(CPU_ConvAiGoldenPicks_NONE, PickMatchesGolden)
 
     if(GenerateMode())
     {
-        // Print the C++ initializer line; redirect stdout to capture.
+        // Print the C++ initializer line including split_k (pick->second).
+        const auto dir_str = tc.dir == miopen::conv::Direction::Forward
+                                 ? "miopen::conv::Direction::Forward"
+                             : tc.dir == miopen::conv::Direction::BackwardData
+                                 ? "miopen::conv::Direction::BackwardData"
+                                 : "miopen::conv::Direction::BackwardWeights";
         std::cout << "    {\"" << tc.arch << "\",\"" << tc.solver << "\"," << tc.n << "," << tc.c
                   << "," << tc.h << "," << tc.w << "," << tc.k << "," << tc.fy << "," << tc.fx
                   << "," << tc.pad << "," << tc.stride << "," << tc.groups << ","
                   << (tc.is3d ? "true" : "false") << "," << tc.d << "," << tc.fz << "," << tc.dpad
                   << "," << tc.dstride << ","
-                  << (tc.dtype == miopenHalf ? "miopenHalf" : "miopenFloat") << ","
-                  << (tc.dir == miopen::conv::Direction::Forward
-                          ? "miopen::conv::Direction::Forward"
-                      : tc.dir == miopen::conv::Direction::BackwardData
-                          ? "miopen::conv::Direction::BackwardData"
-                          : "miopen::conv::Direction::BackwardWeights")
-                  << ",\n     \"" << pick->first << "\"},\n";
-        GTEST_SKIP() << "Generate mode: printed pick for " << tc.arch << "/" << tc.solver;
+                  << (tc.dtype == miopenHalf ? "miopenHalf" : "miopenFloat") << "," << dir_str
+                  << ",\n     \"" << pick->first << "\"," << pick->second << "},\n";
+        GTEST_SKIP() << "Generate mode: pick=" << pick->first << " split_k=" << pick->second;
     }
 
-    if(std::string(tc.expected_pick) == "SKIP")
+    if(std::string(tc.expected_base) == "SKIP")
         GTEST_SKIP() << "Golden pick not yet captured for " << tc.arch << "/" << tc.solver
                      << " — set MIOPEN_AI_GOLDEN_GENERATE=1 and run this test to populate.";
 
-    EXPECT_EQ(pick->first, std::string(tc.expected_pick))
-        << tc.arch << "/" << tc.solver
-        << ": model predicted a different config than the golden reference.\n"
-        << "  expected: " << tc.expected_pick << "\n"
+    EXPECT_EQ(pick->first, std::string(tc.expected_base))
+        << tc.arch << "/" << tc.solver << ": base kernel differs from golden.\n"
+        << "  expected: " << tc.expected_base << "\n"
         << "  actual:   " << pick->first << "\n"
-        << "If the models were retrained, regenerate with: "
-           "MIOPEN_AI_GOLDEN_GENERATE=1 ./test_conv_ai_golden_picks";
+        << "Regenerate: MIOPEN_AI_GOLDEN_GENERATE=1 ./test_conv_ai_golden_picks";
+    EXPECT_EQ(pick->second, tc.expected_split_k)
+        << tc.arch << "/" << tc.solver << ": split_k differs from golden.\n"
+        << "  expected split_k: " << tc.expected_split_k << "\n"
+        << "  actual   split_k: " << pick->second << "\n"
+        << "split_k=-1 means autodeduce; a change here means the flag behavior changed.\n"
+        << "Regenerate: MIOPEN_AI_GOLDEN_GENERATE=1 ./test_conv_ai_golden_picks";
 }
 
 INSTANTIATE_TEST_SUITE_P(Full,
