@@ -616,6 +616,48 @@ TensileLite's Python code generator. That is very likely the architecturally cor
 means TensileLite's own Python unit/characterization suite has no coverage at all for a rocRoller-only
 change; see the corrected rows in Known Risks and Gaps below.
 
+### CPU reference GEMM tests
+
+The C++ reference has two numerical suites: gtests in `tensilelite-tests` and
+the `CPUGemm.*` cases registered for `cpu-gemm-driver`. The driver validates D
+and AMAX-D against its own scalar GEMM. Its cases cover fast and slow paths,
+data types, transposes, scaling, bias, activation and batching.
+
+Both executables and their CTest registrations install under
+`bin/hipblaslt-tensilelite/`. TheRock's TensileLite job runs that installed suite
+in the standard tier and reports through the required `Multi-Arch CI Summary`.
+The driver tiers are defined in
+[`tests/cpu_gemm_test_categories.yaml`](tests/cpu_gemm_test_categories.yaml).
+The pinned TheRock selector omits the C++ stage for quick-tier runs.
+
+Run the driver cases from either the build tree or an installed test package:
+
+```bash
+ctest --test-dir <build>/tensilelite/tests -L '^standard$' -R '^CPUGemm\.' \
+    --parallel 1 --output-on-failure --no-tests=error
+ctest --test-dir <install>/bin/hipblaslt-tensilelite -L '^standard$' -R '^CPUGemm\.' \
+    --parallel 1 --output-on-failure --no-tests=error
+```
+
+Each ordinary driver case has one registration, with an OpenMP thread limit of
+8. Each AMAX-D case has three configurations: the original name uses limit 8,
+and `_Threads1` and `_Threads3` select limits 1 and 3. CTest sets both
+`OMP_THREAD_LIMIT` and `OMP_NUM_THREADS`, disables dynamic teams, and accounts
+for the requested processors when scheduling tests. Limits constrain the
+reference's explicit request for 64 threads; they are numerical test settings,
+not measurements of the team used by every reference call.
+
+The Int8 option-rejection cases require exit code 1 and their expected diagnostic
+through [`CheckCpuGemmFailure.cmake`](tests/cmake/CheckCpuGemmFailure.cmake).
+The checker installs alongside the suite, so unrelated argument or runtime errors
+fail these cases in both the build tree and installed package.
+
+Math CI's `coverage-cpp` environment continues running the build-tree cases
+with coverage instrumentation. That overlap already exists for the gtests:
+Math CI collects coverage while TheRock validates the installed artifact and
+supplies the required gate. Multiple category labels on a driver registration
+do not cause repeated execution within one CTest invocation.
+
 ### Where these tests actually run
 
 The TensileLite Python tree under `tensilelite/Tests/unit` (characterization *and* unit, about six
@@ -720,7 +762,7 @@ it is further along than it is.
 | TensileLite Python, unit and characterization combined | `coverage.py` via `tox -e coverage-unit` | GitHub Actions, on any change under `tensilelite/**`; Math CI measures it again for codecov | Floor plus per-file ratchet, 1 pp tolerance. The lane rolls up to the required `Component CI Summary`, so a regression blocks a merge |
 | TensileLite Python, unit-only share | Same lane, reported in the split summary card | GitHub Actions | **No.** Informational only, and it is the number that tracks real progress |
 | TensileLite Python, mutation score | `tox -e mutation-unit` | Nowhere; run by hand | No. Report-only pilot on ten files |
-| TensileLite C++ host library | `tox -e coverage-cpp` | Math CI | Reported to codecov, not enforced |
+| TensileLite C++: `tensilelite-host`, the client and rocisa, `.cpp` files only | `llvm-cov` via `tox -e coverage-cpp` | Math CI | Reported to codecov as `TensileLite-CPP`, not enforced |
 
 The GitHub Actions coverage lane is CPU-only and takes roughly seven minutes. It runs the
 characterization suite and the pure unit suite once each under coverage, keeping the two selections
@@ -772,10 +814,21 @@ they are not: `KernelWriter.py`, `KernelWriterAssembly.py` and `SolutionStructs/
 carry active per-file floors in the seventies. The genuinely uncovered modules are elsewhere,
 including `ExperimentalLibrary.py` at zero and much of `tensilelite/Components/`.
 
-**No C++ coverage target exists** for the reasons given under
+**C++ coverage** (`coverage-cpp`) counts `.cpp` files from three places: `tensilelite-host`
+(`src/`, exported from `libtensilelite-host.so`), the client (`client/src/`, including the CPU
+reference in `Reference.cpp`) and rocisa (`rocisa/rocisa/src/`, exported from `_rocisa.so`). Test
+sources and `.hpp` headers are excluded, so templates and inline functions in headers are not
+counted. The job log also prints a per-directory table with headers included; that table is
+advisory and is not uploaded. The counts come from `tensilelite-tests` (`ctest`) and `rocisa/test`
+(`pytest`). The GPU `-m common` suite is what drives most of the client, and it does not run under
+coverage, which is why most of `client/src/` reads low.
+
+**No enforced C++ coverage floor exists.** `codecov.yml` sets the same 80% target for
+`TensileLite-CPP` as for the other flags (see [Targets](#targets)), but the job that uploads it is
+not a required check. Enforcing it before the host-side code is linkable in isolation would produce a
+number nobody could act on, for the reasons given under
 [../TESTING.md#unit-testing-strategy](../TESTING.md#unit-testing-strategy) (the C++ client's own
-structural blockers). Setting one before the host-side code is linkable in isolation would produce a
-number nobody could act on.
+structural blockers).
 
 ## Improvement Roadmap
 

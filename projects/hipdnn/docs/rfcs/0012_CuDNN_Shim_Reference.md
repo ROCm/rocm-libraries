@@ -1,7 +1,7 @@
 # RFC 0012 — Supporting Reference: Verified cuDNN FE v1.24 Surface
 
 - **Status**: see [RFC 0012](./0012_CuDNN_Shim.md)
-- **Last verified**: 2026-10-15 against `develop` (2501d0b28cc)
+- **Last verified**: 2026-11-10 against `develop` (1c63e26254a)
 
 This document is the long-form companion to
 [RFC 0012: cuDNN shim for hipDNN](./0012_CuDNN_Shim.md). It collects the
@@ -340,24 +340,28 @@ will:
 
 - Accept all `HeurMode_t` values without error in
   `create_execution_plans()`. Map `A` and `B` to hipDNN's
-  `SelectionHeuristic::ModeA` / `ModeB` prediction policies (RFC 0019 §11.2),
-  and `FALLBACK` and `OPENSOURCE` to hipDNN's fallback/default selection,
-  **WARN**ing that `OPENSOURCE` was not honored.
+  `SelectionHeuristic::ModeA` / `ModeB` prediction policies (RFC 0019 §11.2;
+  backend modes `HIPDNN_HEUR_MODE_A` / `HIPDNN_HEUR_MODE_B`), `FALLBACK` to
+  hipDNN's model-free static selection (`HIPDNN_HEUR_MODE_FALLBACK`), and
+  `OPENSOURCE` to the same fallback selection, **WARN**ing that `OPENSOURCE`
+  was not honored.
 
 **Per-note triage.** Upstream `select_*` keeps only plans carrying the note;
 `deselect_*` drops plans carrying it. Each note is classified by what happens if
 the shim ignores the request: perf-only or unreachable exclusion → **warn**;
 correctness constraint hipDNN can honor → **map**; one it cannot → **error**
 (recorded-error mechanism, RFC §4.4.2); `NOT_SET` → **no-op**. A correctness
-mapping needs a positive engine claim — absence of a negative note proves
-nothing, since hipDNN engines declare no notes by default. Behavior notes
+mapping needs a positive engine claim — absence of a declaration proves
+nothing, since an engine that declares nothing is reported
+`NONDETERMINISTIC`. Behavior notes
 follow one rule: a note hipDNN engines report (`isKnownBehaviorNote`) maps;
 any other value errors on select and warns on deselect.
 
-**Deterministic.** `deselect_numeric_notes({NONDETERMINISTIC})` maps to a shim
-allowlist of engines that positively claim determinism
-(`detail::isDeterminismClaimed`), to be replaced by engine metadata; if no
-engine survives, the shim fails with `GRAPH_NOT_SUPPORTED`.
+**Deterministic.** `select_numeric_notes({NONDETERMINISTIC})` and
+`deselect_numeric_notes({NONDETERMINISTIC})` map to filtering engines by the
+numerical notes they report (`Graph::get_numerical_notes_for_engine`,
+[RFC 0025](./0025_NumericalNotes.md)); if no engine survives, the shim fails
+with `GRAPH_NOT_SUPPORTED`.
 
 The per-note select/deselect dispositions and their rationale are maintained in
 [KNOWN_DIVERGENCES.md — Note filters](../KNOWN_DIVERGENCES.md#note-filters).

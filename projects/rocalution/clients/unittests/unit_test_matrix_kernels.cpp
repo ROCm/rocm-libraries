@@ -447,16 +447,12 @@ namespace
             return;
         }
 
-        SCOPED_TRACE("wide");
-        const Csr<T> wide = full<T>(6, 12);
-        if(f.id == rocalution::DIA && b == Backend::Host)
         {
-            KNOWN_BUG("csr_to_dia sizes the values by the smaller dimension, so LeaveDataPtrDIA "
-                      "aborts");
-            expect_in_child([&] { expect_leave_and_set(b, f, wide); });
-            return;
+            SCOPED_TRACE("wide");
+            expect_leave_and_set(b, f, full<T>(6, 12));
         }
-        expect_leave_and_set(b, f, wide);
+        SCOPED_TRACE("tall");
+        expect_leave_and_set(b, f, full<T>(12, 6));
     }
 }
 
@@ -485,9 +481,7 @@ namespace
     {
     };
 
-    // n x n without non-zeros, and n x 0 in DENSE, which stores every entry.
-    // BCSR is allocated, as the conversion of an empty matrix ignores the block
-    // dimension (a known bug).
+    // n x n without non-zeros, and n x 0 in DENSE, which stores every entry
     template <typename T>
     std::unique_ptr<BaseMatrix<T>> without_entries(Backend b, Format f, int n)
     {
@@ -495,10 +489,6 @@ namespace
         if(f.id == rocalution::DENSE)
         {
             A->AllocateDENSE(n, 0);
-        }
-        else if(f.id == rocalution::BCSR)
-        {
-            A->AllocateBCSR(0, n / f.blockdim, n / f.blockdim, f.blockdim);
         }
         else
         {
@@ -666,28 +656,10 @@ TEST_P(matrix_kernels_without_entries, copies_have_no_entries)
 
 TEST_P(matrix_kernels_without_entries, copies_of_a_never_allocated_matrix_are_empty)
 {
-    auto checks = [&] {
-        test_copies_without_entries<float>(
-            backend(), format(), empty_matrix<float>(backend(), format()).get());
-        test_copies_without_entries<double>(
-            backend(), format(), empty_matrix<double>(backend(), format()).get());
-    };
-
-    if(format().id == rocalution::BCSR)
-    {
-        KNOWN_BUG("the BCSR constructors leave the block counts uninitialised, so the copy "
-                  "asserts or exits with a HIP error");
-        expect_in_child(checks);
-        return;
-    }
-    if(format().id == rocalution::MCSR && backend() == Backend::Accelerator)
-    {
-        KNOWN_BUG("the HIP MCSR copies read the row offsets of an unallocated source and exit "
-                  "with a HIP error");
-        expect_in_child(checks);
-        return;
-    }
-    checks();
+    test_copies_without_entries<float>(
+        backend(), format(), empty_matrix<float>(backend(), format()).get());
+    test_copies_without_entries<double>(
+        backend(), format(), empty_matrix<double>(backend(), format()).get());
 }
 
 // HYB has no data pointer interface
@@ -952,8 +924,8 @@ namespace
         return {{"wide", full<T>(5, 7)}, {"tall", full<T>(7, 5)}};
     }
 
-    // The accelerator HYB and DENSE ApplyAdd overwrite the output (a known bug), which
-    // does not show when it starts out zero
+    // An ApplyAdd that overwrites the output only shows when the output does not start
+    // out zero
     template <typename T>
     void test_apply_add(Backend b, Format f)
     {
@@ -980,11 +952,6 @@ namespace
             A->ApplyAdd(*make_vector(b, x), half, out.get());
             EXPECT_EQ(values_of(*out),
                       apply_add(ref, x, half, std::vector<T>(ref.n, static_cast<T>(0))));
-        }
-
-        if(b == Backend::Accelerator)
-        {
-            KNOWN_BUG("ellmv and gemv get beta 0, so the output is overwritten");
         }
 
         for(const auto& matrix : apply_add_cases<T>(f))
@@ -1026,10 +993,9 @@ namespace
     template <typename T>
     using Entry = std::tuple<int, int, T>;
 
-    // The entries of a COO matrix of any backend, sorted, because Permute leaves
-    // them in their old order (a known bug)
+    // The entries of a COO matrix of any backend, in their stored order
     template <typename T>
-    std::vector<Entry<T>> sorted_coo_entries(const BaseMatrix<T>& A)
+    std::vector<Entry<T>> coo_entries_of(const BaseMatrix<T>& A)
     {
         auto host = host_copy(A);
         auto coo  = dynamic_cast<rocalution::HostMatrixCOO<T>*>(host.get());
@@ -1049,7 +1015,6 @@ namespace
         {
             entries.emplace_back(row[k], col[k], val[k]);
         }
-        std::sort(entries.begin(), entries.end());
         return entries;
     }
 
@@ -1146,7 +1111,7 @@ TYPED_TEST(matrix_kernels_hip_coo, permute_with_a_capped_grid_moves_every_entry)
         A->CopyFromHost(*host);
 
         ASSERT_IN_LOOP(std::get<1>(permutation)(*A));
-        EXPECT_EQ(sorted_coo_entries(*A), entries_of(permuted(ref, std::get<2>(permutation))));
+        EXPECT_EQ(coo_entries_of(*A), entries_of(permuted(ref, std::get<2>(permutation))));
     }
 }
 
@@ -1338,15 +1303,48 @@ namespace
         auto A = empty_matrix<T>(b, f);
         ASSERT_TRUE(A->ConvertFrom(*csr));
         EXPECT_EQ(A->GetNnz(), 0);
-
-        if(f.blockdim != 2)
-        {
-            KNOWN_BUG("an empty matrix gets block dimension 2 and even dimensions");
-        }
-
         EXPECT_EQ(A->GetM(), nrow);
         EXPECT_EQ(A->GetN(), ncol);
         EXPECT_EQ(A->GetMatBlockDimension(), f.blockdim);
+
+        // Sizes that are not a multiple fail, as with entries, so that ConvertTo falls back
+        // to CSR instead of padding the matrix
+        for(const auto& size : {std::make_pair(nrow + 1, ncol), std::make_pair(nrow, ncol + 1)})
+        {
+            csr->AllocateCSR(0, size.first, size.second);
+            auto B = empty_matrix<T>(b, f);
+            EXPECT_FALSE(B->ConvertFrom(*csr)) << size.first << " x " << size.second;
+        }
+    }
+
+    template <typename T>
+    void test_copies_after_clear_and_leave(Backend b, Format f)
+    {
+        SCOPED_TRACE(type_name<T>());
+        const Csr<T> ref = band<T>(12, 2);
+
+        auto A = make_matrix(b, f, *ref.host_csr());
+        ASSERT_NE(A, nullptr);
+        A->Clear();
+        {
+            SCOPED_TRACE("Clear");
+            test_copies_without_entries<T>(b, f, A.get());
+        }
+
+        auto L = make_matrix(b, f, *ref.host_csr());
+        ASSERT_NE(L, nullptr);
+        Arrays<T> arrays = leave(*L);
+        EXPECT_EQ(arrays.extra, f.blockdim);
+        {
+            SCOPED_TRACE("LeaveDataPtrBCSR");
+            EXPECT_EQ(L->GetMatBlockDimension(), f.blockdim);
+            test_copies_without_entries<T>(b, f, L.get());
+        }
+
+        // Hands the arrays to a matrix that frees them
+        auto B = empty_matrix<T>(b, f);
+        set(*B, arrays);
+        expect_matrix(*B, f, ref);
     }
 }
 
@@ -1416,6 +1414,12 @@ TEST_P(matrix_kernels_bcsr, conversion_of_an_empty_matrix_keeps_the_dimensions)
     test_empty_conversion<double>(backend(), format());
 }
 
+TEST_P(matrix_kernels_bcsr, copies_after_clear_and_leave_data_ptr_are_empty)
+{
+    test_copies_after_clear_and_leave<float>(backend(), format());
+    test_copies_after_clear_and_leave<double>(backend(), format());
+}
+
 INSTANTIATE_TEST_SUITE_P(formats,
                          matrix_kernels_bcsr,
                          testing::Combine(testing::Values(Backend::Host, Backend::Accelerator),
@@ -1440,8 +1444,7 @@ namespace
 
 TYPED_TEST_SUITE(matrix_kernels_iterative_solves, WithBackends<RealTypes>, TypedName);
 
-// Without a tolerance every solve runs max_iter iterations, so the known bug of the
-// iteration limit does not apply
+// Without a tolerance every solve runs max_iter iterations
 TYPED_TEST(matrix_kernels_iterative_solves, ll_solve_without_a_tolerance)
 {
     using T = typename TypeParam::value_type;
@@ -1788,9 +1791,12 @@ TYPED_TEST(matrix_kernels_host_csritsv, matrix_without_entries)
     EXPECT_EQ(non_unit.y, untouched);
 
     // Every row lacks its diagonal, so the first zero pivot is row 0
-    KNOWN_BUG("without entries the non-unit solve returns before it looks for zero pivots and "
-              "reports none");
     EXPECT_EQ(non_unit.zero_pivot, 0);
+
+    // A non-unit solve without rows has no zero pivot
+    Itsv<T> no_rows = itsv(Csr<T>(0), c, std::vector<T>(), std::vector<T>());
+    EXPECT_TRUE(no_rows.status);
+    EXPECT_EQ(no_rows.zero_pivot, -1);
 }
 
 // Integer entries and a unit diagonal keep every iterate exact. The stored
@@ -1863,8 +1869,6 @@ TYPED_TEST(matrix_kernels_host_csritsv, the_tolerance_bounds_the_largest_residua
         EXPECT_EQ(r.iterations, expected.iterations);
         expect_near(r.y, lower_solve(dense(L), L.n, x, false), tol<T>());
     }
-
-    KNOWN_BUG("the transposed solve takes the largest update of the previous rows as the residual");
 
     {
         SCOPED_TRACE("transposed");
@@ -1967,11 +1971,6 @@ TYPED_TEST(matrix_kernels_stencil, laplace_2d_apply_add_adds_the_scaled_product)
 
     for(T scalar : {static_cast<T>(1), static_cast<T>(0.5)})
     {
-        if(scalar != static_cast<T>(1))
-        {
-            KNOWN_BUG("ApplyAdd ignores the scalar");
-        }
-
         for(int size : grid_sizes)
         {
             SCOPED_TRACE("grid " + std::to_string(size) + ", scalar " + std::to_string(scalar));
@@ -2063,13 +2062,9 @@ TYPED_TEST(matrix_kernels_local_stencil, apply_and_apply_add_on_the_host)
     S.ApplyAdd(in, static_cast<T>(1), &out);
     EXPECT_EQ(values_of(out), ref.apply(x));
 
-    KNOWN_BUG("LocalStencil::ApplyAdd calls Apply, which overwrites the output");
-
     out.CopyFromData(y.data());
     S.ApplyAdd(in, static_cast<T>(1), &out);
     EXPECT_EQ(values_of(out), apply_add(ref, x, static_cast<T>(1), y));
-
-    KNOWN_BUG("ApplyAdd ignores the scalar");
 
     out.CopyFromData(y.data());
     S.ApplyAdd(in, static_cast<T>(0.5), &out);

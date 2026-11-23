@@ -1,8 +1,8 @@
 {% block includes %}
 // Include utils for {{algo_name}}_config<...>.
-#include "rocprim/device/detail/device_config_helper.hpp" 
+#include "rocprim/device/detail/device_config_helper.hpp"
 // Include 'rocprim::empty_type'.
-#include "rocprim/types.hpp" 
+#include "rocprim/types.hpp"
 {% block benchmarking_include %}
 // Include main benchmarking logic {{algo_type}}_{{algo_name}}_benchmark.
 #include "benchmark_{{algo_type}}_{{algo_name}}.hpp"
@@ -11,6 +11,8 @@
 #include "primbench.hpp"
 // Include fixed-width integers for interop with python.
 #include <cstdint>
+// Include std::log and std::exp for the score.
+#include <cmath>
 {% endblock %}
 
 {% block extern_c_wrapper %}
@@ -59,11 +61,20 @@ extern "C" float {{algo_type}}_{{algo_name}}_wrapper(
     {% block benchmark_queue %}
     executor.queue<benchmark_type>();
     {% endblock %}
-    
+
     executor.run();
 
     {% block get_time %}
-    return (1000 * primbench::GiB) / executor.get_last_bytes_per_second();
+    // Geometric mean of ms/GiB over all queued benchmarks, so every shape counts equally.
+    // With a single benchmark this is just its time.
+    double log_sum = 0;
+    double n       = 0;
+    for(const double& x : executor.get_all_bytes_per_second())
+    {
+        log_sum += std::log((1000.0 * primbench::GiB) / x);
+        n++;
+    }
+    return std::exp(log_sum / n);
     {% endblock %}
 }
 {% endblock %}

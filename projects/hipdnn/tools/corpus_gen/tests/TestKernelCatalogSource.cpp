@@ -31,12 +31,7 @@ namespace
 
 OperationMetadata shippedSdpa()
 {
-    const std::string path = hipdnn_corpus_gen::test::operationsDir() + "/sdpa_fwd.opmeta.json";
-    std::ifstream file(path);
-    EXPECT_TRUE(file.is_open()) << path;
-    const auto parsed = parseOperationMetadata(nlohmann::json::parse(file));
-    EXPECT_TRUE(parsed.ok()) << (parsed.errors.empty() ? "" : parsed.errors.front());
-    return parsed.ok() ? *parsed.metadata : OperationMetadata{};
+    return test::shippedOperation("sdpa_fwd");
 }
 
 /// One descriptor, spelled as a real pack spells it (`num_query_heads`, `seqlen_kv`,
@@ -162,6 +157,10 @@ TEST(TestKernelCatalogSource, AParameterThePackNeverMentionsComesFromTheDeclared
     ASSERT_EQ(harvest.entries.size(), 1u) << harvest.report.shutOut;
     EXPECT_EQ(harvest.report.unbuildable, 0) << harvest.report.firstBuildError;
     EXPECT_EQ(std::get<std::string>(harvest.entries.front().point.at("alignment")), "top_left");
+    // Nor do they carry a layout, a scale or a window; each is the kernel's own default.
+    EXPECT_EQ(std::get<std::string>(harvest.entries.front().point.at("layout")), "bshd");
+    EXPECT_EQ(std::get<std::string>(harvest.entries.front().point.at("scale")), "inv_sqrt_d");
+    EXPECT_EQ(std::get<std::string>(harvest.entries.front().point.at("window")), "none");
 }
 
 TEST(TestKernelCatalogSource, TwoSpellingsOfOneShapeAreOneProblemToMeasure)
@@ -228,17 +227,16 @@ TEST(TestKernelCatalogSource, AGeometryTooLargeToBenchmarkIsCountedApartFromOneT
     // separately.
     const auto metadata = shippedSdpa();
 
-    const ProblemPoint point{{"batch", int64_t{1}},
-                             {"heads", int64_t{8}},
-                             {"heads_kv", int64_t{8}},
-                             {"seqlen_q", int64_t{512}},
-                             {"seqlen_k", int64_t{512}},
-                             {"head_dim", int64_t{64}},
-                             {"is_causal", true},
-                             // Built directly; a pack gets this from `kernel_catalog.constants`.
-                             {"alignment", std::string("top_left")},
-                             {"generate_stats", false},
-                             {"dtype", std::string("bf16")}};
+    // Built directly; a pack gets its categoricals from `kernel_catalog.constants`.
+    const auto point = test::withDefaultCategoricals(metadata,
+                                                     ProblemPoint{{"batch", int64_t{1}},
+                                                                  {"heads", int64_t{8}},
+                                                                  {"heads_kv", int64_t{8}},
+                                                                  {"seqlen_q", int64_t{512}},
+                                                                  {"seqlen_k", int64_t{512}},
+                                                                  {"head_dim", int64_t{64}},
+                                                                  {"is_causal", true},
+                                                                  {"dtype", std::string("bf16")}});
     const auto built = buildAdmissible(metadata, point);
     ASSERT_TRUE(built.has_value());
     const auto footprint = graphBytes(*built);

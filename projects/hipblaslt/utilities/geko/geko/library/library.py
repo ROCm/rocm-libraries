@@ -412,6 +412,7 @@ class Library:
         flush: bool = True,
         print_kernel_info: bool = True,
         initialization: str = "trig_float",
+        adaptive: bool = True,
     ) -> Tuple[str, str | None]:
         """Generate hipBLASLt benchmark input files for the library.
 
@@ -419,7 +420,8 @@ class Library:
             output_dir (str | Path): Directory to store benchmark files.
             verify (bool, optional): Whether to generate a verification file.
                 Defaults to False.
-            duration (float, optional): Target benchmark duration in seconds.
+            duration (float, optional): Target benchmark duration in seconds. With
+                adaptive timing this is the measurement time.
                 Defaults to 0.5.
             iters (int, optional): Number of benchmark iterations.
                 Defaults to 100.
@@ -435,6 +437,9 @@ class Library:
                 Defaults to True.
             initialization (str, optional): Initialization method (trig_float, rand_int, hpl).
                 Defaults to "trig_float".
+            adaptive (bool, optional): Whether the benchmark file uses adaptive
+                timing (see bench.log.update). The verification file never does.
+                Defaults to True.
 
         Returns:
             Tuple[str, str | None]: Paths to benchmark and verification files
@@ -536,6 +541,7 @@ class Library:
             flush=flush,
             aux=False,
             print_kernel_info=print_kernel_info,
+            adaptive=adaptive,
         )[0]
 
         bench_file = output_dir / (Path(self.name).stem + "_bench.yaml")
@@ -550,6 +556,8 @@ class Library:
                 del gemm["flush"]
             if "rotating" in gemm:
                 del gemm["rotating"]
+            for key in bench.log.ADAPTIVE_ROW_KEYS:
+                gemm.pop(key, None)
 
         verif_file = str(bench_file).replace("_bench.yaml", "_verify.yaml")
         bench.log.dump(gemms, verif_file)

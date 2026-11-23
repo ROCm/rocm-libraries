@@ -168,6 +168,7 @@ if(HIPDNN_GENERATE_SDK_HEADERS)
         schemas/gbdt_model.fbs
         schemas/table_model.fbs
         schemas/linear_model.fbs
+        schemas/mlp_model.fbs
         schemas/moe_grouped_matmul_attributes.fbs
         schemas/moe_grouped_matmul_bwd_attributes.fbs
         schemas/linear_attention_common.fbs
@@ -186,13 +187,13 @@ if(HIPDNN_GENERATE_SDK_HEADERS)
     # `_generated/` so they ship in its wheel (see uhd_gen/__init__.py). Other schemas are
     # consumed only from C++. uhd_gen is built only with the kernel ingestor, so a build
     # without it leaves the committed bindings alone; the flatc pre-commit hook
-    # (scripts/run_flatc.py) regenerates them whenever gbdt_model.fbs or linear_model.fbs
-    # changes.
+    # (scripts/run_flatc.py) regenerates them whenever gbdt_model.fbs, linear_model.fbs or
+    # mlp_model.fbs changes.
     if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         hipdnn_generate_flatbuffer_python(
             NAME uhd_gen
             TARGET hipdnn_flatbuffers_sdk
-            SCHEMAS schemas/gbdt_model.fbs schemas/linear_model.fbs
+            SCHEMAS schemas/gbdt_model.fbs schemas/linear_model.fbs schemas/mlp_model.fbs
             SCHEMAS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/schemas"
             OUTPUT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../tools/uhd_gen/_generated"
         )
@@ -242,11 +243,16 @@ if(HIPDNN_GENERATE_SDK_HEADERS)
 
         # Same shape as the cache-key header: driven by `cache_uid` / `work_data_dependent`
         # annotations flatc's C++ output does not expose. Also depends on gen_cache_key.py.
+        # The same run writes the tools' operand table (tools/common, never installed), so the
+        # two cannot disagree.
         set(_node_operands_header
             "${CMAKE_CURRENT_SOURCE_DIR}/include/hipdnn_flatbuffers_sdk/data_objects/node_operands_generated.h"
         )
+        set(_node_operand_table_header
+            "${CMAKE_CURRENT_SOURCE_DIR}/../tools/common/include/hipdnn_tools/node_operand_table_generated.h"
+        )
         add_custom_command(
-            OUTPUT "${_node_operands_header}"
+            OUTPUT "${_node_operands_header}" "${_node_operand_table_header}"
             COMMAND "${Python3_EXECUTABLE}"
                     "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/gen_node_operands.py" --flatc
                     "${_cache_key_flatc}"
@@ -254,13 +260,13 @@ if(HIPDNN_GENERATE_SDK_HEADERS)
                     "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/gen_cache_key.py"
                     "${CMAKE_CURRENT_SOURCE_DIR}/../cmake/default_flatc_version.txt"
                     ${_cache_key_schema_depends} ${_cache_key_flatc_dependency}
-            COMMENT "Generating node_operands_generated.h from the FlatBuffers schemas"
+            COMMENT "Generating node_operands_generated.h and node_operand_table_generated.h"
             VERBATIM
         )
         add_custom_target(
             generate_hipdnn_node_operands
-            DEPENDS "${_node_operands_header}"
-            COMMENT "Node-operand visitor header generation"
+            DEPENDS "${_node_operands_header}" "${_node_operand_table_header}"
+            COMMENT "Node-operand headers generation"
         )
         add_dependencies(hipdnn_flatbuffers_sdk generate_hipdnn_node_operands)
     endif()

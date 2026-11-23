@@ -12,6 +12,7 @@ import subprocess
 import sys
 
 import pytest
+from rocke.tests.arch_marks import arch_specific
 from rocke.tests.provider_categories import provider_category_labels
 
 _PLATFORM = Path(__file__).resolve().parents[1]
@@ -22,6 +23,13 @@ pytestmark = pytest.mark.skipif(_CMAKE is None, reason="CMake is required")
 _OPERATIONS = sorted(
     registry.parents[1].name.removesuffix("_reference")
     for registry in (_LIBRARY / "tests").glob("*_reference/architectures/registry.json")
+)
+# The fixture project names its published architecture "gfx942". The CMake install
+# module and the artifact CLI do not branch on the architecture name, so a loop
+# over `COVERED_ARCHES` would repeat each case with a new label.
+_FIXTURE_ARCH_REASON = (
+    "gfx942 labels the synthetic fixture project; the CMake install module "
+    "and the artifact CLI do not branch on the architecture"
 )
 # The variant that each fixture architecture publishes with its committed lock.
 _VARIANT = "family"
@@ -295,6 +303,7 @@ def check(project, *, enabled=True, rebuild=False):
 _REBUILD = pytest.mark.parametrize("rebuild", [False, True], ids=["new", "existing"])
 
 
+@arch_specific(("gfx942",), reason=_FIXTURE_ARCH_REASON)
 def test_published_operations_install_separately(project):
     result = configure(project)
     assert result.returncode == 0, result.stdout + result.stderr
@@ -325,6 +334,13 @@ def test_disabled_references_need_neither_python_nor_bundles(project):
     assert installed(project) == {operation: [] for operation in _OPERATIONS}
 
 
+@arch_specific(
+    ("gfx1200", "gfx1201"),
+    reason=(
+        "gfx1200 and gfx1201 label two fixture processors that publish the same "
+        "code bytes; the install routes by processor and does not branch on its name"
+    ),
+)
 def test_shared_code_payloads_install_under_separate_processor_directories(project):
     """Artifact routing follows the qualification processor, not shared code bytes."""
     tests = project / "library/tests"
@@ -347,6 +363,7 @@ def test_shared_code_payloads_install_under_separate_processor_directories(proje
         assert payload.read_bytes() == b"sdpa"
 
 
+@arch_specific(("gfx942",), reason=_FIXTURE_ARCH_REASON)
 @_REBUILD
 @pytest.mark.parametrize(
     "problem", ["archive", "lock", "integrity", "cohort", "metadata", "python"]
@@ -398,6 +415,7 @@ def test_required_reference_prerequisites_fail_configuration(project, problem, r
         assert "Traceback" not in output
 
 
+@arch_specific(("gfx942",), reason=_FIXTURE_ARCH_REASON)
 def test_an_architecture_installs_each_published_variant(project):
     """Each variant's lock publishes its own archive below the same architecture.
 
@@ -427,6 +445,7 @@ def test_an_architecture_installs_each_published_variant(project):
     assert " ".join(pointer.split()) in " ".join(output.split())
 
 
+@arch_specific(("gfx942",), reason=_FIXTURE_ARCH_REASON)
 def test_artifact_cli_lists_the_variants_that_configuration_installs(project):
     """Tools list the installed variants and their archives without CMake."""
     tests = project / "library/tests"
@@ -447,6 +466,7 @@ def test_artifact_cli_lists_the_variants_that_configuration_installs(project):
     assert listed == installed_variants(project)
 
 
+@arch_specific(("gfx942",), reason=_FIXTURE_ARCH_REASON)
 @_REBUILD
 def test_staging_rejects_a_bundle_qualified_for_another_variant(project, rebuild):
     """A manifest that declares its variant must declare the lock's variant."""
@@ -474,6 +494,7 @@ def test_staging_rejects_a_bundle_qualified_for_another_variant(project, rebuild
     assert "dvc pull" not in output
 
 
+@arch_specific(("gfx942",), reason=_FIXTURE_ARCH_REASON)
 @_REBUILD
 @pytest.mark.parametrize("missing", ["package", "publication", "metadata"])
 def test_half_wired_operation_fails_configuration(project, missing, rebuild):
@@ -503,6 +524,7 @@ def test_half_wired_operation_fails_configuration(project, missing, rebuild):
     assert all(message in output for message in expected), output
 
 
+@arch_specific(("gfx942", "gfx950"), reason=_FIXTURE_ARCH_REASON)
 @_REBUILD
 @pytest.mark.parametrize("enabled", [True, False], ids=["enabled", "disabled"])
 @pytest.mark.parametrize(
@@ -581,6 +603,7 @@ def test_half_wired_or_pre_variant_references_fail_configuration(
     assert expected in output, output
 
 
+@arch_specific(("gfx942",), reason=_FIXTURE_ARCH_REASON)
 @_REBUILD
 @pytest.mark.parametrize("enabled", [True, False], ids=["enabled", "disabled"])
 @pytest.mark.parametrize(
@@ -607,6 +630,7 @@ def test_listed_architectures_need_enrollment(project, enrolled, enabled, rebuil
     assert " ".join(expected.split()) in output, output
 
 
+@arch_specific(("gfx942",), reason=_FIXTURE_ARCH_REASON)
 @_REBUILD
 @pytest.mark.parametrize("variant", ["gfx942", "gfx_wide", "Wide", "wide-v2", "2wide"])
 def test_invalid_variant_names_fail_configuration(project, variant, rebuild):
@@ -842,6 +866,7 @@ def test_reference_ctests_keep_the_shared_reference_labels(tmp_path):
         )
 
 
+@arch_specific(("gfx942",), reason=_FIXTURE_ARCH_REASON)
 def test_a_variant_cannot_publish_a_copy_of_another_variants_bundle(project):
     """Copying a variant's lock and archive does not give a new variant a baseline."""
     tests = project / "library/tests"

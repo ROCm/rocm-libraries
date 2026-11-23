@@ -8,6 +8,7 @@
 #include "conv_kernel.h"
 #include "direct_conv_kernel.h"
 #include "mathutil.h"
+#include "grid_limits.h"
 #include "launch_params.h"
 #include "types.h"
 #include "hipconv/conv_params.hpp"
@@ -123,8 +124,8 @@ __device__ void conv2d_direct_wgrad_cdna5_nhwc_impl(const ToType<DT>* __restrict
     constexpr auto reg_tiles_k      = cfg.reg_tiles_k();
     constexpr auto block_size_q     = cfg.wmma_size_q;
     constexpr auto block_size_q_pad = block_size_q + (cfg.kw - 1);
-    constexpr auto half_fmt = DT == hipconv::DataType::bf16 ? bn::fpfmt::e8m7 : bn::fpfmt::e5m10;
-    constexpr auto prefill_factor = divup(cfg.chunk_size_p + (cfg.kh - 1), cfg.chunk_size_p);
+    constexpr auto half_fmt         = bn::fpfmt_of<DT>;
+    constexpr auto prefill_factor   = divup(cfg.chunk_size_p + (cfg.kh - 1), cfg.chunk_size_p);
 
     static_assert(cfg.ring_size_p % cfg.chunk_size_p == 0,
                   "tile_size_h must be divisible by chunk_size_p");
@@ -673,6 +674,7 @@ __launch_bounds__(cfg.tiles() * arch::wave_size, 2) __global__
 
 template <Config cfg>
 void launch_impl(const LaunchParams& lp,
+                 const hipconv::Device&,
                  const hipconv::ConvParams& par,
                  const void* in,
                  const void* wei,
@@ -724,7 +726,8 @@ public:
 
     KVDescriptor config_descriptor() const override { return ConfigMatcher(cfg_); }
 
-    bool is_applicable(const hipconv::ConvParams& par) const override
+    bool is_applicable(const hipconv::Device& /*dev*/,
+                       const hipconv::ConvParams& par) const override
     {
         if(par.input_type != DataType::fp16 && par.input_type != DataType::bf16)
             return false;
@@ -746,27 +749,41 @@ public:
         return true;
     }
 
-    bool is_valid_config(const hipconv::ConvParams& par) const override
+    bool is_valid_config(const hipconv::Device& dev, const hipconv::ConvParams& par) const override
     {
         if(par.kh != cfg_.kh)
             return false;
         if(par.kw != cfg_.kw)
             return false;
-        return true;
+        // The int row and column counters stay below h + pad_h + 2 × ring_size_p and
+        // w + pad_w + 2 × wmma_size_q.
+        if(int64_t(par.h) + par.pad_h + 2 * cfg_.ring_size_p > INT32_MAX ||
+           int64_t(par.w) + par.pad_w + 2 * cfg_.wmma_size_q > INT32_MAX)
+            return false;
+        return grid_fits(get_launch_params(dev, par));
     }
 
-    LaunchParams get_launch_params(const hipconv::ConvParams& par) const override
+    // Every config adds into dW atomically.
+    bool is_deterministic(const hipconv::Device& /*dev*/,
+                          const hipconv::ConvParams& /*par*/) const override
+    {
+        return false;
+    }
+
+    LaunchParams get_launch_params(const hipconv::Device& /*dev*/,
+                                   const hipconv::ConvParams& par) const override
     {
         constexpr auto NUM_WGP = 256; // hardcoded for now...
 
-        const auto blocks_c = divup(par.channels_per_group(), cfg_.tile_size_c);
-        const auto blocks_k = divup(par.filters_per_group(), cfg_.tile_size_k);
-        const auto blocks_g = par.groups;
-        const auto blocks_split =
-            std::min(par.n, std::max(1, NUM_WGP / (blocks_c * blocks_k * blocks_g)));
+        const int64_t blocks_c     = divup(par.channels_per_group(), cfg_.tile_size_c);
+        const int64_t blocks_k     = divup(par.filters_per_group(), cfg_.tile_size_k);
+        const int64_t blocks_g     = par.groups;
+        const int64_t blocks_split = std::min<int64_t>(
+            par.n, std::max<int64_t>(1, NUM_WGP / (blocks_c * blocks_k * blocks_g)));
 
         LaunchParams launch;
-        launch.grid       = dim3(blocks_c, blocks_k * blocks_g, blocks_split);
+        launch.grid = dim3(
+            grid_extent(blocks_c), grid_extent(blocks_k * blocks_g), grid_extent(blocks_split));
         launch.block_size = dim3(cfg_.tiles() * arch::wave_size, 1, 1);
         return launch;
     }

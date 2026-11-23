@@ -29,9 +29,11 @@ from .ir import (
     _FENCE_ORDERINGS,
     _FENCE_SCOPES,
     _FLAG_STORE_ORDERINGS,
+    _ORPHAN_YIELD_ERROR,
     F64,
     _int_add_wrap_error,
-    _scf_for_carried_descriptor_error,
+    _int_cmp_pred_error,
+    _scf_for_error,
     KernelDef,
     Op,
     PtrType,
@@ -44,12 +46,15 @@ from .ir import (
     _global_ptr_offset_op_error,
     _global_ptr_to_i64_op_error,
     _gpu_check_failed_op_error,
-    _if_else_branch_yield,
+    _if_else_yields,
+    _ldexp_op_error,
     _refuse_non_u8_source,
     _refuse_unsigned_operands,
     _sync_attr,
     _trap_op_error,
+    claimed_align,
     dpp_ctrl_attr,
+    element_type,
     dpp_xor_ctrl,
     gpu_check_word_symbol,
     require_streaming_arch,
@@ -185,6 +190,30 @@ _HIP_UNSIGNED_INT_TYPE = {
     "i32": "uint32_t",
     "i64": "uint64_t",
 }
+
+
+def _hip_unsigned_int_type(op_name: str, type_name: str) -> str:
+    """Return the unsigned HIP type of the width of ``type_name``, or refuse it.
+
+    ``type_name`` is the element type of ``op_name``'s operand: the operand's
+    own type for a scalar op, its lane type for a vector op. Every handler
+    that reads an integer through the unsigned type of its own width asks
+    here, so an element type that is not an integer is refused with one
+    message wherever it is met (the C++ engine's twin is
+    ``rocke_h_require_unsigned_int_type``). The ``nuw`` add and the ``ult``
+    compare check their IR rule first (``_int_add_wrap_error``,
+    ``_int_cmp_pred_error``: i32 or i64 operands), so for them this lookup
+    cannot fail. ``arith.zext`` reads the table itself: its vector source is
+    valid IR that the HIP lowering has not implemented, and it refuses it as
+    such.
+    """
+    try:
+        return _HIP_UNSIGNED_INT_TYPE[type_name]
+    except KeyError:
+        raise TypeError(
+            f"HIP lowering of {op_name} failed - element type={type_name!r}, "
+            f"expected an integer type, one of {tuple(_HIP_UNSIGNED_INT_TYPE)}"
+        ) from None
 
 
 def _type_to_hip(t) -> str:
@@ -586,7 +615,7 @@ class _Lowerer:
         # maximum is undefined behaviour in C++, which clang emits as ``nsw``.
         a, b = op.operands
         width = op.result.type.name
-        unsigned = _HIP_UNSIGNED_INT_TYPE[width]
+        unsigned = _hip_unsigned_int_type(op.name, width)
         self._emit(
             f"{_type_to_hip(op.result.type)} {_name(op.result)} = "
             f"(int{width[1:]}_t)(({unsigned}){_name(a)} + ({unsigned}){_name(b)});"
@@ -611,10 +640,13 @@ class _Lowerer:
         self._binary(op, "%")
 
     def _op_arith_cmp(self, op: Op) -> None:
-        pred = op.attrs.get("pred", "lt")
         a, b = op.operands
+        pred_error = _int_cmp_pred_error(op.attrs.get("pred"), a.type.name)
+        if pred_error:
+            raise ValueError(pred_error)
+        pred = op.attrs.get("pred", "lt")
         if pred == "ult":
-            unsigned = _HIP_UNSIGNED_INT_TYPE[a.type.name]
+            unsigned = _hip_unsigned_int_type(op.name, a.type.name)
             self._emit(
                 f"bool {_name(op.result)} = ({unsigned}){_name(a)} < ({unsigned}){_name(b)};"
             )
@@ -741,11 +773,7 @@ class _Lowerer:
         elem_name = op.attrs.get("elem_type", "f16")
         prefix = _vec_prefix(elem_name, "global_load_vN")
         byte_count = vec * (dtype_info(elem_name).encoded_bits // 8)
-        align = int(op.attrs.get("align", vec * 2))
-        if align <= 0 or align & (align - 1):
-            raise ValueError(
-                "global_load_vN: alignment must be a positive power of two"
-            )
+        align = claimed_align(op, vec, element_type(op.result.type))
         nontemporal = _nontemporal(op)
         if nontemporal:
             require_streaming_arch(op.name, self.arch.gfx)
@@ -1906,6 +1934,15 @@ class _Lowerer:
         # we promote to f32 first.
         self._math1(op, "exp2f")
 
+    def _op_math_ldexp(self, op: Op) -> None:
+        error = _ldexp_op_error(op)
+        if error:
+            raise ValueError(error)
+        value, exponent = op.operands
+        self._emit(
+            f"float {_name(op.result)} = __builtin_ldexpf({_name(value)}, {_name(exponent)});"
+        )
+
     def _op_math_log2(self, op: Op) -> None:
         # ``log2f`` is HIP's device runtime base-2 log entry point; for
         # fp16/bf16 we promote to f32 first (same promote-compute-demote
@@ -2219,12 +2256,16 @@ class _Lowerer:
         self._binary(op, "<<")
 
     def _op_arith_lshr(self, op: Op) -> None:
-        """``a >> b`` with the unsigned-shift cast pair so HIP doesn't
-        emit a signed arithmetic shift.
+        """A logical shift in the operand's own width, as LLVM's ``lshr``:
+        ``a`` is read through the unsigned type of its width, so a negative
+        i8 or i16 shifts in no sign bits and an i64 keeps its high word.
         """
         a, b = op.operands
+        unsigned = _hip_unsigned_int_type(op.name, op.result.type.name)
+        result_type = _type_to_hip(op.result.type)
         self._emit(
-            f"int {_name(op.result)} = (int)((unsigned)({_name(a)}) >> {_name(b)});"
+            f"{result_type} {_name(op.result)} = "
+            f"({result_type})(({unsigned}){_name(a)} >> {_name(b)});"
         )
 
     def _op_arith_umul_hi_i32(self, op: Op) -> None:
@@ -2383,11 +2424,7 @@ class _Lowerer:
         elem_name = op.attrs.get("elem_type", "f16")
         prefix = _vec_prefix(elem_name, "global_store_vN")
         byte_count = n * (dtype_info(elem_name).encoded_bits // 8)
-        align = int(op.attrs.get("align", byte_count))
-        if align <= 0 or align & (align - 1):
-            raise ValueError(
-                "global_store_vN: alignment must be a positive power of two"
-            )
+        align = claimed_align(op, n, element_type(val.type))
         nontemporal = _nontemporal(op)
         if nontemporal:
             require_streaming_arch(op.name, self.arch.gfx)
@@ -2868,7 +2905,7 @@ class _Lowerer:
             if isinstance(op.result.type, VectorType)
             else op.result.type
         )
-        unsigned = _HIP_UNSIGNED_INT_TYPE[elem.name]
+        unsigned = _hip_unsigned_int_type(op.name, elem.name)
         nice = _name(op.result)
         self._emit(f"{res_t} {nice};")
         for i in range(n):
@@ -2977,9 +3014,9 @@ class _Lowerer:
     # -------------------- control flow --------------------
 
     def _op_scf_for(self, op: Op) -> None:
-        descriptor_error = _scf_for_carried_descriptor_error(op)
-        if descriptor_error is not None:
-            raise ValueError(descriptor_error)
+        error = _scf_for_error(op)
+        if error is not None:
+            raise ValueError(error)
         num_iter = op.attrs.get("num_iter_args", 0)
         lower = op.operands[0]
         upper = op.operands[1]
@@ -3023,19 +3060,13 @@ class _Lowerer:
 
     def _op_scf_yield(self, op: Op) -> None:
         # Map each yielded value to the corresponding iter_arg variable.
-        # We find the enclosing scf.for by walking up the lowering's region
-        # stack; here we just rely on positional order in the for op's
-        # iter_args attr captured at parent time. To make this robust, the
-        # builder records iter_args; the lowering matches them positionally.
-        # In practice we assume scf.yield is the last op in the for body.
+        # The lowering matches the yielded values to the for op's iter_args
+        # attr positionally; _scf_for_error has checked that this yield ends
+        # the loop body and gives one value per iter_args entry.
         parent_for = _find_enclosing_for(self.kernel.body, op)
         if parent_for is None:
-            raise RuntimeError("scf.yield without enclosing scf.for")
+            raise ValueError(_ORPHAN_YIELD_ERROR)
         meta = parent_for.attrs.get("iter_args", [])
-        if len(op.operands) != len(meta):
-            raise RuntimeError(
-                f"scf.yield: {len(op.operands)} values vs {len(meta)} iter_args"
-            )
         for m, v in zip(meta, op.operands):
             self._emit(f"{m['name'][1:]} = {_name(v)};")
 
@@ -3051,14 +3082,14 @@ class _Lowerer:
         # The results are variables declared before the ``if``; the
         # ``scf.yield`` that ends each branch assigns them.
         # First: the rule checks the condition and branch counts read below.
-        yields = [_if_else_branch_yield(op, branch) for branch in range(2)]
+        then_yield, else_yield = _if_else_yields(op)
         (cond,) = op.operands
         for result in op.results:
             self._emit(f"{_type_to_hip(result.type)} {_name(result)};")
         self._emit(f"if({_name(cond)}) {{")
-        self._lower_if_else_branch(op, op.regions[0], yields[0])
+        self._lower_if_else_branch(op, op.regions[0], then_yield)
         self._emit("} else {")
-        self._lower_if_else_branch(op, op.regions[1], yields[1])
+        self._lower_if_else_branch(op, op.regions[1], else_yield)
         self._emit("}")
 
     def _lower_if_else_branch(self, op: Op, region: Region, yld: Optional[Op]) -> None:

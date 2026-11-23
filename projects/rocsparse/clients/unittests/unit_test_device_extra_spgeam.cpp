@@ -33,8 +33,9 @@
 //  - index base one (and mixed bases) for A, B and C,
 //  - the stage state machine (each stage after the listed stage sequences,
 //    including the numeric-only flow: numeric analysis + numeric compute on a
-//    fresh descriptor with a user supplied sparsity pattern of C), and
-//  - the argument checks.
+//    fresh descriptor with a user supplied sparsity pattern of C),
+//  - the argument checks, and
+//  - transposed and conjugate transposed operands, which are not implemented.
 // Every successful flow compares the whole C (row pointer, column indices and
 // values) against a host reference C = alpha * A + beta * B.
 //
@@ -409,6 +410,81 @@ namespace
         expect_vec_equal<T>(hv, want.val, "C val");
     }
 
+    // A transposed or conjugate transposed operand: rocsparse_spgeam_buffer_size and
+    // rocsparse_spgeam return not_implemented at every stage, both when the operations
+    // are set before the analysis and when they are changed after an analysis with
+    // operation none. The values of C are not written, and once the operations are
+    // none again the compute stage gives the reference C.
+    template <typename T, typename I, typename J>
+    void transposed_geam(rocsparse_handle    handle,
+                         bool                device,
+                         rocsparse_operation op_A,
+                         rocsparse_operation op_B)
+    {
+        SCOPED_TRACE(testing::Message()
+                     << "op_A " << op_A << " op_B " << op_B << " device " << device);
+        constexpr auto ni = rocsparse_status_not_implemented;
+        Geam<T, I, J>  g;
+        ASSERT_NO_FATAL_FAILURE(g.init(handle, device, 401));
+        ASSERT_NO_FATAL_FAILURE(g.create_C(g.want.nnzb()));
+        const cplx           sentinel(-7.0, 0.0);
+        const std::vector<T> filled(g.vC.n, from_c<T>(sentinel));
+        ASSERT_EQ(hipMemcpy(g.vC.ptr, filled.data(), g.vC.n * sizeof(T), hipMemcpyHostToDevice),
+                  hipSuccess);
+
+        auto expect_C_untouched = [&](const char* what) {
+            ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+            const std::vector<T> got = g.vC.host();
+            for(size_t k = 0; k < got.size(); ++k)
+                EXPECT_TRUE(close<T>(got[k], sentinel))
+                    << what << ": C value " << k << " was written";
+        };
+        auto set_ops = [&](rocsparse_spgeam_descr d, rocsparse_operation a, rocsparse_operation b) {
+            ASSERT_EQ(rocsparse_spgeam_set_input(
+                          handle, d, rocsparse_spgeam_input_operation_A, &a, sizeof(a), nullptr),
+                      rocsparse_status_success);
+            ASSERT_EQ(rocsparse_spgeam_set_input(
+                          handle, d, rocsparse_spgeam_input_operation_B, &b, sizeof(b), nullptr),
+                      rocsparse_status_success);
+        };
+        DevBuf<char> tmp(size_t(4096));
+        auto expect_rejected = [&](rocsparse_spgeam_descr d, stage_t s, rocsparse_spmat_descr C) {
+            size_t bs = 0;
+            EXPECT_EQ(rocsparse_spgeam_buffer_size(handle, d, g.sA.p, g.sB.p, C, s, &bs, nullptr),
+                      ni)
+                << "buffer_size " << stage_name(s);
+            EXPECT_EQ(rocsparse_spgeam(handle, d, g.sA.p, g.sB.p, C, s, tmp.n, tmp.ptr, nullptr),
+                      ni)
+                << stage_name(s);
+        };
+
+        // The operations are set before the first stage.
+        {
+            SpgeamDescrH h;
+            ASSERT_NE(h.d, nullptr);
+            g.set_inputs(h.d);
+            ASSERT_NO_FATAL_FAILURE(set_ops(h.d, op_A, op_B));
+            for(stage_t s : {AN, SA, NA})
+                expect_rejected(h.d, s, nullptr);
+            for(stage_t s : {CO, SC, NC})
+                expect_rejected(h.d, s, g.sC.p);
+            ASSERT_NO_FATAL_FAILURE(expect_C_untouched("operations set before the analysis"));
+        }
+
+        // The analysis runs with operation none, then the operations change.
+        ASSERT_NO_FATAL_FAILURE(g.ok(AN, true));
+        ASSERT_NO_FATAL_FAILURE(set_ops(g.descr, op_A, op_B));
+        for(stage_t s : {CO, SC, NC})
+            expect_rejected(g.descr, s, g.sC.p);
+        ASSERT_NO_FATAL_FAILURE(expect_C_untouched("operations changed after the analysis"));
+
+        // The rejected calls left the descriptor usable.
+        ASSERT_NO_FATAL_FAILURE(
+            set_ops(g.descr, rocsparse_operation_none, rocsparse_operation_none));
+        ASSERT_NO_FATAL_FAILURE(g.ok(CO, true));
+        ASSERT_NO_FATAL_FAILURE(g.check_C());
+    }
+
     struct ExtraSpgeam : public rocsparse_ut::HandleTest
     {
     };
@@ -660,6 +736,23 @@ TEST_F(ExtraSpgeam, argument_errors)
     ASSERT_NO_FATAL_FAILURE(g.ok(AN, true));
     ASSERT_NO_FATAL_FAILURE(g.ok(CO, true));
     ASSERT_NO_FATAL_FAILURE(g.check_C());
+}
+
+// Only rocsparse_operation_none is supported for A and B; the transpose and conjugate
+// transpose operations return not_implemented.
+TEST_F(ExtraSpgeam, transposed_operations_not_implemented)
+{
+    constexpr auto op_n = rocsparse_operation_none;
+    constexpr auto op_t = rocsparse_operation_transpose;
+    constexpr auto op_c = rocsparse_operation_conjugate_transpose;
+    ASSERT_NO_FATAL_FAILURE((transposed_geam<float, int32_t, int32_t>(handle, false, op_t, op_n)));
+    ASSERT_NO_FATAL_FAILURE((transposed_geam<float, int32_t, int32_t>(handle, false, op_n, op_t)));
+    ASSERT_NO_FATAL_FAILURE((transposed_geam<float, int32_t, int32_t>(handle, false, op_t, op_c)));
+    ASSERT_NO_FATAL_FAILURE(
+        (transposed_geam<rocsparse_float_complex, int32_t, int32_t>(handle, false, op_c, op_c)));
+    ASSERT_NO_FATAL_FAILURE((transposed_geam<double, int64_t, int32_t>(handle, false, op_t, op_t)));
+    ASSERT_NO_FATAL_FAILURE(
+        (transposed_geam<rocsparse_float_complex, int64_t, int64_t>(handle, true, op_n, op_c)));
 }
 
 // The scalar datatype differs from the compute datatype, including real or integer
