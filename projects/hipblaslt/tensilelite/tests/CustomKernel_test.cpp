@@ -803,3 +803,199 @@ TEST(CustomKernelTest, ByteStridesNeedAnIntegerKernelArgument)
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// StreamK scheduling arguments of a handwritten custom kernel.
+//
+// A descriptor's StreamK words are packed from StreamK::Static / StreamK::Dynamic
+// ::calculateKernelArgs() and must all belong to the family its work assignment
+// selects.
+// ---------------------------------------------------------------------------
+namespace
+{
+    enum class StreamKMode
+    {
+        Static,
+        Dynamic,
+    };
+
+    char const* toString(StreamKMode mode)
+    {
+        switch(mode)
+        {
+        case StreamKMode::Static:
+            return "Static";
+        case StreamKMode::Dynamic:
+            return "Dynamic";
+        }
+        return "?";
+    }
+
+    StreamK::WorkAssignment assignmentOf(StreamKMode mode)
+    {
+        switch(mode)
+        {
+        case StreamKMode::Static:
+            return StreamK::WorkAssignment::StaticGrid;
+        case StreamKMode::Dynamic:
+            return StreamK::WorkAssignment::DynamicWorkQueue;
+        }
+        return StreamK::WorkAssignment::StaticGrid;
+    }
+
+    // The scheduling words of one mode, in kernel-argument order.
+    std::vector<CustomArgSemantic> semanticsOf(StreamKMode mode)
+    {
+        using S = CustomArgSemantic;
+        switch(mode)
+        {
+        case StreamKMode::Static:
+            return {S::ItersPerTile,
+                    S::MagicNumberItersPerTile,
+                    S::MagicShiftItersPerTile,
+                    S::SKItersPerWG,
+                    S::SKGrid,
+                    S::SKTilesAndSplit};
+        case StreamKMode::Dynamic:
+            return {S::ItersPerTile,
+                    S::TotalItems,
+                    S::SKTiles,
+                    S::SKSplit,
+                    S::SKItersPerWI,
+                    S::SKGrid};
+        }
+        return {};
+    }
+
+    void configureStreamK(ContractionSolution& solution, StreamK::WorkAssignment assignment)
+    {
+        solution.kernelName                                 = "streamk_probe";
+        solution.sizeMapping.tileProcessingStrategy         = TileProcessingStrategy::StreamK;
+        solution.sizeMapping.workAssignment                 = assignment;
+        solution.sizeMapping.macroTile                      = TensileLite::dim3(128, 128, 1);
+        solution.sizeMapping.depthU                         = 64;
+        solution.sizeMapping.workGroupSize                  = TensileLite::dim3(256, 1, 1);
+        solution.sizeMapping.waveNum                        = 4;
+        solution.sizeMapping.matrixInstruction              = {16, 16, 4, 1};
+        solution.sizeMapping.workGroupMapping               = 1;
+        solution.sizeMapping.workGroupMappingXCC            = 1;
+        solution.sizeMapping.CUOccupancy                    = 1;
+        solution.internalArgsSupport.version                = 3;
+        solution.internalArgsSupport.useUniversalArgs       = true;
+        solution.internalArgsSupport.persistentLoopArgsVersion = 0;
+    }
+
+    // A handwritten twin of a generated StreamK solution: same sizeMapping, a
+    // descriptor that asks for `words` and no others.
+    void makeHandwritten(ContractionSolution& solution, std::vector<CustomArgSemantic> const& words)
+    {
+        solution.customKernel.name      = "streamk_probe";
+        solution.customKernel.macrotile = TensileLite::dim3(128, 128, 64);
+        solution.customKernel.threads   = TensileLite::dim3(256, 1, 1);
+        solution.customKernel.grid
+            = {CustomGridSize::StreamKNoBatch, CustomGridSize::One, CustomGridSize::One};
+        solution.customKernel.args.clear();
+        for(auto semantic : words)
+            solution.customKernel.args.push_back({CustomArgType::uint32, semantic});
+    }
+
+    ContractionProblemGemm streamKProblem()
+    {
+        auto problem = ContractionProblemGemm::GEMM(
+            false, false, 257, 385, 129, 257, 129, 257, 1.0, false, 3);
+        problem.setComputeInputTypeA(rocisa::DataType::Float);
+        problem.setComputeInputTypeB(rocisa::DataType::Float);
+        problem.setAlphaType(rocisa::DataType::Float);
+        problem.setBetaType(rocisa::DataType::Float);
+        problem.setParams().setUniformSummationOrder(0);
+        return problem;
+    }
+}
+
+// (a) A descriptor's StreamK words must all belong to one family, fixed by the first
+// StreamK semantic packed. Anything else would be handed words packed for another
+// mode and run the wrong schedule silently.
+namespace
+{
+    void setUpHandwritten(ContractionSolution&                  solution,
+                          StreamK::WorkAssignment                        assignment,
+                          std::vector<CustomArgSemantic> const& words)
+    {
+        configureStreamK(solution, assignment);
+        makeHandwritten(solution, words);
+    }
+
+    using S = CustomArgSemantic;
+
+    // The family check runs while generateCustomCall() packs the descriptor, so this
+    // is how a descriptor is accepted or refused.
+    KernelInvocation packCustomCall(ContractionSolution& solution)
+    {
+        StreamKSettings launch;
+        launch.grid = 36;
+        auto device = probeDevice();
+        return solution.generateCustomCall<false>(
+            streamKProblem(), ContractionInputs{}, device, launch);
+    }
+}
+
+TEST(CustomKernelTest, StreamKFamilyMatchingDescriptorsAreAccepted)
+{
+    for(auto mode : {StreamKMode::Static, StreamKMode::Dynamic})
+    {
+        SCOPED_TRACE(toString(mode));
+        ContractionSolution solution;
+        setUpHandwritten(solution, assignmentOf(mode), semanticsOf(mode));
+        EXPECT_NO_THROW(solution.validatePersistentLoopArgs());
+        EXPECT_NO_THROW(packCustomCall(solution));
+    }
+    // Words every family shares, and no StreamK words at all, fit any assignment.
+    for(auto assignment :
+        {StreamK::WorkAssignment::StaticGrid, StreamK::WorkAssignment::DynamicWorkQueue, StreamK::WorkAssignment::Hybrid})
+    {
+        ContractionSolution solution;
+        setUpHandwritten(
+            solution, assignment, {S::ItersPerTile, S::SKGrid, S::AddressA});
+        EXPECT_NO_THROW(packCustomCall(solution));
+    }
+}
+
+TEST(CustomKernelTest, StreamKFamilyRejectsDescriptorsThatMixFamilies)
+{
+    const std::vector<std::vector<CustomArgSemantic>> mixed{
+        {S::SKItersPerWG, S::SKTiles},
+        {S::MagicNumberItersPerTile, S::SKSplit},
+        {S::SKTiles, S::SKItersPerWG},
+        // TotalIters is a static word.
+        {S::TotalIters, S::SKTiles},
+        {S::TotalItems, S::TotalIters},
+    };
+    for(auto assignment :
+        {StreamK::WorkAssignment::StaticGrid, StreamK::WorkAssignment::DynamicWorkQueue, StreamK::WorkAssignment::Hybrid})
+    for(auto const& words : mixed)
+    {
+        ContractionSolution solution;
+        setUpHandwritten(solution, assignment, words);
+        try
+        {
+            packCustomCall(solution);
+            ADD_FAILURE() << "a descriptor that mixes StreamK families was accepted";
+        }
+        catch(std::runtime_error const& e)
+        {
+            EXPECT_NE(std::string(e.what()).find("mixes StreamK argument families"),
+                      std::string::npos)
+                << e.what();
+        }
+    }
+}
+
+// ItersPerTile divides K by the DepthU the launch was sized from.
+TEST(CustomKernelTest, StreamKCustomRejectsADescriptorWithoutDepthU)
+{
+    ContractionSolution solution;
+    setUpHandwritten(
+        solution, StreamK::WorkAssignment::StaticGrid, semanticsOf(StreamKMode::Static));
+    solution.sizeMapping.depthU = 0;
+    EXPECT_THROW(packCustomCall(solution), std::runtime_error);
+}
