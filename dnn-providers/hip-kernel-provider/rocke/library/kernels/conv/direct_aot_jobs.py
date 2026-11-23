@@ -583,6 +583,44 @@ DGRAD_WMMA_PP_KNOBS = (
     (2, 5, 4, 5, 50, 1, 32, 2, 2, "iterative-ilp"),
     (2, 3, 4, 9, 54, 1, 32, 2, 1, "iterative-ilp"),
 )
+# Ping-pong with a weight ring (direct_dgrad_wmma row_ring / tap_ring) on the
+# dense stride-1 3x3 grid: (waves_c, waves_p, tiles_c, tiles_p, tile_w, ck,
+# stages, ring, pp_group), ring 1 = row_ring, 2 = tap_ring, all with the
+# iterative-ilp scheduler. 256 x 256 / 256 x 128 / 128 x 512 / 128 x 384 /
+# 192 x 384 blocks of 8 or 16 waves, which only fit in LDS with one tap or
+# filter row per weight slot (all nine taps need 365-750 KB); 128-channel
+# chunks on blocks of up to 256 pixels, pp_group 2 where it fits the VGPR
+# budget. Then tap_ring copies of the DGRAD_WMMA_PP_KNOBS tiles for the
+# 47x82, 50x50 / 100x100 and 92x162 maps (tile_w 48, 50, 54).
+DGRAD_WMMA_PP_RING_KNOBS = tuple(
+    (wc, wp, tc, tp, tw, ck, st, ring, pg)
+    for wc, wp, tc, tp, pgs in (
+        (2, 4, 8, 2, (1, 2)),
+        (4, 4, 4, 4, (1, 2)),
+        (2, 8, 8, 2, (1, 2)),
+        (4, 2, 4, 4, (1, 2)),
+        (2, 4, 4, 8, (1, 2)),
+        (2, 8, 4, 4, (1, 2)),
+        (2, 4, 4, 6, (1, 2)),
+        (2, 8, 4, 3, (1, 2)),
+        (2, 4, 6, 6, (1,)),
+    )
+    for ring, ck, st in (
+        (2, 32, 2),
+        (2, 32, 3),
+        (2, 64, 2),
+        (2, 64, 3),
+        (2, 128, 2),
+        (1, 32, 2),
+    )
+    for pg in pgs
+    for tw in (16, 32)
+    if ck < 128 or wp * tp * 16 <= 256
+) + tuple(
+    (wc, wp, tc, tp, tw, ck, 2, 2, 1)
+    for wc, wp, tc, tp, tw in ((2, 4, 4, 6, 48), (2, 5, 4, 5, 50), (2, 3, 4, 9, 54))
+    for ck in (32, 64)
+)
 # 3x1 / 1x3 "same" dgrad of direct_dgrad_wmma (the Inception-v3 8x8 blocks,
 # c384 -> 384, n16-n128): whole 8x8 images per block (block_p = 64 * tile_n)
 # and 32-128 channel C blocks, as FWD_WMMA_RECT3_KNOBS for the forward.
@@ -2460,6 +2498,22 @@ def _knob_grid(
                     knobs.update(pp_group=pg)
                 if sched:
                     knobs.update(sched=sched)
+                yield knobs
+            for wc, wp, tc, tp, tw, ck, st, ring, pg in DGRAD_WMMA_PP_RING_KNOBS:
+                knobs = dict(
+                    waves_c=wc,
+                    waves_p=wp,
+                    tiles_c=tc,
+                    tiles_p=tp,
+                    tile_w=tw,
+                    ck=ck,
+                    stages=st,
+                    pingpong=True,
+                    sched="iterative-ilp",
+                )
+                knobs.update({"row_ring" if ring == 1 else "tap_ring": True})
+                if pg > 1:
+                    knobs.update(pp_group=pg)
                 yield knobs
     elif variant == "direct_wgrad_tiled":
         for (wk16, wc16, wk, wc), (pf, ru), rps, tb, un in itertools.product(
