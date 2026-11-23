@@ -475,15 +475,18 @@ self-tests, `scripts/test_filter_lcov_exclusions.py`, run as part of `make cover
 profiles (`rocalution-unit-test` and the lifecycle tests) and the `rocalution-test` profiles
 separately and writes `coverage-report/coverage-unit.info` and
 `coverage-report/coverage-integration.info`. Jenkins uploads `coverage-unit.info` as the Codecov
-flag `rocALUTION-unit`, only if `coverage_split` succeeds. `coverage-integration.info` is left for a
-local look and is not uploaded. The combined `rocALUTION` flag is `coverage.info`, which includes
-both runs. `make coverage_cleanup` deletes `coverage-report/`, including the profiles and reports
-of a previous run.
+flag `rocALUTION-unit`. A failed `coverage_split`, or a missing `coverage-unit.info`, fails the
+coverage job, and so does a lifecycle CTest run that finds no test. `coverage-integration.info` is
+left for a local look and is not uploaded. The combined `rocALUTION` flag is `coverage.info`, which
+includes both runs. `make coverage_cleanup` deletes `coverage-report/`, including the profiles and
+reports of a previous run.
 
 The flag rules are in the root [`codecov.yml`](../../../../codecov.yml). `rocALUTION` and
 `rocALUTION-unit` carry forward, and each has a project status with an 80% target. Codecov reports a
-failure when either flag is under 80%. TheRock does not run these statuses. Branch protection on
-`develop` has not been confirmed to require them.
+failure when either flag is under 80%. A failed upload of the unit report does not fail the job.
+`rocALUTION-unit` is then built from the nodes whose upload succeeded; if none did, Codecov posts no
+`rocALUTION-unit` status for that commit and the carried-forward number stays. TheRock does not run
+these statuses. Branch protection on `develop` has not been confirmed to require them.
 
 **Code coverage vs. test coverage**:
 * *Code coverage* = fraction of lines executed by the suite.

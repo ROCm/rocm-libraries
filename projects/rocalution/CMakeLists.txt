@@ -344,14 +344,15 @@ if(BUILD_CODE_COVERAGE)
 
   # The unit tests run unfiltered: GTEST_FILTER selects rocalution-test cases,
   # and make passes it to the environment, where gtest would read it. The
-  # lifecycle tests run through CTest, one process per test. The executables
+  # lifecycle tests run through CTest, one process per test, and a run that
+  # finds none fails, since coverage_split needs their profiles. The executables
   # contain the same library objects as librocalution, and so the same %m
   # signature, so their profiles get names of their own.
   set(COVERAGE_UNIT_TEST_COMMANDS)
   if(TARGET rocalution-unit-test)
     set(COVERAGE_UNIT_TEST_COMMANDS
       COMMAND ${CMAKE_COMMAND} -E env --unset=GTEST_FILTER LLVM_PROFILE_FILE="./coverage-report/profraw/rocalution-coverage_unit_%m.profraw" ./clients/staging/rocalution-unit-test
-      COMMAND ${CMAKE_COMMAND} -E env --unset=GTEST_FILTER LLVM_PROFILE_FILE="${CMAKE_BINARY_DIR}/coverage-report/profraw/rocalution-coverage_lifecycle_%m.profraw" ${CMAKE_CTEST_COMMAND} -R "^lifecycle" --output-on-failure
+      COMMAND ${CMAKE_COMMAND} -E env --unset=GTEST_FILTER LLVM_PROFILE_FILE="${CMAKE_BINARY_DIR}/coverage-report/profraw/rocalution-coverage_lifecycle_%m.profraw" ${CMAKE_CTEST_COMMAND} -R "^lifecycle" --no-tests=error --output-on-failure
     )
   endif()
 
