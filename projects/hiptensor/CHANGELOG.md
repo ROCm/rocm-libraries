@@ -33,6 +33,7 @@ Full documentation for hipTensor is available at [rocm.docs.amd.com/projects/hip
 * Fixed `hiptensorReduce` reporting 0 TFlops/s and 0 GB/s in `HIPTENSOR_LOG_LEVEL_PERF_TRACE` logs.
 * Fixed `hiptensorDestroy` aborting with a double free, or corrupting the heap, after `hiptensorHandleWritePlanCacheToFile` was called on a handle whose plan cache held entries.
 * Fixed a full plan cache growing past its size limit when a new problem was added, and evicting its least recently used entry when an existing problem was updated instead. A new entry now evicts the least recently used one, and updating an existing entry evicts nothing.
+* Fixed `hiptensorContractTrinary` reusing the cached kernel of another problem when two problems differed only in E. The plan cache key now includes the data type, lengths, strides, and modes of E. Plan cache files written by earlier versions no longer match, so their problems are tuned again.
 * Fixed `hiptensorElementwiseBinaryExecute` and `hiptensorReduce` treating the alpha, beta, and gamma scalars as 0 when the compute descriptor is `HIPTENSOR_COMPUTE_DESC_16BF`.
 * Fixed `hiptensorContract` returning wrong results with `HIPTENSOR_STATUS_SUCCESS` when the operands of a contraction were not all packed column-major in the canonical mode order, for example when a tensor listed its modes in a different order.
 * Fixed bilinear `hiptensorContract` reading C with D's layout when C and D are laid out differently.
