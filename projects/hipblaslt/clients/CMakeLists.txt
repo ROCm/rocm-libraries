@@ -92,9 +92,11 @@ if(CMAKE_Fortran_COMPILER_ID MATCHES "Flang")
     unset(_hipblaslt_fortran_search_dirs)
 endif()
 
+# The experimental target: testing_matmul.hpp runs --partitions through the experimental
+# PartitionedGemm, so the bench and the tests opt in.
 target_link_libraries(hipblaslt-clients-common
     PUBLIC
-        roc::hipblaslt
+        roc::hipblaslt_experimental
         hipblaslt-benchmark
         OpenMP::OpenMP_CXX
         ${LAPACK_LIBRARIES}

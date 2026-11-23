@@ -1864,25 +1864,30 @@ TEST(TestFlydslSdpaCdnaKernelMatch, DeclinesAPackedObjectWhoseQueryGroupPassesTh
     EXPECT_TRUE(cdnaAdmits(spec, packed));
 }
 
-TEST(TestFlydslSdpaCdnaKernelMatch, DeclinesALaunchGridPastInt32)
+TEST(TestFlydslSdpaCdnaKernelMatch, DeclinesALaunchPastThirtyTwoBitWorkItems)
 {
-    // The generic kernel flattens (batch, query tile, query head) onto x: 2^24 batches of
-    // four 64-row tiles over 32 heads is 2^31 workgroups, one past int32; 2^24 - 1 fit.
+    // HIP refuses a launch whose workgroups times workgroup size passes 2^32 on an axis. The
+    // generic kernel flattens (batch, query tile, query head) onto x with 128 threads (a
+    // 64-row tile): one tile and one head per batch makes x the batch, so 2^25 batches is
+    // 2^32 work-items and 2^25 - 1 fit.
     auto generic = cdnaSpec();
-    generic.batch = int64_t{1} << 24;
+    generic.heads = 1;
+    generic.kvHeads = 1;
+    generic.seqLenQ = 64;
+    generic.batch = int64_t{1} << 25;
     const auto tile = makeCdnaKernel("generic", 128, 0, "bf16", 64);
     EXPECT_FALSE(cdnaAdmits(generic, tile));
-    generic.batch = (int64_t{1} << 24) - 1;
+    generic.batch = (int64_t{1} << 25) - 1;
     EXPECT_TRUE(cdnaAdmits(generic, tile));
 
-    // The dual-wave kernel's grid takes the query heads as one dimension: 2^31 heads (BHSD,
-    // one batch, so no batch stride steps past them) do not fit; 2^30 do.
+    // The dual-wave kernel's x is the query heads, 512 threads (a 256-row tile): 2^23 heads
+    // (BHSD, one batch, so no batch stride steps past them) is 2^32 work-items; 2^23 - 1 fit.
     auto dualwave = cdnaSpec();
     dualwave.layout = SdpaLayout::BHSD;
     dualwave.kvHeads = 1;
-    dualwave.heads = int64_t{1} << 31;
+    dualwave.heads = int64_t{1} << 23;
     EXPECT_FALSE(cdnaAdmits(dualwave, makeCdnaKernel()));
-    dualwave.heads = int64_t{1} << 30;
+    dualwave.heads = (int64_t{1} << 23) - 1;
     EXPECT_TRUE(cdnaAdmits(dualwave, makeCdnaKernel()));
 }
 

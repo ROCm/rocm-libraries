@@ -34,6 +34,7 @@
 #include <miopen/solver/problem_description_interpreter.hpp>
 #include <miopen/solver/ck_impl_lib_loader.hpp>
 #include <miopen/conv/heuristics/ai_conv_nd_kernel_tuning_utils.hpp>
+#include <miopen/conv/heuristics/default_config_cache.hpp>
 #if MIOPEN_ENABLE_AI_KERNEL_TUNING
 #include <miopen/conv/heuristics/ai_heuristics.hpp>
 #include <miopen/conv/heuristics/ai_candidate_selection.hpp>
@@ -348,11 +349,14 @@ void PerformanceConfigHipImplicitGemmGroupWrwXdlops::HeuristicInit(
 
     [[maybe_unused]] const bool is_deterministic = problem.GetConv().attribute.deterministic;
 
-    // AI heuristics (if enabled)
+    // AI heuristics (if enabled), then the default; the result is computed once per process
+    // (DefaultConfigCache), since the AI heuristics also score their whole configuration
+    // vocabulary and ask CK about candidates on every call.
 #if MIOPEN_ENABLE_AI_KERNEL_TUNING
-    if(&ctx != &GetDummyCtx() &&
-       !env::disabled(MIOPEN_DEBUG_GROUP_CONV_IMPLICIT_GEMM_HIP_WRW_XDLOPS_AI_HEUR))
-    {
+    const bool ai_heuristics =
+        &ctx != &GetDummyCtx() &&
+        !env::disabled(MIOPEN_DEBUG_GROUP_CONV_IMPLICIT_GEMM_HIP_WRW_XDLOPS_AI_HEUR);
+    const auto run_ai = [&]() {
         bool mode_use_tf32 = (problem.GetInDataType() == miopenFloat) && problem.UseTF32();
 
         auto ktn_runner = [this](const ExecutionContext& c, const ProblemDescription& p) {
@@ -365,28 +369,29 @@ void PerformanceConfigHipImplicitGemmGroupWrwXdlops::HeuristicInit(
                                                      mode_use_tf32,
                                                      k2DWrwSolverConfig.uses_split_k);
 
-        if(RunAIHeuristics(k2DWrwSolverConfig,
-                           state,
-                           ctx,
-                           problem,
-                           is_deterministic,
-                           ktn_runner,
-                           ck_val_creator,
-                           mode_use_tf32))
-        {
-            return;
-        }
-    }
+        return RunAIHeuristics(k2DWrwSolverConfig,
+                               state,
+                               ctx,
+                               problem,
+                               is_deterministic,
+                               ktn_runner,
+                               ck_val_creator,
+                               mode_use_tf32);
+    };
+#else
+    const bool ai_heuristics = false;
+    const auto run_ai        = [] { return false; };
 #endif
 
-    // Fallback to default initialization
-    InitValidKernels(problem);
-    if(!valid_kernels.empty())
-    {
-        if(!env::disabled(MIOPEN_DEBUG_CK_DEFAULT_KERNELS))
-            DefaultKernelFromList(ctx);
-        state.SetResult(index, split_k, k2DWrwSolverConfig.uses_split_k);
-    }
+    InitHeuristicConfigFromCache(*this,
+                                 state,
+                                 ctx,
+                                 problem,
+                                 ConvHipImplicitGemmGroupWrwXdlops{}.SolverDbId(),
+                                 !env::disabled(MIOPEN_DEBUG_CK_DEFAULT_KERNELS),
+                                 k2DWrwSolverConfig.uses_split_k,
+                                 ai_heuristics,
+                                 run_ai);
 
     // Invariant: split_k must always be 1 in deterministic mode
     assert(!is_deterministic || split_k == 1);
