@@ -1,7 +1,7 @@
 {
   "version": "1.0",
   "id": "5f2a7c14-9d3b-4e86-b0a1-6c4f21d8e370",
-  "name": "ASM_SDPA_ENGINE (gfx942, 599 contribution(s))",
+  "name": "ASM_SDPA_ENGINE (gfx942, 631 contribution(s))",
   "adapter": "mlp_data",
   "features_signature": [
     "$graph.arithmetic_intensity",
@@ -33,6 +33,12 @@
     "$graph.nodes[0].k.strides[0]",
     "$graph.nodes[0].k.strides[1]",
     "$graph.nodes[0].k.strides[2]",
+    {
+      "value_or_default": [
+        "$graph.nodes[0].left_bound",
+        -1
+      ]
+    },
     "$graph.nodes[0].o.data_type",
     "$graph.nodes[0].o.dims[0]",
     "$graph.nodes[0].o.dims[1]",
@@ -880,7 +886,7 @@
       ]
     }
   ],
-  "features_hash": "sha256:b0d88940ba44a2be",
+  "features_hash": "sha256:bcbfae927ff373d6",
   "trained_against": {
     "selector_revision": "hip-kernel-provider/asm-sdpa/b7f14504c2a75eb2",
     "feature_semantics_revision": 1
@@ -893,6 +899,6 @@
   },
   "mlp_data": {
     "artifact": "asm_sdpa_engine_tflops.bin",
-    "hash": "196d243ac8d75ff190a9807a4f6a03a0dfb7b17d4f27143d629c85d373829feb"
+    "hash": "0659b4529f975fd89bc2125e55aa0b58664ac73ad0d833cf48bb105f3a21eb8d"
   }
 }
