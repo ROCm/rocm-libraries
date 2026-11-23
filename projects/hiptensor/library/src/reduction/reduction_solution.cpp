@@ -32,11 +32,8 @@ namespace hiptensor
     ReductionSolution::ReductionSolution(
         std::unique_ptr<ck::tensor_operation::device::BaseOperator>&& deviceOp,
         std::unique_ptr<ReductionSolutionParams>&&                    params)
-        : mDim(0)
-        , mBytes(0)
-        , mValid(false)
+        : mParams(std::move(params))
         , mDeviceOp(std::move(deviceOp))
-        , mParams(std::move(params))
     {
     }
 
@@ -53,21 +50,29 @@ namespace hiptensor
                                                          void const*                     A,
                                                          void*                           C,
                                                          hiptensorOperator_t             opReduce,
-                                                         StreamConfig const& streamConfig)
+                                                         StreamConfig const& streamConfig,
+                                                         ReductionMetrics*   metrics) const
     {
-        if(!initArgs(a_lengths,
-                     a_strides,
-                     a_modes,
-                     c_lengths,
-                     c_strides,
-                     c_modes,
-                     aOp,
-                     cOp,
-                     alpha,
-                     beta,
-                     A,
-                     C,
-                     opReduce))
+        auto args = makeArgs(a_lengths,
+                             a_strides,
+                             a_modes,
+                             c_lengths,
+                             c_strides,
+                             c_modes,
+                             aOp,
+                             cOp,
+                             alpha,
+                             beta,
+                             A,
+                             C,
+                             opReduce);
+
+        if(metrics != nullptr)
+        {
+            *metrics = args.mMetrics;
+        }
+
+        if(!args.mValid)
         {
 #if !NDEBUG
             std::cout << kernelName() << " does not support this problem" << std::endl;
@@ -75,7 +80,7 @@ namespace hiptensor
             return {false, 0.0f};
         }
 
-        return {true, mInvokerPtr->Run(mInvokerArgPtr.get(), streamConfig)};
+        return {true, args.mInvokerPtr->Run(args.mInvokerArgPtr.get(), streamConfig)};
     }
 
     std::unique_ptr<ReductionSolutionParams> const& ReductionSolution::params() const
@@ -92,30 +97,9 @@ namespace hiptensor
         return value;
     }
 
-    ck::index_t ReductionSolution::problemDim() const
-    {
-        return mDim;
-    }
-
-    ck::index_t ReductionSolution::problemBytes() const
-    {
-        return mBytes;
-    }
-
     std::string ReductionSolution::kernelName() const
     {
         return mDeviceOp->GetTypeString();
-    }
-
-    void ReductionSolution::resetArgs()
-    {
-        mDim   = 0;
-        mBytes = 0;
-
-        mInvokerArgPtr.reset(nullptr);
-        mInvokerPtr.reset(nullptr);
-
-        mValid = false;
     }
 
 } // namespace hiptensor

@@ -35,10 +35,13 @@ struct FrontendFeatureCase
     /// CDNA-only feature); every FlyDSL family when null.
     const char* onlyOn = nullptr;
     /// The architecture prefix on which the standard tier runs the case; on other GPUs its
-    /// Comprehensive* copy (comprehensiveCopy, comprehensiveCopies) runs it. Every tier on
-    /// every GPU when null.
+    /// Comprehensive* copy (comprehensiveCopy, comprehensiveCopies) runs it. Every GPU when
+    /// null.
     const char* standardOn = nullptr;
     bool comprehensiveCopy = false;
+    /// Runs only in the Comprehensive* instantiation of its group (standardTierCases,
+    /// comprehensiveTierCases).
+    bool comprehensiveOnly = false;
 };
 
 /// The Comprehensive* copies of the @p cases that name standardOn.
@@ -156,12 +159,12 @@ std::vector<FrontendFeatureCase> faWindowCases()
     cases.push_back({"DecoderSlidingWindowPacked", packedDecoder});
 
     FrontendSdpaSpec encoder;
-    encoder.seqQ = 128;
-    encoder.seqKv = 128;
-    encoder.leftBound = 32;
-    encoder.rightBound = 31;
-    encoder.packedLensQ = {128, 70};
-    encoder.packedLensKv = {128, 70};
+    encoder.seqQ = 96;
+    encoder.seqKv = 96;
+    encoder.leftBound = 24;
+    encoder.rightBound = 23;
+    encoder.packedLensQ = {96, 50};
+    encoder.packedLensKv = {96, 50};
     encoder.name = "encoder_window_packed";
     cases.push_back({"EncoderWindowPacked", encoder});
 
@@ -312,6 +315,7 @@ std::vector<FrontendFeatureCase> backfillCases()
     f32Padded.seqLensKv = {81, 12};
     f32Padded.name = "f32_with_lengths";
     cases.push_back({"F32WithLengths", f32Padded});
+    cases.back().comprehensiveOnly = true;
     return cases;
 }
 
@@ -320,11 +324,12 @@ std::vector<FrontendFeatureCase> backfillCases()
 /// element 133,120, raw scores near 3e11: O was NaN) and test_sm_scale_magnitude at head_dim 512
 /// and scale 1.2 with normal inputs (O a whole bf16 step off, past AOTriton's absolute bound of
 /// 0.03). The decode shape on the decode engines, where gfx950's and gfx942's CDNA decode
-/// objects failed the second; the first-ranked engine elsewhere. The head_dim 512 cases run
-/// in every tier on CDNA, where those objects are, and in the comprehensive tier on RDNA
-/// (~4 s on a gfx11 CI runner), as RDNA's head_dim 512 dispatch check does
+/// objects failed the second; the first-ranked engine elsewhere. The non-causal head_dim 512
+/// case runs in the standard tier on CDNA, where those objects are, and in the comprehensive tier
+/// on RDNA (~4 s on a gfx11 CI runner), as RDNA's head_dim 512 dispatch check does
 /// (TestGpuFlydslSdpaRdnaComprehensiveTier.DecodesWithinAotritonsBoundAtScale1Point2); the
-/// standard tier's RDNA check is HoldsAotritonsBoundAtScale1Point2 at head_dim 64 and 256.
+/// standard tier's RDNA check is HoldsAotritonsBoundAtScale1Point2 at head_dim 64 and 256. The
+/// top-left causal variant adds only the mask and runs in the comprehensive tier on every GPU.
 std::vector<FrontendFeatureCase> aotritonCases()
 {
     std::vector<FrontendFeatureCase> cases;
@@ -369,7 +374,8 @@ std::vector<FrontendFeatureCase> aotritonCases()
     sharpCausal.alignment = hipdnn_frontend::DiagonalAlignment::TOP_LEFT;
     sharpCausal.engineArch = "gfx942";
     sharpCausal.name = "aotriton_scale_1_2_head_dim_512_causal";
-    cases.push_back({"AotritonScale1Point2HeadDim512Causal", sharpCausal, nullptr, "gfx9"});
+    cases.push_back({"AotritonScale1Point2HeadDim512Causal", sharpCausal});
+    cases.back().comprehensiveOnly = true;
     return cases;
 }
 
@@ -438,37 +444,48 @@ TEST_P(IntegrationGpuFlydslSdpaFrontendFeatures, ServesTheFeatureAsTheCpuReferen
     validateServeAndVerify(sdpa, testCase.spec.dataType);
 }
 
-INSTANTIATE_TEST_SUITE_P(FaWindows,
+INSTANTIATE_TEST_SUITE_P(StandardFaWindows,
                          IntegrationGpuFlydslSdpaFrontendFeatures,
                          ::testing::ValuesIn(faWindowCases()),
                          caseName);
 
-INSTANTIATE_TEST_SUITE_P(UnseenKeys,
+INSTANTIATE_TEST_SUITE_P(StandardUnseenKeys,
                          IntegrationGpuFlydslSdpaFrontendFeatures,
                          ::testing::ValuesIn(unseenKeyCases()),
                          caseName);
 
-INSTANTIATE_TEST_SUITE_P(Backfill,
+INSTANTIATE_TEST_SUITE_P(StandardBackfill,
                          IntegrationGpuFlydslSdpaFrontendFeatures,
-                         ::testing::ValuesIn(backfillCases()),
+                         ::testing::ValuesIn(standardTierCases(backfillCases())),
                          caseName);
 
-INSTANTIATE_TEST_SUITE_P(Aotriton,
+INSTANTIATE_TEST_SUITE_P(ComprehensiveBackfill,
                          IntegrationGpuFlydslSdpaFrontendFeatures,
-                         ::testing::ValuesIn(aotritonCases()),
+                         ::testing::ValuesIn(comprehensiveTierCases(backfillCases())),
                          caseName);
 
-INSTANTIATE_TEST_SUITE_P(ComprehensiveAotriton,
+INSTANTIATE_TEST_SUITE_P(StandardAotriton,
                          IntegrationGpuFlydslSdpaFrontendFeatures,
-                         ::testing::ValuesIn(comprehensiveCopies(aotritonCases())),
+                         ::testing::ValuesIn(standardTierCases(aotritonCases())),
                          caseName);
 
-INSTANTIATE_TEST_SUITE_P(RaggedOrigins,
+INSTANTIATE_TEST_SUITE_P(
+    ComprehensiveAotriton,
+    IntegrationGpuFlydslSdpaFrontendFeatures,
+    ::testing::ValuesIn(comprehensiveCopies(standardTierCases(aotritonCases()))),
+    caseName);
+
+INSTANTIATE_TEST_SUITE_P(ComprehensiveAotritonCausal,
+                         IntegrationGpuFlydslSdpaFrontendFeatures,
+                         ::testing::ValuesIn(comprehensiveTierCases(aotritonCases())),
+                         caseName);
+
+INSTANTIATE_TEST_SUITE_P(StandardRaggedOrigins,
                          IntegrationGpuFlydslSdpaFrontendFeatures,
                          ::testing::ValuesIn(raggedOriginCases()),
                          caseName);
 
-INSTANTIATE_TEST_SUITE_P(ZeroProbabilityDropout,
+INSTANTIATE_TEST_SUITE_P(StandardZeroProbabilityDropout,
                          IntegrationGpuFlydslSdpaFrontendFeatures,
                          ::testing::ValuesIn(zeroProbabilityDropoutCases()),
                          caseName);

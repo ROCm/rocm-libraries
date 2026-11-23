@@ -100,9 +100,9 @@ void testing_amax_ties(void)
     stop_rocalution();                                   \
     disable_accelerator_rocalution(false);
 
-// rocalution-unit-test checks the same tie rule, but a clients-only build does not build it
-// and the rtest.xml sets do not run it.
-// Host-only and cheap: run in every tier, including the emulation tiers used by CI
+// Host-only and cheap: runs in every tier, including the emulation tiers used by CI.
+// rocalution-unit-test checks the same tie rule, but a clients-only build does not
+// build it and the rtest.xml sets do not run it.
 TEST(local_vector_amax_ties, host_float)
 {
     TEST_CASE(testing_amax_ties, float, true);

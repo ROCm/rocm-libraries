@@ -3,7 +3,7 @@
 **Status:** Draft
 **Owner:** @doctorcolinsmith
 **Technical Lead:** @ntrost57
-**Last Updated:** 2026-10-30
+**Last Updated:** 2026-11-23
 
 This document describes how rocALUTION is tested today, which signals actually gate a merge, and where
 the gaps are. It follows the ROCm-wide TESTING.md template and is written as a description of the
@@ -77,8 +77,8 @@ ROCALUTION_EMULATION_REGRESSION=1 HIP_VISIBLE_DEVICES=0 gpu-run ./rocalution-tes
 HIP_VISIBLE_DEVICES=0 gpu-run ./rocalution-unit-test
 ```
 
-> When any `ROCALUTION_EMULATION_*` var is set, GPU-heavy infrastructure suites (`backend`,
-> `preconditioner` except its repeated-move test, MPI infra) call `GTEST_SKIP()`, and
+> When any `ROCALUTION_EMULATION_*` var is set, GPU-heavy infrastructure suites (`backend` except
+> its two OpenMP tests, `preconditioner` except its repeated-move test, MPI infra) call `GTEST_SKIP()`, and
 > solver suites shrink their parameter lists. If no emulation variables are set, the full set of parameter combinations is exercised.
 
 **3. Add the right kind of test:** see [Choosing the Right Test Type](#choosing-the-right-test-type).
@@ -253,7 +253,7 @@ transfers and multi-node communication behave as expected.
 | Algebraic multigrid | pairwise AMG, Ruge–Stüben AMG, smoothed-aggregation (SA-AMG), unsmoothed-aggregation (UA-AMG) |
 | Preconditioners | Jacobi, GS/SGS, ILU/ILUT/IC, ItILU0, (AI)Chebyshev, FSAI, SPAI, TNS, AS/RAS, multi-colored GS/SGS/ILU, multi-elimination, variable |
 | Other | Chebyshev iteration, mixed precision, iterative-solver integration (`test_itersolver`, coverage-only) |
-| MPI (`SUPPORT_MPI`) | `global_matrix`, `global_vector`, `parallel_manager`, `global_amg` (multi-rank AMG setup) |
+| MPI (`SUPPORT_MPI`) | `global_matrix`, `global_vector`, `parallel_manager`, `global_amg` (multi-rank AMG setup, and `ReBuildNumeric()` with host levels) |
 
 **Tiers (environment-variable driven, mapped to CTest categories when built inside the monorepo with
 `shared/ctest/`):**
@@ -295,7 +295,8 @@ mpirun -np 2 ./rocalution-test --gtest_filter='global_amg/*:global_matrix/*'
 Laplacian) across backends and both precisions; the emulation tiers shrink parameter lists rather than
 running exhaustive size sweeps. The strategy prefers cross-backend correctness over large problem sizes.
 
-**Overlap with the unit tests:** the `backend` suites skip in the `quick`, `standard` and `comprehensive` categories and run in `full`, except
+**Overlap with the unit tests:** the `backend` suites skip in the `quick`, `standard` and
+`comprehensive` categories and run in `full`, except
 `backend_omp_parallel_region` and `backend_omp_restore_state`, which run in every category. They
 test operations that the unit tests now check against independent references. They are kept until
 a review of each suite confirms that the unit tests cover all of its checks, on every platform and
@@ -306,13 +307,12 @@ the unit tests. The `local_matrix_allocations`, `local_matrix_zero`, `local_matr
 `local_matrix_conversions/parameterized_local_matrix_conversions`,
 `local_matrix_test/parameterized_local_matrix_test`, `local_vector_bad_args`, `local_vector_test`
 and `local_vector/parameterized_local_vector_test` suites have been deleted on that basis. The
-Jenkins test command runs both unit-test binaries after `rocalution-test`, so the Jenkins lanes
-still run these checks. A clients-only build (`install.sh --clients-only`) doesn't build the unit
-tests, and the `rtest.xml` sets run only `rocalution-test`, so clients-only builds and `rtest.xml`
-runs no longer run these checks.
-`local_vector_amax_ties` is kept for that reason: it runs in every category and every `rtest.xml`
-set, including the emulation sets. The solver, preconditioner and AMG suites stay as the
-integration layer.
+Jenkins test command runs both unit-test binaries before `rocalution-test`, so the Jenkins lanes
+still run these checks. Clients-only builds and `rtest.xml` runs no longer run them (see
+[Known Gaps Summary](#known-gaps-summary)).
+`local_vector_amax_ties` is kept for that reason: it runs in every category and in the `smoke`,
+`regression`, `extended` and `custom` `rtest.xml` sets. The solver, preconditioner and AMG suites
+stay as the integration layer.
 
 ---
 
@@ -381,8 +381,8 @@ Internal AMD **Jenkins** pipelines (`.jenkins/`) are legacy, running on older GP
 HIP+OpenMP), host (`--host`), and MPI (`--host --mpi=on --no-openmp`).
 
 > **Important nuance:** the Jenkins `runTestCommand` GTest filter is commented out, so those legacy
-> lanes run the **full** `rocalution-test` suite (no emulation subset), followed by
-> `rocalution-unit-test` and `rocalution-unit-test-lifecycle`. The intended
+> lanes run the **full** `rocalution-test` suite (no emulation subset), after
+> `rocalution-unit-test` and `rocalution-unit-test-lifecycle`, which run unfiltered. The intended
 > `*checkin*` / `*nightly*` filters match no current test names. The modern TheRock gate, by
 > contrast, selects the subset through the `ROCALUTION_EMULATION_*` env var of the CTest category.
 
@@ -553,7 +553,8 @@ device configurations are not ASAN-covered.
 | No per-architecture perf baseline reproducible from this repo | Medium | Medium | Perf regression is tracked outside this repo; in-repo output files only |
 | Tier not encoded in test names; legacy `*checkin*`/`*nightly*` filters match nothing | Medium | Medium | Tiering works via `ROCALUTION_EMULATION_*`; Jenkins runs full suite |
 | No `known_bugs.yaml` / quarantine mechanism for `rocalution-test` | Medium | Medium | The unit tests skip known bugs with `KNOWN_BUG`; flaky tests handled ad-hoc |
-| `rocalution-test` structure suites duplicate unit tests (see Integration Testing Strategy) | Low | Low | Both run; each suite is deleted once a review confirms that the unit tests cover it |
+| `rocalution-test` structure suites duplicate unit tests (see Integration Testing Strategy) | Low | Low | Both run; each suite is deleted once a review confirms that the unit tests cover it, after which only the unit tests check it |
+| A clients-only build (`install.sh --clients-only`) cannot build the unit tests; the `rtest.xml` sets run only `rocalution-test` | Low | Medium | Neither runs in CI; the checks of the deleted structure suites run only through the unit-test binaries |
 | Unit tests not built on Windows (they use POSIX calls such as `alarm`, and some helpers do not compile there) | Medium | Medium | Windows runs `rocalution-test` only |
 | Device-code coverage not captured | Medium | Medium | Host-only LLVM coverage |
 | MPI/multi-node validation is partial; global stencil test commented out | Medium | Medium | Nightly MPI variant build |

@@ -146,21 +146,29 @@ namespace rocalution_unit
         return BackendProbe<Object>::on_accelerator(x);
     }
 
+    // "no backend" for an object that has lost both backend objects, for which
+    // is_host_ and is_accel_ both hold
     template <typename Object>
     std::string backend_of(const Object& x)
     {
-        return backend_name(on_accelerator(x) ? Backend::Accelerator : Backend::Host);
-    }
-
-    // Also tells an object that has lost both backend objects, for which is_host_
-    // and is_accel_ both hold
-    template <typename Object>
-    std::string location_of(const Object& x)
-    {
         const bool host  = BackendProbe<Object>::on_host(x);
-        const bool accel = BackendProbe<Object>::on_accelerator(x);
+        const bool accel = on_accelerator(x);
         return host && accel ? "no backend"
                              : backend_name(accel ? Backend::Accelerator : Backend::Host);
+    }
+
+    // An object that has lost both backend objects ends the program in its destructor, so
+    // it is leaked instead
+    template <typename Object>
+    bool expect_location(std::unique_ptr<Object>& x, Backend b)
+    {
+        const std::string where = backend_of(*x);
+        EXPECT_EQ(where, backend_name(b));
+        if(where != backend_name(Backend::Host) && where != backend_name(Backend::Accelerator))
+        {
+            static_cast<void>(x.release());
+        }
+        return where == backend_name(b);
     }
 
     template <typename Object>

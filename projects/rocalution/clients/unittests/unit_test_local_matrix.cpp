@@ -529,14 +529,10 @@ namespace
     {
     };
 
-    const auto all_formats = testing::Values(Format{CSR, 1},
-                                             Format{MCSR, 1},
-                                             Format{BCSR, 2},
-                                             Format{COO, 1},
-                                             Format{ELL, 1},
-                                             Format{DIA, 1},
-                                             Format{HYB, 1},
-                                             Format{DENSE, 1});
+    const std::vector<Format> every_format
+        = {{CSR, 1}, {MCSR, 1}, {BCSR, 2}, {COO, 1}, {ELL, 1}, {DIA, 1}, {HYB, 1}, {DENSE, 1}};
+
+    const auto all_formats = testing::ValuesIn(every_format);
 }
 
 TYPED_TEST_SUITE(local_matrix, WithBackends<RealTypes>, TypedName);
@@ -666,11 +662,37 @@ TYPED_TEST(local_matrix, allocate_sets_the_format_and_the_sizes)
 
     auto B = empty_local_matrix<T>(this->backend());
     B->AllocateBCSR("B", 3, 2, 3, 3);
-    KNOWN_BUG("AllocateBCSR of a matrix not in BCSR uses block dimension 2");
     EXPECT_EQ(B->GetBlockDimension(), 3);
     EXPECT_EQ(B->GetM(), 6);
     EXPECT_EQ(B->GetN(), 9);
     EXPECT_EQ(B->GetNnz(), 27);
+
+    // A BCSR matrix takes the new block dimension, also without entries
+    B->AllocateBCSR("B", 3, 3, 2, 2);
+    EXPECT_EQ(B->GetBlockDimension(), 2);
+    EXPECT_EQ(B->GetM(), 6);
+    EXPECT_EQ(B->GetN(), 4);
+    EXPECT_EQ(B->GetNnz(), 12);
+    B->AllocateBCSR("B", 0, 2, 2, 3);
+    EXPECT_EQ(B->GetBlockDimension(), 3);
+    EXPECT_EQ(B->GetNnz(), 0);
+    B->ConvertTo(BCSR);
+    EXPECT_EQ(B->GetBlockDimension(), 3);
+
+    // Without entries too, sizes that are not a multiple of the block dimension stay
+    // CSR instead of being padded
+    auto E = empty_local_matrix<T>(this->backend());
+    E->AllocateCSR("E", 0, 4, 4);
+    E->ConvertToBCSR(3);
+    EXPECT_EQ(E->GetFormat(), CSR);
+    EXPECT_EQ(E->GetM(), 4);
+    EXPECT_EQ(E->GetN(), 4);
+    E->ConvertToBCSR(2);
+    EXPECT_EQ(E->GetFormat(), BCSR);
+    EXPECT_EQ(E->GetBlockDimension(), 2);
+    EXPECT_EQ(E->GetM(), 4);
+    EXPECT_EQ(E->GetN(), 4);
+    EXPECT_EQ(backend_of(*E), backend_name(this->backend()));
 }
 
 // Only a GlobalMatrix has a ghost part. As an Operator, a LocalMatrix is all local.
@@ -729,7 +751,9 @@ TEST_P(local_matrix_data_ptr, leave_and_set_data_ptr_hand_over_the_arrays)
             break;
         case BCSR:
         {
-            int blockdim = format().blockdim;
+            // For a BCSR matrix the block dimension is only an output, so another valid
+            // one must not convert it
+            int blockdim = format().blockdim + 1;
             A->LeaveDataPtrBCSR(&row, &col, &val, blockdim);
             EXPECT_EQ(blockdim, format().blockdim);
             B->SetDataPtrBCSR(&row,
@@ -889,6 +913,30 @@ TYPED_TEST(local_matrix, copies_from_and_to_csr_and_coo_arrays)
     EXPECT_NE(info.find("Imported from CSR matrix"), std::string::npos) << info;
     info = logged([&] { D->Info(); });
     EXPECT_NE(info.find("Imported from COO matrix"), std::string::npos) << info;
+}
+
+// CopyToCOO returns the entries in the order CopyFromCOO took them, also unsorted
+TEST(local_matrix_coo, copy_to_coo_keeps_the_order_of_copy_from_coo)
+{
+    for_each_type<RealTypes>([&](auto type) {
+        using T = typename decltype(type)::type;
+
+        const std::vector<int> row = {0, 1, 2, 2};
+        const std::vector<int> col = {0, 1, 2, 0};
+        const std::vector<T>   val = {1, 2, 3, 4};
+
+        LocalMatrix<T> A;
+        A.AllocateCOO("A", 4, 3, 3);
+        A.CopyFromCOO(row.data(), col.data(), val.data());
+
+        std::vector<int> r(4, -1);
+        std::vector<int> c(4, -1);
+        std::vector<T>   v(4, -1);
+        A.CopyToCOO(r.data(), c.data(), v.data());
+        EXPECT_EQ(r, row);
+        EXPECT_EQ(c, col);
+        EXPECT_EQ(v, val);
+    });
 }
 
 TYPED_TEST(local_matrix, copy_from_host_csr_keeps_the_backend)
@@ -1077,11 +1125,14 @@ TEST_P(local_matrix_formats, converts_between_formats_on_its_backend)
         B->ConvertToHYB();
         B->ConvertToBCSR(3);
         expect_matrix(*B, ref, Format{BCSR, 3}, backend());
+
+        // With a block dimension of 1 or less, a BCSR matrix keeps its own
+        B->ConvertTo(BCSR);
+        B->ConvertTo(BCSR, 0);
+        B->ConvertToBCSR(1);
+        expect_matrix(*B, ref, Format{BCSR, 3}, backend());
+
         B->ConvertTo(format().id, format().blockdim);
-        if(is(BCSR))
-        {
-            KNOWN_BUG("ConvertTo keeps the block dimension of a BCSR matrix");
-        }
         expect_kept(*B, ref);
     });
 }
@@ -1104,6 +1155,16 @@ TYPED_TEST(local_matrix, conversion_falls_back_to_csr_for_unsuitable_matrices)
                   std::string::npos)
             << log;
     }
+
+    // A BCSR matrix falls back too when the new block dimension does not divide
+    // its sizes, instead of keeping its own
+    auto B = make_local_matrix(this->backend(), ref, Format{BCSR, 2});
+    expect_matrix(*B, ref, Format{BCSR, 2}, this->backend());
+    std::string log = logged([&] { B->ConvertToBCSR(5); });
+    expect_matrix(*B, ref, csr_format, this->backend());
+    EXPECT_NE(log.find("Matrix conversion to BCSR failed, falling back to CSR format"),
+              std::string::npos)
+        << log;
 }
 
 // A cyclic shift has no diagonal entries, which MCSR needs. The tall matrix has empty rows
@@ -1176,6 +1237,31 @@ TYPED_TEST(local_matrix, converts_matrices_without_diagonal_entries_and_with_emp
     }
 }
 
+// Block dimensions from 4 on, which the smaller conversion tests do not use, on matrices with
+// many block rows
+TYPED_TEST(local_matrix, converts_large_matrices_to_bcsr_with_large_blocks)
+{
+    using T = typename TypeParam::value_type;
+
+    const std::vector<std::pair<Csr<T>, int>> cases
+        = {{scattered<T>(), 4}, {grid_pattern<T>(21), 7}};
+    for(const auto& c : cases)
+    {
+        const Csr<T>& ref = c.first;
+        const Format  bcsr{BCSR, c.second};
+        SCOPED_TRACE(std::to_string(ref.n) + " x " + std::to_string(ref.m) + " in "
+                     + format_name(bcsr));
+
+        auto A = make_local_matrix(this->backend(), ref);
+        A->ConvertTo(BCSR, bcsr.blockdim);
+        expect_matrix(*A, ref, bcsr, this->backend());
+        EXPECT_TRUE(A->Check());
+
+        A->ConvertToCSR();
+        expect_matrix(*A, ref, csr_format, this->backend());
+    }
+}
+
 TEST_P(local_matrix_formats, moves_keep_the_format_and_the_values)
 {
     for_each_type<RealTypes>([&](auto type) {
@@ -1239,23 +1325,6 @@ TYPED_TEST(local_matrix, async_moves_complete_on_sync)
 
 namespace
 {
-    const std::vector<Format> every_format
-        = {{CSR, 1}, {MCSR, 1}, {BCSR, 2}, {COO, 1}, {ELL, 1}, {DIA, 1}, {HYB, 1}, {DENSE, 1}};
-
-    // A matrix that has lost both backend objects ends the program in its destructor, so
-    // it is leaked instead
-    template <typename T>
-    bool expect_location(std::unique_ptr<LocalMatrix<T>>& A, Backend b)
-    {
-        const std::string where = location_of(*A);
-        EXPECT_EQ(where, backend_name(b));
-        if(where != backend_name(Backend::Host) && where != backend_name(Backend::Accelerator))
-        {
-            static_cast<void>(A.release());
-        }
-        return where == backend_name(b);
-    }
-
     template <typename T>
     void destroy_after_async_moves(const Csr<T>& ref)
     {
@@ -1295,7 +1364,7 @@ TEST(local_matrix_moves, async_moves_switch_the_backend_on_sync)
                 {
                     A->MoveToHostAsync();
                 }
-                EXPECT_EQ(location_of(*A), backend_name(from));
+                EXPECT_EQ(backend_of(*A), backend_name(from));
                 A->Sync();
                 if(!expect_location(A, to))
                 {
@@ -1467,7 +1536,7 @@ TEST(local_matrix_moves, a_matrix_destroyed_during_an_async_move_frees_both_obje
 TEST(local_matrix_moves, a_matrix_destroyed_after_an_async_move_without_sync_frees_both_objects)
 {
     REQUIRE_BACKEND(Backend::Accelerator);
-#ifndef __SANITIZE_ADDRESS__
+#ifndef ROCALUTION_UNIT_ASAN
     GTEST_SKIP() << "only an ASAN build shows whether the destructor frees the data of both "
                     "backend objects";
 #endif
@@ -1582,8 +1651,6 @@ TYPED_TEST(local_matrix, copy_from_async_between_matrices_of_the_same_backend)
 
 TEST_P(local_matrix_formats, apply_and_apply_add_match_the_reference)
 {
-    const bool apply_add_bug = backend() == Backend::Accelerator && (is(HYB) || is(DENSE));
-
     for_each_type<RealTypes>([&](auto type) {
         using T = typename decltype(type)::type;
 
@@ -1609,18 +1676,9 @@ TEST_P(local_matrix_formats, apply_and_apply_add_match_the_reference)
             vy = vector_of(y0);
             A->ApplyAdd(*vx, 3.0, vy.get());
             expect_kept(*A, ref);
-            if(apply_add_bug && !run_known_bugs())
-            {
-                continue;
-            }
             expect_vector(*vy, expected, backend(), scaled_tol<T>(1e-14));
         }
     });
-
-    if(apply_add_bug)
-    {
-        KNOWN_BUG("HIP HYB and DENSE ApplyAdd ignore the output");
-    }
 }
 
 TEST_P(local_matrix_formats, apply_of_a_rectangular_matrix)
@@ -1671,10 +1729,6 @@ TEST_P(local_matrix_formats, apply_of_a_rectangular_matrix)
         KNOWN_BUG("host BCSR ApplyAdd asserts that the matrix is square");
         expect_in_child([&] { for_each_type<RealTypes>(apply_add_checks); });
         return;
-    }
-    if(backend() == Backend::Accelerator && (is(HYB) || is(DENSE)))
-    {
-        KNOWN_BUG("HIP HYB and DENSE ApplyAdd ignore the output");
     }
     for_each_type<RealTypes>(apply_add_checks);
 }
@@ -2216,11 +2270,6 @@ TEST_P(local_matrix_formats, lu_factorizations_solve_a_banded_system)
                 killed.push_back(
                     {"the SymbolicPower structure loses its zero entries in DIA and DENSE", k});
             }
-            else if(name == "ILUpFactorize(1) without levels" && is(BCSR))
-            {
-                killed.push_back(
-                    {"the MatrixAdd fallback converts back to BCSR with block dimension 1", k});
-            }
             else
             {
                 factorize_and_solve(factorizations[k]);
@@ -2402,7 +2451,9 @@ TYPED_TEST(local_matrix, iterative_triangular_solves_converge)
     LL->ItLLSolve(iters, 0, false, *make_local_vector(this->backend(), b), *inv, z.get());
     expect_close(s.apply(values_of(*z)), b, tol<T>());
 
-    // With a tolerance the iteration may stop early, at the requested accuracy
+    // With a tolerance the iteration may stop early, at the requested accuracy. The L
+    // sweep of ItLLSolve starts from the L solution of the previous solve, which it keeps,
+    // so here it stops after one iteration and the L^T sweep has to converge on its own.
     auto w = make_local_vector(this->backend(), std::vector<T>(ref.n, 0.0));
     LU->ItLUSolve(
         iters, scaled_tol<T>(1e-14), true, *make_local_vector(this->backend(), b), w.get());
@@ -2421,65 +2472,77 @@ TYPED_TEST(local_matrix, iterative_triangular_solves_converge)
 
 // A unit diagonal need not be stored. The strict triangles leave the first row of L
 // and the last row of U without entries, and with two off-diagonals a solve that reads
-// past the end of a row reads an entry that changes the result.
-TYPED_TEST(local_matrix, triangular_solves_of_a_triangle_stored_without_its_diagonal)
+// past the end of a row reads an entry that changes the result. The triangles of a
+// 10 x 10 five-point Laplacian have 100 rows with entries ten columns from the diagonal,
+// and are solved both without and with their diagonal.
+TYPED_TEST(local_matrix, triangular_solves_of_triangles_stored_without_and_with_their_diagonal)
 {
     using T = typename TypeParam::value_type;
 
-    const Csr<T>         ref   = pentadiagonal<T>();
-    const std::vector<T> b     = rhs<T>(ref.n);
-    const std::vector<T> start = std::vector<T>(ref.n, 3.0);
-    const int            iters = 2 * ref.n;
+    const Csr<T> penta  = pentadiagonal<T>();
+    const Csr<T> grid10 = grid<T>(10, 10, 1.0, 1.0, true);
 
-    for(bool is_lower : {true, false})
+    for(const Csr<T>* ref : {&penta, &grid10})
     {
-        SCOPED_TRACE(is_lower ? "strict lower triangle" : "strict upper triangle");
-        const Csr<T> strict = is_lower ? lower(ref, false) : upper(ref, false);
-        const Csr<T> M      = unit_triangle(strict);
+        const std::vector<T> b     = rhs<T>(ref->n);
+        const std::vector<T> start = std::vector<T>(ref->n, 3.0);
+        const int            iters = 2 * ref->n;
 
-        // The direct solves overwrite start, the iterative ones start from it
-        auto A  = make_local_matrix(this->backend(), strict);
-        auto in = make_local_vector(this->backend(), b);
-        auto x  = make_local_vector(this->backend(), start);
+        for(bool unit : {true, false})
+        {
+            for(bool is_lower : {true, false})
+            {
+                SCOPED_TRACE("n " + std::to_string(ref->n) + (unit ? ", strict " : ", ")
+                             + (is_lower ? "lower triangle" : "upper triangle"));
+                const Csr<T> stored = is_lower ? lower(*ref, !unit) : upper(*ref, !unit);
+                const Csr<T> M      = unit ? unit_triangle(stored) : stored;
+                const char*  solve  = is_lower ? "LSolve" : "USolve";
 
-        std::string log;
-        if(is_lower)
-        {
-            A->LAnalyse(true);
-            log = logged([&] { A->LSolve(*in, x.get()); });
-            A->LAnalyseClear();
-        }
-        else
-        {
-            A->UAnalyse(true);
-            log = logged([&] { A->USolve(*in, x.get()); });
-            A->UAnalyseClear();
-        }
-        EXPECT_EQ(backend_of(*x), backend_name(this->backend()));
-        expect_solves(M, values_of(*x), b, tol<T>());
-        expect_fallback_warning(log, is_lower ? "LSolve" : "USolve", true);
+                // The direct solves overwrite start, the iterative ones start from it
+                auto A  = make_local_matrix(this->backend(), stored);
+                auto in = make_local_vector(this->backend(), b);
+                auto x  = make_local_vector(this->backend(), start);
 
-        // Without and with a tolerance
-        auto y = make_local_vector(this->backend(), start);
-        auto z = make_local_vector(this->backend(), start);
-        if(is_lower)
-        {
-            A->ItLAnalyse(true);
-            A->ItLSolve(iters, 0, false, *in, y.get());
-            A->ItLSolve(iters, scaled_tol<T>(1e-14), true, *in, z.get());
-            A->ItLAnalyseClear();
+                std::string log;
+                if(is_lower)
+                {
+                    A->LAnalyse(unit);
+                    log = logged([&] { A->LSolve(*in, x.get()); });
+                    A->LAnalyseClear();
+                }
+                else
+                {
+                    A->UAnalyse(unit);
+                    log = logged([&] { A->USolve(*in, x.get()); });
+                    A->UAnalyseClear();
+                }
+                EXPECT_EQ(backend_of(*x), backend_name(this->backend()));
+                expect_solves(M, values_of(*x), b, tol<T>());
+                expect_fallback_warning(log, solve, implements(this->backend(), CSR, solve));
+
+                // Without and with a tolerance
+                auto y = make_local_vector(this->backend(), start);
+                auto z = make_local_vector(this->backend(), start);
+                if(is_lower)
+                {
+                    A->ItLAnalyse(unit);
+                    A->ItLSolve(iters, 0, false, *in, y.get());
+                    A->ItLSolve(iters, scaled_tol<T>(1e-14), true, *in, z.get());
+                    A->ItLAnalyseClear();
+                }
+                else
+                {
+                    A->ItUAnalyse(unit);
+                    A->ItUSolve(iters, 0, false, *in, y.get());
+                    A->ItUSolve(iters, scaled_tol<T>(1e-14), true, *in, z.get());
+                    A->ItUAnalyseClear();
+                }
+                EXPECT_EQ(backend_of(*y), backend_name(this->backend()));
+                expect_solves(M, values_of(*y), b, tol<T>());
+                expect_solves(M, values_of(*z), b, loose_tol<T>(1e-10));
+                expect_matrix(*A, stored, csr_format, this->backend());
+            }
         }
-        else
-        {
-            A->ItUAnalyse(true);
-            A->ItUSolve(iters, 0, false, *in, y.get());
-            A->ItUSolve(iters, scaled_tol<T>(1e-14), true, *in, z.get());
-            A->ItUAnalyseClear();
-        }
-        EXPECT_EQ(backend_of(*y), backend_name(this->backend()));
-        expect_solves(M, values_of(*y), b, tol<T>());
-        expect_solves(M, values_of(*z), b, loose_tol<T>(1e-10));
-        expect_matrix(*A, strict, csr_format, this->backend());
     }
 }
 
@@ -2621,19 +2684,7 @@ TEST_P(local_matrix_formats, permute_moves_rows_and_columns)
         auto        A   = make(ref);
         std::string log = logged([&] { A->Permute(*vector_of(perm)); });
         expect_fallback_warning(log, "Permute", native("Permute"));
-        if(!is(COO))
-        {
-            expect_kept(*A, permuted(ref, perm));
-            return;
-        }
-
-        // The check converts the unsorted entries to CSR, where an assert ends the process
-        KNOWN_BUG("COO Permute leaves the entries unsorted");
-        expect_in_child([&] {
-            auto M = make(ref);
-            M->Permute(*vector_of(perm));
-            expect_kept(*M, permuted(ref, perm));
-        });
+        expect_kept(*A, permuted(ref, perm));
     });
 }
 
@@ -2645,22 +2696,13 @@ TEST_P(local_matrix_formats, permute_backward_undoes_permute)
         const Csr<T>           ref  = banded<T>();
         const std::vector<int> perm = scrambled(ref.n);
 
-        // PermuteBackward only exists for COO, so every format goes through it, and the unsorted
-        // entries break the conversion back: an assert ends the process
-        auto permute_backward = [&] {
-            auto        B   = make(permuted(ref, perm));
-            std::string log = logged([&] { B->PermuteBackward(*vector_of(perm)); });
-            expect_fallback_warning(log, "PermuteBackward", is(COO));
-            EXPECT_EQ(rocalution::_matrix_format_names[B->GetFormat()], format_name(format()));
-            EXPECT_EQ(backend_of(*B), backend_name(backend()));
-            return B;
-        };
-        if(is(COO))
-        {
-            permute_backward();
-        }
-        KNOWN_BUG("COO PermuteBackward leaves the entries unsorted");
-        expect_in_child([&] { expect_kept(*permute_backward(), ref); });
+        // PermuteBackward only exists for COO, so every format goes through it
+        auto        B   = make(permuted(ref, perm));
+        std::string log = logged([&] { B->PermuteBackward(*vector_of(perm)); });
+        expect_fallback_warning(log, "PermuteBackward", is(COO));
+        EXPECT_EQ(rocalution::_matrix_format_names[B->GetFormat()], format_name(format()));
+        EXPECT_EQ(backend_of(*B), backend_name(backend()));
+        expect_kept(*B, ref);
     });
 }
 
@@ -2744,16 +2786,22 @@ TEST_P(local_matrix_formats, connectivity_order_sorts_the_rows_by_their_non_zero
 }
 
 // Also for a tall matrix and for a matrix without diagonal entries, the orderings are
-// permutations of the rows
+// permutations of the rows, RCMK reverses CMK, and ConnectivityOrder sorts the rows
 TEST_P(local_matrix_formats, orderings_of_a_tall_matrix_and_of_a_cyclic_shift_permute_the_rows)
 {
+    if(is(MCSR))
+    {
+        GTEST_SKIP() << "MCSR holds neither a tall matrix nor one without diagonal entries";
+    }
+
     for_each_type<RealTypes>([&](auto type) {
         using T = typename decltype(type)::type;
 
         for(const Csr<T>& ref :
             {rectangular<T>(12, 8), tall_with_empty_rows<T>(), cyclic_shift<T>(12)})
         {
-            SCOPED_TRACE(std::to_string(ref.n) + " x " + std::to_string(ref.m));
+            SCOPED_TRACE(std::to_string(ref.n) + " x " + std::to_string(ref.m) + " with "
+                         + std::to_string(ref.nnz()) + " entries");
             auto             A = make(ref);
             LocalVector<int> cmk;
             LocalVector<int> rcmk;
@@ -2764,13 +2812,43 @@ TEST_P(local_matrix_formats, orderings_of_a_tall_matrix_and_of_a_cyclic_shift_pe
                 rcmk.MoveToAccelerator();
                 connectivity.MoveToAccelerator();
             }
-            A->CMK(&cmk);
-            A->RCMK(&rcmk);
-            A->ConnectivityOrder(&connectivity);
-            expect_permutation(values_of(cmk), ref.n);
-            expect_permutation(values_of(rcmk), ref.n);
-            expect_permutation(values_of(connectivity), ref.n);
-            expect_matrix(*A, ref, Format{A->GetFormat(), A->GetBlockDimension()}, backend());
+
+            std::string log = logged([&] { A->CMK(&cmk); });
+            expect_fallback_warning(log, "CMK", native(*A, "CMK"));
+            log = logged([&] { A->RCMK(&rcmk); });
+            expect_fallback_warning(log, "RCMK", native(*A, "RCMK"));
+            log = logged([&] { A->ConnectivityOrder(&connectivity); });
+            expect_fallback_warning(log, "ConnectivityOrder", native(*A, "ConnectivityOrder"));
+            expect_kept(*A, ref);
+
+            const std::vector<int> c = values_of(cmk);
+            const std::vector<int> r = values_of(rcmk);
+            const std::vector<int> p = values_of(connectivity);
+            expect_permutation(c, ref.n);
+            expect_permutation(r, ref.n);
+            expect_permutation(p, ref.n);
+            ASSERT_EQ(c.size(), static_cast<size_t>(ref.n));
+            ASSERT_EQ(r.size(), c.size());
+            ASSERT_EQ(p.size(), c.size());
+            for(int i = 0; i < ref.n; ++i)
+            {
+                EXPECT_EQ(r[i], ref.n - 1 - c[i]) << "at index " << i;
+            }
+
+            // Row i goes to position p[i]. The ordering follows the stored entries, which for
+            // BCSR include the zeros of the blocks, so that the empty rows are not empty there.
+            const Csr<T> stored = csr_of(*A);
+            auto length = [&](int i) { return stored.row_offset[i + 1] - stored.row_offset[i]; };
+            for(int i = 0; i < ref.n; ++i)
+            {
+                for(int j = 0; j < ref.n; ++j)
+                {
+                    if(p[i] < p[j])
+                    {
+                        EXPECT_LE(length(i), length(j)) << "rows " << i << " and " << j;
+                    }
+                }
+            }
         }
     });
 }
@@ -2784,10 +2862,9 @@ TEST_P(local_matrix_formats, multi_coloring_gives_independent_color_classes)
             = {{"pentadiagonal", pentadiagonal<T>(), 3},
                {"upper bidiagonal", upper_bidiagonal<T>(), 2}};
 
-        for(const auto& c : cases)
+        for(const auto& [name, ref, min_colors] : cases)
         {
-            SCOPED_TRACE(std::get<0>(c));
-            const Csr<T>& ref = std::get<1>(c);
+            SCOPED_TRACE(name);
 
             auto             A           = make(ref);
             int              num_colors  = 0;
@@ -2800,34 +2877,14 @@ TEST_P(local_matrix_formats, multi_coloring_gives_independent_color_classes)
             A->MultiColoring(num_colors, &size_colors, &perm);
             EXPECT_EQ(backend_of(perm), backend_name(backend()));
             ASSERT_NE(size_colors, nullptr);
-            EXPECT_GE(num_colors, std::get<2>(c));
+            EXPECT_GE(num_colors, min_colors);
 
-            std::vector<int> offset(num_colors + 1, 0);
-            for(int k = 0; k < num_colors; ++k)
-            {
-                offset[k + 1] = offset[k] + size_colors[k];
-            }
+            std::vector<int> sizes(size_colors, size_colors + num_colors);
             rocalution::free_host(&size_colors);
-            EXPECT_EQ(offset[num_colors], ref.n);
 
             const std::vector<int> p = values_of(perm);
             expect_permutation(p, ref.n);
-            auto color = [&](int i) {
-                return static_cast<int>(std::upper_bound(offset.begin(), offset.end(), p[i])
-                                        - offset.begin())
-                       - 1;
-            };
-            for(int i = 0; i < ref.n; ++i)
-            {
-                for(PtrType k = ref.row_offset[i]; k < ref.row_offset[i + 1]; ++k)
-                {
-                    if(ref.col[k] != i)
-                    {
-                        EXPECT_NE(color(i), color(ref.col[k]))
-                            << "nodes " << i << " and " << ref.col[k];
-                    }
-                }
-            }
+            expect_valid_coloring(ref, num_colors, sizes, p);
             expect_kept(*A, ref);
         }
     });
@@ -2928,27 +2985,8 @@ TEST_P(local_matrix_formats, matrix_mult_takes_the_format_of_the_factors)
 
         // The second product goes into a matrix of the same size, which MatrixMult
         // clears first
-        auto multiply_twice = [&] {
-            auto C = empty<T>();
-            multiply_into(*C);
-            multiply_into(*C);
-        };
-
-        if(backend() == Backend::Accelerator && is(MCSR))
-        {
-            KNOWN_BUG("HIP MCSR CopyToHost copies the row offsets of an empty matrix from NULL");
-            expect_in_child(multiply_twice);
-            return;
-        }
-
         auto C = empty<T>();
         multiply_into(*C);
-        if(backend() == Backend::Accelerator && is(BCSR))
-        {
-            KNOWN_BUG("BCSR Clear keeps the block counts, so the cleared matrix copies them");
-            expect_in_child(multiply_twice);
-            return;
-        }
         multiply_into(*C);
     });
 }
@@ -2982,21 +3020,17 @@ TEST_P(local_matrix_formats, matrix_add_scales_and_adds)
         // The pattern of the summand is part of the pattern of the matrix
         const Csr<T> part = lower(a, true);
 
-        // A known bug ends the process in every BCSR MatrixAdd
-        if(is(BCSR))
-        {
-            KNOWN_BUG("the MatrixAdd fallback converts back to BCSR with block dimension 1");
-            expect_in_child([&] {
-                add_to(a, 2, b, -1, false);
-                add_to(a, 0.5, c, 3, true);
-            });
-            KNOWN_BUG("MatrixAdd does not scale the entries outside the summand's pattern");
-            expect_in_child([&] { add_to(a, 2, part, 1, false); });
-            return;
-        }
-
         add_to(a, 2, b, -1, false);
         add_to(a, 0.5, c, 3, true);
+
+        // The result keeps the block dimension of the matrix, not the summand's
+        if(is(BCSR))
+        {
+            const Format other{BCSR, format().blockdim == 2 ? 3 : 2};
+            auto         A = make(a);
+            A->MatrixAdd(*make_local_matrix(backend(), b, other), 2, -1, false);
+            expect_kept(*A, add(a, 2, b, -1), scaled_tol<T>(1e-14));
+        }
 
         auto A = make(a);
         A->MatrixAdd(*make(part), 2.0, 1.0, false);
@@ -3134,31 +3168,6 @@ TYPED_TEST(local_matrix, triple_matrix_product_with_long_rows)
     expect_matrix(*C, product(ra, p), csr_format, this->backend());
 }
 
-// Block dimensions from 4 on, which the smaller conversion tests do not use, on matrices with
-// many block rows
-TYPED_TEST(local_matrix, converts_large_matrices_to_bcsr_with_large_blocks)
-{
-    using T = typename TypeParam::value_type;
-
-    const std::vector<std::pair<Csr<T>, int>> cases
-        = {{scattered<T>(), 4}, {grid_pattern<T>(21), 7}};
-    for(const auto& c : cases)
-    {
-        const Csr<T>& ref = c.first;
-        const Format  bcsr{BCSR, c.second};
-        SCOPED_TRACE(std::to_string(ref.n) + " x " + std::to_string(ref.m) + " in "
-                     + format_name(bcsr));
-
-        auto A = make_local_matrix(this->backend(), ref);
-        A->ConvertTo(BCSR, bcsr.blockdim);
-        expect_matrix(*A, ref, bcsr, this->backend());
-        EXPECT_TRUE(A->Check());
-
-        A->ConvertToCSR();
-        expect_matrix(*A, ref, csr_format, this->backend());
-    }
-}
-
 // The CSR kernels of the accelerator on matrices with more rows than one workgroup, with
 // values that float holds exactly
 TEST(local_matrix_large, accelerator_csr_operations_span_several_workgroups)
@@ -3178,13 +3187,21 @@ TEST(local_matrix_large, accelerator_csr_operations_span_several_workgroups)
             const int     n    = ref.n;
             const int     m    = ref.m;
             auto          make = [&](const Csr<T>& x) { return make_local_matrix(acc, x); };
+            // A result the host computes after a failed kernel is right too, so the
+            // operations must not fall back to it
+            auto without_fallback = [](const std::string& operation, auto&& f) {
+                expect_fallback_warning(logged(f), operation, true);
+            };
 
             auto summand = [](int i, int j) { return static_cast<T>((i + 2 * j) % 5 + 1); };
             auto A       = make(ref);
-            A->MatrixAdd(*make(transformed(ref, [&](int i, int j, T) { return summand(i, j); })),
-                         2.0,
-                         -1.0,
-                         false);
+            without_fallback("MatrixAdd", [&] {
+                A->MatrixAdd(
+                    *make(transformed(ref, [&](int i, int j, T) { return summand(i, j); })),
+                    2.0,
+                    -1.0,
+                    false);
+            });
             expect_matrix(
                 *A,
                 transformed(ref, [&](int i, int j, T v) { return 2 * v - summand(i, j); }),
@@ -3205,7 +3222,7 @@ TEST(local_matrix_large, accelerator_csr_operations_span_several_workgroups)
                 sum[k] = static_cast<T>(0.5) * sum[k] + 3 * Do[k];
             }
             A = make(ref);
-            A->MatrixAdd(*make(other), 0.5, 3.0, true);
+            without_fallback("MatrixAdd", [&] { A->MatrixAdd(*make(other), 0.5, 3.0, true); });
             expect_matrix(*A, from_dense(n, m, sum), csr_format, acc);
 
             std::vector<T> left(n);
@@ -3219,13 +3236,15 @@ TEST(local_matrix_large, accelerator_csr_operations_span_several_workgroups)
                 right[j] = static_cast<T>(j % 5 + 2);
             }
             A = make(ref);
-            A->DiagonalMatrixMultL(*make_local_vector(acc, left));
+            without_fallback("DiagonalMatrixMultL",
+                             [&] { A->DiagonalMatrixMultL(*make_local_vector(acc, left)); });
             expect_matrix(*A,
                           transformed(ref, [&](int i, int, T v) { return left[i] * v; }),
                           csr_format,
                           acc);
             A = make(ref);
-            A->DiagonalMatrixMultR(*make_local_vector(acc, right));
+            without_fallback("DiagonalMatrixMultR",
+                             [&] { A->DiagonalMatrixMultR(*make_local_vector(acc, right)); });
             expect_matrix(*A,
                           transformed(ref, [&](int, int j, T v) { return v * right[j]; }),
                           csr_format,
@@ -3237,8 +3256,8 @@ TEST(local_matrix_large, accelerator_csr_operations_span_several_workgroups)
                 auto L = empty_local_matrix<T>(acc);
                 auto U = empty_local_matrix<T>(acc);
                 A      = make(ref);
-                A->ExtractL(L.get(), with_diagonal);
-                A->ExtractU(U.get(), with_diagonal);
+                without_fallback("ExtractL", [&] { A->ExtractL(L.get(), with_diagonal); });
+                without_fallback("ExtractU", [&] { A->ExtractU(U.get(), with_diagonal); });
                 expect_matrix(*L, lower(ref, with_diagonal), csr_format, acc);
                 expect_matrix(*U, upper(ref, with_diagonal), csr_format, acc);
             }
@@ -3257,17 +3276,17 @@ TEST(local_matrix_large, accelerator_csr_operations_span_several_workgroups)
             }
             LocalVector<T> d;
             d.MoveToAccelerator();
-            make(ref)->ExtractDiagonal(&d);
+            without_fallback("ExtractDiagonal", [&] { make(ref)->ExtractDiagonal(&d); });
             expect_vector(d, diagonal, acc, 0);
 
             A = make(ref);
-            A->AddScalar(1.5);
+            without_fallback("AddScalar", [&] { A->AddScalar(1.5); });
             expect_matrix(*A,
                           transformed(ref, [](int, int, T v) { return v + static_cast<T>(1.5); }),
                           csr_format,
                           acc);
             A = make(ref);
-            A->AddScalarOffDiagonal(-0.5);
+            without_fallback("AddScalarOffDiagonal", [&] { A->AddScalarOffDiagonal(-0.5); });
             expect_matrix(
                 *A,
                 transformed(ref,
@@ -3358,17 +3377,19 @@ TEST_P(local_matrix_formats, transposes)
         make_local_matrix(backend(), ref)->Transpose(from_csr.get());
         expect_matrix(*from_csr, transposed(ref), csr_format, backend());
 
+        // MCSR holds neither the rectangles nor the cyclic shift, which has no diagonal entries
         if(!is(MCSR))
         {
-            std::vector<Csr<T>> rectangles = wide_and_tall<T>();
-            rectangles.push_back(tall_with_empty_rows<T>());
-            for(const Csr<T>& rect : rectangles)
+            std::vector<Csr<T>> others = wide_and_tall<T>();
+            others.push_back(tall_with_empty_rows<T>());
+            others.push_back(cyclic_shift<T>(12));
+            for(const Csr<T>& other : others)
             {
-                SCOPED_TRACE(std::to_string(rect.n) + " x " + std::to_string(rect.m) + " with "
-                             + std::to_string(rect.nnz()) + " entries");
-                auto R = make(rect);
+                SCOPED_TRACE(std::to_string(other.n) + " x " + std::to_string(other.m) + " with "
+                             + std::to_string(other.nnz()) + " entries");
+                auto R = make(other);
                 R->Transpose();
-                expect_kept(*R, transposed(rect));
+                expect_kept(*R, transposed(other));
             }
         }
     });
@@ -3667,45 +3688,23 @@ TEST_P(local_matrix_formats, writes_and_reads_matrix_market_and_csr_files)
 
         const Csr<T> ref = banded<T>();
 
-        auto read_mtx = [&] {
-            const std::string mtx = temp_file("mtx");
-            make(ref)->WriteFileMTX(mtx);
-            auto B = empty<T>();
-            B->ReadFileMTX(mtx);
-            expect_kept(*B, ref);
-            std::remove(mtx.c_str());
-        };
+        const std::string mtx = temp_file("mtx");
+        make(ref)->WriteFileMTX(mtx);
+        auto B = empty<T>();
+        B->ReadFileMTX(mtx);
+        expect_kept(*B, ref);
+        std::remove(mtx.c_str());
 
         // Deprecated, but still part of the interface. The read clears the matrix first.
-        auto read_csr = [&] {
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-            const std::string csr = temp_file("csr");
-            make(ref)->WriteFileCSR(csr);
-            auto C = make(spd<T>(4));
-            C->ReadFileCSR(csr);
+        const std::string csr = temp_file("csr");
+        make(ref)->WriteFileCSR(csr);
+        auto C = make(spd<T>(4));
+        C->ReadFileCSR(csr);
 #pragma GCC diagnostic pop
-            expect_kept(*C, ref);
-            std::remove(csr.c_str());
-        };
-
-        // Both reads clear the matrix and then move it to the host, to read it there
-        if(backend() == Backend::Accelerator && is(MCSR))
-        {
-            KNOWN_BUG("HIP MCSR CopyToHost copies the row offsets of an empty matrix from NULL");
-            expect_in_child(read_mtx);
-            expect_in_child(read_csr);
-            return;
-        }
-
-        read_mtx();
-        if(backend() == Backend::Accelerator && is(BCSR))
-        {
-            KNOWN_BUG("BCSR Clear keeps the block counts, so the cleared matrix copies them");
-            expect_in_child(read_csr);
-            return;
-        }
-        read_csr();
+        expect_kept(*C, ref);
+        std::remove(csr.c_str());
     });
 }
 
@@ -3729,6 +3728,15 @@ TEST_P(local_matrix_formats, writes_and_reads_rocsparseio_files)
         auto C = make_local_matrix(backend(), spd<T>(4));
         C->ReadFileRSIO(file, true);
         expect_matrix(*C, ref, csr_format, backend());
+
+        // A BCSR matrix that keeps its format also keeps its block dimension
+        if(is(BCSR))
+        {
+            const Format other{BCSR, format().blockdim == 2 ? 3 : 2};
+            auto         D = make_local_matrix(backend(), spd<T>(6), other);
+            D->ReadFileRSIO(file, true);
+            expect_matrix(*D, ref, other, backend());
+        }
         std::remove(file.c_str());
 
         if(backend() == Backend::Accelerator && !is(CSR))
@@ -3862,30 +3870,6 @@ TYPED_TEST(local_matrix, read_file_mtx_reads_a_hand_written_file)
     EXPECT_EQ(A->GetNnz(), 4);
 }
 
-// CopyToCOO returns the entries in the order CopyFromCOO took them, also unsorted
-TEST(local_matrix_coo, copy_to_coo_keeps_the_order_of_copy_from_coo)
-{
-    for_each_type<RealTypes>([&](auto type) {
-        using T = typename decltype(type)::type;
-
-        const std::vector<int> row = {0, 1, 2, 2};
-        const std::vector<int> col = {0, 1, 2, 0};
-        const std::vector<T>   val = {1, 2, 3, 4};
-
-        LocalMatrix<T> A;
-        A.AllocateCOO("A", 4, 3, 3);
-        A.CopyFromCOO(row.data(), col.data(), val.data());
-
-        std::vector<int> r(4, -1);
-        std::vector<int> c(4, -1);
-        std::vector<T>   v(4, -1);
-        A.CopyToCOO(r.data(), c.data(), v.data());
-        EXPECT_EQ(r, row);
-        EXPECT_EQ(c, col);
-        EXPECT_EQ(v, val);
-    });
-}
-
 // The AMG setup of a matrix in another format runs on a CSR copy, with a warning,
 // and gives the results of that copy
 TEST_P(local_matrix_formats, amg_setup_runs_on_a_csr_copy)
@@ -3979,6 +3963,35 @@ TEST_P(local_matrix_formats, amg_setup_runs_on_a_csr_copy)
             expect_warning(log, "RSPMISCoarsening");
             EXPECT_EQ(values_of(cf_other), values_of(cf));
             EXPECT_EQ(values_of(S_other), values_of(S));
+        }
+        {
+            SCOPED_TRACE("RSCoarsening");
+            LocalVector<int>  cf_ref, cf_other;
+            LocalVector<bool> S_ref, S_other;
+            like(*RC, cf_ref);
+            like(*RC, S_ref);
+            like(*R, cf_other);
+            like(*R, S_other);
+            RC->RSCoarsening(0.25f, &cf_ref, &S_ref);
+            std::string log = logged([&] { R->RSCoarsening(0.25f, &cf_other, &S_other); });
+            expect_warning(log, "RSCoarsening");
+            EXPECT_EQ(values_of(cf_other), values_of(cf_ref));
+            EXPECT_EQ(values_of(S_other), values_of(S_ref));
+        }
+        {
+            SCOPED_TRACE("AMGPMISAggregate(connections, aggregates)");
+            LocalVector<int> conn, agg_ref, agg_other;
+            like(*C, conn);
+            like(*C, agg_ref);
+            like(*A, agg_other);
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+            C->AMGConnect(T(0.08), &conn);
+            C->AMGPMISAggregate(conn, &agg_ref);
+            std::string log = logged([&] { A->AMGPMISAggregate(conn, &agg_other); });
+#pragma GCC diagnostic pop
+            expect_warning(log, "AMGPMISAggregate");
+            EXPECT_EQ(values_of(agg_other), values_of(agg_ref));
         }
 
         using Interpolation = std::function<void(const LocalMatrix<T>&, LocalMatrix<T>*)>;
@@ -4459,6 +4472,8 @@ TEST(local_matrix_preconditions, violations_end_the_program)
                         "GetFormat");
     EXPECT_ASSERT_DEATH(A->MatrixAdd(*make_local_matrix(Backend::Host, ref, Format{COO, 1})),
                         "GetFormat");
+    EXPECT_ASSERT_DEATH(A->ConvertTo(BCSR), "matrix_format != BCSR");
+    EXPECT_ASSERT_DEATH(E.ConvertTo(BCSR, 0), "matrix_format != BCSR");
     EXPECT_ASSERT_DEATH(A->ILUpFactorize(-1), "p >= 0");
     EXPECT_ASSERT_DEATH(A->FSAI(0, nullptr), "power > 0");
     EXPECT_ASSERT_DEATH(A->ItLSolve(0, 0, false, *y, y.get()), "max_iter > 0");
@@ -4485,248 +4500,238 @@ TEST(local_matrix_preconditions, violations_end_the_program)
 // the file, the function and the whole expression.
 TEST(local_matrix_preconditions, null_pointer_arguments_end_the_program)
 {
-    for_each_type<RealTypes>([&](auto type) {
-        using T = typename decltype(type)::type;
+    // One precision, as for LocalVector: the asserts are in code that both precisions share
+    using T = double;
 
-        const int64_t n = 100;
+    const int64_t n = 100;
 
-        LocalMatrix<T>       E;
-        LocalMatrix<T>       F;
-        LocalVector<T>       v;
-        LocalVector<bool>    connections;
-        LocalVector<int>     ints;
-        LocalVector<int64_t> aggregates;
-        LocalMatrix<T>*      no_matrix  = nullptr;
-        LocalMatrix<T>**     no_matrix2 = nullptr;
-        LocalVector<T>*      no_vector  = nullptr;
-        LocalVector<int>*    no_ints    = nullptr;
+    LocalMatrix<T>       E;
+    LocalMatrix<T>       F;
+    LocalVector<T>       v;
+    LocalVector<bool>    connections;
+    LocalVector<int>     ints;
+    LocalVector<int64_t> aggregates;
+    LocalMatrix<T>*      no_matrix  = nullptr;
+    LocalMatrix<T>**     no_matrix2 = nullptr;
+    LocalVector<T>*      no_vector  = nullptr;
+    LocalVector<int>*    no_ints    = nullptr;
 
-        std::vector<int>     int_array(n, 0);
-        std::vector<PtrType> ptr_array(n + 1, 0);
-        std::vector<T>       val_array(n, 0.0);
-        int*                 p     = int_array.data();
-        PtrType*             o     = ptr_array.data();
-        T*                   d     = val_array.data();
-        int*                 null  = nullptr;
-        PtrType*             nullo = nullptr;
-        T*                   nulld = nullptr;
-        int                  k     = 0;
-        T                    beta  = 0;
+    std::vector<int>     int_array(n, 0);
+    std::vector<PtrType> ptr_array(n + 1, 0);
+    std::vector<T>       val_array(n, 0.0);
+    int*                 p     = int_array.data();
+    PtrType*             o     = ptr_array.data();
+    T*                   d     = val_array.data();
+    int*                 null  = nullptr;
+    PtrType*             nullo = nullptr;
+    T*                   nulld = nullptr;
+    int                  k     = 0;
+    T                    beta  = 0;
 
-        LocalMatrix<T> A;
-        A.AllocateCSR("A", n, n, n);
+    LocalMatrix<T> A;
+    A.AllocateCSR("A", n, n, n);
 
-        auto at = [](const std::string& function) {
-            return "local_matrix\\.cpp:[0-9]+: .*::" + function + "\\(.*";
-        };
+    auto at = [](const std::string& function) {
+        return "local_matrix\\.cpp:[0-9]+: .*::" + function + "\\(.*";
+    };
 
-        // Extractions
-        LocalMatrix<T>   sub;
-        LocalMatrix<T>*  row_of_subs[1] = {&sub};
-        LocalMatrix<T>** subs[1]        = {row_of_subs};
-        EXPECT_ASSERT_DEATH(E.ExtractSubMatrix(0, 0, n, n, no_matrix),
-                            at("ExtractSubMatrix") + "[^*]mat != NULL");
-        EXPECT_ASSERT_DEATH(E.ExtractSubMatrices(n, n, null, p, subs),
-                            at("ExtractSubMatrices") + "row_offset != NULL");
-        EXPECT_ASSERT_DEATH(E.ExtractSubMatrices(n, n, p, null, subs),
-                            at("ExtractSubMatrices") + "col_offset != NULL");
-        EXPECT_ASSERT_DEATH(E.ExtractSubMatrices(n, n, p, p, nullptr),
-                            at("ExtractSubMatrices") + "[^*]mat != NULL");
-        EXPECT_ASSERT_DEATH(E.ExtractSubMatrices(n, n, p, p, &no_matrix2),
-                            at("ExtractSubMatrices") + "\\*mat != NULL");
-        EXPECT_ASSERT_DEATH(E.ExtractDiagonal(no_vector),
-                            at("ExtractDiagonal") + "vec_diag != NULL");
-        EXPECT_ASSERT_DEATH(E.ExtractInverseDiagonal(no_vector),
-                            at("ExtractInverseDiagonal") + "vec_inv_diag != NULL");
-        EXPECT_ASSERT_DEATH(E.ExtractL(no_matrix, true), at("ExtractL") + "L != NULL");
-        EXPECT_ASSERT_DEATH(E.ExtractU(no_matrix, true), at("ExtractU") + "U != NULL");
-        EXPECT_ASSERT_DEATH(E.ExtractColumnVector(0, no_vector),
-                            at("ExtractColumnVector") + "vec != NULL");
-        EXPECT_ASSERT_DEATH(E.ExtractRowVector(0, no_vector),
-                            at("ExtractRowVector") + "vec != NULL");
+    // Extractions
+    LocalMatrix<T>   sub;
+    LocalMatrix<T>*  row_of_subs[1] = {&sub};
+    LocalMatrix<T>** subs[1]        = {row_of_subs};
+    EXPECT_ASSERT_DEATH(E.ExtractSubMatrix(0, 0, n, n, no_matrix),
+                        at("ExtractSubMatrix") + "[^*]mat != NULL");
+    EXPECT_ASSERT_DEATH(E.ExtractSubMatrices(n, n, null, p, subs),
+                        at("ExtractSubMatrices") + "row_offset != NULL");
+    EXPECT_ASSERT_DEATH(E.ExtractSubMatrices(n, n, p, null, subs),
+                        at("ExtractSubMatrices") + "col_offset != NULL");
+    EXPECT_ASSERT_DEATH(E.ExtractSubMatrices(n, n, p, p, nullptr),
+                        at("ExtractSubMatrices") + "[^*]mat != NULL");
+    EXPECT_ASSERT_DEATH(E.ExtractSubMatrices(n, n, p, p, &no_matrix2),
+                        at("ExtractSubMatrices") + "\\*mat != NULL");
+    EXPECT_ASSERT_DEATH(E.ExtractDiagonal(no_vector), at("ExtractDiagonal") + "vec_diag != NULL");
+    EXPECT_ASSERT_DEATH(E.ExtractInverseDiagonal(no_vector),
+                        at("ExtractInverseDiagonal") + "vec_inv_diag != NULL");
+    EXPECT_ASSERT_DEATH(E.ExtractL(no_matrix, true), at("ExtractL") + "L != NULL");
+    EXPECT_ASSERT_DEATH(E.ExtractU(no_matrix, true), at("ExtractU") + "U != NULL");
+    EXPECT_ASSERT_DEATH(E.ExtractColumnVector(0, no_vector),
+                        at("ExtractColumnVector") + "vec != NULL");
+    EXPECT_ASSERT_DEATH(E.ExtractRowVector(0, no_vector), at("ExtractRowVector") + "vec != NULL");
 
-        // Orderings
-        EXPECT_ASSERT_DEATH(E.CMK(no_ints), at("CMK") + "permutation != NULL");
-        EXPECT_ASSERT_DEATH(E.RCMK(no_ints), at("RCMK") + "permutation != NULL");
-        EXPECT_ASSERT_DEATH(E.ConnectivityOrder(no_ints),
-                            at("ConnectivityOrder") + "permutation != NULL");
-        EXPECT_ASSERT_DEATH(E.MultiColoring(k, &p, &ints),
-                            at("MultiColoring") + "\\*size_colors == NULL");
-        EXPECT_ASSERT_DEATH(E.MultiColoring(k, &null, no_ints),
-                            at("MultiColoring") + "permutation != NULL");
-        EXPECT_ASSERT_DEATH(E.MaximalIndependentSet(k, no_ints),
-                            at("MaximalIndependentSet") + "permutation != NULL");
-        EXPECT_ASSERT_DEATH(E.ZeroBlockPermutation(k, no_ints),
-                            at("ZeroBlockPermutation") + "permutation != NULL");
+    // Orderings
+    EXPECT_ASSERT_DEATH(E.CMK(no_ints), at("CMK") + "permutation != NULL");
+    EXPECT_ASSERT_DEATH(E.RCMK(no_ints), at("RCMK") + "permutation != NULL");
+    EXPECT_ASSERT_DEATH(E.ConnectivityOrder(no_ints),
+                        at("ConnectivityOrder") + "permutation != NULL");
+    EXPECT_ASSERT_DEATH(E.MultiColoring(k, &p, &ints),
+                        at("MultiColoring") + "\\*size_colors == NULL");
+    EXPECT_ASSERT_DEATH(E.MultiColoring(k, &null, no_ints),
+                        at("MultiColoring") + "permutation != NULL");
+    EXPECT_ASSERT_DEATH(E.MaximalIndependentSet(k, no_ints),
+                        at("MaximalIndependentSet") + "permutation != NULL");
+    EXPECT_ASSERT_DEATH(E.ZeroBlockPermutation(k, no_ints),
+                        at("ZeroBlockPermutation") + "permutation != NULL");
 
-        // Solves, factorizations and products
-        EXPECT_ASSERT_DEATH(E.LSolve(v, no_vector), at("LSolve") + "out != NULL");
-        EXPECT_ASSERT_DEATH(E.USolve(v, no_vector), at("USolve") + "out != NULL");
-        EXPECT_ASSERT_DEATH(E.LLSolve(v, no_vector), at("LLSolve") + "out != NULL");
-        EXPECT_ASSERT_DEATH(E.LLSolve(v, v, no_vector), at("LLSolve") + "out != NULL");
-        EXPECT_ASSERT_DEATH(E.LUSolve(v, no_vector), at("LUSolve") + "out != NULL");
-        EXPECT_ASSERT_DEATH(E.QRSolve(v, no_vector), at("QRSolve") + "out != NULL");
-        EXPECT_ASSERT_DEATH(E.ItLSolve(1, 0, true, v, no_vector), at("ItLSolve") + "out != NULL");
-        EXPECT_ASSERT_DEATH(E.ItUSolve(1, 0, true, v, no_vector), at("ItUSolve") + "out != NULL");
-        EXPECT_ASSERT_DEATH(E.ItLLSolve(1, 0, true, v, no_vector), at("ItLLSolve") + "out != NULL");
-        EXPECT_ASSERT_DEATH(E.ItLLSolve(1, 0, true, v, v, no_vector),
-                            at("ItLLSolve") + "out != NULL");
-        EXPECT_ASSERT_DEATH(E.ItLUSolve(1, 0, true, v, no_vector), at("ItLUSolve") + "out != NULL");
-        EXPECT_ASSERT_DEATH(E.ICFactorize(no_vector), at("ICFactorize") + "inv_diag != NULL");
-        EXPECT_ASSERT_DEATH(E.Householder(0, beta, no_vector), at("Householder") + "vec != NULL");
-        EXPECT_ASSERT_DEATH(E.Apply(v, no_vector), at("Apply") + "out != NULL");
-        EXPECT_ASSERT_DEATH(E.ApplyAdd(v, 1.0, no_vector), at("ApplyAdd") + "out != NULL");
-        EXPECT_ASSERT_DEATH(E.CreateFromMap(ints, n, n, no_matrix),
-                            at("CreateFromMap") + "pro != NULL");
+    // Solves, factorizations and products
+    EXPECT_ASSERT_DEATH(E.LSolve(v, no_vector), at("LSolve") + "out != NULL");
+    EXPECT_ASSERT_DEATH(E.USolve(v, no_vector), at("USolve") + "out != NULL");
+    EXPECT_ASSERT_DEATH(E.LLSolve(v, no_vector), at("LLSolve") + "out != NULL");
+    EXPECT_ASSERT_DEATH(E.LLSolve(v, v, no_vector), at("LLSolve") + "out != NULL");
+    EXPECT_ASSERT_DEATH(E.LUSolve(v, no_vector), at("LUSolve") + "out != NULL");
+    EXPECT_ASSERT_DEATH(E.QRSolve(v, no_vector), at("QRSolve") + "out != NULL");
+    EXPECT_ASSERT_DEATH(E.ItLSolve(1, 0, true, v, no_vector), at("ItLSolve") + "out != NULL");
+    EXPECT_ASSERT_DEATH(E.ItUSolve(1, 0, true, v, no_vector), at("ItUSolve") + "out != NULL");
+    EXPECT_ASSERT_DEATH(E.ItLLSolve(1, 0, true, v, no_vector), at("ItLLSolve") + "out != NULL");
+    EXPECT_ASSERT_DEATH(E.ItLLSolve(1, 0, true, v, v, no_vector), at("ItLLSolve") + "out != NULL");
+    EXPECT_ASSERT_DEATH(E.ItLUSolve(1, 0, true, v, no_vector), at("ItLUSolve") + "out != NULL");
+    EXPECT_ASSERT_DEATH(E.ICFactorize(no_vector), at("ICFactorize") + "inv_diag != NULL");
+    EXPECT_ASSERT_DEATH(E.Householder(0, beta, no_vector), at("Householder") + "vec != NULL");
+    EXPECT_ASSERT_DEATH(E.Apply(v, no_vector), at("Apply") + "out != NULL");
+    EXPECT_ASSERT_DEATH(E.ApplyAdd(v, 1.0, no_vector), at("ApplyAdd") + "out != NULL");
+    EXPECT_ASSERT_DEATH(E.CreateFromMap(ints, n, n, no_matrix),
+                        at("CreateFromMap") + "pro != NULL");
 
-        // Copies of the arrays
-        EXPECT_ASSERT_DEATH(E.UpdateValuesCSR(nulld), at("UpdateValuesCSR") + "val != NULL");
-        EXPECT_ASSERT_DEATH(E.CopyFromCSR(nullo, p, d), at("CopyFromCSR") + "row_offsets != NULL");
-        EXPECT_ASSERT_DEATH(A.CopyFromCSR(o, null, d), at("CopyFromCSR") + "col != NULL");
-        EXPECT_ASSERT_DEATH(A.CopyFromCSR(o, p, nulld), at("CopyFromCSR") + "val != NULL");
-        EXPECT_ASSERT_DEATH(E.CopyToCSR(nullo, p, d), at("CopyToCSR") + "row_offsets != NULL");
-        EXPECT_ASSERT_DEATH(A.CopyToCSR(o, null, d), at("CopyToCSR") + "col != NULL");
-        EXPECT_ASSERT_DEATH(A.CopyToCSR(o, p, nulld), at("CopyToCSR") + "val != NULL");
-        EXPECT_ASSERT_DEATH(E.CopyFromCOO(null, p, d), at("CopyFromCOO") + "row != NULL");
-        EXPECT_ASSERT_DEATH(E.CopyFromCOO(p, null, d), at("CopyFromCOO") + "col != NULL");
-        EXPECT_ASSERT_DEATH(E.CopyFromCOO(p, p, nulld), at("CopyFromCOO") + "val != NULL");
-        EXPECT_ASSERT_DEATH(E.CopyToCOO(null, p, d), at("CopyToCOO") + "row != NULL");
-        EXPECT_ASSERT_DEATH(E.CopyToCOO(p, null, d), at("CopyToCOO") + "col != NULL");
-        EXPECT_ASSERT_DEATH(E.CopyToCOO(p, p, nulld), at("CopyToCOO") + "val != NULL");
-        EXPECT_ASSERT_DEATH(E.CopyFromHostCSR(nullo, p, d, "E", n, n, n),
-                            at("CopyFromHostCSR") + "row_offset != NULL");
-        EXPECT_ASSERT_DEATH(E.CopyFromHostCSR(o, null, d, "E", n, n, n),
-                            at("CopyFromHostCSR") + "col != NULL");
-        EXPECT_ASSERT_DEATH(E.CopyFromHostCSR(o, p, nulld, "E", n, n, n),
-                            at("CopyFromHostCSR") + "val != NULL");
+    // Copies of the arrays
+    EXPECT_ASSERT_DEATH(E.UpdateValuesCSR(nulld), at("UpdateValuesCSR") + "val != NULL");
+    EXPECT_ASSERT_DEATH(E.CopyFromCSR(nullo, p, d), at("CopyFromCSR") + "row_offsets != NULL");
+    EXPECT_ASSERT_DEATH(A.CopyFromCSR(o, null, d), at("CopyFromCSR") + "col != NULL");
+    EXPECT_ASSERT_DEATH(A.CopyFromCSR(o, p, nulld), at("CopyFromCSR") + "val != NULL");
+    EXPECT_ASSERT_DEATH(E.CopyToCSR(nullo, p, d), at("CopyToCSR") + "row_offsets != NULL");
+    EXPECT_ASSERT_DEATH(A.CopyToCSR(o, null, d), at("CopyToCSR") + "col != NULL");
+    EXPECT_ASSERT_DEATH(A.CopyToCSR(o, p, nulld), at("CopyToCSR") + "val != NULL");
+    EXPECT_ASSERT_DEATH(E.CopyFromCOO(null, p, d), at("CopyFromCOO") + "row != NULL");
+    EXPECT_ASSERT_DEATH(E.CopyFromCOO(p, null, d), at("CopyFromCOO") + "col != NULL");
+    EXPECT_ASSERT_DEATH(E.CopyFromCOO(p, p, nulld), at("CopyFromCOO") + "val != NULL");
+    EXPECT_ASSERT_DEATH(E.CopyToCOO(null, p, d), at("CopyToCOO") + "row != NULL");
+    EXPECT_ASSERT_DEATH(E.CopyToCOO(p, null, d), at("CopyToCOO") + "col != NULL");
+    EXPECT_ASSERT_DEATH(E.CopyToCOO(p, p, nulld), at("CopyToCOO") + "val != NULL");
+    EXPECT_ASSERT_DEATH(E.CopyFromHostCSR(nullo, p, d, "E", n, n, n),
+                        at("CopyFromHostCSR") + "row_offset != NULL");
+    EXPECT_ASSERT_DEATH(E.CopyFromHostCSR(o, null, d, "E", n, n, n),
+                        at("CopyFromHostCSR") + "col != NULL");
+    EXPECT_ASSERT_DEATH(E.CopyFromHostCSR(o, p, nulld, "E", n, n, n),
+                        at("CopyFromHostCSR") + "val != NULL");
 
-        // AMG
-        EXPECT_ASSERT_DEATH(E.AMGGreedyAggregate(0.1, nullptr, &aggregates, &aggregates),
-                            at("AMGGreedyAggregate") + "connections != NULL");
-        EXPECT_ASSERT_DEATH(E.AMGGreedyAggregate(0.1, &connections, nullptr, &aggregates),
-                            at("AMGGreedyAggregate") + "aggregates != NULL");
-        EXPECT_ASSERT_DEATH(E.AMGGreedyAggregate(0.1, &connections, &aggregates, nullptr),
-                            at("AMGGreedyAggregate") + "aggregate_root_nodes != NULL");
-        EXPECT_ASSERT_DEATH(
-            E.AMGSmoothedAggregation(0.1, connections, aggregates, aggregates, no_matrix),
-            at("AMGSmoothedAggregation") + "prolong != NULL");
-        EXPECT_ASSERT_DEATH(E.AMGUnsmoothedAggregation(aggregates, aggregates, no_matrix),
-                            at("AMGUnsmoothedAggregation") + "prolong != NULL");
-        EXPECT_ASSERT_DEATH(E.InitialPairwiseAggregation(0.1, k, no_ints, k, &null, k, 0),
-                            at("InitialPairwiseAggregation") + "[^*r]G != NULL");
-        EXPECT_ASSERT_DEATH(E.InitialPairwiseAggregation(0.1, k, &ints, k, &p, k, 0),
-                            at("InitialPairwiseAggregation") + "\\*rG == NULL");
-        EXPECT_ASSERT_DEATH(E.InitialPairwiseAggregation(F, 0.1, k, no_ints, k, &null, k, 0),
-                            at("InitialPairwiseAggregation") + "[^*r]G != NULL");
-        EXPECT_ASSERT_DEATH(E.InitialPairwiseAggregation(F, 0.1, k, &ints, k, &p, k, 0),
-                            at("InitialPairwiseAggregation") + "\\*rG == NULL");
-        EXPECT_ASSERT_DEATH(E.FurtherPairwiseAggregation(0.1, k, no_ints, k, &p, k, 0),
-                            at("FurtherPairwiseAggregation") + "[^*r]G != NULL");
-        EXPECT_ASSERT_DEATH(E.FurtherPairwiseAggregation(0.1, k, &ints, k, &null, k, 0),
-                            at("FurtherPairwiseAggregation") + "\\*rG != NULL");
-        EXPECT_ASSERT_DEATH(E.FurtherPairwiseAggregation(F, 0.1, k, no_ints, k, &p, k, 0),
-                            at("FurtherPairwiseAggregation") + "[^*r]G != NULL");
-        EXPECT_ASSERT_DEATH(E.FurtherPairwiseAggregation(F, 0.1, k, &ints, k, &null, k, 0),
-                            at("FurtherPairwiseAggregation") + "\\*rG != NULL");
-        EXPECT_ASSERT_DEATH(E.CoarsenOperator(no_matrix, n, n, ints, n, p, n),
-                            at("CoarsenOperator") + "Ac != NULL");
-        EXPECT_ASSERT_DEATH(E.CoarsenOperator(&F, n, n, ints, n, null, n),
-                            at("CoarsenOperator") + "[^*]rG != NULL");
+    // AMG
+    EXPECT_ASSERT_DEATH(E.AMGGreedyAggregate(0.1, nullptr, &aggregates, &aggregates),
+                        at("AMGGreedyAggregate") + "connections != NULL");
+    EXPECT_ASSERT_DEATH(E.AMGGreedyAggregate(0.1, &connections, nullptr, &aggregates),
+                        at("AMGGreedyAggregate") + "aggregates != NULL");
+    EXPECT_ASSERT_DEATH(E.AMGGreedyAggregate(0.1, &connections, &aggregates, nullptr),
+                        at("AMGGreedyAggregate") + "aggregate_root_nodes != NULL");
+    EXPECT_ASSERT_DEATH(
+        E.AMGSmoothedAggregation(0.1, connections, aggregates, aggregates, no_matrix),
+        at("AMGSmoothedAggregation") + "prolong != NULL");
+    EXPECT_ASSERT_DEATH(E.AMGUnsmoothedAggregation(aggregates, aggregates, no_matrix),
+                        at("AMGUnsmoothedAggregation") + "prolong != NULL");
+    EXPECT_ASSERT_DEATH(E.InitialPairwiseAggregation(0.1, k, no_ints, k, &null, k, 0),
+                        at("InitialPairwiseAggregation") + "[^*r]G != NULL");
+    EXPECT_ASSERT_DEATH(E.InitialPairwiseAggregation(0.1, k, &ints, k, &p, k, 0),
+                        at("InitialPairwiseAggregation") + "\\*rG == NULL");
+    EXPECT_ASSERT_DEATH(E.InitialPairwiseAggregation(F, 0.1, k, no_ints, k, &null, k, 0),
+                        at("InitialPairwiseAggregation") + "[^*r]G != NULL");
+    EXPECT_ASSERT_DEATH(E.InitialPairwiseAggregation(F, 0.1, k, &ints, k, &p, k, 0),
+                        at("InitialPairwiseAggregation") + "\\*rG == NULL");
+    EXPECT_ASSERT_DEATH(E.FurtherPairwiseAggregation(0.1, k, no_ints, k, &p, k, 0),
+                        at("FurtherPairwiseAggregation") + "[^*r]G != NULL");
+    EXPECT_ASSERT_DEATH(E.FurtherPairwiseAggregation(0.1, k, &ints, k, &null, k, 0),
+                        at("FurtherPairwiseAggregation") + "\\*rG != NULL");
+    EXPECT_ASSERT_DEATH(E.FurtherPairwiseAggregation(F, 0.1, k, no_ints, k, &p, k, 0),
+                        at("FurtherPairwiseAggregation") + "[^*r]G != NULL");
+    EXPECT_ASSERT_DEATH(E.FurtherPairwiseAggregation(F, 0.1, k, &ints, k, &null, k, 0),
+                        at("FurtherPairwiseAggregation") + "\\*rG != NULL");
+    EXPECT_ASSERT_DEATH(E.CoarsenOperator(no_matrix, n, n, ints, n, p, n),
+                        at("CoarsenOperator") + "Ac != NULL");
+    EXPECT_ASSERT_DEATH(E.CoarsenOperator(&F, n, n, ints, n, null, n),
+                        at("CoarsenOperator") + "[^*]rG != NULL");
 
-        // SetDataPtr*: the array pointer and the array
-        EXPECT_ASSERT_DEATH(E.SetDataPtrCOO(nullptr, &p, &d, "E", n, n, n),
-                            at("SetDataPtrCOO") + "[^*]row != NULL");
-        EXPECT_ASSERT_DEATH(E.SetDataPtrCOO(&p, nullptr, &d, "E", n, n, n),
-                            at("SetDataPtrCOO") + "[^*]col != NULL");
-        EXPECT_ASSERT_DEATH(E.SetDataPtrCOO(&p, &p, nullptr, "E", n, n, n),
-                            at("SetDataPtrCOO") + "[^*]val != NULL");
-        EXPECT_ASSERT_DEATH(E.SetDataPtrCOO(&null, &p, &d, "E", n, n, n),
-                            at("SetDataPtrCOO") + "\\*row != NULL");
-        EXPECT_ASSERT_DEATH(E.SetDataPtrCOO(&p, &null, &d, "E", n, n, n),
-                            at("SetDataPtrCOO") + "\\*col != NULL");
-        EXPECT_ASSERT_DEATH(E.SetDataPtrCOO(&p, &p, &nulld, "E", n, n, n),
-                            at("SetDataPtrCOO") + "\\*val != NULL");
-        // CSR row offsets are PtrType, MCSR ones int
-        auto expect_set_offsets_death = [&](const std::string& f, auto set, auto offsets) {
-            SCOPED_TRACE(f);
-            decltype(offsets) none = nullptr;
-            EXPECT_ASSERT_DEATH(set(nullptr, &p, &d), at(f) + "[^*]row_offset != NULL");
-            EXPECT_ASSERT_DEATH(set(&offsets, nullptr, &d), at(f) + "[^*]col != NULL");
-            EXPECT_ASSERT_DEATH(set(&offsets, &p, nullptr), at(f) + "[^*]val != NULL");
-            EXPECT_ASSERT_DEATH(set(&none, &p, &d), at(f) + "\\*row_offset != NULL");
-            EXPECT_ASSERT_DEATH(set(&offsets, &null, &d), at(f) + "\\*col != NULL");
-            EXPECT_ASSERT_DEATH(set(&offsets, &p, &nulld), at(f) + "\\*val != NULL");
-        };
-        expect_set_offsets_death(
-            "SetDataPtrCSR",
-            [&](PtrType** row_offset, int** col, T** val) {
-                E.SetDataPtrCSR(row_offset, col, val, "E", n, n, n);
-            },
-            o);
-        expect_set_offsets_death(
-            "SetDataPtrMCSR",
-            [&](int** row_offset, int** col, T** val) {
-                E.SetDataPtrMCSR(row_offset, col, val, "E", n, n, n);
-            },
-            p);
-        EXPECT_ASSERT_DEATH(E.SetDataPtrELL(nullptr, &d, "E", n, n, n, n),
-                            at("SetDataPtrELL") + "[^*]col != NULL");
-        EXPECT_ASSERT_DEATH(E.SetDataPtrELL(&p, nullptr, "E", n, n, n, n),
-                            at("SetDataPtrELL") + "[^*]val != NULL");
-        EXPECT_ASSERT_DEATH(E.SetDataPtrELL(&null, &d, "E", n, n, n, n),
-                            at("SetDataPtrELL") + "\\*col != NULL");
-        EXPECT_ASSERT_DEATH(E.SetDataPtrELL(&p, &nulld, "E", n, n, n, n),
-                            at("SetDataPtrELL") + "\\*val != NULL");
-        EXPECT_ASSERT_DEATH(E.SetDataPtrDIA(nullptr, &d, "E", n, n, n, n),
-                            at("SetDataPtrDIA") + "[^*_]offset != NULL");
-        EXPECT_ASSERT_DEATH(E.SetDataPtrDIA(&p, nullptr, "E", n, n, n, n),
-                            at("SetDataPtrDIA") + "[^*]val != NULL");
-        EXPECT_ASSERT_DEATH(E.SetDataPtrDIA(&null, &d, "E", n, n, n, n),
-                            at("SetDataPtrDIA") + "\\*offset != NULL");
-        EXPECT_ASSERT_DEATH(E.SetDataPtrDIA(&p, &nulld, "E", n, n, n, n),
-                            at("SetDataPtrDIA") + "\\*val != NULL");
-        EXPECT_ASSERT_DEATH(E.SetDataPtrDENSE(nullptr, "E", n, n),
-                            at("SetDataPtrDENSE") + "[^*]val != NULL");
-        EXPECT_ASSERT_DEATH(E.SetDataPtrDENSE(&nulld, "E", n, n),
-                            at("SetDataPtrDENSE") + "\\*val != NULL");
+    // SetDataPtr*: the array pointer and the array
+    EXPECT_ASSERT_DEATH(E.SetDataPtrCOO(nullptr, &p, &d, "E", n, n, n),
+                        at("SetDataPtrCOO") + "[^*]row != NULL");
+    EXPECT_ASSERT_DEATH(E.SetDataPtrCOO(&p, nullptr, &d, "E", n, n, n),
+                        at("SetDataPtrCOO") + "[^*]col != NULL");
+    EXPECT_ASSERT_DEATH(E.SetDataPtrCOO(&p, &p, nullptr, "E", n, n, n),
+                        at("SetDataPtrCOO") + "[^*]val != NULL");
+    EXPECT_ASSERT_DEATH(E.SetDataPtrCOO(&null, &p, &d, "E", n, n, n),
+                        at("SetDataPtrCOO") + "\\*row != NULL");
+    EXPECT_ASSERT_DEATH(E.SetDataPtrCOO(&p, &null, &d, "E", n, n, n),
+                        at("SetDataPtrCOO") + "\\*col != NULL");
+    EXPECT_ASSERT_DEATH(E.SetDataPtrCOO(&p, &p, &nulld, "E", n, n, n),
+                        at("SetDataPtrCOO") + "\\*val != NULL");
+    // CSR row offsets are PtrType, MCSR ones int
+    auto expect_set_offsets_death = [&](const std::string& f, auto set, auto offsets) {
+        SCOPED_TRACE(f);
+        decltype(offsets) none = nullptr;
+        EXPECT_ASSERT_DEATH(set(nullptr, &p, &d), at(f) + "[^*]row_offset != NULL");
+        EXPECT_ASSERT_DEATH(set(&offsets, nullptr, &d), at(f) + "[^*]col != NULL");
+        EXPECT_ASSERT_DEATH(set(&offsets, &p, nullptr), at(f) + "[^*]val != NULL");
+        EXPECT_ASSERT_DEATH(set(&none, &p, &d), at(f) + "\\*row_offset != NULL");
+        EXPECT_ASSERT_DEATH(set(&offsets, &null, &d), at(f) + "\\*col != NULL");
+        EXPECT_ASSERT_DEATH(set(&offsets, &p, &nulld), at(f) + "\\*val != NULL");
+    };
+    expect_set_offsets_death(
+        "SetDataPtrCSR",
+        [&](PtrType** row_offset, int** col, T** val) {
+            E.SetDataPtrCSR(row_offset, col, val, "E", n, n, n);
+        },
+        o);
+    expect_set_offsets_death(
+        "SetDataPtrMCSR",
+        [&](int** row_offset, int** col, T** val) {
+            E.SetDataPtrMCSR(row_offset, col, val, "E", n, n, n);
+        },
+        p);
+    EXPECT_ASSERT_DEATH(E.SetDataPtrELL(nullptr, &d, "E", n, n, n, n),
+                        at("SetDataPtrELL") + "[^*]col != NULL");
+    EXPECT_ASSERT_DEATH(E.SetDataPtrELL(&p, nullptr, "E", n, n, n, n),
+                        at("SetDataPtrELL") + "[^*]val != NULL");
+    EXPECT_ASSERT_DEATH(E.SetDataPtrELL(&null, &d, "E", n, n, n, n),
+                        at("SetDataPtrELL") + "\\*col != NULL");
+    EXPECT_ASSERT_DEATH(E.SetDataPtrELL(&p, &nulld, "E", n, n, n, n),
+                        at("SetDataPtrELL") + "\\*val != NULL");
+    EXPECT_ASSERT_DEATH(E.SetDataPtrDIA(nullptr, &d, "E", n, n, n, n),
+                        at("SetDataPtrDIA") + "[^*_]offset != NULL");
+    EXPECT_ASSERT_DEATH(E.SetDataPtrDIA(&p, nullptr, "E", n, n, n, n),
+                        at("SetDataPtrDIA") + "[^*]val != NULL");
+    EXPECT_ASSERT_DEATH(E.SetDataPtrDIA(&null, &d, "E", n, n, n, n),
+                        at("SetDataPtrDIA") + "\\*offset != NULL");
+    EXPECT_ASSERT_DEATH(E.SetDataPtrDIA(&p, &nulld, "E", n, n, n, n),
+                        at("SetDataPtrDIA") + "\\*val != NULL");
+    EXPECT_ASSERT_DEATH(E.SetDataPtrDENSE(nullptr, "E", n, n),
+                        at("SetDataPtrDENSE") + "[^*]val != NULL");
+    EXPECT_ASSERT_DEATH(E.SetDataPtrDENSE(&nulld, "E", n, n),
+                        at("SetDataPtrDENSE") + "\\*val != NULL");
 
-        // LeaveDataPtr*: every output array must be NULL on entry
-        auto expect_leave_death
-            = [&](const std::string& f, const std::string& first, auto leave, auto rows) {
-                  SCOPED_TRACE(f);
-                  decltype(rows) none = nullptr;
-                  EXPECT_ASSERT_DEATH(leave(&rows, &null, &nulld),
-                                      at(f) + "\\*" + first + " == NULL");
-                  EXPECT_ASSERT_DEATH(leave(&none, &p, &nulld), at(f) + "\\*col == NULL");
-                  EXPECT_ASSERT_DEATH(leave(&none, &null, &d), at(f) + "\\*val == NULL");
-              };
-        expect_leave_death(
-            "LeaveDataPtrCOO",
-            "row",
-            [&](int** row, int** col, T** val) { E.LeaveDataPtrCOO(row, col, val); },
-            p);
-        expect_leave_death(
-            "LeaveDataPtrCSR",
-            "row_offset",
-            [&](PtrType** row_offset, int** col, T** val) {
-                E.LeaveDataPtrCSR(row_offset, col, val);
-            },
-            o);
-        expect_leave_death(
-            "LeaveDataPtrMCSR",
-            "row_offset",
-            [&](int** row_offset, int** col, T** val) { E.LeaveDataPtrMCSR(row_offset, col, val); },
-            p);
-        EXPECT_ASSERT_DEATH(E.LeaveDataPtrELL(&p, &nulld, k),
-                            at("LeaveDataPtrELL") + "\\*col == NULL");
-        EXPECT_ASSERT_DEATH(E.LeaveDataPtrELL(&null, &d, k),
-                            at("LeaveDataPtrELL") + "\\*val == NULL");
-        EXPECT_ASSERT_DEATH(E.LeaveDataPtrDIA(&p, &nulld, k),
-                            at("LeaveDataPtrDIA") + "\\*offset == NULL");
-        EXPECT_ASSERT_DEATH(E.LeaveDataPtrDIA(&null, &d, k),
-                            at("LeaveDataPtrDIA") + "\\*val == NULL");
-        EXPECT_ASSERT_DEATH(E.LeaveDataPtrDENSE(&d), at("LeaveDataPtrDENSE") + "\\*val == NULL");
-    });
+    // LeaveDataPtr*: every output array must be NULL on entry
+    auto expect_leave_death
+        = [&](const std::string& f, const std::string& first, auto leave, auto rows) {
+              SCOPED_TRACE(f);
+              decltype(rows) none = nullptr;
+              EXPECT_ASSERT_DEATH(leave(&rows, &null, &nulld), at(f) + "\\*" + first + " == NULL");
+              EXPECT_ASSERT_DEATH(leave(&none, &p, &nulld), at(f) + "\\*col == NULL");
+              EXPECT_ASSERT_DEATH(leave(&none, &null, &d), at(f) + "\\*val == NULL");
+          };
+    expect_leave_death(
+        "LeaveDataPtrCOO",
+        "row",
+        [&](int** row, int** col, T** val) { E.LeaveDataPtrCOO(row, col, val); },
+        p);
+    expect_leave_death(
+        "LeaveDataPtrCSR",
+        "row_offset",
+        [&](PtrType** row_offset, int** col, T** val) { E.LeaveDataPtrCSR(row_offset, col, val); },
+        o);
+    expect_leave_death(
+        "LeaveDataPtrMCSR",
+        "row_offset",
+        [&](int** row_offset, int** col, T** val) { E.LeaveDataPtrMCSR(row_offset, col, val); },
+        p);
+    EXPECT_ASSERT_DEATH(E.LeaveDataPtrELL(&p, &nulld, k), at("LeaveDataPtrELL") + "\\*col == NULL");
+    EXPECT_ASSERT_DEATH(E.LeaveDataPtrELL(&null, &d, k), at("LeaveDataPtrELL") + "\\*val == NULL");
+    EXPECT_ASSERT_DEATH(E.LeaveDataPtrDIA(&p, &nulld, k),
+                        at("LeaveDataPtrDIA") + "\\*offset == NULL");
+    EXPECT_ASSERT_DEATH(E.LeaveDataPtrDIA(&null, &d, k), at("LeaveDataPtrDIA") + "\\*val == NULL");
+    EXPECT_ASSERT_DEATH(E.LeaveDataPtrDENSE(&d), at("LeaveDataPtrDENSE") + "\\*val == NULL");
 }
 
 // As on the host (host_matrix_csr_DeathTest), IC(0) of a row without a diagonal
@@ -4771,6 +4776,84 @@ TEST(local_matrix_DeathTest,
     EXPECT_FATAL_ERROR(A->LUAnalyseClear(), "base_matrix\\.cpp");
 }
 
+// An LL-analysed matrix moves to the host, also after LAnalyseClear, and is analysed and
+// solved again there and, after moving back, on the device
+TEST(local_matrix_moves, an_ll_analysed_matrix_is_analysed_again_after_moves)
+{
+    REQUIRE_BACKEND(Backend::Accelerator);
+    for_each_type<RealTypes>([&](auto type) {
+        using T = typename decltype(type)::type;
+
+        const Csr<T>         s = spd<T>();
+        const std::vector<T> b = rhs<T>(s.n);
+
+        for(bool cleared : {true, false})
+        {
+            SCOPED_TRACE(cleared ? "LAnalyseClear before the move" : "no clear before the move");
+            auto L   = make_local_matrix(Backend::Accelerator, lower(s, true));
+            auto inv = make_local_vector(Backend::Accelerator, std::vector<T>());
+            L->ICFactorize(inv.get());
+
+            auto expect_ll_solve = [&](Backend on) {
+                auto x = make_local_vector(on, std::vector<T>(s.n, 0.0));
+                L->LLSolve(*make_local_vector(on, b), x.get());
+                EXPECT_EQ(backend_of(*x), backend_name(on));
+                expect_close(s.apply(values_of(*x)), b, loose_tol<T>(1e-10));
+            };
+
+            L->LLAnalyse();
+            expect_ll_solve(Backend::Accelerator);
+            if(cleared)
+            {
+                L->LAnalyseClear();
+            }
+            L->MoveToHost();
+
+            L->LLAnalyse();
+            expect_ll_solve(Backend::Host);
+            L->LLAnalyseClear();
+
+            L->MoveToAccelerator();
+            L->LLAnalyse();
+            expect_ll_solve(Backend::Accelerator);
+            L->LLAnalyseClear();
+            EXPECT_EQ(backend_of(*L), backend_name(Backend::Accelerator));
+        }
+    });
+}
+
+// The header pairs LLAnalyse with LLAnalyseClear, but the host also accepts LAnalyseClear
+// before the next LLAnalyse. Without asserts, HIP leaks a vector there, which the child
+// cannot see.
+TEST(local_matrix_analyses, an_l_analysis_clear_between_two_ll_analyses_on_the_accelerator)
+{
+    REQUIRE_BACKEND(Backend::Accelerator);
+    if(!hip_has_asserts)
+    {
+        GTEST_SKIP() << "only a build with asserts shows whether HIP accepts LAnalyseClear "
+                        "between two LLAnalyse calls";
+    }
+    KNOWN_BUG("after LLAnalyse, the HIP LAnalyseClear keeps tmp_vec_, and the next LLAnalyse "
+              "asserts on it, or without asserts leaks it");
+    for_each_type<RealTypes>([&](auto type) {
+        using T = typename decltype(type)::type;
+
+        const Csr<T>         s = spd<T>();
+        const std::vector<T> b = rhs<T>(s.n);
+        expect_in_child([&] {
+            auto L   = make_local_matrix(Backend::Accelerator, lower(s, true));
+            auto inv = make_local_vector(Backend::Accelerator, std::vector<T>());
+            L->ICFactorize(inv.get());
+            L->LLAnalyse();
+            L->LAnalyseClear();
+            L->LLAnalyse();
+            auto x = make_local_vector(Backend::Accelerator, std::vector<T>(s.n, 0.0));
+            L->LLSolve(*make_local_vector(Backend::Accelerator, b), x.get());
+            expect_close(s.apply(values_of(*x)), b, loose_tol<T>(1e-10));
+        });
+    });
+}
+
 // LocalStencil, the other local Operator, keeps the async moves and Sync of
 // BaseRocalution
 
@@ -4813,73 +4896,6 @@ TEST(local_stencil_DeathTest, null_output_ends_the_program)
         rocalution::LocalVector<T>  x;
         EXPECT_ASSERT_DEATH(S.Apply(x, nullptr), "out != NULL");
         EXPECT_ASSERT_DEATH(S.ApplyAdd(x, T(1), nullptr), "out != NULL");
-    });
-}
-
-// An LL-analysed matrix moves to the host, also after LAnalyseClear, and is analysed and
-// solved again there and, after moving back, on the device
-TEST(local_matrix_moves, an_analysed_matrix_is_analysed_again_after_moves)
-{
-    REQUIRE_BACKEND(Backend::Accelerator);
-    for_each_type<RealTypes>([&](auto type) {
-        using T = typename decltype(type)::type;
-
-        const Csr<T>         s = spd<T>();
-        const std::vector<T> b = rhs<T>(s.n);
-
-        for(bool cleared : {true, false})
-        {
-            SCOPED_TRACE(cleared ? "LAnalyseClear before the move" : "no clear before the move");
-            auto L   = make_local_matrix(Backend::Accelerator, lower(s, true));
-            auto inv = make_local_vector(Backend::Accelerator, std::vector<T>());
-            L->ICFactorize(inv.get());
-
-            auto expect_ll_solve = [&](Backend on) {
-                auto x = make_local_vector(on, std::vector<T>(s.n, 0.0));
-                L->LLSolve(*make_local_vector(on, b), x.get());
-                EXPECT_EQ(backend_of(*x), backend_name(on));
-                expect_close(s.apply(values_of(*x)), b, loose_tol<T>(1e-10));
-            };
-
-            L->LLAnalyse();
-            expect_ll_solve(Backend::Accelerator);
-            if(cleared)
-            {
-                L->LAnalyseClear();
-            }
-            L->MoveToHost();
-
-            L->LLAnalyse();
-            expect_ll_solve(Backend::Host);
-            L->LLAnalyseClear();
-
-            L->MoveToAccelerator();
-            L->LLAnalyse();
-            expect_ll_solve(Backend::Accelerator);
-            L->LLAnalyseClear();
-            EXPECT_EQ(backend_of(*L), backend_name(Backend::Accelerator));
-        }
-
-        // Without a move in between. The header pairs LLAnalyse with LLAnalyseClear, but
-        // the host also accepts LAnalyseClear before the next LLAnalyse. Without asserts,
-        // HIP leaks a vector there, which the child cannot see.
-#ifdef NDEBUG
-        GTEST_SKIP() << "only a build with asserts shows whether HIP accepts LAnalyseClear "
-                        "between two LLAnalyse calls";
-#endif
-        KNOWN_BUG("after LLAnalyse, the HIP LAnalyseClear keeps tmp_vec_, and the next LLAnalyse "
-                  "asserts on it, or without asserts leaks it");
-        expect_in_child([&] {
-            auto L   = make_local_matrix(Backend::Accelerator, lower(s, true));
-            auto inv = make_local_vector(Backend::Accelerator, std::vector<T>());
-            L->ICFactorize(inv.get());
-            L->LLAnalyse();
-            L->LAnalyseClear();
-            L->LLAnalyse();
-            auto x = make_local_vector(Backend::Accelerator, std::vector<T>(s.n, 0.0));
-            L->LLSolve(*make_local_vector(Backend::Accelerator, b), x.get());
-            expect_close(s.apply(values_of(*x)), b, loose_tol<T>(1e-10));
-        });
     });
 }
 

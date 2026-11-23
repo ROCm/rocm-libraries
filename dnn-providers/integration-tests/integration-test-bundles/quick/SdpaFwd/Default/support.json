@@ -1,5 +1,22 @@
 {
   "claims": {
+    "ASM_SDPA_ENGINE": [
+      {
+        "cases": [
+          "1_2_384_128_bfp16_nhwc_attn_scale_value0p08839_diagonal_alignmentbottom_right_right_bound0",
+          "1_32_512_128_bfp16_nhwc_attn_scale_value0p08839_diagonal_alignmentbottom_right_right_bound0",
+          "1_4_512_128_bfp16_nhwc_attn_scale_value0p08839_diagonal_alignmentbottom_right_right_bound0",
+          "1_8_8192_128_bfp16_nhwc_attn_scale_value0p08839_diagonal_alignmentbottom_right_right_bound0",
+          "2_16_1_128_bfp16_nhwc_decode_hkv2_skv384_causal_br",
+          "4_1_256_128_bfp16_nchw_attn_scale_value0p08839_diagonal_alignmentbottom_right_right_bound0"
+        ],
+        "support": {
+          "gfx942": [
+            "linux"
+          ]
+        }
+      }
+    ],
     "hipkernel:Gfx942AttentionDense": [
       {
         "cases": [
