@@ -44,11 +44,11 @@
 namespace rocsparse
 {
     // True when the wide kernels run instead of the narrow (rocsparse_int)
-    // ones: mb itself does not fit in rocsparse_int, a vector offset
-    // row * block_dim does not fit, or the in-block offset bi * block_dim does
-    // not fit. The block value offset block_dim * block_dim * j is formed in
-    // int64_t on both paths (by BSR_IND and bsrsv_wide_ind), so nnzb does not
-    // decide.
+    // ones: mb itself does not fit in rocsparse_int, or the in-block offset
+    // bi * block_dim, which BSR_IND forms in 32 bits, does not fit. Both paths
+    // form the vector offsets row * block_dim and the block value offset
+    // block_dim * block_dim * j in int64_t, so neither mb * block_dim nor nnzb
+    // decides.
     __host__ __forceinline__ bool bsrsv_solve_needs_wide(int64_t mb, int64_t block_dim)
     {
         if(mb <= 0 || block_dim <= 0)
@@ -58,11 +58,6 @@ namespace rocsparse
 
         const int64_t narrow_max = static_cast<int64_t>(std::numeric_limits<rocsparse_int>::max());
         if(mb > narrow_max)
-        {
-            return true;
-        }
-
-        if(block_dim > narrow_max / mb)
         {
             return true;
         }

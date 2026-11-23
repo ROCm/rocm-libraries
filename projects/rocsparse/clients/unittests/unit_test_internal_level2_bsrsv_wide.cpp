@@ -1398,9 +1398,10 @@ TEST_F(internal_level2_bsrsv_wide, needs_wide_predicate_boundaries)
     EXPECT_FALSE(rocsparse::bsrsv_solve_needs_wide(i32max, 1));
     EXPECT_TRUE(rocsparse::bsrsv_solve_needs_wide(i32max + 1, 1));
 
-    // mb * block_dim at and past INT32_MAX (1048576 * 2047 fits, 1048576 * 2048 does not).
+    // mb * block_dim past INT32_MAX stays narrow: those kernels form the
+    // vector offsets in 64 bits.
     EXPECT_FALSE(rocsparse::bsrsv_solve_needs_wide(1048576, 2047));
-    EXPECT_TRUE(rocsparse::bsrsv_solve_needs_wide(1048576, 2048));
+    EXPECT_FALSE(rocsparse::bsrsv_solve_needs_wide(1048576, 2048));
 
     // block_dim * block_dim alone: 46340^2 fits, 46341^2 does not.
     EXPECT_FALSE(rocsparse::bsrsv_solve_needs_wide(1, 46340));
