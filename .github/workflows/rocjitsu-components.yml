@@ -7,7 +7,7 @@ name: rocJITsu Component Tests
 # selected CTest label (default ^quick$). A comma-separated components list
 # narrows that set. Names match the directory under the nightly bin/ tree.
 #
-# Test jobs run on az-linux-scale-rocm-asan-prod-2. The prepare job only
+# Test jobs run on az-linux-scale-rocm-default-prod. The prepare job only
 # lists components and stays on a GitHub-hosted runner.
 
 on:
@@ -96,7 +96,7 @@ jobs:
     name: ${{ matrix.component }} under rocJITsu
     needs: prepare
     if: needs.prepare.outputs.matrix != '' && needs.prepare.outputs.matrix != '{"include":[]}'
-    runs-on: az-linux-scale-rocm-asan-prod-2
+    runs-on: az-linux-scale-rocm-default-prod
     timeout-minutes: 360
     strategy:
       fail-fast: false
@@ -111,7 +111,7 @@ jobs:
       CTEST_LABEL: ${{ inputs.ctest_label || '^quick$' }}
       ROCJITSU_ARG: ${{ inputs.rocjitsu_arg }}
       COMPONENT: ${{ matrix.component }}
-      BUILD_RUNS_ON: az-linux-scale-rocm-asan-prod-2
+      BUILD_RUNS_ON: az-linux-scale-rocm-default-prod
       # Same pin as hiprand-rocjitsu-parity.yml: after ROCm/rocm-systems#12515
       # and #12618.
       ROCM_SYSTEMS_REF: 7e7420053ea9c896034a073eb53c0e71f7a19de0
