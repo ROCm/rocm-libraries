@@ -28,21 +28,24 @@
 //   - handle construction with logging, the logging helpers, the
 //     argument-descriptor getters, the hip status translation and the debug
 //     switches,
+//   - the HIP error and kernel-launch macros of rocsparse_control.hpp,
 //   - the CSR triangular split and copy_csrmv_info.
 // Coverage counts a line only when every branch of that line has run, so each
-// check is taken on both sides. Only the CSR triangular split launches a
-// (tiny) kernel; the ITILU0 x-impls return from argument checks, from the
-// m == 0 / nnz == 0 shortcuts, or from the async-inplace dispatch (that case
-// returns internal_error before the driver).
+// check is taken on both sides. Only the CSR triangular split and the launch
+// macros launch a (tiny) kernel; the ITILU0 x-impls return from argument
+// checks, from the m == 0 / nnz == 0 shortcuts, or from the async-inplace
+// dispatch (that case returns internal_error before the driver).
 
 #include "unit_test_host_utils.hpp"
 
 #include "rocsparse-debugging.h"
+#include "rocsparse_control.hpp"
 #include "rocsparse_csritilu0x_buffer_size.hpp"
 #include "rocsparse_csritilu0x_compute.hpp"
 #include "rocsparse_csritilu0x_preprocess.hpp"
 #include "rocsparse_csrmv_info.hpp"
 #include "rocsparse_csxsldu.hpp"
+#include "rocsparse_enum_utils.hpp"
 #include "rocsparse_handle.hpp"
 #include "rocsparse_logging.hpp"
 #include "rocsparse_templates.hpp"
@@ -51,6 +54,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
+#include <functional>
 #include <iterator>
 #include <new>
 #include <sstream>
@@ -517,6 +521,116 @@ namespace
             *uptr_out = to_host(uptr);
         return status;
     }
+
+    // Each wrapper runs one *_IF_HIP_ERROR macro and reports the macro's line, so
+    // the verbose trace can be checked against the caller location. The THROW
+    // wrappers return the thrown status, or success when nothing is thrown.
+    rocsparse_status return_if_hip_error(hipError_t error, int& line)
+    {
+        line = __LINE__ + 1;
+        RETURN_IF_HIP_ERROR(error);
+        return rocsparse_status_success;
+    }
+
+    rocsparse_status return_with_message_if_hip_error(hipError_t error, int& line)
+    {
+        line = __LINE__ + 1;
+        RETURN_WITH_MESSAGE_IF_HIP_ERROR(error, "macro message");
+        return rocsparse_status_success;
+    }
+
+    rocsparse_status throw_if_hip_error(hipError_t error, int& line)
+    {
+        try
+        {
+            line = __LINE__ + 1;
+            THROW_IF_HIP_ERROR(error);
+        }
+        catch(const rocsparse_status& status)
+        {
+            return status;
+        }
+        return rocsparse_status_success;
+    }
+
+    rocsparse_status throw_with_message_if_hip_error(hipError_t error, int& line)
+    {
+        try
+        {
+            line = __LINE__ + 1;
+            THROW_WITH_MESSAGE_IF_HIP_ERROR(error, "macro message");
+        }
+        catch(const rocsparse_status& status)
+        {
+            return status;
+        }
+        return rocsparse_status_success;
+    }
+
+    hipError_t forward_if_hip_error(hipError_t error, int& line)
+    {
+        line = __LINE__ + 1;
+        FORWARD_IF_HIP_ERROR(error);
+        return hipSuccess;
+    }
+
+    hipError_t forward_with_message_if_hip_error(hipError_t error, int& line)
+    {
+        line = __LINE__ + 1;
+        FORWARD_WITH_MESSAGE_IF_HIP_ERROR(error, "macro message");
+        return hipSuccess;
+    }
+
+    void print_if_hip_error(hipError_t error, int& line)
+    {
+        line = __LINE__ + 1;
+        PRINT_IF_HIP_ERROR(error);
+    }
+
+    void expect_hip_error_trace(const std::string& trace,
+                                const char*        function,
+                                int                line,
+                                rocsparse_status   status,
+                                const std::string& msg)
+    {
+        const auto has
+            = [&](const std::string& field) { return trace.find(field) != std::string::npos; };
+        EXPECT_TRUE(has(std::string("\"function\": \"") + function + "\"")) << trace;
+        EXPECT_TRUE(has("\"line\"    : \"" + std::to_string(line) + "\"")) << trace;
+        EXPECT_TRUE(has(std::string("\"file\"    : \"") + __FILE__ + "\"")) << trace;
+        EXPECT_TRUE(
+            has(std::string("\"status\"  : \"") + rocsparse::enum_utils::to_string(status) + "\""))
+            << trace;
+        EXPECT_TRUE(has("\"msg\"     : \"" + msg + "\" }")) << trace;
+    }
+
+    __global__ void k_count_launches(int* count)
+    {
+        if(threadIdx.x == 0)
+        {
+            atomicAdd(count, 1);
+        }
+    }
+
+    rocsparse_status return_after_launch(dim3 threads, int* count)
+    {
+        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(k_count_launches, dim3(1), threads, 0, 0, count);
+        return rocsparse_status_success;
+    }
+
+    rocsparse_status throw_after_launch(dim3 threads, int* count)
+    {
+        try
+        {
+            THROW_IF_HIPLAUNCHKERNELGGL_ERROR(k_count_launches, dim3(1), threads, 0, 0, count);
+        }
+        catch(const rocsparse_status& status)
+        {
+            return status;
+        }
+        return rocsparse_status_success;
+    }
+
     class HostInternalBranches : public HandleTest
     {
     };
@@ -903,6 +1017,157 @@ TEST_F(HostInternalBranches, hip_status_and_exceptions)
     EXPECT_EQ(status_of(rocsparse_status_invalid_pointer), rocsparse_status_invalid_pointer);
     EXPECT_EQ(status_of(std::bad_alloc()), rocsparse_status_memory_error);
     EXPECT_EQ(status_of(1), rocsparse_status_thrown_exception);
+}
+
+// The *_IF_HIP_ERROR macros share one out-of-line logger. RETURN and THROW give
+// the mapped status, FORWARD gives the original hipError_t, and each traces the
+// same text, with its prefix, at the caller's location. hipSuccess takes no
+// branch, and the trace is printed only in verbose mode.
+TEST_F(HostInternalBranches, hip_error_macros)
+{
+    const debug_state_guard restore;
+    rocsparse_enable_debug_verbose();
+
+    // hipErrorInvalidDevice maps to invalid_handle rather than the default
+    // internal_error, so a FORWARD that returned the mapped status would show.
+    const hipError_t       error  = hipErrorInvalidDevice;
+    const rocsparse_status mapped = rocsparse_status_invalid_handle;
+    const std::string      detected
+        = "hip error detected: code '" + std::to_string(static_cast<int>(error))
+          + "', name 'hipErrorInvalidDevice', description '" + hipGetErrorString(error) + "'";
+    const std::string message = "macro message, ";
+
+    struct Case
+    {
+        const char*                          function;
+        std::string                          msg;
+        std::function<int(hipError_t, int&)> run;
+        int                                  expected;
+    };
+    const Case cases[]
+        = {{"return_if_hip_error",
+            detected,
+            [](hipError_t e, int& l) { return int(return_if_hip_error(e, l)); },
+            mapped},
+           {"return_with_message_if_hip_error",
+            message + detected,
+            [](hipError_t e, int& l) { return int(return_with_message_if_hip_error(e, l)); },
+            mapped},
+           {"throw_if_hip_error",
+            detected,
+            [](hipError_t e, int& l) { return int(throw_if_hip_error(e, l)); },
+            mapped},
+           {"throw_with_message_if_hip_error",
+            message + detected,
+            [](hipError_t e, int& l) { return int(throw_with_message_if_hip_error(e, l)); },
+            mapped},
+           {"forward_if_hip_error",
+            detected,
+            [](hipError_t e, int& l) { return int(forward_if_hip_error(e, l)); },
+            error},
+           {"forward_with_message_if_hip_error",
+            message + detected,
+            [](hipError_t e, int& l) { return int(forward_with_message_if_hip_error(e, l)); },
+            error},
+           {"print_if_hip_error",
+            detected,
+            [](hipError_t e, int& l) {
+                print_if_hip_error(e, l);
+                return 0;
+            },
+            0}};
+
+    for(const auto& c : cases)
+    {
+        int line = 0;
+        testing::internal::CaptureStdout();
+        const int         success = c.run(hipSuccess, line);
+        const std::string quiet   = testing::internal::GetCapturedStdout();
+        testing::internal::CaptureStdout();
+        const int         failure = c.run(error, line);
+        const std::string trace   = testing::internal::GetCapturedStdout();
+
+        EXPECT_EQ(success, 0) << c.function;
+        EXPECT_EQ(quiet, "") << c.function;
+        EXPECT_EQ(failure, c.expected) << c.function;
+        expect_hip_error_trace(trace, c.function, line, mapped, c.msg);
+    }
+
+    rocsparse_disable_debug_verbose();
+    int line = 0;
+    testing::internal::CaptureStdout();
+    const rocsparse_status silent = return_if_hip_error(error, line);
+    EXPECT_EQ(testing::internal::GetCapturedStdout(), "");
+    EXPECT_EQ(silent, mapped);
+}
+
+// With kernel-launch debugging on, the launch macros read hipGetLastError()
+// before and after the launch: a pending error is reported without launching,
+// and a rejected launch is reported after it. With debugging off neither check
+// runs, so the kernel launches past a pending error and a rejected launch
+// returns success with its error left pending. Either way the kernel runs at
+// most once.
+TEST_F(HostInternalBranches, kernel_launch_macros)
+{
+    const debug_state_guard restore;
+    device_vector<int>      count{std::vector<int>{0}};
+    ASSERT_TRUE(count.ptr);
+
+    struct Outcome
+    {
+        rocsparse_status status;
+        hipError_t       pending;
+        int              launches;
+    };
+    // hipSetDevice(-1) leaves hipErrorInvalidDevice pending, which maps to
+    // invalid_handle. A 2048-thread block is rejected, which maps to internal_error.
+    const auto run = [&](rocsparse_status (*launch)(dim3, int*), bool prior_error, dim3 threads) {
+        EXPECT_EQ(hipMemset(count.ptr, 0, sizeof(int)), hipSuccess);
+        (void)hipGetLastError();
+        if(prior_error)
+        {
+            EXPECT_EQ(hipSetDevice(-1), hipErrorInvalidDevice);
+        }
+        Outcome outcome;
+        outcome.status  = launch(threads, count.ptr);
+        outcome.pending = hipGetLastError();
+        EXPECT_EQ(hipDeviceSynchronize(), hipSuccess);
+        outcome.launches = to_host(count)[0];
+        return outcome;
+    };
+
+    const std::pair<const char*, rocsparse_status (*)(dim3, int*)> launchers[]
+        = {{"RETURN_IF_HIPLAUNCHKERNELGGL_ERROR", return_after_launch},
+           {"THROW_IF_HIPLAUNCHKERNELGGL_ERROR", throw_after_launch}};
+    for(const auto& [name, launch] : launchers)
+    {
+        SCOPED_TRACE(name);
+        rocsparse_enable_debug_kernel_launch();
+        Outcome o = run(launch, false, dim3(1));
+        EXPECT_EQ(o.status, rocsparse_status_success);
+        EXPECT_EQ(o.pending, hipSuccess);
+        EXPECT_EQ(o.launches, 1);
+
+        o = run(launch, true, dim3(1));
+        EXPECT_EQ(o.status, rocsparse_status_invalid_handle);
+        EXPECT_EQ(o.pending, hipSuccess);
+        EXPECT_EQ(o.launches, 0);
+
+        o = run(launch, false, dim3(2048));
+        EXPECT_EQ(o.status, rocsparse_status_internal_error);
+        EXPECT_EQ(o.pending, hipSuccess);
+        EXPECT_EQ(o.launches, 0);
+
+        rocsparse_disable_debug_kernel_launch();
+        o = run(launch, true, dim3(1));
+        EXPECT_EQ(o.status, rocsparse_status_success);
+        EXPECT_EQ(o.launches, 1);
+
+        o = run(launch, false, dim3(2048));
+        EXPECT_EQ(o.status, rocsparse_status_success);
+        EXPECT_NE(o.pending, hipSuccess);
+        EXPECT_EQ(o.launches, 0);
+    }
 }
 
 // The argument-descriptor getters are exported but the clients only read the

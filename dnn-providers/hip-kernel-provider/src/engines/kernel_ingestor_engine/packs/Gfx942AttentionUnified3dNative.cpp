@@ -642,6 +642,15 @@ std::optional<BoundTokens> gfx942AttentionUnified3dGraphMatches(const MatchConte
                                << " is not supported; the kernel runs HALF or BFLOAT16 MFMA");
         return std::nullopt;
     }
+    // The kernel accumulates and keeps the softmax statistics in FLOAT.
+    if(!sdpa_graph::computesInFloat(context))
+    {
+        HIPDNN_PLUGIN_LOG_INFO(Declined{"compute_data_type"}
+                               << "compute data type "
+                               << context.graph.getNodeWrapper(0).computeDataType()
+                               << " is not supported; the kernel accumulates in FLOAT");
+        return std::nullopt;
+    }
     if(attributes.implementation() != data_objects::AttentionImplementation::AUTO)
     {
         HIPDNN_PLUGIN_LOG_INFO(Declined{"implementation"} << "implementation hint "

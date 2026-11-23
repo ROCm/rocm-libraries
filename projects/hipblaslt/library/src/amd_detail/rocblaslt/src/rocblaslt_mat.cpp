@@ -243,6 +243,7 @@ rocblaslt_status rocblaslt_matmul_impl(const rocblaslt_handle       handle,
 
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
     problem.fused_epilogue      = matmul_descr->fused_epilogue;
+    problem.fused_prologue      = matmul_descr->fused_prologue;
     problem.fused_a2a_world     = handle->device_comm_world;
     problem.fused_a2a_rank      = handle->device_comm_rank;
     problem.fused_a2a_peer_flag = handle->device_comm_peer_flags;
@@ -476,10 +477,11 @@ rocblaslt_status rocblaslt_gemm_create_cpp_impl(const rocblaslt_handle          
 
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
     problem.fused_epilogue = matmul_descr->fused_epilogue;
+    problem.fused_prologue = matmul_descr->fused_prologue;
 
     // The all-to-all stage is available through hipblasLtMatmul only.
     RocblasltFusedEpilogueInfo fused_info;
-    if(rocblaslt_resolve_fused_a2a(problem, fused_info))
+    if(rocblaslt_resolve_fused_a2a(problem, fused_info) || fused_info.misattached)
     {
         log_error(__func__, "fused all-to-all is not available through the extension GEMM API");
         return rocblaslt_status_invalid_value;
@@ -1249,6 +1251,8 @@ rocblaslt_status rocblaslt_gemm_create_cpp_impl_2(const rocblaslt_handle handle,
         effective_uniform_summation_order(handle, nullptr)};
     problem.int4EncodingA = problemtype.int4_encoding_a;
     problem.deviceScalarAlpha = inputs.deviceScalarAlpha;
+    if constexpr(std::is_same<Inputs, rocblaslt::RocGemmInputsV2>::value)
+        problem.dPeer = inputs.dPeer;
     return gemmCreate(problem, gemmData, gemmCount);
 }
 
@@ -1707,8 +1711,8 @@ rocblaslt_status
             return rocblaslt_status_invalid_handle;
         }
 
-        if(matA[i]->type != matB[i]->type || matC[i]->type != matD[i]->type
-           || matA[0]->type != matA[i]->type || matC[0]->type != matC[i]->type)
+        if(matC[i]->type != matD[i]->type || matA[0]->type != matA[i]->type
+           || matB[0]->type != matB[i]->type || matC[0]->type != matC[i]->type)
         {
             log_error(__func__, "invalid  matrix datatype");
             return rocblaslt_status_type_mismatch;
@@ -1716,7 +1720,7 @@ rocblaslt_status
 
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
         RocblasltFusedEpilogueInfo fused_info;
-        if(rocblaslt_resolve_fused_a2a(*matmul_descr[i], fused_info))
+        if(rocblaslt_resolve_fused_a2a(*matmul_descr[i], fused_info) || fused_info.misattached)
         {
             log_error(__func__, "fused all-to-all is not available through the extension GEMM API");
             return rocblaslt_status_invalid_value;

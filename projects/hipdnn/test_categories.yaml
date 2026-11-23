@@ -53,6 +53,9 @@ test_categories:
       - "hipdnn_frontend_cudnn_v8_dynamic_link_tests"
       - "hipdnn_test_sdk_tests"
       - "hipdnn_plugin_sdk_tests"
+      # Build tree with the kernel ingestor only (HIPDNN_ENABLE_KERNEL_INGESTOR), like the
+      # pytest suites below.
+      - "hipdnn_tools_common_tests"
       - "hipdnn_bench_tests"
       - "hipdnn_corpus_gen_tests"
       - "hipdnn_corpus_gen_frontend_tests"
@@ -89,6 +92,9 @@ test_categories:
       - "hipdnn_validate_descriptors_smoke_multi_launch"
       - "hipdnn_validate_descriptors_l2_static_order"
       - "hipdnn_validate_descriptors_l2_dynamic_features"
+      - "hipdnn_validate_descriptors_l2_unguarded_optional"
+      - "hipdnn_validate_descriptors_l2_guarded_optional"
+      - "hipdnn_validate_descriptors_l2_tflops_work_feature"
       - "hipdnn_validate_descriptors_l1_static_order"
       - "hipdnn_validate_descriptors_l1_native"
       - "hipdnn_validate_descriptors_slotted_.*"

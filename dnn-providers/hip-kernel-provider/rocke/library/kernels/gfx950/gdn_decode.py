@@ -115,7 +115,7 @@ from rocke.core.ir import (
     TemporalHint,
     Value,
 )
-from rocke.helpers.grid import NUM_XCDS_MI350X
+from rocke.helpers.grid import NUM_XCDS_MI350X, xcd_remap
 from rocke.helpers.io import (
     io_ir_type,
     load_scalar_as_f32,
@@ -1167,25 +1167,6 @@ def _build_simple(spec: GdnDecodeSpec) -> KernelDef:
     return b.kernel
 
 
-def _xcd_remap(b: IRBuilder, pid, npid):
-    """Logical workgroup id for hardware id ``pid`` of ``npid`` (xcd_remap).
-
-    The hardware hands workgroup ``pid`` to XCD ``x = pid % 8``. XCD ``x``
-    gets the contiguous range starting at ``x * ceil(npid / 8)``, minus one
-    slot for each earlier XCD that received one fewer workgroup when ``npid``
-    is not a multiple of 8. A bijection on ``[0, npid)``.
-    """
-    # Not helpers.grid.chiplet_transform_chunked: that maps fixed-size chunks
-    # and leaves a tail at identity; this gives each XCD one ceil(npid / 8)
-    # range, so no workgroup keeps its hardware order.
-    n = b.const_i32(NUM_XCDS_MI350X)
-    xcd = b.mod(pid, n)
-    tall = b.add(b.mod(b.sub(npid, b.const_i32(1)), n), b.const_i32(1))
-    per = b.div(b.add(npid, b.const_i32(NUM_XCDS_MI350X - 1)), n)
-    short = b.smax(b.sub(xcd, tall), b.const_i32(0))
-    return b.sub(b.add(b.div(pid, n), b.mul(xcd, per)), short)
-
-
 @dataclass(frozen=True)
 class _Tile:
     """Geometry of the warp-tiled body, in plain ints (no IR).
@@ -1490,7 +1471,15 @@ def _active_lane(
     tid = b.thread_id_x()
     bidx = b.block_id_x()
     if spec.xcd_remap_on:
-        bidx = _xcd_remap(b, bidx, b.mul(a.batch_size, b.const_i32(t.HV * t.BPV)))
+        # one contiguous ceil(npid / 8) range per XCD: the chunked remap would
+        # leave a tail of npid % 8 ids at identity
+        bidx = xcd_remap(
+            b,
+            bidx,
+            num_wgs=b.mul(a.batch_size, b.const_i32(t.HV * t.BPV)),
+            num_xcds=NUM_XCDS_MI350X,
+            mode="contiguous",
+        )
     b_hv_i = b.div(bidx, b.const_i32(t.BPV))
     tile_v_start = b.mul(b.mod(bidx, b.const_i32(t.BPV)), b.const_i32(t.TILE_V))
     b_i = b.div(b_hv_i, b.const_i32(t.HV))

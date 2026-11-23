@@ -41,8 +41,8 @@
 #include "device/ScopedDevice.hpp"
 #include "engines/kernel_ingestor_engine/IngestorKernelCode.hpp"
 #include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
+#include "engines/kernel_ingestor_engine/packs/ConvAotGraphPredicates.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvDgradAotGeometry.hpp"
-#include "engines/kernel_ingestor_engine/packs/Gfx950ConvGraphPredicates.hpp"
 
 /// @file ConvDgradAotNative.cpp
 /// hipkernel:Gfx950ConvDgradAot and hipkernel:Gfx1250ConvDgradAot: shape-generic AOT
@@ -133,9 +133,9 @@ const data_objects::TensorAttributes* findTensor(const MatchContext& context, in
     return it == tensors.end() ? nullptr : it->second;
 }
 
-using gfx950_conv::hasPackedNhwcStrides;
-using gfx950_conv::hasSpatialRankTwo;
-using gfx950_conv::isDeviceTensor;
+using conv_aot::hasPackedNhwcStrides;
+using conv_aot::hasSpatialRankTwo;
+using conv_aot::isDeviceTensor;
 
 /// The graph contract: one ConvolutionBwdAttributes node on @p engine's architecture (at
 /// its wave size) with FLOAT accumulation, cross-correlation, 2-D symmetric padding, three

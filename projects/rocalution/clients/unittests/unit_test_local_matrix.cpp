@@ -168,15 +168,15 @@ namespace
         EXPECT_EQ(warned, !native) << operation << " logged:\n" << log;
     }
 
-    // The formats with an analysis for the triangular solves. In the others the
-    // analysis ends the program, and the solves fall back to the host.
+    // The formats whose triangular solve analysis does not end the program. The DENSE
+    // LU analysis does nothing.
     bool has_analysis(Backend b, unsigned int format, const std::string& solve)
     {
         if(b == Backend::Accelerator)
         {
-            return format == CSR || format == BCSR;
+            return format == CSR || format == BCSR || (solve == "LU" && format == DENSE);
         }
-        return format == CSR || (solve == "LU" && format == MCSR);
+        return format == CSR || (solve == "LU" && (format == MCSR || format == DENSE));
     }
 
     // Nonsymmetric and diagonally dominant, with lower bandwidth 1, so that ILU(0)
@@ -626,11 +626,37 @@ TYPED_TEST(local_matrix, allocate_sets_the_format_and_the_sizes)
 
     auto B = empty_local_matrix<T>(this->backend());
     B->AllocateBCSR("B", 3, 2, 3, 3);
-    KNOWN_BUG("AllocateBCSR of a matrix not in BCSR uses block dimension 2");
     EXPECT_EQ(B->GetBlockDimension(), 3);
     EXPECT_EQ(B->GetM(), 6);
     EXPECT_EQ(B->GetN(), 9);
     EXPECT_EQ(B->GetNnz(), 27);
+
+    // A BCSR matrix takes the new block dimension, also without entries
+    B->AllocateBCSR("B", 3, 3, 2, 2);
+    EXPECT_EQ(B->GetBlockDimension(), 2);
+    EXPECT_EQ(B->GetM(), 6);
+    EXPECT_EQ(B->GetN(), 4);
+    EXPECT_EQ(B->GetNnz(), 12);
+    B->AllocateBCSR("B", 0, 2, 2, 3);
+    EXPECT_EQ(B->GetBlockDimension(), 3);
+    EXPECT_EQ(B->GetNnz(), 0);
+    B->ConvertTo(BCSR);
+    EXPECT_EQ(B->GetBlockDimension(), 3);
+
+    // Without entries too, sizes that are not a multiple of the block dimension stay
+    // CSR instead of being padded
+    auto E = empty_local_matrix<T>(this->backend());
+    E->AllocateCSR("E", 0, 4, 4);
+    E->ConvertToBCSR(3);
+    EXPECT_EQ(E->GetFormat(), CSR);
+    EXPECT_EQ(E->GetM(), 4);
+    EXPECT_EQ(E->GetN(), 4);
+    E->ConvertToBCSR(2);
+    EXPECT_EQ(E->GetFormat(), BCSR);
+    EXPECT_EQ(E->GetBlockDimension(), 2);
+    EXPECT_EQ(E->GetM(), 4);
+    EXPECT_EQ(E->GetN(), 4);
+    EXPECT_EQ(backend_of(*E), backend_name(this->backend()));
 }
 
 // Only a GlobalMatrix has a ghost part. As an Operator, a LocalMatrix is all local.
@@ -689,7 +715,9 @@ TEST_P(local_matrix_data_ptr, leave_and_set_data_ptr_hand_over_the_arrays)
             break;
         case BCSR:
         {
-            int blockdim = format().blockdim;
+            // For a BCSR matrix the block dimension is only an output, so another valid
+            // one must not convert it
+            int blockdim = format().blockdim + 1;
             A->LeaveDataPtrBCSR(&row, &col, &val, blockdim);
             EXPECT_EQ(blockdim, format().blockdim);
             B->SetDataPtrBCSR(&row,
@@ -981,11 +1009,14 @@ TEST_P(local_matrix_formats, converts_between_formats_on_its_backend)
         B->ConvertToHYB();
         B->ConvertToBCSR(3);
         expect_matrix(*B, ref, Format{BCSR, 3}, backend());
+
+        // With a block dimension of 1 or less, a BCSR matrix keeps its own
+        B->ConvertTo(BCSR);
+        B->ConvertTo(BCSR, 0);
+        B->ConvertToBCSR(1);
+        expect_matrix(*B, ref, Format{BCSR, 3}, backend());
+
         B->ConvertTo(format().id, format().blockdim);
-        if(is(BCSR))
-        {
-            KNOWN_BUG("ConvertTo keeps the block dimension of a BCSR matrix");
-        }
         expect_kept(*B, ref);
     });
 }
@@ -1008,6 +1039,16 @@ TYPED_TEST(local_matrix, conversion_falls_back_to_csr_for_unsuitable_matrices)
                   std::string::npos)
             << log;
     }
+
+    // A BCSR matrix falls back too when the new block dimension does not divide
+    // its sizes, instead of keeping its own
+    auto B = make_local_matrix(this->backend(), ref, Format{BCSR, 2});
+    expect_matrix(*B, ref, Format{BCSR, 2}, this->backend());
+    std::string log = logged([&] { B->ConvertToBCSR(5); });
+    expect_matrix(*B, ref, csr_format, this->backend());
+    EXPECT_NE(log.find("Matrix conversion to BCSR failed, falling back to CSR format"),
+              std::string::npos)
+        << log;
 }
 
 TEST_P(local_matrix_formats, moves_keep_the_format_and_the_values)
@@ -1075,8 +1116,6 @@ TYPED_TEST(local_matrix, async_moves_complete_on_sync)
 
 TEST_P(local_matrix_formats, apply_and_apply_add_match_the_reference)
 {
-    const bool apply_add_bug = backend() == Backend::Accelerator && (is(HYB) || is(DENSE));
-
     for_each_type<RealTypes>([&](auto type) {
         using T = typename decltype(type)::type;
 
@@ -1102,18 +1141,9 @@ TEST_P(local_matrix_formats, apply_and_apply_add_match_the_reference)
             vy = vector_of(y0);
             A->ApplyAdd(*vx, 3.0, vy.get());
             expect_kept(*A, ref);
-            if(apply_add_bug && !run_known_bugs())
-            {
-                continue;
-            }
             expect_vector(*vy, expected, backend(), scaled_tol<T>(1e-14));
         }
     });
-
-    if(apply_add_bug)
-    {
-        KNOWN_BUG("HIP HYB and DENSE ApplyAdd ignore the output");
-    }
 }
 
 TEST_P(local_matrix_formats, apply_of_a_rectangular_matrix)
@@ -1164,10 +1194,6 @@ TEST_P(local_matrix_formats, apply_of_a_rectangular_matrix)
         KNOWN_BUG("host BCSR ApplyAdd asserts that the matrix is square");
         expect_in_child([&] { for_each_type<RealTypes>(apply_add_checks); });
         return;
-    }
-    if(backend() == Backend::Accelerator && (is(HYB) || is(DENSE)))
-    {
-        KNOWN_BUG("HIP HYB and DENSE ApplyAdd ignore the output");
     }
     for_each_type<RealTypes>(apply_add_checks);
 }
@@ -1397,38 +1423,98 @@ TEST_P(local_matrix_formats, extracts_and_replaces_rows_and_columns)
         }
         const Csr<T> column_inserted = from_dense(ref.n, ref.m, D);
 
-        if(backend() == Backend::Accelerator && is(CSR))
-        {
-            KNOWN_BUG("HIP CSR ReplaceColumnVector kills the process");
-            expect_in_child([&] {
-                auto M = make(row_replaced);
-                M->ReplaceColumnVector(4, *vector_of(new_column));
-                expect_kept(*M, column_replaced);
-                M->ReplaceColumnVector(9, *vector_of(full_column));
-                expect_kept(*M, column_inserted);
-            });
-            return;
-        }
         A->ReplaceColumnVector(4, *vector_of(new_column));
         expect_kept(*A, column_replaced);
 
-        // The BCSR blocks already store the column, so only the other formats insert entries
-        if(is(DENSE) || is(BCSR))
-        {
-            A->ReplaceColumnVector(9, *vector_of(full_column));
-            expect_kept(*A, column_inserted);
-            return;
-        }
-
-        // The slot of the dropped entry stays uninitialized, which can corrupt memory
-        // when the result is converted back
-        KNOWN_BUG("host CSR ReplaceColumnVector drops the entry after an inserted one");
-        expect_in_child([&] {
-            auto M = make(column_replaced);
-            M->ReplaceColumnVector(9, *vector_of(full_column));
-            expect_kept(*M, column_inserted);
-        });
+        A->ReplaceColumnVector(9, *vector_of(full_column));
+        expect_kept(*A, column_inserted);
     });
+}
+
+// The rows and columns of a matrix without entries are zero, and a replaced row
+// or column becomes its only entries. Most formats go through the fallbacks.
+TEST_P(local_matrix_formats, extracts_and_replaces_rows_and_columns_without_entries)
+{
+    for_each_type<RealTypes>([&](auto type) {
+        using T = typename decltype(type)::type;
+
+        const int                  n = 4;
+        const std::vector<PtrType> no_entries(n + 1, 0);
+        const std::vector<T>       values = {1, 0, 2, 3};
+        const std::vector<T>       zeros(n, T(0));
+
+        auto without_entries = [&] {
+            auto A = empty_local_matrix<T>(backend());
+            A->CopyFromHostCSR(no_entries.data(), nullptr, nullptr, "E", 0, n, n);
+            A->ConvertTo(format().id, format().blockdim);
+            return A;
+        };
+
+        auto A = without_entries();
+        expect_kept(*A, from_dense(n, n, std::vector<T>(n * n, T(0))));
+
+        auto x = vector_of(std::vector<T>(n, T(7)));
+        A->ExtractColumnVector(1, x.get());
+        expect_vector(*x, zeros, backend(), 0);
+
+        x = vector_of(std::vector<T>(n, T(7)));
+        A->ExtractRowVector(1, x.get());
+        expect_vector(*x, zeros, backend(), 0);
+
+        // MCSR needs every diagonal entry, and DIA and ELL reject matrices with
+        // fewer entries than rows, so these results stay in CSR
+        const unsigned int result_format = is(MCSR) || is(DIA) || is(ELL) ? CSR : format().id;
+
+        std::vector<T> D(n * n, T(0));
+        for(int i = 0; i < n; ++i)
+        {
+            D[i * n + 1] = values[i];
+        }
+        std::string log = logged([&] { A->ReplaceColumnVector(1, *vector_of(values)); });
+        EXPECT_EQ(rocalution::_matrix_format_names[A->GetFormat()],
+                  rocalution::_matrix_format_names[result_format]);
+        expect_kept_or_csr(*A, from_dense(n, n, D), log);
+
+        auto B = without_entries();
+        std::fill(D.begin(), D.end(), T(0));
+        std::copy(values.begin(), values.end(), D.begin() + 2 * n);
+        log = logged([&] { B->ReplaceRowVector(2, *vector_of(values)); });
+        EXPECT_EQ(rocalution::_matrix_format_names[B->GetFormat()],
+                  rocalution::_matrix_format_names[result_format]);
+        expect_kept_or_csr(*B, from_dense(n, n, D), log);
+    });
+}
+
+// Column 4 of a 3 x 5 matrix is past its rows, and its rows are longer than its columns
+TYPED_TEST(local_matrix, extracts_and_replaces_rows_and_columns_of_a_wide_matrix)
+{
+    using T = typename TypeParam::value_type;
+
+    const Csr<T> ref = rectangular<T>(3, 5);
+    auto         A   = make_local_matrix(this->backend(), ref);
+
+    auto c = make_local_vector(this->backend(), std::vector<T>(ref.n, 0.0));
+    auto r = make_local_vector(this->backend(), std::vector<T>(ref.m, 0.0));
+    A->ExtractColumnVector(4, c.get());
+    A->ExtractRowVector(2, r.get());
+    expect_vector(*c, column(ref, 4), this->backend(), 0);
+    expect_vector(*r, row(ref, 2), this->backend(), 0);
+    expect_matrix(*A, ref, csr_format, this->backend());
+
+    // Only row 2 holds column 4, so rows 0 and 1 gain an entry
+    std::vector<T>       D          = dense(ref);
+    const std::vector<T> new_column = {1, 2, 3};
+    for(int i = 0; i < ref.n; ++i)
+    {
+        D[static_cast<size_t>(i) * ref.m + 4] = new_column[i];
+    }
+    A->ReplaceColumnVector(4, *make_local_vector(this->backend(), new_column));
+    expect_matrix(*A, from_dense(ref.n, ref.m, D), csr_format, this->backend());
+
+    const std::vector<T> new_row = {5, 0, 6, 0, 7};
+    std::copy(new_row.begin(), new_row.end(), D.begin() + 2 * ref.m);
+    A->ReplaceRowVector(2, *make_local_vector(this->backend(), new_row));
+    expect_matrix(*A, from_dense(ref.n, ref.m, D), csr_format, this->backend());
 }
 
 // Factorizations and triangular solves
@@ -1502,11 +1588,6 @@ TEST_P(local_matrix_formats, lu_factorizations_solve_a_banded_system)
             {
                 killed.push_back(
                     {"the SymbolicPower structure loses its zero entries in DIA and DENSE", k});
-            }
-            else if(name == "ILUpFactorize(1) without levels" && is(BCSR))
-            {
-                killed.push_back(
-                    {"the MatrixAdd fallback converts back to BCSR with block dimension 1", k});
             }
             else
             {
@@ -1830,19 +1911,7 @@ TEST_P(local_matrix_formats, permute_moves_rows_and_columns)
         auto        A   = make(ref);
         std::string log = logged([&] { A->Permute(*vector_of(perm)); });
         expect_fallback_warning(log, "Permute", native("Permute"));
-        if(!is(COO))
-        {
-            expect_kept(*A, permuted(ref, perm));
-            return;
-        }
-
-        // The check converts the unsorted entries to CSR, where an assert ends the process
-        KNOWN_BUG("COO Permute leaves the entries unsorted");
-        expect_in_child([&] {
-            auto M = make(ref);
-            M->Permute(*vector_of(perm));
-            expect_kept(*M, permuted(ref, perm));
-        });
+        expect_kept(*A, permuted(ref, perm));
     });
 }
 
@@ -1854,22 +1923,13 @@ TEST_P(local_matrix_formats, permute_backward_undoes_permute)
         const Csr<T>           ref  = banded<T>();
         const std::vector<int> perm = scrambled(ref.n);
 
-        // PermuteBackward only exists for COO, so every format goes through it, and the unsorted
-        // entries break the conversion back: an assert ends the process
-        auto permute_backward = [&] {
-            auto        B   = make(permuted(ref, perm));
-            std::string log = logged([&] { B->PermuteBackward(*vector_of(perm)); });
-            expect_fallback_warning(log, "PermuteBackward", is(COO));
-            EXPECT_EQ(rocalution::_matrix_format_names[B->GetFormat()], format_name(format()));
-            EXPECT_EQ(backend_of(*B), backend_name(backend()));
-            return B;
-        };
-        if(is(COO))
-        {
-            permute_backward();
-        }
-        KNOWN_BUG("COO PermuteBackward leaves the entries unsorted");
-        expect_in_child([&] { expect_kept(*permute_backward(), ref); });
+        // PermuteBackward only exists for COO, so every format goes through it
+        auto        B   = make(permuted(ref, perm));
+        std::string log = logged([&] { B->PermuteBackward(*vector_of(perm)); });
+        expect_fallback_warning(log, "PermuteBackward", is(COO));
+        EXPECT_EQ(rocalution::_matrix_format_names[B->GetFormat()], format_name(format()));
+        EXPECT_EQ(backend_of(*B), backend_name(backend()));
+        expect_kept(*B, ref);
     });
 }
 
@@ -1940,9 +2000,9 @@ TEST_P(local_matrix_formats, connectivity_order_sorts_the_rows_by_their_non_zero
         const std::vector<int> p = values_of(perm);
         expect_permutation(p, ref.n);
 
-        // The documented usage: ConnectivityOrder, then Permute
-        KNOWN_BUG("ConnectivityOrder returns perm[new] = old");
-        const Csr<T> ordered = permuted(ref, p);
+        // The documented usage: ConnectivityOrder, then Permute. The ordering follows the
+        // stored entries, which for BCSR include the zeros of the blocks
+        const Csr<T> ordered = permuted(csr_of(*A), p);
         for(int i = 1; i < ordered.n; ++i)
         {
             EXPECT_LE(ordered.row_offset[i] - ordered.row_offset[i - 1],
@@ -2097,27 +2157,8 @@ TEST_P(local_matrix_formats, matrix_mult_takes_the_format_of_the_factors)
 
         // The second product goes into a matrix of the same size, which MatrixMult
         // clears first
-        auto multiply_twice = [&] {
-            auto C = empty<T>();
-            multiply_into(*C);
-            multiply_into(*C);
-        };
-
-        if(backend() == Backend::Accelerator && is(MCSR))
-        {
-            KNOWN_BUG("HIP MCSR CopyToHost copies the row offsets of an empty matrix from NULL");
-            expect_in_child(multiply_twice);
-            return;
-        }
-
         auto C = empty<T>();
         multiply_into(*C);
-        if(backend() == Backend::Accelerator && is(BCSR))
-        {
-            KNOWN_BUG("BCSR Clear keeps the block counts, so the cleared matrix copies them");
-            expect_in_child(multiply_twice);
-            return;
-        }
         multiply_into(*C);
     });
 }
@@ -2151,21 +2192,17 @@ TEST_P(local_matrix_formats, matrix_add_scales_and_adds)
         // The pattern of the summand is part of the pattern of the matrix
         const Csr<T> part = lower(a, true);
 
-        // A known bug ends the process in every BCSR MatrixAdd
-        if(is(BCSR))
-        {
-            KNOWN_BUG("the MatrixAdd fallback converts back to BCSR with block dimension 1");
-            expect_in_child([&] {
-                add_to(a, 2, b, -1, false);
-                add_to(a, 0.5, c, 3, true);
-            });
-            KNOWN_BUG("MatrixAdd does not scale the entries outside the summand's pattern");
-            expect_in_child([&] { add_to(a, 2, part, 1, false); });
-            return;
-        }
-
         add_to(a, 2, b, -1, false);
         add_to(a, 0.5, c, 3, true);
+
+        // The result keeps the block dimension of the matrix, not the summand's
+        if(is(BCSR))
+        {
+            const Format other{BCSR, format().blockdim == 2 ? 3 : 2};
+            auto         A = make(a);
+            A->MatrixAdd(*make_local_matrix(backend(), b, other), 2, -1, false);
+            expect_kept(*A, add(a, 2, b, -1), scaled_tol<T>(1e-14));
+        }
 
         auto A = make(a);
         A->MatrixAdd(*make(part), 2.0, 1.0, false);
@@ -2586,45 +2623,23 @@ TEST_P(local_matrix_formats, writes_and_reads_matrix_market_and_csr_files)
 
         const Csr<T> ref = banded<T>();
 
-        auto read_mtx = [&] {
-            const std::string mtx = temp_file("mtx");
-            make(ref)->WriteFileMTX(mtx);
-            auto B = empty<T>();
-            B->ReadFileMTX(mtx);
-            expect_kept(*B, ref);
-            std::remove(mtx.c_str());
-        };
+        const std::string mtx = temp_file("mtx");
+        make(ref)->WriteFileMTX(mtx);
+        auto B = empty<T>();
+        B->ReadFileMTX(mtx);
+        expect_kept(*B, ref);
+        std::remove(mtx.c_str());
 
         // Deprecated, but still part of the interface. The read clears the matrix first.
-        auto read_csr = [&] {
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-            const std::string csr = temp_file("csr");
-            make(ref)->WriteFileCSR(csr);
-            auto C = make(spd<T>(4));
-            C->ReadFileCSR(csr);
+        const std::string csr = temp_file("csr");
+        make(ref)->WriteFileCSR(csr);
+        auto C = make(spd<T>(4));
+        C->ReadFileCSR(csr);
 #pragma GCC diagnostic pop
-            expect_kept(*C, ref);
-            std::remove(csr.c_str());
-        };
-
-        // Both reads clear the matrix and then move it to the host, to read it there
-        if(backend() == Backend::Accelerator && is(MCSR))
-        {
-            KNOWN_BUG("HIP MCSR CopyToHost copies the row offsets of an empty matrix from NULL");
-            expect_in_child(read_mtx);
-            expect_in_child(read_csr);
-            return;
-        }
-
-        read_mtx();
-        if(backend() == Backend::Accelerator && is(BCSR))
-        {
-            KNOWN_BUG("BCSR Clear keeps the block counts, so the cleared matrix copies them");
-            expect_in_child(read_csr);
-            return;
-        }
-        read_csr();
+        expect_kept(*C, ref);
+        std::remove(csr.c_str());
     });
 }
 
@@ -2648,6 +2663,15 @@ TEST_P(local_matrix_formats, writes_and_reads_rocsparseio_files)
         auto C = make_local_matrix(backend(), spd<T>(4));
         C->ReadFileRSIO(file, true);
         expect_matrix(*C, ref, csr_format, backend());
+
+        // A BCSR matrix that keeps its format also keeps its block dimension
+        if(is(BCSR))
+        {
+            const Format other{BCSR, format().blockdim == 2 ? 3 : 2};
+            auto         D = make_local_matrix(backend(), spd<T>(6), other);
+            D->ReadFileRSIO(file, true);
+            expect_matrix(*D, ref, other, backend());
+        }
         std::remove(file.c_str());
 
         if(backend() == Backend::Accelerator && !is(CSR))
@@ -2753,6 +2777,35 @@ TEST_P(local_matrix_formats, amg_setup_runs_on_a_csr_copy)
             EXPECT_EQ(values_of(cf_other), values_of(cf));
             EXPECT_EQ(values_of(S_other), values_of(S));
         }
+        {
+            SCOPED_TRACE("RSCoarsening");
+            LocalVector<int>  cf_ref, cf_other;
+            LocalVector<bool> S_ref, S_other;
+            like(*RC, cf_ref);
+            like(*RC, S_ref);
+            like(*R, cf_other);
+            like(*R, S_other);
+            RC->RSCoarsening(0.25f, &cf_ref, &S_ref);
+            std::string log = logged([&] { R->RSCoarsening(0.25f, &cf_other, &S_other); });
+            expect_warning(log, "RSCoarsening");
+            EXPECT_EQ(values_of(cf_other), values_of(cf_ref));
+            EXPECT_EQ(values_of(S_other), values_of(S_ref));
+        }
+        {
+            SCOPED_TRACE("AMGPMISAggregate(connections, aggregates)");
+            LocalVector<int> conn, agg_ref, agg_other;
+            like(*C, conn);
+            like(*C, agg_ref);
+            like(*A, agg_other);
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+            C->AMGConnect(T(0.08), &conn);
+            C->AMGPMISAggregate(conn, &agg_ref);
+            std::string log = logged([&] { A->AMGPMISAggregate(conn, &agg_other); });
+#pragma GCC diagnostic pop
+            expect_warning(log, "AMGPMISAggregate");
+            EXPECT_EQ(values_of(agg_other), values_of(agg_ref));
+        }
 
         using Interpolation = std::function<void(const LocalMatrix<T>&, LocalMatrix<T>*)>;
         const std::vector<std::pair<std::string, Interpolation>> interpolations
@@ -2829,44 +2882,6 @@ TEST_P(local_matrix_formats, amg_greedy_aggregate_runs_on_a_csr_copy)
 }
 
 // Matrices without entries
-
-// The rows and columns of a matrix without entries are zero
-TYPED_TEST(local_matrix, rows_and_columns_of_a_matrix_without_entries)
-{
-    using T = typename TypeParam::value_type;
-
-    const int                  n = 4;
-    const std::vector<PtrType> no_entries(n + 1, 0);
-    const std::vector<T>       values = {1, 0, 2, 3};
-    const std::vector<T>       zeros(n, T(0));
-
-    KNOWN_BUG("rows and columns of a matrix without entries are neither extracted nor replaced");
-
-    auto A = empty_local_matrix<T>(this->backend());
-    A->CopyFromHostCSR(no_entries.data(), nullptr, nullptr, "E", 0, n, n);
-    auto x = make_local_vector(this->backend(), std::vector<T>(n, T(7)));
-    A->ExtractColumnVector(1, x.get());
-    expect_vector(*x, zeros, this->backend(), 0);
-
-    x = make_local_vector(this->backend(), std::vector<T>(n, T(7)));
-    A->ExtractRowVector(1, x.get());
-    expect_vector(*x, zeros, this->backend(), 0);
-
-    std::vector<T> D(n * n, T(0));
-    for(int i = 0; i < n; ++i)
-    {
-        D[i * n + 1] = values[i];
-    }
-    A->ReplaceColumnVector(1, *make_local_vector(this->backend(), values));
-    expect_matrix(*A, from_dense(n, n, D), csr_format, this->backend());
-
-    auto B = empty_local_matrix<T>(this->backend());
-    B->CopyFromHostCSR(no_entries.data(), nullptr, nullptr, "E", 0, n, n);
-    std::fill(D.begin(), D.end(), T(0));
-    std::copy(values.begin(), values.end(), D.begin() + 2 * n);
-    B->ReplaceRowVector(2, *make_local_vector(this->backend(), values));
-    expect_matrix(*B, from_dense(n, n, D), csr_format, this->backend());
-}
 
 // The operations skip a matrix without entries and leave their outputs as they
 // were. For the solves of this singular system, the eigenvalue bounds, the
@@ -3270,9 +3285,21 @@ TEST(local_matrix_preconditions, violations_end_the_program)
                         "GetFormat");
     EXPECT_ASSERT_DEATH(A->MatrixAdd(*make_local_matrix(Backend::Host, ref, Format{COO, 1})),
                         "GetFormat");
+    EXPECT_ASSERT_DEATH(A->ConvertTo(BCSR), "matrix_format != BCSR");
+    EXPECT_ASSERT_DEATH(E.ConvertTo(BCSR, 0), "matrix_format != BCSR");
     EXPECT_ASSERT_DEATH(A->ILUpFactorize(-1), "p >= 0");
     EXPECT_ASSERT_DEATH(A->FSAI(0, nullptr), "power > 0");
     EXPECT_ASSERT_DEATH(A->ItLSolve(0, 0, false, *y, y.get()), "max_iter > 0");
+    EXPECT_ASSERT_DEATH(A->ExtractColumnVector(4, y.get()), "idx < this->GetN");
+    EXPECT_ASSERT_DEATH(A->ReplaceColumnVector(4, *y), "idx < this->GetN");
+    EXPECT_ASSERT_DEATH(A->ExtractRowVector(4, y.get()), "idx < this->GetM");
+    EXPECT_ASSERT_DEATH(A->ReplaceRowVector(4, *y), "idx < this->GetM");
+
+    // Row 3 of a 3 x 5 matrix is out of range, although column 3 is not
+    auto W = make_local_matrix(Backend::Host, rectangular(3, 5));
+    auto w = make_local_vector(Backend::Host, std::vector<double>(5, 1.0));
+    EXPECT_ASSERT_DEATH(W->ExtractRowVector(3, w.get()), "idx < this->GetM");
+    EXPECT_ASSERT_DEATH(W->ReplaceRowVector(3, *w), "idx < this->GetM");
 
     LocalMatrix<double> S;
     EXPECT_ASSERT_DEATH(A->ExtractSubMatrix(5, 0, 1, 1, &S), "row_offset");
@@ -3302,6 +3329,24 @@ TEST(local_matrix_preconditions, ic_factorize_of_a_row_without_a_diagonal_ends_t
         EXPECT_LOGGED_EXIT(A->ICFactorize(inv.get()),
                            "Fatal error - the program will be terminated");
     }
+}
+
+// The LU analysis of a format without one ends the program, so that LU and the ILU
+// preconditioners do not fall back to the host at every solve without notice
+TEST(local_matrix_DeathTest, lu_analysis_of_a_format_without_one_ends_the_program_on_the_host)
+{
+    auto A = make_local_matrix(Backend::Host, banded(4), Format{COO, 1});
+    EXPECT_FATAL_ERROR(A->LUAnalyse(), "base_matrix\\.cpp");
+    EXPECT_FATAL_ERROR(A->LUAnalyseClear(), "base_matrix\\.cpp");
+}
+
+TEST(local_matrix_DeathTest,
+     lu_analysis_of_a_format_without_one_ends_the_program_on_the_accelerator)
+{
+    REQUIRE_BACKEND(Backend::Accelerator);
+    auto A = make_local_matrix(Backend::Accelerator, banded(4), Format{COO, 1});
+    EXPECT_FATAL_ERROR(A->LUAnalyse(), "base_matrix\\.cpp");
+    EXPECT_FATAL_ERROR(A->LUAnalyseClear(), "base_matrix\\.cpp");
 }
 
 // LocalStencil, the other local Operator, keeps the async moves and Sync of

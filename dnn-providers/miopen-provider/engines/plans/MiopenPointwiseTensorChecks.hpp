@@ -16,7 +16,7 @@ namespace miopen_plugin::pointwise_applicability
 // with all IO tensors sharing one dtype. This is NOT a general-purpose validator for the whole
 // provider -- batchnorm and convolution also support BFLOAT16 and must not call this.
 //
-// Throws HipdnnPluginException on any violation. Covers exactly: non-virtual, dtype in
+// Throws HipdnnPluginException on any violation. Covers exactly: non-virtual, not pass-by-value (runtime scalar or baked constant), dtype in
 // {FLOAT, HALF}, all listed tensors share one dtype, dims()/strides() non-null, and
 // dims()->size() == strides()->size() (vector lengths, not element counts).
 // `opName` carries the bare op name (e.g. "Relu", "Binary pointwise") and is NOT prefixed
