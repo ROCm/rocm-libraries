@@ -263,8 +263,8 @@ BenchmarkProblems:
   # Non-atomic StreamK=3. Every tile, whole or completed by the fixup, is
   # stored through the same edge blocks: the problems have NonEdge, M-edge,
   # N-edge and corner tiles in two batches, and a leading dimension larger than
-  # M. On 256 CUs, K=256 gives one whole tile per workgroup; with K=1600 each
-  # workgroup's iterations span two tiles and every tile is completed by the fixup.
+  # M. K=256 gives each workgroup at most one whole tile; with K=1600 each
+  # workgroup's iterations span two tiles, so every tile is completed by the fixup.
   ########################################
   -
     - *problem_type_bf16
@@ -506,7 +506,7 @@ BenchmarkProblems:
           - [Enum: relu]
   ########################################
   # DataParallel persistent kernels (StreamK 3 with StreamKForceDPOnly): MT64x64 gives
-  # 17 x 16 x 2 = 544 tiles for the 256 workgroups, so each workgroup stores several tiles through
+  # 17 x 16 x 2 = 544 tiles, more than the persistent grid, so each workgroup stores several tiles through
   # the TDM block, with NonEdge, M-edge, N-edge and corner tiles and a leading dimension larger than M.
   ########################################
   -

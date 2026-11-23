@@ -270,7 +270,7 @@ BenchmarkProblems:
           - [Enum: relu]
   ########################################
   # DataParallel persistent kernels (StreamK 3 with StreamKForceDPOnly): MT64x64 gives
-  # 17 x 16 x 2 = 544 tiles for the 256 workgroups, so each workgroup stores several tiles through
+  # 17 x 16 x 2 = 544 tiles, more than the persistent grid, so each workgroup stores several tiles through
   # the TDM block, with NonEdge, M-edge, N-edge and corner tiles and a leading dimension larger than M.
   ########################################
   -
