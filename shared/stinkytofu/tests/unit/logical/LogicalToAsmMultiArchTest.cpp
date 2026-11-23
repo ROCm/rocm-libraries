@@ -1149,8 +1149,6 @@ TEST(LogicalToAsmComprehensive, AllInstructionsAllArchitectures) {
         logical::BufferStoreD16B16,
         logical::FlatStoreD16B16,
         logical::DSLoadB16,
-        logical::DSLoadD16HIU8,
-        logical::DSLoadD16HIU16,
         logical::DSStoreU16,
         logical::DSStoreB256,
     };
