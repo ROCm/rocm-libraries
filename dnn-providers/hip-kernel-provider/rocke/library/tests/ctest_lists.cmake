@@ -212,6 +212,7 @@ set(_ROCKE_LIBRARY_CONV3D_TEST_RELPATHS
     "tests/library/tests/test_conv_step_replay.py"
     "tests/library/tests/test_conv_wgrad_gates.py"
     "tests/library/tests/test_conv_wgrad_lds_bswz.py"
+    "tests/library/tests/test_conv_wgrad_split_k_device_cus.py"
     "tests/library/tests/test_conv_wgrad_stage2_policy.py"
     "tests/library/tests/test_conv_wgrad_xwin.py"
     "tests/library/tests/test_conv_winograd3d.py"

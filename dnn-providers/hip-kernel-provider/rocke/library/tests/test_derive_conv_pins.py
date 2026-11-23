@@ -25,8 +25,10 @@ def _run_dir(tmp: Path, name: str, winner: str, finalists: dict) -> Path:
         "miopen_cmd": CMD,
     }
     (d / "fwd_s1.jsonl").write_text(json.dumps(row) + "\n")
+    # Synthetic log lines in the sweep's format: the parser needs a number in
+    # the TFLOPS column, which the derivation ignores.
     lines = [
-        f"  [ {i}/9]  100.0 TFLOPS  {ms:8.3f} ms  {lab}"
+        f"  [ {i}/9]  0.0 TFLOPS  {ms:8.3f} ms  {lab}"
         for i, (lab, ms) in enumerate(finalists.items(), 1)
     ]
     lines.append("  [ 1/9] probe    0.100 ms  probe-only-label")
