@@ -858,24 +858,49 @@ TEST_F(ConversionGrids, convert_array_data_narrowing_reports_error)
     ASSERT_EQ(status, rocsparse_status_success);
     EXPECT_EQ(printed, "");
     EXPECT_NE(log.sink.str().find(expected.str()), std::string::npos) << log.sink.str();
+}
 
-    // f64 into f32 complex rounds the real part the same way. The error is the
-    // distance between the source and that rounded real part.
-    device_vector<rocsparse_float_complex> d_complex(std::vector<rocsparse_float_complex>(
+// copy_farray_mix_safe_kernel_t<rocsparse_float_complex, double> rounds the real part
+// as the f64 -> f32 conversion does and logs the same maximum error, the distance
+// between the source and its rounded real part. The error used to be logged as 0.
+TEST_F(ConversionGrids, convert_array_data_f64_to_f32_c_reports_error)
+{
+    std::vector<double> source(convert_nitems);
+    for(size_t i = 0; i < convert_nitems; ++i)
+    {
+        source[i] = static_cast<double>(i);
+    }
+    source[convert_nitems - 1] = 0.1;
+
+    double expected_error = 0;
+    for(const double s : source)
+    {
+        const double e = std::abs(s - static_cast<double>(static_cast<float>(s)));
+        expected_error = (e > expected_error) ? e : expected_error;
+    }
+    ASSERT_GT(expected_error, 0.0);
+
+    std::ostringstream expected;
+    expected << "rocsparse_convert_array numerical conversion error " << expected_error;
+
+    device_vector<double>                  d_source(source);
+    device_vector<rocsparse_float_complex> d_target(std::vector<rocsparse_float_complex>(
         convert_nitems, rocsparse_float_complex(-1.0f, -1.0f)));
-    ScopedDebugLog                         log_complex(handle);
+
+    ScopedMaxGridSizeX clamp(handle, clamped_grid_x);
+    ScopedDebugLog     log(handle);
     testing::internal::CaptureStdout();
-    const rocsparse_status complex_status  = rocsparse::convert_array(handle,
-                                                                     convert_nitems,
-                                                                     rocsparse_datatype_f32_c,
-                                                                     d_complex.ptr,
-                                                                     rocsparse_datatype_f64_r,
-                                                                     d_source.ptr);
-    const std::string      complex_printed = testing::internal::GetCapturedStdout();
-    ASSERT_EQ(complex_status, rocsparse_status_success);
-    EXPECT_EQ(complex_printed, "");
-    EXPECT_NE(log_complex.sink.str().find(expected.str()), std::string::npos)
-        << log_complex.sink.str();
+    const rocsparse_status status  = rocsparse::convert_array(handle,
+                                                             convert_nitems,
+                                                             rocsparse_datatype_f32_c,
+                                                             d_target.ptr,
+                                                             rocsparse_datatype_f64_r,
+                                                             d_source.ptr);
+    const std::string      printed = testing::internal::GetCapturedStdout();
+
+    ASSERT_EQ(status, rocsparse_status_success);
+    EXPECT_EQ(printed, "");
+    EXPECT_NE(log.sink.str().find(expected.str()), std::string::npos) << log.sink.str();
 }
 
 // ===========================================================================
