@@ -368,12 +368,14 @@ def test_inherited_streamk_cluster_payload_is_rederived_when_source_policy_chang
 @pytest.mark.parametrize("strategy, assignment, overrides, fences", [
     ("DataParallel", "StaticGrid", {}, True),
     ("DataParallel", "StaticGrid", {"enableTDMA": False, "enableTDMB": False}, False),
-    ("StreamK", "DynamicWorkQueue", {"enableTDMA": False, "enableTDMB": False}, False),
+    ("StreamK", "DynamicWorkQueue", {"enableTDMA": False, "enableTDMB": False}, True),
     ("StreamK", "Hybrid", {"enableTDMA": False, "enableTDMB": False}, False),
+    ("StreamK", "DynamicWorkQueue",
+     {"enableTDMA": False, "enableTDMB": False, "DebugPersistentKernelLoopForever": True}, False),
     ("DataParallel", "StaticGrid",
      {"enableTDMA": False, "enableTDMB": False, "_PersistentVectorEpilogueLds": True}, True),
     ("DataParallel", "StaticGrid", {"NumThreads": 32, "WavefrontSize": 32}, False),
-], ids=["tdm", "no_tdm", "queue", "hybrid", "epilogue_lds", "one_wave"])
+], ids=["tdm", "no_tdm", "queue", "hybrid", "queue_debug", "epilogue_lds", "one_wave"])
 def test_handoff_fences_lds(strategy, assignment, overrides, fences):
     """The persistent tile handoff ends with a workgroup barrier with TDM loads on more than one
     wave, with the epilogue vectors in LDS or in a spatial cluster; the TDM flush relies on it and
@@ -383,9 +385,12 @@ def test_handoff_fences_lds(strategy, assignment, overrides, fences):
     replaced with splitPersistentTileHandoff. _handoffBarriersLds mirrors that predicate, so the
     rows below now pin it instead.
 
-    The DynamicWorkQueue row expects False where handoffFencesLds returned True: the queue's
-    barrier is emitted in beforeReentry, AFTER the exit check, so a workgroup leaving the loop
-    never executes it and the flush has to keep its own. DataParallel pairs only with StaticGrid --
+    The DynamicWorkQueue row expects True: DynamicWorkQueue.closeLoop emits both phases of the
+    handoff before its back-edge and checks the next work item only after re-entry, so every tile
+    ends with the queue barrier. The Hybrid row stays False: its static arm runs StaticGrid.closeLoop,
+    which has no queue barrier, and emitTDMStoreFlush fences that arm at run time. With
+    DebugPersistentKernelLoopForever the handoff drops the queue barrier, so that row is False.
+    DataParallel pairs only with StaticGrid --
     resolve_policy rejects every other assignment -- so the queue and hybrid rows exercise those
     assignments under StreamK.
     """

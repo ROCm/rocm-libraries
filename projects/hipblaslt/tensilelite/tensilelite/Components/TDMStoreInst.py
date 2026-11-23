@@ -42,9 +42,9 @@ from math import log2
 from rocisa.code import Label, Module
 from rocisa.container import DSModifiers, MemTokenData, sgpr, vgpr
 from rocisa.enum import NonVolatile, TemporalHint
-from rocisa.instruction import DSLoadD16HIU16, DSLoadU8, SAddCU32, SAddU32, SCBranchSCC1, SCmpLeU32, SLShiftLeftB64, \
-  SLShiftRightB32, SMinU32, SMulHIU32, SMulI32, SSubU32, SWaitCnt, SWaitTensorcnt, VAddU32, VLShiftLeftB32, \
-  VMulLOU32, VReadfirstlaneB32, VSubU32
+from rocisa.instruction import DSLoadD16HIU16, DSLoadU8, SAddCU32, SAddU32, SCBranchSCC0, SCBranchSCC1, SCmpEQU32, \
+  SCmpLeU32, SLShiftLeftB64, SLShiftRightB32, SMinU32, SMulHIU32, SMulI32, SSubU32, SWaitCnt, SWaitTensorcnt, \
+  VAddU32, VLShiftLeftB32, VMulLOU32, VReadfirstlaneB32, VSubU32
 
 from ..AsmMemoryHelpers import dsLoad, dsStore
 from ..Common import persistentSpatialCluster
@@ -266,20 +266,31 @@ def _handoffBarriersLds(kernel):
   """Whether the persistent tile handoff already ends with a workgroup barrier, so the TDM flush adds none.
 
   This mirrors the predicate in WorkAssignment.splitPersistentTileHandoff, which is where the handoff
-  decides whether to emit one. It replaced WorkAssignment.handoffFencesLds in develop's AIHPBLAS-5469
-  (#15103, "synchronize persistent TDM LDS reuse"), a fix for the same hazard this flush barrier guards:
-  a slow wave still reading the staged tile when the next tile writes LDS. Where the handoff emits the
-  barrier, a second one here orders nothing and only costs a wait on every tile.
+  decides whether to emit one. Both guard the same hazard: a slow wave still reading the staged tile when
+  the next tile writes LDS. Where the handoff emits the barrier, a second one here orders nothing and only
+  costs a wait on every tile.
 
-  The queue term is deliberately left out: DynamicWorkQueue's barrier is emitted in beforeReentry, after
-  the exit check, so a workgroup leaving the loop never reaches it and the flush must keep its own.
+  The queue term holds for a DynamicWorkQueue kernel: DynamicWorkQueue.closeLoop emits both phases of the
+  handoff before its back-edge, and the next work item is checked for exhaustion only after re-entry, so
+  every tile ends with the barrier. A Hybrid kernel runs StaticGrid.closeLoop, which has no
+  queue barrier, on its static arm, so it does not count here (_hybridStaticArmOnly). With
+  DebugPersistentKernelLoopForever the handoff drops the queue barrier and the flush keeps its own.
   """
   if kernel.get("DebugPersistentKernelLoopForever", False):
     return False
   tdm = (kernel.get("enableTDMA", False) or kernel.get("enableTDMB", False))     and kernel["NumThreads"] > kernel["WavefrontSize"]
   epilogue = kernel.get("_PersistentVectorEpilogueLds", False) and not kernel["PrefetchAcrossPersistent"]
   cluster = persistentSpatialCluster(kernel) and kernel.get("ClusterBarrier", True)
-  return bool(tdm or epilogue or cluster)
+  queue = kernel.get("WorkAssignment") == "DynamicWorkQueue"
+  return bool(tdm or epilogue or cluster or queue)
+
+
+def _hybridStaticArmOnly(kernel):
+  """Whether a persistent kernel whose handoff has no other barrier lacks it on one runtime arm only: Hybrid.closeLoop
+  runs DynamicWorkQueue.closeLoop, whose handoff ends every tile with a barrier, when WorkAssignmentMode is
+  not 0, and StaticGrid.closeLoop, which has none, when it is 0. WorkAssignmentMode is the same in every wave,
+  so the flush can branch around its barrier on the dynamic arm."""
+  return kernel.get("WorkAssignment") == "Hybrid" and not kernel.get("DebugPersistentKernelLoopForever", False)
 
 
 def _stagedTileToken(gwb):
@@ -462,7 +473,7 @@ def emitTDMStoreFlush(gwb) -> Module:
   Each wave stores ceil(MacroTile1/numWaves) consecutive columns of the tile. In a persistent kernel the next tile
   must not write LDS before every wave's store has read the staged tile: the barrier that ends the tile
   handoff orders that when the handoff has one (WorkAssignment.splitPersistentTileHandoff), and otherwise the flush
-  ends with its own. tensor_dim0/1 bound
+  ends with its own, which a Hybrid kernel executes on its static arm only. tensor_dim0/1 bound
   the store to the part of the tile inside D; a wave whose columns all lie at or past the column
   bound skips its store instead of relying on a zero tensor_dim.
   """
@@ -486,5 +497,13 @@ def emitTDMStoreFlush(gwb) -> Module:
       module.add(SWaitTensorcnt(tensorcnt=0, comment="wait for the TDM store " + STINKY_KEEP))
       module.add(skipStore)
   if isPersistent(gwb.kernel) and not _handoffBarriersLds(gwb.kernel):
-    module.add(kw._syncThreads(gwb.kernel, "every TDM store is done with the staged tile before the next tile writes LDS"))
+    sync = kw._syncThreads(gwb.kernel, "every TDM store is done with the staged tile before the next tile writes LDS")
+    if _hybridStaticArmOnly(gwb.kernel):
+      dynamicArm = Label(kw.labels.getNameInc("TDMStoreFlushDynamicArm"), "the queue handoff barrier fences this arm")
+      module.add(SCmpEQU32(src0=sgpr("WorkAssignmentMode"), src1=0, comment="Hybrid: static assignment selected?"))
+      module.add(SCBranchSCC0(labelName=dynamicArm.getLabelName(), comment="dynamic arm: DynamicWorkQueue.closeLoop fences"))
+      module.add(sync)
+      module.add(dynamicArm)
+    else:
+      module.add(sync)
   return module

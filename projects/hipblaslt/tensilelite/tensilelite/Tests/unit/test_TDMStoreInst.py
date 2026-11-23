@@ -1165,6 +1165,38 @@ def test_flush_has_no_duplicate_persistent_barrier(gp_gfx1250, gfx1250_iim, asse
   assert _FLUSH_BARRIER in control
 
 
+@pytest.mark.parametrize("streamk", [4, 5], ids=["sk4", "sk5"])
+def test_queue_handoff_barrier_fences_the_flush(gp_gfx1250, gfx1250_iim, assembler, capsys, streamk):
+  """Without TDM loads, epilogue vectors or a cluster only the queue fences the tile handoff:
+  DynamicWorkQueue.closeLoop ends every tile with a workgroup barrier before its back-edge, and the next work
+  item is checked for exhaustion after it. From the end of every store section with a TDM store to that barrier
+  nothing writes LDS. A StreamK 4 kernel therefore has no flush barrier. A StreamK 5 kernel runs
+  StaticGrid.closeLoop, which has no queue barrier, on its static arm, so its flush keeps a barrier that the
+  dynamic arm branches around."""
+  sol, asm = _emit_asm(gfx1250_iim, assembler, mi=_MT128, TDMStoreInst=True, TDMInst=0, StreamK=streamk)
+  assert sol.get("Valid"), capsys.readouterr().out
+  assert "tensor_store_from_lds " in asm
+  lines = asm.splitlines()
+  ends = [i for i, line in enumerate(lines) if re.match(r"label_GW_End\w*:", line)]
+  ends = [end for start, end in zip([0] + ends, ends) if any("tensor_store_from_lds " in x for x in lines[start:end])]
+  assert ends
+  for end in ends:
+    handoff = next((i for i in range(end, len(lines)) if any(tag in lines[i] for tag in _HANDOFF)), None)
+    assert handoff is not None and "Sync before persistent re-entry" in lines[handoff], lines[end]
+    writes = [code for code in map(_code, lines[end:handoff]) if code.startswith(("ds_store", "ds_write", "tensor_load_to_lds"))]
+    assert not writes, (lines[end], writes[:2])
+  flushes = [i for i, line in enumerate(lines) if _FLUSH_BARRIER in line]
+  if streamk == 4:
+    assert not flushes
+    return
+  assert flushes
+  for flush in flushes:
+    branch = next(i for i in range(flush, -1, -1) if _code(lines[i]).startswith("s_cbranch_scc0"))
+    target = _code(lines[branch]).split()[1]
+    assert "TDMStoreFlushDynamicArm" in target and "static assignment selected" in lines[branch - 1], lines[branch - 1:branch + 1]
+    assert any(_code(line) == target + ":" for line in lines[flush + 1:flush + 4]), target
+
+
 @pytest.mark.parametrize("policy", [{"StreamK": 3, "StreamKForceDPOnly": 1}, {"StreamK": 4}], ids=["dp", "sk4"])
 def test_persistent_kernels_stage_and_fence(gp_gfx1250, gfx1250_iim, assembler, capsys, policy):
   """DataParallel and StreamK 4 kernels store the tiles they complete through the TDM block, and after each
