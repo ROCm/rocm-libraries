@@ -86,7 +86,7 @@ constexpr SolverHeuristicConfig k3DWrwSolverConfig = {
     /* uses_split_k                */ true,
     /* split_k_min                 */ 1,
     /* split_k_max                 */ 128,
-    /* supports_split_k_autodeduce */ true,
+    /* supports_split_k_autodeduce */ false,
     /* supports_ktn                */ false,
 };
 // clang-format on
@@ -196,7 +196,11 @@ void PerformanceConfigHipImplicitGemm3DGroupWrwXdlops::HeuristicInit(
                                                      k3DWrwSolverConfig.uses_split_k);
 
         // Note: No KTN runner needed for 3D (supports_ktn = false)
-        if(RunAIHeuristics(k3DWrwSolverConfig,
+        // Enable autodeduce only for gfx1250: on gfx942/gfx950 explicit split_k
+        // ranks equally well and the net effect is neutral (measured on gfx950).
+        auto wrw_cfg                        = k3DWrwSolverConfig;
+        wrw_cfg.supports_split_k_autodeduce = (arch == "gfx1250");
+        if(RunAIHeuristics(wrw_cfg,
                            state,
                            ctx,
                            problem,

@@ -63,7 +63,7 @@ constexpr SolverHeuristicConfig k2DWrwSolverConfig = {
     /* uses_split_k                */ true,
     /* split_k_min                 */ 1,
     /* split_k_max                 */ 128,
-    /* supports_split_k_autodeduce */ true,
+    /* supports_split_k_autodeduce */ false,
     /* supports_ktn                */ true,
 };
 // clang-format on
@@ -365,7 +365,11 @@ void PerformanceConfigHipImplicitGemmGroupWrwXdlops::HeuristicInit(
                                                      mode_use_tf32,
                                                      k2DWrwSolverConfig.uses_split_k);
 
-        if(RunAIHeuristics(k2DWrwSolverConfig,
+        // Enable autodeduce only for gfx1250: on gfx942/gfx950 explicit split_k
+        // ranks equally well and the net effect is neutral (measured on gfx950).
+        auto wrw_cfg                        = k2DWrwSolverConfig;
+        wrw_cfg.supports_split_k_autodeduce = (arch == "gfx1250");
+        if(RunAIHeuristics(wrw_cfg,
                            state,
                            ctx,
                            problem,
