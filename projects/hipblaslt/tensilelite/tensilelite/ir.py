@@ -58,6 +58,8 @@ from contextvars import ContextVar
 
 import rocisa as _rocisa
 import rocisa.instruction as _rocisa_instruction
+import rocisa.code as _rocisa_code
+import rocisa.container as _rocisa_container
 
 # ISA ([major, minor, stepping]) being generated in the current context, set by
 # KernelWriter around kernel generation. A ContextVar (not a mutable module
@@ -182,6 +184,27 @@ def sched_is_waitcnt(item):
 def sched_is_nop(item):
   """True for an s_nop instruction."""
   return isinstance(item, _rocisa_instruction.SNop)
+
+
+def sched_is_instruction(item):
+  """True for a schedulable leaf instruction (as opposed to a Module subtree).
+
+  This is the structural "is this an instruction, not a container" test the
+  scheduler uses when walking a module's items. In Phase 2 a logical leaf must
+  answer True here even though it is not a rocisa ``Instruction``."""
+  return isinstance(item, _rocisa_instruction.Instruction)
+
+
+def sched_is_module(item):
+  """True for a Module subtree (a container to recurse into), as opposed to a
+  schedulable leaf. A logical leaf answers False, like any non-Module item."""
+  return isinstance(item, _rocisa_code.Module)
+
+
+def sched_is_register_container(item):
+  """True for a register operand (RegisterContainer) the scheduler inspects for
+  read/write dependency overlap."""
+  return isinstance(item, _rocisa_container.RegisterContainer)
 
 
 class _LogicalBackend:

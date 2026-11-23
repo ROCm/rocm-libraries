@@ -46,7 +46,7 @@ from .ir import BranchInstruction, BufferLoadB128, BufferLoadB192, BufferLoadB32
   SLongBranchPositive, VFmaMixF32, VMadMixF32, VMovB32, VAndB32, VCmpEQU32, VCndMaskB32, VMovB64, VNop, VReadfirstlaneB32, TensorLoadToLds, SCMovB32, SCMovB64, t16
 from .ir import sched_is_mfma, sched_is_smfma, sched_is_mxmfma, sched_is_tensor_load_to_lds
 from .ir import sched_is_ds_load, sched_is_ds_load_b128, sched_is_ds_store, sched_is_waitcnt
-from .ir import sched_is_nop
+from .ir import sched_is_nop, sched_is_instruction, sched_is_module, sched_is_register_container
 from .ir import SSchedulingFence
 from .ir import set_active_version as _set_active_ir_version
 from rocisa.register import RegisterPool
@@ -1318,7 +1318,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
             name = getattr(it, "name", "") or ""
             if name.startswith("packMXSA") or name.startswith("packMXSB"):
               continue
-            leftover = it.flatitems() if isinstance(it, Module) else [it]
+            leftover = it.flatitems() if sched_is_module(it) else [it]
             assert len(leftover) == 0, "A/B pack code should be empty for half PLR case"
         if kernel["PrefetchGlobalRead"] < 2:
           iterCode.add(globalReadCode)
@@ -1605,7 +1605,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       lenPointerLRCode = 0
       # count number of PointerLRCode (excluding comment)
       for item in PointerLRCodeItems:
-        if isinstance(item, Instruction):
+        if sched_is_instruction(item):
           lenPointerLRCode += 1
       #####
       # Prepare localReadCode
@@ -2071,7 +2071,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
           else:
             srcRegs = []
 
-        return any((lrDataReg & r) for r in srcRegs if isinstance(r, RegisterContainer))
+        return any((lrDataReg & r) for r in srcRegs if sched_is_register_container(r))
 
       def hasAnyDependency(lr: DSLoadInstruction, insts: List[Instruction]):
         return any(hasDependency(lr, inst) for inst in insts)
@@ -2299,7 +2299,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
               while PointerLRCodeItems:
                 item = PointerLRCodeItems.pop(0)
                 iterCode.add(item)
-                if isinstance(item, Instruction):
+                if sched_is_instruction(item):
                   break
             if i == numMfmaPerIter - 1:
               while PointerLRCodeItems:
