@@ -1635,9 +1635,11 @@ namespace
             for_each_widening(S2sWidening{handle, tf});
     }
 
-    // A matrix with zero nonzeros, from f32 values into i32 values. An unsupported
+    // A matrix with zero nonzeros, from f32 values into i32 values, a pair without a
+    // conversion kernel, and into f64 values, a supported pair. An unsupported
     // value type pair is rejected when both value arrays are set, including when
-    // nnz is zero. CSR -> CSC, CSC -> CSR and BSR -> CSR only check the data types
+    // nnz is zero, and a supported pair still converts on the routes that convert
+    // values. CSR -> CSC, CSC -> CSR and BSR -> CSR only check the data types
     // when both matrices have value arrays, so they still convert a matrix that
     // has none. The permissive conversions go through an intermediate CSR matrix
     // that has no value array when nnz is zero; they check the pair of user value
@@ -1673,13 +1675,22 @@ namespace
             return f == rocsparse_format_csr || f == rocsparse_format_csc
                    || f == rocsparse_format_bsr;
         };
-        for(bool values : {true, false})
+        // The routes that convert f32 values into f64 values.
+        const auto converts_to_f64 = [&](const Case& c) {
+            return c.tf == coo || c.tf == coo_aos || (c.tf == csr && c.sf != csc && c.sf != bsr);
+        };
+        const std::pair<rocsparse_datatype, bool> runs[] = {{rocsparse_datatype_i32_r, true},
+                                                            {rocsparse_datatype_i32_r, false},
+                                                            {rocsparse_datatype_f64_r, true},
+                                                            {rocsparse_datatype_f64_r, false}};
+        for(const auto& [tt, values] : runs)
         {
             for(const Case& c : cases)
             {
-                SCOPED_TRACE(testing::Message() << "source " << c.sf << " target " << c.tf
-                                                << (values ? "" : " without values"));
-                DevBuf<int32_t> t_ptr(std::vector<int32_t>(m + 1, -7)), t_idx(1), t_val(1);
+                SCOPED_TRACE(testing::Message() << "source " << c.sf << " target " << c.tf << " "
+                                                << tt << (values ? "" : " without values"));
+                DevBuf<int32_t> t_ptr(std::vector<int32_t>(m + 1, -7)), t_idx(1);
+                DevBuf<double>  t_val(1);
                 Spmat           source, target;
                 ASSERT_EQ(create_s2s(source,
                                      c.sf,
@@ -1691,7 +1702,7 @@ namespace
                           st_ok);
                 ASSERT_EQ(create_s2s(target,
                                      c.tf,
-                                     rocsparse_datatype_i32_r,
+                                     tt,
                                      0,
                                      has_ptr(c.tf) ? t_ptr.get() : t_idx.get(),
                                      t_idx,
@@ -1700,7 +1711,8 @@ namespace
                 std::string failed_call;
                 // The CSR -> ELL and CSR -> BSR conversions compare the data types even
                 // when the matrices have no value arrays.
-                if(values || c.tf == ell || c.tf == bsr)
+                const bool converts = tt == rocsparse_datatype_f64_r && converts_to_f64(c);
+                if((values && !converts) || c.tf == ell || c.tf == bsr)
                 {
                     EXPECT_EQ(sparse_to_sparse(handle, source, target, c.permissive, &failed_call),
                               rocsparse_status_not_implemented);
