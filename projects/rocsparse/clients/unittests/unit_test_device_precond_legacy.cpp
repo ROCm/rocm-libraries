@@ -658,9 +658,18 @@ namespace
         if(got.size() != want.size())
             return false;
         for(size_t i = 0; i < got.size(); ++i)
-            if(std::abs(to_cd(got[i]) - to_cd(want[i])) > tol)
+            if(!(std::abs(to_cd(got[i]) - to_cd(want[i])) <= tol))
                 return false;
         return true;
+    }
+
+    // The csric0 result is the mirrored factor of AISPARSE-903 and not the Cholesky factor.
+    template <typename T>
+    bool is_mirrored_factor(const std::vector<T>& got,
+                            const std::vector<T>& mirrored,
+                            const std::vector<T>& want)
+    {
+        return all_close(got, mirrored, 1.0e-5) && !all_close(got, want, 1.0e-5);
     }
 
     template <typename T>
@@ -715,12 +724,18 @@ TEST_F(PrecondLegacy, csric0_hermitian_general_phase)
             const auto a        = hermitian_from_factor<T>(general_phase_factor());
             const auto want     = factor_values<T>(general_phase_factor());
             const auto mirrored = mirrored_ic0(a);
+            // A NaN in an otherwise mirrored factor is a different wrong result: it must not
+            // be taken for the known defect and skipped.
+            auto mirrored_with_nan = mirrored;
+            mirrored_with_nan[0]   = nan_of<T>();
+            ASSERT_TRUE(is_mirrored_factor(mirrored, mirrored, want));
+            ASSERT_FALSE(is_mirrored_factor(mirrored_with_nan, mirrored, want));
             csr_out<T> out;
             run_csr<Kind::ic, T>(
                 handle, a, rocsparse_index_base_zero, -1.0, boost_request{}, false, out);
             ASSERT_EQ(out.compute_status, rocsparse_status_success);
             EXPECT_EQ(out.singular_pivot, -1);
-            if(all_close(out.values, mirrored, 1.0e-5) && !all_close(out.values, want, 1.0e-5))
+            if(is_mirrored_factor(out.values, mirrored, want))
             {
                 GTEST_SKIP() << "csric0 conjugates the dependency row instead of the current "
                                 "one (AISPARSE-903); got"
