@@ -97,7 +97,7 @@ DEFAULT_PROBE_ITERS = 2
 #: How a reported time is measured; see "Timing the finalists like hipDNN"
 #: above. The sweeps' ``--timing`` flag picks one for every reported number,
 #: ranked or not (:meth:`benchmarks.common.early_stop.EarlyStop.measure`).
-TIMINGS = ("block", "staged")
+TIMINGS = ("block", "staged", "hcbatch")
 DEFAULT_TIMING = "staged"
 #: The protocol of :func:`rocke.runtime.time_launches`, and of every result
 #: recorded before the choice existed.
@@ -275,6 +275,88 @@ def time_batch(
             out.extend(
                 _time_one_by_one(part, warmup=warmup, iters=iters, stream=stream)
             )
+    return out
+
+
+# hcbatch: a batched sustained-timing protocol: --warmup launches, HCBATCH_WARMUP_MS of warm-up batches, then batches until
+# HCBATCH_BENCH_MS of GPU time and --iters launches have run; each batch is about HCBATCH_BATCH_MS of
+# back-to-back launches between its own event pair, the next batch is queued before the current one
+# is waited on, and the result is the median batch's time per launch.
+HCBATCH_WARMUP_MS = 200.0
+HCBATCH_BENCH_MS = 300.0
+HCBATCH_BATCH_MS = 5.0
+
+
+def time_launches_hcbatch(
+    run: Callable[[], None], *, warmup: int = 0, iters: int = 10, stream: int = 0
+) -> float:
+    """Median per-launch time of ``run`` over ~5 ms batches."""
+    from statistics import median
+
+    from rocke.runtime import resolve_stream
+    from rocke.runtime.hip_module import Runtime
+    from rocke.runtime.launcher import no_fence
+
+    rt = Runtime()
+    resolved = resolve_stream(stream)
+    live = []
+
+    def queue(n):
+        start, end = rt.event(), rt.event()
+        live.append((start, end))
+        start.record(stream=resolved)
+        for _ in range(n):
+            run()
+        end.record(stream=resolved)
+        return start, end, n
+
+    try:
+        with no_fence():
+            for _ in range(int(warmup)):
+                run()
+            warm_ms = bench_ms = 0.0
+            launches = 0
+            samples: List[float] = []
+            n = 1
+            pending = queue(n)
+            while True:
+                nxt = queue(n)
+                start, end, k = pending
+                end.synchronize()
+                ms = start.elapsed_to(end)
+                per = ms / k
+                if warm_ms < HCBATCH_WARMUP_MS:
+                    warm_ms += ms
+                else:
+                    bench_ms += ms
+                    launches += k
+                    samples.append(per)
+                    if bench_ms >= HCBATCH_BENCH_MS and launches >= int(iters):
+                        break
+                n = max(1, int(round(HCBATCH_BATCH_MS / max(per, 1e-6))))
+                pending = nxt
+            rt.sync()
+    except Exception as exc:  # noqa: BLE001 - re-raised after the drain
+        _drain_after_failure(rt, exc)
+        _destroy(live)
+        raise
+    _destroy(live)
+    rt.wait_stream(resolved)
+    return median(samples)
+
+
+def _time_each_hcbatch(runs, *, warmup, iters, stream) -> List[Optional[float]]:
+    """:func:`time_launches_hcbatch` per candidate; ``None`` for one whose launch raised."""
+    from rocke.runtime import synchronize_and_release
+    from rocke.runtime.hip_module import HipError
+
+    out: List[Optional[float]] = []
+    for run in runs:
+        try:
+            out.append(time_launches_hcbatch(run, warmup=warmup, iters=iters, stream=stream))
+        except (HipError, RuntimeError):
+            synchronize_and_release(stream)
+            out.append(None)
     return out
 
 
@@ -478,6 +560,8 @@ def rank(
     finals = [kept[i] for i in order]
     if timing == "staged":
         times = time_batch_staged(finals, warmup=warmup, iters=iters, stream=stream)
+    elif timing == "hcbatch":
+        times = _time_each_hcbatch(finals, warmup=warmup, iters=iters, stream=stream)
     else:
         times = time_batch(
             finals, warmup=warmup, iters=iters, stream=stream, chunk=chunk

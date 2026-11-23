@@ -62,6 +62,13 @@ static int sp_wo(const rocke_direct_conv_problem_t* p)
     return (p->W + 2 * rocke_direct_conv_problem_pad_w(p) - p->KW) / s + 1;
 }
 
+/* Padded input row of the tile-local step y (Python: abs_row); y itself
+ * without a row tile (y_base NULL). */
+static rocke_value_t* sp_abs_row(rocke_ir_builder_t* bld, rocke_value_t* y_base, rocke_value_t* y)
+{
+    return y_base ? rocke_b_add(bld, y_base, y) : y;
+}
+
 /* Raw input values of row y, one per filter column (Python: load_row).
  * The per-lane column offsets come precomputed (OOB sentinel where the tap
  * falls outside the image or the lane is idle); the wave-uniform row offset
@@ -144,6 +151,9 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_spatial(
     rocke_value_t* w_in_wave;
     rocke_value_t* bx;
     rocke_value_t* n;
+    /* First padded input row of the block's row tile (block_h only). */
+    rocke_value_t* y_base = NULL;
+    int BH;
     rocke_value_t* n_w;
     rocke_value_t* q_out;
     rocke_value_t* w_valid;
@@ -210,8 +220,12 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_spatial(
 
     rocke_attr_set_int(bld, &bld->kernel->attrs, "max_workgroup_size", THREADS);
     /* Two waves per SIMD: the KH x KW weights and the prefetch window push
-     * larger filters just over the one-wave threshold; two waves are faster. */
-    rocke_attr_set_int(bld, &bld->kernel->attrs, "waves_per_eu", 2);
+     * larger filters just over the one-wave threshold; two waves are faster.
+     * A row-tiled block of the large filters takes one wave per SIMD: its
+     * tile count fills the device and the weights stay out of scratch. */
+    BH = spec->block_h;
+    rocke_attr_set_int(
+        bld, &bld->kernel->attrs, "waves_per_eu", (BH && p->KH * p->KW > 64) ? 1 : 2);
 
     /* ---- parameters ---- */
     {
@@ -243,9 +257,24 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_spatial(
     ch = rocke_b_mod(bld, t_in_wave, params.p_groups);
     w_in_wave = rocke_b_div(bld, t_in_wave, params.p_groups);
 
-    /* Grid: bx=W-tile, bz=batch */
+    /* Grid: bx=W-tile, bz=batch (* row tiles + row tile with block_h) */
     bx = rocke_b_block_id_x(bld);
-    n = rocke_b_block_id_z(bld);
+    if(BH)
+    {
+        /* h_tiles = (p_Ho + BH - 1) / BH; n = bz / h_tiles;
+         * y_base = (bz % h_tiles) * (BH * stride). Python's operand order. */
+        rocke_value_t* bz = rocke_b_block_id_z(bld);
+        rocke_value_t* ho_up = rocke_b_add(bld, params.p_Ho, rocke_b_const_i32(bld, BH - 1));
+        rocke_value_t* h_tiles = rocke_b_div(bld, ho_up, rocke_b_const_i32(bld, BH));
+        rocke_value_t* tile;
+        n = rocke_b_div(bld, bz, h_tiles);
+        tile = rocke_b_mod(bld, bz, h_tiles);
+        y_base = rocke_b_mul(bld, tile, rocke_b_const_i32(bld, BH * c_stride_dw));
+    }
+    else
+    {
+        n = rocke_b_block_id_z(bld);
+    }
 
     /* AOT: groups is a kernarg, so the W positions per wave (and with them the
      * block's W tile) are derived at run time; the host sizes the grid with
@@ -353,10 +382,20 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_spatial(
         c1 = rocke_b_const_i32(bld, 1);
         c_KH = rocke_b_const_i32(bld, KH);
         c_stride_rv = rocke_b_const_i32(bld, c_stride_dw);
-        /* n_iters = Hi + KH - 1 rows; the loop walks them KH at a time. */
-        n_iters_v = rocke_b_add(bld, params.p_Hi, rocke_b_const_i32(bld, KH - 1));
-        n_groups_v
-            = rocke_b_div(bld, rocke_b_add(bld, n_iters_v, rocke_b_const_i32(bld, KH - 1)), c_KH);
+        if(BH)
+        {
+            /* A row tile walks (BH - 1) * stride + KH padded input rows. */
+            int n_iters_c = (BH - 1) * c_stride_dw + KH;
+            n_iters_v = rocke_b_const_i32(bld, n_iters_c);
+            n_groups_v = rocke_b_const_i32(bld, (n_iters_c + KH - 1) / KH);
+        }
+        else
+        {
+            /* n_iters = Hi + KH - 1 rows; the loop walks them KH at a time. */
+            n_iters_v = rocke_b_add(bld, params.p_Hi, rocke_b_const_i32(bld, KH - 1));
+            n_groups_v = rocke_b_div(
+                bld, rocke_b_add(bld, n_iters_v, rocke_b_const_i32(bld, KH - 1)), c_KH);
+        }
 
         /* Per-lane column offsets, hoisted out of the loop (Python: col_offs). */
         {
@@ -402,7 +441,7 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_spatial(
             for(k = 0; k < PF; ++k)
             {
                 sp_load_row(bld,
-                            rocke_b_const_i32(bld, k),
+                            sp_abs_row(bld, y_base, rocke_b_const_i32(bld, k)),
                             p->PAD,
                             KW,
                             &params,
@@ -475,7 +514,7 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_spatial(
             {
                 rocke_value_t* cpf = rocke_b_const_i32(bld, PF);
                 sp_load_row(bld,
-                            rocke_b_add(bld, y_j, cpf),
+                            sp_abs_row(bld, y_base, rocke_b_add(bld, y_j, cpf)),
                             p->PAD,
                             KW,
                             &params,
@@ -527,8 +566,13 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_spatial(
                 should_flush = rocke_b_land(bld, flush_ge, flush_stride);
             }
 
-            ho_row_j = rocke_b_div(bld, p_flush_rv, c_stride_rv);
+            ho_row_j = rocke_b_div(bld, sp_abs_row(bld, y_base, p_flush_rv), c_stride_rv);
             store_ok = rocke_b_land(bld, q_ok, should_flush);
+            if(BH)
+            {
+                /* The last row tile may run past Ho. */
+                store_ok = rocke_b_land(bld, store_ok, rocke_b_cmp_lt(bld, ho_row_j, params.p_Ho));
+            }
             acc_val = new_accs[P_FLUSH_j];
 
             d_off = NULL;

@@ -115,6 +115,9 @@ def conv_implicit_gemm_spec_to_dict(spec: Any) -> Dict[str, Any]:
         epilogue=spec.epilogue,
         async_dma=spec.async_dma,
         unroll_k=spec.unroll_k,
+        # The register-prefetch K loop; dropped, the engine would build the
+        # plain loop under the spec's name.
+        prefetch_global_regs=spec.prefetch_global_regs,
         chiplet_swizzle=spec.chiplet_swizzle,
         chiplet_wgm=spec.chiplet_wgm,
         chiplet_num_xcds=spec.chiplet_num_xcds,
@@ -333,7 +336,7 @@ def conv_direct_fwd_flex_mfma_spec_to_dict(spec: Any) -> Dict[str, Any]:
     """:class:`FwdFlexMfmaSpec` -> flat dict (problem nested, dtype included)."""
     return dict(
         problem=_fwd_small_problem_dict(spec.problem),
-        block_k=spec.block_k,
+        bk=spec.bk,
         split_c=spec.split_c,
         name=spec.name,
         wave_size=spec.wave_size,

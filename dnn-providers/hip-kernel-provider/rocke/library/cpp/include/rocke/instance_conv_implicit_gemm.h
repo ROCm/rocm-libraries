@@ -217,6 +217,22 @@ typedef struct rocke_implicit_gemm_conv_spec
      * gets its own LDS bytes (pool = ab+c) and the barrier is elided -> lower
      * small-tile latency, more LDS. Only affects epilogue == "cshuffle". */
     bool cshuffle_no_alias; /* default false */
+
+    /* prefetch_global_regs: the register-prefetch form of the plain single-buffer
+     * synchronous K loop (mem/compv3/compv4/basic): tile k+1's global reads stay
+     * in VGPRs under tile k's MFMAs and are written to LDS at the top of the next
+     * iteration, behind LDS-only barriers. Rejected with async_dma, unroll_k, the
+     * wavelet pipeline and on WMMA. Mirrors ImplicitGemmConvSpec.
+     * prefetch_global_regs; the loop is rocke_conv_emit_kloop_prefetch_global_regs,
+     * shared with wgrad. Appended last so it sits in the struct's old tail
+     * padding. */
+    bool prefetch_global_regs; /* default false */
+
+    /* patch: the width-folded patch-embedding GEMM (X == 1, no padding or
+     * dilation, sH >= Y, ungrouped): A's k part is one channel divide with no
+     * bounds test, B is a row-major [K, Y*C] matrix. Same kernargs; tagged
+     * "patch". Mirrors ImplicitGemmConvSpec.patch. */
+    bool patch; /* default false */
 } rocke_implicit_gemm_conv_spec_t;
 
 /* Default-constructed spec (every field == Python dataclass default). The caller

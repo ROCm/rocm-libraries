@@ -2647,7 +2647,7 @@ def _spec(idx: int):
         )
         return (
             "spatial",
-            DirectDepthwiseSpatialSpec(problem=p, block_waves=1),
+            DirectDepthwiseSpatialSpec(problem=p, block_waves=1, block_h=4),
             "gfx950",
         )
     if idx == 12:

@@ -180,12 +180,14 @@ def pp_mfma_reason(
     block_ks: Sequence[int],
     block_k_reason: str,
     needs_ds_read_tr: bool = False,
+    valid_ok: bool = False,
 ) -> "str | None":
     """Why ``spec`` cannot build on ``arch`` (None when it can).
 
     ``family`` names the kernel in the reasons; ``block_ks`` are the block_k
     values its weight staging takes (``block_k_reason`` refuses the rest);
-    ``needs_ds_read_tr`` gates on the transposing LDS read.
+    ``needs_ds_read_tr`` gates on the transposing LDS read; ``valid_ok`` also
+    takes valid padding (PAD 0: the kernel bounds its tiles by Ho x Wo).
     """
     p = spec.problem
     target = ArchTarget.from_gfx(arch)
@@ -212,7 +214,7 @@ def pp_mfma_reason(
         return "dilation must be 1"
     if p.KH != p.KW or p.KH < 3 or p.KH % 2 == 0:
         return "square odd filters >= 3 only"
-    if p.PAD != (p.KH - 1) // 2:
+    if p.PAD != (p.KH - 1) // 2 and not (valid_ok and p.PAD == 0):
         return f"'same' padding only: PAD must be {(p.KH - 1) // 2} (got {p.PAD})"
     why = one_padding_reason(p)
     if why is not None:

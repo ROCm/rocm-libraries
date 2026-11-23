@@ -18,6 +18,7 @@ from dataclasses import replace
 
 __all__ = [
     "DIRECT_WGRAD_FOLD",
+    "DIRECT_WGRAD_SLAB_FOLD",
     "DIRECT_WGRAD_FOLDED",
     "DIRECT_DGRAD_REORGANIZE",
     "DIRECT_DGRAD_REORGANIZE_RTC",
@@ -32,6 +33,7 @@ __all__ = [
     "DIRECT_FWD_SMALLC_MFMA",
     "DIRECT_FWD_SMALLK_MFMA",
     "DIRECT_FWD_FLEX_MFMA",
+    "DIRECT_DGRAD_FLEX_MFMA",
     "DIRECT_FWD_PP_MFMA",
     "DIRECT_FWD_SMALLK_WMMA",
     "DIRECT_FWD_WMMA",
@@ -43,6 +45,10 @@ __all__ = [
     "DIRECT_MFMA_DGRAD",
     "DIRECT_MFMA_HELPERS",
     "DIRECT_SPLIT_REDUCE",
+    "DIRECT_FWD_RR_MFMA",
+    "DIRECT_FWD_RR_WFMT",
+    "DIRECT_FWD_TAP1D_MFMA",
+    "DIRECT_FWD_ROWSTREAM_MFMA",
     "DIRECT_WGRAD_REDUCE",
     "DIRECT_WGRAD_TWO_STAGE",
     "PER_AXIS_PAD_VARIANTS",
@@ -152,6 +158,25 @@ DIRECT_SPLIT_REDUCE = "direct_split_reduce"
 # of any filter / stride / dilation / padding (conv_direct_fwd_flex_mfma);
 # split_c > 1 writes the direct_split_reduce workspace.
 DIRECT_FWD_FLEX_MFMA = "direct_fwd_flex_mfma"
+# WIP: the same kernel running a strided dense dgrad in one launch over the
+# stride's output phases, on the dgrad's own filter (FwdFlexMfmaSpec ds + wt);
+# dgrad ABI, split_c > 1 folds through direct_split_reduce.
+DIRECT_DGRAD_FLEX_MFMA = "direct_dgrad_flex_mfma"
+# Wave64 MFMA (gfx950) dense 3x3 stride-1 forward that keeps input rows in
+# registers across the filter rows and reads pre-formatted weights straight
+# into VGPRs (conv_direct_fwd_rr_mfma) ...
+DIRECT_FWD_RR_MFMA = "direct_fwd_rr_mfma"
+# ... and its weight-format pass (KRSC -> MFMA operand tiles), a forward
+# helper like the split-C reduction: shape-independent (C and K are
+# kernargs), one binary per dtype, found by exact identity.
+DIRECT_FWD_RR_WFMT = "direct_fwd_rr_wfmt"
+# Wave64 MFMA (gfx950) 1-D tap-reuse forward for dense 1 x S filters, stride 1,
+# any width dilation and padding (conv_direct_fwd_tap1d_mfma); workspace always 0.
+DIRECT_FWD_TAP1D_MFMA = "direct_fwd_tap1d_mfma"
+# Wave64 MFMA (gfx950) row-streaming forward for dense 3x3 stride-1 pad-1
+# layers with K 32/64 and C <= 192 (conv_direct_fwd_rowstream_mfma); C and K
+# are baked (weights live in VGPRs); workspace always 0.
+DIRECT_FWD_ROWSTREAM_MFMA = "direct_fwd_rowstream_mfma"
 # Stride-1 depthwise dgrad through the output-stationary forward kernel with
 # the filter rotated by 180 degrees (DirectDepthwiseTiledSpec(dgrad=True)).
 DIRECT_DEPTHWISE_TILED_DGRAD = "direct_depthwise_tiled_dgrad"
@@ -163,7 +188,11 @@ DIRECT_DEPTHWISE_TILED_DGRAD = "direct_depthwise_tiled_dgrad"
 # identity lookup (direct_aot_jobs.direct_job_for_identity) both read it.
 PER_AXIS_PAD_VARIANTS = (
     DIRECT_DEPTHWISE_TILED_DGRAD,
+    "direct_wgrad_tiled",
     DIRECT_FWD_FLEX_MFMA,
+    DIRECT_DGRAD_FLEX_MFMA,
+    DIRECT_FWD_RR_MFMA,
+    DIRECT_FWD_TAP1D_MFMA,
     DIRECT_FWD_SMALLK_WMMA,
     DIRECT_FWD_SMALLK_MFMA,
     DIRECT_FWD_WMMA,
@@ -184,12 +213,16 @@ DIRECT_WGRAD_FOLDED = (
     "direct_wgrad_gather",
     "direct_wgrad_grouped_mfma",
 )
+# WIP: the fold of the tiled wgrad's ``slab`` scratch into the 16-bit dW;
+# shape-generic, keyed by its output dtype and slice count.
+DIRECT_WGRAD_SLAB_FOLD = "direct_wgrad_slab_fold"
 _HELPERS = (
     DIRECT_DGRAD_TRANSPOSE,
     DIRECT_DGRAD_REORGANIZE,
     DIRECT_DGRAD_TRANSPOSE_RTC,
     DIRECT_DGRAD_REORGANIZE_RTC,
     DIRECT_WGRAD_FOLD,
+    DIRECT_WGRAD_SLAB_FOLD,
 )
 # Stage 2 of the two-stage direct wgrad kernels: folds the ws_replicas fp32
 # scratch slabs into dW. Cached as its own entry (one per replica count) and
@@ -487,6 +520,10 @@ def make_direct_spec(variant: str, problem, knobs: dict, wave_size: int = 64):
         return GroupedWgradMfmaSpec(
             problem=problem, name="rocke_direct_wgrad_grouped_mfma", **knobs
         )
+    if variant == DIRECT_WGRAD_SLAB_FOLD:
+        from kernels.common.conv_direct_wgrad_tiled import WgradSlabFoldSpec
+
+        return WgradSlabFoldSpec(name="rocke_direct_wgrad_slab_fold", **knobs)
     if variant == DIRECT_WGRAD_FOLD:
         from kernels.common.conv_direct_dw_wgrad import DwWgradFoldSpec
 
@@ -497,6 +534,28 @@ def make_direct_spec(variant: str, problem, knobs: dict, wave_size: int = 64):
         from kernels.common.conv_direct_fwd_flex_mfma import FwdFlexMfmaSpec
 
         return FwdFlexMfmaSpec(problem=problem, name="rocke_fwd_flex_mfma", **knobs)
+    if variant == DIRECT_DGRAD_FLEX_MFMA:
+        from kernels.common.conv_direct_fwd_flex_mfma import FwdFlexMfmaSpec
+
+        return FwdFlexMfmaSpec(
+            problem=problem, name="rocke_dgrad_flex_mfma", ds=True, **knobs
+        )
+    if variant == DIRECT_FWD_RR_MFMA:
+        from kernels.common.conv_direct_fwd_rr_mfma import FwdRrMfmaSpec
+
+        return FwdRrMfmaSpec(problem=problem, name="rocke_fwd_rr_mfma", **knobs)
+    if variant == DIRECT_FWD_RR_WFMT:
+        from kernels.common.conv_direct_fwd_rr_mfma import FwdRrWfmtSpec
+
+        return FwdRrWfmtSpec(problem=problem, name="rocke_fwd_rr_wfmt", **knobs)
+    if variant == DIRECT_FWD_TAP1D_MFMA:
+        from kernels.common.conv_direct_fwd_tap1d_mfma import FwdTap1dMfmaSpec
+
+        return FwdTap1dMfmaSpec(problem=problem, name="rocke_fwd_tap1d_mfma", **knobs)
+    if variant == DIRECT_FWD_ROWSTREAM_MFMA:
+        from kernels.common.conv_direct_fwd_rowstream_mfma import FwdRowstreamMfmaSpec
+
+        return FwdRowstreamMfmaSpec(problem=problem, name="rocke_fwd_rowstream_mfma", **knobs)
     if variant == "direct_wgrad_small_c":
         # Bakes its channel counts: the im2col decode walks the (s, c) run.
         return dc.DirectConvWgradSpec(
@@ -519,7 +578,7 @@ def make_direct_spec(variant: str, problem, knobs: dict, wave_size: int = 64):
         return dc.DirectReorganizeWeightsSpec(problem=problem, **knobs)
     if variant == DIRECT_DGRAD_TRANSPOSE_RTC:
         return dc.DirectTransposeWeightsDgradSpec(
-            problem=problem, runtime_channels=True
+            problem=problem, runtime_channels=True, **knobs
         )
     if variant == DIRECT_DGRAD_REORGANIZE_RTC:
         return dc.DirectReorganizeWeightsSpec(
@@ -886,10 +945,27 @@ def validate_direct_spec(variant: str, spec, arch: str) -> tuple[bool, str]:
         if variant == DIRECT_SPLIT_REDUCE:
             spec.validate()
             return True, "ok"
-        if variant == DIRECT_FWD_FLEX_MFMA:
+        if variant in (DIRECT_FWD_FLEX_MFMA, DIRECT_DGRAD_FLEX_MFMA):
             from kernels.common.conv_direct_fwd_flex_mfma import fwd_flex_mfma_reason
 
             why = fwd_flex_mfma_reason(spec, arch)
+            return why is None, why or "ok"
+        if variant == DIRECT_FWD_RR_MFMA:
+            from kernels.common.conv_direct_fwd_rr_mfma import fwd_rr_mfma_reason
+
+            why = fwd_rr_mfma_reason(spec, arch)
+            return why is None, why or "ok"
+        if variant == DIRECT_FWD_RR_WFMT:
+            return True, "ok"
+        if variant == DIRECT_FWD_TAP1D_MFMA:
+            from kernels.common.conv_direct_fwd_tap1d_mfma import fwd_tap1d_mfma_reason
+
+            why = fwd_tap1d_mfma_reason(spec, arch)
+            return why is None, why or "ok"
+        if variant == DIRECT_FWD_ROWSTREAM_MFMA:
+            from kernels.common.conv_direct_fwd_rowstream_mfma import fwd_rowstream_mfma_reason
+
+            why = fwd_rowstream_mfma_reason(spec, arch)
             return why is None, why or "ok"
     except ValueError as e:
         return False, str(e)
@@ -911,8 +987,11 @@ def select_direct_kernel_builder(variant: str, spec, arch: str):
     from kernels.common import conv_direct_dgrad_wmma as dwm
     from kernels.common import conv_direct_dw_fwd_wmma as dfw
     from kernels.common import conv_direct_fwd_flex_mfma as ffx
+    from kernels.common import conv_direct_fwd_tap1d_mfma as ft1d
+    from kernels.common import conv_direct_fwd_rowstream_mfma as frs
     from kernels.common import conv_direct_fwd_gstream_wmma as fgs
     from kernels.common import conv_direct_fwd_pp_mfma as fpp
+    from kernels.common import conv_direct_fwd_rr_mfma as frr
     from kernels.common import conv_direct_fwd_tapouter_wmma as ft
     from kernels.common import conv_direct_dw_wgrad as dw
     from kernels.common import conv_direct_dw_wgrad_mfma as dwmf
@@ -949,6 +1028,7 @@ def select_direct_kernel_builder(variant: str, spec, arch: str):
         "direct_wgrad_dw_mfma": dwmf.build_dw_wgrad_mfma,
         "direct_wgrad_grouped_mfma": gwm.build_grouped_wgrad_mfma,
         DIRECT_WGRAD_FOLD: dw.build_dw_wgrad_fold,
+        DIRECT_WGRAD_SLAB_FOLD: wt.build_wgrad_slab_fold,
         "direct_grouped": dc.build_direct_conv,
         "direct_nongrouped": dn.build_direct_conv_nongrouped,
         DIRECT_GROUPED_HALO: dn.build_direct_conv_nongrouped,
@@ -975,6 +1055,11 @@ def select_direct_kernel_builder(variant: str, spec, arch: str):
         DIRECT_DGRAD_REORGANIZE_RTC: dc.build_direct_reorganize_weights,
         DIRECT_SPLIT_REDUCE: dn.build_direct_conv_split_reduce,
         DIRECT_FWD_FLEX_MFMA: ffx.build_fwd_flex_mfma,
+        DIRECT_DGRAD_FLEX_MFMA: ffx.build_fwd_flex_mfma,
+        DIRECT_FWD_RR_MFMA: frr.build_fwd_rr_mfma,
+        DIRECT_FWD_RR_WFMT: frr.build_fwd_rr_wfmt,
+        DIRECT_FWD_TAP1D_MFMA: ft1d.build_fwd_tap1d_mfma,
+        DIRECT_FWD_ROWSTREAM_MFMA: frs.build_fwd_rowstream_mfma,
     }
     return builders[variant](spec, arch=arch)
 

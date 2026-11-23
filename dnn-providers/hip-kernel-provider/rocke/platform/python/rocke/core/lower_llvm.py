@@ -1834,6 +1834,9 @@ class _Lowerer:
         # waits vmcnt(0) first; with them it waits only for DMA into the
         # read's own allocation.
         self._lds_aa = bool(kernel.attrs.get("lds_alias_scopes", False))
+        # buffer resource values: typed <4 x i32> in the IR, ptr addrspace(8)
+        # in LLVM (inline asm operands take the LLVM type)
+        self._rsrc_names: set = set()
         # i64 LDS address value name -> the allocation it points into.
         self._lds_prov: Dict[str, str] = {}
         self._lds_aa_used = False
@@ -5393,7 +5396,12 @@ class _Lowerer:
         # attr is accepted at the IR level (forward-compat) but is NOT
         # rendered as a flag here.
         flag_str = (" " + " ".join(flags)) if flags else ""
-        arglist = ", ".join(self._operand_with_type(v) for v in op.operands)
+        arglist = ", ".join(
+            f"ptr addrspace(8) {self._operand(v)}"
+            if self._operand(v) in self._rsrc_names
+            else self._operand_with_type(v)
+            for v in op.operands
+        )
         asm_expr = f'asm{flag_str} "{template}", "{constraints}"({arglist})'
         if len(op.results) > 1:
             # Multi-output asm: LLVM returns a literal struct; unpack each
@@ -6200,6 +6208,7 @@ class _Lowerer:
                 )
             nb_text = f"i32 {self._operand(num_bytes)}"
         word3 = self._backend.buffer_rsrc_word3
+        self._rsrc_names.add(op.result.name)
         self._current().emit(
             f"  {op.result.name} = call ptr addrspace(8) @{intrinsic}("
             f"ptr addrspace(1) {self._operand(ptr)}, "

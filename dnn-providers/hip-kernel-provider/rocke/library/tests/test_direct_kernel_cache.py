@@ -1854,7 +1854,14 @@ def test_run_from_cache_batch_chunks_are_balanced():
             assert s_i[name] == n * per_image < _TENSOR_LIMIT
         assert (p_i["w"], s_i["w"]) == (ptrs["w"], sizes["w"])
         n0 += n
-    assert _chunk_buffers(ptrs, sizes, inputs, "y", [31], 0) == (ptrs, sizes)
+    # One launch over the whole batch (a plan that rebases its activations
+    # per image / segment): the i32 size kernargs take a clamped value.
+    assert _chunk_buffers(ptrs, sizes, inputs, "y", [31], 0) == (
+        ptrs,
+        {k: min(v, _TENSOR_LIMIT - 1) for k, v in sizes.items()},
+    )
+    small = {k: min(v, 4096) for k, v in sizes.items()}
+    assert _chunk_buffers(ptrs, small, inputs, "y", [31], 0) == (ptrs, small)
 
 
 def test_run_from_cache_wgrad_chunks_accumulate_into_one_dw():
@@ -1976,13 +1983,17 @@ def test_measure_plans_skips_a_plan_whose_kernargs_do_not_fit(monkeypatch, capsy
     assert "[skip] big: kernarg does not fit" in capsys.readouterr().out
 
 
-def test_run_from_cache_plans_each_chunk_size():
+def test_run_from_cache_plans_each_chunk_size(monkeypatch):
     """Each distinct chunk size is planned on its own batch; only kernels that
     serve every chunk are offered, each launch with its chunk's plan."""
     from types import SimpleNamespace
 
     _need_benchmark_direct_conv()
+    from benchmarks.common import benchmark_direct_conv
     from benchmarks.common.benchmark_direct_conv import _chunk_plans
+
+    # none of these plans runs the whole batch as one launch
+    monkeypatch.setattr(benchmark_direct_conv, "_one_launch", lambda pl: False)
 
     seen = []
 
@@ -1998,7 +2009,8 @@ def test_run_from_cache_plans_each_chunk_size():
 
     problem = _problem(N=31)
     plans, rejected, per_chunk = _chunk_plans(plan_fn, problem, [11, 10, 10])
-    assert seen == [11, 10]
+    # the whole batch is planned too, for the one-launch plans
+    assert seen == [11, 10, 31]
     assert [pl.label for pl in plans] == ["both"]
     assert [pl.N for pl in per_chunk["both"]] == [11, 10, 10]
     assert ("big", "does not serve a batch chunk of 10 images") in rejected

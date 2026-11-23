@@ -610,6 +610,8 @@ def _spec_raw(idx: int):
         return _mfma_gate_spec(idx)
     if 82 <= idx <= 85:
         return _tf32_split_k_spec(idx)
+    if 86 <= idx <= 97:
+        return _pgr_spec(idx)
     raise SystemExit(f"unknown config index {idx}")
 
 
@@ -927,6 +929,84 @@ def _tf32_split_k_spec(idx: int):
         )
     spec, arch = _tf32_spec({82: 54, 83: 56}[idx])
     return replace(spec, split_k=2), arch
+
+
+# The register-prefetch K loop (prefetch_global_regs) on gfx950, built on config
+# 66 unsplit (mem/cshuffle, 32x32x64 tile, 2x2 warps, 16x16x32 warp tile,
+# 8-wide vectors). Keep in lockstep with make_cfg_pgr() in
+# conv_implicit_gemm_emit.c.
+#   86: mem/cshuffle
+#   87: compv3/cshuffle, 128x64x64 tile, 4x2 warps, 32x32x16 warp tile
+#   88: compv4/cshuffle, 128x128x64 tile, bf16
+#   89: compv3/default (vector_size_c=1), 32x32x32 tile, 2x1 warps
+#   90: basic/cshuffle, grouped (groups=2), 4-wide vectors
+#   91: split_k=2 (the slice bounds of the loop)
+#   92: depthwise group_merge=8, 64x64x64 tile, 32x32x16 warp tile, widths
+#       derived (the merged B descriptor, scalar B loads)
+#   93: async_dma: rejected by both engines
+#   94: unroll_k: rejected by both engines
+#   95: gfx1250 WMMA (config 41 unsplit): rejected by both engines
+#   96: scalar A loads on a 256-row tile (64 loads per thread): rejected by
+#       both engines
+#   97: scalar A loads on a 128-row tile (32 loads per thread, the limit)
+
+
+def _pgr_spec(idx: int):
+    if idx == 95:
+        spec, arch = _split_k_spec(41)
+        return replace(spec, split_k=1, prefetch_global_regs=True), arch
+    spec, arch = _mfma_split_k_spec(66)
+    spec = replace(spec, split_k=1, prefetch_global_regs=True)
+    wt32 = dict(warp_tile_m=32, warp_tile_n=32, warp_tile_k=16)
+    kw = {
+        86: {},
+        87: dict(
+            wt32,
+            problem=_cp(**_CSH_64),
+            tile_m=128,
+            tile_n=64,
+            warp_m=4,
+            warp_n=2,
+            pipeline="compv3",
+        ),
+        88: dict(
+            tile_m=128,
+            tile_n=128,
+            pipeline="compv4",
+            data=ConvDataSpec("bf16", "bf16", "bf16"),
+        ),
+        89: dict(
+            problem=_cp(**_DEFAULT),
+            tile_k=32,
+            warp_n=1,
+            pipeline="compv3",
+            epilogue="default",
+            vector_size_c=1,
+        ),
+        90: dict(
+            problem=_cp(**_GROUPED),
+            pipeline="basic",
+            vector_size_a=4,
+            vector_size_b=4,
+            vector_size_c=4,
+        ),
+        91: dict(split_k=2),
+        92: dict(
+            wt32,
+            problem=_cp(**_TF32_DW),
+            tile_m=64,
+            tile_n=64,
+            vector_size_a=None,
+            vector_size_b=None,
+            vector_size_c=None,
+            group_merge=8,
+        ),
+        93: dict(async_dma=True),
+        94: dict(unroll_k=True),
+        96: dict(tile_m=256, tile_n=64, vector_size_a=1, vector_size_b=1),
+        97: dict(tile_m=128, tile_n=64, vector_size_a=1, vector_size_b=1),
+    }[idx]
+    return replace(spec, **kw), arch
 
 
 def main() -> int:

@@ -282,6 +282,12 @@ class RtFilterSpec:
     operand_dtype: str = "fp16"
     vec: int = 8
     filter_rows: int = 1
+    #: Read the filter of the dgrad this forward runs as (WIP, python only):
+    #: ``w`` is the original ``[C][3][3][K]`` filter of a dense stride-1 dgrad
+    #: (C = this pass's reduction, K its outputs) and K1 flips the taps and
+    #: swaps the channel axes on the fly, so the dgrad runs as the forward over
+    #: dY with padding ``2 - pad`` and no weight pre-pass.
+    dgrad: bool = False
 
     def __post_init__(self):
         _check_common(self.mh, self.mw, self.io_dtype, self.operand_dtype, self.vec)
@@ -298,6 +304,7 @@ class RtFilterSpec:
             f"op{self.operand_dtype}",
             f"v{self.vec}",
             f"fr{self.filter_rows}",
+            *(("dg",) if self.dgrad else ()),
         )
 
     def reason(self, geo: RtGeometry) -> Optional[str]:
@@ -305,6 +312,8 @@ class RtFilterSpec:
             return "tile mismatch"
         if geo.problem.cpg % self.vec:
             return f"C/groups={geo.problem.cpg} not a multiple of vec {self.vec}"
+        if self.dgrad and geo.problem.groups != 1:
+            return "the dgrad filter read is dense only"
         return None
 
 
@@ -515,21 +524,42 @@ def build_filter(
     gid = b.add(b.mul(b.block_id_x(), _c(b, _FILTER_BLOCK)), b.thread_id_x())
     row_y = b.block_id_y()
     ok = b.cmp_lt(gid, items)
-    k, cm = cgv.divmod(gid)
-    c = _mul_c(b, cm, vec)
     cg2 = b.mul(cg, _c(b, 2))
-    wbase = _oob(b, ok, b.mul(b.add(b.mul(k, b.mul(cg, _c(b, 9))), c), _c(b, 2)))
     taps = []
-    off = wbase
-    for ky in range(3):
-        row = []
-        for kx in range(3):
-            if ky or kx:
-                off = b.add(off, cg2)
-            row.append(
-                _raw_to_f32(b, _load_raw(b, w_rsrc, off, spec.io_dtype, vec), vec)
-            )
-        taps.append(row)
+    if spec.dgrad:
+        # cgv carries K here: neighbouring lanes take neighbouring outputs k,
+        # whose taps are adjacent in the original [C][3][3][K] filter. Tap
+        # (ky, kx) of this pass is original tap (2 - ky, 2 - kx), and each of
+        # the vec reduction channels is its own 9 K-element row.
+        cm, k = cgv.divmod(gid)
+        c = _mul_c(b, cm, vec)
+        k2 = b.mul(K, _c(b, 2))
+        row9 = b.mul(k2, _c(b, 9))
+        base = _oob(b, ok, b.add(b.mul(c, row9), b.mul(k, _c(b, 2))))
+        for ky in range(3):
+            row = []
+            for kx in range(3):
+                t = _mul_c(b, k2, (2 - ky) * 3 + (2 - kx))
+                vals = []
+                for ch in range(vec):
+                    off = b.add(b.add(base, t), _mul_c(b, row9, ch))
+                    vals += _raw_to_f32(b, _load_raw(b, w_rsrc, off, spec.io_dtype, 1), 1)
+                row.append(vals)
+            taps.append(row)
+    else:
+        k, cm = cgv.divmod(gid)
+        c = _mul_c(b, cm, vec)
+        wbase = _oob(b, ok, b.mul(b.add(b.mul(k, b.mul(cg, _c(b, 9))), c), _c(b, 2)))
+        off = wbase
+        for ky in range(3):
+            row = []
+            for kx in range(3):
+                if ky or kx:
+                    off = b.add(off, cg2)
+                row.append(
+                    _raw_to_f32(b, _load_raw(b, w_rsrc, off, spec.io_dtype, vec), vec)
+                )
+            taps.append(row)
     sc = b.const_f32(scale)
     nr = spec.filter_rows
     kcg2 = b.mul(K, cg2)  # bytes of one U[bin]
@@ -585,7 +615,8 @@ def filter_launch(spec: RtFilterSpec, geo: RtGeometry):
     p = geo.problem
     cgv = p.cpg // spec.vec
     items = p.K * cgv
-    vals = dict(K=p.K, cg=p.cpg, items=items, **_div_values("cgv", cgv))
+    vals = dict(K=p.K, cg=p.cpg, items=items,
+                **_div_values("cgv", p.K if spec.dgrad else cgv))  # fmt: skip
     grid = (ceil_div(items, _FILTER_BLOCK), (spec.mh + 2) // spec.filter_rows, 1)
     return grid, _FILTER_BLOCK, vals
 
@@ -1461,6 +1492,7 @@ def aot_stage_specs() -> list:
             for op in ops:
                 for v in AOT_VECS:
                     out.append(RtFilterSpec(mh, mw, io, op, v, fr))
+                    out.append(RtFilterSpec(mh, mw, io, op, v, fr, dgrad=True))
                     out.append(RtOutputSpec(mh, mw, io, op, v, 256, prescale=ps))
                     out.append(RtInputSpec(mh, mw, io, op, v, 256, prescale=ps))
                     if ps:

@@ -53,10 +53,15 @@ class DwWgradFoldSpec:
 
     taps: int
     name: str = "dw_wgrad_fold"
+    # WIP: dW dtype; "fp16" / "bf16" fold straight into the 16-bit dW (no
+    # separate cast launch).
+    out: str = "fp32"
 
     def kernel_name(self) -> str:
         from rocke.helpers.spec import kernel_name_join
 
+        if self.out != "fp32":
+            return kernel_name_join(self.name, f"t{self.taps}", self.out)
         return kernel_name_join(self.name, f"t{self.taps}")
 
     def launch_geometry(self, channels: int):
@@ -78,7 +83,7 @@ def dw_wgrad_fold_signature(spec: DwWgradFoldSpec) -> list:
     sb = (
         SignatureBuilder()
         .ptr("A", "fp32")
-        .ptr("D", "fp32")
+        .ptr("D", spec.out)
         .scalar("A_bytes", "i32")
         .scalar("D_bytes", "i32")
     )
@@ -94,12 +99,14 @@ def build_dw_wgrad_fold(spec: DwWgradFoldSpec, arch: str = "gfx950") -> KernelDe
     b = IRBuilder(spec.kernel_name())
     b.kernel.attrs["max_workgroup_size"] = _FOLD_SLICES * _WAVE
     ws = b.param("A", PtrType(F32, "global"), noalias=True, readonly=True, align=16)
+    from rocke.helpers.io import io_ir_type
+
     dw = b.param(
         "D",
-        PtrType(F32, "global"),
+        PtrType(F32 if spec.out == "fp32" else io_ir_type(spec.out), "global"),
         noalias=True,
         writeonly=True,
-        align=4,
+        align=4 if spec.out == "fp32" else 2,
     )
     b.param("A_bytes", I32)
     b.param("D_bytes", I32)
@@ -154,7 +161,10 @@ def build_dw_wgrad_fold(spec: DwWgradFoldSpec, arch: str = "gfx950") -> KernelDe
         tap = b.div(o, chans)
         c = b.mod(o, chans)
         off = b.add(b.mul(c, ci(spec.taps)), tap)
-        b.global_store(dw, off, t, align=4)
+        if spec.out == "fp32":
+            b.global_store(dw, off, t, align=4)
+        else:
+            b.global_store(dw, off, b.cast_f32_to(t, io_ir_type(spec.out)), align=2)
     return b.kernel
 
 
@@ -392,16 +402,22 @@ def build_dw_wgrad_cols(spec: DwWgradColsSpec, arch: str = "gfx950") -> KernelDe
 class DwWgradLdsSpec:
     problem: DirectConvProblem
     name: str = "dw_wgrad_lds"
-    lanes_c: int = 8  # lanes along channels (8 channels each)
+    lanes_c: int = 8  # lanes along channels (lane_ch channels each)
     lanes_w: int = 32  # lanes along columns
     cols_per_lane: int = 1
     prefetch: int = 2
     rows_per_seg: int = 32  # output rows per segment (rounded up to the unroll)
     target_blocks: int = 1024
+    # WIP: channels per lane (8, 4 or 2); fewer let a 5x5 / 7x7 filter's
+    # KH * KW * lane_ch fp32 accumulators fit.
+    lane_ch: int = 8
+    # Re-key the sibling channel tiles of one partition onto one XCD when
+    # C % block_c != 0 (they share the 128 B lines at the tile seam).
+    xcd_pair: bool = False
 
     @property
     def block_c(self) -> int:
-        return 8 * self.lanes_c
+        return self.lane_ch * self.lanes_c
 
     @property
     def block_wo(self) -> int:
@@ -436,7 +452,8 @@ class DwWgradLdsSpec:
             f"pf{self.prefetch}",
             f"rps{self.rows_per_seg}",
             f"tb{self.target_blocks}",
-            flags=flags,
+            *([f"ch{self.lane_ch}"] if self.lane_ch != 8 else []),
+            flags=dict(flags, **({"xcdp": True} if self.xcd_pair else {})),
         )
 
     def n_channel_tiles(self) -> int:
@@ -498,7 +515,9 @@ def is_valid_dw_wgrad_lds_spec(spec: DwWgradLdsSpec, arch: str = "gfx950"):
         return False, "C must be a multiple of 8"
     if spec.threads < _WAVE or spec.threads % _WAVE or spec.threads > 1024:
         return False, "threads must be a multiple of 64, at most 1024"
-    if p.KH * p.KW * 8 > 128:
+    if spec.lane_ch not in (2, 4, 8) or spec.block_c % 8:
+        return False, "lane_ch must be 2, 4 or 8 and the channel tile a multiple of 8"
+    if p.KH * p.KW * spec.lane_ch > 128:
         return False, "too many accumulators"
     if spec.prefetch < 1:
         return False, "prefetch >= 1"
@@ -522,6 +541,7 @@ def build_dw_wgrad_lds(spec: DwWgradLdsSpec, arch: str = "gfx950") -> KernelDef:
     TAPS = KH * KW
     LC, LW, WL = spec.lanes_c, spec.lanes_w, spec.cols_per_lane
     BC, BWO = spec.block_c, spec.block_wo
+    LCH = spec.lane_ch
     CH = BC // 8  # 16-byte chunks per pixel
     XC = spec.x_cols()
     T = spec.threads
@@ -551,7 +571,6 @@ def build_dw_wgrad_lds(spec: DwWgradLdsSpec, arch: str = "gfx950") -> KernelDef:
     lc = b.mod(tid, ci(LC))
     lw = b.div(tid, ci(LC))
     ctile, part = b.block_id_x(), b.block_id_y()
-    c_blk0 = b.mul(ctile, ci(BC))
     n_ct = b.div(b.add(p_Wo, ci(BWO - 1)), ci(BWO))
     n_hb = b.div(b.add(p_Ho, ci(RPS - 1)), ci(RPS))
     n_units = b.mul(b.mul(params["p_N"], n_ct), n_hb)
@@ -559,6 +578,24 @@ def build_dw_wgrad_lds(spec: DwWgradLdsSpec, arch: str = "gfx950") -> KernelDef:
     n_part = b.smin(
         n_units, b.div(b.add(ci(spec.target_blocks), b.sub(n_tiles, c1)), n_tiles)
     )
+    if spec.xcd_pair:
+        # Grid (n_tiles, n_part): re-key only when C % BC != 0 and 8 | n_part.
+        on = b.land(
+            b.cmp_ne(b.mod(p_C, ci(BC)), c0),
+            b.land(
+                b.cmp_ge(n_tiles, c2),
+                b.cmp_eq(b.mod(n_part, ci(8)), c0),
+            ),
+        )
+        flat = b.add(ctile, b.mul(n_tiles, part))
+        rest = b.add(
+            b.mul(b.div(flat, b.mul(n_tiles, ci(8))), ci(8)), b.mod(flat, ci(8))
+        )
+        ctile = b.readfirstlane(
+            b.select(on, b.mod(b.div(flat, ci(8)), n_tiles), ctile)
+        )
+        part = b.readfirstlane(b.select(on, rest, part))
+    c_blk0 = b.mul(ctile, ci(BC))
 
     a_rsrc = b.buffer_rsrc(params["A"], params["A_bytes"])  # dY
     b_rsrc = b.buffer_rsrc(params["B"], params["B_bytes"])  # X
@@ -609,13 +646,13 @@ def build_dw_wgrad_lds(spec: DwWgradLdsSpec, arch: str = "gfx950") -> KernelDef:
 
     # Fragment read element indices (lane: chunk lc of a column).
     def col_index(col: Value) -> Value:
-        return b.add(b.mul(col, ci(BC)), b.mul(lc, ci(8)))
+        return b.add(b.mul(col, ci(BC)), b.mul(lc, ci(LCH)))
 
     def cvt8(v: Value) -> List[Value]:
-        return [b.cast_to_f32(b.vec_extract(v, e)) for e in range(8)]
+        return [b.cast_to_f32(b.vec_extract(v, e)) for e in range(LCH)]
 
     zero = b.const_f32(0.0)
-    n_acc = TAPS * 8
+    n_acc = TAPS * LCH
     zero_accs = [(f"acc{i}", zero) for i in range(n_acc)]
 
     seg_loop = b.scf_for_iter(
@@ -693,7 +730,7 @@ def build_dw_wgrad_lds(spec: DwWgradLdsSpec, arch: str = "gfx950") -> KernelDef:
                 dyv.append(
                     cvt8(
                         b.smem_load_vN(
-                            y_bufs[tm % NY], c0, col_index(col), dtype=io_type, n=8
+                            y_bufs[tm % NY], c0, col_index(col), dtype=io_type, n=LCH
                         )
                     )
                 )
@@ -708,12 +745,12 @@ def build_dw_wgrad_lds(spec: DwWgradLdsSpec, arch: str = "gfx950") -> KernelDef:
                             col = b.add(b.mul(lw, ci(WL * S)), ci(xc))
                             win[xc] = cvt8(
                                 b.smem_load_vN(
-                                    x_bufs[slot], c0, col_index(col), dtype=io_type, n=8
+                                    x_bufs[slot], c0, col_index(col), dtype=io_type, n=LCH
                                 )
                             )
                         xv = win[xc]
-                        for e in range(8):
-                            i = (r * KW + s) * 8 + e
+                        for e in range(LCH):
+                            i = (r * KW + s) * LCH + e
                             accs[i] = b.fma(dyv[jw][e], xv[e], accs[i])
             return accs
 
@@ -746,10 +783,11 @@ def build_dw_wgrad_lds(spec: DwWgradLdsSpec, arch: str = "gfx950") -> KernelDef:
     # ---- reduce over the LW column lanes, store ws[part][tap][c] ----
     red = b.smem_alloc(F32, [1, LW * BC], name_hint="red")
     for t in range(TAPS):
-        base = b.add(b.mul(lw, ci(BC)), b.mul(lc, ci(8)))
-        for e0 in (0, 4):
-            vec = b.vec_pack([accs[t * 8 + e0 + e] for e in range(4)], F32)
-            b.smem_store_vN_f32(red, [c0, b.add(base, ci(e0))], vec, 4)
+        base = b.add(b.mul(lw, ci(BC)), b.mul(lc, ci(LCH)))
+        for e0 in range(0, LCH, 4):
+            nv = min(4, LCH - e0)
+            vec = b.vec_pack([accs[t * LCH + e0 + e] for e in range(nv)], F32)
+            b.smem_store_vN_f32(red, [c0, b.add(base, ci(e0))], vec, nv)
         b.sync()
         for k in range(ceil_div(BC, T)):
             o = b.add(tid, ci(k * T))

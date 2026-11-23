@@ -3062,7 +3062,7 @@ static rocke_kernel_def_t*
     rocke_value_t* rec_w_tilde_slice = _ld(6);
     rocke_value_t* rec_h_tilde_slice_begin = _ld(7);
     rocke_value_t* rec_w_tilde_slice_begin = _ld(8);
-    (void)_ld(9); /* rec_y_dot_slice: unused (k_out innermost) */
+    rocke_value_t* rec_y_dot_slice = _ld(9);
     rocke_value_t* rec_x_dot_slice = _ld(10);
     rocke_value_t* rec_a_embed_h_coeff = _ld(11);
     rocke_value_t* rec_a_embed_w_coeff = _ld(12);
@@ -4354,7 +4354,16 @@ static rocke_kernel_def_t*
         rocke_value_t* c_cs = c_cstride;
         rocke_value_t* b_step_y = rocke_b_mul(b, c_X, c_cs);
         rocke_value_t* b_step_k = rocke_b_mul(b, c_Y, b_step_y);
-        rocke_value_t* uk_hi = rocke_b_select(b, uk_ok, k_hi, k_lo);
+        /* K % tile_k != 0 with a single filter tap: uniform loop on the full
+         * tiles, the plain loop peels the tail (Python uk_single). */
+        rocke_value_t* uk_xs1 = rocke_b_cmp_eq(b, c_xs, c1);
+        rocke_value_t* uk_ys1 = rocke_b_cmp_eq(b, rec_y_dot_slice, c1);
+        rocke_value_t* uk_single = rocke_b_land(b, uk_xs1, uk_ys1);
+        rocke_value_t* uk_span = rocke_b_sub(b, k_hi, k_lo);
+        rocke_value_t* uk_nt = rocke_b_div(b, uk_span, c_block_k);
+        rocke_value_t* uk_n_full = rocke_b_mul(b, uk_nt, c_block_k);
+        rocke_value_t* uk_hi = rocke_b_select(
+            b, uk_ok, k_hi, rocke_b_select(b, uk_single, rocke_b_add(b, k_lo, uk_n_full), k_lo));
 
         uk_dy_ctx_t uk_dy;
         uk_dy.block_m_off = block_m_off_v;
@@ -4454,7 +4463,7 @@ static rocke_kernel_def_t*
         }
         rocke_b_region_leave(b);
 
-        rocke_value_t* fb_lo = rocke_b_select(b, uk_ok, k_hi, k_lo);
+        rocke_value_t* fb_lo = uk_hi;
         rocke_iter_arg_t fb_args[ROCKE_CONV_MAX_ACCS];
         char fb_name_bufs[ROCKE_CONV_MAX_ACCS][40];
         for(int i = 0; i < num_accs; i++)

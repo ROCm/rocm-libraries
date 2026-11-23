@@ -143,8 +143,8 @@ static rocke_direct_conv_problem_t base_problem(void)
 
 static const int kFwdBlockKs[3] = {64, 128, 256};
 static const int kDgradBlockKs[2] = {128, 256};
-static const rocke_pp::PpFamily kFwd = {"fwd_pp_mfma", kFwdBlockKs, 3, "bk fwd", false};
-static const rocke_pp::PpFamily kDgrad = {"dgrad_pp_mfma", kDgradBlockKs, 2, "bk dgrad", true};
+static const rocke_pp::PpFamily kFwd = {"fwd_pp_mfma", kFwdBlockKs, 3, "bk fwd", false, false};
+static const rocke_pp::PpFamily kDgrad = {"dgrad_pp_mfma", kDgradBlockKs, 2, "bk dgrad", true, false};
 
 static void expect_pp_ok(const char* what,
                          const rocke_pp::PpFamily& fam,
@@ -297,6 +297,15 @@ static void test_shared_refusals(void)
         expect_pp_refused("fp32", *fam, p, 128, "gfx950", "fp16/bf16 only");
         check_problem_refusals(*fam);
     }
+    /* valid_ok (fwd pp): PAD 0 is accepted next to 'same' padding, PAD 2 is not */
+    rocke_pp::PpFamily valid = kFwd;
+    valid.valid_ok = true;
+    rocke_direct_conv_problem_t p = base_problem();
+    p.PAD = 0;
+    expect_pp_ok("valid_ok PAD 0", valid, p, 128, "gfx950");
+    p.PAD = 2;
+    expect_pp_refused(
+        "valid_ok PAD 2", valid, p, 128, "gfx950", "'same' padding only: PAD must be 1 (got 2)");
 }
 
 /* The wgrad validators call the gate with needs_ds_read_tr: gfx950 passes,

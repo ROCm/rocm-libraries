@@ -35,7 +35,8 @@ const rocke_pp::PpFamily kFamily
        kBlockKs,
        2,
        "block_k must be 128 or 256 (256-byte weight rows for the swizzle)",
-       true};
+       true,
+       false};
 
 rocke_pp::PpSpec pp_spec(const rocke_dgrad_pp_mfma_spec_t* s)
 {

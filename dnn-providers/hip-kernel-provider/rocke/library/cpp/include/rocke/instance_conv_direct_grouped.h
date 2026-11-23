@@ -544,6 +544,7 @@ typedef struct rocke_direct_depthwise_spatial_spec
     const char* name; /* default "direct_depthwise_spatial" */
     int block_waves; /* default 1  */
     int wave_size; /* default 64 */
+    int block_h; /* output rows per block; default 0 = the whole image */
 } rocke_direct_depthwise_spatial_spec_t;
 
 rocke_direct_depthwise_spatial_spec_t rocke_direct_depthwise_spatial_spec_default(void);

@@ -1567,6 +1567,27 @@ class TestSplitKNumerics(unittest.TestCase):
 
 
 @unittest.skipIf(_GPU_SKIP, _GPU_SKIP)
+class TestSplitKPrefetchGlobalRegsNumerics(unittest.TestCase):
+    """The MFMA split on the register-prefetch K loop (prefetch_global_regs).
+
+    Each slice reads one tile past its end into registers, which must never
+    reach its slab: at every degree the result has to match the reference.
+    """
+
+    def test_cases(self):
+        if _DEVICE_ARCH == "gfx1250":
+            self.skipTest("prefetch_global_regs is MFMA-only")
+        for dtype in ("bf16", "fp16"):
+            for name, problem, kw, degrees in _MFMA_CASES:
+                with self.subTest(case=name, dtype=dtype):
+                    errs = _run(
+                        problem, dict(kw, prefetch_global_regs=True), degrees, dtype
+                    )
+                    for degree, err in errs.items():
+                        self.assertLess(err, 2e-2, f"{name} {dtype} degree {degree}")
+
+
+@unittest.skipIf(_GPU_SKIP, _GPU_SKIP)
 class TestSplitKAutoNumerics(unittest.TestCase):
     """The binary an auto (-1) spec builds, launched at the resolved degree."""
 

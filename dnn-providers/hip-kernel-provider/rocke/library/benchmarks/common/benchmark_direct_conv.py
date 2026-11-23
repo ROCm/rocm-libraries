@@ -328,6 +328,13 @@ def parse_miopen_cmd_direct(cmd: str):
     # variant. Every other problem keeps one padding for both axes.
     pad_w_ok = (
         (miopen_args.forw == 2 and cpg == 1 and kpg == 1 and sH == 1)
+        # WIP: a stride-1 dgrad runs as a forward (dgrad via forward, dilated
+        # too), and the tiled wgrad takes a column padding
+        or (miopen_args.forw == 2 and sH == 1 and groups == 1)
+        or (miopen_args.forw == 2 and sH == 1 and not dilated)
+        # WIP: a 1-D strided dgrad (direct_dgrad_flex_mfma h1)
+        or (miopen_args.forw == 2 and one_d and groups == 1 and not dilated)
+        or (miopen_args.forw == 4 and groups == 1 and sH == 1 and not dilated)
         or (
             miopen_args.forw == 1 and groups == 1 and (sH == 1 or one_d) and not dilated
         )
@@ -2350,6 +2357,7 @@ def _measure_plans(
     per_chunk,
     ref_floor: float = 1.0,
     tol,
+    honest=None,
 ):
     """Time every plan of one case. Returns ``(results, rc)``.
 
@@ -2381,6 +2389,10 @@ def _measure_plans(
     n_plans = len(plans)
     width = len(str(n_plans))
 
+    def plan_chunks(plan):
+        # a one-launch plan (see _one_launch) covers the whole batch
+        return [sum(chunks)] if len(per_chunk[plan.label]) == 1 else chunks
+
     def bind(plan):
         """The plan's launch, or ``None`` if a step cannot be loaded."""
         try:
@@ -2392,7 +2404,10 @@ def _measure_plans(
                         signature=st.signature,
                     ),
                     launch_values(
-                        st, *_chunk_buffers(ptrs, sizes, inputs, out_name, chunks, i)
+                        st,
+                        *_chunk_buffers(
+                            ptrs, sizes, inputs, out_name, plan_chunks(plan), i
+                        ),
                     ),
                     LaunchConfig(grid=st.grid, block=st.block, stream=0),
                 )
@@ -2414,6 +2429,11 @@ def _measure_plans(
             print(f"  [skip] {plan.label}: kernarg does not fit ({e})", flush=True)
             return None
 
+        if honest is not None:
+            return _honest_wgrad_run(
+                plan, per_chunk[plan.label], bound, rt, ptrs, sizes, honest
+            )
+
         def run(bound=bound):
             for launch in bound:
                 launch()
@@ -2424,15 +2444,26 @@ def _measure_plans(
         """Peak-normalised rel-err of one plan against the case's reference."""
         nonlocal rc
 
-        rt.memset(ptrs[out_name], 0, Out_t.nbytes)
+        # WIP: ROCKE_VERIFY_POISON=<byte> fills the output first (a plan
+        # that skips part of it then fails instead of passing on zeros)
+        poison = int(os.environ.get("ROCKE_VERIFY_POISON", "0"), 0)
+        rt.memset(ptrs[out_name], poison if out_name != "dw" else 0, Out_t.nbytes)
         # Two-stage wgrad scratch accumulates too: zeroed again for the
         # verified launch, as the target is.
         for name in plan.zeroed:
             rt.memset(ptrs[name], 0, sizes[name])
+        if honest is not None:
+            # a plan that skips part of dW must not pass on the last one's
+            rt.memset(ptrs["dw16"], 0, sizes["dw16"])
         run()
         synchronize_and_release(0)
-        out_cpu = torch.empty_like(Out_t)
-        rt.memcpy_d2h(u8(out_cpu), ptrs[out_name], Out_t.nbytes)
+        if honest is not None:
+            # WIP: the 16-bit dW the honest call writes
+            out_cpu = torch.empty(Out_t.shape, dtype=honest["torch_dt"])
+            rt.memcpy_d2h(u8(out_cpu), ptrs["dw16"], out_cpu.nbytes)
+        else:
+            out_cpu = torch.empty_like(Out_t)
+            rt.memcpy_d2h(u8(out_cpu), ptrs[out_name], Out_t.nbytes)
         ref_f32 = ref_out.float().cpu()
         rel_err = float(
             (out_cpu.float() - ref_f32).abs().max()
@@ -2636,6 +2667,7 @@ def _cache_dispatch(args, arch: str, cases: list) -> int:
 
 
 _TENSOR_LIMIT = 1 << 31
+_I32_MAX = _TENSOR_LIMIT - 1
 
 
 def _batch_chunks(p, direction: str) -> List[int]:
@@ -2662,7 +2694,12 @@ def _chunk_buffers(ptrs, sizes, inputs, out_name, chunks, i):
     """``(ptrs, sizes)`` with the activations narrowed to batch chunk ``i``
     of ``chunks`` (images per chunk, in batch order)."""
     if len(chunks) == 1:
-        return ptrs, sizes
+        if all(v <= _I32_MAX for v in sizes.values()):
+            return ptrs, sizes
+        # a one-launch plan (see _one_launch) rebases its activations per
+        # image / segment and never reads their byte sizes: the i32 kernargs
+        # take a clamped value
+        return ptrs, {k: min(v, _I32_MAX) for k, v in sizes.items()}
     ptrs, sizes = dict(ptrs), dict(sizes)
     n_total, n0 = sum(chunks), sum(chunks[:i])
     # wgrad's dW has no batch: every chunk adds into the whole of it.
@@ -2687,6 +2724,11 @@ def _chunk_plans(plan_fn, p, chunks):
     by_size = {}
     for n in dict.fromkeys(chunks):
         by_size[n] = plan_fn(p if n == p.N else dataclasses.replace(p, N=n))
+    # WIP (L64): the kernels that rebase their activations per image /
+    # segment run the whole batch as one launch
+    whole = []
+    if len(chunks) > 1:
+        whole = [pl for pl in plan_fn(p)[0] if _one_launch(pl)]
     plans, rejected = by_size[chunks[0]]
     rejected = list(rejected)
     labels = {n: {pl.label: pl for pl in sized[0]} for n, sized in by_size.items()}
@@ -2699,14 +2741,165 @@ def _chunk_plans(plan_fn, p, chunks):
         ]
         plans = [pl for pl in plans if pl.label in labels[n]]
     per_chunk = {pl.label: [labels[n][pl.label] for n in chunks] for pl in plans}
+    if whole:
+        one = {pl.label for pl in whole}
+        plans = [pl for pl in plans if pl.label not in one] + whole
+        for pl in whole:
+            per_chunk[pl.label] = [pl]
     return plans, rejected, per_chunk
+
+
+#: WIP (L64, python only): ROCKE_ONE_LAUNCH=1 also runs rr as one launch
+#: (off by default). The tiled wgrad l64 cells always do.
+ONE_LAUNCH = os.environ.get("ROCKE_ONE_LAUNCH", "0") == "1"
+
+
+def _one_launch(plan) -> bool:
+    """A plan whose kernels address the activations through a per-image (rr)
+    or per-segment (tiled wgrad ``l64``) 64-bit rebased base: one launch
+    serves a batch past the 2^31-byte buffer range."""
+    algo = plan.identity.algorithm
+    knobs = plan.identity.knobs or ""
+    if algo == "direct_fwd_rr_mfma":
+        return ONE_LAUNCH
+    return algo == "direct_wgrad_tiled" and '"l64": true' in knobs
 
 
 def _accumulates_dw(plan) -> bool:
     """A one-step wgrad plan with no scratch: its kernel adds its tiles into
     the zeroed fp32 dW (atomics), so its launches over batch chunks sum. A fold
     or reduce step, or a scratch slab, writes dW instead."""
+    if '"one_split": true' in (plan.identity.knobs or ""):
+        return False  # WIP: the one-split tiled wgrad stores its dW tile
     return len(plan.steps) == 1 and not plan.workspaces and not plan.zeroed
+
+
+def _wgrad_honest(direction, dtype) -> bool:
+    """WIP: time a 16-bit wgrad as the provider runs it (ROCKE_WGRAD_HONEST=1).
+
+    The provider zeroes the fp32 target of an atomic kernel and casts the fp32
+    dW into the 16-bit one on every call; both are part of the timed call.
+    """
+    return (
+        os.environ.get("ROCKE_WGRAD_HONEST") == "1"
+        and direction == "wgrad"
+        and dtype in ("fp16", "bf16")
+    )
+
+
+_HONEST_REDUCES: dict = {}
+
+
+def _honest_reduce(spec, arch):
+    """A launcher of the wgrad reduce ``spec`` (compiled once per run)."""
+    from rocke import compile_kernel
+    from rocke.runtime.launcher import KernelLauncher
+
+    from kernels.common.conv_wgrad_workspace_reduce import (
+        build_conv_wgrad_workspace_reduce,
+        wgrad_reduce_signature,
+    )
+
+    key = (spec.dtype_d, spec.ws_replicas)
+    if key not in _HONEST_REDUCES:
+        art = compile_kernel(build_conv_wgrad_workspace_reduce(spec), arch=arch)
+        _HONEST_REDUCES[key] = KernelLauncher(
+            hsaco=art.hsaco,
+            kernel_name=art.kernel_name,
+            signature=wgrad_reduce_signature(spec),
+        )
+    return _HONEST_REDUCES[key]
+
+
+def _honest_wgrad_run(plan, chunk_plans, bound, rt, ptrs, sizes, honest):
+    """WIP: ``plan``'s timed call with the provider's per-call steps.
+
+    - two-stage (fp32 replicas in ``ws_wgrad``): zero the scratch, run, and
+      fold the replicas straight into the 16-bit dW (the reduce casts);
+    - folded (partials in ``ws``, the fold writes the fp32 dW whole): run,
+      then cast the fp32 dW into the 16-bit one;
+    - atomic (adds into the fp32 dW): zero it, run, cast.
+    A one-split tiled kernel stores its dW tiles: run, cast.
+    """
+    import dataclasses
+
+    from rocke.runtime.launcher import LaunchConfig
+
+    from kernels.common.conv_wgrad_workspace_reduce import wgrad_reduce_grid
+    from kernels.conv.direct_variants import direct_wgrad_reduce_spec
+
+    p, dtype, arch = honest["p"], honest["dtype"], honest["arch"]
+    steps = [st for cp in chunk_plans for st in cp.steps]
+    zero, main, post = [], [], []
+    two_stage = "ws_wgrad" in plan.workspaces
+    folded = any(st.buffers[2] == "ws" for st in steps)
+    stores = '"one_split": true' in (plan.identity.knobs or "")
+    # WIP: a dw16 kernel or a 16-bit fold writes the 16-bit dW whole
+    direct16 = any(st.buffers[2] == "dw16" for st in steps)
+    if direct16:
+        if '"pk16": true' in (plan.identity.knobs or ""):
+            # packed 16-bit atomics into the 16-bit dW: zero it per call
+            zero.append(("dw16", sizes["dw16"]))
+    elif two_stage:
+        zero.append(("ws_wgrad", plan.workspaces["ws_wgrad"]))
+    elif not folded and not stores:
+        zero.append(("dw", sizes["dw"]))
+    for st, launch in zip(steps, bound):
+        if two_stage and st.buffers == ("ws_wgrad", None, "dw"):
+            sc = dict(st.scalars)
+            reps = plan.workspaces["ws_wgrad"] // (
+                4 * sc["wg_M"] * sc["wg_N"] * sc["groups"]
+            )
+            spec = dataclasses.replace(
+                direct_wgrad_reduce_spec(plan.identity.algorithm, p, reps),
+                dtype_d=dtype,
+            )
+            values = dict(
+                ws_ptr=ptrs["ws_wgrad"],
+                dw_ptr=ptrs["dw16"],
+                ws_bytes=plan.workspaces["ws_wgrad"],
+                dw_bytes=sizes["dw16"],
+                **sc,
+            )
+            cfg = LaunchConfig(grid=st.grid, block=st.block, stream=0)
+            main.append(_honest_reduce(spec, arch).bind(values, config=cfg))
+        else:
+            main.append(launch)
+    if not two_stage and not direct16:
+        spec = dataclasses.replace(
+            direct_wgrad_reduce_spec("direct_wgrad", p, 1), dtype_d=dtype
+        )
+        values = dict(
+            ws_ptr=ptrs["dw"],
+            dw_ptr=ptrs["dw16"],
+            wg_M=spec.wg_M,
+            wg_N=spec.wg_N,
+            ws_bytes=sizes["dw"],
+            dw_bytes=sizes["dw16"],
+            groups=spec.groups,
+        )
+        cfg = LaunchConfig(
+            grid=wgrad_reduce_grid(spec), block=(spec.block_size, 1, 1), stream=0
+        )
+        post.append(_honest_reduce(spec, arch).bind(values, config=cfg))
+
+    # WIP probe: ROCKE_WGRAD_HONEST_SKIP=zero,cast drops a part (timing only;
+    # verify fails without the cast)
+    skip = os.environ.get("ROCKE_WGRAD_HONEST_SKIP", "").split(",")
+    if "zero" in skip:
+        zero = []
+    if "cast" in skip:
+        post = []
+
+    def run():
+        for name, nbytes in zero:
+            rt.memset_async(ptrs[name], 0, nbytes, 0)
+        for launch in main:
+            launch()
+        for launch in post:
+            launch()
+
+    return run
 
 
 def _wgrad_chunk_plans(plans, rejected, per_chunk, chunks):
@@ -2714,7 +2907,12 @@ def _wgrad_chunk_plans(plans, rejected, per_chunk, chunks):
     chunk, only the plans whose every chunk accumulates into dW."""
     if len(chunks) == 1:
         return plans, rejected
-    keep = [pl for pl in plans if all(map(_accumulates_dw, per_chunk[pl.label]))]
+    keep = [
+        pl
+        for pl in plans
+        if len(per_chunk[pl.label]) == 1
+        or all(map(_accumulates_dw, per_chunk[pl.label]))
+    ]
     rejected = list(rejected) + [
         (
             pl.identity,
@@ -2794,6 +2992,17 @@ def _run_from_cache(args, arch: str, cases: list, cache, directions) -> int:
             )
             if direction == "wgrad":
                 plans, rejected = _wgrad_chunk_plans(plans, rejected, per_chunk, chunks)
+            if direction == "wgrad" and not _wgrad_honest(direction, dtype):
+                # WIP: plans that write the 16-bit dW run in the honest mode only
+                plans = [
+                    pl
+                    for pl in plans
+                    if not any(
+                        st.buffers[2] == "dw16"
+                        for cp in per_chunk[pl.label]
+                        for st in cp.steps
+                    )
+                ]
             if kernel_map is not None:
                 keep = conv_fill.kernels_for(kernel_map, case_key(p, dtype, direction))
                 plans = [pl for pl in plans if pl.identity.label() in keep]
@@ -2858,6 +3067,11 @@ def _run_from_cache(args, arch: str, cases: list, cache, directions) -> int:
                 # Zeroed once, as the JIT sweep does: the timed launches keep
                 # accumulating into it, which costs the same as a zeroed target.
                 rt.memset(ptrs[out_name], 0, Out_t.nbytes)
+            honest = None
+            if _wgrad_honest(direction, dtype):
+                ptrs["dw16"] = rt.alloc(2 * Out_t.numel())
+                sizes["dw16"] = 2 * Out_t.numel()
+                honest = dict(p=p, dtype=dtype, arch=arch, torch_dt=torch_dt)
             # Scratch buffers are sized for the largest plan and shared.
             for plan in plans:
                 for chunk_plan in per_chunk[plan.label]:
@@ -2892,6 +3106,7 @@ def _run_from_cache(args, arch: str, cases: list, cache, directions) -> int:
                 per_chunk=per_chunk,
                 ref_floor=conv_fill.ref_floor(direction),
                 tol=direct_verify_tol(dtype, arch),
+                honest=honest,
             )
             overall_rc = overall_rc or case_rc
             # Safe only here: _measure_plans has drained the device by the

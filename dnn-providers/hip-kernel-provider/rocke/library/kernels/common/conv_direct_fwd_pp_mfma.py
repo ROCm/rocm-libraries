@@ -68,6 +68,7 @@ def fwd_pp_mfma_reason(spec: FwdPpMfmaSpec, arch: str = "gfx950") -> "str | None
         family="fwd_pp_mfma",
         block_ks=BLOCK_K,
         block_k_reason="block_k must be 64, 128 or 256",
+        valid_ok=True,
     )
 
 

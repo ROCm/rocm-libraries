@@ -354,8 +354,8 @@ def _winograd_skip_reason(args) -> str:
     """Why the Winograd sweep sits this comparison out (``""``: it runs)."""
     if args.run_from_cache is None:
         return "the Winograd sweep runs from an AOT cache (--run-from-cache)"
-    if args.direction not in (None, "fwd"):
-        return "Winograd runs the forward direction only"
+    if args.direction not in (None, "fwd", "dgrad"):
+        return "Winograd runs the forward and dgrad directions only"
     from benchmarks.common.benchmark_winograd_aot import IOS, cache_index
 
     # IOS is the child's --dtype choices: any other forced dtype would make

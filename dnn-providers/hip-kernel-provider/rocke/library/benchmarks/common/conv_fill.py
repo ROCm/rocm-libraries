@@ -15,10 +15,29 @@ denominator at 1, which is what makes it a relative error on U(-1, 1) data. Smal
 needs a floor near zero, or every output would pass; ``ref_floor`` gives the floor for the mode.
 """
 
+import os
+
 # DIRECTIONS: the directions a kernel label starts with (KernelIdentity.label()).
 from kernels.conv.kernel_identity import DIRECTIONS
 
 FILL_CHOICES = ("uniform", "miopen")
+
+# ROCKE_FILL_NORMAL=<sigma>: every U(-1, 1) data draw of the conv benchmarks becomes N(0, sigma) instead
+# (sigma 0.577 has U(-1, 1)'s variance). Set by
+# environment so the sub-sweeps benchmark_conv_compare.py spawns inherit it.
+_NORMAL_SIGMA = os.environ.get("ROCKE_FILL_NORMAL")
+if _NORMAL_SIGMA:
+    import torch as _torch
+
+    _uniform = _torch.Tensor.uniform_
+
+    def _uniform_or_normal(self, a=0.0, b=1.0, *, generator=None):
+        if (float(a), float(b)) == (-1.0, 1.0):
+            return self.normal_(0.0, float(_NORMAL_SIGMA), generator=generator)
+        return _uniform(self, a, b, generator=generator)
+
+    _torch.Tensor.uniform_ = _uniform_or_normal
+
 _MODE = "uniform"
 
 

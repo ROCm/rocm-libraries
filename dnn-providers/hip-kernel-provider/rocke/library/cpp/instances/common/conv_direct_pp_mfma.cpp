@@ -260,7 +260,7 @@ bool pp_is_valid_spec(
     {
         why = "square odd filters >= 3 only";
     }
-    else if(p->PAD != (p->KH - 1) / 2)
+    else if(p->PAD != (p->KH - 1) / 2 && !(f.valid_ok && p->PAD == 0))
     {
         ROCKE_ERR_SNPRINTF(msg,
                            sizeof msg,

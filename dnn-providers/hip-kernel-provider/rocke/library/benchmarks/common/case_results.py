@@ -46,6 +46,7 @@ from __future__ import annotations
 
 import csv
 import json
+import os
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence
 
@@ -61,7 +62,7 @@ ENGINES = ("direct", "implicit", "winograd")
 #: case pick different instances at the same TFLOPS to three digits. What that
 #: costs you is the *identity* of the kernel, so that is what the runner-up
 #: columns carry; their times would only repeat the winner's.
-RUNNERS_UP = 2
+RUNNERS_UP = int(os.environ.get("ROCKE_RUNNERS_UP", "2"))  # a two-step search can keep more (e.g. 64)
 
 
 def _engine_fields(engine: str) -> tuple:

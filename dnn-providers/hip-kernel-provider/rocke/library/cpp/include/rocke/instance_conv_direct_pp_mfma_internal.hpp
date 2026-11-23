@@ -58,6 +58,7 @@ struct PpFamily
     int n_block_ks;
     const char* block_k_reason;
     bool needs_ds_read_tr;
+    bool valid_ok; /* PAD 0 is accepted next to 'same' padding */
 };
 
 long pp_lds_bytes(const PpSpec& s);
