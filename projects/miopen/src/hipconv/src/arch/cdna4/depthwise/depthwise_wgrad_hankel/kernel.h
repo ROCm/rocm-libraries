@@ -1174,7 +1174,17 @@ public:
             return false;
         if(par.dims == 3 && cfg_.kh != cfg_.kw)
             return false;
-        if(launch_grid_for(cfg_, par, dev.cu_count).z > max_grid_z)
+        const dim3 grid = launch_grid_for(cfg_, par, dev.cu_count);
+        if(grid.z > max_grid_z)
+            return false;
+        // The reduction takes dW's element count as an int.
+        const int64_t dw_elems = int64_t(par.k) * par.kh * par.kw;
+        if(dw_elems > INT32_MAX)
+            return false;
+        // HIP rejects a grid of 2^32 or more work items in x.
+        const bool reduces = par.dims == 3 || partition_count(grid) > 1;
+        if(reduces &&
+           (dw_elems + WAVE_SIZE - 1) / WAVE_SIZE * REDUCE_SLICES * WAVE_SIZE > UINT32_MAX)
             return false;
 
         // Of the configs that fit, keep only those whose grid can fill the machine:
