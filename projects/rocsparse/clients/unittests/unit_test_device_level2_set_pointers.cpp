@@ -312,11 +312,19 @@ namespace
 
     struct config
     {
-        rocsparse_spmv_alg  alg    = rocsparse_spmv_alg_default;
-        rocsparse_operation trans  = rocsparse_operation_none;
-        bool                device = false;
-        bool                v2     = false;
+        rocsparse_spmv_alg     alg     = rocsparse_spmv_alg_default;
+        rocsparse_operation    trans   = rocsparse_operation_none;
+        bool                   device  = false;
+        bool                   v2      = false;
+        rocsparse_storage_mode storage = rocsparse_storage_mode_sorted;
     };
+
+    void set_storage(spmat_guard& g, rocsparse_storage_mode storage)
+    {
+        ASSERT_EQ(rocsparse_spmat_set_attribute(
+                      g.d, rocsparse_spmat_storage_mode, &storage, sizeof(storage)),
+                  rocsparse_status_success);
+    }
 
     // Entries of the y allocation before and after the vector, which no stage may write.
     constexpr size_t y_guard = 16;
@@ -626,7 +634,7 @@ namespace
         return len;
     }
 
-    // block_dim only applies to BSR: SpMV keeps an analysis for block_dim == 1 only.
+    // block_dim only applies to BSR.
     template <typename T, typename I>
     scenario<T, I> make_scenario(fmt f, int base, int32_t block_dim = 1)
     {
@@ -676,24 +684,28 @@ namespace
         return s;
     }
 
+    // Whether the CSR kernels run non-transposed: CSC runs them on the flipped operation.
+    inline bool runs_csr_none(fmt f, rocsparse_operation trans)
+    {
+        return (f == fmt::csr) == (trans == rocsparse_operation_none);
+    }
+
     // Whether the rocsparse_spmv_descr holds an analysis of the matrix arrays, so that
-    // its compute stage after set_pointers returns rocsparse_status_invalid_value.
-    // The COO analysis is kept with the matrix descriptor, not with the SpMV descriptor.
+    // its compute stage after set_pointers returns rocsparse_status_invalid_value, as
+    // listed in the rocsparse_v2_spmv documentation. The COO analysis is kept with the
+    // matrix descriptor, not with the SpMV descriptor.
     inline bool v2_refuses(fmt f, const config& c, int32_t block_dim)
     {
         switch(f)
         {
         case fmt::csr:
         case fmt::csc:
-        {
-            // CSC runs the CSR kernels on the transposed operation. Rowsplit, and the
-            // default of a transposed CSR operation, which is rowsplit, keep no analysis.
-            const bool csr_none = (f == fmt::csr) == (c.trans == rocsparse_operation_none);
-            return c.alg == rocsparse_spmv_alg_csr_nnzsplit
-                   || (c.alg != rocsparse_spmv_alg_csr_rowsplit && csr_none);
-        }
+            // The default resolves to rowsplit, which keeps no analysis, unless the CSR
+            // kernels run non-transposed.
+            return c.alg != rocsparse_spmv_alg_csr_rowsplit
+                   && (c.alg != rocsparse_spmv_alg_default || runs_csr_none(f, c.trans));
         case fmt::bsr:
-            return block_dim == 1;
+            return block_dim == 1 && c.storage == rocsparse_storage_mode_sorted;
         case fmt::coo:
         case fmt::ell:
             return false;
@@ -707,8 +719,8 @@ namespace
     {
         SCOPED_TRACE(::testing::Message()
                      << fmt_name(f) << " alg=" << c.alg << " trans=" << c.trans
-                     << " device=" << c.device << " v2=" << c.v2 << " base=" << base
-                     << " i64=" << (sizeof(I) == 8) << " block_dim=" << block_dim);
+                     << " device=" << c.device << " v2=" << c.v2 << " base=" << base << " i64="
+                     << (sizeof(I) == 8) << " block_dim=" << block_dim << " storage=" << c.storage);
 
         int                  refused = 0;
         const bool           refuses = c.v2 && v2_refuses(f, c, block_dim);
@@ -717,6 +729,9 @@ namespace
 
         spmat_guard mat;
         create(mat, sc.p1, d1);
+        if(::testing::Test::HasFatalFailure())
+            return refused;
+        set_storage(mat, c.storage);
         if(::testing::Test::HasFatalFailure())
             return refused;
         session<T> s(handle, c, mat.d, sc.p1.rows, sc.p1.cols);
@@ -731,6 +746,9 @@ namespace
             = [&](const problem<T, I>& p, device_problem<T, I>& d, const char* what) {
                   spmat_guard fm;
                   create(fm, p, d);
+                  if(::testing::Test::HasFatalFailure())
+                      return;
+                  set_storage(fm, c.storage);
                   if(::testing::Test::HasFatalFailure())
                       return;
                   session<T> fs(handle, c, fm.d, p.rows, p.cols);
@@ -813,6 +831,8 @@ namespace
         rocsparse_operation trans;
     };
 
+    // Every CSR and CSC algorithm with every operation it computes: adaptive and LRB
+    // compute only when the CSR kernels run non-transposed.
     template <typename T>
     std::vector<alg_trans> cases_of(fmt f)
     {
@@ -823,34 +843,23 @@ namespace
         switch(f)
         {
         case fmt::csr:
-        {
-            for(const auto alg : {rocsparse_spmv_alg_default,
-                                  rocsparse_spmv_alg_csr_adaptive,
-                                  rocsparse_spmv_alg_csr_rowsplit,
-                                  rocsparse_spmv_alg_csr_lrb,
-                                  rocsparse_spmv_alg_csr_nnzsplit})
-                v.push_back({alg, none});
-            for(const auto alg : {rocsparse_spmv_alg_default,
-                                  rocsparse_spmv_alg_csr_rowsplit,
-                                  rocsparse_spmv_alg_csr_nnzsplit})
-                v.push_back({alg, tr});
-            if(is_complex)
-                v.push_back(
-                    {rocsparse_spmv_alg_csr_rowsplit, rocsparse_operation_conjugate_transpose});
-            break;
-        }
         case fmt::csc:
         {
-            for(const auto alg : {rocsparse_spmv_alg_default, rocsparse_spmv_alg_csr_rowsplit})
-                v.push_back({alg, none});
-            for(const auto alg : {rocsparse_spmv_alg_default,
-                                  rocsparse_spmv_alg_csr_adaptive,
-                                  rocsparse_spmv_alg_csr_lrb,
-                                  rocsparse_spmv_alg_csr_nnzsplit})
-                v.push_back({alg, tr});
+            std::vector<rocsparse_operation> ops = {none, tr};
             if(is_complex)
-                v.push_back(
-                    {rocsparse_spmv_alg_csr_adaptive, rocsparse_operation_conjugate_transpose});
+                ops.push_back(rocsparse_operation_conjugate_transpose);
+            for(const auto trans : ops)
+                for(const auto alg : {rocsparse_spmv_alg_default,
+                                      rocsparse_spmv_alg_csr_adaptive,
+                                      rocsparse_spmv_alg_csr_rowsplit,
+                                      rocsparse_spmv_alg_csr_lrb,
+                                      rocsparse_spmv_alg_csr_nnzsplit})
+                {
+                    const bool needs_csr_none = alg == rocsparse_spmv_alg_csr_adaptive
+                                                || alg == rocsparse_spmv_alg_csr_lrb;
+                    if(!needs_csr_none || runs_csr_none(f, trans))
+                        v.push_back({alg, trans});
+                }
             break;
         }
         case fmt::coo:
@@ -877,23 +886,38 @@ namespace
         return v;
     }
 
+    struct layout
+    {
+        int32_t                block_dim;
+        rocsparse_storage_mode storage;
+    };
+
+    // SpMV keeps a BSR analysis only for block_dim == 1 in sorted storage.
+    inline std::vector<layout> layouts_of(fmt f)
+    {
+        constexpr auto sorted = rocsparse_storage_mode_sorted;
+        if(f == fmt::bsr)
+            return {{1, sorted}, {4, sorted}, {1, rocsparse_storage_mode_unsorted}};
+        return {{1, sorted}};
+    }
+
     template <typename T, typename I>
     int sweep_index(rocsparse_handle handle, fmt f, bool v2)
     {
         int refused = 0;
-        for(const int32_t block_dim :
-            (f == fmt::bsr) ? std::vector<int32_t>{1, 4} : std::vector<int32_t>{1})
+        for(const layout& l : layouts_of(f))
             for(const int base : {0, 1})
                 for(const bool device : {false, true})
                     for(const auto& at : cases_of<T>(f))
                     {
                         scoped_pointer_mode mode(handle, device);
                         config              c;
-                        c.alg    = at.alg;
-                        c.trans  = at.trans;
-                        c.device = device;
-                        c.v2     = v2;
-                        refused += run_case<T, I>(handle, f, c, base, block_dim);
+                        c.alg     = at.alg;
+                        c.trans   = at.trans;
+                        c.device  = device;
+                        c.v2      = v2;
+                        c.storage = l.storage;
+                        refused += run_case<T, I>(handle, f, c, base, l.block_dim);
                         if(::testing::Test::HasFailure())
                             return refused;
                     }

@@ -102,6 +102,11 @@ rocsparse_status rocsparse_v2_spmv_buffer_size(rocsparse_handle            handl
 *  sparse matrix descriptor, the computation stage returns \ref rocsparse_status_invalid_value after these arrays are replaced with \ref rocsparse_csr_set_pointers,
 *  \ref rocsparse_csc_set_pointers or \ref rocsparse_bsr_set_pointers, also when the same pointers are passed after their contents changed, and when it is called
 *  with a sparse matrix descriptor other than the analyzed one. Create and analyze a new \p rocsparse_spmv_descr in these cases; \ref rocsparse_spmat_set_values keeps the analysis.
+*  A \p rocsparse_spmv_descr holds an analysis for a CSR or CSC matrix with \ref rocsparse_spmv_alg_csr_adaptive, \ref rocsparse_spmv_alg_csr_lrb or
+*  \ref rocsparse_spmv_alg_csr_nnzsplit, for a CSR matrix with \ref rocsparse_spmv_alg_default and \ref rocsparse_operation_none, for a CSC matrix with
+*  \ref rocsparse_spmv_alg_default and a transposed or conjugate-transposed operation, and for a BSR matrix with block dimension 1 and \ref rocsparse_storage_mode_sorted.
+*  It holds no analysis with \ref rocsparse_spmv_alg_csr_rowsplit, with \ref rocsparse_spmv_alg_default for the other CSR and CSC operations, for any other BSR matrix,
+*  for a COO, COO AoS or ELL matrix, or for a matrix without entries.
 *  A COO analysis is kept with the sparse matrix descriptor instead: after \ref rocsparse_coo_set_pointers, the computation stage still succeeds, and the analysis stage of a new
 *  \p rocsparse_spmv_descr replaces the analysis. With \ref rocsparse_spmv_alg_coo_atomic and \ref rocsparse_operation_none, that analysis stage synchronizes the device, so no stream
 *  may be captured while it runs: it returns \ref rocsparse_status_invalid_value if the stream of \p handle is being captured, but a capture of another stream is not detected.
@@ -229,7 +234,7 @@ rocsparse_status rocsparse_v2_spmv_buffer_size(rocsparse_handle            handl
 *  \retval      rocsparse_status_invalid_handle the library context \p handle was not initialized.
 *  \retval      rocsparse_status_invalid_pointer \p alpha, \p mat, \p x, \p beta, \p y, or
 *               \p buffer pointer is invalid.
-*  \retval      rocsparse_status_invalid_value the value of \p stage is invalid, \p stage is \ref rocsparse_v2_spmv_stage_compute and \p spmv_descr holds a CSR, CSC or BSR analysis of another sparse matrix descriptor, or of arrays that were replaced with \ref rocsparse_csr_set_pointers, \ref rocsparse_csc_set_pointers or \ref rocsparse_bsr_set_pointers, or \p stage is \ref rocsparse_v2_spmv_stage_analysis, the stream of \p handle is being captured, and the analysis would synchronize the device to replace a COO analysis of arrays replaced with \ref rocsparse_coo_set_pointers.
+*  \retval      rocsparse_status_invalid_value the value of \p stage is invalid, \p stage is \ref rocsparse_v2_spmv_stage_compute and \p spmv_descr holds a CSR, CSC or BSR analysis, as listed in the description, of another sparse matrix descriptor, or of arrays that were replaced with \ref rocsparse_csr_set_pointers, \ref rocsparse_csc_set_pointers or \ref rocsparse_bsr_set_pointers, or \p stage is \ref rocsparse_v2_spmv_stage_analysis, the stream of \p handle is being captured, and the analysis would synchronize the device to replace a COO analysis of arrays replaced with \ref rocsparse_coo_set_pointers.
 *  \retval      rocsparse_status_not_implemented if \p alg is not supported or if the mixed precision configuration is not supported.
 *
 *  \par Example
