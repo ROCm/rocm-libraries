@@ -14,7 +14,9 @@
 #
 # A pytest entry starts its command with ${_ROCKE_INSTALLED_PYTEST}, which
 # platform/CMakeLists.txt defines. The explicit gates do not. The configure
-# fails for any other pytest entry that does not.
+# fails for any other pytest entry that does not. An entry that takes more than
+# a few seconds of a CI shard and launches kernels in few or none of its tests
+# follows it with ${_ROCKE_INSTALLED_PYTEST_WORKERS}.
 
 # Oracle-free launches of the shipped dense kernels: the uniform-probability
 # gate and the key-permutation relation. Only the GPU modules run here; their
@@ -105,7 +107,7 @@ endforeach()
 # failures outside an individual test item. The exhaustive items of these files
 # run in rocke_library_conv_exhaustive_pytest below instead.
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-       "add_test(rocke_library_conv_pytest ${_ROCKE_INSTALLED_PYTEST}${_ROCKE_LIBRARY_CONV_TESTS} -m \"not exhaustive\" -v -rs --timeout=30)\n")
+       "add_test(rocke_library_conv_pytest ${_ROCKE_INSTALLED_PYTEST} ${_ROCKE_INSTALLED_PYTEST_WORKERS}${_ROCKE_LIBRARY_CONV_TESTS} -m \"not exhaustive\" -v -rs --timeout=30)\n")
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "set_tests_properties(rocke_library_conv_pytest PROPERTIES\n"
        "  LABELS \"ckc;python;conv;host;standard\"\n"
@@ -157,7 +159,7 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
 # because its own sample is smaller. Its exhaustive items (the whole bf16 sweep)
 # run in rocke_library_conv_exhaustive_pytest above.
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-       "add_test(rocke_library_conv_fwd_aot_packaging_pytest ${_ROCKE_INSTALLED_PYTEST} "
+       "add_test(rocke_library_conv_fwd_aot_packaging_pytest ${_ROCKE_INSTALLED_PYTEST} ${_ROCKE_INSTALLED_PYTEST_WORKERS} "
        "\"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_convolution_forward_aot_packaging.py\" "
        "-m \"not exhaustive\" -v -rs --timeout=600)\n")
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
@@ -380,7 +382,7 @@ foreach(_t ${_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS})
          " \"${ROCKE_TEST_CTEST_REL}${_t}\"")
 endforeach()
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-       "add_test(rocke_library_attention_cpu_pytest ${_ROCKE_INSTALLED_PYTEST}${_ROCKE_LIBRARY_ATTENTION_CPU_TESTS} -v -rs --timeout=30)\n")
+       "add_test(rocke_library_attention_cpu_pytest ${_ROCKE_INSTALLED_PYTEST} ${_ROCKE_INSTALLED_PYTEST_WORKERS}${_ROCKE_LIBRARY_ATTENTION_CPU_TESTS} -v -rs --timeout=30)\n")
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "set_tests_properties(rocke_library_attention_cpu_pytest PROPERTIES\n"
        "  LABELS \"ckc;python;attention;host;standard\"\n"
@@ -405,7 +407,7 @@ else()
          "list(APPEND _rocke_library_attention_builds_pytest_environment\n"
          "     \${_rocke_compiler_tool_environment}\n"
          "     \${_rocke_compiler_requirement_environment})\n"
-         "add_test(rocke_library_attention_builds_pytest ${_ROCKE_INSTALLED_PYTEST} \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_attention_builds.py\" --deselect \"${_ROCKE_LIBRARY_ATTENTION_BUILDS_HOST_TEST}\" -v -rs --timeout=120)\n"
+         "add_test(rocke_library_attention_builds_pytest ${_ROCKE_INSTALLED_PYTEST} ${_ROCKE_INSTALLED_PYTEST_WORKERS} \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_attention_builds.py\" --deselect \"${_ROCKE_LIBRARY_ATTENTION_BUILDS_HOST_TEST}\" -v -rs --timeout=120)\n"
          "set_tests_properties(rocke_library_attention_builds_pytest PROPERTIES\n"
          "  LABELS \"ckc;python;attention;host;standard\"\n"
          "  ENVIRONMENT \"\${_rocke_library_attention_builds_pytest_environment}\"\n"
@@ -534,7 +536,7 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "list(APPEND _rocke_library_mla_pytest_environment\n"
        "     \${_rocke_compiler_tool_environment}\n"
        "     \${_rocke_compiler_requirement_environment})\n"
-       "add_test(rocke_library_mla_pytest ${_ROCKE_INSTALLED_PYTEST}${_ROCKE_LIBRARY_MLA_TESTS} -v -rs --timeout=120)\n")
+       "add_test(rocke_library_mla_pytest ${_ROCKE_INSTALLED_PYTEST} ${_ROCKE_INSTALLED_PYTEST_WORKERS}${_ROCKE_LIBRARY_MLA_TESTS} -v -rs --timeout=120)\n")
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "set_tests_properties(rocke_library_mla_pytest PROPERTIES\n"
        "  LABELS \"ckc;python;mla;host;standard\"\n"
@@ -551,7 +553,7 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "  TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})\n")
 
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-       "add_test(rocke_reference_common_pytest ${_ROCKE_INSTALLED_PYTEST} \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_reference_common.py\" -v -rs --timeout=30)\n")
+       "add_test(rocke_reference_common_pytest ${_ROCKE_INSTALLED_PYTEST} ${_ROCKE_INSTALLED_PYTEST_WORKERS} \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_reference_common.py\" -v -rs --timeout=30)\n")
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "set_tests_properties(rocke_reference_common_pytest PROPERTIES\n"
        "  LABELS \"ckc;python;host;quick\"\n"
@@ -571,7 +573,7 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
 # root on sys.path; importlib import mode alone does not prevent it
 # (checked by tests/dispatch/attention/test_import_resolution.py).
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-       "add_test(rocke_library_attention_pytest ${_ROCKE_INSTALLED_PYTEST}"
+       "add_test(rocke_library_attention_pytest ${_ROCKE_INSTALLED_PYTEST} ${_ROCKE_INSTALLED_PYTEST_WORKERS}"
        " \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_wmma_fmha_fwd_v2_spec.py\""
        " \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_wmma_fmha_decode_spec.py\""
        " \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_attention_unified_lse.py\""
@@ -597,7 +599,7 @@ if(ROCKE_REQUIRE_INSTALLED_HIPDNN_SDPA_ASSETS)
   set(_ROCKE_SDPA_PYTEST_ARGS " --rocke-require-hipdnn-assets")
 endif()
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-       "add_test(rocke_library_sdpa_pytest ${_ROCKE_INSTALLED_PYTEST}"
+       "add_test(rocke_library_sdpa_pytest ${_ROCKE_INSTALLED_PYTEST} ${_ROCKE_INSTALLED_PYTEST_WORKERS}"
        " \"${ROCKE_TEST_CTEST_REL}tests/library/tests/sdpa\""
        " --ignore=\"${ROCKE_TEST_CTEST_REL}tests/library/tests/sdpa/test_unified_sdpa_numeric.py\""
        " --ignore=\"${ROCKE_TEST_CTEST_REL}tests/library/tests/sdpa/test_dense_sdpa_numeric.py\""
@@ -674,7 +676,7 @@ else()
          "list(APPEND _rocke_library_gdn_pytest_environment\n"
          "     \${_rocke_compiler_tool_environment}\n"
          "     \${_rocke_compiler_requirement_environment})\n"
-         "add_test(rocke_library_gdn_pytest ${_ROCKE_INSTALLED_PYTEST}${_ROCKE_LIBRARY_GDN_TESTS} -v -rs --timeout=120)\n")
+         "add_test(rocke_library_gdn_pytest ${_ROCKE_INSTALLED_PYTEST} ${_ROCKE_INSTALLED_PYTEST_WORKERS}${_ROCKE_LIBRARY_GDN_TESTS} -v -rs --timeout=120)\n")
   string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
          "set_tests_properties(rocke_library_gdn_pytest PROPERTIES\n"
          "  LABELS \"ckc;python;gdn;host;standard\"\n"

@@ -863,6 +863,26 @@ these lines. It runs all its items on every CI shard.
 The plugin never sets exit code 77. Some entries use 77 as their CTest skip
 code when they cannot run on this machine.
 
+**Worker processes within a CI shard.** CTest runs a CI shard's entries one at
+a time, so one pytest entry runs on one CPU of the shard's machine. A pytest
+entry that takes more than a few seconds of a shard and launches kernels in few
+or none of its tests follows `_ROCKE_INSTALLED_PYTEST` with
+`_ROCKE_INSTALLED_PYTEST_WORKERS` (`-p rocke.tests.ctest_workers
+--rocke-workers 4`, `platform/CMakeLists.txt`). The entry's process then starts
+up to four pytest workers on its own command line, each with an equal share of
+the CPUs the process may use (its own block of them on Linux, and
+`OMP_NUM_THREADS` and the like lowered to the share), and exits with their
+combined status. Each worker keeps the same items the CI shard keeps, then its
+own part of them: the costed keys heaviest first, the others by a hash salted
+apart from the shard's. Each item runs in exactly one worker. The entry's log
+shows each worker's output as it comes, every line prefixed with `[w<index>]`.
+The few GPU tests of such an entry (the platform pytest parts have some) share
+the shard's GPU among the workers. A run with `--collect-only`, `-x`,
+`--maxfail`, `--junitxml` or another option that needs one process runs in one
+process. The workers of entries that a parallel `ctest -j` runs at once take
+their CPU blocks from a rotation the entry picks from its process id, so they
+mostly land apart.
+
 **The explicit gates are never sharded.** `rocke_library_counted_structural_gate`
 and `rocke_library_counted_compiler_gate` do not use `_ROCKE_INSTALLED_PYTEST`.
 Their command does not load the plugin. The gate conftest stops the session

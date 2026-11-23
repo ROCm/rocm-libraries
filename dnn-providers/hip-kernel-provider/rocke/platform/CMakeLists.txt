@@ -163,6 +163,14 @@ endfunction()
 set(_ROCKE_INSTALLED_PYTEST
     "python -m pytest -p rocke.tests.ctest_shard --rocke-shard-from-gtest-env")
 
+# A pytest entry whose share of a CI shard takes more than a few seconds and
+# whose tests launch kernels in few or none of them puts this text right after
+# ${_ROCKE_INSTALLED_PYTEST}: CTest runs a shard's entries one at a time, and
+# the rocke.tests.ctest_workers plugin runs the entry's share in worker
+# processes, each on its own block of the CPUs; the few GPU tests of such an
+# entry share the shard's GPU among the workers.
+set(_ROCKE_INSTALLED_PYTEST_WORKERS "-p rocke.tests.ctest_workers --rocke-workers 4")
+
 # Return the installed-CTestTestfile text that registers rocke_pytest_<part>,
 # one part of the platform pytest suite. The remaining arguments are the part's
 # pytest path and option arguments. _ROCKE_PLATFORM_PYTEST_IGNORE_<part>, when
@@ -183,7 +191,7 @@ function(rocke_platform_pytest_entry out_var part)
     string(APPEND _pytest_arguments " \"${_pytest_argument}\"")
   endforeach()
   string(CONCAT _entry
-         "add_test(${_test_name} ${_ROCKE_INSTALLED_PYTEST}${_pytest_arguments} -m \"not integration\" -v -rs --timeout=60)\n"
+         "add_test(${_test_name} ${_ROCKE_INSTALLED_PYTEST} ${_ROCKE_INSTALLED_PYTEST_WORKERS}${_pytest_arguments} -m \"not integration\" -v -rs --timeout=60)\n"
          "set_tests_properties(${_test_name} PROPERTIES\n"
          "  LABELS \"ckc;python;standard\"\n"
          "  ENVIRONMENT \"\${_rocke_platform_pytest_environment}\"\n"
@@ -834,7 +842,7 @@ if(ROCKE_INSTALL_TESTS)
     set(_ROCKE_HIP_SOURCE_IDENTITY_TEST "instances/differential/test_hip_source_identity.py")
     if(_ROCKE_IR_LOWER_CLI_ENVIRONMENT)
       string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-             "add_test(rocke_hip_source_identity ${_ROCKE_INSTALLED_PYTEST} \"${ROCKE_TEST_CTEST_REL}tests/${_ROCKE_HIP_SOURCE_IDENTITY_TEST}\" -v -rs --timeout=120)\n")
+             "add_test(rocke_hip_source_identity ${_ROCKE_INSTALLED_PYTEST} ${_ROCKE_INSTALLED_PYTEST_WORKERS} \"${ROCKE_TEST_CTEST_REL}tests/${_ROCKE_HIP_SOURCE_IDENTITY_TEST}\" -v -rs --timeout=120)\n")
       string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
              "set_tests_properties(rocke_hip_source_identity PROPERTIES LABELS \"ckc;python;host;standard\" ENVIRONMENT \"PYTHONPATH=${_ROCKE_INSTALLED_PYTHONPATH};${_ROCKE_IR_LOWER_CLI_ENVIRONMENT}\" TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})\n")
     endif()
@@ -858,7 +866,7 @@ if(ROCKE_INSTALL_TESTS)
       string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
              "set(_rocke_hip_lowering_parity_environment \"PYTHONPATH=${_ROCKE_INSTALLED_PYTHONPATH};${_ROCKE_IR_LOWER_CLI_ENVIRONMENT}\")\n"
              "list(APPEND _rocke_hip_lowering_parity_environment \${_rocke_compiler_tool_environment})\n"
-             "add_test(rocke_hip_lowering_parity ${_ROCKE_INSTALLED_PYTEST} ${_rocke_parity_paths} -v -rs --timeout=60)\n"
+             "add_test(rocke_hip_lowering_parity ${_ROCKE_INSTALLED_PYTEST} ${_ROCKE_INSTALLED_PYTEST_WORKERS} ${_rocke_parity_paths} -v -rs --timeout=60)\n"
              "set_tests_properties(rocke_hip_lowering_parity PROPERTIES\n"
              "  LABELS \"ckc;python;host;standard\"\n"
              "  ENVIRONMENT \"\${_rocke_hip_lowering_parity_environment}\"\n"
@@ -946,7 +954,7 @@ if(ROCKE_INSTALL_TESTS)
       # categories tier as standard, so the quick tier does not run them.
       list(APPEND _ROCKE_PLATFORM_PYTEST_IGNORE_other test_ctest_shard.py)
       string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-             "add_test(rocke_ctest_shard_pytest ${_ROCKE_INSTALLED_PYTEST} \"${ROCKE_TEST_CTEST_REL}tests/test_ctest_shard.py\" -m \"not integration\" -v -rs --timeout=60)\n"
+             "add_test(rocke_ctest_shard_pytest ${_ROCKE_INSTALLED_PYTEST} ${_ROCKE_INSTALLED_PYTEST_WORKERS} \"${ROCKE_TEST_CTEST_REL}tests/test_ctest_shard.py\" -m \"not integration\" -v -rs --timeout=60)\n"
              "set_tests_properties(rocke_ctest_shard_pytest PROPERTIES\n"
              "  LABELS \"ckc;python;standard\"\n"
              "  ENVIRONMENT \"\${_rocke_platform_pytest_environment}\"\n"
@@ -1008,7 +1016,7 @@ if(ROCKE_INSTALL_TESTS)
       string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
              "set(_rocke_tiling_pytest_environment \"PYTHONPATH=${_ROCKE_INSTALLED_PYTHONPATH}\")\n"
              "list(APPEND _rocke_tiling_pytest_environment \${_rocke_compiler_tool_environment})\n"
-             "add_test(rocke_tiling_pytest ${_rocke_tiling_pytest_launcher} \"${_ROCKE_TILING_TESTS}\" --ignore \"${_ROCKE_TILING_VISUALIZATION_TESTS}\" ${_rocke_tiling_pytest_options} -m \"not gpu\")\n"
+             "add_test(rocke_tiling_pytest ${_rocke_tiling_pytest_launcher} ${_ROCKE_INSTALLED_PYTEST_WORKERS} \"${_ROCKE_TILING_TESTS}\" --ignore \"${_ROCKE_TILING_VISUALIZATION_TESTS}\" ${_rocke_tiling_pytest_options} -m \"not gpu\")\n"
              "set_tests_properties(rocke_tiling_pytest PROPERTIES\n"
              "  LABELS \"ckc;python;standard\"\n"
              "  ENVIRONMENT \"\${_rocke_tiling_pytest_environment}\"\n"

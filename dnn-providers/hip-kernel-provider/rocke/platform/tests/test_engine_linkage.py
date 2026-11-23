@@ -126,6 +126,9 @@ PYTEST_WITH_SHARD_PLUGIN = [
     "rocke.tests.ctest_shard",
     "--rocke-shard-from-gtest-env",
 ]
+# What an entry that runs its share in worker processes puts right after the
+# plugin (platform/CMakeLists.txt, _ROCKE_INSTALLED_PYTEST_WORKERS).
+PYTEST_WORKERS = ["-p", "rocke.tests.ctest_workers", "--rocke-workers", "4"]
 EXPLICIT_GATES = {
     "rocke_library_counted_structural_gate",
     "rocke_library_counted_compiler_gate",
@@ -512,7 +515,7 @@ def test_installed_ctest_entries_get_scoped_environment_contracts(
         visualization = f"{tiling_tree}/visualization"
         tiling_entries = {
             "rocke_tiling_pytest": (
-                [tiling_tree, "--ignore", visualization],
+                [*PYTEST_WORKERS, tiling_tree, "--ignore", visualization],
                 "not gpu",
             ),
             "rocke_tiling_visualization_pytest": ([visualization], "not gpu"),
@@ -756,9 +759,10 @@ def test_installed_platform_pytest_parts_partition_the_suite(
     for part in parts:
         name, command = part["name"], part["command"]
         assert command[1:6] == PYTEST_WITH_SHARD_PLUGIN, name
+        assert command[6:10] == PYTEST_WORKERS, name
         assert command[-len(suite_options) :] == suite_options, name
         selection_by_part[name.removeprefix("rocke_pytest_")] = command[
-            6 : -len(suite_options)
+            10 : -len(suite_options)
         ]
         properties = {prop["name"]: prop["value"] for prop in part["properties"]}
         # Three labels, as the single entry had.
@@ -811,6 +815,7 @@ def test_installed_platform_pytest_parts_partition_the_suite(
     plugin_tests_file = f"{tests_root}/test_ctest_shard.py"
     assert plugin_tests["command"][1:] == [
         *PYTEST_WITH_SHARD_PLUGIN,
+        *PYTEST_WORKERS,
         plugin_tests_file,
         *suite_options,
     ]
