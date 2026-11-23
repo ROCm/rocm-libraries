@@ -69,19 +69,6 @@ TEST_F(TestHipFlash2Engine, GetDetailsLeavesNumericalNotesAbsentWhileUnclaimed)
     EXPECT_EQ(details.numericalNotes(), std::nullopt);
 }
 
-TEST_F(TestHipFlash2Engine, ReportsNoNumericalNotesWhileUnclaimed)
-{
-    EXPECT_EQ(HipFlash2Engine::numericalNotesFor(false), std::nullopt);
-}
-
-TEST_F(TestHipFlash2Engine, ReportsAnExplicitEmptyListWhenClaimed)
-{
-    const auto notes = HipFlash2Engine::numericalNotesFor(true);
-
-    ASSERT_TRUE(notes.has_value());
-    EXPECT_TRUE(notes->empty());
-}
-
 // -- isApplicable tests --------------------------------------------------------
 
 TEST_F(TestHipFlash2Engine, IsApplicableReturnsFalseForNonSdpaGraph)

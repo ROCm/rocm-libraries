@@ -3,19 +3,14 @@
 
 #include <gtest/gtest.h>
 
-#include "core/Handle.hpp"
 #include "core/Utils.hpp"
 
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
-#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineDetailsWrapper.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
-#include <hipdnn_plugin_sdk/BehaviorNote.h>
-#include <hipdnn_plugin_sdk/NumericalNote.h>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 
 using namespace hip_kernel_provider::core::utils;
-using hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineDetailsWrapper;
 
 namespace
 {
@@ -443,53 +438,4 @@ TEST(TestParseActivation, Passthru)
     auto params = parseActivation(*attrs);
 
     EXPECT_EQ(params.mode, ActivationMode::PASTHRU);
-}
-
-// ============================================================================
-// storeEngineDetails
-// ============================================================================
-
-TEST(TestStoreEngineDetails, WritesAnExplicitEmptyNumericalNotesList)
-{
-    Handle handle;
-    hipdnnPluginConstData_t detailsOut;
-    const std::vector<int32_t> behaviorNotes{
-        static_cast<int32_t>(HIPDNN_BEHAVIOR_NOTE_SUPPORTS_GRAPH_CAPTURE)};
-
-    storeEngineDetails(handle, 7, {}, behaviorNotes, detailsOut, std::vector<int32_t>{});
-
-    const EngineDetailsWrapper details(detailsOut.ptr, detailsOut.size);
-
-    EXPECT_EQ(details.engineId(), 7);
-    EXPECT_EQ(details.behaviorNotes(), behaviorNotes);
-    ASSERT_TRUE(details.numericalNotes().has_value());
-    EXPECT_TRUE(details.numericalNotes()->empty());
-}
-
-TEST(TestStoreEngineDetails, LeavesNumericalNotesAbsentByDefault)
-{
-    Handle handle;
-    hipdnnPluginConstData_t detailsOut;
-
-    storeEngineDetails(handle, 7, {}, {}, detailsOut);
-
-    const EngineDetailsWrapper details(detailsOut.ptr, detailsOut.size);
-
-    EXPECT_EQ(details.numericalNotes(), std::nullopt);
-}
-
-TEST(TestStoreEngineDetails, RoundTripsANonEmptyNumericalNotesList)
-{
-    Handle handle;
-    hipdnnPluginConstData_t detailsOut;
-    const std::vector<int32_t> numericalNotes{
-        static_cast<int32_t>(HIPDNN_NUMERICAL_NOTE_NONDETERMINISTIC)};
-
-    storeEngineDetails(handle, 7, {}, {}, detailsOut, numericalNotes);
-
-    const EngineDetailsWrapper details(detailsOut.ptr, detailsOut.size);
-
-    const auto notes = details.numericalNotes();
-    ASSERT_TRUE(notes.has_value());
-    EXPECT_EQ(*notes, numericalNotes);
 }

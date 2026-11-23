@@ -22,8 +22,8 @@
  *        HKP_DETERMINISM_FLYDSL_SDPA_<OP> for each op the product root ships FlyDSL content
  *        for, and each table below exists only under its definition.
  *
- * One row per launch-structure class and dtype (plan section 3.1). The classes come from the
- * line-level trace of every kernel family (trace-TraceFlydslFwd): the unsplit prefill kernel, the
+ * One row per launch-structure class and dtype. The classes come from a
+ * source read of every kernel family: the unsplit prefill kernel, the
  * column-split (dv_split) and head-pair (hd_pair) schedules, the split-KV decode kernels with
  * their ascending-order merge, the dual-wave kernel, the aiw kernel's QK shards, and the helper
  * launches (head_pad copies, the dropout keep-mask writer, the padded-row fill).
@@ -192,8 +192,8 @@ std::vector<DeterminismRow> flydslForwardRows()
 
 #ifdef HKP_DETERMINISM_FLYDSL_SDPA_CDNA
     {
-        // The generic prefill kernel: one launch, one writer per O element, no workspace
-        // (trace cdna: U:3835, U:5686-5790). Evidence per class:
+        // The generic prefill kernel: one launch, one writer per O element, no workspace.
+        // Evidence per class:
         //  - tiles hd64/128/256: FlydslSdpaCdnaCommon.hpp:1746-1754 (exact head) with the tier
         //    tables _instances.py:1181-1256 (gfx90a/gfx942/gfx950 each ship every class below);
         //    hd256 on gfx942/gfx90a stages K in 128-column chunks (k_chunk), :1235-1254.
@@ -381,9 +381,9 @@ std::vector<DeterminismRow> flydslForwardRows()
 #ifdef HKP_DETERMINISM_FLYDSL_SDPA_CDNA_DECODE
     {
         // The generic kernel in split-KV mode: a main launch writing f32 partials and LSEs to the
-        // workspace, then the merge kernel (ascending split loops, one writer per O element;
-        // trace cdna_decode: GEN:878-1057, U:5634-5684). The split count is
-        // min(device bound, work bound, 64): candidateSplits, FlydslSdpaCdnaCommon.hpp:1391-1404.
+        // workspace, then the merge kernel (ascending split loops, one writer per O element). The
+        // split count is min(device bound, work bound, 64): candidateSplits,
+        // FlydslSdpaCdnaCommon.hpp:1391-1404.
         //  - SplitCap: B1 Hq2 Hkv1 Skv16384 -> work bound 64 on every device (device bound >= 104).
         //  - DeviceBoundSplit: B4 Hq32 Hkv8 Skv8192 -> grid 32 workgroups, so the split count is
         //    units / 32 (6 on a 104-CU gfx90a, 19 on gfx942, 16 on gfx950): CU dependent.
@@ -525,8 +525,8 @@ std::vector<DeterminismRow> flydslForwardRows()
 #ifdef HKP_DETERMINISM_FLYDSL_SDPA_CDNA_DUALWAVE
     {
         // gfx950's dual-wave kernel: one launch, split-K compiled out of every shipped object
-        // (num_kv_splits 1; research INFERENCE, the objects were not scanned), row reductions by
-        // fixed trees (trace cdna_dualwave: U:447-450, 504-507, 8971-9140). It declines padding,
+        // (num_kv_splits 1) [INFERENCE: the objects were not scanned], row reductions by
+        // fixed trees. It declines padding,
         // packing, sink, dropout, f32, windows and strided LSEs (FlydslSdpaCdnaCommon.hpp:1597-1682),
         // so none of those is a row. Objects: _instances.py:1160-1180 (hd64/128), :1261-1272 (hd256,
         // 4 waves), :1289-1300 (bias hd64/128); SOURCE.md sdpa_cdna_dualwave/gfx950 rows 36-46.
@@ -588,7 +588,7 @@ std::vector<DeterminismRow> flydslForwardRows()
 #ifdef HKP_DETERMINISM_FLYDSL_SDPA_RDNA
     {
         // The RDNA prefill kernel: one launch, no workspace, one O writer per (row, column
-        // slice) (trace rdna: RP:930-937, 1626-1660, 1961-2005). Classes:
+        // slice). Classes:
         //  - hd_pair 0 (hd64, hd96, hd128), hd_pair 1 (hd256 exact, a head-dim pair split across
         //    two waves summed through LDS) and dv_split 2 with hd_pair (the generic 256 tier,
         //    head dims 232-248): sdpa_prefill_schedule and SDPA_GENERIC_HEAD_DIM_MAX,
@@ -754,7 +754,7 @@ std::vector<DeterminismRow> flydslForwardRows()
     {
         // The RDNA decode kernel: split-KV main launch with an in-workgroup wave combine
         // (w = 0..3, compile order) and the merge kernel (ascending splits, one workgroup per
-        // (b, h, s)); trace rdna_decode: DEC:383-388, 442-446, 681-760, 886-985. Splits =
+        // (b, h, s)). Splits =
         // min(work bound, device bound, 64), decodeSplits, FlydslSdpaRdnaDecodeNative.cpp:137-146;
         // the work bound needs Skv >= 2048 for a second split, so Skv 16384 gives 16 splits where
         // the device bound (2 x the reported unit count over B*Hkv) is larger. The column split
@@ -902,7 +902,7 @@ std::vector<DeterminismRow> flydslForwardRows()
         // AOTriton's gfx1201 kernel, gfx12-generic only (SDPA_AIW_TARGETS, _instances.py:2399):
         // one launch (plus the padded-row fill launch for a padded graph), explicit per-wave LDS
         // partials for the cross-shard reduction at head dims above 256 (QK_SHARDS 2 at 384, 4
-        // at 512; trace aiw: FC:1189-1245, AIW:1795-1810, AIW:2406). The head dims, dropout,
+        // at 512). The head dims, dropout,
         // sink, bias and MLA objects are the sdpa_aiw/gfx12-generic SOURCE.md rows (a bf16 and
         // f16 object per class; no f32). Kernel matcher FlydslSdpaAiwNative.cpp:262-420: padded
         // or packed graphs need a bottom-right (or no) mask (:336), padded with packed lengths

@@ -113,7 +113,7 @@ std::vector<ClaimedEngine> claimedEngines()
     engines.push_back({"hipkernel:flydsl_sdpa_cdna_dualwave", {"gfx950"}});
 #endif
 #ifdef HKP_DETERMINISM_FLYDSL_SDPA_RDNA
-    // _instances.py:799 ("on gfx11-generic and gfx12-generic"); S8 run tokens gfx1100/gfx1201.
+    // _instances.py:799 ("on gfx11-generic and gfx12-generic"); run tokens gfx1100/gfx1201.
     engines.push_back({"hipkernel:flydsl_sdpa_rdna", {"gfx1100", "gfx1201"}});
 #endif
 #ifdef HKP_DETERMINISM_FLYDSL_SDPA_RDNA_DECODE
@@ -121,7 +121,7 @@ std::vector<ClaimedEngine> claimedEngines()
     engines.push_back({"hipkernel:flydsl_sdpa_rdna_decode", {"gfx1100", "gfx1201"}});
 #endif
 #ifdef HKP_DETERMINISM_FLYDSL_SDPA_AIW
-    // _instances.py:2399 (SDPA_AIW_TARGETS = ("gfx12-generic",)); S8 run token gfx1201.
+    // _instances.py:2399 (SDPA_AIW_TARGETS = ("gfx12-generic",)); run token gfx1201.
     engines.push_back({"hipkernel:flydsl_sdpa_aiw", {"gfx1201"}});
 #endif
 #ifdef HKP_DETERMINISM_FLYDSL_BWD_MERGED

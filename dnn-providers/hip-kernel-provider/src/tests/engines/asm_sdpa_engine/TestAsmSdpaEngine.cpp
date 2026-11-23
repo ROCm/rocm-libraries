@@ -16,7 +16,6 @@
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/MockEngineConfig.hpp>
 #include <hipdnn_test_sdk/utilities/MockGraph.hpp>
-#include <hipdnn_test_sdk/utilities/MockNode.hpp>
 #include <hipdnn_test_sdk/utilities/SdpaGraphMutators.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
@@ -104,24 +103,6 @@ hipdnn_flatbuffers_sdk::data_objects::KnobT makeStringKnob(const std::string& id
     return knob;
 }
 
-using hipdnn_flatbuffers_sdk::data_objects::NodeAttributes;
-using hipdnn_flatbuffers_sdk::flatbuffer_utilities::INodeWrapper;
-
-using NodeList = std::vector<std::unique_ptr<INodeWrapper>>;
-
-// A node list whose nodes only report their attribute type, which is all the engine reads.
-NodeList makeNodes(const std::vector<NodeAttributes>& types)
-{
-    NodeList nodes;
-    for(const auto type : types)
-    {
-        auto node = std::make_unique<::testing::NiceMock<hipdnn_test_sdk::utilities::MockNode>>();
-        ON_CALL(*node, attributesType()).WillByDefault(::testing::Return(type));
-        nodes.push_back(std::move(node));
-    }
-    return nodes;
-}
-
 class TestAsmSdpaEngine : public ::testing::Test
 {
 protected:
@@ -184,68 +165,6 @@ TEST_F(TestAsmSdpaEngine, GetDetailsLeavesNumericalNotesAbsentForABackwardGraph)
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineDetailsWrapper details(result.ptr,
                                                                                      result.size);
     EXPECT_EQ(details.numericalNotes(), std::nullopt);
-}
-
-TEST_F(TestAsmSdpaEngine, ReportsNoNumericalNotesForAForwardGraphWhileUnclaimed)
-{
-    auto builder = hipdnn_test_sdk::utilities::createValidSdpaFwdGraph();
-    const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
-
-    EXPECT_EQ(AsmSdpaEngine::numericalNotesFor(graph, false), std::nullopt);
-}
-
-TEST_F(TestAsmSdpaEngine, ReportsNoNumericalNotesForABackwardGraph)
-{
-    auto builder = hipdnn_test_sdk::utilities::createValidSdpaBwdGraph();
-    const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
-
-    EXPECT_EQ(AsmSdpaEngine::numericalNotesFor(graph, false), std::nullopt);
-}
-
-TEST_F(TestAsmSdpaEngine, ReportsNoNumericalNotesForAGraphWithNoSdpaNode)
-{
-    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
-    const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
-
-    EXPECT_EQ(AsmSdpaEngine::numericalNotesFor(graph, true), std::nullopt);
-}
-
-TEST_F(TestAsmSdpaEngine, ReportsNoNumericalNotesForAGraphWithAnUnknownNode)
-{
-    const auto nodes = makeNodes({NodeAttributes::NONE});
-    const hipdnn_test_sdk::utilities::MockGraph mockGraph;
-    EXPECT_CALL(mockGraph, nodeWrappers()).WillRepeatedly(::testing::ReturnRef(nodes));
-
-    EXPECT_EQ(AsmSdpaEngine::numericalNotesFor(mockGraph, true), std::nullopt);
-}
-
-TEST_F(TestAsmSdpaEngine, ReportsAnExplicitEmptyListForAClaimedForwardGraph)
-{
-    auto builder = hipdnn_test_sdk::utilities::createValidSdpaFwdGraph();
-    const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
-
-    const auto notes = AsmSdpaEngine::numericalNotesFor(graph, true);
-
-    ASSERT_TRUE(notes.has_value());
-    EXPECT_TRUE(notes->empty());
-}
-
-TEST_F(TestAsmSdpaEngine, ReportsNoNotesForABackwardGraphEvenWhenForwardIsClaimed)
-{
-    auto builder = hipdnn_test_sdk::utilities::createValidSdpaBwdGraph();
-    const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
-
-    EXPECT_EQ(AsmSdpaEngine::numericalNotesFor(graph, true), std::nullopt);
-}
-
-TEST_F(TestAsmSdpaEngine, ReportsNoNotesForAGraphWithBothForwardAndBackwardNodes)
-{
-    const auto nodes
-        = makeNodes({NodeAttributes::SdpaAttributes, NodeAttributes::SdpaBackwardAttributes});
-    const hipdnn_test_sdk::utilities::MockGraph mockGraph;
-    EXPECT_CALL(mockGraph, nodeWrappers()).WillRepeatedly(::testing::ReturnRef(nodes));
-
-    EXPECT_EQ(AsmSdpaEngine::numericalNotesFor(mockGraph, true), std::nullopt);
 }
 
 TEST_F(TestAsmSdpaEngine, IsApplicableReturnsFalseForNonSdpaGraph)
@@ -325,10 +244,7 @@ TEST_F(TestAsmSdpaEngine, GetDetailsReportsKnobsOfApplicableBuilderOnly)
     engine.addPlanBuilder(std::move(declining));
     engine.addPlanBuilder(std::move(serving));
 
-    // getDetails reads the graph's node types for the numerical notes.
-    const NodeList noNodes;
     const hipdnn_test_sdk::utilities::MockGraph graph;
-    EXPECT_CALL(graph, nodeWrappers()).WillRepeatedly(::testing::ReturnRef(noNodes));
     hipdnnPluginConstData_t detailsOut;
     engine.getDetails(_handle, graph, detailsOut);
     const EngineDetailsWrapper engineDetails(detailsOut.ptr, detailsOut.size);

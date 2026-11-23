@@ -27,7 +27,7 @@
  * Every row is a forward graph through the frontend (dense BSHD Q/K/V/O, the scale 1/sqrt(D)),
  * pinned to its engine with the knobs that select its kernel class. The rocKE forward
  * generators carry no atomics and no dynamic work counter; the only cross-workgroup combine is
- * the fixed-order reduce of the 3D segment pair (the T0 trace of the rocKE engines). A row set
+ * the fixed-order reduce of the 3D segment pair (a source read of the rocKE generators). A row set
  * therefore has to reach every distinct launch structure, not every kernel: the persistent
  * grid-stride loop (W below and above the CTA count), the one-CTA-per-item grids at each block
  * order, the 2D tiled grids at each geometry (several q-blocks per sequence, a tail q-block, many
@@ -282,8 +282,8 @@ std::vector<DeterminismRow> rockeRows()
 #ifdef HKP_DETERMINISM_ROCKE_GFX942_DENSE
     {
         // The kernel classes of IntegrationGpuGfx942AttentionDenseKnobClasses.inc, one row per
-        // launch-structure class (the inc's 224 rows differ in body levers that change
-        // instruction order and layout only; the T0 trace found no atomic, counter or second
+        // launch-structure class (the catalog's 224 rows differ in body levers that change
+        // instruction order and layout only; a source read found no atomic, counter or second
         // writer in any of them): the one-CTA-per-block grids at each block order, the
         // persistent grid at each decode with W work items below, not a multiple of and above
         // its 304 CTAs, causal_diag_split, the LSE twin, the windowed cells and the ranker
@@ -363,7 +363,7 @@ std::vector<DeterminismRow> rockeRows()
             std::move(diagSplit),
             shapeOf(BF16, 64, 8, 8, Band::TOP_LEFT, 1, 512, 512));
         // The body levers of a kernel of one class (instruction order, LDS padding, the exp2
-        // path): the T0 trace found no writer difference among them, and their LDS schedule is
+        // path): a source read found no writer difference among them, and their LDS schedule is
         // outside it, so the device repeat is the check on each.
         add("LeverPvPriority1",
             withLever(grid(256, 64, QB_MINOR), "pv_priority", 1),
@@ -492,7 +492,7 @@ std::vector<DeterminismRow> rockeRows()
 #ifdef HKP_DETERMINISM_ROCKE_GFX942_UNIFIED_2D
     {
         // One CTA per (kv head, q-block) with a binary-search sequence lookup, a single launch,
-        // and no cross-CTA combine (T0 trace). The classes are the 14 geometry x head size x
+        // and no cross-CTA combine (a source read). The classes are the 14 geometry x head size x
         // dtype kernel classes the reduced catalog ships (the forced table of
         // IntegrationGpuGfx942AttentionUnified2DKnobs.cpp knobCases, each on a head pair whose
         // GQA ratio the class ships), forced through the ten geometry and codegen-stack knobs at
@@ -581,7 +581,7 @@ std::vector<DeterminismRow> rockeRows()
 #endif
 #ifdef HKP_DETERMINISM_ROCKE_GFX950_UNIFIED_2D
     {
-        // One CTA per (kv head, q-block), a single launch, no cross-CTA combine (T0 trace). The
+        // One CTA per (kv head, q-block), a single launch, no cross-CTA combine (a source read). The
         // classes are the kernel classes of IntegrationGpuGfx950AttentionUnifiedKnobs.cpp
         // knobCases2D, which CoversEveryCatalogKernelClass holds to the catalog: the default
         // narrow 4x16 geometry at every dtype x mask on the head configurations it cycles

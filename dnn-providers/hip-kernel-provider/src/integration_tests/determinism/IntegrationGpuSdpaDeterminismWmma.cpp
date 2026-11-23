@@ -36,7 +36,7 @@
  * objects); the two families differ for the wide-Q buckets and the paged head-96 objects, and a
  * row reaches both.
  *
- * What the rows have to reach (the T0 trace of the two engines): neither kernel has an atomic that
+ * What the rows have to reach (a source read of the two kernels): neither kernel has an atomic that
  * combines values, a scheduling-dependent reduction order or a second writer of an output
  * element. Prefill and paged prefill are one launch with one CTA per (head, q-tile, batch) and
  * a sequential in-CTA loop over the key tiles; the wave-pair buckets (Q or V wider than 128 on
@@ -51,51 +51,48 @@
  * row tiles, dv_split slices).
  *
  * The routing is fixed by the device, not by the run: the engine takes a dense graph on the
- * prefill path or the decode path by rdnaAttentionUseDecode (Gfx1151WmmaAttentionNative.cpp:274
- * -296), a function of the problem and the CU count, and the decode split count is
- * min(keys / (4 waves x 4 tiles x 32 keys), WGP x 2 / work groups, 64) (:1793-1840). The rows
+ * prefill path or the decode path by rdnaAttentionUseDecode, a function of the problem and the
+ * CU count, and the decode split count is min(keys / (4 waves x 4 tiles x 32 keys), WGP x 2 /
+ * work groups, 64) (decodePlanFor, usesDecode). The rows
  * keep both far from their thresholds so every RDNA board of the two families routes them as
  * written: a prefill row has Sq 512 and 2 x 8 heads, 64 CTAs, so 4 x 64 CTAs exceed any RDNA
  * board's CU count (the rule declines decode when 4 x CTAs >= CUs); a decode row has Sq 1 to 4, so
  * both families route to decode (gfx12: Sq <= 32; gfx11: g x Sq < 512). A decode row with Skv 8192
  * has 256 key tiles, so by-work gives 16 splits and by-device (WGP x 2 / 2 to 8 work groups) gives
  * at least 2 on any board with 8 WGPs or more; the exact count depends on the board's CU
- * count, a property of the device and not of the run. [INFERENCE: 48 and 32 WGPs are the S8
- * boards' counts; the table needs only 8.]
+ * count, a property of the device and not of the run.
  *
- * Admission evidence, per row group, at tree 42750ca0b02 (NAT is
- * src/engines/kernel_ingestor_engine/packs/Gfx1151WmmaAttentionNative.cpp; CAT is the same
- * directory's Gfx1151WmmaAttentionCatalog.hpp; YAML is projects/hipdnn/tools/IngestorGenerator/
- * configs/gfx1151_wmma_attention.yaml and gfx1151_wmma_attention_decode.yaml):
- *  - every row: one SDPA node, no override shape (NAT:316-330); 16-bit Q/K/V/O (NAT:520-530),
- *    head widths multiples of 8 up to 256 (NAT:638-642), compute type FLOAT, no dropout, no
- *    FP8, no alibi (NAT:849-885, :997-1056); mask: right bound 0 or unbounded, no left bound
- *    (NAT:548-585); scale 1 / sqrt(D).
- *  - dense prefill rows (D1): dense matcher NAT:1393-1500: no seq_len, padding_mask or sink
- *    (NAT:1456-1477), rows aligned to 8 elements (NAT:395-405), LSE FLOAT [B, Hq, Sq, 1]
- *    (NAT:968-995), bias FLOAT or Q dtype [B|1, Hq|1, Sq|1, Skv] with unit key stride
- *    (NAT:665-720); kernel match NAT:1889-1945: dtype and bias kind equal, widths no wider
- *    than the object's bucket, and the dense graph is not one the dispatcher routes to decode
- *    (NAT:1936-1939), here guaranteed by Sq 512 above; the tightest bucket scores highest
- *    (NAT:1961-1985), and the two knobs head_size and head_size_v pin the bucket to the
- *    graph's own widths (shipped buckets 64/64, 96/96, 128/128, 256/256, 192/128 and 256/128,
- *    YAML shapes). The 192/128 and 256/128 objects ship on both families (the wave-pair
- *    form on gfx11, the unsplit form on gfx12, YAML variants).
- *  - paged rows (P1): paged matcher NAT:1117-1385: page tables and seq_len_q, seq_len_kv
- *    present and device INT32 (NAT:1312-1330), page a power of two in CAT:26's {16, 32, 64}
- *    (NAT:1208-1235), table width ceil(max_seq_len_kv / page) (frontend SdpaFwdNode.hpp
- *    :380-412), K and V containers of one block size and page count (NAT:1146-1170), a shared
- *    or a separate page_table_v of one width and row stride (NAT:1254-1285), ragged Q through
- *    token-unit offsets that Q and O share (NAT:1180-1195), no stats with a ragged Q
- *    (NAT:1352), FLOAT sink with a unit head stride (NAT:1061-1100). The kernel match bakes the
- *    page size, the query form and sinks into the object (NAT:1908-1916). The shipped objects:
- *    pages 16, 32, 64 for buckets 64, 128, 256; bucket 96 at page 16 on both families and at
- *    pages 32 and 64 as a distinct block_m 64 object on gfx11 and block_m 128 on gfx12 (YAML
- *    paged variants).
- *  - decode rows (C1): decode matcher NAT:1849-1860 and :1889-1930: the dispatcher's decode
- *    rule and the bucket of decodeBucket (NAT:237-255, 64/128/256 for the widths of the rows);
- *    the decode objects ship for buckets 64, 128 and 256 with bias none, f32 and q
- *    (decode YAML).
+ * Admission evidence, per row group (Gfx1151WmmaAttentionNative.cpp unless noted; CAT is the
+ * same directory's Gfx1151WmmaAttentionCatalog.hpp; YAML is projects/hipdnn/tools/
+ * IngestorGenerator/configs/gfx1151_wmma_attention.yaml and gfx1151_wmma_attention_decode.yaml):
+ *  - every row: one SDPA node (graphMatchesFor); 16-bit Q/K/V/O with well-formed strides
+ *    (isWellFormedOperand); head widths multiples of 8 up to 256 (isServedHeadDim); compute
+ *    type FLOAT, no dropout, no FP8, no alibi (unservedFeature, bindCommon); mask: right bound
+ *    0 or unbounded, left bound optional (a sliding window; the decode table below adds one
+ *    windowed row) (maskFor, bindCommon); scale 1 / sqrt(D).
+ *  - dense prefill rows (D1): the dense branch of graphMatchesFor: no seq_len, padding_mask or
+ *    sink, rows aligned to 8 elements (hasAlignedRows), LSE FLOAT [B, Hq, Sq, 1] (lseFor), bias
+ *    FLOAT or Q dtype [B|1, Hq|1, Sq|1, Skv] with unit key stride (biasFor); kernel match
+ *    (prefillKernelMatches): dtype and bias kind equal, widths no wider than the object's
+ *    bucket, and the dense graph is not one the dispatcher routes to decode (usesDecode), here
+ *    guaranteed by Sq 512 above; the tightest bucket scores highest (scoreKernel), and the two
+ *    knobs head_size and head_size_v pin the bucket to the graph's own widths (shipped buckets
+ *    64/64, 96/96, 128/128, 256/256, 192/128 and 256/128, YAML shapes). The 192/128 and 256/128
+ *    objects ship on both families (the wave-pair form on gfx11, the unsplit form on gfx12,
+ *    YAML variants).
+ *  - paged rows (P1): gfx1151WmmaAttentionPagedGraphMatches: page tables and seq_len_q,
+ *    seq_len_kv present and device INT32, page a power of two in the catalog's set {16, 32, 64}
+ *    (CAT), table width ceil(max_seq_len_kv / page) (frontend SdpaFwdNode.hpp), K and V
+ *    containers of one block size and page count, a shared or a separate page_table_v of one
+ *    width and row stride, ragged Q through token-unit offsets that Q and O share, no stats
+ *    with a ragged Q, FLOAT sink with a unit head stride (sinkFor). The kernel match bakes the
+ *    page size, the query form and sinks into the object. The shipped objects: pages 16, 32, 64
+ *    for buckets 64, 128, 256; bucket 96 at page 16 on both families and at pages 32 and 64 as a
+ *    distinct block_m 64 object on gfx11 and block_m 128 on gfx12 (YAML paged variants).
+ *  - decode rows (C1): decodeKernelMatches and usesDecode: the dispatcher's decode rule and the
+ *    bucket of decodeBucket (64/128/256 for the widths of the rows); the decode objects ship
+ *    for buckets 64, 128 and 256 with bias none, f32 and q (decode YAML). A window narrows
+ *    decodeKvRange's visible keys, which changes decodePlanFor's numSplits (below).
  *
  * Limits of the table, each a fact of this tree and not a choice:
  *  - A sink_token in the Q data type is rejected by the frontend (SdpaFwdNode.hpp:309-326: sink
@@ -149,6 +146,9 @@ struct DenseShape
     int64_t kvHeads;
     int64_t seqQ;
     int64_t seqKv;
+    /// A causal window of this many keys (left_bound, the frontend's band-inclusive count),
+    /// bottom-right anchored; none when unset.
+    std::optional<int64_t> window;
 };
 
 std::string denseToken(const DenseShape& shape)
@@ -160,6 +160,10 @@ std::string denseToken(const DenseShape& shape)
         token += "V" + std::to_string(shape.valueHeadSize);
     }
     token += shape.causal ? "Causal" : "NoMask";
+    if(shape.window.has_value())
+    {
+        token += "Window" + std::to_string(*shape.window);
+    }
     if(shape.withStats)
     {
         token += "Lse";
@@ -194,6 +198,10 @@ FrontendSdpaSpec denseSpec(const std::string& name, const DenseShape& shape)
     if(shape.causal)
     {
         spec.rightBound = 0;
+    }
+    if(shape.window.has_value())
+    {
+        spec.leftBound = shape.window;
     }
     spec.withStats = shape.withStats;
     spec.biasDataType = shape.bias;
@@ -694,6 +702,19 @@ std::vector<DeterminismRow> wmmaRows()
         add({FP16, 256, 256, true, false, std::nullopt, 1, 8, 1, 4, 8192});
         add({BF16, 128, 128, false, false, DataType::FLOAT, 1, 8, 2, 1, 8192});
         add({FP16, 128, 128, false, false, DataType::HALF, 1, 8, 2, 1, 8192});
+        // A sliding window on the Skv 8192 causal shape above. The frontend's left_bound is
+        // band-inclusive; the native's window_left (decodeKvRange) is left_bound - 1
+        // (Gfx1151WmmaAttentionNative.cpp maskFor), so left_bound 2048 gives window_left 2047:
+        // decodeKvRange keeps only the last 2048 keys visible (lo = 8191 - 2047 = 6144, hi =
+        // 8192), so the tile count drops from 256 to 64 and decodePlanFor's by-work split count
+        // drops from 16 (the unwindowed row above) to 4; every row still sees keys. The window
+        // changes the host-computed launch set (numSplits), not the object, so this row pins
+        // STRUCTURE rather than this block's usual TILE_SCHEDULE.
+        addDense(rows,
+                 engine,
+                 KnobClass::STRUCTURE,
+                 {{"head_size", 128}},
+                 {BF16, 128, 128, true, true, std::nullopt, 1, 8, 2, 1, 8192, 2048});
     }
 #endif
     return rows;

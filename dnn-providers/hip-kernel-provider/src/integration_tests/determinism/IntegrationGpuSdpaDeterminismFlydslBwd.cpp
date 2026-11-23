@@ -28,10 +28,10 @@
  *        HKP_DETERMINISM_FLYDSL_BWD_SPLIT for each engine the product root ships FlyDSL content
  *        for, and each table below exists only under its definition.
  *
- * One row per launch-structure class and dtype (plan section 3.1, trace-TraceFlydslBwd). The
+ * One row per launch-structure class and dtype. The
  * classes: the merged one-launch kernel (dK/dV and dQ roles in one grid); the split prep, dkdv
  * and dq launches; the GQA group fold (and the gqa_pack objects); dkv_shards; padded head dims
- * (an `padded` object, compared on live elements only, HKP-H34); the dBias in-place store and
+ * (an `padded` object, compared on live elements only); the dBias in-place store and
  * the broadcast dBias reduce launch; the padding_mask tail-zero launch; Philox dropout (seed and
  * offset as INT64 device tensors and passed by value); causal and not; bf16, f16 and fp32; the
  * dkdv_u2 pair (V heads that differ from K's).
@@ -64,7 +64,7 @@
  * padding; dropout leaves it unchanged), so P = exp(S - LSE) stays at most 1 as it does after a
  * forward launch. The forward builder takes 16-bit graphs only, so fp32 rows cannot use it.
  *
- * Rows that pin dkv_shards, gqa_pack or role_order are STRUCTURE (plan 3.1 names them structure classes);
+ * Rows that pin dkv_shards, gqa_pack or role_order are STRUCTURE;
  * rows that pin store_db or padded are TILE_SCHEDULE (they change the stores and the tail
  * handling only). Knobs are pinned only where the value is spelled in an object name of the
  * shipped catalog. The split
@@ -662,7 +662,7 @@ std::vector<DeterminismRow> flydslBackwardRows()
         addCase(rows, MERGED, "F16Hd64Mqa", archs, withHeads(graphOf(F16, 64), 8, 1));
 
         // Padded head sizes: the padded tile-32 objects (pad1, d32) serve 1 to 32; 20 and 30
-        // are off 8, so the 16-bit row pitch is 24 and 32 and the stores write a gap (HKP-H34).
+        // are off 8, so the 16-bit row pitch is 24 and 32 and the stores write a gap.
         addCase(rows, MERGED, "Bf16Hd20Padded", archs, graphOf(BF16, 20), {{"padded", 1}}, TILE);
         addCase(rows, MERGED, "F16Hd30PaddedCausal", archs, withCausal(graphOf(F16, 30)));
         addCase(rows, MERGED, "Bf16Hd20PaddedDropout", archs, withDropout(graphOf(BF16, 20), true));
@@ -743,6 +743,27 @@ std::vector<DeterminismRow> flydslBackwardRows()
                 "Bf16Hd128PaddingGqa",
                 archs,
                 withLens(withHeads(graphOf(BF16, 128), 8, 2), {128, 77}));
+
+        // Two gfx950 merged objects ship as known-bad-fresh-build pins
+        // (sdpa_bwd_pinned_exceptions.csv): a bf16 d64 dBias dropout object (role_order auto
+        // selects it over its rolpt sibling, since only a store_db object serves dBias) and an
+        // f16 d64 plain dropout object pinned to role_order lpt (its only other sibling at this
+        // shape is role_order auto). A non-broadcast bias keeps the unclamped-bias decline from
+        // excluding the first object.
+        addCase(rows,
+                MERGED,
+                "Bf16Hd64DbiasDropoutRoleAuto",
+                archs,
+                withDropout(withBias(graphOf(BF16, 64), BF16, true), true),
+                {{"role_order", ROLE_AUTO}},
+                STRUCT);
+        addCase(rows,
+                MERGED,
+                "F16Hd64DropoutRoleLpt",
+                archs,
+                withDropout(graphOf(F16, 64), true),
+                {{"role_order", ROLE_LPT}},
+                STRUCT);
     }
 #endif
 #ifdef HKP_DETERMINISM_FLYDSL_BWD_SPLIT

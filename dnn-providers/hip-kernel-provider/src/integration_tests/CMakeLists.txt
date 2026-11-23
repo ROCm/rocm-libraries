@@ -282,11 +282,12 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         Gfx942AttentionUnified3d gfx942
         Gfx950AttentionUnified2D gfx950
         Gfx950AttentionUnified3D gfx950
-        Gfx1151WmmaAttention "gfx1100;gfx1201"
-        Gfx1151WmmaAttentionDecode "gfx1100;gfx1201"
+        Gfx1151WmmaAttention "gfx1100,gfx1201"
+        Gfx1151WmmaAttentionDecode "gfx1100,gfx1201"
     )
     while(_hkp_selection_rocke)
         list(POP_FRONT _hkp_selection_rocke _hkp_selection_engine _hkp_selection_engine_archs)
+        string(REPLACE "," ";" _hkp_selection_engine_archs "${_hkp_selection_engine_archs}")
         hkp_product_offers_engine(_hkp_selection_offered "hipkernel:${_hkp_selection_engine}")
         if(_hkp_selection_offered)
             list(APPEND _hkp_selection_fwd_archs ${_hkp_selection_engine_archs})
