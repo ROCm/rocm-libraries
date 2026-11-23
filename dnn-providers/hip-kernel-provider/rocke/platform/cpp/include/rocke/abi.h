@@ -148,7 +148,12 @@ extern "C" {
  *     offsets unchanged, but an old caller leaves groups unset. The
  *     rocke_img2col_conv_problem_* functions are removed (the conv
  *     rocke_conv_problem_* ones replace them), and the tensor_view descriptor
- *     type and its functions are renamed rocke_tv_tensor_descriptor*. */
+ *     type and its functions are renamed rocke_tv_tensor_descriptor*. The
+ *     standalone fused-MoE orchestrator header and its functions
+ *     (rocke_fused_moe_forward_*, rocke_fused_moe_host_preshuffle_b,
+ *     rocke_fused_moe_build_per_expert_problems, rocke_fmoe_dtype_*) are
+ *     removed; it redefined rocke_fmoe_forward_spec_t and
+ *     rocke_grouped_gemm_problem_t with other layouts. */
 #define ROCKE_ABI_VERSION 23
 
 /* Wire ABI: the CBOR recipe/bundle/guard vocabulary this engine understands.

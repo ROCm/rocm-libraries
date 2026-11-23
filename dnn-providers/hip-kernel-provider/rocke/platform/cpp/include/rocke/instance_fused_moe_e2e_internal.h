@@ -390,8 +390,7 @@ rocke_status_t rocke_fmoe_ensure_compiled(rocke_fmoe_build_ctx_t* ctx);
 /* ----- value-producing host helpers (faithfully ported) ----- */
 
 /* _workspace_specs (lines 1359-1382): fill the 15-entry table in declaration
- * order. Writes min(cap, 15) entries + sets *n_written. The dtype kinds /
- * element sizes mirror the orchestrator helper header. */
+ * order. Writes min(cap, 15) entries + sets *n_written. */
 typedef enum rocke_fmoe_ws_dtype
 {
     ROCKE_FMOE_WS_I32 = 0,

@@ -47,7 +47,7 @@ ported and byte-identity GREEN**. What is missing is the **host-side end-to-end
 forward orchestration** that, in Python, compiles those kernels to HSACO and
 drives them on device.
 
-This is the bulk of the engine's remaining `TODO(port)` markers (74 of 80).
+This is the bulk of the engine's remaining `TODO(port)` markers.
 
 | File | What's missing | Why blocked |
 |---|---|---|
@@ -57,7 +57,6 @@ This is the bulk of the engine's remaining `TODO(port)` markers (74 of 80).
 | `fused_moe_e2e_host_helpers.cpp` (13) | `data_ptr`-keyed lazy weight-packing caches (`w_down` / `gu_concat` / `gu_interleaved` ± preshuffled). Cache-key arithmetic and hit/miss decision ported exactly. | `rocke_tensor_t` has no data accessor/allocator; the actual torch `cat/stack/permute/reshape/contiguous` and the host pre-shuffle element permutation are runtime concerns. A `data_ptr` surrogate uses handle identity until a real device pointer is exposed. |
 | `fused_moe_e2e_ctx_init.cpp` (1) | `rocke_fmoe_build_ctx_destroy` should free runtime-owned resources. | Nothing to free yet: pool / launcher / tensor peers are opaque forward-decls with no allocator. The lifecycle hook exists so a future HIP backend fills it in. |
 | `helpers/fused_moe_e2e_spec.cpp` (1) | `rocke_fmoe_resolve_launch_arch` device-arch probe. | Python probes `get_device_arch()` via `rocke.runtime.hip_module`. The codegen-only library has no HIP runtime; it takes the documented no-device `gfx950` fallback (byte-faithful to Python's except-path). |
-| `helpers/fused_moe_e2e_orchestrator.cpp` (4 + 3 NOTIMPL) | Legacy standalone orchestrator surface: forward/static/dynamic stub bodies. | Same device-launch chain. Tile-policy is intentionally *not* duplicated here — the golden-verified policy lives in `rocke_fmoe_build_ctx_init`; duplicating it would risk a drifting second copy. Blocked until this legacy surface is retired or re-pointed at `ctx_init`. |
 
 **What unblocks all of the above:** a HIP runtime backend for the C engine
 exposing (a) `compile_kernel(IR) -> HSACO`, (b) a `rocke_kernel_launcher_t`
