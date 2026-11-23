@@ -161,14 +161,10 @@ def get_gpu_arch(c):
     help={
         "rocisa_dir": "Path to the rocisa source directory (default: rocisa/ next to this file).",
         "static": "Build rocisa's source StinkyTofu dependency static instead of shared.",
-        "stinkytofu": "Install the standalone stinkytofu Python binding (provides `import stinkytofu` for the logical-IR tooling). One of auto|on|off (default auto: install when a gfx1250 GPU is detected).",
-        "rebuild_stinkytofu": "Force a fresh rebuild+reinstall of the stinkytofu binding even if it is already installed.",
-        "rocm_path": "ROCm installation used to build rocisa and stinkytofu (default: ROCM_PATH, then rocm-sdk path --root, then /opt/rocm).",
+        "rocm_path": "ROCm installation used to build rocisa (default: ROCM_PATH, then rocm-sdk path --root, then /opt/rocm).",
     }
 )
-def rocisa(
-    c, rocisa_dir=None, static=False, rocm_path=None, stinkytofu="auto", rebuild_stinkytofu=False
-):
+def rocisa(c, rocisa_dir=None, static=False, rocm_path=None):
     """Install rocisa editably for source development.
 
     This is a separate rocisa developer workflow for generator commands and
@@ -179,23 +175,14 @@ def rocisa(
     Pass --static to build its source StinkyTofu dependency static — useful for
     exercising the static-plugin path covered by
     rocisa/test/test_pass_plugin.py::TestHelloWorldPassIntegrationStatic.
-
-    On gfx1250 this also builds and installs the standalone stinkytofu Python
-    binding, which provides `import stinkytofu` for the logical-IR tooling
-    (control with --stinkytofu=auto|on|off). `import rocisa` itself is always
-    the native backend.
     """
     build_env = _resolve_rocm_build_environment(rocm_path)
     _report_rocm_build_environment(build_env)
-    _install_rocisa(c, build_env, rocisa_dir, static, stinkytofu, rebuild_stinkytofu)
+    _install_rocisa(c, build_env, rocisa_dir, static)
 
 
-def _install_rocisa(
-    c, build_env, rocisa_dir=None, static=False, stinkytofu="auto", rebuild_stinkytofu=False
-):
+def _install_rocisa(c, build_env, rocisa_dir=None, static=False):
     _pip_install_rocisa(c, rocisa_dir, shared=not static, build_env=build_env)
-    if _want_stinkytofu(stinkytofu, rocm_path=build_env.root):
-        _pip_install_stinkytofu(c, force=rebuild_stinkytofu, build_env=build_env)
 
 
 def _pip_install_rocisa(c, rocisa_dir=None, shared=True, rocm_path=None, build_env=None):
@@ -240,102 +227,6 @@ def _pip_install_rocisa(c, rocisa_dir=None, shared=True, rocm_path=None, build_e
     )
 
 
-def _pip():
-    """Invoke pip through the active interpreter."""
-    return shlex.join([str(pathlib.Path(sys.executable).absolute()), "-m", "pip"])
-
-
-def _stinkytofu_mode(stinkytofu):
-    """True/False for a forced choice, None for automatic GPU detection."""
-    val = str(stinkytofu).strip().lower()
-    if val in ("on", "true", "yes", "1"):
-        return True
-    if val in ("off", "false", "no", "0"):
-        return False
-    if val in ("auto", "none", ""):
-        return None
-    raise Exit(f"Invalid stinkytofu mode {stinkytofu!r}; use auto, on, or off", code=1)
-
-
-def _want_stinkytofu(stinkytofu, targets=None, rocm_path=None):
-    """Install automatically for gfx1250, unless the caller forces on/off."""
-    forced = _stinkytofu_mode(stinkytofu)
-    if forced is not None:
-        return forced
-    from tensilelite.GpuArch import detect_gpu_arch
-
-    arch = targets if targets is not None else (detect_gpu_arch(rocm_path=rocm_path) or "")
-    return "gfx1250" in arch
-
-
-def _pip_install_stinkytofu(c, force=False, build_env=None):
-    """Build and install the standalone stinkytofu Python binding into the venv.
-
-    This provides ``import stinkytofu`` (the standalone ``_stinkytofu.so`` built
-    from ``shared/stinkytofu/python_module``) for the logical-IR tooling. Neither
-    ``invoke rocisa`` (which only builds rocisa's *in-process* libstinkytofu,
-    linked into ``_rocisa.so``) nor ``invoke build-client`` produces that
-    standalone binding, so this step installs it explicitly. ``import rocisa``
-    always uses the native backend and does not depend on this binding.
-
-    Build isolation is used on purpose: the binding's build backend
-    (scikit-build-core / nanobind / cmake / ninja) is often absent from the
-    active venv, where ``--no-build-isolation`` would fail.
-    """
-    repo_root = _TASKS_DIR.parents[2]
-    src = repo_root / "shared" / "stinkytofu"
-    if not (src / "pyproject.toml").is_file():
-        print(
-            f"warning: {src} not found; skipping stinkytofu backend install. "
-            "rocisa will use the native backend.",
-            file=sys.stderr,
-        )
-        return
-
-    build_env = build_env or _resolve_rocm_build_environment()
-    if not (build_env.cxx_compiler.exists() and build_env.c_compiler.exists()):
-        print(
-            f"warning: amdclang/amdclang++ not found under {build_env.root}; skipping "
-            "stinkytofu backend install. rocisa will use the native backend.",
-            file=sys.stderr,
-        )
-        return
-
-    env = build_env.command_env()
-    env["CMAKE_ARGS"] = shlex.join(build_env.cmake_args())
-    env.setdefault("CMAKE_BUILD_PARALLEL_LEVEL", str(os.cpu_count() or 1))
-    # stinkytofu is version-pinned, so pip skips rebuilding an existing install;
-    # --force-reinstall keeps the binding matched to the current venv Python and
-    # sources. --no-deps: the package declares no runtime dependencies.
-    force_flag = "--force-reinstall --no-deps " if force else ""
-    print(
-        "Building and installing the standalone stinkytofu Python binding "
-        "(rocisa stinkytofu backend)..."
-    )
-    c.run(f"{_pip()} install {force_flag}{shlex.quote(str(src))}", env=env)
-
-
-@task(
-    help={
-        "mode": "One of auto|on|off (default auto: install when gfx1250 is among --gpu-targets, or is the detected GPU when no targets are given).",
-        "gpu_targets": "GPU targets the following client build and tests use; consulted by --mode=auto.",
-        "rebuild": "Force a fresh rebuild+reinstall of the binding even if it is already installed.",
-    }
-)
-def install_stinkytofu(c, mode="auto", gpu_targets=None, rebuild=False):
-    """Install the standalone stinkytofu Python binding for logical-IR tooling.
-
-    ``invoke build-client`` only builds the C++ client and does not provision
-    Python packages. Environments that use the logical-IR tooling run this
-    task separately; kernel generation itself uses native rocisa.
-    """
-    if _stinkytofu_mode(mode) is False:
-        return
-    build_env = _resolve_rocm_build_environment()
-    _report_rocm_build_environment(build_env)
-    if _want_stinkytofu(mode, targets=gpu_targets, rocm_path=build_env.root):
-        _pip_install_stinkytofu(c, force=rebuild, build_env=build_env)
-
 
 @task(
     help={
@@ -373,8 +264,7 @@ def build_client(
     """Build the tensilelite-client C++ executable.
 
     This task only configures and builds the client. It does not install or
-    refresh Python packages: provision rocisa with ``invoke rocisa`` and the
-    optional logical-IR binding with ``invoke install-stinkytofu``.
+    refresh Python packages: provision rocisa with ``invoke rocisa``.
 
     To run Tensile after building, use: tensilelite/bin/Tensile <args>
     """
@@ -515,8 +405,6 @@ def configure_client(c, build_dir="build_tmp"):
         "export_compile_commands": "Enable CMAKE_EXPORT_COMPILE_COMMANDS.",
         "enable_rocprof": "Build tensilelite-client with rocprof.",
         "cxx_flags_release": "Override CMAKE_CXX_FLAGS_RELEASE.",
-        "stinkytofu": "Install the standalone stinkytofu Python binding (provides `import stinkytofu` for the logical-IR tooling). One of auto|on|off (default auto: install when a gfx1250 GPU is detected).",
-        "rebuild_stinkytofu": "Force a fresh rebuild+reinstall of the stinkytofu binding even if it is already installed.",
         "enable_asan": "Enable AddressSanitizer.",
         "enable_tsan": "Enable ThreadSanitizer.",
     }
@@ -531,8 +419,6 @@ def install(
     export_compile_commands=False,
     enable_rocprof=False,
     cxx_flags_release=None,
-    stinkytofu="auto",
-    rebuild_stinkytofu=False,
     enable_asan=False,
     enable_tsan=False,
 ):
@@ -545,8 +431,8 @@ def install(
         )
 
     python = pathlib.Path(sys.executable).absolute()
-    # Resolve once so rocisa, the client and the optional StinkyTofu build use
-    # the same native toolchain. Python installation and binding keep caller env.
+    # Resolve once so rocisa and the client use the same native toolchain.
+    # Python installation keeps caller env.
     build_env = _resolve_rocm_build_environment(rocm_path)
     _report_rocm_build_environment(build_env)
     ambient = os.environ.get("ROCM_PATH")
@@ -563,12 +449,7 @@ def install(
     if clean and os.path.exists(build_dir):
         shutil.rmtree(build_dir)
     c.run(shlex.join([str(python), "-m", "pip", "install", "-r", str(common_requirements)]))
-    _install_rocisa(
-        c,
-        build_env=build_env,
-        stinkytofu=stinkytofu,
-        rebuild_stinkytofu=rebuild_stinkytofu,
-    )
+    _install_rocisa(c, build_env=build_env)
     _build_client(
         c,
         build_env=build_env,
