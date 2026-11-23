@@ -140,7 +140,8 @@ extern "C" {
 *  \retval      rocsparse_status_invalid_pointer \p mat_A, \p mat_B, or \p buffer_size
 *               pointer is invalid.
 *  \retval      rocsparse_status_invalid_size the number of rows or columns of
-*               \p mat_A differs from \p mat_B. For blocked ELL, a descriptor
+*               \p mat_A differs from \p mat_B. A BSR \p mat_B is compared as
+*               rows * block_dim by cols * block_dim. For blocked ELL, a descriptor
 *               whose rows or columns were rounded up past the dense size is rejected.
 *               The same status is returned when the workspace size for the blocked ELL
 *               block-row count does not fit in \p size_t.

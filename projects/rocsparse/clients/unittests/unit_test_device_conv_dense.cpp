@@ -26,7 +26,7 @@
 // matrices and the pointer checks; rocsparse_sparse_to_dense for the CSR, CSC and COO
 // formats, both index types, both index bases and both orders of the dense matrix;
 // rocsparse_dense_to_sparse and rocsparse_sparse_to_dense with mismatched dimensions in
-// either direction or an unsupported sparse format.
+// either direction, BSR shapes compared in scalar units, or an unsupported sparse format.
 
 #include "rocsparse_spmat_descr.hpp"
 #include "unit_test_device_conv_common.hpp"
@@ -259,6 +259,7 @@ namespace
 
     constexpr auto st_ni = rocsparse_status_not_implemented;
 
+    // For BSR, sparse_rows and sparse_cols count blocks.
     struct DimCase
     {
         rocsparse_format format;
@@ -338,6 +339,21 @@ namespace
                                                  i32,
                                                  base0,
                                                  f32);
+            break;
+        case rocsparse_format_bsr:
+            status = rocsparse_create_bsr_descr(&sparse,
+                                                rows,
+                                                cols,
+                                                nnz,
+                                                dir_r,
+                                                c.block_dim,
+                                                a.d_idx,
+                                                a.d_col,
+                                                a.d_val,
+                                                i32,
+                                                i32,
+                                                base0,
+                                                f32);
             break;
         default:
             break;
@@ -489,6 +505,30 @@ namespace
     {
         expect_dim_mismatches(handle, rocsparse_format_bell, true);
         expect_sparse_to_dense(handle, {rocsparse_format_bell, 3, 3, 4, 4}, st_size, st_size);
+    }
+
+    // 2x2 blocks of size 2 make a 4x4 matrix. Neither routine converts BSR, so the matching
+    // shape fails with not_implemented. The dense matrices that equal the block counts, end
+    // in a partial block, or hold a different number of whole blocks are size errors.
+    std::vector<DimCase> bsr_mismatches()
+    {
+        constexpr auto bsr = rocsparse_format_bsr;
+        return {{bsr, 2, 2, 2, 2}, {bsr, 5, 4, 2, 2}, {bsr, 4, 5, 2, 2}, {bsr, 6, 4, 2, 2}};
+    }
+
+    TEST_F(ConvDense, DenseToSparseBsrScalarShape)
+    {
+        expect_dense_to_sparse(handle, {rocsparse_format_bsr, 4, 4, 2, 2}, st_ni);
+        for(const DimCase& c : bsr_mismatches())
+            expect_dense_to_sparse(handle, c, st_size);
+    }
+
+    // The buffer-size query of rocsparse_sparse_to_dense succeeds for every format.
+    TEST_F(ConvDense, SparseToDenseBsrScalarShape)
+    {
+        expect_sparse_to_dense(handle, {rocsparse_format_bsr, 4, 4, 2, 2}, st_ok, st_ni);
+        for(const DimCase& c : bsr_mismatches())
+            expect_sparse_to_dense(handle, c, st_size, st_size);
     }
 
     // The ELL descriptor matches the dense dimensions, so only the format is unsupported.

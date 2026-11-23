@@ -399,10 +399,8 @@ try
     ROCSPARSE_CHECKARG(2, mat_B, (mat_B->batch_count != 1), rocsparse_status_not_implemented);
 
     // Reject a mismatch before dispatch. Nothing has been allocated or written.
-    ROCSPARSE_CHECKARG(2,
-                       mat_B,
-                       (mat_B->rows != mat_A->rows || mat_B->cols != mat_A->cols),
-                       rocsparse_status_invalid_size);
+    ROCSPARSE_CHECKARG(
+        2, mat_B, rocsparse::spmat_dnmat_dims_differ(mat_B, mat_A), rocsparse_status_invalid_size);
 
     rocsparse::dense_to_sparse_t f;
     if(mat_B->format == rocsparse_format_csc)

@@ -116,7 +116,8 @@ extern "C" {
 *  \retval      rocsparse_status_invalid_pointer \p mat_A, \p mat_B, or \p buffer_size
 *               pointer is invalid.
 *  \retval      rocsparse_status_invalid_size the number of rows or columns of
-*               \p mat_A differs from \p mat_B.
+*               \p mat_A differs from \p mat_B. A BSR \p mat_A is compared as
+*               rows * block_dim by cols * block_dim.
 *
 *  \par Example
 *  \snippet example_rocsparse_sparse_to_dense.cpp doc example
