@@ -289,26 +289,31 @@ inline bool tileEstimateOverflows(size_t elementSize,
         (elementSize), (window), (stride)))
 
 // ----------------------------------------------------------------------------
-// ALMIOPEN-3449 — MIOpen's 2D tiled pooling forward solver (PoolingForward2d,
-// src/solver/pooling/forward2d.cpp), which MIOpen tries first for 4D pooling,
-// sizes its grid from the output height and width plus its tile span in int.
-// For an output height or width near INT_MAX the sum wraps, the global work size
-// exceeds 32 bits, and miopenPoolingForward fails with miopenStatusInternalError.
-// With the default configuration it fails from INT_MAX - 6; tuned
-// configurations span up to 128 outputs, so the worst case fails from
-// INT_MAX - 126.
+// ALMIOPEN-3449 — MIOpen's tiled pooling forward solvers size their grid from
+// the output spatial sizes plus a per-work-item span, in int. PoolingForward2d
+// (src/solver/pooling/forward2d.cpp), which MIOpen tries first for 4D pooling,
+// adds its tile span to the output height and width; PoolingForwardNd
+// (forwardNd.cpp, 5D) adds pix_*_per_work - 1 to each output size. For an output
+// size near INT_MAX the sum wraps. In 2D the global work size then exceeds 32
+// bits and miopenPoolingForward fails with miopenStatusInternalError; in 3D the
+// block count collapses and miopenPoolingForward returns success with most of Y
+// unwritten. With the default configurations 2D fails from INT_MAX - 6 and 3D
+// does not fail; tuned configurations span up to 128 outputs in 2D and 4 in 3D,
+// so the worst case fails from INT_MAX - 126.
 //
 // WORKAROUND_ALMIOPEN_3449_DECLINES_OUTPUT(outputExtent) is true for the output
-// heights and widths the resample forward checks decline in 4D graphs until the
-// fix lands: above INT_MAX - 127. A channels-last graph that large exceeds the
-// element count limit unless it has a single channel, and then it is pooled as
-// channels-first.
+// spatial sizes the resample forward checks decline until the fix lands: above
+// INT_MAX - 127. The bound also declines the few such graphs MIOpen would serve
+// through its naive kernel (a window too large for the tiled solvers), the cost
+// of not modelling MIOpen's solver choice. An output that large fits the element
+// count limit only when every other dimension of Y is 1, so the graph has one
+// channel and is pooled as channels-first in either layout.
 //
 // To remove after the fix: delete this section and its macro, its call site in
 // engines/plans/MiopenResampleFwdChecks.cpp (and that file's
 // `#include "Workarounds.hpp"` once no workaround there remains), and the tests
 // tagged ALMIOPEN-3449 in tests/engines/plans/TestMiopenResampleFwdChecks.cpp;
-// drop the 2D output size rule from the Resample Forward notes in
+// drop the output size rule from the Resample Forward notes in
 // docs/OperationSupport.md and
 // projects/hipdnn/docs/user-guides/reference/miopen-plugin.rst. `git grep
 // ALMIOPEN.3449` finds the code sites.

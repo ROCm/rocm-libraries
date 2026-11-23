@@ -111,7 +111,7 @@ The following table lists all operations currently supported in hipDNN:
 > each spatial input size plus its padding may not exceed INT_MAX (a known MIOpen limitation);
 > unless the padding is all zero, MAXPOOL needs NEG_INF_PAD and the average modes need ZERO_PAD.
 > An AVGPOOL_INCLUDE_PADDING window may hold at most UINT32_MAX positions (a known MIOpen
-> limitation). Y must have the floor-mode output size; in rank 4 its height and width may not exceed
+> limitation). Y must have the floor-mode output size, and its spatial sizes may not exceed
 > INT_MAX - 127 (a known MIOpen limitation). The index output (`generate_index`) is supported for
 > MAXPOOL in NCHW/NCDHW only, as INT8 or INT32; with INT8 the input spatial size may not exceed 128,
 > and on BFLOAT16 tensors the padding must be zero (a known MIOpen limitation). The index tensor

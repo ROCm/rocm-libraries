@@ -1027,7 +1027,7 @@ TEST(TestMiopenResampleFwdChecks, IsSupportedTrueForPlanarBfloat16TileBytesThatO
 }
 
 // 2D: 4 * (15 * 2 + 2147483618) * INT_MAX is 2^64 - 2^33 bytes, below the limit after MIOpen's
-// rounding and its 64 accumulator bytes. Stride 2 keeps the output height within MIOpen's 2D grid
+// rounding and its 64 accumulator bytes. Stride 2 keeps the output height within MIOpen's grid
 // limit.
 TEST(TestMiopenResampleFwdChecks, IsSupportedTrueForPlanarTileBytesBelowRoundingHeadroom)
 {
@@ -1050,15 +1050,22 @@ TEST(TestMiopenResampleFwdChecks, IsSupportedFalseForPlanarTileBytesInRoundingHe
 }
 
 // ============================================================================
-// Workaround for ALMIOPEN-3449 (see Workarounds.hpp): MIOpen's 2D tiled kernel sizes its grid from
-// the output height and width in int. A 1x1 window and stride keep Y equal to X.
+// Workaround for ALMIOPEN-3449 (see Workarounds.hpp): MIOpen's tiled kernels size their grid from
+// the output spatial sizes in int. A 1x1 window and stride keep Y equal to X unless a test says
+// otherwise.
 // ============================================================================
 
 namespace
 {
 
-constexpr const char* GRID_LIMIT_REASON = "too large for MIOpen's 2D pooling kernels";
+constexpr const char* GRID_LIMIT_REASON = "too large for MIOpen's tiled pooling kernels";
 constexpr int64_t GRID_LIMIT = INT_MAX_VALUE - 127;
+
+std::string gridLimitReason(size_t spatialDim)
+{
+    return "output size at spatial dimension " + std::to_string(spatialDim) + " is "
+           + GRID_LIMIT_REASON;
+}
 
 } // namespace
 
@@ -1067,20 +1074,48 @@ TEST(TestMiopenResampleFwdChecks, IsSupportedTrueForPlanarOutputWidthAtGridLimit
     expectAccepted(identityWindowSpec({1, 1, 1, GRID_LIMIT}));
 }
 
+TEST(TestMiopenResampleFwdChecks, IsSupportedTrueForPlanarOutputHeightAtGridLimit)
+{
+    expectAccepted(identityWindowSpec({1, 1, GRID_LIMIT, 1}));
+}
+
 TEST(TestMiopenResampleFwdChecks, IsSupportedFalseForPlanarOutputWidthAboveGridLimit)
 {
-    expectDeclined(identityWindowSpec({1, 1, 1, GRID_LIMIT + 1}),
-                   std::string("output size at spatial dimension 1 is ") + GRID_LIMIT_REASON);
+    expectDeclined(identityWindowSpec({1, 1, 1, GRID_LIMIT + 1}), gridLimitReason(1));
 }
 
 TEST(TestMiopenResampleFwdChecks, IsSupportedFalseForPlanarOutputHeightAboveGridLimit)
 {
-    expectDeclined(identityWindowSpec({1, 1, GRID_LIMIT + 1, 1}),
-                   std::string("output size at spatial dimension 0 is ") + GRID_LIMIT_REASON);
+    expectDeclined(identityWindowSpec({1, 1, GRID_LIMIT + 1, 1}), gridLimitReason(0));
 }
 
-// The 2D kernel serves only 4D graphs; MIOpen's 3D kernels size their grid differently.
-TEST(TestMiopenResampleFwdChecks, IsSupportedTrueForVolumetricOutputWidthAboveGridLimit)
+// The limit applies to Y, not X: a 2x1 window with padding 1 turns an input height at the limit
+// into an output height one above it.
+TEST(TestMiopenResampleFwdChecks, IsSupportedFalseForPlanarOutputHeightAboveGridLimitFromInputAtIt)
 {
-    expectAccepted(identityWindowSpec({1, 1, 1, 1, GRID_LIMIT + 1}));
+    expectDeclined(ResampleFwdGraphSpec::packed(
+                       ResampleMode::MAXPOOL, {1, 1, GRID_LIMIT, 1}, {2, 1}, {1, 1}, {1, 0}),
+                   gridLimitReason(0));
+}
+
+TEST(TestMiopenResampleFwdChecks, IsSupportedTrueForVolumetricOutputAtGridLimitInEveryDimension)
+{
+    for(size_t dim = 0; dim < 3; ++dim)
+    {
+        SCOPED_TRACE(dim);
+        std::vector<int64_t> xDims{1, 1, 1, 1, 1};
+        xDims[dim + 2] = GRID_LIMIT;
+        expectAccepted(identityWindowSpec(xDims));
+    }
+}
+
+TEST(TestMiopenResampleFwdChecks, IsSupportedFalseForVolumetricOutputAboveGridLimitInEveryDimension)
+{
+    for(size_t dim = 0; dim < 3; ++dim)
+    {
+        SCOPED_TRACE(dim);
+        std::vector<int64_t> xDims{1, 1, 1, 1, 1};
+        xDims[dim + 2] = GRID_LIMIT + 1;
+        expectDeclined(identityWindowSpec(xDims), gridLimitReason(dim));
+    }
 }
