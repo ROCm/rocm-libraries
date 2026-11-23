@@ -746,30 +746,37 @@ class TensorDataMoverStore:
         return mod
 
     def setTensorTile0(self, group1: int | str, tile0: int) -> Module:
-        # tile_dim0 bit240: group1+3 hi16 (immediate)
+        # tile_dim0 bit240: group1+3 hi16 (immediate); 0 makes the transfer a NOP
+        assert 0 < tile0 <= 0xFFFF, f"tile_dim0 {tile0} is outside 1..0xFFFF"
         mod = Module()
         mod.addComment("TDM set tensor tile 0")
         mod.add(SAndB32(self._sg(group1, 3), self._sg(group1, 3), hex(0x0000FFFF)))
-        mod.add(SOrB32(self._sg(group1, 3), self._sg(group1, 3), hex((tile0 & 0xFFFF) << 16), f"set tile0 to {tile0}"))
+        mod.add(SOrB32(self._sg(group1, 3), self._sg(group1, 3), hex(tile0 << 16), f"set tile0 to {tile0}"))
         return mod
 
     def setTensorTile1(self, group1: int | str, tile1: int) -> Module:
-        # tile_dim1 bit256: group1+4 lo16 (immediate).
+        # tile_dim1 bit256: group1+4 lo16 (immediate), 1 to Max.
+        assert 0 < tile1 <= 0xFFFF, f"tile_dim1 {tile1} is outside 1..0xFFFF"
         mod = Module()
         mod.addComment("TDM set tensor tile 1")
         mod.add(SAndB32(self._sg(group1, 4), self._sg(group1, 4), hex(0xFFFF0000)))
-        mod.add(SOrB32(self._sg(group1, 4), self._sg(group1, 4), hex(tile1 & 0xFFFF), f"set tile1 to {tile1}"))
+        mod.add(SOrB32(self._sg(group1, 4), self._sg(group1, 4), hex(tile1), f"set tile1 to {tile1}"))
         return mod
 
-    def setTensorStride0(self, group1: int | str, sgprStride0: int | str | RegisterContainer) -> Module:
-        # tensor_dim0_stride bit288: group1+5 (low 32 of 48-bit field), group1+6 hi = 0
+    def setTensorStride0(self, group1: int | str, sgprStride0: int | str | RegisterContainer, units: int = 1) -> Module:
+        # tensor_dim0_stride bit288: 48 bits, group1+5 and the low half of group1+6, whose high half is tensor_dim1_stride
+        # (unused in the two-group form). sgprStride0 holds a 32-bit stride in elements of `units` data_size units.
+        # group1+5 is odd and 64-bit SGPR operands must be even-aligned, so a doubled stride is added with carry.
         mod = Module()
         mod.addComment("TDM set tensor stride 0")
-        if isinstance(sgprStride0, RegisterContainer):
-            mod.add(SMovB32(self._sg(group1, 5), sgprStride0))
+        stride = sgprStride0 if isinstance(sgprStride0, RegisterContainer) else sgpr(sgprStride0)
+        if units == 1:
+            mod.add(SMovB32(self._sg(group1, 5), stride))
+            mod.add(SMovB32(self._sg(group1, 6), 0))
         else:
-            mod.add(SMovB32(self._sg(group1, 5), sgpr(sgprStride0)))
-        mod.add(SMovB32(self._sg(group1, 6), 0))
+            assert units == 2, f"unsupported data_size units per element: {units}"
+            mod.add(SAddU32(dst=self._sg(group1, 5), src0=stride, src1=stride, comment="stride in data_size units"))
+            mod.add(SAddCU32(dst=self._sg(group1, 6), src0=0, src1=0, comment="bit 32 of the stride"))
         return mod
 
     def _syncComment(self) -> str:

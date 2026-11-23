@@ -33,8 +33,9 @@ and every element reads its C with emitTDMStoreLoadCElement in place of the buff
 beta == 0, _emitNonatomicAdd calls emitTDMStoreSetup for the first batch. _emitNonatomicAdd stages
 the D of every batch with emitTDMStoreStaging and calls emitTDMStoreFlush after the last batch.
 generateBetaModules picks the blocks with tdmStoreBlocks; Solution checks a configuration
-with tdmStoreRejectReason and reserves the staged tile with tdmStoreLdsBytes, at _TDMStoreLdsOffset after
-the epilogue vectors, over the main-loop buffers when _TDMStoreOverMainLoop.
+with tdmStoreRejectReason and its store vectors with tdmStoreVectorRejectReason, and reserves the staged tile with
+tdmStoreLdsBytes, at _TDMStoreLdsOffset after the epilogue vectors, over the main-loop buffers when
+_TDMStoreOverMainLoop.
 """
 
 from math import log2
@@ -46,7 +47,7 @@ from rocisa.instruction import DSLoadD16HIU16, DSLoadU8, SAddCU32, SAddU32, SCBr
   SCmpLeU32, SLShiftLeftB64, SLShiftRightB32, SMinU32, SMulHIU32, SMulI32, SSubU32, SWaitCnt, SWaitTensorcnt, \
   VAddU32, VLShiftLeftB32, VMulLOU32, VReadfirstlaneB32, VSubU32
 
-from ..AsmMemoryHelpers import dsLoad, dsStore
+from ..AsmMemoryHelpers import DS_STORE_WIDTHS, dsLoad, dsStore
 from ..Common import persistentSpatialCluster
 from ..ExecutionPolicy import isPersistent
 from ..SolutionStructs.Problem import isFusedA2A
@@ -66,6 +67,9 @@ STINKY_KEEP = "[stinky-keep]"
 
 # The DS instruction offset field is 16-bit unsigned.
 DS_OFFSET_MAX = 0xFFFF
+
+# tile_dim0 and tile_dim1 of a TDM descriptor are 16-bit, and a tile_dim0 of 0 makes the transfer a NOP.
+TDM_TILE_DIM_MAX = 0xFFFF
 
 
 def hasEpilogueSideEffects(pt):
@@ -112,6 +116,8 @@ def tdmStoreRejectReason(state):
   StoreRemapVectorWidth applies to the blocks that keep buffer_store; a TDM block stages D itself and
   skips the remap. In a block whose stores run in the CompactLoopStore loop, the block sets up the staged tile and loads C
   before the loop, steps the staged tile's base by each iteration's rows and stores the tile after the loop.
+  The descriptors hold MacroTile0 in data_size units (tile_dim0) and the columns of a wave (tile_dim1) in 16 bits.
+  The store vectors the block stages are checked by tdmStoreVectorRejectReason, once their widths are final.
   """
   if not state["TDMStoreInst"]:
     return None
@@ -139,7 +145,44 @@ def tdmStoreRejectReason(state):
     # collects its elements and stages them instead. The TDM block writes one tensor, SrdD or
     # SrdTD, so the peer partition's D would keep its initial value.
     return "TDMStoreInst does not support OutputPeerD"
+  if _tileDim0(state) > TDM_TILE_DIM_MAX or _waveColumns(state) > TDM_TILE_DIM_MAX:
+    return "TDMStoreInst requires the staged tile's tile_dim0 (data_size units) and tile_dim1 (columns per wave) to fit 16 bits"
   return None
+
+
+def tdmStoreVectorRejectReason(state):
+  """Return why the TDM block cannot stage the D vectors of a TDMStoreInst solution, or None.
+
+  Solution asks this once StoreVectorWidth, VectorWidthA and _VectorStore are final. emitTDMStoreStaging writes a
+  vector of bps bytes as bps // width dsStore calls of width = min(bps, 32) bytes, so it writes every byte only when
+  width divides bps and dsStore has that width: any other vector, such as the 48 bytes of fp64 at store vector width
+  6, would lose its last bytes or stop at the assert of dsStore. emitTDMStoreLoadCElement reads the same vectors in
+  pieces of at most 16 bytes, which cover every vector the staging covers.
+  """
+  if not state["TDMStoreInst"]:
+    return None
+  bpe = int(state["ProblemType"]["DestDataType"].numBytes())
+  for width in _stagedVectorWidths(state):
+    bps = width * bpe
+    piece = min(bps, 32)
+    if bps % piece or piece not in DS_STORE_WIDTHS:
+      return "TDMStoreInst requires D vectors of 1, 2, 4, 8, 16 or a multiple of 32 bytes, not %u (vector width %u)" \
+        % (bps, width)
+  return None
+
+
+def _stagedVectorWidths(state):
+  """The vector widths at which the TDM blocks stage D. The store-width cascade starts at StoreVectorWidth on a WMMA
+  kernel and at VectorWidthA on a VALU kernel, or at 1 without _VectorStore, and halves down to 1; generateBetaModules
+  gets only its first and last widths with AdaptiveGemm=0 or LocalSplitU > 1. A TDM block stages at the first width,
+  except that with per-element outputs beyond C and D (hasEpilogueSideEffects) each block stages at its own."""
+  first = state["StoreVectorWidth"] if state["EnableMatrixInstruction"] else state["VectorWidthA"]
+  first = first if state["_VectorStore"] else 1
+  if not hasEpilogueSideEffects(state["ProblemType"]):
+    return [first]
+  if state["AdaptiveGemm"] and state["LocalSplitU"] == 1:
+    return [first >> shift for shift in range(first.bit_length())]
+  return [first, 1]
 
 
 def _waveColumns(kernel):
@@ -151,6 +194,17 @@ def _unevenColumns(kernel):
   """Whether MacroTile1 is not a multiple of the number of waves, so the columns of the last waves reach past
   the tile."""
   return kernel["MacroTile1"] % (kernel["NumThreads"] // kernel["WavefrontSize"]) != 0
+
+
+def _dataUnits(bpe):
+  """The TDM data_size units of an element of bpe bytes: data_size is at most 8 bytes, so a complex double element is
+  two units."""
+  return bpe // min(bpe, 8)
+
+
+def _tileDim0(kernel):
+  """tile_dim0 of the staged tile's descriptors: MacroTile0 in data_size units."""
+  return kernel["MacroTile0"] * _dataUnits(int(kernel["ProblemType"]["DestDataType"].numBytes()))
 
 
 def tdmStoreLdsBytes(state):
@@ -374,14 +428,14 @@ def _tdmStoreDescriptor(gwb, module: Module, tdm, g0, g1, tmp, tc):
   of the last waves reach past the tile, so tensor_dim1 ends at the column bound min(SizeJ, (wg1+1)*MT1),
   which the second tmp SGPR keeps. The block assumes one free index per operand, as every GEMM problem
   type has, so PackedC0IndicesX and PackedC1IndicesX hold one index each. TDM data_size is at most 8 bytes, so a
-  complex double element is two 8-byte units, in which tensor_dim0, tile0 and the stride count; the byte offsets
-  and the staged tile do not change.
+  complex double element is two 8-byte units, in which tensor_dim0, tile0 and the stride count, the doubled stride in
+  the 48 bits of its field; the byte offsets and the staged tile do not change.
   """
   assert len(gwb.kernel["PackedC0IndicesX"]) == 1 and len(gwb.kernel["PackedC1IndicesX"]) == 1, \
     "the TDM block assumes one free index per operand"
   kw = gwb.parentWriter
   bpe = kw.states.bpeCexternalGSU1
-  units = bpe // min(bpe, 8)
+  units = _dataUnits(bpe)
   mt0 = gwb.kernel["MacroTile0"]
   ws = gwb.kernel["WavefrontSize"]
   colsPerWave = _waveColumns(gwb.kernel)
@@ -422,13 +476,9 @@ def _tdmStoreDescriptor(gwb, module: Module, tdm, g0, g1, tmp, tc):
   else:
     module.add(SSubU32(dst=sgpr(dim), src0=sizeJ, src1=sgpr(col), comment="tensor_dim1 = SizeJ - first column"))
     module.add(tdm.setTensorDim1(g1, dim, kw))
-  module.add(tdm.setTensorTile0(g1, mt0 * units))
+  module.add(tdm.setTensorTile0(g1, _tileDim0(gwb.kernel)))
   module.add(tdm.setTensorTile1(g1, colsPerWave))
-  if units > 1:
-    module.add(SAddU32(dst=sgpr(offHi), src0=sgpr(stride1), src1=sgpr(stride1), comment="Stride%s in 8-byte units" % tc))
-    module.add(tdm.setTensorStride0(g1, offHi))
-  else:
-    module.add(tdm.setTensorStride0(g1, stride1))
+  module.add(tdm.setTensorStride0(g1, stride1, units))
 
 
 def _skipTest(gwb, sizeJ, tmp):

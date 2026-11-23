@@ -16,8 +16,9 @@ from tensilelite.Common.DataType import DataType
 from tensilelite.Common.GlobalParameters import defaultSolution
 from tensilelite.Common.ValidParameters import validParameters
 from tensilelite.Components.GlobalWriteBatch import GlobalWriteBatchWriter
-from tensilelite.Components.TDMStoreInst import DS_OFFSET_MAX, STINKY_KEEP, hasEpilogueSideEffects, TDM_STORE_PATHS, storesFinalD, \
-  tdmStoreBlocks, tdmStoreLdsBytes, tdmStoreLdsSplit, tdmStoreModifiers, tdmStoreRejectReason
+from tensilelite.Components.TDMStoreInst import DS_OFFSET_MAX, STINKY_KEEP, hasEpilogueSideEffects, TDM_STORE_PATHS, \
+  TDM_TILE_DIM_MAX, storesFinalD, tdmStoreBlocks, tdmStoreLdsBytes, tdmStoreLdsSplit, tdmStoreModifiers, \
+  tdmStoreRejectReason, tdmStoreVectorRejectReason
 from tensilelite.SolutionStructs.Naming import getKernelNameMin
 
 from emit_test_helpers import assert_every_vector_preload_barriers, emit_asm
@@ -34,8 +35,8 @@ _PROBLEM_TYPE_KEYS = {
 
 
 def _state(**overrides):
-  """The keys tdmStoreRejectReason and the ExecutionPolicy helpers it calls read, for a TDMStoreInst=True
-  solution inside the supported configurations, with `overrides` applied."""
+  """The keys tdmStoreRejectReason, tdmStoreVectorRejectReason and the ExecutionPolicy helpers they call read, for a
+  TDMStoreInst=True solution inside the supported configurations, with `overrides` applied."""
   problemType = {
     "DestDataType": DataType("b"),
     "ComputeDataType": DataType("s"),
@@ -63,9 +64,16 @@ def _state(**overrides):
     "UseSubtileImpl": False,
     "StoreRemapVectorWidth": 0,
     "CompactLoopStore": False,
+    "MacroTile0": 256,
     "MacroTile1": 256,
     "NumThreads": 128,
     "WavefrontSize": 32,
+    "EnableMatrixInstruction": True,
+    "_VectorStore": 1,
+    "StoreVectorWidth": 8,
+    "VectorWidthA": 1,
+    "AdaptiveGemm": 0,
+    "LocalSplitU": 1,
     "ProblemType": problemType,
   }
   for key, value in overrides.items():
@@ -156,6 +164,8 @@ def test_disabled_is_not_validated():
 _OUTPUT = "TDMStoreInst supports fp32 D, fp64, complex float and complex double D from accumulators of their type, " \
   "int32 and int8 D from int32 accumulators, and bf16, fp16, fp8 and bf8 D converted from fp32 accumulators"
 _STREAMK = {"TileProcessingStrategy": "StreamK", "GlobalSplitU": 0}
+_TILE = "TDMStoreInst requires the staged tile's tile_dim0 (data_size units) and tile_dim1 (columns per wave) to fit 16 bits"
+_ZGEMM_STATE = {"DestDataType": DataType("z"), "ComputeDataType": DataType("z"), "HighPrecisionAccumulate": False}
 
 
 @pytest.mark.parametrize("overrides, reason", [
@@ -171,6 +181,9 @@ _STREAMK = {"TileProcessingStrategy": "StreamK", "GlobalSplitU": 0}
   ({"UseSubtileImpl": True}, "TDMStoreInst does not support UseSubtileImpl"),
   ({"FusedA2A": "GemmA2A"}, "TDMStoreInst does not support FusedA2A"),
   ({"OutputPeerD": True}, "TDMStoreInst does not support OutputPeerD"),
+  ({"MacroTile0": TDM_TILE_DIM_MAX + 1}, _TILE),
+  (dict(_ZGEMM_STATE, MacroTile0=TDM_TILE_DIM_MAX // 2 + 1), _TILE),
+  ({"MacroTile1": 4 * TDM_TILE_DIM_MAX + 1}, _TILE),
 ])
 def test_rejects_unsupported(overrides, reason):
   assert tdmStoreRejectReason(_state(**overrides)) == reason
@@ -191,6 +204,70 @@ def test_accepts_persistent_policies(overrides):
   StreamK with the dynamic work queue (StreamK 4) or the hybrid assignment (StreamK 5) as with the static grid,
   also with PrefetchAcrossPersistent and ReuseAcrossPersistent."""
   assert tdmStoreRejectReason(_state(**overrides)) is None
+
+
+@pytest.mark.parametrize("overrides", [
+  {"MacroTile0": TDM_TILE_DIM_MAX},
+  dict(_ZGEMM_STATE, MacroTile0=TDM_TILE_DIM_MAX // 2),
+  {"MacroTile1": 4 * TDM_TILE_DIM_MAX},
+], ids=["mt0", "mt0_complex_double", "columns"])
+def test_accepts_the_largest_tile_the_descriptor_holds(overrides):
+  """tile_dim0 holds MacroTile0 in data_size units, two per complex double element, and tile_dim1 the columns of a
+  wave, MacroTile1 over the four waves rounded up: up to 0xFFFF each."""
+  assert tdmStoreRejectReason(_state(**overrides)) is None
+
+
+def test_tdm_descriptor_refuses_a_tile_the_16_bit_field_cannot_hold():
+  """tile_dim0 and tile_dim1 are 16-bit and a tile_dim0 of 0 makes the transfer a NOP, so the descriptor builder
+  refuses such a tile instead of masking it into another one."""
+  from tensilelite.Components.TensorDataMover import TensorDataMoverStore
+  tdm = TensorDataMoverStore([0])
+  for setter in (tdm.setTensorTile0, tdm.setTensorTile1):
+    for tile in (0, TDM_TILE_DIM_MAX + 1):
+      with pytest.raises(AssertionError):
+        setter(8, tile)
+
+
+# The store vector widths of validParameters whose D vectors emitTDMStoreStaging would not write whole, by D type: 3
+# and 6 for every type but complex double, whose 96 bytes at width 6 are three 32-byte stores.
+_UNCOVERED = {"f8": {3, 6}, "b": {3, 6}, "s": {3, 6}, "d": {3, 6}, "z": {3}}
+
+
+@pytest.mark.parametrize("dest", sorted(_UNCOVERED))
+@pytest.mark.parametrize("svw", [w for w in validParameters["StoreVectorWidth"] if w > 0])
+def test_rejects_d_vectors_the_staging_does_not_cover(dest, svw):
+  """emitTDMStoreStaging writes a vector as stores of min(bytes, 32), so it covers vectors of 1, 2, 4, 8, 16 and
+  multiples of 32 bytes only: 3 bytes of fp8 at width 3, 12 of bf16 at width 6, and 48 of fp64 at width 6 or of
+  complex double at width 3 are rejected."""
+  bps = svw * int(DataType(dest).numBytes())
+  reason = tdmStoreVectorRejectReason(_state(DestDataType=DataType(dest), StoreVectorWidth=svw))
+  if svw in _UNCOVERED[dest]:
+    assert reason == "TDMStoreInst requires D vectors of 1, 2, 4, 8, 16 or a multiple of 32 bytes, not %u " \
+                     "(vector width %u)" % (bps, svw)
+  else:
+    assert reason is None, (dest, svw)
+
+
+@pytest.mark.parametrize("adaptive, lsu, rejected", [(1, 1, True), (0, 1, False), (1, 2, False)])
+def test_side_effect_kernels_check_every_width_of_their_cascade(adaptive, lsu, rejected):
+  """With per-element outputs beyond C and D every block stages at its own width: complex double at store vector width
+  6 stages 96 bytes, which the staging covers, but AdaptiveGemm=1 also builds the block of width 3, whose 48 bytes it
+  does not. AdaptiveGemm=0 and LocalSplitU > 1 keep only the widths 6 and 1; without E only width 6 stages."""
+  state = _state(DestDataType=DataType("z"), StoreVectorWidth=6, UseE=True, AdaptiveGemm=adaptive, LocalSplitU=lsu)
+  assert (tdmStoreVectorRejectReason(state) is not None) == rejected
+  assert tdmStoreVectorRejectReason(dict(state, ProblemType=dict(state["ProblemType"], UseE=False))) is None
+
+
+@pytest.mark.parametrize("overrides, rejected", [
+  ({"_VectorStore": 0, "StoreVectorWidth": 6}, False),
+  ({"EnableMatrixInstruction": False, "VectorWidthA": 3}, True),
+  ({"EnableMatrixInstruction": False, "VectorWidthA": 4, "StoreVectorWidth": 6}, False),
+  ({"TDMStoreInst": False, "StoreVectorWidth": 6}, False),
+], ids=["no_vector_store", "valu_vwa3", "valu_vwa4", "off"])
+def test_the_vector_check_follows_the_first_store_width(overrides, rejected):
+  """The cascade starts at 1 without _VectorStore and at VectorWidthA on a VALU kernel, whatever StoreVectorWidth is;
+  with TDMStoreInst off nothing is checked."""
+  assert (tdmStoreVectorRejectReason(_state(**overrides)) is not None) == rejected
 
 
 def test_the_switch_matches_the_valid_values_and_on_covers_every_path():
@@ -731,12 +808,33 @@ def test_complex_double_descriptor_uses_8_byte_units(gp_gfx1250, gfx1250_iim, as
   assert descriptors and set(re.findall(r"Set data_size to (\d+)", asm)) == {"3"}
   assert re.findall(r"set tile0 to (\d+)", asm) == [str(2 * sol["MacroTile0"])] * descriptors
   assert asm.count("tensor_dim0 in 8-byte units") == descriptors
-  assert len(re.findall(r"Stride[CD] in 8-byte units", asm)) == descriptors
+  assert asm.count("stride in data_size units") == descriptors
   for tag, op in (("stage D element", "ds_store_b128"), ("load C element", "ds_load_b128")):
     assert {line.split()[0] for line in asm.splitlines() if tag in line} == {op}, tag
   staged = [re.search(r"v\[vgprValuC\+(\d+):vgprValuC\+(\d+)\+3\]", line) for line in asm.splitlines()
             if "stage D element" in line]
   assert staged and all(m and m.group(1) == m.group(2) and int(m.group(1)) % 4 == 0 for m in staged), staged[:3]
+
+
+def test_complex_double_stride_fills_the_48_bit_field(gp_gfx1250, gfx1250_iim, assembler, capsys):
+  """tensor_dim0_stride is 48 bits, group1+5 and the low half of group1+6. A complex double stride counts 8-byte units,
+  twice the 32-bit StrideD or StrideC, so it can need bit 32: every descriptor of D and C doubles the stride into
+  group1+5, and the next instruction writes its carry to group1+6."""
+  tdm = 1
+  sol, asm = emit_asm(gfx1250_iim, assembler, _fp64_params(TDMStoreInst=tdm, StoreVectorWidth=1, ProblemType=_ZGEMM))
+  assert sol.get("Valid"), capsys.readouterr().out
+  lines = asm.splitlines()
+  doubles = [i for i, line in enumerate(lines) if "stride in data_size units" in line]
+  assert doubles and len(doubles) == asm.count("tensor_dim0 = SizeI - wg0*MT0")
+  for i in doubles:
+    add = re.match(r"s_add_u32 s\[?(\d+)\]?, (s\[sgprStride[CD]\w*\]), (s\[sgprStride[CD]\w*\])$", _code(lines[i]))
+    assert add and add.group(2) == add.group(3), lines[i]
+    transfer = next(_code(line) for line in lines[i:]
+                    if _code(line).startswith(("tensor_store_from_lds ", "tensor_load_to_lds ")))
+    group1 = int(re.findall(r"s\[(\d+):\d+\]", transfer)[1])
+    assert int(add.group(1)) == group1 + 5, (lines[i], transfer)
+    carry = next(_code(line) for line in lines[i + 1:] if _code(line))
+    assert re.match(r"s_addc_u32 s\[?%u\]?, 0, 0$" % (group1 + 6), carry), carry
 
 
 @pytest.mark.parametrize("algorithm, aga", _GSU_ALGORITHMS)
@@ -1311,6 +1409,22 @@ def test_store_vector_width_1_stores_the_one_masked_block(gp_gfx1250, gfx1250_ii
       end = lines.index("label_GW_B%s_FD0_VW1_GSU1_NonEdgeEnd:" % beta)
       assert lines[end + 1:end + 3] == ["label_GW_B%s_FD0_VW1_GSU1_%s:" % (beta, part) for part in ("Else", "Then")]
     assert "add lds offset" not in asm
+
+
+def test_solution_checks_the_d_vectors_once_their_widths_are_final(gp_gfx1250, gfx1250_iim, assembler, capsys,
+                                                                  monkeypatch):
+  """Solution asks tdmStoreVectorRejectReason after it resolves StoreVectorWidth -1 and _VectorStore, and rejects the
+  solution with its reason."""
+  import importlib
+  # The package re-exports the Solution class under the module's name, so the module comes from sys.modules.
+  solution = importlib.import_module("tensilelite.SolutionStructs.Solution")
+  seen = []
+  monkeypatch.setattr(solution, "tdmStoreVectorRejectReason",
+                      lambda state: seen.append((state["StoreVectorWidth"], state["_VectorStore"])) or "vector check probe")
+  sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=True)
+  assert not sol.get("Valid") and asm is None
+  assert seen and set(seen) == {(8, 1)}, seen
+  assert "vector check probe" in capsys.readouterr().out
 
 
 def test_solution_rejects_with_the_reason(gp_gfx1250, gfx1250_iim, assembler, capsys):
