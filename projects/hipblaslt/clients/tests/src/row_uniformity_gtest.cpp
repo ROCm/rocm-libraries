@@ -3270,21 +3270,50 @@ namespace
 
         out.streamK = true;
 
+        // Clustered Stream-K schedules spatial blocks and may switch parallel
+        // reduction to tree or fall back to whole blocks, so read the launch
+        // solve() performs instead of re-deriving it.
+        if(solution.usesStreamKSpatialCluster())
+        {
+            const auto  launch  = solution.resolvePersistentSettings(tensile, hardware);
+            const auto& cluster = launch.clusterSchedule;
+            out.staticPacking   = true;
+            out.tree            = launch.reduction == origami::reduction_t::tree;
+            out.tiles           = cluster.blocks;
+            out.itersPerTile    = cluster.itersPerTile;
+            out.grid            = launch.grid;
+            if(!out.tree || out.grid == 0)
+                return out;
+            out.split             = cluster.split;
+            out.perTileExtraIters = solution.internalArgsSupport.perTileExtraIters;
+            out.rowUniform        = TensileLite::StreamK::Static::isRowUniform(
+                out.split,
+                out.tiles,
+                out.itersPerTile,
+                out.grid,
+                out.perTileExtraIters,
+                tensile.getParams().uniformSummationOrder(),
+                solution.skKGranularity());
+            out.newlyAdmitted
+                = out.rowUniform && out.split.args.skTiles != 0 && out.tiles % out.grid != 0;
+            return out;
+        }
+
         const bool effectiveDynamic = solution.sizeMapping.workAssignment == TensileLite::WorkAssignment::Hybrid
                                           ? solution.streamK5EffectiveDynamic(tensile, hardware)
                                           : false;
         out.staticPacking           = solution.sizeMapping.workAssignment == TensileLite::WorkAssignment::StaticGrid
                                       || (solution.sizeMapping.workAssignment == TensileLite::WorkAssignment::Hybrid && !effectiveDynamic);
 
-        const origami::reduction_t reduction
+        const origami::reduction_t rawReduction
             = effectiveDynamic ? origami::reduction_t::tree
                                : solution.getSKReduction(tensile, hardware);
-        out.tree = reduction == origami::reduction_t::tree;
 
         out.tiles = tensile.getNumTiles(solution.sizeMapping, 1);
-        out.itersPerTile
-            = std::max(size_t{1}, tensile.getItersPerTile(solution.sizeMapping));
-        out.grid = solution.getSKGrid(tensile, hardware, out.tiles, reduction);
+        out.itersPerTile = std::max(size_t{1}, tensile.getItersPerTile(solution.sizeMapping));
+
+        out.grid = solution.getSKGrid(tensile, hardware, out.tiles, rawReduction);
+        out.tree = rawReduction == origami::reduction_t::tree;
 
         if(!out.staticPacking || !out.tree || out.grid == 0)
             return out;
@@ -4143,6 +4172,62 @@ namespace
         EXPECT_EQ(
             solution->getSKGrid(problem, device, tiles, origami::reduction_t::parallel), 3200u)
             << "parallel never reaches the flags; the bound must not shrink its grid";
+    }
+
+    // Host-only test: build a PLAV2 (clustered Stream-K) solution and verify that
+    // resolveStreamK() agrees with resolvePersistentSettings().
+    TEST(RowUniformityPLAV2Host_pre_checkin, Cluster1x4)
+    {
+        const auto hardware = probeHardware();
+        auto       solution = probeSolution();
+        solution->sizeMapping.clusterDim                        = TensileLite::dim3(1, 4, 1);
+        solution->sizeMapping.workspaceSizePerElemC             = 4;
+        solution->internalArgsSupport.version                   = 3;
+        solution->internalArgsSupport.persistentLoopArgsVersion = 2;
+
+        auto problem = TensileLite::ContractionProblemGemm::GEMM(
+            false, false, 4096, 32, 10240, 4096, 10240, 4096, 0.0, false, 1);
+        problem.setComputeInputTypeA(rocisa::DataType::Float);
+        problem.setComputeInputTypeB(rocisa::DataType::Float);
+        problem.setParams().setUniformSummationOrder(1);
+        problem.setWorkspaceSize(std::numeric_limits<size_t>::max());
+
+        ASSERT_TRUE(solution->usesStreamKSpatialCluster());
+
+        const auto launch   = solution->resolvePersistentSettings(problem, hardware);
+        const auto resolved = resolveStreamK(*solution, problem, hardware);
+
+        EXPECT_EQ(resolved.tiles, launch.clusterSchedule.blocks);
+        EXPECT_EQ(resolved.itersPerTile, launch.clusterSchedule.itersPerTile);
+        EXPECT_EQ(resolved.grid, launch.grid);
+        EXPECT_EQ(resolved.tree, launch.reduction == origami::reduction_t::tree);
+    }
+
+    TEST(RowUniformityPLAV2Host_pre_checkin, Cluster4x4)
+    {
+        const auto hardware = probeHardware();
+        auto       solution = probeSolution();
+        solution->sizeMapping.clusterDim                        = TensileLite::dim3(4, 4, 1);
+        solution->sizeMapping.workspaceSizePerElemC             = 4;
+        solution->internalArgsSupport.version                   = 3;
+        solution->internalArgsSupport.persistentLoopArgsVersion = 2;
+
+        auto problem = TensileLite::ContractionProblemGemm::GEMM(
+            false, false, 4096, 32, 10240, 4096, 10240, 4096, 0.0, false, 1);
+        problem.setComputeInputTypeA(rocisa::DataType::Float);
+        problem.setComputeInputTypeB(rocisa::DataType::Float);
+        problem.setParams().setUniformSummationOrder(1);
+        problem.setWorkspaceSize(std::numeric_limits<size_t>::max());
+
+        ASSERT_TRUE(solution->usesStreamKSpatialCluster());
+
+        const auto launch   = solution->resolvePersistentSettings(problem, hardware);
+        const auto resolved = resolveStreamK(*solution, problem, hardware);
+
+        EXPECT_EQ(resolved.tiles, launch.clusterSchedule.blocks);
+        EXPECT_EQ(resolved.itersPerTile, launch.clusterSchedule.itersPerTile);
+        EXPECT_EQ(resolved.grid, launch.grid);
+        EXPECT_EQ(resolved.tree, launch.reduction == origami::reduction_t::tree);
     }
 
 } // namespace
