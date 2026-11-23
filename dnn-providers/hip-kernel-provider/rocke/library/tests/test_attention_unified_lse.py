@@ -11,6 +11,7 @@ import pytest
 
 from kernels.common import attention_unified as au
 from rocke.core.lower_llvm import lower_kernel_to_llvm
+from rocke.runtime import device_array
 from rocke.tests.host_arrays import HostArray
 
 _ARCHES = ("gfx942", "gfx950")
@@ -400,7 +401,9 @@ def runner(monkeypatch):
 
     # Host-only scratch: the 3D launch is recorded, never run.
     monkeypatch.setattr(
-        au, "device_workspace", lambda shape, dtype, *, like: HostArray(shape, dtype)
+        device_array,
+        "device_workspace",
+        lambda shape, dtype, *, like: HostArray(shape, dtype),
     )
     monkeypatch.setattr(au, "validate_unified_lse", lambda *a, **k: None)
     monkeypatch.setattr(au, "_resolve_attention_arch", lambda: "gfx942")

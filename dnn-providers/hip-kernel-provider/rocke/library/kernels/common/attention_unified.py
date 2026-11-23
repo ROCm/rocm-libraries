@@ -17,7 +17,10 @@ from dataclasses import dataclass, replace
 from threading import Lock, RLock
 from typing import Any, Callable, Dict, Optional, Sequence, Tuple
 
-import numpy as np
+# numpy is imported only by the launch functions that need it, together with the
+# numpy-backed array runtime (rocke.numeric.storage, rocke.runtime.device_array):
+# dispatch and the provider build's table generators import this module with a
+# Python that has no numpy.
 from rocke.core.arch import validate_arch
 from rocke.core.ir import (
     BF16,
@@ -45,8 +48,6 @@ from rocke.runtime.launcher import (
     retain_for_stream,
     wait_stream_and_release,
 )
-from rocke.numeric.storage import element_type_of
-from rocke.runtime.device_array import array_info, device_workspace
 from rocke.runtime.torch_interop import is_torch_tensor
 
 from rocke.helpers.attention import (
@@ -4938,6 +4939,9 @@ def _run_3d_tiled_on_stream(
     # External and internal captures own separate graph-private allocation.
     # Eager reuse is safe only under the owner's whole-pair submission lock.
     if execution is None or capturing or execution._workspace is None:
+        from rocke.numeric.storage import element_type_of
+        from rocke.runtime.device_array import device_workspace
+
         workspace = tuple(
             device_workspace(spec.shape, element_type_of(spec.dtype), like=q)
             for spec in _attention_3d_workspace_specs(problem, num_segments, q.device)
@@ -5614,6 +5618,8 @@ def _fill_workspace(workspace, value: float) -> None:
     if is_torch_tensor(workspace):
         workspace.fill_(value)
     else:
+        import numpy as np
+
         workspace.write(np.full(workspace.shape, value, np.float32))
 
 
@@ -5633,6 +5639,8 @@ def _attention_3d_workspace_specs(
     torch's graph-private pool. The dtype is numpy's, so byte accounting needs
     no torch.
     """
+    import numpy as np
+
     f32 = np.dtype(np.float32)
 
     return (
@@ -6209,6 +6217,8 @@ def _validate_additive_bias(
             )
         return 0
     _require_additive_bias(problem, additive_bias)
+    from rocke.runtime.device_array import array_info
+
     bias = array_info(additive_bias)
     if bias.dtype != "fp32":
         raise ValueError(f"additive_bias must be float32, got {bias.dtype}")
@@ -6348,6 +6358,8 @@ def run_unified_attention_torch(
     ``NotImplementedError`` rather than returning without it. Rows with no
     visible key get ``-inf`` (and O = 0).
     """
+    from rocke.runtime.device_array import array_info
+
     if kv_layout == "strided" and problem.emit_lse:
         raise NotImplementedError("LSE output is not implemented for strided-KV decode")
     # Caller-owned LSE output ([total_q, Hq, 1] FP32, ``problem.emit_lse``):

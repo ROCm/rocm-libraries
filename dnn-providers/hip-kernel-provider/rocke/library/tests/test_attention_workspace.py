@@ -296,6 +296,7 @@ def test_graph_churn_bounds_resources_and_waits_before_eviction(
 def test_other_arrays_launch_on_the_given_stream_without_torch(monkeypatch):
     """A non-torch Q never touches torch: the scratch is allocated of Q's kind
     and the pair launches on the stream given (0 stays the HIP null stream)."""
+    from rocke.runtime import device_array
     from rocke.tests.host_arrays import HostArray
 
     monkeypatch.setitem(sys.modules, "torch", None)  # any torch import fails
@@ -308,7 +309,7 @@ def test_other_arrays_launch_on_the_given_stream_without_torch(monkeypatch):
         scratch.append((dtype, like))
         return HostArray(shape, dtype)
 
-    monkeypatch.setattr(au, "device_workspace", workspace)
+    monkeypatch.setattr(device_array, "device_workspace", workspace)
     calls = []
     monkeypatch.setattr(
         au, "_launch_3d_pipeline", lambda *args, **kwargs: calls.append(args)
