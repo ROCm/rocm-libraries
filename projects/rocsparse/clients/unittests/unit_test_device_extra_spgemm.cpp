@@ -605,6 +605,9 @@ namespace
         cplx                 beta   = cplx(1.0, 0.0);
         bool                 device = false;
         Stages               stages = Stages::nnz_compute;
+        // C is a second descriptor over the row pointer and column indices of D,
+        // with a value array of its own.
+        bool own_values = false;
     };
 
     std::string describe(const AliasCase& c)
@@ -612,7 +615,7 @@ namespace
         std::ostringstream s;
         s << (c.bsr ? "bsr" : "csr") << " dir=" << int(c.dir) << " bases=" << int(c.bAB)
           << int(c.bCD) << " alpha=" << c.alpha << " beta=" << c.beta << " dev=" << c.device
-          << " stages=" << int(c.stages);
+          << " stages=" << int(c.stages) << " own_values=" << c.own_values;
         return s.str();
     }
 
@@ -632,6 +635,17 @@ namespace
         for(double v : val)
             M.val.push_back(cplx(v, 0.0));
         return M;
+    }
+
+    // The values of nnzb identity blocks of dimension bd.
+    std::vector<double> identity_blocks(int64_t nnzb, int64_t bd)
+    {
+        std::vector<double> v;
+        for(int64_t p = 0; p < nnzb; ++p)
+            for(int64_t r = 0; r < bd; ++r)
+                for(int64_t q = 0; q < bd; ++q)
+                    v.push_back(r == q ? 1.0 : 0.0);
+        return v;
     }
 
     // A D whose pattern is the pattern of A * B plus up to extra_row_nnzb random
@@ -669,11 +683,45 @@ namespace
         ASSERT_NO_FATAL_FAILURE(oB.create(B, c.bsr, c.dir, c.bAB));
         ASSERT_NO_FATAL_FAILURE(oCD.create(D, c.bsr, c.dir, c.bCD));
 
+        const std::vector<T> val_D = oCD.v.host();
+        DevBuf<T>            vC(std::vector<T>(val_D.size(), from_c<T>(cplx(-7.0, 0.0))));
+        ASSERT_TRUE(vC.ptr);
+        SpmatH Cown;
+        if(c.own_values && c.bsr)
+            ASSERT_EQ(rocsparse_create_bsr_descr(&Cown.p,
+                                                 D.mb,
+                                                 D.nb,
+                                                 D.nnzb(),
+                                                 c.dir,
+                                                 D.bd,
+                                                 oCD.p.ptr,
+                                                 oCD.c.ptr,
+                                                 vC.ptr,
+                                                 rocsparse_ut::it_of<I>(),
+                                                 rocsparse_ut::it_of<J>(),
+                                                 c.bCD,
+                                                 rocsparse_ut::dt_of<T>()),
+                      rocsparse_status_success);
+        else if(c.own_values)
+            ASSERT_EQ(rocsparse_create_csr_descr(&Cown.p,
+                                                 D.mb,
+                                                 D.nb,
+                                                 D.nnzb(),
+                                                 oCD.p.ptr,
+                                                 oCD.c.ptr,
+                                                 vC.ptr,
+                                                 rocsparse_ut::it_of<I>(),
+                                                 rocsparse_ut::it_of<J>(),
+                                                 c.bCD,
+                                                 rocsparse_ut::dt_of<T>()),
+                      rocsparse_status_success);
+        const rocsparse_spmat_descr C = c.own_values ? Cown.p : oCD.d.p;
+
         PointerModeGuard mode(handle, mode_of(c.device));
         const Scalar<T>  alpha(c.alpha, c.device), beta(c.beta, c.device);
         auto             call = [&](rocsparse_spgemm_stage stage, size_t* bs, void* tmp) {
             return spgemm_call<T>(
-                handle, alpha.get(), oA.d.p, oB.d.p, beta.get(), oCD.d.p, oCD.d.p, stage, bs, tmp);
+                handle, alpha.get(), oA.d.p, oB.d.p, beta.get(), oCD.d.p, C, stage, bs, tmp);
         };
 
         size_t bsz = 0;
@@ -686,8 +734,7 @@ namespace
         {
             ASSERT_EQ(call(rocsparse_spgemm_stage_nnz, &bsz, buffer.ptr), rocsparse_status_success);
             int64_t rows = 0, cols = 0, nnz = -1;
-            ASSERT_EQ(rocsparse_spmat_get_size(oCD.d.p, &rows, &cols, &nnz),
-                      rocsparse_status_success);
+            ASSERT_EQ(rocsparse_spmat_get_size(C, &rows, &cols, &nnz), rocsparse_status_success);
             ASSERT_EQ(nnz, D.nnzb());
             ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
             // Fatal: with a wrong row pointer, compute writes past the arrays of D.
@@ -710,8 +757,14 @@ namespace
                       rocsparse_status_success);
         }
         ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
-        expect_bsr_equal<T, I, J>(
-            oCD.p.host(), oCD.c.host(), oCD.v.host(), want, c.dir, static_cast<int64_t>(c.bCD));
+        expect_bsr_equal<T, I, J>(oCD.p.host(),
+                                  oCD.c.host(),
+                                  c.own_values ? vC.host() : oCD.v.host(),
+                                  want,
+                                  c.dir,
+                                  static_cast<int64_t>(c.bCD));
+        if(c.own_values)
+            EXPECT_EQ(oCD.v.host(), val_D) << "values of D";
     }
 
     const std::vector<Stages> kCsrStages
@@ -776,8 +829,10 @@ TEST_F(ExtraSpgemm, alias_c_d_random)
 {
     const rocsparse_index_base Z = rocsparse_index_base_zero, O = rocsparse_index_base_one;
     const rocsparse_index_base bases[][2] = {{Z, Z}, {O, O}, {O, Z}};
+    // From block dimension 9, every row goes through the multipass BSR kernel,
+    // which writes C chunk by chunk and rereads D for every chunk.
     for(uint64_t seed = 1; seed <= 3; ++seed)
-        for(int64_t bd : {1, 2, 3})
+        for(int64_t bd : {1, 2, 3, 9, 17})
         {
             Rng        rng(seed * 131 + static_cast<uint64_t>(bd));
             const Bsr  A   = random_bsr<float>(7, 6, bd, 3, rng);
@@ -812,15 +867,9 @@ TEST_F(ExtraSpgemm, alias_c_d_random)
 // The CSR witness of alias_c_d with 2 x 2 identity blocks.
 TEST_F(ExtraSpgemm, alias_c_d_bsr)
 {
-    auto identity = [](int64_t nnzb) {
-        std::vector<double> v;
-        for(int64_t p = 0; p < nnzb; ++p)
-            v.insert(v.end(), {1, 0, 0, 1});
-        return v;
-    };
-    const Bsr A = bsr_of(2, 3, 2, {0, 2, 2}, {0, 1}, identity(2));
-    const Bsr B = bsr_of(3, 4, 2, {0, 2, 3, 3}, {0, 2, 0}, identity(3));
-    const Bsr D = bsr_of(2, 4, 2, {0, 3, 4}, {0, 1, 2, 3}, identity(4));
+    const Bsr A = bsr_of(2, 3, 2, {0, 2, 2}, {0, 1}, identity_blocks(2, 2));
+    const Bsr B = bsr_of(3, 4, 2, {0, 2, 3, 3}, {0, 2, 0}, identity_blocks(3, 2));
+    const Bsr D = bsr_of(2, 4, 2, {0, 3, 4}, {0, 1, 2, 3}, identity_blocks(4, 2));
     for(Stages s : kBsrStages)
         for(rocsparse_direction dir : {rocsparse_direction_row, rocsparse_direction_column})
         {
@@ -837,13 +886,150 @@ TEST_F(ExtraSpgemm, alias_c_d_bsr)
         }
 }
 
+// One block row of C whose blocks span more block columns than a chunk holds.
+// With block dimension 3, a row of 17 to 32 blocks goes through the atomic
+// multipass BSR kernel in chunks of 32 block columns, which rereads D for every
+// chunk after the previous chunks have written C.
+TEST_F(ExtraSpgemm, alias_c_d_bsr_chunks)
+{
+    const int64_t        bd = 3, nb = 64;
+    std::vector<int64_t> colB, colD;
+    for(int64_t j = 0; j < nb; ++j)
+    {
+        if(j % 3 == 0)
+            colB.push_back(j);
+        if(j % 3 == 0 || j == 1 || j == 31 || j == 32 || j == 62)
+            colD.push_back(j);
+    }
+    auto numbered = [&](const std::vector<int64_t>& col) {
+        std::vector<double> v(col.size() * static_cast<size_t>(bd * bd));
+        for(size_t q = 0; q < v.size(); ++q)
+            v[q] = static_cast<double>(q % 11 + 1);
+        return v;
+    };
+    const int64_t nnzb_B = static_cast<int64_t>(colB.size());
+    const int64_t nnzb_D = static_cast<int64_t>(colD.size());
+    const Bsr     A      = bsr_of(1, 1, bd, {0, 1}, {0}, identity_blocks(1, bd));
+    const Bsr     B      = bsr_of(1, nb, bd, {0, nnzb_B}, colB, numbered(colB));
+    const Bsr     D      = bsr_of(1, nb, bd, {0, nnzb_D}, colD, numbered(colD));
+    for(Stages s : kBsrStages)
+        for(rocsparse_direction dir : {rocsparse_direction_row, rocsparse_direction_column})
+        {
+            AliasCase c;
+            c.bsr    = true;
+            c.dir    = dir;
+            c.alpha  = cplx(2.0, 0.0);
+            c.beta   = cplx(-1.0, 0.0);
+            c.stages = s;
+            run_alias<float, int32_t, int32_t>(handle, c, A, B, D);
+            if(HasFatalFailure())
+                return;
+            run_alias<double, int64_t, int64_t>(handle, c, A, B, D);
+            if(HasFatalFailure())
+                return;
+        }
+}
+
+// One descriptor passed as C and D, with the first row of D unsorted. The
+// symbolic stage would sort the columns of D under values that keep their
+// order, so it rejects the call before it writes anything. Compute takes each
+// entry of D with its value and accepts the call, unless a row of C needs
+// sorted storage, which it reports before it writes any row.
+TEST_F(ExtraSpgemm, alias_c_d_unsorted)
+{
+    const rocsparse_storage_mode unsorted = rocsparse_storage_mode_unsorted;
+    const float                  alpha = 1.0f, beta = 1.0f;
+
+    // With n = 33000, the second row of C goes through the bitmap algorithm.
+    for(int64_t n : {int64_t(3), int64_t(33000)})
+    {
+        SCOPED_TRACE("n " + std::to_string(n));
+        const int64_t        w = std::max<int64_t>(n, 3);
+        std::vector<int64_t> colB = {0, 1, 2}, colD = {2, 0, 1};
+        std::vector<double>  valB = {1, 2, 3}, valD = {10, 20, 30};
+        for(int64_t j = 0; j < n; ++j)
+        {
+            colB.push_back(j);
+            colD.push_back(j);
+            valB.push_back(1.0);
+            valD.push_back(static_cast<double>(j % 7 + 1));
+        }
+        const Bsr A = bsr_of(2, 2, 1, {0, 1, 2}, {0, 1}, {1, 1});
+        const Bsr B = bsr_of(2, w, 1, {0, 3, 3 + n}, colB, valB);
+        const Bsr D = bsr_of(2, w, 1, {0, 3, 3 + n}, colD, valD);
+        const Bsr want
+            = bsr_gemm(true, cplx(1.0, 0.0), A, B, true, cplx(1.0, 0.0), D, D.mb, D.nb);
+
+        auto make_cd = [&](Operand<float, int32_t, int32_t>& o) {
+            ASSERT_NO_FATAL_FAILURE(
+                o.create(D, false, rocsparse_direction_row, rocsparse_index_base_zero));
+            ASSERT_EQ(rocsparse_spmat_set_attribute(
+                          o.d.p, rocsparse_spmat_storage_mode, &unsorted, sizeof(unsorted)),
+                      rocsparse_status_success);
+        };
+
+        Operand<float, int32_t, int32_t> oA, oB;
+        ASSERT_NO_FATAL_FAILURE(
+            oA.create(A, false, rocsparse_direction_row, rocsparse_index_base_zero));
+        ASSERT_NO_FATAL_FAILURE(
+            oB.create(B, false, rocsparse_direction_row, rocsparse_index_base_zero));
+
+        auto call = [&](const Operand<float, int32_t, int32_t>& o,
+                        rocsparse_spgemm_stage                  stage,
+                        size_t*                                 bs,
+                        void*                                   tmp) {
+            return spgemm_call<float>(
+                handle, &alpha, oA.d.p, oB.d.p, &beta, o.d.p, o.d.p, stage, bs, tmp);
+        };
+        auto expect_d_unchanged = [&](const Operand<float, int32_t, int32_t>& o) {
+            ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+            expect_idx_equal<int32_t>(o.p.host(), D.ptr, 0, "row pointer of D");
+            expect_idx_equal<int32_t>(o.c.host(), D.col, 0, "column indices of D");
+            EXPECT_EQ(o.v.host(), bsr_pack<float>(D, rocsparse_direction_row)) << "values of D";
+        };
+
+        Operand<float, int32_t, int32_t> oCD;
+        ASSERT_NO_FATAL_FAILURE(make_cd(oCD));
+        size_t bsz = 0;
+        ASSERT_EQ(call(oCD, rocsparse_spgemm_stage_buffer_size, &bsz, nullptr),
+                  rocsparse_status_success);
+        DevBuf<char> buffer(bsz);
+        ASSERT_TRUE(buffer.ptr);
+
+        if(n == 3)
+        {
+            ASSERT_EQ(call(oCD, rocsparse_spgemm_stage_nnz, &bsz, buffer.ptr),
+                      rocsparse_status_success);
+            EXPECT_EQ(call(oCD, rocsparse_spgemm_stage_symbolic, &bsz, buffer.ptr),
+                      rocsparse_status_requires_sorted_storage);
+            ASSERT_NO_FATAL_FAILURE(expect_d_unchanged(oCD));
+
+            Operand<float, int32_t, int32_t> oCD2;
+            ASSERT_NO_FATAL_FAILURE(make_cd(oCD2));
+            ASSERT_EQ(call(oCD2, rocsparse_spgemm_stage_compute, &bsz, buffer.ptr),
+                      rocsparse_status_success);
+            ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+            expect_bsr_equal<float, int32_t, int32_t>(
+                oCD2.p.host(), oCD2.c.host(), oCD2.v.host(), want, rocsparse_direction_row, 0);
+        }
+        else
+        {
+            EXPECT_EQ(call(oCD, rocsparse_spgemm_stage_compute, &bsz, buffer.ptr),
+                      rocsparse_status_requires_sorted_storage);
+            ASSERT_NO_FATAL_FAILURE(expect_d_unchanged(oCD));
+        }
+    }
+}
+
 // One row of C with n + extra entries: A = [1], B is a row of n ones, D holds
 // j % 7 + 1 at the n columns of B and at extra more. A row with more entries
 // than the hash table of its group fits in shared memory goes through the
 // bitmap algorithm (with 64 KiB and 32-bit column indices, beyond 4096 entries
 // for float and 2048 for double complex; on every device beyond 32768; in the
 // nnz stage, which counts products and entries of D, beyond 8192 with 64 KiB
-// and 65536 on every device); the shorter rows stay in the hash groups.
+// and 65536 on every device); the shorter rows stay in the hash groups. C is
+// also a second descriptor that shares only the row pointer and column indices
+// of D.
 namespace
 {
     template <typename T>
@@ -864,16 +1050,18 @@ namespace
         const Bsr D = bsr_of(1, w, 1, {0, w}, colD, valD);
         for(Stages s : kCsrStages)
             for(bool dev : {false, true})
-            {
-                AliasCase c;
-                c.alpha  = alpha;
-                c.beta   = beta;
-                c.device = dev;
-                c.stages = s;
-                run_alias<T, int32_t, int32_t>(handle, c, A, B, D);
-                if(::testing::Test::HasFatalFailure())
-                    return;
-            }
+                for(bool own_values : {false, true})
+                {
+                    AliasCase c;
+                    c.alpha      = alpha;
+                    c.beta       = beta;
+                    c.device     = dev;
+                    c.stages     = s;
+                    c.own_values = own_values;
+                    run_alias<T, int32_t, int32_t>(handle, c, A, B, D);
+                    if(::testing::Test::HasFatalFailure())
+                        return;
+                }
     }
 }
 
@@ -904,19 +1092,9 @@ TEST_F(ExtraSpgemm, alias_c_d_pattern_mismatch)
 {
     for(int64_t bd : {1, 2})
     {
-        const int64_t       bb = bd * bd;
-        std::vector<double> blk(static_cast<size_t>(bb), 0.0);
-        for(int64_t r = 0; r < bd; ++r)
-            blk[static_cast<size_t>(r * bd + r)] = 1.0;
-        auto vals = [&](int64_t nnzb) {
-            std::vector<double> v;
-            for(int64_t p = 0; p < nnzb; ++p)
-                v.insert(v.end(), blk.begin(), blk.end());
-            return v;
-        };
-        const Bsr  A   = bsr_of(2, 3, bd, {0, 2, 2}, {0, 1}, vals(2));
-        const Bsr  B   = bsr_of(3, 4, bd, {0, 2, 3, 3}, {0, 2, 0}, vals(3));
-        const Bsr  D   = bsr_of(2, 4, bd, {0, 2, 3}, {0, 1, 3}, vals(3));
+        const Bsr  A   = bsr_of(2, 3, bd, {0, 2, 2}, {0, 1}, identity_blocks(2, bd));
+        const Bsr  B   = bsr_of(3, 4, bd, {0, 2, 3, 3}, {0, 2, 0}, identity_blocks(3, bd));
+        const Bsr  D   = bsr_of(2, 4, bd, {0, 2, 3}, {0, 1, 3}, identity_blocks(3, bd));
         const bool bsr = bd > 1;
         SCOPED_TRACE(bsr ? "bsr" : "csr");
 
@@ -1039,19 +1217,9 @@ TEST_F(ExtraSpgemm, alias_c_d_base_mismatch)
     for(int64_t bd : {1, 2})
         for(const auto& b : bases)
         {
-            const int64_t       bb = bd * bd;
-            std::vector<double> blk(static_cast<size_t>(bb), 0.0);
-            for(int64_t r = 0; r < bd; ++r)
-                blk[static_cast<size_t>(r * bd + r)] = 1.0;
-            auto vals = [&](int64_t nnzb) {
-                std::vector<double> v;
-                for(int64_t p = 0; p < nnzb; ++p)
-                    v.insert(v.end(), blk.begin(), blk.end());
-                return v;
-            };
-            const Bsr  A   = bsr_of(2, 3, bd, {0, 2, 2}, {0, 1}, vals(2));
-            const Bsr  B   = bsr_of(3, 4, bd, {0, 2, 3, 3}, {0, 2, 0}, vals(3));
-            const Bsr  D   = bsr_of(2, 4, bd, {0, 3, 4}, {0, 1, 2, 3}, vals(4));
+            const Bsr  A   = bsr_of(2, 3, bd, {0, 2, 2}, {0, 1}, identity_blocks(2, bd));
+            const Bsr  B   = bsr_of(3, 4, bd, {0, 2, 3, 3}, {0, 2, 0}, identity_blocks(3, bd));
+            const Bsr  D   = bsr_of(2, 4, bd, {0, 3, 4}, {0, 1, 2, 3}, identity_blocks(4, bd));
             const bool bsr = bd > 1;
             SCOPED_TRACE(std::string(bsr ? "bsr" : "csr") + " bases=" + std::to_string(int(b[0]))
                          + std::to_string(int(b[1])));
