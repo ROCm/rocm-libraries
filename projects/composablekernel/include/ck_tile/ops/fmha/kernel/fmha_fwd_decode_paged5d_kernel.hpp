@@ -46,10 +46,9 @@ struct FmhaDecodePaged5dHostArgs
     index_t nhead_q;
     index_t nhead_k;
     index_t max_blocks_per_seq;
-    index_t page_size;       // tokens per cache page: 16, 64 or 128
-    index_t window;          // keys attended, the query's own included; 0 = no window
-    index_t pages_per_split; // lengthened in the kernel if the grid would not cover a range
-    index_t num_groups;      // clusters per (batch, kv head)
+    index_t page_size;  // tokens per cache page: 16, 64 or 128
+    index_t window;     // keys attended, the query's own included; 0 = no window
+    index_t num_groups; // clusters per (batch, kv head)
     float scale_s;
     bool qo_fp16 = false; // Q and O are fp16 instead of bf16
 };
@@ -61,6 +60,8 @@ inline constexpr index_t kMaxClusterSplits = 16;
 struct FmhaDecodePaged5dConfig
 {
     index_t num_splits;
+    // 16-token pages per split for the longest range (fmha_decode_paged5d_split_pages); the kernel
+    // sizes splits from the grid and each sequence's own range
     index_t pages_per_split;
     bool wave_split;
     index_t num_groups = 1;
@@ -77,6 +78,20 @@ CK_TILE_HOST index_t fmha_decode_paged5d_max_span(index_t max_seqlen_k,
     if(window > 0)
         span = std::min<index_t>(span, (window + 15) / 16 + 1 + (page_size > 16 ? 3 : 0));
     return std::max<index_t>(span, 1);
+}
+
+// Pages per split the kernel uses for a range of span 16-token pages on this grid: the range
+// spread over all splits in whole steps, at least 8 pages for cooperative splits of several
+// clusters (FmhaDecodePaged5dKernel::Run computes the same on the device).
+CK_TILE_HOST index_t fmha_decode_paged5d_split_pages(index_t span,
+                                                     index_t num_splits,
+                                                     index_t num_groups,
+                                                     bool wave_split)
+{
+    const index_t step  = wave_split ? 16 : 4;
+    const index_t total = num_splits * num_groups;
+    const index_t cover = ((span + total - 1) / total + step - 1) / step * step;
+    return std::max<index_t>(cover, wave_split ? 16 : (num_groups > 1 ? 8 : 4));
 }
 
 // Layout for key ranges of up to span pages and heads = batch * nhead_k kv heads.
@@ -100,7 +115,12 @@ CK_TILE_HOST FmhaDecodePaged5dConfig fmha_decode_paged5d_config(
     const auto make     = [&](index_t pps, bool wave_split) {
         const index_t total  = ceil_div(span, pps);
         const index_t groups = ceil_div(total, kMaxClusterSplits);
-        return FmhaDecodePaged5dConfig{ceil_div(total, groups), pps, wave_split, groups};
+        const index_t splits = ceil_div(total, groups);
+        return FmhaDecodePaged5dConfig{
+            splits,
+            fmha_decode_paged5d_split_pages(span, splits, groups, wave_split),
+            wave_split,
+            groups};
     };
     constexpr index_t kC = kMaxClusterSplits;
     // the most wave-split splits per head that keep the grid within 480 workgroups
@@ -144,15 +164,45 @@ CK_TILE_HOST size_t fmha_decode_paged5d_workspace_bytes(index_t batch,
 {
     // per split: bf16 O / l [batch][nhead_k][groups][splits][16][128] and fp32 (m, l) [..][16][2];
     // per group the same with one split
+    if(batch <= 0 || nhead_k <= 0 || num_splits <= 0 || num_groups <= 0)
+        return 0;
     const size_t heads = static_cast<size_t>(batch) * nhead_k;
     const size_t rows  = heads * num_groups * num_splits * 16;
     const size_t grows = num_groups > 1 ? heads * num_groups * 16 : 0;
     return (rows + grows) * (128 * 2 + 2 * sizeof(float));
 }
 
+// At least fmha_decode_paged5d_workspace_bytes of the selected configuration for any context
+// length, window and page size, and non-decreasing in batch * nhead_k, so one buffer sized for
+// the largest batch serves every call. Per kv head fmha_decode_paged5d_config makes at most 16
+// splits in one cluster (up to 128 heads), at most 192 and 512 / heads cooperative splits, or
+// about 384 / heads and at most 480 / heads wave-split splits; a test checks the bound.
+CK_TILE_HOST size_t fmha_decode_paged5d_max_workspace_bytes(index_t batch, index_t nhead_k)
+{
+    if(batch <= 0 || nhead_k <= 0)
+        return 0;
+    // split slots of all kv heads; with several groups splits * groups < total + groups, plus one
+    // merge slot per group
+    const auto slots = [](size_t h) {
+        const size_t one_cluster = h <= 128 ? 16 : 1;
+        const size_t total       = std::max<size_t>(
+            {one_cluster, std::min<size_t>(192, 512 / h), (384 + h - 1) / h, 480 / h});
+        const size_t groups = (total + kMaxClusterSplits - 1) / kMaxClusterSplits;
+        return h * (groups > 1 ? total + 2 * groups : total);
+    };
+    // fewer heads can need more in total (more splits per head)
+    const size_t heads = static_cast<size_t>(batch) * nhead_k;
+    size_t most        = slots(heads);
+    for(size_t h = 1; h < std::min<size_t>(heads, 512); ++h)
+        most = std::max(most, slots(h));
+    return most * 16 * (128 * 2 + 2 * sizeof(float));
+}
+
 // one per (batch, kv head, row block) for any configuration
 CK_TILE_HOST size_t fmha_decode_paged5d_num_counters(index_t batch, index_t nhead_k)
 {
+    if(batch <= 0 || nhead_k <= 0)
+        return 0;
     return static_cast<size_t>(batch) * nhead_k * kMaxClusterSplits;
 }
 
@@ -204,7 +254,6 @@ struct FmhaDecodePaged5dKernel
         index_t gqa; // nhead_q / nhead_k, so the kernel does not divide
         index_t max_blocks_per_seq;
         index_t window;
-        index_t pages_per_split;
         index_t num_groups; // read with kGroups only
         // ceil(2^32 / (kNumSplits * num_groups)), for kGroups: the high half of a product with it
         // divides by the split count
@@ -238,7 +287,6 @@ struct FmhaDecodePaged5dKernel
                 h.nhead_q / h.nhead_k,
                 h.max_blocks_per_seq,
                 h.window,
-                h.pages_per_split,
                 h.num_groups,
                 static_cast<uint32_t>(((uint64_t{1} << 32) + kNumSplits * h.num_groups - 1) /
                                       (kNumSplits * h.num_groups)),
@@ -405,7 +453,9 @@ struct FmhaDecodePaged5dKernel
         // step's four pages of a wave lie in one cache page (positions before lo are masked)
         const index_t pg_lo = kSubPages > 1 ? lo / kPage / 4 * 4 : lo / kPage;
         const index_t span  = max(pg_hi - pg_lo, 1);
-        // this range over all splits of the grid, in whole steps and at most the configured size
+        // this range over all splits of the grid in whole steps (fmha_decode_paged5d_split_pages);
+        // cooperative splits of several clusters take at least 8 pages, so a range shorter than
+        // the grid was sized for leaves later clusters empty, and they skip the merge
         constexpr index_t kMinPages = kWaveSplit ? 16 : (kGroups ? 8 : 4);
         index_t per_split;
         if constexpr(kGroups)
@@ -413,9 +463,8 @@ struct FmhaDecodePaged5dKernel
                 __umulhi(static_cast<uint32_t>(span + kNumSplits * a.num_groups - 1), a.splits_rcp);
         else
             per_split = (span + kNumSplits - 1) / kNumSplits;
-        // the configured size, but never too short to cover the range with this grid
         const index_t cover = (per_split + kStepPages - 1) / kStepPages * kStepPages;
-        const index_t pps   = max(cover, min(a.pages_per_split, max(kMinPages, cover)));
+        const index_t pps   = max(cover, kMinPages);
         // groups without pages take no part in the merge
         if(gi > 0 && gi * kNumSplits * pps >= span)
             return;

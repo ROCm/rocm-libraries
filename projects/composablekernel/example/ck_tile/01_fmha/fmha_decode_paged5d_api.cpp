@@ -11,13 +11,22 @@
 
 extern "C" {
 
-// Bytes of scratch workspace for these sizes.
+// Bytes of scratch workspace for these sizes, 0 for invalid sizes.
 size_t ck_fmha_decode_paged5d_workspace_bytes(
     int batch, int nhead_k, int max_seqlen_k, int window, int page_size)
 {
+    if(max_seqlen_k < 0 || (page_size != 16 && page_size != 64 && page_size != 128))
+        return 0;
     const auto c =
         ck_tile::fmha_decode_paged5d_config(batch, nhead_k, max_seqlen_k, window, page_size);
     return ck_tile::fmha_decode_paged5d_workspace_bytes(batch, nhead_k, c.num_splits, c.num_groups);
+}
+
+// An upper bound of ck_fmha_decode_paged5d_workspace_bytes over all context lengths, windows and
+// page sizes; it grows with batch * nhead_k. 0 for invalid sizes.
+size_t ck_fmha_decode_paged5d_max_workspace_bytes(int batch, int nhead_k)
+{
+    return ck_tile::fmha_decode_paged5d_max_workspace_bytes(batch, nhead_k);
 }
 
 // int32 counters for this batch; zero them once, calls of any shape share them (not concurrently).
@@ -50,9 +59,8 @@ int ck_fmha_decode_paged5d(const void* q,
                            float scale_s,
                            hipStream_t stream)
 {
-    if(batch <= 0 || nhead_k <= 0 || nhead_q % nhead_k != 0 || nhead_q / nhead_k > 16)
-        return hipErrorInvalidValue;
-    if(workspace == nullptr || counters == nullptr)
+    // the other arguments are checked by fmha_decode_paged5d::launch
+    if(batch <= 0 || nhead_k <= 0 || max_seqlen_k < 0 || block_table_stride <= 0)
         return hipErrorInvalidValue;
     const auto c =
         ck_tile::fmha_decode_paged5d_config(batch, nhead_k, max_seqlen_k, window, page_size);
@@ -72,7 +80,6 @@ int ck_fmha_decode_paged5d(const void* q,
                                                   block_table_stride,
                                                   page_size,
                                                   window,
-                                                  c.pages_per_split,
                                                   c.num_groups,
                                                   scale_s,
                                                   qo_fp16 != 0};

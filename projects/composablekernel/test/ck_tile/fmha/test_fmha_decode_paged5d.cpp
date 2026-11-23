@@ -170,6 +170,42 @@ TEST_P(DecodePaged5d, CountsEveryKeyOnce)
     EXPECT_TRUE(r.valid) << describe(r);
 }
 
+// fmha_decode_paged5d_max_workspace_bytes bounds every selected configuration and grows with the
+// kv heads (host only: callers size one workspace buffer with it)
+TEST(DecodePaged5dHost, MaxWorkspaceBoundsSelector)
+{
+    std::vector<ck_tile::index_t> lengths;
+    for(ck_tile::index_t s = 0; s <= 40000; s += 16)
+        lengths.push_back(s);
+    for(ck_tile::index_t s = 40000; s <= 1 << 20; s += s / 7)
+        lengths.push_back(s);
+    size_t checked = 0;
+    for(const ck_tile::index_t nhead_k : {1, 8})
+        for(const ck_tile::index_t batch :
+            {1,  2,  3,  4,   5,   8,   13,  16,  24,  31,  32,  33,  48,
+             64, 65, 96, 128, 129, 160, 192, 255, 256, 384, 480, 481, 512})
+        {
+            const size_t bound = ck_tile::fmha_decode_paged5d_max_workspace_bytes(batch, nhead_k);
+            for(const ck_tile::index_t ps : {16, 64, 128})
+                for(const ck_tile::index_t w : {0, 1, 300, 2048, 4000, 23040})
+                    for(const ck_tile::index_t s : lengths)
+                    {
+                        const auto c =
+                            ck_tile::fmha_decode_paged5d_config(batch, nhead_k, s, w, ps);
+                        const size_t need = ck_tile::fmha_decode_paged5d_workspace_bytes(
+                            batch, nhead_k, c.num_splits, c.num_groups);
+                        ASSERT_LE(need, bound) << "b " << batch << " h_k " << nhead_k << " s_k "
+                                               << s << " window " << w << " page " << ps;
+                        ++checked;
+                    }
+        }
+    EXPECT_GT(checked, 0u);
+    for(ck_tile::index_t heads = 1; heads < 2048; ++heads)
+        ASSERT_LE(ck_tile::fmha_decode_paged5d_max_workspace_bytes(heads, 1),
+                  ck_tile::fmha_decode_paged5d_max_workspace_bytes(heads + 1, 1))
+            << heads;
+}
+
 INSTANTIATE_TEST_SUITE_P(Gfx125,
                          DecodePaged5d,
                          ::testing::ValuesIn(params()),

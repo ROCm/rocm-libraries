@@ -8,6 +8,8 @@
 #pragma once
 
 #include <algorithm>
+#include <array>
+#include <atomic>
 #include <cmath>
 #include <limits>
 #include <numeric>
@@ -30,6 +32,27 @@ constexpr uint8_t kFp8One       = 0x38;
 constexpr uint8_t kFp8ThirtyTwo = 0x60;
 constexpr index_t kNeedleDims   = kHdim / 16;
 
+// hipGetFuncBySymbol returns a handle for the current device, so one is kept per device
+template <typename K>
+hipError_t launch_cluster_function(hipFunction_t& fn)
+{
+    static std::array<std::atomic<hipFunction_t>, 64> per_device{};
+    const void* sym =
+        reinterpret_cast<const void*>(&ck_tile::fmha_decode_paged5d_entry_launch_cluster<K>);
+    int dev = 0;
+    if(const hipError_t e = hipGetDevice(&dev); e != hipSuccess)
+        return e;
+    if(dev < 0 || dev >= static_cast<int>(per_device.size()))
+        return hipGetFuncBySymbol(&fn, sym);
+    fn = per_device[dev].load(std::memory_order_relaxed);
+    if(fn != nullptr)
+        return hipSuccess;
+    const hipError_t e = hipGetFuncBySymbol(&fn, sym);
+    if(e == hipSuccess)
+        per_device[dev].store(fn, std::memory_order_relaxed);
+    return e;
+}
+
 template <bool kWaveSplit, index_t kNumSplits, bool kGroups, index_t kPageSize, bool kQoFp16>
 hipError_t launch_one(const ck_tile::FmhaDecodePaged5dHostArgs& h, hipStream_t stream)
 {
@@ -43,14 +66,9 @@ hipError_t launch_one(const ck_tile::FmhaDecodePaged5dHostArgs& h, hipStream_t s
     if constexpr(kNumSplits > 15)
     {
         // see fmha_decode_paged5d_entry_launch_cluster
-        static const hipFunction_t fn = [] {
-            hipFunction_t f = nullptr;
-            HIP_CHECK_ERROR(
-                hipGetFuncBySymbol(&f,
-                                   reinterpret_cast<const void*>(
-                                       &ck_tile::fmha_decode_paged5d_entry_launch_cluster<K>)));
-            return f;
-        }();
+        hipFunction_t fn = nullptr;
+        if(const hipError_t e = launch_cluster_function<K>(fn); e != hipSuccess)
+            return e;
         const dim3 grid = K::GridSize(h.batch, h.nhead_k, h.num_groups);
         HIP_LAUNCH_CONFIG cfg{};
         cfg.gridDimX    = grid.x;
@@ -125,8 +143,15 @@ inline hipError_t launch(const ck_tile::FmhaDecodePaged5dHostArgs& h,
                          const ck_tile::FmhaDecodePaged5dConfig& c,
                          hipStream_t stream)
 {
-    // larger cache pages need whole 4-page groups per split (see FmhaDecodePaged5dKernel::Run)
-    if(h.page_size != 16 && c.pages_per_split % 4 != 0)
+    // the kernel trusts these: a violation leaves rows unwritten or reads out of bounds
+    if(h.batch <= 0 || h.nhead_k <= 0 || h.nhead_q <= 0 || h.nhead_q % h.nhead_k != 0 ||
+       h.nhead_q / h.nhead_k > 16 || h.max_blocks_per_seq <= 0)
+        return hipErrorInvalidValue;
+    if(!h.q_ptr || !h.k_ptr || !h.v_ptr || !h.block_table || !h.seqlen_k_ptr || !h.k_descale_ptr ||
+       !h.v_descale_ptr || !h.o_ptr || !h.counters_ptr)
+        return hipErrorInvalidValue;
+    if(c.num_splits <= 0 || c.num_splits > ck_tile::kMaxClusterSplits || c.num_groups <= 0 ||
+       c.num_groups != h.num_groups || h.workspace_ptr == nullptr)
         return hipErrorInvalidValue;
     return h.qo_fp16 ? launch_type<true>(h, c, stream) : launch_type<false>(h, c, stream);
 }
@@ -220,6 +245,9 @@ inline Result run(const Case& c, bool validate, int warmup = 0, int repeat = 0)
         cfg.num_groups      = (total + ck_tile::kMaxClusterSplits - 1) / ck_tile::kMaxClusterSplits;
         cfg.num_splits      = (total + cfg.num_groups - 1) / cfg.num_groups;
     }
+    // what the kernel uses for the bound after the overrides above
+    cfg.pages_per_split = ck_tile::fmha_decode_paged5d_split_pages(
+        span, cfg.num_splits, cfg.num_groups, cfg.wave_split);
     res.config = cfg;
 
     std::mt19937 rng(c.seed);
@@ -355,7 +383,6 @@ inline Result run(const Case& c, bool validate, int warmup = 0, int repeat = 0)
         max_blocks,
         ps,
         c.window,
-        cfg.pages_per_split,
         cfg.num_groups,
         scale_s,
         c.fp16};

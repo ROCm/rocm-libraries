@@ -21,6 +21,11 @@ _lib = None
 _buffers = {}
 _ones = {}
 
+# aiter pa_decode arguments this kernel has no use for (its own scratch and tuning)
+_IGNORED = ("context_partition_size", "exp_sums", "max_logits", "temporary_output")
+# aiter pa_decode arguments accepted at their defaults only
+_DEFAULTS = {"mask_unowned_kv": True, "store_output": True, "quantized_pad_rows": 0}
+
 
 def _load():
     global _lib
@@ -28,8 +33,8 @@ def _load():
         lib = ctypes.CDLL(
             os.environ.get("CK_FMHA_DECODE_PAGED5D_LIB", "libck_fmha_decode_paged5d.so")
         )
-        lib.ck_fmha_decode_paged5d_workspace_bytes.restype = ctypes.c_size_t
-        lib.ck_fmha_decode_paged5d_workspace_bytes.argtypes = [ctypes.c_int] * 5
+        lib.ck_fmha_decode_paged5d_max_workspace_bytes.restype = ctypes.c_size_t
+        lib.ck_fmha_decode_paged5d_max_workspace_bytes.argtypes = [ctypes.c_int] * 2
         lib.ck_fmha_decode_paged5d_num_counters.restype = ctypes.c_size_t
         lib.ck_fmha_decode_paged5d_num_counters.argtypes = [ctypes.c_int] * 2
         lib.ck_fmha_decode_paged5d.restype = ctypes.c_int
@@ -48,8 +53,9 @@ def _buffer(kind, nbytes, device):
     """Scratch workspace or zeroed counters, shared by all calls on a device; grows on demand.
 
     Calls must not run concurrently (the kernel leaves the counters at zero for the next call).
-    Make the first call at the largest shape eagerly: growing is not possible during graph
-    capture. Outgrown buffers are kept since captured graphs may still use them.
+    Both sizes depend only on num_seqs * num_kv_heads: make the first call at the largest batch
+    eagerly, since growing is not possible during graph capture. Outgrown buffers are kept since
+    captured graphs may still use them.
     """
     buffers = _buffers.setdefault((kind, device), [])
     if not buffers or buffers[-1].numel() < nbytes:
@@ -98,6 +104,7 @@ def pa_decode(
     sliding_window=0,  # keys attended, the query's own included; 0 = no window
     max_context_length=None,
     work_plan=None,  # accepted for call compatibility; this kernel needs no plan
+    compute_type=None,  # None or the cache dtype
     **unsupported,
 ):
     """Decode attention of one query token per sequence.
@@ -107,8 +114,18 @@ def pa_decode(
     call can be captured in a HIP graph. max_context_length must bound every context length.
     """
     for name, value in unsupported.items():
+        if name in _IGNORED:
+            continue
+        if name in _DEFAULTS:
+            if value != _DEFAULTS[name]:
+                raise NotImplementedError(
+                    f"CK pa_decode supports {name}={_DEFAULTS[name]} only"
+                )
+            continue
         if isinstance(value, torch.Tensor) or value not in (None, False, 0):
             raise NotImplementedError(f"CK pa_decode does not support {name}")
+    if compute_type is not None and compute_type != key_cache.dtype:
+        raise NotImplementedError("CK pa_decode computes in the fp8 type of the caches")
     if query_length != 1:
         raise NotImplementedError("CK pa_decode supports query_length 1 only")
     batch, nhead_q, hdim = query.shape
@@ -161,11 +178,54 @@ def pa_decode(
 
     lib = _load()
     device = query.device
+    # the library launches on, and looks kernels up for, the current device
+    with torch.cuda.device(device):
+        _launch(
+            lib,
+            device,
+            output,
+            query,
+            key_cache,
+            value_cache,
+            context_lengths,
+            block_tables,
+            softmax_scale,
+            key_scale,
+            value_scale,
+            batch,
+            nhead_q,
+            nhead_k,
+            max_context_length,
+            sliding_window,
+            page,
+        )
+
+
+def _launch(
+    lib,
+    device,
+    output,
+    query,
+    key_cache,
+    value_cache,
+    context_lengths,
+    block_tables,
+    softmax_scale,
+    key_scale,
+    value_scale,
+    batch,
+    nhead_q,
+    nhead_k,
+    max_context_length,
+    sliding_window,
+    page,
+):
     stream = torch.cuda.current_stream(device).cuda_stream
-    nbytes = lib.ck_fmha_decode_paged5d_workspace_bytes(
-        batch, nhead_k, max_context_length, sliding_window, page
+    ws = _buffer(
+        "workspace",
+        lib.ck_fmha_decode_paged5d_max_workspace_bytes(batch, nhead_k),
+        device,
     )
-    ws = _buffer("workspace", nbytes, device)
     counters = _buffer(
         "counters", lib.ck_fmha_decode_paged5d_num_counters(batch, nhead_k) * 4, device
     )
