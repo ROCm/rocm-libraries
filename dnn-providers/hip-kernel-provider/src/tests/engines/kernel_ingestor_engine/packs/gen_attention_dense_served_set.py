@@ -17,14 +17,14 @@ Rows, one per line, ``{arch, kernel, variant, {overrides}, served}``:
   kernel is built from, which the KDP records beside its KMD metadata. The census loads the real
   pack, so a kernel of a body class the rule gets wrong is judged where it ships;
 * for each distinct (dtype, head_size) of the catalog, that first kernel's spec with a body-class
-  flip applied (persistent in each work order, ragged, persistent and ragged, and on gfx942 the K
-  double buffer, the V prefetch and the KV-segment split), with rocKE's answer for the flipped
-  spec. The census applies the same overrides to the shipped kernel's KMD metadata and asks the
-  engine. This is how a class the catalog does not carry today (a gfx950 persistent kernel) is
-  still held to rocKE. Flips rocKE's spec rejects are left out.
+  flip applied (persistent in each work order, ragged, persistent and ragged, the additive bias,
+  and on gfx942 the K double buffer, the V prefetch and the KV-segment split), with rocKE's
+  answer for the flipped spec. The census applies the same overrides to the shipped kernel's
+  KMD metadata and asks the engine. This is how a class the catalog does not carry today (a
+  gfx950 persistent kernel) is still held to rocKE. Flips rocKE's spec rejects are left out.
 
-Not covered, on purpose: varlen and paged specs. The KMD cannot express them and their
-kernels take more arguments than the 22 the engine launches, so the argument census
+Not covered, on purpose: varlen, paged and (gfx950) fp8 K/V-cache specs. The KMD cannot express
+them and their kernels take more arguments than the 22 the engine launches, so the argument census
 (EveryShippedKernelTakesTheArgumentsTheEngineLaunches) fails first.
 
 With no KDP the table is empty and the census reports that instead of passing vacuously.
@@ -48,6 +48,7 @@ import typing
 # spelled as a C++ string, an integer (a flag too) as an integer.
 _PERSISTENT = ({"persistent": True}, (("persistent", 1),))
 _RAGGED = ({"ragged": True}, (("ragged", 1),))
+_BIAS = ({"use_additive_bias": True}, (("use_additive_bias", 1),))
 _GFX950_DECODES = (
     "auto",
     "qb_major",
@@ -61,6 +62,7 @@ _FLIPS = {
     "gfx950": {
         "persistent": _PERSISTENT,
         "ragged": _RAGGED,
+        "additive_bias": _BIAS,
         "persistent_ragged": (
             {"persistent": True, "ragged": True},
             (("persistent", 1), ("ragged", 1)),
@@ -76,6 +78,7 @@ _FLIPS = {
     "gfx942": {
         "persistent": _PERSISTENT,
         "ragged": _RAGGED,
+        "additive_bias": _BIAS,
         "lds_num_buffers": ({"lds_num_buffers": 2}, (("lds_num_buffers", 2),)),
         "v_reg_prefetch": ({"v_reg_prefetch": True}, (("v_reg_prefetch", 1),)),
         "kv_segments": ({"kv_segments": 2}, (("kv_segments", 2),)),

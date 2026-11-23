@@ -1334,6 +1334,33 @@ TEST_P(TestAttentionDenseBiasDispatch, RefusesABiasContractWithoutABiasBinding)
     EXPECT_NE(result.message.find("binds no additive bias"), std::string::npos) << result.message;
 }
 
+/// A bias body addresses packed Q/K/V/O: its bias reads are written against them. A strided
+/// graph (every operand BHSD, so no operand is dense BSHD) with a bias must therefore be refused
+/// by name at prepare(), where the kernel match would not have matched, rather than launched at
+/// strides the body ignores, which is a wrong answer with no fault. The same body over a packed
+/// graph gets past the layout check.
+TEST_P(TestAttentionDenseBiasDispatch, RefusesToPrepareAStridedGraphForABiasBody)
+{
+    auto spec = servedBiasGraph();
+    spec.setEveryLayout(SdpaLayout::BHSD);
+    const Graph strided(arch(), spec);
+    const auto bound = bindingsFor(strided);
+
+    const std::string failure
+        = prepareFailure(strided, bound, makeBiasKernel(arch(), /*bias=*/true));
+    ASSERT_FALSE(failure.empty()) << "prepare() did not fail at all";
+    EXPECT_NE(failure.find("reads packed operands only and does not read the stride arguments"),
+              std::string::npos)
+        << failure;
+    EXPECT_NE(failure.find(OUTPUT_LAYOUT_MARKER), std::string::npos) << failure;
+
+    const Graph packed(arch(), servedBiasGraph());
+    const std::string packedFailure
+        = prepareFailure(packed, bindingsFor(packed), makeBiasKernel(arch(), /*bias=*/true));
+    ASSERT_FALSE(packedFailure.empty());
+    EXPECT_EQ(packedFailure.find(OUTPUT_LAYOUT_MARKER), std::string::npos) << packedFailure;
+}
+
 INSTANTIATE_TEST_SUITE_P(,
                          TestAttentionDenseBiasDispatch,
                          ::testing::ValuesIn(biasServingArches()),

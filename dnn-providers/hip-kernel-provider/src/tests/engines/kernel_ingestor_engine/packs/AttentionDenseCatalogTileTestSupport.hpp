@@ -204,8 +204,9 @@ inline const std::vector<AttentionDenseServedRow>& attentionDenseServedRows()
  * reads KMD fields where rocKE reads the whole spec, so the two are compared where they can
  * disagree: on the real kernels (the rows of variant "", which name every kernel of the pack, no
  * more and no fewer) and on the shipped kernel with one body-class field flipped (persistent,
- * ragged and, on gfx942, the K double buffer, the V prefetch and the KV-segment split), which
- * holds the engine to rocKE for a class the catalog does not carry today.
+ * ragged, the additive bias and, on gfx942, the K double buffer, the V prefetch and the
+ * KV-segment split), which holds the engine to rocKE for a class the catalog does not carry
+ * today.
  */
 inline void expectEveryShippedAttentionDenseKernelReadsItsStridesAsRockeSaysItDoes(
     std::string_view engineName,
