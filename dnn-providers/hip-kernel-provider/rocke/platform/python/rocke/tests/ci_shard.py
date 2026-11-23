@@ -43,9 +43,12 @@ __all__ = [
     "GTEST_INDEX_ENV",
     "GTEST_TOTAL_ENV",
     "SHARD_ENV",
+    "WORKER_ENV",
     "Shard",
+    "adopt_worker",
     "check_cost",
     "current_shard",
+    "current_worker",
     "header_line",
     "parse_shard",
     "place_keys",
@@ -57,6 +60,9 @@ __all__ = [
 SHARD_ENV = "ROCKE_TEST_SHARD"
 GTEST_INDEX_ENV = "GTEST_SHARD_INDEX"
 GTEST_TOTAL_ENV = "GTEST_TOTAL_SHARDS"
+# ``"<index>/<count>"`` (0-based) in a worker process of
+# ``rocke.tests.ctest_workers``: the share of the run's tests it runs.
+WORKER_ENV = "ROCKE_TEST_WORKER"
 # The option that makes a run take its shard from the gtest pair. A CTest entry
 # whose command carries it runs only its CI shard's share.
 ACTIVATION_FLAG = "--rocke-shard-from-gtest-env"
@@ -65,6 +71,7 @@ ACTIVATION_FLAG = "--rocke-shard-from-gtest-env"
 # TheRock's 1-based pair.
 CHILD_ENV_EXCLUDED = (
     SHARD_ENV,
+    WORKER_ENV,
     GTEST_INDEX_ENV,
     GTEST_TOTAL_ENV,
     "SHARD_INDEX",
@@ -251,6 +258,46 @@ def current_shard(
     """This run's :class:`Shard` by :func:`resolve_shard`'s rule, or ``None``."""
     resolved = resolve_shard(env, from_gtest)
     return None if resolved is None else Shard(*resolved)
+
+
+# This process's worker identity once adopt_worker() has taken it from the
+# environment: (adopted, (index, count) or None).
+_adopted_worker: tuple[bool, tuple[int, int] | None] = (False, None)
+
+
+def adopt_worker() -> tuple[int, int] | None:
+    """This process's :func:`current_worker`, taken out of the environment: the
+    variable is removed, so a pytest process a test starts is not taken for a
+    worker, and :func:`current_worker` answers from what was taken. Raises
+    ``ValueError`` as :func:`current_worker` does."""
+    global _adopted_worker
+    if not _adopted_worker[0]:
+        worker = current_worker()
+        os.environ.pop(WORKER_ENV, None)
+        _adopted_worker = (True, worker)
+    return _adopted_worker[1]
+
+
+def current_worker(env: Mapping[str, str] | None = None) -> tuple[int, int] | None:
+    """``(index, count)`` from :data:`WORKER_ENV` of ``env`` (default: this
+    process's, as :func:`adopt_worker` took it, else ``os.environ``) when the
+    process is a worker of ``rocke.tests.ctest_workers``, else ``None``. Raises
+    ``ValueError`` for a value other than ``<index>/<count>`` with
+    ``0 <= index < count``."""
+    if env is None and _adopted_worker[0]:
+        return _adopted_worker[1]
+    env = os.environ if env is None else env
+    text = env.get(WORKER_ENV, "").strip()
+    if not text:
+        return None
+    index, _, count = text.partition("/")
+    digits = all(part.isascii() and part.isdigit() for part in (index, count))
+    if not (digits and int(index) < int(count)):
+        raise ValueError(
+            f"current_worker failed - {WORKER_ENV}={text!r}, expected "
+            "<index>/<count> with 0 <= index < count"
+        )
+    return int(index), int(count)
 
 
 def header_line(shard: Shard | None) -> str:

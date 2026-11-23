@@ -32,6 +32,11 @@ A test a CI shard leaves to another shard of its entry is ``deselected`` with
 the reason :data:`OTHER_SHARD` (``rocke.tests.ctest_shard``): the run of that
 other shard has its verdict. A test with a ``collected`` record and no other
 was dropped by another filter.
+
+A run in worker processes (``rocke.tests.ctest_workers``) records each test as
+the same run in one process does: worker 0 alone records what collection finds
+(``collected``, ``deselected``, ``module_skipped``, ``collect_error``), and each
+worker records how the tests it runs end (``ran``, ``skipped``).
 """
 
 from __future__ import annotations
@@ -47,6 +52,7 @@ import pytest
 from _pytest.mark import KeywordMatcher, MarkMatcher
 from _pytest.mark.expression import Expression
 
+from .ci_shard import current_worker
 from .lanes import LANES, skip_until_reason
 
 __all__ = [
@@ -118,6 +124,9 @@ class _Recorder:
     of its own in the run's records directory."""
 
     def __init__(self, directory: Path) -> None:
+        worker = current_worker()
+        # Every worker of a run collects the same tests; one records them.
+        self._records_collection = worker is None or worker[0] == 0
         directory.mkdir(parents=True, exist_ok=True)
         self._out = (directory / f"{os.getpid()}-{uuid.uuid4().hex}.jsonl").open(
             "a", encoding="utf-8"
@@ -130,18 +139,25 @@ class _Recorder:
     @pytest.hookimpl(hookwrapper=True, tryfirst=True)
     def pytest_collection_modifyitems(self, items: list[pytest.Item]):
         # Before every other filter, so a test a filter removes is still recorded.
-        for item in items:
-            self._write(item.path, _node_name(item), "collected")
+        if self._records_collection:
+            for item in items:
+                self._write(item.path, _node_name(item), "collected")
         yield
 
     def pytest_deselected(self, items: list[pytest.Item]) -> None:
+        if not self._records_collection:
+            return
         for item in items:
             self._write(item.path, _node_name(item), "deselected", _deselection(item))
 
     @pytest.hookimpl(hookwrapper=True)
     def pytest_make_collect_report(self, collector: pytest.Collector):
         report = (yield).get_result()
-        if report.passed or not isinstance(collector, pytest.Module):
+        if (
+            report.passed
+            or not isinstance(collector, pytest.Module)
+            or not self._records_collection
+        ):
             return
         if report.skipped:
             self._write(collector.path, "", "module_skipped", _skip_reason(report))

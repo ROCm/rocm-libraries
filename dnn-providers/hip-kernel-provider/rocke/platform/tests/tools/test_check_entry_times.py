@@ -200,6 +200,30 @@ def test_entry_seconds_scale_a_split_entry_by_its_shard_count(tmp_path) -> None:
     }
 
 
+# The same entry run in worker processes (rocke.tests.ctest_workers): the entry
+# prints the shard header itself, and its workers' lines carry a [w<index>]
+# prefix.
+_WORKERS_LOG = """\
+2026-11-17T11:50:01.3Z 7: Test command: /venv/bin/python "-m" "pytest" "-p" \
+"rocke.tests.ctest_shard" "--rocke-shard-from-gtest-env" "-p" \
+"rocke.tests.ctest_workers" "--rocke-workers" "4" "./tests/core"
+2026-11-17T11:50:01.9Z 7: rocke-ctest-shard: 3/4 (GTEST_SHARD_INDEX=3, \
+GTEST_TOTAL_SHARDS=4)
+2026-11-17T11:50:02.0Z 7: rocke-ctest-workers: 4 workers, 4 CPUs each
+2026-11-17T11:50:02.9Z 7: [w0] rocke-ctest-shard: 3/4 (GTEST_SHARD_INDEX=3, \
+GTEST_TOTAL_SHARDS=4)
+2026-11-17T11:50:12.2Z  10/40 Test   #7: rocke_pytest_core ............   Passed   10.50 sec
+"""
+
+
+def test_entry_seconds_scale_an_entry_run_in_workers_by_its_shard_count(
+    tmp_path,
+) -> None:
+    log = tmp_path / "workers.log"
+    log.write_text(_WORKERS_LOG, encoding="utf-8")
+    assert check.entry_seconds_from_ctest_logs([log]) == {"rocke_pytest_core": 42.0}
+
+
 def test_entry_seconds_read_a_log_without_timestamps(tmp_path) -> None:
     log = tmp_path / "local.log"
     log.write_text(
