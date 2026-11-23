@@ -1,5 +1,5 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
 
 #include <gtest/gtest.h>
 #include <algorithm>
@@ -109,6 +109,12 @@ class TDMBasicTypedTest : public ::testing::Test
     static constexpr index_t cluster_dim_x = 2;
     static constexpr index_t cluster_dim_y = 1;
     static constexpr index_t cluster_dim_z = 1;
+
+    void SetUp() override
+    {
+        if(!is_gfx125_supported())
+            GTEST_SKIP() << "TDM requires a gfx125 device";
+    }
 
     private:
     // Helper functions
@@ -222,10 +228,8 @@ class TDMBasicTypedTest : public ::testing::Test
     };
 
     template <typename TDMProblemType>
-    bool launch_tdm_kernel(TDMTestData& test_data,
-                           const TDMTestParams& params,
-                           bool use_cluster = false,
-                           bool use_gather  = true)
+    bool
+    launch_tdm_kernel(TDMTestData& test_data, const TDMTestParams& params, bool use_gather = true)
     {
         dim3 grid((params.m + tile_m - 1) / tile_m, (params.n + tile_n - 1) / tile_n);
         assert(is_wave32());
@@ -245,30 +249,14 @@ class TDMBasicTypedTest : public ::testing::Test
                                    params.x_stride,
                                    params.y_stride};
 
-        if(use_cluster)
+        const TDMCopyKernel<TDMProblemType> tdm_kernel{};
+        if constexpr(TDMProblemType::ClusterEnable)
         {
-            hipLaunchConfig_t config{};
-            config.gridDim          = grid;
-            config.blockDim         = block;
-            config.dynamicSmemBytes = 0;
-            config.stream           = s.stream_id_;
-
-            hipLaunchAttribute attribute[1];
-            attribute[0].id               = hipLaunchAttributeClusterDimension;
-            attribute[0].val.clusterDim.x = cluster_dim_x;
-            attribute[0].val.clusterDim.y = cluster_dim_y;
-            attribute[0].val.clusterDim.z = cluster_dim_z;
-            config.attrs                  = attribute;
-            config.numAttrs               = 1;
-
-            auto kernel_func = kentry<CK_TILE_MIN_BLOCK_PER_CU,
-                                      TDMCopyKernel<TDMProblemType>,
-                                      TDMCopyDeviceKernArgs>;
-            HIP_CHECK_ERROR(hipLaunchKernelEx(&config, kernel_func, args));
+            const dim3 cluster(cluster_dim_x, cluster_dim_y, cluster_dim_z);
+            launch_kernel(s, make_kernel(tdm_kernel, cluster, grid, block, 0, args));
         }
         else
         {
-            TDMCopyKernel<TDMProblemType> tdm_kernel;
             launch_kernel(s, make_kernel(tdm_kernel, grid, block, 0, args));
         }
 
@@ -291,7 +279,7 @@ class TDMBasicTypedTest : public ::testing::Test
         using TDMTraits  = typename TDMTraitsFactory<IsClusterMode, IsGatherMode>::type;
         using TDMProblem = TDMPipelineProblem<TDMShape, TDMTraits>;
 
-        launch_tdm_kernel<TDMProblem>(test_data, params, IsClusterMode, IsGatherMode);
+        launch_tdm_kernel<TDMProblem>(test_data, params, IsGatherMode);
 
         if(params.do_validation)
         {

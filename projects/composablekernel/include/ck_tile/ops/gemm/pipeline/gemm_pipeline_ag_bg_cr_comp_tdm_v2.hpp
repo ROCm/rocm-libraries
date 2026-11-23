@@ -185,19 +185,16 @@ struct GemmPipelineAgBgCrCompTDMV2 : public GemmPipelineAgBgCrCompTDMV1<Problem,
                 dim3 block_id_in_cluster{amd_wave_read_first_lane(get_cluster_workgroup_id_x()),
                                          amd_wave_read_first_lane(get_cluster_workgroup_id_y()),
                                          amd_wave_read_first_lane(get_cluster_workgroup_id_z())};
-                tdm_config_a[0].workgroup_mask =
+                const TDMWorkgroupMask workgroup_mask_a = TDMWorkgroupMask::checked(
                     Policy::template GetTDMWorkgroupMask<MultiCastDirection::kM, Problem>(
-                        block_id_in_cluster);
-                tdm_config_b[0].workgroup_mask =
+                        block_id_in_cluster));
+                const TDMWorkgroupMask workgroup_mask_b = TDMWorkgroupMask::checked(
                     Policy::template GetTDMWorkgroupMask<MultiCastDirection::kN, Problem>(
-                        block_id_in_cluster);
-
-                tdm_config_a[1].workgroup_mask =
-                    Policy::template GetTDMWorkgroupMask<MultiCastDirection::kM, Problem>(
-                        block_id_in_cluster);
-                tdm_config_b[1].workgroup_mask =
-                    Policy::template GetTDMWorkgroupMask<MultiCastDirection::kN, Problem>(
-                        block_id_in_cluster);
+                        block_id_in_cluster));
+                tdm_config_a[0].workgroup_mask = workgroup_mask_a;
+                tdm_config_b[0].workgroup_mask = workgroup_mask_b;
+                tdm_config_a[1].workgroup_mask = workgroup_mask_a;
+                tdm_config_b[1].workgroup_mask = workgroup_mask_b;
             }
 
             static_assert(1 == std::tuple_size_v<AsDramBlockWindowTmp>);
@@ -780,18 +777,16 @@ struct GemmPipelineAgBgCrCompTDMV2 : public GemmPipelineAgBgCrCompTDMV1<Problem,
                 dim3 block_id_in_cluster{amd_wave_read_first_lane(get_cluster_workgroup_id_x()),
                                          amd_wave_read_first_lane(get_cluster_workgroup_id_y()),
                                          amd_wave_read_first_lane(get_cluster_workgroup_id_z())};
-                tdm_config_a[0].workgroup_mask =
+                const TDMWorkgroupMask workgroup_mask_a = TDMWorkgroupMask::checked(
                     Policy::template GetTDMWorkgroupMask<MultiCastDirection::kM, Problem>(
-                        block_id_in_cluster);
-                tdm_config_b[0].workgroup_mask =
+                        block_id_in_cluster));
+                const TDMWorkgroupMask workgroup_mask_b = TDMWorkgroupMask::checked(
                     Policy::template GetTDMWorkgroupMask<MultiCastDirection::kN, Problem>(
-                        block_id_in_cluster);
-                tdm_config_a[1].workgroup_mask =
-                    Policy::template GetTDMWorkgroupMask<MultiCastDirection::kM, Problem>(
-                        block_id_in_cluster);
-                tdm_config_b[1].workgroup_mask =
-                    Policy::template GetTDMWorkgroupMask<MultiCastDirection::kN, Problem>(
-                        block_id_in_cluster);
+                        block_id_in_cluster));
+                tdm_config_a[0].workgroup_mask = workgroup_mask_a;
+                tdm_config_b[0].workgroup_mask = workgroup_mask_b;
+                tdm_config_a[1].workgroup_mask = workgroup_mask_a;
+                tdm_config_b[1].workgroup_mask = workgroup_mask_b;
             }
 
             static_assert(1 == std::tuple_size_v<AsDramBlockWindowTmp>);
