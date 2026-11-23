@@ -9,7 +9,8 @@ times from `RUN`.
 
 Read these at `$HEAD`; the YAML wins over this table. Sources: `projects/hipdnn/docs/TESTING.md` *Test tiers*,
 `dnn-providers/integration-tests/docs/running-tests.md` *Test tiers*, `dnn-providers/integration-tests/docs/adding-tests.md`
-*Choosing a tier*, and the `execution_settings.category_timeouts` of each `*test_categories*.yaml`.
+*Choosing a tier*, and the `execution_settings.category_timeouts` of each `*test_categories*.yaml`. When a named document does not exist
+at `$HEAD`, use the section on test tiers in that project's README or `TESTING.md` at `$HEAD`.
 
 | Tier | Holds | Budget | Runs in PR CI |
 |---|---|---|---|
@@ -19,8 +20,9 @@ Read these at `$HEAD`; the YAML wins over this table. Sources: `projects/hipdnn/
 | `full` | Stress, exhaustive, cases redundant with lower-tier coverage, release testing | None (2 h or more) | No |
 
 Tiers cascade: a test in `quick` also runs in `standard`, `comprehensive` and `full`. Every CI test step is limited to 30 minutes
-per shard; a tier that runs longer reaches its budget by sharding, and `quick` is never sharded. Job-level timeouts and shard
-arithmetic are `ROCK-f1`'s ([therock.md](therock.md) section 6); do not repeat them here.
+per shard; a tier that runs longer reaches its budget by sharding, and `quick` is never sharded. Each tier of each binary runs as its
+own CTest entry, and the budgets above apply per entry. A YAML's `category_timeouts` is a kill limit, not this budget; timeouts,
+job-level limits and shard arithmetic are `ROCK-f1`'s ([therock.md](therock.md) section 6); do not repeat them here.
 
 ## Thresholds
 
@@ -41,20 +43,30 @@ row of a sweep counts).
    no case), GTest `TEST*`/`INSTANTIATE_TEST_SUITE_P` instances, pytest tests, and each change to a `*test_categories*.yaml` pattern,
    label or `category_timeouts`. Count cases: expand every parametrized instantiation and every sweep row; read the sweep file, do not
    count files.
-   - A rename that leaves a test in its tier is not an addition; a rename or edit that changes its tier is a move.
+   - A rename that leaves a test in its tier is not an addition; a rename or edit that changes its tier is a move. A case restored from
+     history counts as an addition.
    - A deleted test, or a case a regenerated sweep or catalog no longer produces, is a removal: count it from the `$BASE` tree, record it
-     as a negative count in its tier's `Tier:` line, and subtract its base time in `TIER-f1` (0 when unmeasured). A removal is a credit,
-     never a finding here; whether it weakens coverage is `TESTQ`'s (M3).
+     as a negative count in its tier's `Tier:` line, and subtract its base time in `TIER-f1` (0 when unmeasured, 0 when it skipped at
+     `$BASE`; say which). A removal is a credit, never a finding here; whether it weakens coverage is `TESTQ`'s (M3).
+   - A YAML edit that de-selects cases from a tier while they stay selected by a higher one is a move: record a negative count with
+     `effective <new tier> (<old tier> at $BASE)`. Leaving `quick` is a credit. Leaving `standard` takes the cases out of PR CI and
+     leaving `comprehensive` takes them out of nightly: both are `TESTB` handoffs.
    - A case that skipped on an arch (an `onlyOn` or arch gate) and executes there at `$HEAD` counts as added for that arch. Record the
-     count per arch.
+     count per arch. Read the gate to confirm it skips: a decorator or marker that only records an attribute gates nothing.
    - Rows inside the body of one test (a table it iterates) add no instance. Record `rows +<added> -<removed>` for that test; for any other
-     change in the work a test does (an added assertion, a row that now executes on one more arch) record `work: <note>`. `TIER-f1` prices
-     the test as its time at `$HEAD` minus `$BASE`. With no measurement it is `UNVERIFIED`, never zero.
+     change in the work a test does (an added assertion, a loop or `subTest` over more values, a row that now executes on one more arch)
+     record `work: <note>`. `TIER-f1` prices the test as its time at `$HEAD` minus `$BASE`. With no measurement it is `UNVERIFIED`, never
+     zero.
 2. **Resolve the effective tier** of each test at `$HEAD`. Never take the directory or prefix on trust: apply the owning binary's
    YAML patterns (`BUILD` owns whether the YAML is correct; this lane reads it). Where a build exists, `ctest -N -L '^<tier>$'` on the
    `RUN` tree lists what a tier selects (labels are regexes: anchor them, and check `Total Tests:`). Rules that decide the answer:
    - **Bundle:** its top-level directory under `integration-test-bundles/` (`quick/`, `standard/`, `comprehensive/`, `full/`) is the
-     suite prefix `quick_`, `standard_`, ...
+     suite prefix `quick_`, `standard_`, ... The bundle binary `hipdnn_integration_tests` has no YAML of its own: each provider lane's
+     integration YAML selects bundle suites by pattern, and the integration-tests project's YAMLs categorize its golden-data binary.
+     List every lane whose YAML selects the bundle's suite; the cost lands in each of them. A lane that declines the graph skips it at
+     little cost; say so when the support claims or the engine show it.
+   - **pytest and other script tests:** tiered as a whole CTest entry, by the YAML pattern or the CMake label that registers the entry;
+     one test in the file cannot have its own tier. A test that no CTest entry, YAML or workflow runs is unregistered (*Findings*).
    - **C++ test in an explicit-include provider YAML:** its instantiation prefix (`Smoke/`, `Quick/`, `Standard/`, `Comprehensive/`,
      `Full/`). No prefix: the lane selects it only from `comprehensive` up (the miopen lane through `Integration*`), so it never runs in
      PR CI.
@@ -66,15 +78,18 @@ row of a sweep counts).
      `quick` is a catch-all, so a test with no tier prefix lands in `quick`. A tier missing from either filter spelling
      (`Standard*` and `standard_*`) leaves its cases in `quick`. In `hipdnn_gpu_ref_tests`, reduced-precision, fp8, int8, TF32 and
      mixed-type cases belong in `standard` (each extra datatype is a separate hipRTC compile).
-   - **hipDNN core and samples** (`projects/hipdnn/test_categories.yaml`): every test is in `quick` by design, because core tests are
-     fast. The same `QUICK_CASE_MAX` limit applies to each added case; a core test that needs a device or a large shape does not
-     belong there.
+   - **hipDNN core and samples** (`projects/hipdnn/test_categories.yaml`, `projects/hipdnn/samples/test_categories.yaml`): every test is
+     in `quick` by design, because core tests are fast. The same `QUICK_CASE_MAX` limit applies to each added case; a core test that needs
+     a device or a large shape does not belong there. These YAMLs are exempt from the split check: record `split: exempt <YAML>`. With no
+     `standard` tier there, a non-basic core test's options are make it basic or accept it; write `recommend keep (make basic)`.
    - **Lane narrowing:** a lane YAML can narrow a tier's patterns (ASM_SDPA selects `*Sdpa*`; the gfx950 attention lanes select
      `*_SdpaFwd_Default.*` in every tier). A test the narrowed pattern does not select runs in no tier of that lane.
-   - **Split check, every YAML the change touches.** A YAML is touched when a changed test source (an edit counts, an added test is not
-     needed) belongs to a binary it categorizes, or when an added or edited bundle file (a sweep, a graph, a sidecar) sits under a suite
-     prefix the YAML's patterns select (every consumer lane's YAML that selects `quick_*` for a bundle under `quick/`, and so on). Compare
-     its `quick` and `standard` patterns and excludes. When `standard` selects exactly
+   - **Split check, every YAML the change touches.** A YAML is touched when the change edits it, when a changed test source (an edit
+     counts, an added test is not needed) belongs to a binary it categorizes, or when an added or edited bundle file (a sweep, a graph, a
+     sidecar) sits under a suite prefix the YAML's patterns select (every consumer lane's YAML that selects `quick_*` for a bundle under
+     `quick/`, and so on). A YAML with no `quick` category, or with `quick` and no `standard`, is not `split: missing`: record
+     `split: n/a <YAML> (<reason>)`. Otherwise compare its `quick` and `standard` patterns and excludes: when they differ, record
+     `split: present <YAML>`. When `standard` selects exactly
      what `quick` selects (the hip-kernel-provider `HIP_MLOPS_ENGINE_test_categories.yaml` says "No distinct Standard* prefix exists, so
      standard runs the same tests as quick"), the tier split does not exist: a `Standard` prefix or directory runs in `quick` too, so
      nothing can be moved out of `quick` without leaving PR CI. Record `split: missing` once for the YAML, with every binary it
@@ -88,9 +103,11 @@ row of a sweep counts).
    golden-data load beyond a few KB) or not. A GPU test, a bundle, or a case that builds or compiles a kernel is not a basic unit test; nor
    is a `TEST_F` whose fixture constructor or `SetUp` touches a device, even when the body does not. A `TEST` that only reads generated
    config tables or calls pure functions is basic. Read the test body and its fixture, and follow calls one level into production code: a
-   call that queries or uses the device (`isApplicable` with a device check, a plan build) makes it not basic, whether or not the test
-   guards with `SKIP_IF_NO_DEVICES()`. When unsure, it is not: classify from the source, never from the case's name or the suite it sits
-   in.
+   call that queries or uses the device (`isApplicable` with a device check, a plan build, a default HIP-event timer) makes it not basic,
+   whether or not the test guards with `SKIP_IF_NO_DEVICES()`. Look first for the test seam the code offers (an injected timer, device
+   resolver or handle, as sibling tests use): a test that skips the seam is not basic, and taking the seam is its smallest fix. A call
+   into a native extension or a subprocess gated by an environment variable is basic when it needs no device and compiles no kernel.
+   When unsure, it is not: classify from the source, never from the case's name or the suite it sits in.
 4. **Cost.** Without times, give the static facts the cost follows from (case count, shapes, device need, datatype count) and mark
    the cost `[INFERENCE]`. `TIER-f1` replaces it with `RUN`'s measured times. A case whose time is unknown is never counted as free.
 5. **Recommend a tier** for each finding: the cheapest tier that still finds the failures the test exists to find
@@ -107,7 +124,8 @@ test and, once `TIER-f1` ran, the `RUN` log row for the time. Tiers follow [../p
 
 - A case added to `quick` that is not a basic unit test: `IMPORTANT`, whatever its measured time and without waiting for `TIER-f1`.
   The reviewer must look at it and either move it (`Fix`: the `standard/` bundle directory, or any way of making the test standard tier;
-  the developer chooses how) or accept it. Add one **Needs human decision** entry per group of cases that share a prefix and a reason
+  the developer chooses how), make it basic (take the test seam its siblings use), or accept it. Add one **Needs human decision** entry
+  per group of cases that share a prefix and a reason, after **Approval requests** ([../findings.md](../findings.md) *Lane report*)
   (`<ID>: Keep <tests> in quick? Options: move to standard, accept in quick. Recommendation:
   move to standard, because quick is paid for in every run of every tier.`). Acceptance is a human `ACCEPTED-RISK` in the ledger; the lane
   never downgrades it, and a time under `QUICK_CASE_MAX` does not close it. When the YAML is `split: missing`, "move to standard" is
@@ -130,25 +148,31 @@ test and, once `TIER-f1` ran, the `RUN` log row for the time. Tiers follow [../p
   added time) exceeds 5 min: `IMPORTANT`. A baseline that is `UNVERIFIED (no CI log)` carries through as `UNVERIFIED`, never as a pass.
 - A `standard` tier whose projected total exceeds 30 min, or a single `standard` case over `STANDARD_CASE_SLOW` with no cheaper
   covering case: `SUGGESTION`; `IMPORTANT` when the projection exceeds 30 min.
-- A new test that runs in no PR tier (no prefix in a provider lane, a narrowed pattern that skips it) and has no stated reason:
-  `IMPORTANT` when it is the only test of new behavior, else `SUGGESTION`.
+- A new test that runs in no PR tier (no prefix in a provider lane, a narrowed pattern that skips it) and has no stated reason, or that
+  no CTest entry, YAML or workflow runs at all (unregistered): `IMPORTANT` when it is the only test of new behavior, else `SUGGESTION`.
+  Flag the new test even when the rest of its file is already unregistered at `$BASE`; name the existing tests in `Actual` as a
+  pre-existing gap.
 - A basic unit test in `quick` at or under `QUICK_CASE_MAX` is not a finding. A slow case already in the right tier is not a finding. A
-  test the change moves out of `quick` to `standard` is a credit: record it, with the time it takes off the tier.
+  test the change moves out of `quick` to `standard` is a credit: record it, with the time it takes off the tier. Removals and
+  de-selections are credits or handoffs (*Method* step 1), never findings.
 
 A YAML change that alters what a tier selects is a finding only through the cost it adds; whether the pattern list is correct (cascade,
-both spellings, labels) is `BUILD`'s: write `BUILD: <one line>` under **Handoffs**.
+both spellings, labels, a pattern that no longer matches anything) is `BUILD`'s: write `BUILD: <one line>` under **Handoffs**.
 
 ## Report lines
 
 Write under **Checked, no finding**, with no `|` ([../findings.md](../findings.md) *Lane report*), one line per test group (a bundle
 directory, a GTest suite or an instantiation prefix):
 
-`Tier: <path or suite> <n> cases [(<arch>=<n> ...)] [rows +<added> -<removed>] [work: <note>] class <basic|not basic|n/a> declared <tier> effective <tier> cost <s>s (<source>) recommend <tier|keep>`
+`Tier: <path or suite> <n> cases [(<arch>=<n> ...)] [rows +<added> -<removed>] [work: <note>] [lanes <list>] class <basic|not basic|n/a> declared <tier|none> effective <tier> cost <s>s (<source>) recommend <tier|keep>`
 
 Write an unmeasured cost as `cost UNMEASURED (static [INFERENCE])`. Split a group that spans binaries or datatypes into one line each.
-`<n>` and each `<arch>=<n>` count the cases the change adds or un-gates, not every case in the group; give group totals in prose.
-`recommend standard (after split)` is the form when the recommendation depends on a missing split landing. For each `split: missing`
-YAML write one line: `split: missing <YAML> binaries <list>`.
+`<n>` and each `<arch>=<n>` count the cases the change adds or un-gates (negative for removals and de-selections), not every case in
+the group; give group totals in prose. `declared none` is a test with no tier prefix or directory; `class` is `n/a` outside `quick`, and a
+removal line takes the class of the removed tests and `recommend keep`. `lanes` lists the lanes that run a bundle group. Omit a group
+the change leaves unchanged. `recommend standard (after split)` is the form when the recommendation depends on a missing split landing.
+For each YAML the split check reads, write one line: `split: missing <YAML> binaries <list>`, `split: present <YAML>`,
+`split: n/a <YAML> (<reason>)` or `split: exempt <YAML>`.
 `<source>` is `static [INFERENCE]` in the main pass. `TIER-f1` also writes, for `quick` (budget `300s`) and for `standard` (budget
 `1800s`), one line each:
 
