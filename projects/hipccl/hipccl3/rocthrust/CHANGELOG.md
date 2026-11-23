@@ -7,7 +7,7 @@ Documentation for rocThrust available at
 
 ### Added
 
-* rocThrust is now largely in feature parity with CCCL/thrust v3.2.1.  liphipcxx 3.4 is now required, and the `thrust::tuple`, `thrust::pair` and `thrust::zip_iterator` fallbacks have been removed.
+* rocThrust is now largely in feature parity with CCCL/thrust v3.2.1.  libhipcxx 3.4 is now required, and the `thrust::tuple`, `thrust::pair` and `thrust::zip_iterator` fallbacks have been removed.
 * Add `THRUST_DISABLE_BROKEN_GCC_VECTORIZER`
 * Add `thrust::reduce_into`.
 * Add `thrust::shuffle_iterator`.
