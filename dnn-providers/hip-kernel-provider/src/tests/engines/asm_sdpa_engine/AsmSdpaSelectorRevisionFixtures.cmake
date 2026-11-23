@@ -75,7 +75,8 @@ function(_probe _change _rel _must_expire)
 endfunction()
 # Every selection input of either direction.
 foreach(_source IN ITEMS
-        asm/asm_kernels/codegen.py
+        asm/asm_kernels/codegen.py asm/asm_kernels/co_metadata.py
+        asm/AsmKernelPath.hpp plans/SdpaKernelUtils.hpp
         plans/SdpaFwdPlanBuilder.cpp plans/SdpaFwdPlanBuilder.hpp
         plans/SdpaBwdPlanBuilder.cpp plans/SdpaBwdPlanBuilder.hpp
         plans/SdpaPlanUtils.hpp
@@ -101,6 +102,9 @@ _probe(EDIT asm/asm_kernels/README.md false)
 # builders, not it, choose the kernel.
 _probe(EDIT AsmSdpaEngine.cpp false)
 _probe(EDIT AsmSdpaEngine.hpp false)
+# Loading plumbing: it fetches the kernel the inputs chose.
+_probe(EDIT asm/AsmKpackArchive.hpp false)
+_probe(EDIT plans/SdpaModuleCache.hpp false)
 file(REMOVE_RECURSE "${WORK_DIR}")
 
 string(CONCAT _text

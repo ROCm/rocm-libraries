@@ -41,6 +41,15 @@ function(hkp_asm_sdpa_revision _out_revision _engine_dir)
     set(_sources
         # Turns the CSVs into the config tables the builders search.
         asm/asm_kernels/codegen.py
+        # Reads each kernel's max_flat_workgroup_size out of its code object for codegen.py;
+        # the forward builder declines a config whose launch block exceeds it.
+        asm/asm_kernels/co_metadata.py
+        # Which build of a gfx942 forward kernel runs: the MI300 or the MI308 one
+        # (getFwdKernelTocKey).
+        asm/AsmKernelPath.hpp
+        # The backward dq_acc layout and the 32-bit offset checks that choose between pssk
+        # = 0 and pssk = 1 kernels and gate backward applicability; the workspace size.
+        plans/SdpaKernelUtils.hpp
         # Applicability and the (arch, dtype, head dims, mask, mode, bf16 rounding) ->
         # kernel lookup.
         plans/SdpaFwdPlanBuilder.cpp
@@ -65,9 +74,8 @@ function(hkp_asm_sdpa_revision _out_revision _engine_dir)
         asm/SdpaBwdKernelArgs.hpp
         asm/SgprPadding.hpp)
     # Not inputs:
-    #  - AsmKernelPath.hpp, AsmKpackArchive.hpp, SdpaModuleCache.hpp, SdpaKernelUtils.hpp
-    #    (load and launch plumbing), pack.py (it packs the same .co bytes hashed above), and
-    #    CMakeLists.txt.
+    #  - AsmKpackArchive.hpp and SdpaModuleCache.hpp (they load the kernel the inputs above
+    #    chose), pack.py (it packs the same .co bytes hashed above), and CMakeLists.txt.
     #  - AsmSdpaEngine.cpp and AsmSdpaEngine.hpp. They hold the engine details and behavior
     #    notes, the L1 binding, the prediction plumbing (which asks the builders whether
     #    they serve a graph), the workspace-limit decline, and the dispatch to the first
