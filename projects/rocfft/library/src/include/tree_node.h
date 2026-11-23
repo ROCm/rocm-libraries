@@ -225,11 +225,18 @@ public:
         offset_bytes = in;
     }
 
+    size_t get_log_id() const
+    {
+        return log_id;
+    }
+
 private:
     rocfft_location_t location;
     const size_t      size_bytes;
     // offset in the device's work buffer
     size_t offset_bytes = 0;
+    // Only compile-only plan dumps assign an ID; ordinary logs use addresses.
+    size_t log_id = 0;
 };
 
 // Class representing a buffer in a multi-plan item.
@@ -328,8 +335,14 @@ public:
         {
             std::stringstream ss;
             if(temp_ptr)
-                ss << "temp buffer handle " << temp_ptr.get() << " size "
-                   << temp_ptr->get_size_bytes() << " on rank " << comm_rank;
+            {
+                ss << "temp buffer handle ";
+                if(const auto id = temp_ptr->get_log_id())
+                    ss << id;
+                else
+                    ss << temp_ptr.get();
+                ss << " size " << temp_ptr->get_size_bytes() << " on rank " << comm_rank;
+            }
             else
                 ss << "(null)";
             return ss.str();
@@ -382,6 +395,12 @@ public:
         std::shared_ptr<InternalTempBuffer> buf(new InternalTempBuffer(location, size_bytes));
         buffers.push_back(buf);
         return BufferPtr::temp(buf);
+    }
+
+    void assign_log_ids()
+    {
+        for(size_t i = 0; i < buffers.size(); ++i)
+            buffers[i]->log_id = i + 1;
     }
 
     size_t size() const
@@ -886,7 +905,7 @@ public:
                                size_t& chirpSize);
 
     // Output plan information for debug purposes:
-    virtual void Print(rocfft_ostream& os, int indent = 0) const;
+    virtual void Print(rocfft_ostream& os, int indent = 0, bool detailed = false) const;
 
     // logic B - using in-place transposes, todo
     //void RecursiveBuildTreeLogicB();
@@ -1185,7 +1204,7 @@ public:
 
 public:
     // leaf node would print additional informations about kernel setting
-    void         Print(rocfft_ostream& os, int indent = 0) const override;
+    void         Print(rocfft_ostream& os, int indent = 0, bool detailed = false) const override;
     bool         KernelCheck(std::vector<FMKey>& kernel_keys = EmptyFMKeyVec) override;
     void         SanityCheck(SchemeTree*         solution_scheme = nullptr,
                              std::vector<FMKey>& kernel_keys     = EmptyFMKeyVec) override;
@@ -2064,6 +2083,9 @@ struct ExecPlan : public MultiPlanItem
     // are the nodes that do actual work
     std::vector<TreeNode*> execSeq;
 
+    // Primary kernel names in execSeq order, collected for compile-only plan logs.
+    std::vector<std::string> kernelNames;
+
     // kernels that extracted from solution map
     std::vector<FMKey> solution_kernels;
 
@@ -2144,7 +2166,7 @@ std::unique_ptr<SchemeTree> ApplySolution(ExecPlan& execPlan);
 // get a min_token (without batch, stride, offset...) of a node, for generating a prob-key
 void GetNodeToken(const TreeNode& probNode, std::string& min_token, std::string& full_token);
 void ProcessNode(ExecPlan& execPlan);
-void PrintNode(rocfft_ostream& os, const ExecPlan& execPlan, const int indent = 0);
+void PrintNode(rocfft_ostream& os, const ExecPlan& execPlan, int indent = 0, bool detailed = false);
 bool BufferIsUnitStride(ExecPlan& execPlan, OperatingBuffer buf);
 
 #endif // TREE_NODE_H

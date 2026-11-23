@@ -7,6 +7,8 @@ Documentation for rocFFT is available at
 
 ### Added
 
+* `rocfft-test --dump_plans <dir>` writes a plan tree for each selected accuracy test without executing the transforms.
+
 * Extended the optional RCCL backend to multi-process plans when built with both `ROCFFT_RCCL_ENABLE` and 
   `ROCFFT_MPI_ENABLE`. RCCL is used for the transpose data plane when every MPI rank's bricks use exactly
   one device; otherwise the existing MPI paths remain. Set the

@@ -22,8 +22,10 @@
 /// @brief googletest based unit tester for rocfft
 ///
 
+#include <algorithm>
 #include <chrono>
 #include <fcntl.h>
+#include <filesystem>
 #include <fstream>
 #include <gtest/gtest.h>
 #include <iostream>
@@ -31,6 +33,7 @@
 #include <random>
 #include <streambuf>
 #include <string>
+#include <string_view>
 #include <thread>
 
 #include <initializer_list>
@@ -45,6 +48,7 @@
 #include "../../shared/hostbuf.h"
 #include "../../shared/rocfft_accuracy_test.h"
 #include "../../shared/sys_mem.h"
+#include "../../shared/test_callbacks.h"
 #include "../../shared/test_params.h"
 #include "../../shared/work_queue.h"
 #include "bitwise_repro/bitwise_repro_db.h"
@@ -171,7 +175,7 @@ void init_gtest_flags()
     std::swap(temp_list_tests, testing::GTEST_FLAG(list_tests));
 }
 
-std::vector<std::string> tokens_to_run()
+std::vector<std::string> tokens_to_run(bool preserve_batch = false)
 {
     init_gtest_flags();
 
@@ -185,7 +189,7 @@ std::vector<std::string> tokens_to_run()
             const auto  ti   = ts->GetTestInfo(ti_index);
             std::string name = ti->name();
 
-            // only precompile test cases that will run
+            // Only consider scheduled test cases.
             if(!ti->should_run())
                 continue;
 
@@ -194,11 +198,9 @@ std::vector<std::string> tokens_to_run()
             {
                 name.erase(0, 8);
 
-                // Run any problem that uses brick decomposition
-                // without touching batch.  Bricks are specified with
-                // batch indexes, so arbitrarily changing batch to 1
-                // can break those cases.
-                if(name.find("_brick_") != std::string::npos)
+                // Dump the actual test batch. Precompile also needs to preserve
+                // batch for brick decompositions, whose bounds include batch indices.
+                if(preserve_batch || name.find("_brick_") != std::string::npos)
                 {
                     tokens.emplace_back(std::move(name));
                     continue;
@@ -221,6 +223,19 @@ std::vector<std::string> tokens_to_run()
         }
     }
     return tokens;
+}
+
+static fft_status setup_test_plan(rocfft_params& params, bool plan_only = false)
+{
+    params.validate();
+    if(params.run_callbacks == fft_callback_type_jit)
+    {
+        params.load_jit_cb_state
+            = get_rank_jit_state(params, "load_callback", false, jit_callback_op::LOAD, plan_only);
+        params.store_jit_cb_state = get_rank_jit_state(
+            params, "store_callback", false, jit_callback_op::STORE, plan_only);
+    }
+    return params.setup_structs(plan_only);
 }
 
 void precompile_test_kernels(const std::string& precompile_file)
@@ -261,8 +276,7 @@ void precompile_test_kernels(const std::string& precompile_file)
                     if(params_forward.run_callbacks == fft_callback_type_jit)
                         continue;
 
-                    params_forward.validate();
-                    params_forward.setup_structs();
+                    setup_test_plan(params_forward);
 
                     params_forward.free();
 
@@ -271,8 +285,7 @@ void precompile_test_kernels(const std::string& precompile_file)
                     {
                         rocfft_params params_inverse;
                         params_inverse.inverse_from_forward(params_forward);
-                        params_inverse.validate();
-                        params_inverse.setup_structs();
+                        setup_test_plan(params_inverse);
                     }
                 }
                 catch(std::exception& e)
@@ -296,6 +309,73 @@ void precompile_test_kernels(const std::string& precompile_file)
     std::chrono::duration<double, std::milli> precompile_ms  = precompile_end - precompile_begin;
     std::cout << "done precompiling FFT plans in " << static_cast<size_t>(precompile_ms.count())
               << " ms\n";
+}
+
+static constexpr size_t dump_plan_component_size = 240;
+
+static std::filesystem::path dump_plan_path(const std::filesystem::path& dir,
+                                            std::string_view             token)
+{
+    if(token.size() <= dump_plan_component_size)
+        return dir / token;
+
+    // Keep long brick tokens reversible without exceeding filesystem component
+    // limits. Separating by length prevents a file from also being a directory
+    // prefix for a longer token.
+    auto path = dir / "long-tokens" / std::to_string(token.size());
+    while(token.size() > dump_plan_component_size)
+    {
+        path /= token.substr(0, dump_plan_component_size);
+        token.remove_prefix(dump_plan_component_size);
+    }
+    return path / token;
+}
+
+static int dump_test_plans(const std::filesystem::path& dir)
+{
+    std::error_code ec;
+    std::filesystem::create_directories(dir, ec);
+    if(ec)
+    {
+        std::cerr << "Cannot create plan dump directory " << dir << ": " << ec.message() << '\n';
+        return EXIT_FAILURE;
+    }
+
+    auto tokens = tokens_to_run(true);
+    std::sort(tokens.begin(), tokens.end());
+    tokens.erase(std::unique(tokens.begin(), tokens.end()), tokens.end());
+    std::cout << "Dumping " << tokens.size() << " FFT plans to " << dir << "...\n";
+
+    // ponytail: run serially for the process-wide redirect and JIT bitcode cache;
+    // concurrent dumping would need a per-plan sink and a thread-safe cache.
+    EnvironmentSetTemp env_compile_only{"ROCFFT_INTERNAL_COMPILE_ONLY", "1"};
+    size_t             failed = 0;
+    for(const auto& token : tokens)
+    {
+        const auto path = dump_plan_path(dir, token);
+        try
+        {
+            if(token.size() > dump_plan_component_size)
+                std::filesystem::create_directories(path.parent_path());
+            EnvironmentSetTemp env_plan_path{"ROCFFT_INTERNAL_COMPILE_ONLY_LOG_PLAN_PATH",
+                                             path.string().c_str()};
+            rocfft_params      params;
+            params.from_token(token);
+            if(setup_test_plan(params, true) != fft_status_success)
+                throw std::runtime_error("plan setup failed");
+        }
+        catch(const std::exception& e)
+        {
+            ++failed;
+            std::ofstream out(path);
+            out << "PLAN CREATION FAILED: " << e.what() << '\n';
+            out.close();
+            if(!out)
+                std::cerr << "Could not write plan failure to " << path << ": " << e.what() << '\n';
+        }
+    }
+    std::cout << "Dumped " << tokens.size() - failed << " FFT plans (" << failed << " failed).\n";
+    return failed ? EXIT_FAILURE : EXIT_SUCCESS;
 }
 
 int main(int argc, char* argv[])
@@ -539,6 +619,9 @@ int main(int argc, char* argv[])
     // Filename for precompiled kernels to be written to
     std::string precompile_file;
 
+    // Directory for per-token plan dumps.
+    std::string dump_plans_dir;
+
     // Full path to bitwise repro database file
     std::string repro_db_path;
 
@@ -641,6 +724,12 @@ int main(int argc, char* argv[])
                    "Precompile kernels to a file for all test cases before running tests")
         ->default_val("");
     app.add_flag("--printtokens", printtokens, "Print test tokens to scheduled to be run and exit");
+    const auto opt_dump_plans = app.add_option("--dump_plans",
+                                               dump_plans_dir,
+                                               "Dump one FFT plan per selected accuracy-test token "
+                                               "to a directory without executing tests")
+                                    ->type_name("DIR")
+                                    ->excludes("--printtokens");
     // Default value is set in fft_params.h based on if device-side PRNG was enabled.
     app.add_option("-g, --inputGen",
                    manual_params.igen,
@@ -698,6 +787,15 @@ int main(int argc, char* argv[])
         return EXIT_FAILURE;
     }
 
+    if(*opt_dump_plans && (dump_plans_dir.empty() || mp_lib == fft_params::fft_mp_lib_mpi))
+    {
+        std::cerr << "--dump_plans "
+                  << (dump_plans_dir.empty() ? "requires a nonempty directory path"
+                                             : "does not support MPI plans")
+                  << '\n';
+        return EXIT_FAILURE;
+    }
+
     std::cout << "half epsilon: " << half_epsilon << "\tsingle epsilon: " << single_epsilon
               << "\tdouble epsilon: " << double_epsilon << std::endl;
     std::cout << "Random seed: " << random_seed << std::endl;
@@ -714,7 +812,20 @@ int main(int argc, char* argv[])
                                                               precompile_file.c_str());
     }
 
-    rocfft_setup();
+    if(*opt_dump_plans)
+    {
+        EnvironmentSetTemp env_plan_layer{"ROCFFT_LAYER", "8"};
+        // Do not open or truncate the ordinary plan log; each token gets its own sink.
+        EnvironmentSetTemp env_plan_path{"ROCFFT_LOG_PLAN_PATH", ""};
+        if(rocfft_setup() != rocfft_status_success)
+        {
+            std::cerr << "Could not initialize rocFFT for plan dumps\n";
+            rocfft_cleanup();
+            return EXIT_FAILURE;
+        }
+    }
+    else
+        rocfft_setup();
     {
         char v[256];
         rocfft_get_version_string(v, 256);
@@ -747,6 +858,13 @@ int main(int argc, char* argv[])
                                                                                         : ";");
     }
     std::cout << std::endl;
+
+    if(*opt_dump_plans)
+    {
+        const auto result = dump_test_plans(dump_plans_dir);
+        rocfft_cleanup();
+        return result;
+    }
 
     if(use_fftw_wisdom)
     {

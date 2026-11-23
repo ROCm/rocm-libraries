@@ -96,10 +96,12 @@ enum class jit_callback_op
     LOAD,
     STORE,
 };
+// With plan_only, return the compiled callback without allocating or copying device data.
 std::shared_ptr<fft_params::jit_cb_state_t> get_rank_jit_state(const fft_params& params,
                                                                const char*       symbol,
                                                                bool              round_trip_inverse,
-                                                               jit_callback_op   type);
+                                                               jit_callback_op   type,
+                                                               bool              plan_only = false);
 
 // Execute the load/store callback function on a host buffer, to
 // ensure that the reference host FFT is comparable to a device FFT

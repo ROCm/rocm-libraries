@@ -212,7 +212,7 @@ public:
         return rfield;
     }
 
-    fft_status setup_structs()
+    fft_status setup_structs(bool plan_only = false)
     {
         rocfft_status fft_status = rocfft_status_success;
         if(desc == nullptr)
@@ -322,6 +322,9 @@ public:
                 throw std::runtime_error("rocfft_plan_create failed");
             }
         }
+
+        if(plan_only)
+            return fft_status_success;
 
         if(info == nullptr)
         {
