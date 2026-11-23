@@ -582,13 +582,11 @@ public:
     // Length of the FFT in each dimension, internal value
     std::vector<size_t> length;
 
-    // Row-major output lengths, from fastest to slowest.  If empty,
-    // output length is assumed to be the same as input length.
-    //
-    // This is set for nodes that might do non-obvious things with
-    // strides (e.g. having fastest dimension not be first), so that
-    // buffer assignment can know whether a node's output will fit in
-    // a given buffer.
+    // Plain transposes keep the same length and axis order on both sides.
+    // inStride[i] and outStride[i] describe the same axis; the strides alone
+    // express the transposition. Real transforms can change the span of an axis.
+    // Legacy nodes may still store lengths in output order or leave this empty
+    // to mean "same as length"; use LengthForOutStride() to pair with outStride.
     std::vector<size_t> outputLength;
 
     // Stride of the FFT in each dimension

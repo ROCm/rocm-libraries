@@ -1175,6 +1175,7 @@ void Real3DEvenNode::BuildTree_internal_2D_SINGLE_CC()
         auto sbccZ       = NodeFactory::CreateNodeFromScheme(scheme, this);
         sbccZ->length    = {outputLength[2], (outputLength[0] / 2 + 1) * outputLength[1]};
         sbccZ->dimension = 1;
+        sbccZ->outputLength = sbccZ->length;
 
         auto xyPlan       = NodeFactory::CreateNodeFromScheme(CS_KERNEL_2D_SINGLE, this);
         xyPlan->length    = {outputLength[0] / 2, outputLength[1], outputLength[2]};

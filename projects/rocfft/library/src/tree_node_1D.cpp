@@ -103,6 +103,7 @@ void TRTRT1DNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
     {
         row2Plan->length.push_back(length[index]);
     }
+    row2Plan->outputLength = row2Plan->length;
 
     // third transpose
     auto trans3Plan = NodeFactory::CreateNodeFromScheme(CS_KERNEL_TRANSPOSE, this);
@@ -630,6 +631,7 @@ void CRT1DNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
     {
         row2rowPlan->length.push_back(length[index]);
     }
+    row2rowPlan->outputLength = row2rowPlan->length;
     // memo: A worth-noting try
     // row2rowPlan->allowOutofplace = false;
 

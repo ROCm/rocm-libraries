@@ -897,6 +897,8 @@ static std::unique_ptr<ExecPlan> transpose_brick(int                        loca
         throw std::runtime_error("unsupported transpose_brick dimension");
     }
 
+    execPlan.rootPlan->outputLength = execPlan.rootPlan->length;
+
     execPlan.rootPlan->loadOps  = std::move(loadOps);
     execPlan.rootPlan->storeOps = std::move(storeOps);
 
@@ -2394,6 +2396,7 @@ size_t rocfft_plan_t::C2CBrickOneDimension(size_t                         dimIdx
 
     rootPlanData.dimension = 1;
     rootPlanData.length    = transformLengths;
+    rootPlanData.outputLength = transformLengths;
     rootPlanData.inStride  = transformStride;
     rootPlanData.outStride = transformStride;
     rootPlanData.direction = transformType == rocfft_transform_type_complex_forward
