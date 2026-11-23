@@ -152,6 +152,19 @@ def _each_covered_arch(test):
     return run
 
 
+def _needs_cpp_engine(test):
+    """Skip a test whose every case compares against the C++ engine as a whole
+    when the engine is not built, before its sweep, so it does not run a sweep
+    of cases that each skip (``rocke.tests.sweep_guard`` fails such a sweep)."""
+
+    @functools.wraps(test)
+    def run(self):
+        import_or_skip_until("rocke_engine", BINDING_LANE)
+        test(self)
+
+    return run
+
+
 def _have_library_conv() -> bool:
     """True when the rocke library (``library/kernels``) is importable.
 
@@ -3853,6 +3866,7 @@ class TestNewTargetIntrinsics(unittest.TestCase):
         # The raw immediate reaches the call verbatim (0x041F == 1055).
         self.assertIn("call i32 @llvm.amdgcn.ds.swizzle(i32 1, i32 1055)", ll)
 
+    @_needs_cpp_engine
     @_each_covered_arch
     def test_ds_swizzle_xor_encodes_swap_mode_offset(self):
         # offset = (xor_mask << 10) | 0x1F -> (2 << 10) | 31 == 2079 (0x081F).
@@ -3951,6 +3965,7 @@ class TestNewTargetIntrinsics(unittest.TestCase):
         "i32 1, i32 1, i32 {}, i32 15, i32 15, i1 true)"
     )
 
+    @_needs_cpp_engine
     def test_warp_shuffle_xor_dpp_gfx9_encodings(self):
         """gfx9 CDNA has no ``row_xmask``: each mask with a register-only
         encoding lowers to it (quad_perm 1/2/3, row_half_mirror 7, row_ror:8,
@@ -3971,6 +3986,7 @@ class TestNewTargetIntrinsics(unittest.TestCase):
                     )
 
     @arch_specific(("gfx1151", "gfx1201", "gfx1250"), reason=_RDNA_ONLY)
+    @_needs_cpp_engine
     def test_warp_shuffle_xor_dpp_row_xmask_targets_unchanged(self):
         """Targets with ``row_xmask`` (gfx11, gfx12, gfx1250) keep
         ``0x160 | mask`` for every mask, as before the gfx9 table existed."""
@@ -3986,6 +4002,7 @@ class TestNewTargetIntrinsics(unittest.TestCase):
 
     # ---- vop2_f32_dpp_xor (softmax row-reduce step) ----
     @arch_specific(("gfx1250",), reason=_RDNA_ONLY)
+    @_needs_cpp_engine
     def test_vop2_f32_dpp_xor_is_update_dpp_then_fmax_or_fadd(self):
         """One reduce step is the in-row ``update.dpp`` shuffle (``row_xmask``
         on gfx1250) followed by ``maxnum`` / ``fadd`` -- never inline asm,
@@ -4353,6 +4370,7 @@ class TestNewTargetIntrinsics(unittest.TestCase):
             b.mov_dpp8(b.const_i64(1), 0x11)
 
     # ---- wave_reduce ----
+    @_needs_cpp_engine
     @_each_covered_arch
     def test_wave_reduce_emits_typed_reduction_per_op(self):
         for reduce_op, ty in (
@@ -4394,6 +4412,7 @@ class TestNewTargetIntrinsics(unittest.TestCase):
 
     # ---- readlane / writelane ----
     @arch_specific(("gfx950",), reason=_SAME_IR)
+    @_needs_cpp_engine
     def test_readlane_emits_typed_call_with_i32_lane(self):
         for suffix, ty, mk in (
             ("i32", "i32", "const_i32"),
@@ -4506,6 +4525,7 @@ class TestNewTargetIntrinsics(unittest.TestCase):
         self.assertIn("call i32 @llvm.amdgcn.alignbyte(i32 1, i32 2, i32 8)", ll)
 
     @arch_specific(("gfx950",), reason=_SAME_IR)
+    @_needs_cpp_engine
     def test_s_wqm_emits_width_matched_intrinsic(self):
         for suffix, ty, mk in (
             ("i32", "i32", "const_i32"),

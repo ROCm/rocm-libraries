@@ -555,11 +555,12 @@ def _scaled_matrix_error(op_id, role, bad, dtype, register_words=16):
 def test_scaled_lowering_rejects_sources(scale16, engine, dtype, subtests):
     if engine == "native":
         import_or_skip_until("rocke_engine", BINDING_LANE)
-    # Only failures and existing skips need per-combination subtest reports.
+    # Every combination reports as a subtest, so a run of only skipped
+    # combinations is told apart from one that checked something.
     for concrete, role, kind in product(
         (False, True), (0, 1, 3, 4), ("scalar", "dtype", "short", "long")
     ):
-        try:
+        with subtests.test(concrete=concrete, role=role, kind=kind):
             kernel, call = _scaled_call(scale16, concrete, dtype)
             if role < 2:
                 bad = (
@@ -604,9 +605,6 @@ def test_scaled_lowering_rejects_sources(scale16, engine, dtype, subtests):
             _assert_scaled_lowering_rejects(
                 kernel, message, engine, hip_message=hip_message
             )
-        except (Exception, pytest.fail.Exception, pytest.skip.Exception):
-            with subtests.test(concrete=concrete, role=role, kind=kind):
-                raise
 
 
 @pytest.mark.parametrize("scale16", [False, True])

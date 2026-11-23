@@ -31,7 +31,7 @@ import pytest
 
 from rocke import lower_kernel_to_llvm
 from rocke.tests.comgr import loaded_compiler_build
-from rocke.tests.compiler_tools import require_tools_or_skip
+from rocke.tests.compiler_tools import require_hsaco_tools, require_tools_or_skip
 from rocke.tests.lanes import TORCH_IN_CI, import_or_skip_until
 from rocke.tests.pending_lanes import (
     measured_budget_kernels,
@@ -1435,6 +1435,8 @@ class TestAttentionHelpers(unittest.TestCase):
         import kernels.common.attention_unified as au
         from kernels import build_unified_attention_2d_tiled
 
+        # Every case analyzes a code object: without the tools, skip as a whole.
+        require_hsaco_tools()
         for label, arch, problem_kwargs in _TILED_2D_BUDGET_GEOMETRIES:
             with self.subTest(geometry=label, arch=arch):
                 with _patch_resolved_arch(arch):
@@ -1460,6 +1462,8 @@ class TestAttentionHelpers(unittest.TestCase):
         from kernels import AttentionDenseSpec, build_attention_dense
         from kernels.gfx950.attention_dense import Gfx950AttentionDenseSpec
 
+        # Every case analyzes a code object: without the tools, skip as a whole.
+        require_hsaco_tools()
         base = AttentionDenseSpec(
             batch=1,
             seqlen_q=2048,
@@ -1508,6 +1512,8 @@ class TestAttentionHelpers(unittest.TestCase):
         from dispatch.attention import AttentionRequest, attention_tuning_spec
         from kernels.gfx942.attention_dense import build_attention_dense
 
+        # Every case analyzes a code object: without the tools, skip as a whole.
+        require_hsaco_tools()
         for head_size, dtype, emit_lse in itertools.product(
             (64, 128), ("fp16", "bf16"), (False, True)
         ):
@@ -1955,6 +1961,8 @@ class TestAttentionHelpers(unittest.TestCase):
         """comgr build + resource-budget net for the PAGED dense prefill
         (fp16/bf16 D128 sliding-window, single-seq). Mirrors the non-paged dense
         budget test; the block_tables indirection adds a load but must still fit."""
+        # Every case analyzes a code object: without the tools, skip as a whole.
+        require_hsaco_tools()
         for arch in ("gfx942", "gfx950"):
             ad = importlib.import_module(f"kernels.{arch}.attention_dense")
             AttentionDenseSpec = dense_arch_spec_class(ad)
@@ -1986,6 +1994,8 @@ class TestAttentionHelpers(unittest.TestCase):
     def test_dense_paged_smaller_tiles_compile_and_fit_budget(self):
         """comgr build + resource-budget net for paged K/V on the smaller dense
         tiles, at each tile's page limit."""
+        # Every case analyzes a code object: without the tools, skip as a whole.
+        require_hsaco_tools()
         shape = dict(
             batch=1,
             seqlen_q=1024,

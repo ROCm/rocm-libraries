@@ -33,7 +33,8 @@ per-wave-size, so one arch being green says nothing about the other.
 WMMA wgrad accepts only ``epilogue='default'``, so the K-outer sweeps ask for the
 one their arch supports. A sweep requesting the wrong epilogue skips every
 subTest -- and a test whose subTests all skip still reports *passed*, so
-``_assert_ran`` makes an all-skipped K-outer sweep a hard failure instead.
+the test roots' sweep guard (``rocke.tests.sweep_guard``) makes an all-skipped
+K-outer sweep a hard failure instead.
 
 Requires a ROCm GPU. Run:
     PYTHONPATH=rocke/platform/python:rocke/library python -m pytest \\
@@ -54,6 +55,7 @@ from rocke.runtime.hip_module import get_device_arch
 from rocke.core.arch.target import known_arches
 from rocke.runtime.host_buffers import as_u8_buffer
 from rocke.tests.lanes import arch_skip_reason, skip_needing_arch
+from rocke.tests.sweep_guard import assert_case_ran
 
 from builders.common.conv_reference import (
     conv_extents,
@@ -83,11 +85,13 @@ _WMMA_SPLIT_K_ARCHES = [
     arch for arch in known_arches() if wgrad_wmma_split_k_available(arch)
 ]
 
+
 # WMMA wgrad accepts only the 'default' epilogue (is_valid_wgrad_spec), so the
 # K-outer sweeps below have to ask for the one their arch supports. Requesting
 # 'cshuffle' on gfx1250 makes every subTest skip -- and a test whose subTests all
 # skip still reports *passed*, which is exactly the false green these tests exist
-# to prevent. _assert_ran() below is the backstop.
+# to prevent. The test roots' sweep guard (rocke.tests.sweep_guard) is the
+# backstop.
 _KOUTER_EPILOGUE = "cshuffle" if _IS_MFMA else "default"
 
 
@@ -558,20 +562,6 @@ class TestConvWgradCorrectness(unittest.TestCase):
         )
         return True
 
-    def _assert_ran(self, ran: int, what: str) -> None:
-        """A sweep whose every subTest skipped still reports *passed*.
-
-        That is the false green this suite exists to catch, so make an
-        all-skipped K-outer sweep a hard failure instead of a silent pass.
-        """
-        self.assertGreater(
-            ran,
-            0,
-            f"{what}: every config skipped on {GPU_ARCH}, so the K-outer "
-            f"transpose-read path was never executed -- this is a false green, "
-            f"not a pass. Check the epilogue/atom/split_k the sweep requests.",
-        )
-
     def _sweep_pipeline(self, pipeline: str) -> None:
         for dtype in _DTYPES:
             for shape in _SHAPES:
@@ -592,7 +582,6 @@ class TestConvWgradCorrectness(unittest.TestCase):
         """
         if not _HAS_KOUTER:
             self.skipTest(arch_skip_reason(_KOUTER_ARCHES, _NO_KOUTER))
-        ran = 0
         for dtype in _DTYPES:
             for shape in _SHAPES:
                 with self.subTest(shape=shape.id, dtype=dtype):
@@ -603,8 +592,6 @@ class TestConvWgradCorrectness(unittest.TestCase):
                         _KOUTER_EPILOGUE,
                         lds_k_outer=True,
                     )
-                    ran += 1
-        self._assert_ran(ran, "lds_k_outer vs default")
 
     def test_lds_k_outer_atom_16x16x16(self):
         """K-outer with the 4-element-per-lane atom.
@@ -628,7 +615,6 @@ class TestConvWgradCorrectness(unittest.TestCase):
             self.skipTest(arch_skip_reason(_KOUTER_ARCHES, _NO_KOUTER))
         if not _IS_MFMA:
             self.skipTest(f"the 16x16x16 atom is MFMA-only; got {GPU_ARCH}")
-        ran = 0
         for dtype in _DTYPES:
             for shape in _SHAPES:
                 with self.subTest(shape=shape.id, dtype=dtype):
@@ -641,8 +627,6 @@ class TestConvWgradCorrectness(unittest.TestCase):
                         warp_tile_mn=16,
                         tile_k=16,
                     )
-                    ran += 1
-        self._assert_ran(ran, "lds_k_outer 16x16x16 atom")
 
     def test_lds_k_outer_split_k(self):
         """K-outer under split-K atomics (the shipping configuration).
@@ -650,7 +634,7 @@ class TestConvWgradCorrectness(unittest.TestCase):
         Runs on MFMA and on the wave32 arches whose 16-bit split-K goes through
         the WMMA atomic epilogue (``wgrad_wmma_split_k_available``). There
         ``_KOUTER_EPILOGUE`` is ``default`` -- the only epilogue WMMA has -- and
-        the validator admits it with split_k > 1. ``_assert_ran`` keeps an
+        the validator admits it with split_k > 1. The sweep guard keeps an
         all-skipped run from reporting a false green.
         """
         from kernels.common.conv_implicit_gemm_wgrad import (
@@ -661,7 +645,6 @@ class TestConvWgradCorrectness(unittest.TestCase):
             self.skipTest(arch_skip_reason(_KOUTER_ARCHES, _NO_KOUTER))
         if not _IS_MFMA and not wgrad_wmma_split_k_available(GPU_ARCH):
             self.skipTest(f"no 16-bit wgrad split-K atomic path on {GPU_ARCH}")
-        ran = 0
         for shape in _SHAPES:
             with self.subTest(shape=shape.id):
                 self._check(
@@ -672,8 +655,6 @@ class TestConvWgradCorrectness(unittest.TestCase):
                     split_k=8,
                     lds_k_outer=True,
                 )
-                ran += 1
-        self._assert_ran(ran, "lds_k_outer split-K")
 
     def test_lds_k_outer_async_dma(self):
         """Direct global->LDS load, which is only legal on the K-outer tile.
@@ -690,7 +671,6 @@ class TestConvWgradCorrectness(unittest.TestCase):
             self.skipTest(
                 f"async_dma wgrad on the K-outer tile is MFMA-only; got {GPU_ARCH}"
             )
-        ran = 0
         for dtype in _DTYPES:
             for shape in _SHAPES:
                 with self.subTest(shape=shape.id, dtype=dtype):
@@ -702,8 +682,6 @@ class TestConvWgradCorrectness(unittest.TestCase):
                         lds_k_outer=True,
                         async_dma=True,
                     )
-                    ran += 1
-        self._assert_ran(ran, "lds_k_outer async_dma")
 
     def test_async_dma_requires_k_outer(self):
         """async_dma on the M-outer tile must be rejected, not silently wrong."""
@@ -2517,28 +2495,13 @@ class TestWgradDoubleBufferedSplitKTail(unittest.TestCase):
                         split_k=2,
                         **knobs,
                     )
-                    _assert_case_ran(self, ok, f"{shape.id} {dtype} {knobs}: {why}")
+                    assert_case_ran(self, ok, f"{shape.id} {dtype} {knobs}: {why}")
 
     def test_async_dma_odd_slice(self):
         self._sweep(async_dma=True, lds_k_outer=True)
 
     def test_unroll_k_odd_slice(self):
         self._sweep(unroll_k=True)
-
-
-def _assert_case_ran(test, ok: bool, why: str) -> None:
-    """Fail unless the case was actually built, launched and compared.
-
-    ``_run_one`` and ``_check_two_stage`` report an unbuildable spec as
-    ``(True, "skip (...)")`` so a sweep over many shapes can step past configs
-    an arch does not support. A test that only asserts ``ok`` therefore passes
-    when every one of its cases was skipped. That is not hypothetical: the
-    group-merge cases below silently skipped their whole ``group_merge > 1``
-    axis until this guard was added, because the shape defaulted to groups=1
-    and the gate rejected every merged spec.
-    """
-    test.assertTrue(ok, why)
-    test.assertFalse(why.startswith("skip"), f"case was skipped rather than run: {why}")
 
 
 @unittest.skipIf(_skip_reason(), _skip_reason())
@@ -2656,7 +2619,7 @@ class TestWgradWmmaCShuffle(unittest.TestCase):
                                 "cshuffle",
                                 spec_override=spec,
                             )
-                            _assert_case_ran(
+                            assert_case_ran(
                                 self, ok, f"{shape.id} {dtype} {knobs}: {why}"
                             )
 
@@ -2777,7 +2740,7 @@ class TestWgradGroupMergeNumerics(unittest.TestCase):
                         tile_n=128,
                         group_merge=gm,
                     )
-                    _assert_case_ran(self, ok, why)
+                    assert_case_ran(self, ok, why)
 
     def test_group_merge_split_k_requires_two_stage(self):
         # Merging and split-K compose, but a merged tile cannot use the
@@ -2861,7 +2824,7 @@ class TestWgradGroupMergeNumerics(unittest.TestCase):
             tile_n=128,
             group_merge=8,
         )
-        _assert_case_ran(self, ok, why)
+        assert_case_ran(self, ok, why)
 
 
 @unittest.skipUnless(not _SKIP_REASON, _SKIP_REASON or "needs CDNA GPU")
@@ -2881,7 +2844,7 @@ class TestWgradPrefetchAddrNumerics(unittest.TestCase):
         ok, why = _run_one(
             GPU_ARCH, shape, dtype, pipeline, epilogue, prefetch_addr=True, **kw
         )
-        _assert_case_ran(self, ok, why)
+        assert_case_ran(self, ok, why)
 
     def test_pipelines(self):
         for pipeline in _PIPELINES:
@@ -2952,7 +2915,7 @@ class TestWgradPrefetchAddrNumerics(unittest.TestCase):
                             prefetch_addr=True,
                             register_prefetch=(pipeline == "compv3"),
                         )
-                        _assert_case_ran(self, ok, why)
+                        assert_case_ran(self, ok, why)
 
     def test_grouped(self):
         shape = _Shape(
@@ -3004,7 +2967,7 @@ class TestWgradPrefetchAddrNumerics(unittest.TestCase):
                     seed=95 + gm,
                     prefetch_addr=True,
                 )
-                _assert_case_ran(self, ok, why)
+                assert_case_ran(self, ok, why)
 
 
 @unittest.skipUnless(not _SKIP_REASON and _IS_MFMA, _SKIP_REASON or "needs an MFMA GPU")
@@ -3026,7 +2989,7 @@ class TestWgradPrefetchGlobalRegsNumerics(unittest.TestCase):
         ok, why = _run_one(
             GPU_ARCH, shape, dtype, pipeline, epilogue, prefetch_global_regs=True, **kw
         )
-        _assert_case_ran(self, ok, why)
+        assert_case_ran(self, ok, why)
 
     def test_pipelines(self):
         for pipeline in _PIPELINES:
@@ -3104,7 +3067,7 @@ class TestWgradPrefetchGlobalRegsNumerics(unittest.TestCase):
                                 seed=97,
                                 prefetch_global_regs=True,
                             )
-                            _assert_case_ran(self, ok, why)
+                            assert_case_ran(self, ok, why)
 
     def test_deep_two_stage(self):
         # A long 1xN reduction split many ways: every slice is a few tiles, so
@@ -3121,7 +3084,7 @@ class TestWgradPrefetchGlobalRegsNumerics(unittest.TestCase):
                     seed=98,
                     prefetch_global_regs=True,
                 )
-                _assert_case_ran(self, ok, why)
+                assert_case_ran(self, ok, why)
 
     def test_grouped(self):
         shape = _Shape(

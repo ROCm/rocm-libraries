@@ -1447,6 +1447,14 @@ a runner lane or writes a declaration by hand.
 records (`rocke.tests.run_records`) of the CI lanes: it fails on each case no
 lane ran that no record covers.
 
+**A sweep that checked nothing fails.** The same pytest roots fail a test whose
+subtests all skipped (`rocke.tests.sweep_guard`, on pytest 9): skip such a test
+as a whole before its first subtest when none of its cases can run here, and
+report every combination as a subtest, not only those that fail or skip. A
+lane a subtest declares does not book its test, which ran. A sweep whose
+runner reports each case as `(ok, why)` checks it with
+`rocke.tests.sweep_guard.assert_case_ran`, so a case stepped past fails.
+
 ## 6. Invariants & contracts
 
 Cross-cutting properties every change must preserve:

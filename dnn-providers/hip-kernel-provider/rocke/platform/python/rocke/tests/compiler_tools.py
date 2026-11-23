@@ -17,9 +17,10 @@ import os
 import unittest
 from typing import NoReturn
 
+from ..analysis.isa import missing_hsaco_tools
 from .lanes import CI_TEST_TOOLS, skip_until_reason
 
-__all__ = ["REQUIRE_COMPILER_TOOLS_ENV", "require_tools_or_skip"]
+__all__ = ["REQUIRE_COMPILER_TOOLS_ENV", "require_hsaco_tools", "require_tools_or_skip"]
 
 # platform/CMakeLists.txt sets it to "1" only for the installed CTest entries whose tests consume
 # it, where ROCM_PATH supplies the tools (Linux); see TESTING.md section 5.1.4.
@@ -36,3 +37,15 @@ def require_tools_or_skip(reason: str) -> NoReturn:
     if os.environ.get(REQUIRE_COMPILER_TOOLS_ENV) == "1":
         raise AssertionError(f"{REQUIRE_COMPILER_TOOLS_ENV}=1 but {reason}")
     raise unittest.SkipTest(skip_until_reason(CI_TEST_TOOLS, reason=reason))
+
+
+def require_hsaco_tools() -> None:
+    """Skip the running test (see :func:`require_tools_or_skip`) unless the tools
+    ``rocke.analysis.isa.analyze_hsaco`` runs are on PATH. A sweep whose every
+    case analyzes a code object calls it before its first case, so a host
+    without them skips the sweep as a whole instead of skipping every case."""
+    missing = missing_hsaco_tools()
+    if missing:
+        require_tools_or_skip(
+            f"HSACO introspection unavailable: missing tool: {', '.join(missing)}"
+        )

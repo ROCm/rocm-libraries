@@ -110,13 +110,16 @@ def pytest_configure(config):
     tests that need the package fail on it themselves, the others still run
     (the same rule as ``_restore_attention_arch_state`` below). It also
     declares the shard-cost mark for runs that do not load the
-    ``rocke.tests.ctest_shard`` plugin, and applies the test session's garbage
-    collector setting (``rocke.tests.session_gc``)."""
+    ``rocke.tests.ctest_shard`` plugin, applies the test session's garbage
+    collector setting (``rocke.tests.session_gc``) and fails a sweep whose
+    subtests all skipped (``rocke.tests.sweep_guard``)."""
     from rocke.tests.ctest_shard import register_shard_cost_marker
     from rocke.tests.session_gc import use_test_session_gc
+    from rocke.tests.sweep_guard import register_sweep_guard
 
     use_test_session_gc()
     register_shard_cost_marker(config)
+    register_sweep_guard(config)
     try:
         from kernels.common.attention_bwd_comgr import ensure_production_comgr
     except Exception as exc:  # noqa: BLE001 - see the docstring

@@ -436,7 +436,12 @@ def parse_kernel_arguments(readelf_notes: str) -> dict[str, tuple[KernelArgument
     return result
 
 
-def read_code_object_notes(hsaco_path: Path, *, readelf: str = "llvm-readelf") -> str:
+# The LLVM tools :func:`analyze_hsaco` runs, looked up on PATH unless named.
+OBJDUMP = "llvm-objdump"
+READELF = "llvm-readelf"
+
+
+def read_code_object_notes(hsaco_path: Path, *, readelf: str = READELF) -> str:
     """``readelf --notes`` of one code object: its AMDGPU metadata as the YAML
     text :func:`parse_kernel_arguments` and :func:`parse_resources` read.
 
@@ -459,11 +464,17 @@ def read_code_object_notes(hsaco_path: Path, *, readelf: str = "llvm-readelf") -
     return result.stdout
 
 
+def missing_hsaco_tools(*, objdump: str = OBJDUMP, readelf: str = READELF) -> list[str]:
+    """The tools :func:`analyze_hsaco` runs (``objdump`` and ``readelf``) that
+    are not on PATH, in that order."""
+    return [tool for tool in (objdump, readelf) if shutil.which(tool) is None]
+
+
 def analyze_hsaco(
     hsaco_path: Path,
     *,
-    objdump: str = "llvm-objdump",
-    readelf: str = "llvm-readelf",
+    objdump: str = OBJDUMP,
+    readelf: str = READELF,
     keep_text: bool = False,
 ) -> HsacoAnalysis:
     """Disassemble and inspect one HSACO file.
@@ -475,10 +486,9 @@ def analyze_hsaco(
     path = Path(hsaco_path)
     if not path.exists():
         raise FileNotFoundError(path)
-    if shutil.which(objdump) is None:
-        raise FileNotFoundError(f"missing tool: {objdump}")
-    if shutil.which(readelf) is None:
-        raise FileNotFoundError(f"missing tool: {readelf}")
+    missing = missing_hsaco_tools(objdump=objdump, readelf=readelf)
+    if missing:
+        raise FileNotFoundError(f"missing tool: {missing[0]}")
 
     obj = subprocess.run(
         [objdump, "-d", str(path)],

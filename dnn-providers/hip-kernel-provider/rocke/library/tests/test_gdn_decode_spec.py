@@ -32,6 +32,7 @@ from kernels.gfx950.gdn_decode import (
     gdn_decode_signature,
     is_valid_spec,
 )
+from rocke.tests.compiler_tools import require_hsaco_tools
 
 from ._gdn_decode_compile import compile_each, compiled_scratch_bytes
 
@@ -354,6 +355,8 @@ class TestEmission(unittest.TestCase):
         from dispatch.gdn import GdnDecodeRequest, dispatch_gdn_decode_bases
         from dispatch.gdn.gfx950 import spec_id_for
 
+        # Every case analyzes a code object: without the tools, skip as a whole.
+        require_hsaco_tools()
         # Register-bound tiles: warp_threads_k=1 gives each lane the whole K
         # reduction, so these sit at the 512-VGPR limit and whether (and how
         # much) they spill depends on the compiler. Measured on gfx950, bf16
@@ -397,6 +400,8 @@ class TestEmission(unittest.TestCase):
     def test_every_auto_configuration_compiles_without_spilling(self):
         from dispatch.gdn import GdnDecodeRequest, dispatch_gdn_decode
 
+        # Every case analyzes a code object: without the tools, skip as a whole.
+        require_hsaco_tools()
         # Every case's tile and knob stack, on each state width (f32 doubles
         # the state registers each lane loads), in every fused mode: the
         # one-flag modes run the row less the knobs they cannot read, and
@@ -438,6 +443,8 @@ class TestEmission(unittest.TestCase):
         # longer fits and the kernel spills, so auto must not run it there.
         from dispatch.gdn import GdnDecodeRequest, dispatch_gdn_decode
 
+        # Every case analyzes a code object: without the tools, skip as a whole.
+        require_hsaco_tools()
         for dk, dv in ((256, 128), (256, 256), (128, 256)):
             req = GdnDecodeRequest(
                 batch=16,

@@ -36,6 +36,7 @@ from builders.common.conv_reference import (
 from rocke.numeric import storage
 from rocke.runtime.hip_module import get_device_arch
 from rocke.tests.lanes import skip_needing_arch
+from rocke.tests.sweep_guard import assert_case_ran
 
 GPU_ARCH = get_device_arch(0)
 _IS_WMMA = GPU_ARCH == "gfx1250"  # wave32 / WMMA target
@@ -658,20 +659,6 @@ class TestConvFwdFp32Tf32Correctness(unittest.TestCase):
                 )
 
 
-def _assert_case_ran(test, ok: bool, why: str) -> None:
-    """Fail unless the case was actually built, launched and compared.
-
-    ``_run_one`` reports an unbuildable spec as ``(True, "skip (...)")`` so a
-    sweep can step past configs an arch does not support. A test that only
-    asserts ``ok`` therefore passes when every one of its cases was skipped.
-    The wgrad copy of this guard exists because the merged cases there silently
-    skipped their entire ``group_merge > 1`` axis; the same trap is live here,
-    since the gate rejects every merged spec on a ``groups == 1`` shape.
-    """
-    test.assertTrue(ok, why)
-    test.assertFalse(why.startswith("skip"), f"case was skipped rather than run: {why}")
-
-
 # Depthwise shapes for the merged-groups axis. ``groups == C == K`` is the case
 # the whole feature exists for: the per-group channel count is 1, so unmerged
 # loads and stores are both single-element.
@@ -735,7 +722,7 @@ class TestConvFwdGroupMergeNumerics(unittest.TestCase):
 
     def _check(self, shape: _Shape, dtype: str, epilogue: str, gm: int) -> None:
         ok, why = _run_one(GPU_ARCH, shape, dtype, "mem", epilogue, group_merge=gm)
-        _assert_case_ran(self, ok, why)
+        assert_case_ran(self, ok, why)
 
     def test_merged_matches_reference(self):
         ran = 0
@@ -775,7 +762,7 @@ class TestConvFwdGroupMergeNumerics(unittest.TestCase):
                     group_merge=gm,
                     unroll_k=True,
                 )
-                _assert_case_ran(self, ok, why)
+                assert_case_ran(self, ok, why)
 
     def test_merged_direct_epilogue(self):
         # Every case above stores through cshuffle, because merged kpg derives
@@ -795,7 +782,7 @@ class TestConvFwdGroupMergeNumerics(unittest.TestCase):
                         "default",
                         group_merge=gm,
                     )
-                    _assert_case_ran(self, ok, why)
+                    assert_case_ran(self, ok, why)
 
     def test_merged_wavelet(self):
         # The wavelet load waves fetch B through their own loader; it must
@@ -816,7 +803,7 @@ class TestConvFwdGroupMergeNumerics(unittest.TestCase):
                             epilogue,
                             group_merge=gm,
                         )
-                        _assert_case_ran(self, ok, why)
+                        assert_case_ran(self, ok, why)
 
 
 @unittest.skipIf(_skip_reason(), _skip_reason())
