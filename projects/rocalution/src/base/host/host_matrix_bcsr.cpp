@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -62,6 +62,9 @@ namespace rocalution
         this->mat_.row_offset = NULL;
         this->mat_.col        = NULL;
         this->mat_.val        = NULL;
+        this->mat_.nrowb      = 0;
+        this->mat_.ncolb      = 0;
+        this->mat_.nnzb       = 0;
         this->mat_.blockdim   = blockdim;
 
         this->set_backend(local_backend);
@@ -91,6 +94,10 @@ namespace rocalution
         this->nrow_ = 0;
         this->ncol_ = 0;
         this->nnz_  = 0;
+
+        this->mat_.nrowb = 0;
+        this->mat_.ncolb = 0;
+        this->mat_.nnzb  = 0;
     }
 
     template <typename ValueType>
@@ -180,11 +187,13 @@ namespace rocalution
 
         blockdim = this->mat_.blockdim;
 
-        this->mat_.blockdim = 0;
-
         this->nrow_ = 0;
         this->ncol_ = 0;
         this->nnz_  = 0;
+
+        this->mat_.nrowb = 0;
+        this->mat_.ncolb = 0;
+        this->mat_.nnzb  = 0;
     }
 
     template <typename ValueType>
@@ -245,10 +254,15 @@ namespace rocalution
         // Empty matrix
         if(mat.GetNnz() == 0)
         {
-            int mb = (mat.GetM() + 1) / 2;
-            int nb = (mat.GetN() + 1) / 2;
+            int blockdim = this->mat_.blockdim;
 
-            this->AllocateBCSR(0, mb, nb, 2);
+            // Matrix dimensions must be a multiple of blockdim
+            if((mat.GetM() % blockdim) != 0 || (mat.GetN() % blockdim) != 0)
+            {
+                return false;
+            }
+
+            this->AllocateBCSR(0, mat.GetM() / blockdim, mat.GetN() / blockdim, blockdim);
 
             return true;
         }

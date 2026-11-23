@@ -32,11 +32,18 @@ import time
 from joblib import Parallel, delayed
 from joblib import cpu_count as lokyCpuCount
 
-from .Utilities import tqdm
+from .Utilities import printWarning, tqdm
 
 # All pools started concurrently by one machine's pytest-xdist workers together use at most this
 # many processes per available CPU; a single process never uses more than one per CPU.
 OVERSUBSCRIPTION_FACTOR = 2
+
+# Peak memory per kernel-generation pool process: ~270 MB in a 4-config --build-only run (13.1 GB
+# over 49 processes), ~0.3 GiB RSS on the gfx1250-strict CI host (RSS double-counts shared pages).
+# Override: TENSILE_POOL_PROCESS_PEAK_MIB. POOL_MEMORY_FRACTION: share of the cgroup memory limit
+# that all concurrent workers' pools may use.
+POOL_PROCESS_PEAK_BYTES = 300 * 2**20
+POOL_MEMORY_FRACTION = 0.8
 
 
 def joblibParallelSupportsGenerator():
@@ -88,11 +95,156 @@ def concurrentWorkerCount():
         return 1
 
 
-def poolSizeBudget():
+def _poolProcessPeakBytes():
+    """POOL_PROCESS_PEAK_BYTES, or TENSILE_POOL_PROCESS_PEAK_MIB when it is a positive integer."""
+    try:
+        mib = int(os.environ.get("TENSILE_POOL_PROCESS_PEAK_MIB", ""))
+    except ValueError:
+        return POOL_PROCESS_PEAK_BYTES
+    return mib * 2**20 if mib > 0 else POOL_PROCESS_PEAK_BYTES
+
+
+def _cgroupMemoryLimit(root="/sys/fs/cgroup", selfCgroup="/proc/self/cgroup"):
+    """Smallest memory limit (bytes) from this process's cgroup up to ``root``: v2 ``memory.max``,
+    v1 ``memory.limit_in_bytes`` and ``hierarchical_memory_limit``. A parent's limit binds its
+    children (Slurm, systemd scopes), even when a child sets a larger one. None if no level sets a
+    limit, nothing is readable, or on Windows. ``root``, a container's own cgroup, is checked last.
+    Inside a cgroup namespace, v2 ancestors above the container are invisible."""
+    if os.name == "nt":
+        return None
+    files = []  # leaf first
+    try:
+        with open(selfCgroup) as f:
+            for line in f:
+                hierarchy, _, rest = line.rstrip("\n").partition(":")
+                controllers, _, path = rest.partition(":")
+                if hierarchy == "0" and not controllers:
+                    base, name = root, "memory.max"
+                elif "memory" in controllers.split(","):
+                    base, name = os.path.join(root, "memory"), "memory.limit_in_bytes"
+                else:
+                    continue
+                parts = [p for p in path.split("/") if p]
+                files += [os.path.join(base, *parts[:i], name) for i in range(len(parts), -1, -1)]
+    except OSError:
+        pass
+    files += [
+        os.path.join(root, "memory.max"),
+        os.path.join(root, "memory", "memory.limit_in_bytes"),
+    ]
+    limits = []
+    for path in dict.fromkeys(files):
+        try:
+            with open(path) as f:
+                limits.append(int(f.read().strip()))
+        except (OSError, ValueError):
+            pass  # absent, unreadable, or "max": no limit at this level
+        if path.endswith("memory.limit_in_bytes"):
+            # v1 hides a parent's limit outside the container's view; memory.stat's
+            # hierarchical_memory_limit still reports it.
+            try:
+                with open(os.path.join(os.path.dirname(path), "memory.stat")) as f:
+                    for line in f:
+                        key, _, value = line.partition(" ")
+                        if key == "hierarchical_memory_limit":
+                            limits.append(int(value))
+            except (OSError, ValueError):
+                pass
+    # cgroup v1 reports "no limit" as a value near 2**63.
+    limits = [limit for limit in limits if 0 < limit < 2**62]
+    return min(limits) if limits else None
+
+
+def memoryPoolSizeCap(workers=None):
+    """Pool size per process that keeps the pools of all concurrent workers within
+    POOL_MEMORY_FRACTION of the cgroup memory limit, at POOL_PROCESS_PEAK_BYTES per pool process;
+    None without a limit. The CPU budget cannot see other containers sharing the machine's CPUs,
+    while the memory limit is per container."""
+    limit = _cgroupMemoryLimit()
+    if limit is None:
+        return None
+    workers = concurrentWorkerCount() if workers is None else max(1, workers)
+    perWorker = int(limit * POOL_MEMORY_FRACTION) // workers
+    return max(1, perWorker // _poolProcessPeakBytes())
+
+
+def poolSizeBudget(workers=None):
     """Pool size for one process: OVERSUBSCRIPTION_FACTOR x the available CPUs shared among the
-    concurrent workers, at most the available CPUs, at least 1."""
+    concurrent workers, at most the available CPUs and the memory cap, at least 1. ``workers``
+    overrides PYTEST_XDIST_WORKER_COUNT, which the pytest controller lacks."""
+    workers = concurrentWorkerCount() if workers is None else max(1, workers)
     cpus = availableCPUCount()
-    return max(1, min(cpus, (OVERSUBSCRIPTION_FACTOR * cpus) // concurrentWorkerCount()))
+    budget = max(1, min(cpus, (OVERSUBSCRIPTION_FACTOR * cpus) // workers))
+    memoryCap = memoryPoolSizeCap(workers)
+    return budget if memoryCap is None else min(budget, memoryCap)
+
+
+def describePoolSizeBudget(workers=None):
+    """The pool budget and its inputs, as one log line."""
+    workers = concurrentWorkerCount() if workers is None else max(1, workers)
+    limit = _cgroupMemoryLimit()
+    memory = "none" if limit is None else "%.1f GiB" % (limit / 2**30)
+    return (
+        "TensileLite pool budget: %d processes per worker "
+        "(CPUs %d, workers %d, memory limit %s, %d MiB per process)"
+        % (poolSizeBudget(workers), availableCPUCount(), workers, memory,
+           _poolProcessPeakBytes() // 2**20)
+    )
+
+
+def shutdownWorkerPool():
+    """Terminate the idle joblib (loky) worker pool, if one exists.
+
+    loky keeps its workers alive between Parallel calls, including any heap
+    pages their allocators retain after temporary objects are freed. Call this
+    after a phase's results have been consumed to release the workers' private
+    memory. The next ParallelMap2 call creates fresh workers. No-op when no
+    reusable executor exists.
+    """
+    try:
+        from joblib.externals.loky import reusable_executor
+    except ImportError:  # pragma: no cover - joblib without loky
+        return
+    # loky has no public call for "end the reusable pool", so this reaches its
+    # module-level executor. Say so if a joblib upgrade moves it, rather than
+    # silently keeping every worker alive.
+    if not hasattr(reusable_executor, "_executor"):
+        printWarning(
+            "loky's reusable_executor has no _executor attribute; the worker "
+            "pool is not recycled between phases"
+        )
+        return
+    executor = reusable_executor._executor
+    if executor is None:
+        return
+    executor.shutdown(wait=True, kill_workers=False)
+
+
+_libc = None
+
+
+def releaseFreedMemory():
+    """Hand freed heap pages back to the OS (glibc malloc_trim).
+
+    Allocators can retain pages after Python and rocisa objects are freed.
+    malloc_trim can return whole free pages throughout glibc's arenas; it
+    cannot release live allocations or free blocks held by other allocators.
+    A no-op where libc has no malloc_trim.
+    """
+    global _libc
+    if _libc is False:
+        return
+    if _libc is None:
+        try:
+            import ctypes
+
+            _libc = ctypes.CDLL("libc.so.6")
+            _libc.malloc_trim.argtypes = [ctypes.c_size_t]
+            _libc.malloc_trim.restype = ctypes.c_int
+        except (OSError, AttributeError):
+            _libc = False
+            return
+    _libc.malloc_trim(0)
 
 
 def CPUThreadCount(enable=True):

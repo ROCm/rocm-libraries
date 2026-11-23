@@ -8,14 +8,15 @@
 #include "SdpaFwdParams.hpp"
 
 #include <cstdint>
-#include <unordered_map>
+#include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
+#include <hipdnn_plugin_sdk/PluginDeviceBuffers.hpp>
 
 namespace asm_sdpa_engine
 {
 
 /**
- * @brief Build the packed forward kernel-argument struct from plan params and a
- *        UID->device-pointer map.
+ * @brief Build the packed forward kernel-argument struct from plan params and the
+ *        execute-time device buffers.
  *
  * Pure (performs no device calls), so it can be unit-tested without loading a
  * kernel module. Q/K/V strides use params.inBytesPerElement (1 for fp8, 2 for
@@ -23,16 +24,23 @@ namespace asm_sdpa_engine
  * the corresponding descale UIDs are set; per-tensor descales carry zero strides.
  */
 inline fmha_fwd_v3_args buildFwdKernelArgs(const SdpaFwdParams& params,
-                                           const std::unordered_map<int64_t, void*>& uidToPtrMap)
+                                           const hipdnnPluginDeviceBuffer_t* deviceBuffers,
+                                           uint32_t numDeviceBuffers)
 {
     fmha_fwd_v3_args args{};
 
+    // Throws HipdnnPluginException(INVALID_VALUE), naming the uid, for an operand the caller
+    // supplied no buffer for.
+    const auto bufferPtr = [&](int64_t uid) {
+        return hipdnn_plugin_sdk::findDeviceBuffer(uid, deviceBuffers, numDeviceBuffers).ptr;
+    };
+
     // Output/input pointers
-    args.ptr_o = uidToPtrMap.at(params.oUid);
-    args.ptr_q = uidToPtrMap.at(params.qUid);
-    args.ptr_k = uidToPtrMap.at(params.kUid);
-    args.ptr_v = uidToPtrMap.at(params.vUid);
-    args.ptr_lse = params.lseUid ? uidToPtrMap.at(params.lseUid.value()) : nullptr;
+    args.ptr_o = bufferPtr(params.oUid);
+    args.ptr_q = bufferPtr(params.qUid);
+    args.ptr_k = bufferPtr(params.kUid);
+    args.ptr_v = bufferPtr(params.vUid);
+    args.ptr_lse = params.lseUid ? bufferPtr(params.lseUid.value()) : nullptr;
 
     // Attention scale (args.scalar) is a runtime pass-by-value operand resolved by
     // the caller at execute via resolveScalarOperand(), so it is not set here — this
@@ -67,7 +75,8 @@ inline fmha_fwd_v3_args buildFwdKernelArgs(const SdpaFwdParams& params,
 
     // KV dimensions. Group mode passes hipDNN's S_kv (the maximum per-batch KV length),
     // not a packed total. Precondition, not checked: S_kv >= every per-batch KV length,
-    // i.e. max_b(kvOffset[b+1] - kvOffset[b]).
+    // i.e. max_b(kvOffset[b+1] - kvOffset[b]), or max_b(cuSeqLenKv[b+1] - cuSeqLenKv[b])
+    // when the graph has cu_seq_len_kv.
     args.s_kv_seq_len = params.seqLenKv;
     args.s_qk_head_dim = params.headDimQk;
     args.s_v_head_dim = params.headDimV;
@@ -87,7 +96,10 @@ inline fmha_fwd_v3_args buildFwdKernelArgs(const SdpaFwdParams& params,
     args.ptr_qseq = nullptr;
     args.ptr_kseq = nullptr;
 
-    // LSE stride (head dimension, in bytes)
+    // LSE stride (head dimension, in bytes). In group mode the kernel forms each LSE row's
+    // address as h * s_lse_Hs + 4 * seqstart_q[b] in 32 bits, and the host cannot bound
+    // seqstart_q. Precondition, not checked: seqstart_q[b] + len_b <= head stride; under it,
+    // 4 * H * s_h <= UINT32_MAX (checked in isApplicable) bounds the LSE base.
     constexpr unsigned int K_FP32_SIZE = 4;
     args.s_lse_Hs = params.lseUid ? params.lseStrideHead * K_FP32_SIZE : 0;
 
@@ -99,9 +111,12 @@ inline fmha_fwd_v3_args buildFwdKernelArgs(const SdpaFwdParams& params,
     // fp8 branch: the kernel dequantizes Q/K/V through these per-tensor scalars. The
     // descale UIDs are all-or-none (one optional struct), so a single has_value() gate
     // covers all three.
-    args.ptr_q_descale = params.descaleUids ? uidToPtrMap.at(params.descaleUids->q) : nullptr;
-    args.ptr_k_descale = params.descaleUids ? uidToPtrMap.at(params.descaleUids->k) : nullptr;
-    args.ptr_v_descale = params.descaleUids ? uidToPtrMap.at(params.descaleUids->v) : nullptr;
+    if(params.descaleUids)
+    {
+        args.ptr_q_descale = bufferPtr(params.descaleUids->q);
+        args.ptr_k_descale = bufferPtr(params.descaleUids->k);
+        args.ptr_v_descale = bufferPtr(params.descaleUids->v);
+    }
 
     // FP8 descale strides. Only per-tensor (scalar) descales are supported — isApplicable
     // rejects any non-scalar descale — so there is no batch/head variation and all strides
@@ -126,10 +141,18 @@ inline fmha_fwd_v3_args buildFwdKernelArgs(const SdpaFwdParams& params,
         args.s_v_Bs = 0;
         args.s_o_Bs = 0;
 
-        args.ptr_qseq_padding = uidToPtrMap.at(group->qoRaggedOffsetUid);
-        args.ptr_qseq = args.ptr_qseq_padding;
-        args.ptr_kseq_padding = uidToPtrMap.at(group->kvRaggedOffsetUid);
-        args.ptr_kseq = args.ptr_kseq_padding;
+        // Mirrors AITER's init_fmha_fwd_v3_args group branch: the padding pointers take the
+        // physical starts, and the sequence pointers take the logical cumulative lengths when
+        // the graph has them, else the physical starts again. Without cu_seq_len the kernel
+        // takes each batch's length as the raw offset difference, while hipDNN defines it as
+        // min(offset[b+1] - offset[b], S_max). Precondition, not checked: every offset
+        // difference is at most its side's S_max, so the two agree.
+        args.ptr_qseq_padding = bufferPtr(group->qoRaggedOffsetUid);
+        args.ptr_kseq_padding = bufferPtr(group->kvRaggedOffsetUid);
+        args.ptr_qseq
+            = group->cuSeqLenUids ? bufferPtr(group->cuSeqLenUids->q) : args.ptr_qseq_padding;
+        args.ptr_kseq
+            = group->cuSeqLenUids ? bufferPtr(group->cuSeqLenUids->kv) : args.ptr_kseq_padding;
     }
 
     return args;
