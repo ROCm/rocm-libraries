@@ -47,8 +47,10 @@ if sys.path and sys.path[0] != _LIB_ROOT:
     sys.path.insert(0, _LIB_ROOT)
 
 
+@functools.cache
 def _cases():
-    """case id -> zero-arg builder returning a KernelDef.
+    """case id -> zero-arg builder returning a KernelDef. Built once per process:
+    listing the knob cases lowers each knob's spec pair.
 
     Covers the default spec, the reference path, every legal registered
     tile's base configuration (every knob at its default) for both gate
@@ -468,12 +470,15 @@ def _sha_of(kernel, flavor):
     return hashlib.sha256(data).hexdigest(), len(data)
 
 
-def _run_flavors(flavors, failures=None):
-    """Each flavor's golden sub-document. Every case is built once and lowered at
-    each flavor. A build or lowering error propagates with its traceback, unless
-    ``failures`` is a list: then the case is left out and the error appended."""
+def _run_flavors(flavors, failures=None, owns_case=None):
+    """Each flavor's golden sub-document. Every case (or every case whose id
+    ``owns_case`` accepts) is built once and lowered at each flavor. A build or
+    lowering error propagates with its traceback, unless ``failures`` is a
+    list: then the case is left out and the error appended."""
     cases = {flavor: {} for flavor in flavors}
     for cid, build in _cases().items():
+        if owns_case is not None and not owns_case(cid):
+            continue
         try:
             kernel = build()
             records = {flavor: _sha_of(kernel, flavor) for flavor in flavors}
@@ -504,10 +509,30 @@ def _build_doc():
     return doc
 
 
-def test_gdn_decode_ir_matches_golden():
+#: The cases dealt by id into this many chunks (``rocke.tests.ci_shard.shard_of``),
+#: one test each, so their lowering spreads over CI shards and workers.
+_CHECK_CHUNKS = 4
+
+
+def pytest_generate_tests(metafunc):
+    # One test per chunk of the cases. A hook rather than a decorator keeps
+    # pytest out of the --write script path.
+    if "chunk" in metafunc.fixturenames:
+        import pytest
+
+        cost = pytest.mark.rocke_shard_cost(5)
+        metafunc.parametrize(
+            "chunk", [pytest.param(chunk, marks=cost) for chunk in range(_CHECK_CHUNKS)]
+        )
+
+
+def test_gdn_decode_ir_matches_golden(chunk):
+    """The cases of one chunk lower to their golden hashes at every flavor, and
+    the golden holds no other case of the chunk."""
     import pytest
     from rocke.core.golden_file import rerecord_hint
     from rocke.core.ir_golden import GOLDEN_FLAVORS, check_golden
+    from rocke.tests.ci_shard import shard_of
 
     if not _GOLDEN.exists():
         pytest.skip("gdn_decode golden fixture missing; generate with --write")
@@ -520,11 +545,15 @@ def test_gdn_decode_ir_matches_golden():
         if not entry.get("sha256")
     ]
     assert not unrecorded, "\n  ".join(unrecorded)
+
+    def owns_case(case_id: str) -> bool:
+        return shard_of(case_id, _CHECK_CHUNKS) == chunk
+
     # Every flavor in LLVM_FLAVORS, from any host, so a datalayout or intrinsic
     # change for a flavor this host does not run still fails here. GOLDEN_FLAVORS
     # are the flavors check_golden compares when given none.
-    runs = _run_flavors(GOLDEN_FLAVORS)
-    drift = check_golden(_GOLDEN, runs.__getitem__)
+    runs = _run_flavors(GOLDEN_FLAVORS, owns_case=owns_case)
+    drift = check_golden(_GOLDEN, runs.__getitem__, owns_case=owns_case)
     assert not drift, (
         "gdn_decode IR drift vs golden:\n  "
         + "\n  ".join(drift)
@@ -578,7 +607,7 @@ def test_golden_ir_check_rejects_entry_without_sha256(monkeypatch, tmp_path):
     monkeypatch.setattr(sys.modules[__name__], "_GOLDEN", fixture)
 
     with pytest.raises(AssertionError, match="no sha256 recorded"):
-        test_gdn_decode_ir_matches_golden()
+        test_gdn_decode_ir_matches_golden(chunk=0)
 
 
 def test_config_coverage_rejects_entry_without_sha256(monkeypatch, tmp_path):
@@ -668,15 +697,6 @@ def test_gdn_cases_carry_no_kda_marker():
     assert not set(gdn_ids) & set(kda_ids)
 
 
-# About 16 s. Marked for CI shard placement (rocke.tests.ctest_shard) only
-# when pytest collects this module, so the --write / --check script path still
-# runs without pytest.
-if "pytest" in sys.modules:
-    test_gdn_decode_ir_matches_golden = sys.modules["pytest"].mark.rocke_shard_cost(16)(
-        test_gdn_decode_ir_matches_golden
-    )
-
-
 if __name__ == "__main__":
     if "--write" in sys.argv:
         from rocke.core.golden_file import write_golden_json
@@ -684,5 +704,6 @@ if __name__ == "__main__":
         write_golden_json(_GOLDEN, _build_doc())
         print(f"wrote {_GOLDEN}")
     else:
-        test_gdn_decode_ir_matches_golden()
+        for chunk in range(_CHECK_CHUNKS):
+            test_gdn_decode_ir_matches_golden(chunk)
         test_every_shipped_configuration_is_recorded()
