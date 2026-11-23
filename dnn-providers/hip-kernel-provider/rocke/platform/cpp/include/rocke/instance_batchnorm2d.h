@@ -66,6 +66,8 @@ typedef struct rocke_batchnorm2d_spec
     int n_groups; /* default 1 (byte-identical when 1) */
     bool fast_reduce; /* default false (byte-identical when false) */
     int wave_size; /* default 64                        */
+    bool dynamic; /* default false; AOT-generic variant (requires
+                   * channels_per_block == n_groups == 1)             */
     const char* name; /* default "rocke_batchnorm2d_fwd"  */
 } rocke_batchnorm2d_spec_t;
 

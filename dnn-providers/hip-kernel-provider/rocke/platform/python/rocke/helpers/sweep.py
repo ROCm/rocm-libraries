@@ -54,7 +54,9 @@ from .tensor_view import TileWindow
 __all__ = [
     "RowChunkSweepResult",
     "pass2_row_chunks",
+    "pass2_row_chunks_dynamic",
     "sweep_row_chunks",
+    "sweep_row_chunks_dynamic",
 ]
 
 
@@ -212,5 +214,129 @@ def pass2_row_chunks(
         if len(out) != vec:
             raise ValueError(
                 f"pass2_row_chunks body must return {vec} f32 scalars (got {len(out)})"
+            )
+        tile.store_vec_from_f32(b, b.const_i32(0), n_off, values=out)
+
+
+def sweep_row_chunks_dynamic(
+    b: IRBuilder,
+    tile: TileWindow,
+    *,
+    tid: Value,
+    block_size: int,
+    vec: int,
+    length: Value,
+    iter_args: Sequence,
+    body: Callable[[Value, List[Value], Sequence[Value]], Sequence[Value]],
+    row: Optional[Value] = None,
+    iv_name: str = "k0",
+):
+    """Runtime-trip-count analogue of :func:`sweep_row_chunks`.
+
+    ``length`` is a runtime SSA row-length :class:`Value` (not a Python
+    int) -- the AOT-generic counterpart of a compile-time
+    ``elems_per_thread``. The main vectorized sweep becomes a genuine
+    ``scf.for`` (:meth:`IRBuilder.scf_for_iter`) whose trip count is
+    ``length // (block_size*vec)``, loop-carrying ``iter_args`` (a
+    ``[(name, init_value), ...]`` sequence, exactly `scf_for_iter`'s own
+    contract) instead of the Python-side accumulation
+    :func:`sweep_row_chunks` does across its unrolled ``for k in
+    range(...)``.
+
+    ``body(n_off, x_scalars, iter_vars) -> new_iter_vals`` is called once
+    per iteration and must return one new value per ``iter_args`` entry,
+    which the loop ``scf_yield``\\s.
+
+    Returns ``(final_iter_vals, main_elems_per_row, tail)``:
+    ``main_elems_per_row`` (``trip_count * block_size*vec``) and ``tail``
+    (``length - main_elems_per_row``, in ``[0, block_size*vec)``) are
+    runtime :class:`Value`\\s the caller hands to its own masked
+    scalar-tail loop -- the same main/tail split
+    :func:`sweep_row_chunks`'s compile-time-HW callers already use, just
+    computed at runtime instead of Python build time.
+
+    No per-chunk cache (unlike ``cache=True`` on :func:`sweep_row_chunks`):
+    a runtime trip count can't back a Python list sized at build time, so
+    a caller needing the swept values again (a second pass) must re-stream
+    them instead of reusing a cache.
+    """
+    if row is not None:
+        old_origin = tile.origin
+        tile = TileWindow(
+            view=tile.view,
+            lengths=tile.lengths,
+            origin=(row, old_origin[1]),
+        )
+
+    c_bs_vec = b.const_i32(block_size * vec)
+    c_vec = b.const_i32(vec)
+    c_bs = b.const_i32(block_size)
+    trip_count = b.div(length, c_bs_vec)
+
+    for_op = b.scf_for_iter(
+        b.const_i32(0),
+        trip_count,
+        b.const_i32(1),
+        list(iter_args),
+        iv_name=iv_name,
+    )
+    with for_op as (k, iter_vars):
+        n_off = b.add(b.mul(b.mul(k, c_bs), c_vec), b.mul(tid, c_vec))
+        if tile.dtype.name == "f64":
+            x_scalars = tile.load_vec_scalars(b, b.const_i32(0), n_off, n=vec)
+        else:
+            x_scalars = tile.load_vec_as_f32(b, b.const_i32(0), n_off, n=vec)
+        new_vals = body(n_off, x_scalars, iter_vars)
+        b.scf_yield(*new_vals)
+
+    main_elems_per_row = b.mul(trip_count, c_bs_vec)
+    tail = b.sub(length, main_elems_per_row)
+    return list(for_op.results), main_elems_per_row, tail
+
+
+def pass2_row_chunks_dynamic(
+    b: IRBuilder,
+    tile: TileWindow,
+    *,
+    tid: Value,
+    block_size: int,
+    vec: int,
+    main_elems_per_row: Value,
+    trip_count: Value,
+    body: Callable[[Value], Sequence[Value]],
+    row: Optional[Value] = None,
+    iv_name: str = "k0",
+) -> None:
+    """Runtime-trip-count write-back sweep, the store-side counterpart of
+    :func:`sweep_row_chunks_dynamic`.
+
+    ``trip_count`` and ``main_elems_per_row`` are the same runtime Values
+    :func:`sweep_row_chunks_dynamic` returned for this row (recomputing
+    them from ``length`` is also fine -- they are cheap, O(1)-per-CTA
+    integer ops). The loop carries nothing (pure store side effect), so
+    it is a plain ``scf.for`` (:meth:`IRBuilder.scf_for`), not
+    ``scf_for_iter``. ``body(n_off) -> vec f32 scalars`` is called once
+    per chunk; the caller is responsible for re-loading any input it
+    needs (no cache, same reason as :func:`sweep_row_chunks_dynamic`).
+    """
+    if row is not None:
+        old_origin = tile.origin
+        tile = TileWindow(
+            view=tile.view,
+            lengths=tile.lengths,
+            origin=(row, old_origin[1]),
+        )
+
+    c_vec = b.const_i32(vec)
+    c_bs = b.const_i32(block_size)
+
+    for_op = b.scf_for(b.const_i32(0), trip_count, b.const_i32(1), iv_name=iv_name)
+    with for_op as k:
+        n_off = b.add(b.mul(b.mul(k, c_bs), c_vec), b.mul(tid, c_vec))
+        out = body(n_off)
+        if len(out) != vec:
+            raise ValueError(
+                f"pass2_row_chunks_dynamic body must return {vec} f32 scalars "
+                f"(got {len(out)})"
             )
         tile.store_vec_from_f32(b, b.const_i32(0), n_off, values=out)

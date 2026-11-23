@@ -80,13 +80,19 @@ CONFIGS = [
     (4, 4, 7, 7, 256, 2, "f16", True, True, 1, 4, False),  # 37 HW=49 tail + save mean/invstd
     (4, 4, 7, 7, 128, 2, "f16", True, False, 1, 2, True),  # 38 HW=49 tail + fast_reduce
     (4, 4, 7, 7, 256, 2, "bf16", True, False, 1, 4, False),  # 39 HW=49 tail, bf16
+    # --- dynamic (AOT-generic) variant: requires cpb==1, ng==1 ---
+    (2, 8, 14, 14, 256, 4, "f16", True, False, 1, 1, False, True),  # 40 training, HW tail
+    (1, 16, 8, 8, 64, 2, "f16", False, False, 1, 1, False, True),  # 41 inference
+    (2, 8, 16, 16, 64, 2, "f16", True, True, 1, 1, True, True),  # 42 save_mv + fast_reduce
 ]
 
 
 def _spec(idx: int) -> BatchNorm2DSpec:
     if idx < 0 or idx >= len(CONFIGS):
         raise SystemExit(f"unknown config index {idx}")
-    n, c, h, w, bs, v, dt, training, smv, cpb, ng, fr = CONFIGS[idx]
+    cfg = CONFIGS[idx]
+    n, c, h, w, bs, v, dt, training, smv, cpb, ng, fr = cfg[:12]
+    dynamic = cfg[12] if len(cfg) > 12 else False
     return BatchNorm2DSpec(
         n=n,
         c=c,
@@ -100,6 +106,7 @@ def _spec(idx: int) -> BatchNorm2DSpec:
         channels_per_block=cpb,
         n_groups=ng,
         fast_reduce=fr,
+        dynamic=dynamic,
     )
 
 

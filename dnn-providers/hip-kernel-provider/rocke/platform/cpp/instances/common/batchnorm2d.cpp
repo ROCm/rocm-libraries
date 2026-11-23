@@ -46,6 +46,7 @@ rocke_batchnorm2d_spec_t rocke_batchnorm2d_spec_default(void)
     s.n_groups = 1;
     s.fast_reduce = false;
     s.wave_size = 64;
+    s.dynamic = false;
     s.name = "rocke_batchnorm2d_fwd";
     return s;
 }
@@ -96,8 +97,8 @@ rocke_status_t rocke_batchnorm2d_kernel_name(const rocke_batchnorm2d_spec_t* spe
     char part_cpb[32];
     char part_ng[32];
     const char* parts[6];
-    const char* flag_names[3];
-    int flag_on[3];
+    const char* flag_names[4];
+    int flag_on[4];
 
     if(spec == NULL || out == NULL)
     {
@@ -137,8 +138,10 @@ rocke_status_t rocke_batchnorm2d_kernel_name(const rocke_batchnorm2d_spec_t* spe
     flag_on[1] = spec->save_mean_invstd ? 1 : 0;
     flag_names[2] = "fr";
     flag_on[2] = spec->fast_reduce ? 1 : 0;
+    flag_names[3] = "dyn";
+    flag_on[3] = spec->dynamic ? 1 : 0;
 
-    return rocke_kernel_name_join(spec->name, parts, 6, flag_names, flag_on, 3, out, out_cap, NULL);
+    return rocke_kernel_name_join(spec->name, parts, 6, flag_names, flag_on, 4, out, out_cap, NULL);
 }
 
 /* ------------------------------------------------------------------ *
@@ -225,6 +228,14 @@ bool rocke_batchnorm2d_is_valid_spec(const rocke_batchnorm2d_spec_t* spec,
         return false;
     }
 
+    if(spec->dynamic && (spec->channels_per_block != 1 || spec->n_groups != 1))
+    {
+        bn_set_reason(reason,
+                      reason_cap,
+                      "dynamic=True requires channels_per_block == 1 and n_groups == 1");
+        return false;
+    }
+
     if(spec->fast_reduce && !spec->training)
     {
         bn_set_reason(reason, reason_cap, "fast_reduce requires training=True");
@@ -264,12 +275,18 @@ bool rocke_batchnorm2d_is_valid_spec(const rocke_batchnorm2d_spec_t* spec,
     }
     rocke_arena_destroy(&arena);
 
-    elems = rocke_batchnorm2d_elems_per_thread(spec);
-    two_pass = rocke_row_norm_needs_two_pass(elems, ROCKE_REGISTER_TILE_MAX_ELEMS_PER_THREAD);
-    if(!two_pass && elems > ROCKE_REGISTER_TILE_MAX_ELEMS_PER_THREAD)
+    if(!spec->dynamic)
     {
-        bn_set_reason(reason, reason_cap, "elems_per_thread exceeds register-tile cap");
-        return false;
+        /* The dynamic path always streams X twice (no per-sample register
+         * cache), so it carries no VGPR cap; n/h/w are capacity
+         * placeholders there, not the real shape. */
+        elems = rocke_batchnorm2d_elems_per_thread(spec);
+        two_pass = rocke_row_norm_needs_two_pass(elems, ROCKE_REGISTER_TILE_MAX_ELEMS_PER_THREAD);
+        if(!two_pass && elems > ROCKE_REGISTER_TILE_MAX_ELEMS_PER_THREAD)
+        {
+            bn_set_reason(reason, reason_cap, "elems_per_thread exceeds register-tile cap");
+            return false;
+        }
     }
 
     max_thr = rocke_archtarget_max_threads_per_block(target);
@@ -398,6 +415,376 @@ static void bn_pass2_body(rocke_ir_builder_t* b,
 }
 
 /* ------------------------------------------------------------------ *
+ * build_batchnorm2d_dynamic -- AOT-generic variant (runtime N/H/W)
+ *
+ * C mirror of Python's _build_batchnorm2d_dynamic: see that function's
+ * docstring. Requires channels_per_block == n_groups == 1 (enforced by
+ * is_valid_spec). The N-loop is a genuine scf.for (rocke_b_scf_for_iter)
+ * carrying the running sum/sumsq/tail-count accumulators; nested inside
+ * it, the per-sample H*W sweep is itself a runtime loop
+ * (rocke_sweep_row_chunks_dynamic) plus a vec-wide masked scalar tail.
+ * ------------------------------------------------------------------ */
+
+static void bn_dyn_pass1_body(rocke_ir_builder_t* b,
+                              rocke_value_t* n_off,
+                              rocke_value_t* const* x_scalars,
+                              int vec,
+                              rocke_value_t* const* iter_vars,
+                              int num_iter_vars,
+                              rocke_value_t** new_iter_vals,
+                              void* user)
+{
+    rocke_value_t* sq[8];
+    rocke_value_t* part_sum;
+    rocke_value_t* part_sumsq;
+    int i;
+    (void)n_off;
+    (void)num_iter_vars;
+    (void)user;
+
+    for(i = 0; i < vec; ++i)
+    {
+        sq[i] = rocke_b_fmul(b, x_scalars[i], x_scalars[i]);
+    }
+    part_sum = rocke_tree_reduce(b, bn_fadd_combine, NULL, x_scalars, vec);
+    new_iter_vals[0] = rocke_b_fadd(b, iter_vars[0], part_sum);
+    part_sumsq = rocke_tree_reduce(b, bn_fadd_combine, NULL, sq, vec);
+    new_iter_vals[1] = rocke_b_fadd(b, iter_vars[1], part_sumsq);
+}
+
+typedef struct bn_dyn_pass2_ctx
+{
+    rocke_value_t* mean;
+    rocke_value_t* scale;
+    rocke_value_t* beta_v;
+    const rocke_tile_window_t* x_tile;
+} bn_dyn_pass2_ctx_t;
+
+static void bn_dyn_pass2_body(rocke_ir_builder_t* b,
+                              rocke_value_t* n_off,
+                              rocke_value_t** out,
+                              int vec,
+                              void* user)
+{
+    bn_dyn_pass2_ctx_t* ctx = (bn_dyn_pass2_ctx_t*)user;
+    rocke_value_t* xs[8];
+    rocke_value_t* li[2];
+    int i;
+
+    li[0] = rocke_b_const_i32(b, 0);
+    li[1] = n_off;
+    rocke_tile_window_load_vec_as_f32(b, ctx->x_tile, li, 2, vec, xs);
+    for(i = 0; i < vec; ++i)
+    {
+        rocke_value_t* dx = rocke_b_fsub(b, xs[i], ctx->mean);
+        out[i] = rocke_b_fadd(b, rocke_b_fmul(b, dx, ctx->scale), ctx->beta_v);
+    }
+}
+
+static rocke_kernel_def_t* rocke_build_batchnorm2d_dynamic(rocke_ir_builder_t* b,
+                                                            const rocke_batchnorm2d_spec_t* spec)
+{
+    const rocke_type_t* io_ty;
+    int BS, VEC, CAP;
+    rocke_value_t *X, *Gamma, *Beta, *Y, *RunningMean, *RunningVar;
+    rocke_value_t *Mean = NULL, *InvStd = NULL;
+    rocke_value_t *p_n, *p_c, *p_h, *p_w, *eps, *momentum;
+    rocke_value_t *HW, *tid, *channel;
+    rocke_tensor_view_t x_view, y_view;
+    rocke_tensor_view_t lds_mean_v, lds_m2_v, lds_count_v;
+    rocke_value_t *lds_mean = NULL, *lds_m2 = NULL, *lds_count = NULL;
+    rocke_value_t *mean = NULL, *var = NULL, *inv_std, *gamma_v, *beta_v, *scale;
+    rocke_stride_t row_stride[2];
+    int shape2[2];
+    int ldsshape[1];
+    int lengths2[2];
+    rocke_value_t* origin[2];
+    rocke_param_opts_t opts;
+    int tc;
+
+    io_ty = rocke_b_io_ir_type(b, spec->dtype);
+    if(io_ty == NULL)
+        return NULL;
+    BS = spec->block_size;
+    VEC = spec->vec;
+    CAP = spec->n * spec->c;
+    if(CAP <= 0)
+        CAP = 1;
+
+    rocke_attr_set_int(b, &b->kernel->attrs, "max_workgroup_size", BS);
+
+    memset(&opts, 0, sizeof opts);
+    opts.noalias = true;
+    opts.noalias_set = true;
+    opts.readonly = true;
+    opts.readonly_set = true;
+    opts.align = 16;
+    opts.align_set = true;
+    X = rocke_b_param(b, "X", rocke_ptr_type(b, io_ty, "global"), &opts);
+    Gamma = rocke_b_param(b, "Gamma", rocke_ptr_type(b, io_ty, "global"), &opts);
+    Beta = rocke_b_param(b, "Beta", rocke_ptr_type(b, io_ty, "global"), &opts);
+
+    memset(&opts, 0, sizeof opts);
+    opts.noalias = true;
+    opts.noalias_set = true;
+    opts.writeonly = true;
+    opts.writeonly_set = true;
+    opts.align = 16;
+    opts.align_set = true;
+    Y = rocke_b_param(b, "Y", rocke_ptr_type(b, io_ty, "global"), &opts);
+
+    memset(&opts, 0, sizeof opts);
+    opts.noalias = true;
+    opts.noalias_set = true;
+    RunningMean = rocke_b_param(b, "RunningMean", rocke_ptr_type(b, rocke_f32(), "global"), &opts);
+    RunningVar = rocke_b_param(b, "RunningVar", rocke_ptr_type(b, rocke_f32(), "global"), &opts);
+
+    if(spec->save_mean_invstd)
+    {
+        memset(&opts, 0, sizeof opts);
+        opts.noalias = true;
+        opts.noalias_set = true;
+        opts.writeonly = true;
+        opts.writeonly_set = true;
+        Mean = rocke_b_param(b, "Mean", rocke_ptr_type(b, io_ty, "global"), &opts);
+        InvStd = rocke_b_param(b, "InvStd", rocke_ptr_type(b, io_ty, "global"), &opts);
+    }
+
+    p_n = rocke_b_param(b, "N", rocke_i32(), NULL);
+    p_c = rocke_b_param(b, "C", rocke_i32(), NULL);
+    p_h = rocke_b_param(b, "H", rocke_i32(), NULL);
+    p_w = rocke_b_param(b, "W", rocke_i32(), NULL);
+    eps = rocke_b_param(b, "eps", rocke_f32(), NULL);
+    momentum = rocke_b_param(b, "momentum", rocke_f32(), NULL);
+
+    HW = rocke_b_mul(b, p_h, p_w);
+    tid = rocke_b_thread_id_x(b);
+    channel = rocke_b_block_id_x(b);
+
+    shape2[0] = CAP;
+    shape2[1] = CAP;
+    row_stride[0] = rocke_stride_value(HW);
+    row_stride[1] = rocke_stride_imm(1);
+    rocke_make_global_view(&x_view, X, shape2, 2, io_ty, row_stride);
+    rocke_make_global_view(&y_view, Y, shape2, 2, io_ty, row_stride);
+
+    if(spec->training)
+    {
+        ldsshape[0] = BS;
+        rocke_make_lds_view(b, &lds_mean_v, rocke_f32(), ldsshape, 1, "lds_mean", NULL);
+        rocke_make_lds_view(b, &lds_m2_v, rocke_f32(), ldsshape, 1, "lds_m2", NULL);
+        rocke_make_lds_view(b, &lds_count_v, rocke_f32(), ldsshape, 1, "lds_count", NULL);
+        lds_mean = lds_mean_v.base;
+        lds_m2 = lds_m2_v.base;
+        lds_count = lds_count_v.base;
+    }
+
+    if(spec->training)
+    {
+        rocke_iter_arg_t outer_iter_args[3];
+        rocke_for_t outer_for;
+        rocke_value_t *sum_p, *sumsq_p, *tail_count_p;
+        rocke_value_t *trip_count, *main_per_thread_total, *count_val;
+        rocke_value_t *mean_p, *m2_p;
+
+        outer_iter_args[0].name = "sum_p";
+        outer_iter_args[0].init = rocke_b_const_f32(b, 0.0);
+        outer_iter_args[1].name = "sumsq_p";
+        outer_iter_args[1].init = rocke_b_const_f32(b, 0.0);
+        outer_iter_args[2].name = "tail_count_p";
+        outer_iter_args[2].init = rocke_b_const_f32(b, 0.0);
+
+        outer_for = rocke_b_scf_for_iter(
+            b, rocke_b_const_i32(b, 0), p_n, rocke_b_const_i32(b, 1), outer_iter_args, 3, "n0", false, true);
+        rocke_b_region_enter(b, outer_for.body);
+        {
+            rocke_value_t* n_iv = outer_for.iv;
+            rocke_value_t* row_n = rocke_b_add(b, rocke_b_mul(b, n_iv, p_c), channel);
+            rocke_tile_window_t x_tile_n;
+            rocke_iter_arg_t inner_iter_args[2];
+            rocke_sweep_dynamic_result_t sweep_res;
+            rocke_value_t *sp, *sqp, *tcp;
+            rocke_value_t* new_vals[3];
+
+            lengths2[0] = 1;
+            lengths2[1] = 1;
+            origin[0] = row_n;
+            origin[1] = rocke_b_const_i32(b, 0);
+            rocke_make_tile_window(&x_tile_n, &x_view, lengths2, origin, 2);
+
+            inner_iter_args[0].name = "sum_p_hw";
+            inner_iter_args[0].init = outer_for.iter_vars[0];
+            inner_iter_args[1].name = "sumsq_p_hw";
+            inner_iter_args[1].init = outer_for.iter_vars[1];
+
+            sweep_res = rocke_sweep_row_chunks_dynamic(b,
+                                                       &x_tile_n,
+                                                       tid,
+                                                       BS,
+                                                       VEC,
+                                                       HW,
+                                                       inner_iter_args,
+                                                       2,
+                                                       NULL,
+                                                       bn_dyn_pass1_body,
+                                                       NULL,
+                                                       "hw0");
+            sp = sweep_res.final_iter_vals[0];
+            sqp = sweep_res.final_iter_vals[1];
+            tcp = outer_for.iter_vars[2];
+
+            for(tc = 0; tc < VEC; ++tc)
+            {
+                rocke_value_t* idx_col = rocke_b_add(
+                    b,
+                    rocke_b_add(b, sweep_res.main_elems_per_row, rocke_b_const_i32(b, tc * BS)),
+                    tid);
+                rocke_value_t* valid = rocke_b_cmp_lt(b, idx_col, HW);
+                rocke_value_t* idx_safe =
+                    rocke_b_smin(b, idx_col, rocke_b_sub(b, HW, rocke_b_const_i32(b, 1)));
+                rocke_value_t* flat = rocke_b_add(b, rocke_b_mul(b, row_n, HW), idx_safe);
+                rocke_value_t* x_raw = rocke_b_load_scalar_as_f32(b, X, flat, spec->dtype);
+                rocke_value_t* zero_f = rocke_b_const_f32(b, 0.0);
+                rocke_value_t* x_masked = rocke_b_select(b, valid, x_raw, zero_f);
+                rocke_value_t* one_f2 = rocke_b_const_f32(b, 1.0);
+                rocke_value_t* zero_f2 = rocke_b_const_f32(b, 0.0);
+                rocke_value_t* valid_f = rocke_b_select(b, valid, one_f2, zero_f2);
+                sp = rocke_b_fadd(b, sp, x_masked);
+                sqp = rocke_b_fadd(b, sqp, rocke_b_fmul(b, x_masked, x_masked));
+                tcp = rocke_b_fadd(b, tcp, valid_f);
+            }
+
+            new_vals[0] = sp;
+            new_vals[1] = sqp;
+            new_vals[2] = tcp;
+            rocke_b_scf_yield(b, new_vals, 3);
+        }
+        rocke_b_region_leave(b);
+
+        sum_p = outer_for.op->results[0];
+        sumsq_p = outer_for.op->results[1];
+        tail_count_p = outer_for.op->results[2];
+
+        trip_count = rocke_b_div(b, HW, rocke_b_const_i32(b, BS * VEC));
+        main_per_thread_total =
+            rocke_b_mul(b, p_n, rocke_b_mul(b, trip_count, rocke_b_const_i32(b, VEC)));
+        count_val = rocke_b_fadd(b, rocke_b_sitofp_f32(b, main_per_thread_total), tail_count_p);
+
+        mean_p = rocke_b_fdiv(b, sum_p, count_val);
+        m2_p = rocke_b_fsub(b, sumsq_p, rocke_b_fmul(b, mean_p, sum_p));
+
+        if(spec->fast_reduce)
+        {
+            rocke_welford_block_reduce_stable_wave_prologue(
+                b, mean_p, m2_p, count_val, lds_mean, lds_m2, lds_count, tid, BS, spec->wave_size, &mean, &var);
+        }
+        else
+        {
+            rocke_welford_block_reduce_stable(
+                b, mean_p, m2_p, count_val, lds_mean, lds_m2, lds_count, tid, BS, &mean, &var);
+        }
+
+        {
+            rocke_if_t iff = rocke_b_scf_if(b, rocke_b_cmp_eq(b, tid, rocke_b_const_i32(b, 0)));
+            rocke_b_region_enter(b, iff.then_region);
+            {
+                rocke_value_t* old_mean = rocke_b_global_load_f32(b, RunningMean, channel, 4);
+                rocke_value_t* old_var = rocke_b_global_load_f32(b, RunningVar, channel, 4);
+                rocke_value_t* one_minus_mom = rocke_b_fsub(b, rocke_b_const_f32(b, 1.0), momentum);
+                rocke_value_t* mean_term1 = rocke_b_fmul(b, one_minus_mom, old_mean);
+                rocke_value_t* mean_term2 = rocke_b_fmul(b, momentum, mean);
+                rocke_value_t* new_running_mean = rocke_b_fadd(b, mean_term1, mean_term2);
+                rocke_value_t* var_term1 = rocke_b_fmul(b, one_minus_mom, old_var);
+                rocke_value_t* var_term2 = rocke_b_fmul(b, momentum, var);
+                rocke_value_t* new_running_var = rocke_b_fadd(b, var_term1, var_term2);
+                rocke_b_global_store(b, RunningMean, channel, new_running_mean, 1);
+                rocke_b_global_store(b, RunningVar, channel, new_running_var, 1);
+                if(spec->save_mean_invstd)
+                {
+                    rocke_value_t* inv_std_save = rocke_b_rsqrt(b, rocke_b_fadd(b, var, eps));
+                    rocke_b_store_scalar_from_f32(b, Mean, channel, mean, spec->dtype);
+                    rocke_b_store_scalar_from_f32(b, InvStd, channel, inv_std_save, spec->dtype);
+                }
+            }
+            rocke_b_region_leave(b);
+        }
+    }
+    else
+    {
+        mean = rocke_b_global_load_f32(b, RunningMean, channel, 4);
+        var = rocke_b_global_load_f32(b, RunningVar, channel, 4);
+    }
+
+    inv_std = rocke_b_rsqrt(b, rocke_b_fadd(b, var, eps));
+    gamma_v = rocke_b_load_scalar_as_f32(b, Gamma, channel, spec->dtype);
+    beta_v = rocke_b_load_scalar_as_f32(b, Beta, channel, spec->dtype);
+    scale = rocke_b_fmul(b, inv_std, gamma_v);
+
+    {
+        rocke_for_t outer_for2 = rocke_b_scf_for(b, rocke_b_const_i32(b, 0), p_n, rocke_b_const_i32(b, 1), "n1");
+        rocke_b_region_enter(b, outer_for2.body);
+        {
+            rocke_value_t* n_iv = outer_for2.iv;
+            rocke_value_t* row_n = rocke_b_add(b, rocke_b_mul(b, n_iv, p_c), channel);
+            rocke_tile_window_t x_tile_n, y_tile_n;
+            rocke_value_t *trip_count2, *main_elems2;
+            bn_dyn_pass2_ctx_t p2;
+
+            lengths2[0] = 1;
+            lengths2[1] = 1;
+            origin[0] = row_n;
+            origin[1] = rocke_b_const_i32(b, 0);
+            rocke_make_tile_window(&x_tile_n, &x_view, lengths2, origin, 2);
+            origin[0] = row_n;
+            origin[1] = rocke_b_const_i32(b, 0);
+            rocke_make_tile_window(&y_tile_n, &y_view, lengths2, origin, 2);
+
+            trip_count2 = rocke_b_div(b, HW, rocke_b_const_i32(b, BS * VEC));
+            main_elems2 = rocke_b_mul(b, trip_count2, rocke_b_const_i32(b, BS * VEC));
+
+            p2.mean = mean;
+            p2.scale = scale;
+            p2.beta_v = beta_v;
+            p2.x_tile = &x_tile_n;
+
+            rocke_pass2_row_chunks_dynamic(b,
+                                           &y_tile_n,
+                                           tid,
+                                           BS,
+                                           VEC,
+                                           main_elems2,
+                                           trip_count2,
+                                           NULL,
+                                           bn_dyn_pass2_body,
+                                           &p2,
+                                           "hw1");
+
+            for(tc = 0; tc < VEC; ++tc)
+            {
+                rocke_value_t* idx_col =
+                    rocke_b_add(b, rocke_b_add(b, main_elems2, rocke_b_const_i32(b, tc * BS)), tid);
+                rocke_value_t* valid = rocke_b_cmp_lt(b, idx_col, HW);
+                rocke_if_t iff = rocke_b_scf_if(b, valid);
+                rocke_b_region_enter(b, iff.then_region);
+                {
+                    rocke_value_t* flat = rocke_b_add(b, rocke_b_mul(b, row_n, HW), idx_col);
+                    rocke_value_t* x_raw = rocke_b_load_scalar_as_f32(b, X, flat, spec->dtype);
+                    rocke_value_t* y_val = rocke_b_fadd(
+                        b, rocke_b_fmul(b, rocke_b_fsub(b, x_raw, mean), scale), beta_v);
+                    rocke_b_store_scalar_from_f32(b, Y, flat, y_val, spec->dtype);
+                }
+                rocke_b_region_leave(b);
+            }
+        }
+        rocke_b_region_leave(b);
+    }
+
+    if(!rocke_ir_builder_ok(b))
+        return NULL;
+    return b->kernel;
+}
+
+/* ------------------------------------------------------------------ *
  * build_batchnorm2d
  * ------------------------------------------------------------------ */
 
@@ -469,6 +856,11 @@ rocke_kernel_def_t* rocke_build_batchnorm2d(rocke_ir_builder_t* b,
     {
         (void)rocke_i_set_err(b, ROCKE_ERR_VALUE, "%s", "invalid batchnorm2d spec");
         return NULL;
+    }
+
+    if(spec->dynamic)
+    {
+        return rocke_build_batchnorm2d_dynamic(b, spec);
     }
 
     io_ty = rocke_b_io_ir_type(b, spec->dtype);

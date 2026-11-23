@@ -39,6 +39,7 @@ typedef struct
     int channels_per_block;
     int n_groups;
     bool fast_reduce;
+    bool dynamic;
 } bn_cfg_t;
 
 /* MUST match CONFIGS in batchnorm2d_emit.py (index for index). */
@@ -96,6 +97,10 @@ static const bn_cfg_t CONFIGS[] = {
     {4, 4, 7, 7, 256, 2, "f16", true, true, 1, 4, false},
     {4, 4, 7, 7, 128, 2, "f16", true, false, 1, 2, true},
     {4, 4, 7, 7, 256, 2, "bf16", true, false, 1, 4, false},
+    /* 40..42 dynamic (AOT-generic) variant: requires cpb==1, ng==1 */
+    {2, 8, 14, 14, 256, 4, "f16", true, false, 1, 1, false, true},
+    {1, 16, 8, 8, 64, 2, "f16", false, false, 1, 1, false, true},
+    {2, 8, 16, 16, 64, 2, "f16", true, true, 1, 1, true, true},
 };
 
 #define NCFG ((int)(sizeof(CONFIGS) / sizeof(CONFIGS[0])))
@@ -117,6 +122,7 @@ static int make_spec(int idx, rocke_batchnorm2d_spec_t* spec)
     spec->channels_per_block = CONFIGS[idx].channels_per_block;
     spec->n_groups = CONFIGS[idx].n_groups;
     spec->fast_reduce = CONFIGS[idx].fast_reduce;
+    spec->dynamic = CONFIGS[idx].dynamic;
     return 0;
 }
 

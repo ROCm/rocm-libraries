@@ -60,6 +60,7 @@ typedef struct rocke_layernorm2d_spec
     const char* dtype; /* default "f16" ("f16"|"bf16")      */
     bool save_mean_invstd; /* default false                     */
     int wave_size; /* default 64                        */
+    bool dynamic; /* default false; AOT-generic variant */
     const char* name; /* default "rocke_layernorm2d_fwd"  */
 } rocke_layernorm2d_spec_t;
 
