@@ -99,7 +99,7 @@ namespace rocsparse
     ROCSPARSE_KERNEL(BELL_BLOCK_DIM* BLK_SIZE_Y)
     void bellmm_general_blockdim_kernel(rocsparse_operation trans_A,
                                         rocsparse_operation trans_B,
-                                        I                   M,
+                                        int64_t             M,
                                         I                   N,
                                         ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
                                         I bell_cols,
@@ -167,7 +167,7 @@ namespace rocsparse
     rocsparse_status bellmm_template_general(rocsparse_handle          handle,
                                              rocsparse_operation       trans_A,
                                              rocsparse_operation       trans_B,
-                                             I                         m,
+                                             int64_t                   m,
                                              I                         n,
                                              I                         kb,
                                              I                         bell_cols,
@@ -202,7 +202,7 @@ namespace rocsparse
 
         // One thread block per block row. When block_dim does not divide m, the last
         // block row is partial and the kernel skips its rows past m.
-        const I mb = (m - 1) / bell_block_dim + 1;
+        const int64_t mb = (m - 1) / bell_block_dim + 1;
 
 #define ROCSPARSE_LAUNCH_BELLMM_GENERAL_IMPL(TILE, GRID_STRIDE, BLOCKS, THREADS)       \
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                                \
@@ -269,7 +269,7 @@ namespace rocsparse
     template rocsparse_status rocsparse::bellmm_template_general(rocsparse_handle    handle,         \
                                                                  rocsparse_operation trans_A,        \
                                                                  rocsparse_operation trans_B,        \
-                                                                 ITYPE               m,              \
+                                                                 int64_t             m,              \
                                                                  ITYPE               n,              \
                                                                  ITYPE               kb,             \
                                                                  ITYPE               bell_cols,      \

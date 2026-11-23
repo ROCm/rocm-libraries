@@ -26,12 +26,14 @@
 // Generic spmm with a blocked ELL matrix that has no stored blocks (the
 // product is zero, so C = beta * C) or a few stored blocks, including a row
 // count that the block dimension does not divide (also with a block wider
-// than the kernel tile), i64 indices in base one and a C without padding,
-// with a transposed or batched blocked ELL product that spmm rejects, with a
-// blocked ELL matrix built by dense_to_sparse, and with formats spmm does not
-// support.
+// than the kernel tile), a row count past INT32_MAX with i32 indices, i64
+// indices in base one and a C without padding, with a transposed or batched
+// blocked ELL product that spmm rejects, with a blocked ELL matrix built by
+// dense_to_sparse, and with formats spmm does not support.
 //
 #include "unit_test_extra_common.hpp"
+
+#include <cstring>
 
 using namespace extra_ut;
 
@@ -316,6 +318,111 @@ TEST_F(ExtraBell, partial_block_row_wider_than_tile)
         run_bell_product(handle, r);
         if(HasFatalFailure())
             return;
+    }
+}
+
+TEST_F(ExtraBell, row_count_past_int32_max_writes_every_row)
+{
+    // With int32_t block column indices, C has 2^31 rows, or 2^31 + 3 rows
+    // with a partial last block row. The row count does not fit in int32_t
+    // and must reach the kernel unnarrowed. A block dimension of 32 keeps
+    // the grid within the launch limit for any kernel tile.
+    const int64_t bd = 32, n = 1, max_rows = (int64_t{1} << 31) + 3;
+    const int64_t max_mb  = (max_rows - 1) / bd + 1;
+    const size_t  c_count = static_cast<size_t>(max_rows + bd);
+
+    size_t free_bytes = 0, total_bytes = 0;
+    ASSERT_EQ(hipMemGetInfo(&free_bytes, &total_bytes), hipSuccess);
+    const size_t needed = c_count * sizeof(float) + static_cast<size_t>(max_mb) * sizeof(int32_t);
+    if(free_bytes < needed + (size_t{2} << 30))
+    {
+        GTEST_SKIP() << "needs " << needed / (1 << 20) << " MiB of device memory, have "
+                     << free_bytes / (1 << 20) << " MiB free";
+    }
+
+    // Every ELL slot is padding (-1 in base zero), so the kernel never reads
+    // ell_val and a single value stands in for its rows * ell_cols entries.
+    DevBuf<int32_t> ind(static_cast<size_t>(max_mb));
+    DevBuf<float>   val(size_t{1});
+    DevBuf<float>   dB = up_raw<float>(std::vector<float>(bd * n, 1.0f));
+    DevBuf<float>   dC(c_count);
+    ASSERT_TRUE(ind.ptr && val.ptr && dB.ptr && dC.ptr);
+    ASSERT_EQ(hipMemset(ind.ptr, 0xff, static_cast<size_t>(max_mb) * sizeof(int32_t)), hipSuccess);
+
+    const auto bits = [](float v) {
+        int32_t b;
+        std::memcpy(&b, &v, sizeof(b));
+        return b;
+    };
+    std::vector<float> h(size_t{1} << 26);
+    for(int64_t rows : {int64_t{1} << 31, max_rows})
+    {
+        SCOPED_TRACE("rows=" + std::to_string(rows));
+        // C holds 4 and is followed by a guard of bd sentinels.
+        ASSERT_EQ(hipMemsetD32(dC.ptr, bits(4.0f), rows), hipSuccess);
+        ASSERT_EQ(hipMemsetD32(dC.ptr + rows, bits(-77.0f), bd), hipSuccess);
+
+        SpmatH sp;
+        ASSERT_EQ(rocsparse_create_bell_descr(&sp.p,
+                                              rows,
+                                              bd,
+                                              rocsparse_direction_row,
+                                              bd,
+                                              bd,
+                                              ind.ptr,
+                                              val.ptr,
+                                              rocsparse_indextype_i32,
+                                              rocsparse_index_base_zero,
+                                              rocsparse_datatype_f32_r),
+                  rocsparse_status_success);
+        DnmatH mB, mC;
+        ASSERT_EQ(rocsparse_create_dnmat_descr(
+                      &mB.p, bd, n, bd, dB.ptr, rocsparse_datatype_f32_r, rocsparse_order_column),
+                  rocsparse_status_success);
+        ASSERT_EQ(
+            rocsparse_create_dnmat_descr(
+                &mC.p, rows, n, rows, dC.ptr, rocsparse_datatype_f32_r, rocsparse_order_column),
+            rocsparse_status_success);
+
+        const float alpha = 2.0f, beta = -0.5f;
+        size_t      bsz  = 0;
+        auto        spmm = [&](rocsparse_spmm_stage stage, void* buffer) {
+            return rocsparse_spmm(handle,
+                                  rocsparse_operation_none,
+                                  rocsparse_operation_none,
+                                  &alpha,
+                                  sp.p,
+                                  mB.p,
+                                  &beta,
+                                  mC.p,
+                                  rocsparse_datatype_f32_r,
+                                  rocsparse_spmm_alg_bell,
+                                  stage,
+                                  &bsz,
+                                  buffer);
+        };
+        ASSERT_EQ(spmm(rocsparse_spmm_stage_buffer_size, nullptr), rocsparse_status_success);
+        DevBuf<char> buffer(bsz > 0 ? bsz : 1);
+        ASSERT_TRUE(buffer.ptr);
+        for(rocsparse_spmm_stage stage :
+            {rocsparse_spmm_stage_preprocess, rocsparse_spmm_stage_compute})
+            ASSERT_EQ(spmm(stage, buffer.ptr), rocsparse_status_success);
+        ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+
+        // A has no stored blocks, so every row of C is beta * 4 = -2, and the
+        // guard keeps its sentinel.
+        const size_t count = static_cast<size_t>(rows + bd);
+        for(size_t first = 0; first < count; first += h.size())
+        {
+            const size_t len = std::min(h.size(), count - first);
+            ASSERT_EQ(
+                hipMemcpy(h.data(), dC.ptr + first, len * sizeof(float), hipMemcpyDeviceToHost),
+                hipSuccess);
+            size_t i = 0;
+            while(i < len && h[i] == ((first + i < static_cast<size_t>(rows)) ? -2.0f : -77.0f))
+                ++i;
+            ASSERT_EQ(i, len) << "C[" << first + i << "] is " << h[i];
+        }
     }
 }
 
