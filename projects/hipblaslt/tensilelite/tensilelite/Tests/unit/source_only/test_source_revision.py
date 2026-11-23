@@ -8,6 +8,7 @@ The build tests use a small copy of the project: the real build inputs
 the build needs, committed to a throwaway git repository.
 """
 
+from importlib import metadata
 import os
 from pathlib import Path
 import runpy
@@ -49,9 +50,14 @@ def _git(cwd, *args):
 
 def _copy_project(dest):
     dest.mkdir(parents=True)
-    for name in ("setup.py", "release_metadata.py", "pyproject.toml", "MANIFEST.in",
+    for name in ("setup.py", "release_metadata.py", "VERSION", "pyproject.toml", "MANIFEST.in",
                  "requirements.txt", ".gitignore"):
         shutil.copyfile(_PROJECT_ROOT / name, dest / name)
+    (dest / "packaging_backend").mkdir()
+    shutil.copyfile(
+        _PROJECT_ROOT / "packaging_backend" / "_tensilelite_build_backend.py",
+        dest / "packaging_backend" / "_tensilelite_build_backend.py",
+    )
     (dest / "tensilelite").mkdir()
     for name in ("__init__.py", "_source_revision.py"):
         shutil.copyfile(_PROJECT_ROOT / "tensilelite" / name, dest / "tensilelite" / name)
@@ -66,7 +72,7 @@ def project(tmp_path):
     # In rocm-libraries these come from projects/hipblaslt/.gitignore. Without
     # them, pip's own build outputs would make the tree dirty mid-build.
     with open(root / ".git" / "info" / "exclude", "a") as stream:
-        stream.write("build*/\n*.egg-info/\n")
+        stream.write("build*/\n*.egg-info/\n__pycache__/\n")
     _git(root, "add", "-A")
     _git(root, "commit", "-q", "-m", "initial")
     return root
@@ -81,7 +87,7 @@ def nested_project(tmp_path):
     (repo / "shared" / "library.cpp").write_text("int library();\n")
     _git(repo, "init", "-q")
     with open(repo / ".git" / "info" / "exclude", "a") as stream:
-        stream.write("build*/\n*.egg-info/\n")
+        stream.write("build*/\n*.egg-info/\n__pycache__/\n")
     _git(repo, "add", "-A")
     _git(repo, "commit", "-q", "-m", "initial")
     return repo, root
@@ -108,11 +114,24 @@ def _pip_wheel(source, out, **env):
     return wheel
 
 
+def _pip_editable(source, installed, mode=None, **env):
+    command = [
+        sys.executable, "-m", "pip", "install", "--no-build-isolation", "--no-deps",
+        "--disable-pip-version-check", "--target", str(installed),
+    ]
+    if mode:
+        command.extend(["--config-settings", f"editable_mode={mode}"])
+    command.extend(["-e", str(source)])
+    return subprocess.run(command, env=_build_env(**env), capture_output=True, text=True)
+
+
 def _backend(source, hook, out, **env):
     out.mkdir(parents=True, exist_ok=True)
     result = subprocess.run(
         [sys.executable, "-c",
-         f"import sys; from setuptools import build_meta; print(build_meta.{hook}(sys.argv[1]))",
+         f"import sys; sys.path.insert(0, 'packaging_backend'); "
+         f"import _tensilelite_build_backend as backend; "
+         f"print(backend.{hook}(sys.argv[1]))",
          str(out)],
         cwd=source,
         env=_build_env(**env),
@@ -558,6 +577,7 @@ def test_wheel_built_from_sdist_keeps_the_revision(project, tmp_path, monkeypatc
             assert archive.extractfile(member).read() == original.read_bytes()
         _safe_extractall(archive, tmp_path / "unpacked")
     (unpacked,) = (tmp_path / "unpacked").iterdir()
+    assert (unpacked / "packaging_backend" / "_tensilelite_build_backend.py").is_file()
     assert _RESOLVER["read_build_info"](unpacked / "tensilelite" / "_build_info.py") == head
 
     wheel = _backend(unpacked, "build_wheel", tmp_path / "wheel")
@@ -583,6 +603,80 @@ def test_editable_build_carries_no_stamp(project, tmp_path):
 
     assert _wheel_stamp(wheel)[0] is None
     _assert_tree_unchanged(project)
+
+
+@pytest.mark.parametrize("git_source", [False, True], ids=["archive", "git"])
+@pytest.mark.parametrize("mode", [None, "strict"], ids=["default", "strict"])
+def test_pip_editable_install_rejects_manual_source_revision(project, tmp_path, git_source, mode):
+    source = project if git_source else _copy_project(tmp_path / "archive")
+    # Even a revision agreeing with Git must be rejected for an editable install.
+    revision = _git(source, "rev-parse", "HEAD") if git_source else _SHA
+    installed = tmp_path / "installed"
+    result = _pip_editable(source, installed, mode, TENSILELITE_SOURCE_REVISION=revision)
+
+    assert result.returncode != 0, result.stdout + result.stderr
+    assert "TENSILELITE_SOURCE_REVISION is not supported for editable installs" in (
+        result.stdout + result.stderr
+    )
+    assert not list(installed.glob("*.dist-info"))
+
+
+@pytest.mark.parametrize("git_source", [False, True], ids=["archive", "git"])
+@pytest.mark.parametrize("mode", [None, "strict"], ids=["default", "strict"])
+@pytest.mark.parametrize("override", [None, ""], ids=["unset", "empty"])
+def test_pip_editable_install_without_override_preserves_identity(
+    project, tmp_path, git_source, mode, override
+):
+    source = project if git_source else _copy_project(tmp_path / "archive")
+    expected = "5.0.0"
+    if git_source:
+        expected += "+g" + _git(source, "rev-parse", "HEAD")
+    installed = tmp_path / "installed"
+    environment = {} if override is None else {"TENSILELITE_SOURCE_REVISION": override}
+    result = _pip_editable(source, installed, mode, **environment)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    (dist_info,) = installed.glob("*.dist-info")
+    distribution = metadata.Distribution.at(dist_info)
+    assert distribution.version == expected
+    assert not (source / "tensilelite" / "_build_info.py").exists()
+    assert not (installed / "tensilelite" / "_build_info.py").exists()
+    if git_source:
+        _assert_tree_unchanged(source)
+
+
+@pytest.mark.parametrize("revision", [_SHA, "invalid"], ids=["valid", "malformed"])
+@pytest.mark.parametrize("hook", [
+    "get_requires_for_build_editable", "prepare_metadata_for_build_editable", "build_editable",
+])
+def test_editable_hooks_reject_manual_revision_before_creating_metadata(tmp_path, hook, revision):
+    source = _copy_project(tmp_path / "archive")
+    output = tmp_path / "output"
+    output.mkdir()
+    result = subprocess.run(
+        [sys.executable, "-c",
+         "import sys; sys.path.insert(0, 'packaging_backend'); "
+         "import _tensilelite_build_backend as backend; "
+         "getattr(backend, sys.argv[1])(None if sys.argv[1].startswith('get_requires') "
+         "else sys.argv[2])", hook, str(output)],
+        cwd=source, env=_build_env(TENSILELITE_SOURCE_REVISION=revision),
+        capture_output=True, text=True,
+    )
+
+    assert result.returncode != 0
+    assert "TENSILELITE_SOURCE_REVISION is not supported for editable installs" in result.stderr
+    assert not list(output.iterdir())
+    assert not list(source.glob("*.egg-info"))
+
+
+def test_source_wheel_without_git_preserves_manual_revision(tmp_path):
+    source = _copy_project(tmp_path / "archive")
+    wheel = _pip_wheel(source, tmp_path / "wheel", TENSILELITE_SOURCE_REVISION=_SHA)
+
+    assert _version_of(wheel) == f"5.0.0+g{_SHA}"
+    assert _stamped_revision(_wheel_stamp(wheel)[0]) == _SHA
+    with zipfile.ZipFile(wheel) as archive:
+        assert not any("_tensilelite_build_backend" in name for name in archive.namelist())
 
 
 def test_wheels_are_byte_identical_with_source_date_epoch(project, tmp_path):

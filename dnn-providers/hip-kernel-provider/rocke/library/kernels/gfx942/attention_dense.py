@@ -243,6 +243,7 @@ from kernels.common._lse_store import (
     validate_dense_lse,
     zero_keyless_row,
 )
+from kernels.common._spec_checks import require_bool
 
 LOG2E = 1.4426950408889634
 _DTYPE_IR = {"bf16": BF16, "fp16": F16}
@@ -527,10 +528,7 @@ class Gfx942AttentionDenseSpec(AttentionDenseSpec):
 
     def __post_init__(self) -> None:
         super().__post_init__()
-        if type(self.emit_lse) is not bool:
-            raise ValueError(
-                f"emit_lse must be a bool, got {type(self.emit_lse).__name__}"
-            )
+        require_bool("emit_lse", self.emit_lse)
         # Reject, never coerce: bool("false") is True, so a truthiness read would
         # silently build the CFVST kernel the caller asked to turn off.
         if self.use_cfvst is not None and type(self.use_cfvst) is not bool:

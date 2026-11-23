@@ -210,7 +210,11 @@ namespace rocalution
         /** \brief Compute exclsuive sum of vector */
         ROCALUTION_EXPORT
         virtual ValueType ExclusiveSum(const GlobalVector<ValueType>& vec);
-        /** \brief Compute absolute value sum of vector components */
+        /** \brief Compute absolute value sum of vector components
+        * \details
+        * In the case of complex types, this is the sum of the moduli |z| of the components,
+        * returned with a zero imaginary part, as for LocalVector::Asum().
+        */
         ROCALUTION_EXPORT
         virtual ValueType Asum(void) const;
         /** \brief Compute maximum absolute value component of vector */

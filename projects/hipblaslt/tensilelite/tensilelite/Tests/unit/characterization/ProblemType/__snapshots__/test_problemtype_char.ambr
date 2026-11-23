@@ -95,6 +95,7 @@
     'NumIndicesSummation': 1,
     'OperationType': 'GEMM',
     'OutputAmaxD': False,
+    'OutputPeerD': False,
     'ScaleBlockSizesA': list([
     ]),
     'ScaleZeroPointA': False,
@@ -227,6 +228,7 @@
     'NumIndicesSummation': 1,
     'OperationType': 'GEMM',
     'OutputAmaxD': False,
+    'OutputPeerD': False,
     'ScaleBlockSizesA': list([
     ]),
     'ScaleZeroPointA': False,
@@ -275,7 +277,7 @@
     'getitem_datatype': 'Float',
     'is_mapping_iter_sorted': True,
     'keys_is_list': True,
-    'len': 95,
+    'len': 96,
   })
 # ---
 # name: test_no_data_type_raises
@@ -373,6 +375,7 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'OutputPeerD': False,
       'ScaleBlockSizesA': list([
       ]),
       'ScaleZeroPointA': False,
@@ -507,6 +510,7 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'OutputPeerD': False,
       'ScaleBlockSizesA': list([
       ]),
       'ScaleZeroPointA': False,
@@ -641,6 +645,7 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'OutputPeerD': False,
       'ScaleBlockSizesA': list([
       ]),
       'ScaleZeroPointA': False,
@@ -775,6 +780,7 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'OutputPeerD': False,
       'ScaleBlockSizesA': list([
       ]),
       'ScaleZeroPointA': False,
@@ -909,6 +915,7 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'OutputPeerD': False,
       'ScaleBlockSizesA': list([
       ]),
       'ScaleZeroPointA': False,
@@ -1044,6 +1051,7 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'OutputPeerD': False,
       'ScaleBlockSizesA': list([
       ]),
       'ScaleZeroPointA': False,
@@ -1178,6 +1186,7 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'OutputPeerD': False,
       'ScaleBlockSizesA': list([
       ]),
       'ScaleZeroPointA': False,
@@ -1312,6 +1321,7 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'OutputPeerD': False,
       'ScaleBlockSizesA': list([
       ]),
       'ScaleZeroPointA': False,
@@ -1446,6 +1456,7 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'OutputPeerD': False,
       'ScaleBlockSizesA': list([
       ]),
       'ScaleZeroPointA': False,
@@ -1580,6 +1591,7 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'OutputPeerD': False,
       'ScaleBlockSizesA': list([
       ]),
       'ScaleZeroPointA': False,
@@ -1718,6 +1730,7 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'OutputPeerD': False,
       'ScaleBlockSizesA': list([
       ]),
       'ScaleZeroPointA': False,
@@ -1852,6 +1865,7 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'OutputPeerD': False,
       'ScaleBlockSizesA': list([
       ]),
       'ScaleZeroPointA': False,
@@ -1987,6 +2001,7 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'OutputPeerD': False,
       'ScaleBlockSizesA': list([
       ]),
       'ScaleZeroPointA': False,
@@ -2122,6 +2137,7 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'OutputPeerD': False,
       'ScaleBlockSizesA': list([
       ]),
       'ScaleZeroPointA': False,
@@ -2257,6 +2273,7 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'OutputPeerD': False,
       'ScaleBlockSizesA': list([
       ]),
       'ScaleZeroPointA': False,
@@ -2392,6 +2409,7 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'OutputPeerD': False,
       'ScaleBlockSizesA': list([
       ]),
       'ScaleZeroPointA': False,
@@ -2528,6 +2546,7 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'OutputPeerD': False,
       'ScaleBlockSizesA': list([
       ]),
       'ScaleZeroPointA': False,
@@ -2662,6 +2681,7 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'OutputPeerD': False,
       'ScaleBlockSizesA': list([
       ]),
       'ScaleZeroPointA': False,
@@ -2796,6 +2816,7 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'OutputPeerD': False,
       'ScaleBlockSizesA': list([
       ]),
       'ScaleZeroPointA': False,
@@ -2930,6 +2951,7 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'OutputPeerD': False,
       'ScaleBlockSizesA': list([
       ]),
       'ScaleZeroPointA': False,
@@ -3064,6 +3086,7 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'OutputPeerD': False,
       'ScaleBlockSizesA': list([
       ]),
       'ScaleZeroPointA': False,
@@ -3198,6 +3221,7 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'OutputPeerD': False,
       'ScaleBlockSizesA': list([
       ]),
       'ScaleZeroPointA': False,
@@ -3332,6 +3356,7 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'OutputPeerD': False,
       'ScaleBlockSizesA': list([
       ]),
       'ScaleZeroPointA': False,
@@ -3467,6 +3492,7 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'OutputPeerD': False,
       'ScaleBlockSizesA': list([
       ]),
       'ScaleZeroPointA': False,
@@ -3601,6 +3627,7 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'OutputPeerD': False,
       'ScaleBlockSizesA': list([
       ]),
       'ScaleZeroPointA': False,
@@ -3735,6 +3762,7 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'OutputPeerD': False,
       'ScaleBlockSizesA': list([
       ]),
       'ScaleZeroPointA': False,
@@ -3869,6 +3897,7 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'OutputPeerD': False,
       'ScaleBlockSizesA': list([
       ]),
       'ScaleZeroPointA': False,
@@ -4003,6 +4032,7 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'OutputPeerD': False,
       'ScaleBlockSizesA': list([
       ]),
       'ScaleZeroPointA': False,
@@ -4137,6 +4167,7 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'OutputPeerD': False,
       'ScaleBlockSizesA': list([
       ]),
       'ScaleZeroPointA': False,
@@ -4273,6 +4304,7 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'OutputPeerD': False,
       'ScaleBlockSizesA': list([
       ]),
       'ScaleZeroPointA': False,
@@ -4407,6 +4439,7 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'OutputPeerD': False,
       'ScaleBlockSizesA': list([
       ]),
       'ScaleZeroPointA': False,
@@ -4541,6 +4574,7 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'OutputPeerD': False,
       'ScaleBlockSizesA': list([
       ]),
       'ScaleZeroPointA': False,
@@ -4687,6 +4721,7 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'OutputPeerD': False,
       'ScaleBlockSizesA': list([
       ]),
       'ScaleZeroPointA': False,
@@ -4823,6 +4858,7 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': True,
+      'OutputPeerD': False,
       'ScaleBlockSizesA': list([
       ]),
       'ScaleZeroPointA': False,
@@ -4957,6 +4993,7 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'OutputPeerD': False,
       'ScaleBlockSizesA': list([
       ]),
       'ScaleZeroPointA': False,
@@ -5091,6 +5128,7 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'OutputPeerD': False,
       'ScaleBlockSizesA': list([
       ]),
       'ScaleZeroPointA': False,
@@ -5225,6 +5263,7 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'OutputPeerD': False,
       'ScaleBlockSizesA': list([
       ]),
       'ScaleZeroPointA': False,
@@ -5359,6 +5398,7 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'OutputPeerD': False,
       'ScaleBlockSizesA': list([
       ]),
       'ScaleZeroPointA': False,
@@ -5493,6 +5533,7 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'OutputPeerD': False,
       'ScaleBlockSizesA': list([
       ]),
       'ScaleZeroPointA': False,
@@ -5629,6 +5670,7 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'OutputPeerD': False,
       'ScaleBlockSizesA': list([
       ]),
       'ScaleZeroPointA': False,
@@ -5766,6 +5808,7 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'OutputPeerD': False,
       'ScaleBlockSizesA': list([
       ]),
       'ScaleZeroPointA': False,
@@ -5903,6 +5946,7 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'OutputPeerD': False,
       'ScaleBlockSizesA': list([
       ]),
       'ScaleZeroPointA': False,
@@ -6040,6 +6084,7 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'OutputPeerD': False,
       'ScaleBlockSizesA': list([
       ]),
       'ScaleZeroPointA': False,
@@ -6175,6 +6220,7 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'OutputPeerD': False,
       'ScaleBlockSizesA': list([
       ]),
       'ScaleZeroPointA': False,
@@ -6309,6 +6355,7 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'OutputPeerD': False,
       'ScaleBlockSizesA': list([
       ]),
       'ScaleZeroPointA': False,
@@ -6443,6 +6490,7 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'OutputPeerD': False,
       'ScaleBlockSizesA': list([
       ]),
       'ScaleZeroPointA': False,
@@ -6577,6 +6625,7 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'OutputPeerD': False,
       'ScaleBlockSizesA': list([
       ]),
       'ScaleZeroPointA': False,
@@ -6711,6 +6760,7 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'OutputPeerD': False,
       'ScaleBlockSizesA': list([
       ]),
       'ScaleZeroPointA': False,
