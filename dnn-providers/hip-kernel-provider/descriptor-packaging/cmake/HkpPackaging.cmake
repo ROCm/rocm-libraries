@@ -2265,6 +2265,20 @@ function(hkp_register_tests rocm_kpack_dir hipcc rocke_comgr_lib)
     if(rocke_comgr_lib)
         list(APPEND _pyenv "ROCKE_COMGR_LIB=${rocke_comgr_lib}")
     endif()
+    # test_shipped_model_optionals.py lints every shipped UHD model through hipDNN's feature
+    # evaluator: the superbuild's target, else the installed tool. Without one the test skips,
+    # as uhd_gen's suites do, unless the build requires those suites.
+    if(TARGET hipdnn_uhd_features)
+        list(APPEND _pyenv "HIPDNN_UHD_FEATURE_EVALUATOR=$<TARGET_FILE:hipdnn_uhd_features>")
+    else()
+        find_program(HKP_UHD_FEATURE_EVALUATOR hipdnn_uhd_features)
+        if(HKP_UHD_FEATURE_EVALUATOR)
+            list(APPEND _pyenv "HIPDNN_UHD_FEATURE_EVALUATOR=${HKP_UHD_FEATURE_EVALUATOR}")
+        endif()
+    endif()
+    if(HIPDNN_REQUIRE_UHD_GEN_TESTS)
+        list(APPEND _pyenv "HIPDNN_REQUIRE_UHD_GEN_TESTS=1")
+    endif()
 
     execute_process(
         COMMAND "${Python3_EXECUTABLE}" -c "import pytest"
