@@ -18,7 +18,7 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable
 from concurrent.futures import ThreadPoolExecutor
 
-from ._worker_process import available_cpus
+from rocke.tests.host_cpus import available_cpus
 
 __all__ = ["REFERENCE_WORKERS", "run_reference_pieces"]
 

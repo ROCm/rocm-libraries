@@ -38,7 +38,7 @@ if __package__:
         preflight_is_disabled as _preflight_is_disabled,
     )
     from ._explicit_gate_policy import selection_is_partial as _selection_is_partial
-    from ._worker_process import available_cpus, run_bounded_to_stream, stop_all
+    from ._worker_process import run_bounded_to_stream, stop_all
 else:
     # Script execution puts this directory on sys.path automatically, but tools
     # that load the runner with importlib do not. Bootstrap its private support
@@ -48,7 +48,7 @@ else:
         sys.path.insert(0, str(_RUNNER_DIR))
     from _explicit_gate_policy import preflight_is_disabled as _preflight_is_disabled
     from _explicit_gate_policy import selection_is_partial as _selection_is_partial
-    from _worker_process import available_cpus, run_bounded_to_stream, stop_all
+    from _worker_process import run_bounded_to_stream, stop_all
 
 TESTS = Path(__file__).resolve().parent
 _LIBRARY_ROOT = Path(__file__).resolve().parents[1]
@@ -59,6 +59,7 @@ _SOURCE_PLATFORM_PYTHON = _ROCKE_ROOT / "platform" / "python"
 if _SOURCE_PLATFORM_PYTHON.is_dir() and str(_SOURCE_PLATFORM_PYTHON) not in sys.path:
     sys.path.insert(0, str(_SOURCE_PLATFORM_PYTHON))
 
+from rocke.tests.host_cpus import available_cpus
 from rocke.tests.subprocess_launcher import (  # noqa: E402 - source bootstrap above
     rocke_python_command,
     rocke_subprocess_env,

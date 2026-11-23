@@ -10,7 +10,6 @@ import json
 import os
 import signal
 import subprocess
-import sys
 import time
 from pathlib import Path
 from types import SimpleNamespace
@@ -958,84 +957,6 @@ def test_affordable_lane_enforces_whole_stage_deadline(tmp_path, monkeypatch, ca
         worker_process._stopped = False
     assert result.code == 124
     assert "affordable-lane timeout" in capsys.readouterr().out
-
-
-@pytest.mark.skipif(sys.platform != "linux", reason="Linux cgroup contract")
-def test_available_cpus_honors_nested_v2_quota(tmp_path, monkeypatch):
-    monkeypatch.setattr(
-        worker_process.os, "sched_getaffinity", lambda _pid: {0, 1, 2, 3}
-    )
-    monkeypatch.setattr(worker_process.os, "cpu_count", lambda: 64)
-    member = tmp_path / "team" / "job"
-    member.mkdir(parents=True)
-    (tmp_path / "cpu.max").write_text("max 100000")
-    (member.parent / "cpu.max").write_text("300000 100000")
-    (member / "cpu.max").write_text("150000 100000")
-    proc = tmp_path / "self.cgroup"
-    proc.write_text("0::/team/job\n")
-    mountinfo = tmp_path / "mountinfo"
-    mountinfo.write_text(f"1 2 0:1 / {tmp_path} rw - cgroup2 cgroup rw\n")
-    assert worker_process.available_cpus(tmp_path, proc, mountinfo) == 2
-
-
-@pytest.mark.skipif(sys.platform != "linux", reason="Linux cgroup contract")
-def test_available_cpus_honors_nested_v1_quota(tmp_path, monkeypatch):
-    monkeypatch.setattr(
-        worker_process.os, "sched_getaffinity", lambda _pid: set(range(8))
-    )
-    monkeypatch.setattr(worker_process.os, "cpu_count", lambda: 64)
-    mount = tmp_path / "cpu,cpuacct"
-    member = mount / "batch" / "job"
-    member.mkdir(parents=True)
-    (member.parent / "cpu.cfs_quota_us").write_text("100000")
-    (member.parent / "cpu.cfs_period_us").write_text("100000")
-    (member / "cpu.cfs_quota_us").write_text("800000")
-    (member / "cpu.cfs_period_us").write_text("100000")
-    proc = tmp_path / "self.cgroup"
-    proc.write_text("2:cpu,cpuacct:/batch/job\n")
-    mountinfo = tmp_path / "mountinfo"
-    mountinfo.write_text(f"1 2 0:1 / {mount} rw - cgroup cgroup rw,cpu,cpuacct\n")
-    assert worker_process.available_cpus(tmp_path, proc, mountinfo) == 1
-
-
-@pytest.mark.skipif(sys.platform != "linux", reason="Linux cgroup contract")
-@pytest.mark.parametrize("version", (1, 2))
-def test_available_cpus_rebases_non_root_cgroup_mount(version, tmp_path, monkeypatch):
-    monkeypatch.setattr(
-        worker_process.os, "sched_getaffinity", lambda _pid: set(range(8))
-    )
-    monkeypatch.setattr(worker_process.os, "cpu_count", lambda: 64)
-    mount = tmp_path / "mounted"
-    member = mount / "team" / "job"
-    member.mkdir(parents=True)
-    if version == 2:
-        (member / "cpu.max").write_text("150000 100000")
-        cgroup_line = "0::/tenant.slice/team/job\n"
-        mount_line = f"1 2 0:1 /tenant.slice {mount} rw - cgroup2 cgroup rw\n"
-    else:
-        (member / "cpu.cfs_quota_us").write_text("150000")
-        (member / "cpu.cfs_period_us").write_text("100000")
-        cgroup_line = "2:cpu,cpuacct:/tenant.slice/team/job\n"
-        mount_line = (
-            f"1 2 0:1 /tenant.slice {mount} rw - cgroup cgroup rw,cpu,cpuacct\n"
-        )
-    proc = tmp_path / "self.cgroup"
-    proc.write_text(cgroup_line)
-    mountinfo = tmp_path / "mountinfo"
-    mountinfo.write_text(mount_line)
-    assert worker_process.available_cpus(tmp_path, proc, mountinfo) == 2
-
-
-@pytest.mark.skipif(sys.platform != "linux", reason="Linux affinity contract")
-def test_available_cpus_honors_affinity_without_a_quota(tmp_path, monkeypatch):
-    monkeypatch.setattr(worker_process.os, "sched_getaffinity", lambda _pid: {2, 3})
-    monkeypatch.setattr(worker_process.os, "cpu_count", lambda: 64)
-    assert (
-        worker_process.available_cpus(
-            tmp_path, tmp_path / "missing-cgroup", tmp_path / "missing-mountinfo"
-        )
-        == 2
-    )
 
 
 def test_sigterm_during_spawn_registers_then_kills_the_new_process(

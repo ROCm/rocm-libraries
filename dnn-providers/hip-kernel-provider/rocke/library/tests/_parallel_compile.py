@@ -18,7 +18,7 @@ import pickle
 from collections.abc import Sequence
 from concurrent.futures import ProcessPoolExecutor
 
-from ._worker_process import available_cpus
+from rocke.tests.host_cpus import available_cpus
 
 __all__ = ["MAX_COMPILE_WORKERS", "compile_in_workers"]
 

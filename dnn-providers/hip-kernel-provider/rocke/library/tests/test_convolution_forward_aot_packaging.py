@@ -56,8 +56,7 @@ from kernels.common.conv_direct_nongrouped import _OOB_BASE
 from rocke.core.arch import ArchTarget
 from rocke.core.ir_serialize import serialize
 from rocke.core.lower_llvm import LLVM_FLAVORS
-
-from ._worker_process import available_cpus
+from rocke.tests.host_cpus import available_cpus
 
 _SEED = 2026
 #: The packaged dtypes. Tests over the whole sweep take one as a parameter, so each
