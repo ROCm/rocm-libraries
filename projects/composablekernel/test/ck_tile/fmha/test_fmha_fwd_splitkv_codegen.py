@@ -3,7 +3,6 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-import dataclasses
 import os
 import sys
 import unittest
@@ -46,16 +45,15 @@ class SplitKvPageCheckTest(unittest.TestCase):
         trait = _paged_trait(32)
         self.assertTrue(trait.page_shorter_than_tile)
         self.assertEqual(
-            dataclasses.replace(trait, constraint="true").pagecheck,
+            trait.pagecheck,
             "32 <= 2 * a.page_block_size && a.page_block_size % 16 == 0",
         )
 
     def test_merge_tile_keeps_its_device_constraint(self):
         trait = _paged_trait(32)
         self.assertEqual(
-            trait.pagecheck,
-            "(32 <= 2 * a.page_block_size && a.page_block_size % 16 == 0) && "
-            '(device_name.compare(0, 7, "gfx1100") == 0)',
+            str(trait.constraint),
+            'device_name.compare(0, 7, "gfx1100") == 0',
         )
 
 
