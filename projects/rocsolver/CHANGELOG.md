@@ -4,7 +4,6 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 
 
 ## (Unreleased) rocSOLVER
-## (Unreleased) rocSOLVER 3.39
 
 ### Added
 ### Changed
@@ -15,13 +14,20 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 
 ### Resolved issues
 
-* Fixed failure of large batch count > 64 * 1024 for POTRF, POTF2, POTRS, POSV, POTRI.
 * Fixed LANGE, which did not set the norm to zero when m = 0 or n = 0, could overflow or underflow
   in the Frobenius norm (now accumulated with scaling), and ignored complex elements with a NaN
   real part.
 
 ### Known issues
 ### Upcoming changes
+
+
+
+## rocSOLVER 3.39.0 for ROCm 10.3.0
+
+### Resolved issues
+
+* Fixed failure of large batch count > 64 * 1024 for POTRF, POTF2, POTRS, POSV, POTRI.
 
 
 

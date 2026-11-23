@@ -1132,6 +1132,31 @@ TEST_F(MessagePackWritingLazyTest, PlaceholderMasterWithMapping)
     EXPECT_EQ(selectedIndex(*loaded, gemm(2048, 4000, 64), hardware), 14);
 }
 
+TEST(MessagePackWritingTest, BufferAddressingLimitCheckRoundTrips)
+{
+    // No committed library contains this predicate, so a load of one that
+    // does has never been exercised. The library codec under test is msgpack.
+    // YAML of the same predicate is round-tripped from Python.
+    auto master   = std::make_shared<Master>();
+    auto solution = makeSolution(7);
+    solution->problemPredicate
+        = std::make_shared<Predicates::Contraction::BufferAddressingLimitCheck>();
+    master->solutions[solution->index] = solution;
+    master->library                    = std::make_shared<SingleContractionLibrary>(solution);
+    master->version                    = "test";
+
+    auto reloaded = roundTrip(*master);
+    ASSERT_NE(reloaded, nullptr);
+
+    auto loaded = reloaded->solutions.at(7)->problemPredicate;
+    ASSERT_NE(loaded, nullptr);
+    EXPECT_EQ(loaded->type(), "BufferAddressingLimitCheck");
+    EXPECT_NE(
+        std::dynamic_pointer_cast<Predicates::Contraction::BufferAddressingLimitCheck>(loaded),
+        nullptr)
+        << describe(loaded);
+}
+
 TEST(MessagePackWritingTest, SolutionsRoundTripOnTheirOwn)
 {
     auto lib = buildSelectionLibrary();

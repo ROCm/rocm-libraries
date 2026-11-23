@@ -1208,6 +1208,87 @@ TEST(TestGfx1151WmmaAttentionMatchers, DecodeWorkspaceMirrorsTheDispatcherPlan)
     EXPECT_EQ(workspaceOf(GraphSpec{}, prefillKernel(96, 96), gfx1201), 0U);
 }
 
+/// An unmasked single-token graph at @p batch with head width @p headSize: one workgroup per
+/// batch entry on either engine (Hq = Hk = Sq = Skv = 1), so the batch is the launch grid.
+GraphSpec singleTokenGraph(int64_t batch, int64_t headSize)
+{
+    GraphSpec spec = unmaskedGraph();
+    spec.batch = batch;
+    spec.queryHeads = 1;
+    spec.kvHeads = 1;
+    spec.queryLength = 1;
+    spec.kvLength = 1;
+    spec.headSize = headSize;
+    return spec;
+}
+
+TEST(TestGfx1151WmmaAttentionMatchers, PrefillDeclinesAGridPastOneLaunchAxis)
+{
+    // d = 8 has no decode bucket, so the graph stays on prefill: B workgroups of 256
+    // threads. 2^24 x 256 = 2^32 work-items passes HIP's 4294967295 limit; 2^24 - 1 fits.
+    const auto kernel = prefillKernel(64, 64);
+    EXPECT_FALSE(matchesKernel(singleTokenGraph(int64_t{1} << 24, 8), kernel));
+    EXPECT_TRUE(matchesKernel(singleTokenGraph((int64_t{1} << 24) - 1, 8), kernel));
+}
+
+TEST(TestGfx1151WmmaAttentionMatchers, DecodeDeclinesAGridPastOneLaunchAxis)
+{
+    // d = 16 is the 64 bucket, decoded on the object's 128-thread workgroups: B workgroups.
+    // 2^25 x 128 = 2^32 work-items passes the limit; 2^25 - 1 fits.
+    const auto kernel = decodeKernel(64);
+    EXPECT_FALSE(matchesKernel(singleTokenGraph(int64_t{1} << 25, 16), kernel));
+    EXPECT_TRUE(matchesKernel(singleTokenGraph((int64_t{1} << 25) - 1, 16), kernel));
+}
+
+TEST(TestGfx1151WmmaAttentionMatchers, PrefillDeclinesWhatDecodeDeclinesForItsGrid)
+{
+    // Past decode's grid limit the dispatcher's decode plan is nullopt, so the graph falls to
+    // prefill, whose own grid (2^25 workgroups x 256 threads) is past the limit too: no
+    // engine serves it.
+    const GraphSpec graph = singleTokenGraph(int64_t{1} << 25, 16);
+    EXPECT_FALSE(matchesKernel(graph, decodeKernel(64)));
+    EXPECT_FALSE(matchesKernel(graph, prefillKernel(64, 64)));
+}
+
+TEST(TestGfx1151WmmaAttentionMatchers, PrefillGridLimitFollowsTheDescriptorsBlockSize)
+{
+    // A descriptor may declare up to 1024 threads: 2^22 x 1024 = 2^32 work-items.
+    auto kernel = prefillKernel(64, 64);
+    kernel.blockSize = 1024;
+    EXPECT_FALSE(matchesKernel(singleTokenGraph(int64_t{1} << 22, 8), kernel));
+    EXPECT_TRUE(matchesKernel(singleTokenGraph((int64_t{1} << 22) - 1, 8), kernel));
+}
+
+TEST(TestGfx1151WmmaAttentionMatchers, PrefillGridCountsEveryQueryHead)
+{
+    // One batch entry, one query tile, 2^24 query heads over one K/V head (d = 8: prefill):
+    // one workgroup per head, 256 threads each. 2^24 x 256 = 2^32 work-items passes the
+    // limit; 2^24 - 1 fits. Q holds 2^27 elements (2^28 bytes), inside the 32-bit address.
+    const auto kernel = prefillKernel(64, 64);
+    GraphSpec spec = singleTokenGraph(1, 8);
+    spec.queryHeads = int64_t{1} << 24;
+    EXPECT_FALSE(matchesKernel(spec, kernel));
+    spec.queryHeads = (int64_t{1} << 24) - 1;
+    EXPECT_TRUE(matchesKernel(spec, kernel));
+}
+
+TEST(TestGfx1151WmmaAttentionMatchers, PrefillGridCountsEveryQueryTile)
+{
+    // One batch entry, one head, a descriptor of 1024 threads and 16 query rows per tile:
+    // one workgroup per tile. A shipped descriptor (128 or 64 rows) would need a Q past the
+    // 32-bit address range to reach the limit, so the descriptor's tile is the small one.
+    // (2^22 - 1) tiles x 1024 = 2^32 - 1024 work-items fits; one more row makes 2^22 tiles,
+    // 2^32 work-items, past the limit. Q holds 2^26 rows of 8 elements (2^30 bytes).
+    auto kernel = prefillKernel(64, 64);
+    kernel.blockSize = 1024;
+    kernel.blockM = 16;
+    GraphSpec spec = singleTokenGraph(1, 8);
+    spec.queryLength = ((int64_t{1} << 22) - 1) * 16;
+    EXPECT_TRUE(matchesKernel(spec, kernel));
+    spec.queryLength += 1;
+    EXPECT_FALSE(matchesKernel(spec, kernel));
+}
+
 // -----------------------------------------------------------------------------
 // Score and selection
 // -----------------------------------------------------------------------------
