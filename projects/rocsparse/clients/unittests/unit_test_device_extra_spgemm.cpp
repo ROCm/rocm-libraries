@@ -1005,7 +1005,12 @@ TEST_F(ExtraSpgemm, alias_c_d_unsorted)
 
             Operand<float, int32_t, int32_t> oCD2;
             ASSERT_NO_FATAL_FAILURE(make_cd(oCD2));
-            ASSERT_EQ(call(oCD2, rocsparse_spgemm_stage_compute, &bsz, buffer.ptr),
+            size_t bsz2 = 0;
+            ASSERT_EQ(call(oCD2, rocsparse_spgemm_stage_buffer_size, &bsz2, nullptr),
+                      rocsparse_status_success);
+            DevBuf<char> buffer2(bsz2);
+            ASSERT_TRUE(buffer2.ptr);
+            ASSERT_EQ(call(oCD2, rocsparse_spgemm_stage_compute, &bsz2, buffer2.ptr),
                       rocsparse_status_success);
             ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
             expect_bsr_equal<float, int32_t, int32_t>(
