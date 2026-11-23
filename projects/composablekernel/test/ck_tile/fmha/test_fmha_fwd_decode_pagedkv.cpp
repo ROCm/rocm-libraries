@@ -1,15 +1,15 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-// FmhaDecodePaged5dKernel (gfx125) against the CPU reference of fmha_decode_paged5d_runner.
+// fmha_fwd_decode_pagedkv (gfx125) against the CPU reference of its example runner.
 
 #include <gtest/gtest.h>
 
-#include "fmha_decode_paged5d_runner.hpp"
+#include "fmha_fwd_decode_pagedkv_runner.hpp"
 
 namespace {
 
-using fmha_decode_paged5d::Case;
+using fmha_fwd_decode_pagedkv_runner::Case;
 
 struct Param
 {
@@ -20,13 +20,13 @@ struct Param
     std::string layout;
 };
 
-std::string layout_of(const ck_tile::FmhaDecodePaged5dConfig& c)
+std::string layout_of(const ck_tile::FmhaFwdDecodePagedKVConfig& c)
 {
     return std::string(c.wave_split ? "wave" : "coop") + "/" + std::to_string(c.num_splits) +
            (c.num_groups > 1 ? "x" + std::to_string(c.num_groups) : "");
 }
 
-std::string describe(const fmha_decode_paged5d::Result& r)
+std::string describe(const fmha_fwd_decode_pagedkv_runner::Result& r)
 {
     return "row err/tol " + std::to_string(r.row_err) + ", max abs err " +
            std::to_string(r.max_err) + " (max |ref| " + std::to_string(r.max_ref) + "), cos " +
@@ -142,16 +142,16 @@ std::vector<Param> params()
     return p;
 }
 
-class DecodePaged5d : public ::testing::TestWithParam<Param>
+class FwdDecodePagedKV : public ::testing::TestWithParam<Param>
 {
 };
 
-TEST_P(DecodePaged5d, MatchesReference)
+TEST_P(FwdDecodePagedKV, MatchesReference)
 {
     if(ck_tile::get_device_name().rfind("gfx125", 0) != 0)
         GTEST_SKIP() << "gfx125 only";
     // one timed launch: also replays a captured graph and compares its output
-    const auto r = fmha_decode_paged5d::run(GetParam().c, true, 0, 1);
+    const auto r = fmha_fwd_decode_pagedkv_runner::run(GetParam().c, true, 0, 1);
     ASSERT_TRUE(r.error.empty()) << r.error;
     EXPECT_EQ(layout_of(r.config), GetParam().layout);
     EXPECT_TRUE(r.graph_same) << "graph replay output differs from a stream launch";
@@ -159,20 +159,20 @@ TEST_P(DecodePaged5d, MatchesReference)
 }
 
 // every key inside the window counted once, none outside it
-TEST_P(DecodePaged5d, CountsEveryKeyOnce)
+TEST_P(FwdDecodePagedKV, CountsEveryKeyOnce)
 {
     if(ck_tile::get_device_name().rfind("gfx125", 0) != 0)
         GTEST_SKIP() << "gfx125 only";
     Case c       = GetParam().c;
     c.needles    = true;
-    const auto r = fmha_decode_paged5d::run(c, true);
+    const auto r = fmha_fwd_decode_pagedkv_runner::run(c, true);
     ASSERT_TRUE(r.error.empty()) << r.error;
     EXPECT_TRUE(r.valid) << describe(r);
 }
 
-// fmha_decode_paged5d_max_workspace_bytes bounds every selected configuration and grows with the
-// kv heads (host only: callers size one workspace buffer with it)
-TEST(DecodePaged5dHost, MaxWorkspaceBoundsSelector)
+// fmha_fwd_decode_pagedkv_max_workspace_bytes bounds every selected configuration and grows with
+// the kv heads (host only: callers size one workspace buffer with it)
+TEST(FwdDecodePagedKVHost, MaxWorkspaceBoundsSelector)
 {
     std::vector<ck_tile::index_t> lengths;
     for(ck_tile::index_t s = 0; s <= 40000; s += 16)
@@ -185,14 +185,15 @@ TEST(DecodePaged5dHost, MaxWorkspaceBoundsSelector)
             {1,  2,  3,  4,   5,   8,   13,  16,  24,  31,  32,  33,  48,
              64, 65, 96, 128, 129, 160, 192, 255, 256, 384, 480, 481, 512})
         {
-            const size_t bound = ck_tile::fmha_decode_paged5d_max_workspace_bytes(batch, nhead_k);
+            const size_t bound =
+                ck_tile::fmha_fwd_decode_pagedkv_max_workspace_bytes(batch, nhead_k);
             for(const ck_tile::index_t ps : {16, 64, 128})
                 for(const ck_tile::index_t w : {0, 1, 300, 2048, 4000, 23040})
                     for(const ck_tile::index_t s : lengths)
                     {
                         const auto c =
-                            ck_tile::fmha_decode_paged5d_config(batch, nhead_k, s, w, ps);
-                        const size_t need = ck_tile::fmha_decode_paged5d_workspace_bytes(
+                            ck_tile::fmha_fwd_decode_pagedkv_config(batch, nhead_k, s, w, ps);
+                        const size_t need = ck_tile::fmha_fwd_decode_pagedkv_workspace_bytes(
                             batch, nhead_k, c.num_splits, c.num_groups);
                         ASSERT_LE(need, bound) << "b " << batch << " h_k " << nhead_k << " s_k "
                                                << s << " window " << w << " page " << ps;
@@ -201,13 +202,13 @@ TEST(DecodePaged5dHost, MaxWorkspaceBoundsSelector)
         }
     EXPECT_GT(checked, 0u);
     for(ck_tile::index_t heads = 1; heads < 2048; ++heads)
-        ASSERT_LE(ck_tile::fmha_decode_paged5d_max_workspace_bytes(heads, 1),
-                  ck_tile::fmha_decode_paged5d_max_workspace_bytes(heads + 1, 1))
+        ASSERT_LE(ck_tile::fmha_fwd_decode_pagedkv_max_workspace_bytes(heads, 1),
+                  ck_tile::fmha_fwd_decode_pagedkv_max_workspace_bytes(heads + 1, 1))
             << heads;
 }
 
 INSTANTIATE_TEST_SUITE_P(Gfx125,
-                         DecodePaged5d,
+                         FwdDecodePagedKV,
                          ::testing::ValuesIn(params()),
                          [](const auto& test_info) { return test_info.param.name; });
 

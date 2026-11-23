@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include <array>
+#include <atomic>
 #include <numeric>
 #include <functional>
 #include "ck_tile/core/config.hpp"
@@ -100,6 +102,16 @@ KENTRY_LAUNCH_BOUNDS KENTRY_ATTR_NO_PACKED_FP32_OPS __global__ //
     KENTRY_BODY;
 }
 
+#if CK_TILE_ENABLE_CLUSTER_LAUNCH
+// Entry whose workgroups form clusters of ClusterX along x (see make_cluster_kernel).
+template <int ClusterX, int MinBlockPerCu, typename Kernel, typename... Args>
+KENTRY_LAUNCH_BOUNDS __attribute__((cluster_dims(ClusterX, 1, 1))) __global__ void
+kentry_cluster(Args... args)
+{
+    KENTRY_BODY;
+}
+#endif
+
 #undef KENTRY_LAUNCH_BOUNDS
 #undef KENTRY_MIN_WAVES_PER_EU
 #undef KENTRY_BODY
@@ -168,6 +180,91 @@ CK_TILE_HOST auto make_kernel(KernelImpl /*f*/,
 
         // Launch kernel with cluster attributes
         return hipLaunchKernelEx(&config, kernel, args...);
+    };
+}
+#endif
+
+//
+// Cluster launch with the cluster size (ClusterX workgroups along x) known at compile time, for
+// launches that must keep their clusters when the stream is captured into a HIP graph: capture
+// drops a cluster size that hipLaunchKernelEx gets as a launch attribute only (the overload
+// above), and the graph then replays without clusters.
+// - Up to 15 workgroups the size is the cluster_dims attribute of the entry (kentry_cluster).
+// - clang checks cluster_dims against 4 bits while a gfx1250 cluster holds 16 workgroups, so 16
+//   goes through hipDrvLaunchKernelEx, whose capture keeps the launch attribute.
+//
+#if CK_TILE_ENABLE_CLUSTER_LAUNCH
+namespace detail {
+// hipGetFuncBySymbol returns a handle for the current device, so one is kept per device
+template <typename Entry>
+CK_TILE_HOST hipError_t get_device_function(Entry* entry, hipFunction_t& fn)
+{
+    static std::array<std::atomic<hipFunction_t>, 64> per_device{};
+    const void* sym = reinterpret_cast<const void*>(entry);
+    int dev         = 0;
+    if(const hipError_t e = hipGetDevice(&dev); e != hipSuccess)
+        return e;
+    if(dev < 0 || dev >= static_cast<int>(per_device.size()))
+        return hipGetFuncBySymbol(&fn, sym);
+    fn = per_device[dev].load(std::memory_order_relaxed);
+    if(fn != nullptr)
+        return hipSuccess;
+    const hipError_t e = hipGetFuncBySymbol(&fn, sym);
+    if(e == hipSuccess)
+        per_device[dev].store(fn, std::memory_order_relaxed);
+    return e;
+}
+} // namespace detail
+
+template <int ClusterX,
+          int MinBlockPerCu = CK_TILE_MIN_BLOCK_PER_CU,
+          typename KernelImpl,
+          typename... Args>
+CK_TILE_HOST auto make_cluster_kernel(
+    KernelImpl /*f*/, dim3 grid_dim, dim3 block_dim, std::size_t lds_byte, Args... args)
+{
+    static_assert(1 <= ClusterX && ClusterX <= 16);
+    return [=](const stream_config& s) -> hipError_t {
+        hipLaunchAttribute attrs[1];
+        attrs[0].id               = hipLaunchAttributeClusterDimension;
+        attrs[0].val.clusterDim.x = ClusterX;
+        attrs[0].val.clusterDim.y = 1;
+        attrs[0].val.clusterDim.z = 1;
+        if constexpr(ClusterX <= 15)
+        {
+            hipLaunchConfig_t config{};
+            config.gridDim          = grid_dim;
+            config.blockDim         = block_dim;
+            config.dynamicSmemBytes = lds_byte;
+            config.stream           = s.stream_id_;
+            // must match the cluster_dims of the entry
+            config.attrs    = attrs;
+            config.numAttrs = 1;
+            return hipLaunchKernelEx(
+                &config, kentry_cluster<ClusterX, MinBlockPerCu, KernelImpl, Args...>, args...);
+        }
+        else
+        {
+            hipFunction_t fn = nullptr;
+            if(const hipError_t e =
+                   detail::get_device_function(&kentry<MinBlockPerCu, KernelImpl, Args...>, fn);
+               e != hipSuccess)
+                return e;
+            HIP_LAUNCH_CONFIG config{};
+            config.gridDimX       = grid_dim.x;
+            config.gridDimY       = grid_dim.y;
+            config.gridDimZ       = grid_dim.z;
+            config.blockDimX      = block_dim.x;
+            config.blockDimY      = block_dim.y;
+            config.blockDimZ      = block_dim.z;
+            config.sharedMemBytes = static_cast<unsigned int>(lds_byte);
+            config.hStream        = s.stream_id_;
+            config.attrs          = attrs;
+            config.numAttrs       = 1;
+            // HIP copies the arguments at launch
+            void* params[] = {const_cast<void*>(static_cast<const void*>(&args))...};
+            return hipDrvLaunchKernelEx(&config, fn, params, nullptr);
+        }
     };
 }
 #endif

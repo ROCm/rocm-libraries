@@ -237,4 +237,28 @@ struct TileFmhaBwdConvertQGradTraits
     static constexpr index_t kBlockPerCu = kBlockPerCu_;
 };
 
+// workgroups of a cluster: a gfx1250 cluster holds up to 16
+inline constexpr index_t kFmhaFwdDecodeMaxClusterSplits = 16;
+
+template <bool kWaveSplit_ /* each wave runs its own pages instead of sharing a step */,
+          index_t kNumSplits_ /* splits (workgroups) per cluster */,
+          bool kHasGroups_ /* several clusters per (batch, kv head) */,
+          index_t kPageBlockSize_ /* tokens per cache page */,
+          index_t kBlockPerCu_ = -1 /* overwrite occupancy if not -1 */,
+          BlockAttentionKVCacheMemoryLayoutEnum kKVMemoryLayout_ =
+              BlockAttentionKVCacheMemoryLayoutEnum::VECTORIZED_LAYOUT,
+          BlockAttentionKVCacheLookupTableEnum kKVLookupTable_ =
+              BlockAttentionKVCacheLookupTableEnum::VLLM_BLOCK_TABLE_2D>
+struct TileFmhaFwdDecodePagedKVTraits
+{
+    static constexpr bool kWaveSplit        = kWaveSplit_;
+    static constexpr index_t kNumSplits     = kNumSplits_;
+    static constexpr bool kHasGroups        = kHasGroups_;
+    static constexpr index_t kPageBlockSize = kPageBlockSize_;
+    static constexpr index_t kBlockPerCu    = kBlockPerCu_;
+    static constexpr auto kKVMemoryLayout   = kKVMemoryLayout_;
+    static constexpr auto kKVLookupTable    = kKVLookupTable_;
+    static_assert(1 <= kNumSplits && kNumSplits <= kFmhaFwdDecodeMaxClusterSplits);
+};
+
 } // namespace ck_tile

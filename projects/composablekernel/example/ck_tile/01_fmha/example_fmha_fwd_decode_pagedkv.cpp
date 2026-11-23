@@ -1,13 +1,13 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-// gfx125 fp8 decode attention over the SHUFFLE 5D paged KV cache (see
-// ck_tile/ops/fmha/kernel/fmha_fwd_decode_paged5d_kernel.hpp), with a CPU reference.
+// gfx125 decode attention over a paged fp8 KV cache (see
+// ck_tile/ops/fmha/kernel/fmha_fwd_decode_pagedkv_kernel.hpp), with a CPU reference.
 
 #include <cstdio>
 #include <iostream>
 
-#include "fmha_decode_paged5d_runner.hpp"
+#include "fmha_fwd_decode_pagedkv_runner.hpp"
 
 int main(int argc, char* argv[])
 {
@@ -31,7 +31,7 @@ int main(int argc, char* argv[])
     if(!arg_parser.parse(argc, argv))
         return -1;
 
-    fmha_decode_paged5d::Case c;
+    fmha_fwd_decode_pagedkv_runner::Case c;
     c.batch   = arg_parser.get_int("b");
     c.nhead   = arg_parser.get_int("h");
     c.nhead_k = arg_parser.get_int("h_k");
@@ -49,7 +49,7 @@ int main(int argc, char* argv[])
     c.needles           = arg_parser.get_bool("needles");
     const bool validate = arg_parser.get_bool("v");
 
-    const auto r = fmha_decode_paged5d::run(
+    const auto r = fmha_fwd_decode_pagedkv_runner::run(
         c, validate, arg_parser.get_int("warmup"), arg_parser.get_int("repeat"));
     if(!r.error.empty())
     {

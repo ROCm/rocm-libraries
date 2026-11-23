@@ -1,15 +1,12 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-// Host side of FmhaDecodePaged5dKernel for the example and the tests: launch dispatch over the
-// compile-time split count and cache page size, random inputs in the 5D layout, a CPU reference
-// and timing.
+// Host side of fmha_fwd_decode_pagedkv for the example and the tests: random inputs in the
+// vectorized cache layout, a CPU reference and timing.
 
 #pragma once
 
 #include <algorithm>
-#include <array>
-#include <atomic>
 #include <cmath>
 #include <limits>
 #include <numeric>
@@ -20,9 +17,9 @@
 
 #include "ck_tile/core.hpp"
 #include "ck_tile/host.hpp"
-#include "ck_tile/ops/fmha/kernel/fmha_fwd_decode_paged5d_kernel.hpp"
+#include "fmha_fwd_decode_pagedkv.hpp"
 
-namespace fmha_decode_paged5d {
+namespace fmha_fwd_decode_pagedkv_runner {
 
 using ck_tile::index_t;
 constexpr index_t kHdim = 128;
@@ -31,130 +28,6 @@ constexpr index_t kPage = 16;
 constexpr uint8_t kFp8One       = 0x38;
 constexpr uint8_t kFp8ThirtyTwo = 0x60;
 constexpr index_t kNeedleDims   = kHdim / 16;
-
-// hipGetFuncBySymbol returns a handle for the current device, so one is kept per device
-template <typename K>
-hipError_t launch_cluster_function(hipFunction_t& fn)
-{
-    static std::array<std::atomic<hipFunction_t>, 64> per_device{};
-    const void* sym =
-        reinterpret_cast<const void*>(&ck_tile::fmha_decode_paged5d_entry_launch_cluster<K>);
-    int dev = 0;
-    if(const hipError_t e = hipGetDevice(&dev); e != hipSuccess)
-        return e;
-    if(dev < 0 || dev >= static_cast<int>(per_device.size()))
-        return hipGetFuncBySymbol(&fn, sym);
-    fn = per_device[dev].load(std::memory_order_relaxed);
-    if(fn != nullptr)
-        return hipSuccess;
-    const hipError_t e = hipGetFuncBySymbol(&fn, sym);
-    if(e == hipSuccess)
-        per_device[dev].store(fn, std::memory_order_relaxed);
-    return e;
-}
-
-template <bool kWaveSplit, index_t kNumSplits, bool kGroups, index_t kPageSize, bool kQoFp16>
-hipError_t launch_one(const ck_tile::FmhaDecodePaged5dHostArgs& h, hipStream_t stream)
-{
-    using K = ck_tile::FmhaDecodePaged5dKernel<kWaveSplit, kNumSplits, kGroups, kPageSize, kQoFp16>;
-    auto kargs = K::MakeKargs(h);
-    hipLaunchAttribute attr[1];
-    attr[0].id               = hipLaunchAttributeClusterDimension;
-    attr[0].val.clusterDim.x = kNumSplits;
-    attr[0].val.clusterDim.y = 1;
-    attr[0].val.clusterDim.z = 1;
-    if constexpr(kNumSplits > 15)
-    {
-        // see fmha_decode_paged5d_entry_launch_cluster
-        hipFunction_t fn = nullptr;
-        if(const hipError_t e = launch_cluster_function<K>(fn); e != hipSuccess)
-            return e;
-        const dim3 grid = K::GridSize(h.batch, h.nhead_k, h.num_groups);
-        HIP_LAUNCH_CONFIG cfg{};
-        cfg.gridDimX    = grid.x;
-        cfg.gridDimY    = grid.y;
-        cfg.gridDimZ    = grid.z;
-        cfg.blockDimX   = K::kBlockSize;
-        cfg.blockDimY   = 1;
-        cfg.blockDimZ   = 1;
-        cfg.hStream     = stream;
-        cfg.attrs       = attr;
-        cfg.numAttrs    = 1;
-        void* params[1] = {&kargs};
-        return hipDrvLaunchKernelEx(&cfg, fn, params, nullptr);
-    }
-    else
-    {
-        hipLaunchConfig_t cfg{};
-        cfg.gridDim  = K::GridSize(h.batch, h.nhead_k, h.num_groups);
-        cfg.blockDim = K::BlockSize();
-        cfg.stream   = stream;
-        // must match the cluster_dims of the entry
-        cfg.attrs    = attr;
-        cfg.numAttrs = 1;
-        return hipLaunchKernelEx(&cfg, ck_tile::fmha_decode_paged5d_entry<K>, kargs);
-    }
-}
-
-template <bool kWaveSplit, bool kGroups, index_t kPageSize, bool kQoFp16, index_t... Ns>
-hipError_t dispatch(const ck_tile::FmhaDecodePaged5dHostArgs& h,
-                    index_t splits,
-                    hipStream_t stream,
-                    std::integer_sequence<index_t, Ns...>)
-{
-    hipError_t e       = hipErrorInvalidValue;
-    const auto try_one = [&](auto ns) {
-        if(splits == decltype(ns)::value)
-            e = launch_one<kWaveSplit, decltype(ns)::value, kGroups, kPageSize, kQoFp16>(h, stream);
-    };
-    (try_one(ck_tile::number<Ns + 1>{}), ...);
-    return e;
-}
-
-template <index_t kPageSize, bool kQoFp16>
-hipError_t launch_page(const ck_tile::FmhaDecodePaged5dHostArgs& h,
-                       const ck_tile::FmhaDecodePaged5dConfig& c,
-                       hipStream_t stream)
-{
-    const auto seq = std::make_integer_sequence<index_t, ck_tile::kMaxClusterSplits>{};
-    if(c.num_groups > 1)
-        return c.wave_split
-                   ? dispatch<true, true, kPageSize, kQoFp16>(h, c.num_splits, stream, seq)
-                   : dispatch<false, true, kPageSize, kQoFp16>(h, c.num_splits, stream, seq);
-    return c.wave_split ? dispatch<true, false, kPageSize, kQoFp16>(h, c.num_splits, stream, seq)
-                        : dispatch<false, false, kPageSize, kQoFp16>(h, c.num_splits, stream, seq);
-}
-
-template <bool kQoFp16>
-hipError_t launch_type(const ck_tile::FmhaDecodePaged5dHostArgs& h,
-                       const ck_tile::FmhaDecodePaged5dConfig& c,
-                       hipStream_t stream)
-{
-    switch(h.page_size)
-    {
-    case 16: return launch_page<16, kQoFp16>(h, c, stream);
-    case 64: return launch_page<64, kQoFp16>(h, c, stream);
-    case 128: return launch_page<128, kQoFp16>(h, c, stream);
-    default: return hipErrorInvalidValue;
-    }
-}
-
-inline hipError_t launch(const ck_tile::FmhaDecodePaged5dHostArgs& h,
-                         const ck_tile::FmhaDecodePaged5dConfig& c,
-                         hipStream_t stream)
-{
-    // the kernel trusts these: a violation leaves rows unwritten or reads out of bounds
-    if(h.batch <= 0 || h.nhead_k <= 0 || h.nhead_q <= 0 || h.nhead_q % h.nhead_k != 0 ||
-       h.nhead_q / h.nhead_k > 16 || h.max_blocks_per_seq <= 0)
-        return hipErrorInvalidValue;
-    if(!h.q_ptr || !h.k_ptr || !h.v_ptr || !h.block_table || !h.seqlen_k_ptr || !h.k_descale_ptr ||
-       !h.v_descale_ptr || !h.o_ptr || !h.counters_ptr)
-        return hipErrorInvalidValue;
-    if(c.num_splits <= 0 || c.num_splits > ck_tile::kMaxClusterSplits || c.num_groups <= 0 ||
-       c.num_groups != h.num_groups || h.workspace_ptr == nullptr)
-        return hipErrorInvalidValue;
-    return h.qo_fp16 ? launch_type<true>(h, c, stream) : launch_type<false>(h, c, stream);
-}
 
 inline float bf16_to_float(uint16_t x)
 {
@@ -191,7 +64,7 @@ struct Result
     bool valid     = false; // set only when validated
     double max_err = 0, max_ref = 0, cosine = 0;
     double row_err = 0; // largest error of an output row over the row's tolerance
-    ck_tile::FmhaDecodePaged5dConfig config{};
+    ck_tile::FmhaFwdDecodePagedKVConfig config{};
     float us_stream = 0, us_graph = 0; // set only when timed
     bool graph_same = true;            // graph replay wrote the output of a stream launch
     std::string error;
@@ -217,7 +90,7 @@ inline Result run(const Case& c, bool validate, int warmup = 0, int repeat = 0)
         seqlens[b] = c.seqlen_k[std::min<size_t>(b, c.seqlen_k.size() - 1)];
     const index_t max_seqlen =
         std::max(c.max_seqlen_k, *std::max_element(seqlens.begin(), seqlens.end()));
-    if(c.nhead % c.nhead_k != 0 || c.nhead / c.nhead_k > 16)
+    if(c.nhead_k <= 0 || c.nhead % c.nhead_k != 0 || c.nhead / c.nhead_k > 16)
     {
         res.error = "h / h_k must be an integer <= 16";
         return res;
@@ -229,11 +102,11 @@ inline Result run(const Case& c, bool validate, int warmup = 0, int repeat = 0)
         res.error = "page_size must be 16, 64 or 128";
         return res;
     }
-    auto cfg = ck_tile::fmha_decode_paged5d_config(batch, c.nhead_k, max_seqlen, c.window, ps);
+    auto cfg = ck_tile::fmha_fwd_decode_pagedkv_config(batch, c.nhead_k, max_seqlen, c.window, ps);
     if(c.layout == "coop" || c.layout == "wave")
         cfg.wave_split = c.layout == "wave";
     const index_t lo_align = ps > kPage ? 4 : 1;
-    const index_t span     = ck_tile::fmha_decode_paged5d_max_span(max_seqlen, c.window, ps);
+    const index_t span     = ck_tile::fmha_fwd_decode_pagedkv_max_span(max_seqlen, c.window, ps);
     if(c.pages_per_split > 0)
         cfg.pages_per_split = c.pages_per_split;
     if(c.splits > 0)
@@ -242,11 +115,12 @@ inline Result run(const Case& c, bool validate, int warmup = 0, int repeat = 0)
     {
         cfg.pages_per_split = (cfg.pages_per_split + lo_align - 1) / lo_align * lo_align;
         const index_t total = (span + cfg.pages_per_split - 1) / cfg.pages_per_split;
-        cfg.num_groups      = (total + ck_tile::kMaxClusterSplits - 1) / ck_tile::kMaxClusterSplits;
-        cfg.num_splits      = (total + cfg.num_groups - 1) / cfg.num_groups;
+        cfg.num_groups      = (total + ck_tile::kFmhaFwdDecodeMaxClusterSplits - 1) /
+                         ck_tile::kFmhaFwdDecodeMaxClusterSplits;
+        cfg.num_splits = (total + cfg.num_groups - 1) / cfg.num_groups;
     }
     // what the kernel uses for the bound after the overrides above
-    cfg.pages_per_split = ck_tile::fmha_decode_paged5d_split_pages(
+    cfg.pages_per_split = ck_tile::fmha_fwd_decode_pagedkv_split_pages(
         span, cfg.num_splits, cfg.num_groups, cfg.wave_split);
     res.config = cfg;
 
@@ -353,9 +227,9 @@ inline Result run(const Case& c, bool validate, int warmup = 0, int repeat = 0)
     ck_tile::DeviceMem q_buf(q.size() * 2), k_buf(k.size()), v_buf(v.size());
     ck_tile::DeviceMem bt_buf(block_table.size() * 4), sl_buf(seqlens32.size() * 4);
     ck_tile::DeviceMem o_buf(q.size() * 2), scale_buf(8);
-    ck_tile::DeviceMem ws_buf(ck_tile::fmha_decode_paged5d_workspace_bytes(
+    ck_tile::DeviceMem ws_buf(ck_tile::fmha_fwd_decode_pagedkv_workspace_bytes(
         batch, c.nhead_k, cfg.num_splits, cfg.num_groups));
-    ck_tile::DeviceMem cnt_buf(ck_tile::fmha_decode_paged5d_num_counters(batch, c.nhead_k) * 4);
+    ck_tile::DeviceMem cnt_buf(ck_tile::fmha_fwd_decode_pagedkv_num_counters(batch, c.nhead_k) * 4);
     HIP_CHECK_ERROR(hipMemset(ws_buf.GetDeviceBuffer(), 0xff, ws_buf.GetBufferSize()));
     cnt_buf.SetZero();
     q_buf.ToDevice(q.data());
@@ -366,31 +240,49 @@ inline Result run(const Case& c, bool validate, int warmup = 0, int repeat = 0)
     const float scales[2] = {k_descale, v_descale};
     scale_buf.ToDevice(scales);
 
-    const ck_tile::FmhaDecodePaged5dHostArgs args{
-        q_buf.GetDeviceBuffer(),
-        k_buf.GetDeviceBuffer(),
-        v_buf.GetDeviceBuffer(),
-        static_cast<const int32_t*>(bt_buf.GetDeviceBuffer()),
-        static_cast<const int32_t*>(sl_buf.GetDeviceBuffer()),
-        static_cast<const float*>(scale_buf.GetDeviceBuffer()),
-        static_cast<const float*>(scale_buf.GetDeviceBuffer()) + 1,
-        o_buf.GetDeviceBuffer(),
-        ws_buf.GetDeviceBuffer(),
-        static_cast<int32_t*>(cnt_buf.GetDeviceBuffer()),
-        batch,
-        c.nhead,
-        c.nhead_k,
-        max_blocks,
-        ps,
-        c.window,
-        cfg.num_groups,
-        scale_s,
-        c.fp16};
+    fmha_fwd_decode_pagedkv_args args{};
+    args.q_ptr              = q_buf.GetDeviceBuffer();
+    args.k_ptr              = k_buf.GetDeviceBuffer();
+    args.v_ptr              = v_buf.GetDeviceBuffer();
+    args.o_ptr              = o_buf.GetDeviceBuffer();
+    args.block_table_ptr    = static_cast<const int32_t*>(bt_buf.GetDeviceBuffer());
+    args.block_table_stride = max_blocks;
+    args.seqlen_k_ptr       = static_cast<const int32_t*>(sl_buf.GetDeviceBuffer());
+    args.k_descale_ptr      = static_cast<const float*>(scale_buf.GetDeviceBuffer());
+    args.v_descale_ptr      = static_cast<const float*>(scale_buf.GetDeviceBuffer()) + 1;
+    args.workspace_ptr      = ws_buf.GetDeviceBuffer();
+    args.counters_ptr       = static_cast<int32_t*>(cnt_buf.GetDeviceBuffer());
+    args.batch              = batch;
+    args.nhead_q            = c.nhead;
+    args.nhead_k            = c.nhead_k;
+    args.window_size        = c.window;
+    args.num_groups         = cfg.num_groups;
+    args.scale_s            = scale_s;
+
+    fmha_fwd_decode_pagedkv_traits traits{};
+    traits.hdim_q          = kHdim;
+    traits.data_type       = c.fp16 ? "fp16" : "bf16";
+    traits.page_block_size = ps;
+    traits.wave_split      = cfg.wave_split;
+    traits.num_splits      = cfg.num_splits;
+    if(!fmha_fwd_decode_pagedkv_is_valid(traits, args))
+    {
+        res.error = "invalid arguments";
+        return res;
+    }
 
     hipStream_t stream;
     HIP_CHECK_ERROR(hipDeviceSynchronize()); // the fills above, before a non-blocking stream
     HIP_CHECK_ERROR(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
-    HIP_CHECK_ERROR(launch(args, cfg, stream));
+    const ck_tile::stream_config stream_cfg{stream};
+    // throws on a HIP error
+    const auto launch = [&]() { return fmha_fwd_decode_pagedkv(traits, args, stream_cfg) >= 0; };
+    if(!launch())
+    {
+        HIP_CHECK_ERROR(hipStreamDestroy(stream));
+        res.error = "no instance for this configuration";
+        return res;
+    }
     HIP_CHECK_ERROR(hipStreamSynchronize(stream));
 
     if(validate)
@@ -466,14 +358,14 @@ inline Result run(const Case& c, bool validate, int warmup = 0, int repeat = 0)
     if(repeat > 0)
     {
         for(int i = 0; i < warmup; ++i)
-            HIP_CHECK_ERROR(launch(args, cfg, stream));
+            launch();
         hipEvent_t e0, e1;
         HIP_CHECK_ERROR(hipEventCreate(&e0));
         HIP_CHECK_ERROR(hipEventCreate(&e1));
         HIP_CHECK_ERROR(hipStreamSynchronize(stream));
         HIP_CHECK_ERROR(hipEventRecord(e0, stream));
         for(int i = 0; i < repeat; ++i)
-            HIP_CHECK_ERROR(launch(args, cfg, stream));
+            launch();
         HIP_CHECK_ERROR(hipEventRecord(e1, stream));
         HIP_CHECK_ERROR(hipEventSynchronize(e1));
         float ms = 0;
@@ -485,7 +377,7 @@ inline Result run(const Case& c, bool validate, int warmup = 0, int repeat = 0)
         hipGraphExec_t graph_exec;
         HIP_CHECK_ERROR(hipStreamBeginCapture(stream, hipStreamCaptureModeThreadLocal));
         for(int i = 0; i < repeat; ++i)
-            HIP_CHECK_ERROR(launch(args, cfg, stream));
+            launch();
         HIP_CHECK_ERROR(hipStreamEndCapture(stream, &graph));
         HIP_CHECK_ERROR(hipGraphInstantiate(&graph_exec, graph, nullptr, nullptr, 0));
         {
@@ -521,4 +413,4 @@ inline Result run(const Case& c, bool validate, int warmup = 0, int repeat = 0)
     return res;
 }
 
-} // namespace fmha_decode_paged5d
+} // namespace fmha_fwd_decode_pagedkv_runner

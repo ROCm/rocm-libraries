@@ -152,19 +152,23 @@ if(SUPPORTED_GPU_TARGETS MATCHES "gfx125")
     set_tests_properties(test_ck_tile_fmha_qr_tdm_row_reduce PROPERTIES
         LABELS "${TEST_NAME};CK_TILE_FMHA_TESTS")
 
-    add_gtest_executable(test_ck_tile_fmha_decode_paged5d test_fmha_decode_paged5d.cpp)
-    set(FMHA_DECODE_PAGED5D_GPU_TARGETS ${SUPPORTED_GPU_TARGETS})
-    list(FILTER FMHA_DECODE_PAGED5D_GPU_TARGETS INCLUDE REGEX "^gfx125")
-    set_property(TARGET test_ck_tile_fmha_decode_paged5d PROPERTY HIP_ARCHITECTURES
-        ${FMHA_DECODE_PAGED5D_GPU_TARGETS})
-    target_include_directories(test_ck_tile_fmha_decode_paged5d
-        PRIVATE ${PROJECT_SOURCE_DIR}/example/ck_tile/01_fmha)
-    set_tests_properties(test_ck_tile_fmha_decode_paged5d PROPERTIES
-        LABELS "${TEST_NAME};CK_TILE_FMHA_TESTS")
+    # instances come from example/ck_tile/01_fmha
+    set(FMHA_FWD_DECODE_PAGEDKV_TEST_TARGETS)
+    if(TARGET tile_fmha_fwd_decode_pagedkv_instances)
+        add_gtest_executable(test_ck_tile_fmha_fwd_decode_pagedkv
+            test_fmha_fwd_decode_pagedkv.cpp)
+        target_link_libraries(test_ck_tile_fmha_fwd_decode_pagedkv
+            PRIVATE tile_fmha_fwd_decode_pagedkv_instances)
+        target_include_directories(test_ck_tile_fmha_fwd_decode_pagedkv
+            PRIVATE ${PROJECT_SOURCE_DIR}/example/ck_tile/01_fmha)
+        set_tests_properties(test_ck_tile_fmha_fwd_decode_pagedkv PROPERTIES
+            LABELS "${TEST_NAME};CK_TILE_FMHA_TESTS")
+        set(FMHA_FWD_DECODE_PAGEDKV_TEST_TARGETS test_ck_tile_fmha_fwd_decode_pagedkv)
+    endif()
 
     set(FMHA_QR_TDM_TEST_TARGETS
         test_ck_tile_fmha_bwd_tdm_padding
-        test_ck_tile_fmha_decode_paged5d
+        ${FMHA_FWD_DECODE_PAGEDKV_TEST_TARGETS}
         test_ck_tile_fmha_qr_tdm_lds_padding
         test_ck_tile_fmha_qr_tdm_progressive_k_lds
         test_ck_tile_fmha_qr_tdm_causal_mapping

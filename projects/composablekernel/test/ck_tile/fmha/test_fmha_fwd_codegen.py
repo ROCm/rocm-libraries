@@ -21,6 +21,9 @@ _CK_ROOT = Path(__file__).resolve().parents[3]
 _FMHA_EXAMPLE_DIR = _CK_ROOT / "example" / "ck_tile" / "01_fmha"
 sys.path.insert(0, str(_FMHA_EXAMPLE_DIR))
 
+from codegen.ops.fmha_fwd_decode_pagedkv import (  # noqa: E402
+    get_fwd_decode_pagedkv_blobs,
+)
 from codegen.ops.fmha_fwd_splitkv import get_fwd_splitkv_blobs  # noqa: E402
 from codegen.ops.fmha_fwd import (  # noqa: E402
     CppConstraint,
@@ -2801,7 +2804,6 @@ int main() {
         self.assertEqual(run(seqlen_q=100, seqlen_k=512), [kernel("qr_tdm", 64)])
 
 
-
 class SplitKVQrTdmTiles(unittest.TestCase):
     """The split-kv side of the gfx125 qr_tdm tile contract."""
 
@@ -2855,6 +2857,71 @@ class SplitKVQrTdmTiles(unittest.TestCase):
         # unpadded head-dim predicate reads 64 and can never hold under
         # hdim_q <= 32. get_fwd_splitkv_blobs drops those as unreachable.
         self.assertEqual(sorted({kernel.F_hdim for kernel in exact}), [64, 128, 256])
+
+
+class TestFwdDecodePagedKVCodegen(unittest.TestCase):
+    """fmha_fwd_decode_pagedkv: one instance per split count of every variant, gfx125 only."""
+
+    def test_gfx125_emits_every_split_count_of_every_variant(self):
+        api_pool, kernels = get_fwd_decode_pagedkv_blobs(["gfx1250"], "", 0, [-1])
+        names = [k.name for k in kernels]
+        self.assertEqual(len(names), len(set(names)))
+        variants = Counter(
+            (
+                k.F_dtype,
+                k.F_pipeline.F_page_size,
+                k.F_pipeline.F_wave_split,
+                k.F_pipeline.F_groups,
+            )
+            for k in kernels
+        )
+        # bf16 / fp16 Q and O, three cache page sizes, both layouts, one or several clusters
+        self.assertEqual(len(variants), 2 * 3 * 2 * 2)
+        for variant in variants:
+            splits = sorted(
+                k.F_num_splits
+                for k in kernels
+                if (
+                    k.F_dtype,
+                    k.F_pipeline.F_page_size,
+                    k.F_pipeline.F_wave_split,
+                    k.F_pipeline.F_groups,
+                )
+                == variant
+            )
+            self.assertEqual(splits, list(range(1, 17)), variant)
+        for name in names:
+            self.assertRegex(
+                name,
+                r"^fmha_fwd_decode_pagedkv_d128_(bf16|fp16)_fp8kv_ps(16|64|128)_(coop|wsplit)"
+                r"_s\d+_n?groups$",
+            )
+        # every instance is reachable from the API exactly once
+        traits = re.findall(
+            r"using trait_ = (fmha_fwd_decode_pagedkv_traits_<[^;]*>);", api_pool.api
+        )
+        self.assertEqual(len(traits), len(kernels))
+        self.assertEqual(len(set(traits)), len(kernels))
+
+    def test_filter_selects_matching_instances(self):
+        _, kernels = get_fwd_decode_pagedkv_blobs(
+            ["gfx1250"], "*_bf16_*_ps64_coop_*", 0, [-1]
+        )
+        self.assertEqual(len(kernels), 2 * 16)
+        self.assertTrue(
+            all(
+                k.F_dtype == "bf16"
+                and k.F_pipeline.F_page_size == 64
+                and k.F_pipeline.F_wave_split == "f"
+                for k in kernels
+            )
+        )
+
+    def test_other_targets_emit_no_instance(self):
+        for target in ("gfx942", "gfx950", "gfx1201"):
+            api_pool, kernels = get_fwd_decode_pagedkv_blobs([target], "", 0, [-1])
+            self.assertEqual(kernels, [], target)
+            self.assertNotIn("fmha_fwd_decode_pagedkv_traits_<", api_pool.api)
 
 
 if __name__ == "__main__":

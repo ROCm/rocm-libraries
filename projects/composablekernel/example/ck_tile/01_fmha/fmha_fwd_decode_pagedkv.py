@@ -1,12 +1,12 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""PyTorch wrapper of the gfx125 CK fp8 decode kernel over the SHUFFLE 5D paged KV cache.
+"""PyTorch wrapper of CK fmha_fwd_decode_pagedkv: gfx125 decode over a paged fp8 KV cache.
 
 pa_decode takes the arguments of aiter's FlyDSL pa_decode for the case it covers: one query
 token, bf16 or fp16 Q/O, head dim 128, fp8 e4m3 K/V with per-tensor scales, pages of 16, 64 or
-128 tokens, at most 16 query heads per kv head. Load libck_fmha_decode_paged5d.so (target
-ck_fmha_decode_paged5d) from CK_FMHA_DECODE_PAGED5D_LIB or the library search path.
+128 tokens, at most 16 query heads per kv head. Load libck_fmha_fwd_decode_pagedkv.so (target
+ck_fmha_fwd_decode_pagedkv) from CK_FMHA_FWD_DECODE_PAGEDKV_LIB or the library search path.
 """
 
 import ctypes
@@ -31,14 +31,16 @@ def _load():
     global _lib
     if _lib is None:
         lib = ctypes.CDLL(
-            os.environ.get("CK_FMHA_DECODE_PAGED5D_LIB", "libck_fmha_decode_paged5d.so")
+            os.environ.get(
+                "CK_FMHA_FWD_DECODE_PAGEDKV_LIB", "libck_fmha_fwd_decode_pagedkv.so"
+            )
         )
-        lib.ck_fmha_decode_paged5d_max_workspace_bytes.restype = ctypes.c_size_t
-        lib.ck_fmha_decode_paged5d_max_workspace_bytes.argtypes = [ctypes.c_int] * 2
-        lib.ck_fmha_decode_paged5d_num_counters.restype = ctypes.c_size_t
-        lib.ck_fmha_decode_paged5d_num_counters.argtypes = [ctypes.c_int] * 2
-        lib.ck_fmha_decode_paged5d.restype = ctypes.c_int
-        lib.ck_fmha_decode_paged5d.argtypes = (
+        lib.ck_fmha_fwd_decode_pagedkv_max_workspace_bytes.restype = ctypes.c_size_t
+        lib.ck_fmha_fwd_decode_pagedkv_max_workspace_bytes.argtypes = [ctypes.c_int] * 2
+        lib.ck_fmha_fwd_decode_pagedkv_num_counters.restype = ctypes.c_size_t
+        lib.ck_fmha_fwd_decode_pagedkv_num_counters.argtypes = [ctypes.c_int] * 2
+        lib.ck_fmha_fwd_decode_pagedkv.restype = ctypes.c_int
+        lib.ck_fmha_fwd_decode_pagedkv.argtypes = (
             [ctypes.c_void_p] * 4
             + [ctypes.c_int]
             + [ctypes.c_void_p] * 6
@@ -223,13 +225,15 @@ def _launch(
     stream = torch.cuda.current_stream(device).cuda_stream
     ws = _buffer(
         "workspace",
-        lib.ck_fmha_decode_paged5d_max_workspace_bytes(batch, nhead_k),
+        lib.ck_fmha_fwd_decode_pagedkv_max_workspace_bytes(batch, nhead_k),
         device,
     )
     counters = _buffer(
-        "counters", lib.ck_fmha_decode_paged5d_num_counters(batch, nhead_k) * 4, device
+        "counters",
+        lib.ck_fmha_fwd_decode_pagedkv_num_counters(batch, nhead_k) * 4,
+        device,
     )
-    err = lib.ck_fmha_decode_paged5d(
+    err = lib.ck_fmha_fwd_decode_pagedkv(
         query.data_ptr(),
         key_cache.data_ptr(),
         value_cache.data_ptr(),
@@ -252,4 +256,4 @@ def _launch(
         stream,
     )
     if err != 0:
-        raise RuntimeError(f"ck_fmha_decode_paged5d failed: hipError_t {err}")
+        raise RuntimeError(f"ck_fmha_fwd_decode_pagedkv failed: hipError_t {err}")
