@@ -719,30 +719,28 @@ class TensorDataMoverStore:
         mod.add(SMovB32(self._sg(group0, 1), ldsAddr))
         return mod
 
-    def setTensorDim0(self, group1: int | str, sgprDim0: int | str, writer: "KernelWriterAssembly") -> Module:
-        # tensor_dim0 bit176: group1+1 hi16 + group1+2 lo16
+    def setTensorDim0(self, group1: int | str, sgprDim0: int | str, sgprTmp: int) -> Module:
+        # tensor_dim0 bit176: group1+1 hi16 + group1+2 lo16; sgprTmp is overwritten
         mod = Module()
         mod.addComment("TDM set tensor dim 0")
         mod.add(SAndB32(self._sg(group1, 1), self._sg(group1, 1), hex(0x0000FFFF)))
         mod.add(SAndB32(self._sg(group1, 2), self._sg(group1, 2), hex(0xFFFF0000)))
-        with writer.allocTmpSgpr(1, tag="tdmDim0_tmp") as tmp:
-            mod.add(SLShiftLeftB32(sgpr(tmp.idx), hex(16), sgpr(sgprDim0)))
-            mod.add(SOrB32(self._sg(group1, 1), self._sg(group1, 1), sgpr(tmp.idx)))
-            mod.add(SLShiftRightB32(sgpr(tmp.idx), hex(16), sgpr(sgprDim0)))
-            mod.add(SOrB32(self._sg(group1, 2), self._sg(group1, 2), sgpr(tmp.idx)))
+        mod.add(SLShiftLeftB32(sgpr(sgprTmp), hex(16), sgpr(sgprDim0)))
+        mod.add(SOrB32(self._sg(group1, 1), self._sg(group1, 1), sgpr(sgprTmp)))
+        mod.add(SLShiftRightB32(sgpr(sgprTmp), hex(16), sgpr(sgprDim0)))
+        mod.add(SOrB32(self._sg(group1, 2), self._sg(group1, 2), sgpr(sgprTmp)))
         return mod
 
-    def setTensorDim1(self, group1: int | str, sgprDim1: int | str, writer: "KernelWriterAssembly") -> Module:
-        # tensor_dim1 bit208: group1+2 hi16 + group1+3 lo16
+    def setTensorDim1(self, group1: int | str, sgprDim1: int | str, sgprTmp: int) -> Module:
+        # tensor_dim1 bit208: group1+2 hi16 + group1+3 lo16; sgprTmp is overwritten
         mod = Module()
         mod.addComment("TDM set tensor dim 1")
         mod.add(SAndB32(self._sg(group1, 2), self._sg(group1, 2), hex(0x0000FFFF)))
         mod.add(SAndB32(self._sg(group1, 3), self._sg(group1, 3), hex(0xFFFF0000)))
-        with writer.allocTmpSgpr(1, tag="tdmDim1_tmp") as tmp:
-            mod.add(SLShiftLeftB32(sgpr(tmp.idx), hex(16), sgpr(sgprDim1)))
-            mod.add(SOrB32(self._sg(group1, 2), self._sg(group1, 2), sgpr(tmp.idx)))
-            mod.add(SLShiftRightB32(sgpr(tmp.idx), hex(16), sgpr(sgprDim1)))
-            mod.add(SOrB32(self._sg(group1, 3), self._sg(group1, 3), sgpr(tmp.idx)))
+        mod.add(SLShiftLeftB32(sgpr(sgprTmp), hex(16), sgpr(sgprDim1)))
+        mod.add(SOrB32(self._sg(group1, 2), self._sg(group1, 2), sgpr(sgprTmp)))
+        mod.add(SLShiftRightB32(sgpr(sgprTmp), hex(16), sgpr(sgprDim1)))
+        mod.add(SOrB32(self._sg(group1, 3), self._sg(group1, 3), sgpr(sgprTmp)))
         return mod
 
     def setTensorTile0(self, group1: int | str, tile0: int) -> Module:

@@ -43,7 +43,7 @@ from rocisa.code import Label, Module
 from rocisa.container import DSModifiers, MemTokenData, sgpr, vgpr
 from rocisa.enum import NonVolatile, TemporalHint
 from rocisa.instruction import DSLoadD16HIU16, DSLoadU8, SAddCU32, SAddU32, SCBranchSCC0, SCBranchSCC1, SCmpEQU32, \
-  SCmpLeU32, SLShiftLeftB64, SLShiftRightB32, SMinU32, SMulHIU32, SMulI32, SSubU32, SWaitCnt, SWaitTensorcnt, \
+  SCmpLeU32, SLShiftLeftB64, SLShiftRightB32, SMinU32, SMulHIU32, SMulI32, SOrB32, SSubU32, SWaitCnt, SWaitTensorcnt, \
   VAddU32, VLShiftLeftB32, VMulLOU32, VReadfirstlaneB32, VSubU32
 
 from ..AsmMemoryHelpers import DS_STORE_WIDTHS, dsLoad, dsStore
@@ -424,10 +424,13 @@ def _tdmStoreDescriptor(gwb, module: Module, tdm, g0, g1, tmp, tc):
 
   Each wave covers ceil(MacroTile1/numWaves) consecutive columns: tile MT0 x those columns, M-contiguous
   from the LDS address of its first column, global address Srd<tc> (SrdTD for the reduced tile of MultipleBufferSingleKernel) + (column*Stride<tc> + wg0*MT0)*bpe,
-  and tensor_dim0/1 the part of the tile inside SizeI and SizeJ. The first of the four tmp SGPRs is left
+  and tensor_dim0/1 the part of the tile inside SizeI and SizeJ. The first of the two tmp SGPRs is left
   at the first column of the wave. When MacroTile1 is not a multiple of the number of waves, the columns
   of the last waves reach past the tile, so tensor_dim1 ends at the column bound min(SizeJ, (wg1+1)*MT1),
-  which the second tmp SGPR keeps. The block assumes one free index per operand, as every GEMM problem
+  which the second tmp SGPR keeps. The LDS and global addresses are computed in their group0 words, and the
+  other temporaries live in group1+5 and group1+6 until setTensorStride0 writes them last, so the block needs
+  two SGPRs of any alignment besides the descriptor: the epilogue of a kernel with many live SGPRs may have no
+  aligned run of four left. The block assumes one free index per operand, as every GEMM problem
   type has, so PackedC0IndicesX and PackedC1IndicesX hold one index each. TDM data_size is at most 8 bytes, so a
   complex double element is two 8-byte units, in which tensor_dim0, tile0 and the stride count, the doubled stride in
   the 48 bits of its field; the byte offsets and the staged tile do not change.
@@ -444,39 +447,40 @@ def _tdmStoreDescriptor(gwb, module: Module, tdm, g0, g1, tmp, tc):
   srd = "SrdTD" if tc == "D" and gwb.kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel" else "Srd" + tc
   sizeI = kw.sizeRef(gwb.kernel["ProblemType"]["Index0"])
   sizeJ = kw.sizeRef(gwb.kernel["ProblemType"]["Index1"])
-  col, dim, offLo, offHi = tmp.idx, tmp.idx + 1, tmp.idx + 2, tmp.idx + 3
+  col, dim = tmp.idx, tmp.idx + 1
+  dim1, scratch = g1 + 5, g1 + 6
   module.add(tdm.initOperands(g0, g1))
   module.add(tdm.setDataSize(bpe // units, g1))
   module.add(VReadfirstlaneB32(dst=sgpr(col), src=vgpr("Serial"), comment="first thread id"))
   module.add(SLShiftRightB32(dst=sgpr(col), shiftHex=int(log2(ws)), src=sgpr(col), comment="waveId"))
   module.add(SMulI32(dst=sgpr(col), src0=sgpr(col), src1=colsPerWave, comment="first tile column of this wave"))
-  module.add(SMulI32(dst=sgpr(offLo), src0=sgpr(col), src1=mt0 * bpe, comment="its LDS address"))
+  module.add(SMulI32(dst=sgpr(g0 + 1), src0=sgpr(col), src1=mt0 * bpe, comment="its LDS address"))
   if gwb.kernel["_TDMStoreLdsOffset"]:
-    module.add(SAddU32(dst=sgpr(offLo), src0=sgpr(offLo), src1=gwb.kernel["_TDMStoreLdsOffset"], comment="+ LDS offset of the staged tile"))
-  module.add(tdm.setLdsAddr(g0, sgpr(offLo)))
-  module.add(SMulHIU32(dst=sgpr(offHi), src0=sgpr(col), src1=sgpr(stride1), comment="hi(column*Stride%s)" % tc))
-  module.add(SMulI32(dst=sgpr(offLo), src0=sgpr(col), src1=sgpr(stride1), comment="lo(column*Stride%s)" % tc))
+    module.add(SAddU32(dst=sgpr(g0 + 1), src0=sgpr(g0 + 1), src1=gwb.kernel["_TDMStoreLdsOffset"], comment="+ LDS offset of the staged tile"))
+  module.add(SMulHIU32(dst=sgpr(g0 + 3), src0=sgpr(col), src1=sgpr(stride1), comment="hi(column*Stride%s)" % tc))
+  module.add(SMulI32(dst=sgpr(g0 + 2), src0=sgpr(col), src1=sgpr(stride1), comment="lo(column*Stride%s)" % tc))
   module.add(SMulI32(dst=sgpr(dim), src0=sgpr("WorkGroup0"), src1=mt0, comment="wg0*MT0"))
-  module.add(SAddU32(dst=sgpr(offLo), src0=sgpr(offLo), src1=sgpr(dim), comment="+ wg0*MT0"))
-  module.add(SAddCU32(dst=sgpr(offHi), src0=sgpr(offHi), src1=0, comment="carry"))
-  module.add(SLShiftLeftB64(dst=sgpr(offLo, 2), src=sgpr(offLo, 2), shiftHex=int(log2(bpe)), comment="64-bit byte offset from %s" % srd))
-  module.add(tdm.setGlobalAddr(g0, srd))
-  module.add(SAddU32(dst=sgpr(g0 + 2), src0=sgpr(g0 + 2), src1=sgpr(offLo), comment="global address lo"))
-  module.add(SAddCU32(dst=sgpr(g0 + 3), src0=sgpr(g0 + 3), src1=sgpr(offHi), comment="global address hi"))
+  module.add(SAddU32(dst=sgpr(g0 + 2), src0=sgpr(g0 + 2), src1=sgpr(dim), comment="+ wg0*MT0"))
+  module.add(SAddCU32(dst=sgpr(g0 + 3), src0=sgpr(g0 + 3), src1=0, comment="carry"))
+  module.add(SLShiftLeftB64(dst=sgpr(g0 + 2, 2), src=sgpr(g0 + 2, 2), shiftHex=int(log2(bpe)), comment="64-bit byte offset from %s" % srd))
+  module.add(SAddU32(dst=sgpr(g0 + 2), src0=sgpr(g0 + 2), src1=sgpr(srd), comment="global address lo"))
+  module.add(SAddCU32(dst=sgpr(g0 + 3), src0=sgpr(g0 + 3), src1=sgpr("%s+1" % srd), comment="global address hi"))
+  # The type field, bits 30-31, is ORed in after the add, which cannot carry into it: the address is 57-bit.
+  module.add(SOrB32(dst=sgpr(g0 + 3), src0=sgpr(g0 + 3), src1=hex(2 << 30), comment="set type field to 2(image)"))
   module.add(SSubU32(dst=sgpr(dim), src0=sizeI, src1=sgpr(dim), comment="tensor_dim0 = SizeI - wg0*MT0"))
   if units > 1:
     module.add(SAddU32(dst=sgpr(dim), src0=sgpr(dim), src1=sgpr(dim), comment="tensor_dim0 in 8-byte units"))
-  module.add(tdm.setTensorDim0(g1, dim, kw))
+  module.add(tdm.setTensorDim0(g1, dim, scratch))
   module.add(SMulI32(dst=sgpr(dim), src0=sgpr("WorkGroup1"), src1=gwb.kernel["MacroTile1"], comment="wg1*MT1"))
   module.add(SAddU32(dst=sgpr(col), src0=sgpr(col), src1=sgpr(dim), comment="first %s column of this wave" % tc))
   if _unevenColumns(gwb.kernel):
     module.add(SAddU32(dst=sgpr(dim), src0=sgpr(dim), src1=gwb.kernel["MacroTile1"], comment="end of the tile"))
     module.add(SMinU32(dst=sgpr(dim), src0=sizeJ, src1=sgpr(dim), comment="column bound = min(SizeJ, end of the tile)"))
-    module.add(SSubU32(dst=sgpr(offLo), src0=sgpr(dim), src1=sgpr(col), comment="tensor_dim1 = column bound - first column"))
-    module.add(tdm.setTensorDim1(g1, offLo, kw))
+    module.add(SSubU32(dst=sgpr(dim1), src0=sgpr(dim), src1=sgpr(col), comment="tensor_dim1 = column bound - first column"))
+    module.add(tdm.setTensorDim1(g1, dim1, scratch))
   else:
     module.add(SSubU32(dst=sgpr(dim), src0=sizeJ, src1=sgpr(col), comment="tensor_dim1 = SizeJ - first column"))
-    module.add(tdm.setTensorDim1(g1, dim, kw))
+    module.add(tdm.setTensorDim1(g1, dim, scratch))
   module.add(tdm.setTensorTile0(g1, _tileDim0(gwb.kernel)))
   module.add(tdm.setTensorTile1(g1, colsPerWave))
   module.add(tdm.setTensorStride0(g1, stride1, units))
@@ -506,7 +510,7 @@ def emitTDMStoreLoadC(gwb) -> Module:
   tdm = TensorDataMoverStore([_stagedTileToken(gwb)])
   with kw.allocTmpSgpr(8, alignment=4, tag="tdmLoadCDescGroup1") as group1, \
       kw.allocTmpSgpr(4, alignment=4, tag="tdmLoadCDescGroup0") as group0:
-    with kw.allocTmpSgpr(4, alignment=2, tag="tdmLoadCTmp") as tmp:
+    with kw.allocTmpSgpr(2, tag="tdmLoadCTmp") as tmp:
       _tdmStoreDescriptor(gwb, module, tdm, group0.idx, group1.idx, tmp, "C")
       module.add(_skipTest(gwb, sizeJ, tmp))
       module.add(SCBranchSCC1(labelName=skipLoad.getLabelName(), comment="skip the load"))
@@ -536,7 +540,7 @@ def emitTDMStoreFlush(gwb) -> Module:
   tdm = TensorDataMoverStore([_stagedTileToken(gwb)])
   with kw.allocTmpSgpr(8, alignment=4, tag="tdmStoreDescGroup1") as group1, \
       kw.allocTmpSgpr(4, alignment=4, tag="tdmStoreDescGroup0") as group0:
-    with kw.allocTmpSgpr(4, alignment=2, tag="tdmStoreTmp") as tmp:
+    with kw.allocTmpSgpr(2, tag="tdmStoreTmp") as tmp:
       _tdmStoreDescriptor(gwb, module, tdm, group0.idx, group1.idx, tmp, "D")
       # StinkyRemoveWaitCntPass keeps a wait marked stinky-keep; nothing re-derives this one.
       module.add(SWaitCnt(dscnt=0, comment="staging stores done " + STINKY_KEEP))
