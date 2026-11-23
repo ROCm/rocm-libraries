@@ -20,6 +20,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -603,6 +604,20 @@ namespace
                 m_vdata[tensor].pristine.at(type).cpuInput.valid.get());
             return {data, data + bytes};
         }
+
+        // Replaces the pristine CPU copy of a tensor with one that has `slack` bytes of
+        // `sentinel` past the size the client allocates, so a write past the end lands where the
+        // test can see it. Returns the allocated size.
+        size_t guardCPUTail(int tensor, rocisa::DataType type, size_t slack, uint8_t sentinel)
+        {
+            auto&        pristine = m_vdata[tensor].pristine.at(type);
+            size_t const bytes    = TensileLite::multiplyElementSize(
+                pristine.maxElements, DataTypeInfo::Get(type).elementSize);
+            auto* guarded = static_cast<uint8_t*>(std::malloc(bytes + slack));
+            std::memset(guarded, sentinel, bytes + slack);
+            pristine.cpuInput.valid = std::shared_ptr<void>(guarded, [](void* p) { std::free(p); });
+            return bytes;
+        }
     };
 
     template <typename T>
@@ -666,6 +681,48 @@ TEST(DataInitializationMafScaleTiles, Maf2_0KeepsTheBinomialScalesWithFreeBlocks
     ASSERT_GE(drawn, 512u);
     EXPECT_NEAR(double(atMostHalf) / drawn, 0.5, 0.08);
 }
+
+// B is K = 32 (one MX block) by N = 2 with a leading dimension of 64, so the client allocates
+// 64 + 32 = 96 bytes. The generated data must stay inside them; a generator buffer of
+// ldb * N = 128 bytes would spill 32 bytes past the end.
+class DataInitializationMXPaddedLd : public ::testing::TestWithParam<TensileLite::Client::InitMode>
+{
+};
+
+TEST_P(DataInitializationMXPaddedLd, StaysInsideTheAllocation)
+{
+    using namespace TensileLite::Client;
+    auto args = makeMXLaunchArgs({{32, 2, 1, 32}});
+    setOption(args, "b-strides", std::vector<std::vector<size_t>>{{1, 64, 128}});
+    for(auto const* name : {"init-a", "init-b", "init-mx-a", "init-mx-b"})
+        setOption(args, name, GetParam());
+    ClientProblemFactory factory(args);
+    CPUInputProbe        dataInit(args, factory);
+    auto const&          gemm = dynamic_cast<ContractionProblemGemm const&>(*factory.problems()[0]);
+    ASSERT_EQ(gemm.b().totalAllocatedBytes(), 96u);
+
+    constexpr uint8_t sentinel = 0xA5;
+    constexpr size_t  slack    = 64;
+    size_t const      bytes    = dataInit.guardCPUTail(
+        ContractionProblemGemm::TENSOR::B, gemm.b().dataType(), slack, sentinel);
+    ASSERT_EQ(bytes, 96u);
+    dataInit.initializeCPUInputs(gemm);
+
+    auto const guarded
+        = dataInit.cpuBytes(ContractionProblemGemm::TENSOR::B, gemm.b().dataType(), bytes + slack);
+    size_t written = 0;
+    for(size_t i = bytes; i < guarded.size(); i++)
+        written += guarded[i] != sentinel;
+    EXPECT_EQ(written, 0u) << "bytes written past the " << bytes << "-byte allocation";
+}
+
+INSTANTIATE_TEST_SUITE_P(Modes,
+                         DataInitializationMXPaddedLd,
+                         ::testing::Values(TensileLite::Client::InitMode::RandomNarrow,
+                                           TensileLite::Client::InitMode::Maf1_0,
+                                           TensileLite::Client::InitMode::Maf2_0,
+                                           TensileLite::Client::InitMode::Maf2_0UnitScale),
+                         [](auto const& info) { return TensileLite::Client::ToString(info.param); });
 #endif
 
 // =============================================================================
