@@ -5336,6 +5336,10 @@ namespace
     {
         using TensileLite::TuningAttempt;
 
+        // An error the thread already had is the caller's and stays: the
+        // cleanups below clear the last error only when there was none.
+        const bool callerErrorPending = hipPeekAtLastError() != hipSuccess;
+
         // Wall clock from function entry, not the sum of the timed spans.
         // Scratch allocation, rotation seeding, enumeration, support checks,
         // solve() and code-object loading are most of the cost and none of them
@@ -5475,12 +5479,14 @@ namespace
         struct StreamDrain
         {
             hipStream_t stream;
+            bool        keepLastError;
             ~StreamDrain()
             {
                 static_cast<void>(hipStreamSynchronize(stream));
-                static_cast<void>(hipGetLastError());
+                if(!keepLastError)
+                    static_cast<void>(hipGetLastError());
             }
-        } streamDrain{prob.stream};
+        } streamDrain{prob.stream, callerErrorPending};
 
         if(is_grad_enabled(prob.epilogue) && layout.bytesE
            && !rocblaslt::seedGradientAuxiliary(bytes + layout.offsetE,
@@ -5668,7 +5674,8 @@ namespace
 
             // Clear any sticky async error so it cannot be attributed to the
             // caller's real launch further down.
-            static_cast<void>(hipGetLastError());
+            if(!callerErrorPending)
+                static_cast<void>(hipGetLastError());
         };
 
         // Opened as a candidate's timed phase starts and closed by recordMeasurement.
@@ -6264,6 +6271,10 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
         // Built by whichever of replay and the tuner needs it first.
         std::optional<TensileLite::ProblemOverride> tuningKey;
 
+        // An error the thread already had is the caller's and stays: the
+        // handlers below clear the last error only when there was none.
+        const bool callerErrorPending = hipPeekAtLastError() != hipSuccess;
+
         if(!callerSuppliedAlgo && keyed)
         {
             // Cache replay for a call that passed no algo. hipblasLtMatmul
@@ -6288,7 +6299,8 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
             {
                 // The cache is an optimisation: a lookup that throws leaves the
                 // call on default selection rather than failing it.
-                static_cast<void>(hipGetLastError());
+                if(!callerErrorPending)
+                    static_cast<void>(hipGetLastError());
                 algo = nullptr;
             }
         }
@@ -6663,7 +6675,8 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
             // loading, enumeration and solve() can all throw after the call's
             // own algo was chosen. benchmarked stays set, so data->problem is
             // restored below.
-            static_cast<void>(hipGetLastError());
+            if(!callerErrorPending)
+                static_cast<void>(hipGetLastError());
             tunedIndex  = -1;
             servedIndex = -1;
             launchIndex = -1;

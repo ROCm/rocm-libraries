@@ -2248,6 +2248,27 @@ namespace
         }
     }
 
+    // A call that tunes leaves an error the caller had pending: none of the
+    // tuner's own calls fail, so its cleanups have nothing of their own to clear.
+    // The shape is tuned once first, so the second search finds every
+    // candidate's kernel already looked up.
+    TEST_F(TuningTune_pre_checkin, TuningLeavesACallerErrorPending)
+    {
+        enterMode("tune", m_path);
+        ASSERT_TRUE(runGemm(256, 256, 256));
+        ASSERT_EQ(counters().attempts, 1u) << "the first call did not tune";
+
+        std::remove(m_path.c_str());
+        enterMode("tune", m_path);
+        void* unused = nullptr;
+        ASSERT_EQ(hipMalloc(&unused, SIZE_MAX), hipErrorOutOfMemory);
+        ASSERT_TRUE(runGemm(256, 256, 256));
+        EXPECT_EQ(counters().attempts, 1u) << "the second call did not tune";
+        const hipError_t last = hipGetLastError();
+        EXPECT_EQ(last, hipErrorOutOfMemory)
+            << "the call that tuned left " << hipGetErrorName(last) << " instead";
+    }
+
     // Two threads that meet two untuned shapes at the same time both get them
     // tuned. Tune mode was asked for, so what it records must not depend on
     // which thread reached the tuning lock first.
