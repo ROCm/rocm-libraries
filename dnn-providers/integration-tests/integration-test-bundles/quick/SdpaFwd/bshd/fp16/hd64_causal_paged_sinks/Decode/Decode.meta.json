@@ -1,0 +1,173 @@
+{
+    "format_version": 1,
+    "generator": "generate_sdpa_fwd_paged_golden.py",
+    "generator_sha256": "24b67ead9a6057695be90190220ea04a3e52d82ee21fce16540b69c7f911e983",
+    "helpers_sha256": "0059dc287ab815881959846ef5ed4fae7d4a51604bf3597c8f9bc9dbc8b6e232",
+    "generated_at": "2026-10-24T16:19:43Z",
+    "reference_source": "PyTorch 2.14.1+cpu",
+    "reference_backend": "pytorch_math_backend (gather-then-dense)",
+    "rocm_version": "",
+    "generator_version": "1.2.0",
+    "generation_precision": "like-for-like: FP16 inputs, FP32 intermediates, FP16 output",
+    "direction": "forward",
+    "seed": 7,
+    "input_range": [
+        -1.0,
+        1.0
+    ],
+    "deterministic": true,
+    "config": {
+        "batch": 4,
+        "num_heads_q": 16,
+        "num_heads_kv": 2,
+        "seq_q": 1,
+        "head_dim_qk": 64,
+        "head_dim_v": 64,
+        "dtype": "fp16",
+        "causal": "bottom_right",
+        "window_left": -1,
+        "window_right": -1,
+        "stats": true,
+        "scale": 0.125,
+        "gqa_ratio": 8,
+        "layout": "bshd",
+        "ragged_q": false,
+        "seq_lens_q": [
+            1,
+            1,
+            1,
+            1
+        ],
+        "seq_lens_kv": [
+            37,
+            0,
+            128,
+            16
+        ],
+        "max_seq_len_kv": 128,
+        "block_size": 16,
+        "max_blocks_per_seq": 8,
+        "num_blocks": 14,
+        "used_blocks": 12,
+        "spare_blocks": 2,
+        "kv_container_layout": "[num_blocks, block_size, H_kv, D] (vLLM)",
+        "interleaved_kv": false,
+        "k_strides": [
+            2048,
+            64,
+            128,
+            1
+        ],
+        "v_strides": [
+            2048,
+            64,
+            128,
+            1
+        ],
+        "spare_fill": 100.0,
+        "interleave_fill": null,
+        "shared_page_table": true,
+        "page_table_k": [
+            [
+                12,
+                3,
+                11,
+                -1,
+                -1,
+                -1,
+                -1,
+                -1
+            ],
+            [
+                -1,
+                -1,
+                -1,
+                -1,
+                -1,
+                -1,
+                -1,
+                -1
+            ],
+            [
+                5,
+                0,
+                10,
+                4,
+                2,
+                9,
+                7,
+                13
+            ],
+            [
+                6,
+                -1,
+                -1,
+                -1,
+                -1,
+                -1,
+                -1,
+                -1
+            ]
+        ],
+        "page_table_v": [
+            [
+                12,
+                3,
+                11,
+                -1,
+                -1,
+                -1,
+                -1,
+                -1
+            ],
+            [
+                -1,
+                -1,
+                -1,
+                -1,
+                -1,
+                -1,
+                -1,
+                -1
+            ],
+            [
+                5,
+                0,
+                10,
+                4,
+                2,
+                9,
+                7,
+                13
+            ],
+            [
+                6,
+                -1,
+                -1,
+                -1,
+                -1,
+                -1,
+                -1,
+                -1
+            ]
+        ],
+        "sinks": [
+            0.9122803211212158,
+            -1.610001564025879,
+            0.569429337978363,
+            1.528881549835205,
+            1.4547297954559326,
+            -0.8718259930610657,
+            -0.7874336838722229,
+            -1.3187830448150635,
+            -0.3979018032550812,
+            0.7136116027832031,
+            -0.038331545889377594,
+            0.8808769583702087,
+            -0.8776021599769592,
+            -0.39759448170661926,
+            0.47352737188339233,
+            -0.718550443649292
+        ]
+    }
+}

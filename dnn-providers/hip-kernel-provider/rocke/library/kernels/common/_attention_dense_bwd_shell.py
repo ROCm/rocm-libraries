@@ -45,8 +45,8 @@ stats view, the per-kv-tile driver and the dK / dV epilogues of
   head unit) order. The runtime load-balance order (natural / reverse, and
   interleave when the body's ``lb_interleave`` is set) permutes the kv tiles
   of one (unit, batch) in both. The chiplet remap is the general family's
-  ``xcd_remap_id`` over the whole grid (the batch is a kernarg, so the grid
-  size is known in the kernel).
+  gated ``rocke.helpers.grid.xcd_remap`` over the whole grid (the batch is a
+  kernarg, so the grid size is known in the kernel).
 
 The body knobs ``static_scale`` (multipliers that are 1.0 under the compiled
 scale placement are not applied) and ``ptr_noalias`` (over the dense pointer
@@ -75,6 +75,7 @@ from rocke.core.codegen_policy import (
 )
 from rocke.core.ir import F32, I32, IRBuilder, PtrType, Type, Value
 from rocke.helpers.attention_band import AttnRuntimeBounds
+from rocke.helpers.grid import xcd_remap
 
 from kernels.common._attention_bwd_addr import (
     StridedTensorAddr,
@@ -98,11 +99,7 @@ from kernels.common._attention_bwd_frag import ir_type
 from kernels.common._attention_bwd_gemm import lane_and_wave
 from kernels.common._attention_bwd_ring import QRing
 from kernels.common._attention_bwd_sinks import AtomicWorkspaceSink, NullSink
-from kernels.common._attention_bwd_worklist import (
-    decode_cta,
-    head_range,
-    xcd_remap_id,
-)
+from kernels.common._attention_bwd_worklist import decode_cta, head_range
 from kernels.common.attention_bwd import (
     AGPR_ALLOC_BACKEND,
     BWD_BARRIER_FENCE,
@@ -577,9 +574,9 @@ def emit_dense_bwd_main(spec: AttentionDenseBwdSpec, arch: str, *, sentinel=True
         # whole-grid remap (the batch is a kernarg, so the grid size is
         # known); identity when xcd_n or xcd_chunk is 0
         lin = b.readfirstlane(
-            xcd_remap_id(
-                b, lin, num_wgs=b.mul(b.mul(gx, gy), batch), n=a["xcd_n"],
-                chunk=a["xcd_chunk"],
+            xcd_remap(
+                b, lin, num_wgs=b.mul(b.mul(gx, gy), batch), num_xcds=a["xcd_n"],
+                chunk=a["xcd_chunk"], mode="gated",
             )
         )  # fmt: skip
         tile(*split_linear(lin, unit_major_last=False))

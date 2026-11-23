@@ -61,6 +61,7 @@
         }                                                                       \
         else                                                                    \
         {                                                                       \
+            /* COVERAGE_EXCL_NO_MPI_START */                                    \
             kernel_csr_rs_extpi_interp_nnz<true, BS, WS, HS>                    \
                 <<<(this->nrow_ - 1) / (BS / WS) + 1,                           \
                    BS,                                                          \
@@ -84,6 +85,7 @@
                     cast_pg->mat_.row_offset,                                   \
                     cast_f2c->vec_);                                            \
         }                                                                       \
+        /* COVERAGE_EXCL_NO_MPI_STOP */                                         \
     }
 
 #define DISPATCH_EXTPI_INTERP_FILL(G, BS, WS, HS)                                \
@@ -127,6 +129,7 @@
         }                                                                        \
         else                                                                     \
         {                                                                        \
+            /* COVERAGE_EXCL_NO_MPI_START */                                     \
             size_t ssize = BS / WS * HS * (sizeof(int64_t) + sizeof(ValueType)); \
             kernel_csr_rs_extpi_interp_fill<true, BS, WS, HS>                    \
                 <<<(this->nrow_ - 1) / (BS / WS) + 1,                            \
@@ -162,6 +165,7 @@
                     cast_cf->vec_,                                               \
                     cast_f2c->vec_);                                             \
         }                                                                        \
+        /* COVERAGE_EXCL_NO_MPI_STOP */                                          \
     }
 
 namespace rocalution
@@ -319,7 +323,7 @@ namespace rocalution
                     cast_cf->vec_,
                     cast_m->vec_);
         }
-        else
+        else // COVERAGE_EXCL_NO_MPI_START
         {
             kernel_csr_rs_pmis_correct_coarse<true, 256, 8>
                 <<<(this->nrow_ - 1) / (256 / 8) + 1,
@@ -336,6 +340,7 @@ namespace rocalution
                     cast_S->vec_,
                     cast_cf->vec_,
                     cast_m->vec_);
+            // COVERAGE_EXCL_NO_MPI_STOP
         }
         CHECK_HIP_ERROR(__FILE__, __LINE__);
 
@@ -378,7 +383,7 @@ namespace rocalution
                     cast_S->vec_,
                     cast_cf->vec_);
         }
-        else
+        else // COVERAGE_EXCL_NO_MPI_START
         {
             kernel_csr_rs_pmis_coarse_edges_to_fine<true, 256, 8>
                 <<<(this->nrow_ - 1) / (256 / 8) + 1,
@@ -393,6 +398,7 @@ namespace rocalution
                     cast_gst->mat_.col,
                     cast_S->vec_,
                     cast_cf->vec_);
+            // COVERAGE_EXCL_NO_MPI_STOP
         }
         CHECK_HIP_ERROR(__FILE__, __LINE__);
 
@@ -482,6 +488,7 @@ namespace rocalution
         // Ghost part
         if(global == true)
         {
+            // COVERAGE_EXCL_NO_MPI_START
             assert(cast_gst != NULL);
             assert(cast_pg != NULL);
 
@@ -493,6 +500,7 @@ namespace rocalution
 
             // Number of ghost rows is identical to interior
             cast_pg->nrow_ = this->nrow_;
+            // COVERAGE_EXCL_NO_MPI_STOP
         }
 
         // Determine row nnz of P
@@ -519,7 +527,7 @@ namespace rocalution
                     (PtrType*)NULL,
                     cast_f2c->vec_);
         }
-        else
+        else // COVERAGE_EXCL_NO_MPI_START
         {
             kernel_csr_rs_direct_interp_nnz<true, 256>
                 <<<(this->nrow_ - 1) / 256 + 1,
@@ -541,6 +549,7 @@ namespace rocalution
                     cast_pi->mat_.row_offset,
                     cast_pg->mat_.row_offset,
                     cast_f2c->vec_);
+            // COVERAGE_EXCL_NO_MPI_STOP
         }
         CHECK_HIP_ERROR(__FILE__, __LINE__);
 
@@ -598,10 +607,12 @@ namespace rocalution
         // Ghost part
         if(global == true)
         {
+            // COVERAGE_EXCL_NO_MPI_START
             assert(cast_l2g != NULL);
             assert(cast_gst != NULL);
             assert(cast_pg != NULL);
             assert(cast_glo != NULL);
+            // COVERAGE_EXCL_NO_MPI_STOP
         }
 
         // rocprim buffer
@@ -650,6 +661,7 @@ namespace rocalution
         // Ghost part
         if(global == true)
         {
+            // COVERAGE_EXCL_NO_MPI_START
             // Exclusive sum to obtain row offset pointers of ghost
             // part of P
             CHECK_HIP_STATUS(
@@ -674,6 +686,7 @@ namespace rocalution
             allocate_hip(cast_pg->nnz_, &cast_pg->mat_.val);
 
             cast_glo->Allocate(cast_pg->nnz_);
+            // COVERAGE_EXCL_NO_MPI_STOP
         }
 
         free_hip(&rocprim_buffer);
@@ -708,7 +721,7 @@ namespace rocalution
                     cast_f2c->vec_,
                     (int*)NULL);
         }
-        else
+        else // COVERAGE_EXCL_NO_MPI_START
         {
             kernel_csr_rs_direct_interp_fill<true, 256>
                 <<<(this->nrow_ - 1) / 256 + 1,
@@ -735,12 +748,14 @@ namespace rocalution
                     cast_Amax->vec_,
                     cast_f2c->vec_,
                     cast_l2g->vec_);
+            // COVERAGE_EXCL_NO_MPI_STOP
         }
         CHECK_HIP_ERROR(__FILE__, __LINE__);
 
         return true;
     }
 
+    // COVERAGE_EXCL_NO_MPI_START
     template <typename ValueType>
     bool HIPAcceleratorMatrixCSR<ValueType>::RSExtPIBoundaryNnz(const BaseVector<int>&  boundary,
                                                                 const BaseVector<int>&  CFmap,
@@ -850,6 +865,7 @@ namespace rocalution
 
         return true;
     }
+    // COVERAGE_EXCL_NO_MPI_STOP
 
     template <typename ValueType>
     bool HIPAcceleratorMatrixCSR<ValueType>::RSExtPIProlongNnz(
@@ -904,6 +920,7 @@ namespace rocalution
         // Ghost part
         if(global == true)
         {
+            // COVERAGE_EXCL_NO_MPI_START
             assert(cast_l2g != NULL);
             assert(cast_gst != NULL);
             assert(cast_ptr != NULL);
@@ -918,6 +935,7 @@ namespace rocalution
 
             // Number of ghost rows is identical to interior
             cast_pg->nrow_ = this->nrow_;
+            // COVERAGE_EXCL_NO_MPI_STOP
         }
 
         // rocprim buffer
@@ -945,7 +963,7 @@ namespace rocalution
                     cast_cf->vec_,
                     cast_pi->mat_.row_offset);
         }
-        else
+        else // COVERAGE_EXCL_NO_MPI_START
         {
             kernel_csr_rs_extpi_interp_max<true, 256, 16>
                 <<<(this->nrow_ - 1) / (256 / 16) + 1,
@@ -963,6 +981,7 @@ namespace rocalution
                     cast_S->vec_,
                     cast_cf->vec_,
                     cast_pi->mat_.row_offset);
+            // COVERAGE_EXCL_NO_MPI_STOP
         }
         CHECK_HIP_ERROR(__FILE__, __LINE__);
 
@@ -1094,8 +1113,10 @@ namespace rocalution
 
             if(global == true)
             {
+                // COVERAGE_EXCL_NO_MPI_START
                 free_hip(&cast_pg->mat_.row_offset);
                 cast_pg->nrow_ = 0;
+                // COVERAGE_EXCL_NO_MPI_STOP
             }
 
             return false;
@@ -1164,6 +1185,7 @@ namespace rocalution
         // Ghost part
         if(global == true)
         {
+            // COVERAGE_EXCL_NO_MPI_START
             assert(cast_l2g != NULL);
             assert(cast_gst != NULL);
             assert(cast_ptr != NULL);
@@ -1173,6 +1195,7 @@ namespace rocalution
             assert(cast_ext_val != NULL);
             assert(cast_pg != NULL);
             assert(cast_glo != NULL);
+            // COVERAGE_EXCL_NO_MPI_STOP
         }
 
         // rocprim buffer
@@ -1210,6 +1233,7 @@ namespace rocalution
         // Ghost part
         if(global == true)
         {
+            // COVERAGE_EXCL_NO_MPI_START
             CHECK_HIP_STATUS(
                 rocprim::reduce(rocprim_buffer,
                                 rocprim_size,
@@ -1224,6 +1248,7 @@ namespace rocalution
 
             copy_d2h(1, d_max_hash + 1, &max_hash_fill_gst);
             max_hash_fill += max_hash_fill_gst;
+            // COVERAGE_EXCL_NO_MPI_STOP
         }
 
         free_hip(&d_max_hash);
@@ -1277,6 +1302,7 @@ namespace rocalution
         // Ghost part
         if(global == true)
         {
+            // COVERAGE_EXCL_NO_MPI_START
             // Exclusive sum to obtain row offset pointers of ghost
             // part of P
             CHECK_HIP_STATUS(
@@ -1301,6 +1327,7 @@ namespace rocalution
             allocate_hip(cast_pg->nnz_, &cast_pg->mat_.val);
 
             cast_glo->Allocate(cast_pg->nnz_);
+            // COVERAGE_EXCL_NO_MPI_STOP
         }
 
         free_hip(&rocprim_buffer);

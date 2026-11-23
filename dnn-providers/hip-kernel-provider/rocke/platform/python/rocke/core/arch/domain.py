@@ -134,6 +134,9 @@ class ArchDomain:
         self.toolchain: dict[str, object] = doc.get("toolchain", {})
         self.canonical: dict[str, str] = doc.get("canonical", {})
         self._keys: dict[str, dict[str, dict]] = keys
+        self._processors: dict[str, bool] = _processor_answers(
+            flavor, doc.get("processors", {})
+        )
 
     def lookup(self, key: str, arch: str) -> Cell | None:
         """The cell for ``(key, arch)``, or ``None`` when it was not measured.
@@ -166,6 +169,48 @@ class ArchDomain:
         for a key the column does not cover."""
         return tuple(self._keys.get(key, ()))
 
+    def processors(self) -> tuple[str, ...]:
+        """Every processor name this column recorded an answer for, in file
+        order; :meth:`accepts_processor` gives each one's answer."""
+        return tuple(self._processors)
+
+    def accepts_processor(self, arch: str) -> bool | None:
+        """Whether this flavor's compiler accepts ``arch`` as a processor name.
+
+        ``None`` when the column has no answer for ``arch`` (a target the
+        generator never probed, or a column written before it recorded this).
+        A recorded answer is the JSON boolean itself; the column was refused at
+        construction if any answer was not one.
+        """
+        return self._processors.get(arch)
+
+
+def _processor_answers(flavor: str, processors: object) -> dict[str, bool]:
+    """``{processor: accepted}`` from a column's ``processors`` object.
+
+    Every entry must be an object whose ``accepted`` is a JSON boolean. Raises
+    ``ValueError`` otherwise: coercing ``"false"`` or a missing answer to a
+    boolean would route compiles through a processor the compiler rejects, and
+    the C++ generator would drop the rejection, with nothing reporting it.
+    """
+    if not isinstance(processors, dict):
+        raise ValueError(  # noqa: TRY004 -- the artifact is wrong, not the caller
+            f"arch-domain column for {flavor} has a `processors` "
+            f"{type(processors).__name__}, not a JSON object; regenerate it with "
+            "tools/gen_arch_domain.py."
+        )
+    answers: dict[str, bool] = {}
+    for processor, entry in processors.items():
+        accepted = entry.get("accepted") if isinstance(entry, dict) else None
+        if not isinstance(accepted, bool):
+            raise ValueError(  # noqa: TRY004 -- the artifact is wrong, not the caller
+                f"arch-domain column for {flavor} records processor {processor!r} "
+                f"as {entry!r}; expected an object whose `accepted` is true or "
+                "false. Regenerate it with tools/gen_arch_domain.py."
+            )
+        answers[processor] = accepted
+    return answers
+
 
 def is_negative(status: str) -> bool:
     """Whether a status is a definite "this will not work".
@@ -197,16 +242,42 @@ def committed_flavors() -> tuple[str, ...]:
     )
 
 
+# Lanes that enforce another lane's measured column until their own is
+# committed. The borrowed column was not measured on the borrowing toolchain;
+# it preserves the gate that applied before the compiler lane was split out and
+# is safer than silently running with no gate. A lane's own column always wins.
+# tools/gen_arch_domain_cpp.py copies this map into the C++ engine.
+COLUMN_ALIASES: dict[str, str] = {}
+
+
+def _column_path(flavor: str) -> Path:
+    return _DATA_DIR / f"{_COLUMN_PREFIX}{flavor}{_COLUMN_SUFFIX}"
+
+
+def column_flavor(flavor: str) -> str:
+    """The column ``flavor`` checks against: its own, else its alias."""
+    if _column_path(flavor).is_file():
+        return flavor
+    return COLUMN_ALIASES.get(flavor, flavor)
+
+
 @functools.cache
 def load(flavor: str) -> ArchDomain | None:
     """The committed column for ``flavor``, or ``None`` if there is not one.
+
+    A flavor in :data:`COLUMN_ALIASES` with no column of its own gets its
+    source's column. The returned table's ``flavor`` names that source, which
+    messages and waivers must also use.
 
     A host can only measure its own LLVM, so a missing column is normal, not an
     error. Callers must treat the ``None`` as no data. Only absence is: a column
     that exists but cannot be read (permissions, I/O) raises, because returning
     ``None`` for it would switch the whole lane off without a word.
     """
-    path = _DATA_DIR / f"{_COLUMN_PREFIX}{flavor}{_COLUMN_SUFFIX}"
+    source = column_flavor(flavor)
+    if source != flavor:
+        return load(source)
+    path = _column_path(flavor)
     try:
         text = path.read_text(encoding="utf-8")
     except FileNotFoundError:

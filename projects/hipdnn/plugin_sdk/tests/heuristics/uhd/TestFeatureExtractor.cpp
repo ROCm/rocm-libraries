@@ -5,6 +5,10 @@
 #include <hipdnn_plugin_sdk/heuristics/uhd/FeatureExtractor.hpp>
 
 #include <limits>
+#include <map>
+#include <memory>
+#include <string>
+#include <vector>
 
 namespace
 {
@@ -157,6 +161,123 @@ TEST(TestFeatureExtractor, WorkspacesCannotBeUsedWithAnotherSignature)
     ctx.bindKernelVars({{"a", int64_t{1}}, {"b", int64_t{2}}});
     auto work = first.prepare(ctx);
     EXPECT_THROW(second.extractKernelInto(ctx, work), JsonLogicError);
+}
+
+TEST(TestFeatureExtractor, KernelOnlyEntriesAreCachedPerKernelAndMixedOnesRunPerCandidate)
+{
+    const FeatureExtractor extractor(
+        {"$query.batch",
+         "$kernel.tile_m",
+         json::parse(R"({"*":["$kernel.tile_m","$kernel.priority"]})"),
+         json::parse(R"({"ceil_div":["$query.batch","$kernel.tile_m"]})"),
+         json::parse(R"({"+":["$kernel.tile[1]","$query.batch"]})")});
+    EXPECT_EQ(extractor.kernelDependentCount(), 4u);
+    EXPECT_EQ(extractor.mixedCount(), 2u);
+    // Only what mixed entries read is bound per candidate; kernel-only reads are cached.
+    EXPECT_EQ(extractor.mixedKernelVariables(),
+              (std::vector<std::string>{"kernel.tile_m", "kernel.tile[1]"}));
+
+    FeatureExtractionContext ctx;
+    ctx.bindQueryVars({{"query.batch", int64_t{100}}});
+    ctx.bindKernelVars(
+        {{"tile_m", int64_t{32}}, {"priority", int64_t{3}}, {"tile[1]", int64_t{5}}});
+    const auto reference = extractor.extract(ctx);
+
+    FeatureExtractionContext kernelOnly;
+    kernelOnly.bindKernelVars(
+        {{"tile_m", int64_t{32}}, {"priority", int64_t{3}}, {"tile[1]", int64_t{5}}});
+    const auto cached = extractor.kernelOnlyValues(kernelOnly);
+    EXPECT_EQ(cached, (std::vector<double>{32, 96}));
+
+    auto work = extractor.prepare(ctx);
+    auto row = work.values;
+    extractor.applyKernelOnly(row.data(), cached);
+    for(size_t j = 0; j < extractor.mixedCount(); ++j)
+    {
+        row[extractor.mixedFeatureIndex(j)] = extractor.evaluateMixed(j, ctx);
+    }
+    EXPECT_EQ(row, reference);
+    EXPECT_EQ(row, (std::vector<double>{100, 32, 96, 4, 105}));
+}
+
+/// The graph and device features every engine shares are bound once, in a base the engine's own
+/// context reads through; the signature's references and expressions must see them there.
+std::shared_ptr<const FeatureExtractionContext> sharedGraphFeatures()
+{
+    auto shared = std::make_shared<FeatureExtractionContext>();
+    shared->bind("graph.flops", 10.0);
+    shared->bind("graph.nodes", int64_t{3});
+    shared->bind("kernel.dtype", std::string("fp16"));
+    return shared;
+}
+
+TEST(TestFeatureExtractor, ReferencesAndExpressionsReadTheSharedBase)
+{
+    FeatureExtractionContext own(sharedGraphFeatures());
+    own.bind("constraint.tile", int64_t{4});
+
+    const FeatureExtractor extractor({json::parse(R"({"*":["$graph.flops",2]})"),
+                                      "$graph.flops",
+                                      "$constraint.tile",
+                                      json::parse(R"({"+":["$graph.nodes","$constraint.tile"]})")});
+    EXPECT_EQ(extractor.extract(own), (std::vector<double>{20, 10, 4, 7}));
+}
+
+TEST(TestFeatureExtractor, AnOwnBindingShadowsTheSharedBaseOnEveryRead)
+{
+    const auto shared = sharedGraphFeatures();
+    FeatureExtractionContext own(shared);
+    own.bind("graph.flops", 99.0);
+
+    const FeatureExtractor extractor({json::parse(R"({"*":["$graph.flops",2]})"), "$graph.flops"});
+    EXPECT_EQ(extractor.extract(own), (std::vector<double>{198, 99}));
+    EXPECT_EQ(std::get<double>(*own.getContext().find("graph.flops")), 99.0);
+    EXPECT_EQ(std::get<double>(*own.getContext().find("$graph.flops")), 99.0);
+
+    // A shadowed name is one name: visited once, with the value that reads.
+    std::map<std::string, int> visits;
+    own.getContext().forEachBinding(
+        [&visits](const std::string& name, const auto& /*value*/) { ++visits[name]; });
+    EXPECT_EQ(
+        visits,
+        (std::map<std::string, int>{{"graph.flops", 1}, {"graph.nodes", 1}, {"kernel.dtype", 1}}));
+    const auto exported = own.toJson();
+    EXPECT_EQ(exported.size(), 3u);
+    EXPECT_EQ(exported.at("graph.flops"), 99.0);
+    EXPECT_EQ(exported.at("graph.nodes"), 3);
+
+    // The base is shared and never written through.
+    EXPECT_EQ(std::get<double>(*shared->getContext().find("graph.flops")), 10.0);
+
+    // Removing the shadow uncovers the base's value; the base's own name is not removable.
+    own.unbindSlot("graph.flops");
+    EXPECT_EQ(extractor.extract(own), (std::vector<double>{20, 10}));
+    own.unbindSlot("graph.nodes");
+    EXPECT_TRUE(own.getContext().has("$graph.nodes"));
+}
+
+TEST(TestFeatureExtractor, ClearingOwnBindingsLeavesTheSharedBaseReadable)
+{
+    const auto shared = sharedGraphFeatures();
+    FeatureExtractionContext own(shared);
+    own.bindKernelVars({{"dtype", std::string("fp32")}, {"tile_m", int64_t{64}}});
+    own.bind("constraint.tile", int64_t{4});
+    ASSERT_EQ(std::get<std::string>(*own.getContext().find("kernel.dtype")), "fp32");
+
+    // The namespace's own bindings go, including the one that shadowed the base's.
+    own.clearKernelVars();
+    EXPECT_FALSE(own.getContext().has("kernel.tile_m"));
+    ASSERT_TRUE(own.getContext().has("kernel.dtype"));
+    EXPECT_EQ(std::get<std::string>(*own.getContext().find("kernel.dtype")), "fp16");
+    EXPECT_TRUE(own.getContext().has("graph.flops"));
+    EXPECT_TRUE(own.getContext().has("constraint.tile"));
+
+    // clear() leaves nothing readable, and the base itself is untouched.
+    own.clear();
+    EXPECT_FALSE(own.getContext().has("graph.flops"));
+    EXPECT_FALSE(own.getContext().has("constraint.tile"));
+    EXPECT_TRUE(own.toJson().empty());
+    EXPECT_EQ(shared->toJson().size(), 3u);
 }
 
 } // namespace

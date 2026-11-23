@@ -21,13 +21,17 @@ from .SubtileScaleEmit import (
 )
 from rocisa.code import Module
 from rocisa.instruction import (
-    SWaitCnt, SBarrier, DSLoadB32, SCmpEQU32, SCmpLeU32,
-    SCBranchSCC1, SMovB32, VAddU32, VAndB32, VCmpGEI32, VCmpGTI32, VCmpLeI32,
+    SWaitCnt, SBarrier, DSLoadB32, SBitcmp1B32, SCmpEQU32, SCmpLeU32,
+    SCBranchSCC0, SCBranchSCC1, SMovB32, VAddU32, VAndB32, VCmpGEI32, VCmpGTI32, VCmpLeI32,
     VCmpLtI32, VCndMaskB32, VLShiftLeftB32, VLShiftRightB32, VMovB32, VSubI32,
 )
 from rocisa.instruction import SWaitTensorcnt
 from rocisa.container import vgpr, sgpr, DSModifiers, ContinuousRegister
 from rocisa.code import Label
+
+# A scale group packs this many adjacent subtiles into each scale dword, so it
+# is also the byte distance between consecutive K-phases within that dword.
+SCALE_SUBTILES_PER_GROUP = 2
 
 
 class SWaitCntEx(SWaitCnt):
@@ -128,11 +132,11 @@ class InstructionEmitter:
             'mfma':         lambda em, ui: self.emit_mfma(em.source, ui),
             'lr':           lambda em, ui: self.emit_lr(em.source, ui),
             'gr':           lambda em, ui: self.emit_gr(em.source, ui),
-            'wait_gr':      lambda em, ui: self.emit_wait_gr(em.source),
+            'wait_gr':      lambda em, ui: self.emit_wait_gr(em.source, ui),
             'wait_lr':      lambda em, ui: self.emit_wait_lr(),
             'sync':         lambda em, ui: self.emit_sync(),
-            'lr_inc':       lambda em, ui: self.emit_lr_inc(em.source),
-            'gr_inc':       lambda em, ui: self.emit_gr_inc(em.source),
+            'lr_inc':       lambda em, ui: self.emit_lr_inc(em.source, ui),
+            'gr_inc':       lambda em, ui: self.emit_gr_inc(em.source, ui),
             'skip':         lambda em, ui: self.emit_skip(em.source),
             'mask_k':       lambda em, ui: self.emit_mask_k(em.source),
             'inline':       lambda em, ui: self.emit_inline(em.source),
@@ -148,6 +152,13 @@ class InstructionEmitter:
         """Emit MFMA instructions from MFMAPlacement."""
         module = Module()
         subIterK = placement.subIterK
+        # Dual-period MXFP8: the data body is unrolled scaleReuse times per
+        # 256-K scale epoch (unroll_iter in [0, scaleReuse)).  Scales live on
+        # the epoch, not on the data subIterK axis (numSubIterK == 1), so the
+        # K-phase that selects the scale byte within the shared 4B dword is the
+        # data-iteration parity, i.e. unroll_iter, NOT subIterK (always 0).
+        dualPeriodScale = self.hasScale and getattr(self.config, 'dualPeriodScale', False)
+        scalePhase = (unroll_iter % self.config.scaleReuse) if dualPeriodScale else subIterK
         tile_maps = {t: placement.vgpr_tile_maps[t][unroll_iter]
                      for t in placement.vgpr_tile_maps}
 
@@ -185,8 +196,8 @@ class InstructionEmitter:
                 mShapeB = self.tileInfoMap['SB'].lrSubtileShape[0]
                 kShapeA = self.tileInfoMap['SA'].lrSubtileShape[1]
                 kShapeB = self.tileInfoMap['SB'].lrSubtileShape[1]
-                sAsel = (a % mShapeA) + mShapeA * (subIterK % kShapeA)
-                sBsel = (b % mShapeB) + mShapeB * (subIterK % kShapeB)
+                sAsel = (a % mShapeA) + mShapeA * (scalePhase % kShapeA)
+                sBsel = (b % mShapeB) + mShapeB * (scalePhase % kShapeB)
             else:
                 scaleAVgpr = scaleBVgpr = -1
                 sAsel = sBsel = 0
@@ -195,7 +206,7 @@ class InstructionEmitter:
                 self.writer, self.kernel, aTile, bTile, dTile, dTile,
                 scaleAVgpr=scaleAVgpr, scaleBVgpr=scaleBVgpr,
                 scaleAsel=sAsel, scaleBsel=sBsel,
-                comment=f"MFMA C[{a},{b}] += A[{a},K={subIterK}] * B[{b},K={subIterK}]"))
+                comment=f"MFMA C[{a},{b}] += A[{a},K={scalePhase}] * B[{b},K={scalePhase}]"))
         return list(module.flatitems())
 
     def emit_lr(self, placement, unroll_iter=0):
@@ -232,6 +243,14 @@ class InstructionEmitter:
                     module.add(emitSingleDsRead(
                         ti, tileId, subtileK, subIterK_within, dstTile, swizzled=swizzled))
         elif tensor in ('SA', 'SB'):
+            # Dual-period MXFP8: one scale dword covers both K phases of the
+            # epoch and lives in a globally-colored VGPR that survives across
+            # the scaleReuse-unrolled data iterations.  Read it once per epoch
+            # (unroll_iter 0); later data iterations reuse the resident dword
+            # (the MFMA selects the K-phase byte via op_sel_hi).  This keeps the
+            # steady-state epoch at exactly six scale ds_reads.
+            if getattr(self.config, 'dualPeriodScale', False) and unroll_iter > 0:
+                return []
             tc = 'MXSA' if tensor == 'SA' else 'MXSB'
             ti = self.tileInfoMap[tensor]
             lrGran = self.config.lrSA if tensor == 'SA' else self.config.lrSB
@@ -276,13 +295,23 @@ class InstructionEmitter:
                     module.add(emitSingleBufferLoad(ti, self.kernel, tileId, subtileK,
                                                     writer=self.writer))
         elif tensor in ('SA', 'SB'):
+            # Dual-period MXFP8: one scale epoch (256 K) feeds scaleReuse data
+            # iterations.  Prefetch the next epoch's scales (SRD advance + DTL
+            # load) exactly once per epoch (unroll_iter 0); later data
+            # iterations must NOT re-advance the scale SRD or re-issue the load.
+            if getattr(self.config, 'dualPeriodScale', False) and unroll_iter > 0:
+                return []
             tc = 'MXSA' if tensor == 'SA' else 'MXSB'
             module.add(globalReadDoScaleSubtile(tc, self.writer, self.kernel))
         return list(module.flatitems())
 
-    def emit_wait_gr(self, source):
+    def emit_wait_gr(self, source, unroll_iter=0):
         """Emit SWaitCnt for wait_gr from BaseOp with wait_gr_counts."""
-        counts = source.wait_gr_counts
+        counts_by_unroll = getattr(source, 'wait_gr_counts_by_unroll', None)
+        if counts_by_unroll:
+            counts = counts_by_unroll[unroll_iter % len(counts_by_unroll)]
+        else:
+            counts = source.wait_gr_counts
         if counts is None:
             return []
 
@@ -366,24 +395,39 @@ class InstructionEmitter:
         mod = source.build(self)
         return list(mod.flatitems()) if mod is not None else []
 
-    def emit_lr_inc(self, source):
+    def emit_lr_inc(self, source, unroll_iter=0):
         """Emit localReadLDSBufferSwap for a single tensor."""
         tensor = source.tensor
         tc = {'A': 'A', 'B': 'B', 'SA': 'MXSA', 'SB': 'MXSB'}.get(tensor, tensor)
         module = Module()
+        # Dual-period MXFP8: the scale LDS double-buffer is driven on the 256-K
+        # epoch cadence.  Toggle the scale LR read-half once per epoch
+        # (unroll_iter 0) so it tracks the GR write-half swap; toggling on every
+        # data iteration would net to zero over the epoch and leave the LR
+        # reading the stale half.
+        if tensor in ('SA', 'SB') and getattr(self.config, 'dualPeriodScale', False) \
+                and unroll_iter > 0:
+            return []
         module.add(localReadLDSBufferSwap(tc, self.writer, self.kernel))
         return list(module.flatitems())
 
-    def emit_gr_inc(self, source):
+    def emit_gr_inc(self, source, unroll_iter=0):
         """Emit globalReadPtrUpdates + globalReadLDSBufferSwap for a single tensor."""
         tensor = source.tensor
         tc = {'A': 'A', 'B': 'B', 'SA': 'MXSA', 'SB': 'MXSB'}.get(tensor, tensor)
         hold = getattr(source, 'holdOnLastIter', False)
         module = Module()
         if tensor in ('SA', 'SB'):
+            # Dual-period MXFP8: advance the scale SRD and swap the scale LDS
+            # double-buffer once per 256-K epoch (unroll_iter 0).  Advancing on
+            # every data iteration would over-stride the scale pointer by
+            # scaleReuse and desynchronize scales from data.
+            if getattr(self.config, 'dualPeriodScale', False) and unroll_iter > 0:
+                return []
             module.add(globalReadScalePtrUpdates(tc, self.writer, self.kernel, hold))
         else:
-            module.add(globalReadPtrUpdates(tc, self.writer, self.kernel, hold))
+            module.add(globalReadPtrUpdates(tc, self.writer, self.kernel, hold,
+                                            getattr(source, 'tightenLimit', False)))
         module.add(globalReadLDSBufferSwap(tc, self.writer, self.kernel))
         return list(module.flatitems())
 
@@ -408,20 +452,14 @@ class InstructionEmitter:
         tPA = self.tensorParametersMap['A']
         tPB = self.tensorParametersMap['B']
         from rocisa.code import Module
-        from rocisa.instruction import SCmpLeU32, SCMovB32
-        from rocisa.container import sgpr
+        from rocisa.instruction import SCmpLeU32
         mod = Module("GL2 Prefetch Increment")
         loopCounter = writer.loopCounter(kernel, writer.states.unrollIdx)
         pgl = kernel["PrefetchGL2"]
         pgr = kernel["PrefetchGlobalRead"]
         mod.add(SCmpLeU32(src0=loopCounter, src1=pgr + pgl,
                           comment=f"counterL <= PGR({pgr})+PGL({pgl})?"))
-        mod.add(SCMovB32(dst=sgpr("GL2PrefetchIncA"), src=0))
-        mod.add(SCMovB32(dst=sgpr("GL2PrefetchIncB"), src=0))
-        if kernel["ProblemType"].get("MXBlockA", 0):
-            mod.add(SCMovB32(dst=sgpr("GL2PrefetchIncMXSA"), src=0))
-        if kernel["ProblemType"].get("MXBlockB", 0):
-            mod.add(SCMovB32(dst=sgpr("GL2PrefetchIncMXSB"), src=0))
+        mod.add(writer.gl2PrefetchClearIncrement(kernel, tPA, tPB))
         mod.add(writer.gl2PrefetchIncrementAddr(kernel, tPA, tPB))
         return list(mod.flatitems())
 
@@ -611,11 +649,17 @@ class InstructionEmitter:
             return sorted(set(m.values()))
 
         aIds, bIds = _unique_ids('A'), _unique_ids('B')
-        # All A/B tiles share the same vgprs-per-lane count and K layout,
-        # so the i-th vgpr of every tile gets the same mask.
+        # BF16 A/B tiles share the same vgprs-per-lane count and K layout,
+        # so the i-th vgpr of every tile gets the same mask. Other types use
+        # one shared mask, and with mixed MX operands (e.g. MXFP4 x MXFP8) a
+        # B tile can hold more vgprs than an A tile, so size for the largest.
         refTiles = self.vgprTilesA if aIds else self.vgprTilesB
         refIds = aIds or bIds
         vgprPerInUnroll = len(list(refTiles[refIds[0]])) if refIds else 0
+        if not isBF16:
+            vgprPerInUnroll = max([vgprPerInUnroll]
+                                  + [len(list(self.vgprTilesA[t])) for t in aIds]
+                                  + [len(list(self.vgprTilesB[t])) for t in bIds])
 
         with writer.allocTmpSgpr(laneSGPRCount, alignment=laneSGPRCount, tag="InstructionEmitter_mask_k_tmpSgpr") as tmpSgprInfo:
             maskSgpr = tmpSgprInfo.idx
@@ -685,15 +729,16 @@ class InstructionEmitter:
             # valid residual lanes (~0.5% wrong outputs at K%MIK!=0).
             #
             # Skip the data K-mask for the MX paths that the gfx950 corruption
-            # actually hits: all multi-DU MX kernels, and all 8-bit-float MX
-            # (MXFP8) kernels regardless of unroll depth. GPU-validated on
+            # actually hits: all multi-DU MX kernels, and all MX kernels with an
+            # 8-bit-float (MXFP8) operand regardless of unroll depth. GPU-validated on
             # gfx950 (full-element, K%MIK!=0 tails): single-DU MXFP8 fails with
             # the mask and passes without it, while MXFP4 (4-bit) passes either
             # way -- so single-DU MXFP4 keeps the mask and stays develop-
             # identical, but single-DU MXFP8 must skip it like multi-DU does.
             _emit_mask_multi_du = (self.config.numUnroll.get('A', 1) > 1
                                    or self.config.numUnroll.get('B', 1) > 1)
-            _data_is_8bit_float = kernel["ProblemType"]["DataTypeA"].is8bitFloat()
+            _data_is_8bit_float = (kernel["ProblemType"]["DataTypeA"].is8bitFloat()
+                                   or kernel["ProblemType"]["DataTypeB"].is8bitFloat())
             _skip_data_kmask = self.hasScale and (_emit_mask_multi_du
                                                   or _data_is_8bit_float)
             if not _skip_data_kmask:
@@ -710,20 +755,56 @@ class InstructionEmitter:
             # host zero-padding leaves OOB scale bytes at 0x00 (0x00
             # AND 0 = 0x00) but kept to stay explicit under any input
             # pattern.
+            # One scale dword serves scaleStride K-steps, which read it back
+            # through op_sel rather than reloading it, but each K-step takes a
+            # different lane mask because laneK_n grows with n. Masking only on
+            # the step that loads the dword therefore leaves the later steps'
+            # out-of-range lanes carrying live scale bytes. The masks nest -- a
+            # lane past the end at step n is past it at every later step -- so
+            # re-ANDing per step only ever clears more lanes.
             scaleStride = self.config.lrSA.k if self.hasScale else 0
             if (not isBF16) and self.hasScale \
                     and (self.vgprTilesSA or self.vgprTilesSB) \
-                    and scaleStride > 0 and (subIterK % scaleStride == 0):
+                    and scaleStride > 0:
+                scaleVgprs = []
                 for tensor, tilesList in (('SA', self.vgprTilesSA),
                                           ('SB', self.vgprTilesSB)):
                     liveIds = sorted(set(
                         source.vgpr_tile_map.get(tensor, [{}])[0].values()))
                     for tid in liveIds:
                         for v in list(tilesList[tid]):
+                            scaleVgprs.append(v)
                             module.add(VAndB32(
                                 dst=vgpr(v), src0=vgpr(v),
                                 src1=vgpr(maskVgprs[0]),
                                 comment=f"mask scale vgpr (reuse A/B mask, subIterK={subIterK})"))
+
+                # The tail is populated with unroll_iter=0, so its MFMAs select
+                # scale byte 0 of the shared dword. That is the live K-phase
+                # only when the tail starts a fresh scale epoch; after an odd
+                # number of DepthU iterations the tail continues the epoch and
+                # owns byte 2. op_sel is encoded in the instruction, so shift
+                # the dword down by one phase instead -- byte 2 lands in byte 0
+                # for both subtiles the group packs.
+                # Unlike the mask above, this rewrites the dword itself, so it
+                # belongs to the step that loaded it and must not repeat.
+                if scaleVgprs and (subIterK % scaleStride == 0) \
+                        and getattr(self.config, 'dualPeriodScale', False):
+                    phaseBit = kernel["DepthU"].bit_length() - 1
+                    aligned = Label("SubtileTailScalePhase0_k%u" % subIterK, "")
+                    module.add(SBitcmp1B32(
+                        src0=sgpr(f"SizesSum+{writer.states.unrollIdx}"),
+                        src1=phaseBit,
+                        comment="dual-period tail: test completed-DepthU parity"))
+                    module.add(SCBranchSCC0(
+                        labelName=aligned.getLabelName(),
+                        comment="even completed DepthU count: tail owns phase 0"))
+                    for v in scaleVgprs:
+                        module.add(VLShiftRightB32(
+                            dst=vgpr(v), shiftHex=8 * SCALE_SUBTILES_PER_GROUP,
+                            src=vgpr(v),
+                            comment="odd count: advance scale dword to phase 1"))
+                    module.add(aligned)
 
         for m in set(maskVgprs):
             writer.vgprPool.checkIn(m)

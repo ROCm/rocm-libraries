@@ -178,6 +178,15 @@ typedef struct rocke_attention_tiled_2d_spec
     const char* kv_cache_policy; /* "stream" */
     bool use_global_load_lds_k; /* False */
     bool use_q_major_grid; /* False */
+    bool use_qblock_reverse; /* False (gfx950: longest-first query blocks) */
+    /* Also write the natural-log softmax normalizer (LSE) as FP32
+     * [total_q, num_query_heads] through a trailing lse_ptr param. Off emits
+     * no new IR; on appends the "lse" kernel-name token. */
+    bool emit_lse; /* False (Python kw_only) */
+    /* gfx950 lse_layout == "head_major" (Python kw_only, default "token_major"):
+     * each sequence's LSE is a [num_query_heads, q_len] block; the kernel name's
+     * "lse" token becomes "lsehm". Needs emit_lse. */
+    bool lse_head_major; /* False */
 } rocke_attention_tiled_2d_spec_t;
 
 /* Materialise every defaulted field (the dataclass defaults). The required
@@ -203,7 +212,8 @@ int rocke_attention_tiled_2d_spec_n_blocks_per_tile(const rocke_attention_tiled_
 /* dtype_ir: F16 for "fp16", BF16 otherwise (returns a rocke_type_t*). */
 const rocke_type_t*
     rocke_attention_tiled_2d_spec_dtype_ir(const rocke_attention_tiled_2d_spec_t* s);
-/* binary_search_iters: 32 if num_seqs<=0, else max(1, ceil(log2(num_seqs+1))) */
+/* binary_search_iters: 32 if num_seqs<=0, else max(1, ceil(log2(num_seqs+1))).
+ * Exported for existing callers; the kernels derive the search at runtime. */
 int rocke_attention_tiled_2d_spec_binary_search_iters(const rocke_attention_tiled_2d_spec_t* s);
 
 /* __post_init__ validator (builder variant). Reproduces the Python validation

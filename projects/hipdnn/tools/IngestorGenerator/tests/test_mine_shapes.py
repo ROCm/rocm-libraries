@@ -430,7 +430,7 @@ class TestCausalityComesFromTheGraphNotTheFilename:
         self._assert_refused(tmp_path)
 
     def test_a_zero_left_bound_is_refused(self, tmp_path):
-        """left_bound follows cuDNN (L keys ending at the diagonal); 0 is refused."""
+        """left_bound follows cuDNN (L keys ending at the diagonal); hipDNN rejects 0."""
         self._graph(
             tmp_path / "graphs" / "g.json",
             {"causal_mask": False, "left_bound": 0, "right_bound": 0},
@@ -1255,7 +1255,7 @@ class TestQueryCsv:
         assert lines[0] == (
             "name,op,q.batch,q.heads,q.heads_kv,q.seqlen_q,"
             "q.seqlen_k,q.head_dim,q.is_causal,q.alignment,q.generate_stats,"
-            "q.dtype"
+            "q.dtype,q.form"
         )
         assert lines[1].split(",")[1:] == [
             "sdpa_fwd",
@@ -1269,7 +1269,27 @@ class TestQueryCsv:
             "top_left",
             "false",
             "bf16",
+            "plain",
         ]
+
+    def test_a_shape_with_sinks_is_written_as_the_sink_form(self, tmp_path):
+        """The corpus tool builds a sink-bound graph from `q.form=sink`; a sinkless shape
+        stays `plain`. Rows are told apart by their seqlen_q."""
+        rc, log, lines = self._mine(
+            tmp_path,
+            "batch,heads_q,heads_kv,seqlen_q,seqlen_kv,head_dim,dtype,mask,sinks\n"
+            "1,32,8,2048,2048,128,bf16,causal,true\n"
+            "1,32,8,4096,4096,128,bf16,causal,false\n",
+        )
+        assert rc == 0, log
+        header = lines[0].split(",")
+        form_by_seqlen = {
+            row.split(",")[header.index("q.seqlen_q")]: row.split(",")[
+                header.index("q.form")
+            ]
+            for row in lines[1:]
+        }
+        assert form_by_seqlen == {"2048": "sink", "4096": "plain"}
 
     def test_a_tabular_row_is_written_top_left(self, tmp_path):
         """Tabular sources cannot say bottom-right; the column is still written."""
@@ -1277,7 +1297,7 @@ class TestQueryCsv:
             tmp_path, "batch,heads_q,seqlen_q,seqlen_kv,head_dim\n1,32,4096,4096,128\n"
         )
         assert rc == 0, log
-        assert lines[1].split(",")[-3] == "top_left"
+        assert lines[1].split(",")[-4] == "top_left"
 
     def test_generate_stats_is_always_false(self, tmp_path):
         """Sources record inference forwards only."""
@@ -1285,7 +1305,7 @@ class TestQueryCsv:
             tmp_path, "batch,heads_q,seqlen_q,seqlen_kv,head_dim\n1,32,4096,4096,128\n"
         )
         assert rc == 0, log
-        assert lines[1].split(",")[-2] == "false"
+        assert lines[1].split(",")[-3] == "false"
 
     def test_a_windowed_shape_is_dropped_by_name_and_counted(self, tmp_path):
         """`sdpa_fwd` declares no window parameter."""

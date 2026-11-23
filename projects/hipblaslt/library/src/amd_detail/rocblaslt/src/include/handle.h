@@ -111,7 +111,7 @@ struct _rocblaslt_handle
     int32_t sm_count_target = 0;
 
     // Handle-level uniform-summation-order request. 0 off, 1 on; see hipblaslt.h.
-    int32_t uniform_summation_order = 0;
+    int32_t uniform_summation_order = 1;
 
     // -1: rocRoller (or the checked-in KFA kernels) for block-scaled GEMMs.
     //  1: force that path. 0: Tensile only. Parsed even when rocRoller is not linked.
@@ -406,9 +406,9 @@ struct _rocblaslt_matmul_desc
     // 1 = ON (force SK4 dynamic), 2 = AUTO (heuristic picks per launch).
     int32_t streamk_tile_scheduling_ext = 0;
 
-    // Uniform summation order. 0 inherits the handle request; 1 enables.
+    // Uniform summation order. -1 inherits the handle request; 0 disables;1 enables.
     // See hipblaslt.h for the guarantee.
-    int32_t uniform_summation_order = 0;
+    int32_t uniform_summation_order = -1;
 
     // HIPBLASLT_MATMUL_DESC_A_INT4_ENCODING_EXT (hipblasLtInt4Encoding_t).
     int32_t int4_encoding_a_ext = 0;
@@ -430,7 +430,9 @@ struct _rocblaslt_matmul_desc
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
     // Fused epilogue attached via ROCBLASLT_MATMUL_DESC_FUSED_EPILOGUE. Non-owning:
     // the descriptor is the caller's and must outlive every matmul using this desc.
-    const struct hipblasLtFusedEpilogueDescriptor* fused_epilogue = nullptr;
+    const struct hipblasLtFusionDescriptor* fused_epilogue = nullptr;
+    // Attached via ROCBLASLT_MATMUL_DESC_FUSED_PROLOGUE; non-owning, as above.
+    const struct hipblasLtFusionDescriptor* fused_prologue = nullptr;
 #endif
 
     std::shared_ptr<void> m_data; // Tensile data
@@ -474,9 +476,20 @@ struct _rocblaslt_matmul_desc
         this->grouped_launch.reset();
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
         this->fused_epilogue          = src.fused_epilogue;
+        this->fused_prologue          = src.fused_prologue;
 #endif
     }
 };
+
+#if HIPBLASLT_HAS_GEMM_A2A_FUSION
+// Returns false unless desc requests a fused all-to-all.
+inline bool rocblaslt_resolve_fused_a2a(const _rocblaslt_matmul_desc& desc,
+                                        RocblasltFusedEpilogueInfo&   out)
+{
+    return rocblaslt_resolve_fused_epilogue(desc.fused_epilogue, desc.fused_prologue, out)
+           && out.mode != RocblasltFusedEpilogueInfo::Mode::Disabled;
+}
+#endif
 
 /********************************************************************************
  * \brief rocblaslt_matmul_preference holds the description of the matrix
@@ -543,13 +556,13 @@ inline bool adaptive_sm_count_applies(const _rocblaslt_handle*      handle,
 // when the handle is on.
 inline int32_t effective_uniform_summation_order(const _rocblaslt_handle*      handle,
                                                  const _rocblaslt_matmul_desc* desc,
-                                                 bool                          pref_uso = false)
+                                                 int32_t                       pref_uso = -1)
 {
-    if(pref_uso)
-        return 1;
-    if(desc && desc->uniform_summation_order)
-        return 1;
-    if(handle && handle->uniform_summation_order)
-        return 1;
-    return 0;
+    if(pref_uso != -1)
+        return pref_uso;
+    if(desc && desc->uniform_summation_order != -1)
+        return desc->uniform_summation_order;
+    if(handle)
+        return handle->uniform_summation_order;
+    return 1;
 }

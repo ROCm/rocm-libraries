@@ -27,6 +27,7 @@ from rocke.dispatch.core import (
     selector_matches,
     stable_json_hash,
 )
+from rocke.dispatch.tuning.walk import iter_at_level, sample_count
 
 from . import gfx950
 from . import prefill_gfx950
@@ -72,26 +73,47 @@ def _kernel_id(
     return make_kernel_id(req, candidate, spec, op="gdn_decode")
 
 
-def dispatch_gdn_decode_all(req: GdnDecodeRequest) -> Tuple[DispatchResult, ...]:
-    """One result per registered (tile x canonical knob set) legal for ``req``,
-    at the current sweep level (``waves_per_eu`` differs by level; see
-    ``axes.py``).
+def dispatch_gdn_decode_all(
+    req: GdnDecodeRequest,
+    *,
+    sweep_level: str = "production",
+    tuning_sample: int = 0,
+    seed: int = 0,
+) -> Tuple[DispatchResult, ...]:
+    """One result per registered (tile x canonical knob set) legal for ``req``.
 
-    Tiles come in registry priority order, and each tile's base configuration
-    (every knob at its default, what ``auto`` runs on that tile) comes first
-    among its configurations. Each result's request is pinned to its spec
-    (``spec_id``, ``tuning_id``, ``tuning_knobs``), so dispatching it again
-    selects exactly that kernel. :func:`dispatch_gdn_decode_bases` keeps only
-    the base configurations.
+    ``sweep_level="production"`` (the default) lists every knob set at
+    ``waves_per_eu`` 0 and 4 and ignores ``tuning_sample``; ``"full"`` lists
+    every legal ``waves_per_eu`` (``axes.py``), or with ``tuning_sample > 0``
+    draws that many random legal configurations per tile, seeded by ``seed``.
+    The level is in effect only while this walk runs (as for attention's
+    ``iter_dispatch_attention_all``).
+
+    Tiles come in registry priority order, and at ``production`` each tile's
+    base configuration (every knob at its default) comes first among its
+    configurations. Each result's request is pinned to its spec (``spec_id``,
+    ``tuning_id``, ``tuning_knobs``), so dispatching it again selects exactly
+    that kernel. :func:`dispatch_gdn_decode_bases` keeps only the base
+    configurations.
     """
     if request_errors(req):
         return ()
-    return GDN_REGISTRY.dispatch_all(req, kernel_id=_kernel_id)
+    return tuple(
+        iter_at_level(
+            sweep_level,
+            lambda: GDN_REGISTRY.iter_dispatch_all(
+                req,
+                kernel_id=_kernel_id,
+                sample=sample_count(sweep_level, tuning_sample),
+                seed=seed,
+            ),
+        )
+    )
 
 
 def dispatch_gdn_decode_bases(req: GdnDecodeRequest) -> Tuple[DispatchResult, ...]:
-    """Each legal registered tile's base configuration (no knobs: what ``auto``
-    runs on that tile), one result per tile in registry priority order. What a
+    """Each legal registered tile's base configuration (no knobs: what a bare
+    ``spec_id`` pin runs), one result per tile in registry priority order. What a
     caller that compares tiles wants, rather than every configuration
     :func:`dispatch_gdn_decode_all` lists.
 
@@ -130,11 +152,23 @@ def dispatch_gdn_decode_bases(req: GdnDecodeRequest) -> Tuple[DispatchResult, ..
     return tuple(out)
 
 
-def gdn_sweep_space(req: OperatorRequest) -> Sequence[Any]:
-    """Every distinct tuned spec admitted by the registry for ``req``."""
+def gdn_sweep_space(
+    req: OperatorRequest,
+    *,
+    sweep_level: str = "production",
+    tuning_sample: int = 0,
+    seed: int = 0,
+) -> Sequence[Any]:
+    """Every distinct tuned spec admitted by the registry for ``req`` at
+    ``sweep_level`` (see :func:`dispatch_gdn_decode_all`)."""
     if not isinstance(req, GdnDecodeRequest):
         return ()
-    return tuple(result.spec for result in dispatch_gdn_decode_all(req))
+    return tuple(
+        result.spec
+        for result in dispatch_gdn_decode_all(
+            req, sweep_level=sweep_level, tuning_sample=tuning_sample, seed=seed
+        )
+    )
 
 
 def dispatch_gdn_decode(
@@ -142,14 +176,14 @@ def dispatch_gdn_decode(
 ) -> DispatchResult:
     """Select a registered GDN decode configuration for ``req``.
 
-    ``auto`` returns the static tile's base configuration (every knob at its
-    default). A ``spec_id`` pin (with optional ``tuning_id`` /
-    ``tuning_knobs``) returns exactly that configuration or raises
-    :class:`rocke.dispatch.core.PinRefused` with the candidate's reason; it
-    never falls back to another kernel. The result's request is pinned to the
-    selected spec, so it replays the same kernel; ``result.spec`` is a
-    :class:`GdnDecodeTunedSpec`, whose ``kernel_spec`` is what the builder and
-    launcher read.
+    ``auto`` returns the request's case default (``axes.AUTO_DEFAULTS``: one
+    tile plus a knob stack per gate kind x fused x state width). A
+    ``spec_id`` pin (with optional ``tuning_id`` / ``tuning_knobs``) returns
+    exactly that configuration or raises :class:`rocke.dispatch.core.PinRefused`
+    with the candidate's reason; it never falls back to another kernel. The
+    result's request is pinned to the selected spec, so it replays the same
+    kernel; ``result.spec`` is a :class:`GdnDecodeTunedSpec`, whose
+    ``kernel_spec`` is what the builder and launcher read.
     """
     candidate = GDN_REGISTRY.select(req, ranker=ranker)
     spec = candidate.select_spec(req)
@@ -160,17 +194,19 @@ def dispatch_gdn_decode(
         f"tile=(nw={kernel.num_warps}, wtk={kernel.warp_threads_k}, "
         f"bpv={kernel.blocks_per_v_dim})"
     )
-    # A pinned knob this request cannot read is dropped, not refused (it
-    # changes no code here); say so, so a caller that logs the pin does not
-    # record a knob that did not run.
+    # A pinned knob that changes no code for this request (out of scope here,
+    # or a row_loads that restates auto's order) is dropped, not refused; say
+    # so, so a caller that logs the pin does not record a knob that did not
+    # run.
     dropped = out_of_scope_knobs(
         gfx950.make_spec(
             req, (kernel.num_warps, kernel.warp_threads_k, kernel.blocks_per_v_dim)
         ),
         dict(req.tuning_knobs),
+        arch=req.arch,
     )
     if dropped:
-        headline += f"; dropped out-of-scope tuning_knobs {list(dropped)}"
+        headline += f"; dropped tuning_knobs that change no code here {list(dropped)}"
     return make_dispatch_result(
         request,
         candidate,

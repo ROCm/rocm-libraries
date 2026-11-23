@@ -36,6 +36,7 @@
 #include <stdexcept>
 
 #include "HardwareCaps.hpp"
+#include "stinkytofu/analysis/asm/GirFrameAnalysis.hpp"
 #include "stinkytofu/bindings/python/LogicalModule.hpp"
 #include "stinkytofu/bindings/python/Module.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
@@ -98,6 +99,12 @@ NB_MODULE(_stinkytofu, m) {
              nb::arg("value"), "Set a string plugin data value accessible by plugin passes")
         .def("getPluginDataStr", &StinkyAsmModule::getPluginDataStr, nb::arg("key"),
              nb::arg("defaultVal") = "", "Get a string plugin data value")
+        .def(
+            "setGirFrameContract",
+            [](StinkyAsmModule& self, const GirFrameContract& contract) {
+                self.setGirFrameContract(std::make_shared<const GirFrameContract>(contract));
+            },
+            nb::arg("contract"), "Hand over the GIR frame contract as a struct")
         .def("numFunctions", &StinkyAsmModule::numFunctions,
              "Number of Functions (entry + callable functions) in this module")
         .def(
@@ -184,6 +191,37 @@ NB_MODULE(_stinkytofu, m) {
         .value("InnerRegionBegin", PipelineExtensionPoint::InnerRegionBegin)
         .value("InnerRegionEnd", PipelineExtensionPoint::InnerRegionEnd)
         .value("AfterRegionPasses", PipelineExtensionPoint::AfterRegionPasses);
+
+    // ------------------------------------------------------------------------
+    // Bind GirFrameContract: the GIR facts that belong to NO instruction -- the generation table,
+    // the phi edges and the guard constraints. Actions and the storage they touch ride on the
+    // instructions as GirActionData, so they never appear here. Mirrors the binding the rocisa
+    // converter registers, so the adapter backend reaches the same struct by the same calls.
+    // ------------------------------------------------------------------------
+    nb::class_<GirFrameContract>(m, "GirFrameContract")
+        .def(nb::init<>())
+        .def(
+            "addGeneration",
+            [](GirFrameContract& c, int id, int ring, int entry) {
+                c.generations[id] = GirGenerationSpec{id, ring, entry};
+                c.loaded = true;
+            },
+            nb::arg("id"), nb::arg("ring"), nb::arg("entry"))
+        .def(
+            "addIncoming",
+            [](GirFrameContract& c, uint64_t dst, uint64_t src, int gen, int value, bool relative) {
+                c.incomings.push_back(GirFrameIncomingSpec{dst, src, gen, value, relative});
+                c.loaded = true;
+            },
+            nb::arg("dst"), nb::arg("src"), nb::arg("gen"), nb::arg("value"), nb::arg("relative"))
+        .def(
+            "addRequires",
+            [](GirFrameContract& c, uint64_t dst, uint64_t src, int gen,
+               const std::vector<int>& values) {
+                c.requires_.push_back(GirFrameRequiresSpec{dst, src, gen, values});
+                c.loaded = true;
+            },
+            nb::arg("dst"), nb::arg("src"), nb::arg("gen"), nb::arg("values"));
 
     // ------------------------------------------------------------------------
     // Bind CloneSpec so Python can construct entries for ModuleOptions::CloneList.
@@ -711,19 +749,18 @@ NB_MODULE(_stinkytofu, m) {
         .def(
             "set_mubuf",
             [](LogicalInstruction& inst, bool offen, int offset, bool glc, bool slc, bool nt,
-               int scope, int th, bool isStore, int nv, bool lds, bool hasMUBUFConst,
-               bool hasGLCModifier, bool hasSC0Modifier) {
+               int scope, int th, bool isStore, int nv, bool lds, bool hasGLCModifier,
+               bool hasSC0Modifier) {
                 MUBUFScope mScope = static_cast<MUBUFScope>(scope);
                 TemporalHint mTh = static_cast<TemporalHint>(th);
-                inst.mubuf = MUBUFModifiers(offen, offset, glc, slc, nt, lds, isStore,
-                                            hasMUBUFConst, hasGLCModifier, hasSC0Modifier, mScope,
-                                            mTh, static_cast<NonVolatile>(nv));
+                inst.mubuf =
+                    MUBUFModifiers(offen, offset, glc, slc, nt, lds, isStore, hasGLCModifier,
+                                   hasSC0Modifier, mScope, mTh, static_cast<NonVolatile>(nv));
             },
             nb::arg("offen") = false, nb::arg("offset") = 0, nb::arg("glc") = false,
             nb::arg("slc") = false, nb::arg("nt") = false, nb::arg("scope") = 0, nb::arg("th") = -1,
             nb::arg("is_store") = false, nb::arg("nv") = 0, nb::arg("lds") = false,
-            nb::arg("has_mubuf_const") = false, nb::arg("has_glc_modifier") = false,
-            nb::arg("has_sc0_modifier") = false,
+            nb::arg("has_glc_modifier") = false, nb::arg("has_sc0_modifier") = false,
             "Set MUBUF modifiers (offen, offset, glc, slc, nt, scope, th, is_store, nv, lds, caps)")
         .def(
             "set_smem",
@@ -733,6 +770,16 @@ NB_MODULE(_stinkytofu, m) {
             nb::arg("glc") = false, nb::arg("nv") = false, nb::arg("offset") = 0,
             nb::arg("has_scope_modifier") = false,
             "Set SMEM modifiers (glc, nv, offset, has_scope_modifier)")
+        .def(
+            "set_tensor",
+            [](LogicalInstruction& inst, int scope, int th, bool nv, bool isStore) {
+                inst.tensor =
+                    TENSORModifiers(static_cast<MUBUFScope>(scope), static_cast<TemporalHint>(th),
+                                    nv ? NonVolatile::NV : NonVolatile::NV_NONE, isStore);
+            },
+            nb::arg("scope") = 0, nb::arg("th") = -1, nb::arg("nv") = false,
+            nb::arg("is_store") = false,
+            "Set tensor-op cache-policy modifiers (scope, th, nv, is_store) for tensor_load_to_lds")
         .def(
             "add_src",
             [](LogicalInstruction& inst, const StinkyRegister& reg) { inst.srcs.push_back(reg); },
@@ -793,6 +840,28 @@ NB_MODULE(_stinkytofu, m) {
             nb::arg("label"),
             "Set the s_setpc_b64 long-branch target label (forwarded to LabelData so "
             "CFGBuilderPass builds the CFG edge for the computed jump)")
+        .def(
+            "set_gir_action",
+            [](LogicalInstruction& inst, const nb::dict& data) {
+                const int kind = nb::cast<int>(data["kind"]);
+                if (kind < static_cast<int>(GirActionKind::Other) ||
+                    kind > static_cast<int>(GirActionKind::Wmma))
+                    throw nb::value_error("invalid GIR action kind");
+                std::vector<GirAccessData> accesses;
+                for (nb::handle item : nb::cast<nb::sequence>(data["accesses"])) {
+                    const nb::dict access = nb::cast<nb::dict>(item);
+                    accesses.push_back(GirAccessData{
+                        nb::cast<bool>(access["is_write"]), nb::cast<int>(access["operand"]),
+                        nb::cast<int>(access["ring"]), nb::cast<int>(access["gen"]),
+                        nb::cast<int>(access["gdelta"]), nb::cast<int>(access["absolute"]),
+                        nb::cast<bool>(access["cross_agent"])});
+                }
+                inst.giraction =
+                    GirActionData{nb::cast<uint64_t>(data["action_id"]),
+                                  nb::cast<uint64_t>(data["anchor_action"]),
+                                  static_cast<GirActionKind>(kind), std::move(accesses)};
+            },
+            nb::arg("data"), "Set complete GIR semantic action data")
         .def(
             "set_swaitcnt",
             [](LogicalInstruction& inst, int vlcnt, int vscnt, int dlcnt, int dscnt, int kmcnt,

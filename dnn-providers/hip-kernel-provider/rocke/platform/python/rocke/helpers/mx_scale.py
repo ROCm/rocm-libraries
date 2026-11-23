@@ -17,17 +17,24 @@ the three mantissa types and across the CK Tile ``42_mx_gemm`` /
  3. Apply the scale to the dequantised mantissa value via a single
  ``fmul`` before it enters the accumulator.
 
-The actual MX-aware MFMA intrinsics
-(``llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4`` family on gfx950+) take
-the scale operand directly and apply step 3 in-instruction; this
-module is for the **non-MFMA** code path (e.g., the f32 reference for
-a parity test, or the per-warp f32 prologue when emitting MX-mantissa
-loads through the existing FP8 MFMA pipeline).
+The MX-aware MFMA intrinsics (the ``llvm.amdgcn.mfma.scale.f32.*.f8f6f4``
+family on gfx950) take the scale operand directly and apply step 3
+in-instruction. This module serves the code paths that apply the scales
+themselves (a parity reference, or scaling the dot product of an unscaled
+fp8 MFMA), and bounds the codes the scaled MFMA may take directly
+(:func:`largest_safe_mx_scale_code`).
 
 What v1 ships:
 
 * :func:`decode_mx_scale_e8m0`: ``i8 e8m0 -> f32 multiplier`` via
  ``exp2(code - 127)``, NaN for code 255.
+* :func:`add_mx_scaled_dot`: ``acc + dot * 2^(ea + eb)`` element by element
+ for the A and B scale bytes of each element, with one ``ldexp`` per element
+ instead of a product of decoded scales (which can overflow or flush to zero
+ in f32), and NaN for the NaN code.
+* :func:`largest_safe_mx_scale_code`: the largest code an A and a B scale may
+ both have before a sum of scaled products can overflow f32, for a matrix
+ instruction that applies the scales itself.
 * :func:`apply_mx_scale`: scalar ``fmul`` with a dequantised value.
 * :func:`load_and_decode_mx_scale_byte`: convenience wrapper that
  reads one byte from a scale buffer and decodes it.
@@ -39,16 +46,96 @@ f16/bf16)`` if the consumer wants the scale in a narrower dtype.
 from __future__ import annotations
 
 import math
+from collections.abc import Sequence
+from dataclasses import dataclass
 
-from ..core.ir import I8, I32, IRBuilder, PtrType, Value
+from ..core.ir import F32, I32, IRBuilder, PtrType, Value, VectorType
 
 
 __all__ = [
+    "BF8_E5M2_FNUZ",
+    "BF8_E5M2_OCP",
+    "FP8_E4M3_FNUZ",
+    "FP8_E4M3_OCP",
+    "MxElementFormat",
+    "add_mx_scaled_dot",
     "apply_mx_scale",
     "decode_mx_scale_e8m0",
+    "largest_safe_mx_scale_code",
     "load_and_decode_mx_scale_byte",
     "load_and_decode_mx_scales_wave",
 ]
+
+
+_E8M0_BIAS = 127
+_E8M0_NAN_CODE = 255
+_E8M0_LARGEST_FINITE_CODE = 254
+# The f32 overflow threshold is 2^128 (less half an ulp); a sum bounded by
+# 2^127 stays a full binade below it.
+_F32_SAFE_SUM_EXPONENT = 127
+
+
+@dataclass(frozen=True)
+class MxElementFormat:
+    """An element format's largest finite magnitude, which bounds the products
+    of an MX group (:func:`largest_safe_mx_scale_code`). ``name`` says which
+    encoding it is (for example ``"E4M3 FNUZ"``).
+    """
+
+    name: str
+    largest_value: float
+
+
+# The fp8 and bf8 encodings matrix cores read. OCP: E4M3 (bias 7, largest 448)
+# and E5M2 (bias 15, largest 57344). FNUZ: the same bit layouts with the bias
+# one higher and no infinities or negative zero (largest 240 and 57344).
+FP8_E4M3_OCP = MxElementFormat("OCP E4M3", 448.0)
+BF8_E5M2_OCP = MxElementFormat("OCP E5M2", 57344.0)
+FP8_E4M3_FNUZ = MxElementFormat("E4M3 FNUZ", 240.0)
+BF8_E5M2_FNUZ = MxElementFormat("E5M2 FNUZ", 57344.0)
+
+
+def largest_safe_mx_scale_code(
+    a_format: MxElementFormat, b_format: MxElementFormat, products: int
+) -> int:
+    """The largest E8M0 code an A and a B scale may both have so that a sum of
+    ``products`` scaled A x B products stays a binade below the f32 overflow
+    threshold.
+
+    A matrix instruction that applies the scales itself (the gfx950 scaled
+    MFMA) multiplies every product by ``2^(ea + eb)`` before it sums them. With
+    both codes at most the returned ``c``, every partial sum is bounded by
+    ``products * a_max * b_max * 2^(2c - 254) <= 2^127``. Above it a finite
+    result can come out Inf or NaN: two scaled products of opposite sign that
+    each overflow give NaN although their sum is an ordinary f32. A caller
+    whose codes exceed the bound scales each group's dot product with
+    :func:`add_mx_scaled_dot` instead, whose scaling never overflows on its
+    own: its term overflows only when the scaled dot product itself is beyond
+    the f32 range.
+    """
+    if products <= 0:
+        raise ValueError(
+            f"largest_safe_mx_scale_code: products must be positive, got {products}"
+        )
+    bound = products * a_format.largest_value * b_format.largest_value
+    top = math.ceil(math.log2(bound))  # bound <= 2^top
+    # 2c - 2 * bias + top <= 127
+    return min(
+        _E8M0_LARGEST_FINITE_CODE,
+        (_F32_SAFE_SUM_EXPONENT + 2 * _E8M0_BIAS - top) // 2,
+    )
+
+
+def _read_e8m0_code(caller: str, b: IRBuilder, e8m0: Value) -> tuple[Value, Value]:
+    """Read an E8M0 scale byte as ``(code, is_nan)``.
+
+    The byte is an unsigned biased exponent, so it is zero-extended to an
+    i32 code 0..255; ``is_nan`` is true for the NaN code 255.
+    """
+    if e8m0.type.name != "i8":
+        raise ValueError(f"{caller} expects i8 input, got {e8m0.type.name}")
+    code = b.zext(e8m0, I32)
+    return code, b.cmp_eq(code, b.const_i32(_E8M0_NAN_CODE))
 
 
 def decode_mx_scale_e8m0(b: IRBuilder, e8m0: Value) -> Value:
@@ -70,13 +157,69 @@ def decode_mx_scale_e8m0(b: IRBuilder, e8m0: Value) -> Value:
     integer exponents -127..127, including the subnormal for code 0; the
     decoder test checks all 256 codes on the GPU.
     """
-    if e8m0.type.name != "i8":
-        raise ValueError(f"decode_mx_scale_e8m0 expects i8 input, got {e8m0.type.name}")
-    code = b.zext(e8m0, I32)
-    is_nan_code = b.cmp_eq(code, b.const_i32(255))
+    code, is_nan_code = _read_e8m0_code("decode_mx_scale_e8m0", b, e8m0)
     exponent = b.fsub(b.sitofp_f32(code), b.const_f32(127.0))
     scale = b.exp2(exponent)
     return b.select(is_nan_code, b.const_f32(math.nan), scale)
+
+
+def add_mx_scaled_dot(
+    b: IRBuilder,
+    acc: Value,
+    dot: Value,
+    a_codes: Sequence[Value],
+    b_codes: Sequence[Value],
+) -> Value:
+    """``acc + dot * 2^(ea + eb)``, element by element.
+
+    ``acc`` and ``dot`` are matching ``<n x f32>`` vectors; ``a_codes`` and
+    ``b_codes`` hold the n A and B E8M0 scale bytes (i8) of the n elements, so
+    ``ea`` and ``eb`` are ``code - 127``. Pass the same byte several times when
+    elements share a scale. If either code of an element is the NaN code 255,
+    that element's term is NaN.
+
+    The term is ``ldexp(dot, ea + eb)``: one rounding, and correct for every
+    pair of codes. The product of the two decoded scales spans
+    ``2^-254..2^254`` and would overflow to Inf or flush to zero in f32 even
+    when the term is an ordinary f32; ldexp never forms it. A term beyond the
+    f32 range is the infinity or the zero of its sign. The sum with ``acc`` is
+    an ordinary f32 add: once a term or the running sum overflows, the result
+    is Inf, or NaN where infinities of both signs meet.
+    """
+    if not isinstance(dot.type, VectorType) or dot.type.elem.name != "f32":
+        raise ValueError(
+            f"add_mx_scaled_dot expects an f32 vector dot, got {dot.type.name}"
+        )
+    if acc.type != dot.type:
+        raise ValueError(
+            f"add_mx_scaled_dot expects the accumulator type to match the dot "
+            f"type {dot.type.name}, got {acc.type.name}"
+        )
+    count = dot.type.count
+    if len(a_codes) != count or len(b_codes) != count:
+        raise ValueError(
+            f"add_mx_scaled_dot expects {count} A and {count} B scale bytes, got "
+            f"{len(a_codes)} and {len(b_codes)}"
+        )
+    read: dict[int, tuple[Value, Value]] = {}
+
+    def code_of(e8m0: Value) -> tuple[Value, Value]:
+        # Read each distinct byte once: (code, is_nan).
+        if id(e8m0) not in read:
+            read[id(e8m0)] = _read_e8m0_code("add_mx_scaled_dot", b, e8m0)
+        return read[id(e8m0)]
+
+    nan = b.const_f32(math.nan)
+    two_biases = b.const_i32(2 * _E8M0_BIAS)
+    terms = []
+    for i in range(count):
+        a_code, a_is_nan = code_of(a_codes[i])
+        b_code, b_is_nan = code_of(b_codes[i])
+        exponent = b.sub(b.add(a_code, b_code), two_biases)
+        term = b.ldexp(b.vec_extract(dot, i), exponent)
+        term = b.select(b.lor(a_is_nan, b_is_nan), nan, term)
+        terms.append(b.fadd(b.vec_extract(acc, i), term))
+    return b.vec_pack(terms, F32)
 
 
 def apply_mx_scale(b: IRBuilder, value_f32: Value, scale_f32: Value) -> Value:
@@ -164,6 +307,4 @@ def load_and_decode_mx_scales_wave(
     src_lane = src_lane_fn(b, lane)
     addr = b.mul(src_lane, b.const_i32(4))  # i32 lane index in bits[7:2]
     bcast_i32 = b.ds_bpermute(addr, raw_i32)
-    from ..core.ir import F32
-
     return b.bitcast(bcast_i32, F32)

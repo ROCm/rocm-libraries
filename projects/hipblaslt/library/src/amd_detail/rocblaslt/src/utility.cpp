@@ -304,6 +304,8 @@ const char* rocblaslt_matmul_desc_attributes_to_string(rocblaslt_matmul_desc_att
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
     case ROCBLASLT_MATMUL_DESC_FUSED_EPILOGUE:
         return "MATMUL_DESC_FUSED_EPILOGUE";
+    case ROCBLASLT_MATMUL_DESC_FUSED_PROLOGUE:
+        return "MATMUL_DESC_FUSED_PROLOGUE";
 #endif
     case ROCBLASLT_MATMUL_DESC_MAX:
         return "MATMUL_DESC_MAX";
@@ -381,6 +383,8 @@ const char* rocblaslt_scaling_format_to_string(RocblasltContractionProblem::Scal
         return "Block_64_F16_ZP";
     case RocblasltContractionProblem::ScalingFormat::Block_128_F16_ZP:
         return "Block_128_F16_ZP";
+    case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_128_4_EXT:
+        return "Block_32_UE8M0_128_4_EXT";
     default:
         return "Invalid";
     }

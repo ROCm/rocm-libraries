@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <cmath>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -10,9 +11,12 @@
 #include <memory>
 #include <optional>
 #include <set>
+#include <stdexcept>
+#include <string>
 #include <string_view>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -23,9 +27,12 @@
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/json/Graph.hpp>
 #include <hipdnn_test_sdk/utilities/LoadGraphAndTensors.hpp>
+#include <hipdnn_test_sdk/utilities/RaggedLengthUids.hpp>
 
 #include "harness/bundle/BundleDiscovery.hpp"
 #include "harness/bundle/SweepManifestCache.hpp"
+#include "harness/input-init/FillInputs.hpp"
+#include "harness/input-init/TensorAliases.hpp"
 
 namespace hipdnn_integration_tests::bundle
 {
@@ -70,7 +77,9 @@ struct TensorBlobs
 //
 // A registered bundle lives for the whole process, so it holds no tensor data itself:
 // reading every golden blob at registration kept all of it in memory for the run.
-// Each test reads what it needs with loadTensors() and owns the result.
+// Each test reads what it needs with loadTensors(), or under --benchmark-reference
+// with loadInputs() and, when golden outputs verify it, loadGoldenOutputs(), and
+// owns the result.
 struct IntegrationTestBundle
 {
     flatbuffers::DetachedBuffer graphBuffer;
@@ -92,12 +101,38 @@ struct IntegrationTestBundle
     // of a type that has no tensor.
     TensorMap loadTensors() const
     {
-        TensorMap tensors;
-        if(!blobs.has_value())
-        {
-            return tensors;
-        }
+        auto tensors = loadInputs();
+        loadGoldenOutputs(tensors);
+        return tensors;
+    }
 
+    // Reads only the input blobs, as loadTensors() does. Under --benchmark-reference
+    // the golden outputs are read separately, inside the reference timing.
+    TensorMap loadInputs() const
+    {
+        TensorMap tensors;
+        if(blobs.has_value())
+        {
+            loadTensorUids(tensors, blobs->inputUids);
+        }
+        return tensors;
+    }
+
+    // Adds the golden output blobs to `tensors`, which must already hold the inputs:
+    // a ragged output takes its offset tensor from them. Does nothing for a graph-only
+    // bundle. Throws as loadTensors() does.
+    void loadGoldenOutputs(TensorMap& tensors) const
+    {
+        if(blobs.has_value())
+        {
+            loadTensorUids(tensors, blobs->outputUids);
+        }
+    }
+
+private:
+    // Callers check that the bundle has blobs.
+    void loadTensorUids(TensorMap& tensors, const std::vector<int64_t>& uids) const
+    {
         const auto& graph = *hipdnn_flatbuffers_sdk::data_objects::GetGraph(graphBuffer.data());
         std::unordered_map<int64_t, const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>
             attrByUid;
@@ -106,9 +141,11 @@ struct IntegrationTestBundle
             attrByUid[attributes->uid()] = attributes;
         }
 
-        // Ragged tensors are constructed from their offset tensor, so they load last.
-        // Offset tensors are always inputs, so an output's offset is already loaded.
-        const auto loadUids = [&](const std::vector<int64_t>& uids) {
+        // Ragged tensors are constructed from their offset tensor and, when the node
+        // declares one, their seq_len tensor, so they load last. Both are always
+        // inputs, so an output's offset and seq_len are already loaded.
+        const auto lengthUids = hipdnn_test_sdk::utilities::raggedLengthUids(graph);
+        const auto loadUids = [&] {
             std::vector<int64_t> raggedUids;
             for(const int64_t uid : uids)
             {
@@ -136,14 +173,14 @@ struct IntegrationTestBundle
                                              + " references missing offset tensor "
                                              + std::to_string(offsetUid));
                 }
+                const auto lengths
+                    = hipdnn_test_sdk::utilities::findRaggedLengths(lengthUids, tensors, uid);
                 tensors[uid] = hipdnn_test_sdk::utilities::raggedTensorFromFileAndAttributes(
-                    blobs->pathForUid(uid), *attributes, offsetIt->second);
+                    blobs->pathForUid(uid), *attributes, offsetIt->second, lengths);
             }
         };
 
-        loadUids(blobs->inputUids);
-        loadUids(blobs->outputUids);
-        return tensors;
+        loadUids();
     }
 };
 
@@ -215,6 +252,19 @@ inline bool blobsPresentFor(const std::vector<int64_t>& uids, BlobPathFn&& blobP
     return true;
 }
 
+template <typename BlobPathFn>
+inline bool anyBlobPresentFor(const std::vector<int64_t>& uids, BlobPathFn&& blobPathForUid)
+{
+    for(const int64_t uid : uids)
+    {
+        if(std::filesystem::exists(blobPathForUid(uid)))
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
 inline std::vector<int64_t> allTensorUids(const nlohmann::json& graphJson)
 {
     std::vector<int64_t> uids;
@@ -234,7 +284,7 @@ inline std::vector<int64_t> allTensorUids(const nlohmann::json& graphJson)
 
 // Replaces test_sdk's getOutputTensorUidsFromGraph(), which assumes every
 // node wraps output UIDs in an "outputs" sub-object. ReductionAttributes,
-// ResampleFwdAttributes, and CustomOpAttributes emit flat keys instead,
+// ResampleFwdAttributes, ResampleBwdAttributes, and CustomOpAttributes emit flat keys instead,
 // causing node.at("outputs") to throw for those ops.
 inline std::vector<int64_t> extractOutputUidsFromJson(const nlohmann::json& graphJson)
 {
@@ -274,8 +324,8 @@ inline std::vector<int64_t> extractOutputUidsFromJson(const nlohmann::json& grap
         }
 
         // Flat scalar fallback: Reduction ("out_tensor_uid"),
-        // ResampleFwd ("y_tensor_uid")
-        for(const auto& key : {"out_tensor_uid", "y_tensor_uid"})
+        // ResampleFwd ("y_tensor_uid"), ResampleBwd ("dx_tensor_uid")
+        for(const auto& key : {"out_tensor_uid", "y_tensor_uid", "dx_tensor_uid"})
         {
             if(node.contains(key) && node.at(key).is_number_integer())
             {
@@ -744,6 +794,909 @@ inline std::optional<std::filesystem::path>
     return goldenPath.parent_path();
 }
 
+// The rules that tie a bundle's metadata flags to the golden data it declares.
+// "Declared" is a fact about the checked-in files, not about the checkout: the
+// `.tensors.dvc` pointer (or a sweep case's `golden.path`) is in git, the blobs it
+// names are only there after `dvc pull`. Reading it from the pointer keeps these
+// rules the same on a machine that has not pulled.
+//
+//   * Both references disabled (not on an expected rejection, which ignores them):
+//     nothing but golden data could ever verify the
+//     bundle, so it must declare some.
+//   * An expected-rejection bundle is never executed, so golden data beside it is
+//     meaningless, and would also pull the bundle into the golden-data binary.
+//
+// `where` names the bundle or sweep case in the thrown message.
+inline void checkGoldenDeclarationRules(const hipdnn_integration_tests::BundleMetadata& metadata,
+                                        bool goldenDeclared,
+                                        const std::string& where)
+{
+    if(metadata.expectedRejection)
+    {
+        // The reference flags are ignored on an expected rejection (nothing is ever
+        // compared), so the both-off rule below must not apply to it.
+        if(goldenDeclared)
+        {
+            throw hipdnn_integration_tests::BundleMetadataError(
+                where
+                + " is an expected_rejection bundle but declares golden data; it is never"
+                  " executed, so there is nothing to compare against");
+        }
+        return;
+    }
+    if(metadata.noCpuReference && metadata.noGpuReference && !goldenDeclared)
+    {
+        throw hipdnn_integration_tests::BundleMetadataError(
+            where
+            + " disables both references (no_cpu_reference and no_gpu_reference) but declares no"
+              " golden data; add golden data ({Name}.tensors.dvc or output blobs, or the sweep"
+              " case's golden.path) or enable a reference");
+    }
+}
+
+// The rules that tie a bundle's `aliases` to its graph: checkTensorAliases() against the
+// graph's tensors and its input fill, and no tensor data on disk (golden data declared
+// or input blobs present), because blobs store each tensor apart. `where` names the
+// bundle or sweep case in the thrown message.
+inline void checkAliasRules(const hipdnn_integration_tests::BundleMetadata& metadata,
+                            const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper& graph,
+                            const std::vector<int64_t>& outputTensorUids,
+                            bool tensorDataOnDisk,
+                            const std::string& where)
+{
+    if(metadata.aliases.empty())
+    {
+        return;
+    }
+    try
+    {
+        hipdnn_integration_tests::checkTensorAliases(
+            metadata.aliases,
+            graph.getTensorMap(),
+            outputTensorUids,
+            hipdnn_integration_tests::fillDerivesInputs(graph.getGraph()));
+    }
+    catch(const std::invalid_argument& e)
+    {
+        throw hipdnn_integration_tests::BundleMetadataError(where + ": " + e.what());
+    }
+    if(tensorDataOnDisk)
+    {
+        throw hipdnn_integration_tests::BundleMetadataError(
+            where + ": "
+            + hipdnn_integration_tests::tensor_alias_detail::describe(metadata.aliases.front())
+            + ": the bundle has golden data or tensor blobs, which store each tensor apart");
+    }
+}
+
+// The rules that tie a bundle's `start_offsets` to its graph. Each tensor is a graph
+// tensor that holds its own data: not virtual, not passed by value at run time, not a
+// constant, not the view of an alias and not of a sub-byte type. A tensor that declares
+// an alignment greater than 0 must have a start_offset that is a multiple of it. Throws
+// BundleMetadataError naming `where`, the tensor and the rule.
+inline void
+    checkStartOffsetRules(const hipdnn_integration_tests::BundleMetadata& metadata,
+                          const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper& graph,
+                          const std::string& where)
+{
+    using hipdnn_integration_tests::BundleMetadataError;
+    using hipdnn_integration_tests::bundle_metadata_detail::describeStartOffset;
+
+    if(metadata.startOffsets.empty())
+    {
+        return;
+    }
+    const auto& tensors = graph.getTensorMap();
+    const auto error = [&](int64_t uid, const std::string& rule) {
+        std::string message = where;
+        message.append(": ").append(describeStartOffset(uid)).append(": ").append(rule);
+        return message;
+    };
+
+    for(const auto& entry : metadata.startOffsets)
+    {
+        const auto it = tensors.find(entry.uid);
+        if(it == tensors.end() || it->second == nullptr)
+        {
+            throw BundleMetadataError(error(entry.uid, "the tensor is not a tensor of the graph"));
+        }
+        const auto& tensor = *it->second;
+        if(tensor.virtual_())
+        {
+            throw BundleMetadataError(error(entry.uid, "the tensor is virtual"));
+        }
+        if(tensor.is_runtime_pass_by_value())
+        {
+            throw BundleMetadataError(
+                error(entry.uid, "the tensor is passed by value at run time"));
+        }
+        if(tensor.value_type() != hipdnn_flatbuffers_sdk::data_objects::TensorValue::NONE)
+        {
+            throw BundleMetadataError(error(entry.uid, "the tensor has a constant value"));
+        }
+        for(const auto& alias : metadata.aliases)
+        {
+            if(alias.uid == entry.uid)
+            {
+                throw BundleMetadataError(
+                    error(entry.uid,
+                          "the tensor is "
+                              + hipdnn_integration_tests::tensor_alias_detail::describe(alias)
+                              + "; a view moves with its owner"));
+            }
+        }
+        if(hipdnn_integration_tests::tensor_alias_detail::isSubByte(tensor.data_type()))
+        {
+            throw BundleMetadataError(error(entry.uid,
+                                            std::string("the tensor has the sub-byte data type ")
+                                                + EnumNameDataType(tensor.data_type())));
+        }
+        const int64_t alignment = tensor.alignment();
+        if(alignment > 0 && entry.startOffset % alignment != 0)
+        {
+            throw BundleMetadataError(error(entry.uid,
+                                            "start_offset " + std::to_string(entry.startOffset)
+                                                + " is not a multiple of the tensor's alignment "
+                                                + std::to_string(alignment)));
+        }
+    }
+}
+
+// The rules that tie a bundle's `live_rows` to its graph. Each output is a compared
+// output of a floating-point type that is not ragged. A `lengths` entry has an axis from
+// 1 to the output's rank minus 1, and names a graph input of type INT32 or INT64 that
+// holds its own data and has one element per batch of the output. A `like` entry names
+// a ragged graph tensor that is not virtual and has as many batches as the output.
+// Throws BundleMetadataError naming `where`, the output and the rule.
+inline void
+    checkLiveRowRules(const hipdnn_integration_tests::BundleMetadata& metadata,
+                      const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper& graph,
+                      const std::vector<int64_t>& outputTensorUids,
+                      const std::string& where)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::DataType;
+    using hipdnn_integration_tests::BundleMetadataError;
+    using hipdnn_integration_tests::bundle_metadata_detail::describeLiveRows;
+
+    if(metadata.liveRows.empty())
+    {
+        return;
+    }
+    const auto& tensors = graph.getTensorMap();
+    const std::unordered_set<int64_t> outputs(outputTensorUids.begin(), outputTensorUids.end());
+    const auto error = [&](int64_t uid, const std::string& rule) {
+        std::string message = where;
+        message.append(": ").append(describeLiveRows(uid)).append(": ").append(rule);
+        return message;
+    };
+    const auto find = [&](int64_t uid) {
+        const auto it = tensors.find(uid);
+        return it == tensors.end() ? nullptr : it->second;
+    };
+    const auto dimsOf = [](const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& tensor) {
+        std::vector<int64_t> dims;
+        if(tensor.dims() != nullptr)
+        {
+            dims.assign(tensor.dims()->begin(), tensor.dims()->end());
+        }
+        return dims;
+    };
+    const auto isFloatingPoint = [](DataType type) {
+        return type == DataType::FLOAT || type == DataType::HALF || type == DataType::BFLOAT16
+               || type == DataType::DOUBLE || type == DataType::FP8_E4M3
+               || type == DataType::FP8_E5M2 || type == DataType::FP8_E4M3_FNUZ
+               || type == DataType::FP8_E5M2_FNUZ;
+    };
+
+    for(const auto& entry : metadata.liveRows)
+    {
+        const auto* output = find(entry.uid);
+        if(output == nullptr)
+        {
+            throw BundleMetadataError(error(entry.uid, "the output is not a tensor of the graph"));
+        }
+        if(output->virtual_() || outputs.count(entry.uid) == 0)
+        {
+            throw BundleMetadataError(error(entry.uid, "the tensor is not a compared output"));
+        }
+        if(output->ragged_offset_tensor_uid().has_value())
+        {
+            throw BundleMetadataError(
+                error(entry.uid, "the output is ragged; a ragged output has its own live rows"));
+        }
+        if(!isFloatingPoint(output->data_type()))
+        {
+            throw BundleMetadataError(error(entry.uid,
+                                            std::string("the output has the data type ")
+                                                + EnumNameDataType(output->data_type())
+                                                + ", which is not a floating-point type"));
+        }
+        const auto outputDims = dimsOf(*output);
+        if(outputDims.empty())
+        {
+            throw BundleMetadataError(error(entry.uid, "the output has no dims"));
+        }
+
+        if(entry.likeUid.has_value())
+        {
+            const int64_t likeUid = *entry.likeUid;
+            const auto* like = find(likeUid);
+            if(like == nullptr)
+            {
+                throw BundleMetadataError(error(entry.uid,
+                                                "like tensor " + std::to_string(likeUid)
+                                                    + " is not a tensor of the graph"));
+            }
+            if(like->virtual_())
+            {
+                throw BundleMetadataError(
+                    error(entry.uid, "like tensor " + std::to_string(likeUid) + " is virtual"));
+            }
+            if(!like->ragged_offset_tensor_uid().has_value())
+            {
+                throw BundleMetadataError(
+                    error(entry.uid, "like tensor " + std::to_string(likeUid) + " is not ragged"));
+            }
+            const auto likeDims = dimsOf(*like);
+            if(likeDims.empty() || likeDims[0] != outputDims[0])
+            {
+                throw BundleMetadataError(
+                    error(entry.uid,
+                          "like tensor " + std::to_string(likeUid)
+                              + " does not have the same dims[0] as the output"));
+            }
+            continue;
+        }
+
+        const int64_t axis = entry.axis.value_or(0);
+        const auto rank = static_cast<int64_t>(outputDims.size());
+        if(axis < 1 || axis >= rank)
+        {
+            throw BundleMetadataError(error(entry.uid,
+                                            "axis " + std::to_string(axis)
+                                                + " is not in the range 1 to "
+                                                + std::to_string(rank - 1)));
+        }
+        const int64_t lengthsUid = entry.lengthsUid.value_or(0);
+        const std::string lengthsName = "lengths tensor " + std::to_string(lengthsUid);
+        const auto* lengths = find(lengthsUid);
+        if(lengths == nullptr)
+        {
+            throw BundleMetadataError(
+                error(entry.uid, lengthsName + " is not a tensor of the graph"));
+        }
+        if(lengths->virtual_() || outputs.count(lengthsUid) != 0)
+        {
+            throw BundleMetadataError(error(
+                entry.uid, lengthsName + " is not a graph input (it is virtual or an output)"));
+        }
+        if(lengths->is_runtime_pass_by_value())
+        {
+            throw BundleMetadataError(
+                error(entry.uid, lengthsName + " is passed by value at run time"));
+        }
+        for(const auto& alias : metadata.aliases)
+        {
+            if(alias.uid == lengthsUid)
+            {
+                throw BundleMetadataError(
+                    error(entry.uid,
+                          lengthsName + " is "
+                              + hipdnn_integration_tests::tensor_alias_detail::describe(alias)));
+            }
+        }
+        if(lengths->data_type() != DataType::INT32 && lengths->data_type() != DataType::INT64)
+        {
+            throw BundleMetadataError(error(entry.uid,
+                                            lengthsName + " has the data type "
+                                                + EnumNameDataType(lengths->data_type())
+                                                + ", not INT32 or INT64"));
+        }
+        int64_t elementCount = 1;
+        for(const int64_t dim : dimsOf(*lengths))
+        {
+            elementCount *= dim;
+        }
+        if(elementCount != outputDims[0])
+        {
+            throw BundleMetadataError(error(
+                entry.uid,
+                lengthsName + " has " + std::to_string(elementCount) + " elements; the output has "
+                    + std::to_string(outputDims[0]) + " batches (dims[0])"));
+        }
+    }
+}
+
+// Runs `step` and rethrows any exception that is not a BundleMetadataError as a
+// BundleMetadataError that names `where`.
+template <typename Step>
+inline decltype(auto) rethrowAsBundleMetadataError(const std::string& where, Step&& step)
+{
+    try
+    {
+        return std::forward<Step>(step)();
+    }
+    catch(const hipdnn_integration_tests::BundleMetadataError&)
+    {
+        throw;
+    }
+    catch(const std::exception& e)
+    {
+        std::string message = where;
+        message += ": ";
+        message += e.what();
+        throw hipdnn_integration_tests::BundleMetadataError(message);
+    }
+}
+
+// The sweep-level `version` of the sweep at `sweepPath`: 1 when the key is absent, else
+// the integer 1 or 2. `where` names the sweep case in the thrown message.
+inline int checkSweepVersion(const nlohmann::json* version,
+                             const std::filesystem::path& sweepPath,
+                             const std::string& where)
+{
+    if(version == nullptr)
+    {
+        return 1;
+    }
+    if(version->is_number_integer() && (*version == 1 || *version == 2))
+    {
+        return version->get<int>();
+    }
+    std::string message = where;
+    message += ": sweep version ";
+    message += version->dump();
+    message += " in ";
+    message += sweepPath.string();
+    message += " is not 1 or 2";
+    throw hipdnn_integration_tests::BundleMetadataError(message);
+}
+
+inline std::string formatUidList(const std::vector<int64_t>& uids)
+{
+    std::string text = "[";
+    for(size_t i = 0; i < uids.size(); ++i)
+    {
+        if(i != 0)
+        {
+            text += ", ";
+        }
+        text += std::to_string(uids[i]);
+    }
+    text += ']';
+    return text;
+}
+
+// A node port is a key that ends in "_tensor_uid", directly under the "inputs" or
+// "outputs" object of a node.
+inline bool isNodePortKey(const std::string& key)
+{
+    constexpr std::string_view SUFFIX = "_tensor_uid";
+    return key.size() >= SUFFIX.size()
+           && key.compare(key.size() - SUFFIX.size(), SUFFIX.size(), SUFFIX.data(), SUFFIX.size())
+                  == 0;
+}
+
+// The uid a JSON value holds: an integer, or a float with an integral value. A float
+// such as 3.0 converts to the same uid when the graph is built.
+inline std::optional<int64_t> uidOf(const nlohmann::json& value)
+{
+    if(value.is_number_integer())
+    {
+        return value.get<int64_t>();
+    }
+    if(!value.is_number_float())
+    {
+        return std::nullopt;
+    }
+    constexpr double INT64_BOUND = 9223372036854775808.0;
+    const auto number = value.get<double>();
+    if(std::trunc(number) != number || number < -INT64_BOUND || number >= INT64_BOUND)
+    {
+        return std::nullopt;
+    }
+    return static_cast<int64_t>(number);
+}
+
+inline bool holdsUid(const nlohmann::json& value, const std::unordered_set<int64_t>& uids)
+{
+    const auto uid = uidOf(value);
+    return uid.has_value() && uids.count(*uid) != 0;
+}
+
+// Removes the tensors in `uids` from `graphJson` and sets each node port that holds one
+// of them to null. Nothing else changes, and no uid is renumbered.
+inline nlohmann::json pruneAbsentTensors(nlohmann::json graphJson, const std::vector<int64_t>& uids)
+{
+    const std::unordered_set<int64_t> absent(uids.begin(), uids.end());
+
+    if(graphJson.contains("tensors") && graphJson.at("tensors").is_array())
+    {
+        auto kept = nlohmann::json::array();
+        for(auto& tensor : graphJson.at("tensors"))
+        {
+            if(!tensor.is_object() || !tensor.contains("uid")
+               || !holdsUid(tensor.at("uid"), absent))
+            {
+                kept.push_back(std::move(tensor));
+            }
+        }
+        graphJson["tensors"] = std::move(kept);
+    }
+
+    if(graphJson.contains("nodes") && graphJson.at("nodes").is_array())
+    {
+        for(auto& node : graphJson.at("nodes"))
+        {
+            for(const char* side : {"inputs", "outputs"})
+            {
+                if(!node.is_object() || !node.contains(side) || !node.at(side).is_object())
+                {
+                    continue;
+                }
+                auto& ports = node.at(side);
+                for(auto it = ports.begin(); it != ports.end(); ++it)
+                {
+                    if(isNodePortKey(it.key()) && holdsUid(it.value(), absent))
+                    {
+                        it.value() = nullptr;
+                    }
+                }
+            }
+        }
+    }
+
+    return graphJson;
+}
+
+// Appends to `found` the path of each integer below `json` that equals `uid` and sits
+// under a key whose name holds "uid", directly or through arrays. `path` names `json`;
+// `underUidKey` says whether `json` itself sits under such a key.
+inline void findUidReferences(const nlohmann::json& json,
+                              int64_t uid,
+                              bool underUidKey,
+                              const std::string& path,
+                              std::vector<std::string>& found)
+{
+    if(json.is_object())
+    {
+        for(auto it = json.begin(); it != json.end(); ++it)
+        {
+            std::string childPath = path;
+            childPath += '.';
+            childPath += it.key();
+            findUidReferences(
+                it.value(), uid, it.key().find("uid") != std::string::npos, childPath, found);
+        }
+        return;
+    }
+    if(json.is_array())
+    {
+        for(size_t i = 0; i < json.size(); ++i)
+        {
+            std::string childPath = path;
+            childPath += '[';
+            childPath += std::to_string(i);
+            childPath += ']';
+            findUidReferences(json.at(i), uid, underUidKey, childPath, found);
+        }
+        return;
+    }
+    if(underUidKey && uidOf(json) == uid)
+    {
+        found.push_back(path);
+    }
+}
+
+// Where the nodes of a template hold one uid: the nodes that hold it in a node port, and
+// the path of each other place.
+struct NodeUidUse
+{
+    std::set<size_t> portNodes;
+    std::vector<std::string> otherPaths;
+};
+
+inline NodeUidUse findNodeUidUse(const nlohmann::json& templateJson, int64_t uid)
+{
+    NodeUidUse use;
+    if(!templateJson.contains("nodes") || !templateJson.at("nodes").is_array())
+    {
+        return use;
+    }
+
+    const auto& nodes = templateJson.at("nodes");
+    for(size_t index = 0; index < nodes.size(); ++index)
+    {
+        const auto& node = nodes.at(index);
+        std::string nodePath = "nodes[";
+        nodePath += std::to_string(index);
+        nodePath += ']';
+        if(!node.is_object())
+        {
+            findUidReferences(node, uid, false, nodePath, use.otherPaths);
+            continue;
+        }
+        for(auto field = node.begin(); field != node.end(); ++field)
+        {
+            std::string fieldPath = nodePath;
+            fieldPath += '.';
+            fieldPath += field.key();
+            const bool portSide = (field.key() == "inputs" || field.key() == "outputs")
+                                  && field.value().is_object();
+            if(!portSide)
+            {
+                findUidReferences(field.value(),
+                                  uid,
+                                  field.key().find("uid") != std::string::npos,
+                                  fieldPath,
+                                  use.otherPaths);
+                continue;
+            }
+            for(auto port = field.value().begin(); port != field.value().end(); ++port)
+            {
+                if(isNodePortKey(port.key()) && uidOf(port.value()) == uid)
+                {
+                    use.portNodes.insert(index);
+                    continue;
+                }
+                std::string portPath = fieldPath;
+                portPath += '.';
+                portPath += port.key();
+                findUidReferences(port.value(),
+                                  uid,
+                                  port.key().find("uid") != std::string::npos,
+                                  portPath,
+                                  use.otherPaths);
+            }
+        }
+    }
+    return use;
+}
+
+// The paths outside the nodes where the template refers to `uid`, other than the "uid"
+// key of a tensor entry.
+inline std::vector<std::string> findOtherUidReferences(const nlohmann::json& templateJson,
+                                                       int64_t uid)
+{
+    std::vector<std::string> found;
+    if(!templateJson.is_object())
+    {
+        return found;
+    }
+    for(auto field = templateJson.begin(); field != templateJson.end(); ++field)
+    {
+        if(field.key() == "nodes")
+        {
+            continue;
+        }
+        if(field.key() != "tensors" || !field.value().is_array())
+        {
+            findUidReferences(field.value(),
+                              uid,
+                              field.key().find("uid") != std::string::npos,
+                              field.key(),
+                              found);
+            continue;
+        }
+        const auto& tensors = field.value();
+        for(size_t index = 0; index < tensors.size(); ++index)
+        {
+            std::string tensorPath = "tensors[";
+            tensorPath += std::to_string(index);
+            tensorPath += ']';
+            const auto& tensor = tensors.at(index);
+            if(!tensor.is_object())
+            {
+                findUidReferences(tensor, uid, false, tensorPath, found);
+                continue;
+            }
+            for(auto key = tensor.begin(); key != tensor.end(); ++key)
+            {
+                if(key.key() == "uid")
+                {
+                    continue;
+                }
+                std::string keyPath = tensorPath;
+                keyPath += '.';
+                keyPath += key.key();
+                findUidReferences(
+                    key.value(), uid, key.key().find("uid") != std::string::npos, keyPath, found);
+            }
+        }
+    }
+    return found;
+}
+
+// Throws BundleMetadataError naming `where` for the first node port of the template that
+// holds neither null nor a uid, for example a `${case.*}` placeholder. The pruning cannot
+// tell whether such a port holds an absent uid.
+inline void checkNodePortsAreLiteral(const nlohmann::json& templateJson, const std::string& where)
+{
+    if(!templateJson.contains("nodes") || !templateJson.at("nodes").is_array())
+    {
+        return;
+    }
+    const auto& nodes = templateJson.at("nodes");
+    for(size_t index = 0; index < nodes.size(); ++index)
+    {
+        const auto& node = nodes.at(index);
+        for(const char* side : {"inputs", "outputs"})
+        {
+            if(!node.is_object() || !node.contains(side) || !node.at(side).is_object())
+            {
+                continue;
+            }
+            const auto& ports = node.at(side);
+            for(auto port = ports.begin(); port != ports.end(); ++port)
+            {
+                if(!isNodePortKey(port.key()) || port.value().is_null()
+                   || uidOf(port.value()).has_value())
+                {
+                    continue;
+                }
+                std::string message = where;
+                message += ": absent_tensors needs a uid or null in each node port, and nodes[";
+                message += std::to_string(index);
+                message += "].";
+                message += side;
+                message += '.';
+                message += port.key();
+                message += " holds ";
+                message += port.value().dump();
+                throw hipdnn_integration_tests::BundleMetadataError(message);
+            }
+        }
+    }
+}
+
+inline std::string
+    absentTensorMessage(const std::string& where, int64_t uid, const std::string& rule)
+{
+    std::string message = where;
+    message += ": absent tensor ";
+    message += std::to_string(uid);
+    message += ' ';
+    message += rule;
+    return message;
+}
+
+// A sweep case with `absent_tensors`, checked against its template: the template with
+// the absent tensors removed, the case metadata and the absent uids.
+struct AbsentTensorCase
+{
+    nlohmann::json graphTemplate;
+    hipdnn_integration_tests::BundleMetadata metadata;
+    std::vector<int64_t> uids;
+};
+
+// The rules that tie a case's names to its absent tensors. A case names an absent tensor
+// in none of: values.tensors, a key of another case value (`${case.<field>.<uid>}`),
+// tensor_patches, the metadata `inputs`, the metadata `aliases`, the metadata
+// `start_offsets`, the metadata `live_rows`.
+inline void
+    checkCaseDoesNotNameAbsentTensors(const nlohmann::json& caseJson,
+                                      const hipdnn_integration_tests::BundleMetadata& metadata,
+                                      const std::unordered_set<int64_t>& absent,
+                                      const std::vector<int64_t>& uids,
+                                      const std::string& where)
+{
+    using hipdnn_integration_tests::BundleMetadataError;
+
+    if(caseJson.contains("values") && caseJson.at("values").is_object())
+    {
+        const auto& values = caseJson.at("values");
+        if(values.contains("tensors"))
+        {
+            const auto& tensors = values.at("tensors");
+            if(!tensors.is_array())
+            {
+                throw std::runtime_error("values.tensors must be an array");
+            }
+            for(const auto& entry : tensors)
+            {
+                const auto uid = entry.at("uid").get<int64_t>();
+                if(absent.count(uid) != 0)
+                {
+                    throw BundleMetadataError(
+                        absentTensorMessage(where, uid, "has a values.tensors entry"));
+                }
+            }
+        }
+        for(const int64_t uid : uids)
+        {
+            const auto uidKey = std::to_string(uid);
+            for(auto field = values.begin(); field != values.end(); ++field)
+            {
+                if(field.key() == "tensors" || !field.value().is_object()
+                   || !field.value().contains(uidKey))
+                {
+                    continue;
+                }
+                std::string rule = "is a key of the case value values.";
+                rule += field.key();
+                rule += '.';
+                rule += uidKey;
+                throw BundleMetadataError(absentTensorMessage(where, uid, rule));
+            }
+        }
+    }
+
+    if(caseJson.contains("tensor_patches") && caseJson.at("tensor_patches").is_array())
+    {
+        for(const auto& patch : caseJson.at("tensor_patches"))
+        {
+            if(!patch.is_object() || !patch.contains("uid") || !patch.at("uid").is_number_integer())
+            {
+                throw std::runtime_error("tensor_patch entry is missing an integer uid");
+            }
+
+            const auto uid = patch.at("uid").get<int64_t>();
+            if(absent.count(uid) != 0)
+            {
+                throw BundleMetadataError(
+                    absentTensorMessage(where, uid, "has a tensor_patches entry"));
+            }
+        }
+    }
+
+    for(const int64_t uid : uids)
+    {
+        if(metadata.inputs.has_value() && metadata.inputs->count(uid) != 0)
+        {
+            throw BundleMetadataError(
+                absentTensorMessage(where, uid, "has a metadata inputs entry"));
+        }
+    }
+
+    for(const auto& alias : metadata.aliases)
+    {
+        if(absent.count(alias.uid) != 0)
+        {
+            throw BundleMetadataError(
+                absentTensorMessage(where, alias.uid, "is the view of a metadata aliases entry"));
+        }
+        if(absent.count(alias.ofUid) != 0)
+        {
+            throw BundleMetadataError(absentTensorMessage(
+                where, alias.ofUid, "is the owner of a metadata aliases entry"));
+        }
+    }
+
+    for(const auto& entry : metadata.startOffsets)
+    {
+        if(absent.count(entry.uid) != 0)
+        {
+            throw BundleMetadataError(
+                absentTensorMessage(where, entry.uid, "has a metadata start_offsets entry"));
+        }
+    }
+
+    for(const auto& entry : metadata.liveRows)
+    {
+        for(const auto& uid : {std::optional<int64_t>(entry.uid), entry.lengthsUid, entry.likeUid})
+        {
+            if(uid.has_value() && absent.count(*uid) != 0)
+            {
+                throw BundleMetadataError(
+                    absentTensorMessage(where, *uid, "is named by a metadata live_rows entry"));
+            }
+        }
+    }
+}
+
+// Checks a sweep case that has `absent_tensors` against its template and returns the
+// pruned template. Every rule throws BundleMetadataError naming `where`, and the absent
+// uid where there is one. Runs before placeholder expansion: the placeholders of an
+// absent tensor have no case value.
+inline AbsentTensorCase prepareAbsentTensors(const nlohmann::json& templateJson,
+                                             const nlohmann::json& caseJson,
+                                             int sweepVersion,
+                                             const std::string& where)
+{
+    using hipdnn_integration_tests::BundleMetadataError;
+
+    if(!caseJson.contains("metadata") || caseJson.at("metadata").is_null())
+    {
+        throw BundleMetadataError(where
+                                  + ": absent_tensors needs case metadata with format_version 2");
+    }
+    auto metadata
+        = hipdnn_integration_tests::parseBundleMetadataJson(caseJson.at("metadata"), where);
+    if(metadata.formatVersion < 2)
+    {
+        throw BundleMetadataError(where + ": absent_tensors needs format_version 2");
+    }
+
+    if(sweepVersion != 2)
+    {
+        throw BundleMetadataError(where + ": absent_tensors needs sweep version 2, not "
+                                  + std::to_string(sweepVersion));
+    }
+
+    const auto& list = caseJson.at("absent_tensors");
+    if(!list.is_array() || list.empty())
+    {
+        throw BundleMetadataError(
+            where + ": absent_tensors must be a non-empty array of integer tensor uids");
+    }
+    std::vector<int64_t> uids;
+    std::unordered_set<int64_t> absent;
+    for(const auto& entry : list)
+    {
+        if(!entry.is_number_integer())
+        {
+            throw BundleMetadataError(
+                where + ": absent_tensors must be a non-empty array of integer tensor uids");
+        }
+        const auto uid = entry.get<int64_t>();
+        if(!absent.insert(uid).second)
+        {
+            throw BundleMetadataError(
+                absentTensorMessage(where, uid, "is named twice in absent_tensors"));
+        }
+        uids.push_back(uid);
+    }
+
+    const auto templateUids = collectTemplateTensorUids(templateJson);
+    for(const int64_t uid : uids)
+    {
+        if(templateUids.count(uid) == 0)
+        {
+            throw BundleMetadataError(
+                absentTensorMessage(where, uid, "is not a tensor of the template"));
+        }
+    }
+
+    checkCaseDoesNotNameAbsentTensors(caseJson, metadata, absent, uids, where);
+
+    if(caseJson.contains("golden") && !caseJson.at("golden").is_null())
+    {
+        throw BundleMetadataError(where
+                                  + ": absent_tensors and golden data do not mix; remove the "
+                                    "golden pointer or the absent tensors");
+    }
+
+    for(const auto& tensor : templateJson.at("tensors"))
+    {
+        const auto uid = tensor.at("uid").get<int64_t>();
+        if(absent.count(uid) == 0 || !tensor.contains("virtual") || tensor.at("virtual") == false)
+        {
+            continue;
+        }
+        throw BundleMetadataError(absentTensorMessage(where,
+                                                      uid,
+                                                      tensor.at("virtual") == true
+                                                          ? "is virtual"
+                                                          : "has a virtual flag that is not a "
+                                                            "literal boolean in the template"));
+    }
+
+    checkNodePortsAreLiteral(templateJson, where);
+    for(const int64_t uid : uids)
+    {
+        const auto use = findNodeUidUse(templateJson, uid);
+        if(use.portNodes.size() > 1)
+        {
+            throw BundleMetadataError(
+                absentTensorMessage(where, uid, "is held by node ports of more than one node"));
+        }
+        if(!use.otherPaths.empty())
+        {
+            throw BundleMetadataError(absentTensorMessage(
+                where, uid, "is held by a node outside a node port, at " + use.otherPaths.front()));
+        }
+        const auto references = findOtherUidReferences(templateJson, uid);
+        if(!references.empty())
+        {
+            throw BundleMetadataError(
+                absentTensorMessage(where, uid, "is referenced at " + references.front()));
+        }
+    }
+
+    auto graphTemplate = pruneAbsentTensors(templateJson, uids);
+    return {std::move(graphTemplate), std::move(metadata), std::move(uids)};
+}
+
 } // namespace detail
 
 // Load a direct bundle from its graph .json path, classifying the outcome.
@@ -758,6 +1711,9 @@ inline std::optional<std::filesystem::path>
 //   * golden outputs present, no metadata  -> LoadError::UNVALIDATABLE_GOLDEN_DATA
 //   * no golden outputs, no metadata       -> bundle with empty metadata
 //   * metadata present but malformed       -> throws BundleMetadataError
+//   * metadata flags that contradict the golden data it declares (both references
+//     off with none, expected_rejection with some) -> throws BundleMetadataError
+//   * aliases that the graph or the tensor data on disk rule out -> throws BundleMetadataError
 //   * valid graph, input blobs absent      -> bundle with blobs == nullopt
 //   * inputs present, outputs absent       -> bundle verified against reference
 //   * inputs and outputs present           -> bundle verified against golden data
@@ -821,7 +1777,26 @@ inline LoadResult loadIntegrationTestBundle(const std::filesystem::path& jsonPat
     }
     bundle.metadata = std::move(*metadata);
 
+    // The `.tensors.dvc` pointer counts as declaring golden data even when the blobs
+    // it names have not been pulled.
+    auto pointerPath = jsonPath;
+    pointerPath.replace_extension(".tensors.dvc");
+    const bool goldenDeclared = goldenOutputsPresent || std::filesystem::exists(pointerPath);
+    detail::checkGoldenDeclarationRules(bundle.metadata, goldenDeclared, jsonPath.string());
+
     detail::describeTensorBlobs(bundle, *graphJson, blobPathForUid);
+    detail::checkStartOffsetRules(bundle.metadata, bundle.graphWrapper(), jsonPath.string());
+    detail::checkLiveRowRules(
+        bundle.metadata, bundle.graphWrapper(), bundle.outputTensorUids, jsonPath.string());
+    // One blob is enough: a bundle that leaves out the view's blob still stores its
+    // other tensors apart.
+    detail::checkAliasRules(
+        bundle.metadata,
+        bundle.graphWrapper(),
+        bundle.outputTensorUids,
+        goldenDeclared
+            || detail::anyBlobPresentFor(detail::allTensorUids(*graphJson), blobPathForUid),
+        jsonPath.string());
 
     return bundle;
 }
@@ -834,7 +1809,12 @@ inline LoadResult loadIntegrationTestBundle(const std::filesystem::path& jsonPat
 // INVALID_SWEEP_CASE; an expanded graph that still fails schema conversion is
 // INVALID_GRAPH_SCHEMA. As with the direct-bundle overload, two exceptions
 // propagate uncaught: a BundleMetadataError from a malformed metadata block, and
-// a RuntimePassByValueInvariantError from buildGraphBuffer().
+// a RuntimePassByValueInvariantError from buildGraphBuffer(). A sweep `version`
+// other than 1 or 2 also throws BundleMetadataError, and so does a case that
+// breaks an `absent_tensors` rule, has an unbuildable graph or has no output left.
+// A case with `absent_tensors` loads from a copy of the template without those
+// tensors, made before the placeholders are expanded. An expansion error in such a
+// case is still INVALID_SWEEP_CASE.
 inline LoadResult loadIntegrationTestBundle(const DiscoveredBundle& discovered,
                                             SweepManifestCache& sweeps)
 {
@@ -856,11 +1836,26 @@ inline LoadResult loadIntegrationTestBundle(const DiscoveredBundle& discovered,
         return LoadError::INVALID_SWEEP_CASE;
     }
 
+    const auto where = discovered.diagnosticPath().string();
+    const int sweepVersion = detail::rethrowAsBundleMetadataError(where, [&] {
+        return detail::checkSweepVersion(sweep.manifest->version(), discovered.jsonPath, where);
+    });
+
+    std::optional<detail::AbsentTensorCase> absent;
+    if(caseJson->contains("absent_tensors"))
+    {
+        absent.emplace(detail::rethrowAsBundleMetadataError(where, [&] {
+            return detail::prepareAbsentTensors(*templateJson, *caseJson, sweepVersion, where);
+        }));
+    }
+    const nlohmann::json& graphTemplate
+        = absent.has_value() ? absent->graphTemplate : *templateJson;
+
     nlohmann::json expandedGraph;
     std::optional<std::filesystem::path> goldenDirectory;
     try
     {
-        expandedGraph = detail::expandTemplateGraph(*templateJson, *caseJson, discovered);
+        expandedGraph = detail::expandTemplateGraph(graphTemplate, *caseJson, discovered);
         goldenDirectory = detail::resolveSweepGoldenDirectory(discovered.jsonPath, *caseJson);
         detail::applyTensorPatches(expandedGraph, *caseJson);
     }
@@ -872,6 +1867,12 @@ inline LoadResult loadIntegrationTestBundle(const DiscoveredBundle& discovered,
     flatbuffers::DetachedBuffer graphBuffer;
     if(!detail::buildGraphBuffer(expandedGraph, graphBuffer))
     {
+        if(absent.has_value())
+        {
+            throw hipdnn_integration_tests::BundleMetadataError(
+                where + ": the graph with absent tensors " + detail::formatUidList(absent->uids)
+                + " does not build; a removed tensor fills a port the op requires");
+        }
         return LoadError::INVALID_GRAPH_SCHEMA;
     }
 
@@ -879,7 +1880,8 @@ inline LoadResult loadIntegrationTestBundle(const DiscoveredBundle& discovered,
     bundle.graphBuffer = std::move(graphBuffer);
 
     // Mirror the direct-bundle path: extractOutputUidsFromJson handles flat-uid
-    // ops (Reduction/ResampleFwd/CustomOp) that getOutputTensorUidsFromGraph throws on.
+    // ops (Reduction/ResampleFwd/ResampleBwd/CustomOp) that getOutputTensorUidsFromGraph
+    // throws on.
     {
         auto allOutputUids = detail::extractOutputUidsFromJson(expandedGraph);
         const auto wrapper = bundle.graphWrapper();
@@ -892,6 +1894,13 @@ inline LoadResult loadIntegrationTestBundle(const DiscoveredBundle& discovered,
                 bundle.outputTensorUids.push_back(uid);
             }
         }
+    }
+
+    if(absent.has_value() && bundle.outputTensorUids.empty())
+    {
+        throw hipdnn_integration_tests::BundleMetadataError(where + ": removing "
+                                                            + detail::formatUidList(absent->uids)
+                                                            + " leaves no output to compare");
     }
 
     // Golden blobs without metadata cannot be validated, so that combination is
@@ -908,22 +1917,46 @@ inline LoadResult loadIntegrationTestBundle(const DiscoveredBundle& discovered,
     // anchors the case, so an absent block is MISSING_METADATA. A present but
     // malformed block is an authoring error: parseBundleMetadataJson() throws
     // BundleMetadataError, which is left to propagate (a typo in the metadata
-    // block must not quietly delete the case).
-    if(!caseJson->contains("metadata") || caseJson->at("metadata").is_null())
+    // block must not quietly delete the case). A case with absent tensors already
+    // has its metadata parsed.
+    if(absent.has_value())
     {
-        return goldenOutputsPresent ? LoadError::UNVALIDATABLE_GOLDEN_DATA
-                                    : LoadError::MISSING_METADATA;
+        bundle.metadata = std::move(absent->metadata);
     }
-    bundle.metadata = hipdnn_integration_tests::parseBundleMetadataJson(
-        caseJson->at("metadata"), discovered.diagnosticPath().string());
+    else
+    {
+        if(!caseJson->contains("metadata") || caseJson->at("metadata").is_null())
+        {
+            return goldenOutputsPresent ? LoadError::UNVALIDATABLE_GOLDEN_DATA
+                                        : LoadError::MISSING_METADATA;
+        }
+        bundle.metadata
+            = hipdnn_integration_tests::parseBundleMetadataJson(caseJson->at("metadata"), where);
+    }
 
+    const bool goldenDeclared = goldenOutputsPresent || goldenDirectory.has_value();
+    detail::checkGoldenDeclarationRules(bundle.metadata, goldenDeclared, where);
+
+    // One blob is enough: a case that leaves out the view's blob still stores its
+    // other tensors apart. Mirrors the direct-bundle path above.
+    bool anyBlobPresent = false;
     if(goldenDirectory.has_value())
     {
         const auto blobPathForUid = [goldenDir = *goldenDirectory](int64_t uid) {
             return goldenDir / ("tensor" + std::to_string(uid) + ".bin");
         };
         detail::describeTensorBlobs(bundle, expandedGraph, blobPathForUid);
+        anyBlobPresent
+            = detail::anyBlobPresentFor(detail::allTensorUids(expandedGraph), blobPathForUid);
     }
+    detail::checkStartOffsetRules(bundle.metadata, bundle.graphWrapper(), where);
+    detail::checkLiveRowRules(
+        bundle.metadata, bundle.graphWrapper(), bundle.outputTensorUids, where);
+    detail::checkAliasRules(bundle.metadata,
+                            bundle.graphWrapper(),
+                            bundle.outputTensorUids,
+                            goldenDeclared || anyBlobPresent,
+                            where);
 
     return bundle;
 }

@@ -104,6 +104,7 @@ include(ROCMHeaderWrapper)
 
 include(cmake/ClangCheck.cmake)
 include(cmake/CheckPreCommit.cmake)
+include(cmake/ResourceCompiler.cmake)
 
 # Build library with Beta APIs
 add_definitions("-DMIOPEN_BETA_API=1")
@@ -151,6 +152,11 @@ option(MIOPEN_ENABLE_FIN "Enable the fin driver for MIOpen"  OFF)
 option(MIOPEN_ENABLE_FIN_INTERFACE "Enable internal interface for the fin" ${MIOPEN_ENABLE_FIN})
 option(MIOPEN_STRIP_SYMBOLS "Strip symbols in release mode" ON)
 option(MIOPEN_CK_BUILDER_EXPERIMENTAL "Enable experimental support for CK Builder" OFF)
+# Windows-only. Verifies the embedded VERSIONINFO resource after each DLL links, so a
+# DLL that loses its metadata fails the build rather than shipping. Turn OFF to bypass if the
+# check ever misfires on an unusual toolchain.
+option(MIOPEN_VALIDATE_VERSIONINFO
+       "Verify embedded Windows VERSIONINFO metadata after linking each DLL" ON)
 
 # Gate for the MIOpen public/private library split. When ON, libMIOpen.so is built
 # as a thin public wrapper forwarding to a private implementation library
@@ -608,27 +614,60 @@ message(STATUS "HALF_INCLUDE_DIR: ${HALF_INCLUDE_DIR}")
 
 option( MIOPEN_DEBUG_FIND_DB_CACHING "Use system find-db caching" ON)
 
-if(WIN32)
-    set( DATA_INSTALL_DIR bin )
-    set( DATABASE_INSTALL_DIR ${DATA_INSTALL_DIR})
-else()
-    set( MIOPEN_INSTALL_DIR miopen)
-    set( DATA_INSTALL_DIR ${CMAKE_INSTALL_DATADIR}/${MIOPEN_INSTALL_DIR} )
-    set( DATABASE_INSTALL_DIR ${DATA_INSTALL_DIR}/db )
-endif()
+# Windows and Linux share one data layout. MIOpen resolves DATABASE_INSTALL_DIR at runtime
+# relative to the directory holding the MIOpen library (src/db_path.cpp.in), so keep the two in sync.
+set( MIOPEN_INSTALL_DIR miopen)
+set( DATA_INSTALL_DIR ${CMAKE_INSTALL_DATADIR}/${MIOPEN_INSTALL_DIR} )
+set( DATABASE_INSTALL_DIR ${DATA_INSTALL_DIR}/db )
 
 if(MIOPEN_ENABLE_AI_KERNEL_TUNING OR MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK)
     find_package(frugally-deep CONFIG REQUIRED)
     message(STATUS "Build with frugally-deep ${frugally-deep_VERSION} ${frugally-deep_DIR}")
+    # frugally-deep is header-only and reads one Keras format: 0.15.x reads Keras 2 models, 0.16
+    # and later read Keras 3 models, and the bundled LSTM (*.ktn.model) Keras 3 models need v0.21.0
+    # (which still reports VERSION 0.20.0). Choose the bundled model set from the headers MIOpen
+    # compiles against. The Keras 2 set (src/kernels/keras2) is temporary, until every build uses
+    # frugally-deep v0.21.0 or newer.
+    get_target_property(_fdeep_target frugally-deep::fdeep ALIASED_TARGET)
+    if(NOT _fdeep_target)
+        set(_fdeep_target frugally-deep::fdeep)
+    endif()
+    get_target_property(_fdeep_include_dirs ${_fdeep_target} INTERFACE_INCLUDE_DIRECTORIES)
+    string(REGEX REPLACE "\\$<BUILD_INTERFACE:([^>]*)>" "\\1" _fdeep_include_dirs "${_fdeep_include_dirs}")
+    string(REGEX REPLACE "\\$<INSTALL_INTERFACE:[^>]*>" "" _fdeep_include_dirs "${_fdeep_include_dirs}")
+    set(_fdeep_import_model "")
+    foreach(_fdeep_include_dir IN LISTS _fdeep_include_dirs)
+        if(EXISTS "${_fdeep_include_dir}/fdeep/import_model.hpp")
+            set(_fdeep_import_model "${_fdeep_include_dir}/fdeep/import_model.hpp")
+            break()
+        endif()
+    endforeach()
+    if(NOT _fdeep_import_model)
+        message(FATAL_ERROR "fdeep/import_model.hpp not found in the frugally-deep include directories: ${_fdeep_include_dirs}")
+    endif()
+    file(STRINGS "${_fdeep_import_model}" _fdeep_reads_lstm_initial_state REGEX "\"initial_state\"")
+    file(STRINGS "${_fdeep_import_model}" _fdeep_reads_keras2 REGEX "\"batch_input_shape\"")
+    if(_fdeep_reads_lstm_initial_state)
+        set(MIOPEN_FDEEP_MODEL_FORMAT keras3)
+    elseif(_fdeep_reads_keras2)
+        set(MIOPEN_FDEEP_MODEL_FORMAT keras2)
+    else()
+        message(FATAL_ERROR "frugally-deep ${frugally-deep_VERSION} (${_fdeep_import_model}) reads "
+            "Keras 3 models but cannot load the bundled LSTM models (frugally-deep 0.16 to 0.20). "
+            "Use frugally-deep v0.21.0 or newer, or 0.15.x.")
+    endif()
+    message(STATUS "Bundled AI models: ${MIOPEN_FDEEP_MODEL_FORMAT} (from ${_fdeep_import_model})")
     find_package(Eigen3 REQUIRED)
     message(STATUS "Build with Eigen3 ${Eigen3_VERSION} ${Eigen3_DIR}")
 endif()
 
-if(WIN32)
-    set(KERNELS_BINARY_DIR ${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_BINDIR})
-else()
-    set(KERNELS_BINARY_DIR ${CMAKE_BINARY_DIR}/${DATABASE_INSTALL_DIR})
-endif()
+# Stage the databases, the AI model files and the test-only golden vectors where a
+# BUILD_DEV=OFF library looks for them in the build tree: GetLibPath().parent_path() /
+# share/miopen/db (src/db_path.cpp.in). MIOpen.dll goes to <build>/bin and libMIOpen.so to
+# <build>/lib (CMAKE_RUNTIME_OUTPUT_DIRECTORY / CMAKE_LIBRARY_OUTPUT_DIRECTORY below), so both
+# resolve to <build>/${DATABASE_INSTALL_DIR}. BUILD_DEV builds bake this same path into
+# MIOPEN_SYSTEM_DB_PATH, so one value serves both.
+set(KERNELS_BINARY_DIR ${CMAKE_BINARY_DIR}/${DATABASE_INSTALL_DIR})
 
 set(MIOPEN_GPU_SYNC Off CACHE BOOL "")
 if(BUILD_DEV)
@@ -716,6 +755,7 @@ endif()
 function(unpack_db db_bzip2_file)
     get_filename_component(__fname ${db_bzip2_file} NAME_WLE)
     add_custom_command(OUTPUT ${KERNELS_BINARY_DIR}/${__fname}
+                       DEPENDS ${db_bzip2_file}
                        COMMAND ${UNZIPPER} -dc -k ${db_bzip2_file} > ${KERNELS_BINARY_DIR}/${__fname})
     string(REPLACE "." "_" __tname ${__fname})
     add_custom_target(generate_${__tname} ALL DEPENDS ${KERNELS_BINARY_DIR}/${__fname})
@@ -724,7 +764,7 @@ function(unpack_db db_bzip2_file)
 
     if(NOT MIOPEN_USE_SQLITE_PERFDB AND __extension STREQUAL ".db")
         add_custom_command(OUTPUT ${KERNELS_BINARY_DIR}/${__fname}.txt
-                           DEPENDS sqlite2txt generate_${__tname}
+                           DEPENDS sqlite2txt generate_${__tname} ${KERNELS_BINARY_DIR}/${__fname}
                            COMMAND $<TARGET_FILE:sqlite2txt> ${KERNELS_BINARY_DIR}/${__fname} ${KERNELS_BINARY_DIR}/${__fname}.txt
         )
         add_custom_target(generate_${__tname}_txt ALL DEPENDS ${KERNELS_BINARY_DIR}/${__fname}.txt)
@@ -958,6 +998,12 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_BINDIR})
 
 if(NOT MIOPEN_USE_SQLITE_PERFDB)
     add_subdirectory(tools/sqlite2txt)
+endif()
+# Must precede add_subdirectory(src): miopen_embed_version_resource() attaches a POST_BUILD rule
+# that invokes this tool, and the target has to exist by then. Skipped when cross-compiling, where
+# the tool would be built for the target and could not run on the build host.
+if(WIN32 AND MIOPEN_VALIDATE_VERSIONINFO AND NOT CMAKE_CROSSCOMPILING)
+    add_subdirectory(tools/win_versioninfo_check)
 endif()
 add_subdirectory(addkernels)
 include(${CMAKE_CURRENT_LIST_DIR}/cmake/MiopenCkCompileDefs.cmake)

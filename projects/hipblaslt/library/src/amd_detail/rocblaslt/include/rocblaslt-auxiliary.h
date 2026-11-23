@@ -462,7 +462,7 @@ void applyStreamKTileSchedulingMode(std::shared_ptr<void>  gemmData,
 
 void applyUniformSummationOrder(std::shared_ptr<void>  gemmData,
                                 rocblaslt::RocGemmType gemmType,
-                                bool                   value);
+                                int32_t                value);
 
 rocblaslt_status
     rocblaslt_algo_get_heuristic_cpp(rocblaslt_handle       handle,
@@ -470,7 +470,7 @@ rocblaslt_status
                                      std::shared_ptr<void>  gemmData,
                                      const size_t           maxWorkspaceBytes,
                                      const int32_t          streamKTileSchedulingMode,
-                                     const bool             uniformSummationOrder,
+                                     const int32_t          uniformSummationOrder,
                                      const int              requestedAlgoCount,
                                      std::vector<rocblaslt_matmul_heuristic_result>& results);
 
@@ -482,6 +482,10 @@ rocblaslt_status rocblaslt_copy_matmul(rocblaslt_matmul_desc src, rocblaslt_matm
 // as gfx1250-strict, which ROCr reports for gfx1250 A0 parts -- so it names both
 // the device-library subtree and the files inside it.
 std::string rocblaslt_internal_get_arch_name();
+
+// The same name for an explicit device ID, queried once. Throws if the ID is
+// not a visible device or its properties cannot be read.
+const std::string& rocblaslt_internal_get_arch_name(int deviceId);
 
 // for internal use of testing existence of path
 bool rocblaslt_internal_test_path(const std::string&);
