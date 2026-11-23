@@ -302,11 +302,7 @@ rocblas_status rocsolver_larf_template(rocblas_handle handle,
                                        const I batch_count,
                                        T* scalars,
                                        T* Abyx,
-                                       T** workArr,
-                                       // Bytes the caller reserved for Abyx, used only to verify
-                                       // the gemv scratch fits. Zero means the caller did not say,
-                                       // and the check is skipped.
-                                       const size_t Abyx_bytes = 0)
+                                       T** workArr)
 {
     ROCSOLVER_ENTER("larf", "side:", side, "m:", m, "n:", n, "shiftX:", shiftx, "incx:", incx,
                     "shiftA:", shiftA, "lda:", lda, "bc:", batch_count);
@@ -381,19 +377,17 @@ rocblas_status rocsolver_larf_template(rocblas_handle handle,
     // rocsolver_larf_getMemorySize.
     T* gemv_work = Abyx + size_t(order) * batch_count;
 
-    // The caller sized Abyx from its own m and n, which are often larger than the ones
-    // this call uses, and the rocBLAS requirement is not monotone in them. Verify that
-    // the scratch rocBLAS will ask for here really is covered by what the caller
-    // reserved; an overrun is silent otherwise.
-    if(Abyx_bytes > 0)
-    {
-        const size_t w_offset = size_t(order) * batch_count * sizeof(T);
-        const size_t gemv_work_bytes = Abyx_bytes > w_offset ? Abyx_bytes - w_offset : 0;
-        ROCSOLVER_ASSUME_X(rocblas_internal_gemv_kernel_workspace_size<T>(
-                               trans, rocblas_int(m), rocblas_int(n), rocblas_int(batch_count))
-                               <= gemv_work_bytes,
-                           "larf gemv scratch fits the workspace the caller reserved");
-    }
+    // Callers reserved rocblasCall_gemv_mem_max for their own, larger, m and n. That covers
+    // this call only if the bound is at least what rocBLAS asks for here, so check it in
+    // debug builds; an overrun is silent otherwise.
+#ifndef NDEBUG
+    size_t gemv_bound;
+    rocblasCall_gemv_mem_max<false, T>(trans, rocblas_int(m), rocblas_int(n),
+                                       rocblas_int(batch_count), &gemv_bound);
+    assert(rocblas_internal_gemv_kernel_workspace_size<T>(trans, rocblas_int(m), rocblas_int(n),
+                                                          rocblas_int(batch_count))
+           <= gemv_bound);
+#endif
 
     // compute the matrix vector product  (W=-A'*X or W=-A*X)
     rocblasCall_gemv<T>(handle, trans, m, n, cast2constType<T>(scalars), 0, A, shiftA, lda, stridea,

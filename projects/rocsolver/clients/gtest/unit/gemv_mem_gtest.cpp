@@ -52,8 +52,8 @@ static std::vector<rocblas_int> grid()
     return g;
 }
 
-template <typename T>
-static void expect_bound(rocblas_operation transA)
+template <bool BATCHED, typename T>
+static void expect_bound(rocblas_operation transA, rocblas_int batch_count)
 {
     const std::vector<rocblas_int> g = grid();
     std::vector<size_t> box(g.size(), 0); // max of the query over m' <= m, n' <= g[j]
@@ -62,28 +62,39 @@ static void expect_bound(rocblas_operation transA)
         size_t row = 0; // max over n' <= g[j] for this m
         for(size_t j = 0; j < g.size(); ++j)
         {
-            row = std::max(row, rocblas_internal_gemv_kernel_workspace_size<T>(transA, m, g[j], 1));
+            row = std::max(
+                row, rocblas_internal_gemv_kernel_workspace_size<T>(transA, m, g[j], batch_count));
             box[j] = std::max(box[j], row);
 
             size_t bound;
-            rocsolver::rocblasCall_gemv_mem_max<false, T>(transA, m, g[j], 1, &bound);
-            ASSERT_GE(bound, box[j]) << "transA=" << transA << " m=" << m << " n=" << g[j];
+            rocsolver::rocblasCall_gemv_mem_max<BATCHED, T>(transA, m, g[j], batch_count, &bound);
+            ASSERT_GE(bound, box[j]) << "transA=" << transA << " m=" << m << " n=" << g[j]
+                                     << " batch_count=" << batch_count;
         }
     }
 }
 
+// non-batched with one matrix, and batched with a few batch counts
+template <typename T>
+static void expect_bound_all(rocblas_operation transA)
+{
+    expect_bound<false, T>(transA, 1);
+    expect_bound<true, T>(transA, 3);
+    expect_bound<true, T>(transA, 1000);
+}
+
 TEST(checkin_lapack, GEMV_MEM_MAX_transposed)
 {
-    expect_bound<float>(rocblas_operation_transpose);
-    expect_bound<double>(rocblas_operation_transpose);
-    expect_bound<rocblas_float_complex>(rocblas_operation_conjugate_transpose);
-    expect_bound<rocblas_double_complex>(rocblas_operation_conjugate_transpose);
+    expect_bound_all<float>(rocblas_operation_transpose);
+    expect_bound_all<double>(rocblas_operation_transpose);
+    expect_bound_all<rocblas_float_complex>(rocblas_operation_conjugate_transpose);
+    expect_bound_all<rocblas_double_complex>(rocblas_operation_conjugate_transpose);
 }
 
 TEST(checkin_lapack, GEMV_MEM_MAX_not_transposed)
 {
-    expect_bound<float>(rocblas_operation_none);
-    expect_bound<double>(rocblas_operation_none);
-    expect_bound<rocblas_float_complex>(rocblas_operation_none);
-    expect_bound<rocblas_double_complex>(rocblas_operation_none);
+    expect_bound_all<float>(rocblas_operation_none);
+    expect_bound_all<double>(rocblas_operation_none);
+    expect_bound_all<rocblas_float_complex>(rocblas_operation_none);
+    expect_bound_all<rocblas_double_complex>(rocblas_operation_none);
 }

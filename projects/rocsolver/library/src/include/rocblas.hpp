@@ -875,16 +875,15 @@ void rocblasCall_gemv_mem_max(rocblas_operation transA,
     if(m <= 0 || n <= 0 || batch_count <= 0)
         return;
 
+    constexpr bool is_s = std::is_same_v<T, float>;
+    constexpr bool is_d = std::is_same_v<T, double>;
     constexpr bool is_z = std::is_same_v<T, rocblas_double_complex>;
     size_t elements = 0;
     if(transA != rocblas_operation_none)
     {
         // skinny n: used when n < crossover and m >= 2048 * n, with ceil(m / 1024) partial
         // results per column
-        constexpr size_t crossover = std::is_same_v<T, float> ? 256
-            : std::is_same_v<T, double>                       ? 128
-            : is_z                                            ? 16
-                                                              : 64;
+        constexpr size_t crossover = is_s ? 256 : is_d ? 128 : is_z ? 16 : 64;
         const size_t cols = std::min({size_t(n), crossover - 1, size_t(m) / 2048});
         elements = ((size_t(m) - 1) / 1024 + 1) * cols;
     }

@@ -90,7 +90,7 @@ try
     // execution
     return rocsolver_larf_template<T>(handle, side, m, n, x, shiftx, incx, stridex, alpha, stridep,
                                       A, shiftA, lda, stridea, batch_count, (T*)scalars, (T*)Abyx,
-                                      (T**)workArr, size_Abyx);
+                                      (T**)workArr);
 }
 catch(...)
 {
