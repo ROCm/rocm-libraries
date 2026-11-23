@@ -388,7 +388,8 @@ TEST_F(ExtraSpmm, scalar_combinations)
 }
 
 // ---------------------------------------------------------------------------
-// beta == 0 for every format, algorithm and kernel family.
+// beta == 0 for every format, algorithm and kernel family. C starts as NaN, so
+// a path that scales C instead of overwriting it fails.
 // ---------------------------------------------------------------------------
 TEST_F(ExtraSpmm, beta_zero)
 {
@@ -417,6 +418,7 @@ TEST_F(ExtraSpmm, beta_zero)
                     c.opA       = opA;
                     c.device    = device;
                     c.beta      = cplx(0.0, 0.0);
+                    c.nan_C     = true;
                     c.long_rows = true;
                     run_spmm<float, int32_t, int32_t>(handle, c);
                     if(HasFatalFailure())
