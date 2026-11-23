@@ -5002,9 +5002,8 @@ namespace TensileLite
                 && c.y > 0 && c.y <= 8 && (c.x & (c.x - 1)) == 0
                 && (c.y & (c.y - 1)) == 0 && c.x * c.y >= 2 && c.x * c.y <= 16;
             if(!sizeMapping.isStreamK() || !sizeMapping.hasStaticAssignment()
-               || sizeMapping.streamKAtomic || sizeMapping.prefetchAcrossPersistent
-               || !supportedShape)
-                throw std::runtime_error("StreamK cluster multicast requires static non-atomic scheduling, a supported spatial cluster, and PAP off");
+               || sizeMapping.streamKAtomic || !supportedShape)
+                throw std::runtime_error("StreamK cluster multicast requires static non-atomic scheduling and a supported spatial cluster");
             if(problemType.outputAmaxD)
                 throw std::runtime_error("StreamK cluster multicast does not support amax reductions");
             if(problemType.useGradient && problemType.useBias)

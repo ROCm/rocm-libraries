@@ -633,9 +633,12 @@ TEST(PersistentArgumentLayout, ClusterStreamKVersionTwoRequiresSupportedCapabili
     }
     ContractionSolution solution;
     configureClusterStreamK(solution, 2, 1);
+    const auto papOff = solution.resolvePersistentSettings(problem, device);
     solution.sizeMapping.prefetchAcrossPersistent = 1;
-    EXPECT_THROW(solution.resolvePersistentSettings(problem, device), std::runtime_error);
-    solution.sizeMapping.prefetchAcrossPersistent = 0;
+    const auto papOn = solution.resolvePersistentSettings(problem, device);
+    EXPECT_EQ(papOn.argsVersion, 2);
+    EXPECT_EQ(papOn.grid, papOff.grid);
+    EXPECT_EQ(papOn.clusterSchedule.blocks, papOff.clusterSchedule.blocks);
     solution.sizeMapping.streamKAtomic = 1;
     EXPECT_THROW(solution.resolvePersistentSettings(problem, device), std::runtime_error);
     solution.sizeMapping.streamKAtomic = 0;

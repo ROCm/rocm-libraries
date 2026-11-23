@@ -137,31 +137,36 @@ class TestValidation:
             # cluster-scope barrier handshake, so ClusterBarrier is derived on.
             assert st["ClusterBarrier"] is True, st.get("ClusterBarrier")
 
+    @pytest.mark.parametrize("pap", [0, 1])
     @pytest.mark.parametrize("shape", [[2, 1], [2, 2], [1, 2], [1, 4], [1, 8]])
-    def test_streamk_spatial_clusters_enable_multicast(self, tmp_path, shape):
+    def test_streamk_spatial_clusters_enable_multicast(self, tmp_path, shape, pap):
         cfg = _write_variant(tmp_path, "streamk.yaml", fork_overrides={
             "TileProcessingStrategy": ["StreamK"], "ClusterDim": [shape],
-            "StreamKFixupTreeReduction": [1]})
+            "StreamKFixupTreeReduction": [1], "PrefetchAcrossPersistent": [pap]})
         states = _derive_states(cfg)
         assert states
         for state in states:
             assert streamKCluster(state)
+            assert state["PrefetchAcrossPersistent"] == pap
             assert state["InternalSupportParams"]["PersistentLoopArgsVersion"] == 2
             assert state["InternalSupportParams"]["SupportStreamKPerTileExtraIters"] is True
             assert state["Multicast"] is True
             assert state["ClusterBarrier"] is True
 
     @pytest.mark.parametrize("overrides", [
-        {"ClusterDim": [4, 8]}, {"PrefetchAcrossPersistent": 1},
+        {"ClusterDim": [4, 8]},
         {"PrefetchGlobalRead": 0}, {"StreamKAtomic": 1},
         {"ReuseAcrossPersistent": 1}, {"SpaceFillingAlgo": [1]},
         {"TDMInst": 2}, {"DebugStreamK": 1},
         {"ProblemType": {"OutputAmaxD": True}},
         {"ProblemType": {"Gradient": True, "UseBias": True}},
+        {"UseSubtileImpl": True},
     ])
     def test_unsupported_spatial_capabilities_fail_explicitly(self, overrides):
         from tensilelite.SolutionStructs.Solution import _validateStreamKMulticast
-        state = _mc_state(TileProcessingStrategy="StreamK", StreamKFixupTreeReduction=1)
+        state = _mc_state(TileProcessingStrategy="StreamK", StreamKFixupTreeReduction=1,
+                          PrefetchAcrossPersistent=1)
+        assert _validateStreamKMulticast(dict(state), False, _isa_map())
         state.update(overrides)
         assert not _validateStreamKMulticast(state, False, _isa_map())
 

@@ -539,13 +539,16 @@ def _validateStreamKMulticast(state, printRejectionReason, isaInfoMap):
   """
   if isStreamKSpatialCluster(state):
     constraints = (
-        (not state.get("PrefetchAcrossPersistent", 0), "PrefetchAcrossPersistent=0"),
         (state.get("PrefetchGlobalRead", 1) in (1, 2) or state.get("UseSubtileImpl", False),
          "PrefetchGlobalRead in (1,2) without UseSubtileImpl"),
         (not state.get("ProblemType", {}).get("OutputAmaxD", False), "OutputAmaxD=False"),
         (not (state.get("ProblemType", {}).get("Gradient", False)
               and state.get("ProblemType", {}).get("UseBias", False)), "no bias-gradient reduction"),
         (not state.get("DebugStreamK", 0), "DebugStreamK=0"),
+        # The subtile handoff issues the next slice without the empty-slice
+        # guard that keeps zero-iteration entries unprimed.
+        (not (state.get("PrefetchAcrossPersistent", 0) and state.get("UseSubtileImpl", False)),
+         "PrefetchAcrossPersistent=0 with UseSubtileImpl"),
     )
     for supported, requirement in constraints:
       if not supported:
