@@ -436,8 +436,11 @@ bool RunAIHeuristics(const SolverHeuristicConfig& solver_cfg,
 } // namespace solver
 } // namespace miopen
 
+#if MIOPEN_ENABLE_AI_KERNEL_TUNING
 // Returns the SolverHeuristicConfig for the 2D grouped Wrw solver. Exposed for testing
 // so that CPU tests can build the real IsValidSplitK gate from the actual deployed config.
-MIOPEN_INTERNALS_EXPORT const SolverHeuristicConfig& GetWrw2DSolverHeuristicConfig();
+MIOPEN_INTERNALS_EXPORT const miopen::solver::conv::SolverHeuristicConfig&
+GetWrw2DSolverHeuristicConfig();
+#endif // MIOPEN_ENABLE_AI_KERNEL_TUNING
 
 #endif // MIOPEN_ENABLE_AI_KERNEL_TUNING
