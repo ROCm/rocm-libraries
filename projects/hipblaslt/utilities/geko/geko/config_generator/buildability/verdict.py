@@ -33,7 +33,10 @@ class Verdict:
     over_cap: List[str] = field(default_factory=list)
 
 
-def _starts(failures: Sequence[Tuple[float, str, Dict[str, Any]]]) -> List[Dict[str, Any]]:
+_Failure = Tuple[float, str, Dict[str, Any]]  # overflow, resource, setting
+
+
+def _starts(failures: Sequence[_Failure]) -> List[Dict[str, Any]]:
     """Up to MULTI_STARTS failed kernels to start the one-at-a-time stage from: the closest to fitting
     for each over-used resource, then the next closest overall. Refusals with every resource under its
     cap (negative overflow) rank last: they never led to a build. Refused settings are never starts."""
@@ -57,19 +60,24 @@ def classify(checker: CodegenChecker, search: SettingSearch, mi: MI) -> Verdict:
     entries = search.mi_entries(mi)
     if not entries:
         return Verdict(mi, False, "", 0, reason="MI Designer emits no entry for this MI")
-    checks, best, best_m, seen = 0, None, None, set()
-    failures: List[Tuple[float, str, Dict[str, Any]]] = []  # (overflow, resource, setting)
+    checks, best, best_m = 0, None, None
+    failures: List[_Failure] = []
+    failed_by_key: Dict[str, _Failure] = {}
     refused: List[Tuple[Dict[str, Any], str]] = []  # (setting, reason): failures without resource counts
     accepted: Dict[str, bool] = {}  # the repair stage's validation verdicts
     unmodelled: Dict[int, int] = {}
 
-    def attempt(perms: Iterable[Dict[str, Any]], stage: str) -> Optional[Verdict]:
+    def attempt(
+        perms: Iterable[Dict[str, Any]], stage: str, neighbors: Optional[List[_Failure]] = None
+    ) -> Optional[Verdict]:
         nonlocal checks, best, best_m
         for s in perms:
             key = _key(s)
-            if key in seen:
+            previous = failed_by_key.get(key)
+            if previous is not None:
+                if neighbors is not None:
+                    neighbors.append(previous)
                 continue
-            seen.add(key)
             m = checker.measure(s)
             checks += 1
             if m.err == 0:
@@ -77,12 +85,17 @@ def classify(checker: CodegenChecker, search: SettingSearch, mi: MI) -> Verdict:
                 if m.vgpr is not None:
                     v.over_cap = sorted(r for r, u in m._usage().items() if u > 1)
                 return v
-            failures.append((m.overflow(), m.resource(), s))
-            if m.overflow() == math.inf:
+            overflow = m.overflow()
+            failure = (overflow, m.resource(), s)
+            failed_by_key[key] = failure
+            failures.append(failure)
+            if neighbors is not None:
+                neighbors.append(failure)
+            if overflow == math.inf:
                 refused.append((s, m.reason))
-            if best_m is None or m.overflow() < best_m.overflow():
+            if best_m is None or overflow < best_m.overflow():
                 best, best_m = s, m
-            if m.vgpr is not None and m.overflow() <= 0:
+            if m.vgpr is not None and overflow <= 0:
                 unmodelled[m.err] = unmodelled.get(m.err, 0) + 1
         return None
 
@@ -112,17 +125,33 @@ def classify(checker: CodegenChecker, search: SettingSearch, mi: MI) -> Verdict:
         # the search would have used without them; repair-generated ones fill the remaining slots.
         starts = _starts(failures[:before_repair])
         starts += [s for s in _starts(failures[before_repair:]) if not any(s is t for t in starts)]
-        for start in starts[:MULTI_STARTS]:
+        # The best newly measured neighbor and the best neighbor overall need not lead to the
+        # same kernel. Finish the new-neighbor walks first, so exploring cached alternatives
+        # cannot consume a setting that those walks would otherwise discover.
+        best_neighbor: Dict[str, Optional[_Failure]] = {}
+
+        def walk(start: Dict[str, Any], *, include_cached: bool) -> Optional[Verdict]:
             for _ in range(OFAT_PASSES):
+                key = _key(start)
                 n = len(failures)
-                v = attempt(search.one_at_a_time(start, entries), "one-at-a-time")
-                if v:
-                    return v
-                closer = min(failures[n:], key=lambda f: f[0], default=None)
-                start_ov = next(f[0] for f in failures if f[2] is start)
-                if closer is None or closer[0] >= start_ov:
+                if key not in best_neighbor:
+                    neighbors: List[_Failure] = []
+                    v = attempt(search.one_at_a_time(start, entries), "one-at-a-time", neighbors)
+                    if v:
+                        return v
+                    best_neighbor[key] = min(neighbors, key=lambda f: f[0], default=None)
+                closer = (best_neighbor[key] if include_cached else
+                          min(failures[n:], key=lambda f: f[0], default=None))
+                if closer is None or closer[0] >= failed_by_key[key][0]:
                     break
                 start = closer[2]
+            return None
+
+        for include_cached in (False, True):
+            for start in starts[:MULTI_STARTS]:
+                v = walk(start, include_cached=include_cached)
+                if v:
+                    return v
         return None
 
     v = stages() or Verdict(

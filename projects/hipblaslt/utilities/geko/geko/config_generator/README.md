@@ -177,6 +177,9 @@ A list whose `Architecture` and `GemmType` headers differ from the ARCH and GEMM
 copied to the wrong file) is not used: MI Designer warns and uses every candidate MI.
 For each buildable MI, the generator checks every DepthU below the one that built and stops at the first failed
 search going upward. This DepthU pass roughly doubles generation time.
+The one-parameter search first follows improvements found by trying new settings. If no kernel builds, it walks
+from the same starts again, this time allowing a setting measured earlier (for example, by repair) to guide the
+next step. The two walks share measurements: each distinct setting is code-generated at most once per search.
 Earlier runs on 352 workers took about 7 h for 96 non-int8 gfx950 lists and 3 h for 52 non-int8 gfx942 lists.
 The 24 int8 lists took about 4 h 43 min on 320 workers. Each MI runs in a fresh worker
 process; a worker can still need several GB for a large tile (the gfx1250 FP4 lists peak around 1.7 TB at 352
