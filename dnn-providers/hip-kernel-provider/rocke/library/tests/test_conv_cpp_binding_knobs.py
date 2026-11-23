@@ -57,7 +57,7 @@ _FWD = (
     178,
     180,
 )
-_DGRAD = (1, 8, 34, 50, 52, 87, 101, 116, 127, 128, 129, 130)
+_DGRAD = (1, 8, 34, 50, 52, 87, 101, 116, 127, 128, 129, 130, 147, 151, 152)
 _WGRAD = (10, 17, 18, 20, 22, 33, 114, 117, 133, 139, 140, 141, 142, 143, 144)
 # Stage 2 fold configs that build: the scalar folds and the vector / looped
 # ones (vec, rezero, ws_bf16, fold_loop, slab_par); 16-21 both engines refuse.

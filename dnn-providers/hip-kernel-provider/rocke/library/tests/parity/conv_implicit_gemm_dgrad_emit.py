@@ -12,7 +12,11 @@ from kernels.common.conv_implicit_gemm_dgrad import (
     DgradConvSpec,
     build_implicit_gemm_conv_dgrad,
 )
-from kernels.common._conv_implicit_gemm_common import ConvDataSpec, ConvProblem
+from kernels.common._conv_implicit_gemm_common import (
+    ConvAccumulatorEpilogue,
+    ConvDataSpec,
+    ConvProblem,
+)
 from _emit_common import run_emit
 
 
@@ -1244,10 +1248,48 @@ def _spec(idx: int):
         return _tf32_spec(idx)
     if 67 <= idx <= 70:
         return _split_k_cshuffle_spec(idx)
+    if idx in _EPI_ALIAS:
+        return _epi_alias_spec(idx)
     if idx >= 57 + _GFX942_3D_OFFSET:
         return _gfx942_3d_any(idx - _GFX942_3D_OFFSET)
 
     raise SystemExit(f"unknown config index {idx}")
+
+
+# cshuffle_no_alias and the fused accumulator epilogue on earlier configs:
+# (base config, overrides). Keep in lockstep with make_cfg_epi_alias() in
+# conv_implicit_gemm_dgrad_emit.c.
+#   147-150: cshuffle_no_alias on the stride-1 cshuffle (2), the tilde
+#            cshuffle (16), its split-K atomic form (67) and the split
+#            pixel-list box store (101)
+#   151-155: a non-identity acc_epilogue (its kernel-name tag) on the
+#            stride-1 direct store (0), the tilde cshuffle (16), the x-halo
+#            record loop (91), the ping-pong epilogue (98) and gfx1250 WMMA
+#            (13)
+#   156: clamp_min > clamp_max: rejected by both engines
+_EPI_A = ConvAccumulatorEpilogue(bias=0.5, scale=2.0, relu=True)
+_EPI_B = ConvAccumulatorEpilogue(scale=0.25, clamp_min=-1.0, clamp_max=6.0)
+_EPI_C = ConvAccumulatorEpilogue(relu=True, clamp_max=6.0)
+_EPI_ALIAS = {
+    147: (2, dict(cshuffle_no_alias=True)),
+    148: (16, dict(cshuffle_no_alias=True)),
+    149: (67, dict(cshuffle_no_alias=True)),
+    150: (101, dict(cshuffle_no_alias=True)),
+    151: (0, dict(acc_epilogue=_EPI_A)),
+    152: (16, dict(acc_epilogue=_EPI_B)),
+    153: (91, dict(acc_epilogue=_EPI_C)),
+    154: (98, dict(acc_epilogue=_EPI_A)),
+    155: (13, dict(acc_epilogue=_EPI_B)),
+    156: (0, dict(acc_epilogue=ConvAccumulatorEpilogue(clamp_min=2.0, clamp_max=1.0))),
+}
+
+
+def _epi_alias_spec(idx: int):
+    import dataclasses
+
+    base, kw = _EPI_ALIAS[idx]
+    spec, arch = _spec(base)
+    return dataclasses.replace(spec, **kw), arch
 
 
 # TF32 compute (ConvDataSpec(mma_dtype="tf32")): fp32 dY / W / dX, each LDS

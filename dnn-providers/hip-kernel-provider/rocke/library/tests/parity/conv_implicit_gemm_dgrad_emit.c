@@ -634,8 +634,61 @@ static int make_cfg_3d_any(int idx, rocke_dgrad_conv_spec_t* spec, const char** 
     return -1;
 }
 
+static int make_cfg(int idx, rocke_dgrad_conv_spec_t* spec, const char** arch);
+
+/* cshuffle_no_alias (147-150) and a non-identity acc_epilogue (151-156) on
+ * earlier configs. Keep in lockstep with _EPI_ALIAS in
+ * conv_implicit_gemm_dgrad_emit.py (which lists what each index covers). */
+static int make_cfg_epi_alias(int idx, rocke_dgrad_conv_spec_t* spec, const char** arch)
+{
+    static const int base[10] = {2, 16, 67, 101, 0, 16, 91, 98, 13, 0};
+    const int r = make_cfg(base[idx - 147], spec, arch);
+    if(r != 0)
+        return r;
+    if(idx <= 150)
+    {
+        spec->cshuffle_no_alias = true;
+        return 0;
+    }
+    rocke_conv_acc_epilogue_t* e = &spec->acc_epilogue;
+    if(idx == 151 || idx == 154)
+    {
+        /* _EPI_A */
+        e->bias = 0.5;
+        e->scale = 2.0;
+        e->relu = true;
+    }
+    else if(idx == 152 || idx == 155)
+    {
+        /* _EPI_B */
+        e->scale = 0.25;
+        e->has_clamp_min = true;
+        e->clamp_min = -1.0;
+        e->has_clamp_max = true;
+        e->clamp_max = 6.0;
+    }
+    else if(idx == 153)
+    {
+        /* _EPI_C */
+        e->relu = true;
+        e->has_clamp_max = true;
+        e->clamp_max = 6.0;
+    }
+    else
+    {
+        /* clamp_min > clamp_max */
+        e->has_clamp_min = true;
+        e->clamp_min = 2.0;
+        e->has_clamp_max = true;
+        e->clamp_max = 1.0;
+    }
+    return 0;
+}
+
 static int make_cfg(int idx, rocke_dgrad_conv_spec_t* spec, const char** arch)
 {
+    if(idx >= 147 && idx <= 156)
+        return make_cfg_epi_alias(idx, spec, arch);
     if(idx >= 57 + GFX942_3D_OFFSET)
         return make_cfg_3d_any(idx - GFX942_3D_OFFSET, spec, arch);
     *spec = rocke_dgrad_conv_spec_default();
