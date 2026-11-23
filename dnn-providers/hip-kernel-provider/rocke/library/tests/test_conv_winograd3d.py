@@ -1008,3 +1008,28 @@ def test_benchmark_verdict_is_scale_free():
     assert run_failed({"verify": "FAIL"}) and run_failed({"map_out_ok": False})
     assert run_failed({"det_identical": False})
     assert not run_failed({"verify": "PASS", "map_out_ok": True, "det_identical": True})
+
+
+def test_benchmark_rows_label_measured_and_modelled_fields():
+    """Every timed field of a benchmark row is listed as measured, the FLOP count as
+    modelled, and every throughput as derived from the two."""
+    from benchmarks.common.benchmark_winograd3d import _provenance
+
+    res = {
+        "flops_model": 10,
+        "ms_main": 1.0,
+        "ms_main_block": 1.0,
+        "ms_full": 2.0,
+        "eff_tf_main": 1e-8,
+        "eff_tf_full": 5e-9,
+        "verify": "PASS",
+    }
+    prov = _provenance(res)
+    assert prov["measured"] == ["ms_full", "ms_main", "ms_main_block"]
+    assert set(prov["modelled"]) == {"flops_model"}
+    assert set(prov["derived"]) == {"eff_tf_main", "eff_tf_full"}
+    assert "ms_main" in prov["derived"]["eff_tf_main"]
+    assert "mcyc" not in prov["derived"]
+    prov = _provenance(dict(res, b2b_ms=1.0, mhz=1.0, watt=1.0, mcyc=1.0))
+    assert {"b2b_ms", "mhz", "watt"} <= set(prov["measured"])
+    assert "mcyc" in prov["derived"] and "b2b_ms" in prov["timing_method"]

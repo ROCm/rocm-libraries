@@ -12,6 +12,11 @@ staged protocol (one stalled call per sample, median) -- the same protocol
 ``benchmark_conv_compare --timing staged`` reports. Two times are printed: the main
 kernel alone, and the whole call (weight transform + main kernel).
 
+Each result row says which of its numbers are measured and which are modelled
+(``provenance``, see :func:`_provenance`): the ``ms_*`` times are measured; ``flops_model``
+is the direct convolution's FLOP count, a model of the work rather than what the Winograd
+kernels execute; the ``eff_tf_*`` throughputs divide that model by a measured time.
+
 Example::
 
     python -m benchmarks.common.benchmark_winograd3d --shape 130,66,66,256,128
@@ -95,6 +100,39 @@ def _power_probe(fn, seconds=1.5):
     mhz = cs[len(cs) // 2]
     ms = (t1 - t0) / n * 1e3
     return {"b2b_ms": ms, "mhz": mhz, "watt": ej / (t1 - t0), "mcyc": ms * mhz / 1e3}
+
+
+def _provenance(res: dict) -> dict:
+    """Which fields of a result row are measured, modelled or derived, and how the
+    measured times were taken."""
+    out = {
+        "measured": sorted(
+            k for k in res if k.startswith("ms_") or k in ("b2b_ms", "mhz", "watt")
+        ),
+        "modelled": {
+            "flops_model": "direct-convolution FLOPs of the problem, 2*C*K*27*Do*Ho*Wo; "
+            "not the operations the Winograd kernels execute"
+        },
+        "derived": {
+            k: f"flops_model / {'ms_' + k[len('eff_tf_'):]} / 1e9 "
+            "(modelled FLOPs over a measured time)"
+            for k in res
+            if k.startswith("eff_tf_")
+        },
+        "timing_method": {
+            "ms_*": "staged: median of --iters launches, each its own stalled "
+            "event pair (time_launches_staged)",
+            "ms_main_block": "block: --iters back-to-back launches between one "
+            "event pair, averaged (time_launches)",
+        },
+    }
+    if "b2b_ms" in res:
+        out["derived"]["mcyc"] = "b2b_ms * mhz / 1e3"
+        out["timing_method"]["b2b_ms"] = (
+            "host wall clock over back-to-back launches; mhz and watt sampled "
+            "with amdsmi over the same window (--power)"
+        )
+    return out
 
 
 def _make_data(kind, xs, ws, dev):
@@ -694,7 +732,7 @@ def run_one(
         "label": label,
         "kernel": kern.name,
         "build_s": round(t_build, 1),
-        "flops": spec.flops,
+        "flops_model": spec.flops,
     }
     if frel:
         res["frel_plan"] = list(res_plan)
@@ -862,7 +900,7 @@ def run_one(
         res["ms_chain"] = median(
             time_launches_staged(chain, warmup=warmup, iters=iters)
         )
-        res["eff_tf_chain"] = spec.flops / res["ms_chain"] / 1e9
+        res["eff_tf_chain"] = res["flops_model"] / res["ms_chain"] / 1e9
     if aux is not None:
         res["ms_aux"] = median(
             time_launches_staged(aux_only, warmup=warmup, iters=iters)
@@ -911,11 +949,12 @@ def run_one(
         res["ms_pipe"] = median(
             time_launches_staged(pipe_fn, warmup=warmup, iters=iters)
         )
-        res["eff_tf_pipe"] = spec.flops / res["ms_pipe"] / 1e9
-    res["eff_tf_main"] = spec.flops / tm / 1e9
+        res["eff_tf_pipe"] = res["flops_model"] / res["ms_pipe"] / 1e9
+    res["eff_tf_main"] = res["flops_model"] / tm / 1e9
     if power:
         res.update(_power_probe(main))
-    res["eff_tf_full"] = spec.flops / tf / 1e9
+    res["eff_tf_full"] = res["flops_model"] / tf / 1e9
+    res["provenance"] = _provenance(res)
     print(json.dumps(res), flush=True)
     return res
 
