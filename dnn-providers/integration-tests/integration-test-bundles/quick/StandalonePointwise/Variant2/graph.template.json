@@ -1,0 +1,59 @@
+{
+  "compute_data_type": "float",
+  "intermediate_data_type": "float",
+  "io_data_type": "float",
+  "is_override_shape_enabled": false,
+  "min_required_engine_api_version": {
+    "major": 1,
+    "minor": 0,
+    "patch": 0
+  },
+  "name": "",
+  "nodes": [
+    {
+      "compute_data_type": "float",
+      "inputs": {
+        "axis_tensor_uid": "${case.attributes.axis_tensor_uid}",
+        "elu_alpha": "${case.attributes.elu_alpha}",
+        "in_0_tensor_uid": 0,
+        "in_1_tensor_uid": null,
+        "in_2_tensor_uid": null,
+        "operation": "${case.attributes.operation}",
+        "relu_lower_clip": "${case.attributes.relu_lower_clip}",
+        "relu_lower_clip_slope": "${case.attributes.relu_lower_clip_slope}",
+        "relu_upper_clip": "${case.attributes.relu_upper_clip}",
+        "softplus_beta": "${case.attributes.softplus_beta}",
+        "swish_beta": "${case.attributes.swish_beta}"
+      },
+      "name": "Standalone",
+      "outputs": {
+        "out_0_tensor_uid": 1
+      },
+      "type": "PointwiseAttributes"
+    }
+  ],
+  "tensors": [
+    {
+      "alignment": 16,
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "is_runtime_pass_by_value": false,
+      "name": "Standalone::A",
+      "ragged_offset_multiplier": 1,
+      "strides": "${case.strides}",
+      "uid": 0,
+      "virtual": false
+    },
+    {
+      "alignment": 16,
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "is_runtime_pass_by_value": false,
+      "name": "Standalone::Output",
+      "ragged_offset_multiplier": 1,
+      "strides": "${case.strides}",
+      "uid": 1,
+      "virtual": false
+    }
+  ]
+}

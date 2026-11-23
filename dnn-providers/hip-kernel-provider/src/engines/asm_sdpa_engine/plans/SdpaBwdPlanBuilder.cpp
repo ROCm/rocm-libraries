@@ -28,6 +28,7 @@
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <mutex>
 #include <optional>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <tuple>
@@ -51,6 +52,7 @@ using bwd_dispatch::AccumulatorMode;
 using hip_kernel_provider_common::BatchMode;
 using hip_kernel_provider_common::RoundingMode;
 using plan_utils::MaskType;
+using plan_utils::Rejection;
 
 using bwd_dispatch::BF16_CVT_FP16_SENTINEL;
 
@@ -323,24 +325,19 @@ bool wouldBwdDimsFitKernargFields(const hipdnn_flatbuffers_sdk::data_objects::Te
     return ok;
 }
 
-// True for a batch-mode graph, the only mode the engine serves: it passes no
+// Declines all but a batch-mode graph, the only mode the engine serves: it passes no
 // sequence offsets to the kernels and sizes the stats, D and dq_acc buffers
 // from B x S_q. Group mode (Q ragged; getBatchMode) would also need the total
 // sequence lengths, which the backward graph does not carry. In batch mode no
 // tensor may be ragged.
-bool isBatchModeGraph(const std::unordered_map<
-                          int64_t,
-                          const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>& tensorMap,
-                      const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& q)
+Rejection checkBatchModeGraph(const plan_utils::TensorMap& tensorMap,
+                              const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& q)
 {
-    // NOLINTNEXTLINE(readability-identifier-naming)
-    static const char* HIP_KERNEL_LOG_PREFIX = "[SdpaBwdPlanBuilder::isApplicable] ";
-
-    HIP_KERNEL_RETURN_FALSE_IF(getBatchMode(q) != BatchMode::BATCH,
-                               "group mode (ragged offsets) is not supported");
-    HIP_KERNEL_RETURN_FALSE_IF(!hipdnn_flatbuffers_sdk::utilities::hasNoRaggedTensorIds(tensorMap),
-                               "Ragged tensors are not supported in batch mode");
-    return true;
+    HIP_KERNEL_REJECT_IF(getBatchMode(q) != BatchMode::BATCH,
+                         "group mode (ragged offsets) is not supported");
+    HIP_KERNEL_REJECT_IF(!hipdnn_flatbuffers_sdk::utilities::hasNoRaggedTensorIds(tensorMap),
+                         "Ragged tensors are not supported in batch mode");
+    return std::nullopt;
 }
 
 // Validates that every byte stride consumed by the backward kernels fits in
@@ -925,154 +922,110 @@ bool isVerifiedDispatch(const std::string& archId, const KernelRequest& request)
 // Engine knob identifier for accumulator precision (a32 vs a16)
 static constexpr const char* K_ACC_TYPE_KNOB_NAME = "hipkernel.sdpa.bwd.accumulator_type";
 
-bool SdpaBwdPlanBuilder::isApplicable(
-    const Handle& handle, const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
+// Graph features only the backward attributes carry that the v3 backward kernels do not dispatch.
+static Rejection checkBwdUnsupportedFeatures(
+    const hipdnn_flatbuffers_sdk::data_objects::SdpaBackwardAttributes& attrs)
+{
+    HIP_KERNEL_REJECT_IF(attrs.padding_mask(), "padding_mask must be false");
+    // The ASM kernels take sequence positions only as cumulative offsets
+    // (getBatchMode), never as per-sequence lengths.
+    HIP_KERNEL_REJECT_IF(
+        attrs.seq_len_q_tensor_uid().has_value() || attrs.seq_len_kv_tensor_uid().has_value(),
+        "SEQ_LEN_Q/KV not supported: the ASM kernels take only cumulative sequence offsets");
+    // Dropout tensors are declined even at dropout_probability 0: AITER's keep mask (8-bit
+    // randoms per 32x32 tile) is not the Philox stream the FlyDSL SDPA engines' forwards draw,
+    // so this backward could not replay the mask another engine's forward dropped with.
+    HIP_KERNEL_REJECT_IF(attrs.seed_tensor_uid(), "seed tensor not supported");
+    HIP_KERNEL_REJECT_IF(attrs.offset_tensor_uid(), "offset tensor not supported");
+    HIP_KERNEL_REJECT_IF(attrs.dropout_mask_tensor_uid(), "dropout_mask tensor not supported");
+    HIP_KERNEL_REJECT_IF(attrs.dropout_scale_tensor_uid(), "dropout_scale tensor not supported");
+    HIP_KERNEL_REJECT_IF(attrs.dropout_scale_inv_tensor_uid(),
+                         "dropout_scale_inv tensor not supported");
+    HIP_KERNEL_REJECT_IF(attrs.dbias_tensor_uid(), "dbias tensor not supported");
+    return std::nullopt;
+}
+
+static Rejection
+    checkBwdApplicability(const Handle& handle,
+                          const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
-    // NOLINTNEXTLINE(readability-identifier-naming)
-    static const char* HIP_KERNEL_LOG_PREFIX = "[SdpaBwdPlanBuilder::isApplicable] ";
 
-    // Execute-time override shapes can diverge from the compile-time dims this
-    // builder matched exactly; the family serves fixed prebuilt shapes, so decline
-    // rather than risk a mismatch (RFC 0008 §4.6).
-    HIP_KERNEL_RETURN_FALSE_IF(opGraph.getGraph().is_override_shape_enabled(),
-                               "Graph has override shapes enabled");
+    HIP_KERNEL_RETURN_IF_REJECTED(
+        plan_utils::checkSdpaGraphBasics(opGraph, NodeAttributes::SdpaBackwardAttributes));
 
-    auto& nodeWrappers = opGraph.nodeWrappers();
-
-    auto deviceStringOpt
-        = plan_utils::tryGetDeviceString(handle.getStream(), "Could not query device string: ");
-    if(!deviceStringOpt)
-    {
-        return false;
-    }
+    const auto deviceStringOpt = plan_utils::tryGetDeviceString(
+        handle.getStream(), "[SdpaBwdPlanBuilder::isApplicable] Could not query device string: ");
+    HIP_KERNEL_REJECT_IF(!deviceStringOpt, "Could not query device string");
     const std::string& deviceString = *deviceStringOpt;
 
-    HIP_KERNEL_RETURN_FALSE_IF(
+    HIP_KERNEL_REJECT_IF(
         !bwd_dispatch::isSupportedArch(deviceString),
         "Device string does not match gfx942 or gfx950 (Actual value: " + deviceString + ")");
 
-    HIP_KERNEL_RETURN_FALSE_IF(nodeWrappers.size() != 1, "Graph has more than one node");
-    HIP_KERNEL_RETURN_FALSE_IF(nodeWrappers.front()->attributesType()
-                                   != NodeAttributes::SdpaBackwardAttributes,
-                               "Node attribute type is not SdpaBackwardAttributes");
-
-    const auto& attrs = nodeWrappers.front()->attributesAs<SdpaBackwardAttributes>();
+    const auto& attrs = opGraph.nodeWrappers().front()->attributesAs<SdpaBackwardAttributes>();
+    const auto& tensorMap = opGraph.getTensorMap();
 
     // Graph features the engine does not currently dispatch.
-    HIP_KERNEL_RETURN_FALSE_IF(attrs.dropout_probability().has_value()
-                                   && attrs.dropout_probability().value() != 0.f,
-                               "dropout_probability must be unset or zero (Actual value: "
-                                   + std::to_string(attrs.dropout_probability().value()) + ")");
-    HIP_KERNEL_RETURN_FALSE_IF(attrs.alibi_mask(), "alibi_mask must be false");
-    HIP_KERNEL_RETURN_FALSE_IF(attrs.padding_mask(), "padding_mask must be false");
-    // The ASM kernels take sequence positions only as cumulative offsets
-    // (getBatchMode), never as per-sequence lengths.
-    HIP_KERNEL_RETURN_FALSE_IF(
-        attrs.seq_len_q_tensor_uid().has_value() || attrs.seq_len_kv_tensor_uid().has_value(),
-        "SEQ_LEN_Q/KV not supported: the ASM kernels take only cumulative sequence offsets");
-    HIP_KERNEL_RETURN_FALSE_IF(attrs.attn_mask_tensor_uid(), "attn_mask tensor not supported");
-    // No dropout tensor either: AITER's keep mask (8-bit randoms per 32x32 tile) is not the
-    // Philox stream the FlyDSL SDPA engines' forwards draw, so this backward could not replay
-    // the mask another engine's forward dropped with.
-    HIP_KERNEL_RETURN_FALSE_IF(attrs.seed_tensor_uid(), "seed tensor not supported");
-    HIP_KERNEL_RETURN_FALSE_IF(attrs.offset_tensor_uid(), "offset tensor not supported");
-    HIP_KERNEL_RETURN_FALSE_IF(attrs.dropout_mask_tensor_uid(),
-                               "dropout_mask tensor not supported");
-    HIP_KERNEL_RETURN_FALSE_IF(attrs.dropout_scale_tensor_uid(),
-                               "dropout_scale tensor not supported");
-    HIP_KERNEL_RETURN_FALSE_IF(attrs.dropout_scale_inv_tensor_uid(),
-                               "dropout_scale_inv tensor not supported");
-    HIP_KERNEL_RETURN_FALSE_IF(attrs.dbias_tensor_uid(), "dbias tensor not supported");
+    HIP_KERNEL_RETURN_IF_REJECTED(plan_utils::checkCommonUnsupportedFeatures(attrs, tensorMap));
+    HIP_KERNEL_RETURN_IF_REJECTED(checkBwdUnsupportedFeatures(attrs));
 
-    // Accept scale_tensor_uid only when it is a runtime pass-by-value scalar
-    // (RFC 0016).  Non-pass-by-value scale tensors are not supported.
-    if(attrs.scale_tensor_uid().has_value())
-    {
-        const auto& scaleTensorMap = opGraph.getTensorMap();
-        const auto scaleIt = scaleTensorMap.find(attrs.scale_tensor_uid().value());
-        HIP_KERNEL_RETURN_FALSE_IF(scaleIt == scaleTensorMap.end(),
-                                   "scale_tensor_uid not found in tensor map");
-        HIP_KERNEL_RETURN_FALSE_IF(
-            !hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(scaleIt->second),
-            "scale tensor must be pass-by-value (compile-time constant or runtime)");
-    }
-
-    if(!plan_utils::isAttnScaleApplicable(attrs, opGraph.getTensorMap(), HIP_KERNEL_LOG_PREFIX))
-    {
-        return false;
-    }
+    HIP_KERNEL_RETURN_IF_REJECTED(plan_utils::checkAttnScale(attrs, tensorMap));
 
     // --- Validate required tensors ---
 
-    const auto& tensorMap = opGraph.getTensorMap();
-    HIP_KERNEL_RETURN_FALSE_IF(
-        !hip_kernel_provider::core::utils::hasNoStrayRaggedOffsetMultiplier(tensorMap),
-        "ragged_offset_multiplier is set on a tensor without a ragged offset");
-    HIP_KERNEL_RETURN_FALSE_IF(
-        !hip_kernel_provider::core::utils::hasOnly16ByteAlignedTensors(tensorMap),
-        "All tensors must be aligned to a multiple of 16 bytes");
+    // Required inputs (q, k, v, o, do, stats) and outputs (dq, dk, dv).
+    const TensorAttributes* qTensor = nullptr;
+    const TensorAttributes* kTensor = nullptr;
+    const TensorAttributes* vTensor = nullptr;
+    const TensorAttributes* oTensor = nullptr;
+    const TensorAttributes* doTensor = nullptr;
+    const TensorAttributes* statsTensor = nullptr;
+    const TensorAttributes* dqTensor = nullptr;
+    const TensorAttributes* dkTensor = nullptr;
+    const TensorAttributes* dvTensor = nullptr;
+    HIP_KERNEL_RETURN_IF_REJECTED(
+        plan_utils::findRequiredTensor(tensorMap, "q", attrs.q_tensor_uid(), qTensor));
+    HIP_KERNEL_RETURN_IF_REJECTED(
+        plan_utils::findRequiredTensor(tensorMap, "k", attrs.k_tensor_uid(), kTensor));
+    HIP_KERNEL_RETURN_IF_REJECTED(
+        plan_utils::findRequiredTensor(tensorMap, "v", attrs.v_tensor_uid(), vTensor));
+    HIP_KERNEL_RETURN_IF_REJECTED(
+        plan_utils::findRequiredTensor(tensorMap, "o", attrs.o_tensor_uid(), oTensor));
+    HIP_KERNEL_RETURN_IF_REJECTED(
+        plan_utils::findRequiredTensor(tensorMap, "do", attrs.do_tensor_uid(), doTensor));
+    HIP_KERNEL_RETURN_IF_REJECTED(
+        plan_utils::findRequiredTensor(tensorMap, "stats", attrs.stats_tensor_uid(), statsTensor));
+    HIP_KERNEL_RETURN_IF_REJECTED(
+        plan_utils::findRequiredTensor(tensorMap, "dq", attrs.dq_tensor_uid(), dqTensor));
+    HIP_KERNEL_RETURN_IF_REJECTED(
+        plan_utils::findRequiredTensor(tensorMap, "dk", attrs.dk_tensor_uid(), dkTensor));
+    HIP_KERNEL_RETURN_IF_REJECTED(
+        plan_utils::findRequiredTensor(tensorMap, "dv", attrs.dv_tensor_uid(), dvTensor));
 
-    // Required input tensor UIDs
-    const int64_t qUid = attrs.q_tensor_uid();
-    const int64_t kUid = attrs.k_tensor_uid();
-    const int64_t vUid = attrs.v_tensor_uid();
-    const int64_t oUid = attrs.o_tensor_uid();
-    const int64_t doUid = attrs.do_tensor_uid();
-    const int64_t statsUid = attrs.stats_tensor_uid();
-
-    // Required output tensor UIDs
-    const int64_t dqUid = attrs.dq_tensor_uid();
-    const int64_t dkUid = attrs.dk_tensor_uid();
-    const int64_t dvUid = attrs.dv_tensor_uid();
-
-    auto findTensor = [&](const char* name, int64_t uid) -> const TensorAttributes* {
-        auto it = tensorMap.find(uid);
-        if(it == tensorMap.end())
-        {
-            HIPDNN_PLUGIN_LOG_INFO(std::string{HIP_KERNEL_LOG_PREFIX} + name + " tensor UID "
-                                   + std::to_string(uid) + " not present in graph");
-            return nullptr;
-        }
-        return it->second;
-    };
-
-    const auto* qTensor = findTensor("q", qUid);
-    const auto* kTensor = findTensor("k", kUid);
-    const auto* vTensor = findTensor("v", vUid);
-    const auto* oTensor = findTensor("o", oUid);
-    const auto* doTensor = findTensor("do", doUid);
-    const auto* statsTensor = findTensor("stats", statsUid);
-    const auto* dqTensor = findTensor("dq", dqUid);
-    const auto* dkTensor = findTensor("dk", dkUid);
-    const auto* dvTensor = findTensor("dv", dvUid);
-    if(qTensor == nullptr || kTensor == nullptr || vTensor == nullptr || oTensor == nullptr
-       || doTensor == nullptr || statsTensor == nullptr || dqTensor == nullptr
-       || dkTensor == nullptr || dvTensor == nullptr)
+    // Virtual and pass-by-value tensors have no device buffer, and execute needs a device
+    // pointer for every operand. Q/K/V get the same check from checkRank4DeviceTensor below.
+    for(const auto& [label, tensor] : {std::pair{"o", oTensor},
+                                       std::pair{"do", doTensor},
+                                       std::pair{"stats", statsTensor},
+                                       std::pair{"dq", dqTensor},
+                                       std::pair{"dk", dkTensor},
+                                       std::pair{"dv", dvTensor}})
     {
-        return false;
+        HIP_KERNEL_RETURN_IF_REJECTED(plan_utils::checkDeviceBufferTensor(label, *tensor));
     }
-    if(!isBatchModeGraph(tensorMap, *qTensor))
+    for(const auto& [label, tensor] :
+        {std::pair{"q", qTensor}, std::pair{"k", kTensor}, std::pair{"v", vTensor}})
     {
-        return false;
+        HIP_KERNEL_RETURN_IF_REJECTED(plan_utils::checkRank4DeviceTensor(label, *tensor));
     }
-
-    HIP_KERNEL_RETURN_FALSE_IF(
-        qTensor->dims()->size() != 4,
-        "q tensor must be rank 4 (Actual rank: " + std::to_string(qTensor->dims()->size()) + ")");
-    HIP_KERNEL_RETURN_FALSE_IF(
-        kTensor->dims()->size() != 4,
-        "k tensor must be rank 4 (Actual rank: " + std::to_string(kTensor->dims()->size()) + ")");
-    HIP_KERNEL_RETURN_FALSE_IF(
-        vTensor->dims()->size() != 4,
-        "v tensor must be rank 4 (Actual rank: " + std::to_string(vTensor->dims()->size()) + ")");
+    HIP_KERNEL_RETURN_IF_REJECTED(checkBatchModeGraph(tensorMap, *qTensor));
 
     // Every dimension below is narrowed to 32 bits before it reaches a kernel,
     // starting with the head-dim cast and the mask classification further down,
     // so the range gate comes first.
-    HIP_KERNEL_RETURN_FALSE_IF(
-        !wouldBwdDimsFitKernargFields(*qTensor, *kTensor, *vTensor),
-        "Tensor dimensions overflow the 32-bit kernarg fields that carry them");
+    HIP_KERNEL_REJECT_IF(!wouldBwdDimsFitKernargFields(*qTensor, *kTensor, *vTensor),
+                         "Tensor dimensions overflow the 32-bit kernarg fields that carry them");
 
     auto toString = [](const flatbuffers::Vector<int64_t>* values) {
         return hipdnn_data_sdk::utilities::vecToString(
@@ -1125,13 +1078,12 @@ bool SdpaBwdPlanBuilder::isApplicable(
             return std::string(io.name) + " tensor (Actual dims: " + toString(dims)
                    + ", strides: " + toString(strides) + ")";
         };
-        HIP_KERNEL_RETURN_FALSE_IF(dims->size() != 4 || strides->size() != 4,
-                                   "rank-4 dims and strides required for " + describe());
-        HIP_KERNEL_RETURN_FALSE_IF(strides->Get(3) != 1,
-                                   "head-dim (innermost) stride must be 1 for " + describe());
-        HIP_KERNEL_RETURN_FALSE_IF(strides->Get(2) < dims->Get(3),
-                                   "sequence stride must be at least the head dim for "
-                                       + describe());
+        HIP_KERNEL_REJECT_IF(dims->size() != 4 || strides->size() != 4,
+                             "rank-4 dims and strides required for " + describe());
+        HIP_KERNEL_REJECT_IF(strides->Get(3) != 1,
+                             "head-dim (innermost) stride must be 1 for " + describe());
+        HIP_KERNEL_REJECT_IF(strides->Get(2) < dims->Get(3),
+                             "sequence stride must be at least the head dim for " + describe());
         bool oddIndexedStride = false;
         for(auto axis = io.firstIndexedAxis; axis < 3; ++axis)
         {
@@ -1140,8 +1092,8 @@ bool SdpaBwdPlanBuilder::isApplicable(
                 oddIndexedStride = true;
             }
         }
-        HIP_KERNEL_RETURN_FALSE_IF(oddIndexedStride,
-                                   "4-byte-indexed stride must be even for " + describe());
+        HIP_KERNEL_REJECT_IF(oddIndexedStride,
+                             "4-byte-indexed stride must be even for " + describe());
 
         // A zero batch or head stride on an output axis longer than 1 makes the
         // (batch, head) slices of dQ, dK or dV share memory. Each slice is written
@@ -1157,7 +1109,7 @@ bool SdpaBwdPlanBuilder::isApplicable(
         const bool zeroOutputStride = io.isOutput
                                       && ((dims->Get(0) > 1 && strides->Get(0) == 0)
                                           || (dims->Get(1) > 1 && strides->Get(1) == 0));
-        HIP_KERNEL_RETURN_FALSE_IF(
+        HIP_KERNEL_REJECT_IF(
             zeroOutputStride,
             "batch and head strides must be nonzero on axes longer than 1 for output "
                 + describe());
@@ -1182,16 +1134,16 @@ bool SdpaBwdPlanBuilder::isApplicable(
     // the expansion and reduction are implemented.
     auto numHeadsQ = qTensor->dims()->Get(1);
     auto numHeadsKv = kTensor->dims()->Get(1);
-    HIP_KERNEL_RETURN_FALSE_IF(numHeadsKv == 0 || numHeadsQ != numHeadsKv,
-                               "GQA/MQA backward requires dK/dV head expansion, which is not "
-                               "implemented (Actual: nhead_q="
-                                   + std::to_string(numHeadsQ)
-                                   + ", nhead_k=" + std::to_string(numHeadsKv) + ")");
+    HIP_KERNEL_REJECT_IF(numHeadsKv == 0 || numHeadsQ != numHeadsKv,
+                         "GQA/MQA backward requires dK/dV head expansion, which is not "
+                         "implemented (Actual: nhead_q="
+                             + std::to_string(numHeadsQ) + ", nhead_k=" + std::to_string(numHeadsKv)
+                             + ")");
 
     // Stats is FP32 (LSE from forward pass)
-    HIP_KERNEL_RETURN_FALSE_IF(statsTensor->data_type() != DataType::FLOAT,
-                               "stats tensor datatype must be FP32 (Actual type: "
-                                   + EnumNameDataType(statsTensor->data_type()) + ")");
+    HIP_KERNEL_REJECT_IF(statsTensor->data_type() != DataType::FLOAT,
+                         "stats tensor datatype must be FP32 (Actual type: "
+                             + EnumNameDataType(statsTensor->data_type()) + ")");
 
     // LSE and the D workspace must be packed [B, H_q, S_q] FP32. Every gfx942
     // batch-mode DQDKDV kernel computes the offset of both as
@@ -1205,18 +1157,17 @@ bool SdpaBwdPlanBuilder::isApplicable(
     const int64_t seqLenQ = qTensor->dims()->Get(2);
     const auto* statsDims = statsTensor->dims();
     const auto* statsStrides = statsTensor->strides();
-    HIP_KERNEL_RETURN_FALSE_IF(
+    HIP_KERNEL_REJECT_IF(
         (statsDims->size() != 3 && (statsDims->size() != 4 || statsDims->Get(3) != 1))
             || statsStrides->size() != statsDims->size() || statsDims->Get(0) != batchSize
             || statsDims->Get(1) != numHeadsQ || statsDims->Get(2) != seqLenQ,
         "stats tensor must be [B, H_q, S_q] or [B, H_q, S_q, 1] matching Q (Actual dims: "
             + toString(statsDims) + ", strides: " + toString(statsStrides) + ")");
-    HIP_KERNEL_RETURN_FALSE_IF(
-        (batchSize != 1 && statsStrides->Get(0) != numHeadsQ * seqLenQ)
-            || (numHeadsQ != 1 && statsStrides->Get(1) != seqLenQ)
-            || (seqLenQ != 1 && statsStrides->Get(2) != 1),
-        "stats tensor strides must be packed [H_q * S_q, S_q, 1] (Actual strides: "
-            + toString(statsStrides) + ")");
+    HIP_KERNEL_REJECT_IF((batchSize != 1 && statsStrides->Get(0) != numHeadsQ * seqLenQ)
+                             || (numHeadsQ != 1 && statsStrides->Get(1) != seqLenQ)
+                             || (seqLenQ != 1 && statsStrides->Get(2) != 1),
+                         "stats tensor strides must be packed [H_q * S_q, S_q, 1] (Actual strides: "
+                             + toString(statsStrides) + ")");
 
     auto dataTypeIdOpt = tryGetDataTypeIdentifier(qTensor->data_type(),
                                                   kTensor->data_type(),
@@ -1226,7 +1177,7 @@ bool SdpaBwdPlanBuilder::isApplicable(
                                                   dkTensor->data_type(),
                                                   dvTensor->data_type());
 
-    HIP_KERNEL_RETURN_FALSE_IF(
+    HIP_KERNEL_REJECT_IF(
         !dataTypeIdOpt,
         "All Q/K/V/dO/dQ/dK/dV tensors must share a supported dtype (BF16 or FP16). "
         "Actual: q="
@@ -1240,20 +1191,19 @@ bool SdpaBwdPlanBuilder::isApplicable(
     const auto& dataTypeId = *dataTypeIdOpt;
 
     // The kernels read O in the dtype of Q, K and V, with the same element size.
-    HIP_KERNEL_RETURN_FALSE_IF(oTensor->data_type() != qTensor->data_type(),
-                               "O tensor dtype must equal the Q/K/V dtype (O: "
-                                   + EnumNameDataType(oTensor->data_type())
-                                   + ", Q: " + EnumNameDataType(qTensor->data_type()) + ")");
+    HIP_KERNEL_REJECT_IF(oTensor->data_type() != qTensor->data_type(),
+                         "O tensor dtype must equal the Q/K/V dtype (O: "
+                             + EnumNameDataType(oTensor->data_type())
+                             + ", Q: " + EnumNameDataType(qTensor->data_type()) + ")");
 
     auto headDimQk = static_cast<int>(qTensor->dims()->Get(3));
     auto headDimV = static_cast<int>(vTensor->dims()->Get(3));
 
     // Head dims AITER does not send to the ASM kernels on this arch, including
     // the ones the registry has rows for (see bwd_dispatch::isBatchShapeSupported).
-    HIP_KERNEL_RETURN_FALSE_IF(
-        !bwd_dispatch::isBatchShapeSupported(deviceString, headDimQk, headDimV),
-        deviceString + " backward does not serve D_qk = " + std::to_string(headDimQk)
-            + ", D_v = " + std::to_string(headDimV));
+    HIP_KERNEL_REJECT_IF(!bwd_dispatch::isBatchShapeSupported(deviceString, headDimQk, headDimV),
+                         deviceString + " backward does not serve D_qk = "
+                             + std::to_string(headDimQk) + ", D_v = " + std::to_string(headDimV));
 
     // Each kernel takes B, H, S_q, S_kv, D_qk and D_v once, from Q, K and V, and
     // addresses every tensor with them, so O, dO and dQ must have Q's batch,
@@ -1262,7 +1212,7 @@ bool SdpaBwdPlanBuilder::isApplicable(
     // checks only that both divide H_q); DQDKDV then reads V and writes dV past
     // their last head. On gfx942, H_q = H_k = 4 with H_v = 2 or 1 gave wrong dQ,
     // dK and dV.
-    HIP_KERNEL_RETURN_FALSE_IF(
+    HIP_KERNEL_REJECT_IF(
         kTensor->dims()->Get(0) != batchSize || kTensor->dims()->Get(3) != headDimQk,
         "k tensor batch and head dim must equal q's (Actual dims: k " + toString(kTensor->dims())
             + ", q " + toString(qTensor->dims()) + ")");
@@ -1285,12 +1235,12 @@ bool SdpaBwdPlanBuilder::isApplicable(
     {
         const auto* dims = match.tensor->dims();
         const auto* refDims = match.ref->dims();
-        HIP_KERNEL_RETURN_FALSE_IF(!std::equal(dims->begin(), dims->begin() + 3, refDims->begin())
-                                       || dims->Get(3) != match.headDim,
-                                   std::string(match.name) + " tensor dims must be " + match.refName
-                                       + " dims with head dim " + std::to_string(match.headDim)
-                                       + " (Actual: " + match.name + " " + toString(dims) + ", "
-                                       + match.refName + " " + toString(refDims) + ")");
+        HIP_KERNEL_REJECT_IF(!std::equal(dims->begin(), dims->begin() + 3, refDims->begin())
+                                 || dims->Get(3) != match.headDim,
+                             std::string(match.name) + " tensor dims must be " + match.refName
+                                 + " dims with head dim " + std::to_string(match.headDim)
+                                 + " (Actual: " + match.name + " " + toString(dims) + ", "
+                                 + match.refName + " " + toString(refDims) + ")");
     }
 
     // Classify the mask and build the lookup request. Contradictory mask
@@ -1321,17 +1271,15 @@ bool SdpaBwdPlanBuilder::isApplicable(
     }
     catch(const hipdnn_plugin_sdk::HipdnnPluginException& e)
     {
-        HIPDNN_PLUGIN_LOG_INFO(std::string{HIP_KERNEL_LOG_PREFIX} + e.what());
-        return false;
+        return Rejection{e.what()};
     }
     const auto& request = classified.request;
 
     // Windows AITER sends to CK (see bwd_dispatch::isBatchWindowSupported).
-    HIP_KERNEL_RETURN_FALSE_IF(
-        classified.maskType == MaskType::SLIDING_WINDOW
-            && !bwd_dispatch::isBatchWindowSupported(deviceString, headDimQk),
-        deviceString
-            + " backward does not serve a sliding window at D_qk = " + std::to_string(headDimQk));
+    HIP_KERNEL_REJECT_IF(classified.maskType == MaskType::SLIDING_WINDOW
+                             && !bwd_dispatch::isBatchWindowSupported(deviceString, headDimQk),
+                         deviceString + " backward does not serve a sliding window at D_qk = "
+                             + std::to_string(headDimQk));
 
     std::optional<fmha_v3_bwdConfig> dqdkdvCfg;
     for(const auto stage : {bwd_dispatch::PipelineStage::ODO,
@@ -1341,16 +1289,16 @@ bool SdpaBwdPlanBuilder::isApplicable(
         auto cfg = resolveStageConfig(stage, deviceString, request);
         if(!cfg)
         {
-            HIPDNN_PLUGIN_LOG_INFO(
-                HIP_KERNEL_LOG_PREFIX
-                << "No matching " << stageName(stage) << " kernel for arch=" << deviceString
-                << " dtype=" << dataTypeId << " D_qk=" << headDimQk << " D_v=" << headDimV
-                << " mask=" << request.mask << " atomic32=" << request.atomic32
-                << " S_q=" << seqLenQ << " S_kv=" << seqLenKv << " pssk0_strides="
-                << static_cast<int>(request.psskOffStridesOk) << " pssk0_offsets="
-                << static_cast<int>(bwd_dispatch::psskOffOffsetsFitU32(request))
-                << " mode=" << request.mode << " bf16_cvt=" << request.bf16Cvt);
-            return false;
+            std::ostringstream reason;
+            reason << "No matching " << stageName(stage) << " kernel for arch=" << deviceString
+                   << " dtype=" << dataTypeId << " D_qk=" << headDimQk << " D_v=" << headDimV
+                   << " mask=" << request.mask << " atomic32=" << request.atomic32
+                   << " S_q=" << seqLenQ << " S_kv=" << seqLenKv
+                   << " pssk0_strides=" << static_cast<int>(request.psskOffStridesOk)
+                   << " pssk0_offsets="
+                   << static_cast<int>(bwd_dispatch::psskOffOffsetsFitU32(request))
+                   << " mode=" << request.mode << " bf16_cvt=" << request.bf16Cvt;
+            return reason.str();
         }
         if(stage == bwd_dispatch::PipelineStage::DQDKDV)
         {
@@ -1363,21 +1311,33 @@ bool SdpaBwdPlanBuilder::isApplicable(
     // execute time so the engine can be excluded from heuristics for graphs it
     // cannot represent. Uses the resolved DQDKDV row's tile size for the Ts
     // product (tsKv * stride_k * BF16).
-    HIP_KERNEL_RETURN_FALSE_IF(!wouldBwdByteStridesFitUint32(*qTensor,
-                                                             *kTensor,
-                                                             *vTensor,
-                                                             *oTensor,
-                                                             *doTensor,
-                                                             *dqTensor,
-                                                             *dkTensor,
-                                                             *dvTensor,
-                                                             batchSize,
-                                                             numHeadsQ,
-                                                             seqLenQ,
-                                                             headDimQk,
-                                                             dqdkdvCfg->ts),
-                               "Backward byte strides overflow uint32_t kernarg fields");
+    HIP_KERNEL_REJECT_IF(!wouldBwdByteStridesFitUint32(*qTensor,
+                                                       *kTensor,
+                                                       *vTensor,
+                                                       *oTensor,
+                                                       *doTensor,
+                                                       *dqTensor,
+                                                       *dkTensor,
+                                                       *dvTensor,
+                                                       batchSize,
+                                                       numHeadsQ,
+                                                       seqLenQ,
+                                                       headDimQk,
+                                                       dqdkdvCfg->ts),
+                         "Backward byte strides overflow uint32_t kernarg fields");
 
+    return std::nullopt;
+}
+
+bool SdpaBwdPlanBuilder::isApplicable(
+    const Handle& handle, const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
+{
+    const auto rejection = checkBwdApplicability(handle, opGraph);
+    if(rejection.has_value())
+    {
+        HIPDNN_PLUGIN_LOG_INFO("[SdpaBwdPlanBuilder::isApplicable] " << *rejection);
+        return false;
+    }
     return true;
 }
 

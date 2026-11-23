@@ -1173,6 +1173,76 @@ TEST(TestFlydslSdpaRdnaKernelMatch, ADecodeObjectServesEveryRowCountItsGridHolds
     EXPECT_FALSE(matches(64, 1, 16384)) << "65536 row tiles: past the grid's second dimension";
 }
 
+TEST(TestFlydslSdpaRdnaKernelMatch, APrefillObjectDeclinesALaunchPastThirtyTwoBitWorkItems)
+{
+    // One head and one-row sequences: one workgroup per batch. A 64-row tile is four row groups
+    // of one 32-lane wave, 128 threads, so x holds 2^25 - 1 workgroups before it passes 2^32
+    // work-items.
+    const auto prefill = makeFlydslSdpaRdnaKernel("bf16", 64, 0, 64);
+    const auto batches = [](int64_t batch) {
+        SdpaGraphSpec spec;
+        spec.batch = batch;
+        spec.heads = 1;
+        spec.kvHeads = 1;
+        spec.seqLenQ = 1;
+        spec.seqLenKv = 1;
+        return spec;
+    };
+    const auto matches = [&prefill](const SdpaGraphSpec& spec) {
+        const GraphFixture fixture(buildFlydslSdpaRdnaGraph(spec));
+        return matchesKernel(FLYDSL_SDPA_RDNA, fixture.context(), prefill, bindingsFor(spec));
+    };
+    EXPECT_TRUE(matches(batches((int64_t{1} << 25) - 1)));
+    EXPECT_FALSE(matches(batches(int64_t{1} << 25)));
+}
+
+TEST(TestFlydslSdpaRdnaKernelMatch, ADecodeObjectDeclinesAMainLaunchPastThirtyTwoBitWorkItems)
+{
+    // One head and one-row sequences make one split, so x is batch * dv_split workgroups of
+    // four 32-lane waves, 128 threads: with two column tiles it holds 2^25 - 2 workgroups
+    // before it passes 2^32 work-items.
+    const auto decode = makeFlydslSdpaRdnaKernel("bf16", 64, 0, 16, 32, 2, 0, 64, 1);
+    const auto batches = [](int64_t batch) {
+        SdpaGraphSpec spec;
+        spec.batch = batch;
+        spec.heads = 1;
+        spec.kvHeads = 1;
+        spec.seqLenQ = 1;
+        spec.seqLenKv = 1;
+        return spec;
+    };
+    const auto matches = [&decode](const SdpaGraphSpec& spec) {
+        const GraphFixture fixture(buildFlydslSdpaRdnaGraph(spec));
+        return matchesKernel(FLYDSL_SDPA_RDNA_DECODE, fixture.context(), decode, bindingsFor(spec));
+    };
+    EXPECT_TRUE(matches(batches((int64_t{1} << 24) - 1)));
+    EXPECT_FALSE(matches(batches(int64_t{1} << 24)));
+}
+
+TEST(TestFlydslSdpaRdnaKernelMatch, ADecodeObjectDeclinesAMergeLaunchPastThirtyTwoBitWorkItems)
+{
+    // 16 query heads over one KV head and one-row sequences: one split, so the main grid is
+    // the batch (128 threads, far inside 2^32 work-items) and the merge grid is batch * 16
+    // workgroups of 64 threads, which holds 2^26 - 1 before it passes 2^32 work-items: a batch
+    // of 2^22 declines and 2^22 - 1 is served.
+    const auto decode = makeFlydslSdpaRdnaKernel("bf16", 16, 0, 16, 32, 1, 0, 16, 1);
+    const auto matches = [&decode](int64_t batch) {
+        SdpaGraphSpec spec;
+        spec.batch = batch;
+        spec.heads = 16;
+        spec.kvHeads = 1;
+        spec.seqLenQ = 1;
+        spec.seqLenKv = 1;
+        spec.headDim = 16;
+        const GraphFixture fixture(buildFlydslSdpaRdnaGraph(spec));
+        const auto bound = matchesGraph(FLYDSL_SDPA_RDNA_DECODE, fixture.context());
+        return bound.has_value()
+               && matchesKernel(FLYDSL_SDPA_RDNA_DECODE, fixture.context(), decode, *bound);
+    };
+    EXPECT_TRUE(matches((int64_t{1} << 22) - 1));
+    EXPECT_FALSE(matches(int64_t{1} << 22));
+}
+
 TEST(TestFlydslSdpaRdnaKernelMatch, AWideGenericDecodeTierServesMultiplesOfEightUpTo512)
 {
     // Kernel modification 30: the generic decode tier up to 512, its columns split four
@@ -5628,6 +5698,24 @@ TEST(TestFlydslSdpaAiwKernelMatch, AdmitsTheObjectBuiltForTheGraphAndDeclinesOth
     EXPECT_FALSE(aiwMatches(spec, makeAiwKernel("bf16", 128, 0)));
     EXPECT_FALSE(aiwMatches(spec, makeAiwKernel("bf16", 64, 1)));
     EXPECT_FALSE(aiwMatches(spec, makeAiwKernel("bf16", 64, 0, 64, 0, 0, int64_t{64}, 1)));
+}
+
+TEST(TestFlydslSdpaAiwKernelMatch, DeclinesAMainLaunchPastThirtyTwoBitWorkItemsInX)
+{
+    // One batch, one K head and one-row sequences: x is Hq workgroups of 256 threads, and
+    // holds 2^24 - 1 of them before it passes 2^32 work-items.
+    const auto object = makeAiwKernel("bf16", 64, 0);
+    const auto heads = [](int64_t numHeads) {
+        SdpaGraphSpec spec;
+        spec.batch = 1;
+        spec.heads = numHeads;
+        spec.kvHeads = 1;
+        spec.seqLenQ = 1;
+        spec.seqLenKv = 1;
+        return spec;
+    };
+    EXPECT_TRUE(aiwMatches(heads((int64_t{1} << 24) - 1), object));
+    EXPECT_FALSE(aiwMatches(heads(int64_t{1} << 24), object));
 }
 
 // ---------------------------------------------------------------------------

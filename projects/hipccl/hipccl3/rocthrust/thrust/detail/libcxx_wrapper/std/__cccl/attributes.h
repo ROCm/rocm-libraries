@@ -12,8 +12,8 @@
 #ifndef LIBCXX_WRAPPER_STD__CCCL_ATTRIBUTES_H
 #define LIBCXX_WRAPPER_STD__CCCL_ATTRIBUTES_H
 
-// TODO(libhipcxx): remove this file and replace THRUST_DECLSPEC_EMPTY_BASES, THRUST_NODISCARD* and
-// THRUST_ALIAS_ATTRIBUTE with _CCCL_DECLSPEC_EMPTY_BASES, _CCCL_NODISCARD* and _CCCL_ALIAS_ATTRIBUTE in rocThrust
+// TODO(libhipcxx): remove this file and replace THRUST_DECLSPEC_EMPTY_BASES, THRUST_NODISCARD_FRIEND and
+// THRUST_ALIAS_ATTRIBUTE with _CCCL_DECLSPEC_EMPTY_BASES, _CCCL_NODISCARD_FRIEND and _CCCL_ALIAS_ATTRIBUTE in rocThrust
 // once libhipcxx gets ready
 
 #include <thrust/detail/config/libcxx.h>
@@ -26,7 +26,6 @@
 #  define THRUST_HAS_ATTRIBUTE(__x)     _CCCL_HAS_ATTRIBUTE(__x)
 #  define THRUST_HAS_CPP_ATTRIBUTE(__x) _CCCL_HAS_CPP_ATTRIBUTE(__x)
 #  define THRUST_DECLSPEC_EMPTY_BASES   _CCCL_DECLSPEC_EMPTY_BASES
-#  define THRUST_NODISCARD              _CCCL_NODISCARD
 #  define THRUST_NODISCARD_FRIEND       _CCCL_NODISCARD_FRIEND
 #  define THRUST_NORETURN               _CCCL_NORETURN
 
@@ -56,16 +55,10 @@
 #    define THRUST_DECLSPEC_EMPTY_BASES
 #  endif // !THRUST_COMPILER(MSVC)
 
-#  if THRUST_HAS_CPP_ATTRIBUTE(nodiscard) || THRUST_COMPILER(MSVC)
-#    define THRUST_NODISCARD [[nodiscard]]
-#  else // ^^^ has nodiscard ^^^ / vvv no nodiscard vvv
-#    define THRUST_NODISCARD
-#  endif // no nodiscard
-
 #  if THRUST_COMPILER(CLANG)
 #    define THRUST_NODISCARD_FRIEND friend
 #  else
-#    define THRUST_NODISCARD_FRIEND THRUST_NODISCARD friend
+#    define THRUST_NODISCARD_FRIEND [[nodiscard]] friend
 #  endif
 
 #  if THRUST_COMPILER(MSVC)

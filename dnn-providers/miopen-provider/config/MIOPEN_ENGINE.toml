@@ -60,19 +60,6 @@ filters = ["*_ConvolutionWrw_Default.8_16_16_16_16_bfp16_ncdhw_dil1x1x1_postpad0
 atol = 1.19
 rtol = 0.3
 
-# 3D fp32 conv forward accumulates a ~432-term dot product in fp32 on both GPU and CPU
-# reference, giving an ~1-2e-5 absolute error floor independent of output magnitude.
-# The default 1e-5 atol dips below it for small-magnitude outputs (flaky on Windows
-# gfx1151). atol 5e-5 clears the floor and stays ~50x below the worst-case bound
-# (~2.5e-3); rtol stays at the 1e-5 default. Case ids come from
-# reference-data-scripts/generate_conv_fwd_bundles.py:
-# <items>_3d_i<spatial>_n<N>c<C>k<K>_f<filter>_fp32_<layout>.
-# Like any matching entry, it replaces the dynamic tolerance of those cases whole.
-[[tolerance_overrides]]
-filters = ["*_ConvolutionFwd_Default.*_3d_*_fp32_*", "*_ConvolutionFwdPointwise_*.*_3d_*_fp32_*"]
-atol = 5e-5
-rtol = 1e-5
-
 # Conv forward fp32 numerical floor, calibrated on gfx942 from the conv-fwd test plan
 # run (docs/test-plans/convolution-fwd.md). MIOpen and the GPU reference accumulate in
 # different orders, so the absolute error of a long fp32 reduction grows with the

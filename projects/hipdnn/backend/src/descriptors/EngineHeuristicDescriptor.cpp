@@ -91,23 +91,33 @@ std::vector<int64_t> EngineHeuristicDescriptor::resolveHeuristicPolicyOrder()
                                  _policyOrder.size());
         return _policyOrder;
     }
-    // 3. Default policy list — Config first so HIPDNN_HEUR_CONFIG_PATH
-    // rules win when set; StaticOrdering is the last-resort fallback and always succeeds
-    // when there is at least one candidate. Vendor heuristic plugins may be inserted via env
-    // or descriptor attribute above.
+    // 3. The heuristic mode's list, as CUDNN_ATTR_ENGINEHEUR_MODE selects cuDNN's heuristic.
+    // Config runs first so HIPDNN_HEUR_CONFIG_PATH rules and the exact-match autotune cache
+    // win when they apply. Mode A then ranks applicable engines by their engine-level (L1)
+    // prediction in the ranking metric and mode B by their configuration-level (L2) one,
+    // falling back to L1 (RFC 0019 §11.2); either declines when no engine has a usable
+    // prediction. StaticOrdering is last: the model-free order, and all of FALLBACK.
     //
     // StaticOrdering ranks engines (RFC 0007); it is unrelated to RFC 0019's `static_order`
-    // UHD adapter, which ranks kernels inside one engine. Prediction policies (ModeA/ModeB)
-    // are not injected here: callers request them through the policy order (RFC 0007 §5.3.2).
-    std::vector<int64_t> policyIds = {
-        hipdnn_data_sdk::utilities::policyNameToId("SelectionHeuristic::Config"),
-        hipdnn_data_sdk::utilities::policyNameToId("SelectionHeuristic::StaticOrdering"),
-    };
-    HIPDNN_BACKEND_LOG_WARN(
-        "No heuristic policy order configured, falling back to built-in defaults "
-        "[SelectionHeuristic::Config, SelectionHeuristic::StaticOrdering]. "
-        "Set HIPDNN_HEUR_POLICY_ORDER or the descriptor attribute to silence "
-        "this warning.");
+    // UHD adapter, which ranks kernels inside one engine.
+    using hipdnn_data_sdk::utilities::policyNameToId;
+    std::vector<int64_t> policyIds{policyNameToId("SelectionHeuristic::Config")};
+    switch(_heuristicMode)
+    {
+    case HIPDNN_HEUR_MODE_A:
+        policyIds.push_back(policyNameToId(hipdnn_data_sdk::utilities::MODE_A_POLICY_NAME));
+        break;
+    case HIPDNN_HEUR_MODE_B:
+        policyIds.push_back(policyNameToId(hipdnn_data_sdk::utilities::MODE_B_POLICY_NAME));
+        break;
+    case HIPDNN_HEUR_MODE_FALLBACK:
+    default: // setHeuristicMode() admits no other mode.
+        break;
+    }
+    policyIds.push_back(policyNameToId("SelectionHeuristic::StaticOrdering"));
+    HIPDNN_BACKEND_LOG_DEBUG("Using the policy order of heuristic mode {}: {} policies",
+                             static_cast<int>(_heuristicMode),
+                             policyIds.size());
     return policyIds;
 }
 
@@ -523,7 +533,8 @@ void EngineHeuristicDescriptor::setHeuristicMode(hipdnnBackendAttributeType_t at
         "EngineHeuristicDescriptor failed to set heuristic mode: Heuristic mode is null.");
 
     auto heurModeValue = *heurMode;
-    if(heurModeValue != HIPDNN_HEUR_MODE_FALLBACK)
+    if(heurModeValue != HIPDNN_HEUR_MODE_FALLBACK && heurModeValue != HIPDNN_HEUR_MODE_A
+       && heurModeValue != HIPDNN_HEUR_MODE_B)
     {
         throw HipdnnException(HIPDNN_STATUS_NOT_SUPPORTED,
                               "EngineHeuristicDescriptor::setHeuristicMode() is not "

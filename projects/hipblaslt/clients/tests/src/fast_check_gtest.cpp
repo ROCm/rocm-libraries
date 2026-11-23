@@ -1320,30 +1320,55 @@ namespace
         refused(p, "combine to values below 2^61");
     }
 
-    // A case that cannot fit must say which memory is short and by how much; one that fits must
-    // get an empty answer.
-    // The large fast_check tiers run only under a gtest filter: an unfiltered run, or one that
-    // only excludes, skips them; any selecting pattern runs them.
-    TEST(FastCheck_pre_checkin, large_tiers_need_a_selecting_filter)
+    // The stress and sdc_hunt fast_check cases skip in a run whose filter selects nothing in
+    // particular. A stress case runs under any other filter, such as QA's *matmul*. An sdc_hunt
+    // case runs only when a positive pattern names sdc_hunt, so *matmul* must skip it.
+    TEST(FastCheck_pre_checkin, on_demand_fast_check_cases_run_only_on_request)
     {
-        const std::string saved = ::testing::GTEST_FLAG(filter);
-        for(const auto& [filter, given] : std::vector<std::pair<std::string, bool>>{
-                {"*", false},
-                {"", false},
-                {"*-*known_bug*", false},
-                {"*stress*-*known_bug*", true},
-                {"*threshold*", true},
-                {"*smoke*:*quick*:*pre_checkin*-*known_bug*", true}})
+        struct Row
         {
-            ::testing::GTEST_FLAG(filter) = filter;
-            EXPECT_EQ(hipblaslt_gtest_filter_given(), given) << filter;
+            const char* filter;
+            const char* category;
+            int8_t      fast_check;
+            bool        skipped;
+        };
+        const std::string saved = ::testing::GTEST_FLAG(filter);
+        for(const Row& row :
+            std::vector<Row>{{"*matmul*", "sdc_hunt", 1, true},
+                             {"*fast_check*", "sdc_hunt", 1, true},
+                             {"*stress*", "sdc_hunt", 1, true},
+                             {"*", "sdc_hunt", 1, true},
+                             {"", "sdc_hunt", 1, true},
+                             {"*-*known_bug*", "sdc_hunt", 1, true},
+                             {"*-*sdc_hunt*", "sdc_hunt", 1, true},
+                             {"*sdc*", "sdc_hunt", 1, true},
+                             {"*sdc_hunt*", "sdc_hunt", 1, false},
+                             {"*matmul*:*sdc_hunt*", "sdc_hunt", 1, false},
+                             {"*matmul*sdc_hunt*-*known_bug*", "sdc_hunt", 1, false},
+                             {"*", "stress", 1, true},
+                             {"", "stress", 1, true},
+                             {"*-*known_bug*", "stress", 1, true},
+                             {"*matmul*", "stress", 1, false},
+                             {"*threshold*", "stress", 1, false},
+                             {"*stress*-*known_bug*", "stress", 1, false},
+                             {"*smoke*:*stress*-*known_bug*", "stress", 1, false},
+                             {"*", "stress", 0, false},
+                             {"*", "sdc_hunt", 0, false},
+                             {"*", "nightly", 1, false}})
+        {
+            ::testing::GTEST_FLAG(filter) = row.filter;
+            Arguments arg{};
+            std::snprintf(arg.category, sizeof(arg.category), "%s", row.category);
+            arg.fast_check = row.fast_check;
+            EXPECT_EQ(hipblaslt_skip_on_demand_case(arg), row.skipped)
+                << "filter " << row.filter << ", category " << row.category << ", fast_check "
+                << int(row.fast_check);
         }
         ::testing::GTEST_FLAG(filter) = saved;
-        EXPECT_TRUE(hipblaslt_category_needs_a_filter("stress"));
-        EXPECT_TRUE(hipblaslt_category_needs_a_filter("sdc_hunt"));
-        EXPECT_FALSE(hipblaslt_category_needs_a_filter("nightly"));
     }
 
+    // A case that cannot fit must say which memory is short and by how much; one that fits must
+    // get an empty answer.
     TEST(FastCheckDevice_pre_checkin, memory_shortfall_names_the_short_memory)
     {
         EXPECT_EQ(fast_check_memory_shortfall(0, 0), "");
