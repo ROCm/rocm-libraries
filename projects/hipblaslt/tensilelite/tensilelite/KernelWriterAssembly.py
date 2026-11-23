@@ -19523,8 +19523,8 @@ class KernelWriterAssembly(KernelWriter):
          and (kernel["GlobalSplitU"] > 1 or kernel["GlobalSplitU"] == -1):
         continue
       betaModule = Module("Beta_%u"%betaIdx)
-      tdmVectorWidths = tdmStoreBlocks(kernel, edge, atomic, self.states.bpeCexternalGSU1, vectorWidths)
-      tdmNonEdge = edge and bool(tdmStoreBlocks(kernel, False, atomic, self.states.bpeCexternalGSU1, vectorWidths))
+      tdmVectorWidths = tdmStoreBlocks(kernel, edge, atomic, vectorWidths)
+      tdmNonEdge = edge and bool(tdmStoreBlocks(kernel, False, atomic, vectorWidths))
       if globalWriteMode == "MBSKBuffer":
         # The buffer_store copy of the reduced tile, for a GSU at which each wave reduces on its own.
         tdmVectorWidths, tdmNonEdge = [], False
@@ -21558,9 +21558,7 @@ class KernelWriterAssembly(KernelWriter):
       # larger GSU each wave takes the last decrement of its own synchronizer slot. A reduced tile that takes the
       # block therefore gets a buffer_store copy, and the GSU picks the copy at run time.
       mbskBufferLabels = {}
-      if kernel["MbskPrefetchMethod"] == 0 and tdmStoreBlocks(
-          {"TDMStoreInst": kernel["TDMStoreInst"], "_GlobalAccumulation": "MultipleBufferSingleKernel",
-           "MbskPrefetchMethod": 0}, edge, atomic, self.states.bpeCexternalGSU1, vectorWidths):
+      if kernel["MbskPrefetchMethod"] == 0 and kernel["TDMStoreInst"] and not atomic:
         # OptNLL_MBSK runs at GSU 1 only, without a reduction, and keeps its single store.
         if "MBSK" in globalWriteModes:
           mbskBufferLabels["MBSK"] = Label(self.labels.getNameInc("GW_MBSKBuffer"), "buffer_store copy of the reduced tile")
