@@ -43,14 +43,14 @@ def runCI =
 
         def gfilter = "*nightly*"
         // Host and MPI builds are CPU-only, so the gfx90a XNACK runs add nothing there.
-        commonGroovy.runTestCommand(platform, project, gfilter, label == '')
+        commonGroovy.runTestCommand(platform, project, gfilter, !(label in ['Host', 'MPI']))
     }
 
     def packageCommand =
     {
         platform, project->
 
-        commonGroovy.runPackageCommand(platform, project, jobName)
+        commonGroovy.runPackageCommand(platform, project, jobName, label)
     }
 
     buildProject(prj, formatCheck, nodes.dockerArray, compileCommand, testCommand, packageCommand)
@@ -60,14 +60,14 @@ def runCI =
 // one agent, so fold the list into a single label expression. The library joins
 // os and arch with &&, which yields ubuntu24-therock&&(gfx90a||gfx942||gfx950)
 // and lets the scheduler take whichever of those agents is free.
-def anySingleArch(jobNameList)
+def collapseArchList(jobNameList)
 {
     def collapsed = [:]
     jobNameList.each { jobName, nodeDetails ->
         def platforms = [:]
         nodeDetails.each { os, archs ->
-            // The machine-config value is not always a Collection (it can be an
-            // array), so instanceof Collection let the three-arch list through.
+            // The machine-config value can be a String, a List or a String[], so
+            // iterate anything that is not a single string.
             def items = []
             if (archs instanceof CharSequence)
                 items << archs.toString()
@@ -90,7 +90,7 @@ def setupCI(urlJobName, jobNameList, buildCommand, runCI, label)
 
     // Host and MPI builds are CPU-only. Queue one agent, whichever configured
     // architecture is free, instead of one run per architecture.
-    def nodesForRun = (label == 'Host' || label == 'MPI') ? anySingleArch(jobNameList) : jobNameList
+    def nodesForRun = (label in ['Host', 'MPI']) ? collapseArchList(jobNameList) : jobNameList
 
     nodesForRun.each
     {

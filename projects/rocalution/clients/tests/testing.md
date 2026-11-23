@@ -375,7 +375,7 @@ so its thread count depends on the agent it lands on, and a failure that depends
 can look intermittent.
 
 > **Important nuance:** the Jenkins `runTestCommand` GTest filter is commented out, so those
-> lanes run the **full** `rocalution-test` suite (no emulation subset), followed by
+> lanes run the **full** `rocalution-test` suite (no emulation subset), after
 > `rocalution-unit-test` and `rocalution-unit-test-lifecycle`, which run unfiltered. The intended
 > `*checkin*` / `*nightly*` filters match no current test names. The modern TheRock gate, by
 > contrast, selects the subset through the `ROCALUTION_EMULATION_*` env var of the CTest category.
@@ -395,9 +395,9 @@ can look intermittent.
 | Release qualification | N/A | Component team + QA + TPM | Readiness and known-gap review |
 
 **Jenkins build variants:** default `./install.sh -c` (HIP + OpenMP); host `./install.sh -c --host`;
-MPI `./install.sh -c --host --mpi=on --no-openmp`. The test step runs `rocalution-test`,
-`rocalution-unit-test` and `rocalution-unit-test-lifecycle` from `build/release/clients/staging`
-and stops at the first binary that fails. In the default build on gfx90a, it then runs
+MPI `./install.sh -c --host --mpi=on --no-openmp`. The test step runs `rocalution-unit-test`,
+`rocalution-unit-test-lifecycle` and `rocalution-test`, in that order, from
+`build/release/clients/staging` and stops at the first binary that fails. In the default build on gfx90a, it then runs
 `rocalution-test` again with `HSA_XNACK=0` and `HSA_XNACK=1` for the HMM cases; the host and MPI
 builds skip those runs.
 
