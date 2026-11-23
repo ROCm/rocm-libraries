@@ -586,7 +586,8 @@ hipTensor test runtimes can last an hour or more. Here are some things you can d
 
 *  CTest runs the entire test suite, but you can invoke tests individually by name.
 *  Use GoogleTest filters to target specific test cases. Pass the ``--gtest_filter`` flag or set
-   the ``GTEST_FILTER`` environment variable:
+   the ``GTEST_FILTER`` environment variable. ``<test_exe> --help`` lists the hipTensor test
+   options and the GoogleTest flags:
 
    .. code-block:: bash
 

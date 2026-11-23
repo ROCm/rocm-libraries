@@ -26,6 +26,7 @@
 #include "hiptensor_options.hpp"
 #include "utils.hpp"
 
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
 #include <gtest/gtest.h>
@@ -37,6 +38,21 @@
 
 int main(int argc, char** argv)
 {
+    // --help lists the hipTensor options and then the Google Test flags, and runs no tests.
+    // Google Test only recognizes --help, so it gets that spelling whichever one was passed.
+    if(std::any_of(argv + 1, argv + argc, [](char const* arg) {
+           return std::strcmp(arg, "--help") == 0 || std::strcmp(arg, "-help") == 0;
+       }))
+    {
+        hiptensor::printHelp(argv[0]);
+        std::printf("\n");
+        char  gtestHelpFlag[] = "--help";
+        char* gtestArgv[]     = {argv[0], gtestHelpFlag, nullptr};
+        int   gtestArgc       = 2;
+        testing::InitGoogleTest(&gtestArgc, gtestArgv);
+        return 0;
+    }
+
     // Parse hiptensor test options. The YAML config must be loaded before Google Test registers
     // the value-parameterized tests, so the options are parsed before InitGoogleTest. Hand the
     // parser argv without the Google Test flags, which it would reject as unknown arguments.

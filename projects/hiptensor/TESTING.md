@@ -84,7 +84,7 @@ ctest -j$(nproc)               # same, running test binaries in parallel
 
 There is no ctest filter to run only the unit tests currently.
 
-To run a subset of GoogleTest cases in any hipTensor test binary, pass `--gtest_filter` (or set the `GTEST_FILTER` environment variable). The shared test `main()` hands the `--gtest_*` flags to GoogleTest and the remaining arguments to the hipTensor option parser.
+To run a subset of GoogleTest cases in any hipTensor test binary, pass `--gtest_filter` (or set the `GTEST_FILTER` environment variable). The shared test `main()` hands the `--gtest_*` flags to GoogleTest and the remaining arguments to the hipTensor option parser. `--help` lists the hipTensor options followed by the GoogleTest flags.
 
 ```bash
 ./bin/concurrency_test --gtest_filter='AllOps/ConcurrencyTest.*/Permute_*'
