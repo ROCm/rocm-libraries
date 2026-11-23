@@ -162,11 +162,8 @@ namespace
 
     // Block row i holds 0 to 3 blocks (every fifth block row is empty). With
     // imag, entry (row, col) gets the imaginary part (row + 2 * col) % 3 - 1.
-    HostSparse make_bsr(int64_t             mb,
-                        int64_t             kb,
-                        int64_t             block_dim,
-                        rocsparse_direction dir,
-                        bool                imag = false)
+    HostSparse make_bsr(
+        int64_t mb, int64_t kb, int64_t block_dim, rocsparse_direction dir, bool imag = false)
     {
         HostSparse a;
         a.format    = rocsparse_format_bsr;
@@ -704,8 +701,8 @@ namespace
             for(int64_t j = 0; j < n; ++j)
             {
                 const int64_t idx = b_idx(j, a.t_col[e]);
-                want[a.t_row[e] + a.m * j] += cplx(a.t_val[e], a.t_val_im[e])
-                                              * std::conj(cplx(b_re[idx], b_im[idx]));
+                want[a.t_row[e] + a.m * j]
+                    += cplx(a.t_val[e], a.t_val_im[e]) * std::conj(cplx(b_re[idx], b_im[idx]));
             }
         }
         for(int64_t i = 0; i < a.m * n; ++i)
