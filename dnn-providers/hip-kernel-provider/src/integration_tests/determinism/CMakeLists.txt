@@ -117,4 +117,11 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR AND HIPDNN_ENABLE_SDPA)
         DEFINITIONS ${_hkp_determinism_flydsl_fwd_definitions})
     _hkp_determinism_add_group(IntegrationGpuSdpaDeterminismFlydslBwd.cpp
         DEFINITIONS ${_hkp_determinism_flydsl_bwd_definitions})
+
+    # The claim-coverage check: host-only, but it reads the rows every group above
+    # registered, so it compiles alongside them rather than unconditionally like the harness
+    # self-check above.
+    target_sources(hip_kernel_provider_integration_tests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/IntegrationSdpaDeterminismClaimCoverage.cpp
+    )
 endif()

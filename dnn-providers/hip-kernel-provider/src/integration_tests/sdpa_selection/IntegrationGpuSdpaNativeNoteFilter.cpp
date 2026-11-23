@@ -299,6 +299,9 @@ private:
 
         if(_survivors.empty())
         {
+            ASSERT_FALSE(_row.expectsSurvivor)
+                << _row.name << " expects a claimed engine to survive, but every ranked engine ("
+                << engineNamesText(ranked) << ") reports NONDETERMINISTIC";
             // Every ranked engine reports NONDETERMINISTIC: nothing may be selected.
             expectRefused(graph, _row.name + " (ranked: " + engineNamesText(ranked) + ")");
             return;

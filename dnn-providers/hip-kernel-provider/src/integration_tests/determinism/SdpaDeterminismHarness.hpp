@@ -1158,6 +1158,24 @@ private:
         "sdpa-determinism-case", hipdnn_test_sdk::utilities::ScopedTestCacheDir::Scope::TEST};
 };
 
+/// One registered row's identity, kept for a host-only check across the whole binary: which
+/// engine it pins, which architectures it runs on (skipped elsewhere) and whether a passing
+/// run is expected (PROVEN) or the row is a known hazard, measured and reported only
+/// (MEASURE_ONLY). registerRows appends to this as every determinism translation unit's
+/// static initializer runs, before main() applies any --gtest_filter.
+struct RegisteredRow
+{
+    std::string engine;
+    std::vector<std::string> archs;
+    Disposition disposition;
+};
+
+inline std::vector<RegisteredRow>& registeredDeterminismRows()
+{
+    static std::vector<RegisteredRow> rows;
+    return rows;
+}
+
 /// Registers every row of @p rows as a gtest case under the names in the file comment. Called
 /// from a static initializer of the row's own file, before main() runs the tests. A row name
 /// registered twice is a defect of the tables and terminates the process.
@@ -1179,6 +1197,8 @@ inline bool registerRows(std::vector<DeterminismRow> rows)
             suite = "Measure/IntegrationGpuSdpaDeterminismMeasure";
             test = "DISABLED_RepeatsBitwise/" + row.name;
         }
+        registeredDeterminismRows().push_back(
+            {row.meta.engine, row.meta.archs, row.meta.disposition});
         if(!registered.insert(suite + "." + test).second)
         {
             std::cerr << "SDPA determinism row registered twice: " << suite << "." << test << "\n";

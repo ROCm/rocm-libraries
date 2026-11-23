@@ -18,8 +18,10 @@
  * Shared by the native suite (IntegrationGpuSdpaNativeNoteFilter.cpp) and the cuDNN v9 shim suite
  * (IntegrationGpuCudnnShimSdpaDeterministic.cpp), so both list the same rows. No claim is listed
  * here: which engines survive is read from the engines' notes at run time, and a claim lives in
- * the engine's descriptor. The one fixed fact is per row: the engines named in
- * SelectionRow::unclaimedRanked rank the row's graph and report NONDETERMINISTIC.
+ * the engine's descriptor. Two fixed facts are per row: the engines named in
+ * SelectionRow::unclaimedRanked rank the row's graph and report NONDETERMINISTIC; and whether a
+ * claimed engine ranks the graph at all (SelectionRow::expectsSurvivor), so the filter leaves a
+ * survivor.
  */
 // CMakeLists.txt defines them for the integration binary: the comma-separated architectures an
 // engine of the build serves the forward and the backward graph on.
@@ -55,6 +57,11 @@ struct SelectionRow
     /// each is in the unfiltered ranking and reports NONDETERMINISTIC, and the native pin test
     /// pins the first.
     std::vector<std::string> unclaimedRanked;
+    /// Whether a claimed engine ranks the row's graph on this architecture, so the filter is
+    /// expected to leave a survivor. False only where every ranked engine is unclaimed
+    /// (BwdAsmOnly on gfx942, where ASM_SDPA_ENGINE ranks alone and backward never claims).
+    /// A fact about the graph's ranking, not a list of claimed engines.
+    bool expectsSurvivor = true;
 };
 
 /// The registered names of @p ids (the hexadecimal id of an unregistered one), for messages and
@@ -82,6 +89,9 @@ inline std::vector<SelectionRow> selectionRows()
         std::vector<std::string> unclaimedArchs;
         /// The engines that rank the graph on those architectures and report NONDETERMINISTIC.
         std::vector<std::string> unclaimed;
+        /// The architectures on which every ranked engine is unclaimed, so no survivor is
+        /// expected.
+        std::vector<std::string> noSurvivorArchs;
     };
     // A row exists only for an architecture an engine of this build serves its graph on
     // (CMakeLists.txt defines the HKP_SDPA_SELECTION_* macros), so no row fails for want of any
@@ -121,6 +131,7 @@ inline std::vector<SelectionRow> selectionRows()
                      {"gfx90a", "gfx942", "gfx950", "gfx1100", "gfx1201"},
                      fwdServed,
                      {},
+                     {},
                      {}});
     // Backward: ASM_SDPA_ENGINE accepts the packed bf16 hd128 graph (equal heads at
     // SdpaBwdPlanBuilder.cpp:1185-1186, packed stats at :1196-1219) beside the FlyDSL split engine,
@@ -138,14 +149,16 @@ inline std::vector<SelectionRow> selectionRows()
                      {"gfx90a", "gfx942", "gfx950", "gfx1100"},
                      bwdServed,
                      bwdUnclaimedArchs,
-                     bwdUnclaimed});
+                     bwdUnclaimed,
+                     {}});
 #ifdef HKP_SDPA_SELECTION_ASM_ONLY
     cases.push_back({"BwdAsmOnly",
                      GraphKind::BACKWARD_ASM_ONLY,
                      {"gfx942"},
                      {"gfx942"},
                      {"gfx942"},
-                     {"ASM_SDPA_ENGINE"}});
+                     {"ASM_SDPA_ENGINE"},
+                     {"gfx942"}});
 #endif
     std::vector<SelectionRow> rows;
     for(const auto& selectionCase : cases)
@@ -159,9 +172,9 @@ inline std::vector<SelectionRow> selectionRows()
             rows.push_back({std::string(selectionCase.token) + "_" + arch,
                             selectionCase.kind,
                             arch,
-                            built(selectionCase.unclaimedArchs, arch)
-                                ? selectionCase.unclaimed
-                                : std::vector<std::string>{}});
+                            built(selectionCase.unclaimedArchs, arch) ? selectionCase.unclaimed
+                                                                      : std::vector<std::string>{},
+                            !built(selectionCase.noSurvivorArchs, arch)});
         }
     }
     return rows;

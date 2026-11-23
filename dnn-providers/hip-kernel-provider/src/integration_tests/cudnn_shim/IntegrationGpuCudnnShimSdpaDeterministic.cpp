@@ -184,6 +184,9 @@ public:
 
         if(survivors.empty())
         {
+            ASSERT_FALSE(_row.expectsSurvivor)
+                << _row.name << " expects a claimed engine to survive, but every ranked engine ("
+                << engineNamesText(ranked) << ") reports NONDETERMINISTIC";
             // Every ranked engine reports NONDETERMINISTIC. The first non-good status of the
             // staged build is create_execution_plans, where the shim applies its filters and
             // finds no surviving plan.
