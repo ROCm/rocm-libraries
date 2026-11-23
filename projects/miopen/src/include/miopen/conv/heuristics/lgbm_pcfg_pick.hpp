@@ -9,6 +9,8 @@
 
 #include <miopen/config.hpp> // MIOPEN_INTERNALS_EXPORT
 
+#include <miopen/miopen.h> // miopenDataType_t
+
 #include <functional>
 #include <optional>
 #include <string>
@@ -24,6 +26,8 @@ enum class Direction;
 namespace ai {
 namespace lgbm {
 namespace pcfg {
+
+struct SolverModel; // lgbm_pcfg_metadata.hpp
 
 // Candidates ranked best->worst by predicted speed (higher score = faster): descs[i] is scored
 // scores[i]. A "" desc denotes the solver default config.
@@ -65,6 +69,25 @@ ScorePickForTest(const std::string& solver_name,
                  const std::vector<double>& prob_feature_prefix,
                  const std::vector<std::string>& cand_descs,
                  const std::vector<std::vector<double>>& cand_args);
+
+// Test hook: the ranking (descriptors and scores) PickConfig would use for `solver_name`'s bucket
+// `bucket_key` (arch|direction|dtype) and the feature prefix `prob_feature_prefix`, through the
+// per-process memo (`cached`) or computed directly. Empty when the solver or the bucket is unknown.
+MIOPEN_INTERNALS_EXPORT RankedConfigs
+RankBucketForTest(const std::string& solver_name,
+                  const std::string& bucket_key,
+                  const std::vector<double>& prob_feature_prefix,
+                  bool cached);
+
+// Bucket key "<gfx_id>|<direction code>|<dtype>" that PickConfig looks up in a solver's
+// buckets. `device_name` is the name Handle::GetDeviceName() returns; it is normalized
+// (NormalizeArchName in lgbm_common.hpp), so "gfx1250-strict" gives the "gfx1250|..." key.
+MIOPEN_INTERNALS_EXPORT std::string
+BucketKey(const std::string& device_name, conv::Direction direction, miopenDataType_t data_type);
+
+// gfx_code feature for solvers trained with one (SolverModel::has_gfx_code): the index of the
+// normalized device name in the model's own gfx_vocab, -1 (missing category) if absent.
+MIOPEN_INTERNALS_EXPORT int GfxCode(const SolverModel& model, const std::string& device_name);
 
 // True when the picker must not use `solver_name`'s model for (gfx_id, direction), whether or not
 // lgbm_pcfg.bin has buckets for it. PickConfig then abstains and the solver runs its default

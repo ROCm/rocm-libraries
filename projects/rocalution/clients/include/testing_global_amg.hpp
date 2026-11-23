@@ -41,9 +41,14 @@ using namespace rocalution;
 // only its local data, rank 1 sets local and ghost data. Both ranks call one setter, so they
 // run the same collectives.
 //
-// amg is one of "SAAMG", "UAAMG", "RSAMG-Direct", "RSAMG-ExtPI".
+// amg is one of "SAAMG", "UAAMG", "RSAMG-Direct", "RSAMG-ExtPI". With a nonzero
+// host_levels, the solve is repeated after SetHostLevels() and ReBuildNumeric(); a negative
+// host_levels moves all coarse levels to the host.
 template <typename T>
-void testing_global_amg_one_sided_coupling(const std::string& amg, bool coo, bool use_acc)
+void testing_global_amg_one_sided_coupling(const std::string& amg,
+                                           bool               coo,
+                                           bool               use_acc,
+                                           int                host_levels = 0)
 {
     if(!testing_mpi_launched())
     {
@@ -66,6 +71,13 @@ void testing_global_amg_one_sided_coupling(const std::string& amg, bool coo, boo
     disable_accelerator_rocalution(false);
     set_device_rocalution(device);
     init_rocalution();
+
+    // The exact check after ReBuildNumeric() needs the host reductions in a fixed order, and
+    // other tests in this binary change the OpenMP threshold without restoring it
+    if(!use_acc)
+    {
+        set_omp_threads_rocalution(1);
+    }
 
     // The HIP backend reads past the end of a missing ghost row pointer instead of
     // dereferencing NULL, which only faults once the boundary row is far enough out.
@@ -202,7 +214,6 @@ void testing_global_amg_one_sided_coupling(const std::string& amg, bool coo, boo
     // b = A * 1
     e.Ones();
     mat.Apply(e, &b);
-    x.Zeros();
 
     BiCGStab<GlobalMatrix<T>, GlobalVector<T>, T> ls;
     ls.Verbose(0);
@@ -211,38 +222,86 @@ void testing_global_amg_one_sided_coupling(const std::string& amg, bool coo, boo
     SAAMG<GlobalMatrix<T>, GlobalVector<T>, T>          sa;
     UAAMG<GlobalMatrix<T>, GlobalVector<T>, T>          ua;
     RugeStuebenAMG<GlobalMatrix<T>, GlobalVector<T>, T> rs;
+    BaseAMG<GlobalMatrix<T>, GlobalVector<T>, T>*       p = nullptr;
 
     if(amg == "SAAMG")
     {
         sa.SetCoarseningStrategy(CoarseningStrategy::PMIS);
-        sa.Verbose(0);
-        ls.SetPreconditioner(sa);
+        p = &sa;
     }
     else if(amg == "UAAMG")
     {
         ua.SetCoarseningStrategy(CoarseningStrategy::PMIS);
-        ua.Verbose(0);
-        ls.SetPreconditioner(ua);
+        p = &ua;
     }
     else
     {
         rs.SetCoarseningStrategy(CoarseningStrategy::PMIS);
         rs.SetInterpolationType(amg == "RSAMG-Direct" ? InterpolationType::Direct
                                                       : InterpolationType::ExtPI);
-        rs.Verbose(0);
-        ls.SetPreconditioner(rs);
+        p = &rs;
     }
+    p->Verbose(0);
+    ls.SetPreconditioner(*p);
 
     ls.Build();
     ls.Init(1e-10, 1e-10, 1e+8, 1000);
-    ls.Solve(b, &x);
 
     // x should be the vector of ones
-    e.ScaleAdd(static_cast<T>(-1), x);
-    T error = e.Norm() / std::sqrt(static_cast<T>(2 * n));
+    const auto expect_solved = [&]() {
+        x.Zeros();
+        ls.Solve(b, &x);
 
-    EXPECT_LT(error, static_cast<T>(1e-6));
-    EXPECT_LT(ls.GetIterationCount(), 1000);
+        e.Ones();
+        e.ScaleAdd(static_cast<T>(-1), x);
+        T error = e.Norm() / std::sqrt(static_cast<T>(2 * n));
+
+        EXPECT_LT(error, static_cast<T>(1e-6));
+        EXPECT_LT(ls.GetIterationCount(), 1000);
+    };
+
+    expect_solved();
+
+    if(host_levels != 0)
+    {
+        // Fewer levels put all coarse levels on the host, and miss the boundary between the
+        // levels on the backend of the finest and the host levels
+        if(host_levels > 0)
+        {
+            EXPECT_GT(p->GetNumLevels(), host_levels + 1);
+        }
+
+        const int    iter = ls.GetIterationCount();
+        const double res  = ls.GetCurrentResidual();
+
+        // Doubling all values is exact. On the host, with one thread, it leaves the iterates of
+        // the solve unchanged and doubles its residuals
+        mat.Scale(static_cast<T>(2));
+        e.Ones();
+        mat.Apply(e, &b);
+
+        const int h = host_levels < 0 ? p->GetNumLevels() - 1 : host_levels;
+
+        p->SetHostLevels(h);
+        p->ReBuildNumeric();
+
+        SCOPED_TRACE("SetHostLevels(" + std::to_string(h) + ") and ReBuildNumeric");
+        expect_solved();
+
+        // A wrong or stale coarse operator or smoother can still converge. On the host, the
+        // rebuilt hierarchy must give exactly the same iterates. With use_acc, the host levels
+        // are now computed on the host and only agree up to rounding, so this mainly checks
+        // their backends and parallel managers
+        if(use_acc)
+        {
+            EXPECT_NEAR(ls.GetIterationCount(), iter, 1);
+        }
+        else
+        {
+            EXPECT_EQ(ls.GetIterationCount(), iter);
+            EXPECT_EQ(ls.GetCurrentResidual(), 2 * res);
+        }
+    }
 
     ls.Clear();
     mat.Clear();

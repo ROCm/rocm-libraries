@@ -4,7 +4,6 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 
 
 ## (Unreleased) rocSOLVER
-## (Unreleased) rocSOLVER 3.39
 
 ### Added
 ### Changed
@@ -12,7 +11,6 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 ### Optimized
 ### Resolved issues
 
-* Fixed failure of large batch count > 64 * 1024 for POTRF, POTF2, POTRS, POSV, POTRI.
 * Improved the accuracy of BDSQR (and GESVD), STEQR and the Jacobi eigensolvers and SVD
   (SYEVJ/HEEVJ, GESVDJ): the plane rotations of LARTG were slightly biased, which reduced the
   accuracy of the singular values and eigenvalues by up to one or two orders of magnitude for large
@@ -23,6 +21,14 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 
 ### Known issues
 ### Upcoming changes
+
+
+
+## rocSOLVER 3.39.0 for ROCm 10.3.0
+
+### Resolved issues
+
+* Fixed failure of large batch count > 64 * 1024 for POTRF, POTF2, POTRS, POSV, POTRI.
 
 
 
