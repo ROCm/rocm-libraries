@@ -310,3 +310,58 @@ TEST(csrmv_adaptive_analysis, good_fit_for_empty_partition)
     const std::vector<int> ptr{0};
     EXPECT_FALSE(poor_fit(blocks, ptr));
 }
+
+namespace
+{
+    std::vector<int> split_rows(const std::vector<int>& blocks, const std::vector<int>& wg_ids)
+    {
+        rocsparse::csrmv_partition<int, int> partition;
+        partition.row_blocks = blocks;
+        partition.wg_ids     = wg_ids;
+        return partition.split_rows();
+    }
+}
+
+// csrmv_partition::split_rows lists the rows whose workgroups only atomic-add, so that beta
+// and the extra terms are applied to them first. ComputeRowBlocks gives the w-th of the n
+// workgroups of a long row the block [row, row) with workgroup id w, except the last one,
+// [row, row + 1) with id n - 1. A stream block keeps its reduction width in the workgroup id.
+TEST(csrmv_adaptive_analysis, split_rows_two_workgroups)
+{
+    // Rows 0-2 stream (reduction width 64), row 3 in two workgroups, rows 4-5 stream.
+    EXPECT_EQ(split_rows({0, 3, 3, 4, 6}, {64, 0, 1, 128}), (std::vector<int>{3}));
+}
+
+TEST(csrmv_adaptive_analysis, split_rows_more_workgroups_listed_once)
+{
+    // Row 2 in four workgroups.
+    EXPECT_EQ(split_rows({0, 2, 2, 2, 2, 3, 5}, {128, 0, 1, 2, 3, 128}), (std::vector<int>{2}));
+}
+
+TEST(csrmv_adaptive_analysis, split_rows_first_and_last_block)
+{
+    // Row 0 and the last row 3 in two workgroups each, rows 1-2 stream.
+    EXPECT_EQ(split_rows({0, 0, 1, 3, 3, 4}, {0, 1, 128, 0, 1}), (std::vector<int>{0, 3}));
+}
+
+TEST(csrmv_adaptive_analysis, split_rows_consecutive)
+{
+    // Rows 1 and 2 in two and three workgroups.
+    EXPECT_EQ(split_rows({0, 1, 1, 2, 2, 2, 3}, {0, 0, 1, 0, 1, 2}), (std::vector<int>{1, 2}));
+}
+
+TEST(csrmv_adaptive_analysis, split_rows_trimmed_edges)
+{
+    // The first block starts at first_row = 9000 and the last ends at last_row = 9010 of a
+    // longer matrix. Neither edge is a split row; row 9005 is.
+    EXPECT_EQ(split_rows({9000, 9005, 9005, 9006, 9010}, {128, 0, 1, 64}),
+              (std::vector<int>{9005}));
+}
+
+TEST(csrmv_adaptive_analysis, split_rows_none)
+{
+    // A row of 1025 to 3072 entries has a block of its own, [row, row + 1) with id 0.
+    EXPECT_TRUE(split_rows({0, 4, 5, 9}, {64, 0, 64}).empty());
+    EXPECT_TRUE(split_rows({0}, {0}).empty());
+    EXPECT_TRUE(split_rows({}, {}).empty());
+}

@@ -174,8 +174,9 @@ TEST(internal_infostructs, csrmv_info_clear_resets_fields)
     info.max_rows = 3;
 
     // Dirty the adaptive/lrb sizes (their device pointers stay null).
-    info.adaptive.size = 9;
-    info.lrb.size      = 10;
+    info.adaptive.size           = 9;
+    info.adaptive.num_split_rows = 2;
+    info.lrb.size                = 10;
 
     ASSERT_EQ(info.nnzsplit.allocate(11, true, rocsparse_indextype_i32, nullptr),
               rocsparse_status_success);
@@ -203,6 +204,7 @@ TEST(internal_infostructs, csrmv_info_clear_resets_fields)
 
     EXPECT_EQ(info.adaptive.size, 0u);
     EXPECT_EQ(info.adaptive.row_blocks, nullptr);
+    EXPECT_EQ(info.adaptive.num_split_rows, 0u);
     EXPECT_EQ(info.lrb.size, 0u);
     EXPECT_EQ(info.nnzsplit.get_size(), 0u);
     EXPECT_FALSE(info.nnzsplit.get_use_starting_block_ids());
@@ -227,6 +229,8 @@ TEST(internal_infostructs, csrmv_subinfo_clear_null_safe)
     EXPECT_EQ(adaptive.row_blocks, nullptr);
     EXPECT_EQ(adaptive.wg_flags, nullptr);
     EXPECT_EQ(adaptive.wg_ids, nullptr);
+    EXPECT_EQ(adaptive.num_split_rows, 0u);
+    EXPECT_EQ(adaptive.split_rows, nullptr);
 
     EXPECT_EQ(lrb.size, 0u);
     EXPECT_EQ(lrb.wg_flags, nullptr);

@@ -25,6 +25,7 @@
 #pragma once
 
 #include "rocsparse_common.hpp"
+#include "rocsparse_scalar.hpp"
 
 namespace rocsparse
 {
@@ -53,6 +54,34 @@ namespace rocsparse
             }
         }
         y[row] = static_cast<Y>(sum);
+    }
+
+    // Applies beta and the extra terms to y[rows[i]] for i in [0, n_rows), the rows whose
+    // workgroups only atomic-add A * x. Launched before them on the same stream.
+    template <uint32_t BLOCKSIZE, typename J, typename Y, typename Z, typename T>
+    ROCSPARSE_KERNEL(BLOCKSIZE)
+    void csrmv_scale_rows_kernel(int64_t n_rows,
+                                 const J* __restrict__ rows,
+                                 ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, beta),
+                                 Y* __restrict__ y,
+                                 rocsparse_int   num_extra,
+                                 const T*        gamma_device_array,
+                                 const Z* const* z_arrays,
+                                 bool            is_host_mode)
+    {
+        ROCSPARSE_DEVICE_HOST_SCALAR_GET(beta);
+        if(beta == static_cast<T>(1) && num_extra == 0)
+        {
+            return;
+        }
+        const int64_t stride = static_cast<int64_t>(hipGridDim_x) * BLOCKSIZE;
+        for(int64_t i = static_cast<int64_t>(hipBlockIdx_x) * BLOCKSIZE + hipThreadIdx_x;
+            i < n_rows;
+            i += stride)
+        {
+            rocsparse::csrmv_apply_beta_extras(
+                y, static_cast<int64_t>(rows[i]), beta, num_extra, gamma_device_array, z_arrays);
+        }
     }
 
     template <uint32_t BLOCKSIZE,
