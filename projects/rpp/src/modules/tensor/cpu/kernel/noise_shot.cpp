@@ -211,6 +211,458 @@ inline Rpp32u compute_shot_noise_1_host(RpptXorwowState* xorwowStatePtr, Rpp32f 
     return shotNoiseValue - 1;
 }
 
+inline void shot_noise_u8_u8_host_impl(Rpp8u* srcPtrImage, RpptDescPtr srcDescPtr,
+                                       Rpp8u* dstPtrImage, RpptDescPtr dstDescPtr,
+                                       Rpp32f shotNoiseFactor, Rpp32f shotNoiseFactorInv,
+                                       Rpp32u offset, RpptXorwowState* xorwowInitialStatePtr,
+                                       RpptROI roi, RppLayoutParams layoutParams,
+                                       Rpp32u intraThreads) {
+    Rpp32u bufferLength = roi.xywhROI.roiWidth * layoutParams.bufferMultiplier;
+
+    Rpp8u *srcPtrChannel, *dstPtrChannel;
+    srcPtrChannel = srcPtrImage + (roi.xywhROI.xy.y * srcDescPtr->strides.hStride) +
+                    (roi.xywhROI.xy.x * layoutParams.bufferMultiplier);
+    dstPtrChannel = dstPtrImage;
+
+    Rpp32u alignedLength = (bufferLength / 48) * 48;
+    Rpp32u vectorIncrement = 48;
+    Rpp32u vectorIncrementPerChannel = 16;
+
+    // Shot Noise with fused output-layout toggle (NHWC -> NCHW)
+    if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) &&
+        (dstDescPtr->layout == RpptLayout::NCHW)) {
+        Rpp8u *srcPtrRow, *dstPtrRowR, *dstPtrRowG, *dstPtrRowB;
+        srcPtrRow = srcPtrChannel;
+        dstPtrRowR = dstPtrChannel;
+        dstPtrRowG = dstPtrRowR + dstDescPtr->strides.cStride;
+        dstPtrRowB = dstPtrRowG + dstDescPtr->strides.cStride;
+
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
+        for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
+            // Thread-local RNG state - MUST be inside loop
+            RpptXorwowState xorwowState;
+            Rpp32u rowOffset = offset + i * srcDescPtr->strides.hStride;
+#if __AVX2__
+            __m256i pxXorwowStateX[5], pxXorwowStateCounter;
+            __m256 pShotNoiseFactor, pShotNoiseFactorInv;
+            rpp_host_rng_xorwow_state_offsetted_avx(xorwowInitialStatePtr, xorwowState, rowOffset,
+                                                    pxXorwowStateX, &pxXorwowStateCounter);
+            compute_shot_noise_params_initialize_8_host_avx(shotNoiseFactor, shotNoiseFactorInv,
+                                                            pShotNoiseFactor, pShotNoiseFactorInv);
+#else
+            __m128i pxXorwowStateX[5], pxXorwowStateCounter;
+            __m128 pShotNoiseFactor, pShotNoiseFactorInv;
+            rpp_host_rng_xorwow_state_offsetted_sse(xorwowInitialStatePtr, xorwowState, rowOffset,
+                                                    pxXorwowStateX, &pxXorwowStateCounter);
+            compute_shot_noise_params_initialize_4_host_sse(shotNoiseFactor, shotNoiseFactorInv,
+                                                            pShotNoiseFactor, pShotNoiseFactorInv);
+#endif
+
+            Rpp8u *srcPtrTemp, *dstPtrTempR, *dstPtrTempG, *dstPtrTempB;
+            srcPtrTemp = srcPtrRow + i * srcDescPtr->strides.hStride;
+            dstPtrTempR = dstPtrRowR + i * dstDescPtr->strides.hStride;
+            dstPtrTempG = dstPtrRowG + i * dstDescPtr->strides.hStride;
+            dstPtrTempB = dstPtrRowB + i * dstDescPtr->strides.hStride;
+
+            int vectorLoopCount = 0;
+            for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrement) {
+#if __AVX2__
+                __m256 p[6];
+                rpp_simd_load(rpp_load48_u8pkd3_to_f32pln3_avx, srcPtrTemp, p);  // simd loads
+                if (shotNoiseFactor)
+                    compute_shot_noise_48_host(p, pxXorwowStateX, &pxXorwowStateCounter,
+                                               &pShotNoiseFactorInv,
+                                               &pShotNoiseFactor);  // shot_noise adjustment
+                rpp_simd_store(rpp_store48_f32pln3_to_u8pln3_avx, dstPtrTempR, dstPtrTempG,
+                               dstPtrTempB, p);  // simd stores
+#else
+                __m128 p[12];
+                rpp_simd_load(rpp_load48_u8pkd3_to_f32pln3, srcPtrTemp, p);  // simd loads
+                if (shotNoiseFactor)
+                    compute_shot_noise_48_host(p, pxXorwowStateX, &pxXorwowStateCounter,
+                                               &pShotNoiseFactorInv,
+                                               &pShotNoiseFactor);  // shot_noise adjustment
+                rpp_simd_store(rpp_store48_f32pln3_to_u8pln3, dstPtrTempR, dstPtrTempG, dstPtrTempB,
+                               p);  // simd stores
+#endif
+                srcPtrTemp += vectorIncrement;
+                dstPtrTempR += vectorIncrementPerChannel;
+                dstPtrTempG += vectorIncrementPerChannel;
+                dstPtrTempB += vectorIncrementPerChannel;
+            }
+            for (; vectorLoopCount < bufferLength; vectorLoopCount += 3) {
+                if (shotNoiseFactor) {
+                    Rpp32f poissonDistribLambda[3];
+                    poissonDistribLambda[0] = (Rpp32f)srcPtrTemp[0] * shotNoiseFactorInv;
+                    poissonDistribLambda[1] = (Rpp32f)srcPtrTemp[1] * shotNoiseFactorInv;
+                    poissonDistribLambda[2] = (Rpp32f)srcPtrTemp[2] * shotNoiseFactorInv;
+                    *dstPtrTempR = (Rpp8u)RPPPIXELCHECK(
+                        compute_shot_noise_1_host(&xorwowState, poissonDistribLambda[0]) *
+                        shotNoiseFactor);
+                    *dstPtrTempG = (Rpp8u)RPPPIXELCHECK(
+                        compute_shot_noise_1_host(&xorwowState, poissonDistribLambda[1]) *
+                        shotNoiseFactor);
+                    *dstPtrTempB = (Rpp8u)RPPPIXELCHECK(
+                        compute_shot_noise_1_host(&xorwowState, poissonDistribLambda[2]) *
+                        shotNoiseFactor);
+                } else {
+                    *dstPtrTempR = srcPtrTemp[0];
+                    *dstPtrTempG = srcPtrTemp[1];
+                    *dstPtrTempB = srcPtrTemp[2];
+                }
+
+                srcPtrTemp += 3;
+                dstPtrTempR++;
+                dstPtrTempG++;
+                dstPtrTempB++;
+            }
+        }
+    }
+
+    // Shot Noise with fused output-layout toggle (NCHW -> NHWC)
+    else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) &&
+             (dstDescPtr->layout == RpptLayout::NHWC)) {
+        Rpp8u *srcPtrRowR, *srcPtrRowG, *srcPtrRowB, *dstPtrRow;
+        srcPtrRowR = srcPtrChannel;
+        srcPtrRowG = srcPtrRowR + srcDescPtr->strides.cStride;
+        srcPtrRowB = srcPtrRowG + srcDescPtr->strides.cStride;
+        dstPtrRow = dstPtrChannel;
+
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
+        for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
+            // Thread-local RNG state - MUST be inside loop
+            RpptXorwowState xorwowState;
+            Rpp32u rowOffset = offset + i * srcDescPtr->strides.hStride;
+#if __AVX2__
+            __m256i pxXorwowStateX[5], pxXorwowStateCounter;
+            __m256 pShotNoiseFactor, pShotNoiseFactorInv;
+            rpp_host_rng_xorwow_state_offsetted_avx(xorwowInitialStatePtr, xorwowState, rowOffset,
+                                                    pxXorwowStateX, &pxXorwowStateCounter);
+            compute_shot_noise_params_initialize_8_host_avx(shotNoiseFactor, shotNoiseFactorInv,
+                                                            pShotNoiseFactor, pShotNoiseFactorInv);
+#else
+            __m128i pxXorwowStateX[5], pxXorwowStateCounter;
+            __m128 pShotNoiseFactor, pShotNoiseFactorInv;
+            rpp_host_rng_xorwow_state_offsetted_sse(xorwowInitialStatePtr, xorwowState, rowOffset,
+                                                    pxXorwowStateX, &pxXorwowStateCounter);
+            compute_shot_noise_params_initialize_4_host_sse(shotNoiseFactor, shotNoiseFactorInv,
+                                                            pShotNoiseFactor, pShotNoiseFactorInv);
+#endif
+
+            Rpp8u *srcPtrTempR, *srcPtrTempG, *srcPtrTempB, *dstPtrTemp;
+            srcPtrTempR = srcPtrRowR + i * srcDescPtr->strides.hStride;
+            srcPtrTempG = srcPtrRowG + i * srcDescPtr->strides.hStride;
+            srcPtrTempB = srcPtrRowB + i * srcDescPtr->strides.hStride;
+            dstPtrTemp = dstPtrRow + i * dstDescPtr->strides.hStride;
+
+            int vectorLoopCount = 0;
+            for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrementPerChannel) {
+#if __AVX2__
+                __m256 p[6];
+                rpp_simd_load(rpp_load48_u8pln3_to_f32pln3_avx, srcPtrTempR, srcPtrTempG,
+                              srcPtrTempB, p);  // simd loads
+                if (shotNoiseFactor)
+                    compute_shot_noise_48_host(p, pxXorwowStateX, &pxXorwowStateCounter,
+                                               &pShotNoiseFactorInv,
+                                               &pShotNoiseFactor);  // shot_noise adjustment
+                rpp_simd_store(rpp_store48_f32pln3_to_u8pkd3_avx, dstPtrTemp,
+                               p);  // simd stores
+#else
+                __m128 p[12];
+                rpp_simd_load(rpp_load48_u8pln3_to_f32pln3, srcPtrTempR, srcPtrTempG, srcPtrTempB,
+                              p);  // simd loads
+                if (shotNoiseFactor)
+                    compute_shot_noise_48_host(p, pxXorwowStateX, &pxXorwowStateCounter,
+                                               &pShotNoiseFactorInv,
+                                               &pShotNoiseFactor);  // shot_noise adjustment
+                rpp_simd_store(rpp_store48_f32pln3_to_u8pkd3, dstPtrTemp, p);  // simd stores
+#endif
+                srcPtrTempR += vectorIncrementPerChannel;
+                srcPtrTempG += vectorIncrementPerChannel;
+                srcPtrTempB += vectorIncrementPerChannel;
+                dstPtrTemp += vectorIncrement;
+            }
+            for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
+                Rpp8u src[3] = {*srcPtrTempR, *srcPtrTempG, *srcPtrTempB};
+
+                if (shotNoiseFactor) {
+                    Rpp32f poissonDistribLambda[3];
+                    poissonDistribLambda[0] = (Rpp32f)src[0] * shotNoiseFactorInv;
+                    poissonDistribLambda[1] = (Rpp32f)src[1] * shotNoiseFactorInv;
+                    poissonDistribLambda[2] = (Rpp32f)src[2] * shotNoiseFactorInv;
+                    dstPtrTemp[0] = (Rpp8u)RPPPIXELCHECK(
+                        compute_shot_noise_1_host(&xorwowState, poissonDistribLambda[0]) *
+                        shotNoiseFactor);
+                    dstPtrTemp[1] = (Rpp8u)RPPPIXELCHECK(
+                        compute_shot_noise_1_host(&xorwowState, poissonDistribLambda[1]) *
+                        shotNoiseFactor);
+                    dstPtrTemp[2] = (Rpp8u)RPPPIXELCHECK(
+                        compute_shot_noise_1_host(&xorwowState, poissonDistribLambda[2]) *
+                        shotNoiseFactor);
+                } else
+                    memcpy(dstPtrTemp, src, 3);
+
+                srcPtrTempR++;
+                srcPtrTempG++;
+                srcPtrTempB++;
+                dstPtrTemp += 3;
+            }
+        }
+    }
+
+    // Shot Noise without fused output-layout toggle (NHWC -> NHWC)
+    else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) &&
+             (dstDescPtr->layout == RpptLayout::NHWC)) {
+        Rpp8u *srcPtrRow, *dstPtrRow;
+        srcPtrRow = srcPtrChannel;
+        dstPtrRow = dstPtrChannel;
+
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
+        for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
+            // Thread-local RNG state - MUST be inside loop
+            RpptXorwowState xorwowState;
+            Rpp32u rowOffset = offset + i * srcDescPtr->strides.hStride;
+#if __AVX2__
+            __m256i pxXorwowStateX[5], pxXorwowStateCounter;
+            __m256 pShotNoiseFactor, pShotNoiseFactorInv;
+            rpp_host_rng_xorwow_state_offsetted_avx(xorwowInitialStatePtr, xorwowState, rowOffset,
+                                                    pxXorwowStateX, &pxXorwowStateCounter);
+            compute_shot_noise_params_initialize_8_host_avx(shotNoiseFactor, shotNoiseFactorInv,
+                                                            pShotNoiseFactor, pShotNoiseFactorInv);
+#else
+            __m128i pxXorwowStateX[5], pxXorwowStateCounter;
+            __m128 pShotNoiseFactor, pShotNoiseFactorInv;
+            rpp_host_rng_xorwow_state_offsetted_sse(xorwowInitialStatePtr, xorwowState, rowOffset,
+                                                    pxXorwowStateX, &pxXorwowStateCounter);
+            compute_shot_noise_params_initialize_4_host_sse(shotNoiseFactor, shotNoiseFactorInv,
+                                                            pShotNoiseFactor, pShotNoiseFactorInv);
+#endif
+
+            Rpp8u *srcPtrTemp, *dstPtrTemp;
+            srcPtrTemp = srcPtrRow + i * srcDescPtr->strides.hStride;
+            dstPtrTemp = dstPtrRow + i * dstDescPtr->strides.hStride;
+
+            int vectorLoopCount = 0;
+            for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrement) {
+#if __AVX2__
+                __m256 p[6];
+                rpp_simd_load(rpp_load48_u8pkd3_to_f32pln3_avx, srcPtrTemp, p);  // simd loads
+                if (shotNoiseFactor)
+                    compute_shot_noise_48_host(p, pxXorwowStateX, &pxXorwowStateCounter,
+                                               &pShotNoiseFactorInv,
+                                               &pShotNoiseFactor);  // shot_noise adjustment
+                rpp_simd_store(rpp_store48_f32pln3_to_u8pkd3_avx, dstPtrTemp,
+                               p);  // simd stores
+#else
+                __m128 p[12];
+                rpp_simd_load(rpp_load48_u8pkd3_to_f32pln3, srcPtrTemp, p);  // simd loads
+                if (shotNoiseFactor)
+                    compute_shot_noise_48_host(p, pxXorwowStateX, &pxXorwowStateCounter,
+                                               &pShotNoiseFactorInv,
+                                               &pShotNoiseFactor);  // shot_noise adjustment
+                rpp_simd_store(rpp_store48_f32pln3_to_u8pkd3, dstPtrTemp, p);  // simd stores
+#endif
+                srcPtrTemp += vectorIncrement;
+                dstPtrTemp += vectorIncrement;
+            }
+            for (; vectorLoopCount < bufferLength; vectorLoopCount += 3) {
+                if (shotNoiseFactor) {
+                    Rpp32f poissonDistribLambda[3];
+                    poissonDistribLambda[0] = (Rpp32f)srcPtrTemp[0] * shotNoiseFactorInv;
+                    poissonDistribLambda[1] = (Rpp32f)srcPtrTemp[1] * shotNoiseFactorInv;
+                    poissonDistribLambda[2] = (Rpp32f)srcPtrTemp[2] * shotNoiseFactorInv;
+                    dstPtrTemp[0] = (Rpp8u)RPPPIXELCHECK(
+                        compute_shot_noise_1_host(&xorwowState, poissonDistribLambda[0]) *
+                        shotNoiseFactor);
+                    dstPtrTemp[1] = (Rpp8u)RPPPIXELCHECK(
+                        compute_shot_noise_1_host(&xorwowState, poissonDistribLambda[1]) *
+                        shotNoiseFactor);
+                    dstPtrTemp[2] = (Rpp8u)RPPPIXELCHECK(
+                        compute_shot_noise_1_host(&xorwowState, poissonDistribLambda[2]) *
+                        shotNoiseFactor);
+                } else
+                    memcpy(dstPtrTemp, srcPtrTemp, 3);
+
+                srcPtrTemp += 3;
+                dstPtrTemp += 3;
+            }
+        }
+    }
+
+    // Shot Noise without fused output-layout toggle (NCHW -> NCHW)
+    else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) &&
+             (dstDescPtr->layout == RpptLayout::NCHW)) {
+        Rpp8u *srcPtrRowR, *srcPtrRowG, *srcPtrRowB, *dstPtrRowR, *dstPtrRowG, *dstPtrRowB;
+        srcPtrRowR = srcPtrChannel;
+        srcPtrRowG = srcPtrRowR + srcDescPtr->strides.cStride;
+        srcPtrRowB = srcPtrRowG + srcDescPtr->strides.cStride;
+        dstPtrRowR = dstPtrChannel;
+        dstPtrRowG = dstPtrRowR + dstDescPtr->strides.cStride;
+        dstPtrRowB = dstPtrRowG + dstDescPtr->strides.cStride;
+
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
+        for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
+            // Thread-local RNG state - MUST be inside loop
+            RpptXorwowState xorwowState;
+            Rpp32u rowOffset = offset + i * srcDescPtr->strides.hStride;
+#if __AVX2__
+            __m256i pxXorwowStateX[5], pxXorwowStateCounter;
+            __m256 pShotNoiseFactor, pShotNoiseFactorInv;
+            rpp_host_rng_xorwow_state_offsetted_avx(xorwowInitialStatePtr, xorwowState, rowOffset,
+                                                    pxXorwowStateX, &pxXorwowStateCounter);
+            compute_shot_noise_params_initialize_8_host_avx(shotNoiseFactor, shotNoiseFactorInv,
+                                                            pShotNoiseFactor, pShotNoiseFactorInv);
+#else
+            __m128i pxXorwowStateX[5], pxXorwowStateCounter;
+            __m128 pShotNoiseFactor, pShotNoiseFactorInv;
+            rpp_host_rng_xorwow_state_offsetted_sse(xorwowInitialStatePtr, xorwowState, rowOffset,
+                                                    pxXorwowStateX, &pxXorwowStateCounter);
+            compute_shot_noise_params_initialize_4_host_sse(shotNoiseFactor, shotNoiseFactorInv,
+                                                            pShotNoiseFactor, pShotNoiseFactorInv);
+#endif
+
+            Rpp8u *srcPtrTempR, *srcPtrTempG, *srcPtrTempB, *dstPtrTempR, *dstPtrTempG,
+                *dstPtrTempB;
+            srcPtrTempR = srcPtrRowR + i * srcDescPtr->strides.hStride;
+            srcPtrTempG = srcPtrRowG + i * srcDescPtr->strides.hStride;
+            srcPtrTempB = srcPtrRowB + i * srcDescPtr->strides.hStride;
+            dstPtrTempR = dstPtrRowR + i * dstDescPtr->strides.hStride;
+            dstPtrTempG = dstPtrRowG + i * dstDescPtr->strides.hStride;
+            dstPtrTempB = dstPtrRowB + i * dstDescPtr->strides.hStride;
+
+            int vectorLoopCount = 0;
+            for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrementPerChannel) {
+#if __AVX2__
+                __m256 p[6];
+                rpp_simd_load(rpp_load48_u8pln3_to_f32pln3_avx, srcPtrTempR, srcPtrTempG,
+                              srcPtrTempB, p);  // simd loads
+                if (shotNoiseFactor)
+                    compute_shot_noise_48_host(p, pxXorwowStateX, &pxXorwowStateCounter,
+                                               &pShotNoiseFactorInv,
+                                               &pShotNoiseFactor);  // shot_noise adjustment
+                rpp_simd_store(rpp_store48_f32pln3_to_u8pln3_avx, dstPtrTempR, dstPtrTempG,
+                               dstPtrTempB, p);  // simd stores
+#else
+                __m128 p[12];
+                rpp_simd_load(rpp_load48_u8pln3_to_f32pln3, srcPtrTempR, srcPtrTempG, srcPtrTempB,
+                              p);  // simd loads
+                if (shotNoiseFactor)
+                    compute_shot_noise_48_host(p, pxXorwowStateX, &pxXorwowStateCounter,
+                                               &pShotNoiseFactorInv,
+                                               &pShotNoiseFactor);  // shot_noise adjustment
+                rpp_simd_store(rpp_store48_f32pln3_to_u8pln3, dstPtrTempR, dstPtrTempG, dstPtrTempB,
+                               p);  // simd stores
+#endif
+                srcPtrTempR += vectorIncrementPerChannel;
+                srcPtrTempG += vectorIncrementPerChannel;
+                srcPtrTempB += vectorIncrementPerChannel;
+                dstPtrTempR += vectorIncrementPerChannel;
+                dstPtrTempG += vectorIncrementPerChannel;
+                dstPtrTempB += vectorIncrementPerChannel;
+            }
+            for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
+                if (shotNoiseFactor) {
+                    Rpp32f poissonDistribLambda[3];
+                    poissonDistribLambda[0] = (Rpp32f)*srcPtrTempR * shotNoiseFactorInv;
+                    poissonDistribLambda[1] = (Rpp32f)*srcPtrTempG * shotNoiseFactorInv;
+                    poissonDistribLambda[2] = (Rpp32f)*srcPtrTempB * shotNoiseFactorInv;
+                    *dstPtrTempR = (Rpp8u)RPPPIXELCHECK(
+                        compute_shot_noise_1_host(&xorwowState, poissonDistribLambda[0]) *
+                        shotNoiseFactor);
+                    *dstPtrTempG = (Rpp8u)RPPPIXELCHECK(
+                        compute_shot_noise_1_host(&xorwowState, poissonDistribLambda[1]) *
+                        shotNoiseFactor);
+                    *dstPtrTempB = (Rpp8u)RPPPIXELCHECK(
+                        compute_shot_noise_1_host(&xorwowState, poissonDistribLambda[2]) *
+                        shotNoiseFactor);
+                } else {
+                    *dstPtrTempR = *srcPtrTempR;
+                    *dstPtrTempG = *srcPtrTempG;
+                    *dstPtrTempB = *srcPtrTempB;
+                }
+
+                srcPtrTempR++;
+                srcPtrTempG++;
+                srcPtrTempB++;
+                dstPtrTempR++;
+                dstPtrTempG++;
+                dstPtrTempB++;
+            }
+        }
+    }
+
+    // Shot Noise without fused output-layout toggle single channel (NCHW -> NCHW)
+    else if ((srcDescPtr->c == 1) && (srcDescPtr->layout == RpptLayout::NCHW) &&
+             (dstDescPtr->layout == RpptLayout::NCHW)) {
+        alignedLength = bufferLength & ~15;
+
+        Rpp8u *srcPtrRow, *dstPtrRow;
+        srcPtrRow = srcPtrChannel;
+        dstPtrRow = dstPtrChannel;
+
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
+        for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
+            // Thread-local RNG state - MUST be inside loop
+            RpptXorwowState xorwowState;
+            Rpp32u rowOffset = offset + i * srcDescPtr->strides.hStride;
+#if __AVX2__
+            __m256i pxXorwowStateX[5], pxXorwowStateCounter;
+            __m256 pShotNoiseFactor, pShotNoiseFactorInv;
+            rpp_host_rng_xorwow_state_offsetted_avx(xorwowInitialStatePtr, xorwowState, rowOffset,
+                                                    pxXorwowStateX, &pxXorwowStateCounter);
+            compute_shot_noise_params_initialize_8_host_avx(shotNoiseFactor, shotNoiseFactorInv,
+                                                            pShotNoiseFactor, pShotNoiseFactorInv);
+#else
+            __m128i pxXorwowStateX[5], pxXorwowStateCounter;
+            __m128 pShotNoiseFactor, pShotNoiseFactorInv;
+            rpp_host_rng_xorwow_state_offsetted_sse(xorwowInitialStatePtr, xorwowState, rowOffset,
+                                                    pxXorwowStateX, &pxXorwowStateCounter);
+            compute_shot_noise_params_initialize_4_host_sse(shotNoiseFactor, shotNoiseFactorInv,
+                                                            pShotNoiseFactor, pShotNoiseFactorInv);
+#endif
+
+            Rpp8u *srcPtrTemp, *dstPtrTemp;
+            srcPtrTemp = srcPtrRow + i * srcDescPtr->strides.hStride;
+            dstPtrTemp = dstPtrRow + i * dstDescPtr->strides.hStride;
+
+            int vectorLoopCount = 0;
+            for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrementPerChannel) {
+#if __AVX2__
+                __m256 p[2];
+                rpp_simd_load(rpp_load16_u8_to_f32_avx, srcPtrTemp, p);  // simd loads
+                if (shotNoiseFactor)
+                    compute_shot_noise_16_host(p, pxXorwowStateX, &pxXorwowStateCounter,
+                                               &pShotNoiseFactorInv,
+                                               &pShotNoiseFactor);         // shot_noise adjustment
+                rpp_simd_store(rpp_store16_f32_to_u8_avx, dstPtrTemp, p);  // simd stores
+#else
+                __m128 p[4];
+                rpp_simd_load(rpp_load16_u8_to_f32, srcPtrTemp, p);  // simd loads
+                if (shotNoiseFactor)
+                    compute_shot_noise_16_host(p, pxXorwowStateX, &pxXorwowStateCounter,
+                                               &pShotNoiseFactorInv,
+                                               &pShotNoiseFactor);     // shot_noise adjustment
+                rpp_simd_store(rpp_store16_f32_to_u8, dstPtrTemp, p);  // simd stores
+#endif
+                srcPtrTemp += vectorIncrementPerChannel;
+                dstPtrTemp += vectorIncrementPerChannel;
+            }
+            for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
+                if (shotNoiseFactor)
+                    *dstPtrTemp = (Rpp8u)RPPPIXELCHECK(
+                        compute_shot_noise_1_host(&xorwowState,
+                                                  ((Rpp32f)*srcPtrTemp * shotNoiseFactorInv)) *
+                        shotNoiseFactor);
+                else
+                    *dstPtrTemp = *srcPtrTemp;
+
+                srcPtrTemp++;
+                dstPtrTemp++;
+            }
+        }
+    }
+}
+
 RppStatus shot_noise_u8_u8_host_tensor(Rpp8u* srcPtr, RpptDescPtr srcDescPtr, Rpp8u* dstPtr,
                                        RpptDescPtr dstDescPtr, Rpp32f* shotNoiseFactorTensor,
                                        RpptXorwowState* xorwowInitialStatePtr,
@@ -218,12 +670,13 @@ RppStatus shot_noise_u8_u8_host_tensor(Rpp8u* srcPtr, RpptDescPtr srcDescPtr, Rp
                                        RppLayoutParams layoutParams, rpp::Handle& handle) {
     RpptROI roiDefault = rpp_make_roi_xywh_full((Rpp32s)srcDescPtr->w, (Rpp32s)srcDescPtr->h);
     omp_set_dynamic(0);
-    omp_set_num_threads(handle.GetNumThreads());
-#pragma omp parallel for
+#pragma omp parallel for if (dstDescPtr->n > 1) num_threads(handle.GetNumThreads())
     for (int batchCount = 0; batchCount < dstDescPtr->n; batchCount++) {
         RpptROI roi;
         RpptROIPtr roiPtrInput = &roiTensorPtrSrc[batchCount];
         compute_roi_validation_host(roiPtrInput, &roi, &roiDefault, roiType);
+
+        Rpp32u intraThreads = get_intra_image_threads(handle, dstDescPtr->n, roi.xywhROI.roiHeight);
 
         Rpp32f shotNoiseFactor = shotNoiseFactorTensor[batchCount];
         Rpp32f shotNoiseFactorInv = 1 / shotNoiseFactor;
@@ -233,396 +686,469 @@ RppStatus shot_noise_u8_u8_host_tensor(Rpp8u* srcPtr, RpptDescPtr srcDescPtr, Rp
         srcPtrImage = srcPtr + batchCount * srcDescPtr->strides.nStride;
         dstPtrImage = dstPtr + batchCount * dstDescPtr->strides.nStride;
 
-        Rpp32u bufferLength = roi.xywhROI.roiWidth * layoutParams.bufferMultiplier;
+        shot_noise_u8_u8_host_impl(srcPtrImage, srcDescPtr, dstPtrImage, dstDescPtr,
+                                   shotNoiseFactor, shotNoiseFactorInv, offset,
+                                   xorwowInitialStatePtr, roi, layoutParams, intraThreads);
+    }
 
-        Rpp8u *srcPtrChannel, *dstPtrChannel;
-        srcPtrChannel = srcPtrImage + (roi.xywhROI.xy.y * srcDescPtr->strides.hStride) +
-                        (roi.xywhROI.xy.x * layoutParams.bufferMultiplier);
-        dstPtrChannel = dstPtrImage;
+    return RPP_SUCCESS;
+}
 
-        Rpp32u alignedLength = (bufferLength / 48) * 48;
-        Rpp32u vectorIncrement = 48;
-        Rpp32u vectorIncrementPerChannel = 16;
+inline void shot_noise_f32_f32_host_impl(Rpp32f* srcPtrImage, RpptDescPtr srcDescPtr,
+                                         Rpp32f* dstPtrImage, RpptDescPtr dstDescPtr,
+                                         Rpp32f shotNoiseFactor, Rpp32f shotNoiseFactorInv,
+                                         Rpp32u offset, RpptXorwowState* xorwowInitialStatePtr,
+                                         RpptROI roi, RppLayoutParams layoutParams,
+                                         Rpp32u intraThreads) {
+    Rpp32u bufferLength = roi.xywhROI.roiWidth * layoutParams.bufferMultiplier;
 
-        RpptXorwowState xorwowState;
+    Rpp32f *srcPtrChannel, *dstPtrChannel;
+    srcPtrChannel = srcPtrImage + (roi.xywhROI.xy.y * srcDescPtr->strides.hStride) +
+                    (roi.xywhROI.xy.x * layoutParams.bufferMultiplier);
+    dstPtrChannel = dstPtrImage;
+
 #if __AVX2__
-        __m256i pxXorwowStateX[5], pxXorwowStateCounter;
-        __m256 pShotNoiseFactor, pShotNoiseFactorInv;
-        rpp_host_rng_xorwow_state_offsetted_avx(xorwowInitialStatePtr, xorwowState, offset,
-                                                pxXorwowStateX, &pxXorwowStateCounter);
-        compute_shot_noise_params_initialize_8_host_avx(shotNoiseFactor, shotNoiseFactorInv,
-                                                        pShotNoiseFactor, pShotNoiseFactorInv);
+    Rpp32u alignedLength = (bufferLength / 24) * 24;
+    Rpp32u vectorIncrement = 24;
+    Rpp32u vectorIncrementPerChannel = 8;
 #else
-        __m128i pxXorwowStateX[5], pxXorwowStateCounter;
-        __m128 pShotNoiseFactor, pShotNoiseFactorInv;
-        rpp_host_rng_xorwow_state_offsetted_sse(xorwowInitialStatePtr, xorwowState, offset,
-                                                pxXorwowStateX, &pxXorwowStateCounter);
-        compute_shot_noise_params_initialize_4_host_sse(shotNoiseFactor, shotNoiseFactorInv,
-                                                        pShotNoiseFactor, pShotNoiseFactorInv);
+    Rpp32u alignedLength = (bufferLength / 12) * 12;
+    Rpp32u vectorIncrement = 12;
+    Rpp32u vectorIncrementPerChannel = 4;
 #endif
 
-        // Shot Noise with fused output-layout toggle (NHWC -> NCHW)
-        if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) &&
-            (dstDescPtr->layout == RpptLayout::NCHW)) {
-            Rpp8u *srcPtrRow, *dstPtrRowR, *dstPtrRowG, *dstPtrRowB;
-            srcPtrRow = srcPtrChannel;
-            dstPtrRowR = dstPtrChannel;
-            dstPtrRowG = dstPtrRowR + dstDescPtr->strides.cStride;
-            dstPtrRowB = dstPtrRowG + dstDescPtr->strides.cStride;
+    // Shot Noise with fused output-layout toggle (NHWC -> NCHW)
+    if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) &&
+        (dstDescPtr->layout == RpptLayout::NCHW)) {
+        Rpp32f *srcPtrRow, *dstPtrRowR, *dstPtrRowG, *dstPtrRowB;
+        srcPtrRow = srcPtrChannel;
+        dstPtrRowR = dstPtrChannel;
+        dstPtrRowG = dstPtrRowR + dstDescPtr->strides.cStride;
+        dstPtrRowB = dstPtrRowG + dstDescPtr->strides.cStride;
 
-            for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
-                Rpp8u *srcPtrTemp, *dstPtrTempR, *dstPtrTempG, *dstPtrTempB;
-                srcPtrTemp = srcPtrRow;
-                dstPtrTempR = dstPtrRowR;
-                dstPtrTempG = dstPtrRowG;
-                dstPtrTempB = dstPtrRowB;
-
-                int vectorLoopCount = 0;
-                for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrement) {
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
+        for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
+            // Thread-local RNG state - MUST be inside loop
+            RpptXorwowState xorwowState;
+            Rpp32u rowOffset = offset + i * srcDescPtr->strides.hStride;
 #if __AVX2__
-                    __m256 p[6];
-                    rpp_simd_load(rpp_load48_u8pkd3_to_f32pln3_avx, srcPtrTemp, p);  // simd loads
-                    if (shotNoiseFactor)
-                        compute_shot_noise_48_host(p, pxXorwowStateX, &pxXorwowStateCounter,
-                                                   &pShotNoiseFactorInv,
-                                                   &pShotNoiseFactor);  // shot_noise adjustment
-                    rpp_simd_store(rpp_store48_f32pln3_to_u8pln3_avx, dstPtrTempR, dstPtrTempG,
-                                   dstPtrTempB, p);  // simd stores
+            __m256i pxXorwowStateX[5], pxXorwowStateCounter;
+            __m256 pShotNoiseFactor, pShotNoiseFactorInv;
+            rpp_host_rng_xorwow_state_offsetted_avx(xorwowInitialStatePtr, xorwowState, rowOffset,
+                                                    pxXorwowStateX, &pxXorwowStateCounter);
+            compute_shot_noise_params_initialize_8_host_avx(shotNoiseFactor, shotNoiseFactorInv,
+                                                            pShotNoiseFactor, pShotNoiseFactorInv);
 #else
-                    __m128 p[12];
-                    rpp_simd_load(rpp_load48_u8pkd3_to_f32pln3, srcPtrTemp, p);  // simd loads
-                    if (shotNoiseFactor)
-                        compute_shot_noise_48_host(p, pxXorwowStateX, &pxXorwowStateCounter,
-                                                   &pShotNoiseFactorInv,
-                                                   &pShotNoiseFactor);  // shot_noise adjustment
-                    rpp_simd_store(rpp_store48_f32pln3_to_u8pln3, dstPtrTempR, dstPtrTempG,
-                                   dstPtrTempB, p);  // simd stores
+            __m128i pxXorwowStateX[5], pxXorwowStateCounter;
+            __m128 pShotNoiseFactor, pShotNoiseFactorInv;
+            rpp_host_rng_xorwow_state_offsetted_sse(xorwowInitialStatePtr, xorwowState, rowOffset,
+                                                    pxXorwowStateX, &pxXorwowStateCounter);
+            compute_shot_noise_params_initialize_4_host_sse(shotNoiseFactor, shotNoiseFactorInv,
+                                                            pShotNoiseFactor, pShotNoiseFactorInv);
 #endif
-                    srcPtrTemp += vectorIncrement;
-                    dstPtrTempR += vectorIncrementPerChannel;
-                    dstPtrTempG += vectorIncrementPerChannel;
-                    dstPtrTempB += vectorIncrementPerChannel;
-                }
-                for (; vectorLoopCount < bufferLength; vectorLoopCount += 3) {
-                    if (shotNoiseFactor) {
-                        Rpp32f poissonDistribLambda[3];
-                        poissonDistribLambda[0] = (Rpp32f)srcPtrTemp[0] * shotNoiseFactorInv;
-                        poissonDistribLambda[1] = (Rpp32f)srcPtrTemp[1] * shotNoiseFactorInv;
-                        poissonDistribLambda[2] = (Rpp32f)srcPtrTemp[2] * shotNoiseFactorInv;
-                        *dstPtrTempR = (Rpp8u)RPPPIXELCHECK(
-                            compute_shot_noise_1_host(&xorwowState, poissonDistribLambda[0]) *
-                            shotNoiseFactor);
-                        *dstPtrTempG = (Rpp8u)RPPPIXELCHECK(
-                            compute_shot_noise_1_host(&xorwowState, poissonDistribLambda[1]) *
-                            shotNoiseFactor);
-                        *dstPtrTempB = (Rpp8u)RPPPIXELCHECK(
-                            compute_shot_noise_1_host(&xorwowState, poissonDistribLambda[2]) *
-                            shotNoiseFactor);
-                    } else {
-                        *dstPtrTempR = srcPtrTemp[0];
-                        *dstPtrTempG = srcPtrTemp[1];
-                        *dstPtrTempB = srcPtrTemp[2];
-                    }
 
-                    srcPtrTemp += 3;
-                    dstPtrTempR++;
-                    dstPtrTempG++;
-                    dstPtrTempB++;
-                }
+            Rpp32f *srcPtrTemp, *dstPtrTempR, *dstPtrTempG, *dstPtrTempB;
+            srcPtrTemp = srcPtrRow + i * srcDescPtr->strides.hStride;
+            dstPtrTempR = dstPtrRowR + i * dstDescPtr->strides.hStride;
+            dstPtrTempG = dstPtrRowG + i * dstDescPtr->strides.hStride;
+            dstPtrTempB = dstPtrRowB + i * dstDescPtr->strides.hStride;
 
-                srcPtrRow += srcDescPtr->strides.hStride;
-                dstPtrRowR += dstDescPtr->strides.hStride;
-                dstPtrRowG += dstDescPtr->strides.hStride;
-                dstPtrRowB += dstDescPtr->strides.hStride;
+            int vectorLoopCount = 0;
+            for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrement) {
+#if __AVX2__
+                __m256 p[3];
+                rpp_simd_load(rpp_load24_f32pkd3_to_f32pln3_avx, srcPtrTemp, p);  // simd loads
+                if (shotNoiseFactor)
+                    compute_shot_noise_24_host(p, pxXorwowStateX, &pxXorwowStateCounter,
+                                               &pShotNoiseFactorInv,
+                                               &pShotNoiseFactor);  // shot_noise adjustment
+                rpp_simd_store(rpp_store24_f32pln3_to_f32pln3_avx, dstPtrTempR, dstPtrTempG,
+                               dstPtrTempB, p);  // simd stores
+#else
+                __m128 p[4];
+                rpp_simd_load(rpp_load12_f32pkd3_to_f32pln3, srcPtrTemp, p);  // simd loads
+                if (shotNoiseFactor)
+                    compute_shot_noise_12_host(p, pxXorwowStateX, &pxXorwowStateCounter,
+                                               &pShotNoiseFactorInv,
+                                               &pShotNoiseFactor);  // shot_noise adjustment
+                rpp_simd_store(rpp_store12_f32pln3_to_f32pln3, dstPtrTempR, dstPtrTempG,
+                               dstPtrTempB, p);  // simd stores
+#endif
+                srcPtrTemp += vectorIncrement;
+                dstPtrTempR += vectorIncrementPerChannel;
+                dstPtrTempG += vectorIncrementPerChannel;
+                dstPtrTempB += vectorIncrementPerChannel;
             }
-        }
-
-        // Shot Noise with fused output-layout toggle (NCHW -> NHWC)
-        else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) &&
-                 (dstDescPtr->layout == RpptLayout::NHWC)) {
-            Rpp8u *srcPtrRowR, *srcPtrRowG, *srcPtrRowB, *dstPtrRow;
-            srcPtrRowR = srcPtrChannel;
-            srcPtrRowG = srcPtrRowR + srcDescPtr->strides.cStride;
-            srcPtrRowB = srcPtrRowG + srcDescPtr->strides.cStride;
-            dstPtrRow = dstPtrChannel;
-
-            for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
-                Rpp8u *srcPtrTempR, *srcPtrTempG, *srcPtrTempB, *dstPtrTemp;
-                srcPtrTempR = srcPtrRowR;
-                srcPtrTempG = srcPtrRowG;
-                srcPtrTempB = srcPtrRowB;
-                dstPtrTemp = dstPtrRow;
-
-                int vectorLoopCount = 0;
-                for (; vectorLoopCount < alignedLength;
-                     vectorLoopCount += vectorIncrementPerChannel) {
-#if __AVX2__
-                    __m256 p[6];
-                    rpp_simd_load(rpp_load48_u8pln3_to_f32pln3_avx, srcPtrTempR, srcPtrTempG,
-                                  srcPtrTempB, p);  // simd loads
-                    if (shotNoiseFactor)
-                        compute_shot_noise_48_host(p, pxXorwowStateX, &pxXorwowStateCounter,
-                                                   &pShotNoiseFactorInv,
-                                                   &pShotNoiseFactor);  // shot_noise adjustment
-                    rpp_simd_store(rpp_store48_f32pln3_to_u8pkd3_avx, dstPtrTemp,
-                                   p);  // simd stores
-#else
-                    __m128 p[12];
-                    rpp_simd_load(rpp_load48_u8pln3_to_f32pln3, srcPtrTempR, srcPtrTempG,
-                                  srcPtrTempB, p);  // simd loads
-                    if (shotNoiseFactor)
-                        compute_shot_noise_48_host(p, pxXorwowStateX, &pxXorwowStateCounter,
-                                                   &pShotNoiseFactorInv,
-                                                   &pShotNoiseFactor);  // shot_noise adjustment
-                    rpp_simd_store(rpp_store48_f32pln3_to_u8pkd3, dstPtrTemp, p);  // simd stores
-#endif
-                    srcPtrTempR += vectorIncrementPerChannel;
-                    srcPtrTempG += vectorIncrementPerChannel;
-                    srcPtrTempB += vectorIncrementPerChannel;
-                    dstPtrTemp += vectorIncrement;
-                }
-                for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
-                    Rpp8u src[3] = {*srcPtrTempR, *srcPtrTempG, *srcPtrTempB};
-
-                    if (shotNoiseFactor) {
-                        Rpp32f poissonDistribLambda[3];
-                        poissonDistribLambda[0] = (Rpp32f)src[0] * shotNoiseFactorInv;
-                        poissonDistribLambda[1] = (Rpp32f)src[1] * shotNoiseFactorInv;
-                        poissonDistribLambda[2] = (Rpp32f)src[2] * shotNoiseFactorInv;
-                        dstPtrTemp[0] = (Rpp8u)RPPPIXELCHECK(
-                            compute_shot_noise_1_host(&xorwowState, poissonDistribLambda[0]) *
-                            shotNoiseFactor);
-                        dstPtrTemp[1] = (Rpp8u)RPPPIXELCHECK(
-                            compute_shot_noise_1_host(&xorwowState, poissonDistribLambda[1]) *
-                            shotNoiseFactor);
-                        dstPtrTemp[2] = (Rpp8u)RPPPIXELCHECK(
-                            compute_shot_noise_1_host(&xorwowState, poissonDistribLambda[2]) *
-                            shotNoiseFactor);
-                    } else
-                        memcpy(dstPtrTemp, src, 3);
-
-                    srcPtrTempR++;
-                    srcPtrTempG++;
-                    srcPtrTempB++;
-                    dstPtrTemp += 3;
+            for (; vectorLoopCount < bufferLength; vectorLoopCount += 3) {
+                if (shotNoiseFactor) {
+                    Rpp32f poissonDistribLambda[3];
+                    poissonDistribLambda[0] = (Rpp32f)srcPtrTemp[0] * shotNoiseFactorInv;
+                    poissonDistribLambda[1] = (Rpp32f)srcPtrTemp[1] * shotNoiseFactorInv;
+                    poissonDistribLambda[2] = (Rpp32f)srcPtrTemp[2] * shotNoiseFactorInv;
+                    *dstPtrTempR = RPPPIXELCHECKF32(
+                        compute_shot_noise_1_host(&xorwowState, poissonDistribLambda[0]) *
+                        shotNoiseFactor);
+                    *dstPtrTempG = RPPPIXELCHECKF32(
+                        compute_shot_noise_1_host(&xorwowState, poissonDistribLambda[1]) *
+                        shotNoiseFactor);
+                    *dstPtrTempB = RPPPIXELCHECKF32(
+                        compute_shot_noise_1_host(&xorwowState, poissonDistribLambda[2]) *
+                        shotNoiseFactor);
+                } else {
+                    *dstPtrTempR = srcPtrTemp[0];
+                    *dstPtrTempG = srcPtrTemp[1];
+                    *dstPtrTempB = srcPtrTemp[2];
                 }
 
-                srcPtrRowR += srcDescPtr->strides.hStride;
-                srcPtrRowG += srcDescPtr->strides.hStride;
-                srcPtrRowB += srcDescPtr->strides.hStride;
-                dstPtrRow += dstDescPtr->strides.hStride;
-            }
-        }
-
-        // Shot Noise without fused output-layout toggle (NHWC -> NHWC)
-        else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) &&
-                 (dstDescPtr->layout == RpptLayout::NHWC)) {
-            Rpp8u *srcPtrRow, *dstPtrRow;
-            srcPtrRow = srcPtrChannel;
-            dstPtrRow = dstPtrChannel;
-
-            for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
-                Rpp8u *srcPtrTemp, *dstPtrTemp;
-                srcPtrTemp = srcPtrRow;
-                dstPtrTemp = dstPtrRow;
-
-                int vectorLoopCount = 0;
-                for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrement) {
-#if __AVX2__
-                    __m256 p[6];
-                    rpp_simd_load(rpp_load48_u8pkd3_to_f32pln3_avx, srcPtrTemp, p);  // simd loads
-                    if (shotNoiseFactor)
-                        compute_shot_noise_48_host(p, pxXorwowStateX, &pxXorwowStateCounter,
-                                                   &pShotNoiseFactorInv,
-                                                   &pShotNoiseFactor);  // shot_noise adjustment
-                    rpp_simd_store(rpp_store48_f32pln3_to_u8pkd3_avx, dstPtrTemp,
-                                   p);  // simd stores
-#else
-                    __m128 p[12];
-                    rpp_simd_load(rpp_load48_u8pkd3_to_f32pln3, srcPtrTemp, p);  // simd loads
-                    if (shotNoiseFactor)
-                        compute_shot_noise_48_host(p, pxXorwowStateX, &pxXorwowStateCounter,
-                                                   &pShotNoiseFactorInv,
-                                                   &pShotNoiseFactor);  // shot_noise adjustment
-                    rpp_simd_store(rpp_store48_f32pln3_to_u8pkd3, dstPtrTemp, p);  // simd stores
-#endif
-                    srcPtrTemp += vectorIncrement;
-                    dstPtrTemp += vectorIncrement;
-                }
-                for (; vectorLoopCount < bufferLength; vectorLoopCount += 3) {
-                    if (shotNoiseFactor) {
-                        Rpp32f poissonDistribLambda[3];
-                        poissonDistribLambda[0] = (Rpp32f)srcPtrTemp[0] * shotNoiseFactorInv;
-                        poissonDistribLambda[1] = (Rpp32f)srcPtrTemp[1] * shotNoiseFactorInv;
-                        poissonDistribLambda[2] = (Rpp32f)srcPtrTemp[2] * shotNoiseFactorInv;
-                        dstPtrTemp[0] = (Rpp8u)RPPPIXELCHECK(
-                            compute_shot_noise_1_host(&xorwowState, poissonDistribLambda[0]) *
-                            shotNoiseFactor);
-                        dstPtrTemp[1] = (Rpp8u)RPPPIXELCHECK(
-                            compute_shot_noise_1_host(&xorwowState, poissonDistribLambda[1]) *
-                            shotNoiseFactor);
-                        dstPtrTemp[2] = (Rpp8u)RPPPIXELCHECK(
-                            compute_shot_noise_1_host(&xorwowState, poissonDistribLambda[2]) *
-                            shotNoiseFactor);
-                    } else
-                        memcpy(dstPtrTemp, srcPtrTemp, 3);
-
-                    srcPtrTemp += 3;
-                    dstPtrTemp += 3;
-                }
-
-                srcPtrRow += srcDescPtr->strides.hStride;
-                dstPtrRow += dstDescPtr->strides.hStride;
-            }
-        }
-
-        // Shot Noise without fused output-layout toggle (NCHW -> NCHW)
-        else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) &&
-                 (dstDescPtr->layout == RpptLayout::NCHW)) {
-            Rpp8u *srcPtrRowR, *srcPtrRowG, *srcPtrRowB, *dstPtrRowR, *dstPtrRowG, *dstPtrRowB;
-            srcPtrRowR = srcPtrChannel;
-            srcPtrRowG = srcPtrRowR + srcDescPtr->strides.cStride;
-            srcPtrRowB = srcPtrRowG + srcDescPtr->strides.cStride;
-            dstPtrRowR = dstPtrChannel;
-            dstPtrRowG = dstPtrRowR + dstDescPtr->strides.cStride;
-            dstPtrRowB = dstPtrRowG + dstDescPtr->strides.cStride;
-
-            for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
-                Rpp8u *srcPtrTempR, *srcPtrTempG, *srcPtrTempB, *dstPtrTempR, *dstPtrTempG,
-                    *dstPtrTempB;
-                srcPtrTempR = srcPtrRowR;
-                srcPtrTempG = srcPtrRowG;
-                srcPtrTempB = srcPtrRowB;
-                dstPtrTempR = dstPtrRowR;
-                dstPtrTempG = dstPtrRowG;
-                dstPtrTempB = dstPtrRowB;
-
-                int vectorLoopCount = 0;
-                for (; vectorLoopCount < alignedLength;
-                     vectorLoopCount += vectorIncrementPerChannel) {
-#if __AVX2__
-                    __m256 p[6];
-                    rpp_simd_load(rpp_load48_u8pln3_to_f32pln3_avx, srcPtrTempR, srcPtrTempG,
-                                  srcPtrTempB, p);  // simd loads
-                    if (shotNoiseFactor)
-                        compute_shot_noise_48_host(p, pxXorwowStateX, &pxXorwowStateCounter,
-                                                   &pShotNoiseFactorInv,
-                                                   &pShotNoiseFactor);  // shot_noise adjustment
-                    rpp_simd_store(rpp_store48_f32pln3_to_u8pln3_avx, dstPtrTempR, dstPtrTempG,
-                                   dstPtrTempB, p);  // simd stores
-#else
-                    __m128 p[12];
-                    rpp_simd_load(rpp_load48_u8pln3_to_f32pln3, srcPtrTempR, srcPtrTempG,
-                                  srcPtrTempB, p);  // simd loads
-                    if (shotNoiseFactor)
-                        compute_shot_noise_48_host(p, pxXorwowStateX, &pxXorwowStateCounter,
-                                                   &pShotNoiseFactorInv,
-                                                   &pShotNoiseFactor);  // shot_noise adjustment
-                    rpp_simd_store(rpp_store48_f32pln3_to_u8pln3, dstPtrTempR, dstPtrTempG,
-                                   dstPtrTempB, p);  // simd stores
-#endif
-                    srcPtrTempR += vectorIncrementPerChannel;
-                    srcPtrTempG += vectorIncrementPerChannel;
-                    srcPtrTempB += vectorIncrementPerChannel;
-                    dstPtrTempR += vectorIncrementPerChannel;
-                    dstPtrTempG += vectorIncrementPerChannel;
-                    dstPtrTempB += vectorIncrementPerChannel;
-                }
-                for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
-                    if (shotNoiseFactor) {
-                        Rpp32f poissonDistribLambda[3];
-                        poissonDistribLambda[0] = (Rpp32f)*srcPtrTempR * shotNoiseFactorInv;
-                        poissonDistribLambda[1] = (Rpp32f)*srcPtrTempG * shotNoiseFactorInv;
-                        poissonDistribLambda[2] = (Rpp32f)*srcPtrTempB * shotNoiseFactorInv;
-                        *dstPtrTempR = (Rpp8u)RPPPIXELCHECK(
-                            compute_shot_noise_1_host(&xorwowState, poissonDistribLambda[0]) *
-                            shotNoiseFactor);
-                        *dstPtrTempG = (Rpp8u)RPPPIXELCHECK(
-                            compute_shot_noise_1_host(&xorwowState, poissonDistribLambda[1]) *
-                            shotNoiseFactor);
-                        *dstPtrTempB = (Rpp8u)RPPPIXELCHECK(
-                            compute_shot_noise_1_host(&xorwowState, poissonDistribLambda[2]) *
-                            shotNoiseFactor);
-                    } else {
-                        *dstPtrTempR = *srcPtrTempR;
-                        *dstPtrTempG = *srcPtrTempG;
-                        *dstPtrTempB = *srcPtrTempB;
-                    }
-
-                    srcPtrTempR++;
-                    srcPtrTempG++;
-                    srcPtrTempB++;
-                    dstPtrTempR++;
-                    dstPtrTempG++;
-                    dstPtrTempB++;
-                }
-
-                srcPtrRowR += srcDescPtr->strides.hStride;
-                srcPtrRowG += srcDescPtr->strides.hStride;
-                srcPtrRowB += srcDescPtr->strides.hStride;
-                dstPtrRowR += dstDescPtr->strides.hStride;
-                dstPtrRowG += dstDescPtr->strides.hStride;
-                dstPtrRowB += dstDescPtr->strides.hStride;
-            }
-        }
-
-        // Shot Noise without fused output-layout toggle single channel (NCHW -> NCHW)
-        else if ((srcDescPtr->c == 1) && (srcDescPtr->layout == RpptLayout::NCHW) &&
-                 (dstDescPtr->layout == RpptLayout::NCHW)) {
-            alignedLength = bufferLength & ~15;
-
-            Rpp8u *srcPtrRow, *dstPtrRow;
-            srcPtrRow = srcPtrChannel;
-            dstPtrRow = dstPtrChannel;
-
-            for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
-                Rpp8u *srcPtrTemp, *dstPtrTemp;
-                srcPtrTemp = srcPtrRow;
-                dstPtrTemp = dstPtrRow;
-
-                int vectorLoopCount = 0;
-                for (; vectorLoopCount < alignedLength;
-                     vectorLoopCount += vectorIncrementPerChannel) {
-#if __AVX2__
-                    __m256 p[2];
-                    rpp_simd_load(rpp_load16_u8_to_f32_avx, srcPtrTemp, p);  // simd loads
-                    if (shotNoiseFactor)
-                        compute_shot_noise_16_host(p, pxXorwowStateX, &pxXorwowStateCounter,
-                                                   &pShotNoiseFactorInv,
-                                                   &pShotNoiseFactor);  // shot_noise adjustment
-                    rpp_simd_store(rpp_store16_f32_to_u8_avx, dstPtrTemp, p);  // simd stores
-#else
-                    __m128 p[4];
-                    rpp_simd_load(rpp_load16_u8_to_f32, srcPtrTemp, p);  // simd loads
-                    if (shotNoiseFactor)
-                        compute_shot_noise_16_host(p, pxXorwowStateX, &pxXorwowStateCounter,
-                                                   &pShotNoiseFactorInv,
-                                                   &pShotNoiseFactor);     // shot_noise adjustment
-                    rpp_simd_store(rpp_store16_f32_to_u8, dstPtrTemp, p);  // simd stores
-#endif
-                    srcPtrTemp += vectorIncrementPerChannel;
-                    dstPtrTemp += vectorIncrementPerChannel;
-                }
-                for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
-                    if (shotNoiseFactor)
-                        *dstPtrTemp = (Rpp8u)RPPPIXELCHECK(
-                            compute_shot_noise_1_host(&xorwowState,
-                                                      ((Rpp32f)*srcPtrTemp * shotNoiseFactorInv)) *
-                            shotNoiseFactor);
-                    else
-                        *dstPtrTemp = *srcPtrTemp;
-
-                    srcPtrTemp++;
-                    dstPtrTemp++;
-                }
-
-                srcPtrRow += srcDescPtr->strides.hStride;
-                dstPtrRow += dstDescPtr->strides.hStride;
+                srcPtrTemp += 3;
+                dstPtrTempR++;
+                dstPtrTempG++;
+                dstPtrTempB++;
             }
         }
     }
 
-    return RPP_SUCCESS;
+    // Shot Noise with fused output-layout toggle (NCHW -> NHWC)
+    else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) &&
+             (dstDescPtr->layout == RpptLayout::NHWC)) {
+        Rpp32f *srcPtrRowR, *srcPtrRowG, *srcPtrRowB, *dstPtrRow;
+        srcPtrRowR = srcPtrChannel;
+        srcPtrRowG = srcPtrRowR + srcDescPtr->strides.cStride;
+        srcPtrRowB = srcPtrRowG + srcDescPtr->strides.cStride;
+        dstPtrRow = dstPtrChannel;
+
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
+        for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
+            // Thread-local RNG state - MUST be inside loop
+            RpptXorwowState xorwowState;
+            Rpp32u rowOffset = offset + i * srcDescPtr->strides.hStride;
+#if __AVX2__
+            __m256i pxXorwowStateX[5], pxXorwowStateCounter;
+            __m256 pShotNoiseFactor, pShotNoiseFactorInv;
+            rpp_host_rng_xorwow_state_offsetted_avx(xorwowInitialStatePtr, xorwowState, rowOffset,
+                                                    pxXorwowStateX, &pxXorwowStateCounter);
+            compute_shot_noise_params_initialize_8_host_avx(shotNoiseFactor, shotNoiseFactorInv,
+                                                            pShotNoiseFactor, pShotNoiseFactorInv);
+#else
+            __m128i pxXorwowStateX[5], pxXorwowStateCounter;
+            __m128 pShotNoiseFactor, pShotNoiseFactorInv;
+            rpp_host_rng_xorwow_state_offsetted_sse(xorwowInitialStatePtr, xorwowState, rowOffset,
+                                                    pxXorwowStateX, &pxXorwowStateCounter);
+            compute_shot_noise_params_initialize_4_host_sse(shotNoiseFactor, shotNoiseFactorInv,
+                                                            pShotNoiseFactor, pShotNoiseFactorInv);
+#endif
+
+            Rpp32f *srcPtrTempR, *srcPtrTempG, *srcPtrTempB, *dstPtrTemp;
+            srcPtrTempR = srcPtrRowR + i * srcDescPtr->strides.hStride;
+            srcPtrTempG = srcPtrRowG + i * srcDescPtr->strides.hStride;
+            srcPtrTempB = srcPtrRowB + i * srcDescPtr->strides.hStride;
+            dstPtrTemp = dstPtrRow + i * dstDescPtr->strides.hStride;
+
+            int vectorLoopCount = 0;
+            for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrementPerChannel) {
+#if __AVX2__
+                __m256 p[3];
+                rpp_simd_load(rpp_load24_f32pln3_to_f32pln3_avx, srcPtrTempR, srcPtrTempG,
+                              srcPtrTempB, p);  // simd loads
+                if (shotNoiseFactor)
+                    compute_shot_noise_24_host(p, pxXorwowStateX, &pxXorwowStateCounter,
+                                               &pShotNoiseFactorInv,
+                                               &pShotNoiseFactor);  // shot_noise adjustment
+                rpp_simd_store(rpp_store24_f32pln3_to_f32pkd3_avx, dstPtrTemp,
+                               p);  // simd stores
+#else
+                __m128 p[4];
+                rpp_simd_load(rpp_load12_f32pln3_to_f32pln3, srcPtrTempR, srcPtrTempG, srcPtrTempB,
+                              p);  // simd loads
+                if (shotNoiseFactor)
+                    compute_shot_noise_12_host(p, pxXorwowStateX, &pxXorwowStateCounter,
+                                               &pShotNoiseFactorInv,
+                                               &pShotNoiseFactor);  // shot_noise adjustment
+                rpp_simd_store(rpp_store12_f32pln3_to_f32pkd3, dstPtrTemp, p);  // simd stores
+#endif
+                srcPtrTempR += vectorIncrementPerChannel;
+                srcPtrTempG += vectorIncrementPerChannel;
+                srcPtrTempB += vectorIncrementPerChannel;
+                dstPtrTemp += vectorIncrement;
+            }
+            for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
+                if (shotNoiseFactor) {
+                    Rpp32f poissonDistribLambda[3];
+                    poissonDistribLambda[0] = (Rpp32f)*srcPtrTempR * shotNoiseFactorInv;
+                    poissonDistribLambda[1] = (Rpp32f)*srcPtrTempG * shotNoiseFactorInv;
+                    poissonDistribLambda[2] = (Rpp32f)*srcPtrTempB * shotNoiseFactorInv;
+                    dstPtrTemp[0] = RPPPIXELCHECKF32(
+                        compute_shot_noise_1_host(&xorwowState, poissonDistribLambda[0]) *
+                        shotNoiseFactor);
+                    dstPtrTemp[1] = RPPPIXELCHECKF32(
+                        compute_shot_noise_1_host(&xorwowState, poissonDistribLambda[1]) *
+                        shotNoiseFactor);
+                    dstPtrTemp[2] = RPPPIXELCHECKF32(
+                        compute_shot_noise_1_host(&xorwowState, poissonDistribLambda[2]) *
+                        shotNoiseFactor);
+                } else {
+                    dstPtrTemp[0] = *srcPtrTempR;
+                    dstPtrTemp[1] = *srcPtrTempG;
+                    dstPtrTemp[2] = *srcPtrTempB;
+                }
+
+                srcPtrTempR++;
+                srcPtrTempG++;
+                srcPtrTempB++;
+                dstPtrTemp += 3;
+            }
+        }
+    }
+
+    // Shot Noise without fused output-layout toggle (NHWC -> NHWC)
+    else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) &&
+             (dstDescPtr->layout == RpptLayout::NHWC)) {
+        Rpp32f *srcPtrRow, *dstPtrRow;
+        srcPtrRow = srcPtrChannel;
+        dstPtrRow = dstPtrChannel;
+
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
+        for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
+            // Thread-local RNG state - MUST be inside loop
+            RpptXorwowState xorwowState;
+            Rpp32u rowOffset = offset + i * srcDescPtr->strides.hStride;
+#if __AVX2__
+            __m256i pxXorwowStateX[5], pxXorwowStateCounter;
+            __m256 pShotNoiseFactor, pShotNoiseFactorInv;
+            rpp_host_rng_xorwow_state_offsetted_avx(xorwowInitialStatePtr, xorwowState, rowOffset,
+                                                    pxXorwowStateX, &pxXorwowStateCounter);
+            compute_shot_noise_params_initialize_8_host_avx(shotNoiseFactor, shotNoiseFactorInv,
+                                                            pShotNoiseFactor, pShotNoiseFactorInv);
+#else
+            __m128i pxXorwowStateX[5], pxXorwowStateCounter;
+            __m128 pShotNoiseFactor, pShotNoiseFactorInv;
+            rpp_host_rng_xorwow_state_offsetted_sse(xorwowInitialStatePtr, xorwowState, rowOffset,
+                                                    pxXorwowStateX, &pxXorwowStateCounter);
+            compute_shot_noise_params_initialize_4_host_sse(shotNoiseFactor, shotNoiseFactorInv,
+                                                            pShotNoiseFactor, pShotNoiseFactorInv);
+#endif
+
+            Rpp32f *srcPtrTemp, *dstPtrTemp;
+            srcPtrTemp = srcPtrRow + i * srcDescPtr->strides.hStride;
+            dstPtrTemp = dstPtrRow + i * dstDescPtr->strides.hStride;
+
+            int vectorLoopCount = 0;
+            for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrement) {
+#if __AVX2__
+                __m256 p[3];
+                rpp_simd_load(rpp_load24_f32pkd3_to_f32pln3_avx, srcPtrTemp, p);  // simd loads
+                if (shotNoiseFactor)
+                    compute_shot_noise_24_host(p, pxXorwowStateX, &pxXorwowStateCounter,
+                                               &pShotNoiseFactorInv,
+                                               &pShotNoiseFactor);  // shot_noise adjustment
+                rpp_simd_store(rpp_store24_f32pln3_to_f32pkd3_avx, dstPtrTemp,
+                               p);  // simd stores
+#else
+                __m128 p[4];
+                rpp_simd_load(rpp_load12_f32pkd3_to_f32pln3, srcPtrTemp, p);  // simd loads
+                if (shotNoiseFactor)
+                    compute_shot_noise_12_host(p, pxXorwowStateX, &pxXorwowStateCounter,
+                                               &pShotNoiseFactorInv,
+                                               &pShotNoiseFactor);  // shot_noise adjustment
+                rpp_simd_store(rpp_store12_f32pln3_to_f32pkd3, dstPtrTemp, p);  // simd stores
+#endif
+                srcPtrTemp += vectorIncrement;
+                dstPtrTemp += vectorIncrement;
+            }
+            for (; vectorLoopCount < bufferLength; vectorLoopCount += 3) {
+                if (shotNoiseFactor) {
+                    Rpp32f poissonDistribLambda[3];
+                    poissonDistribLambda[0] = (Rpp32f)srcPtrTemp[0] * shotNoiseFactorInv;
+                    poissonDistribLambda[1] = (Rpp32f)srcPtrTemp[1] * shotNoiseFactorInv;
+                    poissonDistribLambda[2] = (Rpp32f)srcPtrTemp[2] * shotNoiseFactorInv;
+                    dstPtrTemp[0] = RPPPIXELCHECKF32(
+                        compute_shot_noise_1_host(&xorwowState, poissonDistribLambda[0]) *
+                        shotNoiseFactor);
+                    dstPtrTemp[1] = RPPPIXELCHECKF32(
+                        compute_shot_noise_1_host(&xorwowState, poissonDistribLambda[1]) *
+                        shotNoiseFactor);
+                    dstPtrTemp[2] = RPPPIXELCHECKF32(
+                        compute_shot_noise_1_host(&xorwowState, poissonDistribLambda[2]) *
+                        shotNoiseFactor);
+                } else {
+                    dstPtrTemp[0] = srcPtrTemp[0];
+                    dstPtrTemp[1] = srcPtrTemp[1];
+                    dstPtrTemp[2] = srcPtrTemp[2];
+                }
+
+                srcPtrTemp += 3;
+                dstPtrTemp += 3;
+            }
+        }
+    }
+
+    // Shot Noise without fused output-layout toggle (NCHW -> NCHW)
+    else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) &&
+             (dstDescPtr->layout == RpptLayout::NCHW)) {
+        Rpp32f *srcPtrRowR, *srcPtrRowG, *srcPtrRowB, *dstPtrRowR, *dstPtrRowG, *dstPtrRowB;
+        srcPtrRowR = srcPtrChannel;
+        srcPtrRowG = srcPtrRowR + srcDescPtr->strides.cStride;
+        srcPtrRowB = srcPtrRowG + srcDescPtr->strides.cStride;
+        dstPtrRowR = dstPtrChannel;
+        dstPtrRowG = dstPtrRowR + dstDescPtr->strides.cStride;
+        dstPtrRowB = dstPtrRowG + dstDescPtr->strides.cStride;
+
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
+        for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
+            // Thread-local RNG state - MUST be inside loop
+            RpptXorwowState xorwowState;
+            Rpp32u rowOffset = offset + i * srcDescPtr->strides.hStride;
+#if __AVX2__
+            __m256i pxXorwowStateX[5], pxXorwowStateCounter;
+            __m256 pShotNoiseFactor, pShotNoiseFactorInv;
+            rpp_host_rng_xorwow_state_offsetted_avx(xorwowInitialStatePtr, xorwowState, rowOffset,
+                                                    pxXorwowStateX, &pxXorwowStateCounter);
+            compute_shot_noise_params_initialize_8_host_avx(shotNoiseFactor, shotNoiseFactorInv,
+                                                            pShotNoiseFactor, pShotNoiseFactorInv);
+#else
+            __m128i pxXorwowStateX[5], pxXorwowStateCounter;
+            __m128 pShotNoiseFactor, pShotNoiseFactorInv;
+            rpp_host_rng_xorwow_state_offsetted_sse(xorwowInitialStatePtr, xorwowState, rowOffset,
+                                                    pxXorwowStateX, &pxXorwowStateCounter);
+            compute_shot_noise_params_initialize_4_host_sse(shotNoiseFactor, shotNoiseFactorInv,
+                                                            pShotNoiseFactor, pShotNoiseFactorInv);
+#endif
+
+            Rpp32f *srcPtrTempR, *srcPtrTempG, *srcPtrTempB, *dstPtrTempR, *dstPtrTempG,
+                *dstPtrTempB;
+            srcPtrTempR = srcPtrRowR + i * srcDescPtr->strides.hStride;
+            srcPtrTempG = srcPtrRowG + i * srcDescPtr->strides.hStride;
+            srcPtrTempB = srcPtrRowB + i * srcDescPtr->strides.hStride;
+            dstPtrTempR = dstPtrRowR + i * dstDescPtr->strides.hStride;
+            dstPtrTempG = dstPtrRowG + i * dstDescPtr->strides.hStride;
+            dstPtrTempB = dstPtrRowB + i * dstDescPtr->strides.hStride;
+
+            int vectorLoopCount = 0;
+            for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrementPerChannel) {
+#if __AVX2__
+                __m256 p[3];
+                rpp_simd_load(rpp_load24_f32pln3_to_f32pln3_avx, srcPtrTempR, srcPtrTempG,
+                              srcPtrTempB, p);  // simd loads
+                if (shotNoiseFactor)
+                    compute_shot_noise_24_host(p, pxXorwowStateX, &pxXorwowStateCounter,
+                                               &pShotNoiseFactorInv,
+                                               &pShotNoiseFactor);  // shot_noise adjustment
+                rpp_simd_store(rpp_store24_f32pln3_to_f32pln3_avx, dstPtrTempR, dstPtrTempG,
+                               dstPtrTempB, p);  // simd stores
+#else
+                __m128 p[4];
+                rpp_simd_load(rpp_load12_f32pln3_to_f32pln3, srcPtrTempR, srcPtrTempG, srcPtrTempB,
+                              p);  // simd loads
+                if (shotNoiseFactor)
+                    compute_shot_noise_12_host(p, pxXorwowStateX, &pxXorwowStateCounter,
+                                               &pShotNoiseFactorInv,
+                                               &pShotNoiseFactor);  // shot_noise adjustment
+                rpp_simd_store(rpp_store12_f32pln3_to_f32pln3, dstPtrTempR, dstPtrTempG,
+                               dstPtrTempB, p);  // simd stores
+#endif
+                srcPtrTempR += vectorIncrementPerChannel;
+                srcPtrTempG += vectorIncrementPerChannel;
+                srcPtrTempB += vectorIncrementPerChannel;
+                dstPtrTempR += vectorIncrementPerChannel;
+                dstPtrTempG += vectorIncrementPerChannel;
+                dstPtrTempB += vectorIncrementPerChannel;
+            }
+            for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
+                if (shotNoiseFactor) {
+                    Rpp32f poissonDistribLambda[3];
+                    poissonDistribLambda[0] = (Rpp32f)*srcPtrTempR++ * shotNoiseFactorInv;
+                    poissonDistribLambda[1] = (Rpp32f)*srcPtrTempG++ * shotNoiseFactorInv;
+                    poissonDistribLambda[2] = (Rpp32f)*srcPtrTempB++ * shotNoiseFactorInv;
+                    *dstPtrTempR++ = RPPPIXELCHECKF32(
+                        compute_shot_noise_1_host(&xorwowState, poissonDistribLambda[0]) *
+                        shotNoiseFactor);
+                    *dstPtrTempG++ = RPPPIXELCHECKF32(
+                        compute_shot_noise_1_host(&xorwowState, poissonDistribLambda[1]) *
+                        shotNoiseFactor);
+                    *dstPtrTempB++ = RPPPIXELCHECKF32(
+                        compute_shot_noise_1_host(&xorwowState, poissonDistribLambda[2]) *
+                        shotNoiseFactor);
+                } else {
+                    *dstPtrTempR++ = *srcPtrTempR++;
+                    *dstPtrTempG++ = *srcPtrTempG++;
+                    *dstPtrTempB++ = *srcPtrTempB++;
+                }
+            }
+        }
+    }
+
+    // Shot Noise without fused output-layout toggle single channel (NCHW -> NCHW)
+    else if ((srcDescPtr->c == 1) && (srcDescPtr->layout == RpptLayout::NCHW) &&
+             (dstDescPtr->layout == RpptLayout::NCHW)) {
+#if __AVX2__
+        Rpp32u alignedLength = bufferLength & ~7;
+#else
+        Rpp32u alignedLength = bufferLength & ~3;
+#endif
+        Rpp32f *srcPtrRow, *dstPtrRow;
+        srcPtrRow = srcPtrChannel;
+        dstPtrRow = dstPtrChannel;
+
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
+        for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
+            // Thread-local RNG state - MUST be inside loop
+            RpptXorwowState xorwowState;
+            Rpp32u rowOffset = offset + i * srcDescPtr->strides.hStride;
+#if __AVX2__
+            __m256i pxXorwowStateX[5], pxXorwowStateCounter;
+            __m256 pShotNoiseFactor, pShotNoiseFactorInv;
+            rpp_host_rng_xorwow_state_offsetted_avx(xorwowInitialStatePtr, xorwowState, rowOffset,
+                                                    pxXorwowStateX, &pxXorwowStateCounter);
+            compute_shot_noise_params_initialize_8_host_avx(shotNoiseFactor, shotNoiseFactorInv,
+                                                            pShotNoiseFactor, pShotNoiseFactorInv);
+#else
+            __m128i pxXorwowStateX[5], pxXorwowStateCounter;
+            __m128 pShotNoiseFactor, pShotNoiseFactorInv;
+            rpp_host_rng_xorwow_state_offsetted_sse(xorwowInitialStatePtr, xorwowState, rowOffset,
+                                                    pxXorwowStateX, &pxXorwowStateCounter);
+            compute_shot_noise_params_initialize_4_host_sse(shotNoiseFactor, shotNoiseFactorInv,
+                                                            pShotNoiseFactor, pShotNoiseFactorInv);
+#endif
+
+            Rpp32f *srcPtrTemp, *dstPtrTemp;
+            srcPtrTemp = srcPtrRow + i * srcDescPtr->strides.hStride;
+            dstPtrTemp = dstPtrRow + i * dstDescPtr->strides.hStride;
+
+            int vectorLoopCount = 0;
+            for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrementPerChannel) {
+#if __AVX2__
+                __m256 p;
+                rpp_simd_load(rpp_load8_f32_to_f32_avx, srcPtrTemp, &p);  // simd loads
+                if (shotNoiseFactor)
+                    compute_shot_noise_8_host(&p, pxXorwowStateX, &pxXorwowStateCounter,
+                                              &pShotNoiseFactorInv,
+                                              &pShotNoiseFactor);           // shot_noise adjustment
+                rpp_simd_store(rpp_store8_f32_to_f32_avx, dstPtrTemp, &p);  // simd stores
+#else
+                __m128 p;
+                rpp_simd_load(rpp_load4_f32_to_f32, srcPtrTemp, &p);  // simd loads
+                if (shotNoiseFactor)
+                    compute_shot_noise_4_host(&p, pxXorwowStateX, &pxXorwowStateCounter,
+                                              &pShotNoiseFactorInv,
+                                              &pShotNoiseFactor);       // shot_noise adjustment
+                rpp_simd_store(rpp_store4_f32_to_f32, dstPtrTemp, &p);  // simd stores
+#endif
+                srcPtrTemp += vectorIncrementPerChannel;
+                dstPtrTemp += vectorIncrementPerChannel;
+            }
+            for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
+                if (shotNoiseFactor) {
+                    Rpp32f poissonDistribLambda;
+                    poissonDistribLambda = (Rpp32f)*srcPtrTemp++ * shotNoiseFactorInv;
+                    *dstPtrTemp++ = RPPPIXELCHECKF32(
+                        compute_shot_noise_1_host(&xorwowState, poissonDistribLambda) *
+                        shotNoiseFactor);
+                } else {
+                    *dstPtrTemp++ = *srcPtrTemp++;
+                }
+            }
+        }
+    }
 }
 
 RppStatus shot_noise_f32_f32_host_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr, Rpp32f* dstPtr,
@@ -632,12 +1158,13 @@ RppStatus shot_noise_f32_f32_host_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr,
                                          RppLayoutParams layoutParams, rpp::Handle& handle) {
     RpptROI roiDefault = rpp_make_roi_xywh_full((Rpp32s)srcDescPtr->w, (Rpp32s)srcDescPtr->h);
     omp_set_dynamic(0);
-    omp_set_num_threads(handle.GetNumThreads());
-#pragma omp parallel for
+#pragma omp parallel for if (dstDescPtr->n > 1) num_threads(handle.GetNumThreads())
     for (int batchCount = 0; batchCount < dstDescPtr->n; batchCount++) {
         RpptROI roi;
         RpptROIPtr roiPtrInput = &roiTensorPtrSrc[batchCount];
         compute_roi_validation_host(roiPtrInput, &roi, &roiDefault, roiType);
+
+        Rpp32u intraThreads = get_intra_image_threads(handle, dstDescPtr->n, roi.xywhROI.roiHeight);
 
         Rpp32f shotNoiseFactor = shotNoiseFactorTensor[batchCount] * ONE_OVER_255;
         Rpp32f shotNoiseFactorInv = 255.0f / shotNoiseFactorTensor[batchCount];
@@ -647,399 +1174,522 @@ RppStatus shot_noise_f32_f32_host_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr,
         srcPtrImage = srcPtr + batchCount * srcDescPtr->strides.nStride;
         dstPtrImage = dstPtr + batchCount * dstDescPtr->strides.nStride;
 
-        Rpp32u bufferLength = roi.xywhROI.roiWidth * layoutParams.bufferMultiplier;
+        shot_noise_f32_f32_host_impl(srcPtrImage, srcDescPtr, dstPtrImage, dstDescPtr,
+                                     shotNoiseFactor, shotNoiseFactorInv, offset,
+                                     xorwowInitialStatePtr, roi, layoutParams, intraThreads);
+    }
 
-        Rpp32f *srcPtrChannel, *dstPtrChannel;
-        srcPtrChannel = srcPtrImage + (roi.xywhROI.xy.y * srcDescPtr->strides.hStride) +
-                        (roi.xywhROI.xy.x * layoutParams.bufferMultiplier);
-        dstPtrChannel = dstPtrImage;
+    return RPP_SUCCESS;
+}
 
-        RpptXorwowState xorwowState;
+inline void shot_noise_f16_f16_host_impl(Rpp16f* srcPtrImage, RpptDescPtr srcDescPtr,
+                                         Rpp16f* dstPtrImage, RpptDescPtr dstDescPtr,
+                                         Rpp32f shotNoiseFactor, Rpp32f shotNoiseFactorInv,
+                                         Rpp32u offset, RpptXorwowState* xorwowInitialStatePtr,
+                                         RpptROI roi, RppLayoutParams layoutParams,
+                                         Rpp32u intraThreads) {
+    Rpp32u bufferLength = roi.xywhROI.roiWidth * layoutParams.bufferMultiplier;
+
+    Rpp16f *srcPtrChannel, *dstPtrChannel;
+    srcPtrChannel = srcPtrImage + (roi.xywhROI.xy.y * srcDescPtr->strides.hStride) +
+                    (roi.xywhROI.xy.x * layoutParams.bufferMultiplier);
+    dstPtrChannel = dstPtrImage;
+
 #if __AVX2__
-        Rpp32u alignedLength = (bufferLength / 24) * 24;
-        Rpp32u vectorIncrement = 24;
-        Rpp32u vectorIncrementPerChannel = 8;
-
-        __m256i pxXorwowStateX[5], pxXorwowStateCounter;
-        __m256 pShotNoiseFactor, pShotNoiseFactorInv;
-        rpp_host_rng_xorwow_state_offsetted_avx(xorwowInitialStatePtr, xorwowState, offset,
-                                                pxXorwowStateX, &pxXorwowStateCounter);
-        compute_shot_noise_params_initialize_8_host_avx(shotNoiseFactor, shotNoiseFactorInv,
-                                                        pShotNoiseFactor, pShotNoiseFactorInv);
+    Rpp32u alignedLength = (bufferLength / 24) * 24;
+    Rpp32u vectorIncrement = 24;
+    Rpp32u vectorIncrementPerChannel = 8;
 #else
-        Rpp32u alignedLength = (bufferLength / 12) * 12;
-        Rpp32u vectorIncrement = 12;
-        Rpp32u vectorIncrementPerChannel = 4;
-
-        __m128i pxXorwowStateX[5], pxXorwowStateCounter;
-        __m128 pShotNoiseFactor, pShotNoiseFactorInv;
-        rpp_host_rng_xorwow_state_offsetted_sse(xorwowInitialStatePtr, xorwowState, offset,
-                                                pxXorwowStateX, &pxXorwowStateCounter);
-        compute_shot_noise_params_initialize_4_host_sse(shotNoiseFactor, shotNoiseFactorInv,
-                                                        pShotNoiseFactor, pShotNoiseFactorInv);
+    Rpp32u alignedLength = (bufferLength / 12) * 12;
+    Rpp32u vectorIncrement = 12;
+    Rpp32u vectorIncrementPerChannel = 4;
 #endif
 
-        // Shot Noise with fused output-layout toggle (NHWC -> NCHW)
-        if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) &&
-            (dstDescPtr->layout == RpptLayout::NCHW)) {
-            Rpp32f *srcPtrRow, *dstPtrRowR, *dstPtrRowG, *dstPtrRowB;
-            srcPtrRow = srcPtrChannel;
-            dstPtrRowR = dstPtrChannel;
-            dstPtrRowG = dstPtrRowR + dstDescPtr->strides.cStride;
-            dstPtrRowB = dstPtrRowG + dstDescPtr->strides.cStride;
+    // Shot Noise with fused output-layout toggle (NHWC -> NCHW)
+    if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) &&
+        (dstDescPtr->layout == RpptLayout::NCHW)) {
+        Rpp16f *srcPtrRow, *dstPtrRowR, *dstPtrRowG, *dstPtrRowB;
+        srcPtrRow = srcPtrChannel;
+        dstPtrRowR = dstPtrChannel;
+        dstPtrRowG = dstPtrRowR + dstDescPtr->strides.cStride;
+        dstPtrRowB = dstPtrRowG + dstDescPtr->strides.cStride;
 
-            for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
-                Rpp32f *srcPtrTemp, *dstPtrTempR, *dstPtrTempG, *dstPtrTempB;
-                srcPtrTemp = srcPtrRow;
-                dstPtrTempR = dstPtrRowR;
-                dstPtrTempG = dstPtrRowG;
-                dstPtrTempB = dstPtrRowB;
-
-                int vectorLoopCount = 0;
-                for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrement) {
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
+        for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
+            // Thread-local RNG state - MUST be inside loop
+            RpptXorwowState xorwowState;
+            Rpp32u rowOffset = offset + i * srcDescPtr->strides.hStride;
 #if __AVX2__
-                    __m256 p[3];
-                    rpp_simd_load(rpp_load24_f32pkd3_to_f32pln3_avx, srcPtrTemp, p);  // simd loads
-                    if (shotNoiseFactor)
-                        compute_shot_noise_24_host(p, pxXorwowStateX, &pxXorwowStateCounter,
-                                                   &pShotNoiseFactorInv,
-                                                   &pShotNoiseFactor);  // shot_noise adjustment
-                    rpp_simd_store(rpp_store24_f32pln3_to_f32pln3_avx, dstPtrTempR, dstPtrTempG,
-                                   dstPtrTempB, p);  // simd stores
+            __m256i pxXorwowStateX[5], pxXorwowStateCounter;
+            __m256 pShotNoiseFactor, pShotNoiseFactorInv;
+            rpp_host_rng_xorwow_state_offsetted_avx(xorwowInitialStatePtr, xorwowState, rowOffset,
+                                                    pxXorwowStateX, &pxXorwowStateCounter);
+            compute_shot_noise_params_initialize_8_host_avx(shotNoiseFactor, shotNoiseFactorInv,
+                                                            pShotNoiseFactor, pShotNoiseFactorInv);
 #else
-                    __m128 p[4];
-                    rpp_simd_load(rpp_load12_f32pkd3_to_f32pln3, srcPtrTemp, p);  // simd loads
-                    if (shotNoiseFactor)
-                        compute_shot_noise_12_host(p, pxXorwowStateX, &pxXorwowStateCounter,
-                                                   &pShotNoiseFactorInv,
-                                                   &pShotNoiseFactor);  // shot_noise adjustment
-                    rpp_simd_store(rpp_store12_f32pln3_to_f32pln3, dstPtrTempR, dstPtrTempG,
-                                   dstPtrTempB, p);  // simd stores
+            __m128i pxXorwowStateX[5], pxXorwowStateCounter;
+            __m128 pShotNoiseFactor, pShotNoiseFactorInv;
+            rpp_host_rng_xorwow_state_offsetted_sse(xorwowInitialStatePtr, xorwowState, rowOffset,
+                                                    pxXorwowStateX, &pxXorwowStateCounter);
+            compute_shot_noise_params_initialize_4_host_sse(shotNoiseFactor, shotNoiseFactorInv,
+                                                            pShotNoiseFactor, pShotNoiseFactorInv);
 #endif
-                    srcPtrTemp += vectorIncrement;
-                    dstPtrTempR += vectorIncrementPerChannel;
-                    dstPtrTempG += vectorIncrementPerChannel;
-                    dstPtrTempB += vectorIncrementPerChannel;
-                }
-                for (; vectorLoopCount < bufferLength; vectorLoopCount += 3) {
-                    if (shotNoiseFactor) {
-                        Rpp32f poissonDistribLambda[3];
-                        poissonDistribLambda[0] = (Rpp32f)srcPtrTemp[0] * shotNoiseFactorInv;
-                        poissonDistribLambda[1] = (Rpp32f)srcPtrTemp[1] * shotNoiseFactorInv;
-                        poissonDistribLambda[2] = (Rpp32f)srcPtrTemp[2] * shotNoiseFactorInv;
-                        *dstPtrTempR = RPPPIXELCHECKF32(
-                            compute_shot_noise_1_host(&xorwowState, poissonDistribLambda[0]) *
-                            shotNoiseFactor);
-                        *dstPtrTempG = RPPPIXELCHECKF32(
-                            compute_shot_noise_1_host(&xorwowState, poissonDistribLambda[1]) *
-                            shotNoiseFactor);
-                        *dstPtrTempB = RPPPIXELCHECKF32(
-                            compute_shot_noise_1_host(&xorwowState, poissonDistribLambda[2]) *
-                            shotNoiseFactor);
-                    } else {
-                        *dstPtrTempR = srcPtrTemp[0];
-                        *dstPtrTempG = srcPtrTemp[1];
-                        *dstPtrTempB = srcPtrTemp[2];
-                    }
 
-                    srcPtrTemp += 3;
-                    dstPtrTempR++;
-                    dstPtrTempG++;
-                    dstPtrTempB++;
-                }
+            Rpp16f *srcPtrTemp, *dstPtrTempR, *dstPtrTempG, *dstPtrTempB;
+            srcPtrTemp = srcPtrRow + i * srcDescPtr->strides.hStride;
+            dstPtrTempR = dstPtrRowR + i * dstDescPtr->strides.hStride;
+            dstPtrTempG = dstPtrRowG + i * dstDescPtr->strides.hStride;
+            dstPtrTempB = dstPtrRowB + i * dstDescPtr->strides.hStride;
 
-                srcPtrRow += srcDescPtr->strides.hStride;
-                dstPtrRowR += dstDescPtr->strides.hStride;
-                dstPtrRowG += dstDescPtr->strides.hStride;
-                dstPtrRowB += dstDescPtr->strides.hStride;
+            int vectorLoopCount = 0;
+            for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrement) {
+#if __AVX2__
+                __m256 p[3];
+                rpp_simd_load(rpp_load24_f16pkd3_to_f32pln3_avx, srcPtrTemp, p);  // simd loads
+                if (shotNoiseFactor)
+                    compute_shot_noise_24_host(p, pxXorwowStateX, &pxXorwowStateCounter,
+                                               &pShotNoiseFactorInv,
+                                               &pShotNoiseFactor);  // shot_noise adjustment
+                rpp_simd_store(rpp_store24_f32pln3_to_f16pln3_avx, dstPtrTempR, dstPtrTempG,
+                               dstPtrTempB, p);  // simd stores
+#else
+                Rpp32f srcPtrTemp_ps[13];
+                Rpp32f dstPtrTempR_ps[4], dstPtrTempG_ps[4], dstPtrTempB_ps[4];
+                for (int cnt = 0; cnt < vectorIncrement; cnt++)
+                    srcPtrTemp_ps[cnt] = (Rpp32f)srcPtrTemp[cnt];
+
+                __m128 p[4];
+                rpp_simd_load(rpp_load12_f32pkd3_to_f32pln3, srcPtrTemp_ps, p);  // simd loads
+                if (shotNoiseFactor)
+                    compute_shot_noise_12_host(p, pxXorwowStateX, &pxXorwowStateCounter,
+                                               &pShotNoiseFactorInv,
+                                               &pShotNoiseFactor);  // shot_noise adjustment
+                rpp_simd_store(rpp_store12_f32pln3_to_f32pln3, dstPtrTempR_ps, dstPtrTempG_ps,
+                               dstPtrTempB_ps, p);  // simd stores
+
+                for (int cnt = 0; cnt < vectorIncrementPerChannel; cnt++) {
+                    dstPtrTempR[cnt] = (Rpp16f)dstPtrTempR_ps[cnt];
+                    dstPtrTempG[cnt] = (Rpp16f)dstPtrTempG_ps[cnt];
+                    dstPtrTempB[cnt] = (Rpp16f)dstPtrTempB_ps[cnt];
+                }
+#endif
+                srcPtrTemp += vectorIncrement;
+                dstPtrTempR += vectorIncrementPerChannel;
+                dstPtrTempG += vectorIncrementPerChannel;
+                dstPtrTempB += vectorIncrementPerChannel;
             }
-        }
-
-        // Shot Noise with fused output-layout toggle (NCHW -> NHWC)
-        else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) &&
-                 (dstDescPtr->layout == RpptLayout::NHWC)) {
-            Rpp32f *srcPtrRowR, *srcPtrRowG, *srcPtrRowB, *dstPtrRow;
-            srcPtrRowR = srcPtrChannel;
-            srcPtrRowG = srcPtrRowR + srcDescPtr->strides.cStride;
-            srcPtrRowB = srcPtrRowG + srcDescPtr->strides.cStride;
-            dstPtrRow = dstPtrChannel;
-
-            for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
-                Rpp32f *srcPtrTempR, *srcPtrTempG, *srcPtrTempB, *dstPtrTemp;
-                srcPtrTempR = srcPtrRowR;
-                srcPtrTempG = srcPtrRowG;
-                srcPtrTempB = srcPtrRowB;
-                dstPtrTemp = dstPtrRow;
-
-                int vectorLoopCount = 0;
-                for (; vectorLoopCount < alignedLength;
-                     vectorLoopCount += vectorIncrementPerChannel) {
-#if __AVX2__
-                    __m256 p[3];
-                    rpp_simd_load(rpp_load24_f32pln3_to_f32pln3_avx, srcPtrTempR, srcPtrTempG,
-                                  srcPtrTempB, p);  // simd loads
-                    if (shotNoiseFactor)
-                        compute_shot_noise_24_host(p, pxXorwowStateX, &pxXorwowStateCounter,
-                                                   &pShotNoiseFactorInv,
-                                                   &pShotNoiseFactor);  // shot_noise adjustment
-                    rpp_simd_store(rpp_store24_f32pln3_to_f32pkd3_avx, dstPtrTemp,
-                                   p);  // simd stores
-#else
-                    __m128 p[4];
-                    rpp_simd_load(rpp_load12_f32pln3_to_f32pln3, srcPtrTempR, srcPtrTempG,
-                                  srcPtrTempB, p);  // simd loads
-                    if (shotNoiseFactor)
-                        compute_shot_noise_12_host(p, pxXorwowStateX, &pxXorwowStateCounter,
-                                                   &pShotNoiseFactorInv,
-                                                   &pShotNoiseFactor);  // shot_noise adjustment
-                    rpp_simd_store(rpp_store12_f32pln3_to_f32pkd3, dstPtrTemp, p);  // simd stores
-#endif
-                    srcPtrTempR += vectorIncrementPerChannel;
-                    srcPtrTempG += vectorIncrementPerChannel;
-                    srcPtrTempB += vectorIncrementPerChannel;
-                    dstPtrTemp += vectorIncrement;
-                }
-                for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
-                    if (shotNoiseFactor) {
-                        Rpp32f poissonDistribLambda[3];
-                        poissonDistribLambda[0] = (Rpp32f)*srcPtrTempR * shotNoiseFactorInv;
-                        poissonDistribLambda[1] = (Rpp32f)*srcPtrTempG * shotNoiseFactorInv;
-                        poissonDistribLambda[2] = (Rpp32f)*srcPtrTempB * shotNoiseFactorInv;
-                        dstPtrTemp[0] = RPPPIXELCHECKF32(
-                            compute_shot_noise_1_host(&xorwowState, poissonDistribLambda[0]) *
-                            shotNoiseFactor);
-                        dstPtrTemp[1] = RPPPIXELCHECKF32(
-                            compute_shot_noise_1_host(&xorwowState, poissonDistribLambda[1]) *
-                            shotNoiseFactor);
-                        dstPtrTemp[2] = RPPPIXELCHECKF32(
-                            compute_shot_noise_1_host(&xorwowState, poissonDistribLambda[2]) *
-                            shotNoiseFactor);
-                    } else {
-                        dstPtrTemp[0] = *srcPtrTempR;
-                        dstPtrTemp[1] = *srcPtrTempG;
-                        dstPtrTemp[2] = *srcPtrTempB;
-                    }
-
-                    srcPtrTempR++;
-                    srcPtrTempG++;
-                    srcPtrTempB++;
-                    dstPtrTemp += 3;
+            for (; vectorLoopCount < bufferLength; vectorLoopCount += 3) {
+                if (shotNoiseFactor) {
+                    Rpp32f poissonDistribLambda[3];
+                    poissonDistribLambda[0] = (Rpp32f)srcPtrTemp[0] * shotNoiseFactorInv;
+                    poissonDistribLambda[1] = (Rpp32f)srcPtrTemp[1] * shotNoiseFactorInv;
+                    poissonDistribLambda[2] = (Rpp32f)srcPtrTemp[2] * shotNoiseFactorInv;
+                    *dstPtrTempR = (Rpp16f)RPPPIXELCHECKF32(
+                        compute_shot_noise_1_host(&xorwowState, poissonDistribLambda[0]) *
+                        shotNoiseFactor);
+                    *dstPtrTempG = (Rpp16f)RPPPIXELCHECKF32(
+                        compute_shot_noise_1_host(&xorwowState, poissonDistribLambda[1]) *
+                        shotNoiseFactor);
+                    *dstPtrTempB = (Rpp16f)RPPPIXELCHECKF32(
+                        compute_shot_noise_1_host(&xorwowState, poissonDistribLambda[2]) *
+                        shotNoiseFactor);
+                } else {
+                    *dstPtrTempR = srcPtrTemp[0];
+                    *dstPtrTempG = srcPtrTemp[1];
+                    *dstPtrTempB = srcPtrTemp[2];
                 }
 
-                srcPtrRowR += srcDescPtr->strides.hStride;
-                srcPtrRowG += srcDescPtr->strides.hStride;
-                srcPtrRowB += srcDescPtr->strides.hStride;
-                dstPtrRow += dstDescPtr->strides.hStride;
-            }
-        }
-
-        // Shot Noise without fused output-layout toggle (NHWC -> NHWC)
-        else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) &&
-                 (dstDescPtr->layout == RpptLayout::NHWC)) {
-            Rpp32f *srcPtrRow, *dstPtrRow;
-            srcPtrRow = srcPtrChannel;
-            dstPtrRow = dstPtrChannel;
-
-            for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
-                Rpp32f *srcPtrTemp, *dstPtrTemp;
-                srcPtrTemp = srcPtrRow;
-                dstPtrTemp = dstPtrRow;
-
-                int vectorLoopCount = 0;
-                for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrement) {
-#if __AVX2__
-                    __m256 p[3];
-                    rpp_simd_load(rpp_load24_f32pkd3_to_f32pln3_avx, srcPtrTemp, p);  // simd loads
-                    if (shotNoiseFactor)
-                        compute_shot_noise_24_host(p, pxXorwowStateX, &pxXorwowStateCounter,
-                                                   &pShotNoiseFactorInv,
-                                                   &pShotNoiseFactor);  // shot_noise adjustment
-                    rpp_simd_store(rpp_store24_f32pln3_to_f32pkd3_avx, dstPtrTemp,
-                                   p);  // simd stores
-#else
-                    __m128 p[4];
-                    rpp_simd_load(rpp_load12_f32pkd3_to_f32pln3, srcPtrTemp, p);  // simd loads
-                    if (shotNoiseFactor)
-                        compute_shot_noise_12_host(p, pxXorwowStateX, &pxXorwowStateCounter,
-                                                   &pShotNoiseFactorInv,
-                                                   &pShotNoiseFactor);  // shot_noise adjustment
-                    rpp_simd_store(rpp_store12_f32pln3_to_f32pkd3, dstPtrTemp, p);  // simd stores
-#endif
-                    srcPtrTemp += vectorIncrement;
-                    dstPtrTemp += vectorIncrement;
-                }
-                for (; vectorLoopCount < bufferLength; vectorLoopCount += 3) {
-                    if (shotNoiseFactor) {
-                        Rpp32f poissonDistribLambda[3];
-                        poissonDistribLambda[0] = (Rpp32f)srcPtrTemp[0] * shotNoiseFactorInv;
-                        poissonDistribLambda[1] = (Rpp32f)srcPtrTemp[1] * shotNoiseFactorInv;
-                        poissonDistribLambda[2] = (Rpp32f)srcPtrTemp[2] * shotNoiseFactorInv;
-                        dstPtrTemp[0] = RPPPIXELCHECKF32(
-                            compute_shot_noise_1_host(&xorwowState, poissonDistribLambda[0]) *
-                            shotNoiseFactor);
-                        dstPtrTemp[1] = RPPPIXELCHECKF32(
-                            compute_shot_noise_1_host(&xorwowState, poissonDistribLambda[1]) *
-                            shotNoiseFactor);
-                        dstPtrTemp[2] = RPPPIXELCHECKF32(
-                            compute_shot_noise_1_host(&xorwowState, poissonDistribLambda[2]) *
-                            shotNoiseFactor);
-                    } else {
-                        dstPtrTemp[0] = srcPtrTemp[0];
-                        dstPtrTemp[1] = srcPtrTemp[1];
-                        dstPtrTemp[2] = srcPtrTemp[2];
-                    }
-
-                    srcPtrTemp += 3;
-                    dstPtrTemp += 3;
-                }
-
-                srcPtrRow += srcDescPtr->strides.hStride;
-                dstPtrRow += dstDescPtr->strides.hStride;
-            }
-        }
-
-        // Shot Noise without fused output-layout toggle (NCHW -> NCHW)
-        else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) &&
-                 (dstDescPtr->layout == RpptLayout::NCHW)) {
-            Rpp32f *srcPtrRowR, *srcPtrRowG, *srcPtrRowB, *dstPtrRowR, *dstPtrRowG, *dstPtrRowB;
-            srcPtrRowR = srcPtrChannel;
-            srcPtrRowG = srcPtrRowR + srcDescPtr->strides.cStride;
-            srcPtrRowB = srcPtrRowG + srcDescPtr->strides.cStride;
-            dstPtrRowR = dstPtrChannel;
-            dstPtrRowG = dstPtrRowR + dstDescPtr->strides.cStride;
-            dstPtrRowB = dstPtrRowG + dstDescPtr->strides.cStride;
-
-            for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
-                Rpp32f *srcPtrTempR, *srcPtrTempG, *srcPtrTempB, *dstPtrTempR, *dstPtrTempG,
-                    *dstPtrTempB;
-                srcPtrTempR = srcPtrRowR;
-                srcPtrTempG = srcPtrRowG;
-                srcPtrTempB = srcPtrRowB;
-                dstPtrTempR = dstPtrRowR;
-                dstPtrTempG = dstPtrRowG;
-                dstPtrTempB = dstPtrRowB;
-
-                int vectorLoopCount = 0;
-                for (; vectorLoopCount < alignedLength;
-                     vectorLoopCount += vectorIncrementPerChannel) {
-#if __AVX2__
-                    __m256 p[3];
-                    rpp_simd_load(rpp_load24_f32pln3_to_f32pln3_avx, srcPtrTempR, srcPtrTempG,
-                                  srcPtrTempB, p);  // simd loads
-                    if (shotNoiseFactor)
-                        compute_shot_noise_24_host(p, pxXorwowStateX, &pxXorwowStateCounter,
-                                                   &pShotNoiseFactorInv,
-                                                   &pShotNoiseFactor);  // shot_noise adjustment
-                    rpp_simd_store(rpp_store24_f32pln3_to_f32pln3_avx, dstPtrTempR, dstPtrTempG,
-                                   dstPtrTempB, p);  // simd stores
-#else
-                    __m128 p[4];
-                    rpp_simd_load(rpp_load12_f32pln3_to_f32pln3, srcPtrTempR, srcPtrTempG,
-                                  srcPtrTempB, p);  // simd loads
-                    if (shotNoiseFactor)
-                        compute_shot_noise_12_host(p, pxXorwowStateX, &pxXorwowStateCounter,
-                                                   &pShotNoiseFactorInv,
-                                                   &pShotNoiseFactor);  // shot_noise adjustment
-                    rpp_simd_store(rpp_store12_f32pln3_to_f32pln3, dstPtrTempR, dstPtrTempG,
-                                   dstPtrTempB, p);  // simd stores
-#endif
-                    srcPtrTempR += vectorIncrementPerChannel;
-                    srcPtrTempG += vectorIncrementPerChannel;
-                    srcPtrTempB += vectorIncrementPerChannel;
-                    dstPtrTempR += vectorIncrementPerChannel;
-                    dstPtrTempG += vectorIncrementPerChannel;
-                    dstPtrTempB += vectorIncrementPerChannel;
-                }
-                for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
-                    if (shotNoiseFactor) {
-                        Rpp32f poissonDistribLambda[3];
-                        poissonDistribLambda[0] = (Rpp32f)*srcPtrTempR++ * shotNoiseFactorInv;
-                        poissonDistribLambda[1] = (Rpp32f)*srcPtrTempG++ * shotNoiseFactorInv;
-                        poissonDistribLambda[2] = (Rpp32f)*srcPtrTempB++ * shotNoiseFactorInv;
-                        *dstPtrTempR++ = RPPPIXELCHECKF32(
-                            compute_shot_noise_1_host(&xorwowState, poissonDistribLambda[0]) *
-                            shotNoiseFactor);
-                        *dstPtrTempG++ = RPPPIXELCHECKF32(
-                            compute_shot_noise_1_host(&xorwowState, poissonDistribLambda[1]) *
-                            shotNoiseFactor);
-                        *dstPtrTempB++ = RPPPIXELCHECKF32(
-                            compute_shot_noise_1_host(&xorwowState, poissonDistribLambda[2]) *
-                            shotNoiseFactor);
-                    } else {
-                        *dstPtrTempR++ = *srcPtrTempR++;
-                        *dstPtrTempG++ = *srcPtrTempG++;
-                        *dstPtrTempB++ = *srcPtrTempB++;
-                    }
-                }
-
-                srcPtrRowR += srcDescPtr->strides.hStride;
-                srcPtrRowG += srcDescPtr->strides.hStride;
-                srcPtrRowB += srcDescPtr->strides.hStride;
-                dstPtrRowR += srcDescPtr->strides.hStride;
-                dstPtrRowG += srcDescPtr->strides.hStride;
-                dstPtrRowB += srcDescPtr->strides.hStride;
-            }
-        }
-
-        // Shot Noise without fused output-layout toggle single channel (NCHW -> NCHW)
-        else if ((srcDescPtr->c == 1) && (srcDescPtr->layout == RpptLayout::NCHW) &&
-                 (dstDescPtr->layout == RpptLayout::NCHW)) {
-#if __AVX2__
-            alignedLength = bufferLength & ~7;
-#else
-            alignedLength = bufferLength & ~3;
-#endif
-            Rpp32f *srcPtrRow, *dstPtrRow;
-            srcPtrRow = srcPtrChannel;
-            dstPtrRow = dstPtrChannel;
-
-            for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
-                Rpp32f *srcPtrTemp, *dstPtrTemp;
-                srcPtrTemp = srcPtrRow;
-                dstPtrTemp = dstPtrRow;
-
-                int vectorLoopCount = 0;
-                for (; vectorLoopCount < alignedLength;
-                     vectorLoopCount += vectorIncrementPerChannel) {
-#if __AVX2__
-                    __m256 p;
-                    rpp_simd_load(rpp_load8_f32_to_f32_avx, srcPtrTemp, &p);  // simd loads
-                    if (shotNoiseFactor)
-                        compute_shot_noise_8_host(&p, pxXorwowStateX, &pxXorwowStateCounter,
-                                                  &pShotNoiseFactorInv,
-                                                  &pShotNoiseFactor);  // shot_noise adjustment
-                    rpp_simd_store(rpp_store8_f32_to_f32_avx, dstPtrTemp, &p);  // simd stores
-#else
-                    __m128 p;
-                    rpp_simd_load(rpp_load4_f32_to_f32, srcPtrTemp, &p);  // simd loads
-                    if (shotNoiseFactor)
-                        compute_shot_noise_4_host(&p, pxXorwowStateX, &pxXorwowStateCounter,
-                                                  &pShotNoiseFactorInv,
-                                                  &pShotNoiseFactor);       // shot_noise adjustment
-                    rpp_simd_store(rpp_store4_f32_to_f32, dstPtrTemp, &p);  // simd stores
-#endif
-                    srcPtrTemp += vectorIncrementPerChannel;
-                    dstPtrTemp += vectorIncrementPerChannel;
-                }
-                for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
-                    if (shotNoiseFactor) {
-                        Rpp32f poissonDistribLambda;
-                        poissonDistribLambda = (Rpp32f)*srcPtrTemp++ * shotNoiseFactorInv;
-                        *dstPtrTemp++ = RPPPIXELCHECKF32(
-                            compute_shot_noise_1_host(&xorwowState, poissonDistribLambda) *
-                            shotNoiseFactor);
-                    } else {
-                        *dstPtrTemp++ = *srcPtrTemp++;
-                    }
-                }
-
-                srcPtrRow += srcDescPtr->strides.hStride;
-                dstPtrRow += dstDescPtr->strides.hStride;
+                srcPtrTemp += 3;
+                dstPtrTempR++;
+                dstPtrTempG++;
+                dstPtrTempB++;
             }
         }
     }
 
-    return RPP_SUCCESS;
+    // Shot Noise with fused output-layout toggle (NCHW -> NHWC)
+    else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) &&
+             (dstDescPtr->layout == RpptLayout::NHWC)) {
+        Rpp16f *srcPtrRowR, *srcPtrRowG, *srcPtrRowB, *dstPtrRow;
+        srcPtrRowR = srcPtrChannel;
+        srcPtrRowG = srcPtrRowR + srcDescPtr->strides.cStride;
+        srcPtrRowB = srcPtrRowG + srcDescPtr->strides.cStride;
+        dstPtrRow = dstPtrChannel;
+
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
+        for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
+            // Thread-local RNG state - MUST be inside loop
+            RpptXorwowState xorwowState;
+            Rpp32u rowOffset = offset + i * srcDescPtr->strides.hStride;
+#if __AVX2__
+            __m256i pxXorwowStateX[5], pxXorwowStateCounter;
+            __m256 pShotNoiseFactor, pShotNoiseFactorInv;
+            rpp_host_rng_xorwow_state_offsetted_avx(xorwowInitialStatePtr, xorwowState, rowOffset,
+                                                    pxXorwowStateX, &pxXorwowStateCounter);
+            compute_shot_noise_params_initialize_8_host_avx(shotNoiseFactor, shotNoiseFactorInv,
+                                                            pShotNoiseFactor, pShotNoiseFactorInv);
+#else
+            __m128i pxXorwowStateX[5], pxXorwowStateCounter;
+            __m128 pShotNoiseFactor, pShotNoiseFactorInv;
+            rpp_host_rng_xorwow_state_offsetted_sse(xorwowInitialStatePtr, xorwowState, rowOffset,
+                                                    pxXorwowStateX, &pxXorwowStateCounter);
+            compute_shot_noise_params_initialize_4_host_sse(shotNoiseFactor, shotNoiseFactorInv,
+                                                            pShotNoiseFactor, pShotNoiseFactorInv);
+#endif
+
+            Rpp16f *srcPtrTempR, *srcPtrTempG, *srcPtrTempB, *dstPtrTemp;
+            srcPtrTempR = srcPtrRowR + i * srcDescPtr->strides.hStride;
+            srcPtrTempG = srcPtrRowG + i * srcDescPtr->strides.hStride;
+            srcPtrTempB = srcPtrRowB + i * srcDescPtr->strides.hStride;
+            dstPtrTemp = dstPtrRow + i * dstDescPtr->strides.hStride;
+
+            int vectorLoopCount = 0;
+            for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrementPerChannel) {
+#if __AVX2__
+                __m256 p[3];
+                rpp_simd_load(rpp_load24_f16pln3_to_f32pln3_avx, srcPtrTempR, srcPtrTempG,
+                              srcPtrTempB, p);  // simd loads
+                if (shotNoiseFactor)
+                    compute_shot_noise_24_host(p, pxXorwowStateX, &pxXorwowStateCounter,
+                                               &pShotNoiseFactorInv,
+                                               &pShotNoiseFactor);  // shot_noise adjustment
+                rpp_simd_store(rpp_store24_f32pln3_to_f16pkd3_avx, dstPtrTemp,
+                               p);  // simd stores
+#else
+                Rpp32f srcPtrTempR_ps[4], srcPtrTempG_ps[4], srcPtrTempB_ps[4];
+                Rpp32f dstPtrTemp_ps[13];
+                for (int cnt = 0; cnt < vectorIncrementPerChannel; cnt++) {
+                    srcPtrTempR_ps[cnt] = (Rpp32f)srcPtrTempR[cnt];
+                    srcPtrTempG_ps[cnt] = (Rpp32f)srcPtrTempG[cnt];
+                    srcPtrTempB_ps[cnt] = (Rpp32f)srcPtrTempB[cnt];
+                }
+
+                __m128 p[4];
+                rpp_simd_load(rpp_load12_f32pln3_to_f32pln3, srcPtrTempR_ps, srcPtrTempG_ps,
+                              srcPtrTempB_ps, p);  // simd loads
+                if (shotNoiseFactor)
+                    compute_shot_noise_12_host(p, pxXorwowStateX, &pxXorwowStateCounter,
+                                               &pShotNoiseFactorInv,
+                                               &pShotNoiseFactor);  // shot_noise adjustment
+                rpp_simd_store(rpp_store12_f32pln3_to_f32pkd3, dstPtrTemp_ps,
+                               p);  // simd stores
+
+                for (int cnt = 0; cnt < vectorIncrement; cnt++)
+                    dstPtrTemp[cnt] = (Rpp16f)dstPtrTemp_ps[cnt];
+#endif
+                srcPtrTempR += vectorIncrementPerChannel;
+                srcPtrTempG += vectorIncrementPerChannel;
+                srcPtrTempB += vectorIncrementPerChannel;
+                dstPtrTemp += vectorIncrement;
+            }
+            for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
+                if (shotNoiseFactor) {
+                    Rpp32f poissonDistribLambda[3];
+                    poissonDistribLambda[0] = (Rpp32f)*srcPtrTempR * shotNoiseFactorInv;
+                    poissonDistribLambda[1] = (Rpp32f)*srcPtrTempG * shotNoiseFactorInv;
+                    poissonDistribLambda[2] = (Rpp32f)*srcPtrTempB * shotNoiseFactorInv;
+                    dstPtrTemp[0] = (Rpp16f)RPPPIXELCHECKF32(
+                        compute_shot_noise_1_host(&xorwowState, poissonDistribLambda[0]) *
+                        shotNoiseFactor);
+                    dstPtrTemp[1] = (Rpp16f)RPPPIXELCHECKF32(
+                        compute_shot_noise_1_host(&xorwowState, poissonDistribLambda[1]) *
+                        shotNoiseFactor);
+                    dstPtrTemp[2] = (Rpp16f)RPPPIXELCHECKF32(
+                        compute_shot_noise_1_host(&xorwowState, poissonDistribLambda[2]) *
+                        shotNoiseFactor);
+                } else {
+                    dstPtrTemp[0] = *srcPtrTempR;
+                    dstPtrTemp[1] = *srcPtrTempG;
+                    dstPtrTemp[2] = *srcPtrTempB;
+                }
+
+                srcPtrTempR++;
+                srcPtrTempG++;
+                srcPtrTempB++;
+                dstPtrTemp += 3;
+            }
+        }
+    }
+
+    // Shot Noise without fused output-layout toggle (NHWC -> NHWC)
+    else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) &&
+             (dstDescPtr->layout == RpptLayout::NHWC)) {
+        Rpp16f *srcPtrRow, *dstPtrRow;
+        srcPtrRow = srcPtrChannel;
+        dstPtrRow = dstPtrChannel;
+
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
+        for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
+            // Thread-local RNG state - MUST be inside loop
+            RpptXorwowState xorwowState;
+            Rpp32u rowOffset = offset + i * srcDescPtr->strides.hStride;
+#if __AVX2__
+            __m256i pxXorwowStateX[5], pxXorwowStateCounter;
+            __m256 pShotNoiseFactor, pShotNoiseFactorInv;
+            rpp_host_rng_xorwow_state_offsetted_avx(xorwowInitialStatePtr, xorwowState, rowOffset,
+                                                    pxXorwowStateX, &pxXorwowStateCounter);
+            compute_shot_noise_params_initialize_8_host_avx(shotNoiseFactor, shotNoiseFactorInv,
+                                                            pShotNoiseFactor, pShotNoiseFactorInv);
+#else
+            __m128i pxXorwowStateX[5], pxXorwowStateCounter;
+            __m128 pShotNoiseFactor, pShotNoiseFactorInv;
+            rpp_host_rng_xorwow_state_offsetted_sse(xorwowInitialStatePtr, xorwowState, rowOffset,
+                                                    pxXorwowStateX, &pxXorwowStateCounter);
+            compute_shot_noise_params_initialize_4_host_sse(shotNoiseFactor, shotNoiseFactorInv,
+                                                            pShotNoiseFactor, pShotNoiseFactorInv);
+#endif
+
+            Rpp16f *srcPtrTemp, *dstPtrTemp;
+            srcPtrTemp = srcPtrRow + i * srcDescPtr->strides.hStride;
+            dstPtrTemp = dstPtrRow + i * dstDescPtr->strides.hStride;
+
+            int vectorLoopCount = 0;
+            for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrement) {
+#if __AVX2__
+                __m256 p[3];
+                rpp_simd_load(rpp_load24_f16pkd3_to_f32pln3_avx, srcPtrTemp, p);  // simd loads
+                if (shotNoiseFactor)
+                    compute_shot_noise_24_host(p, pxXorwowStateX, &pxXorwowStateCounter,
+                                               &pShotNoiseFactorInv,
+                                               &pShotNoiseFactor);  // shot_noise adjustment
+                rpp_simd_store(rpp_store24_f32pln3_to_f16pkd3_avx, dstPtrTemp,
+                               p);  // simd stores
+#else
+                Rpp32f srcPtrTemp_ps[13];
+                Rpp32f dstPtrTemp_ps[13];
+                for (int cnt = 0; cnt < vectorIncrement; cnt++)
+                    srcPtrTemp_ps[cnt] = (Rpp32f)srcPtrTemp[cnt];
+
+                __m128 p[4];
+                rpp_simd_load(rpp_load12_f32pkd3_to_f32pln3, srcPtrTemp_ps, p);  // simd loads
+                if (shotNoiseFactor)
+                    compute_shot_noise_12_host(p, pxXorwowStateX, &pxXorwowStateCounter,
+                                               &pShotNoiseFactorInv,
+                                               &pShotNoiseFactor);  // shot_noise adjustment
+                rpp_simd_store(rpp_store12_f32pln3_to_f32pkd3, dstPtrTemp_ps,
+                               p);  // simd stores
+
+                for (int cnt = 0; cnt < vectorIncrement; cnt++)
+                    dstPtrTemp[cnt] = (Rpp16f)dstPtrTemp_ps[cnt];
+#endif
+                srcPtrTemp += vectorIncrement;
+                dstPtrTemp += vectorIncrement;
+            }
+            for (; vectorLoopCount < bufferLength; vectorLoopCount += 3) {
+                if (shotNoiseFactor) {
+                    Rpp32f poissonDistribLambda[3];
+                    poissonDistribLambda[0] = (Rpp32f)srcPtrTemp[0] * shotNoiseFactorInv;
+                    poissonDistribLambda[1] = (Rpp32f)srcPtrTemp[1] * shotNoiseFactorInv;
+                    poissonDistribLambda[2] = (Rpp32f)srcPtrTemp[2] * shotNoiseFactorInv;
+                    dstPtrTemp[0] = (Rpp16f)RPPPIXELCHECKF32(
+                        compute_shot_noise_1_host(&xorwowState, poissonDistribLambda[0]) *
+                        shotNoiseFactor);
+                    dstPtrTemp[1] = (Rpp16f)RPPPIXELCHECKF32(
+                        compute_shot_noise_1_host(&xorwowState, poissonDistribLambda[1]) *
+                        shotNoiseFactor);
+                    dstPtrTemp[2] = (Rpp16f)RPPPIXELCHECKF32(
+                        compute_shot_noise_1_host(&xorwowState, poissonDistribLambda[2]) *
+                        shotNoiseFactor);
+                } else {
+                    dstPtrTemp[0] = srcPtrTemp[0];
+                    dstPtrTemp[1] = srcPtrTemp[1];
+                    dstPtrTemp[2] = srcPtrTemp[2];
+                }
+
+                srcPtrTemp += 3;
+                dstPtrTemp += 3;
+            }
+        }
+    }
+
+    // Shot Noise without fused output-layout toggle (NCHW -> NCHW)
+    else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) &&
+             (dstDescPtr->layout == RpptLayout::NCHW)) {
+        Rpp16f *srcPtrRowR, *srcPtrRowG, *srcPtrRowB, *dstPtrRowR, *dstPtrRowG, *dstPtrRowB;
+        srcPtrRowR = srcPtrChannel;
+        srcPtrRowG = srcPtrRowR + srcDescPtr->strides.cStride;
+        srcPtrRowB = srcPtrRowG + srcDescPtr->strides.cStride;
+        dstPtrRowR = dstPtrChannel;
+        dstPtrRowG = dstPtrRowR + dstDescPtr->strides.cStride;
+        dstPtrRowB = dstPtrRowG + dstDescPtr->strides.cStride;
+
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
+        for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
+            // Thread-local RNG state - MUST be inside loop
+            RpptXorwowState xorwowState;
+            Rpp32u rowOffset = offset + i * srcDescPtr->strides.hStride;
+#if __AVX2__
+            __m256i pxXorwowStateX[5], pxXorwowStateCounter;
+            __m256 pShotNoiseFactor, pShotNoiseFactorInv;
+            rpp_host_rng_xorwow_state_offsetted_avx(xorwowInitialStatePtr, xorwowState, rowOffset,
+                                                    pxXorwowStateX, &pxXorwowStateCounter);
+            compute_shot_noise_params_initialize_8_host_avx(shotNoiseFactor, shotNoiseFactorInv,
+                                                            pShotNoiseFactor, pShotNoiseFactorInv);
+#else
+            __m128i pxXorwowStateX[5], pxXorwowStateCounter;
+            __m128 pShotNoiseFactor, pShotNoiseFactorInv;
+            rpp_host_rng_xorwow_state_offsetted_sse(xorwowInitialStatePtr, xorwowState, rowOffset,
+                                                    pxXorwowStateX, &pxXorwowStateCounter);
+            compute_shot_noise_params_initialize_4_host_sse(shotNoiseFactor, shotNoiseFactorInv,
+                                                            pShotNoiseFactor, pShotNoiseFactorInv);
+#endif
+
+            Rpp16f *srcPtrTempR, *srcPtrTempG, *srcPtrTempB, *dstPtrTempR, *dstPtrTempG,
+                *dstPtrTempB;
+            srcPtrTempR = srcPtrRowR + i * srcDescPtr->strides.hStride;
+            srcPtrTempG = srcPtrRowG + i * srcDescPtr->strides.hStride;
+            srcPtrTempB = srcPtrRowB + i * srcDescPtr->strides.hStride;
+            dstPtrTempR = dstPtrRowR + i * dstDescPtr->strides.hStride;
+            dstPtrTempG = dstPtrRowG + i * dstDescPtr->strides.hStride;
+            dstPtrTempB = dstPtrRowB + i * dstDescPtr->strides.hStride;
+
+            int vectorLoopCount = 0;
+            for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrementPerChannel) {
+#if __AVX2__
+                __m256 p[3];
+                rpp_simd_load(rpp_load24_f16pln3_to_f32pln3_avx, srcPtrTempR, srcPtrTempG,
+                              srcPtrTempB, p);  // simd loads
+                if (shotNoiseFactor)
+                    compute_shot_noise_24_host(p, pxXorwowStateX, &pxXorwowStateCounter,
+                                               &pShotNoiseFactorInv,
+                                               &pShotNoiseFactor);  // shot_noise adjustment
+                rpp_simd_store(rpp_store24_f32pln3_to_f16pln3_avx, dstPtrTempR, dstPtrTempG,
+                               dstPtrTempB, p);  // simd stores
+#else
+                Rpp32f srcPtrTempR_ps[4], srcPtrTempG_ps[4], srcPtrTempB_ps[4];
+                Rpp32f dstPtrTempR_ps[4], dstPtrTempG_ps[4], dstPtrTempB_ps[4];
+                for (int cnt = 0; cnt < vectorIncrementPerChannel; cnt++) {
+                    srcPtrTempR_ps[cnt] = (Rpp32f)srcPtrTempR[cnt];
+                    srcPtrTempG_ps[cnt] = (Rpp32f)srcPtrTempG[cnt];
+                    srcPtrTempB_ps[cnt] = (Rpp32f)srcPtrTempB[cnt];
+                }
+
+                __m128 p[4];
+                rpp_simd_load(rpp_load12_f32pln3_to_f32pln3, srcPtrTempR_ps, srcPtrTempG_ps,
+                              srcPtrTempB_ps, p);  // simd loads
+                if (shotNoiseFactor)
+                    compute_shot_noise_12_host(p, pxXorwowStateX, &pxXorwowStateCounter,
+                                               &pShotNoiseFactorInv,
+                                               &pShotNoiseFactor);  // shot_noise adjustment
+                rpp_simd_store(rpp_store12_f32pln3_to_f32pln3, dstPtrTempR_ps, dstPtrTempG_ps,
+                               dstPtrTempB_ps, p);  // simd stores
+
+                for (int cnt = 0; cnt < vectorIncrementPerChannel; cnt++) {
+                    dstPtrTempR[cnt] = (Rpp16f)dstPtrTempR_ps[cnt];
+                    dstPtrTempG[cnt] = (Rpp16f)dstPtrTempG_ps[cnt];
+                    dstPtrTempB[cnt] = (Rpp16f)dstPtrTempB_ps[cnt];
+                }
+#endif
+                srcPtrTempR += vectorIncrementPerChannel;
+                srcPtrTempG += vectorIncrementPerChannel;
+                srcPtrTempB += vectorIncrementPerChannel;
+                dstPtrTempR += vectorIncrementPerChannel;
+                dstPtrTempG += vectorIncrementPerChannel;
+                dstPtrTempB += vectorIncrementPerChannel;
+            }
+            for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
+                if (shotNoiseFactor) {
+                    Rpp32f poissonDistribLambda[3];
+                    poissonDistribLambda[0] = (Rpp32f)*srcPtrTempR++ * shotNoiseFactorInv;
+                    poissonDistribLambda[1] = (Rpp32f)*srcPtrTempG++ * shotNoiseFactorInv;
+                    poissonDistribLambda[2] = (Rpp32f)*srcPtrTempB++ * shotNoiseFactorInv;
+                    *dstPtrTempR++ = (Rpp16f)RPPPIXELCHECKF32(
+                        compute_shot_noise_1_host(&xorwowState, poissonDistribLambda[0]) *
+                        shotNoiseFactor);
+                    *dstPtrTempG++ = (Rpp16f)RPPPIXELCHECKF32(
+                        compute_shot_noise_1_host(&xorwowState, poissonDistribLambda[1]) *
+                        shotNoiseFactor);
+                    *dstPtrTempB++ = (Rpp16f)RPPPIXELCHECKF32(
+                        compute_shot_noise_1_host(&xorwowState, poissonDistribLambda[2]) *
+                        shotNoiseFactor);
+                } else {
+                    *dstPtrTempR++ = *srcPtrTempR++;
+                    *dstPtrTempG++ = *srcPtrTempG++;
+                    *dstPtrTempB++ = *srcPtrTempB++;
+                }
+            }
+        }
+    }
+
+    // Shot Noise without fused output-layout toggle single channel (NCHW -> NCHW)
+    else if ((srcDescPtr->c == 1) && (srcDescPtr->layout == RpptLayout::NCHW) &&
+             (dstDescPtr->layout == RpptLayout::NCHW)) {
+#if __AVX2__
+        Rpp32u alignedLength = bufferLength & ~7;
+#else
+        Rpp32u alignedLength = bufferLength & ~3;
+#endif
+        Rpp16f *srcPtrRow, *dstPtrRow;
+        srcPtrRow = srcPtrChannel;
+        dstPtrRow = dstPtrChannel;
+
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
+        for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
+            // Thread-local RNG state - MUST be inside loop
+            RpptXorwowState xorwowState;
+            Rpp32u rowOffset = offset + i * srcDescPtr->strides.hStride;
+#if __AVX2__
+            __m256i pxXorwowStateX[5], pxXorwowStateCounter;
+            __m256 pShotNoiseFactor, pShotNoiseFactorInv;
+            rpp_host_rng_xorwow_state_offsetted_avx(xorwowInitialStatePtr, xorwowState, rowOffset,
+                                                    pxXorwowStateX, &pxXorwowStateCounter);
+            compute_shot_noise_params_initialize_8_host_avx(shotNoiseFactor, shotNoiseFactorInv,
+                                                            pShotNoiseFactor, pShotNoiseFactorInv);
+#else
+            __m128i pxXorwowStateX[5], pxXorwowStateCounter;
+            __m128 pShotNoiseFactor, pShotNoiseFactorInv;
+            rpp_host_rng_xorwow_state_offsetted_sse(xorwowInitialStatePtr, xorwowState, rowOffset,
+                                                    pxXorwowStateX, &pxXorwowStateCounter);
+            compute_shot_noise_params_initialize_4_host_sse(shotNoiseFactor, shotNoiseFactorInv,
+                                                            pShotNoiseFactor, pShotNoiseFactorInv);
+#endif
+
+            Rpp16f *srcPtrTemp, *dstPtrTemp;
+            srcPtrTemp = srcPtrRow + i * srcDescPtr->strides.hStride;
+            dstPtrTemp = dstPtrRow + i * dstDescPtr->strides.hStride;
+
+            int vectorLoopCount = 0;
+            for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrementPerChannel) {
+#if __AVX2__
+                __m256 p;
+                rpp_simd_load(rpp_load8_f16_to_f32_avx, srcPtrTemp, &p);  // simd loads
+                if (shotNoiseFactor)
+                    compute_shot_noise_8_host(&p, pxXorwowStateX, &pxXorwowStateCounter,
+                                              &pShotNoiseFactorInv,
+                                              &pShotNoiseFactor);           // shot_noise adjustment
+                rpp_simd_store(rpp_store8_f32_to_f16_avx, dstPtrTemp, &p);  // simd stores
+#else
+                Rpp32f srcPtrTemp_ps[4], dstPtrTemp_ps[4];
+                for (int cnt = 0; cnt < vectorIncrementPerChannel; cnt++)
+                    srcPtrTemp_ps[cnt] = (Rpp32f)srcPtrTemp[cnt];
+
+                __m128 p;
+                rpp_simd_load(rpp_load4_f32_to_f32, srcPtrTemp_ps, &p);  // simd loads
+                if (shotNoiseFactor)
+                    compute_shot_noise_4_host(&p, pxXorwowStateX, &pxXorwowStateCounter,
+                                              &pShotNoiseFactorInv,
+                                              &pShotNoiseFactor);          // shot_noise adjustment
+                rpp_simd_store(rpp_store4_f32_to_f32, dstPtrTemp_ps, &p);  // simd stores
+
+                for (int cnt = 0; cnt < vectorIncrementPerChannel; cnt++)
+                    dstPtrTemp[cnt] = (Rpp16f)dstPtrTemp_ps[cnt];
+#endif
+                srcPtrTemp += vectorIncrementPerChannel;
+                dstPtrTemp += vectorIncrementPerChannel;
+            }
+            for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
+                if (shotNoiseFactor) {
+                    Rpp32f poissonDistribLambda;
+                    poissonDistribLambda = (Rpp32f)*srcPtrTemp++ * shotNoiseFactorInv;
+                    *dstPtrTemp++ = (Rpp16f)RPPPIXELCHECKF32(
+                        compute_shot_noise_1_host(&xorwowState, poissonDistribLambda) *
+                        shotNoiseFactor);
+                } else {
+                    *dstPtrTemp++ = *srcPtrTemp++;
+                }
+            }
+        }
+    }
 }
 
 RppStatus shot_noise_f16_f16_host_tensor(Rpp16f* srcPtr, RpptDescPtr srcDescPtr, Rpp16f* dstPtr,
@@ -1049,12 +1699,13 @@ RppStatus shot_noise_f16_f16_host_tensor(Rpp16f* srcPtr, RpptDescPtr srcDescPtr,
                                          RppLayoutParams layoutParams, rpp::Handle& handle) {
     RpptROI roiDefault = rpp_make_roi_xywh_full((Rpp32s)srcDescPtr->w, (Rpp32s)srcDescPtr->h);
     omp_set_dynamic(0);
-    omp_set_num_threads(handle.GetNumThreads());
-#pragma omp parallel for
+#pragma omp parallel for if (dstDescPtr->n > 1) num_threads(handle.GetNumThreads())
     for (int batchCount = 0; batchCount < dstDescPtr->n; batchCount++) {
         RpptROI roi;
         RpptROIPtr roiPtrInput = &roiTensorPtrSrc[batchCount];
         compute_roi_validation_host(roiPtrInput, &roi, &roiDefault, roiType);
+
+        Rpp32u intraThreads = get_intra_image_threads(handle, dstDescPtr->n, roi.xywhROI.roiHeight);
 
         Rpp32f shotNoiseFactor = shotNoiseFactorTensor[batchCount] * ONE_OVER_255;
         Rpp32f shotNoiseFactorInv = 255.0f / shotNoiseFactorTensor[batchCount];
@@ -1064,452 +1715,490 @@ RppStatus shot_noise_f16_f16_host_tensor(Rpp16f* srcPtr, RpptDescPtr srcDescPtr,
         srcPtrImage = srcPtr + batchCount * srcDescPtr->strides.nStride;
         dstPtrImage = dstPtr + batchCount * dstDescPtr->strides.nStride;
 
-        Rpp32u bufferLength = roi.xywhROI.roiWidth * layoutParams.bufferMultiplier;
+        shot_noise_f16_f16_host_impl(srcPtrImage, srcDescPtr, dstPtrImage, dstDescPtr,
+                                     shotNoiseFactor, shotNoiseFactorInv, offset,
+                                     xorwowInitialStatePtr, roi, layoutParams, intraThreads);
+    }
 
-        Rpp16f *srcPtrChannel, *dstPtrChannel;
-        srcPtrChannel = srcPtrImage + (roi.xywhROI.xy.y * srcDescPtr->strides.hStride) +
-                        (roi.xywhROI.xy.x * layoutParams.bufferMultiplier);
-        dstPtrChannel = dstPtrImage;
+    return RPP_SUCCESS;
+}
 
-        RpptXorwowState xorwowState;
+inline void shot_noise_i8_i8_host_impl(Rpp8s* srcPtrImage, RpptDescPtr srcDescPtr,
+                                       Rpp8s* dstPtrImage, RpptDescPtr dstDescPtr,
+                                       Rpp32f shotNoiseFactor, Rpp32f shotNoiseFactorInv,
+                                       Rpp32u offset, RpptXorwowState* xorwowInitialStatePtr,
+                                       RpptROI roi, RppLayoutParams layoutParams,
+                                       Rpp32u intraThreads) {
+    Rpp32u bufferLength = roi.xywhROI.roiWidth * layoutParams.bufferMultiplier;
+
+    Rpp8s *srcPtrChannel, *dstPtrChannel;
+    srcPtrChannel = srcPtrImage + (roi.xywhROI.xy.y * srcDescPtr->strides.hStride) +
+                    (roi.xywhROI.xy.x * layoutParams.bufferMultiplier);
+    dstPtrChannel = dstPtrImage;
+
+    Rpp32u alignedLength = (bufferLength / 48) * 48;
+    Rpp32u vectorIncrement = 48;
+    Rpp32u vectorIncrementPerChannel = 16;
+
+    // Shot Noise with fused output-layout toggle (NHWC -> NCHW)
+    if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) &&
+        (dstDescPtr->layout == RpptLayout::NCHW)) {
+        Rpp8s *srcPtrRow, *dstPtrRowR, *dstPtrRowG, *dstPtrRowB;
+        srcPtrRow = srcPtrChannel;
+        dstPtrRowR = dstPtrChannel;
+        dstPtrRowG = dstPtrRowR + dstDescPtr->strides.cStride;
+        dstPtrRowB = dstPtrRowG + dstDescPtr->strides.cStride;
+
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
+        for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
+            // Thread-local RNG state - MUST be inside loop
+            RpptXorwowState xorwowState;
+            Rpp32u rowOffset = offset + i * srcDescPtr->strides.hStride;
 #if __AVX2__
-        Rpp32u alignedLength = (bufferLength / 24) * 24;
-        Rpp32u vectorIncrement = 24;
-        Rpp32u vectorIncrementPerChannel = 8;
-
-        __m256i pxXorwowStateX[5], pxXorwowStateCounter;
-        __m256 pShotNoiseFactor, pShotNoiseFactorInv;
-        rpp_host_rng_xorwow_state_offsetted_avx(xorwowInitialStatePtr, xorwowState, offset,
-                                                pxXorwowStateX, &pxXorwowStateCounter);
-        compute_shot_noise_params_initialize_8_host_avx(shotNoiseFactor, shotNoiseFactorInv,
-                                                        pShotNoiseFactor, pShotNoiseFactorInv);
+            __m256i pxXorwowStateX[5], pxXorwowStateCounter;
+            __m256 pShotNoiseFactor, pShotNoiseFactorInv;
+            rpp_host_rng_xorwow_state_offsetted_avx(xorwowInitialStatePtr, xorwowState, rowOffset,
+                                                    pxXorwowStateX, &pxXorwowStateCounter);
+            compute_shot_noise_params_initialize_8_host_avx(shotNoiseFactor, shotNoiseFactorInv,
+                                                            pShotNoiseFactor, pShotNoiseFactorInv);
 #else
-        Rpp32u alignedLength = (bufferLength / 12) * 12;
-        Rpp32u vectorIncrement = 12;
-        Rpp32u vectorIncrementPerChannel = 4;
-
-        __m128i pxXorwowStateX[5], pxXorwowStateCounter;
-        __m128 pShotNoiseFactor, pShotNoiseFactorInv;
-        rpp_host_rng_xorwow_state_offsetted_sse(xorwowInitialStatePtr, xorwowState, offset,
-                                                pxXorwowStateX, &pxXorwowStateCounter);
-        compute_shot_noise_params_initialize_4_host_sse(shotNoiseFactor, shotNoiseFactorInv,
-                                                        pShotNoiseFactor, pShotNoiseFactorInv);
+            __m128i pxXorwowStateX[5], pxXorwowStateCounter;
+            __m128 pShotNoiseFactor, pShotNoiseFactorInv;
+            rpp_host_rng_xorwow_state_offsetted_sse(xorwowInitialStatePtr, xorwowState, rowOffset,
+                                                    pxXorwowStateX, &pxXorwowStateCounter);
+            compute_shot_noise_params_initialize_4_host_sse(shotNoiseFactor, shotNoiseFactorInv,
+                                                            pShotNoiseFactor, pShotNoiseFactorInv);
 #endif
 
-        // Shot Noise with fused output-layout toggle (NHWC -> NCHW)
-        if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) &&
-            (dstDescPtr->layout == RpptLayout::NCHW)) {
-            Rpp16f *srcPtrRow, *dstPtrRowR, *dstPtrRowG, *dstPtrRowB;
-            srcPtrRow = srcPtrChannel;
-            dstPtrRowR = dstPtrChannel;
-            dstPtrRowG = dstPtrRowR + dstDescPtr->strides.cStride;
-            dstPtrRowB = dstPtrRowG + dstDescPtr->strides.cStride;
+            Rpp8s *srcPtrTemp, *dstPtrTempR, *dstPtrTempG, *dstPtrTempB;
+            srcPtrTemp = srcPtrRow + i * srcDescPtr->strides.hStride;
+            dstPtrTempR = dstPtrRowR + i * dstDescPtr->strides.hStride;
+            dstPtrTempG = dstPtrRowG + i * dstDescPtr->strides.hStride;
+            dstPtrTempB = dstPtrRowB + i * dstDescPtr->strides.hStride;
 
-            for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
-                Rpp16f *srcPtrTemp, *dstPtrTempR, *dstPtrTempG, *dstPtrTempB;
-                srcPtrTemp = srcPtrRow;
-                dstPtrTempR = dstPtrRowR;
-                dstPtrTempG = dstPtrRowG;
-                dstPtrTempB = dstPtrRowB;
-
-                int vectorLoopCount = 0;
-                for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrement) {
+            int vectorLoopCount = 0;
+            for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrement) {
 #if __AVX2__
-                    __m256 p[3];
-                    rpp_simd_load(rpp_load24_f16pkd3_to_f32pln3_avx, srcPtrTemp, p);  // simd loads
-                    if (shotNoiseFactor)
-                        compute_shot_noise_24_host(p, pxXorwowStateX, &pxXorwowStateCounter,
-                                                   &pShotNoiseFactorInv,
-                                                   &pShotNoiseFactor);  // shot_noise adjustment
-                    rpp_simd_store(rpp_store24_f32pln3_to_f16pln3_avx, dstPtrTempR, dstPtrTempG,
-                                   dstPtrTempB, p);  // simd stores
+                __m256 p[6];
+                rpp_simd_load(rpp_load48_i8pkd3_to_f32pln3_avx, srcPtrTemp, p);  // simd loads
+                if (shotNoiseFactor)
+                    compute_shot_noise_48_host(p, pxXorwowStateX, &pxXorwowStateCounter,
+                                               &pShotNoiseFactorInv,
+                                               &pShotNoiseFactor);  // shot_noise adjustment
+                rpp_simd_store(rpp_store48_f32pln3_to_i8pln3_avx, dstPtrTempR, dstPtrTempG,
+                               dstPtrTempB, p);  // simd stores
 #else
-                    Rpp32f srcPtrTemp_ps[13];
-                    Rpp32f dstPtrTempR_ps[4], dstPtrTempG_ps[4], dstPtrTempB_ps[4];
-                    for (int cnt = 0; cnt < vectorIncrement; cnt++)
-                        srcPtrTemp_ps[cnt] = (Rpp32f)srcPtrTemp[cnt];
-
-                    __m128 p[4];
-                    rpp_simd_load(rpp_load12_f32pkd3_to_f32pln3, srcPtrTemp_ps, p);  // simd loads
-                    if (shotNoiseFactor)
-                        compute_shot_noise_12_host(p, pxXorwowStateX, &pxXorwowStateCounter,
-                                                   &pShotNoiseFactorInv,
-                                                   &pShotNoiseFactor);  // shot_noise adjustment
-                    rpp_simd_store(rpp_store12_f32pln3_to_f32pln3, dstPtrTempR_ps, dstPtrTempG_ps,
-                                   dstPtrTempB_ps, p);  // simd stores
-
-                    for (int cnt = 0; cnt < vectorIncrementPerChannel; cnt++) {
-                        dstPtrTempR[cnt] = (Rpp16f)dstPtrTempR_ps[cnt];
-                        dstPtrTempG[cnt] = (Rpp16f)dstPtrTempG_ps[cnt];
-                        dstPtrTempB[cnt] = (Rpp16f)dstPtrTempB_ps[cnt];
-                    }
+                __m128 p[12];
+                rpp_simd_load(rpp_load48_i8pkd3_to_f32pln3, srcPtrTemp, p);  // simd loads
+                if (shotNoiseFactor)
+                    compute_shot_noise_48_host(p, pxXorwowStateX, &pxXorwowStateCounter,
+                                               &pShotNoiseFactorInv,
+                                               &pShotNoiseFactor);  // shot_noise adjustment
+                rpp_simd_store(rpp_store48_f32pln3_to_i8pln3, dstPtrTempR, dstPtrTempG, dstPtrTempB,
+                               p);  // simd stores
 #endif
-                    srcPtrTemp += vectorIncrement;
-                    dstPtrTempR += vectorIncrementPerChannel;
-                    dstPtrTempG += vectorIncrementPerChannel;
-                    dstPtrTempB += vectorIncrementPerChannel;
-                }
-                for (; vectorLoopCount < bufferLength; vectorLoopCount += 3) {
-                    if (shotNoiseFactor) {
-                        Rpp32f poissonDistribLambda[3];
-                        poissonDistribLambda[0] = (Rpp32f)srcPtrTemp[0] * shotNoiseFactorInv;
-                        poissonDistribLambda[1] = (Rpp32f)srcPtrTemp[1] * shotNoiseFactorInv;
-                        poissonDistribLambda[2] = (Rpp32f)srcPtrTemp[2] * shotNoiseFactorInv;
-                        *dstPtrTempR = (Rpp16f)RPPPIXELCHECKF32(
-                            compute_shot_noise_1_host(&xorwowState, poissonDistribLambda[0]) *
-                            shotNoiseFactor);
-                        *dstPtrTempG = (Rpp16f)RPPPIXELCHECKF32(
-                            compute_shot_noise_1_host(&xorwowState, poissonDistribLambda[1]) *
-                            shotNoiseFactor);
-                        *dstPtrTempB = (Rpp16f)RPPPIXELCHECKF32(
-                            compute_shot_noise_1_host(&xorwowState, poissonDistribLambda[2]) *
-                            shotNoiseFactor);
-                    } else {
-                        *dstPtrTempR = srcPtrTemp[0];
-                        *dstPtrTempG = srcPtrTemp[1];
-                        *dstPtrTempB = srcPtrTemp[2];
-                    }
-
-                    srcPtrTemp += 3;
-                    dstPtrTempR++;
-                    dstPtrTempG++;
-                    dstPtrTempB++;
-                }
-
-                srcPtrRow += srcDescPtr->strides.hStride;
-                dstPtrRowR += dstDescPtr->strides.hStride;
-                dstPtrRowG += dstDescPtr->strides.hStride;
-                dstPtrRowB += dstDescPtr->strides.hStride;
+                srcPtrTemp += vectorIncrement;
+                dstPtrTempR += vectorIncrementPerChannel;
+                dstPtrTempG += vectorIncrementPerChannel;
+                dstPtrTempB += vectorIncrementPerChannel;
             }
-        }
-
-        // Shot Noise with fused output-layout toggle (NCHW -> NHWC)
-        else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) &&
-                 (dstDescPtr->layout == RpptLayout::NHWC)) {
-            Rpp16f *srcPtrRowR, *srcPtrRowG, *srcPtrRowB, *dstPtrRow;
-            srcPtrRowR = srcPtrChannel;
-            srcPtrRowG = srcPtrRowR + srcDescPtr->strides.cStride;
-            srcPtrRowB = srcPtrRowG + srcDescPtr->strides.cStride;
-            dstPtrRow = dstPtrChannel;
-
-            for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
-                Rpp16f *srcPtrTempR, *srcPtrTempG, *srcPtrTempB, *dstPtrTemp;
-                srcPtrTempR = srcPtrRowR;
-                srcPtrTempG = srcPtrRowG;
-                srcPtrTempB = srcPtrRowB;
-                dstPtrTemp = dstPtrRow;
-
-                int vectorLoopCount = 0;
-                for (; vectorLoopCount < alignedLength;
-                     vectorLoopCount += vectorIncrementPerChannel) {
-#if __AVX2__
-                    __m256 p[3];
-                    rpp_simd_load(rpp_load24_f16pln3_to_f32pln3_avx, srcPtrTempR, srcPtrTempG,
-                                  srcPtrTempB, p);  // simd loads
-                    if (shotNoiseFactor)
-                        compute_shot_noise_24_host(p, pxXorwowStateX, &pxXorwowStateCounter,
-                                                   &pShotNoiseFactorInv,
-                                                   &pShotNoiseFactor);  // shot_noise adjustment
-                    rpp_simd_store(rpp_store24_f32pln3_to_f16pkd3_avx, dstPtrTemp,
-                                   p);  // simd stores
-#else
-                    Rpp32f srcPtrTempR_ps[4], srcPtrTempG_ps[4], srcPtrTempB_ps[4];
-                    Rpp32f dstPtrTemp_ps[13];
-                    for (int cnt = 0; cnt < vectorIncrementPerChannel; cnt++) {
-                        srcPtrTempR_ps[cnt] = (Rpp32f)srcPtrTempR[cnt];
-                        srcPtrTempG_ps[cnt] = (Rpp32f)srcPtrTempG[cnt];
-                        srcPtrTempB_ps[cnt] = (Rpp32f)srcPtrTempB[cnt];
-                    }
-
-                    __m128 p[4];
-                    rpp_simd_load(rpp_load12_f32pln3_to_f32pln3, srcPtrTempR_ps, srcPtrTempG_ps,
-                                  srcPtrTempB_ps, p);  // simd loads
-                    if (shotNoiseFactor)
-                        compute_shot_noise_12_host(p, pxXorwowStateX, &pxXorwowStateCounter,
-                                                   &pShotNoiseFactorInv,
-                                                   &pShotNoiseFactor);  // shot_noise adjustment
-                    rpp_simd_store(rpp_store12_f32pln3_to_f32pkd3, dstPtrTemp_ps,
-                                   p);  // simd stores
-
-                    for (int cnt = 0; cnt < vectorIncrement; cnt++)
-                        dstPtrTemp[cnt] = (Rpp16f)dstPtrTemp_ps[cnt];
-#endif
-                    srcPtrTempR += vectorIncrementPerChannel;
-                    srcPtrTempG += vectorIncrementPerChannel;
-                    srcPtrTempB += vectorIncrementPerChannel;
-                    dstPtrTemp += vectorIncrement;
-                }
-                for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
-                    if (shotNoiseFactor) {
-                        Rpp32f poissonDistribLambda[3];
-                        poissonDistribLambda[0] = (Rpp32f)*srcPtrTempR * shotNoiseFactorInv;
-                        poissonDistribLambda[1] = (Rpp32f)*srcPtrTempG * shotNoiseFactorInv;
-                        poissonDistribLambda[2] = (Rpp32f)*srcPtrTempB * shotNoiseFactorInv;
-                        dstPtrTemp[0] = (Rpp16f)RPPPIXELCHECKF32(
-                            compute_shot_noise_1_host(&xorwowState, poissonDistribLambda[0]) *
-                            shotNoiseFactor);
-                        dstPtrTemp[1] = (Rpp16f)RPPPIXELCHECKF32(
-                            compute_shot_noise_1_host(&xorwowState, poissonDistribLambda[1]) *
-                            shotNoiseFactor);
-                        dstPtrTemp[2] = (Rpp16f)RPPPIXELCHECKF32(
-                            compute_shot_noise_1_host(&xorwowState, poissonDistribLambda[2]) *
-                            shotNoiseFactor);
-                    } else {
-                        dstPtrTemp[0] = *srcPtrTempR;
-                        dstPtrTemp[1] = *srcPtrTempG;
-                        dstPtrTemp[2] = *srcPtrTempB;
-                    }
-
-                    srcPtrTempR++;
-                    srcPtrTempG++;
-                    srcPtrTempB++;
-                    dstPtrTemp += 3;
+            for (; vectorLoopCount < bufferLength; vectorLoopCount += 3) {
+                if (shotNoiseFactor) {
+                    Rpp32f poissonDistribLambda[3];
+                    poissonDistribLambda[0] = ((Rpp32f)srcPtrTemp[0] + 128.0f) * shotNoiseFactorInv;
+                    poissonDistribLambda[1] = ((Rpp32f)srcPtrTemp[1] + 128.0f) * shotNoiseFactorInv;
+                    poissonDistribLambda[2] = ((Rpp32f)srcPtrTemp[2] + 128.0f) * shotNoiseFactorInv;
+                    *dstPtrTempR =
+                        (Rpp8s)(RPPPIXELCHECK(compute_shot_noise_1_host(&xorwowState,
+                                                                        poissonDistribLambda[0]) *
+                                              shotNoiseFactor) -
+                                128);
+                    *dstPtrTempG =
+                        (Rpp8s)(RPPPIXELCHECK(compute_shot_noise_1_host(&xorwowState,
+                                                                        poissonDistribLambda[1]) *
+                                              shotNoiseFactor) -
+                                128);
+                    *dstPtrTempB =
+                        (Rpp8s)(RPPPIXELCHECK(compute_shot_noise_1_host(&xorwowState,
+                                                                        poissonDistribLambda[2]) *
+                                              shotNoiseFactor) -
+                                128);
+                } else {
+                    *dstPtrTempR = srcPtrTemp[0];
+                    *dstPtrTempG = srcPtrTemp[1];
+                    *dstPtrTempB = srcPtrTemp[2];
                 }
 
-                srcPtrRowR += srcDescPtr->strides.hStride;
-                srcPtrRowG += srcDescPtr->strides.hStride;
-                srcPtrRowB += srcDescPtr->strides.hStride;
-                dstPtrRow += dstDescPtr->strides.hStride;
-            }
-        }
-
-        // Shot Noise without fused output-layout toggle (NHWC -> NHWC)
-        else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) &&
-                 (dstDescPtr->layout == RpptLayout::NHWC)) {
-            Rpp16f *srcPtrRow, *dstPtrRow;
-            srcPtrRow = srcPtrChannel;
-            dstPtrRow = dstPtrChannel;
-
-            for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
-                Rpp16f *srcPtrTemp, *dstPtrTemp;
-                srcPtrTemp = srcPtrRow;
-                dstPtrTemp = dstPtrRow;
-
-                int vectorLoopCount = 0;
-                for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrement) {
-#if __AVX2__
-                    __m256 p[3];
-                    rpp_simd_load(rpp_load24_f16pkd3_to_f32pln3_avx, srcPtrTemp, p);  // simd loads
-                    if (shotNoiseFactor)
-                        compute_shot_noise_24_host(p, pxXorwowStateX, &pxXorwowStateCounter,
-                                                   &pShotNoiseFactorInv,
-                                                   &pShotNoiseFactor);  // shot_noise adjustment
-                    rpp_simd_store(rpp_store24_f32pln3_to_f16pkd3_avx, dstPtrTemp,
-                                   p);  // simd stores
-#else
-                    Rpp32f srcPtrTemp_ps[13];
-                    Rpp32f dstPtrTemp_ps[13];
-                    for (int cnt = 0; cnt < vectorIncrement; cnt++)
-                        srcPtrTemp_ps[cnt] = (Rpp32f)srcPtrTemp[cnt];
-
-                    __m128 p[4];
-                    rpp_simd_load(rpp_load12_f32pkd3_to_f32pln3, srcPtrTemp_ps, p);  // simd loads
-                    if (shotNoiseFactor)
-                        compute_shot_noise_12_host(p, pxXorwowStateX, &pxXorwowStateCounter,
-                                                   &pShotNoiseFactorInv,
-                                                   &pShotNoiseFactor);  // shot_noise adjustment
-                    rpp_simd_store(rpp_store12_f32pln3_to_f32pkd3, dstPtrTemp_ps,
-                                   p);  // simd stores
-
-                    for (int cnt = 0; cnt < vectorIncrement; cnt++)
-                        dstPtrTemp[cnt] = (Rpp16f)dstPtrTemp_ps[cnt];
-#endif
-                    srcPtrTemp += vectorIncrement;
-                    dstPtrTemp += vectorIncrement;
-                }
-                for (; vectorLoopCount < bufferLength; vectorLoopCount += 3) {
-                    if (shotNoiseFactor) {
-                        Rpp32f poissonDistribLambda[3];
-                        poissonDistribLambda[0] = (Rpp32f)srcPtrTemp[0] * shotNoiseFactorInv;
-                        poissonDistribLambda[1] = (Rpp32f)srcPtrTemp[1] * shotNoiseFactorInv;
-                        poissonDistribLambda[2] = (Rpp32f)srcPtrTemp[2] * shotNoiseFactorInv;
-                        dstPtrTemp[0] = (Rpp16f)RPPPIXELCHECKF32(
-                            compute_shot_noise_1_host(&xorwowState, poissonDistribLambda[0]) *
-                            shotNoiseFactor);
-                        dstPtrTemp[1] = (Rpp16f)RPPPIXELCHECKF32(
-                            compute_shot_noise_1_host(&xorwowState, poissonDistribLambda[1]) *
-                            shotNoiseFactor);
-                        dstPtrTemp[2] = (Rpp16f)RPPPIXELCHECKF32(
-                            compute_shot_noise_1_host(&xorwowState, poissonDistribLambda[2]) *
-                            shotNoiseFactor);
-                    } else {
-                        dstPtrTemp[0] = srcPtrTemp[0];
-                        dstPtrTemp[1] = srcPtrTemp[1];
-                        dstPtrTemp[2] = srcPtrTemp[2];
-                    }
-
-                    srcPtrTemp += 3;
-                    dstPtrTemp += 3;
-                }
-
-                srcPtrRow += srcDescPtr->strides.hStride;
-                dstPtrRow += dstDescPtr->strides.hStride;
-            }
-        }
-
-        // Shot Noise without fused output-layout toggle (NCHW -> NCHW)
-        else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) &&
-                 (dstDescPtr->layout == RpptLayout::NCHW)) {
-            Rpp16f *srcPtrRowR, *srcPtrRowG, *srcPtrRowB, *dstPtrRowR, *dstPtrRowG, *dstPtrRowB;
-            srcPtrRowR = srcPtrChannel;
-            srcPtrRowG = srcPtrRowR + srcDescPtr->strides.cStride;
-            srcPtrRowB = srcPtrRowG + srcDescPtr->strides.cStride;
-            dstPtrRowR = dstPtrChannel;
-            dstPtrRowG = dstPtrRowR + dstDescPtr->strides.cStride;
-            dstPtrRowB = dstPtrRowG + dstDescPtr->strides.cStride;
-
-            for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
-                Rpp16f *srcPtrTempR, *srcPtrTempG, *srcPtrTempB, *dstPtrTempR, *dstPtrTempG,
-                    *dstPtrTempB;
-                srcPtrTempR = srcPtrRowR;
-                srcPtrTempG = srcPtrRowG;
-                srcPtrTempB = srcPtrRowB;
-                dstPtrTempR = dstPtrRowR;
-                dstPtrTempG = dstPtrRowG;
-                dstPtrTempB = dstPtrRowB;
-
-                int vectorLoopCount = 0;
-                for (; vectorLoopCount < alignedLength;
-                     vectorLoopCount += vectorIncrementPerChannel) {
-#if __AVX2__
-                    __m256 p[3];
-                    rpp_simd_load(rpp_load24_f16pln3_to_f32pln3_avx, srcPtrTempR, srcPtrTempG,
-                                  srcPtrTempB, p);  // simd loads
-                    if (shotNoiseFactor)
-                        compute_shot_noise_24_host(p, pxXorwowStateX, &pxXorwowStateCounter,
-                                                   &pShotNoiseFactorInv,
-                                                   &pShotNoiseFactor);  // shot_noise adjustment
-                    rpp_simd_store(rpp_store24_f32pln3_to_f16pln3_avx, dstPtrTempR, dstPtrTempG,
-                                   dstPtrTempB, p);  // simd stores
-#else
-                    Rpp32f srcPtrTempR_ps[4], srcPtrTempG_ps[4], srcPtrTempB_ps[4];
-                    Rpp32f dstPtrTempR_ps[4], dstPtrTempG_ps[4], dstPtrTempB_ps[4];
-                    for (int cnt = 0; cnt < vectorIncrementPerChannel; cnt++) {
-                        srcPtrTempR_ps[cnt] = (Rpp32f)srcPtrTempR[cnt];
-                        srcPtrTempG_ps[cnt] = (Rpp32f)srcPtrTempG[cnt];
-                        srcPtrTempB_ps[cnt] = (Rpp32f)srcPtrTempB[cnt];
-                    }
-
-                    __m128 p[4];
-                    rpp_simd_load(rpp_load12_f32pln3_to_f32pln3, srcPtrTempR_ps, srcPtrTempG_ps,
-                                  srcPtrTempB_ps, p);  // simd loads
-                    if (shotNoiseFactor)
-                        compute_shot_noise_12_host(p, pxXorwowStateX, &pxXorwowStateCounter,
-                                                   &pShotNoiseFactorInv,
-                                                   &pShotNoiseFactor);  // shot_noise adjustment
-                    rpp_simd_store(rpp_store12_f32pln3_to_f32pln3, dstPtrTempR_ps, dstPtrTempG_ps,
-                                   dstPtrTempB_ps, p);  // simd stores
-
-                    for (int cnt = 0; cnt < vectorIncrementPerChannel; cnt++) {
-                        dstPtrTempR[cnt] = (Rpp16f)dstPtrTempR_ps[cnt];
-                        dstPtrTempG[cnt] = (Rpp16f)dstPtrTempG_ps[cnt];
-                        dstPtrTempB[cnt] = (Rpp16f)dstPtrTempB_ps[cnt];
-                    }
-#endif
-                    srcPtrTempR += vectorIncrementPerChannel;
-                    srcPtrTempG += vectorIncrementPerChannel;
-                    srcPtrTempB += vectorIncrementPerChannel;
-                    dstPtrTempR += vectorIncrementPerChannel;
-                    dstPtrTempG += vectorIncrementPerChannel;
-                    dstPtrTempB += vectorIncrementPerChannel;
-                }
-                for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
-                    if (shotNoiseFactor) {
-                        Rpp32f poissonDistribLambda[3];
-                        poissonDistribLambda[0] = (Rpp32f)*srcPtrTempR++ * shotNoiseFactorInv;
-                        poissonDistribLambda[1] = (Rpp32f)*srcPtrTempG++ * shotNoiseFactorInv;
-                        poissonDistribLambda[2] = (Rpp32f)*srcPtrTempB++ * shotNoiseFactorInv;
-                        *dstPtrTempR++ = (Rpp16f)RPPPIXELCHECKF32(
-                            compute_shot_noise_1_host(&xorwowState, poissonDistribLambda[0]) *
-                            shotNoiseFactor);
-                        *dstPtrTempG++ = (Rpp16f)RPPPIXELCHECKF32(
-                            compute_shot_noise_1_host(&xorwowState, poissonDistribLambda[1]) *
-                            shotNoiseFactor);
-                        *dstPtrTempB++ = (Rpp16f)RPPPIXELCHECKF32(
-                            compute_shot_noise_1_host(&xorwowState, poissonDistribLambda[2]) *
-                            shotNoiseFactor);
-                    } else {
-                        *dstPtrTempR++ = *srcPtrTempR++;
-                        *dstPtrTempG++ = *srcPtrTempG++;
-                        *dstPtrTempB++ = *srcPtrTempB++;
-                    }
-                }
-
-                srcPtrRowR += srcDescPtr->strides.hStride;
-                srcPtrRowG += srcDescPtr->strides.hStride;
-                srcPtrRowB += srcDescPtr->strides.hStride;
-                dstPtrRowR += srcDescPtr->strides.hStride;
-                dstPtrRowG += srcDescPtr->strides.hStride;
-                dstPtrRowB += srcDescPtr->strides.hStride;
-            }
-        }
-
-        // Shot Noise without fused output-layout toggle single channel (NCHW -> NCHW)
-        else if ((srcDescPtr->c == 1) && (srcDescPtr->layout == RpptLayout::NCHW) &&
-                 (dstDescPtr->layout == RpptLayout::NCHW)) {
-#if __AVX2__
-            alignedLength = bufferLength & ~7;
-#else
-            alignedLength = bufferLength & ~3;
-#endif
-            Rpp16f *srcPtrRow, *dstPtrRow;
-            srcPtrRow = srcPtrChannel;
-            dstPtrRow = dstPtrChannel;
-
-            for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
-                Rpp16f *srcPtrTemp, *dstPtrTemp;
-                srcPtrTemp = srcPtrRow;
-                dstPtrTemp = dstPtrRow;
-
-                int vectorLoopCount = 0;
-                for (; vectorLoopCount < alignedLength;
-                     vectorLoopCount += vectorIncrementPerChannel) {
-#if __AVX2__
-                    __m256 p;
-                    rpp_simd_load(rpp_load8_f16_to_f32_avx, srcPtrTemp, &p);  // simd loads
-                    if (shotNoiseFactor)
-                        compute_shot_noise_8_host(&p, pxXorwowStateX, &pxXorwowStateCounter,
-                                                  &pShotNoiseFactorInv,
-                                                  &pShotNoiseFactor);  // shot_noise adjustment
-                    rpp_simd_store(rpp_store8_f32_to_f16_avx, dstPtrTemp, &p);  // simd stores
-#else
-                    Rpp32f srcPtrTemp_ps[4], dstPtrTemp_ps[4];
-                    for (int cnt = 0; cnt < vectorIncrementPerChannel; cnt++)
-                        srcPtrTemp_ps[cnt] = (Rpp32f)srcPtrTemp[cnt];
-
-                    __m128 p;
-                    rpp_simd_load(rpp_load4_f32_to_f32, srcPtrTemp_ps, &p);  // simd loads
-                    if (shotNoiseFactor)
-                        compute_shot_noise_4_host(&p, pxXorwowStateX, &pxXorwowStateCounter,
-                                                  &pShotNoiseFactorInv,
-                                                  &pShotNoiseFactor);  // shot_noise adjustment
-                    rpp_simd_store(rpp_store4_f32_to_f32, dstPtrTemp_ps, &p);  // simd stores
-
-                    for (int cnt = 0; cnt < vectorIncrementPerChannel; cnt++)
-                        dstPtrTemp[cnt] = (Rpp16f)dstPtrTemp_ps[cnt];
-#endif
-                    srcPtrTemp += vectorIncrementPerChannel;
-                    dstPtrTemp += vectorIncrementPerChannel;
-                }
-                for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
-                    if (shotNoiseFactor) {
-                        Rpp32f poissonDistribLambda;
-                        poissonDistribLambda = (Rpp32f)*srcPtrTemp++ * shotNoiseFactorInv;
-                        *dstPtrTemp++ = (Rpp16f)RPPPIXELCHECKF32(
-                            compute_shot_noise_1_host(&xorwowState, poissonDistribLambda) *
-                            shotNoiseFactor);
-                    } else {
-                        *dstPtrTemp++ = *srcPtrTemp++;
-                    }
-                }
-
-                srcPtrRow += srcDescPtr->strides.hStride;
-                dstPtrRow += dstDescPtr->strides.hStride;
+                srcPtrTemp += 3;
+                dstPtrTempR++;
+                dstPtrTempG++;
+                dstPtrTempB++;
             }
         }
     }
 
-    return RPP_SUCCESS;
+    // Shot Noise with fused output-layout toggle (NCHW -> NHWC)
+    else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) &&
+             (dstDescPtr->layout == RpptLayout::NHWC)) {
+        Rpp8s *srcPtrRowR, *srcPtrRowG, *srcPtrRowB, *dstPtrRow;
+        srcPtrRowR = srcPtrChannel;
+        srcPtrRowG = srcPtrRowR + srcDescPtr->strides.cStride;
+        srcPtrRowB = srcPtrRowG + srcDescPtr->strides.cStride;
+        dstPtrRow = dstPtrChannel;
+
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
+        for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
+            // Thread-local RNG state - MUST be inside loop
+            RpptXorwowState xorwowState;
+            Rpp32u rowOffset = offset + i * srcDescPtr->strides.hStride;
+#if __AVX2__
+            __m256i pxXorwowStateX[5], pxXorwowStateCounter;
+            __m256 pShotNoiseFactor, pShotNoiseFactorInv;
+            rpp_host_rng_xorwow_state_offsetted_avx(xorwowInitialStatePtr, xorwowState, rowOffset,
+                                                    pxXorwowStateX, &pxXorwowStateCounter);
+            compute_shot_noise_params_initialize_8_host_avx(shotNoiseFactor, shotNoiseFactorInv,
+                                                            pShotNoiseFactor, pShotNoiseFactorInv);
+#else
+            __m128i pxXorwowStateX[5], pxXorwowStateCounter;
+            __m128 pShotNoiseFactor, pShotNoiseFactorInv;
+            rpp_host_rng_xorwow_state_offsetted_sse(xorwowInitialStatePtr, xorwowState, rowOffset,
+                                                    pxXorwowStateX, &pxXorwowStateCounter);
+            compute_shot_noise_params_initialize_4_host_sse(shotNoiseFactor, shotNoiseFactorInv,
+                                                            pShotNoiseFactor, pShotNoiseFactorInv);
+#endif
+
+            Rpp8s *srcPtrTempR, *srcPtrTempG, *srcPtrTempB, *dstPtrTemp;
+            srcPtrTempR = srcPtrRowR + i * srcDescPtr->strides.hStride;
+            srcPtrTempG = srcPtrRowG + i * srcDescPtr->strides.hStride;
+            srcPtrTempB = srcPtrRowB + i * srcDescPtr->strides.hStride;
+            dstPtrTemp = dstPtrRow + i * dstDescPtr->strides.hStride;
+
+            int vectorLoopCount = 0;
+            for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrementPerChannel) {
+#if __AVX2__
+                __m256 p[6];
+                rpp_simd_load(rpp_load48_i8pln3_to_f32pln3_avx, srcPtrTempR, srcPtrTempG,
+                              srcPtrTempB, p);  // simd loads
+                if (shotNoiseFactor)
+                    compute_shot_noise_48_host(p, pxXorwowStateX, &pxXorwowStateCounter,
+                                               &pShotNoiseFactorInv,
+                                               &pShotNoiseFactor);  // shot_noise adjustment
+                rpp_simd_store(rpp_store48_f32pln3_to_i8pkd3_avx, dstPtrTemp,
+                               p);  // simd stores
+#else
+                __m128 p[12];
+                rpp_simd_load(rpp_load48_i8pln3_to_f32pln3, srcPtrTempR, srcPtrTempG, srcPtrTempB,
+                              p);  // simd loads
+                if (shotNoiseFactor)
+                    compute_shot_noise_48_host(p, pxXorwowStateX, &pxXorwowStateCounter,
+                                               &pShotNoiseFactorInv,
+                                               &pShotNoiseFactor);  // shot_noise adjustment
+                rpp_simd_store(rpp_store48_f32pln3_to_i8pkd3, dstPtrTemp, p);  // simd stores
+#endif
+                srcPtrTempR += vectorIncrementPerChannel;
+                srcPtrTempG += vectorIncrementPerChannel;
+                srcPtrTempB += vectorIncrementPerChannel;
+                dstPtrTemp += vectorIncrement;
+            }
+            for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
+                Rpp8s src[3] = {*srcPtrTempR, *srcPtrTempG, *srcPtrTempB};
+
+                if (shotNoiseFactor) {
+                    Rpp32f poissonDistribLambda[3];
+                    poissonDistribLambda[0] = ((Rpp32f)src[0] + 128.0f) * shotNoiseFactorInv;
+                    poissonDistribLambda[1] = ((Rpp32f)src[1] + 128.0f) * shotNoiseFactorInv;
+                    poissonDistribLambda[2] = ((Rpp32f)src[2] + 128.0f) * shotNoiseFactorInv;
+                    dstPtrTemp[0] =
+                        (Rpp8s)(RPPPIXELCHECK(compute_shot_noise_1_host(&xorwowState,
+                                                                        poissonDistribLambda[0]) *
+                                              shotNoiseFactor) -
+                                128);
+                    dstPtrTemp[1] =
+                        (Rpp8s)(RPPPIXELCHECK(compute_shot_noise_1_host(&xorwowState,
+                                                                        poissonDistribLambda[1]) *
+                                              shotNoiseFactor) -
+                                128);
+                    dstPtrTemp[2] =
+                        (Rpp8s)(RPPPIXELCHECK(compute_shot_noise_1_host(&xorwowState,
+                                                                        poissonDistribLambda[2]) *
+                                              shotNoiseFactor) -
+                                128);
+                } else
+                    memcpy(dstPtrTemp, src, 3);
+
+                srcPtrTempR++;
+                srcPtrTempG++;
+                srcPtrTempB++;
+                dstPtrTemp += 3;
+            }
+        }
+    }
+
+    // Shot Noise without fused output-layout toggle (NHWC -> NHWC)
+    else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) &&
+             (dstDescPtr->layout == RpptLayout::NHWC)) {
+        Rpp8s *srcPtrRow, *dstPtrRow;
+        srcPtrRow = srcPtrChannel;
+        dstPtrRow = dstPtrChannel;
+
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
+        for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
+            // Thread-local RNG state - MUST be inside loop
+            RpptXorwowState xorwowState;
+            Rpp32u rowOffset = offset + i * srcDescPtr->strides.hStride;
+#if __AVX2__
+            __m256i pxXorwowStateX[5], pxXorwowStateCounter;
+            __m256 pShotNoiseFactor, pShotNoiseFactorInv;
+            rpp_host_rng_xorwow_state_offsetted_avx(xorwowInitialStatePtr, xorwowState, rowOffset,
+                                                    pxXorwowStateX, &pxXorwowStateCounter);
+            compute_shot_noise_params_initialize_8_host_avx(shotNoiseFactor, shotNoiseFactorInv,
+                                                            pShotNoiseFactor, pShotNoiseFactorInv);
+#else
+            __m128i pxXorwowStateX[5], pxXorwowStateCounter;
+            __m128 pShotNoiseFactor, pShotNoiseFactorInv;
+            rpp_host_rng_xorwow_state_offsetted_sse(xorwowInitialStatePtr, xorwowState, rowOffset,
+                                                    pxXorwowStateX, &pxXorwowStateCounter);
+            compute_shot_noise_params_initialize_4_host_sse(shotNoiseFactor, shotNoiseFactorInv,
+                                                            pShotNoiseFactor, pShotNoiseFactorInv);
+#endif
+
+            Rpp8s *srcPtrTemp, *dstPtrTemp;
+            srcPtrTemp = srcPtrRow + i * srcDescPtr->strides.hStride;
+            dstPtrTemp = dstPtrRow + i * dstDescPtr->strides.hStride;
+
+            int vectorLoopCount = 0;
+            for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrement) {
+#if __AVX2__
+                __m256 p[6];
+                rpp_simd_load(rpp_load48_i8pkd3_to_f32pln3_avx, srcPtrTemp, p);  // simd loads
+                if (shotNoiseFactor)
+                    compute_shot_noise_48_host(p, pxXorwowStateX, &pxXorwowStateCounter,
+                                               &pShotNoiseFactorInv,
+                                               &pShotNoiseFactor);  // shot_noise adjustment
+                rpp_simd_store(rpp_store48_f32pln3_to_i8pkd3_avx, dstPtrTemp,
+                               p);  // simd stores
+#else
+                __m128 p[12];
+                rpp_simd_load(rpp_load48_i8pkd3_to_f32pln3, srcPtrTemp, p);  // simd loads
+                if (shotNoiseFactor)
+                    compute_shot_noise_48_host(p, pxXorwowStateX, &pxXorwowStateCounter,
+                                               &pShotNoiseFactorInv,
+                                               &pShotNoiseFactor);  // shot_noise adjustment
+                rpp_simd_store(rpp_store48_f32pln3_to_i8pkd3, dstPtrTemp, p);  // simd stores
+#endif
+                srcPtrTemp += vectorIncrement;
+                dstPtrTemp += vectorIncrement;
+            }
+            for (; vectorLoopCount < bufferLength; vectorLoopCount += 3) {
+                if (shotNoiseFactor) {
+                    Rpp32f poissonDistribLambda[3];
+                    poissonDistribLambda[0] = ((Rpp32f)srcPtrTemp[0] + 128.0f) * shotNoiseFactorInv;
+                    poissonDistribLambda[1] = ((Rpp32f)srcPtrTemp[1] + 128.0f) * shotNoiseFactorInv;
+                    poissonDistribLambda[2] = ((Rpp32f)srcPtrTemp[2] + 128.0f) * shotNoiseFactorInv;
+                    dstPtrTemp[0] =
+                        (Rpp8s)(RPPPIXELCHECK(compute_shot_noise_1_host(&xorwowState,
+                                                                        poissonDistribLambda[0]) *
+                                              shotNoiseFactor) -
+                                128);
+                    dstPtrTemp[1] =
+                        (Rpp8s)(RPPPIXELCHECK(compute_shot_noise_1_host(&xorwowState,
+                                                                        poissonDistribLambda[1]) *
+                                              shotNoiseFactor) -
+                                128);
+                    dstPtrTemp[2] =
+                        (Rpp8s)(RPPPIXELCHECK(compute_shot_noise_1_host(&xorwowState,
+                                                                        poissonDistribLambda[2]) *
+                                              shotNoiseFactor) -
+                                128);
+                } else
+                    memcpy(dstPtrTemp, srcPtrTemp, 3);
+
+                srcPtrTemp += 3;
+                dstPtrTemp += 3;
+            }
+        }
+    }
+
+    // Shot Noise without fused output-layout toggle (NCHW -> NCHW)
+    else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) &&
+             (dstDescPtr->layout == RpptLayout::NCHW)) {
+        Rpp8s *srcPtrRowR, *srcPtrRowG, *srcPtrRowB, *dstPtrRowR, *dstPtrRowG, *dstPtrRowB;
+        srcPtrRowR = srcPtrChannel;
+        srcPtrRowG = srcPtrRowR + srcDescPtr->strides.cStride;
+        srcPtrRowB = srcPtrRowG + srcDescPtr->strides.cStride;
+        dstPtrRowR = dstPtrChannel;
+        dstPtrRowG = dstPtrRowR + dstDescPtr->strides.cStride;
+        dstPtrRowB = dstPtrRowG + dstDescPtr->strides.cStride;
+
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
+        for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
+            // Thread-local RNG state - MUST be inside loop
+            RpptXorwowState xorwowState;
+            Rpp32u rowOffset = offset + i * srcDescPtr->strides.hStride;
+#if __AVX2__
+            __m256i pxXorwowStateX[5], pxXorwowStateCounter;
+            __m256 pShotNoiseFactor, pShotNoiseFactorInv;
+            rpp_host_rng_xorwow_state_offsetted_avx(xorwowInitialStatePtr, xorwowState, rowOffset,
+                                                    pxXorwowStateX, &pxXorwowStateCounter);
+            compute_shot_noise_params_initialize_8_host_avx(shotNoiseFactor, shotNoiseFactorInv,
+                                                            pShotNoiseFactor, pShotNoiseFactorInv);
+#else
+            __m128i pxXorwowStateX[5], pxXorwowStateCounter;
+            __m128 pShotNoiseFactor, pShotNoiseFactorInv;
+            rpp_host_rng_xorwow_state_offsetted_sse(xorwowInitialStatePtr, xorwowState, rowOffset,
+                                                    pxXorwowStateX, &pxXorwowStateCounter);
+            compute_shot_noise_params_initialize_4_host_sse(shotNoiseFactor, shotNoiseFactorInv,
+                                                            pShotNoiseFactor, pShotNoiseFactorInv);
+#endif
+
+            Rpp8s *srcPtrTempR, *srcPtrTempG, *srcPtrTempB, *dstPtrTempR, *dstPtrTempG,
+                *dstPtrTempB;
+            srcPtrTempR = srcPtrRowR + i * srcDescPtr->strides.hStride;
+            srcPtrTempG = srcPtrRowG + i * srcDescPtr->strides.hStride;
+            srcPtrTempB = srcPtrRowB + i * srcDescPtr->strides.hStride;
+            dstPtrTempR = dstPtrRowR + i * dstDescPtr->strides.hStride;
+            dstPtrTempG = dstPtrRowG + i * dstDescPtr->strides.hStride;
+            dstPtrTempB = dstPtrRowB + i * dstDescPtr->strides.hStride;
+
+            int vectorLoopCount = 0;
+            for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrementPerChannel) {
+#if __AVX2__
+                __m256 p[6];
+                rpp_simd_load(rpp_load48_i8pln3_to_f32pln3_avx, srcPtrTempR, srcPtrTempG,
+                              srcPtrTempB, p);  // simd loads
+                if (shotNoiseFactor)
+                    compute_shot_noise_48_host(p, pxXorwowStateX, &pxXorwowStateCounter,
+                                               &pShotNoiseFactorInv,
+                                               &pShotNoiseFactor);  // shot_noise adjustment
+                rpp_simd_store(rpp_store48_f32pln3_to_i8pln3_avx, dstPtrTempR, dstPtrTempG,
+                               dstPtrTempB, p);  // simd stores
+#else
+                __m128 p[12];
+                rpp_simd_load(rpp_load48_i8pln3_to_f32pln3, srcPtrTempR, srcPtrTempG, srcPtrTempB,
+                              p);  // simd loads
+                if (shotNoiseFactor)
+                    compute_shot_noise_48_host(p, pxXorwowStateX, &pxXorwowStateCounter,
+                                               &pShotNoiseFactorInv,
+                                               &pShotNoiseFactor);  // shot_noise adjustment
+                rpp_simd_store(rpp_store48_f32pln3_to_i8pln3, dstPtrTempR, dstPtrTempG, dstPtrTempB,
+                               p);  // simd stores
+#endif
+                srcPtrTempR += vectorIncrementPerChannel;
+                srcPtrTempG += vectorIncrementPerChannel;
+                srcPtrTempB += vectorIncrementPerChannel;
+                dstPtrTempR += vectorIncrementPerChannel;
+                dstPtrTempG += vectorIncrementPerChannel;
+                dstPtrTempB += vectorIncrementPerChannel;
+            }
+            for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
+                if (shotNoiseFactor) {
+                    Rpp32f poissonDistribLambda[3];
+                    poissonDistribLambda[0] = ((Rpp32f)*srcPtrTempR + 128.0f) * shotNoiseFactorInv;
+                    poissonDistribLambda[1] = ((Rpp32f)*srcPtrTempG + 128.0f) * shotNoiseFactorInv;
+                    poissonDistribLambda[2] = ((Rpp32f)*srcPtrTempB + 128.0f) * shotNoiseFactorInv;
+                    *dstPtrTempR =
+                        (Rpp8s)(RPPPIXELCHECK(compute_shot_noise_1_host(&xorwowState,
+                                                                        poissonDistribLambda[0]) *
+                                              shotNoiseFactor) -
+                                128);
+                    *dstPtrTempG =
+                        (Rpp8s)(RPPPIXELCHECK(compute_shot_noise_1_host(&xorwowState,
+                                                                        poissonDistribLambda[1]) *
+                                              shotNoiseFactor) -
+                                128);
+                    *dstPtrTempB =
+                        (Rpp8s)(RPPPIXELCHECK(compute_shot_noise_1_host(&xorwowState,
+                                                                        poissonDistribLambda[2]) *
+                                              shotNoiseFactor) -
+                                128);
+                } else {
+                    *dstPtrTempR = *srcPtrTempR;
+                    *dstPtrTempG = *srcPtrTempG;
+                    *dstPtrTempB = *srcPtrTempB;
+                }
+
+                srcPtrTempR++;
+                srcPtrTempG++;
+                srcPtrTempB++;
+                dstPtrTempR++;
+                dstPtrTempG++;
+                dstPtrTempB++;
+            }
+        }
+    }
+
+    // Shot Noise without fused output-layout toggle single channel (NCHW -> NCHW)
+    else if ((srcDescPtr->c == 1) && (srcDescPtr->layout == RpptLayout::NCHW) &&
+             (dstDescPtr->layout == RpptLayout::NCHW)) {
+        Rpp32u alignedLength = bufferLength & ~15;
+
+        Rpp8s *srcPtrRow, *dstPtrRow;
+        srcPtrRow = srcPtrChannel;
+        dstPtrRow = dstPtrChannel;
+
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
+        for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
+            // Thread-local RNG state - MUST be inside loop
+            RpptXorwowState xorwowState;
+            Rpp32u rowOffset = offset + i * srcDescPtr->strides.hStride;
+#if __AVX2__
+            __m256i pxXorwowStateX[5], pxXorwowStateCounter;
+            __m256 pShotNoiseFactor, pShotNoiseFactorInv;
+            rpp_host_rng_xorwow_state_offsetted_avx(xorwowInitialStatePtr, xorwowState, rowOffset,
+                                                    pxXorwowStateX, &pxXorwowStateCounter);
+            compute_shot_noise_params_initialize_8_host_avx(shotNoiseFactor, shotNoiseFactorInv,
+                                                            pShotNoiseFactor, pShotNoiseFactorInv);
+#else
+            __m128i pxXorwowStateX[5], pxXorwowStateCounter;
+            __m128 pShotNoiseFactor, pShotNoiseFactorInv;
+            rpp_host_rng_xorwow_state_offsetted_sse(xorwowInitialStatePtr, xorwowState, rowOffset,
+                                                    pxXorwowStateX, &pxXorwowStateCounter);
+            compute_shot_noise_params_initialize_4_host_sse(shotNoiseFactor, shotNoiseFactorInv,
+                                                            pShotNoiseFactor, pShotNoiseFactorInv);
+#endif
+
+            Rpp8s *srcPtrTemp, *dstPtrTemp;
+            srcPtrTemp = srcPtrRow + i * srcDescPtr->strides.hStride;
+            dstPtrTemp = dstPtrRow + i * dstDescPtr->strides.hStride;
+
+            int vectorLoopCount = 0;
+            for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrementPerChannel) {
+#if __AVX2__
+                __m256 p[2];
+                rpp_simd_load(rpp_load16_i8_to_f32_avx, srcPtrTemp, p);  // simd loads
+                if (shotNoiseFactor)
+                    compute_shot_noise_16_host(p, pxXorwowStateX, &pxXorwowStateCounter,
+                                               &pShotNoiseFactorInv,
+                                               &pShotNoiseFactor);         // shot_noise adjustment
+                rpp_simd_store(rpp_store16_f32_to_i8_avx, dstPtrTemp, p);  // simd stores
+#else
+                __m128 p[4];
+                rpp_simd_load(rpp_load16_i8_to_f32, srcPtrTemp, p);  // simd loads
+                if (shotNoiseFactor)
+                    compute_shot_noise_16_host(p, pxXorwowStateX, &pxXorwowStateCounter,
+                                               &pShotNoiseFactorInv,
+                                               &pShotNoiseFactor);     // shot_noise adjustment
+                rpp_simd_store(rpp_store16_f32_to_i8, dstPtrTemp, p);  // simd stores
+#endif
+                srcPtrTemp += vectorIncrementPerChannel;
+                dstPtrTemp += vectorIncrementPerChannel;
+            }
+            for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
+                if (shotNoiseFactor)
+                    *dstPtrTemp =
+                        (Rpp8s)(RPPPIXELCHECK(compute_shot_noise_1_host(
+                                                  &xorwowState, (((Rpp32f)*srcPtrTemp + 128.0f) *
+                                                                 shotNoiseFactorInv)) *
+                                              shotNoiseFactor) -
+                                128);
+                else
+                    *dstPtrTemp = *srcPtrTemp;
+
+                srcPtrTemp++;
+                dstPtrTemp++;
+            }
+        }
+    }
 }
 
 RppStatus shot_noise_i8_i8_host_tensor(Rpp8s* srcPtr, RpptDescPtr srcDescPtr, Rpp8s* dstPtr,
@@ -1519,12 +2208,13 @@ RppStatus shot_noise_i8_i8_host_tensor(Rpp8s* srcPtr, RpptDescPtr srcDescPtr, Rp
                                        RppLayoutParams layoutParams, rpp::Handle& handle) {
     RpptROI roiDefault = rpp_make_roi_xywh_full((Rpp32s)srcDescPtr->w, (Rpp32s)srcDescPtr->h);
     omp_set_dynamic(0);
-    omp_set_num_threads(handle.GetNumThreads());
-#pragma omp parallel for
+#pragma omp parallel for if (dstDescPtr->n > 1) num_threads(handle.GetNumThreads())
     for (int batchCount = 0; batchCount < dstDescPtr->n; batchCount++) {
         RpptROI roi;
         RpptROIPtr roiPtrInput = &roiTensorPtrSrc[batchCount];
         compute_roi_validation_host(roiPtrInput, &roi, &roiDefault, roiType);
+
+        Rpp32u intraThreads = get_intra_image_threads(handle, dstDescPtr->n, roi.xywhROI.roiHeight);
 
         Rpp32f shotNoiseFactor = shotNoiseFactorTensor[batchCount];
         Rpp32f shotNoiseFactorInv = 1 / shotNoiseFactor;
@@ -1534,428 +2224,9 @@ RppStatus shot_noise_i8_i8_host_tensor(Rpp8s* srcPtr, RpptDescPtr srcDescPtr, Rp
         srcPtrImage = srcPtr + batchCount * srcDescPtr->strides.nStride;
         dstPtrImage = dstPtr + batchCount * dstDescPtr->strides.nStride;
 
-        Rpp32u bufferLength = roi.xywhROI.roiWidth * layoutParams.bufferMultiplier;
-
-        Rpp8s *srcPtrChannel, *dstPtrChannel;
-        srcPtrChannel = srcPtrImage + (roi.xywhROI.xy.y * srcDescPtr->strides.hStride) +
-                        (roi.xywhROI.xy.x * layoutParams.bufferMultiplier);
-        dstPtrChannel = dstPtrImage;
-
-        Rpp32u alignedLength = (bufferLength / 48) * 48;
-        Rpp32u vectorIncrement = 48;
-        Rpp32u vectorIncrementPerChannel = 16;
-
-        RpptXorwowState xorwowState;
-#if __AVX2__
-        __m256i pxXorwowStateX[5], pxXorwowStateCounter;
-        __m256 pShotNoiseFactor, pShotNoiseFactorInv;
-        rpp_host_rng_xorwow_state_offsetted_avx(xorwowInitialStatePtr, xorwowState, offset,
-                                                pxXorwowStateX, &pxXorwowStateCounter);
-        compute_shot_noise_params_initialize_8_host_avx(shotNoiseFactor, shotNoiseFactorInv,
-                                                        pShotNoiseFactor, pShotNoiseFactorInv);
-#else
-        __m128i pxXorwowStateX[5], pxXorwowStateCounter;
-        __m128 pShotNoiseFactor, pShotNoiseFactorInv;
-        rpp_host_rng_xorwow_state_offsetted_sse(xorwowInitialStatePtr, xorwowState, offset,
-                                                pxXorwowStateX, &pxXorwowStateCounter);
-        compute_shot_noise_params_initialize_4_host_sse(shotNoiseFactor, shotNoiseFactorInv,
-                                                        pShotNoiseFactor, pShotNoiseFactorInv);
-#endif
-
-        // Shot Noise with fused output-layout toggle (NHWC -> NCHW)
-        if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) &&
-            (dstDescPtr->layout == RpptLayout::NCHW)) {
-            Rpp8s *srcPtrRow, *dstPtrRowR, *dstPtrRowG, *dstPtrRowB;
-            srcPtrRow = srcPtrChannel;
-            dstPtrRowR = dstPtrChannel;
-            dstPtrRowG = dstPtrRowR + dstDescPtr->strides.cStride;
-            dstPtrRowB = dstPtrRowG + dstDescPtr->strides.cStride;
-
-            for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
-                Rpp8s *srcPtrTemp, *dstPtrTempR, *dstPtrTempG, *dstPtrTempB;
-                srcPtrTemp = srcPtrRow;
-                dstPtrTempR = dstPtrRowR;
-                dstPtrTempG = dstPtrRowG;
-                dstPtrTempB = dstPtrRowB;
-
-                int vectorLoopCount = 0;
-                for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrement) {
-#if __AVX2__
-                    __m256 p[6];
-                    rpp_simd_load(rpp_load48_i8pkd3_to_f32pln3_avx, srcPtrTemp, p);  // simd loads
-                    if (shotNoiseFactor)
-                        compute_shot_noise_48_host(p, pxXorwowStateX, &pxXorwowStateCounter,
-                                                   &pShotNoiseFactorInv,
-                                                   &pShotNoiseFactor);  // shot_noise adjustment
-                    rpp_simd_store(rpp_store48_f32pln3_to_i8pln3_avx, dstPtrTempR, dstPtrTempG,
-                                   dstPtrTempB, p);  // simd stores
-#else
-                    __m128 p[12];
-                    rpp_simd_load(rpp_load48_i8pkd3_to_f32pln3, srcPtrTemp, p);  // simd loads
-                    if (shotNoiseFactor)
-                        compute_shot_noise_48_host(p, pxXorwowStateX, &pxXorwowStateCounter,
-                                                   &pShotNoiseFactorInv,
-                                                   &pShotNoiseFactor);  // shot_noise adjustment
-                    rpp_simd_store(rpp_store48_f32pln3_to_i8pln3, dstPtrTempR, dstPtrTempG,
-                                   dstPtrTempB, p);  // simd stores
-#endif
-                    srcPtrTemp += vectorIncrement;
-                    dstPtrTempR += vectorIncrementPerChannel;
-                    dstPtrTempG += vectorIncrementPerChannel;
-                    dstPtrTempB += vectorIncrementPerChannel;
-                }
-                for (; vectorLoopCount < bufferLength; vectorLoopCount += 3) {
-                    if (shotNoiseFactor) {
-                        Rpp32f poissonDistribLambda[3];
-                        poissonDistribLambda[0] =
-                            ((Rpp32f)srcPtrTemp[0] + 128.0f) * shotNoiseFactorInv;
-                        poissonDistribLambda[1] =
-                            ((Rpp32f)srcPtrTemp[1] + 128.0f) * shotNoiseFactorInv;
-                        poissonDistribLambda[2] =
-                            ((Rpp32f)srcPtrTemp[2] + 128.0f) * shotNoiseFactorInv;
-                        *dstPtrTempR =
-                            (Rpp8s)(RPPPIXELCHECK(compute_shot_noise_1_host(
-                                                      &xorwowState, poissonDistribLambda[0]) *
-                                                  shotNoiseFactor) -
-                                    128);
-                        *dstPtrTempG =
-                            (Rpp8s)(RPPPIXELCHECK(compute_shot_noise_1_host(
-                                                      &xorwowState, poissonDistribLambda[1]) *
-                                                  shotNoiseFactor) -
-                                    128);
-                        *dstPtrTempB =
-                            (Rpp8s)(RPPPIXELCHECK(compute_shot_noise_1_host(
-                                                      &xorwowState, poissonDistribLambda[2]) *
-                                                  shotNoiseFactor) -
-                                    128);
-                    } else {
-                        *dstPtrTempR = srcPtrTemp[0];
-                        *dstPtrTempG = srcPtrTemp[1];
-                        *dstPtrTempB = srcPtrTemp[2];
-                    }
-
-                    srcPtrTemp += 3;
-                    dstPtrTempR++;
-                    dstPtrTempG++;
-                    dstPtrTempB++;
-                }
-
-                srcPtrRow += srcDescPtr->strides.hStride;
-                dstPtrRowR += dstDescPtr->strides.hStride;
-                dstPtrRowG += dstDescPtr->strides.hStride;
-                dstPtrRowB += dstDescPtr->strides.hStride;
-            }
-        }
-
-        // Shot Noise with fused output-layout toggle (NCHW -> NHWC)
-        else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) &&
-                 (dstDescPtr->layout == RpptLayout::NHWC)) {
-            Rpp8s *srcPtrRowR, *srcPtrRowG, *srcPtrRowB, *dstPtrRow;
-            srcPtrRowR = srcPtrChannel;
-            srcPtrRowG = srcPtrRowR + srcDescPtr->strides.cStride;
-            srcPtrRowB = srcPtrRowG + srcDescPtr->strides.cStride;
-            dstPtrRow = dstPtrChannel;
-
-            for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
-                Rpp8s *srcPtrTempR, *srcPtrTempG, *srcPtrTempB, *dstPtrTemp;
-                srcPtrTempR = srcPtrRowR;
-                srcPtrTempG = srcPtrRowG;
-                srcPtrTempB = srcPtrRowB;
-                dstPtrTemp = dstPtrRow;
-
-                int vectorLoopCount = 0;
-                for (; vectorLoopCount < alignedLength;
-                     vectorLoopCount += vectorIncrementPerChannel) {
-#if __AVX2__
-                    __m256 p[6];
-                    rpp_simd_load(rpp_load48_i8pln3_to_f32pln3_avx, srcPtrTempR, srcPtrTempG,
-                                  srcPtrTempB, p);  // simd loads
-                    if (shotNoiseFactor)
-                        compute_shot_noise_48_host(p, pxXorwowStateX, &pxXorwowStateCounter,
-                                                   &pShotNoiseFactorInv,
-                                                   &pShotNoiseFactor);  // shot_noise adjustment
-                    rpp_simd_store(rpp_store48_f32pln3_to_i8pkd3_avx, dstPtrTemp,
-                                   p);  // simd stores
-#else
-                    __m128 p[12];
-                    rpp_simd_load(rpp_load48_i8pln3_to_f32pln3, srcPtrTempR, srcPtrTempG,
-                                  srcPtrTempB, p);  // simd loads
-                    if (shotNoiseFactor)
-                        compute_shot_noise_48_host(p, pxXorwowStateX, &pxXorwowStateCounter,
-                                                   &pShotNoiseFactorInv,
-                                                   &pShotNoiseFactor);  // shot_noise adjustment
-                    rpp_simd_store(rpp_store48_f32pln3_to_i8pkd3, dstPtrTemp, p);  // simd stores
-#endif
-                    srcPtrTempR += vectorIncrementPerChannel;
-                    srcPtrTempG += vectorIncrementPerChannel;
-                    srcPtrTempB += vectorIncrementPerChannel;
-                    dstPtrTemp += vectorIncrement;
-                }
-                for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
-                    Rpp8s src[3] = {*srcPtrTempR, *srcPtrTempG, *srcPtrTempB};
-
-                    if (shotNoiseFactor) {
-                        Rpp32f poissonDistribLambda[3];
-                        poissonDistribLambda[0] = ((Rpp32f)src[0] + 128.0f) * shotNoiseFactorInv;
-                        poissonDistribLambda[1] = ((Rpp32f)src[1] + 128.0f) * shotNoiseFactorInv;
-                        poissonDistribLambda[2] = ((Rpp32f)src[2] + 128.0f) * shotNoiseFactorInv;
-                        dstPtrTemp[0] =
-                            (Rpp8s)(RPPPIXELCHECK(compute_shot_noise_1_host(
-                                                      &xorwowState, poissonDistribLambda[0]) *
-                                                  shotNoiseFactor) -
-                                    128);
-                        dstPtrTemp[1] =
-                            (Rpp8s)(RPPPIXELCHECK(compute_shot_noise_1_host(
-                                                      &xorwowState, poissonDistribLambda[1]) *
-                                                  shotNoiseFactor) -
-                                    128);
-                        dstPtrTemp[2] =
-                            (Rpp8s)(RPPPIXELCHECK(compute_shot_noise_1_host(
-                                                      &xorwowState, poissonDistribLambda[2]) *
-                                                  shotNoiseFactor) -
-                                    128);
-                    } else
-                        memcpy(dstPtrTemp, src, 3);
-
-                    srcPtrTempR++;
-                    srcPtrTempG++;
-                    srcPtrTempB++;
-                    dstPtrTemp += 3;
-                }
-
-                srcPtrRowR += srcDescPtr->strides.hStride;
-                srcPtrRowG += srcDescPtr->strides.hStride;
-                srcPtrRowB += srcDescPtr->strides.hStride;
-                dstPtrRow += dstDescPtr->strides.hStride;
-            }
-        }
-
-        // Shot Noise without fused output-layout toggle (NHWC -> NHWC)
-        else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) &&
-                 (dstDescPtr->layout == RpptLayout::NHWC)) {
-            Rpp8s *srcPtrRow, *dstPtrRow;
-            srcPtrRow = srcPtrChannel;
-            dstPtrRow = dstPtrChannel;
-
-            for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
-                Rpp8s *srcPtrTemp, *dstPtrTemp;
-                srcPtrTemp = srcPtrRow;
-                dstPtrTemp = dstPtrRow;
-
-                int vectorLoopCount = 0;
-                for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrement) {
-#if __AVX2__
-                    __m256 p[6];
-                    rpp_simd_load(rpp_load48_i8pkd3_to_f32pln3_avx, srcPtrTemp, p);  // simd loads
-                    if (shotNoiseFactor)
-                        compute_shot_noise_48_host(p, pxXorwowStateX, &pxXorwowStateCounter,
-                                                   &pShotNoiseFactorInv,
-                                                   &pShotNoiseFactor);  // shot_noise adjustment
-                    rpp_simd_store(rpp_store48_f32pln3_to_i8pkd3_avx, dstPtrTemp,
-                                   p);  // simd stores
-#else
-                    __m128 p[12];
-                    rpp_simd_load(rpp_load48_i8pkd3_to_f32pln3, srcPtrTemp, p);  // simd loads
-                    if (shotNoiseFactor)
-                        compute_shot_noise_48_host(p, pxXorwowStateX, &pxXorwowStateCounter,
-                                                   &pShotNoiseFactorInv,
-                                                   &pShotNoiseFactor);  // shot_noise adjustment
-                    rpp_simd_store(rpp_store48_f32pln3_to_i8pkd3, dstPtrTemp, p);  // simd stores
-#endif
-                    srcPtrTemp += vectorIncrement;
-                    dstPtrTemp += vectorIncrement;
-                }
-                for (; vectorLoopCount < bufferLength; vectorLoopCount += 3) {
-                    if (shotNoiseFactor) {
-                        Rpp32f poissonDistribLambda[3];
-                        poissonDistribLambda[0] =
-                            ((Rpp32f)srcPtrTemp[0] + 128.0f) * shotNoiseFactorInv;
-                        poissonDistribLambda[1] =
-                            ((Rpp32f)srcPtrTemp[1] + 128.0f) * shotNoiseFactorInv;
-                        poissonDistribLambda[2] =
-                            ((Rpp32f)srcPtrTemp[2] + 128.0f) * shotNoiseFactorInv;
-                        dstPtrTemp[0] =
-                            (Rpp8s)(RPPPIXELCHECK(compute_shot_noise_1_host(
-                                                      &xorwowState, poissonDistribLambda[0]) *
-                                                  shotNoiseFactor) -
-                                    128);
-                        dstPtrTemp[1] =
-                            (Rpp8s)(RPPPIXELCHECK(compute_shot_noise_1_host(
-                                                      &xorwowState, poissonDistribLambda[1]) *
-                                                  shotNoiseFactor) -
-                                    128);
-                        dstPtrTemp[2] =
-                            (Rpp8s)(RPPPIXELCHECK(compute_shot_noise_1_host(
-                                                      &xorwowState, poissonDistribLambda[2]) *
-                                                  shotNoiseFactor) -
-                                    128);
-                    } else
-                        memcpy(dstPtrTemp, srcPtrTemp, 3);
-
-                    srcPtrTemp += 3;
-                    dstPtrTemp += 3;
-                }
-
-                srcPtrRow += srcDescPtr->strides.hStride;
-                dstPtrRow += dstDescPtr->strides.hStride;
-            }
-        }
-
-        // Shot Noise without fused output-layout toggle (NCHW -> NCHW)
-        else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) &&
-                 (dstDescPtr->layout == RpptLayout::NCHW)) {
-            Rpp8s *srcPtrRowR, *srcPtrRowG, *srcPtrRowB, *dstPtrRowR, *dstPtrRowG, *dstPtrRowB;
-            srcPtrRowR = srcPtrChannel;
-            srcPtrRowG = srcPtrRowR + srcDescPtr->strides.cStride;
-            srcPtrRowB = srcPtrRowG + srcDescPtr->strides.cStride;
-            dstPtrRowR = dstPtrChannel;
-            dstPtrRowG = dstPtrRowR + dstDescPtr->strides.cStride;
-            dstPtrRowB = dstPtrRowG + dstDescPtr->strides.cStride;
-
-            for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
-                Rpp8s *srcPtrTempR, *srcPtrTempG, *srcPtrTempB, *dstPtrTempR, *dstPtrTempG,
-                    *dstPtrTempB;
-                srcPtrTempR = srcPtrRowR;
-                srcPtrTempG = srcPtrRowG;
-                srcPtrTempB = srcPtrRowB;
-                dstPtrTempR = dstPtrRowR;
-                dstPtrTempG = dstPtrRowG;
-                dstPtrTempB = dstPtrRowB;
-
-                int vectorLoopCount = 0;
-                for (; vectorLoopCount < alignedLength;
-                     vectorLoopCount += vectorIncrementPerChannel) {
-#if __AVX2__
-                    __m256 p[6];
-                    rpp_simd_load(rpp_load48_i8pln3_to_f32pln3_avx, srcPtrTempR, srcPtrTempG,
-                                  srcPtrTempB, p);  // simd loads
-                    if (shotNoiseFactor)
-                        compute_shot_noise_48_host(p, pxXorwowStateX, &pxXorwowStateCounter,
-                                                   &pShotNoiseFactorInv,
-                                                   &pShotNoiseFactor);  // shot_noise adjustment
-                    rpp_simd_store(rpp_store48_f32pln3_to_i8pln3_avx, dstPtrTempR, dstPtrTempG,
-                                   dstPtrTempB, p);  // simd stores
-#else
-                    __m128 p[12];
-                    rpp_simd_load(rpp_load48_i8pln3_to_f32pln3, srcPtrTempR, srcPtrTempG,
-                                  srcPtrTempB, p);  // simd loads
-                    if (shotNoiseFactor)
-                        compute_shot_noise_48_host(p, pxXorwowStateX, &pxXorwowStateCounter,
-                                                   &pShotNoiseFactorInv,
-                                                   &pShotNoiseFactor);  // shot_noise adjustment
-                    rpp_simd_store(rpp_store48_f32pln3_to_i8pln3, dstPtrTempR, dstPtrTempG,
-                                   dstPtrTempB, p);  // simd stores
-#endif
-                    srcPtrTempR += vectorIncrementPerChannel;
-                    srcPtrTempG += vectorIncrementPerChannel;
-                    srcPtrTempB += vectorIncrementPerChannel;
-                    dstPtrTempR += vectorIncrementPerChannel;
-                    dstPtrTempG += vectorIncrementPerChannel;
-                    dstPtrTempB += vectorIncrementPerChannel;
-                }
-                for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
-                    if (shotNoiseFactor) {
-                        Rpp32f poissonDistribLambda[3];
-                        poissonDistribLambda[0] =
-                            ((Rpp32f)*srcPtrTempR + 128.0f) * shotNoiseFactorInv;
-                        poissonDistribLambda[1] =
-                            ((Rpp32f)*srcPtrTempG + 128.0f) * shotNoiseFactorInv;
-                        poissonDistribLambda[2] =
-                            ((Rpp32f)*srcPtrTempB + 128.0f) * shotNoiseFactorInv;
-                        *dstPtrTempR =
-                            (Rpp8s)(RPPPIXELCHECK(compute_shot_noise_1_host(
-                                                      &xorwowState, poissonDistribLambda[0]) *
-                                                  shotNoiseFactor) -
-                                    128);
-                        *dstPtrTempG =
-                            (Rpp8s)(RPPPIXELCHECK(compute_shot_noise_1_host(
-                                                      &xorwowState, poissonDistribLambda[1]) *
-                                                  shotNoiseFactor) -
-                                    128);
-                        *dstPtrTempB =
-                            (Rpp8s)(RPPPIXELCHECK(compute_shot_noise_1_host(
-                                                      &xorwowState, poissonDistribLambda[2]) *
-                                                  shotNoiseFactor) -
-                                    128);
-                    } else {
-                        *dstPtrTempR = *srcPtrTempR;
-                        *dstPtrTempG = *srcPtrTempG;
-                        *dstPtrTempB = *srcPtrTempB;
-                    }
-
-                    srcPtrTempR++;
-                    srcPtrTempG++;
-                    srcPtrTempB++;
-                    dstPtrTempR++;
-                    dstPtrTempG++;
-                    dstPtrTempB++;
-                }
-
-                srcPtrRowR += srcDescPtr->strides.hStride;
-                srcPtrRowG += srcDescPtr->strides.hStride;
-                srcPtrRowB += srcDescPtr->strides.hStride;
-                dstPtrRowR += dstDescPtr->strides.hStride;
-                dstPtrRowG += dstDescPtr->strides.hStride;
-                dstPtrRowB += dstDescPtr->strides.hStride;
-            }
-        }
-
-        // Shot Noise without fused output-layout toggle single channel (NCHW -> NCHW)
-        else if ((srcDescPtr->c == 1) && (srcDescPtr->layout == RpptLayout::NCHW) &&
-                 (dstDescPtr->layout == RpptLayout::NCHW)) {
-            alignedLength = bufferLength & ~15;
-
-            Rpp8s *srcPtrRow, *dstPtrRow;
-            srcPtrRow = srcPtrChannel;
-            dstPtrRow = dstPtrChannel;
-
-            for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
-                Rpp8s *srcPtrTemp, *dstPtrTemp;
-                srcPtrTemp = srcPtrRow;
-                dstPtrTemp = dstPtrRow;
-
-                int vectorLoopCount = 0;
-                for (; vectorLoopCount < alignedLength;
-                     vectorLoopCount += vectorIncrementPerChannel) {
-#if __AVX2__
-                    __m256 p[2];
-                    rpp_simd_load(rpp_load16_i8_to_f32_avx, srcPtrTemp, p);  // simd loads
-                    if (shotNoiseFactor)
-                        compute_shot_noise_16_host(p, pxXorwowStateX, &pxXorwowStateCounter,
-                                                   &pShotNoiseFactorInv,
-                                                   &pShotNoiseFactor);  // shot_noise adjustment
-                    rpp_simd_store(rpp_store16_f32_to_i8_avx, dstPtrTemp, p);  // simd stores
-#else
-                    __m128 p[4];
-                    rpp_simd_load(rpp_load16_i8_to_f32, srcPtrTemp, p);  // simd loads
-                    if (shotNoiseFactor)
-                        compute_shot_noise_16_host(p, pxXorwowStateX, &pxXorwowStateCounter,
-                                                   &pShotNoiseFactorInv,
-                                                   &pShotNoiseFactor);     // shot_noise adjustment
-                    rpp_simd_store(rpp_store16_f32_to_i8, dstPtrTemp, p);  // simd stores
-#endif
-                    srcPtrTemp += vectorIncrementPerChannel;
-                    dstPtrTemp += vectorIncrementPerChannel;
-                }
-                for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
-                    if (shotNoiseFactor)
-                        *dstPtrTemp = (Rpp8s)(RPPPIXELCHECK(compute_shot_noise_1_host(
-                                                                &xorwowState,
-                                                                (((Rpp32f)*srcPtrTemp + 128.0f) *
-                                                                 shotNoiseFactorInv)) *
-                                                            shotNoiseFactor) -
-                                              128);
-                    else
-                        *dstPtrTemp = *srcPtrTemp;
-
-                    srcPtrTemp++;
-                    dstPtrTemp++;
-                }
-
-                srcPtrRow += srcDescPtr->strides.hStride;
-                dstPtrRow += dstDescPtr->strides.hStride;
-            }
-        }
+        shot_noise_i8_i8_host_impl(srcPtrImage, srcDescPtr, dstPtrImage, dstDescPtr,
+                                   shotNoiseFactor, shotNoiseFactorInv, offset,
+                                   xorwowInitialStatePtr, roi, layoutParams, intraThreads);
     }
 
     return RPP_SUCCESS;
