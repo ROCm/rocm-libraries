@@ -417,6 +417,7 @@ namespace rocsparse
     // also selects the launch in convert_data_array_compute_core that does not read back a
     // conversion error, so only the pairs listed here skip it. f64 into f32 complex rounds
     // and stays the specialization below, which records the rounding error.
+    // CMake builds this file with -fno-gpu-flush-denormals-to-zero to keep f32 subnormals.
     //
     template <typename TARGET, typename SOURCE>
     static constexpr bool uses_shared_real_widening_kernel_v

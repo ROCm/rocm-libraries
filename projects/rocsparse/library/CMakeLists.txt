@@ -109,6 +109,11 @@ endif()
 # Target compile options
 target_compile_options(rocsparse PRIVATE -Wno-unused-command-line-argument -Wall)
 
+# Keep f32 subnormals so the convert_array widenings are exact (gfx803 flushes them by default).
+set_source_files_properties(src/conversion/rocsparse_convert_array.cpp PROPERTIES
+  COMPILE_OPTIONS "-fno-gpu-flush-denormals-to-zero"
+)
+
 # Optionally remove the deprecated rocsparse_indextype_u16 index type from the
 # public API. ROCSPARSE_KEEP_INTERNAL_U16 is defined only for the library's own
 # translation units, keeping the enumerator available so that internal switch
