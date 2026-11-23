@@ -274,8 +274,12 @@ template <typename T>
 __host__ __device__ inline complex_t<T> operator*(const complex_t<T>& a, const complex_t<T>& b)
 {
     const complex_t<T> r = complex_impl::kahan_multiply(a, b);
-    // One test for both parts: the sum is not finite when either part is not. A finite sum that
-    // overflows takes the slow path too, which then returns the same result.
+    // One check covers both parts: an infinity or NaN in either part makes the sum infinite or
+    // NaN (inf + -inf is NaN), so a result that is not finite never passes. The only false alarm
+    // is two finite parts whose sum overflows, which needs a part above half the largest T; the
+    // slow path then gets finite factors, computes the same product again and returns it
+    // unchanged. The sum costs one add and one compare; checking each part costs two compares
+    // and an OR.
     if(__builtin_isfinite(r.real + r.imag))
     {
         return r;
