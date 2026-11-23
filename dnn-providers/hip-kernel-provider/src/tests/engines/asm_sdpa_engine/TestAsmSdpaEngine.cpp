@@ -5,10 +5,13 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <cmath>
+#include <cstdio>
 #include <optional>
 #include <set>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include <hip_kernel_provider_common/HipDeviceUtils.hpp>
@@ -42,6 +45,11 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 #include "AsmSdpaShippedModels.hpp"
+#include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
+
+#include <hipdnn_plugin_sdk/heuristics/EngineFeatures.hpp>
+#include <hipdnn_plugin_sdk/ingestor/DescriptorLoader.hpp>
+#include <hipdnn_plugin_sdk/ingestor/UhdKernelHeuristic.hpp>
 #endif
 
 namespace asm_sdpa_engine
@@ -468,6 +476,129 @@ TEST_F(TestAsmSdpaEngine, GetPredictionDeclinesAGraphNoBuilderServes)
     EXPECT_EQ(prediction.status, PredictionStatus::UNAVAILABLE);
     EXPECT_EQ(prediction.reason, "ASM SDPA serves no plan for this graph");
 }
+
+#ifdef HIPKERNELPROVIDER_ASM_SDPA_DESCRIPTOR_RELDIR
+/// A device as the shipped models' training rows recorded it: an MI300X for gfx942, an
+/// MI355X for gfx950, in the properties UHD device features read.
+hipDeviceProp_t trainingDevice(const std::string& arch)
+{
+    hipDeviceProp_t device{};
+    std::snprintf(device.gcnArchName, sizeof(device.gcnArchName), "%s", arch.c_str());
+    device.warpSize = 64;
+    device.memoryBusWidth = 8192;
+    const bool mi300x = arch == "gfx942";
+    device.multiProcessorCount = mi300x ? 304 : 256;
+    device.memoryClockRate = mi300x ? 1300000 : 2000000;
+    device.sharedMemPerBlock = mi300x ? 65536 : 163840;
+    device.totalGlobalMem = mi300x ? 206141652992 : 309220868096;
+    return device;
+}
+
+/// Dense bf16 peak in TFLOPS, AMD's published MI300X and MI355X figures. No estimate of an
+/// attention graph can exceed it.
+double denseBf16PeakTflops(const std::string& arch)
+{
+    return arch == "gfx942" ? 1307.4 : 2516.6;
+}
+
+/// Every declared model must ship for its architecture, survive the loader and answer:
+/// the engine itself gives an AVAILABLE `tflops` estimate for forward and backward graphs in
+/// both the token-major (BSHD) and head-major (BHSD) layouts, equal to that architecture's
+/// own model's and below the device's peak. Nothing else asks the engine for an estimate on
+/// a host, so a model that never binds (an id typo, an unstaged file, a binding or
+/// architecture lookup that drifted) would otherwise leave the engine unranked while every
+/// test passed. The plan builder is mocked to serve each graph: which graphs the real
+/// builders serve depends on the device, and is theirs to test.
+TEST_F(TestAsmSdpaEngine, EachDeclaredModelEstimatesOnItsArchitecture)
+{
+    namespace ingestor = hipdnn_plugin_sdk::ingestor;
+    using hipdnn_flatbuffers_sdk::data_objects::DataType;
+    using hipdnn_test_sdk::utilities::createValidSdpaBwdGraph;
+    using hipdnn_test_sdk::utilities::createValidSdpaFwdGraph;
+
+    // [batch, heads, sequence, head_dim] = [4, 8, 1024, 128]; the layout is in the strides.
+    const std::vector<int64_t> dims{4, 8, 1024, 128};
+    const std::vector<int64_t> bshd{1048576, 128, 1024, 1};
+    const std::vector<int64_t> bhsd{1048576, 131072, 128, 1};
+    std::vector<std::pair<std::string, flatbuffers::FlatBufferBuilder>> graphs;
+    for(const auto& [layout, strides] : {std::pair{"bshd", bshd}, std::pair{"bhsd", bhsd}})
+    {
+        graphs.emplace_back(
+            std::string("forward ") + layout,
+            createValidSdpaFwdGraph(
+                dims, strides, dims, strides, dims, strides, dims, strides, DataType::BFLOAT16));
+        graphs.emplace_back(
+            std::string("backward ") + layout,
+            createValidSdpaBwdGraph(
+                dims, strides, dims, strides, dims, strides, dims, strides, DataType::BFLOAT16));
+    }
+    const EngineConfigWrapper config(nullptr, 0);
+
+    for(const auto& [arch, id] : AsmSdpaEngine::L1_MODEL_IDS)
+    {
+        const std::string archName(arch);
+        SCOPED_TRACE(archName);
+
+        // The declared model alone, resolved from the catalog the engine binds from.
+        const auto resolved = ingestor::resolveDeclaredEnginePredictions(
+            hip_kernel_provider::kernel_ingestor_engine::descriptorCatalog(),
+            AsmSdpaEngine::engineName(),
+            AsmSdpaEngine::selectorRevision(),
+            {{archName, {hipdnn_flatbuffers_sdk::utilities::parseUuid(id)}}});
+        for(const auto& [metric, byArch] : resolved.refused)
+        {
+            for(const auto& [refusedArch, refusal] : byArch)
+            {
+                ADD_FAILURE() << "the loader refused " << id << " (" << metric << ", "
+                              << refusedArch << "): " << refusal.reason;
+            }
+        }
+        const auto tflops = resolved.byMetric.find("tflops");
+        ASSERT_TRUE(tflops != resolved.byMetric.end() && tflops->second.count(archName) == 1)
+            << "no tflops model " << id << " ships for " << archName;
+        hipdnn_plugin_sdk::uhd::EngineModelBinding own;
+        own.bind("tflops",
+                 archName,
+                 ingestor::UhdKernelHeuristic::configFrom(tflops->second.at(archName)));
+
+        auto serving = std::make_unique<::testing::NiceMock<MockPlanBuilder>>();
+        ON_CALL(*serving, isApplicable).WillByDefault(::testing::Return(true));
+        AsmSdpaEngine engine;
+        engine.addPlanBuilder(std::move(serving));
+        const auto device = trainingDevice(archName);
+
+        for(const auto& [name, builder] : graphs)
+        {
+            SCOPED_TRACE(name);
+            const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+            const auto estimate
+                = engine.getPredictionOn(_handle,
+                                         graph,
+                                         config,
+                                         HIPDNN_ENGINE_PREDICTION_ENGINE,
+                                         true,
+                                         [&device]() -> const hipDeviceProp_t& { return device; });
+            ASSERT_EQ(estimate.status, PredictionStatus::AVAILABLE) << estimate.reason;
+            EXPECT_EQ(estimate.metric, "tflops");
+
+            const auto expected
+                = own.predict(AsmSdpaEngine::staticId(),
+                              AsmSdpaEngine::engineName(),
+                              AsmSdpaEngine::selectorRevision(),
+                              "tflops",
+                              archName,
+                              hipdnn_plugin_sdk::heuristics::engineFeatures(graph, config, device),
+                              true);
+            ASSERT_EQ(expected.status, PredictionStatus::AVAILABLE) << expected.reason;
+            EXPECT_DOUBLE_EQ(estimate.value, expected.value)
+                << "the engine did not answer with " << archName << "'s own model";
+            EXPECT_TRUE(std::isfinite(estimate.value) && estimate.value > 0.0) << estimate.value;
+            EXPECT_LT(estimate.value, denseBf16PeakTflops(archName))
+                << "an estimate above the device's dense bf16 peak";
+        }
+    }
+}
+#endif // HIPKERNELPROVIDER_ASM_SDPA_DESCRIPTOR_RELDIR
 #endif // HIPDNN_ENABLE_KERNEL_INGESTOR
 
 TEST_F(TestAsmSdpaEngine, InitializeExecutionContextBuildsPlanWithConfiguredSettings)

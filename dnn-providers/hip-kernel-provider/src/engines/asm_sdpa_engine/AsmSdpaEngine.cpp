@@ -163,6 +163,20 @@ hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT AsmSdpaEngine::getPredic
     hipdnnEnginePredictionKind_t kind,
     bool evaluate) const
 {
+    return getPredictionOn(
+        handle, graph, config, kind, evaluate, [&handle]() -> const hipDeviceProp_t& {
+            return hipdnn_plugin_sdk::heuristics::predictionDevice(handle.getStream());
+        });
+}
+
+hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT AsmSdpaEngine::getPredictionOn(
+    Handle& handle,
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph,
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& config,
+    hipdnnEnginePredictionKind_t kind,
+    bool evaluate,
+    const DeviceQuery& deviceOf) const
+{
     using namespace hipdnn_flatbuffers_sdk::data_objects;
     EnginePredictionT result;
     result.engine_id = id();
@@ -189,7 +203,7 @@ hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT AsmSdpaEngine::getPredic
             result.reason = "ASM SDPA serves no plan for this graph";
             return result;
         }
-        const auto& device = hipdnn_plugin_sdk::heuristics::predictionDevice(handle.getStream());
+        const auto& device = deviceOf();
         const auto features = hipdnn_plugin_sdk::heuristics::engineFeatures(graph, config, device);
         return _l1Models.predict(id(),
                                  engineName(),
@@ -210,6 +224,7 @@ hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT AsmSdpaEngine::getPredic
     static_cast<void>(handle);
     static_cast<void>(graph);
     static_cast<void>(evaluate);
+    static_cast<void>(deviceOf);
     result.reason = "UHD engine prediction requires a build with HIPDNN_ENABLE_KERNEL_INGESTOR";
     return result;
 #endif

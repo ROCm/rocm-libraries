@@ -259,6 +259,22 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
             HIPKERNELPROVIDER_FLYDSL_PRODUCT_DESCRIPTOR_RELDIR="${HIPKERNELPROVIDER_PLUGIN_ENGINE_RELDIR}/${HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR}")
     endif()
 
+    # The ASM SDPA engine's L1 models ship loose in the production tree, under asm_sdpa/,
+    # which the unit root does not reach. TestAsmSdpaShippedModels asks the engine for
+    # estimates from them, so main() names that one folder as an additive root (not the
+    # whole production tree, whose packs every other suite here would then load) and the
+    # binary is built after whichever step stages it: the product pack, or the provider's
+    # own copy when production packaging is dormant.
+    if(asm_sdpa IN_LIST HIPKERNELPROVIDER_DECLARED_MODEL_ENGINES)
+        if(TARGET hkp_packaging_product)
+            add_dependencies(hip_kernel_provider_tests hkp_packaging_product)
+        else()
+            add_dependencies(hip_kernel_provider_tests asm_sdpa_engine_descriptors)
+        endif()
+        target_compile_definitions(hip_kernel_provider_tests PRIVATE
+            HIPKERNELPROVIDER_ASM_SDPA_DESCRIPTOR_RELDIR="${HIPKERNELPROVIDER_PLUGIN_ENGINE_RELDIR}/${HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR}/asm_sdpa")
+    endif()
+
     # The packed-load test also reads the slotted fixtures' shards (RFC 0021), beside the
     # unit tree. The fixed-arch roots pack only for their arch (_hkp_wire_fixed_arch_root);
     # the test decides from the staged shards, so no define follows GPU_TARGETS. rocKE is

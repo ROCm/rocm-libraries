@@ -4,10 +4,13 @@
 #pragma once
 
 #include <array>
+#include <functional>
 #include <memory>
 #include <string_view>
 #include <utility>
 #include <vector>
+
+#include <hip/hip_runtime.h>
 
 #include <hipdnn_plugin_sdk/interfaces/IEngine.hpp>
 #include <hipdnn_plugin_sdk/interfaces/IPlanBuilder.hpp>
@@ -73,6 +76,20 @@ public:
                       const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& config,
                       hipdnnEnginePredictionKind_t kind,
                       bool evaluate) const override;
+
+    /// @brief The device an estimate is made for: the handle stream's outside a test.
+    using DeviceQuery = std::function<const hipDeviceProp_t&()>;
+
+    /// @brief getPrediction for the device @p device returns, asked only once a plan
+    /// builder serves @p graph. getPrediction passes the handle stream's device; a host
+    /// test passes a synthesized one to see what each architecture's model answers.
+    hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT
+        getPredictionOn(Handle& handle,
+                        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph,
+                        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& config,
+                        hipdnnEnginePredictionKind_t kind,
+                        bool evaluate,
+                        const DeviceQuery& device) const;
 
     size_t
         // NOLINTNEXTLINE(portability-template-virtual-member-function)
