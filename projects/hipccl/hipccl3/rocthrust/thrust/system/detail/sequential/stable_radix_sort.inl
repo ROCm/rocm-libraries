@@ -36,8 +36,8 @@
 
 #include _THRUST_STD_INCLUDE(utility)
 
-#include <cstdint>
-#include <limits>
+#include _THRUST_STD_INCLUDE(cstdint)
+#include _THRUST_STD_INCLUDE(limits)
 
 THRUST_NAMESPACE_BEGIN
 namespace system
@@ -63,7 +63,7 @@ struct RadixEncoder<char>
 {
   THRUST_HOST_DEVICE unsigned char operator()(char x) const
   {
-    if (std::numeric_limits<char>::is_signed)
+    if (_THRUST_STD::numeric_limits<char>::is_signed)
     {
       return static_cast<unsigned char>(x) ^ static_cast<unsigned char>(1) << (8 * sizeof(unsigned char) - 1);
     }
@@ -226,10 +226,10 @@ THRUST_HOST_DEVICE void radix_shuffle_n(
   // note that we are going to mutate the histogram during this sequential scatter
   thrust::scatter(
     exec,
-    thrust::make_zip_iterator(thrust::make_tuple(keys_first, values_first)),
-    thrust::make_zip_iterator(thrust::make_tuple(keys_first + n, values_first + n)),
+    thrust::make_zip_iterator(keys_first, values_first),
+    thrust::make_zip_iterator(keys_first + n, values_first + n),
     thrust::make_transform_iterator(keys_first, bucket_functor<RadixBits, KeyType>(bit_shift, histogram)),
-    thrust::make_zip_iterator(thrust::make_tuple(keys_result, values_result)));
+    thrust::make_zip_iterator(keys_result, values_result));
 }
 
 template <unsigned int RadixBits,

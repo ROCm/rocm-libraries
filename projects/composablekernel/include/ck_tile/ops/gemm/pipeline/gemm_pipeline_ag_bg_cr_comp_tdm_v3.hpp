@@ -63,8 +63,8 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
                        std::is_same_v<typename Base::BLayout, tensor_layout::gemm::ColumnMajor>),
                   "comp_tdm_v3 with 8-bit A/B supports A row-major, B column-major only");
 
-    // Only tested in the plain and Stream-K GEMM kernels; the multi-D, grouped and
-    // batched-contraction kernels reject a pipeline that sets this
+    // Only tested in the plain, batched, Stream-K and MX GEMM kernels; the multi-D, grouped,
+    // multi-ABD and batched-contraction kernels reject a pipeline that sets this
     // (UniversalGemmKernel::kIsPlainGemmOnlyPipeline).
     static constexpr bool kPlainGemmOnly = true;
 
@@ -382,26 +382,9 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
             TDMConfig tdm_config_a[2];
             TDMConfig tdm_config_b[2];
 
-            // set tdm's lds padding config
-            constexpr auto LdsPaddingConfigA =
-                Policy::template GetLdsPaddingConfig<Problem, true>();
-            constexpr auto APaddingEnabled  = LdsPaddingConfigA[I0{}];
-            constexpr auto APaddingAmount   = LdsPaddingConfigA[I1{}];
-            constexpr auto APaddingInterval = LdsPaddingConfigA[I2{}];
-
-            constexpr auto LdsPaddingConfigB =
-                Policy::template GetLdsPaddingConfig<Problem, false>();
-            constexpr auto BPaddingEnabled  = LdsPaddingConfigB[I0{}];
-            constexpr auto BPaddingAmount   = LdsPaddingConfigB[I1{}];
-            constexpr auto BPaddingInterval = LdsPaddingConfigB[I2{}];
             static_for<0, 2, 1>{}([&](auto i) {
-                tdm_config_a[i].pad_enable              = APaddingEnabled;
-                tdm_config_a[i].pad_config.pad_amount   = APaddingAmount;
-                tdm_config_a[i].pad_config.pad_interval = APaddingInterval;
-
-                tdm_config_b[i].pad_enable              = BPaddingEnabled;
-                tdm_config_b[i].pad_config.pad_amount   = BPaddingAmount;
-                tdm_config_b[i].pad_config.pad_interval = BPaddingInterval;
+                tdm_config_a[i] = Base::template MakeTdmConfig<true>();
+                tdm_config_b[i] = Base::template MakeTdmConfig<false>();
             });
 
             if constexpr(UseClusterLaunch)

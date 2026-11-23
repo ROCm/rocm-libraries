@@ -6,6 +6,10 @@ Documentation for Composable Kernel available at [https://rocm.docs.amd.com/proj
 
 ### Added
 
+* Added batched GEMM to CK Tile GEMM Stream-K: `StreamKHostArgs` takes a batch count and A, B and C batch strides, and the data-parallel and Stream-K work, persistent or not, is shared over the output tiles of all batches with every reduction strategy.
+* Added the gfx1250 comp_tdm_v3 pipeline to CK Tile batched GEMM, in the CK Tile dispatcher and the Tile Engine.
+* Added batched Stream-K to the CK Tile dispatcher batched GEMM bridge and its Tile Engine benchmark (`batched_gemm_full_benchmark.py`): Stream-K sweep configs for gfx9 and gfx1250 (compv3, compv4, mem, comp_tdm, comp_tdm_v2, comp_tdm_v3) and the `--reduction-strategy` and `--budget-pct` options.
+
 ### Changed
 
 ### Removed
@@ -112,6 +116,11 @@ Documentation for Composable Kernel available at [https://rocm.docs.amd.com/proj
 ### Optimized
 
 * Improved FMHA backward performance on gfx1250 by moving the operand transfers to TDM and the transposed reads to ds_load_tr, keeping the dK and dV accumulators in registers, pairing mirrored tiles under a causal mask, and coalescing the dQ atomic onto a single cache line.
+* Improved CK Tile TDM GEMM performance on gfx1250 for tile shapes that lost their LDS padding to avoid wrong results, such as tiles whose LDS rows are not a power of two, by padding them at an interval that divides the LDS row.
+
+### Fixed
+
+* Fixed CK Tile TDM GEMM tile shapes on gfx1250 failing to build because their LDS padding exceeded the LDS size; the padding is now dropped for the operand that needs the most LDS.
 
 ## Composable Kernel 1.3.0 for ROCm 10.1.0
 

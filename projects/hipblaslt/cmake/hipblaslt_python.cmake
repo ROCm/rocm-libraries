@@ -10,6 +10,26 @@ macro(hipblaslt_find_python python_dev_component)
     endif()
 endmacro()
 
+function(hipblaslt_resolve_build_rocm_root output)
+    if(HIPBLASLT_ENABLE_THEROCK)
+        if(NOT THEROCK_TOOLCHAIN_ROOT)
+            message(FATAL_ERROR
+                "HIPBLASLT_ENABLE_THEROCK requires THEROCK_TOOLCHAIN_ROOT")
+        endif()
+        set(_root "${THEROCK_TOOLCHAIN_ROOT}")
+    elseif(ROCM_PATH)
+        set(_root "${ROCM_PATH}")
+    elseif(DEFINED ENV{ROCM_PATH} AND NOT "$ENV{ROCM_PATH}" STREQUAL "")
+        set(_root "$ENV{ROCM_PATH}")
+    elseif(WIN32)
+        message(FATAL_ERROR "A standalone Windows build requires ROCM_PATH to select the build SDK")
+    else()
+        set(_root "/opt/rocm")
+    endif()
+    cmake_path(ABSOLUTE_PATH _root NORMALIZE)
+    set(${output} "${_root}" PARENT_SCOPE)
+endfunction()
+
 # Sets the HIPBLASLT_PYTHON_COMMAND variable in the parent scope such that it
 # can invoke the Python interpreter valid for the build parameters. Because
 # this may involve a multi token list, it must be used without quotes in
@@ -25,7 +45,6 @@ function(hipblaslt_configure_bundled_python_command python_binary_dir asan_optio
     set(_python_path
         "${python_binary_dir}"
         "${hipblaslt_SOURCE_DIR}/tensilelite"
-        "${hipblaslt_SOURCE_DIR}/tensilelite/rocisa_stinkytofu_adaptor"
     )
     list(JOIN _python_path "${_ds}" _python_path)
 

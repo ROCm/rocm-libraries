@@ -101,10 +101,10 @@ struct not_fn_t
             bool cccl_true                                                                   = true,
             ::std::enable_if_t<detail::can_invoke_and_negate<Fn, Args...> && cccl_true, int> = 0>
   inline THRUST_HOST_DEVICE constexpr auto
-  operator()(Args&&... args) && noexcept(noexcept(!detail::invoke(::std::move(f), ::std::forward<Args>(args)...)))
-    -> decltype(!detail::invoke(::std::move(f), ::std::forward<Args>(args)...))
+  operator()(Args&&... args) && noexcept(noexcept(!detail::invoke(_THRUST_STD::move(f), ::std::forward<Args>(args)...)))
+    -> decltype(!detail::invoke(_THRUST_STD::move(f), ::std::forward<Args>(args)...))
   {
-    return !detail::invoke(::std::move(f), ::std::forward<Args>(args)...);
+    return !detail::invoke(_THRUST_STD::move(f), ::std::forward<Args>(args)...);
   }
 
   template <typename... Args,
@@ -116,11 +116,11 @@ struct not_fn_t
   template <typename... Args,
             bool cccl_true                                                                         = true,
             ::std::enable_if_t<detail::can_invoke_and_negate<const Fn, Args...> && cccl_true, int> = 0>
-  inline THRUST_HOST_DEVICE constexpr auto
-  operator()(Args&&... args) const&& noexcept(noexcept(!detail::invoke(::std::move(f), ::std::forward<Args>(args)...)))
-    -> decltype(!detail::invoke(::std::move(f), ::std::forward<Args>(args)...))
+  inline THRUST_HOST_DEVICE constexpr auto operator()(Args&&... args) const&& noexcept(
+    noexcept(!detail::invoke(_THRUST_STD::move(f), ::std::forward<Args>(args)...)))
+    -> decltype(!detail::invoke(_THRUST_STD::move(f), ::std::forward<Args>(args)...))
   {
-    return !detail::invoke(::std::move(f), ::std::forward<Args>(args)...);
+    return !detail::invoke(_THRUST_STD::move(f), ::std::forward<Args>(args)...);
   }
 
   template <typename... Args,
@@ -133,7 +133,7 @@ template <typename Fn,
           bool cccl_true                                                                    = true,
           ::std::enable_if_t<::std::is_constructible_v<decay_t<Fn>, Fn> && cccl_true, int>  = 0,
           ::std::enable_if_t<::std::is_move_constructible_v<decay_t<Fn>> && cccl_true, int> = 0>
-THRUST_NODISCARD inline THRUST_HOST_DEVICE constexpr auto not_fn(Fn&& f)
+[[nodiscard]] inline THRUST_HOST_DEVICE constexpr auto not_fn(Fn&& f)
 {
   return not_fn_t<decay_t<Fn>>(::std::forward<Fn>(f));
 }
