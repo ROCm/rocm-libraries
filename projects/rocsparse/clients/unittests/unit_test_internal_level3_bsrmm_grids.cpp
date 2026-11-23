@@ -74,6 +74,7 @@
 #include <limits>
 #include <sstream>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 using namespace rocsparse_ut;
@@ -152,10 +153,20 @@ namespace
         std::vector<int64_t> t_row;
         std::vector<int64_t> t_col;
         std::vector<double>  t_val;
+
+        // Imaginary parts of val and t_val, empty when A is real. Only complex T
+        // reads them.
+        std::vector<double> val_im;
+        std::vector<double> t_val_im;
     };
 
-    // Block row i holds 0 to 3 blocks (every fifth block row is empty).
-    HostSparse make_bsr(int64_t mb, int64_t kb, int64_t block_dim, rocsparse_direction dir)
+    // Block row i holds 0 to 3 blocks (every fifth block row is empty). With
+    // imag, entry (row, col) gets the imaginary part (row + 2 * col) % 3 - 1.
+    HostSparse make_bsr(int64_t             mb,
+                        int64_t             kb,
+                        int64_t             block_dim,
+                        rocsparse_direction dir,
+                        bool                imag = false)
     {
         HostSparse a;
         a.format    = rocsparse_format_bsr;
@@ -185,17 +196,29 @@ namespace
                 const int64_t blk = static_cast<int64_t>(a.col.size());
                 a.col.push_back(bc);
                 a.val.resize((blk + 1) * bd2);
+                if(imag)
+                {
+                    a.val_im.resize((blk + 1) * bd2);
+                }
                 for(int64_t r = 0; r < block_dim; ++r)
                 {
                     for(int64_t c = 0; c < block_dim; ++c)
                     {
+                        const int64_t row = i * block_dim + r;
+                        const int64_t col = bc * block_dim + c;
                         const double  v   = static_cast<double>((i + bc + 3 * r + c) % 5) - 2.0;
                         const int64_t off = (dir == rocsparse_direction_row) ? r * block_dim + c
                                                                              : c * block_dim + r;
                         a.val[blk * bd2 + off] = v;
-                        a.t_row.push_back(i * block_dim + r);
-                        a.t_col.push_back(bc * block_dim + c);
+                        a.t_row.push_back(row);
+                        a.t_col.push_back(col);
                         a.t_val.push_back(v);
+                        if(imag)
+                        {
+                            const double w = static_cast<double>((row + 2 * col) % 3) - 1.0;
+                            a.t_val_im.push_back(w);
+                            a.val_im[blk * bd2 + off] = w;
+                        }
                     }
                 }
             }
@@ -301,6 +324,38 @@ namespace
         return out;
     }
 
+    template <typename T>
+    struct is_complex_value : std::false_type
+    {
+    };
+    template <>
+    struct is_complex_value<rocsparse_float_complex> : std::true_type
+    {
+    };
+    template <>
+    struct is_complex_value<rocsparse_double_complex> : std::true_type
+    {
+    };
+
+    // The stored values of A as T, with the imaginary parts for complex T.
+    template <typename T>
+    std::vector<T> sparse_values(const HostSparse& a)
+    {
+        if constexpr(is_complex_value<T>::value)
+        {
+            if(!a.val_im.empty())
+            {
+                std::vector<T> out(a.val.size());
+                for(size_t i = 0; i < out.size(); ++i)
+                {
+                    out[i] = T(a.val[i], a.val_im[i]);
+                }
+                return out;
+            }
+        }
+        return convert_values<T>(a.val);
+    }
+
     struct SpmmDescrs
     {
         rocsparse_spmat_descr mat_a = nullptr;
@@ -357,7 +412,7 @@ namespace
                                                                   : convert<J>(a.col));
         device_vector<I> d_col_i(a.format == rocsparse_format_coo ? convert<I>(a.col)
                                                                   : std::vector<I>{0});
-        device_vector<T> d_val(convert_values<T>(a.val));
+        device_vector<T> d_val(sparse_values<T>(a));
         device_vector<T> d_b(b);
         device_vector<T> d_c(c_in);
 
@@ -499,11 +554,18 @@ namespace
         return to_host(d_c);
     }
 
+    // T is the real type the result was computed in. NaN is never near.
     template <typename T>
-    bool near(double got, double want)
+    bool near(std::complex<double> got, std::complex<double> want)
     {
         const double tol = 4.0 * std::numeric_limits<T>::epsilon() * std::max(1.0, std::abs(want));
         return std::abs(got - want) <= tol;
+    }
+
+    template <typename T>
+    bool near(double got, double want)
+    {
+        return near<T>(std::complex<double>(got), std::complex<double>(want));
     }
 
     std::string describe_limits(GridLimits limits)
@@ -609,8 +671,9 @@ namespace
     }
 
     // bsrmm large_ext with op(B) = B^H for complex T, on the check_bsrmm large_ext
-    // shape. B is stored as the n x k matrix whose conjugate transpose is op(B). A is
-    // real, so only the conjugation of B decides the sign of the imaginary parts.
+    // shape. B is stored as the n x k matrix whose conjugate transpose is op(B). A has
+    // non-zero imaginary parts, so conjugating A as well as B, or the sum instead of
+    // B, changes C.
     template <typename T, typename I, typename J, size_t N>
     void check_bsrmm_conj_B(rocsparse_handle    handle,
                             int64_t             block_dim,
@@ -623,7 +686,7 @@ namespace
 
         const int64_t    mb = 24;
         const int64_t    n  = 200;
-        const HostSparse a  = make_bsr(mb, mb, block_dim, dir);
+        const HostSparse a  = make_bsr(mb, mb, block_dim, dir, true);
 
         const std::vector<double> b_re = make_dense(n * a.k, 1);
         const std::vector<double> b_im = make_dense(n * a.k, 2);
@@ -641,7 +704,8 @@ namespace
             for(int64_t j = 0; j < n; ++j)
             {
                 const int64_t idx = b_idx(j, a.t_col[e]);
-                want[a.t_row[e] + a.m * j] += a.t_val[e] * std::conj(cplx(b_re[idx], b_im[idx]));
+                want[a.t_row[e] + a.m * j] += cplx(a.t_val[e], a.t_val_im[e])
+                                              * std::conj(cplx(b_re[idx], b_im[idx]));
             }
         }
         for(int64_t i = 0; i < a.m * n; ++i)
@@ -674,13 +738,14 @@ namespace
                                                             l);
             ASSERT_EQ(got.size(), want.size());
 
-            const double eps   = std::numeric_limits<decltype(std::real(got[0]))>::epsilon();
-            int64_t      bad   = 0;
-            int64_t      first = -1;
+            using R = decltype(std::real(got[0]));
+
+            auto    as_cplx = [](const T& v) { return cplx(std::real(v), std::imag(v)); };
+            int64_t bad     = 0;
+            int64_t first   = -1;
             for(size_t i = 0; i < got.size(); ++i)
             {
-                const cplx g(std::real(got[i]), std::imag(got[i]));
-                if(!(std::abs(g - want[i]) <= 4.0 * eps * std::max(1.0, std::abs(want[i]))))
+                if(!near<R>(as_cplx(got[i]), want[i]))
                 {
                     if(bad++ == 0)
                     {
@@ -692,9 +757,23 @@ namespace
                               << ", block_dim = " << block_dim << ", order_B = "
                               << (order_B == rocsparse_order_column ? "column" : "row") << ": "
                               << bad << " of " << got.size() << " entries wrong; first at row "
-                              << (first % a.m) << ", column " << (first / a.m);
+                              << (first % a.m) << ", column " << (first / a.m) << ", got "
+                              << (first >= 0 ? as_cplx(got[first]) : cplx()) << " want "
+                              << (first >= 0 ? want[first] : cplx());
         }
     }
+
+    // One shape per tuned large_ext config, for op(B) = B^H.
+    const struct
+    {
+        int64_t             block_dim;
+        rocsparse_direction dir;
+        const char*         kernel;
+    } conj_B_shapes[]
+        = {{3, rocsparse_direction_row, "bsrmm_large_blockdim_kernel_ext<4, 16, 2>"},
+           {7, rocsparse_direction_column, "bsrmm_large_blockdim_kernel_ext<8, 8, 2>"},
+           {13, rocsparse_direction_row, "bsrmm_large_blockdim_kernel_ext<16, 16, 2>"},
+           {29, rocsparse_direction_column, "bsrmm_large_blockdim_kernel_ext<32, 32, 2>"}};
 
     // coomm segmented: 2000 rows of 5 entries is nnz = 10000, i.e. 10 segments of
     // 1024 for the block reduction to combine. n = 20 runs the WF_SIZE = 8 main
@@ -848,38 +927,6 @@ TEST_F(BsrmmGrids, general_clamped)
     }
 }
 
-namespace
-{
-    // One shape per tuned large_ext config, for op(B) = B^H.
-    const struct
-    {
-        int64_t             block_dim;
-        rocsparse_direction dir;
-        const char*         kernel;
-    } conj_B_shapes[]
-        = {{3, rocsparse_direction_row, "bsrmm_large_blockdim_kernel_ext<4, 16, 2>"},
-           {7, rocsparse_direction_column, "bsrmm_large_blockdim_kernel_ext<8, 8, 2>"},
-           {13, rocsparse_direction_row, "bsrmm_large_blockdim_kernel_ext<16, 16, 2>"},
-           {29, rocsparse_direction_column, "bsrmm_large_blockdim_kernel_ext<32, 32, 2>"}};
-}
-
-// The clamped large_ext kernel runs a separate grid-stride copy of the B loads, so
-// op(B) = B^H needs its own clamped check, in both B orders (nn and nt loads), for
-// every tuned config.
-TEST_F(BsrmmGrids, large_ext_conj_B_clamped)
-{
-    for(const auto& s : conj_B_shapes)
-    {
-        for(const rocsparse_order order_B : {rocsparse_order_column, rocsparse_order_row})
-        {
-            check_bsrmm_conj_B<rocsparse_float_complex, int32_t, int32_t>(
-                handle, s.block_dim, s.dir, order_B, bsrmm_limits, s.kernel);
-            check_bsrmm_conj_B<rocsparse_double_complex, int64_t, int64_t>(
-                handle, s.block_dim, s.dir, order_B, bsrmm_limits, s.kernel);
-        }
-    }
-}
-
 // Control: every bsrmm shape above with the real grid limits. If this fails
 // the clamped cases prove nothing.
 TEST_F(BsrmmGrids, unclamped_grid_matches_host)
@@ -903,6 +950,27 @@ TEST_F(BsrmmGrids, unclamped_grid_matches_host)
                 handle, s.block_dim, s.dir, order_B, unclamped, "bsrmm");
             check_bsrmm<double, int64_t, int64_t>(
                 handle, s.block_dim, s.dir, order_B, unclamped, "bsrmm");
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// bsrmm large_ext with op(B) = B^H (AISPARSE-1106, rocm-libraries#15880)
+// ---------------------------------------------------------------------------
+
+// The clamped large_ext kernel runs a separate grid-stride copy of the B loads, so
+// op(B) = B^H needs its own clamped check, in both B orders (nn and nt loads), for
+// every tuned config.
+TEST_F(BsrmmGrids, large_ext_conj_B_clamped)
+{
+    for(const auto& s : conj_B_shapes)
+    {
+        for(const rocsparse_order order_B : {rocsparse_order_column, rocsparse_order_row})
+        {
+            check_bsrmm_conj_B<rocsparse_float_complex, int32_t, int32_t>(
+                handle, s.block_dim, s.dir, order_B, bsrmm_limits, s.kernel);
+            check_bsrmm_conj_B<rocsparse_double_complex, int64_t, int64_t>(
+                handle, s.block_dim, s.dir, order_B, bsrmm_limits, s.kernel);
         }
     }
 }
