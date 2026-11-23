@@ -56,10 +56,11 @@ no guard: it does not run on the raw backend API, deserialized or JSON graphs, o
    - The rule is the runtime's per-axis work-item limit (*Launch geometry* row), not the device's `maxGridSize`: the current runtime
      reports y and z limits of 65535 and does not enforce them. Older runtimes that limited grid y and z are out of scope. A hardcoded
      limit names its source in a comment: the HIP launch rule or the architecture limit it mirrors.
-   - A bound stricter than every limit that applies on the engine's target architectures is `over-decline`, at `SUGGESTION` or
-     `FUTURE WORK`, when it refuses a graph each target can serve. Architecture limits count: on gfx12, gfx12.5 and gfx13 the compiler
-     reads `blockIdx.y` and `blockIdx.z` as 16-bit values (`llvm/lib/Target/AMDGPU/SIISelLowering.cpp`, architected SGPRs), so a grid y
-     or z bound of 65536 or less is justified for an engine that targets them, not an over-decline.
+   - A launch bound stricter than every limit that applies on the engine's target architectures is `over-decline` when it refuses a
+     graph each target can serve; tier it by the launch-bound row of *Severity*. Architecture limits count: on gfx12, gfx12.5 and gfx13
+     the compiler reads `blockIdx.y` and `blockIdx.z` as 16-bit values (`llvm/lib/Target/AMDGPU/SIISelLowering.cpp`, architected SGPRs),
+     so a grid y or z bound equal to 65536 is justified for an engine that targets them. A lower bound still refuses the graphs between it
+     and 65536 that those targets serve, so it is `over-decline` (a 65535 constant refuses one value).
    - A bound that exists in plan build but not in applicability is `accept-then-fail`; one that is missing is the hazard.
    - A refusal inside the kernel launcher (a launch-time guard that turns the runtime error into a named exception) is a backstop, not a
      bound in applicability: the graph is still accepted and the plan built, so a missing per-engine bound stays `accept-then-fail` at the
@@ -126,6 +127,7 @@ Per [../policy.md](../policy.md) tiers; kind `defect` unless noted.
 |---|---|
 | Reachable hazard giving UB, a memory fault, wrong results or a crash | `BLOCKING` |
 | Reachable `accept-then-fail`, `over-decline`, or a version change (step 5) whose newly reachable properties are not all handled | `IMPORTANT` (`BLOCKING` when it exposes UB or wrong results) |
+| `over-decline` by a launch bound stricter than every limit on the engine's target architectures (step 9) | `SUGGESTION`; `FUTURE WORK` in code the change does not touch |
 | `N/A-version` latent hazard, or one in code the change does not touch | `FUTURE WORK`, kind `source-claim` |
 
 A reachable claim at `IMPORTANT` or above carries its graph mutation and the reachability argument over the layers that exist for
