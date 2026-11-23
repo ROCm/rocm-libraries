@@ -128,6 +128,7 @@ MI_FILTER=0 python3 scripts/config_generator.py --hipblaslt /path/to/hipBLASLt -
 - **`load_prepared_config`** / **`_prepare_config`** ([`load_input_config.py`](load_input_config.py)): if `MACROTILE_OPT` is false, `MT_DU` is cleared to `None`. `MACROTILE_OPT` with a non-Ductile backend is supported for `SIZE_OPTION: 0` only (explicit `Sizes:` list); attempting it with `SIZE_OPTION: 1` raises `NotImplementedError`. The post-processor's `_apply_mt_du` runs regardless of backend.
 - **`get_sizes`** ([`sizes.py`](sizes.py)): `SIZE_OPTION=1` (grid) with `MACROTILE_OPT` and the Ductile backend raises `NotImplementedError`.
 - **`BUILD_DIR`:** Optional; passed to `geko.utils.build_tensilelite_client` from [`scripts/config_generator.py`](../../scripts/config_generator.py) when generating shell scripts.
+- **StreamK MI order:** MI Designer filters candidates over several hypothetical `GlobalSplitU` values, but a StreamK group without `GSU_PER_MI` does not carry the one it was ranked with. After the filter and the GSU de-duplication, the surviving groups are therefore re-ranked with a split factor of one (`MIDesign._rank_without_proxy_gsu`). Only the order changes: the groups, their `WorkGroup` / `DepthU`, and each group's Ductile cost are the same. Order decides which groups survive `MAX_NUM_KERNELS_PER_CONFIG` trimming and how `CLUSTER: 1` keys sizes, so those outputs can differ.
 
 ---
 

@@ -674,6 +674,23 @@ class MIDesign:
       """MI groups carry their own GlobalSplitU in DP tuning, and with StreamK under GSU_PER_MI."""
       return not self.config["StreamK"] or bool(self.config.get("GSU_PER_MI"))
 
+  def _rank_without_proxy_gsu(self, mfma_list: List[MFMACandidate], size: Tuple[int, int, int, int]) -> List[MFMACandidate]:
+    """Re-sort deduplicated StreamK candidates with a split factor of one.
+
+    The GSU a StreamK candidate was filtered and first sorted with is a proxy that
+    is never emitted, so it must not decide the candidate's final rank. Admission
+    and the retained (mfma, LSU) representatives are unchanged; ties keep their
+    previous order.
+    """
+    m, n, batch, _ = size
+
+    def key(cand: MFMACandidate) -> Tuple[int, float, float]:
+      metrics = self.calculate_granularities(
+          cand.MT0, cand.MT1, m, n, batch, self.config["CUs"], cand.LSU, 1, (cand.mfma.waveM, cand.mfma.waveN))
+      return math.ceil(metrics.TilesPerCU), 1 - metrics.TilesPerCU, 1 - metrics.totalGranularity
+
+    return sorted(mfma_list, key=key)
+
   def generate_for_size(
       self,
       size: Tuple[int, int, int, int],
@@ -705,6 +722,7 @@ class MIDesign:
       if self.config.get("StreamK", False) and not self.config.get("GSU_PER_MI"):
         logger.debug("Removing GSU duplicates for StreamK")
         mfma_list = self._remove_GSU_duplicates(mfma_list)
+        mfma_list = self._rank_without_proxy_gsu(mfma_list, size)
 
       raw_groups, comments, metadata = self._create_mi_groups(
           size, mfma_list, depthu_values=depthu_values, wavefront_size=wavefront_size)
