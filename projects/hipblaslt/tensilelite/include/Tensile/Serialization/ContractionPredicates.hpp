@@ -75,6 +75,10 @@ namespace TensileLite
                      Base::template Pair<Predicates::Contraction::SizeMultiple>(),
                      Base::template Pair<Predicates::Contraction::StrideAEqual>(),
                      Base::template Pair<Predicates::Contraction::StrideBEqual>(),
+                     Base::template Pair<Predicates::Contraction::StrideAMultiple>(),
+                     Base::template Pair<Predicates::Contraction::StrideBMultiple>(),
+                     Base::template Pair<Predicates::Contraction::TensorBytesLessThan>(),
+                     Base::template Pair<Predicates::Contraction::MXScalesPreSwizzled>(),
                      Base::template Pair<Predicates::Contraction::StrideCEqual>(),
                      Base::template Pair<Predicates::Contraction::StrideDEqual>(),
                      Base::template Pair<Predicates::Contraction::LDCEqualsLDD>(),
@@ -98,6 +102,7 @@ namespace TensileLite
                      Base::template Pair<Predicates::Contraction::BufferStoreOffsetLimitCheck>(),
                      Base::template Pair<
                          Predicates::Contraction::GL2PrefetchSAddrOffsetLimitCheck>(),
+                     Base::template Pair<Predicates::Contraction::BufferAddressingLimitCheck>(),
                      Base::template Pair<Predicates::Contraction::WorkgroupNumberCheck>(),
                      Base::template Pair<Predicates::Contraction::PersistentKernelCheck>(),
                      Base::template Pair<Predicates::Contraction::GlobalSplitUCheckMinK>(),
@@ -256,6 +261,30 @@ namespace TensileLite
         };
 
         template <typename IO>
+        struct MappingTraits<Predicates::Contraction::StrideAMultiple, IO>
+            : public AutoMappingTraits<Predicates::Contraction::StrideAMultiple, IO>
+        {
+        };
+
+        template <typename IO>
+        struct MappingTraits<Predicates::Contraction::StrideBMultiple, IO>
+            : public AutoMappingTraits<Predicates::Contraction::StrideBMultiple, IO>
+        {
+        };
+
+        template <typename IO>
+        struct MappingTraits<Predicates::Contraction::TensorBytesLessThan, IO>
+            : public AutoMappingTraits<Predicates::Contraction::TensorBytesLessThan, IO>
+        {
+        };
+
+        template <typename IO>
+        struct MappingTraits<Predicates::Contraction::MXScalesPreSwizzled, IO>
+            : public AutoMappingTraits<Predicates::Contraction::MXScalesPreSwizzled, IO>
+        {
+        };
+
+        template <typename IO>
         struct MappingTraits<Predicates::Contraction::StrideCEqual, IO>
             : public AutoMappingTraits<Predicates::Contraction::StrideCEqual, IO>
         {
@@ -385,6 +414,12 @@ namespace TensileLite
         struct MappingTraits<Predicates::Contraction::GL2PrefetchSAddrOffsetLimitCheck, IO>
             : public AutoMappingTraits<Predicates::Contraction::GL2PrefetchSAddrOffsetLimitCheck,
                                        IO>
+        {
+        };
+
+        template <typename IO>
+        struct MappingTraits<Predicates::Contraction::BufferAddressingLimitCheck, IO>
+            : public AutoMappingTraits<Predicates::Contraction::BufferAddressingLimitCheck, IO>
         {
         };
 

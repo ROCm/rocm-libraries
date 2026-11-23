@@ -4,6 +4,28 @@ Full test-naming rules live on the wiki: https://github.com/ROCm/MIOpen/wiki/GTe
 (`Smoke`/`Standard`/`Full`/`Perf`/`Unit` prefixes, `CPU`/`GPU` hardware token, datatype
 suffix). `check_names.py` enforces that schema against `miopen_gtest --gtest_list_tests`.
 
+## GPU-free database synchronization
+
+TheRock's `miopen-dbsync` component runs the packaged
+`share/miopen/bin/run_dbsync_rocjitsu.py` on a CPU runner. It builds rocjitsu with
+Ninja, matching the MIOpen component CI naming check. Missing build tools,
+including `ninja-build`, are installed through `sudo apt-get`; the environment
+needs passwordless sudo and network access to the package repositories and GitHub.
+
+With matching non-ASAN artifacts unpacked into `build`, run:
+
+```sh
+AMDGPU_FAMILIES=gfx94X-dcgpu TEST_TYPE=standard \
+  python3 build/share/miopen/bin/run_dbsync_rocjitsu.py
+```
+
+Run separately with `AMDGPU_FAMILIES=gfx950-dcgpu` and that family's artifacts.
+The gfx942 run covers 304 and 228 CUs; the gfx950 run covers 256 CUs. Each artifact
+tree must contain `miopen_gtest`, the matching CK grouped-convolution plugin, and
+the SystemDBs. Require non-skipped `StaticFDBSync` results for every CU count:
+exit status zero alone does not prove coverage. The `quick` tier intentionally
+skips this runner.
+
 ## hipDNN shim surface
 
 A test belongs to the hipDNN backend-swap surface if its full gtest name contains the

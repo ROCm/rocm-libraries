@@ -6603,7 +6603,7 @@ void host_csric0(rocsparse_int                     M,
                 if(nnz_entries[col_k] != 0)
                 {
                     rocsparse_int idx = nnz_entries[col_k];
-                    local_sum = std::fma(csr_val[k], rocsparse_conj(csr_val[idx]), local_sum);
+                    local_sum = std::fma(csr_val[idx], rocsparse_conj(csr_val[k]), local_sum);
                 }
             }
 
