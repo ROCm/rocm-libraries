@@ -1043,41 +1043,159 @@ namespace
         }
     }
 
+    // No stored blocks: every column pointer is the index base. The arrays of nnzb
+    // elements, the buffer, and bsr_row_ptr when mb == 0 may be null.
     TEST_F(ConvGebsr, Gebsr2GebscEmpty)
     {
         const I rdim = 2, cdim = 3;
         for(I base : {0, 1})
-            for(const auto& d : {std::pair<I, I>(3, 4), {0, 4}, {3, 0}})
+            for(rocsparse_action action : {rocsparse_action_symbolic, rocsparse_action_numeric})
+                for(const auto& d : {std::pair<I, I>(3, 4), {0, 4}, {3, 0}})
+                {
+                    const I mb = d.first, nb = d.second;
+                    SCOPED_TRACE("base " + std::to_string(base) + " action "
+                                 + std::to_string(action) + " mb " + std::to_string(mb) + " nb "
+                                 + std::to_string(nb));
+                    DevBuf<I> d_ptr(std::vector<I>(mb + 1, base)), d_ind(0), d_rind(0),
+                        d_cptr(std::vector<I>(nb + 1, -1)), d_cptr_null(std::vector<I>(nb + 1, -1));
+                    DevBuf<float> d_val(0), d_cval(0);
+                    size_t        size = 0;
+                    ASSERT_EQ(rocsparse_sgebsr2gebsc_buffer_size(
+                                  handle, mb, nb, 0, d_val, d_ptr, d_ind, rdim, cdim, &size),
+                              st_ok);
+                    DevBuf<char> d_buffer(size);
+                    ASSERT_EQ(rocsparse_sgebsr2gebsc(handle,
+                                                     mb,
+                                                     nb,
+                                                     0,
+                                                     d_val,
+                                                     d_ptr,
+                                                     d_ind,
+                                                     rdim,
+                                                     cdim,
+                                                     d_cval,
+                                                     d_rind,
+                                                     d_cptr,
+                                                     action,
+                                                     base_of(base),
+                                                     d_buffer),
+                              st_ok);
+                    EXPECT_EQ(d_cptr.read(nb + 1), std::vector<I>(nb + 1, base));
+
+                    ASSERT_EQ(rocsparse_sgebsr2gebsc(handle,
+                                                     mb,
+                                                     nb,
+                                                     0,
+                                                     nullptr,
+                                                     mb == 0 ? nullptr : d_ptr.get(),
+                                                     nullptr,
+                                                     rdim,
+                                                     cdim,
+                                                     nullptr,
+                                                     nullptr,
+                                                     d_cptr_null,
+                                                     action,
+                                                     base_of(base),
+                                                     nullptr),
+                              st_ok);
+                    EXPECT_EQ(d_cptr_null.read(nb + 1), std::vector<I>(nb + 1, base));
+                }
+    }
+
+    // Runs f with the handle on a capturing stream and returns its status and the number
+    // of captured graph nodes. Nothing executes, so a fill launched on a null output is
+    // counted instead of faulting the device.
+    template <typename F>
+    std::pair<rocsparse_status, size_t> run_captured(rocsparse_handle handle, F f)
+    {
+        rocsparse_status status     = rocsparse_status_internal_error;
+        size_t           num_nodes  = 0;
+        hipStream_t      old_stream = nullptr, stream = nullptr;
+        hipGraph_t       graph = nullptr;
+        if(rocsparse_get_stream(handle, &old_stream) != st_ok
+           || hipStreamCreate(&stream) != hipSuccess)
+        {
+            ADD_FAILURE() << "capture stream setup failed";
+            return {status, num_nodes};
+        }
+        if(rocsparse_set_stream(handle, stream) == st_ok
+           && hipStreamBeginCapture(stream, hipStreamCaptureModeThreadLocal) == hipSuccess)
+        {
+            status = f();
+            if(hipStreamEndCapture(stream, &graph) == hipSuccess && graph != nullptr)
             {
-                const I mb = d.first, nb = d.second;
-                SCOPED_TRACE("base " + std::to_string(base) + " mb " + std::to_string(mb) + " nb "
-                             + std::to_string(nb));
-                DevBuf<I> d_ptr(std::vector<I>(mb + 1, base)), d_ind(0),
-                    d_cptr(std::vector<I>(nb + 1, 77));
-                DevBuf<float> d_val(0), d_cval(0);
-                size_t        size = 0;
-                ASSERT_EQ(rocsparse_sgebsr2gebsc_buffer_size(
-                              handle, mb, nb, 0, d_val, d_ptr, d_ind, rdim, cdim, &size),
-                          st_ok);
-                DevBuf<char> d_buffer(size);
-                ASSERT_EQ(rocsparse_sgebsr2gebsc(handle,
-                                                 mb,
-                                                 nb,
-                                                 0,
-                                                 d_val,
-                                                 d_ptr,
-                                                 d_ind,
-                                                 rdim,
-                                                 cdim,
-                                                 d_cval,
-                                                 d_ind,
-                                                 d_cptr,
-                                                 rocsparse_action_numeric,
-                                                 base_of(base),
-                                                 d_buffer),
-                          st_ok);
-                EXPECT_EQ(d_cptr.read(nb + 1), std::vector<I>(nb + 1, base));
+                EXPECT_EQ(hipGraphGetNodes(graph, nullptr, &num_nodes), hipSuccess);
+                EXPECT_EQ(hipGraphDestroy(graph), hipSuccess);
             }
+            else
+            {
+                ADD_FAILURE() << "capture did not end";
+            }
+        }
+        else
+        {
+            ADD_FAILURE() << "capture did not start";
+        }
+        EXPECT_EQ(rocsparse_set_stream(handle, old_stream), st_ok);
+        EXPECT_EQ(hipStreamDestroy(stream), hipSuccess);
+        return {status, num_nodes};
+    }
+
+    // bsc_col_ptr (nb + 1 elements), bsr_row_ptr (mb + 1 elements), and the arrays of nnzb
+    // elements are checked before the quick return: a null array is rejected whenever its
+    // size is positive, whatever the other dimensions are, and nothing is launched.
+    TEST_F(ConvGebsr, Gebsr2GebscNullPointers)
+    {
+        using R      = std::pair<rocsparse_status, size_t>;
+        const I rdim = 2, cdim = 3;
+        for(I base : {0, 1})
+            for(rocsparse_action action : {rocsparse_action_symbolic, rocsparse_action_numeric})
+            {
+                SCOPED_TRACE("base " + std::to_string(base) + " action " + std::to_string(action));
+                DevBuf<I>  d_ptr(std::vector<I>(4, base)), d_cptr(std::vector<I>(5, -1));
+                const auto convert = [&](I mb, I nb, I nnzb, const I* bsr_row_ptr, I* bsc_col_ptr) {
+                    return run_captured(handle, [&] {
+                        return rocsparse_sgebsr2gebsc(handle,
+                                                      mb,
+                                                      nb,
+                                                      nnzb,
+                                                      nullptr,
+                                                      bsr_row_ptr,
+                                                      nullptr,
+                                                      rdim,
+                                                      cdim,
+                                                      nullptr,
+                                                      nullptr,
+                                                      bsc_col_ptr,
+                                                      action,
+                                                      base_of(base),
+                                                      nullptr);
+                    });
+                };
+
+                EXPECT_EQ(convert(3, 4, 0, d_ptr, nullptr), R(st_ptr, 0));
+                EXPECT_EQ(convert(3, 4, 0, nullptr, nullptr), R(st_ptr, 0));
+                EXPECT_EQ(convert(0, 4, 0, d_ptr, nullptr), R(st_ptr, 0));
+                EXPECT_EQ(convert(3, 0, 0, d_ptr, nullptr), R(st_ok, 0));
+
+                EXPECT_EQ(convert(3, 4, 0, nullptr, d_cptr), R(st_ptr, 0));
+                EXPECT_EQ(convert(3, 0, 0, nullptr, d_cptr), R(st_ptr, 0));
+
+                EXPECT_EQ(convert(0, 4, 1, d_ptr, d_cptr), R(st_ptr, 0));
+            }
+
+        DevBuf<I>     d_ind(0);
+        DevBuf<float> d_val(0);
+        size_t        size = 0;
+        EXPECT_EQ(rocsparse_sgebsr2gebsc_buffer_size(
+                      handle, 3, 4, 0, d_val, nullptr, d_ind, rdim, cdim, &size),
+                  st_ptr);
+        EXPECT_EQ(rocsparse_sgebsr2gebsc_buffer_size(
+                      handle, 3, 0, 0, d_val, nullptr, d_ind, rdim, cdim, &size),
+                  st_ptr);
+        EXPECT_EQ(rocsparse_sgebsr2gebsc_buffer_size(
+                      handle, 0, 4, 0, d_val, nullptr, d_ind, rdim, cdim, &size),
+                  st_ok);
     }
 
     // ------------------------------------------------------------------------------

@@ -126,6 +126,18 @@ rocsparse_status rocsparse::gebsr2gebsc_template(rocsparse_handle     handle, //
     ROCSPARSE_CHECKARG(7, row_block_dim, (row_block_dim == 0), rocsparse_status_invalid_size);
     ROCSPARSE_CHECKARG(8, col_block_dim, (col_block_dim == 0), rocsparse_status_invalid_size);
 
+    ROCSPARSE_CHECKARG_ARRAY(5, mb, bsr_row_ptr);
+    ROCSPARSE_CHECKARG_ARRAY(6, nnzb, bsr_col_ind);
+
+    ROCSPARSE_CHECKARG_ARRAY(11, nb, bsc_col_ptr);
+    ROCSPARSE_CHECKARG_ARRAY(10, nnzb, bsc_row_ind);
+
+    if(copy_values == rocsparse_action_numeric)
+    {
+        ROCSPARSE_CHECKARG_ARRAY(4, nnzb, bsr_val);
+        ROCSPARSE_CHECKARG_ARRAY(9, nnzb, bsc_val);
+    }
+
     const rocsparse_status status = rocsparse::gebsr2gebsc_quickreturn(handle,
                                                                        mb,
                                                                        nb,
@@ -146,18 +158,6 @@ rocsparse_status rocsparse::gebsr2gebsc_template(rocsparse_handle     handle, //
     {
         RETURN_IF_ROCSPARSE_ERROR(status);
         return rocsparse_status_success;
-    }
-
-    ROCSPARSE_CHECKARG_ARRAY(5, mb, bsr_row_ptr);
-    ROCSPARSE_CHECKARG_ARRAY(6, nnzb, bsr_col_ind);
-
-    ROCSPARSE_CHECKARG_ARRAY(11, nb, bsc_col_ptr);
-    ROCSPARSE_CHECKARG_ARRAY(10, nnzb, bsc_row_ind);
-
-    if(copy_values == rocsparse_action_numeric)
-    {
-        ROCSPARSE_CHECKARG_ARRAY(4, nnzb, bsr_val);
-        ROCSPARSE_CHECKARG_ARRAY(9, nnzb, bsc_val);
     }
 
     ROCSPARSE_CHECKARG_ARRAY(14, nnzb, temp_buffer);
@@ -330,6 +330,9 @@ namespace rocsparse
         ROCSPARSE_CHECKARG(7, row_block_dim, (row_block_dim == 0), rocsparse_status_invalid_size);
         ROCSPARSE_CHECKARG(8, col_block_dim, (col_block_dim == 0), rocsparse_status_invalid_size);
         ROCSPARSE_CHECKARG_POINTER(9, p_buffer_size);
+        ROCSPARSE_CHECKARG_ARRAY(4, nnzb, bsr_val);
+        ROCSPARSE_CHECKARG_ARRAY(5, mb, bsr_row_ptr);
+        ROCSPARSE_CHECKARG_ARRAY(6, nnzb, bsr_col_ind);
 
         // Quick return if possible
         const rocsparse_status status
@@ -349,10 +352,6 @@ namespace rocsparse
             RETURN_IF_ROCSPARSE_ERROR(status);
             return rocsparse_status_success;
         }
-
-        ROCSPARSE_CHECKARG_ARRAY(4, nnzb, bsr_val);
-        ROCSPARSE_CHECKARG_ARRAY(5, mb, bsr_row_ptr);
-        ROCSPARSE_CHECKARG_ARRAY(6, nnzb, bsr_col_ind);
 
         uint32_t startbit = 0;
         uint32_t endbit   = rocsparse::clz(nb);
