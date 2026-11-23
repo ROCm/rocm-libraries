@@ -11,7 +11,9 @@ directory is). A file a selected test runs as a child process counts too. A
 module whose ``pytestmark`` the entry's ``-m`` expression rejects is not in CI
 through that entry. The check works per file: marks on single tests, ``-k``
 filters and a file whose every case skips in CI are not seen here, so
-``rocke.tests.pending_lanes`` records those files under a lane by hand.
+``rocke.tests.pending_lanes`` records those files under a lane by hand, and
+``tools/limbo_audit.py`` checks each case against the record from the run
+records of CI lanes.
 
 Every other test file must be listed in ``rocke.tests.pending_lanes``, and every
 listed entry must be current: its file present and its lane's kind still
@@ -54,6 +56,8 @@ from rocke.runtime.comgr import CompilerInfo
 from rocke.tests import in_tree_suites
 from rocke.tests.ctest_listing import configure_installed_ctest, list_ctest_entries
 from rocke.tests.pending_lanes import (
+    BINDING_LANE,
+    COMPREHENSIVE_CASES,
     GFX950_RUNNER,
     LANES,
     MEASURED_BUDGETS,
@@ -69,6 +73,8 @@ from rocke.tests.pending_lanes import (
     QuarantinedTest,
     measured_budget_kernels,
     measured_scratch_allowance,
+    tree_test_files,
+    waiting_entry,
 )
 from rocke.tests.provider_categories import provider_category_labels
 from rocke.tests.quarantine import skip_quarantined_items
@@ -78,8 +84,6 @@ ROCKE = platform_root().parent
 CI_TIERS = frozenset({"quick", "standard"})
 # The provider build installs rocKE's CTest entries into bin/<this>.
 PROVIDER_CTEST_SUBDIR = "hip_kernel_provider"
-# Where test files live, relative to the rocke directory.
-TEST_FILE_ROOTS = ("platform", "library")
 # The tests that run other test files as child pytest processes, so no CTest
 # command names those files.
 IN_TREE_RUNNER = "platform/tests/in_tree/test_in_tree_suites.py"
@@ -386,16 +390,6 @@ def run_by_another_test() -> dict[str, str]:
     return runners
 
 
-def tree_test_files() -> set[str]:
-    """Every test file of the source tree, relative to the rocke directory."""
-    return {
-        file.relative_to(ROCKE).as_posix()
-        for root in TEST_FILE_ROOTS
-        for file in (ROCKE / root).rglob("test_*.py")
-        if "__pycache__" not in file.parts
-    }
-
-
 def _python_on_path(scratch: Path) -> dict[str, str]:
     """An environment in which the bare ``python`` that installed entries run
     resolves, to this interpreter when no ``python`` is on PATH."""
@@ -435,7 +429,7 @@ def ci_selected_files(scratch: Path) -> set[str]:
     ]
     references = {
         path: f"rocke_{match.group(1)}_gpu_gfx942_pytest"
-        for path in tree_test_files()
+        for path in tree_test_files(ROCKE)
         if (match := PINNED_REFERENCE_TEST.fullmatch(path))
     }
     entry_names = [entry["name"] for entries, _, _ in trees for entry in entries]
@@ -482,20 +476,23 @@ def audit(
 
 
 def listing_breaches(pending: Iterable[PendingTest]) -> list[str]:
-    """The files listed twice under one lane, or under several lanes when one
-    of them is a lane that does not exist yet (its files are in no CI entry)."""
-    lanes_of: dict[str, list[Lane]] = {}
+    """The files or tests listed twice under one lane, or files under several
+    lanes when one of them is a lane that does not exist yet (its files are in
+    no CI entry)."""
+    pending = list(pending)
+    keys = [(entry.path, entry.node, entry.lane.name) for entry in pending]
+    breaches = [
+        f"listed twice under one lane: {path}" + (f"::{node}" if node else "")
+        for path, node, _ in sorted({key for key in keys if keys.count(key) > 1})
+    ]
+    lanes_of: dict[str, dict[str, Lane]] = {}
     for entry in pending:
-        lanes_of.setdefault(entry.path, []).append(entry.lane)
-    breaches = []
+        lanes_of.setdefault(entry.path, {})[entry.lane.name] = entry.lane
     for path, lanes in sorted(lanes_of.items()):
-        names = [lane.name for lane in lanes]
-        if len(set(names)) < len(names):
-            breaches.append(f"listed twice under one lane: {path}")
-        elif len(lanes) > 1 and not all(lane.enrolled for lane in lanes):
+        if len(lanes) > 1 and not all(lane.enrolled for lane in lanes.values()):
             breaches.append(
                 f"listed under several lanes, one of which no CI entry runs yet: "
-                f"{path} ({', '.join(names)})"
+                f"{path} ({', '.join(lanes)})"
             )
     return breaches
 
@@ -503,7 +500,8 @@ def listing_breaches(pending: Iterable[PendingTest]) -> list[str]:
 def imports_torch(test_file: Path) -> bool:
     """Whether a test module imports torch anywhere, a function body included:
     an ``import torch[.x]`` or ``from torch[.x] import`` statement, or a call of
-    ``importorskip`` or ``import_module`` with ``"torch"``."""
+    ``importorskip``, ``import_module`` or ``find_spec`` with ``"torch"`` (a
+    module that checks for torch, for a child process that imports it)."""
     tree = ast.parse(test_file.read_text(encoding="utf-8"))
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
@@ -516,7 +514,7 @@ def imports_torch(test_file: Path) -> bool:
             if isinstance(function, ast.Name):
                 name = function.id
             first = node.args[0] if node.args else None
-            if name not in ("importorskip", "import_module") or not (
+            if name not in ("importorskip", "import_module", "find_spec") or not (
                 isinstance(first, ast.Constant) and isinstance(first.value, str)
             ):
                 continue
@@ -587,6 +585,9 @@ def test_a_torch_import_is_found_wherever_the_module_makes_it(tmp_path):
         "test_import_module.py": (
             "import importlib\ntorch = importlib.import_module('torch')\n"
         ),
+        "test_find_spec.py": (
+            "import importlib.util\nHAS_TORCH = importlib.util.find_spec('torch')\n"
+        ),
     }
     for name, source in sources.items():
         (tmp_path / name).write_text(source)
@@ -632,6 +633,69 @@ def test_a_marker_expression_deselects_a_module_by_its_pytestmark(tmp_path):
     assert deselects_module("gpu", plain)
     assert not deselects_module("gpu", listed)
     assert not deselects_module(None, single)
+
+
+def test_a_lane_ci_lacks_explains_the_cases_whose_skip_reason_it_matches():
+    assert GFX950_RUNNER.explains("needs a gfx950 GPU, found gfx942")
+    assert not GFX950_RUNNER.explains("needs a gfx9500 GPU")
+    assert not GFX950_RUNNER.explains("could not import 'rocke_engine'")
+    assert not GFX950_RUNNER.explains(None)
+    assert BINDING_LANE.explains("could not import 'rocke_engine'")
+    # A lane no CI entry runs yet: every case of its files waits for it.
+    assert NIGHTLY_SOURCE.explains("any reason")
+    assert NIGHTLY_SOURCE.explains(None)
+
+
+def test_a_lane_takes_skip_reasons_only_when_ci_runs_its_files():
+    with pytest.raises(ValueError, match="expected none for a lane whose files"):
+        Lane("x", "a lane", enrolled=False, skip_reasons=("gfx950",))
+    with pytest.raises(ValueError, match="is not a regular expression"):
+        Lane("x", "a lane", enrolled=True, skip_reasons=("gfx(950",))
+
+
+def test_an_entry_for_one_test_covers_its_cases_whatever_their_reason():
+    def entry(lane, node=""):
+        return PendingTest("a/test_x.py", lane, "why", "owner", "2027-01-31", node)
+
+    with pytest.raises(ValueError, match="expected a lane CI lacks for one test"):
+        entry(NIGHTLY_SOURCE, "test_y")
+    with pytest.raises(ValueError, match="takes entries for single tests only"):
+        entry(COMPREHENSIVE_CASES)
+    test = entry(COMPREHENSIVE_CASES, "test_y")
+    assert test.covers("a/test_x.py", "test_y[case]", "deselected by -k 'not test_y'")
+    assert test.covers("a/test_x.py", "test_y", None)
+    assert not test.covers("a/test_x.py", "test_yz", "why")
+    assert not test.covers("a/test_z.py", "test_y", "why")
+    group = entry(COMPREHENSIVE_CASES, "TestGroup")
+    assert group.covers("a/test_x.py", "TestGroup::test_y[case]", "why")
+    assert not group.covers("a/test_x.py", "TestGroupTwo::test_y", "why")
+    whole_file = entry(GFX950_RUNNER)
+    assert whole_file.covers("a/test_x.py", "test_y", "needs a gfx950 GPU")
+    assert not whole_file.covers("a/test_x.py", "test_y", "needs torch")
+
+
+def test_the_registry_accounts_for_a_case_by_its_lane_quarantine_or_runner():
+    file_entry = next(
+        entry
+        for entry in PENDING
+        if entry.lane is GFX950_RUNNER
+        and not entry.node
+        and sum(other.path == entry.path for other in PENDING) == 1
+        and not any(q.path == entry.path for q in QUARANTINED)
+    )
+    path = file_entry.path
+    assert waiting_entry(path, "test_any", "needs a gfx950 GPU") is file_entry
+    assert waiting_entry(path, "test_any", "a reason no lane explains") is None
+    assert waiting_entry(path, "test_any", None) is None
+    everywhere = next(entry for entry in QUARANTINED if not entry.arches)
+    assert waiting_entry(everywhere.path, everywhere.node_name, "any") is everywhere
+    on_gfx950 = next(entry for entry in QUARANTINED if entry.arches)
+    reason = f"quarantined: {on_gfx950.issue} on gfx950"
+    assert waiting_entry(on_gfx950.path, on_gfx950.node_name, reason) is on_gfx950
+    assert waiting_entry(on_gfx950.path, on_gfx950.node_name, "why") is None
+    runner = next(entry for entry in QUARANTINED if entry.runs_files)
+    child = runner.runs_files[0]
+    assert waiting_entry(child, "TestAny::test_any", None) is runner
 
 
 def test_a_pending_test_needs_its_recorded_reason():
@@ -757,6 +821,12 @@ def test_every_pending_entry_is_current(request):
         {pending.path for pending in PENDING if not (ROCKE / pending.path).is_file()}
     )
     assert not missing, f"listed but gone: {missing}"
+    gone = sorted(
+        f"{pending.path}::{pending.node}"
+        for pending in PENDING
+        if pending.node and not _defines_test(ROCKE / pending.path, pending.node)
+    )
+    assert not gone, f"tests listed but gone: {gone}"
     today = _utc_today()
     _fail_or_report_expired(
         request,
@@ -930,12 +1000,13 @@ def test_a_quarantined_test_is_skipped_with_its_issue(tmp_path):
 
 
 def _defines_test(test_file: Path, node_name: str) -> bool:
-    """Whether ``test_file`` defines the test function ``node_name`` names."""
-    function = node_name.split("::")[-1].partition("[")[0]
+    """Whether ``test_file`` defines the test function, or the test class,
+    ``node_name`` names last."""
+    name = node_name.split("::")[-1].partition("[")[0]
     tree = ast.parse(test_file.read_text(encoding="utf-8"))
     return any(
-        isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-        and node.name == function
+        isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+        and node.name == name
         for node in ast.walk(tree)
     )
 
@@ -1012,6 +1083,7 @@ def test_every_quarantined_test_is_current():
         for entry in QUARANTINED
         if not (ROCKE / entry.path).is_file()
         or not _defines_test(ROCKE / entry.path, entry.node_name)
+        or not all((ROCKE / child).is_file() for child in entry.runs_files)
     ]
     assert not gone, f"quarantined but gone: {gone}"
 
@@ -1021,7 +1093,9 @@ def test_every_quarantined_test_is_current():
     reason="CMake and CTest required",
 )
 def test_every_test_file_runs_in_ci_or_has_a_recorded_reason(tmp_path):
-    in_limbo, stale = audit(tree_test_files(), ci_selected_files(tmp_path), PENDING)
+    in_limbo, stale = audit(
+        tree_test_files(ROCKE), ci_selected_files(tmp_path), PENDING
+    )
     assert not in_limbo, (
         f"{len(in_limbo)} test files run in no CI-run entry and are not in "
         f"rocke.tests.pending_lanes: {in_limbo}"

@@ -30,7 +30,12 @@ from pathlib import Path
 import pytest
 
 from .gpu import probe_device_arch
-from .pending_lanes import QUARANTINE_TREES, QUARANTINED, quarantined_test
+from .pending_lanes import (
+    QUARANTINE_SKIP_PREFIX,
+    QUARANTINE_TREES,
+    QUARANTINED,
+    quarantined_test,
+)
 
 __all__ = ["QUARANTINE_ENV", "skip_quarantined_items"]
 
@@ -76,7 +81,7 @@ def skip_quarantined_items(
         entry = quarantined_test(path, item.nodeid.partition("::")[2])
         if entry is None:
             continue
-        reason = f"quarantined: {entry.issue}"
+        reason = f"{QUARANTINE_SKIP_PREFIX}{entry.issue}"
         if entry.arches:
             arch = _device_arch()
             if not entry.holds_out_on(arch):

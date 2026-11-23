@@ -6,8 +6,8 @@ that wait for a CI lane, measured allowances that wait for a decision, and
 quarantined tests that are known to fail.
 
 A test is out of limbo only when a CI lane runs it, or when it has an explicit,
-recorded reason not to yet. This module is that record: one entry per test file
-whose lane does not run it in pull-request or push CI (the quick and standard
+recorded reason not to yet. This module is that record: one entry per test file,
+or test, whose lane does not run it in pull-request or push CI (the quick and standard
 tiers), with the lane it waits for, why, who owns it and when the entry must be
 re-decided. ``platform/tests/tools/test_pending_lanes.py`` holds the tree to it:
 every test file is selected by a CI-run CTest entry or listed here, and no entry
@@ -23,13 +23,16 @@ on every expired entry.
 
 There are two kinds of lane. A lane with ``enrolled=False`` does not exist yet
 (a scheduled run, a pull request that has not landed, a registration not yet
-applied): its files are in no CI-run entry. A lane with ``enrolled=True`` is
-something the CI-run entries lack (torch in the test environment, a gfx950 or
-gfx1250 runner): its files are selected by a CI-run entry, but their cases that
-need it skip there. A file whose cases lack several such things (a gfx950 case
-and a gfx1250 case) has one entry per lane; a file waiting for a lane that does
-not exist yet has exactly one entry. A file listed under a lane that waits for
-torch must import torch.
+applied): its files are in no CI-run entry, and every case of them waits for
+it. A lane with ``enrolled=True`` is something the CI-run entries lack (torch in
+the test environment, a gfx950 or gfx1250 runner): its files are selected by a
+CI-run entry, but their cases that need it skip there. Such a lane names the
+skip reasons of the cases that wait for it (``Lane.skip_reasons``), so an entry
+for a file covers those cases only, and a case that skips for another reason
+needs a record of its own. A file whose cases lack several such things (a
+gfx950 case and a gfx1250 case) has one entry per lane; a file waiting for a
+lane that does not exist yet has exactly one entry. A file listed under a lane
+that waits for torch must import torch.
 
     PendingTest(
         path="library/tests/test_example.py",  # relative to the rocke directory
@@ -38,6 +41,24 @@ torch must import torch.
         owner="rocKE library; issue: none filed yet",
         expires="2027-01-31",
     )
+
+An entry may name one test of its file instead (``node``, as a quarantine
+does), under a lane CI lacks: it covers that test's cases whatever their skip
+reason, for a test whose reason does not name what it waits for, or that its
+entry deselects:
+
+    PendingTest(
+        path="library/tests/test_example.py",
+        lane=COMPREHENSIVE_CASES,
+        reason="its sweep runs only in a comprehensive-tier entry",
+        owner="rocKE library; issue: none filed yet",
+        expires="2027-01-31",
+        node="test_sweep",
+    )
+
+The file-level check cannot see single cases. ``tools/limbo_audit.py`` checks
+them: from the run records (``rocke.tests.run_records``) of CI lanes, it fails
+on each case no lane ran that :func:`waiting_entry` finds no record for.
 
 A measured budget is the other kind of record: a test's resource check allows
 one kernel the bytes one compiler is measured to spill, while the kernel owners
@@ -73,6 +94,7 @@ most ``QUARANTINE_CAP`` tests may be quarantined at once.
         owner="rocKE platform",
         expires="2027-01-31",
         arches=("gfx950",),  # optional: the GPU arches it fails on
+        runs_files=(),  # optional: test files it runs in a child process
     )
 
 Paths, owners and issues are plain text: no links.
@@ -83,6 +105,7 @@ from __future__ import annotations
 import datetime
 import re
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from ..core.arch.target import known_arches
@@ -92,13 +115,17 @@ if TYPE_CHECKING:
 
 __all__ = [
     "BINDING_LANE",
+    "CI_TEST_TOOLS",
+    "COMPREHENSIVE_CASES",
     "ENROLMENT",
+    "EXHAUSTIVE_CASES",
     "GFX90A_RUNNER",
     "GFX950_RUNNER",
-    "GFX1151_GFX1201_RUNNER",
+    "GFX1151_GFX12_RUNNER",
     "GFX1250_RUNNER",
     "LANES",
     "MEASURED_BUDGETS",
+    "MULTI_GPU_RUNNER",
     "NIGHTLY_GPU",
     "NIGHTLY_SOURCE",
     "NO_ISSUE_FILED",
@@ -107,7 +134,11 @@ __all__ = [
     "PR_16482",
     "QUARANTINED",
     "QUARANTINE_CAP",
+    "QUARANTINE_SKIP_PREFIX",
     "QUARANTINE_TREES",
+    "SHARED_LIBRARY_LANE",
+    "SOURCE_TREE_CASES",
+    "TEST_FILE_ROOTS",
     "TORCH_IN_CI",
     "WEEKLY_EXHAUSTIVE",
     "Lane",
@@ -117,6 +148,8 @@ __all__ = [
     "measured_budget_kernels",
     "measured_scratch_allowance",
     "quarantined_test",
+    "tree_test_files",
+    "waiting_entry",
 ]
 
 
@@ -133,6 +166,40 @@ class Lane:
     # True when what the lane waits for is torch: each of its files imports
     # torch (``platform/tests/tools/test_pending_lanes.py`` checks it).
     waits_for_torch: bool = False
+    # For a lane CI lacks (enrolled): regular expressions, one of which a case
+    # waiting for it prints in its skip or deselection reason where CI runs
+    # its file, so an entry for the whole file covers those cases only. A lane
+    # CI lacks with none takes entries for single tests only. A lane that no
+    # CI entry runs yet has none: every case of its files waits for it.
+    skip_reasons: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if self.skip_reasons and not self.enrolled:
+            raise ValueError(
+                f"Lane failed - name={self.name!r}, skip_reasons="
+                f"{self.skip_reasons!r}, expected none for a lane whose files are "
+                "in no CI-run entry: every case of its files waits for it"
+            )
+        for pattern in self.skip_reasons:
+            try:
+                re.compile(pattern)
+            except re.error as error:
+                raise ValueError(
+                    f"Lane failed - name={self.name!r}, skip reason {pattern!r} is "
+                    f"not a regular expression: {error}"
+                ) from None
+
+    def explains(self, reason: str | None) -> bool:
+        """Whether a case of a file listed under this lane waits for it, given
+        why a CI lane did not run the case: its skip or deselection reason, or
+        None when no CI lane collected it. A lane that no CI entry runs yet
+        explains every case of its files; a lane CI lacks, the cases whose
+        reason one of its ``skip_reasons`` matches."""
+        if not self.enrolled:
+            return True
+        return reason is not None and any(
+            re.search(pattern, reason) for pattern in self.skip_reasons
+        )
 
 
 PR_16482 = Lane(
@@ -168,6 +235,7 @@ BINDING_LANE = Lane(
     "the C++ engine's Python modules in the CI test tree: the file is in a CI-run "
     "entry, but its cases skip where the build's Python had no pybind11",
     enrolled=True,
+    skip_reasons=(r"rocke_(library_)?engine", r"C\+\+ engine", r"rocke_ir_lower"),
 )
 OWNER_DECISION = Lane(
     "owner-decision",
@@ -180,18 +248,21 @@ TORCH_IN_CI = Lane(
     "torch-checked cases skip there",
     enrolled=True,
     waits_for_torch=True,
+    skip_reasons=(r"\btorch\b",),
 )
 GFX950_RUNNER = Lane(
     "gfx950-runner",
     "a CI GPU stage on gfx950: the file is in a CI-run entry, but its gfx950 cases "
     "skip on the gfx942 and gfx110X runners",
     enrolled=True,
+    skip_reasons=(r"\bgfx950\b",),
 )
 GFX90A_RUNNER = Lane(
     "gfx90a-runner",
     "a CI GPU stage on gfx90a: the file is in a CI-run entry, but its gfx90a cases "
     "skip on the gfx942 and gfx110X runners",
     enrolled=True,
+    skip_reasons=(r"\bgfx90a\b",),
 )
 GFX1250_RUNNER = Lane(
     "gfx1250-runner",
@@ -199,12 +270,74 @@ GFX1250_RUNNER = Lane(
     "cases skip on the gfx942 and gfx110X runners, and they have not run on "
     "gfx1250 hardware",
     enrolled=True,
+    skip_reasons=(r"\bgfx1250\b",),
 )
-GFX1151_GFX1201_RUNNER = Lane(
-    "gfx1151-gfx1201-runner",
-    "a CI GPU stage on gfx1151 or gfx1201: the file is in a CI-run entry, but its "
-    "cases for those arches skip on the gfx942 and gfx110X runners",
+GFX1151_GFX12_RUNNER = Lane(
+    "gfx1151-gfx12-runner",
+    "a CI GPU stage on gfx1151, gfx1200 or gfx1201: the file is in a CI-run entry, "
+    "but its cases for those arches skip on the gfx942 and gfx110X runners",
     enrolled=True,
+    skip_reasons=(r"\bgfx1151\b", r"\bgfx120[01]\b", r"\bgfx12\b", r"\bRDNA ?4\b"),
+)
+SOURCE_TREE_CASES = Lane(
+    "source-tree-cases",
+    "a scheduled source-tree run (run_all.py), which no job runs yet: the file is "
+    "in a CI-run entry of the installed test tree, but its cases that read the "
+    "source tree (platform tools, C++ sources, docs, git history) skip there, or "
+    "its integration-marked cases are deselected there",
+    enrolled=True,
+    skip_reasons=(
+        r"source[- ]tree",
+        r"source checkout",
+        r"installed (test )?(layout|tree|payload|artifact)",
+        r"\bomits\b",
+        r"platform tools not found",
+        r"platform-only tree",
+        r"absent (here|from this)",
+        r"deselected by -m '[^']*\bnot integration\b",
+    ),
+)
+EXHAUSTIVE_CASES = Lane(
+    "exhaustive-cases",
+    "a scheduled exhaustive run (run_all.py --exhaustive), which no job runs yet: "
+    "the file is in a CI-run entry, but its exhaustive cases are deselected there",
+    enrolled=True,
+    skip_reasons=(r"deselected by -m '[^']*\bnot exhaustive\b",),
+)
+COMPREHENSIVE_CASES = Lane(
+    "comprehensive-cases",
+    "a scheduled CI run of the comprehensive tier's installed entries, which no "
+    "job runs for rocKE (TheRock's nightly does not build it): the file is in a "
+    "CI-run entry, but the test runs only in a comprehensive-tier entry",
+    enrolled=True,
+)
+MULTI_GPU_RUNNER = Lane(
+    "multi-gpu-runner",
+    "a CI GPU stage with two GPUs: the file is in a CI-run entry, but its cases "
+    "that need two GPUs skip on the one-GPU runners",
+    enrolled=True,
+    skip_reasons=(r"\btwo (\w+ )?GPUs\b",),
+)
+SHARED_LIBRARY_LANE = Lane(
+    "shared-library-lane",
+    "the shared librocke C library in the CI test tree: the file is in a CI-run "
+    "entry, but its cases that load the library skip there, as the provider "
+    "build installs none and the lane does not build one on demand",
+    enrolled=True,
+    skip_reasons=(r"\bshared librocke\b",),
+)
+CI_TEST_TOOLS = Lane(
+    "ci-test-tools",
+    "the optional packages and LLVM tools these cases use, in the CI test "
+    "environment: the file is in a CI-run entry, but TheRock's test step installs "
+    "no jsonschema or matplotlib and puts no LLVM tools on PATH, so they skip",
+    enrolled=True,
+    skip_reasons=(
+        r"\bjsonschema\b",
+        r"\bmatplotlib\b",
+        r"\bllvm-objdump\b",
+        r"\bllc\b",
+    ),
 )
 
 LANES: tuple[Lane, ...] = (
@@ -219,7 +352,13 @@ LANES: tuple[Lane, ...] = (
     GFX950_RUNNER,
     GFX90A_RUNNER,
     GFX1250_RUNNER,
-    GFX1151_GFX1201_RUNNER,
+    GFX1151_GFX12_RUNNER,
+    SOURCE_TREE_CASES,
+    EXHAUSTIVE_CASES,
+    COMPREHENSIVE_CASES,
+    MULTI_GPU_RUNNER,
+    SHARED_LIBRARY_LANE,
+    CI_TEST_TOOLS,
 )
 
 
@@ -257,13 +396,23 @@ def _require_recorded(
 
 @dataclass(frozen=True)
 class PendingTest:
-    """One test file waiting for a lane, with its recorded reason."""
+    """One test file, or one test of it, waiting for a lane, with its recorded
+    reason.
+
+    ``node`` names tests below the file (one case ``test_x[case]``, each case
+    of ``test_x``, each test of a class ``TestX``; any of them below a class),
+    as a quarantine does: the entry covers those cases, whatever their skip
+    reason, under a lane CI lacks. Empty (the
+    default), the entry covers the file, as its lane's kind says
+    (:meth:`Lane.explains`).
+    """
 
     path: str
     lane: Lane
     reason: str
     owner: str
     expires: str
+    node: str = ""
 
     def __post_init__(self) -> None:
         _require_test_path("PendingTest", self.path)
@@ -272,9 +421,30 @@ class PendingTest:
                 f"PendingTest failed - path={self.path!r}, lane={self.lane.name!r}, "
                 "expected one of pending_lanes.LANES"
             )
+        if self.node and not self.lane.enrolled:
+            raise ValueError(
+                f"PendingTest failed - path={self.path!r}, node={self.node!r}, "
+                f"lane={self.lane.name!r}, expected a lane CI lacks for one test: "
+                "a lane no CI entry runs yet takes whole files"
+            )
+        if not self.node and self.lane.enrolled and not self.lane.skip_reasons:
+            raise ValueError(
+                f"PendingTest failed - path={self.path!r}, lane={self.lane.name!r}, "
+                "expected a node: the lane has no skip reasons, so it takes "
+                "entries for single tests only"
+            )
         _require_recorded(
             "PendingTest", self.path, self.reason, self.owner, self.expires
         )
+
+    def covers(self, path: str, node_name: str, reason: str | None) -> bool:
+        """Whether this entry records why no CI lane ran the case ``node_name``
+        of ``path``, given ``reason`` (see :func:`waiting_entry`)."""
+        if path != self.path:
+            return False
+        if self.node:
+            return _names_case(self.node, node_name)
+        return self.lane.explains(reason)
 
     @property
     def expiry_date(self) -> datetime.date:
@@ -327,6 +497,10 @@ QUARANTINE_TREES: tuple[str, ...] = ("platform/tests", "library/tests")
 QUARANTINE_CAP = 10
 # The issue of a quarantine whose tracking issue is not filed yet.
 NO_ISSUE_FILED = "none filed yet"
+# A quarantined test's skip reason: this, then its issue.
+QUARANTINE_SKIP_PREFIX = "quarantined: "
+# Where test files live, relative to the rocke directory.
+TEST_FILE_ROOTS: tuple[str, ...] = ("platform", "library")
 # A Jira id (AICK-1234), a GitHub issue (ROCm/rocm-libraries#123) or
 # NO_ISSUE_FILED.
 _ISSUE = re.compile(
@@ -340,9 +514,11 @@ class QuarantinedTest:
 
     ``test_id`` is the test file relative to the rocke directory, ``::`` and the
     pytest node name: ``...::test_x[gfx942]`` names one parameter of
-    ``test_x``, ``...::test_x`` all of them. ``arches`` names the GPU arches it
-    fails on, where it is held out; empty (the default) holds it out
-    everywhere.
+    ``test_x``, ``...::test_x`` all of them, ``...::TestX`` each test of a
+    class. ``arches`` names the GPU arches it fails on, where it is held out;
+    empty (the default) holds it out everywhere. ``runs_files`` names the test
+    files the quarantined test runs in a child process, which it holds out
+    with it.
     """
 
     test_id: str
@@ -351,6 +527,7 @@ class QuarantinedTest:
     owner: str
     expires: str
     arches: tuple[str, ...] = ()
+    runs_files: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         path, separator, node_name = self.test_id.partition("::")
@@ -382,6 +559,13 @@ class QuarantinedTest:
                 f"QuarantinedTest failed - test_id={self.test_id!r}, "
                 f"arches={self.arches!r}, expected a tuple of known gfx arches"
             )
+        if not isinstance(self.runs_files, tuple):
+            raise TypeError(
+                f"QuarantinedTest failed - test_id={self.test_id!r}, runs_files="
+                f"{self.runs_files!r}, expected a tuple of test file paths"
+            )
+        for child in self.runs_files:
+            _require_test_path("QuarantinedTest", child)
 
     @property
     def path(self) -> str:
@@ -404,11 +588,18 @@ class QuarantinedTest:
 
     def covers(self, path: str, node_name: str) -> bool:
         """Whether this entry quarantines the item ``node_name`` of ``path``."""
-        if path != self.path:
-            return False
-        return node_name == self.node_name or (
-            "[" not in self.node_name and node_name.startswith(f"{self.node_name}[")
-        )
+        return path == self.path and _names_case(self.node_name, node_name)
+
+
+def _names_case(test: str, node_name: str) -> bool:
+    """Whether the test node name ``test`` names the pytest item ``node_name``:
+    ``test_x[case]`` that case, ``test_x`` each of its cases, a class each test
+    below it (any of them below a class)."""
+    return (
+        node_name == test
+        or node_name.startswith(f"{test}::")
+        or ("[" not in test and node_name.startswith(f"{test}["))
+    )
 
 
 def quarantined_test(path: str, node_name: str) -> QuarantinedTest | None:
@@ -727,7 +918,7 @@ PENDING: tuple[PendingTest, ...] = (
         "platform/tests/instances/test_gfx1250_scale_formats_numeric.py",
     ),
     *_waiting(
-        GFX1151_GFX1201_RUNNER,
+        GFX1151_GFX12_RUNNER,
         "its device case runs on gfx1151 or gfx1201 only, which no CI GPU stage has",
         "rocKE platform; issue: none filed yet",
         "2027-01-31",
@@ -913,15 +1104,28 @@ def _quarantined(
     )
 
 
+_RECORDER_REFUSES_IF_ELSE = (
+    "the portable-IR recorder refuses scf.if_else with results, which the "
+    "three conv_direct_*_mfma kernels use, so recording and replaying every "
+    "production kernel fails"
+)
+
 QUARANTINED: tuple[QuarantinedTest, ...] = (
-    *_quarantined(
+    QuarantinedTest(
+        "platform/tests/portable_ir/test_portable_ir.py::test_unit[test_recording_builder]",
         "AICK-2863",
-        "the portable-IR recorder refuses scf.if_else with results, which the "
-        "three conv_direct_*_mfma kernels use, so recording and replaying every "
-        "production kernel fails",
+        _RECORDER_REFUSES_IF_ELSE,
         "rocKE platform portable IR",
         "2027-01-31",
-        "platform/tests/portable_ir/test_portable_ir.py::test_unit[test_recording_builder]",
+        runs_files=(
+            "platform/python/rocke/portable_ir/tests/test_recording_builder.py",
+        ),
+    ),
+    *_quarantined(
+        "AICK-2863",
+        _RECORDER_REFUSES_IF_ELSE,
+        "rocKE platform portable IR",
+        "2027-01-31",
         "platform/tests/portable_ir/test_portable_ir.py::test_record_coverage",
         "platform/tests/portable_ir/test_portable_ir.py::test_parity_matrix",
     ),
@@ -941,3 +1145,40 @@ QUARANTINED: tuple[QuarantinedTest, ...] = (
         arches=("gfx950",),
     ),
 )
+
+
+def waiting_entry(
+    path: str, node_name: str, reason: str | None
+) -> PendingTest | QuarantinedTest | None:
+    """The record of why no CI lane ran the case ``node_name`` of the test file
+    ``path`` (relative to the rocke directory), or None when nothing records it.
+
+    ``reason`` is why a CI lane that collected the case did not run it: its
+    skip or deselection reason, or None when no CI lane collected it. The case
+    is recorded by its quarantine, or that of the test that runs its file
+    (one that names arches, only where it was skipped as quarantined), or by
+    an entry that covers it
+    (:meth:`PendingTest.covers`): one for the test, or one for its file whose
+    lane explains ``reason``.
+    """
+    quarantine = quarantined_test(path, node_name) or next(
+        (entry for entry in QUARANTINED if path in entry.runs_files), None
+    )
+    if quarantine is not None and (
+        not quarantine.arches
+        or (reason is not None and reason.startswith(QUARANTINE_SKIP_PREFIX))
+    ):
+        return quarantine
+    return next(
+        (entry for entry in PENDING if entry.covers(path, node_name, reason)), None
+    )
+
+
+def tree_test_files(rocke_dir: Path) -> set[str]:
+    """Every test file of the source tree at ``rocke_dir``, relative to it."""
+    return {
+        file.relative_to(rocke_dir).as_posix()
+        for root in TEST_FILE_ROOTS
+        for file in (rocke_dir / root).rglob("test_*.py")
+        if "__pycache__" not in file.parts
+    }
