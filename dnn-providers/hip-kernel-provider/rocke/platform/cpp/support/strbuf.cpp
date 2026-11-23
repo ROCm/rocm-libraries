@@ -201,4 +201,9 @@ void rocke_strbuf_free(rocke_strbuf_t* sb)
     sb->free_buffer();
 }
 
+void rocke_text_free(char* text)
+{
+    free(text);
+}
+
 } /* extern "C" */

@@ -13,7 +13,8 @@
  * This is the HIP-source mirror of the LLVM-IR path: the same IR in, a
  * human-readable HIP TU out, byte-identical to the Python lowerer's output for
  * the default gfx950 arch. The entry points are rocke_lower_kernel_to_hip() and,
- * for a kernel held as serialized IR text, rocke_lower_serialized_ir_to_hip();
+ * for a kernel held as serialized IR text, rocke_lower_serialized_ir_to_hip()
+ * and its char* twin rocke_lower_serialized_ir_to_hip_text();
  * the lowerer's shared internal plumbing is in lower_hip_internal.h.
  *
  * Binds strictly to the FROZEN IR contract in rocke/ir.h. No new IR types are
@@ -115,6 +116,20 @@ rocke_status_t rocke_lower_serialized_ir_to_hip(const char* ir_text,
                                                 const char* arch,
                                                 rocke_strbuf_t* out,
                                                 rocke_strbuf_t* message);
+
+/* rocke_lower_serialized_ir_to_hip with C strings instead of caller-owned
+ * buffers, for an FFI caller that mirrors no engine struct; the HIP twin of
+ * rocke_lower_serialized_ir_to_llvm (rocke/lower_llvm.h). Same lowering, same
+ * statuses and the same reasons. On ROCKE_OK, *out_text receives the source and
+ * *out_message (when out_message is non-NULL) is NULL. On any other status,
+ * *out_text is NULL and *out_message receives the reason, never empty, or NULL
+ * if allocating it failed. Both strings are malloc'd; free them with
+ * rocke_text_free (rocke/strbuf.h) or free(). A NULL `out_text` is
+ * ROCKE_ERR_VALUE ("no output buffer"). */
+rocke_status_t rocke_lower_serialized_ir_to_hip_text(const char* ir_text,
+                                                     const char* arch,
+                                                     char** out_text,
+                                                     char** out_message);
 
 #ifdef __cplusplus
 } /* extern "C" */

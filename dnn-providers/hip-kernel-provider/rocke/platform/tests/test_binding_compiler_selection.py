@@ -213,12 +213,14 @@ except ComgrError as exc:
 else:
     raise AssertionError("MFMA compiler failure did not precede native build")
 
-# Serialized input validation must not depend on compiler availability.
-for text, message in (("", "empty IR input"), ("not serialized IR", "parse failed")):
+# With an explicit flavor, serialized input is validated without a compiler;
+# with none, the flavor is resolved first (the next blocks) and its failure is
+# what propagates.
+for text, message in (("", "empty IR input"), ("not serialized IR", "bad header")):
     try:
-        rocke_engine.lower_serialized_ir(text, arch="gfx950")
+        rocke_engine.lower_serialized_ir(text, arch="gfx950", flavor="llvm20")
     except ComgrError:
-        raise AssertionError("compiler lookup preceded serialized-input rejection")
+        raise AssertionError("an explicit flavor queried the compiler")
     except RuntimeError as exc:
         assert message in str(exc)
     else:

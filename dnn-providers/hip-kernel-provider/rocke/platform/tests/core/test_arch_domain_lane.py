@@ -696,7 +696,8 @@ def test_no_binding_lowers_without_a_diagnostic_buffer() -> None:
 def test_every_binding_lowering_converts_a_refusal() -> None:
     """A refusal reaches Python as ``ArchDomainError`` only if the binding that
     lowered the kernel hands its status and message to ``throw_if_arch_domain``,
-    directly or through ``take_lowered`` / ``take_ll``. A binding that formats
+    directly or through ``take_lowered`` / ``take_ll`` (or, for the
+    serialized-IR bindings, ``take_serialized_ir_result``). A binding that formats
     its own failure raises a plain ``RuntimeError`` instead, and the two engines
     then disagree about what a refusal is.
 
@@ -707,7 +708,9 @@ def test_every_binding_lowering_converts_a_refusal() -> None:
     scanned too: the Winograd bindings lower in ``winograd_glue.hpp``.
     """
     call = re.compile(r"rocke_\w*to_llvm\w*\(")
-    handled = re.compile(r"take_lowered\(|take_ll\(|throw_if_arch_domain\(")
+    handled = re.compile(
+        r"take_lowered\(|take_ll\(|take_serialized_ir_result\(|throw_if_arch_domain\("
+    )
     offenders = []
     for path in sorted(p for d in BINDING_SOURCES for p in d.glob("*.[ch]pp")):
         text = path.read_text()
@@ -723,14 +726,17 @@ def test_every_binding_lowering_converts_a_refusal() -> None:
 @_needs_sources
 @pytest.mark.skipif(not BINDINGS.is_dir(), reason=_OMITS_CPP)
 def test_every_lowering_helper_converts_a_refusal() -> None:
-    """The scan above trusts ``take_lowered`` / ``take_ll`` by name, so every
-    definition of one must itself hand the status to ``throw_if_arch_domain``.
+    """The scan above trusts ``take_lowered`` / ``take_ll`` /
+    ``take_serialized_ir_result`` by name, so every definition of one must
+    itself hand the status to ``throw_if_arch_domain``.
 
     ``winograd_glue.hpp`` kept a private ``take_lowered`` that formatted every
     failure as a ``RuntimeError``, so a Winograd refusal never reached Python as
     ``ArchDomainError`` while the scan above counted it as converted.
     """
-    definition = re.compile(r"std::string\s+(take_lowered|take_ll)\s*\(")
+    definition = re.compile(
+        r"std::string\s+(take_lowered|take_ll|take_serialized_ir_result)\s*\("
+    )
     found = []
     offenders = []
     for path in sorted(p for d in BINDING_SOURCES for p in d.glob("*.[ch]pp")):
