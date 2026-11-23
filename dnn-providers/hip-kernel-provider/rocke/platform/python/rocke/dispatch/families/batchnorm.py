@@ -56,11 +56,12 @@ _CHANNELS_PER_BLOCK = (1, 2, 4, 8)
 # ``n_groups`` candidate axis: 1 (default, byte-identical to the original
 # per-sample N-loop emission) plus a few power-of-two splits. ``1`` is always
 # the highest-priority value (see ``_build_registry``) -- this is a
-# default-OFF, inference-only lever (``is_valid_spec`` rejects ``n_groups>1``
-# combined with ``training=True``), exposed the same way as
-# ``_CHANNELS_PER_BLOCK`` for measurement, never auto-selected in production
-# unless a caller pins its ``spec_id`` explicitly. See
-# ``instances/common/batchnorm2d.py``'s module docstring for the shapes it
+# default-OFF lever (valid for both ``training=True`` and ``training=False``
+# requests -- see ``instances/common/batchnorm2d.py``'s
+# ``build_batchnorm2d``/``is_valid_spec`` for the training-mode Welford merge),
+# exposed the same way as ``_CHANNELS_PER_BLOCK`` for measurement, never
+# auto-selected in production unless a caller pins its ``spec_id`` explicitly.
+# See ``instances/common/batchnorm2d.py``'s module docstring for the shapes it
 # targets (``H*W`` small enough to structurally cap ``block_size``).
 _N_GROUPS = (1, 2, 4, 8)
 
@@ -258,9 +259,11 @@ def _build_registry() -> CandidateRegistry:
     # _N_GROUPS's docstrings), then largest block_size, then widest vec
     # within a block_size tier, so the highest-throughput cpb=1/ng=1
     # candidate that the arch accepts still wins under ``auto`` exactly as
-    # before either lever was added. ``n_groups>1`` candidates that pair
-    # with ``training=True`` requests are simply rejected by
-    # ``is_valid_spec`` at dispatch time (no explicit skip needed here).
+    # before either lever was added. ``n_groups>1`` candidates that don't fit
+    # a request (e.g. non-divisible H*W, see is_valid_spec) are simply
+    # rejected by ``is_valid_spec`` at dispatch time (no explicit skip needed
+    # here); this applies the same way to both ``training=True`` and
+    # ``training=False`` requests.
     cands = []
     for cpb_rank, cpb in enumerate(_CHANNELS_PER_BLOCK):
         for ng_rank, ng in enumerate(_N_GROUPS):
@@ -332,11 +335,47 @@ def dispatch_batchnorm_all(req: BatchNormRequest) -> Tuple[DispatchResult, ...]:
     return BATCHNORM_REGISTRY.dispatch_all(req, kernel_id=_kernel_id)
 
 
+def _spec_has_tail(req: BatchNormRequest, spec: _bn.BatchNorm2DSpec) -> bool:
+    """Would this (block_size, vec[, n_groups]) need batchnorm2d's HW
+    scalar tail?
+
+    Both ``n_groups == 1`` (scoped to ``block_size``) and ``n_groups > 1``
+    (scoped to ``hw_threads = block_size // n_groups``) now accept a
+    non-exactly-dividing HW via an in-kernel masked tail (see
+    ``is_valid_spec``'s relaxation for both cases) -- this is the
+    per-request signal :func:`_default_ranker` uses to keep picking an
+    exact-fit candidate whenever one exists, falling back to a
+    tail-needing one only when every same-tier candidate needs one.
+    """
+    hw = int(req.h) * int(req.w)
+    hw_threads = spec.block_size // spec.n_groups
+    chunk = hw_threads * spec.vec
+    return hw % chunk != 0
+
+
+def _default_ranker(
+    req: OperatorRequest, candidates: Sequence[KernelCandidate]
+) -> Sequence[KernelCandidate]:
+    assert isinstance(req, BatchNormRequest)
+
+    def key(c: KernelCandidate) -> Tuple[int, bool, int]:
+        spec = c.select_spec(req)
+        # The (cpb, ng, fr) tier is encoded in the hundreds+ digits of
+        # ``priority`` (see ``_build_registry``); flooring to the nearest
+        # 100 isolates that tier from the +0..14 (block_size, vec) offset
+        # within it, so tail-free-vs-tail only reorders candidates inside
+        # one tier, never promotes a worse tier ahead of a better one.
+        tier = (c.priority // 100) * 100
+        return (tier, _spec_has_tail(req, spec), c.priority)
+
+    return sorted(candidates, key=key)
+
+
 def dispatch_batchnorm(
     req: BatchNormRequest, *, ranker: Ranker | None = None
 ) -> DispatchResult:
     """Select a registered batchnorm2d candidate for ``req``."""
-    candidate = BATCHNORM_REGISTRY.select(req, ranker=ranker)
+    candidate = BATCHNORM_REGISTRY.select(req, ranker=ranker or _default_ranker)
     spec = candidate.select_spec(req)
     kid = _kernel_id(req, candidate, spec)
     return DispatchResult(

@@ -6,10 +6,10 @@
 
 Sibling of ``benchmark_batchnorm2d_aot.py``; see that script's and
 :mod:`benchmarks.common.norm_bench_common`'s module docstrings for why this is
-a scaled-down AOT mode (no persistent HSACO cache-dir, no ``batched_timing``
-chunked ranking, a local JSON-Lines writer and case key instead of conv's
-``case_results``/``early_stop``) relative to
-``benchmark_implicit_gemm_conv.py``.
+a scaled-down AOT mode (no persistent HSACO cache-dir, a local JSON-Lines
+writer and case key instead of conv's ``case_results``/``early_stop``)
+relative to ``benchmark_implicit_gemm_conv.py``, and for ``--fast-rank``, the
+same chunked-ranking escape hatch conv's sweeps use for a large candidate grid.
 
 ``--kind`` selects which of the two instances backing the norm2d family
 (``layernorm`` or ``rmsnorm``) is swept; both share the same request shape
@@ -33,8 +33,10 @@ except ImportError:
 
 from benchmarks.common.norm_bench_common import (
     JsonlResultsWriter,
+    add_fast_rank_args,
     case_key,
     compile_candidate,
+    rank_candidates,
     time_candidate,
 )
 from benchmarks.common.norm_sweep_space import norm_combos
@@ -61,6 +63,7 @@ def _parse_args(argv):
         help="'staged' (default) is the protocol comparable to MIOpen/hipDNN; "
         "'block' amortises per-call event overhead across a launch loop",
     )
+    add_fast_rank_args(p)
     return p.parse_args(argv)
 
 
@@ -80,20 +83,21 @@ def main(argv=None) -> int:
     writer = JsonlResultsWriter(args.results)
 
     print(f"norm2d sweep: {key}, {len(combos)} candidate(s)")
-    best = None
-    for candidate, spec in combos:
-        label = candidate.name
-        artifact = compile_candidate(spec, candidate, arch=args.arch)
-        if args.compile_only:
-            print(f"  compiled: {label}")
-            continue
 
+    if args.compile_only:
+        for candidate, spec in combos:
+            compile_candidate(spec, candidate, arch=args.arch)
+            print(f"  compiled: {candidate.name}")
+        writer.close()
+        return 0
+
+    best = None
+    if args.fast_rank:
         torch_dtype = torch.float16 if args.dtype == "fp16" else torch.bfloat16
         x = torch.empty(args.rows, args.cols, dtype=torch_dtype, device="cuda").uniform_(-1.0, 1.0)
         y = torch.empty_like(x)
         gamma = torch.empty(args.cols, dtype=torch_dtype, device="cuda").uniform_(0.5, 1.5)
         beta = torch.empty(args.cols, dtype=torch_dtype, device="cuda").uniform_(-0.5, 0.5)
-
         values = {
             "X": x.data_ptr(),
             "Gamma": gamma.data_ptr(),
@@ -104,16 +108,55 @@ def main(argv=None) -> int:
             "eps": 1e-5,
         }
         grid = (args.rows, 1, 1)  # one CTA per row
-        block = (spec.block_size, 1, 1)
-        ms = time_candidate(
-            artifact, grid=grid, block=block, args=values,
-            warmup=args.warmup, iters=args.iters, timing=args.timing,
-        )
-        print(f"  {label}: {ms:.4f} ms")
-        writer.row(key=key, candidate=label, block_size=spec.block_size,
-                   vec=spec.vec, kind=args.kind, dtype=args.dtype, ms=ms, **dims)
-        if best is None or ms < best[1]:
-            best = (label, ms)
+
+        plans = []
+        for candidate, spec in combos:
+            artifact = compile_candidate(spec, candidate, arch=args.arch)
+            block = (spec.block_size, 1, 1)
+            plans.append((candidate.name, artifact, grid, block, values))
+
+        ranked = rank_candidates(plans, args=args, timing=args.timing)
+        for r in ranked:
+            if r.ms is None:
+                continue
+            label = plans[r.index][0]
+            spec = combos[r.index][1]
+            print(f"  {label}: {r.ms:.4f} ms")
+            writer.row(key=key, candidate=label, block_size=spec.block_size,
+                       vec=spec.vec, kind=args.kind, dtype=args.dtype, ms=r.ms, **dims)
+            if best is None or r.ms < best[1]:
+                best = (label, r.ms)
+    else:
+        for candidate, spec in combos:
+            label = candidate.name
+            artifact = compile_candidate(spec, candidate, arch=args.arch)
+
+            torch_dtype = torch.float16 if args.dtype == "fp16" else torch.bfloat16
+            x = torch.empty(args.rows, args.cols, dtype=torch_dtype, device="cuda").uniform_(-1.0, 1.0)
+            y = torch.empty_like(x)
+            gamma = torch.empty(args.cols, dtype=torch_dtype, device="cuda").uniform_(0.5, 1.5)
+            beta = torch.empty(args.cols, dtype=torch_dtype, device="cuda").uniform_(-0.5, 0.5)
+
+            values = {
+                "X": x.data_ptr(),
+                "Gamma": gamma.data_ptr(),
+                "Beta": beta.data_ptr(),
+                "Y": y.data_ptr(),
+                "M": args.rows,
+                "N": args.cols,
+                "eps": 1e-5,
+            }
+            grid = (args.rows, 1, 1)  # one CTA per row
+            block = (spec.block_size, 1, 1)
+            ms = time_candidate(
+                artifact, grid=grid, block=block, args=values,
+                warmup=args.warmup, iters=args.iters, timing=args.timing,
+            )
+            print(f"  {label}: {ms:.4f} ms")
+            writer.row(key=key, candidate=label, block_size=spec.block_size,
+                       vec=spec.vec, kind=args.kind, dtype=args.dtype, ms=ms, **dims)
+            if best is None or ms < best[1]:
+                best = (label, ms)
 
     writer.close()
     if best is not None:

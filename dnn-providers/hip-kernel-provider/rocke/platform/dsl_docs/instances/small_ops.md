@@ -481,7 +481,8 @@ picks it (lowest priority of the axis; reachable by pinning `spec_id`, e.g.
 that did not pan out for its target shapes — left registered as a lever in
 case a different shape regime benefits.
 
-**`n_groups` (default-off, inference-only thread-decomposition lever).**
+**`n_groups` (default-off thread-decomposition lever, training and
+inference).**
 `BatchNorm2DSpec.n_groups` (default `1`, byte-identical emission when `1`)
 splits one CTA's `block_size` threads into `n_groups` sub-groups of
 `block_size // n_groups` threads each, where each sub-group sweeps a
@@ -507,12 +508,21 @@ against one row at a time — the fix for shapes whose `H*W` is small enough
 that it structurally caps `block_size` well below what the hardware can
 usefully run.
 
-Rejected for `training=True` by `is_valid_spec`: threading cached Welford
-partials across the sub-group boundary needs a different, not-yet-built
-reduction strategy, so this lever only reaches the elementwise inference
-path (same no-LDS, no-sync pass-2-only code shape as `training=False` with
-`n_groups=1`, just a different thread decomposition). Composes with
-`channels_per_block`: each of the CPB channels a CTA owns runs the full
+Supports both `training=False` (same no-LDS, no-sync pass-2-only code shape
+as `training=False` with `n_groups=1`, just a different thread
+decomposition) and `training=True`: each thread accumulates its own Welford
+partial over its assigned `(og, tid_within_row)` slice, then merges via the
+same `welford_block_reduce_stable`/`_wave_prologue` call the `n_groups=1`
+path uses over the full `block_size` -- that merge only needs each thread to
+hand in a partial, not how it was computed. The `training=True` path never
+register-caches `X` across its two passes (always reloads from HBM), unlike
+`n_groups=1`'s cached fast path -- a deliberate scope cut since the shapes
+this lever targets have little enough data that a second HBM pass is cheap.
+A masked scalar tail (the same idiom as the `n_groups=1` HW tail below,
+scoped to `hw_threads = block_size // n_groups` instead of `block_size`)
+means `H*W` no longer needs to divide `hw_threads * vec` exactly, reaching
+shapes (e.g. `7x7=49`) no power-of-two `hw_threads` can tile exactly.
+Composes with `channels_per_block`: each of the CPB channels a CTA owns runs the full
 `n_groups` decomposition in turn. Dispatch-wired the same way as
 `channels_per_block` (new candidate axis, `n_groups=1` kept as the
 default/auto-selected priority, `>1` reachable by pinning `spec_id`, e.g.
@@ -556,6 +566,63 @@ measurement on gfx950 found a reproducible win on every training shape
 tested -- unlike `channels_per_block`/`n_groups`, this is not a
 shape-specific lever: it never regressed on any shape tried. See
 `platform/python/rocke/instances/SUPPORT_MATRIX.md` for the full table.
+
+**HW scalar tail (`n_groups=1` row sweep, always on -- not a spec flag).**
+Every registered candidate used to require `H*W % (block_size * vec) == 0`,
+with `block_size * vec` always a power of two (minimum 128) -- real conv
+feature maps (`56x56`, `24x24`, `14x14`, ...) have no such divisor, so
+`is_valid_spec` rejected every candidate for them and the op was unusable on
+these common shapes. The row sweep now splits each thread's per-row work
+into the existing vectorized main loop (`chunks_main = H*W // (block_size *
+vec)`, unchanged otherwise) plus a scalar tail over the remaining `< block_size
+* vec` elements:
+
+```text
+tail_per_row = H*W - chunks_main * block_size * vec   # 0 <= tail_per_row < block_size * vec
+tail_chunks  = ceil(tail_per_row / block_size)         # scalar (vec=1) passes
+
+# pass 1 (reduction): branch-free, masked via select -- an out-of-range
+# lane's zeroed contribution is harmless to a sum/sumsq/count accumulator
+for tc in range(tail_chunks):
+    idx    = main_elems_per_row + tc * block_size + tid
+    valid  = idx < H*W
+    x      = load(clamp(idx, H*W - 1))    # clamped so the load always stays in-row
+    sum   += select(valid, x, 0)
+    sumsq += select(valid, x*x, 0)
+    count += select(valid, 1, 0)          # runtime per-thread count
+
+# pass 2 (write-back): a real scf_if guard, not a clamp+mask -- clamping
+# would let every out-of-range lane in a tail chunk race to store into the
+# SAME clamped element
+for tc in range(tail_chunks):
+    idx = main_elems_per_row + tc * block_size + tid
+    if idx < H*W:
+        y[idx] = (x[idx] - mean) * inv_std * gamma + beta
+```
+
+The count fed into `welford_block_reduce_stable` / `_wave_prologue` becomes a
+runtime value (`chunks_main*vec*N + tail count`) instead of a compile-time
+constant whenever a tail exists -- those helpers already accept a per-thread
+`count` operand (see `helpers/reduction.py`), so no reduction-helper change
+was needed. When `H*W % (block_size * vec) == 0`, `tail_chunks == 0` and
+every code path collapses back to the original byte-identical emission
+(verified: the pre-existing 22 parity configs, none of which have a tail,
+stayed byte-identical in both engines after this change). `n_groups > 1`
+(the lever above) now shares this same masked-tail support, scoped to
+`hw_threads = block_size // n_groups` instead of `block_size`.
+
+Dispatch impact: relaxing `is_valid_spec`'s divisibility check means every
+`vec` in the candidate axis is now "valid" for any `H*W` (via the tail, if
+nothing else), which would otherwise let a wider but tail-heavy `vec` outrank
+a narrower exact-fit one just because both are "valid" -- the auto dispatcher
+now also ranks by whether a `(block_size, vec)` needs a tail for the
+request's actual `H*W`, inside the same `(channels_per_block, n_groups,
+fast_reduce)` priority tier, so an exact-fit candidate still wins when one
+exists. Byte-identity-verified in both engines (7 new parity configs
+spanning training/inference, `N>1`, `channels_per_block>1`, and
+`fast_reduce`, all 4 LLVM flavors, see `batchnorm2d_emit.py`/`.c` configs
+22-28) and dispatch-tested (`combos()`/`batchnorm_sweep_space` non-empty for
+`14x14`/`24x24`/`56x56`).
 
 ## Transpose2D
 

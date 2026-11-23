@@ -65,7 +65,7 @@ static const bn_cfg_t CONFIGS[] = {
     {2, 8, 16, 16, 64, 2, "bf16", false, false, 4, 1, false},
     {4, 4, 16, 16, 64, 4, "bf16", true, true, 2, 1, false},
     {8, 4, 32, 32, 64, 2, "f16", true, false, 4, 1, false},
-    /* 16..18 n_groups > 1 lever (inference-only) */
+    /* 16..18 n_groups > 1 lever (inference) */
     {4, 4, 16, 16, 256, 2, "f16", false, false, 1, 2, false},
     {4, 4, 16, 16, 256, 2, "bf16", false, false, 1, 4, false},
     {4, 8, 16, 16, 256, 2, "f16", false, false, 2, 2, false},
@@ -73,6 +73,29 @@ static const bn_cfg_t CONFIGS[] = {
     {2, 8, 16, 16, 64, 2, "f16", true, false, 1, 1, true},
     {4, 4, 16, 16, 128, 2, "bf16", true, true, 1, 1, true},
     {2, 8, 16, 16, 64, 2, "f16", true, false, 2, 1, true},
+    /* 22..28 HW tail (not divisible by block_size*vec): real CNN shapes */
+    {1, 16, 14, 14, 64, 2, "f16", true, false, 1, 1, false},
+    {1, 16, 14, 14, 64, 2, "f16", false, false, 1, 1, false},
+    {1, 144, 56, 56, 256, 4, "f16", true, false, 1, 1, false},
+    {1, 480, 24, 24, 128, 4, "bf16", true, true, 1, 1, false},
+    {1, 16, 14, 14, 64, 2, "f16", true, false, 1, 1, true},
+    {1, 16, 14, 14, 64, 2, "f16", true, false, 2, 1, false},
+    {2, 16, 14, 14, 64, 2, "f16", true, false, 1, 1, false},
+    /* 29..33 n_groups > 1 lever (training) */
+    {4, 4, 16, 16, 256, 2, "f16", true, false, 1, 2, false},
+    {4, 4, 16, 16, 256, 2, "bf16", true, false, 1, 4, false},
+    {4, 8, 16, 16, 256, 2, "f16", true, false, 2, 2, false},
+    {4, 4, 16, 16, 256, 2, "f16", true, true, 1, 2, false},
+    {4, 4, 16, 16, 128, 2, "f16", true, false, 1, 2, true},
+    /* 34..39 n_groups > 1, masked tail: HW does not divide
+     * hw_threads*vec exactly (7x7=49, 14x14=196), exercising the new
+     * tail_chunks_ng path */
+    {4, 4, 7, 7, 256, 2, "f16", true, false, 1, 4, false},
+    {4, 4, 14, 14, 256, 2, "f16", true, false, 1, 4, false},
+    {4, 4, 7, 7, 256, 2, "f16", false, false, 1, 4, false},
+    {4, 4, 7, 7, 256, 2, "f16", true, true, 1, 4, false},
+    {4, 4, 7, 7, 128, 2, "f16", true, false, 1, 2, true},
+    {4, 4, 7, 7, 256, 2, "bf16", true, false, 1, 4, false},
 };
 
 #define NCFG ((int)(sizeof(CONFIGS) / sizeof(CONFIGS[0])))

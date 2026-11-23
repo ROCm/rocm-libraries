@@ -289,16 +289,20 @@ parity runs on the matching device and is not implied by the ✅ here.
     auto-selects it (lowest priority, reachable only by pinning `spec_id`).
     The weak shapes' actual bottleneck is still open; this lever is real,
     correct infrastructure that did not pan out for the cases it targeted.
-  - **`n_groups`** (default `1`, byte-identical when `1`) is a default-off,
-    **inference-only** (`training=True` + `n_groups>1` is rejected by
-    `is_valid_spec`) thread-decomposition lever: `>1` splits one CTA's
-    `block_size` threads into `n_groups` sub-groups of `block_size //
-    n_groups` threads, each sweeping a *different* `N` sample's `H*W` row
-    concurrently instead of every thread sweeping the same row one sample at
-    a time — mirroring MIOpen's spatial-batchnorm thread mapping (threads
-    split across both the spatial and batch dimensions). Targets shapes
-    whose `H*W` is small enough to structurally cap `block_size` well below
-    what the hardware can usefully run. Implemented in both engines
+  - **`n_groups`** (default `1`, byte-identical when `1`) is a default-off
+    thread-decomposition lever, supporting both `training=False` and
+    `training=True`: `>1` splits one CTA's `block_size` threads into
+    `n_groups` sub-groups of `block_size // n_groups` threads, each sweeping
+    a *different* `N` sample's `H*W` row concurrently instead of every
+    thread sweeping the same row one sample at a time — mirroring MIOpen's
+    spatial-batchnorm thread mapping (threads split across both the spatial
+    and batch dimensions). Targets shapes whose `H*W` is small enough to
+    structurally cap `block_size` well below what the hardware can usefully
+    run. A masked scalar tail (same idiom as the `n_groups=1` HW tail below,
+    scoped to `hw_threads = block_size // n_groups` instead of
+    `block_size`) means `H*W` no longer needs to divide `hw_threads * vec`
+    exactly either, reaching shapes (e.g. `7x7=49`) no power-of-two
+    `hw_threads` can tile exactly. Implemented in both engines
     (byte-identity-verified: 3 new parity configs, all 4 LLVM flavors, see
     `batchnorm2d_emit.py`/`.c` configs 16-18) + GPU-numeric-verified
     (`differential/numeric.py::BATCHNORM_CONFIGS`, `ng=2`/`ng=4`, both
@@ -323,6 +327,16 @@ parity runs on the matching device and is not implied by the ✅ here.
     bottleneck remains open — but it is a real, measured win for
     large-`N`/small-`H*W` shapes, left registered as an opt-in lever
     (reachable by pinning `spec_id`, e.g. `batchnorm_b256_v4_ng4`).
+
+    Since adding the masked tail above, this lever also now reaches the
+    *training*, non-exactly-dividing small-`H*W` shapes that motivated the
+    HW scalar tail in the first place (real conv feature maps whose `H*W`
+    has no power-of-two divisor, e.g. `14x14=196`, `7x7=49`) — the
+    `n_groups=1` path alone still falls into its own all-scalar tail for
+    these, which trails MIOpen. Not yet measured against the best
+    pre-existing candidate for these shapes (only against the dispatcher's
+    naive default, which overstates the win) -- see the follow-up measurement
+    task before citing a number here.
   - **`fast_reduce`** (default `false`, byte-identical when `false`) is a
     default-off, **training-only** (`training=False` + `fast_reduce=True` is
     rejected by `is_valid_spec`) reduction-shape lever: replaces the flat
@@ -350,6 +364,32 @@ parity runs on the matching device and is not implied by the ✅ here.
     still left as an opt-in lever (reachable by pinning `spec_id`, e.g.
     `batchnorm_b128_v2_fr`) rather than promoted to the auto-selected
     default, pending a wider shape sweep.
+  - **HW scalar tail** (`n_groups=1` only; always on, no spec flag): the row
+    sweep no longer requires `H*W` to be divisible by `block_size * vec`.
+    Real conv feature maps (`56x56`, `24x24`, `14x14`, ...) have no
+    power-of-two divisor large enough to satisfy that old requirement, so
+    `is_valid_spec` used to reject every registered candidate for them --
+    the op was simply unusable on these shapes. The vectorized main sweep is
+    unchanged; the remainder (`< block_size * vec` elements) is handled by a
+    small scalar pass per row. Pass 1's reduction contribution is
+    branch-free (masked via `select`, not a guarded branch, since an
+    out-of-range lane's zeroed contribution is harmless to a sum/count);
+    pass 2's write-back uses a real guarded branch (a masked/clamped store
+    would let multiple out-of-range lanes race to write the same element).
+    Implemented in both engines (byte-identity-verified: 7 new parity
+    configs spanning training/inference, `N>1`, `channels_per_block>1`, and
+    `fast_reduce`, all 4 LLVM flavors, see `batchnorm2d_emit.py`/`.c` configs
+    22-28) and dispatch-tested (`combos()`/`batchnorm_sweep_space` non-empty
+    for `14x14`/`24x24`/`56x56`). The dispatcher's default candidate
+    ranking now also accounts for whether a given `(block_size, vec)` would
+    need this tail for the request's actual `H*W`, so an exact-fit `vec`
+    still outranks a wider `vec` that would only "work" via the tail, inside
+    the same `(channels_per_block, n_groups, fast_reduce)` priority tier --
+    without this, relaxing the old hard divisibility check would have let
+    dispatch regress already-exact-fit shapes toward a needlessly
+    tail-heavy candidate. `n_groups>1` now shares this same masked-tail
+    support, scoped to `hw_threads = block_size // n_groups` (see the
+    `n_groups` entry above).
 - **`add_rmsnorm2d_rdquant` on gfx1151 (RDNA):** only `out_dtype="i8"` is
   supported. fp8/bf8 output needs the CDNA-only `v_cvt_pk_{fp8,bf8}_f32`
   conversion, so fp8/bf8 specs are rejected by the validator on non-CDNA

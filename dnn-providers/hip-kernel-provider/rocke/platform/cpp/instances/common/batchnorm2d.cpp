@@ -160,7 +160,6 @@ bool rocke_batchnorm2d_is_valid_spec(const rocke_batchnorm2d_spec_t* spec,
     rocke_arena_t arena;
     const char* why = NULL;
     int io_ok;
-    int hw;
     int elems;
     int max_thr;
     long bytes_lds;
@@ -215,11 +214,6 @@ bool rocke_batchnorm2d_is_valid_spec(const rocke_batchnorm2d_spec_t* spec,
         bn_set_reason(reason, reason_cap, "n_groups must be positive");
         return false;
     }
-    if(spec->n_groups != 1 && spec->training)
-    {
-        bn_set_reason(reason, reason_cap, "n_groups > 1 requires training=False");
-        return false;
-    }
     if(spec->block_size % spec->n_groups != 0)
     {
         bn_set_reason(reason, reason_cap, "block_size not divisible by n_groups");
@@ -242,14 +236,18 @@ bool rocke_batchnorm2d_is_valid_spec(const rocke_batchnorm2d_spec_t* spec,
         return false;
     }
 
-    hw = rocke_batchnorm2d_hw(spec);
-
-    /* validate_io(IOSpecRule(dtype, block_size=hw_threads, vec, n_per_block=hw)),
-     * where hw_threads = block_size // n_groups (the per-sub-group thread
-     * count the n_groups>1 path actually sweeps HW with). */
-    rocke_io_spec_rule_init(&rule, spec->dtype, spec->block_size / spec->n_groups, spec->vec);
-    rule.n_per_block_set = 1;
-    rule.n_per_block = hw;
+    /* block_size is the real launch parameter (one CTA's thread count), so
+     * it alone -- not hw_threads = block_size/n_groups -- is what must come
+     * from the hardware-meaningful allowed-block-sizes set; dtype/vec are
+     * independent of n_groups. n_groups==1's row sweep handles a
+     * non-divisible HW with an in-kernel scalar tail (rocke_build_batchnorm2d's
+     * tail_chunks block); n_groups>1 reuses the SAME masked-tail idiom
+     * scoped to hw_threads (that function's tail_chunks_ng block), so
+     * hw_threads is a kernel-internal sub-group thread count, not a real
+     * launch parameter -- no n_per_block divisibility check needed for it
+     * either. */
+    rocke_io_spec_rule_init(&rule, spec->dtype, spec->block_size, spec->vec);
+    rule.n_per_block_set = 0;
     rule.max_elems_per_thread_set = 0; /* checked separately below */
 
     if(rocke_arena_init(&arena, 4096) != ROCKE_OK)
@@ -413,6 +411,8 @@ rocke_kernel_def_t* rocke_build_batchnorm2d(rocke_ir_builder_t* b,
     int C;
     int HW;
     int ept_row;
+    int main_elems_per_row;
+    int tail_chunks;
     bool two_pass;
     bool ok;
 
@@ -481,7 +481,20 @@ rocke_kernel_def_t* rocke_build_batchnorm2d(rocke_ir_builder_t* b,
     N = spec->n;
     C = spec->c;
     HW = rocke_batchnorm2d_hw(spec);
-    ept_row = HW / BS;
+    /* Mirrors the Python builder's ``chunks_main``/``tail_chunks`` block: NG==1's
+     * row sweep now tolerates an HW not divisible by block_size*vec via a
+     * scalar tail (see the ``tail_chunks`` loops below), so ``ept_row`` here is
+     * the vectorized-main-loop count only -- identical to the historical value
+     * when HW % (BS*VEC) == 0, strictly smaller otherwise. */
+    {
+        int vec_bs = BS * VEC;
+        int chunks_main = HW / vec_bs;
+        int tail_per_row;
+        ept_row = chunks_main * VEC;
+        main_elems_per_row = ept_row * BS;
+        tail_per_row = HW - main_elems_per_row;
+        tail_chunks = tail_per_row ? (tail_per_row + BS - 1) / BS : 0;
+    }
     two_pass = rocke_row_norm_needs_two_pass(rocke_batchnorm2d_elems_per_thread(spec),
                                              ROCKE_REGISTER_TILE_MAX_ELEMS_PER_THREAD);
 
@@ -604,6 +617,7 @@ rocke_kernel_def_t* rocke_build_batchnorm2d(rocke_ir_builder_t* b,
             {
             p1.sum_p = rocke_b_const_f32(b, 0.0);
             p1.sumsq_p = rocke_b_const_f32(b, 0.0);
+            rocke_value_t* tail_count_p = tail_chunks ? rocke_b_const_f32(b, 0.0) : NULL;
 
             for(n = 0; n < N; ++n)
             {
@@ -628,23 +642,75 @@ rocke_kernel_def_t* rocke_build_batchnorm2d(rocke_ir_builder_t* b,
                                                !two_pass);
                     cached_by_n[n] = res.cached;
                     num_cached_by_n[n] = res.num_cached;
+
+                    /* Scalar tail, branch-free (masked via rocke_b_select,
+                     * not an scf_if guard): mirrors the Python builder's
+                     * tail_chunks block exactly -- the load index is
+                     * clamped with rocke_b_smin to stay inside this row's
+                     * HW span before the mask is applied to its value, so
+                     * an out-of-range lane still issues an in-bounds load,
+                     * just a discarded one. */
+                    {
+                        int tc;
+                        for(tc = 0; tc < tail_chunks; ++tc)
+                        {
+                            rocke_value_t* idx_col = rocke_b_add(
+                                b, rocke_b_const_i32(b, main_elems_per_row + tc * BS), tid);
+                            rocke_value_t* valid = rocke_b_cmp_lt(b, idx_col, rocke_b_const_i32(b, HW));
+                            rocke_value_t* idx_safe =
+                                rocke_b_smin(b, idx_col, rocke_b_const_i32(b, HW - 1));
+                            rocke_value_t* flat =
+                                rocke_b_add(b, rocke_b_mul(b, row_n, rocke_b_const_i32(b, HW)), idx_safe);
+                            rocke_value_t* x_raw = rocke_b_load_scalar_as_f32(b, X, flat, spec->dtype);
+                            rocke_value_t* x_masked = rocke_b_select(b, valid, x_raw, rocke_b_const_f32(b, 0.0));
+                            rocke_value_t* valid_f =
+                                rocke_b_select(b, valid, rocke_b_const_f32(b, 1.0), rocke_b_const_f32(b, 0.0));
+                            p1.sum_p = rocke_b_fadd(b, p1.sum_p, x_masked);
+                            p1.sumsq_p = rocke_b_fadd(b, p1.sumsq_p, rocke_b_fmul(b, x_masked, x_masked));
+                            tail_count_p = rocke_b_fadd(b, tail_count_p, valid_f);
+                        }
+                    }
                 }
             }
 
             if(spec->training)
             {
-                double count_p = (double)rocke_batchnorm2d_elems_per_thread(spec);
-                rocke_value_t* inv_count_p = rocke_b_const_f32(b, 1.0 / count_p);
-                rocke_value_t* mean_p = rocke_b_fmul(b, p1.sum_p, inv_count_p);
-                rocke_value_t* m2_p =
-                    rocke_b_fsub(b, p1.sumsq_p, rocke_b_fmul(b, mean_p, p1.sum_p));
+                rocke_value_t* mean_p;
+                rocke_value_t* m2_p;
+                rocke_value_t* count_val = NULL;
+                double count_p = 0.0;
+
+                if(tail_chunks)
+                {
+                    count_val = rocke_b_fadd(
+                        b, rocke_b_const_f32(b, (double)(N * ept_row)), tail_count_p);
+                    mean_p = rocke_b_fdiv(b, p1.sum_p, count_val);
+                }
+                else
+                {
+                    rocke_value_t* inv_count_p;
+                    count_p = (double)rocke_batchnorm2d_elems_per_thread(spec);
+                    inv_count_p = rocke_b_const_f32(b, 1.0 / count_p);
+                    mean_p = rocke_b_fmul(b, p1.sum_p, inv_count_p);
+                }
+                m2_p = rocke_b_fsub(b, p1.sumsq_p, rocke_b_fmul(b, mean_p, p1.sum_p));
+                if(!tail_chunks)
+                {
+                    /* Byte-identical to the pre-tail-support emission: two
+                     * independent rocke_b_const_f32(count_p) calls, not a
+                     * single value reused, and emitted in the same relative
+                     * position (after m2_p) -- deduplicating or reordering
+                     * either would shift the op/value numbering the Python
+                     * engine must match byte-for-byte. */
+                    count_val = rocke_b_const_f32(b, count_p);
+                }
 
                 if(spec->fast_reduce)
                 {
                     rocke_welford_block_reduce_stable_wave_prologue(b,
                                                                     mean_p,
                                                                     m2_p,
-                                                                    rocke_b_const_f32(b, count_p),
+                                                                    count_val,
                                                                     lds_mean,
                                                                     lds_m2,
                                                                     lds_count,
@@ -659,7 +725,7 @@ rocke_kernel_def_t* rocke_build_batchnorm2d(rocke_ir_builder_t* b,
                     rocke_welford_block_reduce_stable(b,
                                                       mean_p,
                                                       m2_p,
-                                                      rocke_b_const_f32(b, count_p),
+                                                      count_val,
                                                       lds_mean,
                                                       lds_m2,
                                                       lds_count,
@@ -750,74 +816,407 @@ rocke_kernel_def_t* rocke_build_batchnorm2d(rocke_ir_builder_t* b,
                                        &p2,
                                        cached_by_n[n],
                                        num_cached_by_n[n]);
+
+                /* Scalar tail write-back. Unlike pass 1's masked reduction,
+                 * a store cannot be branch-free (clamping an out-of-range
+                 * lane's index would make multiple lanes race to store into
+                 * the SAME element), so this uses a real scf_if guard,
+                 * matching the Python builder's elementwise.py-derived
+                 * idiom, and always reloads X directly (the tail is at most
+                 * BS*VEC - 1 elements -- not worth caching). */
+                {
+                    int tc;
+                    for(tc = 0; tc < tail_chunks; ++tc)
+                    {
+                        rocke_value_t* idx_col = rocke_b_add(
+                            b, rocke_b_const_i32(b, main_elems_per_row + tc * BS), tid);
+                        rocke_value_t* valid = rocke_b_cmp_lt(b, idx_col, rocke_b_const_i32(b, HW));
+                        rocke_if_t tail_iff = rocke_b_scf_if(b, valid);
+                        rocke_value_t* flat;
+                        rocke_value_t* x_raw;
+                        rocke_value_t* y_val;
+
+                        rocke_b_region_enter(b, tail_iff.then_region);
+                        flat = rocke_b_add(b, rocke_b_mul(b, row_values[n], rocke_b_const_i32(b, HW)), idx_col);
+                        x_raw = rocke_b_load_scalar_as_f32(b, X, flat, spec->dtype);
+                        y_val = rocke_b_fadd(b, rocke_b_fmul(b, rocke_b_fsub(b, x_raw, mean), scale), beta_v);
+                        rocke_b_store_scalar_from_f32(b, Y, flat, y_val, spec->dtype);
+                        rocke_b_region_leave(b);
+                    }
+                }
             }
             }
             else
             {
-                /* n_groups > 1: inference-only, N and H*W split across the
-                 * CTA's threads simultaneously (mirrors MIOpen's spatial
-                 * batchnorm thread mapping). is_valid_spec guarantees
-                 * training=false here, so there is no Welford/LDS state to
-                 * thread across the sub-group boundary -- just the scalar
-                 * running-stat read and the elementwise affine, applied
-                 * with a different thread decomposition than the NG==1
-                 * inference branch above. */
-                int hw_threads;
+                /* n_groups > 1: N and H*W split across the CTA's threads
+                 * simultaneously (mirrors MIOpen's spatial batchnorm thread
+                 * mapping). Training and inference are kept as two separate
+                 * emission orders below (not a shared preamble) so the
+                 * pre-existing inference emission stays byte-for-byte
+                 * identical to before training support was added -- only
+                 * the spec->training arm is new. */
+                int hw_threads = BS / NG;
+                /* Same tail shape as NG==1's chunks_main/tail_chunks (see
+                 * that block's comment above), scoped to hw_threads instead
+                 * of BS: the vectorized main sweep covers whole
+                 * hw_threads*vec chunks of one og's row, and the remaining
+                 * tail_per_row_ng elements are handled by a masked scalar
+                 * tail below. When HW % (hw_threads*vec) == 0 (the old exact-
+                 * divisibility case), tail_chunks_ng == 0 and every path
+                 * below collapses back to the original emission. */
                 int ept_row_ng;
-                rocke_value_t* c_hw_threads;
-                rocke_value_t* lidihw;
-                rocke_value_t* tid_within_row;
-                int og;
-
-                mean = rocke_b_global_load_f32(b, RunningMean, channel, 4);
-                var = rocke_b_global_load_f32(b, RunningVar, channel, 4);
-                inv_std = rocke_b_rsqrt(b, rocke_b_fadd(b, var, eps));
-                gamma_v = rocke_b_load_scalar_as_f32(b, Gamma, channel, spec->dtype);
-                beta_v = rocke_b_load_scalar_as_f32(b, Beta, channel, spec->dtype);
-                scale = rocke_b_fmul(b, inv_std, gamma_v);
-
-                hw_threads = BS / NG;
-                ept_row_ng = HW / hw_threads;
-                c_hw_threads = rocke_b_const_i32(b, hw_threads);
-                lidihw = rocke_b_div(b, tid, c_hw_threads);
-                tid_within_row = rocke_b_mod(b, tid, c_hw_threads);
-
-                for(og = 0; og < N / NG; ++og)
+                int main_elems_per_row_ng;
+                int tail_chunks_ng;
                 {
-                    rocke_value_t* n_runtime =
-                        rocke_b_add(b, rocke_b_const_i32(b, og * NG), lidihw);
-                    rocke_value_t* row_n =
-                        rocke_b_add(b, rocke_b_mul(b, n_runtime, rocke_b_const_i32(b, C)), channel);
-                    rocke_tile_window_t y_tile_n_ng;
-                    rocke_tile_window_t x_tile_n_ng;
-                    bn_pass2_ctx_t p2;
+                    int chunks_main_ng = HW / (hw_threads * VEC);
+                    int tail_per_row_ng;
+                    ept_row_ng = chunks_main_ng * VEC;
+                    main_elems_per_row_ng = ept_row_ng * hw_threads;
+                    tail_per_row_ng = HW - main_elems_per_row_ng;
+                    tail_chunks_ng =
+                        tail_per_row_ng ? (tail_per_row_ng + hw_threads - 1) / hw_threads : 0;
+                }
 
-                    origin[0] = row_n;
-                    origin[1] = rocke_b_const_i32(b, 0);
-                    rocke_make_tile_window(&y_tile_n_ng, &y_view, lengths2, origin, 2);
-                    origin[0] = row_n;
-                    origin[1] = rocke_b_const_i32(b, 0);
-                    rocke_make_tile_window(&x_tile_n_ng, &x_view, lengths2, origin, 2);
+                if(spec->training)
+                {
+                    /* Each thread accumulates its own Welford partial over
+                     * its assigned (og, tid_within_row) slice of elements,
+                     * then merges via the SAME welford_block_reduce_stable/
+                     * _wave_prologue call the NG==1 path uses over the full
+                     * tid/block_size=BS -- that merge only needs each of the
+                     * BS threads to hand in its own (mean, M2, count)
+                     * triple, it does not care how a thread's slice was
+                     * chosen, so no new reduction helper or two-tier merge
+                     * is needed. Unlike NG==1's training path this never
+                     * caches X in registers across pass 1/pass 2 (cache=0
+                     * below) -- see the Python builder's matching comment
+                     * for why that scope cut doesn't cost much for the
+                     * small-HW shapes this lever targets. */
+                    rocke_value_t* c_hw_threads = rocke_b_const_i32(b, hw_threads);
+                    rocke_value_t* lidihw = rocke_b_div(b, tid, c_hw_threads);
+                    rocke_value_t* tid_within_row = rocke_b_mod(b, tid, c_hw_threads);
+                    int num_og = N / NG;
+                    rocke_value_t** og_rows =
+                        (rocke_value_t**)malloc(sizeof(rocke_value_t*) * (size_t)num_og);
+                    rocke_tile_window_t* og_x_tiles =
+                        (rocke_tile_window_t*)malloc(sizeof(rocke_tile_window_t) * (size_t)num_og);
+                    bn_pass1_ctx_t p1ng;
+                    rocke_value_t* mean_p;
+                    rocke_value_t* m2_p;
+                    rocke_value_t* count_val;
+                    rocke_value_t* inv_count_p;
+                    double count_p;
+                    int og;
 
-                    p2.two_pass = false;
-                    p2.training = false;
-                    p2.vec = VEC;
-                    p2.x_tile_n = &x_tile_n_ng;
-                    p2.mean = mean;
-                    p2.scale = scale;
-                    p2.beta_v = beta_v;
+                    for(og = 0; og < num_og; ++og)
+                    {
+                        rocke_value_t* n_runtime =
+                            rocke_b_add(b, rocke_b_const_i32(b, og * NG), lidihw);
+                        rocke_value_t* row_n =
+                            rocke_b_add(b, rocke_b_mul(b, n_runtime, rocke_b_const_i32(b, C)), channel);
+                        og_rows[og] = row_n;
+                        origin[0] = row_n;
+                        origin[1] = rocke_b_const_i32(b, 0);
+                        rocke_make_tile_window(&og_x_tiles[og], &x_view, lengths2, origin, 2);
+                    }
 
-                    rocke_pass2_row_chunks(b,
-                                           &y_tile_n_ng,
-                                           tid_within_row,
-                                           hw_threads,
-                                           VEC,
-                                           ept_row_ng,
-                                           NULL, /* row -- origin already placed */
-                                           bn_pass2_body,
-                                           &p2,
-                                           NULL,
-                                           0);
+                    rocke_value_t* tail_count_p_ng = tail_chunks_ng ? rocke_b_const_f32(b, 0.0) : NULL;
+
+                    p1ng.sum_p = rocke_b_const_f32(b, 0.0);
+                    p1ng.sumsq_p = rocke_b_const_f32(b, 0.0);
+
+                    for(og = 0; og < num_og; ++og)
+                    {
+                        rocke_sweep_row_chunks(b,
+                                               &og_x_tiles[og],
+                                               tid_within_row,
+                                               hw_threads,
+                                               VEC,
+                                               ept_row_ng,
+                                               NULL, /* row -- origin already placed */
+                                               bn_pass1_body,
+                                               &p1ng,
+                                               0 /* cache = false */);
+
+                        /* Masked scalar tail, same idiom as NG==1's pass-1
+                         * tail (clamp + select, not scf_if, since a
+                         * reduction contribution is naturally zero-able). */
+                        {
+                            int tc;
+                            for(tc = 0; tc < tail_chunks_ng; ++tc)
+                            {
+                                rocke_value_t* idx_col = rocke_b_add(
+                                    b,
+                                    rocke_b_const_i32(b, main_elems_per_row_ng + tc * hw_threads),
+                                    tid_within_row);
+                                rocke_value_t* valid =
+                                    rocke_b_cmp_lt(b, idx_col, rocke_b_const_i32(b, HW));
+                                rocke_value_t* idx_safe =
+                                    rocke_b_smin(b, idx_col, rocke_b_const_i32(b, HW - 1));
+                                rocke_value_t* flat = rocke_b_add(
+                                    b, rocke_b_mul(b, og_rows[og], rocke_b_const_i32(b, HW)), idx_safe);
+                                rocke_value_t* x_raw =
+                                    rocke_b_load_scalar_as_f32(b, X, flat, spec->dtype);
+                                rocke_value_t* x_masked =
+                                    rocke_b_select(b, valid, x_raw, rocke_b_const_f32(b, 0.0));
+                                rocke_value_t* valid_f = rocke_b_select(
+                                    b, valid, rocke_b_const_f32(b, 1.0), rocke_b_const_f32(b, 0.0));
+                                p1ng.sum_p = rocke_b_fadd(b, p1ng.sum_p, x_masked);
+                                p1ng.sumsq_p =
+                                    rocke_b_fadd(b, p1ng.sumsq_p, rocke_b_fmul(b, x_masked, x_masked));
+                                tail_count_p_ng = rocke_b_fadd(b, tail_count_p_ng, valid_f);
+                            }
+                        }
+                    }
+
+                    if(tail_chunks_ng)
+                    {
+                        rocke_value_t* count_safe;
+                        count_val = rocke_b_fadd(
+                            b,
+                            rocke_b_const_f32(b, (double)(num_og * ept_row_ng)),
+                            tail_count_p_ng);
+                        /* A thread whose tid_within_row falls entirely
+                         * outside every og's valid HW range gets a real
+                         * count_val of 0 (sum_p is 0 too) -- dividing by
+                         * max(count_val, 1) instead of count_val avoids a
+                         * literal 0/0 = NaN that would otherwise poison the
+                         * block merge below even at weight 0 (its delta
+                         * term is NaN * 0 = NaN, not 0). The merge still
+                         * uses the REAL count_val as that thread's weight. */
+                        count_safe = rocke_b_fmax(b, count_val, rocke_b_const_f32(b, 1.0));
+                        mean_p = rocke_b_fdiv(b, p1ng.sum_p, count_safe);
+                        m2_p = rocke_b_fsub(b, p1ng.sumsq_p, rocke_b_fmul(b, mean_p, p1ng.sum_p));
+                    }
+                    else
+                    {
+                        /* No-tail formula: byte-identical to the original
+                         * (pre-tail-support) emission -- a single
+                         * count_val = rocke_b_const_f32(count_p) call
+                         * emitted right after m2_p and reused by both
+                         * Welford branches below. */
+                        count_p = (double)rocke_batchnorm2d_elems_per_thread(spec);
+                        inv_count_p = rocke_b_const_f32(b, 1.0 / count_p);
+                        mean_p = rocke_b_fmul(b, p1ng.sum_p, inv_count_p);
+                        m2_p = rocke_b_fsub(b, p1ng.sumsq_p, rocke_b_fmul(b, mean_p, p1ng.sum_p));
+                        count_val = rocke_b_const_f32(b, count_p);
+                    }
+
+                    if(spec->fast_reduce)
+                    {
+                        rocke_welford_block_reduce_stable_wave_prologue(b,
+                                                                        mean_p,
+                                                                        m2_p,
+                                                                        count_val,
+                                                                        lds_mean,
+                                                                        lds_m2,
+                                                                        lds_count,
+                                                                        tid,
+                                                                        BS,
+                                                                        spec->wave_size,
+                                                                        &mean,
+                                                                        &var);
+                    }
+                    else
+                    {
+                        rocke_welford_block_reduce_stable(b,
+                                                          mean_p,
+                                                          m2_p,
+                                                          count_val,
+                                                          lds_mean,
+                                                          lds_m2,
+                                                          lds_count,
+                                                          tid,
+                                                          BS,
+                                                          &mean,
+                                                          &var);
+                    }
+
+                    {
+                        rocke_if_t iff = rocke_b_scf_if(b, rocke_b_cmp_eq(b, tid, rocke_b_const_i32(b, 0)));
+                        rocke_value_t* old_mean;
+                        rocke_value_t* old_var;
+                        rocke_value_t* one_minus_mom;
+                        rocke_value_t* new_running_mean;
+                        rocke_value_t* new_running_var;
+
+                        rocke_b_region_enter(b, iff.then_region);
+                        old_mean = rocke_b_global_load_f32(b, RunningMean, channel, 4);
+                        old_var = rocke_b_global_load_f32(b, RunningVar, channel, 4);
+                        one_minus_mom = rocke_b_fsub(b, rocke_b_const_f32(b, 1.0), momentum);
+                        {
+                            rocke_value_t* term_a = rocke_b_fmul(b, one_minus_mom, old_mean);
+                            rocke_value_t* term_b = rocke_b_fmul(b, momentum, mean);
+                            new_running_mean = rocke_b_fadd(b, term_a, term_b);
+                        }
+                        {
+                            rocke_value_t* term_a = rocke_b_fmul(b, one_minus_mom, old_var);
+                            rocke_value_t* term_b = rocke_b_fmul(b, momentum, var);
+                            new_running_var = rocke_b_fadd(b, term_a, term_b);
+                        }
+                        rocke_b_global_store(b, RunningMean, channel, new_running_mean, 1);
+                        rocke_b_global_store(b, RunningVar, channel, new_running_var, 1);
+                        if(spec->save_mean_invstd)
+                        {
+                            rocke_value_t* inv_std_save = rocke_b_rsqrt(b, rocke_b_fadd(b, var, eps));
+                            rocke_b_store_scalar_from_f32(b, Mean, channel, mean, spec->dtype);
+                            rocke_b_store_scalar_from_f32(b, InvStd, channel, inv_std_save, spec->dtype);
+                        }
+                        rocke_b_region_leave(b);
+                    }
+
+                    inv_std = rocke_b_rsqrt(b, rocke_b_fadd(b, var, eps));
+                    gamma_v = rocke_b_load_scalar_as_f32(b, Gamma, channel, spec->dtype);
+                    beta_v = rocke_b_load_scalar_as_f32(b, Beta, channel, spec->dtype);
+                    scale = rocke_b_fmul(b, inv_std, gamma_v);
+
+                    for(og = 0; og < num_og; ++og)
+                    {
+                        rocke_tile_window_t y_tile_n_ng;
+                        bn_pass2_ctx_t p2;
+
+                        origin[0] = og_rows[og];
+                        origin[1] = rocke_b_const_i32(b, 0);
+                        rocke_make_tile_window(&y_tile_n_ng, &y_view, lengths2, origin, 2);
+
+                        p2.two_pass = true; /* always reload: no register cache */
+                        p2.training = true;
+                        p2.vec = VEC;
+                        p2.x_tile_n = &og_x_tiles[og];
+                        p2.mean = mean;
+                        p2.scale = scale;
+                        p2.beta_v = beta_v;
+
+                        rocke_pass2_row_chunks(b,
+                                               &y_tile_n_ng,
+                                               tid_within_row,
+                                               hw_threads,
+                                               VEC,
+                                               ept_row_ng,
+                                               NULL, /* row -- origin already placed */
+                                               bn_pass2_body,
+                                               &p2,
+                                               NULL,
+                                               0);
+
+                        /* Masked scalar tail write-back, same idiom as
+                         * NG==1's pass-2 tail: a real scf_if guard, not
+                         * select -- a store cannot be branch-free. */
+                        {
+                            int tc;
+                            for(tc = 0; tc < tail_chunks_ng; ++tc)
+                            {
+                                rocke_value_t* idx_col = rocke_b_add(
+                                    b,
+                                    rocke_b_const_i32(b, main_elems_per_row_ng + tc * hw_threads),
+                                    tid_within_row);
+                                rocke_value_t* valid =
+                                    rocke_b_cmp_lt(b, idx_col, rocke_b_const_i32(b, HW));
+                                rocke_if_t tail_iff = rocke_b_scf_if(b, valid);
+                                rocke_value_t* flat;
+                                rocke_value_t* x_raw;
+                                rocke_value_t* y_val;
+
+                                rocke_b_region_enter(b, tail_iff.then_region);
+                                flat = rocke_b_add(
+                                    b, rocke_b_mul(b, og_rows[og], rocke_b_const_i32(b, HW)), idx_col);
+                                x_raw = rocke_b_load_scalar_as_f32(b, X, flat, spec->dtype);
+                                y_val = rocke_b_fadd(
+                                    b, rocke_b_fmul(b, rocke_b_fsub(b, x_raw, mean), scale), beta_v);
+                                rocke_b_store_scalar_from_f32(b, Y, flat, y_val, spec->dtype);
+                                rocke_b_region_leave(b);
+                            }
+                        }
+                    }
+
+                    free(og_rows);
+                    free(og_x_tiles);
+                }
+                else
+                {
+                    /* Inference: emission order preserved byte-for-byte
+                     * from before training support was added above. */
+                    rocke_value_t* c_hw_threads;
+                    rocke_value_t* lidihw;
+                    rocke_value_t* tid_within_row;
+                    int og;
+
+                    mean = rocke_b_global_load_f32(b, RunningMean, channel, 4);
+                    var = rocke_b_global_load_f32(b, RunningVar, channel, 4);
+                    inv_std = rocke_b_rsqrt(b, rocke_b_fadd(b, var, eps));
+                    gamma_v = rocke_b_load_scalar_as_f32(b, Gamma, channel, spec->dtype);
+                    beta_v = rocke_b_load_scalar_as_f32(b, Beta, channel, spec->dtype);
+                    scale = rocke_b_fmul(b, inv_std, gamma_v);
+
+                    c_hw_threads = rocke_b_const_i32(b, hw_threads);
+                    lidihw = rocke_b_div(b, tid, c_hw_threads);
+                    tid_within_row = rocke_b_mod(b, tid, c_hw_threads);
+
+                    for(og = 0; og < N / NG; ++og)
+                    {
+                        rocke_value_t* n_runtime =
+                            rocke_b_add(b, rocke_b_const_i32(b, og * NG), lidihw);
+                        rocke_value_t* row_n =
+                            rocke_b_add(b, rocke_b_mul(b, n_runtime, rocke_b_const_i32(b, C)), channel);
+                        rocke_tile_window_t y_tile_n_ng;
+                        rocke_tile_window_t x_tile_n_ng;
+                        bn_pass2_ctx_t p2;
+
+                        origin[0] = row_n;
+                        origin[1] = rocke_b_const_i32(b, 0);
+                        rocke_make_tile_window(&y_tile_n_ng, &y_view, lengths2, origin, 2);
+                        origin[0] = row_n;
+                        origin[1] = rocke_b_const_i32(b, 0);
+                        rocke_make_tile_window(&x_tile_n_ng, &x_view, lengths2, origin, 2);
+
+                        p2.two_pass = false;
+                        p2.training = false;
+                        p2.vec = VEC;
+                        p2.x_tile_n = &x_tile_n_ng;
+                        p2.mean = mean;
+                        p2.scale = scale;
+                        p2.beta_v = beta_v;
+
+                        rocke_pass2_row_chunks(b,
+                                               &y_tile_n_ng,
+                                               tid_within_row,
+                                               hw_threads,
+                                               VEC,
+                                               ept_row_ng,
+                                               NULL, /* row -- origin already placed */
+                                               bn_pass2_body,
+                                               &p2,
+                                               NULL,
+                                               0);
+
+                        /* Masked scalar tail write-back -- same idiom as
+                         * the training sub-branch's pass-2 tail above. */
+                        {
+                            int tc;
+                            for(tc = 0; tc < tail_chunks_ng; ++tc)
+                            {
+                                rocke_value_t* idx_col = rocke_b_add(
+                                    b,
+                                    rocke_b_const_i32(b, main_elems_per_row_ng + tc * hw_threads),
+                                    tid_within_row);
+                                rocke_value_t* valid =
+                                    rocke_b_cmp_lt(b, idx_col, rocke_b_const_i32(b, HW));
+                                rocke_if_t tail_iff = rocke_b_scf_if(b, valid);
+                                rocke_value_t* flat;
+                                rocke_value_t* x_raw;
+                                rocke_value_t* y_val;
+
+                                rocke_b_region_enter(b, tail_iff.then_region);
+                                flat = rocke_b_add(
+                                    b, rocke_b_mul(b, row_n, rocke_b_const_i32(b, HW)), idx_col);
+                                x_raw = rocke_b_load_scalar_as_f32(b, X, flat, spec->dtype);
+                                y_val = rocke_b_fadd(
+                                    b, rocke_b_fmul(b, rocke_b_fsub(b, x_raw, mean), scale), beta_v);
+                                rocke_b_store_scalar_from_f32(b, Y, flat, y_val, spec->dtype);
+                                rocke_b_region_leave(b);
+                            }
+                        }
+                    }
                 }
             }
         }

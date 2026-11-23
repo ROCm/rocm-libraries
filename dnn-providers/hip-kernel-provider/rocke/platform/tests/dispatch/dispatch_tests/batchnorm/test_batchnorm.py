@@ -149,7 +149,11 @@ class TestBatchNormDispatch(unittest.TestCase):
                 specs = batchnorm_sweep_space(req)
                 self.assertTrue(any(s.n_groups > 1 for s in specs))
 
-    def test_n_groups_rejected_when_training(self):
+    def test_n_groups_supported_when_training(self):
+        # n_groups > 1 was inference-only; it now also supports training
+        # (see instances/common/batchnorm2d.py's n_groups docstring) --
+        # pinning its spec_id for a training request must dispatch
+        # successfully, not raise.
         for arch in COVERED_ARCHES:
             with self.subTest(arch=arch):
                 req = _req(
@@ -161,8 +165,43 @@ class TestBatchNormDispatch(unittest.TestCase):
                     training=True,
                     spec_id="batchnorm_b256_v4_ng4",
                 )
-                with self.assertRaises(ValueError):
-                    dispatch_batchnorm(req)
+                result = dispatch_batchnorm(req)
+                self.assertEqual(result.spec.n_groups, 4)
+                self.assertTrue(result.spec.training)
+
+    def test_n_groups_still_default_off_under_auto_with_training(self):
+        # n_groups remains a default-off, opt-in lever even though it is now
+        # legal for training=True requests: unpinned ``auto`` dispatch must
+        # keep picking the n_groups=1 candidate for a shape where n_groups>1
+        # candidates are also valid.
+        for arch in COVERED_ARCHES:
+            with self.subTest(arch=arch):
+                req = _req(4, 32, 64, 64, arch, training=True)
+                result = dispatch_batchnorm(req)
+                self.assertEqual(result.spec.n_groups, 1)
+
+    def test_n_groups_supported_on_non_divisible_hw(self):
+        # n_groups's hw_threads floor/exact-divisibility requirement was
+        # relaxed (masked tail, mirroring NG==1's own tail support) so it
+        # now reaches shapes no power-of-two hw_threads can tile exactly
+        # (7x7=49, 14x14=196 -- real CNN shapes), not just ones that
+        # happen to divide evenly.
+        for arch in COVERED_ARCHES:
+            for training in (True, False):
+                for h, w in ((7, 7), (14, 14)):
+                    with self.subTest(arch=arch, training=training, hw=(h, w)):
+                        req = _req(
+                            4,
+                            4,
+                            h,
+                            w,
+                            arch,
+                            training=training,
+                            spec_id="batchnorm_b256_v2_ng4",
+                        )
+                        result = dispatch_batchnorm(req)
+                        self.assertEqual(result.spec.n_groups, 4)
+                        self.assertEqual(result.spec.training, training)
 
     def test_fast_reduce_default_is_false_and_not_auto_selected(self):
         # fast_reduce is a default-off, training-only lever: auto dispatch
@@ -211,6 +250,25 @@ class TestBatchNormDispatch(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     dispatch_batchnorm(req)
 
+    def test_dispatchable_on_non_power_of_two_hw_real_model_shapes(self):
+        # Real CNN feature maps whose H*W has no power-of-two divisor large
+        # enough to satisfy the old hard n_per_block % (block_size*vec) == 0
+        # requirement: 14x14=196, 24x24=576, 56x56=3136. The batchnorm2d
+        # scalar tail (see rocke.instances.common.batchnorm2d) now handles
+        # these directly, so dispatch must succeed and yield a non-empty
+        # sweep space instead of raising/returning nothing.
+        shapes = [(14, 14), (24, 24), (56, 56)]
+        for arch in COVERED_ARCHES:
+            for training in (True, False):
+                for h, w in shapes:
+                    with self.subTest(arch=arch, training=training, hw=(h, w)):
+                        req = _req(1, 16, h, w, arch, training=training)
+                        r = dispatch_batchnorm(req)
+                        self.assertEqual(r.spec.h, h)
+                        self.assertEqual(r.spec.w, w)
+                        specs = batchnorm_sweep_space(req)
+                        self.assertGreater(len(specs), 0)
+
     def test_sweep_space_enumerates_valid_block_vec_combos(self):
         for arch in COVERED_ARCHES:
             with self.subTest(arch=arch):
@@ -220,7 +278,16 @@ class TestBatchNormDispatch(unittest.TestCase):
                 results = dispatch_batchnorm_all(req)
                 self.assertGreater(len(specs), 1)
                 self.assertEqual(len(results), len(specs))
-                self.assertEqual(results[0].candidate.name, winner.candidate.name)
+                # dispatch_all enumerates every eligible candidate in
+                # registration order and explicitly does not rank (see its
+                # docstring); dispatch_batchnorm's winner comes from a
+                # tail-aware ranker (see _default_ranker) that can reorder
+                # same-tier candidates relative to that raw enumeration, so
+                # the only invariant to check here is membership, not
+                # positional equality.
+                self.assertIn(
+                    winner.candidate.name, {r.candidate.name for r in results}
+                )
 
 
 if __name__ == "__main__":

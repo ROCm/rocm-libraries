@@ -1186,8 +1186,16 @@ class BatchNormCfg:
     fast_reduce: bool = False
 
 
-# H*W must be divisible by block_size*vec (one sweep_row_chunks call per
-# sample); both shapes below use H*W=256 with block_size=64, vec=4 (256*1).
+# H*W no longer needs to be divisible by block_size*vec for n_groups=1 (the
+# in-kernel scalar tail handles the remainder -- see
+# rocke.instances.common.batchnorm2d's "HW scalar tail" docs); most shapes
+# below still use an exact-fit H*W=256 (block_size=64, vec=4), and the
+# "_hwtail" configs near the end deliberately pick a non-divisible H*W to
+# exercise that path. n_groups>1 (the spatial-split lever) now shares the
+# same masked-tail support, scoped to hw_threads = block_size // n_groups
+# instead of block_size -- the "_ng{N}_hwtail" configs near the end pick a
+# non-divisible H*W (7x7=49, 14x14=196) that no power-of-two hw_threads
+# can tile exactly, to exercise that path.
 BATCHNORM_CONFIGS: List[BatchNormCfg] = [
     BatchNormCfg("bn_train_f16_2x64x16x16", 2, 64, 16, 16, "f16", training=True),
     BatchNormCfg("bn_train_bf16_2x64x16x16", 2, 64, 16, 16, "bf16", training=True),
@@ -1208,7 +1216,7 @@ BATCHNORM_CONFIGS: List[BatchNormCfg] = [
         "bn_train_bf16_4x128x8x32_cpb8", 4, 128, 8, 32, "bf16",
         training=True, channels_per_block=8,
     ),
-    # --- n_groups > 1 lever: inference-only, N and H*W split across the
+    # --- n_groups > 1 lever, training=False: N and H*W split across the
     # CTA's threads simultaneously (mirrors MIOpen's spatial thread
     # mapping) ---
     BatchNormCfg(
@@ -1223,6 +1231,26 @@ BATCHNORM_CONFIGS: List[BatchNormCfg] = [
         "bn_infer_f16_4x64x16x16_cpb2_ng2", 4, 64, 16, 16, "f16",
         training=False, block_size=256, vec=2, channels_per_block=2, n_groups=2,
     ),
+    # --- n_groups > 1 lever, training=True: each thread accumulates its own
+    # Welford partial over its (og, tid_within_row) slice, merged via the
+    # same welford_block_reduce_stable/_wave_prologue call the n_groups==1
+    # path uses -- always reloads X (no register cache) across pass 1/2 ---
+    BatchNormCfg(
+        "bn_train_f16_4x32x16x16_ng2", 4, 32, 16, 16, "f16",
+        training=True, block_size=256, vec=2, n_groups=2,
+    ),
+    BatchNormCfg(
+        "bn_train_bf16_4x32x16x16_ng4", 4, 32, 16, 16, "bf16",
+        training=True, block_size=256, vec=2, n_groups=4,
+    ),
+    BatchNormCfg(
+        "bn_train_f16_4x64x16x16_cpb2_ng2", 4, 64, 16, 16, "f16",
+        training=True, block_size=256, vec=2, channels_per_block=2, n_groups=2,
+    ),
+    BatchNormCfg(
+        "bn_train_f16_4x32x16x16_ng2_fr", 4, 32, 16, 16, "f16",
+        training=True, block_size=128, vec=2, n_groups=2, fast_reduce=True,
+    ),
     # --- fast_reduce lever: training-only, wave-shuffle-first Welford merge
     # instead of the flat block_size-wide LDS tree ---
     BatchNormCfg(
@@ -1236,6 +1264,63 @@ BATCHNORM_CONFIGS: List[BatchNormCfg] = [
     BatchNormCfg(
         "bn_train_f16_2x64x16x16_fr_sw", 2, 64, 16, 16, "f16",
         training=True, block_size=64, vec=4, fast_reduce=True,
+    ),
+    # --- HW scalar tail: real CNN feature maps whose H*W has no divisor
+    # large enough to satisfy the old hard n_per_block % (block_size*vec)
+    # == 0 requirement (14x14=196, 24x24=576, 56x56=3136) ---
+    BatchNormCfg(
+        "bn_train_f16_1x16x14x14_hwtail", 1, 16, 14, 14, "f16",
+        training=True, block_size=64, vec=2,
+    ),
+    BatchNormCfg(
+        "bn_infer_f16_1x16x14x14_hwtail", 1, 16, 14, 14, "f16",
+        training=False, block_size=64, vec=2,
+    ),
+    BatchNormCfg(
+        "bn_train_bf16_1x480x24x24_hwtail", 1, 480, 24, 24, "bf16",
+        training=True, block_size=128, vec=4,
+    ),
+    BatchNormCfg(
+        "bn_train_f16_1x144x56x56_hwtail", 1, 144, 56, 56, "f16",
+        training=True, block_size=256, vec=4,
+    ),
+    BatchNormCfg(
+        "bn_train_f16_1x16x14x14_hwtail_cpb2", 1, 16, 14, 14, "f16",
+        training=True, block_size=64, vec=2, channels_per_block=2,
+    ),
+    BatchNormCfg(
+        "bn_train_f16_1x16x14x14_hwtail_fr", 1, 16, 14, 14, "f16",
+        training=True, block_size=64, vec=2, fast_reduce=True,
+    ),
+    BatchNormCfg(
+        "bn_train_f16_2x16x14x14_hwtail", 2, 16, 14, 14, "f16",
+        training=True, block_size=64, vec=2,
+    ),
+    # --- n_groups > 1 masked tail: HW does not divide hw_threads*vec
+    # exactly (7x7=49 pure tail, 14x14=196 mixed main+tail) ---
+    BatchNormCfg(
+        "bn_train_f16_4x4x7x7_ng4_hwtail", 4, 4, 7, 7, "f16",
+        training=True, block_size=256, vec=2, n_groups=4,
+    ),
+    BatchNormCfg(
+        "bn_train_f16_4x4x14x14_ng4_hwtail", 4, 4, 14, 14, "f16",
+        training=True, block_size=256, vec=2, n_groups=4,
+    ),
+    BatchNormCfg(
+        "bn_infer_f16_4x4x7x7_ng4_hwtail", 4, 4, 7, 7, "f16",
+        training=False, block_size=256, vec=2, n_groups=4,
+    ),
+    BatchNormCfg(
+        "bn_train_f16_4x4x7x7_cpb2_ng2_hwtail", 4, 4, 7, 7, "f16",
+        training=True, block_size=256, vec=2, channels_per_block=2, n_groups=2,
+    ),
+    BatchNormCfg(
+        "bn_train_f16_4x4x7x7_ng2_hwtail_fr", 4, 4, 7, 7, "f16",
+        training=True, block_size=128, vec=2, n_groups=2, fast_reduce=True,
+    ),
+    BatchNormCfg(
+        "bn_train_bf16_4x4x7x7_ng4_hwtail", 4, 4, 7, 7, "bf16",
+        training=True, block_size=256, vec=2, n_groups=4,
     ),
 ]
 

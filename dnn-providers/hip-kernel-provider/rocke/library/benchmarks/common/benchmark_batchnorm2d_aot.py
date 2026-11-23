@@ -18,8 +18,12 @@ candidate, keyed by :func:`~benchmarks.common.norm_bench_common.case_key`.
 
 See :mod:`benchmarks.common.norm_bench_common` for why this does not reuse
 ``case_results.ResultsWriter`` / ``early_stop.case_key`` (both are typed for
-conv) or ``batched_timing`` (built to rank thousands of candidates behind a
-chunked device drain -- overkill for this family's candidate count).
+conv). ``n_groups > 1``'s masked tail can grow this family's candidate count
+into the hundreds for small H*W shapes, at which point a per-candidate
+device drain starts to dominate the sweep the same way it does for conv's
+much larger grids -- pass ``--fast-rank`` to rank candidates behind one
+chunked drain and only time the best ``--fast-rank-finalists`` in full (see
+:func:`~benchmarks.common.norm_bench_common.rank_candidates`).
 """
 
 from __future__ import annotations
@@ -39,8 +43,10 @@ except ImportError:
 
 from benchmarks.common.norm_bench_common import (
     JsonlResultsWriter,
+    add_fast_rank_args,
     case_key,
     compile_candidate,
+    rank_candidates,
     time_candidate,
 )
 from benchmarks.common.norm_sweep_space import batchnorm_combos
@@ -77,6 +83,7 @@ def _parse_args(argv):
         help="'staged' (default) is the protocol comparable to MIOpen/hipDNN; "
         "'block' amortises per-call event overhead across a launch loop",
     )
+    add_fast_rank_args(p)
     return p.parse_args(argv)
 
 
@@ -97,14 +104,18 @@ def main(argv=None) -> int:
     writer = JsonlResultsWriter(args.results)
 
     print(f"batchnorm2d sweep: {key}, {len(combos)} candidate(s)")
-    best = None
-    for candidate, spec in combos:
-        label = candidate.name
-        artifact = compile_candidate(spec, candidate, arch=args.arch)
-        if args.compile_only:
-            print(f"  compiled: {label}")
-            continue
 
+    if args.compile_only:
+        for candidate, spec in combos:
+            compile_candidate(spec, candidate, arch=args.arch)
+            print(f"  compiled: {candidate.name}")
+        writer.close()
+        return 0
+
+    from rocke.instances.common.batchnorm2d import batchnorm2d_grid
+
+    best = None
+    if args.fast_rank:
         torch_dtype = torch.float16 if args.dtype == "fp16" else torch.bfloat16
         shape = (args.n, args.c, args.h, args.w)
         x = torch.empty(shape, dtype=torch_dtype, device="cuda").uniform_(-1.0, 1.0)
@@ -113,7 +124,6 @@ def main(argv=None) -> int:
         beta = torch.empty(args.c, dtype=torch_dtype, device="cuda").uniform_(-0.5, 0.5)
         running_mean = torch.zeros(args.c, dtype=torch.float32, device="cuda")
         running_var = torch.ones(args.c, dtype=torch.float32, device="cuda")
-
         values = {
             "X": x.data_ptr(),
             "Gamma": gamma.data_ptr(),
@@ -128,18 +138,67 @@ def main(argv=None) -> int:
             "eps": 1e-5,
             "momentum": 0.1,
         }
-        grid = (args.c, 1, 1)  # one CTA per channel
-        block = (spec.block_size, 1, 1)
-        ms = time_candidate(
-            artifact, grid=grid, block=block, args=values,
-            warmup=args.warmup, iters=args.iters, timing=args.timing,
-        )
-        print(f"  {label}: {ms:.4f} ms")
-        writer.row(key=key, candidate=label, block_size=spec.block_size,
-                   vec=spec.vec, training=args.training, dtype=args.dtype,
-                   ms=ms, **dims)
-        if best is None or ms < best[1]:
-            best = (label, ms)
+
+        plans = []
+        for candidate, spec in combos:
+            artifact = compile_candidate(spec, candidate, arch=args.arch)
+            grid = batchnorm2d_grid(args.c, spec)
+            block = (spec.block_size, 1, 1)
+            plans.append((candidate.name, artifact, grid, block, values))
+
+        ranked = rank_candidates(plans, args=args, timing=args.timing)
+        for r in ranked:
+            if r.ms is None:
+                continue
+            label = plans[r.index][0]
+            spec = combos[r.index][1]
+            print(f"  {label}: {r.ms:.4f} ms")
+            writer.row(key=key, candidate=label, block_size=spec.block_size,
+                       vec=spec.vec, training=args.training, dtype=args.dtype,
+                       ms=r.ms, **dims)
+            if best is None or r.ms < best[1]:
+                best = (label, r.ms)
+    else:
+        for candidate, spec in combos:
+            label = candidate.name
+            artifact = compile_candidate(spec, candidate, arch=args.arch)
+
+            torch_dtype = torch.float16 if args.dtype == "fp16" else torch.bfloat16
+            shape = (args.n, args.c, args.h, args.w)
+            x = torch.empty(shape, dtype=torch_dtype, device="cuda").uniform_(-1.0, 1.0)
+            y = torch.empty_like(x)
+            gamma = torch.empty(args.c, dtype=torch_dtype, device="cuda").uniform_(0.5, 1.5)
+            beta = torch.empty(args.c, dtype=torch_dtype, device="cuda").uniform_(-0.5, 0.5)
+            running_mean = torch.zeros(args.c, dtype=torch.float32, device="cuda")
+            running_var = torch.ones(args.c, dtype=torch.float32, device="cuda")
+
+            values = {
+                "X": x.data_ptr(),
+                "Gamma": gamma.data_ptr(),
+                "Beta": beta.data_ptr(),
+                "Y": y.data_ptr(),
+                "RunningMean": running_mean.data_ptr(),
+                "RunningVar": running_var.data_ptr(),
+                "N": args.n,
+                "C": args.c,
+                "H": args.h,
+                "W": args.w,
+                "eps": 1e-5,
+                "momentum": 0.1,
+            }
+
+            grid = batchnorm2d_grid(args.c, spec)
+            block = (spec.block_size, 1, 1)
+            ms = time_candidate(
+                artifact, grid=grid, block=block, args=values,
+                warmup=args.warmup, iters=args.iters, timing=args.timing,
+            )
+            print(f"  {label}: {ms:.4f} ms")
+            writer.row(key=key, candidate=label, block_size=spec.block_size,
+                       vec=spec.vec, training=args.training, dtype=args.dtype,
+                       ms=ms, **dims)
+            if best is None or ms < best[1]:
+                best = (label, ms)
 
     writer.close()
     if best is not None:
