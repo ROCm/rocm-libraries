@@ -230,6 +230,13 @@ namespace rocisa
         {
         }
 
+        // Scheduler seam: a bare instruction is a schedulable leaf with no
+        // special category. Memory/MFMA families override this below.
+        SchedCategory schedCategory() const override
+        {
+            return SchedCategory::Other;
+        }
+
         void setMemToken(const std::shared_ptr<MemTokenData>& token)
         {
             m_memToken = token;

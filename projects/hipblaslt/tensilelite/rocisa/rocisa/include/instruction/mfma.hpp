@@ -155,6 +155,12 @@ namespace rocisa
             return std::make_shared<MFMAInstruction>(*this);
         }
 
+        // Scheduler seam: MFMA family (countMFMA / getMFMAs).
+        SchedCategory schedCategory() const override
+        {
+            return SchedCategory::MFMA;
+        }
+
         // Workaround for gfx1250 V0/strict silicon: low-precision WMMA must use the
         // _scale instruction with scale=0 to avoid a Base layer issue where
         // VOP3PX2/VOP3PX3 instructions may not execute atomically. This is NOT needed
@@ -675,6 +681,12 @@ namespace rocisa
             return std::make_shared<MXMFMAInstruction>(*this);
         }
 
+        // Scheduler seam: MFMA family (countMFMA / getMFMAs).
+        SchedCategory schedCategory() const override
+        {
+            return SchedCategory::MFMA;
+        }
+
         std::string typeConvert() const
         {
             constexpr size_t f4_t = 32;
@@ -1048,6 +1060,12 @@ namespace rocisa
         std::shared_ptr<Item> clone() const override
         {
             return std::make_shared<SMFMAInstruction>(*this);
+        }
+
+        // Scheduler seam: MFMA family (countMFMA / getMFMAs).
+        SchedCategory schedCategory() const override
+        {
+            return SchedCategory::MFMA;
         }
 
         std::string typeConvert(InstType iType) const

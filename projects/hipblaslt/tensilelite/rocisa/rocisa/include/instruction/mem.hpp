@@ -158,6 +158,13 @@ namespace rocisa
             , dst(other.dst ? other.dst->clone() : nullptr)
         {
         }
+
+        // Scheduler seam: global read (SMemLoad subtree inherits this, matching
+        // today's countGlobalRead which counts SMemLoad as a global read too).
+        SchedCategory schedCategory() const override
+        {
+            return SchedCategory::GlobalRead;
+        }
     };
 
     struct FLATReadInstruction : public GlobalReadInstruction
@@ -789,6 +796,12 @@ namespace rocisa
             , srcs(other.srcs ? other.srcs->clone() : nullptr)
         {
         }
+
+        // Scheduler seam: local read (DSLoad subtree inherits this).
+        SchedCategory schedCategory() const override
+        {
+            return SchedCategory::LocalRead;
+        }
     };
 
     struct DSLoadInstruction : public LocalReadInstruction
@@ -884,6 +897,12 @@ namespace rocisa
             , src0(other.src0 ? other.src0->clone() : nullptr)
             , src1(other.src1 ? other.src1->clone() : nullptr)
         {
+        }
+
+        // Scheduler seam: local write (DSStore subtree inherits this).
+        SchedCategory schedCategory() const override
+        {
+            return SchedCategory::LocalWrite;
         }
     };
 
@@ -2952,6 +2971,12 @@ namespace rocisa
             return std::make_shared<DSLoadB192>(*this);
         }
 
+        // Scheduler seam: composed of two physical reads (weighted LR count).
+        int schedWeight() const override
+        {
+            return 2;
+        }
+
         static int issueLatency()
         {
             return 3;
@@ -3318,6 +3343,12 @@ namespace rocisa
             return std::make_shared<DSStoreB128>(*this);
         }
 
+        // Scheduler seam: exact 128-bit LDS write (countDSStoreB128).
+        SchedExactKind schedExactKind() const override
+        {
+            return SchedExactKind::DSStoreB128;
+        }
+
         static int issueLatency()
         {
             return 5;
@@ -3351,6 +3382,18 @@ namespace rocisa
         std::shared_ptr<Item> clone() const override
         {
             return std::make_shared<DSStoreB192>(*this);
+        }
+
+        // Scheduler seam: exact 192-bit LDS write, composed of two physical
+        // ops (countDSStoreB192 + weighted LW count).
+        SchedExactKind schedExactKind() const override
+        {
+            return SchedExactKind::DSStoreB192;
+        }
+
+        int schedWeight() const override
+        {
+            return 2;
         }
 
         static int issueLatency()
@@ -3438,6 +3481,12 @@ namespace rocisa
         std::shared_ptr<Item> clone() const override
         {
             return std::make_shared<DSStoreB256>(*this);
+        }
+
+        // Scheduler seam: composed of two physical ops (weighted LW count).
+        int schedWeight() const override
+        {
+            return 2;
         }
 
         static int issueLatency()

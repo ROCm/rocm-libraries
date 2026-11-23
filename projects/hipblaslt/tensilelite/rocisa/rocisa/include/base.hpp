@@ -302,6 +302,39 @@ namespace rocisa
         std::map<std::thread::id, bool>       m_forceScaledWMMA;
     };
 
+    // Scheduler-introspection seam (logical-IR migration, Phase 1).
+    //
+    // The TensileLite scheduler classifies instructions by concrete type (C++
+    // countX<T> dynamic_cast, Python isinstance). A LogicalLeaf wrapping a
+    // neutral logical instruction matches none of those, so it is miscounted
+    // and scheduling diverges. These categories let the scheduler ask an Item
+    // "what are you, for scheduling purposes?" instead of testing its type, so
+    // a logical leaf can answer the same way the rocisa instruction it replaces
+    // would. In Phase 1 only rocisa answers (reporting the exact classification
+    // that today's dynamic_cast/typeid produce -> byte-identical); in Phase 2
+    // LogicalLeaf overrides these to report from the logical instruction.
+    enum class SchedCategory
+    {
+        None = 0,   // not a schedulable leaf (Module, TextBlock, ...)
+        Other,      // a leaf instruction with no special scheduling category
+        GlobalRead, // GlobalReadInstruction (incl. SMemLoad subtree)
+        SMemLoad,   // reserved; countSMemLoad stays type-based for now
+        LocalRead,  // LocalReadInstruction (incl. DSLoad subtree)
+        LocalWrite, // LocalWriteInstruction (incl. DSStore subtree)
+        MFMA,       // MFMA / SMFMA / MXMFMA
+    };
+
+    // Exact-identity counts the scheduler still needs (DS write width, metadata
+    // v_mov_b32). Kept separate from SchedCategory because they are exact-type
+    // (typeid) matches today, not inheritance categories.
+    enum class SchedExactKind
+    {
+        None = 0,
+        DSStoreB128,
+        DSStoreB192,
+        VMovB32,
+    };
+
     struct Item
     {
     public:
@@ -362,6 +395,25 @@ namespace rocisa
         virtual int countExactType(const std::type_info& targetType) const
         {
             return static_cast<int>(typeid(*this) == targetType);
+        }
+
+        // Scheduler-introspection seam (see SchedCategory above). Default: not a
+        // schedulable leaf. rocisa instruction families override these.
+        virtual SchedCategory schedCategory() const
+        {
+            return SchedCategory::None;
+        }
+
+        virtual SchedExactKind schedExactKind() const
+        {
+            return SchedExactKind::None;
+        }
+
+        // Physical-instruction weight for weighted local-read/write counts
+        // (e.g. ds_*_b192 lowers to two physical ops). Default 1.
+        virtual int schedWeight() const
+        {
+            return 1;
         }
 
         virtual std::string toString() const
