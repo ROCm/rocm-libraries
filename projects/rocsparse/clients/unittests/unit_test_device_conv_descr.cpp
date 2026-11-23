@@ -24,8 +24,9 @@
 
 // Generic-API descriptor and auxiliary entry points: const descriptor constructors and
 // getters, nnz / batch accessors, dense matrix copy and transpose, status strings, color
-// info and the spmat printer. Round trips compare what the public getters return with
-// what was passed in; the constructors are checked with one invalid argument at a time.
+// info, the spmat printer, and the ELL and blocked ELL size-overflow checks. Round trips
+// compare what the public getters return with what was passed in; the constructors are
+// checked with one invalid argument at a time.
 
 #include "rocsparse_spmat_descr.hpp"
 #include "unit_test_device_conv_common.hpp"
@@ -1445,6 +1446,9 @@ namespace
     }
 } // namespace
 
+// ELL and blocked ELL size overflow: rows times the width in the constructors,
+// rocsparse_bell_set_pointers and rocsparse_spmat_get_nnz, and the blocked ELL workspace
+// of the rocsparse_dense_to_sparse buffer-size query.
 namespace
 {
     constexpr int64_t k_max = std::numeric_limits<int64_t>::max();
@@ -1453,17 +1457,6 @@ namespace
     // sizes far beyond device memory need no allocation.
     int   g_dummy_storage = 0;
     void* g_dummy         = &g_dummy_storage;
-
-    template <typename F>
-    void in_both_debug_modes(F&& f)
-    {
-        const rocsparse_ut::debug_state_guard restore;
-        rocsparse_disable_debug_arguments();
-        f();
-        rocsparse_enable_debug_arguments();
-        rocsparse_disable_debug_arguments_verbose();
-        f();
-    }
 
     void expect_ell(int64_t          rows,
                     int64_t          cols,
@@ -1531,7 +1524,7 @@ namespace
     // the null-pointer checks.
     TEST_F(ConvDescr, EllSizeOverflow)
     {
-        in_both_debug_modes([] {
+        rocsparse_ut::in_both_debug_modes([] {
             const int64_t fit = k_max / 4;
             for(void* arrays : {static_cast<void*>(nullptr), g_dummy})
             {
@@ -1557,7 +1550,7 @@ namespace
     // rows * ell_cols must fit in int64_t, and the block-row count must not overflow.
     TEST_F(ConvDescr, BellSizeOverflow)
     {
-        in_both_debug_modes([] {
+        rocsparse_ut::in_both_debug_modes([] {
             const int64_t fit = k_max / 4;
             expect_bell(int64_t(1) << 61, 4, 1, 4, nullptr, nullptr, st_size);
             expect_bell(int64_t(1) << 62, 4, 1, 4, g_dummy, g_dummy, st_size);
@@ -1615,6 +1608,27 @@ namespace
                   st_size);
         EXPECT_EQ(max_rows_buffer, 7);
         EXPECT_EQ(rocsparse_destroy_dnmat_descr(max_rows_dense), st_ok);
+
+        // mb = ceil((INT64_MAX/2) / 2) and 8 * mb does not fit in size_t.
+        // ell_cols is 2 so the width is a whole number of blocks and rows * ell_cols fits.
+        Spmat huge;
+        ASSERT_EQ(rocsparse_create_bell_descr(
+                      &huge, k_max / 2, 1, dir_r, 2, 2, g_dummy, g_dummy, i32, base0, f32),
+                  st_ok);
+        rocsparse_dnmat_descr huge_dense = nullptr;
+        ASSERT_EQ(rocsparse_create_dnmat_descr(
+                      &huge_dense, k_max / 2, 1, k_max / 2, g_dummy, f32, rocsparse_order_column),
+                  st_ok);
+        size_t huge_buffer = 7;
+        EXPECT_EQ(rocsparse_dense_to_sparse(handle,
+                                            huge_dense,
+                                            huge,
+                                            rocsparse_dense_to_sparse_alg_default,
+                                            &huge_buffer,
+                                            nullptr),
+                  st_size);
+        EXPECT_EQ(huge_buffer, 7);
+        EXPECT_EQ(rocsparse_destroy_dnmat_descr(huge_dense), st_ok);
 
         Spmat small;
         ASSERT_EQ(rocsparse_create_bell_descr(
@@ -1735,27 +1749,6 @@ namespace
         EXPECT_EQ(rebuilt_ind.read(), (std::vector<int32_t>{0, 1, 0, 1}));
         EXPECT_EQ(rebuilt_val.read(), (std::vector<float>{1, 1, 1, 0, 1, 1, 1, 0, 1, 1, 1, 0}));
         EXPECT_EQ(rocsparse_destroy_dnmat_descr(dense), st_ok);
-
-        // mb = ceil((INT64_MAX/2) / 2) and 8 * mb does not fit in size_t.
-        // ell_cols is 2 so the width is a whole number of blocks and rows * ell_cols fits.
-        Spmat huge;
-        ASSERT_EQ(rocsparse_create_bell_descr(
-                      &huge, k_max / 2, 1, dir_r, 2, 2, g_dummy, g_dummy, i32, base0, f32),
-                  st_ok);
-        rocsparse_dnmat_descr huge_dense = nullptr;
-        ASSERT_EQ(rocsparse_create_dnmat_descr(
-                      &huge_dense, k_max / 2, 1, k_max / 2, g_dummy, f32, rocsparse_order_column),
-                  st_ok);
-        size_t huge_buffer = 7;
-        EXPECT_EQ(rocsparse_dense_to_sparse(handle,
-                                            huge_dense,
-                                            huge,
-                                            rocsparse_dense_to_sparse_alg_default,
-                                            &huge_buffer,
-                                            nullptr),
-                  st_size);
-        EXPECT_EQ(huge_buffer, 7);
-        EXPECT_EQ(rocsparse_destroy_dnmat_descr(huge_dense), st_ok);
     }
 
     // dense2bell_nnz_template writes ell_cols through &mat_B->ell_cols and does not

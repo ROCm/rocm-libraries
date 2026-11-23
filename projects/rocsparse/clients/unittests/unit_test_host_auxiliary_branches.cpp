@@ -64,20 +64,6 @@ namespace
     int64_t host_storage[64];
     void*   any_ptr = host_storage;
 
-    // Runs fn with argument debugging disabled, then enabled (verbose logging
-    // kept off), and restores the previous state.
-    template <typename F>
-    void in_both_debug_modes(F&& fn)
-    {
-        const debug_state_guard restore;
-
-        rocsparse_disable_debug_arguments();
-        fn();
-        rocsparse_enable_debug_arguments();
-        rocsparse_disable_debug_arguments_verbose();
-        fn();
-    }
-
     using Spmat  = Owned<rocsparse_spmat_descr, rocsparse_destroy_spmat_descr>;
     using Spvec  = Owned<rocsparse_spvec_descr, rocsparse_destroy_spvec_descr>;
     using Dnvec  = Owned<rocsparse_dnvec_descr, rocsparse_destroy_dnvec_descr>;
