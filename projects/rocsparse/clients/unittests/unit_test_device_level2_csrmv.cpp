@@ -339,23 +339,38 @@ namespace
     {
         // A row longer than a row block of the adaptive kernel is split over several
         // workgroups whose contributions are accumulated into y, so the kernel reads
-        // y even with beta == 0. While the library behaves that way (a NaN in the
-        // result) the case is skipped; once the long-row path overwrites y it runs
-        // the full checks.
-        const host_csr<float> A = make_csr_by_length<float>(
-            600, 4001, 0, [](int32_t i) { return i == 250 ? 3500 : 2 + (i % 5); });
-        csr_case probe;
-        probe.alg   = rocsparse_spmv_alg_csr_adaptive;
-        probe.beta  = 0.0f;
-        probe.nan_y = true;
-        std::vector<float> want, got;
-        compute_csr(handle, A, probe, want, got);
-        if(HasFatalFailure())
-            return;
-        if(any_nan(got))
-            GTEST_SKIP() << "csrmv adaptive long-row path reads y when beta == 0 and "
-                            "propagates NaN; known library defect";
-        nan_sweep(A, {rocsparse_spmv_alg_csr_adaptive});
+        // y even with beta == 0. While the library behaves that way the long row keeps
+        // the NaN: every other row is still checked in both pointer modes, and the case
+        // is then skipped. Once the long-row path overwrites y the long row is checked
+        // like the others.
+        constexpr int32_t     long_row = 250;
+        const host_csr<float> A        = make_csr_by_length<float>(
+            600, 4001, 0, [](int32_t i) { return i == long_row ? 3500 : 2 + (i % 5); });
+        bool long_row_nan = false;
+        for(const bool device : {false, true})
+        {
+            csr_case c;
+            c.alg    = rocsparse_spmv_alg_csr_adaptive;
+            c.beta   = 0.0f;
+            c.nan_y  = true;
+            c.device = device;
+            std::vector<float> want, got;
+            compute_csr(handle, A, c, want, got);
+            if(HasFatalFailure())
+                return;
+            SCOPED_TRACE(device ? "device scalars" : "host scalars");
+            if(has_nan(got[long_row]))
+            {
+                long_row_nan  = true;
+                got[long_row] = want[long_row];
+            }
+            expect_no_nan(got, "csrmv y with beta == 0");
+            EXPECT_TRUE(expect_near(want, got, "csrmv y"));
+        }
+        if(long_row_nan && !HasFailure())
+            GTEST_SKIP() << "csrmv adaptive long-row path reads y when beta == 0 and keeps the "
+                            "NaN of row "
+                         << long_row << " (fixed by rocm-libraries#16055, AISPARSE-1100)";
     }
 
     //
