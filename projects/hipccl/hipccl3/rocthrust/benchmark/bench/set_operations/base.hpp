@@ -83,7 +83,7 @@ struct base_set_benchmark : public primbench::benchmark_interface
          in.cend(),
          out.begin());
 
-    const size_t items_in_AB = thrust::distance(out.begin(), result_ends);
+    const size_t items_in_AB = _THRUST_STD::distance(out.begin(), result_ends);
 
     state.set_items(m_items);
     state.add_reads<T>(m_items);

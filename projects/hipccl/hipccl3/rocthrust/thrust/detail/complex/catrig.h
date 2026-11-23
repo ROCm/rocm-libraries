@@ -53,8 +53,9 @@
 #include <thrust/complex.h>
 #include <thrust/detail/complex/math_private.h>
 
-#include <cfloat>
-#include <cmath>
+#include _THRUST_STD_INCLUDE(cfloat)
+#include _THRUST_STD_INCLUDE(cmath)
+#include _THRUST_STD_INCLUDE(limits)
 
 THRUST_NAMESPACE_BEGIN
 namespace detail
@@ -68,8 +69,7 @@ THRUST_HOST_DEVICE inline void raise_inexact()
 {
   const volatile float tiny = 7.888609052210118054117286e-31; /* 0x1p-100; */
   // needs the volatile to prevent compiler from ignoring it
-  volatile float junk = 1 + tiny;
-  (void) junk;
+  [[maybe_unused]] volatile float junk = 1 + tiny;
 }
 
 THRUST_HOST_DEVICE inline complex<double> clog_for_large_values(complex<double> z);
@@ -88,9 +88,9 @@ THRUST_HOST_DEVICE inline complex<double> clog_for_large_values(complex<double> 
  */
 
 /*
- *			================================
- *			| casinh, casin, cacos, cacosh |
- *			================================
+ *      ================================
+ *      | casinh, casin, cacos, cacosh |
+ *      ================================
  */
 
 /*
@@ -431,7 +431,7 @@ THRUST_HOST_DEVICE inline complex<double> cacos(complex<double> z)
     /* cacos(+-Inf + I*NaN) = NaN + I*opt(-)Inf */
     if (isinf(x))
     {
-      return (complex<double>(y + y, -infinity<double>()));
+      return (complex<double>(y + y, -_THRUST_STD::numeric_limits<double>::infinity()));
     }
     /* cacos(NaN + I*+-Inf) = NaN + I*-+Inf */
     if (isinf(y))
@@ -588,9 +588,9 @@ THRUST_HOST_DEVICE inline complex<double> clog_for_large_values(complex<double> 
 }
 
 /*
- *				=================
- *				| catanh, catan |
- *				=================
+ *        =================
+ *        | catanh, catan |
+ *        =================
  */
 
 /*
@@ -635,10 +635,10 @@ THRUST_HOST_DEVICE inline double real_part_reciprocal(double x, double y)
   ix = hx & 0x7ff00000;
   get_high_word(hy, y);
   iy = hy & 0x7ff00000;
-  // #define	BIAS	(DBL_MAX_EXP - 1)
+  // #define  BIAS  (DBL_MAX_EXP - 1)
   const int BIAS = DBL_MAX_EXP - 1;
   /* XXX more guard digits are useful iff there is extra precision. */
-  // #define	CUTOFF	(DBL_MANT_DIG / 2 + 1)	/* just half or 1 guard digit */
+  // #define  CUTOFF  (DBL_MANT_DIG / 2 + 1)  /* just half or 1 guard digit */
   const int CUTOFF = (DBL_MANT_DIG / 2 + 1);
   if (ix - iy >= CUTOFF << 20 || isinf(x))
   {

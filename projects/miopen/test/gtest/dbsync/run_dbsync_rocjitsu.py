@@ -49,7 +49,7 @@ from pathlib import Path
 
 # Pinned rocjitsu source (ROCm/rocm-systems). Bump deliberately.
 ROCJITSU_REPO = "https://github.com/ROCm/rocm-systems.git"
-ROCJITSU_REF = "b2099a6b8703c089134ad526253752d26bbbf43a"  # 2026-09-10
+ROCJITSU_REF = "26a2330c02ea5f1191e67d877fe5761c040040fd"  # 2026-10-08
 
 # family -> [ {arch, rj_config, cus, [retarget]} ]. Each entry is one shipped SystemDB arch and
 # each CU count in "cus" is one CU-corrected rocjitsu run. gfx94X-dcgpu covers BOTH MI300X
@@ -164,7 +164,7 @@ def write_config(
 
 
 def ensure_build_tools():
-    """Install cmake/build-essential/libdrm-dev/git if missing.
+    """Install cmake/build-essential/libdrm-dev/git/ninja-build if missing.
 
     Uses sudo rather than assuming the container runs as root: TheRock's
     no_rocm_image_ubuntu24_04 (and its variants) run as an unprivileged
@@ -172,7 +172,7 @@ def ensure_build_tools():
     pools don't honor a container's --user 0:0 override.
     """
     if (
-        all(shutil.which(t) for t in ("cmake", "c++", "git"))
+        all(shutil.which(t) for t in ("cmake", "c++", "git", "ninja"))
         and Path("/usr/include/libdrm").exists()
     ):
         return
@@ -188,6 +188,7 @@ def ensure_build_tools():
             "build-essential",
             "libdrm-dev",
             "git",
+            "ninja-build",
         ]
     )
 
@@ -215,6 +216,8 @@ def build_rocjitsu(workdir: Path):
             str(src / "emulation" / "rocjitsu"),
             "-B",
             str(build),
+            "-G",
+            "Ninja",
             "-DCMAKE_BUILD_TYPE=Release",
         ]
     )
