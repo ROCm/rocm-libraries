@@ -6,6 +6,7 @@
 #include "DataInitialization.hpp"
 #include "DataInitializationHelpers.hpp"
 #include "ProgramOptions.hpp"
+#include "TimingInstrumentation.hpp"
 #include <Tensile/ContractionProblem.hpp>
 #include <Tensile/ContractionSolution.hpp>
 #include <Tensile/DataTypes.hpp>
@@ -489,6 +490,26 @@ namespace
                && std::string(prop.gcnArchName).find("gfx950") != std::string::npos;
     }
 
+    // RAII guard: enables timing instrumentation for the test scope and
+    // restores the previous state on destruction so tests don't leak.
+    // Pattern from SynchronizerValidatorReporting_test.cpp.
+    struct TimingCapture
+    {
+        bool                                              savedEnabled = TensileLite::Client::g_timingInstrumentationEnabled;
+        std::vector<TensileLite::Client::TimingRec> savedBuffer  = std::move(TensileLite::Client::g_timingBuffer);
+
+        explicit TimingCapture(bool enabled)
+        {
+            TensileLite::Client::g_timingBuffer.clear();
+            TensileLite::Client::g_timingInstrumentationEnabled = enabled;
+        }
+        ~TimingCapture()
+        {
+            TensileLite::Client::g_timingInstrumentationEnabled = savedEnabled;
+            TensileLite::Client::g_timingBuffer                 = std::move(savedBuffer);
+        }
+    };
+
     TensileLite::Client::po::variables_map
         makeMXLaunchArgs(std::vector<std::vector<size_t>> const& problemSizes)
     {
@@ -587,6 +608,138 @@ TEST(DataInitializationMXReuse, NoSwizzleSolutionDoesNotLeakIntoNextPreswizzle)
     EXPECT_TRUE(dataInit.preswizzledA());
     dataInit.postProblem();
 }
+
+// =============================================================================
+//   Section 3b — gfx1250 MX fast-path reuse in prepareGPUInputs (PR #14425)
+//
+//   On gfx1250 MX, the scale layout is geometry-based (not solution-dependent),
+//   so after the first evaluation's slow path, subsequent evaluations of the
+//   same problem should take the fast path and skip the redundant GPU copies.
+//   Switching to a new problem must force a slow-path pass before reuse.
+//
+//   These tests use the ScopedTimer instrumentation to detect which path was
+//   taken: "gpu_input_prep_slow_path" is recorded only on the slow path.
+// =============================================================================
+
+// First eval of an MX problem must take the slow path; second eval of the
+// same problem must take the fast path (no slow-path timer recorded).
+TEST(DataInitializationMXFastPath, Gfx1250MXFastPathReuseAcrossSolutions)
+{
+    hipDeviceProp_t prop{};
+    ASSERT_EQ(hipGetDeviceProperties(&prop, 0), hipSuccess);
+    if(std::string(prop.gcnArchName).find("gfx1250") == std::string::npos)
+        GTEST_SKIP() << "gfx1250-specific fast-path reuse is only observable on gfx1250";
+
+    auto args = makeMXLaunchArgs({{128, 128, 1, 512}});
+    TensileLite::Client::ClientProblemFactory factory(args);
+    MXReuseProbe                              dataInit(args, factory);
+    auto*       problem = factory.problems()[0].get();
+    ContractionSolution solution;
+    setMXSolution(solution, /*mxScaleFormat=*/1, /*miK=*/128);
+
+    TimingCapture capture(true);
+
+    auto hasSlowPath = [] {
+        for(auto const& rec : TensileLite::Client::g_timingBuffer)
+            if(std::string(rec.category).find("gpu_input_prep_slow_path") != std::string::npos)
+                return true;
+        return false;
+    };
+
+    // First eval: must take the slow path.
+    dataInit.preProblem(problem);
+    dataInit.preSolution(&solution);
+    TensileLite::Client::g_timingBuffer.clear();
+    dataInit.prepareGPUInputs(problem);
+    EXPECT_TRUE(hasSlowPath()) << "first eval should take the slow path";
+    dataInit.postSolution();
+
+    // Second eval (same problem, different solution object): must take fast path.
+    ContractionSolution solution2;
+    setMXSolution(solution2, /*mxScaleFormat=*/1, /*miK=*/64);
+    dataInit.preSolution(&solution2);
+    TensileLite::Client::g_timingBuffer.clear();
+    dataInit.prepareGPUInputs(problem);
+    EXPECT_FALSE(hasSlowPath())
+        << "second eval of the same problem should take the fast path";
+    dataInit.postSolution();
+
+    dataInit.postProblem();
+}
+
+// When switching from problem 1 to problem 2, the first eval of problem 2
+// must take the slow path (m_gpuSwizzledReadyForProblem resets in preProblem).
+// The MX scale bytes must also differ between the two problems.
+TEST(DataInitializationMXFastPath, Gfx1250MXFastPathResetsAcrossProblems)
+{
+    hipDeviceProp_t prop{};
+    ASSERT_EQ(hipGetDeviceProperties(&prop, 0), hipSuccess);
+    if(std::string(prop.gcnArchName).find("gfx1250") == std::string::npos)
+        GTEST_SKIP() << "gfx1250-specific fast-path reuse is only observable on gfx1250";
+
+    // Two problems with different geometry so their MX scales differ.
+    auto args = makeMXLaunchArgs({{128, 128, 1, 512}, {256, 128, 1, 512}});
+    TensileLite::Client::ClientProblemFactory factory(args);
+    MXReuseProbe                              dataInit(args, factory);
+    ContractionSolution solution;
+    setMXSolution(solution, /*mxScaleFormat=*/1, /*miK=*/128);
+
+    TimingCapture capture(true);
+
+    auto hasSlowPath = [] {
+        for(auto const& rec : TensileLite::Client::g_timingBuffer)
+            if(std::string(rec.category).find("gpu_input_prep_slow_path") != std::string::npos)
+                return true;
+        return false;
+    };
+
+    auto* problem0 = factory.problems()[0].get();
+    auto* problem1 = factory.problems()[1].get();
+    auto const& gemm0 = dynamic_cast<ContractionProblemGemm const&>(*problem0);
+    auto const& gemm1 = dynamic_cast<ContractionProblemGemm const&>(*problem1);
+
+    // Problem 0, first eval: slow path.
+    dataInit.preProblem(problem0);
+    dataInit.preSolution(&solution);
+    TensileLite::Client::g_timingBuffer.clear();
+    auto inputs0 = dataInit.prepareGPUInputs(problem0);
+    EXPECT_TRUE(hasSlowPath()) << "first eval of problem 0 should take the slow path";
+    auto scales0 = deviceMXScaleA(inputs0, gemm0);
+    dataInit.postSolution();
+
+    // Problem 0, second eval: fast path.
+    dataInit.preSolution(&solution);
+    TensileLite::Client::g_timingBuffer.clear();
+    dataInit.prepareGPUInputs(problem0);
+    EXPECT_FALSE(hasSlowPath())
+        << "second eval of problem 0 should take the fast path";
+    dataInit.postSolution();
+    dataInit.postProblem();
+
+    // Problem 1, first eval: slow path (preProblem resets the per-problem latch).
+    dataInit.preProblem(problem1);
+    dataInit.preSolution(&solution);
+    TensileLite::Client::g_timingBuffer.clear();
+    auto inputs1 = dataInit.prepareGPUInputs(problem1);
+    EXPECT_TRUE(hasSlowPath()) << "first eval of problem 1 should take the slow path";
+    auto scales1 = deviceMXScaleA(inputs1, gemm1);
+    dataInit.postSolution();
+
+    // Problem 1, second eval: fast path.
+    dataInit.preSolution(&solution);
+    TensileLite::Client::g_timingBuffer.clear();
+    dataInit.prepareGPUInputs(problem1);
+    EXPECT_FALSE(hasSlowPath())
+        << "second eval of problem 1 should take the fast path";
+    dataInit.postSolution();
+    dataInit.postProblem();
+
+    // The two problems have different geometry, so their scales must differ.
+    EXPECT_NE(scales0, scales1)
+        << "MX scales for different problem geometries must differ; "
+           "stale reuse across problems would be a correctness bug";
+}
+
 #endif
 
 // =============================================================================
