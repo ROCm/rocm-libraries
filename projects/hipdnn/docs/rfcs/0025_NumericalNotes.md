@@ -2,8 +2,8 @@
 
 - Contributors: Brian Harrison, Garby Gilbert
 - **Status**: Implemented
-- **Status notes**: Shipped in #15493: the backend attribute, `Graph::get_numerical_notes_for_engine()`, the Python binding, the UED `numerical_notes` vocabulary, the MIOpen determinism claims, and note filtering in the cuDNN v9 and v8 layers. #15792 added note filtering on the native and Python `Graph`. Only MIOpen reports notes, and only `NONDETERMINISTIC`; no provider reports any other note (§5).
-- **Last verified**: 2026-11-18 against `develop` (02433ce8085)
+- **Status notes**: Shipped in #15493: the backend attribute, `Graph::get_numerical_notes_for_engine()`, the Python binding, the UED `numerical_notes` vocabulary, the MIOpen determinism claims, and note filtering in the cuDNN v9 and v8 layers. #15792 added note filtering on the native and Python `Graph`. MIOpen engines report `NONDETERMINISTIC` or an explicit empty list; the hip-kernel-provider SDPA engines in the claims table of §5 report an explicit empty list; no provider reports any other note (§5).
+- **Last verified**: 2026-11-23 against `develop` (7f30ff27a59)
 - **Follows**: [RFC 0010: Per-engine behavior notes](./0010_BehaviorNotes.md)
 
 ## Table of Contents

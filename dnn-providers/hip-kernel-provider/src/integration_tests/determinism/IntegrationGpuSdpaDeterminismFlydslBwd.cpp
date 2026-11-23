@@ -50,7 +50,7 @@
  *    (run on gfx1100); gfx942 and gfx90a fp32 reuse the gfx950 fp32 kernels.
  *  - Every graph: bias with a causal mask or padding_mask declines (FlydslSdpaBwdCommon.hpp:
  *    1438-1445), so the bias rows are dense and non-causal; dBias strides are multiples of 8
- *    elements (:1497-1509); a row-broadcast bias is left out (defects IMPL-12, 15643); padding_mask
+ *    elements (:1497-1509); a row-broadcast bias is left out (defect 15643); padding_mask
  *    needs both lengths (:1262-1299); dropout needs seed and offset tensors of one form (:1597-1688);
  *    a head dim off 8 (off 4 for fp32) needs a row pitch of at least ceil8(D) (:894-906).
  *  - No row sets a sink or dSink: the frontend marks the backward sink tokens unsupported

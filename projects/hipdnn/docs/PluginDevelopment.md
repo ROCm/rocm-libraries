@@ -199,7 +199,7 @@ The **EngineManager** ([`EngineManager.hpp`](../plugin_sdk/include/hipdnn_plugin
 For **Engine Implementations** ([`IEngine.hpp`](../plugin_sdk/include/hipdnn_plugin_sdk/interfaces/IEngine.hpp)):
 - Each engine must have a unique inter-plugin `int64_t` identifier
 - Implement `isApplicable()` to report graph support
-- Implement `getDetails()` to return engine metadata and knobs
+- Implement `getDetails()` to return engine metadata and knobs, including numerical notes (see [Reporting Numerical Notes](#reporting-numerical-notes): an explicit empty list claims determinism and must go through the direct builder; an absent field reads as `NONDETERMINISTIC`)
 - Delegate plan building to `IPlanBuilder` implementations
 
 For **Plan Builder Implementations** ([`IPlanBuilder.hpp`](../plugin_sdk/include/hipdnn_plugin_sdk/interfaces/IPlanBuilder.hpp)):

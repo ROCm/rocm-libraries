@@ -254,8 +254,10 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     )
 endif()
 
-# The SDPA note-selection suites: with deselect_numeric_notes({NONDETERMINISTIC}) set, only an
-# engine of sdpa_selection/SdpaProvenEngines.hpp may be selected.
+# The SDPA note-selection suites: with deselect_numeric_notes({NONDETERMINISTIC}) set, which
+# engines survive each row is computed at run time from the engines' reported notes, not from a
+# claim list in sdpa_selection/SdpaProvenEngines.hpp (SelectionRow::unclaimedRanked names the
+# engines expected to report NONDETERMINISTIC for that row).
 # A row exists only for an architecture some engine of this build serves its graph on, as the
 # determinism device cases gate theirs (determinism/CMakeLists.txt). The lists are passed into
 # the code as comma-separated architectures: HKP_SDPA_SELECTION_FWD_ARCHS for the forward graph

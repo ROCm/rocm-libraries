@@ -81,14 +81,14 @@ The hip-kernel-provider SDPA engines report these claims. A claim rests on a sou
 | Engine | Operation | Claim | Basis | Targets proven (device) |
 |---|---|---|---|---|
 | `hipkernel:Gfx942AttentionDense`, `hipkernel:Gfx942AttentionUnified2D`, `hipkernel:Gfx942AttentionUnified3d` | forward | `[]` | source trace, repeat test | gfx942 (MI300X; repeated on MI325X) |
-| `hipkernel:Gfx950AttentionDense`, `hipkernel:Gfx950AttentionUnified2D`, `hipkernel:Gfx950AttentionUnified3D` | forward | `[]` | source trace, repeat test | gfx950 (MI350X; repeated on MI355X) |
+| `hipkernel:Gfx950AttentionDense`, `hipkernel:Gfx950AttentionUnified2D`, `hipkernel:Gfx950AttentionUnified3D` | forward | `[]` | source trace, repeat test | gfx950 (MI355X; repeated on MI355X) |
 | `hipkernel:Gfx1151WmmaAttention`, `hipkernel:Gfx1151WmmaAttentionDecode` | forward | `[]` | source trace, repeat test | gfx11-generic (gfx1100), gfx12-generic (gfx1201) |
-| `hipkernel:flydsl_sdpa_cdna`, `hipkernel:flydsl_sdpa_cdna_decode` | forward | `[]` | source trace, repeat test | gfx90a (MI210), gfx942 (MI300X; repeated on MI325X), gfx950 (MI350X; repeated on MI355X) |
-| `hipkernel:flydsl_sdpa_cdna_dualwave` | forward | `[]` | source trace, repeat test | gfx950 (MI350X; repeated on MI355X) |
+| `hipkernel:flydsl_sdpa_cdna`, `hipkernel:flydsl_sdpa_cdna_decode` | forward | `[]` | source trace, repeat test | gfx90a (MI210), gfx942 (MI300X; repeated on MI325X), gfx950 (MI355X; repeated on MI355X) |
+| `hipkernel:flydsl_sdpa_cdna_dualwave` | forward | `[]` | source trace, repeat test | gfx950 (MI355X; repeated on MI355X) |
 | `hipkernel:flydsl_sdpa_rdna`, `hipkernel:flydsl_sdpa_rdna_decode` | forward | `[]` | source trace, repeat test | gfx11-generic (gfx1100), gfx12-generic (gfx1201) |
 | `hipkernel:flydsl_sdpa_aiw` | forward | `[]` | source trace, repeat test | gfx12-generic (gfx1201) |
-| `hipkernel:flydsl_sdpa_bwd_merged` | backward | `[]` | source trace, repeat test | gfx950 (MI350X; repeated on MI355X) |
-| `hipkernel:flydsl_sdpa_bwd_split` | backward | `[]` | source trace, repeat test | gfx90a (MI210), gfx942 (MI300X; repeated on MI325X), gfx950 (MI350X; repeated on MI355X), gfx11-generic (gfx1100) |
+| `hipkernel:flydsl_sdpa_bwd_merged` | backward | `[]` | source trace, repeat test | gfx950 (MI355X; repeated on MI355X) |
+| `hipkernel:flydsl_sdpa_bwd_split` | backward | `[]` | source trace, repeat test | gfx90a (MI210), gfx942 (MI300X; repeated on MI325X), gfx950 (MI355X; repeated on MI355X), gfx11-generic (gfx1100) |
 | `ASM_SDPA_ENGINE` | backward | absent (`{NONDETERMINISTIC}`) | dQ is accumulated with atomics (fp32 under the default a32 accumulator, 16-bit under a16), so repeated launches of one plan can give different dQ bytes; measured nondeterministic dQ on gfx942 with A32 (dK and dV identical in the measured rows); gfx950 and A16 unmeasured. The engine serves backward on gfx942 and gfx950; neither is claimed | none |
 | `ASM_SDPA_ENGINE` | forward | absent (`{NONDETERMINISTIC}`) | held: the engine accepts an O tensor whose strides map two logical elements to one address, so two workgroups can write one address in either order. A stats (LSE) tensor with that aliasing is declined (`isSupportedStatsTensor`, SdpaFwdPlanBuilder.cpp:517-593). Its MI308X objects have not run. Every repeat test of the other objects on a layout without aliasing gives identical bytes | none |
 | `HIP_FLASH2_ENGINE` | forward | absent (`{NONDETERMINISTIC}`) | held: the engine accepts an O tensor whose strides map two logical elements to one address, and its variant objects (`HIP_FLASH2_BUILD_VARIANTS`) have not run. Every repeat test of the legacy object on a layout without aliasing gives identical bytes | none |

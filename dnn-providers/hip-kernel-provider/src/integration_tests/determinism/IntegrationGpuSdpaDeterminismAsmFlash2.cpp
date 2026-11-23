@@ -13,8 +13,9 @@
 
 /**
  * @file IntegrationGpuSdpaDeterminismAsmFlash2.cpp
- * @brief The determinism rows of ASM_SDPA_ENGINE (forward on gfx942 and gfx950, backward on
- *        gfx942 and gfx950) and HIP_FLASH2_ENGINE (gfx942). CMake defines HKP_DETERMINISM_ASM_SDPA
+ * @brief The determinism rows of ASM_SDPA_ENGINE (forward on gfx942 and gfx950; the engine also
+ *        serves backward on gfx942 and gfx950, but the rows below measure backward on gfx942
+ *        only) and HIP_FLASH2_ENGINE (gfx942). CMake defines HKP_DETERMINISM_ASM_SDPA
  *        and HKP_DETERMINISM_HIP_FLASH2 for the engines this build has, and each table below
  *        exists only under its definition.
  */
