@@ -172,26 +172,11 @@ public:
 
     void stop() override
     {
-        bool no_samples;
         {
             std::lock_guard<std::mutex> lock(m_mutex);
-            if(!m_active)
-                return;
             m_active = false;
-            no_samples
-                = m_MEMCLK.empty() && std::all_of(m_SYSCLK.begin(), m_SYSCLK.end(), [](auto& v) {
-                      return v.empty();
-                  });
         }
         m_cv.notify_all();
-
-        // A loop shorter than the first sample reports the clocks it ended at
-        if(no_samples)
-        {
-            sample                      s = read_sample();
-            std::lock_guard<std::mutex> lock(m_mutex);
-            store(s);
-        }
     }
 
     double getLowestAverageSYSCLK() override
@@ -334,20 +319,24 @@ private:
         while(!m_exit)
         {
             m_cv.wait(lock, [this] { return m_exit || m_active; });
-            while(m_active && !m_exit)
+
+            const uint64_t run     = m_run;
+            auto           stopped = [this, run] { return m_exit || !m_active || run != m_run; };
+
+            // start() follows a stream synchronization, so the GPU is idle; let the timed calls
+            // start before the first sample. Loops shorter than this report 0 (no sample).
+            if(m_cv.wait_for(lock, std::chrono::milliseconds(5), stopped))
+                continue;
+
+            // then sample every 50 ms, as hipBLASLt does
+            do
             {
-                const uint64_t run = m_run;
                 lock.unlock();
                 sample s = read_sample();
                 lock.lock();
-                if(m_active && run == m_run)
+                if(!stopped())
                     store(s);
-
-                // collect every 50 ms, as rocBLAS and hipBLASLt do
-                m_cv.wait_for(lock, std::chrono::milliseconds(50), [this, run] {
-                    return m_exit || !m_active || run != m_run;
-                });
-            }
+            } while(!m_cv.wait_for(lock, std::chrono::milliseconds(50), stopped));
         }
     }
 

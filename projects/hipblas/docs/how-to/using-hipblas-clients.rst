@@ -81,7 +81,9 @@ However, other examples can be found in the `rocBLAS <https://github.com/ROCm/ro
 
 GPU clocks vary with power and thermal limits, which affects the measured performance.
 When hipblas-bench is built with AMD SMI, set ``HIPBLAS_BENCH_FREQ=1`` to sample the clocks
-every 50 ms while the timed iterations run and report them with each result, in MHz:
+every 50 ms while the timed iterations run and report them with each result, in MHz.
+The first sample is taken 5 ms after the timed iterations start, so a result whose timed iterations
+take less than that reports 0:
 
 *  ``lowest-avg-freq`` and ``lowest-median-freq``: the average and median engine clock of the slowest XCD.
 *  ``avg-MCLK`` and ``median-MCLK``: the average and median memory clock.
