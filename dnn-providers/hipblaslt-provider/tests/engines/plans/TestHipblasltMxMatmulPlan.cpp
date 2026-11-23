@@ -1000,7 +1000,9 @@ TEST_F(TestGpuMxMatmulPlanExecute, RunsWithoutWorkspaceWhenNoneIsNeeded)
 
 // The workspace is [A scale prep | B scale prep | hipBLASLt workspace]. With a large K
 // hipBLASLt asks for a workspace of its own, so the matmul must use the region after
-// the prepared scales: placed over them, or left out, C changes.
+// the prepared scales: placed over them, or left out, C changes. A format for which
+// hipBLASLt asks for no workspace is recorded and passed over; the test skips only
+// when that is so for every format.
 TEST_F(TestGpuMxMatmulPlanExecute, PreparedScalesAndHipblasltWorkspaceDoNotOverlap)
 {
     const auto inputs = randomInputs(LARGE_K_SHAPE);
@@ -1009,6 +1011,8 @@ TEST_F(TestGpuMxMatmulPlanExecute, PreparedScalesAndHipblasltWorkspaceDoNotOverl
     {
         formats.emplace_back(MxScaleFormat::SWIZZLED_GFX950);
     }
+    std::string withoutWorkspace;
+    size_t checked = 0;
     for(const auto& format : formats)
     {
         const auto expected = execute(_handle, {true, true, true, true}, inputs, false, format);
@@ -1017,11 +1021,23 @@ TEST_F(TestGpuMxMatmulPlanExecute, PreparedScalesAndHipblasltWorkspaceDoNotOverl
         ASSERT_GT(actual.preparedScaleBytes, 0u) << name;
         if(actual.workspaceSize <= actual.preparedScaleBytes)
         {
-            GTEST_SKIP() << name << ": hipBLASLt asks for no workspace for " << LARGE_K_SHAPE.m
-                         << "x" << LARGE_K_SHAPE.n << "x" << LARGE_K_SHAPE.k;
+            withoutWorkspace += withoutWorkspace.empty() ? "" : ", ";
+            withoutWorkspace += name;
+            continue;
         }
+        ++checked;
         EXPECT_TRUE(actual.c == expected.c)
             << name << ": prepared scales next to a hipBLASLt workspace give a different C";
+    }
+    if(!withoutWorkspace.empty())
+    {
+        RecordProperty("formats_without_hipblaslt_workspace", withoutWorkspace);
+    }
+    if(checked == 0)
+    {
+        GTEST_SKIP() << "hipBLASLt asks for no workspace for " << LARGE_K_SHAPE.m << "x"
+                     << LARGE_K_SHAPE.n << "x" << LARGE_K_SHAPE.k << " (" << withoutWorkspace
+                     << ")";
     }
 }
 
