@@ -111,11 +111,21 @@ _DISABLE_CASES = [
     ("spills, no large tile", dict(MIWaveTile=[10, 8])),
     ("store overflows VGPR",  dict(MIWaveTile=[4, 16])),
     ("MX skew overflows SGPR", dict(MIWaveTile=[2, 16])),
-    # fp8 operand fragments are twice fp4's for the same MI shape, so the
-    # deeper unroll runs out of registers where fp4 does not.
+    # Past DepthU 128 the fused store fails two ways for fp8: four shipped
+    # geometries need 264 VGPRs against the 256 cap, and the ones that do fit
+    # return wrong results. The hold is on the depth, so it does not matter
+    # which geometry or which depth past 128 the case uses.
     ("fp8 at DepthU 256",     dict(ProblemType={"DataTypeA": DataType("float8"),
                                                 "DataTypeB": DataType("float8")},
                                    DepthU=256)),
+    ("fp8 at DepthU 256, a geometry that fits",
+                              dict(ProblemType={"DataTypeA": DataType("float8"),
+                                                "DataTypeB": DataType("float8")},
+                                   DepthU=256, MIWaveTile=[6, 10],
+                                   MacroTile0=192, MacroTile1=320)),
+    ("fp8 at DepthU 512",     dict(ProblemType={"DataTypeA": DataType("float8"),
+                                                "DataTypeB": DataType("float8")},
+                                   DepthU=512)),
     # Plain fp8 is a shipped type and takes a different register peak than the
     # scaled one: MT128x384 reaches 276 VGPRs, which judgeRegisterBudget
     # refuses outright. Scales on one side only is equally unmeasured.
@@ -192,8 +202,8 @@ def test_subsumed_arms():
 
     Neither can be reached by any input, so neither is load-bearing today. They
     are asserted rather than removed because the subsumption is a property of
-    their neighbours: if ``plsinDataTypes`` ever stopped requiring fp4 on
-    both operands, or the re-check after the gate were dropped, these would
+    their neighbours: if ``plsinStoreDataTypes`` ever stopped requiring an MX
+    type on both operands, or the re-check after the gate were dropped, these would
     become the only thing disabling a config -- and that should be a decision,
     not a surprise.
     """
@@ -222,6 +232,23 @@ def test_depth_hold_tolerates_a_state_with_no_depth():
     assert resolve() is True
     assert resolve(ProblemType={"DataTypeA": DataType("float8"),
                                 "DataTypeB": DataType("float8")}) is True
+
+
+def test_gate_answers_on_a_raw_valued_problem_type():
+    """A ``ProblemType`` holding raw values must not take the gate down.
+
+    Both datatype predicates treat a state they cannot classify as out of scope
+    rather than raising, because the gate is asked about solutions at every
+    stage of being built. The fp8 holds have to follow that convention: reading
+    the operand types directly would raise ``AttributeError`` here, from an arm
+    whose neighbours all answer.
+    """
+    s = state()
+    s["ProblemType"] = {"DataTypeA": 8, "DataTypeB": 8, "DestDataType": 9,
+                        "HighPrecisionAccumulate": True,
+                        "MXBlockA": 32, "MXBlockB": 32}
+    Solution.assignPostLoopStoreInNll(s)
+    assert s["PostLoopStoreInNll"] is False
 
 
 def test_absent_key_is_defaulted_then_gated():

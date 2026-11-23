@@ -125,6 +125,11 @@ def plsinStoreDataTypes(kernel) -> bool:
     is read as unscaled, which is the answer that withholds the store, and the
     fp4 arm is left alone so no fp4 kernel's answer moves.
 
+    A mixed pair -- fp4 on one operand, fp8 on the other -- is in scope, and the
+    block-scale requirement is read off the pair rather than off each operand:
+    one fp8 side asks for scales on both. The register argument above bounds the
+    mixed case by the fp8 one, which is the wider of the two fragments.
+
     Answerable at any point, including on a half-built solution dict, and
     "not in scope" is the conservative answer there -- same convention as
     isMxf4SubtilePath, which this is asked alongside.
@@ -141,6 +146,33 @@ def plsinStoreDataTypes(kernel) -> bool:
         if dtA.isFloat8() or dtB.isFloat8():
             return bool(pt.get("MXBlockA")) and bool(pt.get("MXBlockB"))
         return True
+    except (KeyError, TypeError, AttributeError):
+        return False
+
+
+def plsinFp8Operand(kernel) -> bool:
+    """Whether either operand is fp8 -- the test the fp8-only PLSIN holds use.
+
+    A positive test rather than "not plsinDataTypes". The holds want to know
+    that an fp8 fragment is in play, and reading that off the fp4 predicate
+    would make them depend on it staying fp4-only -- one widening edit there
+    would both carry the MXF4 subtile bundle into fp8 and silently delete the
+    holds, which are what keeps a 264-VGPR kernel out of the library build.
+
+    Tolerant of partial state like its neighbours, so a gate that asks it
+    answers rather than raises on a ProblemType that still holds raw values.
+    Unknown types read as not-fp8, which is what leaves the fp4 scope alone.
+
+    The positive form is deliberate, and it moves the obligation: a third
+    operand type admitted to plsinStoreDataTypes escapes both holds rather
+    than inheriting them, so it owes its own hold decision at the depths and
+    thread counts fp8 is held at. That obligation is enforced by
+    test_store_types_are_plsin_types_widened_by_exactly_fp8, which fails the
+    moment anything but fp8 widens the type predicate.
+    """
+    try:
+        pt = kernel["ProblemType"]
+        return bool(pt["DataTypeA"].isFloat8() or pt["DataTypeB"].isFloat8())
     except (KeyError, TypeError, AttributeError):
         return False
 

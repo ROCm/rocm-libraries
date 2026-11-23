@@ -23,6 +23,7 @@ from tensilelite.Common.Utilities import (
     isPlsinSubtilePath,
     plsinBlockSchedTile,
     plsinDataTypes,
+    plsinFp8Operand,
     plsinStoreDataTypes,
     plsinStoreScope,
 )
@@ -104,6 +105,40 @@ def test_store_types_are_plsin_types_widened_by_exactly_fp8():
         elif widened:
             assert FP8 in (dtA, dtB), \
                 f"widened by something other than fp8: {dtA} {dtB} {dtD}"
+
+
+def test_fp8_operand_is_a_positive_test_rather_than_the_fp4_predicate_inverted():
+    """What the gate's two fp8-only holds read.
+
+    They have to key on fp8 being present rather than on fp4 being absent. Read
+    as ``not plsinDataTypes``, a hold would answer "fp8" for a bf16 kernel, and
+    widening ``plsinDataTypes`` -- which also carries ``isMxf4SubtilePath`` --
+    would delete both holds as a side effect. So assert the exact membership,
+    including where the two predicates would disagree.
+    """
+    for dtA, dtB in itertools.product((FP4, FP8, BF16), repeat=2):
+        kernel = kern(dtA=dtA, dtB=dtB)
+        assert plsinFp8Operand(kernel) is (FP8 in (dtA, dtB)), \
+            f"not read off the operands: {dtA} {dtB}"
+
+    # Where the inversion would be wrong: neither type is fp4, and none is fp8.
+    assert plsinDataTypes(kern(dtA=BF16, dtB=BF16)) is False
+    assert plsinFp8Operand(kern(dtA=BF16, dtB=BF16)) is False
+
+    # Scales are not its business -- the type predicate decides that.
+    assert plsinFp8Operand(kern(mxA=0, mxB=0)) is True
+
+
+def test_fp8_operand_answers_on_partially_built_state():
+    """Same tolerance as its neighbours, for the same reason.
+
+    The gate asks it while deriving a solution, so it has to answer on a state
+    whose ``ProblemType`` is missing, empty, or still holding raw values rather
+    than raise from inside an arm whose neighbours all answer.
+    """
+    assert plsinFp8Operand({}) is False
+    assert plsinFp8Operand({"ProblemType": {}}) is False
+    assert plsinFp8Operand({"ProblemType": {"DataTypeA": 8, "DataTypeB": 8}}) is False
 
 
 def test_fnuz_fp8_is_out_of_scope():

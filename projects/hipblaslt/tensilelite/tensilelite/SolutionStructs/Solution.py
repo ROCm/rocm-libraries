@@ -95,7 +95,7 @@ from .Utilities import TDM_PAD_INTERVAL_LIMIT, isSubtileIterateMode, reject, rou
 from .Validators.MXScaleFormat import validateHostPreSwizzle128x4, validateMXScaleFormatCombination
 from .Validators.Subtile import (subtileStackForTLU1, subtileTLU1StackReason,
                                  validateSubtileGRKPartition)
-from ..Common.Utilities import isMxf4SubtilePath, isSubtileSwizzledTensor, plsinDataTypes, plsinStoreDataTypes, swizzleTensorMaxDepthU
+from ..Common.Utilities import isMxf4SubtilePath, isSubtileSwizzledTensor, plsinFp8Operand, plsinStoreDataTypes, swizzleTensorMaxDepthU
 
 
 def _oneSidedMX(state):
@@ -2427,17 +2427,33 @@ class Solution(collections.abc.Mapping):
                         or (not barrierFreeStore))
       # fp8 operand fragments are twice fp4's for the same MI shape, so the
       # headroom the fused store needs is not the same for the two. At DepthU
-      # 128 it fits everywhere measured; at DepthU 256 four of the shipped
-      # tiles (MIWaveTile [6,6], [8,4], [10,2], [2,10]) land on 264 VGPRs
-      # against the 256 cap, which judgeRegisterBudget refuses outright rather
-      # than emit as a dropped shell. Hold fp8 to the shallower unroll until
-      # the deeper one has a bound derived rather than sampled. fp4 keeps its
-      # existing scope at every DepthU.
+      # 128 it fits everywhere measured. At DepthU 256 the deeper unroll fails
+      # in two independent ways, which is why this is held on the depth rather
+      # than fitted to the geometries that fail:
+      #
+      #   Registers. Four of the shipped geometries -- MT128x160 (MIWaveTile
+      #   [2,10]), MT192x192 ([6,6]), MT128x256 ([8,4]) and MT160x128 ([10,2])
+      #   -- need 264 VGPRs against the 256 cap, and judgeRegisterBudget
+      #   refuses a PLSIN kernel outright rather than emit it as a dropped
+      #   shell, so the library build fails. Reproduced by emitting the shipped
+      #   Origami MXFP8 logic entries with this hold removed; the synthetic
+      #   equivalents of those tiles fit, so the entry's own parameters are
+      #   part of the result.
+      #
+      #   Results. With the hold removed and the library built, 16 of the 91
+      #   fused DepthU-256 solutions offered for 1664x6912x256 fail
+      #   verification, returning NaN. On the same problem every fused
+      #   DepthU-128 solution and every unfused DepthU-256 solution is clean,
+      #   so it is the fused store at the deeper unroll that is wrong, not the
+      #   depth. Until that is understood, no DepthU-256 geometry is safe to
+      #   fuse on the strength of fitting.
+      #
       # DepthU is read with a default because the gate also runs on solutions
       # that do not carry one -- pre-tuned logic entries, and the sparse states
       # the arm tests drive it with. An unknown depth is not a reason to hold:
       # the hold applies where the deeper unroll is known to be in play.
-      fp8DepthFits = plsinDataTypes(state) or state.get("DepthU", 0) <= 128
+      fp8In = plsinFp8Operand(state)
+      fp8DepthFits = (not fp8In) or state.get("DepthU", 0) <= 128
       # gfx950 holds one 131072-register unified VGPR file per CU, so an
       # N-thread workgroup is allowed 131072/N registers per thread: 512 at four
       # waves, which is above the 256 architectural cap and so never binds, and
@@ -2450,9 +2466,9 @@ class Solution(collections.abc.Mapping):
       # Held on the thread count rather than the register peak because the peak
       # is not known until the store is emitted, and the budget is. Every MXFP8
       # entry in the shipped logic is two or four waves, so no library kernel
-      # loses the store to this. fp4 keeps its existing scope, and an unknown
-      # thread count is not a reason to hold, as with DepthU above.
-      fp8WaveFits = plsinDataTypes(state) or state.get("NumThreads", 0) <= 256
+      # loses the store to this. fp4 is not asked, and an unknown thread count
+      # is not a reason to hold, as with DepthU above.
+      fp8WaveFits = (not fp8In) or state.get("NumThreads", 0) <= 256
       registerFail = ((not spillFree)
                       or (not storeFitsVgpr)
                       or (not mxBlockScaleSgprFits)

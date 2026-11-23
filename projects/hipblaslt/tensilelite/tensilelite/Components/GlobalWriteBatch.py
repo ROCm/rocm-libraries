@@ -2016,6 +2016,15 @@ class GlobalWriteBatchWriter:
         # hard-fails with no valid solution. tmpS01 is already a 2-aligned pair
         # on this wave64-only path and is dead here -- it is written per-element
         # later in the store loop -- so a one-shot mask costs nothing.
+        #
+        # The scope widened from fp4 to every kernel with a fused store, and the
+        # argument carries over because none of it is about the operand type: the
+        # pair is 2-aligned by the wave64 path, and what makes it dead is the
+        # per-element write that follows in the store loop, which is the same
+        # code for both types. Measured on an MXFP8 DepthU-128 MIWaveTile [8,4]
+        # kernel, the SGPR high-water comes out lower with the fused store than
+        # without it (next_free_sgpr 90 against 102), so the borrow does not
+        # trade one shortage for another.
         _borrowTmpS01 = plsinStoreScope(self.kernel)
         stmp = self.tmpS01 if _borrowTmpS01 \
           else self.parentWriter.sgprPool.checkOutAligned(2, 2, tag="_emitNonatomicAdd_stmp")
