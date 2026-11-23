@@ -1228,6 +1228,7 @@ TEST_F(HostInternalBranches, copy_csrmv_info)
               info.adaptive.first_row = 0;
               info.adaptive.last_row  = 1;
               info.lrb.size           = 1;
+              info.lrb.nRowsBins[rocsparse::lrb_num_bins - 1] = 1;
               info.index_type_I       = itype;
               info.index_type_J       = jtype;
               info.descr              = nullptr;
@@ -1277,6 +1278,11 @@ TEST_F(HostInternalBranches, copy_csrmv_info)
         EXPECT_EQ(d.adaptive.first_row, s.adaptive.first_row);
         EXPECT_EQ(d.adaptive.last_row, s.adaptive.last_row);
         EXPECT_EQ(d.lrb.size, s.lrb.size);
+        // LRB compute launches a bin only if its host count is nonzero.
+        for(int j = 0; j < rocsparse::lrb_num_bins; ++j)
+        {
+            EXPECT_EQ(d.lrb.nRowsBins[j], s.lrb.nRowsBins[j]) << "nRowsBins[" << j << "]";
+        }
         EXPECT_EQ(d.index_type_I, s.index_type_I);
         EXPECT_EQ(d.index_type_J, s.index_type_J);
     };

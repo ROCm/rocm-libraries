@@ -26,6 +26,9 @@
 #include "rocsparse_control.hpp"
 #include "rocsparse_utility.hpp"
 
+#include <algorithm>
+#include <iterator>
+
 _rocsparse_csrmv_info::_rocsparse_csrmv_info() = default;
 
 _rocsparse_csrmv_info::~_rocsparse_csrmv_info()
@@ -292,6 +295,8 @@ rocsparse_status rocsparse::copy_csrmv_info(rocsparse_csrmv_info       dest,
     dest->index_type_J       = src->index_type_J;
     dest->alg                = src->alg;
     dest->max_nnz_per_row    = src->max_nnz_per_row;
+
+    std::copy(std::begin(src->lrb.nRowsBins), std::end(src->lrb.nRowsBins), dest->lrb.nRowsBins);
 
     // Not owned by the info struct. Just pointers to externally allocated memory
     dest->descr       = src->descr;
