@@ -33,7 +33,7 @@ class Parser:
     @staticmethod
     def get_parser(
         default_bytes: Optional[int] = None,
-        default_max_feval: int = 100,
+        default_max_feval: Optional[int] = None,
         default_output_dir: str = "../output",
         default_strategy: Optional[str] = None,
     ):
@@ -49,7 +49,7 @@ class Parser:
             "--max-fevals",
             type=int,
             default=default_max_feval,
-            help=f"Maximum number of unique valid function evaluations (default: {default_max_feval})",
+            help=f"Maximum number of unique valid function evaluations (default: {default_max_feval or 'per-algorithm, 100 unless the tuner overrides it'})",
         )
         parser.add_argument(
             "--output-dir",

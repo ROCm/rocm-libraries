@@ -118,7 +118,9 @@ class Tuner(BaseTuner):
     def _get_default_args(cls) -> TunerArgs:
         # The search space is too large to brute force (~1800 valid configs per type).
         return TunerArgs(
-            algo_full_name="device_radix_sort_onesweep", strategy="dual_annealing"
+            algo_full_name="device_radix_sort_onesweep",
+            strategy="dual_annealing",
+            max_fevals=300,
         )
 
     def __init__(self, args: TunerArgs) -> None:
