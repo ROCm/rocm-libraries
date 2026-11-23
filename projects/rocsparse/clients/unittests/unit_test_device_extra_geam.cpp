@@ -223,7 +223,12 @@ namespace
     // two full 32-chunks; row 3 puts two entries past lane 32 of a 64-chunk that starts at
     // column 5, or spreads over two sparse 32-chunks; row 4 (columns 30 to 63) is a full
     // 32-chunk plus two entries, or the lower 34 lanes of a 64-chunk. A kernel built for the
-    // other wavefront size misplaces the lanes above 32 of rows 0 to 2.
+    // other wavefront size fails differently on each kind of GPU. On a wave32 GPU (seen on
+    // gfx1201), a 64-lane kernel splits each row over two hardware wavefronts, and lanes 32
+    // to 63 take their offsets from a ballot that holds only their own half, which misplaces
+    // the lanes above 32 of rows 0 to 2. On a wave64 GPU (not run), a 32-lane kernel puts two
+    // rows in one hardware wavefront: the 64-bit ballot holds both rows, the upper row takes
+    // its offsets from the lower row's bits, and both rows advance by their combined count.
     template <typename T>
     void full_chunk_geam(rocsparse_handle handle, int base_C)
     {
