@@ -403,6 +403,13 @@ repos:
         files: ^projects/rocsparse/scripts/(merge_coverage_info|test_merge_coverage_info)\.py$
         pass_filenames: false
 
+      - id: rocsparse-testing-md-metrics-tests
+        name: rocSPARSE testing.md metrics script self-tests
+        entry: python -m unittest discover -s projects/rocsparse/scripts/testing_md_metrics -p test_testing_md_metrics.py
+        language: python
+        files: ^projects/rocsparse/scripts/testing_md_metrics/.*\.py$
+        pass_filenames: false
+
       # rocKE layering ratchet: platform's imports of the library packages
       # (kernels, builders, dispatch, benchmarks) may only shrink. It audits
       # the source tree, so the installed rocke_pytest CTest skips it; this
