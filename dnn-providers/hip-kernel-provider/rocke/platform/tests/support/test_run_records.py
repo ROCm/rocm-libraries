@@ -2,8 +2,9 @@
 # SPDX-License-Identifier: MIT
 """rocke.tests.run_records records what every pytest process of a run did with
 each test, loaded through the environment alone: each test's events with its
-file, node name and reason, the reason a plugin gives for a deselection, and
-the records of a child pytest process a test starts.
+file, node name and reason, how each test that ran ended, the reason a plugin
+gives for a deselection, and the records of a child pytest process a test
+starts.
 
 Each case runs real pytest processes over a small test tree it writes.
 """
@@ -19,6 +20,7 @@ import pytest
 from rocke.tests.lanes import EXHAUSTIVE_CASES, SOURCE_TREE_CASES, skip_until_reason
 from rocke.tests.run_records import (
     OTHER_SHARD,
+    RAN_OUTCOMES,
     RECORDS_DIR_ENV,
     RunRecord,
     read_run_records,
@@ -199,7 +201,7 @@ def test_a_deselection_is_put_down_to_the_filter_that_made_it(tmp_path):
         for _, node, event, reason in _events(records)
         if event != "collected"
     } == {
-        ("test_reference[gfx942]", "ran", ""),
+        ("test_reference[gfx942]", "ran", "passed"),
         (
             "test_reference[gfx950]",
             "deselected",
@@ -290,6 +292,67 @@ def test_a_child_pytest_process_writes_records_of_its_own(tmp_path):
         ("test_parent.py", "test_runs_a_child"),
         ("test_child.py", "test_in_the_child"),
     }
+
+
+def test_a_test_that_ran_is_recorded_with_how_it_ended(tmp_path):
+    tree = tmp_path / "tree"
+    tree.mkdir()
+    _write(
+        tree,
+        "test_outcomes.py",
+        """
+        import pytest
+
+        @pytest.fixture
+        def broken_setup():
+            raise RuntimeError("setup")
+
+        @pytest.fixture
+        def broken_teardown():
+            yield
+            raise RuntimeError("teardown")
+
+        def test_passes():
+            pass
+
+        def test_fails():
+            assert False
+
+        @pytest.mark.xfail(reason="known")
+        def test_fails_as_expected():
+            assert False
+
+        @pytest.mark.xfail(reason="known", strict=False)
+        def test_passes_though_expected_to_fail():
+            pass
+
+        @pytest.mark.xfail(reason="known", strict=True)
+        def test_passes_though_strictly_expected_to_fail():
+            pass
+
+        def test_setup_raises(broken_setup):
+            pass
+
+        def test_passes_then_teardown_raises(broken_teardown):
+            pass
+        """,
+    )
+    records = tmp_path / "records"
+    _run_pytest(tree, records)
+    ran = sorted(
+        (node, reason) for _, node, event, reason in _events(records) if event == "ran"
+    )
+    assert ran == [
+        ("test_fails", "failed"),
+        ("test_fails_as_expected", "xfailed"),
+        ("test_passes", "passed"),
+        ("test_passes_then_teardown_raises", "error"),
+        ("test_passes_then_teardown_raises", "passed"),
+        ("test_passes_though_expected_to_fail", "xpassed"),
+        ("test_passes_though_strictly_expected_to_fail", "failed"),
+        ("test_setup_raises", "error"),
+    ]
+    assert {reason for _, reason in ran} == RAN_OUTCOMES
 
 
 def test_nothing_is_written_without_the_records_directory(tmp_path):

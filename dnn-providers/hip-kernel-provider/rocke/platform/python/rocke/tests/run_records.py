@@ -21,8 +21,9 @@ after the file (``[Class::]test[params]``). Its ``event`` is one of:
   removed it gave (:func:`note_deselection`), else the ``-m`` or ``-k``
   expression that rejects it (declaring the lanes, ``rocke.tests.lanes``,
   whose markers are what it rejects);
-- ``ran``: it ran (passed, failed, xfailed or xpassed), or erred in setup or
-  teardown, which a run reports as a failure;
+- ``ran``: it ran, or erred in setup or teardown; ``reason`` is how it ended,
+  one of :data:`RAN_OUTCOMES` (a test whose teardown raises after its body
+  ran has two ``ran`` records), so runs of one test can be compared;
 - ``skipped``: it was skipped; ``reason`` is pytest's skip reason;
 - ``module_skipped``: its whole file was skipped while collecting (no node
   name); ``reason`` is pytest's skip reason;
@@ -58,6 +59,7 @@ from .lanes import LANES, skip_until_reason
 __all__ = [
     "EVENTS",
     "OTHER_SHARD",
+    "RAN_OUTCOMES",
     "RECORDS_DIR_ENV",
     "RunRecord",
     "note_deselection",
@@ -72,6 +74,9 @@ EVENTS = frozenset(
 )
 # The deselection reason of a test a CI shard leaves to another shard.
 OTHER_SHARD = "deselected: another shard of this entry runs it"
+# How a ``ran`` test ended: its body passed or failed, an expected failure
+# failed or passed (non-strict), or its setup or teardown raised.
+RAN_OUTCOMES = frozenset({"passed", "failed", "xfailed", "xpassed", "error"})
 _SKIP_PREFIX = "Skipped: "
 _DESELECTION_REASON = pytest.StashKey[str]()
 
@@ -170,14 +175,17 @@ class _Recorder:
         node = _node_name(item)
         if hasattr(report, "wasxfail"):
             if report.when == "call":
-                self._write(item.path, node, "ran")
+                outcome = "xfailed" if report.skipped else "xpassed"
+                self._write(item.path, node, "ran", outcome)
         elif report.skipped:
             # A skip in setup or in the test body: the test did not check what
             # it is for. (A skip in teardown comes after the call's report.)
             if report.when != "teardown":
                 self._write(item.path, node, "skipped", _skip_reason(report))
-        elif report.when == "call" or report.failed:
-            self._write(item.path, node, "ran")
+        elif report.when == "call":
+            self._write(item.path, node, "ran", report.outcome)
+        elif report.failed:
+            self._write(item.path, node, "ran", "error")
 
     def pytest_unconfigure(self) -> None:
         self._out.close()
