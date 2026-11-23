@@ -18,7 +18,7 @@
         },
         {
             "name": "hipccl-all",
-            "description": "Build all hipCCL components (rocprim, hipcub, rocthrust; libhipcxx not yet wired in)",
+            "description": "Build all hipCCL components (rocprim, hipcub, rocthrust). libhipcxx must be installed, or add -DHIPCCL_BUILD_LIBHIPCXX=ON",
             "inherits": ["default:release"],
             "cacheVariables": {
                 "HIPCCL_BUILD_ALL": "ON"

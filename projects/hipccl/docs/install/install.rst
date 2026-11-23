@@ -99,7 +99,7 @@ Upgrading from standalone rocPRIM, hipCUB, or rocThrust
 =======================================================
 
 hipCCL supersedes the standalone ``rocprim``, ``hipcub``, and ``rocthrust`` development packages.
-The standalone packages aren't removed automatically. They must be removed manually to avoid conflicts.
+The standalone packages aren't removed automatically. To avoid duplicate headers and package conflicts, remove them first.
 
 
 .. tab-set::
@@ -110,8 +110,6 @@ The standalone packages aren't removed automatically. They must be removed manua
 
          sudo apt remove rocprim-dev hipcub-dev rocthrust-dev
          sudo apt install amdrocm-hipccl-dev
-
-      ``sudo apt full-upgrade`` permits package removals and resolves the conflict in one step.
 
    .. tab-item:: RHEL-based distros
 

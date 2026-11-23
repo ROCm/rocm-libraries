@@ -1,12 +1,10 @@
-# hipCCL CI scaffold (not live)
+# hipCCL CI scaffold
 
-GitHub Actions only reads `.github/workflows/` at a repository's *root*. Since
-`hipccl3` currently lives nested inside `rocm-libraries` at
-`projects/hipccl/hipccl3/`, nothing in this directory runs today - it is a
-staged copy of `rocm-libraries`' own `.github/` (see
-`../../../../docs/hipccl-repository-split-proposal.md`), adapted for hipCCL's
-scope, ready to become the real root `.github/` on the day `hipccl3` becomes
-the root of its own `ROCm/hipCCL` repository.
+This directory is a copy of `rocm-libraries`' own `.github/`, adapted for
+hipCCL's scope. GitHub Actions only reads `.github/workflows/` at a
+repository's *root*, and `hipccl3` lives nested inside `rocm-libraries` at
+`projects/hipccl/hipccl3/`, so the workflows here are not triggered from this
+location.
 
 ## What's here and where it came from
 
@@ -36,10 +34,9 @@ the root of its own `ROCm/hipCCL` repository.
   `repos-config.json` uses `"category": "projects"` to match that expectation,
   but hipccl3's actual on-disk layout is flat (`rocprim/`, not
   `projects/rocprim/`). Either hipCCL adopts a `projects/` subfolder
-  convention before real extraction, or `get_valid_prefixes()` needs a small
+  convention, or `get_valid_prefixes()` needs a small
   change to support an empty/no category. Not resolved in this pass.
 - **`component-ci*.yml`, `hipblaslt-asan-ci.yml`, `hipdnn-superbuild-ci.yml`**
   intentionally not copied - they're scoped to Tensile/MIOpen/rocISA/hipBLASLt/
   hipDNN, none of which are part of hipCCL.
-- None of this has been run. Treat it as a starting point for whoever does the
-  real extraction, not as validated CI.
+- None of this has been run. Treat it as a starting point, not as validated CI.

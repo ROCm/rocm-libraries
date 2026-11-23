@@ -23,6 +23,9 @@ hipCCL uses `HIPCC <https://rocm.docs.amd.com/projects/HIPCC/en/latest/index.htm
 
 `CMake 3.25.2 or later <https://cmake.org/>`_ and C++17 are required.
 
+In ``hipccl3``, hipCUB and rocThrust also require libhipcxx 3.4 or later on the ROCm platform.
+See :ref:`hipccl-libhipcxx`.
+
 .. _hipccl-get-source:
 
 Get the hipCCL source code
@@ -99,13 +102,28 @@ Both layouts and the selector share these CMake options.
 
 ``HIPCCL_BUILD_ALL``
     Set to ``ON`` to force ``HIPCCL_BUILD_ROCPRIM``, ``HIPCCL_BUILD_HIPCUB``, and ``HIPCCL_BUILD_ROCTHRUST`` on, including any that were set to ``OFF``.
+    It doesn't build libhipcxx; see ``HIPCCL_BUILD_LIBHIPCXX``.
     The default is ``OFF``.
 
 ``HIPCCL_BUILD_LIBHIPCXX``
     This option exists only for ``hipccl3``.
-    Set to ``ON`` to also build the ``libhipcxx`` git submodule.
+    Set to ``ON`` to also build the ``libhipcxx`` git submodule as part of the build.
     Initialize the submodule first with ``git submodule update --init projects/hipccl/hipccl3/libhipcxx``.
     The default is ``OFF``.
+    The submodule build isn't installed; see :ref:`hipccl-libhipcxx`.
+
+``HIPCCL_USE_LEGACY_API``
+    This option exists only for ``hipccl3``.
+    Set to ``ON`` to enable the rocPRIM and hipCUB APIs from before CCCL 3.0 parity that are kept for backward compatibility, for example with older PyTorch releases.
+    The value is recorded in the installed ``rocprim_version.hpp`` and ``hipcub_version.hpp`` as ``ROCPRIM_USE_LEGACY_API`` and ``HIPCUB_USE_LEGACY_API``.
+    The default is ``ON``.
+
+``HIPCCL_ENABLE_COVERAGE``
+    Set to ``ON`` to build rocPRIM, hipCUB, and rocThrust with code coverage enabled.
+    This sets ``ROCPRIM_ENABLE_COVERAGE``, ``HIPCUB_ENABLE_COVERAGE``, and ``ROCTHRUST_ENABLE_COVERAGE`` together.
+    The default is ``OFF``.
+    The older ``BUILD_CODE_COVERAGE`` option is deprecated.
+    It still works but prints a deprecation message. Use ``HIPCCL_ENABLE_COVERAGE`` instead.
 
 ``HIPCCL_INSTALL_LEGACY_HEADER_SYMLINKS``
     Set to ``ON`` to install the temporary compatibility symlinks described in :doc:`../conceptual/hipccl-layout`.
@@ -129,3 +147,69 @@ For example, to build only rocPRIM and hipCUB, and to skip rocThrust:
    cmake -DHIPCCL_BUILD_ROCTHRUST=OFF ../.
    make
    sudo make install
+
+In ``hipccl3``, hipCUB also needs libhipcxx; see :ref:`hipccl-libhipcxx`.
+
+Run the tests
+-------------
+
+Configure with ``-DBUILD_TEST=ON``, build, and run ``ctest`` from the build directory.
+hipCCL doesn't add tests of its own.
+The test suites are those of rocPRIM, hipCUB, and rocThrust, built through the same configuration.
+Each component also builds a ``generate_resource_spec`` helper that produces the resource file CTest needs to schedule tests across several GPUs.
+For the test options, how to run in parallel, and how to pick GPUs, see each component's ``testing.md``:
+`rocPRIM <https://github.com/ROCm/rocm-libraries/blob/develop/projects/hipccl/hipccl3/rocprim/testing.md>`_,
+`hipCUB <https://github.com/ROCm/rocm-libraries/blob/develop/projects/hipccl/hipccl3/hipcub/testing.md>`_, and
+`rocThrust <https://github.com/ROCm/rocm-libraries/blob/develop/projects/hipccl/hipccl3/rocthrust/testing.md>`_.
+
+.. _hipccl-libhipcxx:
+
+libhipcxx requirement
+---------------------
+
+In ``hipccl3``, hipCUB and rocThrust require libhipcxx 3.4 or later on the ROCm platform.
+Configuration fails if neither of the following is true:
+
+- A libhipcxx installation that meets the minimum version is found by ``find_package(libhipcxx)``.
+  Set ``CMAKE_PREFIX_PATH`` or ``ROCM_ROOT`` so it can be located.
+  The source is at `ROCm/libhipcxx <https://github.com/ROCm/libhipcxx>`_.
+  This is the recommended way.
+- The ``hipccl3`` superbuild builds the submodule, when ``-DHIPCCL_BUILD_LIBHIPCXX=ON`` is passed.
+  Initialize the submodule first.
+
+For example, to build the submodule:
+
+.. code:: shell
+
+   git submodule update --init projects/hipccl/hipccl3/libhipcxx
+   cmake -S projects/hipccl/hipccl3 -B build -DHIPCCL_BUILD_LIBHIPCXX=ON
+
+``HIPCCL_BUILD_ALL`` doesn't build libhipcxx.
+The ``hipccl2`` layout has no such requirement.
+
+.. important::
+
+   **Known issue:** libhipcxx built from the submodule is used for the build only and isn't installed.
+   The installed hipCUB and rocThrust CMake packages declare a dependency on a ``libhipcxx`` package.
+   A project that calls ``find_package(hipcub)``, ``find_package(rocthrust)``, or ``find_package(hipccl)`` against that install needs libhipcxx 3.4 or later installed separately.
+
+   To avoid the problem:
+
+   - Install libhipcxx 3.4 or later into the same prefix as hipCCL, or into a prefix on your project's ``CMAKE_PREFIX_PATH``, before you configure the project that uses hipCCL.
+   - When you plan to install hipCCL for other projects to use, build hipCCL against that installed libhipcxx instead of using ``HIPCCL_BUILD_LIBHIPCXX=ON``.
+   - If you use ``HIPCCL_BUILD_LIBHIPCXX=ON`` only to build and test hipCCL in place, the issue doesn't affect you.
+
+CMake presets
+-------------
+
+``projects/hipccl/hipccl3/CMakePresets.json`` provides the ``hipccl-all``, ``rocprim``, ``hipcub``, and ``rocthrust`` presets.
+They configure a release build into ``build`` with an install prefix of ``/opt/rocm``.
+None of the presets build libhipcxx.
+Install libhipcxx first, or add ``-DHIPCCL_BUILD_LIBHIPCXX=ON`` to a preset after initializing the submodule.
+See :ref:`hipccl-libhipcxx` for the install limitation that applies to the second option.
+
+.. code:: shell
+
+   cd projects/hipccl/hipccl3
+   cmake --preset hipccl-all
+   cmake --build build
