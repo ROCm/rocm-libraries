@@ -944,7 +944,7 @@ TEST_F(ExtraSpgemm, alias_c_d_unsorted)
     for(int64_t n : {int64_t(3), int64_t(33000)})
     {
         SCOPED_TRACE("n " + std::to_string(n));
-        const int64_t        w = std::max<int64_t>(n, 3);
+        const int64_t        w    = std::max<int64_t>(n, 3);
         std::vector<int64_t> colB = {0, 1, 2}, colD = {2, 0, 1};
         std::vector<double>  valB = {1, 2, 3}, valD = {10, 20, 30};
         for(int64_t j = 0; j < n; ++j)
@@ -954,11 +954,10 @@ TEST_F(ExtraSpgemm, alias_c_d_unsorted)
             valB.push_back(1.0);
             valD.push_back(static_cast<double>(j % 7 + 1));
         }
-        const Bsr A = bsr_of(2, 2, 1, {0, 1, 2}, {0, 1}, {1, 1});
-        const Bsr B = bsr_of(2, w, 1, {0, 3, 3 + n}, colB, valB);
-        const Bsr D = bsr_of(2, w, 1, {0, 3, 3 + n}, colD, valD);
-        const Bsr want
-            = bsr_gemm(true, cplx(1.0, 0.0), A, B, true, cplx(1.0, 0.0), D, D.mb, D.nb);
+        const Bsr A    = bsr_of(2, 2, 1, {0, 1, 2}, {0, 1}, {1, 1});
+        const Bsr B    = bsr_of(2, w, 1, {0, 3, 3 + n}, colB, valB);
+        const Bsr D    = bsr_of(2, w, 1, {0, 3, 3 + n}, colD, valD);
+        const Bsr want = bsr_gemm(true, cplx(1.0, 0.0), A, B, true, cplx(1.0, 0.0), D, D.mb, D.nb);
 
         auto make_cd = [&](Operand<float, int32_t, int32_t>& o) {
             ASSERT_NO_FATAL_FAILURE(
