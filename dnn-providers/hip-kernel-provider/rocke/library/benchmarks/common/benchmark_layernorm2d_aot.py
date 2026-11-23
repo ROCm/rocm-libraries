@@ -32,6 +32,7 @@ except ImportError:
     pass
 
 from benchmarks.common.norm_bench_common import (
+    VALIDATE_TOL,
     JsonlResultsWriter,
     add_fast_rank_args,
     case_key,
@@ -63,8 +64,64 @@ def _parse_args(argv):
         help="'staged' (default) is the protocol comparable to MIOpen/hipDNN; "
         "'block' amortises per-call event overhead across a launch loop",
     )
+    p.add_argument(
+        "--validate", action="store_true",
+        help="after picking the fastest candidate, relaunch it once and check "
+        "its output against a torch layer_norm/rms reference (the runbook "
+        "rule: never report speed without correctness)",
+    )
+    p.add_argument(
+        "--cache-dir", default=None, metavar="DIR", dest="cache_dir",
+        help="load/store compiled KernelArtifacts here instead of compiling "
+        "inline (see norm_kernel_cache.py); pairs with norm_compile_all.py "
+        "pre-warming the cache across many CPU workers before a GPU-pinned "
+        "run_norm_shards.py pass",
+    )
     add_fast_rank_args(p)
     return p.parse_args(argv)
+
+
+def _compile(spec, candidate, *, args, dims):
+    if args.cache_dir is None:
+        return compile_candidate(spec, candidate, arch=args.arch)
+    from benchmarks.common.norm_kernel_cache import compile_candidate_cached
+
+    return compile_candidate_cached(
+        spec, candidate, arch=args.arch, cache_dir=args.cache_dir,
+        family="norm2d", dims={**dims, "kind": args.kind}, dtype=args.dtype,
+    )
+
+
+def _validate_norm2d(artifact, *, grid, block, x, y, gamma, beta, kind, dtype, key, writer) -> None:
+    """Relaunch *artifact* once and check ``y`` against a torch reference.
+
+    Only rocke's own output is checked here -- see
+    ``norm_shard_worker.py`` for the (timing-only) MIOpen find-mode
+    comparison, which carries no correctness claim of its own.
+    """
+    from rocke.runtime.launcher import KernelLauncher, LaunchConfig, synchronize_and_release
+
+    launcher = KernelLauncher.from_artifact(artifact)
+    cfg = LaunchConfig(grid=grid, block=block)
+    values = {
+        "X": x.data_ptr(), "Gamma": gamma.data_ptr(), "Beta": beta.data_ptr(),
+        "Y": y.data_ptr(), "M": x.shape[0], "N": x.shape[1], "eps": 1e-5,
+    }
+    launcher(values, config=cfg)
+    synchronize_and_release()
+
+    if kind == "layernorm":
+        ref = torch.nn.functional.layer_norm(
+            x.float(), (x.shape[1],), gamma.float(), beta.float(), 1e-5
+        )
+    else:
+        var = x.float().pow(2).mean(-1, keepdim=True)
+        ref = x.float() * torch.rsqrt(var + 1e-5) * gamma.float()
+    max_abs = float((y.float() - ref).abs().max().item())
+    tol = VALIDATE_TOL[dtype]
+    ok = max_abs <= tol
+    print(f"Validate: {'PASS' if ok else 'FAIL'} max_abs={max_abs:.4e} (tol={tol})")
+    writer.row(key=key, candidate="__validate__", validate=True, ok=ok, max_abs=max_abs)
 
 
 def main(argv=None) -> int:
@@ -86,7 +143,7 @@ def main(argv=None) -> int:
 
     if args.compile_only:
         for candidate, spec in combos:
-            compile_candidate(spec, candidate, arch=args.arch)
+            _compile(spec, candidate, args=args, dims=dims)
             print(f"  compiled: {candidate.name}")
         writer.close()
         return 0
@@ -111,10 +168,11 @@ def main(argv=None) -> int:
 
         plans = []
         for candidate, spec in combos:
-            artifact = compile_candidate(spec, candidate, arch=args.arch)
+            artifact = _compile(spec, candidate, args=args, dims=dims)
             block = (spec.block_size, 1, 1)
             plans.append((candidate.name, artifact, grid, block, values))
 
+        best_idx = None
         ranked = rank_candidates(plans, args=args, timing=args.timing)
         for r in ranked:
             if r.ms is None:
@@ -126,10 +184,18 @@ def main(argv=None) -> int:
                        vec=spec.vec, kind=args.kind, dtype=args.dtype, ms=r.ms, **dims)
             if best is None or r.ms < best[1]:
                 best = (label, r.ms)
+                best_idx = r.index
+
+        if args.validate and best_idx is not None:
+            _, artifact, grid, block, _values = plans[best_idx]
+            _validate_norm2d(artifact, grid=grid, block=block, x=x, y=y, gamma=gamma,
+                              beta=beta, kind=args.kind, dtype=args.dtype, key=key,
+                              writer=writer)
     else:
+        best_validate = None
         for candidate, spec in combos:
             label = candidate.name
-            artifact = compile_candidate(spec, candidate, arch=args.arch)
+            artifact = _compile(spec, candidate, args=args, dims=dims)
 
             torch_dtype = torch.float16 if args.dtype == "fp16" else torch.bfloat16
             x = torch.empty(args.rows, args.cols, dtype=torch_dtype, device="cuda").uniform_(-1.0, 1.0)
@@ -157,6 +223,13 @@ def main(argv=None) -> int:
                        vec=spec.vec, kind=args.kind, dtype=args.dtype, ms=ms, **dims)
             if best is None or ms < best[1]:
                 best = (label, ms)
+                best_validate = (artifact, grid, block, x, y, gamma, beta)
+
+        if args.validate and best is not None:
+            artifact, grid, block, x, y, gamma, beta = best_validate
+            _validate_norm2d(artifact, grid=grid, block=block, x=x, y=y, gamma=gamma,
+                              beta=beta, kind=args.kind, dtype=args.dtype, key=key,
+                              writer=writer)
 
     writer.close()
     if best is not None:

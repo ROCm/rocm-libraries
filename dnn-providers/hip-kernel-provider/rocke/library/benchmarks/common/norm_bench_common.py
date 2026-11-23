@@ -45,6 +45,17 @@ from rocke.helpers.compile import compile_kernel
 from rocke.runtime.launcher import KernelLauncher, LaunchConfig
 from rocke.runtime import time_launches, time_launches_staged
 
+# Per-dtype ``--validate`` tolerance (max abs error vs a torch reference, both
+# compared in fp32): fp16's 5e-3 is ``ck_tile_parity``'s own calibrated
+# layernorm2d/rmsnorm2d gate (~5 ULP at output magnitude ~1.0, see that
+# module's TOL comment). bf16's mantissa is 3 bits narrower than fp16's, so
+# its ULP at the same magnitude is ~8x coarser (2^-7 vs 2^-10) -- the same
+# "~5 ULP of slack" rule scales to ~0.04, not fp16's 5e-3: an unscaled fp16
+# gate flags normal bf16 rounding as a false failure (observed: a bf16
+# layernorm2d case at max_abs=0.0078125, exactly 1 bf16 ULP, failing a flat
+# 5e-3 gate).
+VALIDATE_TOL = {"fp16": 5e-3, "bf16": 4e-2}
+
 
 def case_key(dims: Mapping[str, int], *, dtype: str, family: str, extra: str = "") -> str:
     """One joinable key for a norm/batchnorm case: family + dims + dtype (+ extra)."""
