@@ -2,15 +2,19 @@
 // SPDX-License-Identifier:  MIT
 
 #include <algorithm>
-#include <array>
 #include <cstdint>
+#include <memory>
 #include <stdexcept>
+#include <string>
+#include <unordered_map>
+#include <vector>
 
 #include <hip/hip_runtime.h>
 #include <hip_kernel_provider_common/HipDeviceUtils.hpp>
 #include <hip_kernel_provider_common/SdpaConfigConstants.hpp>
 #include <hip_kernel_provider_common/SdpaConfigEnumerations.hpp>
 #include <hipdnn_data_sdk/types.hpp>
+#include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_frontend/Graph.hpp>
@@ -46,50 +50,110 @@ constexpr float K_DESCALE_Q_FILL = 0.25f;
 constexpr float K_DESCALE_K_FILL = 0.5f;
 constexpr float K_DESCALE_V_FILL = 0.75f;
 
-// Per-batch token counts written into the group-mode offset tables (configToTestCase
-// gives group cases batch 2 and S_q = S_kv = 512). The lengths differ between batches,
-// are not multiples of any ts_qo or ts_kv, and both exceed the largest group ts_qo (256),
-// so every batch spans at least two Q-tiles of every group row and the causal tile
-// merging (tgDiv) changes the launch grid. Every K/V length is at least its Q length,
-// so bottom-right causal masks no row out fully.
-constexpr std::array<int32_t, 2> K_GROUP_SEQ_LENS_Q = {401, 260};
-constexpr std::array<int32_t, 2> K_GROUP_SEQ_LENS_KV = {483, 299};
-
-// Writes the exclusive prefix sum of @p lengths, the [B+1] token seqstarts AITER's group
-// mode reads, into @p tensor.
-template <size_t N>
-void fillSeqStarts(hipdnn_data_sdk::utilities::ITensor& tensor,
-                   const std::array<int32_t, N>& lengths)
+// The per-batch token counts a group-mode case writes into its offset tables, and the
+// ragged offset tables of a cu_seq_len case: each batch's physical first token, then the
+// end of the last batch's slot. A shared-offset-table case uses the Q lengths on both
+// sides; a cu_seq_len case writes the lengths into its cumulative tables, of which a shared
+// cu_seq_len case has only the Q one. In the physical starts batch 0 starts past token 0
+// and every slot ends past its logical length (the Q length too on the K/V side, for a
+// shared cu_seq_len case), so a kernel that takes a token's position from the cumulative
+// lengths instead of these starts reads and writes the wrong rows. The slots fit the
+// B * S token capacity of each side (configToTestCase gives group cases S_q = S_kv = 512).
+struct GroupLengthSet
 {
-    if(tensor.elementCount() != N + 1)
+    std::vector<int32_t> seqLensQ;
+    std::vector<int32_t> seqLensKv;
+    std::vector<int32_t> physicalStartsQ;
+    std::vector<int32_t> physicalStartsKv;
+};
+
+const GroupLengthSet& groupLengthSet(GroupLengths lengths)
+{
+    // Batch 2. The lengths differ between batches, are not multiples of any ts_qo or ts_kv,
+    // and all exceed the largest group ts_qo (256), so every batch spans at least two
+    // Q-tiles of every group row and the causal tile merging (tgDiv) changes the launch
+    // grid. Every K/V length is at least its Q length, so bottom-right causal masks no row
+    // out fully.
+    static const GroupLengthSet s_standard
+        = {{401, 260}, {483, 299}, {16, 480, 760}, {24, 560, 880}};
+    // Batch 3. Batch 0 has 401 queries over 300 keys, so under bottom-right causal its first
+    // 101 query rows see no key (O = 0, LSE = -inf). Batch 1 has no queries; batch 2 has no
+    // keys, so all of its rows see no key under every mask.
+    static const GroupLengthSet s_edge
+        = {{401, 0, 260}, {300, 299, 0}, {16, 480, 560, 900}, {24, 440, 760, 1100}};
+    // Batch 1. The first batch of s_standard, so it keeps that set's properties; its slots
+    // fill the B * S = 512 token capacity of each side.
+    static const GroupLengthSet s_singleBatch = {{401}, {483}, {16, 432}, {24, 512}};
+    switch(lengths)
     {
-        throw std::runtime_error("Ragged offset table has " + std::to_string(tensor.elementCount())
-                                 + " entries; the group-mode lengths need "
-                                 + std::to_string(N + 1));
+    case GroupLengths::STANDARD:
+        return s_standard;
+    case GroupLengths::EDGE:
+        return s_edge;
+    case GroupLengths::SINGLE_BATCH:
+        return s_singleBatch;
+    default:
+        throw std::invalid_argument("Unknown GroupLengths value");
     }
-    std::array<int32_t, N + 1> starts{};
-    for(size_t b = 0; b < N; ++b)
+}
+
+// Writes @p values into the INT32 token table @p tensor.
+void fillTable(hipdnn_data_sdk::utilities::ITensor& tensor, const std::vector<int32_t>& values)
+{
+    if(tensor.elementCount() != values.size())
+    {
+        throw std::runtime_error("Token table has " + std::to_string(tensor.elementCount())
+                                 + " entries; the group-mode values need "
+                                 + std::to_string(values.size()));
+    }
+    tensor.fillWithData(values.data(), values.size() * sizeof(int32_t));
+}
+
+// Writes the exclusive prefix sum of @p lengths into @p tensor: the [B+1] token seqstarts
+// AITER's group mode reads, or the cumulative lengths of cu_seq_len_q/kv.
+void fillSeqStarts(hipdnn_data_sdk::utilities::ITensor& tensor, const std::vector<int32_t>& lengths)
+{
+    std::vector<int32_t> starts(lengths.size() + 1, 0);
+    for(size_t b = 0; b < lengths.size(); ++b)
     {
         starts[b + 1] = starts[b] + lengths[b];
     }
-    tensor.fillWithData(starts.data(), sizeof(starts));
+    fillTable(tensor, starts);
+}
+
+// Checks that every slot of @p starts holds its batch's logical length with a gap after it,
+// and that the slots fit @p capacity tokens.
+void assertGappedSlots(const std::vector<int32_t>& starts,
+                       const std::vector<int32_t>& lengths,
+                       int64_t capacity)
+{
+    ASSERT_EQ(starts.size(), lengths.size() + 1);
+    ASSERT_GT(starts[0], 0);
+    for(size_t b = 0; b < lengths.size(); ++b)
+    {
+        ASSERT_LT(starts[b] + lengths[b], starts[b + 1]) << "batch " << b;
+    }
+    ASSERT_LE(starts.back(), capacity);
 }
 
 /**
- * @brief Test fixture that takes a GraphTestCase as parameter.
+ * @brief Test fixture that runs a GraphTestCase on ASM_SDPA_ENGINE and checks it against
+ * the CPU reference.
  */
 template <typename DataType>
 class IntegrationSdpaFwd : public IntegrationGraphVerificationHarness<DataType, GraphTestCase>
 {
 protected:
-    // Fill inputs, identifying the fp8 q/k/v descales and the group-mode offset tables
+    // Fill inputs, identifying the fp8 q/k/v descales and the group-mode token tables
     // BY NAME rather than by element count. Element-count selection is fragile: it
     // silently breaks once per-(batch, KV-head) descales land (they stop being
     // element-count 1) and it cannot separate the descales from the equally-scalar
     // attention scale. Descales are dequantization factors, so they get the fixed,
     // positive, DISTINCT fill constants defined above (see K_DESCALE_*_FILL for the
-    // distinct-and-fixed rationale). Offset tables get the token seqstarts of
-    // K_GROUP_SEQ_LENS_*. Every other tensor gets the plain random fill.
+    // distinct-and-fixed rationale). Offset tables get the token seqstarts of the case's
+    // groupLengthSet lengths, or its physical starts in a cu_seq_len case, whose cumulative
+    // tables (and the reference graph's seq_len tensors) get the lengths.
+    // Every other tensor gets the plain random fill.
     void initializeBundle(const hipdnn_frontend::graph::Graph& graph,
                           GraphTensorBundle& bundle,
                           unsigned int seed) override
@@ -107,6 +171,7 @@ protected:
             }
         });
 
+        const GroupLengthSet& lengths = groupLengthSet(this->GetParam().groupLengths);
         for(auto& tensorPair : bundle.tensors)
         {
             const auto nameIt = uidToName.find(tensorPair.first);
@@ -125,11 +190,41 @@ protected:
             }
             else if(hasName && nameIt->second == K_QO_RAGGED_OFFSET_NAME)
             {
-                fillSeqStarts(*tensorPair.second, K_GROUP_SEQ_LENS_Q);
+                if(this->GetParam().cuSeqLens)
+                {
+                    fillTable(*tensorPair.second, lengths.physicalStartsQ);
+                }
+                else
+                {
+                    fillSeqStarts(*tensorPair.second, lengths.seqLensQ);
+                }
             }
             else if(hasName && nameIt->second == K_KV_RAGGED_OFFSET_NAME)
             {
-                fillSeqStarts(*tensorPair.second, K_GROUP_SEQ_LENS_KV);
+                if(this->GetParam().cuSeqLens)
+                {
+                    fillTable(*tensorPair.second, lengths.physicalStartsKv);
+                }
+                else
+                {
+                    fillSeqStarts(*tensorPair.second, lengths.seqLensKv);
+                }
+            }
+            else if(hasName && nameIt->second == K_CU_SEQ_LEN_Q_NAME)
+            {
+                fillSeqStarts(*tensorPair.second, lengths.seqLensQ);
+            }
+            else if(hasName && nameIt->second == K_CU_SEQ_LEN_KV_NAME)
+            {
+                fillSeqStarts(*tensorPair.second, lengths.seqLensKv);
+            }
+            else if(hasName && nameIt->second == K_SEQ_LEN_Q_NAME)
+            {
+                fillTable(*tensorPair.second, lengths.seqLensQ);
+            }
+            else if(hasName && nameIt->second == K_SEQ_LEN_KV_NAME)
+            {
+                fillTable(*tensorPair.second, lengths.seqLensKv);
             }
             else
             {
@@ -160,30 +255,54 @@ protected:
             << "Graph validation failed for config: " << testCase.name << " - "
             << validationResult.get_message();
 
-        {
-            auto supportStatus = graph->is_supported_ext(this->_handle);
-            ASSERT_EQ(supportStatus.code, ErrorCode::OK)
-                << "No engines applicable for config: " << testCase.name << " - "
-                << supportStatus.get_message();
-        }
-
-        // Group-mode cases fill their offset tables from K_GROUP_SEQ_LENS_Q/KV and are checked
+        // Group-mode cases fill their offset tables from groupLengthSet and are checked
         // against the CPU ragged reference. IntegrationGpuSdpaForwardRagged.cpp adds
-        // frontend-built packed cases, fully masked rows included.
+        // frontend-built packed cases.
         if(testCase.config.mode == hip_kernel_provider_common::BatchMode::GROUP)
         {
+            const GroupLengthSet& lengths = groupLengthSet(testCase.groupLengths);
             // The offset tables must fit the dense allocation the graph describes.
-            ASSERT_EQ(testCase.batch, static_cast<int64_t>(K_GROUP_SEQ_LENS_Q.size()));
-            ASSERT_LE(*std::max_element(K_GROUP_SEQ_LENS_Q.begin(), K_GROUP_SEQ_LENS_Q.end()),
+            ASSERT_EQ(testCase.batch, static_cast<int64_t>(lengths.seqLensQ.size()));
+            ASSERT_EQ(testCase.batch, static_cast<int64_t>(lengths.seqLensKv.size()));
+            ASSERT_LE(*std::max_element(lengths.seqLensQ.begin(), lengths.seqLensQ.end()),
                       testCase.seqQ);
-            ASSERT_LE(*std::max_element(K_GROUP_SEQ_LENS_KV.begin(), K_GROUP_SEQ_LENS_KV.end()),
+            ASSERT_LE(*std::max_element(lengths.seqLensKv.begin(), lengths.seqLensKv.end()),
                       testCase.seqKv);
-            // Each batch must span at least two Q-tiles of this row.
-            ASSERT_GT(*std::min_element(K_GROUP_SEQ_LENS_Q.begin(), K_GROUP_SEQ_LENS_Q.end()),
-                      testCase.config.ts_qo);
+            if(testCase.groupLengths != GroupLengths::EDGE)
+            {
+                // Each batch must span at least two Q-tiles of this row.
+                ASSERT_GT(*std::min_element(lengths.seqLensQ.begin(), lengths.seqLensQ.end()),
+                          testCase.config.ts_qo);
+            }
+            if(testCase.cuSeqLens)
+            {
+                // A shared cu_seq_len table gives K/V the Q lengths.
+                const auto& kvLengths
+                    = testCase.sharedCuSeqLen ? lengths.seqLensQ : lengths.seqLensKv;
+                ASSERT_NO_FATAL_FAILURE(assertGappedSlots(
+                    lengths.physicalStartsQ, lengths.seqLensQ, testCase.batch * testCase.seqQ));
+                ASSERT_NO_FATAL_FAILURE(assertGappedSlots(
+                    lengths.physicalStartsKv, kvLengths, testCase.batch * testCase.seqKv));
+            }
         }
 
-        GraphVerificationContext context(*graph);
+        // The CPU reference declines cu_seq_len_q/kv, so a cu_seq_len case runs it on the
+        // same graph with the per-batch lengths, over the same tensors. Neither side writes
+        // the rows in the gaps between slots; both bundles seed them alike, so comparing whole
+        // outputs also checks that the engine leaves them untouched.
+        std::shared_ptr<hipdnn_frontend::graph::Graph> referenceGraph;
+        if(testCase.cuSeqLens)
+        {
+            referenceGraph = buildSdpaFwdReferenceGraph(testCase).graph;
+            const auto referenceValidation = referenceGraph->validate();
+            ASSERT_TRUE(referenceValidation.is_good())
+                << "Reference graph validation failed for config: " << testCase.name << " - "
+                << referenceValidation.get_message();
+        }
+        const auto contextOwner
+            = referenceGraph ? std::make_unique<GraphVerificationContext>(*graph, *referenceGraph)
+                             : std::make_unique<GraphVerificationContext>(*graph);
+        GraphVerificationContext& context = *contextOwner;
 
         // Register output tensor validator
         graph->visit([&](const hipdnn_frontend::graph::INode& node) {
@@ -195,8 +314,9 @@ protected:
                 }
                 if(tensorAttr == stats)
                 {
-                    // A fully masked causal row has a log-sum-exp of -inf in both the CPU
-                    // reference and the device result.
+                    // A row that sees no key (fully masked by a causal mask, or in a batch
+                    // with no keys) has a log-sum-exp of -inf in both the CPU reference and
+                    // the device result.
                     this->registerValidator(context,
                                             tensorAttr,
                                             createAllCloseMatchingInfinitiesValidator(
@@ -211,15 +331,9 @@ protected:
             }
         });
 
-        // Build the graph; skip if no engine supports this configuration
-        // (e.g. causal mask + stats is not yet supported by the ASM kernels).
-        auto buildResult = graph->build(this->_handle);
-        if(buildResult.code == ErrorCode::GRAPH_NOT_SUPPORTED)
-        {
-            GTEST_SKIP() << "No engine supports this graph: " << buildResult.err_msg;
-        }
-        ASSERT_EQ(buildResult.code, ErrorCode::OK) << buildResult.err_msg;
-
+        // Pinned to the ASM engine: other hip-kernel-provider engines serve some of these
+        // graphs, so a heuristic build could pass while this engine declines its own row.
+        ASSERT_NO_FATAL_FAILURE(this->buildPlansForEngine(*graph, ASM_SDPA_ENGINE_ID, {}));
         this->verifyBuiltGraph(context, 0);
     }
 
@@ -508,18 +622,256 @@ std::vector<GraphTestCase> getGraphTestCasesByPrecision(bool fp8)
     return cases;
 }
 
-// Stats (LSE) output is not supported for ragged tensors, nor with causal masks on the
-// current ASM kernels (SdpaFwdPlanBuilder::isApplicable declines both), so only
-// batch-mode NO_MASK kernels are paired with stats.
+// Every batch-mode kernel paired with stats (getGroupStatsTestCases pairs the group-mode
+// ones). The causal rows run at S_q > S_kv with bottom-right alignment, so their first
+// S_q - S_kv query rows see no key and their LSE is -inf. Each causal row also runs a
+// top-left causal mask at S_q == S_kv, which the engine serves with the same bottom-right
+// kernel.
 std::vector<GraphTestCase> getBatchModeStatsTestCases()
 {
     std::vector<GraphTestCase> cases;
     for(const auto& [key, config] : cfg_fmha_fwd)
     {
-        if(config.mode == hip_kernel_provider_common::BatchMode::BATCH
-           && static_cast<plan_utils::MaskType>(config.mask) == plan_utils::MaskType::NO_MASK)
+        if(config.mode != hip_kernel_provider_common::BatchMode::BATCH)
         {
-            cases.push_back(configToTestCase(config, /*withStats=*/true));
+            continue;
+        }
+        cases.push_back(configToTestCase(config, /*withStats=*/true));
+        if(static_cast<plan_utils::MaskType>(config.mask)
+           == plan_utils::MaskType::BOTTOM_RIGHT_CAUSAL)
+        {
+            auto topLeftConfig = config;
+            topLeftConfig.mask = static_cast<int>(plan_utils::MaskType::TOP_LEFT_CAUSAL);
+            auto topLeft = configToTestCase(topLeftConfig, /*withStats=*/true);
+            topLeft.seqKv = topLeft.seqQ;
+            cases.push_back(topLeft);
+        }
+    }
+    return cases;
+}
+
+bool isGroupRow(const fmha_v3_fwdConfig& config)
+{
+    return config.mode == hip_kernel_provider_common::BatchMode::GROUP;
+}
+
+bool isBottomRightCausalRow(const fmha_v3_fwdConfig& config)
+{
+    return static_cast<plan_utils::MaskType>(config.mask)
+           == plan_utils::MaskType::BOTTOM_RIGHT_CAUSAL;
+}
+
+// configToTestCase for a group row over @p lengths, with the batch count of that set.
+GraphTestCase groupTestCase(const fmha_v3_fwdConfig& config, bool withStats, GroupLengths lengths)
+{
+    auto testCase = configToTestCase(config, withStats);
+    testCase.groupLengths = lengths;
+    testCase.batch = static_cast<int64_t>(groupLengthSet(lengths).seqLensQ.size());
+    return testCase;
+}
+
+// Whether the engine serves @p config with fewer K/V heads than Q heads: the gfx950 head
+// dim 256 kernels do not support GQA/MQA.
+bool servesGqa(const fmha_v3_fwdConfig& config)
+{
+    return config.arch != "gfx950" || config.hdim_q != 256;
+}
+
+// @p testCase with two K/V heads for its four Q heads (GQA ratio 2).
+GraphTestCase withGqa(GraphTestCase testCase)
+{
+    testCase.numHeadsKv = 2;
+    testCase.name += "Gqa";
+    return testCase;
+}
+
+// @p testCase with one K/V head for its four Q heads (MQA).
+GraphTestCase withMqa(GraphTestCase testCase)
+{
+    testCase.numHeadsKv = 1;
+    testCase.name += "Mqa";
+    return testCase;
+}
+
+// Each causal group row under a top-left causal mask, with Q, K, V and O on one offset
+// table: every batch's Q and K/V lengths are then equal, where the two causal alignments
+// agree, so the engine serves the top-left mask with the row's bottom-right kernel.
+std::vector<GraphTestCase> getGroupTopLeftCausalTestCases()
+{
+    std::vector<GraphTestCase> cases;
+    for(const auto& [key, config] : cfg_fmha_fwd)
+    {
+        if(!isGroupRow(config) || !isBottomRightCausalRow(config))
+        {
+            continue;
+        }
+        auto topLeftConfig = config;
+        topLeftConfig.mask = static_cast<int>(plan_utils::MaskType::TOP_LEFT_CAUSAL);
+        auto topLeft = configToTestCase(topLeftConfig);
+        topLeft.sharedOffsetTable = true;
+        topLeft.name += "SharedOffsets";
+        cases.push_back(topLeft);
+    }
+    return cases;
+}
+
+// Every group row over @p lengths, without stats.
+std::vector<GraphTestCase> getGroupTestCases(GroupLengths lengths)
+{
+    std::vector<GraphTestCase> cases;
+    for(const auto& [key, config] : cfg_fmha_fwd)
+    {
+        if(isGroupRow(config))
+        {
+            cases.push_back(groupTestCase(config, /*withStats=*/false, lengths));
+        }
+    }
+    return cases;
+}
+
+// Every group row over @p lengths with its stats as AITER's varlen LSE [H, total_q] on the
+// Q/O offset table (buildSdpaFwdGraph), against the CPU ragged reference.
+std::vector<GraphTestCase> getGroupStatsTestCases(GroupLengths lengths)
+{
+    std::vector<GraphTestCase> cases;
+    for(const auto& [key, config] : cfg_fmha_fwd)
+    {
+        if(isGroupRow(config))
+        {
+            cases.push_back(groupTestCase(config, /*withStats=*/true, lengths));
+        }
+    }
+    return cases;
+}
+
+// Every group row over @p lengths with cu_seq_len_q/kv over the set's gapped physical
+// slots, without and with stats: each row is its own kernel object, and each must start a
+// batch's LSE at the physical Q start, not the logical one. Each causal group row also runs
+// under a top-left causal mask with one cu_seq_len table for both sides and separate K/V
+// offsets, so the per-batch lengths are equal while the K/V slots differ from the Q slots.
+std::vector<GraphTestCase> getGroupCuSeqLenTestCases(GroupLengths lengths)
+{
+    std::vector<GraphTestCase> cases;
+    for(const auto& [key, config] : cfg_fmha_fwd)
+    {
+        if(!isGroupRow(config))
+        {
+            continue;
+        }
+        for(const bool withStats : {false, true})
+        {
+            auto padded = groupTestCase(config, withStats, lengths);
+            padded.cuSeqLens = true;
+            padded.name += "CuSeqLen";
+            cases.push_back(padded);
+        }
+        if(isBottomRightCausalRow(config))
+        {
+            auto topLeftConfig = config;
+            topLeftConfig.mask = static_cast<int>(plan_utils::MaskType::TOP_LEFT_CAUSAL);
+            auto topLeft = groupTestCase(topLeftConfig, /*withStats=*/false, lengths);
+            topLeft.cuSeqLens = true;
+            topLeft.sharedCuSeqLen = true;
+            topLeft.name += "SharedCuSeqLen";
+            cases.push_back(topLeft);
+        }
+    }
+    return cases;
+}
+
+// Every group row over GroupLengths::EDGE: a batch whose first rows see no key under
+// bottom-right causal, a batch with no queries and a batch with no keys, on the offset
+// tables without and with stats and through cu_seq_len over gapped slots.
+std::vector<GraphTestCase> getGroupEdgeLengthTestCases()
+{
+    std::vector<GraphTestCase> cases = getGroupTestCases(GroupLengths::EDGE);
+    const auto stats = getGroupStatsTestCases(GroupLengths::EDGE);
+    cases.insert(cases.end(), stats.begin(), stats.end());
+    const auto cuSeqLen = getGroupCuSeqLenTestCases(GroupLengths::EDGE);
+    cases.insert(cases.end(), cuSeqLen.begin(), cuSeqLen.end());
+    return cases;
+}
+
+// Group-mode cases that differ from those of the other group instances in one property.
+// Every group row that serves GQA runs with stats over the standard lengths with two Q
+// heads per K/V head (GQA) and with one K/V head (MQA); with GQA it also runs with stats
+// and cu_seq_len over the edge lengths and, for causal rows, under a top-left mask on one
+// shared offset table. Every group row runs with stats over a single batch, and every
+// causal group row runs under a top-left mask with stats through one cu_seq_len table for
+// both sides. Each case matches its counterpart in getGroupStatsTestCases,
+// getGroupEdgeLengthTestCases, getGroupTopLeftCausalTestCases or getGroupCuSeqLenTestCases
+// apart from the K/V head count, the batch count or the stats.
+std::vector<GraphTestCase> getGroupCoverageTestCases()
+{
+    std::vector<GraphTestCase> cases;
+    for(const auto& [key, config] : cfg_fmha_fwd)
+    {
+        if(!isGroupRow(config))
+        {
+            continue;
+        }
+
+        auto singleBatch = groupTestCase(config, /*withStats=*/true, GroupLengths::SINGLE_BATCH);
+        singleBatch.name += "SingleBatch";
+        cases.push_back(singleBatch);
+
+        const bool causal = isBottomRightCausalRow(config);
+        auto topLeftConfig = config;
+        topLeftConfig.mask = static_cast<int>(plan_utils::MaskType::TOP_LEFT_CAUSAL);
+        if(causal)
+        {
+            auto sharedCuSeqLen
+                = groupTestCase(topLeftConfig, /*withStats=*/true, GroupLengths::STANDARD);
+            sharedCuSeqLen.cuSeqLens = true;
+            sharedCuSeqLen.sharedCuSeqLen = true;
+            sharedCuSeqLen.name += "SharedCuSeqLen";
+            cases.push_back(sharedCuSeqLen);
+        }
+
+        if(!servesGqa(config))
+        {
+            continue;
+        }
+        const auto standard = groupTestCase(config, /*withStats=*/true, GroupLengths::STANDARD);
+        cases.push_back(withGqa(standard));
+        cases.push_back(withMqa(standard));
+
+        auto edge = groupTestCase(config, /*withStats=*/true, GroupLengths::EDGE);
+        edge.cuSeqLens = true;
+        edge.name += "CuSeqLenEdge";
+        cases.push_back(withGqa(edge));
+
+        if(causal)
+        {
+            auto topLeft = configToTestCase(topLeftConfig);
+            topLeft.sharedOffsetTable = true;
+            topLeft.name += "SharedOffsets";
+            cases.push_back(withGqa(topLeft));
+        }
+    }
+    return cases;
+}
+
+// Every fp8 row with mma_core_mode set to each FP8 path value cuDNN writes: FP8_E4M3 (the
+// sdpa_fp8() default) and FP8_E5M2. The mode names the MMA path, not the FP8_E4M3_FNUZ input
+// encoding.
+std::vector<GraphTestCase> getFp8MmaCoreModeTestCases()
+{
+    std::vector<GraphTestCase> cases;
+    for(const auto& [key, config] : cfg_fmha_fwd)
+    {
+        if(config.dtype != hip_kernel_provider_common::config::FP8BF16)
+        {
+            continue;
+        }
+        for(const auto& [mode, suffix] :
+            {std::pair{hipdnn_frontend::DataType::FP8_E4M3, "MmaCoreModeFp8E4m3"},
+             std::pair{hipdnn_frontend::DataType::FP8_E5M2, "MmaCoreModeFp8E5m2"}})
+        {
+            auto fp8Mode = configToTestCase(config);
+            fp8Mode.mmaCoreMode = mode;
+            fp8Mode.name += suffix;
+            cases.push_back(fp8Mode);
         }
     }
     return cases;
@@ -555,6 +907,36 @@ INSTANTIATE_TEST_SUITE_P(SmokeFp8,
 INSTANTIATE_TEST_SUITE_P(SmokeStats,
                          IntegrationGpuSdpaFwdBf16,
                          testing::ValuesIn(getBatchModeStatsTestCases()),
+                         GraphTestCase::getName);
+
+INSTANTIATE_TEST_SUITE_P(SmokeFp8MmaCoreMode,
+                         IntegrationGpuSdpaFwdBf16,
+                         testing::ValuesIn(getFp8MmaCoreModeTestCases()),
+                         GraphTestCase::getName);
+
+INSTANTIATE_TEST_SUITE_P(GroupTopLeftCausal,
+                         IntegrationGpuSdpaFwdBf16,
+                         testing::ValuesIn(getGroupTopLeftCausalTestCases()),
+                         GraphTestCase::getName);
+
+INSTANTIATE_TEST_SUITE_P(GroupStats,
+                         IntegrationGpuSdpaFwdBf16,
+                         testing::ValuesIn(getGroupStatsTestCases(GroupLengths::STANDARD)),
+                         GraphTestCase::getName);
+
+INSTANTIATE_TEST_SUITE_P(GroupCuSeqLen,
+                         IntegrationGpuSdpaFwdBf16,
+                         testing::ValuesIn(getGroupCuSeqLenTestCases(GroupLengths::STANDARD)),
+                         GraphTestCase::getName);
+
+INSTANTIATE_TEST_SUITE_P(GroupEdgeLengths,
+                         IntegrationGpuSdpaFwdBf16,
+                         testing::ValuesIn(getGroupEdgeLengthTestCases()),
+                         GraphTestCase::getName);
+
+INSTANTIATE_TEST_SUITE_P(StandardGroupCoverage,
+                         IntegrationGpuSdpaFwdBf16,
+                         testing::ValuesIn(getGroupCoverageTestCases()),
                          GraphTestCase::getName);
 
 TEST_P(IntegrationGpuSdpaFwdShapeSweepBf16, Correctness)

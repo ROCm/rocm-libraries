@@ -647,6 +647,11 @@ for the requested processors when scheduling tests. Limits constrain the
 reference's explicit request for 64 threads; they are numerical test settings,
 not measurements of the team used by every reference call.
 
+The Int8 option-rejection cases require exit code 1 and their expected diagnostic
+through [`CheckCpuGemmFailure.cmake`](tests/cmake/CheckCpuGemmFailure.cmake).
+The checker installs alongside the suite, so unrelated argument or runtime errors
+fail these cases in both the build tree and installed package.
+
 Math CI's `coverage-cpp` environment continues running the build-tree cases
 with coverage instrumentation. That overlap already exists for the gtests:
 Math CI collects coverage while TheRock validates the installed artifact and

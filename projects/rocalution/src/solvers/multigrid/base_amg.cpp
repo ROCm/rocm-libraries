@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -35,6 +35,7 @@
 
 #include "../../utils/log.hpp"
 
+#include <algorithm>
 #include <limits>
 #include <list>
 
@@ -198,6 +199,15 @@ namespace rocalution
         }
 
         this->build_ = true;
+
+        // A rebuild keeps the host levels of SetHostLevels(), but creates all levels on the
+        // backend of the finest operator. The new hierarchy can be shallower, so clamp the
+        // host levels as SetHostLevels() does
+        if(this->host_level_ != 0)
+        {
+            this->host_level_ = std::min(this->host_level_, this->levels_ - 1);
+            this->MoveHostLevels_();
+        }
 
         log_debug(this, "BaseAMG::Build()", this->build_, " #*# end");
     }
@@ -391,11 +401,19 @@ namespace rocalution
                 delete this->op_level_[i];
                 delete this->restrict_op_level_[i];
                 delete this->prolong_op_level_[i];
+
+                // Clear transfer mapping
+                delete this->trans_level_[i];
             }
 
             delete[] this->op_level_;
             delete[] this->restrict_op_level_;
             delete[] this->prolong_op_level_;
+            delete[] this->trans_level_;
+            this->op_level_          = NULL;
+            this->restrict_op_level_ = NULL;
+            this->prolong_op_level_  = NULL;
+            this->trans_level_       = NULL;
 
             // De-allocate smoothers, if not allocated by the user
             if(this->set_sm_ == false)
@@ -408,12 +426,15 @@ namespace rocalution
 
                 delete[] this->smoother_level_;
                 delete[] this->sm_default_;
+                this->smoother_level_ = NULL;
+                this->sm_default_     = NULL;
             }
 
             // De-allocate coarse grid solver, if not allocated by user
             if(this->set_s_ == false)
             {
                 delete this->solver_coarse_;
+                this->solver_coarse_ = NULL;
             }
 
             this->levels_    = -1;

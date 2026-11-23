@@ -4,7 +4,6 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 
 
 ## (Unreleased) rocSOLVER
-## (Unreleased) rocSOLVER 3.39
 
 ### Added
 ### Changed
@@ -12,11 +11,18 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 ### Optimized
 ### Resolved issues
 
-* Fixed failure of large batch count > 64 * 1024 for POTRF, POTF2, POTRS, POSV, POTRI.
 * Fixed memory access faults and wrong results for matrices with more than 2^31 elements (for example in GETRF, GEQLF, ORGQL/UNGQL, GELQF, SYTRF, SYEV, SYGV and GEHRD), caused by 32-bit internal matrix offsets and indices.
 
 ### Known issues
 ### Upcoming changes
+
+
+
+## rocSOLVER 3.39.0 for ROCm 10.3.0
+
+### Resolved issues
+
+* Fixed failure of large batch count > 64 * 1024 for POTRF, POTF2, POTRS, POSV, POTRI.
 
 
 
