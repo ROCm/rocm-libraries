@@ -25,12 +25,35 @@ HipKernelEngine
 
 - **Engines** (`src/engines/`): High-level operation orchestration
     - **HIP MLops engine** (`src/engines/hip_mlops_engine/`): Kernel-specific execution logic. Enabled via the compile flag `ENABLE_HIP_MLOPS_ENGINE` (on by default)
-    - **ASM SDPA engine** (`src/engines/asm_sdpa_engine/`): Assembly kernels to do scaled dot-product attention (SDPA). Enabled via `ENABLE_ASM_SDPA_ENGINE` (on by default)
+    - **ASM SDPA engine** (`src/engines/asm_sdpa_engine/`): Assembly kernels to do scaled dot-product attention (SDPA). Enabled via `ENABLE_ASM_SDPA_ENGINE` (on by default). Data-type contract: [asm_kernels/README.md](src/engines/asm_sdpa_engine/asm/asm_kernels/README.md#data-type-contract)
     - **HIP Flash2 engine** (`src/engines/hip_flash2_engine/`): Flash-Attention 2 V7 SDPA kernel using precompiled `.co` files for gfx942/gfx950 (FP16). Enabled via `ENABLE_HIP_FLASH2_ENGINE` (off by default)
     - **Packaged gfx950 convolution** (`hipkernel:Gfx950ConvFwdAot`): rocKE forward convolution with FP16/BF16 channels-last storage. See the [integration guide](docs/gfx950_conv_fwd/README.md) for catalog scope, packaging, and tests.
 - **HIP Infrastructure** (`src/hip/`): HIPRTC wrapper classes for compilation and execution
 - **Kernels** (`kernels/`): Device-side kernel source code embedded at build time
 - **Plugin SDK Integration**: Implements `IPlan`, `IPlanBuilder`, `IEngine` interfaces
+
+### HIP MLops normalization fusion
+
+The HIP MLops batch normalization and RMS normalization plans support
+ReLU, clipped ReLU, and clamp with
+`RELU_FWD` for forward plans or `RELU_BWD` for backward plans. Batch normalization
+forward plans, including training, also accept a fused `IDENTITY` node.
+RMS normalization accepts unary `IDENTITY` in either direction; backward
+passthrough does not require ReLU's second input. Existing tensor/layout and
+graph connectivity requirements still apply.
+
+Batch normalization and RMS normalization share the same activation-mode
+validation for direction, passthrough and supported ReLU parameters.
+
+Leaky ReLU is **unsupported** in these normalization fusions: any supplied
+`relu_lower_clip_slope` on a ReLU node (including an explicit zero) is rejected.
+Although the common activation enum names `LEAKY_RELU`, the shared scalar kernels
+do not implement its forward function or gradient, so accepting the slope would
+silently produce incorrect results.
+
+Layer normalization supports only a single normalization node, not fused
+pointwise graphs (including `IDENTITY`, ReLU, and leaky ReLU). These restrictions
+describe the HIP MLops engine, not kernel-ingestor descriptor support.
 
 ## Building
 

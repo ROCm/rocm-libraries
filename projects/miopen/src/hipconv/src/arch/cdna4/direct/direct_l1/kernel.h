@@ -131,6 +131,7 @@ constexpr Config K128_SPLIT_K_TILE_2D{.wave_k16 = 4,
                                       .split_k  = true};
 
 inline bool split_active(const Config& cfg, const ConvParams& par);
+inline int64_t grid_items(const Config& cfg, const ConvParams& par);
 inline DepthGeometry depth_geometry(const Config& cfg, const ConvParams& par);
 inline bool is_valid_config(const ConvParams& par, const Config& cfg);
 inline bool fits_the_view(const ConvParams& par, const Config& cfg);
@@ -940,9 +941,23 @@ inline bool fits_the_view(const ConvParams& par, const Config& cfg)
         return false;
     }
 
+    // get_block_counts rounds N × chunks / unfold_n up in int, adding unfold_n - 1.
+    const int64_t chunks = cfg.unfold_chunks ? divup(out_w, cfg.w_unfold()) : 1;
+    if(par.n * chunks + cfg.unfold_n - 1 > INT32_MAX)
+    {
+        return false;
+    }
+
     // A split of one is the unsplit tile plus a round trip through fp32 partials of the
     // whole output.
     if(cfg.split_k && !split_active(cfg, par))
+    {
+        return false;
+    }
+
+    // The grid decode's ceiling divisions and last round exceed the item count by less than one
+    // item per CU.
+    if(grid_items(cfg, par) > INT32_MAX - persistent::NUM_XCD * persistent::NUM_CU_PER_XCD)
     {
         return false;
     }
@@ -1185,6 +1200,23 @@ inline SplitPlan split_plan(const Config& cfg, const ConvParams& par)
 inline bool split_active(const Config& cfg, const ConvParams& par)
 {
     return cfg.split_k && split_plan(cfg, par).T > depth_geometry(cfg, par).E;
+}
+
+// The int item count of cfg's grid decode: BalancedL2Grid::x_total, or RaggedL2Grid::pair_total.
+inline int64_t grid_items(const Config& cfg, const ConvParams& par)
+{
+    // Mirrors get_block_counts, whose batch block count is an int.
+    const bool is_dgrad    = cfg.direction == Direction::Dgrad;
+    const int out_p        = is_dgrad ? par.h : par.p;
+    const int out_q        = is_dgrad ? par.w : par.q;
+    const int64_t chunks   = cfg.unfold_chunks ? divup(out_q, cfg.w_unfold()) : 1;
+    const int64_t n_blocks = (par.n * chunks + cfg.unfold_n - 1) / cfg.unfold_n;
+    const int64_t q_blocks = cfg.unfold_n == 1 ? divup(out_q, cfg.block_q()) : 1;
+    const int out_e        = cfg.kd == 1 ? 1 : (is_dgrad ? par.d : par.e);
+    const int64_t planes   = cfg.split_k ? split_plan(cfg, par).T : out_e;
+    const int64_t items =
+        int64_t(par.groups) * planes * divup(out_p, cfg.block_p()) * q_blocks * n_blocks;
+    return ragged_grid(cfg) ? items * get_k_partition(cfg, par).per_xcd_blocks : items;
 }
 
 // Partial slots of a split-K launch: one per (item, K-block).
