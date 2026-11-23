@@ -164,7 +164,10 @@ static std::size_t byteSpan(hiptensorTensorDescriptor_t const desc)
     return (lastPosition + 1) * hiptensor::hiptensorDataTypeSize(desc->mType);
 }
 
-// Two byte ranges overlap when each one begins before the other ends.
+// Two byte ranges overlap when each one begins before the other ends. The ranges
+// include the gaps of padded or strided tensors, so tensors whose elements
+// interleave without sharing one still overlap. That is stricter than needed, and
+// cheap: checking each element would cost as much as the contraction.
 static bool overlaps(void const* c, std::size_t sizeC, void const* d, std::size_t sizeD)
 {
     auto const beginC = reinterpret_cast<std::uintptr_t>(c);
@@ -610,23 +613,26 @@ hiptensorStatus_t hiptensorContract(const hiptensorHandle_t handle,
 
     // A C that shares only part of D's memory is read after the kernel
     // has overwritten it. C may share memory with D only as the same
-    // buffer.
+    // buffer. Memory is compared by range (see overlaps).
     if(plan->mOpDesc->mDescC != nullptr && C != D
        && overlaps(C, byteSpan(plan->mOpDesc->mDescC), D, byteSpan(plan->mOpDesc->mDescD)))
     {
         auto errorCode = HIPTENSOR_STATUS_NOT_SUPPORTED;
-        snprintf(msg, sizeof(msg), "C and D must not overlap unless they are the same buffer");
+        snprintf(msg,
+                 sizeof(msg),
+                 "The memory ranges of C and D must not overlap unless they are the same buffer");
         logger->logError("hiptensorContraction", msg);
         return errorCode;
     }
 
     // The kernel writes D while it still reads A and B, so an input that
-    // shares memory with D is read after it has been overwritten.
+    // shares memory with D is read after it has been overwritten. Memory is
+    // compared by range (see overlaps).
     if(overlaps(A, byteSpan(plan->mOpDesc->mDescA), D, byteSpan(plan->mOpDesc->mDescD))
        || overlaps(B, byteSpan(plan->mOpDesc->mDescB), D, byteSpan(plan->mOpDesc->mDescD)))
     {
         auto errorCode = HIPTENSOR_STATUS_NOT_SUPPORTED;
-        snprintf(msg, sizeof(msg), "A and B must not overlap D");
+        snprintf(msg, sizeof(msg), "The memory ranges of A and B must not overlap D");
         logger->logError("hiptensorContraction", msg);
         return errorCode;
     }
@@ -1802,24 +1808,27 @@ hiptensorStatus_t hiptensorContractTrinary(const hiptensorHandle_t handle,
 
     // A D that shares only part of E's memory is read after
     // the kernel has overwritten it. D may share memory with E only
-    // as the same buffer.
+    // as the same buffer. Memory is compared by range (see overlaps).
     if(plan->mOpDesc->mDescD != nullptr && D != E
        && overlaps(D, byteSpan(plan->mOpDesc->mDescD), E, byteSpan(plan->mOpDesc->mDescE)))
     {
         auto errorCode = HIPTENSOR_STATUS_NOT_SUPPORTED;
-        snprintf(msg, sizeof(msg), "D and E must not overlap unless they are the same buffer");
+        snprintf(msg,
+                 sizeof(msg),
+                 "The memory ranges of D and E must not overlap unless they are the same buffer");
         logger->logError("hiptensorContractTrinary", msg);
         return errorCode;
     }
 
     // The kernels write E while they still read A, B and C, so an input that
-    // shares memory with E is read after it has been overwritten.
+    // shares memory with E is read after it has been overwritten. Memory is
+    // compared by range (see overlaps).
     if(overlaps(A, byteSpan(plan->mOpDesc->mDescA), E, byteSpan(plan->mOpDesc->mDescE))
        || overlaps(B, byteSpan(plan->mOpDesc->mDescB), E, byteSpan(plan->mOpDesc->mDescE))
        || overlaps(C, byteSpan(plan->mOpDesc->mDescC), E, byteSpan(plan->mOpDesc->mDescE)))
     {
         auto errorCode = HIPTENSOR_STATUS_NOT_SUPPORTED;
-        snprintf(msg, sizeof(msg), "A, B and C must not overlap E");
+        snprintf(msg, sizeof(msg), "The memory ranges of A, B and C must not overlap E");
         logger->logError("hiptensorContractTrinary", msg);
         return errorCode;
     }
