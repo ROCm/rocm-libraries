@@ -55,8 +55,9 @@ std::uint32_t CeilDiv(int value, std::size_t divisor)
 
 // A kernel that accepts every layer and launches one X workgroup per input column, one Y
 // workgroup per kItemsPerYWorkgroup batch items and one Z workgroup per kItemsPerZWorkgroup
-// output channels, the last of each rounded up. It is the real ConvKernel underneath: grid_fits(),
-// launch(), and the hipconv filters see it exactly as they see a shipped kernel.
+// output channels, the last of each rounded up. It is the real ConvKernel underneath:
+// within_workgroup_limit(), launch(), and the hipconv filters see it exactly as they see a shipped
+// kernel.
 class FakeKernel final : public hipconv::ConvKernel
 {
 public:
@@ -142,8 +143,8 @@ std::size_t HipconvLimit(std::string_view arch_name)
     return hipconv::max_workgroups_yz(hipconv::Device{&arch, 1});
 }
 
-// Whether grid_fits(), the algorithm's filter, the public listings and is_applicable() all take
-// \p par on \p arch_name when \p accepted, and all reject it otherwise.
+// Whether within_workgroup_limit(), the algorithm's filter, the public listings and is_applicable()
+// all take \p par on \p arch_name when \p accepted, and all reject it otherwise.
 void ExpectFilter(std::string_view arch_name, const hipconv::ConvParams& par, bool accepted)
 {
     SCOPED_TRACE(std::string{arch_name} + " w=" + std::to_string(par.w) +
@@ -152,7 +153,7 @@ void ExpectFilter(std::string_view arch_name, const hipconv::ConvParams& par, bo
     Rig rig{arch_name};
     const std::size_t listed = accepted ? 1 : 0;
 
-    EXPECT_EQ(rig.kernel.grid_fits(rig.device, par), accepted);
+    EXPECT_EQ(rig.kernel.within_workgroup_limit(rig.device, par), accepted);
     EXPECT_EQ(rig.algorithm.get_valid_configs(rig.device, par, hipconv::ALL_RANKED_CONFIGS).size(),
               listed);
     EXPECT_EQ(hipconv::get_valid_configs(
@@ -227,7 +228,8 @@ TEST(CPU_hipconv_workgroup_limit_NONE, registry_arch_limits)
         const hipconv::Device device{*arch, 80};
         EXPECT_EQ(hipconv::max_workgroups_yz(device), e.limit) << e.name;
         // 65536 Y workgroups fit exactly where the limit is 65536 or absent.
-        EXPECT_EQ(kernel.grid_fits(device, ParamsFor(1, 65536, 1)), e.limit >= 65536u) << e.name;
+        EXPECT_EQ(kernel.within_workgroup_limit(device, ParamsFor(1, 65536, 1)), e.limit >= 65536u)
+            << e.name;
     }
 }
 
@@ -258,7 +260,7 @@ TEST(CPU_hipconv_workgroup_limit_NONE, limits_agree_with_miopen)
         EXPECT_EQ(HipconvLimit(name), miopen::GetMaxWorkgroupsYZ(name)) << name;
 }
 
-TEST(CPU_hipconv_workgroup_limit_NONE, grid_fits_boundaries)
+TEST(CPU_hipconv_workgroup_limit_NONE, within_workgroup_limit_boundaries)
 {
     // The limit's neighbours, in absolute counts, along Y and along Z.
     const struct
@@ -298,7 +300,7 @@ TEST(CPU_hipconv_workgroup_limit_NONE, grid_fits_boundaries)
 
 // The limit applies to the rounded-up workgroup count, so one item past a full last workgroup is
 // already over it.
-TEST(CPU_hipconv_workgroup_limit_NONE, grid_fits_counts_partial_workgroups)
+TEST(CPU_hipconv_workgroup_limit_NONE, within_workgroup_limit_counts_partial_workgroups)
 {
     for(const auto& a : limited_archs)
     {
@@ -318,7 +320,7 @@ TEST(CPU_hipconv_workgroup_limit_NONE, grid_fits_counts_partial_workgroups)
     }
 }
 
-TEST(CPU_hipconv_workgroup_limit_NONE, grid_fits_does_not_limit_x)
+TEST(CPU_hipconv_workgroup_limit_NONE, within_workgroup_limit_does_not_limit_x)
 {
     for(const auto& a : limited_archs)
     {
@@ -329,7 +331,7 @@ TEST(CPU_hipconv_workgroup_limit_NONE, grid_fits_does_not_limit_x)
 }
 
 // An architecture without a limit takes every grid, however large.
-TEST(CPU_hipconv_workgroup_limit_NONE, grid_fits_passes_through_without_a_limit)
+TEST(CPU_hipconv_workgroup_limit_NONE, within_workgroup_limit_passes_through_without_a_limit)
 {
     for(const auto arch : unlimited_archs)
     {

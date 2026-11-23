@@ -135,7 +135,7 @@ function(add_gtest TEST_NAME TEST_CPP)
   endif()
 
   # libMIOpen.so exports nothing from its vendored hipconv, so hipconv_workgroup_limit.cpp tests
-  # hipconv's internals (ConvKernel::grid_fits and launch) through its own copy of the static
+  # hipconv's internals (ConvKernel::within_workgroup_limit and launch) through its own copy of the static
   # library. The other tests, which never name hipconv, do not need it.
   if(MIOPEN_USE_HIPCONV AND (NOT MIOPEN_TEST_DISCRETE OR TEST_CPP STREQUAL "hipconv_workgroup_limit.cpp"))
     target_link_libraries(${TEST_NAME} hipconv)

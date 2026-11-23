@@ -195,7 +195,7 @@ bool kernel_supports(const ConvKernel* kernel, const Device& device, const ConvP
     };
     return is_valid_layer(par) && within_size_limit(par) && algorithm_supports() &&
            kernel->supports_dims(par.dims) && kernel->is_applicable(device, par) &&
-           kernel->is_valid_config(device, par) && kernel->grid_fits(device, par);
+           kernel->is_valid_config(device, par) && kernel->within_workgroup_limit(device, par);
 }
 
 void check_kernel(ConvKernelHandle kernel, const Device& device)

@@ -35,7 +35,8 @@ bool grid_yz_within(const dim3& grid, size_t limit)
 
 } // namespace
 
-bool ConvKernel::grid_fits(const hipconv::Device& dev, const hipconv::ConvParams& par) const
+bool ConvKernel::within_workgroup_limit(const hipconv::Device& dev,
+                                        const hipconv::ConvParams& par) const
 {
     const auto limit = max_workgroups_yz(dev);
     return limit == no_workgroup_limit || grid_yz_within(get_launch_params(dev, par).grid, limit);

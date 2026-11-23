@@ -151,7 +151,7 @@ public:
     // gfx1200/gfx1201 wrap and gfx1250 truncates a larger count to 16 bits, so the launch is
     // accepted and returns wrong results. Mirrors miopen::GetMaxWorkgroupsYZ(); true on every
     // other architecture without computing the launch params.
-    bool grid_fits(const hipconv::Device& dev, const hipconv::ConvParams& par) const;
+    bool within_workgroup_limit(const hipconv::Device& dev, const hipconv::ConvParams& par) const;
 
     // Enqueue the kernel; throw on a launch-time failure.
     //
