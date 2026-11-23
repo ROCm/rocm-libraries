@@ -457,6 +457,39 @@ class TestCapability(unittest.TestCase):
                 self.assertFalse(ok)
                 self.assertIn("requires features ['causal']", why)
 
+    def test_a_request_is_normalized_once_for_every_capability_asked(self):
+        """A dispatch asks every candidate's capability about one request."""
+        calls = []
+
+        @dataclass(frozen=True)
+        class CountingRequest(_Request):
+            def normalized(self) -> dict:
+                calls.append(self)
+                return super().normalized()
+
+        request = CountingRequest()
+        capabilities = [Capability(arches=(arch,)) for arch in COVERED_ARCHES]
+        for capability in capabilities * 3:
+            capability.check(request)
+        self.assertEqual(calls, [request])
+
+    def test_equal_requests_are_each_normalized_by_their_own_values(self):
+        """``flag=1`` and ``flag=True`` compare equal but may normalize apart, so
+        one request's payload never answers for another."""
+
+        @dataclass(frozen=True)
+        class FlagRequest(_Request):
+            flag: object = 1
+
+            def normalized(self) -> dict:
+                return {**super().normalized(), "dtype": type(self.flag).__name__}
+
+        int_request, bool_request = FlagRequest(flag=1), FlagRequest(flag=True)
+        self.assertEqual(int_request, bool_request)
+        capability = Capability(arches=known_arches(), dtypes=("int",))
+        self.assertTrue(capability.check(int_request)[0])
+        self.assertFalse(capability.check(bool_request)[0])
+
     def test_dim_names_collects_from_shapes_and_relations(self):
         for arch in COVERED_ARCHES:
             with self.subTest(arch=arch):
