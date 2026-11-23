@@ -169,6 +169,7 @@ namespace
         hiptensorAlgo_t        algo    = HIPTENSOR_ALGO_DEFAULT;
         bool                   aInD    = false; // A's data sits in D's buffer
         bool                   bInD    = false; // B's data sits in D's buffer
+        bool                   thirdInD = false; // third's data sits in D's buffer
     };
 
     int64_t offset(Tensor const& t, ModeMap const& idx)
@@ -313,14 +314,129 @@ namespace
         return desc;
     }
 
+    // The call that returned a contraction's status: hipTensor checks some inputs
+    // when the contraction is created and others when it runs.
+    enum class Stage
+    {
+        Create, // hiptensorCreateContraction or hiptensorCreateContractionTrinary
+        Plan, // plan preference, workspace estimate and plan
+        Contract // hiptensorContract or hiptensorContractTrinary
+    };
+
     struct Result
     {
         hiptensorStatus_t  status = HIPTENSOR_STATUS_SUCCESS;
+        Stage              stage  = Stage::Create;
         std::vector<float> D;
+        // Status and result of the control call: the same plan run first with
+        // separate buffers.
+        std::optional<hiptensorStatus_t> control;
+        std::vector<float>               controlD;
     };
 
+    // The contraction with every tensor in a buffer of its own: no input in D's
+    // buffer, C neither in place nor at an offset. Its descriptors are p's, so a
+    // plan made for p runs it too.
+    Contraction withSeparateBuffers(Contraction p)
+    {
+        p.inPlace = false;
+        p.cOffset.reset();
+        p.aInD     = false;
+        p.bInD     = false;
+        p.thirdInD = false;
+        return p;
+    }
+
+    // Runs the planned contraction once on buffers made for p and returns its status.
+    // D receives the result.
+    hiptensorStatus_t execute(hiptensorHandle_t   h,
+                              hiptensorPlan_t     plan,
+                              uint64_t            ws,
+                              Contraction const&  p,
+                              std::vector<float>& D)
+    {
+        hiptensorStatus_t status = HIPTENSOR_STATUS_SUCCESS;
+
+        void *dA = nullptr, *dB = nullptr, *dT = nullptr, *dC = nullptr, *dD = nullptr,
+             *dW = nullptr;
+
+        auto upload = [](void** dst, std::vector<float> const& src) {
+            EXPECT_EQ(hipMalloc(dst, src.size() * sizeof(float)), hipSuccess);
+            EXPECT_EQ(
+                hipMemcpy(*dst, src.data(), src.size() * sizeof(float), hipMemcpyHostToDevice),
+                hipSuccess);
+        };
+        size_t const sizeD = p.d.span * p.d.components;
+        upload(&dA, p.a.data);
+        upload(&dB, p.b.data);
+        if(p.third)
+        {
+            upload(&dT, p.third->data);
+        }
+        if(p.c && !p.inPlace && !p.cOffset)
+        {
+            upload(&dC, p.c->data);
+        }
+        // NaN in D: an element the kernel never writes cannot pass the check.
+        // In place, D starts with C's values. With an offset, C follows NaN in D's buffer.
+        std::vector<float> initialD(sizeD, std::numeric_limits<float>::quiet_NaN());
+        if(p.inPlace)
+        {
+            initialD = p.c->data;
+        }
+        if(p.cOffset)
+        {
+            initialD.assign(*p.cOffset * p.d.components, std::numeric_limits<float>::quiet_NaN());
+            initialD.insert(initialD.end(), p.c->data.begin(), p.c->data.end());
+        }
+        // An input in D's buffer: the buffer starts with that input's values.
+        if(p.aInD || p.bInD || p.thirdInD)
+        {
+            initialD = p.aInD ? p.a.data : p.bInD ? p.b.data : p.third->data;
+            initialD.resize(std::max(initialD.size(), sizeD));
+        }
+        upload(&dD, initialD);
+        if(ws > 0)
+        {
+            EXPECT_EQ(hipMalloc(&dW, ws), hipSuccess);
+        }
+        void* const inA = p.aInD ? dD : dA;
+        void* const inB = p.bInD ? dD : dB;
+        void* const inT = p.thirdInD ? dD : dT;
+
+        void* added = p.inPlace ? dD : dC;
+        if(p.cOffset)
+        {
+            added = static_cast<float*>(dD) + *p.cOffset * p.d.components;
+        }
+        if(p.third)
+        {
+            status = hiptensorContractTrinary(
+                h, plan, &p.alpha, inA, inB, inT, &p.beta, added, dD, dW, ws, nullptr);
+        }
+        else
+        {
+            status = hiptensorContract(
+                h, plan, &p.alpha, inA, inB, &p.beta, added, dD, dW, ws, nullptr);
+        }
+        EXPECT_EQ(hipDeviceSynchronize(), hipSuccess);
+
+        D.resize(sizeD);
+        EXPECT_EQ(hipMemcpy(D.data(), dD, sizeD * sizeof(float), hipMemcpyDeviceToHost),
+                  hipSuccess);
+
+        for(void* ptr : {dA, dB, dT, dC, dD, dW})
+        {
+            (void)hipFree(ptr);
+        }
+        return status;
+    }
+
     // Runs the contraction on the device and returns D, or the first failing status.
-    Result run(hiptensorHandle_t h, Contraction const& p)
+    // With withControl, the plan first runs the contraction with separate buffers
+    // (see withSeparateBuffers), so a refusal of p itself is told apart from a
+    // plan that cannot run at all.
+    Result run(hiptensorHandle_t h, Contraction const& p, bool withControl = false)
     {
         Result r;
         auto   descA = describe(h, p.a);
@@ -337,9 +453,6 @@ namespace
         hiptensorPlanPreference_t      pref = nullptr;
         hiptensorPlan_t                plan = nullptr;
         uint64_t                       ws   = 0;
-        void *dA = nullptr, *dB = nullptr, *dT = nullptr, *dC = nullptr, *dD = nullptr,
-             *dW = nullptr;
-
         if(p.third)
         {
             r.status = hiptensorCreateContractionTrinary(h,
@@ -379,6 +492,7 @@ namespace
         }
         if(r.status == HIPTENSOR_STATUS_SUCCESS)
         {
+            r.stage  = Stage::Plan;
             r.status = hiptensorCreatePlanPreference(h, &pref, p.algo, HIPTENSOR_JIT_MODE_NONE);
         }
         if(r.status == HIPTENSOR_STATUS_SUCCESS)
@@ -391,78 +505,16 @@ namespace
             r.status = hiptensorCreatePlan(h, &plan, op, pref, ws);
         }
 
+        if(r.status == HIPTENSOR_STATUS_SUCCESS && withControl)
+        {
+            r.control = execute(h, plan, ws, withSeparateBuffers(p), r.controlD);
+        }
         if(r.status == HIPTENSOR_STATUS_SUCCESS)
         {
-            auto upload = [](void** dst, std::vector<float> const& src) {
-                EXPECT_EQ(hipMalloc(dst, src.size() * sizeof(float)), hipSuccess);
-                EXPECT_EQ(
-                    hipMemcpy(*dst, src.data(), src.size() * sizeof(float), hipMemcpyHostToDevice),
-                    hipSuccess);
-            };
-            size_t const sizeD = p.d.span * p.d.components;
-            upload(&dA, p.a.data);
-            upload(&dB, p.b.data);
-            if(p.third)
-            {
-                upload(&dT, p.third->data);
-            }
-            if(p.c && !p.inPlace && !p.cOffset)
-            {
-                upload(&dC, p.c->data);
-            }
-            // NaN in D: an element the kernel never writes cannot pass the check.
-            // In place, D starts with C's values. With an offset, C follows NaN in D's buffer.
-            std::vector<float> initialD(sizeD, std::numeric_limits<float>::quiet_NaN());
-            if(p.inPlace)
-            {
-                initialD = p.c->data;
-            }
-            if(p.cOffset)
-            {
-                initialD.assign(*p.cOffset * p.d.components,
-                                std::numeric_limits<float>::quiet_NaN());
-                initialD.insert(initialD.end(), p.c->data.begin(), p.c->data.end());
-            }
-            // An input in D's buffer: the buffer starts with that input's values.
-            if(p.aInD || p.bInD)
-            {
-                initialD = p.aInD ? p.a.data : p.b.data;
-                initialD.resize(std::max(initialD.size(), sizeD));
-            }
-            upload(&dD, initialD);
-            if(ws > 0)
-            {
-                EXPECT_EQ(hipMalloc(&dW, ws), hipSuccess);
-            }
-            void* const inA = p.aInD ? dD : dA;
-            void* const inB = p.bInD ? dD : dB;
-
-            void* added = p.inPlace ? dD : dC;
-            if(p.cOffset)
-            {
-                added = static_cast<float*>(dD) + *p.cOffset * p.d.components;
-            }
-            if(p.third)
-            {
-                r.status = hiptensorContractTrinary(
-                    h, plan, &p.alpha, inA, inB, dT, &p.beta, added, dD, dW, ws, nullptr);
-            }
-            else
-            {
-                r.status = hiptensorContract(
-                    h, plan, &p.alpha, inA, inB, &p.beta, added, dD, dW, ws, nullptr);
-            }
-            EXPECT_EQ(hipDeviceSynchronize(), hipSuccess);
-
-            r.D.resize(sizeD);
-            EXPECT_EQ(hipMemcpy(r.D.data(), dD, sizeD * sizeof(float), hipMemcpyDeviceToHost),
-                      hipSuccess);
+            r.stage  = Stage::Contract;
+            r.status = execute(h, plan, ws, p, r.D);
         }
 
-        for(void* ptr : {dA, dB, dT, dC, dD, dW})
-        {
-            (void)hipFree(ptr);
-        }
         if(plan)
         {
             hiptensorDestroyPlan(plan);
@@ -505,16 +557,43 @@ namespace
         EXPECT_LE(err, kTolerance) << "max relative error " << err;
     }
 
-    // Expects hipTensor to refuse the contraction with the given status. Skips when
-    // the device cannot run this element type at all, which create reports first.
-    void expectRefused(hiptensorHandle_t h, Contraction const& p, hiptensorStatus_t expected)
+    // Expects hipTensor to refuse the contraction with the given status, from the call
+    // that holds the check. Skips when the device cannot run this element type at all,
+    // which create reports first.
+    //
+    // A check made when the contraction runs looks only at the buffers: p's
+    // descriptors, and so its plan, are those of the same contraction with separate
+    // buffers. The test runs one plan twice: with separate buffers it must succeed
+    // and give the reference result, with p's buffers it must be refused. Only the buffers differ between the two
+    // calls, so the refusal comes from the check under test. Without a plan the
+    // device has no kernel for this contraction, and the test skips.
+    void expectRefused(hiptensorHandle_t  h,
+                       ModeMap const&     ext,
+                       Contraction const& p,
+                       hiptensorStatus_t  expected,
+                       Stage              where)
     {
-        auto status = run(h, p).status;
-        if(status == HIPTENSOR_STATUS_ARCH_MISMATCH)
+        auto r = run(h, p, where == Stage::Contract);
+        if(r.status == HIPTENSOR_STATUS_ARCH_MISMATCH)
         {
             GTEST_SKIP() << "no kernel for this element type on this device";
         }
-        EXPECT_EQ(status, expected);
+        if(where == Stage::Contract)
+        {
+            if(r.stage == Stage::Plan)
+            {
+                GTEST_SKIP() << "no plan for this contraction on this device (status " << r.status
+                             << ")";
+            }
+            ASSERT_EQ(r.control, HIPTENSOR_STATUS_SUCCESS)
+                << "the plan does not run the contraction with separate buffers";
+            double err = maxRelError(r.controlD, p.d.components, reference(p, ext));
+            ASSERT_LE(err, kTolerance)
+                << "the plan runs the contraction with separate buffers wrongly: "
+                << "max relative error " << err;
+        }
+        EXPECT_EQ(r.status, expected);
+        EXPECT_EQ(r.stage, where);
     }
 
     // How a test differs from the plain f32 contraction.
@@ -815,7 +894,7 @@ TEST_F(ContractionCheckTest, CLacksMode)
                   .b     = makeInput({N0, K0, K1}, ext, kCanonical, 2),
                   .c     = makeInput({M0, M1}, ext, kCanonical, 3),
                   .d     = makeTensor({M0, M1, N0}, ext, kCanonical)};
-    expectRefused(mHandle, p, HIPTENSOR_STATUS_NOT_SUPPORTED);
+    expectRefused(mHandle, ext, p, HIPTENSOR_STATUS_NOT_SUPPORTED, Stage::Create);
 }
 
 // C must give each mode D's extent: here n is 4 in C and 5 in D.
@@ -830,7 +909,7 @@ TEST_F(ContractionCheckTest, CExtentDiffers)
                   .b     = makeInput({N0, K0, K1}, ext, kCanonical, 2),
                   .c     = makeInput({M0, M1, N0}, extC, kCanonical, 3),
                   .d     = makeTensor({M0, M1, N0}, ext, kCanonical)};
-    expectRefused(mHandle, p, HIPTENSOR_STATUS_INVALID_VALUE);
+    expectRefused(mHandle, ext, p, HIPTENSOR_STATUS_INVALID_VALUE, Stage::Create);
 }
 
 // C and D in one buffer with the same layout: each element is read
@@ -864,7 +943,7 @@ TEST_F(ContractionCheckTest, InPlaceStridesDiffer)
                   .c       = makeInput({M0, M1, N0}, ext, kCanonical, 3),
                   .d       = makeTensor({M0, M1, N0}, ext, Layout{false, true}),
                   .inPlace = true};
-    expectRefused(mHandle, p, HIPTENSOR_STATUS_NOT_SUPPORTED);
+    expectRefused(mHandle, ext, p, HIPTENSOR_STATUS_NOT_SUPPORTED, Stage::Contract);
 }
 
 // The complex path does not use C's own layout.
@@ -873,8 +952,10 @@ TEST_F(ContractionCheckTest, ComplexCLayoutDiffers)
     auto const ext = extents(false);
     expectRefused(
         mHandle,
+        ext,
         bilinear(ext, kCanonical, kCanonical, kRowMajor, kCanonical, {.components = kComplex}),
-        HIPTENSOR_STATUS_NOT_SUPPORTED);
+        HIPTENSOR_STATUS_NOT_SUPPORTED,
+        Stage::Create);
 }
 
 // The complex path sizes its buffers by the number of elements, so it cannot
@@ -888,8 +969,10 @@ TEST_F(ContractionCheckTest, ComplexPadded)
         std::array<Layout, 4> l{kCanonical, kCanonical, kCanonical, kCanonical};
         l[i] = kPadded;
         expectRefused(mHandle,
+                      ext,
                       bilinear(ext, l[0], l[1], l[2], l[3], {.components = kComplex}),
-                      HIPTENSOR_STATUS_NOT_SUPPORTED);
+                      HIPTENSOR_STATUS_NOT_SUPPORTED,
+                      Stage::Create);
     }
 }
 
@@ -955,7 +1038,7 @@ TEST_F(ContractionCheckTest, ComplexOverlappingStrides)
     auto       p
         = bilinear(ext, kCanonical, kCanonical, kCanonical, kCanonical, {.components = kComplex});
     p.a.strides = {1, 1, 2, 32};
-    expectRefused(mHandle, p, HIPTENSOR_STATUS_NOT_SUPPORTED);
+    expectRefused(mHandle, ext, p, HIPTENSOR_STATUS_NOT_SUPPORTED, Stage::Create);
 }
 
 // C begins one element after D in the same buffer: the kernel would read
@@ -965,7 +1048,7 @@ TEST_F(ContractionCheckTest, COverlapsD)
     auto const ext = extents(false);
     auto       p   = bilinear(ext, kCanonical, kCanonical, kCanonical, kCanonical);
     p.cOffset      = 1;
-    expectRefused(mHandle, p, HIPTENSOR_STATUS_NOT_SUPPORTED);
+    expectRefused(mHandle, ext, p, HIPTENSOR_STATUS_NOT_SUPPORTED, Stage::Contract);
 }
 
 // C begins where D ends: one buffer, but no shared element.
@@ -985,7 +1068,7 @@ TEST_F(ContractionCheckTest, AOverlapsD)
     auto const ext = extents(false);
     auto       p   = bilinear(ext, kCanonical, kCanonical, kCanonical, kCanonical);
     p.aInD         = true;
-    expectRefused(mHandle, p, HIPTENSOR_STATUS_NOT_SUPPORTED);
+    expectRefused(mHandle, ext, p, HIPTENSOR_STATUS_NOT_SUPPORTED, Stage::Contract);
 }
 
 TEST_F(ContractionCheckTest, BOverlapsD)
@@ -993,7 +1076,7 @@ TEST_F(ContractionCheckTest, BOverlapsD)
     auto const ext = extents(false);
     auto       p   = bilinear(ext, kCanonical, kCanonical, kCanonical, kCanonical);
     p.bInD         = true;
-    expectRefused(mHandle, p, HIPTENSOR_STATUS_NOT_SUPPORTED);
+    expectRefused(mHandle, ext, p, HIPTENSOR_STATUS_NOT_SUPPORTED, Stage::Contract);
 }
 
 // Trinary: D must have E's modes. Here D lacks n.
@@ -1002,7 +1085,7 @@ TEST_F(ContractionCheckTest, TrinaryDLacksMode)
     auto const ext = extents(false);
     auto       p   = trinary(ext, kTrinaryCanonical);
     p.c            = makeInput({M0, M1}, ext, kCanonical, 3);
-    expectRefused(mHandle, p, HIPTENSOR_STATUS_NOT_SUPPORTED);
+    expectRefused(mHandle, ext, p, HIPTENSOR_STATUS_NOT_SUPPORTED, Stage::Create);
 }
 
 // Trinary: D must give each mode E's extent. Here n is 4 in D and 5 in E.
@@ -1013,7 +1096,7 @@ TEST_F(ContractionCheckTest, TrinaryDExtentDiffers)
     extD[N0]        = 4;
     auto p          = trinary(ext, kTrinaryCanonical);
     p.c             = makeInput({M0, M1, N0}, extD, kCanonical, 3);
-    expectRefused(mHandle, p, HIPTENSOR_STATUS_INVALID_VALUE);
+    expectRefused(mHandle, ext, p, HIPTENSOR_STATUS_INVALID_VALUE, Stage::Create);
 }
 
 // Trinary: D and E in one buffer with the same layout.
@@ -1035,7 +1118,7 @@ TEST_F(ContractionCheckTest, TrinaryInPlaceStridesDiffer)
     auto const ext = extents(false);
     auto       p   = trinary(ext, trinaryLayouts(kE, kRowMajor));
     p.inPlace      = true;
-    expectRefused(mHandle, p, HIPTENSOR_STATUS_NOT_SUPPORTED);
+    expectRefused(mHandle, ext, p, HIPTENSOR_STATUS_NOT_SUPPORTED, Stage::Contract);
 }
 
 TEST_F(ContractionCheckTest, TrinaryComplexInPlaceSameLayout)
@@ -1055,7 +1138,7 @@ TEST_F(ContractionCheckTest, TrinaryDOverlapsE)
     auto const ext = extents(false);
     auto       p   = trinary(ext, kTrinaryCanonical);
     p.cOffset      = 1;
-    expectRefused(mHandle, p, HIPTENSOR_STATUS_NOT_SUPPORTED);
+    expectRefused(mHandle, ext, p, HIPTENSOR_STATUS_NOT_SUPPORTED, Stage::Contract);
 }
 
 // Trinary: an input in E's buffer.
@@ -1064,7 +1147,23 @@ TEST_F(ContractionCheckTest, TrinaryAOverlapsE)
     auto const ext = extents(false);
     auto       p   = trinary(ext, kTrinaryCanonical);
     p.aInD         = true;
-    expectRefused(mHandle, p, HIPTENSOR_STATUS_NOT_SUPPORTED);
+    expectRefused(mHandle, ext, p, HIPTENSOR_STATUS_NOT_SUPPORTED, Stage::Contract);
+}
+
+TEST_F(ContractionCheckTest, TrinaryBOverlapsE)
+{
+    auto const ext = extents(false);
+    auto       p   = trinary(ext, kTrinaryCanonical);
+    p.bInD         = true;
+    expectRefused(mHandle, ext, p, HIPTENSOR_STATUS_NOT_SUPPORTED, Stage::Contract);
+}
+
+TEST_F(ContractionCheckTest, TrinaryCOverlapsE)
+{
+    auto const ext = extents(false);
+    auto       p   = trinary(ext, kTrinaryCanonical);
+    p.thirdInD     = true;
+    expectRefused(mHandle, ext, p, HIPTENSOR_STATUS_NOT_SUPPORTED, Stage::Contract);
 }
 
 // Trinary: the complex path does not use D's own layout.
@@ -1072,8 +1171,10 @@ TEST_F(ContractionCheckTest, TrinaryComplexDLayoutDiffers)
 {
     auto const ext = extents(false);
     expectRefused(mHandle,
+                  ext,
                   trinary(ext, trinaryLayouts(kD, kRowMajor), {.components = kComplex}),
-                  HIPTENSOR_STATUS_NOT_SUPPORTED);
+                  HIPTENSOR_STATUS_NOT_SUPPORTED,
+                  Stage::Create);
 }
 
 // Trinary: the complex path cannot hold a tensor with gaps.
@@ -1084,8 +1185,10 @@ TEST_F(ContractionCheckTest, TrinaryComplexPadded)
     {
         SCOPED_TRACE("padded tensor " + std::to_string(i) + " of A, B, C, D, E");
         expectRefused(mHandle,
+                      ext,
                       trinary(ext, trinaryLayouts(i, kPadded), {.components = kComplex}),
-                      HIPTENSOR_STATUS_NOT_SUPPORTED);
+                      HIPTENSOR_STATUS_NOT_SUPPORTED,
+                      Stage::Create);
     }
 }
 
