@@ -9,6 +9,7 @@
 
 #include <gtest/gtest.h>
 
+#include "engines/kernel_ingestor_engine/packs/Gfx950AttentionUnified3DGeometry.hpp"
 #include "tests/engines/kernel_ingestor_engine/packs/Gfx950AttentionUnified3DTestGraphs.hpp"
 
 /**
@@ -428,6 +429,19 @@ TEST(TestGfx950AttentionUnified3DMatchers, RanksFewerSegmentsFirstWithDistinctSc
     EXPECT_GT(a, b);
     EXPECT_GT(b, c);
     EXPECT_GT(c, 0.0);
+}
+
+/// The span the score divides by follows the LDS-derived segment cap, so the widest legal
+/// candidate still outranks a declined record and the one below it.
+TEST(TestGfx950AttentionUnified3DMatchers, ScoresTheSegmentCapAboveZero)
+{
+    KernelSpec widest;
+    widest.numSegments = GFX950_UNIFIED_3D_MAX_SEGMENTS;
+    KernelSpec belowWidest;
+    belowWidest.numSegments = GFX950_UNIFIED_3D_MAX_SEGMENTS - 1;
+    const double top = scoreOf(GraphSpec{}, widest);
+    EXPECT_GT(top, 0.0);
+    EXPECT_GT(scoreOf(GraphSpec{}, belowWidest), top);
 }
 
 TEST(TestGfx950AttentionUnified3DMatchers, ScoresAnUnlaunchableRecordZero)

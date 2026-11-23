@@ -120,6 +120,7 @@ using sdpa_graph::hasSdpaForwardNode;
 using sdpa_graph::HEAD_AXIS;
 using sdpa_graph::HEAD_SIZE_AXIS;
 using sdpa_graph::isWellFormedOperand;
+using sdpa_graph::readProblem;
 using sdpa_graph::SDPA_RANK;
 using sdpa_graph::sdpaNode;
 using sdpa_graph::SEQ_AXIS;
@@ -314,13 +315,7 @@ std::optional<Unified3dProblem> matchedProblem(const MatchContext& context)
     {
         return std::nullopt;
     }
-    const auto* q = findTensor(context, attributes->q_tensor_uid());
-    const auto* k = findTensor(context, attributes->k_tensor_uid());
-    if(q == nullptr || k == nullptr || !isWellFormedOperand(*q) || !isWellFormedOperand(*k))
-    {
-        return std::nullopt;
-    }
-    return problemFor(*q, *k);
+    return readProblem(context, attributes->q_tensor_uid(), attributes->k_tensor_uid());
 }
 
 /**

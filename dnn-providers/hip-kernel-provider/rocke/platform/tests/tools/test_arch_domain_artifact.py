@@ -839,6 +839,23 @@ class DeclareParseTest(unittest.TestCase):
         self.assertIn("%p0 = addrspacecast ptr %base to ptr addrspace(1)", text)
         self.assertIn("call void @llvm.amdgcn.probe.cast(ptr addrspace(1) %p0,", text)
 
+    def test_an_autoupgraded_signature_is_probed_in_rockes_form(self):
+        """Both sides of an AutoUpgrade must ask the same question.
+
+        llvm #220442 gave `asyncmark` a stage-mask operand and upgrades the
+        legacy `()` call to `(i32 0)`. Probing the resolved form recorded a
+        different contract on each side, so no column passed both compilers.
+        Attribute-only resolution still wins: it carries this LLVM's `immarg`.
+        """
+        legacy = "declare void @llvm.amdgcn.asyncmark()"
+        upgraded = "declare void @llvm.amdgcn.asyncmark(i32 immarg range(i32 0, 2048))"
+        self.assertEqual(G._probe_decl(legacy, upgraded), legacy)
+        self.assertEqual(G._probe_decl(legacy, legacy), legacy)
+        self.assertEqual(G._probe_decl(legacy, ""), legacy)
+        plain = "declare i32 @llvm.amdgcn.probe.imm(i1)"
+        attributed = "declare i32 @llvm.amdgcn.probe.imm(i1 immarg zeroext)"
+        self.assertEqual(G._probe_decl(plain, attributed), attributed)
+
 
 class ProbeWitnessTest(unittest.TestCase):
     """Special operands are explicit inputs, not speculative retry values."""

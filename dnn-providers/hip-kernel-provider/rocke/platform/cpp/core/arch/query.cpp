@@ -758,6 +758,21 @@ int rocke_arch_async_lds_max_dwords(const rocke_arch_target_t* t)
     return t->memory.async_lds_max_dwords;
 }
 
+const int rocke_lds_dma_encoded_dwords[ROCKE_LDS_DMA_ENCODED_DWORDS_N] = {1, 3, 4};
+
+int rocke_arch_async_lds_dwords(const rocke_arch_target_t* t,
+                                int out[ROCKE_LDS_DMA_ENCODED_DWORDS_N])
+{
+    /* Python: ArchTarget.async_lds_dwords. */
+    int n = 0;
+    if(!t || !t->memory.has_async_lds)
+        return 0;
+    for(int i = 0; i < ROCKE_LDS_DMA_ENCODED_DWORDS_N; ++i)
+        if(rocke_lds_dma_encoded_dwords[i] <= t->memory.async_lds_max_dwords)
+            out[n++] = rocke_lds_dma_encoded_dwords[i];
+    return n;
+}
+
 int rocke_arch_max_threads_per_block(const rocke_arch_target_t* t)
 {
     if(!t)
