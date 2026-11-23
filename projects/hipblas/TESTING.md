@@ -396,6 +396,14 @@ These cases still create a hipBLAS handle and, for pointer checks, device alloca
 
 hipBLAS performance is mostly the backend's performance. A regression that shows up only in `hipblas-bench` still needs a rocBLAS or cuBLAS investigation when the marshalling change is not the suspect.
 
+**Multiplot script tests.** `scripts/performance/multiplot/tests/test_multiplot.py` checks the benchmark and plot scripts on the host, without a GPU, using the result files checked in under `scripts/performance/multiplot/`. It needs `pytest`, `pyyaml`, `numpy`, and `matplotlib`, which the hipBLAS build does not require. CI does not run it, and it is not needed for library or client changes. Run it when changing the multiplot scripts or sweep YAMLs:
+
+```bash
+cd projects/hipblas
+python3 -m pip install pytest pyyaml numpy matplotlib   # once, if missing
+python3 -m pytest scripts/performance/multiplot/tests
+```
+
 ### Build-Time Validation
 
 hipBLAS does not generate kernels. A successful library build checks that the selected backend (`amd_detail` or `nvidia_detail`) compiles and links against rocBLAS or cuBLAS, and against rocSOLVER when solvers are on. Client builds additionally require an ILP64 CBLAS and LAPACK.
