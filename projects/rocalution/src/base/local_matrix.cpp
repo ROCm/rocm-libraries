@@ -107,13 +107,40 @@ namespace rocalution
     {
         log_debug(this, "LocalMatrix::Clear()", "");
 
-        // A pending *Async() transfer still reads or writes the data
-        if(this->asyncf_ == true)
-        {
-            this->Sync();
-        }
+        this->CancelAsync_();
 
         this->matrix_->Clear();
+    }
+
+    template <typename ValueType>
+    void LocalMatrix<ValueType>::CancelAsync_(void)
+    {
+        if(this->asyncf_ == false)
+        {
+            return;
+        }
+
+        // The transfer still reads or writes the data
+        _rocalution_sync();
+
+        // The destructor frees only the current object
+        if((this->matrix_accel_ != NULL) && (this->matrix_host_ != NULL))
+        {
+            if(this->matrix_ == this->matrix_host_)
+            {
+                delete this->matrix_accel_;
+                this->matrix_accel_ = NULL;
+            }
+            else
+            {
+                delete this->matrix_host_;
+                this->matrix_host_ = NULL;
+            }
+
+            LOG_VERBOSE_INFO(4, "*** info: LocalMatrix::Move*Async() transfer (cancelled)");
+        }
+
+        this->asyncf_ = false;
     }
 
     template <typename ValueType>

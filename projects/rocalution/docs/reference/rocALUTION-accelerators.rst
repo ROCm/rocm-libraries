@@ -62,7 +62,7 @@ The rocALUTION library also provides asynchronous transfer of data between host 
 
 This can be done with :cpp:func:`rocalution::LocalVector::CopyFromAsync` and :cpp:func:`rocalution::LocalMatrix::CopyFromAsync` or with ``MoveToAcceleratorAsync()`` and ``MoveToHostAsync()``. These functions return immediately and perform the asynchronous transfer in background mode. The synchronization is done with ``Sync()``.
 
-When using the ``MoveToAcceleratorAsync()`` and ``MoveToHostAsync()`` functions, the object still points to its original location (i.e. host for calling ``MoveToAcceleratorAsync()`` and accelerator for ``MoveToHostAsync()``). The object switches to the new location after the ``Sync()`` function is called.
+When using the ``MoveToAcceleratorAsync()`` and ``MoveToHostAsync()`` functions, the object still points to its original location (i.e. host for calling ``MoveToAcceleratorAsync()`` and accelerator for ``MoveToHostAsync()``). The object switches to the new location after the ``Sync()`` function is called. ``Clear()``, the destructor, and the functions that clear the object first, such as ``Allocate()`` and ``SetDataPtr()``, cancel a pending move instead: they wait for the transfer, and the object stays at its original location.
 
 .. note::
 

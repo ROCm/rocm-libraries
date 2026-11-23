@@ -92,6 +92,8 @@ namespace rocalution
 
         if(size > 0)
         {
+            this->CancelAsync_();
+
             Rocalution_Backend_Descriptor backend = this->local_backend_;
 
             // init host vector
@@ -186,13 +188,40 @@ namespace rocalution
     {
         log_debug(this, "LocalVector::Clear()");
 
-        // A pending *Async() transfer still reads or writes the data
-        if(this->asyncf_ == true)
-        {
-            this->Sync();
-        }
+        this->CancelAsync_();
 
         this->vector_->Clear();
+    }
+
+    template <typename ValueType>
+    void LocalVector<ValueType>::CancelAsync_(void)
+    {
+        if(this->asyncf_ == false)
+        {
+            return;
+        }
+
+        // The transfer still reads or writes the data
+        _rocalution_sync();
+
+        // The destructor frees only the current object
+        if((this->vector_accel_ != NULL) && (this->vector_host_ != NULL))
+        {
+            if(this->vector_ == this->vector_host_)
+            {
+                delete this->vector_accel_;
+                this->vector_accel_ = NULL;
+            }
+            else
+            {
+                delete this->vector_host_;
+                this->vector_host_ = NULL;
+            }
+
+            LOG_VERBOSE_INFO(4, "*** info: LocalVector::Move*Async() transfer (cancelled)");
+        }
+
+        this->asyncf_ = false;
     }
 
     template <typename ValueType>
