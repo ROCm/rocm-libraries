@@ -336,63 +336,157 @@ namespace
         s.run(mat, a1, false, "first arrays again, without a new preprocessing");
     }
 
-    // The first hipsparseSpMV after hipsparseCsrSetPointers would analyze the new
-    // arrays, which synchronizes the device. While the handle stream is being
-    // captured, it returns HIPSPARSE_STATUS_INVALID_VALUE and leaves the capture
-    // valid. The next call outside the capture computes the new product.
+    using graph_exec_ptr
+        = std::unique_ptr<std::remove_pointer_t<hipGraphExec_t>, hipError_t (*)(hipGraphExec_t)>;
+
+    // Runs call while stream is being captured in global mode and checks that the
+    // capture is still active after it. Returns the status of call. When exec is
+    // not null, it receives the instantiated graph.
+    template <typename F>
+    hipsparseStatus_t during_capture(hipStream_t stream, F&& call, graph_exec_ptr* exec = nullptr)
+    {
+        hipsparseStatus_t st = HIPSPARSE_STATUS_INTERNAL_ERROR;
+        EXPECT_EQ(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal), hipSuccess);
+        EXPECT_NO_THROW(st = call());
+        hipStreamCaptureStatus status = hipStreamCaptureStatusNone;
+        EXPECT_EQ(hipStreamIsCapturing(stream, &status), hipSuccess);
+        EXPECT_EQ(status, hipStreamCaptureStatusActive) << "the capture was invalidated";
+        hipGraph_t graph = nullptr;
+        EXPECT_EQ(hipStreamEndCapture(stream, &graph), hipSuccess);
+        if(graph != nullptr)
+        {
+            if(exec != nullptr)
+            {
+                hipGraphExec_t instance = nullptr;
+                EXPECT_EQ(hipGraphInstantiate(&instance, graph, nullptr, nullptr, 0), hipSuccess);
+                exec->reset(instance);
+            }
+            EXPECT_EQ(hipGraphDestroy(graph), hipSuccess);
+        }
+        return st;
+    }
+
+    // a1 with other values.
+    const std::vector<double> a4{-1, 5, 0, 7, 0, 0};
+
+    // A CSR matrix of a1 on a handle with its own stream, and the arrays of a2 and a4.
+    struct captured_csr
+    {
+        const compressed       h1{a1, false};
+        const compressed       h2{a2, false};
+        const compressed       h4{a4, false};
+        hipsparse_unique_ptr   p1, i1, v1, p2, i2, v2, v4;
+        const stream_ptr       stream;
+        hipsparseLocalHandle_t handle;
+        hipsparseLocalCsr      mat;
+        spmv_check             s;
+
+        explicit captured_csr(hipsparseSpMVAlg_t alg)
+            : p1(to_device(h1.ptr))
+            , i1(to_device(h1.ind))
+            , v1(to_device(h1.val))
+            , p2(to_device(h2.ptr))
+            , i2(to_device(h2.ind))
+            , v2(to_device(h2.val))
+            , v4(to_device(h4.val))
+            , stream(new_stream())
+            , mat(m,
+                  n,
+                  h1.val.size(),
+                  p1.get(),
+                  i1.get(),
+                  v1.get(),
+                  HIPSPARSE_INDEX_32I,
+                  HIPSPARSE_INDEX_32I,
+                  HIPSPARSE_INDEX_BASE_ZERO,
+                  HIP_R_64F)
+            , s(handle, HIPSPARSE_OPERATION_NON_TRANSPOSE, alg)
+        {
+            CHECK_HIPSPARSE_ERROR(hipsparseSetStream(handle, stream.get()));
+        }
+
+        hipsparseStatus_t capture_spmv(graph_exec_ptr* exec = nullptr)
+        {
+            return during_capture(
+                stream.get(), [&] { return s.spmv(mat); }, exec);
+        }
+
+        // Launches exec on the initial y and compares y with the product of a.
+        void launch(const graph_exec_ptr& exec, const std::vector<double>& a)
+        {
+            ASSERT_NE(exec.get(), nullptr);
+            s.reset_y();
+            ASSERT_FALSE(testing::Test::HasFatalFailure());
+            ASSERT_EQ(hipGraphLaunch(exec.get(), stream.get()), hipSuccess);
+            s.check(a);
+        }
+    };
+
+    // The first hipsparseSpMV_bufferSize, hipsparseSpMV_preprocess or hipsparseSpMV
+    // after hipsparseCsrSetPointers would destroy the retired state and analyze the
+    // new arrays, which synchronizes the device. While the handle stream is being
+    // captured, each returns HIPSPARSE_STATUS_INVALID_VALUE, whatever the algorithm,
+    // and leaves the capture valid. One hipsparseSpMV outside the capture computes
+    // the new product, and a hipsparseSpMV captured after it records the new
+    // product.
     void run_capture(hipsparseSpMVAlg_t alg)
     {
         SCOPED_TRACE(testing::Message() << "alg=" << alg);
 
-        const compressed h1(a1, false), h2(a2, false);
-        ASSERT_EQ(h1.val.size(), h2.val.size());
-
-        auto p1 = to_device(h1.ptr), i1 = to_device(h1.ind), p2 = to_device(h2.ptr),
-             i2 = to_device(h2.ind);
-        auto v1 = to_device(h1.val), v2 = to_device(h2.val);
-
-        const stream_ptr       stream = new_stream();
-        hipsparseLocalHandle_t handle;
-        ASSERT_EQ(hipsparseSetStream(handle, stream.get()), HIPSPARSE_STATUS_SUCCESS);
-        hipsparseLocalCsr mat(m,
-                              n,
-                              h1.val.size(),
-                              p1.get(),
-                              i1.get(),
-                              v1.get(),
-                              HIPSPARSE_INDEX_32I,
-                              HIPSPARSE_INDEX_32I,
-                              HIPSPARSE_INDEX_BASE_ZERO,
-                              HIP_R_64F);
-
-        spmv_check s(handle, HIPSPARSE_OPERATION_NON_TRANSPOSE, alg);
-        s.size_buffer(mat);
-        ASSERT_FALSE(testing::Test::HasFatalFailure());
-        ASSERT_EQ(s.preprocess(mat), HIPSPARSE_STATUS_SUCCESS);
-        s.reset_y();
-        ASSERT_EQ(s.spmv(mat), HIPSPARSE_STATUS_SUCCESS);
-        s.check(a1);
-        ASSERT_EQ(hipsparseCsrSetPointers(mat, p2.get(), i2.get(), v2.get()),
+        captured_csr c(alg);
+        c.s.run(c.mat, a1, true, "first arrays");
+        ASSERT_FALSE(testing::Test::HasFailure());
+        ASSERT_EQ(hipsparseCsrSetPointers(c.mat, c.p2.get(), c.i2.get(), c.v2.get()),
                   HIPSPARSE_STATUS_SUCCESS);
         ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
 
-        ASSERT_EQ(hipStreamBeginCapture(stream.get(), hipStreamCaptureModeGlobal), hipSuccess);
-        hipsparseStatus_t captured = HIPSPARSE_STATUS_SUCCESS;
-        EXPECT_NO_THROW(captured = s.spmv(mat));
-        EXPECT_EQ(captured, HIPSPARSE_STATUS_INVALID_VALUE) << "SpMV during the capture";
-        hipStreamCaptureStatus status = hipStreamCaptureStatusNone;
-        EXPECT_EQ(hipStreamIsCapturing(stream.get(), &status), hipSuccess);
-        EXPECT_EQ(status, hipStreamCaptureStatusActive);
-        hipGraph_t graph = nullptr;
-        EXPECT_EQ(hipStreamEndCapture(stream.get(), &graph), hipSuccess);
-        if(graph != nullptr)
-        {
-            EXPECT_EQ(hipGraphDestroy(graph), hipSuccess);
-        }
+        EXPECT_EQ(c.capture_spmv(), HIPSPARSE_STATUS_INVALID_VALUE) << "SpMV during the capture";
+        size_t bytes = 0;
+        EXPECT_EQ(during_capture(c.stream.get(), [&] { return c.s.buffer_size(c.mat, &bytes); }),
+                  HIPSPARSE_STATUS_INVALID_VALUE)
+            << "bufferSize during the capture";
+        EXPECT_EQ(during_capture(c.stream.get(), [&] { return c.s.preprocess(c.mat); }),
+                  HIPSPARSE_STATUS_INVALID_VALUE)
+            << "preprocess during the capture";
+        ASSERT_FALSE(testing::Test::HasFailure());
 
-        s.reset_y();
-        EXPECT_EQ(s.spmv(mat), HIPSPARSE_STATUS_SUCCESS) << "SpMV after the capture";
-        s.check(a2);
+        c.s.reset_y();
+        EXPECT_EQ(c.s.spmv(c.mat), HIPSPARSE_STATUS_SUCCESS) << "SpMV after the capture";
+        c.s.check(a2);
+
+        graph_exec_ptr exec(nullptr, hipGraphExecDestroy);
+        EXPECT_EQ(c.capture_spmv(&exec), HIPSPARSE_STATUS_SUCCESS)
+            << "SpMV captured after the new arrays were analyzed";
+        c.launch(exec, a2);
+    }
+
+    // hipsparseSpMatSetValues keeps the analysis: a hipsparseSpMV captured right
+    // after it records the product of the new values. hipsparseCsrSetPointers with
+    // the same row and column arrays and new values retires the analysis as new
+    // arrays do.
+    void run_capture_new_values(hipsparseSpMVAlg_t alg)
+    {
+        SCOPED_TRACE(testing::Message() << "alg=" << alg);
+
+        captured_csr c(alg);
+        c.s.run(c.mat, a1, true, "first arrays");
+        ASSERT_FALSE(testing::Test::HasFailure());
+
+        ASSERT_EQ(hipsparseSpMatSetValues(c.mat, c.v4.get()), HIPSPARSE_STATUS_SUCCESS);
+        ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+        graph_exec_ptr exec(nullptr, hipGraphExecDestroy);
+        EXPECT_EQ(c.capture_spmv(&exec), HIPSPARSE_STATUS_SUCCESS)
+            << "SpMV captured after hipsparseSpMatSetValues";
+        c.launch(exec, a4);
+        ASSERT_FALSE(testing::Test::HasFailure());
+
+        ASSERT_EQ(hipsparseCsrSetPointers(c.mat, c.p1.get(), c.i1.get(), c.v1.get()),
+                  HIPSPARSE_STATUS_SUCCESS);
+        EXPECT_EQ(c.capture_spmv(), HIPSPARSE_STATUS_INVALID_VALUE)
+            << "SpMV captured after a values-only hipsparseCsrSetPointers";
+        c.s.reset_y();
+        EXPECT_EQ(c.s.spmv(c.mat), HIPSPARSE_STATUS_SUCCESS) << "SpMV after the capture";
+        c.s.check(a1);
     }
 
     // With the null stream as handle stream, querying its capture status fails with
@@ -451,6 +545,13 @@ TEST_P(spmv_set_pointers, csr_capture)
 {
     run_capture(HIPSPARSE_SPMV_ALG_DEFAULT);
     run_capture(HIPSPARSE_SPMV_CSR_ALG1);
+    run_capture(HIPSPARSE_SPMV_CSR_ALG2);
+}
+
+TEST_P(spmv_set_pointers, csr_capture_new_values)
+{
+    run_capture_new_values(HIPSPARSE_SPMV_ALG_DEFAULT);
+    run_capture_new_values(HIPSPARSE_SPMV_CSR_ALG1);
 }
 
 TEST_P(spmv_set_pointers, csr_null_stream_capture)
