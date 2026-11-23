@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2023 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the Software), to deal
@@ -330,11 +330,9 @@ rocsparse_status rocsparse_zcsrgemm_buffer_size(rocsparse_handle                
 *          \p csr_col_ind_A, \p descr_B, \p csr_row_ptr_B, \p csr_col_ind_B,
 *          \p descr_D, \p csr_row_ptr_D, \p csr_col_ind_D, \p descr_C,
 *          \p csr_row_ptr_C, \p nnz_C, \p info_C, or \p temp_buffer is invalid.
-*  \retval rocsparse_status_invalid_value the same array is passed for \p csr_row_ptr_C
-*          and \p csr_row_ptr_D, which is not supported, \p alpha and \p beta passed to
-*          the buffer size function were not null, \p nnz_D is not zero, and the
-*          sparsity pattern of \f$op(A) \cdot op(B)\f$ is not contained in that of
-*          \f$D\f$.
+*  \retval rocsparse_status_invalid_value \p alpha and \p beta passed to the buffer size
+*          function were not null, and the same array is passed for \p csr_row_ptr_C and
+*          \p csr_row_ptr_D.
 *  \retval rocsparse_status_memory_error additional buffer for long rows could not be
 *          allocated.
 *  \retval rocsparse_status_requires_sorted_storage \f$B\f$ or \f$D\f$ is unsorted and

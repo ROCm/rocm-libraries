@@ -118,6 +118,12 @@ namespace rocsparse
                                (descr_C->type != rocsparse_matrix_type_general),
                                rocsparse_status_not_implemented);
 
+            // Only rocsparse_spgemm supports C and D sharing their row pointer.
+            ROCSPARSE_CHECKARG(19,
+                               csr_row_ptr_C,
+                               (csr_row_ptr_C != nullptr && csr_row_ptr_C == csr_row_ptr_D),
+                               rocsparse_status_invalid_value);
+
             const rocsparse_status status
                 = rocsparse::csrgemm_multadd_nnz_quickreturn(handle,
                                                              trans_A,
