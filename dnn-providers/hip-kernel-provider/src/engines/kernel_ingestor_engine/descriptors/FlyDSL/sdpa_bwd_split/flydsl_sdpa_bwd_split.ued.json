@@ -7,6 +7,30 @@
     "native": "hipkernel.flydsl_sdpa_bwd_split.graph_match"
   },
   "shared_workspace": "ws.bytes",
+  "predict_engine": {
+    "default": "cce91ef0-6b53-5888-ab97-18aa6f8cec29",
+    "gfx1100": [
+      "66758ad0-552d-4e37-8035-af5c0cc648b9"
+    ],
+    "gfx1101": [
+      "072c8fc3-3a65-4b28-be0f-65dc3c6be83c"
+    ],
+    "gfx1150": [
+      "037147ec-b28e-49cc-86b6-8131f39e6371"
+    ],
+    "gfx1151": [
+      "664345cc-eb3e-45eb-a5d2-16b553dd17f1"
+    ],
+    "gfx90a": [
+      "f19435c1-43c6-4e84-a50a-a946ce8b5da6"
+    ],
+    "gfx942": [
+      "01ade74b-8b1f-4ac1-8577-35cefdfacf09"
+    ],
+    "gfx950": [
+      "0da21986-9b1f-418f-ab1f-d5f0e1b15f26"
+    ]
+  },
   "slots": [
     {
       "name": "prep",

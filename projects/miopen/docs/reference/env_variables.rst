@@ -781,6 +781,16 @@ following table. For more information, see :doc:`Logging and debugging <../how-t
       - | 0: Disable
         | 1: Enable
 
+    * - | ``MIOPEN_DEBUG_CK_PROBLEM_CACHE``
+        | Controls the per-problem caches of the Composable Kernel grouped solvers: whether a
+          kernel supports a 2D backward-data or backward-weights problem, the untuned
+          configuration (from the AI heuristics or the default list) and the largest workspace
+          of the 2D and 3D backward-weights solvers, and whether a stored FP32 configuration
+          runs with TF32. Disabling them recomputes each on every query; the per-process lists
+          of CK kernels stay cached.
+      - | 0: Disable
+        | 1: Enable (default)
+
 3D implicit GEMM solution control
 =================================
 
