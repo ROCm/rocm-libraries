@@ -27,12 +27,11 @@
  * The body mirrors the Python builder-call sequence byte-faithfully so the
  * resulting IR is identical (same op order, same operands, same attrs).
  *
- * DEPENDENCY (peer, may be unresolved at -fsyntax-only):
+ * DEPENDENCY:
  *   - rocke/ir.h                          (IRBuilder + Value API)
  *   - the i4 unpack helper: rocke.helpers.i4_dequant.unpack_i4_byte_to_pair_f32
- *     -> rocke_unpack_i4_byte_to_pair_f32(b, byte, &lo, &hi). Declared (extern)
- *     below so this body compiles against the not-yet-ported sibling; its real
- *     definition lives in the i4_dequant peer port.
+ *     -> rocke_unpack_i4_byte_to_pair_f32(b, byte, &lo, &hi), from
+ *     rocke/helper_rocke.helpers.i4_dequant.h.
  *
  * Error model: identical to the rest of the C port -- a NULL/failed builder
  * makes the call a no-op returning NULL; any internal builder failure leaves
@@ -90,18 +89,6 @@ typedef struct rocke_matmul_nbits_decode_gemv_spec
  * it with the spec's kernel name. */
 rocke_kernel_def_t* rocke_build_decode_gemv_matmul_nbits(
     rocke_ir_builder_t* b, const rocke_matmul_nbits_decode_gemv_spec_t* spec, const char* arch);
-
-/* ---- peer helper (rocke.helpers.i4_dequant) ----
- *
- * unpack_i4_byte_to_pair_f32(b, packed_byte) -> (low_f32, high_f32).
- * Declared here (extern) so the decode body compiles against the i4_dequant
- * peer port. The real definition is provided by that port; under
- * -fsyntax-only it is an unresolved peer (expected). Writes the two f32 lanes
- * through `out_lo` / `out_hi`. */
-void rocke_unpack_i4_byte_to_pair_f32(rocke_ir_builder_t* b,
-                                      rocke_value_t* packed_byte,
-                                      rocke_value_t** out_lo,
-                                      rocke_value_t** out_hi);
 
 #ifdef __cplusplus
 }
