@@ -3132,10 +3132,16 @@ class SplitKVQrTdmTiles(unittest.TestCase):
             self.assertEqual(kernel.F_tile.F_bn0, 64, kernel.filename)
 
     def test_qr_tdm_covers_every_gfx125_split_kv_head_dim(self):
+        # qr_tdm backs every split-kv head-dim bucket but d512 (none before pingpong's):
+        # its own (32/64/128/256), and pingpong's 96/160/192 buckets on the next qr_tdm tile
+        # up, so the calls pingpong refuses (group mode, bias, paged KV, ...) still dispatch
+        tdm = self._tdm_kernels()
         self.assertEqual(
-            sorted({kernel.F_hdim for kernel in self._tdm_kernels()}),
-            [32, 64, 128, 256],
+            sorted({kernel.F_hdim for kernel in tdm}), [32, 64, 96, 128, 160, 192, 256]
         )
+        for kernel in tdm:
+            up = next(t for t in (32, 64, 128, 256) if t >= kernel.F_hdim)
+            self.assertEqual(kernel.F_tile.F_bn1, up, kernel.filename)
 
     def test_qr_tdm_owns_logits_soft_cap(self):
         # The soft cap entries that dispatch on an exact head dim must be

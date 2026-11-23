@@ -29,8 +29,9 @@ from codegen.utils import check_duplicates_and_paddings, if_, indent, update_fil
 from codegen.ops.fmha_fwd import (
     FmhaFwdPipeline,
     FmhaFwdTileSize,
-    GFX125_QR_TDM_PINGPONG_LDS_READ_SCHEDULE,
-    GFX125_QR_TDM_PINGPONG_MX_LDS_READ_SCHEDULE,
+    GFX125_QR_TDM_PINGPONG_HDIMS,
+    _gfx125_qr_tdm_pingpong_block_scales,
+    qr_tdm_pingpong_lds_read_schedule,
     _gfx125_qr_tdm_pingpong_tiles,
     qr_tdm_pingpong_effective_schedule,
     DTYPE_BITS,
@@ -56,6 +57,7 @@ FMHA_FWD_SPLITKV_PIPELINE_MAP = {
 # on its 16-row decode tile, writing each split's normalized O and LSE to the fp32 accumulators.
 FMHA_FWD_SPLITKV_PINGPONG_KERNEL_BODY = """
 #include <iostream>
+#include <stdexcept>
 
 #if !defined(__HIP_DEVICE_COMPILE__) || ({F_arch.preprocessor_check})
 
@@ -146,6 +148,9 @@ void run_{F_idx}(const ck_tile::stream_config& s, fmha_fwd_splitkv_args a)
 {{
     using k_ = typename instance_{F_idx}<kMergeHeads>::fmha_kernel;
     auto [kargs, grids] = fmha_fwd_splitkv_pingpong_create_kargs_and_grids<k_>(a);
+    // the dispatch's checks hold, but the forward kernel's own as well (descale layouts)
+    if(!k_::IsSupportedArgument(kargs))
+        throw std::runtime_error("fmha_fwd_splitkv: arguments not supported by {F_kname}");
     const dim3 blocks                      = k_::BlockSize();
     constexpr ck_tile::index_t kBlockPerCu = k_::kBlockPerCu;
     ck_tile::make_kernel<kBlockPerCu, {F_arch.tag}>(k_{{}}, grids, blocks, 0, kargs)(ck_tile::stream_config{{s.stream_id_}});
@@ -513,6 +518,14 @@ class FmhaFwdSplitKVApiTrait:
                 return f"a.seqlen_k == 0 || a.seqlen_k % {self.bn0} != 0"
             else:
                 return f"a.seqlen_k != 0 && a.seqlen_k % {self.bn0} == 0"
+        elif self.pipeline_tag == "qr_tdm_pingpong":
+            # the forward kernel reads one physical K length and each batch's own K/V: no
+            # per-batch K lengths (KV cache) or cache batch index; fp8 block scales of whole
+            # 32-key chunks (as the forward instances)
+            check = "a.seqlen_k_ptr == nullptr && a.cache_batch_idx == nullptr"
+            if self.qscale == "blockscale":
+                check += " && " + _gfx125_qr_tdm_pingpong_block_scales()
+            return check
         elif self.pipeline_tag in SPLITKV_PIPELINES_TAG:
             if self.skpad == "t":
                 return f"true /*a.seqlen_k_ptr != nullptr || a.seqlen_k % {self.bn0} != 0*/"  # TODO: order of get_pipelines() matters! (ugly)
@@ -558,7 +571,8 @@ class FmhaFwdSplitKVApiTrait:
                 return "a.hdim_v % 8 == 0"
             return f"a.hdim_v % {TDM_K0_MAX_SUBMAX_MAP[self.bk0max]} == 0"
         elif self.pipeline_tag == "qr_tdm_pingpong":
-            return "true" if self.dvpad == "t" else f"a.hdim_v == {self.bn1}"
+            # the tile's V columns (bn1): (192, 128) takes no wider hdim_v of its bucket
+            return f"a.hdim_v <= {self.bn1}" if self.dvpad == "t" else f"a.hdim_v == {self.bn1}"
         elif self.pipeline_tag in SPLITKV_PIPELINES_TAG:
             bk0submax = K0_MAX_SUBMAX_MAP[self.bk0max]
             if self.dvpad == "t":
@@ -803,13 +817,10 @@ class FmhaFwdSplitKVKernel:
     mask_impl: str
 
     def _pingpong_template(self) -> str:
-        # the LDS read schedule the forward kernel runs on this tile (MX's own table)
-        hdim_pair = (self.F_hdim, self.F_tile.F_bn1)
-        sp, vbs = (
-            GFX125_QR_TDM_PINGPONG_MX_LDS_READ_SCHEDULE
-            if self.F_pipeline.F_qscale == "mx"
-            else GFX125_QR_TDM_PINGPONG_LDS_READ_SCHEDULE
-        ).get(hdim_pair, (0, 0))
+        # the LDS read schedule the forward kernel runs on this tile
+        sp, vbs = qr_tdm_pingpong_lds_read_schedule(
+            (self.F_hdim, self.F_tile.F_bn1), self.F_pipeline.F_qscale
+        )
         fwd_pipeline = qr_tdm_pingpong_effective_schedule(
             self.F_tile,
             FmhaFwdPipeline(
@@ -1102,10 +1113,8 @@ class KernelComponentFactoryGfx117(KernelComponentFactoryGfx12):
     arch = ArchTrait("gfx117")
 
 
-# qr_tdm_pingpong's split-KV head dims (hdim, hdim_v)
-GFX125_QR_TDM_PINGPONG_SPLITKV_HDIMS = (
-    (32, 32), (64, 64), (96, 96), (128, 128), (160, 160), (192, 128), (256, 256), (512, 512),
-)  # fmt: skip
+# qr_tdm_pingpong's split-KV head dims (hdim, hdim_v): the forward kernel's
+GFX125_QR_TDM_PINGPONG_SPLITKV_HDIMS = GFX125_QR_TDM_PINGPONG_HDIMS
 
 
 # qr_tdm_pingpong's fp8 / MX split-KV: the input types and their quantization scales
@@ -1206,10 +1215,14 @@ class KernelComponentFactoryGfx125(KernelComponentFactoryBase):
             }  # fmt: skip
             # qr_tdm_pingpong's decode tile, the longest-trip one (a split's keys are long), at
             # each of its head dims (hdim_v: 128 at d192), ahead of qr_tdm's
+            # a bucket past qr_tdm's (96, 160, 192) also takes the next qr_tdm tile up: the
+            # calls pingpong refuses (group mode, bias, soft cap, paged KV, sinks, K lengths a
+            # batch) fall back to it there, as before the bucket existed
             result = {}
             for h, h_v in GFX125_QR_TDM_PINGPONG_SPLITKV_HDIMS:
                 pp = _gfx125_qr_tdm_pingpong_tiles((h, h_v))[0]
-                result[str(h)] = [pp] + ([tiles[str(h)]] if str(h) in tiles else [])
+                up = next((t for t in ("32", "64", "128", "256") if int(t) >= h), None)
+                result[str(h)] = [pp] + ([tiles[up]] if up is not None else [])
             return result
         elif dtype in ["bf8"]:
             return {

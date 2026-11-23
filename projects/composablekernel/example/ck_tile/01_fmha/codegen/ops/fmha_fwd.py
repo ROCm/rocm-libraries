@@ -1090,11 +1090,7 @@ def qr_tdm_pingpong_pipelines(
     and without group mode's skip_min_seqlen_q (the kernel's early exit; batch mode reuses
     the instances without it), with the head-dim pair's LDS read schedule
     (GFX125_QR_TDM_PINGPONG_LDS_READ_SCHEDULE)."""
-    sp, vbs = (
-        GFX125_QR_TDM_PINGPONG_MX_LDS_READ_SCHEDULE
-        if qscale == "mx"
-        else GFX125_QR_TDM_PINGPONG_LDS_READ_SCHEDULE
-    ).get(hdim_pair, (0, 0))
+    sp, vbs = qr_tdm_pingpong_lds_read_schedule(hdim_pair, qscale)
     pad_variants = [
         pads
         for pads in ALL_PAD_VARIANTS
@@ -1204,6 +1200,16 @@ def qr_tdm_pingpong_packgqa_pipelines(hdim_pair, mask_impl, qscales):
             packgqa="t",
         )
     return pipelines
+
+
+def qr_tdm_pingpong_lds_read_schedule(hdim_pair, qscale):
+    """(F_pp_slice_prefetch, F_pp_v_before_softmax) configured for the head-dim pair: MX's own
+    table (GFX125_QR_TDM_PINGPONG_MX_LDS_READ_SCHEDULE), else the shared one."""
+    return (
+        GFX125_QR_TDM_PINGPONG_MX_LDS_READ_SCHEDULE
+        if qscale == "mx"
+        else GFX125_QR_TDM_PINGPONG_LDS_READ_SCHEDULE
+    ).get(hdim_pair, (0, 0))
 
 
 def qr_tdm_pingpong_effective_schedule(
@@ -2335,9 +2341,10 @@ class KernelComponentFactoryGfx117(CompatibilityRuleFactory):
         )
 
 
-# gfx125 TDM pipelines that combine the logits soft cap with a bias (scale_s, then the soft
-# cap, then the bias, as the example's reference does).
-GFX125_TDM_PIPELINES_WITH_SOFT_CAP_BIAS = ("qr_tdm", "qr_tdm_pingpong", "qr_tdm_sched")
+# gfx125 pipelines that combine the logits soft cap with a bias (scale_s, then the soft cap,
+# then the bias, as the example's reference does): qr_tdm_pingpong, the one gfx125 generates
+# with either (the scheduled pipelines take neither).
+GFX125_TDM_PIPELINES_WITH_SOFT_CAP_BIAS = ("qr_tdm_pingpong",)
 
 # gfx1250 dispatch: qr_tdm_pingpong takes every query but two, which run qr_tdm_fp8_sched:
 # - fp8 d128 small grids (GFX125_QR_TDM_SCHED_SMALL_GRID): fewer than two 128-row query blocks a

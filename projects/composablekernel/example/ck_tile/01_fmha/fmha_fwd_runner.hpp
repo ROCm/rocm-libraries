@@ -189,8 +189,19 @@ int override_num_splits_if_necessary(int batch,
             // with them). gfx1250 d128 32/8 heads, batch 1..8 x 4k..128k keys, end to end (main
             // + combine), geomean of the best split count (worst): bf16 0.992 (0.947), fp8
             // 0.987 (0.927), MX 0.984 (0.929).
-            const int rows   = max_seqlen_q * (nhead / std::max(nhead_k, 1));
-            const int blocks = batch * std::max(nhead_k, 1) * ck_tile::integer_divide_ceil(rows, 16);
+            // Every gfx125 split-kv instance needs hdim % 8 == 0, so other head
+            // dims must not be split or no instance would match.
+            if(hdim_q % 8 != 0 || hdim_v % 8 != 0)
+                return 1;
+            // The workgroups the split kernel launches a split: a KV head's single-query heads
+            // fold into one 16-row tile (as the split-KV dispatch merges them, up to 16 a KV
+            // head), other queries take 16-row tiles a head up to 16 rows, 64-row ones past.
+            const int ratio  = nhead / std::max(nhead_k, 1);
+            const bool merge = max_seqlen_q == 1 && ratio > 1 && ratio <= 16;
+            const int rows   = merge ? ratio : max_seqlen_q;
+            const int tile   = rows <= 16 ? 16 : 64;
+            const int blocks = batch * (merge ? std::max(nhead_k, 1) : nhead) *
+                               ck_tile::integer_divide_ceil(rows, tile);
             const int wgps   = props.multiProcessorCount;
             if(blocks >= wgps)
                 return 1;
@@ -733,8 +744,9 @@ fwd_result fmha_fwd_run(mode_enum mode,
     {
         // a sliding window bounds the keys each query visits
         const int window_keys =
-            mask.left >= 0 ? std::min<int>(max_seqlen_k, mask.left + mask.right + 1 + max_seqlen_q)
-                           : max_seqlen_k;
+            mask.left >= 0 && mask.right >= 0
+                ? std::min<int>(max_seqlen_k, mask.left + mask.right + 1 + max_seqlen_q)
+                : max_seqlen_k;
         num_splits = override_num_splits_if_necessary(batch,
                                                       nhead,
                                                       nhead_k,

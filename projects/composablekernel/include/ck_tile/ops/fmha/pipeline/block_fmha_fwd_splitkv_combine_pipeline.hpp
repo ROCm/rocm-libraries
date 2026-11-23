@@ -305,8 +305,9 @@ struct BlockFmhaFwdSplitKVCombinePipeline
         {
             statically_indexed_array<OTile, kUnroll> o_tiles;
             static_for<0, kUnroll, 1>{}([&](auto u) {
-                // past the padded splits the buffer reads return zeros (never accumulated)
-                o_tiles(u) = load_tile(o_acc_dram_window);
+                // only the groups left (those past them are never accumulated)
+                if(split_start + u * kNumWarps < padded_num_splits)
+                    o_tiles(u) = load_tile(o_acc_dram_window);
                 move_tile_window(o_acc_dram_window, {kNumWarps * kM0, 0});
             });
             const index_t row_start = kM0 * get_warp_id();
