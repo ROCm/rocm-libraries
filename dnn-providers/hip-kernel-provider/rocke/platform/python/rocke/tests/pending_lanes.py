@@ -526,32 +526,6 @@ PENDING: tuple[PendingTest, ...] = (
         "library/tests/test_attention_bwd_valu_numeric.py",
     ),
     *_waiting(
-        ENROLMENT,
-        "device numerics that run without torch now; never registered: they wait "
-        "for a GPU entry, where their gfx950 cases then wait for a gfx950 runner",
-        "rocKE library attention; issue AICK-3334",
-        "2026-12-31",
-        "library/tests/test_attention_unified_mask_gfx950_numeric.py",
-        "library/tests/test_attention_unified_swa_sink_gfx950_numeric.py",
-    ),
-    *_waiting(
-        ENROLMENT,
-        "strided-decode numerics on rocke device arrays (torch only for the "
-        "graph and stream cases); never registered: they wait for the gfx942 GPU "
-        "entry",
-        "rocKE library attention; issue AICK-3334",
-        "2026-12-31",
-        "library/tests/test_strided_kv_decode_numeric.py",
-    ),
-    *_waiting(
-        ENROLMENT,
-        "CPU checks of the gfx950 dense prefill builder's spec construction (no "
-        "torch, no GPU); never registered: they wait for a CPU entry",
-        "rocKE library attention; issue: none filed yet",
-        "2026-12-31",
-        "library/tests/test_attention_dense_prefill_builder_gfx950.py",
-    ),
-    *_waiting(
         BINDING_LANE,
         "C++ engine parity checks that need the rocke_engine module; every case "
         "skips without it, until TheRock's build environment has pybind11",
@@ -658,6 +632,15 @@ PENDING: tuple[PendingTest, ...] = (
         "library/tests/test_attention_unified_lse_numeric.py",
     ),
     *_waiting(
+        TORCH_IN_CI,
+        "its torch-caller cases (graph replay, the concurrent workspace on torch "
+        "streams, the prepared decode lifecycle) take torch tensors; without torch "
+        "in the CI test environment those cases skip",
+        "rocKE library attention",
+        "2027-01-31",
+        "library/tests/test_strided_kv_decode_numeric.py",
+    ),
+    *_waiting(
         GFX950_RUNNER,
         "its device cases need gfx950, which no CI GPU stage has",
         "rocKE library; issue: none filed yet",
@@ -667,6 +650,8 @@ PENDING: tuple[PendingTest, ...] = (
         "library/tests/test_attention_tiled_3d_kv_lds_swizzle.py",
         "library/tests/test_attention_tiled_3d_wave_page_id_load.py",
         "library/tests/test_attention_unified_lse_numeric.py",
+        "library/tests/test_attention_unified_mask_gfx950_numeric.py",
+        "library/tests/test_attention_unified_swa_sink_gfx950_numeric.py",
         "library/tests/test_attn_tiled_2d_gfx950_fp8_k_lds_numeric.py",
         "library/tests/test_conv_dgrad_4c.py",
         "library/tests/test_conv_dgrad_correctness.py",

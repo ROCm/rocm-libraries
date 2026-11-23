@@ -269,7 +269,8 @@ set(_ROCKE_LIBRARY_ATTENTION_BUILDS_HOST_TEST
 # host encoding, gfx950 LDS budget model,
 # dense block-order decodes, the dense paged launch checks, spec-wrapper
 # parity gate, the 3D decode split rule and K/V cache policy, the scalar
-# fallback's cache key and block-table stride kernarg, the unified attention running-max carry and keyless
+# fallback's cache key and block-table stride kernarg, the gfx950 dense prefill
+# builder's spec construction, the unified attention running-max carry and keyless
 # guards on the emitted IR, the tiled 2D LSE store on the emitted IR, the
 # gfx950 tiled-2D K reads from LDS on the emitted IR, the
 # gfx942 cfvst V loader's i64 K/V addressing on the emitted IR, the
@@ -309,6 +310,7 @@ set(_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS
     "tests/library/tests/test_attention_dense_decode.py"
     "tests/library/tests/test_attention_dense_gfx942_golden.py"
     "tests/library/tests/test_attention_dense_gfx950_lds.py"
+    "tests/library/tests/test_attention_dense_prefill_builder_gfx950.py"
     "tests/library/tests/test_attention_dense_paged_launch.py"
     "tests/library/tests/test_attention_dense_gfx950_varlen_kv_bound.py"
     "tests/library/tests/test_attention_dense_spec_vectors.py"
@@ -716,7 +718,8 @@ else()
          "  TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})\n")
 endif()
 
-# Library attention GPU numeric tests (gfx950-specific; require a GPU).
+# Library attention GPU numeric tests (gfx950 kernels, and the unified mask
+# tests' scalar-kernel cases, which run on any GPU; require a GPU).
 # Separate from the omnibus GPU suite so it can be targeted on its own when only
 # attention hardware is available: select it by name (`ctest -R
 # rocke_library_attention_gpu_pytest`), as `-L gpu` and `-L attention` also
@@ -725,6 +728,8 @@ set(_ROCKE_LIBRARY_ATTENTION_GPU_TEST_RELPATHS
     "tests/library/tests/test_attention_dense_gfx950_numeric.py"
     "tests/library/tests/test_attn_tiled_2d_gfx950_fp8_k_lds_numeric.py"
     "tests/library/tests/test_extended_parity_attention.py"
+    "tests/library/tests/test_attention_unified_mask_gfx950_numeric.py"
+    "tests/library/tests/test_attention_unified_swa_sink_gfx950_numeric.py"
     # Each score modifier and each transposed 32x32 route once; the mixes run
     # in rocke_library_attention_biased_mixes_gpu_pytest below.
     "tests/library/tests/test_attention_tiled_2d_gfx950_biased_numeric.py::test_each_modifier_on_each_route")
@@ -800,6 +805,7 @@ set(_ROCKE_LIBRARY_GPU_TEST_RELPATHS
     "tests/library/tests/test_attention_dense_gfx942_numeric.py"
     "tests/library/tests/test_attention_scalar_block_table_numeric.py"
     "tests/library/tests/test_attention_unified_lse_numeric.py"
+    "tests/library/tests/test_strided_kv_decode_numeric.py"
     "tests/library/tests/test_fmha_mfma_free_stride_numeric.py"
     "tests/library/tests/sdpa/test_unified_sdpa_numeric.py"
     "tests/library/tests/sdpa/test_dense_sdpa_numeric.py"
