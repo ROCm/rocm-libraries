@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 import yaml
 from config_harness import assert_assembles, assert_real_gfx1250_kernels, emit_kernels_from_config
+from tensilelite.Components.PersistentLoop import PersistentKernelState
 
 pytestmark = pytest.mark.unit
 _BASE_CONFIG = (Path(__file__).resolve().parent / "data/test_data/_designed/gfx1250"
@@ -40,9 +41,11 @@ def _assert_classic_pap_overlaps_nll(lines):
     return issue, signal, wait, nll_end, entry, first_read
 
 
-def test_classic_pap_load_is_not_drained_in_no_load_loop(tmp_path):
+def test_classic_pap_load_is_not_drained_in_no_load_loop(tmp_path, monkeypatch):
     # The NLL reads one bank while PAP refills the other. A PAP load tagged with
     # the NLL's token makes the token planner drain it before the NLL's reads.
+    # The runtime tail split would move this tail kernel to the pipeline path.
+    monkeypatch.setattr(PersistentKernelState, "papPgr2RuntimeTailSplit", staticmethod(lambda kernel: False))
     results = emit_kernels_from_config(_config(tmp_path), limit=1, arch='gfx1250')
     assert_real_gfx1250_kernels(results)
     for name, src, _ in results:

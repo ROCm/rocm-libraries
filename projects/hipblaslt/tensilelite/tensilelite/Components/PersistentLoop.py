@@ -28,7 +28,8 @@ class PersistentKernelState:
                 and bool(pt["MXBlockA"]) == bool(pt["MXBlockB"])
                 and (not pt["MXBlockA"] or self.papTdmSupportsShadowAddressPair(
                     kernel, tPA["MX"], tPB["MX"]))
-                and kernel["NoTailLoop"] and not self.states.tailloopInNll
+                and (kernel["NoTailLoop"] or self.papPgr2RuntimeTailSplit(kernel))
+                and not self.states.tailloopInNll
                 and kernel["PrefetchLocalRead"] == 1 and self.states.numItersPLR == 1
                 and kernel["LoopIters"] >= 2 and kernel["InnerUnroll"] == 1
                 and not kernel["ForceUnrollSubIter"]
@@ -40,6 +41,21 @@ class PersistentKernelState:
                 and not pt.get("UseScaleAlphaVec", 0)
                 and pt.get("UseScaleAB", "") != "Vector"
                 and not pt.get("OutputAmaxD", False))
+
+    @staticmethod
+    def papPgr2RuntimeTailSplit(kernel):
+        """A compiled tail loop keeps group1 for launches with no K remainder.
+
+        A running tail needs the final bank that group1 would fill. Every
+        DataParallel tile of a launch shares K, so the guard is uniform across
+        waves and persistent iterations. Multicast peers would also need the
+        group0 readiness phase that the bit3-keyed PLR site skips.
+        """
+        depthU = kernel["DepthU"]
+        return (not kernel["NoTailLoop"] and not kernel["HalfPLR"]
+                and kernel["TileProcessingStrategy"] == "DataParallel"
+                and not persistentSpatialCluster(kernel)
+                and depthU & (depthU - 1) == 0)
 
     @staticmethod
     def papPgr2TensorCount(kernel):
@@ -1062,6 +1078,12 @@ class PersistentLoop(Component):
         module.add(SCmpGeU32(src0=sgpr("OrigLoopCounter"), src1=2,
                             comment="PAP PGR2 requires two full K chunks"))
         module.add(SCBranchSCC0(labelName=skip.getLabelName()))
+        if group == 1 and writer.papPgr2RuntimeTailSplit(kernel):
+            with writer.allocTmpSgpr(1, tag="PAP PGR2 K remainder") as remainder:
+                module.add(SAndB32(dst=sgpr(remainder.idx), src0=sgpr("SizesSum+%u" % writer.states.unrollIdx),
+                                   src1=kernel["DepthU"] - 1, comment="PAP K remainder selects the tail loop"))
+            module.add(SCBranchSCC1(labelName=skip.getLabelName(),
+                                    comment="PAP tail loop keeps the final bank; group1 waits for entry"))
         if isStreamK(kernel):
             with writer.allocTmpSgpr(2, tag="PAP next K range length") as count:
                 for i in range(2):

@@ -43,7 +43,7 @@ def _setup(scales=True, cluster=(1, 1)):
 
 
 @pytest.mark.parametrize("scales", [False, True])
-@pytest.mark.parametrize("key,value", [("NoTailLoop", False), ("PrefetchLocalRead", 0),
+@pytest.mark.parametrize("key,value", [("PrefetchLocalRead", 0),
                                       ("ForceUnrollSubIter", True), ("1LDSBuffer", True),
                                       ("ScheduleIterAlg", 0), ("PrefetchGlobalRead", 1),
                                       ("HalfPLR", True), ("TDMSplit", True)])
@@ -51,6 +51,25 @@ def test_unsupported_geometry_keeps_old_pipeline(scales, key, value):
     kernel, tensors, writer = _setup(scales)
     assert writer.papPgr2PipelineEnabled(kernel, tensors["A"], tensors["B"])
     kernel[key] = value
+    assert not writer.papPgr2PipelineEnabled(kernel, tensors["A"], tensors["B"])
+
+
+@pytest.mark.parametrize("scales", [False, True])
+@pytest.mark.parametrize("key,value,enabled", [
+    (None, None, True), ("TileProcessingStrategy", "StreamK", False),
+    ("DepthU", 192, False), ("HalfPLR", True, False)])
+def test_compiled_tail_needs_launch_uniform_remainder(scales, key, value, enabled):
+    kernel, tensors, writer = _setup(scales)
+    kernel["NoTailLoop"] = False
+    if key is not None:
+        kernel[key] = value
+    assert writer.papPgr2PipelineEnabled(kernel, tensors["A"], tensors["B"]) == enabled
+
+
+def test_compiled_tail_keeps_multicast_on_old_pipeline():
+    kernel, tensors, writer = _setup(cluster=(2, 2))
+    assert writer.papPgr2PipelineEnabled(kernel, tensors["A"], tensors["B"])
+    kernel["NoTailLoop"] = False
     assert not writer.papPgr2PipelineEnabled(kernel, tensors["A"], tensors["B"])
 
 
@@ -127,6 +146,36 @@ def test_two_group_guards_publish_once_and_preserve_identity(monkeypatch, q, pre
         # transition runs even when next-tile eligibility fails; no issue or
         # second-bank handoff runs on that path.
         assert machine.barrier_operations == [("s_barrier_signal", "-1"), ("s_barrier_wait", "-1")] * 2
+
+
+@pytest.mark.parametrize("k,group1", [(512, True), (544, False), (767, False)])
+def test_compiled_tail_withholds_group1_when_tail_runs(monkeypatch, k, group1):
+    kernel, tensors, writer = _setup()
+    kernel["NoTailLoop"] = False
+    writer.states.unrollIdx = 2
+    monkeypatch.setattr(Component.TileProcessingStrategy, "find", lambda _: DataParallel())
+    monkeypatch.setattr(Component.WorkAssignment, "find", lambda _: StaticGrid())
+
+    def observed(name):
+        module = Module()
+        module.add(SAddU32(sgpr(name), sgpr(name), 1))
+        return module
+
+    writer.papTdmUpdateDescriptor = lambda *args, **kwargs: Module()
+    writer.papPgr2AdvanceDescriptor = lambda *args: Module()
+    writer.tdmSwapLdsOffset = lambda *args: Module()
+    writer.papPgr2IssueGroup = lambda kernel, a, b, group: observed("Group%uIssues" % group)
+    writer.papTdmSaveLdsBank = lambda *args: Module()
+    pipeline = Module()
+    for group in (0, 1):
+        pipeline.add(PersistentLoopOn().prefetchPgr2Group(writer, kernel, tensors["A"], tensors["B"], group))
+    machine = _PipelineMachine(NextTile=1, TotalTiles=2, OrigLoopCounter=k // 256,
+                               PersistentPrefetchState=0x80000004, **{"SizesSum+2": k})
+    assert machine.run(pipeline) is None
+    assert machine["Group0Issues"] == 1
+    assert machine["Group1Issues"] == int(group1)
+    # Without bit3 the next entry issues group1 and performs the ordinary first PLR.
+    assert machine["PersistentPrefetchState"] & 9 == (9 if group1 else 1)
 
 
 @pytest.mark.parametrize("scales", [False, True])
