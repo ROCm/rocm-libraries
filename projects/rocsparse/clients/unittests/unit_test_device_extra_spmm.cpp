@@ -40,8 +40,6 @@
 //
 #include "unit_test_extra_common.hpp"
 
-#include <limits>
-
 using namespace extra_ut;
 
 namespace
@@ -85,7 +83,9 @@ namespace
                + " oC=" + std::to_string(static_cast<int>(c.order_C)) + " m=" + std::to_string(c.m)
                + " k=" + std::to_string(c.k) + " n=" + std::to_string(c.n) + " dev="
                + std::to_string(c.device) + " base=" + std::to_string(static_cast<int>(c.base))
-               + " bd=" + std::to_string(c.bd);
+               + " bd=" + std::to_string(c.bd) + " dir=" + std::to_string(static_cast<int>(c.dir))
+               + " beta=(" + std::to_string(c.beta.real()) + "," + std::to_string(c.beta.imag())
+               + ")" + (c.nan_C ? " nan_C" : "");
     }
 
     // Scalar (point) CSR of a BSR matrix.
@@ -157,11 +157,8 @@ namespace
         if(c.nan_C)
         {
             ASSERT_EQ(c.beta, cplx(0.0, 0.0)) << "nan_C needs beta == 0";
-            // Host-side fill of the cplx reference; can switch to
-            // rocsparse_ut::nan_of<T>() once that helper lands.
-            const double qnan = std::numeric_limits<double>::quiet_NaN();
             for(auto& x : C0.v)
-                x = cplx(qnan, is_complex_t<T>::value ? qnan : 0.0);
+                x = to_c<T>(rocsparse_ut::nan_of<T>());
         }
 
         const int64_t ldb = min_ld(B_stored, c.order_B) + c.ld_pad;
