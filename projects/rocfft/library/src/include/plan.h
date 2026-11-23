@@ -231,6 +231,17 @@ struct rocfft_field_t
         return bricks.empty();
     }
 
+    inline std::set<size_t> ranks() const
+    {
+        return std::accumulate(bricks.begin(),
+                               bricks.end(),
+                               std::set<size_t>{},
+                               [](std::set<size_t> ranks, const rocfft_brick_t& brick) {
+                                   ranks.insert(brick.location.comm_rank);
+                                   return ranks;
+                               });
+    }
+
 private:
     /**
      * @return true iff all parts of the field's full range of logical indices are covered
@@ -464,10 +475,6 @@ struct rocfft_plan_description_t
                                         + ROCFFT_CURRENT_FUNCTION);
         }
     }
-
-    // returns true if a field has bricks such that any rank has
-    // bricks on more than one device
-    static bool multiple_devices_in_rank(const rocfft_field_t& field);
 
 private:
 #ifdef ROCFFT_MPI_ENABLE
