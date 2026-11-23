@@ -83,22 +83,26 @@ void testing_nnz(const Arguments& arg)
 
     //
     // The output is followed by sentinel entries that nnz must not change. They catch an
-    // overrun of any length, including a one-entry overrun and MN == 0.
+    // overrun of any length, even when MN == 0.
     //
-    static constexpr rocsparse_int nnz_tail      = 4;
-    static constexpr int           nnz_fill_byte = 0x5a;
+    static constexpr rocsparse_int sentinel_count = 4;
+    static constexpr int           sentinel_byte  = 0x5a;
+
+    //
+    // Poison the totals so that a total nnz never writes cannot match any valid count.
+    //
+    static constexpr rocsparse_int total_poison = -1;
 
     host_vector<T>             h_A(LD * N);
     host_vector<rocsparse_int> h_nnzPerRowColumn(MN);
-    host_vector<rocsparse_int> hd_nnzPerRowColumn(MN + nnz_tail);
-    host_vector<rocsparse_int> h_nnzTail(nnz_tail);
-    memset(h_nnzTail.data(), nnz_fill_byte, sizeof(rocsparse_int) * nnz_tail);
+    host_vector<rocsparse_int> hd_nnzPerRowColumn(MN + sentinel_count);
+    host_vector<rocsparse_int> h_sentinel(sentinel_count);
     host_vector<rocsparse_int> h_nnzTotalDevHostPtr(1);
     host_vector<rocsparse_int> hd_nnzTotalDevHostPtr(1);
 
     // Allocate device memory
     device_vector<T>             d_A(LD * N);
-    device_vector<rocsparse_int> d_nnzPerRowColumn(MN + nnz_tail);
+    device_vector<rocsparse_int> d_nnzPerRowColumn(MN + sentinel_count);
     device_vector<rocsparse_int> d_nnzTotalDevHostPtr(1);
 
     //
@@ -142,13 +146,15 @@ void testing_nnz(const Arguments& arg)
         // Compute the reference host first.
         //
         host_nnz<T>(dirA, M, N, h_A, LD, h_nnzPerRowColumn, h_nnzTotalDevHostPtr);
+        memset(h_sentinel.data(), sentinel_byte, sizeof(rocsparse_int) * sentinel_count);
 
         //
         // Pointer mode device for nnz and call.
         //
-        CHECK_HIP_ERROR(
-            hipMemset(d_nnzPerRowColumn, nnz_fill_byte, sizeof(rocsparse_int) * (MN + nnz_tail)));
-        CHECK_HIP_ERROR(hipMemset(d_nnzTotalDevHostPtr, 0xff, sizeof(rocsparse_int)));
+        CHECK_HIP_ERROR(hipMemset(
+            d_nnzPerRowColumn, sentinel_byte, sizeof(rocsparse_int) * (MN + sentinel_count)));
+        CHECK_HIP_ERROR(hipMemcpy(
+            d_nnzTotalDevHostPtr, &total_poison, sizeof(rocsparse_int), hipMemcpyHostToDevice));
         CHECK_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_device));
         CHECK_ROCSPARSE_ERROR(testing::rocsparse_nnz<T>(
             handle, dirA, M, N, descrA, d_A, LD, d_nnzPerRowColumn, d_nnzTotalDevHostPtr));
@@ -158,7 +164,7 @@ void testing_nnz(const Arguments& arg)
         //
         CHECK_HIP_ERROR(hipMemcpy(hd_nnzPerRowColumn,
                                   d_nnzPerRowColumn,
-                                  sizeof(rocsparse_int) * (MN + nnz_tail),
+                                  sizeof(rocsparse_int) * (MN + sentinel_count),
                                   hipMemcpyDeviceToHost));
         CHECK_HIP_ERROR(hipMemcpy(hd_nnzTotalDevHostPtr,
                                   d_nnzTotalDevHostPtr,
@@ -169,15 +175,16 @@ void testing_nnz(const Arguments& arg)
         // Check results.
         //
         unit_check_segments<rocsparse_int>(MN, hd_nnzPerRowColumn, h_nnzPerRowColumn);
-        unit_check_segments<rocsparse_int>(nnz_tail, hd_nnzPerRowColumn.data() + MN, h_nnzTail);
+        unit_check_segments<rocsparse_int>(
+            sentinel_count, hd_nnzPerRowColumn.data() + MN, h_sentinel);
         hd_nnzTotalDevHostPtr.unit_check(h_nnzTotalDevHostPtr);
 
         //
         // Pointer mode host for nnz and call.
         //
-        rocsparse_int dh_nnz = -1;
-        CHECK_HIP_ERROR(
-            hipMemset(d_nnzPerRowColumn, nnz_fill_byte, sizeof(rocsparse_int) * (MN + nnz_tail)));
+        rocsparse_int dh_nnz = total_poison;
+        CHECK_HIP_ERROR(hipMemset(
+            d_nnzPerRowColumn, sentinel_byte, sizeof(rocsparse_int) * (MN + sentinel_count)));
         CHECK_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_host));
         CHECK_ROCSPARSE_ERROR(testing::rocsparse_nnz<T>(
             handle, dirA, M, N, descrA, d_A, LD, d_nnzPerRowColumn, &dh_nnz));
@@ -187,14 +194,15 @@ void testing_nnz(const Arguments& arg)
         //
         CHECK_HIP_ERROR(hipMemcpy(hd_nnzPerRowColumn,
                                   d_nnzPerRowColumn,
-                                  sizeof(rocsparse_int) * (MN + nnz_tail),
+                                  sizeof(rocsparse_int) * (MN + sentinel_count),
                                   hipMemcpyDeviceToHost));
 
         //
         // Check results.
         //
         unit_check_segments<rocsparse_int>(MN, hd_nnzPerRowColumn, h_nnzPerRowColumn);
-        unit_check_segments<rocsparse_int>(nnz_tail, hd_nnzPerRowColumn.data() + MN, h_nnzTail);
+        unit_check_segments<rocsparse_int>(
+            sentinel_count, hd_nnzPerRowColumn.data() + MN, h_sentinel);
         unit_check_scalar(dh_nnz, h_nnzTotalDevHostPtr[0]);
     }
 
