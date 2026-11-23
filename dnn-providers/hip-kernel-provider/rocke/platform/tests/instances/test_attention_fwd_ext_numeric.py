@@ -110,7 +110,7 @@ CASES = {
 def test_probe_matches_oracle(tag, v_lds):
     cfg = dict(CASES[tag])
     if v_lds and not _ARCH.startswith("gfx11"):
-        pytest.skip("V LDS staging is a WMMA-body option")
+        pytest.skip("V LDS staging is a WMMA-body option: gfx1151 only")
     if v_lds and cfg.get("D") == 256:
         pytest.skip("d256 is covered without staging")
     res = run_case(_ARCH, tag=tag, v_lds=v_lds, **cfg)

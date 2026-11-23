@@ -138,7 +138,10 @@ class TestSourceBuildId(unittest.TestCase):
         if not shutil.which("cmake") or not all(
             (source_cmake / name).is_file() for name in script_names
         ):
-            self.skipTest("CMake and rocKE build-ID generator scripts required")
+            self.skipTest(
+                "needs CMake and the build-ID generator scripts of a source tree "
+                "(platform/cmake)"
+            )
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             private = root / "cpp" / "core" / "private.h"
@@ -244,7 +247,10 @@ class TestSourceBuildId(unittest.TestCase):
         if not shutil.which("cmake") or not all(
             (source_cmake / name).is_file() for name in script_names
         ):
-            self.skipTest("CMake and rocKE build-ID generator scripts required")
+            self.skipTest(
+                "needs CMake and the build-ID generator scripts of a source tree "
+                "(platform/cmake)"
+            )
         with tempfile.TemporaryDirectory() as td:
             root = Path(td) / "platform"
             engine = root / "cpp" / "engine.cpp"

@@ -205,15 +205,19 @@ def test_gfx942_native_builder_matches_python(kw):
 
 
 @pytest.mark.parametrize(
-    "policy, bits", [("all", set()), ("stream", {"nt"}), ("nt", {"sc0", "nt"})]
+    "policy, bits, wide",
+    [
+        (policy, bits, wide)
+        for policy, bits in (("all", set()), ("stream", {"nt"}), ("nt", {"sc0", "nt"}))
+        for wide in (True, False)
+        # The wide loader takes 'all' or 'stream'.
+        if not (wide and policy == "nt")
+    ],
 )
-@pytest.mark.parametrize("wide", [True, False])
 def test_gfx942_kv_copies_carry_the_policy_bits(policy, bits, wide):
     from rocke.helpers.compile import compile_kernel
     from rocke.runtime import comgr
 
-    if wide and policy == "nt":
-        pytest.skip("the wide loader takes 'all' or 'stream'")
     objdump = _objdump()
     if objdump is None:
         pytest.skip("llvm-objdump not found (LLVM_OBJDUMP / ROCM_PATH / PATH)")

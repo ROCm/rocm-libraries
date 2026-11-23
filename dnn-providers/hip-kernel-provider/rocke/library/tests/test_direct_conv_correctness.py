@@ -2243,9 +2243,16 @@ def _wgrad_skip_reason(arch: str | None) -> str:
     if not arch:
         return "no ROCm GPU detected"
     from kernels.conv.direct_aot_jobs import grid_caches_variant
+    from rocke.core.arch.target import known_arches
 
     if not grid_caches_variant("direct_wgrad", arch):
-        return f"the AOT grid caches no direct_wgrad kernel for {arch!r}"
+        cached = sorted(
+            a for a in known_arches() if grid_caches_variant("direct_wgrad", a)
+        )
+        return (
+            f"the AOT grid caches no direct_wgrad kernel for {arch!r}; it caches "
+            f"them for {', '.join(cached)}"
+        )
     return ""
 
 
@@ -3045,7 +3052,7 @@ class TestDirectConvMfmaDgradCorrectness(unittest.TestCase):
         )
 
         if fold_k32 and GPU_ARCH != "gfx950":
-            self.skipTest("fold_k32 needs the 16x16x32 atom")
+            self.skipTest("fold_k32 needs the 16x16x32 atom (gfx950 only)")
 
         def fprop_spec_for(problem):
             spec = replace(make_dgrad_fprop_spec(problem, **knobs), fold_k32=fold_k32)

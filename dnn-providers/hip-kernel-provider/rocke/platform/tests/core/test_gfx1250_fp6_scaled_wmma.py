@@ -126,7 +126,7 @@ def test_arbitrary_fp6_bytes_repack_exactly(arbitrary_fp6_bytes):
     "dtype,ml_name", [("fp6", "float6_e2m3fn"), ("bf6", "float6_e3m2fn")]
 )
 def test_arbitrary_fp6_bytes_decode_independently(arbitrary_fp6_bytes, dtype, ml_name):
-    ml = pytest.importorskip("ml_dtypes", minversion="0.6.0")
+    ml = pytest.importorskip("ml_dtypes")
     codes = _fp6_codes_from_bytes(arbitrary_fp6_bytes)
     expected = codes.view(getattr(ml, ml_name)).astype(np.float64)
     actual = decode_fp6(arbitrary_fp6_bytes, dtype)

@@ -243,15 +243,21 @@ def test_non_bool_state_flag_is_rejected(algorithm, field, bad):
 
 
 @pytest.mark.parametrize("algorithm", ["chunk_prep", "chunk_scan"])
-@pytest.mark.parametrize("field", ["seqlen", "chunk_size"])
-@pytest.mark.parametrize("bad", [None, "32", "1024", 32.0, True, [32]])
+@pytest.mark.parametrize(
+    "field,bad",
+    [
+        (field, bad)
+        for field in ("seqlen", "chunk_size")
+        for bad in (None, "32", "1024", 32.0, True, [32])
+        # chunk_size=None means the tuned default, a valid request.
+        if not (field == "chunk_size" and bad is None)
+    ],
+)
 def test_non_int_seqlen_and_chunk_are_rejected_by_name(algorithm, field, bad):
     """``num_chunks`` divides ``seqlen`` by the chunk, and the capability
     prefilter reads it through ``dims()`` before any request check runs, so a
     non-int ``seqlen`` / ``chunk_size`` raised a bare ``TypeError`` from the
     arithmetic (``None % 32``, ``"1024" % 32``) instead of the named error."""
-    if field == "chunk_size" and bad is None:
-        pytest.skip("chunk_size=None means the tuned default")
     with pytest.raises(ValueError, match=f"{field} must be an int"):
         dispatch_gdn_prefill(_req(algorithm=algorithm, **{field: bad}))
 

@@ -127,7 +127,10 @@ def _branch_spec(problem, branch, bs, arch):
     knobs = {"use_transposed_scalar_state": True} if branch.endswith("_s1") else {}
     spec, why = canonicalize_tuning_spec(problem, variant, knobs)
     if spec is None and problem.head_size == 256:
-        pytest.skip(f"{spec_id} {knobs} does not take D256 here: {why}")
+        # D256 fits the LDS of gfx950 only.
+        pytest.skip(
+            f"{spec_id} {knobs} does not take D256 here: {why} (runs on gfx950)"
+        )
     assert spec is not None, f"{spec_id} {knobs}: {why}"
     return spec
 

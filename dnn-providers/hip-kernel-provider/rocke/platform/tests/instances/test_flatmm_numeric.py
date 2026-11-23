@@ -72,7 +72,7 @@ def gpu_arch():
 def test_flatmm_matches_the_exact_batched_product_on_gpu(gpu_arch, tile_name, shape):
     tile = _TILES[tile_name](gpu_arch)
     if tile is None:
-        pytest.skip(f"{tile_name} uses an atom {gpu_arch} does not have")
+        pytest.skip(f"{tile_name} uses an atom {gpu_arch} does not have (gfx950 only)")
     batch, m, n, k, padded = _SHAPES[shape]
     spec = FlatMMSpec(
         tile=tile,

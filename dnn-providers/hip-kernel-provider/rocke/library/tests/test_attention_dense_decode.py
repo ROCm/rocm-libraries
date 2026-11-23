@@ -329,11 +329,21 @@ _PERSIST_LAUNCHES = (
 )
 
 
+def _persist_cases(names):
+    """(name, interleave) for each persistent order: every order without
+    interleave, and qb_major, the one order interleave applies to, with it."""
+    return [(name, False) for name in names] + [
+        (name, True) for name in names if name == "qb_major"
+    ]
+
+
 @pytest.mark.parametrize(
-    "name", sorted(Gfx942AttentionDenseSpec.supported_persist_decodes() - {"auto"})
+    "name,interleave",
+    _persist_cases(
+        sorted(Gfx942AttentionDenseSpec.supported_persist_decodes() - {"auto"})
+    ),
 )
 @pytest.mark.parametrize("causal,window", ((True, 0), (False, 0), (True, 1024)))
-@pytest.mark.parametrize("interleave", (False, True))
 def test_runtime_persist_decode_matches_the_launched_baked_decode(
     name, causal, window, interleave
 ):
@@ -361,9 +371,10 @@ _GFX950_RUNTIME_PERSIST_DECODES = sorted(
 )
 
 
-@pytest.mark.parametrize("name", _GFX950_RUNTIME_PERSIST_DECODES)
+@pytest.mark.parametrize(
+    "name,interleave", _persist_cases(_GFX950_RUNTIME_PERSIST_DECODES)
+)
 @pytest.mark.parametrize("causal,window", ((True, 0), (False, 0), (True, 1024)))
-@pytest.mark.parametrize("interleave", (False, True))
 def test_gfx950_runtime_persist_decode_matches_the_launched_baked_decode(
     name, causal, window, interleave
 ):
@@ -375,8 +386,6 @@ def test_gfx950_runtime_persist_decode_matches_the_launched_baked_decode(
 
 
 def _check_runtime_persist_decode(spec_cls, runtime_args, name, causal, window, il):
-    if il and name != "qb_major":
-        pytest.skip("interleave applies to qb_major only")
     decode = PERSIST_DECODES[name]
     built = None
     for Hq, Hkv, B, S in _PERSIST_LAUNCHES:
