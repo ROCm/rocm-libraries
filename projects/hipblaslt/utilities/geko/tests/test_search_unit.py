@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import logging
+from collections import defaultdict
 from pathlib import Path
 
 import pandas as pd
@@ -78,6 +79,124 @@ def test_configure_sets_skip_ratio_from_latency() -> None:
     out = search.configure(df)
     assert out[0]["skip_slow_solution_ratio"] == 0.3
     assert out[1]["skip_slow_solution_ratio"] == 0.6
+
+
+def _adaptive_like_row() -> dict:
+    # A representative bf16 TN GEMM row for adaptive-timing assertions.
+    return {
+        "transA": "T",
+        "transB": "N",
+        "batch_count": 1,
+        "m": 9504,
+        "n": 7248,
+        "k": 368,
+        "a_type": "bf16_r",
+        "b_type": "bf16_r",
+        "c_type": "bf16_r",
+        "d_type": "bf16_r",
+        "compute_type": "f32_r",
+        "scaleA": 0,
+        "scaleB": 0,
+    }
+
+
+def test_configure_fast_profile_timing() -> None:
+    """profile="fast" emits the "fast" adaptive-timing config.
+
+    measure_time=5 (ms) is the measurement floor; warmup_time, max_measure_time
+    and sample_time are derived from it via the "fast" profile's
+    warmup_mult/ceil_mult/min_samples (0.4x, 3x, 1/10).
+    """
+    out = search.configure(pd.DataFrame([_adaptive_like_row()]), profile="fast")
+    cfg = out[0]
+
+    assert cfg["adaptive"] is True
+    assert cfg["measure_time"] == 5.0
+    assert cfg["warmup_time"] == 2.0
+    assert cfg["max_measure_time"] == 15.0
+    assert cfg["sample_time"] == 0.5
+    assert cfg["noise_threshold"] == 0.01
+    assert cfg["min_iters"] == 3
+    assert cfg["max_iters"] == 10000
+    assert cfg["stability_threshold"] == 0.0
+    assert cfg["stability_window"] == 32
+    assert cfg["stability_interval"] == 16
+
+
+def test_configure_thorough_profile_timing() -> None:
+    """The "thorough" profile's derived timing knobs track its own measure_time."""
+    out = search.configure(pd.DataFrame([_adaptive_like_row()]), profile="thorough")
+    cfg = out[0]
+
+    assert cfg["measure_time"] == 20.0
+    assert cfg["warmup_time"] == 40.0
+    assert cfg["max_measure_time"] == 320.0
+    assert cfg["sample_time"] == 2.0
+    assert cfg["noise_threshold"] == 0.005
+    assert cfg["stability_threshold"] == 0.03
+
+
+def test_configure_defaults_to_thorough_profile() -> None:
+    """Default configure() (no profile arg) matches the "thorough" profile."""
+    out = search.configure(pd.DataFrame([_adaptive_like_row()]))
+    cfg = out[0]
+
+    assert cfg["measure_time"] == 20.0
+    assert cfg["warmup_time"] == 40.0
+    assert cfg["max_measure_time"] == 320.0
+    assert cfg["sample_time"] == 2.0
+    assert cfg["noise_threshold"] == 0.005
+    assert cfg["stability_threshold"] == 0.03
+    assert cfg["stability_window"] == 6
+    assert cfg["stability_interval"] == 3
+
+
+def _flat_profiles() -> list[dict]:
+    flat = []
+    for cfg in search.SEARCH_PROFILES.values():
+        flat.extend([cfg["stage_a"], cfg["stage_b"]] if "stage_a" in cfg else [cfg])
+    return flat
+
+
+@pytest.mark.parametrize("cfg", _flat_profiles())
+def test_profile_knobs_expand_to_expected_adaptive_fields(cfg: dict) -> None:
+    """Every flat profile dict unpacks into adaptive_fields and yields the expected block."""
+    fields = search.bench.log.adaptive_fields(**cfg)
+    mt = cfg["measure_time"]
+
+    assert fields == {
+        "adaptive": True,
+        "measure_time": mt,
+        "warmup_time": cfg["warmup_mult"] * mt,
+        "max_measure_time": cfg["ceil_mult"] * mt,
+        "sample_time": mt / cfg["min_samples"],
+        "noise_threshold": cfg["noise_threshold"],
+        "min_iters": cfg["min_iters"],
+        "max_iters": cfg["max_iters"],
+        "stability_threshold": cfg["stability_threshold"],
+        "stability_window": cfg["stability_window"],
+        "stability_interval": cfg["stability_interval"],
+    }
+
+
+def test_configure_rejects_unknown_profile() -> None:
+    with pytest.raises(ValueError, match="Unknown search profile"):
+        search.configure(pd.DataFrame([_adaptive_like_row()]), profile="bogus")
+
+
+def test_configure_balanced_profile_uses_stage_a() -> None:
+    """The two-stage "balanced" profile's configure() output matches its "stage_a" (== "fast") knobs."""
+    out = search.configure(pd.DataFrame([_adaptive_like_row()]), profile="balanced")
+    cfg = out[0]
+
+    assert cfg["measure_time"] == 5.0
+    assert cfg["warmup_time"] == 2.0
+    assert cfg["max_measure_time"] == 15.0
+    assert cfg["sample_time"] == 0.5
+    assert cfg["noise_threshold"] == 0.01
+    assert cfg["stability_threshold"] == 0.0
+    assert cfg["stability_window"] == 32
+    assert cfg["stability_interval"] == 16
 
 
 def test_run_raises_for_missing_hipblaslt_dir(tmp_path: Path) -> None:
@@ -330,6 +449,546 @@ def test_run_persists_winners_with_stubbed_runner(monkeypatch: pytest.MonkeyPatc
     assert (outdir / "processed.csv").is_file()
 
 
+def test_run_rejects_unknown_profile(tmp_path: Path) -> None:
+    hip = tmp_path / "hip"
+    hip.mkdir()
+    with pytest.raises(ValueError, match="Unknown search profile"):
+        search.run(hip, [{"M": 1}], tmp_path / "out", devices=[0], profile="bogus")
+
+
+def test_run_rejects_stage_b_profile_without_k(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    hip = tmp_path / "hip"
+    hip.mkdir()
+    monkeypatch.setitem(
+        search.SEARCH_PROFILES,
+        "no_k",
+        {"stage_a": search.SEARCH_PROFILES["fast"], "stage_b": search.SEARCH_PROFILES["thorough"]},
+    )
+    with pytest.raises(ValueError, match="positive 'k'"):
+        search.run(hip, [{"M": 1}], tmp_path / "out", devices=[0], profile="no_k")
+
+
+def test_run_two_stage_profile_reverifies_with_stage_b(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """profile="balanced" re-verifies stage_a's shortlisted top-k candidates
+    with stage_b's own adaptive config, and the FINAL winner (persisted by
+    the unmodified teardown()) comes exclusively from stage_b's own result.
+    """
+    hip = tmp_path / "hip"
+    hip.mkdir()
+    outdir = tmp_path / "out"
+
+    # Shortlist to the top 2 candidates to keep the test small.
+    monkeypatch.setitem(search.SEARCH_PROFILES["balanced"], "k", 2)
+
+    cfg = {
+        "transA": "N",
+        "transB": "N",
+        "batch_count": 1,
+        "M": 64,
+        "N": 64,
+        "K": 64,
+        "a_type": "f16_r",
+        "b_type": "f16_r",
+        "c_type": "f16_r",
+        "d_type": "f16_r",
+        "compute_type": "f32_r",
+        "scaleA": 1,
+        "scaleB": 1,
+    }
+
+    gemm_row = {
+        "transA": "N",
+        "transB": "N",
+        "batch_count": 1,
+        "m": 64,
+        "n": 64,
+        "k": 64,
+        "a_type": "f16_r",
+        "b_type": "f16_r",
+        "c_type": "f16_r",
+        "d_type": "f16_r",
+        "compute_type": "c_f32_r",
+        "scaleA": 1,
+        "scaleB": 1,
+    }
+
+    # stage_a (screen) sees 3 candidates; only the best 2 (by "us") are
+    # shortlisted for stage_b's re-verify pass.
+    stage_a_df = pd.DataFrame(
+        [
+            {**gemm_row, "us": 5.0, "solutionIdx": "30"},
+            {**gemm_row, "us": 1.0, "solutionIdx": "10"},
+            {**gemm_row, "us": 3.0, "solutionIdx": "20"},
+        ]
+    )
+    # stage_b (re-verify) measures only the shortlisted candidates; its own
+    # result (not stage_a's) must become the final persisted winner.
+    stage_b_df = pd.DataFrame(
+        [
+            {**gemm_row, "us": 0.9, "solutionIdx": "10"},
+            {**gemm_row, "us": 1.2, "solutionIdx": "20"},
+        ]
+    )
+
+    dumped: list[list[dict]] = []
+    monkeypatch.setattr(
+        search.bench.log,
+        "dump",
+        lambda data, p: (dumped.append(data), yaml.safe_dump(data, Path(p).open("w"), sort_keys=False))[-1],
+    )
+
+    bench_run_calls: list[Path] = []
+
+    def _fake_bench_run(_hip, _bench_file, log_file, **_kwargs):
+        bench_run_calls.append(Path(log_file))
+        if len(bench_run_calls) == 1:
+            Path(log_file).write_text("Winner\n")
+        else:
+            Path(log_file).write_text("stage_b output\n")
+        return pd.DataFrame()
+
+    monkeypatch.setattr(search.bench, "run", _fake_bench_run)
+
+    def _fake_parse(p):
+        p = Path(p)
+        return stage_a_df if p.name.endswith("_stage_a.out") else stage_b_df
+
+    monkeypatch.setattr(search.bench.utils, "parse_benchmark_output", _fake_parse)
+
+    class _PassRunner:
+        def __init__(self, items, worker_impl, devices, n_slots=1):
+            self._items = items
+            self._worker_impl = worker_impl
+            self._devices = devices
+
+        def __call__(self, _workdir):
+            for item in self._items:
+                w = self._worker_impl(item, self._devices[0], 0, None, None)
+                w.setup()
+                w.run()
+                w.teardown()
+            return self._items
+
+    monkeypatch.setattr(search, "Runner", _PassRunner)
+
+    out = search.run(hip, [cfg], outdir, devices=[0], profile="balanced")
+
+    # bench.run was called twice: stage_a (screen), then stage_b (re-verify).
+    assert len(bench_run_calls) == 2
+    # stage_a's own output is preserved under its own name...
+    assert (outdir / "gemms_0_stage_a.out").is_file()
+    # ...and the chunk's original log filename ends up holding stage_b's output.
+    assert bench_run_calls[0] == bench_run_calls[1] == outdir / "gemms_0.out"
+
+    # The second bench.log.dump() call built one algo_method=2 row per
+    # shortlisted candidate (k=2), referencing the screened solution indices.
+    stage_b_rows = dumped[1]
+    assert len(stage_b_rows) == 2
+    assert {r["solution_index"] for r in stage_b_rows} == {10, 20}
+    assert all(r["algo_method"] == 2 for r in stage_b_rows)
+    assert all("requested_solution_num" not in r for r in stage_b_rows)
+    # stage_b rows carry stage_b's own (not stage_a's) adaptive timing.
+    assert all(r["measure_time"] == search.SEARCH_PROFILES["thorough"]["measure_time"] for r in stage_b_rows)
+
+    # The final persisted winner is stage_b's own best candidate (us=0.9,
+    # solutionIdx=10), never compared against stage_a's.
+    assert len(out) == 1
+    assert out.iloc[0]["us"] == 0.9
+    assert int(out.iloc[0]["solutionIdx"]) == 10
+
+
+def test_run_two_stage_shortlist_sorts_dedupes_and_ranks_per_gemm(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Dedicated test for the stage_a -> stage_b shortlisting step itself:
+    candidates are ranked by ascending "us" (not input order), a duplicate
+    solutionIdx for the same GEMM is only counted once toward "k", and each
+    GEMM in the chunk gets its own independent top-k ranking.
+    """
+    hip = tmp_path / "hip"
+    hip.mkdir()
+    outdir = tmp_path / "out"
+
+    monkeypatch.setitem(search.SEARCH_PROFILES["balanced"], "k", 2)
+
+    def _cfg(k: int) -> dict:
+        return {
+            "transA": "N",
+            "transB": "N",
+            "batch_count": 1,
+            "M": 64,
+            "N": 64,
+            "K": k,
+            "a_type": "f16_r",
+            "b_type": "f16_r",
+            "c_type": "f16_r",
+            "d_type": "f16_r",
+            "compute_type": "f32_r",
+            "scaleA": 1,
+            "scaleB": 1,
+        }
+
+    def _gemm_row(k: int, us: float, sol: str) -> dict:
+        return {
+            "transA": "N",
+            "transB": "N",
+            "batch_count": 1,
+            "m": 64,
+            "n": 64,
+            "k": k,
+            "a_type": "f16_r",
+            "b_type": "f16_r",
+            "c_type": "f16_r",
+            "d_type": "f16_r",
+            "compute_type": "c_f32_r",
+            "scaleA": 1,
+            "scaleB": 1,
+            "us": us,
+            "solutionIdx": sol,
+        }
+
+    cfg1, cfg2 = _cfg(64), _cfg(128)
+
+    # GEMM1 (K=64): presented out of order, with a duplicate solutionIdx "10"
+    # row that must not count twice toward the k=2 shortlist. Sorted by us:
+    # 10 (1.0), 10 (dup, skipped), 20 (3.0), 30 (5.0) -> shortlist = [10, 20].
+    # GEMM2 (K=128): independent ranking, lowest two are 40 and 50 -> [40, 50].
+    stage_a_df = pd.DataFrame(
+        [
+            _gemm_row(64, 5.0, "30"),
+            _gemm_row(64, 1.0, "10"),
+            _gemm_row(64, 1.0, "10"),  # duplicate candidate, must be deduped
+            _gemm_row(64, 3.0, "20"),
+            _gemm_row(128, 2.0, "50"),
+            _gemm_row(128, 0.5, "40"),
+            _gemm_row(128, 4.0, "60"),
+        ]
+    )
+    stage_b_df = pd.DataFrame(
+        [
+            _gemm_row(64, 0.9, "10"),
+            _gemm_row(64, 1.1, "20"),
+            _gemm_row(128, 0.4, "40"),
+            _gemm_row(128, 0.6, "50"),
+        ]
+    )
+
+    dumped: list[list[dict]] = []
+    monkeypatch.setattr(
+        search.bench.log,
+        "dump",
+        lambda data, p: (dumped.append(data), yaml.safe_dump(data, Path(p).open("w"), sort_keys=False))[-1],
+    )
+
+    bench_run_calls: list[Path] = []
+
+    def _fake_bench_run(_hip, _bench_file, log_file, **_kwargs):
+        bench_run_calls.append(Path(log_file))
+        if len(bench_run_calls) == 1:
+            Path(log_file).write_text("Winner\nWinner\n")
+        else:
+            Path(log_file).write_text("stage_b output\n")
+        return pd.DataFrame()
+
+    monkeypatch.setattr(search.bench, "run", _fake_bench_run)
+
+    def _fake_parse(p):
+        p = Path(p)
+        return stage_a_df if p.name.endswith("_stage_a.out") else stage_b_df
+
+    monkeypatch.setattr(search.bench.utils, "parse_benchmark_output", _fake_parse)
+
+    class _PassRunner:
+        def __init__(self, items, worker_impl, devices, n_slots=1):
+            self._items = items
+            self._worker_impl = worker_impl
+            self._devices = devices
+
+        def __call__(self, _workdir):
+            for item in self._items:
+                w = self._worker_impl(item, self._devices[0], 0, None, None)
+                w.setup()
+                w.run()
+                w.teardown()
+            return self._items
+
+    monkeypatch.setattr(search, "Runner", _PassRunner)
+
+    # Explicit max_chunk_size: this test cares about both GEMMs landing in
+    # the same chunk (so stage_a produces one shortlist covering both),
+    # not about the default chunk-size heuristic.
+    out = search.run(hip, [cfg1, cfg2], outdir, devices=[0], max_chunk_size=10, profile="balanced")
+
+    stage_b_rows = dumped[1]
+    # 2 GEMMs x k=2 shortlisted candidates each = 4 rows; the duplicate
+    # solutionIdx "10" row for GEMM1 did not consume a second shortlist slot.
+    assert len(stage_b_rows) == 4
+
+    by_k = defaultdict(set)
+    for row in stage_b_rows:
+        by_k[row["K"]].add(row["solution_index"])
+
+    assert by_k[64] == {10, 20}
+    assert by_k[128] == {40, 50}
+
+    # Final per-GEMM winners come from stage_b's own best candidate.
+    assert len(out) == 2
+    winners = {int(row["k"]): (row["us"], int(row["solutionIdx"])) for _, row in out.iterrows()}
+    assert winners[64] == (0.9, 10)
+    assert winners[128] == (0.4, 40)
+
+
+def test_run_two_stage_retries_single_config_after_stage_a_failure(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """If stage_a fails for a chunk, its config is requeued into
+    failed_configs and retried as a single-config item (see
+    test_run_emits_failed_gemms_after_retry_failure for the all-fail case).
+    When that retry runs under profile="balanced" it must still perform the
+    FULL two-stage (stage_a then stage_b) dance and persist stage_b's own
+    winner -- not just stop after stage_a, and not skip stage_b."""
+    hip = tmp_path / "hip"
+    hip.mkdir()
+    outdir = tmp_path / "out"
+
+    monkeypatch.setitem(search.SEARCH_PROFILES["balanced"], "k", 2)
+
+    cfg = {
+        "transA": "N",
+        "transB": "N",
+        "batch_count": 1,
+        "M": 64,
+        "N": 64,
+        "K": 64,
+        "a_type": "f16_r",
+        "b_type": "f16_r",
+        "c_type": "f16_r",
+        "d_type": "f16_r",
+        "compute_type": "f32_r",
+        "scaleA": 1,
+        "scaleB": 1,
+    }
+    gemm_row = {
+        "transA": "N",
+        "transB": "N",
+        "batch_count": 1,
+        "m": 64,
+        "n": 64,
+        "k": 64,
+        "a_type": "f16_r",
+        "b_type": "f16_r",
+        "c_type": "f16_r",
+        "d_type": "f16_r",
+        "compute_type": "c_f32_r",
+        "scaleA": 1,
+        "scaleB": 1,
+    }
+
+    # The retry's own stage_a screens 2 candidates; stage_b re-verifies both
+    # (k=2) and its own best candidate (solutionIdx 10) is the final winner.
+    stage_a_df = pd.DataFrame(
+        [
+            {**gemm_row, "us": 1.0, "solutionIdx": "10"},
+            {**gemm_row, "us": 3.0, "solutionIdx": "20"},
+        ]
+    )
+    stage_b_df = pd.DataFrame(
+        [
+            {**gemm_row, "us": 0.9, "solutionIdx": "10"},
+            {**gemm_row, "us": 1.2, "solutionIdx": "20"},
+        ]
+    )
+
+    monkeypatch.setattr(
+        search.bench.log, "dump", lambda data, p: yaml.safe_dump(data, Path(p).open("w"), sort_keys=False)
+    )
+
+    bench_run_calls: list[Path] = []
+
+    def _fake_bench_run(_hip, _bench_file, log_file, **_kwargs):
+        bench_run_calls.append(Path(log_file))
+        call_index = len(bench_run_calls)
+        if call_index == 1:
+            # Initial attempt's stage_a: zero "Winner" lines for 1 config -> fails.
+            Path(log_file).write_text("no winner here\n")
+        elif call_index == 2:
+            # Retry attempt's own stage_a: passes.
+            Path(log_file).write_text("Winner\n")
+        else:
+            # Retry attempt's own stage_b.
+            Path(log_file).write_text("stage_b output\n")
+        return pd.DataFrame()
+
+    monkeypatch.setattr(search.bench, "run", _fake_bench_run)
+
+    def _fake_parse(p):
+        p = Path(p)
+        return stage_a_df if p.name.endswith("_stage_a.out") else stage_b_df
+
+    monkeypatch.setattr(search.bench.utils, "parse_benchmark_output", _fake_parse)
+
+    class _PassRunner:
+        def __init__(self, items, worker_impl, devices, n_slots=1):
+            self._items = items
+            self._worker_impl = worker_impl
+            self._devices = devices
+
+        def __call__(self, _workdir):
+            for item in self._items:
+                w = self._worker_impl(item, self._devices[0], 0, None, None)
+                w.setup()
+                w.run()
+                w.teardown()
+            return self._items
+
+    monkeypatch.setattr(search, "Runner", _PassRunner)
+
+    out = search.run(hip, [cfg], outdir, devices=[0], profile="balanced")
+
+    # 1 failed stage_a attempt + the retry's own stage_a + stage_b = 3 calls.
+    assert len(bench_run_calls) == 3
+    # The retry redid stage_a from scratch and preserved its own raw output.
+    assert (outdir / "gemms_0_stage_a.out").is_file()
+
+    # Final result is stage_b's own best candidate, re-verified by the retry.
+    assert len(out) == 1
+    assert out.iloc[0]["us"] == 0.9
+    assert int(out.iloc[0]["solutionIdx"]) == 10
+    assert not (outdir / "failed_gemms.yaml").is_file()
+
+
+def test_run_two_stage_retries_single_config_after_stage_b_failure(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """If stage_a passes but stage_b fails for a MULTI-config chunk, the
+    chunk's own stage_a output survives on disk as "chunk_<i>_stage_a.out"
+    (teardown only cleans up self.log_file/self.bench_file, not that
+    renamed-away stage_a artifact). The single-config retry must redo BOTH
+    stages from scratch under its own "gemms_<id>" naming, never colliding
+    with or accidentally reusing that stale chunk-level file."""
+    hip = tmp_path / "hip"
+    hip.mkdir()
+    outdir = tmp_path / "out"
+
+    monkeypatch.setitem(search.SEARCH_PROFILES["balanced"], "k", 1)
+
+    cfg = {
+        "transA": "N",
+        "transB": "N",
+        "batch_count": 1,
+        "M": 64,
+        "N": 64,
+        "K": 64,
+        "a_type": "f16_r",
+        "b_type": "f16_r",
+        "c_type": "f16_r",
+        "d_type": "f16_r",
+        "compute_type": "f32_r",
+        "scaleA": 1,
+        "scaleB": 1,
+    }
+    filler_cfg = {**cfg, "K": 32}
+
+    def _row(k: int) -> dict:
+        return {
+            "transA": "N",
+            "transB": "N",
+            "batch_count": 1,
+            "m": 64,
+            "n": 64,
+            "k": k,
+            "a_type": "f16_r",
+            "b_type": "f16_r",
+            "c_type": "f16_r",
+            "d_type": "f16_r",
+            "compute_type": "c_f32_r",
+            "scaleA": 1,
+            "scaleB": 1,
+        }
+
+    # Per-retry-id dataframes keep each retried GEMM's shortlist independent
+    # (mirroring what the real parsed stage_a/stage_b logs would contain).
+    chunk_stage_a_df = pd.DataFrame(
+        [
+            {**_row(64), "us": 1.0, "solutionIdx": "10"},
+            {**_row(32), "us": 1.0, "solutionIdx": "10"},
+        ]
+    )
+    gemms0_stage_a_df = pd.DataFrame([{**_row(64), "us": 1.0, "solutionIdx": "10"}])
+    gemms0_stage_b_df = pd.DataFrame([{**_row(64), "us": 0.9, "solutionIdx": "10"}])
+    gemms1_stage_a_df = pd.DataFrame([{**_row(32), "us": 1.0, "solutionIdx": "10"}])
+    gemms1_stage_b_df = pd.DataFrame([{**_row(32), "us": 0.9, "solutionIdx": "10"}])
+
+    monkeypatch.setattr(
+        search.bench.log, "dump", lambda data, p: yaml.safe_dump(data, Path(p).open("w"), sort_keys=False)
+    )
+
+    bench_run_calls: list[Path] = []
+
+    def _fake_bench_run(_hip, _bench_file, log_file, **_kwargs):
+        bench_run_calls.append(Path(log_file))
+        call_index = len(bench_run_calls)
+        if call_index == 1:
+            Path(log_file).write_text("Winner\nWinner\n")  # chunk's own stage_a: both configs pass
+        elif call_index == 2:
+            raise RuntimeError("stage_b crashed")  # chunk's own stage_b: crashes
+        else:
+            # Retries: each retried config does its own stage_a (Winner) then
+            # stage_b (output), strictly alternating in processing order.
+            if (call_index - 3) % 2 == 0:
+                Path(log_file).write_text("Winner\n")
+            else:
+                Path(log_file).write_text("stage_b output\n")
+        return pd.DataFrame()
+
+    monkeypatch.setattr(search.bench, "run", _fake_bench_run)
+
+    def _fake_parse(p):
+        p = Path(p)
+        if p.name == "chunk_0_stage_a.out":
+            return chunk_stage_a_df
+        if p.stem.startswith("gemms_0"):
+            return gemms0_stage_a_df if p.name.endswith("_stage_a.out") else gemms0_stage_b_df
+        if p.stem.startswith("gemms_1"):
+            return gemms1_stage_a_df if p.name.endswith("_stage_a.out") else gemms1_stage_b_df
+        raise AssertionError(f"unexpected parse target: {p}")
+
+    monkeypatch.setattr(search.bench.utils, "parse_benchmark_output", _fake_parse)
+
+    class _PassRunner:
+        def __init__(self, items, worker_impl, devices, n_slots=1):
+            self._items = items
+            self._worker_impl = worker_impl
+            self._devices = devices
+
+        def __call__(self, _workdir):
+            for item in self._items:
+                w = self._worker_impl(item, self._devices[0], 0, None, None)
+                w.setup()
+                w.run()
+                w.teardown()
+            return self._items
+
+    monkeypatch.setattr(search, "Runner", _PassRunner)
+
+    # max_chunk_size=10 with 2 configs on 1 device packs both into ONE
+    # "chunk_0" (multi-config) chunk, so its stage_a output uses "chunk_<i>"
+    # naming -- the scenario the stale-file concern is actually about.
+    out = search.run(hip, [cfg, filler_cfg], outdir, devices=[0], max_chunk_size=10, profile="balanced")
+
+    # Stale artifact from the chunk's own (crashed) attempt: never cleaned up.
+    assert (outdir / "chunk_0_stage_a.out").is_file()
+    # The retry's own fresh stage_a output uses a DIFFERENT name -- no collision.
+    assert (outdir / "gemms_0_stage_a.out").is_file()
+
+    winners = {int(row["k"]): (row["us"], int(row["solutionIdx"])) for _, row in out.iterrows()}
+    assert winners[64] == (0.9, 10)
+    assert winners[32] == (0.9, 10)
+    assert not (outdir / "failed_gemms.yaml").is_file()
+
+
 def test_run_emits_failed_gemms_after_retry_failure(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     hip = tmp_path / "hip"
     hip.mkdir()
@@ -375,6 +1034,103 @@ def test_run_emits_failed_gemms_after_retry_failure(monkeypatch: pytest.MonkeyPa
     out = search.run(hip, [cfg], outdir, devices=[0])
     assert out.empty
     assert (outdir / "failed_gemms.yaml").is_file()
+
+
+def test_run_balances_chunks_by_flops_and_count(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Chunks should be capacity-capped (equal-ish item counts) and
+    flops-balanced (heaviest GEMMs spread across different chunks)."""
+    hip = tmp_path / "hip"
+    hip.mkdir()
+
+    # flops == K here since M=N=batch_count=1; 3 heavy + 3 light GEMMs.
+    flop_values = [100_000, 90_000, 80_000, 10, 9, 8]
+    configs = [_gemm_config(M=1, N=1, K=k, batch_count=1) for k in flop_values]
+
+    captured: dict = {}
+
+    class _CaptureRunner:
+        def __init__(self, items, worker_impl, devices, n_slots=1):
+            captured["items"] = items
+
+        def __call__(self, _workdir):
+            return []
+
+    monkeypatch.setattr(search, "Runner", _CaptureRunner)
+
+    search.run(hip, configs, tmp_path / "out", devices=[0, 1], max_chunk_size=10)
+
+    items = captured["items"]
+    assert len(items) == 2
+
+    # Capacity cap: chunks stay equally "full" (differ by at most one item).
+    sizes = sorted(len(item["configs"]) for item in items)
+    assert sizes == [3, 3]
+
+    def _chunk_of(original_id: int) -> int:
+        for i, item in enumerate(items):
+            if any(cfg[1] == original_id for cfg in item["configs"]):
+                return i
+        raise AssertionError(f"original id {original_id} missing from chunks")
+
+    # The two heaviest GEMMs (ids 0 and 1, flops 100_000/90_000) are the
+    # first two placed by the greedy algorithm and must land in different
+    # chunks -- that's the flops-balancing guarantee.
+    assert _chunk_of(0) != _chunk_of(1)
+
+
+def test_run_names_multi_and_single_config_items_differently(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Multi-config chunks are named "chunk_<i>"; single-config items (a
+    lone chunk, or a retry) keep "gemms_<id>" so retries never clash with
+    an existing chunk's output files."""
+    hip = tmp_path / "hip"
+    hip.mkdir()
+
+    captured: dict = {}
+
+    class _CaptureRunner:
+        def __init__(self, items, worker_impl, devices, n_slots=1):
+            captured["items"] = items
+            captured["worker_impl"] = worker_impl
+            captured["devices"] = devices
+
+        def __call__(self, _workdir):
+            return []
+
+    monkeypatch.setattr(search, "Runner", _CaptureRunner)
+
+    # 4 configs on 1 device => a single chunk holding all 4 (multi-config).
+    configs = [_gemm_config(M=1, N=1, K=k, batch_count=1) for k in [4, 3, 2, 1]]
+    search.run(hip, configs, tmp_path / "out", devices=[0], max_chunk_size=10)
+
+    items = captured["items"]
+    worker_impl = captured["worker_impl"]
+    devices = captured["devices"]
+    assert len(items) == 1
+    assert len(items[0]["configs"]) == 4
+
+    worker = worker_impl(items[0], devices[0], 0, None, None)
+    worker.setup()
+    assert worker.chunk_id == "chunk_0"
+    assert worker.bench_file.name == "chunk_0.yaml"
+    assert worker.log_file.name == "chunk_0.out"
+
+    # A single config on its own device => a lone (single-config) chunk.
+    captured.clear()
+    search.run(hip, [configs[0]], tmp_path / "out2", devices=[0], max_chunk_size=10)
+    worker = captured["worker_impl"](captured["items"][0], captured["devices"][0], 0, None, None)
+    worker.setup()
+    assert worker.chunk_id == "gemms_0"
+    assert worker.bench_file.name == "gemms_0.yaml"
+
+    # A single-config retry item (built directly, as search.run() does
+    # internally) must use the same "gemms_<id>" naming.
+    retry_item = {"configs": [(configs[0], 7)], "keep_failed_logs": True}
+    retry_worker = worker_impl(retry_item, devices[0], 0, None, None)
+    retry_worker.setup()
+    assert retry_worker.chunk_id == "gemms_7"
+    assert retry_worker.bench_file.name == "gemms_7.yaml"
 
 
 def _gemm_config(**overrides: object) -> dict:
