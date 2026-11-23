@@ -115,6 +115,40 @@ def region_active():
   return _region_active.get()
 
 
+# ============================================================================
+# Phase 1 scheduling introspection seam
+# ============================================================================
+# The in-path scheduler (KernelWriter.makeSchedule / _makeSubIterSchedule and
+# Components/SIA) classifies instructions by concrete rocisa type via
+# ``isinstance``. That hard-wires the scheduler to rocisa and makes a logical
+# leaf (which is not any rocisa instruction type) invisible -> miscounted ->
+# divergence. These ``sched_is_*`` predicates are the single place that asks
+# "what kind of instruction is this?".
+#
+# Phase 1: each predicate wraps the *exact* rocisa ``isinstance`` it replaces, so
+# the emitted assembly is byte-identical. Only the call site changes.
+# Phase 2: these grow a branch that answers from a logical leaf's payload
+# (``logical::Opcode`` / ``InstFlag``), so the scheduler can introspect a mixed
+# rocisa/logical tree without knowing which node is which.
+#
+# Vocabulary note: the category names mirror the logical-IR taxonomy on purpose
+# (so the Phase 2 leaf branch maps 1:1 to a logical opcode/flag).
+
+def sched_is_mfma(item):
+  """True for a plain MFMA instruction (not SMFMA / MXMFMA)."""
+  return isinstance(item, _rocisa_instruction.MFMAInstruction)
+
+
+def sched_is_smfma(item):
+  """True for a scaled-MFMA (SMFMA) instruction."""
+  return isinstance(item, _rocisa_instruction.SMFMAInstruction)
+
+
+def sched_is_mxmfma(item):
+  """True for a mixed-precision MFMA (MXMFMA) instruction."""
+  return isinstance(item, _rocisa_instruction.MXMFMAInstruction)
+
+
 class _LogicalBackend:
   """Construction backend that builds StinkyTofu logical IR instead of rocisa.
 

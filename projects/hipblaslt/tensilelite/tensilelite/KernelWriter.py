@@ -44,6 +44,7 @@ from .ir import BranchInstruction, BufferLoadB128, BufferLoadB192, BufferLoadB32
   MFMAInstruction, MXMFMAInstruction, SAddU32, SAndB32, SBarrier, SBranch, SCBranchSCC0, SCBranchSCC1, SCBranchVCCNZ, SCmpEQU32, SCmpEQU64, SCmpGeU32, SCmpLeU32, \
   SCSelectB32, SLShiftLeftB32, SLShiftRightB32, SMFMAInstruction, SMovB32, SMovB64, SNop, SEndpgm, SOrB32, SSetPrior, SSetRegIMM32B32, SSubU32, SWaitCnt, SWaitAlu, \
   SLongBranchPositive, VFmaMixF32, VMadMixF32, VMovB32, VAndB32, VCmpEQU32, VCndMaskB32, VMovB64, VNop, VReadfirstlaneB32, TensorLoadToLds, SCMovB32, SCMovB64, t16
+from .ir import sched_is_mfma
 from .ir import SSchedulingFence
 from .ir import set_active_version as _set_active_ir_version
 from rocisa.register import RegisterPool
@@ -1119,7 +1120,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
   ##############################################################################
   def isMFMAIn(self,items):
     for inst in items:
-      if isinstance(inst, MFMAInstruction):
+      if sched_is_mfma(inst):
         return True
     return False
   def countAfter2ndMFMA(self,items):
@@ -1130,7 +1131,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     for inst in items:
       if after2ndMfmaCountStart:
         after2ndMfma += 1
-      if isinstance(inst, MFMAInstruction):
+      if sched_is_mfma(inst):
         mfmaCount += 1
       if mfmaBlockCount == 0 and mfmaCount == 2:
         # ater reaching the first 2 mfma, start counting after2ndMfma
@@ -1163,7 +1164,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
           if mfmaBlockCount == 0 and mfmaCount == 2:
             # ater reaching the first 2 mfma, start counting after2ndMfma
             after2ndMfmaCountStart = True
-          if isinstance(item, MFMAInstruction):
+          if sched_is_mfma(item):
             mfmaCount += 1
           else:
             if mfmaCount > 0:
