@@ -24,6 +24,7 @@
 
 #pragma once
 
+#include "rocsparse_bsr_dims.hpp"
 #include "rocsparse_common.hpp"
 
 namespace rocsparse
@@ -68,9 +69,7 @@ namespace rocsparse
                 {
                     if(i >= start_local_index)
                     {
-                        bsr_val[static_cast<int64_t>(block_index) * block_dim * block_dim
-                                + static_cast<int64_t>(i) * block_dim + i]
-                            = value;
+                        bsr_val[rocsparse::bsr_diag_offset(block_index, i, block_dim)] = value;
                     }
                 }
             }
@@ -126,9 +125,7 @@ namespace rocsparse
                 {
                     if(i >= start_local_index)
                     {
-                        bsr_val[static_cast<int64_t>(block_index) * block_dim * block_dim
-                                + static_cast<int64_t>(i) * block_dim + i]
-                            = value;
+                        bsr_val[rocsparse::bsr_diag_offset(block_index, i, block_dim)] = value;
                     }
                 }
             }

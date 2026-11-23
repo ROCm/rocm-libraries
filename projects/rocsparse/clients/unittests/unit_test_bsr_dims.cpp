@@ -23,12 +23,14 @@
  * ************************************************************************ */
 
 //
-// Tier-0 unit tests: rocsparse::bsr_block_count_matches<I>(m, mb, block_dim).
+// Tier-0 unit tests: rocsparse::bsr_block_count_matches<I>(m, mb, block_dim) and
+// rocsparse::bsr_diag_offset<I>(block_index, i, block_dim).
 //
-// Header-only helper from library/src/include/rocsparse_bsr_dims.hpp that
+// Header-only helpers from library/src/include/rocsparse_bsr_dims.hpp. The first
 // validates the BSR block-row count, (mb - 1) * block_dim < m <= mb * block_dim.
 // It must hold for every representable input of both index widths, including
-// shapes whose products do not fit in I (GitHub issue #15913).
+// shapes whose products do not fit in I (GitHub issue #15913). The second is the
+// bsrpad_value write offset, which must not wrap at 32 bits.
 //
 #include "rocsparse_bsr_dims.hpp"
 
@@ -122,4 +124,18 @@ TEST(bsr_dims, int64_limits)
     EXPECT_TRUE(rocsparse::bsr_block_count_matches<int64_t>(lmax, lmax, 1));
     EXPECT_FALSE(rocsparse::bsr_block_count_matches<int64_t>(1, lmax, lmax));
     EXPECT_TRUE(rocsparse::bsr_block_count_matches<int64_t>(0, 0, lmax));
+}
+
+TEST(bsr_dims, diag_offset)
+{
+    // The last entry of bsr_val in the two bsrpad_value_extra cases. Without the cast on i
+    // the first gives -2147386333; without the cast on block_index the second gives
+    // -2143289345.
+    EXPECT_EQ(rocsparse::bsr_diag_offset<int32_t>(0, 46341, 46342), 2147580963);
+    EXPECT_EQ(rocsparse::bsr_diag_offset<int32_t>(512, 2047, 2048), 2151677951);
+    EXPECT_EQ(rocsparse::bsr_diag_offset<int64_t>(0, 46341, 46342), 2147580963);
+    EXPECT_EQ(rocsparse::bsr_diag_offset<int64_t>(512, 2047, 2048), 2151677951);
+
+    EXPECT_EQ(rocsparse::bsr_diag_offset<int32_t>(0, 0, 1), 0);
+    EXPECT_EQ(rocsparse::bsr_diag_offset<int32_t>(3, 1, 4), 3 * 16 + 1 * 4 + 1);
 }

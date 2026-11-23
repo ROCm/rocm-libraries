@@ -24,6 +24,8 @@
 
 #pragma once
 
+#include <cstdint>
+
 namespace rocsparse
 {
     // True iff mb == ceil(m / block_dim), i.e. (mb - 1) * block_dim < m <= mb * block_dim.
@@ -33,5 +35,15 @@ namespace rocsparse
     constexpr bool bsr_block_count_matches(I m, I mb, I block_dim)
     {
         return mb == m / block_dim + static_cast<I>(m % block_dim != 0);
+    }
+
+    // Offset of diagonal entry (i, i) of block block_index in bsr_val. Both terms are
+    // widened before multiplying: BSR_IND_R computes i * block_dim in I, which overflows
+    // 32 bits from block_dim = 46342.
+    template <typename I>
+    constexpr int64_t bsr_diag_offset(I block_index, I i, I block_dim)
+    {
+        return static_cast<int64_t>(block_index) * block_dim * block_dim
+               + static_cast<int64_t>(i) * block_dim + i;
     }
 }
