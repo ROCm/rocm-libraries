@@ -64,7 +64,7 @@ function(add_hiptensor_component COMPONENT_NAME COMPONENT_SOURCES)
 
     # Don't link to consume ck instances, however will customize and create our own.
     # Make the ck includes visible so we can build instances.
-    get_target_property(composable_kernel_INCLUDES composable_kernel::device_other_operations INTERFACE_INCLUDE_DIRECTORIES)
+    get_target_property(composable_kernel_INCLUDES ${HIPTENSOR_CK_INCLUDE_TARGET} INTERFACE_INCLUDE_DIRECTORIES)
     target_include_directories(${COMPONENT_NAME} PRIVATE
         ${PROJECT_BINARY_DIR}/include/hiptensor
         ${PROJECT_BINARY_DIR}/include
@@ -263,7 +263,7 @@ if(HIPTENSOR_BUILD_TESTS)
     set_target_properties(hiptensor_host_reference PROPERTIES POSITION_INDEPENDENT_CODE ON)
     target_link_libraries(hiptensor_host_reference PRIVATE hip::device)
 
-    get_target_property(composable_kernel_INCLUDES composable_kernel::device_other_operations INTERFACE_INCLUDE_DIRECTORIES)
+    get_target_property(composable_kernel_INCLUDES ${HIPTENSOR_CK_INCLUDE_TARGET} INTERFACE_INCLUDE_DIRECTORIES)
     target_include_directories(hiptensor_host_reference PRIVATE
         ${PROJECT_BINARY_DIR}/include/hiptensor
         ${PROJECT_BINARY_DIR}/include

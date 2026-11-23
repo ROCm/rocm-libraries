@@ -26,6 +26,7 @@ from ..ExecutionPolicy import isPersistentDataParallel, isStreamK, hasStaticAssi
 from rocisa.code import SignatureBase
 from rocisa.enum import SignatureValueKind as SVK
 from ..Component import Signature
+from ..CustomKernels import magicSizeSemantic
 from ..Common import DataDirection
 from ..Common.ScaleAlphaVec import scaleAlphaVectorMode
 from ..Activation import ActivationType
@@ -385,13 +386,17 @@ class SignatureDefault(Signature):
             userArgumentsInfo.gemmArgumentSize += 4
 
         for idxChar in kernel["PackedC0IdxChars"][:-1]:
-            signature.addArg("MagicNumberSize%s"%idxChar, SVK.SIG_VALUE,               "u32")
-            signature.addArg( "MagicShiftSize%s"%idxChar, SVK.SIG_VALUE,               "u32")
+            signature.addArg(magicSizeSemantic("MagicNumberSize", kernel["MagicDivAlg"]) + idxChar,
+                             SVK.SIG_VALUE, "u32")
+            signature.addArg(magicSizeSemantic("MagicShiftSize", kernel["MagicDivAlg"]) + idxChar,
+                             SVK.SIG_VALUE, "u32")
 
         if isPersistentDataParallel(kernel):
             for idxChar in kernel["PackedC1IdxChars"][:-1]:
-                signature.addArg("MagicNumberSize%s"%idxChar, SVK.SIG_VALUE,           "u32")
-                signature.addArg( "MagicShiftSize%s"%idxChar, SVK.SIG_VALUE,           "u32")
+                signature.addArg(magicSizeSemantic("MagicNumberSize", kernel["MagicDivAlg"]) + idxChar,
+                                 SVK.SIG_VALUE, "u32")
+                signature.addArg(magicSizeSemantic("MagicShiftSize", kernel["MagicDivAlg"]) + idxChar,
+                                 SVK.SIG_VALUE, "u32")
 
         # These are fixed sizes
         userArgumentsInfo.gemmArgumentSize += userArgumentsInfo.alphaMaxSize
@@ -454,6 +459,12 @@ class SignatureDefault(Signature):
                 signature.addArg(                   name, SVK.SIG_VALUE,        actValueType)
             if kernel["ProblemType"]["ActivationType"] in ['all', 'hipblaslt_all'] :
                 signature.addArg(       "activationType", SVK.SIG_VALUE,               "u32")
+
+        # Second D output (OutputPeerD): the distance in bytes from D to the peer D, loaded with
+        # the other post-loop arguments. A distance and not an address, so that it is the same
+        # for a strided D and for a pointer-array D (where the D argument is the pointer array).
+        if kernel["ProblemType"]["OutputPeerD"]:
+            signature.addArg("DeltaPeerD", SVK.SIG_VALUE, "i64")
 
         # TODO- combine one workspace
         if (kernel["ProblemType"]["OutputAmaxD"]):

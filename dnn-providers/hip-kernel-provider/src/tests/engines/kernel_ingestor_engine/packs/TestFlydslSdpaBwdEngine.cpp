@@ -4,6 +4,7 @@
 // Redundant with the CMake gate on purpose; see TestFlydslRmsNormEngine.cpp.
 #if defined(HIPDNN_ENABLE_KERNEL_INGESTOR) && defined(HIPDNN_ENGINE_FLYDSL)
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -17,6 +18,7 @@
 #include <set>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -1007,11 +1009,12 @@ TEST(TestFlydslSdpaBwdMergedKernel, EN3DeclinesAPackedObjectWhoseHeadStrideSpans
 TEST(TestFlydslSdpaBwdMergedKernel, EN3ServesAPackedObjectOnlyWhenTheStatsRowsFit32Bits)
 {
     // Q, dO and O share one head (stride 0), so their spans fit; two rows per head keep the
-    // pack_split bound at 2^30. A token-major layout puts the group's 268435455 interleaved
-    // heads between rows: the matcher declines it, as the kernels address padded rows past the
-    // two real ones at that token stride. A head-major layout has token stride 1 and is served,
-    // by the packed object as well.
-    constexpr int64_t HEADS = 268435455;
+    // pack_split bound far inside. A token-major layout puts the group's 2^23 interleaved
+    // heads between rows: the matcher declines it, as the kernels address 256 padded rows
+    // (256 x 2^23 x 4 bytes = 2^33) past the two real ones at that token stride. A head-major
+    // layout has token stride 1 and is served, by the packed object as well. One block per
+    // head: 2^23 + 1 blocks of 256 threads stay under 2^32 work-items.
+    constexpr int64_t HEADS = int64_t{1} << 23;
     constexpr int64_t SEQ = 2;
     RowSpec packed = plainRow();
     packed.gqaPack = 1;
@@ -1040,13 +1043,14 @@ TEST(TestFlydslSdpaBwdMergedKernel, EN3ServesAPackedObjectOnlyWhenTheStatsRowsFi
 TEST(TestFlydslSdpaBwdMergedKernel,
      EN3DeclinesAPackedObjectWhenThePaddedStatsGroupSpansMoreThan32Bits)
 {
-    // The same graph as above with the stats heads padded to four floats apart: one head's rows
+    // The same graph as above with the stats heads padded to 128 floats apart: one head's rows
     // still fit a 32-bit descriptor, so the matcher serves the graph, but the group's heads
-    // reach (268435454 * 4 + 2) * 4 bytes, past it. Only the packed object, whose descriptor
-    // covers the group, declines; the unpacked row rebases per head and is served.
-    constexpr int64_t HEADS = 268435455;
+    // reach ((2^23 - 1) * 128 + 2) * 4 bytes (about 2^32), past it. Only the packed object,
+    // whose descriptor covers the group, declines; the unpacked row rebases per head and is
+    // served. The launch is 2^23 + 1 blocks of 256 threads, under 2^32 work-items.
+    constexpr int64_t HEADS = int64_t{1} << 23;
     constexpr int64_t SEQ = 2;
-    constexpr int64_t PAD = 4;
+    constexpr int64_t PAD = 128;
     RowSpec packed = plainRow();
     packed.gqaPack = 1;
     const auto stats = [&](int64_t headStride) {
@@ -1239,17 +1243,42 @@ TEST(TestFlydslSdpaBwdMergedKernel, DeclinesARecordMissingAField)
 
 TEST(TestFlydslSdpaBwdMergedKernel, DeclinesALaunchGridPastInt32)
 {
-    // One block per tile of one row: B * (Hk * Sk + Hq * Sq) blocks.
+    // One block per tile of one row: B * (Hk * Sk + Hq * Sq) = B * 256 blocks at the default
+    // shape. A one-thread block keeps the work-item bound out of reach: 2^23 batches make 2^31
+    // blocks, past int32 workgroups and under 2^32 work-items.
     RowSpec tiny = plainRow();
     tiny.blockKv = 1;
     tiny.blockM = 1;
+    tiny.blockThreads = 1;
     Shape fits;
     fits.batch = int64_t{1} << 20;
     Shape overflows;
-    overflows.batch = int64_t{1} << 26;
+    overflows.batch = int64_t{1} << 23;
     EXPECT_TRUE(serves(specOf(fits), tiny));
     EXPECT_FALSE(serves(specOf(overflows), tiny));
     expectBadParam([&] { static_cast<void>(dumpOf(specOf(overflows), tiny)); });
+}
+
+TEST(TestFlydslSdpaBwdMergedKernel, DeclinesALaunchPastThirtyTwoBitWorkItems)
+{
+    // One head and one-row sequences with one-row tiles: two blocks per batch. At 1024
+    // threads x holds 2^22 - 1 blocks before it passes 2^32 work-items.
+    RowSpec tiny = plainRow();
+    tiny.blockKv = 1;
+    tiny.blockM = 1;
+    tiny.blockThreads = 1024;
+    const auto batches = [](int64_t batch) {
+        Shape shape;
+        shape.batch = batch;
+        shape.heads = 1;
+        shape.kvHeads = 1;
+        shape.seqQ = 1;
+        shape.seqKv = 1;
+        return specOf(shape);
+    };
+    EXPECT_TRUE(serves(batches((int64_t{1} << 21) - 1), tiny));
+    EXPECT_FALSE(serves(batches(int64_t{1} << 21), tiny));
+    expectBadParam([&] { static_cast<void>(dumpOf(batches(int64_t{1} << 21), tiny)); });
 }
 
 TEST(TestFlydslSdpaBwdMergedKernel, DeclinesADbiasReducePastTheGridRowLimit)
@@ -2237,6 +2266,7 @@ struct RepeatCell
 /// packed objects; dropout) and a bias with its gradient. A bias with a mask is outside both
 /// engines' contract, so the bias cell is unmasked. The merged engine declines head dim 192
 /// with a mask, a bias or dropout, so no cell reaches those objects: the per-object suite does.
+/// The standard tier runs the `plain q288k480`, `dropout` and `bias and dBias` cells.
 std::vector<RepeatCell> repeatLaunchCells(DataType dtype, int64_t headDim)
 {
     const auto cell = [&](int64_t heads, int64_t kvHeads, int64_t seqQ, int64_t seqKv) {
@@ -2288,14 +2318,30 @@ std::vector<RepeatCell> repeatLaunchCells(DataType dtype, int64_t headDim)
     return cells;
 }
 
-/// Launches every cell REPEAT_LAUNCHES times on @p engine on NaN-poisoned outputs: each launch is
-/// bit-for-bit the first, and the first is within the engine tolerance of the reference.
-void expectRepeatLaunches(std::string_view engine, DataType dtype, int64_t headDim)
+/// Launches the cells REPEAT_LAUNCHES times on @p engine on NaN-poisoned outputs: each launch is
+/// bit-for-bit the first, and the first is within the engine tolerance of the reference. All
+/// cells, or with @p smoke the dense multi-tile one, the dropout one and the bias with dBias one:
+/// the dense, the Philox and the dBias-reduce paths.
+void expectRepeatLaunches(std::string_view engine, DataType dtype, int64_t headDim, bool smoke)
 {
+    constexpr std::array<std::string_view, 3> SMOKE_CELLS{
+        "plain q288k480", "dropout", "bias and dBias"};
+    size_t launched = 0;
     for(const auto& cell : repeatLaunchCells(dtype, headDim))
     {
+        if(smoke
+           && std::find(SMOKE_CELLS.begin(), SMOKE_CELLS.end(), cell.label) == SMOKE_CELLS.end())
+        {
+            continue;
+        }
+        ++launched;
         SCOPED_TRACE(std::string(engine) + " d" + std::to_string(headDim) + " " + cell.label);
         bwd::expectCase(engine, cell.graph);
+    }
+    // A renamed label would otherwise silently shrink the smoke subset.
+    if(smoke)
+    {
+        ASSERT_EQ(launched, SMOKE_CELLS.size());
     }
 }
 
@@ -2317,51 +2363,55 @@ protected:
     }
 };
 
-// One suite per dtype: the datatype token ends the suite name.
+// Standard runs the smoke cells at bf16 head dim 64 per engine. Comprehensive runs every cell at
+// both head dims and both dtypes: the suite name ends in the datatype token, so each dtype is its
+// own sweep suite.
 using TestGpuFlydslSdpaBwdMergedRepeatLaunchBfp16 = TestGpuFlydslSdpaBwdMergedRepeatLaunch;
-using TestGpuFlydslSdpaBwdMergedRepeatLaunchFp16 = TestGpuFlydslSdpaBwdMergedRepeatLaunch;
 using TestGpuFlydslSdpaBwdSplitRepeatLaunchBfp16 = TestGpuFlydslSdpaBwdSplitRepeatLaunch;
-using TestGpuFlydslSdpaBwdSplitRepeatLaunchFp16 = TestGpuFlydslSdpaBwdSplitRepeatLaunch;
 
 TEST_F(TestGpuFlydslSdpaBwdMergedRepeatLaunchBfp16, HeadDim64IsBitwiseStable)
 {
-    expectRepeatLaunches(bwd::MERGED_ENGINE, DataType::BFLOAT16, 64);
-}
-
-TEST_F(TestGpuFlydslSdpaBwdMergedRepeatLaunchBfp16, HeadDim128IsBitwiseStable)
-{
-    expectRepeatLaunches(bwd::MERGED_ENGINE, DataType::BFLOAT16, 128);
-}
-
-TEST_F(TestGpuFlydslSdpaBwdMergedRepeatLaunchFp16, HeadDim64IsBitwiseStable)
-{
-    expectRepeatLaunches(bwd::MERGED_ENGINE, DataType::HALF, 64);
-}
-
-TEST_F(TestGpuFlydslSdpaBwdMergedRepeatLaunchFp16, HeadDim128IsBitwiseStable)
-{
-    expectRepeatLaunches(bwd::MERGED_ENGINE, DataType::HALF, 128);
+    expectRepeatLaunches(bwd::MERGED_ENGINE, DataType::BFLOAT16, 64, true);
 }
 
 TEST_F(TestGpuFlydslSdpaBwdSplitRepeatLaunchBfp16, HeadDim64IsBitwiseStable)
 {
-    expectRepeatLaunches(bwd::SPLIT_ENGINE, DataType::BFLOAT16, 64);
+    expectRepeatLaunches(bwd::SPLIT_ENGINE, DataType::BFLOAT16, 64, true);
 }
 
-TEST_F(TestGpuFlydslSdpaBwdSplitRepeatLaunchBfp16, HeadDim128IsBitwiseStable)
-{
-    expectRepeatLaunches(bwd::SPLIT_ENGINE, DataType::BFLOAT16, 128);
-}
+#define FLYDSL_SDPA_BWD_REPEAT_LAUNCH_SWEEP(SUITE, BASE, ENGINE, DTYPE)                        \
+    class SUITE : public BASE, public ::testing::WithParamInterface<int>                       \
+    {                                                                                          \
+    };                                                                                         \
+    TEST_P(SUITE, HeadDim64AllCells)                                                           \
+    {                                                                                          \
+        expectRepeatLaunches(ENGINE, DTYPE, 64, false);                                        \
+    }                                                                                          \
+    TEST_P(SUITE, HeadDim128)                                                                  \
+    {                                                                                          \
+        expectRepeatLaunches(ENGINE, DTYPE, 128, false);                                       \
+    }                                                                                          \
+    INSTANTIATE_TEST_SUITE_P(                                                                  \
+        Comprehensive, SUITE, ::testing::Values(0), [](const ::testing::TestParamInfo<int>&) { \
+            return std::string("Sweep");                                                       \
+        });
 
-TEST_F(TestGpuFlydslSdpaBwdSplitRepeatLaunchFp16, HeadDim64IsBitwiseStable)
-{
-    expectRepeatLaunches(bwd::SPLIT_ENGINE, DataType::HALF, 64);
-}
-
-TEST_F(TestGpuFlydslSdpaBwdSplitRepeatLaunchFp16, HeadDim128IsBitwiseStable)
-{
-    expectRepeatLaunches(bwd::SPLIT_ENGINE, DataType::HALF, 128);
-}
+FLYDSL_SDPA_BWD_REPEAT_LAUNCH_SWEEP(TestGpuFlydslSdpaBwdMergedRepeatLaunchSweepBfp16,
+                                    TestGpuFlydslSdpaBwdMergedRepeatLaunch,
+                                    bwd::MERGED_ENGINE,
+                                    DataType::BFLOAT16)
+FLYDSL_SDPA_BWD_REPEAT_LAUNCH_SWEEP(TestGpuFlydslSdpaBwdMergedRepeatLaunchSweepFp16,
+                                    TestGpuFlydslSdpaBwdMergedRepeatLaunch,
+                                    bwd::MERGED_ENGINE,
+                                    DataType::HALF)
+FLYDSL_SDPA_BWD_REPEAT_LAUNCH_SWEEP(TestGpuFlydslSdpaBwdSplitRepeatLaunchSweepBfp16,
+                                    TestGpuFlydslSdpaBwdSplitRepeatLaunch,
+                                    bwd::SPLIT_ENGINE,
+                                    DataType::BFLOAT16)
+FLYDSL_SDPA_BWD_REPEAT_LAUNCH_SWEEP(TestGpuFlydslSdpaBwdSplitRepeatLaunchSweepFp16,
+                                    TestGpuFlydslSdpaBwdSplitRepeatLaunch,
+                                    bwd::SPLIT_ENGINE,
+                                    DataType::HALF)
 
 /// B2 H4 with a bias of one [1, 1] plane, broadcast over batch and heads, and its gradient: the
 /// engine sums the gradient of every (batch, head) plane through the dBias reduce launch.

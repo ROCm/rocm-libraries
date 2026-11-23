@@ -78,7 +78,7 @@ TYPED_TEST(PrecondIluIc, csr_types_policies_batches_and_index_base)
 }
 
 // IC(0) inner sums with several non-zero terms (rows that share columns below the
-// diagonal) through the hash and the binary-search kernel, with real-valued entries.
+// diagonal) through the hash and the binary-search kernel.
 TEST_F(PrecondGeneric, spic0_csr_nonzero_inner_sums_hash)
 {
     run_options opt;
@@ -87,35 +87,49 @@ TEST_F(PrecondGeneric, spic0_csr_nonzero_inner_sums_hash)
     {
         for_all_types([&](auto tag) {
             using T = decltype(tag);
-            check_csr_matrix<Kind::ic, T>(
-                handle, make_lower_band_matrix<T>(60, w, false), opt, "band");
+            check_csr_matrix<Kind::ic, T>(handle, make_lower_band_matrix<T>(60, w), opt, "band");
         });
     }
     // A dense last row over narrow band rows: table sizes 32 .. 512 (lengths below
     // the sizes) and band 3 so that the sums have three terms.
     for(const int32_t fat : {8, 40, 100, 300, 511})
     {
-        check_csr_matrix<Kind::ic, double>(
-            handle, make_fat_row_matrix<double>(fat, false, 3), opt, "fat " + std::to_string(fat));
-        check_csr_matrix<Kind::ic, float>(
-            handle, make_fat_row_matrix<float>(fat, false, 3), opt, "fat " + std::to_string(fat));
+        for_all_types([&](auto tag) {
+            using T = decltype(tag);
+            check_csr_matrix<Kind::ic, T>(
+                handle, make_fat_row_matrix<T>(fat, 3), opt, "fat " + std::to_string(fat));
+        });
     }
     // Band and fat-row matrices (non-zero inner sums) in the other index base.
     const auto one = rocsparse_index_base_one;
     check_csr_matrix<Kind::ic, double>(
-        handle, make_lower_band_matrix<double>(60, 5, false), opt, "band", one);
+        handle, make_lower_band_matrix<double>(60, 5), opt, "band", one);
     check_csr_matrix<Kind::ic, double>(
-        handle, make_fat_row_matrix<double>(520, false, 3), opt, "fat 520", one);
+        handle, make_fat_row_matrix<double>(520, 3), opt, "fat 520", one);
     check_csr_matrix<Kind::ilu, double>(
         handle, with_upper_triangle(make_lower_band_matrix<double>(60, 5)), opt, "band", one);
     check_csr_matrix<Kind::ilu, double>(
-        handle,
-        with_upper_triangle(make_fat_row_matrix<double>(520, true, 3)),
-        opt,
-        "fat 520",
-        one);
+        handle, with_upper_triangle(make_fat_row_matrix<double>(520, 3)), opt, "fat 520", one);
     check_csr_matrix<Kind::ildlt, double>(
-        handle, make_fat_row_matrix<double>(40, true, 3), opt, "fat 40", one);
+        handle, make_fat_row_matrix<double>(40, 3), opt, "fat 40", one);
+}
+
+// On a Hermitian positive definite matrix with every entry stored, IC(0) drops no fill and
+// is the exact Cholesky factorization, so the factor is compared with L itself and not only
+// with the host reference (issue #15943).
+TEST_F(PrecondGeneric, spic0_csr_exact_cholesky_factor)
+{
+    const run_options opt;
+    for_all_types([&](auto tag) {
+        using T      = decltype(tag);
+        const auto r = make_cholesky_reproducer<T>();
+        for(const auto base : {rocsparse_index_base_zero, rocsparse_index_base_one})
+        {
+            run_result<T> out;
+            check_csr_matrix<Kind::ic, T>(handle, r.a, opt, "exact cholesky", base, &out);
+            expect_close(keep_lower_only(r.a, out.values), r.factor);
+        }
+    });
 }
 
 // ---------------------------------------------------------------------------
@@ -221,6 +235,91 @@ namespace
             opt.boost_tol = tol;
             opt.boost_val = 7.0;
             check_csr_matrix<Kind::ilu, T>(handle, a, opt, "boost tol " + std::to_string(tol));
+        }
+    }
+
+    // |u_ii| of ILU(0) of `a` before any boost, with the boost tolerance `boost_tol` and
+    // the boost value `boost_val` (no boost by default).
+    template <typename T>
+    std::vector<double>
+        ilu_pivots(const csr_matrix<T>& a, double boost_tol = -1.0, double boost_val = 0.0)
+    {
+        std::vector<double> pivots;
+        host_ilu0(a, boost_tol, boost_val, &pivots);
+        return pivots;
+    }
+
+    // Calls `check(opt, what)` with tolerances between the pivots of ILU(0) of `a` and
+    // below every pivot, each passed as a float or a double, in host or device memory. The
+    // float is followed by 0x7fefffff, so an 8-byte read boosts every pivot: a tolerance
+    // above every pivot would not tell it apart.
+    template <typename T, typename F>
+    void for_ilu_boost_inputs(const csr_matrix<T>& a, F&& check)
+    {
+        const auto   pivots   = ilu_pivots(a);
+        const double largest  = *std::max_element(pivots.begin(), pivots.end());
+        const double smallest = *std::min_element(pivots.begin(), pivots.end());
+        // The boosted pivots change the later ones, so the margin to the tolerance is
+        // checked on the pivots of the boosted factorization.
+        const double between        = 0.5 * (smallest + largest);
+        const auto   boosted_pivots = ilu_pivots(a, between, 7.0);
+        const auto   boosted_count  = std::count_if(
+            boosted_pivots.begin(), boosted_pivots.end(), [&](double p) { return p <= between; });
+        ASSERT_TRUE(clear_of_pivots(boosted_pivots, between));
+        ASSERT_GT(boosted_count, 0);
+        ASSERT_LT(boosted_count, a.n);
+        for(const double tol : {between, 0.5 * smallest})
+        {
+            for(const bool float_tol : {false, true})
+            {
+                for(const bool device : {false, true})
+                {
+                    run_options opt;
+                    opt.boost           = true;
+                    opt.boost_tol       = tol;
+                    opt.boost_val       = 7.0;
+                    opt.boost_tol_float = float_tol;
+                    opt.boost_device    = device;
+                    check(opt,
+                          "tol " + std::to_string(tol) + " float_tol " + std::to_string(float_tol)
+                              + " device " + std::to_string(device));
+                }
+            }
+        }
+    }
+
+    // CSR through the hash kernel (the grid matrix) and the binary-search kernel (a last
+    // row of 1100 entries, at least 1024 on a wave64 device).
+    template <typename T>
+    void check_ilu_boost_inputs(rocsparse_handle handle)
+    {
+        for(const auto& a :
+            {make_grid_matrix<T>(4, true), with_upper_triangle(make_fat_row_matrix<T>(1100))})
+        {
+            for_ilu_boost_inputs(a, [&](const run_options& opt, const std::string& what) {
+                check_csr_matrix<Kind::ilu, T>(
+                    handle, a, opt, "n " + std::to_string(a.n) + " " + what);
+            });
+        }
+    }
+
+    // BSR through the bsrilu0 kernels: block_dim 2, 9 and 33 select the 2_8, 9_32 and
+    // 33_64 kernels on a wave64 device (33 the general kernel for double complex), every
+    // block_dim selects the general kernel on a wave32 device.
+    template <typename T>
+    void check_ilu_bsr_boost_inputs(rocsparse_handle handle)
+    {
+        for(const int32_t block_dim : {2, 9, 33})
+        {
+            for(const auto dir : {rocsparse_direction_row, rocsparse_direction_column})
+            {
+                const auto m = make_block_matrix<T>(2, block_dim, dir, true);
+                for_ilu_boost_inputs(
+                    expand_bsr(m), [&](const run_options& opt, const std::string& what) {
+                        check_bsr_matrix<Kind::ilu, T>(
+                            handle, m, opt, "block_dim " + std::to_string(block_dim) + " " + what);
+                    });
+            }
         }
     }
 
@@ -339,11 +438,104 @@ namespace
             }
         }
     }
+
+    // The boost enabled without a boost tolerance, without a boost value, or without both:
+    // the analysis succeeds, and the compute stage returns rocsparse_status_invalid_pointer
+    // without touching the values. Once the missing inputs are set, the same descriptor
+    // computes the factor with every pivot boosted.
+    template <Kind K, typename M>
+    void check_boost_unset(rocsparse_handle handle, const M& m)
+    {
+        constexpr bool bsr = std::is_same_v<M, bsr_matrix<double>>;
+        using D = std::conditional_t<bsr, dev_bsr<double>, dev_csr<double, int32_t, int32_t>>;
+        const auto scalar = [&](const std::vector<double>& val) {
+            M f   = m;
+            f.val = val;
+            if constexpr(bsr)
+                return expand_bsr(f);
+            else
+                return f;
+        };
+        for(const bool set_tol : {false, true})
+        {
+            for(const bool set_val : {false, true})
+            {
+                if(set_tol && set_val)
+                    continue;
+                SCOPED_TRACE(::testing::Message()
+                             << "set_tol " << set_tol << " set_val " << set_val);
+                D d;
+                if constexpr(bsr)
+                    d.init(m);
+                else
+                    d.init(m, 1, true);
+                ASSERT_NE(d.A, nullptr);
+                run_options opt;
+                opt.boost          = true;
+                opt.boost_tol      = 1.0e3;
+                opt.boost_val      = 7.0;
+                opt.set_boost_tol  = set_tol;
+                opt.set_boost_val  = set_val;
+                opt.set_boost_late = true;
+                run_result<double> out;
+                run_factorization<K, double>(handle, d.A, d.val, 1, opt, out);
+                EXPECT_EQ(out.early_compute_status, rocsparse_status_invalid_pointer);
+                EXPECT_EQ(out.early_values, m.val);
+                ASSERT_EQ(out.compute_status, rocsparse_status_success);
+                check_factor<K>(scalar(m.val), scalar(out.values).val, opt, "missing inputs set");
+            }
+        }
+    }
 }
 
 TEST_F(PrecondGeneric, spilu0_numeric_boost)
 {
     for_all_types([&](auto tag) { check_ilu_boost<decltype(tag)>(handle); });
+}
+
+TEST_F(PrecondGeneric, spilu0_numeric_boost_inputs)
+{
+    for_all_types([&](auto tag) { check_ilu_boost_inputs<decltype(tag)>(handle); });
+}
+
+TEST_F(PrecondGeneric, spilu0_bsr_numeric_boost_inputs)
+{
+    for_all_types([&](auto tag) { check_ilu_bsr_boost_inputs<decltype(tag)>(handle); });
+}
+
+// The 3x3 of the AISPARSE-1063 reproducer: first pivot 1e-4, tolerance 1e-3, boost
+// value 1. A float tolerance must boost the same pivot a double tolerance does.
+TEST_F(PrecondGeneric, spilu0_numeric_boost_float_tolerance)
+{
+    csr_matrix<float> a;
+    a.n   = 3;
+    a.ptr = {0, 2, 4, 5};
+    a.ind = {0, 1, 0, 1, 2};
+    a.val = {1.0e-4f, 1.0f, 1.0f, 2.0f, 3.0f};
+    for(const bool float_tol : {false, true})
+    {
+        for(const bool device : {false, true})
+        {
+            run_options opt;
+            opt.boost           = true;
+            opt.boost_tol       = 1.0e-3;
+            opt.boost_val       = 1.0;
+            opt.boost_tol_float = float_tol;
+            opt.boost_device    = device;
+            check_csr_matrix<Kind::ilu, float>(handle,
+                                               a,
+                                               opt,
+                                               std::string(float_tol ? "float" : "double")
+                                                   + (device ? " device" : " host"));
+        }
+    }
+}
+
+TEST_F(PrecondGeneric, spilu0_numeric_boost_unset)
+{
+    check_boost_unset<Kind::ilu>(handle, make_grid_matrix<double>(4, true));
+    check_boost_unset<Kind::ilu>(handle,
+                                 make_block_matrix<double>(3, 3, rocsparse_direction_row, true));
 }
 
 TEST_F(PrecondGeneric, spildlt0_numeric_boost)
@@ -372,34 +564,9 @@ TEST_F(PrecondGeneric, numeric_boost_and_singularity_tolerance)
         handle, make_grid_matrix<double>(4, true), opt, rocsparse_singularity_none, -1);
 }
 
-// The boost enabled without a boost tolerance, without a boost value, or without both:
-// the analysis succeeds, and the compute stage returns rocsparse_status_invalid_pointer
-// without touching the values.
 TEST_F(PrecondGeneric, spildlt0_numeric_boost_unset)
 {
-    const auto a = make_grid_matrix<double>(4, false);
-    for(const bool set_tol : {false, true})
-    {
-        for(const bool set_val : {false, true})
-        {
-            if(set_tol && set_val)
-                continue;
-            SCOPED_TRACE(::testing::Message() << "set_tol " << set_tol << " set_val " << set_val);
-            dev_csr<double, int32_t, int32_t> d;
-            d.init(a, 1, true);
-            ASSERT_NE(d.A, nullptr);
-            run_options opt;
-            opt.boost         = true;
-            opt.boost_tol     = 1.0;
-            opt.boost_val     = 7.0;
-            opt.set_boost_tol = set_tol;
-            opt.set_boost_val = set_val;
-            run_result<double> out;
-            run_factorization<Kind::ildlt, double>(handle, d.A, d.val, 1, opt, out);
-            EXPECT_EQ(out.compute_status, rocsparse_status_invalid_pointer);
-            EXPECT_EQ(out.values, a.val);
-        }
-    }
+    check_boost_unset<Kind::ildlt>(handle, make_grid_matrix<double>(4, false));
 }
 
 // ---------------------------------------------------------------------------
@@ -489,6 +656,54 @@ TEST_F(PrecondGeneric, spic0_bsr_long_block_rows)
     }
 }
 
+// The matrix of spic0_csr_exact_cholesky_factor as one 3 x 3 block (inner sums inside
+// the block) and as 1 x 1 blocks (inner sums across block rows).
+TEST_F(PrecondGeneric, spic0_bsr_exact_cholesky_factor)
+{
+    const run_options opt;
+    for_all_types([&](auto tag) {
+        using T      = decltype(tag);
+        const auto r = make_cholesky_reproducer<T>();
+        for(const auto dir : {rocsparse_direction_row, rocsparse_direction_column})
+        {
+            for(const int32_t block_dim : {1, 3})
+            {
+                SCOPED_TRACE("block_dim=" + std::to_string(block_dim));
+                bsr_matrix<T> m;
+                m.block_dim = block_dim;
+                m.dir       = dir;
+                if(block_dim == 1)
+                {
+                    m.mb  = r.a.n;
+                    m.ptr = r.a.ptr;
+                    m.ind = r.a.ind;
+                    m.val = r.a.val;
+                }
+                else
+                {
+                    m.mb  = 1;
+                    m.ptr = {0, 1};
+                    m.ind = {0};
+                    m.val.resize(9);
+                    for(int32_t i = 0; i < 3; ++i)
+                        for(int32_t j = 0; j < 3; ++j)
+                            m.val[dir == rocsparse_direction_row ? 3 * i + j : 3 * j + i]
+                                = r.a.val[3 * i + j];
+                }
+                dev_bsr<T> d;
+                d.init(m);
+                ASSERT_NE(d.A, nullptr);
+                run_result<T> out;
+                run_factorization<Kind::ic, T>(handle, d.A, d.val, 1, opt, out);
+                ASSERT_EQ(out.compute_status, rocsparse_status_success);
+                EXPECT_EQ(out.singularity[0], rocsparse_singularity_none);
+                m.val = out.values;
+                expect_close(keep_lower_only(r.a, expand_bsr(m).val), r.factor);
+            }
+        }
+    });
+}
+
 // ---------------------------------------------------------------------------
 // Row-length regimes of ILDLT(0): hash kernel up to 512 entries (the binary-search kernels
 // are covered by the value and index type combinations below)
@@ -501,10 +716,8 @@ TEST_F(PrecondGeneric, spildlt0_csr_hash_row_lengths)
     {
         check_csr_matrix<Kind::ildlt, double>(
             handle, make_fat_row_matrix<double>(fat), opt, "fat=" + std::to_string(fat));
-        check_csr_matrix<Kind::ildlt, double>(handle,
-                                              make_fat_row_matrix<double>(fat, true, 3),
-                                              opt,
-                                              "band 3 fat=" + std::to_string(fat));
+        check_csr_matrix<Kind::ildlt, double>(
+            handle, make_fat_row_matrix<double>(fat, 3), opt, "band 3 fat=" + std::to_string(fat));
     }
 }
 
@@ -557,11 +770,9 @@ namespace
         expect_size_error(A::set(handle, descr, A::input(In::boost_val), &value, 1));
         expect_size_error(A::set(handle, descr, A::input(In::sing_tol), &value, 1));
 
-        // Valid inputs: the boost tolerance may be given as a float or a double. spildlt0
-        // records a sizeof(float) tolerance as f32 and reads it as a float. spilu0 and
-        // spic0 record the datatype as f64 whatever the size; spilu0 would then read a
-        // float tolerance as a double, and spic0 never reads its boost (AISPARSE-927). It
-        // is only validated here, no factorization of this test uses it.
+        // Valid inputs: the boost tolerance may be given as a float or a double, and a
+        // sizeof(float) tolerance is recorded as f32. spic0 never reads its boost
+        // (AISPARSE-927). It is only validated here, no factorization of this test uses it.
         const float ftol = 1.0f;
         EXPECT_EQ(A::set(handle, descr, A::input(In::boost_tol), &ftol, sizeof(float)),
                   rocsparse_status_success);
@@ -759,8 +970,6 @@ namespace
     void check_all_row_shapes(rocsparse_handle handle, const std::string& what)
     {
         const run_options opt;
-        // spic0 gets no imaginary parts (AISPARSE-903).
-        constexpr bool real_only = (K == Kind::ic);
         // ILU(0) gets the upper triangle as well, or its update would have nothing to do.
         const auto shape = [](const csr_matrix<T>& lower) {
             return (K == Kind::ilu) ? with_upper_triangle(lower) : lower;
@@ -768,19 +977,17 @@ namespace
 
         // Short rows: hash kernel with the smallest table.
         check_csr_matrix<K, T, I, J>(
-            handle, shape(make_lower_band_matrix<T>(12, 3, !real_only)), opt, what + " short rows");
+            handle, shape(make_lower_band_matrix<T>(12, 3)), opt, what + " short rows");
         // A row of 100 entries: hash kernel with a table of 128.
         check_csr_matrix<K, T, I, J>(
-            handle, shape(make_fat_row_matrix<T>(100, !real_only, 3)), opt, what + " fat row 100");
+            handle, shape(make_fat_row_matrix<T>(100, 3)), opt, what + " fat row 100");
         // A row of 520 entries: binary-search kernel.
         // Not for spildlt0 i32 rows / i64 cols: find_csrildlt0_kernel_binsearch_launch
         // dispatches <int32_t, int32_t> whenever row_type is i32 without looking at
         // col_type, so 64-bit column indices are read as 32-bit (AISPARSE-920).
         if constexpr(!(K == Kind::ildlt && sizeof(I) == 4 && sizeof(J) == 8))
-            check_csr_matrix<K, T, I, J>(handle,
-                                         shape(make_fat_row_matrix<T>(520, !real_only, 3)),
-                                         opt,
-                                         what + " fat row 520");
+            check_csr_matrix<K, T, I, J>(
+                handle, shape(make_fat_row_matrix<T>(520, 3)), opt, what + " fat row 520");
     }
 
     template <Kind K, typename T>

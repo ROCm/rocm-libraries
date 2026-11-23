@@ -148,26 +148,7 @@ struct device_histogram_even_benchmark : public primbench::benchmark_interface
         common::device_ptr<counter_type> d_histogram(m_bins);
 
         size_t temporary_storage_bytes = 0;
-        HIP_CHECK(rocprim::histogram_even(nullptr,
-                                          temporary_storage_bytes,
-                                          d_input.get(),
-                                          items,
-                                          d_histogram.get(),
-                                          m_bins + 1,
-                                          lower_level,
-                                          upper_level,
-                                          stream,
-                                          false));
-
-        common::device_ptr<void> d_temporary_storage(temporary_storage_bytes);
-
-        state.set_items(items);
-        state.add_reads<T>(items);
-
-        state.run(
-            [&]
-            {
-                HIP_CHECK(rocprim::histogram_even(d_temporary_storage.get(),
+        HIP_CHECK(rocprim::histogram_even<Config>(nullptr,
                                                   temporary_storage_bytes,
                                                   d_input.get(),
                                                   items,
@@ -177,6 +158,25 @@ struct device_histogram_even_benchmark : public primbench::benchmark_interface
                                                   upper_level,
                                                   stream,
                                                   false));
+
+        common::device_ptr<void> d_temporary_storage(temporary_storage_bytes);
+
+        state.set_items(items);
+        state.add_reads<T>(items);
+
+        state.run(
+            [&]
+            {
+                HIP_CHECK(rocprim::histogram_even<Config>(d_temporary_storage.get(),
+                                                          temporary_storage_bytes,
+                                                          d_input.get(),
+                                                          items,
+                                                          d_histogram.get(),
+                                                          m_bins + 1,
+                                                          lower_level,
+                                                          upper_level,
+                                                          stream,
+                                                          false));
             });
     }
 
@@ -246,16 +246,17 @@ struct device_multi_histogram_even_benchmark : public primbench::benchmark_inter
         }
 
         size_t temporary_storage_bytes = 0;
-        HIP_CHECK((rocprim::multi_histogram_even<Channels, ActiveChannels>(nullptr,
-                                                                           temporary_storage_bytes,
-                                                                           d_input.get(),
-                                                                           items,
-                                                                           d_histogram,
-                                                                           num_levels,
-                                                                           lower_level,
-                                                                           upper_level,
-                                                                           stream,
-                                                                           false)));
+        HIP_CHECK((
+            rocprim::multi_histogram_even<Channels, ActiveChannels, Config>(nullptr,
+                                                                            temporary_storage_bytes,
+                                                                            d_input.get(),
+                                                                            items,
+                                                                            d_histogram,
+                                                                            num_levels,
+                                                                            lower_level,
+                                                                            upper_level,
+                                                                            stream,
+                                                                            false)));
 
         common::device_ptr<void> d_temporary_storage(temporary_storage_bytes);
 
@@ -265,7 +266,7 @@ struct device_multi_histogram_even_benchmark : public primbench::benchmark_inter
         state.run(
             [&]
             {
-                HIP_CHECK((rocprim::multi_histogram_even<Channels, ActiveChannels>(
+                HIP_CHECK((rocprim::multi_histogram_even<Channels, ActiveChannels, Config>(
                     d_temporary_storage.get(),
                     temporary_storage_bytes,
                     d_input.get(),
@@ -335,15 +336,15 @@ struct device_histogram_range_benchmark : public primbench::benchmark_interface
         common::device_ptr<counter_type> d_histogram(m_bins);
 
         size_t temporary_storage_bytes = 0;
-        HIP_CHECK(rocprim::histogram_range(nullptr,
-                                           temporary_storage_bytes,
-                                           d_input.get(),
-                                           items,
-                                           d_histogram.get(),
-                                           m_bins + 1,
-                                           d_levels.get(),
-                                           stream,
-                                           false));
+        HIP_CHECK(rocprim::histogram_range<Config>(nullptr,
+                                                   temporary_storage_bytes,
+                                                   d_input.get(),
+                                                   items,
+                                                   d_histogram.get(),
+                                                   m_bins + 1,
+                                                   d_levels.get(),
+                                                   stream,
+                                                   false));
 
         common::device_ptr<void> d_temporary_storage(temporary_storage_bytes);
 
@@ -353,15 +354,15 @@ struct device_histogram_range_benchmark : public primbench::benchmark_interface
         state.run(
             [&]
             {
-                HIP_CHECK(rocprim::histogram_range(d_temporary_storage.get(),
-                                                   temporary_storage_bytes,
-                                                   d_input.get(),
-                                                   items,
-                                                   d_histogram.get(),
-                                                   m_bins + 1,
-                                                   d_levels.get(),
-                                                   stream,
-                                                   false));
+                HIP_CHECK(rocprim::histogram_range<Config>(d_temporary_storage.get(),
+                                                           temporary_storage_bytes,
+                                                           d_input.get(),
+                                                           items,
+                                                           d_histogram.get(),
+                                                           m_bins + 1,
+                                                           d_levels.get(),
+                                                           stream,
+                                                           false));
             });
     }
 
@@ -438,15 +439,16 @@ struct device_multi_histogram_range_benchmark : public primbench::benchmark_inte
         }
 
         size_t temporary_storage_bytes = 0;
-        HIP_CHECK((rocprim::multi_histogram_range<Channels, ActiveChannels>(nullptr,
-                                                                            temporary_storage_bytes,
-                                                                            d_input.get(),
-                                                                            items,
-                                                                            d_histogram,
-                                                                            num_levels,
-                                                                            d_levels,
-                                                                            stream,
-                                                                            false)));
+        HIP_CHECK((rocprim::multi_histogram_range<Channels, ActiveChannels, Config>(
+            nullptr,
+            temporary_storage_bytes,
+            d_input.get(),
+            items,
+            d_histogram,
+            num_levels,
+            d_levels,
+            stream,
+            false)));
 
         common::device_ptr<void> d_temporary_storage(temporary_storage_bytes);
 
@@ -456,7 +458,7 @@ struct device_multi_histogram_range_benchmark : public primbench::benchmark_inte
         state.run(
             [&]
             {
-                HIP_CHECK((rocprim::multi_histogram_range<Channels, ActiveChannels>(
+                HIP_CHECK((rocprim::multi_histogram_range<Channels, ActiveChannels, Config>(
                     d_temporary_storage.get(),
                     temporary_storage_bytes,
                     d_input.get(),

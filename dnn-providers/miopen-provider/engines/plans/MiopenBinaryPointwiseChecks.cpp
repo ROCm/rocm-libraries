@@ -5,7 +5,6 @@
 #include <set>
 #include <string>
 
-#include <hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 
@@ -154,14 +153,6 @@ void validateBinaryPointwise(const IGraph& opGraph)
 
     pointwise_applicability::validatePointwiseIoTensors({in0Attr, in1Attr, outAttr},
                                                         "Binary pointwise");
-
-    if(hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(in0Attr)
-       || hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(in1Attr)
-       || hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(outAttr))
-    {
-        throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                                                       "does not support pass-by-value tensors");
-    }
 
     if(in0Attr->ragged_offset_tensor_uid().has_value()
        || in1Attr->ragged_offset_tensor_uid().has_value()
