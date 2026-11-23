@@ -89,58 +89,32 @@ static GirActionData girActionOf(const rocisa::GirActionData& src);
 
 namespace rocisa {
 // Scheduler-introspection seam for logical leaves (logical-IR migration,
-// Phase 2). A LogicalLeaf answers the same scheduling classification the
-// rocisa instruction it replaces would, by reading the wrapped logical
-// instruction's flags / opcode. Defined here (not inline in code.hpp)
-// because it needs the complete stinkytofu::LogicalInstruction type.
-SchedCategory LogicalLeaf::schedCategory() const {
-    if (!logicalInst) return SchedCategory::None;
-    const auto& li = *logicalInst;
-    // Matrix-multiply family (gfx1250 WMMA + MFMA/SMFMA/MXMFMA): matches
-    // rocisa countMFMA / getMFMAs.
-    if (li.is(stinkytofu::IF_MFMA) || li.is(stinkytofu::IF_SMFMA) || li.is(stinkytofu::IF_WMMA) ||
-        li.is(stinkytofu::IF_SWMMA) || li.is(stinkytofu::IF_MXWMMA))
-        return SchedCategory::MFMA;
-    // Vector + scalar loads: matches the rocisa GlobalReadInstruction subtree
-    // that countGlobalRead counts (including the SMemLoad subtree).
-    if (li.is(stinkytofu::IF_MUBUFLoad) || li.is(stinkytofu::IF_FLATLoad) ||
-        li.is(stinkytofu::IF_GLOBALLoad) || li.is(stinkytofu::IF_SMemLoad))
-        return SchedCategory::GlobalRead;
-    if (li.is(stinkytofu::IF_DSRead)) return SchedCategory::LocalRead;
-    if (li.is(stinkytofu::IF_DSStore)) return SchedCategory::LocalWrite;
-    return SchedCategory::Other;
-}
-
-SchedExactKind LogicalLeaf::schedExactKind() const {
-    if (!logicalInst) return SchedExactKind::None;
-    switch (logicalInst->getOpcode()) {
-        case stinkytofu::logical::DSStoreB128:
-            return SchedExactKind::DSStoreB128;
-        case stinkytofu::logical::DSStoreB192:
-            return SchedExactKind::DSStoreB192;
-        case stinkytofu::logical::VMovB32:
-            return SchedExactKind::VMovB32;
-        default:
-            return SchedExactKind::None;
-    }
-}
-
-int LogicalLeaf::schedWeight() const {
-    if (!logicalInst) return 1;
-    // ds_*_b192 lowers to two physical ops, matching rocisa DSLoadB192 /
-    // DSStoreB192 weighted local-read / local-write counts.
-    switch (logicalInst->getOpcode()) {
-        case stinkytofu::logical::DSLoadB192:
-        case stinkytofu::logical::DSStoreB192:
-            return 2;
-        default:
-            return 1;
-    }
-}
-
+// Phase 2/3). schedCategory()/schedExactKind()/schedWeight() are inline in
+// code.hpp and return the rocisa classification cached at makeLogicalLeaf time
+// (the logical IR carries no InstFlag, so it cannot be classified here). Only
+// schedOpcodeName() and the mem-token forwarders need the complete
+// stinkytofu::LogicalInstruction type, so they are defined out-of-line here.
 std::string LogicalLeaf::schedOpcodeName() const {
     if (!logicalInst) return "";
     return stinkytofu::logical::getOpcodeName(logicalInst->getOpcode());
+}
+
+// LDS mem-token forwarding (Phase 3 §10.2 A): mirror rocisa Instruction's
+// setMemToken/getMemToken onto the wrapped logical instruction's memtoken field
+// so a leaf is a drop-in for the post-construction inst.setMemToken(...) call in
+// Component._emitLdsRead, and so getMemToken-based passes (postMainLoopBarrier...
+// _getTokenList) read the leaf's tokens.
+void LogicalLeaf::setMemToken(const std::shared_ptr<MemTokenData>& token) {
+    if (!logicalInst) return;
+    if (token)
+        logicalInst->memtoken = token->tokens;
+    else
+        logicalInst->memtoken = std::nullopt;
+}
+
+std::shared_ptr<MemTokenData> LogicalLeaf::getMemToken() const {
+    if (!logicalInst || !logicalInst->memtoken) return nullptr;
+    return std::make_shared<MemTokenData>(*logicalInst->memtoken);
 }
 }  // namespace rocisa
 
@@ -2453,7 +2427,14 @@ void init_stinkytofu(nb::module_ m) {  // NOLINT(misc-use-internal-linkage)
             const bool hasVgprMsb = asmCap(asmCaps, "HasVgprMSB") != 0;
             auto archId = resolveArchId(archArray, "");
             auto logicalInst = createLogicalFromRocisa(inst, asmCaps, hasVgprMsb, archId);
-            return std::make_shared<rocisa::LogicalLeaf>(logicalInst, rocisaClassName(inst));
+            auto leaf = std::make_shared<rocisa::LogicalLeaf>(logicalInst, rocisaClassName(inst));
+            // Cache the rocisa instruction's own scheduler classification so the
+            // leaf replays the validated answer (the logical IR carries no
+            // InstFlag to re-derive it from). See LogicalLeaf::schedCategory_.
+            leaf->schedCategory_ = inst.schedCategory();
+            leaf->schedExactKind_ = inst.schedExactKind();
+            leaf->schedWeight_ = inst.schedWeight();
+            return leaf;
         },
         nb::arg("inst"), nb::arg("arch"),
         "Lower a rocisa instruction to StinkyTofu logical IR and wrap it in a "

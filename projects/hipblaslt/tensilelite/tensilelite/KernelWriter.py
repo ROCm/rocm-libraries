@@ -12267,12 +12267,17 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       return isinstance(labelName, str) and "OptNLL_End" in labelName
 
     def _classifyTokenAccess(inst: Instruction):
-      # tensor_load / ds_write => write, ds_read => read
-      if isinstance(inst, DSStoreInstruction):
+      # tensor_load / ds_write => write, ds_read => read.
+      # Routed through the scheduler seam (not raw isinstance) so this pass,
+      # which runs on the mixed rocisa/logical tree before toStinkyTofuModule,
+      # classifies a logical-IR ds_load/ds_store/tensor_load leaf the same way
+      # it classifies the rocisa instruction it replaces (logical-IR migration
+      # Phase 3 §10.2 B). Byte-identical for a pure-rocisa tree.
+      if sched_is_ds_store(inst):
         return "write"
-      if isinstance(inst, TensorLoadToLds):
+      if sched_is_tensor_load_to_lds(inst):
         return "write"
-      if isinstance(inst, DSLoadInstruction):
+      if sched_is_ds_load(inst):
         return "read"
       return None
 
@@ -12388,7 +12393,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     guardEndByIndex = {}
     sccIsWaveDivergent = False
     for idx, (leaf, _leafMod, _leafPos) in enumerate(flatLeaves):
-      if not isinstance(leaf, Instruction):
+      if not sched_is_instruction(leaf):
         continue
       if _isConditionalBranch(leaf):
         endIdx = labelDefIndex.get(getattr(leaf, "labelName", None))
@@ -12426,7 +12431,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         info = {}
         for k in range(beginIdx, branchIdx + 1):
           leaf = flatLeaves[k][0]
-          if not isinstance(leaf, Instruction):
+          if not sched_is_instruction(leaf):
             continue
           access = _classifyTokenAccess(leaf)
           tokens = _getTokenList(leaf)
@@ -12543,7 +12548,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
                                     "auto token transition barrier (loop prologue)"))
         continue
 
-      if not isinstance(item, Instruction):
+      if not sched_is_instruction(item):
         continue
 
       branchLabelName = getattr(item, "labelName", None)

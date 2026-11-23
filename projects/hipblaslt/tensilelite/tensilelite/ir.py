@@ -297,6 +297,31 @@ def _backend():
   return _rocisa_instruction
 
 
+def maybe_logical_leaf(inst):
+  """Lower an already-built rocisa instruction to a LogicalLeaf when in-region.
+
+  Some codegen sites do not construct through a dispatched name -- they receive a
+  concrete rocisa instruction class and build it directly (e.g. the local-read
+  emitter in ``Component._emitLdsRead``, whose ds_load class comes from
+  ``MemoryInstruction.getInst()``, and which must set the LDS mem token on the
+  instruction *after* construction). For those, construct + mutate the rocisa
+  instruction as usual and pass it through here as the final step: inside a
+  ``logical_region()`` on a logical ISA (trial-gated) it is lowered to a
+  ``rocisa.LogicalLeaf`` via the same ``createLogicalFromRocisa`` path the lazy
+  converter uses (so it is byte-identical to converting it later); everywhere
+  else -- and on the subtile path, which never opens a region -- it is returned
+  unchanged, so codegen stays pure rocisa.
+
+  Set any post-construction state (mem token, etc.) on ``inst`` *before* calling
+  this, so the eager lowering captures it.
+  """
+  if (_active_version.get() in _LOGICAL_ISAS
+      and _region_active.get()
+      and _trial_enabled()):
+    return _rocisa.makeLogicalLeaf(inst, _active_version.get())
+  return inst
+
+
 # Instruction names installed as call-time dispatchers. A dispatched name still
 # builds rocisa unless _backend() routes it to logical (ISA + region + trial), so
 # adding a name here is safe even when the same opcode is used outside any

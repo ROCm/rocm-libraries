@@ -186,6 +186,22 @@ namespace rocisa
     {
         std::shared_ptr<stinkytofu::LogicalInstruction> logicalInst;
 
+        // Scheduler-introspection seam (logical-IR migration, Phase 2/3): the
+        // coarse scheduling classification of the rocisa instruction this leaf
+        // replaces, captured at construction time in makeLogicalLeaf by calling
+        // the rocisa instruction's own schedCategory()/schedExactKind()/
+        // schedWeight(). We deliberately replay the rocisa answer rather than
+        // re-deriving it from the logical instruction: createLogicalFromRocisa
+        // does not populate LogicalInstruction::flags_, so the logical IR cannot
+        // be classified by InstFlag, and the logical opcode name can differ from
+        // the rocisa class (e.g. the LDS transpose read lowers to logical
+        // GlobalLoadTR16B128 while rocisa classifies it as a local read). Caching
+        // the validated rocisa classification guarantees the leaf schedules
+        // byte-identically to the instruction it stands in for.
+        SchedCategory  schedCategory_  = SchedCategory::None;
+        SchedExactKind schedExactKind_ = SchedExactKind::None;
+        int            schedWeight_    = 1;
+
         LogicalLeaf(std::shared_ptr<stinkytofu::LogicalInstruction> inst,
                     const std::string&                              name = "LogicalLeaf")
             : Item(name)
@@ -205,15 +221,12 @@ namespace rocisa
             return logicalInst;
         }
 
-        // Scheduler-introspection seam (logical-IR migration, Phase 2): report
-        // the wrapped logical instruction's scheduling classification so the
-        // scheduler / count path treats this leaf exactly like the rocisa
-        // instruction it replaces. Defined out-of-line in ToStinkyTofuUtils.cpp,
-        // where stinkytofu::LogicalInstruction is a complete type (only forward
-        // declared here).
-        SchedCategory  schedCategory() const override;
-        SchedExactKind schedExactKind() const override;
-        int            schedWeight() const override;
+        // Report the cached rocisa classification (see schedCategory_ above) so
+        // the scheduler / count path treats this leaf exactly like the rocisa
+        // instruction it replaces.
+        SchedCategory  schedCategory() const override { return schedCategory_; }
+        SchedExactKind schedExactKind() const override { return schedExactKind_; }
+        int            schedWeight() const override { return schedWeight_; }
 
         // Logical opcode name of the wrapped instruction (e.g. "DSLoadB128",
         // "SWaitCnt", "SNop"), or "" if none. Exposed to Python so the
@@ -221,6 +234,18 @@ namespace rocisa
         // the same way they recognise the rocisa class it replaces. Defined
         // out-of-line in ToStinkyTofuUtils.cpp.
         std::string schedOpcodeName() const;
+
+        // LDS memory-token accessors (logical-IR migration, Phase 3 §10.2 A).
+        // An LDS read/write's mem token is set *after* construction
+        // (Component._emitLdsRead: inst = LocalReadX(...); inst.setMemToken(...)),
+        // and the token drives LDS dependency / barrier placement. A leaf must
+        // accept that post-construction set and report it back, so these forward
+        // to the wrapped logical instruction's ``memtoken`` field. rocisa
+        // Instruction exposes the same setMemToken/getMemToken signature, so a
+        // leaf is a drop-in for the ``inst.setMemToken(...)`` call site. Defined
+        // out-of-line in ToStinkyTofuUtils.cpp (LogicalInstruction is complete there).
+        void                          setMemToken(const std::shared_ptr<MemTokenData>& token);
+        std::shared_ptr<MemTokenData> getMemToken() const;
 
         std::string toString() const override
         {

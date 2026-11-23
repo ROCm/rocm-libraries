@@ -17232,7 +17232,14 @@ class KernelWriterAssembly(KernelWriter):
 
     component = Component.LocalRead.find(self)
     if component:
-      return component(self, kernel, bufferIdx, iui, epsi, tP)
+      # logical-IR migration (Phase 3 §10.3 Slice 3.3): mark the local-read
+      # emission as a logical region so Component._emitLdsRead lowers its ds_load
+      # to a LogicalLeaf on a logical ISA (trial-gated). Only the ds_load is
+      # affected -- pack/convert code is built from concrete rocisa classes, not
+      # dispatched names, so it stays rocisa. The subtile local-read path uses a
+      # separate emitter and never reaches here, so it is unaffected.
+      with logical_region("localRead%s" % tP["tensorChar"]):
+        return component(self, kernel, bufferIdx, iui, epsi, tP)
 
   ##############################################################################
   # Save the local read pointers, for example when creating a duplicated

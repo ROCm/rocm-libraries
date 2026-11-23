@@ -184,7 +184,11 @@ void init_code(nb::module_ m)
                  return new rocisa::LogicalLeaf(self);
              })
         .def("schedCategory", &rocisa::LogicalLeaf::schedCategory)
-        .def("schedOpcodeName", &rocisa::LogicalLeaf::schedOpcodeName);
+        .def("schedOpcodeName", &rocisa::LogicalLeaf::schedOpcodeName)
+        // LDS mem-token forwarding (Phase 3 §10.2 A): same signature as rocisa
+        // Instruction so a leaf is a drop-in for inst.setMemToken(...).
+        .def("setMemToken", &rocisa::LogicalLeaf::setMemToken, nb::arg("token").none())
+        .def("getMemToken", &rocisa::LogicalLeaf::getMemToken);
 
     nb::class_<rocisa::Module, rocisa::Item>(m_code, "Module")
         .def(nb::init<const std::string&>(), nb::arg("name") = "")
