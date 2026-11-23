@@ -156,7 +156,9 @@ def tdmStoreVectorRejectReason(state):
   vector of bps bytes as bps // width dsStore calls of width = min(bps, 32) bytes, so it writes every byte only when
   width divides bps and dsStore has that width: any other vector, such as the 48 bytes of fp64 at store vector width
   6, would lose its last bytes or stop at the assert of dsStore. emitTDMStoreLoadCElement reads the same vectors in
-  pieces of at most 16 bytes, which cover every vector the staging covers.
+  pieces of at most 16 bytes, which cover every vector the staging covers. These are the vectors the buffer_store path
+  of chooseGlobalWrite writes too, 1, 2, 4, 8 or 16 bytes or a multiple of 32 in 16-byte stores, and it asserts on any
+  other, so the check turns away no vector that path stores.
   """
   if not state["TDMStoreInst"]:
     return None
@@ -174,7 +176,10 @@ def _stagedVectorWidths(state):
   """The vector widths at which the TDM blocks stage D. The store-width cascade starts at StoreVectorWidth on a WMMA
   kernel and at VectorWidthA on a VALU kernel, or at 1 without _VectorStore, and halves down to 1; generateBetaModules
   gets only its first and last widths with AdaptiveGemm=0 or LocalSplitU > 1. A TDM block stages at the first width,
-  except that with per-element outputs beyond C and D (hasEpilogueSideEffects) each block stages at its own."""
+  except that with per-element outputs beyond C and D (hasEpilogueSideEffects) each block stages at its own.
+  The first width is not capped by KernelWriterAssembly.maxGwvw: the TDM blocks replace the store of the GlobalSplitU=1
+  pass, whose cascade notLocalFullTileElements builds at GlobalSplitU 1, where maxGwvw sets no cap; its cap for the
+  atomics of a GlobalSplitU > 1 or -1 kernel applies to the GSU>1 pass, which keeps buffer_store."""
   first = state["StoreVectorWidth"] if state["EnableMatrixInstruction"] else state["VectorWidthA"]
   first = first if state["_VectorStore"] else 1
   if not hasEpilogueSideEffects(state["ProblemType"]):

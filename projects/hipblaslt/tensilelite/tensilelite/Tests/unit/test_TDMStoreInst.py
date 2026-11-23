@@ -277,6 +277,31 @@ def test_the_vector_check_follows_the_first_store_width(overrides, rejected):
   assert (tdmStoreVectorRejectReason(_state(**overrides)) is not None) == rejected
 
 
+@pytest.mark.parametrize("algorithm", ["SingleBuffer", "AtomicDest"])
+@pytest.mark.parametrize("overrides, width", [
+  ({"EnableMatrixInstruction": False, "VectorWidthA": 3, "DestDataType": DataType("s")}, 3),
+  ({"StoreVectorWidth": 6}, 6),
+], ids=["valu_vwa3", "wmma_svw6"])
+def test_the_vector_check_does_not_cap_dynamic_gsu(overrides, width, algorithm):
+  """GlobalSplitU=-1 caps the store vector width of its GSU>1 pass for the atomics, but not that of the GSU=1 pass
+  the TDM blocks replace, so the check reads the first width uncapped: 12 bytes are rejected at GlobalSplitU -1 as
+  at GlobalSplitU 1."""
+  state = _state(GlobalSplitU=-1, GlobalSplitUAlgorithm=algorithm, **overrides)
+  bps = width * int(state["ProblemType"]["DestDataType"].numBytes())
+  assert tdmStoreVectorRejectReason(state) == tdmStoreVectorRejectReason(dict(state, GlobalSplitU=1)) == \
+    "TDMStoreInst requires D vectors of 1, 2, 4, 8, 16 or a multiple of 32 bytes, not %u (vector width %u)" % (bps, width)
+
+
+def test_dynamic_gsu_stages_at_the_uncapped_width(gp_gfx1250, gfx1250_iim, assembler, capsys):
+  """A GlobalSplitU=-1 SingleBuffer kernel adds the partials of its GSU>1 pass with atomics at a capped vector width,
+  and its GSU=1 pass, which the TDM blocks replace, stages bf16 D at store vector width 8 in 16-byte DS stores."""
+  sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=True, GlobalSplitU=-1, GlobalSplitUAlgorithm="SingleBuffer")
+  assert sol.get("Valid"), capsys.readouterr().out
+  staging = [_code(line).split()[0] for line in asm.splitlines() if "stage D element" in line]
+  assert staging and set(staging) == {"ds_store_b128"}, Counter(staging)
+  assert "buffer_atomic" in asm
+
+
 def test_the_switch_matches_the_valid_values_and_on_covers_every_path():
   """TDMStoreInst is False or True only, and True sends every store path of a final-D store through
   the TDM block, so the epilogue keeps one store path and splits only on beta / non-beta."""
