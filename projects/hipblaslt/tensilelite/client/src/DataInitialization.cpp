@@ -25,6 +25,7 @@
  *******************************************************************************/
 
 #include "DataInitialization.hpp"
+#include "SwizzleStaging.hpp"
 
 #if HIPBLASLT_ENABLE_MXDATAGENERATOR
 #include <mxDataGen.hpp>
