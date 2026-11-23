@@ -23,6 +23,15 @@
 #include <miopen/config.h>
 #if MIOPEN_ENABLE_AI_KERNEL_TUNING
 #include <miopen/conv/heuristics/ai_conv_nd_kernel_tuning_utils.hpp>
+#include <miopen/conv/heuristics/ai_candidate_selection.hpp>
+#include <miopen/conv/problem_description.hpp>
+#include <miopen/conv/solvers.hpp>
+#include <miopen/convolution.hpp>
+#include <miopen/db_path.hpp>
+#include <miopen/filesystem.hpp>
+#include <miopen/tensor.hpp>
+#include <map>
+
 
 using miopen::solver::conv::CkSplitkAutoDeduce;
 using miopen::solver::conv::SolverHeuristicConfig;
@@ -101,6 +110,67 @@ TEST_F(CPU_SplitKAutodeduceGate_NONE, NonSplitKSolverAcceptsOnlyZero)
         << "Non-split-k solver must accept split_k=0 (no split_k suffix in vocab id).";
     EXPECT_FALSE(cfg.IsValidSplitK(1));
     EXPECT_FALSE(cfg.IsValidSplitK(CkSplitkAutoDeduce));
+}
+
+
+// End-to-end test: with the real solver gate (IsValidSplitK from GetWrw2DSolverHeuristicConfig),
+// SelectBestVocabCandidate must return split_k=-1 for a shape where the model's top-1 is -1.
+//
+// This test FAILS when supports_split_k_autodeduce=false in the actual shipped solver config
+// (the gate rejects -1, the walk falls to a different pick), and PASSES when it is true.
+// It is the regression test for PR #16500.
+//
+// Requires model assets in MIOPEN_SYSTEM_DB_PATH (same as conv_ai_candidate_selection_cpu.cpp).
+class CPU_SplitKAutodeduceEndToEnd_NONE : public ::testing::Test
+{
+};
+
+TEST_F(CPU_SplitKAutodeduceEndToEnd_NONE, Wrw2DPicksAutodeduceWithRealGate)
+{
+    const std::string arch   = "gfx950";
+    const std::string solver = "ConvHipImplicitGemmGroupWrwXdlops";
+
+    const auto db = miopen::GetSystemDbPath();
+    if(!miopen::fs::exists(db / (arch + "_" + solver + "_input_encoder.tn.model")) ||
+       !miopen::fs::exists(db / (arch + "_" + solver + "_metadata.tn.model")) ||
+       !miopen::fs::exists(db / (arch + "_" + solver + "_kernel_config_embeddings.bin")))
+        GTEST_SKIP() << "No candidate-selection assets for " << arch << "/" << solver;
+
+    // Shape where the gfx950 Wrw model's true top-1 is split_k=-1 (autodeduce).
+    // Verified by MIOPEN_AI_GOLDEN_GENERATE=1 against the shipped models (Nov 2026).
+    // n=16, c=64, H=256, W=256, k=128, 3x3 grouped conv.
+    miopen::TensorDescriptor in(miopenHalf, {16, 64, 256, 256});
+    miopen::TensorDescriptor wei(miopenHalf, {128, 64, 3, 3});
+    miopen::TensorDescriptor out(miopenHalf, {16, 128, 256, 256});
+    miopen::ConvolutionDescriptor conv(
+        2, miopenConvolution, miopenPaddingDefault, {1, 1}, {1, 1}, {1, 1}, {0, 0});
+    miopen::conv::ProblemDescription prob(
+        in, wei, out, conv, miopen::conv::Direction::BackwardWeights);
+
+    const auto feats = miopen::solver::conv::GetFeaturesND(prob, /*max_cu=*/304, arch);
+
+    // Gate using the ACTUAL shipped solver config (not a hand-crafted copy).
+    // If supports_split_k_autodeduce is false in the solver, IsValidSplitK(-1) returns false
+    // and the -1 pick is rejected -> pick->second != -1 -> this test fails.
+    const auto& cfg   = GetWrw2DSolverHeuristicConfig();
+    const auto gate   = [&cfg](const std::string&, int sk, bool) {
+        return cfg.IsValidSplitK(sk);
+    };
+
+    const auto pick =
+        miopen::ai::tuning::candidate_selection::SelectBestVocabCandidate(
+            arch, solver, feats, /*use_tf32=*/false, gate);
+
+    ASSERT_TRUE(pick.has_value())
+        << "SelectBestVocabCandidate returned nullopt — model load or md5 guard failed. "
+           "Check conv_ai_asset_smoke tests for the root cause.";
+
+    EXPECT_EQ(pick->second, miopen::solver::conv::CkSplitkAutoDeduce)
+        << "Expected split_k=-1 (autodeduce) but got " << pick->second << ".
+"
+        << "This means supports_split_k_autodeduce=false in the actual solver config "
+           "(k2DWrwSolverConfig in conv_hip_implicit_gemm_grouped_wrw_xdlops.cpp). "
+           "The PR #16500 change enabling autodeduce for Wrw was reverted or not applied.";
 }
 
 #endif // MIOPEN_ENABLE_AI_KERNEL_TUNING
