@@ -20,6 +20,7 @@ import os
 import unittest
 
 from rocke.tests.arch_marks import arch_specific
+from rocke.tests.lanes import BINDING_LANE, skip_until
 
 
 def _lower(kernel) -> str:
@@ -227,7 +228,11 @@ class TestGfx950GroupedGemmCppByteIdentity(unittest.TestCase):
     def setUpClass(cls):
         try:
             import rocke_engine  # noqa: F401
-        except Exception as e:  # not built / not on sys.path
+        except ModuleNotFoundError as e:  # not built / not on sys.path
+            skip_until(
+                BINDING_LANE, reason=f"rocke_engine C++ binding not importable: {e}"
+            )
+        except Exception as e:  # built, but failing to load
             raise unittest.SkipTest(f"rocke_engine C++ binding not importable: {e}")
 
     def _assert_cpp_matches_python(self, kernel) -> None:

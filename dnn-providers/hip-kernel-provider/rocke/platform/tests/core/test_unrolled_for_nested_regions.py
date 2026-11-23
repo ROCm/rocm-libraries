@@ -31,6 +31,7 @@ from rocke.core.verify import verify
 from rocke.tests.engines import lower_with_both_engines
 from rocke.tests.gpu import run_on_device
 from rocke.tests.ir_validity import assert_target_accepts
+from rocke.tests.lanes import BINDING_LANE, import_or_skip_until
 
 LANES = 64
 TRIPS = 4
@@ -441,7 +442,7 @@ def _assert_both_parsers_refuse(text, message):
     with pytest.raises(ValueError) as refused:
         parse(text)
     assert str(refused.value) == message
-    engine = pytest.importorskip("rocke_engine")
+    engine = import_or_skip_until("rocke_engine", BINDING_LANE)
     with pytest.raises(RuntimeError) as native:
         engine.lower_serialized_ir(text, arch="gfx942", flavor="llvm22")
     assert str(native.value).endswith(": " + message), str(native.value)

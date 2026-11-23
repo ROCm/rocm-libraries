@@ -28,11 +28,13 @@ import numpy as np
 import pytest
 from rocke.numeric import storage
 from rocke.tests.gpu import probe_device_arch
+from rocke.tests.lanes import arch_skip_reason
 
 from builders.common.kda_host import dense_inputs, worst_relative_error
 
 requires_gfx950_gpu = pytest.mark.skipif(
-    probe_device_arch()[0] != "gfx950", reason="needs a gfx950 GPU"
+    probe_device_arch()[0] != "gfx950",
+    reason=arch_skip_reason(("gfx950",), "needs a gfx950 GPU"),
 )
 
 pytestmark = [pytest.mark.gpu, requires_gfx950_gpu]

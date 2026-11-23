@@ -31,6 +31,7 @@ import pytest
 
 from rocke.core.arch import generic_arch_from_target_id
 from rocke.runtime.hip_module import get_device_arch
+from rocke.tests.lanes import skip_needing_arch
 
 _ARCH = generic_arch_from_target_id(get_device_arch() or "")
 _NEEDS_RDNA = pytest.mark.skipif(
@@ -376,7 +377,9 @@ def test_prefill_feature_matches_reference(case, dtype):
     )  # fmt: skip
     opt.update(CASES[case])
     if opt["unsplit"] and _ARCH != "gfx12-generic":
-        pytest.skip("the unsplit wide-Q object is gfx12-only")
+        skip_needing_arch(
+            ("gfx1200", "gfx1201"), reason="the unsplit wide-Q object is gfx12-only"
+        )
     ml_dtypes = pytest.importorskip("ml_dtypes")
     npdt = ml_dtypes.bfloat16 if dtype == "bf16" else np.float16
     from kernels.gfx1151.wmma_fmha_fwd_v2 import (

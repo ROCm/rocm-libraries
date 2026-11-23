@@ -35,6 +35,7 @@ from rocke.portable_ir.utils.recipe_expand import (
     check_guard,
     expand_recipe,
 )
+from rocke.tests.lanes import SHARED_LIBRARY_LANE, skip_until_reason
 
 # A gate with one per-axis constraint and one coupling, which is the shape of
 # the real ones: head_size runs 16..256 by 16, block_size is one of three
@@ -308,7 +309,11 @@ def _online_lib():
 
 @unittest.skipIf(
     _online_lib() is None,
-    "no shared librocke; build one with online.build_lib() or set ROCKE_ONLINE_LIB",
+    skip_until_reason(
+        SHARED_LIBRARY_LANE,
+        reason="no shared librocke; build one with online.build_lib() or set "
+        "ROCKE_ONLINE_LIB",
+    ),
 )
 class TestCEvaluatorParity(unittest.TestCase):
     """The Python and C guard evaluators must return the same verdict.

@@ -31,6 +31,7 @@ from rocke.core.lower_hip import lower_kernel_to_hip
 from rocke.core.lower_llvm import _lower_kernel_to_llvm_python, lower_kernel_to_llvm
 from rocke.core.verify import verify
 from rocke.tests.ir_validity import assert_target_accepts
+from rocke.tests.lanes import BINDING_LANE, skip_until
 
 _ARCH = "gfx90a"
 
@@ -47,10 +48,10 @@ def _engine():
     """The C++ engine binding; a strict both-engine run fails without it."""
     try:
         import rocke_engine
-    except ImportError as exc:
+    except ModuleNotFoundError as exc:
         if os.environ.get("ROCKE_CPP_STRICT") == "1":
             raise
-        pytest.skip(f"rocke_engine extension not built: {exc}")
+        skip_until(BINDING_LANE, reason=f"rocke_engine extension not built: {exc}")
     return rocke_engine
 
 

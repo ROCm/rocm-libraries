@@ -26,7 +26,8 @@ import numpy as np
 import pytest
 
 from rocke.core.ir import KernelDef
-from rocke.tests.ir_validity import arbiter_verdict
+from rocke.tests.ir_validity import arbiter_verdict, skip_without_verdict
+from rocke.tests.lanes import arch_skip_reason
 
 if TYPE_CHECKING:
     from rocke.helpers.compile import KernelArtifact
@@ -78,8 +79,10 @@ def current_device_arch() -> str:
 
 def current_device_arch_in(arches: Collection[str], subject: str = "this test") -> str:
     """The current GPU's arch when it is one of `arches`; otherwise skip, naming `subject`
-    and the GPU found. Fails instead when ``ROCKE_REQUIRE_<ARCH>=1`` is set for an arch
-    in `arches` and the current GPU is not that arch (see the module docstring)."""
+    and the GPU found, as waiting for the runner lanes of `arches` when no CI runner has
+    any of them (``rocke.tests.lanes.arch_skip_reason``). Fails instead when
+    ``ROCKE_REQUIRE_<ARCH>=1`` is set for an arch in `arches` and the current GPU is not
+    that arch (see the module docstring)."""
     arch, absence = probe_device_arch()
     found = arch or absence
     for required in arches:
@@ -87,7 +90,11 @@ def current_device_arch_in(arches: Collection[str], subject: str = "this test") 
         if os.environ.get(variable) == "1" and arch != required:
             pytest.fail(f"{variable}=1 needs a {required} GPU; found {found}")
     if arch not in arches:
-        pytest.skip(f"{subject} needs one of {sorted(arches)}; found {found}")
+        pytest.skip(
+            arch_skip_reason(
+                arches, f"{subject} needs one of {sorted(arches)}; found {found}"
+            )
+        )
     return arch
 
 
@@ -102,7 +109,7 @@ def supported_device_arch(kernel: KernelDef, arches: Collection[str]) -> str:
     text = lower_kernel_to_llvm(kernel, arch=arch)
     verdict, reason = arbiter_verdict(text, arch)
     if verdict == "cannot_judge":
-        pytest.skip(reason)
+        skip_without_verdict(reason)
     assert verdict == "accepted", f"LLVM rejected {kernel.name} for {arch}: {reason}"
     return arch
 

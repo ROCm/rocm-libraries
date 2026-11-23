@@ -28,6 +28,7 @@ import numpy as np
 from rocke.numeric import storage
 from rocke.numeric.compare import peak_relative_error
 from rocke.runtime.hip_module import get_device_arch
+from rocke.tests.lanes import arch_skip_reason, skip_needing_arch
 
 from ._direct_conv_numeric import (
     direct_dgrad_reference,
@@ -989,7 +990,10 @@ class TestDirectConvCorrectness(unittest.TestCase):
         self._assert_ran(ran, "test_depthwise_col_aot_reuse")
 
 
-@unittest.skipUnless(_IS_WAVE32_DW, "needs a wave32 (gfx1250) GPU")
+@unittest.skipUnless(
+    _IS_WAVE32_DW,
+    arch_skip_reason(("gfx1250",), "needs a wave32 (gfx1250) GPU"),
+)
 class TestDirectDepthwiseFwdWave32(unittest.TestCase):
     """The depthwise forward sweeps above, at wave_size 32 on gfx1250.
 
@@ -2272,9 +2276,10 @@ def _wgrad_skip_reason(arch: str | None) -> str:
         cached = sorted(
             a for a in known_arches() if grid_caches_variant("direct_wgrad", a)
         )
-        return (
+        return arch_skip_reason(
+            cached,
             f"the AOT grid caches no direct_wgrad kernel for {arch!r}; it caches "
-            f"them for {', '.join(cached)}"
+            f"them for {', '.join(cached)}",
         )
     return ""
 
@@ -2973,12 +2978,19 @@ def _dw_wgrad_skip_reason(arch: str | None) -> str:
     if not arch:
         return "no ROCm GPU detected"
     from kernels.conv.direct_aot_jobs import grid_caches_variant
+    from rocke.core.arch.target import known_arches
 
-    if grid_caches_variant("direct_depthwise_wgrad", arch):
+    def runs_on(target: str) -> bool:
+        return grid_caches_variant("direct_depthwise_wgrad", target) or (
+            not _wgrad_skip_reason(target)
+        )
+
+    if runs_on(arch):
         return ""
-    if not _wgrad_skip_reason(arch):
-        return ""
-    return f"the AOT grid caches no direct_depthwise_wgrad kernel for {arch!r}"
+    return arch_skip_reason(
+        [target for target in known_arches() if runs_on(target)],
+        f"the AOT grid caches no direct_depthwise_wgrad kernel for {arch!r}",
+    )
 
 
 _DW_WGRAD_SKIP_REASON = _dw_wgrad_skip_reason(GPU_ARCH)
@@ -3075,7 +3087,9 @@ class TestDirectConvMfmaDgradCorrectness(unittest.TestCase):
         )
 
         if fold_k32 and GPU_ARCH != "gfx950":
-            self.skipTest("fold_k32 needs the 16x16x32 atom (gfx950 only)")
+            skip_needing_arch(
+                ("gfx950",), reason="fold_k32 needs the 16x16x32 atom (gfx950 only)"
+            )
 
         def fprop_spec_for(problem):
             spec = replace(make_dgrad_fprop_spec(problem, **knobs), fold_k32=fold_k32)

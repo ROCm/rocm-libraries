@@ -18,8 +18,10 @@ module docstring.
   does not know the target, or a clang that cannot run its linker); the text says
   which.
 
-``assert_target_accepts`` turns ``"cannot_judge"`` into a named pytest skip, so a
-host whose toolchain predates a target reports the gap instead of passing.
+``assert_target_accepts`` turns ``"cannot_judge"`` into a named pytest skip
+(``skip_without_verdict``), so a host whose toolchain predates a target reports
+the gap instead of passing; in a layout without the platform tools (an installed
+test tree) the skip waits for the source-tree run.
 ``arbiter_llvm_flavor`` names the LLVM flavor of the clang the arbiter compiles
 with, for a test that must lower its module at that flavor
 (``require_arbiter_llvm_flavor`` skips when there is none), and
@@ -39,13 +41,14 @@ import tempfile
 from functools import cache
 from pathlib import Path
 from types import ModuleType
-from typing import Literal
+from typing import Literal, NoReturn
 
 import pytest
 
 from rocke.analysis.isa import _extract_mnemonic, _instruction_lines
 from rocke.assets import platform_tools_dir
 from rocke.core.ir import KernelDef
+from rocke.tests.lanes import SOURCE_TREE_CASES, skip_until
 
 Verdict = Literal["accepted", "rejected", "cannot_judge"]
 
@@ -56,6 +59,7 @@ __all__ = [
     "assert_kernel_target_accepts",
     "assert_target_accepts",
     "require_arbiter_llvm_flavor",
+    "skip_without_verdict",
     "target_instructions",
     "target_mnemonics",
 ]
@@ -188,12 +192,21 @@ def assert_target_accepts(ir_text: str, target: str) -> None:
     _require_accepted(*arbiter_verdict(ir_text, target), target)
 
 
+def skip_without_verdict(reason: str) -> NoReturn:
+    """Skip the calling test, for ``reason``, as one :func:`arbiter_verdict`
+    cannot judge here: as waiting for the source-tree run when this layout has
+    no platform tools (``rocke.tests.lanes.SOURCE_TREE_CASES``)."""
+    if _validity_tool() is None:
+        skip_until(SOURCE_TREE_CASES, reason=reason)
+    pytest.skip(reason)
+
+
 def require_arbiter_llvm_flavor() -> str:
     """:func:`arbiter_llvm_flavor`'s flavor; skip the calling test, naming the reason, when there
-    is none."""
+    is none (:func:`skip_without_verdict`)."""
     flavor, why_not = arbiter_llvm_flavor()
     if flavor is None:
-        pytest.skip(why_not)
+        skip_without_verdict(why_not)
     return flavor
 
 
@@ -211,7 +224,7 @@ def assert_kernel_target_accepts(kernel: KernelDef, target: str) -> None:
 
 def _require_accepted(verdict: Verdict, text: str, target: str) -> None:
     if verdict == "cannot_judge":
-        pytest.skip(text)
+        skip_without_verdict(text)
     assert verdict == "accepted", f"LLVM rejected the lowered IR for {target}: {text}"
 
 

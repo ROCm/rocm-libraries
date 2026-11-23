@@ -22,6 +22,7 @@ import numpy as np
 from rocke.numeric import storage
 from rocke.numeric.compare import peak_relative_error
 from rocke.runtime.hip_module import get_device_arch
+from rocke.tests.lanes import BINDING_LANE, arch_skip_reason, skip_until
 
 from kernels.common.conv_winograd_gemm_wmma import (  # noqa: E402
     WinogradGemmProblem,
@@ -82,8 +83,8 @@ class TestSpec(unittest.TestCase):
         ValueError text, word for word (it wrote only the first clause)."""
         try:
             import rocke_library_engine as eng
-        except ImportError:
-            self.skipTest("rocke_library_engine not built")
+        except ModuleNotFoundError:
+            skip_until(BINDING_LANE, reason="rocke_library_engine not built")
         from kernels.conv.engine_bridge import conv_winograd_gemm_wmma_spec_to_dict
 
         spec = _spec(sched="bogus")
@@ -197,7 +198,7 @@ class TestPlans(unittest.TestCase):
 
 def _gpu_skip() -> str:
     if GPU_ARCH != "gfx1250":
-        return f"needs gfx1250 (got {GPU_ARCH!r})"
+        return arch_skip_reason(("gfx1250",), f"needs gfx1250 (got {GPU_ARCH!r})")
     return ""
 
 

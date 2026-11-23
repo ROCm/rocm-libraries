@@ -24,6 +24,7 @@ from __future__ import annotations
 import os
 
 import pytest
+from rocke.tests.lanes import TORCH_IN_CI, import_or_skip_until
 
 from kernels.common.conv_implicit_gemm import ConvProblem
 
@@ -290,7 +291,7 @@ def test_batch_slices_strided_stem_is_sized_by_its_output():
 
 
 def _meta_conv_reference(p):
-    torch = pytest.importorskip("torch")
+    torch = import_or_skip_until("torch", TORCH_IN_CI)
     from builders.common.conv_reference import conv_reference
 
     # Meta tensors: the refusal must come before any data is touched.

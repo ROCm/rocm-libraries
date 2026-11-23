@@ -50,6 +50,7 @@ from rocke.tests.engines import (
     assert_engine_rejects,
     assert_engine_rejects_hip,
 )
+from rocke.tests.lanes import BINDING_LANE, import_or_skip_until
 
 FLAVORS = LLVM_FLAVORS
 
@@ -71,7 +72,7 @@ def _errors(kernel):
 
 def _assert_engines_agree(kernel, arch="gfx942"):
     """Both engines emit the same text for ``kernel`` at every flavor."""
-    native = pytest.importorskip("rocke_engine")
+    native = import_or_skip_until("rocke_engine", BINDING_LANE)
     ir = serialize(kernel)
     for flavor in FLAVORS:
         python_text = _lower_kernel_to_llvm_python(
@@ -267,7 +268,7 @@ def test_both_lowerings_refuse_a_wrap_that_is_not_a_string():
         _lower_kernel_to_llvm_python(b.kernel, arch="gfx942")
     with pytest.raises(ValueError, match=message):
         lower_kernel_to_hip(b.kernel, arch="gfx942")
-    native = pytest.importorskip("rocke_engine")
+    native = import_or_skip_until("rocke_engine", BINDING_LANE)
     with pytest.raises(Exception, match=message):
         native.lower_serialized_ir(serialize(b.kernel), arch="gfx942", flavor="llvm20")
 
@@ -300,7 +301,7 @@ def test_both_lowerings_refuse_a_narrow_nuw_add():
         _lower_kernel_to_llvm_python(b.kernel, arch="gfx942")
     with pytest.raises(ValueError, match=message):
         lower_kernel_to_hip(b.kernel, arch="gfx942")
-    native = pytest.importorskip("rocke_engine")
+    native = import_or_skip_until("rocke_engine", BINDING_LANE)
     with pytest.raises(Exception, match=message):
         native.lower_serialized_ir(serialize(b.kernel), arch="gfx942", flavor="llvm20")
 

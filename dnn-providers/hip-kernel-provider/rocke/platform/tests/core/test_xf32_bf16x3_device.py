@@ -51,6 +51,7 @@ import subprocess
 import unittest
 
 from rocke.tests.arch_marks import arch_specific
+from rocke.tests.lanes import arch_skip_reason
 from rocke.tests.subprocess_launcher import (
     rocke_python_command,
     rocke_subprocess_env,
@@ -183,7 +184,7 @@ class TestBf16x3OnDevice(unittest.TestCase):
             reason = f"no visible {_ARCH} device (visible: {seen})"
         if env.get(_REQUIRE_ENV) == "1":
             raise AssertionError(f"{_REQUIRE_ENV}=1, but {reason}")
-        raise unittest.SkipTest(reason)
+        raise unittest.SkipTest(arch_skip_reason((_ARCH,), reason))
 
     def test_the_expansion_is_faithful_and_accurate_on_device(self):
         # --require-device: the probe above saw a gfx950 and this process

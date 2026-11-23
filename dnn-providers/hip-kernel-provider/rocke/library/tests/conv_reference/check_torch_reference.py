@@ -5,12 +5,13 @@
 
 import numpy as np
 import pytest
+from rocke.tests.lanes import TORCH_IN_CI, import_or_skip_until
 
 from conv_reference.architectures import ARCHITECTURES, get_adapter, variants
 from conv_reference.contract import independent_reference, make_inputs, reference_scale
 from conv_reference.torch_reference import cross_check
 
-pytest.importorskip("torch")
+import_or_skip_until("torch", TORCH_IN_CI)
 
 # The CPU Torch oracles depend only on the case, not on the processor or the
 # kernel variant, so check each distinct enrolled case once.

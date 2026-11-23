@@ -6,7 +6,8 @@ not account for, from the run records of real pytest runs.
 Each case writes test files at the paths of real registry entries in a
 scratch tree, runs them in pytest processes that stand for CI lanes (each
 lane's environment picks the skip reason a test gives), and audits the
-records against ``rocke.tests.pending_lanes``. The registry entries it relies
+records against ``rocke.tests.pending_lanes``. A test declares the lane it
+waits for with ``rocke.tests.lanes.skip_until``. The registry entries it relies
 on: ``library/tests/test_attention_ir_cpp_parity.py`` waits for the binding
 lane, ``platform/tests/instances/test_gfx950_mxfp4_numeric.py`` for a gfx950
 runner, and ``platform/tests/portable_ir/test_portable_ir.py::test_record_coverage``
@@ -23,7 +24,8 @@ from pathlib import Path
 
 import pytest
 from rocke.assets import platform_root
-from rocke.tests.pending_lanes import BINDING_LANE, GFX950_RUNNER, PENDING
+from rocke.tests.lanes import BINDING_LANE, GFX950_RUNNER, skip_until_reason
+from rocke.tests.pending_lanes import PENDING
 from rocke.tests.run_records import RECORDS_DIR_ENV, read_run_records
 from rocke.tests.subprocess_launcher import rocke_subprocess_env
 
@@ -108,15 +110,17 @@ def _audit(tree: Path, lanes: dict[str, Path], universe: Path | None = None):
 _SKIPS_BY_LANE = """
 import os
 import pytest
+from rocke.tests.lanes import BINDING_LANE, GFX950_RUNNER, skip_until_reason
 
 def skip_for(reasons):
     reason = reasons.get(os.environ["FAKE_LANE"])
     if reason:
         pytest.skip(reason)
 """
+_DECLARED_BINDING = skip_until_reason(BINDING_LANE, reason="no rocke_engine")
 
 
-def test_a_skip_the_files_lane_explains_is_accounted_for_and_another_is_not(tmp_path):
+def test_a_skip_that_declares_the_files_lane_is_accounted_for_and_no_other(tmp_path):
     tree = _tree_with(
         tmp_path,
         {
@@ -126,18 +130,24 @@ def test_runs():
     pass
 
 def test_waits_for_gfx950():
-    skip_for({"gfx942": "needs a gfx950 GPU, found gfx942"})
+    skip_for({"gfx942": skip_until_reason(GFX950_RUNNER, reason="needs a gfx950 GPU")})
+
+def test_only_mentions_gfx950():
+    skip_for({"gfx942": "the gfx950 kernel is refused here"})
 
 def test_waits_for_the_binding():
-    skip_for({"gfx942": "could not import 'rocke_engine'"})
+    skip_for({"gfx942": skip_until_reason(BINDING_LANE, reason="no rocke_engine")})
 """,
         },
     )
     records = _run_lane(tree, tmp_path / "gfx942", "gfx942")
+    # The file waits for a gfx950 runner, not the binding; a skip that names
+    # gfx950 without declaring the lane is not booked as waiting for it.
     assert _audit(tree, {"gfx942": records}) == {
-        (GFX950_FILE, "test_waits_for_the_binding"): {
-            "gfx942": "could not import 'rocke_engine'"
-        }
+        (GFX950_FILE, "test_only_mentions_gfx950"): {
+            "gfx942": "the gfx950 kernel is refused here"
+        },
+        (GFX950_FILE, "test_waits_for_the_binding"): {"gfx942": _DECLARED_BINDING},
     }
 
 
@@ -149,7 +159,7 @@ def test_a_skip_that_names_another_lanes_gpu_leaves_the_test_to_that_lane(tmp_pa
             + """
 def test_explained_where_its_gpu_is():
     skip_for({
-        "gfx942": "could not import 'rocke_engine'",
+        "gfx942": skip_until_reason(BINDING_LANE, reason="no rocke_engine"),
         "gfx1100": "needs a gfx942 GPU, found gfx1100",
     })
 

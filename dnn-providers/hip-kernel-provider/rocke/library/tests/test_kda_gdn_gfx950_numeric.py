@@ -15,9 +15,11 @@ from __future__ import annotations
 
 import pytest
 from rocke.tests.gpu import probe_device_arch
+from rocke.tests.lanes import arch_skip_reason
 
 requires_gfx950_gpu = pytest.mark.skipif(
-    probe_device_arch()[0] != "gfx950", reason="needs a gfx950 GPU"
+    probe_device_arch()[0] != "gfx950",
+    reason=arch_skip_reason(("gfx950",), "needs a gfx950 GPU"),
 )
 
 

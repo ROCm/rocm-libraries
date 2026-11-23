@@ -34,6 +34,7 @@ import subprocess
 import unittest
 
 from rocke.runtime.hip_module import get_device_arch
+from rocke.tests.lanes import TORCH_IN_CI, skip_needing_arch, skip_until_reason
 from rocke.tests.subprocess_launcher import (
     rocke_python_command,
     rocke_subprocess_env,
@@ -57,8 +58,12 @@ _CDNA = ARCH in ("gfx942", "gfx950")  # MFMA targets; gfx1151 is RDNA/WMMA
 _HAS_TORCH = importlib.util.find_spec("torch") is not None
 
 
+@unittest.skipUnless(ARCH, "needs a ROCm GPU + torch (run under a torch venv)")
 @unittest.skipUnless(
-    ARCH and _HAS_TORCH, "needs a ROCm GPU + torch (run under a torch venv)"
+    _HAS_TORCH,
+    skip_until_reason(
+        TORCH_IN_CI, reason="needs a ROCm GPU + torch (run under a torch venv)"
+    ),
 )
 class TestNumericVerification(unittest.TestCase):
     """Launch + numeric-compare on whatever gfx device this runs on."""
@@ -144,7 +149,9 @@ class TestNumericVerification(unittest.TestCase):
         the gate is max_abs_diff within tolerance (1e-2), not exact parity.
         """
         if ARCH != "gfx1151":
-            self.skipTest(f"gfx1151/WMMA GEMM; running on {ARCH}")
+            skip_needing_arch(
+                ("gfx1151",), reason=f"gfx1151/WMMA GEMM; running on {ARCH}"
+            )
         rc, out = self._run(
             "-m",
             "rocke.examples.gfx1151.wmma_gemm_verify",
@@ -171,7 +178,9 @@ class TestNumericVerification(unittest.TestCase):
         line in the output. ``SKIP`` is allowed (the MFMA-only cases).
         """
         if ARCH != "gfx1151":
-            self.skipTest(f"gfx1151/RDNA non-MFMA parity; running on {ARCH}")
+            skip_needing_arch(
+                ("gfx1151",), reason=f"gfx1151/RDNA non-MFMA parity; running on {ARCH}"
+            )
         rc, out = self._run(
             "-m", "rocke.examples.common.ck_tile_parity", "--arch", "gfx1151"
         )

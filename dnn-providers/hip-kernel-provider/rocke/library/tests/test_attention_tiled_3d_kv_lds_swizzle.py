@@ -19,6 +19,7 @@ from kernels.gfx950.attention_tiled_3d import (
     UnifiedAttentionReduceTiledSpec,
 )
 from rocke.tests.gpu import current_device_arch_in
+from rocke.tests.lanes import BINDING_LANE, import_or_skip_until
 
 from ._attention_tiled_launch import launch_unified
 from ._attention_unified_support import (
@@ -61,7 +62,7 @@ def test_needs_power_of_two_chunks_per_row(arch, kv_layout):
     with pytest.raises(ValueError, match="head_size / 8 a power of two"):
         make(head_size=192, kv_layout=kv_layout, **extra)
     make(head_size=192, kv_layout=kv_layout, use_kv_lds_swizzle=False, **extra)
-    engine = pytest.importorskip("rocke_engine")
+    engine = import_or_skip_until("rocke_engine", BINDING_LANE)
     fields = asdict(
         make(head_size=192, kv_layout=kv_layout, use_kv_lds_swizzle=False, **extra)
     )
@@ -89,7 +90,7 @@ def test_kernel_name_token():
     ],
 )
 def test_native_builder_matches_python(head_size, tile, kv_layout):
-    engine = pytest.importorskip("rocke_engine")
+    engine = import_or_skip_until("rocke_engine", BINDING_LANE)
     spec = _spec(
         head_size=head_size,
         num_query_heads=32,
@@ -147,7 +148,7 @@ def test_gfx942_spec_contract(wide):
     ],
 )
 def test_gfx942_native_builder_matches_python(kw):
-    engine = pytest.importorskip("rocke_engine")
+    engine = import_or_skip_until("rocke_engine", BINDING_LANE)
     spec = _gfx942_spec(num_seqs=3, **kw)
     expected = lower_like_tiled_3d_binding(spec, "gfx942")
     assert engine.gfx942_attention_tiled_3d_lower_llvm(asdict(spec), "gfx942") == (

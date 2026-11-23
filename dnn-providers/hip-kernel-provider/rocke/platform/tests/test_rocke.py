@@ -72,6 +72,14 @@ from rocke.helpers import (
 )
 from rocke.helpers.compile import _comgr_options_for_kernel
 from rocke.tests.arch_marks import COVERED_ARCHES, arch_specific
+from rocke.tests.engines import skip_without_cpp_engine
+from rocke.tests.lanes import (
+    BINDING_LANE,
+    TORCH_IN_CI,
+    import_or_skip_until,
+    skip_until,
+    skip_until_reason,
+)
 from rocke.tests.subprocess_launcher import (
     rocke_python_command,
     rocke_subprocess_env,
@@ -100,7 +108,9 @@ try:  # torch is optional; gate torch-facing tests on its presence.
 except Exception:  # pragma: no cover - depends on the environment
     _HAVE_TORCH = False
 
-_requires_torch = unittest.skipUnless(_HAVE_TORCH, "requires torch")
+_requires_torch = unittest.skipUnless(
+    _HAVE_TORCH, skip_until_reason(TORCH_IN_CI, reason="requires torch")
+)
 
 # A gfx950-only atom lowered for gfx942 raises `ArchDomainWarning`. Make it an
 # error so a covered-arch case cannot pass with an atom the arch lacks.
@@ -2060,8 +2070,8 @@ class TestLlvmFlavorEnumeration(unittest.TestCase):
         """
         try:
             import rocke_engine
-        except ImportError:
-            self.skipTest("rocke_engine extension not built")
+        except ModuleNotFoundError:
+            skip_until(BINDING_LANE, reason="rocke_engine extension not built")
         from rocke.core.lower_llvm import LLVM_FLAVORS
 
         self.assertEqual(tuple(rocke_engine.llvm_flavors()), LLVM_FLAVORS)
@@ -2179,8 +2189,8 @@ class TestCrossEngineFlavorAutoResolution(unittest.TestCase):
     def setUp(self):
         try:
             import rocke_engine  # noqa: F401
-        except ImportError:
-            self.skipTest("rocke_engine extension not built")
+        except ModuleNotFoundError:
+            skip_until(BINDING_LANE, reason="rocke_engine extension not built")
 
     def test_agree_on_the_bare_host(self):
         """No env pointing anywhere: whatever this machine has, both must see
@@ -3575,7 +3585,9 @@ def _assert_engines_agree(test, kernel, python_ir, **kw):
             serialize(kernel), kw["arch"], kw.get("llvm_flavor")
         )
     except BackendError as e:
-        test.skipTest(f"C++ engine unavailable, cross-engine check not run: {e}")
+        skip_without_cpp_engine(
+            e, f"C++ engine unavailable, cross-engine check not run: {e}"
+        )
     if cpp_ir != python_ir:
         test.fail(
             f"python vs cpp engine disagree for kernel "
@@ -4943,13 +4955,23 @@ class TestBothBackendDifferentialGate(unittest.TestCase):
         backend rows (``rocke_ll_backend_for`` and the ISA ``REGISTRY``) fails
         here instead of silently reintroducing a skip.
         """
-        from rocke.core.backend import BackendError, _lower_via_cpp_engine, _text_diff
+        from rocke.core.backend import (
+            BackendError,
+            _lower_via_cpp_engine,
+            _text_diff,
+            import_engine,
+        )
         from rocke.core.ir_serialize import serialize
         from rocke.core.isa.backend import wired_arches
         from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
 
         arches = wired_arches()
         self.assertIn("gfx1250", arches)
+        # Without the engine no arch can be checked: skip the test as a whole.
+        try:
+            import_engine()
+        except BackendError as e:
+            skip_without_cpp_engine(e, f"C++ engine unavailable: {e}")
         for arch in arches:
             with self.subTest(arch=arch):
                 kernel = self._kernel()
@@ -4961,7 +4983,7 @@ class TestBothBackendDifferentialGate(unittest.TestCase):
                 try:
                     cpp_ir = _lower_via_cpp_engine(serialize(kernel), arch, None)
                 except BackendError as e:
-                    self.skipTest(f"C++ engine unavailable: {e}")
+                    skip_without_cpp_engine(e, f"C++ engine unavailable: {e}")
                 self.assertEqual(
                     cpp_ir,
                     py_ir,
@@ -4989,7 +5011,7 @@ class TestFusionPlanner(unittest.TestCase):
 
     @_requires_torch
     def test_explain_matmul_bias_relu_scale(self):
-        torch = pytest.importorskip("torch")
+        torch = import_or_skip_until("torch", TORCH_IN_CI)
         from rocke.helpers import explain_fn
 
         def fn(A, B, bias):
@@ -5008,7 +5030,7 @@ class TestFusionPlanner(unittest.TestCase):
 
     @_requires_torch
     def test_explain_matmul_only(self):
-        torch = pytest.importorskip("torch")
+        torch = import_or_skip_until("torch", TORCH_IN_CI)
         from rocke.helpers import explain_fn
 
         def fn(A, B):
@@ -5021,7 +5043,7 @@ class TestFusionPlanner(unittest.TestCase):
 
     @_requires_torch
     def test_explain_unsupported_graph(self):
-        torch = pytest.importorskip("torch")
+        torch = import_or_skip_until("torch", TORCH_IN_CI)
         from rocke.helpers import explain_fn
 
         def fn(A):
@@ -5033,7 +5055,7 @@ class TestFusionPlanner(unittest.TestCase):
 
     @_requires_torch
     def test_compile_fn_exposes_plan_without_launching(self):
-        torch = pytest.importorskip("torch")
+        torch = import_or_skip_until("torch", TORCH_IN_CI)
         from rocke.helpers import compile_fn
 
         def fn(A, B, bias):
@@ -5513,7 +5535,7 @@ class TestExpandedPatternMatchers(unittest.TestCase):
     """Verify the new patterns in ``_PATTERN_TABLE`` match expected fns."""
 
     def test_explain_matmul_gelu(self):
-        torch = pytest.importorskip("torch")
+        torch = import_or_skip_until("torch", TORCH_IN_CI)
         from rocke.helpers import explain_fn
 
         def fn(A, B):
@@ -5525,7 +5547,7 @@ class TestExpandedPatternMatchers(unittest.TestCase):
         self.assertEqual(info["bias_arg_name"], None)
 
     def test_explain_matmul_bias_silu(self):
-        torch = pytest.importorskip("torch")
+        torch = import_or_skip_until("torch", TORCH_IN_CI)
         from rocke.helpers import explain_fn
 
         def fn(A, B, bias):
@@ -5540,7 +5562,7 @@ class TestExpandedPatternMatchers(unittest.TestCase):
         self.assertEqual(info["bias_arg_name"], "bias")
 
     def test_explain_matmul_with_residual(self):
-        torch = pytest.importorskip("torch")
+        torch = import_or_skip_until("torch", TORCH_IN_CI)
         from rocke.helpers import explain_fn
 
         def fn(A, B, bias, residual):
@@ -5557,7 +5579,7 @@ class TestExpandedPatternMatchers(unittest.TestCase):
         self.assertEqual(len(info["residual_arg_names"]), 1)
 
     def test_explain_pointwise_chain(self):
-        torch = pytest.importorskip("torch")
+        torch = import_or_skip_until("torch", TORCH_IN_CI)
         from rocke.helpers import explain_fn
 
         def fn(A):
@@ -5569,7 +5591,7 @@ class TestExpandedPatternMatchers(unittest.TestCase):
         self.assertEqual(info["a_arg_name"], "A")
 
     def test_explain_pointwise_binary_chain(self):
-        torch = pytest.importorskip("torch")
+        torch = import_or_skip_until("torch", TORCH_IN_CI)
         from rocke.helpers import explain_fn
 
         def fn(A, B):
@@ -5584,7 +5606,7 @@ class TestExpandedPatternMatchers(unittest.TestCase):
         self.assertEqual(info["extra_attrs"]["unary_chain"], ("relu",))
 
     def test_explain_matmul_scale_clamp(self):
-        torch = pytest.importorskip("torch")
+        torch = import_or_skip_until("torch", TORCH_IN_CI)
         from rocke.helpers import explain_fn
 
         def fn(A, B):
@@ -5598,7 +5620,7 @@ class TestExpandedPatternMatchers(unittest.TestCase):
         )
 
     def test_explain_rowwise_reduction_sum(self):
-        torch = pytest.importorskip("torch")
+        torch = import_or_skip_until("torch", TORCH_IN_CI)
         from rocke.helpers import explain_fn
 
         def fn(A):
@@ -5610,7 +5632,7 @@ class TestExpandedPatternMatchers(unittest.TestCase):
         self.assertEqual(info["extra_attrs"]["reduce_op"], "sum")
 
     def test_explain_rowwise_reduction_mean(self):
-        torch = pytest.importorskip("torch")
+        torch = import_or_skip_until("torch", TORCH_IN_CI)
         from rocke.helpers import explain_fn
 
         def fn(A):
@@ -6159,7 +6181,7 @@ class TestWorkspaceMaterialize(unittest.TestCase):
     @_requires_torch
     def test_materialize_with_fake_pool_binds_tensors(self):
         # Use the real WorkspacePool with a CPU "device" via torch.
-        torch = pytest.importorskip("torch")
+        torch = import_or_skip_until("torch", TORCH_IN_CI)
         from rocke.helpers import materialize_plan
         from rocke.runtime.launcher import WorkspacePool
 
@@ -6182,7 +6204,7 @@ class TestValidationHarness(unittest.TestCase):
 
     @_requires_torch
     def test_benchmark_case_runs_torch_eager_baseline(self):
-        torch = pytest.importorskip("torch")
+        torch = import_or_skip_until("torch", TORCH_IN_CI)
         from rocke.helpers import BenchmarkCase, run_fusion_validation_matrix
 
         def ref_fn(x, y):

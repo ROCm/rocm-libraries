@@ -20,6 +20,7 @@ from rocke.core.lower_llvm import (
     _decls_for_flavor,
     _lower_kernel_to_llvm_python,
 )
+from rocke.tests.engines import skip_without_cpp_engine
 
 _DEAD_KEY = "ds.read.tr16.b128"
 
@@ -69,7 +70,7 @@ class TestWideTransposeRead(unittest.TestCase):
         try:
             _lower_via_cpp_engine(probe, "gfx1250", "llvm23")
         except BackendError as exc:
-            self.skipTest(f"C++ engine unavailable: {exc}")
+            skip_without_cpp_engine(exc, f"C++ engine unavailable: {exc}")
         with self.assertRaises(RuntimeError) as ctx:
             _lower_via_cpp_engine(probe, "gfx950", "llvm23")
         self.assertIn("ds_read_tr16_b128 is not available", str(ctx.exception))

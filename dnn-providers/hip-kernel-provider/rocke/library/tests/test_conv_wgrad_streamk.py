@@ -32,6 +32,7 @@ from kernels.common.conv_implicit_gemm_wgrad import (
     wgrad_streamk_workspace_layout,
     wgrad_streamk_workspace_nbytes,
 )
+from rocke.tests.engines import skip_without_cpp_engine
 
 _DENSE = ConvProblem(N=2, Hi=12, Wi=12, C=32, K=96, Y=3, X=3, pH=1, pW=1)
 # kpg = 40 is not a multiple of tile_m, so the last M tile of every group is
@@ -73,7 +74,7 @@ def _engine():
     try:
         return import_engine(ENGINE_MODULE)
     except BackendError as e:
-        raise unittest.SkipTest(f"C++ engine not importable: {e}") from None
+        skip_without_cpp_engine(e, f"C++ engine not importable: {e}")
 
 
 def _spec_dict(spec: WgradConvSpec) -> dict:

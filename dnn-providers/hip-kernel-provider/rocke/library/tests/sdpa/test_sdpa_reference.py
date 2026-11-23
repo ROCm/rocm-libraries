@@ -22,6 +22,7 @@ from dataclasses import replace
 
 import numpy as np
 import pytest
+from rocke.tests.lanes import TORCH_IN_CI, import_or_skip_until
 
 from dispatch.sdpa import SdpaBias, SdpaFp8, SdpaTensor
 from tests.sdpa.helpers import strided_view
@@ -525,7 +526,7 @@ def test_negative_strides_are_rejected():
     ],
 )
 def test_matches_torch_math_sdpa_per_batch(overrides):
-    torch = pytest.importorskip("torch")
+    torch = import_or_skip_until("torch", TORCH_IN_CI)
     seq = packed((2, 1, 1, 1), "int32")
     req = make_request(
         layout=bhsd,

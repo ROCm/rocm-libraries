@@ -22,6 +22,7 @@ from rocke.core.ir_serialize import serialize
 from rocke.core.isa.backend import backend_for, wired_arches
 from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
 from rocke.tests.arch_marks import arch_specific
+from rocke.tests.engines import skip_without_cpp_engine
 
 _FLAVOR = "llvm20"
 
@@ -65,7 +66,7 @@ def _lower_cpp(kernel, arch: str) -> str:
     try:
         return _lower_via_cpp_engine(serialize(kernel), arch, _FLAVOR)
     except BackendError as e:
-        pytest.skip(f"C++ engine not importable: {str(e)[:200]}")
+        skip_without_cpp_engine(e, f"C++ engine not importable: {str(e)[:200]}")
 
 
 def test_only_gfx950_backend_has_the_instruction():

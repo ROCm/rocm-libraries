@@ -25,6 +25,7 @@ import sys
 import unittest
 
 from rocke.runtime.hip_module import get_device_arch
+from rocke.tests.lanes import arch_skip_reason
 
 # Subprocess `-m` runs (rocke.*, kernels.*, builders.*) resolve through the
 # editable-installed rocke + library packages; no PYTHONPATH wiring needed
@@ -731,7 +732,10 @@ class TestGfx1250Qwen3KvCache(unittest.TestCase):
 
 @unittest.skipUnless(
     _ARCH == "gfx1250",
-    f"gfx1250 WMMA GPU probe; running on {_ARCH!r} (needs a gfx1250 device)",
+    arch_skip_reason(
+        ("gfx1250",),
+        f"gfx1250 WMMA GPU probe; running on {_ARCH!r} (needs a gfx1250 device)",
+    ),
 )
 class TestGfx1250Gpu(unittest.TestCase):
     """GPU probe: build + numerically verify WMMA GEMM / attention on hardware."""

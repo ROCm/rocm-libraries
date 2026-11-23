@@ -11,6 +11,7 @@ from rocke.core.backend import BackendError, _lower_via_cpp_engine
 from rocke.core.ir import F32, I16, I32, I64, IRBuilder, PtrType
 from rocke.core.ir_serialize import parse, serialize
 from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
+from rocke.tests.engines import skip_without_cpp_engine
 
 
 def _build_all():
@@ -152,7 +153,7 @@ class TestGfx1250LlvmBridge(unittest.TestCase):
         try:
             _lower_via_cpp_engine(serialized, "gfx1250", "llvm20")
         except BackendError as exc:
-            self.skipTest(f"C++ engine unavailable: {exc}")
+            skip_without_cpp_engine(exc, f"C++ engine unavailable: {exc}")
         except RuntimeError as exc:
             self.assertIn(message, str(exc))
         else:

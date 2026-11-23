@@ -30,6 +30,7 @@ from kernels.common.conv_implicit_gemm import (
     is_valid_spec,
 )
 from rocke.core.lower_llvm import lower_kernel_to_llvm
+from rocke.tests.lanes import BINDING_LANE, CI_TEST_TOOLS, skip_until, skip_until_reason
 from rocke.tests.llc import find_llvm_tool
 
 _TF32 = ConvDataSpec("fp32", "fp32", "fp32", mma_dtype="tf32")
@@ -372,7 +373,9 @@ def _disassemble(hsaco: bytes):
 
     objdump = find_llvm_tool("llvm-objdump")
     if objdump is None:
-        raise unittest.SkipTest("llvm-objdump not found; cannot inspect the ISA")
+        skip_until(
+            CI_TEST_TOOLS, reason="llvm-objdump not found; cannot inspect the ISA"
+        )
     readelf = find_llvm_tool("llvm-readelf")
     with tempfile.TemporaryDirectory() as tmp:
         path = Path(tmp) / "kernel.hsaco"
@@ -424,7 +427,9 @@ class TestConvFwdTf32Isa(unittest.TestCase):
 
 @unittest.skipIf(
     importlib.util.find_spec("rocke_library_engine") is None,
-    "rocke_library_engine extension not importable",
+    skip_until_reason(
+        BINDING_LANE, reason="rocke_library_engine extension not importable"
+    ),
 )
 class TestConvFwdTf32CrossEngine(unittest.TestCase):
     """The C++ conv builder builds TF32 specs too: every TF32 atom, pipeline,

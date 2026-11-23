@@ -26,12 +26,15 @@ from rocke.tests.engine_modules import (
     main,
     read_engine_modules_marker,
 )
+from rocke.tests.lanes import BINDING_LANE, skip_until_reason
 
 _ENGINE = "rocke_engine"
 _NO_PYBIND11 = "the build's Python had no pybind11"
 needs_engine = pytest.mark.skipif(
     importlib.util.find_spec(_ENGINE) is None,
-    reason="the rocke_engine module is not built in this environment",
+    reason=skip_until_reason(
+        BINDING_LANE, reason="the rocke_engine module is not built in this environment"
+    ),
 )
 
 

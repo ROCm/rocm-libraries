@@ -9,6 +9,7 @@ import importlib
 import os
 
 import pytest
+from rocke.tests.lanes import arch_skip_reason
 from rocke.tests.run_records import note_deselection
 
 
@@ -110,8 +111,11 @@ def select_reference_items(config, items) -> None:
         if case_arch not in (None, architecture):
             note_deselection(
                 item,
-                f"deselected: a {case_arch} reference case; this entry checks "
-                f"{architecture}",
+                arch_skip_reason(
+                    (case_arch,),
+                    f"deselected: a {case_arch} reference case; this entry checks "
+                    f"{architecture}",
+                ),
             )
             deselected.append(item)
         # Only a reference slot, parametrized by both, names its variant.

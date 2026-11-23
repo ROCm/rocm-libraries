@@ -146,6 +146,11 @@ class LaneRun:
     def collected(self, test: TestId) -> bool:
         return test in self.progress or test[0] in self.skipped_files
 
+    def deselected(self, test: TestId) -> bool:
+        """Whether the lane's entries left ``test`` out (a filter removed it)
+        rather than running it to a skip."""
+        return self.progress.get(test) == "deselected"
+
     def why_not_run(self, test: TestId) -> str:
         """Why the lane, which collected ``test``, did not run it."""
         if test[0] in self.skipped_files:
@@ -211,7 +216,10 @@ def _accounted_for(test: TestId, lanes: list[LaneRun]) -> bool:
     recorded = 0
     for lane in observed:
         reason = lane.why_not_run(test)
-        if waiting_entry(path, node, reason) is not None:
+        if (
+            waiting_entry(path, node, reason, deselected=lane.deselected(test))
+            is not None
+        ):
             recorded += 1
         elif not _defers(lane, test, reason, lanes):
             return False

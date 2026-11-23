@@ -42,9 +42,16 @@ from kernels.common.conv_fwd_small_wmma import FwdSmallcWmmaSpec, FwdSmallkWmmaS
 from kernels.common.conv_winograd_gemm_wmma import WinogradGemmWmmaSpec
 from kernels.conv import engine_bridge as eb
 from rocke.core.codegen_policy import scheduler_strategy_reason
+from rocke.tests.lanes import BINDING_LANE, skip_until_reason
 
 _HAS_ENGINE = importlib.util.find_spec("rocke_library_engine") is not None
-_SKIP = "" if _HAS_ENGINE else "rocke_library_engine extension not importable"
+_SKIP = (
+    ""
+    if _HAS_ENGINE
+    else skip_until_reason(
+        BINDING_LANE, reason="rocke_library_engine extension not importable"
+    )
+)
 _ARCH = "gfx1250"
 
 

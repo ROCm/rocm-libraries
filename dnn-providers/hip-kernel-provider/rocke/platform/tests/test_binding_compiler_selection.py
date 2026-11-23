@@ -11,6 +11,7 @@ import xml.etree.ElementTree as ET
 
 import pytest
 
+from rocke.tests.lanes import BINDING_LANE, import_or_skip_until
 from rocke.tests.subprocess_launcher import (
     rocke_python_command,
     rocke_subprocess_env,
@@ -89,7 +90,7 @@ assert lower_llvm._datalayout_for_flavor("llvm20") in explicit
 
 
 def test_python_bindings_use_the_compiling_library(tmp_path):
-    pytest.importorskip("rocke_engine")
+    import_or_skip_until("rocke_engine", BINDING_LANE)
     if sys.platform != "linux" or not shutil.which("cc"):
         pytest.skip("ELF loader fixtures require Linux and a C compiler")
     source = "void LLVMGetVersion(unsigned*a,unsigned*b,unsigned*c){*a=%d;*b=0;*c=0;}"
@@ -249,7 +250,7 @@ assert rocke_engine.lower_serialized_ir(ir, arch="gfx950", flavor="llvm24")
 
 
 def test_binding_resolver_failure_preserves_error_contract():
-    pytest.importorskip("rocke_engine")
+    import_or_skip_until("rocke_engine", BINDING_LANE)
     result = subprocess.run(
         rocke_python_command("-c", CLEANUP_PROBE, interpreter_flags=("-B",)),
         env=rocke_subprocess_env(
@@ -264,7 +265,7 @@ def test_binding_resolver_failure_preserves_error_contract():
 
 
 def test_resolver_failure_releases_binding_builders(tmp_path):
-    pytest.importorskip("rocke_engine")
+    import_or_skip_until("rocke_engine", BINDING_LANE)
     valgrind = shutil.which("valgrind")
     if sys.platform != "linux" or not valgrind:
         pytest.skip("builder leak detection requires Linux and Valgrind")

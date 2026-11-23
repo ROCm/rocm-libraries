@@ -20,6 +20,7 @@ from rocke.core.arch import ArchTarget
 from rocke.core.ir import I32, IRBuilder, PtrType
 from rocke.helpers import compile_kernel
 from rocke.runtime.hip_module import Runtime, get_device_arch
+from rocke.tests.lanes import BINDING_LANE, skip_until
 
 
 @pytest.fixture(scope="module")
@@ -38,7 +39,7 @@ def arch():
 @pytest.fixture(params=("python", "cpp"))
 def backend(request):
     if request.param == "cpp" and importlib.util.find_spec("rocke_engine") is None:
-        pytest.skip("cpp engine needs the rocke_engine binding")
+        skip_until(BINDING_LANE, reason="cpp engine needs the rocke_engine binding")
     return request.param
 
 

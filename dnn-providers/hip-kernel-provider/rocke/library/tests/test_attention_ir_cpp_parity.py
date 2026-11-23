@@ -31,6 +31,7 @@ import os
 import sys
 
 from rocke.assets import platform_instances_dir
+from rocke.tests.engines import skip_without_cpp_engine
 
 # Families whose cases this gate covers (the ones built from library kernels).
 # lightning_indexer is a Python-authored, generically-lowered family (no
@@ -239,7 +240,7 @@ def test_attention_ir_cpp_python_byte_identity():
                 gaps.append(f"{case['case_id']} ({arch})")
                 continue
             except BackendError as e:  # engine absent -- same for every case
-                pytest.skip(f"C++ engine not importable: {str(e)[:200]}")
+                skip_without_cpp_engine(e, f"C++ engine not importable: {str(e)[:200]}")
             if py != cpp:
                 mism.append(case["case_id"])
     finally:
@@ -293,7 +294,9 @@ def test_mla_prefill_ir_cpp_python_byte_identity():
                         gaps.append(f"{flavor}/{cid}")
                         continue
                     except BackendError as e:
-                        pytest.skip(f"C++ engine not importable: {str(e)[:200]}")
+                        skip_without_cpp_engine(
+                            e, f"C++ engine not importable: {str(e)[:200]}"
+                        )
                     compared += 1
                     if py != cpp:
                         mism.append(f"{flavor}/{cid}")

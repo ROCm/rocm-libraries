@@ -28,6 +28,7 @@ from rocke.examples.gfx1250.qwen3_30b_a3b.qwen3_30b_a3b_shapes import (
     Qwen3A3BConfig,
     layer_shapes,
 )
+from rocke.tests.lanes import TORCH_IN_CI, skip_until
 
 
 class TestGfx1250QwenLayerTable(unittest.TestCase):
@@ -145,7 +146,9 @@ class TestGfx1250QwenCustomOps(unittest.TestCase):
     def test_custom_op_cpu_reference_impls_when_torch_is_available(self):
         try:
             import torch
-        except Exception as exc:
+        except ModuleNotFoundError as exc:
+            skip_until(TORCH_IN_CI, reason=f"torch unavailable: {exc}")
+        except Exception as exc:  # installed, but failing to load
             self.skipTest(f"torch unavailable: {exc}")
 
         self.assertTrue(register_torch_custom_ops())
@@ -172,7 +175,9 @@ class TestGfx1250QwenOneLayerHarness(unittest.TestCase):
     def test_tiny_one_layer_reference_runs_with_independent_gates(self):
         try:
             import torch
-        except Exception as exc:
+        except ModuleNotFoundError as exc:
+            skip_until(TORCH_IN_CI, reason=f"torch unavailable: {exc}")
+        except Exception as exc:  # installed, but failing to load
             self.skipTest(f"torch unavailable: {exc}")
 
         config = Qwen3A3BConfig(

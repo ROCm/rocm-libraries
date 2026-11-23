@@ -43,6 +43,12 @@ from rocke.core.lower_llvm import (
     ArchDomainWarning,
     lower_kernel_to_llvm,
 )
+from rocke.tests.lanes import (
+    BINDING_LANE,
+    SOURCE_TREE_CASES,
+    import_or_skip_until,
+    skip_until_reason,
+)
 
 PLATFORM = Path(__file__).resolve().parents[2]
 LOWER_LLVM = PLATFORM / "python" / "rocke" / "core" / "lower_llvm.py"
@@ -56,7 +62,10 @@ _RUN_ALL_COMPLETE_ENV = "ROCKE_RUN_ALL_ARCH_DOMAIN_COMPLETE"
 # exactly what an installed-package consumer wants run.
 _needs_sources = pytest.mark.skipif(
     not (LOWER_LLVM.exists() and CPP_CORE.exists() and CHECK_GATE.exists()),
-    reason="reads the platform sources, which an installed test layout omits",
+    reason=skip_until_reason(
+        SOURCE_TREE_CASES,
+        reason="reads the platform sources, which an installed test layout omits",
+    ),
 )
 
 
@@ -341,7 +350,7 @@ def test_every_binding_requires_a_target() -> None:
     """
     import re
 
-    engine = pytest.importorskip("rocke_engine")
+    engine = import_or_skip_until("rocke_engine", BINDING_LANE)
     takes_target = re.compile(r"^\w+\(\w+: dict, arch: str\)")
     offenders = []
     checked = 0
@@ -649,6 +658,7 @@ def test_an_aliased_declare_no_alias_accounts_for_is_a_refusal(
 
 
 BINDINGS = PLATFORM / "cpp" / "bindings"
+_OMITS_CPP = skip_until_reason(SOURCE_TREE_CASES, reason="installed layout omits cpp/")
 # Library families bind from library/cpp/bindings (rocke_library_engine); the
 # same rules hold there. Scanned when the sibling tree is present.
 BINDING_SOURCES = [
@@ -659,7 +669,7 @@ BINDING_SOURCES = [
 
 
 @_needs_sources
-@pytest.mark.skipif(not BINDINGS.is_dir(), reason="installed layout omits cpp/")
+@pytest.mark.skipif(not BINDINGS.is_dir(), reason=_OMITS_CPP)
 def test_no_binding_lowers_without_a_diagnostic_buffer() -> None:
     """``rocke_lower_kernel_to_llvm`` has no ``err`` out-parameter.
 
@@ -682,7 +692,7 @@ def test_no_binding_lowers_without_a_diagnostic_buffer() -> None:
 
 
 @_needs_sources
-@pytest.mark.skipif(not BINDINGS.is_dir(), reason="installed layout omits cpp/")
+@pytest.mark.skipif(not BINDINGS.is_dir(), reason=_OMITS_CPP)
 def test_every_binding_lowering_converts_a_refusal() -> None:
     """A refusal reaches Python as ``ArchDomainError`` only if the binding that
     lowered the kernel hands its status and message to ``throw_if_arch_domain``,
@@ -711,7 +721,7 @@ def test_every_binding_lowering_converts_a_refusal() -> None:
 
 
 @_needs_sources
-@pytest.mark.skipif(not BINDINGS.is_dir(), reason="installed layout omits cpp/")
+@pytest.mark.skipif(not BINDINGS.is_dir(), reason=_OMITS_CPP)
 def test_every_lowering_helper_converts_a_refusal() -> None:
     """The scan above trusts ``take_lowered`` / ``take_ll`` by name, so every
     definition of one must itself hand the status to ``throw_if_arch_domain``.
@@ -737,7 +747,7 @@ def test_every_lowering_helper_converts_a_refusal() -> None:
 
 
 @_needs_sources
-@pytest.mark.skipif(not BINDINGS.is_dir(), reason="installed layout omits cpp/")
+@pytest.mark.skipif(not BINDINGS.is_dir(), reason=_OMITS_CPP)
 def test_every_binding_module_registers_the_refusal() -> None:
     """``throw_if_arch_domain`` throws ``ArchDomainRefusal``; only a module that
     registers it turns that into ``ArchDomainError`` (a NotImplementedError).
@@ -769,7 +779,7 @@ def test_every_binding_module_raises_a_refusal_as_python_does(module: str) -> No
     """The cpp backend's refusal is the same kind of exception as the Python
     lowerer's: a NotImplementedError, the convention for a kernel the lowerer
     declines for its target (how hsaco_parity counts a refusal)."""
-    engine = pytest.importorskip(module)
+    engine = import_or_skip_until(module, BINDING_LANE)
     refused = getattr(engine, "ArchDomainError", None)
     assert refused is not None, f"{module} has no ArchDomainError"
     assert issubclass(refused, NotImplementedError)
@@ -1389,7 +1399,7 @@ def test_the_message_text_is_the_one_the_cpp_engine_pins() -> None:
 def test_the_cpp_engine_refuses_with_the_python_message(
     monkeypatch: pytest.MonkeyPatch, flavor: str
 ) -> None:
-    engine = pytest.importorskip("rocke_engine")
+    engine = import_or_skip_until("rocke_engine", BINDING_LANE)
     from rocke.core.ir_serialize import serialize
 
     cell = arch_domain.load(flavor).lookup(_DPP8_KEY, _DPP8_ARCH)
@@ -1410,7 +1420,7 @@ def test_the_cpp_engine_refuses_with_the_python_message(
 def test_the_cpp_engine_lowers_outside_error_mode(
     monkeypatch: pytest.MonkeyPatch, mode: str
 ) -> None:
-    engine = pytest.importorskip("rocke_engine")
+    engine = import_or_skip_until("rocke_engine", BINDING_LANE)
     from rocke.core.ir_serialize import serialize
 
     flavor = _refusing_flavor()
@@ -1424,7 +1434,7 @@ def test_the_cpp_engine_lowers_outside_error_mode(
 def test_the_cpp_engine_rejects_a_misspelled_mode_as_python_does(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    engine = pytest.importorskip("rocke_engine")
+    engine = import_or_skip_until("rocke_engine", BINDING_LANE)
     from rocke.core.ir_serialize import serialize
 
     flavor = _refusing_flavor()
@@ -1446,7 +1456,7 @@ def test_the_cpp_engine_rejects_a_misspelled_mode_for_a_kernel_that_demands_noth
     It used to read it only when a kernel demanded an intrinsic, so a kernel that
     demanded none lowered under a misspelled value because nothing asked.
     """
-    engine = pytest.importorskip("rocke_engine")
+    engine = import_or_skip_until("rocke_engine", BINDING_LANE)
     from rocke.core.ir import IRBuilder
     from rocke.core.ir_serialize import serialize
 
@@ -1465,7 +1475,7 @@ def test_the_cpp_backend_raises_the_python_error(
 ) -> None:
     """End to end on the default backend: the engine refuses, the binding
     raises its ArchDomainError, and the caller gets the Python one."""
-    pytest.importorskip("rocke_engine")
+    import_or_skip_until("rocke_engine", BINDING_LANE)
     flavor = _refusing_flavor()
     monkeypatch.setenv("ROCKE_BACKEND", "cpp")
     monkeypatch.setenv(arch_domain.MODE_ENV, "error")

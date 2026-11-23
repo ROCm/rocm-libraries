@@ -1398,17 +1398,53 @@ with its reason, owner and expiry. It holds three kinds of record:
 
 | Kind | Records | Expired entry |
 |---|---|---|
-| `PendingTest` | a test file waiting for a lane CI does not run yet (a scheduled run, a gfx950 or gfx90a runner, an unlanded PR); the file is not known to be broken. A file whose cases wait for several things CI lacks (two runners) has one entry per lane; a file under a lane that waits for torch imports torch | warns, and fails only a change that touches the registry or that file (every scheduled run under `--strict-expiry`) |
+| `PendingTest` | a test file (or one test of it, `node`) waiting for a lane; the file is not known to be broken. Under a lane no CI entry runs yet (a scheduled run, an unlanded PR) it covers every case of the file; under a lane CI lacks (torch, a gfx950 or gfx1250 runner, the C++ engine's Python modules) it covers only the cases that declare that lane where they skip (below). One entry per lane a file's cases wait for; a file under a lane that waits for torch imports torch | warns, and fails only a change that touches the registry or that file (every scheduled run under `--strict-expiry`) |
 | `MeasuredBudget` | the scratch bytes one test allows one kernel on one compiler while its retune is decided | as `PendingTest` |
 | `QuarantinedTest` | one test known to fail (a flake, or a defect that turns develop red), by item id `<file>::<node name>`; a name without parameters covers all of them. Needs an issue (`AICK-1234`, `ROCm/<repo>#<n>`, or `none filed yet`); may name the GPU arches it fails on, to be held out there only; at most `QUARANTINE_CAP` (10) at once | always fails |
 
+**A skipped case names its lane where it skips.** The lanes are
+[`rocke.tests.lanes`](platform/python/rocke/tests/lanes.py). A case that skips
+because CI lacks what a lane gives says so with the lane, never with words a
+script has to interpret; a case that needs a GPU states the arches it needs,
+and the lanes module books the runner lane they wait for (none when a CI
+runner has one of them):
+
+```python
+from rocke.tests.lanes import (
+    BINDING_LANE, TORCH_IN_CI,
+    arch_skip_reason, import_or_skip_until, skip_needing_arch, skip_until_reason,
+)
+
+skip_needing_arch(("gfx950",), reason="needs a gfx950 GPU, found gfx942")
+@pytest.mark.skipif(arch != "gfx950", reason=arch_skip_reason(("gfx950",), "..."))
+torch = import_or_skip_until("torch", TORCH_IN_CI)
+@pytest.mark.skipif(no_engine, reason=skip_until_reason(BINDING_LANE, reason="..."))
+```
+
+The shared helpers declare for you: `rocke.tests.gpu.current_device_arch_in`
+the runner lane of the arches a case needs; the engine helpers `BINDING_LANE`
+(a module that is installed but fails to import is a defect, not a wait); the
+missing-tool helpers (`rocke.tests.compiler_tools`, `rocke.tests.llc`)
+`CI_TEST_TOOLS`; the source-tree helpers `SOURCE_TREE_CASES`; a case a CI entry
+deselects by `-m 'not exhaustive'` or `'not integration'` waits for the lane of
+that marker. A skip for any other reason (a defect, a configuration refused on
+its own arch, a missing installed artifact) names no lane, and no entry can
+cover it: it shows up in limbo until it is fixed or quarantined.
+
 The pytest roots of `platform/tests` and `library/tests` skip a quarantined test
-with the reason `quarantined: <issue>` (plus `on <arch>` for an arch-scoped entry), so it stays visible in every report; `ROCKE_QUARANTINE=ignore` runs
-it to debug or fix it. A pending file that fails once its lane runs moves to
-quarantine; it does not stay pending. The PR gate
+with the reason `quarantined: <issue>` (plus `on <arch>` for an arch-scoped
+entry), so it stays visible in every report; `ROCKE_QUARANTINE=ignore` runs it
+to debug or fix it. A pending file that fails once its lane runs moves to
+quarantine; it does not stay pending.
+
+Two checks hold the tree to the registry. The PR gate
 [`platform/tests/tools/test_pending_lanes.py`](platform/tests/tools/test_pending_lanes.py)
-holds the tree to the registry: every test file runs in a CI-run entry or is
-pending, and no entry is stale (its test gone, or its lane's kind no longer true).
+works per file: every test file runs in a CI-run entry or is pending, no entry
+is stale (its test gone, or its lane's kind no longer true), and no test names
+a runner lane or writes a declaration by hand.
+[`tools/limbo_audit.py`](tools/limbo_audit.py) works per case, from the run
+records (`rocke.tests.run_records`) of the CI lanes: it fails on each case no
+lane ran that no record covers.
 
 ## 6. Invariants & contracts
 

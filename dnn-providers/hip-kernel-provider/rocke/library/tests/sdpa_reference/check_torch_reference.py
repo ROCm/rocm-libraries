@@ -7,11 +7,12 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+from rocke.tests.lanes import TORCH_IN_CI, import_or_skip_until
 
 from sdpa_reference.contract import Case, independent_reference, make_inputs
 from sdpa_reference.torch_reference import cross_check, validate_device
 
-pytest.importorskip("torch")
+import_or_skip_until("torch", TORCH_IN_CI)
 
 
 @pytest.mark.parametrize("dtype", ["fp16", "bf16"])

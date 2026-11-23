@@ -51,7 +51,9 @@ from typing import List, Tuple
 import numpy as np
 from rocke.numeric import storage
 from rocke.runtime.hip_module import get_device_arch
+from rocke.core.arch.target import known_arches
 from rocke.runtime.host_buffers import as_u8_buffer
+from rocke.tests.lanes import arch_skip_reason, skip_needing_arch
 
 from builders.common.conv_reference import (
     conv_extents,
@@ -59,7 +61,10 @@ from builders.common.conv_reference import (
     tf32_reference_inputs,
     tf32_reference_tol,
 )
-from kernels.common.conv_implicit_gemm_wgrad import wgrad_lds_k_outer_available
+from kernels.common.conv_implicit_gemm_wgrad import (
+    wgrad_lds_k_outer_available,
+    wgrad_wmma_split_k_available,
+)
 
 GPU_ARCH = get_device_arch(0)
 _IS_MFMA = GPU_ARCH in ("gfx942", "gfx950")  # wave64 / MFMA targets
@@ -71,6 +76,12 @@ _IS_MFMA = GPU_ARCH in ("gfx942", "gfx950")  # wave64 / MFMA targets
 # config, so the K-outer tests skip up front instead of skipping every subTest.
 _HAS_KOUTER = wgrad_lds_k_outer_available(GPU_ARCH)
 _NO_KOUTER = f"lds_k_outer needs the LDS transpose read, which {GPU_ARCH} lacks"
+# The arches that have it, whose runners the K-outer tests wait for elsewhere.
+_KOUTER_ARCHES = [arch for arch in known_arches() if wgrad_lds_k_outer_available(arch)]
+# The arches whose 16-bit wgrad split-K runs through the WMMA atomic epilogue.
+_WMMA_SPLIT_K_ARCHES = [
+    arch for arch in known_arches() if wgrad_wmma_split_k_available(arch)
+]
 
 # WMMA wgrad accepts only the 'default' epilogue (is_valid_wgrad_spec), so the
 # K-outer sweeps below have to ask for the one their arch supports. Requesting
@@ -580,7 +591,7 @@ class TestConvWgradCorrectness(unittest.TestCase):
         (async_dma) shipped silently wrong because nothing exercised it.
         """
         if not _HAS_KOUTER:
-            self.skipTest(_NO_KOUTER)
+            self.skipTest(arch_skip_reason(_KOUTER_ARCHES, _NO_KOUTER))
         ran = 0
         for dtype in _DTYPES:
             for shape in _SHAPES:
@@ -614,7 +625,7 @@ class TestConvWgradCorrectness(unittest.TestCase):
         ``test_lds_k_outer_matches_default``.
         """
         if not _HAS_KOUTER:
-            self.skipTest(_NO_KOUTER)
+            self.skipTest(arch_skip_reason(_KOUTER_ARCHES, _NO_KOUTER))
         if not _IS_MFMA:
             self.skipTest(f"the 16x16x16 atom is MFMA-only; got {GPU_ARCH}")
         ran = 0
@@ -647,7 +658,7 @@ class TestConvWgradCorrectness(unittest.TestCase):
         )
 
         if not _HAS_KOUTER:
-            self.skipTest(_NO_KOUTER)
+            self.skipTest(arch_skip_reason(_KOUTER_ARCHES, _NO_KOUTER))
         if not _IS_MFMA and not wgrad_wmma_split_k_available(GPU_ARCH):
             self.skipTest(f"no 16-bit wgrad split-K atomic path on {GPU_ARCH}")
         ran = 0
@@ -674,7 +685,7 @@ class TestConvWgradCorrectness(unittest.TestCase):
         sweep exercise that.
         """
         if not _HAS_KOUTER:
-            self.skipTest(_NO_KOUTER)
+            self.skipTest(arch_skip_reason(_KOUTER_ARCHES, _NO_KOUTER))
         if not _IS_MFMA:
             self.skipTest(
                 f"async_dma wgrad on the K-outer tile is MFMA-only; got {GPU_ARCH}"
@@ -756,7 +767,12 @@ class TestConvWgradCorrectness(unittest.TestCase):
         )
 
         if not wgrad_wmma_split_k_available(GPU_ARCH):
-            self.skipTest(f"WMMA 16-bit split-K atomics not enabled on {GPU_ARCH}")
+            self.skipTest(
+                arch_skip_reason(
+                    _WMMA_SPLIT_K_ARCHES,
+                    f"WMMA 16-bit split-K atomics not enabled on {GPU_ARCH}",
+                )
+            )
         ran = 0
         for dtype in _DTYPES:
             for shape in _SHAPES:
@@ -867,7 +883,11 @@ class TestConvWgradCorrectness(unittest.TestCase):
 
         target = ArchTarget.from_gfx(GPU_ARCH)
         if target.wave_size != 32 or not wgrad_wmma_split_k_available(GPU_ARCH):
-            self.skipTest(f"WMMA split-K not enabled on {GPU_ARCH}")
+            self.skipTest(
+                arch_skip_reason(
+                    _WMMA_SPLIT_K_ARCHES, f"WMMA split-K not enabled on {GPU_ARCH}"
+                )
+            )
         # (N, H=W, C, K, G, dtype, (tile_m, tile_n, tile_k), --split-k,
         #  expected degree); -1 is the resolver's pick.
         cases = [
@@ -966,7 +986,12 @@ class TestConvWgradCorrectness(unittest.TestCase):
         )
 
         if not wgrad_wmma_split_k_available(GPU_ARCH):
-            self.skipTest(f"WMMA 16-bit split-K atomics not enabled on {GPU_ARCH}")
+            self.skipTest(
+                arch_skip_reason(
+                    _WMMA_SPLIT_K_ARCHES,
+                    f"WMMA 16-bit split-K atomics not enabled on {GPU_ARCH}",
+                )
+            )
         grouped = [
             _Shape(
                 "g4_N2H14W14C64K64",
@@ -1867,7 +1892,9 @@ class TestConvWgradTwoStage(unittest.TestCase):
     def test_lds_k_outer(self):
         """lds_k_outer=True combined with two_stage=True on gfx950."""
         if self.ARCH != "gfx950":
-            self.skipTest(f"lds_k_outer is gfx950-only; got {self.ARCH}")
+            skip_needing_arch(
+                ("gfx950",), reason=f"lds_k_outer is gfx950-only; got {self.ARCH}"
+            )
         for dtype in _DTYPES:
             for shape in _SHAPES:
                 with self.subTest(shape=shape.id, dtype=dtype):
@@ -1876,7 +1903,9 @@ class TestConvWgradTwoStage(unittest.TestCase):
     def test_lds_k_outer_atom_16x16x16(self):
         """lds_k_outer with 16x16x16 atoms (narrower warp tile)."""
         if self.ARCH != "gfx950":
-            self.skipTest(f"lds_k_outer is gfx950-only; got {self.ARCH}")
+            skip_needing_arch(
+                ("gfx950",), reason=f"lds_k_outer is gfx950-only; got {self.ARCH}"
+            )
         for dtype in _DTYPES:
             for shape in (_SHAPES[0], _SHAPES[2]):
                 with self.subTest(shape=shape.id, dtype=dtype):
@@ -1887,7 +1916,9 @@ class TestConvWgradTwoStage(unittest.TestCase):
     def test_lds_k_outer_split_k(self):
         """lds_k_outer + split_k=8 + two_stage on gfx950."""
         if self.ARCH != "gfx950":
-            self.skipTest(f"lds_k_outer is gfx950-only; got {self.ARCH}")
+            skip_needing_arch(
+                ("gfx950",), reason=f"lds_k_outer is gfx950-only; got {self.ARCH}"
+            )
         for shape in _SHAPES:
             with self.subTest(shape=shape.id):
                 self._check(shape, "bf16", "mem", split_k=8, lds_k_outer=True, seed=8)
@@ -2667,7 +2698,10 @@ class TestWgradTwoStageWmmaNumerics(unittest.TestCase):
 
     def _sweep(self, **knobs) -> None:
         if GPU_ARCH != "gfx1250":
-            self.skipTest(f"two-stage WMMA wgrad is gfx1250-only; on {GPU_ARCH}")
+            skip_needing_arch(
+                ("gfx1250",),
+                reason=f"two-stage WMMA wgrad is gfx1250-only; on {GPU_ARCH}",
+            )
         for shape in self._CASES:
             if knobs.get("async_dma") and shape.C % 2:
                 continue  # the async copy needs an even channel run

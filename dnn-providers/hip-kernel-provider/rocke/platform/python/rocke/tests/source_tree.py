@@ -9,7 +9,8 @@ tree, but not ``dsl_docs/`` (documentation and authoring tools) and not the
 ``library/`` source root beside ``platform/`` (the installed payload stages a
 copy of its packages for the library tests, which ``rocke.assets.library_root``
 does not point at). A test that reads either tree is a source-tree check. It
-runs where the tree exists and skips, with the reason, in the installed layout.
+runs where the tree exists and skips, with the reason, in the installed layout,
+as waiting for the source-tree run (``rocke.tests.lanes.SOURCE_TREE_CASES``).
 
     def test_doc_names_every_target():
         doc = require_dsl_docs() / "reference" / "dtype_support.md"
@@ -27,9 +28,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from rocke.assets import dsl_docs_dir, library_root
+from rocke.tests.lanes import SOURCE_TREE_CASES, skip_until
 
 __all__ = ["require_dsl_docs", "require_library_tree"]
 
@@ -38,9 +38,10 @@ def _require_source_tree(tree: Path, name: str) -> Path:
     """Return ``tree``, or skip the test, naming ``name`` and the path, when it
     is not a directory in this layout."""
     if not tree.is_dir():
-        pytest.skip(
-            f"source-tree check: no {name} tree at {tree}; the installed test "
-            "payload does not ship it"
+        skip_until(
+            SOURCE_TREE_CASES,
+            reason=f"source-tree check: no {name} tree at {tree}; the installed "
+            "test payload does not ship it",
         )
     return tree
 

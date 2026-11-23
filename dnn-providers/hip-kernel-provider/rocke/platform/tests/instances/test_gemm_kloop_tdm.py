@@ -24,6 +24,7 @@ from types import SimpleNamespace
 from rocke.assets import platform_root
 from rocke.instances.common import _gemm_kloop_tdm, gemm_universal
 from rocke.instances.common._gemm_kloop_tdm import TdmKLoop
+from rocke.tests.lanes import SOURCE_TREE_CASES, skip_until
 
 _SHAPES = ("unpipelined", "ping_pong", "early_refill", "ring")
 
@@ -99,7 +100,10 @@ class TestNoArchNameLiterals(unittest.TestCase):
     def test_cpp_universal_gemm_has_no_gfx1250_literal(self):
         common = platform_root() / "cpp" / "instances" / "common"
         if not common.is_dir():
-            raise unittest.SkipTest("reads the C++ sources, which this layout omits")
+            skip_until(
+                SOURCE_TREE_CASES,
+                reason="reads the C++ sources, which this layout omits",
+            )
         for name in (
             "gemm_spec.cpp",
             "gemm_universal.cpp",

@@ -27,6 +27,7 @@ from rocke.instances.gfx950.block_scaled_gemm import (
     is_valid_spec,
 )
 from rocke.tests.arch_marks import arch_specific
+from rocke.tests.lanes import BINDING_LANE, import_or_skip_until
 from rocke.tests.subprocess_launcher import (
     rocke_python_command,
     rocke_subprocess_env,
@@ -128,7 +129,7 @@ def test_complete_kernel_golden_and_native_identity(idx, flavor, monkeypatch):
             Path(__file__).with_name("gfx950_scaled_mfma_llvm23.json").read_text()
         )
         assert hashlib.sha256(llvm.encode()).hexdigest() == golden[str(idx)]
-    engine = pytest.importorskip("rocke_engine")
+    engine = import_or_skip_until("rocke_engine", BINDING_LANE)
     assert engine.gfx950_block_scaled_gemm_serialize_ir(
         asdict(spec), "gfx950"
     ) == serialize(kernel)
@@ -149,7 +150,7 @@ def test_wrong_target_rejection(arch):
         _lower_kernel_to_llvm_python(k, arch=arch, llvm_flavor="llvm23")
     with pytest.raises(NotImplementedError, match=f"^{refusal}$"):
         lower_kernel_to_hip(k, arch=arch)
-    engine = pytest.importorskip("rocke_engine")
+    engine = import_or_skip_until("rocke_engine", BINDING_LANE)
     with pytest.raises(RuntimeError, match=f": {refusal}$"):
         engine.lower_serialized_ir(serialize(k), arch, "llvm23")
     with pytest.raises(RuntimeError, match=f": {refusal}$"):
@@ -161,7 +162,7 @@ def test_wrong_target_rejection(arch):
     reason="scaled MFMA exists on gfx950 only; gfx942 refuses it and test_wrong_target_rejection checks the refusal",
 )
 def test_native_lowering_preserves_diagnostic(tmp_path):
-    pytest.importorskip("rocke_engine")
+    import_or_skip_until("rocke_engine", BINDING_LANE)
     compiler = shutil.which("cc")
     if sys.platform != "linux" or not compiler:
         pytest.skip("ELF loader fixture requires Linux and a C compiler")
@@ -203,7 +204,7 @@ def test_native_lowering_preserves_diagnostic(tmp_path):
 )
 @pytest.mark.parametrize("name_bytes", [255, 256, 512])
 def test_long_native_kernel_names(name_bytes):
-    engine = pytest.importorskip("rocke_engine")
+    engine = import_or_skip_until("rocke_engine", BINDING_LANE)
     empty = BlockScaledGemmSpec("", 32, 32, 64)
     spec = BlockScaledGemmSpec(
         "x" * (name_bytes - len(empty.kernel_name())), 32, 32, 64
@@ -283,7 +284,7 @@ def test_serialized_native_contract_rejection(mutation):
     assert any("scaled MFMA" in str(d) for d in verify(k))
     with pytest.raises(ValueError, match="scaled MFMA"):
         _lower_kernel_to_llvm_python(k, arch="gfx950", llvm_flavor="llvm23")
-    engine = pytest.importorskip("rocke_engine")
+    engine = import_or_skip_until("rocke_engine", BINDING_LANE)
     with pytest.raises(RuntimeError, match="scaled MFMA"):
         engine.lower_serialized_ir(serialize(k), "gfx950", "llvm23")
 
@@ -294,7 +295,7 @@ def test_serialized_native_contract_rejection(mutation):
 )
 @pytest.mark.parametrize("dtype", ["unknown", "fp32", "FP6 ", " BF8", "fp4"])
 def test_native_spec_format_validation(dtype):
-    engine = pytest.importorskip("rocke_engine")
+    engine = import_or_skip_until("rocke_engine", BINDING_LANE)
     spec = BlockScaledGemmSpec("formats", 32, 32, 64, dtype_a=dtype)
     if dtype.strip().lower() in ("unknown", "fp32"):
         with pytest.raises(RuntimeError, match="invalid gfx950"):

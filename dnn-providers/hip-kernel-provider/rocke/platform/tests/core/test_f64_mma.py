@@ -16,6 +16,7 @@ from rocke.instances.gfx942.f64_mma_probe import (
     F64MmaProbeSpec,
     build_f64_mma_probe,
 )
+from rocke.tests.lanes import BINDING_LANE, import_or_skip_until
 
 # m -> (op_id, c_frag_len, A/B/C shapes) for the gfx942 f64 atoms.
 _ATOMS = {
@@ -144,7 +145,7 @@ def test_python_builder_and_lowerers(m, k):
 @pytest.mark.parametrize("m", [16, 4])
 @pytest.mark.parametrize("k", [4, 8, 64])
 def test_native_builder_and_lowerers_match_python(m, k):
-    native = pytest.importorskip("rocke_engine")
+    native = import_or_skip_until("rocke_engine", BINDING_LANE)
     kernel = build_f64_mma_probe(F64MmaProbeSpec(m, k))
     ir = serialize(kernel)
     assert native.f64_mma_probe_serialize_ir(m, k) == ir

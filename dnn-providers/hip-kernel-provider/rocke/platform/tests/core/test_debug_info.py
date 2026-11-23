@@ -40,6 +40,7 @@ from rocke.core import ir as ir_mod
 from rocke.core.ir import F32, IRBuilder, PtrType
 from rocke.core.ir_serialize import parse, serialize
 from rocke.core.lower_llvm import _escape_md_string, lower_kernel_to_llvm
+from rocke.tests.lanes import BINDING_LANE, CI_TEST_TOOLS, skip_until
 
 THIS_FILE = os.path.abspath(__file__)
 
@@ -503,8 +504,8 @@ class TestInstalledLayout(unittest.TestCase):
 def engine_or_skip():
     try:
         import rocke_engine  # noqa: F401
-    except ImportError as exc:  # pragma: no cover - environment dependent
-        raise unittest.SkipTest(f"rocke_engine not importable: {exc}")
+    except ModuleNotFoundError as exc:  # pragma: no cover - environment dependent
+        skip_until(BINDING_LANE, reason=f"rocke_engine not importable: {exc}")
 
 
 class TestBothEnginesEmitTheSameDebugInfo(unittest.TestCase):
@@ -927,7 +928,7 @@ class TestLlvmToolDiscovery(unittest.TestCase):
             env.pop(LLVM_BIN_ENV, None)
             on_path = shutil.which("llc")
             if on_path is None:
-                self.skipTest("no llc on PATH")
+                skip_until(CI_TEST_TOOLS, reason="no llc on PATH")
             self.assertEqual(llvm_tool("llc"), on_path)
 
     def test_a_configured_root_without_the_tool_falls_through(self):

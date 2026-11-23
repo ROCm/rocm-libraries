@@ -33,6 +33,8 @@ import pytest
 from rocke.core.ir import F32, I32, I64, U8, IRBuilder, KernelDef, PtrType, VectorType
 from rocke.core.ir_serialize import serialize
 from rocke.core.lower_llvm import LLVM_FLAVORS, _lower_kernel_to_llvm_python
+from rocke.tests.engines import skip_without_cpp_engine
+from rocke.tests.lanes import skip_needing_arch
 
 _NAME = "llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4.v8i32.v8i32"
 _DECLARATION = (
@@ -355,7 +357,7 @@ class TestEngineIdentity(unittest.TestCase):
         try:
             _lower_via_cpp_engine(serialize(_kernel("hero")), "gfx950", "llvm20")
         except BackendError as exc:
-            self.skipTest(f"C++ engine unavailable: {exc}")
+            skip_without_cpp_engine(exc, f"C++ engine unavailable: {exc}")
         cases = [(kind, None) for kind in ("hero", "mx", "both")]
         cases += [("mx", fmt) for fmt in _FORMATS]
         cases += [("unscaled", fmt) for fmt in _FORMATS]
@@ -374,7 +376,7 @@ class TestEngineIdentity(unittest.TestCase):
         try:
             _lower_via_cpp_engine(serialize(_kernel("hero")), "gfx950", "llvm23")
         except BackendError as exc:
-            self.skipTest(f"C++ engine unavailable: {exc}")
+            skip_without_cpp_engine(exc, f"C++ engine unavailable: {exc}")
         for args, text in (
             (("fp8e4m3", "fp4e2m1"), "same format"),
             (("fp8", "fp8"), "unknown a_format"),
@@ -548,7 +550,7 @@ class TestGfx950Numerics(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         if not _gfx950_device():
-            raise unittest.SkipTest("no gfx950 device")
+            skip_needing_arch(("gfx950",), reason="no gfx950 device")
         if _llvm_tool("clang") is None:
             raise unittest.SkipTest("no clang found")
 

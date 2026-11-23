@@ -206,3 +206,23 @@ def test_a_lane_that_must_not_fall_back_clears_an_inherited_quiet_setting(
     monkeypatch.setenv(_QUIET_FALLBACK, "1")
     _assert_no_arch_refusal(monkeypatch, lane)
     assert _QUIET_FALLBACK not in os.environ
+
+
+def test_a_missing_engine_module_waits_for_the_binding_lane_and_nothing_else():
+    from rocke.core.backend import BackendError, import_engine
+
+    with pytest.raises(BackendError) as missing:
+        import_engine("a_module_that_is_not_installed")
+    with pytest.raises(pytest.skip.Exception) as skipped:
+        engines.skip_without_cpp_engine(missing.value, "no engine")
+    assert skipped.value.msg == "waits for binding-lane: no engine"
+    # A BackendError for another cause (an unknown backend, or a module that is
+    # built but fails to load) declares no lane.
+    with pytest.raises(pytest.skip.Exception) as plain:
+        engines.skip_without_cpp_engine(BackendError("unknown backend"), "refused")
+    assert plain.value.msg == "refused"
+    broken = BackendError("the extension does not load")
+    broken.__cause__ = ImportError("undefined symbol")
+    with pytest.raises(pytest.skip.Exception) as broken_build:
+        engines.skip_without_cpp_engine(broken, "broken build")
+    assert broken_build.value.msg == "broken build"

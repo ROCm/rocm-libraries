@@ -24,6 +24,7 @@ import sys
 import unittest
 
 from rocke.runtime.hip_module import get_device_arch
+from rocke.tests.lanes import TORCH_IN_CI, skip_until_reason
 
 _LIBDIR = pathlib.Path(__file__).resolve().parents[1]  # rocke/library
 _PYDIR = pathlib.Path(__file__).resolve().parents[2] / "platform" / "python"
@@ -39,7 +40,11 @@ _CDNA = ARCH in ("gfx942", "gfx950")
 _HAS_TORCH = importlib.util.find_spec("torch") is not None
 
 
-@unittest.skipUnless(ARCH and _HAS_TORCH, "needs a ROCm GPU + torch")
+@unittest.skipUnless(ARCH, "needs a ROCm GPU")
+@unittest.skipUnless(
+    _HAS_TORCH,
+    skip_until_reason(TORCH_IN_CI, reason="needs torch for the parity reference"),
+)
 class TestAttentionParityLibrary(unittest.TestCase):
     """Launch the library attention parity harness and check all cases pass."""
 

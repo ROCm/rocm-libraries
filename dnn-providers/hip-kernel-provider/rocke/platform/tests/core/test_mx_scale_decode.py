@@ -45,6 +45,7 @@ from rocke.helpers.mx_scale import (
 )
 from rocke.instances.common.mx_gemm import MxGemmSpec, build_mx_gemm
 from rocke.tests.arch_marks import COVERED_ARCHES
+from rocke.tests.lanes import BINDING_LANE, skip_until
 
 pytestmark = pytest.mark.filterwarnings(
     "error::rocke.core.lower_llvm.ArchDomainWarning"
@@ -123,7 +124,7 @@ def test_decoder_hip_reads_the_byte_unsigned():
 @pytest.mark.parametrize("flavor", LLVM_FLAVORS)
 def test_engines_lower_the_decoder_identically(flavor):
     if not _has_cpp_engine():
-        pytest.skip("needs the rocke_engine binding")
+        skip_until(BINDING_LANE, reason="needs the rocke_engine binding")
     import rocke_engine
 
     kernel = _decode_kernel()
@@ -147,7 +148,7 @@ def test_mx_gemm_reads_the_scale_bytes_unsigned_in_both_engines(arch):
     # The C++ MX GEMM builder must emit the same LLVM IR as the Python one;
     # backend="both" lowers through each and fails on any byte difference.
     if not _has_cpp_engine():
-        pytest.skip("needs the rocke_engine binding")
+        skip_until(BINDING_LANE, reason="needs the rocke_engine binding")
     ll = lower_mx_gemm(_mx_gemm_spec(), arch=arch, backend="both").llvm_text
     assert ll.count("zext i8") >= 2  # the A and the B scale bytes
     assert "sext i8" not in ll

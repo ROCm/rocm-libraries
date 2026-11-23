@@ -23,6 +23,7 @@ import pytest
 from rocke.numeric import storage
 from rocke.runtime.device_array import DeviceArray
 from rocke.runtime.hip_module import Runtime, get_device_arch
+from rocke.tests.lanes import TORCH_IN_CI, import_or_skip_until
 
 from ._attention_unified_support import (
     decode_reference,
@@ -52,7 +53,7 @@ def gpu():
 @pytest.fixture(scope="module")
 def torch_gpu(gpu):
     """Torch with a GPU, for the torch-caller features (graphs, torch streams)."""
-    torch = pytest.importorskip("torch")
+    torch = import_or_skip_until("torch", TORCH_IN_CI)
     if not torch.cuda.is_available():
         pytest.skip("torch has no GPU here")
     return torch, gpu

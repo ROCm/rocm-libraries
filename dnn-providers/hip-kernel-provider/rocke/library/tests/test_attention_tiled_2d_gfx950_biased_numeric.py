@@ -31,6 +31,7 @@ from dispatch.attention.common import AttentionTuningSpec
 from kernels.common import attention_unified as au
 from kernels.common.attention_unified import UnifiedAttentionProblem
 from rocke.runtime.hip_module import get_device_arch
+from rocke.tests.lanes import arch_skip_reason
 
 from ._attention_paged_reference import (
     alibi_score_bias,
@@ -45,7 +46,10 @@ _DEVICE_ARCH = get_device_arch()
 pytestmark = [
     pytest.mark.gpu,
     pytest.mark.skipif(
-        _DEVICE_ARCH != ARCH, reason=f"needs a {ARCH} GPU, found {_DEVICE_ARCH}"
+        _DEVICE_ARCH != ARCH,
+        reason=arch_skip_reason(
+            ("gfx950",), f"needs a {ARCH} GPU, found {_DEVICE_ARCH}"
+        ),
     ),
 ]
 

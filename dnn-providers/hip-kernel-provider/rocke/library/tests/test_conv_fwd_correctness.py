@@ -35,6 +35,7 @@ from builders.common.conv_reference import (
 )
 from rocke.numeric import storage
 from rocke.runtime.hip_module import get_device_arch
+from rocke.tests.lanes import skip_needing_arch
 
 GPU_ARCH = get_device_arch(0)
 _IS_WMMA = GPU_ARCH == "gfx1250"  # wave32 / WMMA target
@@ -521,7 +522,7 @@ class TestConvFwdCorrectness(unittest.TestCase):
 
     def test_pipeline_wavelet(self):
         if _IS_MFMA:
-            self.skipTest("wavelet is WMMA/gfx1250 only")
+            skip_needing_arch(("gfx1250",), reason="wavelet is WMMA/gfx1250 only")
         self._sweep_pipeline("wavelet")
 
 
@@ -800,7 +801,7 @@ class TestConvFwdGroupMergeNumerics(unittest.TestCase):
         # The wavelet load waves fetch B through their own loader; it must
         # take the merged (diagonal-masked) B descriptor like the sync path.
         if not _IS_WMMA:
-            self.skipTest("wavelet is WMMA/gfx1250 only")
+            skip_needing_arch(("gfx1250",), reason="wavelet is WMMA/gfx1250 only")
         for shape in _DW_SHAPES:
             for gm in (4, 16):
                 if shape.groups % gm:

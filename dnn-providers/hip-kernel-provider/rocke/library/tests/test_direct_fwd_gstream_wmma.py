@@ -21,6 +21,7 @@ from __future__ import annotations
 import unittest
 
 from rocke.runtime.hip_module import get_device_arch
+from rocke.tests.lanes import BINDING_LANE, arch_skip_reason, import_or_skip_until
 
 from kernels.common.conv_direct_fwd_gstream_wmma import (
     FwdGstreamWmmaSpec,
@@ -144,9 +145,7 @@ class TestFwdGstreamSpec(unittest.TestCase):
     def test_engines_agree_on_specs(self):
         """The C++ engine's validator, kernel name, grid and LDS size match
         Python's over the AOT grid and a set of rejected specs."""
-        import pytest
-
-        eng = pytest.importorskip("rocke_library_engine")
+        eng = import_or_skip_until("rocke_library_engine", BINDING_LANE)
         from kernels.conv.direct_aot_jobs import (
             DIRECT_CAPABILITIES,
             _knob_grid,
@@ -211,7 +210,7 @@ class TestFwdGstreamSpec(unittest.TestCase):
 
 def _gpu_skip() -> str:
     if GPU_ARCH != "gfx1250":
-        return f"needs gfx1250 (got {GPU_ARCH!r})"
+        return arch_skip_reason(("gfx1250",), f"needs gfx1250 (got {GPU_ARCH!r})")
     return ""
 
 

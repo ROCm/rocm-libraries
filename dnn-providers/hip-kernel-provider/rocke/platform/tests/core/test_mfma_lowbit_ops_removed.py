@@ -28,6 +28,7 @@ from rocke.core.lower_llvm import (
     _lower_kernel_to_llvm_python,
 )
 from rocke.helpers.atoms import MFMA_ATOMS, MfmaAtom
+from rocke.tests.engines import skip_without_cpp_engine
 
 # The op id is also the name of the builder method.
 # Each row holds the op id, the declaration key, and the atom factory name.
@@ -113,7 +114,7 @@ class TestRemovedOps(unittest.TestCase):
         try:
             _lower_via_cpp_engine(serialize(_probe_kernel()), "gfx950", "llvm23")
         except BackendError as exc:
-            self.skipTest(f"C++ engine unavailable: {exc}")
+            skip_without_cpp_engine(exc, f"C++ engine unavailable: {exc}")
         for op_id, _decl, _factory in _REMOVED:
             with self.subTest(op_id=op_id), self.assertRaises(RuntimeError) as ctx:
                 _lower_via_cpp_engine(serialize(_raw_kernel(op_id)), "gfx950", "llvm23")

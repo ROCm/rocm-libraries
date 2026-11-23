@@ -27,6 +27,7 @@ import dataclasses as dc
 import pytest
 from rocke.numeric import storage
 from rocke.tests.gpu import probe_device_arch
+from rocke.tests.lanes import arch_skip_reason
 
 from dispatch.gdn.axes import AUTO_DEFAULTS
 
@@ -40,7 +41,8 @@ _KDA_AUTO_TILES = sorted(
 )
 
 requires_gfx950 = pytest.mark.skipif(
-    probe_device_arch()[0] != ARCH, reason=f"needs a {ARCH} device"
+    probe_device_arch()[0] != ARCH,
+    reason=arch_skip_reason(("gfx950",), f"needs a {ARCH} device"),
 )
 
 

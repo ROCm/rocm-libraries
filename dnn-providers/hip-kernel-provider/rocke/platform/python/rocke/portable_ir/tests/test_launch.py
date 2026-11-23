@@ -32,6 +32,7 @@ from rocke.tests.gpu_check_recipes import (
     GPU_CHECK_REFUSAL,
     gpu_check_recipe,
 )
+from rocke.tests.lanes import SHARED_LIBRARY_LANE, skip_until_reason
 
 # grid.x = ceil(D / 64), the shape of a real elementwise dispatch.
 CEIL_DIV_D_64 = {"div": [{"add": [{"spec": "D"}, 63]}, 64]}
@@ -343,7 +344,12 @@ def _online_lib():
     return online.resolve_library_path(build=False)
 
 
-@unittest.skipIf(_online_lib() is None, "no shared librocke; run online.build_lib()")
+@unittest.skipIf(
+    _online_lib() is None,
+    skip_until_reason(
+        SHARED_LIBRARY_LANE, reason="no shared librocke; run online.build_lib()"
+    ),
+)
 class TestCEngineAgrees(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

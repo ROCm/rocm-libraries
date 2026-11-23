@@ -66,12 +66,19 @@ from kernels.conv.engine_bridge import (
     lower_conv_implicit_gemm,
 )
 from rocke.core import backend as bk
+from rocke.tests.lanes import BINDING_LANE, skip_until_reason
 
 _HAS_ENGINE = importlib.util.find_spec("rocke_library_engine") is not None
 
 #: The refusal of groups * cpg = groups * kpg = 2^31 (channel_totals_reason).
 _TOTALS_2_31 = "groups * cpg = 2147483648 and groups * kpg = 2147483648 must fit in i32"
-_SKIP = "" if _HAS_ENGINE else "rocke_library_engine extension not importable"
+_SKIP = (
+    ""
+    if _HAS_ENGINE
+    else skip_until_reason(
+        BINDING_LANE, reason="rocke_library_engine extension not importable"
+    )
+)
 
 
 def _p4(dtype, N=2, H=13, W=17, groups=32, K=3):

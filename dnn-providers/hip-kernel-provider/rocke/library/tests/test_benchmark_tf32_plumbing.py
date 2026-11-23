@@ -22,6 +22,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 from rocke.core.arch import ArchTarget
+from rocke.tests.lanes import TORCH_IN_CI, import_or_skip_until
 
 from benchmarks.common import benchmark_implicit_gemm_conv as big
 from benchmarks.common import kernel_sweep as ks
@@ -482,7 +483,7 @@ def test_rank_results_never_ranks_a_failed_kernel():
 
 
 def test_conv_reference_pins_ieee_and_restores():
-    torch = pytest.importorskip("torch")
+    torch = import_or_skip_until("torch", TORCH_IN_CI)
     from builders.common.conv_reference import ieee_fp32
 
     # Every conv backend with the per-operator API: the GPU one and oneDNN,
@@ -510,7 +511,7 @@ def test_conv_reference_pins_ieee_and_restores():
 def test_conv_reference_legacy_torch_uses_allow_tf32(monkeypatch):
     """A torch without the per-operator API (< 2.9) gets the legacy flag only:
     the helper must not touch an attribute that version lacks."""
-    torch = pytest.importorskip("torch")
+    torch = import_or_skip_until("torch", TORCH_IN_CI)
     from builders.common import conv_reference
 
     class _Cudnn:

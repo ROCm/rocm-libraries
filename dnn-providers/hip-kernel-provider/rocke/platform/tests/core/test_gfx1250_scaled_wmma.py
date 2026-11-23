@@ -28,6 +28,7 @@ from rocke.instances.gfx1250.block_scaled_gemm import (
     build_block_scaled_gemm,
     is_valid_spec,
 )
+from rocke.tests.lanes import BINDING_LANE, import_or_skip_until
 
 
 def _scaled_atom(dtype="fp8", scale16=False):
@@ -103,7 +104,7 @@ def _assert_scaled_lowering_rejects(kernel, message, engine, *, hip_message=None
     if engine == "native":
         if not neutral:
             pytest.skip("native LLVM uses neutral MMA dispatch")
-        native = pytest.importorskip("rocke_engine")
+        native = import_or_skip_until("rocke_engine", BINDING_LANE)
         with pytest.raises(RuntimeError) as caught:
             native.lower_serialized_ir(ir, arch="gfx1250", flavor="llvm23")
         assert str(caught.value) == (
@@ -553,7 +554,7 @@ def _scaled_matrix_error(op_id, role, bad, dtype, register_words=16):
 @pytest.mark.parametrize("dtype", ["fp8", "bf8", "fp6", "bf6", "fp4"])
 def test_scaled_lowering_rejects_sources(scale16, engine, dtype, subtests):
     if engine == "native":
-        pytest.importorskip("rocke_engine")
+        import_or_skip_until("rocke_engine", BINDING_LANE)
     # Only failures and existing skips need per-combination subtest reports.
     for concrete, role, kind in product(
         (False, True), (0, 1, 3, 4), ("scalar", "dtype", "short", "long")

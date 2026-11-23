@@ -22,12 +22,16 @@ import dataclasses
 
 import pytest
 from rocke.runtime.hip_module import get_device_arch
+from rocke.tests.lanes import arch_skip_reason
 
 from ._winograd_plan import run_winograd_plan
 
 GPU_ARCH = get_device_arch(0)
 
-pytestmark = pytest.mark.skipif(GPU_ARCH != "gfx1250", reason="needs a gfx1250 GPU")
+pytestmark = pytest.mark.skipif(
+    GPU_ARCH != "gfx1250",
+    reason=arch_skip_reason(("gfx1250",), "needs a gfx1250 GPU"),
+)
 
 _TOL = 5e-2
 _ARTIFACTS: dict = {}

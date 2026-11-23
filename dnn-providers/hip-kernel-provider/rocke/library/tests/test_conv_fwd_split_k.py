@@ -19,6 +19,11 @@ import unittest
 from unittest import mock
 
 import numpy as np
+from rocke.tests.lanes import (
+    BINDING_LANE,
+    arch_skip_reason,
+    skip_until,
+)
 
 from kernels.common._conv_implicit_gemm_common import ConvDataSpec, ConvProblem
 from kernels.common.conv_abi import conv_arg_names
@@ -1019,8 +1024,11 @@ class TestSplitKSpecDict(unittest.TestCase):
 def _engine_or_skip(case):
     try:
         import rocke_library_engine  # type: ignore
-    except ImportError:
-        case.skipTest("rocke_library_engine (the conv C++ extension) is not built")
+    except ModuleNotFoundError:
+        skip_until(
+            BINDING_LANE,
+            reason="rocke_library_engine (the conv C++ extension) is not built",
+        )
     return rocke_library_engine
 
 
@@ -1198,8 +1206,11 @@ class TestSplitKReduceEngine(unittest.TestCase):
     def test_overlong_name_is_an_error_not_a_stale_builder(self):
         try:
             import rocke_library_engine  # type: ignore
-        except ImportError:
-            self.skipTest("rocke_library_engine (the conv C++ extension) is not built")
+        except ModuleNotFoundError:
+            skip_until(
+                BINDING_LANE,
+                reason="rocke_library_engine (the conv C++ extension) is not built",
+            )
         spec = dict(dtype_d="bf16", vec=4, name="x" * 300)
         with self.assertRaisesRegex(Exception, "kernel name does not fit"):
             rocke_library_engine.conv_fwd_split_k_reduce_lower_llvm(
@@ -1237,8 +1248,9 @@ def _gpu_skip(archs=("gfx1250", "gfx950")) -> str:
     if not _DEVICE_ARCH:
         return "no GPU"
     if _DEVICE_ARCH not in archs:
-        return (
-            f"split-K fwd numerics run on {', '.join(archs)}; device is {_DEVICE_ARCH}"
+        return arch_skip_reason(
+            archs,
+            f"split-K fwd numerics run on {', '.join(archs)}; device is {_DEVICE_ARCH}",
         )
     return ""
 

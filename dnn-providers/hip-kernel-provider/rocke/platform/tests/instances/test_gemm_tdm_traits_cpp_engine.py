@@ -21,6 +21,8 @@ import sys
 import unittest
 from dataclasses import replace
 
+from rocke.tests.lanes import BINDING_LANE, skip_until
+
 # pytest.ini uses --import-mode=importlib, which does not put this directory on
 # sys.path: without the insert the sibling import below only resolves when an
 # earlier-collected module happened to add it.
@@ -147,8 +149,10 @@ class TestGemmTdmTraitsCppEngine(unittest.TestCase):
     def setUpClass(cls):
         try:
             import rocke_engine  # noqa: F401
-        except ImportError as e:
-            raise unittest.SkipTest(f"rocke_engine C++ binding not importable: {e}")
+        except ModuleNotFoundError as e:
+            skip_until(
+                BINDING_LANE, reason=f"rocke_engine C++ binding not importable: {e}"
+            )
 
     def test_both_engines_emit_identical_kernels(self):
         from rocke.core.backend import lower_universal_gemm

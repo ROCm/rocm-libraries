@@ -11,9 +11,9 @@ directory is). A file a selected test runs as a child process counts too. A
 module whose ``pytestmark`` the entry's ``-m`` expression rejects is not in CI
 through that entry. The check works per file: marks on single tests, ``-k``
 filters and a file whose every case skips in CI are not seen here, so
-``rocke.tests.pending_lanes`` records those files under a lane by hand, and
-``tools/limbo_audit.py`` checks each case against the record from the run
-records of CI lanes.
+``rocke.tests.pending_lanes`` records those files under the lane their cases
+declare where they skip (``rocke.tests.lanes``), and ``tools/limbo_audit.py``
+checks each case against the record from the run records of CI lanes.
 
 Every other test file must be listed in ``rocke.tests.pending_lanes``, and every
 listed entry must be current: its file present and its lane's kind still
@@ -54,20 +54,24 @@ from _pytest.mark.expression import Expression
 from rocke.assets import platform_root
 from rocke.runtime.comgr import CompilerInfo
 from rocke.tests import in_tree_suites
+from rocke.tests import lanes as rocke_lanes
 from rocke.tests.ctest_listing import configure_installed_ctest, list_ctest_entries
-from rocke.tests.pending_lanes import (
-    BINDING_LANE,
+from rocke.tests.lanes import (
     COMPREHENSIVE_CASES,
     GFX950_RUNNER,
+    GFX1250_RUNNER,
     LANES,
-    MEASURED_BUDGETS,
     NIGHTLY_SOURCE,
+    TORCH_IN_CI,
+    Lane,
+    skip_until_reason,
+)
+from rocke.tests.pending_lanes import (
+    MEASURED_BUDGETS,
     NO_ISSUE_FILED,
     PENDING,
     QUARANTINE_CAP,
     QUARANTINED,
-    TORCH_IN_CI,
-    Lane,
     MeasuredBudget,
     PendingTest,
     QuarantinedTest,
@@ -500,8 +504,9 @@ def listing_breaches(pending: Iterable[PendingTest]) -> list[str]:
 def imports_torch(test_file: Path) -> bool:
     """Whether a test module imports torch anywhere, a function body included:
     an ``import torch[.x]`` or ``from torch[.x] import`` statement, or a call of
-    ``importorskip``, ``import_module`` or ``find_spec`` with ``"torch"`` (a
-    module that checks for torch, for a child process that imports it)."""
+    ``importorskip``, ``import_or_skip_until``, ``import_module`` or
+    ``find_spec`` with ``"torch"`` (a module that checks for torch, for a child
+    process that imports it)."""
     tree = ast.parse(test_file.read_text(encoding="utf-8"))
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
@@ -514,9 +519,12 @@ def imports_torch(test_file: Path) -> bool:
             if isinstance(function, ast.Name):
                 name = function.id
             first = node.args[0] if node.args else None
-            if name not in ("importorskip", "import_module", "find_spec") or not (
-                isinstance(first, ast.Constant) and isinstance(first.value, str)
-            ):
+            if name not in (
+                "importorskip",
+                "import_or_skip_until",
+                "import_module",
+                "find_spec",
+            ) or not (isinstance(first, ast.Constant) and isinstance(first.value, str)):
                 continue
             modules = [first.value]
         else:
@@ -588,6 +596,10 @@ def test_a_torch_import_is_found_wherever_the_module_makes_it(tmp_path):
         "test_find_spec.py": (
             "import importlib.util\nHAS_TORCH = importlib.util.find_spec('torch')\n"
         ),
+        "test_lane_import.py": (
+            "from rocke.tests.lanes import TORCH_IN_CI, import_or_skip_until\n"
+            "torch = import_or_skip_until('torch', TORCH_IN_CI)\n"
+        ),
     }
     for name, source in sources.items():
         (tmp_path / name).write_text(source)
@@ -635,43 +647,59 @@ def test_a_marker_expression_deselects_a_module_by_its_pytestmark(tmp_path):
     assert not deselects_module(None, single)
 
 
-def test_a_lane_ci_lacks_explains_the_cases_whose_skip_reason_it_matches():
-    assert GFX950_RUNNER.explains("needs a gfx950 GPU, found gfx942")
-    assert not GFX950_RUNNER.explains("needs a gfx9500 GPU")
-    assert not GFX950_RUNNER.explains("could not import 'rocke_engine'")
-    assert not GFX950_RUNNER.explains(None)
-    assert BINDING_LANE.explains("could not import 'rocke_engine'")
+def test_a_file_entry_covers_the_cases_that_declare_its_lane_only():
+    def entry(lane):
+        return PendingTest("a/test_x.py", lane, "why", "owner", "2027-01-31")
+
+    waiting = entry(GFX950_RUNNER)
+    declared = skip_until_reason(GFX950_RUNNER, reason="needs a gfx950 GPU")
+    assert waiting.covers("a/test_x.py", "test_y", declared)
+    both = skip_until_reason(GFX950_RUNNER, GFX1250_RUNNER, reason="needs either")
+    assert waiting.covers("a/test_x.py", "test_y", both)
+    # A skip that only mentions the lane's arch is not a declaration: a defect
+    # whose reason names gfx950 is not booked as waiting for its runner.
+    assert not waiting.covers("a/test_x.py", "test_y", "needs a gfx950 GPU")
+    assert not waiting.covers("a/test_x.py", "test_y", "gfx950 kernel miscompares")
+    other = skip_until_reason(GFX1250_RUNNER, reason="needs a gfx1250 GPU")
+    assert not waiting.covers("a/test_x.py", "test_y", other)
+    assert not waiting.covers("a/test_x.py", "test_y", None)
+    assert not waiting.covers("a/test_z.py", "test_y", declared)
     # A lane no CI entry runs yet: every case of its files waits for it.
-    assert NIGHTLY_SOURCE.explains("any reason")
-    assert NIGHTLY_SOURCE.explains(None)
+    new_lane = entry(NIGHTLY_SOURCE)
+    assert new_lane.covers("a/test_x.py", "test_y", "any reason")
+    assert new_lane.covers("a/test_x.py", "test_y", None)
 
 
-def test_a_lane_takes_skip_reasons_only_when_ci_runs_its_files():
-    with pytest.raises(ValueError, match="expected none for a lane whose files"):
-        Lane("x", "a lane", enrolled=False, skip_reasons=("gfx950",))
-    with pytest.raises(ValueError, match="is not a regular expression"):
-        Lane("x", "a lane", enrolled=True, skip_reasons=("gfx(950",))
-
-
-def test_an_entry_for_one_test_covers_its_cases_whatever_their_reason():
+def test_an_entry_for_one_test_covers_its_unselected_or_declared_cases_only():
     def entry(lane, node=""):
         return PendingTest("a/test_x.py", lane, "why", "owner", "2027-01-31", node)
 
     with pytest.raises(ValueError, match="expected a lane CI lacks for one test"):
         entry(NIGHTLY_SOURCE, "test_y")
-    with pytest.raises(ValueError, match="takes entries for single tests only"):
-        entry(COMPREHENSIVE_CASES)
+    with pytest.raises(ValueError, match="expected one of rocke.tests.lanes.LANES"):
+        PendingTest(
+            "a/test_x.py",
+            Lane("unlisted", "a lane", enrolled=True),
+            "why",
+            "owner",
+            "2027-01-31",
+        )
     test = entry(COMPREHENSIVE_CASES, "test_y")
-    assert test.covers("a/test_x.py", "test_y[case]", "deselected by -k 'not test_y'")
+    left_out = "deselected by -k 'not test_y'"
+    assert test.covers("a/test_x.py", "test_y[case]", left_out, deselected=True)
     assert test.covers("a/test_x.py", "test_y", None)
-    assert not test.covers("a/test_x.py", "test_yz", "why")
-    assert not test.covers("a/test_z.py", "test_y", "why")
+    assert not test.covers("a/test_x.py", "test_yz", None)
+    assert not test.covers("a/test_z.py", "test_y", None)
     group = entry(COMPREHENSIVE_CASES, "TestGroup")
-    assert group.covers("a/test_x.py", "TestGroup::test_y[case]", "why")
-    assert not group.covers("a/test_x.py", "TestGroupTwo::test_y", "why")
-    whole_file = entry(GFX950_RUNNER)
-    assert whole_file.covers("a/test_x.py", "test_y", "needs a gfx950 GPU")
-    assert not whole_file.covers("a/test_x.py", "test_y", "needs torch")
+    assert group.covers("a/test_x.py", "TestGroup::test_y[case]", None)
+    assert not group.covers("a/test_x.py", "TestGroupTwo::test_y", None)
+    # A test that ran to a skip is covered only when the skip declares the
+    # entry's lane: a defect skip of a test listed under a runner is not.
+    runner = entry(GFX950_RUNNER, "test_y")
+    declared = skip_until_reason(GFX950_RUNNER, reason="needs a gfx950 GPU")
+    assert runner.covers("a/test_x.py", "test_y", declared)
+    assert not runner.covers("a/test_x.py", "test_y", "invalid spec on gfx942")
+    assert not runner.covers("a/test_x.py", "test_y", left_out)
 
 
 def test_the_registry_accounts_for_a_case_by_its_lane_quarantine_or_runner():
@@ -684,8 +712,9 @@ def test_the_registry_accounts_for_a_case_by_its_lane_quarantine_or_runner():
         and not any(q.path == entry.path for q in QUARANTINED)
     )
     path = file_entry.path
-    assert waiting_entry(path, "test_any", "needs a gfx950 GPU") is file_entry
-    assert waiting_entry(path, "test_any", "a reason no lane explains") is None
+    declared = skip_until_reason(GFX950_RUNNER, reason="needs a gfx950 GPU")
+    assert waiting_entry(path, "test_any", declared) is file_entry
+    assert waiting_entry(path, "test_any", "needs a gfx950 GPU") is None
     assert waiting_entry(path, "test_any", None) is None
     everywhere = next(entry for entry in QUARANTINED if not entry.arches)
     assert waiting_entry(everywhere.path, everywhere.node_name, "any") is everywhere
@@ -1077,6 +1106,71 @@ def test_a_quarantine_fails_when_expired_listed_twice_or_over_the_cap():
             f"{QUARANTINE_CAP}; fix one before quarantining another"
         )
     ]
+
+
+# The files that may name a runner lane or write a lane declaration by hand:
+# the lanes module, the registry, and the tests of both.
+_LANE_HOMES = frozenset(
+    {
+        "platform/python/rocke/tests/lanes.py",
+        "platform/python/rocke/tests/pending_lanes.py",
+    }
+)
+_LANE_TEST_DIRS = ("platform/tests/support/", "platform/tests/tools/")
+
+
+def _python_sources() -> Iterable[tuple[str, ast.Module]]:
+    """Each Python file of the test file roots, relative to the rocke
+    directory, with its syntax tree."""
+    for root in ("platform", "library"):
+        for file in (ROCKE / root).rglob("*.py"):
+            parts = file.relative_to(ROCKE).parts
+            if "__pycache__" in parts or any(p.startswith("build") for p in parts):
+                continue
+            yield file.relative_to(ROCKE).as_posix(), ast.parse(
+                file.read_text(encoding="utf-8")
+            )
+
+
+def _declares_a_lane(text: str) -> bool:
+    """Whether ``text`` reads as a lane declaration, a known lane or not."""
+    try:
+        return bool(rocke_lanes.lanes_waited_for(text))
+    except ValueError:
+        return True
+
+
+def test_tests_state_the_arches_they_need_not_the_runner_lane():
+    """A test names the arches it needs (``skip_needing_arch`` or
+    ``arch_skip_reason``); which runner lane that waits for, if any, is a fact
+    of ``rocke.tests.lanes`` alone, so a runner lane is named only in the lane
+    homes, and a hand-written ``waits for ...`` reason nowhere else."""
+    runner_lanes = {
+        name
+        for name, value in vars(rocke_lanes).items()
+        if isinstance(value, Lane) and value.arches
+    }
+    named, hand_written = [], []
+    for path, tree in _python_sources():
+        if path in _LANE_HOMES or path.startswith(_LANE_TEST_DIRS):
+            continue
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Name) and node.id in runner_lanes:
+                named.append(f"{path}:{node.lineno} {node.id}")
+            elif (
+                isinstance(node, ast.Constant)
+                and isinstance(node.value, str)
+                and _declares_a_lane(node.value)
+            ):
+                hand_written.append(f"{path}:{node.lineno}")
+    assert not named, (
+        "name the arches the case needs (skip_needing_arch / arch_skip_reason) "
+        f"instead of a runner lane: {named}"
+    )
+    assert not hand_written, (
+        "declare a lane with rocke.tests.lanes.skip_until / skip_until_reason, "
+        f"not a hand-written 'waits for' reason: {hand_written}"
+    )
 
 
 def test_every_file_waiting_for_torch_imports_it():

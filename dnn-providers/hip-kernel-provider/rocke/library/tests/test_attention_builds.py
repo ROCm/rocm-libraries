@@ -32,6 +32,7 @@ import pytest
 from rocke import lower_kernel_to_llvm
 from rocke.runtime.comgr import loaded_compiler_info
 from rocke.tests.compiler_tools import require_tools_or_skip
+from rocke.tests.lanes import TORCH_IN_CI, import_or_skip_until
 from rocke.tests.pending_lanes import (
     measured_budget_kernels,
     measured_scratch_allowance,
@@ -6380,14 +6381,11 @@ class TestAttentionHarnessTimers(unittest.TestCase):
         from pathlib import Path
         from unittest import mock
 
-        import pytest
-
         # The harness's reference implementation imports torch at module scope,
         # so it cannot be loaded without torch; skip torch-free instead of
         # erroring. Import torch BEFORE patching sys.modules so it stays in the
         # parent process's module table after ``mock.patch.dict`` exits.
-        pytest.importorskip("torch")
-        import torch  # noqa: F401
+        import_or_skip_until("torch", TORCH_IN_CI)
 
         # The harness moved into the library tree (builders/); resolve it via the
         # package system (editable-installed) rather than a hardcoded path, then

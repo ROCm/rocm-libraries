@@ -28,6 +28,7 @@ from rocke.portable_ir.examples import recipe_toy
 from rocke.portable_ir.src import abi
 from rocke.portable_ir.src.recipe_bundle import cbor_encode
 from rocke.portable_ir.utils.recipe_expand import ExpandError, expand_recipe
+from rocke.tests.lanes import SHARED_LIBRARY_LANE, skip_until_reason
 
 ARCHS = ("gfx942", "gfx950")
 
@@ -310,7 +311,12 @@ def _online_lib():
     return online.resolve_library_path(build=False)
 
 
-@unittest.skipIf(_online_lib() is None, "no shared librocke; run online.build_lib()")
+@unittest.skipIf(
+    _online_lib() is None,
+    skip_until_reason(
+        SHARED_LIBRARY_LANE, reason="no shared librocke; run online.build_lib()"
+    ),
+)
 class TestCEngineAgrees(unittest.TestCase):
     """The C engine has to make the same admission decisions as the Python one.
 

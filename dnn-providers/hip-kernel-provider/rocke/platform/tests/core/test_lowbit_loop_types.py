@@ -25,6 +25,7 @@ from rocke.core.ir import (
 from rocke.core.ir_serialize import parse, serialize
 from rocke.core.lower_llvm import LLVM_FLAVORS, _lower_kernel_to_llvm_python
 from rocke.tests.arch_marks import COVERED_ARCHES, arch_specific
+from rocke.tests.lanes import BINDING_LANE, skip_until
 
 
 pytestmark = pytest.mark.filterwarnings(
@@ -160,8 +161,8 @@ class TestLowbitLoopTypes(unittest.TestCase):
     def test_python_cpp_bytes_match_for_each_llvm_flavor(self):
         try:
             import rocke_engine
-        except ImportError as exc:
-            self.skipTest(f"rocke_engine extension not built: {exc}")
+        except ModuleNotFoundError as exc:
+            skip_until(BINDING_LANE, reason=f"rocke_engine extension not built: {exc}")
 
         for trip_count in (None, 0, 1, 3):
             kernel, _ = _build_loop(
@@ -254,8 +255,8 @@ class TestLowbitLoopTypes(unittest.TestCase):
     def test_cpp_validates_metadata_counts_in_both_loop_paths(self):
         try:
             import rocke_engine
-        except ImportError as exc:
-            self.skipTest(f"rocke_engine extension not built: {exc}")
+        except ModuleNotFoundError as exc:
+            skip_until(BINDING_LANE, reason=f"rocke_engine extension not built: {exc}")
         self._check_metadata_counts(
             lambda kernel: rocke_engine.lower_serialized_ir(
                 serialize(kernel), arch="gfx950", flavor="llvm20"
@@ -307,8 +308,8 @@ class TestLowbitLoopTypes(unittest.TestCase):
     def test_cpp_rejects_illegal_type_and_malformed_metadata_clearly(self):
         try:
             import rocke_engine
-        except ImportError as exc:
-            self.skipTest(f"rocke_engine extension not built: {exc}")
+        except ModuleNotFoundError as exc:
+            skip_until(BINDING_LANE, reason=f"rocke_engine extension not built: {exc}")
 
         illegal_types = (
             (Type("i7"), "no LLVM mapping for type i7"),

@@ -14,6 +14,26 @@ from pathlib import Path
 from unittest import mock
 
 from rocke.portable_ir.src import online
+from rocke.tests.lanes import SOURCE_TREE_CASES, skip_until
+
+# The CMake scripts that generate the source build ID, under platform/cmake.
+_BUILD_ID_SCRIPTS = ("rocke_build_id.cmake", "generate_rocke_build_id.cmake")
+
+
+def _build_id_generator(test: unittest.TestCase) -> tuple[Path, tuple[str, ...]]:
+    """The source tree's ``platform/cmake`` directory and the build-ID generator
+    scripts in it; skip ``test`` without them, as waiting for the source-tree
+    run, or without CMake."""
+    source_cmake = Path(online._platform_root()) / "cmake"
+    reason = (
+        "needs CMake and the build-ID generator scripts of a source tree "
+        "(platform/cmake)"
+    )
+    if not all((source_cmake / name).is_file() for name in _BUILD_ID_SCRIPTS):
+        skip_until(SOURCE_TREE_CASES, reason=reason)
+    if not shutil.which("cmake"):
+        test.skipTest(reason)
+    return source_cmake, _BUILD_ID_SCRIPTS
 
 
 class _BuildIdFunction:
@@ -133,15 +153,7 @@ class TestSourceBuildId(unittest.TestCase):
             self.assertNotEqual(first, online.source_build_id(root))
 
     def test_python_id_matches_the_cmake_generator(self):
-        source_cmake = Path(online._platform_root()) / "cmake"
-        script_names = ("rocke_build_id.cmake", "generate_rocke_build_id.cmake")
-        if not shutil.which("cmake") or not all(
-            (source_cmake / name).is_file() for name in script_names
-        ):
-            self.skipTest(
-                "needs CMake and the build-ID generator scripts of a source tree "
-                "(platform/cmake)"
-            )
+        source_cmake, script_names = _build_id_generator(self)
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             private = root / "cpp" / "core" / "private.h"
@@ -242,15 +254,7 @@ class TestSourceBuildId(unittest.TestCase):
             self.assertEqual(platform_only, online.source_build_id(root))
 
     def test_python_id_matches_the_cmake_generator_with_library_cpp(self):
-        source_cmake = Path(online._platform_root()) / "cmake"
-        script_names = ("rocke_build_id.cmake", "generate_rocke_build_id.cmake")
-        if not shutil.which("cmake") or not all(
-            (source_cmake / name).is_file() for name in script_names
-        ):
-            self.skipTest(
-                "needs CMake and the build-ID generator scripts of a source tree "
-                "(platform/cmake)"
-            )
+        source_cmake, script_names = _build_id_generator(self)
         with tempfile.TemporaryDirectory() as td:
             root = Path(td) / "platform"
             engine = root / "cpp" / "engine.cpp"

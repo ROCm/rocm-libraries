@@ -21,6 +21,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 from rocke.numeric.sdpa_reference import sdpa_reference_bwd
+from rocke.tests.lanes import TORCH_IN_CI, import_or_skip_until
 
 from benchmarks.common import attention_bwd_bench as bb
 from benchmarks.common import attention_bwd_rocke_arm as ra
@@ -328,7 +329,7 @@ def _fp64_grads(problem, o_io=None):
     ``o_io`` (the I/O-dtype O a backward consumes; the stored-inputs convention
     of the test oracle), or from the fp64 O when ``o_io`` is None. Returned as
     torch tensors, like the problem's."""
-    torch = pytest.importorskip("torch")
+    torch = import_or_skip_until("torch", TORCH_IN_CI)
     c = problem.cell
     q, k, v, do = (
         t.detach().double().cpu().numpy()
@@ -382,7 +383,7 @@ REF_CELLS = [
 
 @pytest.mark.parametrize("cell", REF_CELLS, ids=lambda c: c.id)
 def test_chunked_reference_matches_fp64_autograd(cell):
-    pytest.importorskip("torch")
+    import_or_skip_until("torch", TORCH_IN_CI)
     problem = bb.make_problem(cell, seed=3, device="cpu")
     ref = bb.reference_backward(problem, q_block=7, head_block=3)
     want = _fp64_grads(problem, ref.o.to(problem.q.dtype))
@@ -427,7 +428,7 @@ def test_chunked_reference_matches_fp64_autograd(cell):
 
 
 def test_odd_stride_cells_are_not_eight_aligned():
-    pytest.importorskip("torch")
+    import_or_skip_until("torch", TORCH_IN_CI)
     p = bb.make_problem(REF_CELLS[-1], seed=1, device="cpu")
     assert p.q.stride(-1) == 1 and any(s % 8 for s in p.q.stride()[:-1])
 
@@ -444,7 +445,7 @@ def test_kv_growth():
 def test_reference_dsum_uses_the_io_dtype_output():
     """The reference follows the stored-inputs convention: with the exact O it
     would differ on rows that attend two keys (near-cancelling dQ)."""
-    torch = pytest.importorskip("torch")
+    torch = import_or_skip_until("torch", TORCH_IN_CI)
     cell = bb.Cell("tl", 32, 2, 2, 1, 24, 24, "causal_tl", "bf16", "bshd")
     problem = bb.make_problem(cell, seed=7, device="cpu")
     ref = bb.reference_backward(problem)
@@ -459,7 +460,7 @@ def test_reference_dsum_uses_the_io_dtype_output():
 
 @pytest.mark.parametrize("cell", REF_CELLS, ids=lambda c: c.id)
 def test_fp64_samples_match_the_fp64_oracle(cell):
-    torch = pytest.importorskip("torch")
+    torch = import_or_skip_until("torch", TORCH_IN_CI)
     problem = bb.make_problem(cell, seed=5, device="cpu")
     ref = bb.reference_backward(problem, q_block=5, head_block=2)
     o_io = ref.o.to(problem.q.dtype)
@@ -498,7 +499,7 @@ def test_fp64_sample_threshold_and_spread():
 
 
 def test_reference_cache_roundtrip_checks_the_inputs(tmp_path):
-    pytest.importorskip("torch")
+    import_or_skip_until("torch", TORCH_IN_CI)
     cell = REF_CELLS[0]
     problem = bb.make_problem(cell, seed=3, device="cpu")
     ref = bb.reference_backward(problem)

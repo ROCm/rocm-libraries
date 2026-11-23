@@ -45,6 +45,7 @@ from rocke.numeric import storage
 from rocke.numeric.conv import conv_dgrad, conv_fwd
 from rocke.runtime.hip_module import get_device_arch
 from rocke.runtime.host_buffers import as_u8_buffer
+from rocke.tests.lanes import arch_skip_reason
 
 from kernels.common.conv_direct_grouped import (
     DirectConv4cSpec,
@@ -696,7 +697,7 @@ class Test4cDgrad(unittest.TestCase):
                     self.assertTrue(ok, msg)
 
 
-@unittest.skipIf(GPU_ARCH != "gfx950", "needs gfx950")
+@unittest.skipIf(GPU_ARCH != "gfx950", arch_skip_reason(("gfx950",), "needs gfx950"))
 class Test4cStageRowsDgrad(unittest.TestCase):
     """On device: the row-staged kernel over adversarial shapes (NaN-filled
     dX, so an unwritten element fails)."""

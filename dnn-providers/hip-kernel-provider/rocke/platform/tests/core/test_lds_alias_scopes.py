@@ -18,6 +18,7 @@ import unittest
 from rocke.core.ir import BF16, F32, IRBuilder, PtrType
 from rocke.core.ir_serialize import serialize
 from rocke.core.lower_llvm import LLVM_FLAVORS, lower_kernel_to_llvm
+from rocke.tests.lanes import BINDING_LANE, skip_until
 
 
 def _kernel(*, scopes: bool, overlap: bool = False):
@@ -104,8 +105,8 @@ class TestLdsAliasScopes(unittest.TestCase):
     def test_python_cpp_bytes_match(self):
         try:
             import rocke_engine
-        except ImportError as exc:
-            self.skipTest(f"rocke_engine extension not built: {exc}")
+        except ModuleNotFoundError as exc:
+            skip_until(BINDING_LANE, reason=f"rocke_engine extension not built: {exc}")
         for overlap in (False, True):
             kernel = _kernel(scopes=True, overlap=overlap)
             for flavor in LLVM_FLAVORS:

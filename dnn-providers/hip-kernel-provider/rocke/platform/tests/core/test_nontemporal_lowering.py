@@ -31,6 +31,8 @@ from rocke.core.ir import BF16, F16, F32, IRBuilder, PtrType, TemporalHint
 from rocke.core.ir_serialize import serialize
 from rocke.core.lower_hip import lower_kernel_to_hip
 from rocke.helpers.compile import _lower_llvm_via_backend, compile_kernel
+from rocke.tests.engines import skip_without_cpp_engine
+from rocke.tests.lanes import CI_TEST_TOOLS, skip_until
 
 
 def _hint(streaming: bool) -> TemporalHint:
@@ -59,7 +61,7 @@ def _lower_both(kernel, arch, monkeypatch):
     try:
         cpp = _lower_llvm_via_backend(kernel, arch=arch, backend="cpp", spec=None)
     except BackendError as e:
-        pytest.skip(f"C++ engine not importable: {str(e)[:200]}")
+        skip_without_cpp_engine(e, f"C++ engine not importable: {str(e)[:200]}")
     return py, cpp
 
 
@@ -126,7 +128,7 @@ def _require_cpp_engine(monkeypatch):
     try:
         _lower_llvm_via_backend(probe, arch="gfx950", backend="cpp", spec=None)
     except BackendError as e:
-        pytest.skip(f"C++ engine not importable: {str(e)[:200]}")
+        skip_without_cpp_engine(e, f"C++ engine not importable: {str(e)[:200]}")
 
 
 @pytest.mark.parametrize("which", ["load", "store"])
@@ -291,7 +293,10 @@ def _global_mem_lines(kernel, arch: str) -> list[str]:
 
     objdump = _objdump()
     if objdump is None:
-        pytest.skip("llvm-objdump not found (LLVM_OBJDUMP / ROCM_PATH / PATH)")
+        skip_until(
+            CI_TEST_TOOLS,
+            reason="llvm-objdump not found (LLVM_OBJDUMP / ROCM_PATH / PATH)",
+        )
     try:
         comgr._resolve_lib()
     except comgr.ComgrError as e:

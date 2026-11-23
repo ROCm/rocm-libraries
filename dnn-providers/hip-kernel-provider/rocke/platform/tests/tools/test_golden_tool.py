@@ -23,6 +23,7 @@ from types import ModuleType
 import pytest
 import rocke
 from rocke.core.golden_file import rerecord_command, write_golden_json
+from rocke.tests.lanes import SOURCE_TREE_CASES, skip_until
 
 _TEST_FILE = Path(__file__).resolve()
 # Source: rocke/platform/tests/tools/<this>; the tool is rocke/tools/golden.py.
@@ -37,7 +38,10 @@ def _tool_path() -> Path:
     ):
         if candidate.is_file():
             return candidate
-    pytest.skip("rocke/tools/golden.py is absent from this platform-only tree")
+    skip_until(
+        SOURCE_TREE_CASES,
+        reason="rocke/tools/golden.py is absent from this platform-only tree",
+    )
 
 
 @pytest.fixture(scope="module")
@@ -184,7 +188,10 @@ def _golden_name_constants() -> dict[str, str]:
     for tree in _CHECKER_TREES:
         root = _SOURCE_ROCKE / tree
         if not root.is_dir():
-            pytest.skip(f"{tree} is absent: the scan needs a source checkout")
+            skip_until(
+                SOURCE_TREE_CASES,
+                reason=f"{tree} is absent: the scan needs a source checkout",
+            )
         for path in sorted(root.rglob("*.py")):
             text = path.read_text(encoding="utf-8")
             if "GOLDEN_NAME" not in text:

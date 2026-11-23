@@ -19,6 +19,7 @@ from rocke.tests.subprocess_launcher import (
     rocke_python_command,
     rocke_subprocess_env,
 )
+from rocke.tests.lanes import skip_needing_arch
 
 _MODULE = "rocke.examples.gfx1250.gemm.block_scaled_gemm_verify"
 
@@ -45,7 +46,7 @@ def gpu_env():
         reason = f"requires visible HIP device 0 = gfx1250; detected {arch}"
         if env.get("ROCKE_REQUIRE_GFX1250") == "1":
             pytest.fail(reason)
-        pytest.skip(reason)
+        skip_needing_arch(("gfx1250",), reason=reason)
     for dependency in ("numpy", "ml_dtypes"):
         assert importlib.util.find_spec(
             dependency

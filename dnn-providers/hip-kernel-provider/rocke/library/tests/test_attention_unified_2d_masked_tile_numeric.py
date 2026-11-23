@@ -43,6 +43,7 @@ from kernels.common.attention_unified import (
     _tiled_spec_from_problem,
 )
 from rocke.runtime.hip_module import get_device_arch
+from rocke.tests.lanes import skip_needing_arch
 
 from ._attention_paged_reference import paged_attention_reference, round_to_half
 from ._attention_tiled_launch import launch_tiled_one_sequence
@@ -127,10 +128,11 @@ def _branch_spec(problem, branch, bs, arch):
     knobs = {"use_transposed_scalar_state": True} if branch.endswith("_s1") else {}
     spec, why = canonicalize_tuning_spec(problem, variant, knobs)
     if spec is None and problem.head_size == 256:
-        # D256 fits the LDS of gfx950 only.
-        pytest.skip(
-            f"{spec_id} {knobs} does not take D256 here: {why} (runs on gfx950)"
-        )
+        reason = f"{spec_id} {knobs} does not take D256 here: {why} (runs on gfx950)"
+        # D256 fits the LDS of gfx950 only; there a refusal is a defect.
+        if arch != "gfx950":
+            skip_needing_arch(("gfx950",), reason=reason)
+        pytest.skip(reason)
     assert spec is not None, f"{spec_id} {knobs}: {why}"
     return spec
 

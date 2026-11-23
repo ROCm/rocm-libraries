@@ -32,6 +32,7 @@ from rocke.core.isa.matrix_calls import MATRIX_CALLS, MatrixOperand
 from rocke.core.lower_llvm import LLVM_FLAVORS
 from rocke.tests.engines import lower_hip_with_both_engines, lower_with_both_engines
 from rocke.tests.ir_validity import assert_target_accepts, target_mnemonics
+from rocke.tests.lanes import SOURCE_TREE_CASES, skip_until
 
 # (signed op_id, operand bits, the generic target whose row lists it)
 _INSTRUCTIONS = (
@@ -222,7 +223,10 @@ def test_neither_engine_writes_a_signedness_flag_literal():
         *sorted((root / "cpp" / "include" / "rocke").rglob("*.h")),
     ]
     if not sources:
-        pytest.skip(f"source-tree check: no engine sources under {root}")
+        skip_until(
+            SOURCE_TREE_CASES,
+            reason=f"source-tree check: no engine sources under {root}",
+        )
     found = [
         f"{path.relative_to(root)}:{number}: {line.strip()}"
         for path in sources

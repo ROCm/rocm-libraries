@@ -30,6 +30,7 @@ from rocke.numeric.bf16 import bf16_to_f32, f32_to_bf16
 from rocke.numeric.sdpa_reference import sdpa_reference
 from rocke.runtime.device_array import DeviceArray
 from rocke.runtime.hip_module import get_device_arch
+from rocke.tests.lanes import arch_skip_reason
 
 from ._attn_tiled_2d_gfx950_qk_paths import FP8_K_IN_LDS, QK_PATHS
 
@@ -39,7 +40,10 @@ ml_dtypes = pytest.importorskip("ml_dtypes")
 _ARCH = get_device_arch()
 pytestmark = [
     pytest.mark.gpu,
-    pytest.mark.skipif(_ARCH != "gfx950", reason=f"needs a gfx950 GPU, found {_ARCH}"),
+    pytest.mark.skipif(
+        _ARCH != "gfx950",
+        reason=arch_skip_reason(("gfx950",), f"needs a gfx950 GPU, found {_ARCH}"),
+    ),
 ]
 
 _HEAD_SIZE = 64

@@ -35,8 +35,9 @@ from kernels.gfx950.attention_tiled_2d_fastkv_regp import (
     build_unified_attention_2d_fastkv_register_p,
     make_fastkv_register_p_spec,
 )
+from rocke.tests.lanes import BINDING_LANE, import_or_skip_until
 
-rocke_engine = pytest.importorskip("rocke_engine")
+rocke_engine = import_or_skip_until("rocke_engine", BINDING_LANE)
 
 _PROBLEM = {
     "head_size": 128,

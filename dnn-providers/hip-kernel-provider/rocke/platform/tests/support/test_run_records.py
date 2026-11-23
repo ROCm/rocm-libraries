@@ -16,6 +16,7 @@ import textwrap
 from pathlib import Path
 
 import pytest
+from rocke.tests.lanes import EXHAUSTIVE_CASES, SOURCE_TREE_CASES, skip_until_reason
 from rocke.tests.run_records import RECORDS_DIR_ENV, RunRecord, read_run_records
 from rocke.tests.subprocess_launcher import rocke_subprocess_env
 
@@ -126,7 +127,9 @@ def test_each_test_event_is_recorded_with_its_node_and_reason(tmp_path):
         "test_cases.py",
         "test_deselected",
         "deselected",
-        "deselected by -m 'not integration'",
+        skip_until_reason(
+            SOURCE_TREE_CASES, reason="deselected by -m 'not integration'"
+        ),
     ) in events
     collected = {node for file, node, event, _ in events if event == "collected"}
     assert {
@@ -199,7 +202,55 @@ def test_a_deselection_is_put_down_to_the_filter_that_made_it(tmp_path):
         ),
         # Removed under -m by a plugin that gave no reason: not put down to -m.
         ("test_quiet", "deselected", "deselected by a plugin that gave no reason"),
-        ("test_marked", "deselected", "deselected by -m 'not integration'"),
+        (
+            "test_marked",
+            "deselected",
+            skip_until_reason(
+                SOURCE_TREE_CASES, reason="deselected by -m 'not integration'"
+            ),
+        ),
+    }
+
+
+def test_a_marker_deselection_declares_the_lane_whose_marker_rejects_it(tmp_path):
+    """A test the -m expression rejects for a lane's marker (exhaustive,
+    integration) waits for that lane; one it would reject without that marker
+    too (a GPU test in a CPU entry) declares no lane."""
+    tree = tmp_path / "tree"
+    tree.mkdir()
+    _write(
+        tree,
+        "test_marks.py",
+        """
+        import pytest
+
+        @pytest.mark.exhaustive
+        def test_sweep():
+            pass
+
+        @pytest.mark.exhaustive
+        @pytest.mark.gpu
+        def test_gpu_sweep():
+            pass
+
+        @pytest.mark.gpu
+        def test_on_gpu():
+            pass
+
+        def test_on_host():
+            pass
+        """,
+    )
+    records = tmp_path / "records"
+    expression = "not exhaustive and not gpu"
+    _run_pytest(tree, records, "-m", expression, "-W", "ignore")
+    reason = f"deselected by -m {expression!r}"
+    assert {
+        (node, why) for _, node, event, why in _events(records) if event == "deselected"
+    } == {
+        ("test_sweep", skip_until_reason(EXHAUSTIVE_CASES, reason=reason)),
+        ("test_gpu_sweep", reason),
+        ("test_on_gpu", reason),
     }
 
 

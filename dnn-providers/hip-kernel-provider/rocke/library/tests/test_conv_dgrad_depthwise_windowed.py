@@ -54,6 +54,7 @@ from dataclasses import dataclass, replace
 
 import numpy as np
 from rocke.runtime.hip_module import get_device_arch
+from rocke.tests.lanes import arch_skip_reason
 
 from kernels.common.conv_direct_grouped import (
     DW_DGRAD_MFMA_CH,
@@ -782,7 +783,10 @@ def _mfma_spec(c: _MfmaCase) -> DirectDepthwiseDgradWindowedSpec:
     )
 
 
-@unittest.skipUnless(GPU_ARCH == "gfx950", f"needs gfx950, got {GPU_ARCH!r}")
+@unittest.skipUnless(
+    GPU_ARCH == "gfx950",
+    arch_skip_reason(("gfx950",), f"needs gfx950, got {GPU_ARCH!r}"),
+)
 class TestMfmaNumerics(unittest.TestCase):
     def test_adversarial_shapes(self):
         for c in _MFMA_CASES:
@@ -843,7 +847,10 @@ class TestWmmaMfmaCaseCoverage(unittest.TestCase):
                     self.assertTrue(ok, f"{c.id}: {why}")
 
 
-@unittest.skipUnless(GPU_ARCH == "gfx1250", f"needs gfx1250, got {GPU_ARCH!r}")
+@unittest.skipUnless(
+    GPU_ARCH == "gfx1250",
+    arch_skip_reason(("gfx1250",), f"needs gfx1250, got {GPU_ARCH!r}"),
+)
 class TestWmmaNumerics(unittest.TestCase):
     def test_mfma_cases_at_wave32(self):
         """The MFMA form's adversarial set, on the WMMA where it fits."""
@@ -884,7 +891,10 @@ def _mfma_spread_zone(p: DirectConvProblem, bad_inputs) -> np.ndarray:
     return zone
 
 
-@unittest.skipUnless(GPU_ARCH == "gfx950", f"needs gfx950, got {GPU_ARCH!r}")
+@unittest.skipUnless(
+    GPU_ARCH == "gfx950",
+    arch_skip_reason(("gfx950",), f"needs gfx950, got {GPU_ARCH!r}"),
+)
 class TestNonFiniteGradients(unittest.TestCase):
     """An Inf in dY reaches only the dX columns in its receptive field.
 
@@ -1108,7 +1118,10 @@ _FWD_CASES = (
 )
 
 
-@unittest.skipUnless(GPU_ARCH == "gfx950", f"needs gfx950, got {GPU_ARCH!r}")
+@unittest.skipUnless(
+    GPU_ARCH == "gfx950",
+    arch_skip_reason(("gfx950",), f"needs gfx950, got {GPU_ARCH!r}"),
+)
 class TestForwardNumerics(unittest.TestCase):
     def test_depthwise_and_grouped_forward(self):
         for N, H, W, G, cpg, K, S, dtype, knobs in _FWD_CASES:

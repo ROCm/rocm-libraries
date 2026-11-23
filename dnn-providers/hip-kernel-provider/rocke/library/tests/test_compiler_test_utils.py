@@ -27,6 +27,7 @@ from rocke.runtime import comgr
 from rocke.runtime.comgr import CompilerInfo
 from rocke.runtime.compiler_options import measured_answers, require_accepted
 from rocke.tests.compiler_tools import REQUIRE_COMPILER_TOOLS_ENV, require_tools_or_skip
+from rocke.tests.lanes import CI_TEST_TOOLS, skip_until_reason
 
 from . import _attention_bwd_resources, _parallel_compile
 from ._attention_bwd_resources import compile_or_skip
@@ -40,6 +41,8 @@ OPTION = "-amdgpu-mfma-vgpr-form"
 # How the refusal starts, and how the policy introduces it.
 REFUSAL = f"kernel 'probe' needs the compiler option '-mllvm {OPTION}'"
 SKIP_REASON = f"loaded compiler cannot build this kernel: {REFUSAL}"
+# A missing or refusing tool skips as waiting for the CI test environment.
+TOOLS_SKIP = skip_until_reason(CI_TEST_TOOLS, reason=SKIP_REASON)
 
 
 def _compiler(llvm_major: int) -> CompilerInfo:
@@ -80,7 +83,7 @@ def _unmeasured_major() -> int:
 def test_refused_option_skips(monkeypatch):
     monkeypatch.delenv(REQUIRE_COMPILER_TOOLS_ENV, raising=False)
     with (
-        pytest.raises(unittest.SkipTest, match=f"^{SKIP_REASON}"),
+        pytest.raises(unittest.SkipTest, match=f"^{TOOLS_SKIP}"),
         skip_where_compiler_refuses_option(),
     ):
         _compile_on(_refusing_major())
@@ -126,7 +129,7 @@ def _vgpr_form_kernel() -> KernelDef:
 @pytest.mark.parametrize(
     ("required", "outcome", "reason"),
     [
-        ("0", unittest.SkipTest, f"^{SKIP_REASON}"),
+        ("0", unittest.SkipTest, f"^{TOOLS_SKIP}"),
         ("1", AssertionError, f"^{REQUIRE_COMPILER_TOOLS_ENV}=1 but {SKIP_REASON}"),
     ],
     ids=["skips", "fails-where-tools-are-required"],
@@ -199,7 +202,14 @@ def test_other_value_errors_propagate_from_the_processor_policy(
 @pytest.mark.parametrize(
     ("required", "outcome", "reason"),
     [
-        ("0", unittest.SkipTest, "^HSACO introspection unavailable: missing tool"),
+        (
+            "0",
+            unittest.SkipTest,
+            "^"
+            + skip_until_reason(
+                CI_TEST_TOOLS, reason="HSACO introspection unavailable: missing tool"
+            ),
+        ),
         (
             "1",
             AssertionError,

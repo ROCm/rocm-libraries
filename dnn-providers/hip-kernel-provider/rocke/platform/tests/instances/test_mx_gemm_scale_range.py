@@ -61,6 +61,7 @@ from rocke.tests.engines import (
     lower_spec_with_all_engines,
 )
 from rocke.tests.gpu import current_device_arch_in, launch_with_buffers
+from rocke.tests.lanes import BINDING_LANE, skip_until
 from rocke.tests.llvm_ir import KernelIR
 
 _NAN_CODE = 255
@@ -817,7 +818,7 @@ def test_both_engines_refuse_invalid_specs(fields, message):
     with pytest.raises(ValueError, match=re.escape(message)):
         build_mx_gemm(spec, arch="gfx950")
     if "cpp" not in available_engines():
-        pytest.skip("needs the rocke_engine binding")
+        skip_until(BINDING_LANE, reason="needs the rocke_engine binding")
     with pytest.raises(RuntimeError, match=re.escape(message)):
         lower_mx_gemm(spec, arch="gfx950", backend="cpp")
 

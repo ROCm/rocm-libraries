@@ -36,6 +36,7 @@ from functools import cache
 from pathlib import Path
 
 import pytest
+from rocke.tests.lanes import BINDING_LANE, import_or_skip_until
 
 _TESTS = Path(__file__).resolve().parent
 _PARITY = _TESTS / "parity"
@@ -161,7 +162,7 @@ def test_end_of_range_is_reported():
 @pytest.mark.parametrize("flavor", FLAVORS)
 @pytest.mark.parametrize("idx", CONFIGS)
 def test_cpp_engine_lowers_the_serialized_ir_identically(idx, flavor):
-    rocke_engine = pytest.importorskip("rocke_engine")
+    rocke_engine = import_or_skip_until("rocke_engine", BINDING_LANE)
     _spec, arch = _emitter()._spec(idx)
     cpp = rocke_engine.lower_serialized_ir(
         _out(idx, "ir", "llvm22"), arch=arch, flavor=flavor

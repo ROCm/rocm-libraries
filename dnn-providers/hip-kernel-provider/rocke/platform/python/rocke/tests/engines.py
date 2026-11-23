@@ -87,7 +87,7 @@ import sys
 from collections.abc import Callable, Sequence
 from pathlib import Path
 from types import ModuleType
-from typing import Literal
+from typing import Literal, NoReturn
 
 import pytest
 
@@ -103,6 +103,7 @@ from rocke.tests.hip_outcomes import (
     hip_refusal_of,
     python_hip_outcome_of_kernel,
 )
+from rocke.tests.lanes import BINDING_LANE, import_or_skip_until, skip_until
 
 __all__ = [
     "BACKEND_LANES",
@@ -129,6 +130,7 @@ __all__ = [
     "lower_with_engine",
     "native_hip_outcomes",
     "python_hip_outcome",
+    "skip_without_cpp_engine",
     "skip_without_native_hip_lowering",
 ]
 
@@ -224,8 +226,9 @@ def instance_llvm_from_all_engines(
 
 
 def _require_native_engine() -> ModuleType:
-    """The ``rocke_engine`` binding; skip the calling test when it is not built."""
-    return pytest.importorskip("rocke_engine")
+    """The ``rocke_engine`` binding; skip the calling test, as waiting for the
+    binding lane, when it is not built."""
+    return import_or_skip_until("rocke_engine", BINDING_LANE)
 
 
 def _validate_engine(engine: Engine) -> None:
@@ -632,17 +635,31 @@ def _native_status_refusal(status: int, message: str) -> HipRefusal:
     return HipRefusal(type_name, message)
 
 
+def skip_without_cpp_engine(error: Exception, reason: str) -> NoReturn:
+    """Skip the calling test, for ``reason``, after the C++ engine raised
+    ``error`` (a ``rocke.core.backend.BackendError``): as waiting for the
+    binding lane when the engine's module is not installed (the error's cause
+    is the ``ModuleNotFoundError`` ``import_engine`` raises it from), else as a
+    plain skip, so a module that is built but fails to load is not booked as
+    waiting for the lane."""
+    __tracebackhide__ = True  # pytest reports the skip at the caller
+    if isinstance(error.__cause__, ModuleNotFoundError):
+        skip_until(BINDING_LANE, reason=reason)
+    pytest.skip(reason)
+
+
 def skip_without_native_hip_lowering() -> None:
-    """Skip the calling test, or the module when called at import, unless the
-    C++ HIP lowering can run: the ``rocke_engine`` binding is built, or
-    ``ROCKE_IR_LOWER_CLI`` names the ``rocke_ir_lower_cli`` program."""
+    """Skip the calling test, or the module when called at import, as waiting
+    for the binding lane, unless the C++ HIP lowering can run: the
+    ``rocke_engine`` binding is built, or ``ROCKE_IR_LOWER_CLI`` names the
+    ``rocke_ir_lower_cli`` program."""
     if importlib.util.find_spec("rocke_engine") is None and not os.environ.get(
         IR_LOWER_CLI_ENV
     ):
-        pytest.skip(
-            f"needs the rocke_engine binding, or {IR_LOWER_CLI_ENV} naming a "
-            "built rocke_ir_lower_cli",
-            allow_module_level=True,
+        skip_until(
+            BINDING_LANE,
+            reason=f"needs the rocke_engine binding, or {IR_LOWER_CLI_ENV} naming "
+            "a built rocke_ir_lower_cli",
         )
 
 
@@ -678,7 +695,9 @@ def ir_lower_cli_hip_outcomes(
     unset. A name that is not a file is a broken setup and fails."""
     program = os.environ.get(IR_LOWER_CLI_ENV)
     if not program:
-        pytest.skip(f"set {IR_LOWER_CLI_ENV} to a built rocke_ir_lower_cli")
+        skip_until(
+            BINDING_LANE, reason=f"set {IR_LOWER_CLI_ENV} to a built rocke_ir_lower_cli"
+        )
     path = Path(program).resolve()
     assert path.is_file(), f"{IR_LOWER_CLI_ENV} names {path}, not a file"
     request = bytearray()

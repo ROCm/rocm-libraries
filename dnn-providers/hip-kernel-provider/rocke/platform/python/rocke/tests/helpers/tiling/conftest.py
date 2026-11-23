@@ -18,6 +18,7 @@ from typing import TypeVar
 import pytest
 
 from rocke.tests.gpu import current_device_arch, current_device_arch_in
+from rocke.tests.lanes import CI_TEST_TOOLS, skip_until
 from rocke.tests.session_gc import use_test_session_gc
 
 _Fixture = TypeVar("_Fixture", bound=Callable[..., object])
@@ -57,9 +58,13 @@ def requires_matplotlib() -> None:
     draws one asks for this fixture (``@pytest.mark.usefixtures("requires_matplotlib")``), so it
     skips where matplotlib is absent while the tests of the same module that draw nothing still run.
     """
-    pytest.importorskip(
-        "matplotlib", reason="matplotlib is not installed; it is needed to draw figures"
-    )
+    try:
+        import matplotlib  # noqa: F401
+    except ModuleNotFoundError:
+        skip_until(
+            CI_TEST_TOOLS,
+            reason="matplotlib is not installed; it is needed to draw figures",
+        )
 
 
 @_gpu_fixture

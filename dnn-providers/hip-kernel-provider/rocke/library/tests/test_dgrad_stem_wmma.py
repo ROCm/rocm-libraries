@@ -21,10 +21,10 @@ import dataclasses
 import unittest
 
 import numpy as np
-import pytest
 from rocke.numeric import storage
 from rocke.numeric.compare import peak_relative_error
 from rocke.runtime.hip_module import get_device_arch
+from rocke.tests.lanes import BINDING_LANE, arch_skip_reason, import_or_skip_until
 
 from kernels.common.conv_dgrad_patch_wmma import (
     DgradPatchWmmaSpec,
@@ -190,7 +190,7 @@ class TestStemEngines(unittest.TestCase):
                     self.assertEqual(tuple(grid), spec.grid())
 
     def test_patch_engines_agree_on_specs(self):
-        eng = pytest.importorskip("rocke_library_engine")
+        eng = import_or_skip_until("rocke_library_engine", BINDING_LANE)
         from kernels.conv.engine_bridge import conv_dgrad_patch_wmma_spec_to_dict
 
         specs = _aot_specs("direct_dgrad_patch_wmma")
@@ -208,7 +208,7 @@ class TestStemEngines(unittest.TestCase):
         )
 
     def test_smallc_engines_agree_on_specs(self):
-        eng = pytest.importorskip("rocke_library_engine")
+        eng = import_or_skip_until("rocke_library_engine", BINDING_LANE)
         from kernels.conv.engine_bridge import conv_dgrad_smallc_wmma_spec_to_dict
 
         specs = _aot_specs("direct_dgrad_smallc_wmma")
@@ -228,7 +228,7 @@ class TestStemEngines(unittest.TestCase):
     def test_binding_rejects_bad_input(self):
         """A rejected spec returns the rejection (no grid is computed from its
         zero tile extents); a missing, mistyped or partial problem raises."""
-        eng = pytest.importorskip("rocke_library_engine")
+        eng = import_or_skip_until("rocke_library_engine", BINDING_LANE)
         from kernels.conv.engine_bridge import (
             conv_dgrad_patch_wmma_spec_to_dict,
             conv_dgrad_smallc_wmma_spec_to_dict,
@@ -525,7 +525,7 @@ def _with_dtype(spec, dtype):
 
 def _gpu_skip() -> str:
     if GPU_ARCH != "gfx1250":
-        return f"needs gfx1250 (got {GPU_ARCH!r})"
+        return arch_skip_reason(("gfx1250",), f"needs gfx1250 (got {GPU_ARCH!r})")
     return ""
 
 

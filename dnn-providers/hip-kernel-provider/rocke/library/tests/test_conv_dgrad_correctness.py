@@ -33,6 +33,7 @@ import numpy as np
 from rocke.assets import library_root, platform_root
 from rocke.numeric import storage
 from rocke.runtime.hip_module import get_device_arch
+from rocke.tests.lanes import arch_skip_reason
 
 from builders.common.conv_reference import (
     conv_dgrad_reference,
@@ -1006,7 +1007,8 @@ _KOUTER_WAVE32_ATOM = {(32, 64): (16, 32)}  # (warp_tile_mn, tile_k) gfx950 -> w
 
 
 @unittest.skipUnless(
-    ARCH in _KOUTER_WAVE, f"K-outer dgrad needs {'/'.join(_KOUTER_WAVE)}"
+    ARCH in _KOUTER_WAVE,
+    arch_skip_reason(_KOUTER_WAVE, f"K-outer dgrad needs {'/'.join(_KOUTER_WAVE)}"),
 )
 class TestConvDgradLdsKOuter(unittest.TestCase):
     """The K-outer B tile must be a pure re-layout of the M-outer default."""
@@ -1222,7 +1224,17 @@ class TestConvDgradUniformKDecode(unittest.TestCase):
         )
         ok, reason = is_valid_dgrad_spec(spec, ARCH)
         if not ok:
-            self.skipTest(f"invalid spec (uniform_k_decode={ukd}): {reason}")
+            # The case waits for the runner of an arch that takes the spec.
+            self.skipTest(
+                arch_skip_reason(
+                    [
+                        arch
+                        for arch in _MFMA_ARCHES
+                        if is_valid_dgrad_spec(spec, arch)[0]
+                    ],
+                    f"invalid spec (uniform_k_decode={ukd}): {reason}",
+                )
+            )
         spec.validate()
         return _dgrad_run_inprocess(spec, dtype)
 
@@ -1687,7 +1699,10 @@ _HALO_TILINGS = (
 _HALO_MAX_WO = 72
 
 
-@unittest.skipUnless(ARCH == "gfx950", "the dY halo dgrad loop is gfx950 wave64 MFMA")
+@unittest.skipUnless(
+    ARCH == "gfx950",
+    arch_skip_reason(("gfx950",), "the dY halo dgrad loop is gfx950 wave64 MFMA"),
+)
 class TestConvDgradDyHalo(unittest.TestCase):
     """The dY halo loop against the reference on adversarial shapes.
 
@@ -2066,7 +2081,10 @@ class TestConvDgradTf32(unittest.TestCase):
                     )
 
 
-@unittest.skipUnless(ARCH == "gfx950", "the cached split-K cshuffle dgrad is gfx950")
+@unittest.skipUnless(
+    ARCH == "gfx950",
+    arch_skip_reason(("gfx950",), "the cached split-K cshuffle dgrad is gfx950"),
+)
 class TestConvDgradSplitKCshuffle(unittest.TestCase):
     """Split-K with the cshuffle epilogue: the LDS-staged tile is atomic-added
     into dX through the tilde address function (packed pairs for 16-bit dX).

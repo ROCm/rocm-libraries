@@ -40,6 +40,7 @@ from kernels.common import attention_unified as au
 from rocke.numeric.bf16 import bf16_to_f32, f32_to_bf16
 from rocke.runtime.device_array import DeviceArray
 from rocke.runtime.hip_module import get_device_arch
+from rocke.tests.lanes import arch_skip_reason
 
 
 _CUS = {"gfx942": 304, "gfx950": 256}
@@ -458,7 +459,11 @@ def test_pair_numeric_on_one_binary(
     device_arch, monkeypatch, arch, path, geometry, first, second
 ):
     if device_arch != arch:
-        pytest.skip(f"requires a {arch} GPU, found {device_arch or 'no GPU'}")
+        pytest.skip(
+            arch_skip_reason(
+                (arch,), f"requires a {arch} GPU, found {device_arch or 'no GPU'}"
+            )
+        )
     # The gfx942 2D graph replay captures through torch; launch eagerly.
     monkeypatch.setenv("HIPDNN_GFX942_2D_GRAPH", "0")
     _, bs, _ = geometry

@@ -47,6 +47,7 @@ from rocke.tests.engines import (
     lower_hip_with_both_engines,
     native_hip_outcomes,
 )
+from rocke.tests.lanes import BINDING_LANE, import_or_skip_until
 
 
 def _assert_both_refuse(
@@ -97,7 +98,7 @@ def test_ir_lower_cli_reports_what_the_binding_reports():
     in one batch, both report the same source and the same refusals, in order,
     including the parser's refusals of text that is not a kernel. Runs where
     both are present."""
-    pytest.importorskip("rocke_engine")
+    import_or_skip_until("rocke_engine", BINDING_LANE)
     waitcnt = serialize(_waitcnt_kernel("s_waitcnt").kernel)
     no_template = serialize(_inline_asm_kernel(template=None).kernel)
     kernels = [

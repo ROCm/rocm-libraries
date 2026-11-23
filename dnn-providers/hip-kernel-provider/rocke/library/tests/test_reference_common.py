@@ -39,6 +39,7 @@ from reference_common.numeric import (
     encode,
     max_abs_upper,
 )
+from rocke.tests.lanes import SOURCE_TREE_CASES, skip_until
 
 from ._child_pytest import pin_child_rootdir
 
@@ -3864,10 +3865,11 @@ def _published_bundle_data(spec, architecture, variant):
                 f"bundle is extracted at {bundle}; fetch the archive with: "
                 + display_command(["dvc", "pull", str(pointer)])
             )
-        pytest.skip(
-            f"no {name} bundle is installed at {bundle}; installed trees have it "
-            "only when built with ROCKE_INSTALL_TEST_GPU_REFERENCES=ON and "
-            "assembled with its architecture's test artifact"
+        skip_until(
+            SOURCE_TREE_CASES,
+            reason=f"no {name} bundle is installed at {bundle}; installed trees have "
+            "it only when built with ROCKE_INSTALL_TEST_GPU_REFERENCES=ON and "
+            "assembled with its architecture's test artifact",
         )
     return bundle
 
@@ -4422,9 +4424,10 @@ def _baseline_repository(tests, revision):
     from reference_common.paths import installed_test_root
 
     if installed_test_root(tests) is not None:
-        pytest.skip(
-            "installed test trees have no git history to export locked baselines "
-            "from; run this check from a rocKE source checkout"
+        skip_until(
+            SOURCE_TREE_CASES,
+            reason="installed test trees have no git history to export locked "
+            "baselines from; run this check from a rocKE source checkout",
         )
     if shutil.which("git") is None:
         pytest.skip("git is not installed; exporting a locked baseline needs it")

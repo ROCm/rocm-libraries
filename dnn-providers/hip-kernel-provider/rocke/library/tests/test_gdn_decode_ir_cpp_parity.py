@@ -24,6 +24,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from rocke.tests.lanes import BINDING_LANE, skip_until
 
 _TESTS = str(Path(__file__).resolve().parent)
 if _TESTS not in sys.path:
@@ -44,7 +45,9 @@ def _engine():
                 f"ROCKE_BACKEND={os.environ['ROCKE_BACKEND']} expects the C++ "
                 f"engine, but rocke_engine is not importable: {e}"
             )
-        pytest.skip(f"rocke_engine extension not built/importable: {e}")
+        skip_until(
+            BINDING_LANE, reason=f"rocke_engine extension not built/importable: {e}"
+        )
     return rocke_engine
 
 

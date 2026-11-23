@@ -19,7 +19,8 @@ after the file (``[Class::]test[params]``). Its ``event`` is one of:
 - ``collected``: the test was collected (before any filter removed it);
 - ``deselected``: a filter removed it; ``reason`` is the reason the plugin that
   removed it gave (:func:`note_deselection`), else the ``-m`` or ``-k``
-  expression that rejects it;
+  expression that rejects it (declaring the lanes, ``rocke.tests.lanes``,
+  whose markers are what it rejects);
 - ``ran``: it ran (passed, failed, xfailed or xpassed), or erred in setup or
   teardown, which a run reports as a failure;
 - ``skipped``: it was skipped; ``reason`` is pytest's skip reason;
@@ -43,6 +44,8 @@ from pathlib import Path
 import pytest
 from _pytest.mark import KeywordMatcher, MarkMatcher
 from _pytest.mark.expression import Expression
+
+from .lanes import LANES, skip_until_reason
 
 __all__ = [
     "EVENTS",
@@ -171,15 +174,35 @@ def _deselection(item: pytest.Item) -> str:
     if noted is not None:
         return noted
     option = item.config.option
-    if option.markexpr and not Expression.compile(option.markexpr).evaluate(
-        MarkMatcher.from_markers(item.iter_markers())
-    ):
-        return f"deselected by -m {option.markexpr!r}"
+    if option.markexpr:
+        expression = Expression.compile(option.markexpr)
+        markers = list(item.iter_markers())
+        if not expression.evaluate(MarkMatcher.from_markers(markers)):
+            return _marker_deselection(expression, option.markexpr, markers)
     if option.keyword and not Expression.compile(option.keyword).evaluate(
         KeywordMatcher.from_item(item)
     ):
         return f"deselected by -k {option.keyword!r}"
     return "deselected by a plugin that gave no reason"
+
+
+def _marker_deselection(
+    expression: Expression, markexpr: str, markers: list[pytest.Mark]
+) -> str:
+    """Why ``-m markexpr`` rejects a test carrying ``markers``: the expression,
+    declaring the lanes whose markers it rejects when the test without them
+    would be selected."""
+    reason = f"deselected by -m {markexpr!r}"
+    names = {marker.name for marker in markers}
+    lanes = [lane for lane in LANES if lane.marker and lane.marker in names]
+    lane_markers = {lane.marker for lane in lanes}
+    if lanes and expression.evaluate(
+        MarkMatcher.from_markers(
+            [marker for marker in markers if marker.name not in lane_markers]
+        )
+    ):
+        return skip_until_reason(*lanes, reason=reason)
+    return reason
 
 
 def _skip_reason(report: pytest.TestReport | pytest.CollectReport) -> str:

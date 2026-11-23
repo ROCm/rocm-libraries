@@ -18,6 +18,7 @@ import tempfile
 from pathlib import Path
 
 import pytest
+from rocke.tests.lanes import arch_skip_reason
 
 _TESTS = Path(__file__).resolve().parent
 _LIBRARY = _TESTS.parent
@@ -61,7 +62,7 @@ def _gpu_arch() -> str:
 @pytest.mark.parametrize("Q,Sk,HI,D,block,q_pos_base,body", _SHAPES)
 def test_indexer_scores_match_oracle(arch, Q, Sk, HI, D, block, q_pos_base, body):
     if arch not in _gpu_arch():
-        pytest.skip(f"needs a {arch} GPU")
+        pytest.skip(arch_skip_reason((arch,), f"needs a {arch} GPU"))
 
     from rocke.helpers.compile import compile_kernel
     from rocke.run_manifest import run_manifest

@@ -13,8 +13,9 @@ LSE = -inf).
 from __future__ import annotations
 
 import pytest
+from rocke.tests.lanes import TORCH_IN_CI, import_or_skip_until
 
-torch = pytest.importorskip("torch")
+torch = import_or_skip_until("torch", TORCH_IN_CI)
 
 from dispatch.sdpa.bind_unified import (
     _LaunchPlan,

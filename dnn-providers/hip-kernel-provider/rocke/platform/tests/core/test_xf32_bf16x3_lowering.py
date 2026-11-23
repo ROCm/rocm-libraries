@@ -47,6 +47,8 @@ from rocke.core.lower_llvm import (
     _lower_kernel_to_llvm_python,
 )
 from rocke.tests.arch_marks import arch_specific
+from rocke.tests.engines import skip_without_cpp_engine
+from rocke.tests.lanes import BINDING_LANE, import_or_skip_until
 
 _ARCH = "gfx950"
 _FLAVORS = LLVM_FLAVORS
@@ -549,10 +551,7 @@ class TestLlvmFoldsTheSplit(unittest.TestCase):
             return _lower_kernel_to_llvm_python(
                 kernel, arch=_ARCH, llvm_flavor=self.flavor
             )
-        try:
-            return _lower_via_cpp_engine(serialize(kernel), _ARCH, self.flavor)
-        except BackendError as exc:
-            self.skipTest(f"C++ engine unavailable: {exc}")
+        return _lower_via_cpp_engine(serialize(kernel), _ARCH, self.flavor)
 
     def _folded_operands(
         self, op_id: str, a_bits: int, b_bits: int, engine: str = "python"
@@ -606,12 +605,16 @@ class TestLlvmFoldsTheSplit(unittest.TestCase):
         self._check_the_hand_derived_values("python")
 
     def test_the_cpp_engines_folded_split_matches_too(self):
+        # Skip the whole sweep, before its first case, without the C++ engine.
+        import_or_skip_until("rocke_engine", BINDING_LANE)
         self._check_the_hand_derived_values("cpp")
 
     def test_a_finite_payload_never_leaves_an_infinity_in_a_term(self):
         self._check_no_infinity_in_a_term("python")
 
     def test_the_cpp_engine_never_leaves_an_infinity_in_a_term_either(self):
+        # Skip the whole sweep, before its first case, without the C++ engine.
+        import_or_skip_until("rocke_engine", BINDING_LANE)
         self._check_no_infinity_in_a_term("cpp")
 
 
@@ -758,7 +761,7 @@ class TestEngineParity(unittest.TestCase):
             try:
                 _lower_via_cpp_engine(serialized, _ARCH, "llvm20")
             except BackendError as exc:
-                self.skipTest(f"C++ engine unavailable: {exc}")
+                skip_without_cpp_engine(exc, f"C++ engine unavailable: {exc}")
             for flavor in _FLAVORS:
                 with self.subTest(op_id=op_id, flavor=flavor):
                     self.assertEqual(

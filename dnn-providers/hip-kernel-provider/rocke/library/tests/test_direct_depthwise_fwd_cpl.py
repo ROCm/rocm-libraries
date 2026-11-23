@@ -22,6 +22,7 @@ import json
 import unittest
 
 from rocke.runtime.hip_module import get_device_arch
+from rocke.tests.lanes import arch_skip_reason
 
 from kernels.common import conv_direct_grouped as dc
 
@@ -106,7 +107,7 @@ class TestDepthwiseFwdCplSpecs(unittest.TestCase):
 
 def _gpu_skip() -> str:
     if GPU_ARCH != "gfx1250":
-        return f"needs gfx1250 (got {GPU_ARCH!r})"
+        return arch_skip_reason(("gfx1250",), f"needs gfx1250 (got {GPU_ARCH!r})")
     return ""
 
 

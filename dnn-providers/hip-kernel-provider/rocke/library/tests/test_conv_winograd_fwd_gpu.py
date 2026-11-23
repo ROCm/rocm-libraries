@@ -19,10 +19,14 @@ from __future__ import annotations
 
 import pytest
 from rocke.runtime.hip_module import get_device_arch
+from rocke.tests.lanes import arch_skip_reason
 
 GPU_ARCH = get_device_arch(0)
 
-pytestmark = pytest.mark.skipif(GPU_ARCH != "gfx1250", reason="needs a gfx1250 GPU")
+pytestmark = pytest.mark.skipif(
+    GPU_ARCH != "gfx1250",
+    reason=arch_skip_reason(("gfx1250",), "needs a gfx1250 GPU"),
+)
 
 _K3_CFG = (32, 32, 32, 1, 1, 16, "mem", "cshuffle")
 _TOL = 5e-2

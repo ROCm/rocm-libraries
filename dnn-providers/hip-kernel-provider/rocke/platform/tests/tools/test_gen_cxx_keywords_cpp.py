@@ -17,13 +17,17 @@ import re
 import pytest
 from rocke.assets import platform_tools_dir
 from rocke.core.cxx_keywords import CXX_KEYWORDS
+from rocke.tests.lanes import SOURCE_TREE_CASES, skip_until_reason
 
 GENERATOR = platform_tools_dir() / "gen_cxx_keywords_cpp.py"
 
 # The installed test layout ships no tools/ tree.
 pytestmark = pytest.mark.skipif(
     not GENERATOR.exists(),
-    reason="runs the platform's generator, which an installed test layout omits",
+    reason=skip_until_reason(
+        SOURCE_TREE_CASES,
+        reason="runs the platform's generator, which an installed test layout omits",
+    ),
 )
 
 

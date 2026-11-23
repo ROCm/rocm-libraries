@@ -12,8 +12,9 @@ included (O = 0, LSE = -inf).
 from __future__ import annotations
 
 import pytest
+from rocke.tests.lanes import TORCH_IN_CI, import_or_skip_until
 
-torch = pytest.importorskip("torch")
+torch = import_or_skip_until("torch", TORCH_IN_CI)
 
 from dispatch.sdpa.bind_dense import sdpa_dense_admits, sdpa_dense_bind
 from rocke.core.arch import base_arch_from_target_id

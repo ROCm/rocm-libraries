@@ -12,6 +12,12 @@ import tempfile
 from pathlib import Path
 
 import pytest
+from rocke.tests.lanes import (
+    BINDING_LANE,
+    CI_TEST_TOOLS,
+    import_or_skip_until,
+    skip_until,
+)
 
 from kernels.common import attention_unified as au
 from kernels.common.attention_unified import UnifiedAttentionProblem
@@ -82,7 +88,7 @@ def test_fp8_kv_rejects_streaming():
 def test_native_builder_matches_python(kv_layout):
     from dataclasses import asdict
 
-    engine = pytest.importorskip("rocke_engine")
+    engine = import_or_skip_until("rocke_engine", BINDING_LANE)
     spec = UnifiedAttention3DTiledSpec(
         head_size=128,
         block_size=16,
@@ -122,7 +128,10 @@ def test_kv_copies_carry_the_policy_bits(policy, bits, tile):
 
     objdump = _objdump()
     if objdump is None:
-        pytest.skip("llvm-objdump not found (LLVM_OBJDUMP / ROCM_PATH / PATH)")
+        skip_until(
+            CI_TEST_TOOLS,
+            reason="llvm-objdump not found (LLVM_OBJDUMP / ROCM_PATH / PATH)",
+        )
     try:
         comgr._resolve_lib()
     except comgr.ComgrError as e:
@@ -197,7 +206,7 @@ def test_gfx942_wide_loader_takes_all_or_stream(policy):
 def test_gfx942_native_builder_matches_python(kw):
     from dataclasses import asdict
 
-    engine = pytest.importorskip("rocke_engine")
+    engine = import_or_skip_until("rocke_engine", BINDING_LANE)
     spec = _gfx942_spec(num_query_heads=32, num_segments=8, num_seqs=3, **kw)
     expected = lower_like_tiled_3d_binding(spec, "gfx942")
     actual = engine.gfx942_attention_tiled_3d_lower_llvm(asdict(spec), "gfx942")
@@ -220,7 +229,10 @@ def test_gfx942_kv_copies_carry_the_policy_bits(policy, bits, wide):
 
     objdump = _objdump()
     if objdump is None:
-        pytest.skip("llvm-objdump not found (LLVM_OBJDUMP / ROCM_PATH / PATH)")
+        skip_until(
+            CI_TEST_TOOLS,
+            reason="llvm-objdump not found (LLVM_OBJDUMP / ROCM_PATH / PATH)",
+        )
     try:
         comgr._resolve_lib()
     except comgr.ComgrError as e:
