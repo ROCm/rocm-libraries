@@ -160,9 +160,7 @@ TEST_F(CPU_SplitKAutodeduceEndToEnd_NONE, Wrw2DPicksAutodeduceWithRealGate)
            "Check conv_ai_asset_smoke tests for the root cause.";
 
     EXPECT_EQ(pick->second, miopen::solver::conv::CkSplitkAutoDeduce)
-        << "Expected split_k=-1 (autodeduce) but got " << pick->second
-        << ".
-           "
+        << "Expected split_k=-1 (autodeduce) but got " << pick->second << ". "
         << "This means supports_split_k_autodeduce=false in the actual solver config "
            "(k2DWrwSolverConfig in conv_hip_implicit_gemm_grouped_wrw_xdlops.cpp). "
            "The PR #16500 change enabling autodeduce for Wrw was reverted or not applied.";

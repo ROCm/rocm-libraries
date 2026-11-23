@@ -558,12 +558,14 @@ ConvSolution ConvHipImplicitGemmGroupWrwXdlops::GetSolution(
     return loader.GetSolutionTf32Aware(CKSolverType::GrpConvWrw, ctx, problem, config.kernel_id);
 }
 
-MIOPEN_INTERNALS_EXPORT const miopen::solver::conv::SolverHeuristicConfig&
-GetWrw2DSolverHeuristicConfig()
-{
-    return k2DWrwSolverConfig;
-}
-
 } // namespace conv
 } // namespace solver
 } // namespace miopen
+
+#if MIOPEN_ENABLE_AI_KERNEL_TUNING
+MIOPEN_INTERNALS_EXPORT const miopen::solver::conv::SolverHeuristicConfig&
+GetWrw2DSolverHeuristicConfig()
+{
+    return miopen::solver::conv::k2DWrwSolverConfig;
+}
+#endif // MIOPEN_ENABLE_AI_KERNEL_TUNING
