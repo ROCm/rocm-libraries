@@ -1429,7 +1429,9 @@ missing-tool helpers (`rocke.tests.compiler_tools`, `rocke.tests.llc`)
 deselects by `-m 'not exhaustive'` or `'not integration'` waits for the lane of
 that marker. A skip for any other reason (a defect, a configuration refused on
 its own arch, a missing installed artifact) names no lane, and no entry can
-cover it: it shows up in limbo until it is fixed or quarantined.
+cover it: it shows up in limbo until it is fixed or quarantined. A case that
+can never run (a refused request kept as a listed skip) declares `DROP_REVIEW`
+until the owner decides to drop or rewrite it.
 
 The pytest roots of `platform/tests` and `library/tests` skip a quarantined test
 with the reason `quarantined: <issue>` (plus `on <arch>` for an arch-scoped entry

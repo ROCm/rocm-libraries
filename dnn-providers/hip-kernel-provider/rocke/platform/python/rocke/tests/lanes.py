@@ -42,6 +42,7 @@ from types import ModuleType
 from typing import NoReturn
 
 import pytest
+from packaging.version import Version
 
 from ..core.arch.target import known_arches
 
@@ -49,6 +50,7 @@ __all__ = [
     "BINDING_LANE",
     "CI_TEST_TOOLS",
     "COMPREHENSIVE_CASES",
+    "DROP_REVIEW",
     "ENROLMENT",
     "EXHAUSTIVE_CASES",
     "GFX90A_RUNNER",
@@ -234,7 +236,16 @@ CI_TEST_TOOLS = Lane(
     "ci-test-tools",
     "the optional packages and LLVM tools these cases use, in the CI test "
     "environment: the file is in a CI-run entry, but TheRock's test step installs "
-    "no jsonschema or matplotlib and puts no LLVM tools on PATH, so they skip",
+    "no jsonschema or matplotlib, an ml_dtypes older than 0.6.0, and puts no LLVM "
+    "tools on PATH, so they skip",
+    enrolled=True,
+)
+DROP_REVIEW = Lane(
+    "drop-review",
+    "the owner's review of cases that can never run (the state they check cannot "
+    "be built, or the configuration they generate is refused by design): the "
+    "file is in a CI-run entry, but these cases skip everywhere until the owner "
+    "decides to drop or rewrite them",
     enrolled=True,
 )
 
@@ -257,6 +268,7 @@ LANES: tuple[Lane, ...] = (
     MULTI_GPU_RUNNER,
     SHARED_LIBRARY_LANE,
     CI_TEST_TOOLS,
+    DROP_REVIEW,
 )
 _BY_NAME = {lane.name: lane for lane in LANES}
 
@@ -303,18 +315,35 @@ def skip_until(*lanes: Lane, reason: str) -> NoReturn:
     )
 
 
-def import_or_skip_until(module_name: str, lane: Lane) -> ModuleType:
+def import_or_skip_until(
+    module_name: str, lane: Lane, *, minversion: str | None = None
+) -> ModuleType:
     """The module ``module_name``, or skip the running case (or module) as
-    waiting for ``lane`` when it is not installed: ``pytest.importorskip``
-    that names the lane. A module that is installed but fails to import (a
-    broken build) raises."""
+    waiting for ``lane`` when it is not installed, or its ``__version__`` is
+    older than ``minversion``: ``pytest.importorskip`` that names the lane. A
+    module that is installed but fails to import (a broken build) raises."""
     __tracebackhide__ = True  # pytest reports the skip at the caller
     try:
-        return importlib.import_module(module_name)
+        module = importlib.import_module(module_name)
     except ModuleNotFoundError as error:
         if not _is_missing_module(error, module_name):
             raise
         skip_until(lane, reason=f"could not import {module_name!r}: {error}")
+    if minversion is not None:
+        found = getattr(module, "__version__", None)
+        if found is None:
+            skip_until(
+                lane,
+                reason=f"{module_name} has no __version__ to compare with the "
+                f"{minversion} this case needs",
+            )
+        if Version(found) < Version(minversion):
+            skip_until(
+                lane,
+                reason=f"{module_name} {found} is older than the {minversion} "
+                "this case needs",
+            )
+    return module
 
 
 def _is_missing_module(error: ModuleNotFoundError, module_name: str) -> bool:
