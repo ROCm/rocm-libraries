@@ -130,7 +130,7 @@ private:
 
         // Calculate the number of elements
         size_t items = bytes / sizeof(key_type);
-        size_t k     = 10;
+        size_t k     = std::min<size_t>(10, items);
 
         if(!small_k)
         {
@@ -162,6 +162,8 @@ private:
         state.add_reads<key_type>(items);
 
         // Run
+        state.test([&] { check(keys_input, d_keys_input.get(), d_keys_output.get(), stream); });
+
         state.run(
             [&]
             {
@@ -192,7 +194,7 @@ private:
 
         // Calculate the number of elements
         size_t items = bytes / (sizeof(key_type) + sizeof(value_type));
-        size_t k     = 10;
+        size_t k     = std::min<size_t>(10, items);
 
         if(!small_k)
         {
@@ -233,6 +235,18 @@ private:
         state.add_reads<key_type>(items);
         state.add_reads<value_type>(items);
         // Run
+        state.test(
+            [&]
+            {
+                check(keys_input,
+                      d_keys_input.get(),
+                      d_keys_output.get(),
+                      stream,
+                      values_input.data(),
+                      d_values_input.get(),
+                      d_values_output.get());
+            });
+
         state.run(
             [&]
             {
@@ -256,6 +270,41 @@ public:
     }
 
 private:
+    void check(const std::vector<Key>& keys,
+               Key*                    d_keys,
+               Key*                    d_output,
+               hipStream_t             stream,
+               const Value*            values          = nullptr,
+               Value*                  d_values        = nullptr,
+               Value*                  d_values_output = nullptr) const
+    {
+        const auto count = std::min<size_t>(keys.size(), 2048);
+        const auto k     = small_k ? std::min<size_t>(10, count) : count / 2;
+        if(k == 0)
+        {
+            return;
+        }
+        size_t     temp_storage_bytes = 0;
+        const auto launch             = [&](void* storage)
+        {
+            HIP_CHECK(invoke_topk_air(storage,
+                                      temp_storage_bytes,
+                                      d_keys,
+                                      d_output,
+                                      d_values,
+                                      d_values_output,
+                                      count,
+                                      k,
+                                      stream,
+                                      false));
+        };
+        launch(nullptr);
+        common::device_ptr<void> d_storage(temp_storage_bytes);
+        launch(d_storage.get());
+        HIP_CHECK(hipStreamSynchronize(stream));
+        common::check_topk(keys.data(), count, d_output, k, values, d_values_output);
+    }
+
     static hipError_t invoke_topk_air(void*       d_temporary_storage,
                                       size_t&     temp_storage_bytes,
                                       Key*        keys_input,

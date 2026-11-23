@@ -113,26 +113,22 @@ struct device_adjacent_find_benchmark : public primbench::benchmark_interface
                                                 common::generate_limits<input_type>::min(),
                                                 common::generate_limits<input_type>::max(),
                                                 seed);
-            std::vector<std::size_t> iota(items);
-            std::iota(iota.begin(), iota.end(), 0);
-            std::transform(iota.begin() + 1,
-                           iota.begin() + first_adj_index + 1,
-                           input.begin() + 1,
-                           [&](std::size_t& idx)
-                           {
-                               while(input[idx] == input[idx - 1])
-                               {
-                                   input[idx] = get_random_value<input_type>(
-                                       common::generate_limits<input_type>::min(),
-                                       common::generate_limits<input_type>::max(),
-                                       seed);
-                               }
-                               return input[idx];
-                           });
+            engine_type gen(seed);
+            for(size_t i = 1; i <= first_adj_index; ++i)
+            {
+                while(common::equal(input[i], input[i - 1]))
+                {
+                    generate_random_data_n(input.begin() + i,
+                                           1,
+                                           common::generate_limits<input_type>::min(),
+                                           common::generate_limits<input_type>::max(),
+                                           gen);
+                }
+            }
         }
 
         // Insert first adjacent pair
-        input[first_adj_index] = input[first_adj_index + 1];
+        input[first_adj_index + 1] = input[first_adj_index];
 
         input_type*  d_input;
         output_type* d_output;
@@ -163,6 +159,15 @@ struct device_adjacent_find_benchmark : public primbench::benchmark_interface
 
         state.set_items(first_adj_index);
         state.add_reads<input_type>(first_adj_index);
+
+        state.test(
+            [&]
+            {
+                const auto expected
+                    = std::adjacent_find(input.begin(), input.end(), common::equal<input_type>);
+                PRIMBENCH_ASSERT(common::read_output(d_output, 1).front(),
+                                 static_cast<output_type>(expected - input.begin()));
+            });
 
         state.run([&] { launch_adjacent_find(); });
 

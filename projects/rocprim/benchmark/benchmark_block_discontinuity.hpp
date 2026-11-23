@@ -265,6 +265,42 @@ struct block_discontinuity_benchmark : public primbench::benchmark_interface
         state.set_items(items * Trials);
         state.add_reads<T>(items * Trials);
 
+        state.test(
+            [&]
+            {
+                if(items == 0)
+                {
+                    return;
+                }
+                kernel<Subalgo, T, BlockSize, ItemsPerThread, WithTile, Algorithm, 1>
+                    <<<dim3(1), dim3(BlockSize), 0, stream>>>(d_input, d_output);
+                HIP_CHECK(hipStreamSynchronize(stream));
+                const auto index
+                    = [](size_t i) { return i / ItemsPerThread + i % ItemsPerThread * BlockSize; };
+                std::vector<T> expected(items_per_block);
+                for(size_t i = 0; i < items_per_block; ++i)
+                {
+                    const T value  = input[index(i)];
+                    auto    result = value;
+                    if constexpr(!std::is_same_v<Subalgo, flag_tails>)
+                    {
+                        const bool flag = i == 0 ? (!WithTile || common::equal(T(123), value))
+                                                 : common::equal(input[index(i - 1)], value);
+                        result          = common::add(result, T(flag));
+                    }
+                    if constexpr(!std::is_same_v<Subalgo, flag_heads>)
+                    {
+                        constexpr int successor = std::is_same_v<Subalgo, flag_tails> ? 123 : 234;
+                        const bool    flag      = i + 1 == items_per_block
+                                                      ? (!WithTile || common::equal(value, T(successor)))
+                                                      : common::equal(value, input[index(i + 1)]);
+                        result                  = common::add(result, T(flag));
+                    }
+                    expected[index(i)] = result;
+                }
+                common::check_output(d_output, expected);
+            });
+
         state.run(
             [&]
             {

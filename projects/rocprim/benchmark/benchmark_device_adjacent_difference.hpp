@@ -125,6 +125,26 @@ struct device_adjacent_difference_benchmark : public primbench::benchmark_interf
         state.set_items(items);
         state.add_reads<T>(items);
 
+        state.test(
+            [&]
+            {
+                const auto  count = std::min<size_t>(items, 4096);
+                const auto* output
+                    = Aliasing == common::api_variant::no_alias ? d_output.get() : d_input.get();
+                common::check_prefix(
+                    output,
+                    count,
+                    [&](size_t i)
+                    {
+                        if(Left ? i == 0 : i + 1 == items)
+                        {
+                            return input[i];
+                        }
+                        return common::add(input[i], input[Left ? i - 1 : i + 1]);
+                    },
+                    common::equal<T>);
+            });
+
         state.run([&] { HIP_CHECK(launch()); });
     }
 };

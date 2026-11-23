@@ -140,6 +140,22 @@ private:
             state.add_reads<value_type>(items);
         }
 
+        state.test(
+            [&]
+            {
+                if(items == 0)
+                {
+                    return;
+                }
+                const auto count = std::min<size_t>(items, items_per_block);
+                common::check_sorted(keys_input.data(),
+                                     count,
+                                     d_keys_output.get(),
+                                     count,
+                                     values_input.data(),
+                                     d_values_output);
+            });
+
         state.run(
             [&]
             {

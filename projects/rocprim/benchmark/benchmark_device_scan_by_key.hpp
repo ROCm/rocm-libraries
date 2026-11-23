@@ -244,6 +244,29 @@ struct device_scan_by_key_benchmark : public primbench::benchmark_interface
         state.add_reads<Key>(items);
         state.add_reads<Value>(items);
 
+        state.test(
+            [&]
+            {
+                const auto count
+                    = std::min<size_t>(items, std::is_same_v<Value, rocprim::half> ? 64 : 4096);
+                auto sum = Exclusive ? initial_value : Value{};
+                common::check_prefix(
+                    d_output.get(),
+                    count,
+                    [&](size_t i)
+                    {
+                        if(i != 0 && !common::equal(keys[i - 1], keys[i]))
+                        {
+                            sum = Exclusive ? initial_value : Value{};
+                        }
+
+                        const auto previous = sum;
+                        sum                 = common::scan_add(sum, input[i], scan_op);
+                        return Exclusive ? previous : sum;
+                    },
+                    common::near<Value>);
+            });
+
         state.run(
             [&]
             {

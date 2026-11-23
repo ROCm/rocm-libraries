@@ -120,6 +120,19 @@ struct device_find_end_benchmark : public primbench::benchmark_interface
         state.set_items(items);
         state.add_reads<key_type>(items);
 
+        state.test(
+            [&]
+            {
+                const auto expected = keys_input.empty() ? input.end()
+                                                         : std::find_end(input.begin(),
+                                                                         input.end(),
+                                                                         keys_input.begin(),
+                                                                         keys_input.end(),
+                                                                         common::equal<key_type>);
+                PRIMBENCH_ASSERT(d_output.load_value_at(0),
+                                 static_cast<output_type>(expected - input.begin()));
+            });
+
         state.run(
             [&]
             {

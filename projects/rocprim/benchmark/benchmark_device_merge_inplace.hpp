@@ -196,6 +196,28 @@ struct device_merge_inplace_benchmark : public primbench::benchmark_interface
 
         state.run_before_every_iteration([&] { d_data.store(h_data); });
 
+        state.test(
+            [&]
+            {
+                const auto count  = std::min<size_t>(items, 4096);
+                const auto output = common::read_output(d_data.get(), count);
+                auto       first  = h_data.begin();
+                auto       second = h_data.begin() + size_a;
+                const auto middle = second;
+                for(const auto& value : output)
+                {
+                    if(second == h_data.end()
+                       || (first != middle && !common::less(*second, *first)))
+                    {
+                        PRIMBENCH_ASSERT(common::equal(value, *first++), true);
+                    }
+                    else
+                    {
+                        PRIMBENCH_ASSERT(common::equal(value, *second++), true);
+                    }
+                }
+            });
+
         state.run([&] { runner.run(); });
     }
 };

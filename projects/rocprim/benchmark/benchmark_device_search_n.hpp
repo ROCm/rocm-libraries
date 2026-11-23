@@ -144,13 +144,14 @@ struct device_search_n_benchmark : public primbench::benchmark_interface
         std::vector<InputType>         input{};
         common::device_ptr<InputType>  d_input;
         common::device_ptr<OutputType> d_output(1);
-        common::device_ptr<InputType>  d_value(std::vector<decltype(h_value)>{h_value}, stream);
+        const std::array<InputType, 1> value{h_value};
+        common::device_ptr<InputType>  d_value(value, stream);
 
         size_t items = size_byte / sizeof(InputType);
 
         count            = CountCalculator{}.resolve(items);
         size_t cur_tile  = 0;
-        size_t last_tile = items / count - 1;
+        size_t last_tile = count != 0 && items >= count ? items / count - 1 : 0;
         input            = std::vector<InputType>(items, h_value);
         while(cur_tile != last_tile)
         {
@@ -180,6 +181,20 @@ struct device_search_n_benchmark : public primbench::benchmark_interface
 
         state.set_items(items);
         state.add_reads<InputType>(items);
+
+        state.test(
+            [&]
+            {
+                const auto expected = std::search_n(input.begin(),
+                                                    input.end(),
+                                                    count,
+                                                    h_value,
+                                                    common::equal<InputType>);
+                const auto actual   = d_output.load_value_at(0);
+                PRIMBENCH_ASSERT(
+                    common::equal(actual, static_cast<OutputType>(expected - input.begin())),
+                    true);
+            });
 
         state.run([&] { launch_search_n(); });
     }

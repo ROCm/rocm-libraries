@@ -128,9 +128,8 @@ struct device_find_first_of_benchmark : public primbench::benchmark_interface
             const size_t p = static_cast<size_t>(items * m_first_occurrences[fi]);
             if(p < items)
             {
-                const type key = key_input[0];
                 HIP_CHECK(hipMemcpyAsync(d_input + p,
-                                         &key,
+                                         key_input.data(),
                                          sizeof(*d_input),
                                          hipMemcpyHostToDevice,
                                          stream));
@@ -206,6 +205,22 @@ struct device_find_first_of_benchmark : public primbench::benchmark_interface
 
         state.set_items(sum_effective_size);
         state.add_reads<type>(sum_effective_size);
+
+        state.test(
+            [&]
+            {
+                for(size_t keys_size : m_keys_sizes)
+                {
+                    for(size_t fi = 0; fi < m_first_occurrences.size(); ++fi)
+                    {
+                        const auto expected
+                            = std::min(items, static_cast<size_t>(items * m_first_occurrences[fi]));
+                        launch(keys_size, d_inputs[fi]);
+                        HIP_CHECK(hipStreamSynchronize(stream));
+                        PRIMBENCH_ASSERT(common::read_output(d_output, 1).front(), expected);
+                    }
+                }
+            });
 
         state.run(
             [&]

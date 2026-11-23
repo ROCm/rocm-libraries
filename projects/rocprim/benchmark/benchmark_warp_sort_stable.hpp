@@ -174,6 +174,7 @@ struct warp_sort_stable_benchmark : public primbench::benchmark_interface
                             stream,
                             items,
                             seeds,
+                            input_key,
                             d_input_key,
                             d_output_key,
                             d_input_value,
@@ -181,7 +182,7 @@ struct warp_sort_stable_benchmark : public primbench::benchmark_interface
         }
         else
         {
-            run_sort_no_value(state, stream, items, d_input_key, d_output_key);
+            run_sort_no_value(state, stream, items, input_key, d_input_key, d_output_key);
         }
 
         HIP_CHECK(hipFree(d_input_key));
@@ -197,6 +198,7 @@ private:
                                 hipStream_t                stream,
                                 size_t                     items,
                                 const primbench::seeds<2>& seeds,
+                                const std::vector<Key>&    input_key,
                                 Key*                       d_input_key,
                                 Key*                       d_output_key,
                                 Value*&                    d_input_value,
@@ -215,6 +217,16 @@ private:
                             input_value.data(),
                             items * sizeof(Value),
                             hipMemcpyHostToDevice));
+
+        state.test(
+            [&]
+            {
+                common::check_warp_sort<true, BlockSize, WarpSize, ItemsPerThread>(
+                    input_key,
+                    d_output_key,
+                    input_value.data(),
+                    d_output_value);
+            });
 
         state.run(
             [&]
@@ -237,13 +249,21 @@ private:
             });
     }
 
-    static void run_sort_no_value(primbench::state& state,
-                                  hipStream_t       stream,
-                                  size_t            items,
-                                  Key*              d_input_key,
-                                  Key*              d_output_key)
+    static void run_sort_no_value(primbench::state&       state,
+                                  hipStream_t             stream,
+                                  size_t                  items,
+                                  const std::vector<Key>& input_key,
+                                  Key*                    d_input_key,
+                                  Key*                    d_output_key)
     {
         constexpr auto items_per_block = BlockSize * ItemsPerThread;
+
+        state.test(
+            [&]
+            {
+                common::check_warp_sort<true, BlockSize, WarpSize, ItemsPerThread>(input_key,
+                                                                                   d_output_key);
+            });
 
         state.run(
             [&]

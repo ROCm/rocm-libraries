@@ -34,12 +34,14 @@
 #include <rocprim/device/detail/device_config_helper.hpp>
 #include <rocprim/intrinsics/arch.hpp>
 #include <rocprim/intrinsics/thread.hpp>
+#include <rocprim/iterator/counting_iterator.hpp>
 #include <rocprim/type_traits.hpp>
 #include <rocprim/types.hpp>
 #include <rocprim/types/tuple.hpp>
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstddef>
 #include <fstream>
 #include <iomanip>
@@ -284,6 +286,380 @@ struct generate_limits<T, std::enable_if_t<common::is_custom_type<T>::value>>
         return T(generate_limits<F>::max(), generate_limits<S>::max());
     }
 };
+
+template<typename T>
+std::vector<T> read_output(const T* d_output, size_t count)
+{
+    std::vector<T> output(count);
+    if(count != 0)
+    {
+        HIP_CHECK(hipMemcpy(output.data(), d_output, count * sizeof(T), hipMemcpyDeviceToHost));
+    }
+    return output;
+}
+
+template<typename T>
+bool equal(const T& lhs, const T& rhs)
+{
+    if constexpr(std::is_same_v<T, float2> || std::is_same_v<T, double2>)
+    {
+        return lhs.x == rhs.x && lhs.y == rhs.y;
+    }
+    else if constexpr(std::is_same_v<T, float4>)
+    {
+        return lhs.x == rhs.x && lhs.y == rhs.y && lhs.z == rhs.z && lhs.w == rhs.w;
+    }
+    else if constexpr(std::is_same_v<T, rocprim::half>)
+    {
+        return half_equal_to{}(lhs, rhs);
+    }
+    else
+    {
+        return lhs == rhs;
+    }
+}
+
+template<typename T>
+bool less(const T& lhs, const T& rhs)
+{
+    if constexpr(std::is_same_v<T, rocprim::half>)
+    {
+        return half_less{}(lhs, rhs);
+    }
+    else
+    {
+        return lhs < rhs;
+    }
+}
+
+template<typename T>
+ROCPRIM_HOST_DEVICE
+T add(const T& lhs, const T& rhs)
+{
+    if constexpr(common::is_custom_type<T>::value)
+    {
+        return T{add(lhs.x, rhs.x), add(lhs.y, rhs.y)};
+    }
+    else if constexpr(rocprim::is_integral<T>::value)
+    {
+        using unsigned_type =
+            typename decltype(rocprim::traits::get<T>().radix_key_codec())::bit_key_type;
+        return static_cast<T>(static_cast<unsigned_type>(lhs) + static_cast<unsigned_type>(rhs));
+    }
+    else if constexpr(std::is_same_v<T, rocprim::half>)
+    {
+        return half_plus{}(lhs, rhs);
+    }
+    else
+    {
+        return lhs + rhs;
+    }
+}
+
+template<typename T>
+double as_double(const T& value)
+{
+    if constexpr(std::is_same_v<T, rocprim::half>)
+    {
+        return common::half_to_native(value);
+    }
+    else
+    {
+        return static_cast<double>(value);
+    }
+}
+
+template<typename T>
+bool near(const T& lhs, const T& rhs)
+{
+    if constexpr(common::is_custom_type<T>::value)
+    {
+        return near(lhs.x, rhs.x) && near(lhs.y, rhs.y);
+    }
+    else if constexpr(rocprim::is_floating_point<T>::value)
+    {
+        const auto actual    = as_double(lhs);
+        const auto expected  = as_double(rhs);
+        const auto tolerance = std::is_same_v<T, rocprim::half> ? 0.01 : 0.001;
+        return actual == expected
+               || (std::isfinite(actual) && std::isfinite(expected)
+                   && std::abs(actual - expected) <= tolerance * std::max(1.0, std::abs(expected)));
+    }
+    else
+    {
+        return equal(lhs, rhs);
+    }
+}
+
+template<typename Iterator, typename T, typename BinaryFunction>
+T reduce(Iterator first, Iterator last, T init, BinaryFunction op)
+{
+    if constexpr(std::is_same_v<BinaryFunction, rocprim::plus<T>>)
+    {
+        if constexpr(common::is_custom_type<T>::value)
+        {
+            double x = as_double(init.x);
+            double y = as_double(init.y);
+            for(; first != last; ++first)
+            {
+                x += as_double(first->x);
+                y += as_double(first->y);
+            }
+            return T{static_cast<typename T::first_type>(x),
+                     static_cast<typename T::second_type>(y)};
+        }
+        else if constexpr(rocprim::is_floating_point<T>::value)
+        {
+            double sum = as_double(init);
+            for(; first != last; ++first)
+            {
+                sum += as_double(*first);
+            }
+            if constexpr(std::is_same_v<T, rocprim::half>)
+            {
+                return common::native_to_half(static_cast<rocprim::native_half>(sum));
+            }
+            else
+            {
+                return static_cast<T>(sum);
+            }
+        }
+        else
+        {
+            return std::accumulate(first, last, init, add<T>);
+        }
+    }
+    else
+    {
+        return std::accumulate(first, last, init, op);
+    }
+}
+
+template<typename T, typename BinaryFunction>
+T scan_add(const T& lhs, const T& rhs, BinaryFunction op)
+{
+    if constexpr(std::is_same_v<BinaryFunction, rocprim::plus<T>>)
+    {
+        return add(lhs, rhs);
+    }
+    else
+    {
+        return op(lhs, rhs);
+    }
+}
+
+template<typename T, typename Expected, typename Equal>
+void check_prefix(const T* d_output, size_t count, Expected expected, Equal compare)
+{
+    const auto output = read_output(d_output, count);
+    for(size_t i = 0; i < count; ++i)
+    {
+        if(!compare(output[i], expected(i)))
+        {
+            PRIMBENCH_ASSERT(i, count);
+        }
+    }
+}
+
+template<typename T>
+void check_output(const T* d_output, const std::vector<T>& expected)
+{
+    const auto output   = read_output(d_output, expected.size());
+    const auto mismatch = std::mismatch(output.begin(), output.end(), expected.begin(), equal<T>);
+    PRIMBENCH_ASSERT(static_cast<size_t>(mismatch.first - output.begin()), expected.size());
+}
+template<typename Key>
+auto sorted_indices(const Key* keys, size_t items, size_t count)
+{
+    std::vector<size_t> indices(count);
+    if(count == 0)
+    {
+        return indices;
+    }
+    std::partial_sort_copy(rocprim::counting_iterator<size_t>(0),
+                           rocprim::counting_iterator<size_t>(items),
+                           indices.begin(),
+                           indices.end(),
+                           [&](size_t lhs, size_t rhs)
+                           {
+                               if(equal(keys[lhs], keys[rhs]))
+                               {
+                                   return lhs < rhs;
+                               }
+                               return less(keys[lhs], keys[rhs]);
+                           });
+    return indices;
+}
+
+template<typename Key, typename Value = rocprim::empty_type>
+void check_sorted(const Key*   input,
+                  size_t       items,
+                  const Key*   d_keys,
+                  size_t       count,
+                  const Value* values   = nullptr,
+                  const Value* d_values = nullptr)
+{
+    const auto indices = sorted_indices(input, items, count);
+    check_prefix(d_keys, count, [&](size_t i) { return input[indices[i]]; }, equal<Key>);
+    if constexpr(!std::is_same_v<Value, rocprim::empty_type>)
+    {
+        check_prefix(d_values, count, [&](size_t i) { return values[indices[i]]; }, equal<Value>);
+    }
+}
+
+template<typename Key, typename Value = rocprim::empty_type>
+void check_topk(const Key*   keys,
+                size_t       items,
+                const Key*   d_keys,
+                size_t       k,
+                const Value* values   = nullptr,
+                const Value* d_values = nullptr)
+{
+    auto output = read_output(d_keys, k);
+    if constexpr(!std::is_same_v<Value, rocprim::empty_type>)
+    {
+        const auto        actual_values = read_output(d_values, k);
+        std::vector<bool> matched(items, false);
+        for(size_t i = 0; i < k; ++i)
+        {
+            size_t j = 0;
+            while(j < items
+                  && (matched[j] || !equal(output[i], keys[j])
+                      || !equal(actual_values[i], values[j])))
+            {
+                ++j;
+            }
+            PRIMBENCH_ASSERT(j < items, true);
+            matched[j] = true;
+        }
+    }
+    std::vector<Key> expected(k);
+    std::partial_sort_copy(keys, keys + items, expected.begin(), expected.end(), less<Key>);
+    std::sort(output.begin(), output.end(), less<Key>);
+    PRIMBENCH_ASSERT(std::equal(output.begin(), output.end(), expected.begin(), equal<Key>), true);
+}
+
+template<size_t Outputs, size_t Counts, typename T, typename Classify>
+void check_selection(const std::vector<T>&                   input,
+                     std::array<const T*, Outputs>           d_outputs,
+                     const std::array<unsigned int, Counts>& actual_counts,
+                     Classify                                classify,
+                     bool                                    reverse_rejected = false)
+{
+    std::array<std::vector<T>, Outputs> expected;
+    std::array<size_t, Outputs>         counts{};
+    for(size_t i = 0; i < input.size(); ++i)
+    {
+        const auto output = classify(i);
+        if(output < Outputs)
+        {
+            if(expected[output].size() < 4096)
+            {
+                expected[output].push_back(input[i]);
+            }
+            ++counts[output];
+        }
+    }
+    for(size_t i = 0; i < Counts; ++i)
+    {
+        PRIMBENCH_ASSERT(static_cast<size_t>(actual_counts[i]), counts[i]);
+    }
+    for(size_t i = 0; i < Outputs; ++i)
+    {
+        check_output(d_outputs[i], expected[i]);
+    }
+    if(reverse_rejected && counts[0] < input.size())
+    {
+        std::vector<T> rejected;
+        for(size_t i = input.size(); i != 0 && rejected.size() < 4096; --i)
+        {
+            if(classify(i - 1) != 0)
+            {
+                rejected.push_back(input[i - 1]);
+            }
+        }
+        if(!rejected.empty())
+        {
+            check_output(d_outputs[0] + counts[0], rejected);
+        }
+    }
+}
+
+template<typename T, typename Run>
+void for_each_run(const std::vector<T>& keys, Run run)
+{
+    for(size_t first = 0, last; first < keys.size(); first = last)
+    {
+        last = first + 1;
+        while(last < keys.size() && equal(keys[first], keys[last]))
+        {
+            ++last;
+        }
+        run(first, last);
+    }
+}
+
+template<bool         Stable,
+         unsigned int BlockSize,
+         unsigned int WarpSize,
+         unsigned int ItemsPerThread,
+         typename Key,
+         typename Value = rocprim::empty_type>
+void check_warp_sort(const std::vector<Key>& input_keys,
+                     const Key*              d_keys,
+                     const Value*            input_values = nullptr,
+                     const Value*            d_values     = nullptr)
+{
+    constexpr size_t items_per_block = BlockSize * ItemsPerThread;
+    constexpr size_t items_per_warp  = WarpSize * ItemsPerThread;
+    if(input_keys.size() < items_per_block)
+    {
+        return;
+    }
+    const auto         keys = read_output(d_keys, items_per_block);
+    std::vector<Value> values;
+    if constexpr(!std::is_same_v<Value, rocprim::empty_type>)
+    {
+        values = read_output(d_values, items_per_block);
+    }
+    std::vector<size_t> indices(items_per_warp);
+    for(size_t warp = 0; warp < BlockSize; warp += WarpSize)
+    {
+        for(size_t i = 0; i < items_per_warp; ++i)
+        {
+            indices[i] = warp + i / ItemsPerThread + i % ItemsPerThread * BlockSize;
+        }
+        std::stable_sort(indices.begin(),
+                         indices.end(),
+                         [&](size_t lhs, size_t rhs)
+                         { return less(input_keys[lhs], input_keys[rhs]); });
+        const auto        offset = warp * ItemsPerThread;
+        std::vector<bool> matched(items_per_warp, false);
+        for(size_t i = 0; i < items_per_warp; ++i)
+        {
+            PRIMBENCH_ASSERT(equal(keys[offset + i], input_keys[indices[i]]), true);
+            if constexpr(!std::is_same_v<Value, rocprim::empty_type>)
+            {
+                if constexpr(Stable)
+                {
+                    PRIMBENCH_ASSERT(equal(values[offset + i], input_values[indices[i]]), true);
+                }
+                else
+                {
+                    size_t match = 0;
+                    while(match < items_per_warp
+                          && (matched[match] || !equal(keys[offset + i], input_keys[indices[match]])
+                              || !equal(values[offset + i], input_values[indices[match]])))
+                    {
+                        ++match;
+                    }
+                    PRIMBENCH_ASSERT(match < items_per_warp, true);
+                    matched[match] = true;
+                }
+            }
+        }
+    }
+}
 
 } // namespace common
 

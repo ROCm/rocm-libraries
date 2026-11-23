@@ -139,7 +139,32 @@ struct device_non_trivial_runs_benchmark : public primbench::benchmark_interface
         common::device_ptr<count_type>  d_counts_output(items);
         common::device_ptr<count_type>  d_runs_count_output(1);
 
-        const auto dispatch = [&](void* d_temporary_storage, size_t& temporary_storage_bytes)
+        const auto check = [&](const std::vector<T>& keys)
+        {
+            std::vector<offset_type> expected_offsets;
+            std::vector<count_type>  expected_counts;
+            count_type               count = 0;
+            common::for_each_run(
+                keys,
+                [&](size_t first, size_t last)
+                {
+                    if(last - first > 1)
+                    {
+                        if(count < 4096)
+                        {
+                            expected_offsets.push_back(static_cast<offset_type>(first));
+                            expected_counts.push_back(static_cast<count_type>(last - first));
+                        }
+                        ++count;
+                    }
+                });
+            PRIMBENCH_ASSERT(d_runs_count_output.load_value_at(0), count);
+            common::check_output(d_offsets_output.get(), expected_offsets);
+            common::check_output(d_counts_output.get(), expected_counts);
+        };
+
+        const auto dispatch
+            = [&](void* d_temporary_storage, size_t& temporary_storage_bytes, bool verify = false)
         {
             const auto dispatch_input = [&](T* d_input)
             {
@@ -158,6 +183,11 @@ struct device_non_trivial_runs_benchmark : public primbench::benchmark_interface
             for(int i = 0; i < num_input_arrays; ++i)
             {
                 dispatch_input(d_input[i].get());
+                if(verify)
+                {
+                    HIP_CHECK(hipStreamSynchronize(stream));
+                    check(input[i]);
+                }
             }
         };
 
@@ -170,6 +200,19 @@ struct device_non_trivial_runs_benchmark : public primbench::benchmark_interface
         state.add_reads<T>(items);
         state.add_reads<offset_type>(items);
         state.add_reads<count_type>(items);
+
+        state.test(
+            [&]
+            {
+                if(is_tuning)
+                {
+                    dispatch(d_temporary_storage.get(), temporary_storage_bytes, true);
+                }
+                else
+                {
+                    check(input[0]);
+                }
+            });
 
         state.run([&] { dispatch(d_temporary_storage.get(), temporary_storage_bytes); });
     }

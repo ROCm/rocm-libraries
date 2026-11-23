@@ -64,7 +64,7 @@ struct device_partial_sort_benchmark : public primbench::benchmark_interface
 
         size_t items = bytes / sizeof(key_type);
 
-        size_t middle = 10;
+        size_t middle = items == 0 ? 0 : std::min<size_t>(10, items - 1);
 
         if(!m_small_n)
         {
@@ -113,6 +113,13 @@ struct device_partial_sort_benchmark : public primbench::benchmark_interface
 
         state.set_items(items);
         state.add_reads<key_type>(items);
+
+        state.test(
+            [&]
+            {
+                const auto count = std::min<size_t>(middle, 128);
+                common::check_sorted(keys_input.data(), items, d_keys_input, count);
+            });
 
         state.run(
             [&]

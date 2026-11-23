@@ -132,6 +132,56 @@ struct warp_reduce_benchmark : public primbench::benchmark_interface
         state.set_items(items * Trials);
         state.add_reads<T>(items * Trials);
 
+        state.test(
+            [&]
+            {
+                int device;
+                HIP_CHECK(hipGetDevice(&device));
+                if(items == 0 || !is_warp_size_supported(VirtualWaveSize, device))
+                {
+                    return;
+                }
+                if constexpr(Segmented)
+                {
+                    segmented_warp_reduce_kernel<T, flag_type, VirtualWaveSize, 1>
+                        <<<dim3(1), dim3(BlockSize), 0, stream>>>(d_input.get(),
+                                                                  d_flags.get(),
+                                                                  d_output.get());
+                }
+                else
+                {
+                    warp_reduce_kernel<T, VirtualWaveSize, AllReduce, 1>
+                        <<<dim3(1), dim3(BlockSize), 0, stream>>>(d_input.get(), d_output.get());
+                }
+                HIP_CHECK(hipStreamSynchronize(stream));
+                const auto output = common::read_output(d_output.get(), BlockSize);
+                for(size_t warp = 0; warp < BlockSize; warp += VirtualWaveSize)
+                {
+                    const auto end = warp + VirtualWaveSize;
+                    for(size_t first = warp, last; first < end; first = last)
+                    {
+                        last = end;
+                        if constexpr(Segmented)
+                        {
+                            last = first + 1;
+                            while(last < end && flags[last] == 0)
+                            {
+                                ++last;
+                            }
+                        }
+                        const auto expected = std::accumulate(input.begin() + first,
+                                                              input.begin() + last,
+                                                              T(0),
+                                                              common::add<T>);
+                        const auto count    = AllReduce && !Segmented ? last - first : 1;
+                        for(size_t i = first; i < first + count; ++i)
+                        {
+                            PRIMBENCH_ASSERT(common::equal(output[i], expected), true);
+                        }
+                    }
+                }
+            });
+
         state.run(
             [&]
             {

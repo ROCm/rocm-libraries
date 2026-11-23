@@ -152,6 +152,18 @@ struct block_histogram_benchmark : public primbench::benchmark_interface
         state.set_items(items * Trials);
         state.add_reads<T>(items * Trials);
 
+        state.test(
+            [&]
+            {
+                if(items == 0)
+                {
+                    return;
+                }
+                std::vector<T> expected(BinSize, T(0));
+                expected[Trials % 2 == 0 ? BinSize - 1 : 0] = T(items_per_block);
+                common::check_output(d_output.get(), expected);
+            });
+
         state.run(
             [&]
             {

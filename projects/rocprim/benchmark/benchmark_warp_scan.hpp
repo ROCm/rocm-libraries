@@ -176,6 +176,50 @@ struct warp_scan_benchmark : public primbench::benchmark_interface
         state.set_items(items * Trials);
         state.add_reads<T>(items * Trials);
 
+        state.test(
+            [&]
+            {
+                int device;
+                HIP_CHECK(hipGetDevice(&device));
+                if(items == 0 || !is_warp_size_supported(VirtualWaveSize, device))
+                {
+                    return;
+                }
+                constexpr bool is_broadcast = std::is_same_v<Subalgo, broadcast>;
+                constexpr bool inclusive    = std::is_same_v<Subalgo, inclusive_scan>;
+                std::vector<T> values(BlockSize);
+                for(size_t i = 0; i < BlockSize; ++i)
+                {
+                    values[i] = T(is_broadcast ? i % VirtualWaveSize : i % 3 + 1);
+                }
+                common::device_ptr<T> d_values(values);
+                kernel<Subalgo, T, VirtualWaveSize, 1>
+                    <<<dim3(1), dim3(BlockSize), 0, stream>>>(d_values.get(),
+                                                              d_output.get(),
+                                                              input.front());
+                HIP_CHECK(hipStreamSynchronize(stream));
+                std::vector<T> expected(BlockSize);
+                for(size_t warp = 0; warp < BlockSize; warp += VirtualWaveSize)
+                {
+                    if constexpr(is_broadcast)
+                    {
+                        const auto lane = warp / VirtualWaveSize % VirtualWaveSize;
+                        std::fill_n(expected.begin() + warp, VirtualWaveSize, values[warp + lane]);
+                    }
+                    else
+                    {
+                        T sum = inclusive ? T(0) : input.front();
+                        for(size_t i = warp; i < warp + VirtualWaveSize; ++i)
+                        {
+                            const T previous = sum;
+                            sum              = common::add(sum, values[i]);
+                            expected[i]      = inclusive ? sum : previous;
+                        }
+                    }
+                }
+                common::check_output(d_output.get(), expected);
+            });
+
         state.run(
             [&]
             {

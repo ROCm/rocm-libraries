@@ -324,6 +324,34 @@ struct device_batch_memcpy_benchmark : public primbench::benchmark_interface
 private:
     using ValueType = custom_aligned_type<ItemSize, ItemAlignment>;
 
+    static void check_copy(const BatchMemcpyData<ValueType, BufferSizeType>& data)
+    {
+        constexpr size_t num_buffers = NumTlevBuffers + NumWlevBuffers + NumBlevBuffers;
+        const auto       srcs        = data.d_buffer_srcs.load();
+        const auto       dsts        = data.d_buffer_dsts.load();
+        const auto       sizes       = data.d_buffer_sizes.load();
+        const auto       count       = std::min<size_t>(num_buffers, 32);
+        for(size_t i = 0; i < count; ++i)
+        {
+            const auto buffer = count < 2 ? 0 : i * (num_buffers - 1) / (count - 1);
+            const auto items  = static_cast<size_t>(sizes[buffer]);
+            if(items == 0)
+            {
+                continue;
+            }
+            const auto  window = IsMemCpy ? std::min<size_t>(items, 64) : 1;
+            const auto  stride = IsMemCpy ? 1 : sizeof(ValueType);
+            const auto  bytes  = IsMemCpy ? window : ItemSize;
+            const auto* src    = reinterpret_cast<const unsigned char*>(srcs[buffer]);
+            const auto* dst    = reinterpret_cast<const unsigned char*>(dsts[buffer]);
+            for(const auto offset : {size_t{0}, (items - window) * stride})
+            {
+                const auto expected = common::read_output(src + offset, bytes);
+                common::check_output(dst + offset, expected);
+            }
+        }
+    }
+
     void run_naive_benchmark(primbench::state& state)
     {
         const auto& stream = state.stream;
@@ -341,6 +369,8 @@ private:
 
         state.set_items(items);
         state.add_reads<ValueType>(items);
+
+        state.test([&] { check_copy(data); });
 
         state.run(
             [&]
@@ -381,6 +411,8 @@ private:
 
         state.set_items(items);
         state.add_reads<ValueType>(items);
+
+        state.test([&] { check_copy(data); });
 
         state.run(
             [&]

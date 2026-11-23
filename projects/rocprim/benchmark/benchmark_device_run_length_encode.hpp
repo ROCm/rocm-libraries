@@ -132,6 +132,28 @@ struct device_run_length_encode_benchmark : public primbench::benchmark_interfac
         state.set_items(items);
         state.add_reads<key_type>(items);
 
+        state.test(
+            [&]
+            {
+                std::vector<key_type>   expected_keys;
+                std::vector<count_type> expected_counts;
+                count_type              count = 0;
+                common::for_each_run(input,
+                                     [&](size_t first, size_t last)
+                                     {
+                                         if(count < 4096)
+                                         {
+                                             expected_keys.push_back(input[first]);
+                                             expected_counts.push_back(
+                                                 static_cast<count_type>(last - first));
+                                         }
+                                         ++count;
+                                     });
+                PRIMBENCH_ASSERT(d_runs_count_output.load_value_at(0), count);
+                common::check_output(d_unique_output.get(), expected_keys);
+                common::check_output(d_counts_output.get(), expected_counts);
+            });
+
         state.run(
             [&]
             {
