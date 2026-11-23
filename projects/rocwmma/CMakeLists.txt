@@ -268,7 +268,6 @@ if(ROCWMMA_BUILD_TESTS)
       PATTERN "*.hip"
       PATTERN "*.cpp"
       PATTERN "*.json"
-      PATTERN "*.py"
       PATTERN "*.cmake"
       PATTERN "*.h"
       PATTERN "*.hpp"
