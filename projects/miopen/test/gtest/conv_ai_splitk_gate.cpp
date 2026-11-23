@@ -1,8 +1,7 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-// Regression test for the supports_split_k_autodeduce flag introduced in #6723 and enabled
-// for grouped Wrw solvers in this PR.
+// Tests for the supports_split_k_autodeduce flag on the grouped Wrw solver configs.
 //
 // What it tests:
 //   The precompute vocab-walk heuristic walks the ranked (kernel, split_k) pair list and accepts
@@ -34,15 +33,9 @@
 using miopen::solver::conv::CkSplitkAutoDeduce;
 using miopen::solver::conv::SolverHeuristicConfig;
 
-namespace {
-
-// The 2D and 3D grouped Wrw solver configs — their supports_split_k_autodeduce value is what this
-// PR changes from false to true. Defined in conv_hip_implicit_gemm_grouped_wrw_xdlops.cpp and
-// conv_hip_implicit_gemm_3d_grouped_wrw_xdlops.cpp as file-scope constexpr; we access them here
-// via the solver's GetDefaultPerformanceConfig indirectly, but it's simpler to test the
-// SolverHeuristicConfig struct directly since the struct is what gates the heuristic.
-
-} // namespace
+// The autodeduce sentinel must be -1 to match the value stored in the Wrw vocab tables and the
+// value CK recognises as "compute k_batch from occupancy". Checked at compile time.
+static_assert(CkSplitkAutoDeduce == -1, "CkSplitkAutoDeduce must equal -1");
 
 class CPU_SplitKAutodeduceGate_NONE : public ::testing::Test
 {
@@ -59,8 +52,7 @@ TEST_F(CPU_SplitKAutodeduceGate_NONE, FlagOffRejectsAutodeduce)
     };
     EXPECT_FALSE(cfg.IsValidSplitK(CkSplitkAutoDeduce))
         << "IsValidSplitK(-1) must return false when supports_split_k_autodeduce=false. "
-           "A true result means the heuristic can pick -1 when the flag is off, which may "
-           "cause CK to execute an untested autodeduce path.";
+           "A true result means the heuristic can pick -1 when the flag is off.";
     EXPECT_TRUE(cfg.IsValidSplitK(1));
     EXPECT_TRUE(cfg.IsValidSplitK(32));
     EXPECT_TRUE(cfg.IsValidSplitK(128));
@@ -87,14 +79,6 @@ TEST_F(CPU_SplitKAutodeduceGate_NONE, FlagOnAcceptsAutodeduce)
     EXPECT_TRUE(cfg.IsValidSplitK(128));
 }
 
-// Autodeduce sentinel value is exactly -1.
-TEST_F(CPU_SplitKAutodeduceGate_NONE, AutodeduceSentinelIsMinusOne)
-{
-    EXPECT_EQ(CkSplitkAutoDeduce, -1)
-        << "CkSplitkAutoDeduce must equal -1 to match the value stored in the Wrw vocab tables "
-           "and the value CK recognises as 'compute k_batch from occupancy'.";
-}
-
 // Non-split-k solvers (uses_split_k=false) accept split_k==0 and reject everything else.
 TEST_F(CPU_SplitKAutodeduceGate_NONE, NonSplitKSolverAcceptsOnlyZero)
 {
@@ -115,7 +99,6 @@ TEST_F(CPU_SplitKAutodeduceGate_NONE, NonSplitKSolverAcceptsOnlyZero)
 //
 // This test FAILS when supports_split_k_autodeduce=false in the actual shipped solver config
 // (the gate rejects -1, the walk falls to a different pick), and PASSES when it is true.
-// It is the regression test for PR #16500.
 //
 // Requires model assets in MIOPEN_SYSTEM_DB_PATH (same as conv_ai_candidate_selection_cpu.cpp).
 class CPU_SplitKAutodeduceEndToEnd_NONE : public ::testing::Test
@@ -161,9 +144,9 @@ TEST_F(CPU_SplitKAutodeduceEndToEnd_NONE, Wrw2DPicksAutodeduceWithRealGate)
 
     EXPECT_EQ(pick->second, miopen::solver::conv::CkSplitkAutoDeduce)
         << "Expected split_k=-1 (autodeduce) but got " << pick->second << ". "
-        << "This means supports_split_k_autodeduce=false in the actual solver config "
-           "(k2DWrwSolverConfig in conv_hip_implicit_gemm_grouped_wrw_xdlops.cpp). "
-           "The PR #16500 change enabling autodeduce for Wrw was reverted or not applied.";
+        << "Most likely supports_split_k_autodeduce was set back to false in the 2D Wrw solver "
+           "config (k2DWrwSolverConfig in conv_hip_implicit_gemm_grouped_wrw_xdlops.cpp); a shipped "
+           "model refresh that changes this shape's top-1 could also cause it.";
 }
 
 #endif // MIOPEN_ENABLE_AI_KERNEL_TUNING
