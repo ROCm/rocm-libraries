@@ -321,7 +321,8 @@ namespace
             remove();
         }
 
-        deep_library(const deep_library&)            = delete;
+        deep_library(const deep_library&) = delete;
+
         deep_library& operator=(const deep_library&) = delete;
 
         const stdfs::path& root() const
@@ -352,15 +353,32 @@ namespace
         }
     };
 
-    // Shortest name of a library file the f32 NN GEMM can open in `arch_dir`.
-    size_t shortest_sgemm_library_name(const stdfs::path& arch_dir)
+    // The directory holding the lazy catalog for `arch`, searched the way
+    // tensile_host.cpp does: <arch>-<xnack>, then <arch>, then the flat directory that
+    // multi-architecture builds use. Empty if there is no lazy catalog.
+    stdfs::path lazy_catalog_dir(const stdfs::path& source, const std::string& arch)
+    {
+        const std::string lazy = "TensileLibrary_lazy_" + arch + ".dat";
+        std::error_code   ec;
+        for(const auto& entry : stdfs::directory_iterator(source, ec))
+            if(entry.is_directory() && entry.path().filename().string().rfind(arch + "-", 0) == 0
+               && stdfs::exists(entry.path() / lazy, ec))
+                return entry.path();
+        for(const auto& dir : {source / arch, source})
+            if(stdfs::exists(dir / lazy, ec))
+                return dir;
+        return {};
+    }
+
+    // Shortest name of a library file for `arch` that the f32 NN GEMM can open in `dir`.
+    size_t shortest_sgemm_library_name(const stdfs::path& dir, const std::string& arch)
     {
         size_t shortest = 0;
-        for(const auto& file : stdfs::directory_iterator(arch_dir))
+        for(const auto& file : stdfs::directory_iterator(dir))
         {
             const std::string name = file.path().filename().string();
             if(name.find("_Type_SS_Contraction_l_Ailk_Bljk_Cijk_Dijk") != std::string::npos
-               && file.path().extension() == ".dat")
+               && name.find(arch) != std::string::npos && file.path().extension() == ".dat")
                 shortest = shortest ? std::min<size_t>(shortest, name.size()) : name.size();
         }
         return shortest;
@@ -496,18 +514,22 @@ namespace
     // under MAX_PATH, and only the per-type library files reach it.
     TEST_F(rocblas_long_path, quick_tensile_libpath_longest_files)
     {
-        const stdfs::path arch_dir = m_source / m_arch;
+        const stdfs::path catalog_dir = lazy_catalog_dir(m_source, m_arch);
         const size_t      shortest
-            = stdfs::is_directory(arch_dir) ? shortest_sgemm_library_name(arch_dir) : 0;
-        const std::string lazy = "TensileLibrary_lazy_" + m_arch + ".dat";
-        if(!shortest || !stdfs::exists(arch_dir / lazy))
+            = catalog_dir.empty() ? 0 : shortest_sgemm_library_name(catalog_dir, m_arch);
+        if(!shortest)
             LONG_PATH_UNAVAILABLE << "no lazy " << m_arch << " library in " << m_source.string();
 
+        // The catalog's directory relative to the library root: empty in a flat layout.
+        const std::string sub  = catalog_dir == m_source ? "" : catalog_dir.filename().string();
+        const std::string lazy = "TensileLibrary_lazy_" + m_arch + ".dat";
+        const size_t      sub_length = sub.empty() ? 0 : sub.size() + 1;
+
         // Put the shortest sgemm library file a few characters past the limit.
-        const size_t root = c_max_path + 4 - (2 + m_arch.size() + shortest);
-        deep_library library(m_source, m_arch, root);
-        if(path_length(library.root() / m_arch) + 1 + shortest < c_max_path
-           || path_length(library.root() / m_arch / lazy) >= c_max_path)
+        const size_t      root = c_max_path + 4 - (1 + sub_length + shortest);
+        deep_library      library(m_source, m_arch, root);
+        const stdfs::path dir = sub.empty() ? library.root() : library.root() / sub;
+        if(path_length(dir) + 1 + shortest < c_max_path || path_length(dir / lazy) >= c_max_path)
             LONG_PATH_UNAVAILABLE << "cannot build the layout: the base directory of "
                                   << library.root().string() << " is too long";
 
