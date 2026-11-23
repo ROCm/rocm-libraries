@@ -4450,7 +4450,9 @@ class Solution(collections.abc.Mapping):
       unsupported = (
         state["NoTailLoop"]                                        # no K tail to fold
         or not (state["enableTDMA"] and state["enableTDMB"])       # the K dim lives in the TDM descriptor
-        or state["PrefetchGlobalRead"] != 2
+        or state["PrefetchGlobalRead"] not in (1, 2)
+        # PGR1 without a NoLoadLoop and without HalfPLR's TDM disable loads one k-tile past K
+        or (state["SuppressNoLoadLoop"] and not state["HalfPLR"])
         or isPersistent(state)                                     # DataParallel / StreamK tiles start mid-K
         or du & (du - 1) != 0
         or not tdmWaveSeparated(state) or tdmSeparateABDescriptors(state) or tdmPairOnEveryWave(state, "A", "B")

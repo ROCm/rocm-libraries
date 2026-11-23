@@ -3,7 +3,7 @@
 
 """Tail folding of the K tail into the TDM unroll loop (gfx1250), fixed at codegen.
 
-Every kernel whose structure allows it (any input type but packed sub-byte F4/F6, TDM A/B, PGR 2, ...) folds: the unroll loop runs
+Every kernel whose structure allows it (any input type but packed sub-byte F4/F6, TDM A/B, PGR 1 or 2, ...) folds: the unroll loop runs
 ceil(K/DU) iterations, the TDM K dim (shrunk at every address step) zero-fills the partial last k-tile, and
 no tail loop is emitted. Any other kernel keeps the develop tail loop. With GSU the folded k-tile count is
 distributed; each split's K dim starts at its own first k-tile (GSUC 0: interleaved, GSUC 1: contiguous).
@@ -216,10 +216,97 @@ def test_fold_gate_gap_is_an_error(tmp_path, monkeypatch, capsys):
     assert "the K dim step cannot be derived from the TDM increment" in out and FALLBACK not in out
 
 
-def test_fold_off_when_illegal(tmp_path):
-    # PrefetchGlobalRead 1 is not legal for folding -> the kernel keeps the plain tail loop; never a reject.
-    asm = _emit_one(tmp_path, _config([("PrefetchGlobalRead", 1)]), "tf_pgr1.yaml")
+@pytest.mark.parametrize("extra", [[("PrefetchGlobalRead", 0)],
+                                   [("PrefetchGlobalRead", 1), ("SuppressNoLoadLoop", True), ("GlobalSplitU", 1)]],
+                         ids=["pgr0", "pgr1_suppress_nll"])
+def test_fold_off_when_illegal(tmp_path, extra):
+    # PGR 0, and PGR 1 without a NoLoadLoop (its last iteration loads a k-tile past K) unless HalfPLR
+    # disables that load, keep the plain tail loop; never a reject.
+    asm = _emit_one(tmp_path, _config(extra), "tf_illegal.yaml")
     assert "TailFold" not in asm and "label_TailLoopBeginL" in asm
+
+
+_PGR1_CASES = {
+    "noloadloop": ([], {}),
+    "halfplr": ([("HalfPLR", 2)], dict(mi=(16, 16, 32, 1, 1, 2, 2, 2, 2), wg=(32, 4, 1))),
+    "gsu_gl2": ([("GlobalSplitU", -1), ("GlobalSplitUAlgorithm", "MultipleBuffer"), ("PrefetchGL2", 2)], {}),
+    "stagger_gsu": ([("ClusterDim", [1, 1]), ("GlobalSplitU", 3), ("GlobalSplitUAlgorithm", "MultipleBuffer")], {}),
+}
+
+
+@pytest.mark.parametrize("case", list(_PGR1_CASES))
+def test_fold_pgr1_codegen(tmp_path, case):
+    # PGR 1 folds like PGR 2: the prologue issues k-tile 0 and one address step, each loop iteration issues the
+    # next k-tile and one address step, the NoLoadLoop (or HalfPLR's disabled last iteration) issues nothing.
+    # Every address step shrinks the K dim, so k-tile t is issued after t shrinks.
+    extra, kw = _PGR1_CASES[case]
+    asm = _emit_one(tmp_path, _config([("PrefetchGlobalRead", 1)] + extra, **kw), "tf_pgr1_%s.yaml" % case)
+    assert "label_TailLoopBeginL" not in asm and "toPGR1:" not in asm
+    assert asm.index(CEIL) < asm.index("tensor_load_to_lds")
+    shrink = re.findall(r"// TailFolding: K dim -= \S.* \(low half\)", asm)
+    if case == "stagger_gsu":
+        assert asm.count("TailFolding: K dim -= stagger start (low half)") == 2
+        assert asm.count("TailFolding: K dim -= wrapIter ? -(splitIters-1)*step : step (low half)") \
+            == asm.count("TDM addr += inc (with wrap, 64-bit)") > 0
+    else:
+        assert _steps(asm) and len(shrink) == _steps(asm)
+    if case == "halfplr":
+        assert "is this the last iters" in asm
+    else:
+        # the NoLoadLoop issues no TDM load
+        assert "tensor_load_to_lds" not in asm[asm.index("label_LoopEndL:"):]
+    if case == "gsu_gl2":
+        assert "// TailFolding: split start = start k-tile * DU, in the K dim field" in asm
+        assert re.search(r"^s_addc_u32 (s\d+), 1, 0 +// TailFolding: pre-loop GL2 threshold = PGR \(\+1 if K tail\)", asm, re.M)
+        assert re.search(r"^s_addc_u32 (s\d+), 3, 0 +// TailFolding: GL2 threshold = PGR\+GL2 \(\+1 if K tail\)", asm, re.M)
+    _check_borrow_pairs(asm)
+
+
+def _simulate_issue(K, DU, pgr):
+    """Issue order of the generated unroll loop (no GSU): the prologue issues k-tiles 0..pgr-1 with an address
+    step after k-tile 0 only (PGR 2 issues k-tile 1 from the stepped address), every loop iteration steps the
+    address (PGR 2: before its issue; PGR 1: after it) and issues the next k-tile, the loop leaves at
+    counter == pgr (PGR 2 with count 1 jumps to toPGR1), and the drain issues nothing. Returns the issued
+    (k-tile, K dim) pairs and the number of k-tiles computed."""
+    n = -(-K // DU)
+    kdim, addr, issued = K, 0, []
+
+    def step():
+        nonlocal kdim, addr
+        addr += 1; kdim -= DU
+
+    def issue():
+        if addr < n:                                            # the prologue's 2nd PGR stage skips past the count
+            issued.append((addr, kdim))
+
+    issue(); step()
+    if pgr == 2:
+        issue()
+    counter, computed = n, 0
+    if counter > pgr:
+        while True:
+            if pgr == 2:
+                step()
+            issue()
+            if pgr == 1:
+                step()
+            computed += 1; counter -= 1
+            if counter <= pgr:
+                break
+    computed += min(counter, pgr)                               # NGLL + NLL (or toPGR1: NLL only)
+    return n, issued, computed
+
+
+@pytest.mark.parametrize("pgr", [1, 2])
+@pytest.mark.parametrize("DU", [32, 128, 256])
+def test_fold_issue_model(DU, pgr):
+    # every k-tile 0..ceil(K/DU)-1 is issued once, with the K dim measured from its base (so the partial last
+    # one is clamped at K), none past it, and ceil(K/DU) k-tiles are computed: K < DU, r = 0, floor 0 / 1 / 2
+    for K in list(range(1, 4 * DU + 3)) + [65535, 65601, 70001]:
+        n, issued, computed = _simulate_issue(K, DU, pgr)
+        assert [t for t, _ in issued] == list(range(n)), (K, DU, pgr)
+        assert all(kd == K - t * DU for t, kd in issued), (K, DU, pgr)
+        assert computed == n, (K, DU, pgr)
 
 
 @pytest.mark.parametrize("gsu", [1, 3])
