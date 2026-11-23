@@ -660,14 +660,6 @@ namespace rocsparse
         {
         case rocsparse_v2_spmv_stage_analysis:
         {
-            // The CSR, CSC and BSR analysis kept by spmv_descr describes the arrays of the
-            // matrix descriptor it was computed for. Another matrix descriptor, or arrays
-            // replaced with rocsparse_*_set_pointers, need a new rocsparse_spmv_descr.
-            if(spmv_descr->has_analysis() && spmv_descr->get_analyzed_stamp() != mat->arrays_stamp)
-            {
-                RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
-            }
-
             switch(format)
             {
 
@@ -675,7 +667,6 @@ namespace rocsparse
             case rocsparse_format_sell:
             case rocsparse_format_coo_aos:
             {
-                spmv_descr->set_analyzed_stamp(mat->arrays_stamp);
                 return rocsparse_status_success;
             }
 
@@ -712,7 +703,6 @@ namespace rocsparse
                                                                          &coomv_info)));
                     mat->info->set_coomv_info(coomv_info);
                 }
-                spmv_descr->set_analyzed_stamp(mat->arrays_stamp);
                 return rocsparse_status_success;
             }
 
@@ -819,11 +809,15 @@ namespace rocsparse
 
         case rocsparse_v2_spmv_stage_compute:
         {
-            // rocsparse_*_set_pointers replaced the arrays that the analysis describes;
-            // a new rocsparse_spmv_descr has to be analyzed for them.
+            // The CSR, CSC and BSR analysis describes the arrays of the matrix descriptor
+            // it was computed for. rocsparse_*_set_pointers replaced them, or mat is
+            // another matrix descriptor: a new rocsparse_spmv_descr has to be analyzed.
             if(spmv_descr->has_analysis() && spmv_descr->get_analyzed_stamp() != mat->arrays_stamp)
             {
-                RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
+                RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(
+                    rocsparse_status_invalid_value,
+                    "the rocsparse_spmv_descr was analyzed for other arrays or another matrix "
+                    "descriptor; create and analyze a new one");
             }
 
             static constexpr bool    fallback_algorithm = false;

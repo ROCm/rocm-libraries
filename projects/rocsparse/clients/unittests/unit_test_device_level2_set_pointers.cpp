@@ -1448,7 +1448,9 @@ namespace
     }
 
     // A second analysis on the same v2 descriptor, after set_pointers, must not
-    // adopt the CSR, CSC or BSR info built for the previous arrays.
+    // adopt the CSR, CSC or BSR info built for the previous arrays. That analysis is
+    // refused by the existing rule that a rocsparse_spmv_descr is analyzed only
+    // once; the compute stage that follows is refused by the set_pointers check.
     template <typename T>
     void v2_reanalysis_same_descr(rocsparse_handle handle, fmt f, const config& c)
     {
@@ -1469,7 +1471,7 @@ namespace
 
         ASSERT_EQ(set_pointers(mat, sc.p2, d2), rocsparse_status_success);
         EXPECT_EQ(s.analyze_same_descr(), rocsparse_status_invalid_value)
-            << "analysis of the same descriptor";
+            << "second analysis of the same descriptor";
         EXPECT_EQ(s.compute(), rocsparse_status_invalid_value) << "compute after the refusal";
         EXPECT_TRUE(expect_near(s.y0(), s.y(), "y after the refused compute"));
     }
