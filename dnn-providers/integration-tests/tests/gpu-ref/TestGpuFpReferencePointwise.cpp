@@ -1547,14 +1547,22 @@ TEST_P(TestGpuPointwiseUnarySpecialValuesFp32, MatchesCpuRef)
 
 INSTANTIATE_TEST_SUITE_P(Quick,
                          TestGpuPointwiseUnaryRef4DFp32,
-                         ::testing::ValuesIn(getSmall4dUnaryPointwiseCases()));
+                         ::testing::ValuesIn(getSmall4dCoreUnaryPointwiseCases()));
 INSTANTIATE_TEST_SUITE_P(Quick,
                          TestGpuPointwiseBinaryRef4DFp32,
-                         ::testing::ValuesIn(getSmall4dBinaryPointwiseCases()));
-INSTANTIATE_TEST_SUITE_P(Quick,
+                         ::testing::ValuesIn(getSmall4dCoreBinaryPointwiseCases()));
+// The extended modes compile kernels the core modes do not, so their small fp32 cases run in the
+// standard tier.
+INSTANTIATE_TEST_SUITE_P(StandardSmall,
+                         TestGpuPointwiseUnaryRef4DFp32,
+                         ::testing::ValuesIn(getSmall4dExtendedUnaryPointwiseCases()));
+INSTANTIATE_TEST_SUITE_P(StandardSmall,
+                         TestGpuPointwiseBinaryRef4DFp32,
+                         ::testing::ValuesIn(getSmall4dExtendedBinaryPointwiseCases()));
+INSTANTIATE_TEST_SUITE_P(StandardSmall,
                          TestGpuPointwiseCompareRef4DFp32,
                          ::testing::ValuesIn(getSmall4dComparePointwiseCases()));
-INSTANTIATE_TEST_SUITE_P(Quick,
+INSTANTIATE_TEST_SUITE_P(StandardSmall,
                          TestGpuPointwiseTernaryRef4DFp32,
                          ::testing::ValuesIn(getSmall4dTernaryPointwiseCases()));
 INSTANTIATE_TEST_SUITE_P(Standard,
@@ -1614,14 +1622,22 @@ INSTANTIATE_TEST_SUITE_P(Comprehensive,
 
 INSTANTIATE_TEST_SUITE_P(Quick,
                          TestGpuPointwiseUnaryRef5DFp32,
-                         ::testing::ValuesIn(getSmall5dUnaryPointwiseCases()));
+                         ::testing::ValuesIn(getSmall5dCoreUnaryPointwiseCases()));
 INSTANTIATE_TEST_SUITE_P(Quick,
                          TestGpuPointwiseBinaryRef5DFp32,
-                         ::testing::ValuesIn(getSmall5dBinaryPointwiseCases()));
-INSTANTIATE_TEST_SUITE_P(Quick,
+                         ::testing::ValuesIn(getSmall5dCoreBinaryPointwiseCases()));
+// The extended modes compile kernels the core modes do not, so their small fp32 cases run in the
+// standard tier.
+INSTANTIATE_TEST_SUITE_P(StandardSmall,
+                         TestGpuPointwiseUnaryRef5DFp32,
+                         ::testing::ValuesIn(getSmall5dExtendedUnaryPointwiseCases()));
+INSTANTIATE_TEST_SUITE_P(StandardSmall,
+                         TestGpuPointwiseBinaryRef5DFp32,
+                         ::testing::ValuesIn(getSmall5dExtendedBinaryPointwiseCases()));
+INSTANTIATE_TEST_SUITE_P(StandardSmall,
                          TestGpuPointwiseCompareRef5DFp32,
                          ::testing::ValuesIn(getSmall5dComparePointwiseCases()));
-INSTANTIATE_TEST_SUITE_P(Quick,
+INSTANTIATE_TEST_SUITE_P(StandardSmall,
                          TestGpuPointwiseTernaryRef5DFp32,
                          ::testing::ValuesIn(getSmall5dTernaryPointwiseCases()));
 INSTANTIATE_TEST_SUITE_P(Standard,
@@ -1679,7 +1695,7 @@ INSTANTIATE_TEST_SUITE_P(Comprehensive,
 // Special values (signed zeros, NaN, infinities, a negative number)
 // ============================================================================
 
-INSTANTIATE_TEST_SUITE_P(Quick,
+INSTANTIATE_TEST_SUITE_P(StandardSmall,
                          TestGpuPointwiseUnarySpecialValuesFp32,
                          ::testing::ValuesIn(getUnarySpecialValuePointwiseCases()));
 INSTANTIATE_TEST_SUITE_P(Standard,

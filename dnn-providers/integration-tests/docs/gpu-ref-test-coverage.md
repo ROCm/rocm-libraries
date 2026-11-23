@@ -115,6 +115,12 @@ A new reduced-precision or mixed-type case belongs in standard. Give a
 parameterized suite a `Standard` prefix. A plain `TEST` is placed by its suite
 name, so name it with the datatype token (`...Fp16`, `...MixedType`).
 
+The pointwise modes added with the CPU-parity work (the math, ELU and softplus unary modes, MAX, MIN,
+CMP_GT and BINARY_SELECT) run their small fp32 cases in standard, under the `StandardSmall` prefix. Their
+plain `TEST`s, and the plan and executor execution tests in `hipdnn_integration_tests_unit_tests`, are
+placed by name patterns in `test_categories_gpu_ref.yaml` and `test_categories.yaml`. Quick keeps the
+pre-existing modes' small fp32 cases and the host-only validation tests.
+
 ## What was kept, and why
 
 - Every fp32 small-shape case that compiles a distinct kernel: each reduction
