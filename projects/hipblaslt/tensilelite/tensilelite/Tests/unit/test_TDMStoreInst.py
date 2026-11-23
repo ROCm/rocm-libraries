@@ -1313,7 +1313,10 @@ def test_queue_handoff_barrier_fences_the_flush(gp_gfx1250, gfx1250_iim, assembl
   for flush in flushes:
     branch = next(i for i in range(flush, -1, -1) if _code(lines[i]).startswith("s_cbranch_scc0"))
     target = _code(lines[branch]).split()[1]
-    assert "TDMStoreFlushDynamicArm" in target and "static assignment selected" in lines[branch - 1], lines[branch - 1:branch + 1]
+    # WorkAssignmentMode 0 is the static arm, whose handoff has no barrier: scc0 skips the barrier on the other arm.
+    assert "TDMStoreFlushDynamicArm" in target, lines[branch]
+    assert re.fullmatch(r"s_cmp_eq_u32\s+s\[sgprWorkAssignmentMode\],\s*0", _code(lines[branch - 1])), \
+      lines[branch - 1:branch + 1]
     assert any(_code(line) == target + ":" for line in lines[flush + 1:flush + 4]), target
 
 
