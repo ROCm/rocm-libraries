@@ -95,16 +95,25 @@ public:
     }
 };
 
-// The layer FakeKernel launches \p x, \p y and \p z workgroups for. With \p partial the last Y and
-// Z workgroups hold a single item each.
+// The layer FakeKernel launches \p x, \p y and \p z workgroups for: a valid 1x1 convolution with
+// w = \p x, a batch and an output-channel count that give \p y and \p z workgroups. With
+// \p partial the last Y and Z workgroups hold a single item each. hipconv rejects an invalid
+// layer before it looks at the grid.
 hipconv::ConvParams ParamsFor(std::size_t x, std::size_t y, std::size_t z, bool partial = false)
 {
     hipconv::ConvParams par{};
     par.w                     = static_cast<int>(x);
+    par.h                     = 1;
+    par.c                     = 1;
+    par.kh                    = 1;
+    par.kw                    = 1;
+    par.pad_h                 = 0;
+    par.pad_w                 = 0;
     const std::size_t y_slack = partial ? kItemsPerYWorkgroup - 1 : std::size_t{0};
     const std::size_t z_slack = partial ? kItemsPerZWorkgroup - 1 : std::size_t{0};
     par.n                     = static_cast<int>(y * kItemsPerYWorkgroup - y_slack);
     par.k                     = static_cast<int>(z * kItemsPerZWorkgroup - z_slack);
+    par.compute_output_size();
     return par;
 }
 
