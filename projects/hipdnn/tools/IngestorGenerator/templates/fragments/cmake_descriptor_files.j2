@@ -42,6 +42,39 @@
 ##     {{ slug }}.uhd.json
 {% endif %}
 ##     kernel_dtype_matches_graph.umd.json
+{% elif config.is_shipped_direct_load %}
+## This is a SHIPPED DIRECT-LOAD bundle: hkp_pack passes its `embedded_source`
+## descriptors through unchanged into the production shard, and the runtime loader reads
+## them as authored. The plugin compiles each kernel from source at plan build, so every
+## `source_file` must be embedded in the PLUGIN, not the test binary:
+##
+##     add_kernels_for_embedding(TARGET hip_kernel_provider_impl
+##                               FILES <descriptor dir>/<source_file> ...
+##                               KEYS <source_file> ...)
+##
+## Each key is the descriptor's `source_file` string, and the file must sit at that path
+## relative to the descriptor: hkp_verify_embedded_sources(TARGET hip_kernel_provider_impl
+## ... PACK_NAMES product) checks both and fails the build otherwise. Headers a kernel
+## includes are keyed by bare filename, so two shipped bundles cannot both embed a header
+## of the same name.
+##
+## Authored subpath:
+##     {{ config.descriptor_dir }}/
+##
+## Files placed there by this run:
+##     {{ slug }}.kmd.json
+##     {{ slug }}.ued.json
+##     {{ slug }}.udd.json
+{% if config.engine.has_heuristic %}
+##     {{ slug }}.uhd.json
+{% endif %}
+##     kernel_dtype_matches_graph.umd.json
+{% for pack in config.packs %}
+##     {{ config.kdp_stem(pack) }}.kdp.json
+{% if config.has_operation_matchers %}
+##     operation_is_{{ pack.discriminator }}.umd.json
+{% endif %}
+{% endfor %}
 {% else %}
 ## This is a DIRECT-LOAD bundle: the runtime loader reads these files as authored, out
 ## of the shard belonging to the set `{{ config.authored_subpath }}`. The set is a pack

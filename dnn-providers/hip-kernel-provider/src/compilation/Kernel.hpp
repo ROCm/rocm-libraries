@@ -16,7 +16,7 @@ class Kernel : public IRunnableKernel
 {
 public:
     /// Carried by Program-sourced kernels, which launch on whatever device is current: a
-    /// Program loads its module without binding and HipMlopsModuleCache keys on (file,
+    /// Program loads its module without binding and HiprtcModuleCache keys on (file,
     /// options) with no ordinal, so one Program is legitimately shared across every device.
     /// Remembering an ordinal here would pin every launch to whichever device compiled
     /// first; giving that cache a device is ALMIOPEN-2550's job.

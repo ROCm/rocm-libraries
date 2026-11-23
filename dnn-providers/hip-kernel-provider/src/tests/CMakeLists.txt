@@ -26,6 +26,8 @@ add_executable(
     compilation/TestProgramAndKernel.cpp
     compilation/TestKernelCompileOptions.cpp
     compilation/TestModuleCache.cpp
+    compilation/TestHiprtcKernelCompiler.cpp
+    compilation/TestHiprtcModuleCache.cpp
     device/TestScopedDevice.cpp
     utilities/TestDigest.cpp
 )

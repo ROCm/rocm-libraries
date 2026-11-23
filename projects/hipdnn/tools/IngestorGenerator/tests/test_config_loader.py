@@ -1632,6 +1632,56 @@ class TestPackagedAuthoredSubpathIsContained:
         assert "g2demo_pwned" in str(excinfo.value)
 
 
+class TestShippedDirectLoadAuthoredSubpath:
+    """A direct-load bundle the plugin ships names its folder under the production
+    ``descriptors/`` root with a ``descriptors/`` prefix; the subpath is used verbatim and
+    held to the same containment rules as a packaged bundle's."""
+
+    def _load(self, tmp_path, subpath):
+        raw = TestDeprecatedKeys()._base_raw()
+        raw["authored_subpath"] = subpath
+        path = tmp_path / "c.yaml"
+        path.write_text(yaml.dump(raw))
+        return load_config(path)
+
+    def test_a_shipped_subpath_lands_under_descriptors_verbatim(self, tmp_path):
+        config = self._load(tmp_path, "descriptors/HipMlops/layernorm")
+        assert config.is_shipped_direct_load
+        assert config.descriptor_dir == "descriptors/HipMlops/layernorm"
+
+    def test_a_test_set_is_still_not_shipped(self, tmp_path):
+        config = self._load(tmp_path, "unit")
+        assert not config.is_shipped_direct_load
+        assert config.descriptor_dir == "test_descriptors/unit/test"
+
+    def test_a_shipped_subpath_is_normalised(self, tmp_path):
+        config = self._load(tmp_path, "descriptors/HipMlops/./layernorm")
+        assert config.descriptor_dir == "descriptors/HipMlops/layernorm"
+
+    def test_the_descriptor_root_itself_is_rejected(self, tmp_path):
+        for subpath in ("descriptors/", "descriptors/.", "descriptors/HipMlops/.."):
+            with pytest.raises(ConfigError) as excinfo:
+                self._load(tmp_path, subpath)
+            assert "'descriptors/' root itself" in str(excinfo.value), subpath
+
+    def test_a_shipped_subpath_that_walks_out_is_rejected(self, tmp_path):
+        with pytest.raises(ConfigError) as excinfo:
+            self._load(tmp_path, "descriptors/HipMlops/../../g2demo_pwned")
+        message = str(excinfo.value)
+        assert "authored_subpath" in message, message
+        assert "g2demo_pwned" in message, message
+
+    def test_a_shipped_subpath_with_a_rooted_remainder_is_rejected(self, tmp_path):
+        with pytest.raises(ConfigError) as excinfo:
+            self._load(tmp_path, "descriptors//g2demo_abs")
+        assert "not relative" in str(excinfo.value)
+
+    def test_the_set_refusal_names_the_shipped_form(self, tmp_path):
+        with pytest.raises(ConfigError) as excinfo:
+            self._load(tmp_path, "HipMlops/layernorm")
+        assert "'descriptors/<subpath>'" in str(excinfo.value)
+
+
 class TestPackKernelDefaults:
     """A pack may hoist what every kernel repeats; a kernel overrides by restating.
     Without it a generated variant set restates `kind`, `source`, `builder` once per

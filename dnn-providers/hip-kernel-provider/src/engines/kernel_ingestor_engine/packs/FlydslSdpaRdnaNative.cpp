@@ -34,12 +34,12 @@
 #include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
 #include <hipdnn_plugin_sdk/ingestor/SymbolScope.hpp>
 
+#include "compilation/HiprtcKernelCompiler.hpp"
 #include "compilation/IKernelCompiler.hpp"
 #include "compilation/KernelCompileOptions.hpp"
 #include "compilation/KpackKernelLoader.hpp"
 #include "compilation/KpackModuleCache.hpp"
 #include "core/Handle.hpp"
-#include "engines/hip_mlops_engine/HipMlopsKernelCompiler.hpp"
 #include "engines/kernel_ingestor_engine/IngestorKernelCode.hpp"
 #include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
 #include "engines/kernel_ingestor_engine/packs/FlydslSdpaHeadPad.hpp"
@@ -643,7 +643,7 @@ namespace
 /// graph reaches the engine's own handler unchanged.
 const flydsl_sdpa::HeadPadDispatchHandler& flydslSdpaRdnaDispatchHandler()
 {
-    static const HipMlopsKernelCompiler s_kernelCompiler;
+    static const compilation::HiprtcKernelCompiler s_kernelCompiler;
     static const compilation::KpackKernelLoader s_kpackLoader(flydslSdpaRdnaKpackModuleCache());
     static const FlydslSdpaRdnaDispatchHandler s_engineHandler(s_kernelCompiler, s_kpackLoader);
     static const flydsl_sdpa::HeadPadDispatchHandler s_dispatchHandler(s_engineHandler,

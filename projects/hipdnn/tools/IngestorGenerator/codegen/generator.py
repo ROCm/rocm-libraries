@@ -1068,10 +1068,11 @@ def build_kdp(
         kdp["provenance"]["generated_from"] = dict(generated_from)
     if pack.arch:
         kdp["arch"] = list(pack.arch)
-    elif config.is_packaged:
+    else:
         # hkp_pack requires arch on a KDP (_validate_kdp) where the runtime
-        # loader treats absence as a wildcard. The config loader rejects this
-        # earlier, so keep the key present and empty.
+        # loader treats absence as a wildcard. It packs direct-load bundles too
+        # (passing their descriptors through), so keep the key present and empty
+        # for both dialects: an empty list claims every architecture.
         kdp["arch"] = []
     return kdp
 

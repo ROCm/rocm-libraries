@@ -33,7 +33,7 @@ per-run evidence directory as described in [RUNBOOK.md](RUNBOOK.md#paths-and-int
 | | `direct_load` | `packaged` |
 |---|---|---|
 | Authored source | `embedded_source` | `rocke`, `hip` or `hsaco` |
-| Authored under | `test_descriptors/<set>/<slug>`, `<set>` one of `shared`, `unit`, `integration`, `archive_fixture`; staged, not shipped | `descriptors/<subpath>`, defaulting to `<kind>/<slug>`; ships |
+| Authored under | `test_descriptors/<set>/<slug>`, `<set>` one of `shared`, `unit`, `integration`, `archive_fixture`; staged, not shipped. Or, to ship, `descriptors/<subpath>` (`authored_subpath: descriptors/<subpath>`), sources embedded in `hip_kernel_provider_impl` | `descriptors/<subpath>`, defaulting to `<kind>/<slug>`; ships |
 | Runtime descriptors | Per-arch shard, kind unchanged (passthrough) | Per-arch shard, rewritten to `kind: kpack` |
 | Kernel source | `add_kernels_for_embedding()` key table, compiled into the binary | `rocke` and `hip` are lowered at pack time; `hsaco` is packed as authored; one archive per arch |
 

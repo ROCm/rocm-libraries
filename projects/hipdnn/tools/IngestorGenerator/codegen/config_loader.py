@@ -29,6 +29,7 @@ from .models import (
     DIALECT_DIRECT_LOAD,
     DIALECT_PACKAGED,
     DIALECTS,
+    DIRECT_LOAD_SHIPPED_PREFIX,
     EMITTABLE_KINDS_BY_DIALECT,
     ENGINE_NAME_PATTERN,
     KERNEL_SOURCE_KIND_EMBEDDED,
@@ -2311,43 +2312,73 @@ def _check_dialect(config: IngestorConfig) -> None:
             )
 
 
+def _check_contained_under_descriptors(
+    config: IngestorConfig, subpath: str, authored: str, example: str
+) -> None:
+    """Reject a ``descriptors/`` subpath that is not relative or walks out of it.
+
+    ``subpath`` is the part joined under ``descriptors/``; ``authored`` is the
+    ``authored_subpath`` value as the config states it, for the message.
+    """
+    # Read with Windows semantics on either host so a config validated on
+    # Linux and generated on Windows gets the same answer: backslash is a
+    # separator there, and ``C:x`` is drive-relative rather than rooted.
+    stated = PureWindowsPath(subpath)
+    if stated.drive or stated.root:
+        raise ConfigError(
+            f"engine '{config.engine.name}' is a '{config.dialect}' bundle "
+            f"whose 'authored_subpath' is '{authored}', which is not relative. "
+            f"It is joined under the bundle's 'descriptors/' source root, and a "
+            f"rooted or drive-qualified subpath does not join -- the descriptors "
+            f"land outside --output-dir. State a path relative to 'descriptors/', "
+            f"e.g. {example}."
+        )
+    resolved = posixpath.normpath(stated.as_posix())
+    if resolved == ".." or resolved.startswith("../"):
+        raise ConfigError(
+            f"engine '{config.engine.name}' is a '{config.dialect}' bundle "
+            f"whose 'authored_subpath' '{authored}' resolves to '{resolved}', "
+            f"outside the 'descriptors/' source root it is joined into -- it "
+            f"would write this bundle's files above --output-dir and install "
+            f"them where hkp_pack never walks. State a path under 'descriptors/', "
+            f"e.g. {example}."
+        )
+
+
 def _check_authored_subpath(config: IngestorConfig) -> None:
     """Check ``authored_subpath`` against the dialect's tree.
 
     ``direct_load`` must name one of the authored sets, each a separate pack
-    target reaching a different binary. ``packaged`` is free-form but must be a
-    relative subpath of the ``descriptors/`` source root: ``descriptor_dir``
-    joins the two as a string, so ``..`` or an absolute path would let
-    ``render()`` write above ``--output-dir``. Checked lexically, since no
-    output directory exists yet.
+    target reaching a different binary, or a subpath of the production
+    ``descriptors/`` root for a bundle the plugin ships. ``packaged`` is
+    free-form but must be a relative subpath of the ``descriptors/`` source
+    root: ``descriptor_dir`` joins the two as a string, so ``..`` or an
+    absolute path would let ``render()`` write above ``--output-dir``. Checked
+    lexically, since no output directory exists yet.
     """
     if config.is_packaged:
-        subpath = config.authored_subpath
-        if not subpath:
+        if not config.authored_subpath:
             return
-        # Read with Windows semantics on either host so a config validated on
-        # Linux and generated on Windows gets the same answer: backslash is a
-        # separator there, and ``C:x`` is drive-relative rather than rooted.
-        stated = PureWindowsPath(subpath)
-        if stated.drive or stated.root:
+        _check_contained_under_descriptors(
+            config,
+            config.authored_subpath,
+            config.authored_subpath,
+            f"'{config.kernel_source_kind}/{config.engine.slug}' (the default)",
+        )
+        return
+    if config.is_shipped_direct_load:
+        subpath = config.authored_subpath[len(DIRECT_LOAD_SHIPPED_PREFIX) :]
+        example = f"'{DIRECT_LOAD_SHIPPED_PREFIX}<producer>/{config.engine.slug}'"
+        if posixpath.normpath(PureWindowsPath(subpath or ".").as_posix()) == ".":
             raise ConfigError(
-                f"engine '{config.engine.name}' is a '{DIALECT_PACKAGED}' bundle "
-                f"whose 'authored_subpath' is '{subpath}', which is not relative. "
-                f"It is joined under the bundle's 'descriptors/' source root, and a "
-                f"rooted or drive-qualified subpath does not join -- the descriptors "
-                f"land outside --output-dir. State a path relative to 'descriptors/', "
-                f"e.g. '{config.kernel_source_kind}/{config.engine.slug}' (the default)."
+                f"engine '{config.engine.name}' is a shipped "
+                f"'{DIALECT_DIRECT_LOAD}' bundle whose 'authored_subpath' "
+                f"'{config.authored_subpath}' names the 'descriptors/' root itself. "
+                f"Name the bundle's own folder under it, e.g. {example}."
             )
-        resolved = posixpath.normpath(stated.as_posix())
-        if resolved == ".." or resolved.startswith("../"):
-            raise ConfigError(
-                f"engine '{config.engine.name}' is a '{DIALECT_PACKAGED}' bundle "
-                f"whose 'authored_subpath' '{subpath}' resolves to '{resolved}', "
-                f"outside the 'descriptors/' source root it is joined into -- it "
-                f"would write this bundle's files above --output-dir and install "
-                f"them where hkp_pack never walks. State a path under 'descriptors/', "
-                f"e.g. '{config.kernel_source_kind}/{config.engine.slug}' (the default)."
-            )
+        _check_contained_under_descriptors(
+            config, subpath, config.authored_subpath, example
+        )
         return
     if config.authored_subpath not in AUTHORED_TEST_SETS:
         stated = (
@@ -2360,7 +2391,8 @@ def _check_authored_subpath(config: IngestorConfig) -> None:
             f"{', '.join(AUTHORED_TEST_SETS)}. Each is a separate pack target under "
             f"test_descriptors/, so the set decides which shard these descriptors "
             f"land in and which test binary can read them -- the consuming binary "
-            f"chooses it and this tool cannot infer it."
+            f"chooses it and this tool cannot infer it. A bundle the plugin ships "
+            f"instead states '{DIRECT_LOAD_SHIPPED_PREFIX}<subpath>'."
         )
 
 

@@ -5,7 +5,7 @@
 
 #include <memory>
 
-#include "HipMlopsKernelCompiler.hpp"
+#include "compilation/HiprtcKernelCompiler.hpp"
 #include "core/Context.hpp"
 #include "core/Handle.hpp"
 #include "core/Settings.hpp"
@@ -51,7 +51,7 @@ private:
     int64_t _id;
     std::vector<std::unique_ptr<hipdnn_plugin_sdk::IPlanBuilder<Handle, Settings, Context>>>
         _planBuilders;
-    HipMlopsKernelCompiler _kernelCompiler;
+    compilation::HiprtcKernelCompiler _kernelCompiler;
 };
 
 }

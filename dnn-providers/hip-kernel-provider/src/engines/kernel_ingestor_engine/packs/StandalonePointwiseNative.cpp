@@ -15,10 +15,10 @@
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <hipdnn_plugin_sdk/ingestor/SymbolScope.hpp>
 
+#include "compilation/HiprtcKernelCompiler.hpp"
 #include "compilation/KpackKernelLoader.hpp"
 #include "compilation/KpackModuleCache.hpp"
 #include "core/Handle.hpp"
-#include "engines/hip_mlops_engine/HipMlopsKernelCompiler.hpp"
 #include "engines/kernel_ingestor_engine/IngestorLaunchRestore.hpp"
 #include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
 #include "engines/kernel_ingestor_engine/IngestorPreparedDispatch.hpp"
@@ -464,7 +464,7 @@ public:
             throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
                                                            "invalid standalone pointwise match");
         }
-        static const HipMlopsKernelCompiler s_compiler;
+        static const compilation::HiprtcKernelCompiler s_compiler;
         static const compilation::KpackKernelLoader s_loader(moduleCache());
         const compilation::KernelCompileOptions options(context.deviceProperties.gcnArchName);
         auto code

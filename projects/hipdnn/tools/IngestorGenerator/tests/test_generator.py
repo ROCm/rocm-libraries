@@ -610,6 +610,31 @@ class TestFragmentsNameRealFiles:
                 ddir / name
             ).exists(), f"fragment names {name}, which the generator never wrote"
 
+    def test_shipped_direct_load_bundle_lands_under_descriptors(
+        self, generator, scale_add_config, tmp_path
+    ):
+        """A direct-load bundle authored under ``descriptors/`` is written there, and its
+        fragments say to embed its sources in the plugin and census it as ``product``.
+        """
+        config = dataclasses.replace(
+            scale_add_config, authored_subpath="descriptors/HipMlops/scale_add"
+        )
+        generator.render(config, tmp_path)
+        listed = self._fragment_descriptor_names(tmp_path)
+        assert listed, "fragment named no descriptor files at all"
+        ddir = tmp_path / "descriptors" / "HipMlops" / "scale_add"
+        for name in listed:
+            assert (
+                ddir / name
+            ).exists(), f"fragment names {name}, not written to {ddir}"
+        assert not (tmp_path / "test_descriptors").exists()
+
+        files = (tmp_path / "fragments" / "cmake_descriptor_files.txt").read_text()
+        assert "SHIPPED DIRECT-LOAD" in files
+        assert "TARGET hip_kernel_provider_impl" in files
+        census = (tmp_path / "fragments" / "cmake_test_sources.txt").read_text()
+        assert "`<set>` is `product`" in census
+
     def test_multi_pack_fragment_names_all_exist(
         self, generator, binary_ops_config, tmp_path
     ):

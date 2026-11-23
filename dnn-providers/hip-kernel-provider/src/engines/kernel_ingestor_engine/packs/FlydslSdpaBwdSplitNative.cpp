@@ -38,12 +38,12 @@
 #include <variant>
 #include <vector>
 
+#include "compilation/HiprtcKernelCompiler.hpp"
 #include "compilation/IKernelCompiler.hpp"
 #include "compilation/KernelCompileOptions.hpp"
 #include "compilation/KpackKernelLoader.hpp"
 #include "compilation/KpackModuleCache.hpp"
 #include "core/Handle.hpp"
-#include "engines/hip_mlops_engine/HipMlopsKernelCompiler.hpp"
 #include "engines/kernel_ingestor_engine/IngestorKernelCode.hpp"
 #include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
 #include "engines/kernel_ingestor_engine/LaunchKernelDefinition.hpp"
@@ -2074,7 +2074,7 @@ compilation::KpackModuleCache& flydslSdpaBwdSplitKpackModuleCache()
 template <Slot SLOT, bool SOURCES = false, bool DQ_U2 = false>
 const FlydslSdpaBwdSplitDispatchHandler<SLOT, SOURCES, DQ_U2>& flydslSdpaBwdSplitDispatchHandler()
 {
-    static const HipMlopsKernelCompiler s_kernelCompiler;
+    static const compilation::HiprtcKernelCompiler s_kernelCompiler;
     static const compilation::KpackKernelLoader s_kpackLoader(flydslSdpaBwdSplitKpackModuleCache());
     static const FlydslSdpaBwdSplitDispatchHandler<SLOT, SOURCES, DQ_U2> s_dispatchHandler(
         s_kernelCompiler, s_kpackLoader);

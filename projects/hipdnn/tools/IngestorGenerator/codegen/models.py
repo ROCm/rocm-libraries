@@ -4,8 +4,10 @@
 """Data models for generic-kernel-ingestor descriptor generation."""
 
 import dataclasses
+import posixpath
 import re
 from dataclasses import dataclass, field
+from pathlib import PureWindowsPath
 from typing import Optional
 
 from . import generic_targets as gtmod
@@ -16,7 +18,8 @@ KMD_FIELD_TYPES: tuple[str, ...] = ("bool", "int", "float", "string", "int_list"
 #: The two authored dialects, not interchangeable: the dialect decides the
 #: ``kernel_source`` key names, the ``kind`` vocabulary and the consumer.
 #: ``direct_load`` is read by ``DescriptorLoader.hpp`` from the installed
-#: ``test_descriptors/`` tree; ``packaged`` is read by ``hkp_pack``, which
+#: ``test_descriptors/`` tree (or, when shipped, from the production tree, which
+#: ``hkp_pack`` passes it into unchanged); ``packaged`` is read by ``hkp_pack``, which
 #: compiles ``hip``/``rocke`` kernels, packs an ``hsaco`` code object as-is
 #: without compiling, and rewrites the descriptor to ``kind: kpack``.
 DIALECT_DIRECT_LOAD = "direct_load"
@@ -91,6 +94,13 @@ AUTHORED_TEST_SETS: tuple[str, ...] = (
     "integration",
     "archive_fixture",
 )
+
+#: A ``direct_load`` ``authored_subpath`` starting with this names a SHIPPED bundle:
+#: the subpath, verbatim, under the provider's production ``descriptors/`` root. The
+#: packer passes ``embedded_source`` through unchanged, and the plugin's
+#: ``hkp_verify_embedded_sources`` checks each ``source_file`` against the kernels the
+#: plugin embeds, so the bundle's sources must be registered on the plugin target.
+DIRECT_LOAD_SHIPPED_PREFIX = "descriptors/"
 
 #: RFC 0020 §4.2's closed vocabulary for UED ``behavior_notes``.
 BEHAVIOR_NOTES: tuple[str, ...] = ("runtime_compilation", "supports_graph_capture")
@@ -555,7 +565,8 @@ class IngestorConfig:
     #: ``rocKE/gfx950_attention_dense``, preserved verbatim into the staged and
     #: installed trees; defaults to ``<kind>/<slug>``.
     #: ``direct_load``: required, one of `AUTHORED_TEST_SETS`, since the set is
-    #: the consuming binary's choice.
+    #: the consuming binary's choice; or `DIRECT_LOAD_SHIPPED_PREFIX` followed by a
+    #: subpath, for a bundle the plugin ships (``descriptors/HipMlops/layernorm``).
     authored_subpath: str = ""
     specialization: dict = field(default_factory=dict)
     #: The ``reduction`` block, for selection tooling; never emitted.
@@ -568,6 +579,14 @@ class IngestorConfig:
     @property
     def is_packaged(self) -> bool:
         return self.dialect == DIALECT_PACKAGED
+
+    @property
+    def is_shipped_direct_load(self) -> bool:
+        """A ``direct_load`` bundle authored under the production ``descriptors/``
+        root rather than one of the ``test_descriptors/`` sets."""
+        return not self.is_packaged and self.authored_subpath.startswith(
+            DIRECT_LOAD_SHIPPED_PREFIX
+        )
 
     @property
     def launch_names(self) -> tuple[str, ...]:
@@ -632,8 +651,11 @@ class IngestorConfig:
     @property
     def descriptor_dir(self) -> str:
         """Where this bundle's descriptor files go, relative to the output dir:
-        ``direct_load`` under the authored set in ``test_descriptors/``,
-        ``packaged`` mirroring the packager's source root."""
+        ``direct_load`` under the authored set in ``test_descriptors/`` (or, when
+        shipped, its ``descriptors/`` subpath verbatim), ``packaged`` mirroring the
+        packager's source root."""
+        if self.is_shipped_direct_load:
+            return posixpath.normpath(PureWindowsPath(self.authored_subpath).as_posix())
         if not self.is_packaged:
             return f"test_descriptors/{self.authored_subpath}/{self.engine.slug}"
         subpath = (

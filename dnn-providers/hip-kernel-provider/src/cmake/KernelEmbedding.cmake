@@ -214,6 +214,12 @@ function(embed_kernel_sources)
 
     get_target_property(KERNEL_FILES ${EMBED_KERNELS_TARGET} KERNELEMBEDDING_KERNEL_FILES)
     get_target_property(KERNEL_KEYS ${EMBED_KERNELS_TARGET} KERNELEMBEDDING_KERNEL_KEYS)
+    # A target nothing registered kernels on (the plugin built without the HIP MLOps engine)
+    # still gets the generated files, with empty tables.
+    if(NOT KERNEL_FILES)
+        set(KERNEL_FILES "")
+        set(KERNEL_KEYS "")
+    endif()
     set(KERNEL_DECLARATIONS "")
     set(KERNEL_DEFINITIONS "")
     set(KERNEL_MAP_ENTRIES "")

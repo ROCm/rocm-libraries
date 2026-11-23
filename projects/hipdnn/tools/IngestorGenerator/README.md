@@ -423,7 +423,11 @@ rankers are per slot. Without `engine.heuristics` every output is unchanged.
 
 The descriptor directory mirrors the authored root, so the emitted tree copies across
 verbatim. `direct_load` emits under `test_descriptors/<set>/<slug>/`, `<set>` being the
-`authored_subpath` the config must name; `packaged` emits under
+`authored_subpath` the config must name. A `direct_load` bundle the plugin ships instead
+names `authored_subpath: descriptors/<producer>/<bundle>` and emits there verbatim: the
+packer passes its `embedded_source` descriptors into the production shard unchanged, and
+its kernel sources must be embedded in `hip_kernel_provider_impl` under keys equal to each
+`source_file` (`hkp_verify_embedded_sources` checks both). `packaged` emits under
 `descriptors/<producer>/<bundle>/`, defaulting the subpath to `<kernel_source_kind>/<slug>`.
 `<slug>` is the engine slug, the snake_case of the engine's local name; it names the files.
 The folder is the `authored_subpath` and may differ from it:
@@ -433,7 +437,8 @@ The folder is the `authored_subpath` and may differ from it:
 ```
 <output-dir>/
   <descriptor-dir>/                 # test_descriptors/<set>/<slug>/ (direct_load)
-                                    # descriptors/<producer>/<bundle>/ (packaged)
+                                    # descriptors/<producer>/<bundle>/ (packaged, or
+                                    # direct_load shipped by the plugin)
     <slug>.kmd.json                 # KMD -- the engine's per-kernel metadata schema
     <slug>.ued.json                 # UED -- the engine descriptor
     <slug>.udd.json                 # UDD -- dispatch symbol (a slotted engine: one
@@ -976,7 +981,10 @@ kernel_source_kind: embedded_source   # direct-load example; packaged sources us
 authored_subpath: unit            # REQUIRED for direct_load, naming one of the four
                                     # authored sets: shared | unit | integration |
                                     # archive_fixture. Each is a separate pack target
-                                    # reaching a different binary. Optional for
+                                    # reaching a different binary. A direct_load
+                                    # bundle the plugin ships states
+                                    # descriptors/<producer>/<bundle> instead (relative,
+                                    # under descriptors/). Optional for
                                     # packaged, defaulting to <kernel_source_kind>/<slug>;
                                     # must be RELATIVE and stay under descriptors/.
 workspace_policy: none | fixed | derived

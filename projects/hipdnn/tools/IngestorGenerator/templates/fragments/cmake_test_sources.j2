@@ -85,10 +85,17 @@ hkp_register_census_tests(TARGET hip_kernel_provider_census_tests
 ## A direct-load engine's suite is censused, if at all, by a hand-added
 ## `hkp_register_census_tests(TARGET hip_kernel_provider_census_tests PACK_NAME <set>
 ## SUITES Test{{ config.engine.pascal_name }}Packs EXPECTED_CASES <case> <case> ...)`
+{% if config.is_shipped_direct_load %}
+## call in `P/src/tests/CMakeLists.txt`, where `<set>` is `product`: this bundle ships
+## under `descriptors/`, so it lands in the production pack target. The census target is
+## the one to name: the census cannot run as an ordinary unit, whatever dialect the
+## bundle is.
+{% else %}
 ## call in `P/src/tests/CMakeLists.txt`, where `<set>` is the pack target for the
 ## authored set this bundle writes into (`unit`, `integration`, `shared` or
 ## `archive_fixture`). The census target is the one to name: the census cannot run as an
 ## ordinary unit, whatever dialect the bundle is.
+{% endif %}
 ##
 ## Write NO `ARCHES` keyword in that call. This bundle's descriptors declare no concrete
 ## architecture, so it ships on every arch its pack target was wired for, and omission is

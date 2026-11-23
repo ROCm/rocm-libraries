@@ -25,13 +25,13 @@
 #include <hipdnn_plugin_sdk/ingestor/NativeHooks.hpp>
 #include <hipdnn_plugin_sdk/ingestor/SymbolScope.hpp>
 
+#include "compilation/HiprtcKernelCompiler.hpp"
 #include "compilation/IKernelCompiler.hpp"
 #include "compilation/KernelCompileOptions.hpp"
 #include "compilation/KpackKernelLoader.hpp"
 #include "compilation/KpackModuleCache.hpp"
 #include "core/Handle.hpp"
 #include "core/Utils.hpp"
-#include "engines/hip_mlops_engine/HipMlopsKernelCompiler.hpp"
 #include "engines/kernel_ingestor_engine/IngestorKernelCode.hpp"
 #include "engines/kernel_ingestor_engine/IngestorLaunchRestore.hpp"
 #include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
@@ -610,7 +610,7 @@ namespace
 /// it (and the compiler and loader it holds) must outlive every Container.
 const PointwiseDispatchHandler& pointwiseDispatchHandler()
 {
-    static const HipMlopsKernelCompiler s_kernelCompiler;
+    static const compilation::HiprtcKernelCompiler s_kernelCompiler;
     static const compilation::KpackKernelLoader s_kpackLoader(pointwiseKpackModuleCache());
     static const PointwiseDispatchHandler s_dispatchHandler(s_kernelCompiler, s_kpackLoader);
     return s_dispatchHandler;

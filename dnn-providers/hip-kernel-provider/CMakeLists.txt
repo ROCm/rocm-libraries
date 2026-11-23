@@ -59,8 +59,8 @@ option(HIPKERNELPROVIDER_GENERATE_SERIALIZE_HEADERS
        ${_hkp_generate_serialize_default}
 )
 
-# Gates the generic kernel ingestor. The ingestor engine compiles its kernel
-# through the HIP kernel engine's compiler, so it only builds alongside that engine.
+# Gates the generic kernel ingestor. It compiles embedded-source kernels through the
+# shared compilation::HiprtcKernelCompiler, so it does not need ENABLE_HIP_MLOPS_ENGINE.
 option(HIPDNN_ENABLE_KERNEL_INGESTOR "Enable the generic kernel ingestor" OFF)
 
 # A second kernel set for the ingestor, independent of rocKE: prebuilt FlyDSL
