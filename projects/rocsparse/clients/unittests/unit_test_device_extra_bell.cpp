@@ -43,25 +43,25 @@ namespace
 
     struct BellRun
     {
-        rocsparse_operation  opA     = rocsparse_operation_none;
-        int64_t              rows    = 6;
-        int64_t              kb      = 2;
-        int64_t              bd      = 2;
-        int64_t              cols    = 0;
-        int64_t              n       = 5;
-        rocsparse_order      order   = rocsparse_order_column;
-        bool                 device  = false;
-        rocsparse_indextype  itype   = rocsparse_indextype_i32;
-        rocsparse_index_base base    = rocsparse_index_base_zero;
-        int64_t              ldc_pad = 2;
+        rocsparse_operation  opA      = rocsparse_operation_none;
+        int64_t              rows     = 6;
+        int64_t              kb       = 2;
+        int64_t              bd       = 2;
+        int64_t              ell_cols = 0;
+        int64_t              n        = 5;
+        rocsparse_order      order    = rocsparse_order_column;
+        bool                 device   = false;
+        rocsparse_indextype  itype    = rocsparse_indextype_i32;
+        rocsparse_index_base base     = rocsparse_index_base_zero;
+        int64_t              ldc_pad  = 2;
     };
 
     // A blocked ELL A of `rows` scalar rows (ceil(rows / bd) block rows, so the
     // last block row is partial when bd does not divide rows) and kb block
-    // columns, with ell_cols = cols, so cols / bd stored blocks per block row,
-    // and block column indices of type itype in base `base`. Ad is A on the
-    // host. B and C, in `order`, are those of op(A) * B and hold `slabs` copies
-    // of their storage so that a strided batch stays in bounds. The leading
+    // columns, with ell_cols / bd stored blocks per block row and block column
+    // indices of type itype in base `base`. Ad is A on the host. B and C, in
+    // `order`, are those of op(A) * B and hold `slabs` copies of their
+    // storage so that a strided batch stays in bounds. The leading
     // dimension of C is ldc_pad more than its rows (column order) or columns
     // (row order). C's slabs are followed by a guard of bd * ldc sentinels, so
     // a write to a row past the last row of C stays in the buffer and is seen
@@ -82,7 +82,7 @@ namespace
     void make_bell_problem(const BellRun& r, BellProblem& p, int64_t slabs = 1)
     {
         const int64_t m = r.rows, k = r.kb * r.bd;
-        const int64_t mb = (m + r.bd - 1) / r.bd, width = r.cols / r.bd;
+        const int64_t mb = (m + r.bd - 1) / r.bd, width = r.ell_cols / r.bd;
         const bool    col = (r.order == rocsparse_order_column);
         p.Mc              = (r.opA == rocsparse_operation_none) ? m : k;
         p.Kc              = (r.opA == rocsparse_operation_none) ? k : m;
@@ -101,10 +101,10 @@ namespace
         p.dC = up_raw<float>(p.hC);
 
         // Block row i stores block columns i, i + 1, ... (mod kb) in increasing
-        // order. ell_val holds rows * cols values, so the rows of a partial last
+        // order. ell_val holds rows * ell_cols values, so the rows of a partial last
         // block row past `rows` have no storage.
         std::vector<int64_t> hind(mb * width);
-        std::vector<cplx>    hval(m * r.cols, cplx(0.0, 0.0));
+        std::vector<cplx>    hval(m * r.ell_cols, cplx(0.0, 0.0));
         p.Ad = Dense(m, k);
         for(int64_t i = 0; i < mb; ++i)
         {
@@ -116,9 +116,9 @@ namespace
                 for(int64_t row = i * r.bd; row < std::min(m, (i + 1) * r.bd); ++row)
                     for(int64_t c = 0; c < r.bd; ++c)
                     {
-                        const cplx v                      = round_to<float>(rand_val<float>(rng));
-                        hval[row * r.cols + e * r.bd + c] = v;
-                        p.Ad.at(row, first[e] * r.bd + c) = v;
+                        const cplx v = round_to<float>(rand_val<float>(rng));
+                        hval[row * r.ell_cols + e * r.bd + c] = v;
+                        p.Ad.at(row, first[e] * r.bd + c)     = v;
                     }
         }
         ASSERT_TRUE(r.itype == rocsparse_indextype_i32 || r.itype == rocsparse_indextype_i64);
@@ -141,7 +141,7 @@ namespace
                                               k,
                                               rocsparse_direction_row,
                                               r.bd,
-                                              r.cols,
+                                              r.ell_cols,
                                               ind,
                                               p.val.ptr,
                                               r.itype,
@@ -186,7 +186,7 @@ namespace
     {
         SCOPED_TRACE("rows=" + std::to_string(r.rows) + " kb=" + std::to_string(r.kb)
                      + " bd=" + std::to_string(r.bd) + " n=" + std::to_string(r.n)
-                     + " cols=" + std::to_string(r.cols)
+                     + " ell_cols=" + std::to_string(r.ell_cols)
                      + " order=" + std::to_string(static_cast<int>(r.order))
                      + " device=" + std::to_string(r.device));
         SCOPED_TRACE("itype=" + std::to_string(static_cast<int>(r.itype))
@@ -226,7 +226,7 @@ namespace
 
         const Dense want = axpby(2.0, matmul(p.Ad, p.Bl), -0.5, p.C0);
         // Without stored blocks C = beta * C is exact.
-        const double tol = (r.cols == 0) ? 0.0 : 1e-5;
+        const double tol = (r.ell_cols == 0) ? 0.0 : 1e-5;
         expect_dense_equal<float>(p.dC.host(), want, r.order, p.ldc, "C", cplx(-77.0, 0.0), tol);
         expect_dense_equal<float>(p.dB.host(), p.Bl, r.order, p.ldb, "B");
     }
@@ -264,9 +264,9 @@ TEST_F(ExtraBell, stored_blocks_match_host_product)
             for(rocsparse_order order : {rocsparse_order_column, rocsparse_order_row})
             {
                 BellRun r;
-                r.rows  = rows;
-                r.cols  = blocks * r.bd;
-                r.order = order;
+                r.rows     = rows;
+                r.ell_cols = blocks * r.bd;
+                r.order    = order;
                 run_bell_product(handle, r);
                 if(HasFatalFailure())
                     return;
@@ -285,12 +285,12 @@ TEST_F(ExtraBell, stored_blocks_i64_base_one_tight_ldc)
             for(rocsparse_order order : {rocsparse_order_row, rocsparse_order_column})
             {
                 BellRun r;
-                r.rows    = rows;
-                r.cols    = blocks * r.bd;
-                r.order   = order;
-                r.itype   = rocsparse_indextype_i64;
-                r.base    = rocsparse_index_base_one;
-                r.ldc_pad = 0;
+                r.rows     = rows;
+                r.ell_cols = blocks * r.bd;
+                r.order    = order;
+                r.itype    = rocsparse_indextype_i64;
+                r.base     = rocsparse_index_base_one;
+                r.ldc_pad  = 0;
                 run_bell_product(handle, r);
                 if(HasFatalFailure())
                     return;
@@ -307,12 +307,12 @@ TEST_F(ExtraBell, partial_block_row_wider_than_tile)
     for(rocsparse_order order : {rocsparse_order_column, rocsparse_order_row})
     {
         BellRun r;
-        r.rows    = 41;
-        r.bd      = 33;
-        r.kb      = 2;
-        r.cols    = r.bd;
-        r.order   = order;
-        r.ldc_pad = 0;
+        r.rows     = 41;
+        r.bd       = 33;
+        r.kb       = 2;
+        r.ell_cols = r.bd;
+        r.order    = order;
+        r.ldc_pad  = 0;
         run_bell_product(handle, r);
         if(HasFatalFailure())
             return;
@@ -331,12 +331,12 @@ TEST_F(ExtraBell, transpose_is_not_implemented_on_every_stage)
         BellRun r;
         r.opA = opA;
         r.kb  = 5;
-        // ell_cols counts scalar columns, so cols == bd stores one block per block row.
-        for(int64_t cols : {int64_t{0}, r.bd})
+        // ell_cols == bd stores one block per block row.
+        for(int64_t ell_cols : {int64_t{0}, r.bd})
         {
-            r.cols = cols;
+            r.ell_cols = ell_cols;
             SCOPED_TRACE("opA=" + std::to_string(static_cast<int>(opA))
-                         + " ell_cols=" + std::to_string(cols));
+                         + " ell_cols=" + std::to_string(ell_cols));
             BellProblem p;
             ASSERT_NO_FATAL_FAILURE(make_bell_problem(r, p));
 
