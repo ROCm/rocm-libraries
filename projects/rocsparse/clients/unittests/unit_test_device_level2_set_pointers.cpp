@@ -42,7 +42,6 @@
 #include <algorithm>
 #include <functional>
 #include <memory>
-#include <numeric>
 
 using namespace level2;
 
@@ -126,26 +125,10 @@ namespace
         }
         case fmt::csc:
         {
-            std::vector<int32_t> cp(h.n + 1, 0);
-            for(const int32_t j : h.ind)
-                ++cp[j - h.base + 1];
-            for(int32_t j = 0; j < h.n; ++j)
-                cp[j + 1] += cp[j];
-            std::vector<int32_t> pos(cp.begin(), cp.end() - 1);
-            std::vector<int32_t> ri(h.nnz());
-            std::vector<T>       cv(h.nnz());
-            for(int32_t i = 0; i < h.m; ++i)
-                for(int32_t k = h.ptr[i] - h.base; k < h.ptr[i + 1] - h.base; ++k)
-                {
-                    const int32_t d = pos[h.ind[k] - h.base]++;
-                    ri[d]           = i + h.base;
-                    cv[d]           = h.val[k];
-                }
-            for(auto& c : cp)
-                c += h.base;
-            p.first  = convert_vector<I>(cp);
-            p.second = convert_vector<I>(ri);
-            p.val    = cv;
+            const host_csr<T> c = to_csc_arrays(h);
+            p.first             = convert_vector<I>(c.ptr);
+            p.second            = convert_vector<I>(c.ind);
+            p.val               = c.val;
             break;
         }
         case fmt::ell:
@@ -930,12 +913,12 @@ namespace
         }
     }
 
-    class L2SetPointers : public rocsparse_ut::HandleTest
+    class L2DeviceSpmvSetPointers : public rocsparse_ut::HandleTest
     {
     };
 
 #define SET_POINTERS_TEST(NAME, T, V2, FMT) \
-    TEST_F(L2SetPointers, NAME)             \
+    TEST_F(L2DeviceSpmvSetPointers, NAME)   \
     {                                       \
         sweep<T>(handle, FMT, V2);          \
     }
@@ -960,7 +943,7 @@ namespace
 
     // The reproducer of the report: a 3 x 2 CSR matrix whose offsets and columns are
     // replaced after it was analyzed.
-    TEST_F(L2SetPointers, replaced_csr_arrays_small_matrix)
+    TEST_F(L2DeviceSpmvSetPointers, replaced_csr_arrays_small_matrix)
     {
         const std::vector<int32_t> old_row = {0, 2, 3, 3};
         const std::vector<int32_t> old_col = {0, 1, 1};
@@ -1071,7 +1054,7 @@ namespace
         return cases;
     }
 
-    TEST_F(L2SetPointers, same_pointers_new_contents)
+    TEST_F(L2DeviceSpmvSetPointers, same_pointers_new_contents)
     {
         for(const bool v2 : {false, true})
             for(const auto& fc : cases_with_analysis())
@@ -1086,7 +1069,7 @@ namespace
 
     // The COO analysis stores the longest row, which selects the atomic COO kernel;
     // it has to be the longest row of the new arrays.
-    TEST_F(L2SetPointers, coo_analysis_of_the_new_arrays)
+    TEST_F(L2DeviceSpmvSetPointers, coo_analysis_of_the_new_arrays)
     {
         using T = double;
         using I = int32_t;
@@ -1129,7 +1112,7 @@ namespace
 
     // set_pointers frees nothing and makes no device call, so it can run while
     // another stream is being captured.
-    TEST_F(L2SetPointers, set_pointers_during_stream_capture)
+    TEST_F(L2DeviceSpmvSetPointers, set_pointers_during_stream_capture)
     {
         using T                 = double;
         using I                 = int32_t;
@@ -1219,7 +1202,7 @@ namespace
         EXPECT_TRUE(expect_near(s.want(sc.p3), s.y(), "product after the new preprocessing"));
     }
 
-    TEST_F(L2SetPointers, values_only)
+    TEST_F(L2DeviceSpmvSetPointers, values_only)
     {
         for(const bool v2 : {false, true})
             for(const auto& fc : cases_with_analysis())
@@ -1267,7 +1250,7 @@ namespace
         EXPECT_TRUE(expect_near(s.want(sc.p1), s.y(), "product of the analyzed descriptor again"));
     }
 
-    TEST_F(L2SetPointers, v2_another_descriptor_over_the_same_arrays)
+    TEST_F(L2DeviceSpmvSetPointers, v2_another_descriptor_over_the_same_arrays)
     {
         for(const auto& fc : cases_with_analysis())
         {
@@ -1352,7 +1335,7 @@ namespace
         EXPECT_TRUE(expect_near(s.want(sc.p2), s.y(), "product after the capture"));
     }
 
-    TEST_F(L2SetPointers, preprocess_after_set_pointers_during_stream_capture)
+    TEST_F(L2DeviceSpmvSetPointers, preprocess_after_set_pointers_during_stream_capture)
     {
         for(const auto& fc : cases_with_analysis())
         {
@@ -1397,7 +1380,7 @@ namespace
     // The preprocess after set_pointers returns invalid_value, as during a capture
     // of the handle stream, and the preprocess after the capture analyzes the new
     // arrays.
-    TEST_F(L2SetPointers, preprocess_after_set_pointers_on_the_null_stream_during_capture)
+    TEST_F(L2DeviceSpmvSetPointers, preprocess_after_set_pointers_on_the_null_stream_during_capture)
     {
         using T                 = double;
         using I                 = int32_t;
@@ -1476,7 +1459,7 @@ namespace
         EXPECT_TRUE(expect_near(s.y0(), s.y(), "y after the refused compute"));
     }
 
-    TEST_F(L2SetPointers, v2_reanalysis_of_the_same_descriptor)
+    TEST_F(L2DeviceSpmvSetPointers, v2_reanalysis_of_the_same_descriptor)
     {
         for(const auto& fc : cases_with_analysis())
         {
@@ -1492,7 +1475,7 @@ namespace
 
     // Destroying an analysis synchronizes the device, which fails while another
     // stream is being captured in global mode. The destructor must not throw.
-    TEST_F(L2SetPointers, destroy_spmv_descr_during_stream_capture)
+    TEST_F(L2DeviceSpmvSetPointers, destroy_spmv_descr_during_stream_capture)
     {
         using T                 = double;
         using I                 = int32_t;

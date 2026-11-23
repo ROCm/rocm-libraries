@@ -707,6 +707,36 @@ namespace level2
         return c;
     }
 
+    // CSC arrays of A (the CSR arrays of A^T), same index base as A.
+    template <typename T>
+    inline host_csr<T> to_csc_arrays(const host_csr<T>& a)
+    {
+        const int   b = a.base;
+        host_csr<T> c;
+        c.m    = a.m;
+        c.n    = a.n;
+        c.base = b;
+        std::vector<int32_t> count(a.n + 1, 0);
+        for(int32_t k = 0; k < a.nnz(); ++k)
+            ++count[a.ind[k] - b + 1];
+        for(int32_t j = 0; j < a.n; ++j)
+            count[j + 1] += count[j];
+        std::vector<int32_t> pos(count.begin(), count.end() - 1);
+        c.ind.resize(a.nnz());
+        c.val.resize(a.nnz());
+        for(int32_t i = 0; i < a.m; ++i)
+            for(int32_t k = a.ptr[i] - b; k < a.ptr[i + 1] - b; ++k)
+            {
+                const int32_t d = pos[a.ind[k] - b]++;
+                c.ind[d]        = i + b;
+                c.val[d]        = a.val[k];
+            }
+        c.ptr = count;
+        for(auto& p : c.ptr)
+            p += b;
+        return c;
+    }
+
     template <typename T>
     struct host_ell
     {
