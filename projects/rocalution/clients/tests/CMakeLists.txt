@@ -133,7 +133,7 @@ set(ROCALUTION_TEST_SOURCES
 )
 
 if(NOT WIN32)
-# Local structures - skip on Windows, as google test does not support union for death tests
+# Local structures - not built on Windows, where local_vector_amax_ties has not been run yet
   list(APPEND ROCALUTION_TEST_SOURCES
     test_local_vector.cpp
   )

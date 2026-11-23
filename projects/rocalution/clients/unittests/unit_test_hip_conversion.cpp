@@ -439,8 +439,9 @@ TEST(hip_conversion_hyb, csr_to_hyb_keeps_a_given_ell_width)
 
 // The conversion kernels on matrices larger than one workgroup, from CSR and, where the
 // accelerator implements it, back. The 441 x 441 grid has its DIA diagonals at indices
-// 420 to 462 of the nrow + ncol offset map. BCSR with block dimensions 4 and 7 takes
-// other rocSPARSE kernels than 2 and 3.
+// 420 to 462 of the nrow + ncol offset map. For BCSR, rocSPARSE takes other kernels than for
+// block dimensions 2 and 3: for 4 only back to CSR, for 7 (up to 8) and 10 (up to 16) in
+// both directions.
 TEST(hip_conversion_large, converts_matrices_spanning_several_workgroups)
 {
     REQUIRE_BACKEND(Backend::Accelerator);
@@ -456,7 +457,7 @@ TEST(hip_conversion_large, converts_matrices_spanning_several_workgroups)
         const std::vector<std::tuple<std::string, Csr<T>, std::vector<Format>>> cases = {
             {"1000 x 500 with empty rows",
              scattered<T>(),
-             {{COO, 1}, {ELL, 1}, {HYB, 1}, {DENSE, 1}, {BCSR, 4}}},
+             {{COO, 1}, {ELL, 1}, {HYB, 1}, {DENSE, 1}, {BCSR, 4}, {BCSR, 10}}},
             {"21 x 21 grid",
              grid_pattern<T>(21),
              {{COO, 1}, {ELL, 1}, {DIA, 1}, {HYB, 1}, {DENSE, 1}, {BCSR, 7}}},

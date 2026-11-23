@@ -1221,20 +1221,6 @@ TYPED_TEST(local_vector_coarse, extract_coarse_boundary_appends_each_aggregate_o
 
 namespace
 {
-    // A vector that has lost both backend objects ends the program in its destructor,
-    // so it is leaked instead
-    template <typename T>
-    bool expect_location(std::unique_ptr<LocalVector<T>>& v, Backend b)
-    {
-        const std::string where = location_of(*v);
-        EXPECT_EQ(where, backend_name(b));
-        if(where != backend_name(Backend::Host) && where != backend_name(Backend::Accelerator))
-        {
-            static_cast<void>(v.release());
-        }
-        return where == backend_name(b);
-    }
-
     // The entries through the mutable operator[], which must give the same as the const one
     template <typename T>
     std::vector<T> entries_of(LocalVector<T>& v)
