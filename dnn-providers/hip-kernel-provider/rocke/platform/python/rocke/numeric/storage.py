@@ -99,15 +99,25 @@ def _require_storage_dtype(dtype: str) -> np.dtype:
     return host_dtype(dtype)
 
 
+def _fp32(values: npt.ArrayLike) -> np.ndarray:
+    """``values`` as a contiguous fp32 array of their own shape (a scalar stays
+    0-d: ``np.ascontiguousarray`` alone would make it 1-d)."""
+    fp32 = np.asarray(values, dtype=np.float32)
+    return np.ascontiguousarray(fp32).reshape(fp32.shape)
+
+
 def encode(values: npt.ArrayLike, dtype: str) -> np.ndarray:
-    """``values`` (cast to fp32 first) as a contiguous ``dtype`` host array."""
+    """``values`` (cast to fp32 first) as a contiguous ``dtype`` host array of
+    their shape (0-d for a scalar)."""
     array_dtype = _require_storage_dtype(dtype)
-    fp32 = np.ascontiguousarray(values, dtype=np.float32)
+    fp32 = _fp32(values)
     if dtype == "bf16":
-        return f32_to_bf16(fp32)
-    if dtype == "fp8e4m3":
-        return fp8e4m3_round(fp32)
-    return fp32.astype(array_dtype)
+        encoded = f32_to_bf16(fp32)
+    elif dtype == "fp8e4m3":
+        encoded = fp8e4m3_round(fp32)
+    else:
+        encoded = fp32.astype(array_dtype)
+    return encoded.reshape(fp32.shape)
 
 
 def decode(stored: np.ndarray, dtype: str) -> np.ndarray:
@@ -122,10 +132,12 @@ def decode(stored: np.ndarray, dtype: str) -> np.ndarray:
             f"{array_dtype} for dtype={dtype!r}"
         )
     if dtype == "bf16":
-        return bf16_to_f32(stored)
-    if dtype == "fp8e4m3":
-        return fp8e4m3_decode_table()[stored]
-    return stored.astype(np.float32)
+        decoded = bf16_to_f32(stored)
+    elif dtype == "fp8e4m3":
+        decoded = fp8e4m3_decode_table()[stored]
+    else:
+        decoded = stored.astype(np.float32)
+    return decoded.reshape(stored.shape)
 
 
 def round_to(values: npt.ArrayLike, dtype: str) -> np.ndarray:
@@ -136,5 +148,5 @@ def round_to(values: npt.ArrayLike, dtype: str) -> np.ndarray:
 def xf32_truncate(values: npt.ArrayLike) -> np.ndarray:
     """fp32 ``values`` as a native XF32 MMA consumes them: the low 13 mantissa
     bits cleared (truncation, not rounding)."""
-    fp32 = np.ascontiguousarray(values, dtype=np.float32)
+    fp32 = _fp32(values)
     return (fp32.view(np.uint32) & _XF32_MASK).view(np.float32)

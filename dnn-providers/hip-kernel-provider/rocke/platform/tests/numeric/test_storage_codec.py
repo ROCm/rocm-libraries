@@ -96,3 +96,22 @@ def test_xf32_truncate_clears_the_low_13_mantissa_bits():
     bits = np.array([0x3F001FFF, 0xBF7FFFFF, 0x7F800000], dtype=np.uint32)
     got = xf32_truncate(bits.view(np.float32)).view(np.uint32)
     np.testing.assert_array_equal(got, [0x3F000000, 0xBF7FE000, 0x7F800000])
+
+
+@pytest.mark.parametrize("dtype", STORAGE_DTYPES)
+@pytest.mark.parametrize("shape", [(), (3,), (2, 3)])
+def test_the_codec_keeps_the_shape_it_is_given(dtype, shape):
+    """A scalar comes back 0-d, as every other shape comes back unchanged, so a
+    caller can store one encoded element in place (``a[i] = encode(x, ...)``)."""
+    values = np.full(shape, 1.5)
+    stored = encode(values, dtype)
+    assert stored.shape == shape
+    assert decode(stored, dtype).shape == shape
+    assert round_to(values, dtype).shape == shape
+    assert xf32_truncate(values).shape == shape
+
+
+def test_a_scalar_encodes_into_an_array_element():
+    target = encode(np.zeros(4), "bf16")
+    target[1] = encode(2.0, "bf16")
+    np.testing.assert_array_equal(decode(target, "bf16"), [0.0, 2.0, 0.0, 0.0])
