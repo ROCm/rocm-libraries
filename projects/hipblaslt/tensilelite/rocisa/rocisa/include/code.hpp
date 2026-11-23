@@ -205,6 +205,16 @@ namespace rocisa
             return logicalInst;
         }
 
+        // Scheduler-introspection seam (logical-IR migration, Phase 2): report
+        // the wrapped logical instruction's scheduling classification so the
+        // scheduler / count path treats this leaf exactly like the rocisa
+        // instruction it replaces. Defined out-of-line in ToStinkyTofuUtils.cpp,
+        // where stinkytofu::LogicalInstruction is a complete type (only forward
+        // declared here).
+        SchedCategory  schedCategory() const override;
+        SchedExactKind schedExactKind() const override;
+        int            schedWeight() const override;
+
         std::string toString() const override
         {
             return name;

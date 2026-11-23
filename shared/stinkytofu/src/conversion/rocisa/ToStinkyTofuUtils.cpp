@@ -87,6 +87,58 @@ namespace stinkytofu {
 static GirActionData girActionOf(const rocisa::GirActionData& src);
 }
 
+namespace rocisa {
+// Scheduler-introspection seam for logical leaves (logical-IR migration,
+// Phase 2). A LogicalLeaf answers the same scheduling classification the
+// rocisa instruction it replaces would, by reading the wrapped logical
+// instruction's flags / opcode. Defined here (not inline in code.hpp)
+// because it needs the complete stinkytofu::LogicalInstruction type.
+SchedCategory LogicalLeaf::schedCategory() const {
+    if (!logicalInst) return SchedCategory::None;
+    const auto& li = *logicalInst;
+    // Matrix-multiply family (gfx1250 WMMA + MFMA/SMFMA/MXMFMA): matches
+    // rocisa countMFMA / getMFMAs.
+    if (li.is(stinkytofu::IF_MFMA) || li.is(stinkytofu::IF_SMFMA) || li.is(stinkytofu::IF_WMMA) ||
+        li.is(stinkytofu::IF_SWMMA) || li.is(stinkytofu::IF_MXWMMA))
+        return SchedCategory::MFMA;
+    // Vector + scalar loads: matches the rocisa GlobalReadInstruction subtree
+    // that countGlobalRead counts (including the SMemLoad subtree).
+    if (li.is(stinkytofu::IF_MUBUFLoad) || li.is(stinkytofu::IF_FLATLoad) ||
+        li.is(stinkytofu::IF_GLOBALLoad) || li.is(stinkytofu::IF_SMemLoad))
+        return SchedCategory::GlobalRead;
+    if (li.is(stinkytofu::IF_DSRead)) return SchedCategory::LocalRead;
+    if (li.is(stinkytofu::IF_DSStore)) return SchedCategory::LocalWrite;
+    return SchedCategory::Other;
+}
+
+SchedExactKind LogicalLeaf::schedExactKind() const {
+    if (!logicalInst) return SchedExactKind::None;
+    switch (logicalInst->getOpcode()) {
+        case stinkytofu::logical::DSStoreB128:
+            return SchedExactKind::DSStoreB128;
+        case stinkytofu::logical::DSStoreB192:
+            return SchedExactKind::DSStoreB192;
+        case stinkytofu::logical::VMovB32:
+            return SchedExactKind::VMovB32;
+        default:
+            return SchedExactKind::None;
+    }
+}
+
+int LogicalLeaf::schedWeight() const {
+    if (!logicalInst) return 1;
+    // ds_*_b192 lowers to two physical ops, matching rocisa DSLoadB192 /
+    // DSStoreB192 weighted local-read / local-write counts.
+    switch (logicalInst->getOpcode()) {
+        case stinkytofu::logical::DSLoadB192:
+        case stinkytofu::logical::DSStoreB192:
+            return 2;
+        default:
+            return 1;
+    }
+}
+}  // namespace rocisa
+
 namespace {
 using namespace rocisa;
 using namespace stinkytofu;
