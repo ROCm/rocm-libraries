@@ -39,23 +39,20 @@ namespace ingestor = hipdnn_plugin_sdk::ingestor;
 
 constexpr const char* ENGINE_NAME = "hipkernel:PointwiseModel";
 
-/// The pack's kernels as the engine's catalog holds them.
-std::vector<ingestor::KernelDefinition> shippedKernels(const ingestor::DescriptorSet& set)
+/// One copy of the pack's kernels as the engine's catalog holds them.
+std::vector<ingestor::KernelDefinition> packKernels(const ingestor::KernelDescriptorPack& pack)
 {
     std::vector<ingestor::KernelDefinition> kernels;
-    for(const auto& pack : set.packs)
+    for(const auto& kernel : pack.kernels)
     {
-        for(const auto& kernel : pack.kernels)
-        {
-            ingestor::KernelDefinition definition;
-            definition.kernelId = kernel.id;
-            definition.packId = pack.id;
-            definition.dispatchId = pack.dispatchId;
-            definition.metadata = kernel.metadata;
-            definition.priority = kernel.priority;
-            definition.name = kernel.name;
-            kernels.push_back(std::move(definition));
-        }
+        ingestor::KernelDefinition definition;
+        definition.kernelId = kernel.id;
+        definition.packId = pack.id;
+        definition.dispatchId = pack.dispatchId;
+        definition.metadata = kernel.metadata;
+        definition.priority = kernel.priority;
+        definition.name = kernel.name;
+        kernels.push_back(std::move(definition));
     }
     return kernels;
 }
@@ -79,15 +76,20 @@ TEST(TestPointwiseModelPack, TheGeneratedModelRanksTheKernelDeclaredOrderWouldNo
     const auto bound = graphMatch(context);
     ASSERT_TRUE(bound.has_value()) << "the engine does not serve an fp32 ADD graph";
 
-    // An installed tree can carry the pack once per architecture shard, so the catalog may
-    // hold several copies of each kernel; what it must hold is a 64 and a 256 kernel.
-    const auto kernels = shippedKernels(set);
-    std::set<int64_t> blockSizes;
-    for(const auto& kernel : kernels)
+    // The packer emits one copy of the pack per architecture (a TheRock shard holds several),
+    // so check every copy and rank one of them.
+    ASSERT_EQ(distinctPackIdCount(set), 1U) << "one authored pack";
+    for(const auto& pack : set.packs)
     {
-        blockSizes.insert(kernel.getIntMetadata("block_size"));
+        std::multiset<int64_t> blockSizes;
+        for(const auto& kernel : packKernels(pack))
+        {
+            blockSizes.insert(kernel.getIntMetadata("block_size"));
+        }
+        ASSERT_EQ(blockSizes, (std::multiset<int64_t>{64, 256}))
+            << pack.name << ": the pack ships one 64 and one 256 kernel";
     }
-    ASSERT_EQ(blockSizes, (std::set<int64_t>{64, 256})) << "the pack ships a 64 and a 256 kernel";
+    const auto kernels = packKernels(set.packs.front());
     ingestor::Catalog catalog;
     catalog.bound = *bound;
     for(const auto& kernel : kernels)

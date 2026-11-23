@@ -23,16 +23,18 @@ to tell them apart.
 declared-order fallback breaks the tie on descriptor id, and the 256 kernel's id is the
 lower of the two. Declared order therefore picks 256 and the model picks 64 — so a model
 that silently failed to load is visible, instead of landing on the same answer by luck.
-`get_knobs_for_engine` reports the top-ranked kernel's `block_size` as the knob default,
-which is how a test reads the outcome.
+`TestPointwiseModelPack` reads the outcome by ranking the pack's kernels through the loaded
+model (`UhdKernelHeuristic::rankScored`) and requiring the 64 kernel first.
 
 ## Where it lives
 
 Authored under `src/integration_tests/`, assembled into a build-tree stage directory (with
-the generated artifacts below), and packed into the unit test descriptor root only, excluded
-from `install`. Its kernel is `embedded_source`, so only `hip_kernel_provider_tests`, which
-embeds `kernels/PointwiseModelAdd.cpp`, can serve it; the dlopened plugin the integration
-binary loads carries no such source. A two-leaf model over one feature has no business in a
+the generated artifacts below), and packed into the unit test descriptor root only, never
+the product root. That root is installed with the tests (`HIPKERNELPROVIDER_ENABLE_TESTS`),
+so the pack ships in the test tree, one copy per architecture. Its kernel is
+`embedded_source`, so only `hip_kernel_provider_tests`, which embeds
+`kernels/PointwiseModelAdd.cpp`, can serve it; the dlopened plugin the integration binary
+loads carries no such source. A two-leaf model over one feature has no business in a
 customer's plugin directory; it is scaffolding, not product.
 
 ## What this is not
