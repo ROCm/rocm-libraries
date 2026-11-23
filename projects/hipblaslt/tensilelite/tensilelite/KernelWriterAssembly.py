@@ -26368,7 +26368,7 @@ class KernelWriterAssembly(KernelWriter):
             and not kernel.get("StaggerU", 0)
             and not kernel.get("ProblemType", {}).get("Sparse", 0))
 
-  def papTdmUpdateDescriptor(self, kernel: Mapping, tPA: Mapping, tPB: Mapping, preservePapBank: bool=True) -> Module:
+  def papTdmUpdateDescriptor(self, kernel: Mapping, tPA: Mapping, tPB: Mapping) -> Module:
     comp: TensorDataMoverLoad = TensorDataMoverLoad.find(self)
     tcA: str = tPA["tensorChar"]
     tcB: str = tPB["tensorChar"]
@@ -26392,12 +26392,12 @@ class KernelWriterAssembly(KernelWriter):
       waveIdxSgpr = waveIdxSgprRes.idx
       mod.add(self.papTdmRecomputeWaveIdx(kernel, waveIdxSgpr))
       # Refresh tile-dependent fields, including StreamK's local K offset below.
-      # Other descriptor groupings and current-tail restore keep the full path.
+      # Other descriptor groupings keep the full path.
       # TDMSplit can leave within-bank LDS offsets and modified iterate state.
-      incremental = preservePapBank and KernelWriterAssembly.papTdmSupportsIncrementalUpdate(kernel)
+      incremental = KernelWriterAssembly.papTdmSupportsIncrementalUpdate(kernel)
       if incremental:
         mod.add(self.initTDMDescriptorWaveSeparated(kernel, tPA, tPB, waveIdxSgpr, updateOnly=True))
-      elif preservePapBank and blkOffset != 0:
+      elif blkOffset != 0:
         with self.allocTmpSgpr(1) as tmpSgprRes:
           papBankSgpr = tmpSgprRes.idx
           mod.add(SCmpGeU32(src0=sgpr(ldsAddrSgpr), src1=blkOffset,

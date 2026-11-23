@@ -378,13 +378,13 @@ def test_incremental_reresolves_general_batched_base(arg_type):
         assert current.get("tdmAGroup0+3") >> 30 == 2
 
 
-@pytest.mark.parametrize("overrides,preserve", [
-    ({"TDMFuse": 1}, True), ({"TDMFuse": 2}, True),
-    ({"UseSubtileImpl": True}, True), ({"TDMSplit": True}, True),
-    ({"TDMPlusLdsBuf": 1}, True), ({"StaggerU": 1}, True),
-    ({"NumWaves": 1}, True), ({"ProblemType": {"Sparse": 1}}, True), ({}, False),
+@pytest.mark.parametrize("overrides", [
+    {"TDMFuse": 1}, {"TDMFuse": 2},
+    {"UseSubtileImpl": True}, {"TDMSplit": True},
+    {"TDMPlusLdsBuf": 1}, {"StaggerU": 1},
+    {"NumWaves": 1}, {"ProblemType": {"Sparse": 1}},
 ])
-def test_unsupported_refresh_keeps_full_initializer(overrides, preserve):
+def test_unsupported_refresh_keeps_full_initializer(overrides):
     kernel, tensors = _kernel(scales=True)
     kernel.update(overrides)
     writer = _Writer(kernel)
@@ -392,16 +392,15 @@ def test_unsupported_refresh_keeps_full_initializer(overrides, preserve):
     writer.initTDMDescriptorWaveSeparated = lambda *args, **kwargs: calls.append(kwargs) or Module()
     writer.tdmGlobalOffsetWaveSeparated = lambda *args: Module()
     writer.tdmApplyTileKOffsetWaveSeparated = lambda *args: Module()
-    writer.papTdmUpdateDescriptor(kernel, tensors["A"], tensors["B"], preservePapBank=preserve)
+    writer.papTdmUpdateDescriptor(kernel, tensors["A"], tensors["B"])
     assert calls == ([{}, {}] if kernel.get("TDMFuse") in (1, 2) else [{}])
 
 
-@pytest.mark.parametrize("no_tail,half_plr,expected_refreshes", [
-    (False, False, [True, False]), (True, False, [True]), (False, True, [True]),
-])
-def test_current_descriptor_restore_stays_omitted_without_tail(
-        monkeypatch, no_tail, half_plr, expected_refreshes):
-    kernel, tensors = _kernel()
+@pytest.mark.parametrize("scales", [False, True])
+@pytest.mark.parametrize("no_tail,half_plr", [(False, False), (True, False), (False, True)])
+def test_handoff_refreshes_only_next_tile_descriptors(monkeypatch, no_tail, half_plr, scales):
+    """Tail entry rebuilds the current tile's descriptors, so the handoff does not restore them."""
+    kernel, tensors = _kernel(scales=scales)
     kernel.update(NoTailLoop=no_tail, HalfPLR=half_plr)
     writer = _Writer(kernel)
     writer.states.currentTileWork = SimpleNamespace(k_start=None)
@@ -415,15 +414,15 @@ def test_current_descriptor_restore_stays_omitted_without_tail(
     writer.setupPrefetchAcrossPersistentLoads = lambda *args, **kwargs: Module()
     writer.papTdmSaveLdsBank = lambda *args: Module()
     calls = []
-    writer.papTdmUpdateDescriptor = lambda *args, preservePapBank=True: (
-        calls.append(preservePapBank) or Module())
+    writer.papTdmUpdateDescriptor = lambda kernel, a, b, **kwargs: (
+        calls.append((a["tensorChar"], b["tensorChar"], kwargs)) or Module())
     processing = SimpleNamespace(prefetchEligibility=lambda *args: Module(),
         prefetchAcrossPersistentSetupNextTile=lambda *args, **kwargs: Module())
     assignment = SimpleNamespace(reserveNext=lambda *args: Module())
     monkeypatch.setattr(Component.TileProcessingStrategy, "find", lambda writer: processing)
     monkeypatch.setattr(Component.WorkAssignment, "find", lambda writer: assignment)
     PersistentLoopOn().prefetch(writer, kernel, tensors["A"], tensors["B"])
-    assert calls == expected_refreshes
+    assert calls == [("A", "B", {})] + ([("MXSA", "MXSB", {})] if scales else [])
 
 
 @pytest.mark.parametrize("scales,tlu", [(False, False), (False, True), (True, False)])

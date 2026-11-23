@@ -2075,6 +2075,26 @@ def test_pap_moves_each_descriptor_set_once(_gp_gfx1250, gfx1250_iim, assembler,
     assert not undefined, "referenced with no .set: %s" % undefined
 
 
+@pytest.mark.parametrize("cell", [dict(TDMFuse=0), dict(_NO_MX_EMIT, TDMFuse=0)], ids=["mx", "bf16"])
+def test_pap_rebuilds_current_descriptors_only_at_tail_entry(_gp_gfx1250, gfx1250_iim, assembler, capsys, cell):
+    """The NLL handoff leaves the next tile's descriptors in place; tail entry rebuilds the current tile's."""
+    sol, asm = _emit_asm(gfx1250_iim, assembler, PrefetchAcrossPersistent=1, **cell)
+    assert asm, "rejected or not emitted: %r" % capsys.readouterr().out
+    assert not sol.get("NoTailLoop") and not sol.get("HalfPLR")
+    refresh = "recompute WaveIdx for PAP TDM descriptor refresh"
+    handoff = asm.rindex("first PGR group for next persistent iter prefetched")
+    rebuild = asm.index("did PAP actually prefetch a persistent tile?", handoff)
+    assert refresh not in asm[handoff:rebuild]
+    done = re.search(r"^label_PapTailDescriptorDone\w*:", asm[rebuild:], re.M)
+    assert done, "tail descriptor reset has no join label"
+    tail = asm[rebuild:rebuild + done.start()]
+    assert tail.count(refresh) == 1
+    assert "Apply StreamK tail K-offset to TDM global addr" in tail
+    if sol.get("LdsOffsetA_Blk"):
+        assert "tail uses opposite physical LDS bank" in tail
+        assert "set TDM tail write bank opposite PAP" in tail
+
+
 _RAP_NO_MX = dict(_NO_MX_EMIT, ReuseAcrossPersistent=1, AssertSummationElementMultiple=128)
 
 
