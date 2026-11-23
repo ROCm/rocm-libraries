@@ -510,8 +510,8 @@ double denseBf16PeakTflops(const std::string& arch)
 /// The architectures this install carries production content for: the shard directories
 /// (arch_content/hip-kernel-provider/<arch>/) beside asm_sdpa/. TheRock splits the provider's
 /// per-arch content into one artifact per GPU family, so a gfx950 job holds gfx950's model
-/// and not gfx942's. Empty where production packaging is dormant: the provider then copies
-/// every model itself, so each must be there.
+/// and not gfx942's, and a family with no production content (gfx103X, gfx117X) holds no
+/// shard and neither model.
 std::set<std::string> installedShardArches(const std::filesystem::path& productRoot)
 {
     std::set<std::string> arches;
@@ -527,6 +527,19 @@ std::set<std::string> installedShardArches(const std::filesystem::path& productR
     return arches;
 }
 
+/// Whether this binary runs from the build tree that staged the models, where every declared
+/// model is there whatever the packaging state: the provider copies each one itself when
+/// production packaging is dormant, and the product pack stages each one when it is active.
+/// Only the binary's own directory is compared with the one it was built into; nothing is
+/// read from the build tree, so an installed or relocated copy answers false.
+bool runsFromItsBuildTree()
+{
+    std::error_code error;
+    return std::filesystem::equivalent(hip_kernel_provider::testing::descriptorSetRoot("."),
+                                       HIPKERNELPROVIDER_ASM_SDPA_TEST_BUILD_DIR,
+                                       error);
+}
+
 /// Every declared model must ship for its architecture, survive the loader and answer:
 /// the engine itself gives an AVAILABLE `tflops` estimate for forward and backward graphs in
 /// both the token-major (BSHD) and head-major (BHSD) layouts, equal to that architecture's
@@ -534,8 +547,8 @@ std::set<std::string> installedShardArches(const std::filesystem::path& productR
 /// a host, so a model that never binds (an id typo, an unstaged file, a binding or
 /// architecture lookup that drifted) would otherwise leave the engine unranked while every
 /// test passed. The plan builder is mocked to serve each graph: which graphs the real
-/// builders serve depends on the device, and is theirs to test. A model may be absent only
-/// where this install carries no content for its architecture at all (installedShardArches).
+/// builders serve depends on the device, and is theirs to test. Outside the build tree a
+/// model may be absent only where the install carries no shard for its architecture.
 TEST_F(TestAsmSdpaEngine, EachDeclaredModelEstimatesOnItsArchitecture)
 {
     namespace ingestor = hipdnn_plugin_sdk::ingestor;
@@ -563,18 +576,19 @@ TEST_F(TestAsmSdpaEngine, EachDeclaredModelEstimatesOnItsArchitecture)
     const auto modelsRoot = hip_kernel_provider::testing::descriptorSetRoot(
         HIPKERNELPROVIDER_ASM_SDPA_DESCRIPTOR_RELDIR);
     const auto shards = installedShardArches(modelsRoot.parent_path());
+    const bool buildTree = runsFromItsBuildTree();
     size_t checked = 0;
 
     for(const auto& [arch, id] : AsmSdpaEngine::L1_MODEL_IDS)
     {
         const std::string archName(arch);
         SCOPED_TRACE(archName);
-        const bool carried = shards.empty() || shards.count(archName) != 0;
-        if(!carried && !std::filesystem::exists(modelsRoot / "predict_engine" / archName))
+        const bool required = buildTree || shards.count(archName) != 0;
+        if(!required && !std::filesystem::exists(modelsRoot / "predict_engine" / archName))
         {
             std::cout << "[ NOTE     ] this install carries no " << archName
-                      << " content (its GPU family is packaged separately), so the " << archName
-                      << " ASM SDPA model is not checked here\n";
+                      << " content (its GPU family is packaged separately or has none), so the "
+                      << archName << " ASM SDPA model is not checked here\n";
             continue;
         }
         ++checked;

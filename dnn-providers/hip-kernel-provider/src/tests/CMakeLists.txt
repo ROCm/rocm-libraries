@@ -260,11 +260,15 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     endif()
 
     # The ASM SDPA engine's L1 models ship loose in the production tree, under asm_sdpa/,
-    # which the unit root does not reach. TestAsmSdpaShippedModels asks the engine for
-    # estimates from them, so main() names that one folder as an additive root (not the
-    # whole production tree, whose packs every other suite here would then load) and the
-    # binary is built after whichever step stages it: the product pack, or the provider's
+    # which the unit root does not reach. EachDeclaredModelEstimatesOnItsArchitecture asks
+    # the engine for estimates from them, so main() names that one folder as an additive root
+    # (not the whole production tree, whose packs every other suite here would then load) and
+    # the binary is built after whichever step stages it: the product pack, or the provider's
     # own copy when production packaging is dormant.
+    #
+    # The case also gets the directory the binary is built into. It only compares that with
+    # its own directory, to tell the build tree (where every model is staged) from an install
+    # (which TheRock splits per GPU family); it never reads descriptors from it.
     if(asm_sdpa IN_LIST HIPKERNELPROVIDER_DECLARED_MODEL_ENGINES)
         if(TARGET hkp_packaging_product)
             add_dependencies(hip_kernel_provider_tests hkp_packaging_product)
@@ -272,7 +276,8 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
             add_dependencies(hip_kernel_provider_tests asm_sdpa_engine_descriptors)
         endif()
         target_compile_definitions(hip_kernel_provider_tests PRIVATE
-            HIPKERNELPROVIDER_ASM_SDPA_DESCRIPTOR_RELDIR="${HIPKERNELPROVIDER_PLUGIN_ENGINE_RELDIR}/${HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR}/asm_sdpa")
+            HIPKERNELPROVIDER_ASM_SDPA_DESCRIPTOR_RELDIR="${HIPKERNELPROVIDER_PLUGIN_ENGINE_RELDIR}/${HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR}/asm_sdpa"
+            HIPKERNELPROVIDER_ASM_SDPA_TEST_BUILD_DIR="$<TARGET_FILE_DIR:hip_kernel_provider_tests>")
     endif()
 
     # The packed-load test also reads the slotted fixtures' shards (RFC 0021), beside the
