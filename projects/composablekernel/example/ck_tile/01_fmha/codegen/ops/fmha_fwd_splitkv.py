@@ -21,6 +21,8 @@ from codegen.cpp_symbol_map import (
     BIAS_MAP,
     get_mask_map,
     BOOL_MAP,
+    QSCALE_MAP,
+    QSCALE_CHECK_MAP,
 )
 from codegen.utils import check_duplicates_and_paddings, if_, indent, update_file
 
@@ -28,6 +30,7 @@ from codegen.ops.fmha_fwd import (
     FmhaFwdPipeline,
     FmhaFwdTileSize,
     GFX125_QR_TDM_PINGPONG_LDS_READ_SCHEDULE,
+    GFX125_QR_TDM_PINGPONG_MX_LDS_READ_SCHEDULE,
     _gfx125_qr_tdm_pingpong_tiles,
     qr_tdm_pingpong_effective_schedule,
     DTYPE_BITS,
@@ -80,7 +83,7 @@ using fmha_traits_base = ck_tile::TileFmhaTraits<{F_spad},
                                             false,
                                             true,
                                             false,
-                                            ck_tile::BlockAttentionQuantScaleEnum::NO_SCALE,
+                                            {F_qscale},
                                             {F_occupancy},
                                             false,
                                             false>;
@@ -135,7 +138,7 @@ using fmha_kernel = ck_tile::FmhaFwdKernel<fmha_pipeline, fmha_epilogue, true>;
 
 using trait_{F_idx} = fmha_fwd_splitkv_traits_<{F_hdim}, {F_dtype}, {F_mode}, {F_bm0}, {F_bn0}, {F_bk0}, {F_bn1}, {F_bk1}, {F_bk0max}, {F_vlayout},
                         {F_pipeline_enum}, {F_logits}, {F_mask}, {F_bias}, true, false, false, false, {F_spad}, {F_skpad}, {F_dpad},
-                        {F_dvpad}, {F_occupancy}>;
+                        {F_dvpad}, {F_occupancy}, {F_qscale}>;
 
 namespace {{
 template <bool kMergeHeads>
@@ -411,9 +414,9 @@ float fmha_fwd_splitkv(fmha_fwd_splitkv_traits t, fmha_fwd_splitkv_args a, const
 }}
 """
 
-FMHA_FWD_SPLITKV_API_INNER_DISPATCH = """{F_if}((t.is_group_mode == {F_mode}) && (t.is_v_rowmajor == {F_vlayout}) && (t.has_logits_soft_cap == {F_logits}) && ({F_mask_check}) && (t.bias_type == {F_bias_check}) && (t.do_fp8_static_quant == {F_squant}) &&
+FMHA_FWD_SPLITKV_API_INNER_DISPATCH = """{F_if}((t.is_group_mode == {F_mode}) && (t.is_v_rowmajor == {F_vlayout}) && (t.has_logits_soft_cap == {F_logits}) && ({F_mask_check}) && (t.bias_type == {F_bias_check}) && (t.do_fp8_static_quant == {F_squant}) && (t.qscale_type == {F_qscale_check}) &&
         ((a.block_table_ptr != nullptr) == {F_pagedkv}) && (t.has_sink == {F_sink}) && ({F_scheck}) && ({F_seqtune}) && ({F_skcheck}) && ({F_dcheck}) && ({F_dvcheck})) {{
-    using traits_ = fmha_fwd_splitkv_traits_<{F_hdim}, {F_dtype}, {F_mode}, {F_bm0}, {F_bn0}, {F_bk0}, {F_bn1}, {F_bk1}, {F_bk0max}, {F_vlayout}, {F_pipeline_enum}, {F_logits}, {F_mask}, {F_bias}, true, {F_squant}, {F_pagedkv},{F_sink}, {F_spad}, {F_skpad}, {F_dpad}, {F_dvpad}, {F_occupancy}>;
+    using traits_ = fmha_fwd_splitkv_traits_<{F_hdim}, {F_dtype}, {F_mode}, {F_bm0}, {F_bn0}, {F_bk0}, {F_bn1}, {F_bk1}, {F_bk0max}, {F_vlayout}, {F_pipeline_enum}, {F_logits}, {F_mask}, {F_bias}, true, {F_squant}, {F_pagedkv},{F_sink}, {F_spad}, {F_skpad}, {F_dpad}, {F_dvpad}, {F_occupancy}, {F_qscale_enum}>;
 
     // get combine kernel tile sizes
     using OaccDataType = typename FmhaFwdTypeConfig<{F_dtype}>::OaccDataType;
@@ -463,6 +466,7 @@ class FmhaFwdSplitKVApiTrait:
     pagedkv: str
     sink: str  # sink or not
     bn1comb: int  # tile size along v head_dim of combine kernel
+    qscale: str = "no"  # value from QSCALE_CHECK_MAP
     # Metadata-only hint (occupancy of the splitkv kernel), see
     # fmha_fwd_traits_::kOccupancy for rationale.
     occupancy: int = -1
@@ -581,6 +585,7 @@ class FmhaFwdSplitKVPipeline:
     F_pagedkv: str  # t/f
     F_sink: str  # t/f
     F_mask: str  # value from MASK_MAP
+    F_qscale: str = "no"  # value from QSCALE_MAP (qr_tdm_pingpong's fp8 / MX split-KV)
 
     @property
     def name(self) -> str:
@@ -644,6 +649,8 @@ class FmhaFwdSplitKVPipeline:
             n += "_sink"
         else:
             n += "_nsink"
+        if self.F_qscale != "no":
+            n += f"_{self.F_qscale}"
         return n
 
 
@@ -726,6 +733,8 @@ class FmhaFwdSplitKVApiPool:
                             F_bias=BIAS_MAP[trait.bias],
                             F_lse=BOOL_MAP[trait.lse],
                             F_squant=BOOL_MAP[trait.squant],
+                            F_qscale_check=QSCALE_CHECK_MAP[trait.qscale],
+                            F_qscale_enum=QSCALE_MAP[trait.qscale],
                             F_pagedkv=BOOL_MAP[trait.pagedkv],
                             F_sink=BOOL_MAP[trait.sink],
                             F_scheck=trait.scheck,
@@ -794,16 +803,20 @@ class FmhaFwdSplitKVKernel:
     mask_impl: str
 
     def _pingpong_template(self) -> str:
-        # the LDS read schedule the forward kernel runs on this tile
+        # the LDS read schedule the forward kernel runs on this tile (MX's own table)
         hdim_pair = (self.F_hdim, self.F_tile.F_bn1)
-        sp, vbs = GFX125_QR_TDM_PINGPONG_LDS_READ_SCHEDULE.get(hdim_pair, (0, 0))
+        sp, vbs = (
+            GFX125_QR_TDM_PINGPONG_MX_LDS_READ_SCHEDULE
+            if self.F_pipeline.F_qscale == "mx"
+            else GFX125_QR_TDM_PINGPONG_LDS_READ_SCHEDULE
+        ).get(hdim_pair, (0, 0))
         fwd_pipeline = qr_tdm_pingpong_effective_schedule(
             self.F_tile,
             FmhaFwdPipeline(
                 "qr_tdm_pingpong", self.F_pipeline.F_vlayout, self.F_pipeline.F_spad,
                 self.F_pipeline.F_skpad, self.F_pipeline.F_dpad, self.F_pipeline.F_dvpad,
-                self.F_pipeline.F_logits, self.F_pipeline.F_bias, "t", "f", "no",
-                self.F_pipeline.F_mask, "f", "f", "f",
+                self.F_pipeline.F_logits, self.F_pipeline.F_bias, "t", "f",
+                self.F_pipeline.F_qscale, self.F_pipeline.F_mask, "f", "f", "f",
                 F_pp_slice_prefetch=sp, F_pp_v_before_softmax=vbs,
             ),
         )  # fmt: skip
@@ -833,6 +846,7 @@ class FmhaFwdSplitKVKernel:
             F_mode=MODE_MAP[self.F_mode],
             F_pp_slice_prefetch=fwd_pipeline.F_pp_slice_prefetch,
             F_pp_v_before_softmax=fwd_pipeline.F_pp_v_before_softmax,
+            F_qscale=QSCALE_MAP[self.F_pipeline.F_qscale],
         )  # fmt: skip
 
     @property
@@ -1094,13 +1108,31 @@ GFX125_QR_TDM_PINGPONG_SPLITKV_HDIMS = (
 )  # fmt: skip
 
 
+# qr_tdm_pingpong's fp8 / MX split-KV: the input types and their quantization scales
+GFX125_QR_TDM_PINGPONG_SPLITKV_QSCALES = {
+    "fp8bf16": ("pertensor", "perhead", "blockscale"),
+    "mxfp8bf16": ("mx",),
+}
+
+
 class KernelComponentFactoryGfx125(KernelComponentFactoryBase):
     arch = ArchTrait("gfx125")
 
     @staticmethod
+    def get_combine_pipelines(dtype, hdim) -> List[FmhaFwdSplitKVCombinePipeline]:
+        if dtype in GFX125_QR_TDM_PINGPONG_SPLITKV_QSCALES:
+            # the split kernel always stores the LSE; the combine as for 16 bits
+            return KernelComponentFactoryBase.get_combine_pipelines("bf16", hdim)
+        return KernelComponentFactoryBase.get_combine_pipelines(dtype, hdim)
+
+    @staticmethod
     def get_combine_hdim_tile_size_dict(dtype: str) -> Optional[dict]:
-        d = KernelComponentFactoryBase.get_combine_hdim_tile_size_dict(dtype)
-        if d is not None and dtype in ["fp16", "bf16"]:
+        if dtype in GFX125_QR_TDM_PINGPONG_SPLITKV_QSCALES:
+            # fp8 / MX: qr_tdm_pingpong's split-KV only (fp32 partials, bf16 output)
+            d = {}
+        else:
+            d = KernelComponentFactoryBase.get_combine_hdim_tile_size_dict(dtype)
+        if d is not None and dtype in ["fp16", "bf16", *GFX125_QR_TDM_PINGPONG_SPLITKV_QSCALES]:
             # the head dims qr_tdm_pingpong splits
             for h, _ in GFX125_QR_TDM_PINGPONG_SPLITKV_HDIMS:
                 d.setdefault(str(h), FmhaFwdSplitKVCombineTileSize(32, -1))
@@ -1143,15 +1175,27 @@ class KernelComponentFactoryGfx125(KernelComponentFactoryBase):
             ):
                 pipelines.append(Pipeline("qr", "row", "f", "f", "f", "f", logits, bias, "t", squant, "f", "f", mask))  # fmt: skip
                 pipelines.append(Pipeline("qr", "row", "t", "t", "f", "f", logits, bias, "t", squant, "f", "f", mask))  # fmt: skip
-        elif dtype in ["fp8fp16", "fp8bf16"]:
-            # TODO
-            None
+        elif dtype in GFX125_QR_TDM_PINGPONG_SPLITKV_QSCALES:
+            # fp8 / MX: qr_tdm_pingpong's decode tile only, at each quantization scale
+            for qscale, mask in itertools.product(
+                GFX125_QR_TDM_PINGPONG_SPLITKV_QSCALES[dtype], get_mask_map(mask_impl).keys()
+            ):
+                #                             vlayout spad skpad dpad dvpad logits bias lse squant pagedkv sink mask
+                pipelines.append(Pipeline("qr_tdm_pingpong", "row", "t", "t", "f", "f", "f", "no", "t", "f", "f", "f", mask, qscale))  # fmt: skip
+        elif dtype in ["fp8fp16", "fp8bf16", "mxfp8", "mxfp4"]:
+            pass
         else:
             assert False
         return pipelines
 
     @staticmethod
     def get_hdim_tile_size_dict(dtype: str) -> Optional[dict]:
+        if dtype in GFX125_QR_TDM_PINGPONG_SPLITKV_QSCALES:
+            mx = dtype.startswith("mx")
+            return {
+                str(h): [_gfx125_qr_tdm_pingpong_tiles((h, h_v), fp8=True, mx=mx)[0]]
+                for h, h_v in GFX125_QR_TDM_PINGPONG_SPLITKV_HDIMS
+            }
         if dtype in ["fp16", "bf16"]:
             tiles = {
                 #                      bm0, bn0, bk0, bn1, bk1,
@@ -1464,6 +1508,7 @@ def write_blobs(
                 dvpad=kernel.F_pipeline.F_dvpad,
                 bn1comb=combine_kernel.F_tile.F_bn1,
                 occupancy=int(kernel.F_tile.F_occupancy),
+                qscale=kernel.F_pipeline.F_qscale,
             )
         )
     write_fwd_splitkv_api(api_pool, output_dir)

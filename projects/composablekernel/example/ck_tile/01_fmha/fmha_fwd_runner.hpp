@@ -147,7 +147,8 @@ int override_num_splits_if_necessary(int batch,
                                      [[maybe_unused]] int hdim_q,
                                      [[maybe_unused]] int hdim_v,
                                      float p_drop,
-                                     int num_splits)
+                                     int num_splits,
+                                     [[maybe_unused]] int kv_elem_bytes = 2)
 {
     int device;
     auto status = hipGetDevice(&device);
@@ -183,17 +184,20 @@ int override_num_splits_if_necessary(int batch,
         {
             // qr_tdm_pingpong's decode tile (16 query rows; GQA folds a KV head's query heads
             // into them): split a grid of fewer workgroups than WGPs to about 2 of them a WGP,
-            // each split keeping at least 512 keys, at most 32 splits (the combine's cost grows
-            // with them). gfx1250 bf16 d128 32/8 heads, batch 1..8 x 4k..128k keys, end to end
-            // (main + combine): geomean 0.992 of the best split count, worst 0.947 (1.5 a WGP,
-            // 1024 keys, 128 splits: 0.962, worst 0.863, short keys).
+            // each split reading at least 256 KiB of K and V (whatever the input type: 512
+            // keys at bf16 d128, 1024 at fp8 / MX), at most 32 splits (the combine's cost grows
+            // with them). gfx1250 d128 32/8 heads, batch 1..8 x 4k..128k keys, end to end (main
+            // + combine), geomean of the best split count (worst): bf16 0.992 (0.947), fp8
+            // 0.987 (0.927), MX 0.984 (0.929).
             const int rows   = max_seqlen_q * (nhead / std::max(nhead_k, 1));
             const int blocks = batch * std::max(nhead_k, 1) * ck_tile::integer_divide_ceil(rows, 16);
             const int wgps   = props.multiProcessorCount;
             if(blocks >= wgps)
                 return 1;
             const int by_grid = ck_tile::integer_divide_ceil(2 * wgps, blocks);
-            const int by_keys = std::max(1, ck_tile::integer_divide_ceil(max_seqlen_k, 512));
+            const int key_bytes = std::max(1, (hdim_q + hdim_v) * kv_elem_bytes);
+            const int min_keys  = ck_tile::integer_divide_ceil(256 * 1024, key_bytes);
+            const int by_keys   = std::max(1, ck_tile::integer_divide_ceil(max_seqlen_k, min_keys));
             return std::min({by_grid, by_keys, 32});
         }
 
@@ -739,7 +743,8 @@ fwd_result fmha_fwd_run(mode_enum mode,
                                                       hdim_q,
                                                       hdim_v,
                                                       p_drop,
-                                                      num_splits);
+                                                      num_splits,
+                                                      static_cast<int>(sizeof(KDataType)));
     }
     if(128 < num_splits)
     {
@@ -804,6 +809,11 @@ fwd_result fmha_fwd_run(mode_enum mode,
             if constexpr(std::is_same_v<fmha_fwd_traits, std::decay_t<decltype(traits)>>)
             {
                 traits.has_dropout = (p_drop > 0.0f);
+                traits.qscale_type = qscale.type;
+            }
+            else if constexpr(std::is_same_v<fmha_fwd_splitkv_traits,
+                                             std::decay_t<decltype(traits)>>)
+            {
                 traits.qscale_type = qscale.type;
             }
             else if constexpr(std::is_same_v<fmha_fwd_pagedkv_traits,
@@ -1548,15 +1558,10 @@ fwd_result fmha_fwd_run(mode_enum mode,
             args.sink_size         = mask.sink;
             args.mask_type         = static_cast<ck_tile::index_t>(mask.type);
 
-            if constexpr(std::is_same_v<fmha_fwd_args, std::decay_t<decltype(args)>>)
+            // quantization descales (the split-KV args take the same fields)
+            if constexpr(std::is_same_v<fmha_fwd_args, std::decay_t<decltype(args)>> ||
+                         std::is_same_v<fmha_fwd_splitkv_args, std::decay_t<decltype(args)>>)
             {
-                // Fix group-mode tile selection: use the longest sequence length instead of
-                // the total Q length, which incorrectly selected large tiles for short sequences.
-                if(mode == mode_enum::group &&
-                   (ck_tile::is_gfx11_supported() || ck_tile::is_gfx117_supported() ||
-                    ck_tile::is_gfx120_supported()))
-                    args.max_seqlen_q = max_seqlen_q;
-
                 if(qscale.type == quant_scale_enum::pertensor)
                 {
                     args.q_descale_ptr = q_descale_buf.GetDeviceBuffer();
@@ -1634,6 +1639,16 @@ fwd_result fmha_fwd_run(mode_enum mode,
                     args.batch_stride_k_descale = nhead_k;
                     args.batch_stride_v_descale = nhead_k;
                 }
+
+            }
+            if constexpr(std::is_same_v<fmha_fwd_args, std::decay_t<decltype(args)>>)
+            {
+                // Fix group-mode tile selection: use the longest sequence length instead of
+                // the total Q length, which incorrectly selected large tiles for short sequences.
+                if(mode == mode_enum::group &&
+                   (ck_tile::is_gfx11_supported() || ck_tile::is_gfx117_supported() ||
+                    ck_tile::is_gfx120_supported()))
+                    args.max_seqlen_q = max_seqlen_q;
 
                 args.rand_val_ptr = randval_buf.GetDeviceBuffer();
 

@@ -533,6 +533,25 @@ struct fmha_fwd_splitkv_args
     ck_tile::index_t window_size_right;
     ck_tile::index_t sink_size;
     ck_tile::index_t mask_type;
+
+    // quantization descales, as in fmha_fwd_args (gfx1250 qr_tdm_pingpong's split-KV)
+    const void* q_descale_ptr               = nullptr;
+    const void* k_descale_ptr               = nullptr;
+    const void* v_descale_ptr               = nullptr;
+    const void* block_scale_seqstart_q_ptr  = nullptr;
+    const void* block_scale_seqstart_k_ptr  = nullptr;
+    const void* seqstart_v_scale_ptr        = nullptr;
+    ck_tile::index_t stride_q_descale       = 0;
+    ck_tile::index_t stride_k_descale       = 0;
+    ck_tile::index_t stride_v_descale       = 0;
+    ck_tile::index_t nhead_stride_q_descale = 0;
+    ck_tile::index_t nhead_stride_k_descale = 0;
+    ck_tile::index_t nhead_stride_v_descale = 0;
+    ck_tile::index_t batch_stride_q_descale = 0;
+    ck_tile::index_t batch_stride_k_descale = 0;
+    ck_tile::index_t batch_stride_v_descale = 0;
+    ck_tile::index_t block_scale_size_q     = 0;
+    ck_tile::index_t block_scale_size_kv    = 0;
 };
 
 struct fmha_fwd_appendkv_args
@@ -1312,6 +1331,23 @@ auto fmha_fwd_splitkv_pingpong_create_kargs_and_grids(fmha_fwd_splitkv_args args
     f.sink_size            = args.sink_size;
     f.mask_type            = args.mask_type;
     f.drop_seed_offset     = std::make_pair(uint64_t{0}, uint64_t{0});
+    f.q_descale_ptr              = args.q_descale_ptr;
+    f.k_descale_ptr              = args.k_descale_ptr;
+    f.v_descale_ptr              = args.v_descale_ptr;
+    f.block_scale_seqstart_q_ptr = args.block_scale_seqstart_q_ptr;
+    f.block_scale_seqstart_k_ptr = args.block_scale_seqstart_k_ptr;
+    f.seqstart_v_scale_ptr       = args.seqstart_v_scale_ptr;
+    f.stride_q_descale           = args.stride_q_descale;
+    f.stride_k_descale           = args.stride_k_descale;
+    f.stride_v_descale           = args.stride_v_descale;
+    f.nhead_stride_q_descale     = args.nhead_stride_q_descale;
+    f.nhead_stride_k_descale     = args.nhead_stride_k_descale;
+    f.nhead_stride_v_descale     = args.nhead_stride_v_descale;
+    f.batch_stride_q_descale     = args.batch_stride_q_descale;
+    f.batch_stride_k_descale     = args.batch_stride_k_descale;
+    f.batch_stride_v_descale     = args.batch_stride_v_descale;
+    f.block_scale_size_q         = args.block_scale_size_q;
+    f.block_scale_size_kv        = args.block_scale_size_kv;
     auto [kargs, grids]    = fmha_fwd_create_kargs_and_grids<Kernel>(f);
     kargs.num_splits       = args.num_splits;
     kargs.split_stride_o   = args.split_stride_o_acc;
@@ -1768,7 +1804,8 @@ template <ck_tile::index_t HDim_,
           bool kPadSK_,
           bool kPadD_,
           bool kPadDv_,
-          int kOccupancy_ = -1>
+          int kOccupancy_                                  = -1,
+          ck_tile::BlockAttentionQuantScaleEnum QScaleEnum_ = ck_tile::BlockAttentionQuantScaleEnum::NO_SCALE>
 struct fmha_fwd_splitkv_traits_
 {
     static constexpr ck_tile::index_t HDim           = HDim_;
@@ -1933,6 +1970,8 @@ struct fmha_fwd_splitkv_traits
     bool do_fp8_static_quant = false;
     bool has_sink            = false;
     // TODO: padding check is inside this api
+    // gfx1250 qr_tdm_pingpong's split-KV: the forward kernel's quantization descales
+    quant_scale_enum qscale_type = quant_scale_enum::no_scale;
 };
 float fmha_fwd_splitkv(fmha_fwd_splitkv_traits,
                        fmha_fwd_splitkv_args,
