@@ -8,9 +8,11 @@ Errors that a setter or filter "records" are returned by the next `validate()`, 
 
 ## Heuristic modes
 
-Every `HeurMode_t` (`A`, `B`, `FALLBACK`, `OPENSOURCE`) is accepted. `A` and `B` select hipDNN's `SelectionHeuristic::ModeA` and `SelectionHeuristic::ModeB` prediction policies, which rank engines by trained UHD models rather than by cuDNN's heuristics and decline to static engine selection when no applicable engine has a usable prediction (see the [Porting Guide](./PortingGuide.md)). `OPENSOURCE` uses hipDNN's default engine selection and logs a warning on its first use in a process. Plan choice and performance can differ from cuDNN.
+Every `HeurMode_t` (`A`, `B`, `FALLBACK`, `OPENSOURCE`) is accepted and forwarded as the backend heuristic mode: `A` as `HIPDNN_HEUR_MODE_A`, `B` as `HIPDNN_HEUR_MODE_B`, `FALLBACK` as `HIPDNN_HEUR_MODE_FALLBACK`. `A` and `B` select hipDNN's `SelectionHeuristic::ModeA` and `SelectionHeuristic::ModeB` prediction policies, which rank engines by trained UHD models rather than by cuDNN's heuristics and decline to static engine selection when no applicable engine has a usable prediction (see the [Porting Guide](./PortingGuide.md)). `FALLBACK` is hipDNN's model-free static (fallback) order, as cuDNN's `FALLBACK` is its non-heuristic order. `OPENSOURCE` is treated as `FALLBACK` and also logs a warning on its first use in a process. Where no applicable engine has a trained model, `A` and `FALLBACK` rank alike. Plan choice and performance can differ from cuDNN.
 
-The v0.x builders accept every `CUDNN_HEUR_MODE_*` (`INSTANT`, `A`, `B`, `FALLBACK`). `A` and `B` rank by the `ModeA` and `ModeB` policies, `INSTANT` as `A` (NVIDIA's alias), and `FALLBACK` by hipDNN's default engine selection; no mode logs a warning. Every mode returns the same engines, the ones `FALLBACK` finds, in its own order. With `HIPDNN_HEUR_POLICY_ORDER` set, the environment overrides the requested policy and every mode orders alike.
+A list of modes follows cudnn-frontend: one heuristic query per mode, in the order given, results concatenated; an engine an earlier mode already returned is not repeated, because hipDNN returns one configuration per engine. `{A, FALLBACK}` is therefore `A`'s ranking, since every mode returns the same applicable engines. An empty list is rejected with `INVALID_VALUE` before any query; cudnn-frontend v1.33.0 accepts it in `create_execution_plans()` and fails later, at `check_support()`. Upstream cudnn-frontend has no default for the mode list; hipDNN defaults it to `{HeuristicMode::A}` (and `{HeurMode_t::A}` in the compatibility layer) as a convenience, so a call that names no mode ranks by `A`. Pass `{FALLBACK}` for the static order.
+
+The v0.x builders accept every `CUDNN_HEUR_MODE_*` (`INSTANT`, `A`, `B`, `FALLBACK`). `A` and `B` rank by the `ModeA` and `ModeB` policies, `INSTANT` as `A` (NVIDIA's alias), and `FALLBACK` by hipDNN's model-free static (fallback) order; no mode logs a warning. Every mode returns the same engines, the ones `FALLBACK` finds, in its own order. With `HIPDNN_HEUR_POLICY_ORDER` set, the environment overrides the policy list the requested mode selects and every mode orders alike.
 
 ## Note filters
 
@@ -94,7 +96,7 @@ Differences from cuDNN that follow from the shim's filter handling:
 
 ## Engine indices
 
-Engine indices are dense and graph-local, `0 .. get_engine_count() - 1`, in hipDNN's `FALLBACK` ranking of the applicable engines (not cuDNN's, and not the ranking of the requested heuristic mode, `A` and `B` included). `get_engine_count()` refreshes the index-to-engine map. `get_knobs_for_engine`, `create_execution_plan`, and `deselect_engines(std::vector<int64_t>)` translate indices through it, so every index names the same engine. The `int64_t` overload of `deselect_engines` is a hipDNN extension. It shares one list with the name overload: the last call of either kind replaces the list, and an empty list clears it. In C++ a clearing call spells the type, for example `deselect_engines(std::vector<std::string>{})`, because `{}` matches both overloads.
+Engine indices are dense and graph-local, `0 .. get_engine_count() - 1`, in hipDNN's `FALLBACK` ranking of the applicable engines, which is the static (fallback) order (not cuDNN's, and not the ranking of the requested heuristic mode, `A` and `B` included). `get_engine_count()` refreshes the index-to-engine map. `get_knobs_for_engine`, `create_execution_plan`, and `deselect_engines(std::vector<int64_t>)` translate indices through it, so every index names the same engine. The `int64_t` overload of `deselect_engines` is a hipDNN extension. It shares one list with the name overload: the last call of either kind replaces the list, and an empty list clears it. In C++ a clearing call spells the type, for example `deselect_engines(std::vector<std::string>{})`, because `{}` matches both overloads.
 
 ## Knobs
 
@@ -157,7 +159,7 @@ On gfx90a, `hipkernel:flydsl_sdpa_bwd_split` serves fp16 graphs with the gfx90a 
 
 ## hipDNN extensions
 
-- `Graph::is_supported_ext(cudnnHandle_t, std::vector<HeurMode_t> = {FALLBACK})`: returns `OK` if any engine supports the graph, `GRAPH_NOT_SUPPORTED` otherwise. Builds the operation graph if needed; does not create or invalidate plans.
+- `Graph::is_supported_ext(cudnnHandle_t, std::vector<HeurMode_t> = {A})`: returns `OK` if any engine supports the graph, `GRAPH_NOT_SUPPORTED` otherwise. Builds the operation graph if needed; does not create or invalidate plans.
 - `Graph::get_name`, `get_io_data_type`, `get_compute_data_type`, `get_intermediate_data_type`.
 - `Graph::deserialize(data, enforce_precompiled)` without a handle.
 - `HIPDNN_COMPATIBILITY_CUDNN_FRONTEND` macro.
@@ -303,7 +305,7 @@ These differ from cuDNN:
 
 | Case | Compatibility layer behavior |
 |---|---|
-| Heuristic mode (`setHeurMode`) | `A` and `INSTANT` rank the graph's engines by hipDNN's `ModeA` policy, `B` by `ModeB`, `FALLBACK` by hipDNN's fallback rank; every mode returns the same engines. Each mode queries hipDNN once per graph, on its first use, so the first `INSTANT` (the builder's default) or `A`/`B` query of a graph costs a second heuristic run. See [Heuristic modes](#heuristic-modes) |
+| Heuristic mode (`setHeurMode`) | `A` and `INSTANT` rank the graph's engines by hipDNN's `ModeA` policy, `B` by `ModeB`, `FALLBACK` by hipDNN's static (fallback) order; every mode returns the same engines. Each mode queries hipDNN once per graph, on its first use, so the first `INSTANT` (the builder's default) or `A`/`B` query of a graph costs a second heuristic run. See [Heuristic modes](#heuristic-modes) |
 | Heuristic results of `A`, `B` and `INSTANT` | ranked by the policy, but every result uses the engine's default configuration: mode B's predicted knob settings and the ranking metric the policies attach to their configurations are not carried |
 | `EngineHeuristics::getEngineConfig(count)` | returns the first `count` results (at most `getEngineConfigCount()`): objects fixed at `build()`, the same on every call. Upstream also returns at most `count` results, but refills its descriptors from cuDNN on each call. Every result for a given engine of a graph, from any heuristics or fallback list, shares that engine's default hipDNN configuration: their `get_raw_desc()` is equal |
 | Matmul on gfx115x under Windows | hipBLASLt declines every matmul there (a hipBLASLt GEMM crash workaround), and no other provider runs matmul, so a v8 matmul graph has no engine |

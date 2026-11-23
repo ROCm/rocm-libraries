@@ -60,7 +60,7 @@ protected:
     std::array<char, 16> _engineDescs{};
     size_t _nextEngineDesc = 0;
     size_t _nextEngineIdLookup = 0;
-    // When set, heuristics given a policy order (modes A/B) rank the engines in reverse.
+    // When set, heuristics in backend mode A or B rank the engines in reverse.
     bool _policyOrderReversesRanking = false;
     std::unordered_set<hipdnnBackendDescriptor_t> _policyOrderedHeuristics;
     std::unordered_map<hipdnnBackendDescriptor_t, int64_t> _engineIdsByConfig;
@@ -68,6 +68,8 @@ protected:
     // entry reports 0.
     std::unordered_map<int64_t, int64_t> _engineConfigWorkspaceByEngineId;
     int64_t _lastStampedEngineId = -1;
+    // Every HIPDNN_ATTR_ENGINEHEUR_MODE the shim sends, in order.
+    std::vector<hipdnnBackendHeurMode_t> _sentModes;
 
     void installRankedEnginePlanMocks()
     {
@@ -98,9 +100,14 @@ protected:
                     _lastStampedEngineId = *static_cast<const int64_t*>(arrayOfElements);
                     _engineIdsByDesc[descriptor] = _lastStampedEngineId;
                 }
-                if(attribute == HIPDNN_ATTR_ENGINEHEUR_POLICY_ORDER_EXT)
+                if(attribute == HIPDNN_ATTR_ENGINEHEUR_MODE && arrayOfElements != nullptr)
                 {
-                    _policyOrderedHeuristics.insert(descriptor);
+                    const auto mode = *static_cast<const hipdnnBackendHeurMode_t*>(arrayOfElements);
+                    _sentModes.push_back(mode);
+                    if(mode != HIPDNN_HEUR_MODE_FALLBACK)
+                    {
+                        _policyOrderedHeuristics.insert(descriptor);
+                    }
                 }
                 return HIPDNN_STATUS_SUCCESS;
             });
@@ -287,6 +294,38 @@ protected:
         return notesEntry == _behaviorNotesByEngineId.end() ? nullptr : &notesEntry->second;
     }
 };
+
+// Each compatibility-layer Graph entry point called without a mode list queries hipDNN mode A:
+// hipDNN's default (upstream requires the list). The shim's engine-index map is built from a
+// FALLBACK query, so FALLBACK may also appear; a default left at FALLBACK sends no A and fails.
+TEST_F(TestCudnnShimNoteTriageBackend, EntryPointsWithoutModesSendModeA)
+{
+    installRankedEnginePlanMocks();
+    const std::vector<std::pair<const char*, std::function<fe::error_t(fe::graph::Graph&)>>>
+        entryPoints{
+            {"create_execution_plans",
+             [this](fe::graph::Graph& graph) {
+                 EXPECT_TRUE(graph.validate().is_good());
+                 EXPECT_TRUE(graph.build_operation_graph(_handle).is_good());
+                 return graph.create_execution_plans();
+             }},
+            {"is_supported_ext",
+             [this](fe::graph::Graph& graph) { return graph.is_supported_ext(_handle); }},
+            {"build", [this](fe::graph::Graph& graph) { return graph.build(_handle); }},
+        };
+    for(const auto& [name, call] : entryPoints)
+    {
+        SCOPED_TRACE(name);
+        fe::graph::Graph graph;
+        addPointwiseGraph(graph);
+        _sentModes.clear();
+        const auto error = call(graph);
+        ASSERT_TRUE(error.is_good()) << error.get_message();
+        EXPECT_NE(std::find(_sentModes.begin(), _sentModes.end(), HIPDNN_HEUR_MODE_A),
+                  _sentModes.end());
+        EXPECT_EQ(std::count(_sentModes.begin(), _sentModes.end(), HIPDNN_HEUR_MODE_B), 0);
+    }
+}
 
 TEST(TestCudnnShimNoteTriage, DeselectNondeterministicDoesNotPoisonValidate)
 {

@@ -1077,9 +1077,14 @@ if(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS AND NOT WIN32)
     )
 
     if(TENSILELITE_ENABLE_CLIENT)
+        set(_tensilelite_client_dest "${CMAKE_INSTALL_LIBEXECDIR}/hipblaslt/tensilelite")
+        # TheRock computes install RPATHs relative to this location; without it they
+        # assume bin/ and miss <prefix>/lib from libexec/hipblaslt/tensilelite.
+        set_property(TARGET tensilelite-client PROPERTY THEROCK_INSTALL_RPATH_ORIGIN
+            "${_tensilelite_client_dest}")
         install(
             TARGETS tensilelite-client
-            RUNTIME DESTINATION "${CMAKE_INSTALL_LIBEXECDIR}/hipblaslt/tensilelite"
+            RUNTIME DESTINATION "${_tensilelite_client_dest}"
             COMPONENT tests
         )
     endif()
