@@ -54,19 +54,22 @@ owner and expiry, and the same check reports it stale or expired.
 
 A quarantined test is known to fail (a flake, or a defect that turns develop
 red) and is held out of every run until it is fixed. It names one pytest item,
-or every parameter of one test function, and needs an issue that tracks the
-fix. The pytest roots of ``platform/tests`` and ``library/tests`` skip it with
-the reason ``quarantined: <issue>`` (``rocke.tests.quarantine``), so it stays
-visible in every report; ``ROCKE_QUARANTINE=ignore`` runs it anyway. Rules
-stricter than a pending entry's hold it: an expired quarantine always fails
-the check, and at most ``QUARANTINE_CAP`` tests may be quarantined at once.
+or every parameter of one test function, and the issue that tracks the fix
+(``NO_ISSUE_FILED`` until one is filed). A test that fails only on some GPU
+arches names them, and is held out on those arches only. The pytest roots of
+``platform/tests`` and ``library/tests`` skip it with the reason
+``quarantined: <issue>`` (``rocke.tests.quarantine``), so it stays visible in
+every report; ``ROCKE_QUARANTINE=ignore`` runs it anyway. Rules stricter than a
+pending entry's hold it: an expired quarantine always fails the check, and at
+most ``QUARANTINE_CAP`` tests may be quarantined at once.
 
     QuarantinedTest(
         test_id="platform/tests/test_example.py::test_case[gfx942]",
-        issue="AICK-1234",  # a Jira id or ROCm/<repo>#<number>
+        issue="AICK-1234",  # a Jira id, ROCm/<repo>#<number> or NO_ISSUE_FILED
         reason="fails on every run since the recorder change",
         owner="rocKE platform",
         expires="2027-01-31",
+        arches=("gfx950",),  # optional: the GPU arches it fails on
     )
 
 Paths, owners and issues are plain text: no links.
@@ -78,6 +81,8 @@ import datetime
 import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
+
+from ..core.arch.target import known_arches
 
 if TYPE_CHECKING:
     from ..runtime.comgr import CompilerInfo
@@ -91,6 +96,7 @@ __all__ = [
     "MEASURED_BUDGETS",
     "NIGHTLY_GPU",
     "NIGHTLY_SOURCE",
+    "NO_ISSUE_FILED",
     "OWNER_DECISION",
     "PENDING",
     "PR_16482",
@@ -302,8 +308,13 @@ QUARANTINE_TREES: tuple[str, ...] = ("platform/tests", "library/tests")
 # At most this many tests are quarantined at once, so quarantine cannot become
 # the backlog: at the cap, a new entry needs one cleared first.
 QUARANTINE_CAP = 10
-# A Jira id (AICK-1234) or a GitHub issue (ROCm/rocm-libraries#123).
-_ISSUE = re.compile(r"[A-Z][A-Z0-9]+-[0-9]+|ROCm/[A-Za-z0-9._-]+#[0-9]+")
+# The issue of a quarantine whose tracking issue is not filed yet.
+NO_ISSUE_FILED = "none filed yet"
+# A Jira id (AICK-1234), a GitHub issue (ROCm/rocm-libraries#123) or
+# NO_ISSUE_FILED.
+_ISSUE = re.compile(
+    rf"[A-Z][A-Z0-9]+-[0-9]+|ROCm/[A-Za-z0-9._-]+#[0-9]+|{re.escape(NO_ISSUE_FILED)}"
+)
 
 
 @dataclass(frozen=True)
@@ -312,7 +323,9 @@ class QuarantinedTest:
 
     ``test_id`` is the test file relative to the rocke directory, ``::`` and the
     pytest node name: ``...::test_x[gfx942]`` names one parameter of
-    ``test_x``, ``...::test_x`` all of them.
+    ``test_x``, ``...::test_x`` all of them. ``arches`` names the GPU arches it
+    fails on, where it is held out; empty (the default) holds it out
+    everywhere.
     """
 
     test_id: str
@@ -320,6 +333,7 @@ class QuarantinedTest:
     reason: str
     owner: str
     expires: str
+    arches: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         path, separator, node_name = self.test_id.partition("::")
@@ -338,12 +352,19 @@ class QuarantinedTest:
         if not _ISSUE.fullmatch(self.issue):
             raise ValueError(
                 f"QuarantinedTest failed - test_id={self.test_id!r}, "
-                f"issue={self.issue!r}, expected a Jira id (AICK-1234) or "
-                "ROCm/<repo>#<number>"
+                f"issue={self.issue!r}, expected a Jira id (AICK-1234), "
+                f"ROCm/<repo>#<number> or {NO_ISSUE_FILED!r}"
             )
         _require_recorded(
             "QuarantinedTest", path, self.reason, self.owner, self.expires
         )
+        if not isinstance(self.arches, tuple) or not set(self.arches) <= set(
+            known_arches()
+        ):
+            raise ValueError(
+                f"QuarantinedTest failed - test_id={self.test_id!r}, "
+                f"arches={self.arches!r}, expected a tuple of known gfx arches"
+            )
 
     @property
     def path(self) -> str:
@@ -358,6 +379,11 @@ class QuarantinedTest:
     @property
     def expiry_date(self) -> datetime.date:
         return datetime.date.fromisoformat(self.expires)
+
+    def holds_out_on(self, arch: str | None) -> bool:
+        """Whether this entry holds its test out on a GPU of ``arch`` (None: no
+        GPU): always when it names no arches, else only on one it names."""
+        return not self.arches or arch in self.arches
 
     def covers(self, path: str, node_name: str) -> bool:
         """Whether this entry quarantines the item ``node_name`` of ``path``."""
@@ -778,11 +804,18 @@ def measured_scratch_allowance(
 
 
 def _quarantined(
-    issue: str, reason: str, owner: str, expires: str, *test_ids: str
+    issue: str,
+    reason: str,
+    owner: str,
+    expires: str,
+    *test_ids: str,
+    arches: tuple[str, ...] = (),
 ) -> tuple[QuarantinedTest, ...]:
-    """One entry per test id, all quarantined for the same issue and reason."""
+    """One entry per test id, all quarantined for the same issue and reason (on
+    ``arches`` only, when given)."""
     return tuple(
-        QuarantinedTest(test_id, issue, reason, owner, expires) for test_id in test_ids
+        QuarantinedTest(test_id, issue, reason, owner, expires, arches)
+        for test_id in test_ids
     )
 
 
@@ -797,5 +830,20 @@ QUARANTINED: tuple[QuarantinedTest, ...] = (
         "platform/tests/portable_ir/test_portable_ir.py::test_unit[test_recording_builder]",
         "platform/tests/portable_ir/test_portable_ir.py::test_record_coverage",
         "platform/tests/portable_ir/test_portable_ir.py::test_parity_matrix",
+    ),
+    *_quarantined(
+        NO_ISSUE_FILED,
+        "built by the ROCm core-10.1 COMGR, the gfx950-only dgrad kouter and ukd "
+        "kernels (16x16x32 and 32x32x16 atoms) fault with an illegal memory "
+        "access or miscompare (rel_err 1.17, depthwise 11x3); the same kernels "
+        "verify when built by the ROCm 7.1 or 7.2 COMGR on the same gfx950 node "
+        "(a COMGR bisect of this file's tests)",
+        "kernel owners",
+        "2026-12-15",
+        "library/tests/test_conv_dgrad_correctness.py::TestConvDgradCorrectness::test_bf16_depthwise_large_filter",
+        "library/tests/test_conv_dgrad_correctness.py::TestConvDgradCorrectness::test_bf16_stride1",
+        "library/tests/test_conv_dgrad_correctness.py::TestConvDgradCorrectness::test_fp16_resnet_shape",
+        "library/tests/test_conv_dgrad_correctness.py::TestConvDgradCorrectness::test_fp16_stride1",
+        arches=("gfx950",),
     ),
 )

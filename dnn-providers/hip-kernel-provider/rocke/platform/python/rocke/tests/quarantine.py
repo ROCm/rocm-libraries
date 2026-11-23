@@ -14,18 +14,22 @@ directory, which the install keeps (``platform/tests`` installs as ``tests``,
         skip_quarantined_items(items, Path(__file__).parent, "library/tests")
 
 A quarantined item is skipped with the reason ``quarantined: <issue>``, so it
-stays visible in every report. ``ROCKE_QUARANTINE=ignore`` runs it anyway, to
+stays visible in every report. An entry that names GPU arches skips its item
+only when this process's GPU is one of them (``rocke.tests.gpu``), and adds
+``on <arch>`` to the reason. ``ROCKE_QUARANTINE=ignore`` runs it anyway, to
 debug or fix it.
 """
 
 from __future__ import annotations
 
+import functools
 import os
 from collections.abc import Iterable
 from pathlib import Path
 
 import pytest
 
+from .gpu import probe_device_arch
 from .pending_lanes import QUARANTINE_TREES, QUARANTINED, quarantined_test
 
 __all__ = ["QUARANTINE_ENV", "skip_quarantined_items"]
@@ -70,5 +74,19 @@ def skip_quarantined_items(
         if path is None:
             continue
         entry = quarantined_test(path, item.nodeid.partition("::")[2])
-        if entry is not None:
-            item.add_marker(pytest.mark.skip(reason=f"quarantined: {entry.issue}"))
+        if entry is None:
+            continue
+        reason = f"quarantined: {entry.issue}"
+        if entry.arches:
+            arch = _device_arch()
+            if not entry.holds_out_on(arch):
+                continue
+            reason += f" on {arch}"
+        item.add_marker(pytest.mark.skip(reason=reason))
+
+
+@functools.cache
+def _device_arch() -> str | None:
+    """This process's GPU arch, or None without a GPU; probed only when an entry
+    that names arches covers a collected item."""
+    return probe_device_arch()[0]

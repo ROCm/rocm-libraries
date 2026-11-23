@@ -1400,10 +1400,10 @@ with its reason, owner and expiry. It holds three kinds of record:
 |---|---|---|
 | `PendingTest` | a test file waiting for a lane CI does not run yet (a scheduled run, a gfx950 or gfx90a runner, an unlanded PR); the file is not known to be broken | warns, and fails only a change that touches the registry or that file (every scheduled run under `--strict-expiry`) |
 | `MeasuredBudget` | the scratch bytes one test allows one kernel on one compiler while its retune is decided | as `PendingTest` |
-| `QuarantinedTest` | one test known to fail (a flake, or a defect that turns develop red), by item id `<file>::<node name>`; a name without parameters covers all of them. Needs an issue (`AICK-1234` or `ROCm/<repo>#<n>`); at most `QUARANTINE_CAP` (10) at once | always fails |
+| `QuarantinedTest` | one test known to fail (a flake, or a defect that turns develop red), by item id `<file>::<node name>`; a name without parameters covers all of them. Needs an issue (`AICK-1234`, `ROCm/<repo>#<n>`, or `none filed yet`); may name the GPU arches it fails on, to be held out there only; at most `QUARANTINE_CAP` (10) at once | always fails |
 
 The pytest roots of `platform/tests` and `library/tests` skip a quarantined test
-with the reason `quarantined: <issue>`, so it stays visible in every report; `ROCKE_QUARANTINE=ignore` runs
+with the reason `quarantined: <issue>` (plus `on <arch>` for an arch-scoped entry), so it stays visible in every report; `ROCKE_QUARANTINE=ignore` runs
 it to debug or fix it. A pending file that fails once its lane runs moves to
 quarantine; it does not stay pending. The PR gate
 [`platform/tests/tools/test_pending_lanes.py`](platform/tests/tools/test_pending_lanes.py)

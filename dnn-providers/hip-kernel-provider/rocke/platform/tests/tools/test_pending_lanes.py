@@ -54,6 +54,7 @@ from rocke.tests.ctest_listing import configure_installed_ctest, list_ctest_entr
 from rocke.tests.pending_lanes import (
     LANES,
     MEASURED_BUDGETS,
+    NO_ISSUE_FILED,
     PENDING,
     QUARANTINE_CAP,
     QUARANTINED,
@@ -728,7 +729,7 @@ def test_a_measured_budget_needs_a_positive_size_and_its_recorded_reason():
         budget(expires="next month")
 
 
-def _quarantined(test_id: str, **overrides: str) -> QuarantinedTest:
+def _quarantined(test_id: str, **overrides: object) -> QuarantinedTest:
     fields = {
         "issue": "AICK-1234",
         "reason": "why",
@@ -744,7 +745,7 @@ def test_a_quarantined_test_needs_an_item_an_issue_and_its_recorded_reason():
     with pytest.raises(ValueError, match="expected a test under one of"):
         _quarantined("platform/python/rocke/tests/test_x.py::test_y")
     with pytest.raises(ValueError, match="expected a Jira id"):
-        _quarantined("library/tests/test_x.py::test_y", issue="none filed yet")
+        _quarantined("library/tests/test_x.py::test_y", issue="filed soon")
     with pytest.raises(ValueError, match="expected a Jira id"):
         _quarantined(
             "library/tests/test_x.py::test_y",
@@ -754,10 +755,26 @@ def test_a_quarantined_test_needs_an_item_an_issue_and_its_recorded_reason():
         _quarantined("library/tests/test_x.py::test_y", reason="see https://x")
     with pytest.raises(ValueError, match="expected an ISO date"):
         _quarantined("library/tests/test_x.py::test_y", expires="next month")
+    with pytest.raises(ValueError, match="expected a tuple of known gfx arches"):
+        _quarantined("library/tests/test_x.py::test_y", arches=("gfx9999",))
+    with pytest.raises(ValueError, match="expected a tuple of known gfx arches"):
+        _quarantined("library/tests/test_x.py::test_y", arches="gfx950")
     github = _quarantined(
         "library/tests/test_x.py::test_y", issue="ROCm/rocm-libraries#1"
     )
     assert github.issue == "ROCm/rocm-libraries#1"
+    unfiled = _quarantined("library/tests/test_x.py::test_y", issue=NO_ISSUE_FILED)
+    assert unfiled.issue == NO_ISSUE_FILED
+
+
+def test_a_quarantine_that_names_arches_holds_its_test_out_on_those_only():
+    everywhere = _quarantined("library/tests/test_x.py::test_y")
+    assert everywhere.holds_out_on("gfx942")
+    assert everywhere.holds_out_on(None)
+    on_gfx950 = _quarantined("library/tests/test_x.py::test_y", arches=("gfx950",))
+    assert on_gfx950.holds_out_on("gfx950")
+    assert not on_gfx950.holds_out_on("gfx942")
+    assert not on_gfx950.holds_out_on(None)
 
 
 def test_a_quarantined_function_covers_its_parameters_and_a_case_only_itself():
