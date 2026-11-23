@@ -3272,7 +3272,6 @@ namespace
 
         // Clustered Stream-K schedules spatial blocks and may switch parallel
         // reduction to tree or fall back to whole blocks, so read the launch
-        // solve() performs instead of re-deriving it.
         if(solution.usesStreamKSpatialCluster())
         {
             const auto  launch  = solution.resolvePersistentSettings(tensile, hardware);
