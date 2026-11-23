@@ -544,6 +544,7 @@ void BLOCKCR3DNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
         auto node = NodeFactory::CreateNodeFromScheme(CS_KERNEL_STOCKHAM_BLOCK_CR, this);
         node->length.push_back(cur_length[2]);
         node->length.push_back(cur_length[0] * cur_length[1]);
+        node->outputLength = node->length;
         childNodes.emplace_back(std::move(node));
         std::swap(cur_length[1], cur_length[2]);
         std::swap(cur_length[1], cur_length[0]);
@@ -624,7 +625,7 @@ void RC3DNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
     {
         zPlanData.length.push_back(length[index]);
     }
-    zPlanData.outputLength = length;
+    zPlanData.outputLength = zPlanData.length;
 
     // use explicit SBCC kernel if available
     std::unique_ptr<TreeNode> zPlan;
@@ -632,6 +633,7 @@ void RC3DNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
     if(determined_scheme_node1 != CS_NONE)
     {
         zPlan = NodeFactory::CreateExplicitNode(zPlanData, this, determined_scheme_node1);
+        zPlan->legacyOutputOrder = OutputAxisOrder::ROTATE_LEFT_3;
         zPlan->RecursiveBuildTree((noSolution) ? nullptr : child_scheme_trees[1].get());
     }
     else
@@ -640,11 +642,13 @@ void RC3DNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
         {
             zPlan            = NodeFactory::CreateNodeFromScheme(CS_KERNEL_STOCKHAM_BLOCK_CC, this);
             zPlan->length    = zPlanData.length;
+            zPlan->outputLength = zPlan->length;
             zPlan->dimension = 1;
         }
         else
         {
             zPlan = NodeFactory::CreateExplicitNode(zPlanData, this);
+            zPlan->legacyOutputOrder = OutputAxisOrder::ROTATE_LEFT_3;
             zPlan->RecursiveBuildTree(nullptr);
         }
     }
@@ -736,6 +740,7 @@ void PP3DNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
 
         xPartialPassPlan         = NodeFactory::CreateNodeFromScheme(CS_KERNEL_STOCKHAM_PP, this);
         xPartialPassPlan->length = xPartialPassPlanData.length;
+        xPartialPassPlan->outputLength = xPartialPassPlan->length;
         xPartialPassPlan->dimension    = 1;
         xPartialPassPlan->ppOffDim     = ppOffDim;
         xPartialPassPlan->allowInplace = true;
@@ -752,13 +757,13 @@ void PP3DNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
         {
             zPartialPassPlanData.length.push_back(length[index]);
         }
-        zPartialPassPlanData.outputLength = length;
 
         // use explicit SBCC partial-pass kernel
         std::unique_ptr<TreeNode> zPartialPassPlan;
 
         zPartialPassPlan = NodeFactory::CreateNodeFromScheme(CS_KERNEL_STOCKHAM_PP_BLOCK_CC, this);
         zPartialPassPlan->length       = zPartialPassPlanData.length;
+        zPartialPassPlan->outputLength = zPartialPassPlan->length;
         zPartialPassPlan->dimension    = 1;
         zPartialPassPlan->ppOffDim     = ppOffDim;
         zPartialPassPlan->allowInplace = false;

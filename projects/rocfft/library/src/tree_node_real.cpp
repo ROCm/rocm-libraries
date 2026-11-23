@@ -591,10 +591,11 @@ void Real2DEvenNode::BuildTree_internal_SBCC(SchemeTreeVec& child_scheme_trees)
         rcplan->RecursiveBuildTree((noSolution) ? nullptr : child_scheme_trees[0].get());
         childNodes.emplace_back(std::move(rcplan));
 
-        auto sbccY          = NodeFactory::CreateNodeFromScheme(determined_scheme_1, this);
-        sbccY->length       = childNodes.back()->outputLength;
-        sbccY->outputLength = sbccY->length;
+        auto sbccY    = NodeFactory::CreateNodeFromScheme(determined_scheme_1, this);
+        sbccY->length = childNodes.back()->outputLength;
         std::swap(sbccY->length[0], sbccY->length[1]);
+        sbccY->outputLength      = sbccY->length;
+        sbccY->legacyOutputOrder = OutputAxisOrder::SWAP_01;
         childNodes.emplace_back(std::move(sbccY));
     }
     else
@@ -612,10 +613,11 @@ void Real2DEvenNode::BuildTree_internal_SBCC(SchemeTreeVec& child_scheme_trees)
             determined_scheme_0 = child_scheme_trees[0]->curScheme;
         }
 
-        auto sbccY          = NodeFactory::CreateNodeFromScheme(determined_scheme_0, this);
-        sbccY->outputLength = length;
-        sbccY->length       = length;
+        auto sbccY    = NodeFactory::CreateNodeFromScheme(determined_scheme_0, this);
+        sbccY->length = length;
         std::swap(sbccY->length[0], sbccY->length[1]);
+        sbccY->outputLength      = sbccY->length;
+        sbccY->legacyOutputOrder = OutputAxisOrder::SWAP_01;
         childNodes.emplace_back(std::move(sbccY));
 
         // c2r
@@ -1158,12 +1160,13 @@ void Real3DEvenNode::BuildTree_internal_2D_SINGLE_CC()
         xyPlan->outputLength = xyPlan->length;
         xyPlan->outputLength.front() += 1;
 
-        bool haveSBCC_Z     = pool.has_SBCC_kernel(length[2], precision);
-        auto scheme         = haveSBCC_Z ? CS_KERNEL_STOCKHAM_BLOCK_CC : CS_KERNEL_STOCKHAM;
-        auto sbccZ          = NodeFactory::CreateNodeFromScheme(scheme, this);
-        sbccZ->length       = {length[2], (length[0] / 2 + 1), length[1]};
-        sbccZ->outputLength = outputLength;
-        sbccZ->dimension    = 1;
+        bool haveSBCC_Z          = pool.has_SBCC_kernel(length[2], precision);
+        auto scheme              = haveSBCC_Z ? CS_KERNEL_STOCKHAM_BLOCK_CC : CS_KERNEL_STOCKHAM;
+        auto sbccZ               = NodeFactory::CreateNodeFromScheme(scheme, this);
+        sbccZ->length            = {length[2], (length[0] / 2 + 1), length[1]};
+        sbccZ->outputLength      = sbccZ->length;
+        sbccZ->legacyOutputOrder = OutputAxisOrder::ROTATE_LEFT_3;
+        sbccZ->dimension         = 1;
 
         childNodes.emplace_back(std::move(xyPlan));
         childNodes.emplace_back(std::move(sbccZ));
@@ -1227,7 +1230,8 @@ void Real3DEvenNode::BuildTree_internal_SBCC(SchemeTreeVec& child_scheme_trees)
         sbccZ->length = remainingLength;
         std::swap(sbccZ->length[1], sbccZ->length[2]);
         std::swap(sbccZ->length[0], sbccZ->length[1]);
-        sbccZ->outputLength = remainingLength;
+        sbccZ->outputLength      = sbccZ->length;
+        sbccZ->legacyOutputOrder = OutputAxisOrder::ROTATE_LEFT_3;
         childNodes.emplace_back(std::move(sbccZ));
 
         // SBCC along Y dimension
@@ -1242,7 +1246,8 @@ void Real3DEvenNode::BuildTree_internal_SBCC(SchemeTreeVec& child_scheme_trees)
         auto sbccY    = NodeFactory::CreateNodeFromScheme(scheme, this);
         sbccY->length = remainingLength;
         std::swap(sbccY->length[0], sbccY->length[1]);
-        sbccY->outputLength = remainingLength;
+        sbccY->outputLength      = sbccY->length;
+        sbccY->legacyOutputOrder = OutputAxisOrder::SWAP_01;
         childNodes.emplace_back(std::move(sbccY));
     };
 
@@ -1335,16 +1340,19 @@ void Real3DEvenNode::BuildTree_internal_SBCR(SchemeTreeVec& child_scheme_trees)
     auto sbcrZ       = NodeFactory::CreateNodeFromScheme(CS_KERNEL_STOCKHAM_BLOCK_CR, this);
     sbcrZ->length    = {outputLength[2], (outputLength[0] / 2 + 1) * outputLength[1]};
     sbcrZ->dimension = 1;
+    sbcrZ->outputLength = sbcrZ->length;
     childNodes.emplace_back(std::move(sbcrZ));
 
     auto sbcrY       = NodeFactory::CreateNodeFromScheme(CS_KERNEL_STOCKHAM_BLOCK_CR, this);
     sbcrY->length    = {outputLength[1], outputLength[2] * (outputLength[0] / 2 + 1)};
     sbcrY->dimension = 1;
+    sbcrY->outputLength = sbcrY->length;
     childNodes.emplace_back(std::move(sbcrY));
 
     auto sbcrX       = NodeFactory::CreateNodeFromScheme(CS_KERNEL_STOCKHAM_BLOCK_CR, this);
     sbcrX->length    = {outputLength[0] / 2, outputLength[1] * outputLength[2]};
     sbcrX->dimension = 1;
+    sbcrX->outputLength = sbcrX->length;
     childNodes.emplace_back(std::move(sbcrX));
 }
 
@@ -1983,6 +1991,7 @@ void Real3DPPNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
             zPartialPassPlan->length.push_back((*complexLength)[2]);
             zPartialPassPlan->length.push_back((*complexLength)[0]);
             zPartialPassPlan->length.push_back((*complexLength)[1]);
+            zPartialPassPlan->outputLength = zPartialPassPlan->length;
             zPartialPassPlan->comments.push_back("partial-pass enabled for second dimension.");
 
             childNodes.emplace_back(std::move(xPartialPassPlan));
@@ -2001,7 +2010,8 @@ void Real3DPPNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
             zPartialPassPlan->length.push_back((*complexLength)[2]);
             zPartialPassPlan->length.push_back((*complexLength)[0]);
             zPartialPassPlan->length.push_back((*complexLength)[1]);
-            zPartialPassPlan->outputLength = *complexLength;
+            zPartialPassPlan->outputLength      = zPartialPassPlan->length;
+            zPartialPassPlan->legacyOutputOrder = OutputAxisOrder::ROTATE_LEFT_3;
             zPartialPassPlan->comments.push_back("partial-pass enabled for first dimension.");
 
             // use explicit SBRR partial-pass kernel
@@ -2014,6 +2024,7 @@ void Real3DPPNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
             xPartialPassPlan->allowInplace = true;
             xPartialPassPlan->length       = *realLength;
             xPartialPassPlan->length[0] /= 2;
+            xPartialPassPlan->outputLength = xPartialPassPlan->length;
             xPartialPassPlan->comments.push_back("partial-pass enabled for second dimension.");
 
             childNodes.emplace_back(std::move(zPartialPassPlan));

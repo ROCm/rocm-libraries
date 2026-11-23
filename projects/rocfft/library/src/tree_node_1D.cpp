@@ -356,7 +356,7 @@ void CC1DNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
         col2colPlan->length.push_back(length[index]);
     }
     col2colPlan->outputLength = col2colPlan->length;
-    std::swap(col2colPlan->outputLength[0], col2colPlan->outputLength[1]);
+    col2colPlan->legacyOutputOrder = OutputAxisOrder::SWAP_01;
 
     // second plan, row-to-column
     auto row2colPlan = NodeFactory::CreateNodeFromScheme(CS_KERNEL_STOCKHAM_BLOCK_RC, this);
@@ -564,7 +564,7 @@ void CC1DNode::AssignParams_internal()
         // hack the plan to put batch as second dimension since it moves
         // faster than the actual second dimension
         std::swap(col2colPlan->length.back(), col2colPlan->batch);
-        col2colPlan->outputLength = {col2colPlan->length.back(), col2colPlan->length.front()};
+        col2colPlan->outputLength = col2colPlan->length;
         col2colPlan->iDist        = col2colPlan->inStride.back();
         col2colPlan->inStride     = {col2colPlan->inStride.back() * col2colPlan->batch, 1};
         // make output the same shape as input (even though it's going to
@@ -620,7 +620,7 @@ void CRT1DNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
         col2colPlan->length.push_back(length[index]);
     }
     col2colPlan->outputLength = col2colPlan->length;
-    std::swap(col2colPlan->outputLength[0], col2colPlan->outputLength[1]);
+    col2colPlan->legacyOutputOrder = OutputAxisOrder::SWAP_01;
 
     // second plan, row-to-row
     auto row2rowPlan = NodeFactory::CreateNodeFromScheme(CS_KERNEL_STOCKHAM, this);

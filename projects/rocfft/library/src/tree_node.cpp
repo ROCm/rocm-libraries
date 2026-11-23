@@ -407,20 +407,33 @@ void LeafNode::SetupGridParam(GridParam& gp)
 // grid params are set up by RTC
 void TransposeNode::SetupGridParam_internal(GridParam& gp) {}
 
-bool TransposeNode::PermuteToPackedOutput(ComputeScheme scheme, std::vector<size_t>& axes)
+TreeNode::OutputAxisOrder TransposeNode::PackedOutputOrder(ComputeScheme scheme)
 {
     switch(scheme)
     {
     case CS_KERNEL_TRANSPOSE:
     case CS_KERNEL_TRANSPOSE_XY_Z:
         // XY_Z builders already exchange Y and Z in the node's input axes.
-        std::swap(axes[0], axes[1]);
-        return true;
+        return OutputAxisOrder::SWAP_01;
     case CS_KERNEL_TRANSPOSE_Z_XY:
-        std::rotate(axes.begin(), axes.begin() + 1, axes.begin() + 3);
-        return true;
+        return OutputAxisOrder::ROTATE_LEFT_3;
     default:
-        return false;
+        return OutputAxisOrder::IDENTITY;
+    }
+}
+
+void TreeNode::PermuteOutputAxes(OutputAxisOrder order, std::vector<size_t>& axes)
+{
+    switch(order)
+    {
+    case OutputAxisOrder::IDENTITY:
+        break;
+    case OutputAxisOrder::SWAP_01:
+        std::swap(axes[0], axes[1]);
+        break;
+    case OutputAxisOrder::ROTATE_LEFT_3:
+        std::rotate(axes.begin(), axes.begin() + 1, axes.begin() + 3);
+        break;
     }
 }
 
@@ -471,6 +484,7 @@ void TreeNode::CollapseContiguousDims()
     // is valid for both the input and output node's data layouts for the considered couple
     // of axes
     auto outputLengthTemp = GetOutputLength();
+    PermuteOutputAxes(legacyOutputOrder, outputLengthTemp);
     auto first_axis_it    = collapsible_axes.begin();
     while(first_axis_it != collapsible_axes.end())
     {
@@ -563,7 +577,7 @@ void TreeNode::CollapseContiguousDims()
     }
 
     if(!outputLength.empty())
-        outputLength = outputLengthTemp;
+        outputLength = legacyOutputOrder == OutputAxisOrder::IDENTITY ? outputLengthTemp : length;
 }
 
 bool TreeNode::IsBluesteinChirpSetup()

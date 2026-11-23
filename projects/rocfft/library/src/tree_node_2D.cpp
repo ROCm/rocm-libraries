@@ -204,7 +204,7 @@ void RC2DNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
         colPlan->length.push_back(length[index]);
     }
     colPlan->outputLength = colPlan->length;
-    std::swap(colPlan->outputLength[0], colPlan->outputLength[1]);
+    colPlan->legacyOutputOrder = OutputAxisOrder::SWAP_01;
 
     // RC
     childNodes.emplace_back(std::move(rowPlan));

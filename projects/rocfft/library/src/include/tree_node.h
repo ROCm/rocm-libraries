@@ -589,6 +589,17 @@ public:
     // to mean "same as length"; use LengthForOutStride() to pair with outStride.
     std::vector<size_t> outputLength;
 
+    // Some decompositions previously used a packed-output view in fit and
+    // collapse heuristics. Keep its order, not a second set of lengths.
+    enum class OutputAxisOrder : uint8_t
+    {
+        IDENTITY,
+        SWAP_01,
+        ROTATE_LEFT_3,
+    };
+    OutputAxisOrder legacyOutputOrder = OutputAxisOrder::IDENTITY;
+    static void     PermuteOutputAxes(OutputAxisOrder order, std::vector<size_t>& axes);
+
     // Stride of the FFT in each dimension
     std::vector<size_t> inStride, outStride;
 
@@ -1322,14 +1333,15 @@ protected:
         : LeafNode(p, s)
     {
         allowInplace = false;
+        legacyOutputOrder = PackedOutputOrder(s);
     }
 
     void SetupGridParam_internal(GridParam& gp) override;
 
+    // Packed order is independent of the strides assigned to a user buffer.
+    static OutputAxisOrder PackedOutputOrder(ComputeScheme scheme);
+
 public:
-    // Order for a packed output buffer, independent of the assigned strides.
-    // Returns false without touching axes for non-plain-transpose schemes.
-    static bool PermuteToPackedOutput(ComputeScheme scheme, std::vector<size_t>& axes);
 
     // Transpose tiles read more row-ish and write more column-ish.  So
     // assume output benefits more from padding than input.

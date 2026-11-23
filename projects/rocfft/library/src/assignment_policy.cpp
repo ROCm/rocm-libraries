@@ -337,7 +337,6 @@ bool AssignmentPolicy::ValidOutBuffer(ExecPlan&           execPlan,
             = (buffer == OB_USER_OUT && execPlan.rootPlan->outArrayType == rocfft_array_type_real)
               || (buffer == OB_USER_IN && execPlan.rootPlan->inArrayType == rocfft_array_type_real);
         const bool doubleFront = outBufferIsReal && !kernelOutputIsReal;
-        const auto front       = nodeLen.front();
         if(doubleFront)
             nodeLen.front() *= 2;
 
@@ -361,13 +360,12 @@ bool AssignmentPolicy::ValidOutBuffer(ExecPlan&           execPlan,
 
         // Enumerate tests candidate buffers before assigning their strides.
         // Keep the packed-buffer decomposition order without storing it in
-        // a plain transpose's outputLength. Other schemes still have their
-        // legacy output ordering; fused Bluestein keeps its special footprint.
+        // outputLength. Unconverted schemes still use their legacy ordering;
+        // fused Bluestein keeps its special footprint.
         if(node.GetBluesteinFuseType() == BFT_NONE)
         {
-            nodeLen.front() = front;
-            if(!TransposeNode::PermuteToPackedOutput(node.scheme, nodeLen))
-                nodeLen = node.GetOutputLength();
+            nodeLen = node.GetOutputLength();
+            TreeNode::PermuteOutputAxes(node.legacyOutputOrder, nodeLen);
             if(doubleFront)
                 nodeLen.front() *= 2;
         }
