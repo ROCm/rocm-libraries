@@ -582,48 +582,58 @@ namespace
         }
     }
 
-    // SpMV preprocess with LRB on a 1 x row_len matrix whose only row is full.
-    // The analysis reads only the row pointers, so one-element column, value and
-    // x arrays are enough.
-    void check_lrb_preprocess_one_row(rocsparse_handle handle,
-                                      int64_t          row_len,
-                                      rocsparse_status expected)
+    // SpMV preprocess with LRB on a matrix whose only row (CSR, 1 x len) or only
+    // column (CSC, len x 1) is full. The analysis reads only the row or column
+    // pointers, so one-element index, value and vector arrays are enough.
+    void check_lrb_preprocess_one_line(rocsparse_handle    handle,
+                                       rocsparse_format    format,
+                                       rocsparse_operation trans,
+                                       int64_t             len,
+                                       rocsparse_status    expected)
     {
-        device_vector<int64_t> d_row_ptr(std::vector<int64_t>{0, row_len});
-        device_vector<int64_t> d_col_ind(std::vector<int64_t>{0});
+        device_vector<int64_t> d_ptr(std::vector<int64_t>{0, len});
+        device_vector<int64_t> d_ind(std::vector<int64_t>{0});
         device_vector<float>   d_val(std::vector<float>{1.0f});
         device_vector<float>   d_x(std::vector<float>{1.0f});
         device_vector<float>   d_y(std::vector<float>{1.0f});
-        ASSERT_NE(d_row_ptr.ptr, nullptr);
-        ASSERT_NE(d_col_ind.ptr, nullptr);
+        ASSERT_NE(d_ptr.ptr, nullptr);
+        ASSERT_NE(d_ind.ptr, nullptr);
         ASSERT_NE(d_val.ptr, nullptr);
         ASSERT_NE(d_x.ptr, nullptr);
         ASSERT_NE(d_y.ptr, nullptr);
 
+        const bool    csr  = (format == rocsparse_format_csr);
+        const int64_t rows = csr ? 1 : len;
+        const int64_t cols = csr ? len : 1;
+
+        const auto create = csr ? rocsparse_create_csr_descr : rocsparse_create_csc_descr;
         SpmvDescrs descrs;
-        ASSERT_EQ(rocsparse_create_csr_descr(&descrs.mat,
-                                             1,
-                                             row_len,
-                                             row_len,
-                                             d_row_ptr.ptr,
-                                             d_col_ind.ptr,
-                                             d_val.ptr,
-                                             rocsparse_indextype_i64,
-                                             rocsparse_indextype_i64,
-                                             rocsparse_index_base_zero,
-                                             rocsparse_datatype_f32_r),
+        ASSERT_EQ(create(&descrs.mat,
+                         rows,
+                         cols,
+                         len,
+                         d_ptr.ptr,
+                         d_ind.ptr,
+                         d_val.ptr,
+                         rocsparse_indextype_i64,
+                         rocsparse_indextype_i64,
+                         rocsparse_index_base_zero,
+                         rocsparse_datatype_f32_r),
                   rocsparse_status_success);
-        ASSERT_EQ(
-            rocsparse_create_dnvec_descr(&descrs.x, row_len, d_x.ptr, rocsparse_datatype_f32_r),
-            rocsparse_status_success);
-        ASSERT_EQ(rocsparse_create_dnvec_descr(&descrs.y, 1, d_y.ptr, rocsparse_datatype_f32_r),
+
+        const bool none = (trans == rocsparse_operation_none);
+        ASSERT_EQ(rocsparse_create_dnvec_descr(
+                      &descrs.x, none ? cols : rows, d_x.ptr, rocsparse_datatype_f32_r),
+                  rocsparse_status_success);
+        ASSERT_EQ(rocsparse_create_dnvec_descr(
+                      &descrs.y, none ? rows : cols, d_y.ptr, rocsparse_datatype_f32_r),
                   rocsparse_status_success);
 
         const float alpha = 1.0f;
         const float beta  = 0.0f;
         auto        spmv  = [&](rocsparse_spmv_stage stage, size_t* size, void* buffer) {
             return rocsparse_spmv(handle,
-                                  rocsparse_operation_none,
+                                  trans,
                                   &alpha,
                                   descrs.mat,
                                   descrs.x,
@@ -699,17 +709,62 @@ TEST_F(CsrmvLrbGrids, unclamped_grid_matches_host)
 // LRB processes bins 0 to 31, i.e. rows of up to 2^31 non-zeros. A longer row
 // falls in bin 32 or above, which LRB does not process, so the analysis must
 // reject it. Such a row needs 64-bit offsets and 64-bit column indices.
+// The LRB kernels run only for a CSR operation_none, which is also what a CSC
+// transpose is analysed as. rocsparse_spmv computes every other operation with
+// row split, so those must not be rejected.
 // ---------------------------------------------------------------------------
 
 TEST_F(CsrmvLrbAnalysis, rejects_row_longer_than_2_pow_31)
 {
-    check_lrb_preprocess_one_row(handle, (int64_t(1) << 31) + 1, rocsparse_status_not_implemented);
+    check_lrb_preprocess_one_line(handle,
+                                  rocsparse_format_csr,
+                                  rocsparse_operation_none,
+                                  (int64_t(1) << 31) + 1,
+                                  rocsparse_status_not_implemented);
 }
 
 // A row of exactly 2^31 non-zeros is in bin 31, the last bin LRB processes.
 TEST_F(CsrmvLrbAnalysis, accepts_row_of_2_pow_31)
 {
-    check_lrb_preprocess_one_row(handle, int64_t(1) << 31, rocsparse_status_success);
+    check_lrb_preprocess_one_line(handle,
+                                  rocsparse_format_csr,
+                                  rocsparse_operation_none,
+                                  int64_t(1) << 31,
+                                  rocsparse_status_success);
+}
+
+TEST_F(CsrmvLrbAnalysis, csc_transpose_rejects_column_longer_than_2_pow_31)
+{
+    for(const rocsparse_operation trans :
+        {rocsparse_operation_transpose, rocsparse_operation_conjugate_transpose})
+    {
+        SCOPED_TRACE(trans);
+        check_lrb_preprocess_one_line(handle,
+                                      rocsparse_format_csc,
+                                      trans,
+                                      (int64_t(1) << 31) + 1,
+                                      rocsparse_status_not_implemented);
+    }
+}
+
+TEST_F(CsrmvLrbAnalysis, csr_transpose_accepts_row_longer_than_2_pow_31)
+{
+    for(const rocsparse_operation trans :
+        {rocsparse_operation_transpose, rocsparse_operation_conjugate_transpose})
+    {
+        SCOPED_TRACE(trans);
+        check_lrb_preprocess_one_line(
+            handle, rocsparse_format_csr, trans, (int64_t(1) << 31) + 1, rocsparse_status_success);
+    }
+}
+
+TEST_F(CsrmvLrbAnalysis, csc_none_accepts_column_longer_than_2_pow_31)
+{
+    check_lrb_preprocess_one_line(handle,
+                                  rocsparse_format_csc,
+                                  rocsparse_operation_none,
+                                  (int64_t(1) << 31) + 1,
+                                  rocsparse_status_success);
 }
 
 // ---------------------------------------------------------------------------

@@ -73,6 +73,25 @@ rocsparse_status rocsparse::csrmv_analysis_lrb_template_dispatch(rocsparse_handl
     p_csrmv_info[0]                 = new _rocsparse_csrmv_info();
     rocsparse_csrmv_info csrmv_info = p_csrmv_info[0];
 
+    // Store some pointers to verify correct execution
+    csrmv_info->trans       = trans;
+    csrmv_info->m           = m;
+    csrmv_info->n           = n;
+    csrmv_info->nnz         = nnz;
+    csrmv_info->descr       = descr;
+    csrmv_info->csr_row_ptr = csr_row_ptr;
+    csrmv_info->csr_col_ind = csr_col_ind;
+
+    csrmv_info->index_type_I = rocsparse::get_indextype<I>();
+    csrmv_info->index_type_J = rocsparse::get_indextype<J>();
+
+    // The LRB compute kernels support only rocsparse_operation_none, so no kernel reads the bins
+    // of any other operation.
+    if(trans != rocsparse_operation_none)
+    {
+        return rocsparse_status_success;
+    }
+
     // Stream
     hipStream_t stream = handle->stream;
 
@@ -241,18 +260,6 @@ rocsparse_status rocsparse::csrmv_analysis_lrb_template_dispatch(rocsparse_handl
         RETURN_IF_HIP_ERROR(rocsparse_hipMallocAsync(
             &csrmv_info->lrb.wg_flags, sizeof(uint32_t) * csrmv_info->lrb.size, stream));
     }
-
-    // Store some pointers to verify correct execution
-    csrmv_info->trans       = trans;
-    csrmv_info->m           = m;
-    csrmv_info->n           = n;
-    csrmv_info->nnz         = nnz;
-    csrmv_info->descr       = descr;
-    csrmv_info->csr_row_ptr = csr_row_ptr;
-    csrmv_info->csr_col_ind = csr_col_ind;
-
-    csrmv_info->index_type_I = rocsparse::get_indextype<I>();
-    csrmv_info->index_type_J = rocsparse::get_indextype<J>();
 
     return rocsparse_status_success;
 }
