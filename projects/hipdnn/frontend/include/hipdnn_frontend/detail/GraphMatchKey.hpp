@@ -251,8 +251,14 @@ inline std::optional<PrioritizedAutotuneConfigMatchKey>
         appendOptionalMatchTensor(key,
                                   config_tensor::PREV_RUNNING_VARIANCE,
                                   batchnorm.attributes.get_prev_running_variance());
-        appendOptionalMatchTensor(
-            key, config_tensor::MOMENTUM, batchnorm.attributes.get_momentum());
+        // Momentum is left out of the lowered operation unless both previous running stats are
+        // present (the packer sends it only then), so the key leaves it out too.
+        if(batchnorm.attributes.get_prev_running_mean()
+           && batchnorm.attributes.get_prev_running_variance())
+        {
+            appendOptionalMatchTensor(
+                key, config_tensor::MOMENTUM, batchnorm.attributes.get_momentum());
+        }
         return PrioritizedAutotuneConfigMatchKey{match_priority::BATCHNORM, std::move(key)};
     }
     case graph::NodeType::BATCHNORM_INFERENCE:

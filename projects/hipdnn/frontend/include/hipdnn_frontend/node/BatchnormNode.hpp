@@ -169,14 +169,6 @@ public:
                 nextRunningVar, channels, "Next running variance tensor"));
         }
 
-        // Momentum only weights the running statistics update, so it needs the previous
-        // running statistics; without them the backend rejects the operation at build.
-        const bool hasMomentum = attributes.get_momentum() != nullptr;
-        HIPDNN_RETURN_IF_TRUE(hasMomentum && !(hasPrevRunningMean && hasPrevRunningVar),
-                              ErrorCode::INVALID_VALUE,
-                              "BatchnormNode: momentum requires prev_running_mean and "
-                              "prev_running_variance");
-
         // SECTION 6: Validate Spatial Mode Constraints
         // Why: For spatial BN, statistics are computed over N*H*W elements per channel.
         // We need N*H*W > 1 to compute meaningful statistics (mean and variance).

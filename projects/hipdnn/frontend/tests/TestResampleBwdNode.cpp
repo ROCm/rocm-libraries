@@ -273,6 +273,27 @@ TEST(TestResampleBwdNode, PreValidateNodeRejectsWindowShorterThanSpatialRank)
     EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
 }
 
+TEST(TestResampleBwdNode, PreValidateNodeRejectsWindowLongerThanSpatialRank)
+{
+    auto attrs = createValidAttributes();
+    attrs.set_window({3, 3, 3});
+    attrs.set_stride({2, 2, 2});
+    attrs.set_pre_padding({1, 1, 1});
+    attrs.set_post_padding({1, 1, 1});
+
+    const GraphAttributes graphAttributes;
+    const ResampleBwdNode node(std::move(attrs), graphAttributes);
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
+    // Pins validateResampleParam's size-mismatch check (ResampleParamsValidation.hpp): an
+    // over-long window must be rejected, not just a too-short one.
+    EXPECT_NE(error.get_message().find(
+                  "window parameter count (3) must match spatial dimension count (2)"),
+              std::string::npos)
+        << error.get_message();
+}
+
 TEST(TestResampleBwdNode, PreValidateNodeRejectsZeroStride)
 {
     auto attrs = createInferableAttributes();

@@ -1,9 +1,18 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
+#include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include <hipdnn_frontend/Error.hpp>
+#include <hipdnn_frontend/Types.hpp>
 #include <hipdnn_frontend/attributes/BatchnormAttributes.hpp>
 #include <hipdnn_frontend/node/BatchnormNode.hpp>
+
+#include "fake_backend/MockHipdnnBackend.hpp"
+
+#include <array>
+#include <cstddef>
+#include <unordered_map>
+#include <vector>
 
 using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::graph;
@@ -714,7 +723,7 @@ TEST(TestBatchnormNode, PreValidateAcceptsCompleteRunningStats)
     EXPECT_EQ(error.code, ErrorCode::OK);
 }
 
-TEST(TestBatchnormNode, PreValidateRejectsMomentumWithoutPreviousRunningStats)
+TEST(TestBatchnormNode, PreValidateAcceptsMomentumWithoutPreviousRunningStats)
 {
     BatchnormAttributes batchnormAttributes;
 
@@ -742,12 +751,12 @@ TEST(TestBatchnormNode, PreValidateRejectsMomentumWithoutPreviousRunningStats)
 
     const GraphAttributes graphAttributes;
 
-    // Momentum without any running statistics.
+    // cuDNN accepts momentum without any running statistics and ignores it; it sets momentum
+    // on the operation only when the previous running mean is present (BatchnormPacker.hpp).
     auto withoutStats = batchnormAttributes;
     const BatchnormNode nodeWithoutStats(std::move(withoutStats), graphAttributes);
     auto error = nodeWithoutStats.pre_validate_node();
-    EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
-    EXPECT_NE(error.get_message().find("momentum"), std::string::npos) << error.get_message();
+    EXPECT_EQ(error.code, ErrorCode::OK) << error.get_message();
 
     // Momentum with the complete running statistics.
     auto runningStat = [] {
@@ -918,4 +927,131 @@ TEST(TestBatchnormNode, GetNodeTypeReturnsBatchnorm)
     const GraphAttributes graphAttrs;
     const BatchnormNode node(BatchnormAttributes{}, graphAttrs);
     EXPECT_EQ(node.getNodeType(), NodeType::BATCHNORM);
+}
+
+namespace
+{
+class TestBatchnormNodeCreateOperation : public ::testing::Test
+{
+protected:
+    std::shared_ptr<::testing::NiceMock<Mock_hipdnn_backend>> _mockBackend;
+    std::array<char, 16> _fakeDescriptors{};
+    size_t _nextDescriptor = 0;
+
+    void SetUp() override
+    {
+        using ::testing::_;
+        using ::testing::Return;
+
+        _mockBackend = std::make_shared<::testing::NiceMock<Mock_hipdnn_backend>>();
+        hipdnn_frontend::detail::IHipdnnBackend::setInstance(_mockBackend);
+
+        ON_CALL(*_mockBackend, backendCreateDescriptor(_, _))
+            .WillByDefault([this](hipdnnBackendDescriptorType_t,
+                                  hipdnnBackendDescriptor_t* descriptor) {
+                *descriptor = reinterpret_cast<hipdnnBackendDescriptor_t>(
+                    std::addressof(_fakeDescriptors[_nextDescriptor++ % _fakeDescriptors.size()]));
+                return HIPDNN_STATUS_SUCCESS;
+            });
+        ON_CALL(*_mockBackend, backendSetAttribute(_, _, _, _, _))
+            .WillByDefault(Return(HIPDNN_STATUS_SUCCESS));
+        ON_CALL(*_mockBackend, backendFinalize(_)).WillByDefault(Return(HIPDNN_STATUS_SUCCESS));
+        ON_CALL(*_mockBackend, backendDestroyDescriptor(_))
+            .WillByDefault(Return(HIPDNN_STATUS_SUCCESS));
+    }
+
+    void TearDown() override
+    {
+        hipdnn_frontend::detail::IHipdnnBackend::resetInstance();
+        _mockBackend.reset();
+    }
+
+    static std::shared_ptr<TensorAttributes>
+        makeTensor(int64_t uid, const std::vector<int64_t>& dim, const std::vector<int64_t>& stride)
+    {
+        auto tensor = std::make_shared<TensorAttributes>();
+        tensor->set_uid(uid).set_data_type(DataType::FLOAT).set_dim(dim).set_stride(stride);
+        return tensor;
+    }
+
+    // Builds the required tensors (x, y, scale, bias, epsilon) and compute data type shared by
+    // every case below; the caller adds momentum and running statistics on top. Epsilon is
+    // marked pass-by-value: validateScalarParameter (Utilities.hpp) rejects a required scalar
+    // parameter that is not, independent of the momentum behavior under test here.
+    static BatchnormAttributes makeBaseAttributes()
+    {
+        BatchnormAttributes attributes;
+        attributes.set_compute_data_type(DataType::FLOAT);
+        attributes.set_x(makeTensor(1, {2, 64, 32, 32}, {65536, 1024, 32, 1}));
+        attributes.set_y(makeTensor(2, {2, 64, 32, 32}, {65536, 1024, 32, 1}));
+        attributes.set_scale(makeTensor(3, {1, 64, 1, 1}, {64, 1, 1, 1}));
+        attributes.set_bias(makeTensor(4, {1, 64, 1, 1}, {64, 1, 1, 1}));
+        auto epsilon = makeTensor(5, {1}, {1});
+        epsilon->set_is_pass_by_value(true);
+        attributes.set_epsilon(epsilon);
+        return attributes;
+    }
+};
+} // namespace
+
+// cuDNN parity (B3): momentum alone, without the previous running mean and variance, has
+// nothing to weight, so the lowered operation omits it (BatchnormPacker.hpp).
+TEST_F(TestBatchnormNodeCreateOperation, OmitsMomentumWithoutPreviousRunningStats)
+{
+    using ::testing::_;
+    using ::testing::AnyNumber;
+
+    auto attributes = makeBaseAttributes();
+    attributes.set_momentum(makeTensor(6, {1}, {1}));
+
+    EXPECT_CALL(*_mockBackend, backendSetAttribute(_, _, _, _, _)).Times(AnyNumber());
+    EXPECT_CALL(*_mockBackend,
+                backendSetAttribute(_, HIPDNN_ATTR_OPERATION_BATCHNORM_MOMENTUM_EXT, _, _, _))
+        .Times(0);
+
+    const GraphAttributes graphAttributes;
+    const BatchnormNode node(std::move(attributes), graphAttributes);
+
+    auto error = node.pre_validate_node();
+    ASSERT_EQ(error.code, ErrorCode::OK) << error.get_message();
+
+    std::unordered_map<int64_t, detail::ScopedHipdnnBackendDescriptor> tensorDescs;
+    std::vector<detail::ScopedHipdnnBackendDescriptor> operations;
+    error = node.create_operation(tensorDescs, operations);
+
+    ASSERT_TRUE(error.is_good()) << error.get_message();
+    EXPECT_EQ(operations.size(), 1u);
+}
+
+// cuDNN parity (B3): momentum is lowered exactly once when both the previous running mean and
+// variance are present.
+TEST_F(TestBatchnormNodeCreateOperation, SendsMomentumOnceWithFullRunningStats)
+{
+    using ::testing::_;
+    using ::testing::AnyNumber;
+
+    auto attributes = makeBaseAttributes();
+    attributes.set_momentum(makeTensor(6, {1}, {1}));
+    attributes.set_prev_running_mean(makeTensor(7, {1, 64, 1, 1}, {64, 1, 1, 1}));
+    attributes.set_prev_running_variance(makeTensor(8, {1, 64, 1, 1}, {64, 1, 1, 1}));
+    attributes.set_next_running_mean(makeTensor(9, {1, 64, 1, 1}, {64, 1, 1, 1}));
+    attributes.set_next_running_variance(makeTensor(10, {1, 64, 1, 1}, {64, 1, 1, 1}));
+
+    EXPECT_CALL(*_mockBackend, backendSetAttribute(_, _, _, _, _)).Times(AnyNumber());
+    EXPECT_CALL(*_mockBackend,
+                backendSetAttribute(_, HIPDNN_ATTR_OPERATION_BATCHNORM_MOMENTUM_EXT, _, _, _))
+        .Times(1);
+
+    const GraphAttributes graphAttributes;
+    const BatchnormNode node(std::move(attributes), graphAttributes);
+
+    auto error = node.pre_validate_node();
+    ASSERT_EQ(error.code, ErrorCode::OK) << error.get_message();
+
+    std::unordered_map<int64_t, detail::ScopedHipdnnBackendDescriptor> tensorDescs;
+    std::vector<detail::ScopedHipdnnBackendDescriptor> operations;
+    error = node.create_operation(tensorDescs, operations);
+
+    ASSERT_TRUE(error.is_good()) << error.get_message();
+    EXPECT_EQ(operations.size(), 1u);
 }

@@ -132,7 +132,7 @@ Layer normalization
      - Stats dims
      - Batch dims from input, normalized dims = 1
 
-Normalization covers the dims of x from the first scale dim that is not 1 through the last dim; a scale that omits the batch dims covers as many trailing dims of x as it has. For example, x ``(N, C, H, W)`` with scale ``(1, C, H, W)`` or ``(C, H, W)`` normalizes the last three dims.
+A scale (or bias) of lower rank than x is treated as right-aligned to x's rank by prepending 1s. Normalization then covers the trailing dims of x from the first non-1 dim of the right-aligned scale through the last dim; if every dim but the last is 1, only the last dim is covered. A lower-rank scale with no dimension other than 1 normalizes as many trailing dimensions as it has instead of just the last one. For example, scale ``(1, 5)`` on x ``(2, 3, 4, 5)`` right-aligns to ``(1, 1, 1, 5)``, so normalization covers 1 dim; scale ``(1, C, H, W)`` or ``(C, H, W)`` on x ``(N, C, H, W)`` covers the last three dims. A full-rank scale whose first non-1 dim is not the batch dim, such as ``(1, C, 1, 1)`` on x ``(N, C, H, W)``, derives a count that would span non-trailing feature dims and is rejected: no hipDNN provider normalizes non-trailing axes (`Graph validation <https://github.com/ROCm/rocm-libraries/blob/develop/projects/hipdnn/docs/KNOWN_DIVERGENCES.md#graph-validation>`__).
 
 Matrix multiplication
 ---------------------

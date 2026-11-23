@@ -1003,6 +1003,35 @@ TEST(TestLayernormBackwardNode, PreValidateNodeAcceptsRankReducedScaleWithOnePad
     EXPECT_EQ(error.code, error_code_t::OK) << error.err_msg;
 }
 
+TEST(TestLayernormBackwardNode, PreValidateNodeAcceptsRankReducedScaleBelowExplicitCount)
+{
+    // x [2,3,5,7] with scale [1,5,7] (rank 3) and an explicit normalized_dim_count of 2: the
+    // shared helper's affine check passes a scale rank between normalized_dim_count and rank(x),
+    // and backward no longer requires the scale to hold exactly k dims on top of that.
+    auto attrs = createShapedAttributes({2, 3, 5, 7}, {1, 5, 7}, {2, 3, 1, 1});
+    attrs.set_normalized_dim_count(2);
+
+    const GraphAttributes graphAttributes;
+    const LayernormBackwardNode node(std::move(attrs), graphAttributes);
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, error_code_t::OK) << error.err_msg;
+}
+
+TEST(TestLayernormBackwardNode, PreValidateNodeAcceptsExplicitCountEqualToRankWithFullRankScale)
+{
+    // normalized_dim_count equal to rank(x) is the accepting boundary of
+    // deriveLayernormNormalizedDimCount's explicitCount > rank check.
+    auto attrs = createShapedAttributes({2, 3, 5, 7}, {2, 3, 5, 7}, {1, 1, 1, 1});
+    attrs.set_normalized_dim_count(4);
+
+    const GraphAttributes graphAttributes;
+    const LayernormBackwardNode node(std::move(attrs), graphAttributes);
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, error_code_t::OK) << error.err_msg;
+}
+
 TEST(TestLayernormBackwardNode, PreValidateNodeRejectsStatsRankAboveX)
 {
     // x [N, C, H, W] with scale [C, H, W]: statistics have rank 1 or 4
@@ -1054,6 +1083,23 @@ TEST(TestLayernormBackwardNode, PreValidateNodeRejectsAllOnesScaleOnNonUnitX)
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, error_code_t::INVALID_VALUE) << error.err_msg;
+}
+
+TEST(TestLayernormBackwardNode, PreValidateNodeAcceptsAmbiguousAllOnesRankReducedScale)
+{
+    // x and scale all-ones, scale rank below rank(x): the right-aligned scan finds no
+    // non-1 dim anywhere in the scale, so normalizedDimCount falls back to the scale's own
+    // rank (ambiguous case) rather than the full-rank default of 1. Mirrors test_sdk's
+    // layer-norm backward graphs (x [1,1,1,1], scale [1,1,1], mean/inv_variance [1]), which
+    // develop accepted via k = scale rank = 3; the PR's right-aligned rule previously
+    // defaulted this case to k = 1 and rejected the rank-1 saved-stats tensors ("Mean tensor
+    // rank must be 3 (batch dims of x) or 4 (rank of x), got 1").
+    const GraphAttributes graphAttributes;
+    const LayernormBackwardNode node(createShapedAttributes({1, 1, 1, 1}, {1, 1, 1}, {1}),
+                                     graphAttributes);
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, error_code_t::OK) << error.err_msg;
 }
 
 TEST(TestLayernormBackwardNode, PreValidateNodeRejectsNormalizedDimCountConflictingWithScale)

@@ -28,10 +28,21 @@ namespace hipdnn_frontend::graph
  * layer normalization normalizes across the last k feature dimensions.
  *
  * The number of normalized dimensions (k) is determined by:
- * 1. **From scale shape**: k is inferred from the scale tensor. Dimensions
- *    where scale != 1 are normalized. If scale has fewer dims than X, all
- *    scale dims are normalized dims.
- * 2. **Default**: If scale dims are also unset, they are inferred as
+ * 1. **Explicit**: `normalized_dim_count` k, when set (> 0), wins outright.
+ * 2. **From scale shape**: a scale of lower rank than X is treated as
+ *    right-aligned to X's rank by prepending 1s. k is then `rank(X) - i`
+ *    for the first dimension i (0-indexed, up to but excluding X's last
+ *    dimension) whose right-aligned scale value is not 1; if every such
+ *    dimension is 1, k = 1. A lower-rank scale with no dimension other
+ *    than 1 instead gives k equal to the scale's own rank. For example,
+ *    X `(2, 3, 4, 5)` with scale `(1, 5)` right-aligns to `(1, 1, 1, 5)`,
+ *    so k = 1; scale `(4, 5)` right-aligns to `(1, 1, 4, 5)`, so k = 2.
+ *    A full-rank scale whose first non-1 dimension is not the batch
+ *    dimension, such as `(1, C, 1, 1)` on a 4-D X, derives a k that
+ *    would span non-trailing feature dimensions; no hipDNN provider
+ *    normalizes non-trailing axes, so validation rejects such a graph
+ *    (see "Graph validation" in docs/KNOWN_DIVERGENCES.md).
+ * 3. **Default**: If scale dims are also unset, they are inferred as
  *    `[1, D1, ..., Dk]` (batch dim = 1), normalizing all non-batch dims.
  *
  * Unset Scale and Bias dims are inferred during validation as

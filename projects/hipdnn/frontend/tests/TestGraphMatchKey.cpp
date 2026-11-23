@@ -345,6 +345,79 @@ TEST_F(TestGraphMatchKey, PointwiseBinaryKeyOmitsSurplusInput)
     expectTensorUidOrder(*key, {x, y});
 }
 
+// cuDNN parity (B3): momentum alone, without the previous running mean and variance, has
+// nothing to weight, so the key leaves it out, same as the lowered operation (GraphMatchKey.hpp).
+TEST_F(TestGraphMatchKey, BatchnormKeyOmitsMomentumWithoutRunningStats)
+{
+    const auto x = makeUidTensor("x", 1);
+    const auto scale = makeUidTensor("scale", 2);
+    const auto bias = makeUidTensor("bias", 3);
+    const auto epsilon = makeUidTensor("epsilon", 4);
+
+    graph::Graph graphWithoutMomentum;
+    graph::BatchnormAttributes attrsWithoutMomentum;
+    attrsWithoutMomentum.set_epsilon(epsilon);
+    graphWithoutMomentum.batchnorm(x, scale, bias, attrsWithoutMomentum);
+
+    graph::Graph graphWithMomentum;
+    graph::BatchnormAttributes attrsWithMomentum;
+    attrsWithMomentum.set_epsilon(epsilon);
+    attrsWithMomentum.set_momentum(makeUidTensor("momentum", 5));
+    graphWithMomentum.batchnorm(x, scale, bias, attrsWithMomentum);
+
+    const auto keyWithoutMomentum = detail::getAutotuneConfigMatchKey(graphWithoutMomentum);
+    const auto keyWithMomentum = detail::getAutotuneConfigMatchKey(graphWithMomentum);
+    ASSERT_TRUE(keyWithoutMomentum.has_value());
+    ASSERT_TRUE(keyWithMomentum.has_value());
+
+    const std::vector<std::string_view> expectedIds{
+        config_tensor::X, config_tensor::SCALE, config_tensor::BIAS, config_tensor::EPSILON};
+    expectTensorIdOrder(*keyWithoutMomentum, expectedIds);
+    expectTensorIdOrder(*keyWithMomentum, expectedIds);
+}
+
+// cuDNN parity (B3): momentum joins the key, after the running-stats tensors, once both the
+// previous running mean and variance are present (the same condition the packer uses).
+TEST_F(TestGraphMatchKey, BatchnormKeyIncludesMomentumWithRunningStats)
+{
+    const auto x = makeUidTensor("x", 1);
+    const auto scale = makeUidTensor("scale", 2);
+    const auto bias = makeUidTensor("bias", 3);
+    const auto epsilon = makeUidTensor("epsilon", 4);
+    const auto prevMean = makeUidTensor("prevMean", 5);
+    const auto prevVar = makeUidTensor("prevVar", 6);
+    const auto momentum = makeUidTensor("momentum", 7);
+
+    graph::Graph graphObj;
+    graph::BatchnormAttributes attrs;
+    attrs.set_epsilon(epsilon);
+    attrs.set_prev_running_mean(prevMean);
+    attrs.set_prev_running_variance(prevVar);
+    attrs.set_momentum(momentum);
+    graphObj.batchnorm(x, scale, bias, attrs);
+
+    const auto key = detail::getAutotuneConfigMatchKey(graphObj);
+    ASSERT_TRUE(key.has_value());
+    expectTensorIdOrder(*key,
+                        {config_tensor::X,
+                         config_tensor::SCALE,
+                         config_tensor::BIAS,
+                         config_tensor::EPSILON,
+                         config_tensor::PREV_RUNNING_MEAN,
+                         config_tensor::PREV_RUNNING_VARIANCE,
+                         config_tensor::MOMENTUM});
+
+    // Differs from the momentum-without-running-stats key above: seven tensors instead of four.
+    graph::Graph graphWithoutStats;
+    graph::BatchnormAttributes attrsWithoutStats;
+    attrsWithoutStats.set_epsilon(epsilon);
+    attrsWithoutStats.set_momentum(makeUidTensor("momentumOnly", 8));
+    graphWithoutStats.batchnorm(x, scale, bias, attrsWithoutStats);
+    const auto keyWithoutStats = detail::getAutotuneConfigMatchKey(graphWithoutStats);
+    ASSERT_TRUE(keyWithoutStats.has_value());
+    EXPECT_NE(key->tensors.size(), keyWithoutStats->tensors.size());
+}
+
 #ifdef HIPDNN_ENABLE_SDPA
 // The cumulative sequence length tensors are part of an SDPA forward match key, after the other
 // optional tensors, so a rule can name them and graphs differing only in them stay distinct.

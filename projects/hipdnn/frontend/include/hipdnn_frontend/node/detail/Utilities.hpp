@@ -492,13 +492,21 @@ inline Error validateNormStatsShapeIfSet(const std::shared_ptr<graph::TensorAttr
 }
 
 // Derives the LayerNorm normalized dim count k from x and scale dims.
-// A positive explicitCount is used as given (0 means unset). Otherwise a scale that omits
-// the batch dims normalizes all of its dims, and a full-rank scale normalizes every dim
-// from its first non-1 dim onward, at least the last one:
-//   x [N, C, H, W], scale [C, H, W]     → k = 3
+// A positive explicitCount is used as given (0 means unset). Otherwise a scale of rank
+// below rank(x) is first right-aligned to rank(x) by prepending 1s; the (now full-rank)
+// scale then normalizes every dim from its first non-1 dim onward, at least the last one:
+//   x [N, C, H, W], scale [C, H, W]     → pad [1, C, H, W] → k = 3
 //   x [N, C, H, W], scale [1, C, H, W]  → k = 3
 //   x [N, C, 1, 1], scale [1, C, 1, 1]  → k = 3
 //   x [N, 1, H, W], scale [1, 1, H, W]  → k = 2
+//   x [2, 3, 4, 5], scale [1, 5]        → pad [1, 1, 1, 5] → k = 1
+//   x [2, 3, 4, 5], scale [5]           → pad [1, 1, 1, 5] → k = 1
+//   x [2, 3, 4, 5], scale [4, 5]        → pad [1, 1, 4, 5] → k = 2
+// If the padded scale has no non-1 dim at all, a full-rank scale leaves k at its default of 1;
+// a rank-reduced scale is ambiguous (padding and the scale's own dims are both all-1s) and
+// falls back to the scale's own rank instead, matching cuDNN:
+//   x [N, C, 1, 1], scale [1, 1, 1, 1]  → k = 1 (full rank, ambiguity doesn't apply)
+//   x [1, 1, 1, 1], scale [1, 1, 1]     → k = 3 (rank-reduced, falls back to scale rank)
 inline Error deriveLayernormNormalizedDimCount(const std::vector<int64_t>& xDims,
                                                const std::vector<int64_t>& scaleDims,
                                                int64_t explicitCount,
@@ -528,20 +536,29 @@ inline Error deriveLayernormNormalizedDimCount(const std::vector<int64_t>& xDims
         return {};
     }
 
-    if(scaleRank < rank)
-    {
-        normalizedDimCount = scaleRank;
-        return {};
-    }
-
+    // Right-align: a scale dim at padded index i reads as 1 for i below the padding, else
+    // the scale's own dim at (i - padding).
+    const int64_t padding = rank - scaleRank;
     normalizedDimCount = 1;
+    bool foundNonOneDim = false;
     for(int64_t i = 0; i < rank - 1; ++i)
     {
-        if(scaleDims[static_cast<size_t>(i)] != 1)
+        const int64_t paddedDim = i < padding ? 1 : scaleDims[static_cast<size_t>(i - padding)];
+        if(paddedDim != 1)
         {
             normalizedDimCount = rank - i;
+            foundNonOneDim = true;
             break;
         }
+    }
+
+    // The scan above skips the scale's own last dim (it is always normalized regardless of
+    // value). A rank-reduced scale with no dimension other than 1 anywhere, including that
+    // last one, is genuinely ambiguous and falls back to its own rank instead of k = 1.
+    if(!foundNonOneDim && scaleRank < rank
+       && std::all_of(scaleDims.begin(), scaleDims.end(), [](int64_t dim) { return dim == 1; }))
+    {
+        normalizedDimCount = scaleRank;
     }
 
     return {};

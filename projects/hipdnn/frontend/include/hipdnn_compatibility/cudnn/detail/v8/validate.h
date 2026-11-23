@@ -9,6 +9,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstddef>
@@ -755,24 +756,35 @@ constexpr OperationTarget
     }
 }
 
-// hipDNN's layernorm normalized-dim count. A full-rank scale normalizes every
-// dimension from its first non-1 one onward (at least 1), so [1, H, 1, 1]
-// normalizes the last three; a scale that omits the batch dims normalizes all
-// of them.
+// hipDNN's layernorm normalized-dim count. A scale of rank below rank(x) is
+// first right-aligned to rank(x) by prepending 1s; the (now full-rank) scale
+// then normalizes every dimension from its first non-1 one onward (at least
+// 1), so x [N, C, H, W] with scale [1, H, 1, 1] normalizes the last three,
+// and with scale [1, C] normalizes only the last ([1, 1, 1, C] -> 1). If the
+// scale has no dimension other than 1 anywhere (including its own last
+// dimension, which the scan below never reaches), a full-rank scale keeps
+// count 1; a rank-reduced scale is genuinely ambiguous and falls back to its
+// own rank instead (x [1, 1, 1, 1] with scale [1, 1, 1] -> 3), matching cuDNN.
 inline std::int64_t layernormNormalizedDimCount(const TensorRecord& x, const TensorRecord& scale)
 {
     const std::vector<std::int64_t>& scaleDims = scale.dimensions();
-    const auto rank = static_cast<std::int64_t>(scaleDims.size());
-    if(x.dimensions().size() != scaleDims.size())
-    {
-        return rank;
-    }
+    const auto rank = static_cast<std::int64_t>(x.dimensions().size());
+    const auto scaleRank = static_cast<std::int64_t>(scaleDims.size());
+    const std::int64_t padding = rank - scaleRank;
     for(std::int64_t i = 0; i < rank - 1; ++i)
     {
-        if(scaleDims[static_cast<std::size_t>(i)] != 1)
+        const std::int64_t paddedDim
+            = i < padding ? 1 : scaleDims[static_cast<std::size_t>(i - padding)];
+        if(paddedDim != 1)
         {
             return rank - i;
         }
+    }
+    if(scaleRank < rank && std::all_of(scaleDims.begin(), scaleDims.end(), [](std::int64_t dim) {
+           return dim == 1;
+       }))
+    {
+        return scaleRank;
     }
     return 1;
 }

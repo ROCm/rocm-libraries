@@ -123,13 +123,6 @@ public:
         HIPDNN_CHECK_ERROR(detail::validateLayernormStatsIfSet(
             attributes.get_inv_variance(), xDims, normalizedDimCount, "Inverse variance tensor"));
 
-        // A scale without the batch dims holds exactly k dims.
-        HIPDNN_RETURN_IF_TRUE(scaleDims.size() != xDims.size()
-                                  && static_cast<int64_t>(scaleDims.size()) != normalizedDimCount,
-                              ErrorCode::INVALID_VALUE,
-                              "LayernormBackwardNode requires that scale (input) conforms to the "
-                              "specified normalized_dim_count");
-
         return {};
     }
 

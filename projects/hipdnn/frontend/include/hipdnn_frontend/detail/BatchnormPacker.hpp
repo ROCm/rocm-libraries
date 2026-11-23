@@ -63,11 +63,18 @@ inline Error createBatchnormOperation(
                                       attributes.get_prev_running_variance(),
                                       tensorDescs,
                                       "batchnorm PREV_RUNNING_VARIANCE"));
-    HIPDNN_CHECK_ERROR(ensureAndSetOptionalTensorRef(opDesc.get(),
-                                                     HIPDNN_ATTR_OPERATION_BATCHNORM_MOMENTUM_EXT,
-                                                     attributes.get_momentum(),
-                                                     tensorDescs,
-                                                     "batchnorm MOMENTUM"));
+    // cuDNN sets the momentum (exponential moving-average factor) on the operation only when
+    // the previous running mean and variance are both present; without them momentum has
+    // nothing to weight, and the backend rejects a momentum-without-running-stats build.
+    if(attributes.get_prev_running_mean() && attributes.get_prev_running_variance())
+    {
+        HIPDNN_CHECK_ERROR(
+            ensureAndSetOptionalTensorRef(opDesc.get(),
+                                          HIPDNN_ATTR_OPERATION_BATCHNORM_MOMENTUM_EXT,
+                                          attributes.get_momentum(),
+                                          tensorDescs,
+                                          "batchnorm MOMENTUM"));
+    }
     HIPDNN_CHECK_ERROR(ensureAndSetOptionalTensorRef(opDesc.get(),
                                                      HIPDNN_ATTR_OPERATION_BATCHNORM_MEAN_EXT,
                                                      attributes.get_mean(),
