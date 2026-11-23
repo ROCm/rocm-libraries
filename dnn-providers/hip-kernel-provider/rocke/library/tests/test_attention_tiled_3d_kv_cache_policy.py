@@ -15,7 +15,6 @@ import pytest
 from rocke.tests.lanes import (
     BINDING_LANE,
     CI_TEST_TOOLS,
-    DROP_REVIEW,
     import_or_skip_until,
     skip_until,
 )
@@ -214,17 +213,20 @@ def test_gfx942_native_builder_matches_python(kw):
     assert actual == expected
 
 
+# The cache-policy bits each policy sets on a K/V copy.
+_POLICY_BITS = {"all": set(), "stream": {"nt"}, "nt": {"sc0", "nt"}}
+
+
 @pytest.mark.parametrize(
-    "policy, bits", [("all", set()), ("stream", {"nt"}), ("nt", {"sc0", "nt"})]
+    "wide, policy",
+    # The wide loader takes 'all' or 'stream' only.
+    [(True, "all"), (True, "stream"), *((False, policy) for policy in _POLICY_BITS)],
 )
-@pytest.mark.parametrize("wide", [True, False])
-def test_gfx942_kv_copies_carry_the_policy_bits(policy, bits, wide):
+def test_gfx942_kv_copies_carry_the_policy_bits(wide, policy):
     from rocke.helpers.compile import compile_kernel
     from rocke.runtime import comgr
 
-    if wide and policy == "nt":
-        # Never runs: kept listed until the owner decides to drop it.
-        skip_until(DROP_REVIEW, reason="the wide loader takes 'all' or 'stream'")
+    bits = _POLICY_BITS[policy]
     objdump = _objdump()
     if objdump is None:
         skip_until(

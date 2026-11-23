@@ -24,7 +24,6 @@ import itertools
 
 import numpy as np
 import pytest
-from rocke.tests.lanes import DROP_REVIEW, skip_until
 
 from kernels.common.attention_dense_decode import (
     NONPERSIST_DECODES,
@@ -330,11 +329,24 @@ _PERSIST_LAUNCHES = (
 )
 
 
+def _runtime_persist_cases(names):
+    """``(interleave, causal, window, name)`` for each persistent order: causal,
+    plain and windowed, and interleaved for qb_major, the one order interleave
+    applies to."""
+    return [
+        (interleave, causal, window, name)
+        for name in names
+        for causal, window in ((True, 0), (False, 0), (True, 1024))
+        for interleave in ((False, True) if name == "qb_major" else (False,))
+    ]
+
+
 @pytest.mark.parametrize(
-    "name", sorted(Gfx942AttentionDenseSpec.supported_persist_decodes() - {"auto"})
+    "interleave,causal,window,name",
+    _runtime_persist_cases(
+        sorted(Gfx942AttentionDenseSpec.supported_persist_decodes() - {"auto"})
+    ),
 )
-@pytest.mark.parametrize("causal,window", ((True, 0), (False, 0), (True, 1024)))
-@pytest.mark.parametrize("interleave", (False, True))
 def test_runtime_persist_decode_matches_the_launched_baked_decode(
     name, causal, window, interleave
 ):
@@ -362,9 +374,10 @@ _GFX950_RUNTIME_PERSIST_DECODES = sorted(
 )
 
 
-@pytest.mark.parametrize("name", _GFX950_RUNTIME_PERSIST_DECODES)
-@pytest.mark.parametrize("causal,window", ((True, 0), (False, 0), (True, 1024)))
-@pytest.mark.parametrize("interleave", (False, True))
+@pytest.mark.parametrize(
+    "interleave,causal,window,name",
+    _runtime_persist_cases(_GFX950_RUNTIME_PERSIST_DECODES),
+)
 def test_gfx950_runtime_persist_decode_matches_the_launched_baked_decode(
     name, causal, window, interleave
 ):
@@ -376,9 +389,6 @@ def test_gfx950_runtime_persist_decode_matches_the_launched_baked_decode(
 
 
 def _check_runtime_persist_decode(spec_cls, runtime_args, name, causal, window, il):
-    if il and name != "qb_major":
-        # Never runs: kept listed until the owner decides to drop it.
-        skip_until(DROP_REVIEW, reason="interleave applies to qb_major only")
     decode = PERSIST_DECODES[name]
     built = None
     for Hq, Hkv, B, S in _PERSIST_LAUNCHES:

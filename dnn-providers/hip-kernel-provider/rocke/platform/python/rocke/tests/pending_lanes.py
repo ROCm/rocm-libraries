@@ -116,7 +116,6 @@ from .lanes import (
     BINDING_LANE,
     CI_TEST_TOOLS,
     COMPREHENSIVE_CASES,
-    DROP_REVIEW,
     ENROLMENT,
     EXHAUSTIVE_CASES,
     GFX90A_RUNNER,
@@ -1274,25 +1273,6 @@ PENDING: tuple[PendingTest, ...] = (
         "rocKE platform; issue: none filed yet",
         "2026-12-15",
         "platform/tests/core/test_gfx1250_fp6_scaled_wmma.py",
-    ),
-    *_waiting(
-        DROP_REVIEW,
-        "cases that can never run (a refused request or a state the driver cannot "
-        "build), kept listed as skips until the owner decides to drop or rewrite "
-        "them",
-        "rocKE library; issue: none filed yet",
-        "2026-12-15",
-        "library/tests/dispatch/gdn/test_gfx950_prefill_wiring.py",
-        "library/tests/test_attention_dense_decode.py",
-        "library/tests/test_attention_tiled_3d_kv_cache_policy.py",
-    ),
-    *_waiting(
-        DROP_REVIEW,
-        "its V LDS staging cases at D256 can never run (D256 is covered without "
-        "staging), kept listed as skips until the owner decides to drop them",
-        "rocKE platform; issue: none filed yet",
-        "2026-12-15",
-        "platform/tests/instances/test_attention_fwd_ext_numeric.py",
     ),
 )
 

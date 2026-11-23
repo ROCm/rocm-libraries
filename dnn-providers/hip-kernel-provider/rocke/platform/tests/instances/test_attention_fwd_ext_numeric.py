@@ -21,7 +21,7 @@ import sys
 
 import numpy as np
 import pytest
-from rocke.tests.lanes import DROP_REVIEW, skip_needing_arch, skip_until
+from rocke.tests.lanes import skip_needing_arch
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -106,17 +106,23 @@ CASES = {
 }
 
 
-@pytest.mark.parametrize("v_lds", [False, True], ids=["v_direct", "v_lds"])
-@pytest.mark.parametrize("tag", sorted(CASES))
+# Each case with V read directly, and with V staged in LDS except at D256,
+# which is covered with V read directly.
+_PROBE_CASES = [
+    pytest.param(tag, v_lds, id=f"{tag}-{'v_lds' if v_lds else 'v_direct'}")
+    for tag in sorted(CASES)
+    for v_lds in (False, True)
+    if not (v_lds and CASES[tag].get("D") == 256)
+]
+
+
+@pytest.mark.parametrize("tag, v_lds", _PROBE_CASES)
 def test_probe_matches_oracle(tag, v_lds):
     cfg = dict(CASES[tag])
     if v_lds and not _ARCH.startswith("gfx11"):
         skip_needing_arch(
             ("gfx1151",), reason="V LDS staging is a WMMA-body option: gfx1151 only"
         )
-    if v_lds and cfg.get("D") == 256:
-        # Never runs: kept listed until the owner decides to drop it.
-        skip_until(DROP_REVIEW, reason="d256 is covered without staging")
     res = run_case(_ARCH, tag=tag, v_lds=v_lds, **cfg)
     _check(res, **(_BF16_TOL if cfg.get("dtype") == "bf16" else {}))
 

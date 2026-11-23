@@ -50,7 +50,6 @@ __all__ = [
     "BINDING_LANE",
     "CI_TEST_TOOLS",
     "COMPREHENSIVE_CASES",
-    "DROP_REVIEW",
     "ENROLMENT",
     "EXHAUSTIVE_CASES",
     "GFX90A_RUNNER",
@@ -240,14 +239,6 @@ CI_TEST_TOOLS = Lane(
     "tools on PATH, so they skip",
     enrolled=True,
 )
-DROP_REVIEW = Lane(
-    "drop-review",
-    "the owner's review of cases that can never run (the state they check cannot "
-    "be built, or the configuration they generate is refused by design): the "
-    "file is in a CI-run entry, but these cases skip everywhere until the owner "
-    "decides to drop or rewrite them",
-    enrolled=True,
-)
 
 LANES: tuple[Lane, ...] = (
     PR_16482,
@@ -268,7 +259,6 @@ LANES: tuple[Lane, ...] = (
     MULTI_GPU_RUNNER,
     SHARED_LIBRARY_LANE,
     CI_TEST_TOOLS,
-    DROP_REVIEW,
 )
 _BY_NAME = {lane.name: lane for lane in LANES}
 
