@@ -16,8 +16,15 @@ directory, which the install keeps (``platform/tests`` installs as ``tests``,
 A quarantined item is skipped with the reason ``quarantined: <issue>``, so it
 stays visible in every report. An entry that names GPU arches skips its item
 only when this process's GPU is one of them (``rocke.tests.gpu``), and adds
-``on <arch>`` to the reason. ``ROCKE_QUARANTINE=ignore`` runs it anyway, to
-debug or fix it.
+``on <arch>`` to the reason; one that names llvm-project commits skips it only
+when the COMGR this process loads was built from one of them
+(``rocke.runtime.comgr.loaded_compiler_commit``), and adds ``with llvm-project
+<commit>``. Each is probed only when such an entry covers a collected item,
+after the test modules are imported, and the compiler before the GPU: probing
+the GPU loads HIP, which maps its own COMGR, and a process with a COMGR mapped
+loads no different one. A compiler that cannot be identified (no COMGR loads
+here) matches no commit, so its tests run. ``ROCKE_QUARANTINE=ignore`` runs
+every quarantined test, to debug or fix it.
 """
 
 from __future__ import annotations
@@ -81,12 +88,18 @@ def skip_quarantined_items(
         entry = quarantined_test(path, item.nodeid.partition("::")[2])
         if entry is None:
             continue
+        # The compiler first: probing the GPU loads HIP (see the docstring).
+        llvm_commit = _loaded_compiler_commit() if entry.llvm_commits else None
+        if not entry.holds_out_with(llvm_commit):
+            continue
+        arch = _device_arch() if entry.arches else None
+        if not entry.holds_out_on(arch):
+            continue
         reason = f"{QUARANTINE_SKIP_PREFIX}{entry.issue}"
         if entry.arches:
-            arch = _device_arch()
-            if not entry.holds_out_on(arch):
-                continue
             reason += f" on {arch}"
+        if entry.llvm_commits:
+            reason += f" with llvm-project {llvm_commit}"
         item.add_marker(pytest.mark.skip(reason=reason))
 
 
@@ -95,3 +108,13 @@ def _device_arch() -> str | None:
     """This process's GPU arch, or None without a GPU; probed only when an entry
     that names arches covers a collected item."""
     return probe_device_arch()[0]
+
+
+@functools.cache
+def _loaded_compiler_commit() -> str | None:
+    """The llvm-project commit of the compiler this process's COMGR was built
+    from, or None; probed only when an entry that names commits covers a
+    collected item."""
+    from ..runtime.comgr import loaded_compiler_commit
+
+    return loaded_compiler_commit()

@@ -937,6 +937,9 @@ def test_a_quarantined_test_needs_an_item_an_issue_and_its_recorded_reason():
         _quarantined("library/tests/test_x.py::test_y", arches=("gfx9999",))
     with pytest.raises(ValueError, match="expected a tuple of known gfx arches"):
         _quarantined("library/tests/test_x.py::test_y", arches="gfx950")
+    for llvm_commits in (("424729dba65",), ("424729DBA653",), "424729dba653"):
+        with pytest.raises(ValueError, match="expected a tuple of llvm-project"):
+            _quarantined("library/tests/test_x.py::test_y", llvm_commits=llvm_commits)
     github = _quarantined(
         "library/tests/test_x.py::test_y", issue="ROCm/rocm-libraries#1"
     )
@@ -953,6 +956,20 @@ def test_a_quarantine_that_names_arches_holds_its_test_out_on_those_only():
     assert on_gfx950.holds_out_on("gfx950")
     assert not on_gfx950.holds_out_on("gfx942")
     assert not on_gfx950.holds_out_on(None)
+
+
+def test_a_quarantine_that_names_compilers_holds_its_test_out_with_those_only():
+    ci_build = "424729dba65359a5e521ab2e729af131c8a5b0d4"
+    other_build = "d6f6cb691863e9258034ab48c1dfce21689d5606"
+    any_compiler = _quarantined("library/tests/test_x.py::test_y")
+    assert any_compiler.holds_out_with(ci_build)
+    assert any_compiler.holds_out_with(None)
+    with_ci_build = _quarantined(
+        "library/tests/test_x.py::test_y", llvm_commits=("424729dba653",)
+    )
+    assert with_ci_build.holds_out_with(ci_build)
+    assert not with_ci_build.holds_out_with(other_build)
+    assert not with_ci_build.holds_out_with(None)
 
 
 def test_a_quarantined_function_covers_its_parameters_and_a_case_only_itself():

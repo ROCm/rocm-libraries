@@ -80,7 +80,10 @@ A quarantined test is known to fail (a flake, or a defect that turns develop
 red) and is held out of every run until it is fixed. It names one pytest item,
 or every parameter of one test function, and the issue that tracks the fix
 (``NO_ISSUE_FILED`` until one is filed). A test that fails only on some GPU
-arches names them, and is held out on those arches only. The pytest roots of
+arches names them, and is held out on those arches only; one that fails only
+when built by some compilers (a defect of one compiler build) names the
+llvm-project commits of those builds, and is held out only while the loaded
+COMGR's compiler is one of them. The pytest roots of
 ``platform/tests`` and ``library/tests`` skip it with the reason
 ``quarantined: <issue>`` (``rocke.tests.quarantine``), so it stays visible in
 every report; ``ROCKE_QUARANTINE=ignore`` runs it anyway. Rules stricter than a
@@ -95,6 +98,7 @@ most ``QUARANTINE_CAP`` tests may be quarantined at once.
         expires="2027-01-31",
         arches=("gfx950",),  # optional: the GPU arches it fails on
         runs_files=(),  # optional: test files it runs in a child process
+        llvm_commits=("424729dba653",),  # optional: the compiler builds it fails with
     )
 
 Paths, owners and issues are plain text: no links.
@@ -501,6 +505,8 @@ NO_ISSUE_FILED = "none filed yet"
 QUARANTINE_SKIP_PREFIX = "quarantined: "
 # Where test files live, relative to the rocke directory.
 TEST_FILE_ROOTS: tuple[str, ...] = ("platform", "library")
+# An llvm-project commit: at least 12 of its lowercase hex digits.
+_LLVM_COMMIT = re.compile(r"[0-9a-f]{12,40}")
 # A Jira id (AICK-1234), a GitHub issue (ROCm/rocm-libraries#123) or
 # NO_ISSUE_FILED.
 _ISSUE = re.compile(
@@ -518,7 +524,11 @@ class QuarantinedTest:
     class. ``arches`` names the GPU arches it fails on, where it is held out;
     empty (the default) holds it out everywhere. ``runs_files`` names the test
     files the quarantined test runs in a child process, which it holds out
-    with it.
+    with it. ``llvm_commits`` names the llvm-project commits (at least 12 hex
+    digits) of the compiler builds it fails with, and holds it out only while
+    the loaded COMGR's compiler was built from one of them
+    (``rocke.runtime.comgr.loaded_compiler_commit``); empty (the default)
+    holds it out whatever the compiler.
     """
 
     test_id: str
@@ -528,6 +538,7 @@ class QuarantinedTest:
     expires: str
     arches: tuple[str, ...] = ()
     runs_files: tuple[str, ...] = ()
+    llvm_commits: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         path, separator, node_name = self.test_id.partition("::")
@@ -566,6 +577,15 @@ class QuarantinedTest:
             )
         for child in self.runs_files:
             _require_test_path("QuarantinedTest", child)
+        if not isinstance(self.llvm_commits, tuple) or not all(
+            isinstance(commit, str) and _LLVM_COMMIT.fullmatch(commit)
+            for commit in self.llvm_commits
+        ):
+            raise ValueError(
+                f"QuarantinedTest failed - test_id={self.test_id!r}, "
+                f"llvm_commits={self.llvm_commits!r}, expected a tuple of "
+                "llvm-project commits, each 12 to 40 lowercase hex digits"
+            )
 
     @property
     def path(self) -> str:
@@ -585,6 +605,16 @@ class QuarantinedTest:
         """Whether this entry holds its test out on a GPU of ``arch`` (None: no
         GPU): always when it names no arches, else only on one it names."""
         return not self.arches or arch in self.arches
+
+    def holds_out_with(self, llvm_commit: str | None) -> bool:
+        """Whether this entry holds its test out when the loaded compiler was
+        built from the llvm-project commit ``llvm_commit`` (None: unknown):
+        always when it names no commits, else only for one it names; an
+        unknown compiler is none of them."""
+        return not self.llvm_commits or (
+            llvm_commit is not None
+            and any(llvm_commit.startswith(commit) for commit in self.llvm_commits)
+        )
 
     def covers(self, path: str, node_name: str) -> bool:
         """Whether this entry quarantines the item ``node_name`` of ``path``."""
@@ -1348,7 +1378,11 @@ PENDING: tuple[PendingTest, ...] = (
 _ATTENTION_BUILDS = "library/tests/test_attention_builds.py"
 _GDN_DECODE_FUSED = "library/tests/test_gdn_decode_fused.py"
 _COMPILER_20 = "ROCm 7.1 (AMD clang 20.0.0git, roc-7.1.0 25425)"
-_COMPILER_24 = "AMD clang 24.0.0git (llvm-project 424729dba653)"
+# The llvm-project commits of two LLVM 24 compiler builds: the one CI pins, and
+# one a ROCm install ships.
+_LLVM_24_CI_COMMIT = "424729dba653"
+_LLVM_24_ROCM_INSTALL_COMMIT = "d6f6cb691863"
+_COMPILER_24 = f"AMD clang 24.0.0git (llvm-project {_LLVM_24_CI_COMMIT})"
 _SPILL_RETUNE_OWNER = "kernel owners; issue: none filed yet"
 _SPILL_RETUNE_EXPIRES = "2026-12-31"
 
@@ -1493,11 +1527,20 @@ def _quarantined(
     expires: str,
     *test_ids: str,
     arches: tuple[str, ...] = (),
+    llvm_commits: tuple[str, ...] = (),
 ) -> tuple[QuarantinedTest, ...]:
     """One entry per test id, all quarantined for the same issue and reason (on
-    ``arches`` only, when given)."""
+    ``arches`` and with the compilers of ``llvm_commits`` only, when given)."""
     return tuple(
-        QuarantinedTest(test_id, issue, reason, owner, expires, arches)
+        QuarantinedTest(
+            test_id,
+            issue,
+            reason,
+            owner,
+            expires,
+            arches=arches,
+            llvm_commits=llvm_commits,
+        )
         for test_id in test_ids
     )
 
@@ -1507,6 +1550,18 @@ _RECORDER_REFUSES_IF_ELSE = (
     "three conv_direct_*_mfma kernels use, so recording and replaying every "
     "production kernel fails"
 )
+
+_DGRAD_CORRECTNESS = (
+    "library/tests/test_conv_dgrad_correctness.py::TestConvDgradCorrectness"
+)
+# What the LLVM 24 compiler builds below get wrong in the gfx950 dgrad kernels.
+_SGPR_SPLIT_SPILL = (
+    "the register allocator splits an SGPR tuple filled by one scalar load, "
+    "copies only some of its pieces, spills the whole tuple and later reads a piece "
+    "it never copied (a compiler defect: rocKE's IR is the same for every "
+    "LLVM 24 build, and LLVM 20 builds these kernels correctly)"
+)
+
 
 QUARANTINED: tuple[QuarantinedTest, ...] = (
     QuarantinedTest(
@@ -1529,18 +1584,29 @@ QUARANTINED: tuple[QuarantinedTest, ...] = (
     ),
     *_quarantined(
         NO_ISSUE_FILED,
-        "built by the ROCm core-10.1 COMGR, the gfx950-only dgrad kouter and ukd "
-        "kernels (16x16x32 and 32x32x16 atoms) fault with an illegal memory "
-        "access or miscompare (rel_err 1.17, depthwise 11x3); the same kernels "
-        "verify when built by the ROCm 7.1 or 7.2 COMGR on the same gfx950 node "
-        "(a COMGR bisect of this file's tests)",
+        "built by the LLVM 24 compiler a ROCm install ships, the gfx950 dgrad kouter "
+        "and ukd kernels (16x16x32 and 32x32x16 atoms) fault with an illegal "
+        "memory access or miscompare (rel_err 1.17, depthwise 11x3): "
+        f"{_SGPR_SPLIT_SPILL}",
         "kernel owners",
         "2026-12-15",
-        "library/tests/test_conv_dgrad_correctness.py::TestConvDgradCorrectness::test_bf16_depthwise_large_filter",
-        "library/tests/test_conv_dgrad_correctness.py::TestConvDgradCorrectness::test_bf16_stride1",
-        "library/tests/test_conv_dgrad_correctness.py::TestConvDgradCorrectness::test_fp16_resnet_shape",
-        "library/tests/test_conv_dgrad_correctness.py::TestConvDgradCorrectness::test_fp16_stride1",
+        f"{_DGRAD_CORRECTNESS}::test_bf16_depthwise_large_filter",
+        f"{_DGRAD_CORRECTNESS}::test_bf16_stride1",
+        f"{_DGRAD_CORRECTNESS}::test_fp16_resnet_shape",
+        f"{_DGRAD_CORRECTNESS}::test_fp16_stride1",
         arches=("gfx950",),
+        llvm_commits=(_LLVM_24_ROCM_INSTALL_COMMIT,),
+    ),
+    *_quarantined(
+        NO_ISSUE_FILED,
+        "built by the LLVM 24 compiler CI pins, the gfx950 dgrad kernel at tile "
+        "256x64x32, warp tile 32x32x16, compv4 miscompares on the fp16 depthwise "
+        f"stride-2 shape (rel_err 0.88): {_SGPR_SPLIT_SPILL}",
+        "kernel owners",
+        "2026-12-15",
+        f"{_DGRAD_CORRECTNESS}::test_fp16_depthwise_stride2",
+        arches=("gfx950",),
+        llvm_commits=(_LLVM_24_CI_COMMIT,),
     ),
     QuarantinedTest(
         "library/tests/test_mla_prefill_gfx942.py::TestShippedLayoutOccupancy::test_no_scratch",
@@ -1562,7 +1628,8 @@ def waiting_entry(
     ``reason`` is why a CI lane that collected the case did not run it: its
     skip or deselection reason, or None when no CI lane collected it. The case
     is recorded by its quarantine, or that of the test that runs its file
-    (one that names arches, only where it was skipped as quarantined), or by
+    (one that names arches or compilers, only where it was skipped as
+    quarantined), or by
     an entry that covers it
     (:meth:`PendingTest.covers`): one for the test, or one for its file whose
     lane explains ``reason``.
@@ -1571,7 +1638,7 @@ def waiting_entry(
         (entry for entry in QUARANTINED if path in entry.runs_files), None
     )
     if quarantine is not None and (
-        not quarantine.arches
+        not (quarantine.arches or quarantine.llvm_commits)
         or (reason is not None and reason.startswith(QUARANTINE_SKIP_PREFIX))
     ):
         return quarantine

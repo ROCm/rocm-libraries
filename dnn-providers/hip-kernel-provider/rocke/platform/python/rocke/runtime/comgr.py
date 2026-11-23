@@ -138,6 +138,8 @@ _lib: Optional[ctypes.CDLL] = None
 _lib_lock = threading.RLock()
 _llvm_version_lib: ctypes.CDLL | None = None
 _compiler_info: CompilerInfo | None = None
+_llvm_commit_lib: ctypes.CDLL | None = None
+_llvm_commit: str | None = None
 
 
 def _resolve_lib() -> ctypes.CDLL:
@@ -451,6 +453,31 @@ def loaded_compiler_info() -> CompilerInfo | None:
         )
         _llvm_version_lib, _compiler_info = lib, info
         return info
+
+
+def loaded_compiler_commit() -> str | None:
+    """The llvm-project commit the loaded COMGR's compiler was built from.
+
+    Read from Clang's ``__clang_version__``, preprocessed through the loaded
+    COMGR (the 40 hex digits its build records), so two builds of one LLVM
+    version are told apart and a defect of one build can be tied to it. None
+    when COMGR does not load or its compiler records no commit. The answer for
+    a loaded COMGR is retained for the process lifetime, like
+    :func:`loaded_compiler_info`; compilation never queries it.
+    """
+    global _llvm_commit_lib, _llvm_commit
+    with _lib_lock:
+        try:
+            lib = _resolve_lib()
+        except (ComgrError, OSError):
+            return None
+        if _llvm_commit_lib is not lib:
+            try:
+                commit = _probe_llvm_commit(lib)
+            except (AttributeError, ComgrError, OSError):
+                commit = None
+            _llvm_commit_lib, _llvm_commit = lib, commit
+        return _llvm_commit
 
 
 def _describe_loaded_compiler(info: CompilerInfo | None) -> str:
@@ -786,6 +813,28 @@ def _build_in_fresh_process(
 
 def _probe_llvm_version(lib: ctypes.CDLL) -> tuple[int, int, int] | None:
     """Preprocess a version marker through COMGR when LLVM symbols are hidden."""
+    marker = (
+        b"ROCKE_LLVM_VERSION __clang_major__ __clang_minor__ __clang_patchlevel__\n"
+    )
+    output = _preprocess_through(lib, marker)
+    match = re.search(rb"(?m)^ROCKE_LLVM_VERSION (\d+) (\d+) (\d+)\s*$", output)
+    if match and int(match[1]) > 0:
+        return tuple(int(match[i]) for i in (1, 2, 3))
+    return None
+
+
+def _probe_llvm_commit(lib: ctypes.CDLL) -> str | None:
+    """Preprocess ``__clang_version__`` through COMGR and return the
+    llvm-project commit it records, e.g. ``"24.0.0git (<repository>
+    424729dba65359a5e521ab2e729af131c8a5b0d4)"`` gives the 40 hex digits."""
+    output = _preprocess_through(lib, b"ROCKE_LLVM_COMMIT __clang_version__\n")
+    match = re.search(rb'(?m)^ROCKE_LLVM_COMMIT ".*\b([0-9a-f]{40})\)"\s*$', output)
+    return match[1].decode() if match else None
+
+
+def _preprocess_through(lib: ctypes.CDLL, source_text: bytes) -> bytes:
+    """``source_text`` preprocessed as OpenCL by the loaded COMGR's Clang, to
+    read its built-in macros. Raises :class:`ComgrError` when an action fails."""
 
     def bind(name, *args):
         fn = getattr(lib, "amd_comgr_" + name)
@@ -816,7 +865,7 @@ def _probe_llvm_version(lib: ctypes.CDLL) -> tuple[int, int, int] | None:
 
     def check(status):
         if status != AMD_COMGR_STATUS_SUCCESS:
-            raise ComgrError(f"COMGR compiler-version probe failed: status={status}")
+            raise ComgrError(f"COMGR compiler probe failed: status={status}")
 
     def acquire(create, destroy, *args):
         handle = _Handle()
@@ -829,10 +878,7 @@ def _probe_llvm_version(lib: ctypes.CDLL) -> tuple[int, int, int] | None:
         outputs = acquire(create_set, destroy_set)
         source = acquire(create_data, release_data, AMD_COMGR_DATA_KIND_SOURCE)
         info = acquire(create_info, destroy_info)
-        payload = (
-            b"ROCKE_LLVM_VERSION __clang_major__ __clang_minor__ __clang_patchlevel__\n"
-        )
-        check(set_data(source, len(payload), payload))
+        check(set_data(source, len(source_text), source_text))
         check(set_name(source, b"rocke_compiler_version.cl"))
         check(add_data(inputs, source))
         isa = ctypes.c_char_p()
@@ -847,10 +893,7 @@ def _probe_llvm_version(lib: ctypes.CDLL) -> tuple[int, int, int] | None:
         check(get_data(output, ctypes.byref(size), None))
         data = ctypes.create_string_buffer(size.value)
         check(get_data(output, ctypes.byref(size), data))
-        match = re.search(rb"(?m)^ROCKE_LLVM_VERSION (\d+) (\d+) (\d+)\s*$", data.value)
-        if match and int(match[1]) > 0:
-            return tuple(int(match[i]) for i in (1, 2, 3))
-        return None
+        return data.value
     finally:
         for destroy, handle in reversed(handles):
             destroy(handle)
