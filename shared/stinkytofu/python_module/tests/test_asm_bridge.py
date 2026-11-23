@@ -522,6 +522,14 @@ def test_emit_asm_rejects_invalid_fmha_bwd_and_dropout_shapes(item, message):
     with pytest.raises(ValueError, match=message):
         _emit([item])
 
+
+@pytest.mark.parametrize("soffset", [sgpr(4), Register("m", 0, 1)], ids=["sgpr", "m0"])
+@pytest.mark.parametrize("flag", ["set_minus", "set_abs"])
+def test_emit_asm_rejects_flagged_buffer_soffset(soffset, flag):
+    getattr(soffset, flag)(True)
+    with pytest.raises(ValueError, match="soffset does not support negate/absolute flags"):
+        _emit([_dq_atomic(vgpr(0), vgpr(1), sgpr(4, 4), soffset, _DQ_MUBUF)])
+
 def test_emit_asm_uses_selected_primary_or_promoted_descriptor_fields():
     primary = _raw_emit_asm(
         "gfx1250",

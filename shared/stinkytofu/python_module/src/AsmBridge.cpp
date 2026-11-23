@@ -580,17 +580,22 @@ void validateOperand(const StinkyRegister& operand, const HwInstDesc& desc,
     if (field.fieldType == FieldType::label)
         fail(itemIndex, location + " label field requires a string target");
 
-    if (field.fieldType == FieldType::sreg_m0 && !isM0(operand)) {
-        // Buffer soffset: one SGPR, m0, or zero, which the emitter writes as null.
+    if (field.fieldType == FieldType::sreg_m0) {
+        // Buffer soffset: one SGPR, m0, or zero, which the emitter writes as null. The
+        // field only names a register, so it has no room for negate/absolute flags.
         if (operand.dataType == StinkyRegister::Type::LiteralInt) {
             if (operand.literalInt != 0)
                 fail(itemIndex, location + " soffset immediate must be 0 (null)");
             return;
         }
-        if (operand.dataType != StinkyRegister::Type::Register ||
-            operand.reg.type != RegType::S || operand.reg.num != 1)
-            fail(itemIndex, location + " soffset requires one SGPR, m0 or 0 (null)");
-        validateRegisterRange(operand, archInfo, location, itemIndex);
+        if (!isM0(operand)) {
+            if (operand.dataType != StinkyRegister::Type::Register ||
+                operand.reg.type != RegType::S || operand.reg.num != 1)
+                fail(itemIndex, location + " soffset requires one SGPR, m0 or 0 (null)");
+            validateRegisterRange(operand, archInfo, location, itemIndex);
+        }
+        if (operand.reg.isMinus || operand.reg.isAbs)
+            fail(itemIndex, location + " soffset does not support negate/absolute flags");
         return;
     }
 
@@ -648,8 +653,6 @@ void validateOperand(const StinkyRegister& operand, const HwInstDesc& desc,
                             "audited v_fma_f32 VGPR src0 form");
     if (fieldRequiresVgpr(field.fieldType) && operand.reg.type != RegType::V)
         fail(itemIndex, location + " field requires a VGPR");
-    if (field.fieldType == FieldType::sreg_m0 && !isM0(operand))
-        fail(itemIndex, location + " field requires m0");
     if (fieldRequiresScalar(field.fieldType) && field.fieldType != FieldType::sreg_m0 &&
         !isScalarRegister(operand.reg.type))
         fail(itemIndex, location + " field requires a scalar register");
