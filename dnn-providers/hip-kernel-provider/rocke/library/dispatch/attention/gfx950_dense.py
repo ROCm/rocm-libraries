@@ -32,7 +32,12 @@ from .candidate import (
     make_dense_candidate,
 )
 from .common import AttentionRequest, normalize_band
-from .dense_rules import dense_kv_segments, dense_wave_segments
+from .dense_rules import (
+    dense_kv_segments,
+    dense_paged_fields,
+    dense_paged_tile_fits,
+    dense_wave_segments,
+)
 
 _DENSE_LAYOUT = "default"
 _DENSE_TILE = "default"
@@ -80,7 +85,9 @@ GFX950_DENSE_VARIANTS: Tuple[Gfx950DenseVariant, ...] = (
         DENSE_GRID_ALGORITHM,
         persistent=False,
         wide_lds_dma=False,
-        features=_FEATURES | {"causal_bottom_right"},
+        # fp8 KV is grid-only -- the spec rejects persistent/paged (so the
+        # persistent variants do not advertise it).
+        features=_FEATURES | {"causal_bottom_right", "layout_paged", "fp8"},
     ),
     # The grid body at the qb_minor block order: the grid the hipDNN kernel ingestor
     # launches.
@@ -89,7 +96,7 @@ GFX950_DENSE_VARIANTS: Tuple[Gfx950DenseVariant, ...] = (
         DENSE_GRID_ALGORITHM,
         persistent=False,
         wide_lds_dma=False,
-        features=_FEATURES | {"causal_bottom_right"},
+        features=_FEATURES | {"causal_bottom_right", "layout_paged"},
         nonpersist_decode="qb_minor",
     ),
     Gfx950DenseVariant(
@@ -207,8 +214,14 @@ def _base_spec(req: AttentionRequest, variant: Gfx950DenseVariant):
     shared_bm = int(DENSE_TILE_GEOMETRIES[_DENSE_TILE]["block_m"])
     shared_ctas = -(-sq // shared_bm) * int(req.nhead_q) * int(req.batch)
     num_cus = int(req.num_cus) or _DEFAULT_NUM_PERSISTENT
-    window_tile = bool(window) and (
-        shared_ctas < _WINDOW_TILE_MAX_CTAS_PER_CU * num_cus
+    window_geometry = DENSE_TILE_GEOMETRIES[_WINDOW_TILE]
+    # A paged request whose pages do not fit the window tile keeps the shared one.
+    window_tile = (
+        bool(window)
+        and shared_ctas < _WINDOW_TILE_MAX_CTAS_PER_CU * num_cus
+        and dense_paged_tile_fits(
+            req, int(window_geometry["block_m"]), int(window_geometry["block_n"])
+        )
     )
     geometry = DENSE_TILE_GEOMETRIES[_WINDOW_TILE if window_tile else _DENSE_TILE]
     layout = GFX950_DENSE_LAYOUTS[_DENSE_LAYOUT]
@@ -253,6 +266,16 @@ def _base_spec(req: AttentionRequest, variant: Gfx950DenseVariant):
             if not _is_ragged(sq, sk, int(tile["block_m"]), int(tile["block_n"])):
                 bm, bn, ragged = int(tile["block_m"]), int(tile["block_n"]), False
                 break
+    # Both flags are checked as bools by _request_errors before any candidate is
+    # consulted, so they are read here without re-coercing.
+    if req.use_fp8:
+        # gfx950 decodes OCP fp8; reject an FNUZ-encoded request here (it would
+        # otherwise map to the same OCP spec and be decoded ~2x off).
+        from .tuning_specs import validate_explicit_fp8_encoding
+
+        validate_explicit_fp8_encoding(
+            arch="gfx950", use_fp8=True, fp8_fnuz=req.fp8_fnuz
+        )
     return Gfx950AttentionDenseSpec(
         batch=int(req.batch),
         seqlen_q=sq,
@@ -280,6 +303,8 @@ def _base_spec(req: AttentionRequest, variant: Gfx950DenseVariant):
         emit_lse=bool(req.emit_lse),
         right_bound=right_bound,
         kv_segments=kv_segments,
+        **dense_paged_fields(req),
+        kv_storage_dtype="fp8e4m3" if req.use_fp8 else None,
     )
 
 

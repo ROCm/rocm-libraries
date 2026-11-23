@@ -169,13 +169,17 @@ int rocke_validate_io(rocke_arena_t* arena,
  * choose_load_vec
  * ------------------------------------------------------------------ *
  *
- * Pick the widest global-load vector width for a GEMM block tile.
- * Starting at v = 16 / elem_bytes (the 16-byte buffer_load limit; Python
- * default elem_bytes=2) and halving, returns the first v that divides tile_k
- * and for which both (tile_m*tile_k)//v and (tile_n*tile_k)//v are
- * >= block_size and divisible by it. On no usable width the Python raises ValueError; here we return
- * ROCKE_ERR_VALUE and leave *out_vec untouched. On success *out_vec holds the
- * chosen width and ROCKE_OK is returned. */
+ * Pick the widest global-load vector width, in elements, for a GEMM block
+ * tile. Returns the largest v <= 16/elem_bytes (the 4-dword buffer_load
+ * limit) such that v divides tile_k and both (tile_m*tile_k)//v and
+ * (tile_n*tile_k)//v are >= block_size and divisible by it. On no usable
+ * width the Python raises ValueError; here we return ROCKE_ERR_VALUE and
+ * leave *out_vec untouched. On success *out_vec holds the chosen width and
+ * ROCKE_OK is returned.
+ *
+ * elem_bytes is bytes per element: 2 for f16/bf16, 1 for the 8-bit floats,
+ * 4 for fp32/i32. It only sets the cap; it takes no part in the divisibility
+ * tests. elem_bytes <= 0 is rejected. */
 rocke_status_t rocke_choose_load_vec(
     int tile_m, int tile_n, int tile_k, int block_size, int elem_bytes, int* out_vec);
 

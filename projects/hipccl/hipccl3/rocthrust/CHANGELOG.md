@@ -5,15 +5,39 @@ Documentation for rocThrust available at
 
 ## rocThrust 5.1.0 for ROCm 10.3.0
 
+### Added
+
+* Add `THRUST_DISABLE_BROKEN_GCC_VECTORIZER`
+* Add `thrust::reduce_into`.
+* Add `thrust::shuffle_iterator`.
+* Add `thrust::transform_n` and `thrust::transform_if_n`.
+
+### Changed
+
+* Replaced bad_alloc, cassert, cfloat, cmath, complex, cstddef, cstdint, cstring, initializer_list, limits, move and type_traits operators with `hip::std` operators.
+* Replaced `hip::std::__identity` with `hip::std::identity`.
+* Replaced ``_LIBCUDACXX_HIDE_FROM_ABI`` with ``_CCCL_API``.
+* Defined `THRUST_COMP_DEPR_IMPL` with `_CCCL_WARNING`.
+* Replaced `thrust::constant_iterator`, `thrust::make_discard_iterator`, `thrust::permutation_iterator`, `thrust::strided_iterator`, `thrust::tabulate_output_iterator` and `thrust::transform_output_iterator` with `hip::constant_iterator`, `hip::make_discard_iterator`, `hip::permutation_iterator`, `hip::strided_iterator`, `hip::tabulate_output_iterator` and `hip::transform_output_iterator` instead.
+* Renamed the CMake option `CODE_COVERAGE` to `ROCTHRUST_ENABLE_COVERAGE`.
+
+### Removed
+
+* Deprecated `thrust::advance`, `thrust::bit_and`, `thrust::bit_or`, `thrust::bit_xor`, `thrust::distance`, `thrust::equal_to`, `thrust::greater`, `thrust::greater_equal`, `thrust::less`, `thrust::less_equal`, `thrust::logical_and`, `thrust::logical_not`, `thrust::logical_or`, `thrust::maximum`, `thrust::minimum`, `thrust::modulus`, `thrust::multiplies`, `thrust::negate`, `thrust::next`, `thrust::not_equal_to`, `thrust::not_fn`, `thrust::operator_name`, and `thrust::plus`. Use `hip::std::advance`, `hip::std::bit_and`, `hip::std::bit_or`, `hip::std::bit_xor`, `hip::std::distance`, `hip::std::equal_to`, `hip::std::greater`, `hip::std::greater_equal`, `hip::std::less`, `hip::std::less_equal`, `hip::std::logical_and`, `hip::std::logical_not`, `hip::std::logical_or`, `hip::maximum`, `hip::minimum`, `hip::modulus`, `hip::std::multiplies`, `hip::std::negate`, `hip::std::next`, `hip::std::not_equal_to`, `hip::std::not_fn`, `hip::std::operator_name` and `hip::std::plus` instead.
+* Deprecated `thrust::detail::::identity_`. Use `hip::std::type_identity` instead.
+* Removed `THRUST_NODISCARD`.
+* Deprecated `CODE_COVERAGE`, use `ROCTHRUST_ENABLE_COVERAGE` instead.
+
 ### Resolved issues
 
+* Fixed `BUILD_TEST`, `BUILD_BENCHMARK`, and `BUILD_EXAMPLE` being set to `OFF` in the CMake cache when rocThrust fetches rocPRIM in the same configure.
 * Fixed build failures when libhipcxx is not on the include path. The OMP and TBB backends included `<cuda/std/...>` headers directly and `thrust/unique_ptr.h` included `<compare>` unconditionally. They now use the standard library fallback, and `<compare>` is only included for C++20 and later.
 
 ## rocThrust 5.0.0 for ROCm 10.2.0
- 
+
 ### Added
 * rocThrust is now largely in feature parity with CCCL/thrust v3.0.3. If there isn't a libhipcxx corresponding to CCCL/libcudacxx version 3.0.3 or later, `thrust::tuple`, `thrust::pair` and `thrust::zip_iterator` will fall back to rocThrust 4.4.0 implementations.
- 
+
 ### Removed
 
 * rocThrust compatibility with PyTorch v2.9 and v2.10 has been removed in this release.  Use PyTorch v2.11 or later.
@@ -37,14 +61,14 @@ Documentation for rocThrust available at
 * With `--hipstdpar-interpose-alloc`, `aligned_alloc` rounds an alignment that is not a power of two up, as `memalign` does, instead of failing with `EINVAL`. The compiler routes both calls to the same interposed function.
 
 ## rocThrust 4.6.0 for ROCm 10.0.0
- 
+
 ### Added
- 
+
 * True global support in hipstdpar
 * Return value checks for assorted locations in the codebase that were previously missing.
- 
+
 ### Fixed
- 
+
 * Fixed over-read and NULL deref in __hipstdpar_realloc
 
 ### Upcoming changes

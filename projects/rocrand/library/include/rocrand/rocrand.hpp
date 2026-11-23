@@ -57,11 +57,7 @@ public:
     /// Constructs new error object from error code \p error.
     ///
     /// \param error error code
-    explicit error(error_type error) noexcept
-        : m_error(error),
-          m_error_string(to_string(error))
-    {
-    }
+    explicit error(error_type error) noexcept : m_error(error), m_error_string(to_string(error)) {}
 
     /// Returns the numeric error code.
     error_type error_code() const noexcept
@@ -91,50 +87,44 @@ public:
     {
         switch(error)
         {
-            case ROCRAND_STATUS_SUCCESS:
-                return "Success";
+            case ROCRAND_STATUS_SUCCESS: return "Success";
             case ROCRAND_STATUS_VERSION_MISMATCH:
                 return "Header file and linked library version do not match";
             case ROCRAND_STATUS_NOT_CREATED:
                 return "Generator was not created using rocrand_create_generator";
             case ROCRAND_STATUS_ALLOCATION_FAILED:
                 return "Memory allocation failed during execution";
-            case ROCRAND_STATUS_TYPE_ERROR:
-                return "Generator type is wrong";
-            case ROCRAND_STATUS_OUT_OF_RANGE:
-                return "Argument out of range";
+            case ROCRAND_STATUS_TYPE_ERROR: return "Generator type is wrong";
+            case ROCRAND_STATUS_OUT_OF_RANGE: return "Argument out of range";
             case ROCRAND_STATUS_LENGTH_NOT_MULTIPLE:
                 return "Length requested is not a multiple of dimension";
             case ROCRAND_STATUS_DOUBLE_PRECISION_REQUIRED:
                 return "GPU does not have double precision";
-            case ROCRAND_STATUS_LAUNCH_FAILURE:
-                return "Kernel launch failure";
-            case ROCRAND_STATUS_INTERNAL_ERROR:
-                return "Internal library error";
-            default: {
-                std::stringstream s;
-                s << "Unknown rocRAND error (" << error << ")";
-                return s.str();
-            }
+            case ROCRAND_STATUS_LAUNCH_FAILURE: return "Kernel launch failure";
+            case ROCRAND_STATUS_INTERNAL_ERROR: return "Internal library error";
+            default:
+                {
+                    std::stringstream s;
+                    s << "Unknown rocRAND error (" << error << ")";
+                    return s.str();
+                }
         }
     }
 
     /// Compares two error objects for equality.
-    friend
-    bool operator==(const error& l, const error& r)
+    friend bool operator==(const error& l, const error& r)
     {
         return l.error_code() == r.error_code();
     }
 
     /// Compares two error objects for inequality.
-    friend
-    bool operator!=(const error& l, const error& r)
+    friend bool operator!=(const error& l, const error& r)
     {
         return !(l == r);
     }
 
 private:
-    error_type m_error;
+    error_type  m_error;
     std::string m_error_string;
 };
 
@@ -158,14 +148,10 @@ public:
     typedef IntType result_type;
 
     /// Default constructor
-    uniform_int_distribution()
-    {
-    }
+    uniform_int_distribution() {}
 
     /// Resets distribution's internal state if there is any.
-    static void reset()
-    {
-    }
+    static void reset() {}
 
     /// Returns the smallest possible value that can be generated.
     static constexpr IntType min()
@@ -197,17 +183,18 @@ public:
     ///
     /// See also: rocrand_generate(), rocrand_generate_char(), rocrand_generate_short()
     template<class Generator>
-    void operator()(Generator& g, IntType * output, size_t size)
+    void operator()(Generator& g, IntType* output, size_t size)
     {
         rocrand_status status;
         status = this->generate(g, output, size);
-        if(status != ROCRAND_STATUS_SUCCESS) throw rocrand_cpp::error(status);
+        if(status != ROCRAND_STATUS_SUCCESS)
+            throw rocrand_cpp::error(status);
     }
 
     /// Returns \c true if the distribution is the same as \p other.
     bool operator==(const uniform_int_distribution<IntType>& other) const
     {
-        (void) other;
+        (void)other;
         return true;
     }
 
@@ -219,19 +206,19 @@ public:
 
 private:
     template<class Generator>
-    static rocrand_status generate(Generator& g, unsigned char * output, size_t size)
+    static rocrand_status generate(Generator& g, unsigned char* output, size_t size)
     {
         return rocrand_generate_char(g.m_generator, output, size);
     }
 
     template<class Generator>
-    static rocrand_status generate(Generator& g, unsigned short * output, size_t size)
+    static rocrand_status generate(Generator& g, unsigned short* output, size_t size)
     {
         return rocrand_generate_short(g.m_generator, output, size);
     }
 
     template<class Generator>
-    static rocrand_status generate(Generator& g, unsigned int * output, size_t size)
+    static rocrand_status generate(Generator& g, unsigned int* output, size_t size)
     {
         return rocrand_generate(g.m_generator, output, size);
     }
@@ -252,26 +239,19 @@ private:
 template<class RealType = float>
 class uniform_real_distribution
 {
-    static_assert(
-        std::is_same<float, RealType>::value
-        || std::is_same<double, RealType>::value
-        || std::is_same<half, RealType>::value,
-        "Only float, double, and half types are supported in uniform_real_distribution"
-    );
+    static_assert(std::is_same<float, RealType>::value || std::is_same<double, RealType>::value
+                      || std::is_same<half, RealType>::value,
+                  "Only float, double, and half types are supported in uniform_real_distribution");
 
 public:
     /// See description for RealType template parameter.
     typedef RealType result_type;
 
     /// Default constructor
-    uniform_real_distribution()
-    {
-    }
+    uniform_real_distribution() {}
 
     /// Resets distribution's internal state if there is any.
-    static void reset()
-    {
-    }
+    static void reset() {}
 
     /// Returns the smallest possible value that can be generated.
     static constexpr RealType min()
@@ -303,17 +283,18 @@ public:
     ///
     /// See also: rocrand_generate_uniform(), rocrand_generate_uniform_double(), rocrand_generate_uniform_half()
     template<class Generator>
-    void operator()(Generator& g, RealType * output, size_t size)
+    void operator()(Generator& g, RealType* output, size_t size)
     {
         rocrand_status status;
         status = this->generate(g, output, size);
-        if(status != ROCRAND_STATUS_SUCCESS) throw rocrand_cpp::error(status);
+        if(status != ROCRAND_STATUS_SUCCESS)
+            throw rocrand_cpp::error(status);
     }
 
     /// Returns \c true if the distribution is the same as \p other.
     bool operator==(const uniform_real_distribution<RealType>& other) const
     {
-        (void) other;
+        (void)other;
         return true;
     }
 
@@ -325,19 +306,19 @@ public:
 
 private:
     template<class Generator>
-    static rocrand_status generate(Generator& g, float * output, size_t size)
+    static rocrand_status generate(Generator& g, float* output, size_t size)
     {
         return rocrand_generate_uniform(g.m_generator, output, size);
     }
 
     template<class Generator>
-    static rocrand_status generate(Generator& g, double * output, size_t size)
+    static rocrand_status generate(Generator& g, double* output, size_t size)
     {
         return rocrand_generate_uniform_double(g.m_generator, output, size);
     }
 
     template<class Generator>
-    static rocrand_status generate(Generator& g, half * output, size_t size)
+    static rocrand_status generate(Generator& g, half* output, size_t size)
     {
         return rocrand_generate_uniform_half(g.m_generator, output, size);
     }
@@ -351,12 +332,9 @@ private:
 template<class RealType = float>
 class normal_distribution
 {
-    static_assert(
-        std::is_same<float, RealType>::value
-        || std::is_same<double, RealType>::value
-        || std::is_same<half, RealType>::value,
-        "Only float, double and half types are supported in normal_distribution"
-    );
+    static_assert(std::is_same<float, RealType>::value || std::is_same<double, RealType>::value
+                      || std::is_same<half, RealType>::value,
+                  "Only float, double and half types are supported in normal_distribution");
 
 public:
     /// See description for RealType template parameter.
@@ -374,10 +352,7 @@ public:
         /// given distribution parameters.
         /// \param mean mean
         /// \param stddev standard deviation
-        param_type(RealType mean = 0.0, RealType stddev = 1.0)
-            : m_mean(mean), m_stddev(stddev)
-        {
-        }
+        param_type(RealType mean = 0.0, RealType stddev = 1.0) : m_mean(mean), m_stddev(stddev) {}
 
         /// Copy constructor
         param_type(const param_type& params) = default;
@@ -412,6 +387,7 @@ public:
         {
             return !(*this == other);
         }
+
     private:
         RealType m_mean;
         RealType m_stddev;
@@ -420,22 +396,14 @@ public:
     /// \brief Constructs a new distribution object.
     /// \param mean A mean distribution parameter
     /// \param stddev A standard deviation distribution parameter
-    normal_distribution(RealType mean = 0.0, RealType stddev = 1.0)
-        : m_params(mean, stddev)
-    {
-    }
+    normal_distribution(RealType mean = 0.0, RealType stddev = 1.0) : m_params(mean, stddev) {}
 
     /// \brief Constructs a new distribution object.
     /// \param params Distribution parameters
-    explicit normal_distribution(const param_type& params)
-        : m_params(params)
-    {
-    }
+    explicit normal_distribution(const param_type& params) : m_params(params) {}
 
     /// Resets distribution's internal state if there is any.
-    static void reset()
-    {
-    }
+    static void reset() {}
 
     /// \brief Returns the mean distribution parameter.
     ///
@@ -496,17 +464,18 @@ public:
     ///
     /// See also: rocrand_generate_normal(), rocrand_generate_normal_double(), rocrand_generate_normal_half()
     template<class Generator>
-    void operator()(Generator& g, RealType * output, size_t size)
+    void operator()(Generator& g, RealType* output, size_t size)
     {
         rocrand_status status;
         status = this->generate(g, output, size);
-        if(status != ROCRAND_STATUS_SUCCESS) throw rocrand_cpp::error(status);
+        if(status != ROCRAND_STATUS_SUCCESS)
+            throw rocrand_cpp::error(status);
     }
 
     /// \brief Returns \c true if the distribution is the same as \p other.
     ///
     /// Two distribution are equal, if their parameters are equal.
-    bool operator==(const normal_distribution<RealType>& other) const 
+    bool operator==(const normal_distribution<RealType>& other) const
     {
         return this->m_params == other.m_params;
     }
@@ -521,27 +490,29 @@ public:
 
 private:
     template<class Generator>
-    rocrand_status generate(Generator& g, float * output, size_t size)
+    rocrand_status generate(Generator& g, float* output, size_t size)
     {
-        return rocrand_generate_normal(
-            g.m_generator, output, size, this->mean(), this->stddev()
-        );
+        return rocrand_generate_normal(g.m_generator, output, size, this->mean(), this->stddev());
     }
 
     template<class Generator>
-    rocrand_status generate(Generator& g, double * output, size_t size)
+    rocrand_status generate(Generator& g, double* output, size_t size)
     {
-        return rocrand_generate_normal_double(
-            g.m_generator, output, size, this->mean(), this->stddev()
-        );
+        return rocrand_generate_normal_double(g.m_generator,
+                                              output,
+                                              size,
+                                              this->mean(),
+                                              this->stddev());
     }
 
     template<class Generator>
-    rocrand_status generate(Generator& g, half * output, size_t size)
+    rocrand_status generate(Generator& g, half* output, size_t size)
     {
-        return rocrand_generate_normal_half(
-            g.m_generator, output, size, this->mean(), this->stddev()
-        );
+        return rocrand_generate_normal_half(g.m_generator,
+                                            output,
+                                            size,
+                                            this->mean(),
+                                            this->stddev());
     }
 
     param_type m_params;
@@ -555,12 +526,9 @@ private:
 template<class RealType = float>
 class lognormal_distribution
 {
-    static_assert(
-        std::is_same<float, RealType>::value
-        || std::is_same<double, RealType>::value
-        || std::is_same<half, RealType>::value,
-        "Only float, double and half types are supported in lognormal_distribution"
-    );
+    static_assert(std::is_same<float, RealType>::value || std::is_same<double, RealType>::value
+                      || std::is_same<half, RealType>::value,
+                  "Only float, double and half types are supported in lognormal_distribution");
 
 public:
     /// See description for RealType template parameter.
@@ -578,10 +546,7 @@ public:
         /// given distribution parameters.
         /// \param m mean
         /// \param s standard deviation
-        param_type(RealType m = 0.0, RealType s = 1.0)
-            : m_mean(m), m_stddev(s)
-        {
-        }
+        param_type(RealType m = 0.0, RealType s = 1.0) : m_mean(m), m_stddev(s) {}
 
         /// Copy constructor
         param_type(const param_type& params) = default;
@@ -616,6 +581,7 @@ public:
         {
             return !(*this == other);
         }
+
     private:
         RealType m_mean;
         RealType m_stddev;
@@ -624,22 +590,14 @@ public:
     /// \brief Constructs a new distribution object.
     /// \param m A mean distribution parameter
     /// \param s A standard deviation distribution parameter
-    lognormal_distribution(RealType m = 0.0, RealType s = 1.0)
-        : m_params(m, s)
-    {
-    }
+    lognormal_distribution(RealType m = 0.0, RealType s = 1.0) : m_params(m, s) {}
 
     /// \brief Constructs a new distribution object.
     /// \param params Distribution parameters
-    explicit lognormal_distribution(const param_type& params)
-        : m_params(params)
-    {
-    }
+    explicit lognormal_distribution(const param_type& params) : m_params(params) {}
 
     /// Resets distribution's internal state if there is any.
-    static void reset()
-    {
-    }
+    static void reset() {}
 
     /// \brief Returns the mean distribution parameter.
     ///
@@ -701,11 +659,12 @@ public:
     ///
     /// See also: rocrand_generate_log_normal(), rocrand_generate_log_normal_double()
     template<class Generator>
-    void operator()(Generator& g, RealType * output, size_t size)
+    void operator()(Generator& g, RealType* output, size_t size)
     {
         rocrand_status status;
         status = this->generate(g, output, size);
-        if(status != ROCRAND_STATUS_SUCCESS) throw rocrand_cpp::error(status);
+        if(status != ROCRAND_STATUS_SUCCESS)
+            throw rocrand_cpp::error(status);
     }
 
     /// \brief Returns \c true if the distribution is the same as \p other.
@@ -726,27 +685,25 @@ public:
 
 private:
     template<class Generator>
-    rocrand_status generate(Generator& g, float * output, size_t size)
+    rocrand_status generate(Generator& g, float* output, size_t size)
     {
-        return rocrand_generate_log_normal(
-            g.m_generator, output, size, this->m(), this->s()
-        );
+        return rocrand_generate_log_normal(g.m_generator, output, size, this->m(), this->s());
     }
 
     template<class Generator>
-    rocrand_status generate(Generator& g, double * output, size_t size)
+    rocrand_status generate(Generator& g, double* output, size_t size)
     {
-        return rocrand_generate_log_normal_double(
-            g.m_generator, output, size, this->m(), this->s()
-        );
+        return rocrand_generate_log_normal_double(g.m_generator,
+                                                  output,
+                                                  size,
+                                                  this->m(),
+                                                  this->s());
     }
 
     template<class Generator>
-    rocrand_status generate(Generator& g, half * output, size_t size)
+    rocrand_status generate(Generator& g, half* output, size_t size)
     {
-        return rocrand_generate_log_normal_half(
-            g.m_generator, output, size, this->m(), this->s()
-        );
+        return rocrand_generate_log_normal_half(g.m_generator, output, size, this->m(), this->s());
     }
 
     param_type m_params;
@@ -760,10 +717,8 @@ private:
 template<class IntType = unsigned int>
 class poisson_distribution
 {
-    static_assert(
-        std::is_same<unsigned int, IntType>::value,
-        "Only unsigned int type is supported in poisson_distribution"
-    );
+    static_assert(std::is_same<unsigned int, IntType>::value,
+                  "Only unsigned int type is supported in poisson_distribution");
 
 public:
     /// See description for IntType template parameter.
@@ -780,10 +735,7 @@ public:
         /// \brief Constructs a \p param_type object with the
         /// given mean.
         /// \param mean mean to use for the distribution
-        param_type(double mean = 1.0)
-            : m_mean(mean)
-        {
-        }
+        param_type(double mean = 1.0) : m_mean(mean) {}
 
         /// Copy constructor
         param_type(const param_type& params) = default;
@@ -818,22 +770,14 @@ public:
 
     /// \brief Constructs a new distribution object.
     /// \param mean A mean distribution parameter.
-    poisson_distribution(double mean = 1.0)
-        : m_params(mean)
-    {
-    }
+    poisson_distribution(double mean = 1.0) : m_params(mean) {}
 
     /// \brief Constructs a new distribution object.
     /// \param params Distribution parameters
-    explicit poisson_distribution(const param_type& params)
-        : m_params(params)
-    {
-    }
+    explicit poisson_distribution(const param_type& params) : m_params(params) {}
 
     /// Resets distribution's internal state if there is any.
-    static void reset()
-    {
-    }
+    static void reset() {}
 
     /// \brief Returns the mean distribution parameter.
     ///
@@ -887,11 +831,12 @@ public:
     ///
     /// See also: rocrand_generate_poisson()
     template<class Generator>
-    void operator()(Generator& g, IntType * output, size_t size)
+    void operator()(Generator& g, IntType* output, size_t size)
     {
         rocrand_status status;
         status = rocrand_generate_poisson(g.m_generator, output, size, this->mean());
-        if(status != ROCRAND_STATUS_SUCCESS) throw rocrand_cpp::error(status);
+        if(status != ROCRAND_STATUS_SUCCESS)
+            throw rocrand_cpp::error(status);
     }
 
     /// \brief Returns \c true if the distribution is the same as \p other.
@@ -959,7 +904,8 @@ public:
     {
         rocrand_status status;
         status = rocrand_create_generator(&m_generator, this->type());
-        if(status != ROCRAND_STATUS_SUCCESS) throw rocrand_cpp::error(status);
+        if(status != ROCRAND_STATUS_SUCCESS)
+            throw rocrand_cpp::error(status);
         try
         {
             if(offset_value > 0)
@@ -984,8 +930,7 @@ public:
     /// bound to the lifetime of the engine.
     ///
     /// \param generator rocRAND generator
-    explicit philox4x32_10_engine(rocrand_generator& generator)
-        : m_generator(generator)
+    explicit philox4x32_10_engine(rocrand_generator& generator) : m_generator(generator)
     {
         if(generator == NULL)
         {
@@ -1041,7 +986,8 @@ public:
     void stream(hipStream_t value)
     {
         rocrand_status status = rocrand_set_stream(m_generator, value);
-        if(status != ROCRAND_STATUS_SUCCESS) throw rocrand_cpp::error(status);
+        if(status != ROCRAND_STATUS_SUCCESS)
+            throw rocrand_cpp::error(status);
     }
 
     /// \brief Sets the order of a random number engine.
@@ -1076,7 +1022,8 @@ public:
     void offset(offset_type value)
     {
         rocrand_status status = rocrand_set_offset(this->m_generator, value);
-        if(status != ROCRAND_STATUS_SUCCESS) throw rocrand_cpp::error(status);
+        if(status != ROCRAND_STATUS_SUCCESS)
+            throw rocrand_cpp::error(status);
     }
 
     /// \brief Sets the seed of the pseudo-random number engine.
@@ -1092,7 +1039,8 @@ public:
     void seed(seed_type value)
     {
         rocrand_status status = rocrand_set_seed(this->m_generator, value);
-        if(status != ROCRAND_STATUS_SUCCESS) throw rocrand_cpp::error(status);
+        if(status != ROCRAND_STATUS_SUCCESS)
+            throw rocrand_cpp::error(status);
     }
 
     /// \brief Fills \p output with uniformly distributed random integer values.
@@ -1108,12 +1056,12 @@ public:
     /// and be large enough to store at least \p size values of \p IntType type.
     ///
     /// See also: rocrand_generate()
-    template<class Generator>
-    void operator()(result_type * output, size_t size)
+    void operator()(result_type* output, size_t size)
     {
         rocrand_status status;
         status = rocrand_generate(m_generator, output, size);
-        if(status != ROCRAND_STATUS_SUCCESS) throw rocrand_cpp::error(status);
+        if(status != ROCRAND_STATUS_SUCCESS)
+            throw rocrand_cpp::error(status);
     }
 
     /// Returns the smallest possible value that can be generated by the engine.
@@ -1157,7 +1105,8 @@ private:
 
 /// \cond
 template<unsigned long long DefaultSeed>
-constexpr typename philox4x32_10_engine<DefaultSeed>::seed_type philox4x32_10_engine<DefaultSeed>::default_seed;
+constexpr typename philox4x32_10_engine<DefaultSeed>::seed_type
+    philox4x32_10_engine<DefaultSeed>::default_seed;
 /// \endcond
 
 /// \brief Pseudorandom number engine based XORWOW algorithm.
@@ -1187,7 +1136,8 @@ public:
     {
         rocrand_status status;
         status = rocrand_create_generator(&m_generator, this->type());
-        if(status != ROCRAND_STATUS_SUCCESS) throw rocrand_cpp::error(status);
+        if(status != ROCRAND_STATUS_SUCCESS)
+            throw rocrand_cpp::error(status);
         try
         {
             this->order(order_value);
@@ -1205,8 +1155,7 @@ public:
     }
 
     /// \copydoc philox4x32_10_engine::philox4x32_10_engine(rocrand_generator&)
-    explicit xorwow_engine(rocrand_generator& generator)
-        : m_generator(generator)
+    explicit xorwow_engine(rocrand_generator& generator) : m_generator(generator)
     {
         if(generator == NULL)
         {
@@ -1249,7 +1198,8 @@ public:
     void stream(hipStream_t value)
     {
         rocrand_status status = rocrand_set_stream(m_generator, value);
-        if(status != ROCRAND_STATUS_SUCCESS) throw rocrand_cpp::error(status);
+        if(status != ROCRAND_STATUS_SUCCESS)
+            throw rocrand_cpp::error(status);
     }
 
     /// \copydoc philox4x32_10_engine::order()
@@ -1264,23 +1214,25 @@ public:
     void offset(offset_type value)
     {
         rocrand_status status = rocrand_set_offset(this->m_generator, value);
-        if(status != ROCRAND_STATUS_SUCCESS) throw rocrand_cpp::error(status);
+        if(status != ROCRAND_STATUS_SUCCESS)
+            throw rocrand_cpp::error(status);
     }
 
     /// \copydoc philox4x32_10_engine::seed()
     void seed(seed_type value)
     {
         rocrand_status status = rocrand_set_seed(this->m_generator, value);
-        if(status != ROCRAND_STATUS_SUCCESS) throw rocrand_cpp::error(status);
+        if(status != ROCRAND_STATUS_SUCCESS)
+            throw rocrand_cpp::error(status);
     }
 
     /// \copydoc philox4x32_10_engine::operator()()
-    template<class Generator>
-    void operator()(result_type * output, size_t size)
+    void operator()(result_type* output, size_t size)
     {
         rocrand_status status;
         status = rocrand_generate(m_generator, output, size);
-        if(status != ROCRAND_STATUS_SUCCESS) throw rocrand_cpp::error(status);
+        if(status != ROCRAND_STATUS_SUCCESS)
+            throw rocrand_cpp::error(status);
     }
 
     /// \copydoc philox4x32_10_engine::min()
@@ -1445,7 +1397,6 @@ public:
     }
 
     /// \copydoc philox4x32_10_engine::operator()()
-    template<class Generator>
     void operator()(result_type* output, size_t size)
     {
         rocrand_status status;
@@ -1526,7 +1477,8 @@ public:
     {
         rocrand_status status;
         status = rocrand_create_generator(&m_generator, this->type());
-        if(status != ROCRAND_STATUS_SUCCESS) throw rocrand_cpp::error(status);
+        if(status != ROCRAND_STATUS_SUCCESS)
+            throw rocrand_cpp::error(status);
         try
         {
             this->order(order_value);
@@ -1544,8 +1496,7 @@ public:
     }
 
     /// \copydoc philox4x32_10_engine::philox4x32_10_engine(rocrand_generator&)
-    explicit mrg32k3a_engine(rocrand_generator& generator)
-        : m_generator(generator)
+    explicit mrg32k3a_engine(rocrand_generator& generator) : m_generator(generator)
     {
         if(generator == NULL)
         {
@@ -1588,7 +1539,8 @@ public:
     void stream(hipStream_t value)
     {
         rocrand_status status = rocrand_set_stream(m_generator, value);
-        if(status != ROCRAND_STATUS_SUCCESS) throw rocrand_cpp::error(status);
+        if(status != ROCRAND_STATUS_SUCCESS)
+            throw rocrand_cpp::error(status);
     }
 
     /// \copydoc philox4x32_10_engine::order()
@@ -1603,23 +1555,25 @@ public:
     void offset(offset_type value)
     {
         rocrand_status status = rocrand_set_offset(this->m_generator, value);
-        if(status != ROCRAND_STATUS_SUCCESS) throw rocrand_cpp::error(status);
+        if(status != ROCRAND_STATUS_SUCCESS)
+            throw rocrand_cpp::error(status);
     }
 
     /// \copydoc philox4x32_10_engine::seed()
     void seed(seed_type value)
     {
         rocrand_status status = rocrand_set_seed(this->m_generator, value);
-        if(status != ROCRAND_STATUS_SUCCESS) throw rocrand_cpp::error(status);
+        if(status != ROCRAND_STATUS_SUCCESS)
+            throw rocrand_cpp::error(status);
     }
 
     /// \copydoc philox4x32_10_engine::operator()()
-    template<class Generator>
-    void operator()(result_type * output, size_t size)
+    void operator()(result_type* output, size_t size)
     {
         rocrand_status status;
         status = rocrand_generate(m_generator, output, size);
-        if(status != ROCRAND_STATUS_SUCCESS) throw rocrand_cpp::error(status);
+        if(status != ROCRAND_STATUS_SUCCESS)
+            throw rocrand_cpp::error(status);
     }
 
     /// \copydoc philox4x32_10_engine::min()
@@ -1663,7 +1617,8 @@ private:
 
 /// \cond
 template<unsigned long long DefaultSeed>
-constexpr typename mrg32k3a_engine<DefaultSeed>::seed_type mrg32k3a_engine<DefaultSeed>::default_seed;
+constexpr
+    typename mrg32k3a_engine<DefaultSeed>::seed_type mrg32k3a_engine<DefaultSeed>::default_seed;
 /// \endcond
 
 /// \brief Random number engine based on the Mersenne Twister for Graphic Processors algorithm.
@@ -1700,7 +1655,8 @@ public:
     {
         rocrand_status status;
         status = rocrand_create_generator(&m_generator, this->type());
-        if(status != ROCRAND_STATUS_SUCCESS) throw rocrand_cpp::error(status);
+        if(status != ROCRAND_STATUS_SUCCESS)
+            throw rocrand_cpp::error(status);
         try
         {
             this->order(order_value);
@@ -1714,8 +1670,7 @@ public:
     }
 
     /// \copydoc philox4x32_10_engine::philox4x32_10_engine(rocrand_generator&)
-    explicit mtgp32_engine(rocrand_generator& generator)
-        : m_generator(generator)
+    explicit mtgp32_engine(rocrand_generator& generator) : m_generator(generator)
     {
         if(generator == NULL)
         {
@@ -1758,7 +1713,8 @@ public:
     void stream(hipStream_t value)
     {
         rocrand_status status = rocrand_set_stream(m_generator, value);
-        if(status != ROCRAND_STATUS_SUCCESS) throw rocrand_cpp::error(status);
+        if(status != ROCRAND_STATUS_SUCCESS)
+            throw rocrand_cpp::error(status);
     }
 
     /// \copydoc philox4x32_10_engine::order()
@@ -1773,16 +1729,17 @@ public:
     void seed(seed_type value)
     {
         rocrand_status status = rocrand_set_seed(this->m_generator, value);
-        if(status != ROCRAND_STATUS_SUCCESS) throw rocrand_cpp::error(status);
+        if(status != ROCRAND_STATUS_SUCCESS)
+            throw rocrand_cpp::error(status);
     }
 
     /// \copydoc philox4x32_10_engine::operator()()
-    template<class Generator>
-    void operator()(result_type * output, size_t size)
+    void operator()(result_type* output, size_t size)
     {
         rocrand_status status;
         status = rocrand_generate(m_generator, output, size);
-        if(status != ROCRAND_STATUS_SUCCESS) throw rocrand_cpp::error(status);
+        if(status != ROCRAND_STATUS_SUCCESS)
+            throw rocrand_cpp::error(status);
     }
 
     /// \copydoc philox4x32_10_engine::min()
@@ -1971,7 +1928,6 @@ public:
     }
 
     /// \copydoc philox4x32_10_engine::operator()()
-    template<class Generator>
     void operator()(result_type* output, size_t size)
     {
         rocrand_status status;
@@ -2139,7 +2095,6 @@ public:
     }
 
     /// \copydoc philox4x32_10_engine::operator()()
-    template<class Generator>
     void operator()(result_type* output, size_t size)
     {
         rocrand_status status;
@@ -2228,7 +2183,8 @@ public:
     {
         rocrand_status status;
         status = rocrand_create_generator(&m_generator, this->type());
-        if(status != ROCRAND_STATUS_SUCCESS) throw rocrand_cpp::error(status);
+        if(status != ROCRAND_STATUS_SUCCESS)
+            throw rocrand_cpp::error(status);
         try
         {
             this->order(order_value);
@@ -2246,8 +2202,7 @@ public:
     }
 
     /// \copydoc philox4x32_10_engine::philox4x32_10_engine(rocrand_generator&)
-    explicit sobol32_engine(rocrand_generator& generator)
-        : m_generator(generator)
+    explicit sobol32_engine(rocrand_generator& generator) : m_generator(generator)
     {
         if(generator == NULL)
         {
@@ -2290,7 +2245,8 @@ public:
     void stream(hipStream_t value)
     {
         rocrand_status status = rocrand_set_stream(m_generator, value);
-        if(status != ROCRAND_STATUS_SUCCESS) throw rocrand_cpp::error(status);
+        if(status != ROCRAND_STATUS_SUCCESS)
+            throw rocrand_cpp::error(status);
     }
 
     /// \copydoc philox4x32_10_engine::order()
@@ -2305,7 +2261,8 @@ public:
     void offset(offset_type value)
     {
         rocrand_status status = rocrand_set_offset(this->m_generator, value);
-        if(status != ROCRAND_STATUS_SUCCESS) throw rocrand_cpp::error(status);
+        if(status != ROCRAND_STATUS_SUCCESS)
+            throw rocrand_cpp::error(status);
     }
 
     /// \brief Set the number of dimensions of a quasi-random number generator.
@@ -2320,9 +2277,10 @@ public:
     /// See also: rocrand_set_quasi_random_generator_dimensions()
     void dimensions(dimensions_num_type value)
     {
-        rocrand_status status =
-            rocrand_set_quasi_random_generator_dimensions(this->m_generator, value);
-        if(status != ROCRAND_STATUS_SUCCESS) throw rocrand_cpp::error(status);
+        rocrand_status status
+            = rocrand_set_quasi_random_generator_dimensions(this->m_generator, value);
+        if(status != ROCRAND_STATUS_SUCCESS)
+            throw rocrand_cpp::error(status);
     }
 
     /// \brief Fills \p output with uniformly distributed random integer values.
@@ -2340,12 +2298,12 @@ public:
     /// * \p size must be a multiple of the engine's number of dimensions.
     ////
     /// See also: rocrand_generate()
-    template<class Generator>
-    void operator()(result_type * output, size_t size)
+    void operator()(result_type* output, size_t size)
     {
         rocrand_status status;
         status = rocrand_generate(m_generator, output, size);
-        if(status != ROCRAND_STATUS_SUCCESS) throw rocrand_cpp::error(status);
+        if(status != ROCRAND_STATUS_SUCCESS)
+            throw rocrand_cpp::error(status);
     }
 
     /// \copydoc philox4x32_10_engine::min()
@@ -2544,7 +2502,6 @@ public:
     /// * \p size must be a multiple of the engine's number of dimensions.
     ////
     /// See also: rocrand_generate()
-    template<class Generator>
     void operator()(result_type* output, size_t size)
     {
         rocrand_status status;
@@ -2634,7 +2591,8 @@ public:
     {
         rocrand_status status;
         status = rocrand_create_generator(&m_generator, this->type());
-        if(status != ROCRAND_STATUS_SUCCESS) throw rocrand_cpp::error(status);
+        if(status != ROCRAND_STATUS_SUCCESS)
+            throw rocrand_cpp::error(status);
         try
         {
             this->order(order_value);
@@ -2652,8 +2610,7 @@ public:
     }
 
     /// \copydoc philox4x32_10_engine::philox4x32_10_engine(rocrand_generator&)
-    explicit sobol64_engine(rocrand_generator& generator)
-        : m_generator(generator)
+    explicit sobol64_engine(rocrand_generator& generator) : m_generator(generator)
     {
         if(generator == NULL)
         {
@@ -2696,7 +2653,8 @@ public:
     void stream(hipStream_t value)
     {
         rocrand_status status = rocrand_set_stream(m_generator, value);
-        if(status != ROCRAND_STATUS_SUCCESS) throw rocrand_cpp::error(status);
+        if(status != ROCRAND_STATUS_SUCCESS)
+            throw rocrand_cpp::error(status);
     }
 
     /// \copydoc philox4x32_10_engine::order()
@@ -2711,7 +2669,8 @@ public:
     void offset(offset_type value)
     {
         rocrand_status status = rocrand_set_offset(this->m_generator, value);
-        if(status != ROCRAND_STATUS_SUCCESS) throw rocrand_cpp::error(status);
+        if(status != ROCRAND_STATUS_SUCCESS)
+            throw rocrand_cpp::error(status);
     }
 
     /// \brief Set the number of dimensions of a quasi-random number generator.
@@ -2726,9 +2685,10 @@ public:
     /// See also: rocrand_set_quasi_random_generator_dimensions()
     void dimensions(dimensions_num_type value)
     {
-        rocrand_status status =
-            rocrand_set_quasi_random_generator_dimensions(this->m_generator, value);
-        if(status != ROCRAND_STATUS_SUCCESS) throw rocrand_cpp::error(status);
+        rocrand_status status
+            = rocrand_set_quasi_random_generator_dimensions(this->m_generator, value);
+        if(status != ROCRAND_STATUS_SUCCESS)
+            throw rocrand_cpp::error(status);
     }
 
     /// \brief Fills \p output with uniformly distributed random integer values.
@@ -2746,12 +2706,12 @@ public:
     /// * \p size must be a multiple of the engine's number of dimensions.
     ////
     /// See also: rocrand_generate()
-    template<class Generator>
-    void operator()(result_type * output, size_t size)
+    void operator()(result_type* output, size_t size)
     {
         rocrand_status status;
         status = rocrand_generate_long_long(m_generator, output, size);
-        if(status != ROCRAND_STATUS_SUCCESS) throw rocrand_cpp::error(status);
+        if(status != ROCRAND_STATUS_SUCCESS)
+            throw rocrand_cpp::error(status);
     }
 
     /// \copydoc philox4x32_10_engine::min()
@@ -2950,7 +2910,6 @@ public:
     /// * \p size must be a multiple of the engine's number of dimensions.
     ////
     /// See also: rocrand_generate()
-    template<class Generator>
     void operator()(result_type* output, size_t size)
     {
         rocrand_status status;
@@ -3121,7 +3080,6 @@ public:
     }
 
     /// \copydoc philox4x32_10_engine::operator()()
-    template<class Generator>
     void operator()(result_type* output, size_t size)
     {
         rocrand_status status;
@@ -3292,7 +3250,6 @@ public:
     }
 
     /// \copydoc philox4x32_10_engine::operator()()
-    template<class Generator>
     void operator()(result_type* output, size_t size)
     {
         rocrand_status status;
@@ -3463,7 +3420,6 @@ public:
     }
 
     /// \copydoc philox4x32_10_engine::operator()()
-    template<class Generator>
     void operator()(result_type* output, size_t size)
     {
         rocrand_status status;
@@ -3634,7 +3590,6 @@ public:
     }
 
     /// \copydoc philox4x32_10_engine::operator()()
-    template<class Generator>
     void operator()(result_type* output, size_t size)
     {
         rocrand_status status;
@@ -3772,7 +3727,7 @@ typedef std::random_device random_device;
 /// \return rocRAND version number as an \p int value.
 inline int version()
 {
-    int x;
+    int            x;
     rocrand_status status = rocrand_get_version(&x);
     if(status != ROCRAND_STATUS_SUCCESS)
     {

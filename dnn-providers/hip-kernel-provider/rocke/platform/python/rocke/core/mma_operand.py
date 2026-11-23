@@ -24,7 +24,16 @@ from __future__ import annotations
 from typing import Literal
 
 from .arch import ArchTarget
-from .ir import Op, Type, Value, VectorType, dtype_to_ir_type, is_packed_only, type_bits
+from .ir import (
+    Op,
+    Type,
+    Value,
+    VectorType,
+    dtype_to_ir_type,
+    element_type,
+    is_packed_only,
+    type_bits,
+)
 
 MmaOperandRole = Literal["a", "b", "c"]
 
@@ -35,11 +44,6 @@ _OPERAND_INDEX = {"a": 0, "b": 1, "c": 2}
 def mma_operand_value(op: Op, role: MmaOperandRole) -> Value:
     """MMA operand ``role`` ("a", "b" or the accumulator "c") of ``op``."""
     return op.operands[_OPERAND_INDEX[role]]
-
-
-def _element_type(t: Type) -> Type:
-    """The element type of a vector type, or the type itself for a scalar."""
-    return t.elem if isinstance(t, VectorType) else t
 
 
 def _admitted_elements(
@@ -55,12 +59,20 @@ def _admitted_elements(
     packed-only (``i4`` for the iu4 instructions): no value has that element
     type, so its values arrive in the register type.
     """
-    elements = {_element_type(register_type)}
+    elements = {element_type(register_type)}
     if catalog_dtype is not None:
         catalog_element = dtype_to_ir_type(catalog_dtype)
         if not is_packed_only(catalog_element):
             elements.add(catalog_element)
     return frozenset(elements)
+
+
+def _require_integer_vector_count(label: str, kind: str, ty: Type) -> None:
+    """Check counts before equality can admit a numerically equal float or bool."""
+    if isinstance(ty, VectorType) and type(ty.count) is not int:
+        raise ValueError(
+            f"{label} requires an integer {kind} vector count, got {ty.count!r}"
+        )
 
 
 def _require_reshape(
@@ -79,7 +91,7 @@ def _require_reshape(
     ``label`` names the value, ``verb`` says what the instruction does with the
     register ("takes" or "returns"), and each hint ends its refusal.
     """
-    element = _element_type(value_type)
+    element = element_type(value_type)
     if element not in admitted:
         names = " or ".join(sorted(t.name for t in admitted))
         raise ValueError(
@@ -112,23 +124,21 @@ def mma_operand_needs_reinterpret(
 
     Raises ``ValueError`` for an operand holding another number format (its
     values would have to be converted, which is the kernel's decision, not the
-    lowerer's) and for an operand of another bit width.
+    lowerer's), an operand of another bit width, or a vector type whose count
+    is not an integer.
     """
+    label = f"MMA operand {role} of {op_id!r}"
+    for kind, ty in (("operand", operand_type), ("register", register_type)):
+        _require_integer_vector_count(label, kind, ty)
     if operand_type == register_type:
         return False
     catalog_op = arch.mma.by_op_id(op_id)
     catalog_dtype = (
-        None
-        if catalog_op is None
-        else {
-            "a": catalog_op.a_dtype,
-            "b": catalog_op.b_dtype,
-            "c": catalog_op.c_dtype,
-        }[role]
+        None if catalog_op is None else catalog_op.srcs[_OPERAND_INDEX[role]].dtype
     )
     register_bits = type_bits(register_type)
     _require_reshape(
-        f"MMA operand {role} of {op_id!r}",
+        label,
         "takes",
         operand_type,
         register_type,
@@ -142,27 +152,22 @@ def mma_operand_needs_reinterpret(
 def mma_result_needs_reinterpret(
     op_id: str, result_type: Type, register_type: Type, arch: ArchTarget
 ) -> bool:
-    """Whether the result of MMA ``op_id`` must be reinterpreted from ``register_type``.
+    """Whether the result of MMA ``op_id`` needs a register reinterpretation.
 
-    The operand rule (:func:`mma_operand_needs_reinterpret`) applied to the
-    value the instruction returns, with the catalog's result dtype
-    (``dst_dtype``): False when ``result_type`` is ``register_type``; True when
-    it holds the register's element type or the catalog's result element type
-    in the register's bit width, such as ``vec<bf16x8>`` for an instruction
-    that returns its bf16 results as ``<8 x i16>``.
-
-    Raises ``ValueError`` for a result of another number format, such as
-    ``vec<f16x8>`` for an instruction whose catalog row returns bf16 (one
-    ``bitcast`` would read bf16 bits as f16 values), and for a result of
-    another bit width.
+    Result admission uses ``dst`` metadata independently of the accumulator
+    source. The register's or catalog result's element type must occupy the
+    register's bit width; reinterpretation never converts number formats.
     """
+    label = f"MMA result of {op_id!r}"
+    for kind, ty in (("result", result_type), ("register", register_type)):
+        _require_integer_vector_count(label, kind, ty)
     if result_type == register_type:
         return False
     catalog_op = arch.mma.by_op_id(op_id)
-    catalog_dtype = None if catalog_op is None else catalog_op.dst_dtype
+    catalog_dtype = None if catalog_op is None else catalog_op.dst.dtype
     register_bits = type_bits(register_type)
     _require_reshape(
-        f"MMA result of {op_id!r}",
+        label,
         "returns",
         result_type,
         register_type,

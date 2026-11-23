@@ -131,7 +131,7 @@ hipCUB performance testing is getting reworked to use `Primbench` instead of `Go
 
 
 ## Coverage
-* **Tooling:** `BUILD_CODE_COVERAGE=ON` (clang) compiles with `-g -O0 -fprofile-instr-generate -fcoverage-mapping`; `llvm-profdata` + `llvm-cov` (from `${ROCM_PATH}/llvm/bin`) produce HTML/LCOV reports via the `coverage_analysis` and `coverage` build targets. Test files are excluded (`--ignore-filename-regex="test_*"`). Codecov config lives at the `rocm-libraries` monorepo level.
+* **Tooling:** `HIPCUB_ENABLE_COVERAGE=ON` (clang) compiles with `-g -O0 -fprofile-instr-generate -fcoverage-mapping`; `llvm-profdata` + `llvm-cov` (from `${ROCM_PATH}/llvm/bin`) produce HTML/LCOV reports via the `coverage_analysis` and `coverage` build targets. Test files are excluded (`--ignore-filename-regex="test_*"`). Codecov config lives at the `rocm-libraries` monorepo level.
 * **Target:** long-term > 95% (phased, aspirational). Because hipCUB is a wrapper, meaningful primitive coverage is measured under rocPRIM.
 * **Scope / limitations:** instrumentation is host-side and clang-only; device-code coverage is not measured. Windows coverage is not tracked separately.
 

@@ -348,6 +348,81 @@ struct LocalCleanup
     std::function<void()> f;
 };
 
+// TODO: move the rocFFT RAII wrappers out of hipFFT's library details into shared/ and use them
+// across tests instead of LocalCleanup
+TEST(rocfft_UnitTest, planar_with_field_on_other_side)
+{
+    // planar array types are rejected if a field is set on either side
+
+    PROB_SKIP_UNITTEST();
+
+    try
+    {
+        const size_t length = 64;
+        // column-major; the field side is never Hermitian, so the brick spans the full length
+        const size_t lower[]  = {0, 0};
+        const size_t upper[]  = {length, 1};
+        const size_t stride[] = {1, length};
+
+        const std::tuple<rocfft_transform_type, rocfft_array_type, rocfft_array_type> cases[] = {
+            {rocfft_transform_type_complex_forward,
+             rocfft_array_type_complex_interleaved,
+             rocfft_array_type_complex_planar},
+            {rocfft_transform_type_complex_forward,
+             rocfft_array_type_complex_planar,
+             rocfft_array_type_complex_interleaved},
+            {rocfft_transform_type_real_forward,
+             rocfft_array_type_real,
+             rocfft_array_type_hermitian_planar},
+            {rocfft_transform_type_real_inverse,
+             rocfft_array_type_hermitian_planar,
+             rocfft_array_type_real},
+        };
+        for(const auto& [transform_type, itype, otype] : cases)
+        {
+            rocfft_plan_description desc = nullptr;
+            LocalCleanup desc_cleanup([&desc]() { rocfft_plan_description_destroy(desc); });
+            ASSERT_EQ(rocfft_plan_description_create(&desc), rocfft_status_success);
+            ASSERT_EQ(rocfft_plan_description_set_data_layout(
+                          desc, itype, otype, nullptr, nullptr, 0, nullptr, 0, 0, nullptr, 0),
+                      rocfft_status_success);
+
+            rocfft_field field = nullptr;
+            LocalCleanup field_cleanup([&field]() { rocfft_field_destroy(field); });
+            ASSERT_EQ(rocfft_field_create(&field), rocfft_status_success);
+            rocfft_brick brick = nullptr;
+            LocalCleanup brick_cleanup([&brick]() { rocfft_brick_destroy(brick); });
+            ASSERT_EQ(rocfft_brick_create(
+                          &brick, lower, upper, stride, 2, rocfft_scoped_device::current_device()),
+                      rocfft_status_success);
+            ASSERT_EQ(rocfft_field_add_brick(field, brick), rocfft_status_success);
+            if(array_type_is_planar(itype))
+            {
+                ASSERT_EQ(rocfft_plan_description_add_outfield(desc, field), rocfft_status_success);
+            }
+            else
+            {
+                ASSERT_EQ(rocfft_plan_description_add_infield(desc, field), rocfft_status_success);
+            }
+
+            rocfft_plan  plan = nullptr;
+            LocalCleanup plan_cleanup([&plan]() { rocfft_plan_destroy(plan); });
+            EXPECT_EQ(rocfft_plan_create(&plan,
+                                         rocfft_placement_notinplace,
+                                         transform_type,
+                                         rocfft_precision_single,
+                                         1,
+                                         &length,
+                                         1,
+                                         desc),
+                      rocfft_status_invalid_array_type)
+                << "transform type " << transform_type << ", input type " << itype
+                << ", output type " << otype;
+        }
+    }
+    ROCFFT_CATCH_TEST_EXCEPTIONS;
+}
+
 // run a transform with all log levels enabled
 TEST(rocfft_UnitTest, log_levels)
 {

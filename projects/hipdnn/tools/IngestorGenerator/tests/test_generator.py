@@ -12,6 +12,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import uuid
 from pathlib import Path
 
@@ -52,6 +53,14 @@ from tests.helpers import (
     make_rocke_kernel,
     read_docs,
     render_resolved,
+)
+
+#: The shipped descriptor tree, which carries what `uhd_gen promote` installed under
+#: `heuristics/`. The generator does not write that subtree, so a test that needs a
+#: pack-time view of a bundle reads it from here rather than from a render.
+SHIPPED_DESCRIPTOR_ROOT = (
+    Path(__file__).resolve().parents[5]
+    / "dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/descriptors"
 )
 
 
@@ -735,21 +744,39 @@ class TestSpecializationContractEmission:
     ):
         """hkp_pack loads the rendered tree as it would at pack time: every id and
         cross-reference a packed bundle carries (the UED's `id` and `metadata` among
-        them) must be a UUID the packer resolves."""
+        them) must be a UUID the packer resolves.
+
+        Pack time sees the generator's output *and* whatever `uhd_gen promote` installed
+        under `heuristics/`, so the trained UHDs an `engine.heuristics` binding names are
+        copied in beside the render. Rendering alone would fail on an engine that ships a
+        trained ranker, since promote's output is not the generator's to write."""
         descriptors = _import_hkp_pack("descriptors")
         generic_targets = _import_hkp_pack("generic_targets")
         if descriptors is None or generic_targets is None:
             pytest.skip("hkp_pack is not importable from this checkout")
         config = gfx950_attention_dense_config
         generator.render(config, tmp_path)
+        rendered = tmp_path / config.descriptor_dir
+        shipped_heuristics = (
+            SHIPPED_DESCRIPTOR_ROOT / config.authored_subpath / "heuristics"
+        )
+        if shipped_heuristics.is_dir():
+            shutil.copytree(shipped_heuristics, rendered / "heuristics")
         # The shipped generic target table, as the packer loads it at pack time.
         flat = descriptors.load_flat_input(
-            tmp_path / config.descriptor_dir,
+            rendered,
             generic_targets.GenericTargets.load(generic_targets.DEFAULT_TABLE_PATH),
             log=lambda _message: None,
         )
         # A wrong root would load nothing and pass vacuously.
         assert flat.by_type("ued") and flat.by_type("kmd")
+        # The binding is only real if the packer resolved the trained models too: a
+        # missing heuristics/ copy would otherwise leave this at the native UHD alone.
+        bound = config.engine.heuristics.get("sort_kernel_catalog", {})
+        promoted = {uhd for ids in bound.values() for uhd in ids}
+        if promoted:
+            loaded = {str(d.id) for d in flat.by_type("uhd")}
+            assert promoted <= loaded, f"unresolved trained UHDs: {promoted - loaded}"
 
 
 def _import_hkp_pack(module: str):
@@ -967,7 +994,7 @@ class TestBorrowedNativeSymbols:
     def test_every_symbol_reference_names_the_other_engine(self):
         config = make_minimal_config(
             engine=make_engine(
-                name="hipkernel:TestSeed", native_symbols_from="hipkernel:Test"
+                name="hipkernel:TestSeed", native_symbols_from="hipkernel.test"
             )
         )
         ids = mint_ids(config)
@@ -3667,6 +3694,7 @@ class TestHeuristicBindings:
             "predict_applicable_kernels",
         ]
         assert ued["predict_engine"] == {"gfx950": [self.MODEL, self.OTHER]}
+        assert ued["predict_applicable_kernels"] == {"default": [self.OTHER]}
         assert ued["sort_kernel_catalog"] == {
             "default": ued["sort_kernel_catalog"]["default"]
         }
@@ -3695,6 +3723,51 @@ class TestHeuristicBindings:
             "uhd": doc["sort_kernel_catalog"]["default"],
         }
         assert _dump(build_ued(config, ids)) == promoted
+
+    @staticmethod
+    def _promote():
+        """uhd_gen's promote module, so a binding is checked against promote itself and not
+        a copy of its output: a change in what promote writes fails here. Skips without
+        uhd_gen's requirements unless the build requires them (HIPDNN_REQUIRE_UHD_GEN_TESTS),
+        as uhd_gen's own suites do."""
+        sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+        if os.environ.get("HIPDNN_REQUIRE_UHD_GEN_TESTS"):
+            from uhd_gen import promote
+
+            return promote
+        return pytest.importorskip("uhd_gen.promote")
+
+    @pytest.mark.parametrize(
+        "role, arch, metric",
+        [
+            ("sort_kernel_catalog", "gfx942", "tflops"),
+            ("predict_engine", "gfx950", "tflops"),
+            ("predict_engine", "default", "tflops"),
+            ("predict_applicable_kernels", "default", None),
+        ],
+    )
+    def test_a_binding_is_what_promote_writes(
+        self, tmp_path, configs_dir, role, arch, metric
+    ):
+        """The README's flow end to end: promote binds a model, its binding is recorded in
+        the config as written, and loading and regenerating gives back the same value.
+        """
+        import yaml
+
+        from codegen.config_loader import load_config
+
+        promote = self._promote()
+        raw = yaml.safe_load((configs_dir / "scale_add.yaml").read_text())
+        path = tmp_path / "scale_add.yaml"
+        path.write_text(yaml.safe_dump(raw, sort_keys=False))
+        config = load_config(path)
+        ids = mint_ids(config)
+        written, _ = promote._rebind(
+            build_ued(config, ids), role, arch, self.MODEL, metric, {}
+        )
+        raw["engine"]["heuristics"] = {role: {arch: written}}
+        path.write_text(yaml.safe_dump(raw, sort_keys=False))
+        assert build_ued(load_config(path), ids)[role][arch] == written
 
     def test_regeneration_keeps_bytes_and_ids_around_a_heuristics_tree(
         self, generator, scale_add_config, tmp_path

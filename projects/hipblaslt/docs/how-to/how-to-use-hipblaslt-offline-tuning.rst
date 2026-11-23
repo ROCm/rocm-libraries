@@ -280,10 +280,12 @@ The time ``hipblaslt-bench`` prints for a kernel is its own benchmark, separate 
 measurement, so the two can disagree between kernels that are within noise of each other. Both run
 the same measurement code and size their rotation by the same rules, but on different buffers: the
 tuner rotates copies of your tensors in memory it owns, and leaves block-scaled and w4a16 scales in
-place, since only their caller knows their layout. The tuner always times with HIP events;
-``hipblaslt-bench`` times with HIP events only with ``--use_gpu_timer`` and otherwise uses a
-synchronized CPU timer. Treat ``hipblaslt-bench``'s benchmark as the reference when a shape matters
-enough to check by hand.
+place, since only their caller knows their layout. The tuner times with HIP events, except on
+Windows, where the HIP runtime does not time event pairs correctly, so the tuner uses a synchronized
+CPU timer instead. ``hipblaslt-bench`` times with HIP events only with ``--use_gpu_timer`` and
+otherwise uses a synchronized CPU timer. On Windows, leave ``--use_gpu_timer`` off for the same
+reason. Treat ``hipblaslt-bench``'s benchmark as the reference when a shape matters enough to check
+by hand.
 
 Benchmarking never writes to your buffers. Candidates run against memory the library allocates for
 the purpose, and only the winner runs on the real output.

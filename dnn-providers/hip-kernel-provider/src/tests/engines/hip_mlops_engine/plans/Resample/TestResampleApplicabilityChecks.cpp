@@ -484,3 +484,71 @@ TEST(TestResampleValidator, BwdUnsupportedIODataType)
 
     EXPECT_THROW(validateResampleBwdGraph(builder), hipdnn_plugin_sdk::HipdnnPluginException);
 }
+
+// ============================================================================
+// Forward Resample - 32-bit launch and index limits
+// ============================================================================
+
+namespace
+{
+// A 2x2 stride-2 max pool whose output is `outH` x `outW`.
+ResampleGraphConfig pooledOutput(int64_t outH, int64_t outW, bool withIndex = false)
+{
+    ResampleGraphConfig config;
+    const int64_t inH = 2 * outH;
+    const int64_t inW = 2 * outW;
+    config.xDims = {1, 1, inH, inW};
+    config.xStrides = {inH * inW, inH * inW, inW, 1};
+    config.yDims = {1, 1, outH, outW};
+    config.yStrides = {outH * outW, outH * outW, outW, 1};
+    config.indexDims = config.yDims;
+    config.indexStrides = config.yStrides;
+    config.includeIndexTensor = withIndex;
+    config.setIndexUid = withIndex;
+    config.generateIndex = withIndex ? std::optional<bool>(true) : std::nullopt;
+    return config;
+}
+}
+
+TEST(TestResampleValidator, OutputElementCountAtTheLaunchThreadLimit)
+{
+    // One launch runs fewer than 2^32 threads in 256-thread blocks, so 2^32 - 256 outputs is the
+    // last count served; one more rounds up to 2^32 threads.
+    for(const auto& [outW, fits] :
+        {std::pair{int64_t{4294967040}, true}, std::pair{int64_t{4294967041}, false}})
+    {
+        SCOPED_TRACE(outW);
+        auto builder = createResampleFwdGraph(pooledOutput(1, outW));
+        if(fits)
+        {
+            EXPECT_NO_THROW(validateResampleGraph(builder));
+        }
+        else
+        {
+            EXPECT_THROW(validateResampleGraph(builder), hipdnn_plugin_sdk::HipdnnPluginException);
+        }
+    }
+}
+
+TEST(TestResampleValidator, FlattenedInputSpatialExtentAtTheInt32IndexLimit)
+{
+    // The index tensor holds the flattened input position as INT32: 46340^2 fits, 46341^2 does
+    // not. Both pool to a 23170 x 23170 output.
+    for(const auto& [inExtent, fits] :
+        {std::pair{int64_t{46340}, true}, std::pair{int64_t{46341}, false}})
+    {
+        SCOPED_TRACE(inExtent);
+        auto config = pooledOutput(23170, 23170, /*withIndex=*/true);
+        config.xDims = {1, 1, inExtent, inExtent};
+        config.xStrides = {inExtent * inExtent, inExtent * inExtent, inExtent, 1};
+        auto builder = createResampleFwdGraph(config);
+        if(fits)
+        {
+            EXPECT_NO_THROW(validateResampleGraph(builder));
+        }
+        else
+        {
+            EXPECT_THROW(validateResampleGraph(builder), hipdnn_plugin_sdk::HipdnnPluginException);
+        }
+    }
+}

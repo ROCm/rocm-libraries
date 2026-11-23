@@ -5,7 +5,7 @@ cmake_minimum_required(VERSION 3.25.2)
 
 option(CMAKE_EXPORT_COMPILE_COMMANDS "Generate compile commands json file." ON)
 
-project(hipsparselt VERSION 0.2.9 LANGUAGES CXX)
+project(hipsparselt VERSION 0.2.10 LANGUAGES CXX)
 
 # ROCm libraries root (for shared/ctest and other shared resources)
 # Only set default when not already defined (e.g. by superproject / rocm-libraries).
@@ -108,6 +108,16 @@ if(NOT HIPSPARSELT_ENABLE_CUDA)
     elseif(GPU_TARGETS STREQUAL "all")
         hipsparselt_get_base_architectures(GPU_TARGETS)
     else()
+        # A device ASAN build needs the XNACK mode named, and an explicitly
+        # requested target arrives bare: TheRock's sanitizer stanza rewrites
+        # gfx90a/gfx942/gfx950 only, so gfx1250 reaches us as itself. Promoted
+        # here, before validation, so the list that is checked is the one the
+        # build will use. Settled against the compiler straight after, which
+        # hands back the bare name on a toolchain that refuses the qualifier --
+        # the same answer the `all` list gets.
+        if(HIPSPARSELT_ENABLE_ASAN OR BUILD_ADDRESS_SANITIZER OR THEROCK_SANITIZER STREQUAL "ASAN")
+            hipsparselt_offload_targets(GPU_TARGETS ${GPU_TARGETS})
+        endif()
         hipsparselt_validate_gpu_targets("${GPU_TARGETS}")
     endif()
 

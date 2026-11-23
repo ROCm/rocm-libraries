@@ -4,6 +4,8 @@
 #include "HipblasltEngine.hpp"
 
 #include <hipdnn_flatbuffers_sdk/data_objects/engine_details_generated.h>
+#include <hipdnn_plugin_sdk/BehaviorNote.h>
+#include <hipdnn_plugin_sdk/PluginException.hpp>
 
 namespace hipblaslt_plugin
 {
@@ -38,7 +40,10 @@ void HipblasltEngine::getDetails(HipdnnEnginePluginHandle& handle,
                                  hipdnnPluginConstData_t& detailsOut) const
 {
     flatbuffers::FlatBufferBuilder builder;
-    auto engineDetails = hipdnn_flatbuffers_sdk::data_objects::CreateEngineDetails(builder, _id);
+    const std::vector<int32_t> behaviorNotes{
+        static_cast<int32_t>(HIPDNN_BEHAVIOR_NOTE_SUPPORTS_GRAPH_CAPTURE)};
+    auto engineDetails = hipdnn_flatbuffers_sdk::data_objects::CreateEngineDetailsDirect(
+        builder, _id, nullptr, &behaviorNotes);
     builder.Finish(engineDetails);
     auto detachedBuffer = std::make_unique<flatbuffers::DetachedBuffer>(builder.Release());
     detailsOut.ptr = detachedBuffer->data();
@@ -72,9 +77,12 @@ void HipblasltEngine::initializeExecutionContext(
         if(planBuilder->isApplicable(handle, opGraph))
         {
             planBuilder->buildPlan(handle, opGraph, executionContext);
-            break;
+            return;
         }
     }
+
+    throw hipdnn_plugin_sdk::HipdnnPluginException(
+        HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR, "No hipBLASLt plan builder applies to the graph");
 }
 
 void HipblasltEngine::addPlanBuilder(std::unique_ptr<IPlanBuilder> planBuilder)

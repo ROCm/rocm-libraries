@@ -155,9 +155,11 @@ namespace TensileLite
             return AlmostEqual(a.real(), b.real()) && AlmostEqual(a.imag(), b.imag());
         }
 
+        // EpilogueT is the type used for scaling and output arithmetic. InputMathT
+        // controls input rounding before multiplication (for example, XFloat32).
         template <typename Inputs,
-                  typename Accumulator = typename Inputs::DType,
-                  typename MathOpAccum = Accumulator>
+                  typename EpilogueT  = typename Inputs::DType,
+                  typename InputMathT = EpilogueT>
         struct ReferenceSolution
         {
             static void SolveCPU(ContractionProblemGemm const& contraction,

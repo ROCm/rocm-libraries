@@ -71,7 +71,7 @@ BEGIN_HIPCUB_NAMESPACE
  *   // Specialising BlockRunLengthDecode to have each thread hold 4 run-length decoded items
  *   constexpr int DECODED_ITEMS_PER_THREAD = 4;
  *
- *   // Specialize BlockRadixSort for a 1D block of 128 threads owning 4 integer items each
+ *   // Specialize BlockRunLengthDecode for a 1D block of 128 threads owning 4 integer items each
  *   using BlockRunLengthDecodeT =
  *     hipcub::BlockRunLengthDecode<RunItemT, BLOCK_DIM_X, RUNS_PER_THREAD, DECODED_ITEMS_PER_THREAD>;
  *

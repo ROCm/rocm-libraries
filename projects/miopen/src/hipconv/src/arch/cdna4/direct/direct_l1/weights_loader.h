@@ -7,8 +7,13 @@
 // the cursor bumps 1024 bytes per tile. A step loads Kh x (Kwg/16) tiles.
 //
 // All waves_k sub-tensors are shape-identical and differ only in base, so one
-// loader serves any partition: select the base by wave_k_idx (a scalar select)
+// loader handles any partition: select the base by wave_k_idx (a scalar select)
 // rather than a per-step branch that would double the load instruction count.
+//
+// At cfg.kd > 1 the buffer window spans all Kd depth taps. Kd sits directly inside
+// kq in the formatted layout, so C/64 iterations advance the cursor by exactly one
+// tap: consecutive taps need no seek, and a tap loop starting past 0 needs only
+// seek_tap(). See docs/algorithms/direct/direct-3d.md.
 
 #include "config.h"
 #include "layer_pars.h"
@@ -38,7 +43,7 @@ class WeightsLoader
 
     using Vector = __attribute__((ext_vector_type(4))) unsigned int;
     // Veclen=1 so offsets/strides are in fp16 elements (datatype_t units).
-    using Layout = WeightsLayout<cfg.kh, cfg.kw, Kwg, 1>;
+    using Layout = WeightsLayout<cfg.kh, cfg.kw, Kwg, 1, cfg.kd>;
 
 public:
     static constexpr bool is_tf32 = (cfg.elem_bytes == 4);
@@ -68,6 +73,24 @@ public:
         const datatype_t* base = select_base(K, C_padded, k_idx, weights_global, wave_k_idx);
         rsrc_                  = __builtin_amdgcn_make_buffer_rsrc(
             const_cast<datatype_t*>(base), 0, stripe_bytes(K, C_padded), rsrc_data_format);
+    }
+
+    // Aim the cursor at depth tap `tap` (0 .. cfg.kd-1) of this stripe.
+    //
+    // Only needed when the tap loop does not start at 0 (depth padding clips the
+    // leading taps); consecutive taps roll over without a seek.
+    __device__ void seek_tap(int tap, int C_padded)
+    {
+        cursor_bytes_ = __builtin_amdgcn_readfirstlane(tap * tap_bytes(C_padded));
+    }
+
+    // Aim the cursor at reduction step `step` = tap * (C_padded / 64) + C(64) block.
+    //
+    // A split-K item starts mid-reduction; C(64) blocks sit directly inside Kd, so the
+    // cursor then rolls over the tap boundaries on its own.
+    __device__ void seek_step(int step, int C_padded)
+    {
+        cursor_bytes_ = __builtin_amdgcn_readfirstlane(step * c64_bytes(C_padded));
     }
 
     // Load one step's tiles into the caller's register array.
@@ -119,9 +142,24 @@ private:
         return weights_global + __builtin_amdgcn_readfirstlane(off);
     }
 
+    // Bytes in one kq stripe: all Kd taps. K does not enter (kq's stride is the
+    // product of the axes below it, and K only sets the kq count).
     __device__ static int stripe_bytes(int K, int C_padded)
     {
         return planes * Layout(K, C_padded).strides().kq() * static_cast<int>(sizeof(datatype_t));
+    }
+
+    // Bytes in one depth tap's slice, which is what C/64 iterations advance over.
+    __device__ static int tap_bytes(int C_padded)
+    {
+        return planes * Layout(Kwg, C_padded).strides().kd() * static_cast<int>(sizeof(datatype_t));
+    }
+
+    // Bytes in one C(64) block of one tap: one main-loop iteration's advance.
+    __device__ static int c64_bytes(int C_padded)
+    {
+        return planes * Layout(Kwg, C_padded).strides().c64() *
+               static_cast<int>(sizeof(datatype_t));
     }
 
     __amdgpu_buffer_rsrc_t rsrc_;

@@ -33,6 +33,7 @@
 #include "hipblaslt/hipblaslt.h"
 
 #include <memory>
+#include <string>
 #include <vector>
 
 namespace hipblaslt_ext
@@ -40,6 +41,10 @@ namespace hipblaslt_ext
     class GemmInstance;
     class Gemm;
     class GroupedGemm;
+    namespace detail
+    {
+        struct GemmInputsAccess;
+    }
 
     using HipBufferDeleter = hipError_t (*)(void*);
     using HipBufferPtr     = std::unique_ptr<void, HipBufferDeleter>;
@@ -292,9 +297,12 @@ namespace hipblaslt_ext
         HIPBLASLT_EXPORT             GemmTuning(GemmTuning&& tuning);
         HIPBLASLT_EXPORT GemmTuning& operator=(GemmTuning&& tuning);
 
-        HIPBLASLT_EXPORT void setSplitK(
-            uint16_t
-                splitK); //!< Set the value of splitK, 0 is off (use the splitK inside the solution).
+        /**
+         * Set splitK; 0 uses the solution default.
+         * Device-scalar-alpha-capable kernels support at most 2047,
+         * including in host/vector alpha mode.
+         */
+        HIPBLASLT_EXPORT void setSplitK(uint16_t splitK);
         HIPBLASLT_EXPORT void setWgm(
             int16_t
                 wgm); //!< Set the value of workgroup mapping, 0 is off (use the workgroup mapping inside the solution).
@@ -377,6 +385,7 @@ namespace hipblaslt_ext
     private:
         friend Gemm;
         friend GroupedGemm;
+        friend detail::GemmInputsAccess; // library-internal fields without a public setter
         class GemmInputsImpl;
         std::unique_ptr<GemmInputsImpl> pimpl;
     };

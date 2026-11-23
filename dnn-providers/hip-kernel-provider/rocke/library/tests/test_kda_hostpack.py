@@ -184,6 +184,7 @@ def test_runner_geometry_without_gpu():
 
         class kernel:
             name = "kda_test"
+            cluster_dims = None
 
     man = make_kda_fused_manifest(
         artifact=_Art(),

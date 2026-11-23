@@ -436,12 +436,10 @@ void rocke_tensor_view_store_scalar(rocke_ir_builder_t* b,
         return;
     }
     off = rocke_tensor_descriptor_offset(b, &v->desc, indices, num_indices);
-    if(align <= 0 && rocke_tv_name_is(dt, "f64"))
+    if(align == 0 && rocke_tv_name_is(dt, "f64"))
         align = 8; /* Same 8-byte element alignment as the f64 load_scalar. */
-    if(align <= 0)
-        rocke_b_global_store(b, v->base, off, value, 0); /* Python: align default 1 */
-    else
-        rocke_b_global_store(b, v->base, off, value, align);
+    /* align 0 is rocke_b_global_store's default, 1, as Python's align=None. */
+    rocke_b_global_store(b, v->base, off, value, align);
 }
 
 rocke_value_t* rocke_tensor_view_load_vec(rocke_ir_builder_t* b,
@@ -459,7 +457,8 @@ rocke_value_t* rocke_tensor_view_load_vec(rocke_ir_builder_t* b,
 
     if(v->addr_space == ROCKE_ADDR_LDS)
     {
-        if(rocke_tv_name_is(dt, "f16") || rocke_tv_name_is(dt, "bf16"))
+        if(rocke_tv_name_is(dt, "f16") || rocke_tv_name_is(dt, "bf16")
+           || rocke_tv_name_is(dt, "fp8e4m3") || rocke_tv_name_is(dt, "bf8e5m2"))
             return rocke_b_smem_load_vN(b, v->base, indices, num_indices, dt, n);
         if(rocke_tv_name_is(dt, "f32"))
             return rocke_b_smem_load_vN_f32(b, v->base, indices, num_indices, n);
@@ -505,7 +504,8 @@ rocke_value_t* rocke_tensor_view_load_vec(rocke_ir_builder_t* b,
         return NULL;
     }
     off = rocke_tensor_descriptor_offset(b, &v->desc, indices, num_indices);
-    if(rocke_tv_name_is(dt, "f16") || rocke_tv_name_is(dt, "bf16") || rocke_tv_name_is(dt, "f64"))
+    if(rocke_tv_name_is(dt, "f16") || rocke_tv_name_is(dt, "bf16") || rocke_tv_name_is(dt, "f64")
+       || rocke_tv_name_is(dt, "fp8e4m3") || rocke_tv_name_is(dt, "bf8e5m2"))
         return rocke_b_global_load_vN(b, v->base, off, dt, n, 0);
     if(rocke_tv_name_is(dt, "f32"))
     {

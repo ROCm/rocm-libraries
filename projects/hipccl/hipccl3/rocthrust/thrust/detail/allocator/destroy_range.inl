@@ -55,7 +55,7 @@ struct has_effectful_member_destroy : has_member_destroy<Allocator, T>
 
 // std::allocator::destroy's only effect is to invoke its argument's destructor
 template <typename U, typename T>
-struct has_effectful_member_destroy<std::allocator<U>, T> : thrust::detail::false_type
+struct has_effectful_member_destroy<std::allocator<U>, T> : _THRUST_STD::false_type
 {};
 
 // case 1: Allocator has an effectful 1-argument member function "destroy"

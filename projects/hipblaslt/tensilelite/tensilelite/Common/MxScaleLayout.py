@@ -22,6 +22,19 @@ from rocisa.instruction import SAddU32, SLShiftRightB32, SMulI32
 MXS_LDS_ALIGN_2D = 64
 
 
+def mxReadVectorWidth(kernel: Mapping, tc: str) -> int:
+    """Scale tiles per LDS read group, without changing the configured width."""
+    if tc == "MXSA" and kernel.get("WaveTileContiguousA"):
+        return 1
+    return kernel["VectorWidth" + tc]
+
+
+def mxSegmentSplit(kernel: Mapping, tc: str) -> bool:
+    """MXSA's two TDM pieces contain M halves in separate LDS segments."""
+    return (tc == "MXSA" and kernel.get("LDSSegmentInterleave") == 1
+            and bool((kernel.get("LDSSegInterleaveOffsets") or {}).get("mxsSplitA")))
+
+
 def mxFreeTile(kernel: Mapping, tc: str) -> int:
     """Free-dim MX share in scale rows. Non-MXS tensors return 1.
 

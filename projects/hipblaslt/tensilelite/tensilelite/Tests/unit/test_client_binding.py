@@ -1,0 +1,620 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+import hashlib
+import json
+import os
+from pathlib import Path, PureWindowsPath
+import shutil
+import subprocess
+import sys
+import warnings
+
+import pytest
+
+import _tensilelite_client_binding as binding
+import tensilelite_configure_client as configure_client
+
+pytestmark = pytest.mark.unit
+
+_SOURCE_REVISION = Path(__file__).resolve().parents[2] / "_source_revision.py"
+_SHA = "0123456789abcdef0123456789abcdef01234567"
+_OTHER_SHA = "89abcdef0123456789abcdef0123456789abcdef"
+_DIRTY = f"{_SHA}.dirty.00a1b2c3d4e5"
+
+
+def _package(tmp_path, revision=_SHA, name="environment"):
+    """An installed-looking tensilelite package directory."""
+    package_dir = (tmp_path / name / "tensilelite").resolve()
+    package_dir.mkdir(parents=True)
+    shutil.copyfile(_SOURCE_REVISION, package_dir / "_source_revision.py")
+    if revision is not False:
+        (package_dir / "_build_info.py").write_text(f"SOURCE_REVISION = {revision!r}\n")
+    return package_dir
+
+
+def _installation(tmp_path, revision=_SHA, editable=False):
+    package_dir = tmp_path / "package" / "tensilelite"
+    if not package_dir.exists():
+        package_dir.mkdir(parents=True)
+        shutil.copyfile(_SOURCE_REVISION, package_dir / "_source_revision.py")
+    return binding.Installation(package_dir, "id", "5.0.0+g" + _SHA, revision, editable)
+
+
+class _Distribution:
+    version = "5.0.0+g" + _SHA
+
+    def __init__(self, package_dir: Path, *, editable: bool = False):
+        self.package_dir = package_dir
+        self.files = () if editable else (Path("tensilelite/__init__.py"),)
+        self.editable = editable
+
+    def locate_file(self, entry):
+        return self.package_dir.parent / entry
+
+    def read_text(self, name):
+        if name == "direct_url.json" and self.editable:
+            return json.dumps(
+                {"url": self.package_dir.parent.as_uri(), "dir_info": {"editable": True}}
+            )
+        return None
+
+
+def _identify(monkeypatch, package_dir, editable=False):
+    monkeypatch.setattr(binding, "_package_dir", lambda: package_dir)
+    monkeypatch.setattr(
+        binding.metadata,
+        "distributions",
+        lambda **unused: [_Distribution(package_dir, editable=editable)],
+    )
+    return binding.current_installation()
+
+
+@pytest.mark.parametrize("editable", [False, True])
+def test_installation_key_uses_exact_resolved_package_directory(tmp_path, monkeypatch, editable):
+    package_dir = _package(tmp_path)
+    monkeypatch.setattr(binding, "_installation_source_revision", lambda *args: None)
+
+    installation = _identify(monkeypatch, package_dir, editable)
+
+    assert installation.package_dir == package_dir
+    assert installation.identifier == hashlib.sha256(os.fsencode(str(package_dir))).hexdigest()
+    assert installation.editable is editable
+
+
+def test_different_worktrees_have_different_installation_keys(tmp_path, monkeypatch):
+    identifiers = [
+        _identify(monkeypatch, _package(tmp_path, name=name)).identifier for name in ("one", "two")
+    ]
+    assert identifiers[0] != identifiers[1]
+
+
+@pytest.mark.parametrize("revision", [_SHA, _DIRTY, None])
+def test_installed_package_reads_its_stamped_revision(tmp_path, monkeypatch, revision):
+    installation = _identify(monkeypatch, _package(tmp_path, revision=revision))
+
+    assert installation.source_revision == revision
+    assert installation.editable is False
+
+
+def test_installed_package_without_a_stamp_has_no_revision(tmp_path, monkeypatch):
+    installation = _identify(monkeypatch, _package(tmp_path, revision=False))
+
+    assert installation.source_revision is None
+
+
+def test_broken_stamp_link_is_an_error(tmp_path, monkeypatch):
+    package_dir = _package(tmp_path, revision=False)
+    (package_dir / "_build_info.py").symlink_to(package_dir / "missing-stamp")
+    installation = _identify(monkeypatch, package_dir)
+    with pytest.raises(binding.ClientBindingError, match="Cannot resolve source revision") as error:
+        _ = installation.source_revision
+    assert isinstance(error.value.__cause__, FileNotFoundError)
+
+
+@pytest.mark.parametrize("contents", [None, "invalid Python ("])
+def test_source_helper_load_failures_are_binding_errors(tmp_path, monkeypatch, contents):
+    package_dir = _package(tmp_path)
+    helper = package_dir / "_source_revision.py"
+    if contents is None:
+        helper.unlink()
+    else:
+        helper.write_text(contents)
+    installation = _identify(monkeypatch, package_dir)
+    with pytest.raises(
+        binding.ClientBindingError, match="Cannot load source revision helper"
+    ) as error:
+        _ = installation.source_revision
+    assert str(helper) in str(error.value)
+    assert isinstance(error.value.__cause__, (OSError, SyntaxError))
+
+
+def test_editable_install_computes_its_revision_from_the_checkout(tmp_path, monkeypatch):
+    package_dir = _package(tmp_path, revision=False)
+    seen = []
+
+    def fake_resolve(root, environ):
+        seen.append((root, environ))
+        return _DIRTY
+
+    original = binding._source_revision_module(package_dir)
+    monkeypatch.setitem(original, "resolve", fake_resolve)
+    monkeypatch.setenv("TENSILELITE_SOURCE_REVISION", _OTHER_SHA)
+
+    installation = _identify(monkeypatch, package_dir, editable=True)
+
+    assert installation.source_revision == _DIRTY
+    assert installation.editable is True
+    # The checkout's own git is the only source; the build-time override never applies.
+    assert seen == [(package_dir.parent, {})]
+
+
+def test_metadata_binding_and_reset_do_not_resolve_revision(tmp_path, monkeypatch):
+    package_dir = _package(tmp_path)
+    monkeypatch.setattr(binding.Path, "home", classmethod(lambda cls: tmp_path))
+    monkeypatch.setattr(
+        binding,
+        "_installation_source_revision",
+        lambda *args: pytest.fail("metadata and reset must not resolve source revision"),
+    )
+    installation = _identify(monkeypatch, package_dir)
+    assert installation.version == _Distribution.version
+    path = binding.binding_path(installation)
+    path.parent.mkdir(parents=True)
+    client = tmp_path / "client"
+    path.write_text(json.dumps(str(client)))
+    assert binding.read_binding(installation) == client
+    configure_client.reset()
+    assert not path.exists()
+
+
+def test_revision_is_lazy_once_per_installation_and_fresh_on_next_operation(tmp_path, monkeypatch):
+    package_dir = _package(tmp_path)
+    seen = []
+    revision = _SHA
+
+    def resolve(*args):
+        seen.append(args)
+        return revision
+
+    monkeypatch.setattr(binding, "_installation_source_revision", resolve)
+    installation = _identify(monkeypatch, package_dir)
+    assert seen == []
+    assert installation.source_revision == _SHA
+    revision = _OTHER_SHA
+    assert installation.source_revision == _SHA
+    assert len(seen) == 1
+    fresh = binding.current_installation()
+    assert fresh.source_revision == _OTHER_SHA
+    assert len(seen) == 2
+
+
+@pytest.mark.parametrize("link_kind", ["symlink", "hardlink"])
+def test_strict_editable_uses_file_ownership_and_actual_source_root(
+    tmp_path, monkeypatch, link_kind
+):
+    source = _package(tmp_path, name="source")
+    (source / "__init__.py").touch()
+    imported = tmp_path / "build" / "__editable__" / "tensilelite"
+    imported.mkdir(parents=True)
+    for name in ("__init__.py", "_source_revision.py"):
+        if link_kind == "symlink":
+            (imported / name).symlink_to(source / name)
+        else:
+            os.link(source / name, imported / name)
+    monkeypatch.setattr(binding, "_package_dir", lambda: imported)
+    monkeypatch.setattr(
+        binding.metadata, "distributions", lambda **unused: [_Distribution(source, editable=True)]
+    )
+    seen = []
+    revisions = binding._source_revision_module(imported)
+    monkeypatch.setitem(revisions, "resolve", lambda root, env: seen.append(root) or _SHA)
+    installation = binding.current_installation()
+    assert installation.package_dir == imported
+    assert installation.source_root == source.parent
+    assert installation.identifier != hashlib.sha256(os.fsencode(str(source))).hexdigest()
+    assert installation.source_revision == _SHA
+    assert seen == [source.parent]
+
+
+@pytest.mark.parametrize("failure", ["unrelated", "partial-link", "ambiguous"])
+def test_installation_rejects_unrelated_or_ambiguous_metadata(tmp_path, monkeypatch, failure):
+    source = _package(tmp_path, name="source")
+    (source / "__init__.py").touch()
+    imported = _package(tmp_path, name="imported")
+    (imported / "__init__.py").touch()
+    if failure == "partial-link":
+        (imported / "__init__.py").unlink()
+        os.link(source / "__init__.py", imported / "__init__.py")
+    distributions = [_Distribution(source, editable=True)]
+    if failure == "ambiguous":
+        imported = source
+        other = _Distribution(source, editable=True)
+        other.version = "0.0.1"
+        distributions.append(other)
+    monkeypatch.setattr(binding, "_package_dir", lambda: imported)
+    monkeypatch.setattr(binding.metadata, "distributions", lambda **unused: distributions)
+    with pytest.raises(binding.ClientBindingError, match="one tensilelite version owning"):
+        binding.current_installation()
+
+
+@pytest.mark.parametrize(
+    "stamp", ["", "SOURCE_REVISION = 'invalid'", "SOURCE_REVISION = (", "SOURCE_REVISION = f()"]
+)
+def test_stamp_failures_preserve_context_and_cause(tmp_path, monkeypatch, stamp):
+    package_dir = _package(tmp_path)
+    (package_dir / "_build_info.py").write_text(stamp)
+    installation = _identify(monkeypatch, package_dir)
+    with pytest.raises(binding.ClientBindingError, match="Cannot resolve source revision") as error:
+        _ = installation.source_revision
+    assert str(package_dir / "_build_info.py") in str(error.value)
+    assert error.value.__cause__ is not None
+
+
+@pytest.mark.parametrize("editable", [False, True])
+def test_revision_io_and_git_failures_are_binding_errors(tmp_path, monkeypatch, editable):
+    package_dir = _package(tmp_path)
+    revisions = binding._source_revision_module(package_dir)
+    cause = (
+        revisions["SourceRevisionError"]("git diff failed") if editable else OSError("read failed")
+    )
+
+    def fail(*args):
+        raise cause
+
+    monkeypatch.setitem(revisions, "resolve" if editable else "read_build_info", fail)
+    installation = _identify(monkeypatch, package_dir, editable)
+    with pytest.raises(binding.ClientBindingError, match="Cannot resolve source revision") as error:
+        _ = installation.source_revision
+    assert error.value.__cause__ is cause
+
+
+@pytest.mark.parametrize(
+    "stamp", ["", "SOURCE_REVISION = 'invalid'", "SOURCE_REVISION = (", "SOURCE_REVISION = f()"]
+)
+def test_cli_stamp_errors_exit_without_traceback(tmp_path, stamp):
+    package_dir = _package(tmp_path)
+    (package_dir / "__init__.py").touch()
+    (package_dir / "_build_info.py").write_text(stamp)
+    metadata_dir = package_dir.parent / "tensilelite-5.0.0.dist-info"
+    metadata_dir.mkdir()
+    (metadata_dir / "METADATA").write_text("Name: tensilelite\nVersion: 5.0.0\n")
+    (metadata_dir / "RECORD").write_text("tensilelite/__init__.py,,\n")
+    client = _client(tmp_path)
+    environment = dict(
+        os.environ,
+        PYTHONPATH=os.pathsep.join((str(package_dir.parent), str(Path(binding.__file__).parent))),
+    )
+    # Keep the subprocess CLI/stamp path real; platform-independent query
+    # answers avoid requiring a native client for this diagnostic test.
+    script = (
+        "import _tensilelite_client_binding as binding; "
+        f"binding._query_client = lambda path, option: {_SHA!r} "
+        "if option == '--source-revision' else '7.2.4'; "
+        "import tensilelite_configure_client as cli; "
+        "raise SystemExit(cli.main())"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", script, "--client", str(client)],
+        cwd=tmp_path,
+        env=environment,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 1
+    assert "tensilelite-configure-client: error:" in result.stderr
+    assert str(package_dir / "_build_info.py") in result.stderr
+    assert "Traceback" not in result.stderr
+
+
+def test_binding_root_and_helper_cache_share_tensilelite_home(tmp_path, monkeypatch):
+    monkeypatch.setattr(binding.Path, "home", classmethod(lambda cls: tmp_path))
+    installation = _installation(tmp_path)
+    assert binding.binding_path(installation) == tmp_path / ".tensilelite/bindings/id/client.json"
+
+
+def test_configure_atomically_replaces_and_reset_removes_one_file(tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    monkeypatch.setattr(binding.Path, "home", classmethod(lambda cls: home))
+    installation = _installation(tmp_path)
+    client = (tmp_path / "client").absolute()
+    client.write_text("client", encoding="utf-8")
+    monkeypatch.setattr(configure_client, "current_installation", lambda: installation)
+    monkeypatch.setattr(configure_client, "validate_client", lambda path, installation: None)
+
+    configure_client.configure(client)
+    path = binding.binding_path(installation)
+    assert json.loads(path.read_text(encoding="utf-8")) == str(client)
+    assert list(path.parent.iterdir()) == [path]
+
+    configure_client.reset()
+    assert not path.exists()
+
+
+def test_ensure_revalidates_an_unchanged_client(tmp_path, monkeypatch):
+    installation = _installation(tmp_path)
+    client = (tmp_path / "client").absolute()
+    client.write_text("client", encoding="utf-8")
+    validated = []
+    monkeypatch.setattr(configure_client, "current_installation", lambda: installation)
+    monkeypatch.setattr(configure_client, "read_binding", lambda unused: client)
+    monkeypatch.setattr(
+        configure_client,
+        "binding_path",
+        lambda unused: pytest.fail("unchanged --ensure-client must not rewrite the binding"),
+    )
+    monkeypatch.setattr(
+        configure_client,
+        "validate_client",
+        lambda path, installation: validated.append((path, installation)),
+    )
+
+    assert configure_client.configure(client, ensure=True) == client
+    assert validated == [(client, installation)]
+
+
+def test_ensure_rejects_a_stale_client_at_the_unchanged_path(tmp_path, monkeypatch):
+    installation = _installation(tmp_path)
+    client = (tmp_path / "client").absolute()
+    client.write_text("client", encoding="utf-8")
+    monkeypatch.setattr(configure_client, "current_installation", lambda: installation)
+    monkeypatch.setattr(configure_client, "read_binding", lambda unused: client)
+
+    def reject(path, installation):
+        raise binding.ClientBindingError(f"stale {installation.source_revision}: {path}")
+
+    monkeypatch.setattr(configure_client, "validate_client", reject)
+
+    with pytest.raises(binding.ClientBindingError, match=f"stale {_SHA}"):
+        configure_client.configure(client, ensure=True)
+
+
+@pytest.mark.parametrize(
+    ("url", "expected"),
+    [
+        ("file:///C:/work/tree", PureWindowsPath("C:/work/tree")),
+        ("file://localhost/C:/work/tree", PureWindowsPath("C:/work/tree")),
+        ("file://server/share/tree", PureWindowsPath("//server/share/tree")),
+        ("file:///C:/work/a%20tree", PureWindowsPath("C:/work/a tree")),
+    ],
+)
+def test_file_url_path_preserves_windows_roots(url, expected):
+    assert binding._file_url_path(url, platform="win32") == expected
+
+
+def test_configured_binding_is_exclusive_even_when_missing(tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    monkeypatch.setattr(binding.Path, "home", classmethod(lambda cls: home))
+    installation = _installation(tmp_path)
+    configured = (tmp_path / "missing-client").absolute()
+    path = binding.binding_path(installation)
+    path.parent.mkdir(parents=True)
+    path.write_text(json.dumps(str(configured)), encoding="utf-8")
+
+    def default_client():
+        raise AssertionError("configured bindings must not resolve a default client")
+
+    selected = binding.selected_client(default_client, installation)
+
+    assert selected == binding.ClientCandidate(configured, "explicit TensileLite client binding")
+
+
+@pytest.mark.parametrize(
+    ("platform", "name"),
+    [
+        ("linux", "tensilelite-client"),
+        ("darwin", "tensilelite-client"),
+        ("win32", "tensilelite-client.exe"),
+    ],
+)
+def test_client_name_and_build_path_contract(tmp_path, platform, name):
+    assert binding.client_executable_name(platform) == name
+    expected = (tmp_path / "build").resolve() / "tensilelite" / "client" / name
+    assert binding.built_client_path(tmp_path / "build", platform) == expected
+
+
+def test_default_client_candidate_uses_first_existing_executable_path(tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    monkeypatch.setattr(binding.Path, "home", classmethod(lambda cls: home))
+    installation = _installation(tmp_path)
+    primary = tmp_path / "primary"
+    fallback = tmp_path / "fallback"
+    executable = "tensilelite-client.exe" if os.name == "nt" else "tensilelite-client"
+    client = fallback / executable
+    client.parent.mkdir()
+    client.write_text("client", encoding="utf-8")
+
+    def default_client():
+        return binding.default_client_candidate(installation, (primary, fallback), "test prefix")
+
+    selected = binding.selected_client(default_client, installation)
+    assert selected == binding.ClientCandidate(client, "test prefix")
+
+
+@pytest.mark.parametrize("editable", [False, True])
+def test_missing_default_client_explains_how_to_get_one(tmp_path, editable):
+    installation = _installation(tmp_path, editable=editable)
+
+    with pytest.raises(binding.ClientBindingError, match="tensilelite-configure-client"):
+        binding.default_client_candidate(installation, (tmp_path / "none",), "test prefix")
+
+
+def _client(tmp_path):
+    client = (tmp_path / "client").absolute()
+    client.write_text("client", encoding="utf-8")
+    client.chmod(0o755)
+    return client
+
+
+def _fake_client(monkeypatch, revision=_SHA, build_rocm="7.2.4 base", **overrides):
+    """Answer the client's identity queries; ``overrides`` replaces one query's result."""
+    answers = {
+        "--source-revision": subprocess.CompletedProcess([], 0, f"{revision}\n", ""),
+        "--build-rocm": subprocess.CompletedProcess([], 0, f"{build_rocm}\n", ""),
+    }
+    answers.update(overrides)
+    queries = []
+    real_run = subprocess.run
+
+    def run(command, **kwargs):
+        if len(command) != 2 or command[1] not in answers:
+            return real_run(command, **kwargs)  # not a client query (e.g. conftest probes)
+        assert kwargs["timeout"] == 5
+        queries.append(command[1])
+        answer = answers[command[1]]
+        if isinstance(answer, BaseException):
+            raise answer
+        return answer
+
+    monkeypatch.setattr(binding.subprocess, "run", run)
+    return queries
+
+
+@pytest.mark.parametrize("revision", [_SHA, _DIRTY])
+def test_installed_package_accepts_the_exact_revision(tmp_path, monkeypatch, revision):
+    queries = _fake_client(monkeypatch, revision=revision)
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        binding.validate_client(_client(tmp_path), _installation(tmp_path, revision=revision))
+    assert "--source-revision" in queries and "--build-rocm" in queries
+
+
+@pytest.mark.parametrize(
+    ("package", "client"),
+    [(_SHA, _OTHER_SHA), (_SHA, _DIRTY), (_DIRTY, _SHA), (_DIRTY, f"{_SHA}.dirty.ffffffffffff")],
+)
+def test_installed_package_rejects_any_other_revision(tmp_path, monkeypatch, package, client):
+    _fake_client(monkeypatch, revision=client, build_rocm="7.12.0rc1 full")
+
+    with pytest.raises(binding.ClientBindingError, match="source revision mismatch") as error:
+        binding.validate_client(_client(tmp_path), _installation(tmp_path, revision=package))
+    message = str(error.value)
+    assert package in message and client in message
+    assert "client build ROCm: 7.12.0rc1 full" in message
+    assert "tensilelite-configure-client" in message
+
+
+def test_editable_install_rejects_another_commit(tmp_path, monkeypatch):
+    _fake_client(monkeypatch, revision=_OTHER_SHA)
+
+    with pytest.raises(binding.ClientBindingError, match="commit mismatch") as error:
+        binding.validate_client(_client(tmp_path), _installation(tmp_path, editable=True))
+    assert "invoke install" in str(error.value)
+
+
+@pytest.mark.parametrize(
+    ("package", "client"), [(_SHA, _DIRTY), (_DIRTY, _SHA), (_DIRTY, f"{_SHA}.dirty.ffffffffffff")]
+)
+def test_editable_install_warns_about_uncommitted_changes(tmp_path, monkeypatch, package, client):
+    _fake_client(monkeypatch, revision=client)
+
+    with pytest.warns(binding.ClientBindingWarning, match="uncommitted changes"):
+        binding.validate_client(
+            _client(tmp_path), _installation(tmp_path, revision=package, editable=True)
+        )
+
+
+@pytest.mark.parametrize("revision", [_SHA, _DIRTY])
+def test_editable_install_accepts_the_same_source_state(tmp_path, monkeypatch, revision):
+    _fake_client(monkeypatch, revision=revision)
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        binding.validate_client(
+            _client(tmp_path), _installation(tmp_path, revision=revision, editable=True)
+        )
+
+
+@pytest.mark.parametrize("editable", [False, True])
+def test_both_source_revisions_missing_warns_and_allows_pairing(tmp_path, monkeypatch, editable):
+    queries = _fake_client(monkeypatch, revision="none")
+    with pytest.warns(binding.ClientBindingWarning, match="could not be verified") as warning:
+        binding.validate_client(
+            _client(tmp_path), _installation(tmp_path, revision=None, editable=editable)
+        )
+    assert "same source" in str(warning[0].message)
+    assert "neither the package nor the client has a source revision" in str(warning[0].message)
+    assert queries == ["--source-revision", "--build-rocm"]
+
+
+@pytest.mark.parametrize("editable", [False, True])
+@pytest.mark.parametrize(
+    "package, client", [(None, _SHA), (None, _DIRTY), (_SHA, "none"), (_DIRTY, "none")]
+)
+def test_exactly_one_source_revision_missing_rejects_pairing(
+    tmp_path, monkeypatch, editable, package, client
+):
+    queries = _fake_client(monkeypatch, revision=client, build_rocm="7.12.0rc1 full")
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        with pytest.raises(binding.ClientBindingError, match="only one") as error:
+            binding.validate_client(
+                _client(tmp_path), _installation(tmp_path, revision=package, editable=editable)
+            )
+    message = str(error.value)
+    assert f"tensilelite source revision: {package or 'none'}" in message
+    assert f"client source revision: {client}" in message
+    assert "client build ROCm: 7.12.0rc1 full" in message
+    assert queries == ["--source-revision", "--build-rocm"]
+    if package is None:
+        expected_hint = "editable Git checkout" if editable else "TENSILELITE_SOURCE_REVISION"
+        assert expected_hint in message
+    else:
+        assert "tensilelite-configure-client" in message
+
+
+@pytest.mark.parametrize("editable", [False, True])
+@pytest.mark.parametrize("package, client", [(None, "invalid"), ("invalid", "none")])
+def test_missing_revision_does_not_hide_malformed_other_revision(
+    tmp_path, monkeypatch, editable, package, client
+):
+    _fake_client(monkeypatch, revision=client)
+    with pytest.raises(binding.ClientBindingError, match="not a git commit"):
+        binding.validate_client(
+            _client(tmp_path), _installation(tmp_path, revision=package, editable=editable)
+        )
+
+
+def test_client_revision_must_be_a_commit(tmp_path, monkeypatch):
+    _fake_client(monkeypatch, revision="5.0.0+rocm7.2.4")
+
+    with pytest.raises(binding.ClientBindingError, match="not a git commit"):
+        binding.validate_client(_client(tmp_path), _installation(tmp_path))
+
+
+def _result(stdout="x\n", stderr="", returncode=0):
+    return subprocess.CompletedProcess([], returncode, stdout, stderr)
+
+
+@pytest.mark.parametrize(
+    ("result", "message"),
+    [
+        (_result(stderr="loader warning"), "wrote to stderr"),
+        (_result(returncode=3), "status 3.*rebuild"),
+        (_result(returncode=-9), "signal 9"),
+        (_result(stdout=""), "exactly one"),
+        (_result(stdout="one\ntwo\n"), "exactly one"),
+    ],
+)
+@pytest.mark.parametrize("query", ["--source-revision", "--build-rocm"])
+def test_client_query_diagnostics(tmp_path, monkeypatch, query, result, message):
+    _fake_client(monkeypatch, **{query: result})
+
+    with pytest.raises(binding.ClientBindingError, match=message):
+        binding.validate_client(_client(tmp_path), _installation(tmp_path))
+
+
+@pytest.mark.parametrize(
+    ("failure", "message"),
+    [
+        (FileNotFoundError("missing loader"), "Could not launch"),
+        (OSError("bad image"), "loader failed"),
+        (subprocess.TimeoutExpired(["client", "--source-revision"], 5), "timed out"),
+    ],
+)
+def test_client_launch_diagnostics(tmp_path, monkeypatch, failure, message):
+    _fake_client(monkeypatch, **{"--source-revision": failure})
+
+    with pytest.raises(binding.ClientBindingError, match=message):
+        binding.validate_client(_client(tmp_path), _installation(tmp_path))

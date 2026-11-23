@@ -126,7 +126,7 @@ copy_n(execution_policy<System>& system, InputIterator first, Size n, OutputIter
     THRUST_HOST static OutputIterator
     par(execution_policy<System>& system, InputIterator first, Size n, OutputIterator result)
     {
-      return result = __copy::device_to_device(system, first, thrust::next(first, n), result);
+      return result = __copy::device_to_device(system, first, _THRUST_STD::next(first, n), result);
     }
 #  if defined(__HIP_DEVICE_COMPILE__)
     THRUST_DEVICE static OutputIterator

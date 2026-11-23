@@ -1674,9 +1674,17 @@ def test_aot_dgrad_builds_tilde_and_stride1_binaries(monkeypatch):
     family = "wmma" if target.wave_size == 32 else "mma"
     jobs = list(aj._dgrad_jobs(_ARCH, "fp16", target.wave_size, family, target, 64))
     patch = [j for j in jobs if j.identity.patch]
-    tilde = [j for j in jobs if j.identity.stride_h == 0 and not j.identity.patch]
+    # The split-K (atomic dX) variants are tilde binaries too, built next to
+    # some of the split_k = 1 ones (see test_aot_dgrad_split_k_variants).
+    split = [j for j in jobs if j.identity.split_k > 1]
+    tilde = [
+        j
+        for j in jobs
+        if j.identity.stride_h == 0 and not j.identity.patch and j.identity.split_k == 1
+    ]
     unit = [j for j in jobs if j.identity.stride_h == 1]
-    assert tilde and len(tilde) + len(unit) + len(patch) == len(jobs)
+    assert all(j.identity.stride_h == 0 for j in split)
+    assert tilde and len(tilde) + len(unit) + len(patch) + len(split) == len(jobs)
     # One stride-1 binary per tilde one outside the wavelet pipeline, and it
     # is the tap-outer one.
     assert all(j.identity.tap_outer_k for j in unit)
@@ -2716,8 +2724,10 @@ def test_aot_grid_caps_accumulator_registers(monkeypatch):
 
 def test_cache_applies_runtime_launch_limits(tmp_path):
     """Rules that depend on the launch-time problem, not on the binary: the
-    per-axis grid cap. The grouped implicit dgrad binary also serves depthwise
-    (cpg == 1), a one-column GEMM per group."""
+    per-axis grid cap, and the depthwise (cpg == 1) refusal.
+    identity_supports_problem refuses depthwise (cpg == 1) for the grouped
+    implicit-GEMM dgrad binary; depthwise dgrad runs on the direct depthwise
+    kernels."""
     from benchmarks.common.kernel_cache import KernelCache, KernelIdentity
 
     cache = KernelCache(tmp_path, _ARCH)
@@ -2765,11 +2775,15 @@ def test_cache_applies_runtime_launch_limits(tmp_path):
     grouped = ConvProblem(N=2, Hi=16, Wi=16, **dict(shape, C=64, K=64), groups=4)
     depthwise = ConvProblem(N=2, Hi=16, Wi=16, **dict(shape, C=64, K=64), groups=64)
     assert cache.supports_problem(dgrad, grouped)[0]
-    assert cache.supports_problem(dgrad, depthwise)[0]
+    ok, why = cache.supports_problem(dgrad, depthwise)
+    assert not ok and "depthwise" in why
 
-    # A split-K 16-bit dX binary needs an even cpg (packed <2 x dtype> atomic
-    # pairs must stay within one group's slab); depthwise has cpg=1 and must
-    # be rejected, while grouped's cpg=16 is unaffected.
+    # A split-K binary serves the same problems: grouped (even cpg) is still
+    # accepted. The even-cpg rule for a split-K 16-bit dX atomic is also
+    # checked here, because a grouped binary takes cpg at run time: an odd
+    # cpg is refused with the builder's own reason. Depthwise (cpg == 1) is
+    # odd, so a split-K binary refuses it on that rule; the unsplit binary
+    # above covers the separate depthwise rule.
     split_k_dgrad = KernelIdentity(
         direction="dgrad",
         tile_m=64,
@@ -2782,6 +2796,16 @@ def test_cache_applies_runtime_launch_limits(tmp_path):
         split_k=2,
         **common,
     )
-    ok, why = cache.supports_problem(split_k_dgrad, depthwise)
-    assert not ok and "cpg" in why
+    odd_cpg = ConvProblem(N=2, Hi=16, Wi=16, **dict(shape, C=12, K=12), groups=4)
     assert cache.supports_problem(split_k_dgrad, grouped)[0]
+    ok, why = cache.supports_problem(split_k_dgrad, odd_cpg)
+    assert not ok and "even channels-per-group" in why
+    ok, why = cache.supports_problem(split_k_dgrad, depthwise)
+    assert not ok and "even channels-per-group" in why
+    # Only a 16-bit dX uses the packed atomic: bf16 is refused the same way,
+    # fp32 takes an odd cpg.
+    from dataclasses import replace
+
+    ok, why = cache.supports_problem(replace(split_k_dgrad, dtype_d="bf16"), odd_cpg)
+    assert not ok and "even channels-per-group" in why
+    assert cache.supports_problem(replace(split_k_dgrad, dtype_d="fp32"), odd_cpg)[0]

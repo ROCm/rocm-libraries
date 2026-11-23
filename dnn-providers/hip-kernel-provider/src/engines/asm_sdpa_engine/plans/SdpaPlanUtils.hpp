@@ -3,22 +3,74 @@
 
 #pragma once
 
+#include "core/Utils.hpp"
+
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
+#include <exception>
 #include <hip/hip_runtime.h>
 #include <hip_kernel_provider_common/HipDeviceUtils.hpp>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/sdpa_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
+#include <hipdnn_plugin_sdk/RuntimePassByValue.hpp>
 #include <initializer_list>
+#include <iomanip>
+#include <limits>
 #include <optional>
+#include <sstream>
 #include <string>
+#include <unordered_map>
+
+/**
+ * @brief Applicability-check convention of the ASM SDPA plan builders (local to
+ * asm_sdpa_engine; other hip-kernel-provider engines use HIP_KERNEL_RETURN_FALSE_IF).
+ *
+ * A check returns asm_sdpa_engine::plan_utils::Rejection: std::nullopt when the
+ * graph passes, otherwise the reason the engine declines it. Checks compose with
+ * HIP_KERNEL_RETURN_IF_REJECTED and the top-level isApplicable() logs the reason once,
+ * so no check expands a logging macro of its own.
+ *
+ * HIP_KERNEL_REJECT_IF returns `message` from a Rejection-returning function when
+ * `condition` holds. `message` follows HIP_KERNEL_RETURN_FALSE_IF's rule: it is
+ * substituted unparenthesised after `std::string{} +` so `+`-chained pieces fold into
+ * a std::string left to right.
+ */
+#define HIP_KERNEL_REJECT_IF(condition, message)                                      \
+    do                                                                                \
+    {                                                                                 \
+        if(condition)                                                                 \
+        {                                                                             \
+            /* NOLINTNEXTLINE(bugprone-macro-parentheses) */                          \
+            return ::asm_sdpa_engine::plan_utils::Rejection{std::string{} + message}; \
+        }                                                                             \
+    } while(0)
+
+/**
+ * @brief Forwards a sub-check's Rejection to the caller (which must return Rejection).
+ */
+#define HIP_KERNEL_RETURN_IF_REJECTED(check)  \
+    do                                        \
+    {                                         \
+        if(auto hipKernelRejection = (check)) \
+        {                                     \
+            return hipKernelRejection;        \
+        }                                     \
+    } while(0)
 
 namespace asm_sdpa_engine
 {
 namespace plan_utils
 {
+
+// Why a builder declines a graph: std::nullopt when applicable, otherwise the reason.
+using Rejection = std::optional<std::string>;
 
 // =============================================================================
 // Tensor dtype classification
@@ -206,6 +258,42 @@ inline std::pair<int32_t, int32_t> computeMaskCoordinates(
 }
 
 // =============================================================================
+// Operand shape consistency
+// =============================================================================
+
+// The forward kernel's head-group arithmetic and tensor addressing assume the shapes of Q,
+// K, V and O describe one attention problem: Q [B, Hq, Sq, Dqk], K [B, Hkv, Skv, Dqk],
+// V [B, Hkv, Skv, Dv], O [B, Hq, Sq, Dv] with Hq a multiple of Hkv. Ranks are already 4.
+// The kernel takes the QK head size from Q alone, so K must agree with it.
+inline bool hasConsistentFwdShapes(const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& q,
+                                   const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& k,
+                                   const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& v,
+                                   const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& o)
+{
+    for(const auto* tensor : {&q, &k, &v, &o})
+    {
+        for(const auto dim : *tensor->dims())
+        {
+            if(dim <= 0)
+            {
+                return false;
+            }
+        }
+    }
+
+    const auto* qd = q.dims();
+    const auto* kd = k.dims();
+    const auto* vd = v.dims();
+    const auto* od = o.dims();
+    const int64_t headsQ = qd->Get(1);
+    const int64_t headsKv = kd->Get(1);
+    return kd->Get(0) == qd->Get(0) && kd->Get(3) == qd->Get(3) && vd->Get(0) == qd->Get(0)
+           && vd->Get(1) == headsKv && vd->Get(2) == kd->Get(2) && headsQ % headsKv == 0
+           && od->Get(0) == qd->Get(0) && od->Get(1) == headsQ && od->Get(2) == qd->Get(2)
+           && od->Get(3) == vd->Get(3);
+}
+
+// =============================================================================
 // Kernarg range primitives
 // =============================================================================
 //
@@ -292,12 +380,280 @@ inline std::optional<std::string> tryGetDeviceString(hipStream_t stream, const c
     }
 }
 
+// =============================================================================
+// Attention scale
+// =============================================================================
+
 // The attention scale the kernels apply when the graph has no scale tensor:
 // attn_scale_value, or 1.0 (no scaling, cuDNN's default) when it is unset.
 template <typename SdpaAttrsT>
 float attnScaleOrDefault(const SdpaAttrsT& attrs)
 {
     return attrs.attn_scale_value().value_or(1.0f);
+}
+
+// =============================================================================
+// Applicability checks shared by SdpaFwdPlanBuilder and SdpaBwdPlanBuilder
+// =============================================================================
+
+using TensorMap
+    = std::unordered_map<int64_t, const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>;
+
+// Looks up a tensor the node references; a UID missing from the graph declines it.
+inline Rejection
+    findRequiredTensor(const TensorMap& tensorMap,
+                       const char* name,
+                       int64_t uid,
+                       const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*& tensor)
+{
+    const auto it = tensorMap.find(uid);
+    HIP_KERNEL_REJECT_IF(it == tensorMap.end(),
+                         std::string(name) + " tensor UID " + std::to_string(uid)
+                             + " not present in graph");
+    tensor = it->second;
+    return std::nullopt;
+}
+
+// Graph-level requirements both SDPA builders share: no execute-time override shapes
+// (the family serves fixed prebuilt shapes, RFC 0008 §4.6), no `ragged_offset_multiplier`
+// on a tensor without a ragged offset, 16-byte aligned tensors, exactly one node of
+// `expectedType`, accumulating in FLOAT.
+inline Rejection
+    checkSdpaGraphBasics(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
+                         hipdnn_flatbuffers_sdk::data_objects::NodeAttributes expectedType)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+    // Execute-time override shapes can diverge from the compile-time dims the
+    // builders match exactly, so decline rather than risk a mismatch.
+    HIP_KERNEL_REJECT_IF(opGraph.getGraph().is_override_shape_enabled(),
+                         "Graph has override shapes enabled");
+    HIP_KERNEL_REJECT_IF(
+        !hip_kernel_provider::core::utils::hasNoStrayRaggedOffsetMultiplier(opGraph.getTensorMap()),
+        "ragged_offset_multiplier is set on a tensor without a ragged offset");
+    HIP_KERNEL_REJECT_IF(
+        !hip_kernel_provider::core::utils::hasOnly16ByteAlignedTensors(opGraph.getTensorMap()),
+        "All tensors must be aligned to a multiple of 16 bytes");
+
+    const auto& nodeWrappers = opGraph.nodeWrappers();
+    HIP_KERNEL_REJECT_IF(nodeWrappers.size() != 1, "Graph has more than one node");
+    const auto& node = *nodeWrappers.front();
+    HIP_KERNEL_REJECT_IF(node.attributesType() != expectedType,
+                         "Node attribute type is not "
+                             + std::string(EnumNameNodeAttributes(expectedType)));
+    HIP_KERNEL_REJECT_IF(node.computeDataType() != DataType::FLOAT,
+                         "compute_data_type must be FLOAT (fp32 accumulation) (Actual value: "
+                             + std::string(EnumNameDataType(node.computeDataType())) + ")");
+    return std::nullopt;
+}
+
+// Features neither SDPA direction dispatches; scale_tensor_uid only as a pass-by-value scalar (RFC 0016).
+template <typename SdpaAttrsT>
+Rejection checkCommonUnsupportedFeatures(const SdpaAttrsT& attrs, const TensorMap& tensorMap)
+{
+    HIP_KERNEL_REJECT_IF(attrs.dropout_probability().has_value()
+                             && attrs.dropout_probability().value() != 0.f,
+                         "dropout_probability must be unset or zero (Actual value: "
+                             + std::to_string(attrs.dropout_probability().value()) + ")");
+    HIP_KERNEL_REJECT_IF(attrs.alibi_mask(), "alibi_mask must be false");
+    HIP_KERNEL_REJECT_IF(attrs.attn_mask_tensor_uid(), // Change to bias
+                         "attn_mask tensor not supported");
+
+    // Accept scale_tensor_uid only when it is a runtime pass-by-value scalar
+    // (RFC 0016).  Non-pass-by-value scale tensors are not supported.
+    if(attrs.scale_tensor_uid().has_value())
+    {
+        const auto scaleIt = tensorMap.find(attrs.scale_tensor_uid().value());
+        HIP_KERNEL_REJECT_IF(scaleIt == tensorMap.end(),
+                             "scale_tensor_uid not found in tensor map");
+        HIP_KERNEL_REJECT_IF(
+            !hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(scaleIt->second),
+            "scale tensor must be pass-by-value (compile-time constant or runtime)");
+    }
+    return std::nullopt;
+}
+
+// A tensor the kernels read or write through a device pointer. A virtual tensor has no
+// buffer, and a pass-by-value one is delivered as a host pointer (or not at all).
+inline Rejection
+    checkDeviceBufferTensor(const char* label,
+                            const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& tensor)
+{
+    HIP_KERNEL_REJECT_IF(
+        tensor.virtual_() || hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(&tensor),
+        std::string(label) + " tensor must be a non-virtual, non-pass-by-value device tensor");
+    return std::nullopt;
+}
+
+// Q/K/V(/O) requirement: a device buffer (neither virtual nor pass-by-value) and rank 4,
+// which every later dims()->Get(0..3) relies on.
+inline Rejection
+    checkRank4DeviceTensor(const char* label,
+                           const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& tensor)
+{
+    HIP_KERNEL_RETURN_IF_REJECTED(checkDeviceBufferTensor(label, tensor));
+    HIP_KERNEL_REJECT_IF(tensor.dims()->size() != 4,
+                         std::string(label) + " tensor must be rank 4 (Actual rank: "
+                             + std::to_string(tensor.dims()->size()) + ")");
+    return std::nullopt;
+}
+
+// Classifies the requested mask on the graph's sequence lengths into `maskType`.
+// Contradictory mask attributes (resolveDiagonalBand throws INVALID_VALUE) are a decline.
+template <typename SdpaAttrsT>
+Rejection
+    tryClassifyMask(const SdpaAttrsT& attrs, int64_t seqLenQ, int64_t seqLenKv, MaskType& maskType)
+{
+    try
+    {
+        const auto band = makeCoveringBoundsUnbound(resolveDiagonalBand(attrs), seqLenQ, seqLenKv);
+        maskType = getMaskType(band.leftBound, band.rightBound, band.alignment);
+    }
+    catch(const hipdnn_plugin_sdk::HipdnnPluginException& e)
+    {
+        return Rejection{e.what()};
+    }
+    return std::nullopt;
+}
+
+// False for an attention scale the kernels are known to mishandle: one that is
+// not a finite, positive, normal float (FLT_MIN <= scale <= FLT_MAX, so NaN
+// fails). cuDNN and hipDNN accept any scale value, so the engine must decline
+// these. Passing this check is necessary, not sufficient: large finite scales can
+// still fail (see below).
+//
+// The kernels write -inf into every masked score (causal and sliding-window masks,
+// and the padding past S_kv in the last K tile) and only then multiply the scores
+// by scale * log2(e). A scale of 0 turns those scores into NaN (-inf * 0), and a
+// negative scale turns them into +inf. The bf16 forward kernels also start the
+// running row max at max(-FLT_MAX, -FLT_MAX / (scale * log2(e))). That is positive
+// for a negative scale and +inf for -0.0, so even with no mask the exp2 inputs
+// overflow, or for -0.0 are NaN (-0 * +inf). 32-bit denormals are flushed, so a
+// subnormal scale acts as 0.
+//
+// Large scales are tracked by ALMIOPEN-3137, because the limit depends on the input. With
+// c = scale * log2(e), the forward computes each exp2 input as
+// fma(score, c, -(c * row max)), with the product rounded. For the row's max score
+// only the rounding residue is left, up to half an ulp of the product, so exp2 can
+// overflow or underflow once |c * row max of the raw scores| reaches 2^31. On
+// gfx942, scales of 1e37 and 1e38 gave NaN O this way with raw scores around 1e-3.
+// The backward subtracts a rounded LSE * log2(e) the same way; it was not tested
+// with such scales.
+//
+// The fp8 forward instead multiplies the scores by scale * log2(e) * q_descale *
+// k_descale, and starts the row max at max(-FLT_MAX, -FLT_MAX / (q_descale *
+// k_descale)). The descales live in device memory and are not checked, so a
+// descale product that is not positive, or small enough to flush that factor to
+// 0, fails like an unsupported scale.
+//
+// (From the gfx942 .co disassembly. The gfx950 bf16 forward kernels contain the
+// same sentinel, row max start and fma.)
+inline bool isSupportedAttnScale(float scale)
+{
+    return scale >= std::numeric_limits<float>::min() && scale <= std::numeric_limits<float>::max();
+}
+
+// Avoid an out-of-range double-to-float conversion. Infinities and finite values
+// outside the float range become infinities, which isSupportedAttnScale rejects.
+// Values within the range retain the usual rounding to the kernel's float type.
+inline float narrowAttnScale(double scale)
+{
+    if(std::isnan(scale))
+    {
+        return std::numeric_limits<float>::quiet_NaN();
+    }
+    if(scale > static_cast<double>(std::numeric_limits<float>::max()))
+    {
+        return std::numeric_limits<float>::infinity();
+    }
+    if(scale < -static_cast<double>(std::numeric_limits<float>::max()))
+    {
+        return -std::numeric_limits<float>::infinity();
+    }
+    return static_cast<float>(scale);
+}
+
+// An attention scale as text, for decline reasons and errors.
+inline std::string attnScaleToString(float scale)
+{
+    std::ostringstream text;
+    text << std::setprecision(std::numeric_limits<float>::max_digits10) << scale;
+    return text.str();
+}
+
+// The attention scale the kernels will receive, if it is known before execute:
+// attn_scale_value or its default when the graph has no scale tensor, or else the
+// value of a compile-time constant or runtime-with-default pass-by-value scale
+// tensor, which buildPlan bakes. Narrowed to the f32 kernarg, as execute narrows
+// it. std::nullopt for a pure runtime pass-by-value scale tensor, whose value
+// arrives at execute. Throws, as buildPlan would, when the scale tensor's value
+// cannot be read.
+template <typename SdpaAttrsT>
+std::optional<float> attnScaleBeforeExecute(
+    const SdpaAttrsT& attrs,
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
+        tensorMap)
+{
+    if(!attrs.scale_tensor_uid().has_value())
+    {
+        return attnScaleOrDefault(attrs);
+    }
+    const auto operand = hipdnn_plugin_sdk::makeScalarOperand(
+        tensorMap, attrs.scale_tensor_uid().value(), "attn_scale");
+    if(operand.isRuntimeUserSupplied)
+    {
+        return std::nullopt;
+    }
+    return narrowAttnScale(hipdnn_plugin_sdk::toDouble(operand.bakedDefault));
+}
+
+// Check a scale known before execute; pure runtime pass-by-value scales are
+// checked at execute instead. Share the policy and decline diagnostics between
+// the forward and backward applicability predicates.
+template <typename SdpaAttrsT>
+Rejection checkAttnScale(
+    const SdpaAttrsT& attrs,
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
+        tensorMap)
+{
+    std::optional<float> attnScale;
+    try
+    {
+        attnScale = attnScaleBeforeExecute(attrs, tensorMap);
+    }
+    catch(const std::exception& e)
+    {
+        return Rejection{std::string{"scale tensor value cannot be read: "} + e.what()};
+    }
+    HIP_KERNEL_REJECT_IF(attnScale.has_value() && !isSupportedAttnScale(*attnScale),
+                         "attention scale must be a finite, positive, normal float (Actual value: "
+                             + attnScaleToString(*attnScale) + ")");
+    return std::nullopt;
+}
+
+// Resolves the attention scale into the f32 kernarg at execute. Throws
+// HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM) for a scale the kernels
+// mishandle (see isSupportedAttnScale), so call it before the first launch.
+// isApplicable declines every other such scale, so only a pure runtime
+// pass-by-value scale tensor can fail here.
+inline float resolveSupportedAttnScale(const hipdnn_plugin_sdk::ScalarOperand& attnScale,
+                                       const hipdnnPluginDeviceBuffer_t* deviceBuffers,
+                                       uint32_t numDeviceBuffers,
+                                       const char* caller)
+{
+    const auto scale = narrowAttnScale(hipdnn_plugin_sdk::toDouble(
+        hipdnn_plugin_sdk::resolveScalarOperand(attnScale, deviceBuffers, numDeviceBuffers)));
+    if(!isSupportedAttnScale(scale))
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            std::string(caller)
+                + ": attention scale must be a finite, positive, normal float (Actual value: "
+                + attnScaleToString(scale) + ")");
+    }
+    return scale;
 }
 
 } // namespace plan_utils

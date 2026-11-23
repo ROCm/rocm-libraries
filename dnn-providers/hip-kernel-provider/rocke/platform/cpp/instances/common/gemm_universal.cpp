@@ -66,7 +66,7 @@ static const rocke_mmaop_t* rocke_gemm_resolve_mma_op(const rocke_gemm_universal
                                                       const char* arch,
                                                       const rocke_archtarget_t* target)
 {
-    const char* a_name; /* homogeneous A/B/C (validated in _storage_dtype) */
+    const char* a_name; /* A/B storage dtype (validated in _storage_dtype) */
     const rocke_gemm_tile_spec_t* t;
     if(spec == NULL || target == NULL)
     {
@@ -85,39 +85,61 @@ static const rocke_mmaop_t* rocke_gemm_resolve_mma_op(const rocke_gemm_universal
                                          nullptr);
 }
 
-/* _storage_dtype(spec): validate homogeneous A/B/C + fp32 acc (fp64 acc for
- * fp64 storage) + RCR layout, then map the storage dtype string to its IR
- * type. On a Python ValueError path this returns NULL and sets the builder's
- * sticky error. */
+/* _validate_storage(spec): validate the spec's storage dtypes, then map the A/B
+ * storage dtype string to its IR type and write C's to `c_ty_out` (when
+ * non-NULL). A/B/C are homogeneous (f32 acc, or fp64 acc for fp64 storage)
+ * except on the gfx1250 fp8/bf8 WMMA path, where A/B are 8-bit floats and C
+ * stays 16-bit (there is no fp8 accumulator).
+ * On a Python ValueError path this returns NULL and sets the builder's sticky
+ * error. */
 static const rocke_type_t* rocke_gemm_storage_dtype(rocke_ir_builder_t* b,
-                                                    const rocke_gemm_universal_spec_t* spec)
+                                                    const rocke_gemm_universal_spec_t* spec,
+                                                    const rocke_type_t** c_ty_out)
 {
     const rocke_gemm_data_spec_t* d = &spec->data;
-    if(strcmp(d->dtype_a, d->dtype_b) != 0 || strcmp(d->dtype_a, d->dtype_c) != 0)
+    const rocke_type_t* ty;
+    const rocke_type_t* c_ty;
+
     {
-        /* "requires homogeneous A/B/C dtypes" */
-        return rocke_b_io_ir_type(b, "");
-    }
-    if(strcmp(d->dtype_a, "fp64") == 0)
-    {
-        if(strcmp(d->dtype_acc, "fp64") != 0 && strcmp(d->dtype_acc, "f64") != 0)
+        /* Python ValueError: set the builder's sticky error to its text. */
+        char reason[256] = {0};
+        if(!rocke_gemm_check_storage(spec, reason, sizeof(reason)))
         {
-            return rocke_b_io_ir_type(b, "");
+            rocke_i_set_err_msg(b, ROCKE_ERR_VALUE, reason);
+            return NULL;
         }
     }
-    else if(strcmp(d->dtype_acc, "fp32") != 0 && strcmp(d->dtype_acc, "f32") != 0)
+    ty = rocke_gemm_dtype_ir(d->dtype_a);
+    c_ty = rocke_gemm_dtype_ir(d->dtype_c);
+    if(ty == NULL || c_ty == NULL)
     {
-        return rocke_b_io_ir_type(b, "");
+        /* io_ir_type's ValueError, through the helper that sets it. */
+        return rocke_b_io_ir_type(b, ty == NULL ? d->dtype_a : d->dtype_c);
     }
-    if(strcmp(d->layout, "RCR") != 0)
+    if(c_ty_out != NULL)
     {
-        return rocke_b_io_ir_type(b, "");
+        *c_ty_out = c_ty;
     }
-    if(strcmp(d->dtype_a, "fp64") == 0)
-    {
-        return rocke_f64();
-    }
-    return rocke_b_io_ir_type(b, d->dtype_a); /* _dtype_ir == io_ir_type */
+    return ty;
+}
+
+/* Mirrors Python _dtype_bytes(dtype). */
+int rocke_gemm_dtype_bytes(const char* dtype)
+{
+    const rocke_dtype_info_t* info = rocke_dtype_info(dtype);
+    return (info != NULL) ? (info->encoded_bits / 8) : 2;
+}
+
+/* Mirrors Python _tdm_pipelined(trait). */
+bool rocke_gemm_tdm_pipelined(const rocke_gemm_trait_spec_t* trait)
+{
+    return trait->tdm && trait->tdm_depth >= 2;
+}
+
+/* Mirrors Python _tdm_ring_depth(trait). */
+int rocke_gemm_tdm_ring_depth(const rocke_gemm_trait_spec_t* trait)
+{
+    return (trait->tdm && trait->tdm_depth >= 3) ? trait->tdm_depth : 0;
 }
 
 /* _ilog2(x): bit_length()-1 for powers of two, else -1 (Python returns None). */
@@ -491,7 +513,9 @@ rocke_kernel_def_t* rocke_build_wsp3_gemm(rocke_ir_builder_t* b,
         return NULL;
     }
     rocke_gemm_atom_frag_lengths(op, &a_per_lane, &b_per_lane, &c_per_lane);
-    storage_dtype = rocke_gemm_storage_dtype(b, spec);
+    /* Python gemm_wsp3.py calls _storage_dtype(spec) (= _validate_storage(spec)[0]);
+     * A/B are fp16-only here (rejected above), so C never differs. */
+    storage_dtype = rocke_gemm_storage_dtype(b, spec, NULL);
     if(storage_dtype == NULL)
     {
         return NULL;
@@ -1015,7 +1039,7 @@ rocke_kernel_def_t* rocke_build_universal_gemm(rocke_ir_builder_t* b,
         rocke_attr_set_int(b, &b->kernel->attrs, "waves_per_eu", spec->trait.waves_per_eu);
     }
 
-    ctx.storage_dtype = rocke_gemm_storage_dtype(b, spec);
+    ctx.storage_dtype = rocke_gemm_storage_dtype(b, spec, &ctx.c_storage_dtype);
     if(ctx.storage_dtype == NULL)
     {
         return NULL;
@@ -1058,7 +1082,7 @@ rocke_kernel_def_t* rocke_build_universal_gemm(rocke_ir_builder_t* b,
             opts.writeonly_set = true;
             opts.align = 16;
             opts.align_set = true;
-            ctx.C = rocke_b_param(b, "C", ptr_storage, &opts);
+            ctx.C = rocke_b_param(b, "C", rocke_ptr_type(b, ctx.c_storage_dtype, "global"), &opts);
         }
 
         ctx.M = rocke_b_param(b, "M", rocke_i32(), NULL);
@@ -1186,6 +1210,29 @@ rocke_kernel_def_t* rocke_build_universal_gemm(rocke_ir_builder_t* b,
         ctx.batch_off_b = ctx.c0;
         ctx.batch_off_c = ctx.c0;
     }
+    /* The TDM fills' batch offsets, decided once here and only here: one i64
+     * per operand, which rocke_gemm_tdm_issue adds as it is. The fills address
+     * in i64, and an i32 batch offset would wrap first once a batch passes
+     * 2^31 elements. Every term is non-negative, so each widens with zext.
+     * Python's order. */
+    ctx.tdm_batch_a = NULL;
+    ctx.tdm_batch_b = NULL;
+    if(spec->trait.tdm)
+    {
+        if(spec->batched)
+        {
+            rocke_value_t* batch64 = rocke_b_zext(b, ctx.batch_idx, rocke_i64());
+            rocke_value_t* stride_a64 = rocke_b_zext(b, ctx.stride_a, rocke_i64());
+            ctx.tdm_batch_a = rocke_b_mul(b, batch64, stride_a64);
+            rocke_value_t* stride_b64 = rocke_b_zext(b, ctx.stride_b, rocke_i64());
+            ctx.tdm_batch_b = rocke_b_mul(b, batch64, stride_b64);
+        }
+        else
+        {
+            ctx.tdm_batch_a = rocke_b_const_i64(b, 0);
+            ctx.tdm_batch_b = ctx.tdm_batch_a;
+        }
+    }
 
     /* ---- per-CTA tile origins (SGPR-pinned) -- */
     if(spec->trait.chiplet_swizzle)
@@ -1222,8 +1269,8 @@ rocke_kernel_def_t* rocke_build_universal_gemm(rocke_ir_builder_t* b,
     }
 
     /* ---- AB LDS double-buffer plan (_ab_lds_plan) -- */
-    ctx.prefetch = spec->trait.dtl_prefetch;
-    if(ctx.prefetch && !spec->trait.direct_to_lds)
+    ctx.prefetch = spec->trait.dtl_prefetch || rocke_gemm_tdm_pipelined(&spec->trait);
+    if(spec->trait.dtl_prefetch && !spec->trait.direct_to_lds)
     {
         /* "dtl_prefetch requires direct_to_lds=True" -- ValueError path. */
         return NULL;
@@ -1258,12 +1305,17 @@ rocke_kernel_def_t* rocke_build_universal_gemm(rocke_ir_builder_t* b,
         db = spec->trait.pipeline != NULL && strcmp(spec->trait.pipeline, "compv4") == 0
              && spec->trait.epilogue != NULL && strcmp(spec->trait.epilogue, "cshuffle") != 0
              && !spec->trait.direct_to_lds && db_fits_2wg;
-        two_buf = (spec->trait.dtl_prefetch ? true : false) || db;
+        two_buf = (spec->trait.dtl_prefetch ? true : false) || db
+                  || rocke_gemm_tdm_pipelined(&spec->trait);
         ctx.db = db;
         ctx.two_buf = two_buf;
     }
-    ctx.A_LDS_M = (ctx.two_buf ? 2 : 1) * ctx.block_m;
-    ctx.B_LDS_N = (ctx.two_buf ? 2 : 1) * ctx.block_n;
+    ctx.tdm_ring = rocke_gemm_tdm_ring_depth(&spec->trait);
+    {
+        int nbuf = ctx.tdm_ring ? ctx.tdm_ring : (ctx.two_buf ? 2 : 1);
+        ctx.A_LDS_M = nbuf * ctx.block_m;
+        ctx.B_LDS_N = nbuf * ctx.block_n;
+    }
     ctx.lds_pad = spec->trait.direct_to_lds ? 0 : spec->trait.lds_k_pad;
     ctx.lds_k = ctx.block_k + ctx.lds_pad;
     {
@@ -1429,6 +1481,36 @@ rocke_kernel_def_t* rocke_build_universal_gemm(rocke_ir_builder_t* b,
         ctx.dtl_c_cols_per_chunk
             = rocke_b_const_i32(b, ctx.dtl_sub_elem ? ctx.dtl_bytes_per_lane : ctx.dtl_halves);
         ctx.dtl_c_block_size = rocke_b_const_i32(b, spec->block_size);
+    }
+
+    /* ---- TDM plumbing. Mirrors Python's `if spec.trait.tdm:` prologue. ---- */
+    if(spec->trait.tdm)
+    {
+        ctx.tdm_elem_bytes = rocke_gemm_elem_bytes(spec);
+        rocke_gemm_tdm_padding_for_tile(ctx.tdm_elem_bytes,
+                                        ctx.block_k,
+                                        spec->trait.lds_k_pad,
+                                        &ctx.tdm_pad_enable,
+                                        &ctx.tdm_pad_interval,
+                                        &ctx.tdm_pad_amount,
+                                        NULL,
+                                        0);
+        ctx.tdm_a_lds_base = rocke_b_smem_addr_of(b, ctx.A_smem);
+        ctx.tdm_b_lds_base = rocke_b_smem_addr_of(b, ctx.B_smem);
+        ctx.tdm_a_buf_bytes = ctx.block_m * ctx.lds_k * ctx.tdm_elem_bytes;
+        ctx.tdm_b_buf_bytes = ctx.block_n * ctx.lds_k * ctx.tdm_elem_bytes;
+        /* The waves the kernel launches. Not warp_m * warp_n * warp_k: with
+         * warp_k > 1 that counts waves a block_size of warp_m * warp_n waves
+         * never launches, and a fill gated on one of them never happens. */
+        ctx.tdm_waves = spec->block_size / spec->wave_size;
+        if(ctx.tdm_waves > 1)
+        {
+            ctx.tdm_wave_id = rocke_b_readfirstlane(b, rocke_b_div(b, ctx.tid, ctx.c_wave));
+        }
+        else
+        {
+            ctx.tdm_wave_id = rocke_b_const_i32(b, 0);
+        }
     }
 
     /* ---- active-tile gate (batched && active_tile_skip) -- */

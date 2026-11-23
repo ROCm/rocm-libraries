@@ -3,13 +3,15 @@
 
 """Performance knobs of the gfx950 GDN/KDA decode emitter, without a GPU.
 
-Covers the ``spec -> IR`` contract of the ten knobs (ALGORITHM.md §4.10):
+Covers the ``spec -> IR`` contract of the eleven knobs (ALGORITHM.md §4.10):
 
-* the validator rejects every non-bool flag, every unknown hint and every
-  out-of-range ``waves_per_eu``, and each dependency rule;
+* the validator rejects every non-bool flag, every unknown hint, every
+  out-of-range ``waves_per_eu`` and every unknown ``row_loads``, and each
+  dependency rule;
 * a tile knob that is inert on a tile (its ``*_applies`` predicate is False)
   emits the knob-off kernel under the knob-off name, and one that applies
-  changes both, so the name stays a faithful cache key;
+  changes both, so the name stays a faithful cache key; ``row_loads`` changes
+  both exactly where it forces the order auto does not choose;
 * names stay injective across knob combinations;
 * the hints, ``waves_per_eu`` and ``dpp_reduce`` change the IR in the way
   their docs claim.
@@ -27,12 +29,17 @@ import itertools
 import pytest
 
 from kernels.gfx950.gdn_decode import (
+    ROW_LOADS,
     STATE_HINTS,
     GdnDecodeSpec,
+    auto_late_row_inputs,
     build_gdn_decode,
     dpp_reduce_applies,
     interleave_cols_applies,
     is_valid_spec,
+    late_row_inputs,
+    row_loads_applies,
+    row_loads_overrides,
     stream_rows_applies,
     xcd_remap_applies,
 )
@@ -52,6 +59,8 @@ BOOL_KNOBS = (
 _FUSED = dict(
     num_k_heads=16, num_v_heads=16, num_warps=4, warp_threads_k=16, blocks_per_v_dim=1
 )
+# One wave with fuse_conv: the only tile where row_loads applies.
+_ONE_WAVE = dict(_FUSED, num_warps=1, warp_threads_k=8, fuse_conv=True)
 
 
 def _spec(**kw) -> GdnDecodeSpec:
@@ -324,6 +333,12 @@ def _knob_variants():
         ),
         "simple_lh": _spec(simple=True, state_load_hint="streaming"),
         "simple_wpe": _spec(simple=True, waves_per_eu=2),
+        "w1": _spec(**_ONE_WAVE, fuse_out_norm=True),
+        "w1_rlf": _spec(**_ONE_WAVE, fuse_out_norm=True, row_loads="first"),
+        "w1_co": _spec(**_ONE_WAVE, fuse_out_norm=True, conv_once=True),
+        "w1_co_rll": _spec(
+            **_ONE_WAVE, fuse_out_norm=True, conv_once=True, row_loads="late"
+        ),
     }
     tile = ("dpp_reduce", "xcd_remap", "stream_rows")
     for r in range(2, len(tile) + 1):
@@ -383,3 +398,78 @@ def test_dpp_reduce_replaces_the_xor4_and_xor8_swizzles(wtk, dk, swizzles_left):
     assert is_valid_spec(base, arch=ARCH)[0]
     assert "ds.swizzle" in _lower(base)
     assert ("ds.swizzle" in _lower(dc.replace(base, dpp_reduce=True))) is swizzles_left
+
+
+# ---------------------------------------------------------------- row_loads
+
+
+class _Str(str):
+    pass
+
+
+@pytest.mark.parametrize(
+    "value", ["early", "AUTO", "First", "late ", "", None, True, 1, _Str("late")]
+)
+def test_unknown_row_loads_is_rejected(value):
+    # Refused on every spec, the ones it would not change included, and named
+    # apart from every legal order: the name keys the launcher cache, which is
+    # read before the validator.
+    for spec in (_spec(row_loads=value), _spec(**_ONE_WAVE, row_loads=value)):
+        ok, why = is_valid_spec(spec, arch=ARCH)
+        assert not ok
+        assert "row_loads must be one of" in why
+        legal = {dc.replace(spec, row_loads=o).kernel_name() for o in ROW_LOADS}
+        assert spec.kernel_name() not in legal
+
+
+_W1 = dict(_ONE_WAVE, fuse_out_norm=True)
+# case -> (spec at row_loads="auto", row_loads applies, auto loads late)
+_ROW_LOADS_CASES = {
+    "plain": (_spec(), False, False),
+    "simple": (_spec(simple=True), False, False),
+    "w4_cv_rn": (_spec(**_FUSED, fuse_conv=True, fuse_out_norm=True), False, False),
+    "w1_rn": (_spec(**dict(_W1, fuse_conv=False)), False, False),
+    "w1k8_cv_rn": (_spec(**_W1), True, True),
+    "w1k8_cv_rn_co": (_spec(**_W1, conv_once=True), True, False),
+    "w1k4_cv_co_kda_f32": (
+        _spec(
+            **dict(_ONE_WAVE, warp_threads_k=4),
+            conv_once=True,
+            gate_kind="kda",
+            state_dtype="f32",
+        ),
+        True,
+        False,
+    ),
+    "w1k8_cv_rn_co_wpe4": (_spec(**_W1, conv_once=True, waves_per_eu=4), True, True),
+    "w1k16_cv_rn_co": (
+        _spec(**dict(_W1, warp_threads_k=16), conv_once=True),
+        True,
+        True,
+    ),
+    "w1k8_cv_rn_co_d64": (
+        _spec(**_W1, conv_once=True, head_k_dim=64, head_v_dim=64),
+        True,
+        True,
+    ),
+}
+
+
+@pytest.mark.parametrize("order", ["first", "late"])
+@pytest.mark.parametrize("case", sorted(_ROW_LOADS_CASES))
+def test_row_loads_name_and_ir_follow_its_predicate(case, order):
+    auto, applies, auto_late = _ROW_LOADS_CASES[case]
+    forced = dc.replace(auto, row_loads=order)
+    assert is_valid_spec(forced, arch=ARCH)[0], is_valid_spec(forced, arch=ARCH)[1]
+    assert row_loads_applies(forced) is applies
+    assert auto_late_row_inputs(forced) is auto_late
+    late = order == "late" if applies else auto_late
+    assert late_row_inputs(forced) is late
+    changes = applies and late is not auto_late
+    assert row_loads_overrides(forced) is changes
+    # Inert, or forced to auto's own order: auto's kernel under auto's name.
+    # Forced to the other order: a new kernel under a new name.
+    assert (_lower(forced) == _lower(auto)) is (not changes), forced.kernel_name()
+    assert (forced.kernel_name() == auto.kernel_name()) is (not changes)
+    token = {"first": "_rlf", "late": "_rll"}[order]
+    assert forced.kernel_name().endswith(token) is changes

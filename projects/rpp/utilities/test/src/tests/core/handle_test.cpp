@@ -25,6 +25,8 @@ SOFTWARE.
 #include <gtest/gtest.h>
 #include <rpp/rpp.h>
 
+#include <string>
+
 #include "framework/backend_param.hpp"
 #include "framework/skip_list.hpp"
 
@@ -49,6 +51,35 @@ TEST_P(HandleTest, BatchSizeRoundTrip) {
     EXPECT_EQ(batchSize, 16u);
 
     EXPECT_EQ(rppDestroy(handle, GetParam()), rppStatusSuccess);
+}
+
+// RPP logs the rejection to stderr; capture it so the run output stays clean.
+TEST_P(HandleTest, DestroyNullHandle) {
+    ::testing::internal::CaptureStderr();
+    const rppStatus_t status = rppDestroy(nullptr, GetParam());
+    const std::string log = ::testing::internal::GetCapturedStderr();
+    EXPECT_EQ(status, rppStatusBadParm);
+    EXPECT_NE(log.find("Dereferencing nullptr"), std::string::npos) << log;
+}
+
+TEST_P(HandleTest, DestroyInvalidBackendKeepsHandle) {
+    rppHandle_t handle = nullptr;
+    ASSERT_EQ(rppCreate(&handle, 4, 0, nullptr, GetParam()), rppStatusSuccess);
+
+    EXPECT_EQ(rppDestroy(handle, static_cast<RppBackend>(99)), rppStatusNotImplemented);
+    size_t batchSize = 0;
+    EXPECT_EQ(rppGetBatchSize(handle, &batchSize), rppStatusSuccess);
+    EXPECT_EQ(batchSize, 4u);
+
+    EXPECT_EQ(rppDestroy(handle, GetParam()), rppStatusSuccess);
+}
+
+// rppDestroy must release the handle by its own backend, not the (possibly defaulted) argument.
+TEST_P(HandleTest, DestroyWithOtherBackend) {
+    rppHandle_t handle = nullptr;
+    ASSERT_EQ(rppCreate(&handle, 4, 0, nullptr, GetParam()), rppStatusSuccess);
+    const RppBackend other = GetParam() == RPP_HOST_BACKEND ? RPP_HIP_BACKEND : RPP_HOST_BACKEND;
+    EXPECT_EQ(rppDestroy(handle, other), rppStatusSuccess);
 }
 
 INSTANTIATE_TEST_SUITE_P(, HandleTest, ::testing::ValuesIn(available_backends()),

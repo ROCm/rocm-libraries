@@ -21,6 +21,7 @@
  * THE SOFTWARE.
  *
  * ************************************************************************ */
+#include "rocsparse_check_cholesky.hpp"
 #include "rocsparse_enum.hpp"
 #include "testing.hpp"
 
@@ -225,6 +226,26 @@ static void test_csric0_matrix(rocsparse_local_handle&    handle,
 
             hcsr_val_gold.near_check(hcsr_val_1);
             hcsr_val_gold.near_check(hcsr_val_2);
+            // The residual is meaningless if the factorization overflowed.
+            if(std::none_of(hcsr_val_gold.begin(), hcsr_val_gold.end(), [](const T& v) {
+                   return rocsparse_isnan(v) || rocsparse_isinf(v);
+               }))
+            {
+                check_csr_cholesky(M,
+                                   hcsr_row_ptr.data(),
+                                   hcsr_col_ind.data(),
+                                   hcsr_val.data(),
+                                   hcsr_val_1.data(),
+                                   base,
+                                   "csric0, pointer mode host");
+                check_csr_cholesky(M,
+                                   hcsr_row_ptr.data(),
+                                   hcsr_col_ind.data(),
+                                   hcsr_val.data(),
+                                   hcsr_val_2.data(),
+                                   base,
+                                   "csric0, pointer mode device");
+            }
         }
         else
         {
@@ -464,6 +485,17 @@ void testing_csric0_bad_arg(const Arguments& arg)
     EXPECT_ROCSPARSE_STATUS(rocsparse_csric0_clear(nullptr, info), rocsparse_status_invalid_handle);
     EXPECT_ROCSPARSE_STATUS(rocsparse_csric0_clear(handle, nullptr),
                             rocsparse_status_invalid_pointer);
+
+    // Test rocsparse_csric0_set_tolerance()
+    {
+        static constexpr int nargs_to_exclude                  = 1;
+        const int            args_to_exclude[nargs_to_exclude] = {2};
+        const double         tol                               = 0.0;
+        select_bad_arg_analysis(
+            rocsparse_csric0_set_tolerance, nargs_to_exclude, args_to_exclude, handle, info, tol);
+        EXPECT_ROCSPARSE_STATUS(rocsparse_csric0_set_tolerance(handle, info, -1.0),
+                                rocsparse_status_invalid_value);
+    }
 
     // Additional tests for invalid zero matrices
     EXPECT_ROCSPARSE_STATUS(

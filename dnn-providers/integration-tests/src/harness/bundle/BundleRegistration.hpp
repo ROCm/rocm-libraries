@@ -3,11 +3,14 @@
 
 #pragma once
 
+#include <algorithm>
 #include <exception>
 #include <filesystem>
+#include <functional>
 #include <iostream>
 #include <memory>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -347,16 +350,28 @@ struct BundleRegistrationStats
 namespace detail
 {
 
-// The bundle root and every bundle discovered under it.
+// The bundle root, the bundles discovered under it, and the sweep roots that discovery
+// counted but did not parse.
 struct DiscoveredBundleSet
 {
     std::filesystem::path dataDir;
     std::vector<DiscoveredBundle> bundles;
+    std::vector<UnparsedSweep> unparsedSweeps;
 };
 
-// Discovery, shared by both binaries. Returns nullopt when bundles are switched off
-// or there is nothing to discover; the reason is already on stderr.
-inline std::optional<DiscoveredBundleSet> discoverDataDirBundles()
+// True when a discovery found no bundle test and no case in a sweep root that it did
+// not parse.
+inline bool hasNoDiscoveredBundles(const BundleDiscoveryResult& result)
+{
+    return result.bundles.empty()
+           && std::all_of(result.unparsedSweeps.begin(),
+                          result.unparsedSweeps.end(),
+                          [](const UnparsedSweep& sweep) { return sweep.caseCount == 0; });
+}
+
+// The bundle root, or nullopt when bundles are switched off or the root does not exist;
+// the reason is already on stderr.
+inline std::optional<std::filesystem::path> enabledDataDir()
 {
     if(!TestConfig::get().allowBundles())
     {
@@ -370,11 +385,29 @@ inline std::optional<DiscoveredBundleSet> discoverDataDirBundles()
                   << dataDir << "\n";
         return std::nullopt;
     }
+    return dataDir;
+}
 
-    std::vector<DiscoveredBundle> discovered;
+// Discovers the bundles under `dataDir`. Returns nullopt when there is nothing to
+// discover; the reason is already on stderr.
+//
+// Without `mayParseSuite`, discovery parses every sweep manifest. With it, discovery
+// parses only the sweep roots whose suite name it accepts; see discoverBundles().
+inline std::optional<DiscoveredBundleSet>
+    discoverBundleSet(std::filesystem::path dataDir,
+                      const std::function<bool(const std::string& suiteName)>& mayParseSuite)
+{
+    BundleDiscoveryResult discovered;
     try
     {
-        discovered = discoverBundles(dataDir);
+        if(mayParseSuite)
+        {
+            discovered = discoverBundles(dataDir, mayParseSuite);
+        }
+        else
+        {
+            discovered.bundles = discoverBundles(dataDir);
+        }
     }
     catch(const std::exception& e)
     {
@@ -382,14 +415,28 @@ inline std::optional<DiscoveredBundleSet> discoverDataDirBundles()
         throw;
     }
 
-    if(discovered.empty())
+    if(hasNoDiscoveredBundles(discovered))
     {
         std::cerr << "WARNING: Bundle tests are enabled but no bundles were found in " << dataDir
                   << "\n";
         return std::nullopt;
     }
 
-    return DiscoveredBundleSet{std::move(dataDir), std::move(discovered)};
+    return DiscoveredBundleSet{
+        std::move(dataDir), std::move(discovered.bundles), std::move(discovered.unparsedSweeps)};
+}
+
+// Discovery for the golden-data binary: every sweep manifest is parsed. Returns nullopt
+// when bundles are switched off or there is nothing to discover; the reason is already
+// on stderr.
+inline std::optional<DiscoveredBundleSet> discoverDataDirBundles()
+{
+    auto dataDir = enabledDataDir();
+    if(!dataDir.has_value())
+    {
+        return std::nullopt;
+    }
+    return discoverBundleSet(std::move(*dataDir), {});
 }
 
 // The eager load, shared by both binaries. Returns nullopt when nothing loaded; the
@@ -505,7 +552,9 @@ inline FilterSplit splitByGTestFilter(std::vector<DiscoveredBundle> discovered,
 }
 
 // Narrows the discovered bundles to the ones `filter` selects, and accounts for the rest,
-// before any of them is loaded.
+// before any of them is loaded. `unparsedSweeps` are the sweep roots that discovery did
+// not parse because `filter` selects none of their cases. Their cases count as
+// discovered and as excluded.
 //
 // GTest applies --gtest_filter only inside RUN_ALL_TESTS(), after every bundle would
 // have been parsed, expanded and had its tensors read. Dropping what the filter is
@@ -514,25 +563,42 @@ inline FilterSplit splitByGTestFilter(std::vector<DiscoveredBundle> discovered,
 //
 // `writing` (--write-support-claims) keeps every bundle: authoring needs every graph
 // loaded, because `graphsFound` is the denominator for the graphs it did not observe.
+// A writing run must therefore discover without unparsed sweeps.
 //
 // `observing` (an engine is named and claims are not being written) also counts the
 // excluded bundles into `coverage`. The coverage ladder counts every claim-bearing
 // graph on disk and attributes the gap to the filter (`not_selected`), so an excluded
 // bundle is counted by sidecar presence only, which is what the load would have counted
 // too. A bundle that would have failed to load is counted here and was not before; such
-// a bundle is already a red test whenever a run does select it.
+// a bundle is already a red test whenever a run does select it. All cases of a sweep
+// share its sidecar, so an unparsed sweep counts its cases all together.
 //
 // These counters are the denominators the summary divides by, so a miscount here does
 // not merely misreport -- it reattributes every gap line to the wrong cause. The
 // counters are parameters so a test can check them.
-inline std::vector<DiscoveredBundle> selectBundlesToLoad(std::vector<DiscoveredBundle> discovered,
-                                                         std::string_view filter,
-                                                         bool writing,
-                                                         bool observing,
-                                                         BundleRegistrationStats& stats,
-                                                         SupportClaimCoverage& coverage)
+inline std::vector<DiscoveredBundle>
+    selectBundlesToLoad(std::vector<DiscoveredBundle> discovered,
+                        const std::vector<UnparsedSweep>& unparsedSweeps,
+                        std::string_view filter,
+                        bool writing,
+                        bool observing,
+                        BundleRegistrationStats& stats,
+                        SupportClaimCoverage& coverage)
 {
-    stats.discovered = discovered.size();
+    if(writing && !unparsedSweeps.empty())
+    {
+        throw std::logic_error("Writing support claims needs every sweep manifest parsed, but "
+                               + std::to_string(unparsedSweeps.size())
+                               + " sweep root(s) were not parsed");
+    }
+
+    size_t unparsedCases = 0;
+    for(const auto& sweep : unparsedSweeps)
+    {
+        unparsedCases += sweep.caseCount;
+    }
+
+    stats.discovered = discovered.size() + unparsedCases;
     stats.excludedByFilter = 0;
 
     if(writing)
@@ -541,11 +607,11 @@ inline std::vector<DiscoveredBundle> selectBundlesToLoad(std::vector<DiscoveredB
     }
 
     auto split = splitByGTestFilter(std::move(discovered), filter);
-    stats.excludedByFilter = split.excluded.size();
+    stats.excludedByFilter = split.excluded.size() + unparsedCases;
 
-    if(!split.excluded.empty())
+    if(stats.excludedByFilter != 0)
     {
-        std::cerr << "--gtest_filter excluded " << split.excluded.size() << " of "
+        std::cerr << "--gtest_filter excluded " << stats.excludedByFilter << " of "
                   << stats.discovered << " discovered bundle test(s) before loading\n";
     }
 
@@ -559,9 +625,56 @@ inline std::vector<DiscoveredBundle> selectBundlesToLoad(std::vector<DiscoveredB
                 coverage.graphsWithClaims++;
             }
         }
+        for(const auto& sweep : unparsedSweeps)
+        {
+            coverage.graphsFound += sweep.caseCount;
+            if(sweep.caseCount != 0
+               && std::filesystem::exists(
+                   sweepCaseClaimLocator(sweep.sweepDir / "sweep.json", {}).sidecarPath))
+            {
+                coverage.graphsWithClaims += sweep.caseCount;
+            }
+        }
     }
 
     return std::move(split.selected);
+}
+
+// Discovery and selection for the engine binary. Discovers the bundles under `dataDir`
+// and keeps the ones selectBundlesToLoad() selects. Returns nullopt when there is
+// nothing to discover; the reason is already on stderr.
+//
+// A run that does not write claims parses only the sweep roots that `filter` can select.
+// A writing run parses every sweep manifest.
+inline std::optional<DiscoveredBundleSet> discoverAndSelectBundles(std::filesystem::path dataDir,
+                                                                   const std::string& filter,
+                                                                   bool writing,
+                                                                   bool observing,
+                                                                   BundleRegistrationStats& stats,
+                                                                   SupportClaimCoverage& coverage)
+{
+    std::function<bool(const std::string&)> mayParseSuite;
+    if(!writing)
+    {
+        mayParseSuite = [&filter](const std::string& suiteName) {
+            return gtestFilterMaySelectSuite(filter, suiteName);
+        };
+    }
+
+    auto discovered = discoverBundleSet(std::move(dataDir), mayParseSuite);
+    if(!discovered.has_value())
+    {
+        return std::nullopt;
+    }
+
+    discovered->bundles = selectBundlesToLoad(std::move(discovered->bundles),
+                                              discovered->unparsedSweeps,
+                                              filter,
+                                              writing,
+                                              observing,
+                                              stats,
+                                              coverage);
+    return discovered;
 }
 
 } // namespace detail
@@ -590,20 +703,19 @@ inline BundleRegistrationStats
 
     BundleRegistrationStats stats;
 
-    auto discovered = detail::discoverDataDirBundles();
-    if(!discovered.has_value())
+    auto dataDir = detail::enabledDataDir();
+    if(!dataDir.has_value())
     {
         return stats;
     }
 
-    discovered->bundles = detail::selectBundlesToLoad(std::move(discovered->bundles),
-                                                      GTEST_FLAG_GET(filter),
-                                                      writing,
-                                                      observing,
-                                                      stats,
-                                                      supportClaimCoverage());
-
-    if(discovered->bundles.empty())
+    auto discovered = detail::discoverAndSelectBundles(std::move(*dataDir),
+                                                       GTEST_FLAG_GET(filter),
+                                                       writing,
+                                                       observing,
+                                                       stats,
+                                                       supportClaimCoverage());
+    if(!discovered.has_value() || discovered->bundles.empty())
     {
         return stats;
     }

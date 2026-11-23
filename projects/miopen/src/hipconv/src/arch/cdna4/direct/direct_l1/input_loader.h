@@ -7,6 +7,7 @@
 #include "packed_ops.h"
 #include "swizzle.h"
 #include "types.h"
+#include "unfold_chunks.h"
 
 namespace hipconv::cdna4
 {
@@ -40,7 +41,7 @@ using direct_l1::Config;
 //
 // Address split: voffset (per-lane) carries (n, column, c-unit) with no H term (OOB
 // columns fold their offset in once); soffset (per-row SGPR) carries the H term.
-// An OOB row sets soffset = 0 and lets the OOB voffset null the read.
+// An OOB row loads at the OOB voffset, which nulls the read whatever soffset holds.
 template <Config cfg, typename datatype_t>
 class InputLoader
 {
@@ -89,8 +90,8 @@ public:
                   "direct_l1 input tile needs more W-strip waves than the workgroup has; "
                   "raise waves_k (or lower block_q / kw) for this config.");
 
-    // Kw * 2 main-loop steps; input rows spread evenly, rows_per_step per step.
-    static constexpr int num_load_steps = cfg.kw * 2;
+    // One load step per main-loop step; input rows spread evenly, rows_per_step per step.
+    static constexpr int num_load_steps = cfg.num_steps();
     static constexpr int rows_per_step  = divup(LdsLayout::block_size_h, num_load_steps);
 
     // Per-step load count MAXIMUM (rows_per_step); the ragged last step loads fewer.
@@ -176,9 +177,16 @@ public:
 
         // Fold this tile's image origin into the 64-bit base pointer so the 32-bit
         // buffer offsets only span the tile's images. The whole tensor may exceed
-        // 4 GiB; one image (nu images under batch-unfold) fits an int32 offset.
+        // 4 GiB; one image (nu under batch-unfold, two under unfold_chunks) fits an int32
+        // offset.
         const size_t img_stride = static_cast<size_t>(pars.H) * pars.W * pars.C;
-        const size_t image0     = static_cast<size_t>(block_n) * nu;
+        // unfold_chunks: block_n is a slot group.
+        const direct_l1::ChunkGroup group =
+            cfg.unfold_chunks ? direct_l1::chunk_group(block_n, nu, pars.chunks_per_row)
+                              : direct_l1::ChunkGroup{0, 0};
+        const size_t image0       = cfg.unfold_chunks ? static_cast<size_t>(group.image0)
+                                                      : static_cast<size_t>(block_n) * nu;
+        constexpr int window_imgs = cfg.unfold_chunks ? 2 : nu;
 
         // large_tensor: also fold the tile's row origin into the 64-bit base.
         //
@@ -205,10 +213,10 @@ public:
         // The window span is the whole image (baseline) or, for large_tensor, just the
         // folded tile's block_size_h rows: the per-image span can exceed int32, while
         // the row span covers every real read and still clamps to the tensor tail.
-        const size_t window_span_bytes = cfg.large_tensor
-                                             ? static_cast<size_t>(LdsLayout::block_size_h) *
-                                                   global_layout.strides().h() * sizeof(src_t)
-                                             : static_cast<size_t>(nu) * img_stride * sizeof(src_t);
+        const size_t window_span_bytes =
+            cfg.large_tensor ? static_cast<size_t>(LdsLayout::block_size_h) *
+                                   global_layout.strides().h() * sizeof(src_t)
+                             : static_cast<size_t>(window_imgs) * img_stride * sizeof(src_t);
         const size_t remaining_bytes =
             (static_cast<size_t>(pars.N) * img_stride - image0 * img_stride -
              static_cast<size_t>(group_c_base) - row_off) *
@@ -259,6 +267,21 @@ public:
                 global_layout.w(global_w).c(c_unit * chan_per_unit).offset * src_elem_bytes;
             voffset_base_ = col_in_image ? real_off_bytes : oob_offset_bytes_;
         }
+        else if constexpr(cfg.unfold_chunks)
+        {
+            // Columns past the row and slots past the last image take the OOB voffset.
+            const int slot = w_tile / LdsLayout::w_per_image;
+            const int col  = w_tile % LdsLayout::w_per_image;
+            const direct_l1::SlotChunk sc =
+                direct_l1::slot_chunk(group.chunk0, slot, pars.chunks_per_row);
+            const int global_w = block_w + sc.chunk * LdsLayout::w_unfold + col;
+            const bool in_image =
+                (0 <= global_w) && (global_w < pars.W) && (group.image0 + sc.image < pars.N);
+            const int real_off_bytes =
+                global_layout.n(sc.image).w(global_w).c(c_unit * chan_per_unit).offset *
+                src_elem_bytes;
+            voffset_base_ = in_image ? real_off_bytes : oob_offset_bytes_;
+        }
         else
         {
             // Batch-unfold: w_tile decodes to (n_local, w_in_image).
@@ -306,7 +329,8 @@ public:
             const int global_h      = block_h_ + row;
             const bool row_in_image = (0 <= global_h) && (global_h < H_);
 
-            // soffset is added but skips the range check, so voffset alone nulls OOB rows.
+            // The buffer range check adds soffset to voffset without wrapping, so the OOB
+            // voffset nulls an OOB row for any soffset, negative included (large as unsigned).
             //
             // large_tensor folded the tile's row origin (max(0, block_h)) into the
             // 64-bit base, so soffset carries only the row-relative term and cannot

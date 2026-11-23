@@ -24,35 +24,79 @@ namespace {
 // and route it by default_left; Zero-type nodes send an exact zero left.
 constexpr int kMissingTypeZero = 1;
 constexpr int kMissingTypeNaN  = 2;
+
+// Per-node flag bits of the compact FOREST block.
+constexpr std::uint8_t kFlagDefaultLeft     = 0x01;
+constexpr int kFlagMissingTypeShift         = 1;
+constexpr std::uint8_t kFlagMissingTypeMask = 0x03;
+constexpr std::uint8_t kFlagCategorical     = 0x08;
+
+// Child indices are stored as signed integers of the block's child width
+// (1, 2 or 4 bytes); widen them to the in-memory int.
+std::vector<std::int32_t> ReadChildren(BinReader& reader, std::uint8_t width, std::size_t n)
+{
+    std::vector<std::int32_t> out;
+    switch(width)
+    {
+    case 1: {
+        const auto v = reader.ReadArray<std::int8_t>(n);
+        out.assign(v.begin(), v.end());
+        break;
+    }
+    case 2: {
+        const auto v = reader.ReadArray<std::int16_t>(n);
+        out.assign(v.begin(), v.end());
+        break;
+    }
+    default: out = reader.ReadArray<std::int32_t>(n); break;
+    }
+    return out;
+}
+
+// Leaf values are stored as f32 (default) or f64 and always scored in double.
+std::vector<double> ReadLeaves(BinReader& reader, std::uint8_t width, std::size_t n)
+{
+    if(width == 8)
+        return reader.ReadArray<double>(n);
+    const auto v = reader.ReadArray<float>(n);
+    return {v.begin(), v.end()};
+}
 } // namespace
 
 LgbmForest::LgbmForest(BinReader& reader)
 {
-    // FOREST block: u32 num_trees, then per tree the decoded node arrays,
-    // leaf values, and categorical bitset/offset runs. See lgbm_binary.hpp and
-    // script/convert_lgbm_binary.py; the exporter already decodes LightGBM's
-    // decision_type into split/cat/default_left/missing_type, so nothing is
-    // decoded here.
-    const std::uint32_t num_trees = reader.ReadU32();
-    for(std::uint32_t t = 0; t < num_trees; ++t)
+    // Compact FOREST block (see lgbm_binary.hpp and script/convert_lgbm_binary.py):
+    // u32 num_trees, u32 num_thresholds, f64[num_thresholds] threshold table,
+    // u8 child_width (1|2|4), u8 leaf_width (4|8), then per tree
+    // u16 n (internal nodes; leaves = n + 1), u8[n] split_feature,
+    // u16[n] threshold-table index (cat_offsets index for categorical nodes),
+    // child_width[n] left, child_width[n] right, u8[n] flags, leaf_width[n+1]
+    // leaf values, u16 + u32[] cat_bitset, u16 + u16[] cat_offsets.
+    // Thresholds stay exact f64, so every split decides exactly as the trained
+    // model does; only leaf values may be narrowed to f32.
+    const std::uint32_t num_trees      = reader.ReadU32();
+    const std::uint32_t num_thresholds = reader.ReadU32();
+    const auto thresholds              = reader.ReadArray<double>(num_thresholds);
+    const std::uint8_t child_width     = reader.ReadU8();
+    const std::uint8_t leaf_width      = reader.ReadU8();
+    bool valid = (child_width == 1 || child_width == 2 || child_width == 4) &&
+                 (leaf_width == 4 || leaf_width == 8);
+
+    for(std::uint32_t t = 0; valid && t < num_trees; ++t)
     {
-        const std::uint32_t num_nodes = reader.ReadU32();
-        const auto split_feature      = reader.ReadArray<std::int32_t>(num_nodes);
-        const auto threshold          = reader.ReadArray<double>(num_nodes);
-        const auto left               = reader.ReadArray<std::int32_t>(num_nodes);
-        const auto right              = reader.ReadArray<std::int32_t>(num_nodes);
-        const auto cat_index          = reader.ReadArray<std::int32_t>(num_nodes);
-        const auto default_left       = reader.ReadArray<std::uint8_t>(num_nodes);
-        const auto missing_type       = reader.ReadArray<std::uint8_t>(num_nodes);
+        const std::uint16_t num_nodes = reader.ReadU16();
+        const auto split_feature      = reader.ReadArray<std::uint8_t>(num_nodes);
+        const auto split_index        = reader.ReadArray<std::uint16_t>(num_nodes);
+        const auto left               = ReadChildren(reader, child_width, num_nodes);
+        const auto right              = ReadChildren(reader, child_width, num_nodes);
+        const auto flags              = reader.ReadArray<std::uint8_t>(num_nodes);
+        auto leaf_values              = ReadLeaves(reader, leaf_width, std::size_t{num_nodes} + 1);
 
-        const std::uint32_t num_leaves = reader.ReadU32();
-        auto leaf_values               = reader.ReadArray<double>(num_leaves);
-
-        const std::uint32_t cat_bitset_len = reader.ReadU32();
+        const std::uint16_t cat_bitset_len = reader.ReadU16();
         auto cat_bitset                    = reader.ReadArray<std::uint32_t>(cat_bitset_len);
 
-        const std::uint32_t cat_offsets_len = reader.ReadU32();
-        const auto cat_offsets              = reader.ReadArray<std::int64_t>(cat_offsets_len);
+        const std::uint16_t cat_offsets_len = reader.ReadU16();
+        const auto cat_offsets              = reader.ReadArray<std::uint16_t>(cat_offsets_len);
 
         // Any short read latched reader.Ok() to false and left the arrays empty;
         // stop before indexing them so a truncated file abstains cleanly.
@@ -64,26 +108,41 @@ LgbmForest::LgbmForest(BinReader& reader)
         tree.cat_bitset  = std::move(cat_bitset);
         tree.cat_offsets.assign(cat_offsets.begin(), cat_offsets.end());
         tree.nodes.resize(num_nodes);
-        for(std::uint32_t i = 0; i < num_nodes; ++i)
+        for(std::uint16_t i = 0; i < num_nodes; ++i)
         {
             Node node{};
-            node.split_feature = split_feature[i];
-            node.threshold     = threshold[i];
-            node.left          = left[i];
-            node.right         = right[i];
-            node.cat_index     = cat_index[i];
-            node.default_left  = default_left[i] != 0;
-            node.missing_type  = missing_type[i];
-            tree.nodes[i]      = node;
+            const bool categorical = (flags[i] & kFlagCategorical) != 0;
+            node.split_feature     = split_feature[i];
+            node.left              = left[i];
+            node.right             = right[i];
+            node.default_left      = (flags[i] & kFlagDefaultLeft) != 0;
+            node.missing_type      = (flags[i] >> kFlagMissingTypeShift) & kFlagMissingTypeMask;
+            if(categorical)
+            {
+                node.cat_index = split_index[i];
+                node.threshold = 0.0;
+            }
+            else
+            {
+                if(split_index[i] >= num_thresholds)
+                {
+                    valid = false;
+                    break;
+                }
+                node.cat_index = -1;
+                node.threshold = thresholds[split_index[i]];
+            }
+            tree.nodes[i] = node;
         }
-        trees_.push_back(std::move(tree));
+        if(valid)
+            trees_.push_back(std::move(tree));
     }
 
-    ready_ = reader.Ok() && !trees_.empty();
+    ready_ = valid && reader.Ok() && !trees_.empty();
     if(ready_)
         MIOPEN_LOG_I2("LGBM forest loaded: " << trees_.size() << " trees (binary)");
     else
-        MIOPEN_LOG_W("LGBM forest: binary block truncated or empty; picker will abstain");
+        MIOPEN_LOG_W("LGBM forest: binary block truncated, corrupt or empty; picker will abstain");
 }
 
 double LgbmForest::ScoreTree(const Tree& tree, const LgbmEntry* row) const

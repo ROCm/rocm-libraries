@@ -120,17 +120,17 @@ typedef enum rocsparse_hip_debug_info_
 /*! \ingroup aux_module
    * \details Enable HIP debug.
    */
-ROCSPARSE_EXPORT rocsparse_status rocsparse_hip_debug_enable();
+ROCSPARSE_EXPORT rocsparse_status rocsparse_hip_debug_enable(void);
 
 /*! \ingroup aux_module
    * \details Disable HIP debug.
    */
-ROCSPARSE_EXPORT rocsparse_status rocsparse_hip_debug_disable();
+ROCSPARSE_EXPORT rocsparse_status rocsparse_hip_debug_disable(void);
 
 /*! \ingroup aux_module
    * \details State of hip_debug, 1: enable, 0 otherwise.
    */
-ROCSPARSE_EXPORT int32_t rocsparse_hip_debug_state();
+ROCSPARSE_EXPORT int32_t rocsparse_hip_debug_state(void);
 
 /*! \ingroup aux_module
    * \details Start HIP debug.

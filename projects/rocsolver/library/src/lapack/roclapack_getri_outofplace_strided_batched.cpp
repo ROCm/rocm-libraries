@@ -43,20 +43,20 @@ rocblas_status rocsolver_getri_outofplace_strided_batched_impl(rocblas_handle ha
                                                                const rocblas_int strideC,
                                                                rocblas_int* info,
                                                                const bool pivot,
-                                                               const rocblas_int batch_count)
+                                                               const rocblas_int batch_count_arg)
 try
 {
     const char* name
         = (pivot ? "getri_outofplace_strided_batched" : "getri_npvt_outofplace_strided_batched");
     ROCSOLVER_ENTER_TOP(name, "-n", n, "--lda", lda, "--strideA", strideA, "--strideP", strideP,
-                        "--ldc", ldc, "--strideC", strideC, "--batch_count", batch_count);
+                        "--ldc", ldc, "--strideC", strideC, "--batch_count", batch_count_arg);
 
     if(!handle)
         return rocblas_status_invalid_handle;
 
     // argument checking
     rocblas_status st = rocsolver_getri_outofplace_argCheck(handle, n, lda, ldc, A, C, ipiv, info,
-                                                            pivot, batch_count);
+                                                            pivot, batch_count_arg);
     if(st != rocblas_status_continue)
         return st;
 
@@ -65,33 +65,44 @@ try
     rocblas_int shiftP = 0;
     rocblas_int shiftC = 0;
 
-    // memory workspace sizes:
-    // size of reusable workspace (for calling GETRS)
-    bool optim_mem;
-    size_t size_work1, size_work2, size_work3, size_work4;
+    // split batch
+    rocblas_int const nsweep = ceildiv(batch_count_arg, MAX_BATCH_COUNT);
+    rocblas_int const batch_count_split = (nsweep == 0) ? 0 : ceildiv(batch_count_arg, nsweep);
 
+    // memory workspace sizes:
+    rocsolver_workspace_helper work_helper;
     rocsolver_getri_outofplace_getMemorySize<false, true, T>(
-        n, batch_count, &size_work1, &size_work2, &size_work3, &size_work4, &optim_mem);
+        handle, n, A, shiftA, lda, strideA, ipiv, shiftP, strideP, C, shiftC, ldc, strideC, info,
+        batch_count_split, &work_helper, pivot);
 
     if(rocblas_is_device_memory_size_query(handle))
-        return rocblas_set_optimal_device_memory_size(handle, size_work1, size_work2, size_work3,
-                                                      size_work4);
+        return rocblas_set_optimal_device_memory_size(handle, work_helper.get_total_size<T>());
 
     // memory workspace allocation
-    void *work1, *work2, *work3, *work4;
-    rocblas_device_malloc mem(handle, size_work1, size_work2, size_work3, size_work4);
+    rocblas_device_malloc mem(handle, work_helper.get_total_size<T>());
 
     if(!mem)
         return rocblas_status_memory_error;
-    work1 = mem[0];
-    work2 = mem[1];
-    work3 = mem[2];
-    work4 = mem[3];
 
-    // Execution
-    return rocsolver_getri_outofplace_template<false, true, T>(
-        handle, n, A, shiftA, lda, strideA, ipiv, shiftP, strideP, C, shiftC, ldc, strideC, info,
-        batch_count, work1, work2, work3, work4, optim_mem, pivot);
+    ROCBLAS_CHECK(work_helper.assign_buffer<T>(handle, mem[0]));
+
+    for(rocblas_int isweep = 0; isweep < nsweep; isweep++)
+    {
+        rocblas_int const bid = isweep * batch_count_split;
+        rocblas_int const batch_count = std::min(batch_count_arg - bid, batch_count_split);
+
+        auto const A_sweep = (A == nullptr) ? nullptr : A + bid * strideA;
+        auto const C_sweep = (C == nullptr) ? nullptr : C + bid * strideC;
+        auto const ipiv_sweep = (ipiv == nullptr) ? nullptr : ipiv + bid * strideP;
+        auto const info_sweep = (info == nullptr) ? nullptr : info + bid;
+
+        // Execution
+        ROCBLAS_CHECK(rocsolver_getri_outofplace_template<false, true, T>(
+            handle, n, A_sweep, shiftA, lda, strideA, ipiv_sweep, shiftP, strideP, C_sweep, shiftC,
+            ldc, strideC, info_sweep, batch_count, &work_helper, pivot));
+    }
+
+    return rocblas_status_success;
 }
 catch(...)
 {

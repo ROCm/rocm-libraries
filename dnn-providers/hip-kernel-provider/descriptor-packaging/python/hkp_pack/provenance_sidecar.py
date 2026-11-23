@@ -50,9 +50,14 @@ _READABLE_MINOR = 0
 # memory. A sidecar holds a few kilobytes per UKD, so the ceiling grows with the
 # UKDs of the descriptor being attached -- MAX_DECOMPRESSED_BYTES_PER_UKD each,
 # far above any real entry -- and never drops below MAX_DECOMPRESSED_BYTES. A
-# fixed ceiling would refuse a catalog of tens of thousands of kernels.
+# fixed ceiling would refuse a catalog of tens of thousands of kernels. ukd_count
+# itself comes from the (untrusted) descriptor being attached, so the grown
+# budget is additionally capped at MAX_DECOMPRESSED_BYTES_ABSOLUTE: without that
+# ceiling a descriptor claiming millions of UKDs would hand a hostile sidecar an
+# effectively unbounded inflation budget.
 MAX_DECOMPRESSED_BYTES = 64 * 1024 * 1024
 MAX_DECOMPRESSED_BYTES_PER_UKD = 64 * 1024
+MAX_DECOMPRESSED_BYTES_ABSOLUTE = 4 * 1024 * 1024 * 1024
 
 
 def sidecar_name(descriptor_name: str) -> str:
@@ -176,7 +181,8 @@ def detach(descriptor_name: str, doc: dict) -> tuple[str, bytes]:
 
 def decompressed_limit(ukd_count: int = 0) -> int:
     """The most bytes a sidecar for a descriptor of `ukd_count` UKDs may inflate to."""
-    return max(MAX_DECOMPRESSED_BYTES, ukd_count * MAX_DECOMPRESSED_BYTES_PER_UKD)
+    grown = max(MAX_DECOMPRESSED_BYTES, ukd_count * MAX_DECOMPRESSED_BYTES_PER_UKD)
+    return min(grown, MAX_DECOMPRESSED_BYTES_ABSOLUTE)
 
 
 def _inflate(data: bytes, path: Path, limit: int) -> bytes:

@@ -27,16 +27,17 @@
 
 #include "core/Handle.hpp"
 #include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
+#include "tests/engines/kernel_ingestor_engine/packs/SdpaLayoutTestSupport.hpp"
 
 /**
  * @file UnifiedAttentionTestGraphs.hpp
- * @brief The SDPA graphs the hipkernel:Gfx950AttentionUnified2D and
- *        hipkernel:Gfx950AttentionUnified3D suites build, shared by both engines' test
- *        headers.
+ * @brief The SDPA graphs the unified-attention engines' suites build (the gfx950 Unified2D
+ *        and Unified3D engines and the gfx942 Unified2D engine), shared by every engine's
+ *        test header.
  *
- * Both engines match the same single dense SDPA-forward node, so the graph builder, the
+ * The engines match the same single dense SDPA-forward node, so the graph builder, the
  * uids and the mask spellings live here once. Symbols, tokens, candidate records and ABIs
- * are each engine's contract and stay in Gfx950AttentionUnified{2D,3D}TestGraphs.hpp.
+ * are each engine's contract and stay in that engine's own TestGraphs header.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine::testing::unified_attention
 {
@@ -52,6 +53,8 @@ inline constexpr int64_t K_UID = 22;
 inline constexpr int64_t V_UID = 33;
 inline constexpr int64_t O_UID = 44;
 inline constexpr int64_t EXTRA_UID = 99;
+/// The stats output's uid, when BasicGraphSpec::stats is set.
+inline constexpr int64_t STATS_UID = 66;
 /// The RFC-0014 offsets tensor a ragged operand names.
 inline constexpr int64_t RAGGED_OFFSET_UID = 55;
 
@@ -62,50 +65,7 @@ inline constexpr int64_t BOTTOM_RIGHT_CAUSAL = 2;
 
 inline constexpr float SCALE = 0.08838834764831843F;
 
-/// BSHD strides for (B, H, S, D) logical dims -- token-major, head varying fastest.
-inline std::vector<int64_t> bshdStrides(int64_t heads, int64_t sequence, int64_t headSize)
-{
-    return {sequence * heads * headSize, headSize, heads * headSize, 1};
-}
-
-/// BHSD strides for the same dims: head-major.
-inline std::vector<int64_t> bhsdStrides(int64_t heads, int64_t sequence, int64_t headSize)
-{
-    return {heads * sequence * headSize, sequence * headSize, headSize, 1};
-}
-
-/// BSHD axis order with the token row padded past `heads * headSize`: still token-major,
-/// but not gap-free, so it is not a paged cache's layout.
-inline std::vector<int64_t> paddedBshdStrides(int64_t heads, int64_t sequence, int64_t headSize)
-{
-    constexpr int64_t ROW_PAD = 8;
-    const int64_t rowStride = heads * headSize + ROW_PAD;
-    return {sequence * rowStride, headSize, rowStride, 1};
-}
-
-enum class Layout
-{
-    BSHD,
-    BHSD,
-    PADDED_BSHD
-};
-
-inline std::vector<int64_t>
-    stridesFor(Layout layout, int64_t heads, int64_t sequence, int64_t headSize)
-{
-    switch(layout)
-    {
-    case Layout::BHSD:
-        return bhsdStrides(heads, sequence, headSize);
-    case Layout::PADDED_BSHD:
-        return paddedBshdStrides(heads, sequence, headSize);
-    case Layout::BSHD:
-    default:
-        return bshdStrides(heads, sequence, headSize);
-    }
-}
-
-/// An SDPA graph, defaulting to one both engines' tests start from: bf16, D128, B2, Hq 8
+/// An SDPA graph, defaulting to one every engine's tests start from: bf16, D128, B2, Hq 8
 /// over Hkv 2, Sq @p DefaultSeqLenQ over Skv 256, top-left causal. Fields perturb one rule
 /// at a time. Each engine's header names its own default (prefill or decode) as GraphSpec.
 template <int64_t DefaultSeqLenQ>
@@ -120,12 +80,14 @@ struct BasicGraphSpec
     data_objects::DataType dataType = data_objects::DataType::BFLOAT16;
     std::optional<data_objects::DataType> kDataType;
 
-    Layout qLayout = Layout::BSHD;
-    Layout kLayout = Layout::BSHD;
-    Layout vLayout = Layout::BSHD;
-    Layout oLayout = Layout::BSHD;
+    SdpaLayout qLayout = SdpaLayout::BSHD;
+    SdpaLayout kLayout = SdpaLayout::BSHD;
+    SdpaLayout vLayout = SdpaLayout::BSHD;
+    SdpaLayout oLayout = SdpaLayout::BSHD;
 
-    /// Dims of V and O, when they should disagree with the shared values.
+    /// Dims of K, V and O, when they should disagree with the shared values.
+    std::optional<int64_t> kBatch;
+    std::optional<int64_t> kHeadSize;
     std::optional<int64_t> vSeqLen;
     std::optional<int64_t> oHeads;
 
@@ -138,11 +100,21 @@ struct BasicGraphSpec
     bool alibiMask = false;
     bool paddingMask = false;
     data_objects::DataType mmaCoreMode = data_objects::DataType::UNSET;
+    /// The SDPA node's compute_data_type.
+    data_objects::DataType computeDataType = data_objects::DataType::FLOAT;
     data_objects::AttentionImplementation implementation
         = data_objects::AttentionImplementation::AUTO;
 
     /// Sets any further attribute on the SDPA node (an optional tensor uid, a probability).
     std::function<void(data_objects::SdpaAttributesBuilder&)> extra;
+
+    /// A stats output (generate_stats with a stats tensor, uid STATS_UID): FP32
+    /// [B, Hq, Sq, 1], head-major unless statsTokenMajor. statsDataType and statsHeads
+    /// perturb it.
+    bool stats = false;
+    bool statsTokenMajor = false;
+    data_objects::DataType statsDataType = data_objects::DataType::FLOAT;
+    std::optional<int64_t> statsHeads;
 
     /// Operand uid (Q/K/V/O) that carries a ragged offsets tensor, if any.
     std::optional<int64_t> raggedOperand;
@@ -181,18 +153,21 @@ flatbuffers::FlatBufferBuilder buildSdpaGraph(const Spec& spec)
 {
     flatbuffers::FlatBufferBuilder builder;
 
+    const int64_t kBatch = spec.kBatch.value_or(spec.batch);
+    const int64_t kHeadSize = spec.kHeadSize.value_or(spec.headSize);
     const std::vector<int64_t> qDims{spec.batch, spec.numQueryHeads, spec.seqLenQ, spec.headSize};
-    const std::vector<int64_t> kDims{spec.batch, spec.numKvHeads, spec.seqLenKv, spec.headSize};
+    const std::vector<int64_t> kDims{kBatch, spec.numKvHeads, spec.seqLenKv, kHeadSize};
     const std::vector<int64_t> vDims{
         spec.batch, spec.numKvHeads, spec.vSeqLen.value_or(spec.seqLenKv), spec.headSize};
     const int64_t oHeads = spec.oHeads.value_or(spec.numQueryHeads);
     const std::vector<int64_t> oDims{spec.batch, oHeads, spec.seqLenQ, spec.headSize};
 
-    const auto qStrides = stridesFor(spec.qLayout, spec.numQueryHeads, spec.seqLenQ, spec.headSize);
-    const auto kStrides = stridesFor(spec.kLayout, spec.numKvHeads, spec.seqLenKv, spec.headSize);
-    const auto vStrides = stridesFor(
+    const auto qStrides
+        = sdpaStrides(spec.qLayout, spec.numQueryHeads, spec.seqLenQ, spec.headSize);
+    const auto kStrides = sdpaStrides(spec.kLayout, spec.numKvHeads, spec.seqLenKv, kHeadSize);
+    const auto vStrides = sdpaStrides(
         spec.vLayout, spec.numKvHeads, spec.vSeqLen.value_or(spec.seqLenKv), spec.headSize);
-    const auto oStrides = stridesFor(spec.oLayout, oHeads, spec.seqLenQ, spec.headSize);
+    const auto oStrides = sdpaStrides(spec.oLayout, oHeads, spec.seqLenQ, spec.headSize);
 
     const auto tensorFor = [&](int64_t uid,
                                data_objects::DataType dataType,
@@ -216,6 +191,16 @@ flatbuffers::FlatBufferBuilder buildSdpaGraph(const Spec& spec)
 
     std::vector<flatbuffers::Offset<data_objects::TensorAttributes>> tensors;
     tensors.push_back(tensorFor(Q_UID, spec.dataType, qStrides, qDims));
+    if(spec.stats)
+    {
+        const int64_t heads = spec.statsHeads.value_or(spec.numQueryHeads);
+        const std::vector<int64_t> statsDims{spec.batch, heads, spec.seqLenQ, 1};
+        // Head-major [B, H, S, 1], or token-major [B, S, H, 1] memory.
+        const std::vector<int64_t> statsStrides
+            = spec.statsTokenMajor ? std::vector<int64_t>{spec.seqLenQ * heads, 1, heads, 1}
+                                   : std::vector<int64_t>{heads * spec.seqLenQ, spec.seqLenQ, 1, 1};
+        tensors.push_back(tensorFor(STATS_UID, spec.statsDataType, statsStrides, statsDims));
+    }
     tensors.push_back(tensorFor(K_UID, spec.kDataType.value_or(spec.dataType), kStrides, kDims));
     tensors.push_back(tensorFor(V_UID, spec.dataType, vStrides, vDims));
     tensors.push_back(tensorFor(O_UID, spec.dataType, oStrides, oDims));
@@ -252,6 +237,11 @@ flatbuffers::FlatBufferBuilder buildSdpaGraph(const Spec& spec)
         attributesBuilder.add_padding_mask(spec.paddingMask);
         attributesBuilder.add_mma_core_mode(spec.mmaCoreMode);
         attributesBuilder.add_implementation(spec.implementation);
+        if(spec.stats)
+        {
+            attributesBuilder.add_generate_stats(true);
+            attributesBuilder.add_stats_tensor_uid(STATS_UID);
+        }
         if(spec.extra)
         {
             spec.extra(attributesBuilder);
@@ -284,7 +274,7 @@ flatbuffers::FlatBufferBuilder buildSdpaGraph(const Spec& spec)
     {
         nodes.push_back(data_objects::CreateNodeDirect(builder,
                                                        "sdpa",
-                                                       data_objects::DataType::FLOAT,
+                                                       spec.computeDataType,
                                                        data_objects::NodeAttributes::SdpaAttributes,
                                                        attributesFor().Union()));
     }
@@ -315,11 +305,12 @@ template <typename Spec>
 class BasicGraph
 {
 public:
-    explicit BasicGraph(const Spec& spec = Spec{})
+    /// @p gcnArchName is the device the MatchContext reports.
+    explicit BasicGraph(const Spec& spec = Spec{}, const char* gcnArchName = "gfx950")
         : _builder(buildSdpaGraph(spec))
         , _graph(_builder.GetBufferPointer(), _builder.GetSize())
     {
-        _properties.gcnArchName = "gfx950";
+        _properties.gcnArchName = gcnArchName;
         _properties.warpSize = 64;
     }
 

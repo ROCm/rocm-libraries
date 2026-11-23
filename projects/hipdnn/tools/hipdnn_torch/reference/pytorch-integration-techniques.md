@@ -469,7 +469,7 @@ Providers: Multiple engines compete for best performance per-configuration:
 - **rocKE SDPA engine** — high-performance kernels authored via rocKE's agentic kernel authoring platform
 - **AITER kernels** (when available via plugin) — proven MI3XX performance
 - **RDNA-tuned kernels** — Wave32/WMMA-based for consumer GPUs (gfx1100, gfx1201)
-- hipDNN's engine selection picks from available providers based on configurable static ordering or auto-tuning. Smarter heuristic selection is planned.
+- hipDNN's engine selection picks from available providers based on configurable static ordering, auto-tuning, or the default heuristic mode A, which ranks engines by trained engine-level (L1) predictions where an applicable engine binds a model for the device (several FlyDSL engines today, including the SDPA ones, with more landing) and otherwise falls back to static ordering. Pass `HeuristicMode.FALLBACK` for the static order alone.
 
 ### 3.6 Fallback Strategy
 
@@ -859,7 +859,7 @@ General availability (beyond POC) is planned in the roadmap.
 |----------|---------|---------|
 | `HIPDNN_PLUGIN_DIR` | `hipdnn_plugins/engines/` (relative to cwd) | Engine plugin search directory |
 | `HIPDNN_HEURISTIC_PLUGIN_DIR` | `hipdnn_plugins/heuristics/` | Heuristic plugin search directory |
-| `HIPDNN_HEUR_POLICY_ORDER` | `Config,StaticOrdering` | Heuristic policy priority order |
+| `HIPDNN_HEUR_POLICY_ORDER` | unset (the heuristic mode selects the list; mode A: `SelectionHeuristic::Config,SelectionHeuristic::ModeA,SelectionHeuristic::StaticOrdering`) | Heuristic policy priority order |
 | `HIPDNN_HEUR_CONFIG_PATH` | (unset) | JSON rule file for config-based engine selection |
 | `HIPDNN_HEUR_FALLBACK_ENGINE_ORDER` | MIOpen-first | Engine preference for static ordering |
 | `HIPDNN_LOG_LEVEL` | `off` | Minimum log severity: `off`, `info`, `warn`, `error`, `fatal` |

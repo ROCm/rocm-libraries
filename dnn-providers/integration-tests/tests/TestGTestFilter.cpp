@@ -8,7 +8,11 @@
 
 #include <gtest/gtest.h>
 
+#include <cstddef>
+#include <initializer_list>
 #include <string>
+#include <string_view>
+#include <utility>
 #include <vector>
 
 #include "harness/bundle/BundleDiscovery.hpp"
@@ -94,6 +98,186 @@ TEST(TestGtestFilter, TrailingColonDoesNotWidenTheSelection)
 {
     EXPECT_TRUE(gtestFilterSelects("quick_*:", "quick_A.b"));
     EXPECT_FALSE(gtestFilterSelects("quick_*:", "standard_A.b"));
+}
+
+namespace
+{
+
+// Every string of length minLength..maxLength over `alphabet`, shortest first.
+std::vector<std::string>
+    allStrings(const std::string& alphabet, std::size_t minLength, std::size_t maxLength)
+{
+    std::vector<std::string> result;
+    std::vector<std::string> sameLength{""};
+    for(std::size_t length = 0; length <= maxLength; ++length)
+    {
+        if(length >= minLength)
+        {
+            result.insert(result.end(), sameLength.begin(), sameLength.end());
+        }
+        std::vector<std::string> longer;
+        for(const auto& text : sameLength)
+        {
+            for(const char c : alphabet)
+            {
+                longer.push_back(text + c);
+            }
+        }
+        sameLength = std::move(longer);
+    }
+    return result;
+}
+
+std::string joined(std::initializer_list<std::string_view> parts)
+{
+    std::string result;
+    for(const auto part : parts)
+    {
+        result += part;
+    }
+    return result;
+}
+
+std::vector<std::string> enumeratedFilters()
+{
+    const auto shortPatterns = allStrings("a_.*?", 0, 2);
+    const auto longPatterns = allStrings("a_.*?", 0, 3);
+    const auto tinyPatterns = allStrings("a_.*?", 0, 1);
+
+    std::vector<std::string> filters;
+    for(const auto& pattern : longPatterns)
+    {
+        filters.push_back(pattern);
+        filters.push_back("-" + pattern);
+    }
+    for(const auto& first : shortPatterns)
+    {
+        for(const auto& second : shortPatterns)
+        {
+            filters.push_back(joined({first, "-", second}));
+            filters.push_back(joined({first, ":", second}));
+        }
+    }
+    for(const auto& positive1 : tinyPatterns)
+    {
+        for(const auto& positive2 : tinyPatterns)
+        {
+            for(const auto& negative1 : tinyPatterns)
+            {
+                for(const auto& negative2 : tinyPatterns)
+                {
+                    filters.push_back(
+                        joined({positive1, ":", positive2, "-", negative1, ":", negative2}));
+                }
+            }
+        }
+    }
+    for(const auto& first : tinyPatterns)
+    {
+        for(const auto& second : tinyPatterns)
+        {
+            for(const auto& third : tinyPatterns)
+            {
+                filters.push_back(joined({first, "-", second, "-", third}));
+            }
+        }
+    }
+    return filters;
+}
+
+} // namespace
+
+TEST(TestGtestFilter, MaySelectSuiteHoldsForEverySuiteWithASelectedCase)
+{
+    const auto suites = allStrings("a_", 0, 2);
+    const auto testNames = allStrings("a_.", 0, 3);
+
+    std::size_t skippedSuites = 0;
+    std::size_t parsedSuitesWithNoSelection = 0;
+    for(const auto& filter : enumeratedFilters())
+    {
+        for(const auto& suite : suites)
+        {
+            const bool maySelect = gtestFilterMaySelectSuite(filter, suite);
+            bool anySelected = false;
+            for(const auto& testName : testNames)
+            {
+                if(gtestFilterSelects(filter, joined({suite, ".", testName})))
+                {
+                    anySelected = true;
+                    EXPECT_TRUE(maySelect) << "filter '" << filter << "' selects '" << suite << "."
+                                           << testName << "' but skips the suite";
+                }
+            }
+            skippedSuites += maySelect ? 0 : 1;
+            parsedSuitesWithNoSelection += (maySelect && !anySelected) ? 1 : 0;
+        }
+    }
+    EXPECT_GT(skippedSuites, 0u);
+    EXPECT_GT(parsedSuitesWithNoSelection, 0u);
+}
+
+TEST(TestGtestFilter, MaySelectSuiteExpectedVerdicts)
+{
+    EXPECT_FALSE(gtestFilterMaySelectSuite("", "quick_Matmul_X"));
+    EXPECT_FALSE(gtestFilterMaySelectSuite("", ""));
+    EXPECT_TRUE(gtestFilterMaySelectSuite("*", "quick_Matmul_X"));
+    EXPECT_TRUE(gtestFilterMaySelectSuite("-quick_*", "standard_Matmul_X"));
+    EXPECT_FALSE(gtestFilterMaySelectSuite("-quick_*", "quick_Matmul_X"));
+
+    EXPECT_FALSE(gtestFilterMaySelectSuite("quick_SdpaFwd_*.*", "quick_SdpaFwdPlan_X"));
+    EXPECT_TRUE(gtestFilterMaySelectSuite("quick_SdpaFwd_*.*", "quick_SdpaFwd_X"));
+    EXPECT_TRUE(gtestFilterMaySelectSuite("quick_*Sdpa*", "quick_Matmul_X"));
+    EXPECT_FALSE(gtestFilterMaySelectSuite("quick_*Sdpa*", "standard_Matmul_X"));
+    EXPECT_TRUE(gtestFilterMaySelectSuite("quick_?atmul_X.case", "quick_Matmul_X"));
+    EXPECT_FALSE(gtestFilterMaySelectSuite("quick_?atmul_X.case", "quick_atmul_X"));
+    EXPECT_FALSE(gtestFilterMaySelectSuite("Suite.Case", "Suite.Case"));
+
+    const std::string excludeOneSuite = "*-*_SdpaFwd_bhsd_fp16_hd128_causal_gqa4_Small.*";
+    EXPECT_FALSE(gtestFilterMaySelectSuite(excludeOneSuite,
+                                           "quick_SdpaFwd_bhsd_fp16_hd128_causal_gqa4_Small"));
+    EXPECT_TRUE(gtestFilterMaySelectSuite(excludeOneSuite,
+                                          "quick_SdpaFwd_bhsd_fp16_hd128_causal_gqa4_Smaller"));
+    EXPECT_TRUE(gtestFilterMaySelectSuite(excludeOneSuite,
+                                          "quick_SdpaFwd_bhsd_fp16_hd128_causal_mha_Small"));
+
+    EXPECT_TRUE(gtestFilterMaySelectSuite("*-*_SdpaBackward_*.prbu01_*", "quick_SdpaBackward_X"));
+    EXPECT_TRUE(gtestFilterMaySelectSuite("*-A.*?", "A"));
+    EXPECT_FALSE(gtestFilterMaySelectSuite("*-A.**", "A"));
+    EXPECT_FALSE(gtestFilterMaySelectSuite("*-A*", "A"));
+    EXPECT_TRUE(gtestFilterMaySelectSuite("*-A.b-c", "A"));
+}
+
+TEST(TestGtestFilter, MaySelectSuiteOnTheLaneFilters)
+{
+    const std::string hipMlops = "quick_*:standard_*:Smoke/*:Quick/*:Standard/*-*DISABLED*";
+    const std::string asmSdpa
+        = "quick_*Sdpa*:standard_*Sdpa*:Smoke/*Sdpa*-*DISABLED*:*_SdpaBackward_*.prbu01_*:"
+          "*_SdpaBackward_*.prbu03_*:*_SdpaBackward_*.prbu13_*:*_SdpaBackward_*.prbt04_*:"
+          "*_SdpaBackward_*.prbt04n_*:*_SdpaBackward_*.prbr05_*";
+    const std::string flyDslSdpa = "quick_SdpaFwd_*.*:standard_SdpaFwd_*.*-*DISABLED*:"
+                                   "*_SdpaFwd_bhsd_fp16_hd128_causal_gqa4_Small.*:"
+                                   "*_SdpaFwd_bhsd_fp16_hd128_causal_mha_Small.*";
+
+    EXPECT_TRUE(gtestFilterMaySelectSuite(hipMlops, "quick_SdpaFwdPlan_X"));
+    EXPECT_TRUE(gtestFilterMaySelectSuite(hipMlops, "standard_RMSNorm_X"));
+    EXPECT_FALSE(gtestFilterMaySelectSuite(hipMlops, "comprehensive_SdpaFwdPlan_X"));
+    EXPECT_FALSE(gtestFilterMaySelectSuite(hipMlops, "full_Matmul_X"));
+
+    EXPECT_TRUE(gtestFilterMaySelectSuite(asmSdpa, "quick_SdpaFwdPlan_X"));
+    EXPECT_TRUE(gtestFilterMaySelectSuite(asmSdpa, "standard_RMSNorm_X"));
+    EXPECT_TRUE(gtestFilterMaySelectSuite(asmSdpa, "standard_SdpaBackward_X"));
+    EXPECT_FALSE(gtestFilterMaySelectSuite(asmSdpa, "comprehensive_SdpaFwdPlan_X"));
+    EXPECT_FALSE(gtestFilterMaySelectSuite(asmSdpa, "full_Matmul_X"));
+
+    EXPECT_FALSE(gtestFilterMaySelectSuite(flyDslSdpa, "quick_SdpaFwdPlan_X"));
+    EXPECT_TRUE(gtestFilterMaySelectSuite(flyDslSdpa, "quick_SdpaFwd_bhsd_fp16_hd64_X"));
+    EXPECT_TRUE(gtestFilterMaySelectSuite(flyDslSdpa, "standard_SdpaFwd_bhsd_fp16_hd64_X"));
+    EXPECT_FALSE(
+        gtestFilterMaySelectSuite(flyDslSdpa, "quick_SdpaFwd_bhsd_fp16_hd128_causal_gqa4_Small"));
+    EXPECT_FALSE(gtestFilterMaySelectSuite(flyDslSdpa, "standard_RMSNorm_X"));
+    EXPECT_FALSE(gtestFilterMaySelectSuite(flyDslSdpa, "comprehensive_SdpaFwdPlan_X"));
+    EXPECT_FALSE(gtestFilterMaySelectSuite(flyDslSdpa, "full_Matmul_X"));
 }
 
 namespace

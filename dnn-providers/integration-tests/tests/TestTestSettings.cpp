@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <vector>
 
 #include <hipdnn_test_sdk/utilities/ScratchDirectory.hpp>
 
@@ -1065,6 +1066,159 @@ reason    = "windows + gfx1100 only"
     EXPECT_FALSE(settings.findSkip("Foo.Test", "gfx942", "windows").has_value());
     // Wrong platform
     EXPECT_FALSE(settings.findSkip("Foo.Test", "gfx1100", "linux").has_value());
+}
+
+// ---------------------------------------------------------------------------
+// [conv_fwd_tolerance]
+// ---------------------------------------------------------------------------
+
+TEST(TestSettingsParser, ConvFwdSummationOrderIsUnsetWhenTheFileSaysNothing)
+{
+    const TempTomlFile file(R"(
+[meta]
+version = 1
+)");
+    const TestSettings settings(file.path());
+    EXPECT_FALSE(settings.convFwdSummationOrder("float").has_value());
+}
+
+TEST(TestSettingsParser, ParsesTheFloatSummationOrder)
+{
+    const TempTomlFile file(R"(
+[meta]
+version = 1
+
+[conv_fwd_tolerance.float]
+summation_order = 9.5
+)");
+    const TestSettings settings(file.path());
+    ASSERT_TRUE(settings.convFwdSummationOrder("float").has_value());
+    EXPECT_DOUBLE_EQ(*settings.convFwdSummationOrder("float"), 9.5);
+    // Only the float table exists: nothing is set for another output type.
+    EXPECT_FALSE(settings.convFwdSummationOrder("half").has_value());
+    EXPECT_FALSE(settings.convFwdSummationOrder("bfloat16").has_value());
+}
+
+TEST(TestSettingsParser, AnIntegerSummationOrderIsANumber)
+{
+    const TempTomlFile file(R"(
+[meta]
+version = 1
+
+[conv_fwd_tolerance.float]
+summation_order = 8
+)");
+    const TestSettings settings(file.path());
+    ASSERT_TRUE(settings.convFwdSummationOrder("float").has_value());
+    EXPECT_DOUBLE_EQ(*settings.convFwdSummationOrder("float"), 8.0);
+}
+
+TEST(TestSettingsParser, RejectsASummationOrderThatIsNotFiniteAndPositive)
+{
+    for(const char* bad : {"0", "0.0", "-1.5", "inf", "-inf", "nan"})
+    {
+        const TempTomlFile file(std::string(R"(
+[meta]
+version = 1
+
+[conv_fwd_tolerance.float]
+summation_order = )") + bad + "\n");
+        EXPECT_THROW(const TestSettings settings(file.path()), std::runtime_error) << bad;
+    }
+}
+
+TEST(TestSettingsParser, RejectsASummationOrderOfTheWrongType)
+{
+    for(const char* bad : {R"("9")", "true", "[9.0]", "{ a = 1 }"})
+    {
+        const TempTomlFile file(std::string(R"(
+[meta]
+version = 1
+
+[conv_fwd_tolerance.float]
+summation_order = )") + bad + "\n");
+        EXPECT_THROW(const TestSettings settings(file.path()), std::runtime_error) << bad;
+    }
+}
+
+TEST(TestSettingsParser, RejectsAnUnknownConvFwdToleranceTypeOrKey)
+{
+    const std::vector<std::string> bad = {
+        // an output type the harness does not read
+        "[conv_fwd_tolerance.half]\nsummation_order = 2.0\n",
+        "[conv_fwd_tolerance.bfloat16]\nsummation_order = 2.0\n",
+        // a term it does not read
+        "[conv_fwd_tolerance.float]\npartial_result = 12.0\n",
+        "[conv_fwd_tolerance.float]\nsummation_order = 2.0\nextra = 1\n",
+        // not tables
+        "[conv_fwd_tolerance]\nfloat = 9.0\n",
+    };
+    for(const auto& text : bad)
+    {
+        const TempTomlFile file("[meta]\nversion = 1\n\n" + text);
+        EXPECT_THROW(const TestSettings settings(file.path()), std::runtime_error) << text;
+    }
+}
+
+TEST(TestSettingsParser, RejectsAConvFwdToleranceThatIsNotATable)
+{
+    const TempTomlFile file(R"(conv_fwd_tolerance = 9.0
+
+[meta]
+version = 1
+)");
+    EXPECT_THROW(const TestSettings settings(file.path()), std::runtime_error);
+}
+
+// A top-level key the loader does not read is an error: a misspelt section name would otherwise
+// leave its setting out of the file without a word.
+TEST(TestSettingsParser, RejectsATopLevelKeyThatIsNoTable)
+{
+    const std::vector<std::string> bad = {
+        // a misspelt section of each kind
+        "[conv_fwd_tolerence.float]\nsummation_order = 9.0\n",
+        "[[tolerance_override]]\nfilters = [\"*\"]\natol = 1.0\nrtol = 1.0\n",
+        "[[validator_override]]\nfilters = [\"*\"]\ntensors = [\"*\"]\nvalidator = \"rms\"\n"
+        "rms_threshold = 1e-4\n",
+        "[[test_skip]]\nfilters = [\"*\"]\nreason = \"x\"\n",
+    };
+    for(const auto& text : bad)
+    {
+        const TempTomlFile file("[meta]\nversion = 1\n\n" + text);
+        EXPECT_THROW(const TestSettings settings(file.path()), std::runtime_error) << text;
+    }
+    // a key that is no section at all, before the first table (after [meta] it would be its)
+    const TempTomlFile loose("unknown = 1\n\n[meta]\nversion = 1\n");
+    EXPECT_THROW(const TestSettings settings(loose.path()), std::runtime_error);
+}
+
+TEST(TestSettingsParser, AcceptsEveryTopLevelKeyOfTheSchemaInOneFile)
+{
+    const TempTomlFile file(R"([meta]
+version = 1
+
+[[tolerance_overrides]]
+filters = ["*"]
+atol = 1.0
+rtol = 1.0
+
+[[validator_overrides]]
+filters = ["*"]
+tensors = ["*"]
+validator = "allclose"
+
+[[test_skips]]
+filters = ["*"]
+reason = "known"
+
+[conv_fwd_tolerance.float]
+summation_order = 9.0
+)");
+    const TestSettings settings(file.path());
+    EXPECT_EQ(settings.toleranceOverrideCount(), 1u);
+    EXPECT_EQ(settings.validatorOverrideCount(), 1u);
+    EXPECT_EQ(settings.skipEntryCount(), 1u);
+    EXPECT_TRUE(settings.convFwdSummationOrder("float").has_value());
 }
 
 // NOLINTEND(readability-identifier-naming)

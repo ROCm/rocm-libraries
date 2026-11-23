@@ -15,6 +15,7 @@
 #define ROCKE_INSTANCE_LSE_STORE_INTERNAL_H
 
 #include <math.h>
+#include <stdbool.h>
 
 #include "rocke/ir.h"
 #include "rocke/ir_internal.h" /* rocke_i_set_err */
@@ -61,6 +62,29 @@ static inline void rocke_lse_store(rocke_ir_builder_t* b,
     rocke_value_t* neg_inf = rocke_b_const_f32(b, -INFINITY);
     value = rocke_b_select(b, row_has_mass, value, neg_inf);
     rocke_b_global_store(b, dst, element_offset, value, 4);
+}
+
+/* unified_lse_offset: element index of (sequence-local row pos, query head).
+ * token-major (cu_q_start + pos) * num_heads + head; head-major
+ * cu_q_start * num_heads + head * q_len + pos. */
+static inline rocke_value_t* rocke_unified_lse_offset(rocke_ir_builder_t* b,
+                                                      bool head_major,
+                                                      rocke_value_t* cu_q_start,
+                                                      rocke_value_t* q_len,
+                                                      rocke_value_t* pos,
+                                                      rocke_value_t* head,
+                                                      rocke_value_t* num_heads)
+{
+    if(!head_major)
+    {
+        rocke_value_t* tok = rocke_b_add(b, cu_q_start, pos);
+        rocke_value_t* tok_nh = rocke_b_mul(b, tok, num_heads);
+        return rocke_b_add(b, tok_nh, head);
+    }
+    rocke_value_t* seq_base = rocke_b_mul(b, cu_q_start, num_heads);
+    rocke_value_t* head_base = rocke_b_mul(b, head, q_len);
+    rocke_value_t* row_base = rocke_b_add(b, seq_base, head_base);
+    return rocke_b_add(b, row_base, pos);
 }
 
 /* dense_row_has_key(b, query_row, kv_length, *, causal, diagonal, window,

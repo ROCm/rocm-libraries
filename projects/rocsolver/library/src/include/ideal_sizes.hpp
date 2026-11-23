@@ -39,6 +39,14 @@
     ROCSOLVER_ASAN_VALUE(16, 32) // generic 2 dimensional thread-block size used \
     // to call common kernels
 
+#ifndef MAX_BATCH_COUNT
+#ifndef NDEBUG
+#define MAX_BATCH_COUNT 100
+#else
+#define MAX_BATCH_COUNT (64 * 1024 - 1)
+#endif
+#endif
+
 /******************************* larf ****************************************
 *******************************************************************************/
 #ifndef LARF_SSKER_THREADS
@@ -59,12 +67,12 @@
 
 /******************************* larfg ****************************************
 *******************************************************************************/
-#ifndef LARFG_SSKER_THREADS
-#define LARFG_SSKER_THREADS 256 // must be 64, 128, 256, 512, or 1024
-#endif
-
-#ifndef LARFG_SSKER_MAX_N
-#define LARFG_SSKER_MAX_N 2048
+/*! \brief Determines the default size at which rocSOLVER switches from
+    the kernel to the BLAS implementation when executing LARFG. This is used
+    when a configuration has no set switch size (see larfg_use_kernel).
+    Overridden by LARFG_SSKER_MAX_N. */
+#ifndef LARFG_SSKER_DEFAULT_MAX_N
+#define LARFG_SSKER_DEFAULT_MAX_N 98304
 #endif
 
 /******************************* larft ****************************************

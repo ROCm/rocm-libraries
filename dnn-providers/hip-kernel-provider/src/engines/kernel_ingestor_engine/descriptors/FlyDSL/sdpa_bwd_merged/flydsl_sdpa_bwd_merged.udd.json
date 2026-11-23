@@ -1,0 +1,6 @@
+{
+  "version": "1.0",
+  "id": "3648b558-27df-5221-b9e2-efe77364a08a",
+  "name": "flydsl sdpa_bwd_merged dispatch",
+  "dispatch_symbol": "hipkernel.flydsl_sdpa_bwd_merged.dispatch"
+}

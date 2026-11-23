@@ -8,6 +8,7 @@ import geko.device as device
 from geko import logger
 from geko.paths import resolve_hipblaslt_path
 from geko.pipeline import run_search
+from geko.search import SEARCH_PROFILES
 from geko.utils import parse_devices
 
 
@@ -69,10 +70,18 @@ def main() -> None:
         ),
     )
     parser.add_argument(
-        "--duration",
-        type=float,
-        default=0.04,
-        help="Target dense-search benchmark duration per GEMM (seconds)",
+        "--search-profile",
+        dest="search_profile",
+        type=str,
+        default="thorough",
+        choices=sorted(SEARCH_PROFILES),
+        help=(
+            "Search profile: bundles the hipblaslt-bench --adaptive timing "
+            "knobs. 'fast' (single dense pass, cheapest), 'balanced' "
+            "(two-stage: cheap screen + strict re-verify of its top-K "
+            "candidates), or 'thorough' (tightest convergence/ceiling knobs, "
+            "most expensive). Defaults to 'thorough'."
+        ),
     )
     parser.add_argument(
         "--custom-lib-src",
@@ -138,7 +147,7 @@ def main() -> None:
         up_thr=args.up_thr,
         workdir=args.workdir,
         verbose=args.verbose,
-        duration=args.duration,
+        profile=args.search_profile,
         bench_freq=args.bench_freq,
         custom_lib_src=args.custom_lib_src,
     )

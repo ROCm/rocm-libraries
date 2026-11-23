@@ -66,18 +66,18 @@ THRUST_HOST_DEVICE ForwardIterator uninitialized_copy(
   InputIterator first,
   InputIterator last,
   ForwardIterator result,
-  thrust::detail::false_type) // _THRUST_STD::is_trivially_copy_constructible
+  _THRUST_STD::false_type) // _THRUST_STD::is_trivially_copy_constructible
 {
   // zip up the iterators
   using IteratorTuple = thrust::tuple<InputIterator, ForwardIterator>;
   using ZipIterator   = thrust::zip_iterator<IteratorTuple>;
 
-  ZipIterator begin = thrust::make_zip_iterator(thrust::make_tuple(first, result));
+  ZipIterator begin = thrust::make_zip_iterator(first, result);
   ZipIterator end   = begin;
 
   // get a zip_iterator pointing to the end
-  const thrust::detail::it_difference_t<InputIterator> n = thrust::distance(first, last);
-  thrust::advance(end, n);
+  const thrust::detail::it_difference_t<InputIterator> n = _THRUST_STD::distance(first, last);
+  _THRUST_STD::advance(end, n);
 
   // create a functor
   using InputType  = thrust::detail::it_value_t<InputIterator>;
@@ -99,7 +99,7 @@ THRUST_HOST_DEVICE ForwardIterator uninitialized_copy(
   InputIterator first,
   InputIterator last,
   ForwardIterator result,
-  thrust::detail::true_type) // _THRUST_STD::is_trivially_copy_constructible
+  _THRUST_STD::true_type) // _THRUST_STD::is_trivially_copy_constructible
 {
   return thrust::copy(exec, first, last, result);
 } // end uninitialized_copy()
@@ -111,13 +111,13 @@ THRUST_HOST_DEVICE ForwardIterator uninitialized_copy_n(
   InputIterator first,
   Size n,
   ForwardIterator result,
-  thrust::detail::false_type) // _THRUST_STD::is_trivially_copy_constructible
+  _THRUST_STD::false_type) // _THRUST_STD::is_trivially_copy_constructible
 {
   // zip up the iterators
   using IteratorTuple = thrust::tuple<InputIterator, ForwardIterator>;
   using ZipIterator   = thrust::zip_iterator<IteratorTuple>;
 
-  ZipIterator zipped_first = thrust::make_zip_iterator(thrust::make_tuple(first, result));
+  ZipIterator zipped_first = thrust::make_zip_iterator(first, result);
 
   // create a functor
   using InputType  = thrust::detail::it_value_t<InputIterator>;
@@ -139,7 +139,7 @@ THRUST_HOST_DEVICE ForwardIterator uninitialized_copy_n(
   InputIterator first,
   Size n,
   ForwardIterator result,
-  thrust::detail::true_type) // _THRUST_STD::is_trivially_copy_constructible
+  _THRUST_STD::true_type) // _THRUST_STD::is_trivially_copy_constructible
 {
   return thrust::copy_n(exec, first, n, result);
 } // end uninitialized_copy_n()

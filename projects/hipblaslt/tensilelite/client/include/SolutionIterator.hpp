@@ -46,9 +46,17 @@ namespace TensileLite
  * Not an iterator by the traditional definition but I can't think of a better
  * name
  */
+        class ClientProblemFactory;
+
         class SolutionIterator : public RunListener
         {
         public:
+            // --split-devices: a solution must be valid for every device's slice.
+            void setSplit(ClientProblemFactory const* split)
+            {
+                m_split = split;
+            }
+
             static std::shared_ptr<SolutionIterator>
                 Default(std::shared_ptr<MasterSolutionLibrary<ContractionProblemGemm>> library,
                         std::shared_ptr<Hardware>                                      hardware,
@@ -129,6 +137,8 @@ namespace TensileLite
                                        bool                    isReportValid=true);
             virtual bool checkSolution(ContractionSolution& solution);
 
+            ClientProblemFactory const* m_split = nullptr;
+
             std::shared_ptr<MasterSolutionLibrary<ContractionProblemGemm>> m_library;
             std::shared_ptr<Hardware>                                      m_hardware;
             ContractionProblem*                                            m_problem;
@@ -208,11 +218,15 @@ namespace TensileLite
         class TopSolutionIterator : public SolutionIterator
         {
         public:
+            /// requireSelectedSolution: a problem for which the library selects no
+            /// solution is counted as an error (error() != 0, so the client exits
+            /// non-zero) and skipped, instead of falling back to library solution 0.
             TopSolutionIterator(
                 std::shared_ptr<MasterSolutionLibrary<ContractionProblemGemm>> library,
                 std::shared_ptr<Hardware>                                      hardware,
                 double                                                         predictionThreshold,
                 int                                                            numSolutions,
+                bool                                                           requireSelectedSolution,
                 bool                                                           printWinnerOnly);
 
             virtual void preProblem(ContractionProblem* const problem) override;
@@ -220,6 +234,8 @@ namespace TensileLite
 
             virtual void preSolution(ContractionSolution* const solution) override;
             virtual void postSolution() override;
+
+            virtual int error() const override;
 
             virtual bool                                 moreSolutionsInProblem() const override;
             virtual std::shared_ptr<ContractionSolution> getSolution() override;
@@ -234,6 +250,8 @@ namespace TensileLite
             int                                               m_currentSolutionIdx = 0;
             double                                            m_predictionThreshold;
             double                                            m_currentPrediction;
+            bool                                              m_requireSelectedSolution  = false;
+            int                                               m_problemsWithoutSelection = 0;
         };
     } // namespace Client
 } // namespace TensileLite

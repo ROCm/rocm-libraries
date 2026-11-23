@@ -340,8 +340,8 @@ TEST_F(IntegrationSdpaBwdLifting, SdpaBwdWithCompatibleOptionalAttributesViaCApi
         .set_diagonal_band_left_bound(-1)
         .set_diagonal_band_right_bound(1)
         .set_diagonal_alignment(DiagonalAlignment::BOTTOM_RIGHT);
+    // Only one deprecated causal flag may be set; SdpaBwdNode rejects the pair.
     sdpaNode->attributes.causal_mask = true;
-    sdpaNode->attributes.causal_mask_bottom_right = true;
 
     auto result = originalGraph->validate();
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
@@ -455,7 +455,7 @@ TEST_F(IntegrationSdpaBwdLifting, SdpaBwdWithCompatibleOptionalAttributesViaCApi
     EXPECT_TRUE(attrs.alibi_mask);
     EXPECT_TRUE(attrs.padding_mask);
     EXPECT_TRUE(attrs.causal_mask);
-    EXPECT_TRUE(attrs.causal_mask_bottom_right);
+    EXPECT_FALSE(attrs.causal_mask_bottom_right);
 
     // Scalar values
     ASSERT_TRUE(attrs.dropout_probability.has_value());

@@ -525,14 +525,37 @@ TYPED_TEST(PrecondLegacyCsr, tolerance_argument_checks)
     EXPECT_EQ(get_tolerance<K>(handle, nullptr, &tol), rocsparse_status_invalid_pointer);
     EXPECT_EQ(get_tolerance<K>(handle, di.info, nullptr), rocsparse_status_invalid_pointer);
     EXPECT_EQ(set_tolerance<K>(nullptr, di.info, 1.0), rocsparse_status_invalid_handle);
-    // A negative tolerance is rejected (the status is not documented).
-    EXPECT_NE(set_tolerance<K>(handle, di.info, -1.0), rocsparse_status_success);
+    EXPECT_EQ(set_tolerance<K>(handle, nullptr, 1.0), rocsparse_status_invalid_pointer);
+    EXPECT_EQ(set_tolerance<K>(handle, di.info, 0.5), rocsparse_status_success);
+    // A negative tolerance is rejected.
+    EXPECT_EQ(set_tolerance<K>(handle, di.info, -1.0), rocsparse_status_invalid_value);
+    // The rejected tolerance does not replace the stored one.
+    EXPECT_EQ(get_tolerance<K>(handle, di.info, &tol), rocsparse_status_success);
+    EXPECT_EQ(tol, 0.5);
     EXPECT_EQ(singular_pivot<K>(nullptr, di.info, &position), rocsparse_status_invalid_handle);
     EXPECT_EQ(singular_pivot<K>(handle, nullptr, &position), rocsparse_status_invalid_pointer);
     EXPECT_EQ(singular_pivot<K>(handle, di.info, nullptr), rocsparse_status_invalid_pointer);
     // Without an analysis there is no singular pivot.
     EXPECT_EQ(singular_pivot<K>(handle, di.info, &position), rocsparse_status_success);
     EXPECT_EQ(position, -1);
+}
+
+// IC(0) of a Hermitian positive definite matrix with every entry stored is its exact
+// Cholesky factor, compared with L itself (issue #15943).
+TEST_F(PrecondLegacy, csric0_exact_cholesky_factor)
+{
+    for_all_types([&](auto tag) {
+        using T      = decltype(tag);
+        const auto r = make_cholesky_reproducer<T>();
+        for(const auto base : {rocsparse_index_base_zero, rocsparse_index_base_one})
+        {
+            csr_out<T> out;
+            run_csr<Kind::ic, T>(handle, r.a, base, -1.0, boost_request{}, false, out);
+            ASSERT_EQ(out.compute_status, rocsparse_status_success);
+            EXPECT_EQ(out.singular_pivot, -1);
+            expect_close(keep_lower_only(r.a, out.values), r.factor);
+        }
+    });
 }
 
 // ---------------------------------------------------------------------------

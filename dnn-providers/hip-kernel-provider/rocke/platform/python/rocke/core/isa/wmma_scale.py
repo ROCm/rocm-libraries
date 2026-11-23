@@ -35,7 +35,7 @@ class ScaledWmmaLLVM:
     def intrinsic_suffix(self) -> str:
         atom = self.contract.atom
         return (
-            f"f32.{atom.m}x{atom.n}x{atom.k}.f8f6f4.v{atom.c_frag_len}f32."
+            f"f32.{atom.m}x{atom.n}x{atom.k}.f8f6f4.v{atom.dst.frag_len}f32."
             f"v{atom.a_frag_len}i32.v{atom.b_frag_len}i32"
         )
 

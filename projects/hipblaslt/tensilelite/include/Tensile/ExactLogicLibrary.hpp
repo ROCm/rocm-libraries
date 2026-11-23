@@ -63,7 +63,6 @@ namespace TensileLite
     {
         using Row = LibraryRow<MyProblem, MySolution, MyPredicate>;
         std::vector<Row>          rows;
-        mutable std::atomic<bool> lastFindTopRetAll = false;
 
         ExactLogicLibrary() = default;
         ExactLogicLibrary(std::initializer_list<Row> init)
@@ -107,10 +106,28 @@ namespace TensileLite
             std::shared_ptr<MySolution> fallbackRv;
             const bool                  streamK = Debug::Instance().useExperimentalSelection() == 2;
 
+            const bool meshbasedLib = Debug::Instance().useMeshBasedLibrary();
+            bool       hasMeshBased = false;
+            if(meshbasedLib)
+            {
+                for(auto const& r : rows)
+                    if(r.first.value->type() == "MeshBasedMatching")
+                    {
+                        hasMeshBased = true;
+                        break;
+                    }
+            }
+
             // Return exact match immediately; otherwise keep first successful fallback.
             for(auto const& row : rows)
             {
                 if(row.first.value->type() == "ExperimentalStreamK" && !streamK)
+                    continue;
+
+                if(!meshbasedLib && row.first.value->type() == "MeshBasedMatching")
+                    continue;
+
+                if(hasMeshBased && row.first.value->type() == "PredictionMatching")
                     continue;
 
                 if(!row.first(problem, hardware))
@@ -124,6 +141,11 @@ namespace TensileLite
                        && dynamic_cast<Predicates::Contraction::EqualityMatching*>(
                            row.first.value.get()))
                         rv->tag = MySolution::MatchingTag::Equal;
+
+                    if(rv
+                       && dynamic_cast<Predicates::Contraction::MeshBasedMatching*>(
+                           row.first.value.get()))
+                        rv->tag = MySolution::MatchingTag::MeshBased;
 
                     if(rv)
                     {
@@ -143,6 +165,11 @@ namespace TensileLite
                        && dynamic_cast<Predicates::Contraction::EqualityMatching*>(
                            row.first.value.get()))
                         fallbackRv->tag = MySolution::MatchingTag::Equal;
+
+                    if(fallbackRv
+                       && dynamic_cast<Predicates::Contraction::MeshBasedMatching*>(
+                           row.first.value.get()))
+                        fallbackRv->tag = MySolution::MatchingTag::MeshBased;
                 }
             }
 
@@ -164,26 +191,31 @@ namespace TensileLite
                              = SolutionLibrarySearchType::DEFAULT) const override
         {
             SolutionSet<MySolution> rv;
-            const bool              debug       = Debug::Instance().printPropertyEvaluation();
-            const bool              streamK     = Debug::Instance().useExperimentalSelection() == 2;
-            const auto&             excludedLib = Debug::Instance().excludedLibFromGetAll();
+            const bool              debug   = Debug::Instance().printPropertyEvaluation();
+            const bool              streamK = Debug::Instance().useExperimentalSelection() == 2;
+            const bool              skipRankingLibs = skipsRankingLibraries(searchType);
 
             auto amdGPU             = static_cast<AMDGPU const*>(&hardware);
             bool isStandardCUDevice = amdGPU->isStandardCU();
 
+            const bool meshbasedLib = Debug::Instance().useMeshBasedLibrary();
+
             for(auto const& row : rows)
             {
-                // we want to exclude this lib from getAll. If the Set is not empty,
-                // it means we want to skip searched GridBased, Prediction.
-                // But if this is a non-standard-CU GPU, we still need to search all for CU-Fallback solutions.
-                // In this case, we don't skip the excludedLib.
-                if(!excludedLib.empty() && isStandardCUDevice)
+                // The caller asked for a no-ranking search, so skip GridBased and
+                // Prediction: it has already collected those candidates itself.
+                // But if this is a non-standard-CU GPU, we still need to search all
+                // for CU-Fallback solutions, so the skip does not apply there.
+                if(skipRankingLibs && isStandardCUDevice)
                 {
-                    if(excludedLib.count(row.first.value->type()))
+                    if(isRankingMatchingLibrary(row.first.value->type()))
                         continue;
                 }
 
                 if(row.first.value->type() == "ExperimentalStreamK" && !streamK)
+                    continue;
+
+                if(!meshbasedLib && row.first.value->type() == "MeshBasedMatching")
                     continue;
 
                 if(row.first.value->type() == "AMDGPU" && !row.first(problem, hardware))
@@ -205,6 +237,12 @@ namespace TensileLite
                     {
                         for(auto& sol : rowSolutions)
                             sol->tag = MySolution::MatchingTag::GridBased;
+                    }
+                    else if(dynamic_cast<Predicates::Contraction::MeshBasedMatching*>(
+                                row.first.value.get()))
+                    {
+                        for(auto& sol : rowSolutions)
+                            sol->tag = MySolution::MatchingTag::MeshBased;
                     }
                     else if(dynamic_cast<Predicates::Contraction::RangeMatching*>(
                                 row.first.value.get()))
@@ -268,13 +306,22 @@ namespace TensileLite
             const bool                 streamK = Debug::Instance().useExperimentalSelection() == 2;
 
             const auto forceDynamic = Debug::Instance().streamK5ForceMode();
-            const bool effectiveDynamic = 
+            const bool effectiveDynamic =
                 (forceDynamic == 1) ||
                 (forceDynamic != 0 && problem.getParams().streamKTileSchedulingMode() != 0);
             const bool                 predictionLib = Debug::Instance().usePredictionLibrary() || effectiveDynamic;
 
-            // false in case of early return;
-            lastFindTopRetAll = false;
+            const bool meshbasedLib = Debug::Instance().useMeshBasedLibrary();
+            bool       hasMeshBased = false;
+            if(meshbasedLib)
+            {
+                for(auto const& r : rows)
+                    if(r.first.value->type() == "MeshBasedMatching")
+                    {
+                        hasMeshBased = true;
+                        break;
+                    }
+            }
 
             for(auto const& row : rows)
             {
@@ -284,6 +331,12 @@ namespace TensileLite
                 if(predictionLib
                    && ((row.first.value->type() == "EqualityMatching")
                        || (row.first.value->type() == "RangeMatching")))
+                    continue;
+
+                if(!meshbasedLib && row.first.value->type() == "MeshBasedMatching")
+                    continue;
+
+                if(hasMeshBased && row.first.value->type() == "PredictionMatching")
                     continue;
 
                 if(row.first(problem, hardware))
@@ -306,6 +359,12 @@ namespace TensileLite
                         {
                             for(auto& sol : solutions)
                                 sol->tag = MySolution::MatchingTag::GridBased;
+                        }
+                        else if(dynamic_cast<Predicates::Contraction::MeshBasedMatching*>(
+                                    row.first.value.get()))
+                        {
+                            for(auto& sol : solutions)
+                                sol->tag = MySolution::MatchingTag::MeshBased;
                         }
                         else if(dynamic_cast<Predicates::Contraction::RangeMatching*>(
                                     row.first.value.get()))
@@ -334,14 +393,7 @@ namespace TensileLite
                 }
             }
 
-            // can't reach the requested number, means findTop already done its best
-            lastFindTopRetAll = (rv.size() < numSolutions);
             return rv;
-        }
-
-        virtual bool lastFindTopAlreadyRetAll() const override
-        {
-            return lastFindTopRetAll;
         }
 
         virtual SolutionVector<MySolution>

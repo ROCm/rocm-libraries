@@ -34,17 +34,14 @@
 #include <thrust/device_ptr.h>
 #include <thrust/device_reference.h>
 
-// Use rocprim::numeric_limits if thrust/detail/type_traits.h uses rocprim::arithmetic
-#include _THRUST_STD_INCLUDE(limits)
-
 #if _THRUST_HAS_DEVICE_SYSTEM_STD
 #  include _THRUST_STD_INCLUDE(cstdint)
-#endif
-
-#include <stdexcept>
-#if !_THRUST_HAS_DEVICE_SYSTEM_STD
+#else
 #  include <cstddef>
 #endif
+
+#include <new>
+#include _THRUST_STD_INCLUDE(limits)
 
 THRUST_NAMESPACE_BEGIN
 
@@ -150,10 +147,9 @@ public:
    *  \note Memory deallocated by this function must previously have been
    *        allocated with \p allocate.
    */
-  THRUST_HOST inline void deallocate(pointer p, size_type cnt) noexcept
+  THRUST_HOST inline void deallocate(pointer p, [[maybe_unused]] size_type cnt) noexcept
   {
     // use "::operator delete" rather than keyword delete
-    (void) cnt;
     device_delete(p);
   } // end deallocate()
 

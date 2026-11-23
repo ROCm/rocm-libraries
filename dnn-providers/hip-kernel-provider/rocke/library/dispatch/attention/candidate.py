@@ -10,14 +10,11 @@ and Torch binding; admission, pin resolution and sweeping are shared.
 
 from __future__ import annotations
 
-import dataclasses
-
 from typing import Callable, Mapping, Optional
 
 from kernels.common.attention_unified import (
-    supports_native_unified_attention,
-    supports_native_unified_attention_3d_tiled,
-    supports_native_unified_attention_tiled,
+    supports_native_unified_attention_coverage,
+    unified_lse_path_gate,
 )
 from rocke.dispatch.core import Capability, KernelCandidate, ShapeRange
 from rocke.dispatch.tuning import make_tuned_candidate
@@ -37,12 +34,21 @@ from .common import (
 from .dense_rules import DenseSpace, DenseSupports
 from .unified_rules import TUNING_ALGORITHM, AttentionGeometryVariant, unified_space
 
-# The dense selectors. gfx942 has one candidate whose space covers both bodies;
-# on gfx950 the grid and persistent bodies serve different features, so each
-# is its own algorithm (wide DMA is a second candidate of the persistent one).
+# The dense selectors. gfx942's tuned candidate has a space covering both bodies
+# (its qbminor candidate fixes the grid one); on gfx950 the grid and persistent
+# bodies serve different features, so each is its own algorithm (wide DMA is a
+# second candidate of the persistent one, qbminor a second of the grid one).
 DENSE_ALGORITHM = "attention_dense"
 DENSE_GRID_ALGORITHM = "attention_dense_grid"
 DENSE_PERSIST_ALGORITHM = "attention_dense_persist"
+# Every algorithm that routes through the dense launch path (SDPA's dense
+# gate, ``dispatch.sdpa.bind_dense``, builds its own "which algorithms do I
+# serve" set from this one; so does the attention route-coverage test), so a
+# new dense candidate cannot go unnoticed by only adding a literal nobody
+# re-checks.
+DENSE_ALGORITHMS = frozenset(
+    {DENSE_ALGORITHM, DENSE_GRID_ALGORITHM, DENSE_PERSIST_ALGORITHM}
+)
 
 
 def _tuning_precheck(variant: AttentionGeometryVariant):
@@ -50,20 +56,12 @@ def _tuning_precheck(variant: AttentionGeometryVariant):
     (the scalar kernel writes none), so it is asked about the LSE-off problem
     and an LSE request must also pass the gate of the variant's own path: the
     split-KV or tiled 2D gate owns which arches and features can write LSE."""
-    path_gate = (
-        supports_native_unified_attention_3d_tiled
-        if variant.path == "3d"
-        else supports_native_unified_attention_tiled
-    )
+    path_gate = unified_lse_path_gate(variant.path)
 
     def precheck(req):
         problem = _tuning_problem(req)
-        if not problem.emit_lse:
-            return supports_native_unified_attention(problem, arch=variant.arch)
-        ok, why = supports_native_unified_attention(
-            dataclasses.replace(problem, emit_lse=False), arch=variant.arch
-        )
-        if ok:
+        ok, why = supports_native_unified_attention_coverage(problem, arch=variant.arch)
+        if ok and problem.emit_lse:
             return path_gate(problem, arch=variant.arch)
         return ok, why
 
@@ -156,6 +154,7 @@ def make_dense_candidate(
     derived: Optional[
         Callable[[object, Mapping[str, object]], Mapping[str, object]]
     ] = None,
+    axis_names: Optional[frozenset] = None,
 ) -> KernelCandidate:
     """One dense candidate. ``base_spec(req)`` is its default kernel spec (raise
     ``ValueError`` when the request cannot have one); ``supports`` is the
@@ -164,7 +163,9 @@ def make_dense_candidate(
     ``algorithm`` the selector a pin names it by; ``recorded`` names the
     fields ``base_spec`` resolves per problem (see
     :meth:`rocke.dispatch.tuning.KnobSpace.recorded`); ``derived`` recomputes
-    problem fields that depend on the knobs (see :class:`.DenseSpace`)."""
+    problem fields that depend on the knobs (see :class:`.DenseSpace`);
+    ``axis_names`` limits the knobs the candidate takes (``None``: every
+    declared dense axis; empty: its default spec only)."""
 
     def bind_torch(request, spec, tensors, **kwargs):
         from .bindings import bind_dense_attention_torch
@@ -192,6 +193,7 @@ def make_dense_candidate(
             supports=supports,
             recorded_fields=frozenset(recorded),
             derived=derived,
+            axis_names=axis_names,
         ),
         base=base_spec,
         request_errors=_request_errors,

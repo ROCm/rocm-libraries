@@ -370,7 +370,7 @@ namespace ck
                                               typename std::decay_t<decltype(out_i)>::element_type>,
                                           "r and i buffers must be same type");
 
-                            if(input_grid != nullptr)
+                            if(input_grid != nullptr && elementCount > 0)
                             {
                                 out_r = std::move(allocDevice<DecompT>(elementCount));
                                 out_i = std::move(allocDevice<DecompT>(elementCount));
