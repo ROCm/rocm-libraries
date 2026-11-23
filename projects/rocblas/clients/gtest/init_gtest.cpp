@@ -192,4 +192,42 @@ namespace
         for(int v = 1; v <= 10; v++)
             EXPECT_TRUE(seen[v]) << v << " never generated";
     }
+
+    // The thread-count tests only show that a fill is deterministic: they would also pass if every
+    // row, column, block or batch were seeded alike and so held the same values
+    TEST(rocblas_init, quick_fill_blocks_differ)
+    {
+        rocblas_seedrand();
+
+        static constexpr int64_t N = 2 * rocblas_fill_block_size;
+        host_vector<float>       hx(N);
+        rocblas_init_vector(random_generator<float>, hx.data(), N, 1);
+        EXPECT_NE(
+            memcmp(hx.data(), hx.data() + rocblas_fill_block_size, rocblas_fill_block_size * 4), 0)
+            << "vector blocks 0 and 1 hold the same values";
+
+        constexpr size_t   m = 64, n = 64, lda = 64, batches = 2;
+        host_vector<float> hA(lda * n * batches);
+        rocblas_init_matrix(rocblas_client_general_matrix,
+                            'L',
+                            random_generator<float>,
+                            hA,
+                            m,
+                            n,
+                            lda,
+                            lda * n,
+                            batches);
+        const float* A         = hA.data();
+        bool         rows_same = true;
+        for(size_t j = 0; j < n; j++)
+            rows_same = rows_same && A[j * lda] == A[1 + j * lda];
+        EXPECT_FALSE(rows_same) << "rows 0 and 1 hold the same values";
+        EXPECT_NE(memcmp(A, A + lda * n, lda * n * sizeof(float)), 0)
+            << "batches 0 and 1 hold the same values";
+
+        host_vector<float> hB(lda * n);
+        rocblas_init(hB.data(), m, n, lda);
+        EXPECT_NE(memcmp(hB.data(), hB.data() + lda, m * sizeof(float)), 0)
+            << "columns 0 and 1 hold the same values";
+    }
 }
