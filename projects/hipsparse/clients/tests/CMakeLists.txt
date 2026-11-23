@@ -45,6 +45,7 @@ set(_hipsparse_test_sources
     "${CMAKE_CURRENT_SOURCE_DIR}/test_device_malloc.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_check_error.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_status_handling.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_datatype_validation.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_get_version.cpp")
 foreach(_src IN LISTS HIPSPARSE_TEST_SOURCES)
   list(APPEND _hipsparse_test_sources "${CMAKE_CURRENT_SOURCE_DIR}/${_src}")

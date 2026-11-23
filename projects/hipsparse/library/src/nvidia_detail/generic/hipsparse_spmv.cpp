@@ -137,6 +137,12 @@ hipsparseStatus_t hipsparseSpMV_preprocess(hipsparseHandle_t           handle,
         return HIPSPARSE_STATUS_INVALID_VALUE;
     }
 
+    // cuSPARSE has no preprocess stage before CUDA 12.4. Validate computeType anyway so
+    // this routine rejects the same values as the other SpMV routines.
+    cudaDataType backend_data_type{};
+    RETURN_IF_HIPSPARSE_ERROR(
+        hipsparse::hipDataTypeToCudaDataType(computeType, &backend_data_type));
+
     return HIPSPARSE_STATUS_SUCCESS;
 }
 #elif(CUDART_VERSION > 10010 || (CUDART_VERSION == 10010 && CUDART_10_1_UPDATE_VERSION == 1))
@@ -161,6 +167,12 @@ hipsparseStatus_t hipsparseSpMV_preprocess(hipsparseHandle_t           handle,
     {
         return HIPSPARSE_STATUS_INVALID_VALUE;
     }
+
+    // cuSPARSE has no preprocess stage before CUDA 12.4. Validate computeType anyway so
+    // this routine rejects the same values as the other SpMV routines.
+    cudaDataType backend_data_type{};
+    RETURN_IF_HIPSPARSE_ERROR(
+        hipsparse::hipDataTypeToCudaDataType(computeType, &backend_data_type));
 
     return HIPSPARSE_STATUS_SUCCESS;
 }

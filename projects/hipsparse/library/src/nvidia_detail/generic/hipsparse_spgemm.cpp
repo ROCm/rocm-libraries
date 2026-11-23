@@ -1,5 +1,5 @@
 /* ************************************************************************
-* Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+* Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
 *
 * Permission is hereby granted, free of charge, to any person obtaining a copy
 * of this software and associated documentation files (the "Software"), to deal
@@ -59,6 +59,10 @@ hipsparseStatus_t hipsparseSpGEMM_workEstimation(hipsparseHandle_t          hand
                                                  size_t*                    bufferSize1,
                                                  void*                      externalBuffer1)
 {
+    cudaDataType backend_data_type{};
+    RETURN_IF_HIPSPARSE_ERROR(
+        hipsparse::hipDataTypeToCudaDataType(computeType, &backend_data_type));
+
     return hipsparse::hipCUSPARSEStatusToHIPStatus(
         cusparseSpGEMM_workEstimation((cusparseHandle_t)handle,
                                       hipsparse::hipOperationToCudaOperation(opA),
@@ -68,7 +72,7 @@ hipsparseStatus_t hipsparseSpGEMM_workEstimation(hipsparseHandle_t          hand
                                       (cusparseConstSpMatDescr_t)matB,
                                       beta,
                                       (cusparseSpMatDescr_t)matC,
-                                      computeType,
+                                      backend_data_type,
                                       hipsparse::hipSpGEMMAlgToCudaSpGEMMAlg(alg),
                                       (cusparseSpGEMMDescr_t)spgemmDescr,
                                       bufferSize1,
@@ -89,6 +93,10 @@ hipsparseStatus_t hipsparseSpGEMM_workEstimation(hipsparseHandle_t      handle,
                                                  size_t*                bufferSize1,
                                                  void*                  externalBuffer1)
 {
+    cudaDataType backend_data_type{};
+    RETURN_IF_HIPSPARSE_ERROR(
+        hipsparse::hipDataTypeToCudaDataType(computeType, &backend_data_type));
+
     return hipsparse::hipCUSPARSEStatusToHIPStatus(
         cusparseSpGEMM_workEstimation((cusparseHandle_t)handle,
                                       hipsparse::hipOperationToCudaOperation(opA),
@@ -98,7 +106,7 @@ hipsparseStatus_t hipsparseSpGEMM_workEstimation(hipsparseHandle_t      handle,
                                       (cusparseSpMatDescr_t)matB,
                                       beta,
                                       (cusparseSpMatDescr_t)matC,
-                                      computeType,
+                                      backend_data_type,
                                       hipsparse::hipSpGEMMAlgToCudaSpGEMMAlg(alg),
                                       (cusparseSpGEMMDescr_t)spgemmDescr,
                                       bufferSize1,
@@ -121,6 +129,10 @@ hipsparseStatus_t hipsparseSpGEMM_compute(hipsparseHandle_t          handle,
                                           size_t*                    bufferSize2,
                                           void*                      externalBuffer2)
 {
+    cudaDataType backend_data_type{};
+    RETURN_IF_HIPSPARSE_ERROR(
+        hipsparse::hipDataTypeToCudaDataType(computeType, &backend_data_type));
+
     return hipsparse::hipCUSPARSEStatusToHIPStatus(
         cusparseSpGEMM_compute((cusparseHandle_t)handle,
                                hipsparse::hipOperationToCudaOperation(opA),
@@ -130,7 +142,7 @@ hipsparseStatus_t hipsparseSpGEMM_compute(hipsparseHandle_t          handle,
                                (cusparseConstSpMatDescr_t)matB,
                                beta,
                                (cusparseSpMatDescr_t)matC,
-                               computeType,
+                               backend_data_type,
                                hipsparse::hipSpGEMMAlgToCudaSpGEMMAlg(alg),
                                (cusparseSpGEMMDescr_t)spgemmDescr,
                                bufferSize2,
@@ -151,6 +163,10 @@ hipsparseStatus_t hipsparseSpGEMM_compute(hipsparseHandle_t      handle,
                                           size_t*                bufferSize2,
                                           void*                  externalBuffer2)
 {
+    cudaDataType backend_data_type{};
+    RETURN_IF_HIPSPARSE_ERROR(
+        hipsparse::hipDataTypeToCudaDataType(computeType, &backend_data_type));
+
     return hipsparse::hipCUSPARSEStatusToHIPStatus(
         cusparseSpGEMM_compute((cusparseHandle_t)handle,
                                hipsparse::hipOperationToCudaOperation(opA),
@@ -160,7 +176,7 @@ hipsparseStatus_t hipsparseSpGEMM_compute(hipsparseHandle_t      handle,
                                (cusparseSpMatDescr_t)matB,
                                beta,
                                (cusparseSpMatDescr_t)matC,
-                               computeType,
+                               backend_data_type,
                                hipsparse::hipSpGEMMAlgToCudaSpGEMMAlg(alg),
                                (cusparseSpGEMMDescr_t)spgemmDescr,
                                bufferSize2,
@@ -181,6 +197,10 @@ hipsparseStatus_t hipsparseSpGEMM_copy(hipsparseHandle_t          handle,
                                        hipsparseSpGEMMAlg_t       alg,
                                        hipsparseSpGEMMDescr_t     spgemmDescr)
 {
+    cudaDataType backend_data_type{};
+    RETURN_IF_HIPSPARSE_ERROR(
+        hipsparse::hipDataTypeToCudaDataType(computeType, &backend_data_type));
+
     return hipsparse::hipCUSPARSEStatusToHIPStatus(
         cusparseSpGEMM_copy((cusparseHandle_t)handle,
                             hipsparse::hipOperationToCudaOperation(opA),
@@ -190,7 +210,7 @@ hipsparseStatus_t hipsparseSpGEMM_copy(hipsparseHandle_t          handle,
                             (cusparseConstSpMatDescr_t)matB,
                             beta,
                             (cusparseSpMatDescr_t)matC,
-                            computeType,
+                            backend_data_type,
                             hipsparse::hipSpGEMMAlgToCudaSpGEMMAlg(alg),
                             (cusparseSpGEMMDescr_t)spgemmDescr));
 }
@@ -207,6 +227,10 @@ hipsparseStatus_t hipsparseSpGEMM_copy(hipsparseHandle_t      handle,
                                        hipsparseSpGEMMAlg_t   alg,
                                        hipsparseSpGEMMDescr_t spgemmDescr)
 {
+    cudaDataType backend_data_type{};
+    RETURN_IF_HIPSPARSE_ERROR(
+        hipsparse::hipDataTypeToCudaDataType(computeType, &backend_data_type));
+
     return hipsparse::hipCUSPARSEStatusToHIPStatus(
         cusparseSpGEMM_copy((cusparseHandle_t)handle,
                             hipsparse::hipOperationToCudaOperation(opA),
@@ -216,7 +240,7 @@ hipsparseStatus_t hipsparseSpGEMM_copy(hipsparseHandle_t      handle,
                             (cusparseSpMatDescr_t)matB,
                             beta,
                             (cusparseSpMatDescr_t)matC,
-                            computeType,
+                            backend_data_type,
                             hipsparse::hipSpGEMMAlgToCudaSpGEMMAlg(alg),
                             (cusparseSpGEMMDescr_t)spgemmDescr));
 }

@@ -60,6 +60,9 @@ hipsparseStatus_t hipsparseSpVV(hipsparseHandle_t          handle,
                                 hipDataType                computeType,
                                 void*                      externalBuffer)
 {
+    rocsparse_datatype_ backend_data_type{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDataTypeToHCCDataType(computeType, &backend_data_type));
+
     size_t bufferSize;
 
     // Check for buffer == nullptr as this is not done in rocsparse
@@ -67,9 +70,6 @@ hipsparseStatus_t hipsparseSpVV(hipsparseHandle_t          handle,
     {
         return HIPSPARSE_STATUS_INVALID_VALUE;
     }
-
-    rocsparse_datatype_ backend_data_type{};
-    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDataTypeToHCCDataType(computeType, &backend_data_type));
 
     return hipsparse::rocSPARSEStatusToHIPStatus(
         rocsparse_spvv((rocsparse_handle)handle,

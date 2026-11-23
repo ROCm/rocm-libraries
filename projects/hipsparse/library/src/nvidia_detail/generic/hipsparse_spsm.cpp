@@ -240,6 +240,10 @@ hipsparseStatus_t hipsparseSpSM_solve_ex(hipsparseHandle_t           handle,
                                          hipsparseSpSMAlg_t          alg,
                                          hipsparseSpSMDescr_t        spsmDescr)
 {
+    cudaDataType backend_data_type{};
+    RETURN_IF_HIPSPARSE_ERROR(
+        hipsparse::hipDataTypeToCudaDataType(computeType, &backend_data_type));
+
     return hipsparseSpSM_solve(
         handle, opA, opB, alpha, matA, matB, matC, computeType, alg, spsmDescr, nullptr);
 }

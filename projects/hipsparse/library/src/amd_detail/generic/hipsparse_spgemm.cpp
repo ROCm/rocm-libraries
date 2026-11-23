@@ -415,6 +415,11 @@ hipsparseStatus_t hipsparseSpGEMM_copy(hipsparseHandle_t          handle,
         return HIPSPARSE_STATUS_INVALID_VALUE;
     }
 
+    // Validate computeType before any work. The branches below only compare against the
+    // supported types, so an unsupported type would otherwise pass a null scalar through.
+    rocsparse_datatype_ backend_data_type{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDataTypeToHCCDataType(computeType, &backend_data_type));
+
     // Get data stored in C matrix
     int64_t              rowsC, colsC, nnzC;
     void*                csrRowOffsetsC;
