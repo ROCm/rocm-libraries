@@ -587,7 +587,8 @@ std::vector<DeterminismRow> wmmaRows()
                                            8,
                                            causal ? 2 : 8,
                                            512,
-                                           512};
+                                           512,
+                                           std::nullopt};
                     addDense(rows,
                              PREFILL_ENGINE,
                              KnobClass::TILE_SCHEDULE,
@@ -603,7 +604,7 @@ std::vector<DeterminismRow> wmmaRows()
             for(const auto biasType : {DataType::FLOAT, dataType})
             {
                 const DenseShape shape{
-                    dataType, 128, 128, false, false, biasType, 2, 8, 8, 512, 512};
+                    dataType, 128, 128, false, false, biasType, 2, 8, 8, 512, 512, std::nullopt};
                 addDense(rows,
                          PREFILL_ENGINE,
                          KnobClass::TILE_SCHEDULE,
@@ -689,19 +690,41 @@ std::vector<DeterminismRow> wmmaRows()
         };
         for(const int64_t headSize : {64, 128, 256})
         {
-            add({BF16, headSize, headSize, true, true, std::nullopt, 1, 8, 2, 1, 8192});
-            add({FP16, headSize, headSize, false, false, std::nullopt, 1, 8, 2, 1, 8192});
+            add({BF16,
+                 headSize,
+                 headSize,
+                 true,
+                 true,
+                 std::nullopt,
+                 1,
+                 8,
+                 2,
+                 1,
+                 8192,
+                 std::nullopt});
+            add({FP16,
+                 headSize,
+                 headSize,
+                 false,
+                 false,
+                 std::nullopt,
+                 1,
+                 8,
+                 2,
+                 1,
+                 8192,
+                 std::nullopt});
         }
-        add({BF16, 128, 128, true, false, std::nullopt, 1, 8, 2, 1, 5120});
-        add({FP16, 128, 128, false, false, std::nullopt, 1, 8, 2, 1, 2048});
+        add({BF16, 128, 128, true, false, std::nullopt, 1, 8, 2, 1, 5120, std::nullopt});
+        add({FP16, 128, 128, false, false, std::nullopt, 1, 8, 2, 1, 2048, std::nullopt});
         // One split: Skv 512 is 16 key tiles, so by-work gives 1 split on every board (a
         // decode launch that stores O and LSE directly, with no workspace and no merge launch).
-        add({BF16, 128, 128, true, true, std::nullopt, 1, 8, 2, 1, 512});
-        add({FP16, 128, 128, false, false, std::nullopt, 1, 8, 2, 1, 512});
-        add({BF16, 128, 128, true, true, std::nullopt, 1, 8, 1, 4, 8192});
-        add({FP16, 256, 256, true, false, std::nullopt, 1, 8, 1, 4, 8192});
-        add({BF16, 128, 128, false, false, DataType::FLOAT, 1, 8, 2, 1, 8192});
-        add({FP16, 128, 128, false, false, DataType::HALF, 1, 8, 2, 1, 8192});
+        add({BF16, 128, 128, true, true, std::nullopt, 1, 8, 2, 1, 512, std::nullopt});
+        add({FP16, 128, 128, false, false, std::nullopt, 1, 8, 2, 1, 512, std::nullopt});
+        add({BF16, 128, 128, true, true, std::nullopt, 1, 8, 1, 4, 8192, std::nullopt});
+        add({FP16, 256, 256, true, false, std::nullopt, 1, 8, 1, 4, 8192, std::nullopt});
+        add({BF16, 128, 128, false, false, DataType::FLOAT, 1, 8, 2, 1, 8192, std::nullopt});
+        add({FP16, 128, 128, false, false, DataType::HALF, 1, 8, 2, 1, 8192, std::nullopt});
         // A sliding window on the Skv 8192 causal shape above. The frontend's left_bound is
         // band-inclusive; the native's window_left (decodeKvRange) is left_bound - 1
         // (Gfx1151WmmaAttentionNative.cpp maskFor), so left_bound 2048 gives window_left 2047:
