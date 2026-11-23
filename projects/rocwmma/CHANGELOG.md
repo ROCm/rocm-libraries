@@ -5,6 +5,13 @@ Documentation for rocWMMA is available at
 
 ## Unreleased
 
+### Breaking changes and deprecations for rocWMMA 3.0.0
+
+* **Migrate FP8/BF8/XF32 type queries to `rocwmma::is_arithmetic`, `rocwmma::is_floating_point`, and `rocwmma::is_signed`, including their `_v` forms.** These are now independently owned traits in every mode. Unqualified queries after importing both `std` and `rocwmma` can become ambiguous, and code relying on the old aliases' exact type identity must be updated.
+* The forbidden `std::` specializations remain temporarily available through `ROCWMMA_LEGACY_STD_TRAIT_SPECIALIZATIONS=1`. They default on for supporting toolchains and off for libc++ 20+ and annotated MSVC STL when the compiler supports the prohibition attribute, fixing the restrictive-toolchain build without requiring consumer flags. An explicit setting takes precedence; enabling legacy specializations on a rejecting STL can still fail.
+* Legacy specialization uses now emit deprecation diagnostics rather than warning on every header inclusion. Warning-as-error users can migrate or temporarily define `ROCWMMA_SUPPRESS_LEGACY_STD_TRAIT_DEPRECATION=1`. Standard-library `_v` implementations may bypass the deprecated class traits or suppress their warnings in system headers, so diagnostics cannot identify every use. rocWMMA's own `_v` forms always follow its class traits, including on MSVC STL.
+* **Planned transition across three consecutive ROCm releases:** rocWMMA 3.0.0 introduces the migration, 4.0.0 disables legacy specializations by default, and 5.0.0 removes them. Define `ROCWMMA_LEGACY_STD_TRAIT_SPECIALIZATIONS=0` to exercise the permanent behavior now. In that mode standard traits for the affected HIP FP8 and rocWMMA XF32 class types are false. See the [migration guide](docs/conceptual/migration-guide.rst) for affected aliases and build requirements. HIPRTC's trait implementation is unchanged.
+
 ### Changed
 
 * int8 WMMA on gfx11, gfx1170, gfx1171, gfx1200 and gfx1201 now wraps on int32 overflow instead of saturating. This matches gfx1250, uint8 inputs, MFMA targets and the reference implementations. Results differ only when an int32 result overflows.

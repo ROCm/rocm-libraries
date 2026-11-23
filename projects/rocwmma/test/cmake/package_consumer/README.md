@@ -58,10 +58,24 @@ package_consumer/
 ├── no_openmp/
 │   ├── CMakeLists.txt
 │   └── main.hip
-└── openmp/
+├── openmp/
+│   ├── CMakeLists.txt
+│   └── test_openmp_consumer.cpp
+└── type_traits/
     ├── CMakeLists.txt
-    └── test_openmp_consumer.cpp
+    ├── test_type_traits.hip
+    └── test_type_traits.py
 ```
+
+The `type_traits` consumer intentionally leaves the compatibility selector unset.
+It checks owned traits, compiles a real FP16 GEMM with the shipped default, and
+registers a GPU execution test (reported as skipped when no device is available).
+Its host check and Python compiler/diagnostic checks need no GPU. The compiler
+checks cover explicit modes, restrictive-STL rejection, header order, per-use
+deprecation, and suppression using installed headers through a system include
+path. The STL's ability to accept legacy specializations is probed independently
+of rocWMMA's default selection. Positive legacy diagnostic cases are inapplicable
+when the STL rejects them; the explicit-override failure is still checked.
 
 ## Registering another consumer
 
@@ -115,7 +129,7 @@ Values are passed as individual arguments, without shell expansion; use strings
 such as `"ON"` rather than JSON booleans for CMake options.
 
 The test installation includes `CMakeLists.txt`, `*.cpp`, `*.hip`, `*.json`,
-`*.cmake`, `*.h`, `*.hpp`, `*.in`, and `README.md`. If a case needs another
+`*.cmake`, `*.h`, `*.hpp`, `*.in`, `*.py`, and `README.md`. If a case needs another
 file type, extend the installation patterns in rocWMMA's main `CMakeLists.txt`.
 TheRock already includes this entire installed directory in its test artifact.
 

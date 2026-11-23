@@ -9,7 +9,14 @@
     {
       "name": "openmp",
       "source": "openmp",
-      "platforms": ["linux"]
+      "platforms": [
+        "linux"
+      ]
+    },
+    {
+      "name": "type_traits",
+      "source": "type_traits",
+      "hip": true
     }
   ]
 }

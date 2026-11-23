@@ -29,7 +29,18 @@
 
 #include "type_traits_impl.hpp"
 
+#if defined(ROCWMMA_LEGACY_STD_TRAIT_SPECIALIZATIONS) \
+    && ROCWMMA_LEGACY_STD_TRAIT_SPECIALIZATIONS != 0  \
+    && ROCWMMA_LEGACY_STD_TRAIT_SPECIALIZATIONS != 1
+#error "ROCWMMA_LEGACY_STD_TRAIT_SPECIALIZATIONS must be 0 or 1"
+#endif
+
 #if defined(__HIPCC_RTC__)
+
+// HIPRTC has always used rocWMMA's own traits; the legacy switch has no effect here.
+#ifndef ROCWMMA_LEGACY_STD_TRAIT_SPECIALIZATIONS
+#define ROCWMMA_LEGACY_STD_TRAIT_SPECIALIZATIONS 0
+#endif
 
 namespace rocwmma
 {
@@ -96,6 +107,28 @@ namespace rocwmma
 #else
 
 #include <type_traits>
+
+// Keep the legacy default only where the STL does not diagnose these forbidden
+// specializations. An explicit application setting takes precedence. Test the
+// STL and attribute support together: the compiler alone does not select its STL.
+#ifndef ROCWMMA_LEGACY_STD_TRAIT_SPECIALIZATIONS
+#if ((defined(_LIBCPP_VERSION) && _LIBCPP_VERSION >= 200000)                         \
+     || (defined(_MSVC_STL_VERSION) && defined(_NO_SPECIALIZATIONS_OF_TYPE_TRAITS))) \
+    && (__has_cpp_attribute(_Clang::__no_specializations__)                          \
+        || __has_cpp_attribute(msvc::no_specializations))
+#define ROCWMMA_LEGACY_STD_TRAIT_SPECIALIZATIONS 0
+#else
+#define ROCWMMA_LEGACY_STD_TRAIT_SPECIALIZATIONS 1
+#endif
+#endif
+
+#if defined(ROCWMMA_SUPPRESS_LEGACY_STD_TRAIT_DEPRECATION) \
+    && ROCWMMA_SUPPRESS_LEGACY_STD_TRAIT_DEPRECATION
+#define ROCWMMA_DETAIL_DEPRECATED_STD_TRAIT(MSG)
+#else
+#define ROCWMMA_DETAIL_DEPRECATED_STD_TRAIT(MSG) [[deprecated(MSG)]]
+#endif
+
 namespace rocwmma
 {
     // std implementations
@@ -114,16 +147,12 @@ namespace rocwmma
     using std::enable_if_t;
     using std::false_type;
     using std::integral_constant;
-    using std::is_arithmetic;
-    using std::is_arithmetic_v;
     using std::is_array;
     using std::is_array_v;
     using std::is_const;
     using std::is_const_v;
     using std::is_convertible;
     using std::is_convertible_v;
-    using std::is_floating_point;
-    using std::is_floating_point_v;
     using std::is_function;
     using std::is_function_v;
     using std::is_integral;
@@ -136,8 +165,6 @@ namespace rocwmma
     using std::is_rvalue_reference_v;
     using std::is_same;
     using std::is_same_v;
-    using std::is_signed;
-    using std::is_signed_v;
     using std::is_standard_layout;
     using std::is_trivial;
     using std::is_void;
@@ -154,9 +181,37 @@ namespace rocwmma
     using std::remove_volatile_t;
     using std::true_type;
 
+    // rocWMMA-owned traits that rocWMMA extends for its own number types
+    // (fp8 / bf8 / xfloat32). The standard forbids specializing the std:: type
+    // traits ([meta.rqmts]/4) and recent MSVC STL rejects it, so these default to
+    // the std:: answer and are specialized in ROCWMMA_TYPE_TRAITS_IMPL_NAMESPACE.
+    template <typename T>
+    struct is_arithmetic : std::is_arithmetic<T>
+    {
+    };
+
+    template <typename T>
+    struct is_floating_point : std::is_floating_point<T>
+    {
+    };
+
+    template <typename T>
+    struct is_signed : std::is_signed<T>
+    {
+    };
+
+    template <typename T>
+    inline constexpr bool is_arithmetic_v = is_arithmetic<T>::value;
+
+    template <typename T>
+    inline constexpr bool is_floating_point_v = is_floating_point<T>::value;
+
+    template <typename T>
+    inline constexpr bool is_signed_v = is_signed<T>::value;
+
 } // namespace rocwmma
 
-#define ROCWMMA_TYPE_TRAITS_IMPL_NAMESPACE std
+#define ROCWMMA_TYPE_TRAITS_IMPL_NAMESPACE rocwmma
 
 #endif // defined(__HIPCC_RTC__) || defined(__clang__)
 

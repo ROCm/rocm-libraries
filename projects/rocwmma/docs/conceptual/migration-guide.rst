@@ -5,9 +5,123 @@
 
 .. _migration-guide:
 
-===============================
-Migration guide for rocWMMA 2.0 
-===============================
+==========================
+Migration guide for rocWMMA
+==========================
+
+-------------------------------------------
+Type-trait migration starting in rocWMMA 3.0
+-------------------------------------------
+
+Use ``rocwmma::is_arithmetic``, ``rocwmma::is_floating_point``, and
+``rocwmma::is_signed`` when classifying rocWMMA numeric types. Their ``_v``
+forms have the same answers as the corresponding class traits. Include
+``<rocwmma/rocwmma.hpp>`` before using them.
+
+.. code-block:: c++
+
+   // Classifies rocWMMA floating-point types as well as native numeric types.
+   if constexpr (rocwmma::is_signed_v<T>) {
+       // Generate or handle negative values.
+   }
+
+The affected types and their underlying spellings are:
+
+.. list-table:: Affected types
+   :header-rows: 1
+
+   * - rocWMMA type
+     - Underlying type
+   * - ``rocwmma::float8_t``
+     - ``__hip_fp8_e4m3`` (also ``hip_fp8_e4m3``)
+   * - ``rocwmma::bfloat8_t``
+     - ``__hip_fp8_e5m2`` (also ``hip_fp8_e5m2``)
+   * - ``rocwmma::float8_fnuz_t``
+     - ``__hip_fp8_e4m3_fnuz`` (also ``hip_fp8_e4m3_fnuz``)
+   * - ``rocwmma::bfloat8_fnuz_t``
+     - ``__hip_fp8_e5m2_fnuz`` (also ``hip_fp8_e5m2_fnuz``)
+   * - ``rocwmma::xfloat32_t``
+     - ``rocwmma_xfloat32``
+
+The C++ standard forbids specializing these standard-library traits.
+Without the legacy specializations, all three ``std::`` traits are false
+for the affected unqualified class types. This can silently change overload
+selection, ``if constexpr`` branches, or random input generation. The change
+also affects code naming the underlying HIP types rather than rocWMMA aliases.
+
+rocWMMA's three traits are independently owned in every mode. They are no
+longer aliases of the standard templates; importing both namespaces can make
+unqualified trait names ambiguous. Qualify calls with ``rocwmma::`` and update
+code depending on the old alias type identity. This migration does not broaden
+the existing behavior of cv-qualified or reference forms.
+
+Transition schedule
+^^^^^^^^^^^^^^^^^^^
+
+The three stages are intended for consecutive ROCm releases. Exact ROCm
+release numbers are assigned during release preparation.
+
+.. list-table:: rocWMMA release stages
+   :header-rows: 1
+
+   * - Version
+     - Default
+     - Explicit legacy request
+   * - 3.0.0
+     - Legacy specializations on where supported; off on known restrictive STLs
+     - Available, subject to compiler/STL restrictions
+   * - 4.0.0 (planned)
+     - Legacy specializations off
+     - Available with deprecation diagnostics
+   * - 5.0.0 (planned)
+     - Owned traits only
+     - Compilation error
+
+In 3.0.0, the automatic default considers both the STL and compiler annotation
+support: libc++ 20 or newer, or MSVC STL defining its type-trait prohibition
+annotation, defaults to no legacy specializations when the compiler supports
+``no_specializations``. Other configurations retain the legacy default.
+An explicit setting overrides this selection; it cannot make forbidden
+specializations compile on an STL that rejects them.
+
+Select the permanent behavior throughout an application using:
+
+.. code-block:: cmake
+
+   target_compile_definitions(my_application PRIVATE
+       ROCWMMA_LEGACY_STD_TRAIT_SPECIALIZATIONS=0)
+
+The equivalent compiler option is ``-DROCWMMA_LEGACY_STD_TRAIT_SPECIALIZATIONS=0``.
+Use ``=1`` only as temporary compatibility through rocWMMA 4.0.0. Values other
+than 0 and 1 are unsupported. In 5.0.0, ``=0`` remains accepted as a no-op so
+migrated build scripts continue to work; ``=1`` reports the removal.
+
+Set the option before any rocWMMA includes and consistently across translation
+units, dependent libraries and precompiled headers. Owned traits have stable
+answers in both modes, but optional standard specializations can still change
+generic template definitions and overload selection across translation units.
+These switches do not change HIPRTC's existing owned-trait implementation.
+
+Deprecation diagnostics
+^^^^^^^^^^^^^^^^^^^^^^
+
+Legacy class specializations carry ``[[deprecated]]`` attributes. Merely
+including rocWMMA or using its owned traits does not emit a migration warning.
+Uses of the legacy standard traits can warn, including uses in system-header
+templates instantiated by an application. Such warnings can fail builds using
+``-Werror``.
+
+Temporarily define ``ROCWMMA_SUPPRESS_LEGACY_STD_TRAIT_DEPRECATION=1`` to suppress
+these attributes without changing trait answers. Prefer migrating the queries
+instead. Standard-library ``_v`` implementations, including MSVC STL's, can
+bypass class specializations: they may neither reflect the legacy answer nor
+emit its warning. System-header instantiations can also suppress warnings.
+The option does not repair that standard-library-dependent
+behavior. Both rocWMMA spellings consistently use its own specializations.
+
+------------------------
+Migrating to rocWMMA 2.0
+------------------------
 
 This document outlines the key API changes and new features introduced in rocWMMA 2.0, with examples to help you migrate from earlier versions.
 

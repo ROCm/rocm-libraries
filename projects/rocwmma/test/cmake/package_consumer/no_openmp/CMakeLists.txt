@@ -29,3 +29,6 @@ target_link_libraries(rocwmma_package_consumer PRIVATE roc::rocwmma)
 
 enable_testing()
 add_test(NAME rocwmma_package_consumer COMMAND rocwmma_package_consumer)
+
+# Use the owned traits even when this consumer is configured independently.
+target_compile_definitions(rocwmma_package_consumer PRIVATE ROCWMMA_LEGACY_STD_TRAIT_SPECIALIZATIONS=0)
