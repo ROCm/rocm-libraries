@@ -180,9 +180,11 @@ namespace
     //    and without the swap divides by the zero diagonal.
     //
     // An odd m leaves a trailing row with a regular diagonal. Complex types carry
-    // imaginary parts on the couplings and the known solution.
+    // imaginary parts on the couplings and the known solution. `even_diag` replaces the
+    // zero diagonal of the even rows: a small value (well below kappa * L_j * U_j / 32)
+    // still fails the 1x1 test, but makes the b_k terms of the 2x2 pivot non-zero.
     template <typename T>
-    system_t<T> make_pivoting_system(int32_t m, int32_t n, int seed)
+    system_t<T> make_pivoting_system(int32_t m, int32_t n, int seed, double even_diag = 0.0)
     {
         system_t<T> s;
         s.dl.resize(m);
@@ -198,7 +200,7 @@ namespace
                                                 : 0.25 + 0.05 * ((j * 3 + seed) % 8); // coupling
             const double  du        = strong_dl ? 0.25 + 0.05 * ((j * 7 + seed) % 8) // coupling
                                                 : 20.0 + ((j * 11 + seed) % 13); // U_j
-            const double  d         = paired ? 0.0 : 1.0 + 0.1 * ((j + seed) % 11);
+            const double  d         = paired ? even_diag : 1.0 + 0.1 * ((j + seed) % 11);
             s.dl[i] = (i == 0) ? make_value<T>(0.0) : make_value<T>(dl, strong_dl ? 0.0 : im_part);
             s.du[i]
                 = (i == m - 1) ? make_value<T>(0.0) : make_value<T>(du, strong_dl ? -im_part : 0.0);
@@ -347,12 +349,17 @@ namespace
         solve_multi_rhs<S, T>(handle, s, m, n, ldb_extra);
     }
 
-    // gtsv on a system whose even rows have a zero diagonal (see make_pivoting_system).
+    // gtsv on a system whose even rows have a zero (or `even_diag`) diagonal (see
+    // make_pivoting_system).
     template <typename T>
-    void run_pivoting_multi_rhs(rocsparse_handle handle, int32_t m, int32_t n)
+    void run_pivoting_multi_rhs(rocsparse_handle handle,
+                                int32_t          m,
+                                int32_t          n,
+                                double           even_diag = 0.0)
     {
-        SCOPED_TRACE("pivot zero-diagonal m=" + std::to_string(m) + " n=" + std::to_string(n));
-        const system_t<T> s = make_pivoting_system<T>(m, n, m % 5);
+        SCOPED_TRACE("pivot zero-diagonal m=" + std::to_string(m) + " n=" + std::to_string(n)
+                     + " even_diag=" + std::to_string(even_diag));
+        const system_t<T> s = make_pivoting_system<T>(m, n, m % 5, even_diag);
         ASSERT_GT(s.swap_rows, 0);
         solve_multi_rhs<Solver::pivot, T>(handle, s, m, n, 0);
     }
@@ -582,6 +589,16 @@ TEST_F(PrecondTridiagonal, pivot_zero_diagonal_blocks)
             run_pivoting_multi_rhs<T>(handle, m, 4);
         }
     });
+}
+
+// From m = 262145 on the SPIKE blocks have 4 rows (rocsparse_gtsv.cpp doubles the block
+// dimension above 512 blocks of 256 threads), so a 2x2 pivot at the top of a block also
+// updates w, v, the right-hand side and the diagonal of row k + 2, and the backward
+// substitution takes its 2x2 branch; with 2-row blocks neither runs. The even rows get a
+// small diagonal so that the terms of those updates that carry b_k are not zero.
+TEST_F(PrecondTridiagonal, pivot_zero_diagonal_blocks_of_four_rows)
+{
+    run_pivoting_multi_rhs<double>(handle, 262145, 1, 0.03);
 }
 
 TEST_F(PrecondTridiagonal, strided_batch_small_sizes)
