@@ -6,7 +6,9 @@
 
 Drives the P2 designed BenchmarkProblems config
 (``data/_designed/gfx950/subtile.yaml``) through the config-driven emit harness
-and asserts every emitted kernel is real gfx950 AMDGCN assembly with err==0.
+and asserts every emitted kernel is real gfx950 AMDGCN assembly with err==0,
+emits the tail loop's boundary DTL load, and reads no SGPR written by
+v_readfirstlane or v_readlane fewer wait states later than gfx950 requires.
 
 Target: tensilelite/Components/Subtile/SubtileGREmit.py, uncovered ranges:
   359-411  (_emitGR_TLU0 — subtile GR buffer load emit)
@@ -25,7 +27,7 @@ import os
 
 import pytest
 
-from config_harness import emit_kernels_from_config
+from config_harness import assert_no_sgpr_hazards, emit_kernels_from_config
 
 pytestmark = pytest.mark.unit
 
@@ -53,6 +55,8 @@ def test_r2_subtile_gfx950_emits_assembly():
         assert ".amdgcn_target" in src, f"kernel {base!r}: missing .amdgcn_target"
         assert "gfx950" in src, f"kernel {base!r}: wrong arch in assembly"
         assert base.startswith("Cijk_"), f"kernel {base!r}: unexpected basename prefix"
+        assert "// boundary 16-bit DTL load" in src, f"kernel {base!r}: no tail-loop boundary DTL load"
+        assert_no_sgpr_hazards(src, base)
 
 
 def test_r2_subtile_gfx950_golden(snapshot):

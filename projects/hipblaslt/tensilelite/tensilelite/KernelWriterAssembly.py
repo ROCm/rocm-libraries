@@ -6607,11 +6607,11 @@ class KernelWriterAssembly(KernelWriter):
                                   comment="sTarget = v[vaddr][sLaneId]"))
           module.add(SAddU32(dst=sgpr(sVaddrTmp), src0=sgpr(sVaddrTmp), src1=sgpr(sVaddrBase),
                              comment="+ sVaddrBase (intra + offsetK + offsetM_glb)"))
+          module.add(SCmpEQU32(src0=sgpr(sAnyMatch), src1=0,
+                               comment="SCC=1 if no matching lane on this wave"))
           module.add(VMovB32(dst=vgpr(vTmp), src=sgpr(sVaddrTmp), comment="vaddr"))
 
           # EXEC gate, DTL load, wait, restore EXEC
-          module.add(SCmpEQU32(src0=sgpr(sAnyMatch), src1=0,
-                               comment="SCC=1 if no matching lane on this wave"))
           module.add(SCSelectB64(dst=EXEC(), src0=0, src1=1,
                                  comment="EXEC = match ? 1 : 0"))
           module.add(BufferLoadU16(dst=None, vaddr=vgpr(vTmp),

@@ -389,6 +389,73 @@ def assert_cluster_barrier_balanced(src, base):
     )
 
 
+_SET_RE = re.compile(r"^\.set (\w+), (\d+)\s*$")
+_ANY_LABEL_RE = re.compile(r"^[\w.]+:\s*$")
+_INST_RE = re.compile(r"^([a-z][a-z0-9_]*)\b(.*)$")
+_VMEM_PREFIXES = ("buffer_", "global_", "flat_", "scratch_")
+
+
+def _sgprs(operand, sets):
+    """SGPR numbers of an `sN` or `s[expr]` / `s[expr:expr]` operand, expr a sum of integers and
+    .set names; empty for anything else."""
+    m = re.fullmatch(r"s(\d+)", operand)
+    if m:
+        return {int(m.group(1))}
+    m = re.fullmatch(r"s\[([^\]]+)\]", operand)
+    if not m:
+        return set()
+    ends = []
+    for part in m.group(1).split(":"):
+        total = 0
+        for term in part.split("+"):
+            term = term.strip()
+            if not term.isdigit() and term not in sets:
+                return set()
+            total += int(term) if term.isdigit() else sets[term]
+        ends.append(total)
+    return set(range(ends[0], ends[-1] + 1))
+
+
+def sgpr_hazards(src):
+    """(line, writer, line, reader, wait states) for each read of an SGPR written by a
+    v_readfirstlane or v_readlane with fewer wait states than gfx950 requires; labels end the window."""
+    sets, insts = {}, []
+    for lineno, line in enumerate(src.splitlines(), 1):
+        line = line.strip()
+        m = _SET_RE.match(line)
+        if m:
+            sets[m.group(1)] = int(m.group(2))
+        elif _ANY_LABEL_RE.match(line):
+            insts.append(None)
+        elif m := _INST_RE.match(line):
+            ops = [o.strip().split()[0] for o in m.group(2).split("//")[0].split(",") if o.strip()]
+            insts.append((lineno, m.group(1), [_sgprs(o, sets) for o in ops], ops, line))
+    hits = []
+    for n, inst in enumerate(insts):
+        if inst is None or inst[1] not in ("v_readfirstlane_b32", "v_readlane_b32") or not inst[2][0]:
+            continue
+        waits = 0
+        for e in insts[n + 1:]:
+            if e is None or waits >= 5:
+                break
+            lineno, mn, regs, ops, line = e
+            if mn.startswith(_VMEM_PREFIXES):
+                needs = [5] * len(regs)
+            elif mn in ("v_readlane_b32", "v_writelane_b32"):
+                needs = [0, 2, 4]
+            else:
+                needs = [0] + [2 if mn.startswith("v_") else 0] * (len(regs) - 1)
+            if any(r & inst[2][0] and waits < need for r, need in zip(regs, needs)):
+                hits.append((inst[0], inst[4], lineno, line, waits))
+            waits += int(ops[0], 0) + 1 if mn == "s_nop" else 1
+    return hits
+
+
+def assert_no_sgpr_hazards(src, base):
+    hazards = sgpr_hazards(src)
+    assert not hazards, f"Kernel {base!r}: SGPR read too soon after a VALU write {hazards}"
+
+
 def derive_states(config_path, arch=_DEFAULT_ARCH, limit_solutions=8):
     """Return the derived Solution ``state`` dicts for a config (CPU-only).
 
