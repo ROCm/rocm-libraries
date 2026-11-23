@@ -1,0 +1,84 @@
+{
+  "version": "1.0",
+  "id": "abcebb04-2efd-4618-8f03-d19de3726c9c",
+  "name": "hipkernel:Gfx942AttentionDense engine predictor (L1, gfx942, tflops)",
+  "adapter": "tree_data",
+  "features_signature": [
+    "$gfx942_attention_dense.causal",
+    "$graph.flops",
+    "$graph.flops_by_type.SdpaAttributes",
+    "$graph.nodes[0].flops",
+    {
+      "value_or_default": [
+        "$graph.nodes[0].generate_stats",
+        false
+      ]
+    },
+    "$graph.nodes[0].k.data_type",
+    "$graph.nodes[0].k.dims[0]",
+    "$graph.nodes[0].k.dims[1]",
+    "$graph.nodes[0].k.dims[2]",
+    "$graph.nodes[0].k.dims[3]",
+    "$graph.nodes[0].k.numel",
+    "$graph.nodes[0].k.strides[0]",
+    "$graph.nodes[0].k.strides[1]",
+    "$graph.nodes[0].k.strides[2]",
+    "$graph.nodes[0].o.data_type",
+    "$graph.nodes[0].o.dims[0]",
+    "$graph.nodes[0].o.dims[1]",
+    "$graph.nodes[0].o.dims[2]",
+    "$graph.nodes[0].o.dims[3]",
+    "$graph.nodes[0].o.numel",
+    "$graph.nodes[0].o.strides[0]",
+    "$graph.nodes[0].o.strides[1]",
+    "$graph.nodes[0].o.strides[2]",
+    "$graph.nodes[0].q.data_type",
+    "$graph.nodes[0].q.dims[0]",
+    "$graph.nodes[0].q.dims[1]",
+    "$graph.nodes[0].q.dims[2]",
+    "$graph.nodes[0].q.dims[3]",
+    "$graph.nodes[0].q.numel",
+    "$graph.nodes[0].q.strides[0]",
+    "$graph.nodes[0].q.strides[1]",
+    "$graph.nodes[0].q.strides[2]",
+    "$graph.nodes[0].v.data_type",
+    "$graph.nodes[0].v.dims[0]",
+    "$graph.nodes[0].v.dims[1]",
+    "$graph.nodes[0].v.dims[2]",
+    "$graph.nodes[0].v.dims[3]",
+    "$graph.nodes[0].v.numel",
+    "$graph.nodes[0].v.strides[0]",
+    "$graph.nodes[0].v.strides[1]",
+    "$graph.nodes[0].v.strides[2]"
+  ],
+  "features_hash": "sha256:1acb5188cc46b2a4",
+  "trained_against": {
+    "ued": {
+      "id": "a74a5afb-30c0-41c2-8006-501d2961f808",
+      "revision": "1.0"
+    },
+    "kmd": {
+      "id": "daac46c8-97fb-4012-b00c-500f0bf3b955",
+      "revision": "1.0"
+    },
+    "umd": [
+      {
+        "id": "c1a8caf0-42aa-4852-a967-23328e1f6eb7",
+        "revision": "1.0"
+      }
+    ],
+    "selector_revision": "generic-untuned-v1/b36dcfc7f28afb9b1635a4bfd43be1997482713af2f31ebe0265f6eb5c8e2f50",
+    "codegen_revision": "generic-codegen-v1/4e50ea88074cb6008f5b017d4d08552298c2299ccce73154d1ad125e9a7abab6",
+    "feature_semantics_revision": 1
+  },
+  "objective": "max",
+  "score": {
+    "metric": "tflops",
+    "calibrated": true,
+    "transform": "log"
+  },
+  "tree_data": {
+    "artifact": "model.bin",
+    "hash": "c86bf91f9b21beeaf32227bcc8a473ad92f0fafa9d615666fde26910a2cf12d6"
+  }
+}

@@ -73,12 +73,22 @@ def _code_object(module):
     return _object([_kernel(name, ARGS[name]) for name in names])
 
 
+def _identity_of(vk):
+    """A stand-in compiler-independent identity for variant `vk`'s code object."""
+    return hashlib.sha256(f"identity of {vk}".encode()).hexdigest()
+
+
 def shipped(launches=ONE_MODULE, version="1.0"):
     """A shipped rocke `sources` UKD over synthesised objects.
 
     `launches` is `{launch: (variant key, role)}`; each variant key names a module
     in `MODULES`. Returns `(doc, records, payload)` with `payload` keyed by launch.
+    `launches` None ships the `vk-seg` kernel as one `kernel_source` instead, and
+    `payload` is its code object.
     """
+    single = launches is None
+    if single:
+        launches = {"segment": ("vk-seg", None)}
     entry = consumer()
     records = agreement.canonical_records(
         [
@@ -101,6 +111,7 @@ def shipped(launches=ONE_MODULE, version="1.0"):
             observations["symbol"] = module["primary"]
             observations["compile_target"] = ARCH
             observations["code_object_sha256"] = hashlib.sha256(objects[vk]).hexdigest()
+            observations["code_object_identity"] = _identity_of(vk)
             if module["companions"]:
                 observations["companions"] = dict(module["companions"])
             observed[vk] = observations
@@ -116,6 +127,35 @@ def shipped(launches=ONE_MODULE, version="1.0"):
             role=role,
             origin_kind="rocke",
         )
+    if single:
+        (launch,) = entries.values()
+        code_object = objects[launch.variant_key]
+        record = pipeline.InlineUKD(
+            id="ukd-demo",
+            name="demo variant",
+            metadata=METADATA,
+            priority=0,
+            source=launch.source,
+            entry=None,
+            build=None,
+            symbol=launch.symbol,
+            variant_key=launch.variant_key,
+            extra={"version": version},
+            origin_kind="rocke",
+            builder=launch.builder,
+            spec=launch.spec,
+            observations=launch.observations,
+            consumers=records,
+            compile_target=ARCH,
+        )
+        doc = pipeline._rewrite_ukd_kpack(
+            record,
+            ARCH,
+            launch.variant_key,
+            hashlib.sha256(code_object).hexdigest(),
+            signature=kernel_signature(code_object, launch.symbol, "t"),
+        )
+        return doc, records, code_object
     record = pipeline.InlineUKD(
         id="ukd-demo",
         name="demo variant",
@@ -169,12 +209,57 @@ class TestShippedSources:
                 "toc_key",
                 "symbol",
                 "sha256",
+                "identity",
                 "signature",
             }
             assert ks["kind"] == "kpack"
+            assert ks["identity"] == _identity_of(launches[name][0])
             assert ks["signature"] == kernel_signature(payload[name], ks["symbol"], "t")
             assert ks["sha256"] == hashlib.sha256(payload[name]).hexdigest()
         agreement.verify(doc, records, payload)
+
+    @pytest.mark.parametrize("kind", ["hip", "hsaco"])
+    @pytest.mark.parametrize("names", [(), ("k0", "k1")], ids=["single", "sources"])
+    def test_hip_and_hsaco_kernels_carry_no_identity(self, kind, names):
+        """Only a rocke compile records what COMGR compiled; a hip or hsaco kernel
+        has `sha256` as its only digest and keeps the version `sources` needs."""
+        authored = {
+            "hip": {"source": "k.cpp", "entry": "k", "build": {}},
+            "hsaco": {"rel_file": "k.co"},
+        }[kind]
+        record = pipeline.InlineUKD(
+            id="k",
+            name="k",
+            metadata={},
+            priority=0,
+            source=authored.get("source"),
+            entry=authored.get("entry"),
+            build=authored.get("build"),
+            symbol="k",
+            variant_key="vk",
+            extra={"version": "1.0"},
+            origin_kind=kind,
+            rel_file=authored.get("rel_file"),
+            launches={
+                name: pipeline.LaunchEntry(
+                    variant_key="vk", symbol="k", origin_kind=kind, **authored
+                )
+                for name in names
+            },
+        )
+        packed = {"toc_key": "vk", "sha256": "0" * 64, "signature": []}
+        doc = pipeline._rewrite_ukd_kpack(
+            record,
+            ARCH,
+            "vk",
+            "0" * 64,
+            signature=[],
+            packed_launches={name: packed for name in names},
+        )
+        entries = list(doc["sources"].values()) if names else [doc["kernel_source"]]
+        assert entries and not any("identity" in ks for ks in entries)
+        # Only `sources` raises the version.
+        assert doc["version"] == ("1.1" if names else "1.0")
 
     def test_entries_on_one_module_share_the_object_and_differ_in_symbol(self):
         doc, _records, _payload = shipped(ONE_MODULE)
@@ -196,11 +281,14 @@ class TestShippedSources:
         assert _evidence(doc, "segment") != _evidence(doc, "reduce")
         assert set(doc["provenance"]["sources"]) == {"segment", "reduce"}
 
-    @pytest.mark.parametrize("authored", ["0.1", "1.0", "1.1", "1.2", "2.0"])
-    def test_a_sources_ukd_ships_at_no_less_than_1_1(self, authored):
-        doc, records, payload = shipped(version=authored)
+    @pytest.mark.parametrize("launches", [None, ONE_MODULE], ids=["single", "sources"])
+    @pytest.mark.parametrize("authored", ["0.1", "1.0", "1.1", "1.2", "1.10", "2.0"])
+    def test_an_identified_ukd_ships_at_no_less_than_1_2(self, launches, authored):
+        """A rocke UKD carries `identity`, which the loader reads from UKD 1.2; a
+        later authored version is kept."""
+        doc, records, payload = shipped(launches, version=authored)
         major, minor = (int(p) for p in authored.split("."))
-        assert doc["version"] == (authored if (major, minor) >= (1, 1) else "1.1")
+        assert doc["version"] == (authored if (major, minor) >= (1, 2) else "1.2")
         # The stamp is in the bytes the evidence digests.
         agreement.verify(doc, records, payload)
 
@@ -943,6 +1031,16 @@ def _packed_ukd(version="1.1", entries=None):
     )
 
 
+def _identified(single, identity, version="1.2"):
+    """A packed UKD whose first (or only) kernel source carries `identity`."""
+    entry = _packed_entry(PRIMARY, identity=identity)
+    if single:
+        doc = {**_packed_ukd(version), "kernel_source": entry}
+        del doc["sources"]
+        return doc
+    return _packed_ukd(version, entries={"k0": entry, "k1": _packed_entry(MERGE)})
+
+
 class TestAuthoredValidation:
     def test_two_rocke_entries_with_and_without_a_role_are_accepted(self):
         _validate_ukd_fields(_sources_ukd(), "UKD 'k'")
@@ -1151,6 +1249,41 @@ class TestPackedValidation:
         )
         with pytest.raises(HkpPackError, match="'role', which is authored-only"):
             _validate_ukd_fields(doc, "UKD 'k'")
+
+    @pytest.mark.parametrize("single", [True, False], ids=["kernel_source", "sources"])
+    @pytest.mark.parametrize(
+        "identity, accepted",
+        [
+            ("0123456789abcdef" * 4, True),
+            ("0123456789ABCDEF" * 4, False),
+            ("0" * 63, False),
+            ("0" * 65, False),
+            ("g" * 64, False),
+            ("", False),
+            (None, False),
+            (64, False),
+        ],
+    )
+    def test_an_identity_must_be_64_lowercase_hex(self, single, identity, accepted):
+        doc = _identified(single, identity)
+        if accepted:
+            _validate_ukd_fields(doc, "UKD 'k'")
+        else:
+            with pytest.raises(HkpPackError, match="'identity' must be 64 lowercase"):
+                _validate_ukd_fields(doc, "UKD 'k'")
+
+    @pytest.mark.parametrize("single", [True, False], ids=["kernel_source", "sources"])
+    @pytest.mark.parametrize(
+        "version, accepted",
+        [("1.2", True), ("1.10", True), ("2.0", True), ("1.1", False), ("1.0", False)],
+    )
+    def test_an_identity_needs_version_1_2_or_later(self, single, version, accepted):
+        doc = _identified(single, "0" * 64, version)
+        if accepted:
+            _validate_ukd_fields(doc, "UKD 'k'")
+        else:
+            with pytest.raises(HkpPackError, match="'identity' under version"):
+                _validate_ukd_fields(doc, "UKD 'k'")
 
     def test_a_packed_entry_needs_the_full_kernel_source(self):
         entry = _packed_entry(MERGE)

@@ -235,7 +235,14 @@ inline void provenance(const nlohmann::json& value, const std::string& where, bo
              + ", which requires UHD version 1.1");
     }
     keys(value,
-         {"ued", "kmd", "kmds", "slot", "umd", "selector_revision", "feature_semantics_revision"},
+         {"ued",
+          "kmd",
+          "kmds",
+          "slot",
+          "umd",
+          "selector_revision",
+          "codegen_revision",
+          "feature_semantics_revision"},
          where);
     if(value.contains("feature_semantics_revision"))
     {
@@ -263,6 +270,11 @@ inline void provenance(const nlohmann::json& value, const std::string& where, bo
     {
         // Opaque: only the provider that produced it can interpret it.
         (void)text(value, "selector_revision", where);
+    }
+    if(value.contains("codegen_revision"))
+    {
+        // Opaque like selector_revision, but satisfies neither form: it only qualifies one.
+        (void)text(value, "codegen_revision", where);
     }
     if(value.contains("slot") && !value.contains("kmd"))
     {

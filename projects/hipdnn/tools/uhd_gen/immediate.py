@@ -20,7 +20,12 @@ from .correctness import (
 )
 from .features import UnseenCategoryError, evaluate_feature_maps, signature_references
 from .corpus_io import read_corpus_frame
-from .provenance import compare_provenance, validate_provenance
+from .provenance import (
+    compare_provenance,
+    hard_provenance,
+    shared_provenance,
+    validate_provenance,
+)
 from .ranking_metrics import (
     RANKING_METRICS,
     RankingMetric,
@@ -146,14 +151,18 @@ def validate_binding(value) -> dict:
 
 
 def binding_identity(binding: dict, *, include_uhd_id: bool = True) -> dict:
-    """`binding` without `provider_build`: the loaded plugin's name and version, which the
-    runtime reports as a diagnostic and never as a model compatibility key.
+    """`binding` without `provider_build` (the loaded plugin's name and version) and without
+    `trained_against.codegen_revision` (the digest of its code objects): the runtime reports
+    both, and neither is a model compatibility key.
 
     Two measurements whose identities match were taken under one contract, whichever build
     answered. `include_uhd_id=False` also drops the model id an opaque engine declares.
     """
     ignored = ("provider_build",) if include_uhd_id else ("provider_build", "uhd_id")
-    return {key: value for key, value in binding.items() if key not in ignored}
+    identity = {key: value for key, value in binding.items() if key not in ignored}
+    if "trained_against" in identity:
+        identity["trained_against"] = hard_provenance(identity["trained_against"])
+    return identity
 
 
 def require_binding_metric(
@@ -377,16 +386,18 @@ def normalize_corpus(frame: pd.DataFrame, *, repeats: bool = False) -> pd.DataFr
         )
     for _, group in result.groupby("engine", sort=False):
         bindings = [validate_binding(value) for value in group["binding"]]
+        # Code objects built by another compiler (`codegen_revision`) do not change the
+        # contract; `measured_provenance` warns about them.
         recorded = (
             bindings[0]["selector_revision"],
             bindings[0]["metric"],
-            bindings[0]["trained_against"],
+            hard_provenance(bindings[0]["trained_against"]),
         )
         if any(
             (
                 binding["selector_revision"],
                 binding["metric"],
-                binding["trained_against"],
+                hard_provenance(binding["trained_against"]),
             )
             != recorded
             for binding in bindings[1:]
@@ -410,7 +421,9 @@ def read_corpus(path: Path) -> pd.DataFrame:
 
 def training_binding(
     frame: pd.DataFrame, engine: str | None = None
-) -> tuple[pd.DataFrame, dict]:
+) -> tuple[pd.DataFrame, dict, str | None]:
+    """The rows of one immediate engine in `frame`, their binding, and the warning
+    `measured_provenance` gives for its `trained_against`."""
     if engine is not None:
         frame = frame[
             frame["engine_name"].eq(engine) | frame["engine"].astype(str).eq(engine)
@@ -420,7 +433,18 @@ def training_binding(
             "train one immediate engine at a time; select --engine by canonical name or public ID"
         )
     binding = validate_binding(frame.iloc[0]["binding"])
-    return frame.copy(), binding
+    binding["trained_against"], warning = measured_provenance(frame)
+    return frame.copy(), binding, warning
+
+
+def measured_provenance(frame: pd.DataFrame) -> tuple[dict, str | None]:
+    """The provenance every row of `frame` was measured under, and a warning when their
+    code objects come from different compilers: its `codegen_revision` is kept only where
+    every row records the same one (`shared_provenance`)."""
+    return shared_provenance(
+        validate_binding(value)["trained_against"]
+        for value in frame["binding"].unique()
+    )
 
 
 def validate_model(descriptor: dict) -> RankingMetric:
@@ -482,6 +506,7 @@ def prediction_scorer(descriptor: dict, responses: list[dict]):
     identity = descriptor["id"]
     metric = validate_model(descriptor).name
     selected = {}
+    compared = []
     for response in responses:
         if response.get("model") != identity:
             continue
@@ -499,7 +524,12 @@ def prediction_scorer(descriptor: dict, responses: list[dict]):
         ):
             raise ValueError(f"runtime prediction has an unknown status {status!r}")
         binding = validate_binding(response.get("binding"))
-        compare_provenance(descriptor["trained_against"], binding["trained_against"])
+        # Once per distinct provenance: a codegen difference warns, once.
+        if binding["trained_against"] not in compared:
+            compare_provenance(
+                descriptor["trained_against"], binding["trained_against"]
+            )
+            compared.append(binding["trained_against"])
         engine = response.get("engine_id")
         if isinstance(engine, bool) or not isinstance(engine, int):
             raise ValueError("runtime prediction engine_id must be an integer")

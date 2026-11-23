@@ -14,6 +14,7 @@ from hkp_pack.descriptors import load_flat_input
 from hkp_pack.errors import HkpPackError
 from hkp_pack.rocke_compile import (
     build_spec,
+    code_object_identity,
     compile_rocke_variant,
     rocke_variant_key,
 )
@@ -161,9 +162,11 @@ def _write_stub_pkg(tmp_path, body, pkg="stubpkg", sub="sub", mod="mod"):
 
 
 class _FakeArtifact:
-    def __init__(self, name, data):
+    def __init__(self, name, data, llvm_text, isa):
         self.kernel_name = name
         self.hsaco = data
+        self.llvm_text = llvm_text
+        self.isa = isa
 
 
 class _FakeComgrError(Exception):
@@ -177,7 +180,19 @@ STUB_ARGUMENTS = [
 ]
 
 
-def _patch_compiler(monkeypatch, name="stub_symbol", data=None):
+_STUB_IR = "; stub IR"
+_STUB_ISA = f"amdgcn-amd-amdhsa--{ARCH}"
+_STUB_OPTIONS = ("-O3",)
+
+
+def _patch_compiler(
+    monkeypatch,
+    name="stub_symbol",
+    data=None,
+    llvm_text=_STUB_IR,
+    isa=_STUB_ISA,
+    options=_STUB_OPTIONS,
+):
     """Stub the comgr entry, recording the backend and arch the producer requested.
 
     The recorder exists so a test can assert the producer PINS the backend
@@ -190,6 +205,9 @@ def _patch_compiler(monkeypatch, name="stub_symbol", data=None):
     before any guard under test is reached. Synthesising that note needs
     msgpack, so the default -- and only the default -- is gated on it; a caller
     supplying its own bytes needs nothing.
+
+    `llvm_text`, `isa` and `options` are what the stub reports COMGR compiled;
+    the options stub records the kernel it was asked about.
     """
     if data is None:
         requires_msgpack()
@@ -201,11 +219,16 @@ def _patch_compiler(monkeypatch, name="stub_symbol", data=None):
     def _fake_compile(kernel, *, arch, capture_ir_text=False, backend=None):
         seen["backend"] = backend
         seen.setdefault("arches", []).append(arch)
-        return _FakeArtifact(name, data)
+        return _FakeArtifact(name, data, llvm_text, isa)
+
+    def _fake_options(kernel):
+        seen.setdefault("options_for", []).append(kernel)
+        return list(options)
 
     monkeypatch.setattr(
         rocke_compile, "_load_compiler", lambda: (_fake_compile, _FakeComgrError)
     )
+    monkeypatch.setattr(rocke_compile, "_load_comgr_options", lambda: _fake_options)
     return name, data, seen
 
 
@@ -239,6 +262,61 @@ def test_adapter_import_build_capture(tmp_path, monkeypatch):
     # default: the wheel has no C++ engine, so an unpinned request degrades to
     # Python via a fallback and the artifact misreports which engine built it.
     assert seen["backend"] == "python"
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize(
+    "changed, value, moves",
+    [
+        ("data", b"\x7fELF-rebuilt", False),
+        ("llvm_text", "; other IR", True),
+        ("isa", f"amdgcn-amd-amdhsa--{ARCH}:xnack-", True),
+        ("options", ("-O3", "-mllvm", "-amdgpu-mfma-vgpr-form"), True),
+    ],
+)
+def test_identity_follows_what_comgr_compiled_not_the_code_object(
+    tmp_path, monkeypatch, changed, value, moves
+):
+    """`code_object_identity` digests the IR, ISA name and options COMGR compiled, so
+    a compiler that only rebuilds the bytes keeps it while the sha256 moves."""
+    src = _write_stub_pkg(tmp_path, _GOOD_STUB, pkg=f"stubpkg_identity_{changed}")
+    base = {"data": b"\x7fELF-stub"}
+
+    def _observations(**inputs):
+        _name, _data, seen = _patch_compiler(monkeypatch, **inputs)
+        _co, _symbol, observations = compile_rocke_variant(
+            src, "build_stub", {"n": 1}, ARCH, tmp_path / "co"
+        )
+        # The options are asked for the kernel the builder returned.
+        (kernel,) = seen["options_for"]
+        assert kernel[0] == "kernel" and kernel[1].n == 1 and kernel[2] == ARCH
+        return observations
+
+    before = _observations(**base)
+    after = _observations(**{**base, changed: value})
+    assert before["code_object_identity"] == code_object_identity(
+        [_STUB_IR], _STUB_ISA, list(_STUB_OPTIONS)
+    )
+    assert (before["code_object_identity"] != after["code_object_identity"]) is moves
+    assert (before["code_object_sha256"] != after["code_object_sha256"]) is (
+        changed == "data"
+    )
+
+
+@pytest.mark.quick
+def test_identity_digests_the_documented_canonical_json():
+    """The runtime's selector revision hashes this digest, so it is pinned. Derived
+    by hand from the documented form, sha256 of the compact sorted-key JSON
+    `{"isa": isa, "llvm": [sha256 of each IR text], "options": options}`:
+
+        sha256(b"; ir")
+          = 43c92120e820d267cd330838aaf9629cc10033e1725933a4286391e2fda98382
+        sha256(b'{"isa":"amdgcn-amd-amdhsa--gfx942","llvm":["43c9...8382"],'
+               b'"options":["-O3"]}')   # the full IR digest in place of 43c9...8382
+    """
+    assert code_object_identity(["; ir"], "amdgcn-amd-amdhsa--gfx942", ["-O3"]) == (
+        "c7ac4b0c9a56d0f9fe3deca3df317be3cb2ab2607e5663715bde6295574d78ce"
+    )
 
 
 @pytest.mark.quick

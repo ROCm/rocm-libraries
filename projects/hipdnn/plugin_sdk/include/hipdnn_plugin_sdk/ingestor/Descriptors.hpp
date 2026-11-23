@@ -385,6 +385,10 @@ struct HeuristicDescriptor
     /// measured on, for engines with no UED. Empty unless authored. A mismatch is refused, not
     /// warned about, because a stale L1 estimate changes which engine is selected.
     std::string trainedAgainstSelectorRevision;
+    /// RFC 0019 §4.1 `trained_against.codegen_revision`: the code objects this model was
+    /// measured on. Empty unless recorded. A mismatch is warned about, not refused: it moves
+    /// when only the compiler changes, which leaves the selector revision alone.
+    std::string trainedAgainstCodegenRevision;
     /// The role-map entry that resolved this model: backfilled by
     /// DescriptorLoader::resolveRole from the owning UED, never authored in the UHD
     /// (RFC 0019 §3.1). Empty for a model no role map has resolved yet.
@@ -412,6 +416,7 @@ inline bool operator==(const HeuristicDescriptor& lhs, const HeuristicDescriptor
                     lhs.customLibrarySymbol,
                     lhs.trainedAgainst,
                     lhs.trainedAgainstSelectorRevision,
+                    lhs.trainedAgainstCodegenRevision,
                     lhs.trainedAgainstJson)
            == std::tie(rhs.id,
                        rhs.name,
@@ -427,6 +432,7 @@ inline bool operator==(const HeuristicDescriptor& lhs, const HeuristicDescriptor
                        rhs.customLibrarySymbol,
                        rhs.trainedAgainst,
                        rhs.trainedAgainstSelectorRevision,
+                       rhs.trainedAgainstCodegenRevision,
                        rhs.trainedAgainstJson);
 }
 
@@ -708,6 +714,11 @@ struct KernelSource
     /// Empty is a kernel that takes no arguments, which is why the parser rejects the key
     /// being absent rather than reading absence as empty.
     std::vector<KernelArgument> signature;
+    /// KPACK, optional (UKD 1.2): a compiler-independent digest of what the packager handed the
+    /// compiler, for a code object it compiled from rocKE IR. It moves when the kernel's code
+    /// changes but not when only the compiler does, so the selector revision hashes it in place
+    /// of @ref sha256 (RFC 0019 §8.1). Empty for a prebuilt or HIP-compiled code object.
+    std::string identity;
 };
 
 inline bool operator==(const KernelSource& lhs, const KernelSource& rhs)
@@ -719,7 +730,8 @@ inline bool operator==(const KernelSource& lhs, const KernelSource& rhs)
                     lhs.tocKey,
                     lhs.symbol,
                     lhs.sha256,
-                    lhs.signature)
+                    lhs.signature,
+                    lhs.identity)
            == std::tie(rhs.kind,
                        rhs.sourceFile,
                        rhs.entryPoint,
@@ -727,7 +739,8 @@ inline bool operator==(const KernelSource& lhs, const KernelSource& rhs)
                        rhs.tocKey,
                        rhs.symbol,
                        rhs.sha256,
-                       rhs.signature);
+                       rhs.signature,
+                       rhs.identity);
 }
 
 inline bool operator!=(const KernelSource& lhs, const KernelSource& rhs)
@@ -757,7 +770,7 @@ inline constexpr bool IS_BRACE_INITIALIZABLE_V = IsBraceInitializable<T, void, A
 
 } // namespace detail
 
-// KernelSource's field count is pinned here: accepting exactly eight initializers and no
+// KernelSource's field count is pinned here: accepting exactly nine initializers and no
 // more makes an inserted field ill-formed at this assertion, rather than silently
 // rebinding every value after it at a positional initialization site. Only the count --
 // two same-typed members swapped past each other still brace-initialize.
@@ -769,7 +782,8 @@ static_assert(detail::IS_BRACE_INITIALIZABLE_V<KernelSource,
                                                std::string,
                                                std::string,
                                                std::string,
-                                               std::vector<KernelArgument>>
+                                               std::vector<KernelArgument>,
+                                               std::string>
                   && !detail::IS_BRACE_INITIALIZABLE_V<KernelSource,
                                                        KernelSourceKind,
                                                        std::string,
@@ -779,6 +793,7 @@ static_assert(detail::IS_BRACE_INITIALIZABLE_V<KernelSource,
                                                        std::string,
                                                        std::string,
                                                        std::vector<KernelArgument>,
+                                                       std::string,
                                                        std::string>,
               "KernelSource gained or lost a field; append only, then extend this "
               "assertion.");

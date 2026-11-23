@@ -114,7 +114,8 @@ One directory the user names (default `~/uhd-work`), laid out so a key is its pa
 
 Write any `:` in an engine name (UED names are scoped, e.g. `hipkernel:Gfx950AttentionDense`)
 as `-` in paths. The revision
-segment is the selector revision with `/` as `-`.
+segment is the selector revision with `/` as `-`. The `codegen_revision` (the digest of the
+engine's code objects, which a compiler change moves) is not part of any path.
 
 - **Shape sets accumulate.** Sets are numbered in order (`set-0001`, `set-0002`, ...). A new
   set of an engine on a device passes `--exclude-corpus <set>/<operation>/manifest.json` for
@@ -137,7 +138,14 @@ segment is the selector revision with `/` as `-`.
   recall (`uhd_gen generate --recall`).
 - **Selector revision.** Every collection records the engine's `selector_revision` in its
   `collection_manifest.json`. Rows of different revisions never train together; a revision
-  change (the engine's code changed) needs new measurements.
+  change (the engine's selection logic changed) needs new measurements.
+- **Codegen revision.** A collection's `trained_against` may also carry the engine's
+  `codegen_revision`. Each contribution keeps its own, and a dataset may hold contributions
+  measured with different compilers: `dataset add` accepts them and warns (stderr, and
+  `warnings` in its JSON output). A model trained on them records no `codegen_revision`, and
+  its evaluation report warns too; one trained on contributions that agree records it. The
+  runtime binds a model whose `codegen_revision` differs from the engine's and warns; when to
+  re-measure after a compiler change is the team's decision.
 - A **contribution** is one source's rows (a collection, an old generate folder, a CSV set).
   Each row records its contribution, when it was measured, its `purpose` (`training`,
   `holdout` or `eval`) and its corpus. `dataset.parquet` keeps every row, failures and
@@ -212,7 +220,9 @@ source's numeric problem columns, its group column and the positional columns
 ## Decision rules
 
 - Re-measure only what is not stored. A training change (features, boosting, a new
-  `uhd_gen`) retrains from the dataset; a revision change needs new measurements.
+  `uhd_gen`) retrains from the dataset; a selector revision change needs new measurements. A
+  codegen revision change alone does not: new measurements join the same dataset, with a
+  warning.
 - A refused conversion was measured under another binding; it belongs in another dataset.
   Do not force it.
 - A CSV with no FLOP count cannot derive `tflops`: train with `--target minTimeMs

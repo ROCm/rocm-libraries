@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <set>
 #include <stdexcept>
 #include <string>
@@ -24,6 +25,7 @@
 #include <hipdnn_plugin_sdk/KnobFactory.hpp>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
+#include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <hipdnn_plugin_sdk/heuristics/RankingMetric.hpp>
 #include <hipdnn_plugin_sdk/heuristics/uhd/EnginePredictor.hpp>
 #include <hipdnn_plugin_sdk/ingestor/GenericPlanBuilder.hpp>
@@ -55,6 +57,21 @@ inline const std::string* findUndeclaredKnob(const std::vector<std::string>& kno
     }
     return nullptr;
 }
+
+namespace detail
+{
+
+/// Whether this process sees @p key for the first time, so a condition every Container of
+/// an engine meets is logged once rather than once per handle.
+inline bool firstInProcess(const std::string& key)
+{
+    static std::mutex s_mutex;
+    static std::set<std::string> s_seen;
+    const std::lock_guard<std::mutex> lock(s_mutex);
+    return s_seen.insert(key).second;
+}
+
+} // namespace detail
 
 /// The first knob @p engine exposes that @p fields does not declare, or nullptr.
 /// The descriptor form of the vector overload above, which it forwards to.
@@ -127,7 +144,9 @@ public:
         // RFC 0019 §3.1: the UED role map is this engine's L1 binding, keyed by each UHD's metric.
         // §4.1 selector_revision is re-checked here because this engine's selector also covers
         // its rankers, packs, kernels and native symbols; an L1 model measured against another
-        // selector changes which engine is chosen.
+        // selector changes which engine is chosen. §8.1 codegen_revision is only warned about:
+        // it moves when a compiler rebuilds the same kernels.
+        const auto codegenRevision = _provenance.value("codegen_revision", std::string{});
         for(const auto& [metric, byArch] : predictions)
         {
             for(const auto& [arch, descriptor] : byArch)
@@ -153,6 +172,19 @@ public:
                 }
                 else
                 {
+                    const auto& trainedCodegen = descriptor.trainedAgainstCodegenRevision;
+                    // Either side recording none leaves nothing to compare.
+                    if(!trainedCodegen.empty() && !codegenRevision.empty()
+                       && trainedCodegen != codegenRevision
+                       && detail::firstInProcess(_engine.name + "|" + metric + "|" + arch))
+                    {
+                        HIPDNN_PLUGIN_LOG_WARN(
+                            "ingestor: engine '"
+                            << _engine.name << "' binds its " << metric << " model for " << arch
+                            << ", which was measured on other code objects (trained against "
+                            << trainedCodegen << ", engine reports " << codegenRevision
+                            << "); its estimates may be stale until it is retrained");
+                    }
                     _binding.bind(metric, arch, UhdKernelHeuristic::configFrom(descriptor));
                 }
             }
