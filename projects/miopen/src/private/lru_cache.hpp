@@ -10,6 +10,7 @@
 #include <cstddef>
 #include <functional>
 #include <list>
+#include <optional>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -33,20 +34,25 @@ public:
         return &found->second->second;
     }
 
-    void Insert(const Key& key, Value value)
+    // Returns the value this call displaced instead of destroying it, so the caller can let it
+    // go after releasing its lock: the evicted oldest entry when the cache was full, or the old
+    // value when `key` was already cached. Empty when nothing was displaced.
+    std::optional<Value> Insert(const Key& key, Value value)
     {
         if(Value* existing = Find(key))
         {
+            std::optional<Value> replaced(std::move(*existing));
             *existing = std::move(value);
-            return;
+            return replaced;
         }
         entries_.emplace_front(key, std::move(value));
         index_.emplace(key, entries_.begin());
-        if(entries_.size() > capacity_)
-        {
-            index_.erase(entries_.back().first);
-            entries_.pop_back();
-        }
+        if(entries_.size() <= capacity_)
+            return std::nullopt;
+        std::optional<Value> evicted(std::move(entries_.back().second));
+        index_.erase(entries_.back().first);
+        entries_.pop_back();
+        return evicted;
     }
 
     // Hands the removed values back instead of destroying them, so a caller can

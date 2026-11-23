@@ -1204,9 +1204,11 @@ public:
                 return &entry.second;
         return nullptr;
     }
-    void Insert(const hipdnn::PlanKey& key, std::shared_ptr<FakeGraph> graph)
+    std::optional<std::shared_ptr<FakeGraph>> Insert(const hipdnn::PlanKey& key,
+                                                     std::shared_ptr<FakeGraph> graph)
     {
         entries_.emplace_back(key, std::move(graph));
+        return std::nullopt;
     }
     size_t Size() const { return entries_.size(); }
 
@@ -1460,6 +1462,40 @@ TEST(CPU_WrapperRoutingReentry_NONE, AGraphEvictedByTheNextBuildIsDestroyedAfter
 
     ASSERT_TRUE(destroyed) << "the first graph was not evicted";
     EXPECT_FALSE(lockHeld) << "the evicted graph was destroyed while the plan lock was held";
+}
+
+// The graph is created before the build, so when the build fails it is dropped on the way out,
+// and then it is the only reference. It must go after the lock is released too.
+TEST(CPU_WrapperRoutingReentry_NONE, AGraphFromAFailedBuildIsDestroyedAfterTheLockIsReleased)
+{
+    const graph_steps::SilencedStderr silenced;
+    using Graph = graph_eviction::TrackedGraph;
+    miopen::wrapper::LruCache<hipdnn::PlanKey, std::shared_ptr<Graph>, graph_eviction::KeyHash>
+        cache(1);
+    std::mutex mutex;
+    bool destroyed = false;
+    bool lockHeld  = false;
+    hipdnn::PlanKey key;
+    key.problem = {1};
+
+    const auto result = hipdnn::AcquireGraphWith<Graph>(
+        cache,
+        mutex,
+        key,
+        [&](Graph& graph) {
+            graph.mutex                 = &mutex;
+            graph.destroyed             = &destroyed;
+            graph.lockHeldAtDestruction = &lockHeld;
+            return true;
+        },
+        [](Graph&) { return 1; },
+        graph_steps::FailureOf);
+
+    ASSERT_EQ(result.second, miopenStatusBadParm);
+    ASSERT_EQ(result.first, nullptr);
+    ASSERT_TRUE(destroyed) << "the graph of the failed build was not destroyed";
+    EXPECT_FALSE(lockHeld) << "the graph was destroyed while the plan lock was held";
+    hipdnn::ClearForwardedFailure();
 }
 
 TEST(CPU_WrapperRoutingReentry_NONE, AGraphRunsInsideAHipdnnCallAndClearsEarlierFailures)

@@ -108,3 +108,36 @@ TEST(CPU_HipdnnLruCache_NONE, EraseIfHandsBackTheRemovedValues)
     EXPECT_FALSE(watched[1].expired());
     EXPECT_FALSE(watched[3].expired());
 }
+
+TEST(CPU_HipdnnLruCache_NONE, InsertHandsBackTheEvictedEntry)
+{
+    // As with EraseIf, the caller destroys what the cache pushes out, after releasing its lock.
+    miopen::wrapper::LruCache<int, std::shared_ptr<int>> cache(2);
+    std::weak_ptr<int> oldest;
+    {
+        auto value = std::make_shared<int>(1);
+        oldest     = value;
+        EXPECT_FALSE(cache.Insert(1, std::move(value)).has_value());
+    }
+    EXPECT_FALSE(cache.Insert(2, std::make_shared<int>(2)).has_value());
+
+    auto evicted = cache.Insert(3, std::make_shared<int>(3));
+    ASSERT_TRUE(evicted.has_value());
+    EXPECT_FALSE(oldest.expired());
+    EXPECT_EQ(**evicted, 1);
+
+    evicted.reset();
+    EXPECT_TRUE(oldest.expired());
+}
+
+TEST(CPU_HipdnnLruCache_NONE, InsertHandsBackTheValueItReplaces)
+{
+    Cache cache(2);
+    EXPECT_FALSE(cache.Insert(1, 10).has_value());
+
+    const auto replaced = cache.Insert(1, 11);
+    ASSERT_TRUE(replaced.has_value());
+    EXPECT_EQ(*replaced, 10);
+    ASSERT_NE(cache.Find(1), nullptr);
+    EXPECT_EQ(*cache.Find(1), 11);
+}

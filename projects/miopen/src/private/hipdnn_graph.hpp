@@ -213,12 +213,18 @@ AcquireGraphWith(Cache& cache,
                  Build&& build,
                  FailureOf&& failureOf)
 {
+    // Declared before the lock, so what they hold is destroyed after it is released. Destroying
+    // a graph runs plugin code, and a plugin that called back into the wrapper from there would
+    // wait on a lock its own thread holds. `graph` matters on the failure returns, where it is
+    // the only reference; `displaced` is the graph the cache pushed out.
+    std::shared_ptr<Graph> graph;
+    decltype(cache.Insert(key, graph)) displaced;
     const std::lock_guard<std::mutex> lock(mutex);
 
     if(const auto* cached = cache.Find(key))
         return {*cached, miopenStatusSuccess};
 
-    auto graph = std::make_shared<Graph>();
+    graph = std::make_shared<Graph>();
     if(!populate(*graph))
         return {nullptr,
                 RecordFailure(miopenStatusUnsupportedOp,
@@ -229,7 +235,7 @@ AcquireGraphWith(Cache& cache,
     if(const auto failure = FailureOfGuardedCall(built, failureOf))
         return {nullptr, *failure};
 
-    cache.Insert(key, graph);
+    displaced = cache.Insert(key, graph);
     return {graph, miopenStatusSuccess};
 }
 
