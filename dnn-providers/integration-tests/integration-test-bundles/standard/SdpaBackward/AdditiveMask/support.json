@@ -48,6 +48,9 @@
           "gfx1151": [
             "windows"
           ],
+          "gfx942": [
+            "linux"
+          ],
           "gfx950": [
             "linux"
           ]
