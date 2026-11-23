@@ -1000,10 +1000,58 @@ constexpr std::array<ForwardCase, 4> kSchedM128GridCases{{
      128},
 }};
 
-constexpr int kCaseCount =
-    static_cast<int>(kCases.size() + kAdditionalCases.size() + kVirtualSinkCases.size() +
-                     kSelectorCases.size() + kPartialQueryCases.size() + kD64WideTileCases.size() +
-                     kD64ExpandedCases.size() + kSchedM128GridCases.size());
+// As kSchedM128GridCases, with three query tiles in the first sequence (q 384, so the M128 grid
+// is 3 * (CU + 1) blocks and max_seqlen_q stays below the M64 fill-once threshold): the M128xN128
+// scheduled tile walks several Q tiles of one group sequence, including the causal tile order.
+// Batch mode needs no such case: it has no M64 tile, so its D64 / D128 N128 cases above already
+// run M128 with up to eight Q tiles. Appended so every earlier case index remains stable.
+constexpr std::array<ForwardCase, 4> kSchedM128MultiTileCases{{
+    {"D64GroupGridAboveCuM128MultiTileDense",
+     64,
+     384,
+     1024,
+     mask_enum::no_mask,
+     false,
+     1,
+     1,
+     SequencePointers::AboveCuGrid,
+     128},
+    {"D64GroupGridAboveCuM128MultiTileBottomRight",
+     64,
+     384,
+     1024,
+     mask_enum::mask_bottom_right,
+     false,
+     1,
+     1,
+     SequencePointers::AboveCuGrid,
+     128},
+    {"D128GroupGridAboveCuM128MultiTileDense",
+     128,
+     384,
+     1024,
+     mask_enum::no_mask,
+     false,
+     1,
+     1,
+     SequencePointers::AboveCuGrid,
+     128},
+    {"D128GroupGridAboveCuM128MultiTileBottomRight",
+     128,
+     384,
+     1024,
+     mask_enum::mask_bottom_right,
+     false,
+     1,
+     1,
+     SequencePointers::AboveCuGrid,
+     128},
+}};
+
+constexpr int kCaseCount = static_cast<int>(
+    kCases.size() + kAdditionalCases.size() + kVirtualSinkCases.size() + kSelectorCases.size() +
+    kPartialQueryCases.size() + kD64WideTileCases.size() + kD64ExpandedCases.size() +
+    kSchedM128GridCases.size() + kSchedM128MultiTileCases.size());
 
 const ForwardCase& GetCase(int index)
 {
@@ -1027,7 +1075,10 @@ const ForwardCase& GetCase(int index)
     index -= static_cast<int>(kD64WideTileCases.size());
     if(index < static_cast<int>(kD64ExpandedCases.size()))
         return kD64ExpandedCases[index];
-    return kSchedM128GridCases[index - kD64ExpandedCases.size()];
+    index -= static_cast<int>(kD64ExpandedCases.size());
+    if(index < static_cast<int>(kSchedM128GridCases.size()))
+        return kSchedM128GridCases[index];
+    return kSchedM128MultiTileCases[index - kSchedM128GridCases.size()];
 }
 
 enum class ValuePattern
@@ -1062,8 +1113,9 @@ Sequences MakeSequences(const ForwardCase& c, int num_cus)
     sequences.k_lengths.assign(batch, c.key_length);
     if(c.pointers == SequencePointers::AboveCuGrid)
     {
-        // max_seqlen_q is the actual maximum (128). All CU+1 groups are nonempty,
-        // so get_num_blocks(128) = (CU+1) * 1 * ceil(128/128) exceeds CU.
+        // max_seqlen_q is the actual maximum (the first sequence's query_length). All CU+1
+        // groups are nonempty, so get_num_blocks(128) = (CU+1) * 1 * ceil(query_length/128)
+        // exceeds CU.
         std::fill(sequences.q_lengths.begin() + 1, sequences.q_lengths.end(), 1);
     }
     else if(sequences.group)
@@ -1511,13 +1563,15 @@ TEST_P(QrTdmSchedForward, GeneratedDispatcherAndIndependentFp32)
         // D192: every N128 predicate except grid<=CU is true. D64 and D128: every N128
         // predicate is true and only the M64 grid predicate fails. No fabricated maximum or
         // empty sequence is used to make this branch reachable on any CU count.
-        ASSERT_EQ(args.max_seqlen_q, 128);
+        ASSERT_EQ(args.max_seqlen_q, c.query_length);
         ASSERT_EQ(args.seqlen_k, c.key_length * batch);
         ASSERT_EQ(args.seqlen_k_ptr, nullptr);
         ASSERT_EQ(args.cu_seqlen_k_ptr, nullptr);
         if(c.dimension == 192)
             ASSERT_EQ(c.mask, mask_enum::no_mask);
-        ASSERT_EQ(grid_blocks, static_cast<std::size_t>(properties.multiProcessorCount) + 1);
+        ASSERT_EQ(grid_blocks,
+                  (static_cast<std::size_t>(properties.multiProcessorCount) + 1) *
+                      ((c.query_length + 127) / 128));
     }
     fmha_fwd_traits traits{};
     traits.hdim_q        = c.dimension;
