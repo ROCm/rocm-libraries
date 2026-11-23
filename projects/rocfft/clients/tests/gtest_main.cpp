@@ -31,6 +31,7 @@
 #include <iostream>
 #include <memory>
 #include <random>
+#include <set>
 #include <streambuf>
 #include <string>
 #include <string_view>
@@ -331,7 +332,7 @@ static std::filesystem::path dump_plan_path(const std::filesystem::path& dir,
     return path / token;
 }
 
-static int dump_test_plans(const std::filesystem::path& dir)
+static int dump_test_plans(const std::filesystem::path& dir, const std::string& skip_file)
 {
     std::error_code ec;
     std::filesystem::create_directories(dir, ec);
@@ -339,6 +340,19 @@ static int dump_test_plans(const std::filesystem::path& dir)
     {
         std::cerr << "Cannot create plan dump directory " << dir << ": " << ec.message() << '\n';
         return EXIT_FAILURE;
+    }
+
+    std::set<std::string> skipped_tokens;
+    if(!skip_file.empty())
+    {
+        std::ifstream input(skip_file);
+        for(std::string token; std::getline(input, token);)
+            skipped_tokens.insert(std::move(token));
+        if(!input.eof() || input.bad())
+        {
+            std::cerr << "Cannot read plan dump skip list " << skip_file << '\n';
+            return EXIT_FAILURE;
+        }
     }
 
     auto tokens = tokens_to_run(true);
@@ -350,6 +364,7 @@ static int dump_test_plans(const std::filesystem::path& dir)
     // concurrent dumping would need a per-plan sink and a thread-safe cache.
     EnvironmentSetTemp env_compile_only{"ROCFFT_INTERNAL_COMPILE_ONLY", "1"};
     size_t             failed = 0;
+    size_t             skipped = 0;
     for(const auto& token : tokens)
     {
         const auto path = dump_plan_path(dir, token);
@@ -357,6 +372,16 @@ static int dump_test_plans(const std::filesystem::path& dir)
         {
             if(token.size() > dump_plan_component_size)
                 std::filesystem::create_directories(path.parent_path());
+            if(skipped_tokens.count(token))
+            {
+                std::ofstream out(path, std::ios::binary);
+                out << "SKIPPED (known hang)\n";
+                out.close();
+                if(!out)
+                    throw std::runtime_error("could not write skip marker");
+                ++skipped;
+                continue;
+            }
             EnvironmentSetTemp env_plan_path{"ROCFFT_INTERNAL_COMPILE_ONLY_LOG_PLAN_PATH",
                                              path.string().c_str()};
             rocfft_params      params;
@@ -374,7 +399,8 @@ static int dump_test_plans(const std::filesystem::path& dir)
                 std::cerr << "Could not write plan failure to " << path << ": " << e.what() << '\n';
         }
     }
-    std::cout << "Dumped " << tokens.size() - failed << " FFT plans (" << failed << " failed).\n";
+    std::cout << "Dumped " << tokens.size() - failed - skipped << " FFT plans (" << failed
+              << " failed, " << skipped << " skipped).\n";
     return failed ? EXIT_FAILURE : EXIT_SUCCESS;
 }
 
@@ -621,6 +647,7 @@ int main(int argc, char* argv[])
 
     // Directory for per-token plan dumps.
     std::string dump_plans_dir;
+    std::string dump_plans_skip_file;
 
     // Full path to bitwise repro database file
     std::string repro_db_path;
@@ -730,6 +757,11 @@ int main(int argc, char* argv[])
                                                "to a directory without executing tests")
                                     ->type_name("DIR")
                                     ->excludes("--printtokens");
+    app.add_option("--dump_plans_skip",
+                   dump_plans_skip_file,
+                   "Skip known-hang plan tokens listed one per line and record a marker")
+        ->needs(opt_dump_plans)
+        ->check(CLI::ExistingFile);
     // Default value is set in fft_params.h based on if device-side PRNG was enabled.
     app.add_option("-g, --inputGen",
                    manual_params.igen,
@@ -861,7 +893,7 @@ int main(int argc, char* argv[])
 
     if(*opt_dump_plans)
     {
-        const auto result = dump_test_plans(dump_plans_dir);
+        const auto result = dump_test_plans(dump_plans_dir, dump_plans_skip_file);
         rocfft_cleanup();
         return result;
     }
