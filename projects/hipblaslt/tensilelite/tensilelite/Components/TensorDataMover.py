@@ -684,10 +684,6 @@ class TensorDataMoverStore:
             return sgpr(base + off)
         return sgpr(base if off == 0 else f"{base}+{off}")
 
-    @staticmethod
-    def _sg2(base: int | str):
-        return sgpr(base, 2)
-
     def initOperands(self, group0: int | str, group1: int | str) -> Module:
         mod = Module("tdmInit")
         for i in range(self.GROUP0_NUM_SGPR):
@@ -704,20 +700,6 @@ class TensorDataMoverStore:
         dataSizeOp = int(log2(numBytes))
         mod.add(SAndB32(self._sg(group1), self._sg(group1), hex(0xFFFCFFFF), "Reset data_size"))
         mod.add(SOrB32(self._sg(group1), self._sg(group1), hex(dataSizeOp << 16), f"Set data_size to {dataSizeOp}"))
-        return mod
-
-    def setGlobalAddr(self, group0: int | str, sgprGlobalAddr: int | str) -> Module:
-        mod = Module()
-        mod.addComment("TDM set global addr")
-        mod.add(SMovB64(self._sg2(group0 + 2 if isinstance(group0, int) else f"{group0}+2"),
-                        self._sg2(sgprGlobalAddr)))
-        mod.add(SOrB32(self._sg(group0, 3), self._sg(group0, 3), hex(2 << 30), "set type field to 2(image)"))
-        return mod
-
-    def setLdsAddr(self, group0: int | str, ldsAddr: int | RegisterContainer) -> Module:
-        mod = Module()
-        mod.addComment("TDM set LDS addr")
-        mod.add(SMovB32(self._sg(group0, 1), ldsAddr))
         return mod
 
     def setTensorDim0(self, group1: int | str, sgprDim0: int | str, sgprTmp: int) -> Module:
