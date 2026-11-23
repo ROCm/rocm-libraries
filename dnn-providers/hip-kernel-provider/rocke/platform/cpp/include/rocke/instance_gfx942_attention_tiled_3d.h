@@ -73,6 +73,7 @@
 #include <stddef.h>
 
 #include "rocke/arena.h"
+#include "rocke/instance_attention_tiled_3d_spec.h" /* the shared spec PODs */
 #include "rocke/ir.h" /* rocke_ir_builder_t, rocke_value_t, rocke_kernel_def_t, rocke_type_t */
 #include "rocke/lower_llvm.h" /* rocke_llvm_flavor_t, rocke_status_t                              */
 
@@ -117,71 +118,11 @@ bool rocke_gfx942_attention_tiled_3d_supports(int head_size,
                                               const char** out_reason);
 
 /* ============================================================ *
- * Segment-kernel spec -- UnifiedAttention3DTiledSpec
+ * Segment-kernel spec helpers (UnifiedAttention3DTiledSpec)
  * ============================================================ *
  *
- * Faithful by-value mirror of the frozen dataclass. The first block holds the
- * required (no-default) fields; the rest carry the Python field defaults
- * (materialised by rocke_unified_attention_3d_tiled_spec_default).
- *
- * Optional[int] fields are (has_<x>, <x>); has_<x>==false encodes Python None.
- * Optional[str] kv_storage_dtype is a const char* (NULL == Python None,
- * "fp8e4m3" otherwise). dtype is "fp16" or "bf16". Strings are caller-owned. */
-typedef struct rocke_unified_attention_3d_tiled_spec
-{
-    /* ---- required (no Python default) ---- */
-    int head_size; /* 64 / 128 / 256                                   */
-    int block_size; /* 16 / 32 / 64                                     */
-    int num_query_heads;
-    int num_kv_heads;
-    const char* dtype; /* "fp16" or "bf16"                                 */
-    bool use_sinks;
-    int sliding_window; /* 0 == disabled                                    */
-    bool has_softcap;
-    int num_segments;
-
-    /* ---- defaulted ---- */
-    bool use_alibi; /* False */
-    bool use_qq_bias; /* False */
-    int num_seqs; /* 0 */
-
-    bool has_waves_per_eu; /* Optional[int] None */
-    int waves_per_eu;
-
-    const char* kv_storage_dtype; /* Optional[str] None ("fp8e4m3") */
-
-    bool has_tile_size_override; /* Optional[int] None */
-    int tile_size_override;
-
-    bool use_invariant_hoist; /* False; inert, kept so saved specs still load */
-    bool use_wide_kv_load; /* False */
-    /* 64-bit paged-KV addressing for caches > 2 GiB (gfx950 segment kernel folds
-     * the per-block byte base into a 64-bit buffer base). Kept byte-identical
-     * with the gfx950 header (the two share this struct). */
-    bool use_i64_kv_addr; /* False */
-    /* All-decode launch grid: seq_idx = block_id_x, one query block per
-     * sequence, no binary search (legal only when every sequence has one query
-     * token; the launcher sizes grid x to num_seqs). */
-    bool use_decode_grid; /* False */
-    /* Cache policy of the K/V copies ("all", "global", "stream", "nt";
-     * rocke_cache_policy_from_name). gfx942's wide K/V loader takes "all" or
-     * "stream"; fp8 K/V keeps "all". */
-    const char* kv_cache_policy; /* "all" */
-    /* K/V LDS rows store their 16-byte chunks XOR-permuted by the row.
-     * Implemented for fp16/bf16 K/V, which can be extended. */
-    bool use_kv_lds_swizzle; /* False */
-    /* The wave loads the segment's page ids 64 at a time, one per lane; tiles
-     * read theirs with v_readlane. Paged K/V; implemented for fp16/bf16, which
-     * can be extended. */
-    bool use_wave_page_id_load; /* False */
-    /* gfx950 emit_lse (False, kw_only): the packaged module's reduce writes LSE.
-     * The segment IR is unchanged; its kernel name gains a trailing "lse". */
-    bool emit_lse;
-} rocke_unified_attention_3d_tiled_spec_t;
-
-/* Materialise every defaulted field. Required fields are zero/NULL-init; the
- * caller must set them before use. */
-rocke_unified_attention_3d_tiled_spec_t rocke_unified_attention_3d_tiled_spec_default(void);
+ * The spec struct and its _default live in
+ * rocke/instance_attention_tiled_3d_spec.h (shared with the gfx950 port). */
 
 /* __post_init__ validator (builder variant). Reproduces the Python check
  * (kv_storage_dtype must be None or "fp8e4m3"); on failure records the Python
@@ -218,22 +159,8 @@ int rocke_unified_attention_3d_tiled_spec_kernel_name(
 /* ============================================================ *
  * Reduce-kernel spec -- UnifiedAttentionReduceTiledSpec
  * ============================================================ */
-typedef struct rocke_unified_attention_reduce_tiled_spec
-{
-    int head_size;
-    int num_query_heads;
-    int num_kv_heads;
-    const char* dtype; /* "fp16" or "bf16" */
-    int num_segments;
-
-    bool has_waves_per_eu; /* Optional[int] None */
-    int waves_per_eu;
-    /* emit_lse (False): add a trailing lse_ptr param and write the FP32 natural-log
-     * LSE [total_q, num_query_heads, 1]; kernel name gains a trailing "lse". */
-    bool emit_lse;
-} rocke_unified_attention_reduce_tiled_spec_t;
-
-rocke_unified_attention_reduce_tiled_spec_t rocke_unified_attention_reduce_tiled_spec_default(void);
+/* The spec struct and its _default live in
+ * rocke/instance_attention_tiled_3d_spec.h (shared with the gfx950 port). */
 
 /* dtype_ir: F16 for "fp16", BF16 otherwise. */
 const rocke_type_t* rocke_unified_attention_reduce_tiled_spec_dtype_ir(

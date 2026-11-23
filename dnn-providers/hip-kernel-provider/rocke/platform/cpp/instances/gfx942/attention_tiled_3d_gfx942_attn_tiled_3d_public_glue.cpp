@@ -118,31 +118,8 @@ static bool rocke_attn3d_wide_k_available(const rocke_archtarget_t* t)
 }
 
 /* ===================================================================== *
- *  UnifiedAttention3DTiledSpec -- _default / _validate / @property
+ *  UnifiedAttention3DTiledSpec -- _validate / @property
  * ===================================================================== */
-
-rocke_unified_attention_3d_tiled_spec_t rocke_unified_attention_3d_tiled_spec_default(void)
-{
-    rocke_unified_attention_3d_tiled_spec_t s;
-    memset(&s, 0, sizeof(s));
-    /* required fields stay zero/NULL (caller must set). Defaulted fields: */
-    s.use_alibi = false;
-    s.use_qq_bias = false;
-    s.num_seqs = 0;
-    s.has_waves_per_eu = false;
-    s.waves_per_eu = 0;
-    s.kv_storage_dtype = NULL;
-    s.has_tile_size_override = false;
-    s.tile_size_override = 0;
-    s.use_invariant_hoist = false;
-    s.use_wide_kv_load = false;
-    s.use_decode_grid = false;
-    s.kv_cache_policy = "all";
-    s.use_kv_lds_swizzle = false;
-    s.use_wave_page_id_load = false;
-    s.emit_lse = false;
-    return s;
-}
 
 /* __post_init__: kv_storage_dtype must be None or 'fp8e4m3'. */
 bool rocke_unified_attention_3d_tiled_spec_validate(
@@ -391,18 +368,8 @@ int rocke_unified_attention_3d_tiled_spec_kernel_name(
 }
 
 /* ===================================================================== *
- *  UnifiedAttentionReduceTiledSpec -- _default / dtype_ir / kernel_name
+ *  UnifiedAttentionReduceTiledSpec -- dtype_ir / kernel_name
  * ===================================================================== */
-
-rocke_unified_attention_reduce_tiled_spec_t rocke_unified_attention_reduce_tiled_spec_default(void)
-{
-    rocke_unified_attention_reduce_tiled_spec_t s;
-    memset(&s, 0, sizeof(s));
-    s.has_waves_per_eu = false;
-    s.waves_per_eu = 0;
-    s.emit_lse = false;
-    return s;
-}
 
 const rocke_type_t* rocke_unified_attention_reduce_tiled_spec_dtype_ir(
     const rocke_unified_attention_reduce_tiled_spec_t* s)
