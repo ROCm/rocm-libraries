@@ -139,17 +139,10 @@ ci: {
     String hostBuildCommand = './install.sh -c --host --static'
     String mpiBuildCommand = './install.sh -c --host --mpi=on --no-openmp --static'
 
-    // Queue the GPU, Host, and MPI builds together so later jobs cannot
-    // slip in between them.
-    parallel(
-        'gpu': {
-            setupCI(urlJobName, defaultJobNameList, defaultBuildCommand, runCI, '')
-        },
-        'host': {
-            setupCI(urlJobName, hostJobNameList, hostBuildCommand, runCI, 'Host')
-        },
-        'mpi': {
-            setupCI(urlJobName, mpiJobNameList, mpiBuildCommand, runCI, 'MPI')
-        }
-    )
+    // Keep these sequential. Each buildProject posts the job's single GitHub
+    // status, so parallel variants report success before the others finish
+    // and can overwrite a failure.
+    setupCI(urlJobName, defaultJobNameList, defaultBuildCommand, runCI, '')
+    setupCI(urlJobName, hostJobNameList, hostBuildCommand, runCI, 'Host')
+    setupCI(urlJobName, mpiJobNameList, mpiBuildCommand, runCI, 'MPI')
 }
