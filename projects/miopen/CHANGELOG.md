@@ -93,9 +93,9 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   these problems ahead of the AI heuristic, and Composable Kernel now accepts that instance for
   larger problems. The gfx950 rule is removed, so these problems use the AI heuristic. gfx942 is
   unchanged.
-* [Pooling][BatchNorm][Conv] Fixed wrong results on gfx12 for launches with more than 65535
-  workgroups in Y or Z ([#15001](https://github.com/ROCm/rocm-libraries/issues/15001)); launches
-  still over the limit are rejected or fail with `miopenStatusInternalError`.
+* [Pooling][BatchNorm] Fixed wrong results on gfx12 for launches with more than 65535 workgroups
+  in Y or Z ([#15001](https://github.com/ROCm/rocm-libraries/issues/15001)); other launches
+  through `HIPOCKernelInvoke` over the limit now fail with `miopenStatusInternalError`.
 
 ### Added
 * [Build] ROCm builds now enable `MIOPEN_ENABLE_HIPDNN_WRAPPER` by default. MIOpen is built as a
