@@ -633,6 +633,38 @@ static inline bool KernelParam4B(Kernel4B kind, BatchedTransposeParam& param, bo
     return false;
 }
 
+// Fall back to the generic heuristic where the fitted kernel is slower. The fitted rules above are
+// not always better than the generic heuristic: for small and medium tensors (a few microseconds)
+// and for some aspect ratios the generic kernels are faster, up to 1.6x for 4-byte data. The
+// functions below return true for the sizes where the kernel chosen by the fitted rule was measured
+// more than 10% slower than the generic heuristic.
+
+static inline bool UseGeneric4B(uint32_t batch, uint32_t height, uint32_t width)
+{
+    const uint64_t elements  = static_cast<uint64_t>(batch) * height * width;
+    const uint64_t per_batch = static_cast<uint64_t>(height) * width;
+    // small and medium tensors that are not close to square
+    return elements <= 7001088 && per_batch <= 3244032 &&
+           static_cast<double>(std::max(height, width)) >
+               static_cast<double>(std::min(height, width)) * 1.23526;
+}
+
+static inline bool UseGeneric2B(uint32_t batch, uint32_t height, uint32_t width)
+{
+    // number of blocks with 32x32 tiles
+    const uint64_t blk_s =
+        static_cast<uint64_t>(batch) * ((height + 31) / 32) * ((width + 31) / 32);
+    if(blk_s <= 14568)
+    {
+        const uint32_t min_hw = std::min(height, width);
+        if(height % 32 != 0)
+            return min_hw > 486;
+        return static_cast<double>(std::max(height, width)) <=
+               static_cast<double>(min_hw) * 655.805;
+    }
+    return batch <= 3 && static_cast<uint64_t>(height) * width <= 11239424;
+}
+
 static inline bool TryGetFittedKernel(const ExecutionContext& ctx,
                                       std::size_t data_size,
                                       uint32_t batch,
@@ -658,10 +690,14 @@ static inline bool TryGetFittedKernel(const ExecutionContext& ctx,
     {
         if(!KernelParam2B(SelectKernel2B(batch, height, width), height, param, buffer))
             return false;
+        if(UseGeneric2B(batch, height, width))
+            return false;
     }
     else
     {
         if(!KernelParam4B(SelectKernel4B(batch, height, width), param, buffer))
+            return false;
+        if(UseGeneric4B(batch, height, width))
             return false;
     }
     if(!IsApplicable(batch, height, width, &param))
