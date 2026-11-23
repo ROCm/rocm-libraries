@@ -245,7 +245,7 @@ Geometric multiGrid
 
 The MultiGrid method can be used with external data, such as externally computed restriction, prolongation and operator hierarchy. The user need to pass all this information for each level and for its construction. This includes smoothing step, prolongation/restriction, grid traversing and coarse grid solver. This data need to be passed to the solver.
 
-- Restriction and prolongation operations can be performed in two ways, based on Restriction() and Prolongation() of the LocalVector class, or by matrix-vector multiplication. This is configured by a set function.
+- Restriction and prolongation are performed by matrix-vector multiplication with the restriction and prolongation operators of each level, set with SetRestrictOperator() and SetProlongOperator().
 - Smoothers can be of any iterative linear solver. Valid options are Jacobi, Gauss-Seidel, ILU, etc. using a FixedPoint iteration scheme with pre-defined number of iterations. The smoothers could also be a solver such as CG, BiCGStab, etc.
 - Coarse grid solver could be of any iterative linear solver type. The class also provides mechanisms to specify, where the coarse grid solver has to be performed, on the host or on the accelerator. The coarse grid solver can be preconditioned.
 - Grid scaling based on a :math:`L_2` norm ratio.

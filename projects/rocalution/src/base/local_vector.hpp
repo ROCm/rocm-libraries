@@ -345,9 +345,15 @@ namespace rocalution
       * none. Fine entries with map[j] = -1 are skipped.
       *
       * This vector must already be allocated with at least max(map) + 1 entries, which
-      * is not checked, and its size does not change. If it has no entries, nothing is
-      * computed. \p map must have one entry per entry of \p vec_fine, and this vector,
-      * \p vec_fine and \p map must be on the same backend.
+      * is not checked, and its size does not change. \p map must have one entry per
+      * entry of \p vec_fine, and each entry of \p map must be -1 or a coarse index,
+      * which is not checked either. A coarse vector that is too short, or a map entry
+      * below -1, leads to a write out of bounds. If this vector has no entries, nothing
+      * is computed and the size of \p map is not checked. This vector, \p vec_fine and
+      * \p map must be on the same backend.
+      *
+      * There is no accelerator implementation. On the accelerator, the result is
+      * computed on the host and this vector is moved back to the accelerator.
       *
       * @param[in]
       * vec_fine    fine vector to restrict.
@@ -359,14 +365,19 @@ namespace rocalution
 
         /** \brief Prolongation operator based on restriction mapping vector
       * \details
-      * Copies the entries of a coarse vector into this fine vector: entry i of this
-      * vector is set to entry map[i] of \p vec_coarse, or to zero if map[i] = -1. \p map
+      * Copies the entries of a coarse vector into this fine vector: entry j of this
+      * vector is set to entry map[j] of \p vec_coarse, or to zero if map[j] = -1. \p map
       * is the mapping that Restriction() takes.
       *
-      * This vector must already be allocated with one entry per entry of \p map, and
-      * \p vec_coarse must have at least max(map) + 1 entries, which is not checked. If
-      * this vector has no entries, nothing is computed. This vector, \p vec_coarse and
-      * \p map must be on the same backend.
+      * This vector must already be allocated with one entry per entry of \p map. If it
+      * has no entries, nothing is computed and the size of \p map is not checked.
+      * \p vec_coarse must have at least max(map) + 1 entries, and each entry of \p map
+      * must be -1 or a coarse index. Neither is checked: a coarse vector that is too
+      * short, or a map entry below -1, leads to a read out of bounds. This vector,
+      * \p vec_coarse and \p map must be on the same backend.
+      *
+      * There is no accelerator implementation. On the accelerator, the result is
+      * computed on the host and this vector is moved back to the accelerator.
       *
       * @param[in]
       * vec_coarse  coarse vector to prolongate.
