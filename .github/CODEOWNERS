@@ -297,3 +297,7 @@
 /projects/hipthreads/**/*.rst                       @ROCm/hipthreads-reviewers @ROCm/hipthreads-doc-reviewers
 /projects/hipthreads/**/.readthedocs.yaml           @ROCm/hipthreads-reviewers @ROCm/hipthreads-doc-reviewers
 /projects/hipthreads/docs/                          @ROCm/hipthreads-reviewers @ROCm/hipthreads-doc-reviewers
+
+# Custom Origami Python bindings share component ownership.
+/bindings/python/rocm-origami/ @ROCm/origami-reviewers
+/bindings/python/rocm-origami/CMakeLists.txt @ROCm/origami-reviewers @ROCm/rocm-math-lib-build-infra

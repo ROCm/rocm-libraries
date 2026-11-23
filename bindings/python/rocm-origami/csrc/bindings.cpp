@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: MIT
 
 #include <nanobind/nanobind.h>
-#include <nanobind/stl/optional.h>
 #include <nanobind/stl/map.h>
+#include <nanobind/stl/optional.h>
 #include <nanobind/stl/pair.h>
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/tuple.h>
@@ -97,9 +97,8 @@ NB_MODULE(_pyorigami, m) {
       .value("none", origami::hybrid_mode_t::none)
       .export_values();
 
-  m.def("hybrid_mode_to_string",
-        &origami::hybrid_mode_to_string,
-        "Convert hybrid_mode_t to string.");
+  m.def(
+      "hybrid_mode_to_string", &origami::hybrid_mode_to_string, "Convert hybrid_mode_t to string.");
 
   nanobind::enum_<origami::prediction_modes_t>(m, "prediction_modes_t")
       .value("estimation", origami::prediction_modes_t::estimation)
@@ -328,19 +327,18 @@ NB_MODULE(_pyorigami, m) {
         "This gets a hardware object for a device.");
 
   // Needs named arguments; optional pci_chip_id for gfx950 memory model row (e.g. 0x75a8)
-  m.def(
-      "get_hardware_for_arch",
-      &hardware_t::get_hardware_for_arch,
-      nanobind::arg("arch"),
-      nanobind::arg("N_CU"),
-      nanobind::arg("lds_capacity"),
-      nanobind::arg("rf_capacity"),
-      nanobind::arg("L2_capacity"),
-      nanobind::arg("compute_clock_khz"),
-      nanobind::arg("pci_chip_id") = nanobind::none(),
-      "Create hardware object for a specific architecture with specified parameters."
-      "For gfx950, optional pci_chip_id selects the microbenchmark memory-constant row "
-      "(0x75a8 -> id75a8; absent or other values -> id75a0).");
+  m.def("get_hardware_for_arch",
+        &hardware_t::get_hardware_for_arch,
+        nanobind::arg("arch"),
+        nanobind::arg("N_CU"),
+        nanobind::arg("lds_capacity"),
+        nanobind::arg("rf_capacity"),
+        nanobind::arg("L2_capacity"),
+        nanobind::arg("compute_clock_khz"),
+        nanobind::arg("pci_chip_id") = nanobind::none(),
+        "Create hardware object for a specific architecture with specified parameters."
+        "For gfx950, optional pci_chip_id selects the microbenchmark memory-constant row "
+        "(0x75a8 -> id75a8; absent or other values -> id75a0).");
   m.def("datatype_to_bits", &origami::datatype_to_bits, "Return the number of bits in a datatype");
   m.def("string_to_datatype",
         &origami::string_to_datatype,
@@ -412,7 +410,8 @@ NB_MODULE(_pyorigami, m) {
   m.def("compute_number_matrix_instructions",
         &origami::gemm::compute_number_matrix_instructions,
         "Compute the number of matrix instructions required");
-  m.def("arithmetic_intensity", &origami::gemm::arithmetic_intensity, "Compute arithmetic intensity");
+  m.def(
+      "arithmetic_intensity", &origami::gemm::arithmetic_intensity, "Compute arithmetic intensity");
   m.def("emulated_tf32_arithmetic_intensity",
         &origami::gemm::emulated_tf32_arithmetic_intensity,
         "Compute emulated TF32 arithmetic intensity");

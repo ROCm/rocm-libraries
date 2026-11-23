@@ -11,20 +11,11 @@ fail() { echo "FAIL: $*" >&2; exit 1; }
 pass() { echo "PASS: $*"; }
 
 python="${PYTHON:-python3}"
-abi_tag="$("$python" - <<'PY'
-import sysconfig
-print(sysconfig.get_config_var("EXT_SUFFIX"))
-PY
-)"
-echo "=== interpreter: $("$python" -V), ext suffix: ${abi_tag} ==="
-
-build_args=()
-if [ "${ORIGAMI_BUILD_FROM_SOURCE:-OFF}" = "ON" ]; then
-    build_args+=(-C cmake.define.ORIGAMI_BUILD_FROM_SOURCE=ON)
-fi
+abi_tag=".abi3.so"
+echo "=== interpreter: $("$python" -V), stable ABI: cp312 ==="
 
 rm -rf dist
-"$python" -m build --wheel --outdir dist ${build_args[@]+"${build_args[@]}"}
+"$python" -m build --wheel --outdir dist
 whl="$(ls dist/*.whl)"
 [ -f "$whl" ] || fail "no wheel produced"
 pass "built ${whl}"
@@ -45,16 +36,21 @@ with zipfile.ZipFile(sys.argv[1]) as wheel:
     metadata_name = next(name for name in wheel.namelist() if name.endswith(".dist-info/METADATA"))
     metadata = message_from_bytes(wheel.read(metadata_name))
     requirements = metadata.get_all("Requires-Dist", [])
-    if "rocm" not in metadata.get_all("Provides-Extra", []) or not any(
-        requirement.startswith("rocm[libraries]") and 'extra == "rocm"' in requirement
-        for requirement in requirements
-    ):
-        raise SystemExit("Wheel metadata does not declare the rocm runtime extra")
+    import os
+    sdk = os.environ.get("ROCM_SDK_VERSION")
+    sdk_requirements = [r for r in requirements if r.startswith("rocm[")]
+    if sdk and not any(r.startswith(f"rocm[libraries]=={sdk}") for r in sdk_requirements):
+        raise SystemExit("Wheel metadata lacks the exact SDK pin")
+    if not sdk and sdk_requirements:
+        raise SystemExit("System wheel unexpectedly depends on SDK wheels")
+    wheel_metadata = wheel.read(next(n for n in wheel.namelist() if n.endswith(".dist-info/WHEEL"))).decode()
+    if "Tag: cp312-abi3-" not in wheel_metadata:
+        raise SystemExit("Wheel is not tagged cp312-abi3")
 if unexpected:
     raise SystemExit("Unexpected wheel entries outside the package and metadata:\n" + "\n".join(unexpected))
 PY
 pass "all wheel entries belong to the package or distribution metadata"
-pass "wheel metadata declares the rocm runtime extra"
+pass "wheel SDK metadata and abi3 tag match the build"
 
 so_entries="$(echo "$listing" | awk '{print $1}' | grep -E '\.so($|\.)' || true)"
 n_so="$(printf '%s' "$so_entries" | grep -c . || true)"

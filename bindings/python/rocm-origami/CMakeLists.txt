@@ -1,21 +1,27 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-include(GNUInstallDirs)
+cmake_minimum_required(VERSION 3.26)
 
-find_package(Python 3.10 COMPONENTS Interpreter Development.Module REQUIRED)
+project(OrigamiPython LANGUAGES CXX)
+
+include(GNUInstallDirs)
+find_package(origami CONFIG REQUIRED)
+option(ORIGAMI_BUILD_TESTING "Enable Python tests." OFF)
+option(ORIGAMI_PYTHON_ENABLE_WARNINGS "Enable compiler warnings." OFF)
+
+find_package(Python 3.12 COMPONENTS Interpreter Development.Module Development.SABIModule REQUIRED)
 
 find_package(hip REQUIRED)
 
 find_package(nanobind CONFIG QUIET)
-if(NOT nanobind_FOUND AND ORIGAMI_ENABLE_FETCH)
-    include(FetchContent)
-    FetchContent_Declare(
-        nanobind
-        GIT_REPOSITORY https://github.com/wjakob/nanobind.git
-        GIT_TAG        v2.0.0
+if(NOT nanobind_FOUND)
+    execute_process(
+        COMMAND "${Python_EXECUTABLE}" -m nanobind --cmake_dir
+        OUTPUT_VARIABLE nanobind_DIR
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        COMMAND_ERROR_IS_FATAL ANY
     )
-    FetchContent_MakeAvailable(nanobind)
     find_package(nanobind CONFIG REQUIRED)
 endif()
 
@@ -27,7 +33,7 @@ else()
     )
 endif()
 
-nanobind_add_module(_pyorigami "${CMAKE_CURRENT_SOURCE_DIR}/csrc/bindings.cpp")
+nanobind_add_module(_pyorigami STABLE_ABI "${CMAKE_CURRENT_SOURCE_DIR}/csrc/bindings.cpp")
 
 set_target_properties(_pyorigami PROPERTIES
     LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/origami"
@@ -37,10 +43,10 @@ configure_file(
     "${CMAKE_CURRENT_BINARY_DIR}/origami/__init__.py"
     COPYONLY
 )
-configure_file(
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/_rocm_init.py"
-    "${CMAKE_CURRENT_BINARY_DIR}/origami/_rocm_init.py"
-    COPYONLY
+execute_process(
+    COMMAND "${Python_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/build_metadata.py"
+        "${CMAKE_CURRENT_BINARY_DIR}/origami/_rocm_init.py"
+    COMMAND_ERROR_IS_FATAL ANY
 )
 configure_file(
     "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/selector.py"
@@ -72,16 +78,9 @@ if(ORIGAMI_PYTHON_ENABLE_WARNINGS)
     )
 endif()
 
-if(ORIGAMI_BUILD_FROM_SOURCE AND SKBUILD_STATE STREQUAL "editable")
-    set_target_properties(_pyorigami PROPERTIES
-        INSTALL_RPATH "$<TARGET_FILE_DIR:roc::origami>"
-        INSTALL_RPATH_USE_LINK_PATH ON
-    )
-else()
-    set_target_properties(_pyorigami PROPERTIES
-        INSTALL_RPATH "$ORIGIN/../../..:$ORIGIN/../../lib:$ORIGIN/../lib"
-    )
-endif()
+set_target_properties(_pyorigami PROPERTIES
+    INSTALL_RPATH "$ORIGIN/../../..:$ORIGIN/../../lib:$ORIGIN/../lib"
+)
 
 install(TARGETS _pyorigami
     LIBRARY DESTINATION "${PYTHON_INSTALL_DIR}"
@@ -91,31 +90,24 @@ install(TARGETS _pyorigami
 if(NOT SKBUILD)
     install(FILES
         "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/__init__.py"
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/_rocm_init.py"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/selector.py"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/origami.py"
         DESTINATION "${PYTHON_INSTALL_DIR}"
     )
 endif()
 
+install(FILES "${CMAKE_CURRENT_BINARY_DIR}/origami/_rocm_init.py"
+    DESTINATION "${PYTHON_INSTALL_DIR}"
+)
+
 if(ORIGAMI_BUILD_TESTING OR BUILD_TESTING)
     add_test(
         NAME "Python: pytest"
         COMMAND ${Python_EXECUTABLE} -m pytest -v
-        WORKING_DIRECTORY ${Origami_SOURCE_DIR}
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
     )
     set_tests_properties("Python: pytest" PROPERTIES
         ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}:$ENV{PYTHONPATH}"
         SKIP_RETURN_CODE 5
-    )
-    install(
-        DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/tests/"
-        DESTINATION "${CMAKE_INSTALL_BINDIR}/origami/tests"
-        COMPONENT tests
-        FILES_MATCHING
-        PATTERN "*.py"
-        PATTERN "*.csv"
-        PATTERN "*.yaml"
-        PATTERN "*.md"
     )
 endif()

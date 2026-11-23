@@ -4,7 +4,8 @@
 [build-system]
 requires = [
     "scikit-build-core>=0.10",
-    "nanobind>=2.0.0"
+    "nanobind>=2.0.0",
+    "packaging>=24.0"
 ]
 build-backend = "scikit_build_core.build"
 
@@ -14,35 +15,29 @@ build-backend = "scikit_build_core.build"
 
 [project]
 name = "rocm-origami"
-dynamic = ["version"]
+dynamic = ["version", "dependencies", "optional-dependencies"]
 description = "Analytical GEMM Solution Selection"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.12"
 license = {text = "MIT"}
 authors = [
     {name = "Advanced Micro Devices, Inc."}
 ]
-dependencies = []
-
-[project.optional-dependencies]
-rocm = ["rocm[libraries]"]
-test = [
-    "pytest>=7.0.0",
-    "pytest-cov>=4.0.0",
-    "pyyaml>=6.0",
-]
-torch = ["torch>=2.0.0"]
-
 [tool.scikit-build]
-wheel.packages = ["python/src/origami"]
-cmake.version = ">=3.25"
+experimental = true
+wheel.packages = ["src/origami"]
+wheel.py-api = "cp312"
+cmake.version = ">=3.26"
 build.verbose = true
 cmake.source-dir = "."
 build-dir = "build/{state}-{wheel_tag}"
-cmake.args = ["--preset=python"]
-metadata.version.provider = "scikit_build_core.metadata.regex"
-metadata.version.input = "python/src/origami/__init__.py"
-metadata.version.regex = '^__version__\s*=\s*["\x27](?P<value>[^"\x27]+)["\x27]'
+cmake.build-type = "Release"
+metadata.version.provider = "build_metadata"
+metadata.version.provider-path = "."
+metadata.dependencies.provider = "build_metadata"
+metadata.dependencies.provider-path = "."
+metadata.optional-dependencies.provider = "build_metadata"
+metadata.optional-dependencies.provider-path = "."
 sdist.exclude = [
     "build/*",
     "*.egg-info/*",
@@ -61,8 +56,8 @@ wheel.exclude = [
 ]
 
 [tool.pytest.ini_options]
-testpaths = ["python/tests"]
-pythonpath = ["python/tests"]
+testpaths = ["tests"]
+pythonpath = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
@@ -75,9 +70,3 @@ addopts = [
     "-ra",
     "--strict-markers",
 ]
-
-
-[[tool.scikit-build.overrides]]
-if.state = "editable"
-cmake.args = ["--preset=dev"]
-cmake.build-type = "RelWithDebInfo"

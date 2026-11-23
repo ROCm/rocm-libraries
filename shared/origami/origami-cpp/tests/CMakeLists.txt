@@ -48,21 +48,6 @@ set_tests_properties(origami-tests PROPERTIES
 
 ]=])
 
-if(ORIGAMI_ENABLE_PYTHON)
-    find_package(Python COMPONENTS Interpreter REQUIRED)
-
-    string(APPEND _ctest_content [=[
-# Python tests (using pytest)
-add_test(origami_python_tests python3 -m pytest "tests" -v)
-
-set_tests_properties(origami_python_tests PROPERTIES
-    LABELS "python"
-    SKIP_RETURN_CODE 5
-    ENVIRONMENT "LD_LIBRARY_PATH=../../@CMAKE_INSTALL_LIBDIR@:$ENV{LD_LIBRARY_PATH};PYTHONPATH=../..:$ENV{PYTHONPATH}"
-)
-]=])
-endif()
-
 string(CONFIGURE "${_ctest_content}" _ctest_content @ONLY)
 file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/CTestTestfile.cmake.install" "${_ctest_content}")
 

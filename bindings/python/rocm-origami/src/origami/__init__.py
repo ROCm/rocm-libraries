@@ -189,6 +189,7 @@ __all__ = [
 try:
     # Import the python selectors if possible (requires torch)
     from .selector import OrigamiMatmulSelector, OrigamiAttentionSelector
+
     __all__.append("OrigamiMatmulSelector")
     __all__.append("OrigamiAttentionSelector")
 except ImportError:

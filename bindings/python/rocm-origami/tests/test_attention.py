@@ -7,7 +7,9 @@ import pytest
 import origami
 
 
-def create_attention_problem(q_seq_len, kv_seq_len, head_dim, q_heads=32, batch=1, dtype="f16"):
+def create_attention_problem(
+    q_seq_len, kv_seq_len, head_dim, q_heads=32, batch=1, dtype="f16"
+):
     """Create an attention problem specification."""
     problem = origami.problem_t()
     problem.size = origami.dim3_t(q_seq_len, kv_seq_len, head_dim)
@@ -25,7 +27,9 @@ def create_attention_problem(q_seq_len, kv_seq_len, head_dim, q_heads=32, batch=
     return problem
 
 
-def create_attention_config(mt_m, mt_n, mt_k, mi_m=16, mi_n=16, mi_k=16, occupancy=1, wgm=1):
+def create_attention_config(
+    mt_m, mt_n, mt_k, mi_m=16, mi_n=16, mi_k=16, occupancy=1, wgm=1
+):
     """Create an attention configuration."""
     config = origami.config_t()
     config.mt = origami.dim3_t(mt_m, mt_n, mt_k)
@@ -44,7 +48,7 @@ def hardware():
         lds_capacity=64 * 1024,
         rf_capacity=512 * 1024,
         L2_capacity=4000000,
-        compute_clock_khz=2100000
+        compute_clock_khz=2100000,
     )
 
 
@@ -82,8 +86,15 @@ def test_att_compute_cu_occupancy(hardware):
     problem = create_attention_problem(2048, 2048, 128, q_heads=1, batch=1)
     config = create_attention_config(128, 128, 64)
 
-    num_wgs, num_active_cus, num_timesteps, split_factor = origami.att_compute_cu_occupancy(
-        problem, hardware, config, origami.grid_selection_t.k_split_aware, hardware.N_CU, 1
+    num_wgs, num_active_cus, num_timesteps, split_factor = (
+        origami.att_compute_cu_occupancy(
+            problem,
+            hardware,
+            config,
+            origami.grid_selection_t.k_split_aware,
+            hardware.N_CU,
+            1,
+        )
     )
 
     # With q_heads=1, batch=1: num_tiles = (2048/128) * (2048/128) * 1 * 1 = 256
@@ -99,8 +110,15 @@ def test_att_compute_cu_occupancy_with_qheads(hardware):
     problem = create_attention_problem(2048, 2048, 128, q_heads=32, batch=1)
     config = create_attention_config(128, 128, 64)
 
-    num_wgs, num_active_cus, num_timesteps, split_factor = origami.att_compute_cu_occupancy(
-        problem, hardware, config, origami.grid_selection_t.k_split_aware, hardware.N_CU, 1
+    num_wgs, num_active_cus, num_timesteps, split_factor = (
+        origami.att_compute_cu_occupancy(
+            problem,
+            hardware,
+            config,
+            origami.grid_selection_t.k_split_aware,
+            hardware.N_CU,
+            1,
+        )
     )
 
     # With q_heads=32, batch=1: num_tiles = 16 * 16 * 1 * 32 = 8192
@@ -114,8 +132,15 @@ def test_att_compute_cu_occupancy_with_split(hardware):
     problem = create_attention_problem(2048, 2048, 128, q_heads=1, batch=1)
     config = create_attention_config(128, 128, 64)
 
-    num_wgs, num_active_cus, num_timesteps, split_factor = origami.att_compute_cu_occupancy(
-        problem, hardware, config, origami.grid_selection_t.k_split_aware, hardware.N_CU, 4
+    num_wgs, num_active_cus, num_timesteps, split_factor = (
+        origami.att_compute_cu_occupancy(
+            problem,
+            hardware,
+            config,
+            origami.grid_selection_t.k_split_aware,
+            hardware.N_CU,
+            4,
+        )
     )
 
     # num_wgs = 256 * 4 = 1024
@@ -135,7 +160,9 @@ def test_att_arithmetic_intensity(hardware):
 def test_att_emulated_tf32_arithmetic_intensity(hardware):
     """Test emulated TF32 arithmetic intensity for attention."""
     # emulated_tf32_arithmetic_intensity(m, n, k, bytes_per_element)
-    ai = origami.att_emulated_tf32_arithmetic_intensity(2048.0, 2048.0, 128.0, 4.0)  # FP32 = 4 bytes
+    ai = origami.att_emulated_tf32_arithmetic_intensity(
+        2048.0, 2048.0, 128.0, 4.0
+    )  # FP32 = 4 bytes
     assert ai > 0.0
 
 
@@ -307,7 +334,12 @@ def test_att_batched_scenario(hardware):
 
     # CU occupancy should account for batch
     num_wgs, _, _, _ = origami.att_compute_cu_occupancy(
-        problem, hardware, config, origami.grid_selection_t.k_split_aware, hardware.N_CU, 1
+        problem,
+        hardware,
+        config,
+        origami.grid_selection_t.k_split_aware,
+        hardware.N_CU,
+        1,
     )
 
     # With batch=4, q_heads=8: num_tiles = (1024/128) * (1024/128) * 4 * 8 = 2048
@@ -318,10 +350,10 @@ def test_att_batched_scenario(hardware):
 def test_att_various_sequence_lengths(hardware):
     """Test attention with various sequence length combinations."""
     test_cases = [
-        (512, 512, 64),      # Small
-        (2048, 2048, 128),   # Medium
-        (4096, 4096, 128),   # Large
-        (1024, 2048, 64),    # Rectangular (cross-attention)
+        (512, 512, 64),  # Small
+        (2048, 2048, 128),  # Medium
+        (4096, 4096, 128),  # Large
+        (1024, 2048, 64),  # Rectangular (cross-attention)
     ]
 
     for q_len, kv_len, head_dim in test_cases:
@@ -363,7 +395,9 @@ def test_att_different_block_sizes(hardware):
 # Attention Config Selection Tests (using model_t.attention)
 
 
-def create_attention_config_list(hardware: origami.hardware_t, dtype: str = "f16") -> list[origami.config_t]:
+def create_attention_config_list(
+    hardware: origami.hardware_t, dtype: str = "f16"
+) -> list[origami.config_t]:
     """Create a list of configurations for attention testing."""
     configs = []
 
@@ -399,9 +433,13 @@ def test_att_select_config_basic(hardware):
     configs = create_attention_config_list(hardware, "f16")
     assert len(configs) > 0
 
-    problem = create_attention_problem(2048, 2048, 128, q_heads=32, batch=1, dtype="f16")
+    problem = create_attention_problem(
+        2048, 2048, 128, q_heads=32, batch=1, dtype="f16"
+    )
 
-    result = origami.select_config(problem, hardware, configs, origami.model_t.attention)
+    result = origami.select_config(
+        problem, hardware, configs, origami.model_t.attention
+    )
     assert result.latency > 0
     assert result.config is not None
     assert result.config.mt.m > 0
@@ -415,9 +453,13 @@ def test_att_rank_configs(hardware):
     configs = create_attention_config_list(hardware, "f16")
     assert len(configs) > 0
 
-    problem = create_attention_problem(4096, 4096, 128, q_heads=32, batch=1, dtype="f16")
+    problem = create_attention_problem(
+        4096, 4096, 128, q_heads=32, batch=1, dtype="f16"
+    )
 
-    ranked_configs = origami.rank_configs(problem, hardware, configs, origami.model_t.attention)
+    ranked_configs = origami.rank_configs(
+        problem, hardware, configs, origami.model_t.attention
+    )
     assert len(ranked_configs) > 0
     assert len(ranked_configs) <= len(configs)
 
@@ -432,10 +474,14 @@ def test_att_select_topk_configs(hardware):
     configs = create_attention_config_list(hardware, "f16")
     assert len(configs) > 0
 
-    problem = create_attention_problem(2048, 2048, 128, q_heads=16, batch=1, dtype="f16")
+    problem = create_attention_problem(
+        2048, 2048, 128, q_heads=16, batch=1, dtype="f16"
+    )
 
     topk = 5
-    top_configs = origami.select_topk_configs(problem, hardware, configs, topk, origami.model_t.attention)
+    top_configs = origami.select_topk_configs(
+        problem, hardware, configs, topk, origami.model_t.attention
+    )
     assert len(top_configs) <= topk
     assert len(top_configs) > 0
 
@@ -451,16 +497,22 @@ def test_att_various_problem_sizes(hardware):
     assert len(configs) > 0
 
     test_cases = [
-        (512, 512, 64, 8),       # Small
-        (2048, 2048, 128, 32),   # Medium
-        (4096, 4096, 128, 32),   # Large
-        (1024, 2048, 64, 16),    # Rectangular (cross-attention)
+        (512, 512, 64, 8),  # Small
+        (2048, 2048, 128, 32),  # Medium
+        (4096, 4096, 128, 32),  # Large
+        (1024, 2048, 64, 16),  # Rectangular (cross-attention)
     ]
 
     for q_len, kv_len, head_dim, q_heads in test_cases:
-        problem = create_attention_problem(q_len, kv_len, head_dim, q_heads=q_heads, batch=1)
-        result = origami.select_config(problem, hardware, configs, origami.model_t.attention)
-        assert result.latency > 0, f"Failed for size ({q_len}, {kv_len}, {head_dim}, q_heads={q_heads})"
+        problem = create_attention_problem(
+            q_len, kv_len, head_dim, q_heads=q_heads, batch=1
+        )
+        result = origami.select_config(
+            problem, hardware, configs, origami.model_t.attention
+        )
+        assert (
+            result.latency > 0
+        ), f"Failed for size ({q_len}, {kv_len}, {head_dim}, q_heads={q_heads})"
 
 
 @pytest.mark.integration
@@ -473,8 +525,12 @@ def test_att_config_selection_dtypes(hardware, dtype):
     if len(configs) == 0:
         pytest.skip(f"No valid configs for dtype {dtype}")
 
-    problem = create_attention_problem(1024, 1024, 128, q_heads=16, batch=1, dtype=dtype)
-    result = origami.select_config(problem, hardware, configs, origami.model_t.attention)
+    problem = create_attention_problem(
+        1024, 1024, 128, q_heads=16, batch=1, dtype=dtype
+    )
+    result = origami.select_config(
+        problem, hardware, configs, origami.model_t.attention
+    )
     assert result.latency > 0
 
 
@@ -485,7 +541,11 @@ def test_att_batched_config_selection(hardware):
     assert len(configs) > 0
 
     # Test with batch size > 1
-    problem = create_attention_problem(1024, 1024, 128, q_heads=16, batch=8, dtype="f16")
-    result = origami.select_config(problem, hardware, configs, origami.model_t.attention)
+    problem = create_attention_problem(
+        1024, 1024, 128, q_heads=16, batch=8, dtype="f16"
+    )
+    result = origami.select_config(
+        problem, hardware, configs, origami.model_t.attention
+    )
     assert result.latency > 0
     assert result.config is not None

@@ -8,7 +8,9 @@ import math
 import origami
 
 # Skip entire module if torch is not available (selector requires torch)
-torch = pytest.importorskip("torch", reason="torch is required for OrigamiAttentionSelector tests.")
+torch = pytest.importorskip(
+    "torch", reason="torch is required for OrigamiAttentionSelector tests."
+)
 
 from origami.selector import OrigamiAttentionSelector
 
@@ -18,10 +20,10 @@ class MockConfig:
 
     def __init__(self, block_m, block_n, block_k, waves_per_eu):
         self.kwargs = {
-            'BLOCK_M': block_m,
-            'BLOCK_N': block_n,
-            'BLOCK_K': block_k,
-            'waves_per_eu': waves_per_eu
+            "BLOCK_M": block_m,
+            "BLOCK_N": block_n,
+            "BLOCK_K": block_k,
+            "waves_per_eu": waves_per_eu,
         }
 
 
@@ -61,7 +63,7 @@ def test_attention_selector_initialization_basic(rocm_device):
         q_heads=32,
         kv_heads=32,
         dtype=torch.float16,
-        device=rocm_device
+        device=rocm_device,
     )
 
     assert selector is not None
@@ -85,18 +87,21 @@ def test_attention_selector_dtype_conversion(rocm_device):
         q_heads=16,
         kv_heads=16,
         dtype=torch.bfloat16,
-        device=rocm_device
+        device=rocm_device,
     )
 
     assert selector._dtype_str == "bf16"
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("dtype,expected_str", [
-    (torch.float32, "f32"),
-    (torch.float16, "f16"),
-    (torch.bfloat16, "bf16"),
-])
+@pytest.mark.parametrize(
+    "dtype,expected_str",
+    [
+        (torch.float32, "f32"),
+        (torch.float16, "f16"),
+        (torch.bfloat16, "bf16"),
+    ],
+)
 def test_attention_selector_various_dtypes(rocm_device, dtype, expected_str):
     """Test selector with various data types."""
     config_gen = create_mock_config_gen()
@@ -109,7 +114,7 @@ def test_attention_selector_various_dtypes(rocm_device, dtype, expected_str):
         q_heads=8,
         kv_heads=8,
         dtype=dtype,
-        device=rocm_device
+        device=rocm_device,
     )
 
     assert selector._dtype_str == expected_str
@@ -128,7 +133,7 @@ def test_attention_selector_macrotile_properties(rocm_device):
         q_heads=32,
         kv_heads=32,
         dtype=torch.float16,
-        device=rocm_device
+        device=rocm_device,
     )
 
     # Check that macrotile dimensions are positive
@@ -159,7 +164,7 @@ def test_attention_selector_wgm_property(rocm_device):
         q_heads=16,
         kv_heads=16,
         dtype=torch.float16,
-        device=rocm_device
+        device=rocm_device,
     )
 
     assert selector.wgm >= 1
@@ -178,7 +183,7 @@ def test_attention_selector_number_of_cus_property(rocm_device):
         q_heads=8,
         kv_heads=8,
         dtype=torch.float16,
-        device=rocm_device
+        device=rocm_device,
     )
 
     # Number of CUs should be reasonable (common values: 104, 228, 256, 304)
@@ -199,7 +204,7 @@ def test_attention_selector_occupancy_property(rocm_device):
         q_heads=32,
         kv_heads=32,
         dtype=torch.float16,
-        device=rocm_device
+        device=rocm_device,
     )
 
     # Occupancy should be one of the values from config_gen
@@ -220,7 +225,7 @@ def test_attention_selector_batch_size(rocm_device):
         kv_heads=16,
         dtype=torch.float16,
         device=rocm_device,
-        batch=8
+        batch=8,
     )
 
     assert selector._batch == 8
@@ -240,7 +245,7 @@ def test_attention_selector_gqa_scenario(rocm_device):
         q_heads=32,
         kv_heads=8,
         dtype=torch.float16,
-        device=rocm_device
+        device=rocm_device,
     )
 
     assert selector._q_heads == 32
@@ -261,7 +266,7 @@ def test_attention_selector_mqa_scenario(rocm_device):
         q_heads=16,
         kv_heads=1,
         dtype=torch.float16,
-        device=rocm_device
+        device=rocm_device,
     )
 
     assert selector._q_heads == 16
@@ -281,7 +286,7 @@ def test_attention_selector_small_problem_size(rocm_device):
         q_heads=4,
         kv_heads=4,
         dtype=torch.float16,
-        device=rocm_device
+        device=rocm_device,
     )
 
     assert selector.macrotile_m > 0
@@ -301,7 +306,7 @@ def test_attention_selector_large_problem_size(rocm_device):
         q_heads=64,
         kv_heads=64,
         dtype=torch.float16,
-        device=rocm_device
+        device=rocm_device,
     )
 
     assert selector.grid_size > 0
@@ -321,7 +326,7 @@ def test_attention_selector_rectangular_sequences(rocm_device):
         q_heads=8,
         kv_heads=8,
         dtype=torch.float16,
-        device=rocm_device
+        device=rocm_device,
     )
 
     assert selector._q_seq_len == 512
@@ -341,12 +346,12 @@ def test_attention_selector_hardware_info(rocm_device):
         q_heads=16,
         kv_heads=16,
         dtype=torch.float16,
-        device=rocm_device
+        device=rocm_device,
     )
 
     # Check that hardware object exists and has expected attributes
-    assert hasattr(selector._hardware, 'N_CU')
-    assert hasattr(selector._hardware, 'lds_capacity')
+    assert hasattr(selector._hardware, "N_CU")
+    assert hasattr(selector._hardware, "lds_capacity")
     assert selector._hardware.N_CU == selector.number_of_cus
 
 
@@ -363,7 +368,7 @@ def test_attention_selector_grid_size_property(rocm_device):
         q_heads=32,
         kv_heads=32,
         dtype=torch.float16,
-        device=rocm_device
+        device=rocm_device,
     )
 
     # Grid size should be positive
