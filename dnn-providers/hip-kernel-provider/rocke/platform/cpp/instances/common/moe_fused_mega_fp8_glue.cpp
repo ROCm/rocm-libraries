@@ -1104,22 +1104,22 @@ rocke_kernel_def_t*
         /* bstage_view (lds). */
         ctx.bstage_view.base = ctx.BStage_smem;
         ctx.bstage_view.addr_space = ROCKE_ADDR_LDS;
-        rocke_tensor_descriptor_packed(&ctx.bstage_view.desc, bstage_shape, 2, rocke_fp8e4m3());
+        rocke_tv_tensor_descriptor_packed(&ctx.bstage_view.desc, bstage_shape, 2, rocke_fp8e4m3());
 
         /* f32_view (lds) over HiddenF32_smem. */
         ctx.f32_view.base = ctx.HiddenF32_smem;
         ctx.f32_view.addr_space = ROCKE_ADDR_LDS;
-        rocke_tensor_descriptor_packed(&ctx.f32_view.desc, hf32_shape, 2, rocke_f32());
+        rocke_tv_tensor_descriptor_packed(&ctx.f32_view.desc, hf32_shape, 2, rocke_f32());
 
         /* fp8_view (lds) over Hidden_smem. */
         ctx.fp8_view.base = ctx.Hidden_smem;
         ctx.fp8_view.addr_space = ROCKE_ADDR_LDS;
-        rocke_tensor_descriptor_packed(&ctx.fp8_view.desc, hidden_shape, 2, rocke_fp8e4m3());
+        rocke_tv_tensor_descriptor_packed(&ctx.fp8_view.desc, hidden_shape, 2, rocke_fp8e4m3());
 
         /* scale_view (lds) over HiddenScale_smem. */
         ctx.scale_view.base = ctx.HiddenScale_smem;
         ctx.scale_view.addr_space = ROCKE_ADDR_LDS;
-        rocke_tensor_descriptor_packed(&ctx.scale_view.desc, hscale_shape, 2, rocke_f32());
+        rocke_tv_tensor_descriptor_packed(&ctx.scale_view.desc, hscale_shape, 2, rocke_f32());
     }
 
     /* ---- lane decode + warp offsets ---- */

@@ -99,46 +99,46 @@ static inline rocke_stride_t rocke_stride_value(rocke_value_t* v)
 
 /* Pure shape + strides + dtype; no SSA at construction. Analogue of CK Tile's
  * ``tensor_descriptor``. */
-typedef struct rocke_tensor_descriptor
+typedef struct rocke_tv_tensor_descriptor
 {
     int rank;
     int shape[ROCKE_TV_MAX_RANK]; /* element extents               */
     rocke_stride_t strides[ROCKE_TV_MAX_RANK];
     const rocke_type_t* dtype;
-} rocke_tensor_descriptor_t;
+} rocke_tv_tensor_descriptor_t;
 
 /* TensorDescriptor.__init__ with rank validation (Python __post_init__).
  * Returns ROCKE_OK, or ROCKE_ERR_VALUE on shape/strides rank mismatch or empty. */
-rocke_status_t rocke_tensor_descriptor_init(rocke_tensor_descriptor_t* out,
-                                            const int* shape,
-                                            const rocke_stride_t* strides,
-                                            int rank,
-                                            const rocke_type_t* dtype);
+rocke_status_t rocke_tv_tensor_descriptor_init(rocke_tv_tensor_descriptor_t* out,
+                                               const int* shape,
+                                               const rocke_stride_t* strides,
+                                               int rank,
+                                               const rocke_type_t* dtype);
 
 /* TensorDescriptor.packed(shape, dtype) -- row-major packed strides. */
-rocke_status_t rocke_tensor_descriptor_packed(rocke_tensor_descriptor_t* out,
-                                              const int* shape,
-                                              int rank,
-                                              const rocke_type_t* dtype);
+rocke_status_t rocke_tv_tensor_descriptor_packed(rocke_tv_tensor_descriptor_t* out,
+                                                 const int* shape,
+                                                 int rank,
+                                                 const rocke_type_t* dtype);
 
 /* TensorDescriptor.with_strides(shape, strides, dtype). */
-rocke_status_t rocke_tensor_descriptor_with_strides(rocke_tensor_descriptor_t* out,
-                                                    const int* shape,
-                                                    const rocke_stride_t* strides,
-                                                    int rank,
-                                                    const rocke_type_t* dtype);
+rocke_status_t rocke_tv_tensor_descriptor_with_strides(rocke_tv_tensor_descriptor_t* out,
+                                                       const int* shape,
+                                                       const rocke_stride_t* strides,
+                                                       int rank,
+                                                       const rocke_type_t* dtype);
 
 /* @property rank / numel. */
-int rocke_tensor_descriptor_rank(const rocke_tensor_descriptor_t* d);
-int64_t rocke_tensor_descriptor_numel(const rocke_tensor_descriptor_t* d);
+int rocke_tv_tensor_descriptor_rank(const rocke_tv_tensor_descriptor_t* d);
+int64_t rocke_tv_tensor_descriptor_numel(const rocke_tv_tensor_descriptor_t* d);
 
 /* TensorDescriptor.offset(b, indices): flat element offset (SSA). Emits the
  * same mul/add chain as Python (literal-1 stride omitted, const stride folded
  * into const_i32 mul). Returns NULL with builder error on rank mismatch. */
-rocke_value_t* rocke_tensor_descriptor_offset(rocke_ir_builder_t* b,
-                                              const rocke_tensor_descriptor_t* d,
-                                              rocke_value_t* const* indices,
-                                              int num_indices);
+rocke_value_t* rocke_tv_tensor_descriptor_offset(rocke_ir_builder_t* b,
+                                                 const rocke_tv_tensor_descriptor_t* d,
+                                                 rocke_value_t* const* indices,
+                                                 int num_indices);
 
 /* ------------------------------------------------------------- BufferResource */
 
@@ -180,7 +180,7 @@ rocke_status_t rocke_tv_make_buffer_resource(rocke_ir_builder_t* b,
 typedef struct rocke_tensor_view
 {
     rocke_value_t* base;
-    rocke_tensor_descriptor_t desc;
+    rocke_tv_tensor_descriptor_t desc;
     rocke_addr_space_t addr_space;
     rocke_tv_buffer_resource_t buffer; /* addr_space == ROCKE_ADDR_BUFFER only */
 } rocke_tensor_view_t;

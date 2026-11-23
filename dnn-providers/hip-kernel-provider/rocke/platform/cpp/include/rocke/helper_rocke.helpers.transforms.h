@@ -21,7 +21,7 @@
  *   TensorDescriptor               rocke_tensor_descriptor_t
  *     .naive                       rocke_tensor_descriptor_naive
  *     .transform                   rocke_tensor_descriptor_transform
- *     .offset                      rocke_tensor_descriptor_offset
+ *     .offset                      rocke_transforms_descriptor_offset
  *     .unmerge_lower               rocke_tensor_descriptor_unmerge_lower
  *
  * Out of scope (NOT ported here): Pad, Merge, UnmergeDivMod, XorT, Slice,

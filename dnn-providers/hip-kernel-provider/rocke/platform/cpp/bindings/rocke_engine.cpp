@@ -80,11 +80,7 @@ extern "C" {
 #include "rocke/instance_moe_smoothquant.h"
 #include "rocke/instance_moe_sorting.h"
 #include "rocke/instance_topk_softmax.h"
-/* NOTE: instance_moe_gemm_fused.h is intentionally NOT included here. It pulls
- * in helper_rocke.helpers.tensor_view.h, whose struct rocke_tensor_descriptor
- * collides (same tag, different definition) with the copy in
- * helper_rocke.helpers.transforms.h that the WMMA-FMHA / fmha attention headers
- * pull in. The moe_gemm_fused family is bound in its own translation unit
+/* The moe_gemm_fused family is bound from its own translation unit
  * (rocke_engine_moe_gemm_fused.cpp) and registered via register_moe_gemm_fused(). */
 /* ---- RDNA WMMA families ---- */
 #include "rocke/instance_gfx1151_wmma_fmha_decode.h"
@@ -111,15 +107,12 @@ void register_attention(py::module_& m);
  * dedicated translation unit (rocke_engine_fmha_extra.cpp). */
 void register_fmha_extra(py::module_& m);
 
-/* The fused-MoE end-to-end orchestrator (fused_moe_e2e). A separate TU: its
- * internal header drags in the moe_gemm_fused / tensor_view headers whose
- * rocke_tensor_descriptor tag clashes with the FMHA common header's transforms.h.
- * It is a host-launch multi-kernel orchestrator, bound as a concatenated
- * multi-stage lower (see rocke_engine_fused_moe_e2e.cpp). */
+/* The fused-MoE end-to-end orchestrator (fused_moe_e2e). It is a host-launch
+ * multi-kernel orchestrator, bound as a concatenated multi-stage lower (see
+ * rocke_engine_fused_moe_e2e.cpp). */
 void register_fused_moe_e2e(py::module_& m);
 
-/* Defined in rocke_engine_moe_gemm_fused.cpp (separate TU; see the tensor_view /
- * transforms rocke_tensor_descriptor tag clash note above). */
+/* Defined in rocke_engine_moe_gemm_fused.cpp. */
 void register_moe_gemm_fused(py::module_& m);
 
 namespace

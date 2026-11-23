@@ -46,7 +46,7 @@ static bool rocke_moe_make_lds_view2(rocke_ir_builder_t* b,
     int shape[2];
     shape[0] = d0;
     shape[1] = d1;
-    if(rocke_tensor_descriptor_packed(&out->desc, shape, 2, dtype) != ROCKE_OK)
+    if(rocke_tv_tensor_descriptor_packed(&out->desc, shape, 2, dtype) != ROCKE_OK)
     {
         rocke_i_set_err(b, ROCKE_ERR_VALUE, "build_moe_down_reduce_gemm: LDS view");
         return false;

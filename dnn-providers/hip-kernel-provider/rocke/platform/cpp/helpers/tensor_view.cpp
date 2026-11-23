@@ -63,11 +63,11 @@ static int rocke_tv_buffer_elem_bytes(rocke_ir_builder_t* b, const rocke_type_t*
 
 /* ======================================================== TensorDescriptor */
 
-rocke_status_t rocke_tensor_descriptor_init(rocke_tensor_descriptor_t* out,
-                                            const int* shape,
-                                            const rocke_stride_t* strides,
-                                            int rank,
-                                            const rocke_type_t* dtype)
+rocke_status_t rocke_tv_tensor_descriptor_init(rocke_tv_tensor_descriptor_t* out,
+                                               const int* shape,
+                                               const rocke_stride_t* strides,
+                                               int rank,
+                                               const rocke_type_t* dtype)
 {
     int i;
     if(out == NULL || shape == NULL || strides == NULL || dtype == NULL)
@@ -87,10 +87,10 @@ rocke_status_t rocke_tensor_descriptor_init(rocke_tensor_descriptor_t* out,
     return ROCKE_OK;
 }
 
-rocke_status_t rocke_tensor_descriptor_packed(rocke_tensor_descriptor_t* out,
-                                              const int* shape,
-                                              int rank,
-                                              const rocke_type_t* dtype)
+rocke_status_t rocke_tv_tensor_descriptor_packed(rocke_tv_tensor_descriptor_t* out,
+                                                 const int* shape,
+                                                 int rank,
+                                                 const rocke_type_t* dtype)
 {
     /* Python TensorDescriptor.packed: stride[i] = product of dims with index>i,
      * computed by walking reversed(shape) accumulating ``prod``. */
@@ -107,26 +107,26 @@ rocke_status_t rocke_tensor_descriptor_packed(rocke_tensor_descriptor_t* out,
         strides[i] = rocke_stride_imm(prod);
         prod *= (int64_t)shape[i];
     }
-    return rocke_tensor_descriptor_init(out, shape, strides, rank, dtype);
+    return rocke_tv_tensor_descriptor_init(out, shape, strides, rank, dtype);
 }
 
-rocke_status_t rocke_tensor_descriptor_with_strides(rocke_tensor_descriptor_t* out,
-                                                    const int* shape,
-                                                    const rocke_stride_t* strides,
-                                                    int rank,
-                                                    const rocke_type_t* dtype)
+rocke_status_t rocke_tv_tensor_descriptor_with_strides(rocke_tv_tensor_descriptor_t* out,
+                                                       const int* shape,
+                                                       const rocke_stride_t* strides,
+                                                       int rank,
+                                                       const rocke_type_t* dtype)
 {
     /* Python with_strides: same as init; an int stride stays int, a Value
      * stride stays Value. Our rocke_stride_t already carries the tag. */
-    return rocke_tensor_descriptor_init(out, shape, strides, rank, dtype);
+    return rocke_tv_tensor_descriptor_init(out, shape, strides, rank, dtype);
 }
 
-int rocke_tensor_descriptor_rank(const rocke_tensor_descriptor_t* d)
+int rocke_tv_tensor_descriptor_rank(const rocke_tv_tensor_descriptor_t* d)
 {
     return d ? d->rank : 0;
 }
 
-int64_t rocke_tensor_descriptor_numel(const rocke_tensor_descriptor_t* d)
+int64_t rocke_tv_tensor_descriptor_numel(const rocke_tv_tensor_descriptor_t* d)
 {
     int64_t n = 1;
     int i;
@@ -137,10 +137,10 @@ int64_t rocke_tensor_descriptor_numel(const rocke_tensor_descriptor_t* d)
     return n;
 }
 
-rocke_value_t* rocke_tensor_descriptor_offset(rocke_ir_builder_t* b,
-                                              const rocke_tensor_descriptor_t* d,
-                                              rocke_value_t* const* indices,
-                                              int num_indices)
+rocke_value_t* rocke_tv_tensor_descriptor_offset(rocke_ir_builder_t* b,
+                                                 const rocke_tv_tensor_descriptor_t* d,
+                                                 rocke_value_t* const* indices,
+                                                 int num_indices)
 {
     /* Python TensorDescriptor.offset:
      *   off = None
@@ -309,7 +309,7 @@ rocke_value_t* rocke_tensor_view_load_scalar(rocke_ir_builder_t* b,
     const rocke_type_t* dt;
     if(b == NULL || v == NULL)
         return NULL;
-    off = rocke_tensor_descriptor_offset(b, &v->desc, indices, num_indices);
+    off = rocke_tv_tensor_descriptor_offset(b, &v->desc, indices, num_indices);
     dt = v->desc.dtype;
 
     if(v->addr_space == ROCKE_ADDR_LDS)
@@ -420,7 +420,7 @@ void rocke_tensor_view_store_scalar(rocke_ir_builder_t* b,
         rsrc = rocke_tensor_view_buffer(b, v);
         if(rsrc == NULL)
             return;
-        off = rocke_tensor_descriptor_offset(b, &v->desc, indices, num_indices);
+        off = rocke_tv_tensor_descriptor_offset(b, &v->desc, indices, num_indices);
         elem_bytes = rocke_tv_buffer_elem_bytes(b, dt);
         c_bytes = rocke_b_const_i32(b, elem_bytes);
         byte_off = rocke_b_mul(b, off, c_bytes);
@@ -435,7 +435,7 @@ void rocke_tensor_view_store_scalar(rocke_ir_builder_t* b,
                         dt && dt->name ? dt->name : "<null>");
         return;
     }
-    off = rocke_tensor_descriptor_offset(b, &v->desc, indices, num_indices);
+    off = rocke_tv_tensor_descriptor_offset(b, &v->desc, indices, num_indices);
     if(align == 0 && rocke_tv_name_is(dt, "f64"))
         align = 8; /* Same 8-byte element alignment as the f64 load_scalar. */
     /* align 0 is rocke_b_global_store's default, 1, as Python's align=None. */
@@ -483,7 +483,7 @@ rocke_value_t* rocke_tensor_view_load_vec(rocke_ir_builder_t* b,
         int elem_bytes;
         if(rsrc == NULL)
             return NULL;
-        elem_off = rocke_tensor_descriptor_offset(b, &v->desc, indices, num_indices);
+        elem_off = rocke_tv_tensor_descriptor_offset(b, &v->desc, indices, num_indices);
         elem_bytes = rocke_tv_buffer_elem_bytes(b, dt);
         c_bytes = rocke_b_const_i32(b, elem_bytes);
         byte_off = rocke_b_mul(b, elem_off, c_bytes);
@@ -503,7 +503,7 @@ rocke_value_t* rocke_tensor_view_load_vec(rocke_ir_builder_t* b,
                         dt && dt->name ? dt->name : "<null>");
         return NULL;
     }
-    off = rocke_tensor_descriptor_offset(b, &v->desc, indices, num_indices);
+    off = rocke_tv_tensor_descriptor_offset(b, &v->desc, indices, num_indices);
     if(rocke_tv_name_is(dt, "f16") || rocke_tv_name_is(dt, "bf16") || rocke_tv_name_is(dt, "f64")
        || rocke_tv_name_is(dt, "fp8e4m3") || rocke_tv_name_is(dt, "bf8e5m2"))
         return rocke_b_global_load_vN(b, v->base, off, dt, n, 0);
@@ -571,7 +571,7 @@ void rocke_tensor_view_store_vec(rocke_ir_builder_t* b,
         rsrc = rocke_tensor_view_buffer(b, v);
         if(rsrc == NULL)
             return;
-        elem_off = rocke_tensor_descriptor_offset(b, &v->desc, indices, num_indices);
+        elem_off = rocke_tv_tensor_descriptor_offset(b, &v->desc, indices, num_indices);
         elem_bytes = rocke_tv_buffer_elem_bytes(b, dt);
         c_bytes = rocke_b_const_i32(b, elem_bytes);
         byte_off = rocke_b_mul(b, elem_off, c_bytes);
@@ -592,7 +592,7 @@ void rocke_tensor_view_store_vec(rocke_ir_builder_t* b,
                         dt && dt->name ? dt->name : "<null>");
         return;
     }
-    off = rocke_tensor_descriptor_offset(b, &v->desc, indices, num_indices);
+    off = rocke_tv_tensor_descriptor_offset(b, &v->desc, indices, num_indices);
     rocke_b_global_store_vN(b, v->base, off, value, n, 0);
 }
 
@@ -1040,9 +1040,9 @@ rocke_status_t rocke_make_global_view(rocke_tensor_view_t* out,
     if(out == NULL)
         return ROCKE_ERR_VALUE;
     if(strides == NULL)
-        st = rocke_tensor_descriptor_packed(&out->desc, shape, rank, dtype);
+        st = rocke_tv_tensor_descriptor_packed(&out->desc, shape, rank, dtype);
     else
-        st = rocke_tensor_descriptor_with_strides(&out->desc, shape, strides, rank, dtype);
+        st = rocke_tv_tensor_descriptor_with_strides(&out->desc, shape, strides, rank, dtype);
     if(st != ROCKE_OK)
         return st;
     out->base = base;
@@ -1091,9 +1091,9 @@ rocke_status_t rocke_tv_make_buffer_view(rocke_tensor_view_t* out,
     if(out == NULL)
         return ROCKE_ERR_VALUE;
     if(strides == NULL)
-        st = rocke_tensor_descriptor_packed(&out->desc, shape, rank, dtype);
+        st = rocke_tv_tensor_descriptor_packed(&out->desc, shape, rank, dtype);
     else
-        st = rocke_tensor_descriptor_with_strides(&out->desc, shape, strides, rank, dtype);
+        st = rocke_tv_tensor_descriptor_with_strides(&out->desc, shape, strides, rank, dtype);
     if(st != ROCKE_OK)
         return st;
     out->base = NULL; /* the Python base (the BufferResource) is out->buffer */
@@ -1147,9 +1147,9 @@ rocke_status_t rocke_make_lds_view_ex(rocke_ir_builder_t* b,
         return ROCKE_ERR_VALUE;
     smem = rocke_b_smem_alloc_ex(b, dtype, shape, rank, name_hint, exclusive);
     if(strides == NULL)
-        st = rocke_tensor_descriptor_packed(&out->desc, shape, rank, dtype);
+        st = rocke_tv_tensor_descriptor_packed(&out->desc, shape, rank, dtype);
     else
-        st = rocke_tensor_descriptor_with_strides(&out->desc, shape, strides, rank, dtype);
+        st = rocke_tv_tensor_descriptor_with_strides(&out->desc, shape, strides, rank, dtype);
     if(st != ROCKE_OK)
         return st;
     out->base = smem;
@@ -1177,9 +1177,9 @@ rocke_status_t rocke_make_lds_view(rocke_ir_builder_t* b,
         return ROCKE_ERR_VALUE;
     smem = rocke_b_smem_alloc(b, dtype, shape, rank, name_hint);
     if(strides == NULL)
-        st = rocke_tensor_descriptor_packed(&out->desc, shape, rank, dtype);
+        st = rocke_tv_tensor_descriptor_packed(&out->desc, shape, rank, dtype);
     else
-        st = rocke_tensor_descriptor_with_strides(&out->desc, shape, strides, rank, dtype);
+        st = rocke_tv_tensor_descriptor_with_strides(&out->desc, shape, strides, rank, dtype);
     if(st != ROCKE_OK)
         return st;
     out->base = smem;

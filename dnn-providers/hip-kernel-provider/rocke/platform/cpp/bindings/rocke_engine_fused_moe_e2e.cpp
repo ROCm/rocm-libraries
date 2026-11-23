@@ -2,12 +2,7 @@
 // SPDX-License-Identifier: MIT
 /*
  * bindings/rocke_engine_fused_moe_e2e.cpp -- binding for the fused-MoE end-to-end
- * forward orchestrator (fused_moe_e2e). Kept in its own translation unit because
- * the orchestrator's internal header (instance_fused_moe_e2e_internal.h) pulls
- * in the moe_gemm_fused / tensor_view headers, whose rocke_tensor_descriptor tag
- * clashes with the transforms.h definition pulled in by the FMHA common header
- * in rocke_engine_fmha_extra.cpp -- the same isolation reason as
- * rocke_engine_moe_gemm_fused.cpp.
+ * forward orchestrator (fused_moe_e2e).
  *
  * fused_moe_e2e is NOT a single bound lowering unit. It is a host-launch
  * orchestrator: rocke_build_fused_moe_forward returns a kernel whose forward_fn

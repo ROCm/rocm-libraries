@@ -315,9 +315,11 @@ rocke_status_t rocke_moe_mega_build_ctx_init(rocke_moe_mega_build_ctx_t* ctx,
         bg_lds->addr_space = ROCKE_ADDR_LDS;
         bu_lds->base = ctx->Bu_smem;
         bu_lds->addr_space = ROCKE_ADDR_LDS;
-        if(rocke_tensor_descriptor_packed(&a_lds->desc, a_shape, 2, storage_dtype) != ROCKE_OK
-           || rocke_tensor_descriptor_packed(&bg_lds->desc, b_shape, 2, storage_dtype) != ROCKE_OK
-           || rocke_tensor_descriptor_packed(&bu_lds->desc, b_shape, 2, storage_dtype) != ROCKE_OK)
+        if(rocke_tv_tensor_descriptor_packed(&a_lds->desc, a_shape, 2, storage_dtype) != ROCKE_OK
+           || rocke_tv_tensor_descriptor_packed(&bg_lds->desc, b_shape, 2, storage_dtype)
+                  != ROCKE_OK
+           || rocke_tv_tensor_descriptor_packed(&bu_lds->desc, b_shape, 2, storage_dtype)
+                  != ROCKE_OK)
         {
             return rocke_ir_builder_status(b);
         }
@@ -372,7 +374,7 @@ rocke_status_t rocke_moe_mega_build_ctx_init(rocke_moe_mega_build_ctx_t* ctx,
         }
         bd_lds->base = ctx->Bd_smem;
         bd_lds->addr_space = ROCKE_ADDR_LDS;
-        if(rocke_tensor_descriptor_packed(&bd_lds->desc, bd_shape, 2, storage_dtype) != ROCKE_OK)
+        if(rocke_tv_tensor_descriptor_packed(&bd_lds->desc, bd_shape, 2, storage_dtype) != ROCKE_OK)
         {
             return rocke_ir_builder_status(b);
         }

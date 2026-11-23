@@ -88,7 +88,7 @@ static rocke_status_t rocke_x_make_lds_view(rocke_ir_builder_t* b,
         return ROCKE_ERR_VALUE;
     }
     smem = rocke_b_smem_alloc(b, dtype, shape, rank, name_hint);
-    st = rocke_tensor_descriptor_packed(&out->desc, shape, rank, dtype);
+    st = rocke_tv_tensor_descriptor_packed(&out->desc, shape, rank, dtype);
     if(st != ROCKE_OK)
     {
         return st;

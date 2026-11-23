@@ -211,8 +211,8 @@ typedef struct rocke_gemm_build_ctx
     /* ---- CK-Tile data views (host-side; hold SSA bases) -- */
     rocke_tensor_view_t a_view; /* make_global_view(A, (1,K,1))      */
     rocke_tensor_view_t b_view; /* make_global_view(Bp,(1,K,1))      */
-    rocke_tensor_descriptor_t a_lds_desc; /* packed or with_strides         */
-    rocke_tensor_descriptor_t b_lds_desc;
+    rocke_tv_tensor_descriptor_t a_lds_desc; /* packed or with_strides         */
+    rocke_tv_tensor_descriptor_t b_lds_desc;
     rocke_tensor_view_t a_lds_view; /* LDS view over A_smem              */
     rocke_tensor_view_t b_lds_view; /* LDS view over B_smem              */
 

@@ -72,14 +72,10 @@
  *                            (f32 demote/pack) + raw_ptr_buffer_store.
  * ===================================================================== */
 
-/* NB: the rich named-coord rocke_tensor_descriptor (helpers.transforms.h, already
- * included above) and the simple shape/stride descriptor in
- * helpers.tensor_view.h share the struct tag ``rocke_tensor_descriptor`` but are
- * different types -- the two headers cannot coexist in one TU. The pooling store
- * path needs only a packed buffer view, so we carry the flat shape directly here
- * (a self-contained mirror of helpers/tensor_view.py's buffer TensorView) and
- * compute the packed offset inline; this keeps the byte-identical op stream
- * without dragging in the conflicting header. */
+/* The pooling store path needs only a packed buffer view, so we carry the flat
+ * shape directly here (a self-contained mirror of helpers/tensor_view.py's
+ * buffer TensorView) and compute the packed offset inline, keeping the
+ * byte-identical op stream. */
 #define ROCKE_POOL_TV_MAX_RANK 8
 
 /* helpers/tensor_view.py: BufferResource (rsrc + soffset + num_bytes). */
