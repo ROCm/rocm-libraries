@@ -32,8 +32,9 @@ Tests:
   indextype: *i32_i64
   precision: *single_double_precisions_complex_real
 
-# int8 spvv with 32-bit indices and nnz = INT32_MAX. Needs ~10 GiB of device
-# data; skipped elsewhere.
+# Regression test for AISPARSE-1104: int8 spvv with 32-bit indices and
+# nnz = INT32_MAX reaches the grid-stride overflow that was fixed in the doti
+# kernel. Needs ~10 GiB of device data; skipped elsewhere.
 - name: spvv_extra
   category: nightly
   function: spvv_extra

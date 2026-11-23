@@ -234,8 +234,18 @@ INSTANTIATE_MIXED(int64_t, int8_t, int8_t, float);
 
 void testing_spvv_extra(const Arguments& arg)
 {
-    // doti_kernel_part1 runs on a fixed grid and its 32-bit grid stride wraps once
-    // nnz exceeds 2147352576.
+    // Regression test for AISPARSE-1104.
+    //
+    // Before the fix, doti_kernel_part1 kept its grid-stride index in the 32-bit
+    // index type. The kernel runs on a fixed 256 x 256 grid, so once nnz
+    // exceeded 2147352576 the index wrapped negative and the kernel read out of
+    // bounds or never terminated. The fix computes the index in 64-bit
+    // arithmetic.
+    //
+    // This drives the 32-bit-index int8 path of rocsparse_spvv with
+    // nnz = INT32_MAX. Every index is 0 and every value of x and y is 1, so an
+    // exact result of nnz shows that the kernel terminated and counted every
+    // element. The int32 compute type holds that sum exactly.
     using I = int32_t;
     using X = int8_t;
     using Y = int8_t;
