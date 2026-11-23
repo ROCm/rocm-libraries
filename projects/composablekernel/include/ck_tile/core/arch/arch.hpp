@@ -1608,7 +1608,9 @@ template <index_t N = 0>
 CK_TILE_DEVICE void s_wait_asynccnt()
 {
 #if CK_TILE_HAS_ASYNCMARK
-    // We consistently asyncmark DMAs, so this will have the same effect on gfx12+.
+    // CK's async load paths (buffer_view, tile_scatter_gather) asyncmark the DMAs they issue, so
+    // for those this has the same effect on gfx12+. Inline-asm DMAs carry no asyncmark and are not
+    // waited for here: see amd_async_global_store_from_lds_wait().
     wait_asyncmark<N>();
 #elif defined(__gfx125__)
     __builtin_amdgcn_s_wait_asynccnt(N);
