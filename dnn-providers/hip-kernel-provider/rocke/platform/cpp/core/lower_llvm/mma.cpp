@@ -25,6 +25,7 @@
 #include "rocke/arch_target.h"
 #include "rocke/ir.h"
 #include "rocke/ir_internal.h"
+#include "rocke/isa_backend.h" /* the float-WMMA spec tables */
 #include "rocke/lower_llvm.h"
 #include "rocke/lower_llvm_internal.h"
 #include "rocke/matrix_calls_internal.h"
@@ -785,118 +786,29 @@ static void _op_tile_wmma_f32_16x16x16_bf16(rocke_lower_t* L, const rocke_op_t* 
 /* bitcast to <W x i16> before the call (call_elt != ssa_elt).            */
 /* ====================================================================== */
 
-/* Local float-WMMA spec table, a faithful copy of the Python backend tables
- * (_RDNA_WMMA for RDNA3/3.5 + _RDNA_GFX12_WMMA for RDNA4). Held here rather than
- * via rocke/isa_backend.h to avoid the header's own `rocke_isa_backend` struct
- * colliding with the lowerer's same-named backend struct. The op_ids are
- * disjoint between the two families, so one flat table resolves both: gfx12
- * op_ids carry the "wmma_gfx12_" prefix (8-wide fragments), the rest are
- * RDNA3/3.5 (16-wide). */
-/* The call shape a float-WMMA intrinsic takes. RDNA3/3.5 and RDNA4 share the
- * plain 3-operand (A, B, C) form; gfx1250 does not, so the shape has to travel
- * with the spec rather than be inferred from the fragment width. */
-typedef enum _wmma_shape
+/* The float-WMMA spec of `op_id` (no "tile." prefix), from the ISA backend's
+ * tables (Python _RDNA_WMMA, _RDNA_GFX12_WMMA, _GFX1250_WMMA and
+ * _GFX1250_WMMA_FP8). The op_ids are disjoint between the families, so the
+ * first table that lists the op_id holds its spec. NULL when none does. */
+static const rocke_wmma_spec_t* _wmma_spec_for(const char* op_id)
 {
-    /* (<W x elt> A, <W x elt> B, <8 x float> C) -- gfx11 / gfx12 */
-    WMMA_SHAPE_AB_C = 0,
-    /* (i1 negA, <16 x elt> A, i1 negB, <16 x elt> B, i16 fmt, <8 x float> C,
-     * i1 reuseA, i1 reuseB) -- gfx1250 K=32 f16/bf16 */
-    WMMA_SHAPE_GFX1250,
-    /* (<8 x i32> A, <8 x i32> B, i16 fmt, <8 x float> C, i1, i1) -- gfx1250
-     * K=64 fp8/bf8, where a lane's fragment is 32 packed bytes */
-    WMMA_SHAPE_GFX1250_FP8
-} _wmma_shape_t;
-
-typedef struct _wmma_spec
-{
-    const char* op_id; /* the tile.mma op_id (no "tile." prefix)        */
-    const char* decl_key; /* _need() key                                   */
-    const char* intrinsic; /* fully-mangled @llvm.amdgcn.wmma....           */
-    const char* ssa_elt; /* SSA operand element type                      */
-    const char* call_elt; /* call-site operand element type                */
-    int frag_width; /* A/B operand vector width (16 RDNA3/3.5, 8 RDNA4) */
-    _wmma_shape_t shape; /* which intrinsic signature to emit             */
-} _wmma_spec_t;
-
-static const _wmma_spec_t WMMA_SPECS[] = {
-    /* _RDNA_WMMA (RDNA3/3.5, frag_width 16) */
-    {"wmma_f32_16x16x16_f16",
-     "wmma.f32.16x16x16.f16",
-     "llvm.amdgcn.wmma.f32.16x16x16.f16.v8f32.v16f16",
-     "half",
-     "half",
-     16,
-     WMMA_SHAPE_AB_C},
-    {"wmma_f32_16x16x16_bf16",
-     "wmma.f32.16x16x16.bf16",
-     "llvm.amdgcn.wmma.f32.16x16x16.bf16.v8f32.v16i16",
-     "bfloat",
-     "i16",
-     16,
-     WMMA_SHAPE_AB_C},
-    /* _RDNA_GFX12_WMMA (RDNA4, frag_width 8) */
-    {"wmma_gfx12_f32_16x16x16_f16",
-     "wmma.gfx12.f32.16x16x16.f16",
-     "llvm.amdgcn.wmma.f32.16x16x16.f16.v8f32.v8f16",
-     "half",
-     "half",
-     8,
-     WMMA_SHAPE_AB_C},
-    {"wmma_gfx12_f32_16x16x16_bf16",
-     "wmma.gfx12.f32.16x16x16.bf16",
-     "llvm.amdgcn.wmma.f32.16x16x16.bf16.v8f32.v8i16",
-     "bfloat",
-     "i16",
-     8,
-     WMMA_SHAPE_AB_C},
-    /* _GFX1250_WMMA (K=32, frag_width 16). Note bf16 keeps ssa_elt ==
-     * call_elt: the gfx1250 intrinsic takes <16 x bfloat> directly, so unlike
-     * gfx11/gfx12 there is NO i16 bitcast. */
-    {"wmma_gfx1250_f32_16x16x32_f16",
-     "wmma.gfx1250.f32.16x16x32.f16",
-     "llvm.amdgcn.wmma.f32.16x16x32.f16.v8f32.v16f16",
-     "half",
-     "half",
-     16,
-     WMMA_SHAPE_GFX1250},
-    {"wmma_gfx1250_f32_16x16x32_bf16",
-     "wmma.gfx1250.f32.16x16x32.bf16",
-     "llvm.amdgcn.wmma.f32.16x16x32.bf16.v8f32.v16bf16",
-     "bfloat",
-     "bfloat",
-     16,
-     WMMA_SHAPE_GFX1250},
-    /* _GFX1250_WMMA_FP8 (K=64). A/B are passed as <8 x i32> (mma_operand). */
-    {"wmma_gfx1250_f32_16x16x64_fp8_fp8",
-     "wmma.gfx1250.f32.16x16x64.fp8.fp8",
-     "llvm.amdgcn.wmma.f32.16x16x64.fp8.fp8.v8f32.v8i32",
-     "i32",
-     "i32",
-     8,
-     WMMA_SHAPE_GFX1250_FP8},
-    {"wmma_gfx1250_f32_16x16x64_fp8_bf8",
-     "wmma.gfx1250.f32.16x16x64.fp8.bf8",
-     "llvm.amdgcn.wmma.f32.16x16x64.fp8.bf8.v8f32.v8i32",
-     "i32",
-     "i32",
-     8,
-     WMMA_SHAPE_GFX1250_FP8},
-    {"wmma_gfx1250_f32_16x16x64_bf8_fp8",
-     "wmma.gfx1250.f32.16x16x64.bf8.fp8",
-     "llvm.amdgcn.wmma.f32.16x16x64.bf8.fp8.v8f32.v8i32",
-     "i32",
-     "i32",
-     8,
-     WMMA_SHAPE_GFX1250_FP8},
-    {"wmma_gfx1250_f32_16x16x64_bf8_bf8",
-     "wmma.gfx1250.f32.16x16x64.bf8.bf8",
-     "llvm.amdgcn.wmma.f32.16x16x64.bf8.bf8.v8f32.v8i32",
-     "i32",
-     "i32",
-     8,
-     WMMA_SHAPE_GFX1250_FP8},
-};
-static const int WMMA_SPECS_N = (int)(sizeof(WMMA_SPECS) / sizeof(WMMA_SPECS[0]));
+    char op_name[96];
+    const int length = snprintf(op_name, sizeof(op_name), "tile.%s", op_id);
+    if(length < 0 || (size_t)length >= sizeof(op_name))
+    {
+        return NULL;
+    }
+    const rocke_wmma_spec_t* spec = rocke_isa_wmma_lookup(op_name);
+    if(spec == NULL)
+    {
+        spec = rocke_isa_wmma_gfx12_lookup(op_name);
+    }
+    if(spec == NULL)
+    {
+        spec = rocke_isa_wmma_gfx1250_lookup(op_name);
+    }
+    return spec;
+}
 
 /* core/wmma.py::validate_unscaled_wmma (rocke_unscaled_wmma_operand_error),
  * failing `L` with its text. */
@@ -922,27 +834,19 @@ static void _validate_unscaled_wmma(rocke_lower_t* L,
 
 static void _emit_wmma(rocke_lower_t* L, const rocke_op_t* op, const char* op_id)
 {
-    const _wmma_spec_t* spec = NULL;
     const rocke_value_t *a, *b, *c;
     const char *a_arg, *b_arg;
-    int w, i;
+    int w;
 
     if(!rocke_ll_live(L))
     {
         return;
     }
 
-    for(i = 0; i < WMMA_SPECS_N; i++)
-    {
-        if(strcmp(WMMA_SPECS[i].op_id, op_id) == 0)
-        {
-            spec = &WMMA_SPECS[i];
-            break;
-        }
-    }
+    const rocke_wmma_spec_t* spec = _wmma_spec_for(op_id);
     if(spec == NULL)
     {
-        /* WMMA_SPECS above covers exactly the Python _RDNA_WMMA (gfx11),
+        /* The backend tables cover exactly the Python _RDNA_WMMA (gfx11),
          * _RDNA_GFX12_WMMA (gfx12) and _GFX1250_WMMA / _GFX1250_WMMA_FP8
          * op_ids -- the full set of hand-written WMMAs reachable on every
          * WMMA backend rocke_ll_backend_for resolves. */
@@ -964,7 +868,7 @@ static void _emit_wmma(rocke_lower_t* L, const rocke_op_t* op, const char* op_id
     w = spec->frag_width;
 
     rocke_ll_need(L, spec->decl_key);
-    if(spec->shape == WMMA_SHAPE_GFX1250_FP8)
+    if(spec->shape == ROCKE_WMMA_SHAPE_GFX1250_FP8)
     {
         /* A and B are passed as the intrinsic's <8 x i32> (32 low-bit bytes per
          * lane); a <32 x i8> fragment is reinterpreted with one bitcast. */
@@ -1004,7 +908,7 @@ static void _emit_wmma(rocke_lower_t* L, const rocke_op_t* op, const char* op_id
         b_arg = b_cast;
     }
 
-    if(spec->shape == WMMA_SHAPE_GFX1250)
+    if(spec->shape == ROCKE_WMMA_SHAPE_GFX1250)
     {
         /* gfx1250 8-operand form: (i1 negA, A, i1 negB, B, i16 fmt, C,
          * i1 reuseA, i1 reuseB). The negate / format / reuse immediates are
@@ -1026,7 +930,7 @@ static void _emit_wmma(rocke_lower_t* L, const rocke_op_t* op, const char* op_id
                        rocke_ll_operand(L, c));
         return;
     }
-    if(spec->shape == WMMA_SHAPE_GFX1250_FP8)
+    if(spec->shape == ROCKE_WMMA_SHAPE_GFX1250_FP8)
     {
         /* gfx1250 K=64 6-operand form: (A, B, i16 fmt, C, i1, i1), format and
          * reuse immediates pinned to 0 (plain unscaled MMA). */
@@ -1070,7 +974,7 @@ static void _emit_wmma(rocke_lower_t* L, const rocke_op_t* op, const char* op_id
  * <4 x bfloat> -> <4 x i16>), then emits a single MFMA call. They differ only
  * by five literal strings (decl key, intrinsic, src0/src1 element-vector
  * spelling, src2 spelling, dst spelling) plus the optional bitcast target. This
- * mirrors the WMMA_SPECS / _emit_wmma idiom already used in this file. */
+ * mirrors the table-driven _emit_wmma idiom already used in this file. */
 typedef struct _mfma_spec
 {
     const char* op_id; /* the tile.mma op_id (no "tile." prefix)         */
