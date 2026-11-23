@@ -89,14 +89,15 @@ constexpr std::pair<float, float> get_mul_add() {
         return {1.0f, 0.0f};  // No transformation for other types
 }
 
-// Compute quality factor for JPEG quantization based on quality parameter
-inline Rpp32f get_quality_factor(Rpp32s quality) {
-    Rpp32f qualityFactor;
-    if (quality < 50)
-        qualityFactor = 50.0f / quality;  // Higher compression
-    else
-        qualityFactor = 2.0f - (quality / 50.0f);  // Lower compression
-    return qualityFactor;
+// Percentage the base tables are scaled by for a quality (libjpeg's jpeg_quality_scaling)
+inline Rpp32s get_quality_scaling(Rpp32s quality) {
+    quality = std::max(1, std::min(100, quality));
+    return (quality < 50) ? 5000 / quality : 200 - quality * 2;
+}
+
+// libjpeg's (base * scale + 50) / 100 in integers, clamped to the baseline 8-bit range
+inline Rpp32f get_quantizer(Rpp32f base, Rpp32s qualityScaling) {
+    return clamp((static_cast<Rpp32s>(base) * qualityScaling + 50) / 100, 1, 255);
 }
 
 // Upsample 8 values in AVX2 register by duplicating adjacent pairs
@@ -141,13 +142,12 @@ inline void transpose_8x8_avx(__m256* p) {
 // Apply quantization to an 8x8 block with a given quantization table and quality
 inline void quantize_block(Rpp32f* block, const Rpp32f* quantTable, Rpp32s stride,
                            Rpp32s qualityParam) {
-    Rpp32f qualityFactor = get_quality_factor(qualityParam);
+    Rpp32s qualityScaling = get_quality_scaling(qualityParam);
     for (Rpp32s row = 0; row < 8; row++) {
         Rpp32s rowIdx = row * stride;
         Rpp32s rowQuantIdx = row * 8;
         for (Rpp32s col = 0; col < 8; col++) {
-            Rpp32f qCoeff =
-                clamp(roundf(quantTable[rowQuantIdx + col] * qualityFactor), 1.0f, 255.0f);
+            Rpp32f qCoeff = get_quantizer(quantTable[rowQuantIdx + col], qualityScaling);
             block[rowIdx + col] = qCoeff * roundf(block[rowIdx + col] / qCoeff);
         }
     }
@@ -296,16 +296,13 @@ inline __m256 accurate_quant_round(__m256 val, __m256 quant) {
 
 // Applies quantization
 inline void quantize_block_avx2(__m256* p, const float* quantTable, int qualityParam) {
-    float qualityFactor = get_quality_factor(qualityParam);
-    __m256 pQualityFactor = _mm256_set1_ps(qualityFactor);
+    Rpp32s qualityScaling = get_quality_scaling(qualityParam);
 
     for (int i = 0; i < 8; i++) {
-        __m256 quantRow = _mm256_loadu_ps(&quantTable[i * 8]);
-        quantRow = _mm256_mul_ps(quantRow, pQualityFactor);  // Scale by quality
-        // Round half up like roundf in quantize_block, and clamp to the baseline 8-bit range
-        quantRow = _mm256_min_ps(
-            _mm256_max_ps(_mm256_floor_ps(_mm256_add_ps(quantRow, avx_p1op2)), avx_p1), avx_p255);
-        p[i] = accurate_quant_round(p[i], quantRow);  // Quantize
+        alignas(32) float quantRow[8];
+        for (int j = 0; j < 8; j++)
+            quantRow[j] = get_quantizer(quantTable[i * 8 + j], qualityScaling);
+        p[i] = accurate_quant_round(p[i], _mm256_load_ps(quantRow));  // Quantize
     }
 }
 
