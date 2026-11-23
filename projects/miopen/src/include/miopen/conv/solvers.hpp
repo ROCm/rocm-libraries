@@ -17,6 +17,7 @@
 
 #include <initializer_list>
 #include <string>
+#include <string_view>
 #include <tuple>
 #include <unordered_map>
 #include <vector>
@@ -3944,6 +3945,17 @@ struct PerformanceConfigHipImplicitGemm3DGroupWrwXdlops
 private:
     void InitValidKernels(const miopen::conv::ProblemDescription& problem);
     mutable bool use_tf32 = false;
+
+    template <class Config, class State, class RunAI>
+    friend void InitHeuristicConfigFromCache(Config&,
+                                             State&,
+                                             const ExecutionContext&,
+                                             const miopen::conv::ProblemDescription&,
+                                             std::string_view,
+                                             bool,
+                                             bool,
+                                             bool,
+                                             RunAI&&);
 };
 
 struct MIOPEN_INTERNALS_EXPORT ConvHipImplicitGemm3DGroupWrwXdlops final
@@ -3981,6 +3993,7 @@ struct MIOPEN_INTERNALS_EXPORT ConvHipImplicitGemm3DGroupWrwXdlops final
     size_t GetWorkspaceSize(const ExecutionContext&,
                             const miopen::conv::ProblemDescription&) const override;
     bool MayNeedWorkspace() const override { return true; }
+    bool WorkspaceDependsOnConfig() const override { return true; }
 
 private:
     size_t GetCKMaxWorkspaceSize(const miopen::conv::ProblemDescription& problem) const;
@@ -4159,9 +4172,6 @@ struct MIOPEN_INTERNALS_EXPORT ConvHipImplicitGemmGroupBwdXdlops final
     size_t GetWorkspaceSize(const ExecutionContext&,
                             const miopen::conv::ProblemDescription&) const override;
     bool MayNeedWorkspace() const override { return true; }
-
-private:
-    size_t GetCKMaxWorkspaceSize(const miopen::conv::ProblemDescription& problem) const;
 };
 
 struct PerformanceConfigHipImplicitGemmGroupWrwXdlops
@@ -4227,6 +4237,17 @@ private:
     template <typename DataType>
     bool CheckIsSupportCKArgs(const miopen::conv::ProblemDescription&) const;
     mutable bool use_tf32 = false;
+
+    template <class Config, class State, class RunAI>
+    friend void InitHeuristicConfigFromCache(Config&,
+                                             State&,
+                                             const ExecutionContext&,
+                                             const miopen::conv::ProblemDescription&,
+                                             std::string_view,
+                                             bool,
+                                             bool,
+                                             bool,
+                                             RunAI&&);
 };
 
 struct MIOPEN_INTERNALS_EXPORT ConvHipImplicitGemmGroupWrwXdlops final
@@ -4263,6 +4284,7 @@ struct MIOPEN_INTERNALS_EXPORT ConvHipImplicitGemmGroupWrwXdlops final
     size_t GetWorkspaceSize(const ExecutionContext&,
                             const miopen::conv::ProblemDescription&) const override;
     bool MayNeedWorkspace() const override { return true; }
+    bool WorkspaceDependsOnConfig() const override { return true; }
 
 private:
     size_t GetCKMaxWorkspaceSize(const miopen::conv::ProblemDescription& problem) const;
@@ -4615,6 +4637,13 @@ extern template struct TransposedConvMPBidirectWinograd_xdlops<5, 3>;
 extern template struct TransposedConvMPBidirectWinograd_xdlops<6, 3>;
 #if defined(__clang__) && defined(CONV_MP_BIDIRECTIONAL_WINOGRAD_CPP)
 #pragma clang diagnostic pop
+
+// Returns the SolverHeuristicConfig for the 2D grouped Wrw solver. Exposed for testing.
+// Tests that use the real gate (IsValidSplitK) must call this to get the actual flag value
+// rather than hardcoding it, so a flag revert is immediately caught.
+MIOPEN_INTERNALS_EXPORT const miopen::solver::conv::SolverHeuristicConfig&
+GetWrw2DSolverHeuristicConfig();
+
 #endif
 
 /// Forward 2D depthwise convolution (channels-per-group == 1) for RDNA.
@@ -4709,6 +4738,7 @@ struct MIOPEN_INTERNALS_EXPORT ConvHipConv final : ConvTunableSolver<Performance
     size_t GetWorkspaceSize(const ExecutionContext&,
                             const miopen::conv::ProblemDescription&) const override;
     bool MayNeedWorkspace() const override { return true; }
+    bool WorkspaceDependsOnConfig() const override { return true; }
     PerformanceConfigConvHipConv
     GetDefaultPerformanceConfig(const ExecutionContext&,
                                 const miopen::conv::ProblemDescription&) const override;

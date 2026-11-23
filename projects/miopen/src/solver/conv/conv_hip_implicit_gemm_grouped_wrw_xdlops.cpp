@@ -34,6 +34,7 @@
 #include <miopen/solver/problem_description_interpreter.hpp>
 #include <miopen/solver/ck_impl_lib_loader.hpp>
 #include <miopen/conv/heuristics/ai_conv_nd_kernel_tuning_utils.hpp>
+#include <miopen/conv/heuristics/default_config_cache.hpp>
 #if MIOPEN_ENABLE_AI_KERNEL_TUNING
 #include <miopen/conv/heuristics/ai_heuristics.hpp>
 #include <miopen/conv/heuristics/ai_candidate_selection.hpp>
@@ -63,7 +64,7 @@ constexpr SolverHeuristicConfig k2DWrwSolverConfig = {
     /* uses_split_k                */ true,
     /* split_k_min                 */ 1,
     /* split_k_max                 */ 128,
-    /* supports_split_k_autodeduce */ false,
+    /* supports_split_k_autodeduce */ true,
     /* supports_ktn                */ true,
 };
 // clang-format on
@@ -241,8 +242,8 @@ bool PerformanceConfigHipImplicitGemmGroupWrwXdlops::RunParameterPredictionModel
 bool PerformanceConfigHipImplicitGemmGroupWrwXdlops::IsModelApplicable(
     const ExecutionContext& ctx, const ProblemDescription& problem) const
 {
-    const auto arch = ai::common::NormalizeArch(ctx.GetStream().GetDeviceName());
-    if(arch != "gfx90a" && arch != "gfx942" && arch != "gfx950" && arch != "gfx1250")
+    if(ctx.GetStream().GetDeviceName() != "gfx90a" && ctx.GetStream().GetDeviceName() != "gfx942" &&
+       ctx.GetStream().GetDeviceName() != "gfx950")
         return false;
     if(problem.GetInDataType() != miopenFloat && problem.GetInDataType() != miopenHalf &&
        problem.GetInDataType() != miopenBFloat16)
@@ -348,11 +349,14 @@ void PerformanceConfigHipImplicitGemmGroupWrwXdlops::HeuristicInit(
 
     [[maybe_unused]] const bool is_deterministic = problem.GetConv().attribute.deterministic;
 
-    // AI heuristics (if enabled)
+    // AI heuristics (if enabled), then the default; the result is computed once per process
+    // (DefaultConfigCache), since the AI heuristics also score their whole configuration
+    // vocabulary and ask CK about candidates on every call.
 #if MIOPEN_ENABLE_AI_KERNEL_TUNING
-    if(&ctx != &GetDummyCtx() &&
-       !env::disabled(MIOPEN_DEBUG_GROUP_CONV_IMPLICIT_GEMM_HIP_WRW_XDLOPS_AI_HEUR))
-    {
+    const bool ai_heuristics =
+        &ctx != &GetDummyCtx() &&
+        !env::disabled(MIOPEN_DEBUG_GROUP_CONV_IMPLICIT_GEMM_HIP_WRW_XDLOPS_AI_HEUR);
+    const auto run_ai = [&]() {
         bool mode_use_tf32 = (problem.GetInDataType() == miopenFloat) && problem.UseTF32();
 
         auto ktn_runner = [this](const ExecutionContext& c, const ProblemDescription& p) {
@@ -365,28 +369,29 @@ void PerformanceConfigHipImplicitGemmGroupWrwXdlops::HeuristicInit(
                                                      mode_use_tf32,
                                                      k2DWrwSolverConfig.uses_split_k);
 
-        if(RunAIHeuristics(k2DWrwSolverConfig,
-                           state,
-                           ctx,
-                           problem,
-                           is_deterministic,
-                           ktn_runner,
-                           ck_val_creator,
-                           mode_use_tf32))
-        {
-            return;
-        }
-    }
+        return RunAIHeuristics(k2DWrwSolverConfig,
+                               state,
+                               ctx,
+                               problem,
+                               is_deterministic,
+                               ktn_runner,
+                               ck_val_creator,
+                               mode_use_tf32);
+    };
+#else
+    const bool ai_heuristics = false;
+    const auto run_ai        = [] { return false; };
 #endif
 
-    // Fallback to default initialization
-    InitValidKernels(problem);
-    if(!valid_kernels.empty())
-    {
-        if(!env::disabled(MIOPEN_DEBUG_CK_DEFAULT_KERNELS))
-            DefaultKernelFromList(ctx);
-        state.SetResult(index, split_k, k2DWrwSolverConfig.uses_split_k);
-    }
+    InitHeuristicConfigFromCache(*this,
+                                 state,
+                                 ctx,
+                                 problem,
+                                 ConvHipImplicitGemmGroupWrwXdlops{}.SolverDbId(),
+                                 !env::disabled(MIOPEN_DEBUG_CK_DEFAULT_KERNELS),
+                                 k2DWrwSolverConfig.uses_split_k,
+                                 ai_heuristics,
+                                 run_ai);
 
     // Invariant: split_k must always be 1 in deterministic mode
     assert(!is_deterministic || split_k == 1);
@@ -551,6 +556,13 @@ ConvSolution ConvHipImplicitGemmGroupWrwXdlops::GetSolution(
         return ConvSolution{miopenStatusInternalError};
 
     return loader.GetSolutionTf32Aware(CKSolverType::GrpConvWrw, ctx, problem, config.kernel_id);
+}
+
+
+MIOPEN_INTERNALS_EXPORT const miopen::solver::conv::SolverHeuristicConfig&
+GetWrw2DSolverHeuristicConfig()
+{
+    return k2DWrwSolverConfig;
 }
 
 } // namespace conv
