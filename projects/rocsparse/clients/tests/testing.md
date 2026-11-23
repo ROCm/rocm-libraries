@@ -580,8 +580,8 @@ Whether `develop` branch protection requires that status is not confirmed (see
 
 Each point is the upload that the `codecov/rocsparse/develop` Jenkins job made for the latest
 develop commit of that day that has a qualifying upload for both flags. Carried-forward Codecov
-readings are not points. When a build uploaded two reports of a flag, the chart keeps the higher one. An upload that covers fewer than 100 files is
-skipped, because Codecov sometimes processes only part of a report. Builds from 380 (2026-11-18)
+readings are not points. When a build uploaded two reports of a flag, the chart keeps the higher one.
+An upload that covers fewer than 100 files is skipped, because Codecov sometimes processes only part of a report. Builds from 380 (2026-11-18)
 upload the union of the reports from two wavefront sizes (see [Coverage](#coverage)), so the step
 on that date is a change of measurement as well as a change in tests.
 
@@ -590,7 +590,7 @@ merged), 2026-11-12 (#15395: unit tests that were behind macros nothing defined 
 run), and 2026-11-18 (#15569, the union above).
 
 <!-- metrics:start -->
-_Measured on 2026-11-23. Refresh with `sync_testing_md_metrics.py all testing.md`._
+_Measured on 2026-11-23._
 
 **Latest develop coverage reading** (2026-11-23, build 384): `rocSPARSE` flag
 85.88%, `rocSPARSE-unit` flag 82.73%,
@@ -650,22 +650,6 @@ and as adding any new test when it also adds YAML or C/C++ lines under `clients/
   points.
 * The periods differ in length, so compare rates and not counts.
 * The counts depend on the title rule. A fix with a different title is not counted.
-
-### Refreshing this section
-
-The numbers between the markers above are generated. From the
-repository root, with `gh` signed in and `matplotlib` installed:
-
-```bash
-python3 projects/rocsparse/scripts/testing_md_metrics/sync_testing_md_metrics.py all \
-    projects/rocsparse/clients/tests/testing.md
-```
-
-That appends new develop uploads to `coverage_history.csv`, re-reads the fix pull requests from
-GitHub, redraws `testing_coverage_history.svg`, and rewrites the block between the markers. Review
-the diff, then update **Last Updated** at the top. The list of fixes for bugs the unit tests found
-is kept by hand in `UNIT_FOUND` in the script: add a pull request there when a bug's ticket says a
-unit test reaches it.
 
 ---
 
