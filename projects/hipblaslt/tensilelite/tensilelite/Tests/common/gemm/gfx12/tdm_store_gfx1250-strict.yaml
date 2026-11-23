@@ -31,10 +31,9 @@ GlobalParameters:
 BenchmarkProblems:
   ########################################
   # TDMStoreInst off and on over the beta=0 epilogue with AdaptiveGemm 0 and 1, with A
-  # and B loaded by TDM (TDMInst 3) and without it (TDMInst 0): 1 stores the
-  # masked paths narrower than the store vector width with tensor_store_from_lds,
-  # 2 every edge path and 3 every path, also where ldd = M is not a multiple of 8,
-  # so that the columns of D do not start 16-byte aligned. The sizes have M-edge
+  # and B loaded by TDM (TDMInst 3) and without it (TDMInst 0): on, every path stores
+  # with tensor_store_from_lds, also where ldd = M is not a multiple of 8, so that
+  # the columns of D do not start 16-byte aligned. The sizes have M-edge
   # workgroups with M % 8 odd, 6, 4 and 0, N-edge-only workgroups and only NonEdge
   # workgroups.
   # The last size has NonEdge, M-edge, N-edge and corner workgroups and a leading
@@ -1346,8 +1345,8 @@ BenchmarkProblems:
           - Exact: [64, 64, 1, 128]
           - Exact: [128, 128, 1, 256]
   ########################################
-  # int32 D from int32 accumulators, which the TDM block stages as 4-byte elements like fp32 D, at every
-  # TDMStoreInst off and on over the setup of i8ii_gfx1250.yaml: i8 inputs, ScaleAlphaVec and the activations.
+  # int32 D from int32 accumulators, which the TDM block stages as 4-byte elements like fp32 D, with
+  # TDMStoreInst off and on, over the setup of i8ii_gfx1250.yaml: i8 inputs, ScaleAlphaVec and the activations.
   ########################################
   -
     - # ProblemType
@@ -1421,8 +1420,8 @@ BenchmarkProblems:
           - Exact: [384, 125, 2, 128, 400, 400, 128, 128]
   ########################################
   # bf8 D converted from fp32 accumulators and int8 D from int32 accumulators: 1-byte elements, which the
-  # TDM block stages with ds_store_b8 at store vector width 1 and reads back with ds_load_u8, at every
-  # TDMStoreInst off and on over bf8 and int8 inputs. M is odd and ldd = 136, so the columns of D do not start
+  # TDM block stages with ds_store_b8 at store vector width 1 and reads back with ds_load_u8, with
+  # TDMStoreInst off and on, over bf8 and int8 inputs. M is odd and ldd = 136, so the columns of D do not start
   # 16-byte aligned.
   ########################################
   -
@@ -2148,7 +2147,7 @@ BenchmarkProblems:
         - - {Enum: relu}
         - - {Enum: gelu}
   ########################################
-  # Develop's forward E setup (bbs_bias_gelu_aux_cls_gfx1250.yaml, without CompactLoopStore): every TDM block keeps
+  # The forward E setup of bbs_bias_gelu_aux_cls_gfx1250.yaml, without CompactLoopStore: every TDM block keeps
   # the E stores, and an edge one keeps the edge block's masks, vector width and C loads, on M- and N-edge tiles.
   ########################################
   - - OperationType: GEMM
@@ -2207,7 +2206,7 @@ BenchmarkProblems:
         - - {Enum: none}
         - - {Enum: Gelu}
   ########################################
-  # Develop's Gradient setup with E as input (fp16_use_e_gfx1250.yaml, without CompactLoopStore), off and on.
+  # The Gradient setup with E as input of fp16_use_e_gfx1250.yaml, without CompactLoopStore, off and on.
   ########################################
   - - {OperationType: GEMM, DataType: h, DestDataType: h, ComputeDataType: s, Gradient: true,
       UseE: true, Activation: false, HighPrecisionAccumulate: true, TransposeA: false,
@@ -2266,7 +2265,7 @@ BenchmarkProblems:
       - ActivationArgs:
         - - {Enum: Dgelu}
   ########################################
-  # Develop's CompactLoopStore E setup (bbs_bias_gelu_aux_cls_gfx1250.yaml): every TDM block stores in the
+  # The CompactLoopStore E setup of bbs_bias_gelu_aux_cls_gfx1250.yaml: every TDM block stores in the
   # CompactLoopStore loop, on full tiles and on tiles past the M and N edges.
   ########################################
   - - OperationType: GEMM
@@ -2326,7 +2325,7 @@ BenchmarkProblems:
         - - {Enum: none}
         - - {Enum: Gelu}
   ########################################
-  # Develop's zgemm setup (zgemm_gfx1250.yaml): complex double D through the TDM block, whose descriptors
+  # The zgemm setup of zgemm_gfx1250.yaml: complex double D through the TDM block, whose descriptors
   # count 8-byte units, on full tiles, on tiles past the M and N edges and with leading dimensions past M.
   ########################################
   - - {OperationType: GEMM, DataType: z, DestDataType: z, ComputeDataType: z, TransposeA: false,

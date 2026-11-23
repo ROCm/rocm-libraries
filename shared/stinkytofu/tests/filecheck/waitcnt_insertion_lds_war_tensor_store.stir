@@ -6,8 +6,8 @@
 # tensor_store_from_lds READS the LDS region and writes global memory, so it is an LDS consumer
 # with no register destination (StinkyAsmIR.hpp isTensorStore). The SSA use-def chain therefore
 # cannot order a later LDS WRITE against it -- the store has no def for the writer to depend on.
-# That is the same shape as global_store_async_from_lds, which is why scanAsyncAntiDeps exists
-# (ROCm/rocm-libraries#9487, AIHPBLAS-4141); scanTensorAntiDeps is the tensor-counter equivalent.
+# That is the same shape as global_store_async_from_lds, which scanAsyncAntiDeps orders;
+# scanTensorAntiDeps is the tensor-counter equivalent.
 #
 # Here two tensor_store_from_lds on token 0 are followed by a ds_store_b64 that rewrites the same
 # region. Both stores must land before the writer is issued, so the pass must emit

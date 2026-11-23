@@ -755,7 +755,7 @@ class TensorDataMoverStore:
         return mod
 
     def setTensorTile1(self, group1: int | str, tile1: int) -> Module:
-        # tile_dim1 bit256: group1+4 lo16 (immediate), 1 to Max.
+        # tile_dim1 bit256: group1+4 lo16 (immediate), 1 to 0xFFFF.
         assert 0 < tile1 <= 0xFFFF, f"tile_dim1 {tile1} is outside 1..0xFFFF"
         mod = Module()
         mod.addComment("TDM set tensor tile 1")
@@ -765,8 +765,9 @@ class TensorDataMoverStore:
 
     def setTensorStride0(self, group1: int | str, sgprStride0: int | str | RegisterContainer, units: int = 1) -> Module:
         # tensor_dim0_stride bit288: 48 bits, group1+5 and the low half of group1+6, whose high half is tensor_dim1_stride
-        # (unused in the two-group form). sgprStride0 holds a 32-bit stride in elements of `units` data_size units.
-        # group1+5 is odd and 64-bit SGPR operands must be even-aligned, so a doubled stride is added with carry.
+        # (unused in the two-group form). sgprStride0 holds a 32-bit stride in elements; an element is `units`
+        # data_size units. group1+5 is odd and 64-bit SGPR operands must be even-aligned, so a doubled stride is
+        # added with carry.
         mod = Module()
         mod.addComment("TDM set tensor stride 0")
         stride = sgprStride0 if isinstance(sgprStride0, RegisterContainer) else sgpr(sgprStride0)

@@ -3,7 +3,7 @@
 
 // StinkyRemoveWaitCntPass keeps a wait whose comment carries the stinky-keep tag and removes the
 // same wait without it. TensileLite tags the waits that WaitCntInsertion does not re-derive
-// (STINKY_KEEP in Components/TDMStore.py).
+// (STINKY_KEEP in Components/TDMStoreInst.py).
 
 #include <gtest/gtest.h>
 

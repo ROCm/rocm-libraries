@@ -1,6 +1,6 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""TDMStore: store D through LDS with tensor_store_from_lds in place of buffer_store (gfx1250).
+"""TDMStoreInst: store D through LDS with tensor_store_from_lds in place of buffer_store (gfx1250).
 
 The store blocks TDMStoreInst picks store through the TDM block, which stages the converted D
 tile in LDS over the main-loop buffers and stores it with one tensor_store_from_lds per wave,
@@ -10,14 +10,13 @@ tensor_load_to_lds, bounded the same way.
   =============  =================================================================
   TDMStoreInst   Paths stored through the TDM block
   =============  =================================================================
-  0              off: every block keeps its buffer_store
-  1              on: EdgeM, EdgeN and NonEdge, so every tile, the OptNLL store included
+  False          off: every block keeps its buffer_store
+  True           on: EdgeM, EdgeN and NonEdge, so every tile, the OptNLL store included
   =============  =================================================================
 
-TDMStoreInst 1 stores every tile through the TDM block, whatever the alignment of its columns, so
-the epilogue keeps one store path and splits only on beta / non-beta. Where the columns of D do not
-start on a 16-byte boundary the TDM store is slower than buffer_store, so the choice is whether to
-enable TDMStoreInst for a kernel at all, not which paths it covers.
+TDMStoreInst on stores every tile through the TDM block, whatever the alignment of its columns, so
+the epilogue keeps one store path and splits only on beta / non-beta. The choice is whether to enable
+TDMStoreInst for a kernel, not which paths it covers.
 
 A path is a store block of the store-width cascade generateBetaModules builds, one per vector width,
 and turning TDMStoreInst on only changes which store each block emits: it adds, drops and moves no
@@ -269,6 +268,7 @@ def emitTDMStoreSetup(gwb) -> Module:
   module = Module("TDMStoreSetup")
   kw = gwb.parentWriter
   if gwb.kernel["_TDMStoreOverMainLoop"]:
+    # enableTDMMetadata requires TDMInst > 0 (enableTDMA or enableTDMB), so the metadata load is drained too.
     if gwb.kernel["enableTDMA"] or gwb.kernel["enableTDMB"]:
       module.add(SWaitTensorcnt(tensorcnt=0, comment="drain tensor_load_to_lds before reusing its LDS"))
     module.add(kw._syncThreads(gwb.kernel, "all waves are done with the main-loop LDS"))
@@ -328,11 +328,13 @@ def _handoffBarriersLds(kernel):
   handoff before its back-edge, and the next work item is checked for exhaustion only after re-entry, so
   every tile ends with the barrier. A Hybrid kernel runs StaticGrid.closeLoop, which has no
   queue barrier, on its static arm, so it does not count here (_hybridStaticArmOnly). With
-  DebugPersistentKernelLoopForever the handoff drops the queue barrier and the flush keeps its own.
+  DebugPersistentKernelLoopForever the handoff drops the queue barrier, and the flush keeps its own whatever the
+  other terms say.
   """
   if kernel.get("DebugPersistentKernelLoopForever", False):
     return False
-  tdm = (kernel.get("enableTDMA", False) or kernel.get("enableTDMB", False))     and kernel["NumThreads"] > kernel["WavefrontSize"]
+  tdm = (kernel.get("enableTDMA", False) or kernel.get("enableTDMB", False)) \
+    and kernel["NumThreads"] > kernel["WavefrontSize"]
   epilogue = kernel.get("_PersistentVectorEpilogueLds", False) and not kernel["PrefetchAcrossPersistent"]
   cluster = persistentSpatialCluster(kernel) and kernel.get("ClusterBarrier", True)
   queue = kernel.get("WorkAssignment") == "DynamicWorkQueue"
