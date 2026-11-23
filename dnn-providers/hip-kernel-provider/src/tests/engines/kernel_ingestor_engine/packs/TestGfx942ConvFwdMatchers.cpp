@@ -13,6 +13,7 @@
 #include <set>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -43,9 +44,9 @@
  *        TestGfx950ConvFwdMatchers.cpp covers the graph and metadata contract they share.
  *        When this build packed the gfx942 production tree, the shipped catalog also runs
  *        through the real state manager: every graph's candidates have distinct knob
- *        tuples, no pack names the split-C dispatch, and one shipped kernel of each
- *        variant and pipeline passes the pack's signature check (and loads, on a gfx942
- *        device). Host-only otherwise.
+ *        tuples, the split-C packs alone name the split-C dispatch, and one shipped kernel
+ *        of each variant, pipeline and launch count passes the pack's signature check (and
+ *        loads, on a gfx942 device). Host-only otherwise.
  */
 namespace
 {
@@ -58,9 +59,26 @@ namespace catalog = hip_kernel_provider::kernel_ingestor_engine::conv_fwd_test_c
 using hip_kernel_provider::kernel_ingestor_engine::registerNativeIngestorSymbols;
 
 constexpr const PackSymbols& GFX942_CONV_FWD_AOT = GFX942_FWD.pack;
-/// Registered by the shared native code for split-C packs; the gfx942 catalog has none, so
-/// no gfx942 UDD names it.
+/// Registered by the shared native code for split-C packs: the gfx942 direct_split packs
+/// name it.
 constexpr std::string_view SPLIT_C_DISPATCH = "hipkernel.gfx942_conv_fwd_aot.split_c_dispatch";
+
+bool isSplitC(const catalog::Entry& entry)
+{
+    return entry.integer("split_c") > 1;
+}
+
+/// The handler @p entry's pack names: the split-C one (two launches) for a split-C kernel,
+/// the single-launch one otherwise.
+const IKernelDispatchHandler<Handle>& handlerOf(const catalog::Entry& entry)
+{
+    registerNativeIngestorSymbols();
+    if(isSplitC(entry))
+    {
+        return *DispatchRegistry<Handle>::resolve(std::string(SPLIT_C_DISPATCH));
+    }
+    return dispatchHandler(GFX942_CONV_FWD_AOT);
+}
 
 GraphFixture fixtureOf(const ConvShape& shape,
                        data_objects::DataType dtype = data_objects::DataType::HALF,
@@ -100,11 +118,12 @@ const std::vector<KernelDefinition>& catalogKernels(const std::string& dtype)
     return s_kernels.at(dtype);
 }
 
-/// An entry's kind (implicit GEMM or its direct variant, atom, merge degree) without its id.
+/// An entry's kind (implicit GEMM or its direct variant, atom, merge degree, split-C)
+/// without its id.
 std::string kindOf(const catalog::Entry& entry)
 {
     const auto kind = entry.kind();
-    return kind.substr(0, kind.rfind(' '));
+    return kind.substr(0, kind.rfind(' ')) + (isSplitC(entry) ? " split" : "");
 }
 
 /// The first catalog instance of @p dtype that @p pick accepts, as its kernel.
@@ -480,15 +499,17 @@ TEST(TestGfx942ConvFwdKernelMatcher, GroupMergeMetadataDecodesAsTheCatalogDeclar
     absent.metadata.erase("group_merge");
     EXPECT_FALSE(serves(absent));
 
-    // An unmerged scalar identity serves with group_merge 1, and its widths refuse a
-    // merge degree.
-    auto scalar = plain(catalogKernel([](const catalog::Entry& e) {
+    // An unmerged identity serves with group_merge 1, and its widths refuse a merge
+    // degree. The catalog has no scalar-output unmerged instance to serve the depthwise
+    // graph, so a vector one on a dense graph.
+    const auto dense = fixtureOf(denseShape(64, 64, 14, 14));
+    auto unmerged = plain(catalogKernel([](const catalog::Entry& e) {
         return e.integer("kernel_family") == 0 && e.integer("group_merge") == 1
-               && e.integer("vector_size_a") == 1 && e.integer("vector_size_c") == 1;
+               && e.integer("vector_size_a") == 8 && e.integer("vector_size_c") == 8;
     }));
-    ASSERT_TRUE(serves(scalar));
-    scalar.metadata["group_merge"] = int64_t{16};
-    EXPECT_FALSE(serves(scalar));
+    ASSERT_TRUE(matchesKernel(GFX942_CONV_FWD_AOT, dense.context(), unmerged));
+    unmerged.metadata["group_merge"] = int64_t{16};
+    EXPECT_FALSE(matchesKernel(GFX942_CONV_FWD_AOT, dense.context(), unmerged));
 
     // A direct depthwise identity has no group merge.
     auto direct = plain(catalogKernel([](const catalog::Entry& e) {
@@ -513,7 +534,7 @@ TEST(TestGfx942ConvFwdDispatch, WorkspaceAndPrepareRefuseTogether)
         ASSERT_EQ(matchesKernel(GFX942_CONV_FWD_AOT, fixture.context(), kernel, *bound), served);
         if(served)
         {
-            // No shipped gfx942 kernel is split-C, so none needs scratch.
+            // None of these kernels is split-C, so none needs scratch.
             EXPECT_EQ(handler.workspaceBytes(fixture.context(), *bound, kernel), 0U);
             expectReachesCodeLoading(handler, fixture.context(), *bound, kernel);
         }
@@ -529,7 +550,7 @@ TEST(TestGfx942ConvFwdDispatch, WorkspaceAndPrepareRefuseTogether)
     });
     const auto nongrouped = catalogKernel([](const catalog::Entry& e) {
         return e.text("direct_variant") == "nongrouped" && e.integer("stride_h") == 1
-               && e.integer("dilation_h") == 1;
+               && e.integer("dilation_h") == 1 && !isSplitC(e);
     });
     {
         SCOPED_TRACE("merged");
@@ -582,10 +603,9 @@ TEST(TestGfx942ConvFwdDispatch, WorkspaceAndPrepareRefuseTogether)
 TEST(TestGfx942ConvFwdDispatch, WorkspaceAndPrepareRefuseTogetherOverTheCatalog)
 {
     // On every golden problem, one instance of each kind the adapter refuses and one it
-    // serves: what the plan refuses, workspaceBytes() and prepare() refuse together
-    // (workspace 0, BAD_PARAM before any code loads); what it serves needs no workspace
-    // and reaches code loading.
-    const auto& handler = dispatchHandler(GFX942_CONV_FWD_AOT);
+    // serves, through the handler its pack names: what the plan refuses, workspaceBytes()
+    // and prepare() refuse together (workspace 0, BAD_PARAM before any code loads); what
+    // it serves needs workspace only when split-C, and reaches code loading.
     size_t refused = 0;
     size_t served = 0;
     for(const auto& row : vectors::servedMatrix())
@@ -609,10 +629,12 @@ TEST(TestGfx942ConvFwdDispatch, WorkspaceAndPrepareRefuseTogetherOverTheCatalog)
                 continue;
             }
             SCOPED_TRACE(entries[i].kind());
+            const auto& handler = handlerOf(entries[i]);
             if(isServed)
             {
                 ++served;
-                EXPECT_EQ(handler.workspaceBytes(fixture.context(), *bound, kernels[i]), 0U);
+                EXPECT_EQ(handler.workspaceBytes(fixture.context(), *bound, kernels[i]) > 0,
+                          isSplitC(entries[i]));
                 expectReachesCodeLoading(handler, fixture.context(), *bound, kernels[i]);
             }
             else
@@ -658,40 +680,41 @@ TEST(TestGfx942ConvFwdDispatch, ChecksItsOwnBindingsAndReachesCodeLoading)
     expectReachesCodeLoading(handler, fixture.context(), *bound, merged);
 }
 
-TEST(TestGfx942ConvFwdDispatch, TheSplitCHandlerIsRegisteredButServesNoShippedKernel)
+TEST(TestGfx942ConvFwdDispatch, EachHandlerServesOnlyItsOwnPacksKernels)
 {
-    // The shared native code registers a split-C dispatch for every forward engine; the
-    // gfx942 catalog has no split-C kernel, so the handler refuses each one together, and
-    // no gfx942 UDD names it (TestGfx942ConvFwdCatalog checks the shipped bundle).
+    // The shared native code registers a split-C dispatch for every forward engine, which
+    // the gfx942 direct_split packs name. On a served pair, the handler the kernel's pack
+    // does not name refuses it together: the split-C one a single-launch kernel, the
+    // single-launch one a split-C kernel.
     registerNativeIngestorSymbols();
     const auto* splitC = DispatchRegistry<Handle>::resolve(std::string(SPLIT_C_DISPATCH));
     ASSERT_NE(splitC, nullptr);
-    EXPECT_NE(splitC, &dispatchHandler(GFX942_CONV_FWD_AOT));
+    const auto& single = dispatchHandler(GFX942_CONV_FWD_AOT);
+    EXPECT_NE(splitC, &single);
     EXPECT_EQ(splitC->launchNames(), (std::set<std::string>{"conv", "reduce"}));
-    EXPECT_TRUE(dispatchHandler(GFX942_CONV_FWD_AOT).launchNames().empty());
-    for(const auto* dtype : {"fp16", "bf16"})
-    {
-        for(const auto& entry : catalog::gfx942Catalog(dtype))
-        {
-            EXPECT_EQ(entry.integer("split_c"), 1) << entry.kind();
-        }
-    }
-    // A served pair: the main handler takes it, the split-C one refuses it together.
+    EXPECT_TRUE(single.launchNames().empty());
+    std::map<bool, size_t> refused;
     for(const auto& row : vectors::servedMatrix())
     {
         const auto fixture = rowFixture(row);
         const auto bound = matchesGraph(GFX942_CONV_FWD_AOT, fixture.context());
+        const auto& entries = catalog::gfx942Catalog(row.dtype);
         const auto& kernels = catalogKernels(row.dtype);
+        std::set<bool> checked;
         for(size_t i = 0; bound && i < kernels.size(); ++i)
         {
-            if(catalog::bitAt(row.served, i))
+            const bool split = isSplitC(entries[i]);
+            if(catalog::bitAt(row.served, i) && checked.insert(split).second)
             {
-                SCOPED_TRACE(catalog::gfx942Catalog(row.dtype)[i].kind());
-                expectRefusedTogether(*splitC, fixture.context(), *bound, kernels[i]);
-                break;
+                SCOPED_TRACE(entries[i].kind());
+                expectRefusedTogether(
+                    split ? single : *splitC, fixture.context(), *bound, kernels[i]);
+                ++refused[split];
             }
         }
     }
+    EXPECT_GT(refused[false], 0U);
+    EXPECT_GT(refused[true], 0U);
 }
 
 #ifdef HIPKERNELPROVIDER_PRODUCT_DESCRIPTOR_RELDIR
@@ -761,25 +784,26 @@ TEST(TestGfx942ConvFwdCatalog, EveryGraphsCandidatesHaveDistinctKnobTuples)
     EXPECT_GT(graphs, 0U);
 }
 
-TEST(TestGfx942ConvFwdCatalog, EveryPackDispatchesThroughTheSingleLaunchHandler)
+TEST(TestGfx942ConvFwdCatalog, EveryPackDispatchesThroughOneOfTheEnginesHandlers)
 {
     const auto& bundle = shippedBundle();
     if(bundle.manager == nullptr)
     {
         GTEST_SKIP() << NOT_STAGED;
     }
-    ASSERT_FALSE(bundle.dispatchSymbols.empty());
-    for(const auto& symbol : bundle.dispatchSymbols)
-    {
-        EXPECT_EQ(symbol, GFX942_CONV_FWD_AOT.dispatch);
-        EXPECT_NE(symbol, SPLIT_C_DISPATCH);
-    }
+    // The single-launch handler, and the split-C one the direct_split packs name.
+    const std::set<std::string> symbols(bundle.dispatchSymbols.begin(),
+                                        bundle.dispatchSymbols.end());
+    EXPECT_EQ(symbols,
+              (std::set<std::string>{std::string(GFX942_CONV_FWD_AOT.dispatch),
+                                     std::string(SPLIT_C_DISPATCH)}));
 }
 
 TEST(TestGfx942ConvFwdCatalog, ShippedKernelsMatchThePacksSignaturesAndLoad)
 {
-    // One shipped kernel of each variant and pipeline per dtype, on a golden problem the
-    // engine selects it for, through prepare(): requireSignatureMatch compares the ABI this
+    // One shipped kernel of each variant, pipeline and launch count per dtype, on a golden
+    // problem the engine selects it for, through the prepare() of the handler its pack
+    // names: requireSignatureMatch compares the ABI this
     // pack marshals (names, kinds, sizes) with what hkp_pack recorded, before any device
     // is needed; with a wave64 gfx942 device the code object then loads.
     const auto* manager = shippedBundle().manager.get();
@@ -789,15 +813,23 @@ TEST(TestGfx942ConvFwdCatalog, ShippedKernelsMatchThePacksSignaturesAndLoad)
     }
     const auto device = currentDeviceProperties();
     const bool loadable = device.gcnArchName.rfind("gfx942", 0) == 0 && device.warpSize == 64;
-    const auto& handler = dispatchHandler(GFX942_CONV_FWD_AOT);
-    const auto keyOf = [](const KernelDefinition& kernel) {
-        return std::make_pair(std::get<std::string>(kernel.metadata.at("direct_variant")),
-                              std::get<std::string>(kernel.metadata.at("pipeline")));
+    registerNativeIngestorSymbols();
+    const auto& single = dispatchHandler(GFX942_CONV_FWD_AOT);
+    const auto* splitC = DispatchRegistry<Handle>::resolve(std::string(SPLIT_C_DISPATCH));
+    ASSERT_NE(splitC, nullptr);
+    const auto isSplit = [](const KernelDefinition& kernel) {
+        return std::get<int64_t>(kernel.metadata.at("split_c")) > 1;
     };
+    const auto keyOf = [&](const KernelDefinition& kernel) {
+        return std::make_tuple(std::get<std::string>(kernel.metadata.at("direct_variant")),
+                               std::get<std::string>(kernel.metadata.at("pipeline")),
+                               isSplit(kernel));
+    };
+    using Key = decltype(keyOf(std::declval<const KernelDefinition&>()));
     for(const std::string dtype : {"fp16", "bf16"})
     {
-        // Every (variant, pipeline) the adapter selects somewhere.
-        std::set<std::pair<std::string, std::string>> expected;
+        // Every (variant, pipeline, split-C) the adapter selects somewhere.
+        std::set<Key> expected;
         for(const auto& row : vectors::servedMatrix())
         {
             for(size_t i = 0; row.dtype == dtype && i < catalogKernels(dtype).size(); ++i)
@@ -809,7 +841,7 @@ TEST(TestGfx942ConvFwdCatalog, ShippedKernelsMatchThePacksSignaturesAndLoad)
             }
         }
         ASSERT_FALSE(expected.empty()) << dtype;
-        std::set<std::pair<std::string, std::string>> prepared;
+        std::set<Key> prepared;
         for(const auto& row : vectors::servedMatrix())
         {
             if(row.dtype != dtype)
@@ -827,9 +859,10 @@ TEST(TestGfx942ConvFwdCatalog, ShippedKernelsMatchThePacksSignaturesAndLoad)
                 {
                     continue;
                 }
-                SCOPED_TRACE(dtype + " " + keyOf(*kernel).first + " " + keyOf(*kernel).second);
+                SCOPED_TRACE(dtype + " " + std::get<0>(keyOf(*kernel)) + " "
+                             + std::get<1>(keyOf(*kernel)) + (isSplit(*kernel) ? " split" : ""));
                 shipped::expectPreparesOnItsDeviceOnly(
-                    handler,
+                    isSplit(*kernel) ? *splitC : single,
                     fixture.context(),
                     *bound,
                     *kernel,

@@ -34,13 +34,26 @@ _LISTS = shared._GFX942_LISTS
 #: Kernels per pack and dtype of the gfx942 catalog under the default k-loop
 #: sharding, and the group-merged implicit-GEMM kernels among them.
 _SHARDS = {
-    "mem_plain": (141, 12),
-    "mem_unroll": (32, 2),
-    "compv3_plain": (80, 8),
-    "compv3_unroll": (14, 0),
-    "compv4_plain": (83, 7),
-    "compv4_unroll": (22, 1),
-    "direct": (181, 0),
+    "bf16": {
+        "mem_plain": (36, 0),
+        "mem_unroll": (12, 0),
+        "compv3_plain": (30, 1),
+        "compv3_unroll": (7, 0),
+        "compv4_plain": (29, 2),
+        "compv4_unroll": (2, 0),
+        "direct": (74, 0),
+        "direct_split": (30, 0),
+    },
+    "fp16": {
+        "mem_plain": (34, 0),
+        "mem_unroll": (10, 0),
+        "compv3_plain": (28, 1),
+        "compv3_unroll": (7, 0),
+        "compv4_plain": (27, 2),
+        "compv4_unroll": (2, 0),
+        "direct": (101, 9),
+        "direct_split": (30, 0),
+    },
 }
 
 
@@ -90,16 +103,24 @@ def test_the_config_is_the_gfx942_engine_over_its_own_native_code(config, specs)
     assert "native_symbols_from" not in engine
     assert engine["sdk_version"] == "1.0.0"
     assert config["authored_subpath"] == "rocKE/gfx942_conv_fwd_aot"
-    # No split-C kernel, so no workspace and no split-C dispatch.
-    assert config["workspace_policy"] == "none"
+    # The split-C kernels need a workspace, and their packs name the split-C dispatch.
+    assert config["workspace_policy"] == "derived"
     for pack in config["packs"]:
         assert pack["arch"] == [_ARCH]
-        assert "dispatch" not in pack
-        assert pack["kernel_defaults"] == {
+        defaults = {
             "kind": "rocke",
             "source": "builders/common/convolution_forward.py",
             "builder": "build_gfx942_conv_fwd_aot",
         }
+        if pack["name"].endswith("_direct_split"):
+            assert pack["dispatch"] == tool.SPLIT_C_DISPATCH
+            defaults["launches"] = {
+                "conv": {},
+                "reduce": {"builder": "build_gfx942_conv_fwd_aot_split_reduce"},
+            }
+        else:
+            assert "dispatch" not in pack
+        assert pack["kernel_defaults"] == defaults
         for variant in pack["variants"]:
             assert variant["name"].startswith("gfx942_conv_fwd_aot_")
     assert all(spec.ARCH == _ARCH for spec in specs)
@@ -126,26 +147,30 @@ def test_the_catalog_is_sharded_by_pipeline_and_k_loop(config):
         names[(dtype, shard)] = (len(shapes), merged)
     assert names == {
         (dtype, shard): counts
-        for dtype in ("bf16", "fp16")
-        for shard, counts in _SHARDS.items()
+        for dtype, shards in _SHARDS.items()
+        for shard, counts in shards.items()
     }
 
 
 def test_the_catalog_leaves_every_gfx950_only_feature_off(specs):
     """gfx942 has no 16x16x32 or 32x32x16 MFMA atom and no windowed depthwise; its
-    catalog also ships no split-C and no async-DMA kernel."""
+    catalog also ships no async-DMA kernel, and split-C only for non-grouped ones."""
     variants = collections.Counter(spec.direct_variant for spec in specs)
     assert variants == {
-        "none": 744,
-        "nongrouped": 196,
-        "tiled": 128,
-        "grouped": 22,
+        "none": 224,
+        "nongrouped": 164,
+        "tiled": 35,
+        "grouped_halo": 17,
+        "grouped": 4,
         "std": 8,
-        "spatial": 6,
-        "col": 2,
+        "col": 4,
+        "spatial": 3,
     }
     for spec in specs:
-        assert not spec.is_split_c and not spec.async_dma, spec.instance_id
+        assert not spec.async_dma, spec.instance_id
+        assert (
+            not spec.is_split_c or spec.direct_variant == "nongrouped"
+        ), spec.instance_id
         if spec.direct_variant == "nongrouped":
             assert spec.atom in ("16x16x16", "32x32x8"), spec.instance_id
         if not spec.is_direct:
@@ -160,11 +185,11 @@ def test_the_config_expands_to_one_kernel_per_instance(tmp_path, config, specs):
     path.write_text(tool.dump_config(config))
     loaded = load_config(path)
     assert loaded.engine.name == _ENGINE
-    assert sum(len(pack.kernels) for pack in loaded.packs) == len(specs) == 1106
+    assert sum(len(pack.kernels) for pack in loaded.packs) == len(specs) == 459
     assert sorted(loaded.kdp_stem(pack) for pack in loaded.packs) == sorted(
         f"gfx942_conv_fwd_aot_{dtype}_{shard}"
-        for dtype in ("bf16", "fp16")
-        for shard in _SHARDS
+        for dtype, shards in _SHARDS.items()
+        for shard in shards
     )
 
 
@@ -178,7 +203,7 @@ def test_main_writes_the_gfx942_config(tmp_path, capsys, config):
     out = tmp_path / "aot.yaml"
     argv = ["--arch", _ARCH, "--instances", *map(str, _LISTS), "--output", str(out)]
     assert tool.main(argv) == 0
-    assert "1106 instance(s)" in capsys.readouterr().out
+    assert "459 instance(s)" in capsys.readouterr().out
     header, body = out.read_text().split("\n", 1)
     assert header.startswith("# Generated by tools/make_conv_aot_config.py")
     assert yaml.safe_load(body) == config

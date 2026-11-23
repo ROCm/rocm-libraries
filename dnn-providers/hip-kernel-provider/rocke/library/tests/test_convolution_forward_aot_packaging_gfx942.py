@@ -67,17 +67,29 @@ _ARCH = "gfx942"
 _DTYPES = ("fp16", "bf16")
 
 #: Instances per dtype in the gfx942 list; of these the group-merged implicit-GEMM
-#: ones per merge degree, and the direct ones per algorithm.
-_CATALOG_SIZE = 553
-_MERGED_COUNTS = {4: 7, 16: 11, 32: 12}
+#: ones per merge degree, the direct ones per algorithm, and the split-C direct ones
+#: per algorithm.
+_CATALOG_SIZE = {"fp16": 239, "bf16": 220}
+_MERGED_COUNTS = {4: 2, 16: 1}
 _DIRECT_COUNTS = {
-    "direct_nongrouped": 98,
-    "direct_depthwise_tiled": 64,
-    "direct_grouped": 11,
-    "direct_depthwise": 4,
-    "direct_depthwise_spatial": 3,
-    "direct_depthwise_col": 1,
+    "fp16": {
+        "direct_nongrouped": 85,
+        "direct_depthwise_tiled": 17,
+        "direct_grouped_halo": 17,
+        "direct_grouped": 4,
+        "direct_depthwise": 4,
+        "direct_depthwise_col": 2,
+        "direct_depthwise_spatial": 2,
+    },
+    "bf16": {
+        "direct_nongrouped": 79,
+        "direct_depthwise_tiled": 18,
+        "direct_depthwise": 4,
+        "direct_depthwise_col": 2,
+        "direct_depthwise_spatial": 1,
+    },
 }
+_SPLIT_C_COUNTS = {"direct_nongrouped": 30}
 #: Unmerged implicit-GEMM instances per dtype the served-problem test samples, spread
 #: evenly over the catalog; every merged instance is checked.
 _SERVES_SAMPLE = 40
@@ -156,9 +168,10 @@ def test_the_gfx942_target_is_gfx950s_but_the_windowed_depthwise():
 
 def test_every_catalog_instance_is_packageable(catalog):
     for dtype, entries in catalog.items():
-        assert len(entries) == _CATALOG_SIZE, dtype
+        assert len(entries) == _CATALOG_SIZE[dtype], dtype
         merges: dict = {}
         directs: dict = {}
+        split: dict = {}
         for identity, spec in entries:
             assert identity.arch == _ARCH and spec.ARCH == _ARCH
             assert identity.llvm_flavor == TARGETS[_ARCH].llvm_flavor
@@ -166,7 +179,8 @@ def test_every_catalog_instance_is_packageable(catalog):
             assert spec.identity() == identity
             assert spec.instance_id == identity.stable_hash()
             assert supports_gfx942_conv_fwd_aot(spec) == (True, "ok"), identity.label()
-            assert not spec.is_split_c
+            if spec.is_split_c:
+                split[spec.algorithm] = split.get(spec.algorithm, 0) + 1
             if spec.is_direct:
                 directs[spec.algorithm] = directs.get(spec.algorithm, 0) + 1
                 assert spec.direct_variant in TARGETS[_ARCH].direct_variants
@@ -180,7 +194,8 @@ def test_every_catalog_instance_is_packageable(catalog):
             else:
                 assert spec.group_merge == 1
         assert merges == _MERGED_COUNTS, dtype
-        assert directs == _DIRECT_COUNTS, dtype
+        assert directs == _DIRECT_COUNTS[dtype], dtype
+        assert split == _SPLIT_C_COUNTS, dtype
 
 
 def test_instances_are_refused_for_the_other_arch(catalog):
@@ -412,7 +427,7 @@ def test_served_problems_agree_with_kernel_cache_supports_problem(implicit_sampl
     served: dict = {}
     for dtype, identity, spec in implicit_sample:
         current = _current(identity)
-        problems = _random_problems(40 if spec.is_merged else 25, dtype, _SEED)
+        problems = _random_problems(400 if spec.is_merged else 25, dtype, _SEED)
         for problem in problems:
             ours, reason = gfx942_conv_fwd_aot_serves(spec, problem)
             if not ours and ("2**23" in reason or "32-bit" in reason):
@@ -500,7 +515,7 @@ def test_direct_serving_does_not_depend_on_the_arch(catalog):
                     assert _admits(current, request)[0], (identity.label(), problem)
                 compared[spec.algorithm] = compared.get(spec.algorithm, 0) + 1
                 served[spec.algorithm] = served.get(spec.algorithm, 0) + ours
-    assert set(compared) == set(_DIRECT_COUNTS)
+    assert set(compared) == {a for counts in _DIRECT_COUNTS.values() for a in counts}
     # Both verdicts occur for every algorithm, so the agreement is not vacuous.
     for algorithm, count in compared.items():
         assert 0 < served[algorithm] < count, (algorithm, served[algorithm], count)
@@ -511,12 +526,12 @@ def test_direct_serving_does_not_depend_on_the_arch(catalog):
     [
         ({"C": 64, "K": 128}, "depthwise"),
         ({"C": 128, "K": 128, "groups": 64}, "depthwise"),
-        ({"C": 48, "K": 48, "groups": 48}, "does not divide groups"),
+        ({"C": 40, "K": 40, "groups": 40}, "does not divide groups"),
         ({"C": 1, "K": 1, "groups": 1}, "does not divide groups"),
     ],
 )
 def test_a_merged_instance_serves_depthwise_its_degree_divides(merged, change, reason):
-    _, _, spec = next(m for m in merged if m[2].group_merge == 32)
+    _, _, spec = next(m for m in merged if m[2].group_merge == 16)
     problem = Gfx950ConvFwdSpec(
         N=2, Hi=14, Wi=14, C=64, K=64, Y=3, X=3, pH=1, pW=1, groups=64,
         dtype=spec.dtype,
@@ -535,7 +550,7 @@ def test_merged_grid_and_launch_values_are_rockes_for_the_runtime_problem(merged
     problem's ``ConvArgs``, as the benchmark launches."""
     launched = 0
     for dtype, _, spec in merged:
-        for problem in _random_problems(30, dtype, _SEED + 1):
+        for problem in _random_problems(100, dtype, _SEED + 1):
             if not gfx942_conv_fwd_aot_serves(spec, problem)[0]:
                 continue
             p = problem.to_problem()
@@ -635,8 +650,9 @@ def test_runtime_candidates_are_rockes_runtime_selection(catalog):
             narrowed += len([s for s in ours if not s.is_direct]) < len(compatible)
             merged_selected += any(s.is_merged for s in ours)
     # The policy narrows, and merged instances run wherever a merge degree divides a
-    # depthwise group count.
-    assert narrowed > len(_SELECTION_GRID) and merged_selected >= 2 * 5
+    # depthwise group count. How often it narrows tracks the catalog's vector-width
+    # spread (12 of 48 grid problems with the 459-instance list).
+    assert narrowed > 0 and merged_selected >= 2 * 5
 
 
 # ---- The profile ----
@@ -671,5 +687,7 @@ def test_profile_dispatch_resolves_gfx942_requests_including_grouped_pointwise()
 
 
 def test_every_direct_algorithm_of_the_catalog_has_a_packaged_launch():
-    assert set(_DIRECT_COUNTS) <= set(TARGETS[_ARCH].direct_algorithms)
+    assert {a for counts in _DIRECT_COUNTS.values() for a in counts} <= set(
+        TARGETS[_ARCH].direct_algorithms
+    )
     assert set(TARGETS[_ARCH].direct_algorithms) <= set(AOT_DIRECT_ALGORITHMS)

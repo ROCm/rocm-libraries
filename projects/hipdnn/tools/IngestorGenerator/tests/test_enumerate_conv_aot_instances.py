@@ -156,36 +156,53 @@ def test_the_catalog_lists_233_kernels_per_dtype_the_same_in_both(packaged_catal
     )
 
 
-def test_the_gfx942_catalog_lists_553_kernels_per_dtype_the_same_in_both():
-    """372 implicit-GEMM kernels (30 of them group-merged) and 181 direct ones per
-    dtype, no split-C, no windowed depthwise and no grouped-halo kernel, and the two
-    dtypes list the same kernels."""
+def test_the_gfx942_catalog_lists_239_fp16_and_220_bf16_kernels():
+    """Per dtype: 108 (fp16) and 116 (bf16) implicit-GEMM kernels, 3 of them
+    group-merged; 131 and 104 direct ones, 30 of them split-C non-grouped; no windowed
+    depthwise kernel; direct grouped and grouped-halo kernels in fp16 only."""
     by_dtype = _by_dtype(
         _packaged(tool.read_dispatcher_instances(_ROCKE, "gfx942"), "gfx942")
     )
     assert sorted(by_dtype) == sorted(tool.DTYPES)
-    for identities in by_dtype.values():
+    common = {
+        ("implicit_gemm", True): 3,
+        ("direct_depthwise", False): 4,
+        ("direct_depthwise_col", False): 2,
+    }
+    expected = {
+        "fp16": {
+            **common,
+            ("implicit_gemm", False): 105,
+            ("direct_nongrouped", False): 85,
+            ("direct_depthwise_tiled", False): 17,
+            ("direct_grouped_halo", False): 17,
+            ("direct_grouped", False): 4,
+            ("direct_depthwise_spatial", False): 2,
+        },
+        "bf16": {
+            **common,
+            ("implicit_gemm", False): 113,
+            ("direct_nongrouped", False): 79,
+            ("direct_depthwise_tiled", False): 18,
+            ("direct_depthwise_spatial", False): 1,
+        },
+    }
+    for dtype, identities in by_dtype.items():
         assert {i["arch"] for i in identities} == {"gfx942"}
         kinds = collections.Counter(
             (i["algorithm"], i.get("group_merge", 1) > 1) for i in identities
         )
-        assert kinds == {
-            ("implicit_gemm", False): 342,
-            ("implicit_gemm", True): 30,
-            ("direct_nongrouped", False): 98,
-            ("direct_depthwise_tiled", False): 64,
-            ("direct_grouped", False): 11,
-            ("direct_depthwise", False): 4,
-            ("direct_depthwise_spatial", False): 3,
-            ("direct_depthwise_col", False): 1,
-        }
+        assert kinds == expected[dtype], dtype
         merged = collections.Counter(
             i["group_merge"] for i in identities if i.get("group_merge", 1) > 1
         )
-        assert merged == {4: 7, 16: 11, 32: 12}
-    assert sorted(map(_without_dtype, by_dtype["fp16"])) == sorted(
-        map(_without_dtype, by_dtype["bf16"])
-    )
+        assert merged == {4: 2, 16: 1}, dtype
+        split = collections.Counter(
+            i["algorithm"]
+            for i in identities
+            if json.loads(i.get("knobs") or "{}").get("split_c", 1) > 1
+        )
+        assert split == {"direct_nongrouped": 30}, dtype
 
 
 def test_every_catalog_entry_is_a_forward_sweep_identity(arch_catalog, monkeypatch):

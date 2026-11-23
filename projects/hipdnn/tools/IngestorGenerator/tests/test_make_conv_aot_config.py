@@ -78,7 +78,7 @@ _SHIPS_A_RANKER = {"product": True, "seed": False, "gfx942": True}
 _TRAINED_CATALOG_SHA256 = {
     "product": None,
     "seed": None,
-    "gfx942": "3daac9f58965d52354e6db105da347fb43b02c564d782978f8a86c34d2bf9d71",
+    "gfx942": "05f2acbe6e0fd70be8128c8ee30e654b603e6e8283bc22078bbf3e0e501de5a8",
 }
 #: Worker processes that convert a catalog.
 _JOBS = min(32, os.cpu_count() or 1)
@@ -1049,7 +1049,7 @@ _GFX942_GPU_SUITE = _GPU_SUITE.with_name("IntegrationGpuGfx942ConvFwd.cpp")
 #: One gfx942AotGraphs() row: name, problem, the direct count (both dtypes), then the
 #: implicit-GEMM counts in fp16 and in bf16.
 _GFX942_GRAPH_ROW = re.compile(
-    r'^\s*\{"(\w+)", \{([\d, ]+)\}, (\d+), (\d+), (\d+)\},$', re.MULTILINE
+    r'^\s*\{"(\w+)", \{([\d, ]+)\}, (\d+), (\d+), (\d+), (\d+)\},$', re.MULTILINE
 )
 
 
@@ -1076,22 +1076,26 @@ def _gfx942_gpu_suite_graphs():
 
 def test_gfx942_gpu_suite_selected_counts_are_the_python_runtime_candidates(catalogs):
     """IntegrationGpuGfx942ConvFwd.cpp states, per graph, how many instances of each family
-    the gfx942 catalog selects; the GPU suites check the engine against those numbers, so
-    they must be what the Python runtime selection counts over the committed gfx942 lists,
-    in both dtypes. Every graph has a selected instance, selection only narrows what serves,
-    and every direct instance that serves is selected."""
+    the gfx942 catalog selects in each dtype; the GPU suites check the engine against those
+    numbers, so they must be what the Python runtime selection counts over the committed
+    gfx942 lists. Every graph has a selected instance in one dtype at least (a dtype with
+    none does not run it), selection only narrows what serves, and every direct instance
+    that serves is selected."""
     from builders.common.convolution_forward import gfx942_conv_fwd_aot_serves
 
     specs = catalogs["gfx942"]
-    for name, problem, (direct, fp16, bf16) in _gfx942_gpu_suite_graphs():
-        for dtype, implicit in (("fp16", fp16), ("bf16", bf16)):
+    for name, problem, (direct16, direct_bf, fp16, bf16) in _gfx942_gpu_suite_graphs():
+        assert direct16 + direct_bf + fp16 + bf16 > 0, name
+        for dtype, direct, implicit in (
+            ("fp16", direct16, fp16),
+            ("bf16", direct_bf, bf16),
+        ):
             selected = _gfx942_selected(specs, problem, dtype)
             counted = (
                 sum(s.is_direct for s in selected),
                 sum(not s.is_direct for s in selected),
             )
             assert counted == (direct, implicit), (name, dtype, counted)
-            assert sum(counted) > 0, (name, dtype)
             runtime = _runtime_problem(problem, dtype)
             serving = [
                 s

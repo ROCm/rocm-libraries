@@ -103,12 +103,17 @@ _SHAPES = {
     "dense1x1_bf16": dict(Y=1, X=1, pad_h=0, pad_w=0, C=256, K=128, dtype="bf16"),
     "dense_stride2": dict(stride_h=2, stride_w=2, K=128),
     "grouped_cpg16": dict(C=1024, K=1024, G=64, dtype="bf16"),
+    # gfx942 ships its 16-channel direct grouped kernels in fp16 only.
+    "grouped_cpg16_fp16": dict(C=128, K=128, G=8),
     "grouped_cpg4": dict(C=512, K=512, G=128),
     "depthwise3x3": dict(C=144, K=144, G=144),
     "depthwise7x7": dict(C=96, K=96, G=96, Y=7, X=7, pad_h=3, pad_w=3),
     "depthwise11x11": dict(C=256, K=256, G=256, Y=11, X=11, pad_h=5, pad_w=5),
     # The spatial depthwise kernel holds every channel in one wavefront.
     "depthwise11x11_g32": dict(C=32, K=32, G=32, Y=11, X=11, pad_h=5, pad_w=5),
+    "depthwise11x11_g32_bf16": dict(
+        C=32, K=32, G=32, Y=11, X=11, pad_h=5, pad_w=5, dtype="bf16"
+    ),
     "depthwise_s2": dict(C=144, K=144, G=144, stride_h=2, stride_w=2),
     "dilated_h3": dict(Hi=32, Wi=32, C=128, K=128, dilation_h=3),
     "stem_c3": dict(
@@ -853,7 +858,8 @@ def test_fwd_default_pick_follows_the_list_files_on_disk_priority_order():
         # direct_depthwise_spatial instead. Both are covered instead by
         # test_fwd_default_pick_follows_the_list_files_on_disk_priority_order,
         # which asserts on whatever the on-disk order actually admits.
-        and s not in ("depthwise11x11", "depthwise11x11_g32")
+        # depthwise11x11_g32_bf16 is depthwise11x11_g32 in bf16.
+        and s not in ("depthwise11x11", "depthwise11x11_g32", "depthwise11x11_g32_bf16")
     ],
 )
 def test_depthwise_shapes_default_to_the_direct_depthwise_kernel(shape):

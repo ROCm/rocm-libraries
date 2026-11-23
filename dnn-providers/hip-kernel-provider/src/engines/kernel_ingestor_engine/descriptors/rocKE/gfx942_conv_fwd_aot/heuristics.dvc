@@ -1,7 +1,0 @@
-outs:
-- md5: 8ecee70c1aea8e2e64b50e3baf514d4f.dir
-  size: 649198
-  nfiles: 2
-  hash: md5
-  path: heuristics
-  remote: ingestor

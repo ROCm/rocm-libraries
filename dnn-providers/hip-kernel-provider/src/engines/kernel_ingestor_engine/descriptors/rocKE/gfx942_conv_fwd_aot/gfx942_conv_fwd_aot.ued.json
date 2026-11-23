@@ -1,6 +1,6 @@
 {
   "version": "1.0",
-  "id": "14a3ba0e-ee3a-486b-af65-3813694a0ac0",
+  "id": "3511d327-60d8-4227-92ce-321a6d10cb75",
   "name": "hipkernel:Gfx942ConvFwdAot",
   "sdk_version": "1.0.0",
   "graph_match": {
@@ -8,10 +8,7 @@
   },
   "metadata": "f7306da4-4925-4306-86bb-4c2584da5b8a",
   "sort_kernel_catalog": {
-    "default": [
-      "7f247391-75aa-47a5-b4ec-e5888a258197",
-      "97c80e6c-161d-43d7-bf94-fe108f443e67"
-    ]
+    "default": "7f247391-75aa-47a5-b4ec-e5888a258197"
   },
   "knobs": [
     "kernel_family",

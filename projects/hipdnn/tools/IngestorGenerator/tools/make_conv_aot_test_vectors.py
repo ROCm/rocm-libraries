@@ -297,8 +297,8 @@ def _adapter(arch: str, name: str):
 def _candidate_problems(spec):
     """Problems of ``spec``'s own geometry, in a fixed order, for
     :func:`_serving_problems` to try: its filter, stride, padding and dilation when it
-    is direct; channels per group its channel tile and its output-channel tile divide,
-    or the compiled ones; output widths and heights multiples of its tile; a batch of
+    is direct; channels per group its channel tile and its output-channel tile divide
+    (at least split_c channel tiles for a split-C kernel), or the compiled ones; output widths and heights multiples of its tile; a batch of
     one or two."""
     direct = spec.is_direct
     y, x = (spec.filter_h, spec.filter_w) if direct else (3, 3)
@@ -317,7 +317,10 @@ def _candidate_problems(spec):
     else:
         c_tile = getattr(spec, "ck", None) or 16
         k_tile = getattr(spec, "tile_k_out", None) or 16
-        channels = [(c_tile * m, k_tile * m) for m in (1, 2, 4)]
+        # A split-C kernel needs at least split_c chunks of its channel tile.
+        split_c = getattr(spec, "split_c", 0) or 0
+        mults = (1, 2, 4) + ((split_c,) if split_c > 4 else ())
+        channels = [(c_tile * m, k_tile * m) for m in mults]
     w_tile = getattr(spec, "tile_w", None) or 16
     h_tile = getattr(spec, "tile_h", None) or 8
     for groups in group_counts:
