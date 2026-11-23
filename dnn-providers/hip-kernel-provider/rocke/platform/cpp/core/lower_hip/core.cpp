@@ -1060,7 +1060,7 @@ rocke_hip_arch_t rocke_hip_arch_from_gfx(const char* gfx)
      * not emit the monolithic s_waitcnt (gfx1250) has no immediate to encode. */
     {
         rocke_status_t st = ROCKE_OK;
-        const ckc::rocke_isa_backend_t* backend = ckc::rocke_ll_backend_for(gfx, &st);
+        const ckc::rocke_ll_isa_backend_t* backend = ckc::rocke_ll_backend_for(gfx, &st);
         if(backend && !backend->emits_legacy_s_waitcnt)
         {
             a.waitcnt_family = ROCKE_HIP_WAITCNT_NONE;

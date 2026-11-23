@@ -87,14 +87,14 @@ static rocke_llvm_flavor_t ll_resolve_flavor(void)
     .has_async_lds_counter = false, .emits_legacy_s_waitcnt = true,                           \
     .emit_lds_barrier_drain = rocke_ll_emit_lds_barrier_drain_legacy
 
-static const rocke_isa_backend_t LL_BACKEND_GFX950
+static const rocke_ll_isa_backend_t LL_BACKEND_GFX950
     = {.gfx = "gfx950", LL_BACKEND_CDNA_DEFAULTS, .has_fp8_scale_conversion = true};
-static const rocke_isa_backend_t LL_BACKEND_GFX942 = {.gfx = "gfx942", LL_BACKEND_CDNA_DEFAULTS};
-static const rocke_isa_backend_t LL_BACKEND_GFX908 = {.gfx = "gfx908", LL_BACKEND_CDNA_DEFAULTS};
-static const rocke_isa_backend_t LL_BACKEND_GFX90A = {.gfx = "gfx90a", LL_BACKEND_CDNA_DEFAULTS};
-static const rocke_isa_backend_t LL_BACKEND_GFX11_GENERIC
+static const rocke_ll_isa_backend_t LL_BACKEND_GFX942 = {.gfx = "gfx942", LL_BACKEND_CDNA_DEFAULTS};
+static const rocke_ll_isa_backend_t LL_BACKEND_GFX908 = {.gfx = "gfx908", LL_BACKEND_CDNA_DEFAULTS};
+static const rocke_ll_isa_backend_t LL_BACKEND_GFX90A = {.gfx = "gfx90a", LL_BACKEND_CDNA_DEFAULTS};
+static const rocke_ll_isa_backend_t LL_BACKEND_GFX11_GENERIC
     = {.gfx = "gfx11-generic", LL_BACKEND_RDNA_DEFAULTS};
-static const rocke_isa_backend_t LL_BACKEND_GFX12_GENERIC
+static const rocke_ll_isa_backend_t LL_BACKEND_GFX12_GENERIC
     = {.gfx = "gfx12-generic", LL_BACKEND_RDNA_DEFAULTS};
 
 /* gfx1250 (Python Gfx1250Backend, which derives from Gfx12RdnaBackend). It is a
@@ -109,7 +109,7 @@ static const rocke_isa_backend_t LL_BACKEND_GFX12_GENERIC
  * (llvm.amdgcn.s.waitcnt is not selectable, and the pre-barrier drain is
  * s_wait_loadcnt / s_wait_dscnt), a dedicated async-DMA counter, and the
  * element-typed ds_load_tr16_b128 opcodes. */
-static const rocke_isa_backend_t LL_BACKEND_GFX1250
+static const rocke_ll_isa_backend_t LL_BACKEND_GFX1250
     = {.gfx = "gfx1250",
        .datalayout = NULL,
        .triple = NULL,
@@ -127,7 +127,7 @@ static const rocke_isa_backend_t LL_BACKEND_GFX1250
 
 /* One backend per target whose arch_specs.json row holds facts of its own
  * (Python BACKEND_REGISTRY). */
-static const rocke_isa_backend_t* const LL_BACKENDS[] = {
+static const rocke_ll_isa_backend_t* const LL_BACKENDS[] = {
     &LL_BACKEND_GFX908,
     &LL_BACKEND_GFX90A,
     &LL_BACKEND_GFX942,
@@ -137,9 +137,9 @@ static const rocke_isa_backend_t* const LL_BACKENDS[] = {
     &LL_BACKEND_GFX12_GENERIC,
 };
 
-static const rocke_isa_backend_t* ll_registered_backend(const char* gfx)
+static const rocke_ll_isa_backend_t* ll_registered_backend(const char* gfx)
 {
-    for(const rocke_isa_backend_t* backend : LL_BACKENDS)
+    for(const rocke_ll_isa_backend_t* backend : LL_BACKENDS)
     {
         if(strcmp(backend->gfx, gfx) == 0)
         {
@@ -155,27 +155,27 @@ static const rocke_isa_backend_t* ll_registered_backend(const char* gfx)
  * stay its own. These backends are derived from the arch registry once, on first
  * use; a function-local static is initialised exactly once even when lowerers
  * start on several threads. */
-static const rocke_isa_backend_t* ll_member_backend(const char* gfx)
+static const rocke_ll_isa_backend_t* ll_member_backend(const char* gfx)
 {
-    static const std::vector<rocke_isa_backend_t> member_backends = [] {
-        std::vector<rocke_isa_backend_t> backends;
+    static const std::vector<rocke_ll_isa_backend_t> member_backends = [] {
+        std::vector<rocke_ll_isa_backend_t> backends;
         int count = 0;
         const char* const* arches = rocke_known_arches(&count);
         for(int i = 0; i < count; ++i)
         {
             const char* generic = rocke_arch_facts_of(arches[i]);
-            const rocke_isa_backend_t* shared
+            const rocke_ll_isa_backend_t* shared
                 = generic != NULL ? ll_registered_backend(generic) : NULL;
             if(shared != NULL)
             {
-                rocke_isa_backend_t backend = *shared;
+                rocke_ll_isa_backend_t backend = *shared;
                 backend.gfx = arches[i]; /* static storage */
                 backends.push_back(backend);
             }
         }
         return backends;
     }();
-    for(const rocke_isa_backend_t& backend : member_backends)
+    for(const rocke_ll_isa_backend_t& backend : member_backends)
     {
         if(strcmp(backend.gfx, gfx) == 0)
         {
@@ -185,7 +185,7 @@ static const rocke_isa_backend_t* ll_member_backend(const char* gfx)
     return NULL;
 }
 
-const rocke_isa_backend_t* rocke_ll_backend_for(const char* arch, rocke_status_t* st)
+const rocke_ll_isa_backend_t* rocke_ll_backend_for(const char* arch, rocke_status_t* st)
 {
     /* No default. A NULL arch used to resolve to gfx950 silently, so a caller
      * that forgot the target lowered for one arch and compiled for another.
@@ -198,7 +198,7 @@ const rocke_isa_backend_t* rocke_ll_backend_for(const char* arch, rocke_status_t
         }
         return NULL;
     }
-    const rocke_isa_backend_t* base = ll_registered_backend(arch);
+    const rocke_ll_isa_backend_t* base = ll_registered_backend(arch);
     if(base == NULL)
     {
         base = ll_member_backend(arch);
@@ -2278,7 +2278,7 @@ static void ll_lower_into(rocke_lower_t* L,
 
     /* Resolve ISA backend. */
     rocke_status_t bst = ROCKE_OK;
-    const rocke_isa_backend_t* row = rocke_ll_backend_for(arch, &bst);
+    const rocke_ll_isa_backend_t* row = rocke_ll_backend_for(arch, &bst);
     if(row == NULL || bst != ROCKE_OK)
     {
         if(arch == NULL)

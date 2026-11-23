@@ -1141,7 +1141,7 @@ static rocke_status_t _op_tile_buffer_rsrc(rocke_h_lowerer_t* lw, const rocke_op
      * is ISA-specific. Take it from the target's ISA backend, the same source
      * the LLVM lowerer's tile.buffer_rsrc reads, so both routes agree. */
     rocke_status_t backend_status = ROCKE_OK;
-    const rocke_isa_backend_t* backend = rocke_ll_backend_for(lw->arch.gfx, &backend_status);
+    const rocke_ll_isa_backend_t* backend = rocke_ll_backend_for(lw->arch.gfx, &backend_status);
     if(backend == NULL)
     {
         return rocke_h_fail(lw, ROCKE_ERR_KEY, "no ISA backend registered for '%s'", lw->arch.gfx);

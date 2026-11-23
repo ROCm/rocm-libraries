@@ -85,7 +85,7 @@ static void check_isa_backend(const char* gfx, const char* generic)
 static void check_lowering_backend(const char* gfx, const char* generic)
 {
     rocke_status_t status = ROCKE_ERR_VALUE;
-    const ckc::rocke_isa_backend_t* own = ckc::rocke_ll_backend_for(gfx, &status);
+    const ckc::rocke_ll_isa_backend_t* own = ckc::rocke_ll_backend_for(gfx, &status);
     CHECK(own != NULL && status == ROCKE_OK, "rocke_ll_backend_for resolves", gfx);
     if(own == NULL)
         return;
@@ -93,7 +93,7 @@ static void check_lowering_backend(const char* gfx, const char* generic)
     CHECK(ckc::rocke_ll_backend_for(gfx, NULL) == own, "the lowering backend is one row", gfx);
     if(generic == NULL)
         return;
-    const ckc::rocke_isa_backend_t* shared = ckc::rocke_ll_backend_for(generic, NULL);
+    const ckc::rocke_ll_isa_backend_t* shared = ckc::rocke_ll_backend_for(generic, NULL);
     CHECK(shared != NULL && shared != own, "the generic has a row of its own", gfx);
     if(shared == NULL)
         return;
