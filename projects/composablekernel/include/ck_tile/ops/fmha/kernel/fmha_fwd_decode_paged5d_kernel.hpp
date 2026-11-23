@@ -11,6 +11,8 @@
 // page_size = 16, 64 or 128 tokens:
 //   K [num_blocks][nhead_k][hdim / 16][page_size tokens][16 B]
 //   V [num_blocks][nhead_k][page_size / 16][hdim][16 tokens]
+// that is BlockAttentionKVCacheMemoryLayoutEnum::VECTORIZED_LAYOUT for fp8, with a
+// VLLM_BLOCK_TABLE_2D block table (the batch-prefill kernel's names for it).
 // One query token per sequence, hdim 128, fp8 e4m3 K/V with per-tensor descales, bf16 or fp16 Q
 // (quantized per row in the kernel) and output of the same type. The q heads of one kv head (at
 // most 16) are the 16 columns of S^T = K Q^T. Below, a page is 16 tokens; a cache page holds
