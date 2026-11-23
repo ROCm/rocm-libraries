@@ -204,14 +204,8 @@ void PerformanceConfigHipImplicitGemm3DGroupWrwXdlops::HeuristicInit(
         // ranks equally well and the net effect is neutral (measured on gfx950).
         auto wrw_cfg                        = k3DWrwSolverConfig;
         wrw_cfg.supports_split_k_autodeduce = (arch == "gfx1250");
-        return RunAIHeuristics(k3DWrwSolverConfig,
-                               state,
-                               ctx,
-                               problem,
-                               is_deterministic,
-                               nullptr,
-                               ck_val_creator,
-                               mode_use_tf32);
+        return RunAIHeuristics(
+            wrw_cfg, state, ctx, problem, is_deterministic, nullptr, ck_val_creator, mode_use_tf32);
     };
 #else
     const bool ai_heuristics = false;
