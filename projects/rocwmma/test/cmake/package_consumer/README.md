@@ -58,18 +58,10 @@ package_consumer/
 ├── no_openmp/
 │   ├── CMakeLists.txt
 │   └── main.hip
-├── openmp/
-│   ├── CMakeLists.txt
-│   └── test_openmp_consumer.cpp
-└── type_traits/
+└── openmp/
     ├── CMakeLists.txt
-    └── test_type_traits.hip
+    └── test_openmp_consumer.cpp
 ```
-
-The `type_traits` consumer intentionally leaves the compatibility selector unset.
-It checks owned traits, compiles a real FP16 GEMM with the shipped default, and
-registers a GPU execution test (reported as skipped when no device is available).
-Its host check needs no GPU.
 
 ## Registering another consumer
 
