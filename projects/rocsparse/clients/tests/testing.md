@@ -601,15 +601,15 @@ against an 80% target.
 
 | Period | Library fixes | Added a unit test | Added any new test |
 |---|---:|---:|---:|
-| Before the unit-test layer, 2025-07-01 to 2026-08-11 | 40 | 0 of 40 (0%) | 15 of 40 (38%) |
+| Before the unit-test layer, 2025-07-01 to 2026-08-11 | 41 | 0 of 41 (0%) | 15 of 41 (37%) |
 | Unit tests existed, 2026-08-12 to 2026-09-22 | 20 | 4 of 20 (20%) | 11 of 20 (55%) |
-| Since this document, 2026-09-23 to 2026-11-06 | 10 | 7 of 10 (70%) | 9 of 10 (90%) |
+| Since this document, 2026-09-23 to 2026-11-06 | 15 | 9 of 15 (60%) | 12 of 15 (80%) |
 | Since this document, 2026-11-07 to 2026-11-23 | 22 | 20 of 22 (91%) | 21 of 22 (95%) |
-| **Since this document, 2026-09-23 to 2026-11-23** | 32 | 27 of 32 (84%) | 30 of 32 (94%) |
+| **Since this document, 2026-09-23 to 2026-11-23** | 37 | 29 of 37 (78%) | 33 of 37 (89%) |
 | &nbsp;&nbsp;of which fix a bug the unit tests found | 14 | 14 of 14 (100%) | 14 of 14 (100%) |
-| &nbsp;&nbsp;all other fixes | 18 | 13 of 18 (72%) | 16 of 18 (89%) |
+| &nbsp;&nbsp;all other fixes | 23 | 15 of 23 (65%) | 19 of 23 (83%) |
 
-27 unit-tested fixes since this document were opened by 4 different authors; the most active opened 22 of them.
+29 unit-tested fixes since this document were opened by 4 different authors; the most active opened 24 of them.
 
 **Fixes for bugs the unit tests found:** 18 pull requests, 14 merged.
 
@@ -637,18 +637,18 @@ against an 80% target.
 
 ### How to read the fix table
 
-A fix is a merged pull request whose title is a rocSPARSE fix (`fix(rocsparse)`, a title
-beginning `[rocSPARSE] Fix`, or `Fix rocSPARSE`) and whose diff touches `projects/rocsparse/library/`.
+A fix is a merged pull request whose title contains the word `fix`, `fixes` or `fixed`, and whose
+diff touches `projects/rocsparse/library/`. The title does not have to name rocSPARSE.
 It counts as adding a unit test when it adds lines to a C or C++ file under `clients/unittests/`,
 and as adding any new test when it also adds YAML or C/C++ lines under `clients/tests/`,
 `clients/testings/`, or `clients/include/testing_*`.
 
 * Every fix for a bug the unit tests found that is merged so far added a unit test, so the "all other
   fixes" row is the fairer measure of whether fixes now come with tests.
-* The first period since this document is only ten fixes, so one pull request moves its rate by ten
-  points.
+* The first period since this document has 15 fixes, so one pull request moves its rate by about
+  seven points.
 * The periods differ in length, so compare rates and not counts.
-* The counts depend on the title rule. A fix with a different title is not counted.
+* A library change whose title does not contain one of those words is not counted as a fix.
 
 ---
 
