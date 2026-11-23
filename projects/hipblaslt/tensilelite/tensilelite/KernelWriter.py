@@ -6909,16 +6909,16 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         names["ValuMXS%s_X%u_I%u" % (tc, bi, iui)] = plan["piece"][tc]
     def visit(mod):
       for item in mod.items():
-        if isinstance(item, Module):
+        if sched_is_module(item):
           visit(item)
           continue
-        if not isinstance(item, Instruction):
+        if not sched_is_instruction(item):
           continue
         # MX WMMAs keep their scale operands in mxsa/mxsb, outside getParams().
         params = list(item.getParams()) + [getattr(item, attr, None) for attr in ("mxsa", "mxsb")]
         seen = set()
         for param in params:
-          if not isinstance(param, RegisterContainer) or param.regName is None or id(param) in seen:
+          if not sched_is_register_container(param) or param.regName is None or id(param) in seen:
             continue
           seen.add(id(param))
           name = param.regName.name
