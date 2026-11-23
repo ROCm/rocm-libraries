@@ -14,6 +14,11 @@ function(ck_tile_fmha_fwd_get_source_compile_options fwd_blob_name out_var)
                   AND CMAKE_HIP_COMPILER_VERSION VERSION_LESS 24)))
     list(APPEND compile_options -mllvm -amdgpu-expert-scheduling-mode)
   endif()
+  # Same scheduling mode for the paged-KV counterpart (qr_pagedkv_tdm_sched),
+  # which currently only ships the hdim=128 geometry.
+  if(fwd_blob_name MATCHES "^fmha_fwd_pagedkv_d128_(fp16|bf16)_.*_qr_pagedkv_tdm_sched_.*_gfx125\\.cpp$")
+    list(APPEND compile_options -mllvm -amdgpu-expert-scheduling-mode)
+  endif()
   # Break large PHIs so blockscale and non-MX D64 keep the loop-carried K group in dwords.
   if(fwd_blob_name MATCHES "^fmha_fwd_d[0-9]+_[a-z0-9]+_.*_qr_tdm_fp8_sched_.*_blockscale_ntrload_.*_gfx125\\.cpp$"
      OR fwd_blob_name MATCHES "^fmha_fwd_d64_[a-z0-9]+_.*_qr_tdm_fp8_sched_.*_(nqscale|pertensor|perhead)_ntrload_.*_gfx125\\.cpp$")

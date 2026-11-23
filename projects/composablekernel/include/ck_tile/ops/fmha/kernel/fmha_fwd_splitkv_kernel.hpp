@@ -6,6 +6,7 @@
 #include "ck_tile/core.hpp"
 #include "ck_tile/ops/common.hpp"
 #include "ck_tile/ops/fmha/block/block_attention_bias_enum.hpp"
+#include "ck_tile/ops/fmha/block/tdm_page_tracker.hpp"
 #include "ck_tile/ops/fmha/block/variants.hpp"
 #include "ck_tile/ops/fmha/detail/fmha_fwd_kernel_path_markers.hpp"
 
@@ -903,17 +904,29 @@ struct FmhaFwdSplitKVKernel
                 const long_index_t fixed_offset =
                     static_cast<long_index_t>(i_nhead_k) * kargs.nhead_stride_k;
 
-                return make_page_block_navigator<const KDataType, 0>(
-                    kargs.k_ptr,
-                    kargs.batch_stride_k, // kcache page-block stride/size
-                    fixed_offset,
-                    block_indices,
-                    num_blocks,
-                    kargs.page_block_size,
-                    k_dram,
-                    make_k_dram(nullptr,
-                                (kv_l2p_offset + kargs.seqlen_k) -
-                                    (num_blocks - 1) * kargs.page_block_size));
+                const auto k_last_dram = make_k_dram(nullptr,
+                                                     (kv_l2p_offset + kargs.seqlen_k) -
+                                                         (num_blocks - 1) * kargs.page_block_size);
+                // TDM pipelines page through TdmPageTracker: scalar block-table reads.
+                if constexpr(kUsesTdmAffineDramPath)
+                    return make_tdm_page_tracker<const KDataType>(kargs.k_ptr,
+                                                                  kargs.batch_stride_k,
+                                                                  fixed_offset,
+                                                                  block_indices,
+                                                                  num_blocks,
+                                                                  kargs.page_block_size,
+                                                                  k_dram,
+                                                                  k_last_dram);
+                else
+                    return make_page_block_navigator<const KDataType, 0>(
+                        kargs.k_ptr,
+                        kargs.batch_stride_k, // kcache page-block stride/size
+                        fixed_offset,
+                        block_indices,
+                        num_blocks,
+                        kargs.page_block_size,
+                        k_dram,
+                        k_last_dram);
             }
             else
             {
@@ -933,17 +946,29 @@ struct FmhaFwdSplitKVKernel
                 const long_index_t fixed_offset =
                     static_cast<long_index_t>(i_nhead_k) * kargs.nhead_stride_v;
 
-                return make_page_block_navigator<const VDataType, kVPagedDim>(
-                    kargs.v_ptr,
-                    kargs.batch_stride_v, // vcache page-block stride/size
-                    fixed_offset,
-                    block_indices,
-                    num_blocks,
-                    kargs.page_block_size,
-                    v_dram,
-                    make_v_dram(nullptr,
-                                (kv_l2p_offset + kargs.seqlen_k) -
-                                    (num_blocks - 1) * kargs.page_block_size));
+                const auto v_last_dram = make_v_dram(nullptr,
+                                                     (kv_l2p_offset + kargs.seqlen_k) -
+                                                         (num_blocks - 1) * kargs.page_block_size);
+                // TdmPageTracker pages dim 0 only, i.e. untransposed V.
+                if constexpr(kUsesTdmAffineDramPath && kVPagedDim == 0)
+                    return make_tdm_page_tracker<const VDataType>(kargs.v_ptr,
+                                                                  kargs.batch_stride_v,
+                                                                  fixed_offset,
+                                                                  block_indices,
+                                                                  num_blocks,
+                                                                  kargs.page_block_size,
+                                                                  v_dram,
+                                                                  v_last_dram);
+                else
+                    return make_page_block_navigator<const VDataType, kVPagedDim>(
+                        kargs.v_ptr,
+                        kargs.batch_stride_v, // vcache page-block stride/size
+                        fixed_offset,
+                        block_indices,
+                        num_blocks,
+                        kargs.page_block_size,
+                        v_dram,
+                        v_last_dram);
             }
             else
             {

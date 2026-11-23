@@ -455,10 +455,13 @@ struct BlockFmhaFwdSplitKVPipelineNWarpSShuffleQRKSVS
         {
             // STAGE 1, QK gemm
             clear_tile(s_acc); // initialize C
-            const bool is_sink_tile  = ((num_sink_loop - 1) == i_total_loops);
-            const auto k_move_offset = [&]() {
+            // See BlockFmhaFwdSplitKVPipelineQRKSVS: is_sink_tile gates the paged head
+            // check, is_last_sink_tile the jump from the sink to the ordinary range.
+            const bool is_sink_tile      = (i_total_loops < num_sink_loop);
+            const bool is_last_sink_tile = ((num_sink_loop - 1) == i_total_loops);
+            const auto k_move_offset     = [&]() {
                 if constexpr(kHasSink)
-                    return is_sink_tile ? logical_seqlen_k_start - sink_seq_end + kN0 : kN0;
+                    return is_last_sink_tile ? logical_seqlen_k_start - sink_seq_end + kN0 : kN0;
                 else
                     return kN0;
             }();

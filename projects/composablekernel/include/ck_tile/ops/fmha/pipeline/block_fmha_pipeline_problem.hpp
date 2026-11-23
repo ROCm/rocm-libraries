@@ -5,6 +5,7 @@
 
 #include "ck_tile/core.hpp"
 #include "ck_tile/ops/fmha/block/block_attention_kvcache_layout_enum.hpp"
+#include "ck_tile/ops/fmha/block/block_attention_quant_scale_enum.hpp"
 #include "ck_tile/ops/fmha/block/block_rotary_embedding.hpp"
 #include "ck_tile/ops/fmha/pipeline/tile_fmha_traits.hpp"
 
@@ -52,6 +53,63 @@ CK_TILE_HOST_DEVICE static constexpr auto GetDramTileAccessMaxVectorSize()
     constexpr index_t ElemPerThread = (kHigherDimSize * kLowerDimSize) / kThreadBlockSize;
 
     return GetMaxVectorSize<DataType, ElemPerThread>();
+}
+
+// Not every Traits type defines these two flags (only paged-KV-aware traits such
+// as TileFmhaFwdPagedKVTraits do). BlockFmhaPipelineProblem is shared by pipelines
+// that pair with kernels which unconditionally read Problem::kDoFp8StaticQuant /
+// Problem::kIsPagedKV (e.g. FmhaFwdPagedKVKernel), so we forward them from Traits
+// when present, instead of requiring every Traits type in the codebase to define
+// fields most of them have no use for.
+template <typename T, typename = void>
+struct traits_has_do_fp8_static_quant : std::false_type
+{
+};
+template <typename T>
+struct traits_has_do_fp8_static_quant<T, std::void_t<decltype(T::kDoFp8StaticQuant)>>
+    : std::true_type
+{
+};
+
+template <typename T, typename = void>
+struct traits_has_is_paged_kv : std::false_type
+{
+};
+template <typename T>
+struct traits_has_is_paged_kv<T, std::void_t<decltype(T::kIsPagedKV)>> : std::true_type
+{
+};
+
+// The ternary operator requires both branches to name a valid expression even
+// when the condition is a compile-time constant, so defaulting a possibly-absent
+// Traits member needs an if-constexpr function rather than `cond ? T::x : false`.
+//
+// When Traits has no explicit kDoFp8StaticQuant, do not default to false: the
+// generic BlockFmhaPipelineProblem already expresses quantization through
+// QScaleEnum (read unconditionally from Traits a few lines below in the
+// Problem body), and kernels built directly on this Problem type derive the
+// flag the same way (see fmha_fwd_vsa_kernel.hpp / fmha_fwd_jenga_kernel.hpp:
+// kDoFp8StaticQuant = (QScaleEnum != BlockAttentionQuantScaleEnum::NO_SCALE)).
+// A plain Traits type with QScaleEnum != NO_SCALE (the fwd codegen does emit
+// such configs) genuinely does static quant, so false here would be silently
+// wrong -- it would make FmhaFwdPagedKVKernel/FmhaFwdSplitKVKernel pick
+// EmptyKargs instead of Fp8StaticQuantKargs with no diagnostic.
+template <typename T>
+CK_TILE_HOST_DEVICE static constexpr bool GetDoFp8StaticQuantOrDefault()
+{
+    if constexpr(traits_has_do_fp8_static_quant<T>::value)
+        return T::kDoFp8StaticQuant;
+    else
+        return T::QScaleEnum != BlockAttentionQuantScaleEnum::NO_SCALE;
+}
+
+template <typename T>
+CK_TILE_HOST_DEVICE static constexpr bool GetIsPagedKVOrDefault()
+{
+    if constexpr(traits_has_is_paged_kv<T>::value)
+        return T::kIsPagedKV;
+    else
+        return false;
 }
 
 } // namespace detail
@@ -125,6 +183,14 @@ struct BlockFmhaPipelineProblem
     static constexpr index_t kBlockPerCu    = Traits::kBlockPerCu;
     static constexpr bool kHasSink          = Traits::kHasSink;
 
+    // See the comments on detail::GetDoFp8StaticQuantOrDefault /
+    // detail::GetIsPagedKVOrDefault above: kDoFp8StaticQuant falls back to
+    // QScaleEnum != NO_SCALE (not unconditionally false) for Traits types
+    // (e.g. plain TileFmhaTraits) that do not define it explicitly;
+    // kIsPagedKV has no equivalent second source of truth, so it defaults to
+    // plain false.
+    static constexpr bool kDoFp8StaticQuant = detail::GetDoFp8StaticQuantOrDefault<Traits>();
+    static constexpr bool kIsPagedKV        = detail::GetIsPagedKVOrDefault<Traits>();
     // Only TileFmhaMergeHeadsTraits sets it; other traits leave it false.
     static constexpr bool kMergeNumHeadGroupsSeqLenQ = kTraitsMergeNumHeadGroupsSeqLenQ<Traits>;
 };
@@ -246,6 +312,11 @@ struct BlockFmhaFwdPagedKVPipelineProblem
     static constexpr bool kIsPagedKV        = Traits::kIsPagedKV;
     static constexpr index_t kBlockPerCu    = Traits::kBlockPerCu;
     static constexpr bool kHasSink          = Traits::kHasSink;
+
+    // Read by the shared qr_tdm policy. The paged-KV qr_tdm_sched pipeline only
+    // runs kQKHeaddim == 128, where this flag does not change the LDS padding
+    // gate, so it is fixed to false.
+    static constexpr bool kUseDoubleKVLdsBuffer = false;
 };
 
 template <typename QDataType_,

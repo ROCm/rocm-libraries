@@ -181,6 +181,33 @@ if(SUPPORTED_GPU_TARGETS MATCHES "gfx125")
         endif()
     endfunction()
 
+    # Pure host test: page-table address arithmetic, no GPU needed.
+    add_gtest_executable(test_ck_tile_fmha_tdm_page_tracker test_tdm_page_tracker.cpp)
+    if(TARGET test_ck_tile_fmha_tdm_page_tracker)
+        target_include_directories(test_ck_tile_fmha_tdm_page_tracker
+            PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+        set_tests_properties(test_ck_tile_fmha_tdm_page_tracker PROPERTIES
+            LABELS "${TEST_NAME};CK_TILE_FMHA_TESTS")
+        list(APPEND FMHA_QR_TDM_SCHED_TEST_TARGETS test_ck_tile_fmha_tdm_page_tracker)
+        # script/dependency-parser/smart_build_ci.sh force-builds the ninja
+        # target `${TEST_NAME}` and runs `ctest -R ${TEST_NAME}` with an
+        # unanchored regex that also selects this test; without the edge
+        # below the binary is never built and ctest reports Not Run.
+        add_dependencies(${TEST_NAME} test_ck_tile_fmha_tdm_page_tracker)
+    endif()
+
+    # Pure host test: fmha_fwd_pagedkv_tdm_sched_applicable is a plain bool function, no GPU
+    # needed. ${PROJECT_SOURCE_DIR} (for the "example/ck_tile/01_fmha/fmha_fwd.hpp" include)
+    # is already on the include path globally, see test/CMakeLists.txt.
+    add_gtest_executable(test_ck_tile_fmha_qr_tdm_sched_paged_gate
+        test_qr_tdm_sched_paged_gate.cpp)
+    if(TARGET test_ck_tile_fmha_qr_tdm_sched_paged_gate)
+        set_tests_properties(test_ck_tile_fmha_qr_tdm_sched_paged_gate PROPERTIES
+            LABELS "${TEST_NAME};CK_TILE_FMHA_TESTS")
+        list(APPEND FMHA_QR_TDM_SCHED_TEST_TARGETS test_ck_tile_fmha_qr_tdm_sched_paged_gate)
+        add_dependencies(${TEST_NAME} test_ck_tile_fmha_qr_tdm_sched_paged_gate)
+    endif()
+
     add_qr_tdm_sched_gtest(test_ck_tile_fmha_qr_tdm_sched_config
         test_qr_tdm_sched_config.cpp)
     add_qr_tdm_sched_gtest(test_ck_tile_fmha_qr_tdm_sched_schedule
@@ -214,6 +241,10 @@ if(SUPPORTED_GPU_TARGETS MATCHES "gfx125")
             target_compile_definitions(${target} PRIVATE CK_TILE_FMHA_TDM_V128_TEST_FP16=1)
         endif()
     endforeach()
+
+    add_qr_tdm_sched_gtest(test_ck_tile_fmha_qr_tdm_sched_paged
+        test_qr_tdm_sched_paged.cpp)
+    target_compile_options(test_ck_tile_fmha_qr_tdm_sched_paged PRIVATE -Wno-float-equal)
 
     add_qr_tdm_sched_gtest(test_ck_tile_fmha_qr_tdm_sched_softmax
         test_qr_tdm_sched_softmax.cpp)
