@@ -54,10 +54,12 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <cstring>
 #include <iostream>
 #include <iterator>
 #include <memory>
 #include <numeric>
+#include <random>
 #include <stdint.h>
 #include <type_traits>
 #include <utility>
@@ -1256,6 +1258,139 @@ void sort_keys_over_4g()
         gHelper.cleanupGraphHelper();
         HIP_CHECK(hipStreamDestroy(stream));
     }
+}
+
+// Floating point keys that mix signaling and quiet NaNs must be ordered by their bits (with -0.0
+// equal to +0.0) on every path. The merge sort path (1024 < size <= merge_sort_limit) merges
+// tiles sorted by a radix block sort and used to compare keys that went through floating point
+// arithmetic, which quiets signaling NaNs, so the output was corrupted.
+// See https://github.com/ROCm/rocm-libraries/issues/16364.
+template<class Key, bool Descending>
+void sort_pairs_mixed_nans_impl()
+{
+    using key_type   = Key;
+    using value_type = unsigned int;
+    using bits_type  = typename rocprim::get_unsigned_bits_type<key_type>::unsigned_type;
+
+    constexpr auto      bit_mask  = rocprim::traits::get<key_type>().float_bit_mask();
+    constexpr bits_type exponent  = static_cast<bits_type>(bit_mask.exponent);
+    constexpr bits_type mantissa  = static_cast<bits_type>(bit_mask.mantissa);
+    constexpr bits_type quiet_bit = static_cast<bits_type>(mantissa ^ (mantissa >> 1));
+
+    constexpr unsigned int start_bit = 0;
+    constexpr unsigned int end_bit   = sizeof(key_type) * 8;
+
+    hipStream_t stream = 0;
+
+    SCOPED_TRACE(testing::Message() << "with descending = " << Descending);
+
+    for(size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
+    {
+        unsigned int seed_value
+            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+        SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
+
+        // Sizes inside the merge sort range (which 2-byte keys only use below 100000 items)
+        // and the largest size it handles by default.
+        for(size_t size :
+            {size_t{1025}, size_t{4096}, size_t{34567}, size_t{99999}, size_t{1} << 20})
+        {
+            SCOPED_TRACE(testing::Message() << "with size = " << size);
+
+            engine_type                                       rng_engine(seed_value);
+            std::uniform_int_distribution<unsigned long long> distribution;
+
+            // Random bit patterns; every fourth key is a NaN with a random sign and payload,
+            // signaling or quiet depending on the (random) quiet bit.
+            std::vector<key_type> keys_input(size);
+            for(size_t i = 0; i < size; i++)
+            {
+                bits_type bits = static_cast<bits_type>(distribution(rng_engine));
+                if(i % 4 == 0)
+                {
+                    bits |= exponent;
+                    if((bits & mantissa & ~quiet_bit) == 0)
+                    {
+                        bits |= 1;
+                    }
+                }
+                std::memcpy(&keys_input[i], &bits, sizeof(bits));
+            }
+
+            std::vector<value_type> values_input(size);
+            test_utils::iota(values_input.begin(), values_input.end(), 0);
+
+            using key_value = std::pair<key_type, value_type>;
+            std::vector<key_value> expected(size);
+            for(size_t i = 0; i < size; i++)
+            {
+                expected[i] = key_value(keys_input[i], values_input[i]);
+            }
+            std::stable_sort(
+                expected.begin(),
+                expected.end(),
+                test_utils::
+                    key_value_comparator<key_type, value_type, Descending, start_bit, end_bit>());
+            std::vector<key_type>   keys_expected(size);
+            std::vector<value_type> values_expected(size);
+            for(size_t i = 0; i < size; i++)
+            {
+                keys_expected[i]   = expected[i].first;
+                values_expected[i] = expected[i].second;
+            }
+
+            common::device_ptr<key_type>   d_keys_input(keys_input);
+            common::device_ptr<key_type>   d_keys_output(size);
+            common::device_ptr<value_type> d_values_input(values_input);
+            common::device_ptr<value_type> d_values_output(size);
+
+            size_t temporary_storage_bytes;
+            HIP_CHECK(
+                (invoke_sort_pairs<rocprim::default_config, Descending>(nullptr,
+                                                                        temporary_storage_bytes,
+                                                                        d_keys_input.get(),
+                                                                        d_keys_output.get(),
+                                                                        d_values_input.get(),
+                                                                        d_values_output.get(),
+                                                                        size,
+                                                                        start_bit,
+                                                                        end_bit,
+                                                                        stream,
+                                                                        false)));
+            ASSERT_GT(temporary_storage_bytes, 0);
+            common::device_ptr<void> d_temporary_storage(temporary_storage_bytes);
+
+            HIP_CHECK(
+                (invoke_sort_pairs<rocprim::default_config, Descending>(d_temporary_storage.get(),
+                                                                        temporary_storage_bytes,
+                                                                        d_keys_input.get(),
+                                                                        d_keys_output.get(),
+                                                                        d_values_input.get(),
+                                                                        d_values_output.get(),
+                                                                        size,
+                                                                        start_bit,
+                                                                        end_bit,
+                                                                        stream,
+                                                                        false)));
+
+            const auto keys_output   = d_keys_output.load();
+            const auto values_output = d_values_output.load();
+
+            ASSERT_NO_FATAL_FAILURE(test_utils::assert_bit_eq(keys_output, keys_expected));
+            ASSERT_NO_FATAL_FAILURE(test_utils::assert_bit_eq(values_output, values_expected));
+        }
+    }
+}
+
+template<class Key>
+void sort_pairs_mixed_nans()
+{
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
+    ASSERT_NO_FATAL_FAILURE((sort_pairs_mixed_nans_impl<Key, false>()));
+    ASSERT_NO_FATAL_FAILURE((sort_pairs_mixed_nans_impl<Key, true>()));
 }
 
 inline void sort_keys_large_sizes()

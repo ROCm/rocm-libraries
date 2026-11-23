@@ -52,6 +52,10 @@
     TEST(SUITE, SortKeysOver4G) { sort_keys_over_4g(); }
     TEST(SUITE, SortKeysOver4GWithGraphs) { sort_keys_over_4g<true>(); }
     TEST(SUITE, SortKeysLargeSizes) { sort_keys_large_sizes(); }
+    TEST(SUITE, SortPairsMixedNaNsFloat) { sort_pairs_mixed_nans<float>(); }
+    TEST(SUITE, SortPairsMixedNaNsDouble) { sort_pairs_mixed_nans<double>(); }
+    TEST(SUITE, SortPairsMixedNaNsHalf) { sort_pairs_mixed_nans<rocprim::half>(); }
+    TEST(SUITE, SortPairsMixedNaNsBfloat16) { sort_pairs_mixed_nans<rocprim::bfloat16>(); }
 #endif
 
 using __custom_float2 = common::custom_type<float, float, true>;
