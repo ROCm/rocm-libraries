@@ -384,10 +384,10 @@ CK_TILE_DEVICE void amd_tdm_load([[maybe_unused]] const TDM_GROUP0& group0,
 {
 #if CK_TILE_ENABLE_TDM_FEATURE
     __builtin_amdgcn_tensor_load_to_lds(bit_cast<uint32x4_t>(group0.bitfield),
-                                        group1.bitfield,
-                                        group2.bitfield,
-                                        int32x4_t{0, 0, 0, 0},
-                                        int32x8_t{},
+                                        bit_cast<uint32x8_t>(group1.bitfield),
+                                        bit_cast<uint32x4_t>(group2.bitfield),
+                                        uint32x4_t{0, 0, 0, 0},
+                                        uint32x8_t{},
                                         static_cast<index_t>(coherence));
 #endif
 }
