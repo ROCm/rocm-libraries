@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -39,6 +39,9 @@
 #include "blas_ex/rocblas_gemm_ex.hpp"
 
 #ifdef BUILD_WITH_TENSILE
+#ifndef ROCBLAS_TENSILE_ARCH_SKIPLIST_C_LITERALS
+#define ROCBLAS_TENSILE_ARCH_SKIPLIST_C_LITERALS
+#endif
 //#include <Tensile/AMDGPU.hpp>
 #include <Tensile/Contractions.hpp>
 #include <Tensile/EmbeddedLibrary.hpp>
@@ -59,8 +62,8 @@
 #include <memory>
 #include <mutex>
 #include <optional>
-#include <regex>
 #include <string>
+#include <string_view>
 #include <type_traits>
 #include <vector>
 
@@ -666,6 +669,66 @@ namespace
         return std::nullopt;
     }
 
+    /**************************************************************************
+    * We normally print error messages only once, to avoid excessive logging *
+    **************************************************************************/
+    void print_if_verbose(const rocblas_internal_ostream& msg)
+    {
+        if(rocblas_suppress_tensile_error_messages())
+            return;
+        static constexpr char varname[] = "ROCBLAS_VERBOSE_TENSILE_ERROR";
+        static const char*    verbose   = getenv(varname);
+        if(verbose)
+        {
+            rocblas_cerr << std::endl << msg << std::endl;
+        }
+    }
+
+    // Tensile initialization failures are reported only for architectures in
+    // Tensile::AMDGPU::Processor. Other architectures (for example a GPU reached
+    // through an amdgcnspirv build) fall back quietly unless verbose is enabled.
+    void print_tensile_init_warning(const rocblas_internal_ostream& msg, const std::string& arch)
+    {
+        const bool tensile_arch
+            = Tensile::AMDGPU(arch, 0, 0, arch).processor != Tensile::AMDGPU::Processor{};
+        if(!tensile_arch)
+        {
+            print_if_verbose(msg);
+            return;
+        }
+        if(rocblas_suppress_tensile_error_messages())
+            return;
+        rocblas_cerr << std::endl << msg << std::endl;
+    }
+
+    // Generated from ROCBLAS_TENSILE_ARCH_SKIPLIST. An entry matches when its part
+    // before the first ':' equals the arch's part before the first ':', so gfx90a
+    // and gfx90a:xnack+ both match gfx90a, gfx90a:xnack- and gfx90a:xnack+.
+    bool rocblas_internal_tensile_arch_skipped(const std::string& arch)
+    {
+        static constexpr const char* const patterns[]
+            = {ROCBLAS_TENSILE_ARCH_SKIPLIST_C_LITERALS nullptr};
+
+        try
+        {
+            const std::string_view arch_base = std::string_view(arch).substr(0, arch.find(':'));
+            if(arch_base.empty())
+                return false;
+            for(const char* const* p = patterns; *p != nullptr; ++p)
+            {
+                const std::string_view pat(*p);
+                if(pat.substr(0, pat.find(':')) == arch_base)
+                {
+                    return true;
+                }
+            }
+        }
+        catch(...)
+        {
+        }
+        return false;
+    }
+
     /**************************************************
      * The TensileHost struct interfaces with Tensile *
      **************************************************/
@@ -759,7 +822,9 @@ namespace
                 rocblas_layer_mode layer_mode
                     = static_cast<rocblas_layer_mode>(strtol(str_layer_mode, 0, 0));
 
-                if(layer_mode & (rocblas_layer_mode_log_trace | rocblas_layer_mode_log_internal))
+                if(layer_mode
+                   & (rocblas_layer_mode_log_trace | rocblas_layer_mode_log_internal
+                      | rocblas_layer_mode_log_kernel_select))
                 {
                     char buf[256];
                     rocblas_get_version_string(buf, 256);
@@ -923,27 +988,48 @@ namespace
 #endif
                     if(!TestPath(tensileLibraryPath))
                     {
-#if ROCBLAS_TENSILE_SEPARATE_ARCH
-                        rocblas_cerr << "\nrocBLAS error: Cannot read " << tensileLibraryPath
-                                     << ": " << strerror(errno) << " for GPU arch : " << processor
-                                     << std::endl;
-#if ROCBLAS_TENSILE_LAZY_LOAD
-                        std::regex fileMatcher(path + "/TensileLibrary_lazy.*");
-#else
-                        std::regex fileMatcher(path + "/TensileLibrary_gfx\\d+.dat");
-#endif
-                        rocblas_cerr << " List of available TensileLibrary Files : " << std::endl;
-                        for(auto& file_name : fs::directory_iterator(path))
+                        // A missing library is fatal unless Tensile skipped this architecture.
+                        if(rocblas_internal_tensile_arch_skipped(processor)
+                           || rocblas_internal_tensile_arch_skipped(strict_catalog))
                         {
-                            if(std::regex_match(file_name.path().string(), fileMatcher))
-                            {
-                                rocblas_cerr << file_name << std::endl;
-                            }
+                            rocblas_internal_ostream msg;
+                            print_if_verbose(msg << "Tensile skipped for GPU architecture '"
+                                                 << processor
+                                                 << "' (ROCBLAS_TENSILE_ARCH_SKIPLIST); GEMM "
+                                                    "will use hipBLASLt or source kernels.");
+
+                            std::lock_guard<std::mutex> lock(m_libraryMapMutex);
+                            return m_libraryMap[processor];
                         }
+
+                        rocblas_internal_ostream msg;
+                        msg << "\nrocBLAS error: Cannot read " << tensileLibraryPath << ": "
+                            << strerror(errno);
+#if ROCBLAS_TENSILE_SEPARATE_ARCH
+                        msg << " for GPU arch : " << processor;
+                        msg << "\n List of available TensileLibrary Files :";
+#if ROCBLAS_TENSILE_LAZY_LOAD
+                        constexpr bool lazy_load = true;
 #else
-                        rocblas_cerr << "\nrocBLAS error: Cannot read " << tensileLibraryPath
-                                     << ": " << strerror(errno) << std::endl;
+                        constexpr bool lazy_load = false;
 #endif
+                        // Best-effort directory listing
+                        std::error_code list_ec;
+                        for(auto& file_name : fs::directory_iterator(path, list_ec))
+                        {
+                            // Match by filename prefix.
+                            if(rocblas_tensile_is_library_filename(
+                                   file_name.path().filename().string(), lazy_load))
+                                msg << "\n  " << file_name.path().string();
+                        }
+#endif
+                        // msg << "\nTensile unavailable for GPU architecture '" << processor
+                        //     << "'; GEMM will use hipBLASLt or source kernels.";
+                        // print_tensile_init_warning(msg, processor);
+                        //
+                        // std::lock_guard<std::mutex> lock(m_libraryMapMutex);
+                        // return m_libraryMap[processor];
+                        rocblas_cerr << msg.str() << std::endl;
                         rocblas_abort();
                     }
                 }
@@ -1104,8 +1190,11 @@ namespace
                         auto lib = ftr_lib_ptr->get();
                         if(!lib)
                         {
-                            rocblas_cerr << "\nrocBLAS error: Could not load " << tensileLibraryPath
-                                         << " for architecture: " << processor << std::endl;
+                            rocblas_internal_ostream msg;
+                            print_tensile_init_warning(msg << "rocBLAS warning: Could not load "
+                                                           << tensileLibraryPath
+                                                           << " for architecture: " << processor,
+                                                       processor);
                         }
                         else
                         {
@@ -1121,10 +1210,13 @@ namespace
 
                 if(m_libraryMap.find(processor) == m_libraryMap.end())
                 {
-                    rocblas_cerr << "\nrocBLAS error: Could not initialize Tensile library for "
-                                    "architecture: "
-                                 << processor << std::endl;
-                    rocblas_abort();
+                    rocblas_internal_ostream msg;
+                    print_tensile_init_warning(
+                        msg << "rocBLAS warning: Could not initialize Tensile library for "
+                               "architecture: "
+                            << processor << "; GEMM will use hipBLASLt or source kernels.",
+                        processor);
+                    return m_libraryMap[processor];
                 }
             }
 
@@ -1185,13 +1277,42 @@ namespace
             adapter = a.adapter.load(std::memory_order_relaxed);
             if(!adapter)
             {
-                // Allocate a new adapter using the current HIP device
-                adapter = new Tensile::hip::SolutionAdapter;
+                // Hold the new adapter in a unique_ptr so that if initialize()
+                // throws (e.g. a HIP error or code-object load failure) the
+                // adapter is freed during unwinding rather than leaked.
+                // Ownership transfers to a.adapter only after initialize()
+                // succeeds.
+                auto new_adapter = std::make_unique<Tensile::hip::SolutionAdapter>();
 
-                // Initialize the adapter and get the library (all of the same gfx use the same library)
-                a.library = host.initialize(*adapter, device);
+                // Initialize the adapter and get the library (all of the same gfx use the same library).
+                // A failure leaves a null library so GEMM falls back to hipBLASLt or source kernels.
+                try
+                {
+                    a.library = host.initialize(*new_adapter, device);
+                }
+                catch(const std::exception& e)
+                {
+                    rocblas_internal_ostream msg;
+                    print_tensile_init_warning(
+                        msg << "rocBLAS warning: Could not initialize Tensile; GEMM will use "
+                               "hipBLASLt or source kernels:\n"
+                            << e.what(),
+                        rocblas_internal_get_arch_name(device));
+                    a.library = nullptr;
+                }
+                catch(const rocblas_status& status)
+                {
+                    rocblas_internal_ostream msg;
+                    print_tensile_init_warning(
+                        msg << "rocBLAS warning: Could not initialize Tensile; GEMM will use "
+                               "hipBLASLt or source kernels:\n"
+                            << rocblas_status_to_string(status),
+                        rocblas_internal_get_arch_name(device));
+                    a.library = nullptr;
+                }
 
                 // Atomically change the adapter stored for this device ID
+                adapter = new_adapter.release();
                 a.adapter.store(adapter, std::memory_order_release);
             }
         }
@@ -1203,7 +1324,13 @@ namespace
         if(library)
             *library = a.library;
         if(deviceProp)
-            *deviceProp = host.get_device_property(archName);
+        {
+            // if skipped architecture then library is nullptr
+            if(a.library)
+                *deviceProp = host.get_device_property(archName);
+            else
+                *deviceProp = nullptr;
+        }
 
         return *adapter;
     }
@@ -1225,21 +1352,6 @@ namespace
             << "\nrocBLAS error: Could not initialize Tensile host:\nUnknown exception thrown"
             << std::endl;
         rocblas_abort();
-    }
-
-    /**************************************************************************
-    * We normally print error messages only once, to avoid excessive logging *
-    **************************************************************************/
-    void print_if_verbose(const rocblas_internal_ostream& msg)
-    {
-        if(rocblas_suppress_tensile_error_messages())
-            return;
-        static constexpr char varname[] = "ROCBLAS_VERBOSE_TENSILE_ERROR";
-        static const char*    verbose   = getenv(varname);
-        if(verbose)
-        {
-            rocblas_cerr << std::endl << msg << std::endl;
-        }
     }
 
 } // namespace
@@ -1292,25 +1404,39 @@ bool useHipBLASLt(const RocblasContractionProblem<Ti, To, Tc>& prob)
     {
         int arch = rocblas_internal_get_arch(prob.handle);
 
-        // gfx950: Tensile remains the default only for SGEMM (real f32).
-        // TODO remove after SGEMM is supported
-        if constexpr(std::is_same<Ti, float>::value)
+        if(arch == 950)
         {
-            if(arch == 950)
-                return false;
+            // Enable hipBLASLt for all types on gfx950
+            return prob.handle->tryHipBLASLt();
         }
 
-        // gfx942: hipBLASLt is used for fp64 on all gfx942 devices, and for fp16/bf16
-        // only on MI300X (304 CUs); MI300A (228 CUs) stays on Tensile for fp16/bf16.
-        // TODO remove after all types are supported
+        // gfx942: the set of types defaulting to hipBLASLt depends on the device.
+        //   MI300X (304 CUs) and MI300A (228 CUs):  fp16/bf16/fp64/fp32/int8
+        //   228-CU MI300A only:                     complex-fp64, complex-fp32
+        //   every other gfx942 configuration:       nothing, Tensile remains the default
+        // The CU count is the one reported for the visible device, so a partitioned
+        // MI300A or MI300X does not match 228 or 304 and keeps the Tensile default.
         if(arch == 942)
         {
-            if constexpr(sizeof(Ti) == 2)
+            constexpr bool MI300A_or_MI300X = sizeof(Ti) == 2 || std::is_same<Ti, double>::value
+                                              || std::is_same<Ti, float>::value
+                                              || std::is_same<Ti, int8_t>::value;
+
+            constexpr bool only_MI300A = std::is_same<Ti, rocblas_double_complex>::value
+                                         || std::is_same<Ti, rocblas_float_complex>::value;
+
+            if constexpr(only_MI300A)
             {
-                if(prob.handle->device_properties.multiProcessorCount != 304)
+                if(prob.handle->device_properties.multiProcessorCount != 228)
                     return false;
             }
-            else if constexpr(!std::is_same<Ti, double>::value)
+            else if constexpr(MI300A_or_MI300X)
+            {
+                const int cu_count = prob.handle->device_properties.multiProcessorCount;
+                if(cu_count != 228 && cu_count != 304)
+                    return false;
+            }
+            else
             {
                 return false;
             }
@@ -1323,6 +1449,42 @@ bool useHipBLASLt(const RocblasContractionProblem<Ti, To, Tc>& prob)
 #endif
 }
 
+namespace
+{
+    template <typename Ti, typename To, typename Tc>
+    rocblas_internal_gemm_problem
+        make_gemm_problem(const RocblasContractionProblem<Ti, To, Tc>& prob,
+                          rocblas_gemm_algo                            algo,
+                          int32_t                                      solution_index)
+    {
+        rocblas_internal_gemm_problem p;
+        p.trans_a        = prob.trans_a;
+        p.trans_b        = prob.trans_b;
+        p.m              = prob.m;
+        p.n              = prob.n;
+        p.k              = prob.k;
+        p.alpha          = prob.alpha;
+        p.beta           = prob.beta;
+        p.input_type     = rocblas_datatype_from_type<Ti>;
+        p.output_type    = rocblas_datatype_from_type<To>;
+        p.compute_type   = rocblas_datatype_from_type<Tc>;
+        p.lda            = prob.col_stride_a;
+        p.ldb            = prob.col_stride_b;
+        p.ldc            = prob.col_stride_c;
+        p.ldd            = prob.col_stride_d;
+        p.stride_a       = prob.batch_stride_a;
+        p.stride_b       = prob.batch_stride_b;
+        p.stride_c       = prob.batch_stride_c;
+        p.stride_d       = prob.batch_stride_d;
+        p.batch_count    = prob.batch_count;
+        p.pointer_array  = !prob.strided_batch;
+        p.algo           = algo;
+        p.solution_index = solution_index;
+        p.flags          = uint32_t(prob.flags);
+        return p;
+    }
+} // namespace
+
 /******************************************************************************
  * runContractionProblem calls Tensile to run a contraction problem described *
  * by RocblasContractionProblem                                               *
@@ -1334,6 +1496,13 @@ rocblas_status runContractionProblem(const RocblasContractionProblem<Ti, To, Tc>
 {
     rocblas_status status            = rocblas_status_internal_error;
     bool           hipblaslt_backend = false;
+
+    // Per-sub-problem kernel-selection state, consumed by rocblas_layer_mode_log_kernel_select (0x10).
+    // Capture is gated by the layer bit to avoid the std::string copy of solution->name() when off.
+    const bool kernel_select_logging
+        = prob.handle->layer_mode & rocblas_layer_mode_log_kernel_select;
+    bool        hipblaslt_attempted = false;
+    std::string selected_tensile_name;
 
     bool solutionBased = algo == rocblas_gemm_algo_solution_index;
     bool hipBLASLtOnly = false, TensileOnly = false;
@@ -1350,6 +1519,7 @@ rocblas_status runContractionProblem(const RocblasContractionProblem<Ti, To, Tc>
 #ifdef BUILD_WITH_HIPBLASLT
         if(useHipBLASLt(prob))
         {
+            hipblaslt_attempted = true;
             try
             {
                 rocblas_int hipblaslt_idx = map_index_rocblas_to_hipblaslt(solution_index);
@@ -1395,92 +1565,105 @@ rocblas_status runContractionProblem(const RocblasContractionProblem<Ti, To, Tc>
             auto& adapter
                 = get_library_and_adapter(&library, &deviceProp, prob.handle->getDevice());
 
-            hardware = Tensile::hip::GetDevice(*deviceProp);
-
-            auto  tensile_prob  = ConstructTensileProblem(prob);
-            auto  handle        = prob.handle;
-            auto* fitness_query = handle->get_solution_fitness_query();
-
-            if(solutionBased && !useDefaultSolution)
+            if(!library)
             {
-                rocblas_int tensile_idx = map_index_rocblas_to_tensile(solution_index);
-                solution                = library->getSolutionByIndex(tensile_idx);
-                // load solution if not already loaded
+                status = rocblas_status_not_implemented;
+            }
+            else
+            {
+                hardware = Tensile::hip::GetDevice(*deviceProp);
+
+                auto  tensile_prob  = ConstructTensileProblem(prob);
+                auto  handle        = prob.handle;
+                auto* fitness_query = handle->get_solution_fitness_query();
+
+                if(solutionBased && !useDefaultSolution)
+                {
+                    rocblas_int tensile_idx = map_index_rocblas_to_tensile(solution_index);
+                    solution                = library->getSolutionByIndex(tensile_idx);
+                    // load solution if not already loaded
+                    if(!solution)
+                    {
+                        library->findAllSolutions(tensile_prob, *hardware);
+                        solution = library->getSolutionByIndex(tensile_idx);
+                    }
+                }
+                else
+                {
+                    solution = library->findBestSolution(tensile_prob, *hardware, fitness_query);
+                }
+
+                if(!solution && fallbackTensileProblem(tensile_prob))
+                    solution = library->findBestSolution(tensile_prob, *hardware, fitness_query);
+
+                if(solution && kernel_select_logging)
+                    selected_tensile_name = solution->name();
+
                 if(!solution)
                 {
-                    library->findAllSolutions(tensile_prob, *hardware);
-                    solution = library->getSolutionByIndex(tensile_idx);
-                }
-            }
-            else
-            {
-                solution = library->findBestSolution(tensile_prob, *hardware, fitness_query);
-            }
-
-            if(!solution && fallbackTensileProblem(tensile_prob))
-                solution = library->findBestSolution(tensile_prob, *hardware, fitness_query);
-
-            if(!solution)
-            {
-                if(!useDefaultSolution)
-                {
-                    status = rocblas_status_invalid_value;
-                }
-                else
-                {
-                    rocblas_internal_ostream msg;
-                    print_if_verbose(msg << "rocBLAS error: No Tensile solution found for "
-                                         << prob);
-                    status = rocblas_status_not_implemented;
-                }
-            }
-            else
-            {
-                if(fitness_query)
-                {
-                    status = rocblas_status_success;
-                }
-                else if(handle->is_device_memory_size_query())
-                {
-                    status = handle->set_optimal_device_memory_size(
-                        ((solution->requiredWorkspaceSize(tensile_prob, *hardware)
-                          + HPA_GSU_WORKSPACE_SIZE_GRANULARITY - 1)
-                         / HPA_GSU_WORKSPACE_SIZE_GRANULARITY)
-                        * HPA_GSU_WORKSPACE_SIZE_GRANULARITY);
-                }
-                else
-                {
-                    // check if the solution requires workspace for GSU and allocate it.
-                    size_t WorkspaceSize = solution->requiredWorkspaceSize(tensile_prob, *hardware);
-                    auto   gsu_malloc    = prob.handle->gsu_malloc_by_size(WorkspaceSize);
-
-                    if(!gsu_malloc)
+                    if(!useDefaultSolution)
                     {
-                        return rocblas_status_memory_error;
-                    }
-
-                    if(solution->canSolve(tensile_prob, *hardware))
-                    {
-                        if(!(prob.flags & rocblas_gemm_flags_check_solution_index))
-                        {
-                            hipError_t hip_status = adapter.launchKernels(
-                                solution->solve(tensile_prob, GetTensileInputs(prob), *hardware),
-                                handle->get_stream(),
-                                handle->startEvent,
-                                handle->stopEvent);
-                            if(hip_status != hipSuccess)
-                                status = rocblas_internal_convert_hip_to_rocblas_status(hip_status);
-                            else
-                                status = rocblas_status_success;
-                        }
-                        else
-                        {
-                            status = rocblas_status_success;
-                        }
+                        status = rocblas_status_invalid_value;
                     }
                     else
                     {
-                        status = rocblas_status_invalid_value;
+                        rocblas_internal_ostream msg;
+                        print_if_verbose(msg << "rocBLAS error: No Tensile solution found for "
+                                             << prob);
+                        status = rocblas_status_not_implemented;
+                    }
+                }
+                else
+                {
+                    if(fitness_query)
+                    {
+                        status = rocblas_status_success;
+                    }
+                    else if(handle->is_device_memory_size_query())
+                    {
+                        status = handle->set_optimal_device_memory_size(
+                            ((solution->requiredWorkspaceSize(tensile_prob, *hardware)
+                              + HPA_GSU_WORKSPACE_SIZE_GRANULARITY - 1)
+                             / HPA_GSU_WORKSPACE_SIZE_GRANULARITY)
+                            * HPA_GSU_WORKSPACE_SIZE_GRANULARITY);
+                    }
+                    else
+                    {
+                        // check if the solution requires workspace for GSU and allocate it.
+                        size_t WorkspaceSize
+                            = solution->requiredWorkspaceSize(tensile_prob, *hardware);
+                        auto gsu_malloc = prob.handle->gsu_malloc_by_size(WorkspaceSize);
+
+                        if(!gsu_malloc)
+                        {
+                            return rocblas_status_memory_error;
+                        }
+
+                        if(solution->canSolve(tensile_prob, *hardware))
+                        {
+                            if(!(prob.flags & rocblas_gemm_flags_check_solution_index))
+                            {
+                                hipError_t hip_status = adapter.launchKernels(
+                                    solution->solve(
+                                        tensile_prob, GetTensileInputs(prob), *hardware),
+                                    handle->get_stream(),
+                                    handle->startEvent,
+                                    handle->stopEvent);
+                                if(hip_status != hipSuccess)
+                                    status = rocblas_internal_convert_hip_to_rocblas_status(
+                                        hip_status);
+                                else
+                                    status = rocblas_status_success;
+                            }
+                            else
+                            {
+                                status = rocblas_status_success;
+                            }
+                        }
+                        else
+                        {
+                            status = rocblas_status_invalid_value;
+                        }
                     }
                 }
             }
@@ -1511,8 +1694,8 @@ rocblas_status runContractionProblem(const RocblasContractionProblem<Ti, To, Tc>
             = hipblaslt_backend ? "rocblas_gemm_hipblaslt_backend" : "rocblas_gemm_tensile_backend";
 
         rocblas_internal_ostream alphass, betass;
-        (void)rocblas_internal_log_trace_alpha_beta_ex(
-            rocblas_datatype_from_type<Tc>, prob.alpha, prob.beta, alphass, betass);
+        PRINT_IF_ROCBLAS_ERROR((rocblas_internal_log_trace_alpha_beta_ex(
+            rocblas_datatype_from_type<Tc>, prob.alpha, prob.beta, alphass, betass)));
 
         rocblas_internal_logger logger;
         logger.log_trace(prob.handle,
@@ -1533,6 +1716,38 @@ rocblas_status runContractionProblem(const RocblasContractionProblem<Ti, To, Tc>
                          prob.col_stride_c,
                          (void*)prob.D,
                          prob.col_stride_d);
+    }
+
+    if(kernel_select_logging)
+    {
+        // Queries and check_solution_index return success without launching anything. hipBLASLt
+        // honours check_solution_index only for algo == rocblas_gemm_algo_solution_index.
+        const bool check_only = (prob.flags & rocblas_gemm_flags_check_solution_index)
+                                && (!hipblaslt_backend || solutionBased);
+        const bool launched = !check_only && !prob.handle->get_solution_fitness_query()
+                              && !prob.handle->is_device_memory_size_query();
+
+        if(launched && status == rocblas_status_success)
+        {
+            rocblas_internal_log_kernel_select(
+                prob.handle,
+                make_gemm_problem(prob, algo, solution_index),
+                hipblaslt_backend ? "hipblaslt" : "tensile",
+                hipblaslt_backend ? nullptr : selected_tensile_name.c_str(),
+                hipblaslt_attempted && !hipblaslt_backend ? "hipblaslt" : "none");
+        }
+
+        // Tell the source-GEMM fallback which backends rejected this sub-problem.
+        const char* rejected = nullptr;
+        if(status == rocblas_status_not_implemented)
+        {
+#ifdef BUILD_WITH_TENSILE
+            rejected = hipblaslt_attempted ? "hipblaslt,tensile" : "tensile";
+#else
+            rejected = hipblaslt_attempted ? "hipblaslt" : nullptr;
+#endif
+        }
+        prob.handle->kernel_select_fallback_from = rejected;
     }
 
     return status;
@@ -1632,41 +1847,56 @@ rocblas_status getAllSolutions(const RocblasContractionProblem<Ti, To, Tc>& prob
         std::shared_ptr<Tensile::Hardware>                                           hardware;
 
         auto& adapter = get_library_and_adapter(&library, &deviceProp, prob.handle->getDevice());
-        hardware      = Tensile::hip::GetDevice(*deviceProp);
-        auto tensile_prob = ConstructTensileProblem(prob);
-
-        if(option == CAN_SOLVE)
+        if(!library)
         {
-            solutions = library->findAllSolutions(tensile_prob, *hardware);
-        }
-        else if(option == MATCHES_TYPE)
-        {
-            solutions = library->findAllSolutionsMatchingType(tensile_prob, *hardware);
-        }
-        else
-        {
-            return rocblas_status_invalid_value;
-        }
-
-        if(list_array == nullptr)
-        {
-            *list_size = solutions.size();
-            status     = rocblas_status_success;
-        }
-        else
-        {
-            auto it = solutions.begin();
-            while(added_sols < *list_size && it != solutions.end())
+            if(list_array == nullptr)
+                *list_size = 0;
+            else
             {
-                list_array[added_sols++] = map_index_tensile_to_rocblas(it->get()->index);
-                ++it;
-            }
-            int i = added_sols;
-            while(i < *list_size)
-            {
-                list_array[i++] = c_rocblas_default_solution;
+                for(rocblas_int i = 0; i < *list_size; ++i)
+                    list_array[i] = c_rocblas_default_solution;
+                status = rocblas_status_success;
             }
             status = rocblas_status_success;
+        }
+        else
+        {
+            hardware          = Tensile::hip::GetDevice(*deviceProp);
+            auto tensile_prob = ConstructTensileProblem(prob);
+
+            if(option == CAN_SOLVE)
+            {
+                solutions = library->findAllSolutions(tensile_prob, *hardware);
+            }
+            else if(option == MATCHES_TYPE)
+            {
+                solutions = library->findAllSolutionsMatchingType(tensile_prob, *hardware);
+            }
+            else
+            {
+                return rocblas_status_invalid_value;
+            }
+
+            if(list_array == nullptr)
+            {
+                *list_size = solutions.size();
+                status     = rocblas_status_success;
+            }
+            else
+            {
+                auto it = solutions.begin();
+                while(added_sols < *list_size && it != solutions.end())
+                {
+                    list_array[added_sols++] = map_index_tensile_to_rocblas(it->get()->index);
+                    ++it;
+                }
+                int i = added_sols;
+                while(i < *list_size)
+                {
+                    list_array[i++] = c_rocblas_default_solution;
+                }
+                status = rocblas_status_success;
+            }
         }
 
         // inject rocblas source-code gemv if applicable

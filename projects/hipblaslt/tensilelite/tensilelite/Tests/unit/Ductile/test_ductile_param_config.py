@@ -4,7 +4,7 @@
 import pytest
 import yaml
 
-from Tensile.ductile import config
+from tensilelite.ductile import config
 
 pytestmark = pytest.mark.unit
 

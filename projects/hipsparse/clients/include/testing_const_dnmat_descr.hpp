@@ -118,7 +118,7 @@ void testing_const_dnmat_descr_bad_arg(void)
                                             "Error: batch_stride is nullptr");
 
     // Destroy valid descriptor
-    verify_hipsparse_status_success(hipsparseDestroyDnVec(x), "Success");
+    verify_hipsparse_status_success(hipsparseDestroyDnMat(x), "Success");
 #endif
 }
 

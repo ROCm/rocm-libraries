@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 
-import Tensile.TensileLogic.ValidChipId as V
-from Tensile.Common.Architectures import ArchInfo, LogicFileError
+import tensilelite.logic.valid_chip_id as V
+from tensilelite.Common.Architectures import ArchInfo, LogicFileError
 
 pytestmark = pytest.mark.unit
 

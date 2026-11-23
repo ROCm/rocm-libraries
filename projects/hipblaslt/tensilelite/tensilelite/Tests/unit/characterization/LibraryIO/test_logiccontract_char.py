@@ -42,14 +42,14 @@ All version tokens normalised to ``<VERSION>``.
 
 import pytest
 
-from Tensile import __version__
-import Tensile.LibraryIO as L
+from tensilelite import __version__
+import tensilelite.LibraryIO as L
 
 pytestmark = pytest.mark.unit
 
 
 def _norm(obj):
-    """Recursively replace the embedded Tensile version with a stable token."""
+    """Recursively replace the embedded TensileLite version with a stable token."""
     if isinstance(obj, str):
         return obj.replace(__version__, "<VERSION>")
     if isinstance(obj, dict):

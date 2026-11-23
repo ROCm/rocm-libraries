@@ -145,11 +145,11 @@ struct CDNA5ReadyQueueTestPeer {
     static void advance(CDNA5ReadyQueue& q, int cycles, TimeKind kind) {
         q.advanceTime(cycles, kind);
     }
-    static void setDsCap(CDNA5ReadyQueue& q, DsIssueCap::Mode mode, int depth) {
-        q.dsIssueCap_ = DsIssueCap(mode, depth);
-    }
     static void carry(CDNA5ReadyQueue& q) {
         q.carryQueuedWar();
+    }
+    static int cover(const CDNA5ReadyQueue& q, int wmmaLatency) {
+        return q.wmmaQueueCover(wmmaLatency);
     }
     static void resetWindow(CDNA5ReadyQueue& q) {
         q.resetActiveWindow();
@@ -157,16 +157,18 @@ struct CDNA5ReadyQueueTestPeer {
     static bool overlaps(CDNA5ReadyQueue& q, DAGNode* n) {
         return q.destOverlapsActiveWmmaSrc(n);
     }
+    static void setQueueDepth(CDNA5ReadyQueue& q, const HwInstDesc& desc) {
+        q.hardwareWmmaQueueDepth_ = std::max(1, static_cast<int>(desc.wmmaQueueDepth));
+    }
     static constexpr uint8_t kBlocked = CDNA5ReadyQueue::kBlockedSlot;
 };
 
-PassContext makeQueueCtx(int depth, int cover) {
+PassContext makeQueueCtx(int cover) {
     PassContext ctx;
     GemmTileConfig config;
     config.arch = {12, 5, 0};
     ctx.setGemmTileConfig(config);
     PassFeatureConfig pfc;
-    pfc.dagFeatures.wmmaQueueDepth = depth;
     pfc.dagFeatures.wmmaQueueCoverCycles = cover;
     ctx.setPassFeatureConfig(pfc);
     return ctx;
@@ -188,6 +190,45 @@ TEST_F(CDNA5ReadyQueueTest, OpenSccChainWithOnlyBarriersReadyAborts) {
             pickWithOpenChainAndOnlyBarriersReady(queue, *bb);
         },
         "open SCC chain but only barriers are ready");
+}
+
+TEST_F(CDNA5ReadyQueueTest, QueueFillBurstIncludesEntriesRetiredWhileFilling) {
+    const std::vector<WmmaQueueWindow> regular(
+        12, {/*latency=*/8, /*issue=*/1, /*coIssueMask=*/0, /*blockedMask=*/0});
+    EXPECT_EQ(predictWmmaQueueFillBurst(regular, /*queueDepth=*/8), 9);
+
+    std::vector<WmmaQueueWindow> scaled(
+        12, {/*latency=*/8, /*issue=*/1, /*coIssueMask=*/0, /*blockedMask=*/0});
+    EXPECT_EQ(predictWmmaQueueFillBurst(scaled, /*queueDepth=*/5), 5);
+
+    // Two short leading operations retire while later operations enter the five-entry queue.
+    // Seven WMMAs issue before five are simultaneously outstanding.
+    scaled[0].latency = 2;
+    scaled[1].latency = 2;
+    EXPECT_EQ(predictWmmaQueueFillBurst(scaled, /*queueDepth=*/5), 7);
+}
+
+TEST_F(CDNA5ReadyQueueTest, QueueFillConsumerSlackUsesResolvedWmmaLatencies) {
+    const std::vector<WmmaQueueWindow> f8(
+        24, {/*latency=*/8, /*issue=*/1, /*coIssueMask=*/0, /*blockedMask=*/0});
+    const std::vector<WmmaQueueWindow> f4(
+        24, {/*latency=*/4, /*issue=*/1, /*coIssueMask=*/0, /*blockedMask=*/0});
+    constexpr int kDsReadyCycle = 56;
+    constexpr int kSafetyMargin = 32;
+
+    // Preserve the old gfx1250 boundary for an 8-cycle WMMA: ten windows leave only 24 cycles
+    // after the load returns, while eleven leave the required 32.
+    EXPECT_FALSE(
+        queueFillConsumerSlackAllows(wmmaWindowStartCycle(f8, 10), kDsReadyCycle, kSafetyMargin));
+    EXPECT_TRUE(
+        queueFillConsumerSlackAllows(wmmaWindowStartCycle(f8, 11), kDsReadyCycle, kSafetyMargin));
+
+    // The same number of 4-cycle FP4 windows is not enough time. Twenty-two windows provide the
+    // same 88 cycles as eleven FP8 windows.
+    EXPECT_FALSE(
+        queueFillConsumerSlackAllows(wmmaWindowStartCycle(f4, 11), kDsReadyCycle, kSafetyMargin));
+    EXPECT_TRUE(
+        queueFillConsumerSlackAllows(wmmaWindowStartCycle(f4, 22), kDsReadyCycle, kSafetyMargin));
 }
 
 TEST_F(CDNA5ReadyQueueTest, DsLoadDescCarriesDrainParams) {
@@ -336,8 +377,10 @@ TEST_F(CDNA5ReadyQueueTest, MixedDrainCapUsesMaxDrainInBurst) {
 //  - Elapsed: already wall time, so the blocked cycle is not charged a second time.
 TEST_F(CDNA5ReadyQueueTest, AdvanceTimeReadsItsArgumentByKind) {
     using Peer = CDNA5ReadyQueueTestPeer;
+    const HwInstDesc* wmma = getMCIDByUOp(GFX::v_wmma_f32_16x16x16_bf16, GfxArchID::Gfx1250);
+    ASSERT_NE(wmma, nullptr);
     for (int on = 0; on < 2; ++on) {
-        PassContext ctx = on ? makeQueueCtx(8, 16) : makeQueueCtx(1, 0);
+        PassContext ctx = on ? makeQueueCtx(16) : makeQueueCtx(0);
         struct Case {
             Peer::TimeKind kind;
             int cycles;
@@ -351,6 +394,7 @@ TEST_F(CDNA5ReadyQueueTest, AdvanceTimeReadsItsArgumentByKind) {
         };
         for (const Case& c : cases) {
             CDNA5ReadyQueue queue(ctx);
+            Peer::setQueueDepth(queue, *wmma);
             Peer::slots(queue).assign(20, 1);
             Peer::slots(queue)[15] = Peer::kBlocked;
             Peer::latency(queue) = 20;
@@ -364,9 +408,37 @@ TEST_F(CDNA5ReadyQueueTest, AdvanceTimeReadsItsArgumentByKind) {
 
 // A queued WMMA keeps reading its sources after a region cut. The WAR gate must still hold a
 // ds_load into those registers until the pipe has read them, then release it.
+// The automatic refill line is one WMMA short of a full queue, sized by the latency of the WMMA
+// the refill is for, not by the region's first WMMA: depth 8 gives 28 for a 4-cycle WMMA and 56
+// for an 8-cycle one. An explicit cover is the same for both and 0 turns the queue model off.
+TEST_F(CDNA5ReadyQueueTest, AutomaticRefillLineFollowsTheNextWmmaLatency) {
+    using Peer = CDNA5ReadyQueueTestPeer;
+    const HwInstDesc* wmma = getMCIDByUOp(GFX::v_wmma_f32_16x16x16_bf16, GfxArchID::Gfx1250);
+    ASSERT_NE(wmma, nullptr);
+    PassContext autoCtx = makeQueueCtx(-1);
+    CDNA5ReadyQueue autoQueue(autoCtx);
+    Peer::setQueueDepth(autoQueue, *wmma);
+    EXPECT_EQ(Peer::cover(autoQueue, 4), 28);
+    EXPECT_EQ(Peer::cover(autoQueue, 8), 56);
+
+    PassContext explicitCtx = makeQueueCtx(40);
+    CDNA5ReadyQueue explicitQueue(explicitCtx);
+    Peer::setQueueDepth(explicitQueue, *wmma);
+    EXPECT_EQ(Peer::cover(explicitQueue, 4), 40);
+    EXPECT_EQ(Peer::cover(explicitQueue, 8), 40);
+
+    PassContext offCtx = makeQueueCtx(0);
+    CDNA5ReadyQueue offQueue(offCtx);
+    Peer::setQueueDepth(offQueue, *wmma);
+    EXPECT_EQ(Peer::cover(offQueue, 8), 0);
+}
+
 TEST_F(CDNA5ReadyQueueTest, QueuedWmmaWarStateSurvivesARegionCut) {
-    PassContext ctx = makeQueueCtx(8, 16);
+    PassContext ctx = makeQueueCtx(16);
     CDNA5ReadyQueue queue(ctx);
+    const HwInstDesc* wmma = getMCIDByUOp(GFX::v_wmma_f32_16x16x16_bf16, GfxArchID::Gfx1250);
+    ASSERT_NE(wmma, nullptr);
+    CDNA5ReadyQueueTestPeer::setQueueDepth(queue, *wmma);
     // A WMMA reading v[0:7] ends 40 cycles into the window; the region ends at position 10.
     CDNA5ReadyQueueTestPeer::srcs(queue).push_back({StinkyRegister("v", 0, 8)});
     CDNA5ReadyQueueTestPeer::ends(queue).push_back(40);
@@ -387,7 +459,7 @@ TEST_F(CDNA5ReadyQueueTest, QueuedWmmaWarStateSurvivesARegionCut) {
     EXPECT_FALSE(CDNA5ReadyQueueTestPeer::overlaps(queue, &overwrite)) << "read by now";
 
     // With the queue model off nothing is carried (the original per-region reset).
-    PassContext off = makeQueueCtx(1, 0);
+    PassContext off = makeQueueCtx(0);
     CDNA5ReadyQueue plain(off);
     CDNA5ReadyQueueTestPeer::srcs(plain).push_back({StinkyRegister("v", 0, 8)});
     CDNA5ReadyQueueTestPeer::ends(plain).push_back(40);
@@ -403,7 +475,7 @@ TEST_F(CDNA5ReadyQueueTest, QueuedWmmaWarStateSurvivesARegionCut) {
 TEST_F(CDNA5ReadyQueueTest, ForcedWmmaChargesItsSourceStallWhenTheQueueModelIsOn) {
     int elapsed[2] = {0, 0};
     for (int on = 0; on < 2; ++on) {
-        PassContext ctx = on ? makeQueueCtx(8, 16) : makeQueueCtx(1, 0);
+        PassContext ctx = on ? makeQueueCtx(16) : makeQueueCtx(0);
         CDNA5ReadyQueue queue(ctx);
         Function f{"forced_wmma"};
         BasicBlock* b = f.createBasicBlock("entry");
@@ -413,6 +485,7 @@ TEST_F(CDNA5ReadyQueueTest, ForcedWmmaChargesItsSourceStallWhenTheQueueModelIsOn
         AsmIRBuilder builder(*b, GfxArchID::Gfx1250);
         StinkyInstruction* wmma =
             builder.create(getMCIDByUOp(GFX::v_wmma_f32_16x16x16_bf16, GfxArchID::Gfx1250));
+        CDNA5ReadyQueueTestPeer::setQueueDepth(queue, *wmma->getHwInstDesc());
         wmma->addDestReg(StinkyRegister("v", 200, 8));
         wmma->addSrcReg(StinkyRegister("v", 100, 8));  // reads the ds_load's v[100:103]
         wmma->addSrcReg(StinkyRegister("v", 100, 8));
@@ -430,24 +503,18 @@ TEST_F(CDNA5ReadyQueueTest, ForcedWmmaChargesItsSourceStallWhenTheQueueModelIsOn
     EXPECT_GE(elapsed[1], 40) << "queue model on: the source stall elapses";
 }
 
-// Periodic cap: at most A ds_loads per X-cycle period. With only ds_loads to issue nothing else
-// supplies elapsed time, so the cap wait itself must elapse; otherwise the period never ends and
-// the ds_loads are all counted into the same full period, exceeding A.
-TEST_F(CDNA5ReadyQueueTest, PeriodicDsCapNeverIssuesMoreThanItsLimitInOnePeriod) {
-    constexpr int kCap = 4, kSpan = 32, kLoads = 10;
+// A full ds credit queue delays ds_loads but never stalls the scheduler: every ds_load issues
+// and the timeline never runs backwards.
+TEST_F(CDNA5ReadyQueueTest, FullDsCreditQueueStillIssuesEveryDsLoad) {
+    constexpr int kLoads = 10;
     PassContext ctx;
     GemmTileConfig config;
     config.arch = {12, 5, 0};
     ctx.setGemmTileConfig(config);
     PassFeatureConfig pfc;
-    pfc.dagFeatures.dsReadPerCap = kCap;
-    pfc.dagFeatures.dsIssueCapSpanCycles = kSpan;
-    pfc.dagFeatures.dsIssueCapMode = PassFeatureConfig::DsIssueCapMode::Periodic;
-    pfc.dagFeatures.dsReadQueueDepth = 16;
-    pfc.dagFeatures.dsReadThrottleLatency = 1;  // the LDS throttle is out of the way
+    pfc.dagFeatures.dsReadQueueDepth = 2;
     ctx.setPassFeatureConfig(pfc);
     CDNA5ReadyQueue queue(ctx);
-    CDNA5ReadyQueueTestPeer::setDsCap(queue, DsIssueCap::Mode::Periodic, kCap);
 
     std::vector<DAGNode> nodes;
     nodes.reserve(kLoads);
@@ -459,17 +526,41 @@ TEST_F(CDNA5ReadyQueueTest, PeriodicDsCapNeverIssuesMoreThanItsLimitInOnePeriod)
     }
     for (DAGNode& n : nodes) queue.push(&n);
 
-    std::vector<int> issuedAt;  // timeline clock once each ds_load has issued (after any wait)
+    int lastClock = 0;
     for (int i = 0; i < kLoads; ++i) {
         ASSERT_NE(queue.pickOne(), nullptr);
-        issuedAt.push_back(CDNA5ReadyQueueTestPeer::clock(queue));
+        EXPECT_GE(CDNA5ReadyQueueTestPeer::clock(queue), lastClock);
+        lastClock = CDNA5ReadyQueueTestPeer::clock(queue);
     }
-    std::string times;
-    for (int t : issuedAt) times += std::to_string(t) + " ";
-    // No window of kSpan cycles opened by a ds_load holds more than kCap of them.
-    for (int i = 0; i < kLoads; ++i) {
-        int inPeriod = 0;
-        for (int j = i; j < kLoads; ++j) inPeriod += issuedAt[j] < issuedAt[i] + kSpan;
-        EXPECT_LE(inPeriod, kCap) << "period opened by ds_load " << i << ", issue times: " << times;
-    }
+}
+
+TEST(DsSpreadConsecutiveLoadCount, LastBatchIsTheEvenShareOfTheIssueWindows) {
+    // 64 loads over 48 windows, 4 WMMAs per batch: 12 batches, 6 loads each.
+    EXPECT_EQ(dsSpreadConsecutiveLoadCount(64, 48, 4), 6);
+    // 20 loads fit in 3 windows, which is one batch, so they all issue together.
+    EXPECT_EQ(dsSpreadConsecutiveLoadCount(20, 3, 4), 20);
+    // 126 loads over 95 windows: 24 batches, 6 loads in the fullest batch.
+    EXPECT_EQ(dsSpreadConsecutiveLoadCount(126, 95, 4), 6);
+    EXPECT_EQ(dsSpreadConsecutiveLoadCount(1, 0, 4), 1);
+}
+
+TEST(DrainLatencyAfterIssueOffsets, UniformCreditSpacingWhenSpreadIsOff) {
+    // credit/16 = 64/16 = 4, the neutral spacing. No reduction.
+    EXPECT_EQ(drainLatencyAfterIssueOffsets(/*burst=*/117, /*last=*/56, /*count=*/17,
+                                            /*queueDepth=*/16, /*credit=*/64),
+              117);
+    EXPECT_EQ(drainLatencyAfterIssueOffsets(131, 56, 31, 16, 64), 131);
+    // credit 72 => 4.5, excess 0.5 on the loads past the queue.
+    //   lround(117 - 0.5) = 117, lround(118 - 1) = 117, lround(131 - 7.5) = 124.
+    EXPECT_EQ(drainLatencyAfterIssueOffsets(117, 56, 17, 16, 72), 117);
+    EXPECT_EQ(drainLatencyAfterIssueOffsets(118, 56, 18, 16, 72), 117);
+    EXPECT_EQ(drainLatencyAfterIssueOffsets(131, 56, 31, 16, 72), 124);
+    // credit 160 => 10 cycles/ds, excess 6.
+    EXPECT_EQ(drainLatencyAfterIssueOffsets(117, 56, 17, 16, 160), 111);
+    EXPECT_EQ(drainLatencyAfterIssueOffsets(118, 56, 18, 16, 160), 106);
+    // 31 loads: 131 - 15*6 = 41, floored at the last load.
+    EXPECT_EQ(drainLatencyAfterIssueOffsets(131, 56, 31, 16, 160), 56);
+    // Queue not full, or no credit lifetime: nothing to subtract.
+    EXPECT_EQ(drainLatencyAfterIssueOffsets(116, 56, 16, 16, 160), 116);
+    EXPECT_EQ(drainLatencyAfterIssueOffsets(117, 56, 17, 16, 0), 117);
 }

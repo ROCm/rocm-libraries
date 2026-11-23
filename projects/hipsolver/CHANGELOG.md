@@ -3,11 +3,21 @@
 Full documentation for hipSOLVER is available at the [hipSOLVER Documentation](https://rocm.docs.amd.com/projects/hipSOLVER/en/latest/index.html).
 
 
-## (Unreleased) hipSOLVER
+## hipSOLVER 3.9.0 for ROCm 10.3.0
+
+### Resolved issues
+
+* Fixed hipsolverDnXpotrs not setting info, which kept the value it had before the call.
+
+
+## hipSOLVER 3.8.0 for ROCm 10.2.0
 
 ### Added
 
 * Added functions:
+  * gelsBatched
+    * hipsolverXXgelsBatched_bufferSize
+    * hipsolverXXgelsBatched
   * geqrfBatched
     * hipsolverSgeqrfBatched_bufferSize, hipsolverDgeqrfBatched_bufferSize, hipsolverCgeqrfBatched_bufferSize, hipsolverZgeqrfBatched_bufferSize
     * hipsolverSgeqrfBatched, hipsolverDgeqrfBatched, hipsolverCgeqrfBatched, hipsolverZgeqrfBatched
@@ -20,20 +30,19 @@ Full documentation for hipSOLVER is available at the [hipSOLVER Documentation](h
   * getrsBatched
     * hipsolverSgetrsBatched_bufferSize, hipsolverDgetrsBatched_bufferSize, hipsolverCgetrsBatched_bufferSize, hipsolverZgetrsBatched_bufferSize
     * hipsolverSgetrsBatched, hipsolverDgetrsBatched, hipsolverCgetrsBatched, hipsolverZgetrsBatched
+* Added compatibility-only functions:
+  * trtri
+    * hipsolverDnXtrtri_bufferSize
+    * hipsolverDnXtrtri
 
 ### Changed
 
 * The rocSOLVER backend now allows devIpiv to be passed as a null pointer to hipsolverXgetrs and hipsolverDnXgetrs.
 
-### Removed
-### Optimized
 ### Resolved issues
 
 * Fixed hipsolverDnXpotrs calling 32-bit potrs instead of 64-bit potrs.
 * Fixed hipsolverSpSetStream not setting the internal rocsparse_handle stream.
-
-### Known issues
-### Upcoming changes
 
 
 ## hipSOLVER 3.7.0 for ROCm 10.1.0

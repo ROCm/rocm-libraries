@@ -4,13 +4,17 @@
 """Gate the exported ABI of a hipDNN wrapper build.
 
 This is the command behind its own ctest entry, separate from the forwarding
-parity harness in run_forwarding_parity.py. It only reads the two built shared
-objects -- it never loads or executes them -- so unlike the parity harness it
-needs no GPU, and is registered wherever MIOPEN_ENABLE_HIPDNN_WRAPPER is on
-regardless of whether one is available.
+parity harness in run_forwarding_parity.py. It only reads the built libraries
+(MIOpen, MIOpen_private and any CK plugins beside them) -- it never loads or
+executes them -- so unlike the parity harness it needs no GPU, and is registered
+wherever MIOPEN_ENABLE_HIPDNN_WRAPPER is on regardless of whether one is available.
+
+The CK plugin check runs only when a libMIOpenCKGroupedConv_*.so sits beside the
+libraries, and never on Windows. With none it is skipped, unless --require-plugins
+turns that into a failure.
 
 Registered from both the build tree and an installed one, which differ only in
-where the two libraries and --public-header sit; the defaults below suit the
+where the libraries and --public-header sit; the defaults below suit the
 installed layout, where everything but --public-header lands beside this script.
 """
 
@@ -19,42 +23,55 @@ import subprocess
 import sys
 from pathlib import Path
 
-from miopen_wrapper_libs import resolve_pair
+from miopen_wrapper_libs import (
+    ON_WINDOWS,
+    default_lib_dirs,
+    find_ck_plugins,
+    resolve_pair,
+)
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 
 
-def main():
+def main(argv=None, windows=ON_WINDOWS):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--lib-dir",
-        help="directory holding libMIOpen.so* and libMIOpen_private.so*; defaults "
-        "to searching lib*/ beside this script's parent directory",
+        help="directory holding the MIOpen and MIOpen_private libraries and any CK "
+        "plugins; defaults to the install prefix's lib*/ on Linux and bin/ on "
+        "Windows, found from this script's location",
+    )
+    parser.add_argument(
+        "--require-plugins",
+        action="store_true",
+        help="fail when no CK plugin sits beside the libraries instead of skipping "
+        "the plugin check. For a build that is expected to produce plugins; an "
+        "installed layout may legitimately carry none. Ignored on Windows",
     )
     parser.add_argument("--abi-check", default=SCRIPT_DIR / "check_public_abi.py")
     parser.add_argument("--baseline", default=SCRIPT_DIR / "public_symbols.baseline")
     parser.add_argument(
-        "--excluded", default=SCRIPT_DIR / "wrapper_excluded_symbols.txt"
+        "--wrapper-only", default=SCRIPT_DIR / "wrapper_only_symbols.txt"
     )
     parser.add_argument(
         "--needed-baseline",
-        help="committed DT_NEEDED list the wrapper must match exactly. Off by "
-        "default because the list names ROCm soversions and the platform's "
-        "loader; the checks it matters for (libMIOpen_private linked, the hipDNN "
-        "backend not) run without it",
+        help="committed DT_NEEDED list the wrapper must match exactly (Linux only; "
+        "an error for a DLL). Off by default because the list names ROCm "
+        "soversions and the platform's loader; the checks it matters for "
+        "(libMIOpen_private linked, the hipDNN backend not) run without it",
     )
     parser.add_argument(
         "--public-header",
         help="path to include/miopen/miopen.h; only meaningful from a build tree, "
         "since an installed tree has no include directory. Enables the check that "
-        "no excluded symbol is declared there",
+        "no wrapper-only symbol is declared there",
     )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     lib_dirs = (
-        [Path(args.lib_dir)] if args.lib_dir else sorted(SCRIPT_DIR.parent.glob("lib*"))
+        [Path(args.lib_dir)] if args.lib_dir else default_lib_dirs(SCRIPT_DIR, windows)
     )
-    wrapper_lib, private_lib, problems = resolve_pair(lib_dirs)
+    wrapper_lib, private_lib, problems = resolve_pair(lib_dirs, windows)
     if problems:
         # Both are built whenever this entry is registered, so a missing one is a
         # packaging or layout regression rather than a configuration to skip over.
@@ -71,8 +88,8 @@ def main():
         wrapper_lib,
         "--baseline",
         args.baseline,
-        "--excluded",
-        args.excluded,
+        "--wrapper-only",
+        args.wrapper_only,
         "--private-lib",
         private_lib,
     ]
@@ -80,6 +97,21 @@ def main():
         command += ["--needed-baseline", args.needed_baseline]
     if args.public_header:
         command += ["--public-header", args.public_header]
+    plugins = find_ck_plugins(wrapper_lib.parent, windows)
+    for plugin in plugins:
+        command += ["--plugin", plugin]
+    if not plugins and args.require_plugins and not windows:
+        print(
+            f"FAIL: no libMIOpenCKGroupedConv_*.so beside {wrapper_lib.parent}, but "
+            "--require-plugins was given. Either the CK plugin targets are not "
+            "built (build MIOpen_with_plugins or the whole project, not only "
+            "MIOpen and MIOpen_private) or the plugins are in another directory "
+            "than the libraries.",
+            flush=True,
+        )
+        return 1
+    if not plugins:
+        print("no CK plugins beside the libraries; the plugin check is not run")
     print(f"+ {' '.join(str(a) for a in command)}", flush=True)
     return subprocess.run([str(a) for a in command]).returncode
 

@@ -77,6 +77,7 @@
 
 #include <hipdnn_backend.h>
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
+#include <hipdnn_data_sdk/utilities/RankingMetrics.hpp>
 #include <hipdnn_frontend/Logging.hpp>
 #include <hipdnn_frontend/Utilities.hpp>
 #include <hipdnn_frontend/attributes/BatchnormAttributes.hpp>
@@ -221,7 +222,9 @@ protected:
         int64_t engineId = -1;
         std::vector<KnobSetting> knobSettings;
         int64_t workspaceSize = -1; ///< Cached workspace size; -1 = not yet queried
-        bool barred = false; ///< Set at evaluation time by build_plans/autotuneImpl
+        bool barred = false; ///< A filter removed the plan; never set on the finalized active plan
+        bool deserialized
+            = false; ///< Installed by deserialization: no engine config, never filtered
     };
 
     // All compiled plans. create_execution_plans() retains all engine configs
@@ -239,12 +242,46 @@ protected:
     // by (engineId, knobSettings) via PlanSpec::operator==.
     std::vector<autotune::detail::PlanSpec> _planSpecs;
 
-    int64_t _maxWorkspaceAllowed = -1; // Workspace threshold; -1 = no limit.
-        // Set by deselect_workspace_greater_than().
-        // Last-write-wins semantics.
+    // Engine filters. They persist until the caller changes them: no create or build call
+    // resets them. evaluatePlanFilters() applies them to a plan.
+    int64_t _maxWorkspaceAllowed = -1; // Engine-config workspace limit; -1 = no limit.
+    // Set by deselect_workspace_greater_than().
+    // Last-write-wins semantics.
     std::unordered_set<int64_t> _barredEngineIds; // Engine ID exclusion set.
-        // Set by deselect_engines().
-        // Accumulates across calls.
+    // Set by deselect_engines().
+    // Each call replaces it; an empty call clears it.
+
+    // Note filters, one list per family and direction. An engine passes when it reports
+    // every selected note and none of the deselected ones, in each family.
+    // Set by select_*_notes() / deselect_*_notes(). Accumulate across calls.
+    std::vector<NumericalNote> _selectedNumericalNotes;
+    std::vector<NumericalNote> _deselectedNumericalNotes;
+    std::vector<BehaviorNote> _selectedBehaviorNotes;
+    std::vector<BehaviorNote> _deselectedBehaviorNotes;
+
+    // Which note filter an engine fails, if any.
+    enum class NoteVerdict
+    {
+        PASS,
+        FAIL_NUMERICAL,
+        FAIL_BEHAVIOR
+    };
+
+    // Note verdict per engine ID, so each engine's notes are read once per filter state.
+    // Cleared by every note-filter call, by create_execution_plans() and
+    // create_execution_plan_ext(), and whenever the operation graph is rebuilt. A failed
+    // read is not cached.
+    std::unordered_map<int64_t, NoteVerdict> _noteVerdicts;
+
+    // The outcome of evaluatePlanFilters() for one plan.
+    struct PlanFilterVerdict
+    {
+        // Why the plan is held out; empty when it passes every filter.
+        std::string skipReason;
+        // True when a filter removed the plan, so it is marked barred. False with a reason
+        // when the plan has no usable descriptors.
+        bool filtered = false;
+    };
 
     void resetActivePlanState()
     {
@@ -295,10 +332,12 @@ protected:
     void installDeserializedExecutionPlan(hipdnnBackendDescriptor_t executionPlan)
     {
         CompiledPlan plan;
+        plan.deserialized = true;
         plan.executionPlanDesc
             = std::make_unique<detail::ScopedHipdnnBackendDescriptor>(executionPlan);
 
-        // A deserialized compiled plan is finalized by construction and can be re-serialized.
+        // A deserialized compiled plan is finalized by construction. Saving it again returns the
+        // plan bytes the backend kept at load; the plan is not serialized again.
         auto engineId = detail::getNullableAttrScalar<int64_t>(
             plan.executionPlanDesc->get(),
             HIPDNN_ATTR_EXECUTION_PLAN_ENGINE_GLOBAL_INDEX_EXT,
@@ -388,10 +427,11 @@ protected:
                                              1,
                                              static_cast<const void*>(&engineDesc.get())),
                                          "Failed to set engine on the engine config descriptor.");
+        HIPDNN_CHECK_ERROR(applyRankingMetric(engineConfigDesc->get()));
 
         // Validate and apply knob settings
         std::unordered_map<KnobType_t, Knob> existingKnobs;
-        HIPDNN_CHECK_ERROR(get_knob_lookup_for_engine(engineId, existingKnobs));
+        HIPDNN_CHECK_ERROR(knobLookupFromEngineDescriptor(engineDesc.get(), existingKnobs));
 
         std::vector<KnobSetting> validatedSettings;
         HIPDNN_CHECK_ERROR(
@@ -424,6 +464,26 @@ protected:
         plan.knobSettings = validatedSettings;
 
         return {ErrorCode::OK, ""};
+    }
+
+    // Workspace of an engine's priming plan: exhaustive autotune compiles it with the
+    // benchmarking knob on.
+    int64_t queryBenchmarkingWorkspaceSize(int64_t engineId) const
+    {
+        return detail::queryEngineWorkspaceSize(
+            _graphDesc->get(),
+            engineId,
+            {KnobSetting(autotune::detail::BENCHMARKING_KNOB_NAME, int64_t{1})});
+    }
+
+    // Pre-compile workspace estimate for an engine. For an engine that exposes the
+    // benchmarking knob it is the larger of the default and the priming configuration.
+    int64_t estimateEngineWorkspaceSize(int64_t engineId, bool supportsExhaustive) const
+    {
+        const auto workspaceSize = detail::queryEngineWorkspaceSize(_graphDesc->get(), engineId);
+        return supportsExhaustive
+                   ? std::max(workspaceSize, queryBenchmarkingWorkspaceSize(engineId))
+                   : workspaceSize;
     }
 
     // Run the mechanical execution-plan finalize sequence on a compiled plan:
@@ -481,6 +541,267 @@ protected:
         return {ErrorCode::OK, ""};
     }
 
+    // ── Engine filters ───────────────────────────────────────────────────
+    // evaluatePlanFilters() is the one place that decides whether a filter removes a plan.
+    // check_support(), build_plans(), build_plan_at_index() and autotune() all call it, so
+    // they agree. Skip reasons are one vocabulary for logs and failure messages.
+
+    // The finalized active plan stays active and executable, so a filter never marks it.
+    bool isFinalizedActivePlan(size_t index) const
+    {
+        return _executionPlanFinalized && index == _activePlanIndex;
+    }
+
+    bool noteFilterSet() const
+    {
+        return !_selectedNumericalNotes.empty() || !_deselectedNumericalNotes.empty()
+               || !_selectedBehaviorNotes.empty() || !_deselectedBehaviorNotes.empty();
+    }
+
+    // A filter is set when the caller configured one, or an earlier evaluation barred a plan.
+    bool filterSet() const
+    {
+        return !_barredEngineIds.empty() || noteFilterSet() || _maxWorkspaceAllowed >= 0
+               || std::any_of(_compiledPlans.begin(),
+                              _compiledPlans.end(),
+                              [](const CompiledPlan& plan) { return plan.barred; });
+    }
+
+    template <typename Note>
+    Graph& appendNoteFilter(std::vector<Note>& filter,
+                            const std::vector<Note>& notes,
+                            const char* method)
+    {
+        if(notes.empty())
+        {
+            return *this;
+        }
+        filter.insert(filter.end(), notes.begin(), notes.end());
+        _noteVerdicts.clear();
+        HIPDNN_FE_LOG_INFO(method << "(): stored note filter (" << filter.size() << " note(s))");
+        return *this;
+    }
+
+    // Whether the engine reports every selected note and none of the deselected ones. Reads
+    // the engine's notes only when the family has a filter.
+    template <typename Note>
+    Error engineReportsNotes(int64_t engineId,
+                             const std::vector<Note>& selected,
+                             const std::vector<Note>& deselected,
+                             Error (Graph::*getNotes)(int64_t, std::vector<Note>&) const,
+                             bool& passes) const
+    {
+        passes = true;
+        if(selected.empty() && deselected.empty())
+        {
+            return {ErrorCode::OK, ""};
+        }
+
+        std::vector<Note> reported;
+        HIPDNN_CHECK_ERROR((this->*getNotes)(engineId, reported));
+
+        const auto reports = [&reported](Note note) {
+            return std::find(reported.begin(), reported.end(), note) != reported.end();
+        };
+        passes = std::all_of(selected.begin(), selected.end(), reports)
+                 && std::none_of(deselected.begin(), deselected.end(), reports);
+        return {ErrorCode::OK, ""};
+    }
+
+    // The note verdict for an engine, read once per filter state. A failed read returns the
+    // getter's error and caches nothing.
+    Error noteVerdictForEngine(int64_t engineId, NoteVerdict& verdict)
+    {
+        if(const auto cached = _noteVerdicts.find(engineId); cached != _noteVerdicts.end())
+        {
+            verdict = cached->second;
+            return {ErrorCode::OK, ""};
+        }
+
+        bool passes = true;
+        HIPDNN_CHECK_ERROR(engineReportsNotes(engineId,
+                                              _selectedNumericalNotes,
+                                              _deselectedNumericalNotes,
+                                              &Graph::get_numerical_notes_for_engine,
+                                              passes));
+        verdict = passes ? NoteVerdict::PASS : NoteVerdict::FAIL_NUMERICAL;
+
+        if(passes)
+        {
+            HIPDNN_CHECK_ERROR(engineReportsNotes(engineId,
+                                                  _selectedBehaviorNotes,
+                                                  _deselectedBehaviorNotes,
+                                                  &Graph::get_behavior_notes_for_engine,
+                                                  passes));
+            verdict = passes ? NoteVerdict::PASS : NoteVerdict::FAIL_BEHAVIOR;
+        }
+
+        _noteVerdicts.emplace(engineId, verdict);
+        return {ErrorCode::OK, ""};
+    }
+
+    // The plan's engine-config workspace: an upper bound on the workspace of any plan
+    // finalized from the config (the plugin contract, IEngine::getMaxWorkspaceSize).
+    static Error readEngineConfigWorkspace(const CompiledPlan& plan, int64_t& workspace)
+    {
+        workspace = 0;
+        HIPDNN_RETURN_ON_BACKEND_FAILURE(
+            detail::hipdnnBackend()->backendGetAttribute(plan.engineConfigDesc->get(),
+                                                         HIPDNN_ATTR_ENGINECFG_WORKSPACE_SIZE,
+                                                         HIPDNN_TYPE_INT64,
+                                                         1,
+                                                         nullptr,
+                                                         &workspace),
+            "Failed to query the engine config workspace size.");
+        return {ErrorCode::OK, ""};
+    }
+
+    // Warn when a built plan's workspace exceeds the workspace its engine config reported,
+    // which breaks the plugin contract (IEngine::getMaxWorkspaceSize). Runs only when WARN
+    // logging is enabled, because reading a heuristic config's workspace queries the plugin.
+    // Never fails: a deserialized plan has no engine config, and a failed read skips the
+    // comparison. Callers log the rejection instead for a plan over the limit.
+    static void warnIfWorkspaceExceedsEngineConfig(const CompiledPlan& plan)
+    {
+        if(!hipdnn_data_sdk::logging::isLogLevelEnabled(HIPDNN_SEV_WARN) || plan.deserialized
+           || !plan.engineConfigDesc || !plan.engineConfigDesc->valid())
+        {
+            return;
+        }
+
+        int64_t configWorkspace = 0;
+        if(readEngineConfigWorkspace(plan, configWorkspace).is_bad()
+           || plan.workspaceSize <= configWorkspace)
+        {
+            return;
+        }
+
+        HIPDNN_FE_LOG_WARN("Engine "
+                           << engineNameFor(nullptr, plan.engineId) << " (id " << plan.engineId
+                           << ") built a plan with workspace " << plan.workspaceSize
+                           << ", larger than its engine config workspace " << configWorkspace);
+    }
+
+    // Skip reason for a finalized plan whose workspace exceeds the limit although its engine
+    // config reported less.
+    std::string finalizedWorkspaceReason(const CompiledPlan& plan) const
+    {
+        int64_t configWorkspace = 0;
+        const bool configKnown = readEngineConfigWorkspace(plan, configWorkspace).is_good();
+        return "finalized workspace " + std::to_string(plan.workspaceSize) + " exceeds limit "
+               + std::to_string(_maxWorkspaceAllowed) + " (engine config reported "
+               + (configKnown ? std::to_string(configWorkspace) : std::string("unknown")) + ")";
+    }
+
+    // Decide whether a filter removes the plan. Filters are checked in the order
+    // deselect_engines(), note filters, engine-config workspace, then the mark an earlier
+    // evaluation left. Notes are read only when a note filter is set, and the engine-config
+    // workspace only when a limit is set; a failed workspace read filters the plan, a failed
+    // note read returns its error. A deserialized plan is never filtered.
+    Error evaluatePlanFilters(const CompiledPlan& plan, PlanFilterVerdict& verdict)
+    {
+        verdict = PlanFilterVerdict{};
+        if(plan.deserialized)
+        {
+            return {ErrorCode::OK, ""};
+        }
+
+        if(!plan.engineConfigDesc || !plan.engineConfigDesc->valid() || !plan.executionPlanDesc
+           || !plan.executionPlanDesc->valid())
+        {
+            verdict.skipReason = "missing or invalid descriptor";
+            return {ErrorCode::OK, ""};
+        }
+
+        const auto filtered = [&verdict](std::string reason) {
+            verdict.skipReason = std::move(reason);
+            verdict.filtered = true;
+            return Error{ErrorCode::OK, ""};
+        };
+
+        if(_barredEngineIds.count(plan.engineId) > 0)
+        {
+            return filtered("deselect_engines");
+        }
+
+        if(noteFilterSet())
+        {
+            NoteVerdict noteVerdict = NoteVerdict::PASS;
+            HIPDNN_CHECK_ERROR(noteVerdictForEngine(plan.engineId, noteVerdict));
+            if(noteVerdict == NoteVerdict::FAIL_NUMERICAL)
+            {
+                return filtered("numerical note filter");
+            }
+            if(noteVerdict == NoteVerdict::FAIL_BEHAVIOR)
+            {
+                return filtered("behavior note filter");
+            }
+        }
+
+        if(_maxWorkspaceAllowed >= 0)
+        {
+            int64_t configWorkspace = 0;
+            const Error readError = readEngineConfigWorkspace(plan, configWorkspace);
+            if(readError.is_bad())
+            {
+                return filtered("workspace unknown: " + readError.get_message());
+            }
+            if(configWorkspace > _maxWorkspaceAllowed)
+            {
+                return filtered("workspace " + std::to_string(configWorkspace) + " exceeds limit "
+                                + std::to_string(_maxWorkspaceAllowed));
+            }
+        }
+
+        if(plan.barred)
+        {
+            return filtered("barred by an earlier evaluation");
+        }
+
+        return {ErrorCode::OK, ""};
+    }
+
+    // Finalize the plan, then compare its finalized workspace with the limit. The engine
+    // config bounds the finalized workspace by contract, so the comparison is a safety net;
+    // a plan over the limit is marked barred, a warning names both sizes, and `rejection`
+    // holds the skip reason. Returns the finalize error. Only for a plan finalized by this
+    // call: the finalized active plan is never marked.
+    Error finalizePlanWithinLimit(size_t index, std::string& rejection)
+    {
+        rejection.clear();
+        auto& plan = _compiledPlans[index];
+        HIPDNN_CHECK_ERROR(finalizePlanDescriptor(plan));
+
+        if(_maxWorkspaceAllowed >= 0 && plan.workspaceSize > _maxWorkspaceAllowed)
+        {
+            plan.barred = true;
+            rejection = finalizedWorkspaceReason(plan);
+            HIPDNN_FE_LOG_WARN("Plan index " << index << " (engine " << plan.engineId
+                                             << ") rejected: " << rejection);
+        }
+        else
+        {
+            warnIfWorkspaceExceedsEngineConfig(plan);
+        }
+        return {ErrorCode::OK, ""};
+    }
+
+    static void logPlanSkipped(size_t index, const CompiledPlan& plan, const std::string& reason)
+    {
+        HIPDNN_FE_LOG_INFO("plan index " << index << " (engine " << plan.engineId
+                                         << ") skipped: " << reason);
+    }
+
+    // Append "engine <id>: <what>" to a failure message, joined by "; ".
+    static void appendFailure(std::string& failures, int64_t engineId, const std::string& what)
+    {
+        if(!failures.empty())
+        {
+            failures += "; ";
+        }
+        failures += "engine " + std::to_string(engineId) + ": " + what;
+    }
+
     /// The execution plan is finalized only after build_plans()/build(); a plan
     /// descriptor that has merely been created is valid but not yet finalized and
     /// carries no execution context. serialize() gates the combined graph+plan
@@ -496,6 +817,62 @@ private:
     std::optional<int64_t> _preferredEngineId;
 
     bool _isOverrideShapeEnabled = false;
+
+    // Create and finalize an engine descriptor for engineId on the built
+    // operation graph. Returns ErrorCode::INVALID_VALUE if the graph has not
+    // been built.
+    Error
+        createEngineDescriptorForKnobQuery(int64_t engineId,
+                                           detail::ScopedHipdnnBackendDescriptor& engineDesc) const
+    {
+        if(!hasValidGraphDesc())
+        {
+            return {ErrorCode::INVALID_VALUE,
+                    "Graph has not been built, build the operation graph first. Cannot get knobs "
+                    "for engine."};
+        }
+
+        return hipdnn_frontend::detail::createEngineDescriptorForGraph(
+            engineDesc, _graphDesc->get(), engineId);
+    }
+
+    // Insert the knobs exposed by a finalized engine descriptor into knobs,
+    // keyed by knob type. Entries already present for a knob type are kept.
+    static Error knobLookupFromEngineDescriptor(hipdnnBackendDescriptor_t engineDesc,
+                                                std::unordered_map<KnobType_t, Knob>& knobs)
+    {
+        std::vector<Knob> knobVector;
+        HIPDNN_CHECK_ERROR(detail::unpackKnobsFromDescriptors(engineDesc, knobVector));
+
+        for(auto& knob : knobVector)
+        {
+            knobs.try_emplace(knob.knobId(), std::move(knob));
+        }
+
+        return {ErrorCode::OK, ""};
+    }
+
+    /// Metric requested through set_ranking_metric(); empty when none was, which leaves
+    /// HIPDNN_HEUR_RANKING_METRIC and the backend default to decide.
+    std::string _rankingMetric;
+
+    // Explicit-engine configs must carry the metric too; heuristic results already do.
+    Error applyRankingMetric(hipdnnBackendDescriptor_t engineConfigDesc) const
+    {
+        if(_rankingMetric.empty())
+        {
+            return {};
+        }
+        HIPDNN_RETURN_ON_BACKEND_FAILURE(
+            detail::hipdnnBackend()->backendSetAttribute(
+                engineConfigDesc,
+                HIPDNN_ATTR_ENGINECFG_RANKING_METRIC_EXT,
+                HIPDNN_TYPE_CHAR,
+                static_cast<int64_t>(_rankingMetric.size()),
+                _rankingMetric.c_str()),
+            "Failed to set ranking metric on the engine config descriptor.");
+        return {};
+    }
 
     // Get the active plan's engine config descriptor. Throws if no active plan exists.
     // Returns a borrowed pointer; invalidated by any operation that resets _compiledPlans
@@ -752,6 +1129,7 @@ private:
     /// Set the graph descriptor and its finalization state atomically
     void setGraphDesc(std::unique_ptr<detail::ScopedHipdnnBackendDescriptor> desc, bool finalized)
     {
+        _noteVerdicts.clear();
         _graphDesc = std::move(desc);
         _graphDescFinalized = finalized;
     }
@@ -759,6 +1137,7 @@ private:
     /// Clear the graph descriptor and finalization state
     void resetGraphDesc()
     {
+        _noteVerdicts.clear();
         _graphDesc.reset();
         _graphDescFinalized = false;
     }
@@ -950,7 +1329,7 @@ private:
                != notes.end();
     }
 
-    Error initializeEngineConfig(hipdnnBackendDescriptor_t engineHeuristicDesc)
+    Error initializeEngineConfig(const std::vector<HeuristicMode>& modes)
     {
         // The backend's SelectionHeuristic::Config built-in honors
         // HIPDNN_HEUR_CONFIG_PATH inside the policy loop, so the
@@ -961,8 +1340,8 @@ private:
         // back to the heuristic's choice.
         std::vector<std::unique_ptr<detail::ScopedHipdnnBackendDescriptor>> engineConfigs;
         std::vector<int64_t> engineIds;
-        HIPDNN_CHECK_ERROR(hipdnn_frontend::detail::getEngineConfigs(
-            engineConfigs, engineIds, engineHeuristicDesc, /*getAll=*/true));
+        HIPDNN_CHECK_ERROR(hipdnn_frontend::detail::getEngineConfigsForModes(
+            engineConfigs, engineIds, _graphDesc->get(), modes, _rankingMetric));
 
         size_t selectedIndex = 0;
         if(_preferredEngineId.has_value())
@@ -998,38 +1377,6 @@ private:
 
         replaceCompiledPlans(
             std::move(plans), selectedIndex, detail::ActivePlanFinalization::UNFINALIZED);
-
-        return {ErrorCode::OK, ""};
-    }
-
-    // Initialize engine config for a specific engine ID.
-    // Clears the compiled plans vector and creates a single plan entry with
-    // the engine config set but not yet finalized.
-    // This method does NOT finalize the engine config. The caller must
-    // finalize after setting any knobs on the config.
-    Error initializeEngineConfig(int64_t engineId)
-    {
-        detail::ScopedHipdnnBackendDescriptor engineDesc;
-
-        HIPDNN_CHECK_ERROR(hipdnn_frontend::detail::createEngineDescriptorForGraph(
-            engineDesc, _graphDesc->get(), engineId));
-
-        auto engineConfigDesc = std::make_unique<detail::ScopedHipdnnBackendDescriptor>(
-            HIPDNN_BACKEND_ENGINECFG_DESCRIPTOR);
-
-        HIPDNN_RETURN_ON_BACKEND_FAILURE(detail::hipdnnBackend()->backendSetAttribute(
-                                             engineConfigDesc->get(),
-                                             HIPDNN_ATTR_ENGINECFG_ENGINE,
-                                             HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                                             1,
-                                             static_cast<const void*>(&engineDesc.get())),
-                                         "Failed to set engine on the engine config descriptor.");
-
-        CompiledPlan plan;
-        plan.engineConfigDesc = std::move(engineConfigDesc);
-        plan.engineId = engineId;
-
-        replaceWithSingleCompiledPlan(std::move(plan), detail::ActivePlanFinalization::UNFINALIZED);
 
         return {ErrorCode::OK, ""};
     }
@@ -1322,6 +1669,10 @@ private:
 
             // --- Filter the plan specs ---
             filteredSpecs.reserve(_planSpecs.size());
+            // Compiled during filter evaluation, aligned with filteredSpecs; an entry without
+            // an engine config was not compiled yet.
+            std::vector<CompiledPlan> evaluatedSpecPlans;
+            evaluatedSpecPlans.reserve(_planSpecs.size());
 
             for(const auto& spec : _planSpecs)
             {
@@ -1350,6 +1701,7 @@ private:
                                                            spec.workspaceSize,
                                                            int64_t{-1},
                                                            config,
+                                                           "deselect_engines",
                                                            spec.supportsExhaustive,
                                                            /*ranExhaustive=*/false,
                                                            /*exhaustiveNotRunReason=*/std::string{},
@@ -1357,7 +1709,37 @@ private:
                     ++barredCount;
                     continue;
                 }
+
+                // The note and workspace filters read the spec's engine config, so a spec they
+                // apply to is compiled before any priming. The compiled plan is kept for the
+                // real compile below. A spec that fails to compile passes here and reports its
+                // failure there.
+                CompiledPlan evaluatedPlan;
+                if((noteFilterSet() || _maxWorkspaceAllowed >= 0)
+                   && compilePlanFromSpec(spec.engineId, spec.knobSettings, evaluatedPlan)
+                          .is_good())
+                {
+                    PlanFilterVerdict verdict;
+                    HIPDNN_CHECK_ERROR(evaluatePlanFilters(evaluatedPlan, verdict));
+                    if(verdict.filtered)
+                    {
+                        nonBenchmarkedResults.push_back(autotune::detail::makeBarredResult(
+                            spec.engineId,
+                            spec.knobSettings,
+                            spec.workspaceSize,
+                            int64_t{-1},
+                            config,
+                            verdict.skipReason,
+                            spec.supportsExhaustive,
+                            /*ranExhaustive=*/false,
+                            /*exhaustiveNotRunReason=*/std::string{},
+                            engineNameFor(handle, spec.engineId)));
+                        ++barredCount;
+                        continue;
+                    }
+                }
                 filteredSpecs.push_back(spec);
+                evaluatedSpecPlans.push_back(std::move(evaluatedPlan));
             }
 
             if(filteredSpecs.empty())
@@ -1384,7 +1766,6 @@ private:
                 for(size_t specIdx = 0; specIdx < filteredSpecs.size(); ++specIdx)
                 {
                     auto& spec = filteredSpecs[specIdx];
-
                     if(!spec.supportsExhaustive)
                     {
                         HIPDNN_FE_LOG_INFO("autotune: engine "
@@ -1439,6 +1820,8 @@ private:
                             = "Priming finalize failed: " + finErr.get_message();
                         continue;
                     }
+
+                    warnIfWorkspaceExceedsEngineConfig(primingPlan);
 
                     // Do not deselect priming plans by workspace size here  as the real plan's
                     // compiled workspace size may be smaller after the priming plan run than
@@ -1519,8 +1902,10 @@ private:
             for(size_t specIdx = 0; specIdx < filteredSpecs.size(); ++specIdx)
             {
                 const auto& spec = filteredSpecs[specIdx];
-                CompiledPlan plan;
-                auto compileErr = compilePlanFromSpec(spec.engineId, spec.knobSettings, plan);
+                CompiledPlan plan = std::move(evaluatedSpecPlans[specIdx]);
+                auto compileErr = plan.engineConfigDesc != nullptr
+                                      ? Error{ErrorCode::OK, ""}
+                                      : compilePlanFromSpec(spec.engineId, spec.knobSettings, plan);
                 if(compileErr.is_bad())
                 {
                     HIPDNN_FE_LOG_WARN("autotune: failed to compile plan for engine "
@@ -1559,19 +1944,19 @@ private:
                     continue;
                 }
 
-                // --- Deselect by workspace size for real compiled plans (only) ---
+                // --- Safety net: the finalized plan must fit the deselect limit ---
                 if(_maxWorkspaceAllowed >= 0 && plan.workspaceSize > _maxWorkspaceAllowed)
                 {
-                    HIPDNN_FE_LOG_INFO("autotune: plan (engine "
-                                       << spec.engineId << ") barred: workspace "
-                                       << plan.workspaceSize << " exceeds deselect limit "
-                                       << _maxWorkspaceAllowed);
+                    const auto reason = finalizedWorkspaceReason(plan);
+                    HIPDNN_FE_LOG_WARN("autotune: plan (engine " << spec.engineId
+                                                                 << ") barred: " << reason);
                     nonBenchmarkedResults.push_back(autotune::detail::makeBarredResult(
                         spec.engineId,
                         spec.knobSettings,
                         spec.workspaceSize,
                         plan.workspaceSize,
                         config,
+                        reason,
                         spec.supportsExhaustive,
                         primingOutcomes[specIdx].ranExhaustive,
                         primingOutcomes[specIdx].exhaustiveNotRunReason,
@@ -1579,6 +1964,8 @@ private:
                     ++barredCount;
                     continue;
                 }
+
+                warnIfWorkspaceExceedsEngineConfig(plan);
 
                 // --- Recheck workspace size guard using real compiled plan workspace size ---
                 if(maxWorkspaceSize >= 0 && plan.workspaceSize > maxWorkspaceSize)
@@ -1716,14 +2103,24 @@ private:
                     continue;
                 }
 
-                if(plan.barred)
+                // Filters apply to plans built earlier, so one set after build_plans(ALL) takes
+                // effect. The finalized active plan is reported barred but never marked: it
+                // stays active and executable.
+                PlanFilterVerdict verdict;
+                HIPDNN_CHECK_ERROR(evaluatePlanFilters(plan, verdict));
+                if(verdict.filtered)
                 {
+                    if(!isFinalizedActivePlan(i))
+                    {
+                        plan.barred = true;
+                    }
                     nonBenchmarkedResults.push_back(
                         autotune::detail::makeBarredResult(plan.engineId,
                                                            plan.knobSettings,
                                                            plan.workspaceSize,
                                                            plan.workspaceSize,
                                                            config,
+                                                           verdict.skipReason,
                                                            supportsExhaustive,
                                                            /*ranExhaustive=*/false,
                                                            /*exhaustiveNotRunReason=*/std::string{},
@@ -1921,6 +2318,7 @@ private:
                 std::vector<float> timings;
                 bool benchmarkFailed = false;
                 bool restartUnstalled = false;
+                int discardedNegativeSamples = 0;
                 auto candidateQuality = ::hipdnn_frontend::TimingQuality::INVALID;
 
                 // One lambda for both strategies: it just runs the reusable profiling
@@ -1948,6 +2346,7 @@ private:
                     timings = std::move(outcome.timings);
                     benchmarkFailed = outcome.benchmarkFailed;
                     restartUnstalled = outcome.restartUnstalled;
+                    discardedNegativeSamples = outcome.discardedNegativeSamples;
                     candidateQuality = outcome.finalQuality;
                     if(benchmarkFailed)
                     {
@@ -1975,6 +2374,7 @@ private:
                     timings = std::move(outcome.timings);
                     benchmarkFailed = outcome.benchmarkFailed;
                     restartUnstalled = outcome.restartUnstalled;
+                    discardedNegativeSamples = outcome.discardedNegativeSamples;
                     candidateQuality = outcome.finalQuality;
                     if(benchmarkFailed)
                     {
@@ -1989,8 +2389,9 @@ private:
                     HIPDNN_FE_LOG_WARN(
                         "autotune: engine "
                         << result.engineName
-                        << ": stall watchdog fired or stalling was declined mid-sweep; "
-                           "discarding this pass and re-measuring every candidate unstalled.");
+                        << ": stall watchdog fired, stalling was declined, or stalled "
+                           "timing kept reading negative mid-sweep; discarding this pass and "
+                           "re-measuring every candidate unstalled.");
                     restartUnstalledRequested = true;
                     break;
                 }
@@ -2002,6 +2403,16 @@ private:
                                                            << result.errorMessage);
                     allResults.push_back(std::move(result));
                     continue;
+                }
+
+                if(discardedNegativeSamples > 0)
+                {
+                    HIPDNN_FE_LOG_WARN("autotune: engine "
+                                       << result.engineName << ": discarded "
+                                       << discardedNegativeSamples
+                                       << " negative elapsed reading(s) from the HIP event "
+                                          "timer and re-measured them "
+                                          "(ROCm/rocm-systems#12925).");
                 }
 
                 // --- Compute statistics ---
@@ -2058,6 +2469,24 @@ private:
             return rankErr;
         }
         setActivePlanState(winnerPlanIndex, detail::ActivePlanFinalization::FINALIZED);
+
+        // --- Run the winner last ---
+        // The timed sweep leaves the last timed plan's output in the caller's buffers.
+        // Executing the winner after the sweep (and after any stalled restart) makes those
+        // buffers hold the winner's output on success. The sync makes that output complete
+        // on return, as the event-synchronized timed runs were, and reports a device fault
+        // in this run as the error of this call.
+        auto winnerExecErr = detail::executeWithPlan(
+            handle, *_compiledPlans[winnerPlanIndex].executionPlanDesc, variantPackDesc);
+        if(winnerExecErr.is_bad())
+        {
+            return winnerExecErr;
+        }
+        auto winnerSyncErr = autotune::detail::syncDevice();
+        if(winnerSyncErr.is_bad())
+        {
+            return winnerSyncErr;
+        }
 
         // --- Persist results ---
 #ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
@@ -2386,17 +2815,8 @@ public:
     // NOLINTNEXTLINE(readability-identifier-naming)
     Error get_knobs_for_engine(int64_t engineId, std::vector<Knob>& knobs) const
     {
-        if(!hasValidGraphDesc())
-        {
-            return {ErrorCode::INVALID_VALUE,
-                    "Graph has not been built, build the operation graph first. Cannot get knobs "
-                    "for engine."};
-        }
-
         detail::ScopedHipdnnBackendDescriptor engineDesc;
-
-        HIPDNN_CHECK_ERROR(hipdnn_frontend::detail::createEngineDescriptorForGraph(
-            engineDesc, _graphDesc->get(), engineId));
+        HIPDNN_CHECK_ERROR(createEngineDescriptorForKnobQuery(engineId, engineDesc));
 
         return detail::unpackKnobsFromDescriptors(engineDesc.get(), knobs);
     }
@@ -2404,8 +2824,9 @@ public:
     /**
      * @brief Get knobs for a specific engine, indexed by knob type
      *
-     * Convenience wrapper around get_knobs_for_engine() that populates
-     * a map keyed by KnobType_t for direct lookup.
+     * Clears @p knobs, creates and finalizes an engine descriptor for
+     * @p engineId, and fills @p knobs with that engine's knobs keyed by
+     * KnobType_t for direct lookup.
      *
      * @param engineId The engine ID to query
      * @param knobs Output map populated with available knobs, keyed by type
@@ -2421,15 +2842,10 @@ public:
     {
         knobs.clear();
 
-        std::vector<Knob> knobVector;
-        HIPDNN_CHECK_ERROR(get_knobs_for_engine(engineId, knobVector));
+        detail::ScopedHipdnnBackendDescriptor engineDesc;
+        HIPDNN_CHECK_ERROR(createEngineDescriptorForKnobQuery(engineId, engineDesc));
 
-        for(auto& knob : knobVector)
-        {
-            knobs.try_emplace(knob.knobId(), std::move(knob));
-        }
-
-        return {ErrorCode::OK, ""};
+        return knobLookupFromEngineDescriptor(engineDesc.get(), knobs);
     }
 
     /**
@@ -2445,7 +2861,7 @@ public:
      */
     // NOLINTNEXTLINE(readability-identifier-naming, readability-convert-member-functions-to-static)
     Error get_ranked_engine_ids(std::vector<int64_t>& rankedEngineIds,
-                                const std::vector<HeuristicMode>& modes = {HeuristicMode::FALLBACK})
+                                const std::vector<HeuristicMode>& modes = {HeuristicMode::A})
     {
         if(!hasReadyGraphDesc())
         {
@@ -2454,13 +2870,9 @@ public:
                     "ranked engine ids."};
         }
 
-        detail::ScopedHipdnnBackendDescriptor engineHeuristicDesc;
-        HIPDNN_CHECK_ERROR(hipdnn_frontend::detail::createEngineHeuristicDescriptorForGraph(
-            engineHeuristicDesc, _graphDesc->get(), modes));
-
         std::vector<std::unique_ptr<detail::ScopedHipdnnBackendDescriptor>> engineConfigs;
-        HIPDNN_CHECK_ERROR(detail::getEngineConfigs(
-            engineConfigs, rankedEngineIds, engineHeuristicDesc.get(), true));
+        HIPDNN_CHECK_ERROR(detail::getEngineConfigsForModes(
+            engineConfigs, rankedEngineIds, _graphDesc->get(), modes, _rankingMetric));
 
         return {ErrorCode::OK, ""};
     }
@@ -2550,10 +2962,118 @@ public:
     }
 
     /**
+     * @brief Get numerical notes for an engine applicable to this graph.
+     *
+     * @param engineId Backend global engine ID to query
+     * @param notes Output numerical notes; cleared on entry. A backend that
+     *        answers NOT_SUPPORTED yields {NONDETERMINISTIC}.
+     * @return ErrorCode::OK on success; ErrorCode::INVALID_VALUE if the graph
+     *         has not been built; ErrorCode::HIPDNN_BACKEND_ERROR on other failure
+     */
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    Error get_numerical_notes_for_engine(int64_t engineId, std::vector<NumericalNote>& notes) const
+    {
+        notes.clear();
+
+        if(!hasReadyGraphDesc())
+        {
+            return {ErrorCode::INVALID_VALUE,
+                    "Graph has not been built, build the operation graph first. Cannot get "
+                    "numerical notes for engine."};
+        }
+
+        detail::ScopedHipdnnBackendDescriptor engineDesc;
+        HIPDNN_CHECK_ERROR(hipdnn_frontend::detail::createEngineDescriptorForGraph(
+            engineDesc, _graphDesc->get(), engineId));
+
+        // A backend that predates numerical notes answers NOT_SUPPORTED. Its
+        // engines are treated as nondeterministic, the conservative default; the
+        // backend error it recorded is drained so it does not outlive the query.
+        const auto reportNondeterministic = [&notes]() {
+            std::array<char, 1024> drained{};
+            detail::hipdnnBackend()->getLastErrorString(drained.data(), drained.size());
+            notes = {NumericalNote::NONDETERMINISTIC};
+            return Error{ErrorCode::OK, ""};
+        };
+
+        int64_t noteCount = 0;
+        const auto countStatus
+            = detail::hipdnnBackend()->backendGetAttribute(engineDesc.get(),
+                                                           HIPDNN_ATTR_ENGINE_NUMERICAL_NOTE,
+                                                           HIPDNN_TYPE_NUMERICAL_NOTE,
+                                                           0,
+                                                           &noteCount,
+                                                           nullptr);
+        if(countStatus == HIPDNN_STATUS_NOT_SUPPORTED)
+        {
+            return reportNondeterministic();
+        }
+        HIPDNN_RETURN_ON_BACKEND_FAILURE(countStatus,
+                                         "Failed to get numerical note count from engine "
+                                         "descriptor.");
+
+        if(noteCount < 0)
+        {
+            return {ErrorCode::HIPDNN_BACKEND_ERROR,
+                    "Backend returned a negative numerical note count: "
+                        + std::to_string(noteCount)};
+        }
+
+        if(noteCount == 0)
+        {
+            return {ErrorCode::OK, ""};
+        }
+
+        const auto expectedNoteCount = noteCount;
+        std::vector<hipdnnBackendNumericalNote_t> backendNotes(static_cast<size_t>(noteCount));
+        const auto readStatus
+            = detail::hipdnnBackend()->backendGetAttribute(engineDesc.get(),
+                                                           HIPDNN_ATTR_ENGINE_NUMERICAL_NOTE,
+                                                           HIPDNN_TYPE_NUMERICAL_NOTE,
+                                                           noteCount,
+                                                           &noteCount,
+                                                           backendNotes.data());
+        if(readStatus == HIPDNN_STATUS_NOT_SUPPORTED)
+        {
+            return reportNondeterministic();
+        }
+        HIPDNN_RETURN_ON_BACKEND_FAILURE(readStatus,
+                                         "Failed to get numerical notes from engine descriptor.");
+
+        if(noteCount != expectedNoteCount)
+        {
+            return {ErrorCode::HIPDNN_BACKEND_ERROR,
+                    "Backend returned a numerical note count of " + std::to_string(noteCount)
+                        + " after reporting " + std::to_string(expectedNoteCount) + "."};
+        }
+
+        notes.reserve(backendNotes.size());
+        for(auto note : backendNotes)
+        {
+            // A note this frontend does not recognize is dropped rather than
+            // surfaced: a newer backend may define notes past this frontend's
+            // range, and reporting them would require inventing a meaning.
+            if(const auto mapped = fromHipdnnNumericalNote(note); mapped.has_value())
+            {
+                notes.push_back(*mapped);
+            }
+            else
+            {
+                HIPDNN_FE_LOG_INFO(
+                    "Skipping numerical note unknown to this frontend: " << static_cast<int>(note));
+            }
+        }
+
+        return {ErrorCode::OK, ""};
+    }
+
+    /**
      * @brief Create execution plans using heuristics
      *
      * Queries the backend for available engines and selects based on the
-     * specified heuristic modes.
+     * specified heuristic modes. The engine filters (deselect_engines(), the note filters,
+     * deselect_workspace_greater_than()) are not reset: filters set before this call apply to
+     * the plans it creates, and the creation drops the note verdicts read so far.
      *
      * @param modes Heuristic modes to use for engine selection
      * @return ErrorCode::OK on success; ErrorCode::INVALID_VALUE if the graph
@@ -2563,8 +3083,7 @@ public:
      *         get_message() for the specific failure reason.
      */
     // NOLINTNEXTLINE(readability-identifier-naming)
-    Error create_execution_plans(const std::vector<HeuristicMode>& modes
-                                 = {HeuristicMode::FALLBACK})
+    Error create_execution_plans(const std::vector<HeuristicMode>& modes = {HeuristicMode::A})
     {
         HIPDNN_FE_LOG_INFO("Creating execution plans for graph " << graph_attributes.get_name());
 
@@ -2575,8 +3094,7 @@ public:
                     "The plan-spec path and compiled-plan path are mutually exclusive."};
         }
 
-        _maxWorkspaceAllowed = -1;
-        _barredEngineIds.clear();
+        _noteVerdicts.clear();
 
         if(!hasReadyGraphDesc())
         {
@@ -2585,11 +3103,7 @@ public:
                     "execution plan."};
         }
 
-        detail::ScopedHipdnnBackendDescriptor engineHeuristicDesc;
-        HIPDNN_CHECK_ERROR(hipdnn_frontend::detail::createEngineHeuristicDescriptorForGraph(
-            engineHeuristicDesc, _graphDesc->get(), modes));
-
-        HIPDNN_CHECK_ERROR(initializeEngineConfig(engineHeuristicDesc.get()));
+        HIPDNN_CHECK_ERROR(initializeEngineConfig(modes));
 
         // Allocate an unfinalized execution plan descriptor for each engine
         // config. build_plans() will finalize the active plan (default) or all
@@ -2615,7 +3129,10 @@ public:
      *
      * Creates an execution plan for a specific engine, configured via knob
      * settings. Settings for deprecated knobs or knobs that are not supported
-     * by the engine are skipped and a log message is added describing this.
+     * by the engine are skipped and a log message is added describing this. The engine
+     * filters persist and apply to the plan this call creates: when a filter removes the
+     * named engine, check_support() and build_plans() fail with
+     * ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED.
      *
      * @param engineId The engine ID to use
      * @param settings Knob settings to apply to the engine
@@ -2637,8 +3154,7 @@ public:
                     "The plan-spec path and compiled-plan path are mutually exclusive."};
         }
 
-        _maxWorkspaceAllowed = -1;
-        _barredEngineIds.clear();
+        _noteVerdicts.clear();
 
         if(!hasReadyGraphDesc())
         {
@@ -2658,22 +3174,52 @@ public:
     /**
      * @brief Verify that the execution plan is valid and supported
      *
-     * @return ErrorCode::OK if valid, or ErrorCode::HIPDNN_BACKEND_ERROR
-     *         if the execution plan has not been created.
+     * With no engine filter set, checks that the execution plan has been created. With a
+     * filter set (deselect_engines(), a note filter, deselect_workspace_greater_than(), or a
+     * plan an earlier build marked barred), answers "is this supported with these filters?":
+     * OK when at least one created plan is not filtered, in ranked order. It finalizes and
+     * marks nothing, and a plan whose engine-config workspace cannot be read while a limit is
+     * set counts as filtered. Notes are read only when a note filter is set. A deserialized
+     * plan is never filtered: it counts as passing.
+     *
+     * @return ErrorCode::OK if supported; ErrorCode::HIPDNN_BACKEND_ERROR if the execution
+     *         plan has not been created; ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED
+     *         when every created plan is filtered, with a message listing each skip reason; or
+     *         the error of a failed note read.
      */
     Error check_support() // NOLINT(readability-identifier-naming)
     {
         HIPDNN_FE_LOG_INFO("Checking execution plan support for graph "
                            << graph_attributes.get_name());
 
-        const auto* execPlan = activeExecutionPlanPtr();
-        if(execPlan == nullptr || !execPlan->valid())
+        if(_compiledPlans.empty() || !filterSet())
         {
-            return {ErrorCode::HIPDNN_BACKEND_ERROR,
-                    "Execution plan descriptor is not created or invalid."};
+            const auto* execPlan = activeExecutionPlanPtr();
+            if(execPlan == nullptr || !execPlan->valid())
+            {
+                return {ErrorCode::HIPDNN_BACKEND_ERROR,
+                        "Execution plan descriptor is not created or invalid."};
+            }
+
+            return {ErrorCode::OK, ""};
         }
 
-        return {ErrorCode::OK, ""};
+        std::string skips;
+        for(size_t i = 0; i < _compiledPlans.size(); ++i)
+        {
+            const auto& plan = _compiledPlans[i];
+            PlanFilterVerdict verdict;
+            HIPDNN_CHECK_ERROR(evaluatePlanFilters(plan, verdict));
+            if(verdict.skipReason.empty())
+            {
+                return {ErrorCode::OK, ""};
+            }
+            logPlanSkipped(i, plan, verdict.skipReason);
+            appendFailure(skips, plan.engineId, verdict.skipReason);
+        }
+
+        return {ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED,
+                "No execution plan passes the engine filters: " + skips};
     }
 
     /**
@@ -2691,7 +3237,7 @@ public:
      */
     // NOLINTNEXTLINE(readability-identifier-naming)
     Error is_supported_ext(hipdnnHandle_t handle,
-                           const std::vector<HeuristicMode>& modes = {HeuristicMode::FALLBACK})
+                           const std::vector<HeuristicMode>& modes = {HeuristicMode::A})
     {
         HIPDNN_FE_LOG_INFO("Checking engine support for graph " << graph_attributes.get_name());
 
@@ -2704,9 +3250,18 @@ public:
             HIPDNN_CHECK_ERROR(finalizeGraphDescWithHandle(handle));
         }
 
+        // Applicability does not depend on the mode, so one query answers for every mode.
+        if(modes.empty())
+        {
+            return {ErrorCode::INVALID_VALUE, "No heuristic mode was requested."};
+        }
         detail::ScopedHipdnnBackendDescriptor engineHeuristicDesc;
-        HIPDNN_CHECK_ERROR(hipdnn_frontend::detail::createEngineHeuristicDescriptorForGraph(
-            engineHeuristicDesc, _graphDesc->get(), modes, /*findFirst=*/true));
+        HIPDNN_CHECK_ERROR(
+            hipdnn_frontend::detail::createEngineHeuristicDescriptorForGraph(engineHeuristicDesc,
+                                                                             _graphDesc->get(),
+                                                                             modes.front(),
+                                                                             /*findFirst=*/true,
+                                                                             _rankingMetric));
 
         HIPDNN_CHECK_ERROR(detail::hasEngineConfigs(engineHeuristicDesc.get()));
 
@@ -2720,6 +3275,11 @@ public:
      * If the graph has not been lowered to a backend descriptor, it will be
      * auto-lowered before serialization.
      *
+     * When the graph holds a finalized execution plan whose engine supports plan
+     * serialization, the plan is saved with the graph in one graph-and-plan container.
+     * Otherwise only the graph is saved. A plan loaded from bytes is saved as the plan
+     * bytes it was loaded from, unchanged; see serialize_compiled_plan().
+     *
      * @param[out] data The serialized binary data.
      * @return Error indicating success or failure.
      */
@@ -2732,6 +3292,7 @@ public:
     /** @brief Serialize a previously built graph to a binary byte vector.
      *
      * Requires a valid backend descriptor (call build_operation_graph() first).
+     * Embeds the execution plan as the non-const serialize() overload does.
      *
      * @param[out] data The serialized binary data.
      * @return Error indicating success or failure.
@@ -2742,6 +3303,8 @@ public:
     }
 
     /** @brief Serialize the graph to a binary byte vector, auto-lowering if needed.
+     *
+     * Embeds the execution plan as serialize() does.
      *
      * @return A pair of the serialized data and an Error.
      */
@@ -2754,6 +3317,8 @@ public:
     }
 
     /** @brief Serialize a previously built graph to a binary byte vector.
+     *
+     * Embeds the execution plan as serialize() does.
      *
      * @return A pair of the serialized data and an Error.
      */
@@ -2786,7 +3351,9 @@ public:
      * afterwards to finalize for execution.
      *
      * Any embedded execution plan is dropped (with a warning), as deserializing
-     * it needs a handle. Use from_binary(handle, data) to restore it.
+     * it needs a handle. Use from_binary(handle, data) to restore it. Loading the
+     * graph alone is also how to replace a plan saved by an older provider: build
+     * a new plan from the graph and save that.
      *
      * @param data The binary data to deserialize.
      * @return Error indicating success or failure.
@@ -2800,7 +3367,12 @@ public:
     /** @brief Deserialize a graph from a binary byte vector with handle.
      *
      * Unpacks the serialized graph, reconstructs frontend nodes and attributes,
-     * and finalizes the backend descriptor with the given handle.
+     * and finalizes the backend descriptor with the given handle. An embedded
+     * execution plan is restored too, and keeps a copy of its plan bytes, which
+     * include any GPU code object, for as long as the plan lives.
+     *
+     * An embedded execution plan is restored bound to the device of @p handle's
+     * stream, and executes only on handles whose stream is on that device.
      *
      * @param handle The hipDNN handle for finalization.
      * @param data The binary data to deserialize.
@@ -2862,7 +3434,9 @@ public:
      * afterwards to finalize for execution.
      *
      * Any embedded execution plan is dropped (with a warning), as deserializing
-     * it needs a handle. Use deserialize(handle, data) to restore it.
+     * it needs a handle. Use deserialize(handle, data) to restore it. Loading the
+     * graph alone is also how to replace a plan saved by an older provider: build
+     * a new plan from the graph and save that.
      *
      * @param data The binary data to deserialize.
      * @return Error indicating success or failure.
@@ -2874,7 +3448,16 @@ public:
 
     /** @brief Serialize the compiled backend execution plan to a byte vector.
      *
-     * Requires build_plans() or build() to have finalized the execution plan.
+     * Requires build_plans() or build() to have finalized the execution plan, or a plan loaded
+     * from bytes with deserialize(handle, data) or from_compiled_plan_binary().
+     *
+     * A loaded plan is not rebuilt when it is saved. It returns the exact plan bytes it was
+     * loaded from, which still hold the original kernel and the provider and format versions.
+     * Upgrading the provider does not change what a re-save writes. To pick up a newer kernel,
+     * build a new plan from the graph and save that; for a saved graph, from_binary(data)
+     * loads the graph alone. A plan loaded from a graph-and-plan container returns only its
+     * plan part, not the container.
+     *
      * The returned data is intended for from_compiled_plan_binary().
      */
     // NOLINTNEXTLINE(readability-identifier-naming)
@@ -2885,7 +3468,7 @@ public:
         {
             return {ErrorCode::INVALID_VALUE,
                     "Graph has no finalized compiled execution plan. Call build() or "
-                    "build_plans() first."};
+                    "build_plans(), or load one with from_compiled_plan_binary()."};
         }
 
         size_t planByteSize = 0;
@@ -2909,7 +3492,11 @@ public:
         return {};
     }
 
-    /** @brief Serialize the compiled backend execution plan to a byte vector. */
+    /** @brief Serialize the compiled backend execution plan to a byte vector.
+     *
+     * Same rules as serialize_compiled_plan(): a loaded plan returns the plan bytes it was
+     * loaded from, unchanged.
+     */
     // NOLINTNEXTLINE(readability-identifier-naming)
     std::pair<std::vector<uint8_t>, Error> to_compiled_plan_binary() const
     {
@@ -2926,6 +3513,13 @@ public:
      * allowed on this lightweight plan-only object; graph-aware override
      * validation is skipped, so callers must supply overrides that are
      * consistent with the deserialized plan.
+     *
+     * The restored plan keeps a copy of its plan bytes, which include any GPU
+     * code object, for as long as it lives. A later save returns those bytes.
+     *
+     * The plan is bound to the device of @p handle's stream and executes only on
+     * handles whose stream is on that device. To run it on another device,
+     * deserialize the same bytes with a handle on that device.
      */
     // NOLINTNEXTLINE(readability-identifier-naming)
     Error deserialize_compiled_plan(hipdnnHandle_t handle, const std::vector<uint8_t>& data)
@@ -2957,6 +3551,9 @@ public:
      * allowed on this lightweight plan-only object; graph-aware override
      * validation is skipped, so callers must supply overrides that are
      * consistent with the deserialized plan.
+     *
+     * The restored plan keeps a copy of its plan bytes, which include any GPU
+     * code object, for as long as it lives. A later save returns those bytes.
      */
     // NOLINTNEXTLINE(readability-identifier-naming)
     Error from_compiled_plan_binary(hipdnnHandle_t handle, const std::vector<uint8_t>& data)
@@ -3182,13 +3779,41 @@ public:
      *
      * Called internally by build() after create_execution_plans().
      *
-     * @param policy Controls which plans are compiled:
-     *   - HEURISTICS_CHOICE: compile only the active (top-ranked) plan
-     *   - ALL: compile every plan in _compiledPlans, setting _activePlanIndex
-     *     to the first plan that compiles successfully
+     * @param policy Controls which plans are compiled. Every engine filter applies:
+     *   deselect_engines(), the note filters, and deselect_workspace_greater_than() (against
+     *   the engine-config workspace). A plan a filter removes is marked barred and is never
+     *   finalized. A plan whose engine-config workspace cannot be read while a limit is set
+     *   counts as filtered. Notes are read only when a note filter is set. A deserialized plan
+     *   is never filtered: ALL skips it.
+     *   - HEURISTICS_CHOICE: compile the active plan. The active plan is the
+     *     preferred engine's plan when set_preferred_engine_id_ext() names an engine
+     *     among the ranked candidates, otherwise the top-ranked plan. If a filter
+     *     removes it, or it fails to finalize for any reason (engine config rejected,
+     *     backend finalize or execution-context creation failure, workspace query
+     *     failure), the other plans are tried in ranked order starting at the top of the
+     *     list; the first one that passes the filters and finalizes becomes active, so a
+     *     filter can replace the preferred engine. A finalize failure is logged as a
+     *     warning and each plan a filter removes as an info line. A plan that finalizes
+     *     with a workspace over the limit, though its engine config reported less, breaks
+     *     the plugin contract: it is barred with a warning and the walk moves on. If no
+     *     plan is built, ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED is returned with a
+     *     message listing every skipped or failed engine and its reason, and the active
+     *     plan is unchanged. This applies to a single-plan graph too. A repeated call after a
+     *     plan is finalized, or for a deserialized plan, returns ErrorCode::OK, evaluates no
+     *     filter, walks no plan, and leaves the active plan unchanged.
+     *   - ALL: evaluate every plan's filters, with every note read, before finalizing any
+     *     plan, then compile the plans that pass, setting _activePlanIndex to the first
+     *     that compiles successfully. A plan built earlier stays active and is never
+     *     finalized again: a filter that removes it is logged as skipped, never marks it,
+     *     and does not fail the call, and a repeated call builds only the other plans.
      *
-     * @return ErrorCode::OK on success, or ErrorCode::HIPDNN_BACKEND_ERROR
-     *         on failure. Call get_message() for the specific failure reason.
+     * @return ErrorCode::OK on success, including when a plan built earlier is still active;
+     *         ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED when no plan is built under
+     *         HEURISTICS_CHOICE, or under ALL with an engine filter set and no active plan;
+     *         ErrorCode::HIPDNN_BACKEND_ERROR when no plan finalizes under ALL with no filter
+     *         set and no active plan; the error of a failed note read;
+     *         ErrorCode::INVALID_VALUE / ErrorCode::HIPDNN_BACKEND_ERROR on other failures.
+     *         Call get_message() for the specific failure reason.
      */
     // NOLINTNEXTLINE(readability-identifier-naming)
     Error build_plans(BuildPlanPolicy policy = BuildPlanPolicy::HEURISTICS_CHOICE)
@@ -3205,55 +3830,81 @@ public:
 
         if(policy == BuildPlanPolicy::ALL)
         {
+            const bool filterWasSet = filterSet();
+            const bool activeFinalized = _executionPlanFinalized;
+            std::string failures;
+            std::vector<size_t> candidates;
+            std::vector<size_t> toBar;
+            candidates.reserve(_compiledPlans.size());
+
+            // Evaluate every plan's filters, with all note reads, before finalizing any plan,
+            // so a failed read leaves no plan half-built.
+            for(size_t i = 0; i < _compiledPlans.size(); ++i)
+            {
+                const auto& plan = _compiledPlans[i];
+                // A deserialized plan was finalized at load and has no engine config: it is
+                // never filtered and never rebuilt.
+                if(plan.deserialized)
+                {
+                    continue;
+                }
+                PlanFilterVerdict verdict;
+                HIPDNN_CHECK_ERROR(evaluatePlanFilters(plan, verdict));
+                if(verdict.skipReason.empty())
+                {
+                    candidates.push_back(i);
+                    continue;
+                }
+
+                logPlanSkipped(i, plan, verdict.skipReason);
+                appendFailure(failures, plan.engineId, verdict.skipReason);
+                if(!verdict.filtered)
+                {
+                    continue;
+                }
+                // The finalized active plan stays active and executable: skipped, not marked.
+                if(isFinalizedActivePlan(i))
+                {
+                    continue;
+                }
+                toBar.push_back(i);
+            }
+
+            for(const size_t i : toBar)
+            {
+                _compiledPlans[i].barred = true;
+            }
+
             bool anySucceeded = false;
             size_t firstSuccessIndex = 0;
 
-            for(size_t i = 0; i < _compiledPlans.size(); ++i)
+            for(const size_t i : candidates)
             {
                 auto& plan = _compiledPlans[i];
 
-                if(plan.barred)
+                // The active plan, and any plan an earlier ALL or build_plan_at_index()
+                // finalized, is already built: finalizing it again fails in the backend.
+                if(isFinalizedActivePlan(i) || plan.workspaceSize != -1)
                 {
                     continue;
                 }
 
-                // Skip entries without valid descriptors
-                if(!plan.engineConfigDesc || !plan.engineConfigDesc->valid()
-                   || !plan.executionPlanDesc || !plan.executionPlanDesc->valid())
-                {
-                    HIPDNN_FE_LOG_WARN("Skipping plan index "
-                                       << i << " (engine " << plan.engineId
-                                       << "): missing or invalid descriptor");
-                    continue;
-                }
-
-                if(_barredEngineIds.count(plan.engineId) > 0)
-                {
-                    plan.barred = true;
-                    HIPDNN_FE_LOG_INFO("Plan index "
-                                       << i << " (engine " << plan.engineId
-                                       << ") marked barred: matched barred engine ID");
-                    continue;
-                }
-
-                // Set the engine config, finalize the plan, and cache its
-                // workspace size. On failure log and skip to the next plan.
-                auto finalizeErr = finalizePlanDescriptor(plan);
+                // Set the engine config, finalize the plan, and cache its workspace size,
+                // then apply the safety net. On failure log and skip to the next plan.
+                std::string rejection;
+                const auto finalizeErr = finalizePlanWithinLimit(i, rejection);
                 if(finalizeErr.is_bad())
                 {
                     HIPDNN_FE_LOG_WARN("Failed to finalize plan index "
                                        << i << " (engine " << plan.engineId
                                        << "): " << finalizeErr.get_message() << "; skipping");
+                    appendFailure(failures, plan.engineId, finalizeErr.get_message());
                     continue;
                 }
 
-                if(_maxWorkspaceAllowed >= 0 && plan.workspaceSize > _maxWorkspaceAllowed)
+                if(!rejection.empty())
                 {
-                    plan.barred = true;
-                    HIPDNN_FE_LOG_INFO("Plan index " << i << " (engine " << plan.engineId
-                                                     << ") marked barred: workspace "
-                                                     << plan.workspaceSize << " exceeds limit "
-                                                     << _maxWorkspaceAllowed);
+                    appendFailure(failures, plan.engineId, rejection);
                     continue;
                 }
 
@@ -3264,59 +3915,124 @@ public:
                 }
             }
 
-            if(!anySucceeded)
+            // A plan built earlier stays active, so the call succeeds with it even when a new
+            // filter removes it and no other plan builds.
+            if(!anySucceeded && !activeFinalized)
             {
+                if(filterWasSet)
+                {
+                    return {ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED,
+                            "Failed to finalize any execution plan (policy=ALL): " + failures};
+                }
                 return {ErrorCode::HIPDNN_BACKEND_ERROR,
                         "Failed to finalize any execution plan (policy=ALL)."};
             }
 
-            setActivePlanState(firstSuccessIndex, detail::ActivePlanFinalization::FINALIZED);
+            if(anySucceeded && !activeFinalized)
+            {
+                setActivePlanState(firstSuccessIndex, detail::ActivePlanFinalization::FINALIZED);
+            }
             return {ErrorCode::OK, ""};
         }
 
-        // HEURISTICS_CHOICE path: compile only the active plan (original behavior)
+        // HEURISTICS_CHOICE path: compile the active plan. If a filter removes it or it fails
+        // to finalize, the other plans are tried in ranked order from the top of the list and
+        // the first one that passes the filters and finalizes becomes active.
+        //
+        // A repeated call after a plan was finalized, or for a deserialized plan, succeeds
+        // and leaves the active plan unchanged. No filter is evaluated and no plan is walked.
+        if(_executionPlanFinalized)
+        {
+            return {ErrorCode::OK, ""};
+        }
+
         auto& activePlan = _compiledPlans[_activePlanIndex];
-        if(activePlan.barred)
-        {
-            return {ErrorCode::INVALID_VALUE,
-                    "Active plan (engine " + std::to_string(activePlan.engineId)
-                        + ") is already barred."};
-        }
-
-        if(_barredEngineIds.count(activePlan.engineId) > 0)
-        {
-            activePlan.barred = true;
-            return {ErrorCode::INVALID_VALUE,
-                    "Active plan (engine " + std::to_string(activePlan.engineId)
-                        + ") is barred by deselect_engines()."};
-        }
-
-        auto* activeExecPlanPtr = activeExecutionPlanPtr();
-        auto* activeEngineCfgPtr = activeEngineConfigPtr();
-        if(activeExecPlanPtr == nullptr || activeEngineCfgPtr == nullptr)
+        if(!activePlan.engineConfigDesc || !activePlan.executionPlanDesc)
         {
             return {ErrorCode::INVALID_VALUE, "No active execution plan / engine config"};
         }
 
-        // Set the engine config, finalize the plan, and cache its workspace size.
-        // On failure return a backend error (the original heuristics behavior).
-        auto finalizeErr = finalizePlanDescriptor(activePlan);
-        if(finalizeErr.is_bad())
+        // Failures and skips in attempt order, the active plan first.
+        std::string failures;
+
+        // Try one plan: a filter removes it (marked barred, skipped), it fails to finalize, or
+        // the safety net rejects it, in which case `built` stays false; otherwise it is
+        // finalized and within the limit. The returned error is a failed note read.
+        const auto tryPlan = [this, &failures](size_t i, bool& built) -> Error {
+            built = false;
+            auto& plan = _compiledPlans[i];
+
+            PlanFilterVerdict verdict;
+            HIPDNN_CHECK_ERROR(evaluatePlanFilters(plan, verdict));
+            if(!verdict.skipReason.empty())
+            {
+                if(verdict.filtered)
+                {
+                    plan.barred = true;
+                }
+                logPlanSkipped(i, plan, verdict.skipReason);
+                appendFailure(failures, plan.engineId, verdict.skipReason);
+                return {ErrorCode::OK, ""};
+            }
+
+            // Set the engine config, finalize the plan, and cache its workspace size.
+            std::string rejection;
+            const auto finalizeErr = finalizePlanWithinLimit(i, rejection);
+            if(finalizeErr.is_bad())
+            {
+                if(i == _activePlanIndex)
+                {
+                    HIPDNN_FE_LOG_WARN("Failed to finalize active plan (engine "
+                                       << plan.engineId << "): " << finalizeErr.get_message()
+                                       << "; trying the other ranked plans");
+                }
+                else
+                {
+                    HIPDNN_FE_LOG_WARN("Failed to finalize plan index "
+                                       << i << " (engine " << plan.engineId
+                                       << "): " << finalizeErr.get_message() << "; skipping");
+                }
+                appendFailure(failures, plan.engineId, finalizeErr.get_message());
+                return {ErrorCode::OK, ""};
+            }
+
+            if(!rejection.empty())
+            {
+                appendFailure(failures, plan.engineId, rejection);
+                return {ErrorCode::OK, ""};
+            }
+
+            built = true;
+            return {ErrorCode::OK, ""};
+        };
+
+        bool built = false;
+        HIPDNN_CHECK_ERROR(tryPlan(_activePlanIndex, built));
+        if(built)
         {
-            return finalizeErr;
+            setActivePlanState(_activePlanIndex, detail::ActivePlanFinalization::FINALIZED);
+            return {ErrorCode::OK, ""};
         }
 
-        if(_maxWorkspaceAllowed >= 0 && activePlan.workspaceSize > _maxWorkspaceAllowed)
+        for(size_t i = 0; i < _compiledPlans.size(); ++i)
         {
-            activePlan.barred = true;
-            return {ErrorCode::INVALID_VALUE,
-                    "Active plan workspace " + std::to_string(activePlan.workspaceSize)
-                        + " exceeds deselect limit " + std::to_string(_maxWorkspaceAllowed) + "."};
+            if(i == _activePlanIndex)
+            {
+                continue;
+            }
+
+            HIPDNN_CHECK_ERROR(tryPlan(i, built));
+            if(built)
+            {
+                HIPDNN_FE_LOG_INFO("Falling back to plan index "
+                                   << i << " (engine " << _compiledPlans[i].engineId << ")");
+                setActivePlanState(i, detail::ActivePlanFinalization::FINALIZED);
+                return {ErrorCode::OK, ""};
+            }
         }
 
-        setActivePlanState(_activePlanIndex, detail::ActivePlanFinalization::FINALIZED);
-
-        return {ErrorCode::OK, ""};
+        return {ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED,
+                "Failed to finalize any execution plan (policy=HEURISTICS_CHOICE): " + failures};
     }
 
     /**
@@ -3333,6 +4049,10 @@ public:
      * to configure knobs, use get_ranked_engine_ids(), get_knobs_for_engine(),
      * and create_execution_plan_ext() instead.
      *
+     * @note The engine filters (deselect_engines(), the note filters,
+     * deselect_workspace_greater_than()) persist across this call: filters set before it apply
+     * to the plans it creates and builds.
+     *
      * @code{.cpp}
      * hipdnnHandle_t handle;
      * hipdnnCreate(&handle);
@@ -3342,18 +4062,24 @@ public:
      *
      * @param handle The hipDNN handle
      * @param modes Heuristic modes for engine selection
-     * @param policy Build plan policy: HEURISTICS_CHOICE compiles only the
-     *        top-ranked plan; ALL compiles every engine config
+     * @param policy Build plan policy: HEURISTICS_CHOICE compiles the active plan
+     *        (the preferred engine's plan when it is among the ranked candidates,
+     *        otherwise the top-ranked plan) and, if that plan fails to finalize for
+     *        any reason, tries the other ranked plans in order. See build_plans()
+     *        for the details. ALL compiles every engine config
      * @param do_multithreaded_builds Reserved for future use
      * @return ErrorCode::OK on success, or ErrorCode::INVALID_VALUE /
      *         ErrorCode::ATTRIBUTE_NOT_SET / ErrorCode::HIPDNN_BACKEND_ERROR /
      *         ErrorCode::GRAPH_NOT_SUPPORTED (when no engine has an applicable
-     *         solution on the current device) on failure. Call get_message() for
-     *         the specific failure reason.
+     *         solution on the current device) /
+     *         ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED (under HEURISTICS_CHOICE when no
+     *         plan is built, or under ALL with a filter set and no active plan) or
+     *         ErrorCode::HIPDNN_BACKEND_ERROR (under ALL with no filter set and no active
+     *         plan) on failure. Call get_message() for the specific failure reason.
      */
     // NOLINTBEGIN(readability-identifier-naming)
     Error build(hipdnnHandle_t handle,
-                const std::vector<HeuristicMode>& modes = {HeuristicMode::FALLBACK},
+                const std::vector<HeuristicMode>& modes = {HeuristicMode::A},
                 BuildPlanPolicy policy = BuildPlanPolicy::HEURISTICS_CHOICE,
                 [[maybe_unused]] bool do_multithreaded_builds = false)
     // NOLINTEND(readability-identifier-naming)
@@ -3409,7 +4135,7 @@ public:
     // NOLINTNEXTLINE(readability-identifier-naming)
     Error get_engine_configs(hipdnnHandle_t handle,
                              std::vector<EngineConfigInfo>& configs,
-                             const std::vector<HeuristicMode>& modes = {HeuristicMode::FALLBACK})
+                             const std::vector<HeuristicMode>& modes = {HeuristicMode::A})
     {
         configs.clear();
 
@@ -3419,14 +4145,10 @@ public:
                     "Graph has not been built. Call build_operation_graph() first."};
         }
 
-        detail::ScopedHipdnnBackendDescriptor engineHeuristicDesc;
-        HIPDNN_CHECK_ERROR(hipdnn_frontend::detail::createEngineHeuristicDescriptorForGraph(
-            engineHeuristicDesc, _graphDesc->get(), modes));
-
         std::vector<std::unique_ptr<detail::ScopedHipdnnBackendDescriptor>> engineConfigDescs;
         std::vector<int64_t> engineIds;
-        HIPDNN_CHECK_ERROR(detail::getEngineConfigs(
-            engineConfigDescs, engineIds, engineHeuristicDesc.get(), /*getAll=*/true));
+        HIPDNN_CHECK_ERROR(detail::getEngineConfigsForModes(
+            engineConfigDescs, engineIds, _graphDesc->get(), modes, _rankingMetric));
 
         configs.reserve(engineIds.size());
         for(size_t i = 0; i < engineIds.size(); ++i)
@@ -3460,6 +4182,11 @@ public:
             {
                 info.estimatedWorkspaceSize = wsSize;
             }
+            if(info.supportsExhaustive)
+            {
+                info.estimatedWorkspaceSize = std::max(
+                    info.estimatedWorkspaceSize, queryBenchmarkingWorkspaceSize(engineIds[i]));
+            }
 
             configs.push_back(std::move(info));
         }
@@ -3482,7 +4209,7 @@ public:
      */
     // NOLINTNEXTLINE(readability-identifier-naming)
     Error get_engine_configs(std::vector<EngineConfigInfo>& configs,
-                             const std::vector<HeuristicMode>& modes = {HeuristicMode::FALLBACK})
+                             const std::vector<HeuristicMode>& modes = {HeuristicMode::A})
     {
         return get_engine_configs(nullptr, configs, modes);
     }
@@ -3559,7 +4286,7 @@ public:
         HIPDNN_CHECK_ERROR(validateKnobSettingsStrict(spec.knobSettings, engineId));
 
         // Query workspace size
-        spec.workspaceSize = detail::queryEngineWorkspaceSize(_graphDesc->get(), engineId);
+        spec.workspaceSize = estimateEngineWorkspaceSize(engineId, spec.supportsExhaustive);
 
         addPlanSpecIfUnique(spec);
         return {ErrorCode::OK, ""};
@@ -3662,7 +4389,7 @@ public:
             }
 
             spec.workspaceSize
-                = detail::queryEngineWorkspaceSize(_graphDesc->get(), variant.engineId);
+                = estimateEngineWorkspaceSize(variant.engineId, spec.supportsExhaustive);
             addPlanSpecIfUnique(spec);
         }
         return {ErrorCode::OK, ""};
@@ -3743,11 +4470,11 @@ public:
             HIPDNN_CHECK_ERROR(
                 autotune::detail::computeCartesianProduct(filteredAxes, combinations));
 
+            const bool engineSupportsExhaustive = autotune::detail::knobsSupportExhaustive(knobs);
+
             // Query workspace once per engine (shared across all knob combinations)
             const int64_t engineWsSize
-                = detail::queryEngineWorkspaceSize(_graphDesc->get(), sweepSpec.engineId);
-
-            const bool engineSupportsExhaustive = autotune::detail::knobsSupportExhaustive(knobs);
+                = estimateEngineWorkspaceSize(sweepSpec.engineId, engineSupportsExhaustive);
 
             // For each combination, merge with fixed settings and add as a plan spec
             for(auto& combo : combinations)
@@ -3784,7 +4511,7 @@ public:
      * @return ErrorCode::OK on success
      */
     // NOLINTNEXTLINE(readability-identifier-naming)
-    Error add_all_engines(const std::vector<HeuristicMode>& modes = {HeuristicMode::FALLBACK})
+    Error add_all_engines(const std::vector<HeuristicMode>& modes = {HeuristicMode::A})
     {
         if(!_compiledPlans.empty())
         {
@@ -3804,8 +4531,9 @@ public:
      * @brief Get the estimated maximum workspace size across all collected plan specs
      *
      * Iterates the plan specs added by add_engine_*() calls and returns
-     * the maximum workspace requirement. Use this to allocate workspace
-     * before calling autotune().
+     * the maximum workspace requirement. For an engine that exposes the
+     * benchmarking knob, the requirement covers its EXHAUSTIVE priming
+     * configuration. Use this to allocate workspace before calling autotune().
      *
      * @param[out] maxSize Maximum workspace size in bytes
      * @return ErrorCode::OK on success, ErrorCode::INVALID_VALUE if no plan specs
@@ -3839,6 +4567,13 @@ public:
      *
      * Ranks plans by performance and sets the winner as the active plan.
      * Optionally persists results to a JSON config file.
+     *
+     * The winner executes last, after every timed pass, and this call waits for that run to
+     * finish. On success the caller's output buffers therefore hold the winner's output,
+     * unless the graph writes one of its own inputs: every run then reads what the previous
+     * one wrote. A failure of that final run, including a device fault, is returned as the
+     * error of this call; the winner then stays the active plan, no results are persisted,
+     * and @c results is not filled.
      *
      * Requires build_operation_graph() and at least one add_engine_*() call
      * or a prior build_plans(BuildPlanPolicy::ALL) call.
@@ -3907,8 +4642,9 @@ public:
     // These overloads accept an explicit workspaceSize parameter that acts
     // as a runtime ceiling on plan benchmarking. Plans whose compiled
     // workspace exceeds this limit are skipped and reported as failed in
-    // the results vector. This is distinct from deselect_workspace_greater_than()
-    // which stores a persistent threshold evaluated during build_plans().
+    // the results vector. This is distinct from deselect_workspace_greater_than(),
+    // which stores a persistent threshold judged by check_support(), build_plans(),
+    // build_plan_at_index() and autotune().
     //
     // General overloads intentionally omit the tensor-lookup convenience
     // overloads present in compiled-plan and cuDNN-compatibility overloads:
@@ -3922,6 +4658,10 @@ public:
      * Filters plans whose compiled workspace exceeds @c workspaceSize
      * before benchmarking. Filtered plans appear in @c results (if requested)
      * with succeeded=false and an explanatory errorMessage.
+     *
+     * As with the overload above, the winner executes last and this call waits for it, so on
+     * success the caller's output buffers hold the winner's output unless the graph writes
+     * one of its own inputs; a failure of that final run is returned.
      *
      * @param handle The hipDNN handle
      * @param variantPack Map from tensor UID to device memory pointers
@@ -4021,7 +4761,8 @@ public:
      * active plan.
      *
      * **No filtering, and a workspace large enough for every candidate.** Leave
-     * @c config.engineIdFilter empty, apply no deselect_engines() or
+     * @c config.engineIdFilter empty, apply no deselect_engines(), select_numeric_notes(),
+     * deselect_numeric_notes(), select_behavior_notes(), deselect_behavior_notes() or
      * deselect_workspace_greater_than() filter, and pass a @c workspaceSize at least as
      * large as get_autotune_workspace_size() reports. Each of these can hold an applicable
      * engine out of the timing loop while leaving it a live candidate for a later
@@ -4062,6 +4803,10 @@ public:
      * graph, so recording them keeps a permanently broken engine from making later
      * lookups reject the entry. A cache-write failure is logged and does not fail this
      * call.
+     *
+     * The winner executes last and this call waits for it, so on success the caller's output
+     * buffers hold the winner's output unless the graph writes one of its own inputs. A
+     * failure of that final run is returned, and nothing is cached.
      *
      * @param handle The hipDNN handle
      * @param variantPack Map from tensor UID to device memory pointers
@@ -4407,9 +5152,18 @@ public:
      * the selected plan. If the plan's execution plan descriptor has not
      * yet been finalized, compiles it (backendSetAttribute + backendFinalize).
      *
+     * Every engine filter applies to the indexed plan; notes are read for its engine only.
+     * A plan a filter removes is marked barred and not built. The finalized active plan is
+     * reported as skipped but not marked: it stays active and executable. A plan that
+     * finalizes with a workspace over the deselect_workspace_greater_than() limit, though
+     * its engine config reported less, breaks the plugin contract and is barred too. A
+     * deserialized plan has no engine config, so it returns ErrorCode::INVALID_VALUE.
+     *
      * @param index Zero-based index into the compiled plan vector
      * @return ErrorCode::OK on success, ErrorCode::INVALID_VALUE if index is
      *         out of bounds or the plan lacks valid descriptors,
+     *         ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED if an engine filter removes the
+     *         plan or the safety net rejects it, the error of a failed note read,
      *         ErrorCode::HIPDNN_BACKEND_ERROR on finalization failure
      */
     Error build_plan_at_index(int64_t index)
@@ -4421,7 +5175,8 @@ public:
                         + std::to_string(_compiledPlans.size()) + " plans)."};
         }
 
-        auto& plan = _compiledPlans[static_cast<size_t>(index)];
+        const auto planIndex = static_cast<size_t>(index);
+        auto& plan = _compiledPlans[planIndex];
 
         if(!plan.engineConfigDesc || !plan.engineConfigDesc->valid() || !plan.executionPlanDesc
            || !plan.executionPlanDesc->valid())
@@ -4431,41 +5186,35 @@ public:
                         + " has missing or invalid descriptors."};
         }
 
-        if(plan.barred)
+        PlanFilterVerdict verdict;
+        HIPDNN_CHECK_ERROR(evaluatePlanFilters(plan, verdict));
+        if(verdict.filtered)
         {
-            return {ErrorCode::INVALID_VALUE,
-                    "Plan at index " + std::to_string(index) + " is already barred."};
-        }
-
-        if(_barredEngineIds.count(plan.engineId) > 0)
-        {
-            plan.barred = true;
-            return {ErrorCode::INVALID_VALUE,
+            // The finalized active plan stays active and executable: skipped, not marked.
+            if(!isFinalizedActivePlan(planIndex))
+            {
+                plan.barred = true;
+            }
+            logPlanSkipped(planIndex, plan, verdict.skipReason);
+            return {ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED,
                     "Plan at index " + std::to_string(index)
-                        + " is barred: matched barred engine ID."};
+                        + " is filtered: " + verdict.skipReason};
         }
 
         // If workspace size is still -1, the plan has not been finalized yet.
         // Compile it using the same pattern as build_plans(ALL).
         if(plan.workspaceSize == -1)
         {
-            auto finalizeErr = finalizePlanDescriptor(plan);
-            if(finalizeErr.is_bad())
+            std::string rejection;
+            HIPDNN_CHECK_ERROR(finalizePlanWithinLimit(planIndex, rejection));
+            if(!rejection.empty())
             {
-                return finalizeErr;
+                return {ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED,
+                        "Plan at index " + std::to_string(index) + " is filtered: " + rejection};
             }
         }
 
-        if(_maxWorkspaceAllowed >= 0 && plan.workspaceSize > _maxWorkspaceAllowed)
-        {
-            plan.barred = true;
-            return {ErrorCode::INVALID_VALUE,
-                    "Plan at index " + std::to_string(index) + " is barred: workspace "
-                        + std::to_string(plan.workspaceSize) + " exceeds limit "
-                        + std::to_string(_maxWorkspaceAllowed)};
-        }
-
-        setActivePlanState(static_cast<size_t>(index), detail::ActivePlanFinalization::FINALIZED);
+        setActivePlanState(planIndex, detail::ActivePlanFinalization::FINALIZED);
 
         return {ErrorCode::OK, ""};
     }
@@ -4476,10 +5225,17 @@ public:
     /**
      * @brief Store a workspace threshold for deferred plan barring
      *
-     * Stores the workspace limit. Plans whose compiled workspace exceeds
-     * this threshold are barred during @c build_plans() and @c autotuneImpl().
-     * Uses last-write-wins semantics: a subsequent call replaces the
-     * previous threshold.
+     * Stores the workspace limit. A plan whose engine-config workspace exceeds the limit,
+     * or cannot be read while the limit is set, is filtered: @c check_support(),
+     * @c build_plans(), @c build_plan_at_index() and @c autotune() skip it. The engine
+     * config bounds the workspace of any plan finalized from it, so the limit is checked
+     * before a plan is finalized; a finalized plan over the limit despite its config is
+     * rejected too. Uses last-write-wins semantics: a subsequent call replaces the previous
+     * threshold. A negative value means no limit. The limit persists until the caller
+     * changes it; creating plans does not reset it, and it applies to plans created later.
+     * A plan an earlier evaluation barred stays barred when a filter is relaxed or cleared,
+     * until the plans are recreated (create_execution_plans(), create_execution_plan_ext(),
+     * rebuilding the operation graph, deserialization or plan-spec autotune()).
      *
      * @param workspace Maximum allowed workspace size in bytes
      * @return Reference to @c *this for method chaining
@@ -4495,10 +5251,13 @@ public:
     /**
      * @brief Store engine names for deferred plan barring
      *
-     * Resolves each name to an engine ID and adds it to the barred engine ID
-     * set. Plans whose engine matches are barred during @c build_plans() and
-     * @c autotuneImpl(). Accumulates across calls (set union), and is cleared
-     * along with the rest of the filter state by @c create_execution_plans().
+     * Resolves each name to an engine ID and stores it in the barred engine ID
+     * set. Plans whose engine matches are filtered: @c check_support(),
+     * @c build_plans(), @c build_plan_at_index() and @c autotune() skip them. Replaces the
+     * barred engine ID set, which the ID overload shares: the last call of either kind
+     * wins, and an empty list clears it. It persists until changed or the @c Graph is
+     * destroyed: creating plans does not reset it, and it applies to plans created later.
+     * A plan an earlier evaluation marked barred stays barred until the plans are recreated.
      *
      * Resolution goes through @c engineNameOrIdToId, so a registered name, a
      * name a plugin declared, and the hexadecimal ID an unnamed engine displays
@@ -4510,10 +5269,11 @@ public:
      */
     Graph& deselect_engines(const std::vector<std::string>& engine_names)
     {
-        if(engine_names.empty())
+        if(engine_names.empty() && !_barredEngineIds.empty())
         {
-            return *this;
+            HIPDNN_FE_LOG_INFO("deselect_engines(): cleared engine filter");
         }
+        _barredEngineIds.clear();
         for(const auto& name : engine_names)
         {
             const int64_t engineId = hipdnn_data_sdk::utilities::engineNameOrIdToId(name);
@@ -4524,34 +5284,103 @@ public:
                                << hipdnn_data_sdk::utilities::formatEngineIdHex(engineId));
             _barredEngineIds.insert(engineId);
         }
-        HIPDNN_FE_LOG_INFO("deselect_engines(): stored engine filter (" << _barredEngineIds.size()
-                                                                        << " engine(s))");
+        if(!engine_names.empty())
+        {
+            HIPDNN_FE_LOG_INFO("deselect_engines(): stored engine filter ("
+                               << _barredEngineIds.size() << " engine(s))");
+        }
         return *this;
     }
 
     /**
      * @brief Store engine IDs for deferred plan barring
      *
-     * Adds the given engine IDs to the barred engine ID set. Plans matching
-     * barred engine IDs are barred during @c build_plans() and @c autotuneImpl().
-     * Accumulates across calls (set union).
+     * Replaces the barred engine ID set with the given IDs, which share it with the name
+     * overload above: the last call of either kind wins, and an empty argument clears it.
+     * Plans matching barred engine IDs are filtered like those named by the overload above.
      *
      * @param engine_ids Engine IDs to deselect
      * @return Reference to @c *this for method chaining
      */
     Graph& deselect_engines(const std::vector<int64_t>& engine_ids)
     {
-        if(engine_ids.empty())
+        if(engine_ids.empty() && !_barredEngineIds.empty())
         {
-            return *this;
+            HIPDNN_FE_LOG_INFO("deselect_engines(): cleared engine filter");
         }
+        _barredEngineIds.clear();
         for(const int64_t id : engine_ids)
         {
             _barredEngineIds.insert(id);
         }
-        HIPDNN_FE_LOG_INFO("deselect_engines(): stored engine filter (" << _barredEngineIds.size()
-                                                                        << " engine(s))");
+        if(!engine_ids.empty())
+        {
+            HIPDNN_FE_LOG_INFO("deselect_engines(): stored engine filter ("
+                               << _barredEngineIds.size() << " engine(s))");
+        }
         return *this;
+    }
+
+    /**
+     * @brief Keep only engines that report every one of the given numerical notes
+     *
+     * Appends to the selected numerical notes; an empty argument is a no-op. An engine
+     * passes the numerical filters when it reports every selected note and none of the
+     * deselected ones; it must pass the behavior filters too. Plans of failing engines are
+     * filtered: @c check_support(), @c build_plans(), @c build_plan_at_index() and
+     * @c autotune() skip them. An engine's notes are read only when a note filter is
+     * set, and only for the engines a call evaluates; a failed read returns its error from
+     * the evaluating call. The filter persists until the @c Graph is destroyed: creating
+     * plans does not reset it, it applies to plans created later, and it cannot be removed.
+     *
+     * @param notes Numerical notes an engine must report
+     * @return Reference to @c *this for method chaining
+     */
+    Graph& select_numeric_notes(const std::vector<NumericalNote>& notes)
+    {
+        return appendNoteFilter(_selectedNumericalNotes, notes, "select_numeric_notes");
+    }
+
+    /**
+     * @brief Drop engines that report any of the given numerical notes
+     *
+     * Appends to the deselected numerical notes. See @c select_numeric_notes() for the match
+     * rule, reads and lifetime.
+     *
+     * @param notes Numerical notes an engine must not report
+     * @return Reference to @c *this for method chaining
+     */
+    Graph& deselect_numeric_notes(const std::vector<NumericalNote>& notes)
+    {
+        return appendNoteFilter(_deselectedNumericalNotes, notes, "deselect_numeric_notes");
+    }
+
+    /**
+     * @brief Keep only engines that report every one of the given behavior notes
+     *
+     * Appends to the selected behavior notes. See @c select_numeric_notes() for the match
+     * rule, reads and lifetime. The behavior note members are hipDNN's own.
+     *
+     * @param notes Behavior notes an engine must report
+     * @return Reference to @c *this for method chaining
+     */
+    Graph& select_behavior_notes(const std::vector<BehaviorNote>& notes)
+    {
+        return appendNoteFilter(_selectedBehaviorNotes, notes, "select_behavior_notes");
+    }
+
+    /**
+     * @brief Drop engines that report any of the given behavior notes
+     *
+     * Appends to the deselected behavior notes. See @c select_numeric_notes() for the match
+     * rule, reads and lifetime.
+     *
+     * @param notes Behavior notes an engine must not report
+     * @return Reference to @c *this for method chaining
+     */
+    Graph& deselect_behavior_notes(const std::vector<BehaviorNote>& notes)
+    {
+        return appendNoteFilter(_deselectedBehaviorNotes, notes, "deselect_behavior_notes");
     }
 
     /// @}
@@ -4675,6 +5504,11 @@ public:
 
     /**
      * @brief Execute the graph with tensor pointers mapped by UID
+     *
+     * The handle's stream must be on the device the plan was built or
+     * deserialized for; a handle on another device fails with
+     * HIPDNN_BACKEND_ERROR. To run on another device, serialize the plan and
+     * deserialize it with a handle on that device.
      *
      * @param handle The hipDNN handle
      * @param variantPack Map from tensor UID to device memory pointers
@@ -4858,7 +5692,7 @@ public:
             "Failed to finalize variant pack descriptor");
 
         // One-shot local profiling context: this call measures exactly once and never
-        // reuses it, unlike autotuneImpl()'s comparison-scoped descriptor.
+        // reuses it, unlike the comparison-scoped autotune descriptor.
         const detail::ScopedHipdnnBackendDescriptor profilingDesc(
             HIPDNN_BACKEND_PROFILING_CONTROL_EXT);
         if(!profilingDesc.valid())
@@ -6558,6 +7392,13 @@ public:
 
     /**
      * @brief Set the preferred engine ID for execution plan selection
+     *
+     * The preference is soft. When the ID is among the ranked candidates its plan
+     * becomes the active plan that build_plans() compiles. If that plan fails to
+     * finalize for any reason, the other ranked plans are tried from the top of
+     * the list and the engine that ends up serving the graph may differ; read it
+     * with @c get_execution_plan_engine_id() or @c get_plan_name().
+     *
      * @param engineId Engine ID to prefer, or std::nullopt to clear
      * @return Reference to this Graph for method chaining
      */
@@ -6583,6 +7424,11 @@ public:
      * graph descriptor, so this is what keeps such a preference from being
      * silently dropped on deserialize.
      *
+     * The preference is soft. If the preferred engine's plan fails to finalize
+     * for any reason, build_plans() falls back to another ranked engine, scanning
+     * from the top of the list; read the engine that serves the graph with
+     * @c get_execution_plan_engine_id() or @c get_plan_name().
+     *
      * @param engineName Engine name to look up; empty string clears the preference
      * @return Reference to this Graph for method chaining
      */
@@ -6602,6 +7448,40 @@ public:
 
         HIPDNN_FE_LOG_INFO("Engine name '" << engineName << "' mapped to ID: " << engineId);
         return *this;
+    }
+
+    /**
+     * @brief Choose the ranking metric engine selection and kernel choice optimize.
+     *
+     * @c "tflops" ranks higher first; @c "time" (milliseconds) lower first (RFC 0019 §4.4).
+     * Engine order follows it under every heuristic mode while an applicable engine has a
+     * model for the metric; engines with none rank last. HeuristicMode A (the default) ranks
+     * by ModeA, B by ModeB; FALLBACK is model-free and ignores the metric for engine order.
+     * An engine that ranks its own kernels ranks them by it in every mode. Applies to later
+     * heuristic queries and explicit-engine configurations; HIPDNN_HEUR_RANKING_METRIC
+     * overrides it for heuristic selection.
+     *
+     * @param metric A registered ranking metric name
+     * @return ErrorCode::INVALID_VALUE, with the metric unchanged, for an unregistered name
+     */
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    Error set_ranking_metric(std::string metric)
+    {
+        if(hipdnn_data_sdk::utilities::findRankingMetric(metric) == nullptr)
+        {
+            return {ErrorCode::INVALID_VALUE, "Unregistered ranking metric '" + metric + "'"};
+        }
+        _rankingMetric = std::move(metric);
+        return {};
+    }
+
+    /// The ranking metric this Graph requests: the one passed to set_ranking_metric(), or
+    /// the registry default ("tflops") when none was.
+    std::string get_ranking_metric() const // NOLINT(readability-identifier-naming)
+    {
+        return _rankingMetric.empty()
+                   ? std::string(hipdnn_data_sdk::utilities::DEFAULT_RANKING_METRIC)
+                   : _rankingMetric;
     }
 
 #ifdef HIPDNN_ENABLE_SDPA

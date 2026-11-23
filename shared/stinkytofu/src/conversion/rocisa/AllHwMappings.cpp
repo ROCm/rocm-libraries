@@ -25,6 +25,7 @@
 
 #include <cassert>
 #include <cstdint>
+#include <stdexcept>
 #include <unordered_map>
 
 #include "instruction/branch.hpp"
@@ -43,6 +44,9 @@ std::vector<StinkyInstruction*> lowerRocisaMFMA(rocisa::Instruction& inst,
                                                 AsmIRBuilder& irBuilder) {
     std::string mnemonic = inst.preStr();
     uint16_t opcode = getMnemonicToIsaOpcode(mnemonic, irBuilder.arch);
+    if (opcode == GFX::INVALID)
+        throw std::runtime_error("No ISA opcode for mnemonic '" + mnemonic + "' on " +
+                                 getArchName(irBuilder.arch));
 
     StinkyInstruction* stinkyInst = irBuilder.create(getMCIDByIsaOp(opcode, irBuilder.arch));
 
@@ -177,6 +181,8 @@ std::vector<StinkyInstruction*> lowerRocisaSchedulingFence(rocisa::Instruction& 
 // the last line) and legalizeBarrier's behavior. We mirror the mem
 // token onto signal manually so the implicit-dependency pass groups
 // both halves with the fenced memory ops (see BarrierTest::TokenGrouped_*).
+// GirActionData is different: ToStinkyTofuUtils attaches it generically
+// to every instruction returned by a conversion.
 std::vector<StinkyInstruction*> lowerRocisaSBarrier(rocisa::Instruction& inst,
                                                     AsmIRBuilder& irBuilder) {
     auto* sBarrier = dynamic_cast<rocisa::SBarrier*>(&inst);

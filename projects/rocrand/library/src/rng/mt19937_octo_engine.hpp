@@ -475,7 +475,7 @@ struct mt19937_octo_engine
             for(int i = 0; i < 8; ++i)
             {
                 last_deps[i]  = thread_engines[(i + 1) % 8].m_state.mt[i227];
-                first_deps[i] = thread_engines[(i - 1) % 8].m_state.mt[i001 + items_per_thread - 1];
+                first_deps[i] = thread_engines[(i + 7) % 8].m_state.mt[i001 + items_per_thread - 1];
             }
 
             for(int i = 0; i < 8; ++i)

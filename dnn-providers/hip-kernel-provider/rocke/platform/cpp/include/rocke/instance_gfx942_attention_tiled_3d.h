@@ -34,9 +34,9 @@
  * with a 4-reg-per-lane accumulator decoded via _mfma_16x16_c_row.
  *
  * REDUCE KERNEL (build_unified_attention_reduce_tiled, lines 1002-1133). Arch-
- * neutral, pure f32 load / exp2 / store (byte-for-byte port of the gfx950
- * reduce): 64 threads, single active per (q_token, q_head), three passes (max,
- * combine, normalize).
+ * neutral, pure f32 load / exp2 / store (the gfx950 reduce with a runtime
+ * query head count): 64 threads, single active per (q_token, q_head), three
+ * passes (max, combine, normalize).
  *
  * REUSED HELPER PORTS (no IR re-emitted here):
  *   rocke/helper_helper_rocke.helpers.attention.h   -- apply_softcap_log2,
@@ -153,12 +153,30 @@ typedef struct rocke_unified_attention_3d_tiled_spec
     bool has_tile_size_override; /* Optional[int] None */
     int tile_size_override;
 
-    bool use_invariant_hoist; /* False */
+    bool use_invariant_hoist; /* False; inert, kept so saved specs still load */
     bool use_wide_kv_load; /* False */
     /* 64-bit paged-KV addressing for caches > 2 GiB (gfx950 segment kernel folds
      * the per-block byte base into a 64-bit buffer base). Kept byte-identical
      * with the gfx950 header (the two share this struct). */
     bool use_i64_kv_addr; /* False */
+    /* All-decode launch grid: seq_idx = block_id_x, one query block per
+     * sequence, no binary search (legal only when every sequence has one query
+     * token; the launcher sizes grid x to num_seqs). */
+    bool use_decode_grid; /* False */
+    /* Cache policy of the K/V copies ("all", "global", "stream", "nt";
+     * rocke_cache_policy_from_name). gfx942's wide K/V loader takes "all" or
+     * "stream"; fp8 K/V keeps "all". */
+    const char* kv_cache_policy; /* "all" */
+    /* K/V LDS rows store their 16-byte chunks XOR-permuted by the row.
+     * Implemented for fp16/bf16 K/V, which can be extended. */
+    bool use_kv_lds_swizzle; /* False */
+    /* The wave loads the segment's page ids 64 at a time, one per lane; tiles
+     * read theirs with v_readlane. Paged K/V; implemented for fp16/bf16, which
+     * can be extended. */
+    bool use_wave_page_id_load; /* False */
+    /* gfx950 emit_lse (False, kw_only): the packaged module's reduce writes LSE.
+     * The segment IR is unchanged; its kernel name gains a trailing "lse". */
+    bool emit_lse;
 } rocke_unified_attention_3d_tiled_spec_t;
 
 /* Materialise every defaulted field. Required fields are zero/NULL-init; the
@@ -187,7 +205,8 @@ int rocke_unified_attention_3d_tiled_spec_tile_size(
 /* dtype_ir: F16 for "fp16", BF16 otherwise (returns a rocke_type_t*). */
 const rocke_type_t* rocke_unified_attention_3d_tiled_spec_dtype_ir(
     const rocke_unified_attention_3d_tiled_spec_t* s);
-/* binary_search_iters: 32 if num_seqs<=0, else max(1, ceil(log2(num_seqs+1))) */
+/* binary_search_iters: 32 if num_seqs<=0, else max(1, ceil(log2(num_seqs+1))).
+ * Exported for existing callers; the kernels derive the search at runtime. */
 int rocke_unified_attention_3d_tiled_spec_binary_search_iters(
     const rocke_unified_attention_3d_tiled_spec_t* s);
 /* kernel_name(): kernel_name_join(...) into caller's buf (NUL-terminated, up to
@@ -209,6 +228,9 @@ typedef struct rocke_unified_attention_reduce_tiled_spec
 
     bool has_waves_per_eu; /* Optional[int] None */
     int waves_per_eu;
+    /* emit_lse (False): add a trailing lse_ptr param and write the FP32 natural-log
+     * LSE [total_q, num_query_heads, 1]; kernel name gains a trailing "lse". */
+    bool emit_lse;
 } rocke_unified_attention_reduce_tiled_spec_t;
 
 rocke_unified_attention_reduce_tiled_spec_t rocke_unified_attention_reduce_tiled_spec_default(void);

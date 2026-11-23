@@ -27,8 +27,8 @@
 
 Building a real ``Solution`` requires the toolchain-derived capability map and a
 real ``Assembler`` (``Solution`` reads ``assembler.rocm_version``). We reuse the
-LibraryIO suite's session fixtures (``cxx_compiler`` / ``isa_info_map`` /
-``assembler``) and parse the LibraryIO vendored logic fixture once to obtain
+unit suite's session fixtures (``isa_info_map`` / ``assembler``) and parse
+the LibraryIO vendored logic fixture once to obtain
 genuine ``Solution`` objects — avoiding hand-authoring a self-consistent kernel.
 """
 
@@ -36,33 +36,13 @@ from pathlib import Path
 
 import pytest
 
-from Tensile.Activation import ActivationType
-from Tensile.Common.Architectures import SUPPORTED_ISA
-from Tensile.Common.Capabilities import makeIsaInfoMap
-from Tensile.Common.DataType import DataType
-from Tensile.SolutionStructs.Problem import ProblemType
-from Tensile.Toolchain.Assembly import makeAssemblyToolchain
-from Tensile.Toolchain.Validators import validateToolchain, ToolchainDefaults
-import Tensile.LibraryIO as LibraryIO
+from tensilelite.Activation import ActivationType
+from tensilelite.Common.DataType import DataType
+from tensilelite.SolutionStructs.Problem import ProblemType
+import tensilelite.LibraryIO as LibraryIO
 
 # Reuse the LibraryIO suite's committed, vendored logic fixture (read-only).
 _FIXTURE = Path(__file__).parent.parent / "LibraryIO" / "data" / "logic_gfx942_HSS_BH.yaml"
-
-
-@pytest.fixture(scope="session")
-def cxx_compiler():
-    return validateToolchain("amdclang++")
-
-
-@pytest.fixture(scope="session")
-def isa_info_map(cxx_compiler):
-    return makeIsaInfoMap(SUPPORTED_ISA, cxx_compiler)
-
-
-@pytest.fixture(scope="session")
-def assembler(cxx_compiler):
-    bundler = validateToolchain(ToolchainDefaults.OFFLOAD_BUNDLER)
-    return makeAssemblyToolchain(cxx_compiler, bundler, "default").assembler
 
 
 @pytest.fixture(scope="session")

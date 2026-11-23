@@ -24,7 +24,7 @@
 ################################################################################
 
 """Characterization tests for the validators in
-``Tensile.Common.ValidParameters``: ``checkParametersAreValid`` (the central
+``tensilelite.Common.ValidParameters``: ``checkParametersAreValid`` (the central
 parameter validator) and the sub-validators ``checkAssertSizeMapIsValid`` /
 ``checkSpaceFillAlgoIsValid`` / ``checkSpaceFillAlgoWGMIsValid``.
 
@@ -37,7 +37,7 @@ is used only for the realistic accept case).
 
 import pytest
 
-import Tensile.Common.ValidParameters as VP
+import tensilelite.Common.ValidParameters as VP
 
 pytestmark = pytest.mark.unit
 
@@ -69,6 +69,38 @@ def test_assert_size_map_invalid_raises(value, snapshot):
     with pytest.raises(Exception) as excinfo:
         VP.checkAssertSizeMapIsValid("AssertSizeEqual", value)
     assert str(excinfo.value) == snapshot
+
+
+# ===========================================================================
+# checkAssertMultipleMapIsValid — divisor must be positive (or the -1 skip)
+# ===========================================================================
+
+def test_assert_multiple_map_valid_returns_none():
+    assert VP.checkAssertMultipleMapIsValid("AssertStrideAMultiple", {}) is None
+    assert VP.checkAssertMultipleMapIsValid("AssertStrideAMultiple", {1: 4}) is None
+    assert VP.checkAssertMultipleMapIsValid("AssertStrideBMultiple", {0: -1, 1: 8}) is None
+
+
+@pytest.mark.parametrize(
+    "value",
+    [{1: -2}, {0: -1, 1: 0}],
+    ids=["negative", "zero_after_skip"],
+)
+def test_assert_multiple_map_invalid_raises(value, snapshot):
+    with pytest.raises(Exception) as excinfo:
+        VP.checkAssertMultipleMapIsValid("AssertStrideAMultiple", value)
+    assert str(excinfo.value) == snapshot
+
+
+@pytest.mark.parametrize("name", VP.ASSERT_DIM_MULTIPLE_PARAMETERS)
+def test_check_params_dispatch_multiple_parameters(name):
+    assert VP.checkParametersAreValid((name, [{1: 4}]), {name: -1}) is None
+    with pytest.raises(Exception, match="Multiple must be > 0"):
+        VP.checkParametersAreValid((name, [{1: 0}]), {name: -1})
+    with pytest.raises(Exception, match="Must be a dict"):
+        VP.checkParametersAreValid((name, [4]), {name: -1})
+    with pytest.raises(Exception, match="Index must be int"):
+        VP.checkParametersAreValid((name, [{"1": 4}]), {name: -1})
 
 
 # ===========================================================================

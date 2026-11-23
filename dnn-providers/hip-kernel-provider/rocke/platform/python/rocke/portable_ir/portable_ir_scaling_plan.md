@@ -99,7 +99,8 @@ hard-coded to attention head_size (D=64/128, VEC=8).
   repeats), and rolls each run into a `static_for` with **multiple** index-ladder
   constants (`v0 + i*delta`), **multiple** loop-carried values (cross-block
   def→use, threaded via the carry-alias trick), spec-scaled in-run constants, and
-  **nested** rolling (runs inside `scf.for`/`scf.if` bodies recurse naturally).
+  **nested** rolling (runs inside `scf.for`/`scf.if`/`scf.if_else` bodies recurse
+  naturally).
 - `utils/recipe_expand.py` — a pure-Python recipe VM (mirrors `recipe_vm.c`) +
   `recipes_equiv` (structural equality modulo SSA renaming). This is the
   **device-free oracle**: `expand(parametric, spec) ≡ recorded_concrete(spec)`
@@ -293,7 +294,7 @@ either reproduces the data or it does not, so it cannot overfit. It exists becau
 polynomial fits either, but the *generating formula* does, so the recipe carries
 that and regenerates both at replay. `magic_multiplier`/`magic_shift` are now
 intexpr primitives in both VMs; the DSL helper
-(`helpers/transforms.py::calculate_magic_numbers`) stays the single source of
+(`helpers/magic_division.py::calculate_magic_numbers`) stays the single source of
 truth, with `recipe_expand.py` and `recipe_vm.cpp` as tested mirrors.
 
 Ordering is what keeps a candidate library from becoming "fit anything", and it is
@@ -753,7 +754,7 @@ failures, across all tiers (see Step 1).
   owed to *any* C JIT backend regardless of record+roll, and the byte-identical
   oracle catches a missing/wrong lowering. Two guardrails already exist: the
   recorder **deliberately raises** on a new *region-bearing* op (loud "extend me"
-  signal — only `scf.for`/`scf.if` are modeled), and the `RecordingIRBuilder`
+  signal — only `scf.for`/`scf.if`/`scf.if_else` are modeled), and the `RecordingIRBuilder`
   drift tests fire if `IRBuilder`'s op/region/param surface changes.
 - **Graceful degradation, never breakage.** If the roller finds no pattern in a
   region, it keeps that region **concrete per-shape** — still correct, just less
@@ -805,7 +806,7 @@ through different machinery than this phase names — worth separating so the
 remaining work is not read as done:
 
 *Delivered:* single-axis run rolling, including runs nested **inside** an
-`scf.for`/`scf.if` body; variable loop-carry fan rolling with lane-label analysis;
+`scf.for`/`scf.if`/`scf.if_else` body; variable loop-carry fan rolling with lane-label analysis;
 linear spec-scaled constants; spec-parametric **types and attrs**; automatic
 kernel-name parameterization.
 

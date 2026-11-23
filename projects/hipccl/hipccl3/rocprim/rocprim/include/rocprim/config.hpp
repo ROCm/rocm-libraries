@@ -41,6 +41,10 @@
     #include "rocprim_version.hpp"
 #endif
 
+#ifndef ROCPRIM_USE_LEGACY_API
+    #define ROCPRIM_USE_LEGACY_API 1
+#endif
+
 // Inline namespace (e.g. ROCPRIM_300400_NS where 300400 is the rocPRIM version) is used to
 // eliminate issues when shared libraries are built with different versions of rocPRIM so they may
 // have symbols with the same name but different content.
@@ -196,6 +200,7 @@
          || __builtin_amdgcn_processor_is("gfx1102") || __builtin_amdgcn_processor_is("gfx1103") \
          || __builtin_amdgcn_processor_is("gfx1150") || __builtin_amdgcn_processor_is("gfx1151") \
          || __builtin_amdgcn_processor_is("gfx1152") || __builtin_amdgcn_processor_is("gfx1153") \
+         || __builtin_amdgcn_processor_is("gfx1170") || __builtin_amdgcn_processor_is("gfx1171") \
          || __builtin_amdgcn_processor_is("gfx11-generic"))
     #define ROCPRIM_IS_RDNA2()                                                                   \
         (__builtin_amdgcn_processor_is("gfx1030") || __builtin_amdgcn_processor_is("gfx1031")    \

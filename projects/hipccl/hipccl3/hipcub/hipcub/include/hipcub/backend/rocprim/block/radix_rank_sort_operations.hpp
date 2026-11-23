@@ -43,7 +43,9 @@
 #include <rocprim/detail/various.hpp> // IWYU pragma: export
 #include <rocprim/type_traits.hpp> // IWYU pragma: export
 
-#include _HIPCUB_LIBCXX_INCLUDE(bit)
+#if _HIPCUB_HAS_DEVICE_SYSTEM_STD
+    #include _HIPCUB_LIBCXX_INCLUDE(bit)
+#endif
 
 #include <type_traits>
 
@@ -132,13 +134,9 @@ struct RadixSortTwiddle
         {
             HIPCUB_CLANG_SUPPRESS_DEPRECATED_PUSH
 
-            uint32_t result =
-#if _HIPCUB_HAS_DEVICE_SYSTEM_STD
-                _HIPCUB_LIBCXX::bitfield_extract
-#else
-                BFE
-#endif
-                (this->ProcessFloatMinusZero(key), bit_start, num_bits);
+            uint32_t result = _HIPCUB_LIBCXX::bitfield_extract(this->ProcessFloatMinusZero(key),
+                                                               bit_start,
+                                                               num_bits);
 
             HIPCUB_CLANG_SUPPRESS_DEPRECATED_POP
 

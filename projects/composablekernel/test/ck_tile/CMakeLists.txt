@@ -27,11 +27,21 @@
 # validate all related tests without running the entire test suite.
 ################################################################################
 
+# Keep only the requested GPU targets of <target> that match <regex>. Used by tests whose
+# kernels exist on a single arch family (e.g. "^gfx125" for TDM and async-LDS WMMA tests),
+# because the "_wmma" suffix only drops gfx9.
+function(ck_tile_restrict_archs target regex)
+    get_target_property(_archs ${target} HIP_ARCHITECTURES)
+    list(FILTER _archs INCLUDE REGEX "${regex}")
+    set_property(TARGET ${target} PROPERTY HIP_ARCHITECTURES ${_archs})
+endfunction()
+
 add_subdirectory(image_to_column)
 add_subdirectory(gemm)
 add_subdirectory(gemm_persistent_async_input)
 add_subdirectory(gemm_weight_preshuffle)
 add_subdirectory(batched_gemm)
+add_subdirectory(batched_contraction)
 add_subdirectory(grouped_gemm)
 add_subdirectory(grouped_gemm_preshuffle)
 add_subdirectory(grouped_gemm_multi_d)
@@ -71,9 +81,6 @@ if(BUILD_CK_TILE_FMHA_TESTS)
     add_subdirectory(fmha)
 endif()
 if(BUILD_CK_TILE_ENGINE_TESTS)
-# TODO: The Universal GEMM tile engine test will be either removed
-# or moved to the appropriate location in future work.
-#   add_subdirectory(gemm_tile_engine)
     add_subdirectory(pooling_tile_engine)
 endif()
 add_subdirectory(pooling)

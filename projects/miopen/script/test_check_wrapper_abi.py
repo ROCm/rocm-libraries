@@ -18,6 +18,8 @@ that builds MIOpen.
     python3 -m unittest test_check_wrapper_abi
 """
 
+import contextlib
+import io
 import os
 import shutil
 import subprocess
@@ -25,6 +27,9 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
+
+import check_wrapper_abi
 
 HARNESS = Path(__file__).resolve().parent / "check_wrapper_abi.py"
 
@@ -41,9 +46,9 @@ sys.exit(1)
 """
 
 
-# Checked before anything here touches os.geteuid(), which off POSIX would fail at
-# import rather than skip.
-@unittest.skipUnless(os.name == "posix", "the harness under test is POSIX-only")
+# The stand-in tree uses the Linux library layout, which the script only looks for
+# on Linux; test_miopen_wrapper_libs covers the Windows layout.
+@unittest.skipUnless(os.name == "posix", "the stand-in tree has the Linux layout")
 class WrapperAbiCheckTest(unittest.TestCase):
     def setUp(self):
         """A stand-in install tree: the libraries the harness resolves, plus its helper."""
@@ -71,7 +76,7 @@ class WrapperAbiCheckTest(unittest.TestCase):
                 str(self.tree / "fake_abi_check.py"),
                 "--baseline",
                 os.devnull,
-                "--excluded",
+                "--wrapper-only",
                 os.devnull,
                 *extra,
             ],
@@ -100,11 +105,68 @@ class WrapperAbiCheckTest(unittest.TestCase):
             str(self.tree / "lib" / "libMIOpen_private.so.1.0"),
         )
 
-    def test_baseline_and_excluded_are_forwarded_to_the_abi_check(self):
+    def test_ck_plugins_beside_the_libraries_are_forwarded_to_the_abi_check(self):
+        plugin = self.tree / "lib" / "libMIOpenCKGroupedConv_gfx90a.so"
+        plugin.touch()
+        result = self.run_harness(self.tree)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        argv = (self.tree / "fake_abi_check.argv").read_text().splitlines()
+        self.assertEqual(argv[argv.index("--plugin") + 1], str(plugin))
+
+    def test_every_plugin_is_forwarded_and_the_no_plugin_note_is_absent(self):
+        plugins = [
+            self.tree / "lib" / f"libMIOpenCKGroupedConv_{arch}.so"
+            for arch in ("gfx90a", "gfx942")
+        ]
+        for plugin in plugins:
+            plugin.touch()
+        result = self.run_harness(self.tree)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        argv = (self.tree / "fake_abi_check.argv").read_text().splitlines()
+        forwarded = [argv[i + 1] for i, a in enumerate(argv) if a == "--plugin"]
+        self.assertEqual(forwarded, [str(p) for p in plugins])
+        self.assertNotIn("plugin check is not run", result.stdout)
+
+    def test_no_plugin_option_is_passed_when_there_are_no_plugins(self):
+        result = self.run_harness(self.tree)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        argv = (self.tree / "fake_abi_check.argv").read_text().splitlines()
+        self.assertNotIn("--plugin", argv)
+        self.assertIn("plugin check is not run", result.stdout)
+
+    def test_required_plugins_that_are_missing_fail_the_run(self):
+        """A build that should have plugins must not pass by finding none."""
+        result = self.run_harness(self.tree, "--require-plugins")
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("--require-plugins", result.stdout)
+        self.assertFalse((self.tree / "fake_abi_check.argv").exists())
+
+    def test_required_plugins_that_are_present_pass(self):
+        (self.tree / "lib" / "libMIOpenCKGroupedConv_gfx90a.so").touch()
+        result = self.run_harness(self.tree, "--require-plugins")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        argv = (self.tree / "fake_abi_check.argv").read_text().splitlines()
+        self.assertIn("--plugin", argv)
+
+    def test_required_plugins_are_not_demanded_on_windows(self):
+        """Plugin DLLs are never checked, so there is nothing to require."""
+        (self.tree / "lib" / "MIOpen.dll").touch()
+        (self.tree / "lib" / "MIOpen_private.dll").touch()
+        argv = [
+            "--lib-dir",
+            str(self.tree / "lib"),
+            "--abi-check",
+            str(self.tree / "fake_abi_check.py"),
+            "--require-plugins",
+        ]
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(check_wrapper_abi.main(argv, windows=True), 0)
+
+    def test_symbol_lists_are_forwarded_to_the_abi_check(self):
         baseline = self.tree / "baseline.txt"
-        excluded = self.tree / "excluded.txt"
+        wrapper_only = self.tree / "wrapper_only.txt"
         baseline.touch()
-        excluded.touch()
+        wrapper_only.touch()
         result = subprocess.run(
             [
                 sys.executable,
@@ -115,8 +177,8 @@ class WrapperAbiCheckTest(unittest.TestCase):
                 str(self.tree / "fake_abi_check.py"),
                 "--baseline",
                 str(baseline),
-                "--excluded",
-                str(excluded),
+                "--wrapper-only",
+                str(wrapper_only),
             ],
             cwd=str(self.tree),
             capture_output=True,
@@ -125,7 +187,7 @@ class WrapperAbiCheckTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         argv = (self.tree / "fake_abi_check.argv").read_text().splitlines()
         self.assertEqual(argv[argv.index("--baseline") + 1], str(baseline))
-        self.assertEqual(argv[argv.index("--excluded") + 1], str(excluded))
+        self.assertEqual(argv[argv.index("--wrapper-only") + 1], str(wrapper_only))
 
     def test_needed_baseline_is_not_passed_unless_asked_for(self):
         """The exact list names ROCm soversions, so it must not gate by default."""
@@ -179,13 +241,13 @@ class WrapperAbiCheckTest(unittest.TestCase):
         """Which files count is tested in test_miopen_wrapper_libs; this checks the
         script stops on what it reports, using the default lib* search.
 
-        Copied into bin/ so that search -- lib* beside its parent directory -- lands in
-        this tree. miopen_wrapper_libs.py comes with it since the script imports from
-        it and only its own directory is on sys.path.
+        Copied into bin/miopen_wrapper_tests/ so that search, two levels up, lands in
+        this tree. miopen_wrapper_libs.py comes too: the script imports it, and only
+        its own directory is on sys.path.
         """
         (self.tree / "lib" / "libMIOpen_private.so.1.0").unlink()
-        bindir = self.tree / "bin"
-        bindir.mkdir()
+        bindir = self.tree / "bin" / "miopen_wrapper_tests"
+        bindir.mkdir(parents=True)
         harness = bindir / HARNESS.name
         shutil.copy(HARNESS, harness)
         shutil.copy(HARNESS.parent / "miopen_wrapper_libs.py", bindir)
@@ -198,7 +260,7 @@ class WrapperAbiCheckTest(unittest.TestCase):
                 str(self.tree / "fake_abi_check.py"),
                 "--baseline",
                 os.devnull,
-                "--excluded",
+                "--wrapper-only",
                 os.devnull,
             ],
             cwd=str(self.tree),
@@ -210,6 +272,45 @@ class WrapperAbiCheckTest(unittest.TestCase):
             f"no libMIOpen_private.so.* found under {self.tree / 'lib'}", result.stdout
         )
         self.assertFalse((self.tree / "fake_abi_check.argv").exists())
+
+
+# Drives the Windows layout in-process by naming the platform, so it is covered on Linux.
+class WindowsLayoutTest(unittest.TestCase):
+    def setUp(self):
+        """A stand-in Windows install: DLLs and the scripts' folder both under bin/."""
+        holder = tempfile.TemporaryDirectory()
+        self.addCleanup(holder.cleanup)
+        self.bin = Path(holder.name) / "bin"
+        self.scripts = self.bin / "miopen_wrapper_tests"
+        self.scripts.mkdir(parents=True)
+        (self.bin / "MIOpen.dll").touch()
+        (self.bin / "MIOpen_private.dll").touch()
+        (self.scripts / "fake_abi_check.py").write_text(RECORDS_ARGV)
+
+    def run_main(self):
+        argv = [
+            "--abi-check",
+            str(self.scripts / "fake_abi_check.py"),
+            "--baseline",
+            os.devnull,
+            "--wrapper-only",
+            os.devnull,
+        ]
+        output = io.StringIO()
+        with mock.patch.object(
+            check_wrapper_abi, "SCRIPT_DIR", self.scripts
+        ), contextlib.redirect_stdout(output):
+            code = check_wrapper_abi.main(argv, windows=True)
+        return code, output.getvalue()
+
+    def test_the_dlls_beside_the_programs_are_handed_to_the_abi_check(self):
+        code, output = self.run_main()
+        self.assertEqual(code, 0, output)
+        argv = (self.scripts / "fake_abi_check.argv").read_text().splitlines()
+        self.assertIn(str(self.bin / "MIOpen.dll"), argv)
+        self.assertEqual(
+            argv[argv.index("--private-lib") + 1], str(self.bin / "MIOpen_private.dll")
+        )
 
 
 if __name__ == "__main__":

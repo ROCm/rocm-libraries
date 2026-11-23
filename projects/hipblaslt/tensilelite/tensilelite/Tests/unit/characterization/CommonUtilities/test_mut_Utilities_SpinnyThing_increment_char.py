@@ -4,7 +4,7 @@
 ################################################################################
 
 """Mutation-targeted characterization tests for
-``Tensile.Common.Utilities.SpinnyThing.increment``.
+``tensilelite.Common.Utilities.SpinnyThing.increment``.
 
 Pins the index-advance behavior of ``increment``: each call advances
 ``self.index`` forward by exactly one, modulo ``len(self.chars)`` (4). This
@@ -17,7 +17,7 @@ import inspect
 
 import pytest
 
-U = importlib.import_module("Tensile.Common.Utilities")
+U = importlib.import_module("tensilelite.Common.Utilities")
 
 pytestmark = pytest.mark.unit
 

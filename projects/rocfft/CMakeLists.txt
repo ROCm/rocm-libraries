@@ -89,7 +89,7 @@ endif()
 # Using standardized versioning from rocm-cmake
 set ( ROCFFT_VERSION_MAJOR "1" )
 set ( ROCFFT_VERSION_MINOR "0" )
-set ( ROCFFT_VERSION_PATCH "41" )
+set ( ROCFFT_VERSION_PATCH "42" )
 set ( VERSION_STRING "${ROCFFT_VERSION_MAJOR}.${ROCFFT_VERSION_MINOR}.${ROCFFT_VERSION_PATCH}" )
 rocm_setup_version( VERSION ${VERSION_STRING} )
 
@@ -205,8 +205,9 @@ if( ROCFFT_MPI_ENABLE )
   include_directories(SYSTEM ${MPI_INCLUDE_PATH})
 endif()
 
-# Optional RCCL backend for single-node multi-GPU communication.
-option(ROCFFT_RCCL_ENABLE "Enable RCCL for optimized single-node multi-GPU communication" OFF)
+# Optional RCCL backend for multi-GPU communication (single-process, and
+# multi-process when ROCFFT_MPI_ENABLE is also ON).
+option(ROCFFT_RCCL_ENABLE "Enable RCCL for optimized multi-GPU communication" OFF)
 
 # Internal (library-side) unit tests.  enable_testing() must be called
 # here, an ancestor of library/src, for ctest to discover them.

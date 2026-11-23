@@ -7,10 +7,10 @@ import importlib
 import numpy as np
 import pytest
 
-import Tensile.ductile.core.space as space_mod
+import tensilelite.ductile.core.space as space_mod
 
-from Tensile.ductile.core.space import SearchSpace, MaxIterationsReached, sample_chunk
-from Tensile.ductile.core.population import Individual, Population
+from tensilelite.ductile.core.space import SearchSpace, MaxIterationsReached, sample_chunk
+from tensilelite.ductile.core.population import Individual, Population
 
 pytestmark = pytest.mark.unit
 
@@ -226,7 +226,7 @@ class TestSearchSpaceSample:
 
 class TestXdistWorkerDetection:
     def test_xdist_env_var_sets_threading_backend(self, monkeypatch):
-        import Tensile.ductile.core.space as space_mod
+        import tensilelite.ductile.core.space as space_mod
         monkeypatch.setenv("PYTEST_XDIST_WORKER", "gw0")
         # Reload IS_XDIST_WORKER logic by checking the module-level constants
         # (they're set at import time; we just verify the module reflects the design)
@@ -241,14 +241,14 @@ class TestXdistWorkerDetection:
 
     def test_reload_module_sets_threading_backend_constants(self, monkeypatch):
         monkeypatch.setenv("PYTEST_XDIST_WORKER", "gw0")
-        import Tensile.ductile.core.space as space_mod
+        import tensilelite.ductile.core.space as space_mod
         reloaded = importlib.reload(space_mod)
         assert reloaded.JOBLIB_BACKEND == "threading"
         assert reloaded.JOBLIB_N_JOBS_OVERRIDE == 1
 
     def test_reload_module_sets_multiprocessing_backend_constants(self, monkeypatch):
         monkeypatch.delenv("PYTEST_XDIST_WORKER", raising=False)
-        import Tensile.ductile.core.space as space_mod
+        import tensilelite.ductile.core.space as space_mod
         reloaded = importlib.reload(space_mod)
         assert reloaded.JOBLIB_BACKEND == "multiprocessing"
         assert reloaded.JOBLIB_N_JOBS_OVERRIDE is None

@@ -49,7 +49,8 @@ the data type, and the problem. The architectures which default to hipBLASLt, an
         default to Tensile.
 
     * - gfx942 (MI300A, 228 CUs)
-      - ``f64_r`` only. ``f16_r``, ``bf16_r``, and all other data types default to Tensile.
+      - ``f16_r``, ``bf16_r``, ``f64_r``, ``f32_r``, ``f32_c``, and ``f64_c``, including their mixed-precision
+        ``gemm_ex`` forms. All other data types default to Tensile.
 
     * - All others
       - None. Tensile is always the default.
@@ -58,6 +59,14 @@ Where hipBLASLt is the default but provides no solution for a given problem, or 
 to Tensile. Source code GEMMs internal to the rocBLAS library also
 allow rocBLAS to be built without Tensile or hipBLASLt.
 They can potentially be used as fallbacks for problems that are not supported by the Tensile or hipBLASLt backends.
+
+CMake ``GPU_TARGETS`` (offload architectures) are always used when compiling the rocBLAS library.
+``ROCBLAS_TENSILE_ARCH_SKIPLIST`` removes selected targets from Tensile library generation only.
+If every ``GPU_TARGETS`` entry is skipped, Tensile is still enabled and
+builds its stub ``gfx000`` target when the selected logic tree provides one (HIP fallback or
+``gfx000`` YAML). Stub ``gfx000`` catalogs are not packaged. A skipped architecture still receives rocBLAS device
+code. When Tensile is present, GEMM on a skipped architecture uses hipBLASLt or
+source kernels instead of aborting Tensile initialization.
 
 The environment variable ``ROCBLAS_USE_HIPBLASLT`` is provided to manually control which GEMM backend is used for non-batched, _strided_batched, and _batched GEMM, including calls made while a stream is capturing.
 Batched GEMM uses the same selection as other GEMM during capture. It provides the following settings:

@@ -42,6 +42,34 @@
 #endif
 #endif
 
+// Each XCD has its own L2, and the L2s are not coherent with each other. Agent scope acquire and
+// release fences therefore invalidate and write back the whole L2. Kernels that hand results from
+// one row to another through done flags exchange these results with device scope atomic loads and
+// stores (sc1) instead, which are coherent across the XCD L2s. This is correct only if every such
+// result is written and read through the done row helpers (rocsparse::load_done_row_data and the
+// others), and it relies on the gfx9 wait counters: stores are counted in vmcnt (and lgkmcnt for
+// flat stores), so waiting for all counters to reach zero completes them. Newer architectures count
+// stores separately and must not be added here without changing the waits. See the GFX942 memory
+// model in the LLVM AMDGPUUsage documentation.
+//
+// Native targets use the preprocessor, so the macro is 0 or 1 and older compilers keep working.
+// SPIR-V is compiled once for all processors and defers the choice to finalization with
+// __builtin_amdgcn_processor_is. Use the macro only as an if condition: the finalizer then removes
+// the branch for other processors, and that branch may contain s_waitcnt, which gfx1250 and later
+// cannot compile.
+#if defined(__SPIRV__) && defined(__HIP_DEVICE_COMPILE__)
+#if !__has_builtin(__builtin_amdgcn_processor_is)
+#error "SPIR-V builds of rocSPARSE need a compiler with __builtin_amdgcn_processor_is"
+#endif
+#define ROCSPARSE_HAS_NONCOHERENT_XCD_L2                                                \
+    (__builtin_amdgcn_processor_is("gfx942") || __builtin_amdgcn_processor_is("gfx950") \
+     || __builtin_amdgcn_processor_is("gfx9-4-generic"))
+#elif defined(__gfx942__) || defined(__gfx950__) || defined(__gfx9_4_generic__)
+#define ROCSPARSE_HAS_NONCOHERENT_XCD_L2 1
+#else
+#define ROCSPARSE_HAS_NONCOHERENT_XCD_L2 0
+#endif
+
 // clang-format off
 // ELL indexing macros
 #define ELL_IND_ROW(i, el, m, width) (el) * (m) + (i)
@@ -50,12 +78,12 @@
 
 // BSR indexing macros
 #define BSR_IND(j, bi, bj, dir) ((dir == rocsparse_direction_row) ? BSR_IND_R(j, bi, bj) : BSR_IND_C(j, bi, bj))
-#define BSR_IND_R(j, bi, bj) (block_dim * block_dim * (j) + (bi) * block_dim + (bj))
-#define BSR_IND_C(j, bi, bj) (block_dim * block_dim * (j) + (bi) + (bj) * block_dim)
+#define BSR_IND_R(j, bi, bj) (static_cast<int64_t>(block_dim) * block_dim * (j) + (bi) * block_dim + (bj))
+#define BSR_IND_C(j, bi, bj) (static_cast<int64_t>(block_dim) * block_dim * (j) + (bi) + (bj) * block_dim)
 
 #define GEBSR_IND(j, bi, bj, dir) ((dir == rocsparse_direction_row) ? GEBSR_IND_R(j, bi, bj) : GEBSR_IND_C(j, bi, bj))
-#define GEBSR_IND_R(j, bi, bj) (row_block_dim * col_block_dim * (j) + (bi) * col_block_dim + (bj))
-#define GEBSR_IND_C(j, bi, bj) (row_block_dim * col_block_dim * (j) + (bi) + (bj) * row_block_dim)
+#define GEBSR_IND_R(j, bi, bj) (static_cast<int64_t>(row_block_dim) * col_block_dim * (j) + (bi) * col_block_dim + (bj))
+#define GEBSR_IND_C(j, bi, bj) (static_cast<int64_t>(row_block_dim) * col_block_dim * (j) + (bi) + (bj) * row_block_dim)
 // clang-format on
 
 namespace rocsparse
@@ -71,6 +99,26 @@ namespace rocsparse
     {
         static constexpr int value = 0;
     };
+
+    // True when a dynamic shared-memory request of nbytes fills
+    // hipDeviceProp_t::sharedMemPerBlockOptin. hipFuncSetAttribute rejects a
+    // request that equals that opt-in limit, so equality counts as too small.
+    inline constexpr bool shared_memory_is_too_small(const size_t nbytes, uint32_t shared_mem_optin)
+    {
+        return (nbytes >= shared_mem_optin);
+    }
+
+    template <typename T>
+    constexpr bool shared_memory_is_too_small(const int32_t nmemb, uint32_t shared_mem_optin)
+    {
+        return shared_memory_is_too_small(sizeof(T) * static_cast<size_t>(nmemb), shared_mem_optin);
+    }
+
+    template <uint32_t SIZE, typename T>
+    constexpr bool shared_memory_is_too_small(uint32_t shared_mem_optin)
+    {
+        return shared_memory_is_too_small(sizeof(T) * static_cast<size_t>(SIZE), shared_mem_optin);
+    }
 
     template <typename T>
     __device__ inline T* batched_pointer(uint32_t index, T* p, int64_t dist)
@@ -906,12 +954,16 @@ namespace rocsparse
                     while(atomicCAS(&g_fp16_lock, 0U, 1U) != 0U)
                         ;
 
+                    // Acquire: without this fence the load below can hit a stale cached
+                    // copy and overwrite the previous lock holder's update.
+                    __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "agent");
+
                     // Handle unpaired last element
                     half old_val = *addr;
                     *addr        = __hadd(old_val, __float2half(tmp));
 
                     // Ensure the write is visible to other threads before releasing the lock
-                    __threadfence();
+                    __builtin_amdgcn_fence(__ATOMIC_RELEASE, "agent");
 
                     // Release spinlock
                     atomicExch(&g_fp16_lock, 0U);
@@ -1022,12 +1074,16 @@ namespace rocsparse
                     while(atomicCAS(&g_bf16_lock, 0U, 1U) != 0U)
                         ;
 
+                    // Acquire: without this fence the load below can hit a stale cached
+                    // copy and overwrite the previous lock holder's update.
+                    __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "agent");
+
                     // Handle unpaired last element
                     rocsparse_bfloat16 old_val = *addr;
                     *addr = static_cast<rocsparse_bfloat16>(static_cast<float>(old_val) + tmp);
 
                     // Ensure the write is visible to other threads before releasing the lock
-                    __threadfence();
+                    __builtin_amdgcn_fence(__ATOMIC_RELEASE, "agent");
 
                     // Release spinlock
                     atomicExch(&g_bf16_lock, 0U);
@@ -2756,25 +2812,26 @@ namespace rocsparse
         int lid = threadIdx.x & (BSRDIM - 1);
         int wid = threadIdx.x / BSRDIM;
 
-        // Non-permuted nnz index
-        I j = blockIdx.x * DIMY + threadIdx.y;
-
-        // Do not exceed the number of elements
-        if(j >= nnzb)
+        // Grid-stride loop over the non-permuted nnz index so a grid clamped by
+        // rocsparse::get_grid_size_x still covers the full range. The index is
+        // computed in 64-bit to avoid overflowing the block-grid product.
+        const int64_t gid    = static_cast<int64_t>(blockIdx.x) * DIMY + threadIdx.y;
+        const int64_t stride = static_cast<int64_t>(gridDim.x) * DIMY;
+        for(int64_t jj = gid; jj < nnzb; jj += stride)
         {
-            return;
-        }
+            const I j = static_cast<I>(jj);
 
-        // Load the permuted nnz index
-        I p = perm[j];
+            // Load the permuted nnz index
+            const I p = perm[j];
 
-        // Gather values from A and store them to T with respect to the
-        // given row / column permutation
-        for(I bi = lid; bi < block_dim; bi += BSRDIM)
-        {
-            for(I bj = wid; bj < block_dim; bj += BSRDIM)
+            // Gather values from A and store them to T with respect to the
+            // given row / column permutation
+            for(I bi = lid; bi < block_dim; bi += BSRDIM)
             {
-                bsr_val_T[BSR_IND(j, bi, bj, dir)] = bsr_val_A[BSR_IND(p, bj, bi, dir)];
+                for(I bj = wid; bj < block_dim; bj += BSRDIM)
+                {
+                    bsr_val_T[BSR_IND(j, bi, bj, dir)] = bsr_val_A[BSR_IND(p, bj, bi, dir)];
+                }
             }
         }
     }
@@ -2831,26 +2888,11 @@ namespace rocsparse
         return local_done;
     }
 
-#if defined(__gfx942__) || defined(__gfx950__) || defined(__gfx9_4_generic__)
-    // Each XCD has its own L2, and the L2s are not coherent with each other. Agent scope acquire
-    // and release fences therefore invalidate and write back the whole L2. Kernels that hand
-    // results from one row to another through done flags exchange these results with device scope
-    // atomic loads and stores (sc1) instead, which are coherent across the XCD L2s. This is
-    // correct only if every such result is written and read through the done row helpers below,
-    // and it relies on the gfx9 wait counters: stores are counted in vmcnt (and lgkmcnt for flat
-    // stores), so waiting for all counters to reach zero completes them. Newer architectures count
-    // stores separately and must not be added here without changing the waits. See the GFX942
-    // memory model in the LLVM AMDGPUUsage documentation.
-    static constexpr bool has_noncoherent_xcd_l2 = true;
-#else
-    static constexpr bool has_noncoherent_xcd_l2 = false;
-#endif
-
     // Waits until all stores of the calling wavefront have completed. Only valid where
-    // has_noncoherent_xcd_l2 is true, because s_waitcnt 0 covers the stores only with the gfx9 wait
-    // counters. The builtin has side effects, which the compiler treats as reading and writing all
-    // memory, so memory operations stay on their side of it. The workgroup release fence makes
-    // this ordering explicit and emits no cache maintenance.
+    // ROCSPARSE_HAS_NONCOHERENT_XCD_L2 is true, because s_waitcnt 0 covers the stores only with the
+    // gfx9 wait counters. The builtin has side effects, which the compiler treats as reading and
+    // writing all memory, so memory operations stay on their side of it. The workgroup release
+    // fence makes this ordering explicit and emits no cache maintenance.
     __device__ __forceinline__ void wait_store_completion()
     {
         __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup");
@@ -2866,7 +2908,7 @@ namespace rocsparse
     // rocSPARSE does not use).
     __device__ __forceinline__ void acquire_done_rows()
     {
-        if constexpr(has_noncoherent_xcd_l2)
+        if(ROCSPARSE_HAS_NONCOHERENT_XCD_L2)
         {
             __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup");
         }
@@ -2880,7 +2922,7 @@ namespace rocsparse
     template <typename T>
     __device__ __forceinline__ T load_done_row_data(const T* ptr)
     {
-        if constexpr(has_noncoherent_xcd_l2)
+        if(ROCSPARSE_HAS_NONCOHERENT_XCD_L2)
         {
             return rocsparse::atomic_load(ptr, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
         }
@@ -2894,7 +2936,7 @@ namespace rocsparse
     template <typename T>
     __device__ __forceinline__ void store_done_row_data(T* ptr, T val)
     {
-        if constexpr(has_noncoherent_xcd_l2)
+        if(ROCSPARSE_HAS_NONCOHERENT_XCD_L2)
         {
             rocsparse::atomic_store(ptr, val, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
         }
@@ -2909,7 +2951,7 @@ namespace rocsparse
     template <typename T>
     __device__ __forceinline__ void store_done_row_result(T* ptr, T val)
     {
-        if constexpr(has_noncoherent_xcd_l2)
+        if(ROCSPARSE_HAS_NONCOHERENT_XCD_L2)
         {
             rocsparse::store_done_row_data(ptr, val);
         }
@@ -2923,7 +2965,7 @@ namespace rocsparse
     // wavefronts of the workgroup may set the done flag after a following __syncthreads().
     __device__ __forceinline__ void release_done_row_data()
     {
-        if constexpr(has_noncoherent_xcd_l2)
+        if(ROCSPARSE_HAS_NONCOHERENT_XCD_L2)
         {
             // The stores are device scope already, they only have to complete.
             rocsparse::wait_store_completion();
@@ -2940,7 +2982,7 @@ namespace rocsparse
     // row that has seen the flag.
     __device__ __forceinline__ void set_done_flag(int32_t* ptr, int32_t val)
     {
-        if constexpr(has_noncoherent_xcd_l2)
+        if(ROCSPARSE_HAS_NONCOHERENT_XCD_L2)
         {
             rocsparse::wait_store_completion();
             rocsparse::atomic_store(ptr, val, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);

@@ -43,8 +43,9 @@ class _HipTensor:
 
 
 class RockeKernels:
-    def __init__(self, rt):
+    def __init__(self, rt, arch):
         self.rt = rt
+        self.arch = arch
         self.cache = {}
         self._streams = set()
 
@@ -62,7 +63,7 @@ class RockeKernels:
             seqlen_k=max(case.k_lengths, default=case.seqlen_k),
             hdim_q=case.head_dim,
             hdim_v=case.head_dim,
-            arch="gfx1151",
+            arch=self.arch,
             dtype=case.dtype,
             mask_type=masks[case.mask],
             layout=case.layout,

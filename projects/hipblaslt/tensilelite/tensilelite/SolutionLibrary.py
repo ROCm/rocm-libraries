@@ -30,6 +30,8 @@ from . import Contractions
 from .Common import state, IsaInfo
 from .Common.Architectures import gfxToIsa, supportsChipIdPredicate
 from .SolutionStructs.Naming import getSolutionNameMin, getKernelNameMin
+from .SolutionStructs.CompactSolution import hydrateSolution
+from .SolutionStructs.Problem import isFusedA2A, splitFusedA2ARow
 
 class SingleSolutionLibrary:
     Tag = "Single"
@@ -90,7 +92,7 @@ class MatchingLibrary:
     StateKeys = [("type", "tag"), "properties", "table", "distance", "useKdTree"]
 
     @classmethod
-    def FromOriginalState(cls, d, solutions):
+    def FromOriginalState(cls, d, solutions, problemType=None):
         indices = d["indexOrder"]
         distance = d["distance"]
         origTable = d["table"]
@@ -100,7 +102,7 @@ class MatchingLibrary:
             3: Properties.Property("FreeSizeB", index=0),
             1: Properties.Property("BoundSize", index=0)
         }
-        if distance == "Equality" or distance == "GridBased":
+        if distance in ("Equality", "GridBased", "MeshBased"):
             propertyKeys[0] = Properties.Property("BatchSize", index=0)
 
         if distance == "Range":
@@ -115,17 +117,31 @@ class MatchingLibrary:
                 7: Properties.Property("BoundSize", index=0)
             }
 
+        fusedA2A = isFusedA2A(problemType)
+        if fusedA2A and distance != "Equality":
+            raise RuntimeError("fused GEMM+A2A logic supports only the Equality distance; got %s" % distance)
+
         properties = list([propertyKeys[i] for i in indices if i in propertyKeys])
         keyOrder = [i for i, j in enumerate(indices) if j in propertyKeys]
+        if fusedA2A:
+            properties += [Properties.Property("World"), Properties.Property("FusedA2AExtent")]
 
         table = []
+        # Rows typically outnumber solutions by orders of magnitude; the wrapper
+        # is immutable, so share one per solution (keeps the pickled result that
+        # workers send back to the parent small).
+        wrappers = {}
 
         for row in origTable:
             try:
                 index = row[1][0]
-                value = IndexSolutionLibrary(solutions[index])
+                value = wrappers.get(index)
+                if value is None:
+                    value = wrappers[index] = IndexSolutionLibrary(solutions[index])
                 key = list([row[0][i] for i in keyOrder])
-                if distance == "GridBased":
+                if fusedA2A:
+                    key += splitFusedA2ARow(row[0], problemType)[2]
+                if distance in ("GridBased", "MeshBased"):
                     entry = {"key": key, "index": value}
                 else:
                     entry = {"key": key, "index": value, "speed": row[1][1]}
@@ -469,10 +485,12 @@ class MasterSolutionLibrary:
                     predicate = Properties.Predicate(tag="EqualityMatching")
                 elif d["Library"]["distance"] == "Range":
                     predicate = Properties.Predicate(tag="RangeMatching")
+                elif d["Library"]["distance"] == "MeshBased":
+                    predicate = Properties.Predicate(tag="MeshBasedMatching")
                 else:
                     predicate = Properties.Predicate(tag="GridBasedMatching") # to make different from TruePred
 
-                matchingLib = MatchingLibrary.FromOriginalState(d["Library"], solutions)
+                matchingLib = MatchingLibrary.FromOriginalState(d["Library"], solutions, d["ProblemType"])
                 library = PredicateLibrary(tag="Problem")
                 library.rows.append({"predicate": predicate, "library": matchingLib})
             elif d["LibraryType"] == "FreeSize":
@@ -510,10 +528,18 @@ class MasterSolutionLibrary:
                     else:
                         placeholderName += "_%s"%str(problemType.activationType).upper()
 
+                # '<free>x' is prefixed only for a 2D scaling tile, keeping every
+                # previously generated placeholder name unchanged.
                 if problemType.mxBlockA:
-                    placeholderName += ('_MXA' + str(problemType.mxTypeA) + 'B' + str(problemType.mxBlockA))
+                    tile = str(problemType.mxBlockA)
+                    if problemType.mxBlockFreeA != 1:
+                        tile = str(problemType.mxBlockFreeA) + 'x' + tile
+                    placeholderName += ('_MXA' + str(problemType.mxTypeA) + 'B' + tile)
                 if problemType.mxBlockB:
-                    placeholderName += ('_MXB' + str(problemType.mxTypeB) + 'B' + str(problemType.mxBlockB))
+                    tile = str(problemType.mxBlockB)
+                    if problemType.mxBlockFreeB != 1:
+                        tile = str(problemType.mxBlockFreeB) + 'x' + tile
+                    placeholderName += ('_MXB' + str(problemType.mxTypeB) + 'B' + tile)
 
                 if problemType.swizzleTensorA:
                     placeholderName += '_STA'
@@ -533,6 +559,15 @@ class MasterSolutionLibrary:
                     placeholderName += '_SAB'
                 elif problemType.useScaleAB == "Vector":
                     placeholderName += '_SABV'
+                groups = problemType.scaleBlockSizesA
+                if groups:
+                    # Runtime-group kernels share one table; fixed-group kernels
+                    # and different quantization modes still need separate tables.
+                    groupTag = ('G' + 'x'.join(map(str, groups)) if len(groups) > 1
+                                else str(groups[0]))
+                    placeholderName += ('_SABB' + groupTag
+                                        + '_ZP' + str(int(problemType.scaleZeroPointA))
+                                        + '_' + problemType.int4EncodingA)
                 if problemType.useScaleCD:
                     placeholderName += '_SCD'
                 if problemType.useScaleAlphaVec:
@@ -658,8 +693,11 @@ class MasterSolutionLibrary:
 
     def applyNaming(self, splitGSU: bool):
         for s in list(self.solutions.values()):
-            s.name = getSolutionNameMin(s.originalSolution.getKernels()[0], splitGSU)
-            s.kernelName = getKernelNameMin(s.originalSolution.getKernels()[0], splitGSU)
+            # Hydrated once per solution: naming reads hundreds of state keys,
+            # which on a CompactSolution would otherwise each be a fallback.
+            kernel = hydrateSolution(s.originalSolution).getKernels()[0]
+            s.name = getSolutionNameMin(kernel, splitGSU)
+            s.kernelName = getKernelNameMin(kernel, splitGSU)
 
     def remapSolutionIndicesStartingFrom(self, curIndex):
         reIndexMap = {}

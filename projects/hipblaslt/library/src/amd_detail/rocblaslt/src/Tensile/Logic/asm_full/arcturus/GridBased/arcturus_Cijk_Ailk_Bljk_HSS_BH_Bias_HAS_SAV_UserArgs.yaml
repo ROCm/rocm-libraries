@@ -248,6 +248,7 @@ DefaultSolution:
   WorkGroupReduction: false
 Solutions:
 - SolutionIndex: 0
+  SolutionUID: 0uR2wGtAQgug
   KernelNameMin: Cijk_Ailk_Bljk_HSS_BH_Bias_HAS_SAV_UserArgs_MT64x16x32_MI16x16x1_SN_CLR1_LBSPPA512_LPB4_LRVW4_MIWT1_1_PGR0
   SolutionNameMin: Cijk_Ailk_Bljk_HSS_BH_Bias_HAS_SAV_UserArgs_MT64x16x32_MI16x16x1_SN_CLR1_GSU1_LBSPPA512_LPB4_LRVW4_MIWT1_1_PGR0_SU4_SUM1_SUS256_WGM8
   AssignedDerivedParameters: true
@@ -374,6 +375,7 @@ Solutions:
   _WorkspaceSizePerElemC: 4
   _staggerStrideShift: 2
 - SolutionIndex: 1
+  SolutionUID: 0uR2wGtB43rC
   KernelNameMin: Cijk_Ailk_Bljk_HSS_BH_Bias_HAS_SAV_UserArgs_MT64x16x32_MI16x16x1_SN_CLR0_LBSPPA512_LPB4_LRVW4_MIWT1_1_PGR0
   SolutionNameMin: Cijk_Ailk_Bljk_HSS_BH_Bias_HAS_SAV_UserArgs_MT64x16x32_MI16x16x1_SN_CLR0_GSU1_LBSPPA512_LPB4_LRVW4_MIWT1_1_PGR0_SU4_SUM1_SUS256_WGM8
   AssignedDerivedParameters: true

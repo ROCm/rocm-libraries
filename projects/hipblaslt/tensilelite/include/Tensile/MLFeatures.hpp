@@ -259,4 +259,3 @@ namespace TensileLite
          */
     } // namespace MLFeatures
 } // namespace TensileLite
-

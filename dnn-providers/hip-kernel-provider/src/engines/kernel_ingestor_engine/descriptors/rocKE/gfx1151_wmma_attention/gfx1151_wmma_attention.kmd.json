@@ -8,7 +8,15 @@
       "type": "string"
     },
     {
+      "name": "kind",
+      "type": "string"
+    },
+    {
       "name": "head_size",
+      "type": "int"
+    },
+    {
+      "name": "head_size_v",
       "type": "int"
     },
     {
@@ -16,29 +24,45 @@
       "type": "string"
     },
     {
-      "name": "transposed_qk",
+      "name": "bias",
+      "type": "string"
+    },
+    {
+      "name": "block_size",
+      "type": "int"
+    },
+    {
+      "name": "block_m",
+      "type": "int"
+    },
+    {
+      "name": "dv_split",
+      "type": "int"
+    },
+    {
+      "name": "layout",
+      "type": "string",
+      "default_value": "dense"
+    },
+    {
+      "name": "page_block_size",
       "type": "int",
       "default_value": 0
     },
     {
-      "name": "query_tail",
+      "name": "dense_q",
       "type": "int",
-      "default_value": 1
+      "default_value": 0
     },
     {
-      "name": "kv_tail",
+      "name": "seqused_q",
       "type": "int",
-      "default_value": 1
+      "default_value": 0
     },
     {
-      "name": "block_n",
+      "name": "sinks",
       "type": "int",
-      "default_value": 32
-    },
-    {
-      "name": "num_waves",
-      "type": "int",
-      "default_value": 1
+      "default_value": 0
     }
   ]
 }

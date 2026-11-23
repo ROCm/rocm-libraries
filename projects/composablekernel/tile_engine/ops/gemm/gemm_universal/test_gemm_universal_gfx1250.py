@@ -49,26 +49,34 @@ gub = _load_builder_module()
 
 DTYPES = ["fp16", "bf16", "fp8", "bf8"]
 LAYOUTS = ["rcr", "rrr", "crr", "ccr"]
-NEW_PIPELINES = ["comp_async", "comp_tdm", "comp_tdm_v2"]
-TDM_PIPELINES = ["comp_tdm", "comp_tdm_v2"]
+NEW_PIPELINES = ["comp_async", "comp_tdm", "comp_tdm_v2", "comp_tdm_pc"]
+TDM_PIPELINES = ["comp_tdm", "comp_tdm_v2", "comp_tdm_pc"]
+TDM_EPILOGUES = ("tdm", "tdmstaged")
 GFX1250_LDS = 320 * 1024
 
 # Kernel counts per (dtype, layout) for the full gfx1250 config: total and per
-# new pipeline. Pins the sweep so any config or validator drift is noticed.
+# new pipeline, as (total, comp_async, comp_tdm, comp_tdm_v2, comp_tdm_pc).
+# Pins the sweep so any config or validator drift is noticed.
 # comp_async is rcr-only on gfx1250, so the rrr rows have no comp_async. The
 # fp16/bf16 comp_async tiles with M+N=320, K=256 exceed LDS once the descriptor
 # padding is added. The pads sweep [false, true]: comp_async keeps only
 # all-True, TDM only all-False, and the legacy pipelines keep all 8 combos.
+# comp_tdm_pc trails comp_tdm because its 4-slot LDS ring (PIPELINE_SMEM_SLOTS)
+# drops the widest tiles, partly offset by it not being wave-count locked.
+# Every TDM count covers both TDM epilogues (tdm and tdmstaged, half each);
+# test_full_dtype_layout_set checks the two halves are the same kernels.
+# comp_tdm_pc also counts a cshuffle twin of every tdm instance (the split-K
+# capable pairing, see vu.tdm_epilogue_allowed), so it splits in thirds.
 FULL_COUNTS = {
-    ("fp16", "rcr"): (27489, 348, 174, 87),
-    ("fp16", "rrr"): (27141, 0, 174, 87),
-    ("bf16", "rcr"): (27489, 348, 174, 87),
-    ("bf16", "rrr"): (27141, 0, 174, 87),
+    ("fp16", "rcr"): (28041, 348, 348, 174, 291),
+    ("fp16", "rrr"): (27693, 0, 348, 174, 291),
+    ("bf16", "rcr"): (28041, 348, 348, 174, 291),
+    ("bf16", "rrr"): (27693, 0, 348, 174, 291),
     # fp8/bf8 comp_async keeps only warp_tile_k=128 (the 16x16x64 set is gated).
-    ("fp8", "rcr"): (46908, 288, 360, 180),
-    ("fp8", "rrr"): (46620, 0, 360, 180),
-    ("bf8", "rcr"): (46908, 288, 360, 180),
-    ("bf8", "rrr"): (46620, 0, 360, 180),
+    ("fp8", "rcr"): (48177, 288, 720, 360, 729),
+    ("fp8", "rrr"): (47889, 0, 720, 360, 729),
+    ("bf8", "rcr"): (48177, 288, 720, 360, 729),
+    ("bf8", "rrr"): (47889, 0, 720, 360, 729),
 }
 
 
@@ -194,14 +202,16 @@ class _ConfigLintMixin:
             name,
         )
         if pipeline in TDM_PIPELINES:
-            self.assertEqual(
-                (epilogue, scheduler, persistent), ("tdm", "intrawave", False), name
+            # tdm or tdmstaged, or cshuffle for the pipelines that may split K with it.
+            self.assertTrue(
+                vu.tdm_epilogue_allowed(pipeline, epilogue, "gemm_universal"), name
             )
+            self.assertEqual((scheduler, persistent), ("intrawave", False), name)
             self.assertEqual((pad_m, pad_n, pad_k), (False, False, False), name)
             c_bytes = t["tile_m"] * t["tile_n"] * vu.element_size(_c_dtype(dtype))
             self.assertLessEqual(c_bytes, GFX1250_LDS, name)
         else:
-            self.assertNotEqual(epilogue, "tdm", name)
+            self.assertNotIn(epilogue, TDM_EPILOGUES, name)
         if pipeline == "comp_async":
             self.assertEqual(layout[:2], "rc", name)
             self.assertEqual((pad_m, pad_n, pad_k), (True, True, True), name)
@@ -210,7 +220,8 @@ class _ConfigLintMixin:
         if pipeline == "comp_tdm_v2":
             self.assertEqual(t["warp_m"] * t["warp_n"] * t["warp_k"], 4, name)
         if pipeline in NEW_PIPELINES + ["compv4"]:
-            # Double-buffered: two A+B stages must fit in the 320K LDS.
+            # Every staged A+B slot the pipeline holds live must fit in the
+            # 320K LDS. comp_tdm_pc rings 4 slots; the rest double-buffer.
             esz = vu.element_size(dtype)
             a = t["tile_m"] * t["tile_k"] * esz
             b = t["tile_n"] * t["tile_k"] * esz
@@ -218,7 +229,8 @@ class _ConfigLintMixin:
                 layer = max(1, 256 // (t["tile_k"] * esz))
                 a += max(0, t["tile_m"] // layer - 1) * 16
                 b += max(0, t["tile_n"] // layer - 1) * 16
-            self.assertLessEqual(2 * (a + b), GFX1250_LDS, name)
+            slots = vu.PIPELINE_SMEM_SLOTS[pipeline]
+            self.assertLessEqual(slots * (a + b), GFX1250_LDS, name)
 
     def _lint(self, dtype, layout):
         kernels = _kernels("gfx1250", dtype, layout, self.CONFIG)
@@ -245,7 +257,18 @@ class TestCiConfig(_ConfigLintMixin, unittest.TestCase):
                 # comp_async keeps only pads True; TDM keeps only pads False;
                 # comp_async is rcr-only on gfx1250, and fp8/bf8 comp_async
                 # needs warp_tile_k=128, which the CI config (tile_k=64) lacks.
-                expected = {"comp_tdm": 1, "comp_tdm_v2": 1}
+                #
+                # comp_tdm_pc is deliberately absent from the CI config. That
+                # file is a shared contract with the dispatcher bridge:
+                # TestDispatcherGolden runs dispatcher/codegen/
+                # unified_gemm_codegen.py over it, and the dispatcher has no
+                # comp_tdm_pc entry (codegen_common.PIPELINE_TO_CK,
+                # unified_gemm_codegen.py, kernel_key.hpp Pipeline enum).
+                # Adding it here fails TestDispatcherGolden.setUpClass until
+                # the dispatcher side is wired too. The full config
+                # (default_config_gfx1250.json) has no such coupling.
+                # Each TDM pipeline gets one tdm and one tdmstaged kernel.
+                expected = {"comp_tdm": 2, "comp_tdm_v2": 2}
                 if layout[:2] == "rc" and dtype not in ("fp8", "bf8"):
                     expected["comp_async"] = 1
                 self.assertEqual(counts, expected, (dtype, layout))
@@ -266,8 +289,23 @@ class TestFullConfig(_ConfigLintMixin, unittest.TestCase):
             for layout in LAYOUTS:
                 kernels = self._lint(dtype, layout)
                 counts = collections.Counter(k["trait_combo"][0] for k in kernels)
+                tdm_names = collections.defaultdict(list)
+                for k in kernels:
+                    pipeline, epilogue = k["trait_combo"][:2]
+                    if pipeline in TDM_PIPELINES:
+                        tdm_names[(pipeline, epilogue)].append(
+                            k["name"].replace(
+                                f"_{pipeline}_{epilogue}_", f"_{pipeline}_*_"
+                            )
+                        )
                 for p in TDM_PIPELINES:
                     self.assertGreater(counts[p], 0, (dtype, layout, p))
+                    # tdmstaged is accepted exactly where tdm is (row-major C).
+                    self.assertEqual(
+                        sorted(tdm_names[(p, "tdm")]),
+                        sorted(tdm_names[(p, "tdmstaged")]),
+                        (dtype, layout, p),
+                    )
                 if layout[:2] == "rc":
                     self.assertGreater(counts["comp_async"], 0, (dtype, layout))
                 else:
@@ -279,6 +317,7 @@ class TestFullConfig(_ConfigLintMixin, unittest.TestCase):
                         counts["comp_async"],
                         counts["comp_tdm"],
                         counts["comp_tdm_v2"],
+                        counts["comp_tdm_pc"],
                     )
                     self.assertEqual(got, expected, (dtype, layout))
 
@@ -287,7 +326,9 @@ class TestFullConfig(_ConfigLintMixin, unittest.TestCase):
             kernels = _kernels(arch, "fp16", "rcr", _FULL_CONFIG)
             pipelines = {k["trait_combo"][0] for k in kernels}
             self.assertFalse(pipelines & set(NEW_PIPELINES), arch)
-            self.assertFalse(any(k["trait_combo"][1] == "tdm" for k in kernels), arch)
+            self.assertFalse(
+                any(k["trait_combo"][1] in TDM_EPILOGUES for k in kernels), arch
+            )
 
 
 _GOLDEN_TILE = {
@@ -302,6 +343,8 @@ _GOLDEN_TILE = {
     "warp_tile_k": 32,
 }
 
+_GOLDEN_TILE_FP8 = dict(_GOLDEN_TILE, tile_k=256, warp_tile_k=128)
+
 
 class TestTileEngineGolden(unittest.TestCase):
     def _instance(self, pipeline, epilogue, pad=False, layout="rcr"):
@@ -311,10 +354,32 @@ class TestTileEngineGolden(unittest.TestCase):
 
     def test_tdm_with_pad_raises(self):
         for pipeline in TDM_PIPELINES:
-            with self.assertRaisesRegex(
-                ValueError, "padded TDM kernel would duplicate"
-            ):
-                self._instance(pipeline, "tdm", pad=True)
+            for epilogue in TDM_EPILOGUES:
+                with self.assertRaisesRegex(
+                    ValueError, "padded TDM kernel would duplicate"
+                ):
+                    self._instance(pipeline, epilogue, pad=True)
+
+    def test_tdm_staged_column_major_c_raises(self):
+        with self.assertRaisesRegex(ValueError, "tdmstaged requires a row-major C"):
+            self._instance("comp_tdm", "tdmstaged", layout="rcc")
+        self.assertFalse(
+            vu.is_trait_combination_valid(
+                "comp_tdm", "tdmstaged", "intrawave", False, "gemm_universal", "rcc"
+            )
+        )
+        self.assertTrue(
+            vu.is_trait_combination_valid(
+                "comp_tdm", "tdmstaged", "intrawave", False, "gemm_universal", "rcr"
+            )
+        )
+
+    def test_tdm_staged_needs_a_tdm_pipeline(self):
+        for pipeline in ("compv3", "comp_async"):
+            with self.assertRaisesRegex(ValueError, "tdmstaged epilogue requires"):
+                self._instance(pipeline, "tdmstaged", pad=pipeline == "comp_async")
+        with self.assertRaisesRegex(ValueError, "requires the cshuffle epilogue"):
+            self._instance("comp_tdm_v3", "tdmstaged")
 
     def test_comp_async_non_rc_layout_raises(self):
         for layout in ["rrr", "crr", "ccr"]:
@@ -350,6 +415,26 @@ class TestTileEngineGolden(unittest.TestCase):
         self.assertIn("ck_tile::TdmEpilogue<", code)
         self.assertIn("static constexpr bool DoubleSmemBuffer = true;", code)
         self.assertIn("args.k_batch != 1", code)
+
+    def test_tdm_staged(self):
+        staged = (
+            "ck_tile::TdmEpilogueStagedForPipeline<EpilogueProblem, 1, GemmPipeline>"
+        )
+        for pipeline, impl in (
+            ("comp_tdm", "GemmPipelineAgBgCrCompTDMV1"),
+            ("comp_tdm_v2", "GemmPipelineAgBgCrCompTDMV2"),
+            ("comp_tdm_pc", "GemmPipelineAgBgCrCompTDMProducerConsumer"),
+        ):
+            name, code = self._instance(pipeline, "tdmstaged")
+            self.assertIn(f"_{pipeline}_tdmstaged_intrawave_", name)
+            self.assertIn('#include "ck_tile/ops/epilogue/tdm_epilogue.hpp"', code)
+            self.assertIn(f"ck_tile::{impl}<", code)
+            self.assertIn(f"using GemmEpilogue = {staged};", code)
+            self.assertNotIn("ck_tile::TdmEpilogue<", code)
+            self.assertNotIn("CShuffleEpilogue<", code)
+            # The staged epilogue sizes its slab buffers from the pipeline type.
+            self.assertLess(code.index("using GemmPipeline"), code.index(staged))
+            self.assertIn("TDM pipeline requires k_batch==1", code)
 
     def test_comp_async(self):
         name, code = self._instance("comp_async", "cshuffle", pad=True)
@@ -395,6 +480,113 @@ class TestTileEngineGolden(unittest.TestCase):
             self.assertIn("comp_tdm_v2_tdm_intrawave", headers[0].name)
             self.assertIn("ck_tile::GemmPipelineAgBgCrCompTDMV2<", code)
             self.assertIn("ck_tile::TdmEpilogue<", code)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+
+class TestCDatatype(unittest.TestCase):
+    """--c_datatype bf16 (fp8/bf8 only) is opt-in: default names and headers are
+    unchanged, and a bf16-C kernel carries a _cbf16 name suffix."""
+
+    def _builder(self, dtype, c_datatype):
+        return gub.GemmUniversalKernelBuilder(
+            "gemm_universal",
+            Path(tempfile.mkdtemp(prefix="gu_gfx1250_c_")),
+            "gfx1250",
+            dtype,
+            "rcr",
+            str(_CI_CONFIG),
+            c_datatype=c_datatype,
+        )
+
+    def _names(self, dtype, c_datatype):
+        b = self._builder(dtype, c_datatype)
+        try:
+            return [k["name"] for k in b._get_sampled_kernel_list()]
+        finally:
+            shutil.rmtree(b.working_path, ignore_errors=True)
+
+    def test_default_names_unchanged(self):
+        for dtype in DTYPES:
+            default = self._names(dtype, None)
+            self.assertTrue(default, dtype)
+            self.assertEqual(default, self._names(dtype, _c_dtype(dtype)), dtype)
+            self.assertFalse([n for n in default if n.endswith("_cbf16")], dtype)
+
+    def test_bf16_c_suffix(self):
+        for dtype in ("fp8", "bf8"):
+            default = self._names(dtype, None)
+            bf16 = self._names(dtype, "bf16")
+            # bf16 and fp16 C are both 2 bytes, so the validated set is the same.
+            self.assertEqual(bf16, [n + "_cbf16" for n in default], dtype)
+
+    def test_bf16_c_header(self):
+        trait = ("comp_tdm", "tdm", "intrawave", False, False, False, False)
+        for c_datatype, c_type, suffix in (
+            (None, "ck_tile::fp16_t", ""),
+            ("bf16", "ck_tile::bf16_t", "_cbf16"),
+        ):
+            b = self._builder("fp8", c_datatype)
+            try:
+                name, code = b._generate_kernel_instance(_GOLDEN_TILE_FP8, trait)
+                self.assertTrue(name.endswith("_16x16x128" + suffix), name)
+                self.assertIn(f"using CDataType = {c_type};", code)
+                self.assertIn(f'KERNEL_NAME = "{name}";', code)
+                headers = [h.name for h in b.working_path.glob("*.hpp")]
+                self.assertEqual(
+                    headers, [f"gemm_universal_single_{name[15:]}.hpp"], headers
+                )
+            finally:
+                shutil.rmtree(b.working_path, ignore_errors=True)
+
+    def test_unsupported_c_datatype_raises(self):
+        for dtype, c_datatype in (("fp16", "bf16"), ("bf16", "fp16"), ("fp8", "fp8")):
+            with self.assertRaisesRegex(ValueError, "is not supported for datatype"):
+                self._builder(dtype, c_datatype)
+
+    def test_gen_single_cli_bf16_c(self):
+        # The CMake target passes --c_datatype and expects the _cbf16 header name.
+        tmp = Path(tempfile.mkdtemp(prefix="gu_gfx1250_cli_c_"))
+        try:
+            subprocess.run(
+                [
+                    sys.executable,
+                    str(_BUILDER),
+                    "--working_path",
+                    str(tmp),
+                    "--gpu_target",
+                    "gfx1250",
+                    "--datatype",
+                    "fp8",
+                    "--layout",
+                    "rcr",
+                    "--config_json",
+                    str(_CI_CONFIG),
+                    "--c_datatype",
+                    "bf16",
+                    "--gen_single",
+                    "--kernel_name",
+                    "unused",
+                    "--tile_config",
+                    "128x128x256_2x2x1_16x16x128",
+                    "--trait_combo",
+                    "comp_tdm_tdm_intrawave_False_False_False_False",
+                ],
+                check=True,
+                capture_output=True,
+                cwd=str(_HERE),
+            )
+            headers = [h.name for h in tmp.glob("*.hpp")]
+            self.assertEqual(
+                headers,
+                [
+                    "gemm_universal_single_fp8_rcr_comp_tdm_tdm_intrawave_False_False_"
+                    "False_False_128x128x256_2x2x1_16x16x128_cbf16.hpp"
+                ],
+            )
+            self.assertIn(
+                "using CDataType = ck_tile::bf16_t;", (tmp / headers[0]).read_text()
+            )
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 
@@ -457,19 +649,20 @@ class TestDispatcherGolden(unittest.TestCase):
         return (self.out / name).read_text(), wrapper.read_text()
 
     def test_kernel_set(self):
-        # comp_async: pads True only; comp_tdm / comp_tdm_v2: pads False only.
-        self.assertEqual(len(self.names), 3, self.names)
-        counts = collections.Counter(
-            p
-            for n in self.names
-            for p in ("_comp_async_", "_comp_tdm_tdm_", "_comp_tdm_v2_tdm_")
-            if p in n
+        # comp_async: pads True only; comp_tdm / comp_tdm_v2: pads False only, one
+        # kernel per TDM epilogue.
+        markers = (
+            "_comp_async_",
+            "_comp_tdm_tdm_",
+            "_comp_tdm_v2_tdm_",
+            "_comp_tdm_tdmstaged_",
+            "_comp_tdm_v2_tdmstaged_",
         )
-        self.assertEqual(
-            counts, {"_comp_async_": 1, "_comp_tdm_tdm_": 1, "_comp_tdm_v2_tdm_": 1}
-        )
+        self.assertEqual(len(self.names), len(markers), self.names)
+        counts = collections.Counter(p for n in self.names for p in markers if p in n)
+        self.assertEqual(counts, {p: 1 for p in markers})
         for n in self.names:
-            if "_tdm_intrawave_" in n:
+            if "_tdm_intrawave_" in n or "_tdmstaged_intrawave_" in n:
                 self.assertIn("_intrawave_False_False_False_False_", n)
 
     def test_comp_tdm(self):
@@ -488,6 +681,20 @@ class TestDispatcherGolden(unittest.TestCase):
         self.assertIn("static constexpr bool DoubleSmemBuffer = true;", code)
         self.assertIn("args.k_batch != 1", code)
         self.assertIn("Epilogue::Tdm", wrapper)
+
+    def test_tdm_staged(self):
+        for marker, impl in (
+            ("_comp_tdm_tdmstaged_", "GemmPipelineAgBgCrCompTDMV1<"),
+            ("_comp_tdm_v2_tdmstaged_", "GemmPipelineAgBgCrCompTDMV2<"),
+        ):
+            code, wrapper = self._header(marker)
+            self.assertIn(impl, code)
+            self.assertIn(
+                "TdmEpilogueStagedForPipeline<EpilogueProblem, 1, GemmPipeline>", code
+            )
+            self.assertNotIn("TdmEpilogue<", code)
+            self.assertIn("args.k_batch != 1", code)
+            self.assertIn("Epilogue::TdmStaged", wrapper)
 
     def test_comp_async(self):
         code, _wrapper = self._header("_comp_async_", pads="True_True_True")

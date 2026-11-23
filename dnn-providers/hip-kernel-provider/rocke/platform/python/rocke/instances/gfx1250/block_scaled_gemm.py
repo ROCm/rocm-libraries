@@ -4,7 +4,7 @@
 
 The default path preserves the existing K=64 FP8/BF8 WMMA plus software
 post-scaling contract. ``matrix_path="wmma_scale"`` and ``"wmma_scale16"``
-select the native gfx1250 K=128 instructions and consume packed E8M0 scale
+select the native gfx1250 K=128 instructions and consume packed encoded scale
 bytes directly.
 """
 
@@ -29,7 +29,12 @@ from ...core.ir import (
 )
 from ...helpers.mma_io import load_matrix_fragment, pack_fragment_bits, storage_ir_type
 from ...core.storage import BitPacking
-from ...helpers.spec import SignatureBuilder, ceil_div_grid, kernel_name_join
+from ...helpers.spec import (
+    SignatureBuilder,
+    ceil_div_grid,
+    kernel_name_join,
+    salted_kernel_name,
+)
 
 _LOWBIT_FORMATS = {
     "fp8e4m3": "fp8",
@@ -103,12 +108,31 @@ class BlockScaledGemmSpec:
     tile_m: int = 16
     tile_n: int = 16
     tile_k: int = 128
+
     # Data-prefetch hints (gfx1250, llvm23 only): one scalar prefetch of the
     # workgroup's A-scale rows and a per-lane ``global_prefetch`` of the next
     # K step's A/B rows. Results do not change; off keeps the default IR.
     prefetch: bool = False
+    scale_dtype_a: str | None = None
+    scale_dtype_b: str | None = None
+    # Runtime tensor factors are supported for FP4/E4M3/SCALE16 (NVFP4) only.
+    tensor_scale: bool = False
+
+    def resolved_scale_dtypes(self) -> tuple[str, str]:
+        aliases = {"i8": "e8m0", "fp8e4m3": "e4m3"}
+        return tuple(
+            aliases.get(dtype, dtype)
+            for dtype in (
+                self.scale_dtype if self.scale_dtype_a is None else self.scale_dtype_a,
+                self.scale_dtype if self.scale_dtype_b is None else self.scale_dtype_b,
+            )
+        )
 
     def __post_init__(self) -> None:
+        if type(self.tensor_scale) is not bool:
+            raise TypeError("tensor_scale must be a bool")
+        if type(self.prefetch) is not bool:
+            raise TypeError("prefetch must be a bool")
         object.__setattr__(self, "dtype_a", normalize_dtype(self.dtype_a))
         object.__setattr__(self, "dtype_b", normalize_dtype(self.dtype_b))
 
@@ -117,16 +141,28 @@ class BlockScaledGemmSpec:
         return _WAVE
 
     def kernel_name(self) -> str:
-        return kernel_name_join(
+        base = kernel_name_join(
             self.name,
             "block_scaled",
             f"{_canon_lowbit(self.dtype_a)}_{_canon_lowbit(self.dtype_b)}",
             f"out_{normalize_dtype(self.dtype_c)}",
-            f"M{self.M}N{self.N}K{self.K}",
             f"bk{self.block_k}",
             f"t{self.tile_m}x{self.tile_n}x{self.tile_k}",
-            flags={self.resolved_matrix_path(): True, "pf": self.prefetch},
+            flags={
+                self.resolved_matrix_path(): True,
+                "tensor_scale": self.tensor_scale,
+                **{
+                    f"s{operand}_{dtype}": True
+                    for operand, dtype in zip("ab", self.resolved_scale_dtypes())
+                    if self.resolved_matrix_path() in ("wmma_scale", "wmma_scale16")
+                    and dtype != "e8m0"
+                },
+            },
         )
+        # N specializes addressing and K specializes the unrolled instruction
+        # sequence. M affects only launch geometry, not the generated body.
+        specialized = salted_kernel_name(base, (("N", self.N), ("K", self.K)))
+        return kernel_name_join(specialized, flags={"pf": self.prefetch})
 
     def resolved_matrix_path(self) -> str:
         # "auto" and the legacy "wmma_scaffold" token both resolve to the real
@@ -137,13 +173,12 @@ class BlockScaledGemmSpec:
 
 
 def _native_scaled_atom(spec: BlockScaledGemmSpec, target: ArchTarget):
-    scale_dtype = "e8m0" if spec.scale_dtype == "i8" else spec.scale_dtype
     return target.mma.op_for_shape(
         family="wmma_scaled",
         a_dtype=spec.dtype_a,
         b_dtype=spec.dtype_b,
         c_dtype=spec.dtype_acc,
-        scales=(scale_dtype, scale_dtype, spec.block_k),
+        scales=(*spec.resolved_scale_dtypes(), spec.block_k),
         m=_BLOCK_M,
         n=_BLOCK_N,
         k=_WMMA_SCALE_K,
@@ -153,6 +188,11 @@ def _native_scaled_atom(spec: BlockScaledGemmSpec, target: ArchTarget):
 def is_valid_spec(spec: BlockScaledGemmSpec, arch: str = "gfx1250") -> Tuple[bool, str]:
     """Return ``(ok, reason)`` for the gfx1250 block-scaled GEMM contract."""
     from ...core.arch import ArchTarget
+
+    if type(spec.tensor_scale) is not bool:
+        return False, "tensor_scale must be a bool"
+    if type(spec.prefetch) is not bool:
+        return False, "prefetch must be a bool"
 
     try:
         target = ArchTarget.from_gfx(arch)
@@ -208,6 +248,16 @@ def is_valid_spec(spec: BlockScaledGemmSpec, arch: str = "gfx1250") -> Tuple[boo
         return False, f"accumulator dtype must be fp32 (got {spec.dtype_acc!r})"
     if spec.layout != "RCR":
         return False, f"block_scaled_gemm supports RCR only (got {spec.layout!r})"
+    if spec.tensor_scale and not native_scale:
+        return False, "tensor scales require native scaled WMMA"
+    if spec.tensor_scale and (
+        spec.dtype_a != normalize_dtype("fp4")
+        or spec.dtype_b != normalize_dtype("fp4")
+        or matrix_path != "wmma_scale16"
+        or spec.block_k != 16
+        or spec.resolved_scale_dtypes() != ("e4m3", "e4m3")
+    ):
+        return False, "tensor scales require the FP4/E4M3/SCALE16 NVFP4 contract"
     if native_scale:
         required_block_k = 16 if matrix_path == "wmma_scale16" else 32
         if spec.block_k != required_block_k:
@@ -226,6 +276,8 @@ def is_valid_spec(spec: BlockScaledGemmSpec, arch: str = "gfx1250") -> Tuple[boo
             )
 
     else:
+        if spec.scale_dtype_a is not None or spec.scale_dtype_b is not None:
+            return False, "per-operand scale types require native scaled WMMA"
         try:
             _wire_scale_dtype(spec.scale_dtype)
         except ValueError as e:
@@ -257,7 +309,7 @@ def block_scaled_gemm_signature(spec: BlockScaledGemmSpec) -> List[dict]:
         if spec.resolved_matrix_path() in ("wmma_scale", "wmma_scale16")
         else _wire_scale_dtype(spec.scale_dtype)
     )
-    return (
+    signature = (
         SignatureBuilder()
         .ptr(
             "A",
@@ -281,8 +333,10 @@ def block_scaled_gemm_signature(spec: BlockScaledGemmSpec) -> List[dict]:
         .scalar("M", "i32")
         .scalar("N", "i32")
         .scalar("K", "i32")
-        .build()
     )
+    if spec.tensor_scale:
+        signature.scalar("A_tensor_scale", "f32").scalar("B_tensor_scale", "f32")
+    return signature.build()
 
 
 def block_scaled_gemm_grid(spec: BlockScaledGemmSpec) -> Tuple[int, int, int]:
@@ -305,7 +359,7 @@ def build_block_scaled_gemm(
     One wave (32 lanes) computes one 16x16 output tile without LDS. The legacy
     ``wmma`` path uses K=64 FP8/BF8 atoms, accumulates each ``block_k`` group,
     and applies FP16/FP32 A/B scales in software. The native ``wmma_scale`` and
-    ``wmma_scale16`` paths use K=128 scaled WMMA atoms and pass packed E8M0 scale bytes
+    ``wmma_scale16`` paths use K=128 scaled WMMA atoms and pass packed encoded scale bytes
     directly to the instruction, with K=32 and K=16 scale groups respectively.
 
     Lane ``l`` owns output column ``l % 16`` and rows
@@ -365,6 +419,11 @@ def build_block_scaled_gemm(
     M = ir.param("M", I32)  # noqa: F841 - ABI mirror; grid defines bounds
     N = ir.param("N", I32)  # noqa: F841
     K = ir.param("K", I32)  # noqa: F841
+
+    if spec.tensor_scale:
+        a_tensor_scale = ir.param("A_tensor_scale", F32)
+        b_tensor_scale = ir.param("B_tensor_scale", F32)
+        tensor_scale = ir.fmul(a_tensor_scale, b_tensor_scale)
 
     cK = ir.const_i32(spec.K)
     cN = ir.const_i32(spec.N)
@@ -486,9 +545,12 @@ def build_block_scaled_gemm(
         for i in range(_ACC):
             out_row = ir.add(row_base, ir.const_i32(i))
             idx = ir.add(ir.mul(out_row, cN), out_col)
-            ir.global_store(
-                C, idx, ir.cast_f32_to(ir.vec_extract(acc, i), c_ty), align=2
-            )
+            value = ir.vec_extract(acc, i)
+            if spec.tensor_scale:
+                value = ir.fmul(value, tensor_scale)
+                # Preserve FP32 rounding before the BF16/FP16 conversion.
+                value = ir.optimization_barrier(value)
+            ir.global_store(C, idx, ir.cast_f32_to(value, c_ty), align=2)
         return ir.kernel
 
     # Per-lane f32 output accumulators (8 column-distributed slots).

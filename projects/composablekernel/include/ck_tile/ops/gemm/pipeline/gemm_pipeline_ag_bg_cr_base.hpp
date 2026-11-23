@@ -8,6 +8,17 @@
 
 namespace ck_tile {
 
+// Optional policy hook: a policy that supplies its own scale DRAM windows (e.g. group-quant
+// scales) returns the per-iteration (scale_a, scale_b) window steps from
+// GetScaleDramTileWindowSteps. Pipelines then use the scale windows as passed in.
+template <typename Policy, typename Problem>
+using scale_dram_tile_window_steps_t =
+    decltype(Policy::template GetScaleDramTileWindowSteps<Problem>());
+
+template <typename Policy, typename Problem>
+inline constexpr bool has_scale_dram_tile_window_steps_v =
+    is_detected<scale_dram_tile_window_steps_t, Policy, Problem>::value;
+
 template <typename Policy, typename Problem, typename = void>
 struct has_get_pipeline_subtile_params : std::false_type
 {
@@ -103,6 +114,36 @@ struct GemmPipelineAgBgCrImplBase
                                           SrcTileWindow& dram_tile_window) const
     {
         load_tile_tdm(tdm_config, dst_block_window, dram_tile_window);
+    }
+
+    // overload for TDM groups built once (TDMDescriptor::getGroups) and kept in registers: this
+    // load's LDS and global addresses and the extent of dimension Dim replace the groups'.
+    template <index_t Dim>
+    CK_TILE_DEVICE static void GlobalPrefetchTDM(const TDMGroups& groups,
+                                                 uint32_t lds_addr,
+                                                 uint64_t global_addr,
+                                                 uint32_t extent)
+    {
+        amd_tdm_load<Dim>(groups, lds_addr, global_addr, extent);
+    }
+
+    // The TDMConfig of A's or B's LDS tile, or with IsScale of its scales: the LDS padding of
+    // Policy::GetLdsPaddingConfig and the cluster multicast workgroup_mask (none by default).
+    template <bool IsA, bool IsScale = false>
+    CK_TILE_DEVICE static TDMConfig MakeTdmConfig(uint16_t workgroup_mask = 0)
+    {
+        constexpr auto padding = [] {
+            if constexpr(IsScale)
+                return Policy::template GetLdsPaddingConfig<Problem, IsA, true>();
+            else
+                return Policy::template GetLdsPaddingConfig<Problem, IsA>();
+        }();
+        TDMConfig config;
+        config.pad_enable              = padding[number<0>{}];
+        config.pad_config.pad_amount   = padding[number<1>{}];
+        config.pad_config.pad_interval = padding[number<2>{}];
+        config.workgroup_mask          = workgroup_mask;
+        return config;
     }
 
     // Store a tile to LDS. Applies an optional element-wise function first.

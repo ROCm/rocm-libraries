@@ -11,20 +11,10 @@ import copy
 
 import pytest
 
-from Tensile.Common.Architectures import SUPPORTED_ISA
-from Tensile.Common.Capabilities import makeIsaInfoMap
-from Tensile.Toolchain.Validators import validateToolchain
-
-
-@pytest.fixture(scope="session")
-def isa_info_map():
-    return makeIsaInfoMap(SUPPORTED_ISA, validateToolchain("amdclang++"))
-
-
 @pytest.fixture
 def isolate_globals():
-    from Tensile.Common.GlobalParameters import globalParameters
-    from Tensile.Common.ValidParameters import validParameters
+    from tensilelite.Common.GlobalParameters import globalParameters
+    from tensilelite.Common.ValidParameters import validParameters
 
     saved_gp = copy.deepcopy(dict(globalParameters))
     saved_isa = validParameters.get("ISA")

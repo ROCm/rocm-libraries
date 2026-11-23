@@ -50,7 +50,7 @@ flowchart TD
     subgraph L2["2 · ISA backend — code, per gfx family"]
         direction LR
         B1["core/isa/backend.py<br/>BACKEND_REGISTRY['gfxNNNN'] = Gfx…Backend<br/>reuse a class; subclass only if codegen diverges"]
-        B2["cpp/core/isa/backend.cpp REGISTRY row<br/>+ cpp/core/lower_llvm/core.cpp rocke_ll_backend_for"]
+        B2["cpp/core/isa/backend.cpp REGISTRY row<br/>+ cpp/core/lower_llvm/core.cpp LL_BACKENDS"]
         B1 -.->|"both C++ rows required"| B2
     end
 
@@ -86,7 +86,7 @@ flowchart TD
 
     subgraph G["5 · Gates — 'done' means all green"]
         direction TB
-        G1["tools/check_byte_identity.py at EVERY flavor<br/>llvm20 · llvm22 · llvm23"]
+        G1["tools/check_byte_identity.py at EVERY flavor<br/>llvm20 · llvm22 · llvm23 · llvm24"]
         G2["test_cpp_engine_lowers_every_arch_python_wires<br/>a Python row without the two C++ rows FAILS here"]
         G3["arch-gate dispatch test: new candidates reject every other arch<br/>+ additive-registration + declared-coverage invariants"]
         G4["tools/run_checks.py · platform/tests/run_all.py"]
@@ -115,6 +115,28 @@ Mirror the same facts into the C++ SSOT,
 static `rocke_arch_target_t` plus its `k_mma_gfxNNNN[]` catalog. The two SSOTs
 are compared by the byte-identity gate, not by review alone.
 
+The gfx1250 scaled family uses one JSON declaration, `gfx1250_wmma_scaled_v1`,
+instead of individual rows. It expands independent A/B matrix types
+(`fp8`, `bf8`, `fp6`, `bf6`, `fp4`), independent A/B scale types
+(`e8m0`, `e5m3`, `e4m3`), and K-group sizes 32/16 into 86 ordinary
+`wmma_scaled` rows with shape 16×16×128 and fp32 accumulators. The
+[supported-combination filter](https://github.com/llvm/llvm-project/commit/7597c0c938b364306cbee21dd03835ff5b699c74)
+requires E8M0 for non-FP4 operands and matching scales for FP4 × FP4. The loader
+validates the complete declaration before expansion and rejects duplicate IDs.
+Version 1 fixes both these axes and their historical enumeration order; changing
+support requires an explicit loader/native generator update and regression
+baseline review. The first ten native E8M0 entries historically use a different
+order from Python; each API retains its own pre-change order. Other architectures
+retain explicit rows.
+
+Python generates the scaled fragment dictionary from the expanded catalog.
+C++ generates the contiguous catalog at compile time using private POD arrays;
+ID strings live in separate immutable static storage. The native lookup remains
+libc-only at runtime, with no JSON parser, Python dependency, allocation, or
+dynamic initialization. Bare-ID accumulator fragment lookup consults that
+catalog rather than maintaining a second scaled-ID table. Compare every
+expanded row against the pre-change baseline as well as running engine parity.
+
 ### New matrix atoms
 
 An `op_id` that no existing arch lists needs a row in `_MMA_FRAGMENT_INFO`
@@ -128,6 +150,56 @@ and no maps — and then raises `NotImplementedError: no verified 'a' layout map
 MMA op_id ...` the first time a kernel asks for it. Emission for a genuinely new
 atom shape also lands in [`cpp/core/lower_llvm/mma.cpp`](../../cpp/core/lower_llvm/mma.cpp).
 
+### Generic processors
+
+An LLVM generic processor (`gfx11-generic`, `gfx12-generic`) is catalogued like
+any other target: an `arches` row whose facts and `mma` atoms are the common
+subset of its members, plus the two backend rows. Its code objects (code object
+v6) load on every member device, so one build serves the family. The
+`generic_targets` section of `arch_specs.json` lists each catalogued generic
+processor's members, mirrored by `rocke_ati_generic_targets` in
+[`cpp/core/arch/data.cpp`](../../cpp/core/arch/data.cpp).
+`generic_arch_from_target_id()` (C++: `rocke_generic_arch_from_target_id()`)
+maps any device or processor name to that generic target.
+`base_arch_from_target_id()` keeps a processor that has a row of its own, and
+every member of a catalogued generic target has one (see below), so `gfx1100`
+lowers as `gfx1100`; only a processor with no row falls back to the generic row
+that lists it. Capability tables (`intrinsic_arch_domain.*.json`) need
+the new column, regenerated per LLVM flavor with `tools/gen_arch_domain.py`.
+
+Every member of a generic target that rocKE supports gets a row of its own, so
+support for a processor is explicit rather than implied by `generic_targets`. A
+member whose recorded facts differ from the generic's holds them in full. A member
+whose every recorded field equals the generic's holds no facts and points at the
+generic instead, so each fact has one home:
+
+```json
+"gfx1151": { "_comment": "why the row exists", "facts_of": "gfx11-generic" }
+```
+
+The loader resolves every pointer before any reader sees it, so
+`ArchTarget.from_gfx("gfx1151")` is the generic's target under the name
+`gfx1151`. A pointer holds nothing but `facts_of` and an optional `_comment`, and
+must name the generic target that `generic_targets` lists the processor under,
+which itself holds facts; the loader refuses anything else. In C++ the processor's
+`rocke_arch_target_t` is the generic's `constexpr` target with only `gfx` replaced
+(`facts_of(k_target_gfx11_generic, "gfx1151")` in `data.cpp`), sharing its `mma`
+array. Grouping is decided by the recorded fields only: a member points at its
+generic exactly when every field this file records matches.
+
+Each target compiles for itself where the LLVM flavor's compiler accepts its
+processor name. `tools/gen_arch_domain.py` records that per target in each
+column's `processors`; where a flavor rejects a member's name,
+`compiler_target_for_flavor()` (C++: `rocke_compiler_target_for_flavor()`,
+which reads the rejections the build generates from the same columns through
+`tools/gen_arch_domain_cpp.py`) compiles it as the
+generic its row points at, with a message saying so, and refuses a target with
+no such generic. Each compile helper passes the flavor of the compiler it runs:
+the one COMGR loads for `compile_kernel`, hipcc's own clang for the hipcc helpers.
+`compiler_target_from_target_id()` only removes the profile and never replaces
+the processor. The C++ engine has no compile path yet; its function exists for
+API parity.
+
 ## 2 · ISA backend
 
 Add one row to `BACKEND_REGISTRY` in
@@ -137,15 +209,21 @@ subclass only when the target's codegen actually diverges. Adding a gfx is
 explicitly *not* "edit `_Lowerer`".
 
 The C++ side needs **two** rows: the `REGISTRY` table in
-[`cpp/core/isa/backend.cpp`](../../cpp/core/isa/backend.cpp) and the resolver
-`rocke_ll_backend_for` in
+[`cpp/core/isa/backend.cpp`](../../cpp/core/isa/backend.cpp) and the
+`LL_BACKENDS` table `rocke_ll_backend_for` reads in
 [`cpp/core/lower_llvm/core.cpp`](../../cpp/core/lower_llvm/core.cpp).
 
-A backend row may legitimately land **before** the arch metadata — `gfx908` and
-`gfx90a` are such forward declarations today. `backend_for()` resolves the
+Only a target whose row holds facts of its own gets backend rows. A member that
+points at its generic (`facts_of`) gets none in any of the three registries: each
+resolves it through its generic's row under the member's own name (Python
+through `listed_arch_for`, C++ through `rocke_arch_facts_of`), so its arch-domain
+cells and messages stay its own.
+
+A backend row may legitimately land **before** the arch metadata (a forward
+declaration; none is registered today). `backend_for()` resolves the
 `ArchTarget` first, so that case reports "forward-declared but has no
 arch_specs.json metadata yet" instead of leaking a raw `KeyError`, and
-`wired_arches()` returns only the rows that can actually build a backend.
+`wired_arches()` returns only the targets that can actually build a backend.
 
 ## 3 · Kernels
 
@@ -193,8 +271,13 @@ invisible to `for_arch()` and `coverage()` and would make both answer by omissio
 Two decisions stay deliberate rather than automatic:
 
 - **Generic multi-arch candidates do not inherit the target.** There is no family
-  wildcard; extend a `unified_*` candidate's `arches` only once that generic kernel
-  has actually been run there. Silence is the correct default.
+  wildcard; extend a candidate's `arches` only once its kernel has actually been
+  run there. Silence is the correct default. A processor whose row points at a
+  generic target is the exception by construction, not a wildcard: a list that
+  names the generic covers it (`listed_arch_for`), because it is the generic's
+  target under its own name. The `unified_*` candidates declare every target with
+  facts of its own (`arches_with_own_facts()`) on purpose; a new such target
+  reaches them on landing.
 - **Registration is not promotion.** Making the new arch's specialized kernel win
   under `algorithm="auto"` is a separate decision that wants benchmark evidence.
   Land it opt-in.

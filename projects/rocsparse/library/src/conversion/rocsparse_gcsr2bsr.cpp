@@ -245,7 +245,8 @@ rocsparse_status rocsparse::spmat_csr2bsr_nnz(rocsparse_handle            handle
                                                       target->descr,
                                                       target->row_type,
                                                       target->row_data,
-                                                      bsr_nnz));
+                                                      bsr_nnz,
+                                                      rocsparse_pointer_mode_host));
     return rocsparse_status_success;
 }
 
@@ -272,7 +273,7 @@ rocsparse_status rocsparse::spmat_csr2bsr(rocsparse_handle            handle,
                               source->row_type != target->row_type);
     RETURN_ROCSPARSE_ERROR_IF(rocsparse_status_not_implemented,
                               source->col_type != target->col_type);
-    if(target->val_data != nullptr && source->val_data != nullptr)
+    if(target->val_data != nullptr && source->const_val_data != nullptr)
     {
         RETURN_ROCSPARSE_ERROR_IF(rocsparse_status_not_implemented,
                                   source->data_type != target->data_type);

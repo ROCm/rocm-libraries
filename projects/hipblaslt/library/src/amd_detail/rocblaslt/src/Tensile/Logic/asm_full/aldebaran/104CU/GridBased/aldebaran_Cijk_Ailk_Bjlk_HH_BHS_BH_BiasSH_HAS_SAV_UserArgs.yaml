@@ -248,6 +248,7 @@ DefaultSolution:
   WorkGroupReduction: false
 Solutions:
 - SolutionIndex: 0
+  SolutionUID: 0uR2vpdKBfDv
   KernelNameMin: Cijk_Ailk_Bjlk_HH_BHS_BH_BiasSH_HAS_SAV_UserArgs_MT16x16x16_MI16x16x1_SN_MIWT1_1
   SolutionNameMin: Cijk_Ailk_Bjlk_HH_BHS_BH_BiasSH_HAS_SAV_UserArgs_MT16x16x16_MI16x16x1_SN_GSU1_MIWT1_1_SU32_SUM1_SUS256_WGM8
   AssignedDerivedParameters: true
@@ -375,6 +376,7 @@ Solutions:
   _WorkspaceSizePerElemC: 4
   _staggerStrideShift: 3
 - SolutionIndex: 1
+  SolutionUID: 0uR2vpdKSoMr
   KernelNameMin: Cijk_Ailk_Bjlk_HH_BHS_BH_BiasSH_HAS_SAV_UserArgs_MT16x16x32_MI16x16x1_SN_MIWT1_1
   SolutionNameMin: Cijk_Ailk_Bjlk_HH_BHS_BH_BiasSH_HAS_SAV_UserArgs_MT16x16x32_MI16x16x1_SN_GSU1_MIWT1_1_SU32_SUM1_SUS256_WGM8
   AssignedDerivedParameters: true
@@ -500,6 +502,7 @@ Solutions:
   _WorkspaceSizePerElemC: 4
   _staggerStrideShift: 2
 - SolutionIndex: 2
+  SolutionUID: 0uR2vpdKw81T
   KernelNameMin: Cijk_Ailk_Bjlk_HH_BHS_BH_BiasSH_HAS_SAV_UserArgs_MT16x16x32_MI16x16x1_SN_MIWT1_1
   SolutionNameMin: Cijk_Ailk_Bjlk_HH_BHS_BH_BiasSH_HAS_SAV_UserArgs_MT16x16x32_MI16x16x1_SN_GSU1_MIWT1_1_SU32_SUM1_SUS256_WGM8
   AssignedDerivedParameters: true
@@ -625,6 +628,7 @@ Solutions:
   _WorkspaceSizePerElemC: 4
   _staggerStrideShift: 2
 - SolutionIndex: 3
+  SolutionUID: 0uR2vpdKBtgU
   KernelNameMin: Cijk_Ailk_Bjlk_HH_BHS_BH_BiasSH_HAS_SAV_UserArgs_MT16x16x32_MI16x16x1_SN_MIWT1_1
   SolutionNameMin: Cijk_Ailk_Bjlk_HH_BHS_BH_BiasSH_HAS_SAV_UserArgs_MT16x16x32_MI16x16x1_SN_GSU1_MIWT1_1_SU32_SUM1_SUS256_WGM8
   AssignedDerivedParameters: true
@@ -750,6 +754,7 @@ Solutions:
   _WorkspaceSizePerElemC: 4
   _staggerStrideShift: 2
 - SolutionIndex: 4
+  SolutionUID: 0uR2vpdKmYYy
   KernelNameMin: Cijk_Ailk_Bjlk_HH_BHS_BH_BiasSH_HAS_SAV_UserArgs_MT16x16x64_MI16x16x1_SN_MIWT1_1
   SolutionNameMin: Cijk_Ailk_Bjlk_HH_BHS_BH_BiasSH_HAS_SAV_UserArgs_MT16x16x64_MI16x16x1_SN_GSU1_MIWT1_1_SU32_SUM1_SUS256_WGM8
   AssignedDerivedParameters: true
@@ -875,6 +880,7 @@ Solutions:
   _WorkspaceSizePerElemC: 4
   _staggerStrideShift: 1
 - SolutionIndex: 5
+  SolutionUID: 0uR2vpdK7r2J
   KernelNameMin: Cijk_Ailk_Bjlk_HH_BHS_BH_BiasSH_HAS_SAV_UserArgs_MT16x16x64_MI16x16x1_SN_MIWT1_1
   SolutionNameMin: Cijk_Ailk_Bjlk_HH_BHS_BH_BiasSH_HAS_SAV_UserArgs_MT16x16x64_MI16x16x1_SN_GSU1_MIWT1_1_SU32_SUM1_SUS256_WGM8
   AssignedDerivedParameters: true
@@ -1000,6 +1006,7 @@ Solutions:
   _WorkspaceSizePerElemC: 4
   _staggerStrideShift: 1
 - SolutionIndex: 6
+  SolutionUID: 0uR2vpdKNKSJ
   KernelNameMin: Cijk_Ailk_Bjlk_HH_BHS_BH_BiasSH_HAS_SAV_UserArgs_MT16x16x16_MI16x16x1_SN_MIWT1_1
   SolutionNameMin: Cijk_Ailk_Bjlk_HH_BHS_BH_BiasSH_HAS_SAV_UserArgs_MT16x16x16_MI16x16x1_SN_GSU1_MIWT1_1_SU32_SUM1_SUS256_WGM8
   AssignedDerivedParameters: true
@@ -1127,6 +1134,7 @@ Solutions:
   _WorkspaceSizePerElemC: 4
   _staggerStrideShift: 3
 - SolutionIndex: 7
+  SolutionUID: 0uR2vpdKkVjB
   KernelNameMin: Cijk_Ailk_Bjlk_HH_BHS_BH_BiasSH_HAS_SAV_UserArgs_MT16x16x16_MI16x16x1_SN_MIWT1_1
   SolutionNameMin: Cijk_Ailk_Bjlk_HH_BHS_BH_BiasSH_HAS_SAV_UserArgs_MT16x16x16_MI16x16x1_SN_GSU1_MIWT1_1_SU32_SUM1_SUS256_WGM8
   AssignedDerivedParameters: true
@@ -1254,6 +1262,7 @@ Solutions:
   _WorkspaceSizePerElemC: 4
   _staggerStrideShift: 3
 - SolutionIndex: 8
+  SolutionUID: 0uR2vpdKv0Nc
   KernelNameMin: Cijk_Ailk_Bjlk_HH_BHS_BH_BiasSH_HAS_SAV_UserArgs_MT16x16x16_MI16x16x1_SN_MIWT1_1
   SolutionNameMin: Cijk_Ailk_Bjlk_HH_BHS_BH_BiasSH_HAS_SAV_UserArgs_MT16x16x16_MI16x16x1_SN_GSU1_MIWT1_1_SU32_SUM1_SUS256_WGM8
   AssignedDerivedParameters: true

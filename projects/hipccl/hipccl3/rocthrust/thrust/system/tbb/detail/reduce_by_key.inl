@@ -34,11 +34,15 @@
 #include <thrust/system/tbb/detail/reduce_by_key.h>
 #include <thrust/system/tbb/detail/reduce_intervals.h>
 
-#include <cuda/std/__algorithm/max.h>
-#include <cuda/std/__algorithm/min.h>
-#include <cuda/std/__type_traits/void_t.h>
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+#  include _THRUST_STD_INCLUDE(__algorithm/max.h)
+#  include _THRUST_STD_INCLUDE(__algorithm/min.h)
+#  include _THRUST_STD_INCLUDE(__type_traits/void_t.h)
+#  include _THRUST_STD_INCLUDE(cassert)
+#else
+#  include <thrust/detail/algorithm_wrapper.h>
+#endif
 
-#include <cassert>
 #include <thread>
 
 #include <tbb/blocked_range.h>
@@ -198,7 +202,7 @@ struct serial_reduce_by_key_body
     const size_type interval_idx = r.begin();
 
     const size_type offset_to_first = interval_size * interval_idx;
-    const size_type offset_to_last  = ::cuda::std::min(n, offset_to_first + interval_size);
+    const size_type offset_to_last  = _THRUST_STD::min(n, offset_to_first + interval_size);
 
     Iterator1 my_keys_first    = keys_first + offset_to_first;
     Iterator1 my_keys_last     = keys_first + offset_to_last;
@@ -320,13 +324,13 @@ thrust::pair<Iterator3, Iterator4> reduce_by_key(
   }
 
   // count the number of processors
-  const unsigned int p = ::cuda::std::max<unsigned int>(1u, std::thread::hardware_concurrency());
+  const unsigned int p = _THRUST_STD::max<unsigned int>(1u, std::thread::hardware_concurrency());
 
   // generate O(P) intervals of sequential work
   // XXX oversubscribing is a tuning opportunity
   const unsigned int subscription_rate = 1;
-  difference_type interval_size        = ::cuda::std::min<difference_type>(
-    parallelism_threshold, ::cuda::std::max<difference_type>(n, n / (subscription_rate * p)));
+  difference_type interval_size        = _THRUST_STD::min<difference_type>(
+    parallelism_threshold, _THRUST_STD::max<difference_type>(n, n / (subscription_rate * p)));
   difference_type num_intervals = reduce_by_key_detail::divide_ri(n, interval_size);
 
   // decompose the input into intervals of size N / num_intervals
@@ -342,7 +346,7 @@ thrust::pair<Iterator3, Iterator4> reduce_by_key(
     tail_flags.end(),
     interval_size,
     interval_output_offsets.begin() + 1,
-    thrust::plus<size_t>());
+    _THRUST_STD::plus<size_t>());
   interval_output_offsets[0] = 0;
 
   // scan the counts to get each body's output offset

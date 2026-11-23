@@ -1,0 +1,10 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
+namespace hipdnn_flatbuffers_sdk.data_objects;
+
+// How the g tensor of a linear-attention node (GDN, KDA) encodes the decay alpha.
+enum GateDomain : byte {
+    LOG    = 0,  // g holds ln(alpha)
+    LINEAR = 1,  // g holds alpha in (0, 1]
+}

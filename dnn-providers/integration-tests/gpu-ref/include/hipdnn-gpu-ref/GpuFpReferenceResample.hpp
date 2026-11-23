@@ -32,6 +32,20 @@ inline std::vector<std::string> buildResampleFwdDefines(bool hasIndex)
     return defines;
 }
 
+template <typename DyDataType,
+          typename DxDataType,
+          typename ComputeDataType,
+          typename IndexDataType>
+inline std::vector<std::string> buildResampleBwdDefines()
+{
+    std::vector<std::string> defines;
+    defines.emplace_back(std::string("-DDY_TYPE=") + HipRtcTypeName<DyDataType>::VALUE);
+    defines.emplace_back(std::string("-DDX_TYPE=") + HipRtcTypeName<DxDataType>::VALUE);
+    defines.emplace_back(std::string("-DCOMPUTE_TYPE=") + HipRtcTypeName<ComputeDataType>::VALUE);
+    defines.emplace_back(std::string("-DINDEX_TYPE=") + HipRtcTypeName<IndexDataType>::VALUE);
+    return defines;
+}
+
 } // namespace detail
 
 class GpuFpReferenceResample
@@ -70,7 +84,7 @@ public:
                         hipdnn_flatbuffers_sdk::data_objects::PaddingMode paddingMode,
                         hipdnn_data_sdk::utilities::TensorBase<IndexDataType>* index = nullptr)
     {
-        // Validate IO tensors, spatial parameters, and resample mode
+        // Validate IO tensors, spatial parameters, and modes
         validateInput(x, y, {prePadding, postPadding, stride, window}, resampleMode, paddingMode);
 
         // Validate consistency of spatial parameters with IO tensor dimensions
@@ -85,16 +99,17 @@ public:
                                          "the window size for each spatial dimension.");
             }
 
-            const auto numerator = xDims[i + 2] + prePadding[i] + postPadding[i] - window[i];
-            if(numerator < 0)
+            const auto paddedXSize = xDims[i + 2] + prePadding[i] + postPadding[i];
+            if(window[i] > paddedXSize)
             {
                 throw std::runtime_error(
-                    "Window size: " + std::to_string(window[i]) + " exceeds padded input size: "
+                    "Resample forward window size: " + std::to_string(window[i])
+                    + " exceeds padded input size: "
                     + std::to_string(xDims[i + 2] + prePadding[i] + postPadding[i])
                     + " at spatial dim: " + std::to_string(i));
             }
 
-            const auto expectedYDim = numerator / stride[i] + 1;
+            const auto expectedYDim = (paddedXSize - window[i]) / stride[i] + 1;
             if(expectedYDim <= 0 || yDims[i + 2] != expectedYDim)
             {
                 throw std::runtime_error(
@@ -148,6 +163,100 @@ public:
         {
             index->memory().markDeviceModified();
         }
+    }
+
+    // -- Backward resample ---
+
+    template <class DyDataType,
+              class DxDataType = DyDataType,
+              class ComputeDataType = float,
+              class IndexDataType = int32_t>
+    static void backward(hipdnn_data_sdk::utilities::TensorBase<DyDataType>& dy,
+                         hipdnn_data_sdk::utilities::TensorBase<DxDataType>& dx,
+                         const std::vector<int64_t>& prePadding,
+                         const std::vector<int64_t>& postPadding,
+                         const std::vector<int64_t>& stride,
+                         const std::vector<int64_t>& window,
+                         hipdnn_flatbuffers_sdk::data_objects::ResampleMode resampleMode,
+                         hipdnn_flatbuffers_sdk::data_objects::PaddingMode paddingMode,
+                         hipdnn_data_sdk::utilities::TensorBase<IndexDataType>* index = nullptr)
+    {
+        // Validate IO tensors, spatial parameters, and modes
+        validateInput(dy, dx, {prePadding, postPadding, stride, window}, resampleMode, paddingMode);
+
+        // Validate consistency of spatial parameters with IO tensor dimensions
+        const auto& dyDims = dy.dims();
+        const auto& dxDims = dx.dims();
+        const auto spatialDims = dyDims.size() - 2;
+        for(size_t i = 0; i < spatialDims; ++i)
+        {
+            const auto paddedDxSize = dxDims[i + 2] + prePadding[i] + postPadding[i];
+            if(window[i] > paddedDxSize)
+            {
+                throw std::runtime_error(
+                    "Resample backward window size: " + std::to_string(window[i])
+                    + " exceeds padded dx size: "
+                    + std::to_string(dxDims[i + 2] + prePadding[i] + postPadding[i])
+                    + " at spatial dim: " + std::to_string(i));
+            }
+
+            const auto expectedDyDim = (paddedDxSize - window[i]) / stride[i] + 1;
+            if(expectedDyDim <= 0 || dyDims[i + 2] != expectedDyDim)
+            {
+                throw std::runtime_error("Resample backward shape mismatch for spatial dimension "
+                                         + std::to_string(i)
+                                         + ". Expected Dy dim: " + std::to_string(expectedDyDim)
+                                         + ", Actual Dy dim: " + std::to_string(dyDims[i + 2]));
+            }
+        }
+
+        // Validate index tensor
+        if(resampleMode == hipdnn_flatbuffers_sdk::data_objects::ResampleMode::MAXPOOL)
+        {
+            if(index == nullptr)
+            {
+                throw std::invalid_argument(
+                    "Resample backward max pooling requires an index tensor input.");
+            }
+
+            if(index->dims() != dy.dims() || index->strides() != dy.strides())
+            {
+                throw std::invalid_argument(
+                    "Resample backward requires the index tensor dims and strides to match the "
+                    "dy tensor.");
+            }
+        }
+        else
+        {
+            if(index != nullptr)
+            {
+                throw std::invalid_argument("Resample backward supports index tensor input only "
+                                            "for MAXPOOL resample mode.");
+            }
+        }
+
+        // Validate data types
+        static_assert(
+            IS_SUPPORTED_DATA_TYPE<DyDataType, DxDataType, ComputeDataType, IndexDataType>,
+            "Resample backward supports only double, float, half, and bfloat16 data types for Dy, "
+            "Dx, and compute types, and int32_t for index type.");
+
+        auto defines = detail::
+            buildResampleBwdDefines<DyDataType, DxDataType, ComputeDataType, IndexDataType>();
+
+        launchBackward(dy.memory().deviceData(),
+                       {dy.dims().begin() + 2, dy.dims().end()},
+                       dy.strides(),
+                       dx.memory().deviceData(),
+                       {dx.dims().begin() + 2, dx.dims().end()},
+                       dx.strides(),
+                       {dx.dims()[0], dx.dims()[1]},
+                       {prePadding, postPadding, stride, window},
+                       {resampleMode, paddingMode},
+                       defines,
+                       index ? index->memory().deviceData() : nullptr);
+
+        dx.memory().markDeviceModified();
     }
 
 private:
@@ -292,6 +401,18 @@ private:
                               const ResampleModeParams& modeParams,
                               std::vector<std::string>& defines,
                               void* indexPtr = nullptr);
+
+    static void launchBackward(const void* dyPtr,
+                               const std::vector<int64_t>& dySpatialDims,
+                               const std::vector<int64_t>& dyStrides,
+                               void* dxPtr,
+                               const std::vector<int64_t>& dxSpatialDims,
+                               const std::vector<int64_t>& dxStrides,
+                               const std::array<int64_t, 2>& batchChannelDims,
+                               const ResampleSpatialParams& spatialParams,
+                               const ResampleModeParams& modeParams,
+                               std::vector<std::string>& defines,
+                               const void* indexPtr = nullptr);
 };
 
 } // namespace hipdnn_gpu_ref

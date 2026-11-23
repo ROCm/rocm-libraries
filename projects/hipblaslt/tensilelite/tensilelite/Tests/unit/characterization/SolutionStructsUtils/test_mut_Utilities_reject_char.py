@@ -5,7 +5,7 @@
 
 import pytest
 
-from Tensile.SolutionStructs.Utilities import isSubtileIterateMode, reject
+from tensilelite.SolutionStructs.Utilities import isSubtileIterateMode, reject
 
 pytestmark = pytest.mark.unit
 

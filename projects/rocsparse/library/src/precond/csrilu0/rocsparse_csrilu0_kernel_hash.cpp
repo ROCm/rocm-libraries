@@ -24,6 +24,7 @@
 
 #include "rocsparse_csrilu0_kernel_hash.hpp"
 #include "rocsparse_common.hpp"
+#include "rocsparse_grid.hpp"
 #include "rocsparse_utility.hpp"
 
 namespace rocsparse
@@ -132,9 +133,15 @@ namespace rocsparse
             J local_col = csr_col_ind[j] - idx_base;
 
             // Corresponding value. With non-coherent XCD L2s it is read after the spin loop.
-            T local_val = rocsparse::has_noncoherent_xcd_l2
-                              ? static_cast<T>(0)
-                              : rocsparse::load_done_row_data(&csr_val[j]);
+            T local_val;
+            if(ROCSPARSE_HAS_NONCOHERENT_XCD_L2)
+            {
+                local_val = static_cast<T>(0);
+            }
+            else
+            {
+                local_val = rocsparse::load_done_row_data(&csr_val[j]);
+            }
 
             // End of the row that corresponds to local_col
             I local_end = csr_row_ptr[local_col + 1] - idx_base;
@@ -158,7 +165,7 @@ namespace rocsparse
 
             // Earlier columns may have updated entry j with device scope stores, which have to
             // complete before it is read back.
-            if constexpr(rocsparse::has_noncoherent_xcd_l2)
+            if(ROCSPARSE_HAS_NONCOHERENT_XCD_L2)
             {
                 rocsparse::wait_store_completion();
                 local_val = rocsparse::load_done_row_data(&csr_val[j]);
@@ -220,7 +227,7 @@ namespace rocsparse
 
         // The updates of the diagonal entry are device scope stores, which have to complete
         // before it is read back.
-        if constexpr(rocsparse::has_noncoherent_xcd_l2)
+        if(ROCSPARSE_HAS_NONCOHERENT_XCD_L2)
         {
             rocsparse::wait_store_completion();
         }
@@ -283,7 +290,8 @@ namespace rocsparse
               typename I,
               typename J>
     ROCSPARSE_KERNEL(BLOCKSIZE)
-    void csrilu0_kernel_hash(J m,
+    void csrilu0_kernel_hash(J       m,
+                             int64_t batch_count,
                              const I* __restrict__ csr_row_ptr,
                              const J* __restrict__ csr_col_ind,
                              T*      csr_val,
@@ -312,8 +320,6 @@ namespace rocsparse
                              ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, boost_val),
                              bool is_val_host_mode)
     {
-        const auto batch_index = hipBlockIdx_y;
-
         ROCSPARSE_SCALAR_HOST_DEVICE_GET_IF(
             enable_boost && (size_boost_tol == sizeof(float)), is_tol_host_mode, boost_tol_32);
         ROCSPARSE_SCALAR_HOST_DEVICE_GET_IF(
@@ -328,21 +334,25 @@ namespace rocsparse
         const double tolerance
             = (tolerance_datatype == rocsparse_datatype_f64_r) ? tolerance_64 : tolerance_32;
 
-        rocsparse::csrilu0_device_hash<BLOCKSIZE, WFSIZE, HASH>(
-            m,
-            csr_row_ptr,
-            csr_col_ind,
-            csr_val + batch_index * csr_val_stride,
-            csr_diag_ind,
-            done + batch_index * done_stride,
-            map,
-            zero_pivot + batch_index * zero_pivot_stride,
-            singular_pivot + batch_index * singular_pivot_stride,
-            tolerance,
-            idx_base,
-            enable_boost,
-            boost_tol,
-            boost_val);
+        for(int64_t batch_index = hipBlockIdx_y; batch_index < batch_count;
+            batch_index += hipGridDim_y)
+        {
+            rocsparse::csrilu0_device_hash<BLOCKSIZE, WFSIZE, HASH>(
+                m,
+                csr_row_ptr,
+                csr_col_ind,
+                rocsparse::load_pointer(csr_val, batch_index, csr_val_stride),
+                csr_diag_ind,
+                rocsparse::load_pointer(done, batch_index, done_stride),
+                map,
+                rocsparse::load_pointer(zero_pivot, batch_index, zero_pivot_stride),
+                rocsparse::load_pointer(singular_pivot, batch_index, singular_pivot_stride),
+                tolerance,
+                idx_base,
+                enable_boost,
+                boost_tol,
+                boost_val);
+        }
     }
 
     template <uint32_t BLOCKSIZE,
@@ -379,8 +389,9 @@ namespace rocsparse
         const T*      boost_val    = reinterpret_cast<const T*>(boost->get_val());
 
         int64_t stride = A->columns_values_batch_stride;
-        dim3 csrilu0_blocks((A->rows * handle->wavefront_size - 1) / BLOCKSIZE + 1, A_batch_count);
-        dim3 csrilu0_threads(BLOCKSIZE);
+        dim3    csrilu0_blocks((A->rows * handle->wavefront_size - 1) / BLOCKSIZE + 1,
+                            rocsparse::get_grid_size_y(handle, A_batch_count));
+        dim3    csrilu0_threads(BLOCKSIZE);
 
         auto                         numeric_exact = csrilu0_info->get_singularity_numeric_exact();
         auto                         numeric_near  = csrilu0_info->get_singularity_numeric_near();
@@ -399,6 +410,7 @@ namespace rocsparse
             0,
             handle->stream,
             static_cast<J>(A->rows),
+            A_batch_count,
             reinterpret_cast<const I*>(A->const_row_data),
             reinterpret_cast<const J*>(A->const_col_data),
             reinterpret_cast<T*>(A->val_data),

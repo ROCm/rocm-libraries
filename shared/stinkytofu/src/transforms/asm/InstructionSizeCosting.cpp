@@ -350,6 +350,9 @@ int getLiteralExtraBytesImpl(
         return 0;
     }
 
+    // The message id is encoded in the 8-bit ssrc0 field, never as a literal.
+    if (inst.getUnifiedOpcode() == GFX::s_sendmsg_rtn_b32) return 0;
+
     if (const HwInstDesc* desc = inst.getHwInstDesc();
         desc && desc->microcode == MicrocodeFormat::MC_SOPK) {
         if (!inst.getSrcRegs().empty() && inst.getUnifiedOpcode() == GFX::s_setreg_IMM32_b32)

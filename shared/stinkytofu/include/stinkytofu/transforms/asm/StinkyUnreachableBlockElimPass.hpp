@@ -28,6 +28,7 @@
 
 namespace stinkytofu {
 class Pass;
+class StinkyAsmModule;
 
 /// Creates a pass that erases basic blocks not reachable from the function entry
 /// along CFG successor edges.
@@ -42,6 +43,19 @@ class Pass;
 ///
 /// Deleting blocks mutates the CFG. Attached SSA is cleared when anything is
 /// erased, because incoming edges and the shape fingerprint would be stale.
+///
+/// This overload is for a caller that keeps no instruction-group ranges.
 STINKYTOFU_EXPORT std::unique_ptr<Pass> createStinkyUnreachableBlockElimPass();
+
+/// Same, and additionally guards \p module's instruction-group ranges.
+///
+/// A group range is a pair of raw boundary nodes, and erasing a block frees the
+/// instructions it holds. This overload checks the groups while those nodes are
+/// still alive and clears any that would lose a boundary, so findGroupRange()
+/// reports nothing and a later ScopeAdaptor no-ops instead of walking freed
+/// memory. It is the only correct moment for the check — afterwards, reading a
+/// node to ask whether it is still listed is itself undefined.
+STINKYTOFU_EXPORT std::unique_ptr<Pass> createStinkyUnreachableBlockElimPass(
+    StinkyAsmModule& module);
 
 }  // namespace stinkytofu

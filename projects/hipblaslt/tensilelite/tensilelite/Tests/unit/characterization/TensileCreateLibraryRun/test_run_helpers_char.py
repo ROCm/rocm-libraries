@@ -1,7 +1,7 @@
 ################################################################################
-# Characterization tests for Tensile.TensileCreateLibrary.Run — helper layer.
+# Characterization tests for tensilelite.create_library.run — helper layer.
 #
-# ADD-ONLY. Run.py is the TensileCreateLibrary driver: most of it is asm codegen
+# ADD-ONLY. create_library/run.py is the TensileCreateLibrary driver: most of it is asm codegen
 # (processKernelSource / writeAssembly / writeSolutionsAndKernels / run()) using
 # KernelWriterAssembly + the toolchain, which is out of scope. This suite pins
 # the pure / stubbable helpers: libraryDir, the result NamedTuples,
@@ -17,8 +17,8 @@ import pytest
 
 pytestmark = pytest.mark.unit
 
-M = importlib.import_module("Tensile.TensileCreateLibrary.Run")
-SL = importlib.import_module("Tensile.SolutionLibrary")
+M = importlib.import_module("tensilelite.create_library.run")
+SL = importlib.import_module("tensilelite.SolutionLibrary")
 
 
 # ---------------------------------------------------------------------------
@@ -113,7 +113,7 @@ class _Sol:
 
 
 def test_check_invalid_solutions(monkeypatch):
-    monkeypatch.setattr(M, "getKeyNoInternalArgs", lambda k, split: k["name"])
+    monkeypatch.setattr(M, "getKernelCompileKey", lambda k, split: k["name"])
     sols = [_Sol([{"name": "k0"}]), _Sol([{"name": "kBAD"}])]
     out = M._checkInvalidSolutions(False, {"kBAD"}, sols)
     # one True appended for the matching solution, plus a trailing False per loop
@@ -124,7 +124,7 @@ def test_check_invalid_solutions(monkeypatch):
 # removeInvalidSolutionsAndKernels (ParallelMap2 + Naming stubbed)
 # ---------------------------------------------------------------------------
 def test_remove_invalid_solutions_and_kernels(monkeypatch):
-    monkeypatch.setattr(M, "getKeyNoInternalArgs", lambda k, split: k["name"])
+    monkeypatch.setattr(M, "getKernelCompileKey", lambda k, split: k["name"])
     monkeypatch.setattr(
         M, "ParallelMap2",
         lambda fn, iterable, desc, return_as=None: [fn(*x) for x in iterable],
@@ -146,30 +146,39 @@ def test_remove_invalid_solutions_and_kernels(monkeypatch):
 # passPostKernelInfoToSolution
 # ---------------------------------------------------------------------------
 def test_pass_post_kernel_info_to_solution(monkeypatch):
-    monkeypatch.setattr(M, "getKernelNameMin", lambda k, split: k["name"])
+    monkeypatch.setattr(M, "getKernelCompileKey", lambda k, split: k["name"])
     # customKernelDef mirrors KernelCodeGenResult's `= None` NamedTuple default:
     # a real result always has it (None unless the kernel was custom), so a
     # SimpleNamespace standing in for one must set it explicitly.
-    results = [SimpleNamespace(cuoccupancy=11, pgr=22, mathclk=33, customKernelDef=None)]
-    kernels = [{"name": "k0"}]
-    sol = _Sol([{"name": "k0"}], state={})
-    M.passPostKernelInfoToSolution(results, kernels, [sol], splitGSU=False)
+    results = [SimpleNamespace(cuoccupancy=11, pgr=22, mathclk=33, customKernelDef=None,
+                               ldsNumBytes=44, loopIters=55, subtileUnitScaleVgpr=None,
+                               ldsOffsetBias=66)]
+    kernel = {"name": "k0"}
+    sol = _Sol([kernel], state={})
+    M.passPostKernelInfoToSolution(results, [kernel], [sol], splitGSU=False)
     assert sol._state["CUOccupancy"] == 11
     assert sol._state["PrefetchGlobalRead"] == 22
     assert sol._state["MathClocksUnrolledLoop"] == 33
+    assert sol._state["LdsNumBytes"] == 44
+    assert sol._state["LoopIters"] == 55
+    assert sol._state["LdsOffsetBias"] == 66
+    assert "_subtileUnitScaleVgpr" not in sol._state
     assert "CustomKernel" not in sol._state
 
 
 def test_pass_post_kernel_info_to_solution_carries_custom_kernel_def(monkeypatch):
     # When a kernel is custom, its CustomKernel definition rides along into
     # solution._state so downstream library serialization can see it.
-    monkeypatch.setattr(M, "getKernelNameMin", lambda k, split: k["name"])
+    monkeypatch.setattr(M, "getKernelCompileKey", lambda k, split: k["name"])
     ckDef = {"name": "k0", "args": []}
-    results = [SimpleNamespace(cuoccupancy=11, pgr=22, mathclk=33, customKernelDef=ckDef)]
-    kernels = [{"name": "k0"}]
-    sol = _Sol([{"name": "k0"}], state={})
-    M.passPostKernelInfoToSolution(results, kernels, [sol], splitGSU=False)
+    results = [SimpleNamespace(cuoccupancy=11, pgr=22, mathclk=33, customKernelDef=ckDef,
+                               ldsNumBytes=44, loopIters=55, subtileUnitScaleVgpr=77,
+                               ldsOffsetBias=66)]
+    kernel = {"name": "k0"}
+    sol = _Sol([kernel], state={})
+    M.passPostKernelInfoToSolution(results, [kernel], [sol], splitGSU=False)
     assert sol._state["CustomKernel"] is ckDef
+    assert sol._state["_subtileUnitScaleVgpr"] == 77
 
 
 # ---------------------------------------------------------------------------

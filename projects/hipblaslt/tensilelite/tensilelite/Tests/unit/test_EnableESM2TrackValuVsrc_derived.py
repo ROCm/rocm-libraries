@@ -21,8 +21,7 @@ import os
 
 import pytest
 
-from Tensile.Common.Architectures import gfxToIsa
-from Tensile.Common.Capabilities import makeIsaInfoMap
+from toolchain_test_helpers import shared_isa_info_map_or_skip
 
 pytestmark = pytest.mark.unit
 
@@ -38,7 +37,7 @@ _KEY = "EnableESM2TrackValuVsrc"
 ARCH_CONFIGS = {
     "gfx1250": (
         os.path.join(_DESIGNED, "gfx1250", "streamk.yaml"),
-        os.path.join(_COMMON, "sparse", "gfx1250", "spmm_f16_sia4.yaml"),
+        os.path.join(_COMMON, "sparse", "gfx1250", "spmm_f16.yaml"),
     ),
 }
 
@@ -49,16 +48,7 @@ _STATES = {}
 
 def _require_toolchain(arch):
     """Skip where amdclang++ cannot target ``arch``; the derivation would raise."""
-    from Tensile.Toolchain.Validators import validateToolchain
-
-    try:
-        cxx = validateToolchain("amdclang++")
-    except (ValueError, FileNotFoundError) as e:
-        pytest.skip(f"amdclang++ is unavailable: {e}")
-
-    isa = gfxToIsa(arch)
-    if not makeIsaInfoMap([isa], cxx)[isa].asmCaps["SupportedISA"]:
-        pytest.skip(f"amdclang++ in this environment does not support {arch}")
+    shared_isa_info_map_or_skip(arch, toolchainRequired=False)
 
 
 def _states(arch, cfg_path):

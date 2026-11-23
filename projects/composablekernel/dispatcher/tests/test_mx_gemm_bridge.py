@@ -11,6 +11,8 @@ microscaled reference. Also covers build entry points, target normalization, and
 Tile Engine configuration validation. No GPU or hipcc is required.
 """
 
+import json
+import math
 import os
 import subprocess
 import sys
@@ -974,6 +976,173 @@ class TestMxBuildEntryPoints(unittest.TestCase):
                     self.assertIn(flag, command)
                 self.assertIn(f"--offload-arch={arch}", command)
                 self.assertIn(f'-DGFX_ARCH="{arch}"', command)
+
+
+_MX_TE = _CK / "tile_engine" / "ops" / "gemm"
+_MX_CONFIGS = _MX_TE / "mx_gemm" / "configs"
+
+
+class TestSweepExpansion(unittest.TestCase):
+    """expand_mx_sweep must run exactly the Old-TE kernel list of a sweep JSON."""
+
+    def _old_te_names(self, cfg, arch, dtype):
+        with tempfile.TemporaryDirectory() as work_dir:
+            builder = codegen._load_mx_builder()(
+                "mx_gemm", work_dir, arch, dtype, "rcr", config_json=str(cfg)
+            )
+            return [k["name"] for k in builder._get_sampled_kernel_list()]
+
+    def test_names_match_old_te(self):
+        for arch in ("gfx950", "gfx1250"):
+            for dtype in ("fp4", "fp8"):
+                for cfg in (
+                    _MX_CONFIGS / f"bridge_ci_config_{arch}.json",
+                    _MX_CONFIGS / "default_ci_config.json",
+                ):
+                    with self.subTest(arch=arch, dtype=dtype, cfg=cfg.name):
+                        got = [c.name for c in mx.expand_mx_sweep(cfg, arch, dtype)]
+                        self.assertEqual(got, self._old_te_names(cfg, arch, dtype))
+
+    def test_bridge_ci_configs_cover_every_pipeline(self):
+        for arch in ("gfx950", "gfx1250"):
+            for dtype in ("fp4", "fp8"):
+                cfgs = mx.expand_mx_sweep(
+                    _MX_CONFIGS / f"bridge_ci_config_{arch}.json", arch, dtype
+                )
+                self.assertEqual(
+                    {c.pipeline for c in cfgs},
+                    set(codegen.GEMM_MX_PIPELINES_BY_ARCH[arch]),
+                    f"{arch} {dtype}",
+                )
+
+    def test_max_instances_caps_the_sweep(self):
+        cfg = _MX_CONFIGS / "default_config.json"
+        got = mx.expand_mx_sweep(cfg, "gfx950", "fp4", max_instances=5, seed=1)
+        self.assertEqual(len(got), 5)
+
+    def test_missing_config_raises(self):
+        with self.assertRaises(FileNotFoundError):
+            mx.expand_mx_sweep(_MX_CONFIGS / "no_such.json", "gfx950", "fp4")
+
+    def test_example_problems_fit_every_ci_tile(self):
+        problems = json.loads((_MX_CONFIGS / "example_problems.json").read_text())
+        for arch in ("gfx950", "gfx1250"):
+            cfgs = mx.expand_mx_sweep(
+                _MX_CONFIGS / f"bridge_ci_config_{arch}.json", arch, "fp4"
+            )
+            for p in problems["problems"]:
+                for c in cfgs:
+                    self.assertEqual(
+                        (p["M"] % c.tile_m, p["N"] % c.tile_n, p["K"] % c.tile_k),
+                        (0, 0, 0),
+                        f"{p} vs {c.name}",
+                    )
+
+
+class TestSweepWorker(unittest.TestCase):
+    """run_one_mx_gemm_kernel.py verdicts, with the ctypes lib replaced by a
+    host model of an exact kernel."""
+
+    @classmethod
+    def setUpClass(cls):
+        sys.path.insert(0, str(_MX_TE))
+        import run_one_mx_gemm_kernel
+
+        cls.worker = run_one_mx_gemm_kernel
+
+    def _run(self, run_impl, dtype="fp4", init="grid"):
+        class FakeRunner(mx.GpuMxGemmRunner):
+            def __init__(self, so_path, dtype="fp8", arch=None):
+                self.dtype, self.arch = dtype, arch
+
+            kernel_name = "fake"
+            run = run_impl
+
+        self.worker._inputs.clear()
+        item = {
+            "so_path": "x.so",
+            "kernel_name": "k",
+            "problem": {"M": 64, "N": 32, "K": 128},
+        }
+        with (
+            patch.object(self.worker, "GpuMxGemmRunner", FakeRunner),
+            patch("builtins.print") as out,
+        ):
+            self.worker._run_one(0, item, dtype, "gfx950", True, 2e-2, init)
+        return json.loads(out.call_args[0][0])
+
+    def test_trig_codes_match_example_56(self):
+        # Example 56's e2m1_rne, line for line.
+        mid = (0.25, 0.75, 1.25, 1.75, 2.5, 3.5, 5.0)
+
+        def e2m1_rne(x):
+            a, code = abs(x), 7
+            for c, m in enumerate(mid):
+                if a < m:
+                    code = c
+                    break
+                if not a > m:
+                    code = c if c % 2 == 0 else c + 1
+                    break
+            return (8 if math.copysign(1.0, x) < 0 else 0) | code
+
+        K = 256
+        for use_cos, f in ((False, math.sin), (True, math.cos)):
+            data, scales = self.worker._trig_fp4(
+                np.random.default_rng(0), 3, K, use_cos
+            )
+            self.assertEqual(data.shape, (3, K // 2))
+            self.assertTrue(((scales >= 124) & (scales <= 130)).all())
+            for r in range(3):
+                for k in range(K):
+                    x = float(np.float32(f(float(r * K + k))))
+                    got = (int(data[r, k // 2]) >> (4 * (k % 2))) & 15
+                    self.assertEqual(got, e2m1_rne(x), (use_cos, r, k))
+
+    def test_trig_exact_kernel_verifies(self):
+        def run(self, prob, a, b, sa, sb):
+            a_deq = mx.dequantize_fp4_packed(a, prob.K)
+            b_deq = mx.dequantize_fp4_packed(b, prob.K).T
+            c = mx_gemm_reference(a_deq, b_deq, sa, sb, prob)
+            return mx.MxGemmResult(C=c, time_ms=0.5, kernel_name="fake")
+
+        res = self._run(run, init="trig")
+        self.assertTrue(res["ok"] and res["verified"], res)
+
+    def test_trig_rejects_fp8(self):
+        res = self._run(lambda *a: None, dtype="fp8", init="trig")
+        self.assertFalse(res["ok"])
+        self.assertIn("fp4 only", res["error"])
+
+    def test_exact_kernel_verifies_with_random_scales(self):
+        cache = self.worker._inputs
+
+        def run(self, prob, a, b, sa, sb):
+            a_deq, b_deq = next(iter(cache.values()))[:2]
+            c = mx_gemm_reference(a_deq, b_deq, sa, sb, prob)
+            return mx.MxGemmResult(C=c, time_ms=0.5, kernel_name="fake")
+
+        res = self._run(run)
+        self.assertTrue(res["ok"] and res["verified"], res)
+        self.assertGreater(len(np.unique(next(iter(cache.values()))[4])), 1)
+        self.assertAlmostEqual(res["tflops"], 2 * 64 * 32 * 128 / 0.5e9)
+
+    def test_wrong_kernel_mismatches(self):
+        def run(self, prob, a, b, sa, sb):
+            c = np.ones((prob.M, prob.N), dtype=np.float16)
+            return mx.MxGemmResult(C=c, time_ms=0.5, kernel_name="fake")
+
+        res = self._run(run)
+        self.assertTrue(res["ok"])
+        self.assertFalse(res["verified"])
+
+    def test_unsupported_shape_is_skipped_not_failed(self):
+        def run(self, prob, a, b, sa, sb):
+            raise RuntimeError("dispatcher_run_mx_gemm rc=-2 (unsupported)")
+
+        res = self._run(run)
+        self.assertTrue(res["skipped"])
+        self.assertFalse(res["ok"])
 
 
 if __name__ == "__main__":

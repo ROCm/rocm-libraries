@@ -32,7 +32,7 @@
 #include <thrust/iterator/iterator_traits.h>
 #include <thrust/system/tbb/detail/scan.h>
 
-#include <cuda/std/__functional/invoke.h>
+#include <thrust/detail/libcxx_wrapper/std/__functional/invoke.h>
 
 #include <tbb/blocked_range.h>
 #include <tbb/parallel_scan.h>
@@ -243,7 +243,7 @@ inclusive_scan(tag, InputIterator first, InputIterator last, OutputIterator resu
   using ValueType = thrust::detail::it_value_t<InputIterator>;
 
   using Size = thrust::detail::it_difference_t<InputIterator>;
-  Size n     = thrust::distance(first, last);
+  Size n     = _THRUST_STD::distance(first, last);
 
   if (n != 0)
   {
@@ -252,7 +252,7 @@ inclusive_scan(tag, InputIterator first, InputIterator last, OutputIterator resu
     ::tbb::parallel_scan(::tbb::blocked_range<Size>(0, n), scan_body);
   }
 
-  thrust::advance(result, n);
+  _THRUST_STD::advance(result, n);
 
   return result;
 }
@@ -265,10 +265,10 @@ OutputIterator inclusive_scan(
 
   // Use the input iterator's value type and the initial value type per wg21.link/p2322
   using ValueType =
-    typename ::cuda::std::__accumulator_t<BinaryFunction, thrust::detail::it_value_t<InputIterator>, InitialValueType>;
+    typename ::internal::accumulator_t<BinaryFunction, thrust::detail::it_value_t<InputIterator>, InitialValueType>;
 
   using Size = thrust::detail::it_difference_t<InputIterator>;
-  Size n     = thrust::distance(first, last);
+  Size n     = _THRUST_STD::distance(first, last);
 
   if (n != 0)
   {
@@ -277,7 +277,7 @@ OutputIterator inclusive_scan(
     ::tbb::parallel_scan(::tbb::blocked_range<Size>(0, n), scan_body);
   }
 
-  thrust::advance(result, n);
+  _THRUST_STD::advance(result, n);
 
   return result;
 }
@@ -292,7 +292,7 @@ OutputIterator exclusive_scan(
   using ValueType = InitialValueType;
 
   using Size = thrust::detail::it_difference_t<InputIterator>;
-  Size n     = thrust::distance(first, last);
+  Size n     = _THRUST_STD::distance(first, last);
 
   if (n != 0)
   {
@@ -301,7 +301,7 @@ OutputIterator exclusive_scan(
     ::tbb::parallel_scan(::tbb::blocked_range<Size>(0, n), scan_body);
   }
 
-  thrust::advance(result, n);
+  _THRUST_STD::advance(result, n);
 
   return result;
 }

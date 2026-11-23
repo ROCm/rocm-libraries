@@ -10,8 +10,8 @@ architecture kernel runners inside binding calls.
 from __future__ import annotations
 
 import math
-from dataclasses import replace
-from typing import Any, Dict, Mapping, Tuple
+from dataclasses import dataclass, replace
+from typing import Any, Dict, Mapping, Optional, Tuple
 
 from rocke.dispatch.core import TorchBinding
 
@@ -83,6 +83,11 @@ def validate_tuning_attention_contract(request, problem, spec) -> None:
         problem.fp8_fnuz
     ):
         raise ValueError("request FP8 encoding disagrees with attention problem")
+    if bool(request.emit_lse) != problem.emit_lse:
+        raise ValueError(
+            f"request.emit_lse={bool(request.emit_lse)} disagrees with "
+            f"problem.emit_lse={problem.emit_lse}"
+        )
 
     kernel_spec = spec.kernel_spec
     for name, expected in (
@@ -103,6 +108,13 @@ def validate_tuning_attention_contract(request, problem, spec) -> None:
         raise ValueError("kernel spec K/V storage dtype disagrees with problem")
     if bool(spec.fp8_fnuz) != bool(problem.fp8_fnuz):
         raise ValueError("tuning wrapper FP8 encoding disagrees with problem")
+    if spec.path == "2d":
+        spec_lse = bool(getattr(kernel_spec, "emit_lse", False))
+        if spec_lse != problem.emit_lse:
+            raise ValueError(
+                f"kernel_spec.emit_lse={spec_lse} disagrees with "
+                f"problem.emit_lse={problem.emit_lse}"
+            )
 
     reduce_spec = spec.reduce_spec
     if reduce_spec is not None:
@@ -269,11 +281,30 @@ def validate_tuning_attention_tensors(
 # Declared runner contracts. Inferring them with inspect.signature drops
 # arguments the runner does not list and launches a different kernel.
 _DENSE_OPTIONAL_INPUTS = {
-    "gfx942": frozenset({"cu_seqlens_q", "cu_seqlens_kv", "sinks", "lse"}),
+    "gfx942": frozenset(
+        {"cu_seqlens_q", "cu_seqlens_kv", "block_tables", "kv_lens", "sinks", "lse"}
+    ),
     "gfx950": frozenset(
         {"cu_seqlens_q", "cu_seqlens_kv", "block_tables", "kv_lens", "sinks", "lse"}
     ),
 }
+
+
+_DENSE_SCALAR_OPTIONS = frozenset({"scale", "stream"})
+_DENSE_LAUNCH_OPTIONS = _DENSE_SCALAR_OPTIONS.union(*_DENSE_OPTIONAL_INPUTS.values())
+_DENSE_BIND_OPTIONS = _DENSE_SCALAR_OPTIONS | {"unsafe_skip_paged_value_validation"}
+# Taken only by an fp8 KV spec: on any other spec a scale would be dropped silently.
+_DENSE_FP8_SCALE_OPTIONS = frozenset({"k_scale", "v_scale"})
+
+
+def _refuse_unknown_keywords(where: str, got: Mapping[str, Any], allowed) -> None:
+    # Refused, not ignored: an option of another call or binding, or a misspelled
+    # keyword, would otherwise be dropped silently.
+    if unknown := got.keys() - allowed:
+        raise TypeError(
+            f"dense attention {where} got unexpected keyword(s) "
+            f"{', '.join(sorted(unknown))}; it takes {', '.join(sorted(allowed))}"
+        )
 
 
 def _dense_runner(arch: str):
@@ -286,6 +317,24 @@ def _dense_runner(arch: str):
     return run_attention_dense_torch
 
 
+def _resolve_fp8_scale(name: str, kwargs: Mapping[str, Any], label: str) -> float:
+    """One per-tensor fp8 dequant scale, resolved to a float at bind time.
+
+    Every fp8 binding reads its scales through here, so one rule holds at every
+    entry point: a scale is a bind kwarg. It is a scalar, not an input tensor,
+    so it is not sourced from the ``tensors`` mapping even where that mapping
+    happens to carry the name.
+
+    Resolving at bind time host-syncs a device-tensor scale once, not on every
+    launch, which keeps graph capture intact. The missing-scale rule itself lives
+    in ``require_fp8_kv_scale`` beside ``require_ocp_fp8_kv``, so this binding
+    and the runner refuse with one wording.
+    """
+    from kernels.common.attention_dense_spec import require_fp8_kv_scale
+
+    return require_fp8_kv_scale(name, kwargs.get(name), label)
+
+
 def bind_dense_attention_torch(
     request, tuning_spec, tensors: Mapping[str, Any], **kwargs
 ) -> TorchBinding:
@@ -293,16 +342,43 @@ def bind_dense_attention_torch(
 
     Grid and block come from the spec, the same values the candidate reports.
     An ``emit_lse`` spec also needs ``tensors["lse"]``: a caller-owned FP32
-    buffer the kernel fills in place (the runner validates it).
+    buffer the kernel fills in place (the runner validates it). For a paged spec,
+    ``unsafe_skip_paged_value_validation=True`` skips the runner's synchronized
+    block-table/kv_lens value checks (graph capture, hot paths), as for the
+    unified binding; the structural checks stay. Only for callers that guarantee
+    ``kv_lens[i] == seqlen_kv`` and in-range block ids: the kernel trusts both.
     """
+    fp8_scales = (
+        _DENSE_FP8_SCALE_OPTIONS
+        if getattr(tuning_spec.kernel_spec, "kv_storage_dtype", None) is not None
+        else frozenset()
+    )
+    _refuse_unknown_keywords("bind_torch()", kwargs, _DENSE_BIND_OPTIONS | fp8_scales)
     run = _dense_runner(str(getattr(request, "arch", "")))
+    if tuning_spec.kernel_spec.paged:
+        tuning_spec = tuning_spec.with_num_kv_blocks(int(tensors["k"].shape[0]))
     spec = tuning_spec.kernel_spec
+    if getattr(spec, "kv_storage_dtype", None) == "fp8e4m3":
+        from kernels.common.attention_dense_spec import require_ocp_fp8_kv
+
+        require_ocp_fp8_kv((name, tensors[name]) for name in ("k", "v"))
     scale = kwargs.get("scale")
     if scale is None:
         scale = 1.0 / math.sqrt(int(getattr(request, "hdim_q", spec.head_size)))
     stream = kwargs.get("stream", 0)
+    unsafe_skip = kwargs.get("unsafe_skip_paged_value_validation", False)
+    if type(unsafe_skip) is not bool:
+        raise ValueError(
+            "unsafe_skip_paged_value_validation must be a bool, got "
+            f"{type(unsafe_skip).__name__}"
+        )
+    bind_k_scale = bind_v_scale = None
+    if getattr(spec, "kv_storage_dtype", None) is not None:
+        bind_k_scale = _resolve_fp8_scale("k_scale", kwargs, "fp8 dense")
+        bind_v_scale = _resolve_fp8_scale("v_scale", kwargs, "fp8 dense")
 
     def launch(**_kw):
+        _refuse_unknown_keywords("launch()", _kw, _DENSE_LAUNCH_OPTIONS | fp8_scales)
         call = {
             "spec": spec,
             "q": tensors["q"],
@@ -313,6 +389,11 @@ def bind_dense_attention_torch(
             "stream": int(_kw.get("stream", stream)),
             "arch": str(request.arch),
         }
+        # fp8 KV dequant reads per-tensor k_scale/v_scale. Resolved at bind time
+        # above; a launch kwarg may still override (e.g. a sweep varying scale).
+        if bind_k_scale is not None:
+            call["k_scale"] = float(_kw.get("k_scale", bind_k_scale))
+            call["v_scale"] = float(_kw.get("v_scale", bind_v_scale))
         optional = {
             "cu_seqlens_q": _kw.get("cu_seqlens_q", tensors.get("cu_seqlens_q")),
             "cu_seqlens_kv": _kw.get("cu_seqlens_kv", tensors.get("cu_seqlens_kv")),
@@ -330,6 +411,8 @@ def bind_dense_attention_torch(
                     f"{request.arch} dense runner does not accept {name!r}"
                 )
             call[name] = value
+        if spec.paged:
+            call["validate_paged"] = not unsafe_skip
         return run(**call)
 
     return TorchBinding(
@@ -337,6 +420,24 @@ def bind_dense_attention_torch(
         grid=tuple(tuning_spec.launch_grid()),
         block=tuple(tuning_spec.launch_block()),
     )
+
+
+_ADDITIVE_BIAS_INPUTS = (
+    "additive_bias",
+    "additive_bias_batch_stride",
+    "additive_bias_head_stride",
+    "additive_bias_sq_stride",
+)
+
+
+def _reject_additive_bias_inputs(inputs: Mapping[str, Any], where: str) -> None:
+    supplied = [name for name in _ADDITIVE_BIAS_INPUTS if name in inputs]
+    if supplied:
+        raise ValueError(
+            "explicit tuning bindings do not support additive bias; got "
+            + ", ".join(supplied)
+            + f" in {where}"
+        )
 
 
 def bind_tuning_attention_torch(
@@ -367,7 +468,26 @@ def bind_tuning_attention_torch(
             f"{type(problem).__name__}"
         )
     validate_tuning_attention_contract(request, problem, spec)
-    unsafe_skip = bool(kwargs.pop("unsafe_skip_paged_value_validation", False))
+    # The caller-owned LSE buffer must be bound exactly when the problem asks
+    # for it, so misuse fails here and not at the first launch. Its shape,
+    # dtype, device and overlap are validated by the runner, which needs torch.
+    has_lse = tensors.get("lse") is not None
+    if problem.emit_lse and not has_lse:
+        raise ValueError("emit_lse=True requires tensors['lse']")
+    if has_lse and not problem.emit_lse:
+        raise ValueError("tensors['lse'] was given but emit_lse is off")
+    # Explicit specs are built without additive bias (the spec makers reject
+    # it), so refuse a bias-on problem or bias inputs here instead of launching
+    # a kernel that would silently ignore them.
+    if problem.use_additive_bias:
+        raise ValueError("explicit tuning bindings do not support additive bias")
+    _reject_additive_bias_inputs(tensors, "tensors")
+    unsafe_skip = kwargs.pop("unsafe_skip_paged_value_validation", False)
+    if type(unsafe_skip) is not bool:
+        raise ValueError(
+            "unsafe_skip_paged_value_validation must be a bool, got "
+            f"{type(unsafe_skip).__name__}"
+        )
     num_blocks = validate_tuning_attention_tensors(
         problem,
         tensors,
@@ -382,8 +502,20 @@ def bind_tuning_attention_torch(
     scale = kwargs.get("softmax_scale")
     if scale is None:
         scale = 1.0 / math.sqrt(int(problem.head_size))
+    if bool(getattr(problem, "use_fp8", False)):
+        # Resolve once: a device-tensor scale costs a host readback, so the
+        # non-fp8 capture below must not also run and then be overwritten.
+        bind_k_scale = _resolve_fp8_scale("k_scale", kwargs, "fp8 attention")
+        bind_v_scale = _resolve_fp8_scale("v_scale", kwargs, "fp8 attention")
+    else:
+        # Non-fp8 keeps the unconditional bind-time capture unchanged: the kernel
+        # only folds the scale in under fp8, but the strided decode path refuses a
+        # non-unit scale, and dropping the kwarg here would swallow that error.
+        bind_k_scale = float(kwargs.get("k_scale", 1.0))
+        bind_v_scale = float(kwargs.get("v_scale", 1.0))
 
     def launch(**_kw):
+        _reject_additive_bias_inputs(_kw, "launch kwargs")
         return run_unified_attention_torch(
             problem=problem,
             q=tensors["q"],
@@ -393,6 +525,8 @@ def bind_tuning_attention_torch(
             cu_seqlens_q=tensors["cu_seqlens_q"],
             seqused_k=tensors["seqused_k"],
             softmax_scale=float(_kw.get("softmax_scale", scale)),
+            k_scale=float(_kw.get("k_scale", bind_k_scale)),
+            v_scale=float(_kw.get("v_scale", bind_v_scale)),
             block_table=tensors["block_table"],
             softcap=float(_kw.get("softcap", tensors.get("softcap", 0.0))),
             sinks=_kw.get("sinks", tensors.get("sinks")),
@@ -401,6 +535,7 @@ def bind_tuning_attention_torch(
             backend=backend,
             stream=int(_kw.get("stream", stream)),
             tuning_spec=spec,
+            lse=_kw.get("lse", tensors.get("lse")),
         )
 
     return TorchBinding(
@@ -470,45 +605,130 @@ def bind_wmma_attention_torch(
     return TorchBinding(launch=launch, grid=grid, block=block)
 
 
+# ---------------------------------------------------------------- RDNA WMMA
 # Cached modules stay alive across bindings; asynchronous launches retain the
 # supplied tensor owners through KernelLauncher until the caller's stream drain.
 
-_GFX1151_LAUNCHERS: Dict[Tuple[str, Any], Any] = {}
+_RDNA_LAUNCHERS: Dict[Tuple[Any, ...], Any] = {}
 
 _LOG2E = math.log2(math.e)
 
 
-def _gfx1151_launcher(spec, arch: str):
-    """Build-or-fetch the cached ``KernelLauncher`` for one resolved spec."""
-    key = (str(arch), spec)
-    launcher = _GFX1151_LAUNCHERS.get(key)
+def _rdna_launcher(key: Tuple[Any, ...], build, signature):
+    """Build-or-fetch the cached ``KernelLauncher`` under ``key``."""
+    launcher = _RDNA_LAUNCHERS.get(key)
     if launcher is not None:
         return launcher
-    from kernels.gfx1151.wmma_fmha_fwd import (
-        build_wmma_fmha_fwd,
-        wmma_fmha_fwd_signature,
-    )
     from rocke.helpers import compile_kernel
     from rocke.runtime.launcher import KernelLauncher
 
-    kernel = build_wmma_fmha_fwd(spec, arch=arch)
-    artifact = compile_kernel(kernel, arch=arch, capture_ir_text=False)
+    arch = key[0]
+    artifact = compile_kernel(build(), arch=arch, capture_ir_text=False)
     launcher = KernelLauncher(
         hsaco=artifact.hsaco,
         kernel_name=artifact.kernel_name,
-        signature=wmma_fmha_fwd_signature(spec),
+        signature=signature,
         cache_key=key,
     )
-    _GFX1151_LAUNCHERS[key] = launcher
+    _RDNA_LAUNCHERS[key] = launcher
     return launcher
 
 
-def _gfx1151_q_kind(spec) -> str:
-    return "bf16" if str(spec.dtype).lower() == "bf16" else "fp16"
+def _prefill_launcher(spec, arch: str):
+    from kernels.gfx1151.wmma_fmha_fwd_v2 import (
+        build_wmma_fmha_fwd_v2,
+        wmma_fmha_fwd_v2_signature,
+    )
+
+    return _rdna_launcher(
+        (str(arch), spec),
+        lambda: build_wmma_fmha_fwd_v2(spec, arch=arch),
+        wmma_fmha_fwd_v2_signature(spec),
+    )
 
 
-def _gfx1151_kv_kind(spec) -> str:
-    return "fp8" if spec.kv_dtype else _gfx1151_q_kind(spec)
+def _decode_launcher(spec, arch: str):
+    from kernels.gfx1151.wmma_fmha_decode import (
+        build_wmma_fmha_decode,
+        wmma_fmha_decode_signature,
+    )
+
+    return _rdna_launcher(
+        (str(arch), spec),
+        lambda: build_wmma_fmha_decode(spec, arch=arch),
+        wmma_fmha_decode_signature(spec),
+    )
+
+
+def _merge_launcher(spec, arch: str):
+    """The merge kernel: one per (arch, dtype, packed rows), shared by every
+    decode object with those."""
+    from kernels.gfx1151.wmma_fmha_decode import (
+        build_wmma_fmha_decode_merge,
+        wmma_fmha_decode_merge_signature,
+    )
+
+    return _rdna_launcher(
+        (str(arch), "wmma_fmha_decode_merge", spec.dtype, spec.packed),
+        lambda: build_wmma_fmha_decode_merge(spec, arch=arch),
+        wmma_fmha_decode_merge_signature(spec),
+    )
+
+
+@dataclass(frozen=True)
+class _RdnaView:
+    """What the shared RDNA tensor validation reads from either kernel spec."""
+
+    decode: bool
+    dtype: str
+    q_bucket: int
+    v_bucket: int
+    layout: str
+    page_block_size: int
+    kv_fp8: bool
+    softcap: bool
+    sinks: bool
+    alibi: bool
+    qq_bias: bool
+    bias: Optional[str]  # None | "f32" | "q"
+    dense_q: bool = False  # paged prefill: batch-strided Q / O / LSE, no cu_seqlens_q
+    seqused_q: bool = False  # packed prefill: live query rows from seqused_q
+
+
+def _rdna_view(spec) -> _RdnaView:
+    from kernels.gfx1151.wmma_fmha_decode import WmmaFmhaDecodeSpec
+
+    if isinstance(spec, WmmaFmhaDecodeSpec):
+        return _RdnaView(
+            decode=True,
+            dtype=spec.dtype,
+            q_bucket=spec.head_size,
+            v_bucket=spec.head_size,
+            layout=spec.layout,
+            page_block_size=spec.page_block_size,
+            kv_fp8=bool(spec.kv_dtype),
+            softcap=spec.softcap,
+            sinks=spec.sinks,
+            alibi=spec.alibi,
+            qq_bias=spec.qq_bias,
+            bias=spec.bias or None,
+        )
+    return _RdnaView(
+        decode=False,
+        dtype=spec.dtype,
+        q_bucket=spec.head_dim,
+        v_bucket=spec.dv,
+        layout=spec.layout,
+        page_block_size=spec.page_block_size,
+        kv_fp8=bool(spec.kv_dtype),
+        softcap=spec.use_softcap,
+        sinks=spec.use_sinks,
+        alibi=spec.use_alibi,
+        qq_bias=spec.use_qq_bias,
+        bias=spec.bias,
+        dense_q=spec.dense_q,
+        seqused_q=spec.seqused_q,
+    )
 
 
 def _fits_i32(value: Any, name: str) -> int:
@@ -521,11 +741,11 @@ def _fits_i32(value: Any, name: str) -> int:
 def _check_byte_extent_i32(tensor, name: str, element_bytes: int) -> None:
     """Reject tensors whose addressed byte extent exceeds I32.
 
-    The kernel forms element offsets in I32 (``token * stride + head * stride``)
-    and scales them to I32 byte offsets for buffer loads against a descriptor
-    of at most 2 GiB (the transposed-QK V gather multiplies by the element
-    size), so the bound is on bytes, not elements. Matches the native pack's
-    ``addressFitsI32``.
+    The kernels form element offsets in I32 (``token * stride + head *
+    stride``) and scale them to I32 byte offsets for buffer loads against a
+    descriptor of at most 2 GiB, so the bound is on bytes, not elements.
+    Matches the native pack's ``addressFitsI32``. Paged prefill K / V use
+    :func:`_check_page_extent_i32` instead.
     """
     shape = _shape(tensor, name)
     stride = getattr(tensor, "stride", None)
@@ -538,28 +758,53 @@ def _check_byte_extent_i32(tensor, name: str, element_bytes: int) -> None:
     if extent > 0x7FFF_FFFF:
         raise ValueError(
             f"{name} spans {extent} bytes, which does not fit the I32 "
-            "offset arithmetic of the gfx1151 kernel; split the tensor "
+            "offset arithmetic of the RDNA attention kernels; split the tensor "
             "(e.g. per batch or per page range) before launching"
         )
 
 
-def _check_vector_aligned(tensor, name: str, align_bytes: int) -> None:
-    """Reject a 1-byte-element tensor whose rows can start off an
-    ``align_bytes`` boundary (data pointer or any outer stride)."""
+def _check_page_extent_i32(tensor, name: str, element_bytes: int) -> None:
+    """Reject a paged K / V cache ``[num_blocks, page, H, D]`` whose page of
+    one head exceeds I32 bytes.
+
+    The prefill kernel steps to a head and to a page in 64 bits and addresses
+    the rows of that page from its base in I32 bytes, so the cache itself may
+    pass 2 GiB. Matches the native pack's ``pageFitsI32`` (the page count is
+    an I32 argument, checked as ``num_blocks``).
+    """
     shape = _shape(tensor, name)
     stride = getattr(tensor, "stride", None)
     if not callable(stride):
         raise ValueError(f"{name} must expose strides")
-    if int(tensor.data_ptr()) % align_bytes:
+    if any(int(extent) <= 0 for extent in shape):
+        return
+    highest = sum((int(shape[i]) - 1) * int(stride(i)) for i in (1, 3))
+    extent = (highest + 1) * int(element_bytes)
+    if extent > 0x7FFF_FFFF:
         raise ValueError(
-            f"{name} data pointer must be {align_bytes}-byte aligned for the "
-            "gfx1151 FP8 vector loads"
+            f"{name} spans {extent} bytes in one page of one head, which does "
+            "not fit the I32 offset arithmetic of the RDNA attention kernels"
+        )
+
+
+def _check_rows_aligned(tensor, name: str, element_bytes: int, align: int) -> None:
+    """Reject a tensor whose rows can start off an ``align``-byte boundary
+    (data pointer or any outer stride): the kernels load whole rows as
+    ``align``-byte vectors."""
+    shape = _shape(tensor, name)
+    stride = getattr(tensor, "stride", None)
+    if not callable(stride):
+        raise ValueError(f"{name} must expose strides")
+    if int(tensor.data_ptr()) % align:
+        raise ValueError(
+            f"{name} data pointer must be {align}-byte aligned for the RDNA "
+            "attention row loads"
         )
     for axis in range(len(shape) - 1):
-        if int(shape[axis]) > 1 and int(stride(axis)) % align_bytes:
+        if int(shape[axis]) > 1 and (int(stride(axis)) * element_bytes) % align:
             raise ValueError(
-                f"{name} stride({axis})={int(stride(axis))} bytes must be a "
-                f"multiple of {align_bytes} for the gfx1151 FP8 vector loads"
+                f"{name} stride({axis})={int(stride(axis))} elements must be a "
+                f"multiple of {align} bytes for the RDNA attention row loads"
             )
 
 
@@ -572,22 +817,22 @@ def _check_last_dim_contiguous(tensor, name: str) -> None:
         raise ValueError(f"{name} innermost dimension must be contiguous")
 
 
-def _check_gfx1151_device(tensors: Mapping[str, Any]) -> None:
+def _check_rdna_device(tensors: Mapping[str, Any]) -> None:
     present = {name: t for name, t in tensors.items() if t is not None}
     if not present:
         return
     devices = {str(getattr(t, "device", None)) for t in present.values()}
     if len(devices) != 1:
         raise ValueError(
-            f"all gfx1151 attention tensors must share one device, got {devices}"
+            f"all RDNA attention tensors must share one device, got {devices}"
         )
     device = getattr(next(iter(present.values())), "device", None)
     device_type = getattr(device, "type", str(device).split(":")[0])
     if str(device_type).lower() != "cuda":
-        raise ValueError("gfx1151 attention tensors must be on a HIP/CUDA device")
+        raise ValueError("RDNA attention tensors must be on a HIP/CUDA device")
 
 
-def _check_gfx1151_qo(
+def _check_packed_rows(
     tensor, name: str, kind: str, num_heads: int, head_size: int
 ) -> None:
     actual = _dtype_kind(tensor, name)
@@ -608,7 +853,7 @@ def _fits_signed_i32(value: Any, name: str) -> int:
     return value
 
 
-def _check_gfx1151_storage(tensor, name: str, itemsize: int) -> None:
+def _check_storage(tensor, name: str, itemsize: int) -> None:
     shape = _shape(tensor, name)
     stride_fn = getattr(tensor, "stride", None)
     if not callable(stride_fn):
@@ -651,82 +896,111 @@ def _dense_axis_order(request, q) -> tuple[int, int, str]:
     return candidates[0]
 
 
-def _gfx1151_validate_and_collect(
+def _rdna_head_widths(request, view: _RdnaView) -> Tuple[int, int]:
+    """The launch's Q/K and V/O head widths: the request's, multiples of 8
+    inside the object's bucket (the decode bucket also bounds Q/K below)."""
+    widths = []
+    for name, value, bucket in (
+        ("hdim_q", request.hdim_q, view.q_bucket),
+        ("hdim_v", request.hdim_v, view.v_bucket),
+    ):
+        value = int(value)
+        if value < 8 or value > bucket or value % 8:
+            raise ValueError(
+                f"{name}={value} must be a multiple of 8 in [8, {bucket}] for "
+                "this RDNA attention object"
+            )
+        widths.append(value)
+    if view.decode:
+        from kernels.gfx1151.wmma_fmha_decode import wmma_fmha_decode_bucket
+
+        # Bucket D serves Q/K widths from its own minimum up (narrower Q/K
+        # would read K columns the kernel never masks).
+        if (
+            wmma_fmha_decode_bucket(head_dim_q=widths[0], head_dim_v=view.q_bucket)
+            != view.q_bucket
+        ):
+            raise ValueError(
+                f"hdim_q={widths[0]} is below what the decode bucket "
+                f"{view.q_bucket} serves"
+            )
+    return widths[0], widths[1]
+
+
+def _rdna_v_heads(num_v_heads: int, request, view: _RdnaView) -> int:
+    hq, hk = int(request.nhead_q), int(request.nhead_k)
+    if num_v_heads <= 0 or hq % num_v_heads:
+        raise ValueError(
+            f"V head count {num_v_heads} must divide the query head count {hq}"
+        )
+    if view.decode and max(hk, num_v_heads) % min(hk, num_v_heads):
+        raise ValueError(
+            f"the decode kernel needs one of the K head count {hk} and the V "
+            f"head count {num_v_heads} to divide the other"
+        )
+    return _fits_i32(num_v_heads, "num_v_heads")
+
+
+def _rdna_validate_and_collect(
     request, spec, tensors: Mapping[str, Any]
 ) -> Dict[str, Any]:
-    """Validate one launch and collect the runtime-shape-generic ABI values."""
-    from .common import AttentionMaskType
-    from .gfx1151 import _window_bounds
+    """Validate one launch and collect the runtime arguments both RDNA kernels
+    share (pointers, shape, mask, strides, feature operands)."""
+    from .gfx1151 import mask_arguments
 
-    layout = spec.layout
+    view = _rdna_view(spec)
+    layout = view.layout
     if layout not in ("dense", "ragged", "paged"):
-        raise ValueError(f"unsupported gfx1151 attention layout {layout!r}")
-    if spec.transposed_qk and (
-        int(request.seqlen_q) % spec.q_rows_per_cta
-        or int(request.seqlen_k) % spec.block_n
-    ):
-        raise ValueError("transposed QK requires complete query and KV tiles")
+        raise ValueError(f"unsupported RDNA attention layout {layout!r}")
     required = ["q", "k", "v", "out"]
     if bool(request.emit_lse):
         required.append("lse")
     missing = [name for name in required if tensors.get(name) is None]
     if missing:
-        raise ValueError("missing gfx1151 attention tensors: " + ", ".join(missing))
+        raise ValueError("missing RDNA attention tensors: " + ", ".join(missing))
     q, k, v, out = (tensors[name] for name in ("q", "k", "v", "out"))
     lse = tensors.get("lse")
-    q_kind = _gfx1151_q_kind(spec)
-    kv_kind = _gfx1151_kv_kind(spec)
-    if kv_kind == "fp8" and _dtype_kind(k, "k") == "fp8_fnuz":
+    q_kind = "bf16" if view.dtype == "bf16" else "fp16"
+    kv_kind = "fp8" if view.kv_fp8 else q_kind
+    if view.kv_fp8 and _dtype_kind(k, "k") == "fp8_fnuz":
         raise ValueError(
-            "gfx1151 WMMA FP8 KV storage is OCP fp8e4m3 (not FNUZ); "
-            "got fp8_fnuz for k"
+            "RDNA WMMA FP8 KV storage is OCP fp8e4m3 (not FNUZ); got fp8_fnuz for k"
         )
+    q_rank = 4 if layout == "dense" or view.dense_q else 3
     for name, tensor, rank in (
-        ("q", q, 4 if layout == "dense" else 3),
-        ("out", out, 4 if layout == "dense" else 3),
+        ("q", q, q_rank),
+        ("out", out, q_rank),
         ("k", k, 3 if layout == "ragged" else 4),
         ("v", v, 3 if layout == "ragged" else 4),
     ):
         if len(_shape(tensor, name)) != rank:
             raise ValueError(f"{name} must be rank-{rank} for {layout} layout")
-    _check_gfx1151_device(tensors)
-    kv_bytes = 1 if kv_kind == "fp8" else 2
-    for name, tensor, element_bytes in (
-        ("q", q, 2),
-        ("k", k, kv_bytes),
-        ("v", v, kv_bytes),
-        ("out", out, 2),
+    _check_rdna_device(tensors)
+    kv_bytes = 1 if view.kv_fp8 else 2
+    # The prefill kernel addresses paged K / V heads and pages in 64 bits; the
+    # decode kernel forms its head and per-row page offsets in I32, so its
+    # caches keep the whole-tensor cap.
+    paged_kv = layout == "paged" and not view.decode
+    for name, tensor, element_bytes, paged in (
+        ("q", q, 2, False),
+        ("k", k, kv_bytes, paged_kv),
+        ("v", v, kv_bytes, paged_kv),
+        ("out", out, 2, False),
     ):
-        _check_byte_extent_i32(tensor, name, element_bytes)
-    if kv_kind == "fp8":
-        # FP8 K is read as 16-byte vectors (one WMMA K fragment) and LDS-staged
-        # FP8 V as 8-byte vectors, both emitted with align == vector size.
-        # Every row address is base + sum(index * stride), so the base and all
-        # outer byte strides must be multiples of that width.
-        _check_vector_aligned(k, "k", 16)
-        if spec.v_lds_stage:
-            _check_vector_aligned(v, "v", 8)
+        if paged:
+            _check_page_extent_i32(tensor, name, element_bytes)
+        else:
+            _check_byte_extent_i32(tensor, name, element_bytes)
+        # 16-bit rows load as 16-byte vectors, FP8 K/V rows as 8-byte ones.
+        _check_rows_aligned(
+            tensor, name, element_bytes, 8 if element_bytes == 1 else 16
+        )
+    head_q, head_v = _rdna_head_widths(request, view)
+    # A runtime_head_dims request takes its V head count from the v tensor.
+    runtime_v_heads = bool(request.runtime_head_dims)
+    num_v_heads = int(request.nhead_k)
 
-    mask_type = AttentionMaskType(int(request.mask_type))
-    windowed = (
-        mask_type == AttentionMaskType.SLIDING_WINDOW
-        or int(request.sliding_window) > 0
-        or request.window_left is not None
-        or (request.window_right is not None and int(request.window_right) >= 0)
-    )
-    if windowed:
-        window_left, window_right = _window_bounds(request)
-    elif mask_type in (
-        AttentionMaskType.TOP_LEFT_CAUSAL,
-        AttentionMaskType.BOTTOM_RIGHT_CAUSAL,
-    ):
-        window_left, window_right = -1, 0
-    else:
-        window_left, window_right = -1, -1
-    bottom_right = mask_type == AttentionMaskType.BOTTOM_RIGHT_CAUSAL or (
-        mask_type == AttentionMaskType.SLIDING_WINDOW
-        and bool(request.window_bottom_right)
-    )
+    bottom_right, window_left, window_right = mask_arguments(request)
     values: Dict[str, Any] = {
         "Q": q,
         "K": k,
@@ -737,6 +1011,8 @@ def _gfx1151_validate_and_collect(
         "seqlen_k": _fits_i32(request.seqlen_k, "seqlen_k"),
         "num_query_heads": _fits_i32(request.nhead_q, "num_query_heads"),
         "num_kv_heads": _fits_i32(request.nhead_k, "num_kv_heads"),
+        "head_dim_q": head_q,
+        "head_dim_v": head_v,
         "bottom_right": int(bottom_right),
         "window_left": _fits_signed_i32(window_left, "window_left"),
         "window_right": _fits_signed_i32(window_right, "window_right"),
@@ -770,12 +1046,15 @@ def _gfx1151_validate_and_collect(
             actual = _dtype_kind(tensor, name)
             if actual != kind:
                 raise ValueError(f"{name} dtype must be {kind}, got {actual}")
-            _check_gfx1151_storage(tensor, name, 1 if kind == "fp8" else 2)
+            _check_storage(tensor, name, 1 if kind == "fp8" else 2)
 
-        validate_dense(q, "q", q_kind, seqlen_q, int(request.nhead_q), spec.head_size)
-        validate_dense(out, "out", q_kind, seqlen_q, int(request.nhead_q), spec.v_dim)
-        validate_dense(k, "k", kv_kind, seqlen_k, int(request.nhead_k), spec.head_size)
-        validate_dense(v, "v", kv_kind, seqlen_k, int(request.nhead_k), spec.v_dim)
+        if runtime_v_heads:
+            num_v_heads = _shape(v, "v")[head_axis]
+        num_v_heads = _rdna_v_heads(num_v_heads, request, view)
+        validate_dense(q, "q", q_kind, seqlen_q, int(request.nhead_q), head_q)
+        validate_dense(out, "out", q_kind, seqlen_q, int(request.nhead_q), head_v)
+        validate_dense(k, "k", kv_kind, seqlen_k, int(request.nhead_k), head_q)
+        validate_dense(v, "v", kv_kind, seqlen_k, num_v_heads, head_v)
         values.update(
             {
                 "stride_q_batch": _fits_i32(q.stride(0), "stride_q_batch"),
@@ -810,7 +1089,7 @@ def _gfx1151_validate_and_collect(
                         f"{dense_layout.upper()} shape {expected}, got {shape}"
                     )
                 lse_token_axis, lse_head_axis = token_axis, head_axis
-            _check_gfx1151_storage(lse, "lse", 4)
+            _check_storage(lse, "lse", 4)
             _check_byte_extent_i32(lse, "lse", 4)
             values.update(
                 {
@@ -824,46 +1103,68 @@ def _gfx1151_validate_and_collect(
                 }
             )
     else:
-        _check_gfx1151_qo(q, "q", q_kind, int(request.nhead_q), spec.head_size)
-        _check_gfx1151_qo(out, "out", q_kind, int(request.nhead_q), spec.v_dim)
-        _check_gfx1151_qo(k, "k", kv_kind, int(request.nhead_k), spec.head_size)
-        _check_gfx1151_qo(v, "v", kv_kind, int(request.nhead_k), spec.v_dim)
+        if runtime_v_heads:
+            num_v_heads = _shape(v, "v")[-2]
+        num_v_heads = _rdna_v_heads(num_v_heads, request, view)
+        _check_packed_rows(q, "q", q_kind, int(request.nhead_q), head_q)
+        _check_packed_rows(out, "out", q_kind, int(request.nhead_q), head_v)
+        _check_packed_rows(k, "k", kv_kind, int(request.nhead_k), head_q)
+        _check_packed_rows(v, "v", kv_kind, num_v_heads, head_v)
         if _shape(out, "out")[:-1] != _shape(q, "q")[:-1]:
             raise ValueError("out shape must match q shape except the head dim")
-        if _shape(v, "v")[:-1] != _shape(k, "k")[:-1]:
-            raise ValueError("v shape must match k shape except the head dim")
+        if _shape(v, "v")[:-2] != _shape(k, "k")[:-2]:
+            raise ValueError("v shape must match k shape except the head count and dim")
         for name, tensor, itemsize in (
             ("q", q, 2),
-            ("k", k, 1 if spec.kv_dtype else 2),
-            ("v", v, 1 if spec.kv_dtype else 2),
+            ("k", k, kv_bytes),
+            ("v", v, kv_bytes),
             ("out", out, 2),
         ):
-            _check_gfx1151_storage(tensor, name, itemsize)
+            _check_storage(tensor, name, itemsize)
+        batch = int(request.batch)
+        heads = int(request.nhead_q)
+        # A dense Q / O is [B, Sq, Hq, D] with batch strides; a packed one is
+        # [total_q, Hq, D] addressed through cu_seqlens_q.
+        lead = (batch,) if view.dense_q else ()
+        token_axis, head_axis = len(lead), len(lead) + 1
+        if view.dense_q:
+            if _shape(q, "q")[:2] != (batch, int(request.seqlen_q)):
+                raise ValueError(
+                    f"dense_q needs q [B, Sq, Hq, D] with B={batch} and "
+                    f"Sq={int(request.seqlen_q)}, got {_shape(q, 'q')}"
+                )
+            values["stride_q_batch"] = _fits_i32(q.stride(0), "stride_q_batch")
+            values["stride_o_batch"] = _fits_i32(out.stride(0), "stride_o_batch")
         values.update(
             {
-                "stride_q_token": _fits_i32(q.stride(0), "stride_q_token"),
-                "stride_q_head": _fits_i32(q.stride(1), "stride_q_head"),
-                "stride_o_token": _fits_i32(out.stride(0), "stride_o_token"),
-                "stride_o_head": _fits_i32(out.stride(1), "stride_o_head"),
+                "stride_q_token": _fits_i32(q.stride(token_axis), "stride_q_token"),
+                "stride_q_head": _fits_i32(q.stride(head_axis), "stride_q_head"),
+                "stride_o_token": _fits_i32(out.stride(token_axis), "stride_o_token"),
+                "stride_o_head": _fits_i32(out.stride(head_axis), "stride_o_head"),
             }
         )
         if bool(request.emit_lse):
             lse_shape = _shape(lse, "lse")
-            total_q = _shape(q, "q")[0]
-            heads = int(request.nhead_q)
+            rows = _shape(q, "q")[token_axis]
             if _dtype_kind(lse, "lse") != "fp32":
                 raise ValueError("lse dtype must be FP32")
-            if lse_shape == (heads, total_q):
-                lse_head_axis, lse_token_axis = 0, 1
-            elif lse_shape in ((total_q, heads), (total_q, heads, 1)):
-                lse_token_axis, lse_head_axis = 0, 1
+            if lse_shape == lead + (heads, rows):
+                lse_head_axis, lse_token_axis = len(lead), len(lead) + 1
+            elif lse_shape in (lead + (rows, heads), lead + (rows, heads, 1)):
+                lse_token_axis, lse_head_axis = len(lead), len(lead) + 1
             else:
-                raise ValueError(
-                    "lse must be packed [H,total_q], [total_q,H], or "
-                    f"[total_q,H,1], got {lse_shape}"
+                forms = (
+                    "[B,H,Sq], [B,Sq,H], or [B,Sq,H,1]"
+                    if view.dense_q
+                    else "packed [H,total_q], [total_q,H], or [total_q,H,1]"
                 )
-            _check_gfx1151_storage(lse, "lse", 4)
+                raise ValueError(f"lse must be {forms}, got {lse_shape}")
+            _check_storage(lse, "lse", 4)
             _check_byte_extent_i32(lse, "lse", 4)
+            if view.dense_q:
+                values["stride_lse_batch"] = _fits_i32(
+                    lse.stride(0), "stride_lse_batch"
+                )
             values["stride_lse_token"] = _fits_i32(
                 lse.stride(lse_token_axis), "stride_lse_token"
             )
@@ -871,16 +1172,29 @@ def _gfx1151_validate_and_collect(
                 lse.stride(lse_head_axis), "stride_lse_head"
             )
 
-        cu_seqlens_q = tensors.get("cu_seqlens_q")
-        if cu_seqlens_q is None:
-            raise ValueError(f"{layout} layout requires tensors['cu_seqlens_q']")
-        batch = int(request.batch)
-        if _dtype_kind(cu_seqlens_q, "cu_seqlens_q") != "int32":
-            raise ValueError("cu_seqlens_q dtype must be int32")
-        if _shape(cu_seqlens_q, "cu_seqlens_q") != (batch + 1,):
-            raise ValueError(f"cu_seqlens_q must have shape [{batch + 1}]")
-        _check_last_dim_contiguous(cu_seqlens_q, "cu_seqlens_q")
-        values["cu_seqlens_q"] = cu_seqlens_q
+        if not view.dense_q:
+            cu_seqlens_q = tensors.get("cu_seqlens_q")
+            if cu_seqlens_q is None:
+                raise ValueError(f"{layout} layout requires tensors['cu_seqlens_q']")
+            if _dtype_kind(cu_seqlens_q, "cu_seqlens_q") != "int32":
+                raise ValueError("cu_seqlens_q dtype must be int32")
+            if _shape(cu_seqlens_q, "cu_seqlens_q") != (batch + 1,):
+                raise ValueError(f"cu_seqlens_q must have shape [{batch + 1}]")
+            _check_last_dim_contiguous(cu_seqlens_q, "cu_seqlens_q")
+            values["cu_seqlens_q"] = cu_seqlens_q
+        if view.seqused_q:
+            # Live query rows per sequence; with dense_q the kernel writes rows
+            # past them as padding (O = 0, LSE = -inf), with cu_seqlens_q it
+            # neither reads nor writes them.
+            seqused_q = tensors.get("seqused_q")
+            if seqused_q is None:
+                raise ValueError("seqused_q objects require tensors['seqused_q']")
+            if _dtype_kind(seqused_q, "seqused_q") != "int32":
+                raise ValueError("seqused_q dtype must be int32")
+            if _shape(seqused_q, "seqused_q") != (batch,):
+                raise ValueError(f"seqused_q must have shape [{batch}]")
+            _check_last_dim_contiguous(seqused_q, "seqused_q")
+            values["seqused_q"] = seqused_q
 
         if layout == "ragged":
             cu_seqlens_k = tensors.get("cu_seqlens_k")
@@ -915,57 +1229,81 @@ def _gfx1151_validate_and_collect(
                 raise ValueError(
                     f"block_table shape must be [{batch}, max_pages], got {table_shape}"
                 )
+            # The kernels bound each sequence's key count by seqlen_k, so a
+            # seqlen_k past the table's pages would read another row's entries.
+            capacity = table_shape[1] * int(view.page_block_size)
+            if int(request.seqlen_k) > capacity:
+                raise ValueError(
+                    f"seqlen_k={int(request.seqlen_k)} exceeds the page table's "
+                    f"capacity of {capacity} keys ({table_shape[1]} pages of "
+                    f"{int(view.page_block_size)})"
+                )
             table_stride = getattr(block_table, "stride", None)
             if not callable(table_stride) or int(table_stride(1)) != 1:
                 raise ValueError("block_table innermost stride must be 1")
             row_stride = _fits_i32(table_stride(0), "block_table_stride")
             if row_stride < table_shape[1]:
                 raise ValueError("block_table row stride must be non-overlapping")
-            if _shape(k, "k")[1] != int(spec.page_block_size):
+            if _shape(k, "k")[1] != int(view.page_block_size):
                 raise ValueError(
-                    f"k cache page length must be {spec.page_block_size}, "
+                    f"k cache page length must be {view.page_block_size}, "
                     f"got {_shape(k, 'k')}"
                 )
+            # The prefill's dead key rows of a page smaller than a tile still
+            # load from page 0 (and discard the value), so its caches must hold
+            # at least one page.
+            if not view.decode and _shape(k, "k")[0] <= 0:
+                raise ValueError("paged k / v caches must hold at least one page")
             values.update(
                 {
                     "seqused_k": seqused_k,
                     "block_table": block_table,
+                    # One table maps both caches' pages.
+                    "block_table_v": block_table,
                     "block_table_stride": row_stride,
                     "stride_k_block": _fits_i32(k.stride(0), "stride_k_block"),
                     "stride_v_block": _fits_i32(v.stride(0), "stride_v_block"),
+                    # Every block_table entry is bounded to this page count on
+                    # device (v's matches k's, checked above).
+                    "num_blocks": _fits_i32(_shape(k, "k")[0], "num_blocks"),
                     "stride_k_token": _fits_i32(k.stride(1), "stride_k_token"),
                     "stride_k_head": _fits_i32(k.stride(2), "stride_k_head"),
                     "stride_v_token": _fits_i32(v.stride(1), "stride_v_token"),
                     "stride_v_head": _fits_i32(v.stride(2), "stride_v_head"),
                 }
             )
+    values["num_v_heads"] = num_v_heads
 
-    if spec.use_sinks:
+    if view.sinks:
         sinks = tensors.get("sinks")
         if sinks is None:
-            raise ValueError("spec.use_sinks requires tensors['sinks']")
-        if _dtype_kind(sinks, "sinks") != q_kind:
-            raise ValueError(
-                f"sinks dtype must be {q_kind}, got {_dtype_kind(sinks, 'sinks')}"
-            )
+            raise ValueError("sinks require tensors['sinks']")
+        sink_kind = _dtype_kind(sinks, "sinks")
+        # The prefill kernel reads f32 or Q-dtype sinks (sink_is_f32); the decode
+        # kernel reads the Q dtype only.
+        if sink_kind != q_kind and (view.decode or sink_kind != "fp32"):
+            allowed = q_kind if view.decode else f"{q_kind} or float32"
+            raise ValueError(f"sinks dtype must be {allowed}, got {sink_kind}")
         if _shape(sinks, "sinks") != (int(request.nhead_q),):
             raise ValueError(f"sinks must have shape [{request.nhead_q}]")
         _check_last_dim_contiguous(sinks, "sinks")
         values["sink_ptr"] = sinks
-    if spec.use_alibi:
+        if not view.decode:
+            values["sink_is_f32"] = int(sink_kind == "fp32")
+    if view.alibi:
         alibi = tensors.get("alibi_slopes")
         if alibi is None:
-            raise ValueError("spec.use_alibi requires tensors['alibi_slopes']")
+            raise ValueError("ALiBi requires tensors['alibi_slopes']")
         if _dtype_kind(alibi, "alibi_slopes") != "fp32":
             raise ValueError("alibi_slopes dtype must be float32")
         if _shape(alibi, "alibi_slopes") != (int(request.nhead_q),):
             raise ValueError(f"alibi_slopes must have shape [{request.nhead_q}]")
         _check_last_dim_contiguous(alibi, "alibi_slopes")
         values["alibi_slopes_ptr"] = alibi
-    if spec.use_qq_bias:
+    if view.qq_bias:
         qq_bias = tensors.get("qq_bias")
         if qq_bias is None:
-            raise ValueError("spec.use_qq_bias requires tensors['qq_bias']")
+            raise ValueError("QQ-bias requires tensors['qq_bias']")
         if _dtype_kind(qq_bias, "qq_bias") != "fp32":
             raise ValueError("qq_bias dtype must be float32")
         bias_shape = _shape(qq_bias, "qq_bias")
@@ -977,16 +1315,16 @@ def _gfx1151_validate_and_collect(
         values["qq_bias_rows"] = _fits_i32(bias_shape[0], "qq_bias_rows")
         values["qq_bias_cols"] = _fits_i32(bias_shape[1], "qq_bias_cols")
         values["qq_bias_stride"] = _fits_i32(qq_bias.stride(0), "qq_bias_stride")
-    if spec.use_attn_bias:
+    if view.bias:
         attn_bias = tensors.get("attn_bias")
         if attn_bias is None:
-            raise ValueError("spec.use_attn_bias requires tensors['attn_bias']")
-        want_kind = "fp32" if spec.bias_dtype == "f32" else q_kind
+            raise ValueError("an additive bias requires tensors['attn_bias']")
+        want_kind = "fp32" if view.bias == "f32" else q_kind
         bias_kind = _dtype_kind(attn_bias, "attn_bias")
         if bias_kind != want_kind:
             raise ValueError(
-                f"attn_bias dtype must be {want_kind} for bias_dtype="
-                f"{spec.bias_dtype!r}, got {bias_kind}"
+                f"attn_bias dtype must be {want_kind} for this object's "
+                f"{view.bias!r} bias, got {bias_kind}"
             )
         bias_shape = _shape(attn_bias, "attn_bias")
         if len(bias_shape) != 4:
@@ -1021,91 +1359,221 @@ def _gfx1151_validate_and_collect(
             values[key] = (
                 0 if bias_shape[axis] == 1 else _fits_i32(attn_bias.stride(axis), key)
             )
-
     return values
 
 
-def bind_gfx1151_attention_torch(
+def _rdna_softmax_scale(value) -> float:
+    """The RDNA kernels fold ``softmax_scale * log2(e)`` into an online
+    softmax that requires it finite and positive (zero or negative gives NaN
+    or zero rows), so reject anything else."""
+    scale = float(value)
+    if not math.isfinite(scale) or scale <= 0:
+        raise ValueError(
+            "softmax_scale must be finite and positive for the RDNA attention "
+            f"kernels, got {scale}"
+        )
+    return scale
+
+
+def _rdna_scalars(view: _RdnaView, head_q: int, kwargs: Mapping[str, Any]):
+    """Bind-time runtime scalars and the per-launch resolver over them."""
+    softmax_scale = _rdna_softmax_scale(
+        kwargs.get("softmax_scale", 1.0 / math.sqrt(head_q))
+    )
+    softcap = kwargs.get("softcap")
+    if view.softcap:
+        if softcap is None:
+            raise ValueError("softcap objects require kwargs['softcap']")
+        softcap = float(softcap)
+        if not math.isfinite(softcap) or softcap <= 0:
+            raise ValueError("softcap must be finite and positive")
+    if view.kv_fp8:
+        k_scale = _resolve_fp8_scale("k_scale", kwargs, "RDNA WMMA fp8 attention")
+        v_scale = _resolve_fp8_scale("v_scale", kwargs, "RDNA WMMA fp8 attention")
+    else:
+        k_scale = float(kwargs.get("k_scale", 1.0))
+        v_scale = float(kwargs.get("v_scale", 1.0))
+    stream_default = kwargs.get("stream", 0)
+    fence_default = bool(kwargs.get("fence", True))
+
+    def resolve(values: Dict[str, Any], kw: Mapping[str, Any]):
+        values["scale_log2"] = (
+            _rdna_softmax_scale(kw.get("softmax_scale", softmax_scale)) * _LOG2E
+        )
+        if view.softcap:
+            cap = float(kw.get("softcap", softcap))
+            if not math.isfinite(cap) or cap <= 0:
+                raise ValueError("softcap must be finite and positive")
+            values["softcap"] = cap
+        if view.kv_fp8:
+            values["k_scale"] = float(kw.get("k_scale", k_scale))
+            values["v_scale"] = float(kw.get("v_scale", v_scale))
+        stream = kw.get("stream", stream_default)
+        return (0 if stream is None else int(stream)), bool(
+            kw.get("fence", fence_default)
+        )
+
+    return resolve
+
+
+def bind_rdna_prefill_torch(
     request, spec, tensors: Mapping[str, Any], **kwargs
 ) -> TorchBinding:
-    """Bind a resolved gfx1151 ``WmmaFmhaFwdSpec`` to caller-owned tensors.
+    """Bind a ``WmmaFmhaFwdV2Spec`` (RDNA prefill) to caller-owned tensors.
 
     Handles dense BSHD/BHSD tensors with arbitrary non-overlapping outer
     strides, packed ragged/paged layouts, FP16/BF16, and OCP fp8e4m3 KV
     storage. Tensor keys are ``q``/``k``/``v``/``out`` plus caller-owned
-    ``lse`` when ``request.emit_lse`` is true, layout metadata, and enabled
-    score inputs including dense additive ``attn_bias``. LSE accepts live-head
-    ``[B,H,S]`` / ``[H,total_q]`` layouts and layout-shaped forms. Runtime
-    scalar kwargs are ``softmax_scale`` (default ``1/sqrt(D)``), ``softcap``
-    (required and positive when enabled), ``k_scale``/``v_scale`` for FP8 KV,
-    ``stream``, and ``fence``.
+    ``lse`` when ``request.emit_lse`` is true, layout metadata
+    (``cu_seqlens_q``/``cu_seqlens_k``/``seqused_k``/``block_table``, and
+    ``seqused_q`` for a ``seqused_q`` spec) and the enabled score inputs
+    (``sinks``, ``alibi_slopes``, ``qq_bias``, ``attn_bias``). LSE accepts
+    live-head ``[B,H,S]`` / ``[H,total_q]`` layouts and layout-shaped forms.
 
-    Metadata validation (shapes/dtypes/strides) happens once here, at bind
-    time; it never reads ``cu_seqlens*``/``seqused_k``/``block_table``
-    *contents* (that would require a GPU->host readback on every rebind).
-    The compiled ``KernelLauncher`` is cached by ``(arch, spec)``, so binding
-    the same spec again reuses the already-loaded module.
+    A paged ``dense_q`` spec takes a batch-strided ``[B, Sq, Hq, D]`` Q / O
+    (LSE ``[B,H,Sq]`` or ``[B,Sq,H(,1)]``) and no ``cu_seqlens_q``. With
+    ``seqused_q``, INT32 ``seqused_q[b]`` live rows of sequence ``b`` are
+    computed and its rows past them are written as O = 0, LSE = -inf. Paged
+    K / V caches may pass 2 GiB; one page of one head must fit I32 bytes.
+
+    Head widths are the request's ``hdim_q``/``hdim_v``: multiples of 8 inside
+    the object's buckets. Rows load as 16-byte vectors (8-byte for FP8 K/V),
+    so data pointers and every outer stride must keep that alignment. The V
+    head count is ``nhead_k``, or the ``v`` tensor's for a
+    ``runtime_head_dims`` request (any count dividing ``nhead_q``).
+
+    Runtime scalar kwargs are ``softmax_scale`` (default ``1/sqrt(hdim_q)``),
+    ``softcap`` (required and positive when enabled), ``k_scale``/``v_scale``
+    for FP8 KV, ``stream``, and ``fence``. Validation reads shapes, dtypes and
+    strides only (never the contents of the layout metadata); the kernels bound
+    every ``block_table`` entry to the cache's page count on device (an entry
+    outside ``[0, k.shape[0])`` reads as zero K / V rows). The compiled
+    ``KernelLauncher`` is cached by ``(arch, spec)``.
     """
-    from kernels.gfx1151.wmma_fmha_fwd import wmma_fmha_fwd_grid
+    from kernels.gfx1151.wmma_fmha_fwd_v2 import wmma_fmha_fwd_v2_grid
 
     arch = str(request.arch)
-    base_values = _gfx1151_validate_and_collect(request, spec, tensors)
-    grid = wmma_fmha_fwd_grid(
+    base_values = _rdna_validate_and_collect(request, spec, tensors)
+    base_values["batch"] = _fits_i32(request.batch, "batch")
+    grid, block = wmma_fmha_fwd_v2_grid(
         spec,
+        batch=int(request.batch),
         seqlen_q=int(request.seqlen_q),
         num_query_heads=int(request.nhead_q),
-        batch=int(request.batch),
     )
-    block = (int(spec.block_size), 1, 1)
-
-    kv_dtype = spec.kv_dtype
-    softmax_scale_default = float(
-        kwargs.get("softmax_scale", 1.0 / math.sqrt(int(spec.head_size)))
-    )
-    softcap_default = kwargs.get("softcap")
-    if spec.use_softcap and softcap_default is None:
-        raise ValueError("spec.use_softcap requires kwargs['softcap']")
-    if spec.use_softcap:
-        softcap_default = float(softcap_default)
-        if not math.isfinite(softcap_default) or softcap_default <= 0:
-            raise ValueError("softcap must be finite and positive")
-    if kv_dtype:
-        if "k_scale" not in kwargs or "v_scale" not in kwargs:
-            raise ValueError(
-                "spec.kv_dtype='fp8e4m3' requires explicit kwargs['k_scale'] "
-                "and kwargs['v_scale']"
-            )
-    k_scale_default = float(kwargs.get("k_scale", 1.0))
-    v_scale_default = float(kwargs.get("v_scale", 1.0))
-    stream_default = kwargs.get("stream", 0)
-    fence_default = bool(kwargs.get("fence", True))
-    # Cheap structural/kwargs validation above is complete; only now does a
-    # cache miss compile+load a module (never on any of the error paths above).
-    launcher = _gfx1151_launcher(spec, arch)
+    resolve = _rdna_scalars(_rdna_view(spec), base_values["head_dim_q"], kwargs)
+    # Validation is complete; only now does a cache miss compile+load a module.
+    launcher = _prefill_launcher(spec, arch)
 
     def launch(**_kw):
         from rocke.runtime.launcher import LaunchConfig
 
         values = dict(base_values)
-        values["scale_log2"] = (
-            float(_kw.get("softmax_scale", softmax_scale_default)) * _LOG2E
+        stream, fence = resolve(values, _kw)
+        launcher(
+            values,
+            config=LaunchConfig(grid=grid, block=block, stream=stream, fence=fence),
         )
-        if spec.use_softcap:
-            softcap = float(_kw.get("softcap", softcap_default))
-            if not math.isfinite(softcap) or softcap <= 0:
-                raise ValueError("softcap must be finite and positive")
-            values["softcap"] = softcap
-        if kv_dtype:
-            values["k_scale"] = float(_kw.get("k_scale", k_scale_default))
-            values["v_scale"] = float(_kw.get("v_scale", v_scale_default))
-        stream = _kw.get("stream", stream_default)
-        config = LaunchConfig(
-            grid=grid,
-            block=block,
-            stream=0 if stream is None else int(stream),
-            fence=bool(_kw.get("fence", fence_default)),
-        )
-        launcher(values, config=config)
         return tensors["out"]
 
     return TorchBinding(launch=launch, grid=grid, block=block)
+
+
+def bind_rdna_decode_torch(
+    request, spec, tensors: Mapping[str, Any], **kwargs
+) -> TorchBinding:
+    """Bind a resolved ``WmmaFmhaDecodeSpec`` (RDNA split-KV decode) to
+    caller-owned tensors; the tensor, layout and scalar contract is
+    :func:`bind_rdna_prefill_torch`'s (the decode bucket serves Q/K widths from
+    its own minimum up, and with a V head count other than ``nhead_k`` one of
+    the K/V head counts must divide the other).
+
+    The split count comes from the shape and the CU count
+    (``gfx1151.request_decode_plan``; the live device's on device). One split
+    launches the decode kernel alone, writing O and LSE. More splits use a
+    split workspace the binding allocates and owns (``launch.workspace``) for
+    its lifetime: up to 4 splits merge in the last split to finish (its arrival
+    counters are zeroed once here; the kernel re-arms them), more launch the
+    merge kernel after the decode kernel on the same stream. Launches of one
+    binding therefore share that workspace and must not overlap: issue them on
+    one stream (or synchronize between streams), as for its output tensors.
+    """
+    from rocke.runtime.launcher import DeviceMem
+
+    from .gfx1151 import request_decode_plan
+
+    arch = str(request.arch)
+    base_values = _rdna_validate_and_collect(request, spec, tensors)
+    plan = request_decode_plan(request, spec, num_v_heads=base_values["num_v_heads"])
+    base_values["num_splits"] = plan.num_splits
+    resolve = _rdna_scalars(_rdna_view(spec), base_values["head_dim_q"], kwargs)
+    layout = plan.workspace
+    # Validation is complete; only now does a cache miss compile+load a module
+    # or the workspace get allocated.
+    launcher = _decode_launcher(spec, arch)
+    merge = (
+        _merge_launcher(spec, arch) if plan.num_splits > 1 and not plan.fused else None
+    )
+    workspace = DeviceMem(layout["bytes"])
+    if layout["bytes"]:
+        base = workspace.ptr()
+        if plan.fused:
+            from rocke.runtime.hip_module import Runtime
+
+            # The arrival counters start at zero; the device-wide sync orders
+            # the null-stream memset before launches on any stream.
+            rt = Runtime()
+            rt.memset(base + layout["ws_cnt"], 0, layout["bytes"] - layout["ws_cnt"])
+            rt.sync()
+        # WS_O starts the allocation: passing the owner keeps it alive for any
+        # asynchronous launch still queued when the binding is dropped.
+        base_values["WS_O"] = workspace
+        base_values["WS_LSE"] = base + layout["ws_lse"]
+        base_values["WS_CNT"] = base + layout["ws_cnt"] if plan.fused else 0
+    else:
+        base_values.update(WS_O=0, WS_LSE=0, WS_CNT=0)
+    merge_keys = (
+        "O",
+        "LSE",
+        "WS_O",
+        "WS_LSE",
+        "seqlen_q",
+        "num_query_heads",
+        "head_dim_v",
+        "num_splits",
+        "write_lse",
+    ) + tuple(
+        f"stride_{t}_{a}" for t in ("o", "lse") for a in ("batch", "token", "head")
+    )
+    if spec.packed:
+        merge_keys += ("cu_seqlens_q",)
+
+    def launch(**_kw):
+        from rocke.runtime.launcher import LaunchConfig
+
+        values = dict(base_values)
+        stream, fence = resolve(values, _kw)
+        launcher(
+            values,
+            config=LaunchConfig(
+                grid=plan.grid,
+                block=plan.block,
+                stream=stream,
+                fence=fence and merge is None,
+            ),
+        )
+        if merge is not None:
+            merge(
+                {key: values[key] for key in merge_keys},
+                config=LaunchConfig(
+                    grid=plan.merge_grid,
+                    block=plan.merge_block,
+                    stream=stream,
+                    fence=fence,
+                ),
+            )
+        return tensors["out"]
+
+    launch.workspace = workspace
+    launch.plan = plan
+    return TorchBinding(launch=launch, grid=plan.grid, block=plan.block)

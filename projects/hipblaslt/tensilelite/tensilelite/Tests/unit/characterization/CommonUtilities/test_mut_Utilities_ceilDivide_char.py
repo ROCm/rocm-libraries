@@ -4,7 +4,7 @@
 ################################################################################
 
 """Mutation-targeted characterization tests for
-``Tensile.Common.Utilities.ceilDivide``.
+``tensilelite.Common.Utilities.ceilDivide``.
 
 ``ceilDivide(numerator, denominator)`` computes ``ceil(numerator/denominator)``
 via integer floor division of ``(numerator + denominator - 1) // denominator``.
@@ -26,7 +26,7 @@ import importlib
 
 import pytest
 
-U = importlib.import_module("Tensile.Common.Utilities")
+U = importlib.import_module("tensilelite.Common.Utilities")
 ceilDivide = U.ceilDivide
 
 pytestmark = pytest.mark.unit

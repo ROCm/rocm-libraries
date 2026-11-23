@@ -11,14 +11,14 @@ object claims to be stage X but actually isn't."
 
 import pytest
 
-from Tensile.Components.Subtile.LogicalScheduler import (
+from tensilelite.Components.Subtile.LogicalScheduler import (
     Dep,
     LogicalScheduler,
     Pass,
     ReadGranularity,
     SchedulerConfig,
 )
-from Tensile.Components.Subtile.ScheduleTypes import (
+from tensilelite.Components.Subtile.ScheduleTypes import (
     AnnotatedSchedule,
     AugmentedSchedule,
     EmittedSchedule,
