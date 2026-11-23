@@ -405,23 +405,28 @@ def test_handoff_barriers_lds_mirrors_split_persistent_tile_handoff(gfx1250_iim)
     DebugPersistentKernelLoopForever it reports the barrier of the static arm (StaticGrid, and the static arm of
     Hybrid) or of the queue (DynamicWorkQueue), and where a Hybrid kernel has none the queue fences its dynamic arm.
     With DebugPersistentKernelLoopForever it reports none, so the flush keeps its own. The handoff of a spatial cluster
-    signals the next cluster tile through the writer's SGPR pool, which this test does not build, so the cluster cells
-    check the predicate only; test_flush_has_no_duplicate_persistent_barrier emits a StreamK 3 cluster kernel."""
+    signals the next cluster tile through the writer's SGPR pool, for which a stub stands in, and its arrive signal is
+    an SBarrier too, so a cell finds the workgroup barrier by its comment. With DebugPersistentKernelLoopForever the
+    cluster handoff also reads the static partition of a whole writer, so those cells check only that the predicate
+    reports no barrier; test_flush_has_no_duplicate_persistent_barrier emits a StreamK 3 cluster kernel."""
     import itertools
     from types import SimpleNamespace
 
-    from rocisa.instruction import SBarrier
     from tensilelite.Components.TDMStoreInst import _hybridStaticArmOnly
     from tensilelite.Components.WorkAssignment import DynamicWorkQueue, StaticGrid
     from toolchain_test_helpers import use_isa
 
     use_isa((12, 5, 0), 32)
     writer = SimpleNamespace(states=SimpleNamespace(memTokenEpilogue=0, asmCaps={"HasClusterBarrier": True}),
-                             labels=SimpleNamespace(getNameInc=lambda name: name + "_0"))
+                             labels=SimpleNamespace(getNameInc=lambda name: name + "_0"),
+                             sgprPool=SimpleNamespace(checkOut=lambda num, tag=None, **kwargs: 100,
+                                                      checkIn=lambda idx: None))
+    workgroupBarriers = ("hand compute LDS back to persistent TDM prefetch",
+                         "hand epilogue LDS back to persistent compute", "Sync before persistent re-entry")
 
     def barrier(arm, kernel):
-        return any(isinstance(item, SBarrier)
-                   for module in arm().splitPersistentTileHandoff(writer, kernel) for item in module.flatitems())
+        text = "".join(str(module) for module in arm().splitPersistentTileHandoff(writer, kernel))
+        return any(comment in text for comment in workgroupBarriers)
 
     arms = {"StaticGrid": [StaticGrid], "DynamicWorkQueue": [DynamicWorkQueue], "Hybrid": [StaticGrid, DynamicWorkQueue]}
     checked = 0
@@ -435,8 +440,8 @@ def test_handoff_barriers_lds_mirrors_split_persistent_tile_handoff(gfx1250_iim)
         fences = _handoffBarriersLds(kernel)
         if debug:
             assert not fences, kernel
-        if clusterDim != [1, 1]:
-            continue
+            if clusterDim != [1, 1]:
+                continue
         emitted = [barrier(arm, kernel) for arm in arms[assignment]]
         assert not fences or all(emitted), kernel
         if not debug:
@@ -444,4 +449,5 @@ def test_handoff_barriers_lds_mirrors_split_persistent_tile_handoff(gfx1250_iim)
             if assignment == "Hybrid":
                 assert _hybridStaticArmOnly(kernel) and emitted[1], kernel
         checked += 1
-    assert checked == 3 * 4 * 2 * 2 * 2 * 2
+    # Without a cluster with and without the debug loop, and the two cluster settings without it.
+    assert checked == 3 * 4 * 2 * 2 * 2 * (2 + 2)
