@@ -160,7 +160,7 @@ public:
     {
     }
 
-    FrequencyMonitorImp(const FrequencyMonitorImp&)            = delete;
+    FrequencyMonitorImp(const FrequencyMonitorImp&) = delete;
     FrequencyMonitorImp& operator=(const FrequencyMonitorImp&) = delete;
 
     ~FrequencyMonitorImp() override
