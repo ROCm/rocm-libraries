@@ -287,6 +287,9 @@ class StateValues:
   # silencing above has to relax there: the next tile may be in another batch, and
   # then it runs the fill copy, which expects A to have been prefetched.
   rapInPapNextTilePrefetch: bool         = False
+  # LDS token of the bank the NLL's classic PAP group writes, while it is emitted.
+  # None leaves the group on ldsTensorTokenIdx.
+  papClassicLoadToken: Optional[int]     = None
   # Diagnostic carried alongside overflowedResources == 9.
   rapStoreNeutralityMsg: str             = ""
   numVgprBufferPackA: int                = 0
@@ -3841,11 +3844,18 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       if papPrefetchUsesStagger:
         module.add(self.declareStaggerParms(kernel))
       skip2ndWaitForDtl = kernel["DirectToLds%s" % tensorParameters1st["tensorChar"]]
-      _emitGlobalReadsSplatFirst(
-        kernel, tensorParameters1st, tensorParameters2nd,
-        lambda: emitTensorLoad(tensorParameters1st),
-        lambda tP: emitTensorLoad(tP["MX"], skipWait=True),
-        lambda: emitTensorLoad(tensorParameters2nd, skipWait=skip2ndWaitForDtl))
+      issueToken = getattr(self.states, "papClassicLoadToken", None)
+      previousToken = self.states.ldsTensorTokenIdx
+      if issueToken is not None:
+        self.states.ldsTensorTokenIdx = issueToken
+      try:
+        _emitGlobalReadsSplatFirst(
+          kernel, tensorParameters1st, tensorParameters2nd,
+          lambda: emitTensorLoad(tensorParameters1st),
+          lambda tP: emitTensorLoad(tP["MX"], skipWait=True),
+          lambda: emitTensorLoad(tensorParameters2nd, skipWait=skip2ndWaitForDtl))
+      finally:
+        self.states.ldsTensorTokenIdx = previousToken
 
     # A next K range holding only the partial last iteration runs no unrolled
     # iteration, so its first PGR group is never consumed. Its full-DepthU TDM
@@ -4670,8 +4680,16 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
                 and self.isPrefetchAcrossPersistentEnabled(kernel))
 
     if isPapNll:
-      module.add(self.prefetchAcrossPersistent(kernel, tensorParametersA, tensorParametersB,
-                                               skipBarrier=papPriorSync))
+      # The NLL reads one bank while PAP refills the bank the previous trip
+      # released. Name that bank, or the NLL's reads wait for the next tile's loads.
+      outerToken = self.states.papClassicLoadToken
+      if not self.states.dcpTokenGate:
+        self.states.papClassicLoadToken = self._nextLdsToken(self.states.ldsReadTokenIdx)
+      try:
+        module.add(self.prefetchAcrossPersistent(kernel, tensorParametersA, tensorParametersB,
+                                                 skipBarrier=papPriorSync))
+      finally:
+        self.states.papClassicLoadToken = outerToken
 
     # generate no Load Loop Body code
     module.add(self.noLoadLoopBody(kernel, tensorParametersA, tensorParametersB, pack, packPre, isOptNLL, isNGLL, NLLfirst, NLLlast, NLLindex=NLLindex, \
