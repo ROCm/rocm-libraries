@@ -12,7 +12,9 @@ only warns. This test lints every shipped ``predict_engine`` and ``sort_kernel_c
 model of every engine (kernel-ingestor bundles of any pack source and the native engines)
 through hipDNN's feature evaluator, the same check promote applies. A model that fails is
 fixed with ``python -m uhd_gen rewrite-signature``. Host-only; reads the signatures in the
-source tree, so no ``dvc pull``.
+source tree. Most are committed in git; the models of a bundle whose whole ``heuristics``
+directory is a DVC directory (the conv AOT rankers) are present, and linted, only after
+``dvc pull``, which the superbuild CI jobs run first.
 """
 
 from __future__ import annotations

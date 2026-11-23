@@ -2309,6 +2309,14 @@ function(hkp_register_tests rocm_kpack_dir hipcc rocke_comgr_lib)
     set_tests_properties(hip-kernel-provider-hkp-pack PROPERTIES
         ENVIRONMENT "${_pyenv}")
 
+    # The quick entry runs hipdnn_uhd_features (test_shipped_model_optionals.py), which in a
+    # Windows address-sanitizer build needs the sanitizer, ROCm and build DLL directories on
+    # PATH, as uhd_gen_tests and the census entries get them.
+    if(DEFINED TEST_ENVIRONMENT_MODIFICATION)
+        set_tests_properties(hip-kernel-provider-hkp-pack-quick hip-kernel-provider-hkp-pack
+            PROPERTIES ENVIRONMENT_MODIFICATION "${TEST_ENVIRONMENT_MODIFICATION}")
+    endif()
+
     # Both entries are add_test()'d in this scope, so the YAML's test_patterns match them
     # via the directory-property loop. EXPLICIT_TESTS is avoided:
     # apply_ctest_category_labels joins it with ';', which execute_process re-splits into
