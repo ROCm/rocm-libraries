@@ -110,20 +110,23 @@ namespace rocsparse
         }
     }
 
-    // Copies each row into a contiguous segment of zero-based column indices. Every slot
-    // from the first -1 of a row onward is padding, stored as n so that it sorts last.
+    // Copies rows [first_row, first_row + rows) into contiguous segments of zero-based
+    // column indices. Every slot from the first -1 of a row onward is padding, stored as n
+    // so that it sorts last.
     template <uint32_t BLOCKSIZE, typename I>
     ROCSPARSE_KERNEL(BLOCKSIZE)
-    void check_matrix_ell_gather_device(I m,
-                                        I n,
-                                        I ell_width,
+    void check_matrix_ell_gather_device(I       m,
+                                        I       n,
+                                        I       ell_width,
+                                        int64_t first_row,
+                                        int64_t rows,
                                         const I* __restrict__ in,
                                         rocsparse_index_base idx_base,
                                         I* __restrict__ out)
     {
         const int64_t row = static_cast<int64_t>(hipBlockIdx_x) * BLOCKSIZE + hipThreadIdx_x;
 
-        if(row >= m)
+        if(row >= rows)
         {
             return;
         }
@@ -131,7 +134,7 @@ namespace rocsparse
         bool padding = false;
         for(I j = 0; j < ell_width; ++j)
         {
-            const I col = in[static_cast<int64_t>(m) * j + row];
+            const I col = in[static_cast<int64_t>(m) * j + first_row + row];
             padding     = padding || (col == static_cast<I>(-1));
 
             out[row * ell_width + j] = padding ? n : static_cast<I>(col - idx_base);
@@ -156,12 +159,15 @@ namespace rocsparse
     // stored as n.
     template <uint32_t BLOCKSIZE, typename I>
     ROCSPARSE_KERNEL(BLOCKSIZE)
-    void check_matrix_ell_duplicate_device(
-        I m, I n, I ell_width, const I* __restrict__ cols, rocsparse_data_status* data_status)
+    void check_matrix_ell_duplicate_device(int64_t rows,
+                                           I       n,
+                                           I       ell_width,
+                                           const I* __restrict__ cols,
+                                           rocsparse_data_status* data_status)
     {
         const int64_t row = static_cast<int64_t>(hipBlockIdx_x) * BLOCKSIZE + hipThreadIdx_x;
 
-        if(row >= m)
+        if(row >= rows)
         {
             return;
         }

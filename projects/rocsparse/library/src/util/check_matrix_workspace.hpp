@@ -25,6 +25,7 @@
 #pragma once
 
 #include "rocsparse_control.hpp"
+#include "rocsparse_grid.hpp"
 #include "rocsparse_primitives.hpp"
 #include "rocsparse_utility.hpp"
 
@@ -49,6 +50,7 @@ namespace rocsparse
         size_t   total{};
     };
 
+    // The keys sections hold one batch of rows.
     struct check_matrix_ell_workspace
     {
         int64_t  batch_rows{};
@@ -134,6 +136,11 @@ namespace rocsparse
         // The sort takes the number of keys and segments as unsigned int and reads each
         // segment offset as unsigned int.
         int64_t entries = std::numeric_limits<uint32_t>::max();
+
+        // The sort configured in rocsparse_segmented_radix_sort_keys.cpp gives a segment at
+        // most one block of 256 threads, and the work-items of one launch must fit in 32 bits.
+        // The gather and duplicate kernels of a batch run one 256-thread block per 256 rows.
+        int64_t rows = rocsparse::dispatch_limit_x(256);
     };
 
     // The unsorted ELL duplicate pass needs one row to fit in a batch.
@@ -149,7 +156,7 @@ namespace rocsparse
                                                    int64_t                             ell_width,
                                                    const check_matrix_ell_sort_limits& limits)
     {
-        return std::min(m, limits.entries / ell_width);
+        return std::min({m, limits.entries / ell_width, limits.rows});
     }
 
     // The duplicate pass sorts zero-based column indices with padding stored as n.
@@ -194,7 +201,7 @@ namespace rocsparse
                     ws.end_bit,
                     &ws.rocprim_bytes)));
 
-            const size_t keys_bytes = rocsparse::align_size<I>(static_cast<size_t>(entries));
+            const size_t keys_bytes = rocsparse::align_size<I>(static_cast<size_t>(batch_entries));
             ws.rocprim_offset       = check_matrix_workspace_append(
                 ws.total, rocsparse::align_size<char>(ws.rocprim_bytes));
             ws.offsets_offset = check_matrix_workspace_append(

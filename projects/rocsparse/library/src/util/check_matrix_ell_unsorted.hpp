@@ -50,49 +50,48 @@ namespace rocsparse
 
         const int64_t batch_rows = ws.batch_rows;
         void*    rocprim_buffer  = check_matrix_workspace_at<char>(temp_buffer, ws.rocprim_offset);
-        int64_t* offsets      = check_matrix_workspace_at<int64_t>(temp_buffer, ws.offsets_offset);
-        I*       gathered     = check_matrix_workspace_at<I>(temp_buffer, ws.keys_offset);
-        I*       gathered_alt = check_matrix_workspace_at<I>(temp_buffer, ws.keys_alt_offset);
-
-        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::check_matrix_ell_gather_device<256, I>),
-                                           dim3((m - 1) / 256 + 1),
-                                           dim3(256),
-                                           0,
-                                           handle->stream,
-                                           m,
-                                           n,
-                                           ell_width,
-                                           ell_col_ind,
-                                           idx_base,
-                                           gathered);
+        int64_t* offsets  = check_matrix_workspace_at<int64_t>(temp_buffer, ws.offsets_offset);
+        I*       keys_buf = check_matrix_workspace_at<I>(temp_buffer, ws.keys_offset);
+        I*       keys_alt = check_matrix_workspace_at<I>(temp_buffer, ws.keys_alt_offset);
+        rocsparse_data_status* d_data_status
+            = check_matrix_workspace_at<rocsparse_data_status>(temp_buffer, 0);
 
         // The segment offsets are relative to the first row of a batch, so all batches
         // share them.
-        const int64_t  offset_threads = batch_rows + 1;
-        const uint32_t offset_blocks  = static_cast<uint32_t>((offset_threads - 1) / 256 + 1);
-        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::check_matrix_ell_offsets_device<256>),
-                                           dim3(offset_blocks),
-                                           dim3(256),
-                                           0,
-                                           handle->stream,
-                                           batch_rows,
-                                           static_cast<int64_t>(ell_width),
-                                           offsets);
+        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+            (rocsparse::check_matrix_ell_offsets_device<256>),
+            dim3(static_cast<uint32_t>(rocsparse::ceil_div(batch_rows + 1, 256))),
+            dim3(256),
+            0,
+            handle->stream,
+            batch_rows,
+            static_cast<int64_t>(ell_width),
+            offsets);
 
-        // A batch can end up sorted in either buffer. sorted is the buffer that holds the
-        // first batch, and later batches are copied there if they end up in the other one.
-        I* sorted = nullptr;
         for(int64_t first_row = 0; first_row < m; first_row += batch_rows)
         {
-            const int64_t rows  = std::min(batch_rows, static_cast<int64_t>(m) - first_row);
-            const int64_t begin = first_row * ell_width;
-            const int64_t count = rows * ell_width;
+            const int64_t rows = std::min(batch_rows, static_cast<int64_t>(m) - first_row);
+            const dim3    blocks(static_cast<uint32_t>(rocsparse::ceil_div(rows, 256)));
 
-            rocsparse::primitives::double_buffer<I> keys(gathered + begin, gathered_alt + begin);
+            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::check_matrix_ell_gather_device<256, I>),
+                                               blocks,
+                                               dim3(256),
+                                               0,
+                                               handle->stream,
+                                               m,
+                                               n,
+                                               ell_width,
+                                               first_row,
+                                               rows,
+                                               ell_col_ind,
+                                               idx_base,
+                                               keys_buf);
+
+            rocsparse::primitives::double_buffer<I> keys(keys_buf, keys_alt);
             RETURN_IF_ROCSPARSE_ERROR((rocsparse::primitives::segmented_radix_sort_keys<I, int64_t>(
                 handle,
                 keys,
-                static_cast<size_t>(count),
+                static_cast<size_t>(rows * ell_width),
                 static_cast<size_t>(rows),
                 offsets,
                 offsets + 1,
@@ -101,32 +100,18 @@ namespace rocsparse
                 ws.rocprim_bytes,
                 rocprim_buffer)));
 
-            if(sorted == nullptr)
-            {
-                sorted = keys.current() - begin;
-            }
-            else if(keys.current() != sorted + begin)
-            {
-                RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(sorted + begin,
-                                                             keys.current(),
-                                                             sizeof(I) * static_cast<size_t>(count),
-                                                             hipMemcpyDeviceToDevice,
-                                                             handle->stream));
-            }
+            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+                (rocsparse::check_matrix_ell_duplicate_device<256, I>),
+                blocks,
+                dim3(256),
+                0,
+                handle->stream,
+                rows,
+                n,
+                ell_width,
+                keys.current(),
+                d_data_status);
         }
-
-        rocsparse_data_status* d_data_status
-            = reinterpret_cast<rocsparse_data_status*>(temp_buffer);
-        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::check_matrix_ell_duplicate_device<256, I>),
-                                           dim3((m - 1) / 256 + 1),
-                                           dim3(256),
-                                           0,
-                                           handle->stream,
-                                           m,
-                                           n,
-                                           ell_width,
-                                           sorted,
-                                           d_data_status);
 
         RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(data_status,
                                                      d_data_status,

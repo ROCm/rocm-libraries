@@ -1130,21 +1130,37 @@ namespace
         both[4][2] = both[4][0];
         cases.emplace_back("duplicate_rows_3_4", both, k_dup);
 
-        // Batches of 1, 2, 3 and 6 rows, with and without unused entries below the limit,
-        // one batch of all rows, and the library default.
-        const int64_t limits[]
-            = {4, 5, 8, 11, 12, 24, 27, 28, rocsparse::check_matrix_ell_sort_limits{}.entries};
+        // Batches of 1, 2, 3 and 6 rows set by the entry limit, with and without unused
+        // entries below it, one batch of all rows, and the library default; then batches of
+        // 1, 2, 3 and 6 rows set by the row limit, alone and below a larger entry limit.
+        const int64_t entries = rocsparse::check_matrix_ell_sort_limits{}.entries;
+        const rocsparse::check_matrix_ell_sort_limits limits[] = {{4},
+                                                                  {5},
+                                                                  {8},
+                                                                  {11},
+                                                                  {12},
+                                                                  {24},
+                                                                  {27},
+                                                                  {28},
+                                                                  {},
+                                                                  {entries, 1},
+                                                                  {entries, 2},
+                                                                  {entries, 3},
+                                                                  {entries, 6},
+                                                                  {12, 2},
+                                                                  {27, 3}};
 
         for(auto base : {rocsparse_index_base_zero, rocsparse_index_base_one})
             for(const auto& item : cases)
-                for(int64_t limit : limits)
+                for(const auto& limit : limits)
                 {
                     SCOPED_TRACE(std::string(type_name) + " " + std::get<0>(item) + " base "
-                                 + std::to_string(base_of(base)) + " limit "
-                                 + std::to_string(limit));
+                                 + std::to_string(base_of(base)) + " entries "
+                                 + std::to_string(limit.entries) + " rows "
+                                 + std::to_string(limit.rows));
                     rocsparse_data_status data = k_fill;
                     EXPECT_EQ(run_ell_duplicate_pass<I>(
-                                  handle, n, width, std::get<1>(item), base, {limit}, data),
+                                  handle, n, width, std::get<1>(item), base, limit, data),
                               rocsparse_status_success);
                     EXPECT_EQ(data, std::get<2>(item));
                 }
@@ -1515,13 +1531,34 @@ TEST_F(CheckMatrixDefects, EllScale)
     }
 }
 
-// The unsorted ELL duplicate pass sorts whole rows in batches that fit the 32-bit sizes of
-// the segmented sort. A lowered batch limit splits a small matrix into several batches,
-// which must report the same status as a single batch.
+// The unsorted ELL duplicate pass sorts whole rows in batches that fit the 32-bit sizes and
+// launch limits of the segmented sort. A lowered entry or row limit splits a small matrix
+// into several batches, which must report the same status as a single batch.
 TEST_F(CheckMatrixDefects, EllUnsortedBatches)
 {
     expect_ell_batches<int32_t>(handle, "i32");
     expect_ell_batches<int64_t>(handle, "i64");
+}
+
+// A batch of the library default fits both the 32-bit sizes of the segmented sort and the
+// 32-bit work-item count of its launches, which give a row at most 256 threads. With
+// 2^29 rows, the entry limit alone allows more than 2^32 / 256 rows for widths up to 256.
+TEST_F(CheckMatrixDefects, EllUnsortedBatchFitsSortLaunch)
+{
+    const int64_t max_entries = std::numeric_limits<uint32_t>::max();
+    const int64_t max_rows    = max_entries / 256;
+    const int32_t m           = int32_t(1) << 29;
+    for(int32_t width : {2, 3, 8, 9, 64, 65, 256, 257, 4096})
+    {
+        SCOPED_TRACE("width " + std::to_string(width));
+        rocsparse::check_matrix_ell_workspace ws;
+        ASSERT_EQ(rocsparse::check_matrix_ell_workspace_query<int32_t>(
+                      handle, m, 16, width, rocsparse_storage_mode_unsorted, ws),
+                  rocsparse_status_success);
+        EXPECT_GE(ws.batch_rows, 1);
+        EXPECT_LE(ws.batch_rows, max_rows);
+        EXPECT_LE(ws.batch_rows * width, max_entries);
+    }
 }
 
 // The helpers allocate the queried size plus a canary and check that the canary is
