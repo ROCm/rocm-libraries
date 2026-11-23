@@ -609,16 +609,22 @@ _SELECTION_GRID = (
 )
 
 
-@pytest.mark.rocke_shard_cost(14)
-@pytest.mark.parametrize("dtype", _SWEEP_DTYPE_PARAMS)
-def test_runtime_candidates_are_rockes_runtime_selection(forward_sweep, dtype):
-    """Over the whole packaged sweep, the instances selected for a problem are exactly
-    the ones rocKE's --run-from-cache benchmark runs by default from a cache holding
-    them: KernelCache.compatible, then _widest_vector_sizes. Both functions are rocKE's
-    own, called on the identities."""
-    from benchmarks.common.benchmark_implicit_gemm_conv import _widest_vector_sizes
+#: The grid's problems, dealt round-robin into this many chunks, one test each, so
+#: the scans of the whole sweep spread over CI shards and workers.
+_SELECTION_CHUNKS = 4
 
-    identities = [job.identity for job in forward_sweep(dtype)]
+
+def _selection_problem(values: tuple, dtype: str) -> Gfx950ConvFwdSpec:
+    """The ``dtype`` problem of one :data:`_SELECTION_GRID` row."""
+    n, c, k, hi, wi, y, x, sh, sw, ph, pw, dh, dw, groups = values
+    return Gfx950ConvFwdSpec(
+        N=n, C=c, K=k, Hi=hi, Wi=wi, Y=y, X=x, sH=sh, sW=sw, pH=ph, pW=pw,
+        dH=dh, dW=dw, groups=groups, dtype=dtype,
+    )  # fmt: skip
+
+
+def _cache_holding(identities: list[KernelIdentity]) -> KernelCache:
+    """A KernelCache whose forward entries are ``identities``."""
     cache = KernelCache.__new__(KernelCache)
     # compatible() needs the in-memory state __init__ sets up; _entries is the
     # only thing it reads through, so no disk-backed state is needed here.
@@ -626,29 +632,61 @@ def test_runtime_candidates_are_rockes_runtime_selection(forward_sweep, dtype):
     cache._compatible = OrderedDict()
     cache._compatible_rows = 0
     cache._entries = lambda direction: [(i, None, {}) for i in identities]
+    return cache
+
+
+def _rockes_selection(
+    cache: KernelCache, problem: Gfx950ConvFwdSpec
+) -> tuple[list, list[KernelIdentity]]:
+    """What rocKE's --run-from-cache benchmark does with ``problem`` by default from
+    ``cache``: the compatible entries of the problem's dtype
+    (KernelCache.compatible), and the identities of those it runs
+    (_widest_vector_sizes)."""
+    from benchmarks.common.benchmark_implicit_gemm_conv import _widest_vector_sizes
+
+    compatible = [
+        entry
+        for entry in cache.compatible(problem.to_problem(), direction="fwd")
+        if entry[0].dtype_a == problem.dtype
+    ]
+    return compatible, [ident for ident, *_ in _widest_vector_sizes(compatible)]
+
+
+@pytest.mark.rocke_shard_cost(4)
+@pytest.mark.parametrize("chunk", range(_SELECTION_CHUNKS))
+@pytest.mark.parametrize("dtype", _SWEEP_DTYPE_PARAMS)
+def test_runtime_candidates_are_rockes_runtime_selection(forward_sweep, dtype, chunk):
+    """Over the whole packaged sweep, the instances selected for each problem of one
+    chunk of the grid are exactly the ones rocKE's --run-from-cache benchmark runs by
+    default from a cache holding them (:func:`_rockes_selection`). Both functions
+    are rocKE's own, called on the identities."""
+    identities = [job.identity for job in forward_sweep(dtype)]
+    cache = _cache_holding(identities)
     specs = [_spec(identity) for identity in identities]
-    narrowed = kept_default = 0
-    for values in _SELECTION_GRID:
-        n, c, k, hi, wi, y, x, sh, sw, ph, pw, dh, dw, groups = values
-        problem = Gfx950ConvFwdSpec(
-            N=n, C=c, K=k, Hi=hi, Wi=wi, Y=y, X=x, sH=sh, sW=sw, pH=ph, pW=pw,
-            dH=dh, dW=dw, groups=groups, dtype=dtype,
-        )  # fmt: skip
-        compatible = [
-            entry
-            for entry in cache.compatible(problem.to_problem(), direction="fwd")
-            if entry[0].dtype_a == dtype
-        ]
-        theirs = {ident.stable_hash() for ident, *_ in _widest_vector_sizes(compatible)}
+    for values in _SELECTION_GRID[chunk::_SELECTION_CHUNKS]:
+        problem = _selection_problem(values, dtype)
+        _, selected = _rockes_selection(cache, problem)
+        theirs = {ident.stable_hash() for ident in selected}
         ours = gfx950_conv_fwd_aot_runtime_candidates(problem, specs)
         assert [s.instance_id for s in ours] == [
             s.instance_id for s in specs if s.instance_id in theirs
         ], values
         assert len(ours) == len(theirs), values
-        narrowed += len(ours) < len(compatible)
-        kept_default += any(s.epilogue == "default" for s in ours)
-    # The policy narrows wherever some width is wider than 1, which is most of the
-    # grid, and keeps the scalar-store epilogue where nothing stores wider.
+
+
+@pytest.mark.parametrize("dtype", _SWEEP_DTYPE_PARAMS)
+def test_rockes_runtime_selection_narrows_most_of_the_grid(forward_sweep, dtype):
+    """The selection the packaged one is held to above narrows wherever some width
+    is wider than 1, which is most of the grid, and keeps the scalar-store epilogue
+    where nothing stores wider."""
+    cache = _cache_holding([job.identity for job in forward_sweep(dtype)])
+    narrowed = kept_default = 0
+    for values in _SELECTION_GRID:
+        compatible, selected = _rockes_selection(
+            cache, _selection_problem(values, dtype)
+        )
+        narrowed += len({ident.stable_hash() for ident in selected}) < len(compatible)
+        kept_default += any(ident.epilogue == "default" for ident in selected)
     assert narrowed > len(_SELECTION_GRID) // 2 and kept_default > 0
 
 
@@ -838,12 +876,13 @@ def test_every_direct_sweep_identity_is_packageable_on_the_sweeps_probe(direct_j
 # Rough single-core seconds of the heavy algorithms' cases, for CI shard
 # placement (rocke.tests.ctest_shard); the others are light.
 _DIRECT_IR_SHARD_COSTS = {
-    "direct_depthwise": 20,
-    "direct_depthwise_spatial": 10,
-    "direct_grouped": 3,
+    "direct_depthwise": 10,
+    "direct_depthwise_spatial": 5,
+    "direct_grouped": 1.5,
 }
 
 
+@pytest.mark.parametrize("dtype", _DTYPES)
 @pytest.mark.parametrize(
     "algorithm",
     [
@@ -859,12 +898,15 @@ _DIRECT_IR_SHARD_COSTS = {
     ],
 )
 def test_packaged_direct_ir_is_the_sweep_kernel_up_to_its_symbol(
-    direct_jobs, algorithm
+    direct_jobs, algorithm, dtype
 ):
+    """One algorithm and dtype of the direct sample (:func:`_sampled`), the
+    packaged kernel the sweep's, byte for byte up to its symbol."""
     sample = _sampled(direct_jobs)
     assert {job.identity.algorithm for _, job in sample} == set(_DIRECT_COUNTS)
-    for dtype, job in sample:
-        if job.identity.algorithm != algorithm:
+    assert {job_dtype for job_dtype, _ in sample} == set(_DTYPES)
+    for job_dtype, job in sample:
+        if (job.identity.algorithm, job_dtype) != (algorithm, dtype):
             continue
         spec = _direct_spec(job.identity)
         ours = build_gfx950_conv_fwd_aot(spec)
