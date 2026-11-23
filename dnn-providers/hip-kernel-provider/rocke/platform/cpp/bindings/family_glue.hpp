@@ -80,8 +80,7 @@ inline void throw_if_arch_domain(rocke_status_t st, const char* err)
 
 /* Helpers shared by every binding translation unit of both modules. Each file
  * names the ones it uses with using-declarations; a file whose readers behave
- * differently (img2col's i2c_dict_int, winograd_glue.hpp's None-rejecting
- * readers) keeps its own. */
+ * differently (winograd_glue.hpp's None-rejecting readers) keeps its own. */
 namespace rocke_bind
 {
 

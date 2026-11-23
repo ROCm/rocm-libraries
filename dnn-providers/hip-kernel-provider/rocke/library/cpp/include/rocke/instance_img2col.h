@@ -14,7 +14,7 @@
  *   Python (img2col.py)                   C99 (this header)
  *   -----------------------------------   --------------------------------------
  *   Img2ColSpec (frozen dataclass)        rocke_img2col_spec_t  (helper header)
- *   ConvProblem (frozen dataclass)        rocke_conv_problem_t  (helper header)
+ *   ConvProblem (frozen dataclass)        rocke_conv_problem_t  (conv helper header)
  *   is_valid_spec(spec, arch)             rocke_img2col_is_valid_spec(...)
  *   build_img2col(spec, arch)             rocke_build_img2col(...)
  *   img2col_grid(spec)                    rocke_img2col_grid(...)
@@ -22,9 +22,10 @@
  *   img2col_signature(spec)               rocke_img2col_signature(...)
  *   (+ convenience: build -> lower .ll)   rocke_img2col_lower_to_llvm(...)
  *
- * The rocke_img2col_spec_t / rocke_conv_problem_t value types and their property
- * accessors (block_size, can_vector_load, kernel_name, M, K_gemm, short) are
- * defined in rocke/helper_rocke.instances.common.img2col.h and reused here.
+ * rocke_img2col_spec_t and its accessors (block_size, can_vector_load,
+ * kernel_name) are defined in rocke/helper_rocke.instances.common.img2col.h;
+ * rocke_conv_problem_t and its accessors (M, K_gemm, short) are the conv
+ * family's, from rocke/helper_rocke.instances.common.conv_implicit_gemm.h.
  *
  * Error model mirrors the rest of the C port: build/lower routes errors through
  * the sticky-error IRBuilder (rocke_b_*); the validity gate returns a bool + a

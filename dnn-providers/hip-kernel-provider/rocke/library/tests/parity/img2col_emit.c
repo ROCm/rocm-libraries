@@ -27,7 +27,7 @@
 static int make_spec(int idx, rocke_img2col_spec_t* spec)
 {
     *spec = rocke_img2col_spec_default();
-    rocke_conv_problem_t p = rocke_img2col_conv_problem_default();
+    rocke_conv_problem_t p = spec->problem;
 
     switch(idx)
     {
