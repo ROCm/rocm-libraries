@@ -1053,6 +1053,26 @@ def test_a_quarantined_function_covers_its_parameters_and_a_case_only_itself():
     assert not case.covers("platform/tests/test_x.py", "test_y")
 
 
+def test_a_quarantine_narrowed_by_params_covers_the_cases_with_all_of_them():
+    """One record for one defect across several cases: every case whose
+    parameter ids include each of ``params``, matched as whole ids."""
+    narrowed = _quarantined(
+        "platform/tests/test_x.py::test_y", params=("window", "bf16")
+    )
+    path = "platform/tests/test_x.py"
+    assert narrowed.covers(path, "test_y[window-bf16-mha]")
+    assert narrowed.covers(path, "test_y[bf16-gqa-window]")
+    assert not narrowed.covers(path, "test_y[window-fp16-mha]")
+    assert not narrowed.covers(path, "test_y[window_1seq-bf16-mha]")
+    assert not narrowed.covers(path, "test_y")
+    with pytest.raises(ValueError, match="expected a tuple of whole parameter ids"):
+        _quarantined("platform/tests/test_x.py::test_y", params=("a-b",))
+    with pytest.raises(ValueError, match="expected a tuple of whole parameter ids"):
+        _quarantined("platform/tests/test_x.py::test_y", params="bf16")
+    with pytest.raises(ValueError, match="expected a test without parameters"):
+        _quarantined("platform/tests/test_x.py::test_y[a]", params=("a",))
+
+
 def test_only_a_quarantine_tree_skips_quarantined_tests():
     with pytest.raises(ValueError, match="expected one of"):
         skip_quarantined_items([], ROCKE / "platform/python", "platform/python")

@@ -386,7 +386,12 @@ class QuarantinedTest:
     with it. ``compilers`` names the compiler builds it fails with, and holds
     it out only while the loaded COMGR's compiler is one of them
     (``rocke.tests.comgr.loaded_compiler_build``); None (the default) holds it
-    out whatever the compiler.
+    out whatever the compiler. ``params`` narrows a parametrized test to the
+    cases whose parameter ids include every one of them: ``("bf16",)`` on
+    ``...::test_x`` holds out ``test_x[case_a-bf16-mha]`` and
+    ``test_x[case_b-bf16-gqa]``, one record for one defect across several
+    cases. Each id is matched whole, between the ``-`` separators of the case's
+    brackets; empty (the default) holds out every case ``test_id`` names.
     """
 
     test_id: str
@@ -397,6 +402,7 @@ class QuarantinedTest:
     arches: tuple[str, ...] = ()
     runs_files: tuple[str, ...] = ()
     compilers: Compilers | None = None
+    params: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         path, separator, node_name = self.test_id.partition("::")
@@ -440,6 +446,20 @@ class QuarantinedTest:
                 f"QuarantinedTest failed - test_id={self.test_id!r}, "
                 f"compilers={self.compilers!r}, expected a Compilers or None"
             )
+        if not isinstance(self.params, tuple) or any(
+            not isinstance(param, str) or not param or "-" in param or "[" in param
+            for param in self.params
+        ):
+            raise ValueError(
+                f"QuarantinedTest failed - test_id={self.test_id!r}, "
+                f"params={self.params!r}, expected a tuple of whole parameter ids"
+            )
+        if self.params and "[" in node_name:
+            raise ValueError(
+                f"QuarantinedTest failed - test_id={self.test_id!r}, "
+                f"params={self.params!r}, expected a test without parameters to "
+                "narrow"
+            )
 
     @property
     def path(self) -> str:
@@ -468,7 +488,12 @@ class QuarantinedTest:
 
     def covers(self, path: str, node_name: str) -> bool:
         """Whether this entry quarantines the item ``node_name`` of ``path``."""
-        return path == self.path and _names_case(self.node_name, node_name)
+        if path != self.path or not _names_case(self.node_name, node_name):
+            return False
+        if not self.params:
+            return True
+        _, bracket, ids = node_name.partition("[")
+        return bool(bracket) and set(self.params) <= set(ids[:-1].split("-"))
 
 
 def _names_case(test: str, node_name: str) -> bool:
@@ -744,12 +769,8 @@ PENDING: tuple[PendingTest, ...] = (
     ),
     *_waiting(
         GFX950_RUNNER,
-        "its device cases need gfx950, which no CI GPU stage has. Known defect: "
-        "four test_additive_bias_with_features_matches_reference cases "
-        "(tiled_window_1seq, bf16) fail on gfx950, with torch and without: the "
-        "selector routes them to transposed32 where the route pin expects 16x16; "
-        "the selector owner decides which is right",
-        "rocKE library attention selector; issue: none filed yet",
+        "its device cases need gfx950, which no CI GPU stage has",
+        "rocKE library attention; issue: none filed yet",
         "2026-12-15",
         "library/tests/test_attention_additive_bias_gfx950_numeric.py",
     ),
@@ -1557,6 +1578,21 @@ QUARANTINED: tuple[QuarantinedTest, ...] = (
         f"{_DGRAD_CORRECTNESS}::test_fp16_depthwise_stride2",
         arches=("gfx950",),
         compilers=_LLVM_24_CI,
+    ),
+    QuarantinedTest(
+        "library/tests/test_attention_additive_bias_gfx950_numeric.py::"
+        "test_additive_bias_with_features_matches_reference",
+        "AICK-3375",
+        "on gfx950 the attention selector routes the single-sequence bf16 "
+        "sliding-window prefill (384 queries over 640 keys, window 64) to the "
+        "transposed 32x32 score path, where the test's route pin expects 16x16, "
+        "so the route assertion fails before launch, with torch and without, in "
+        "each of its four bias-layout and head cases; the selector owners decide "
+        "whether the pin or the selector is right",
+        "rocKE library attention selector",
+        "2026-12-31",
+        arches=("gfx950",),
+        params=("tiled_window_1seq", "bf16"),
     ),
 )
 
