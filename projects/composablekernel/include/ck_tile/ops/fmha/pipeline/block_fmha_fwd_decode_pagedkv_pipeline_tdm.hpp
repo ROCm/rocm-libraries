@@ -138,6 +138,12 @@ struct BlockFmhaFwdDecodePagedKVPipelineTdm
         return kQoFp16 ? pack_fp16(a, b) : pack_bf16(a, b);
     }
     CK_TILE_DEVICE static float exp2(float x) { return __builtin_amdgcn_exp2f(x); }
+    // x of the lane 16 away, with a VALU permute: a bpermute would queue behind the LDS reads
+    CK_TILE_DEVICE static float other_half(float x)
+    {
+        return __uint_as_float(static_cast<uint32_t>(__builtin_amdgcn_permlanex16(
+            0, static_cast<int32_t>(__float_as_uint(x)), 0x76543210, 0xfedcba98, false, true)));
+    }
 
     // pairwise: shorter dependency chains than a running max or sum
     template <index_t N>
@@ -338,7 +344,7 @@ struct BlockFmhaFwdDecodePagedKVPipelineTdm
         float qmax = 1e-20f;
         for(index_t i = 0; i < 64; ++i)
             qmax = fmaxf(qmax, fabsf(qv[i]));
-        qmax             = fmaxf(qmax, __shfl_xor(qmax, 16, 32));
+        qmax             = fmaxf(qmax, other_half(qmax));
         const float qinv = 448.f / qmax;
         v16i qf{};
         for(index_t j = 0; j < 16; ++j)
@@ -460,8 +466,17 @@ struct BlockFmhaFwdDecodePagedKVPipelineTdm
                     qk4(bool_constant<false>{});
                 else
                     qk4(bool_constant<true>{});
+                // the V^T operands of the step, read here so that the softmax covers the reads
+                v8i vf[8];
+                for(index_t db = 0; db < 8; ++db)
+                {
+                    const index_t off = (db * 16 + n) * 16;
+                    const v4i x       = *ptr_as<v4i>(&sm.wave[w].kv.v[st][2 * h][off]);
+                    const v4i y       = *ptr_as<v4i>(&sm.wave[w].kv.v[st][2 * h + 1][off]);
+                    vf[db]            = v8i{x[0], x[1], x[2], x[3], y[0], y[1], y[2], y[3]};
+                }
                 float mx          = tree_max<kWavePages * 8>(&sv[0][0]);
-                mx                = fmaxf(mx, __shfl_xor(mx, 16, 32)) * scl;
+                mx                = fmaxf(mx, other_half(mx)) * scl;
                 const float m_new = fmaxf(m_run, mx);
                 const float m_use = is_neg_inf(m_new) ? 0.f : m_new;
                 const float c     = kLog2P - m_use;
@@ -480,7 +495,7 @@ struct BlockFmhaFwdDecodePagedKVPipelineTdm
                                                 : __builtin_amdgcn_cvt_pk_fp8_f32(p0, p1, pk[e / 4], true);
                     }
                 float ps = tree_sum<kWavePages * 8>(&pv[0][0]);
-                ps       = ps + __shfl_xor(ps, 16, 32);
+                ps       = ps + other_half(ps);
                 // rescale only when a row max grew
                 if(__builtin_amdgcn_ballot_w32(m_new > m_run) != 0)
                 {
@@ -493,14 +508,8 @@ struct BlockFmhaFwdDecodePagedKVPipelineTdm
                 m_run = m_new;
                 const v8i pf{pk[0], pk[1], pk[2], pk[3], pk[4], pk[5], pk[6], pk[7]};
                 for(index_t db = 0; db < 8; ++db)
-                {
-                    const index_t off = (db * 16 + n) * 16;
-                    const v4i x       = *ptr_as<v4i>(&sm.wave[w].kv.v[st][2 * h][off]);
-                    const v4i y       = *ptr_as<v4i>(&sm.wave[w].kv.v[st][2 * h + 1][off]);
-                    const v8i vf{x[0], x[1], x[2], x[3], y[0], y[1], y[2], y[3]};
                     acc[db] = __builtin_amdgcn_wmma_f32_16x16x64_fp8_fp8(
-                        vf, pf, 0, acc[db], false, false);
-                }
+                        vf[db], pf, 0, acc[db], false, false);
                 // this wave is done with stage st: it takes step t + kStages
                 if(t + kStages < steps)
                 {
@@ -525,9 +534,19 @@ struct BlockFmhaFwdDecodePagedKVPipelineTdm
                 else
                     qk_tile(st, 0, n, pg, h * 8, sv, bool_constant<true>{});
                 float mx = tree_max<8>(sv);
-                mx       = fmaxf(mx, __shfl_xor(mx, 16, 32)) * scl;
+                mx       = fmaxf(mx, other_half(mx)) * scl;
                 if(h == 0)
                     sm.red[0][w][n] = mx;
+                // the V^T operands of the step (every wave's V of this stage landed before the
+                // last barrier), read here so that the barriers and the softmax cover the reads
+                v8i vf[2];
+                for(index_t bk = 0; bk < 2; ++bk)
+                {
+                    const index_t dd = (bk * kNumWarps + w) * 16 + n;
+                    const v4i x      = *ptr_as<v4i>(&sm.v[st][h][dd * 16]);
+                    const v4i y      = *ptr_as<v4i>(&sm.v[st][h + 2][dd * 16]);
+                    vf[bk]           = v8i{x[0], x[1], x[2], x[3], y[0], y[1], y[2], y[3]};
+                }
                 __syncthreads();
                 // every wave is past step t-1's PV: its stage takes step t + 2
                 if(t >= 1 && t + 2 < steps)
@@ -546,7 +565,7 @@ struct BlockFmhaFwdDecodePagedKVPipelineTdm
                 for(index_t r = 0; r < 8; ++r)
                     pv[r] = exp2(fmaf(sv[r], scl, c));
                 float ps   = tree_sum<8>(pv);
-                ps         = ps + __shfl_xor(ps, 16, 32);
+                ps         = ps + other_half(ps);
                 int32_t p0 = __builtin_amdgcn_cvt_pk_fp8_f32(pv[0], pv[1], 0, false);
                 p0         = __builtin_amdgcn_cvt_pk_fp8_f32(pv[2], pv[3], p0, true);
                 int32_t p1 = __builtin_amdgcn_cvt_pk_fp8_f32(pv[4], pv[5], 0, false);
@@ -569,14 +588,8 @@ struct BlockFmhaFwdDecodePagedKVPipelineTdm
                 const v4i py = *ptr_as<v4i>(&sm.p[n][(h + 2) * kN0]);
                 const v8i pf{px[0], px[1], px[2], px[3], py[0], py[1], py[2], py[3]};
                 for(index_t bk = 0; bk < 2; ++bk)
-                {
-                    const index_t dd = (bk * kNumWarps + w) * 16 + n;
-                    const v4i x      = *ptr_as<v4i>(&sm.v[st][h][dd * 16]);
-                    const v4i y      = *ptr_as<v4i>(&sm.v[st][h + 2][dd * 16]);
-                    const v8i vf{x[0], x[1], x[2], x[3], y[0], y[1], y[2], y[3]};
                     acc[bk] = __builtin_amdgcn_wmma_f32_16x16x64_fp8_fp8(
-                        vf, pf, 0, acc[bk] * alpha, false, false);
-                }
+                        vf[bk], pf, 0, acc[bk] * alpha, false, false);
             }
         }
 
