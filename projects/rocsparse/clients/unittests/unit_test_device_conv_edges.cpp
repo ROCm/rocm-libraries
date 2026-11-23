@@ -265,12 +265,12 @@ namespace
             a.ptr               = {base, base + 3, base + 7};
             a.ind               = {base, base + 2, base + 4, base, base + 1, base + 3, base + 5};
             a.val               = {cval<T>(2, 0),
-                                   cval<T>(-tol, 0),
-                                   cval<T>(3, 0),
-                                   cval<T>(tol, 0),
-                                   cval<T>(above, 0),
-                                   on_boundary,
-                                   cval<T>(0.5, 0)};
+                     cval<T>(-tol, 0),
+                     cval<T>(3, 0),
+                     cval<T>(tol, 0),
+                     cval<T>(above, 0),
+                     on_boundary,
+                     cval<T>(0.5, 0)};
             const auto want     = keep_entries(a, base, [&](T v) { return std::abs(v) > tol; });
             ASSERT_EQ(want.nnz(), 3);
             std::vector<I> per_row(m);

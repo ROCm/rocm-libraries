@@ -396,8 +396,8 @@ namespace
 TEST_F(ExtraBell, complex_B_operations)
 {
     const rocsparse_operation ops[]    = {rocsparse_operation_none,
-                                          rocsparse_operation_transpose,
-                                          rocsparse_operation_conjugate_transpose};
+                                       rocsparse_operation_transpose,
+                                       rocsparse_operation_conjugate_transpose};
     const rocsparse_order     orders[] = {rocsparse_order_column, rocsparse_order_row};
     for(rocsparse_operation opB : ops)
         for(rocsparse_order oB : orders)

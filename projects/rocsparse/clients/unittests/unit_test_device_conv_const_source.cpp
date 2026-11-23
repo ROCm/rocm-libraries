@@ -25,12 +25,12 @@
 // A const sparse descriptor stores its arrays in const_row_data / const_col_data /
 // const_val_data and leaves the mutable pointers null. These tests run rocsparse_extract
 // (CSR and CSC) and the BSR-to-CSR, CSR-to-BSR, CSR-to-ELL, CSR-to-COO and CSR-to-COO AoS
-// conversions of rocsparse_sparse_to_sparse on a const source. Extract calls the shared run_extract helper,
-// which builds the source with the const constructor and checks the output against its host
-// reference, including the sentinel and the guard tail. The other conversions run a mutable
-// source and a const source that share the same arrays; both must return the same statuses
-// and write the output of a host reference, and neither may write past the end of the
-// output arrays.
+// conversions of rocsparse_sparse_to_sparse on a const source. Extract calls the shared
+// run_extract helper, which builds the source with the const constructor and checks the
+// output against its host reference, including the sentinel and the guard tail. The other
+// conversions run a mutable source and a const source that share the same arrays; both
+// must return the same statuses and write the output of a host reference, and neither may
+// write past the end of the output arrays.
 
 #include "unit_test_device_conv_common.hpp"
 
@@ -854,7 +854,7 @@ namespace
                                                                        dt);
             EXPECT_EQ(created, st_ok);
             EXPECT_EQ(aos ? rocsparse_create_coo_aos_descr(
-                                &target, rows, cols, nnz, dst_aos.get(), dst_val.get(), jt, ib, dt)
+                          &target, rows, cols, nnz, dst_aos.get(), dst_val.get(), jt, ib, dt)
                           : rocsparse_create_coo_descr(&target,
                                                        rows,
                                                        cols,
