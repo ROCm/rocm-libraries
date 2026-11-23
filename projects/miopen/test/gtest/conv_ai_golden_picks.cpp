@@ -18,12 +18,15 @@
 //   - CPU-only (no GPU execution). SelectBestVocabCandidate + GetFeaturesND make no GPU calls.
 //   - Parameterized over (arch, solver, shape) triples covering gfx942, gfx950, and gfx1250.
 //   - Shapes are small to keep CPU inference fast.
-//   - Expected picks captured on gfx950 hardware with MIOPEN_DEVICE_ARCH forced per arch (Nov
-//     2026). gfx1250 picks are "SKIP" until a build with matching fdeep/keras version is available.
-//   - Update by running: MIOPEN_ENABLE_LOGGING=1 MIOPEN_LOG_LEVEL=6 MIOPEN_DEVICE_ARCH=<arch>
-//     MIOpenDriver convfp16 ... and grepping for "Lazy-applicability selected:".
+//   - Uses accept_all (no CK applicability filter) — tests pure model ranking. Golden values MUST
+//     be captured via the same accept_all path using MIOPEN_AI_GOLDEN_GENERATE=1 (see below), NOT
+//     via MIOpenDriver which applies a real CK applicability walk and may return a lower-ranked
+//     pick if the model's #1 is CK-inapplicable on the shape.
+//   - Update: MIOPEN_AI_GOLDEN_GENERATE=1 ./test_conv_ai_golden_picks, copy printed lines into
+//     kGoldenCases. The gfx942/gfx950 picks in this file were initially captured via MIOpenDriver
+//     (provisional) and should be regenerated via MIOPEN_AI_GOLDEN_GENERATE=1 on the first build.
 //   - A pick mismatch is a hard failure: the model is not producing the expected output. Either
-//     the models were updated (expected: update this file) or something regressed unexpectedly.
+//     the models were updated (expected: regenerate) or something regressed unexpectedly.
 
 #include <gtest/gtest.h>
 #include <miopen/config.h>
@@ -175,17 +178,21 @@ class CPU_ConvAiGoldenPicks_NONE : public ::testing::TestWithParam<GoldenCase>
 {
 };
 
+// When MIOPEN_AI_GOLDEN_GENERATE=1 the test prints actual picks as C++ initializer lines instead
+// of asserting. Use this to regenerate kGoldenCases after a model retrain:
+//   MIOPEN_AI_GOLDEN_GENERATE=1 ./test_conv_ai_golden_picks --gtest_also_run_disabled_tests
+// Copy the printed lines into the kGoldenCases table above, replacing the old expected_pick
+// strings. The generation uses the same accept_all path as the assertion, so the values are
+// self-consistent: they reflect pure model ranking with no applicability filter.
+static bool GenerateMode()
+{
+    const char* v = std::getenv("MIOPEN_AI_GOLDEN_GENERATE");
+    return v && std::string(v) == "1";
+}
+
 TEST_P(CPU_ConvAiGoldenPicks_NONE, PickMatchesGolden)
 {
     const auto& tc = GetParam();
-
-    if(std::string(tc.expected_pick) == "SKIP")
-        GTEST_SKIP() << "Golden pick not yet captured for " << tc.arch << "/" << tc.solver
-                     << " — run with MIOPEN_ENABLE_LOGGING=1 MIOPEN_LOG_LEVEL=6 "
-                        "MIOPEN_DEVICE_ARCH="
-                     << tc.arch
-                     << " MIOpenDriver convfp16 ... and grep for "
-                        "'Lazy-applicability selected:' to populate.";
 
     if(!AssetsPresent(tc.arch, tc.solver))
         GTEST_SKIP() << "No assets for " << tc.arch << "/" << tc.solver;
@@ -193,8 +200,10 @@ TEST_P(CPU_ConvAiGoldenPicks_NONE, PickMatchesGolden)
     const auto prob  = MakeProblem(tc);
     const auto feats = miopen::solver::conv::GetFeaturesND(prob, /*max_cu=*/304, tc.arch);
 
-    // accept_all: tests the pure model ranking, not the runtime IsValidSplitK gate.
-    // A separate test (conv_ai_nd_kernel_tuning_utils.cpp) covers the gate itself.
+    // accept_all: tests the pure model ranking with no CK applicability filter.
+    // Golden values must be captured with the same accept_all path (via MIOPEN_AI_GOLDEN_GENERATE),
+    // NOT via MIOpenDriver which applies a real CK applicability walk and may return a different
+    // (lower-ranked) pick if the model's #1 is CK-inapplicable on the shape.
     const auto accept_all = [](const std::string&, int, bool) { return true; };
     const auto pick       = SelectBestVocabCandidate(tc.arch, tc.solver, feats, false, accept_all);
 
@@ -203,14 +212,35 @@ TEST_P(CPU_ConvAiGoldenPicks_NONE, PickMatchesGolden)
         << ": SelectBestVocabCandidate returned nullopt — model load or md5 guard failed. "
            "Check conv_ai_asset_smoke tests for the root cause.";
 
+    if(GenerateMode())
+    {
+        // Print the C++ initializer line; redirect stdout to capture.
+        std::cout << "    {\"" << tc.arch << "\",\"" << tc.solver << "\"," << tc.n << "," << tc.c
+                  << "," << tc.h << "," << tc.w << "," << tc.k << "," << tc.fy << "," << tc.fx
+                  << "," << tc.pad << "," << tc.stride << "," << tc.groups << ","
+                  << (tc.is3d ? "true" : "false") << "," << tc.d << "," << tc.fz << "," << tc.dpad
+                  << "," << tc.dstride << ","
+                  << (tc.dtype == miopenHalf ? "miopenHalf" : "miopenFloat") << ","
+                  << (tc.dir == miopen::conv::Direction::Forward
+                          ? "miopen::conv::Direction::Forward"
+                      : tc.dir == miopen::conv::Direction::BackwardData
+                          ? "miopen::conv::Direction::BackwardData"
+                          : "miopen::conv::Direction::BackwardWeights")
+                  << ",\n     \"" << pick->first << "\"},\n";
+        GTEST_SKIP() << "Generate mode: printed pick for " << tc.arch << "/" << tc.solver;
+    }
+
+    if(std::string(tc.expected_pick) == "SKIP")
+        GTEST_SKIP() << "Golden pick not yet captured for " << tc.arch << "/" << tc.solver
+                     << " — set MIOPEN_AI_GOLDEN_GENERATE=1 and run this test to populate.";
+
     EXPECT_EQ(pick->first, std::string(tc.expected_pick))
         << tc.arch << "/" << tc.solver
         << ": model predicted a different config than the golden reference.\n"
         << "  expected: " << tc.expected_pick << "\n"
         << "  actual:   " << pick->first << "\n"
-        << "This means the model was retrained (update this file) or something regressed. "
-           "Re-capture with: MIOPEN_ENABLE_LOGGING=1 MIOPEN_LOG_LEVEL=6 MIOPEN_DEVICE_ARCH="
-        << tc.arch << " MIOpenDriver convfp16 ... grep 'Lazy-applicability selected:'.";
+        << "If the models were retrained, regenerate with: "
+           "MIOPEN_AI_GOLDEN_GENERATE=1 ./test_conv_ai_golden_picks";
 }
 
 INSTANTIATE_TEST_SUITE_P(Full,
