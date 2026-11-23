@@ -357,16 +357,28 @@ where
 Blocked ELL storage format
 --------------------------
 
-The Blocked Ellpack (ELL) storage format represents an :math:`(mb \cdot \text{block_dim}) \times (nb \cdot \text{block_dim})` matrix by:
+The Blocked Ellpack (ELL) storage format represents an :math:`m \times (nb \cdot \text{block_dim})` matrix by:
 
 =========== ================================================================================
-mb          Number of block rows (integer).
+m           Number of rows (integer).
+mb          Number of block rows, :math:`\lceil m / \text{block_dim} \rceil` (integer).
 nb          Number of block columns (integer).
 ell_width   Maximum number of non-zero block elements per row (integer).
-ell_val     Array of ``mb * ell_width * block_dim * block_dim`` elements containing the data (floating point).
+ell_cols    Number of columns of the storage, ``ell_width * block_dim`` (integer).
+ell_val     Array of ``m * ell_cols`` elements containing the data (floating point).
 ell_col_ind Array of ``mb * ell_width`` elements containing the column indices (integer).
 block_dim   Dimension of each block (integer).
 =========== ================================================================================
+
+When ``block_dim`` divides ``m``, ``ell_val`` has ``mb * ell_width * block_dim * block_dim`` elements.
+Otherwise the last block row is partial and holds only the last ``m - (mb - 1) * block_dim`` rows. Its blocks
+have no rows past row ``m``: those rows are not part of the matrix and have no storage, so ``ell_val`` needs no
+padding rows. Only the last block row can be partial; the matrix always has ``nb`` whole block columns.
+
+:cpp:func:`rocsparse_spmm()` reads ``ell_val`` as a row-major array of ``m`` rows of ``ell_cols`` values and
+``ell_col_ind`` as ``mb`` rows of ``ell_width`` block column indices. Entry ``(r, c)`` of the block in slot ``e``
+of block row ``i`` is ``ell_val[(i * block_dim + r) * ell_cols + e * block_dim + c]``, and its block column is
+``ell_col_ind[i * ell_width + e]``.
 
 The Blocked ELL is similar to the ELL format except that column entries now indicate the location of two dimensional blocks of size
 ``block_dim * block_dim`` instead of single matrix entries. The block values can be stored in either row or column ordering.
