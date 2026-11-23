@@ -102,6 +102,9 @@ REJECTED = [
     (_c("tdm_onlyA", TDMInst=1), "TDMA and TDMB must be enabled simultaneously"),
     (_c("tdmsplit", TDMSplit=True), "TDMSplit is currently disabled"),
     (_c("1lds", **{"1LDSBuffer": 1}), "1LDSBuffer must be 0 for TDM"),
+    # the subtile swizzle is validated on gfx950 only (the client pads a swizzled K by UseSubtileImpl)
+    *[(_c("subtile_%s" % side, side=side, UseSubtileImpl=True),
+       "SwizzleTensor with UseSubtileImpl is validated on gfx950 only") for side in ("A", "B", "AB")],
     (_c("lsi_B_wg41", wt=(1, 2), wg=(4, 1), VectorWidthB=2, LDSSegmentInterleave=1),
      "swizzle-B LSI: only MIWaveGroup=[2,2]"),
     # LSI, B not spanning its LDS component, with the nO rows of a vIdx group not dividing evenly over

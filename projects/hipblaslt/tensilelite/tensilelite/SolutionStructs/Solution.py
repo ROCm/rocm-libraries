@@ -1491,6 +1491,13 @@ class Solution(collections.abc.Mapping):
     if isgfx950 and (state["ProblemType"]["MXBlockA"] or state["ProblemType"]["MXBlockB"]) and not state["UseSubtileImpl"]:
         reject(state, printRejectionReason, "gfx950 MX requires UseSubtileImpl")
 
+    # The subtile swizzle (K stride = the pre-shuffled block stride, swizzleGeometry layoutK) is validated on
+    # gfx950 only; gfx1250 swizzles go through the swizzled-TDM path (UseSubtileImpl=0, K stride 64 B). The
+    # client pads the K of a swizzled F4 by UseSubtileImpl alone, so do not leave this combination open.
+    if isgfx1250 and state["UseSubtileImpl"] \
+        and (state["ProblemType"]["SwizzleTensorA"] or state["ProblemType"]["SwizzleTensorB"]):
+        reject(state, printRejectionReason, "SwizzleTensor with UseSubtileImpl is validated on gfx950 only")
+
     if state["UseSubtileImpl"]:
       state["VectorWidthA"] = 1
       state["VectorWidthB"] = 1
