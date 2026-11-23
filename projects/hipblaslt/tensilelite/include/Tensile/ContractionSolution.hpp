@@ -198,7 +198,13 @@ namespace TensileLite
         X_MACRO(TotalItems) \
         X_MACRO(SKTiles) \
         X_MACRO(SKSplit) \
-        X_MACRO(SKItersPerWI)
+        X_MACRO(SKItersPerWI) \
+        /* Hybrid StreamK */ \
+        X_MACRO(HybridMagicNumberItersPerTileOrTotalItems) \
+        X_MACRO(HybridMagicShiftItersPerTileOrSKTiles) \
+        X_MACRO(HybridSKItersPerWGOrSKSplit) \
+        X_MACRO(HybridSKGridOrSKItersPerWI) \
+        X_MACRO(HybridSKTilesAndSplitOrSKGrid)
 
     enum class CustomArgSemantic
     {
@@ -1361,9 +1367,14 @@ namespace TensileLite
                 return std::get<StreamK::Dynamic::KernelArguments>(
                     getStreamKArgs(cache, Mode, hardware, problem, launch, tiles).slots.words);
             }
+            else if constexpr(Mode == StreamK::WorkAssignment::Hybrid)
+            {
+                // Hybrid picks its sub-mode per launch; the words are whichever it resolved to.
+                return getStreamKArgs(cache, Mode, hardware, problem, launch, tiles).slots.words;
+            }
             else
             {
-                static_assert(Mode != Mode, "Custom kernels do not pack Hybrid StreamK arguments yet");
+                static_assert(Mode != Mode, "Unknown StreamK work assignment");
             }
         }
 

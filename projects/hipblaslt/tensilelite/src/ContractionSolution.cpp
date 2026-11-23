@@ -2606,7 +2606,10 @@ namespace TensileLite
             = internalArgsSupport.perTileExtraIters && problem.getParams().uniformSummationOrder() != 0;
         const size_t kGranularity = skKGranularity();
 
-        if(mode == StreamK::WorkAssignment::StaticGrid)
+        const bool isHybridDynamic
+            = mode == StreamK::WorkAssignment::Hybrid && streamK5EffectiveDynamic(problem, hardware);
+
+        if(mode != StreamK::WorkAssignment::DynamicWorkQueue && !isHybridDynamic)
             return {StreamK::Static::calculateKernelArgs(numTiles,
                                                          itersPerTile,
                                                          launch.grid,
@@ -2615,11 +2618,16 @@ namespace TensileLite
                                                          uniformSummationOrder,
                                                          kGranularity)};
 
-        if(mode == StreamK::WorkAssignment::DynamicWorkQueue)
-            return {StreamK::Dynamic::calculateKernelArgs(
-                hardware, numTiles, itersPerTile, launch.grid, kGranularity)};
-
-        throw std::logic_error("Unsupported streamk mode");
+        auto dynamicStreamkArgs = StreamK::Dynamic::calculateKernelArgs(
+            hardware, numTiles, itersPerTile, launch.grid, kGranularity);
+        if(isHybridDynamic)
+        {
+            TENSILE_ASSERT_EXC(
+                (dynamicStreamkArgs.tiles & StreamK::Slot2Bits::TileReservedMask) == 0u
+                && "Hybrid dynamic skTiles collides with mode/magic bits");
+            dynamicStreamkArgs.tiles |= StreamK::Slot2Bits::HybridModeBit;
+        }
+        return {dynamicStreamkArgs};
     }
 
     StreamK::ArgumentCache const&
@@ -3453,6 +3461,43 @@ namespace TensileLite
                 case CustomArgSemantic::SKItersPerWI:
                     rv.args.template append<uint32_t>("SKItersPerWI", getStreamKArgsHelper<StreamK::WorkAssignment::DynamicWorkQueue>(streamK, hardware, problem, launch, tiles).itersPerWI);
                     break;
+                // ---- Hybrid StreamK ----
+                case CustomArgSemantic::HybridMagicNumberItersPerTileOrTotalItems:
+                {
+                    auto const& words          = getStreamKArgsHelper<StreamK::WorkAssignment::Hybrid>(streamK, hardware, problem, launch, tiles);
+                    const auto* dynamicStreamk = std::get_if<StreamK::Dynamic::KernelArguments>(&words);
+                    rv.args.template append<uint32_t>("HybridMagicNumberItersPerTileOrTotalItems", dynamicStreamk ? dynamicStreamk->totalItems : std::get<StreamK::Static::KernelArguments>(words).magicNumber);
+                    break;
+                }
+                case CustomArgSemantic::HybridMagicShiftItersPerTileOrSKTiles:
+                {
+                    auto const& words          = getStreamKArgsHelper<StreamK::WorkAssignment::Hybrid>(streamK, hardware, problem, launch, tiles);
+                    const auto* dynamicStreamk = std::get_if<StreamK::Dynamic::KernelArguments>(&words);
+                    rv.args.template append<uint32_t>("HybridMagicShiftItersPerTileOrSKTiles", dynamicStreamk ? dynamicStreamk->tiles : std::get<StreamK::Static::KernelArguments>(words).magicShift);
+                    break;
+                }
+                case CustomArgSemantic::HybridSKItersPerWGOrSKSplit:
+                {
+                    auto const& words          = getStreamKArgsHelper<StreamK::WorkAssignment::Hybrid>(streamK, hardware, problem, launch, tiles);
+                    const auto* dynamicStreamk = std::get_if<StreamK::Dynamic::KernelArguments>(&words);
+                    rv.args.template append<uint32_t>("HybridSKItersPerWGOrSKSplit", dynamicStreamk ? dynamicStreamk->split : std::get<StreamK::Static::KernelArguments>(words).itersPerWG);
+                    break;
+                }
+                case CustomArgSemantic::HybridSKGridOrSKItersPerWI:
+                {
+                    auto const& words          = getStreamKArgsHelper<StreamK::WorkAssignment::Hybrid>(streamK, hardware, problem, launch, tiles);
+                    const auto* dynamicStreamk = std::get_if<StreamK::Dynamic::KernelArguments>(&words);
+                    rv.args.template append<uint32_t>("HybridSKGridOrSKItersPerWI", dynamicStreamk ? dynamicStreamk->itersPerWI : std::get<StreamK::Static::KernelArguments>(words).grid);
+                    break;
+                }
+                case CustomArgSemantic::HybridSKTilesAndSplitOrSKGrid:
+                {
+                    auto const& words          = getStreamKArgsHelper<StreamK::WorkAssignment::Hybrid>(streamK, hardware, problem, launch, tiles);
+                    const auto* dynamicStreamk = std::get_if<StreamK::Dynamic::KernelArguments>(&words);
+                    rv.args.appendCustomType(toString(arg.semantic), dynamicStreamk ? dynamicStreamk->grid : std::get<StreamK::Static::KernelArguments>(words).skTiles, arg.type);
+                    break;
+                }
+
                 // ---- Packed batch dimension divisors ----
                 // arg.index comes from the kernel's custom.config, so it is untrusted;
                 // fall back to a dimension of 1 rather than indexing out of bounds.
@@ -5010,6 +5055,11 @@ namespace TensileLite
             case CustomArgSemantic::SKTiles:
             case CustomArgSemantic::SKSplit:
             case CustomArgSemantic::SKItersPerWI:
+            case CustomArgSemantic::HybridMagicNumberItersPerTileOrTotalItems:
+            case CustomArgSemantic::HybridMagicShiftItersPerTileOrSKTiles:
+            case CustomArgSemantic::HybridSKItersPerWGOrSKSplit:
+            case CustomArgSemantic::HybridSKGridOrSKItersPerWI:
+            case CustomArgSemantic::HybridSKTilesAndSplitOrSKGrid:
             case CustomArgSemantic::AddressWorkspace:
             case CustomArgSemantic::AddressFlags:
             case CustomArgSemantic::AddressSynchronizer:

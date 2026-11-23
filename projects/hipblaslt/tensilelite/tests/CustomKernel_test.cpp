@@ -819,6 +819,8 @@ namespace
     {
         Static,
         Dynamic,
+        HybridStatic,
+        HybridDynamic,
     };
 
     char const* toString(StreamKMode mode)
@@ -829,6 +831,10 @@ namespace
             return "Static";
         case StreamKMode::Dynamic:
             return "Dynamic";
+        case StreamKMode::HybridStatic:
+            return "HybridStatic";
+        case StreamKMode::HybridDynamic:
+            return "HybridDynamic";
         }
         return "?";
     }
@@ -841,6 +847,9 @@ namespace
             return StreamK::WorkAssignment::StaticGrid;
         case StreamKMode::Dynamic:
             return StreamK::WorkAssignment::DynamicWorkQueue;
+        case StreamKMode::HybridStatic:
+        case StreamKMode::HybridDynamic:
+            return StreamK::WorkAssignment::Hybrid;
         }
         return StreamK::WorkAssignment::StaticGrid;
     }
@@ -873,6 +882,30 @@ namespace
                     {"SKSplit", S::SKSplit, "SKSplit"},
                     {"SKItersPerWI", S::SKItersPerWI, "SKItersPerWI"},
                     {"SKGrid", S::SKGrid, "SKGrid"}};
+        case StreamKMode::HybridStatic:
+            return {{"ItersPerTile", S::ItersPerTile, "ItersPerTile"},
+                    {"MagicNumberItersPerTile",
+                     S::HybridMagicNumberItersPerTileOrTotalItems,
+                     "HybridMagicNumberItersPerTileOrTotalItems"},
+                    {"MagicShiftItersPerTile",
+                     S::HybridMagicShiftItersPerTileOrSKTiles,
+                     "HybridMagicShiftItersPerTileOrSKTiles"},
+                    {"SKItersPerWG",
+                     S::HybridSKItersPerWGOrSKSplit,
+                     "HybridSKItersPerWGOrSKSplit"},
+                    {"skGrid", S::HybridSKGridOrSKItersPerWI, "HybridSKGridOrSKItersPerWI"},
+                    {"skTiles", S::HybridSKTilesAndSplitOrSKGrid, "HybridSKTilesAndSplitOrSKGrid"}};
+        case StreamKMode::HybridDynamic:
+            return {{"ItersPerTile", S::ItersPerTile, "ItersPerTile"},
+                    {"TotalItems",
+                     S::HybridMagicNumberItersPerTileOrTotalItems,
+                     "HybridMagicNumberItersPerTileOrTotalItems"},
+                    {"SKTiles|ModeBit",
+                     S::HybridMagicShiftItersPerTileOrSKTiles,
+                     "HybridMagicShiftItersPerTileOrSKTiles"},
+                    {"SKSplit", S::HybridSKItersPerWGOrSKSplit, "HybridSKItersPerWGOrSKSplit"},
+                    {"SKItersPerWI", S::HybridSKGridOrSKItersPerWI, "HybridSKGridOrSKItersPerWI"},
+                    {"SKGrid", S::HybridSKTilesAndSplitOrSKGrid, "HybridSKTilesAndSplitOrSKGrid"}};
         }
         return {};
     }
@@ -972,7 +1005,7 @@ TEST(CustomKernelTest, StreamKCustomWordsMatchTheGeneratedPacker)
         origami::reduction_t reduction;
     };
 
-    for(auto mode : {StreamKMode::Static, StreamKMode::Dynamic})
+    for(auto mode : {StreamKMode::Static, StreamKMode::Dynamic, StreamKMode::HybridStatic, StreamKMode::HybridDynamic})
     for(bool uniformSummationOrder : {false, true})
     for(bool kUnit : {false, true})
     for(auto shape : {Shape{129, 3}, Shape{65, 1}, Shape{0, 2}})
@@ -982,7 +1015,8 @@ TEST(CustomKernelTest, StreamKCustomWordsMatchTheGeneratedPacker)
                            Launch{2, 0, origami::reduction_t::parallel}})
     {
         // The parallel split factor is a static StreamK notion; the dynamic queue is tree-only.
-        if(launchSpec.reduction == origami::reduction_t::parallel && mode == StreamKMode::Dynamic)
+        if(launchSpec.reduction == origami::reduction_t::parallel
+           && (mode == StreamKMode::Dynamic || mode == StreamKMode::HybridDynamic))
             continue;
 
         SCOPED_TRACE(::testing::Message()
@@ -1006,6 +1040,7 @@ TEST(CustomKernelTest, StreamKCustomWordsMatchTheGeneratedPacker)
 
         auto problem = streamKProblem(257, 385, shape.k, shape.batches);
         problem.setParams().setUniformSummationOrder(uniformSummationOrder ? 1 : 0);
+        problem.setParams().setStreamKTileSchedulingMode(mode == StreamKMode::HybridDynamic ? 1 : 0);
 
         auto device = probeDevice();
 
@@ -1024,6 +1059,14 @@ TEST(CustomKernelTest, StreamKCustomWordsMatchTheGeneratedPacker)
         for(auto const& w : schedulingWords(mode))
             EXPECT_EQ(word(customCall.args, w.customName), word(generatedCall.args, w.generatedName))
                 << w.customName;
+
+        if(mode == StreamKMode::HybridStatic || mode == StreamKMode::HybridDynamic)
+        {
+            // Slot 2 carries the mode bit on the dynamic sub-path only.
+            const bool modeBit = word(customCall.args, "HybridMagicShiftItersPerTileOrSKTiles")
+                                 & StreamK::Slot2Bits::HybridModeBit;
+            EXPECT_EQ(modeBit, mode == StreamKMode::HybridDynamic);
+        }
     }
 }
 
@@ -1177,6 +1220,95 @@ TEST(CustomKernelTest, StreamKCustomItersPerTileFollowsTheSizeMappingDepthU)
     }
 }
 
+// The work queue covers the tiles the launched grid was sized from. For a custom
+// kernel that is calculateTiles() on the descriptor's macrotile, whatever the
+// sizeMapping macrotile or a stale launch.totalTiles say. Every family counts its
+// tiles this way.
+namespace
+{
+    // The one word of each mode that scales with the tile count: skTiles on the
+    // static path, TotalItems on the dynamic one. The magic divisor does not.
+    char const* tileScaledWord(StreamKMode mode)
+    {
+        switch(mode)
+        {
+        case StreamKMode::Static:
+            return "SKTilesAndSplit";
+        case StreamKMode::Dynamic:
+            return "TotalItems";
+        case StreamKMode::HybridStatic:
+            return "HybridSKTilesAndSplitOrSKGrid";
+        case StreamKMode::HybridDynamic:
+            return "HybridMagicNumberItersPerTileOrTotalItems";
+        }
+        return "?";
+    }
+}
+
+TEST(CustomKernelTest, StreamKCustomCountsTilesFromTheDescriptorMacrotile)
+{
+    constexpr size_t launchGrid = 40;
+    for(auto mode : {StreamKMode::Static,
+                     StreamKMode::Dynamic,
+                     StreamKMode::HybridStatic,
+                     StreamKMode::HybridDynamic})
+    {
+        SCOPED_TRACE(toString(mode));
+        const bool dynamic = mode == StreamKMode::Dynamic || mode == StreamKMode::HybridDynamic;
+
+        ContractionSolution custom;
+        configureStreamK(custom, assignmentOf(mode));
+        // sizeMapping says 128x128, the external kernel really computes 64x64.
+        makeHandwritten(custom, semanticsOf(mode), TensileLite::dim3(64, 64, 64));
+
+        auto problem = streamKProblem();
+        problem.setParams().setStreamKTileSchedulingMode(mode == StreamKMode::HybridDynamic ? 1 : 0);
+        auto device = probeDevice();
+
+        const size_t tiles = tileCount(problem, 64, 64);
+        ASSERT_NE(tiles, tileCount(problem, 128, 128));
+        const size_t itersPerTile
+            = std::max<size_t>(1, problem.getItersPerTile(custom.sizeMapping));
+
+        std::vector<uint32_t> baseline;
+        for(size_t reportedTiles : {tiles, tileCount(problem, 128, 128), size_t{1}, size_t{0}})
+        {
+            StreamKSettings launch;
+            launch.grid       = launchGrid;
+            launch.reduction  = origami::reduction_t::tree;
+            launch.totalTiles = reportedTiles;
+
+            auto const call = custom.generateCustomCall<true>(problem, ContractionInputs{}, device, launch);
+            std::vector<uint32_t> words;
+            for(auto const& w : schedulingWords(mode))
+                words.push_back(word(call.args, w.customName));
+            if(baseline.empty())
+                baseline = words;
+            EXPECT_EQ(words, baseline) << "launch.totalTiles=" << reportedTiles;
+        }
+
+        // And the tile-scaled word is the 64x64 tile count's.
+        StreamKSettings launch;
+        launch.grid      = launchGrid;
+        launch.reduction = origami::reduction_t::tree;
+        auto const call
+            = custom.generateCustomCall<true>(problem, ContractionInputs{}, device, launch);
+        const uint32_t expected
+            = dynamic ? StreamK::Dynamic::calculateKernelArgs(
+                            device, tiles, itersPerTile, launchGrid, custom.skKGranularity())
+                            .totalItems
+                      : StreamK::Static::calculateKernelArgs(tiles,
+                                                             itersPerTile,
+                                                             launchGrid,
+                                                             origami::reduction_t::tree,
+                                                             device.skFullTiles,
+                                                             false,
+                                                             custom.skKGranularity())
+                            .skTiles;
+        EXPECT_EQ(word(call.args, tileScaledWord(mode)), expected);
+    }
+}
+
 // (c) A descriptor's StreamK words must all belong to one family, fixed by the first
 // StreamK semantic packed. Anything else would be handed words packed for another
 // mode and run the wrong schedule silently.
@@ -1206,7 +1338,7 @@ namespace
 
 TEST(CustomKernelTest, StreamKFamilyMatchingDescriptorsAreAccepted)
 {
-    for(auto mode : {StreamKMode::Static, StreamKMode::Dynamic})
+    for(auto mode : {StreamKMode::Static, StreamKMode::Dynamic, StreamKMode::HybridStatic, StreamKMode::HybridDynamic})
     {
         SCOPED_TRACE(toString(mode));
         ContractionSolution solution;
@@ -1230,10 +1362,13 @@ TEST(CustomKernelTest, StreamKFamilyRejectsDescriptorsThatMixFamilies)
     const std::vector<std::vector<CustomArgSemantic>> mixed{
         {S::SKItersPerWG, S::SKTiles},
         {S::MagicNumberItersPerTile, S::SKSplit},
+        {S::TotalItems, S::HybridSKGridOrSKItersPerWI},
+        {S::SKTilesAndSplit, S::HybridMagicShiftItersPerTileOrSKTiles},
         {S::SKTiles, S::SKItersPerWG},
         // TotalIters is a static word.
         {S::TotalIters, S::SKTiles},
         {S::TotalItems, S::TotalIters},
+        {S::TotalIters, S::HybridSKGridOrSKItersPerWI},
     };
     for(auto assignment :
         {StreamK::WorkAssignment::StaticGrid, StreamK::WorkAssignment::DynamicWorkQueue, StreamK::WorkAssignment::Hybrid})

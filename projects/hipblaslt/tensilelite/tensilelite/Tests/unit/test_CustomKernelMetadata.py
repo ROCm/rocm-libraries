@@ -1971,3 +1971,93 @@ def test_metadata_inference_maps_the_static_streamk_names():
     assert _metadata_semantics() == [
         "MagicNumberItersPerTile", "MagicShiftItersPerTile", "SKItersPerWG", "SKGrid",
         "SKTilesAndSplit"]
+
+
+def _streamk_family_config(work_assignment, semantics):
+    return {
+        "TileProcessingStrategy": "StreamK",
+        "WorkAssignment": work_assignment,
+        "CustomKernel": {
+            "name": "k",
+            "args": [{"semantic": s, "type": "uint32"} for s in semantics],
+        },
+    }
+
+
+_STATIC_FAMILY = ["MagicNumberItersPerTile", "MagicShiftItersPerTile", "SKItersPerWG",
+                  "SKGrid", "SKTilesAndSplit"]
+_DYNAMIC_FAMILY = ["TotalItems", "SKTiles", "SKSplit", "SKItersPerWI", "SKGrid"]
+_HYBRID_FAMILY = ["HybridMagicNumberItersPerTileOrTotalItems",
+                  "HybridMagicShiftItersPerTileOrSKTiles", "HybridSKItersPerWGOrSKSplit",
+                  "HybridSKGridOrSKItersPerWI", "HybridSKTilesAndSplitOrSKGrid"]
+
+
+@pytest.mark.parametrize("work_assignment, semantics", [
+    ("StaticGrid", _STATIC_FAMILY),
+    ("DynamicWorkQueue", _DYNAMIC_FAMILY),
+    ("Hybrid", _HYBRID_FAMILY),
+])
+def test_streamk_family_matching_the_work_assignment_is_accepted(work_assignment, semantics):
+    ck_mod.validateCustomPersistentArgs(_streamk_family_config(work_assignment, semantics))
+
+
+@pytest.mark.parametrize("work_assignment, semantics, offender", [
+    ("Hybrid", _STATIC_FAMILY, "MagicNumberItersPerTile"),
+    ("Hybrid", _DYNAMIC_FAMILY, "TotalItems"),
+    ("DynamicWorkQueue", _STATIC_FAMILY, "MagicNumberItersPerTile"),
+    ("DynamicWorkQueue", _HYBRID_FAMILY, "HybridMagicNumberItersPerTileOrTotalItems"),
+    ("StaticGrid", _DYNAMIC_FAMILY, "TotalItems"),
+    ("StaticGrid", _HYBRID_FAMILY, "HybridMagicNumberItersPerTileOrTotalItems"),
+])
+def test_streamk_family_of_another_work_assignment_is_rejected(work_assignment, semantics, offender):
+    with pytest.raises(ValueError, match=f"'{offender}'.*WorkAssignment {work_assignment}"):
+        ck_mod.validateCustomPersistentArgs(_streamk_family_config(work_assignment, semantics))
+
+
+def test_streamk_family_check_waits_for_a_declared_work_assignment():
+    # A minimal custom.config inherits its selectors from the logic file, so with no
+    # WorkAssignment there is nothing to compare the semantics with yet.
+    config = _streamk_family_config("Hybrid", _STATIC_FAMILY)
+    del config["WorkAssignment"]
+    ck_mod.validateCustomPersistentArgs(config)
+
+
+def test_hybrid_kernel_inferred_from_metadata_with_static_names_is_rejected():
+    config = {"MatrixInstruction": [16, 16, 16, 1], "TileProcessingStrategy": "StreamK",
+              "WorkAssignment": "Hybrid"}
+    config["CustomKernel"] = _buildCustomKernelFromMetadata(
+        "k", _kernel_yaml(_metadata_streamk_args()), config)
+    with pytest.raises(ValueError, match="StreamK argument.*WorkAssignment Hybrid"):
+        ck_mod.validateCustomPersistentArgs(config)
+
+
+def _versioned_config(version, semantics, assignment="StaticGrid"):
+    args = [{"semantic": s, "type": "uint32"} for s in semantics]
+    if version == 2:
+        args += [{"semantic": s, "type": "address"} for s in ("AddressWorkspace", "AddressFlags")]
+    return {
+        "TileProcessingStrategy": "StreamK" if version == 2 else "DataParallel",
+        "WorkAssignment": assignment,
+        "InternalSupportParams": {"PersistentLoopArgsVersion": version, "KernArgsVersion": 3},
+        "CustomKernel": {"name": "k", "args": args},
+    }
+
+
+_V2_SCHEDULING = ["ItersPerTile", "MagicNumberItersPerTile", "MagicShiftItersPerTile",
+                  "SKItersPerWG", "SKGrid", "SKTilesAndSplit"]
+
+
+@pytest.mark.parametrize("assignment, semantic", [
+    ("DynamicWorkQueue", s) for s in _DYNAMIC_FAMILY[:-1]
+] + [("Hybrid", s) for s in _HYBRID_FAMILY])
+def test_versioned_persistent_layouts_reject_other_streamk_families(assignment, semantic):
+    ck_mod.validateCustomPersistentArgs(_versioned_config(1, ["ItersPerTile", "PersistentGrid"]))
+    ck_mod.validateCustomPersistentArgs(_versioned_config(2, _V2_SCHEDULING))
+    # DataParallel is StaticGrid, so the family check refuses these words first.
+    with pytest.raises(ValueError, match="StreamK argument"):
+        ck_mod.validateCustomPersistentArgs(
+            _versioned_config(1, ["ItersPerTile", "PersistentGrid", semantic]))
+    # The version-2 layout is the six static words; a kernel of the matching family
+    # passes the family check and is refused by the layout check.
+    with pytest.raises(ValueError, match="StreamK version-2"):
+        ck_mod.validateCustomPersistentArgs(_versioned_config(2, [semantic], assignment))
