@@ -296,17 +296,19 @@ mpirun -np 2 ./rocalution-test --gtest_filter='global_amg/*:global_matrix/*'
 Laplacian) across backends and both precisions; the emulation tiers shrink parameter lists rather than
 running exhaustive size sweeps. The strategy prefers cross-backend correctness over large problem sizes.
 
-**Overlap with the unit tests:** the `local_matrix*`, `local_vector` and `backend` suites skip in the `quick`, `standard` and `comprehensive` categories and run in `full`, except
+**Overlap with the unit tests:** the `local_matrix*`, `local_vector` and `backend` suites skip in
+the `quick`, `standard` and `comprehensive` categories and run in `full`, except
 `backend_omp_parallel_region` and `backend_omp_restore_state`, which run in every category. They
 test operations that the unit tests now check against independent references. They are kept until
 a review of each suite confirms that the unit tests cover all of its checks, on every platform and
 in every CI job that runs the suite. A suite that is covered is then deleted, not maintained next to
 the unit tests. The `local_matrix_allocations`, `local_matrix_zero`, `local_matrix_set_data_ptr`,
-`local_matrix_multicoloring`, `local_matrix_itsolve`, `local_matrix_solve` and `local_stencil_bad_args`
-suites have been deleted on that basis. The Jenkins test command runs both unit-test binaries before
-`rocalution-test`, so the Jenkins lanes still run these checks. Clients-only builds and
-`rtest.xml` runs no longer run them (see [Known Gaps Summary](#known-gaps-summary)). The
-solver, preconditioner and AMG suites stay as the integration layer.
+`local_matrix_multicoloring`, `local_matrix_itsolve`, `local_matrix_solve` and
+`local_stencil_bad_args` suites have been deleted on that basis. The Jenkins test command runs both
+unit-test binaries before `rocalution-test`, so the Jenkins lanes still run these checks.
+Clients-only builds and `rtest.xml` runs no longer run them (see [Known Gaps
+Summary](#known-gaps-summary)). The solver, preconditioner and AMG suites stay as the integration
+layer.
 
 ---
 
