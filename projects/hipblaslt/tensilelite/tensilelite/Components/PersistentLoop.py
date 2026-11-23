@@ -1826,10 +1826,28 @@ class PersistentLoop(Component):
 
     def prefetchClassicLoads(self, writer, kernel, tPA, tPB, *, beforeIssue=None, updateDescriptors=True):
         module = Module("Persistent classic PAP load handoff")
-        if updateDescriptors and kernel["enableTDMA"] and kernel["enableTDMB"]:
-            module.add(writer.papTdmUpdateDescriptor(kernel, tPA, tPB))
-            if kernel["ProblemType"]["MXBlockA"] and kernel["ProblemType"]["MXBlockB"]:
-                module.add(writer.papTdmUpdateDescriptor(kernel, tPA["MX"], tPB["MX"]))
+        def descriptors():
+            refresh = Module("PAP next-tile descriptors")
+            if updateDescriptors and kernel["enableTDMA"] and kernel["enableTDMB"]:
+                refresh.add(writer.papTdmUpdateDescriptor(kernel, tPA, tPB))
+                if kernel["ProblemType"]["MXBlockA"] and kernel["ProblemType"]["MXBlockB"]:
+                    refresh.add(writer.papTdmUpdateDescriptor(kernel, tPA["MX"], tPB["MX"]))
+            return refresh
+
+        # A StreamK cluster slice can have no full iteration: one K-tail
+        # iteration, K == 0 or alpha == 0. Its entry takes the zero-iteration
+        # cluster wait, which pairs only the tile-close arrive. Without a tail
+        # loop a primed tile skips that arrive, so such a slice must not be
+        # primed. With a tail loop the arrive stays, and leaving the slice
+        # unprimed only saves a handoff phase and an unused descriptor refresh.
+        # Every peer shares the logical worker's K range, so the count is
+        # cluster-uniform. Decide before borrowing the current descriptors.
+        emptyNext = None
+        if isStreamKSpatialCluster(kernel):
+            assert updateDescriptors, "StreamK clusters map the next tile in place"
+            emptyNext = Label(writer.labels.getNameInc("PapSkipEmptyNextSlice"), "")
+        else:
+            module.add(descriptors())
         loopCounterName = writer.loopCounterName(kernel, writer.states.unrollIdx)
         snapshotLoopCounter = kernel["HalfPLR"] or writer.states.currentTileWork.k_start is not None
         if snapshotLoopCounter:
@@ -1837,6 +1855,10 @@ class PersistentLoop(Component):
             module.add(VMovB32(dst=vgpr(previous), src=sgpr(loopCounterName), comment="checkpoint LoopCounter for PAP restore"))
             module.add(VMovB32(dst=vgpr(previous + 1), src=sgpr("OrigLoopCounter"), comment="checkpoint OrigLoopCounter for PAP restore"))
         module.add(writer.calculateLoopNumIter(kernel, tPA, tPB, writer.states.unrollIdx))
+        if emptyNext is not None:
+            module.add(SCmpEQU32(src0=sgpr(loopCounterName), src1=0, comment="next StreamK slice has no full iteration?"))
+            module.add(SCBranchSCC1(labelName=emptyNext.getLabelName(), comment="leave it unprimed; the tile-close arrive pairs its entry wait"))
+            module.add(descriptors())
         if beforeIssue is not None:
             # Build this here, while the identity checkpoint remains allocated,
             # so the elected-wave temporary cannot alias the saved identity.
@@ -1845,11 +1867,16 @@ class PersistentLoop(Component):
             # the current OptNLL PAP path does not need an issue predicate.
             module.add(beforeIssue())
         module.add(writer.setupPrefetchAcrossPersistentLoads(kernel, tPA, tPB, isOptNLL=True))
+        saveBank = kernel["enableTDMA"] and kernel["enableTDMB"]
+        if emptyNext is not None:
+            if saveBank:
+                module.add(writer.papTdmSaveLdsBank(kernel))
+            module.add(emptyNext)
         if snapshotLoopCounter:
             module.add(VReadfirstlaneB32(dst=sgpr(loopCounterName), src=vgpr(previous), comment="restore LoopCounter after PAP"))
             module.add(VReadfirstlaneB32(dst=sgpr("OrigLoopCounter"), src=vgpr(previous + 1), comment="restore OrigLoopCounter after PAP"))
             writer.vgprPool.checkIn(previous)
-        if kernel["enableTDMA"] and kernel["enableTDMB"]:
+        if emptyNext is None and saveBank:
             module.add(writer.papTdmSaveLdsBank(kernel))
         return module
 
