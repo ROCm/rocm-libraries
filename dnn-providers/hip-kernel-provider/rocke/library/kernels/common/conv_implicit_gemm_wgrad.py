@@ -1536,6 +1536,16 @@ def wgrad_wmma_split_k_available(arch: str) -> bool:
     return ArchTarget.from_gfx(arch).memory.has_global_float_atomic_add
 
 
+def wgrad_lds_k_outer_available(arch: str) -> bool:
+    """Whether ``arch`` has the LDS transpose read a K-outer wgrad tile needs.
+
+    is_valid_wgrad_spec rejects every ``lds_k_outer`` spec (and so every
+    ``async_dma`` spec, which requires it) wherever this is False, so a caller
+    can ask before it builds instead of meeting a skip per config.
+    """
+    return arch in _LDS_K_OUTER_ARCH_WAVE
+
+
 def _kouter_pad(spec: "WgradConvSpec") -> int:
     """Row pad (elements) of the K-outer LDS tile.
 

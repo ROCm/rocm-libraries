@@ -59,16 +59,18 @@ from builders.common.conv_reference import (
     tf32_reference_inputs,
     tf32_reference_tol,
 )
+from kernels.common.conv_implicit_gemm_wgrad import wgrad_lds_k_outer_available
 
 GPU_ARCH = get_device_arch(0)
 _IS_MFMA = GPU_ARCH in ("gfx942", "gfx950")  # wave64 / MFMA targets
 
-# Arches with a K-outer transpose-read regime. The lane mapping is per-wave-size
-# (gfx950 wave64 ds_read_b64_tr_b16, gfx1250 wave32 ds_load_tr16_b128), so a
-# green run on one says nothing about the other -- both must be exercised.
-# Configs with no counterpart on the running arch are rejected by
-# is_valid_wgrad_spec and skip through _check's existing reason path.
-_KOUTER_ARCHES = ("gfx950", "gfx1250")
+# Whether the running arch has a K-outer transpose-read regime. The lane mapping
+# is per-wave-size (gfx950 wave64 ds_read_b64_tr_b16, gfx1250 wave32
+# ds_load_tr16_b128), so a green run on one says nothing about the other -- both
+# must be exercised. Elsewhere (gfx942) is_valid_wgrad_spec rejects every K-outer
+# config, so the K-outer tests skip up front instead of skipping every subTest.
+_HAS_KOUTER = wgrad_lds_k_outer_available(GPU_ARCH)
+_NO_KOUTER = f"lds_k_outer needs the LDS transpose read, which {GPU_ARCH} lacks"
 
 # WMMA wgrad accepts only the 'default' epilogue (is_valid_wgrad_spec), so the
 # K-outer sweeps below have to ask for the one their arch supports. Requesting
@@ -81,10 +83,10 @@ _KOUTER_EPILOGUE = "cshuffle" if _IS_MFMA else "default"
 def _skip_reason() -> str:
     if not GPU_ARCH:
         return "no ROCm GPU detected"
-    if not _IS_MFMA and GPU_ARCH not in _KOUTER_ARCHES:
+    if not _IS_MFMA and not _HAS_KOUTER:
         return (
-            f"wgrad numeric sweep needs MFMA (gfx942/gfx950) or a K-outer WMMA "
-            f"arch ({'/'.join(_KOUTER_ARCHES)}); got {GPU_ARCH}"
+            f"wgrad numeric sweep needs MFMA (gfx942/gfx950) or a WMMA arch with "
+            f"the K-outer LDS transpose read; got {GPU_ARCH}"
         )
     return ""
 
@@ -577,10 +579,8 @@ class TestConvWgradCorrectness(unittest.TestCase):
         This is the test that has to exist -- the last change to this LDS path
         (async_dma) shipped silently wrong because nothing exercised it.
         """
-        if GPU_ARCH not in _KOUTER_ARCHES:
-            self.skipTest(
-                f"lds_k_outer needs {'/'.join(_KOUTER_ARCHES)}; got {GPU_ARCH}"
-            )
+        if not _HAS_KOUTER:
+            self.skipTest(_NO_KOUTER)
         ran = 0
         for dtype in _DTYPES:
             for shape in _SHAPES:
@@ -609,12 +609,15 @@ class TestConvWgradCorrectness(unittest.TestCase):
         only in the MFMA table -- gfx1250's WMMA fp16/bf16 atom is 16x16x32, so
         ``select_largest_k`` returns None there and every subTest would skip.
         A class whose subTests all skip still reports ``passed``, so widening
-        the gate to _KOUTER_ARCHES would buy a false green rather than wave32
-        coverage. gfx1250's atom is already covered by
+        the gate to every K-outer arch would buy a false green rather than
+        wave32 coverage. gfx1250's atom is already covered by
         ``test_lds_k_outer_matches_default``.
         """
+        if not _HAS_KOUTER:
+            self.skipTest(_NO_KOUTER)
         if not _IS_MFMA:
             self.skipTest(f"the 16x16x16 atom is MFMA-only; got {GPU_ARCH}")
+        ran = 0
         for dtype in _DTYPES:
             for shape in _SHAPES:
                 with self.subTest(shape=shape.id, dtype=dtype):
@@ -627,6 +630,8 @@ class TestConvWgradCorrectness(unittest.TestCase):
                         warp_tile_mn=16,
                         tile_k=16,
                     )
+                    ran += 1
+        self._assert_ran(ran, "lds_k_outer 16x16x16 atom")
 
     def test_lds_k_outer_split_k(self):
         """K-outer under split-K atomics (the shipping configuration).
@@ -641,6 +646,8 @@ class TestConvWgradCorrectness(unittest.TestCase):
             wgrad_wmma_split_k_available,
         )
 
+        if not _HAS_KOUTER:
+            self.skipTest(_NO_KOUTER)
         if not _IS_MFMA and not wgrad_wmma_split_k_available(GPU_ARCH):
             self.skipTest(f"no 16-bit wgrad split-K atomic path on {GPU_ARCH}")
         ran = 0
@@ -666,8 +673,13 @@ class TestConvWgradCorrectness(unittest.TestCase):
         the loader's contig_cols guard enforces; the C=24 and C=8 shapes in the
         sweep exercise that.
         """
+        if not _HAS_KOUTER:
+            self.skipTest(_NO_KOUTER)
         if not _IS_MFMA:
-            self.skipTest(f"async_dma wgrad is MFMA/gfx950-only; got {GPU_ARCH}")
+            self.skipTest(
+                f"async_dma wgrad on the K-outer tile is MFMA-only; got {GPU_ARCH}"
+            )
+        ran = 0
         for dtype in _DTYPES:
             for shape in _SHAPES:
                 with self.subTest(shape=shape.id, dtype=dtype):
@@ -679,6 +691,8 @@ class TestConvWgradCorrectness(unittest.TestCase):
                         lds_k_outer=True,
                         async_dma=True,
                     )
+                    ran += 1
+        self._assert_ran(ran, "lds_k_outer async_dma")
 
     def test_async_dma_requires_k_outer(self):
         """async_dma on the M-outer tile must be rejected, not silently wrong."""
@@ -2702,11 +2716,11 @@ class TestWgradGroupMergeNumerics(unittest.TestCase):
 
     # The subject of these cases is group merging, not the LDS layout: the
     # K-outer staging only rides along because it is the layout the merged
-    # dispatch prefers where it exists. It is gated to _KOUTER_ARCHES, so
+    # dispatch prefers where it exists. It is gated to the K-outer arches, so
     # pinning it True would turn every case below into a skip on gfx942 --
     # which _assert_case_ran correctly reports as a failure rather than a
     # green. Follow the arch instead and keep the merge coverage running.
-    _KOUTER = GPU_ARCH in _KOUTER_ARCHES
+    _KOUTER = _HAS_KOUTER
 
     def test_group_merge_without_two_stage(self):
         # The primary path: split_k=1, so dW is written straight from the tile
@@ -2827,7 +2841,7 @@ class TestWgradPrefetchAddrNumerics(unittest.TestCase):
     tile's out-of-range rows exercise the carried sentinel offsets too.
     """
 
-    _KOUTER_AXIS = (False, True) if GPU_ARCH in _KOUTER_ARCHES else (False,)
+    _KOUTER_AXIS = (False, True) if _HAS_KOUTER else (False,)
 
     def _run(self, shape, dtype, pipeline, epilogue, **kw):
         ok, why = _run_one(
@@ -2972,7 +2986,7 @@ class TestWgradPrefetchGlobalRegsNumerics(unittest.TestCase):
     multiple of tile_k, so the last tile's out-of-range rows are covered too.
     """
 
-    _KOUTER_AXIS = (False, True) if GPU_ARCH in _KOUTER_ARCHES else (False,)
+    _KOUTER_AXIS = (False, True) if _HAS_KOUTER else (False,)
 
     def _run(self, shape, dtype, pipeline, epilogue, **kw):
         ok, why = _run_one(
