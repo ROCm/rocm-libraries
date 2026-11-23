@@ -99,6 +99,53 @@ struct by_key_set_benchmark : public primbench::benchmark_interface
     state.add_writes<T>(item_in_AB);
     state.add_writes<K>(item_in_AB);
 
+    state.test([&] {
+      const auto left  = std::min<size_t>(items_in_A, 96);
+      const auto right = std::min<size_t>(m_items - items_in_A, 96);
+      const auto keys  = bench_utils::set_input<K>(left, right);
+      thrust::host_vector<T> values(keys.size());
+      for (size_t i = 0; i < values.size(); ++i)
+      {
+        values[i] = T(i < left ? i % 31 : 64 + (i - left) % 31);
+      }
+
+      const thrust::device_vector<K> d_keys   = keys;
+      const thrust::device_vector<T> d_values = values;
+      thrust::device_vector<K> result_keys(keys.size());
+      thrust::device_vector<T> result_values(keys.size());
+      const auto ends = op(
+        policy(alloc).on(state.stream),
+        d_keys.cbegin(),
+        d_keys.cbegin() + left,
+        d_keys.cbegin() + left,
+        d_keys.cend(),
+        d_values.cbegin(),
+        d_values.cbegin() + left,
+        result_keys.begin(),
+        result_values.begin());
+      HIP_CHECK(hipStreamSynchronize(state.stream));
+
+      thrust::host_vector<K> expected_keys(keys.size());
+      thrust::host_vector<T> expected_values(keys.size());
+      const auto expected_ends = op(
+        thrust::seq,
+        keys.cbegin(),
+        keys.cbegin() + left,
+        keys.cbegin() + left,
+        keys.cend(),
+        values.cbegin(),
+        values.cbegin() + left,
+        expected_keys.begin(),
+        expected_values.begin());
+      expected_keys.resize(expected_ends.first - expected_keys.begin());
+      expected_values.resize(expected_ends.second - expected_values.begin());
+
+      PRIMBENCH_ASSERT(static_cast<size_t>(ends.first - result_keys.begin()), expected_keys.size());
+      PRIMBENCH_ASSERT(static_cast<size_t>(ends.second - result_values.begin()), expected_values.size());
+      bench_utils::check_output(result_keys, expected_keys);
+      bench_utils::check_output(result_values, expected_values);
+    });
+
     state.run([&] {
       op(policy(alloc).on(state.stream),
          in_keys.cbegin(),

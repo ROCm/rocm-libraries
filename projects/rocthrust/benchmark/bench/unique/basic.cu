@@ -71,6 +71,21 @@ struct unique_benchmark : public primbench::benchmark_interface
     state.add_reads<T>(m_items);
     state.add_writes<T>(unique_items);
 
+    state.test([&] {
+      const auto count                            = std::min(m_items, bench_utils::validation_items);
+      const auto input                            = bench_utils::read_range(in, 0, count);
+      const thrust::device_vector<T> replay_input = input;
+      thrust::device_vector<T> result(count);
+      const auto end =
+        thrust::unique_copy(policy(alloc).on(state.stream), replay_input.cbegin(), replay_input.cend(), result.begin());
+      HIP_CHECK(hipStreamSynchronize(state.stream));
+
+      thrust::host_vector<T> expected;
+      std::unique_copy(input.begin(), input.end(), std::back_inserter(expected));
+      PRIMBENCH_ASSERT(static_cast<size_t>(end - result.begin()), expected.size());
+      bench_utils::check_output(result, expected);
+    });
+
     state.run([&] {
       thrust::unique_copy(policy(alloc).on(state.stream), in.cbegin(), in.cend(), out.begin());
     });

@@ -62,6 +62,21 @@ struct inner_product_benchmark : public primbench::benchmark_interface
     state.add_reads<T>(m_items);
     state.add_writes<T>(m_items + 1);
 
+    state.test([&] {
+      const auto input_a = bench_utils::arithmetic_input<T>(m_items);
+      thrust::host_vector<T> input_b(input_a.size());
+      for (size_t i = 0; i < input_b.size(); ++i)
+      {
+        input_b[i] = T(1 + i % 2);
+      }
+      const thrust::device_vector<T> d_a = input_a;
+      const thrust::device_vector<T> d_b = input_b;
+      const auto actual =
+        thrust::inner_product(policy(alloc).on(state.stream), d_a.cbegin(), d_a.cend(), d_b.cbegin(), T{0});
+      const auto expected = std::inner_product(input_a.begin(), input_a.end(), input_b.begin(), T{0});
+      PRIMBENCH_ASSERT(actual == expected, true);
+    });
+
     state.run([&] {
       thrust::inner_product(policy(alloc).on(state.stream), lhs.begin(), lhs.end(), rhs.begin(), T{0});
     });

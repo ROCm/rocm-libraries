@@ -70,8 +70,15 @@ struct sort_benchmark : public primbench::benchmark_interface
       thrust::copy(policy.on(state.stream), ref.begin(), ref.end(), in.begin());
     });
 
+    const auto compare = bench_utils::less_t{};
+    const auto sort    = [&](auto& data) {
+      thrust::sort(policy(alloc).on(state.stream), data.begin(), data.end(), compare);
+    };
+    state.test([&] {
+      bench_utils::check_key_sort(in, ref, state.stream, compare, sort);
+    });
     state.run([&] {
-      thrust::sort(policy(alloc).on(state.stream), in.begin(), in.end(), bench_utils::less_t{});
+      sort(in);
     });
   }
 

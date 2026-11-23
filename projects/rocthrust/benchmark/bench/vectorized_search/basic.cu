@@ -67,14 +67,23 @@ struct vectorized_search_benchmark : public primbench::benchmark_interface
     state.set_items(needles);
     state.add_reads<T>(needles);
 
-    state.run([&] {
+    const auto search = [&](auto& input, size_t count, auto& output) {
       thrust::binary_search(
         policy(alloc).on(state.stream),
-        data.begin(),
-        data.begin() + m_items,
-        data.begin() + m_items,
-        data.end(),
-        result.begin());
+        input.begin(),
+        input.begin() + count,
+        input.begin() + count,
+        input.end(),
+        output.begin());
+    };
+    state.test([&] {
+      bench_utils::check_vectorized_search(
+        data, m_items, result, state.stream, search, [](auto first, auto last, const T& value) {
+          return std::binary_search(first, last, value);
+        });
+    });
+    state.run([&] {
+      search(data, m_items, result);
     });
   }
 

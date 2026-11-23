@@ -132,6 +132,25 @@ struct transform_benchmark : public primbench::benchmark_interface
     state.add_reads<T>(m_items);
     state.add_writes<uint32_t>(m_items);
 
+    state.test([&] {
+      const auto count = std::min(m_items, bench_utils::validation_items);
+      const auto input = bench_utils::read_range(in, 0, count);
+      std::array<uint32_t, M1 + 2> fibonacci{};
+      fibonacci[2] = 1;
+      for (size_t i = 3; i < fibonacci.size(); ++i)
+      {
+        fibonacci[i] = fibonacci[i - 1] + fibonacci[i - 2];
+      }
+
+      thrust::host_vector<uint32_t> expected(count);
+      for (size_t i = 0; i < count; ++i)
+      {
+        PRIMBENCH_ASSERT(input[i] < fibonacci.size(), true);
+        expected[i] = fibonacci[input[i]];
+      }
+      bench_utils::check_output(out, expected);
+    });
+
     state.run([&] {
       thrust::transform(policy(alloc).on(state.stream), in.cbegin(), in.cend(), out.begin(), op);
     });
@@ -295,6 +314,55 @@ struct transform_babel_benchmark : public primbench::benchmark_interface
     state.set_items(m_items);
     state.add_reads<T>(m_items * OpT::reads_per_item);
     state.add_writes<T>(m_items * OpT::writes_per_item);
+
+    state.test([&] {
+      const auto count = std::min(m_items, bench_utils::validation_items);
+      auto check       = [&](const thrust::device_vector<T>& result, T value) {
+        bench_utils::check_output(result, thrust::host_vector<T>(count, value));
+      };
+
+      const auto a0     = T{babelstream::startA};
+      const auto b0     = T{babelstream::startB};
+      const auto c0     = T{babelstream::startC};
+      const auto scalar = T{babelstream::startScalar};
+      if constexpr (std::is_same_v<OpT, babelstream::mul>)
+      {
+        check(b, T(c0 * scalar));
+      }
+      else if constexpr (std::is_same_v<OpT, babelstream::add>)
+      {
+        check(c, T(a0 + b0));
+      }
+      else if constexpr (std::is_same_v<OpT, babelstream::triad>)
+      {
+        check(a, T(b0 + scalar * c0));
+      }
+      else
+      {
+        thrust::host_vector<T> input_a(count);
+        thrust::host_vector<T> input_b(count);
+        thrust::host_vector<T> input_c(count);
+        for (size_t i = 0; i < count; ++i)
+        {
+          input_a[i] = T(1 + i % 7);
+          input_b[i] = T(2 + i % 5);
+          input_c[i] = T(3 + i % 3);
+        }
+
+        thrust::device_vector<T> result         = input_a;
+        thrust::device_vector<T> input_b_device = input_b;
+        thrust::device_vector<T> input_c_device = input_c;
+        OpT::run(policy(alloc).on(state.stream), result, input_b_device, input_c_device);
+        HIP_CHECK(hipStreamSynchronize(state.stream));
+
+        thrust::host_vector<T> expected(count);
+        for (size_t i = 0; i < count; ++i)
+        {
+          expected[i] = T(input_a[i] + input_b[i] + scalar * input_c[i]);
+        }
+        bench_utils::check_output(result, expected);
+      }
+    });
 
     state.run([&] {
       OpT::run(policy(alloc).on(state.stream), a, b, c);

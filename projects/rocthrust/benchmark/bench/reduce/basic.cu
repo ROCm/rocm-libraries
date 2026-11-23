@@ -60,6 +60,14 @@ struct reduce_benchmark : public primbench::benchmark_interface
     state.set_items(m_items);
     state.add_reads<T>(m_items + 1);
 
+    state.test([&] {
+      const auto input                       = bench_utils::arithmetic_input<T>(m_items);
+      const thrust::device_vector<T> d_input = input;
+      const auto actual   = thrust::reduce(policy(alloc).on(state.stream), d_input.cbegin(), d_input.cend());
+      const auto expected = std::accumulate(input.begin(), input.end(), T{0});
+      PRIMBENCH_ASSERT(actual == expected, true);
+    });
+
     state.run([&] {
       thrust::reduce(policy(alloc).on(state.stream), in.begin(), in.end());
     });

@@ -68,6 +68,34 @@ struct inclusive_scan_benchmark : public primbench::benchmark_interface
     state.add_reads<K>(m_items);
     state.add_writes<T>(m_items);
 
+    state.test([&] {
+      const auto input = bench_utils::arithmetic_input<T>(m_items);
+      thrust::host_vector<K> test_keys(input.size());
+      for (size_t i = 0; i < test_keys.size(); ++i)
+      {
+        test_keys[i] = K((i + 1) / 3);
+      }
+      const thrust::device_vector<K> d_keys  = test_keys;
+      const thrust::device_vector<T> d_input = input;
+      thrust::device_vector<T> result(input.size());
+      thrust::inclusive_scan_by_key(
+        policy(alloc).on(state.stream), d_keys.cbegin(), d_keys.cend(), d_input.cbegin(), result.begin());
+      HIP_CHECK(hipStreamSynchronize(state.stream));
+
+      thrust::host_vector<T> expected(input.size());
+      T sum{};
+      for (size_t i = 0; i < input.size(); ++i)
+      {
+        if (i != 0 && test_keys[i] != test_keys[i - 1])
+        {
+          sum = T{};
+        }
+        sum         = T(sum + input[i]);
+        expected[i] = sum;
+      }
+      bench_utils::check_output(result, expected);
+    });
+
     state.run([&] {
       thrust::inclusive_scan_by_key(
         policy(alloc).on(state.stream), keys.cbegin(), keys.cend(), in_vals.cbegin(), out_vals.begin());

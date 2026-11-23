@@ -79,6 +79,37 @@ struct partition_benchmark : public primbench::benchmark_interface
     state.add_reads<T>(m_items);
     state.add_writes<T>(m_items);
 
+    state.test([&] {
+      const auto count                            = std::min(m_items, bench_utils::validation_items);
+      const auto input                            = bench_utils::read_range(in, 0, count);
+      const thrust::device_vector<T> replay_input = input;
+      thrust::device_vector<T> result(count);
+      const auto rejected = thrust::make_reverse_iterator(result.end());
+      const auto ends     = thrust::partition_copy(
+        policy(alloc).on(state.stream), replay_input.cbegin(), replay_input.cend(), result.begin(), rejected, select_op);
+      HIP_CHECK(hipStreamSynchronize(state.stream));
+
+      thrust::host_vector<T> expected_selected;
+      thrust::host_vector<T> expected_rejected;
+      std::partition_copy(
+        input.begin(),
+        input.end(),
+        std::back_inserter(expected_selected),
+        std::back_inserter(expected_rejected),
+        select_op);
+      PRIMBENCH_ASSERT(static_cast<size_t>(ends.first - result.begin()), expected_selected.size());
+      PRIMBENCH_ASSERT(static_cast<size_t>(ends.second - rejected), expected_rejected.size());
+
+      auto selected   = bench_utils::read_range(result, 0, expected_selected.size());
+      auto unselected = bench_utils::read_range(result, count - expected_rejected.size(), expected_rejected.size());
+      std::sort(selected.begin(), selected.end());
+      std::sort(unselected.begin(), unselected.end());
+      std::sort(expected_selected.begin(), expected_selected.end());
+      std::sort(expected_rejected.begin(), expected_rejected.end());
+      bench_utils::check_values(selected, expected_selected);
+      bench_utils::check_values(unselected, expected_rejected);
+    });
+
     state.run([&] {
       thrust::partition_copy(
         policy(alloc).on(state.stream),

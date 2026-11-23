@@ -62,6 +62,14 @@ struct inclusive_scan_benchmark : public primbench::benchmark_interface
     state.add_reads<T>(m_items);
     state.add_writes<T>(m_items);
 
+    state.test([&] {
+      const auto count = std::min(m_items, bench_utils::validation_items);
+      const auto input = bench_utils::read_range(in, 0, count);
+      thrust::host_vector<T> expected(count);
+      std::inclusive_scan(input.begin(), input.end(), expected.begin(), bench_utils::max_t{}, T{});
+      bench_utils::check_output(out, expected);
+    });
+
     state.run([&] {
       thrust::inclusive_scan(
         policy(alloc).on(state.stream), in.cbegin(), in.cend(), out.begin(), T{}, bench_utils::max_t{});

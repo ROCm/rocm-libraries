@@ -78,6 +78,28 @@ struct tabulate_benchmark : public primbench::benchmark_interface
     state.add_reads<T>(m_items);
     state.add_writes<T>(m_items + 1);
 
+    state.test([&] {
+      const auto count = std::min(m_items, bench_utils::validation_items);
+      thrust::host_vector<T> offsets(count + 1, T{0});
+      for (size_t i = 0; i < count; ++i)
+      {
+        offsets[i + 1] = offsets[i] + T(1 + i % 5);
+      }
+
+      thrust::device_vector<T> d_offsets = offsets;
+      thrust::device_vector<T> result(count);
+      seg_size_t<T> test_op{thrust::raw_pointer_cast(d_offsets.data())};
+      thrust::tabulate(policy(alloc).on(state.stream), result.begin(), result.end(), test_op);
+      HIP_CHECK(hipStreamSynchronize(state.stream));
+
+      thrust::host_vector<T> expected(count);
+      for (size_t i = 0; i < count; ++i)
+      {
+        expected[i] = offsets[i + 1] - offsets[i];
+      }
+      bench_utils::check_output(result, expected);
+    });
+
     state.run([&] {
       thrust::tabulate(policy(alloc).on(state.stream), out.begin(), out.end(), op);
     });

@@ -34,6 +34,7 @@
 #include <thrust/count.h>
 #include <thrust/device_vector.h>
 #include <thrust/execution_policy.h>
+#include <thrust/transform.h>
 
 // Non-trivially-copyable/relocatable type which is not allowed to be copied using std::memcpy or cudaMemcpy
 struct non_trivial
@@ -62,6 +63,14 @@ static_assert(!thrust::is_trivially_relocatable<non_trivial>::value, ""); // thr
 
 PRIMBENCH_REGISTER_TYPE(non_trivial, "non_trivial")
 
+struct has_copy_value
+{
+  THRUST_HOST_DEVICE int operator()(const non_trivial& value) const
+  {
+    return value.a == 1 && value.b == 1;
+  }
+};
+
 template <typename T>
 struct copy_benchmark : public primbench::benchmark_interface
 {
@@ -89,6 +98,22 @@ struct copy_benchmark : public primbench::benchmark_interface
     state.set_items(m_items);
     state.add_reads<T>(m_items);
     state.add_writes<T>(m_items);
+
+    state.test([&] {
+      const auto count = std::min(m_items, bench_utils::validation_items);
+      if constexpr (std::is_same_v<T, non_trivial>)
+      {
+        thrust::device_vector<int> fields_match(count);
+        thrust::transform(
+          policy(alloc).on(state.stream), out.cbegin(), out.cbegin() + count, fields_match.begin(), has_copy_value{});
+        HIP_CHECK(hipStreamSynchronize(state.stream));
+        bench_utils::check_output(fields_match, thrust::host_vector<int>(count, 1));
+      }
+      else
+      {
+        bench_utils::check_output(out, thrust::host_vector<T>(count, T{1}));
+      }
+    });
 
     state.run([&] {
       thrust::copy(policy(alloc).on(state.stream), in.cbegin(), in.cend(), out.begin());
