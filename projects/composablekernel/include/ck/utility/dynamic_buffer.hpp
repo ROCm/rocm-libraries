@@ -502,6 +502,11 @@ struct DynamicBuffer
                                  bool>::type = false>
     __host__ __device__ void AtomicAdd(IndexType i, bool is_valid_element, const X& x)
     {
+        // Temporary: atomic add for complex_t comes with the complex sum reduction, which
+        // replaces this check.
+        static_assert(!is_two_component_type<remove_cvref_t<T>>::value,
+                      "complex_t has no atomic add yet");
+
         using scalar_t = typename scalar_type<remove_cvref_t<T>>::type;
 
         // X contains multiple T
@@ -563,6 +568,9 @@ struct DynamicBuffer
                                  bool>::type = false>
     __host__ __device__ void AtomicMax(IndexType i, bool is_valid_element, const X& x)
     {
+        static_assert(!is_two_component_type<remove_cvref_t<T>>::value,
+                      "complex_t has no atomic max: complex numbers have no order");
+
         // X contains multiple T
         constexpr IndexType scalar_per_t_vector = scalar_type<remove_cvref_t<T>>::vector_size;
 
