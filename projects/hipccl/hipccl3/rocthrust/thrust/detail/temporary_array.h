@@ -30,6 +30,8 @@
 #  pragma system_header
 #endif // no system header
 
+#include _THRUST_STD_INCLUDE(type_traits)
+
 THRUST_NAMESPACE_BEGIN
 namespace detail
 {
@@ -131,8 +133,8 @@ private:
 template <typename Iterator, typename FromSystem, typename ToSystem>
 struct move_to_system_base
     : public eval_if<_THRUST_STD::is_convertible<FromSystem, ToSystem>::value,
-                     identity_<tagged_iterator_range<Iterator, ToSystem>>,
-                     identity_<temporary_array<thrust::detail::it_value_t<Iterator>, ToSystem>>>
+                     _THRUST_STD::type_identity<tagged_iterator_range<Iterator, ToSystem>>,
+                     _THRUST_STD::type_identity<temporary_array<thrust::detail::it_value_t<Iterator>, ToSystem>>>
 {};
 
 template <typename Iterator, typename FromSystem, typename ToSystem>

@@ -50,6 +50,21 @@ using device_grouped_conv_bwd_data_wavelet_direct_load_xdl_v3_instances = std::t
     // clang-format on
     >;
 
+template <index_t NDimSpatial,
+          typename ALayout,
+          typename BLayout,
+          typename DsLayout,
+          typename ELayout,
+          typename DataType,
+          ConvolutionBackwardDataSpecialization ConvSpec>
+using device_grouped_conv_bwd_data_wavelet_xdl_v3_instances_part1 = std::tuple<
+    // clang-format off
+    DeviceGroupedConvBwdDataMultipleD_Wavelet_Xdl_CShuffleV3<NDimSpatial, ALayout, BLayout, DsLayout, ELayout, DataType, DataType, F32, DataType, Empty_Tuple, DataType, PassThrough, PassThrough, PassThrough, ConvSpec, true, true, 256, 256,  64,  64, 128, 8, 8, 16, 16, 2, 2, S<16, 16, 1>, S<1, 0, 2>, S<1, 0, 2>, 2, 8, 8, 1, S<4,  8, 8>, S<0, 2, 1>, S<0, 2, 1>, 1, 8, 8, 1, 2, 1, S<1, 64, 1, 4>, 8, DataType, DataType, true, false>,
+    DeviceGroupedConvBwdDataMultipleD_Wavelet_Xdl_CShuffleV3<NDimSpatial, ALayout, BLayout, DsLayout, ELayout, DataType, DataType, F32, DataType, Empty_Tuple, DataType, PassThrough, PassThrough, PassThrough, ConvSpec, true, true, 256, 256,  64, 128, 128, 8, 8, 16, 16, 2, 4, S<16, 16, 1>, S<1, 0, 2>, S<1, 0, 2>, 2, 8, 8, 1, S<2, 16, 8>, S<0, 2, 1>, S<0, 2, 1>, 1, 8, 8, 1, 1, 2, S<1, 32, 1, 8>, 8, DataType, DataType, true, true>,
+    DeviceGroupedConvBwdDataMultipleD_Wavelet_Xdl_CShuffleV3<NDimSpatial, ALayout, BLayout, DsLayout, ELayout, DataType, DataType, F32, DataType, Empty_Tuple, DataType, PassThrough, PassThrough, PassThrough, ConvSpec, true, true, 256, 256, 128, 128, 128, 8, 8, 16, 16, 2, 8, S<16, 16, 1>, S<1, 0, 2>, S<1, 0, 2>, 2, 8, 8, 1, S<2, 16, 8>, S<0, 2, 1>, S<0, 2, 1>, 1, 8, 8, 1, 1, 2, S<1, 64, 1, 4>, 8, DataType, DataType, true, true>
+    // clang-format on
+    >;
+
 } // namespace instance
 } // namespace device
 } // namespace tensor_operation

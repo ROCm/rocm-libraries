@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 
 from tensilelite import LibraryIO
-from tensilelite.Common.SolutionIdGen import (
+from tensilelite.SolutionIdGen import (
     RANDOM_MASK,
     RANDOM_SHIFT,
     decode_solution_id,

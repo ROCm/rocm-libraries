@@ -121,15 +121,97 @@ protected:
     }
 };
 
-// One suite per dtype: the datatype token ends the suite name.
+// Standard runs five cases per engine and dtype, at head dim 64: the control and one K-and-V poison
+// per removal mode (NaN and infinity both), which together reach dQ, dK and dV through every
+// removal. Comprehensive runs every case at every head dim, per dtype: the suite name ends in the
+// datatype token, so each dtype is its own sweep suite.
 using TestGpuFlydslSdpaBwdSplitRemovedKeysBfp16 = TestGpuFlydslSdpaBwdSplitRemovedKeys;
-using TestGpuFlydslSdpaBwdSplitRemovedKeysFp16 = TestGpuFlydslSdpaBwdSplitRemovedKeys;
 using TestGpuFlydslSdpaBwdSplitRemovedKeysFp32 = TestGpuFlydslSdpaBwdSplitRemovedKeys;
 using TestGpuFlydslSdpaBwdMergedRemovedKeysBfp16 = TestGpuFlydslSdpaBwdMergedRemovedKeys;
-using TestGpuFlydslSdpaBwdMergedRemovedKeysFp16 = TestGpuFlydslSdpaBwdMergedRemovedKeys;
 
-#define FLYDSL_SDPA_BWD_REMOVED_KEYS_CASES(SUITE, ENGINE, DTYPE, HEAD_DIMS)                     \
+const std::vector<int64_t> HEAD_DIMS_16_BIT{64, 128};
+const std::vector<int64_t> HEAD_DIMS_FLOAT{64};
+
+#define FLYDSL_SDPA_BWD_REMOVED_KEYS_STANDARD_CASES(SUITE, ENGINE, DTYPE)                       \
     TEST_F(SUITE, ControlWithoutPoison)                                                         \
+    {                                                                                           \
+        for(const auto removal : {Removal::WINDOW,                                              \
+                                  Removal::TAIL,                                                \
+                                  Removal::TOP_LEFT_SHORT_QUERY,                                \
+                                  Removal::TAIL_TOP_LEFT})                                      \
+        {                                                                                       \
+            expectCase(                                                                         \
+                ENGINE,                                                                         \
+                removedKeysCase(DTYPE, removal, BwdPoison::NONE, 0.0F, HEAD_DIMS_FLOAT[0]));    \
+        }                                                                                       \
+    }                                                                                           \
+    TEST_F(SUITE, WindowPoisonKAndV)                                                            \
+    {                                                                                           \
+        runRemovedKeys(ENGINE, DTYPE, Removal::WINDOW, BwdPoison::K_AND_V, HEAD_DIMS_FLOAT);    \
+    }                                                                                           \
+    TEST_F(SUITE, TailPoisonKAndV)                                                              \
+    {                                                                                           \
+        runRemovedKeys(ENGINE, DTYPE, Removal::TAIL, BwdPoison::K_AND_V, HEAD_DIMS_FLOAT);      \
+    }                                                                                           \
+    TEST_F(SUITE, TopLeftShortQueryPoisonKAndV)                                                 \
+    {                                                                                           \
+        runRemovedKeys(                                                                         \
+            ENGINE, DTYPE, Removal::TOP_LEFT_SHORT_QUERY, BwdPoison::K_AND_V, HEAD_DIMS_FLOAT); \
+    }                                                                                           \
+    TEST_F(SUITE, TailTopLeftPoisonKAndV)                                                       \
+    {                                                                                           \
+        runRemovedKeys(                                                                         \
+            ENGINE, DTYPE, Removal::TAIL_TOP_LEFT, BwdPoison::K_AND_V, HEAD_DIMS_FLOAT);        \
+    }
+
+// The sweep fixture of one engine and dtype: the engine's device fixture with a dummy parameter.
+#define FLYDSL_SDPA_BWD_REMOVED_KEYS_SWEEP_SUITE(SUITE, BASE)                                  \
+    class SUITE : public BASE, public ::testing::WithParamInterface<int>                       \
+    {                                                                                          \
+    };                                                                                         \
+    INSTANTIATE_TEST_SUITE_P(                                                                  \
+        Comprehensive, SUITE, ::testing::Values(0), [](const ::testing::TestParamInfo<int>&) { \
+            return std::string("Sweep");                                                       \
+        });
+
+// The sweep cases the standard tier does not run at all: one poison source per case.
+#define FLYDSL_SDPA_BWD_REMOVED_KEYS_SWEEP_CASES(SUITE, ENGINE, DTYPE, HEAD_DIMS)              \
+    TEST_P(SUITE, WindowPoisonK)                                                               \
+    {                                                                                          \
+        runRemovedKeys(ENGINE, DTYPE, Removal::WINDOW, BwdPoison::K, HEAD_DIMS);               \
+    }                                                                                          \
+    TEST_P(SUITE, WindowPoisonV)                                                               \
+    {                                                                                          \
+        runRemovedKeys(ENGINE, DTYPE, Removal::WINDOW, BwdPoison::V, HEAD_DIMS);               \
+    }                                                                                          \
+    TEST_P(SUITE, TailPoisonK)                                                                 \
+    {                                                                                          \
+        runRemovedKeys(ENGINE, DTYPE, Removal::TAIL, BwdPoison::K, HEAD_DIMS);                 \
+    }                                                                                          \
+    TEST_P(SUITE, TailPoisonV)                                                                 \
+    {                                                                                          \
+        runRemovedKeys(ENGINE, DTYPE, Removal::TAIL, BwdPoison::V, HEAD_DIMS);                 \
+    }                                                                                          \
+    TEST_P(SUITE, TopLeftShortQueryPoisonK)                                                    \
+    {                                                                                          \
+        runRemovedKeys(ENGINE, DTYPE, Removal::TOP_LEFT_SHORT_QUERY, BwdPoison::K, HEAD_DIMS); \
+    }                                                                                          \
+    TEST_P(SUITE, TopLeftShortQueryPoisonV)                                                    \
+    {                                                                                          \
+        runRemovedKeys(ENGINE, DTYPE, Removal::TOP_LEFT_SHORT_QUERY, BwdPoison::V, HEAD_DIMS); \
+    }                                                                                          \
+    TEST_P(SUITE, TailTopLeftPoisonK)                                                          \
+    {                                                                                          \
+        runRemovedKeys(ENGINE, DTYPE, Removal::TAIL_TOP_LEFT, BwdPoison::K, HEAD_DIMS);        \
+    }                                                                                          \
+    TEST_P(SUITE, TailTopLeftPoisonV)                                                          \
+    {                                                                                          \
+        runRemovedKeys(ENGINE, DTYPE, Removal::TAIL_TOP_LEFT, BwdPoison::V, HEAD_DIMS);        \
+    }
+
+// The sweep cases the standard tier also runs, at head dim 64: here at every head dim.
+#define FLYDSL_SDPA_BWD_REMOVED_KEYS_SWEEP_STANDARD_NAMES(SUITE, ENGINE, DTYPE, HEAD_DIMS)      \
+    TEST_P(SUITE, ControlWithoutPoison)                                                         \
     {                                                                                           \
         for(const auto removal : {Removal::WINDOW,                                              \
                                   Removal::TAIL,                                                \
@@ -140,79 +222,82 @@ using TestGpuFlydslSdpaBwdMergedRemovedKeysFp16 = TestGpuFlydslSdpaBwdMergedRemo
                        removedKeysCase(DTYPE, removal, BwdPoison::NONE, 0.0F, (HEAD_DIMS)[0])); \
         }                                                                                       \
     }                                                                                           \
-    TEST_F(SUITE, WindowPoisonK)                                                                \
-    {                                                                                           \
-        runRemovedKeys(ENGINE, DTYPE, Removal::WINDOW, BwdPoison::K, HEAD_DIMS);                \
-    }                                                                                           \
-    TEST_F(SUITE, WindowPoisonV)                                                                \
-    {                                                                                           \
-        runRemovedKeys(ENGINE, DTYPE, Removal::WINDOW, BwdPoison::V, HEAD_DIMS);                \
-    }                                                                                           \
-    TEST_F(SUITE, WindowPoisonKAndV)                                                            \
+    TEST_P(SUITE, WindowPoisonKAndV)                                                            \
     {                                                                                           \
         runRemovedKeys(ENGINE, DTYPE, Removal::WINDOW, BwdPoison::K_AND_V, HEAD_DIMS);          \
     }                                                                                           \
-    TEST_F(SUITE, TailPoisonK)                                                                  \
-    {                                                                                           \
-        runRemovedKeys(ENGINE, DTYPE, Removal::TAIL, BwdPoison::K, HEAD_DIMS);                  \
-    }                                                                                           \
-    TEST_F(SUITE, TailPoisonV)                                                                  \
-    {                                                                                           \
-        runRemovedKeys(ENGINE, DTYPE, Removal::TAIL, BwdPoison::V, HEAD_DIMS);                  \
-    }                                                                                           \
-    TEST_F(SUITE, TailPoisonKAndV)                                                              \
+    TEST_P(SUITE, TailPoisonKAndV)                                                              \
     {                                                                                           \
         runRemovedKeys(ENGINE, DTYPE, Removal::TAIL, BwdPoison::K_AND_V, HEAD_DIMS);            \
     }                                                                                           \
-    TEST_F(SUITE, TopLeftShortQueryPoisonK)                                                     \
-    {                                                                                           \
-        runRemovedKeys(ENGINE, DTYPE, Removal::TOP_LEFT_SHORT_QUERY, BwdPoison::K, HEAD_DIMS);  \
-    }                                                                                           \
-    TEST_F(SUITE, TopLeftShortQueryPoisonV)                                                     \
-    {                                                                                           \
-        runRemovedKeys(ENGINE, DTYPE, Removal::TOP_LEFT_SHORT_QUERY, BwdPoison::V, HEAD_DIMS);  \
-    }                                                                                           \
-    TEST_F(SUITE, TopLeftShortQueryPoisonKAndV)                                                 \
+    TEST_P(SUITE, TopLeftShortQueryPoisonKAndV)                                                 \
     {                                                                                           \
         runRemovedKeys(                                                                         \
             ENGINE, DTYPE, Removal::TOP_LEFT_SHORT_QUERY, BwdPoison::K_AND_V, HEAD_DIMS);       \
     }                                                                                           \
-    TEST_F(SUITE, TailTopLeftPoisonK)                                                           \
-    {                                                                                           \
-        runRemovedKeys(ENGINE, DTYPE, Removal::TAIL_TOP_LEFT, BwdPoison::K, HEAD_DIMS);         \
-    }                                                                                           \
-    TEST_F(SUITE, TailTopLeftPoisonV)                                                           \
-    {                                                                                           \
-        runRemovedKeys(ENGINE, DTYPE, Removal::TAIL_TOP_LEFT, BwdPoison::V, HEAD_DIMS);         \
-    }                                                                                           \
-    TEST_F(SUITE, TailTopLeftPoisonKAndV)                                                       \
+    TEST_P(SUITE, TailTopLeftPoisonKAndV)                                                       \
     {                                                                                           \
         runRemovedKeys(ENGINE, DTYPE, Removal::TAIL_TOP_LEFT, BwdPoison::K_AND_V, HEAD_DIMS);   \
     }
 
-const std::vector<int64_t> HEAD_DIMS_16_BIT{64, 128};
-const std::vector<int64_t> HEAD_DIMS_FLOAT{64};
+FLYDSL_SDPA_BWD_REMOVED_KEYS_STANDARD_CASES(TestGpuFlydslSdpaBwdSplitRemovedKeysBfp16,
+                                            SPLIT_ENGINE,
+                                            DataType::BFLOAT16)
+FLYDSL_SDPA_BWD_REMOVED_KEYS_STANDARD_CASES(TestGpuFlydslSdpaBwdSplitRemovedKeysFp32,
+                                            SPLIT_ENGINE,
+                                            DataType::FLOAT)
+FLYDSL_SDPA_BWD_REMOVED_KEYS_STANDARD_CASES(TestGpuFlydslSdpaBwdMergedRemovedKeysBfp16,
+                                            MERGED_ENGINE,
+                                            DataType::BFLOAT16)
 
-FLYDSL_SDPA_BWD_REMOVED_KEYS_CASES(TestGpuFlydslSdpaBwdSplitRemovedKeysBfp16,
-                                   SPLIT_ENGINE,
-                                   DataType::BFLOAT16,
-                                   HEAD_DIMS_16_BIT)
-FLYDSL_SDPA_BWD_REMOVED_KEYS_CASES(TestGpuFlydslSdpaBwdSplitRemovedKeysFp16,
-                                   SPLIT_ENGINE,
-                                   DataType::HALF,
-                                   HEAD_DIMS_16_BIT)
-FLYDSL_SDPA_BWD_REMOVED_KEYS_CASES(TestGpuFlydslSdpaBwdSplitRemovedKeysFp32,
-                                   SPLIT_ENGINE,
-                                   DataType::FLOAT,
-                                   HEAD_DIMS_FLOAT)
-FLYDSL_SDPA_BWD_REMOVED_KEYS_CASES(TestGpuFlydslSdpaBwdMergedRemovedKeysBfp16,
-                                   MERGED_ENGINE,
-                                   DataType::BFLOAT16,
-                                   HEAD_DIMS_16_BIT)
-FLYDSL_SDPA_BWD_REMOVED_KEYS_CASES(TestGpuFlydslSdpaBwdMergedRemovedKeysFp16,
-                                   MERGED_ENGINE,
-                                   DataType::HALF,
-                                   HEAD_DIMS_16_BIT)
+FLYDSL_SDPA_BWD_REMOVED_KEYS_SWEEP_SUITE(TestGpuFlydslSdpaBwdSplitRemovedKeysSweepBfp16,
+                                         TestGpuFlydslSdpaBwdSplitRemovedKeys)
+FLYDSL_SDPA_BWD_REMOVED_KEYS_SWEEP_SUITE(TestGpuFlydslSdpaBwdSplitRemovedKeysSweepFp16,
+                                         TestGpuFlydslSdpaBwdSplitRemovedKeys)
+FLYDSL_SDPA_BWD_REMOVED_KEYS_SWEEP_SUITE(TestGpuFlydslSdpaBwdSplitRemovedKeysSweepFp32,
+                                         TestGpuFlydslSdpaBwdSplitRemovedKeys)
+FLYDSL_SDPA_BWD_REMOVED_KEYS_SWEEP_SUITE(TestGpuFlydslSdpaBwdMergedRemovedKeysSweepBfp16,
+                                         TestGpuFlydslSdpaBwdMergedRemovedKeys)
+FLYDSL_SDPA_BWD_REMOVED_KEYS_SWEEP_SUITE(TestGpuFlydslSdpaBwdMergedRemovedKeysSweepFp16,
+                                         TestGpuFlydslSdpaBwdMergedRemovedKeys)
+
+FLYDSL_SDPA_BWD_REMOVED_KEYS_SWEEP_CASES(TestGpuFlydslSdpaBwdSplitRemovedKeysSweepBfp16,
+                                         SPLIT_ENGINE,
+                                         DataType::BFLOAT16,
+                                         HEAD_DIMS_16_BIT)
+FLYDSL_SDPA_BWD_REMOVED_KEYS_SWEEP_STANDARD_NAMES(TestGpuFlydslSdpaBwdSplitRemovedKeysSweepBfp16,
+                                                  SPLIT_ENGINE,
+                                                  DataType::BFLOAT16,
+                                                  HEAD_DIMS_16_BIT)
+FLYDSL_SDPA_BWD_REMOVED_KEYS_SWEEP_CASES(TestGpuFlydslSdpaBwdSplitRemovedKeysSweepFp16,
+                                         SPLIT_ENGINE,
+                                         DataType::HALF,
+                                         HEAD_DIMS_16_BIT)
+FLYDSL_SDPA_BWD_REMOVED_KEYS_SWEEP_STANDARD_NAMES(TestGpuFlydslSdpaBwdSplitRemovedKeysSweepFp16,
+                                                  SPLIT_ENGINE,
+                                                  DataType::HALF,
+                                                  HEAD_DIMS_16_BIT)
+// The fp32 standard cases already run its one head dim: the sweep holds the other eight.
+FLYDSL_SDPA_BWD_REMOVED_KEYS_SWEEP_CASES(TestGpuFlydslSdpaBwdSplitRemovedKeysSweepFp32,
+                                         SPLIT_ENGINE,
+                                         DataType::FLOAT,
+                                         HEAD_DIMS_FLOAT)
+FLYDSL_SDPA_BWD_REMOVED_KEYS_SWEEP_CASES(TestGpuFlydslSdpaBwdMergedRemovedKeysSweepBfp16,
+                                         MERGED_ENGINE,
+                                         DataType::BFLOAT16,
+                                         HEAD_DIMS_16_BIT)
+FLYDSL_SDPA_BWD_REMOVED_KEYS_SWEEP_STANDARD_NAMES(TestGpuFlydslSdpaBwdMergedRemovedKeysSweepBfp16,
+                                                  MERGED_ENGINE,
+                                                  DataType::BFLOAT16,
+                                                  HEAD_DIMS_16_BIT)
+FLYDSL_SDPA_BWD_REMOVED_KEYS_SWEEP_CASES(TestGpuFlydslSdpaBwdMergedRemovedKeysSweepFp16,
+                                         MERGED_ENGINE,
+                                         DataType::HALF,
+                                         HEAD_DIMS_16_BIT)
+FLYDSL_SDPA_BWD_REMOVED_KEYS_SWEEP_STANDARD_NAMES(TestGpuFlydslSdpaBwdMergedRemovedKeysSweepFp16,
+                                                  MERGED_ENGINE,
+                                                  DataType::HALF,
+                                                  HEAD_DIMS_16_BIT)
 
 } // namespace
 

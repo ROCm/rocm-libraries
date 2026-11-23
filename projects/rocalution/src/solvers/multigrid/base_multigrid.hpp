@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2023 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -96,7 +96,19 @@ namespace rocalution
         ROCALUTION_EXPORT
         void SetScaling(bool scaling);
 
-        /** \brief Force computation of coarser levels on the host backend */
+        /** \brief Force computation of coarser levels on the host backend
+         *  \details
+         *  The number of host levels is kept by \p ReBuildNumeric, \p MoveToHost,
+         *  \p MoveToAccelerator, \p Clear and \p Build. \p Build of an AMG solver moves the
+         *  coarsest levels of the new hierarchy and its coarse grid solver to the host, at
+         *  most all levels but the finest, as \p SetHostLevels does. It keeps this clamped
+         *  number, also if a later \p Build has more levels again.
+         *
+         *  \p SetHostLevels only moves levels to the host. After a smaller number than
+         *  before, also after \p Build, call \p MoveToAccelerator to move the other levels
+         *  back to the accelerator. To compute all levels on the accelerator again, use a
+         *  new solver.
+         */
         ROCALUTION_EXPORT
         void SetHostLevels(int levels);
 
@@ -138,6 +150,13 @@ namespace rocalution
 
         /** \brief V-cycle */
         void Vcycle_(const VectorType& rhs, VectorType* x);
+        /** \brief V-cycle, optionally continuing from x
+         *  \details
+         *  A coarse level, and the finest level of a preconditioner, start from a zero
+         *  initial guess unless \p continue_x is set. The coarsest level always solves from
+         *  zero, so \p continue_x must not be set there.
+         */
+        void Vcycle_(const VectorType& rhs, VectorType* x, bool continue_x);
         /** \brief W-cycle */
         void Wcycle_(const VectorType& rhs, VectorType* x);
         /** \brief F-cycle */
@@ -194,7 +213,11 @@ namespace rocalution
         VectorType** s_level_; /**< \private */
         VectorType** q_level_; /**< \private */
 
-        /** \brief Transfer mapping */
+        /** \brief Transfer mapping
+         *  \details
+         *  Only \p BaseAMG allocates and frees it. It stays NULL for \p MultiGrid, and
+         *  \p Finalize does not touch it.
+         */
         LocalVector<int>** trans_level_;
 
         /** \brief Coarse grid solver */

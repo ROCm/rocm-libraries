@@ -1010,7 +1010,7 @@ public:
         if((par.groups % cfg_.groups_per_wg) != 0)
             return false;
 
-        if(get_launch_params(dev, par).grid.z > max_grid_z)
+        if(!grid_fits(get_launch_params(dev, par)))
             return false;
         return true;
     }
@@ -1022,8 +1022,9 @@ public:
         auto blocks_w            = divup(out_q, output_block_q);
         auto blocks_w_n          = blocks_w * cfg_.n_fold;
         auto blocks_c            = divup(par.c, cfg_.block_c());
-        auto blocks_n_fold =
-            divup(par.n * (cfg_.direction == Direction::Dgrad ? par.d : par.e), cfg_.n_fold);
+        const int64_t images =
+            int64_t(par.n) * (cfg_.direction == Direction::Dgrad ? par.d : par.e);
+        const unsigned blocks_n_fold = grid_extent((images + cfg_.n_fold - 1) / cfg_.n_fold);
 
         LaunchParams launch;
         launch.grid       = dim3(blocks_w_n, blocks_c, blocks_n_fold);

@@ -233,20 +233,37 @@ bool decodeMergeReaches(const MatchContext& context,
     return true;
 }
 
+/// The main kernel's x extent, one workgroup per (batch, KV head, split, output-column tile),
+/// or nullopt past int32 workgroups or 32 bits of work-items.
+std::optional<int64_t> decodeMainGrid(const SdpaProblem& problem, int64_t splits, int64_t dvSplit)
+{
+    const auto grid = checkedProduct({problem.batch, problem.numKvHeads, splits, dvSplit});
+    if(!grid.has_value() || *grid > INT32_LIMIT || !launchAxisFits(*grid, DECODE_WAVES * WAVE_SIZE))
+    {
+        return std::nullopt;
+    }
+    return grid;
+}
+
+/// The merge kernel's x extent, one workgroup per (batch, query head, query position), or
+/// nullopt past int32 workgroups or 32 bits of work-items.
+std::optional<int64_t> decodeMergeGrid(const SdpaProblem& problem)
+{
+    const auto grid = checkedProduct({problem.batch, problem.numHeads, problem.seqLenQ});
+    if(!grid.has_value() || *grid > INT32_LIMIT || !launchAxisFits(*grid, DECODE_MERGE_THREADS))
+    {
+        return std::nullopt;
+    }
+    return grid;
+}
+
 /// Whether a decode object can compute the graph: one V head goes with each K head (the
 /// rows of a tile share one KV head), and its rows fit -- any number of 16-row tiles the
 /// grid's second dimension holds for a row-tiled object, one tile's for an object built
 /// for one.
 bool decodeServes(const SdpaProblem& problem, bool rowTiled)
 {
-    if(problem.numKvHeads != problem.numVHeads)
-    {
-        return false;
-    }
-    // The merge kernel runs one workgroup per (batch, query head, query position): a grid
-    // past int32 would be refused at launch, so it is declined here instead.
-    const auto mergeGrid = checkedProduct({problem.batch, problem.numHeads, problem.seqLenQ});
-    if(!mergeGrid.has_value() || *mergeGrid > INT32_LIMIT)
+    if(problem.numKvHeads != problem.numVHeads || !decodeMergeGrid(problem).has_value())
     {
         return false;
     }
@@ -288,7 +305,8 @@ bool flydslSdpaRdnaDecodeKernelMatches(const MatchContext& context,
     const auto splits = decodeSplits(problem,
                                      decodeRowTiles(problem, decodeRowTiled(kernel)),
                                      context.deviceProperties.multiProcessorCount);
-    if(!decodeMergeReaches(context, bound, problem, splits))
+    if(!decodeMainGrid(problem, splits, *dvSplit).has_value()
+       || !decodeMergeReaches(context, bound, problem, splits))
     {
         return false;
     }
@@ -578,10 +596,10 @@ public:
         const int64_t splits
             = decodeSplits(problem, rowTiles, context.deviceProperties.multiProcessorCount);
         const auto mergeSymbol = stringMetadata(kernel, MERGE_SYMBOL_FIELD);
-        const auto mainGrid = checkedProduct({problem.batch, problem.numKvHeads, splits, *dvSplit});
-        const auto mergeGrid = checkedProduct({problem.batch, problem.numHeads, problem.seqLenQ});
+        const auto mainGrid = decodeMainGrid(problem, splits, *dvSplit);
+        const auto mergeGrid = decodeMergeGrid(problem);
         if(!mergeSymbol.has_value() || mergeSymbol->empty() || !mainGrid.has_value()
-           || *mainGrid > INT32_LIMIT || !mergeGrid.has_value() || *mergeGrid > INT32_LIMIT)
+           || !mergeGrid.has_value())
         {
             throw hipdnn_plugin_sdk::HipdnnPluginException(
                 HIPDNN_PLUGIN_STATUS_BAD_PARAM,

@@ -2,8 +2,8 @@
 
 - Contributors: TBD
 - **Status**: Implemented
-- **Status notes**: Shipped in #7171: backend `HIPDNN_ATTR_ENGINE_BEHAVIOR_NOTE`, `EngineDetails.behavior_notes`, `Graph::get_behavior_notes_for_engine()`, and Python bindings. #10226 renumbered the frontend `BehaviorNote` enum to cuDNN values and added note filtering in the cuDNN compatibility shim only.
-- **Last verified**: 2026-11-10 against `develop` (1c63e26254a)
+- **Status notes**: Shipped in #7171: backend `HIPDNN_ATTR_ENGINE_BEHAVIOR_NOTE`, `EngineDetails.behavior_notes`, `Graph::get_behavior_notes_for_engine()`, and Python bindings. #10226 renumbered the frontend `BehaviorNote` enum to cuDNN values and added note filtering in the cuDNN compatibility shim. Note filtering on the native and Python `Graph` is specified in [RFC 0025](./0025_NumericalNotes.md).
+- **Last verified**: 2026-11-13 against `develop` (7d8674e8542)
 
 ## Table of Contents
 
@@ -30,7 +30,7 @@ Error Graph::get_behavior_notes_for_engine(int64_t engineId,
                                            std::vector<BehaviorNote>& notes) const;
 ```
 
-This RFC does not add graph-level filtering, plan-index note queries, numerical notes, or compiled execution-plan serialization changes to the native frontend `Graph`. Behavior notes are engine/plugin metadata, not execution-plan payload.
+The per-engine query this RFC adds does not filter plans; note filtering on the native `Graph` is specified in [RFC 0025](./0025_NumericalNotes.md) §2 and covers behavior notes too. This RFC does not add plan-index note queries, numerical notes, or compiled execution-plan serialization changes to the native frontend `Graph`. Behavior notes are engine/plugin metadata, not execution-plan payload.
 
 ## 2. Problem Statement
 
@@ -62,7 +62,7 @@ The engine path is:
 
 `EngineDetails` is the correct metadata boundary for behavior notes because plugins already use it to report per-engine details such as knobs.
 
-cuDNN frontend supports broader note behavior, including candidate filtering through `select_behavior_notes()` and `deselect_behavior_notes()`. The native hipDNN `Graph` does not implement that filtering. Its behavior is a direct per-engine query. The cuDNN compatibility shim (`frontend/include/hipdnn_compatibility/cudnn/detail/graph_wrapper.h`) provides the cuDNN-style calls on top of this query (see § 10).
+cuDNN frontend supports broader note behavior, including candidate filtering through `select_behavior_notes()` and `deselect_behavior_notes()`. The native hipDNN `Graph` implements the filtering with `select_behavior_notes()` and `deselect_behavior_notes()`, which read each engine through the per-engine query and follow cuDNN's filter semantics ([RFC 0025](./0025_NumericalNotes.md) §2 and §4). The cuDNN compatibility shim (`frontend/include/hipdnn_compatibility/cudnn/detail/graph_wrapper.h`) provides the cuDNN-style calls on top of this query (see § 10).
 
 ## 4. Proposed Design
 
@@ -191,7 +191,7 @@ Bind:
 - Behavior notes are engine/plugin metadata.
 - `SerializedExecutionPlan` remains unchanged.
 - Per-engine query is the first API because it fits hipDNN's current single-selected-plan model.
-- Filtering by notes is a future frontend selection feature, not part of this RFC.
+- Filtering by notes builds on the per-engine query and is specified in [RFC 0025](./0025_NumericalNotes.md) §2.
 - Numerical notes are not part of this RFC; [RFC 0025](./0025_NumericalNotes.md) applies the same pattern to them and records where it differs.
 
 ### 6.1 Included Behavior Notes
@@ -207,7 +207,7 @@ Bind:
 1. **Ambiguous semantics**: Plugins may emit notes inconsistently. Mitigation: keep the initial enum small and document each value precisely.
 2. **FlatBuffers compatibility mistakes**: Inserting fields or marking fields required would break old buffers. Mitigation: append optional fields only and add old-shape buffer tests.
 3. **Invalid raw metadata**: Plugins can emit invalid `int32` values. Mitigation: validate on the first metadata query in `EngineDescriptor::ensureDetailsLoaded()`. Successful finalization alone is not metadata validation.
-4. **Future API pressure**: Users may ask for cuDNN-style filtering. Mitigation: document filtering as future work and keep this RFC scoped to per-engine queries.
+4. **API pressure**: Users expect cuDNN-style filtering. Mitigation: `select_behavior_notes()` and `deselect_behavior_notes()` on the native `Graph` read the per-engine query, and this RFC stays scoped to that query.
 
 ## 8. Execution Plan
 
@@ -332,7 +332,7 @@ Python tests:
 
 ## 10. Future Considerations
 
-The cuDNN compatibility shim (`frontend/include/hipdnn_compatibility/cudnn/detail/graph_wrapper.h`) provides `select_behavior_notes()`, `deselect_behavior_notes()`, `get_behavior_notes()`, and `get_behavior_notes_for_plan_at_index()`. `get_behavior_notes()` and `get_behavior_notes_for_plan_at_index()` call `get_behavior_notes_for_engine()`. The native `hipdnn_frontend::graph::Graph` does not provide these four functions.
+The cuDNN compatibility shim (`frontend/include/hipdnn_compatibility/cudnn/detail/graph_wrapper.h`) provides `select_behavior_notes()`, `deselect_behavior_notes()`, `get_behavior_notes()`, and `get_behavior_notes_for_plan_at_index()`. `get_behavior_notes()` and `get_behavior_notes_for_plan_at_index()` call `get_behavior_notes_for_engine()`. The native `hipdnn_frontend::graph::Graph` provides `select_behavior_notes()` and `deselect_behavior_notes()` ([RFC 0025](./0025_NumericalNotes.md) §2) and the per-engine getter; it has no getter for the active plan or a plan index.
 
 Numerical notes follow the same per-engine metadata pattern; see [RFC 0025](./0025_NumericalNotes.md).
 

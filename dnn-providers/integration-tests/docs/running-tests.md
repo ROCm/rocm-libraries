@@ -467,8 +467,11 @@ bundle patterns to `*Sdpa*`, uses `Smoke/*Sdpa*` as its only tier-prefixed C++
 pattern, and its `full` tier is `*Sdpa*`. The hip-kernel-provider gfx950
 attention lanes and gfx942 unified 3D lane (see
 [Tier YAML files](file-formats.md#tier-yaml-files--test_categoriesyaml)) select
-only `*_SdpaFwd_Default.*` bundles in every tier, `full` included. The gfx942
-dense lane also selects the BSHD stats bundles `*_SdpaFwd_bshd_*_stats_*`:
+only the `*_SdpaFwd_Default.*` and `*_SdpaFwdPlan_*` bundles in every tier,
+`full` included. The gfx942 dense lane also selects the BSHD stats bundles
+`*_SdpaFwd_bshd_*_stats_*`. The FlyDSL SDPA lanes select the `*_SdpaFwd_*` and
+`*_SdpaFwdPlan_*` bundles. The miopen, hipblaslt and HIP_MLOPS files exclude
+`*_SdpaFwdPlan_*` from every tier:
 
 | CTest label | Bundle suites | C++ tests | Other labels on the suite |
 |---|---|---|---|
@@ -489,6 +492,10 @@ It differs for each lane:
 
 Because `-L` is a regex, `-L quick` also selects these suites
 ([above](#1-ctest-by-tier-what-ci-does)).
+
+The hip-kernel-provider FlyDSL lanes (`hipkernel_flydsl_*_test_categories_integration.yaml`)
+define neither `quick` nor `ffm-quick`: no FlyDSL device test runs in those tiers, so
+each lane registers `standard`, `comprehensive` and `full` only.
 
 The timeouts come from `execution_settings.category_timeouts` in each YAML file.
 They are different in each file.
@@ -536,7 +543,7 @@ it passes all of them.
 | 1 | Build options (`-DBUILD_CPP_GRAPH_TESTS`, op enables) | configure | A test not compiled cannot be selected. C++ graph tests are **off by default**. |
 | 2 | `exclude_gpu` in the tier YAML | configure (suites) and `ctest` (selection) | Adds per-arch variant suites (`…_<category>_<arch>_suite`, label `ex_gpu_<arch>`) carrying that arch's negative patterns, or `DISABLED` for `"*"`. To pick the variant, use `-L ex_gpu_<arch>`. A plain `-L quick` also runs the unfiltered suite. See `shared/ctest/README.md`. |
 | 3 | `ctest -L` / `-LE` / `-R` | ctest invocation | Selects suites by label or name. |
-| 4 | `--gtest_filter` (from the YAML, or yours) | binary start | Selects cases by GTest name. Bundles that the filter excludes are dropped **before** they are parsed or read, which keeps startup fast. |
+| 4 | `--gtest_filter` (from the YAML, or yours) | binary start | Selects cases by GTest name. Bundles that the filter excludes are dropped **before** they are loaded, which keeps startup fast. The harness applies the filter to each sweep folder by its suite name before it parses the `sweep.json`. It does not parse the `sweep.json` of a folder that the filter cannot select: it reads the file only to count its cases. With `--write-support-claims`, the harness parses every folder. The harness also parses a `sweep.json` when the case count cannot read its structure. |
 | 5 | Metadata guards and TOML `test_skips` | each test's `SetUp()` | Skip on VRAM, arch-locked golden data, or a recorded engine limitation. |
 | 6 | The engine's ranked list | each test body | The engine declines the graph → the case is skipped (or fails if a claim promised support). |
 

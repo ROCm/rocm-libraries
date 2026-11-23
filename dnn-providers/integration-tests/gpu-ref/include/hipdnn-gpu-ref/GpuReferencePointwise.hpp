@@ -9,6 +9,7 @@
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/pointwise_attributes_generated.h>
 
+#include <cstddef>
 #include <cstdint>
 #include <stdexcept>
 #include <string>
@@ -19,6 +20,9 @@ namespace hipdnn_gpu_ref
 
 namespace detail
 {
+
+// Shared argument structs — single definition used by both host and device (HipRTC).
+#include <GpuRefPointwiseArgs.h> // NOLINT(misc-include-cleaner)
 
 template <typename OutputDataType,
           typename InputDataType,
@@ -56,6 +60,7 @@ class GpuReferencePointwise
 {
 public:
     static constexpr unsigned int BLOCK_SIZE = 256;
+    static constexpr size_t MAX_DIMS = detail::POINTWISE_MAX_DIMS;
 
     template <typename OutputType, typename InputType, typename ComputeType = double>
     static void pointwiseCompute(hipdnn_flatbuffers_sdk::data_objects::PointwiseMode operation,
@@ -235,9 +240,10 @@ private:
     static void validateTensors(hipdnn_data_sdk::utilities::TensorBase<OutputType>& output,
                                 hipdnn_data_sdk::utilities::TensorBase<InputType>& input)
     {
-        if(output.dims().size() > 5)
+        if(output.dims().size() > MAX_DIMS)
         {
-            throw std::invalid_argument("Pointwise operations have a max dimension of 5");
+            throw std::invalid_argument("Pointwise operations have a max dimension of "
+                                        + std::to_string(MAX_DIMS));
         }
 
         if(!hipdnn_data_sdk::utilities::areDimensionsBroadcastCompatible(input.dims(),
@@ -263,9 +269,10 @@ private:
                                 hipdnn_data_sdk::utilities::TensorBase<Input0Type>& input0,
                                 hipdnn_data_sdk::utilities::TensorBase<Input1Type>& input1)
     {
-        if(output.dims().size() > 5)
+        if(output.dims().size() > MAX_DIMS)
         {
-            throw std::invalid_argument("Pointwise operations have a max dimension of 5");
+            throw std::invalid_argument("Pointwise operations have a max dimension of "
+                                        + std::to_string(MAX_DIMS));
         }
 
         if(!hipdnn_data_sdk::utilities::areDimensionsBroadcastCompatible(input0.dims(),

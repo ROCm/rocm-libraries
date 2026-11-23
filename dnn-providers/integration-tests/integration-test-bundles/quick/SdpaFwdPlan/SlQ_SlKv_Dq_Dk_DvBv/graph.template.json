@@ -1,0 +1,165 @@
+{
+  "compute_data_type": "${case.compute_data_type}",
+  "intermediate_data_type": "${case.intermediate_data_type}",
+  "io_data_type": "${case.io_data_type}",
+  "is_override_shape_enabled": "${case.is_override_shape_enabled}",
+  "min_required_engine_api_version": "${case.min_required_engine_api_version}",
+  "name": "sdpa_case_flow",
+  "nodes": [
+    {
+      "attributes": {
+        "alibi_mask": "${case.attributes.attributes__alibi_mask}",
+        "attn_scale_value": "${case.attributes.attributes__attn_scale_value}",
+        "causal_mask": "${case.attributes.attributes__causal_mask}",
+        "causal_mask_bottom_right": "${case.attributes.attributes__causal_mask_bottom_right}",
+        "diagonal_alignment": "${case.attributes.attributes__diagonal_alignment}",
+        "dropout_probability": "${case.attributes.attributes__dropout_probability}",
+        "generate_stats": "${case.attributes.attributes__generate_stats}",
+        "implementation": "${case.attributes.attributes__implementation}",
+        "left_bound": "${case.attributes.attributes__left_bound}",
+        "max_seq_len_kv": "${case.attributes.attributes__max_seq_len_kv}",
+        "mma_core_mode": "${case.attributes.attributes__mma_core_mode}",
+        "padding_mask": "${case.attributes.attributes__padding_mask}",
+        "right_bound": "${case.attributes.attributes__right_bound}"
+      },
+      "compute_data_type": "${case.attributes.compute_data_type}",
+      "inputs": {
+        "attn_mask_tensor_uid": null,
+        "block_mask_tensor_uid": null,
+        "descale_k_tensor_uid": 0,
+        "descale_q_tensor_uid": 1,
+        "descale_s_tensor_uid": null,
+        "descale_v_tensor_uid": 2,
+        "dropout_mask_tensor_uid": null,
+        "dropout_scale_tensor_uid": null,
+        "k_tensor_uid": 3,
+        "offset_tensor_uid": null,
+        "page_table_k_tensor_uid": null,
+        "page_table_v_tensor_uid": null,
+        "q_tensor_uid": 4,
+        "scale_o_tensor_uid": null,
+        "scale_s_tensor_uid": null,
+        "scale_tensor_uid": null,
+        "seed_tensor_uid": null,
+        "seq_len_kv_tensor_uid": 6,
+        "seq_len_q_tensor_uid": 7,
+        "sink_token_tensor_uid": null,
+        "v_tensor_uid": 8
+      },
+      "name": "sdpa_fwd",
+      "outputs": {
+        "amax_o_tensor_uid": null,
+        "amax_s_tensor_uid": null,
+        "max_tensor_uid": null,
+        "o_tensor_uid": 5,
+        "rng_dump_tensor_uid": null,
+        "stats_tensor_uid": null,
+        "sum_exp_tensor_uid": null
+      },
+      "type": "SdpaAttributes"
+    }
+  ],
+  "tensors": [
+    {
+      "alignment": "${case.alignment.0}",
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "is_runtime_pass_by_value": false,
+      "name": "descale_k",
+      "ragged_offset_multiplier": 1,
+      "strides": "${case.strides}",
+      "uid": 0,
+      "virtual": false
+    },
+    {
+      "alignment": "${case.alignment.1}",
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "is_runtime_pass_by_value": false,
+      "name": "descale_q",
+      "ragged_offset_multiplier": 1,
+      "strides": "${case.strides}",
+      "uid": 1,
+      "virtual": false
+    },
+    {
+      "alignment": "${case.alignment.2}",
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "is_runtime_pass_by_value": false,
+      "name": "descale_v",
+      "ragged_offset_multiplier": 1,
+      "strides": "${case.strides}",
+      "uid": 2,
+      "value": "${case.value}",
+      "value_type": "Float32Value",
+      "virtual": false
+    },
+    {
+      "alignment": "${case.alignment.3}",
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "is_runtime_pass_by_value": false,
+      "name": "k",
+      "ragged_offset_multiplier": 1,
+      "strides": "${case.strides}",
+      "uid": 3,
+      "virtual": false
+    },
+    {
+      "alignment": "${case.alignment.4}",
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "is_runtime_pass_by_value": false,
+      "name": "q",
+      "ragged_offset_multiplier": 1,
+      "strides": "${case.strides}",
+      "uid": 4,
+      "virtual": false
+    },
+    {
+      "alignment": "${case.alignment.5}",
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "is_runtime_pass_by_value": false,
+      "name": "sdpa_fwd::O",
+      "ragged_offset_multiplier": 1,
+      "strides": "${case.strides}",
+      "uid": 5,
+      "virtual": false
+    },
+    {
+      "alignment": "${case.alignment.6}",
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "is_runtime_pass_by_value": false,
+      "name": "seq_len_kv",
+      "ragged_offset_multiplier": 1,
+      "strides": "${case.strides}",
+      "uid": 6,
+      "virtual": false
+    },
+    {
+      "alignment": "${case.alignment.7}",
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "is_runtime_pass_by_value": false,
+      "name": "seq_len_q",
+      "ragged_offset_multiplier": 1,
+      "strides": "${case.strides}",
+      "uid": 7,
+      "virtual": false
+    },
+    {
+      "alignment": "${case.alignment.8}",
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "is_runtime_pass_by_value": false,
+      "name": "v",
+      "ragged_offset_multiplier": 1,
+      "strides": "${case.strides}",
+      "uid": 8,
+      "virtual": false
+    }
+  ]
+}

@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -17,6 +17,8 @@
 
 #include <thrust/execution_policy.h>
 #include <thrust/mismatch.h>
+
+#include <cuda/std/atomic>
 
 #include <unittest/unittest.h>
 
@@ -132,7 +134,7 @@ public:
   }
 
 private:
-  static std::atomic<size_t> my_count;
+  static cuda::std::atomic<size_t> my_count;
   T dummy;
 };
 

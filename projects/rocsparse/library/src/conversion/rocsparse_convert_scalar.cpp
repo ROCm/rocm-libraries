@@ -101,8 +101,8 @@ namespace rocsparse
     }
 
     template <typename S, typename T>
-    __launch_bounds__(64) __global__
-        void convert_device_scalars_kernel(const void* source, void* target)
+    ROCSPARSE_KERNEL(64)
+    void convert_device_scalars_kernel(const void* source, void* target)
     {
         const size_t tid = hipBlockIdx_x * 64 + hipThreadIdx_x;
         if(tid == 0)

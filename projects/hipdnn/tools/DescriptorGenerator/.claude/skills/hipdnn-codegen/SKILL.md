@@ -536,7 +536,7 @@ Before building, do a quick self-check:
 - CMake lists include all new source/test files
 
 **Work-model oracle** (local, before the build). Each check must pass; fix the cause, do not skip it:
-- `node_operands_generated.h` is regenerated for the current schemas: from the repository root, `pre-commit run node-operands-hipdnn --all-files` passes. The hook rewrites `$HIPDNN_SRC/flatbuffers_sdk/include/hipdnn_flatbuffers_sdk/data_objects/node_operands_generated.h`; a "files were modified by this hook" failure means it was stale, so keep the rewrite and run the hook again until it passes. Do the same for `cache-key-hipdnn` (`cachekey_generated.h`). Without `pre-commit`, run `python $HIPDNN_SRC/scripts/gen_node_operands.py` and `python $HIPDNN_SRC/scripts/gen_cache_key.py`.
+- `node_operands_generated.h` is regenerated for the current schemas: from the repository root, `pre-commit run node-operands-hipdnn --all-files` passes. The hook rewrites two headers, the visitor `$HIPDNN_SRC/flatbuffers_sdk/include/hipdnn_flatbuffers_sdk/data_objects/node_operands_generated.h` and the tools operand table `$HIPDNN_SRC/tools/common/include/hipdnn_tools/node_operand_table_generated.h`; a "files were modified by this hook" failure means it was stale, so keep the rewrite and run the hook again until it passes. Do the same for `cache-key-hipdnn` (`cachekey_generated.h`). Without `pre-commit`, run `python $HIPDNN_SRC/scripts/gen_node_operands.py` and `python $HIPDNN_SRC/scripts/gen_cache_key.py`.
 - The regenerated header visits the new op, and its `visit()` passes `true` as the last `visitor.tensor(...)` argument for exactly the agreed work-data-dependent operands:
   ```bash
   grep -n "<Op>Attributes" $HIPDNN_SRC/flatbuffers_sdk/include/hipdnn_flatbuffers_sdk/data_objects/node_operands_generated.h
@@ -556,7 +556,7 @@ ninja 2>&1 | tail -100
 ```
 
 If the build fails, **read the errors and fix them**. Common issues:
-- **`node_operands_generated.h is stale: rerun scripts/gen_node_operands.py`** (`static_assert`) → the schema changed after the header was generated. Run the `node-operands-hipdnn` hook and commit the header.
+- **`node_operands_generated.h is stale: rerun scripts/gen_node_operands.py`** (`static_assert`) → the schema changed after the header was generated. Run the `node-operands-hipdnn` hook and commit both headers (the visitor header and the tools operand table).
 - **Missing converter function in `Types.hpp`** → insert from `mode_frontend_plumbing_<field>.txt`. Includes both `toBackend<Foo>Mode` and `fromHipdnn<Foo>Mode` — the unpacker calls the inverse.
 - **Missing `#include`** → add it.
 - **Wrong attribute name (missing or extra `_EXT` suffix)** → check `HipdnnBackendAttributeName.h` against the YAML's `attr_suffix` per field. Re-derive per the cuDNN parity rule in Step 3a.

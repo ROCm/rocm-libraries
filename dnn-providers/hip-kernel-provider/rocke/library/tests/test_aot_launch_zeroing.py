@@ -116,3 +116,33 @@ def test_setup_outside_a_launch_still_drains():
         "_extras_and_grid no longer clears the workspace it allocates; if the "
         "clear moved into the launch, it has to be queued instead"
     )
+
+
+@pytest.mark.parametrize(
+    "direction, expected",
+    [("dgrad", [True, True, True]), ("wgrad", [True, False, False])],
+)
+def test_sliced_launches_clear_the_right_output(monkeypatch, direction, expected):
+    """A dgrad batch slice writes its own dX range, so every slice clears it
+    on each launch; wgrad slices share one dW that only the first clears."""
+    import dataclasses
+
+    seen = []
+
+    def fake_bind(direction, problem, ident, *rest, zero_dw=True):
+        seen.append(zero_dw)
+        return (lambda: None), "label"
+
+    monkeypatch.setattr(sweep, "_cached_bind", fake_bind)
+    monkeypatch.setattr(sweep, "_wgrad_accumulates", lambda ident: True)
+
+    @dataclasses.dataclass
+    class P:
+        N: int
+
+    rest = (None, None, None, "fp16", 4, (0, 0, 0), (3, 5, 3))
+    out = sweep._cached_bind_batch(
+        [(0, 1), (1, 1), (2, 1)], direction, P(N=3), object(), *rest
+    )
+    assert out is not None
+    assert seen == expected

@@ -213,16 +213,16 @@ protected:
         _failingConfigIds = std::move(failingConfigIds);
     }
 
-    // Opt-in: an ENGINEHEUR that carries POLICY_ORDER_EXT answers RESULTS with
-    // these IDs instead of the installHeuristicResults list. Off by default, so
-    // every heuristic mode ranks alike.
+    // Opt-in: an ENGINEHEUR in heuristic mode A or B answers RESULTS with these IDs
+    // instead of the installHeuristicResults list. Off by default, so every
+    // heuristic mode ranks alike.
     void installPolicyRanking(std::vector<std::int64_t> rankedIds)
     {
         const std::lock_guard<std::mutex> lock(_mutex);
         _policyRankedIds = std::move(rankedIds);
     }
 
-    // Finalizing the next ENGINEHEUR that carries POLICY_ORDER_EXT returns `status`.
+    // Finalizing the next ENGINEHEUR in heuristic mode A or B returns `status`.
     void failNextPolicyQuery(hipdnnStatus_t status)
     {
         const std::lock_guard<std::mutex> lock(_mutex);
@@ -849,9 +849,15 @@ private:
                 _planIds[descriptor] = engineId->second;
             }
         }
-        if(name == HIPDNN_ATTR_ENGINEHEUR_POLICY_ORDER_EXT)
+        if(name == HIPDNN_ATTR_ENGINEHEUR_MODE
+           && call.payload.size() == sizeof(hipdnnBackendHeurMode_t))
         {
-            _policyHeuristics.insert(descriptor);
+            hipdnnBackendHeurMode_t mode = HIPDNN_HEUR_MODE_FALLBACK;
+            std::memcpy(&mode, call.payload.data(), sizeof(mode));
+            if(mode != HIPDNN_HEUR_MODE_FALLBACK)
+            {
+                _policyHeuristics.insert(descriptor);
+            }
         }
         if(call.descriptorType == HIPDNN_BACKEND_PROFILING_CONTROL_EXT)
         {

@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2025-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -96,8 +96,8 @@ struct rebind_vector<thrust::universal_vector<T, Allocator>, U>
     ASSERT_EQ(reference, result);                                                                     \
   }
 
-BINARY_FUNCTIONAL_PLACEHOLDERS_TEST(LogicalAnd, &&, thrust::logical_and);
-BINARY_FUNCTIONAL_PLACEHOLDERS_TEST(LogicalOr, ||, thrust::logical_or);
+BINARY_FUNCTIONAL_PLACEHOLDERS_TEST(LogicalAnd, &&, _THRUST_STD::logical_and);
+BINARY_FUNCTIONAL_PLACEHOLDERS_TEST(LogicalOr, ||, _THRUST_STD::logical_or);
 
 TYPED_TEST(FunctionalPlaceholdersLogicalNotTest, TestFunctionalPlaceholdersLogicalNot)
 {
@@ -115,7 +115,7 @@ TYPED_TEST(FunctionalPlaceholdersLogicalNotTest, TestFunctionalPlaceholdersLogic
   } // end if
 
   bool_vector reference(input.size());
-  thrust::transform(input.begin(), input.end(), reference.begin(), thrust::logical_not<T>());
+  thrust::transform(input.begin(), input.end(), reference.begin(), _THRUST_STD::logical_not<T>());
 
   using namespace thrust::placeholders;
   bool_vector result(input.size());

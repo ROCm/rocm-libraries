@@ -7,7 +7,6 @@
 #include "plans/SdpaPlanUtils.hpp"
 
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
-#include <unordered_map>
 
 namespace asm_sdpa_engine
 {
@@ -29,16 +28,9 @@ void SdpaFwdPlan::execute(const Handle& handle,
                           uint32_t numDeviceBuffers,
                           void* /*workspace*/) const
 {
-    // Build UID->ptr map from device buffers
-    std::unordered_map<int64_t, void*> uidToPtrMap;
-    for(uint32_t i = 0; i < numDeviceBuffers; ++i)
-    {
-        uidToPtrMap[deviceBuffers[i].uid] = deviceBuffers[i].ptr;
-    }
-
     // Build the packed kernel-argument struct (pure; no device calls).
     // Non-const: launchKernel takes a void* to the argument buffer.
-    fmha_fwd_v3_args args = buildFwdKernelArgs(_params, uidToPtrMap);
+    fmha_fwd_v3_args args = buildFwdKernelArgs(_params, deviceBuffers, numDeviceBuffers);
 
     // Attention scale — resolved at execute for runtime pass-by-value support.
     // Throws BAD_PARAM before the launch for a scale the kernel mishandles.

@@ -2821,6 +2821,7 @@ def test_the_groups_share_the_pool_budget_of_one_process(
     Parallel = importlib.import_module("tensilelite.Common.Parallel")
     monkeypatch.setattr(Parallel.os, "sched_getaffinity", lambda pid: set(range(affinity)))
     monkeypatch.setattr(Parallel, "lokyCpuCount", lambda: affinity)
+    monkeypatch.setattr(Parallel, "_cgroupMemoryLimit", lambda: None)
     for name, value in (("PYTEST_XDIST_WORKER_COUNT", workers), ("KUBE_CPU_REQUEST", kube)):
         if value is None:
             monkeypatch.delenv(name, raising=False)
@@ -4329,3 +4330,21 @@ def test_streamk_fence_policy_keeps_completion_waits(gfx1250_cxx, mtype_nc):
                                 "global_wb scope:SCOPE_DEV", "s_wait_loadcnt 0", "s_wait_storecnt 0"]
         assert "global_inv scope:SCOPE_DEV" in acquire
     assert acquire.index("global_inv") < acquire.index("s_wait_loadcnt 0")
+
+
+@pytest.mark.parametrize("spec", ["gfx1250:xnack+", "gfx1250-strict:xnack+"])
+def test_the_asan_xnack_mode_is_registered_as_a_spec_of_its_own(spec):
+    """Nothing in Python writes these, which is exactly why they need pinning.
+
+    A device ASAN build names the mode rather than leaving it to the driver, so
+    the spec arrives from cmake and no caller here spells it -- it reads as a
+    dead entry to anyone tidying the map. Dropping it configures cleanly and
+    then fails inside TensileCreateLibrary, because the two checks between a
+    request and codegen do not ask the same question: Tensile.py checks
+    baseArchName, which a qualified spec passes on the strength of its base
+    alone, while splitArchsFromPredicates matches the spec as written.
+    """
+    from tensilelite.Common.Architectures import splitArchsFromPredicates
+
+    archs, _ = splitArchsFromPredicates([spec])
+    assert archs == [spec]

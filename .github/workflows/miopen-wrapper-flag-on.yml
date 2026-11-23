@@ -18,6 +18,12 @@
 # The parity harness is only checked for registration here. Executing it needs a GPU,
 # which no runner here has, so the doubled runs happen wherever MIOpen's ctest suite
 # is run on hardware rather than being duplicated as a bespoke step.
+#
+# The provider plugin is not built by the first job, which configures projects/miopen alone.
+# The second job builds the wrapper together with the provider and runs the plugin's binary
+# check (check_public_abi.py check-plugin), which dnn-providers/miopen-provider registers
+# only when it sees a MIOpen_private target. Neither job needs a GPU, so the GPU re-entry
+# entry (miopen-provider-plugin-reentry-guard) is not run here.
 
 name: "MIOpen: hipDNN wrapper flag-on"
 
@@ -144,3 +150,73 @@ jobs:
             --labels "$labels" \
             --ctest-dir build \
             --packaged build/test/gtest/install_CTestTestfile.cmake
+
+  # The plugin has to bind to libMIOpen_private. The check is a ctest entry, so it only runs
+  # in a configure that has the wrapper and the provider; the first job has no provider. The
+  # entries read the built plugin and the stand-in plugin (built against the public library,
+  # which the check must reject) without loading them, so no GPU is needed. Only the two
+  # plugins are built: they pull in MIOpen_private and the wrapper but not the MIOpen tests.
+  flag-on-provider:
+    name: MIOpen wrapper with the hipDNN provider
+    runs-on: azure-linux-scale-rocm
+    timeout-minutes: 180
+    container:
+      image: rocm/miopen-dev:multiarch_dev_20261117
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          submodules: recursive
+          sparse-checkout: |
+            .dvc
+            .github
+            cmake
+            dnn-providers
+            projects/hipdnn
+            projects/miopen
+            shared
+
+      - name: Pull DVC files for rocm-libraries
+        run: |
+          if command -v dvc &> /dev/null; then
+            echo "dvc detected"
+          else
+            echo "Warning, dvc not detected!"
+          fi
+          LOGNAME=github-runner dvc pull -v
+
+      # The preset does not enable the wrapper; the option below does. ROCM_LIBS_ENABLE_ROOT_CTEST
+      # registers the provider's ctest entries in the root test list. MIOPEN_TEST_GFX94X names the
+      # target for the same reason as in the first job.
+      - name: Configure build
+        run: |
+          export PATH=/opt/rocm/bin:/opt/rocm/llvm/bin:$PATH
+          cmake --preset miopen-with-provider -B build \
+            -DMIOPEN_ENABLE_HIPDNN_WRAPPER=ON \
+            -DROCM_LIBS_ENABLE_ROOT_CTEST=ON \
+            -DMIOPEN_TEST_DISCRETE=OFF \
+            -DMIOPEN_GPU_SYNC=OFF \
+            -DENABLE_CLANG_TIDY=OFF \
+            -DCMAKE_PREFIX_PATH=/opt/rocm \
+            -DPython3_EXECUTABLE=$(command -v python3) \
+            -DGPU_TARGETS="gfx942" \
+            -DMIOPEN_TEST_GFX94X=ON
+
+      - name: Build the plugin and the stand-in plugin
+        run: cmake --build build --target miopen_plugin miopen_plugin_public_stand_in -j$(nproc)
+
+      # The pattern also matches when only one of the two entries exists, so the entries are
+      # counted first: losing the stand-in's rejection entry would otherwise go unnoticed.
+      # --no-tests=error: ctest exits 0 when -R matches nothing, which is what a configure
+      # that did not enable the wrapper would give.
+      - name: Plugin binary check
+        run: |
+          pattern='^miopen-provider-plugin-abi-check(-rejects-public-plugin)?$'
+          listing=$(ctest --test-dir build -N -R "$pattern")
+          count=$(printf '%s\n' "$listing" | sed -n 's/^Total Tests: //p')
+          test "$count" = "2" || {
+            echo "expected the plugin check and the stand-in rejection check, found ${count:-<unparsed>} entries"
+            printf '%s\n' "$listing"
+            exit 1
+          }
+          ctest --test-dir build -R "$pattern" --no-tests=error --output-on-failure

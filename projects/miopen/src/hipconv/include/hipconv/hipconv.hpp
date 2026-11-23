@@ -14,6 +14,7 @@
 #include <hip/hip_runtime.h>
 
 #include <cstddef>
+#include <cstdint>
 #include <limits>
 #include <memory>
 #include <optional>
@@ -77,7 +78,12 @@ inline constexpr std::size_t MAX_RANKED_CONFIGS = 8;
 // Keeps every matching config, for a caller that selects by index or by descriptor.
 inline constexpr std::size_t ALL_RANKED_CONFIGS = std::numeric_limits<std::size_t>::max();
 
-// All valid kernels for the given params, best first. Empty if unsupported.
+// Largest tensor, in elements, of a layer any kernel supports.
+// Host-side planning arithmetic is checked for `int` overflow up to this size.
+inline constexpr std::int64_t MAX_TENSOR_ELEMENTS = std::int64_t{1} << 38;
+
+// All valid kernels for the given params, best first. Empty if unsupported, or if `par` fails
+// is_valid() or output_size_matches().
 //
 // Makes no HIP calls, so it runs without a GPU. A kernel that calls a runtime library, such as
 // hipBLASLt, can still fail its first launch() with hipErrorNotSupported; the caller then tries
@@ -90,8 +96,11 @@ inline constexpr std::size_t ALL_RANKED_CONFIGS = std::numeric_limits<std::size_
 // and stride-1 dgrad. The handle this returns is then bound to the unfolded params,
 // so ConvLaunch::make and launch() must be given the same ones.
 //
-// Throws std::invalid_argument if device.arch is null or device.cu_count is not positive,
-// as does every function below that takes a Device.
+// Throws std::invalid_argument if device.arch is null or device.cu_count is not in
+// [1, MAX_CU_COUNT], as does every function below that takes a Device. get_workspace_size,
+// is_deterministic, get_weighted_throughput_index, get_tolerance and
+// get_recursive_summation_tolerance also throw it for a `par` that get_valid_configs rejects as
+// invalid.
 HIPCONV_API std::vector<ConvKernelHandle>
 get_valid_configs(const Device& device,
                   const ConvParams& par,
@@ -180,7 +189,7 @@ get_weighted_throughput_index(ConvKernelHandle kernel, const Device& device, con
 // Enqueue the kernel on the stream, returning the launch-time HIP status.
 //
 // hipSuccess means the launch was submitted; otherwise it is the launch error
-// (hipErrorInvalidValue if kernel is null or `device` is invalid, hipErrorNotSupported if
+// (hipErrorInvalidValue if kernel is null or `device` or `par` is invalid, hipErrorNotSupported if
 // the runtime library the kernel calls, such as hipBLASLt, has no algorithm for `par` on the
 // stream's device). The kernel runs asynchronously, so an execution fault (e.g. an
 // out-of-bounds access) surfaces at a later synchronization.
@@ -211,7 +220,8 @@ HIPCONV_API void get_tolerance(ConvKernelHandle kernel,
 // coarse to check, so the caller owes it a more accurate one; see
 // docs/algorithms/details/direct/direct-wgrad-tolerance.md.
 //
-// rtol is TOLERANCE_UNAVAILABLE past the depth where the model applies.
+// rtol is TOLERANCE_UNAVAILABLE past the depth where the model applies. Throws
+// std::invalid_argument for a `par` that get_valid_configs rejects as invalid.
 HIPCONV_API void get_recursive_summation_tolerance(const ConvParams& par, float& atol, float& rtol);
 
 // A bound (kernel, params) pair ready to launch.

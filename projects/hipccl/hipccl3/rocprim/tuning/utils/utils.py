@@ -24,9 +24,10 @@ import argparse
 import numpy as np
 from dataclasses import dataclass
 from typing import Optional
-import os 
+import os
 
-BASE_DIR = f'{os.path.dirname(os.path.abspath(__file__))}/..'
+BASE_DIR = f"{os.path.dirname(os.path.abspath(__file__))}/.."
+
 
 class Parser:
     @staticmethod
@@ -91,6 +92,13 @@ class Parser:
             default=-1,
             help=f"The initial seed to generate the input data with",
         )
+        parser.add_argument(
+            "--param-overrides",
+            type=str,
+            default=None,
+            help='JSON object replacing tune parameter values, e.g. \'{"radix_bits": 8, "ipt": [4, 8]}\'. '
+            'Use "best" to pin a parameter to the best cached result for each type (default: none)',
+        )
         return parser
 
 
@@ -99,6 +107,7 @@ class TypeInfo:
     cpp_type: str
     size: int
     numpy_type: type | np.dtype
+
 
 TYPE_CONFIGS = {
     "int64_t": TypeInfo("int64_t", 8, np.int64),

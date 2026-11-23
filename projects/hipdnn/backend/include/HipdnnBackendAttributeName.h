@@ -75,7 +75,13 @@ typedef enum
      * @{
      */
 
-    /** @brief Heuristic search mode (hipdnnBackendHeuristicMode_t) */
+    /**
+     * @brief Heuristic mode (hipdnnBackendHeurMode_t); required before finalize
+     *
+     * Selects the heuristic policy list when neither HIPDNN_HEUR_POLICY_ORDER nor
+     * HIPDNN_ATTR_ENGINEHEUR_POLICY_ORDER_EXT is set: FALLBACK ranks without models,
+     * A (INSTANT) by engine-level predictions, B by configuration-level predictions.
+     */
     HIPDNN_ATTR_ENGINEHEUR_MODE = 100,
 
     /** @brief Operation graph to find engines for (backend descriptor) */
@@ -107,7 +113,10 @@ typedef enum
      *      either a policy name, which is hashed via policyNameToId, or a raw
      *      decimal int64 policy ID).
      *   2. This descriptor attribute, if set.
-     *   3. Built-in default: [SelectionHeuristic::Config, SelectionHeuristic::StaticOrdering].
+     *   3. The list HIPDNN_ATTR_ENGINEHEUR_MODE selects: FALLBACK
+     *      [SelectionHeuristic::Config, SelectionHeuristic::StaticOrdering], A
+     *      [Config, SelectionHeuristic::ModeA, StaticOrdering], B
+     *      [Config, SelectionHeuristic::ModeB, StaticOrdering].
      *
      * Type: HIPDNN_TYPE_INT64
      */

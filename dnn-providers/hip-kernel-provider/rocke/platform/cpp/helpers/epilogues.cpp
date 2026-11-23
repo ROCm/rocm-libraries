@@ -349,28 +349,32 @@ rocke_cshuffle_epilogue_t rocke_cshuffle_epilogue_make(const rocke_mfma_atom_t* 
     return epi;
 }
 
+int rocke_cshuffle_pick_store_vec(
+    int tile_m, int tile_n, int block_size, int max_store_vec, bool fp32_out)
+{
+    /* Mirrors Python: cap at 8; for fp32 output store_vec counts f32 elements,
+     * so cap at 4 (=16 bytes hw limit). */
+    const int cap = fp32_out ? 4 : 8;
+    int v = max_store_vec < cap ? max_store_vec : cap;
+    while(v > 1)
+    {
+        bool ok = (tile_n % v == 0) && ((tile_m * tile_n) / v >= block_size)
+                  && (((tile_m * tile_n) / v) % block_size == 0);
+        if(ok)
+            break;
+        v /= 2;
+    }
+    return v;
+}
+
 rocke_cshuffle_epilogue_t rocke_cshuffle_epilogue_from_grid(const rocke_mfma_atom_t* atom,
                                                             const rocke_warp_grid_t* grid,
                                                             int max_store_vec)
 {
     rocke_cshuffle_epilogue_t epi = rocke_cshuffle_epilogue_make(atom, grid);
-    int v;
-    int block_size = rocke_warp_grid_block_size(grid);
-    /* For fp32 output store_vec counts f32 elements; cap at 4 (=16 bytes hw limit). */
-    bool _fp32_out = epi.out_dtype != NULL
-                     && (epi.out_dtype[0] == 'f' && epi.out_dtype[1] == 'p'
-                         && epi.out_dtype[2] == '3' && epi.out_dtype[3] == '2');
-    int _max_sv = (_fp32_out && max_store_vec > 4) ? 4 : max_store_vec;
-    v = _max_sv;
-    while(v > 1)
-    {
-        bool ok = (grid->tile_n % v == 0) && ((grid->tile_m * grid->tile_n) / v >= block_size)
-                  && (((grid->tile_m * grid->tile_n) / v) % block_size == 0);
-        if(ok)
-            break;
-        v /= 2;
-    }
-    epi.store_vec = v;
+    /* epi.out_dtype is the f16 default here; the caller sets it afterwards. */
+    epi.store_vec = rocke_cshuffle_pick_store_vec(
+        grid->tile_m, grid->tile_n, rocke_warp_grid_block_size(grid), max_store_vec, false);
     return epi;
 }
 
@@ -379,32 +383,16 @@ rocke_cshuffle_epilogue_t rocke_cshuffle_epilogue_from_grid_op(const rocke_mmaop
                                                                int max_store_vec)
 {
     rocke_cshuffle_epilogue_t epi;
-    int v;
-    int block_size;
-    bool _fp32_out;
-    int _max_sv;
     epi.atom = NULL;
     epi.mma_op = op;
     epi.grid = *grid;
-    epi.store_vec = 8;
     epi.smem_name_hint = "C_smem";
     epi.out_dtype = "f16";
     epi.war_barriers = 1;
     epi.no_alias = false;
-    block_size = rocke_warp_grid_block_size(grid);
     /* fp32_out cap: caller sets epi.out_dtype after construction; default f16 */
-    _fp32_out = false;
-    _max_sv = (_fp32_out && max_store_vec > 4) ? 4 : max_store_vec;
-    v = _max_sv;
-    while(v > 1)
-    {
-        bool ok = (grid->tile_n % v == 0) && ((grid->tile_m * grid->tile_n) / v >= block_size)
-                  && (((grid->tile_m * grid->tile_n) / v) % block_size == 0);
-        if(ok)
-            break;
-        v /= 2;
-    }
-    epi.store_vec = v;
+    epi.store_vec = rocke_cshuffle_pick_store_vec(
+        grid->tile_m, grid->tile_n, rocke_warp_grid_block_size(grid), max_store_vec, false);
     return epi;
 }
 
@@ -689,6 +677,30 @@ void rocke_cshuffle_epilogue_atomic_store(rocke_ir_builder_t* b,
                                           rocke_value_t* bounds_m,
                                           rocke_value_t* bounds_n)
 {
+    rocke_cshuffle_epilogue_atomic_store_addr(
+        b, epi, accs, num_accs, dw_ptr, wg_N, NULL, NULL, bounds_m, bounds_n);
+}
+
+/* Python _and(x, y) in CShuffleEpilogue.atomic_store: a NULL operand is
+ * "no condition"; two conditions are and-ed. */
+static rocke_value_t* cshuffle_atomic_and(rocke_ir_builder_t* b, rocke_value_t* x, rocke_value_t* y)
+{
+    if(x == NULL)
+        return y;
+    return (y == NULL) ? x : rocke_b_land(b, x, y);
+}
+
+void rocke_cshuffle_epilogue_atomic_store_addr(rocke_ir_builder_t* b,
+                                               const rocke_cshuffle_epilogue_t* epi,
+                                               rocke_value_t* const* accs,
+                                               int num_accs,
+                                               rocke_value_t* dw_ptr,
+                                               rocke_value_t* wg_N,
+                                               rocke_epilogue_addr_fn addr_fn,
+                                               void* addr_user,
+                                               rocke_value_t* bounds_m,
+                                               rocke_value_t* bounds_n)
+{
     /* Steps 1+2 are identical to rocke_cshuffle_epilogue_store (scatter accs
      * to LDS then barrier).  Step 3 replaces wide buffer_store with atomic-adds:
      *   fp32 -> global_atomic_add per element in the sv chunk.
@@ -873,6 +885,11 @@ void rocke_cshuffle_epilogue_atomic_store(rocke_ir_builder_t* b,
     vecs_per_thread = (grid->tile_m * grid->tile_n / sv) / threads;
     c_threads = rocke_b_const_i32(b, threads);
     c_tile_n_div_vec = rocke_b_const_i32(b, grid->tile_n / sv);
+    if(addr_fn == NULL && wg_N == NULL)
+    {
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "CShuffleEpilogue.atomic_store: pass wg_N or addr_fn");
+        return;
+    }
 
     for(e = 0; e < vecs_per_thread; ++e)
     {
@@ -900,6 +917,15 @@ void rocke_cshuffle_epilogue_atomic_store(rocke_ir_builder_t* b,
                 rocke_value_t* n_ok
                     = (bounds_n != NULL) ? rocke_b_cmp_lt(b, n_val, bounds_n) : NULL;
                 rocke_value_t* ok = NULL;
+                rocke_value_t* c_off = NULL;
+                /* addr_fn: the offset and its validity come right after the
+                 * bounds compares; the validity joins m_ok (Python _and). */
+                if(addr_fn != NULL)
+                {
+                    rocke_value_t* a_ok = NULL;
+                    c_off = addr_fn(b, m_val, n_val, &a_ok, addr_user);
+                    m_ok = cshuffle_atomic_and(b, m_ok, a_ok);
+                }
                 if(m_ok != NULL && n_ok != NULL)
                     ok = rocke_b_land(b, m_ok, n_ok);
                 else if(m_ok != NULL)
@@ -922,7 +948,8 @@ void rocke_cshuffle_epilogue_atomic_store(rocke_ir_builder_t* b,
                     rocke_value_t* vf32
                         = rocke_b_smem_load_vN(b, c_smem, smem_idx, 2, rocke_f32(), 1);
                     rocke_value_t* v = rocke_b_vec_extract(b, vf32, 0);
-                    rocke_value_t* c_off = rocke_b_add(b, rocke_b_mul(b, m_val, wg_N), n_val);
+                    if(addr_fn == NULL)
+                        c_off = rocke_b_add(b, rocke_b_mul(b, m_val, wg_N), n_val);
                     rocke_b_global_atomic_add(b, dw_ptr, c_off, v, NULL);
                 }
                 if(ok != NULL)
@@ -953,7 +980,7 @@ void rocke_cshuffle_epilogue_atomic_store(rocke_ir_builder_t* b,
                 {
                     rocke_value_t* sce = rocke_b_add(b, col, rocke_b_const_i32(b, 2 * p));
                     rocke_value_t* sco = rocke_b_add(b, col, rocke_b_const_i32(b, 2 * p + 1));
-                    rocke_value_t* c_off_even = rocke_b_add(b, rocke_b_mul(b, m_val, wg_N), n_even);
+                    rocke_value_t* c_off_even;
                     rocke_value_t* smem_idx_e[2];
                     rocke_value_t* smem_idx_o[2];
                     rocke_value_t* v_e;
@@ -964,6 +991,16 @@ void rocke_cshuffle_epilogue_atomic_store(rocke_ir_builder_t* b,
                     smem_idx_e[1] = sce;
                     smem_idx_o[0] = row;
                     smem_idx_o[1] = sco;
+                    /* The pair is addressed (and validated) at its even element;
+                     * the odd one is offset + 1. */
+                    if(addr_fn == NULL)
+                        c_off_even = rocke_b_add(b, rocke_b_mul(b, m_val, wg_N), n_even);
+                    else
+                    {
+                        rocke_value_t* a_ok = NULL;
+                        c_off_even = addr_fn(b, m_val, n_even, &a_ok, addr_user);
+                        ok = cshuffle_atomic_and(b, ok, a_ok);
+                    }
 
                     if(ok != NULL)
                     {

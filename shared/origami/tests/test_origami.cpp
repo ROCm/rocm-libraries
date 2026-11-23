@@ -1038,9 +1038,12 @@ TEST_CASE("Origami: select_config_mnk unit test", "[origami]") {
         REQUIRE(result_config.config.mt.m == config[1].mt.m);
 
       result_config = origami::select_config_mnk(201, 201, 201, hardware, config);  // M = N = K
-      // All architectures prefer the square 192x160x64 tile (Tile B) for this
-      // small cube.
-      REQUIRE(result_config.config.mt.m == config[1].mt.m);
+      // The CDNA architectures prefer the square 192x160x64 tile (Tile B) for this small cube;
+      // gfx1250 ranks the 128x128x256 tile (Tile C) first.
+      if (gpu_arch == 1250)
+        REQUIRE(result_config.config.mt.m == config[2].mt.m);
+      else
+        REQUIRE(result_config.config.mt.m == config[1].mt.m);
 
       // Test 2: Verify default problem settings (transpose, data types)
       origami::problem_t problem = {
@@ -1050,6 +1053,8 @@ TEST_CASE("Origami: select_config_mnk unit test", "[origami]") {
           .b_transpose     = origami::transpose_t::N,
           .a_dtype         = origami::data_type_t::Half,  // element_size_A = 16
           .b_dtype         = origami::data_type_t::Half,
+          .c_dtype         = origami::data_type_t::Half,  // as select_config_mnk's default problem
+          .d_dtype         = origami::data_type_t::Half,
           .mi_dtype        = origami::data_type_t::Half,
           .a_mx_block_size = 0,
           .b_mx_block_size = 0,
@@ -1961,4 +1966,36 @@ TEST_CASE("gfx950 pci_chip_id id75a0 vs id75a8", "[hardware]") {
   REQUIRE_FALSE(hw_def.pci_chip_id.has_value());
   REQUIRE(hw_v2.pci_chip_id.has_value());
   REQUIRE(hw_v2.pci_chip_id.value() == 0x75a8);
+}
+
+TEST_CASE("gfx1250 WGP count selects the 6-XCD part", "[hardware]") {
+  using origami::hardware_t;
+  const auto arch = hardware_t::architecture_t::gfx1250;
+  const auto c8   = hardware_t::get_arch_constants(arch);
+  for (size_t n_cu : {size_t{256}, size_t{128}, size_t{64}, size_t{32}}) {
+    INFO(n_cu << " WGPs");
+    const auto c = hardware_t::get_arch_constants(arch, std::nullopt, n_cu);
+    REQUIRE(c.mem1_perf_ratio == c8.mem1_perf_ratio);
+    REQUIRE(c.mem3_perf_ratio == c8.mem3_perf_ratio);
+    REQUIRE(c.mem_bw_per_wg_coefficients == c8.mem_bw_per_wg_coefficients);
+  }
+
+  // A 96-WGP DPX partition of the 6-XCD part: 3 XCDs in one L2 domain, measured peaks
+  // (L2 14.75 TB/s, DRAM 8.64 TB/s at a 2.4 GHz engine clock), scaled by the refit's peak ratios.
+  const auto dpx = hardware_t::get_hardware_for_arch(arch, 96, 327680, 512 * 1024, 4 << 20, 2'400'000);
+  REQUIRE(dpx.NUM_XCD == 3);
+  REQUIRE(dpx.num_l2_domains() == 1);
+  REQUIRE(dpx.l2_domain_capacity() == (96ull << 20));
+  REQUIRE(dpx.mem1_perf_ratio * dpx.compute_clock_ghz == Catch::Approx(14750.0 * (41301.81761089743 / 41930.0)));
+  REQUIRE(dpx.mem3_perf_ratio * dpx.compute_clock_ghz == Catch::Approx(8637.0 * (18382.976995668938 / 19725.454545454544)));
+
+  // The whole 6-XCD part has twice the partition's peaks; the 8-XCD part keeps its own.
+  const auto spx = hardware_t::get_hardware_for_arch(arch, 192, 327680, 512 * 1024, 4 << 20, 2'400'000);
+  REQUIRE(spx.NUM_XCD == 6);
+  REQUIRE(spx.num_l2_domains() == 2);
+  REQUIRE(spx.mem3_perf_ratio == Catch::Approx(2.0 * dpx.mem3_perf_ratio));
+  const auto p8 = hardware_t::get_hardware_for_arch(arch, 256, 327680, 512 * 1024, 4 << 20, 2'400'000);
+  REQUIRE(p8.NUM_XCD == 8);
+  REQUIRE(p8.mem1_perf_ratio * p8.compute_clock_ghz == Catch::Approx(41930.0));
+  REQUIRE(p8.mem3_perf_ratio * p8.compute_clock_ghz == Catch::Approx(17130.0));
 }

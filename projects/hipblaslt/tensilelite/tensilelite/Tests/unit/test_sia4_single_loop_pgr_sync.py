@@ -98,8 +98,8 @@ def _tdm_plr0_config(prefetch_global_read):
         {"ScheduleIterAlg": [3]},
     ]
     if prefetch_global_read == 1:
-        # LDSTrInst with PGR1 is only supported with one LDS buffer and no pointer swap.
-        fork_parameters += [{"1LDSBuffer": [1]}, {"ExpandPointerSwap": [False]}]
+        # TDM requires 1LDSBuffer=0, and LDSTrInst with 1LDSBuffer=0 needs ExpandPointerSwap off.
+        fork_parameters += [{"1LDSBuffer": [0]}, {"ExpandPointerSwap": [False]}]
     return {
         "GlobalParameters": {"Architecture": "gfx1250", "PrintLevel": 0},
         "BenchmarkProblems": [[

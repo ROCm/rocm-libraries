@@ -30,6 +30,7 @@
 #include "mathutil.h"
 #include "launch_params.h"
 #include "detail.h"
+#include "grid_limits.h"
 #include "hip_util.h"
 #include "hipconv/conv_params.hpp"
 
@@ -1158,11 +1159,24 @@ public:
         }
         if(shared_bytes(par) > kMaxSharedBytes)
             return false;
+        if(!positions_fit(par))
+            return false;
         // Exactly one fold family is valid per shape, so on a narrow map the F=1 ladder
         // drops out and the folded one leads the auto-pick.
         if(cfg_.w_fold != preferred_wfold(par, dev.cu_count))
             return false;
-        return true;
+        return grid_fits(get_launch_params(dev, par));
+    }
+
+    // Whether the row and column positions the kernel computes in int stay within INT32_MAX.
+    //
+    // Rows reach up to 3 × kh + prefetch_depth past the padded input, columns 2 × w_sub() + kw.
+    bool positions_fit(const ConvParams& par) const
+    {
+        const int64_t rows = std::max(int64_t(par.h), int64_t(par.p) * par.stride_h);
+        const int64_t cols = std::max(int64_t(par.w), int64_t(par.q) * par.stride_w);
+        return rows + 2 * par.pad_h + 3 * par.kh + cfg_.prefetch_depth <= INT32_MAX &&
+               cols + 2 * par.pad_w + 2 * cfg_.w_sub() + par.kw <= INT32_MAX;
     }
 
     // Batch-fold factor for `par` (1 = none). Fold only narrow maps (tile <= 50% full)
@@ -1241,27 +1255,29 @@ public:
         int num_h_chunks        = 1;
         if(ups == 1 && n_full_blocks > 1)
         {
-            const int base_wgs    = (q_tiles * eff_n_fold) * ch_blocks * blocks_n_fold;
-            const int target_wgs  = 4 * dev.cu_count;
-            const int max_by_halo = std::max(2, n_full_blocks / 2);
+            const int64_t base_wgs = int64_t(q_tiles) * eff_n_fold * ch_blocks * blocks_n_fold;
+            const int target_wgs   = 4 * dev.cu_count;
+            const int max_by_halo  = std::max(2, n_full_blocks / 2);
             if(base_wgs < target_wgs)
             {
-                num_h_chunks = divup(target_wgs, base_wgs);
+                num_h_chunks = divup(target_wgs, static_cast<int>(base_wgs));
                 num_h_chunks = std::min(num_h_chunks, max_by_halo);
                 num_h_chunks = std::min(num_h_chunks, n_full_blocks);
                 num_h_chunks = std::max(num_h_chunks, 1);
                 // The split buys occupancy with (num_h_chunks-1)/n_full_blocks of extra input
                 // traffic, so it must clear both bars; see depthwise-1d-toeplitz-cdna5.md.
                 const bool grid_deep_enough = base_wgs >= (5 * dev.cu_count) / 2;
-                const bool reread_too_dear  = (num_h_chunks - 1) * 100 > 6 * n_full_blocks;
+                const bool reread_too_dear  = (num_h_chunks - 1) * 100 > 6 * int64_t(n_full_blocks);
                 if(grid_deep_enough && reread_too_dear)
                     num_h_chunks = 1;
             }
         }
 
         LaunchParams launch;
-        launch.block_size = dim3(cfg_.block_size(), 1, 1);
-        launch.grid       = dim3(q_tiles * eff_n_fold, ch_blocks, blocks_n_fold * num_h_chunks);
+        launch.block_size           = dim3(cfg_.block_size(), 1, 1);
+        launch.grid                 = dim3(grid_extent(int64_t(q_tiles) * eff_n_fold),
+                           ch_blocks,
+                           grid_extent(int64_t(blocks_n_fold) * num_h_chunks));
         launch.dynamic_shared_bytes = shared_bytes(par);
         return launch;
     }

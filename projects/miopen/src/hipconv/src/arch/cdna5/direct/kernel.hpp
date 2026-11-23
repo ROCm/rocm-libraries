@@ -1162,9 +1162,9 @@ public:
         }
         // Due to GVS addressing the lane-variable part of the offset must fit in a 32 bit
         // integer
-        const int64_t prefetch_max_offset = [&]() -> int64_t {
-            return gc * (arch::wave_size - 1) * par.kh * par.kw * sizeof_data_type(par.weight_type);
-        }();
+        const int64_t prefetch_max_offset = static_cast<int64_t>(gc) * (arch::wave_size - 1) *
+                                            par.kh * par.kw *
+                                            static_cast<int64_t>(sizeof_data_type(par.weight_type));
         if(prefetch_max_offset != static_cast<int64_t>(static_cast<int32_t>(prefetch_max_offset)))
             return false;
         if(cfg_.aligned && gk * sizeof_data_type(par.output_type) % 16 != 0)

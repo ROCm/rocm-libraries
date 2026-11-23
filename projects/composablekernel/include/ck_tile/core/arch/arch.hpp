@@ -1366,6 +1366,25 @@ CK_TILE_DEVICE uint32_t get_cluster_workgroup_id_z()
 #endif
 }
 
+// Workgroup masks of a cluster_x by cluster_y cluster, as TDM's workgroup_mask takes them: bit i
+// is the workgroup whose cluster flat id, x + y * cluster_x, is i.
+
+/// The workgroups whose cluster x is x: one per row.
+CK_TILE_HOST_DEVICE constexpr uint32_t
+cluster_mask_same_x(index_t cluster_x, index_t cluster_y, index_t x)
+{
+    uint32_t column = 0;
+    for(index_t y = 0; y < cluster_y; ++y)
+        column |= 1u << (y * cluster_x);
+    return column << x;
+}
+
+/// The workgroups whose cluster y is y: a whole row.
+CK_TILE_HOST_DEVICE constexpr uint32_t cluster_mask_same_y(index_t cluster_x, index_t y)
+{
+    return ((1u << cluster_x) - 1u) << (y * cluster_x);
+}
+
 // https://llvm.org/docs/AMDGPU/gfx9_waitcnt.html
 struct WaitcntLayoutGfx12
 { // s_wait_loadcnt_dscnt: mem[13:8], ds[5:0]
@@ -1519,6 +1538,20 @@ CK_TILE_DEVICE void s_wait_dscnt()
 #endif
 }
 
+/// s_wait_dscnt N exactly where it is written. LLVM's waitcnt pass may drop or relax the
+/// intrinsic in s_wait_dscnt when its own analysis needs no wait there, so a pipeline that paces
+/// its LDS reads ahead of their use loses the waits it placed.
+template <index_t N = 0>
+CK_TILE_DEVICE void s_wait_dscnt_pinned()
+{
+#if defined(__gfx12__)
+    static_assert(N >= 0 && N <= waitcnt_arg::kMaxLgkmCnt, "dscnt out of range");
+    asm volatile("s_wait_dscnt %0" ::"n"(N) : "memory");
+#else
+    s_wait_dscnt<N>();
+#endif
+}
+
 #if CK_TILE_HAS_ASYNCMARK
 namespace detail {
 // Some compilers take a trailing stage mask operand in the asyncmark builtins. MaskType holds its
@@ -1613,21 +1646,30 @@ CK_TILE_DEVICE void s_waitcnt_barrier()
 template <index_t lgkmcnt = 0>
 CK_TILE_DEVICE void block_sync_lds()
 {
-    // LDS fence: synchronize LDS across a workgroup barrier. The release/acquire fences make the
-    // barrier visible to the LLVM memory model so the optimizer cannot move LDS accesses across
-    // it; "local" keeps them LDS-only (no VMEM synchronization is added). The explicit
-    // lgkmcnt/dscnt wait is kept as a workaround for ROCm 7.2-10.1 where a release fence's wait
-    // could be elided when it was the first memory op in a loop (loop-carried counts mishandled);
-    // see ac4f0dc9 / ck::block_sync_lds.
-    s_waitcnt_lgkm<lgkmcnt>();
-    __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup", "local");
+    if constexpr(lgkmcnt != 0)
+    {
+        // Partial or no LDS wait: the caller keeps ds_loads in flight across the barrier. A
+        // workgroup fence would drain them (s_wait_dscnt 0), so use the unfenced barrier.
+        s_waitcnt_barrier<waitcnt_arg::kMaxVmCnt, waitcnt_arg::kMaxExpCnt, lgkmcnt>();
+    }
+    else
+    {
+        // LDS fence: synchronize LDS across a workgroup barrier. The release/acquire fences make
+        // the barrier visible to the LLVM memory model so the optimizer cannot move LDS accesses
+        // across it; "local" keeps them LDS-only (no VMEM synchronization is added). The explicit
+        // lgkmcnt/dscnt wait is kept as a workaround for ROCm 7.2-10.1 where a release fence's
+        // wait could be elided when it was the first memory op in a loop (loop-carried counts
+        // mishandled); see ac4f0dc9 / ck::block_sync_lds.
+        s_waitcnt_lgkm<lgkmcnt>();
+        __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup", "local");
 #if defined(__gfx12__)
-    __builtin_amdgcn_s_barrier_signal(-1);
-    __builtin_amdgcn_s_barrier_wait(-1);
+        __builtin_amdgcn_s_barrier_signal(-1);
+        __builtin_amdgcn_s_barrier_wait(-1);
 #else
-    __builtin_amdgcn_s_barrier();
+        __builtin_amdgcn_s_barrier();
 #endif
-    __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup", "local");
+        __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup", "local");
+    }
 }
 
 // Pre-asyncmark gfx9 FALLBACK for publishing direct/async global->LDS data across a barrier. The
@@ -1678,6 +1720,13 @@ CK_TILE_DEVICE void s_wait_tensorcnt_barrier()
     s_wait_tensorcnt<tensorcnt>();
     block_sync_lds<lgkmcnt>();
 }
+
+/// The workgroup barrier alone. Unlike block_sync_lds it waits for nothing: the caller issues
+/// the waits it needs first.
+CK_TILE_DEVICE void s_barrier() { __builtin_amdgcn_s_barrier(); }
+
+/// A compiler-only memory fence: no memory operation is moved across it. Emits no instruction.
+CK_TILE_DEVICE void compiler_memory_fence() { asm volatile("" ::: "memory"); }
 
 template <index_t vmcnt = 0>
 CK_TILE_DEVICE void block_sync_lds_direct_load()
@@ -1901,6 +1950,15 @@ enum LLVMSchedGroupMask : int32_t
     TRANS      = 1 << 10,
     ALL        = (TRANS << 1) - 1,
 };
+
+/// compiler_memory_fence plus a sched_barrier: only the instruction groups in Mask (an
+/// LLVMSchedGroupMask) may be scheduled across this point.
+template <int32_t Mask = LLVMSchedGroupMask::NONE>
+CK_TILE_DEVICE void sched_fence()
+{
+    compiler_memory_fence();
+    __builtin_amdgcn_sched_barrier(Mask);
+}
 
 CK_TILE_DEVICE static constexpr auto get_max_vgpr_count()
 {

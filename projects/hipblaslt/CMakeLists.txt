@@ -292,6 +292,23 @@ set(hipblaslt_python_dev Development.Module)
 hipblaslt_find_python("${hipblaslt_python_dev}")
 hipblaslt_configure_bundled_python_command("${CMAKE_CURRENT_BINARY_DIR}/tensilelite/rocisa;${CMAKE_CURRENT_BINARY_DIR}/tensilelite" "${san_opts}")
 
+if(TENSILELITE_ENABLE_CLIENT)
+    set(_tensilelite_source_root "${CMAKE_CURRENT_SOURCE_DIR}/tensilelite")
+    set(TENSILELITE_SOURCE_REVISION "" CACHE STRING
+        "rocm-libraries commit to record when building from a tree without git")
+    hipblaslt_resolve_build_rocm_root(HIPBLASLT_BUILD_ROCM_ROOT)
+    include(cmake/TensileLiteMetadata.cmake)
+    hipblaslt_configure_tensilelite_metadata("${_tensilelite_source_root}"
+        "${CMAKE_CURRENT_BINARY_DIR}/tensilelite-client-generated")
+    if(TENSILELITE_CLIENT_SOURCE_REVISION STREQUAL "none")
+        message(WARNING "No source revision found; client pairing disabled. Build from a git "
+            "checkout or pass -DTENSILELITE_SOURCE_REVISION=<sha>.")
+    endif()
+    message(STATUS "TensileLite client: version ${TENSILELITE_DISTRIBUTION_VERSION}, "
+        "source revision ${TENSILELITE_CLIENT_SOURCE_REVISION}, "
+        "build ROCm ${TENSILELITE_CLIENT_BUILD_ROCM}")
+endif()
+
 if(HIPBLASLT_ENABLE_ROCROLLER)
     if(NOT ROCM_LIBS_SUPERBUILD)
         if(HIPBLASLT_ENABLE_THEROCK)
@@ -444,6 +461,19 @@ configure_file(
     "${CMAKE_CURRENT_BINARY_DIR}/library/include/hipblaslt/hipblaslt-opt-in-features.h"
 )
 
+# Experimental API registry: fails configure once a feature is past its deadline, and
+# generates hipblaslt-experimental-features.h and the library's private feature list.
+# Sets HIPBLASLT_EXPERIMENTAL_FRAGMENTS.
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/rocm_feature_releases.cmake")
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/hipblaslt_experimental.cmake")
+set(HIPBLASLT_EXPERIMENTAL_HEADER_DIR "${CMAKE_CURRENT_SOURCE_DIR}/library/include/hipblaslt")
+include("${CMAKE_CURRENT_SOURCE_DIR}/library/experimental/features.cmake")
+hipblaslt_experimental_finalize(
+    TEMPLATE "${CMAKE_CURRENT_SOURCE_DIR}/library/include/hipblaslt-experimental-features.h.in"
+    OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/library/include/hipblaslt/hipblaslt-experimental-features.h"
+    REGISTRY "${CMAKE_CURRENT_BINARY_DIR}/library/src/hipblaslt-experimental-registry.inc"
+)
+
 # Configure the Windows version resource (PE VERSIONINFO) embedded into
 # libhipblaslt.dll. This mirrors the sibling rocBLAS/hipBLAS libraries so the
 # DLL reports file/product version metadata in its Windows file properties.
@@ -538,6 +568,15 @@ if(HIPBLASLT_ENABLE_HOST)
     endif()
     rocm_set_soversion(hipblaslt "${hipblaslt_SOVERSION}")
     add_library(roc::hipblaslt ALIAS hipblaslt)
+
+    # roc::hipblaslt plus ROCM_ENABLE_EXPERIMENTAL_APIS=1, the ROCm-wide switch that makes
+    # hipblaslt/hipblaslt-experimental.h declare the experimental API. Installed and exported
+    # with roc::hipblaslt, but not listed in hipblaslt_LIBRARIES, so nobody opts in by accident.
+    add_library(hipblaslt-experimental INTERFACE)
+    target_link_libraries(hipblaslt-experimental INTERFACE hipblaslt)
+    target_compile_definitions(hipblaslt-experimental INTERFACE ROCM_ENABLE_EXPERIMENTAL_APIS=1)
+    set_target_properties(hipblaslt-experimental PROPERTIES EXPORT_NAME hipblaslt_experimental)
+    add_library(roc::hipblaslt_experimental ALIAS hipblaslt-experimental)
 
     target_link_libraries(hipblaslt
         PUBLIC
@@ -645,7 +684,7 @@ if(HIPBLASLT_ENABLE_HOST)
         message(WARNING "llvm-strip not found, using default strip tool. This may cause stripping to fail during packaging.")
     endif()
 
-    rocm_install_targets(TARGETS hipblaslt)
+    rocm_install_targets(TARGETS hipblaslt hipblaslt-experimental)
 
     get_target_property(hipblaslt_public_headers roc::hipblaslt INTERFACE_SOURCES)
 
@@ -804,6 +843,22 @@ if(HIPBLASLT_ENABLE_CLIENT)
         COMPONENT benchmarks
     )
 
+    # Race check run under CPU rocjitsu by TheRock's hipblaslt-rocjitsu-race
+    # test; it locates the ROCm installation from this install location.
+    # rocjitsu is Linux-only.
+    if(NOT WIN32)
+        rocm_install(
+            PROGRAMS "${CMAKE_CURRENT_SOURCE_DIR}/clients/scripts/rocjitsu/rocjitsu_race_smoke.py"
+            DESTINATION "${CMAKE_INSTALL_DATADIR}/hipblaslt/rocjitsu"
+            COMPONENT clients-common
+        )
+        rocm_install(
+            FILES "${CMAKE_CURRENT_SOURCE_DIR}/clients/scripts/rocjitsu/rocjitsu_race_smoke_tensilelite.yaml"
+            DESTINATION "${CMAKE_INSTALL_DATADIR}/hipblaslt/rocjitsu"
+            COMPONENT clients-common
+        )
+    endif()
+
     if(HIPBLASLT_ENABLE_GEMM_A2A_FUSION AND NOT WIN32)
         rocm_install(
             TARGETS hipblaslt-bench-a2a
@@ -878,8 +933,6 @@ endif()
 #   share/hipblaslt/tensilelite/tensilelite/ — TensileLite Python package
 #   share/hipblaslt/tensilelite/rocisa/       — rocisa Python package (normalized layout)
 #   share/hipblaslt/tensilelite/rocisa_tests/ — rocisa pytest modules
-#   share/hipblaslt/tensilelite/stinkytofu/   — stinkytofu Python package (gfx1250 backend)
-#   share/hipblaslt/tensilelite/rocisa_stinkytofu_adaptor/ — rocisa facade over stinkytofu
 if(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS AND NOT WIN32)
     set(_tensilelite_install_dest "${CMAKE_INSTALL_DATADIR}/hipblaslt/tensilelite")
     set(_tensilelite_src "${CMAKE_CURRENT_SOURCE_DIR}/tensilelite")
@@ -893,6 +946,14 @@ if(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS AND NOT WIN32)
         PATTERN ".pytest_cache" EXCLUDE
         PATTERN "*.pyc" EXCLUDE
         PATTERN "source_only" EXCLUDE
+    )
+
+    install(
+        FILES
+            "${_tensilelite_src}/_tensilelite_client_binding.py"
+            "${_tensilelite_src}/tensilelite_configure_client.py"
+        DESTINATION "${_tensilelite_install_dest}"
+        COMPONENT tests
     )
 
     # Scripts used by unit tests
@@ -949,37 +1010,6 @@ if(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS AND NOT WIN32)
         endif()
     endif()
 
-    # FFM runs with PYTHONPATH=share/hipblaslt/tensilelite. The lib/hipblaslt
-    # install in rocisa/CMakeLists.txt is a different root, and TheRock's lib
-    # component keeps lib/hipblaslt/rocisa plus every *.so. Put the package
-    # here so gfx1250 codegen can import it. The *.so is claimed by the lib
-    # artifact; these Python files stay in the test artifact; flattening
-    # puts them back next to each other. The target exists for every GPU
-    # family (see STINKYTOFU_BUILD_PYTHON in rocisa/CMakeLists.txt).
-    if(TARGET stinkytofu_python)
-        set(_stinkytofu_py_src "${ROCM_LIBRARIES_ROOT}/shared/stinkytofu")
-        install(TARGETS stinkytofu_python
-            LIBRARY DESTINATION "${_tensilelite_install_dest}/stinkytofu"
-            COMPONENT tests
-        )
-        install(FILES "${_stinkytofu_py_src}/python_module/stinkytofu/__init__.py"
-            DESTINATION "${_tensilelite_install_dest}/stinkytofu"
-            COMPONENT tests
-        )
-        if(TARGET intrinsics_compiled)
-            install(FILES "${CMAKE_BINARY_DIR}/intrinsics.st.bc"
-                DESTINATION "${_tensilelite_install_dest}/stinkytofu"
-                COMPONENT tests
-            )
-        endif()
-        install(DIRECTORY
-            "${_tensilelite_src}/rocisa_stinkytofu_adaptor/rocisa_stinkytofu_adaptor/"
-            DESTINATION "${_tensilelite_install_dest}/rocisa_stinkytofu_adaptor"
-            COMPONENT tests
-            FILES_MATCHING PATTERN "*.py"
-        )
-    endif()
-
     # rocisa tests
     install(
         DIRECTORY "${_tensilelite_src}/rocisa/test/"
@@ -1014,9 +1044,14 @@ if(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS AND NOT WIN32)
     )
 
     if(TENSILELITE_ENABLE_CLIENT)
+        set(_tensilelite_client_dest "${CMAKE_INSTALL_LIBEXECDIR}/hipblaslt/tensilelite")
+        # TheRock computes install RPATHs relative to this location; without it they
+        # assume bin/ and miss <prefix>/lib from libexec/hipblaslt/tensilelite.
+        set_property(TARGET tensilelite-client PROPERTY THEROCK_INSTALL_RPATH_ORIGIN
+            "${_tensilelite_client_dest}")
         install(
             TARGETS tensilelite-client
-            RUNTIME DESTINATION "${CMAKE_INSTALL_LIBEXECDIR}/hipblaslt/tensilelite"
+            RUNTIME DESTINATION "${_tensilelite_client_dest}"
             COMPONENT tests
         )
     endif()

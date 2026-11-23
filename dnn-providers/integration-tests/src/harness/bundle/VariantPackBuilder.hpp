@@ -59,9 +59,10 @@ VariantPack buildVariantPack(
 ///
 /// `onDevice` says the buffers will be handed to an executor as device pointers. Their
 /// sentinel is then written straight into device memory where the element type allows
-/// it, rather than filled on the host and uploaded; the rest are filled on the host as
-/// before. False never touches the device. A device failure while `onDevice` throws
-/// DeviceOutputError.
+/// it, rather than filled on the host and uploaded. For host buffers, packed plain
+/// tensors use a bulk repeated-pattern fill; other layouts and tensor types retain the
+/// generic tensor fill. False never touches the device. A device failure while
+/// `onDevice` throws DeviceOutputError.
 ///
 /// Shared for the same reason buildVariantPack() is: both harnesses allocate the
 /// same buffers from the same attributes, and two copies of that would drift.

@@ -43,7 +43,6 @@
 #include <miopen/filesystem.hpp>
 #include <miopen/logger.hpp>
 #include <miopen/conv/heuristics/ai_heuristics.hpp>
-#include <fdeep/fdeep.hpp>
 #include <map>
 #include <set>
 #include <sstream>
@@ -51,6 +50,8 @@
 #include <vector>
 
 #if MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK
+
+#include <fdeep/fdeep.hpp>
 
 namespace {
 

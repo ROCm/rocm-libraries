@@ -25,6 +25,8 @@ The description explains why more than how, and every factual claim in it is che
 - Test results and counts (passed, skipped, architecture, build flags) match the evidence available: CI logs, the `RUN` lane's
   rows. A result the author states and nothing supports is `UNVERIFIED`, not accepted.
 - Linked tickets, defects and PRs are described accurately. Existence and resolution of the links belong to `AUTH`: hand off.
+- No host names, runner names or CI job IDs in the description or commit messages (`projects/miopen/AGENTS.md` *Code Conventions*).
+  The `LEAK` lane owns identifying hosts; this lane only notes the convention (`SUGGESTION`) when `LEAK` does not already file it.
 
 A false or unsupported claim is `IMPORTANT` when a reader would rely on it to judge risk (kind `process`), else `SUGGESTION`.
 

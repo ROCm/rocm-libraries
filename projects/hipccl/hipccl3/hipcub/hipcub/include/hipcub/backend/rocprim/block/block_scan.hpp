@@ -61,22 +61,17 @@ enum BlockScanAlgorithm
         = detail::to_BlockScanAlgorithm_enum(::rocprim::block_scan_algorithm::using_warp_scan)
 };
 
-template<
-    typename T,
-    int BLOCK_DIM_X,
-    BlockScanAlgorithm ALGORITHM = BLOCK_SCAN_RAKING,
-    int BLOCK_DIM_Y = 1,
-    int BLOCK_DIM_Z = 1,
-    int ARCH = HIPCUB_ARCH /* ignored */
->
+template<typename T,
+         int                BLOCK_DIM_X,
+         BlockScanAlgorithm ALGORITHM   = BLOCK_SCAN_RAKING,
+         int                BLOCK_DIM_Y = 1,
+         int                BLOCK_DIM_Z = 1>
 class BlockScan
-    : private ::rocprim::block_scan<
-        T,
-        BLOCK_DIM_X,
-        static_cast<::rocprim::block_scan_algorithm>(ALGORITHM),
-        BLOCK_DIM_Y,
-        BLOCK_DIM_Z
-      >
+    : private ::rocprim::block_scan<T,
+                                    BLOCK_DIM_X,
+                                    static_cast<::rocprim::block_scan_algorithm>(ALGORITHM),
+                                    BLOCK_DIM_Y,
+                                    BLOCK_DIM_Z>
 {
     static_assert(
         BLOCK_DIM_X * BLOCK_DIM_Y * BLOCK_DIM_Z > 0,

@@ -6434,7 +6434,9 @@ def _cached_bind_batch(batch_chunks, direction, problem, ident, *rest):
             sl_ptrs,
             sl_sizes,
             *tail,
-            zero_dw=n0 == 0,
+            # dgrad slices write disjoint dX ranges, so each clears its own;
+            # wgrad slices share one dW, which only the first one clears.
+            zero_dw=direction == "dgrad" or n0 == 0,
         )
         if bound is None:
             return None
@@ -6469,7 +6471,8 @@ def _cached_bind(
 
     ``zero_dw=False`` leaves out the dW clear of the packed-atomic split-K
     wgrad launch: the later batch slices of a sliced wgrad problem add into
-    the dW the first slice zeroed (:func:`_cached_bind_batch`).
+    the dW the first slice zeroed (:func:`_cached_bind_batch`). Sliced dgrad
+    never passes it: each slice owns its dX range and clears it.
 
     ``ptrs`` / ``sizes`` are the A, B, D buffers. The device scratch the
     launch config allocates is appended to ``live_extras`` (freed by
@@ -6519,7 +6522,7 @@ def _cached_bind(
     stream = resolve_stream(cfg.stream)
     if (
         zero_dw
-        and direction == "wgrad"
+        and direction in ("wgrad", "dgrad")
         and ident.split_k > 1
         and not ident.two_stage
         and ident.streamk == "off"

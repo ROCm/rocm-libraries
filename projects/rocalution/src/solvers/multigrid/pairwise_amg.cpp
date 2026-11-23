@@ -151,8 +151,9 @@ namespace rocalution
         assert(this->build_ == true);
         assert(this->op_ != NULL);
 
+        // Create coarse operator, on the backend of the finest operator
         this->op_level_[0]->Clear();
-        this->op_level_[0]->CloneBackend(*this->op_);
+        this->op_level_[0]->MoveToBackend(*this->op_);
         this->op_level_[0]->ConvertToCSR();
 
         this->trans_level_[0]->CloneBackend(*this->op_);
@@ -164,6 +165,12 @@ namespace rocalution
                                    this->Gsize_level_[0],
                                    this->rG_level_[0],
                                    this->rGsize_level_[0]);
+
+        // Move it to the host, if all coarse levels are
+        if(this->host_level_ == this->levels_ - 1)
+        {
+            this->op_level_[0]->MoveToHost();
+        }
 
         for(int i = 1; i < this->levels_ - 1; ++i)
         {
@@ -187,7 +194,7 @@ namespace rocalution
 
             if(i == this->levels_ - this->host_level_ - 1)
             {
-                this->op_level_[i - 1]->CloneBackend(*this->restrict_op_level_[i - 1]);
+                this->op_level_[i - 1]->MoveToBackend(*this->restrict_op_level_[i - 1]);
             }
         }
 

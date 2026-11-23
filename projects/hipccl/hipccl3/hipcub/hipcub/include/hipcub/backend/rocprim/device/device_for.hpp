@@ -207,7 +207,7 @@ HIPCUB_RUNTIME_FUNCTION
                               hipStream_t           stream = 0)
     {
         using offset_t           = detail::it_difference_t<RandomAccessIteratorT>;
-        const offset_t num_items = static_cast<offset_t>(std::distance(first, last));
+        const offset_t num_items = static_cast<offset_t>(_HIPCUB_STD::distance(first, last));
 
         return ForEachN(first, num_items, op, stream);
     }

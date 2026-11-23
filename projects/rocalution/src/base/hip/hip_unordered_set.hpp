@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2022 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -31,6 +31,10 @@
 
 namespace rocalution
 {
+    // If NTHREADS <= warpSize, the set must be owned by NTHREADS contiguous lanes of one
+    // wavefront, aligned to NTHREADS. It does not use a block barrier, so other wavefronts of
+    // the block may return early. Otherwise, all threads of the block must call the constructor
+    // and clear().
     template <typename KeyType,
               unsigned int SIZE,
               unsigned int NTHREADS,
@@ -95,7 +99,7 @@ namespace rocalution
         }
 
         // Wait for all threads to finish clearing
-        if(NTHREADS < warpSize)
+        if(NTHREADS <= warpSize)
         {
             __threadfence_block();
         }

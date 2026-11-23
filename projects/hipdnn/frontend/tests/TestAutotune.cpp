@@ -819,6 +819,7 @@ TEST(TestAutotune, MakeBarredResultAssignsEveryField)
                                                            ESTIMATED_WORKSPACE,
                                                            COMPILED_WORKSPACE,
                                                            factoryConfig(),
+                                                           "numerical note filter",
                                                            /*supportsExhaustive=*/true,
                                                            /*ranExhaustive=*/false,
                                                            REASON_VALUE,
@@ -827,7 +828,7 @@ TEST(TestAutotune, MakeBarredResultAssignsEveryField)
     expectNonBenchmarkedCommonFields(result);
     EXPECT_EQ(result.estimatedWorkspaceSize, ESTIMATED_WORKSPACE);
     EXPECT_EQ(result.workspaceSize, COMPILED_WORKSPACE);
-    EXPECT_EQ(result.errorMessage, "Plan barred (engine ID or workspace deselect filter).");
+    EXPECT_EQ(result.errorMessage, "Plan barred: numerical note filter");
 }
 
 TEST(TestAutotune, MakeCompileFailedResultAssignsEveryField)

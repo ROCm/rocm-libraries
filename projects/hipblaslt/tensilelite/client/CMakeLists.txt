@@ -125,6 +125,7 @@ if(TENSILELITE_CLIENT_ENABLE_ROCPROFSDK)
 endif()
 
 add_executable(tensilelite-client "${CMAKE_CURRENT_SOURCE_DIR}/main.cpp")
+hipblaslt_attach_tensilelite_metadata(tensilelite-client)
 target_link_libraries(tensilelite-client PRIVATE tensilelite-client-common)
 
 add_executable(cpu-gemm-driver "${CMAKE_CURRENT_SOURCE_DIR}/cpu_gemm_driver.cpp")

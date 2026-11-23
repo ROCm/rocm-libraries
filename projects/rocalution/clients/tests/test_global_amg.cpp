@@ -45,3 +45,25 @@ INSTANTIATE_TEST_CASE_P(global_amg,
                         testing::Combine(testing::ValuesIn(global_amg_type),
                                          testing::Bool(),
                                          testing::Bool()));
+
+typedef std::tuple<std::string, bool, int> global_amg_host_levels_tuple;
+
+class parameterized_global_amg_host_levels
+    : public testing::TestWithParam<global_amg_host_levels_tuple>
+{
+};
+
+// CSR only: with a finest operator in another format, ReBuildNumeric() copies it with
+// GlobalMatrix::CloneFrom(), which is not implemented
+TEST_P(parameterized_global_amg_host_levels, rebuild_numeric_with_host_levels_double)
+{
+    testing_global_amg_one_sided_coupling<double>(
+        std::get<0>(GetParam()), false, std::get<1>(GetParam()), std::get<2>(GetParam()));
+}
+
+// -1 moves all coarse levels to the host
+INSTANTIATE_TEST_CASE_P(global_amg,
+                        parameterized_global_amg_host_levels,
+                        testing::Combine(testing::ValuesIn(global_amg_type),
+                                         testing::Bool(),
+                                         testing::Values(-1, 1)));

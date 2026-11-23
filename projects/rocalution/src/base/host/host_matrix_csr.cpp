@@ -6955,6 +6955,7 @@ namespace rocalution
         // S_ij = { 1   if i != j and -a_ij > eps * max(-a_ik) for k != i
         //        { 0   otherwise
         //
+        // where row i is scaled by -1 first if its diagonal is negative.
         // This means, S_ij is 1, only if i strongly depends on j.
         // S has been extended to also work with matrices that do not have
         // fully non-positive off-diagonal entries.
@@ -7011,16 +7012,19 @@ namespace rocalution
             ValueType cond = (sign ? max_a_ik : min_a_ik) * static_cast<ValueType>(eps);
 
             // Fill S
+            bool depends = false;
             for(PtrType j = row_begin; j < row_end; ++j)
             {
                 int       col = this->mat_.col[j];
                 ValueType val = this->mat_.val[j];
 
-                cast_S->vec_[j] = (col != i) && (val < cond);
+                cast_S->vec_[j] = (col != i) && (sign ? val > cond : val < cond);
+                depends         = depends || cast_S->vec_[j];
             }
 
-            // If cond is zero -> i is independent of other grid points
-            if(cond == static_cast<ValueType>(0))
+            // i is an F point from the start if it depends on no other point. cond can round
+            // to zero although i depends on other points.
+            if(!depends)
             {
                 cast_cf->vec_[i] = 2;
             }
@@ -7061,6 +7065,8 @@ namespace rocalution
         S_row_offset[0] = 0;
 
         // Split into C and F
+        // A point that depends on i is no F point yet, since it depends on some point. So
+        // lambda_i counts each such point once and starts below n, the number of buckets.
         std::vector<int> lambda(this->nrow_);
 
         for(int i = 0; i < this->nrow_; ++i)
@@ -7068,7 +7074,8 @@ namespace rocalution
             int temp = 0;
             for(PtrType j = S_row_offset[i]; j < S_row_offset[i + 1]; ++j)
             {
-                temp += (cast_cf->vec_[S_col[j]] == 0 ? 1 : 2);
+                assert(cast_cf->vec_[S_col[j]] == 0);
+                ++temp;
             }
 
             lambda[i] = temp;
@@ -7288,7 +7295,6 @@ namespace rocalution
 
             if(global == true)
             {
-                // COVERAGE_EXCL_NO_MPI_START
                 PtrType gst_row_begin = cast_gst->mat_.row_offset[i];
                 PtrType gst_row_end   = cast_gst->mat_.row_offset[i + 1];
 
@@ -7299,7 +7305,6 @@ namespace rocalution
                     min_a_ik = (min_a_ik < val) ? min_a_ik : val;
                     max_a_ik = (max_a_ik > val) ? max_a_ik : val;
                 }
-                // COVERAGE_EXCL_NO_MPI_STOP
             }
 
             // Threshold to check for strength of connection
@@ -7311,7 +7316,7 @@ namespace rocalution
                 int       col = this->mat_.col[j];
                 ValueType val = this->mat_.val[j];
 
-                if(col != i && val < cond)
+                if(col != i && (sign ? val > cond : val < cond))
                 {
                     // col is strongly connected to i
                     cast_S->vec_[j] = true;
@@ -7330,7 +7335,6 @@ namespace rocalution
 
             if(global == true)
             {
-                // COVERAGE_EXCL_NO_MPI_START
                 PtrType gst_row_begin = cast_gst->mat_.row_offset[i];
                 PtrType gst_row_end   = cast_gst->mat_.row_offset[i + 1];
 
@@ -7339,7 +7343,7 @@ namespace rocalution
                     int       col = cast_gst->mat_.col[j];
                     ValueType val = cast_gst->mat_.val[j];
 
-                    if(val < cond)
+                    if(sign ? val > cond : val < cond)
                     {
                         // col is strongly connected to i
                         cast_S->vec_[j + this->nnz_] = true;
@@ -7355,7 +7359,6 @@ namespace rocalution
                         cast_w->vec_[col + this->nrow_] += 1.0f;
                     }
                 }
-                // COVERAGE_EXCL_NO_MPI_STOP
             }
         }
 
@@ -10333,9 +10336,10 @@ namespace rocalution
             cast_G->vec_[i] = -2;
         }
 
-        int      Usize    = 0;
-        PtrType* ind_diag = NULL;
-        allocate_host(this->nrow_, &ind_diag);
+        int Usize = 0;
+
+        // A row without diagonal counts as a zero diagonal
+        std::vector<ValueType> diag(this->nrow_, static_cast<ValueType>(0));
 
         // Build U
         for(int i = 0; i < this->nrow_; ++i)
@@ -10350,13 +10354,13 @@ namespace rocalution
                 }
                 else
                 {
-                    ind_diag[i] = j;
+                    diag[i] = this->mat_.val[j];
                 }
             }
 
             sum *= static_cast<ValueType>(5);
 
-            if(this->mat_.val[ind_diag[i]] > sum)
+            if(diag[i] > sum)
             {
                 cast_G->vec_[i] = -1;
                 ++Usize;
@@ -10400,7 +10404,7 @@ namespace rocalution
             ValueType max_a_ij = static_cast<ValueType>(0);
             PtrType   min_j    = -1;
             bool      neg      = false;
-            if(this->mat_.val[ind_diag[i]] < static_cast<ValueType>(0))
+            if(diag[i] < static_cast<ValueType>(0))
             {
                 neg = true;
             }
@@ -10464,8 +10468,6 @@ namespace rocalution
 
             ++nc;
         }
-
-        free_host(&ind_diag);
 
         return true;
     }
@@ -10551,9 +10553,10 @@ namespace rocalution
             cast_G->vec_[i] = -2;
         }
 
-        int      Usize    = 0;
-        PtrType* ind_diag = NULL;
-        allocate_host(this->nrow_, &ind_diag);
+        int Usize = 0;
+
+        // A row without diagonal counts as a zero diagonal
+        std::vector<ValueType> diag(this->nrow_, static_cast<ValueType>(0));
 
         // Build U
         for(int i = 0; i < this->nrow_; ++i)
@@ -10568,7 +10571,7 @@ namespace rocalution
                 }
                 else
                 {
-                    ind_diag[i] = j;
+                    diag[i] = this->mat_.val[j];
                 }
             }
 
@@ -10583,7 +10586,7 @@ namespace rocalution
 
             sum *= static_cast<ValueType>(5);
 
-            if(this->mat_.val[ind_diag[i]] > sum)
+            if(diag[i] > sum)
             {
                 cast_G->vec_[i] = -1;
                 ++Usize;
@@ -10627,7 +10630,7 @@ namespace rocalution
             ValueType max_a_ij = static_cast<ValueType>(0);
             int       min_j    = -1;
             bool      neg      = false;
-            if(this->mat_.val[ind_diag[i]] < static_cast<ValueType>(0))
+            if(diag[i] < static_cast<ValueType>(0))
             {
                 neg = true;
             }
@@ -10729,8 +10732,6 @@ namespace rocalution
 
             ++nc;
         }
-
-        free_host(&ind_diag);
 
         return true;
     }

@@ -1,6 +1,13 @@
 {% extends "common/base.cpp.jinja2" %}
 {% block config_constructor -%}
-rocprim::detail::merge_sort_block_merge_config<{{ config.block_size_x }}, {{ config.ipt }}, 0, 128, {{ config.block_size_x }}, {{ config.ipt }}>
+rocprim::detail::merge_sort_block_merge_config<
+    {{ config.odd_even_block_size }},
+    {{ config.odd_even_ipt }},
+    {{ config.odd_even_size_limit }},
+    {{ config.partition_block_size }},
+    {{ config.block_size_x }},
+    {{ config.ipt }}
+>
 {%- endblock %}
 {% block benchmark_type %}
 using benchmark_type = device_merge_sort_block_merge_benchmark<key_type, value_type, config>;

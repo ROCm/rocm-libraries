@@ -22,7 +22,6 @@
 # Scripts and other supporting files
 /.github/docs-config.json                           @ROCm/rocm-documentation
 /.github/requirements-hipdnn-superbuild-ci.txt      @ROCm/hipdnn-reviewers
-/.github/scripts/run_rocjitsu_hipblaslt_race_check.sh      @ROCm/hipblaslt-reviewers
 
 # Component CI ownership
 /.github/workflows/*component-ci*.yml               @ROCm/rocm-math-lib-build-infra

@@ -255,14 +255,14 @@ find_if_n(execution_policy<Derived>& policy, InputIt first, Size num_items, Pred
 template <class Derived, class InputIt, class Predicate>
 InputIt THRUST_HOST_DEVICE find_if(execution_policy<Derived>& policy, InputIt first, InputIt last, Predicate predicate)
 {
-  return hip_rocprim::find_if_n(policy, first, thrust::distance(first, last), predicate);
+  return hip_rocprim::find_if_n(policy, first, _THRUST_STD::distance(first, last), predicate);
 }
 
 template <class Derived, class InputIt, class Predicate>
 InputIt THRUST_HOST_DEVICE
 find_if_not(execution_policy<Derived>& policy, InputIt first, InputIt last, Predicate predicate)
 {
-  return hip_rocprim::find_if(policy, first, last, thrust::not_fn(predicate));
+  return hip_rocprim::find_if(policy, first, last, _THRUST_STD::not_fn(predicate));
 }
 
 template <class Derived, class InputIt, class T>

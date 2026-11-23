@@ -2,7 +2,9 @@
 // SPDX-License-Identifier:  MIT
 
 #include "AsmSdpaConfigHelpers.hpp"
+#include "../../../engines/asm_sdpa_engine/asm/AsmKernelPath.hpp"
 #include "../../../engines/asm_sdpa_engine/plans/SdpaPlanUtils.hpp"
+#include "AsmSdpaTestSupport.hpp"
 #include "hip_kernel_provider_common/SdpaConfigConstants.hpp"
 #include "hip_kernel_provider_common/SdpaConfigEnumerations.hpp"
 
@@ -10,6 +12,12 @@
 #include <hipdnn_frontend/Graph.hpp>
 
 #include <cmath>
+#include <cstdint>
+#include <memory>
+#include <stdexcept>
+#include <string>
+#include <unordered_map>
+#include <vector>
 
 namespace asm_sdpa_engine
 {
@@ -111,7 +119,7 @@ GraphTestCase configToTestCase(const fmha_v3_fwdConfig& config, bool withStats)
     tc.attnScale = 1.0f / std::sqrt(static_cast<float>(config.hdim_q));
     // Group mode gives Q and K/V a token capacity of 512, twice the largest ts_qo of any
     // group row, so the per-batch lengths a test writes into the offset tables can span
-    // two Q-tiles of every row while keeping every K/V length at least its Q length.
+    // two Q-tiles of every row on either side.
     if(config.mode == BatchMode::GROUP)
     {
         constexpr int64_t K_GROUP_SEQ_CAPACITY = 512;
@@ -126,16 +134,67 @@ GraphTestCase configToTestCase(const fmha_v3_fwdConfig& config, bool withStats)
     return tc;
 }
 
-SdpaFwdGraph buildSdpaFwdGraph(const GraphTestCase& testCase)
+// Fixed tensor uids, so buildSdpaFwdReferenceGraph's graph addresses the same tensors as
+// buildSdpaFwdGraph's.
+namespace
 {
-    using namespace hipdnn_frontend;
+constexpr int64_t K_Q_UID = 1;
+constexpr int64_t K_K_UID = 2;
+constexpr int64_t K_V_UID = 3;
+constexpr int64_t K_O_UID = 4;
+constexpr int64_t K_STATS_UID = 5;
+constexpr int64_t K_QO_OFFSET_UID = 6;
+constexpr int64_t K_KV_OFFSET_UID = 7;
+constexpr int64_t K_DESCALE_Q_UID = 8;
+constexpr int64_t K_DESCALE_K_UID = 9;
+constexpr int64_t K_DESCALE_V_UID = 10;
+constexpr int64_t K_CU_SEQ_LEN_Q_UID = 11;
+constexpr int64_t K_CU_SEQ_LEN_KV_UID = 12;
+constexpr int64_t K_SEQ_LEN_Q_UID = 13;
+constexpr int64_t K_SEQ_LEN_KV_UID = 14;
+
+// Which length inputs a cuSeqLens graph carries: the cumulative tables the engine reads, or
+// the per-batch lengths the CPU reference reads.
+enum class LengthInputs
+{
+    CUMULATIVE,
+    PER_BATCH,
+};
+
+// An INT32 [count, 1, 1, 1] token table (ragged offsets, cumulative or per-batch lengths).
+std::shared_ptr<hipdnn_frontend::graph::TensorAttributes>
+    makeTokenTable(int64_t uid, const char* name, int64_t count)
+{
+    const std::vector<int64_t> dims = {count, 1, 1, 1};
+    auto table = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    table->set_uid(uid)
+        .set_name(name)
+        .set_dim(dims)
+        .set_stride(hipdnn_data_sdk::utilities::generateStrides(dims))
+        .set_data_type(DataType::INT32);
+    return table;
+}
+
+SdpaFwdGraph buildGraph(const GraphTestCase& testCase, LengthInputs lengthInputs)
+{
     using namespace hipdnn_frontend::graph;
     using namespace hipdnn_data_sdk::utilities;
 
     const fmha_v3_fwdConfig& config = testCase.config;
+    const bool isGroup = (config.mode == BatchMode::GROUP);
+    if(!isGroup && (testCase.sharedOffsetTable || testCase.cuSeqLens))
+    {
+        throw std::invalid_argument("sharedOffsetTable and cuSeqLens need a group-mode config ("
+                                    + testCase.name + ")");
+    }
+    if(testCase.sharedCuSeqLen && !testCase.cuSeqLens)
+    {
+        throw std::invalid_argument("sharedCuSeqLen needs cuSeqLens (" + testCase.name + ")");
+    }
 
     const int64_t batch = testCase.batch;
     const int64_t numHeads = testCase.numHeads;
+    const int64_t numHeadsKv = testCase.numHeadsKv.value_or(numHeads);
     const int64_t seqQ = testCase.seqQ;
     const int64_t seqKv = testCase.seqKv;
 
@@ -147,8 +206,8 @@ SdpaFwdGraph buildSdpaFwdGraph(const GraphTestCase& testCase)
 
     // Create tensor dimensions
     const std::vector<int64_t> qDims = {batch, numHeads, seqQ, config.hdim_q};
-    const std::vector<int64_t> kDims = {batch, numHeads, seqKv, config.hdim_q};
-    const std::vector<int64_t> vDims = {batch, numHeads, seqKv, config.hdim_v};
+    const std::vector<int64_t> kDims = {batch, numHeadsKv, seqKv, config.hdim_q};
+    const std::vector<int64_t> vDims = {batch, numHeadsKv, seqKv, config.hdim_v};
     // Use physical memory layout: B, Seq, H, D for compatibility with group mode
     const std::vector<int64_t> layout = {3, 1, 2, 0};
 
@@ -158,28 +217,34 @@ SdpaFwdGraph buildSdpaFwdGraph(const GraphTestCase& testCase)
         .set_intermediate_data_type(DataType::FLOAT);
 
     auto q = std::make_shared<TensorAttributes>();
-    q->set_dim(qDims).set_stride(generateStrides(qDims, layout)).set_data_type(inDataType);
+    q->set_uid(K_Q_UID)
+        .set_name("q")
+        .set_dim(qDims)
+        .set_stride(generateStrides(qDims, layout))
+        .set_data_type(inDataType);
 
     auto k = std::make_shared<TensorAttributes>();
-    k->set_dim(kDims).set_stride(generateStrides(kDims, layout)).set_data_type(inDataType);
+    k->set_uid(K_K_UID)
+        .set_name("k")
+        .set_dim(kDims)
+        .set_stride(generateStrides(kDims, layout))
+        .set_data_type(inDataType);
 
     auto v = std::make_shared<TensorAttributes>();
-    v->set_dim(vDims).set_stride(generateStrides(vDims, layout)).set_data_type(inDataType);
+    v->set_uid(K_V_UID)
+        .set_name("v")
+        .set_dim(vDims)
+        .set_stride(generateStrides(vDims, layout))
+        .set_data_type(inDataType);
 
-    if(config.mode == BatchMode::GROUP)
+    std::shared_ptr<TensorAttributes> qoOffset;
+    if(isGroup)
     {
-        const std::vector<int64_t> offsetDims = {batch + 1, 1, 1, 1};
-        const std::vector<int64_t> offsetStrides = generateStrides(offsetDims);
-        const auto makeOffset = [&](const char* name) {
-            auto offset = std::make_shared<TensorAttributes>();
-            offset->set_name(name)
-                .set_dim(offsetDims)
-                .set_stride(offsetStrides)
-                .set_data_type(DataType::INT32);
-            return offset;
-        };
-        const auto qoOffset = makeOffset(K_QO_RAGGED_OFFSET_NAME);
-        const auto kvOffset = makeOffset(K_KV_RAGGED_OFFSET_NAME);
+        qoOffset = makeTokenTable(K_QO_OFFSET_UID, K_QO_RAGGED_OFFSET_NAME, batch + 1);
+        const auto kvOffset
+            = testCase.sharedOffsetTable
+                  ? qoOffset
+                  : makeTokenTable(K_KV_OFFSET_UID, K_KV_RAGGED_OFFSET_NAME, batch + 1);
 
         q->set_ragged_offset(qoOffset).set_ragged_offset_multiplier(q->get_stride()[2]);
         k->set_ragged_offset(kvOffset).set_ragged_offset_multiplier(k->get_stride()[2]);
@@ -201,6 +266,35 @@ SdpaFwdGraph buildSdpaFwdGraph(const GraphTestCase& testCase)
         attributes.set_attn_scale(testCase.attnScale.value());
     }
 
+    if(testCase.mmaCoreMode.has_value())
+    {
+        attributes.set_mma_core_mode(testCase.mmaCoreMode.value());
+    }
+
+    if(testCase.cuSeqLens)
+    {
+        attributes.set_padding_mask(true);
+        if(lengthInputs == LengthInputs::CUMULATIVE)
+        {
+            const auto cuSeqLenQ
+                = makeTokenTable(K_CU_SEQ_LEN_Q_UID, K_CU_SEQ_LEN_Q_NAME, batch + 1);
+            attributes.set_cu_seq_len_q(cuSeqLenQ);
+            attributes.set_cu_seq_len_kv(
+                testCase.sharedCuSeqLen
+                    ? cuSeqLenQ
+                    : makeTokenTable(K_CU_SEQ_LEN_KV_UID, K_CU_SEQ_LEN_KV_NAME, batch + 1));
+        }
+        else
+        {
+            const auto seqLenQ = makeTokenTable(K_SEQ_LEN_Q_UID, K_SEQ_LEN_Q_NAME, batch);
+            attributes.set_seq_len_q(seqLenQ);
+            attributes.set_seq_len_kv(
+                testCase.sharedCuSeqLen
+                    ? seqLenQ
+                    : makeTokenTable(K_SEQ_LEN_KV_UID, K_SEQ_LEN_KV_NAME, batch));
+        }
+    }
+
     // FP8 inputs require per-tensor (scalar) q/k/v descale tensors.
     if(isFp8)
     {
@@ -208,17 +302,18 @@ SdpaFwdGraph buildSdpaFwdGraph(const GraphTestCase& testCase)
         const auto descaleStrides = generateStrides(descaleDims);
         // Name each descale so the integration fixture can identify it by name (not by
         // scalar element count) when choosing per-tensor fill values.
-        const auto makeDescale = [&](const std::string& name) {
+        const auto makeDescale = [&](int64_t uid, const std::string& name) {
             auto descale = std::make_shared<TensorAttributes>();
-            descale->set_dim(descaleDims)
+            descale->set_uid(uid)
+                .set_dim(descaleDims)
                 .set_stride(descaleStrides)
                 .set_data_type(DataType::FLOAT)
                 .set_name(name);
             return descale;
         };
-        attributes.set_descale_q(makeDescale("descale_q"));
-        attributes.set_descale_k(makeDescale("descale_k"));
-        attributes.set_descale_v(makeDescale("descale_v"));
+        attributes.set_descale_q(makeDescale(K_DESCALE_Q_UID, "descale_q"));
+        attributes.set_descale_k(makeDescale(K_DESCALE_K_UID, "descale_k"));
+        attributes.set_descale_v(makeDescale(K_DESCALE_V_UID, "descale_v"));
     }
 
     // Configure mask type
@@ -253,24 +348,79 @@ SdpaFwdGraph buildSdpaFwdGraph(const GraphTestCase& testCase)
 
     auto [o, stats] = graph->sdpa(q, k, v, attributes);
 
-    o->set_output(true);
-    o->set_data_type(outDataType);
+    o->set_uid(K_O_UID).set_name("o").set_output(true).set_data_type(outDataType);
 
     if(testCase.withStats)
     {
-        stats->set_output(true);
-        stats->set_data_type(DataType::FLOAT);
+        stats->set_uid(K_STATS_UID)
+            .set_name("stats")
+            .set_output(true)
+            .set_data_type(DataType::FLOAT);
+        if(isGroup)
+        {
+            // AITER's varlen LSE [H, B * S_q] in token units on the Q/O offset table: the
+            // dims stay [B, H, S_q, 1], and B * S_q, the Q token capacity, is the head stride.
+            const std::vector<int64_t> statsDims = {batch, numHeads, seqQ, 1};
+            stats->set_dim(statsDims)
+                .set_stride({seqQ, batch * seqQ, 1, 1})
+                .set_ragged_offset(qoOffset)
+                .set_ragged_offset_multiplier(1);
+        }
     }
 
-    if(config.mode == BatchMode::GROUP)
+    if(isGroup)
     {
         const std::vector<int64_t> oDims = {batch, numHeads, seqQ, config.hdim_v};
         o->set_dim(oDims).set_stride(generateStrides(oDims, layout));
-        o->set_ragged_offset(q->get_ragged_offset())
-            .set_ragged_offset_multiplier(o->get_stride()[2]);
+        o->set_ragged_offset(qoOffset).set_ragged_offset_multiplier(o->get_stride()[2]);
     }
 
     return {graph, testCase.withStats ? stats : nullptr};
+}
+
+} // namespace
+
+SdpaFwdGraph buildSdpaFwdGraph(const GraphTestCase& testCase)
+{
+    return buildGraph(testCase, LengthInputs::CUMULATIVE);
+}
+
+SdpaFwdGraph buildSdpaFwdReferenceGraph(const GraphTestCase& testCase)
+{
+    if(!testCase.cuSeqLens)
+    {
+        throw std::invalid_argument("buildSdpaFwdReferenceGraph needs a cuSeqLens case ("
+                                    + testCase.name + ")");
+    }
+    return buildGraph(testCase, LengthInputs::PER_BATCH);
+}
+
+std::vector<std::string> getFwdKernelTocKeys(const fmha_v3_fwdConfig& config,
+                                             const std::string& arch)
+{
+    std::vector<std::string> tocKeys{asm_kernels::getFwdKernelTocKey(config.co_name, arch, false)};
+    if(arch == "gfx942")
+    {
+        tocKeys.push_back(asm_kernels::getFwdKernelTocKey(config.co_name, arch, true));
+    }
+    return tocKeys;
+}
+
+std::vector<AsmKernelTocEntry> getFwdKernelTocEntries(const std::string& arch)
+{
+    std::vector<AsmKernelTocEntry> entries;
+    for(const auto& [key, config] : cfg_fmha_fwd)
+    {
+        if(config.arch != arch)
+        {
+            continue;
+        }
+        for(auto& tocKey : getFwdKernelTocKeys(config, arch))
+        {
+            entries.push_back({std::move(tocKey), config.knl_name});
+        }
+    }
+    return entries;
 }
 
 } // namespace asm_sdpa_engine

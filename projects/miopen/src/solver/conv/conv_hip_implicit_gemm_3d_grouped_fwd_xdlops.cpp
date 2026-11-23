@@ -208,11 +208,11 @@ void PerformanceConfigHipImplicitGemm3DGroupFwdXdlops::HeuristicInit(
         MIOPEN_LOG_I2("Step 1: Index override not set, proceeding to next step");
     }
 
-    // 2. Hard-coded heuristics for BF16/FP16 on gfx942 and gfx950 only
-    //    (set MIOPEN_DEBUG_..._HARDCODE=0 to skip and fall through to the AI model)
+    // 2. Hard-coded heuristics for BF16/FP16 on gfx942 only
+    //    (set MIOPEN_DEBUG_..._HARDCODE=0 to skip and fall through to the AI model).
+    //    gfx950 has no hard-coded rule here, so its picks come from the AI model.
     if((problem.GetInDataType() == miopenBFloat16 || problem.GetInDataType() == miopenHalf) &&
-       (ctx.GetStream().GetDeviceName() == "gfx942" ||
-        ctx.GetStream().GetDeviceName() == "gfx950") &&
+       ctx.GetStream().GetDeviceName() == "gfx942" &&
        !env::disabled(MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_FWD_XDLOPS_HARDCODE))
     {
         MIOPEN_LOG_I2("Step 2: Attempting hard-coded heuristics for "
@@ -319,21 +319,6 @@ void PerformanceConfigHipImplicitGemm3DGroupFwdXdlops::HeuristicInit(
                             "Default, 16, 16, 1, 1, 4, 4, 4, 1, 1, BlkGemmPipelineScheduler: "
                             "Interwave, BlkGemmPipelineVersion: v2>");
                     }
-                }
-            }
-        }
-        else if(ctx.GetStream().GetDeviceName() == "gfx950")
-        {
-            if(index == 0 && ((problem.GetInDataType() == miopenHalf) ||
-                              (problem.GetInDataType() == miopenBFloat16)))
-            {
-                if(problem.GetInDepth() >= 3 && problem.GetInWidth() >= 256)
-                {
-                    found_index = find_kernel(
-                        11,
-                        "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3<256, 256, 256, "
-                        "32, Default, 32, 32, 4, 4, 8, 8, 8, 1, 1, "
-                        "BlkGemmPipelineScheduler: Intrawave, BlkGemmPipelineVersion: v3>");
                 }
             }
         }

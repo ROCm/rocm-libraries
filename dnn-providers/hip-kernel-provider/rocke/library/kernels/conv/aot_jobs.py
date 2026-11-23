@@ -105,7 +105,11 @@ Per direction, on top of that:
   picks (``DgradConvSpec.default_lds_k_outer``): K-outer wherever the arch,
   dtype, atom and pipeline allow it and the B load is wider than one element,
   M-outer otherwise. ``uniform_k_decode`` follows
-  ``DgradConvSpec.default_uniform_k_decode``.
+  ``DgradConvSpec.default_uniform_k_decode``. On gfx950
+  (``CACHE_DGRAD_SPLIT_K_ARCHS``) the a = b = 8 cshuffle tilde kernels of the
+  ``CACHE_DGRAD_SPLIT_K_GEOMETRIES`` cover also get a split-K copy (atomic dX
+  through the cshuffle epilogue, c = 2, the plain K loop, the degree baked);
+  the launch zeroes dX first.
 
 Every direction builds the grouped kernel only: it serves groups == 1 as well
 (``CACHE_GROUPED``), so there is no separate ungrouped binary.
@@ -820,6 +824,53 @@ def _wgrad_vec_c(
     if vc and split_k > 1 and not two_stage and dtype_d in ("fp16", "bf16"):
         return vc if vec_bc % vc == 0 else vec_bc
     return vec_bc
+
+
+# Split-K dgrad (atomic dX, the degree baked), per arch: the small-M, deep-K
+# shapes (a few image rows of a wide layer) that leave most CUs idle without a
+# K split.
+CACHE_DGRAD_SPLIT_K_ARCHS: Tuple[str, ...] = ("gfx950",)
+# (tile_m, tile_n, tile_k, warp_m, warp_n, warp_tile, pipeline, split_k): the
+# 8 / 8 cshuffle tilde kernels built with a split-K copy, and its degree. The
+# smallest subset of a 2 / 4 / 8 / 16 x (mem, compv3) x (tiles up to 64 x 128)
+# split-K grid that serves the measured dgrad layers as well as the full grid.
+CACHE_DGRAD_SPLIT_K_GEOMETRIES: Tuple[
+    Tuple[int, int, int, int, int, int, str, int], ...
+] = (
+    (32, 64, 64, 2, 4, 16, "mem", 16),
+    (32, 128, 32, 2, 2, 16, "mem", 16),
+    (32, 128, 64, 1, 8, 16, "mem", 8),
+    (32, 128, 64, 1, 8, 16, "mem", 16),
+    (64, 128, 32, 1, 4, 32, "mem", 8),
+    (64, 128, 32, 1, 8, 16, "mem", 16),
+    (64, 128, 32, 2, 4, 16, "mem", 16),
+    (64, 128, 64, 2, 4, 32, "mem", 16),
+    (64, 128, 64, 4, 2, 16, "mem", 8),
+)
+
+
+def _dgrad_split_ks(
+    arch, wave_size, vec_a, vec_bc, pipeline, epilogue, caps, geometry
+) -> Tuple[int, ...]:
+    """Split-K degrees a dgrad configuration is also built with.
+
+    ``geometry`` is ``(tile_m, tile_n, tile_k, warp_m, warp_n, warp_tile)``:
+    wave64 MFMA, the runtime-stride (tilde) binary, the widest vectors and the
+    cshuffle epilogue, on the ``CACHE_DGRAD_SPLIT_K_GEOMETRIES`` cover.
+    """
+    if not (
+        arch in CACHE_DGRAD_SPLIT_K_ARCHS
+        and wave_size == 64
+        and (vec_a, vec_bc) == (8, 8)
+        and epilogue == "cshuffle"
+        and not caps.get("stride", 0)
+    ):
+        return ()
+    return tuple(
+        g[7]
+        for g in CACHE_DGRAD_SPLIT_K_GEOMETRIES
+        if tuple(g[:6]) == tuple(geometry) and g[6] == pipeline
+    )
 
 
 def _wgrad_two_stages(split_k: int) -> Tuple[bool, ...]:
@@ -1777,6 +1828,7 @@ def _dgrad_jobs(
             # The stride-1 binary is the tap-outer K loop, which replaces the
             # uniform_k_decode loop and serves only problems whose kpg is a
             # multiple of tile_k (supports_problem).
+            base_cfg = cfg
             for tapk in _dgrad_tap_outer_variants(caps, wave_size, pipeline):
                 if tapk:
                     cfg = {**cfg, "uniform_k_decode": False, "tap_outer_k": True}
@@ -1798,6 +1850,45 @@ def _dgrad_jobs(
                     ),
                     direction="dgrad",
                     spec_kwargs=cfg,
+                    caps=caps,
+                )
+            for sk in _dgrad_split_ks(
+                arch,
+                wave_size,
+                vec_a,
+                vec_bc,
+                pipeline,
+                epilogue,
+                caps,
+                (tile_m, tile_n, tile_k, warp_m, warp_n, wt),
+            ):
+                # Split-K (atomic dX) for small-M, deep-K problems: the plain
+                # loop over one K slice, the degree baked. A cshuffle split
+                # kernel pairs its atomics lane-contiguous (dX width 2).
+                skcfg = {
+                    **base_cfg,
+                    "uniform_k_decode": False,
+                    "split_k": sk,
+                    "vector_size_c": 2 if epilogue == "cshuffle" else vec_c,
+                }
+                yield BuildJob(
+                    identity=KernelIdentity(
+                        arch=arch,
+                        direction="dgrad",
+                        algorithm="implicit_gemm",
+                        llvm_flavor=flavor,
+                        dtype_a=da,
+                        dtype_b=db,
+                        dtype_d=dd,
+                        grouped=grouped,
+                        stride_h=0,
+                        stride_w=0,
+                        dilation_h=0,
+                        dilation_w=0,
+                        **skcfg,
+                    ),
+                    direction="dgrad",
+                    spec_kwargs=skcfg,
                     caps=caps,
                 )
 
@@ -2183,6 +2274,23 @@ def count_jobs(
                     for caps in _dgrad_caps()
                 )
                 total += len(_dgrad_halo_jobs_for(target.gfx, geo, wave_size, db))
+                if 8 in _VECS:
+                    # The split-K (atomic dX) variants of the (8, 8) kernel.
+                    total += sum(
+                        len(
+                            _dgrad_split_ks(
+                                target.gfx,
+                                wave_size,
+                                8,
+                                8,
+                                pipeline,
+                                geo[7],
+                                caps,
+                                geo[:6],
+                            )
+                        )
+                        for caps in _dgrad_caps()
+                    )
                 if _is_patch_geometry(geo):
                     total += len(_VECS)
     return total

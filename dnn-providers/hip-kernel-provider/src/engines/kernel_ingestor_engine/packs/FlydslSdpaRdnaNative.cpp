@@ -111,12 +111,19 @@ std::optional<SdpaTile> candidateTile(const KernelDefinition& kernel)
     return SdpaTile{*blockM, *blockN, *dvSplit, *hdPair == 1 ? 2 : 1};
 }
 
-/// The workgroup count `batch_x_qtiles_x_heads_x_dv_split`, or nullopt past int32.
+/// Work-items per workgroup: block_m / WAVE_ROWS row groups of waves_per_row_tile waves.
+int64_t candidateThreads(const SdpaTile& tile)
+{
+    return tile.blockM / WAVE_ROWS * tile.wavesPerRowTile * WAVE_SIZE;
+}
+
+/// The workgroup count `batch_x_qtiles_x_heads_x_dv_split`, or nullopt past int32 workgroups
+/// or 32 bits of work-items.
 std::optional<int64_t> candidateGrid(const SdpaProblem& problem, const SdpaTile& tile)
 {
     const auto queryTiles = (problem.seqLenQ + tile.blockM - 1) / tile.blockM;
     const auto grid = checkedProduct({problem.batch, queryTiles, problem.numHeads, tile.dvSplit});
-    if(!grid.has_value() || *grid > INT32_LIMIT)
+    if(!grid.has_value() || *grid > INT32_LIMIT || !launchAxisFits(*grid, candidateThreads(tile)))
     {
         return std::nullopt;
     }
@@ -399,13 +406,10 @@ public:
         {
             throw hipdnn_plugin_sdk::HipdnnPluginException(
                 HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                "flydsl_sdpa_rdna: launch grid exceeds int32 for kernel '"
+                "flydsl_sdpa_rdna: launch grid exceeds the launch limits for kernel '"
                     + toString(kernel.kernelId) + "'");
         }
-        code.setBlockSize(
-            static_cast<unsigned int>(tile->blockM / WAVE_ROWS * tile->wavesPerRowTile * WAVE_SIZE),
-            1,
-            1);
+        code.setBlockSize(static_cast<unsigned int>(candidateThreads(*tile)), 1, 1);
         code.setGridSize(static_cast<unsigned int>(*gridX), 1, 1);
 
         std::optional<hipdnn_plugin_sdk::ScalarOperand> scaleOperand;

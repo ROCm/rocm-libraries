@@ -409,6 +409,83 @@ TEST(TestBatchnormFwdTrainingPlan, CompileDefaultSetsCorrectDefines)
 // currently creates graphs only with FP32 input data type. We can add tests for those options
 // once we have graph builders that can create graphs with FP16/BFP16 input tensors.
 
+TEST(TestBatchnormFwdTrainingPlan, CompileLdsGcnSizeScalesWithWaveSize)
+{
+    const MockKernelCompiler mockCompiler;
+
+    std::vector<std::string> capturedOptions;
+    EXPECT_CALL(mockCompiler, compile(::testing::_, ::testing::_))
+        .WillOnce([&](const std::string&, const std::vector<std::string>& options) {
+            capturedOptions = options;
+            auto kernel = std::make_unique<MockRunnableKernel>();
+            EXPECT_CALL(*kernel, setBlockSize(::testing::_, ::testing::_, ::testing::_)).Times(1);
+            EXPECT_CALL(*kernel, setGridSize(::testing::_, ::testing::_, ::testing::_)).Times(1);
+            auto program = std::make_unique<MockCompiledProgram>();
+            EXPECT_CALL(*program, getKernel(::testing::_))
+                .WillOnce(::testing::Return(::testing::ByMove(std::move(kernel))));
+            return program;
+        });
+
+    auto [fbb, plan] = createPlanFromGraph();
+    auto deviceProps = createTestDeviceProps("gfx1201");
+    deviceProps.warpSize = 32;
+
+    plan.compile(mockCompiler, deviceProps);
+
+    auto hasOption = [&](const std::string& opt) {
+        return std::find(capturedOptions.begin(), capturedOptions.end(), opt)
+               != capturedOptions.end();
+    };
+
+    // Variant 1 launches 1024 threads, so a wave32 device has twice as many waves as wave64.
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_VARIANT=1"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_LDS_SIZE=1024"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_LDSGCN_SIZE=32"));
+}
+
+TEST(TestBatchnormFwdTrainingPlan, CompileNhwcLdsGcnSizeScalesWithWaveSize)
+{
+    for(const int waveSize : {32, 64})
+    {
+        const MockKernelCompiler mockCompiler;
+        std::vector<std::string> capturedOptions;
+
+        EXPECT_CALL(mockCompiler, compile(::testing::_, ::testing::_))
+            .WillOnce([&](const std::string&, const std::vector<std::string>& options) {
+                capturedOptions = options;
+                auto program = std::make_unique<MockCompiledProgram>();
+                EXPECT_CALL(*program, getKernel(::testing::_))
+                    .Times(3)
+                    .WillRepeatedly(::testing::Invoke([](const std::string&) {
+                        auto k = std::make_unique<MockRunnableKernel>();
+                        EXPECT_CALL(*k, setBlockSize(::testing::_, ::testing::_, ::testing::_))
+                            .Times(1);
+                        EXPECT_CALL(*k, setGridSize(::testing::_, ::testing::_, ::testing::_))
+                            .Times(1);
+                        return k;
+                    }));
+                return program;
+            });
+
+        auto [fbb, plan] = createPlanFromGraph({150528, 1, 672, 3}, {1, 3, 224, 224});
+        auto deviceProps = createTestDeviceProps();
+        deviceProps.warpSize = waveSize;
+
+        plan.compile(mockCompiler, deviceProps);
+
+        auto hasOption = [&](const std::string& opt) {
+            return std::find(capturedOptions.begin(), capturedOptions.end(), opt)
+                   != capturedOptions.end();
+        };
+
+        // NHWC selects variant 2, whose LDS sizing is a separate code path from variant 1.
+        EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_VARIANT=2"));
+        EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_LDS_SIZE=1024"));
+        EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_LDSGCN_SIZE=" + std::to_string(1024 / waveSize)))
+            << "waveSize=" << waveSize;
+    }
+}
+
 TEST(TestBatchnormFwdTrainingPlan, CompileNchwLayoutSetsCorrectDefine)
 {
     const MockKernelCompiler mockCompiler;

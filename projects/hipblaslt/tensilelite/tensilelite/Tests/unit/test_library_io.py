@@ -26,6 +26,7 @@
 
 import copy
 import os
+import struct
 import subprocess
 import sys
 import zlib
@@ -39,6 +40,8 @@ from tensilelite.Utilities.BinaryLibraryIO import (
     readMessagePack,
     writeMessagePack,
 )
+
+from tensilelite.Utilities.BinaryLibraryIO import _packMeshTables
 
 pytestmark = pytest.mark.unit
 
@@ -581,3 +584,134 @@ for indexed in (False, True):
         timeout=20,
     )
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+####################
+# _packMeshTables
+####################
+
+def _meshBased_library(entries):
+    """Build a Matching/MeshBased library node with the given table entries."""
+    return {
+        "type": "Matching",
+        "distance": "MeshBased",
+        "properties": ["FreeSizeA", "FreeSizeB", "BatchSize", "BoundSize"],
+        "table": [{"key": e[0], "index": e[1]} for e in entries],
+    }
+
+
+def test_pack_mesh_tables_converts_meshbased():
+    """MeshBased table is replaced with table_bin + table_count."""
+    entries = [([10, 20, 1, 256], 42), ([30, 40, 1, 512], 7)]
+    d = _meshBased_library(entries)
+
+    _packMeshTables(d)
+
+    assert "table" not in d
+    assert d["table_count"] == 2
+    assert isinstance(d["table_bin"], bytes)
+    assert len(d["table_bin"]) == 2 * 20
+
+    for i, (key, idx) in enumerate(entries):
+        rec = struct.unpack_from("<5i", d["table_bin"], i * 20)
+        assert list(rec[:4]) == key
+        assert rec[4] == idx
+
+
+def test_pack_mesh_tables_leaves_gridbased_unchanged():
+    """GridBased tables must not be touched."""
+    d = {
+        "type": "Matching",
+        "distance": "GridBased",
+        "table": [{"key": [1, 2, 3, 4], "index": 0}],
+    }
+    original = copy.deepcopy(d)
+
+    _packMeshTables(d)
+
+    assert d == original
+
+
+def test_pack_mesh_tables_leaves_equality_unchanged():
+    """Equality tables must not be touched."""
+    d = {
+        "type": "Matching",
+        "distance": "Equality",
+        "table": [{"key": [1, 2, 3, 4], "index": 0}],
+    }
+    original = copy.deepcopy(d)
+
+    _packMeshTables(d)
+
+    assert d == original
+
+
+def test_pack_mesh_tables_empty_table():
+    """Empty MeshBased table produces zero-length binary blob."""
+    d = _meshBased_library([])
+
+    _packMeshTables(d)
+
+    assert d["table_count"] == 0
+    assert d["table_bin"] == b""
+    assert "table" not in d
+
+
+def test_pack_mesh_tables_recurses_into_nested_structure():
+    """_packMeshTables walks nested dicts (e.g. rows → predicates → library)."""
+    inner = _meshBased_library([([5, 6, 7, 8], 99)])
+    d = {
+        "rows": [
+            {"predicate": {"type": "And"}, "library": inner},
+        ],
+    }
+
+    _packMeshTables(d)
+
+    assert "table_bin" in inner
+    assert inner["table_count"] == 1
+
+
+def test_pack_mesh_tables_no_mutation_of_non_matching_dicts():
+    """Dicts without type=Matching are left alone."""
+    d = {"type": "Decision", "children": [{"type": "Leaf", "value": 42}]}
+    original = copy.deepcopy(d)
+
+    _packMeshTables(d)
+
+    assert d == original
+
+
+def test_writeMsgPack_packs_meshbased_as_binary(tmp_path):
+    """writeMsgPack emits table_bin (BIN type) for MeshBased tables."""
+    dest = str(tmp_path / "library.dat")
+    data = {
+        "library": _meshBased_library([([1, 2, 3, 4], 10)]),
+    }
+
+    writeMsgPack(dest, data)
+
+    raw = zlib.decompress((tmp_path / "library.dat.zlib").read_bytes())
+    unpacked = msgpack.unpackb(raw, raw=False, strict_map_key=False)
+    lib = unpacked["library"]
+    assert "table" not in lib
+    assert isinstance(lib["table_bin"], bytes)
+    assert lib["table_count"] == 1
+
+
+def test_writeMsgPackIndexed_packs_meshbased_as_binary(tmp_path):
+    """writeMsgPackIndexed emits table_bin for MeshBased tables in the library tree."""
+    dest = str(tmp_path / "library.dat")
+    data = _masterLibraryState()
+    data["library"]["distance"] = "MeshBased"
+    count = len(data["library"]["table"])
+    for entry in data["library"]["table"]:
+        entry["key"] = [entry["key"][0], 1, 1, 256]
+
+    writeMsgPackIndexed(dest, data)
+
+    indexed = _readIndexed(tmp_path / "library.dat.zlib")
+    lib = indexed["library"]
+    assert "table" not in lib
+    assert isinstance(lib["table_bin"], bytes)
+    assert lib["table_count"] == count

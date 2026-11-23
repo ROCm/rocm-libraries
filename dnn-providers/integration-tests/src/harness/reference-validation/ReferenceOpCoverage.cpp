@@ -19,6 +19,9 @@ namespace
 // Keep this list honest: an entry here means bundles using that op are registered
 // for CPU validation and will turn red if the reference cannot run them. Do not add
 // an op speculatively.
+//
+// ConvolutionFwdAttributes and MatmulAttributes are absent although the CPU reference runs them:
+// no golden-bearing bundle uses either, and referenceShapeIsAffordable() only knows Sdpa.
 const std::set<NodeAttributes>& cpuSupportedOps()
 {
     static const std::set<NodeAttributes> s_ops = {
@@ -40,6 +43,10 @@ const std::set<NodeAttributes>& cpuSupportedOps()
 // Ops the GPU reference is required to handle. Narrower than the CPU set: the GPU
 // reference dispatches through a signature-keyed plan registry, so coverage is
 // per-op-shape and grows only as plan builders are written.
+//
+// PointwiseAttributes is absent while the GPU reference lacks pointwise graphs the CPU one takes.
+// TestPointwiseReferenceParity requires adding it, which also stops Convolution Forward + Pointwise
+// bundles reporting OUTSIDE_OP_SET, once the last gap closes.
 const std::set<NodeAttributes>& gpuSupportedOps()
 {
     static const std::set<NodeAttributes> s_ops = {

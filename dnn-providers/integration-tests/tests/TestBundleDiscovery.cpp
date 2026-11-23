@@ -9,6 +9,8 @@
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <iterator>
+#include <map>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -257,6 +259,46 @@ protected:
         std::ofstream(dir / "sweep.json") << sweepJson.dump(2);
     }
 
+    static void createSweepWithCases(const std::filesystem::path& dir,
+                                     const std::vector<std::string>& caseIds,
+                                     bool withSupportClaims)
+    {
+        std::vector<SweepCaseSpec> cases;
+        cases.reserve(caseIds.size());
+        for(const auto& id : caseIds)
+        {
+            cases.push_back(
+                {id, "float", {2, 3, 4, 5}, {60, 20, 5, 1}, {1, 3, 1, 1}, {3, 1, 1, 1}});
+        }
+        createTemplateSweep(dir, cases);
+        if(withSupportClaims)
+        {
+            std::ofstream(dir / "support.json") << "{}";
+        }
+    }
+
+    // Sweeps and direct bundles over every tier, with and without support claims, and an
+    // empty leaf folder.
+    static void createMixedTierTree(const std::filesystem::path& root)
+    {
+        createSweepWithCases(root / "quick" / "Matmul" / "A", {"c1", "c2"}, true);
+        createSweepWithCases(root / "quick" / "SdpaFwd" / "bhsd_fp16_hd64", {"s1"}, false);
+        createSweepWithCases(
+            root / "quick" / "SdpaFwd" / "bhsd_fp16_hd128_causal_gqa4_Small", {"g1", "g2"}, true);
+        createSweepWithCases(
+            root / "standard" / "SdpaBackward" / "P", {"prbu01_a", "prbu02_b", "other"}, true);
+        createSweepWithCases(root / "standard" / "RMSNorm" / "R", {"r1", "r2"}, true);
+        createSweepWithCases(
+            root / "comprehensive" / "SdpaFwdPlan" / "Q", {"q1", "q2", "q3"}, true);
+        createSweepWithCases(root / "full" / "Matmul" / "F", {"f1"}, false);
+        createMinimalBundle(root / "full" / "Matmul" / "F" / "golden" / "f1", "extra");
+
+        createMinimalBundle(root / "quick" / "Matmul" / "direct", "Small");
+        std::ofstream(root / "quick" / "Matmul" / "direct" / "Small.support.json") << "{}";
+        createMinimalBundle(root / "full" / "Conv" / "direct", "Big");
+        std::filesystem::create_directories(root / "quick" / "Empty" / "leaf");
+    }
+
     static const DiscoveredBundle* findByTest(const std::vector<DiscoveredBundle>& bundles,
                                               const std::string& testName)
     {
@@ -489,6 +531,289 @@ TEST_F(TestBundleDiscoveryFixture, LeafWithOnlyMetaJsonWarnsAndSkips)
     EXPECT_TRUE(result.empty());
 }
 
+TEST_F(TestBundleDiscoveryFixture, FindEmptyLeafFoldersReportsOnlyLeavesWithoutAGraph)
+{
+    const auto emptyLeaf = _tempDir / "conv" / "case_12312";
+    std::filesystem::create_directories(emptyLeaf);
+    const auto metaOnlyLeaf = _tempDir / "conv" / "meta_only";
+    std::filesystem::create_directories(metaOnlyLeaf);
+    std::ofstream(metaOnlyLeaf / "meta.json") << "{}";
+    createMinimalBundle(_tempDir / "conv" / "good", "good");
+
+    const auto sweepWithGolden = _tempDir / "quick" / "Op" / "WithGolden";
+    createTemplateSweep(sweepWithGolden,
+                        {SweepCaseSpec{"case0", "float", {2, 3}, {3, 1}, {2, 3}, {3, 1}}});
+    const auto sweepWithoutGolden = _tempDir / "quick" / "Op" / "WithoutGolden";
+    createTemplateSweep(sweepWithoutGolden,
+                        {SweepCaseSpec{"case0", "float", {2, 3}, {3, 1}, {2, 3}, {3, 1}, false}});
+    ASSERT_TRUE(std::filesystem::is_directory(sweepWithGolden / "golden" / "case0"));
+
+    const auto emptyLeaves = detail::findEmptyLeafFolders(_tempDir, findSweepDirectories(_tempDir));
+
+    const std::vector<std::filesystem::path> expected{emptyLeaf, metaOnlyLeaf};
+    EXPECT_EQ(emptyLeaves, expected);
+}
+
+TEST_F(TestBundleDiscoveryFixture, SweepRootAtTheDataRootIsFound)
+{
+    createTemplateSweep(_tempDir,
+                        {SweepCaseSpec{"case0", "float", {2, 3}, {3, 1}, {2, 3}, {3, 1}}});
+
+    const auto sweepDirs = findSweepDirectories(_tempDir);
+    EXPECT_EQ(sweepDirs, std::vector<std::filesystem::path>{_tempDir});
+    EXPECT_TRUE(detail::findEmptyLeafFolders(_tempDir, sweepDirs).empty());
+    const auto result = discoverBundles(_tempDir);
+    ASSERT_EQ(result.size(), 1u);
+    EXPECT_EQ(result.front().jsonPath, _tempDir / "sweep.json");
+    EXPECT_EQ(result.front().suiteName, "_");
+}
+
+TEST_F(TestBundleDiscoveryFixture, DataRootWithATrailingSeparatorIsNotALeaf)
+{
+    createMinimalBundle(_tempDir / "conv" / "good", "good");
+    const auto root = _tempDir / "";
+
+    EXPECT_TRUE(detail::findEmptyLeafFolders(root, findSweepDirectories(root)).empty());
+}
+
+TEST_F(TestBundleDiscoveryFixture, SweepRootAtADataRootWithATrailingSeparatorIsFound)
+{
+    createTemplateSweep(_tempDir,
+                        {SweepCaseSpec{"case0", "float", {2, 3}, {3, 1}, {2, 3}, {3, 1}}});
+    const auto root = _tempDir / "";
+
+    const auto sweepDirs = findSweepDirectories(root);
+    EXPECT_EQ(sweepDirs, std::vector<std::filesystem::path>{root});
+    EXPECT_TRUE(detail::findEmptyLeafFolders(root, sweepDirs).empty());
+}
+
+// The listing decides sweep roots from the walked entries. It must agree with
+// isSweepBundleRoot() on every directory, the data root included.
+TEST_F(TestBundleDiscoveryFixture, ListingSweepRootCheckAgreesWithIsSweepBundleRoot)
+{
+    createMixedTierTree(_tempDir);
+    const auto templateOnly = _tempDir / "quick" / "Odd" / "TemplateOnly";
+    std::filesystem::create_directories(templateOnly);
+    std::ofstream(templateOnly / "graph.template.json") << "{}";
+    const auto manifestOnly = _tempDir / "quick" / "Odd" / "ManifestOnly";
+    std::filesystem::create_directories(manifestOnly);
+    std::ofstream(manifestOnly / "sweep.json") << "{}";
+    const auto directoryManifest = _tempDir / "quick" / "Odd" / "DirectoryManifest";
+    std::filesystem::create_directories(directoryManifest / "sweep.json");
+    std::ofstream(directoryManifest / "graph.template.json") << "{}";
+
+    for(const auto& root : {_tempDir, _tempDir / ""})
+    {
+        const auto listing = detail::listBundleTree(root);
+        size_t sweepRoots = 0;
+        for(const auto& directory : listing.directories)
+        {
+            EXPECT_EQ(listing.isSweepRoot(directory), isSweepBundleRoot(directory)) << directory;
+            sweepRoots += listing.isSweepRoot(directory) ? 1 : 0;
+        }
+        EXPECT_EQ(sweepRoots, 8u);
+    }
+
+    createTemplateSweep(_tempDir,
+                        {SweepCaseSpec{"case0", "float", {2, 3}, {3, 1}, {2, 3}, {3, 1}}});
+    for(const auto& root : {_tempDir, _tempDir / ""})
+    {
+        const auto listing = detail::listBundleTree(root);
+        EXPECT_TRUE(listing.isSweepRoot(root));
+        EXPECT_TRUE(isSweepBundleRoot(root));
+    }
+}
+
+TEST_F(TestBundleDiscoveryFixture, EmptyLeafFoldersBesideAndInsideASweepAreReported)
+{
+    const auto sweepDir = _tempDir / "quick" / "Op" / "Sweep";
+    createTemplateSweep(sweepDir,
+                        {SweepCaseSpec{"case0", "float", {2, 3}, {3, 1}, {2, 3}, {3, 1}}});
+    const auto beside = _tempDir / "quick" / "Op" / "Empty";
+    std::filesystem::create_directories(beside);
+    const auto inside = sweepDir / "notes";
+    std::filesystem::create_directories(inside);
+
+    const auto sweepDirs = findSweepDirectories(_tempDir);
+    EXPECT_EQ(sweepDirs, std::vector<std::filesystem::path>{sweepDir});
+    const std::vector<std::filesystem::path> expected{beside, inside};
+    EXPECT_EQ(detail::findEmptyLeafFolders(_tempDir, sweepDirs), expected);
+}
+
+// A directory named sweep.json marks a sweep root like a file does.
+TEST_F(TestBundleDiscoveryFixture, DirectoryNamedSweepJsonMarksASweepRoot)
+{
+    const auto sweepDir = _tempDir / "quick" / "Op" / "Odd";
+    std::filesystem::create_directories(sweepDir / "sweep.json");
+    std::ofstream(sweepDir / "graph.template.json") << "{}";
+
+    const auto sweepDirs = findSweepDirectories(_tempDir);
+    EXPECT_EQ(sweepDirs, std::vector<std::filesystem::path>{sweepDir});
+    const std::vector<std::filesystem::path> expected{sweepDir / "sweep.json"};
+    EXPECT_EQ(detail::findEmptyLeafFolders(_tempDir, sweepDirs), expected);
+}
+
+// In a sweep that the filter skips, a directory named sweep.json fails discovery with
+// a message that names it.
+TEST_F(TestBundleDiscoveryFixture, DirectoryNamedSweepJsonThrowsWithItsPathWhenTheFilterSkipsIt)
+{
+    const auto sweepDir = _tempDir / "quick" / "Op" / "Odd";
+    std::filesystem::create_directories(sweepDir / "sweep.json");
+    std::ofstream(sweepDir / "graph.template.json") << "{}";
+
+    try
+    {
+        (void)discoverBundles(_tempDir, [](const std::string&) { return false; });
+        FAIL() << "discovery did not throw";
+    }
+    catch(const std::runtime_error& e)
+    {
+        EXPECT_NE(std::string(e.what()).find((sweepDir / "sweep.json").string()), std::string::npos)
+            << e.what();
+    }
+}
+
+// In a sweep that discovery reads, a directory named sweep.json, or a link to a
+// directory, fails discovery with a message that names it.
+TEST_F(TestBundleDiscoveryFixture, DirectoryNamedSweepJsonThrowsWithItsPathWhenTheCasesAreRead)
+{
+    namespace fs = std::filesystem;
+    const auto expectThrowNaming = [](const fs::path& root, const fs::path& sweepJson) {
+        try
+        {
+            (void)discoverBundles(root);
+            ADD_FAILURE() << "discovery did not throw for " << sweepJson;
+        }
+        catch(const std::runtime_error& e)
+        {
+            EXPECT_NE(
+                std::string(e.what()).find("Could not open sweep manifest: " + sweepJson.string()),
+                std::string::npos)
+                << e.what();
+        }
+    };
+
+    const auto directoryRoot = _tempDir / "directory";
+    const auto directorySweep = directoryRoot / "quick" / "Op" / "Odd";
+    fs::create_directories(directorySweep / "sweep.json");
+    std::ofstream(directorySweep / "graph.template.json") << "{}";
+    expectThrowNaming(directoryRoot, directorySweep / "sweep.json");
+
+    const auto linkRoot = _tempDir / "link";
+    const auto linkSweep = linkRoot / "quick" / "Op" / "Linked";
+    const auto target = _tempDir / "target";
+    fs::create_directories(linkSweep);
+    fs::create_directories(target);
+    std::ofstream(linkSweep / "graph.template.json") << "{}";
+    try
+    {
+        fs::create_directory_symlink(target, linkSweep / "sweep.json");
+    }
+    catch(const fs::filesystem_error& e)
+    {
+        GTEST_SKIP() << "cannot create directory symlinks here: " << e.what();
+    }
+    expectThrowNaming(linkRoot, linkSweep / "sweep.json");
+}
+
+// The walk skips a sweep.json that is a directory link back to its own folder, and a
+// link to nothing. Such a folder is not a sweep root, so it is an empty leaf.
+TEST_F(TestBundleDiscoveryFixture, SweepJsonLinkThatTheWalkSkipsMarksNoSweepRoot)
+{
+    namespace fs = std::filesystem;
+    const auto looped = _tempDir / "quick" / "Op" / "Looped";
+    const auto dangling = _tempDir / "quick" / "Op" / "Dangling";
+    for(const auto& dir : {looped, dangling})
+    {
+        fs::create_directories(dir);
+        std::ofstream(dir / "graph.template.json") << "{}";
+    }
+    createMinimalBundle(_tempDir / "quick" / "Op" / "Good", "good");
+    try
+    {
+        fs::create_directory_symlink(looped, looped / "sweep.json");
+        fs::create_symlink(_tempDir / "missing.json", dangling / "sweep.json");
+    }
+    catch(const fs::filesystem_error& e)
+    {
+        GTEST_SKIP() << "cannot create symlinks here: " << e.what();
+    }
+
+    EXPECT_TRUE(isSweepBundleRoot(looped));
+    const auto sweepDirs = findSweepDirectories(_tempDir);
+    EXPECT_TRUE(sweepDirs.empty());
+    EXPECT_EQ(detail::findEmptyLeafFolders(_tempDir, sweepDirs),
+              (std::vector<fs::path>{dangling, looped}));
+
+    std::vector<DiscoveredBundle> result;
+    ASSERT_NO_THROW(result = discoverBundles(_tempDir));
+    ASSERT_EQ(result.size(), 1u);
+    EXPECT_EQ(result.front().suiteName, "quick_Op_Good");
+}
+
+TEST_F(TestBundleDiscoveryFixture, SweepRootsAndEmptyLeavesBehindADirectorySymlinkAreFound)
+{
+    const auto root = _tempDir / "root";
+    const auto outside = _tempDir / "outside" / "Linked";
+    createTemplateSweep(outside / "Sweep",
+                        {SweepCaseSpec{"case0", "float", {2, 3}, {3, 1}, {2, 3}, {3, 1}}});
+    std::filesystem::create_directories(outside / "Empty");
+    std::filesystem::create_directories(outside / "MetaOnly");
+    std::ofstream(outside / "MetaOnly" / "meta.json") << "{}";
+    createMinimalBundle(outside / "Good", "good");
+    std::filesystem::create_directories(root / "quick");
+    try
+    {
+        std::filesystem::create_directory_symlink(outside, root / "quick" / "Linked");
+    }
+    catch(const std::filesystem::filesystem_error& e)
+    {
+        GTEST_SKIP() << "cannot create directory symlinks here: " << e.what();
+    }
+
+    const auto linked = root / "quick" / "Linked";
+    const auto sweepDirs = findSweepDirectories(root);
+    EXPECT_EQ(sweepDirs, std::vector<std::filesystem::path>{linked / "Sweep"});
+    const std::vector<std::filesystem::path> expected{linked / "Empty", linked / "MetaOnly"};
+    EXPECT_EQ(detail::findEmptyLeafFolders(root, sweepDirs), expected);
+}
+
+// The walk does not list a directory it may not read. Its parent then has no listed
+// subdirectory, so the parent is a leaf.
+TEST_F(TestBundleDiscoveryFixture, ParentOfAnUnlistableDirectoryIsALeaf)
+{
+    namespace fs = std::filesystem;
+    createMinimalBundle(_tempDir / "conv" / "good", "good");
+    const auto parent = _tempDir / "x";
+    const auto locked = parent / "locked";
+    createTemplateSweep(locked / "Sweep",
+                        {SweepCaseSpec{"case0", "float", {2, 3}, {3, 1}, {2, 3}, {3, 1}}});
+    fs::permissions(locked, fs::perms::none);
+    // Give the permissions back on every exit, so the scratch directory can be removed.
+    struct RestorePermissions
+    {
+        fs::path path;
+        ~RestorePermissions()
+        {
+            std::error_code error;
+            fs::permissions(path, fs::perms::owner_all, error);
+        }
+    };
+    const RestorePermissions restore{locked};
+
+    std::error_code probeError;
+    const fs::directory_iterator probe(locked, probeError);
+    if(!probeError)
+    {
+        GTEST_SKIP() << "this process can still list a directory with no permissions";
+    }
+
+    const auto sweepDirs = findSweepDirectories(_tempDir);
+    EXPECT_TRUE(sweepDirs.empty());
+    EXPECT_EQ(detail::findEmptyLeafFolders(_tempDir, sweepDirs),
+              std::vector<std::filesystem::path>{parent});
+}
+
 TEST_F(TestBundleDiscoveryFixture, EmptyRootReturnsEmpty)
 {
     auto result = discoverBundles(_tempDir);
@@ -558,18 +883,76 @@ TEST_F(TestBundleDiscoveryFixture, SweepSupportJsonIsNotDiscoveredAsGraph)
     }
 }
 
-TEST_F(TestBundleDiscoveryFixture, ScanFilesByExtensionIsGenericAndSorted)
+TEST_F(TestBundleDiscoveryFixture, BundleTreeListingHoldsRegularJsonFilesSorted)
 {
     std::filesystem::create_directories(_tempDir / "b");
     std::filesystem::create_directories(_tempDir / "a");
     std::ofstream(_tempDir / "b" / "z.json") << "{}";
     std::ofstream(_tempDir / "a" / "m.json") << "{}";
     std::ofstream(_tempDir / "a" / "ignore.txt") << "x";
+    std::filesystem::create_directories(_tempDir / "a" / "dir.json");
 
-    auto files = scanFilesByExtension(_tempDir, ".json");
+    const auto files = detail::listBundleTree(_tempDir).jsonFiles;
     ASSERT_EQ(files.size(), 2u);
     EXPECT_EQ(files[0].filename(), "m.json");
     EXPECT_EQ(files[1].filename(), "z.json");
+}
+
+TEST(TestHasAncestorIn, MatchesIsDescendantOfOnEveryPair)
+{
+    const std::vector<std::filesystem::path> paths{
+        "a",        "a/b",      "a/b/c",        "a/bc",      "a/bc/d",    "a/./b/c",     "a/../a/b",
+        "a//b/c",   "a/b/",     "a/b/c/",       ".",         "../x/a",    "/r/a",        "/r/a/b",
+        "/r/a/bc",  "/r/./a/b", "/r/a/../a/b/", "/r//a/b/c", "/r/a/b/..", "/r/x/../a/b", "C:\\r",
+        "C:\\r\\a", "C:r",      "C:/r/a",       "D:\\r"};
+    const std::vector<std::vector<std::filesystem::path>> ancestorSets{{"a"},
+                                                                       {"a/b"},
+                                                                       {"a/b/"},
+                                                                       {"a/b/c"},
+                                                                       {"a/./b"},
+                                                                       {"a//b"},
+                                                                       {"a/b/../b"},
+                                                                       {"x", "a/bc"},
+                                                                       {".."},
+                                                                       {"."},
+                                                                       {"/"},
+                                                                       {"/r/a"},
+                                                                       {"/r/a/"},
+                                                                       {"/r/a/b", "/r/x"},
+                                                                       {"/r/a/b/c", "a/b"},
+                                                                       {"/r/./a//b/"},
+                                                                       {""},
+                                                                       {"C:"},
+                                                                       {"C:\\"},
+                                                                       {"C:\\r"},
+                                                                       {"D:", "x"}};
+
+    size_t matches = 0;
+    size_t misses = 0;
+    for(const auto& ancestors : ancestorSets)
+    {
+        const auto normalized = detail::lexicallyNormalSet(ancestors);
+        for(const auto& path : paths)
+        {
+            const bool expected
+                = std::any_of(ancestors.begin(), ancestors.end(), [&](const auto& ancestor) {
+                      return isDescendantOf(path, ancestor);
+                  });
+            EXPECT_EQ(detail::hasAncestorIn(path, normalized), expected)
+                << "path '" << path.string() << "', first ancestor '" << ancestors.front().string()
+                << "'";
+            if(expected)
+            {
+                ++matches;
+            }
+            else
+            {
+                ++misses;
+            }
+        }
+    }
+    EXPECT_GT(matches, 0u);
+    EXPECT_GT(misses, 0u);
 }
 
 TEST(TestGraphFile, AllowlistsGraphsAndExcludesCompanions)
@@ -1306,6 +1689,88 @@ TEST_F(TestBundleDiscoveryFixture, DuplicateSweepCaseIdThrows)
     EXPECT_THROW(discoverBundles(_tempDir), std::runtime_error);
 }
 
+TEST_F(TestBundleDiscoveryFixture, SweepCaseScanEqualsTheParsedIdCount)
+{
+    const std::vector<std::string> manifests{
+        R"json({"cases":[]})json",
+        "{ \"cases\" : [ ] }\n",
+        R"json({"template":"graph.template.json","cases":[{"id":"a"},{"id":"b"},{"id":"c"}]})json",
+        R"json({
+  "note": ["{[}],\"\\"],
+  "cases": [
+    {"id": "a{", "values": {"tensors": [{"uid": 0, "dims": [1, 2]}, {"uid": 1}]}},
+    {"id": "b]\"", "values": {"x": {"y": {}}}},
+    {"id": "c,\\"}
+  ],
+  "after": {"k": [1, {"m": 2}]}
+}
+)json",
+        R"json({"nested":{"cases":[{"id":"z1"},{"id":"z2"}]},"cases":[{"id":"a"}]})json",
+        R"json({"label":"cases","cases":[{"id":"a"},{"id":"b"}],"tail":["cases",1]})json"};
+
+    for(size_t index = 0; index < manifests.size(); ++index)
+    {
+        const auto sweepPath = _tempDir / ("sweep" + std::to_string(index) + ".json");
+        std::ofstream(sweepPath, std::ios::binary) << manifests[index];
+        const auto expected = readSweepCaseIds(sweepPath).size();
+
+        const auto scanned = detail::countSweepCasesWithoutParsing(manifests[index]);
+        ASSERT_TRUE(scanned.has_value()) << manifests[index];
+        EXPECT_EQ(*scanned, expected) << manifests[index];
+        EXPECT_EQ(countSweepCases(sweepPath), expected) << manifests[index];
+    }
+}
+
+TEST_F(TestBundleDiscoveryFixture, SweepCaseScanFallsBackOnShapesItDoesNotAccept)
+{
+    const std::vector<std::string> manifests{
+        R"json([])json",
+        R"json({})json",
+        R"json({"other":[{"id":"a"}]})json",
+        R"json({"cases":{}})json",
+        R"json({"cases":1,"other":[{}]})json",
+        R"json({"cases":{},"other":[{}]})json",
+        R"json({"cases":"a"})json",
+        R"json({"cases":[1]})json",
+        R"json({"cases":["a"]})json",
+        R"json({"cases":[[]]})json",
+        R"json({"cases":[{"id":"a"}],"cases":[]})json",
+        R"json({"cases":1,"cases":[{"id":"a"}]})json",
+        R"json({"cases":[{"id":"a"})json",
+        R"json({"cases":[{"id":"a}]})json",
+        R"json({"cases":[]} {})json",
+        R"json({"ca\u0073es":[{"id":"a"}]})json",
+        R"json({"cases":[{"id":"a"}],"c\u0061ses":[{"id":"a"},{"id":"b"}]})json",
+        R"json({"c\u0061ses":[{"id":"a"},{"id":"b"}],"cases":[{"id":"a"}]})json",
+        R"json({"note":"a\"b","cases":[{"id":"a"}]})json",
+        ""};
+
+    size_t throwingManifests = 0;
+    for(size_t index = 0; index < manifests.size(); ++index)
+    {
+        EXPECT_FALSE(detail::countSweepCasesWithoutParsing(manifests[index]).has_value())
+            << manifests[index];
+
+        const auto sweepPath = _tempDir / ("sweep" + std::to_string(index) + ".json");
+        std::ofstream(sweepPath, std::ios::binary) << manifests[index];
+        std::optional<size_t> parsedCount;
+        try
+        {
+            parsedCount = readSweepCaseIds(sweepPath).size();
+        }
+        catch(const std::runtime_error&)
+        {
+            ++throwingManifests;
+            EXPECT_THROW(countSweepCases(sweepPath), std::runtime_error) << manifests[index];
+            continue;
+        }
+        EXPECT_EQ(countSweepCases(sweepPath), *parsedCount) << manifests[index];
+    }
+    EXPECT_GT(throwingManifests, 0u);
+
+    EXPECT_THROW(countSweepCases(_tempDir / "missing" / "sweep.json"), std::runtime_error);
+}
+
 // resolvePlaceholder falls back to the case-level `values` map when a
 // placeholder key is absent from the per-tensor entry. A top-level template
 // placeholder (no current tensor uid) resolves straight from the global value.
@@ -1424,7 +1889,7 @@ TEST_F(TestBundleDiscoveryFixture, SelectBundlesToLoadCountsExcludedClaimsWhenOb
     BundleRegistrationStats stats;
     SupportClaimCoverage coverage;
     const auto selected = detail::selectBundlesToLoad(
-        discovered, "case_a.*", /*writing=*/false, /*observing=*/true, stats, coverage);
+        discovered, {}, "case_a.*", /*writing=*/false, /*observing=*/true, stats, coverage);
 
     ASSERT_EQ(selected.size(), 1u);
     EXPECT_EQ(selected.front().suiteName, "case_a");
@@ -1452,7 +1917,7 @@ TEST_F(TestBundleDiscoveryFixture, SelectBundlesToLoadLeavesCoverageAloneWhenNot
     BundleRegistrationStats stats;
     SupportClaimCoverage coverage;
     const auto selected = detail::selectBundlesToLoad(
-        discovered, "case_a.*", /*writing=*/false, /*observing=*/false, stats, coverage);
+        discovered, {}, "case_a.*", /*writing=*/false, /*observing=*/false, stats, coverage);
 
     EXPECT_EQ(selected.size(), 1u);
     EXPECT_EQ(stats.excludedByFilter, 1u);
@@ -1472,12 +1937,284 @@ TEST_F(TestBundleDiscoveryFixture, SelectBundlesToLoadKeepsEveryBundleWhenWritin
     BundleRegistrationStats stats;
     SupportClaimCoverage coverage;
     const auto selected = detail::selectBundlesToLoad(
-        discovered, "case_a.*", /*writing=*/true, /*observing=*/false, stats, coverage);
+        discovered, {}, "case_a.*", /*writing=*/true, /*observing=*/false, stats, coverage);
 
     EXPECT_EQ(selected.size(), 2u);
     EXPECT_EQ(stats.discovered, 2u);
     EXPECT_EQ(stats.excludedByFilter, 0u);
     EXPECT_EQ(coverage.graphsFound, 0u);
+}
+
+namespace
+{
+
+const std::string HIP_MLOPS_LANE_FILTER
+    = "quick_*:standard_*:Smoke/*:Quick/*:Standard/*-*DISABLED*";
+const std::string ASM_SDPA_LANE_FILTER
+    = "quick_*Sdpa*:standard_*Sdpa*:Smoke/*Sdpa*-*DISABLED*:*_SdpaBackward_*.prbu01_*:"
+      "*_SdpaBackward_*.prbu03_*:*_SdpaBackward_*.prbu13_*:*_SdpaBackward_*.prbt04_*:"
+      "*_SdpaBackward_*.prbt04n_*:*_SdpaBackward_*.prbr05_*";
+const std::string FLYDSL_SDPA_LANE_FILTER
+    = "quick_SdpaFwd_*.*:standard_SdpaFwd_*.*-*DISABLED*:"
+      "*_SdpaFwd_bhsd_fp16_hd128_causal_gqa4_Small.*:*_SdpaFwd_bhsd_fp16_hd128_causal_mha_Small.*";
+
+struct SelectionOutcome
+{
+    std::vector<std::string> selected;
+    BundleRegistrationStats stats;
+    size_t graphsFound = 0;
+    size_t graphsWithClaims = 0;
+};
+
+std::vector<std::string> describeSelected(const std::vector<DiscoveredBundle>& bundles)
+{
+    std::vector<std::string> described;
+    described.reserve(bundles.size());
+    for(const auto& bundle : bundles)
+    {
+        described.push_back(bundle.fullName() + "|" + bundle.jsonPath.string() + "|"
+                            + (bundle.isTemplateSweepCase() ? bundle.sweep->caseId : ""));
+    }
+    return described;
+}
+
+SelectionOutcome selectionOutcome(std::vector<DiscoveredBundle> bundles,
+                                  const std::string& filter,
+                                  bool observing)
+{
+    SelectionOutcome outcome;
+    SupportClaimCoverage coverage;
+    outcome.selected = describeSelected(detail::selectBundlesToLoad(std::move(bundles),
+                                                                    {},
+                                                                    filter,
+                                                                    /*writing=*/false,
+                                                                    observing,
+                                                                    outcome.stats,
+                                                                    coverage));
+    outcome.graphsFound = coverage.graphsFound;
+    outcome.graphsWithClaims = coverage.graphsWithClaims;
+    return outcome;
+}
+
+BundleDiscoveryResult discoverForFilter(const std::filesystem::path& root,
+                                        const std::string& filter)
+{
+    return discoverBundles(root, [&filter](const std::string& suiteName) {
+        return gtestFilterMaySelectSuite(filter, suiteName);
+    });
+}
+
+// Compares what discoverAndSelectBundles() selects, counts and covers with selection after
+// the full discovery, with and without observing. Returns how many sweep roots the
+// filtered discovery did not parse. Observing must not change that number.
+size_t expectFilteredSelectionMatchesFull(const std::filesystem::path& root,
+                                          const std::vector<DiscoveredBundle>& full,
+                                          const std::string& filter)
+{
+    size_t unparsedSweeps = 0;
+    for(const bool observing : {false, true})
+    {
+        const auto expected = selectionOutcome(full, filter, observing);
+
+        SelectionOutcome actual;
+        SupportClaimCoverage coverage;
+        const auto discovered = detail::discoverAndSelectBundles(
+            root, filter, /*writing=*/false, observing, actual.stats, coverage);
+        if(!discovered.has_value())
+        {
+            ADD_FAILURE() << "filter '" << filter << "': nothing discovered";
+            return 0;
+        }
+        EXPECT_EQ(discovered->dataDir, root) << "filter '" << filter << "'";
+        actual.selected = describeSelected(discovered->bundles);
+        actual.graphsFound = coverage.graphsFound;
+        actual.graphsWithClaims = coverage.graphsWithClaims;
+        if(!observing)
+        {
+            unparsedSweeps = discovered->unparsedSweeps.size();
+        }
+        EXPECT_EQ(discovered->unparsedSweeps.size(), unparsedSweeps)
+            << "filter '" << filter << "', observing " << observing;
+
+        EXPECT_EQ(actual.selected.size(), expected.selected.size()) << "filter '" << filter << "'";
+        EXPECT_TRUE(actual.selected == expected.selected) << "filter '" << filter << "'";
+        EXPECT_EQ(actual.stats.discovered, expected.stats.discovered)
+            << "filter '" << filter << "'";
+        EXPECT_EQ(actual.stats.excludedByFilter, expected.stats.excludedByFilter)
+            << "filter '" << filter << "'";
+        EXPECT_EQ(actual.graphsFound, expected.graphsFound) << "filter '" << filter << "'";
+        EXPECT_EQ(actual.graphsWithClaims, expected.graphsWithClaims)
+            << "filter '" << filter << "'";
+    }
+    return unparsedSweeps;
+}
+
+} // namespace
+
+TEST_F(TestBundleDiscoveryFixture, FilteredDiscoverySelectsAndCountsLikeFullDiscovery)
+{
+    createMixedTierTree(_tempDir);
+    const auto full = discoverBundles(_tempDir);
+    ASSERT_EQ(full.size(), 16u);
+
+    size_t filtersWithUnparsedSweeps = 0;
+    for(const auto& filter : {std::string("*"),
+                              std::string(""),
+                              std::string("quick_*"),
+                              std::string("quick_Matmul_*.*"),
+                              HIP_MLOPS_LANE_FILTER,
+                              ASM_SDPA_LANE_FILTER,
+                              FLYDSL_SDPA_LANE_FILTER,
+                              std::string("*-quick_Matmul_A.*"),
+                              std::string("NoSuchSuite.*")})
+    {
+        const size_t unparsedSweeps = expectFilteredSelectionMatchesFull(_tempDir, full, filter);
+        filtersWithUnparsedSweeps += unparsedSweeps != 0 ? 1 : 0;
+        if(filter == "quick_Matmul_*.*")
+        {
+            EXPECT_GT(unparsedSweeps, 0u);
+        }
+    }
+    EXPECT_GT(filtersWithUnparsedSweeps, 0u);
+}
+
+TEST_F(TestBundleDiscoveryFixture, SelectBundlesToLoadRejectsUnparsedSweepsWhenWriting)
+{
+    createMinimalBundle(_tempDir / "case_a", "graph");
+    const std::vector<UnparsedSweep> unparsed{{_tempDir / "quick" / "S", "quick_S", 1}};
+
+    BundleRegistrationStats stats;
+    SupportClaimCoverage coverage;
+    EXPECT_THROW(detail::selectBundlesToLoad(discoverBundles(_tempDir),
+                                             unparsed,
+                                             "*",
+                                             /*writing=*/true,
+                                             /*observing=*/false,
+                                             stats,
+                                             coverage),
+                 std::logic_error);
+}
+
+TEST_F(TestBundleDiscoveryFixture, MalformedManifestThrowsOnlyWhenTheFilterCanSelectItsSuite)
+{
+    createTemplateSweep(
+        _tempDir / "quick" / "Bad" / "Dup",
+        {{"dup_case_nchw", "float", {2, 3, 4, 5}, {60, 20, 5, 1}, {1, 3, 1, 1}, {3, 1, 1, 1}},
+         {"dup_case_nchw", "half", {2, 3, 4, 5}, {60, 20, 5, 1}, {1, 3, 1, 1}, {3, 1, 1, 1}}});
+    createSweepWithCases(_tempDir / "quick" / "Good" / "G", {"g1"}, false);
+
+    const auto filtered = discoverForFilter(_tempDir, "quick_Good_*.*");
+    ASSERT_EQ(filtered.unparsedSweeps.size(), 1u);
+    EXPECT_EQ(filtered.unparsedSweeps.front().suiteName, "quick_Bad_Dup");
+    EXPECT_EQ(filtered.unparsedSweeps.front().caseCount, 2u);
+    EXPECT_EQ(filtered.bundles.size(), 1u);
+
+    EXPECT_THROW(discoverBundles(_tempDir), std::runtime_error);
+    EXPECT_THROW(discoverForFilter(_tempDir, "quick_Bad_*.*"), std::runtime_error);
+}
+
+TEST_F(TestBundleDiscoveryFixture, NameCollisionThrowsWhenTheFilterCanSelectTheSuite)
+{
+    createSweepWithCases(_tempDir / "quick" / "Op-A" / "S", {"c1"}, false);
+    createSweepWithCases(_tempDir / "quick" / "Op_A" / "S", {"c1"}, false);
+
+    EXPECT_THROW(discoverForFilter(_tempDir, "quick_Op_A_S.*"), std::runtime_error);
+    EXPECT_NO_THROW(discoverForFilter(_tempDir, "standard_*"));
+}
+
+TEST(TestHasNoDiscoveredBundles, IsTrueOnlyWithoutBundlesAndWithoutUnparsedCases)
+{
+    const DiscoveredBundle bundle{"quick/S/graph.json", "quick_S", "graph", std::nullopt};
+    const UnparsedSweep sweep{"quick/T", "quick_T", 3};
+    const UnparsedSweep emptySweep{"quick/E", "quick_E", 0};
+
+    EXPECT_TRUE(detail::hasNoDiscoveredBundles({}));
+    EXPECT_TRUE(detail::hasNoDiscoveredBundles({{}, {emptySweep}}));
+    EXPECT_FALSE(detail::hasNoDiscoveredBundles({{bundle}, {}}));
+    EXPECT_FALSE(detail::hasNoDiscoveredBundles({{}, {sweep}}));
+    EXPECT_FALSE(detail::hasNoDiscoveredBundles({{}, {emptySweep, sweep}}));
+    EXPECT_FALSE(detail::hasNoDiscoveredBundles({{bundle}, {sweep}}));
+}
+
+// A tree whose only bundles are sweeps without cases has nothing to discover, also
+// when the filter skips those sweeps.
+TEST_F(TestBundleDiscoveryFixture, ZeroCaseSweepsTheFilterSkipsCountAsNoBundles)
+{
+    createSweepWithCases(_tempDir / "quick" / "Op" / "A", {}, false);
+    createSweepWithCases(_tempDir / "standard" / "Op" / "B", {}, true);
+
+    const auto skipped = discoverBundles(_tempDir, [](const std::string&) { return false; });
+    EXPECT_EQ(skipped.unparsedSweeps.size(), 2u);
+    EXPECT_TRUE(detail::hasNoDiscoveredBundles(skipped));
+
+    const auto parsed = discoverBundles(_tempDir, [](const std::string&) { return true; });
+    EXPECT_TRUE(parsed.unparsedSweeps.empty());
+    EXPECT_TRUE(detail::hasNoDiscoveredBundles(parsed));
+}
+
+// --write-support-claims needs every sweep manifest parsed, whatever the filter.
+TEST_F(TestBundleDiscoveryFixture, DiscoverAndSelectBundlesParsesEverySweepWhenWriting)
+{
+    createMixedTierTree(_tempDir);
+
+    BundleRegistrationStats stats;
+    SupportClaimCoverage coverage;
+    std::optional<detail::DiscoveredBundleSet> discovered;
+    ASSERT_NO_THROW(discovered = detail::discoverAndSelectBundles(_tempDir,
+                                                                  "quick_Matmul_*.*",
+                                                                  /*writing=*/true,
+                                                                  /*observing=*/false,
+                                                                  stats,
+                                                                  coverage));
+
+    ASSERT_TRUE(discovered.has_value());
+    EXPECT_TRUE(discovered->unparsedSweeps.empty());
+    EXPECT_EQ(discovered->bundles.size(), 16u);
+    EXPECT_EQ(stats.discovered, 16u);
+    EXPECT_EQ(stats.excludedByFilter, 0u);
+}
+
+// A tree of sweeps the filter skips is not "no bundles": the zero-tests diagnostic must
+// report their cases as discovered and excluded.
+TEST_F(TestBundleDiscoveryFixture, DiscoverAndSelectBundlesCountsSweepsTheFilterSkips)
+{
+    createSweepWithCases(_tempDir / "quick" / "Op" / "A", {"c1", "c2"}, false);
+    createSweepWithCases(_tempDir / "standard" / "Op" / "B", {"c3"}, true);
+
+    BundleRegistrationStats stats;
+    SupportClaimCoverage coverage;
+    testing::internal::CaptureStderr();
+    const auto discovered = detail::discoverAndSelectBundles(
+        _tempDir, "NoSuchSuite.*", /*writing=*/false, /*observing=*/true, stats, coverage);
+    const auto printed = testing::internal::GetCapturedStderr();
+
+    EXPECT_NE(printed.find("--gtest_filter excluded 3 of 3 discovered bundle test(s) before "
+                           "loading\n"),
+              std::string::npos)
+        << printed;
+    ASSERT_TRUE(discovered.has_value());
+    EXPECT_TRUE(discovered->bundles.empty());
+    EXPECT_EQ(discovered->unparsedSweeps.size(), 2u);
+    EXPECT_EQ(stats.discovered, 3u);
+    EXPECT_EQ(stats.excludedByFilter, 3u);
+    EXPECT_EQ(coverage.graphsFound, 3u);
+    EXPECT_EQ(coverage.graphsWithClaims, 1u);
+}
+
+TEST_F(TestBundleDiscoveryFixture, DiscoverAndSelectBundlesFindsNothingInATreeWithoutCases)
+{
+    createSweepWithCases(_tempDir / "quick" / "Op" / "A", {}, false);
+
+    for(const auto* filter : {"NoSuchSuite.*", "*"})
+    {
+        BundleRegistrationStats stats;
+        SupportClaimCoverage coverage;
+        EXPECT_FALSE(detail::discoverAndSelectBundles(
+                         _tempDir, filter, /*writing=*/false, /*observing=*/false, stats, coverage)
+                         .has_value())
+            << "filter '" << filter << "'";
+        EXPECT_EQ(stats.discovered, 0u) << "filter '" << filter << "'";
+    }
 }
 
 // Reuses the baked-value-plus-runtime-pass-by-value corruption from
@@ -1948,7 +2685,7 @@ TEST_F(TestBundleDiscoveryFixture, RegistrationDoesNotCountAnExpectedRejectionCa
         << R"({"version": 1, "claims": {"E": [{"cases": ["claimed_fp32_nchw"],
                 "support": {"gfx942": ["linux"]}}]}})";
 
-    const detail::DiscoveredBundleSet set{_tempDir, discoverBundles(_tempDir)};
+    const detail::DiscoveredBundleSet set{_tempDir, discoverBundles(_tempDir), {}};
     ASSERT_EQ(set.bundles.size(), 2u);
 
     const auto before = supportClaimCoverage();
@@ -3491,5 +4228,92 @@ TEST(TestPruneAbsentTensors, RemovesTheTensorsAndNullsTheirPortsOnly)
     EXPECT_EQ(detail::pruneAbsentTensors(fx::templateOfGraph(supersetGraph()), {SINK}),
               fx::templateOfGraph(sdpa_utils::optionalSdpaFwdGraphJson(true, false)));
 }
+
+namespace
+{
+
+// One full discovery of each bundle tree, shared by every test of the suite.
+class TestCheckedInBundleTree : public ::testing::TestWithParam<std::string>
+{
+protected:
+    static void TearDownTestSuite()
+    {
+        s_discovered.clear();
+    }
+
+    void SetUp() override
+    {
+        if(!std::filesystem::is_directory(root()))
+        {
+            GTEST_SKIP() << "No checked-in bundle tree at " << GetParam();
+        }
+        if(s_discovered.find(GetParam()) == s_discovered.end())
+        {
+            s_discovered.emplace(GetParam(), discoverBundles(root()));
+        }
+    }
+
+    static std::filesystem::path root()
+    {
+        return GetParam();
+    }
+
+    static const std::vector<DiscoveredBundle>& discovered()
+    {
+        return s_discovered.at(GetParam());
+    }
+
+    static inline std::map<std::string, std::vector<DiscoveredBundle>> s_discovered;
+};
+
+} // namespace
+
+TEST_P(TestCheckedInBundleTree, SweepCaseScanEqualsTheParsedIdCountForEveryManifest)
+{
+    std::map<std::filesystem::path, size_t> discoveredCaseCounts;
+    for(const auto& bundle : discovered())
+    {
+        if(bundle.isTemplateSweepCase())
+        {
+            ++discoveredCaseCounts[bundle.jsonPath];
+        }
+    }
+
+    const auto sweepDirs = findSweepDirectories(root());
+    ASSERT_FALSE(sweepDirs.empty());
+    size_t scannedCases = 0;
+    for(const auto& sweepDir : sweepDirs)
+    {
+        const auto sweepPath = sweepDir / "sweep.json";
+        const auto found = discoveredCaseCounts.find(sweepPath);
+        const size_t expected = found == discoveredCaseCounts.end() ? 0 : found->second;
+        const auto scanned = countSweepCases(sweepPath);
+        EXPECT_EQ(scanned, expected) << sweepPath.string();
+        std::ifstream stream(sweepPath, std::ios::binary);
+        const std::string content{std::istreambuf_iterator<char>(stream),
+                                  std::istreambuf_iterator<char>()};
+        EXPECT_TRUE(detail::countSweepCasesWithoutParsing(content).has_value())
+            << sweepPath.string();
+        scannedCases += scanned;
+    }
+    EXPECT_GT(scannedCases, 0u);
+}
+
+TEST_P(TestCheckedInBundleTree, FilteredDiscoverySelectsAndCountsLikeFullDiscovery)
+{
+    for(const auto& filter : {HIP_MLOPS_LANE_FILTER,
+                              ASM_SDPA_LANE_FILTER,
+                              FLYDSL_SDPA_LANE_FILTER,
+                              std::string("quick_*")})
+    {
+        expectFilteredSelectionMatchesFull(root(), discovered(), filter);
+    }
+}
+
+INSTANTIATE_TEST_SUITE_P(Standard,
+                         TestCheckedInBundleTree,
+                         ::testing::Values((std::filesystem::path(__FILE__).parent_path() / ".."
+                                            / "integration-test-bundles")
+                                               .string()));
 
 // NOLINTEND(readability-identifier-naming)

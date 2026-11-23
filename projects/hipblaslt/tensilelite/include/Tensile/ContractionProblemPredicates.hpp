@@ -767,6 +767,179 @@ namespace TensileLite
                 }
             };
 
+            // Divisibility of one A or B stride, in elements. A zero (broadcast) stride never
+            // satisfies it, because the kernels that declare it take the stride as a byte kernarg.
+            template <typename Class, TensorDescriptor const& (ContractionProblemGemm::*tensor)() const>
+            struct OperandStrideMultiple : public Predicate_CRTP<Class, ContractionProblemGemm>
+            {
+                enum
+                {
+                    HasIndex = true,
+                    HasValue = true
+                };
+                size_t index = 0;
+                size_t value = 0;
+
+                OperandStrideMultiple() = default;
+                OperandStrideMultiple(size_t index, size_t value)
+                    : index(index)
+                    , value(value)
+                {
+                }
+
+                virtual bool operator()(ContractionProblemGemm const& problem) const override
+                {
+                    std::vector<size_t> const& strides = (problem.*tensor)().strides();
+                    if(value == 0 || index >= strides.size() || strides[index] == 0)
+                        return false;
+                    return strides[index] % value == 0;
+                }
+
+                virtual bool debugEval(ContractionProblemGemm const& problem,
+                                       std::ostream&                 stream) const override
+                {
+                    bool                       rv      = (*this)(problem);
+                    std::vector<size_t> const& strides = (problem.*tensor)().strides();
+                    std::ostringstream         details;
+                    if(index >= strides.size())
+                        details << "index=" << index << " out of range, strides=" << strides.size();
+                    else
+                        details << "prob=" << strides[index] << " % sol=" << value << " == 0";
+                    PredicateDebugger::printRow(stream, rv, this->type(), details.str());
+                    return rv;
+                }
+            };
+
+            struct StrideAMultiple
+                : public OperandStrideMultiple<StrideAMultiple, &ContractionProblemGemm::a>
+            {
+                using OperandStrideMultiple::OperandStrideMultiple;
+                StrideAMultiple() = default;
+
+                static std::string Type()
+                {
+                    return "StrideAMultiple";
+                }
+            };
+
+            struct StrideBMultiple
+                : public OperandStrideMultiple<StrideBMultiple, &ContractionProblemGemm::b>
+            {
+                using OperandStrideMultiple::OperandStrideMultiple;
+                StrideBMultiple() = default;
+
+                static std::string Type()
+                {
+                    return "StrideBMultiple";
+                }
+            };
+
+            // Handwritten kernels that address a whole tensor through one buffer resource
+            // declare the first byte extent they cannot address (the shipped skinny MXFP8
+            // kernels declare 2^31). Each tensor's allocated bytes and its leading stride in
+            // bytes must stay below it; the stride is passed as a 32-bit kernel argument and is
+            // not part of the allocated bytes when a dimension has size 1.
+            struct TensorBytesLessThan
+                : public Predicate_CRTP<TensorBytesLessThan, ContractionProblemGemm>
+            {
+                enum
+                {
+                    HasIndex = false,
+                    HasValue = true
+                };
+                size_t value = 0;
+
+                TensorBytesLessThan() = default;
+                TensorBytesLessThan(size_t value)
+                    : value(value)
+                {
+                }
+
+                static std::string Type()
+                {
+                    return "TensorBytesLessThan";
+                }
+
+                // Leading stride in bytes, 0 for a tensor with no leading dimension.
+                static size_t leadingStrideBytes(TensorDescriptor const& tensor)
+                {
+                    if(tensor.dimensions() < 2)
+                        return 0;
+                    return multiplyElementSize(tensor.strides()[1], tensor.elementBytes());
+                }
+
+                virtual bool operator()(ContractionProblemGemm const& problem) const override
+                {
+                    for(TensorDescriptor const* tensor :
+                        {&problem.a(), &problem.b(), &problem.c(), &problem.d()})
+                    {
+                        if(tensor->empty())
+                            continue;
+                        if(tensor->totalAllocatedBytes() >= value)
+                            return false;
+                        if(leadingStrideBytes(*tensor) >= value)
+                            return false;
+                    }
+                    return true;
+                }
+
+                virtual bool debugEval(ContractionProblemGemm const& problem,
+                                       std::ostream&                 stream) const override
+                {
+                    bool const         rv = (*this)(problem);
+                    std::ostringstream details;
+                    char               name = 'A';
+                    for(TensorDescriptor const* tensor :
+                        {&problem.a(), &problem.b(), &problem.c(), &problem.d()})
+                    {
+                        char const tensorName = name++;
+                        if(tensor->empty())
+                            continue;
+                        details << tensorName << " alloc bytes=" << tensor->totalAllocatedBytes()
+                                << " ld bytes=" << leadingStrideBytes(*tensor) << "; ";
+                    }
+                    details << "< sol=" << value;
+                    PredicateDebugger::printRow(stream, rv, this->type(), details.str());
+                    return rv;
+                }
+            };
+
+            // Handwritten kernels that read the padded HostPreSwizzle MX scale layout declare
+            // it. A caller that hands over compactly packed scales (hipBLASLt does for every
+            // format but Block_32_UE8M0_32_8_EXT) sets the custom-kernel packed flags, and the
+            // kernel would read the wrong scales.
+            struct MXScalesPreSwizzled
+                : public Predicate_CRTP<MXScalesPreSwizzled, ContractionProblemGemm>
+            {
+                enum
+                {
+                    HasIndex = false,
+                    HasValue = false
+                };
+                static std::string Type()
+                {
+                    return "MXScalesPreSwizzled";
+                }
+
+                virtual bool operator()(ContractionProblemGemm const& problem) const override
+                {
+                    return !problem.customKernelMXScaleAIsPacked()
+                           && !problem.customKernelMXScaleBIsPacked();
+                }
+
+                virtual bool debugEval(ContractionProblemGemm const& problem,
+                                       std::ostream&                 stream) const override
+                {
+                    bool               rv = (*this)(problem);
+                    std::ostringstream details;
+                    details << "packed scaleA=" << problem.customKernelMXScaleAIsPacked()
+                            << " scaleB=" << problem.customKernelMXScaleBIsPacked()
+                            << " sol=pre-swizzled";
+                    PredicateDebugger::printRow(stream, rv, this->type(), details.str());
+                    return rv;
+                }
+            };
+
             struct StrideCEqual : public Predicate_CRTP<StrideCEqual, ContractionProblemGemm>
             {
                 enum
@@ -1854,6 +2027,90 @@ namespace TensileLite
                 }
             };
 
+            // Every tensor the kernel addresses must fit one buffer descriptor.
+            //
+            // BufferLoad/StoreOffsetLimitCheck bound a tile's extent, because a
+            // generated kernel re-bases its descriptor per workgroup. A kernel that
+            // programs num_records once over the whole tensor has no such bound: at
+            // 4 GiB the 32-bit field wraps, after which loads read back 0 and stores
+            // are dropped, so the launch succeeds and the answer is wrong. The
+            // rocRoller-on path rejects these problems in
+            // RocRollerGemmKernel::exceedsBufferAddressingLimit; this is the
+            // counterpart for checked-in rocRoller kernels, which the off path
+            // reaches through the solution library instead.
+            //
+            // The extent is max(stride[i] * size[i]) over dimensions of size > 1,
+            // not the tight totalAllocatedElements: the kernel programs
+            // num_records from the stride product, so leading-dimension padding
+            // counts in full. That, and counting the scale tensors, makes this
+            // stricter than the rocRoller-on check, which counts packed extents
+            // only. A size-1 dimension (the batch of a single-batch call) never
+            // advances the address, so its stride does not count.
+            struct BufferAddressingLimitCheck
+                : public Predicate_CRTP<BufferAddressingLimitCheck, ContractionProblemGemm>
+            {
+                enum
+                {
+                    HasIndex = false,
+                    HasValue = false
+                };
+
+                BufferAddressingLimitCheck() = default;
+
+                static std::string Type()
+                {
+                    return "BufferAddressingLimitCheck";
+                }
+
+                static constexpr uint64_t MaxBufferBytes = uint64_t(1) << 32; // 4 GiB
+
+                // The scale tensors are empty when the problem is not block-scaled,
+                // which makes their extent 0 and the test vacuous.
+                static uint64_t largestTensorBytes(ContractionProblemGemm const& problem)
+                {
+                    static constexpr ContractionProblemGemm::TENSOR addressed[]
+                        = {ContractionProblemGemm::TENSOR::A,
+                           ContractionProblemGemm::TENSOR::B,
+                           ContractionProblemGemm::TENSOR::C,
+                           ContractionProblemGemm::TENSOR::D,
+                           ContractionProblemGemm::TENSOR::MXSA,
+                           ContractionProblemGemm::TENSOR::MXSB};
+
+                    uint64_t largest = 0;
+                    for(auto which : addressed)
+                    {
+                        auto const& t = problem.tensor(which);
+                        for(size_t i = 0; i < t.sizes().size(); i++)
+                        {
+                            if(t.sizes()[i] <= 1)
+                                continue;
+                            largest = std::max<uint64_t>(
+                                largest,
+                                multiplyElementSize(t.strides()[i] * t.sizes()[i],
+                                                    t.elementBytes()));
+                        }
+                    }
+                    return largest;
+                }
+
+                virtual bool operator()(ContractionProblemGemm const& problem) const override
+                {
+                    return largestTensorBytes(problem) < MaxBufferBytes;
+                }
+
+                virtual bool debugEval(ContractionProblemGemm const& problem,
+                                       std::ostream&                 stream) const override
+                {
+                    return debugEvalCmp(problem,
+                                        stream,
+                                        "largest_tensor_bytes",
+                                        largestTensorBytes(problem),
+                                        "<",
+                                        "max",
+                                        MaxBufferBytes);
+                }
+            };
+
             struct WorkgroupNumberCheck
                 : public Predicate_CRTP<WorkgroupNumberCheck, ContractionProblemGemm>
             {
@@ -2338,6 +2595,36 @@ namespace TensileLite
                 static std::string Type()
                 {
                     return "GridBasedMatching";
+                }
+
+                virtual bool operator()(ContractionProblemGemm const& problem) const override
+                {
+                    return true;
+                }
+
+                virtual bool debugEval(ContractionProblemGemm const& problem,
+                                       std::ostream&                 stream) const override
+                {
+                    bool rv = (*this)(problem);
+                    PredicateDebugger::printRow(stream, rv, this->type());
+                    return rv;
+                }
+            };
+
+            struct MeshBasedMatching
+                : public Predicate_CRTP<MeshBasedMatching, ContractionProblemGemm>
+            {
+                enum
+                {
+                    HasIndex = false,
+                    HasValue = false
+                };
+
+                MeshBasedMatching() = default;
+
+                static std::string Type()
+                {
+                    return "MeshBasedMatching";
                 }
 
                 virtual bool operator()(ContractionProblemGemm const& problem) const override
