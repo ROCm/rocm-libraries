@@ -5369,11 +5369,12 @@ def _recommend_graph_replay(problem: UnifiedAttentionProblem) -> bool:
 
     **Long prefill** (``q > 768``) is kernel-bound: the overhead is noise and
     its tensors usually differ per call, so graphing would only add recapture
-    cost. -> ungraph. Feature-flagged shapes (sinks/alibi/qq/softcap/sw/fp8) are
-    excluded for now. The dispatcher only engages an internal graph when the
-    caller is not already capturing (frameworks that graph the whole forward
-    take precedence)."""
-    if problem.use_sinks or _has_score_bias(problem):
+    cost. -> ungraph. Feature-flagged shapes (sinks/qq/additive bias/softcap/
+    sw/fp8) are excluded for now. ALiBi is admitted: both graph keys carry
+    ``use_alibi`` and the slopes tensor (null for the built-in slopes). The
+    dispatcher only engages an internal graph when the caller is not already
+    capturing (frameworks that graph the whole forward take precedence)."""
+    if problem.use_sinks or _has_non_alibi_score_bias(problem):
         return False
     if problem.softcap > 0 or problem.sliding_window > 0 or problem.use_fp8:
         return False
@@ -5505,6 +5506,8 @@ def _run_2d_graphed(
         id(block_table),
         id(sinks) if sinks is not None else 0,
         id(alibi_slopes) if alibi_slopes is not None else 0,
+        # A caller can swap the slopes' storage in place, keeping the id.
+        int(alibi_slopes.data_ptr()) if alibi_slopes is not None else 0,
         id(qq_bias) if qq_bias is not None else 0,
         id(additive_bias) if additive_bias is not None else 0,
         float(softmax_scale),

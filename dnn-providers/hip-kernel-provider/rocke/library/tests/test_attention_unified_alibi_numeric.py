@@ -105,30 +105,10 @@ def _reference(
     return torch.cat(outs), torch.cat(lses).unsqueeze(-1)
 
 
-def _run_case(
-    q_lens,
-    kv_lens,
-    *,
-    backend,
-    hq=12,
-    hkv=4,
-    d=128,
-    bs=16,
-    dtype="bf16",
-    top_left=False,
-    lse=False,
-    external=False,
-    sinks=False,
-    alibi_design=None,
-    family=None,
-    window=0,
-    off_kernel=False,
-    seed=0,
-):
-    """``family``: a 2D spec flag the dispatched kernel must set (or
-    ``_PER_SCORE_ADD``), so the case runs the path it names; ``alibi_design``
-    forces that arm on it. ``off_kernel``: run ALiBi on the kernel the problem
-    without ALiBi dispatches to (a path dispatch keeps ALiBi off)."""
+def _inputs(q_lens, kv_lens, hq, hkv, d, bs, dtype, external, seed):
+    """Random paged Q/K/V with a shuffled block table, the slopes the reference
+    uses and the bottom-right ALiBi problem (built-in slopes unless
+    ``external``)."""
     g = torch.Generator(device="cuda").manual_seed(seed)
     tdt = torch.float16 if dtype == "fp16" else torch.bfloat16
     total_q, num_seqs = sum(q_lens), len(q_lens)
@@ -161,9 +141,42 @@ def _run_case(
         dtype=dtype,
         num_kv_blocks=num_blocks,
         use_alibi=True,
+        right_bound=0,
+    )
+    return g, tdt, q, kc, vc, bt, cu, seqused, slopes, problem
+
+
+def _run_case(
+    q_lens,
+    kv_lens,
+    *,
+    backend,
+    hq=12,
+    hkv=4,
+    d=128,
+    bs=16,
+    dtype="bf16",
+    top_left=False,
+    lse=False,
+    external=False,
+    sinks=False,
+    alibi_design=None,
+    family=None,
+    window=0,
+    off_kernel=False,
+    seed=0,
+):
+    """``family``: a 2D spec flag the dispatched kernel must set (or
+    ``_PER_SCORE_ADD``), so the case runs the path it names; ``alibi_design``
+    forces that arm on it. ``off_kernel``: run ALiBi on the kernel the problem
+    without ALiBi dispatches to (a path dispatch keeps ALiBi off)."""
+    g, tdt, q, kc, vc, bt, cu, seqused, slopes, problem = _inputs(
+        q_lens, kv_lens, hq, hkv, d, bs, dtype, external, seed
+    )
+    problem = replace(
+        problem,
         use_sinks=sinks,
         causal_top_left=top_left,
-        right_bound=0,
         emit_lse=lse,
         sliding_window=window,
     )
@@ -197,10 +210,14 @@ def _run_case(
                     if alibi_design is None
                     else replace(spec, alibi_design=alibi_design)
                 ),
-                num_kv_blocks=num_blocks,
+                num_kv_blocks=problem.num_kv_blocks,
             )
     out = torch.empty_like(q)
-    lse_t = torch.full((total_q, hq, 1), float("nan"), device="cuda") if lse else None
+    lse_t = (
+        torch.full((problem.total_q, hq, 1), float("nan"), device="cuda")
+        if lse
+        else None
+    )
     scale = 1.0 / math.sqrt(d)
     run_unified_attention_torch(
         problem=problem,
@@ -435,3 +452,140 @@ def test_sinks_on_the_top_left_diagonal_split_kv():
 def test_sinks_off_the_top_left_diagonal_are_refused():
     with pytest.raises((ValueError, NotImplementedError), match="sinks"):
         _run_case([96], [300], backend="tiled", sinks=True)
+
+
+# Shapes inside the launcher's internal graph replay: short prefill (2D) and
+# decode (3D).
+_GRAPH_CASES = {
+    "2d short prefill": (
+        "tiled",
+        [512, 200],
+        [512, 300],
+        dict(hq=32, hkv=8, bs=64, dtype="fp16"),
+    ),
+    "3d decode": ("3d", [1, 1, 1, 1], [4096, 777, 1500, 2049], dict(hq=12, hkv=4)),
+}
+
+
+@pytest.fixture
+def graph_replay(monkeypatch):
+    """Enables the launcher's graph replay on this arch and counts the graphs
+    it captures (new keys in its graph caches) and the calls it serves."""
+    if _ARCH == "gfx942":
+        monkeypatch.delenv("HIPDNN_GFX942_2D_GRAPH", raising=False)
+        monkeypatch.delenv("HIPDNN_GFX942_3D_GRAPH", raising=False)
+    else:
+        monkeypatch.setenv("HIPDNN_GFX950_3D_GRAPH", "1")
+    # Fresh caches: the process-wide ones are bounded and shared with other
+    # tests, so an eviction there would look like a recapture.
+    monkeypatch.setattr(au, "_2D_GRAPHS", {})
+    monkeypatch.setattr(au, "_2D_GRAPH_REFS", {})
+    monkeypatch.setattr(au, "_3D_GRAPHS", type(au._3D_GRAPHS)())
+    calls = {"tiled": 0, "3d": 0}
+    for name, backend in (("_run_2d_graphed", "tiled"), ("_run_3d_graph", "3d")):
+        real = getattr(au, name)
+
+        def spy(*args, real=real, backend=backend, **kwargs):
+            calls[backend] += 1
+            return real(*args, **kwargs)
+
+        monkeypatch.setattr(au, name, spy)
+    caches = {"tiled": au._2D_GRAPHS, "3d": au._3D_GRAPHS}
+    state = {"calls": calls, "keys": {b: set(c) for b, c in caches.items()}}
+
+    def captured(backend):
+        """Graphs captured since the last call."""
+        keys = set(caches[backend])
+        new = keys - state["keys"][backend]
+        state["keys"][backend] = keys
+        return len(new)
+
+    state["captured"] = captured
+    yield state
+    torch.cuda.synchronize()
+    au.clear_attention_3d_graph_cache()  # drains and releases the fresh cache
+
+
+def _graph_case(name):
+    backend, q_lens, kv_lens, kw = _GRAPH_CASES[name]
+    if backend == "tiled" and _ARCH != "gfx942":
+        pytest.skip("the 2D graph replay is gfx942-only")
+    return backend, q_lens, kv_lens, kw
+
+
+def _graph_run(problem, backend, q, kc, vc, bt, cu, seqused, slopes, external, out):
+    # The graph key holds every tensor's identity: one `out` across the calls.
+    out.fill_(float("nan"))
+    run_unified_attention_torch(
+        problem=problem,
+        q=q,
+        k=kc,
+        v=vc,
+        out=out,
+        cu_seqlens_q=cu,
+        seqused_k=seqused,
+        softmax_scale=1.0 / math.sqrt(problem.head_size),
+        block_table=bt,
+        softcap=0.0,
+        backend=backend,
+        alibi_slopes=slopes if external else None,
+    )
+    torch.cuda.synchronize()
+    return out
+
+
+@pytest.mark.parametrize("external", [False, True], ids=["builtin", "external"])
+@pytest.mark.parametrize("name", list(_GRAPH_CASES))
+def test_graph_replay_follows_rewritten_inputs(graph_replay, name, external):
+    # A replay reads the captured buffers: Q (and caller slopes) rewritten in
+    # place must reach the kernel without a new capture.
+    backend, q_lens, kv_lens, kw = _graph_case(name)
+    hq, hkv, d, bs = kw["hq"], kw["hkv"], kw.get("d", 128), kw.get("bs", 16)
+    dtype = kw.get("dtype", "bf16")
+    g, _, q, kc, vc, bt, cu, seqused, slopes, problem = _inputs(
+        q_lens, kv_lens, hq, hkv, d, bs, dtype, external, seed=1
+    )
+    tol, scale = _tolerance(dtype), 1.0 / math.sqrt(d)
+    out = torch.empty_like(q)
+    for step in range(3):
+        if step:
+            q.copy_(torch.randn(q.shape, device="cuda", dtype=q.dtype, generator=g))
+            if external:
+                slopes.mul_(0.5)
+        out = _graph_run(
+            problem, backend, q, kc, vc, bt, cu, seqused, slopes, external, out
+        )
+        o_ref, _ = _reference(q, kc, vc, q_lens, kv_lens, bt, scale, slopes, False)
+        assert (out.float() - o_ref).abs().max().item() < tol, f"call {step}"
+        assert graph_replay["captured"](backend) == (0 if step else 1), f"call {step}"
+    assert graph_replay["calls"][backend] == 3
+
+
+@pytest.mark.parametrize("name", list(_GRAPH_CASES))
+def test_graph_replay_keeps_alibi_on_and_off_apart(graph_replay, name):
+    # ALiBi on and off on the same buffers are two graphs; neither replay
+    # serves the other.
+    backend, q_lens, kv_lens, kw = _graph_case(name)
+    hq, hkv, d, bs = kw["hq"], kw["hkv"], kw.get("d", 128), kw.get("bs", 16)
+    dtype = kw.get("dtype", "bf16")
+    _, _, q, kc, vc, bt, cu, seqused, slopes, on = _inputs(
+        q_lens, kv_lens, hq, hkv, d, bs, dtype, False, seed=2
+    )
+    off = replace(on, use_alibi=False)
+    scale, tol = 1.0 / math.sqrt(d), _tolerance(dtype)
+    refs = {
+        True: _reference(q, kc, vc, q_lens, kv_lens, bt, scale, slopes, False)[0],
+        False: _reference(
+            q, kc, vc, q_lens, kv_lens, bt, scale, torch.zeros_like(slopes), False
+        )[0],
+    }
+    out = torch.empty_like(q)
+    for step, alibi in enumerate((True, False, True, False)):
+        problem = on if alibi else off
+        out = _graph_run(
+            problem, backend, q, kc, vc, bt, cu, seqused, slopes, False, out
+        )
+        err = (out.float() - refs[alibi]).abs().max().item()
+        assert err < tol, f"call {step} (alibi={alibi})"
+        assert graph_replay["captured"](backend) == (1 if step < 2 else 0)
+    assert graph_replay["calls"][backend] == 4
