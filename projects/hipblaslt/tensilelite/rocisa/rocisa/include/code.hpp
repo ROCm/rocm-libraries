@@ -186,22 +186,6 @@ namespace rocisa
     {
         std::shared_ptr<stinkytofu::LogicalInstruction> logicalInst;
 
-        // Scheduler-introspection seam (logical-IR migration, Phase 2/3): the
-        // coarse scheduling classification of the rocisa instruction this leaf
-        // replaces, captured at construction time in makeLogicalLeaf by calling
-        // the rocisa instruction's own schedCategory()/schedExactKind()/
-        // schedWeight(). We deliberately replay the rocisa answer rather than
-        // re-deriving it from the logical instruction: createLogicalFromRocisa
-        // does not populate LogicalInstruction::flags_, so the logical IR cannot
-        // be classified by InstFlag, and the logical opcode name can differ from
-        // the rocisa class (e.g. the LDS transpose read lowers to logical
-        // GlobalLoadTR16B128 while rocisa classifies it as a local read). Caching
-        // the validated rocisa classification guarantees the leaf schedules
-        // byte-identically to the instruction it stands in for.
-        SchedCategory  schedCategory_  = SchedCategory::None;
-        SchedExactKind schedExactKind_ = SchedExactKind::None;
-        int            schedWeight_    = 1;
-
         LogicalLeaf(std::shared_ptr<stinkytofu::LogicalInstruction> inst,
                     const std::string&                              name = "LogicalLeaf")
             : Item(name)
@@ -221,12 +205,16 @@ namespace rocisa
             return logicalInst;
         }
 
-        // Report the cached rocisa classification (see schedCategory_ above) so
-        // the scheduler / count path treats this leaf exactly like the rocisa
-        // instruction it replaces.
-        SchedCategory  schedCategory() const override { return schedCategory_; }
-        SchedExactKind schedExactKind() const override { return schedExactKind_; }
-        int            schedWeight() const override { return schedWeight_; }
+        // Scheduler-introspection seam (logical-IR migration, Phase 2/3). The
+        // leaf classifies itself from its own logical opcode via the opcode ->
+        // classification table in ToStinkyTofuUtils.cpp (schedCategoryForOpcode,
+        // etc.) -- the end-state source of truth, no rocisa needed. Defined
+        // out-of-line there, where stinkytofu::LogicalInstruction is complete.
+        // makeLogicalLeaf cross-checks each entry against the rocisa instruction
+        // the leaf replaces (the oracle) until the table fully subsumes rocisa.
+        SchedCategory  schedCategory() const override;
+        SchedExactKind schedExactKind() const override;
+        int            schedWeight() const override;
 
         // Logical opcode name of the wrapped instruction (e.g. "DSLoadB128",
         // "SWaitCnt", "SNop"), or "" if none. Exposed to Python so the

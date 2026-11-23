@@ -88,12 +88,100 @@ static GirActionData girActionOf(const rocisa::GirActionData& src);
 }
 
 namespace rocisa {
-// Scheduler-introspection seam for logical leaves (logical-IR migration,
-// Phase 2/3). schedCategory()/schedExactKind()/schedWeight() are inline in
-// code.hpp and return the rocisa classification cached at makeLogicalLeaf time
-// (the logical IR carries no InstFlag, so it cannot be classified here). Only
-// schedOpcodeName() and the mem-token forwarders need the complete
-// stinkytofu::LogicalInstruction type, so they are defined out-of-line here.
+// Scheduler-introspection seam for logical leaves (logical-IR migration).
+//
+// A LogicalLeaf classifies itself from its own logical opcode via the three
+// opcode -> classification tables below. This is the end-state source of truth:
+// the scheduler asks the logical IR "what are you?" and the logical IR answers
+// from its opcode alone -- no rocisa instruction required. The tables are grown
+// one region's opcodes at a time as emission is flipped to leaves; makeLogicalLeaf
+// cross-checks every entry against the rocisa instruction the leaf replaces (see
+// the oracle there), so a wrong or missing entry is caught immediately, and the
+// tables can be trusted to subsume rocisa before the rocisa classes retire.
+//
+// Mismatch inventory (logical opcode name != rocisa class, so a table entry must
+// be added explicitly when those regions are flipped) is recorded in the
+// migration doc §10.5; none of those opcodes occur on the local-read path.
+// A `logical_region` flips *every* dispatcher-built instruction in it to a leaf,
+// not just the one op the region targets (e.g. localReadDo also emits SMovB32 /
+// VMovB32 leaves). So these tables mirror rocisa's *whole* classification scheme:
+// the default is the rocisa Instruction base answer (Other / None / 1), and only
+// opcodes whose rocisa class overrides the base are listed. That way any plain
+// Other instruction that incidentally becomes a leaf matches rocisa for free,
+// while a genuinely special category the table is still missing (e.g. a stray
+// LocalWrite / GlobalRead) trips the makeLogicalLeaf oracle instead of silently
+// diverging. Enumerators are fully qualified because this namespace (rocisa) also
+// has struct types of the same names, which would otherwise shadow the opcode.
+static SchedCategory schedCategoryForOpcode(stinkytofu::logical::Opcode op) {
+    namespace Logical = stinkytofu::logical;
+    switch (op) {
+        // --- local-read region: every LDS (DS) read -> LocalRead ---
+        case Logical::DSLoadU8:
+        case Logical::DSLoadI8:
+        case Logical::DSLoadU16:
+        case Logical::DSLoadI16:
+        case Logical::DSLoadB16:
+        case Logical::DSLoadB32:
+        case Logical::DSLoadB64:
+        case Logical::DSLoadB96:
+        case Logical::DSLoadB128:
+        case Logical::DSLoadB192:
+        case Logical::DSLoad2B32:
+        case Logical::DSLoad2B64:
+        case Logical::DSLoadB96TrB6:
+        case Logical::DSLoadB64TrB4:
+        case Logical::DSLoadB64TrB8:
+        case Logical::DSLoadB64TrB16:
+        case Logical::DSLoadB128TrB16:
+        case Logical::DSLoadD16HIU8:
+        case Logical::DSLoadD16HIU16:
+            return SchedCategory::LocalRead;
+        default:
+            // rocisa Instruction::schedCategory() base answer. LocalWrite /
+            // GlobalRead / MFMA opcodes get explicit cases as their regions flip.
+            return SchedCategory::Other;
+    }
+}
+
+static SchedExactKind schedExactKindForOpcode(stinkytofu::logical::Opcode op) {
+    namespace Logical = stinkytofu::logical;
+    switch (op) {
+        // Metadata v_mov_b32 count (matches rocisa VMovB32::schedExactKind).
+        // DSStoreB128/B192 join here when the local-write region is flipped.
+        case Logical::VMovB32:
+            return SchedExactKind::VMovB32;
+        default:
+            return SchedExactKind::None;
+    }
+}
+
+static int schedWeightForOpcode(stinkytofu::logical::Opcode op) {
+    namespace Logical = stinkytofu::logical;
+    switch (op) {
+        // ds_load_b192 lowers to two physical ops -> weighted local-read count 2
+        // (matches rocisa DSLoadB192::schedWeight). DSStoreB192/B256 join later.
+        case Logical::DSLoadB192:
+            return 2;
+        default:
+            return 1;
+    }
+}
+
+SchedCategory LogicalLeaf::schedCategory() const {
+    if (!logicalInst) return SchedCategory::None;
+    return schedCategoryForOpcode(logicalInst->getOpcode());
+}
+
+SchedExactKind LogicalLeaf::schedExactKind() const {
+    if (!logicalInst) return SchedExactKind::None;
+    return schedExactKindForOpcode(logicalInst->getOpcode());
+}
+
+int LogicalLeaf::schedWeight() const {
+    if (!logicalInst) return 1;
+    return schedWeightForOpcode(logicalInst->getOpcode());
+}
+
 std::string LogicalLeaf::schedOpcodeName() const {
     if (!logicalInst) return "";
     return stinkytofu::logical::getOpcodeName(logicalInst->getOpcode());
@@ -2428,12 +2516,26 @@ void init_stinkytofu(nb::module_ m) {  // NOLINT(misc-use-internal-linkage)
             auto archId = resolveArchId(archArray, "");
             auto logicalInst = createLogicalFromRocisa(inst, asmCaps, hasVgprMsb, archId);
             auto leaf = std::make_shared<rocisa::LogicalLeaf>(logicalInst, rocisaClassName(inst));
-            // Cache the rocisa instruction's own scheduler classification so the
-            // leaf replays the validated answer (the logical IR carries no
-            // InstFlag to re-derive it from). See LogicalLeaf::schedCategory_.
-            leaf->schedCategory_ = inst.schedCategory();
-            leaf->schedExactKind_ = inst.schedExactKind();
-            leaf->schedWeight_ = inst.schedWeight();
+            // Oracle (logical-IR migration): the leaf classifies itself from its
+            // own logical opcode (schedCategoryForOpcode et al.). While the rocisa
+            // classes still exist, cross-check that self-classification against the
+            // rocisa instruction the leaf replaces. A mismatch means the opcode is
+            // missing from the table (or is one of the §10.5 non-identity cases) --
+            // fail loudly with the exact opcode so the entry can be added, instead
+            // of silently diverging in the scheduler. Once every flipped region's
+            // opcodes are in the tables and this never fires, the oracle (and the
+            // rocisa classification it checks against) can be removed.
+            const std::string opName = stinkytofu::logical::getOpcodeName(logicalInst->getOpcode());
+            if (leaf->schedCategory() != inst.schedCategory() ||
+                leaf->schedExactKind() != inst.schedExactKind() ||
+                leaf->schedWeight() != inst.schedWeight()) {
+                throw std::runtime_error(
+                    "LogicalLeaf scheduler-classification table disagrees with rocisa for opcode "
+                    "'" +
+                    opName + "' (rocisa class " + rocisaClassName(inst) +
+                    "): add it to schedCategoryForOpcode/schedExactKindForOpcode/"
+                    "schedWeightForOpcode (see migration doc §10.5).");
+            }
             return leaf;
         },
         nb::arg("inst"), nb::arg("arch"),
