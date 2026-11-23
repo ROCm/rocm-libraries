@@ -4638,12 +4638,6 @@ extern template struct TransposedConvMPBidirectWinograd_xdlops<6, 3>;
 #if defined(__clang__) && defined(CONV_MP_BIDIRECTIONAL_WINOGRAD_CPP)
 #pragma clang diagnostic pop
 
-// Returns the SolverHeuristicConfig for the 2D grouped Wrw solver. Exposed for testing.
-// Tests that use the real gate (IsValidSplitK) must call this to get the actual flag value
-// rather than hardcoding it, so a flag revert is immediately caught.
-MIOPEN_INTERNALS_EXPORT const miopen::solver::conv::SolverHeuristicConfig&
-GetWrw2DSolverHeuristicConfig();
-
 #endif
 
 /// Forward 2D depthwise convolution (channels-per-group == 1) for RDNA.
