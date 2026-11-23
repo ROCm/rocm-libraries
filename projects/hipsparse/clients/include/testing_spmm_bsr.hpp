@@ -177,6 +177,38 @@ void testing_spmm_bsr_bad_arg(const Arguments& argus)
         hipsparseSpMM(
             handle, transA, transB, &alpha, matA, matB, &beta, nullptr, dataType, alg, dbuf),
         "Error: matC is nullptr");
+
+#if !defined(CUDART_VERSION)
+    // Batched BSR is not supported with the ROCm backend. cuSPARSE returns a different status.
+    auto verify_batched_not_supported = [&](const char* message) {
+        verify_hipsparse_status_not_supported(
+            hipsparseSpMM_bufferSize(
+                handle, transA, transB, &alpha, matA, matB, &beta, matC, dataType, alg, &bsize),
+            message);
+        verify_hipsparse_status_not_supported(
+            hipsparseSpMM_preprocess(
+                handle, transA, transB, &alpha, matA, matB, &beta, matC, dataType, alg, dbuf),
+            message);
+        verify_hipsparse_status_not_supported(
+            hipsparseSpMM(
+                handle, transA, transB, &alpha, matA, matB, &beta, matC, dataType, alg, dbuf),
+            message);
+    };
+
+    verify_hipsparse_status_success(hipsparseDnMatSetStridedBatch(matB, 2, kb * blockDim * n),
+                                    "Error: hipsparseDnMatSetStridedBatch on matB failed");
+    verify_hipsparse_status_success(hipsparseDnMatSetStridedBatch(matC, 2, mb * blockDim * n),
+                                    "Error: hipsparseDnMatSetStridedBatch on matC failed");
+    verify_batched_not_supported("Error: batched matB and matC with a BSR matA");
+
+    verify_hipsparse_status_success(hipsparseDnMatSetStridedBatch(matB, 1, 0),
+                                    "Error: hipsparseDnMatSetStridedBatch on matB failed");
+    verify_hipsparse_status_success(hipsparseDnMatSetStridedBatch(matC, 1, 0),
+                                    "Error: hipsparseDnMatSetStridedBatch on matC failed");
+    verify_hipsparse_status_success(hipsparseSpMatSetStridedBatch(matA, 2),
+                                    "Error: hipsparseSpMatSetStridedBatch on matA failed");
+    verify_batched_not_supported("Error: batched BSR matA");
+#endif
 #endif
 }
 
