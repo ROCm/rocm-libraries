@@ -972,30 +972,42 @@ namespace
     // ---- type sets --------------------------------------------------------
 
     // A is the matrix type, X and Y the vector types and T the compute type.
-#define NNZSPLIT_FOR_EACH_TYPE_SET(F)                                                       \
-    F(float, float, float, float)                                                           \
-    F(double, double, double, double)                                                       \
-    F(rocsparse_float_complex,                                                              \
-      rocsparse_float_complex,                                                              \
-      rocsparse_float_complex,                                                              \
-      rocsparse_float_complex)                                                              \
-    F(rocsparse_double_complex,                                                             \
-      rocsparse_double_complex,                                                             \
-      rocsparse_double_complex,                                                             \
-      rocsparse_double_complex)                                                             \
-    F(_Float16, _Float16, _Float16, float)                                                  \
-    F(_Float16, _Float16, float, float)                                                     \
-    F(rocsparse_bfloat16, rocsparse_bfloat16, rocsparse_bfloat16, float)                    \
-    F(rocsparse_bfloat16, rocsparse_bfloat16, float, float)                                 \
-    F(int8_t, int8_t, int32_t, int32_t)                                                     \
-    F(int8_t, int8_t, float, float)                                                         \
-    F(float, rocsparse_float_complex, rocsparse_float_complex, rocsparse_float_complex)     \
-    F(float, double, double, double)                                                        \
-    F(double, rocsparse_double_complex, rocsparse_double_complex, rocsparse_double_complex) \
-    F(rocsparse_float_complex,                                                              \
-      rocsparse_double_complex,                                                             \
-      rocsparse_double_complex,                                                             \
-      rocsparse_double_complex)
+    // The arguments after F are passed on to every F.
+#define NNZSPLIT_FOR_EACH_TYPE_SET(F, ...)                                            \
+    F(float, float, float, float, __VA_ARGS__)                                        \
+    F(double, double, double, double, __VA_ARGS__)                                    \
+    F(rocsparse_float_complex,                                                        \
+      rocsparse_float_complex,                                                        \
+      rocsparse_float_complex,                                                        \
+      rocsparse_float_complex,                                                        \
+      __VA_ARGS__)                                                                    \
+    F(rocsparse_double_complex,                                                       \
+      rocsparse_double_complex,                                                       \
+      rocsparse_double_complex,                                                       \
+      rocsparse_double_complex,                                                       \
+      __VA_ARGS__)                                                                    \
+    F(_Float16, _Float16, _Float16, float, __VA_ARGS__)                               \
+    F(_Float16, _Float16, float, float, __VA_ARGS__)                                  \
+    F(rocsparse_bfloat16, rocsparse_bfloat16, rocsparse_bfloat16, float, __VA_ARGS__) \
+    F(rocsparse_bfloat16, rocsparse_bfloat16, float, float, __VA_ARGS__)              \
+    F(int8_t, int8_t, int32_t, int32_t, __VA_ARGS__)                                  \
+    F(int8_t, int8_t, float, float, __VA_ARGS__)                                      \
+    F(float,                                                                          \
+      rocsparse_float_complex,                                                        \
+      rocsparse_float_complex,                                                        \
+      rocsparse_float_complex,                                                        \
+      __VA_ARGS__)                                                                    \
+    F(float, double, double, double, __VA_ARGS__)                                     \
+    F(double,                                                                         \
+      rocsparse_double_complex,                                                       \
+      rocsparse_double_complex,                                                       \
+      rocsparse_double_complex,                                                       \
+      __VA_ARGS__)                                                                    \
+    F(rocsparse_float_complex,                                                        \
+      rocsparse_double_complex,                                                       \
+      rocsparse_double_complex,                                                       \
+      rocsparse_double_complex,                                                       \
+      __VA_ARGS__)
 
     class CsrmvNnzsplit : public HandleTest
     {
@@ -1068,6 +1080,31 @@ namespace
                 o.v2      = (mode > 0);
                 o.use_ids = (mode == 2);
                 f(o, std::string(mode == 0 ? "v1" : (mode == 1 ? "v2" : "v2+ids")));
+            }
+        }
+
+        // Runs every shape in every mode with matrix type A, vector types X
+        // and Y and compute type T. types names them in failure messages.
+        template <typename A, typename X, typename Y, typename T>
+        void run_value_types(const std::vector<Named>& shapes,
+                             uint32_t                  expected_npt,
+                             const std::string&        types)
+        {
+            for(const Named& shape : shapes)
+            {
+                each_mode([&](Opt o, const std::string& mode) {
+                    const std::string what = types + " " + shape.first + " " + mode;
+                    const Out         out
+                        = run<int32_t, int32_t, A, X, Y, T>(handle, shape.second, o, what);
+                    if(!o.v2)
+                    {
+                        expect_npt(out, expected_npt, what);
+                    }
+                    o.device = true;
+                    o.beta   = 0.0;
+                    run<int64_t, int64_t, A, X, Y, T>(
+                        handle, shape.second, o, what + " device beta=0");
+                });
             }
         }
     };
@@ -1555,22 +1592,8 @@ TEST_F(CsrmvNnzsplit, density_selected_granularities)
     }
 }
 
-#define NNZSPLIT_TYPE_TEST_BODY(A, X, Y, T)                                                      \
-    for(const Named& shape : shapes)                                                             \
-    {                                                                                            \
-        each_mode([&](Opt o, const std::string& mode) {                                          \
-            const std::string what                                                               \
-                = std::string(#A "," #X "," #Y "," #T " ") + shape.first + " " + mode;           \
-            const Out out = run<int32_t, int32_t, A, X, Y, T>(handle, shape.second, o, what);    \
-            if(!o.v2)                                                                            \
-            {                                                                                    \
-                expect_npt(out, expected_npt, what);                                             \
-            }                                                                                    \
-            o.device = true;                                                                     \
-            o.beta   = 0.0;                                                                      \
-            run<int64_t, int64_t, A, X, Y, T>(handle, shape.second, o, what + " device beta=0"); \
-        });                                                                                      \
-    }
+#define NNZSPLIT_RUN_VALUE_TYPES(A, X, Y, T, SHAPES, EXPECTED_NPT) \
+    run_value_types<A, X, Y, T>(SHAPES, EXPECTED_NPT, #A "," #X "," #Y "," #T);
 
 TEST_F(CsrmvNnzsplit, value_types_one_nnz_per_thread)
 {
@@ -1585,8 +1608,7 @@ TEST_F(CsrmvNnzsplit, value_types_one_nnz_per_thread)
         }
     }
     ASSERT_EQ(shapes.size(), 5u);
-    const uint32_t expected_npt = 1;
-    NNZSPLIT_FOR_EACH_TYPE_SET(NNZSPLIT_TYPE_TEST_BODY)
+    NNZSPLIT_FOR_EACH_TYPE_SET(NNZSPLIT_RUN_VALUE_TYPES, shapes, 1u)
 }
 
 TEST_F(CsrmvNnzsplit, value_types_eight_nnz_per_thread)
@@ -1605,9 +1627,11 @@ TEST_F(CsrmvNnzsplit, value_types_eight_nnz_per_thread)
         lens.push_back(1);
         shapes.emplace_back("skew_head_reaches_tail", make(n, lens));
     }
-    const uint32_t expected_npt = 8;
-    NNZSPLIT_FOR_EACH_TYPE_SET(NNZSPLIT_TYPE_TEST_BODY)
+    NNZSPLIT_FOR_EACH_TYPE_SET(NNZSPLIT_RUN_VALUE_TYPES, shapes, 8u)
 }
+
+#undef NNZSPLIT_RUN_VALUE_TYPES
+#undef NNZSPLIT_FOR_EACH_TYPE_SET
 
 // The same analysis serves every compute call; a later compute must not see
 // state left by an earlier one.
