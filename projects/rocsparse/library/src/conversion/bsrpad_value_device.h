@@ -106,11 +106,12 @@ namespace rocsparse
         __syncthreads();
 
         //find block
-        for(rocsparse_int index = start + local_id; index < end; index += BLOCK_SIZE)
+        for(int64_t index = static_cast<int64_t>(start) + local_id; index < end;
+            index += BLOCK_SIZE)
         {
             if(bsr_col_ind[index] - bsr_base == mb - 1)
             {
-                block_index = index;
+                block_index = static_cast<rocsparse_int>(index);
             }
         }
 
