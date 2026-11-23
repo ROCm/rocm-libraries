@@ -5,10 +5,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from rocisa import rocIsa
 from rocisa.enum import RegisterType
 from rocisa.register import RegisterPool
 from tensilelite.KernelWriterAssembly import KernelWriterAssembly
+from toolchain_test_helpers import use_isa
 
 pytestmark = pytest.mark.unit
 
@@ -28,7 +28,7 @@ pytestmark = pytest.mark.unit
 def test_remap_readback_buffers_do_not_overlap(
     output_bytes, accumulation_bytes, global_split_u, global_accumulation
 ):
-    rocIsa.getInstance().setKernel((12, 5, 0), 32)
+    use_isa((12, 5, 0), 32)
     kernel = dict(
         WavefrontSize=32, MIWaveGroup=[2, 2], MatrixInstM=16, MatrixInstN=16,
         MatrixInstBM=1, MatrixInstBN=1, MIOutputVectorWidth=4,

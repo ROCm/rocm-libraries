@@ -395,3 +395,53 @@ def test_handoff_fences_lds(strategy, assignment, overrides, fences):
               "enableTDMA": True, "enableTDMB": True}
     kernel.update(overrides)
     assert _handoffBarriersLds(kernel) == fences
+
+
+def test_handoff_barriers_lds_mirrors_split_persistent_tile_handoff(gfx1250_iim):
+    """_handoffBarriersLds against the barrier WorkAssignment.splitPersistentTileHandoff emits, over its inputs: TDM
+    loads of A, of B or of both (TDMInst 1, 2 and 3) on one wave or four, the epilogue vectors in LDS with and without
+    PrefetchAcrossPersistent, a spatial cluster with and without ClusterBarrier, DebugPersistentKernelLoopForever and
+    each assignment. Where it reports a barrier every arm of the handoff emits one. Outside
+    DebugPersistentKernelLoopForever it reports the barrier of the static arm (StaticGrid, and the static arm of
+    Hybrid) or of the queue (DynamicWorkQueue), and where a Hybrid kernel has none the queue fences its dynamic arm.
+    With DebugPersistentKernelLoopForever it reports none, so the flush keeps its own. The handoff of a spatial cluster
+    signals the next cluster tile through the writer's SGPR pool, which this test does not build, so the cluster cells
+    check the predicate only; test_flush_has_no_duplicate_persistent_barrier emits a StreamK 3 cluster kernel."""
+    import itertools
+    from types import SimpleNamespace
+
+    from rocisa.instruction import SBarrier
+    from tensilelite.Components.TDMStoreInst import _hybridStaticArmOnly
+    from tensilelite.Components.WorkAssignment import DynamicWorkQueue, StaticGrid
+    from toolchain_test_helpers import use_isa
+
+    use_isa((12, 5, 0), 32)
+    writer = SimpleNamespace(states=SimpleNamespace(memTokenEpilogue=0, asmCaps={"HasClusterBarrier": True}),
+                             labels=SimpleNamespace(getNameInc=lambda name: name + "_0"))
+
+    def barrier(arm, kernel):
+        return any(isinstance(item, SBarrier)
+                   for module in arm().splitPersistentTileHandoff(writer, kernel) for item in module.flatitems())
+
+    arms = {"StaticGrid": [StaticGrid], "DynamicWorkQueue": [DynamicWorkQueue], "Hybrid": [StaticGrid, DynamicWorkQueue]}
+    checked = 0
+    for assignment, (tdmA, tdmB), waves, vectors, pap, (clusterDim, clusterBarrier), debug in itertools.product(
+            arms, ((False, False), (True, False), (False, True), (True, True)), (1, 4), (False, True), (0, 1),
+            (([1, 1], True), ([2, 1], True), ([2, 1], False)), (False, True)):
+        kernel = {"TileProcessingStrategy": "StreamK", "WorkAssignment": assignment, "ClusterDim": clusterDim,
+                  "ClusterBarrier": clusterBarrier, "NumThreads": 32 * waves, "WavefrontSize": 32,
+                  "PrefetchAcrossPersistent": pap, "enableTDMA": tdmA, "enableTDMB": tdmB,
+                  "_PersistentVectorEpilogueLds": vectors, "DebugPersistentKernelLoopForever": debug}
+        fences = _handoffBarriersLds(kernel)
+        if debug:
+            assert not fences, kernel
+        if clusterDim != [1, 1]:
+            continue
+        emitted = [barrier(arm, kernel) for arm in arms[assignment]]
+        assert not fences or all(emitted), kernel
+        if not debug:
+            assert fences == emitted[0], kernel
+            if assignment == "Hybrid":
+                assert _hybridStaticArmOnly(kernel) and emitted[1], kernel
+        checked += 1
+    assert checked == 3 * 4 * 2 * 2 * 2 * 2
