@@ -7,12 +7,15 @@
 #include <rocRoller/Operations/Command.hpp>
 #include <rocRoller/Utilities/Error.hpp>
 #include <rocRoller/WorkgroupClusters_detail.hpp>
+#include <rocRoller/hostnumerics/HostDataGeneration.hpp>
+#include <rocRoller/hostnumerics/HostReference.hpp>
 
 #include "GPUContextFixture.hpp"
 
 #include <common/GEMMProblem.hpp>
-#include <common/mxDataGen.hpp>
-#include <mxDataGenerator/PreSwizzle.hpp>
+#include <rocRoller/hostnumerics/ScaleLayout.hpp>
+
+#include <optional>
 
 namespace GEMMTests
 {
@@ -235,17 +238,19 @@ namespace GEMMTests
 
             TensorDescriptor descA(dataTypeA, {size_t(M), size_t(K)}, gemm.transA);
             TensorDescriptor descB(dataTypeB, {size_t(K), size_t(N)}, gemm.transB);
-            TensorDescriptor descC(dataTypeD, {size_t(M), size_t(N)}, "N");
+            TensorDescriptor descC(dataTypeC, {size_t(M), size_t(N)}, "N");
             TensorDescriptor descD(dataTypeD, {size_t(M), size_t(N)}, "N");
 
-            auto seed = 31415u;
+            auto const seed    = 31415u;
+            auto const bounded = hostnumerics::DataInitialization{};
+            std::optional<hostnumerics::BlockScaleFormat> scaleFormatA, scaleFormatB;
             if(gemm.scaleAMode == Operations::ScaleMode::Separate
                || gemm.scaleBMode == Operations::ScaleMode::Separate)
             {
                 auto const& arch = m_context->targetArchitecture();
 
-                auto scaleBlockSize = gemm.scaleBlockSize;
-                AssertFatal(scaleBlockSize > 0, "scaleBlockSize must be set to scale A or B.");
+                AssertFatal(gemm.scaleBlockSize > 0, "scaleBlockSize must be set to scale A or B.");
+                const auto scaleBlockSize = static_cast<size_t>(gemm.scaleBlockSize);
                 AssertFatal(
                     arch.isSupportedScaleBlockSize(scaleBlockSize),
                     fmt::format("Architecture {} does not support block scaling (size: {}).",
@@ -255,25 +260,32 @@ namespace GEMMTests
                             fmt::format("K: {} must be a multiple of the scale block size: {}",
                                         gemm.k,
                                         scaleBlockSize));
-                DGenInput(seed,
-                          hostA,
-                          descA,
-                          hostB,
-                          descB,
-                          hostC,
-                          descC,
-                          hostScaleA,
-                          hostScaleB,
-                          gemm.scaleTypeA,
-                          gemm.scaleTypeB,
-                          -1.f,
-                          1.f,
-                          static_cast<uint>(scaleBlockSize));
+                if(gemm.scaleAMode == Operations::ScaleMode::Separate)
+                    scaleFormatA = {gemm.scaleTypeA, scaleBlockSize};
+                if(gemm.scaleBMode == Operations::ScaleMode::Separate)
+                    scaleFormatB = {gemm.scaleTypeB, scaleBlockSize};
             }
-            else
-            {
-                DGenInput(seed, hostA, descA, hostB, descB, hostC, descC);
-            }
+
+            auto generatedInputs = hostnumerics::generateGEMMInputs(descA,
+                                                                    descB,
+                                                                    descC,
+                                                                    bounded,
+                                                                    bounded,
+                                                                    bounded,
+                                                                    scaleFormatA,
+                                                                    scaleFormatB,
+                                                                    -1.0f,
+                                                                    1.0f,
+                                                                    seed);
+            hostA                = hostnumerics::copyTensorStorage<PackedTypeA>(generatedInputs.a);
+            hostB                = hostnumerics::copyTensorStorage<PackedTypeB>(generatedInputs.b);
+            hostC                = hostnumerics::copyTensorStorage<TC>(generatedInputs.c);
+            if(generatedInputs.scaleA)
+                hostScaleA
+                    = hostnumerics::copyTensorStorage<uint8_t>(generatedInputs.scaleA->scales);
+            if(generatedInputs.scaleB)
+                hostScaleB
+                    = hostnumerics::copyTensorStorage<uint8_t>(generatedInputs.scaleB->scales);
 
             if(setIdentity)
             {
@@ -284,8 +296,8 @@ namespace GEMMTests
             }
 
             // Pre-tile A on the host when pretileA is set (kernel expects pre-tiled layout).
-            // pretileA is only supported for transA == "T"; A is stored in memory as KxM, so we
-            // pass (K, M) and (tileK, tileM) to preSwizzle to match the client (gemm.cpp).
+            // pretileA is only supported for transA == "T", where A is stored with K
+            // contiguous, matching the client (gemm.cpp).
             std::vector<PackedTypeA> hostAForKernel(hostA);
             if(!gemm.pretileA.empty() && gemm.pretileA.size() == 2)
             {
@@ -315,10 +327,11 @@ namespace GEMMTests
                     preTileSize[1] /= packing;
                 }
 
-                // The preSwizzle helper assumes column-major; so we swap sizes here.
-                std::vector<size_t> swappedSizes       = {sizes[1], sizes[0]};
-                std::vector<size_t> swappedPreTileSize = {preTileSize[1], preTileSize[0]};
-                hostAForKernel = DGen::preSwizzle(hostA, swappedSizes, {}, swappedPreTileSize);
+                roc::hostnumerics::copyWithReshapePermutation<PackedTypeA>(
+                    hostA,
+                    hostAForKernel,
+                    roc::hostnumerics::ReshapePermutation::tiled({sizes[0], sizes[1]},
+                                                                 {preTileSize[0], preTileSize[1]}));
             }
 
             // Pre-tile B on the host when pretileB is set (kernel expects pre-tiled layout)
@@ -349,7 +362,12 @@ namespace GEMMTests
                     sizes[0] /= packing;
                     preTileSize[0] /= packing;
                 }
-                hostBForKernel = DGen::preSwizzle(hostB, sizes, {}, preTileSize);
+                // B is K x N with K contiguous.
+                roc::hostnumerics::copyWithReshapePermutation<PackedTypeB>(
+                    hostB,
+                    hostBForKernel,
+                    roc::hostnumerics::ReshapePermutation::tiled({sizes[1], sizes[0]},
+                                                                 {preTileSize[1], preTileSize[0]}));
             }
 
             auto deviceA = make_shared_device<TA>(hostAForKernel);
@@ -371,21 +389,29 @@ namespace GEMMTests
                         scaleSizes[0] /= gemm.scaleBlockSize;
                         descScaleA = TensorDescriptor(descScaleA.dataType(), std::move(scaleSizes));
                     }
-                    std::vector<size_t> preSwizzleSize;
+                    std::optional<rocRoller::hostnumerics::ScaleSwizzle> scaleSwizzle;
                     if(gemm.scaleSkipPermlane == ScaleSkipPermlaneMode::PreSwizzleScale)
                     {
-                        AssertFatal(gemm.scaleShuffleTileA.size() == 3);
-                        preSwizzleSize = gemm.scaleShuffleTileA;
+                        auto const& shuffleTile = gemm.scaleShuffleTileA;
+                        AssertFatal(shuffleTile.size() == 3);
+                        scaleSwizzle = rocRoller::hostnumerics::ScaleSwizzle{
+                            .tileReduction    = shuffleTile[1],
+                            .tileNonReduction = shuffleTile[0],
+                            .subTileReduction = shuffleTile[2]};
                     }
-                    std::vector<size_t> preTileSize;
+                    std::optional<roc::hostnumerics::Shape> scaleTile;
                     if(!gemm.scalePretileA.empty())
                     {
                         AssertFatal(gemm.transA == "T",
                                     "Can only pre-tile scale A if A is TransposeType::T");
-                        preTileSize = {gemm.scalePretileA[1], gemm.scalePretileA[0]};
+                        scaleTile = roc::hostnumerics::Shape{gemm.scalePretileA[0],
+                                                             gemm.scalePretileA[1]};
                     }
-                    auto tmpScaleA = DGen::preSwizzle(
-                        hostScaleA, descScaleA.sizes(), preSwizzleSize, preTileSize);
+                    const auto transform = rocRoller::hostnumerics::ScaleStoragePermutation(
+                        {descScaleA.sizes()[1], descScaleA.sizes()[0]}, scaleSwizzle, scaleTile);
+                    std::vector<uint8_t> tmpScaleA(transform.physicalElementCount());
+                    roc::hostnumerics::copyWithReshapePermutation<uint8_t>(
+                        hostScaleA, tmpScaleA, transform);
                     deviceScaleA = make_shared_device(tmpScaleA);
                 }
                 else
@@ -404,21 +430,29 @@ namespace GEMMTests
                         scaleSizes[0] /= gemm.scaleBlockSize;
                         descScaleB = TensorDescriptor(descScaleB.dataType(), std::move(scaleSizes));
                     }
-                    std::vector<size_t> preSwizzleSize;
+                    std::optional<rocRoller::hostnumerics::ScaleSwizzle> scaleSwizzle;
                     if(gemm.scaleSkipPermlane == ScaleSkipPermlaneMode::PreSwizzleScale)
                     {
-                        AssertFatal(gemm.scaleShuffleTileB.size() == 3);
-                        preSwizzleSize = gemm.scaleShuffleTileB;
+                        auto const& shuffleTile = gemm.scaleShuffleTileB;
+                        AssertFatal(shuffleTile.size() == 3);
+                        scaleSwizzle = rocRoller::hostnumerics::ScaleSwizzle{
+                            .tileReduction    = shuffleTile[1],
+                            .tileNonReduction = shuffleTile[0],
+                            .subTileReduction = shuffleTile[2]};
                     }
-                    std::vector<size_t> preTileSize;
+                    std::optional<roc::hostnumerics::Shape> scaleTile;
                     if(!gemm.scalePretileB.empty())
                     {
                         AssertFatal(gemm.transB == "N",
                                     "Can only pre-tile scale B if B is TransposeType::N");
-                        preTileSize = {gemm.scalePretileB[0], gemm.scalePretileB[1]};
+                        scaleTile = roc::hostnumerics::Shape{gemm.scalePretileB[1],
+                                                             gemm.scalePretileB[0]};
                     }
-                    auto tmpScaleB = DGen::preSwizzle(
-                        hostScaleB, descScaleB.sizes(), preSwizzleSize, preTileSize);
+                    const auto transform = rocRoller::hostnumerics::ScaleStoragePermutation(
+                        {descScaleB.sizes()[1], descScaleB.sizes()[0]}, scaleSwizzle, scaleTile);
+                    std::vector<uint8_t> tmpScaleB(transform.physicalElementCount());
+                    roc::hostnumerics::copyWithReshapePermutation<uint8_t>(
+                        hostScaleB, tmpScaleB, transform);
                     deviceScaleB = make_shared_device(tmpScaleB);
                 }
                 else
@@ -923,56 +957,48 @@ namespace GEMMTests
             }
 
             // Host result
-            std::vector<TD> h_result(M * N, TD{});
-            if(gemm.scaleAMode != Operations::ScaleMode::None
-               || gemm.scaleBMode != Operations::ScaleMode::None)
+            std::optional<roc::hostnumerics::MatmulBlockScale> referenceScaleA;
+            std::optional<roc::hostnumerics::MatmulBlockScale> referenceScaleB;
+            if(gemm.scaleAMode == Operations::ScaleMode::Separate)
+                referenceScaleA = hostnumerics::hostBlockScale(
+                    gemm.scaleTypeA, hostScaleA, descA, 1, scaleFormatA->blockSize);
+            else if(gemm.scaleAMode == Operations::ScaleMode::SingleScale)
+                referenceScaleA
+                    = hostnumerics::hostUniformScale(gemm.scaleTypeA, hostScaleA.at(0), M, K);
+            if(gemm.scaleBMode == Operations::ScaleMode::Separate)
+                referenceScaleB = hostnumerics::hostBlockScale(
+                    gemm.scaleTypeB, hostScaleB, descB, 0, scaleFormatB->blockSize);
+            else if(gemm.scaleBMode == Operations::ScaleMode::SingleScale)
+                referenceScaleB
+                    = hostnumerics::hostUniformScale(gemm.scaleTypeB, hostScaleB.at(0), N, K);
+            auto floatReference = hostnumerics::computeHostReference(
+                hostnumerics::hostTensor(descA,
+                                         hostA,
+                                         gemm.scaleAMode == Operations::ScaleMode::Separate
+                                             ? hostnumerics::DataTypeInterpretation::BlockScaled
+                                             : hostnumerics::DataTypeInterpretation::Unscaled),
+                hostnumerics::hostTensor(descB,
+                                         hostB,
+                                         gemm.scaleBMode == Operations::ScaleMode::Separate
+                                             ? hostnumerics::DataTypeInterpretation::BlockScaled
+                                             : hostnumerics::DataTypeInterpretation::Unscaled),
+                hostnumerics::hostTensor(
+                    descC, hostC, hostnumerics::DataTypeInterpretation::Unscaled),
+                std::move(referenceScaleA),
+                std::move(referenceScaleB),
+                alpha,
+                beta);
+
+            std::vector<TD> h_result;
+            if constexpr(std::is_same_v<TC, TD>)
             {
-                rocRoller::ScaledCPUMM(h_result,
-                                       hostC,
-                                       hostA,
-                                       hostB,
-                                       hostScaleA,
-                                       hostScaleB,
-                                       M,
-                                       N,
-                                       K,
-                                       alpha,
-                                       beta,
-                                       gemm.transA == "T",
-                                       gemm.transB == "T",
-                                       gemm.scaleBlockSize,
-                                       gemm.scaleTypeA,
-                                       gemm.scaleTypeB);
-            }
-            else if constexpr(std::is_same_v<TC, TD>)
-            {
-                rocRoller::CPUMM(h_result,
-                                 hostC,
-                                 hostA,
-                                 hostB,
-                                 M,
-                                 N,
-                                 K,
-                                 alpha,
-                                 beta,
-                                 gemm.transA == "T",
-                                 gemm.transB == "T");
+                h_result = hostnumerics::convertHostReference<TD>(floatReference);
             }
             else
             {
-                std::vector<TC> hostD(M * N, TC{});
-                rocRoller::CPUMM(hostD,
-                                 hostC,
-                                 hostA,
-                                 hostB,
-                                 M,
-                                 N,
-                                 K,
-                                 alpha,
-                                 beta,
-                                 gemm.transA == "T",
-                                 gemm.transB == "T");
-                ASSERT_EQ(hostD.size(), h_result.size());
+                auto hostD = hostnumerics::convertHostReference<TC>(floatReference);
+                ASSERT_EQ(hostD.size(), static_cast<size_t>(M) * static_cast<size_t>(N));
+                h_result.resize(hostD.size());
                 bool const isSRConversion = srCvtSeed.has_value();
                 for(size_t i = 0; i < hostD.size(); i++)
                 {
@@ -1048,11 +1074,11 @@ namespace GEMMTests
                         d_result.data(), deviceD.get(), M * N * sizeof(TD), hipMemcpyDeviceToHost),
                     HasHipSuccess(0));
 
-                auto tol = gemmAcceptableError<TA, TB, TD>(
-                    M, N, K, m_context->targetArchitecture().target());
+                auto tol
+                    = gemmAcceptableError<TA, TB, TD>(K, m_context->targetArchitecture().target());
                 auto res = compare(d_result, h_result, tol);
                 Log::info("RNorm is {} (acceptable {}, iteration {})",
-                          res.relativeNormL2,
+                          res.statistics.relativeFrobeniusError,
                           res.acceptableError.relativeL2Tolerance,
                           iteration);
 
@@ -1086,7 +1112,7 @@ namespace GEMMTests
                         << scratchSpaceRequired[zeroedIdx] << " bytes)";
                 }
 
-                if(debuggable && !res.ok)
+                if(debuggable && !res.ok())
                 {
                     for(size_t i = 0; i < M; i++)
                     {
@@ -1106,7 +1132,7 @@ namespace GEMMTests
                         }
                     }
                 }
-                EXPECT_TRUE(res.ok) << res.message();
+                EXPECT_TRUE(res.ok()) << res.message();
             }
         }
 

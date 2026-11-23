@@ -16,6 +16,10 @@
 #include <utility>
 #include <vector>
 
+#ifdef _OPENMP
+#error "HostNumerics consumers must not inherit OpenMP compile flags."
+#endif
+
 using namespace roc::hostnumerics;
 
 // Tutorial: describe a padded tensor as factors, then make one factor run
@@ -136,6 +140,37 @@ TEST(ReshapePermutationTest, CopiesScalarsEmptyTensorsAndWholeTiles) {
     EXPECT_EQ(copied, matrix);
     copyWithReshapePermutation<int>(matrix, copied, ReshapePermutation::identity({2, 3}));
     EXPECT_EQ(copied, matrix);
+}
+
+// 25,000 elements split into uneven chunks that run on several threads.
+TEST(ReshapePermutationTest, LargePaddedTileCopyCoversEveryChunk) {
+    constexpr size_t rows = 250, columns = 100, paddedRows = 256, paddedColumns = 104;
+    const ReshapePermutation transform({rows, columns}, {paddedRows, paddedColumns},
+                                       {paddedRows / 32, 32, paddedColumns / 8, 8},
+                                       Permutation{0, 2, 1, 3});
+    std::vector<int> input(rows * columns);
+    std::iota(input.begin(), input.end(), 0);
+    std::vector<int> output(transform.physicalElementCount(), -1);
+    copyWithReshapePermutation<int>(input, output, transform);
+    std::vector<int> expected(output.size(), -1);
+    for (size_t row = 0; row < rows; ++row)
+        for (size_t column = 0; column < columns; ++column)
+            expected[((row / 32 * (paddedColumns / 8) + column / 8) * 32 + row % 32) * 8 +
+                     column % 8] = input[row * columns + column];
+    EXPECT_EQ(output, expected);
+}
+
+// Factors of 4 do not align with padded rows of 6: padded index p maps to
+// offset 6 * (p % 4) + p / 4, so offsets jump within rows and rows begin
+// partway through a factor.
+TEST(ReshapePermutationTest, CopiesFactorsThatSpanPaddedRows) {
+    const ReshapePermutation transform({3, 5}, {4, 6}, {6, 4}, Permutation{1, 0});
+    std::vector<int> input(15);
+    std::iota(input.begin(), input.end(), 0);
+    std::vector<int> output(transform.physicalElementCount(), -1);
+    copyWithReshapePermutation<int>(input, output, transform);
+    EXPECT_EQ(output, (std::vector<int>{0, 4, 7, 10, 14, -1, 1, -1, 8,  11, -1, -1,
+                                        2, 5, 9, 12, -1, -1, 3, 6,  -1, 13, -1, -1}));
 }
 
 TEST(ReshapePermutationTest, CopyPreservesFloatingPointBits) {

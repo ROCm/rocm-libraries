@@ -17,8 +17,7 @@ SIZE_MAX = (1 << (8 * ctypes.sizeof(ctypes.c_size_t))) - 1
 
 class LayoutTests(unittest.TestCase):
     def test_scalar_and_owned_metadata(self):
-        scalar = hn.Layout()
-        self.assertEqual(scalar, hn.Layout(hn.Shape(), [], 0))
+        scalar = hn.Layout(hn.Shape(), [], 0)
         self.assertEqual(scalar.shape, hn.Shape())
         self.assertEqual(scalar.strides, [])
         self.assertEqual(scalar.element_offset([]), 0)
@@ -63,7 +62,9 @@ class LayoutTests(unittest.TestCase):
             repr(hn.Layout(hn.Shape([2, 3]), [5, -1], 2)),
             "Layout(Shape((2, 3)), (5, -1), 2)",
         )
-        self.assertEqual(repr(hn.Layout()), "Layout(Shape(()), (), 0)")
+        self.assertEqual(repr(hn.Layout(hn.Shape(), [], 0)), "Layout(Shape(()), (), 0)")
+        with self.assertRaises(TypeError):
+            hn.Layout()
 
     def test_contiguous_orders_match_numpy(self):
         factories = (
@@ -247,7 +248,7 @@ class LayoutTests(unittest.TestCase):
                     7 + sum(i * s for i, s in zip(point, strides))
                     for point in itertools.product(*(range(d) for d in dimensions))
                 ]
-                expected = (min(offsets), max(offsets)) if offsets else (0, -1)
+                expected = (min(offsets), max(offsets)) if offsets else None
                 self.assertEqual(layout.element_bounds(), expected)
         for layout, message in (
             (

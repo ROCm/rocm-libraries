@@ -30,7 +30,7 @@
 #include "ResultReporter.hpp"
 #include "TimingInstrumentation.hpp"
 
-#include "Reference.hpp"
+#include <TensileLite/Client/hostnumerics/Reference.hpp>
 
 #include <Tensile/hip/HipUtils.hpp>
 

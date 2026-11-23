@@ -1,0 +1,125 @@
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
+#include <algorithm>
+#include <atomic>
+#include <chrono>
+#include <cmath>
+#include <cstddef>
+#include <cstdlib>
+#include <iostream>
+#include <limits>
+#include <roc/hostnumerics/comparison.hpp>
+#include <span>
+#include <vector>
+
+namespace {
+using Clock = std::chrono::steady_clock;
+
+template <typename Function>
+double bestSeconds(Function&& function) {
+    double best = std::numeric_limits<double>::infinity();
+    for (int iteration = 0; iteration < 4; ++iteration) {
+        const auto start = Clock::now();
+        std::atomic_signal_fence(std::memory_order_seq_cst);
+        function();
+        std::atomic_signal_fence(std::memory_order_seq_cst);
+        const auto end = Clock::now();
+        best = std::min(best, std::chrono::duration<double>(end - start).count());
+    }
+    return best;
+}
+}  // namespace
+
+int main(int argc, char** argv) {
+    using namespace roc::hostnumerics;
+
+    const size_t rows = argc > 1 ? std::strtoull(argv[1], nullptr, 10) : 4096;
+    const size_t columns = argc > 2 ? std::strtoull(argv[2], nullptr, 10) : 4096;
+    const size_t leadingDimension = rows + 16;
+    const size_t elements = rows * columns;
+    const size_t storageElements = leadingDimension * columns;
+    std::vector<float> expected(storageElements);
+    std::vector<float> observed(storageElements);
+    for (size_t column = 0; column < columns; ++column) {
+        for (size_t row = 0; row < rows; ++row) {
+            const size_t logicalIndex = row + column * rows;
+            const size_t storageIndex = row + column * leadingDimension;
+            expected[storageIndex] = static_cast<float>(static_cast<int>(logicalIndex % 101) - 50);
+            // Exercise tolerance arithmetic instead of the encoded-equality shortcut.
+            observed[storageIndex] = expected[storageIndex] + 0.0001f;
+        }
+    }
+
+    const Layout layout(Shape{rows, columns}, {1, static_cast<ptrdiff_t>(leadingDimension)}, 0);
+    const Tensor expectedView =
+        Tensor::copyNativeStorage<float>(layout, std::span<const float>(expected));
+    const Tensor observedView =
+        Tensor::copyNativeStorage<float>(layout, std::span<const float>(observed));
+    ComparisonOptions options = allCloseComparisonOptions(0.0002, 0.0004, false);
+    options.complexComparisonMode = ComplexComparisonMode::Componentwise;
+    options.computeElementwiseStatistics = false;
+    options.computeFrobenius = false;
+    options.maxReportedMismatches = 0;
+
+    ComparisonReport report;
+    const double componentSeconds = bestSeconds([&] {
+        report = compare(observedView, expectedView, options,
+                         IndexRange::all(observedView.elementCount()), Permutation{1, 0});
+    });
+    if (!report.passed() || report.compared != elements) return 1;
+
+    ComparisonOptions statisticsOptions = options;
+    statisticsOptions.computeElementwiseStatistics = true;
+
+    ComparisonReport statisticsReport;
+    const double statisticsComponentSeconds = bestSeconds([&] {
+        statisticsReport = compare(observedView, expectedView, statisticsOptions,
+                                   IndexRange::all(observedView.elementCount()), Permutation{1, 0});
+    });
+    if (!statisticsReport.passed() || statisticsReport.compared != elements ||
+        (elements != 0 && statisticsReport.maxAbsoluteDifference == 0.0))
+        return 1;
+
+    ComparisonOptions detailedOptions = statisticsOptions;
+    detailedOptions.computeFrobenius = true;
+
+    ComparisonReport detailedReport;
+    const double detailedComponentSeconds = bestSeconds([&] {
+        detailedReport = compare(observedView, expectedView, detailedOptions,
+                                 IndexRange::all(observedView.elementCount()), Permutation{1, 0});
+    });
+    if (!detailedReport.passed() || detailedReport.compared != elements ||
+        (elements != 0 && detailedReport.frobeniusDifference == 0.0))
+        return 1;
+
+    // Consume every repetition so the optimizer cannot discard all but the last scan.
+    volatile size_t baselineMismatches = 0;
+    constexpr double absoluteTolerance = 0.0002;
+    constexpr double relativeTolerance = 0.0004;
+    const double baselineSeconds = bestSeconds([&] {
+        size_t mismatches = 0;
+        for (size_t column = 0; column < columns; ++column) {
+            for (size_t row = 0; row < rows; ++row) {
+                const size_t index = row + column * leadingDimension;
+                const double a = observed[index];
+                const double b = expected[index];
+                const double difference = std::abs(a - b);
+                mismatches +=
+                    !(a == b || difference <= absoluteTolerance + relativeTolerance * std::abs(b));
+            }
+        }
+        baselineMismatches = mismatches;
+    });
+    if (baselineMismatches != 0) return 1;
+
+    const double bytes = 2.0 * static_cast<double>(elements) * sizeof(float);
+    std::cout << "component_seconds=" << componentSeconds
+              << " component_GBps=" << bytes / componentSeconds / 1e9
+              << " baseline_seconds=" << baselineSeconds
+              << " baseline_GBps=" << bytes / baselineSeconds / 1e9
+              << " component_over_baseline=" << componentSeconds / baselineSeconds
+              << " statistics_component_seconds=" << statisticsComponentSeconds
+              << " detailed_component_seconds=" << detailedComponentSeconds << std::endl;
+    return 0;
+}

@@ -19,11 +19,13 @@
 
 #include <hip/hip_runtime.h>
 #include <hipblaslt/hipblaslt.h>
+#include <roc/hostnumerics/generation.hpp>
 
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <span>
 #include <vector>
 
 #define CHECK_HIP(x)                                                                               \
@@ -151,10 +153,32 @@ int main(int argc, char** argv)
     CHECK_HBL(hipblasLtCreate(&handle));
     CHECK_HIP(hipStreamCreate(&stream));
 
-    std::vector<float> A_clean(M * K, 1.0f);
-    std::vector<float> B(K * N, 1.0f);
-    std::vector<float> A_dirty(M * K, 1.0f);
-    A_dirty[0] = std::nanf("");
+    std::vector<float> A_clean(M * K);
+    std::vector<float> B(K * N);
+    const auto         ones = roc::hostnumerics::GenerationRecipe::realOnly(
+        roc::hostnumerics::GenerationRecipe::constant({.value = 1.0}),
+        0,
+        roc::hostnumerics::LastDimensionFastest{});
+    roc::hostnumerics::Tensor cleanTensor = roc::hostnumerics::generate(
+        roc::hostnumerics::ScalarType::Float32, roc::hostnumerics::Shape{A_clean.size()}, ones);
+    std::memcpy(A_clean.data(),
+                cleanTensor.rawEncodedBackingStorage().data(),
+                cleanTensor.rawEncodedBackingStorage().size());
+    roc::hostnumerics::Tensor bTensor = roc::hostnumerics::generate(
+        roc::hostnumerics::ScalarType::Float32, roc::hostnumerics::Shape{B.size()}, ones);
+    std::memcpy(B.data(),
+                bTensor.rawEncodedBackingStorage().data(),
+                bTensor.rawEncodedBackingStorage().size());
+    std::vector<float> A_dirty = A_clean;
+    const auto         nan     = roc::hostnumerics::GenerationRecipe::realOnly(
+        roc::hostnumerics::GenerationRecipe::typeNaN(),
+        0,
+        roc::hostnumerics::LastDimensionFastest{});
+    roc::hostnumerics::Tensor dirtyTensor = cleanTensor.deepCopy();
+    roc::hostnumerics::generateAt(dirtyTensor, 0, nan);
+    std::memcpy(A_dirty.data(),
+                dirtyTensor.rawEncodedBackingStorage().data(),
+                dirtyTensor.rawEncodedBackingStorage().size());
 
     for(int i = 1; i <= total; ++i)
     {

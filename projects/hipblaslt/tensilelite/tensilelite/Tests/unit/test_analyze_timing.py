@@ -575,7 +575,7 @@ class TestColumnAlignment:
             "python_client_execution": TimingSeries(855, 9_800_000_000.5),
             "pre_problem": TimingSeries(28_641_123, 1_035_798_421.42),
             "cpu_reference_gemm": TimingSeries(28_596_001, 928_712_973.97),
-            "solve_cpu_fast": TimingSeries(26_656_000, 200_931_330.0),
+            "solve_cpu_reference": TimingSeries(26_656_000, 200_931_330.0),
             "made_up_category": TimingSeries(12_345_678, 5_000_000.0),
             "main_total": TimingSeries(855, 8_000_000_000.0),
         }
@@ -598,11 +598,11 @@ class TestPurposeHierarchy:
         "pre_problem": [300.0],
         "cpu_data_init": [100.0],
         "cpu_reference_gemm": [150.0],
-        "solve_cpu_fast": [140.0],
+        "solve_cpu_reference": [140.0],
         "pre_solution": [200.0],
         "pre_solution_listener.ReferenceValidator": [120.0],
         "cpu_reference_gemm_per_solution": [110.0],
-        "solve_cpu_fast_per_solution": [105.0],
+        "solve_cpu_reference_per_solution": [105.0],
         "pre_solution_listener.DataInitialization": [60.0],
         "validate_warmups": [180.0],
         "validate_warmups_listener.SynchronizerValidator": [100.0],
@@ -625,7 +625,7 @@ class TestPurposeHierarchy:
         groups = self._groups()
 
         # The reference GEMM is one group even though it is called from two different places.
-        assert {"cpu_reference_gemm", "solve_cpu_fast", "pre_solution_listener.ReferenceValidator",
+        assert {"cpu_reference_gemm", "solve_cpu_reference", "pre_solution_listener.ReferenceValidator",
                 "cpu_reference_gemm_per_solution"} <= self._names(groups[G_REFERENCE])
         assert "cpu_data_init" in self._names(groups[G_INPUT])
         assert "pre_solution_listener.DataInitialization" in self._names(groups[G_INPUT])

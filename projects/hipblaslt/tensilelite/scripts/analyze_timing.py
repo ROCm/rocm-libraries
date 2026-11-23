@@ -112,8 +112,7 @@ TIMING_HIERARCHY = {
             "pre_problem": {
                 "cpu_data_init": {},
                 "cpu_reference_gemm": {
-                    "solve_cpu_fast": {},
-                    "solve_cpu_slow": {},
+                    "solve_cpu_reference": {},
                 },
             },
             "validate_warmups": {
@@ -166,8 +165,7 @@ TIMING_HIERARCHY = {
             "pre_solution": {
                 "pre_solution_listener.ReferenceValidator": {
                     "cpu_reference_gemm_per_solution": {
-                        "solve_cpu_fast_per_solution": {},
-                        "solve_cpu_slow_per_solution": {},
+                        "solve_cpu_reference_per_solution": {},
                     },
                 },
                 "pre_solution_listener.DataInitialization": {

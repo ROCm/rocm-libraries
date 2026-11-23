@@ -57,6 +57,7 @@ BenchmarkProblems:
       BenchmarkFinalParameters:
         - ProblemSizes:
           - Exact: [32, 128, 1, 256]
+          - Exact: [64, 128, 2, 512]
 
   -
     - # MT256x256: the tile the shipped swizzled-A logic selects on every size

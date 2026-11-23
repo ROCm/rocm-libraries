@@ -19,7 +19,6 @@ target_link_libraries(rocroller-tests-catch
     PRIVATE
         rocroller::common-test-utilities
         Catch2::Catch2WithMain
-        ${BLAS_LIBRARIES}
         ${msgpack_libs}
 )
 
@@ -125,7 +124,7 @@ target_sources(rocroller-tests-catch
         "${CMAKE_CURRENT_SOURCE_DIR}/WaitcntObserverTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/WidenAddrExprTo64bitTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/WorkgroupRemapXCCTest.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/mxDataGeneratorTest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/HostDataGenerationTest.cpp"
 
         "${CMAKE_CURRENT_SOURCE_DIR}/CustomMatchers.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/CustomSections.hpp"
@@ -140,4 +139,3 @@ target_sources(rocroller-tests-catch
 target_include_directories(rocroller-tests-catch PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../../client/include
 )
-

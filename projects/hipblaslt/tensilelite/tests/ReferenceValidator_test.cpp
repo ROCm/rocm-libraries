@@ -13,6 +13,7 @@
 
 #include <Tensile/ContractionProblem.hpp>
 #include <Tensile/ContractionSolution.hpp>
+#include <Tensile/FusedA2AKernArg.hpp>
 #include <Tensile/KernelLanguageTypes.hpp>
 #include <Tensile/PerformanceMetricTypes.hpp>
 #include <Tensile/hip/HipUtils.hpp>
@@ -169,16 +170,16 @@ namespace
             return reporter->strings.at(ResultKey::Validation);
         }
 
-        po::variables_map                     args = makeValidatorArgs();
-        std::unique_ptr<ClientProblemFactory> factory;
-        std::shared_ptr<DataInitialization>   dataInit;
-        std::shared_ptr<DeviceContext>        device;
+        po::variables_map                           args = makeValidatorArgs();
+        std::unique_ptr<ClientProblemFactory>       factory;
+        std::shared_ptr<DataInitialization>         dataInit;
+        std::shared_ptr<DeviceContext>              device;
         std::vector<std::shared_ptr<DeviceContext>> devices;
-        ContractionProblem*                   problem = nullptr;
-        ContractionSolution                   solution;
-        std::shared_ptr<CapturingReporter>    reporter = std::make_shared<CapturingReporter>();
-        std::shared_ptr<ContractionInputs>    gpu;
-        std::shared_ptr<ContractionInputs>    ref;
+        ContractionProblem*                         problem = nullptr;
+        ContractionSolution                         solution;
+        std::shared_ptr<CapturingReporter> reporter = std::make_shared<CapturingReporter>();
+        std::shared_ptr<ContractionInputs> gpu;
+        std::shared_ptr<ContractionInputs> ref;
     };
 }
 
@@ -196,6 +197,77 @@ TEST_F(ReferenceValidatorTest, OneShotValidatesOnlyTheFirstRun)
     validator->postSolution();
     EXPECT_EQ(validation(), "PASSED");
     EXPECT_EQ(validator->error(), 0);
+}
+
+TEST_F(ReferenceValidatorTest, FailureDoesNotDependOnPrintMax)
+{
+    setOption(args, "print-max", 0);
+    auto validator = start();
+    corruptFirstElement();
+    TimingEvents events({}, 1, 1);
+    validator->validateWarmups({0}, events, events);
+    validator->postWarmup(events, events);
+    validator->postSolution();
+    EXPECT_EQ(validation(), "FAILED");
+    EXPECT_EQ(validator->error(), 1);
+}
+
+TEST_F(ReferenceValidatorTest, EachDeviceUsesItsOwnReferenceAndBoundsMode)
+{
+    int count = 0;
+    ASSERT_EQ(hipGetDeviceCount(&count), hipSuccess);
+    if(count < 2)
+        GTEST_SKIP() << "needs two devices";
+    setOption(args, "init-a", InitMode::One);
+    setOption(args, "init-b", InitMode::One);
+    setOption(args, "print-max", 0);
+    for(bool freivalds : {false, true})
+    {
+        SCOPED_TRACE(freivalds);
+        setOption(args, "freivalds", freivalds);
+        auto otherArgs = args;
+        setOption(otherArgs, "init-a", InitMode::Two);
+        setOption(otherArgs, "bounds-check", BoundsCheckMode::NaN);
+        {
+            ScopedDevice card(0);
+            device->dataInit = std::make_shared<DataInitialization>(args, *factory);
+        }
+        auto other = std::make_shared<DeviceContext>(1, true);
+        {
+            ScopedDevice card(1);
+            other->dataInit = std::make_shared<DataInitialization>(otherArgs, *factory);
+        }
+        std::vector<std::shared_ptr<DeviceContext>> devices{device, other};
+        ReferenceValidator                          validator(args);
+        validator.setDevices(&devices);
+        validator.setReporter(reporter);
+        validator.preProblem(problem);
+        validator.preSolution(&solution);
+        size_t index = 0;
+        forEachDevice(devices, [&](DeviceContext& context) {
+            context.inputArr = {context.dataInit->prepareGPUInputs(problem)};
+            auto output      = std::dynamic_pointer_cast<ContractionInputs>(context.inputArr[0]);
+            std::vector<float> values(64 * 64, index++ == 0 ? 64.0f : 128.0f);
+            HIP_CHECK_EXC(hipMemcpy(
+                output->d, values.data(), values.size() * sizeof(float), hipMemcpyHostToDevice));
+        });
+        TimingEvents events({}, 1, 1);
+        validator.validateWarmups({0}, events, events);
+        validator.postWarmup(events, events);
+        validator.postSolution();
+        EXPECT_EQ(validation(), "PASSED");
+        {
+            ScopedDevice card(1);
+            auto         output = std::dynamic_pointer_cast<ContractionInputs>(other->inputArr[0]);
+            float        bad    = 0.0f;
+            HIP_CHECK_EXC(hipMemcpy(
+                static_cast<float*>(output->d) - 1, &bad, sizeof(bad), hipMemcpyHostToDevice));
+        }
+        validator.validateEnqueues({0}, events, events);
+        validator.postSolution();
+        EXPECT_EQ(validation(), "FAILED");
+        EXPECT_EQ(validator.error(), 1);
+    }
 }
 
 TEST(ReferenceValidatorFusedA2A, RotatedReceiveBufferIsAligned)

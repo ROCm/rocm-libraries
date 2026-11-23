@@ -1,19 +1,18 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-// Host-only unit tests for the maf1_0 method of generateMXInput (mxDataGen.cpp). maf1_0 is
+// Host-only unit tests for maf1_0 block-scaled (MX) data from generateMxData. maf1_0 is
 // closed-form, so every element is checked exactly: element (i, j) of the stored matrix of
 // batch b must hold the code nearest (ties to even) to sin(idx) for A or cos(idx) for B, with
 // idx = i + j * rows + b * rows * cols, and every block scale must be 0.5. The expected codes come
 // from a brute-force search over the element encodings written here, independent of
-// mxDataGenerator. See README.md in this directory for the HostUnit/smoke_ naming.
+// HostNumerics. See README.md in this directory for the HostUnit/smoke_ naming.
 
-#if HIPBLASLT_ENABLE_MXDATAGENERATOR
-
-#include "mxDataGen.hpp"
+#include <hipblaslt/hostnumerics/HipblasltDataInitialization.hpp>
 
 #include <gtest/gtest.h>
 
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -22,6 +21,9 @@
 
 namespace
 {
+    namespace hn     = roc::hostnumerics;
+    namespace client = hipblaslt::hostnumerics;
+
     // OCP E4M3: bias 7, 3 mantissa bits, no infinities, S.1111.111 is NaN.
     double decodeE4M3(uint8_t code)
     {
@@ -88,6 +90,42 @@ namespace
         {false, true, 24, 64}, // BT: N x K
     };
 
+    // K runs along the stored rows (block axis 0) for transposed A and non-transposed B.
+    size_t blockAxis(Layout const& l)
+    {
+        return l.isMatrixA == l.isTranspose ? 0 : 1;
+    }
+
+    hn::MxTensor generate(
+        hipDataType dataType, hipDataType scaleType, Layout const& l, int block, uint32_t batch)
+    {
+        return client::generateMxData(dataType,
+                                      scaleType,
+                                      hn::Shape{l.rows, l.cols},
+                                      l.rows,
+                                      blockAxis(l),
+                                      block,
+                                      hipblaslt_initialization::maf1_0,
+                                      client::mxDefaultSeed,
+                                      l.isMatrixA ? client::MatrixRole::A : client::MatrixRole::B,
+                                      batch);
+    }
+
+    size_t expectedScaleCount(Layout const& l, int block)
+    {
+        const uint64_t k    = blockAxis(l) == 0 ? l.rows : l.cols;
+        const uint64_t free = blockAxis(l) == 0 ? l.cols : l.rows;
+        return free * ((k + block - 1) / block);
+    }
+
+    void expectEveryScaleByte(hn::MxTensor const& mx, size_t count, uint8_t expected)
+    {
+        const auto bytes = mx.scales.rawEncodedBackingStorage();
+        ASSERT_EQ(bytes.size(), count);
+        for(std::byte s : bytes)
+            ASSERT_EQ(std::to_integer<uint8_t>(s), expected);
+    }
+
     TEST(HostUnitMXDataGenMaf1_0, smoke_fp8_e4m3_values_and_scales)
     {
         constexpr int block = 32;
@@ -96,49 +134,24 @@ namespace
             for(uint32_t batch : {0u, 1u, 5u})
             {
                 SCOPED_TRACE(describe(l, batch));
-                const size_t         count = l.rows * l.cols;
-                std::vector<uint8_t> data(count, 0xAA);
-                std::vector<uint8_t> scale(count, 0xAA);
-                const uint32_t       seedIndex = (l.isMatrixA ? 0u : 1u) + 3u * batch;
-                const auto           ref       = generateMXInput(HIP_R_8F_E4M3,
-                                                 HIP_R_8F_UE8M0,
-                                                 data.data(),
-                                                 scale.data(),
-                                                 l.rows,
-                                                 l.cols,
-                                                 l.rows,
-                                                 l.isTranspose,
-                                                 l.isMatrixA ? block : 1,
-                                                 l.isMatrixA ? 1 : block,
-                                                 l.isMatrixA,
-                                                 MXScaleLayout::None,
-                                                 "maf1_0",
-                                                 -1.0f,
-                                                 1.0f,
-                                                 "",
-                                                 seedIndex);
-                ASSERT_EQ(ref.size(), count);
+                const size_t count = l.rows * l.cols;
+                const auto   mx    = generate(HIP_R_8F_E4M3, HIP_R_8F_UE8M0, l, block, batch);
+                const auto   data  = mx.data.rawEncodedBackingStorage();
+                ASSERT_EQ(data.size(), count);
                 for(uint64_t j = 0; j < l.cols; j++)
                     for(uint64_t i = 0; i < l.rows; i++)
                     {
                         const uint64_t idx = i + j * l.rows + batch * count;
                         const uint8_t  expected
                             = nearestCode(trig(l.isMatrixA, idx), decodeE4M3, 0x80, 0x7E);
-                        const size_t o = i + j * l.rows;
-                        ASSERT_EQ(data[o], expected) << "i " << i << " j " << j;
-                        ASSERT_EQ(ref[o], float(0.5 * decodeE4M3(expected)))
+                        ASSERT_EQ(std::to_integer<uint8_t>(data[i + j * l.rows]), expected)
+                            << "i " << i << " j " << j;
+                        ASSERT_EQ(mx.reference.loadAs<float>({i, j}),
+                                  float(0.5 * decodeE4M3(expected)))
                             << "i " << i << " j " << j;
                     }
-                // Every block scale written is E8M0 0.5; at least one per block of data.
-                size_t written = 0;
-                for(uint8_t s : scale)
-                {
-                    if(s == 0xAA)
-                        continue;
-                    ASSERT_EQ(s, 0x7E);
-                    written++;
-                }
-                EXPECT_GE(written, count / block);
+                // Every block scale is E8M0 0.5.
+                expectEveryScaleByte(mx, expectedScaleCount(l, block), 0x7E);
             }
         }
     }
@@ -166,91 +179,60 @@ namespace
                 for(uint32_t batch : {0u, 2u})
                 {
                     SCOPED_TRACE(describe(l, batch) + " scale type " + std::to_string(f.type));
-                    const size_t         count = l.rows * l.cols;
-                    std::vector<uint8_t> data(count / 2, 0xAA);
-                    std::vector<uint8_t> scale(count, 0xAA);
-                    const uint32_t       seedIndex = (l.isMatrixA ? 0u : 1u) + 3u * batch;
-                    const auto ref = generateMXInput(static_cast<hipDataType>(HIP_R_4F_E2M1),
-                                                     f.type,
-                                                     data.data(),
-                                                     scale.data(),
-                                                     l.rows,
-                                                     l.cols,
-                                                     l.rows,
-                                                     l.isTranspose,
-                                                     l.isMatrixA ? f.block : 1,
-                                                     l.isMatrixA ? 1 : f.block,
-                                                     l.isMatrixA,
-                                                     MXScaleLayout::None,
-                                                     "maf1_0",
-                                                     -1.0f,
-                                                     1.0f,
-                                                     "",
-                                                     seedIndex);
-                    ASSERT_EQ(ref.size(), count);
+                    const size_t count = l.rows * l.cols;
+                    const auto   mx    = generate(
+                        static_cast<hipDataType>(HIP_R_4F_E2M1), f.type, l, f.block, batch);
+                    const auto data = mx.data.rawEncodedBackingStorage();
+                    ASSERT_EQ(data.size(), count / 2);
                     for(uint64_t j = 0; j < l.cols; j++)
                         for(uint64_t i = 0; i < l.rows; i++)
                         {
                             const uint64_t idx = i + j * l.rows + batch * count;
                             const uint8_t  expected
                                 = nearestCode(trig(l.isMatrixA, idx), decodeE2M1, 0x8, 0x7);
-                            const size_t  o    = i + j * l.rows;
-                            const uint8_t code = (data[o / 2] >> (4 * (o % 2))) & 0xF;
+                            const size_t  o = i + j * l.rows;
+                            const uint8_t code
+                                = (std::to_integer<uint8_t>(data[o / 2]) >> (4 * (o % 2))) & 0xF;
                             ASSERT_EQ(code, expected) << "i " << i << " j " << j;
-                            ASSERT_EQ(ref[o], float(0.5 * decodeE2M1(expected)))
+                            ASSERT_EQ(mx.reference.loadAs<float>({i, j}),
+                                      float(0.5 * decodeE2M1(expected)))
                                 << "i " << i << " j " << j;
                         }
-                    size_t written = 0;
-                    for(uint8_t s : scale)
-                    {
-                        if(s == 0xAA)
-                            continue;
-                        ASSERT_EQ(s, f.half);
-                        written++;
-                    }
-                    EXPECT_GE(written, count / f.block);
+                    expectEveryScaleByte(mx, expectedScaleCount(l, f.block), f.half);
                 }
             }
         }
     }
 
-    // The gfx1250 scale swizzle only reorders scale bytes, and maf1_0 data does not depend on
-    // the scale layout.
-    TEST(HostUnitMXDataGenMaf1_0, smoke_fp8_gfx1250_layout_keeps_data)
+    // The gfx1250 scale tiling only reorders scale bytes and pads them with zeros; maf1_0 data
+    // does not depend on the scale layout, which generateMxData does not take.
+    TEST(HostUnitMXDataGenMaf1_0, smoke_fp8_gfx1250_layout_keeps_scales)
     {
+        constexpr size_t block = 32;
         for(auto const& l : kLayouts)
         {
             SCOPED_TRACE(describe(l, 0));
-            const size_t         count = l.rows * l.cols;
-            std::vector<uint8_t> dataNone(count), dataSwizzled(count);
-            std::vector<uint8_t> scaleNone(count, 0xAA), scaleSwizzled(4 * count, 0xAA);
-            for(auto layout : {MXScaleLayout::None, MXScaleLayout::GFX1250})
+            const auto   mx      = generate(HIP_R_8F_E4M3, HIP_R_8F_UE8M0, l, block, 0);
+            const size_t axis    = blockAxis(l);
+            const size_t free    = axis == 0 ? l.cols : l.rows;
+            const size_t kBlocks = ((axis == 0 ? l.rows : l.cols) + block - 1) / block;
+            // The natural scales are [free, K blocks] when K runs along the stored rows and
+            // [K blocks, free] otherwise; gfx1250 tiles the fast dimension.
+            const std::array<size_t, 2> natural = axis == 0 ? std::array<size_t, 2>{free, kBlocks}
+                                                            : std::array<size_t, 2>{kBlocks, free};
+            const auto                  plan
+                = hn::amd_gpu_layout::MxScaleStoragePlan::fastDimensionTiles(natural, 128 / block);
+            const auto device = client::mxScaleBytesForDevice(
+                mx, axis, plan, client::MxScaleStorageLayout::FastDimensionTiles);
+            ASSERT_EQ(device.size(), plan.physicalByteCount());
+            size_t written = 0;
+            for(std::byte s : device)
             {
-                const bool swizzled = layout == MXScaleLayout::GFX1250;
-                generateMXInput(HIP_R_8F_E4M3,
-                                HIP_R_8F_UE8M0,
-                                swizzled ? dataSwizzled.data() : dataNone.data(),
-                                swizzled ? scaleSwizzled.data() : scaleNone.data(),
-                                l.rows,
-                                l.cols,
-                                l.rows,
-                                l.isTranspose,
-                                l.isMatrixA ? 32 : 1,
-                                l.isMatrixA ? 1 : 32,
-                                l.isMatrixA,
-                                layout,
-                                "maf1_0",
-                                -1.0f,
-                                1.0f,
-                                "",
-                                l.isMatrixA ? 0u : 1u);
+                const uint8_t b = std::to_integer<uint8_t>(s);
+                ASSERT_TRUE(b == 0x7E || b == 0x00) << int(b);
+                written += b == 0x7E;
             }
-            EXPECT_EQ(dataNone, dataSwizzled);
-            for(uint8_t s : scaleSwizzled)
-                if(s != 0xAA)
-                    ASSERT_TRUE(s == 0x7E || s == 0x00) << int(s); // the swizzle may zero-pad
+            EXPECT_EQ(written, expectedScaleCount(l, block));
         }
     }
 } // namespace
-
-#endif // HIPBLASLT_ENABLE_MXDATAGENERATOR

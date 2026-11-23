@@ -20,6 +20,8 @@
 #include <vector>
 
 namespace roc::hostnumerics {
+struct LastDimensionFastest {};
+
 // A Shape traversal callback, taking (flat index, coordinates) or only
 // (coordinates). The two-argument form is used when both are available.
 template <typename Function>
@@ -86,6 +88,19 @@ class Shape {
         return m_elementCount;
     }
 
+    // The product of the extents, or std::nullopt if it does not fit size_t.
+    // Descriptor translators use it to reject an extent list without throwing.
+    static std::optional<size_t> getElementCount(std::span<const size_t> dimensions) noexcept {
+        if (std::find(dimensions.begin(), dimensions.end(), size_t{0}) != dimensions.end())
+            return 0;
+        size_t count = 1;
+        for (size_t extent : dimensions) {
+            if (count > std::numeric_limits<size_t>::max() / extent) return std::nullopt;
+            count *= extent;
+        }
+        return count;
+    }
+
     // Select dimensions in the supplied order; repetition is allowed.
     Shape fromDimensions(std::span<const size_t> axes) const {
         validateDimensions(axes);
@@ -100,11 +115,12 @@ class Shape {
     // Parameter `order` lists axis numbers from slowest to fastest. For shape (2, 3, 5),
     // order (1, 2, 0) enumerates coordinates as:
     //
-    //   size_t index = 0;
-    //   for (size_t i1 = 0; i1 < 3; ++i1)
-    //       for (size_t i2 = 0; i2 < 5; ++i2)
-    //           for (size_t i0 = 0; i0 < 2; ++i0)
-    //               visit(index++, i0, i1, i2);
+    //   index = 0
+    //   for i1 from 0 through 2:
+    //       for i2 from 0 through 4:
+    //           for i0 from 0 through 1:
+    //               visit index and coordinates (i0, i1, i2)
+    //               increment index
     //
     // Axis 0 changes every step, axis 2 every 2 steps, and axis 1 every 2*5=10 steps.
     // logical strides are therefore (1, 10, 2) for the 3 dimensions.
@@ -112,7 +128,6 @@ class Shape {
     // Other orders for the same shape:
     //   (0, 1, 2): last axis fastest, strides (15, 5, 1); (1, 2, 3) maps to 28.
     //   (2, 1, 0): first axis fastest, strides (1, 2, 6); (1, 2, 3) maps to 23.
-    //   etc.
     //
     // The linear index is the inner product of `indices` and the logical strides.
     size_t linearIndex(std::span<const size_t> indices, const Permutation& order) const {
@@ -125,7 +140,8 @@ class Shape {
     }
 
     // Invert linearIndex with the same traversal order. The result stays in the
-    // original axis order: Shape{2, 3, 5}.coordinates(27, (1, 2, 0)) is (1, 2, 3).
+    // original axis order: for shape (2, 3, 5) and order (1, 2, 0), index 27
+    // maps to coordinates (1, 2, 3).
     // The index must lie in [0, elementCount()).
     std::vector<size_t> coordinates(size_t index, const Permutation& order) const {
         validateCoordinates(index, order);
@@ -282,19 +298,25 @@ class Shape {
         }
     }
 
-    static std::optional<size_t> getElementCount(std::span<const size_t> dimensions) noexcept {
-        if (std::find(dimensions.begin(), dimensions.end(), size_t{0}) != dimensions.end())
-            return 0;
-        size_t count = 1;
-        for (size_t extent : dimensions) {
-            if (count > std::numeric_limits<size_t>::max() / extent) return std::nullopt;
-            count *= extent;
-        }
-        return count;
-    }
-
     std::vector<size_t> m_dimensions;
     size_t m_elementCount = 1;
 };
 
+// Returns the NumPy-style broadcast shape of two inputs. Dimensions are
+// aligned from the end and must be equal or have extent one. A zero extent
+// broadcasts with one to zero, but not with any other extent.
+inline Shape broadcastShapes(const Shape& left, const Shape& right) {
+    const size_t resultRank = std::max(left.rank(), right.rank());
+    std::vector<size_t> dimensions(resultRank, 1);
+    for (size_t reverseDimension = 0; reverseDimension < resultRank; ++reverseDimension) {
+        const size_t leftExtent =
+            reverseDimension < left.rank() ? left[left.rank() - reverseDimension - 1] : 1;
+        const size_t rightExtent =
+            reverseDimension < right.rank() ? right[right.rank() - reverseDimension - 1] : 1;
+        if (leftExtent != rightExtent && leftExtent != 1 && rightExtent != 1)
+            throw std::runtime_error("Tensor shapes are not broadcast-compatible.");
+        dimensions[resultRank - reverseDimension - 1] = leftExtent == 1 ? rightExtent : leftExtent;
+    }
+    return Shape(std::move(dimensions));
+}
 }  // namespace roc::hostnumerics
