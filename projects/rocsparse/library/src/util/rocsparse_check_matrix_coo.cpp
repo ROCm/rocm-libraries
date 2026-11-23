@@ -24,6 +24,7 @@
 #include "internal/util/rocsparse_check_matrix_coo.h"
 #include "rocsparse_check_matrix_coo.hpp"
 #include "rocsparse_enum_utils.hpp"
+#include "rocsparse_grid.hpp"
 #include "rocsparse_utility.hpp"
 
 #include "check_matrix_coo_device.h"
@@ -85,18 +86,27 @@ namespace rocsparse
 
         rocsparse_data_status* d_data_status
             = reinterpret_cast<rocsparse_data_status*>(temp_buffer);
-        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::check_matrix_coo_duplicate_device<256, I>),
-                                           dim3((nnz - 1) / 256 + 1),
-                                           dim3(256),
-                                           0,
-                                           handle->stream,
-                                           m,
-                                           n,
-                                           nnz,
-                                           row_keys.current(),
-                                           col_vals.current(),
-                                           idx_base,
-                                           d_data_status);
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse::dispatch_grid_stride_x(
+            handle,
+            rocsparse::ceil_div(nnz - 1, 256),
+            256,
+            [&](auto grid_stride, uint32_t grid) -> rocsparse_status {
+                RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+                    (rocsparse::
+                         check_matrix_coo_duplicate_device<256, decltype(grid_stride)::value, I>),
+                    dim3(grid),
+                    dim3(256),
+                    0,
+                    handle->stream,
+                    m,
+                    n,
+                    nnz,
+                    row_keys.current(),
+                    col_vals.current(),
+                    idx_base,
+                    d_data_status);
+                return rocsparse_status_success;
+            }));
 
         RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(data_status,
                                                      d_data_status,

@@ -29,6 +29,7 @@
 
 #include "../../library/src/util/check_matrix_ell_unsorted.hpp"
 #include "rocsparse_hyb_mat.hpp"
+#include "unit_test_grid_clamp.hpp"
 
 #include <algorithm>
 #include <cstdint>
@@ -1450,6 +1451,37 @@ TEST_F(CheckMatrixDefects, CooScale)
             handle, "shuffled_dup_boundary", with_copy(unsorted, 255, 256), base, u_mode, k_dup);
         expect_coo_scale(
             handle, "shuffled_dup_first_last", with_copy(unsorted, 0, last), base, u_mode, k_dup);
+    }
+}
+
+// The unsorted COO duplicate kernel clamps its grid like the CSR checker and grid-strides
+// over the rest. With maxGridSize[0] at 1, 3 or 7, every sweep covers at most 7 * 256 of
+// the 100000 entries, so pairs at the end of the sorted copy are only reached by a later
+// sweep.
+TEST_F(CheckMatrixDefects, CooUnsortedClampedGrid)
+{
+    const coo_coords sorted   = scale_coo_sorted();
+    const coo_coords unsorted = shuffled(sorted);
+    const int64_t    last     = k_scale_nnz - 1;
+    const auto       u_mode   = rocsparse_storage_mode_unsorted;
+    for(int limit : {1, 3, 7})
+    {
+        SCOPED_TRACE("maxGridSize[0] " + std::to_string(limit));
+        ScopedMaxGridSizeX clamp(handle, limit);
+        for(auto base : {rocsparse_index_base_zero, rocsparse_index_base_one})
+        {
+            expect_coo_scale(handle, "valid", unsorted, base, u_mode, k_ok);
+            expect_coo_scale(
+                handle, "dup_last", with_copy(sorted, last - 1, last), base, u_mode, k_dup);
+            expect_coo_scale(
+                handle, "dup_boundary", with_copy(sorted, 255, 256), base, u_mode, k_dup);
+            expect_coo_scale(handle,
+                             "shuffled_dup_far_apart",
+                             with_copy(unsorted, 0, last),
+                             base,
+                             u_mode,
+                             k_dup);
+        }
     }
 }
 

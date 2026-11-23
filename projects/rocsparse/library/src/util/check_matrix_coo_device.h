@@ -144,24 +144,16 @@ namespace rocsparse
         }
     }
 
-    // Adjacent coordinates of a copy sorted by row, then by column.
-    template <uint32_t BLOCKSIZE, typename I>
-    ROCSPARSE_KERNEL(BLOCKSIZE)
-    void check_matrix_coo_duplicate_device(I       m,
-                                           I       n,
-                                           int64_t nnz,
-                                           const I* __restrict__ rows,
-                                           const I* __restrict__ cols,
-                                           rocsparse_index_base   idx_base,
-                                           rocsparse_data_status* data_status)
+    // Entries gid and gid + 1 of a copy sorted by row, then by column.
+    template <typename I>
+    ROCSPARSE_DEVICE_ILF void check_matrix_coo_duplicate_pair(int64_t gid,
+                                                              I       m,
+                                                              I       n,
+                                                              const I* __restrict__ rows,
+                                                              const I* __restrict__ cols,
+                                                              rocsparse_index_base   idx_base,
+                                                              rocsparse_data_status* data_status)
     {
-        const int64_t gid = static_cast<int64_t>(hipBlockIdx_x) * BLOCKSIZE + hipThreadIdx_x;
-
-        if(gid >= nnz - 1)
-        {
-            return;
-        }
-
         const I row = rows[gid] - idx_base;
         const I col = cols[gid] - idx_base;
 
@@ -176,6 +168,38 @@ namespace rocsparse
         if(row == next_row && col == next_col)
         {
             record_data_status(data_status, rocsparse_data_status_duplicate_entry);
+        }
+    }
+
+    // Launched with GRID_STRIDE = true only when get_grid_size_x clamps grid.x below the
+    // natural block count.
+    template <uint32_t BLOCKSIZE, bool GRID_STRIDE, typename I>
+    ROCSPARSE_KERNEL(BLOCKSIZE)
+    void check_matrix_coo_duplicate_device(I       m,
+                                           I       n,
+                                           int64_t nnz,
+                                           const I* __restrict__ rows,
+                                           const I* __restrict__ cols,
+                                           rocsparse_index_base   idx_base,
+                                           rocsparse_data_status* data_status)
+    {
+        if constexpr(GRID_STRIDE)
+        {
+            for(int64_t gid = static_cast<int64_t>(hipBlockIdx_x) * BLOCKSIZE + hipThreadIdx_x;
+                gid < nnz - 1;
+                gid += static_cast<int64_t>(hipGridDim_x) * BLOCKSIZE)
+            {
+                check_matrix_coo_duplicate_pair(gid, m, n, rows, cols, idx_base, data_status);
+            }
+        }
+        else
+        {
+            const int64_t gid = static_cast<int64_t>(hipBlockIdx_x) * BLOCKSIZE + hipThreadIdx_x;
+
+            if(gid < nnz - 1)
+            {
+                check_matrix_coo_duplicate_pair(gid, m, n, rows, cols, idx_base, data_status);
+            }
         }
     }
 }
