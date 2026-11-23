@@ -81,6 +81,14 @@ An algorithm is valid only for the problem it was queried for. ``hipblasLtMatmul
 ``HIPBLAS_STATUS_INVALID_VALUE`` when the problem no longer satisfies that kernel's problem
 predicates, such as its sizes, strides, or ``alpha`` value, or uses
 ``HIPBLASLT_BATCH_MODE_POINTER_ARRAY``, which hand-written kernels do not support.
+``hipblaslt_ext::GroupedGemm::initialize`` does the same for each GEMM of the group when
+``useUserArgs`` is ``false``. With ``useUserArgs`` set to ``true``, each launch reads the
+sizes from the device ``UserArguments`` and the sizes passed to ``setProblem`` are not
+checked, so the caller must keep every group's device sizes within what the algorithm was
+queried for. ``hipblasLtMatmul`` and ``hipblaslt_ext::Gemm::initialize`` also refuse an
+algorithm for a grouped GEMM solution, and
+``hipblaslt_ext::GroupedGemm::initialize`` refuses one for a non-grouped solution, with
+``HIPBLAS_STATUS_INVALID_VALUE``.
 
 Supported data types
 ------------------------------------------

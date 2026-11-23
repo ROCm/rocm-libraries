@@ -5,6 +5,7 @@
     'CUCount': 228,
     'DefaultSolution': dict({
       '1LDSBuffer': 0,
+      'A2ASubRounds': 1,
       'ActivationAlt': False,
       'ActivationFuncCall': True,
       'ActivationFused': True,
@@ -189,6 +190,7 @@
       'WaveSeparateGlobalReadB': 0,
       'WaveSeparateGlobalReadMetadata': 0,
       'WaveSplitK': False,
+      'WaveTileContiguousA': False,
       'WavefrontSize': -1,
       'WorkAssignment': 'StaticGrid',
       'WorkGroup': list([
@@ -264,6 +266,7 @@
     'CUCount': None,
     'DefaultSolution': dict({
       '1LDSBuffer': 0,
+      'A2ASubRounds': 1,
       'ActivationAlt': False,
       'ActivationFuncCall': True,
       'ActivationFused': True,
@@ -448,6 +451,7 @@
       'WaveSeparateGlobalReadB': 0,
       'WaveSeparateGlobalReadMetadata': 0,
       'WaveSplitK': False,
+      'WaveTileContiguousA': False,
       'WavefrontSize': -1,
       'WorkAssignment': 'StaticGrid',
       'WorkGroup': list([
@@ -511,6 +515,7 @@
     'CUCount': None,
     'DefaultSolution': dict({
       '1LDSBuffer': 0,
+      'A2ASubRounds': 1,
       'ActivationAlt': False,
       'ActivationFuncCall': True,
       'ActivationFused': True,
@@ -695,6 +700,7 @@
       'WaveSeparateGlobalReadB': 0,
       'WaveSeparateGlobalReadMetadata': 0,
       'WaveSplitK': False,
+      'WaveTileContiguousA': False,
       'WavefrontSize': -1,
       'WorkAssignment': 'StaticGrid',
       'WorkGroup': list([
@@ -773,6 +779,7 @@
     'CUCount': None,
     'DefaultSolution': dict({
       '1LDSBuffer': 0,
+      'A2ASubRounds': 1,
       'ActivationAlt': False,
       'ActivationFuncCall': True,
       'ActivationFused': True,
@@ -957,6 +964,7 @@
       'WaveSeparateGlobalReadB': 0,
       'WaveSeparateGlobalReadMetadata': 0,
       'WaveSplitK': False,
+      'WaveTileContiguousA': False,
       'WavefrontSize': -1,
       'WorkAssignment': 'StaticGrid',
       'WorkGroup': list([
@@ -1052,6 +1060,7 @@
     'CUCount': None,
     'DefaultSolution': dict({
       '1LDSBuffer': 0,
+      'A2ASubRounds': 1,
       'ActivationAlt': False,
       'ActivationFuncCall': True,
       'ActivationFused': True,
@@ -1236,6 +1245,7 @@
       'WaveSeparateGlobalReadB': 0,
       'WaveSeparateGlobalReadMetadata': 0,
       'WaveSplitK': False,
+      'WaveTileContiguousA': False,
       'WavefrontSize': -1,
       'WorkAssignment': 'StaticGrid',
       'WorkGroup': list([
@@ -1311,6 +1321,7 @@
     'CUCount': None,
     'DefaultSolution': dict({
       '1LDSBuffer': 0,
+      'A2ASubRounds': 1,
       'ActivationAlt': False,
       'ActivationFuncCall': True,
       'ActivationFused': True,
@@ -1495,6 +1506,7 @@
       'WaveSeparateGlobalReadB': 0,
       'WaveSeparateGlobalReadMetadata': 0,
       'WaveSplitK': False,
+      'WaveTileContiguousA': False,
       'WavefrontSize': -1,
       'WorkAssignment': 'StaticGrid',
       'WorkGroup': list([
@@ -1584,6 +1596,7 @@
     'CUCount': None,
     'DefaultSolution': dict({
       '1LDSBuffer': 0,
+      'A2ASubRounds': 1,
       'ActivationAlt': False,
       'ActivationFuncCall': True,
       'ActivationFused': True,
@@ -1768,6 +1781,7 @@
       'WaveSeparateGlobalReadB': 0,
       'WaveSeparateGlobalReadMetadata': 0,
       'WaveSplitK': False,
+      'WaveTileContiguousA': False,
       'WavefrontSize': -1,
       'WorkAssignment': 'StaticGrid',
       'WorkGroup': list([
@@ -1846,6 +1860,7 @@
     'CUCount': 228,
     'DefaultSolution': dict({
       '1LDSBuffer': 0,
+      'A2ASubRounds': 1,
       'ActivationAlt': False,
       'ActivationFuncCall': True,
       'ActivationFused': True,
@@ -2030,6 +2045,7 @@
       'WaveSeparateGlobalReadB': 0,
       'WaveSeparateGlobalReadMetadata': 0,
       'WaveSplitK': False,
+      'WaveTileContiguousA': False,
       'WavefrontSize': -1,
       'WorkAssignment': 'StaticGrid',
       'WorkGroup': list([
@@ -2108,6 +2124,7 @@
     'CUCount': None,
     'DefaultSolution': dict({
       '1LDSBuffer': 0,
+      'A2ASubRounds': 1,
       'ActivationAlt': False,
       'ActivationFuncCall': True,
       'ActivationFused': True,
@@ -2292,6 +2309,7 @@
       'WaveSeparateGlobalReadB': 0,
       'WaveSeparateGlobalReadMetadata': 0,
       'WaveSplitK': False,
+      'WaveTileContiguousA': False,
       'WavefrontSize': -1,
       'WorkAssignment': 'StaticGrid',
       'WorkGroup': list([
@@ -2358,6 +2376,7 @@
     'CUCount': None,
     'DefaultSolution': dict({
       '1LDSBuffer': 0,
+      'A2ASubRounds': 1,
       'ActivationAlt': False,
       'ActivationFuncCall': True,
       'ActivationFused': True,
@@ -2542,6 +2561,7 @@
       'WaveSeparateGlobalReadB': 0,
       'WaveSeparateGlobalReadMetadata': 0,
       'WaveSplitK': False,
+      'WaveTileContiguousA': False,
       'WavefrontSize': -1,
       'WorkAssignment': 'StaticGrid',
       'WorkGroup': list([
@@ -2620,6 +2640,7 @@
     'CUCount': None,
     'DefaultSolution': dict({
       '1LDSBuffer': 0,
+      'A2ASubRounds': 1,
       'ActivationAlt': False,
       'ActivationFuncCall': True,
       'ActivationFused': True,
@@ -2804,6 +2825,7 @@
       'WaveSeparateGlobalReadB': 0,
       'WaveSeparateGlobalReadMetadata': 0,
       'WaveSplitK': False,
+      'WaveTileContiguousA': False,
       'WavefrontSize': -1,
       'WorkAssignment': 'StaticGrid',
       'WorkGroup': list([
@@ -2881,6 +2903,7 @@
     'CUCount': None,
     'DefaultSolution': dict({
       '1LDSBuffer': 0,
+      'A2ASubRounds': 1,
       'ActivationAlt': False,
       'ActivationFuncCall': True,
       'ActivationFused': True,
@@ -3065,6 +3088,7 @@
       'WaveSeparateGlobalReadB': 0,
       'WaveSeparateGlobalReadMetadata': 0,
       'WaveSplitK': False,
+      'WaveTileContiguousA': False,
       'WavefrontSize': -1,
       'WorkAssignment': 'StaticGrid',
       'WorkGroup': list([

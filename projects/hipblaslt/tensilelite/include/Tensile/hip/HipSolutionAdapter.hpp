@@ -27,6 +27,8 @@
 #pragma once
 
 #include <Tensile/AMDGPU.hpp>
+#include <Tensile/LongPath.hpp>
+#include <Tensile/ReadMostlyMap.hpp>
 #include <Tensile/Tensile.hpp>
 #include <hip/hip_runtime.h>
 #include <unordered_set>
@@ -35,6 +37,8 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <unordered_map>
+#include <vector>
 
 #include <tensilelitehost/export.h>
 
@@ -42,6 +46,15 @@ namespace TensileLite
 {
     namespace hip
     {
+        /// Whose failure an unrecordable launch event is. Strict returns it as
+        /// the launch's error; BestEffort costs the measurement, not the launch,
+        /// and leaves no error behind.
+        enum class EventRecording
+        {
+            Strict,
+            BestEffort,
+        };
+
         class TENSILELITEHOST_EXPORT SolutionAdapter : public TensileLite::SolutionAdapter
         {
         public:
@@ -49,9 +62,15 @@ namespace TensileLite
             // be tested without a GPU or process-wide HIP symbol interposition.
             struct ModuleApi
             {
-                decltype(&hipModuleLoad)   load         = hipModuleLoad;
-                decltype(&hipModuleUnload) unload       = hipModuleUnload;
-                decltype(&hipGetLastError) getLastError = hipGetLastError;
+                decltype(&hipModuleLoad)     load         = hipModuleLoad;
+                decltype(&hipModuleUnload)   unload       = hipModuleUnload;
+                decltype(&hipGetLastError)   getLastError = hipGetLastError;
+                decltype(&hipModuleLoadData) loadData     = hipModuleLoadData;
+                // Gives the path to open a code object with. When it differs
+                // from the path given, hipModuleLoad could not open the file,
+                // so the adapter reads it and calls loadData instead.
+                decltype(&longPathSafe)         resolvePath = longPathSafe;
+                decltype(&hipModuleGetFunction) getFunction = hipModuleGetFunction;
             };
 
             SolutionAdapter();
@@ -96,6 +115,16 @@ namespace TensileLite
                                      hipEvent_t                           startEvent,
                                      hipEvent_t                           stopEvent,
                                      bool                                 isKernelLoaded = false);
+
+            // With EventRecording::BestEffort a swallowed start also skips the
+            // stop. An overload, because the existing mangled name is part of the
+            // installed ABI.
+            hipError_t launchKernels(std::vector<KernelInvocation> const& kernels,
+                                     hipStream_t                          stream,
+                                     hipEvent_t                           startEvent,
+                                     hipEvent_t                           stopEvent,
+                                     bool                                 isKernelLoaded,
+                                     EventRecording                       recording);
 
             hipError_t launchKernels(std::vector<KernelInvocation> const& kernels,
                                      hipStream_t                          stream,
@@ -149,21 +178,45 @@ namespace TensileLite
             int numRotationModules();
 
         private:
+            // startSwallowed carries the first kernel's start record to the last
+            // kernel's stop.
+            hipError_t launchKernelMeasured(KernelInvocation const& kernel,
+                                            hipStream_t             stream,
+                                            hipEvent_t              startEvent,
+                                            hipEvent_t              stopEvent,
+                                            bool                    isKernelLoaded,
+                                            EventRecording          recording,
+                                            bool&                   startSwallowed);
+
             hipError_t loadCodeObjectFileOnce(std::string const& path);
             hipError_t getKernel(hipFunction_t& rv, std::string const& name);
+            // Cached function for `name`, or null. Takes no lock.
+            hipFunction_t cachedKernel(std::string const& name) const;
 
             ModuleApi  m_moduleApi;
             std::mutex m_access;
 
-            std::vector<hipModule_t>                       m_modules;
-            std::unordered_map<std::string, hipFunction_t> m_kernels;
-            bool                                           m_debug           = false;
-            bool                                           m_debugSkipLaunch = false;
-            std::string                                    m_name            = "HipSolutionAdapter";
-            std::string                                    m_codeObjectDirectory;
+            std::vector<hipModule_t> m_modules;
+            // Written under m_access, read without it by getKernel(). Null
+            // means not loaded: recovery resets entries instead of removing them.
+            ReadMostlyMap<std::string, std::atomic<hipFunction_t>> m_kernels;
+            bool                                                   m_debug           = false;
+            bool                                                   m_debugSkipLaunch = false;
+            std::string                                            m_name = "HipSolutionAdapter";
+            std::string                                            m_codeObjectDirectory;
 
-            std::vector<std::string>        m_loadedModuleNames;
-            std::unordered_set<std::string> m_loadedCOFiles;
+            std::vector<std::string> m_loadedModuleNames;
+            // Written under m_access, read without it by FindCodeObject().
+            // Recovery resets entries to false instead of removing them.
+            ReadMostlyMap<std::string, std::atomic<bool>> m_loadedCOFiles;
+
+            // Code objects read into memory because their path was too long for
+            // hipModuleLoad. HIP keeps using the buffer passed to
+            // hipModuleLoadData, so each one lives until its module is unloaded.
+            // Shared so the code that loads a module can keep its own reference
+            // until the module is recorded here or unloaded.
+            std::unordered_map<hipModule_t, std::shared_ptr<const std::vector<char>>>
+                m_moduleImages;
 
             // Extra rotation copies for I-cache cold-miss testing.
             //   m_extraModuleCopies[i] is parallel to m_modules and holds
@@ -175,8 +228,8 @@ namespace TensileLite
             //     0      -> original m_modules / m_kernels;
             //     k > 0  -> m_extraModuleCopies[k-1] / m_extraKernels[k-1].
             //   std::atomic<int> lets selectRotationCopy() update without locking
-            //     and getKernel() snapshot the index without locking; the actual
-            //     module/cache search is still guarded by m_access.
+            //     and getKernel() snapshot the index without locking; a copy k > 0
+            //     is searched under m_access.
             std::vector<std::vector<hipModule_t>>                       m_extraModuleCopies;
             std::vector<std::unordered_map<std::string, hipFunction_t>> m_extraKernels;
             std::atomic<int>                                            m_currentRotationCopy{0};
@@ -187,10 +240,14 @@ namespace TensileLite
             // the xnack suffix stripped, so the on-disk name cannot be derived.
             std::string m_helperKernelPath;
 
+            // One mutex per code object serializes its load, so two threads
+            // cannot both load it: keyed by absolute path for a local code
+            // object, else by m_loadedCOFiles name. Taken before m_access,
+            // never while holding it. This map and the local maps below are
+            // guarded by m_access.
+            std::unordered_map<std::string, std::shared_ptr<std::mutex>> m_loadMutexes;
+
 #ifdef TENSILELITE_ENABLE_LOCAL_KERNELS
-            // One mutex per path serializes its load, so two threads cannot
-            // both load it. The maps are guarded by m_access.
-            std::unordered_map<std::string, std::shared_ptr<std::mutex>> m_localLoadMutexes;
             std::unordered_map<std::string, hipModule_t>                 m_localModules;
             std::map<std::pair<std::string, std::string>, hipFunction_t> m_localKernels;
 #endif

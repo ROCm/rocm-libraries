@@ -24,19 +24,21 @@
 
 from argparse import ArgumentParser
 from pathlib import Path
+from typing import Optional, Sequence
 
 from ..Toolchain.Validators import ToolchainDefaults
 
 BUNDLED_KNOWN_BUGS = object()
 
 
-def parseArguments():
+def parseArguments(argv: Optional[Sequence[str]] = None):
     """
     Returns:
         A dictionary containing the keys representing options and their values.
     """
 
     argParser = ArgumentParser(
+        prog="tensilelite logic",
         description="TensileLogic runs critical checks to ensure the "
         "integrity of the supplied logic files.",
     )
@@ -112,6 +114,12 @@ def parseArguments():
         help="exit non-zero when a known-bugs entry no longer fails validation "
         "(a landed fix); use in CI to force removal of stale entries",
     )
-    args = argParser.parse_args()
+    argParser.add_argument(
+        "--logic-filter",
+        dest="LogicFilter",
+        default="**/*.yaml",
+        help="glob relative to LogicPath (default: **/*.yaml)",
+    )
+    args = argParser.parse_args(argv)
 
     return args
