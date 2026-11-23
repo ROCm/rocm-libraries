@@ -918,6 +918,75 @@ ACCUM_SHAPES = {
     ),  # 3,456
 }
 
+# E: layout and stride edges of real models (nightly). Each shape carries one F15 mix
+# (``mix``: x, w, y layouts) or one F16 stride kind (``stride``, on x and y in
+# ``layout``). E1-E4 and E5-E6 differ from a uniform layout only on extent-1 dims: a
+# 1x1 convolution on an [N, C, 1, 1] input whose output PyTorch allocates
+# channels-last, and a batch-1 input sliced from a wider channel dimension. E7-E12
+# slice the channels of real-size tensors; E13 and E14 mix layouts that agree only
+# once extent-1 strides are ignored.
+E_SHAPES = {
+    "E1": dict(
+        shape=dict(rank=2, n=8, c=256, k=64, g=1, ins=1, f=1), mix=("cf", "cf", "cl")
+    ),
+    "E2": dict(
+        shape=dict(rank=2, n=8, c=64, k=256, g=1, ins=1, f=1), mix=("cf", "cf", "cl")
+    ),
+    "E3": dict(
+        shape=dict(rank=3, n=4, c=128, k=32, g=1, ins=1, f=1), mix=("cf", "cf", "cl")
+    ),
+    "E4": dict(
+        shape=dict(rank=1, n=8, c=256, k=64, g=1, ins=1, f=1), mix=("cf", "cf", "cl")
+    ),
+    "E5": dict(
+        shape=dict(rank=2, n=1, c=64, k=64, g=1, ins=80, f=3, pre=1, post=1),
+        stride="chan",
+        layout="cf",
+    ),
+    "E6": dict(
+        shape=dict(rank=3, n=1, c=32, k=32, g=1, ins=(8, 16, 16), f=3, pre=1, post=1),
+        stride="chan",
+        layout="cf",
+    ),
+    "E7": dict(
+        shape=dict(rank=2, n=8, c=64, k=64, g=1, ins=56, f=3, pre=1, post=1),
+        stride="chan",
+        layout="cf",
+    ),
+    "E8": dict(
+        shape=dict(rank=2, n=8, c=64, k=64, g=1, ins=56, f=3, pre=1, post=1),
+        stride="chan",
+        layout="cl",
+    ),
+    "E9": dict(
+        shape=dict(rank=2, n=8, c=64, k=64, g=64, ins=56, f=3, pre=1, post=1),
+        stride="chan",
+        layout="cf",
+    ),
+    "E10": dict(
+        shape=dict(rank=2, n=8, c=64, k=64, g=64, ins=56, f=3, pre=1, post=1),
+        stride="chan",
+        layout="cl",
+    ),
+    "E11": dict(
+        shape=dict(rank=2, n=8, c=64, k=64, g=2, ins=56, f=3, pre=1, post=1),
+        stride="chan",
+        layout="cf",
+    ),
+    "E12": dict(
+        shape=dict(rank=3, n=2, c=32, k=32, g=1, ins=(8, 28, 28), f=3, pre=1, post=1),
+        stride="chan",
+        layout="cl",
+    ),
+    "E13": dict(
+        shape=dict(rank=2, n=8, c=256, k=256, g=256, ins=1, f=3, pre=1, post=1),
+        mix=("cf", "cf", "cl"),
+    ),
+    "E14": dict(
+        shape=dict(rank=2, n=8, c=1, k=32, g=1, ins=28, f=3), mix=("cf", "cf", "cl")
+    ),
+}
+
 
 # --------------------------------------------------------------------------
 # Trimmed products (plan section 4.3, trade-off register T8, T9, T11, T12). T10 is

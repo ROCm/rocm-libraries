@@ -131,7 +131,7 @@ These variables control heuristics, benchmarking, and the on-disk cache.
 ``HIPDNN_HEUR_POLICY_ORDER``
 ----------------------------
 
-A comma-separated list of heuristic policies, by name (for example ``SelectionHeuristic::Config``) or by integer policy ID. When set, it takes priority over the policy order set on the heuristic descriptor.
+A comma-separated list of heuristic policies, by name (for example ``SelectionHeuristic::Config``) or by integer policy ID. When set, it takes priority over the policy order set on the heuristic descriptor and over the list the descriptor's heuristic mode selects.
 
 ``HIPDNN_HEUR_CONFIG_PATH``
 ---------------------------
