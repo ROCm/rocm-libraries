@@ -97,6 +97,12 @@ protected:
     // vendored kernel accepts the block it is launched with.
     virtual unsigned int maxThreadsPerBlock(const fmha_v3_fwdConfig& config) const;
 
+    // Architecture name ("gfx942", "gfx950", ...) of the device behind the handle's
+    // stream, or std::nullopt when the query fails; isApplicable's only device query.
+    // Virtual so tests can check the applicability rules of each served architecture
+    // on a host without that GPU.
+    virtual std::optional<std::string> deviceArch(const Handle& handle) const;
+
 private:
     // Describes why the resolved kernel cannot be launched with the block the
     // plan uses, or std::nullopt when it can.
