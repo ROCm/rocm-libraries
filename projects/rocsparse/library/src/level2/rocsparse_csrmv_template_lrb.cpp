@@ -887,7 +887,7 @@ rocsparse_status rocsparse::csrmv_lrb_template_dispatch(rocsparse_handle        
         }
 
         // Long rows
-        for(int j = LR_THRESHOLD; j < 32; j++)
+        for(int j = LR_THRESHOLD; j < rocsparse::lrb_num_bins; j++)
         {
             if(info->lrb.nRowsBins[j] != 0)
             {

@@ -65,5 +65,5 @@ void _rocsparse_lrb_info::clear()
     this->rows_bins            = nullptr;
     this->n_rows_bins          = nullptr;
     this->size                 = 0;
-    memset(this->nRowsBins, 0, sizeof(int64_t) * 32);
+    memset(this->nRowsBins, 0, sizeof(this->nRowsBins));
 }
