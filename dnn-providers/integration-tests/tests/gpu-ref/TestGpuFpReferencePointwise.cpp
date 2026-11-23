@@ -30,7 +30,8 @@ TEST(TestGpuPointwiseMixedLayouts, Unary)
     inputTensor.memory().hostData();
 
     auto operation = PointwiseMode::ABS;
-    CpuReferencePointwiseImpl<float>::pointwiseCompute(operation, outputCpuTensor, inputTensor);
+    CpuReferencePointwiseImpl<float, double>::pointwiseCompute(
+        operation, outputCpuTensor, inputTensor);
 
     GpuReferencePointwise::pointwiseCompute<float>(operation, outputGpuTensor, inputTensor);
 
@@ -58,7 +59,7 @@ TEST(TestGpuPointwiseMixedLayouts, Binary)
     input1Tensor.memory().hostData();
 
     auto operation = PointwiseMode::ADD;
-    CpuReferencePointwiseImpl<float>::pointwiseCompute(
+    CpuReferencePointwiseImpl<float, double>::pointwiseCompute(
         operation, outputCpuTensor, input0Tensor, input1Tensor);
 
     GpuReferencePointwise::pointwiseCompute<float>(
@@ -87,7 +88,8 @@ TEST(TestGpuPointwiseMixedTypes, UnaryUpcast)
     inputTensor.memory().hostData();
 
     auto operation = PointwiseMode::ABS;
-    CpuReferencePointwiseImpl<float>::pointwiseCompute(operation, outputCpuTensor, inputTensor);
+    CpuReferencePointwiseImpl<float, double>::pointwiseCompute(
+        operation, outputCpuTensor, inputTensor);
 
     GpuReferencePointwise::pointwiseCompute<float>(operation, outputGpuTensor, inputTensor);
 
@@ -113,7 +115,7 @@ TEST(TestGpuPointwiseMixedTypes, UnaryDowncast)
     inputTensor.memory().hostData();
 
     auto operation = PointwiseMode::ABS;
-    CpuReferencePointwiseImpl<BFloat16Type>::pointwiseCompute(
+    CpuReferencePointwiseImpl<BFloat16Type, double>::pointwiseCompute(
         operation, outputCpuTensor, inputTensor);
 
     GpuReferencePointwise::pointwiseCompute<BFloat16Type>(operation, outputGpuTensor, inputTensor);
@@ -143,7 +145,7 @@ TEST(TestGpuPointwiseMixedTypes, BinaryMixedInputs)
     input1Tensor.memory().hostData();
 
     auto operation = PointwiseMode::ADD;
-    CpuReferencePointwiseImpl<float>::pointwiseCompute(
+    CpuReferencePointwiseImpl<float, double>::pointwiseCompute(
         operation, outputCpuTensor, input0Tensor, input1Tensor);
 
     GpuReferencePointwise::pointwiseCompute<float>(
@@ -172,7 +174,8 @@ TEST(TestGpuPointwise1DShapes, Unary)
     inputTensor.memory().hostData();
 
     auto operation = PointwiseMode::ABS;
-    CpuReferencePointwiseImpl<float>::pointwiseCompute(operation, outputCpuTensor, inputTensor);
+    CpuReferencePointwiseImpl<float, double>::pointwiseCompute(
+        operation, outputCpuTensor, inputTensor);
 
     GpuReferencePointwise::pointwiseCompute<float>(operation, outputGpuTensor, inputTensor);
 
@@ -199,7 +202,7 @@ TEST(TestGpuPointwise1DShapes, Binary)
     input1Tensor.memory().hostData();
 
     auto operation = PointwiseMode::ADD;
-    CpuReferencePointwiseImpl<float>::pointwiseCompute(
+    CpuReferencePointwiseImpl<float, double>::pointwiseCompute(
         operation, outputCpuTensor, input0Tensor, input1Tensor);
 
     GpuReferencePointwise::pointwiseCompute<float>(
@@ -225,7 +228,8 @@ TEST(TestGpuPointwise2DShapes, Unary)
     inputTensor.memory().hostData();
 
     auto operation = PointwiseMode::ABS;
-    CpuReferencePointwiseImpl<float>::pointwiseCompute(operation, outputCpuTensor, inputTensor);
+    CpuReferencePointwiseImpl<float, double>::pointwiseCompute(
+        operation, outputCpuTensor, inputTensor);
 
     GpuReferencePointwise::pointwiseCompute<float>(operation, outputGpuTensor, inputTensor);
 
@@ -252,7 +256,7 @@ TEST(TestGpuPointwise2DShapes, Binary)
     input1Tensor.memory().hostData();
 
     auto operation = PointwiseMode::ADD;
-    CpuReferencePointwiseImpl<float>::pointwiseCompute(
+    CpuReferencePointwiseImpl<float, double>::pointwiseCompute(
         operation, outputCpuTensor, input0Tensor, input1Tensor);
 
     GpuReferencePointwise::pointwiseCompute<float>(
@@ -278,7 +282,8 @@ TEST(TestGpuPointwise3DShapes, Unary)
     inputTensor.memory().hostData();
 
     auto operation = PointwiseMode::ABS;
-    CpuReferencePointwiseImpl<float>::pointwiseCompute(operation, outputCpuTensor, inputTensor);
+    CpuReferencePointwiseImpl<float, double>::pointwiseCompute(
+        operation, outputCpuTensor, inputTensor);
 
     GpuReferencePointwise::pointwiseCompute<float>(operation, outputGpuTensor, inputTensor);
 
@@ -305,7 +310,7 @@ TEST(TestGpuPointwise3DShapes, Binary)
     input1Tensor.memory().hostData();
 
     auto operation = PointwiseMode::ADD;
-    CpuReferencePointwiseImpl<float>::pointwiseCompute(
+    CpuReferencePointwiseImpl<float, double>::pointwiseCompute(
         operation, outputCpuTensor, input0Tensor, input1Tensor);
 
     GpuReferencePointwise::pointwiseCompute<float>(
@@ -334,7 +339,8 @@ TEST(TestGpuPointwise5DShapes, DISABLED_ExceedsInt32MaxElements)
     inputTensor.memory().hostData();
 
     auto operation = PointwiseMode::ABS;
-    CpuReferencePointwiseImpl<float>::pointwiseCompute(operation, outputCpuTensor, inputTensor);
+    CpuReferencePointwiseImpl<float, double>::pointwiseCompute(
+        operation, outputCpuTensor, inputTensor);
 
     GpuReferencePointwise::pointwiseCompute<float>(operation, outputGpuTensor, inputTensor);
 
@@ -423,7 +429,8 @@ TEST(TestGpuPointwiseBroadcast, Broadcast2D)
     inputTensor.memory().hostData();
 
     auto operation = PointwiseMode::ABS;
-    CpuReferencePointwiseImpl<float>::pointwiseCompute(operation, outputCpuTensor, inputTensor);
+    CpuReferencePointwiseImpl<float, double>::pointwiseCompute(
+        operation, outputCpuTensor, inputTensor);
 
     GpuReferencePointwise::pointwiseCompute<float>(operation, outputGpuTensor, inputTensor);
 
@@ -451,7 +458,7 @@ TEST(TestGpuPointwiseBroadcast, Broadcast2DImplicitLeading)
     input2Tensor.memory().hostData();
 
     auto operation = PointwiseMode::MUL;
-    CpuReferencePointwiseImpl<float>::pointwiseCompute(
+    CpuReferencePointwiseImpl<float, double>::pointwiseCompute(
         operation, outputCpuTensor, input1Tensor, input2Tensor);
 
     GpuReferencePointwise::pointwiseCompute<float>(
@@ -481,7 +488,7 @@ TEST(TestGpuPointwiseBroadcast, Broadcast3D)
     input2Tensor.memory().hostData();
 
     auto operation = PointwiseMode::MUL;
-    CpuReferencePointwiseImpl<float>::pointwiseCompute(
+    CpuReferencePointwiseImpl<float, double>::pointwiseCompute(
         operation, outputCpuTensor, input1Tensor, input2Tensor);
 
     GpuReferencePointwise::pointwiseCompute<float>(
@@ -511,7 +518,7 @@ TEST(TestGpuPointwiseBroadcast, Broadcast3DImplicitLeading)
     input2Tensor.memory().hostData();
 
     auto operation = PointwiseMode::MUL;
-    CpuReferencePointwiseImpl<float>::pointwiseCompute(
+    CpuReferencePointwiseImpl<float, double>::pointwiseCompute(
         operation, outputCpuTensor, input1Tensor, input2Tensor);
 
     GpuReferencePointwise::pointwiseCompute<float>(
@@ -541,7 +548,7 @@ TEST(TestGpuPointwiseBroadcast, Broadcast4D)
     input2Tensor.memory().hostData();
 
     auto operation = PointwiseMode::MUL;
-    CpuReferencePointwiseImpl<float>::pointwiseCompute(
+    CpuReferencePointwiseImpl<float, double>::pointwiseCompute(
         operation, outputCpuTensor, input1Tensor, input2Tensor);
 
     GpuReferencePointwise::pointwiseCompute<float>(
@@ -571,7 +578,7 @@ TEST(TestGpuPointwiseBroadcast, Broadcast5D)
     input2Tensor.memory().hostData();
 
     auto operation = PointwiseMode::MUL;
-    CpuReferencePointwiseImpl<float>::pointwiseCompute(
+    CpuReferencePointwiseImpl<float, double>::pointwiseCompute(
         operation, outputCpuTensor, input1Tensor, input2Tensor);
 
     GpuReferencePointwise::pointwiseCompute<float>(
@@ -600,7 +607,7 @@ TEST(TestGpuPointwiseRefSwishForward, WithBetaVal)
 
     auto operation = PointwiseMode::SWISH_FWD;
     const float beta = 2.0f;
-    CpuReferencePointwiseImpl<float>::pointwiseCompute(
+    CpuReferencePointwiseImpl<float, double>::pointwiseCompute(
         operation, outputCpuTensor, inputTensor, 0.f, 0.f, 0.f, beta);
 
     GpuReferencePointwise::pointwiseCompute<float>(
@@ -633,7 +640,7 @@ TEST(TestGpuPointwiseRefRELuForward, WithVals)
     const float lowerSlope = 0.1f;
 
     auto operation = PointwiseMode::RELU_FWD;
-    CpuReferencePointwiseImpl<float>::pointwiseCompute(
+    CpuReferencePointwiseImpl<float, double>::pointwiseCompute(
         operation, outputCpuTensor, inputTensor, lowerClip, upperClip, lowerSlope);
 
     GpuReferencePointwise::pointwiseCompute<float>(
@@ -675,7 +682,7 @@ TEST(TestGpuPointwiseRefRELuBackward, WithVals)
     const float lowerSlope = 0.1f;
 
     auto operation = PointwiseMode::RELU_BWD;
-    CpuReferencePointwiseImpl<float>::pointwiseCompute(
+    CpuReferencePointwiseImpl<float, double>::pointwiseCompute(
         operation, outputCpuTensor, input0Tensor, input1Tensor, lowerClip, upperClip, lowerSlope);
 
     GpuReferencePointwise::pointwiseCompute<float>(

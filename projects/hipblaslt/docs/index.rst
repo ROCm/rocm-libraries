@@ -56,6 +56,7 @@ The hipBLASLt public repository is located at `<https://github.com/ROCm/rocm-lib
     * :doc:`hipBLASLt API <./reference/api-reference>`
     * :doc:`hipBLASLtExt API <./reference/ext-reference>`
     * :doc:`hipBLASLtExt operation API <./reference/ext-ops>`
+    * :doc:`hipBLASLt experimental API <./reference/experimental-api>`
 
 To contribute to the documentation, see
 `Contributing to ROCm  <https://rocm.docs.amd.com/en/latest/contribute/contributing.html>`_.

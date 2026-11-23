@@ -8,10 +8,16 @@
 #include <unordered_set>
 #include <vector>
 
+#include <hipdnn_flatbuffers_sdk/data_objects/pointwise_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
 
 namespace hip_kernel_provider
 {
+
+void checkNormalizationActivationModeSupported(
+    const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& attributes,
+    bool isBwd,
+    const std::string& normalizationName);
 
 // --- Tensor Descriptor Value Object ---
 
