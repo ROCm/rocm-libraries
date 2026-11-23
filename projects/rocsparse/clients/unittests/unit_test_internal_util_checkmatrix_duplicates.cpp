@@ -1347,6 +1347,39 @@ TEST_F(CheckMatrixDefects, EllRejectsNonGeneral)
               rocsparse_status_success);
 }
 
+// In unsorted storage the duplicate pass runs only when the first pass found no issue, so a
+// matrix with an invalid index and a duplicate pair reports the invalid index. Sorted
+// storage finds both in one pass and can report either. The ELL matrix is 2 x 3 because
+// an ELL descriptor cannot be wider than n.
+TEST_F(CheckMatrixDefects, UnsortedFirstPassIssueWins)
+{
+    const auto general = rocsparse_matrix_type_general;
+    const auto lower   = rocsparse_fill_mode_lower;
+    const auto u_mode  = rocsparse_storage_mode_unsorted;
+    for(auto base : {rocsparse_index_base_zero, rocsparse_index_base_one})
+    {
+        SCOPED_TRACE("base " + std::to_string(base_of(base)));
+        const auto                 rows = shift_base({5, 0, 0}, base_of(base), false);
+        const auto                 cols = shift_base({0, 0, 0}, base_of(base), false);
+        const std::vector<int32_t> r32(rows.begin(), rows.end());
+        const std::vector<int32_t> c32(cols.begin(), cols.end());
+        const std::vector<int64_t> r64(rows.begin(), rows.end());
+        const std::vector<int64_t> c64(cols.begin(), cols.end());
+        expect_coo_public<float>(handle, 2, 2, rows, cols, base, general, lower, u_mode, k_idx);
+        expect_coo_spmat<float, int32_t>(
+            handle, 2, 2, r32, c32, base, general, lower, u_mode, k_idx);
+        expect_coo_spmat<float, int64_t>(
+            handle, 2, 2, r64, c64, base, general, lower, u_mode, k_idx);
+
+        const std::vector<std::vector<int>> ell_rows = {{5, 0, 0}, {1}};
+        for(bool spmat : {false, true})
+            expect_ell<float, int32_t>(
+                handle, "s", "index_and_duplicate", 2, 3, 3, ell_rows, base, u_mode, k_idx, spmat);
+        expect_ell<float, int64_t>(
+            handle, "s64", "index_and_duplicate", 2, 3, 3, ell_rows, base, u_mode, k_idx, true);
+    }
+}
+
 TEST_F(CheckMatrixDefects, HybFloat)
 {
     run_hyb<float>(handle, "s");
