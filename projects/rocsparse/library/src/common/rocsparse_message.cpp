@@ -27,7 +27,7 @@
 #include "rocsparse_debug.hpp"
 #include "rocsparse_enum_utils.hpp"
 #include "rocsparse_envariables.hpp"
-#include <map>
+#include <sstream>
 
 void rocsparse::warning_message(const char* msg_,
                                 const char* function_,

@@ -604,22 +604,25 @@ namespace
         EXPECT_TRUE(has("\"msg\"     : \"" + msg + "\" }")) << trace;
     }
 
-    __global__ void k_mark_launched(int* flag)
+    __global__ void k_count_launches(int* count)
     {
-        *flag = 1;
+        if(threadIdx.x == 0)
+        {
+            atomicAdd(count, 1);
+        }
     }
 
-    rocsparse_status return_after_launch(dim3 threads, int* flag)
+    rocsparse_status return_after_launch(dim3 threads, int* count)
     {
-        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(k_mark_launched, dim3(1), threads, 0, 0, flag);
+        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(k_count_launches, dim3(1), threads, 0, 0, count);
         return rocsparse_status_success;
     }
 
-    rocsparse_status throw_after_launch(dim3 threads, int* flag)
+    rocsparse_status throw_after_launch(dim3 threads, int* count)
     {
         try
         {
-            THROW_IF_HIPLAUNCHKERNELGGL_ERROR(k_mark_launched, dim3(1), threads, 0, 0, flag);
+            THROW_IF_HIPLAUNCHKERNELGGL_ERROR(k_count_launches, dim3(1), threads, 0, 0, count);
         }
         catch(const rocsparse_status& status)
         {
@@ -1102,63 +1105,68 @@ TEST_F(HostInternalBranches, hip_error_macros)
 // before and after the launch: a pending error is reported without launching,
 // and a rejected launch is reported after it. With debugging off neither check
 // runs, so the kernel launches past a pending error and a rejected launch
-// returns success with its error left pending.
+// returns success with its error left pending. Either way the kernel runs at
+// most once.
 TEST_F(HostInternalBranches, kernel_launch_macros)
 {
     const debug_state_guard restore;
-    device_vector<int>      flag{std::vector<int>{0}};
-    ASSERT_TRUE(flag.ptr);
+    device_vector<int>      count{std::vector<int>{0}};
+    ASSERT_TRUE(count.ptr);
 
     struct Outcome
     {
         rocsparse_status status;
         hipError_t       pending;
-        bool             launched;
+        int              launches;
     };
     // hipSetDevice(-1) leaves hipErrorInvalidDevice pending, which maps to
     // invalid_handle. A 2048-thread block is rejected, which maps to internal_error.
     const auto run = [&](rocsparse_status (*launch)(dim3, int*), bool prior_error, dim3 threads) {
-        EXPECT_EQ(hipMemset(flag.ptr, 0, sizeof(int)), hipSuccess);
+        EXPECT_EQ(hipMemset(count.ptr, 0, sizeof(int)), hipSuccess);
         (void)hipGetLastError();
         if(prior_error)
         {
             EXPECT_EQ(hipSetDevice(-1), hipErrorInvalidDevice);
         }
         Outcome outcome;
-        outcome.status  = launch(threads, flag.ptr);
+        outcome.status  = launch(threads, count.ptr);
         outcome.pending = hipGetLastError();
         EXPECT_EQ(hipDeviceSynchronize(), hipSuccess);
-        outcome.launched = to_host(flag)[0] == 1;
+        outcome.launches = to_host(count)[0];
         return outcome;
     };
 
-    for(const auto launch : {return_after_launch, throw_after_launch})
+    const std::pair<const char*, rocsparse_status (*)(dim3, int*)> launchers[]
+        = {{"RETURN_IF_HIPLAUNCHKERNELGGL_ERROR", return_after_launch},
+           {"THROW_IF_HIPLAUNCHKERNELGGL_ERROR", throw_after_launch}};
+    for(const auto& [name, launch] : launchers)
     {
+        SCOPED_TRACE(name);
         rocsparse_enable_debug_kernel_launch();
         Outcome o = run(launch, false, dim3(1));
         EXPECT_EQ(o.status, rocsparse_status_success);
         EXPECT_EQ(o.pending, hipSuccess);
-        EXPECT_TRUE(o.launched);
+        EXPECT_EQ(o.launches, 1);
 
         o = run(launch, true, dim3(1));
         EXPECT_EQ(o.status, rocsparse_status_invalid_handle);
         EXPECT_EQ(o.pending, hipSuccess);
-        EXPECT_FALSE(o.launched);
+        EXPECT_EQ(o.launches, 0);
 
         o = run(launch, false, dim3(2048));
         EXPECT_EQ(o.status, rocsparse_status_internal_error);
         EXPECT_EQ(o.pending, hipSuccess);
-        EXPECT_FALSE(o.launched);
+        EXPECT_EQ(o.launches, 0);
 
         rocsparse_disable_debug_kernel_launch();
         o = run(launch, true, dim3(1));
         EXPECT_EQ(o.status, rocsparse_status_success);
-        EXPECT_TRUE(o.launched);
+        EXPECT_EQ(o.launches, 1);
 
         o = run(launch, false, dim3(2048));
         EXPECT_EQ(o.status, rocsparse_status_success);
         EXPECT_NE(o.pending, hipSuccess);
-        EXPECT_FALSE(o.launched);
+        EXPECT_EQ(o.launches, 0);
     }
 }
 
