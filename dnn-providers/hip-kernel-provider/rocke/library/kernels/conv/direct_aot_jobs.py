@@ -727,7 +727,28 @@ FWD_WMMA_PP_RING_KNOBS = tuple(
     for pg in (1, 2)
     for tw in (16, 32)
     if (ring, ck) not in ((1, 64), (2, 128)) or wp * tp * 16 < 384
-)
+) + tuple(
+    # 64- to 192-channel blocks around the 128 x 512 tap_ring winner of the
+    # rows above (gfx1250 search, 11-23): (waves_k, waves_p, tiles_k,
+    # tiles_p, pp_groups); pp_group 2 only where it fits the VGPR budget.
+    (wk, wp, tk, tp, tw, ck, st, 2, pg)
+    for wk, wp, tk, tp, pgs in (
+        (2, 4, 4, 6, (1, 2)),
+        (2, 4, 4, 10, (1,)),
+        (2, 8, 4, 4, (1, 2)),
+        (2, 8, 4, 6, (1, 2)),
+        (4, 2, 2, 8, (1, 2)),
+        (4, 4, 2, 4, (1, 2)),
+        (1, 8, 8, 4, (1, 2)),
+        (2, 4, 6, 4, (1, 2)),
+        (2, 4, 6, 6, (1, 2)),
+        (2, 4, 6, 8, (1,)),
+        (1, 8, 4, 6, (1, 2)),
+    )
+    for ck, st in ((32, 2), (64, 2), (64, 3))
+    for pg in pgs
+    for tw in (16, 32)
+) + tuple((2, 4, 4, 8, tw, 32, 2, 2, pg) for pg in (1, 2) for tw in (16, 32))
 # Ping-pong (two wave ranks a barrier apart) on the dense stride-1 grid:
 # (waves_k, waves_p, tiles_k, tiles_p, tile_w, tile_n, ck, pp_group, sched).
 # Measured winners on gfx1250: the 240-block SDXL 40x40 layer (c#122) and the
