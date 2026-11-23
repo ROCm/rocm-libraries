@@ -3,7 +3,7 @@
 
 """Tail folding of the K tail into the TDM unroll loop (gfx1250), fixed at codegen.
 
-Every kernel whose structure allows it (16-bit inputs, TDM A/B, PGR 2, ...) folds: the unroll loop runs
+Every kernel whose structure allows it (any input type, TDM A/B, PGR 2, ...) folds: the unroll loop runs
 ceil(K/DU) iterations, the TDM K dim (shrunk at every address step) zero-fills the partial last k-tile, and
 no tail loop is emitted. Any other kernel keeps the develop tail loop. With GSU the folded k-tile count is
 distributed; each split's K dim starts at its own first k-tile (GSUC 0: interleaved, GSUC 1: contiguous).
@@ -127,15 +127,29 @@ def test_fold_no_gsu_immediate_step(tmp_path):
     assert asm.count("// TailFolding: K dim -= 128 (low half)") == _steps(asm)
 
 
-def test_fold_off_for_8bit(tmp_path):
-    # 8-bit inputs keep the tail loop for now.
+def test_fold_8bit(tmp_path):
+    # 8-bit inputs fold like 16-bit ones.
     config = _config([(k, -1) for k in ("LdsBlockSizePerPadA", "LdsBlockSizePerPadB", "LdsPadA", "LdsPadB", "LocalReadVectorWidth")])
     config["BenchmarkProblems"][0][0].update(DataType="f8", DestDataType="b")
     for p in config["BenchmarkProblems"][0][1]["ForkParameters"]:
         if "MatrixInstruction" in p:
             p["MatrixInstruction"] = [[16, 16, 64, 1, 1, 1, 1, 2, 1]]
     asm = _emit_one(tmp_path, config, "tf_f8.yaml")
-    assert "TailFold" not in asm and "label_TailLoopBeginL" in asm
+    assert CEIL in asm and "label_TailLoopBeginL" not in asm
+
+
+def test_fold_subbyte_falls_back(tmp_path):
+    # Packed sub-byte inputs (F6 here): the TDM K dim does not step in elements, so codegen falls
+    # back to the tail loop; never a reject.
+    import pathlib
+    src = pathlib.Path(__file__).resolve().parents[1] / "common" / "gemm" / "gfx12" / "f6_tdm_gfx1250.yaml"
+    config = yaml.safe_load(src.read_text())
+    config["BenchmarkProblems"] = config["BenchmarkProblems"][:1]
+    results = _emit(tmp_path, config, "tf_f6.yaml")
+    assert results
+    for _, assembly, error in results:
+        assert error == 0
+        assert CEIL not in assembly and "label_TailLoopBeginL" in assembly
 
 
 def test_fold_off_when_illegal(tmp_path):

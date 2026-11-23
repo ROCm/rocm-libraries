@@ -4437,15 +4437,15 @@ class Solution(collections.abc.Mapping):
     # Tail folding (fixed at codegen): every kernel whose structure allows it folds a K tail into the
     # unroll loop -- ceil(K/DepthU) unroll iterations, TDM zero-fills the partial last k-tile -- and
     # emits no tail loop (NoTailLoop), the way RAP folds (RAP sets its own _TailFolding above). Any
-    # other kernel keeps the tail loop -- this never rejects a kernel. 16-bit inputs only for now
-    # (8-bit and smaller: follow-up).
+    # other kernel keeps the tail loop -- this never rejects a kernel. Any input type: MX scales and
+    # sparse metadata keep the tail loop; a type whose TDM K dim does not step in elements (packed
+    # sub-byte F6/F4) falls back to the tail loop at codegen.
     if not state["ReuseAcrossPersistent"]:
       state.pop("_TailFolding", None)
       du = state["DepthU"]
       unsupported = (
         state["NoTailLoop"]                                        # no K tail to fold
         or not (state["enableTDMA"] and state["enableTDMB"])       # the K dim lives in the TDM descriptor
-        or state["ProblemType"]["DataTypeA"].numBytes() != 2 or state["ProblemType"]["DataTypeB"].numBytes() != 2
         or state["PrefetchGlobalRead"] != 2
         or isPersistent(state)                                     # DataParallel / StreamK tiles start mid-K
         or du & (du - 1) != 0
