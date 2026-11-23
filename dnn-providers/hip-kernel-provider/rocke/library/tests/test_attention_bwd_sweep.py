@@ -353,6 +353,8 @@ def test_tuning_knobs_leave_head_pack_to_the_plan():
     assert c2.tuning_knobs()["head_pack"] is True
 
 
+# Walks the whole unpruned structure space of four slices: minutes, not seconds.
+@pytest.mark.exhaustive
 def test_fallback_structure_order_is_meaningful_before_the_key():
     """Fewest arch VGPRs, then AGPRs, then the structure nearest the default,
     then LDS; the key only breaks exact ties."""
