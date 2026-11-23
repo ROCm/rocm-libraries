@@ -16,7 +16,6 @@
 #include <nlohmann/json.hpp>
 
 #include "OperationsDir.hpp"
-#include <fstream>
 #include <set>
 #include <string>
 
@@ -73,17 +72,6 @@ int64_t at(const ProblemPoint& point, const std::string& name)
     return std::get<int64_t>(point.at(name));
 }
 
-/// A shipped declaration, read as the generator reads it.
-OperationMetadata shipped(const std::string& operation)
-{
-    const auto path = hipdnn_corpus_gen::test::operationsDir() + "/" + operation + ".opmeta.json";
-    std::ifstream file(path);
-    EXPECT_TRUE(file.is_open()) << path;
-    const auto load = parseOperationMetadata(nlohmann::json::parse(file));
-    EXPECT_TRUE(load.ok()) << (load.errors.empty() ? "" : load.errors.front());
-    return load.metadata.value_or(OperationMetadata{});
-}
-
 } // namespace
 
 TEST(TestWorkloadSampling, ADrawKeepsAnArchetypesValuesTogether)
@@ -122,14 +110,12 @@ TEST(TestWorkloadSampling, EveryShippedSdpaArchetypeDrawsWhateverOrderItsKeysPar
     // follow references, not key order.
     for(const std::string operation : {"sdpa_fwd", "sdpa_bwd"})
     {
-        const auto metadata = shipped(operation);
+        const auto metadata = test::shippedOperation(operation);
         ASSERT_FALSE(metadata.archetypes.empty()) << operation;
-        ProblemPoint categorical{{"alignment", std::string{"top_left"}},
-                                 {"dtype", std::string{"bf16"}}};
-        if(metadata.find("generate_stats") != nullptr)
-        {
-            categorical["generate_stats"] = false;
-        }
+        auto categorical
+            = test::withDefaultCategoricals(metadata, ProblemPoint{{"dtype", std::string{"bf16"}}});
+        // The archetypes say whether their mask is causal.
+        categorical.erase("is_causal");
 
         std::mt19937_64 rng(4);
         for(const auto& archetype : metadata.archetypes)
@@ -151,7 +137,7 @@ TEST(TestWorkloadSampling, EveryShippedSdpaArchetypeDrawsWhateverOrderItsKeysPar
 TEST(TestWorkloadSampling, AShippedMirrorFollowsThePerturbedValueWhateverOrderItsKeysParseIn)
 {
     // Same key-order hazard for neighbourhood mirrors.
-    const auto metadata = shipped("sdpa_fwd");
+    const auto metadata = test::shippedOperation("sdpa_fwd");
     std::mt19937_64 rng(5);
     const ProblemPoint anchor{{"batch", int64_t{4}},
                               {"heads", int64_t{32}},
@@ -162,7 +148,8 @@ TEST(TestWorkloadSampling, AShippedMirrorFollowsThePerturbedValueWhateverOrderIt
                               {"is_causal", true},
                               {"alignment", std::string{"top_left"}},
                               {"dtype", std::string{"bf16"}},
-                              {"generate_stats", false}};
+                              {"generate_stats", false},
+                              {"form", std::string{"plain"}}};
 
     const std::set<int64_t> ratios{1, 2, 4, 16};
     for(int i = 0; i < 100; ++i)
@@ -467,6 +454,32 @@ TEST(TestWorkloadSampling, AMalformedDeclarationIsRefusedRatherThanQuietlyWeaken
     expectError(head + R"( "mixture": { "archetypes": 0.5, "neighbourhood": 0.0,
                                         "exploration": 0.5 } })",
                 "asks for archetype samples but none are declared");
+}
+
+TEST(TestWorkloadSampling, AShippedAnchorsHeadDimMovesAmongTheWidthsModelsUse)
+{
+    // head_dim has no scale neighbourhood: an interpolated 100 or 144 is not a shipped model.
+    const std::set<int64_t> widths{32, 40, 48, 64, 80, 96, 112, 128, 160, 192, 256};
+    for(const std::string operation : {"sdpa_fwd", "sdpa_bwd"})
+    {
+        const auto metadata = test::shippedOperation(operation);
+        std::mt19937_64 rng(8);
+        const ProblemPoint anchor{{"batch", int64_t{4}},
+                                  {"heads", int64_t{32}},
+                                  {"heads_kv", int64_t{8}},
+                                  {"seqlen_q", int64_t{2048}},
+                                  {"seqlen_k", int64_t{2048}},
+                                  {"head_dim", int64_t{128}}};
+        std::set<int64_t> seen;
+        for(int i = 0; i < 300; ++i)
+        {
+            const auto moved = detail::perturbWithinNeighbourhood(metadata, anchor, rng);
+            const auto width = at(moved, "head_dim");
+            EXPECT_EQ(widths.count(width), 1U) << operation << " moved head_dim to " << width;
+            seen.insert(width);
+        }
+        EXPECT_GE(seen.size(), 8U) << operation << " barely moves head_dim";
+    }
 }
 
 } // namespace hipdnn_corpus_gen

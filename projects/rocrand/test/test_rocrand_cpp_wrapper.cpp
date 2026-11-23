@@ -30,9 +30,11 @@
 #include <cstddef>
 #include <cstdio>
 #include <numeric>
+#include <random>
 #include <string>
 #include <tuple>
 #include <type_traits>
+#include <vector>
 
 TEST(rocrand_cpp_wrapper, rocrand_error)
 {
@@ -644,4 +646,64 @@ TEST(rocrand_cpp_wrapper, rocrand_poisson_dist_param)
 
     d3.param(d1.param());
     ASSERT_TRUE(d1.param() == d3.param());
+}
+
+////////////////////////// rocrand () operator tests //////////////////////////
+
+using OperatorParams = ::testing::Types<rocrand_cpp::philox4x32_10_engine<>,
+                                        rocrand_cpp::xorwow_engine<>,
+                                        rocrand_cpp::mrg31k3p_engine<>,
+                                        rocrand_cpp::mrg32k3a_engine<>,
+                                        rocrand_cpp::mtgp32_engine<>,
+                                        rocrand_cpp::lfsr113_engine<>,
+                                        rocrand_cpp::mt19937_engine<>,
+                                        rocrand_cpp::sobol32_engine<>,
+                                        rocrand_cpp::scrambled_sobol32_engine<>,
+                                        rocrand_cpp::sobol64_engine<>,
+                                        rocrand_cpp::scrambled_sobol64_engine<>,
+                                        rocrand_cpp::threefry2x32_20_engine<>,
+                                        rocrand_cpp::threefry2x64_20_engine<>,
+                                        rocrand_cpp::threefry4x32_20_engine<>,
+                                        rocrand_cpp::threefry4x64_20_engine<>>;
+
+template<class Engine>
+class OperatorTests : public ::testing::Test
+{
+public:
+    using engine_t                 = Engine;
+    static constexpr size_t   size = 100000;
+    static constexpr unsigned seed = 123456;
+};
+
+TYPED_TEST_SUITE(OperatorTests, OperatorParams);
+
+TYPED_TEST(OperatorTests, test_generator_operator)
+{
+    constexpr size_t size = TestFixture::size;
+    using engine_t        = typename TestFixture::engine_t;
+    using result_t        = typename engine_t::result_type;
+
+    // Host reference sample: uniform over the full range of result_t
+    std::mt19937_64                         gen(TestFixture::seed);
+    std::uniform_int_distribution<result_t> s_dis; // defaults to [0, max]
+
+    std::vector<double> expected(size);
+    for(size_t i = 0; i < size; i++)
+        expected[i] = static_cast<double>(s_dis(gen));
+
+    // Device sample through engine_t::operator()
+    result_t* d_out;
+    HIP_CHECK(hipMallocHelper(&d_out, sizeof(result_t) * size));
+
+    engine_t engine;
+    engine(d_out, size);
+    HIP_CHECK(hipDeviceSynchronize());
+
+    std::vector<result_t> h_out(size);
+    HIP_CHECK(hipMemcpy(h_out.data(), d_out, sizeof(result_t) * size, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipFree(d_out));
+
+    std::vector<double> actual(h_out.begin(), h_out.end());
+
+    ASSERT_TRUE(ks_test_2(expected, actual));
 }

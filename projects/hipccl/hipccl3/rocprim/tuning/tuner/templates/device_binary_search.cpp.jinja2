@@ -3,9 +3,14 @@
 rocprim::binary_search_config<{{ config.block_size_x }}, {{ config.ipt }}>
 {%- endblock %}
 {% block benchmark_type %}
-using benchmark_type = device_binary_search_benchmark<binary_search_subalgorithm, value_type, output_type, 10, false ,config>;
 {% endblock %}
 {% block type_definitions %}
 using value_type = {{ value_type }};
 using output_type = {{ output_type }};
+{% endblock %}
+
+{% block benchmark_queue %}
+// Match benchmark_device_binary_search.cpp: 10% needles, unsorted and sorted.
+executor.queue<device_binary_search_benchmark<{% block subalgorithm %}binary_search_subalgorithm{% endblock %}, value_type, output_type, 10, false, config>>();
+executor.queue<device_binary_search_benchmark<{{ self.subalgorithm() }}, value_type, output_type, 10, true, config>>();
 {% endblock %}
