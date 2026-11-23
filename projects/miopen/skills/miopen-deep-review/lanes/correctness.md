@@ -46,6 +46,8 @@ Read every changed line of your owned files, and the outside code each change de
   out of `projects/miopen/include/miopen/miopen.h`.
 - Dead code, unused parameters, commented-out code, unexplained magic numbers, environment switches (`MIOPEN_DECLARE_ENV_VAR_*`)
   added without a default or a documented reason.
+- Conventions from `projects/miopen/AGENTS.md` *Code Conventions*: new headers use `#pragma once`, not `#ifndef` guards; no ticket
+  IDs in code or comments unless the comment marks a workaround (`SUGGESTION`).
 - Complexity that a simpler construct in the same codebase already solves.
 
 Missing or weak tests are not findings here: hand them off to `TESTQ` (weak tests) or `TESTB` (missing coverage). Test registration in

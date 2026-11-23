@@ -309,13 +309,10 @@ if(${LINK_HIP_DEVICE_LIBS} AND NOT GRAFT_THRUST_ONTO_BINARIES)
   endif()
 endif()
 
-# Search for libhipcxx if requested (default: ON)
-if(${ROCTHRUST_USE_LIBHIPCXX})
-  find_package(libhipcxx)
-  if (NOT TARGET libhipcxx::libhipcxx)
-    message(STATUS "libhipcxx installation not found. Using deprecated rocThrust fallback implementation.  Please switch to using libhipcxx.")
-  endif()
-endif()
+# libhipcxx - hard dependency, see require_libhipcxx.cmake
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../cmake/modules")
+include(require_libhipcxx)
+hipccl_require_libhipcxx(3.4)
 
 # Test dependencies
 if(USER_BUILD_TEST OR BUILD_HIPSTDPAR_TEST)

@@ -13,6 +13,8 @@ from kernels.common._conv_implicit_gemm_common import ConvProblem
 from kernels.common import conv_winograd_gen as WG
 from kernels.common.conv_winograd_fwd import toom_cook
 
+from ._compiler_test_utils import skip_where_compiler_refuses_processor
+
 
 def _direct(x, w, p):
     n, h, wd, c = x.shape
@@ -201,9 +203,13 @@ def test_kernels_build(case):
 
     p, ay, ax = _CASES[case]
     spec = WG.WinogradGenSpec(problem=p, ax_y=WG.WinoAxis(*ay), ax_x=WG.WinoAxis(*ax))
+    built = []
     for st in WG.transform_stages(spec):
         assert min(st.grid) > 0
-        compile_kernel(st.build(spec, arch="gfx1250"), arch="gfx1250")
+        built.append(st.build(spec, arch="gfx1250"))
+    with skip_where_compiler_refuses_processor():
+        for kernel in built:
+            compile_kernel(kernel, arch="gfx1250")
 
 
 def test_k3_taps_spec():
@@ -283,7 +289,8 @@ def test_fused_builds(kw):
     from kernels.common.conv_winograd_fused_1d_wmma import build_fused_wino_1d
 
     s = _fspec(**kw)
-    compile_kernel(build_fused_wino_1d(s), arch="gfx1250")
+    with skip_where_compiler_refuses_processor():
+        compile_kernel(build_fused_wino_1d(s), arch="gfx1250")
 
 
 def _op_names(region):
@@ -314,7 +321,8 @@ def test_fused_f47_builds():
     )
     k = build_fused_wino_1d(s)
     assert any("async" in nm for nm in _op_names(k.body))
-    compile_kernel(k, arch="gfx1250")
+    with skip_where_compiler_refuses_processor():
+        compile_kernel(k, arch="gfx1250")
 
 
 @pytest.mark.parametrize(

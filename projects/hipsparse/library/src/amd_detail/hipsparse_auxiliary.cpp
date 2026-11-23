@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -73,6 +73,11 @@ hipsparseStatus_t hipsparseGetVersion(hipsparseHandle_t handle, int* version)
     if(handle == nullptr)
     {
         return HIPSPARSE_STATUS_NOT_INITIALIZED;
+    }
+
+    if(version == nullptr)
+    {
+        return HIPSPARSE_STATUS_INVALID_VALUE;
     }
 
     *version = hipsparseVersionMajor * 100000 + hipsparseVersionMinor * 100 + hipsparseVersionPatch;

@@ -1,5 +1,20 @@
 {
   "claims": {
+    "ASM_SDPA_ENGINE": [
+      {
+        "cases": [
+          "golden_1_1_128_128_bf16_causal",
+          "golden_1_1_128_128_bf16_nomask",
+          "golden_1_1_128_128_fp16_causal",
+          "golden_1_1_128_128_fp16_nomask"
+        ],
+        "support": {
+          "gfx942": [
+            "linux"
+          ]
+        }
+      }
+    ],
     "hipkernel:flydsl_sdpa_bwd_merged": [
       {
         "cases": [

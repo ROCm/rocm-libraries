@@ -169,7 +169,8 @@ namespace rocalution_unit
         return strong;
     }
 
-    // RS: j influences i if a_ij < eps min_k a_ik, for a positive diagonal
+    // RS: j influences i if a_ij < eps min_k a_ik, after scaling row i by -1 if its
+    // diagonal is negative
     template <typename T>
     std::vector<bool> rs_strength(const Csr<T>& A, double eps)
     {
@@ -177,17 +178,25 @@ namespace rocalution_unit
         std::vector<bool> strong(A.nnz());
         for(int i = 0; i < A.n; ++i)
         {
+            T sign = static_cast<T>(1);
+            for(PtrType j = A.row_offset[i]; j < A.row_offset[i + 1]; ++j)
+            {
+                if(A.col[j] == i && A.val[j] < static_cast<T>(0))
+                {
+                    sign = static_cast<T>(-1);
+                }
+            }
             T minimum = static_cast<T>(0);
             for(PtrType j = A.row_offset[i]; j < A.row_offset[i + 1]; ++j)
             {
                 if(A.col[j] != i)
                 {
-                    minimum = std::min(minimum, A.val[j]);
+                    minimum = std::min(minimum, sign * A.val[j]);
                 }
             }
             for(PtrType j = A.row_offset[i]; j < A.row_offset[i + 1]; ++j)
             {
-                strong[j] = A.col[j] != i && A.val[j] < e * minimum;
+                strong[j] = A.col[j] != i && sign * A.val[j] < e * minimum;
             }
         }
         return strong;

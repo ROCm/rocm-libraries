@@ -30,8 +30,8 @@ namespace hipdnn_frontend::compatibility::cudnn_frontend::detail::v8
 // A finalized hipDNN operation graph and its engine index space. The engine
 // space is enumerated on first use (the hipDNN heuristics need a HIP device);
 // a failed enumeration is retried on the next call. Modes A and B rerank the
-// same engines through hipDNN's ModeA/ModeB policies, each queried at most
-// once per graph.
+// same engines through hipDNN heuristic modes A and B (the ModeA/ModeB
+// policies), each queried at most once per graph.
 class GraphCore final : public RecordOf<CUDNN_BACKEND_OPERATIONGRAPH_DESCRIPTOR>
 {
 public:
@@ -170,11 +170,10 @@ private:
         return ranking.rankedIds;
     }
 
-    // A FALLBACK-mode ENGINEHEUR for `graph`, finalized, with its result
-    // configs unfinalized in rank order. A non-empty `policyOrder` selects the
-    // prediction policies, as the native frontend sends modes A and B.
+    // An ENGINEHEUR for `graph` in hipDNN heuristic mode `mode`, finalized, with
+    // its result configs unfinalized in rank order.
     static HeuristicQuery queryHeuristic(hipdnnBackendDescriptor_t graph,
-                                         const std::vector<std::int64_t>& policyOrder)
+                                         hipdnnBackendHeurMode_t mode)
     {
         using hipdnn_frontend::detail::hipdnnBackend;
 
@@ -188,23 +187,8 @@ private:
                                                          1,
                                                          static_cast<const void*>(&graph)),
                     "setting the hipDNN engine heuristic graph");
-        const hipdnnBackendHeurMode_t mode = HIPDNN_HEUR_MODE_FALLBACK;
-        checkHipdnn(hipdnnBackend()->backendSetAttribute(heuristic,
-                                                         HIPDNN_ATTR_ENGINEHEUR_MODE,
-                                                         HIPDNN_TYPE_HEUR_MODE,
-                                                         1,
-                                                         static_cast<const void*>(&mode)),
+        checkHipdnn(hipdnn_frontend::detail::setEngineHeuristicMode(heuristic, mode),
                     "setting the hipDNN engine heuristic mode");
-        if(!policyOrder.empty())
-        {
-            checkHipdnn(
-                hipdnnBackend()->backendSetAttribute(heuristic,
-                                                     HIPDNN_ATTR_ENGINEHEUR_POLICY_ORDER_EXT,
-                                                     HIPDNN_TYPE_INT64,
-                                                     static_cast<std::int64_t>(policyOrder.size()),
-                                                     static_cast<const void*>(policyOrder.data())),
-                "setting the hipDNN engine heuristic policy order");
-        }
         checkHipdnn(hipdnnBackend()->backendFinalize(heuristic),
                     "finalizing the hipDNN engine heuristic");
 
@@ -251,7 +235,7 @@ private:
         using hipdnn_frontend::detail::hipdnnBackend;
         using hipdnn_frontend::detail::ScopedHipdnnBackendDescriptor;
 
-        HeuristicQuery query = queryHeuristic(graph, {});
+        HeuristicQuery query = queryHeuristic(graph, HIPDNN_HEUR_MODE_FALLBACK);
         EngineSpace space;
         std::unordered_set<std::int64_t> seen;
         for(std::size_t i = 0; i < query.configs.size(); ++i)
@@ -294,8 +278,7 @@ private:
         {
             return space.rankedIds;
         }
-        const HeuristicQuery query
-            = queryHeuristic(graph, hipdnn_frontend::detail::heuristicPolicyOrder({mode}));
+        const HeuristicQuery query = queryHeuristic(graph, hipdnn_frontend::toBackendType(mode));
         std::vector<std::int64_t> ranked;
         ranked.reserve(space.byId.size());
         std::unordered_set<std::int64_t> seen;

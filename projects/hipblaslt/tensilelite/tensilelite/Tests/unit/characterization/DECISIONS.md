@@ -712,3 +712,10 @@ preceding validation command.
 
 **Classification:** intended command-line behavior. The three added snapshot
 fields expose one new parser default; no existing saved value was re-recorded.
+
+## D51 — Replace artificial FP32/XF32 padding snapshot inputs
+
+**ADR:** [0038](adr/0038-replace-artificial-fp32-padding-inputs.md)
+
+Replace the four arbitrary-input snapshots with Solution-derived padding
+assertions and codegen checks in `test_LdsPadding.py`; production is unchanged.

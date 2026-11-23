@@ -42,7 +42,20 @@ one to `IMPORTANT` or above, also run step 3.
      binary, run the mutant under that configuration or return `UNVERIFIED`. If none does, run no mutant: return
      `CONFIRMED` only on that link-graph evidence plus the absence of any registered test that exercises the path, and say
      in **Proof** that no mutant ran.
-4. Set the verdict and the tier you can defend; `PARTIAL` states the narrower claim.
+4. Set the verdict and the tier you can defend; `PARTIAL` states the narrower claim. A `design` finding is never `BLOCKING`
+   ([../policy.md](../policy.md) *Design findings*): a verifier who believes one must block writes it as a `VER` defect with its own
+   proof (`verify/VER<batch>.md`) and sets the design finding's tier at `IMPORTANT` at most.
+
+## Threads
+
+A finding linked to a PR thread (`LEDGER.md` *Threads*, the `Thread URL` rows of the finding;
+the thread's comments are in `pr/threads.json`) joins your batch when its thread has a new reply
+(`reply-affected.txt`). Read the reply: it can show a guard, test or document you missed, and then step 2 applies. The
+verdict follows the proof, never the reply or the thread's resolved state. When the proof
+holds and the reply argues intent (the behavior is deliberate, accepted or out of scope), keep
+the verdict and add a `Needs human decision:` line to the verify file: the question, the
+options and your recommendation. The orchestrator moves it to Open questions. Cite the thread
+URL; never quote the reply or name its author.
 
 ## Handoffs
 

@@ -108,11 +108,11 @@ bool runVariant(cudnnHandle_t handle, const Config& config, const TensorLayout& 
                                                                      problem.postPadding);
 
         sdk::Tensor<InputType> addRef(yDims, layout);
-        hipdnn_test_sdk::utilities::CpuReferencePointwiseImpl<InputType>::pointwiseCompute(
+        hipdnn_test_sdk::utilities::CpuReferencePointwiseImpl<InputType, double>::pointwiseCompute(
             hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::ADD, addRef, convRef, biasTensor);
 
         sdk::Tensor<InputType> yRef(yDims, layout);
-        hipdnn_test_sdk::utilities::CpuReferencePointwiseImpl<InputType>::pointwiseCompute(
+        hipdnn_test_sdk::utilities::CpuReferencePointwiseImpl<InputType, double>::pointwiseCompute(
             hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD, yRef, addRef);
 
         const auto tolerance = hipdnn_test_sdk::utilities::conv::getToleranceFwd<InputType>();

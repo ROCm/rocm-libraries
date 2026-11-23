@@ -21,6 +21,20 @@ class _RecordingContext:
         self.commands.append(command)
 
 
+def _stub_compiler_checks(tasks, monkeypatch, root):
+    checked = []
+
+    def compiler_check(command, **kwargs):
+        assert command[1:] == ["--version"]
+        assert Path(command[0]).parent == root / "bin"
+        assert kwargs["env"]["ROCM_PATH"] == str(root)
+        checked.append(Path(command[0]).name)
+
+    monkeypatch.setattr(tasks.subprocess, "run", compiler_check)
+    monkeypatch.setenv("ROCM_PATH", str(root))
+    return checked
+
+
 def test_build_client_configures_for_the_target_and_not_the_features(monkeypatch, tmp_path):
     """The detection path itself, not just the helper: passing the probe's answer
     straight to -DGPU_TARGETS is what failed CI, and nothing about the helper
@@ -30,16 +44,24 @@ def test_build_client_configures_for_the_target_and_not_the_features(monkeypatch
     tasks = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(tasks)
 
-    monkeypatch.setattr(tasks, "detect_gpu_arch", lambda: "gfx950:sramecc+:xnack-")
+    from tensilelite import GpuArch
+
+    root = tmp_path / "selected-rocm"
+    checked = _stub_compiler_checks(tasks, monkeypatch, root)
+
+    def detect(rocm_path):
+        assert rocm_path == root
+        return "gfx950:sramecc+:xnack-"
+
+    monkeypatch.setattr(GpuArch, "detect_gpu_arch", detect)
     context = _RecordingContext()
 
-    tasks.build_client.body(
-        context, build=False, build_dir=str(tmp_path / "build")
-    )
+    tasks.build_client.body(context, build=False, build_dir=str(tmp_path / "build"))
 
     configure = next(c for c in context.commands if c.startswith("cmake"))
     assert "-DGPU_TARGETS=gfx950" in configure
     assert "sramecc" not in configure
+    assert checked == ["amdclang", "amdclang++"]
 
 
 def test_build_client_strips_features_from_an_explicit_gpu_target(monkeypatch, tmp_path):
@@ -50,6 +72,7 @@ def test_build_client_strips_features_from_an_explicit_gpu_target(monkeypatch, t
     tasks = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(tasks)
 
+    checked = _stub_compiler_checks(tasks, monkeypatch, tmp_path / "selected-rocm")
     context = _RecordingContext()
     tasks.build_client.body(
         context,
@@ -61,3 +84,4 @@ def test_build_client_strips_features_from_an_explicit_gpu_target(monkeypatch, t
     configure = next(c for c in context.commands if c.startswith("cmake"))
     assert "-DGPU_TARGETS=gfx942" in configure
     assert "sramecc" not in configure
+    assert checked == ["amdclang", "amdclang++"]

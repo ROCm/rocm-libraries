@@ -477,23 +477,31 @@ std::optional<KernelDefinition> launchAiw(const SdpaGraphSpec& spec)
     return launchTopRanked(spec, FLYDSL_SDPA_AIW, RdnaObjectEngine::AIW, "sdpa_aiw");
 }
 
-TEST(TestGpuFlydslSdpaAiwClasses, ComputesHeadDimsPast256OnTheWideTiers)
+/// The comprehensive (nightly) tier's aiw class cases: the remainders of the tests whose
+/// standard-tier case keeps one object of a sweep, and the decode-engine cross-check at 512.
+/// TestGpuFlydslSdpaObjects launches one object per aiw form (OnePerForm) in the standard tier.
+class TestGpuFlydslSdpaAiwClassesComprehensiveTier : public ::testing::TestWithParam<int>
 {
-    SKIP_IF_NO_DEVICES();
-    struct WideCase
-    {
-        int64_t headDim;
-        SdpaMask mask;
-        DataType dataType;
-        SdpaLayout layout;
-        int64_t tier;
-    };
-    for(const auto& [headDim, mask, dataType, layout, tier] :
-        {WideCase{264, SdpaMask::TOP_LEFT_CAUSAL, DataType::BFLOAT16, SdpaLayout::BSHD, 384},
-         WideCase{384, SdpaMask::NONE, DataType::HALF, SdpaLayout::BHSD, 384},
-         WideCase{448, SdpaMask::SLIDING_WINDOW, DataType::BFLOAT16, SdpaLayout::BSHD, 512},
-         WideCase{512, SdpaMask::BOTTOM_RIGHT_CAUSAL, DataType::BFLOAT16, SdpaLayout::BSHD, 512},
-         WideCase{512, SdpaMask::NONE, DataType::HALF, SdpaLayout::BSHD, 512}})
+};
+
+INSTANTIATE_TEST_SUITE_P(Comprehensive,
+                         TestGpuFlydslSdpaAiwClassesComprehensiveTier,
+                         ::testing::Values(0),
+                         [](const ::testing::TestParamInfo<int>&) { return std::string("Sweep"); });
+
+struct WideCase
+{
+    int64_t headDim;
+    SdpaMask mask;
+    DataType dataType;
+    SdpaLayout layout;
+    int64_t tier;
+};
+
+/// The top-ranked object for each of @p cases is on its head-dim tier.
+void expectHeadDimsPast256OnTheWideTiers(std::initializer_list<WideCase> cases)
+{
+    for(const auto& [headDim, mask, dataType, layout, tier] : cases)
     {
         SCOPED_TRACE("head_dim " + std::to_string(headDim));
         SdpaGraphSpec spec;
@@ -512,22 +520,40 @@ TEST(TestGpuFlydslSdpaAiwClasses, ComputesHeadDimsPast256OnTheWideTiers)
         {
             EXPECT_EQ(intField(*top, FLYDSL_SDPA_RDNA_HEAD_DIM_MAX_FIELD), tier) << top->name;
         }
-        if(HasFatalFailure() || IsSkipped())
+        if(::testing::Test::HasFatalFailure() || ::testing::Test::IsSkipped())
         {
             return;
         }
     }
 }
 
-TEST(TestGpuFlydslSdpaAiwClasses, AddsAMaskOnTheWideTiers)
+// The 512 tier; the 384 tier is served by AddsAMaskOnTheWideTiers' head_dim 320. The other
+// widths: Comprehensive/TestGpuFlydslSdpaAiwClassesComprehensiveTier.
+TEST(TestGpuFlydslSdpaAiwClasses, ComputesHeadDimsPast256OnTheWideTiers)
 {
     SKIP_IF_NO_DEVICES();
-    // An f32 mask per head with a bottom-right causal mask at 320 (the 384 tier), one in the
-    // query's dtype at 512; then COVERAGE §5.7's mask rows on each tier: rows at the mask
-    // dtype's lowest finite value (O = mean(V), the LSE near the mask), then -inf on every
-    // key of every third row and on the first 64 keys of the others (O = 0, LSE = -inf on
-    // the rows the bound leaves no other key).
-    for(const int64_t headDim : {320, 512})
+    expectHeadDimsPast256OnTheWideTiers(
+        {WideCase{512, SdpaMask::BOTTOM_RIGHT_CAUSAL, DataType::BFLOAT16, SdpaLayout::BSHD, 512}});
+}
+
+TEST_P(TestGpuFlydslSdpaAiwClassesComprehensiveTier, ComputesTheOtherHeadDimsPast256)
+{
+    SKIP_IF_NO_DEVICES();
+    expectHeadDimsPast256OnTheWideTiers(
+        {WideCase{264, SdpaMask::TOP_LEFT_CAUSAL, DataType::BFLOAT16, SdpaLayout::BSHD, 384},
+         WideCase{384, SdpaMask::NONE, DataType::HALF, SdpaLayout::BHSD, 384},
+         WideCase{448, SdpaMask::SLIDING_WINDOW, DataType::BFLOAT16, SdpaLayout::BSHD, 512},
+         WideCase{512, SdpaMask::NONE, DataType::HALF, SdpaLayout::BSHD, 512}});
+}
+
+/// An f32 mask per head with a bottom-right causal mask at 320 (the 384 tier), one in the
+/// query's dtype at 512; then COVERAGE §5.7's mask rows on each of @p headDims's tiers: rows at
+/// the mask dtype's lowest finite value (O = mean(V), the LSE near the mask), then -inf on every
+/// key of every third row and on the first 64 keys of the others (O = 0, LSE = -inf on the
+/// rows the bound leaves no other key).
+void expectAMaskOnTheWideTiers(std::initializer_list<int64_t> headDims)
+{
+    for(const int64_t headDim : headDims)
     {
         SCOPED_TRACE("head_dim " + std::to_string(headDim));
         SdpaGraphSpec spec;
@@ -551,14 +577,27 @@ TEST(TestGpuFlydslSdpaAiwClasses, AddsAMaskOnTheWideTiers)
         spec.biasNegativeInfinityLeadingKeys = 64;
         setMask(spec, headDim == 320 ? AiwMask::QUERY_TYPE : AiwMask::F32);
         static_cast<void>(launchAiw(spec));
-        if(HasFatalFailure() || IsSkipped())
+        if(::testing::Test::HasFatalFailure() || ::testing::Test::IsSkipped())
         {
             return;
         }
     }
 }
 
-TEST(TestGpuFlydslSdpaAiwClasses, GivesTheRdnaDecodeObjectsAnswerAt512)
+// The 384 tier; head_dim 512: Comprehensive/TestGpuFlydslSdpaAiwClassesComprehensiveTier.
+TEST(TestGpuFlydslSdpaAiwClasses, AddsAMaskOnTheWideTiers)
+{
+    SKIP_IF_NO_DEVICES();
+    expectAMaskOnTheWideTiers({320});
+}
+
+TEST_P(TestGpuFlydslSdpaAiwClassesComprehensiveTier, AddsAMaskOnTheWide512Tier)
+{
+    SKIP_IF_NO_DEVICES();
+    expectAMaskOnTheWideTiers({512});
+}
+
+TEST_P(TestGpuFlydslSdpaAiwClassesComprehensiveTier, GivesTheRdnaDecodeObjectsAnswerAt512)
 {
     SKIP_IF_NO_DEVICES();
     // Equal 512/512 with one KV head is served at a decode tile by the RDNA decode engine
@@ -595,24 +634,19 @@ void expectSinkMaskObject(const std::optional<KernelDefinition>& top, AiwMask ma
         << top->name;
 }
 
-TEST(TestGpuFlydslSdpaAiwClasses, AddsASinkWithAMask)
+struct SinkMaskCase
 {
-    SKIP_IF_NO_DEVICES();
-    // A sink beside a mask per head: an f32 mask with a causal sliding window at 64 (bf16),
-    // a mask in the query's dtype with a bottom-right causal mask at 128 (f16), GQA, the
-    // LSE (which carries the sink's term).
-    struct SinkMaskCase
-    {
-        int64_t headDim;
-        DataType dataType;
-        SdpaMask mask;
-        AiwMask bias;
-    };
-    for(const auto& [headDim, dataType, mask, bias] :
-        {SinkMaskCase{64, DataType::BFLOAT16, SdpaMask::SLIDING_WINDOW, AiwMask::F32},
-         SinkMaskCase{128, DataType::HALF, SdpaMask::BOTTOM_RIGHT_CAUSAL, AiwMask::QUERY_TYPE},
-         SinkMaskCase{128, DataType::BFLOAT16, SdpaMask::NONE, AiwMask::F32},
-         SinkMaskCase{64, DataType::HALF, SdpaMask::TOP_LEFT_CAUSAL, AiwMask::QUERY_TYPE}})
+    int64_t headDim;
+    DataType dataType;
+    SdpaMask mask;
+    AiwMask bias;
+};
+
+/// A sink beside a mask per head over each of @p cases, GQA, the LSE (which carries the sink's
+/// term).
+void expectASinkWithAMask(std::initializer_list<SinkMaskCase> cases)
+{
+    for(const auto& [headDim, dataType, mask, bias] : cases)
     {
         SCOPED_TRACE("head_dim " + std::to_string(headDim) + ", " + maskName(bias));
         SdpaGraphSpec spec;
@@ -628,60 +662,91 @@ TEST(TestGpuFlydslSdpaAiwClasses, AddsASinkWithAMask)
         setMask(spec, bias);
         spec.biasDims = {1, spec.heads, spec.seqLenQ, spec.seqLenKv};
         expectSinkMaskObject(launchAiw(spec), bias);
-        if(HasFatalFailure() || IsSkipped())
+        if(::testing::Test::HasFatalFailure() || ::testing::Test::IsSkipped())
         {
             return;
         }
     }
 }
 
+// An f32 mask with a causal sliding window at 64 (bf16). The mask in the query's dtype at 128
+// (f16) and the other two cases: Comprehensive/TestGpuFlydslSdpaAiwClassesComprehensiveTier.
+TEST(TestGpuFlydslSdpaAiwClasses, AddsASinkWithAMask)
+{
+    SKIP_IF_NO_DEVICES();
+    expectASinkWithAMask(
+        {SinkMaskCase{64, DataType::BFLOAT16, SdpaMask::SLIDING_WINDOW, AiwMask::F32}});
+}
+
+TEST_P(TestGpuFlydslSdpaAiwClassesComprehensiveTier, AddsASinkWithAMaskInTheOtherDtypes)
+{
+    SKIP_IF_NO_DEVICES();
+    expectASinkWithAMask(
+        {SinkMaskCase{128, DataType::HALF, SdpaMask::BOTTOM_RIGHT_CAUSAL, AiwMask::QUERY_TYPE},
+         SinkMaskCase{128, DataType::BFLOAT16, SdpaMask::NONE, AiwMask::F32},
+         SinkMaskCase{64, DataType::HALF, SdpaMask::TOP_LEFT_CAUSAL, AiwMask::QUERY_TYPE}});
+}
+
+/// COVERAGE §5.7 with a sink and a mask together, for each (mask dtype, head_dim) of
+/// @p combinations:
+/// - rows at the mask dtype's lowest finite value on every key: their scores sit about
+///   -FLT_MAX below the sink, so the sink takes the whole softmax (O = 0, LSE = the sink),
+///   as PyTorch gives -- the kernel's max must include the sink, not overflow past it;
+/// - -inf on every key of every third row and the first 64 keys of the others, with a
+///   bottom-right diagonal: the rows the diagonal leaves no other key are keyless (O = 0,
+///   LSE = the sink);
+/// - a sink of -inf with those rows: O = 0 and LSE = -inf, not NaN;
+/// - a sink far above every score: LSE = the sink, O about 0.
+void expectASinkWithAMaskThroughTheEdgeCases(
+    std::initializer_list<std::pair<AiwMask, int64_t>> combinations)
+{
+    for(const auto& [bias, headDim] : combinations)
+    {
+        SCOPED_TRACE("head_dim " + std::to_string(headDim) + ", " + maskName(bias));
+        SdpaGraphSpec spec;
+        spec.headDim = headDim;
+        spec.heads = 4;
+        spec.kvHeads = 2;
+        spec.seqLenQ = 77;
+        // A multiple of 8: the mask's rows must stay aligned for the object's loads.
+        spec.seqLenKv = 104;
+        spec.withSink = true;
+        spec.stats = SdpaStats::LSE;
+        setMask(spec, bias);
+        spec.biasMasksRows = true;
+        expectSinkMaskObject(launchAiw(spec), bias);
+        spec.biasMasksRows = false;
+        spec.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
+        spec.biasNegativeInfinityRows = true;
+        spec.biasNegativeInfinityLeadingKeys = 64;
+        expectSinkMaskObject(launchAiw(spec), bias);
+        spec.sinkNegativeInfinity = true;
+        expectSinkMaskObject(launchAiw(spec), bias);
+        spec.sinkNegativeInfinity = false;
+        spec.biasNegativeInfinityRows = false;
+        spec.biasNegativeInfinityLeadingKeys = 0;
+        spec.sinkValue = 200.0F;
+        expectSinkMaskObject(launchAiw(spec), bias);
+        if(::testing::Test::HasFatalFailure() || ::testing::Test::IsSkipped())
+        {
+            return;
+        }
+    }
+}
+
+// The f32 mask at head_dim 64 and the query-dtype mask at 128; the other two combinations:
+// Comprehensive/TestGpuFlydslSdpaAiwClassesComprehensiveTier.
 TEST(TestGpuFlydslSdpaAiwClasses, AddsASinkWithAMaskThroughTheEdgeCases)
 {
     SKIP_IF_NO_DEVICES();
-    // COVERAGE §5.7 with a sink and a mask together, both masks' dtypes:
-    // - rows at the mask dtype's lowest finite value on every key: their scores sit about
-    //   -FLT_MAX below the sink, so the sink takes the whole softmax (O = 0, LSE = the sink),
-    //   as PyTorch gives -- the kernel's max must include the sink, not overflow past it;
-    // - -inf on every key of every third row and the first 64 keys of the others, with a
-    //   bottom-right diagonal: the rows the diagonal leaves no other key are keyless (O = 0,
-    //   LSE = the sink);
-    // - a sink of -inf with those rows: O = 0 and LSE = -inf, not NaN;
-    // - a sink far above every score: LSE = the sink, O about 0.
-    for(const auto bias : {AiwMask::F32, AiwMask::QUERY_TYPE})
-    {
-        for(const int64_t headDim : {64, 128})
-        {
-            SCOPED_TRACE("head_dim " + std::to_string(headDim) + ", " + maskName(bias));
-            SdpaGraphSpec spec;
-            spec.headDim = headDim;
-            spec.heads = 4;
-            spec.kvHeads = 2;
-            spec.seqLenQ = 77;
-            // A multiple of 8: the mask's rows must stay aligned for the object's loads.
-            spec.seqLenKv = 104;
-            spec.withSink = true;
-            spec.stats = SdpaStats::LSE;
-            setMask(spec, bias);
-            spec.biasMasksRows = true;
-            expectSinkMaskObject(launchAiw(spec), bias);
-            spec.biasMasksRows = false;
-            spec.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
-            spec.biasNegativeInfinityRows = true;
-            spec.biasNegativeInfinityLeadingKeys = 64;
-            expectSinkMaskObject(launchAiw(spec), bias);
-            spec.sinkNegativeInfinity = true;
-            expectSinkMaskObject(launchAiw(spec), bias);
-            spec.sinkNegativeInfinity = false;
-            spec.biasNegativeInfinityRows = false;
-            spec.biasNegativeInfinityLeadingKeys = 0;
-            spec.sinkValue = 200.0F;
-            expectSinkMaskObject(launchAiw(spec), bias);
-            if(HasFatalFailure() || IsSkipped())
-            {
-                return;
-            }
-        }
-    }
+    expectASinkWithAMaskThroughTheEdgeCases({{AiwMask::F32, 64}, {AiwMask::QUERY_TYPE, 128}});
+}
+
+TEST_P(TestGpuFlydslSdpaAiwClassesComprehensiveTier,
+       AddsASinkWithAMaskThroughTheEdgeCasesAtTheOtherWidths)
+{
+    SKIP_IF_NO_DEVICES();
+    expectASinkWithAMaskThroughTheEdgeCases({{AiwMask::F32, 128}, {AiwMask::QUERY_TYPE, 64}});
 }
 
 } // namespace

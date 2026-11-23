@@ -104,6 +104,8 @@ option(ROCPRIM_INSTALL "Enable installation of rocPRIM (projects embedding rocPR
 option(ROCPRIM_ENABLE_ASSERTS "Enable asserts in release build)" OFF)
 cmake_dependent_option(ROCPRIM_ENABLE_TOPK "Enable the device level topk and segmented topk algorithms" OFF BUILD_TEST ON)
 option(BUILD_OFFLOAD_COMPRESS "Build rocPRIM with offload compression" ON)
+# No-op when nested under the hipccl3 root, which declares the same option.
+option(HIPCCL_USE_LEGACY_API "Enable legacy APIs from before CCCL 3.0 parity, restored for backward compatibility" ON)
 cmake_dependent_option(USE_SYSTEM_LIB "Use installed ROCm libs when building tests" OFF BUILD_TEST OFF)
 
 check_language(HIP)

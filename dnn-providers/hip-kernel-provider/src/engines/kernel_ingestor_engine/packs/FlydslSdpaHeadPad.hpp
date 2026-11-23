@@ -765,12 +765,17 @@ public:
         }
         std::vector<IngestorKernelCode> copies;
         const auto addCopy = [&](const HeadPadOperand& operand) {
+            const int64_t gridX = (operand.planeThreads + threads - 1) / threads;
+            if(!launchAxisFits(gridX, threads))
+            {
+                throw hipdnn_plugin_sdk::HipdnnPluginException(
+                    HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                    "flydsl_sdpa head pad: the padding copy's launch exceeds the launch limits");
+            }
             auto code = buildIngestorKernelCode(_kpackLoader, context, helper, headPadSignature());
             code.setBlockSize(static_cast<unsigned int>(threads), 1, 1);
             code.setGridSize(
-                static_cast<unsigned int>((operand.planeThreads + threads - 1) / threads),
-                static_cast<unsigned int>(operand.planes),
-                1);
+                static_cast<unsigned int>(gridX), static_cast<unsigned int>(operand.planes), 1);
             copies.push_back(std::move(code));
         };
         for(const auto& input : plan.inputs)

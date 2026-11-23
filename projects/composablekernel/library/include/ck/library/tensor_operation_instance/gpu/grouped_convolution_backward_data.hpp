@@ -112,6 +112,8 @@ struct DeviceOperationInstanceFactory<
                         op_ptrs);
                     add_device_grouped_conv2d_bwd_data_wavelet_direct_load_xdl_v3_nhwgk_gkyxc_nhwgc_f16_instances(
                         op_ptrs);
+                    add_device_grouped_conv2d_bwd_data_wavelet_xdl_v3_nhwgk_gkyxc_nhwgc_f16_instances_part1(
+                        op_ptrs);
                     add_device_grouped_conv2d_bwd_data_xdl_v3_nhwgk_gkyxc_nhwgc_f16_large_tensors_instances(
                         op_ptrs);
                     add_device_grouped_conv2d_bwd_data_xdl_nhwgk_gkyxc_nhwgc_f16_instances(op_ptrs);
@@ -159,6 +161,8 @@ struct DeviceOperationInstanceFactory<
                     add_device_grouped_conv2d_bwd_data_xdl_v3_nhwgk_gkyxc_nhwgc_bf16_instances(
                         op_ptrs);
                     add_device_grouped_conv2d_bwd_data_wavelet_direct_load_xdl_v3_nhwgk_gkyxc_nhwgc_bf16_instances(
+                        op_ptrs);
+                    add_device_grouped_conv2d_bwd_data_wavelet_xdl_v3_nhwgk_gkyxc_nhwgc_bf16_instances_part1(
                         op_ptrs);
                     add_device_grouped_conv2d_bwd_data_xdl_v3_nhwgk_gkyxc_nhwgc_bf16_gfx1250_instances(
                         op_ptrs);
@@ -472,6 +476,8 @@ struct DeviceOperationInstanceFactory<
                         op_ptrs);
                     add_device_grouped_conv2d_bwd_data_wmma_v3_nhwgk_gkyxc_nhwgc_f16_16_16_instances(
                         op_ptrs);
+                    add_device_grouped_conv2d_bwd_data_wmma_v3_nhwgk_gkyxc_nhwgc_f16_instances_part1(
+                        op_ptrs);
                     add_device_grouped_conv2d_bwd_data_wmma_nhwgk_gkyxc_nhwgc_f16_instances(
                         op_ptrs);
                     add_device_grouped_conv2d_bwd_data_wmma_nhwgk_gkyxc_nhwgc_f16_1x1s1p0_instances(
@@ -488,6 +494,8 @@ struct DeviceOperationInstanceFactory<
                     add_device_grouped_conv2d_bwd_data_wmma_v3_nhwgk_gkyxc_nhwgc_bf16_large_tiles_instances(
                         op_ptrs);
                     add_device_grouped_conv2d_bwd_data_wmma_v3_nhwgk_gkyxc_nhwgc_bf16_16_16_instances(
+                        op_ptrs);
+                    add_device_grouped_conv2d_bwd_data_wmma_v3_nhwgk_gkyxc_nhwgc_bf16_instances_part1(
                         op_ptrs);
                 }
 #endif

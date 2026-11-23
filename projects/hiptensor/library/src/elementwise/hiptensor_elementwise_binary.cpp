@@ -49,7 +49,6 @@ hiptensorStatus_t hiptensorElementwiseBinaryExecute(const hiptensorHandle_t hand
 
     using hiptensor::PlancacheAutotuneMgr;
     auto& autotuneMgr = PlancacheAutotuneMgr::instance();
-    autotuneMgr->startAutotune(hiptensor::AutotuneOps::Autotune_BinaryOp);
 
     hiptensorOperationDescriptor_t    opDes      = plan->mOpDesc;
     const hiptensorTensorDescriptor_t descA      = opDes->mDescA;
@@ -142,12 +141,13 @@ hiptensorStatus_t hiptensorElementwiseBinaryExecute(const hiptensorHandle_t hand
         gammaD = hiptensor::readVal<double>(gamma, hiptensor::convertToComputeType(typeScalar));
     }
 
-    autotuneMgr->setAutotune<hiptensor::ElementwiseSolution>(
+    auto trial = autotuneMgr->setAutotune<hiptensor::ElementwiseSolution>(
         hiptensor::AutotuneOps::Autotune_BinaryOp, handle, plan);
 
     std::vector<hiptensor::ElementwiseSolution*> solutions;
-    if(plan->mPref->mSolution != nullptr)
-        solutions.push_back((hiptensor::ElementwiseSolution*)plan->mPref->mSolution);
+    // Use the trial's solution: another thread sharing this plan may update the plan's.
+    if(auto* planSolution = trial.solution())
+        solutions.push_back(planSolution);
     else
     {
         auto& instances = hiptensor::ElementwiseSolutionInstances::instance();
@@ -162,22 +162,22 @@ hiptensorStatus_t hiptensorElementwiseBinaryExecute(const hiptensorHandle_t hand
             hiptensor::ElementwiseExecutionSpaceType_t::DEVICE);
     }
 
-    bool canRun = false;
     for(auto pSolution : solutions)
     {
-        canRun = pSolution->initArgs({alphaD, gammaD},
-                                     {descA->mLengths, descC->mLengths},
-                                     {descA->mStrides, descC->mStrides},
-                                     {std::vector<int32_t>(modeA, modeA + descA->mLengths.size()),
-                                      std::vector<int32_t>(modeC, modeC + descC->mLengths.size())},
-                                     {descD->mLengths},
-                                     {descD->mStrides},
-                                     {std::vector<int32_t>(modeD, modeD + descD->mLengths.size())},
-                                     {opAC, opA, opC},
-                                     {A, C},
-                                     {D});
+        auto args
+            = pSolution->makeArgs({alphaD, gammaD},
+                                  {descA->mLengths, descC->mLengths},
+                                  {descA->mStrides, descC->mStrides},
+                                  {std::vector<int32_t>(modeA, modeA + descA->mLengths.size()),
+                                   std::vector<int32_t>(modeC, modeC + descC->mLengths.size())},
+                                  {descD->mLengths},
+                                  {descD->mStrides},
+                                  {std::vector<int32_t>(modeD, modeD + descD->mLengths.size())},
+                                  {opAC, opA, opC},
+                                  {A, C},
+                                  {D});
 
-        if(canRun)
+        if(args.mValid)
         {
             float time = 0.0f;
             // Perform elementwise binary with LOG_LEVEL_PERF_TRACE
@@ -186,23 +186,24 @@ hiptensorStatus_t hiptensorElementwiseBinaryExecute(const hiptensorHandle_t hand
                 using hiptensor::HiptensorOptions;
                 auto& options = HiptensorOptions::instance();
 
-                time = (*pSolution)(StreamConfig{
-                    stream, // stream id
-                    true, // time_kernel
-                    0, // log_level
-                    options->coldRuns(), // cold_niters
-                    options->hotRuns(), // nrepeat
-                });
+                time = pSolution->run(args,
+                                      StreamConfig{
+                                          stream, // stream id
+                                          true, // time_kernel
+                                          0, // log_level
+                                          options->coldRuns(), // cold_niters
+                                          options->hotRuns(), // nrepeat
+                                      });
                 if(time < 0)
                 {
                     return HIPTENSOR_STATUS_CK_ERROR;
                 }
 
-                auto flops = std::size_t(5) * pSolution->problemSize();
+                auto flops = std::size_t(5) * args.mSize;
                 auto bytes = (hiptensor::hiptensorDataTypeSize(descA->mType)
                               + hiptensor::hiptensorDataTypeSize(descC->mType)
                               + hiptensor::hiptensorDataTypeSize(descD->mType))
-                             * pSolution->problemSize();
+                             * args.mSize;
 
                 hiptensor::PerfMetrics metrics = {
                     pSolution->uid(), // id
@@ -226,16 +227,15 @@ hiptensorStatus_t hiptensorElementwiseBinaryExecute(const hiptensorHandle_t hand
             // Perform elementwise binary without timing
             else
             {
-                time = (*pSolution)(StreamConfig{stream, false});
+                time = pSolution->run(args, StreamConfig{stream, false});
                 if(time < 0)
                 {
                     return HIPTENSOR_STATUS_CK_ERROR;
                 }
             }
 
-            plan->mPref->mSolution = pSolution;
-            autotuneMgr->saveAutotune<hiptensor::ElementwiseSolution>(
-                hiptensor::AutotuneOps::Autotune_BinaryOp, time, handle, plan);
+            plan->mPref->mSolution.store(pSolution);
+            trial.save(pSolution, time);
 
             return HIPTENSOR_STATUS_SUCCESS;
         }

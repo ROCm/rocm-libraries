@@ -249,7 +249,7 @@ you can call the run API to launch the kernel directly.
     gemm.setProblem(1, 1, 1, 1, epilogue, inputs); // m, n, k, batch
     gemm.algoGetHeuristic(gemm, pref, heuristic);
     gemm.setMaxWorkspaceBytes(1000000);
-    gemm.initialize(heuristic[0].algo, d_workspace, stream);
+    gemm.initialize(heuristic[0].algo, d_workspace, false, stream);
     for(int i = 0; i < 10; i++)
     {
         gemm.run(stream);
@@ -484,10 +484,10 @@ Here is a simple example that shows how this API works.
     if(validIdx.size() > 1)
     {
         groupedGemm.setMaxWorkspaceBytes(1000000);
-        groupedGemm.initialize(heuristicResult[validIdx[0]].algo, d_workspace, stream);
+        groupedGemm.initialize(heuristicResult[validIdx[0]].algo, d_workspace, true, stream);
         for(int i = 0; i < 10; i++)
         {
-            groupedGemm.run(userArgs, stream);
+            groupedGemm.run(d_dUAFloat, stream);
         }
     }
 
@@ -669,7 +669,7 @@ GEMM
     if(validIdx.size() > 1)
     {
         gemm.setMaxWorkspaceBytes(1000000);
-        gemm.initialize(heuristicResult[validIdx[0]].algo, d_workspace, stream);
+        gemm.initialize(heuristicResult[validIdx[0]].algo, d_workspace, false, stream);
         for(int i = 0; i < 10; i++)
         {
             gemm.run(stream);
@@ -745,7 +745,7 @@ Grouped GEMM
     if(validIdx.size() > 1)
     {
         groupedGemm.setMaxWorkspaceBytes(1000000);
-        groupedGemm.initialize(heuristicResult[validIdx[0]].algo, d_workspace, stream);
+        groupedGemm.initialize(heuristicResult[validIdx[0]].algo, d_workspace, false, stream);
         for(int i = 0; i < 10; i++)
         {
             groupedGemm.run(stream);
@@ -899,7 +899,7 @@ In this mode, the first element is the "sum of N" in the array of Ns.
                                 gemm_count,
                                 d_dUAFloat,
                                 d_n_vec);  // d_n_vec is a device pointer with Ns
-            groupedGemm.run(userArgs, stream);
+            groupedGemm.run(d_dUAFloat, stream);
         }
     }
 

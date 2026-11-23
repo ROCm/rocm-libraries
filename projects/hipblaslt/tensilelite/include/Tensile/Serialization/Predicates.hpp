@@ -30,6 +30,7 @@
 
 #include <Tensile/AMDGPU.hpp>
 #include <Tensile/AMDGPUPredicates.hpp>
+#include <Tensile/ContractionTaskPredicates.hpp>
 #include <Tensile/Predicates.hpp>
 
 #include <tensilelitehost/export.h>

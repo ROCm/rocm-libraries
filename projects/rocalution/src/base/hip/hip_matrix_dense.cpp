@@ -439,7 +439,7 @@ namespace rocalution
             assert(this->nrow_ == hip_cast_mat->nrow_);
             assert(this->ncol_ == hip_cast_mat->ncol_);
 
-            copy_d2h(this->nnz_,
+            copy_d2d(this->nnz_,
                      this->mat_.val,
                      hip_cast_mat->mat_.val,
                      true,
@@ -589,7 +589,7 @@ namespace rocalution
 
             rocblas_status status;
 
-            ValueType beta = static_cast<ValueType>(0);
+            ValueType beta = static_cast<ValueType>(1);
 
             if(DENSE_IND_BASE == 0)
             {
@@ -684,6 +684,18 @@ namespace rocalution
         }
 
         return true;
+    }
+
+    template <typename ValueType>
+    void HIPAcceleratorMatrixDENSE<ValueType>::LUAnalyse(void)
+    {
+        // do nothing
+    }
+
+    template <typename ValueType>
+    void HIPAcceleratorMatrixDENSE<ValueType>::LUAnalyseClear(void)
+    {
+        // do nothing
     }
 
     template <typename ValueType>

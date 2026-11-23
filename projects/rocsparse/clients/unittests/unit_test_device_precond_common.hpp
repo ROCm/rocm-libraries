@@ -360,10 +360,10 @@ namespace precond_ut
     // row holds `fat` entries and every other row `band` + 1 entries
     // (r - band .. r). The longest row, `fat`, selects between the hash kernels
     // (fat <= 512) and the binary-search kernels (fat > 512). With band >= 2 the
-    // IC(0) / ILDLT(0) inner sums of the last row have several terms.
-    // `imag` adds an imaginary part to the off-diagonal entries of complex types.
+    // IC(0) / ILDLT(0) inner sums of the last row have several terms. The off-diagonal
+    // entries of complex types have an imaginary part.
     template <typename T>
-    csr_matrix<T> make_fat_row_matrix(int32_t fat, bool imag = true, int32_t band = 1)
+    csr_matrix<T> make_fat_row_matrix(int32_t fat, int32_t band = 1)
     {
         require_safe_row_length(fat);
         csr_matrix<T> a;
@@ -378,9 +378,8 @@ namespace precond_ut
                 if(c == r)
                     a.val.push_back(make_value<T>(4.0));
                 else
-                    a.val.push_back(
-                        make_value<T>(-0.05 * (1.0 + 0.1 * ((r + 2 * c) % 3)),
-                                      (imag && is_cplx<T>) ? 0.01 * ((r - c) % 3) : 0.0));
+                    a.val.push_back(make_value<T>(-0.05 * (1.0 + 0.1 * ((r + 2 * c) % 3)),
+                                                  is_cplx<T> ? 0.01 * ((r - c) % 3) : 0.0));
             }
             a.ptr.push_back(static_cast<int32_t>(a.ind.size()));
         }
@@ -390,10 +389,10 @@ namespace precond_ut
     // Lower band matrix of order n: row r holds the columns max(0, r - w) .. r, so the
     // longest row has min(n, w + 1) entries and every IC(0) / ILDLT(0) inner sum
     // runs over up to w terms. The diagonal grows with w so that the symmetric
-    // matrix (the lower triangle mirrored) stays positive definite. See make_fat_row_matrix
-    // for `imag`.
+    // matrix (the lower triangle mirrored) stays positive definite. The off-diagonal
+    // entries of complex types have an imaginary part.
     template <typename T>
-    csr_matrix<T> make_lower_band_matrix(int32_t n, int32_t w, bool imag = true)
+    csr_matrix<T> make_lower_band_matrix(int32_t n, int32_t w)
     {
         require_safe_row_length(std::min(n, w + 1));
         csr_matrix<T> a;
@@ -408,13 +407,51 @@ namespace precond_ut
                     a.val.push_back(
                         make_value<T>(1.0 + 0.15 * std::min(w, n - 1) + 0.25 * (r % 3)));
                 else
-                    a.val.push_back(
-                        make_value<T>(-0.05 * (1.0 + 0.1 * ((r + 2 * c) % 3)),
-                                      (imag && is_cplx<T>) ? 0.01 * ((r - c) % 3) : 0.0));
+                    a.val.push_back(make_value<T>(-0.05 * (1.0 + 0.1 * ((r + 2 * c) % 3)),
+                                                  is_cplx<T> ? 0.01 * ((r - c) % 3) : 0.0));
             }
             a.ptr.push_back(static_cast<int32_t>(a.ind.size()));
         }
         return a;
+    }
+
+    // Full 3 x 3 Hermitian positive definite matrix A = L * L^H with all nine entries
+    // stored (reproducer of issue #15943). With no dropped fill, IC(0) is the exact
+    // Cholesky factorization, so the factor is compared with L itself rather than with a
+    // host IC(0). The inner sums are not real for the complex types; real types drop the
+    // imaginary parts.
+    template <typename T>
+    struct cholesky_reproducer
+    {
+        csr_matrix<T>  a;
+        std::vector<T> factor; // L on and below the diagonal, A above it
+    };
+
+    template <typename T>
+    cholesky_reproducer<T> make_cholesky_reproducer()
+    {
+        using cd                       = std::complex<double>;
+        const double           s       = is_cplx<T> ? 1.0 : 0.0;
+        const cd               l[3][3] = {{cd(2.0), 0.0, 0.0},
+                            {cd(1.0, 2.0 * s), cd(3.0), 0.0},
+                            {cd(2.0, -s), cd(0.5, 0.75 * s), cd(4.0)}};
+        cholesky_reproducer<T> r;
+        r.a.n = 3;
+        r.a.ptr.push_back(0);
+        for(int32_t i = 0; i < 3; ++i)
+        {
+            for(int32_t j = 0; j < 3; ++j)
+            {
+                cd sum = 0.0;
+                for(int32_t k = 0; k < 3; ++k)
+                    sum += l[i][k] * std::conj(l[j][k]);
+                r.a.ind.push_back(j);
+                r.a.val.push_back(from_cd<T>(sum));
+                r.factor.push_back(from_cd<T>(j <= i ? l[i][j] : sum));
+            }
+            r.a.ptr.push_back(static_cast<int32_t>(r.a.ind.size()));
+        }
+        return r;
     }
 
     // ILU(0) input from a lower-triangular matrix: every stored a_ij (j < i) gets the

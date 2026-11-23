@@ -31,7 +31,8 @@ from tuner.base_tuner import BaseTuner, TunerArgs, COMMON_KEY_TYPES
 class Tuner(BaseTuner):
     @classmethod
     def _get_default_args(cls) -> TunerArgs:
-        return TunerArgs(algo_full_name="device_reduce")
+        # Match benchmark_device_reduce.cpp (512 MiB).
+        return TunerArgs(algo_full_name="device_reduce", size=512 * 1024**2)
 
     def __init__(self, args: TunerArgs):
         super().__init__(args)

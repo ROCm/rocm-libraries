@@ -346,29 +346,6 @@ void setRmsnormBackwardInitDefaults(const hipdnn_flatbuffers_sdk::data_objects::
 
 // ── Block-scale quantization ─────────────────────────────────────────────────
 
-// Largest magnitude a recipe can produce.
-float recipeMagnitude(const FillRecipe& recipe)
-{
-    if(recipe.kind == FillRecipe::Kind::FIXED)
-    {
-        return std::fabs(recipe.value);
-    }
-    if(recipe.kind == FillRecipe::Kind::VALUES && recipe.list != nullptr)
-    {
-        return std::visit(
-            [](const auto& numbers) {
-                float magnitude = 0.0f;
-                for(const auto number : numbers)
-                {
-                    magnitude = std::max(magnitude, std::fabs(static_cast<float>(number)));
-                }
-                return magnitude;
-            },
-            *recipe.list);
-    }
-    return std::max(std::fabs(recipe.lo), std::fabs(recipe.hi));
-}
-
 void setBlockScaleDequantizeInitDefaults(const hipdnn_flatbuffers_sdk::data_objects::Node& node,
                                          InputFillRecipes& recipes)
 {
@@ -385,7 +362,7 @@ void setBlockScaleDequantizeInitDefaults(const hipdnn_flatbuffers_sdk::data_obje
     // amax < 1 keeps e = 0 and peaks at 2 * amax. UE8M0 has no mantissa bits,
     // so the [0.5, 2] * 2^-e draw discretizes to three powers of two. An
     // operand in [-1, 1] gives e = 0, i.e. [0.5, 2].
-    const float amax = recipeMagnitude(recipes.fill(a->x_tensor_uid()));
+    const float amax = recipes.fill(a->x_tensor_uid()).maxMagnitude();
     const int e = amax >= 1.0f ? std::ilogb(amax) : 0;
     recipes.setDefault(a->scale_tensor_uid(),
                        FillRecipe::free(std::ldexp(0.5f, -e), std::ldexp(2.0f, -e)));

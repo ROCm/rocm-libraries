@@ -4,6 +4,7 @@
 
 import pytest
 
+from tensilelite.SolutionStructs.Naming import getSolutionNameFull
 from tensilelite.SolutionStructs.Solution import Solution
 from test_halfplr_streamk_rejects import _gp_gfx1250, _make_params  # noqa: F401
 
@@ -32,6 +33,73 @@ def _lds_configuration(sol):
             if key.startswith(("Lds", "lds", "LDSSeg"))
             or key in ("NumLdsBlk", "StoreSwapAddr", "1LDSBuffer",
                        "ExpandPointerSwap", "TDMPlusLdsBuf", "DtlPlusLdsBuf")}
+
+
+def _check_split_mxsa_addresses(sol):
+    from types import SimpleNamespace
+    from tensilelite.KernelWriterAssembly import KernelWriterAssembly
+    from tensilelite.SolutionStructs.segment_interleave import SEG
+
+    offsets = sol["LDSSegInterleaveOffsets"]
+    assert offsets["mxsSplitA"] and offsets["pairedBuffers"]
+    regions = []
+    for tc in ("A", "B", "MXSA", "MXSB"):
+        components = 1 if tc == "MXSB" else 2
+        component_stride = (offsets["mxsaStrideBytes"] if tc == "MXSA"
+                            else offsets["writeStrideBytes"])
+        size = offsets["bufferStride" + tc]
+        for phase in (0, 1):
+            for component in range(components):
+                start = offsets["ldsBase" + tc] + component * component_stride + phase * size
+                regions.append((start, start + size))
+            if tc == "MXSA":
+                base = offsets["ldsBaseMXSA"] + phase * size
+                footprint = offsets["mxsaHalfFootprintBytes"]
+                segments = [set(range((base + half * component_stride) // SEG,
+                                      (base + half * component_stride + footprint - 1) // SEG + 1))
+                            for half in (0, 1)]
+                assert segments[0].isdisjoint(segments[1])
+    regions.sort()
+    assert all(left[1] <= right[0] for left, right in zip(regions, regions[1:]))
+    assert regions[-1][1] == offsets["pairedUsedBytes"] <= sol["LdsNumBytes"]
+
+    # Execute the emitted TDM address instructions for both M components.
+    raw_half = sol["MacroTile0"] * sol["DepthU"] // sol["ProblemType"]["MXBlockA"] // 2
+    module = KernelWriterAssembly.tdmWaveLdsAddr(
+        None, sol, "MXSA", 2, raw_half, sol["LdsOffsetMXSA"],
+        sol["LdsBlockSizePerPadMXSA"], sol["LdsPadMXSA"], 80, 81)
+    for component in (0, 1):
+        registers = {"s80": component}
+        for line in str(module).splitlines():
+            code = line.partition("//")[0].strip()
+            if not code or code.startswith("/*"):
+                continue
+            op, dst, *args = code.replace(",", " ").split()
+            values = [registers[arg] if arg in registers else int(arg, 0) for arg in args]
+            if op == "s_mul_i32":
+                registers[dst] = values[0] * values[1]
+            elif op == "s_add_u32":
+                registers[dst] = values[0] + values[1]
+            else:
+                pytest.fail(f"Unsupported TDM address instruction: {line}")
+        expected = offsets["ldsBaseMXSA"] + component * offsets["mxsaStrideBytes"]
+        assert registers["s80"] == expected
+        for phase in (0, 1):
+            actual = registers["s80"] + phase * offsets["bufferStrideMXSA"]
+            assert actual + offsets["mxsaHalfFootprintBytes"] <= sol["LdsNumBytes"]
+
+    # The reader must advance through K groups inside one M half.
+    states = SimpleNamespace(inTailLoop=False, localReadDoCntA=0, localReadDoCntB=0,
+                             localReadDoCntMXSA=0, localReadDoCntMXSB=0,
+                             localReadDoCntMetadata=0)
+    writer = SimpleNamespace(do={"LocalReadMXSA": True, "LocalReadMXSB": True}, states=states)
+    for tc, rows in (("MXSA", sol["MacroTile0"] // 2), ("MXSB", sol["MacroTile1"])):
+        params = dict(tensorChar=tc, localReadInstruction=SimpleNamespace(numOffsets=1),
+                      localReadOffset=0)
+        mx_unit = sol["MatrixInstK"] // sol["ProblemType"]["MXBlock" + tc[-1]]
+        for group in range(1, sol["DepthU"] // sol["MatrixInstK"]):
+            KernelWriterAssembly.localReadInc(writer, sol, 0, params)
+            assert params["localReadOffset"] == group * rows * mx_unit
 
 
 @pytest.mark.parametrize("tile", [4, 8])
@@ -489,12 +557,10 @@ def test_streamk_pairs_unless_mx_with_shadow_init(derive, mode, mx, shadow_init,
         assert offsets["pairedUsedBytes"] <= sol["LdsNumBytes"] <= sol["MaxLDS"]
     else:
         # The paired swap masks would push these kernels past the SGPR limit.
-        # Keep unpaired buffers, with MXSA M halves inside their components.
+        # Keep unpaired buffers. The 64-byte M-half row keeps MXSA unsplit.
         assert offsets == {
-            "ldsBaseB": 8704, "writeStrideBytes": 93184, "footprintPacked": True,
-            "bBaseline": True, "ldsBaseMXSA": 8448, "ldsBaseMXSB": 101888,
-            "mxsSplitA": True, "mxsaHalfBytes": 256,
-            "mxsaHalfFootprintBytes": 256, "mxsaStrideBytes": 93184,
+            "ldsBaseB": 8448, "writeStrideBytes": 92928, "footprintPacked": True,
+            "bBaseline": True, "ldsBaseMXSA": 101376, "ldsBaseMXSB": 101888,
         }
         assert sol["StoreSwapAddr"] is False
         assert sol["LdsNumBytes"] == 235520
@@ -518,10 +584,7 @@ def test_persistent_prefetch_keeps_unpaired_interleave(derive, mode, mx, strateg
         "bBaseline": True,
     }
     if mx:
-        expected.update(ldsBaseB=8704, writeStrideBytes=93184,
-                        ldsBaseMXSA=8448, ldsBaseMXSB=101888, mxsSplitA=True,
-                        mxsaHalfBytes=256, mxsaHalfFootprintBytes=256,
-                        mxsaStrideBytes=93184)
+        expected.update(ldsBaseMXSA=101376, ldsBaseMXSB=101888)
     assert sol["LDSSegInterleaveOffsets"] == expected
     assert sol["LdsNumBytes"] == (235520 if mx else 232448)
 
@@ -581,3 +644,740 @@ def test_persistent_yaml_reaches_paired_tail_reset(problem_index):
             assert mask == f"s[sgpr{expected_mask}]", swap
         if problem_index == 2:
             assert any(reset[1].startswith("s[sgprtdmMXS") for _, reset in resets), name
+
+
+@pytest.mark.parametrize("wave_tile,width", [(7, 1), (6, 1), (6, 2)])
+@pytest.mark.parametrize("source_swap", [False, True])
+@pytest.mark.parametrize("width_b", [2, 4, 8])
+def test_contiguous_a_waves_preserve_data_writer_and_choose_native_stores(derive, wave_tile, width, source_swap, width_b):
+    overrides = dict(mi=[16, 16, 128, 1, 1, wave_tile, 8, 2, 2],
+                     VectorWidthA=width, VectorWidthB=width_b, HalfPLR=0,
+                     SourceSwap=source_swap, StoreVectorWidth=-1,
+                     StoreRemapVectorWidth=0, LDSTrInst=False,
+                     LdsPadA=16, LdsPadB=16,
+                     LdsBlockSizePerPadA=256 * width, LdsBlockSizePerPadB=256 * width_b,
+                     ProblemType={"MXBlockA": 32, "MXBlockB": 32})
+    baseline, out = derive(0, **overrides)
+    assert baseline["Valid"], out
+    assert baseline["StoreVectorWidth"] == (width if source_swap else 8 * width)
+    assert baseline["VectorWidthMXSA"] == width
+    contiguous_a, out = derive(0, WaveTileContiguousA=True, **overrides)
+    assert contiguous_a["Valid"], out
+    assert _lds_configuration(baseline) == _lds_configuration(contiguous_a)
+    assert contiguous_a["StoreVectorWidth"] == (1 if source_swap else 8)
+    assert baseline["VectorWidthA"] == contiguous_a["VectorWidthA"] == width
+    assert contiguous_a["VectorWidthMXSA"] == width
+    assert contiguous_a["VectorWidthB"] == baseline["VectorWidthB"] == width_b
+    assert contiguous_a["VectorWidthMXSB"] == baseline["VectorWidthMXSB"]
+    interleaved, out = derive(1, WaveTileContiguousA=True, **overrides)
+    assert interleaved["Valid"], out
+    assert interleaved["StoreVectorWidth"] == (1 if source_swap else 8)
+    offsets = interleaved["LDSSegInterleaveOffsets"]
+    assert offsets["pairedBuffers"]
+    assert bool(offsets.get("mxsSplitA")) is (wave_tile == 6)
+    assert offsets["pairedUsedBytes"] <= interleaved["LdsNumBytes"]
+    for phase in (0, 1):
+        starts = [offsets["ldsBaseA"] + component * offsets["writeStrideBytes"]
+                  + phase * offsets["bufferStrideA"] for component in (0, 1)]
+        size = offsets["bufferStrideA"]
+        segments = [set(range(start // 65536, (start + size - 1) // 65536 + 1))
+                    for start in starts]
+        assert segments[0].isdisjoint(segments[1])
+
+
+@pytest.mark.parametrize("tile,half_row_bytes,split", [
+    (5, 320, False), (6, 384, True), (7, 448, False), (8, 512, True), (10, 640, True),
+])
+@pytest.mark.parametrize("source_swap", [False, True])
+@pytest.mark.parametrize("dtype,depth_u", [("F8", 256), ("F4", 512)])
+def test_mxsa_split_preserves_128_byte_m_boundary(
+        derive, monkeypatch, tile, half_row_bytes, split, source_swap, dtype, depth_u):
+    import tensilelite.SolutionStructs.segment_interleave as layout
+
+    params = dict(mi=[16, 16, 128, 1, 1, tile, 2, 2, 2],
+                  SourceSwap=source_swap, VectorWidthA=1, VectorWidthB=1,
+                  HalfPLR=0, DepthU=depth_u, WaveTileContiguousA=True,
+                  LDSSegmentBRotate=1, TDMIterateMode=0,
+                  ProblemType={"DataType": dtype, "DestDataType": "S",
+                               "MXBlockA": 32, "MXBlockB": 32})
+    sol, out = derive(1, **params)
+    assert sol["Valid"], out
+    assert sol["WaveTileContiguousA"] and sol["LDSSegmentInterleave"] == 1
+    assert sol["LDSSegmentBRotate"] == 1
+    offsets = sol["LDSSegInterleaveOffsets"]
+    assert bool(offsets.get("mxsSplitA")) is split
+    assert sol["MacroTile0"] // 2 * 4 == half_row_bytes
+    if split:
+        _check_split_mxsa_addresses(sol)
+        for component in (0, 1):
+            for phase in (0, 1):
+                base = (offsets["ldsBaseMXSA"] + component * offsets["mxsaStrideBytes"]
+                        + phase * offsets["bufferStrideMXSA"])
+                assert base % 128 == 0
+    else:
+        # Fall back to the full existing layout, including A/B and both buffers.
+        monkeypatch.setattr(layout, "_mxsa_half_layout", lambda *args, **kwargs: None)
+        ordinary, out = derive(1, **params)
+        assert ordinary["Valid"], out
+        assert _lds_configuration(sol) == _lds_configuration(ordinary)
+
+
+@pytest.mark.parametrize("tile,width,half_plr", [(6, -1, 1), (6, 1, 1), (6, 2, 1),
+                                               (7, -1, 2), (7, 1, 2)])
+@pytest.mark.parametrize("source_swap", [False, True])
+@pytest.mark.parametrize("dtype,mx,depth_u,pad", [("F8", 0, 256, 16),
+                                               ("F8", 32, 256, 16),
+                                               ("F4", 32, 512, 32)])
+def test_contiguous_a_auto_padding_matches_row_padded_writer(
+        derive, tile, width, half_plr, source_swap, dtype, mx, depth_u, pad):
+    overrides = dict(mi=[16, 16, 128, 1, 1, tile, 8, 2, 2],
+                     SourceSwap=source_swap, VectorWidthA=width, VectorWidthB=4,
+                     HalfPLR=half_plr, DepthU=depth_u, WaveTileContiguousA=True,
+                     LDSSegmentBRotate=1, TDMIterateMode=0,
+                     ProblemType={"DataType": dtype, "DestDataType": "S",
+                                  "MXBlockA": mx, "MXBlockB": mx,
+                                  "DataTypeMXSA": "E8", "DataTypeMXSB": "E8"})
+    automatic, out = derive(1, **overrides)
+    assert automatic["Valid"], out
+    explicit, out = derive(1, LdsPadA=pad, LdsPadB=pad,
+                           LdsBlockSizePerPadA=256, LdsBlockSizePerPadB=1024,
+                           **overrides)
+    assert explicit["Valid"], out
+    # Each A row contains 256 bytes, including the packed FP4 cases.
+    assert automatic["LdsBlockSizePerPadA"] == 256
+    assert automatic["LdsBlockSizePerPadB"] == 1024
+    assert automatic["LdsPadA"] == automatic["LdsPadB"] == pad
+    expected_width = (2 if tile == 6 else 1) if width == -1 else width
+    assert automatic["VectorWidthA"] == expected_width
+    if mx:
+        assert automatic["VectorWidthMXSA"] == expected_width
+        assert automatic["LdsPadMXSA"] == automatic["LdsBlockSizePerPadMXSA"] == 0
+    assert _lds_configuration(automatic) == _lds_configuration(explicit)
+
+
+@pytest.mark.parametrize("width", [1, 2])
+def test_original_a_auto_padding_keeps_vector_width_stride(derive, width):
+    sol, out = derive(0, mi=[16, 16, 128, 1, 1, 6, 8, 2, 2],
+                      VectorWidthA=width, VectorWidthB=4, WaveTileContiguousA=False,
+                      TDMIterateMode=0, ProblemType={"MXBlockA": 0, "MXBlockB": 0})
+    assert sol["Valid"], out
+    assert sol["LdsBlockSizePerPadA"] == 256 * width
+    assert sol["LdsBlockSizePerPadB"] == 1024
+
+
+@pytest.mark.parametrize("iterate_mode", [-1, 0, 1, 2, 3])
+@pytest.mark.parametrize("tile,width,half_plr", [(6, -1, 1), (6, 1, 1), (6, 2, 1), (7, -1, 2)])
+@pytest.mark.parametrize("source_swap", [False, True])
+def test_contiguous_a_disables_only_a_iterate(derive, iterate_mode, tile, width, half_plr, source_swap):
+    params = dict(mi=[16, 16, 128, 1, 1, tile, 8, 2, 2],
+                  VectorWidthA=width, VectorWidthB=4, HalfPLR=half_plr,
+                  SourceSwap=source_swap, WaveTileContiguousA=True,
+                  LDSSegmentBRotate=1, ProblemType={"MXBlockA": 32, "MXBlockB": 32})
+    expected_mode = 2 if iterate_mode in (2, 3) else 0
+    if expected_mode:
+        params.update(LdsBlockSizePerPadB=2048, LdsPadB=16)
+    sol, out = derive(1, TDMIterateMode=iterate_mode, **params)
+    assert sol["Valid"], out
+    assert sol["TDMIterateMode"] == expected_mode
+    assert not sol.get("_TDMIterateModeA", False)
+    assert bool(sol.get("_TDMIterateModeB", False)) == bool(expected_mode)
+    expected_width = (2 if tile == 6 else 1) if width == -1 else width
+    assert sol["VectorWidthA"] == sol["VectorWidthMXSA"] == expected_width
+    assert sol["LdsBlockSizePerPadA"] == 256
+    reference, out = derive(1, TDMIterateMode=expected_mode, **params)
+    assert reference["Valid"], out
+    assert _lds_configuration(sol) == _lds_configuration(reference)
+    assert getSolutionNameFull(sol, False) == getSolutionNameFull(reference, False)
+
+
+@pytest.mark.parametrize("iterate_mode", [-1, 0, 1])
+def test_equal_auto_width_preserves_original_iterate_and_width_fallback(derive, iterate_mode):
+    # Auto first chooses VWA2 == WT2. Non-iterate mode then reduces VWA to 1;
+    # that fallback must not reactivate the contiguous layout.
+    params = dict(mi=[16, 16, 128, 1, 1, 2, 2, 2, 2],
+                  VectorWidthA=-1, VectorWidthB=1, DepthU=1024, HalfPLR=0,
+                  SourceSwap=False, TDMIterateMode=iterate_mode,
+                  ProblemType={"MXBlockA": 32, "MXBlockB": 32})
+    original, out = derive(0, WaveTileContiguousA=False, **params)
+    assert original["Valid"], out
+    enabled, out = derive(0, WaveTileContiguousA=True, **params)
+    assert enabled["Valid"], out
+    assert enabled["WaveTileContiguousA"] is False
+    assert enabled["VectorWidthA"] == (1 if iterate_mode == 0 else 2)
+    assert enabled._state == original._state
+    assert getSolutionNameFull(enabled, False) == getSolutionNameFull(original, False)
+
+
+@pytest.mark.parametrize("tile,width", [(4, 4), (8, 8), (4, -1), (8, -1)])
+@pytest.mark.parametrize("source_swap", [False, True])
+@pytest.mark.parametrize("dtype,mx,depth_u", [("F8", 0, 256), ("F8", 32, 256), ("F4", 32, 512)])
+def test_equal_wave_tile_width_uses_original_solution(derive, tile, width, source_swap, dtype, mx, depth_u):
+    params = dict(mi=[16, 16, 128, 1, 1, tile, 8, 2, 2],
+                  VectorWidthA=width, VectorWidthB=4, DepthU=depth_u, HalfPLR=2,
+                  SourceSwap=source_swap, TDMIterateMode=-1, LDSSegmentBRotate=1,
+                  ProblemType={"DataType": dtype, "DestDataType": "S",
+                               "MXBlockA": mx, "MXBlockB": mx,
+                               "DataTypeMXSA": "E8", "DataTypeMXSB": "E8"})
+    original, out = derive(1, WaveTileContiguousA=False, **params)
+    assert original["Valid"], out
+    enabled, out = derive(1, WaveTileContiguousA=True, **params)
+    assert enabled["Valid"], out
+    assert enabled["VectorWidthA"] == tile
+    assert enabled["WaveTileContiguousA"] is False
+    # Covers padding, scale grouping, TDM, store width, LDS placement and naming.
+    assert enabled._state == original._state
+    assert getSolutionNameFull(enabled, False) == getSolutionNameFull(original, False)
+
+
+@pytest.mark.parametrize("source_swap,mx", [(False, 0), (True, 32)])
+def test_equal_auto_width_emits_original_assembly(derive, assembler, source_swap, mx):
+    import re
+    from codegen_harness import emit_one_kernel
+    from tensilelite.Common.Types import DebugConfig
+    from tensilelite.KernelWriterAssembly import KernelWriterAssembly
+    from tensilelite.create_library.run import generateKernelObjectsFromSolutions
+
+    sources = []
+    for enabled in (False, True):
+        sol, out = derive(0, mi=[16, 16, 128, 1, 1, 2, 2, 2, 2],
+                          VectorWidthA=-1, VectorWidthB=1, HalfPLR=0,
+                          SourceSwap=source_swap, WaveTileContiguousA=enabled,
+                          ProblemType={"MXBlockA": mx, "MXBlockB": mx})
+        assert sol["Valid"], out
+        kernel, = generateKernelObjectsFromSolutions([sol])
+        name, source, error = emit_one_kernel(KernelWriterAssembly(assembler, DebugConfig()),
+                                             kernel, canonical=False)
+        assert error == 0, name
+        labels = {}
+        sources.append(re.sub(r"label_skipCBPreSignal(?:_LCL)?_[A-Za-z0-9]{16}\b",
+                              lambda match: labels.setdefault(match[0], f"label_cluster_{len(labels)}"),
+                              source))
+    assert sources[0] == sources[1]
+
+
+@pytest.mark.parametrize("tile,width", [(6, -1), (6, 2), (6, 3), (7, -1),
+                                      (8, 4), (12, 6), (16, 8)])
+@pytest.mark.parametrize("source_swap", [False, True])
+@pytest.mark.parametrize("dtype,mx,depth_u", [("F8", 0, 128), ("F8", 32, 128), ("F4", 32, 256)])
+def test_contiguous_a_retains_legal_widths(derive, tile, width, source_swap, dtype, mx, depth_u):
+    # Smaller B/DepthU keep the wider inputs inside the LDS budget.
+    params = dict(mi=[16, 16, 128, 1, 1, tile, 2, 2, 2],
+                  VectorWidthB=1, HalfPLR=0, DepthU=depth_u,
+                  SourceSwap=source_swap, WaveTileContiguousA=True,
+                  ProblemType={"DataType": dtype, "DestDataType": "S",
+                               "MXBlockA": mx, "MXBlockB": mx})
+    sol, out = derive(0, VectorWidthA=width, **params)
+    assert sol["Valid"], out
+    assert sol["WaveTileContiguousA"] is True
+    expected_width = (2 if tile == 6 else 1) if width == -1 else width
+    assert sol["VectorWidthA"] == expected_width
+    assert sol["StoreVectorWidth"] == (1 if source_swap else 8)
+    assert sol["LdsBlockSizePerPadA"] == 256
+    assert not sol.get("_TDMIterateModeA", False)
+    if mx:
+        assert sol["VectorWidthMXSA"] == expected_width
+        assert sol["LdsPadMXSA"] == sol["LdsBlockSizePerPadMXSA"] == 0
+    reference, out = derive(0, VectorWidthA=1, **params)
+    assert reference["Valid"], out
+    # Physical placement stays contiguous while the requested grouping remains
+    # in the solution and its name.
+    assert _lds_configuration(sol) == _lds_configuration(reference)
+    assert (getSolutionNameFull(sol, False) == getSolutionNameFull(reference, False)) == (expected_width == 1)
+
+
+@pytest.mark.parametrize("tile,width", [(6, 1), (6, 2), (6, 3), (8, 4), (12, 6), (16, 8)])
+@pytest.mark.parametrize("block", [64, 128, 256])
+@pytest.mark.parametrize("mode", [0, 1])
+def test_contiguous_a_scale_padding_checks_effective_scale_groups(derive, tile, width, block, mode):
+    params = dict(mi=[16, 16, 128, 1, 1, tile, 2, 2, 2],
+                  VectorWidthA=width, VectorWidthB=1, HalfPLR=0, DepthU=128,
+                  WaveTileContiguousA=True,
+                  ProblemType={"MXBlockA": 32, "MXBlockB": 32})
+    unpadded, out = derive(mode, **params)
+    assert unpadded["Valid"], out
+    assert unpadded["VectorWidthA"] == unpadded["VectorWidthMXSA"] == width
+    assert unpadded["LdsPadMXSA"] == unpadded["LdsBlockSizePerPadMXSA"] == 0
+    padded, out = derive(mode, LdsPadMXSA=16, LdsBlockSizePerPadMXSA=block, **params)
+    assert not padded["Valid"]
+    if block == 256:
+        # The reader advances two scale tiles (128 B), regardless of raw VW.
+        assert "WaveTileContiguousA" in out and "padding phase" in out
+    else:
+        assert "is not a pair the MX scale layout offers" in out
+
+
+def test_contiguous_a_scale_read_metadata_preserves_vgpr_interleave(derive, assembler):
+    from codegen_harness import emit_one_kernel
+    from rocisa.instruction import DSLoadB32
+    from tensilelite.Common.Types import DebugConfig
+    from tensilelite.KernelWriterAssembly import KernelWriterAssembly
+    from tensilelite.create_library.run import generateKernelObjectsFromSolutions
+
+    sol, out = derive(1, mi=[16, 16, 128, 1, 1, 12, 4, 2, 2],
+                      VectorWidthA=6, VectorWidthB=2, HalfPLR=1, DepthU=256,
+                      SourceSwap=True, WaveTileContiguousA=True, LDSSegmentBRotate=1,
+                      NumElementsPerBatchStore=16,
+                      ProblemType={"DataType": "F4", "DestDataType": "S",
+                                   "MXBlockA": 32, "MXBlockB": 32})
+    assert sol["Valid"], out
+    kernel, = generateKernelObjectsFromSolutions([sol])
+    writer = KernelWriterAssembly(assembler, DebugConfig())
+    name, source, error = emit_one_kernel(writer, kernel, canonical=False)
+    assert error == 0, name
+    instruction = writer.tPA["MX"]["localReadInstruction"]
+    assert instruction.getInst() is DSLoadB32
+    assert instruction.blockWidth == 1
+    assert writer.states.mxsInterleave is not None
+    scale_loads = [line for line in source.splitlines()
+                   if line.strip().startswith("ds_load_") and "v[vgprValuMXSA" in line]
+    assert scale_loads
+    assert all(line.strip().startswith("ds_load_b32 ") for line in scale_loads)
+
+
+def _execute_scale_addresses(source, serial):
+    import re
+
+    def normalized(operand):
+        operand = re.sub(r"-(?:256|512|768)\]", "]", operand)
+        return re.sub(r"((?:\+\d+)+)\]",
+                      lambda m: f"+{sum(map(int, m[1].split('+')[1:]))}]",
+                      operand).replace("+0]", "]")
+
+    registers = {}
+
+    def value(operand):
+        if "vgprSerial" in operand:
+            return serial
+        return registers[operand] if operand in registers else int(operand, 0)
+
+    for line in source.splitlines():
+        code = line.partition("//")[0].strip()
+        if not code or code.startswith("/*"):
+            continue
+        op, *args = map(normalized, code.replace(",", " ").split())
+        if op == "s_set_vgpr_msb":
+            continue
+        dst, *src = args
+        if op == "v_add_co_u32":
+            src = src[1:]
+        values = [value(s) for s in src]
+        if op in ("s_mov_b32", "v_mov_b32"):
+            result = values[0]
+        elif op in ("v_and_b32", "s_and_b32"):
+            result = values[0] & values[1]
+        elif op in ("v_xor_b32", "s_xor_b32"):
+            result = values[0] ^ values[1]
+        elif op == "v_lshrrev_b32":
+            result = values[1] >> values[0]
+        elif op == "s_lshr_b32":
+            result = values[0] >> values[1]
+        elif op == "v_lshlrev_b32":
+            result = values[1] << values[0]
+        elif op == "v_lshl_add_u32":
+            result = (values[0] << values[1]) + values[2]
+        elif op in ("v_add_u32", "v_add_nc_u32", "v_add_co_u32", "s_add_u32"):
+            result = values[0] + values[1]
+        elif op in ("v_mul_lo_u32", "s_mul_i32"):
+            result = values[0] * values[1]
+        elif op == "v_mad_u32_u24":
+            result = (values[0] & 0xffffff) * (values[1] & 0xffffff) + values[2]
+        else:
+            pytest.fail(f"Unsupported scale address instruction: {line}")
+        registers[dst] = result & 0xffffffff
+    return registers, normalized
+
+
+@pytest.mark.parametrize("tile,width", [
+    (6, 1), (6, 2), (6, 3), (7, 1), (8, 4), (12, 3), (12, 6), (16, 8),
+])
+@pytest.mark.parametrize("source_swap", [False, True])
+@pytest.mark.parametrize("dtype,depth_u", [("F8", 128), ("F4", 256)])
+@pytest.mark.parametrize("rectangular", [False, True])
+def test_contiguous_a_scale_loads_match_wmma_rows(
+        derive, assembler, monkeypatch, tile, width, source_swap, dtype, depth_u, rectangular):
+    import re
+    from codegen_harness import emit_one_kernel
+    from tensilelite.Common.Types import DebugConfig
+    from tensilelite.Components.LocalRead import LocalReadMFMA
+    from tensilelite.Components.LraTileAssignment import LraTileAssignmentMFMA
+    from tensilelite.KernelWriterAssembly import KernelWriterAssembly
+    from tensilelite.create_library.run import generateKernelObjectsFromSolutions
+
+    init, loads = {}, []
+    original_assignment = LraTileAssignmentMFMA.__call__
+
+    def assignment(self, writer, kernel, tp):
+        result = original_assignment(self, writer, kernel, tp)
+        if tp["tensorChar"] == "MXSA":
+            init.setdefault("assignment", str(result))
+        return result
+
+    monkeypatch.setattr(LraTileAssignmentMFMA, "__call__", assignment)
+    for method in ("lraFinalOffset", "lraDeclareAddresses", "lraSwapAddressesForDTLPad"):
+        original = getattr(KernelWriterAssembly, method)
+
+        def address(self, kernel, *args, _original=original, _method=method, **kwargs):
+            result = _original(self, kernel, *args, **kwargs)
+            tp = next((arg for arg in args if isinstance(arg, dict) and "tensorChar" in arg), {})
+            if tp.get("tensorChar") == "MXSA":
+                init.setdefault(_method, str(result))
+            return result
+
+        monkeypatch.setattr(KernelWriterAssembly, method, address)
+    original_read = LocalReadMFMA.localReadMX
+
+    def local_read(self, writer, kernel, buffer_idx, iui, epsi, tp):
+        result = original_read(self, writer, kernel, buffer_idx, iui, epsi, tp)
+        if tp["tensorChar"] == "MXSA":
+            loads.append((tp["localReadOffset"], str(result[0])))
+        return result
+
+    monkeypatch.setattr(LocalReadMFMA, "localReadMX", local_read)
+    sol, out = derive(1, mi=[32 if rectangular else 16, 16, 128, 1, 1, tile, 1 if rectangular else 2, 2, 2],
+                      VectorWidthA=width, VectorWidthB=1, DepthU=depth_u, HalfPLR=0,
+                      SourceSwap=source_swap, WaveTileContiguousA=True,
+                      LDSSegmentBRotate=0 if rectangular else 1, NumElementsPerBatchStore=16,
+                      LdsPadMXSA=-1, LdsBlockSizePerPadMXSA=-1,
+                      ProblemType={"DataType": dtype, "DestDataType": "S",
+                                   "MXBlockA": 32, "MXBlockB": 32})
+    assert sol["Valid"], out
+    assert sol["VectorWidthA"] == sol["VectorWidthMXSA"] == width
+    assert sol["LdsPadMXSA"] == sol["LdsBlockSizePerPadMXSA"] == 0
+    kernel, = generateKernelObjectsFromSolutions([sol])
+    writer = KernelWriterAssembly(assembler, DebugConfig())
+    name, _, error = emit_one_kernel(writer, kernel, canonical=False)
+    assert error == 0, name
+    assert len(init) == 4 and loads
+    matrix_m = sol["MatrixInstM"]
+    count = tile // 2 if matrix_m == 16 and tile % 2 == 0 else tile
+    assert writer.states.mxsa.numVgprValuPerBlock == count
+    assert writer.states.numReadsPerIterMXSA == count
+    assert writer.tPA["MX"]["localReadInstruction"].blockWidth == 1
+    source = "\n".join(init[key] for key in (
+        "assignment", "lraFinalOffset", "lraDeclareAddresses", "lraSwapAddressesForDTLPad"))
+    lane_regs = [_execute_scale_addresses(source, serial)[0] for serial in range(128)]
+    _, normalized = _execute_scale_addresses(source, 0)
+    offsets = sol["LDSSegInterleaveOffsets"]
+    split = bool(offsets.get("mxsSplitA"))
+    assert split is (matrix_m * tile * 4 % 128 == 0)
+    buffer_stride = offsets.get("bufferStrideMXSA", sol["LdsOffsetA_Blk"])
+    pad = sol["LdsPadMXSA"]
+    pad_block = sol["LdsBlockSizePerPadMXSA"]
+
+    def padded(address):
+        return address + (address // pad_block) * pad if pad_block else address
+
+    for k_offset, module in set(loads):
+        assert k_offset % (tile * matrix_m * 4) == 0
+        instructions = [line for line in module.splitlines() if line.startswith("ds_load_")]
+        assert len(instructions) == count
+        by_register = {}
+        for line in instructions:
+            assert line.startswith("ds_load_b32 ")
+            dest, addr, immediate = re.search(r" (v\[[^]]+\]), (v\[[^]]+\]) offset:(\d+)", line).groups()
+            match = re.search(r"vgprValuMXSA_X\d+_I\d+(?:\+(\d+))?", normalized(dest))
+            register = int(match[1] or 0)
+            by_register[register] = normalized(addr), int(immediate)
+        assert len(by_register) == count
+        for logical_tile in range(tile):
+            register, selector = writer.mxsTileSpanScaleSel(kernel, writer.tPA["MX"], logical_tile)
+            addr, immediate = by_register[register]
+            for wave in range(4):
+                for row_in_tile in range(matrix_m):
+                    regs = lane_regs[wave * 32 + row_in_tile + selector * 16]
+                    for phase in (0, 1):
+                        actual = regs[addr]
+                        if phase:
+                            actual ^= regs["v[vgprLocalReadSwapAddrMXSA]"]
+                        actual += immediate
+                        row = logical_tile * matrix_m + row_in_tile
+                        expected = offsets["ldsBaseMXSA"] + phase * buffer_stride
+                        if split:
+                            expected += (wave % 2) * offsets["mxsaStrideBytes"]
+                        else:
+                            row += (wave % 2) * tile * matrix_m
+                        expected += padded(k_offset + row * 4)
+                        # One dword contains the four K-block scales for this row.
+                        assert list(range(actual, actual + 4)) == list(range(expected, expected + 4))
+
+
+@pytest.mark.parametrize("tile,width", [(6, 4), (7, 2), (10, 4)])
+def test_contiguous_a_still_requires_integral_operand_groups(derive, tile, width):
+    sol, out = derive(0, mi=[16, 16, 128, 1, 1, tile, 8, 2, 2],
+                      VectorWidthA=width, WaveTileContiguousA=True, HalfPLR=0)
+    assert not sol["Valid"]
+    assert f"MIWaveTile0({tile}) should be multiple of VectorWidthA({width})" in out
+
+
+@pytest.mark.parametrize("contiguous_a", [False, True])
+def test_contiguous_a_keeps_non_iterate_padding_limit(derive, contiguous_a):
+    sol, out = derive(0, mi=[16, 16, 128, 1, 1, 6, 8, 2, 2],
+                      VectorWidthA=2, VectorWidthB=4, HalfPLR=1,
+                      WaveTileContiguousA=contiguous_a, TDMIterateMode=1,
+                      LdsBlockSizePerPadA=2048, LdsPadA=16)
+    if contiguous_a:
+        assert not sol["Valid"]
+        assert sol["TDMIterateMode"] == 0
+        assert "LdsBlockSizePerPadA=2048" in out and "pad_interval" in out
+        assert "WaveTileContiguousA disables A iterate" in out
+    else:
+        assert sol["Valid"], out
+        assert sol["TDMIterateMode"] == 1
+        assert sol["_TDMIterateModeA"]
+
+
+@pytest.mark.parametrize("mode", [0, 1])
+def test_contiguous_a_scale_padding_phase_must_match_component_writer(derive, mode):
+    # Without splitting, Wave1 starts at byte384 in a 768-byte scale component.
+    # M-half splitting removes that base offset, but the 384-byte K step still
+    # does not preserve the padding phase required by the reader.
+    overrides = dict(mi=[16, 16, 128, 1, 1, 6, 8, 2, 2],
+                     VectorWidthA=1, VectorWidthB=8, HalfPLR=0,
+                     StoreRemapVectorWidth=0, LDSTrInst=False,
+                     LdsBlockSizePerPadMXSA=256, LdsPadMXSA=16,
+                     ProblemType={"MXBlockA": 32, "MXBlockB": 32})
+    baseline, out = derive(0, **overrides)
+    assert baseline["Valid"], out
+    contiguous_a, out = derive(mode, WaveTileContiguousA=True, **overrides)
+    assert not contiguous_a["Valid"]
+    assert "WaveTileContiguousA" in out and "padding phase" in out
+
+
+@pytest.mark.parametrize("tile,width,half_plr", [(6, 1, 1), (6, 2, 1), (7, 1, 2)])
+@pytest.mark.parametrize("width_b,rotate", [(2, 0), (2, 1), (4, 0), (4, 1), (8, 0)])
+@pytest.mark.parametrize("source_swap", [False, True])
+def test_contiguous_a_with_original_b_and_rotate(derive, tile, width, half_plr, width_b, rotate, source_swap):
+    sol, out = derive(1, mi=[16, 16, 128, 1, 1, tile, 8, 2, 2],
+                      SourceSwap=source_swap, VectorWidthA=width, VectorWidthB=width_b,
+                      HalfPLR=half_plr, WaveTileContiguousA=True,
+                      LDSSegmentBRotate=rotate, LdsPadA=16, LdsPadB=16,
+                      LdsBlockSizePerPadA=256, LdsBlockSizePerPadB=1024,
+                      TDMIterateMode=0, ProblemType={"MXBlockA": 0, "MXBlockB": 0})
+    assert sol["Valid"], out
+    offsets = sol["LDSSegInterleaveOffsets"]
+    assert offsets["pairedBuffers"]
+    assert not offsets.get("aBaseline") and not offsets.get("bBaseline")
+    assert sol["StoreVectorWidth"] == (1 if source_swap else 8)
+    assert sol["VectorWidthB"] == width_b
+    if rotate:
+        from tensilelite.SolutionStructs.segment_interleave import b_rotate_reason
+        assert b_rotate_reason(sol._state) is None
+
+
+@pytest.mark.parametrize("source_swap,store_width,valid", [
+    (False, 1, True), (False, 2, True), (False, 4, True), (False, 8, True),
+    (False, 16, False), (True, 1, True), (True, 2, False),
+])
+def test_contiguous_a_store_width_is_explicit_and_lane_local(derive, source_swap, store_width, valid):
+    sol, out = derive(1, mi=[16, 16, 128, 1, 1, 6, 8, 2, 2],
+                      SourceSwap=source_swap, VectorWidthA=2, VectorWidthB=4,
+                      HalfPLR=1, WaveTileContiguousA=True,
+                      StoreVectorWidth=store_width, LDSSegmentBRotate=1,
+                      LdsPadA=16, LdsPadB=16,
+                      LdsBlockSizePerPadA=256, LdsBlockSizePerPadB=1024,
+                      TDMIterateMode=0, ProblemType={"MXBlockA": 0, "MXBlockB": 0})
+    assert bool(sol["Valid"]) == valid, out
+    assert sol["StoreVectorWidth"] == store_width
+    if not valid:
+        assert "WaveTileContiguousA requires StoreVectorWidth" in out
+        assert "for direct stores" in out
+
+
+@pytest.mark.parametrize("source_swap", [False, True])
+@pytest.mark.parametrize("case", ["compact", "data-parallel", "stream-k", "int8"])
+def test_contiguous_a_preserves_supported_execution_paths(
+        _gp_gfx1250, gfx1250_iim, assembler, capsys, source_swap, case):
+    integer = case == "int8"
+    params = _make_params(
+        gfx1250_iim, mi=[16, 16, 64 if integer else 128, 1, 1, 6, 8, 2, 2],
+        GlobalSplitU=1, SourceSwap=source_swap, VectorWidthA=1, VectorWidthB=4,
+        HalfPLR=1, WaveTileContiguousA=True, TDMIterateMode=0,
+        LDSSegmentInterleave=0 if integer else 1, CompactLoopStore=case == "compact",
+        ProblemType={"DataType": "I8" if integer else "F8",
+                     "DestDataType": "I" if integer else "F8",
+                     "ComputeDataType": "I" if integer else "S"})
+    params.pop("StreamK")
+    strategy = {"data-parallel": "DataParallel", "stream-k": "StreamK"}.get(case, "None")
+    params.update(TileProcessingStrategy=strategy, WorkAssignment="StaticGrid")
+    sol = Solution(params, False, True, False, assembler, gfx1250_iim)
+    assert sol["Valid"], capsys.readouterr().out
+    assert sol["WaveTileContiguousA"]
+    assert sol["TileProcessingStrategy"] == strategy
+    assert sol["CompactLoopStore"] == (case == "compact")
+    assert sol["ProblemType"]["ComputeDataType"].isInt32() == integer
+    assert not sol["PostLoopStoreInNll"]
+
+
+@pytest.mark.parametrize("contiguous", [False, True])
+def test_contiguous_a_gradient_scalar_e_uses_loaded_half(derive, assembler, contiguous):
+    import re
+    from codegen_harness import emit_one_kernel
+    from tensilelite.Common.Types import DebugConfig
+    from tensilelite.KernelWriterAssembly import KernelWriterAssembly
+    from tensilelite.create_library.run import generateKernelObjectsFromSolutions
+
+    sol, out = derive(int(contiguous), mi=[16, 16, 32, 1, 1, 6, 8, 2, 2],
+                      DepthU=128, VectorWidthA=1, VectorWidthB=4, HalfPLR=1,
+                      SourceSwap=True, WaveTileContiguousA=contiguous,
+                      NumElementsPerBatchStore=16, GroupLoadStore=False,
+                      ProblemType={"DataType": "H", "DestDataType": "H",
+                                   "Gradient": True, "UseE": True, "DataTypeE": "H",
+                                   "Activation": True, "ActivationType": "hipblaslt_all"})
+    assert sol["Valid"], out
+    assert sol["StoreVectorWidth"] == 1
+    kernel, = generateKernelObjectsFromSolutions([sol])
+    writer = KernelWriterAssembly(assembler, DebugConfig())
+    name, source, error = emit_one_kernel(writer, kernel, canonical=False)
+    assert error == 0, name
+    loads = [line for line in source.splitlines() if "// load E" in line]
+    conversions = [line for line in source.splitlines()
+                   if "v_cvt_f32_f16" in line and "gwvw 1, elementIdx" in line]
+    assert loads and conversions
+    assert all("buffer_load_d16_b16 " in line for line in loads)
+    # Every scalar E load targets the low half, including odd batch elements.
+    assert any("elementIdx 1" in line for line in conversions)
+    assert all(re.search(r"\.l\s*//", line) for line in conversions)
+
+
+@pytest.mark.parametrize("overrides,reason", [
+    ({"VectorWidthB": 8, "LDSSegmentBRotate": 1}, "MIWaveTile[1]/VectorWidthB must be even"),
+    ({"ProblemType": {"MXBlockA": 32, "MXBlockB": 32, "MXBlockFreeA": 2}},
+     "2D MX scale for A supports MXBlockFreeA 128 only, got 2"),
+])
+def test_contiguous_a_rejects_unimplemented_combinations(derive, overrides, reason):
+    params = dict(mi=[16, 16, 128, 1, 1, 6, 8, 2, 2], SourceSwap=False,
+                  VectorWidthA=1, VectorWidthB=4, HalfPLR=1,
+                  WaveTileContiguousA=True, TDMIterateMode=0,
+                  LdsPadA=16, LdsPadB=16, LdsBlockSizePerPadA=256,
+                  LdsBlockSizePerPadB=1024, ProblemType={"MXBlockA": 0, "MXBlockB": 0})
+    params.update(overrides)
+    sol, out = derive(1, **params)
+    assert not sol["Valid"], out
+    assert reason in out
+
+
+@pytest.mark.parametrize("tile,width,half_plr", [(6, -1, 1), (6, 1, 1), (6, 2, 1),
+                                               (7, -1, 2), (7, 1, 2)])
+@pytest.mark.parametrize("source_swap", [False, True])
+@pytest.mark.parametrize("dtype,depth_u,pad", [("F8", 256, 16), ("F4", 512, 32)])
+def test_contiguous_a_mx_selects_scale_layout_and_preserves_b_rotate(derive, tile, width, half_plr,
+                                                                  source_swap, dtype, depth_u, pad):
+    overrides = dict(mi=[16, 16, 128, 1, 1, tile, 8, 2, 2],
+                     SourceSwap=source_swap, VectorWidthA=width, VectorWidthB=4,
+                     HalfPLR=half_plr, WaveTileContiguousA=True,
+                     LdsPadA=pad, LdsPadB=pad, DepthU=depth_u,
+                     LdsBlockSizePerPadA=256, LdsBlockSizePerPadB=1024,
+                     TDMIterateMode=0,
+                     ProblemType={"DataType": dtype, "DestDataType": "S",
+                                  "MXBlockA": 32, "MXBlockB": 32,
+                                  "DataTypeMXSA": "E8", "DataTypeMXSB": "E8"})
+    reference, out = derive(1, LDSSegmentBRotate=0, **overrides)
+    assert reference["Valid"], out
+    rotated, out = derive(1, LDSSegmentBRotate=1, **overrides)
+    assert rotated["Valid"], out
+    # BRotate changes reader deltas; the TDM writer and allocation stay fixed.
+    writer_keys = [key for key in reference._state if key.startswith("Lds")]
+    assert {key: reference[key] for key in writer_keys} == {
+        key: rotated[key] for key in writer_keys}
+    reference_offsets = reference["LDSSegInterleaveOffsets"]
+    offsets = rotated["LDSSegInterleaveOffsets"]
+    for key in ("ldsBaseA", "ldsBaseB", "ldsBaseMXSA", "ldsBaseMXSB",
+                "bufferStrideA", "bufferStrideB", "bufferStrideMXSA", "bufferStrideMXSB",
+                "writeStrideBytes", "pairedUsedBytes"):
+        assert reference_offsets[key] == offsets[key]
+    assert bool(offsets.get("mxsSplitA")) is (tile == 6)
+    if tile == 6:
+        _check_split_mxsa_addresses(rotated)
+    assert offsets["pairedUsedBytes"] <= rotated["LdsNumBytes"] <= rotated["MaxLDS"]
+    assert rotated["StoreVectorWidth"] == (1 if source_swap else 8)
+    # A scales pair consecutive tiles; B keeps its VWB4 scale group.
+    from tensilelite.Components.LocalRead import LocalReadMFMA
+    expected_width = (2 if tile == 6 else 1) if width == -1 else width
+    assert rotated["VectorWidthA"] == rotated["VectorWidthMXSA"] == expected_width
+    assert rotated["VectorWidthMXSB"] == 4
+    caps = {"HasWMMA_V3": True}
+    scale_a = LocalReadMFMA.getMxsTileSpanInfo(rotated, "MXSA", 0, caps)
+    assert scale_a == ({"vectorWidth": 1, "numGroups": 3} if tile == 6 else None)
+    assert LocalReadMFMA.getMxsTileSpanInfo(rotated, "MXSB", 1, caps) == {
+        "vectorWidth": 4, "numGroups": 1}
+    from tensilelite.SolutionStructs.segment_interleave import b_rotate_reason
+    assert b_rotate_reason(rotated._state) is None
+
+
+@pytest.mark.parametrize("source_swap", [False, True])
+def test_mxsa_split_preserves_b_rotate_encoding_across_segment_boundary(derive, source_swap):
+    sol, out = derive(
+        1, mi=[16, 16, 128, 1, 1, 6, 8, 2, 2],
+        SourceSwap=source_swap, VectorWidthA=1, VectorWidthB=4,
+        HalfPLR=1, DepthU=512, WaveTileContiguousA=True, LDSSegmentBRotate=1,
+        LdsPadA=128, LdsPadB=64, LdsBlockSizePerPadA=256, LdsBlockSizePerPadB=1024,
+        TDMIterateMode=0,
+        ProblemType={"DataType": "F4", "DestDataType": "S", "MXBlockA": 32, "MXBlockB": 32})
+    assert sol["Valid"], out
+    _check_split_mxsa_addresses(sol)
+    offsets = sol["LDSSegInterleaveOffsets"]
+    # MXSA pushes the component past 64 KiB; B keeps its A/B-only read encoding.
+    ab_bytes = offsets["bufferStrideA"] + offsets["bufferStrideB"]
+    assert ab_bytes == 64512
+    assert ab_bytes + offsets["mxsaHalfBytes"] > 65536
+    assert offsets["readStrideBytesB"] == 65536
+    assert offsets["writeStrideBytes"] != offsets["readStrideBytesB"]
+    from tensilelite.SolutionStructs.segment_interleave import b_rotate_reason
+    assert b_rotate_reason(sol._state) is None
+
+
+@pytest.mark.parametrize("source_swap", [False, True])
+def test_contiguous_a_mxsa_split_budget_keeps_auto_fallback_intact(derive, source_swap):
+    params = dict(mi=[16, 16, 128, 1, 1, 6, 8, 2, 2],
+                  SourceSwap=source_swap, VectorWidthA=1, VectorWidthB=4,
+                  HalfPLR=0, DepthU=128, WaveTileContiguousA=True,
+                  TDMIterateMode=0,
+                  ProblemType={"MXBlockA": 32, "MXBlockB": 32})
+    ordinary, out = derive(0, **params)
+    assert ordinary["Valid"], out
+    forced, out = derive(1, **params)
+    assert forced["Valid"], out
+    assert forced["LDSSegInterleaveOffsets"]["mxsSplitA"]
+    assert forced["LdsNumBytes"] > ordinary["LdsNumBytes"]
+    params["MaxLDS"] = ordinary["LdsNumBytes"]
+    automatic, out = derive(-1, **params)
+    assert automatic["Valid"], out
+    assert automatic["LDSSegmentInterleave"] == 0
+    assert _lds_configuration(automatic) == _lds_configuration(ordinary)
+    for mode, rotate in ((1, 0), (1, 1), (-1, 1)):
+        rejected, out = derive(mode, LDSSegmentBRotate=rotate, **params)
+        assert not rejected["Valid"]
+        if mode == 1:
+            assert "requires paired LDS placement: layout exceeds MaxLDS" in out
+        else:
+            assert "LDSSegmentBRotate: needs LDSSegmentInterleave=1" in out
+
+
+@pytest.mark.parametrize("source_swap,tile,width,depth_u,half_plr,mt", [
+    (False, [10, 4], -1, 256, 1, (640, 128)),
+    (True, [10, 4], -1, 512, 1, (320, 256)),
+    (True, [10, 4], -1, 256, 1, (320, 256)),
+    (False, [4, 10], 2, 512, 1, (256, 320)),
+    (False, [4, 10], 2, 256, 1, (256, 320)),
+    (True, [4, 10], 2, 256, 2, (128, 640)),
+])
+@pytest.mark.parametrize("mode", [0, 1])
+@pytest.mark.parametrize("mx_block,scale_type", [(16, "F8"), (32, "E8"), (128, "E8")])
+def test_contiguous_a_rectangular_mxf4_derivation(derive, source_swap, tile, width, depth_u, half_plr, mt, mode, mx_block, scale_type):
+    sol, out = derive(mode, mi=[32, 16, 128, 1, 1, *tile, 2, 2],
+                      VectorWidthA=width, VectorWidthB=2, DepthU=depth_u, HalfPLR=half_plr,
+                      SourceSwap=source_swap, WaveTileContiguousA=True,
+                      LDSSegmentBRotate=0, ClusterDim=[4, 4], ClusterAIDMapping=-2,
+                      ProblemType={"DataType": "F4", "DestDataType": "F8",
+                                   "MXBlockA": mx_block, "MXBlockB": mx_block,
+                                   "DataTypeMXSA": scale_type, "DataTypeMXSB": scale_type})
+    if mx_block == 16 and depth_u == 512:
+        assert not sol["Valid"]
+        assert "exceeds MaxLDS" in out or "bytes of LDS" in out
+        return
+    assert sol["Valid"], out
+    assert sol["WaveTileContiguousA"]
+    assert sol["LDSSegmentInterleave"] == mode
+    assert sol["StoreVectorWidth"] == (1 if source_swap else 8)
+    assert (sol["MacroTile0"], sol["MacroTile1"]) == mt
+    assert sol["LdsNumBytes"] <= sol["MaxLDS"]

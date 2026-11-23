@@ -2,7 +2,10 @@
 // SPDX-License-Identifier:  MIT
 
 #include <cstdio>
+#include <functional>
 #include <gtest/gtest.h>
+#include <ostream>
+#include <string>
 
 #include "core/Context.hpp"
 #include "core/Handle.hpp"
@@ -103,3 +106,82 @@ TEST_F(TestResamplePlanBuilder, GetCustomKnobsReturnsEmpty)
     auto knobs = _planBuilder.getCustomKnobs(_dummyHandle, graph);
     EXPECT_TRUE(knobs.empty());
 }
+
+// ============================================================================
+// Attributes the kernel reads or writes: a graph that changes them is declined
+// ============================================================================
+
+namespace
+{
+using hipdnn_flatbuffers_sdk::data_objects::GraphT;
+
+struct ResampleFwdMutation
+{
+    std::string name;
+    std::function<void(GraphT&)> mutate;
+};
+
+std::ostream& operator<<(std::ostream& os, const ResampleFwdMutation& value)
+{
+    return os << value.name;
+}
+
+flatbuffers::FlatBufferBuilder mutatedResampleFwdGraph(const std::function<void(GraphT&)>& mutate)
+{
+    auto base = hipdnn_test_sdk::utilities::createValidResampleFwdGraph(true);
+    return hipdnn_test_sdk::utilities::mutateGraph(base, mutate);
+}
+
+void setVirtual(GraphT& graph, int64_t uid)
+{
+    for(auto& tensor : graph.tensors)
+    {
+        if(tensor->uid == uid)
+        {
+            tensor->virtual_ = true;
+        }
+    }
+}
+} // namespace
+
+class TestResampleFwdDecline : public TestResamplePlanBuilder,
+                               public ::testing::WithParamInterface<ResampleFwdMutation>
+{
+};
+
+TEST_F(TestResamplePlanBuilder, IsApplicableReturnsTrueForMaxpoolWithGeneratedIndex)
+{
+    auto builder = mutatedResampleFwdGraph([](GraphT&) {});
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_TRUE(_planBuilder.isApplicable(_dummyHandle, graph));
+}
+
+TEST_P(TestResampleFwdDecline, IsApplicableReturnsFalse)
+{
+    auto builder = mutatedResampleFwdGraph(GetParam().mutate);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_FALSE(_planBuilder.isApplicable(_dummyHandle, graph));
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    Mutations,
+    TestResampleFwdDecline,
+    ::testing::Values(
+        ResampleFwdMutation{"GenerateIndexFalseWithIndexTensor",
+                            [](GraphT& g) {
+                                g.nodes.at(0)->attributes.AsResampleFwdAttributes()->generate_index
+                                    = false;
+                            }},
+        ResampleFwdMutation{
+            "GenerateIndexUnsetWithIndexTensor",
+            [](GraphT& g) {
+                g.nodes.at(0)->attributes.AsResampleFwdAttributes()->generate_index.reset();
+            }},
+        ResampleFwdMutation{"VirtualX", [](GraphT& g) { setVirtual(g, 1); }},
+        ResampleFwdMutation{"VirtualY", [](GraphT& g) { setVirtual(g, 2); }},
+        ResampleFwdMutation{"VirtualIndex", [](GraphT& g) { setVirtual(g, 3); }}),
+    [](const ::testing::TestParamInfo<ResampleFwdMutation>& info) { return info.param.name; });

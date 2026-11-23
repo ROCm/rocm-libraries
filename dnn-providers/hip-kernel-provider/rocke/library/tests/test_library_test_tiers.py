@@ -30,6 +30,7 @@ from ._attention_bwd_counted_cases import (
     require_explicit_gate_entrypoint,
     selected_isa_arch,
 )
+from ._child_pytest import pin_child_rootdir
 from ._explicit_gate_policy import (
     configured_selection_is_partial,
     preflight_is_disabled,
@@ -318,6 +319,7 @@ def test_environment_plugin_cannot_filter_direct_gate(tmp_path):
     ("-W", "--pythonwarnings"),
 )
 def test_gate_warning_options_are_not_selection_filters(warning_arg, tmp_path):
+    pin_child_rootdir(tmp_path)
     gate = tmp_path / _EXPECTED_GATES["counted-structural"].name
     gate.write_text("def test_selected_name():\n    pass\n", encoding="utf-8")
     environment = dict(os.environ)
@@ -788,6 +790,7 @@ def test_fresh_file_timeout_names_the_file_and_uses_bounded_runner(
 def test_affordable_collection_excludes_resource_integrations(tmp_path, monkeypatch):
     suite = tmp_path / "suite"
     suite.mkdir()
+    pin_child_rootdir(suite)
     (suite / "test_fast.py").write_text("def test_fast():\n    pass\n")
     (suite / "test_worker.py").write_text(
         "import pytest\n@pytest.mark.worker_integration\ndef test_worker():\n    pass\n"
@@ -813,6 +816,7 @@ def test_file_lane_reports_all_files_and_fails_on_one_failure(
 ):
     suite = tmp_path / "suite"
     suite.mkdir()
+    pin_child_rootdir(suite)
     (suite / "test_pass.py").write_text("def test_pass():\n    pass\n")
     (suite / "test_fail.py").write_text(
         "def test_fail():\n    assert False, 'expected failure'\n"
@@ -837,6 +841,7 @@ def test_file_lane_reports_all_files_and_fails_on_one_failure(
 
 @pytest.mark.worker_integration
 def test_worker_child_imports_the_exact_parent_rocke_package(tmp_path):
+    pin_child_rootdir(tmp_path)
     expected = Path(rocke.__file__).resolve()
     test_file = tmp_path / "test_package_identity.py"
     test_file.write_text(
@@ -854,6 +859,7 @@ def test_worker_child_imports_the_exact_parent_rocke_package(tmp_path):
 @pytest.mark.worker_integration
 @pytest.mark.skipif(not Path("/proc").is_dir(), reason="Linux process-group contract")
 def test_worker_normal_exit_cleans_up_owned_group_children(tmp_path):
+    pin_child_rootdir(tmp_path)
     child_pid = tmp_path / "child.pid"
     test_file = tmp_path / "test_child.py"
     test_file.write_text(
@@ -1243,6 +1249,7 @@ def test_gate_cannot_report_green_without_a_pytest_session(monkeypatch, capsys):
     not Path("/proc").is_dir(), reason="Linux process-liveness contract"
 )
 def test_runner_sigterm_kills_owned_group_children(tmp_path):
+    pin_child_rootdir(tmp_path)
     child_pid = tmp_path / "child.pid"
     worker = tmp_path / "test_worker.py"
     worker.write_text(

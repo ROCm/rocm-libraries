@@ -3,6 +3,7 @@
 
 from invoke.exceptions import Exit
 from invoke.tasks import task
+import dataclasses
 import os
 import pathlib
 import shlex
@@ -12,10 +13,9 @@ import sys
 
 _TASKS_DIR = pathlib.Path(__file__).parent.resolve()
 
-# Architecture detection, steppings included, lives in the packaged TensileLite tree
-# (invoke-free) so CI test artifacts can exercise it directly; these @task
-# wrappers only expose it on the invoke command line.
-from tensilelite.GpuArch import cmake_gpu_target, detect_gpu_arch
+# Task discovery and client-path must work before the generator is installed.
+# Import GPU helpers only inside the tasks that need the generator.
+from _tensilelite_client_binding import built_client_path as _built_client_path
 
 
 def _cmake_bool(value):
@@ -29,14 +29,16 @@ def _cmake_gpu_targets(spec):
     ``cmake_gpu_target`` so ``gfx942:sramecc+:xnack-`` (what tox forwards from
     an unstripped probe) becomes ``gfx942``.
     """
-    return ",".join(
-        cmake_gpu_target(part.strip()) for part in spec.split(",") if part.strip()
-    )
+    from tensilelite.GpuArch import cmake_gpu_target
+
+    return ",".join(cmake_gpu_target(part.strip()) for part in spec.split(",") if part.strip())
 
 
-def _resolve_gpu_targets(spec):
+def _resolve_gpu_targets(spec, build_env=None):
     if spec is None:
-        detected = detect_gpu_arch()
+        from tensilelite.GpuArch import detect_gpu_arch
+
+        detected = detect_gpu_arch(rocm_path=build_env.root) if build_env else detect_gpu_arch()
         if not detected:
             return None, None
         return detected, _cmake_gpu_targets(detected)
@@ -54,9 +56,11 @@ def _detect_rocm():
 
     if shutil.which("rocm-sdk"):
         try:
-            result = subprocess.check_output(
-                ["rocm-sdk", "path", "--root"], stderr=subprocess.DEVNULL
-            ).decode().strip()
+            result = (
+                subprocess.check_output(["rocm-sdk", "path", "--root"], stderr=subprocess.DEVNULL)
+                .decode()
+                .strip()
+            )
             if result:
                 return result
         except subprocess.CalledProcessError:
@@ -65,8 +69,89 @@ def _detect_rocm():
     return "/opt/rocm"
 
 
+@dataclasses.dataclass(frozen=True)
+class RocmBuildEnvironment:
+    """One selected ROCm installation for every native configure of a task.
+
+    The selected root supplies the compilers, ``ROCM_PATH`` and the CMake search
+    prefix together, so neither an inherited CMake preset (``/opt/rocm``) nor an
+    ambient ``ROCM_PATH`` can mix a second installation into the build, and the
+    client's recorded build ROCm (``tensilelite-client --build-rocm``) is the ROCm
+    rocisa was built against too.
+    """
+
+    root: pathlib.Path
+    cmake_prefix: pathlib.Path
+    c_compiler: pathlib.Path
+    cxx_compiler: pathlib.Path
+    source: str
+
+    def cmake_args(self, *, prefix: bool = True) -> list:
+        args = [f"-DROCM_PATH={self.root}"]
+        if prefix:
+            args.append(f"-DCMAKE_PREFIX_PATH={self.cmake_prefix}")
+        args += [
+            f"-DCMAKE_C_COMPILER={self.c_compiler}",
+            f"-DCMAKE_CXX_COMPILER={self.cxx_compiler}",
+        ]
+        return args
+
+    def command_env(self, base=None) -> dict:
+        """A subprocess environment naming the selected root; never os.environ itself."""
+        env = dict(os.environ if base is None else base)
+        env["ROCM_PATH"] = str(self.root)
+        return env
+
+
+def _rocm_tool(root: pathlib.Path, name: str) -> pathlib.Path:
+    """A tool from the selected root: ``<root>/bin``, else ``<root>/lib/llvm/bin``."""
+    for directory in (root / "bin", root / "lib" / "llvm" / "bin"):
+        candidate = directory / name
+        if candidate.exists():
+            return candidate
+    return root / "bin" / name
+
+
+def _resolve_rocm_build_environment(rocm_path=None) -> RocmBuildEnvironment:
+    """Select one ROCm root: ``--rocm-path``, then ``ROCM_PATH``, then a default.
+
+    The default is ``rocm-sdk path --root`` when that command exists, then
+    ``/opt/rocm`` -- the existing ``_detect_rocm`` fallback, kept until the Python
+    ROCm SDK model replaces it. A set but empty ``ROCM_PATH`` is an error rather
+    than a silent fallback.
+    """
+    if rocm_path:
+        root, source = pathlib.Path(rocm_path), "--rocm-path"
+    elif "ROCM_PATH" in os.environ:
+        value = os.environ["ROCM_PATH"]
+        if not value.strip():
+            raise Exit(
+                "ROCM_PATH is set but empty; set it to a ROCm installation or pass " "--rocm-path.",
+                code=1,
+            )
+        root, source = pathlib.Path(value), "ROCM_PATH"
+    else:
+        detected = _detect_rocm()
+        root = pathlib.Path(detected)
+        source = "/opt/rocm" if detected == "/opt/rocm" else "rocm-sdk path --root"
+    root = root.expanduser().absolute()
+    return RocmBuildEnvironment(
+        root=root,
+        cmake_prefix=root,
+        c_compiler=_rocm_tool(root, "amdclang"),
+        cxx_compiler=_rocm_tool(root, "amdclang++"),
+        source=source,
+    )
+
+
+def _report_rocm_build_environment(build_env):
+    print(f"Using ROCm at {build_env.root} (from {build_env.source})")
+
+
 @task
 def get_gpu_arch(c):
+    from tensilelite.GpuArch import cmake_gpu_target, detect_gpu_arch
+
     detected = detect_gpu_arch()
     if detected:
         print(cmake_gpu_target(detected))
@@ -76,12 +161,10 @@ def get_gpu_arch(c):
     help={
         "rocisa_dir": "Path to the rocisa source directory (default: rocisa/ next to this file).",
         "static": "Build rocisa's source StinkyTofu dependency static instead of shared.",
-        "stinkytofu": "Install the standalone stinkytofu Python binding (provides `import stinkytofu` for the logical-IR tooling). One of auto|on|off (default auto: install when a gfx1250 GPU is detected).",
-        "rebuild_stinkytofu": "Force a fresh rebuild+reinstall of the stinkytofu binding even if it is already installed.",
+        "rocm_path": "ROCm installation used to build rocisa (default: ROCM_PATH, then rocm-sdk path --root, then /opt/rocm).",
     }
 )
-def rocisa(c, rocisa_dir=None, static=False,
-           stinkytofu="auto", rebuild_stinkytofu=False):
+def rocisa(c, rocisa_dir=None, static=False, rocm_path=None):
     """Install rocisa editably for source development.
 
     This is a separate rocisa developer workflow for generator commands and
@@ -92,132 +175,57 @@ def rocisa(c, rocisa_dir=None, static=False,
     Pass --static to build its source StinkyTofu dependency static — useful for
     exercising the static-plugin path covered by
     rocisa/test/test_pass_plugin.py::TestHelloWorldPassIntegrationStatic.
-
-    On gfx1250 this also builds and installs the standalone stinkytofu Python
-    binding, which provides `import stinkytofu` for the logical-IR tooling
-    (control with --stinkytofu=auto|on|off). `import rocisa` itself is always
-    the native backend.
     """
-    _pip_install_rocisa(c, rocisa_dir, shared=not static)
-    if _want_stinkytofu(stinkytofu):
-        _pip_install_stinkytofu(c, force=rebuild_stinkytofu)
+    build_env = _resolve_rocm_build_environment(rocm_path)
+    _report_rocm_build_environment(build_env)
+    _install_rocisa(c, build_env, rocisa_dir, static)
 
 
-def _load_stinkytofu_tasks():
-    """Import shared/stinkytofu/tasks.py without triggering its venv guard.
+def _install_rocisa(c, build_env, rocisa_dir=None, static=False):
+    _pip_install_rocisa(c, rocisa_dir, shared=not static, build_env=build_env)
 
-    The venv check was moved into build() so this import is side-effect-free.
+
+def _pip_install_rocisa(c, rocisa_dir=None, shared=True, rocm_path=None, build_env=None):
+    """Editable-install rocisa via scikit-build-core.
+
+    The selected root supplies ``ROCM_PATH`` and the compilers. No
+    ``CMAKE_PREFIX_PATH`` is passed: scikit-build-core sets that itself (its
+    site-packages entry is how nanobind is found), and rocisa's CMakeLists.txt
+    appends ``ROCM_PATH`` to it ahead of ``/opt/rocm``.
     """
-    import importlib.util
-    spec = importlib.util.spec_from_file_location(
-        "stinkytofu_tasks",
-        _TASKS_DIR.parent.parent.parent / "shared" / "stinkytofu" / "tasks.py",
-    )
-
-
-def _pip_install_rocisa(c, rocisa_dir=None, shared=True):
-    """Editable-install rocisa via scikit-build-core."""
     src = pathlib.Path(rocisa_dir).resolve() if rocisa_dir else _TASKS_DIR / "rocisa"
-    rocm = _detect_rocm()
+    build_env = build_env or _resolve_rocm_build_environment(rocm_path)
 
-    cmake_args = (
-        f"-DROCM_PATH={rocm}"
-        f" -DBUILD_SHARED_LIBS={_cmake_bool(shared)}"
-        f" -DROCISA_INCLUDE_BUILD_INFO=ON"
-        f" -DROCISA_BUILD_HELLOWORLD_STATIC_PLUGIN=ON"
-    )
+    cmake_args = [
+        *build_env.cmake_args(prefix=False),
+        f"-DBUILD_SHARED_LIBS={_cmake_bool(shared)}",
+        "-DROCISA_INCLUDE_BUILD_INFO=ON",
+        "-DROCISA_BUILD_HELLOWORLD_STATIC_PLUGIN=ON",
+    ]
     if shutil.which("ccache"):
-        cmake_args += " -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache"
-    env = dict(os.environ, CMAKE_ARGS=cmake_args)
+        cmake_args += [
+            "-DCMAKE_C_COMPILER_LAUNCHER=ccache",
+            "-DCMAKE_CXX_COMPILER_LAUNCHER=ccache",
+        ]
+    # scikit-build-core splits CMAKE_ARGS with shlex.
+    env = build_env.command_env()
+    env["CMAKE_ARGS"] = shlex.join(cmake_args)
     env.setdefault("CMAKE_BUILD_PARALLEL_LEVEL", str(os.cpu_count() or 1))
-    c.run(f"pip install --no-build-isolation -e {shlex.quote(str(src))}", env=env)
-
-
-def _want_stinkytofu(stinkytofu, targets=None):
-    """Resolve the tri-state ``--stinkytofu`` option (auto/on/off) to a bool.
-
-    ``auto`` installs the standalone stinkytofu binding when gfx1250 is present
-    -- among ``targets`` when given, otherwise on the detected GPU.
-    ``on``/``off`` force the decision.
-    """
-    val = str(stinkytofu).strip().lower()
-    if val in ("on", "true", "yes", "1"):
-        return True
-    if val in ("off", "false", "no", "0"):
-        return False
-    if val in ("auto", "none", ""):
-        arch = targets if targets is not None else (detect_gpu_arch() or "")
-        return "gfx1250" in arch
-    raise Exit(f"Invalid stinkytofu mode {stinkytofu!r}; use auto, on, or off", code=1)
-
-
-def _pip_install_stinkytofu(c, force=False):
-    """Build and install the standalone stinkytofu Python binding into the venv.
-
-    This provides ``import stinkytofu`` (the standalone ``_stinkytofu.so`` built
-    from ``shared/stinkytofu/python_module``) for the logical-IR tooling. Neither
-    ``invoke rocisa`` (which only builds rocisa's *in-process* libstinkytofu,
-    linked into ``_rocisa.so``) nor ``invoke build-client`` produces that
-    standalone binding, so this step installs it explicitly. ``import rocisa``
-    always uses the native backend and does not depend on this binding.
-
-    Build isolation is used on purpose: the binding's build backend
-    (scikit-build-core / nanobind / cmake / ninja) is often absent from the
-    active venv, where ``--no-build-isolation`` would fail.
-    """
-    repo_root = _TASKS_DIR.parents[2]
-    src = repo_root / "shared" / "stinkytofu"
-    if not (src / "pyproject.toml").is_file():
-        print(
-            f"warning: {src} not found; skipping stinkytofu backend install. "
-            "rocisa will use the native backend.",
-            file=sys.stderr,
-        )
-        return
-
-    rocm = _detect_rocm()
-    cxx = os.path.join(rocm, "bin", "amdclang++")
-    cc = os.path.join(rocm, "bin", "amdclang")
-    if not (os.path.exists(cxx) and os.path.exists(cc)):
-        print(
-            f"warning: amdclang/amdclang++ not found under {rocm}/bin; skipping "
-            "stinkytofu backend install. rocisa will use the native backend.",
-            file=sys.stderr,
-        )
-        return
-
-    cmake_args = (
-        f"-DCMAKE_CXX_COMPILER={cxx}"
-        f" -DCMAKE_C_COMPILER={cc}"
-        f" -DCMAKE_PREFIX_PATH={rocm}"
+    c.run(
+        shlex.join(
+            [
+                str(pathlib.Path(sys.executable).absolute()),
+                "-m",
+                "pip",
+                "install",
+                "--no-build-isolation",
+                "-e",
+                str(src),
+            ]
+        ),
+        env=env,
     )
-    env = dict(os.environ, CMAKE_ARGS=cmake_args)
-    env.setdefault("CMAKE_BUILD_PARALLEL_LEVEL", str(os.cpu_count() or 1))
-    # stinkytofu is version-pinned, so pip skips rebuilding an existing install;
-    # --force-reinstall keeps the binding matched to the current venv Python and
-    # sources. --no-deps: the package declares no runtime dependencies.
-    force_flag = "--force-reinstall --no-deps " if force else ""
-    print("Building and installing the standalone stinkytofu Python binding "
-          "(rocisa stinkytofu backend)...")
-    c.run(f"pip install {force_flag}{shlex.quote(str(src))}", env=env)
 
-
-@task(
-    help={
-        "mode": "One of auto|on|off (default auto: install when gfx1250 is among --gpu-targets, or is the detected GPU when no targets are given).",
-        "gpu_targets": "GPU targets the following client build and tests use; consulted by --mode=auto.",
-        "rebuild": "Force a fresh rebuild+reinstall of the binding even if it is already installed.",
-    }
-)
-def install_stinkytofu(c, mode="auto", gpu_targets=None, rebuild=False):
-    """Install the standalone stinkytofu Python binding for logical-IR tooling.
-
-    ``invoke build-client`` only builds the C++ client and does not provision
-    Python packages. Environments that use the logical-IR tooling run this
-    task separately; kernel generation itself uses native rocisa.
-    """
-    if _want_stinkytofu(mode, targets=gpu_targets):
-        _pip_install_stinkytofu(c, force=rebuild)
 
 
 @task(
@@ -228,7 +236,7 @@ def install_stinkytofu(c, mode="auto", gpu_targets=None, rebuild=False):
         "build_dir": "Path to client build dir.",
         "build_type": "CMake build type (e.g. Release, Debug).",
         "gpu_targets": "Comma-separated list of GPU targets (e.g. gfx90a,gfx1101).",
-        "rocm_path": "Path to a ROCm install whose amdclang/amdclang++ should be used.",
+        "rocm_path": "ROCm installation for the compilers, ROCM_PATH and CMake packages (default: ROCM_PATH, then rocm-sdk path --root, then /opt/rocm).",
         "export_compile_commands": "Enable CMAKE_EXPORT_COMPILE_COMMANDS.",
         "enable_rocprof": "Build tensilelite-client with rocprof.",
         "cxx_flags_release": "Override CMAKE_CXX_FLAGS_RELEASE (for example, -O3 to keep asserts enabled in Release).",
@@ -256,34 +264,74 @@ def build_client(
     """Build the tensilelite-client C++ executable.
 
     This task only configures and builds the client. It does not install or
-    refresh Python packages: provision rocisa with ``invoke rocisa`` and the
-    optional logical-IR binding with ``invoke install-stinkytofu``.
+    refresh Python packages: provision rocisa with ``invoke rocisa``.
 
     To run Tensile after building, use: tensilelite/bin/Tensile <args>
     """
+    build_env = _resolve_rocm_build_environment(rocm_path)
+    _report_rocm_build_environment(build_env)
+    _build_client(
+        c,
+        build_env,
+        clean=clean,
+        configure=configure,
+        build=build,
+        build_dir=build_dir,
+        build_type=build_type,
+        gpu_targets=gpu_targets,
+        export_compile_commands=export_compile_commands,
+        enable_rocprof=enable_rocprof,
+        cxx_flags_release=cxx_flags_release,
+        enable_asan=enable_asan,
+        enable_tsan=enable_tsan,
+        enable_sdma=enable_sdma,
+    )
+
+
+def _build_client(
+    c,
+    build_env,
+    clean=False,
+    configure=True,
+    build=True,
+    build_dir="build_tmp",
+    build_type="Release",
+    gpu_targets=None,
+    export_compile_commands=False,
+    enable_rocprof=False,
+    cxx_flags_release=None,
+    enable_asan=False,
+    enable_tsan=False,
+    enable_sdma=False,
+):
 
     if enable_asan and enable_tsan:
         raise Exit("Error: ASAN and TSAN cannot be enabled simultaneously", code=1)
 
-    detected, gpu_targets = _resolve_gpu_targets(gpu_targets)
+    for compiler in (build_env.c_compiler, build_env.cxx_compiler):
+        try:
+            subprocess.run(
+                [str(compiler), "--version"],
+                capture_output=True,
+                timeout=5,
+                check=True,
+                env=build_env.command_env(),
+            )
+        except FileNotFoundError:
+            raise Exit(f"Error: compiler not found at {compiler}", code=1)
+        except (OSError, subprocess.SubprocessError) as e:
+            raise Exit(f"Error: compiler check failed for {compiler}: {e}", code=1)
+
+    detected, gpu_targets = _resolve_gpu_targets(gpu_targets, build_env)
     if not gpu_targets:
-        raise Exit("Error: No GPU detected and no gpu_targets provided", code=1)
+        raise Exit(
+            f"Error: No GPU detected using ROCm at {build_env.root} and no gpu_targets provided",
+            code=1,
+        )
     if detected is not None and detected != gpu_targets:
         print(f"warning: No GPU targets specified. Detected {detected}, using: {gpu_targets}")
     elif detected is not None:
         print(f"warning: No GPU targets specified. Detected and using: {gpu_targets}")
-
-    if rocm_path:
-        cmake_c_compiler = os.path.join(rocm_path, "bin", "amdclang")
-        cmake_cxx_compiler = os.path.join(rocm_path, "bin", "amdclang++")
-
-        for compiler in (cmake_c_compiler, cmake_cxx_compiler):
-            try:
-                subprocess.run([compiler, "--version"], capture_output=True, timeout=5, check=True)
-            except FileNotFoundError:
-                raise Exit(f"Error: compiler not found at {compiler}", code=1)
-            except subprocess.SubprocessError as e:
-                raise Exit(f"Error: compiler check failed for {compiler}: {e}", code=1)
 
     if clean and os.path.exists(build_dir):
         c.run(f"rm -rf {shlex.quote(build_dir)}")
@@ -295,8 +343,10 @@ def build_client(
             "cmake",
             "--preset",
             "tensilelite",
-            "-S", str(_TASKS_DIR.parent),
-            "-B", build_dir,
+            "-S",
+            str(_TASKS_DIR.parent),
+            "-B",
+            build_dir,
             f"-DCMAKE_BUILD_TYPE={build_type}",
             f"-DGPU_TARGETS={gpu_targets}",
             f"-DTENSILELITE_CLIENT_ENABLE_ROCPROFSDK={_cmake_bool(enable_rocprof)}",
@@ -304,9 +354,7 @@ def build_client(
 
         if cxx_flags_release is not None:
             cmake_cmd.append(f"-DCMAKE_CXX_FLAGS_RELEASE={cxx_flags_release}")
-        if rocm_path:
-            cmake_cmd.append(f"-DCMAKE_C_COMPILER={cmake_c_compiler}")
-            cmake_cmd.append(f"-DCMAKE_CXX_COMPILER={cmake_cxx_compiler}")
+        cmake_cmd.extend(build_env.cmake_args())
         if shutil.which("ccache"):
             cmake_cmd.append("-DCMAKE_C_COMPILER_LAUNCHER=ccache")
             cmake_cmd.append("-DCMAKE_CXX_COMPILER_LAUNCHER=ccache")
@@ -324,6 +372,131 @@ def build_client(
         c.run(shlex.join(["cmake", "--build", build_dir, "--parallel"]))
 
 
+@task(help={"build_dir": "TensileLite CMake build directory."})
+def client_path(c, build_dir="build_tmp"):
+    """Print the absolute client output path without building or installing it."""
+    print(_built_client_path(build_dir))
+
+
+@task(help={"build_dir": "CMake build directory containing tensilelite-client."})
+def configure_client(c, build_dir="build_tmp"):
+    """Bind this Python installation to a previously built client."""
+    client = _built_client_path(build_dir)
+    c.run(
+        shlex.join(
+            [
+                sys.executable,
+                "-m",
+                "tensilelite_configure_client",
+                "--ensure-client",
+                str(client),
+            ]
+        )
+    )
+
+
+@task(
+    help={
+        "clean": "Remove the client build directory before building.",
+        "build_dir": "Path to the client build directory.",
+        "build_type": "CMake build type (for example Release or Debug).",
+        "gpu_targets": "Comma-separated GPU targets; detected when omitted.",
+        "rocm_path": "ROCm installation used to build native components; runtime selects ROCm independently (default: ROCM_PATH, then rocm-sdk path --root, then /opt/rocm).",
+        "export_compile_commands": "Enable CMAKE_EXPORT_COMPILE_COMMANDS.",
+        "enable_rocprof": "Build tensilelite-client with rocprof.",
+        "cxx_flags_release": "Override CMAKE_CXX_FLAGS_RELEASE.",
+        "enable_asan": "Enable AddressSanitizer.",
+        "enable_tsan": "Enable ThreadSanitizer.",
+    }
+)
+def install(
+    c,
+    clean=False,
+    build_dir="build_tmp",
+    build_type="Release",
+    gpu_targets=None,
+    rocm_path=None,
+    export_compile_commands=False,
+    enable_rocprof=False,
+    cxx_flags_release=None,
+    enable_asan=False,
+    enable_tsan=False,
+):
+    """Build rocisa/client and install TensileLite editably into this Python."""
+    if sys.platform != "linux":
+        raise Exit(
+            "invoke install is supported only in the Linux ROCm development environment; "
+            "use the manual CMake and pip workflow on other platforms.",
+            code=1,
+        )
+
+    python = pathlib.Path(sys.executable).absolute()
+    # Resolve once so rocisa and the client use the same native toolchain.
+    # Python installation keeps caller env.
+    build_env = _resolve_rocm_build_environment(rocm_path)
+    _report_rocm_build_environment(build_env)
+    ambient = os.environ.get("ROCM_PATH")
+    if rocm_path and ambient and ambient.strip():
+        runtime_root = pathlib.Path(ambient).expanduser().resolve()
+        if runtime_root != build_env.root.resolve():
+            print(
+                f"warning: Building native components against ROCm at {build_env.root}, "
+                f"but ROCM_PATH points to {runtime_root}. Conventional runtime selection "
+                f"follows ROCM_PATH; set it to {build_env.root} before running TensileLite "
+                "if you intend to use this build installation at runtime."
+            )
+    common_requirements = _TASKS_DIR / "requirements-dev-common.txt"
+    if clean and os.path.exists(build_dir):
+        shutil.rmtree(build_dir)
+    c.run(shlex.join([str(python), "-m", "pip", "install", "-r", str(common_requirements)]))
+    _install_rocisa(c, build_env=build_env)
+    _build_client(
+        c,
+        build_env=build_env,
+        clean=False,
+        build_dir=build_dir,
+        build_type=build_type,
+        gpu_targets=gpu_targets,
+        export_compile_commands=export_compile_commands,
+        enable_rocprof=enable_rocprof,
+        cxx_flags_release=cxx_flags_release,
+        enable_asan=enable_asan,
+        enable_tsan=enable_tsan,
+    )
+
+    built_client = _built_client_path(build_dir)
+    if not built_client.is_file() or not os.access(built_client, os.X_OK):
+        raise Exit(f"Built tensilelite-client is missing or not executable: {built_client}", code=1)
+
+    # The package build reads no ROCm environment; its version is +g<commit>.
+    c.run(
+        shlex.join(
+            [
+                str(python),
+                "-m",
+                "pip",
+                "install",
+                "--no-build-isolation",
+                "--no-deps",
+                "--editable",
+                str(_TASKS_DIR),
+            ]
+        )
+    )
+    c.run(
+        shlex.join(
+            [
+                str(python),
+                "-m",
+                "tensilelite_configure_client",
+                "--client",
+                str(built_client),
+            ]
+        )
+    )
+    print(f"TensileLite editable install uses: {built_client}")
+
+
 @task
 def precommit_install(c):
     """Install the hipblaslt/TensileLite git pre-commit hook (run once after `uv sync`).
@@ -331,9 +504,7 @@ def precommit_install(c):
     Clears core.hooksPath only when it points at the default hooks dir; bails if
     it points somewhere custom.
     """
-    root = subprocess.check_output(
-        ["git", "rev-parse", "--show-toplevel"], text=True
-    ).strip()
+    root = subprocess.check_output(["git", "rev-parse", "--show-toplevel"], text=True).strip()
     common = subprocess.check_output(
         ["git", "rev-parse", "--git-common-dir"], text=True, cwd=root
     ).strip()
@@ -343,13 +514,17 @@ def precommit_install(c):
     default_hooks = str(common_path / "hooks")
     hooks_path = subprocess.run(
         ["git", "config", "--get", "core.hooksPath"],
-        cwd=root, capture_output=True, text=True,
+        cwd=root,
+        capture_output=True,
+        text=True,
     ).stdout.strip()
 
     if hooks_path:
         if os.path.realpath(hooks_path) == os.path.realpath(default_hooks):
-            print(f"core.hooksPath is set to the default ({hooks_path}); clearing it "
-                  "(redundant; git-lfs hooks are unaffected).")
+            print(
+                f"core.hooksPath is set to the default ({hooks_path}); clearing it "
+                "(redundant; git-lfs hooks are unaffected)."
+            )
             with c.cd(root):
                 c.run("git config --unset-all core.hooksPath")
         else:
@@ -385,9 +560,11 @@ def build_coverage(
     Builds rocisa, tensilelite-host, and client with LLVM coverage flags.
     Run tests with tox -e coverage-cpp to generate coverage reports.
     """
-    _, gpu_targets = _resolve_gpu_targets(gpu_targets)
+    build_env = _resolve_rocm_build_environment(rocm_path)
+    _report_rocm_build_environment(build_env)
+    _, gpu_targets = _resolve_gpu_targets(gpu_targets, build_env)
     if not gpu_targets:
-        print("Error: No GPU detected and no gpu_targets provided.")
+        print(f"Error: No GPU detected using ROCm at {build_env.root} and no gpu_targets provided.")
         return
 
     if clean and os.path.exists(build_dir):
@@ -395,19 +572,17 @@ def build_coverage(
 
     os.makedirs(build_dir, exist_ok=True)
 
-    rocm = rocm_path or _detect_rocm()
-    cmake_c = os.path.join(rocm, "bin", "amdclang")
-    cmake_cxx = os.path.join(rocm, "bin", "amdclang++")
-
     cmake_cmd = [
         "cmake",
-        "--preset", "tensilelite",
-        "-S", "../",
-        "-B", build_dir,
+        "--preset",
+        "tensilelite",
+        "-S",
+        "../",
+        "-B",
+        build_dir,
         "-DCMAKE_BUILD_TYPE=Debug",
         f"-DGPU_TARGETS={gpu_targets}",
-        f"-DCMAKE_C_COMPILER={cmake_c}",
-        f"-DCMAKE_CXX_COMPILER={cmake_cxx}",
+        *build_env.cmake_args(),
         "-DTENSILELITE_ENABLE_COVERAGE=ON",
         "-DROCISA_ENABLE_COVERAGE=ON",
         "-DTENSILELITE_BUILD_TESTING=ON",
@@ -415,10 +590,12 @@ def build_coverage(
     ]
 
     if shutil.which("ccache"):
-        cmake_cmd.extend([
-            "-DCMAKE_C_COMPILER_LAUNCHER=ccache",
-            "-DCMAKE_CXX_COMPILER_LAUNCHER=ccache",
-        ])
+        cmake_cmd.extend(
+            [
+                "-DCMAKE_C_COMPILER_LAUNCHER=ccache",
+                "-DCMAKE_CXX_COMPILER_LAUNCHER=ccache",
+            ]
+        )
 
     c.run(shlex.join(cmake_cmd))
     c.run(shlex.join(["cmake", "--build", build_dir, "--parallel"]))

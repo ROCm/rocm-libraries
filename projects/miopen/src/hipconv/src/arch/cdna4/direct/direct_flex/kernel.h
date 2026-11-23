@@ -1453,8 +1453,11 @@ public:
         const ConvSize sz(par);
         if(phased(layer))
             return sz.weight_bytes() <= INT32_MAX;
-        return sz.weight_bytes() <= INT32_MAX && out_rows(par) <= INT32_MAX - 256 &&
-               span_input(par) <= INT32_MAX / 2;
+        // The output descriptor is based at the tile's first pixel and spans the tile's rows.
+        const int64_t tile_span =
+            int64_t(cfg_.x_tile()) * par.k * sizeof_data_type(par.output_type);
+        return sz.weight_bytes() <= INT32_MAX && tile_span <= INT32_MAX &&
+               out_rows(par) <= INT32_MAX - 256 && span_input(par) <= INT32_MAX / 2;
     }
 
     // Each layer runs one variant per tile.

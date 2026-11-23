@@ -4995,17 +4995,19 @@ inline void host_bsric02(hipsparseDirection_t    direction,
                         {
                             if(direction == HIPSPARSE_DIRECTION_ROW)
                             {
-                                local_sum = testing_fma(bsr_val[block_dim * block_dim * l
-                                                                + block_dim * local_row_j + m],
-                                                        testing_conj(bsr_val[idx]),
-                                                        local_sum);
+                                local_sum = testing_fma(
+                                    bsr_val[idx],
+                                    testing_conj(bsr_val[block_dim * block_dim * l
+                                                         + block_dim * local_row_j + m]),
+                                    local_sum);
                             }
                             else
                             {
-                                local_sum = testing_fma(bsr_val[block_dim * block_dim * l
-                                                                + block_dim * m + local_row_j],
-                                                        testing_conj(bsr_val[idx]),
-                                                        local_sum);
+                                local_sum = testing_fma(
+                                    bsr_val[idx],
+                                    testing_conj(bsr_val[block_dim * block_dim * l + block_dim * m
+                                                         + local_row_j]),
+                                    local_sum);
                             }
                         }
                     }
@@ -5158,7 +5160,7 @@ void csric0(int                  M,
                 if(nnz_entries[col_k] != 0)
                 {
                     int idx   = nnz_entries[col_k];
-                    local_sum = testing_fma(csr_val[k], testing_conj(csr_val[idx]), local_sum);
+                    local_sum = testing_fma(csr_val[idx], testing_conj(csr_val[k]), local_sum);
                 }
             }
 

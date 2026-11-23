@@ -163,8 +163,8 @@ namespace rocsparse
                 {
                     // If a match has been found, do linear combination
                     local_sum = rocsparse::fma(
-                        rocsparse::load_done_row_data(&csr_val[k]),
-                        rocsparse::conj(rocsparse::load_done_row_data(&csr_val[m])),
+                        rocsparse::load_done_row_data(&csr_val[m]),
+                        rocsparse::conj(rocsparse::load_done_row_data(&csr_val[k])),
                         local_sum);
                 }
             }

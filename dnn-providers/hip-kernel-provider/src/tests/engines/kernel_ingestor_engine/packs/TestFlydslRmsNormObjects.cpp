@@ -53,8 +53,8 @@
  *  - into outputs that start as NaN, with a non-finite element an infinite error;
  *  - the backward twice, the two launches compared bit for bit.
  *
- * Two tiers. `OnePerForm` runs one object per (dtype, gamma form, inv_rms, tier) and is
- * the pre-merge case. `Full/...Every` runs all of them and is the nightly one: about a
+ * Two tiers. `Standard/...OnePerForm` runs one object per (dtype, gamma form, inv_rms, tier)
+ * and is the pre-merge case. `Full/...Every` runs all of them and is the full-tier one: about a
  * second per architecture today, but the object count grows with every op.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine
@@ -584,7 +584,7 @@ std::string selectionName(const ::testing::TestParamInfo<ObjectSelection>& info)
     return info.param == ObjectSelection::EVERY ? "Every" : "OnePerForm";
 }
 
-INSTANTIATE_TEST_SUITE_P(,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuFlydslRmsNormObjects,
                          ::testing::Values(ObjectSelection::ONE_PER_FORM),
                          selectionName);

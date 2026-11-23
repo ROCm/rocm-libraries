@@ -201,7 +201,7 @@ void TestSetDifferenceWithBigIndexesHelper(int magnitude)
   thrust::counting_iterator<long long> begin(0);
   thrust::counting_iterator<long long> end        = begin + (1ll << magnitude);
   thrust::counting_iterator<long long> end_longer = end + 1;
-  ASSERT_EQUAL(thrust::distance(begin, end), 1ll << magnitude);
+  ASSERT_EQUAL(_THRUST_STD::distance(begin, end), 1ll << magnitude);
 
   thrust::device_vector<long long> result;
   result.resize(1);

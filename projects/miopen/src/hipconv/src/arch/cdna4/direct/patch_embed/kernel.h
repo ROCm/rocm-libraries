@@ -104,25 +104,25 @@ inline int64_t span_rows(const ConvParams& par)
 
 inline int wgrad_split_rows(const Config& cfg, const ConvParams& par, int cu_count)
 {
-    const int pair = 2 * cfg.k_chunk;
-    const int rows = par.n * par.p * par.q;
-    const int axis = wgrad_filter_axis(cfg, par);
-    const int tiles =
+    const int64_t pair = 2 * cfg.k_chunk;
+    const int64_t rows = static_cast<int64_t>(par.n) * par.p * par.q;
+    const int axis     = wgrad_filter_axis(cfg, par);
+    const int64_t tiles =
         ((axis + cfg.m_tile() - 1) / cfg.m_tile()) * ((par.k + cfg.n_tile() - 1) / cfg.n_tile());
-    const int pairs = (rows + pair - 1) / pair;
+    const int64_t pairs = (rows + pair - 1) / pair;
     // Rounded down, so every split is resident at once: one left over waits a whole walk.
     // Never so few that a split's rows outgrow what one rebased descriptor reaches.
-    const int most = static_cast<int>(std::max<int64_t>(1, span_rows(par) / pair));
-    const int splits =
-        std::clamp(cu_count * wgrad_slots(cfg) / tiles, (pairs + most - 1) / most, pairs);
-    return (pairs + splits - 1) / splits * pair;
+    const int64_t most = std::max<int64_t>(1, span_rows(par) / pair);
+    const int64_t splits =
+        std::clamp<int64_t>(cu_count * wgrad_slots(cfg) / tiles, (pairs + most - 1) / most, pairs);
+    return static_cast<int>((pairs + splits - 1) / splits * pair);
 }
 
 inline int wgrad_splits(const Config& cfg, const ConvParams& par, int cu_count)
 {
-    const int rows = par.n * par.p * par.q;
-    const int per  = wgrad_split_rows(cfg, par, cu_count);
-    return (rows + per - 1) / per;
+    const int64_t rows = static_cast<int64_t>(par.n) * par.p * par.q;
+    const int64_t per  = wgrad_split_rows(cfg, par, cu_count);
+    return static_cast<int>((rows + per - 1) / per);
 }
 
 inline LayerPars layer_pars(const Config& cfg, const ConvParams& par, int cu_count)
@@ -1141,15 +1141,31 @@ __launch_bounds__(cfg.threads()) void patch_embed_cdna4(LayerPars pars,
 // Wgrad's M axis is the filter, not the spatial rows it reduces over.
 inline int m_tiles(const Config& cfg, const ConvParams& par)
 {
-    const int m =
-        par.direction == Direction::Wgrad ? wgrad_filter_axis(cfg, par) : par.n * par.p * par.q;
-    return (m + cfg.m_tile() - 1) / cfg.m_tile();
+    const int64_t m = par.direction == Direction::Wgrad
+                          ? wgrad_filter_axis(cfg, par)
+                          : static_cast<int64_t>(par.n) * par.p * par.q;
+    return static_cast<int>((m + cfg.m_tile() - 1) / cfg.m_tile());
 }
 
 inline int n_tiles(const Config& cfg, const ConvParams& par)
 {
     const int n = par.direction == Direction::Dgrad ? par.kh * par.kw * par.c : par.k;
     return (n + cfg.n_tile() - 1) / cfg.n_tile();
+}
+
+// Whether HIP accepts get_launch_params' grid and the kernel's int row indices hold the layer.
+//
+// The N × P × Q rows, rounded up to whole M tiles (in wgrad, whole splits), must fit an int. HIP
+// rejects 2^32 or more work items in x.
+inline bool launch_fits(const Config& cfg, const ConvParams& par, int cu_count)
+{
+    const bool wgrad     = par.direction == Direction::Wgrad;
+    const int64_t walked = wgrad ? static_cast<int64_t>(wgrad_splits(cfg, par, cu_count)) *
+                                       wgrad_split_rows(cfg, par, cu_count)
+                                 : static_cast<int64_t>(m_tiles(cfg, par)) * cfg.m_tile();
+    const int64_t blocks_x =
+        wgrad ? m_tiles(cfg, par) : static_cast<int64_t>(m_tiles(cfg, par)) * n_tiles(cfg, par);
+    return walked <= INT32_MAX && blocks_x * cfg.threads() <= UINT32_MAX;
 }
 
 inline LaunchParams get_launch_params(const Config& cfg, const ConvParams& par, int cu_count)
@@ -1474,9 +1490,9 @@ public:
         return span_rows(par) >= 256;
     }
 
-    bool is_valid_config(const Device& /*dev*/, const ConvParams& par) const override
+    bool is_valid_config(const Device& dev, const ConvParams& par) const override
     {
-        return patch_embed::is_valid_config(par, cfg_);
+        return patch_embed::is_valid_config(par, cfg_) && launch_fits(cfg_, par, dev.cu_count);
     }
 
     LaunchParams get_launch_params(const Device& dev, const ConvParams& par) const override

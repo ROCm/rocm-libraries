@@ -12,9 +12,6 @@ set -euo pipefail
 # GEMM_WORKLOAD selects the workload:
 #   random-gemms  RANDOM_GEMM_COUNT fixed-seed sampled GEMMs, chosen by the
 #                 library's normal kernel selection.
-#
-# run_rocjitsu_hipblaslt_race_check.sh runs the smaller per-PR smoke workloads
-# and builds rocjitsu the same way.
 
 ROCM_PATH="${ROCM_PATH:-${PWD}/build}"
 AMDGPU_TARGETS="${AMDGPU_TARGETS:-}"

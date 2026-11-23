@@ -384,18 +384,97 @@ def test_add_engine_family_reports_errors_without_built_graph():
 
 
 def test_deselect_returns_same_graph():
-    """The deselect_*() filters are fluent and return the same Graph object."""
+    """The engine and note filters are fluent and return the same Graph object."""
     graph = hipdnn.Graph()
+    numerical = [hipdnn.NumericalNote.NONDETERMINISTIC]
+    behavior = [hipdnn.BehaviorNote.RUNTIME_COMPILATION]
 
     assert graph.deselect_workspace_greater_than(1024) is graph
     assert graph.deselect_engines(["MIOPEN_ENGINE"]) is graph
     assert graph.deselect_engines([1234]) is graph
+    assert graph.select_numeric_notes(numerical) is graph
+    assert graph.deselect_numeric_notes(numerical) is graph
+    assert graph.select_behavior_notes(behavior) is graph
+    assert graph.deselect_behavior_notes(behavior) is graph
     assert (
         graph.deselect_workspace_greater_than(2048)
         .deselect_engines(["MIOPEN_ENGINE"])
         .deselect_engines([1234])
+        .select_numeric_notes(numerical)
+        .deselect_numeric_notes([])
+        .select_behavior_notes(behavior)
+        .deselect_behavior_notes(behavior)
         is graph
     )
+
+
+@pytest.mark.parametrize(
+    "method, wrong_note",
+    [
+        ("select_numeric_notes", hipdnn.BehaviorNote.RUNTIME_COMPILATION),
+        ("deselect_numeric_notes", hipdnn.BehaviorNote.RUNTIME_COMPILATION),
+        ("select_behavior_notes", hipdnn.NumericalNote.NONDETERMINISTIC),
+        ("deselect_behavior_notes", hipdnn.NumericalNote.NONDETERMINISTIC),
+    ],
+)
+def test_note_filter_rejects_the_other_notes_enum(method, wrong_note):
+    """Each note filter takes only its own enum; the other family's enum is a TypeError."""
+    graph = hipdnn.Graph()
+
+    with pytest.raises(TypeError):
+        getattr(graph, method)([wrong_note])
+
+
+@pytest.mark.gpu
+@pytest.mark.parametrize(
+    "method, note, keeps_engine",
+    [
+        ("select_numeric_notes", hipdnn.NumericalNote.NONDETERMINISTIC, True),
+        ("select_numeric_notes", hipdnn.NumericalNote.TENSOR_CORE, False),
+        ("deselect_numeric_notes", hipdnn.NumericalNote.NONDETERMINISTIC, False),
+        ("deselect_numeric_notes", hipdnn.NumericalNote.TENSOR_CORE, True),
+        (
+            "select_behavior_notes",
+            hipdnn.BehaviorNote.SUPPORTS_EXECUTION_PLAN_SERIALIZATION,
+            True,
+        ),
+        ("select_behavior_notes", hipdnn.BehaviorNote.RUNTIME_COMPILATION, False),
+        (
+            "deselect_behavior_notes",
+            hipdnn.BehaviorNote.SUPPORTS_EXECUTION_PLAN_SERIALIZATION,
+            False,
+        ),
+        ("deselect_behavior_notes", hipdnn.BehaviorNote.RUNTIME_COMPILATION, True),
+    ],
+)
+def test_note_filters_decide_which_engine_survives(method, note, keeps_engine):
+    """Each note filter keeps or drops the test engine according to the notes it reports.
+
+    The test engine reports NONDETERMINISTIC (the backend's default for an engine that
+    declares none) and SUPPORTS_EXECUTION_PLAN_SERIALIZATION, and nothing else. It is
+    the only engine, so a filter that drops it leaves no plan and check_support() fails.
+    Selecting a reported note or deselecting an unreported one keeps the engine;
+    selecting an unreported note or deselecting a reported one drops it.
+    """
+    graph, _handle, _tensors = _built_conv_graph()
+    assert graph.create_execution_plans().is_good()
+    engine_id = graph.get_ranked_engine_ids()[0]
+    assert graph.get_numerical_notes_for_engine(engine_id) == [
+        hipdnn.NumericalNote.NONDETERMINISTIC
+    ]
+    assert graph.get_behavior_notes_for_engine(engine_id) == [
+        hipdnn.BehaviorNote.SUPPORTS_EXECUTION_PLAN_SERIALIZATION
+    ]
+
+    assert getattr(graph, method)([note]) is graph
+
+    support = graph.check_support()
+    if keeps_engine:
+        assert support.is_good(), support.get_message()
+        assert graph.build_plans().is_good()
+    else:
+        assert support.is_bad()
+        assert "No execution plan passes the engine filters" in support.get_message()
 
 
 def test_plan_index_primitives_on_empty_plan_list():

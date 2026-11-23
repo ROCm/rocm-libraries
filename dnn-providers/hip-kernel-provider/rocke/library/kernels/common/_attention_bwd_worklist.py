@@ -17,8 +17,9 @@ fixed order:
    (:class:`XcdRemap`) the plane id ``P_id = x + gx * y`` of batch ``z`` goes
    through the chunked chiplet transform of ``helpers/grid.py`` with runtime
    ``num_xcds = xcd_n`` and ``chunk_size = xcd_chunk`` over ``num_wgs = gx *
-   gy`` (:func:`xcd_remap_id`), and ``(x, y)`` are re-read from the result
-   (``x = P' % gx``, ``y = P' / gx``). The transform runs per batch plane
+   gy`` (:func:`rocke.helpers.grid.xcd_remap_plane`), and ``(x, y)`` are
+   re-read from the result (``x = P' % gx``, ``y = P' / gx``). The transform
+   runs per batch plane
    because the main kernarg ABI carries no batch count; it equals the
    whole-grid transform whenever ``xcd_n * xcd_chunk`` divides ``gx * gy``,
    and is a bijection of each plane for every grid;
@@ -92,6 +93,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from rocke.core.ir import IRBuilder, Value
+from rocke.helpers.grid import xcd_remap_plane
 
 __all__ = [
     "LB_INTERLEAVE",
@@ -113,7 +115,6 @@ __all__ = [
     "worklist_store_item",
     "worklist_tiles",
     "worklist_words",
-    "xcd_remap_id",
 ]
 
 LB_NATURAL = 0
@@ -261,29 +262,6 @@ class XcdRemap:
     gy: Value
 
 
-def xcd_remap_id(
-    b: IRBuilder, wgid: Value, *, num_wgs: Value, n: Value, chunk: Value
-) -> Value:
-    """``chiplet_transform_chunked_dynamic`` of ``helpers/grid.py`` with
-    runtime ``num_xcds = n`` and ``chunk_size = chunk``; the identity when
-    ``n <= 0`` or ``chunk <= 0``.
-
-    Ids below the last full ``n * chunk`` block boundary are remapped so the
-    i-th CTA dispatched to XCD ``wgid % n`` gets the i-th id of that XCD's
-    chunk; the tail keeps its id. A bijection of ``[0, num_wgs)``.
-    """
-    zero, one = b.const_i32(0), b.const_i32(1)
-    on = b.land(b.cmp_gt(n, zero), b.cmp_gt(chunk, zero))
-    n1 = b.select(on, n, one)
-    c1 = b.select(on, chunk, one)
-    block = b.mul(n1, c1)
-    limit = b.mul(b.div(num_wgs, block), block)
-    xcd = b.mod(wgid, n1)
-    local = b.div(wgid, n1)
-    new = b.add(b.add(b.mul(b.div(local, c1), block), b.mul(xcd, c1)), b.mod(local, c1))
-    return b.select(b.land(on, b.cmp_lt(wgid, limit)), new, wgid)
-
-
 def decode_cta(
     b: IRBuilder,
     *,
@@ -319,11 +297,9 @@ def decode_cta(
             half = b.div(b.add(n_kv_tiles, b.const_i32(1)), two_)
             gx = b.select(b.cmp_ne(pair, b.const_i32(0)), half, n_kv_tiles)
         gx1 = b.select(b.cmp_gt(gx, b.const_i32(0)), gx, b.const_i32(1))
-        plane = xcd_remap_id(
-            b, b.add(x, b.mul(gx1, y)), num_wgs=b.mul(gx1, xcd.gy), n=xcd.n,
-            chunk=xcd.chunk,
-        )  # fmt: skip
-        x, y = b.mod(plane, gx1), b.div(plane, gx1)
+        x, y = xcd_remap_plane(
+            b, x, y, gx=gx1, gy=xcd.gy, num_xcds=xcd.n, chunk=xcd.chunk
+        )
     zero, one = b.const_i32(0), b.const_i32(1)
     if g_split is None:
         unit, split = y, zero

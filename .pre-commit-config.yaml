@@ -35,7 +35,6 @@ exclude: |
     projects/rocfft/.*|
     projects/rocprim/.*|
     projects/rocsolver/.*|
-    projects/rocsparse/.*|
     projects/rocthrust/.*|
     projects/rocwmma/.*|
     shared/mxdatagenerator/.*|
@@ -76,6 +75,9 @@ exclude: |
     projects/miopen/src/conv/heuristics/lgbm_models/.*|
     projects/miopen/src/conv/heuristics/lgbm_pcfg_models/.*|
     projects/miopen/src/kernels/lgbm_.*\.(json|txt|bin)|
+    # Machine-generated two-tower config-embedding tables (binary; exceed
+    # check-added-large-files and are not lintable/end-of-file-fixable).
+    projects/miopen/src/kernels/.*_kernel_config_embeddings\.bin|
     # RPP exclusion list - raw test data with no early NUL byte, which pre-commit would
     # otherwise treat as text and corrupt. Matched by extension so new data stays covered.
     projects/rpp/.*\.(bin|rgb|yuv)$
@@ -93,6 +95,7 @@ repos:
           (?x)
           projects/hipblaslt/.*|
           projects/hipsparse/.*|
+          projects/rocsparse/.*|
           shared/tensile/.*|
           # Vendored AOTriton test sources, kept byte-identical to their pin
           # (tools/sdpa_conformance/aotriton/VENDOR.md, sync.py --check).
@@ -104,6 +107,7 @@ repos:
           (?x)
           projects/hipblaslt/.*|
           projects/hipsparse/.*|
+          projects/rocsparse/.*|
           shared/tensile/.*|
           ^projects/hipdnn/\.clang-format$|
           ^projects/miopen/\.clang-format$|
@@ -285,16 +289,16 @@ repos:
         files: ^(projects/miopen/(include_wrapper/miopen/hipdnn_forwarding\.h|src/(private/wrapper\.cpp|convolution_api\.cpp)|test/public_abi/wrapper_only_symbols\.txt)|dnn-providers/miopen-provider/MiopenApi\.hpp)$
         pass_filenames: false
 
-      # The wrapper's derived files are generated from include/miopen/miopen.h;
-      # this catches a hand edit or a stale file. The generator prefers the
-      # release pinned for the clang-format hook above, and takes another only
-      # while its output matches the committed files (releases can wrap lines
-      # differently). That release is written twice in this file: the
-      # clang-format hook's rev and the additional_dependencies list that the two
-      # hooks below share. Bump both together; a mismatch shows only when the
-      # output differs.
+      # The wrapper's derived files are generated from include/miopen/miopen.h
+      # and src/include/miopen/miopen_internal.h; this catches a hand edit or a
+      # stale file. The generator prefers the release pinned for the clang-format
+      # hook above, and takes another only while its output matches the committed
+      # files (releases can wrap lines differently). That release is written twice
+      # in this file: the clang-format hook's rev and the additional_dependencies
+      # list that the two hooks below share. Bump both together; a mismatch shows
+      # only when the output differs.
       - id: miopen-wrapper-sources
-        name: MIOpen wrapper sources match miopen.h
+        name: MIOpen wrapper sources match miopen.h and miopen_internal.h
         entry: >-
           python -c "import os, subprocess, sys;
           script = 'projects/miopen/script/generate_wrapper_sources.py';
@@ -303,14 +307,14 @@ repos:
           sys.exit(subprocess.call([sys.executable, script, '--check']) if present else 0)"
         language: python
         additional_dependencies: &miopen_clang_format ["clang-format==18.1.4"]
-        files: ^(\.pre-commit-config\.yaml|projects/miopen/(\.clang-format|include/miopen/miopen\.h|include_wrapper/miopen/hipdnn_forwarding\.h|script/(generate_wrapper_sources|check_public_abi)\.py|src/private/(wrapper|wrapper_passthrough)\.cpp|src/private/(miopen_impl|miopen_private_rename)\.h)|dnn-providers/miopen-provider/(\.clang-format|MiopenApiPrivateRename\.hpp))$
+        files: ^(\.pre-commit-config\.yaml|projects/miopen/(\.clang-format|include/miopen/miopen\.h|include_wrapper/miopen/hipdnn_forwarding\.h|script/(generate_wrapper_sources|check_public_abi)\.py|src/include/miopen/miopen_internal\.h|src/private/(wrapper|wrapper_passthrough)\.cpp|src/private/(miopen_impl|miopen_private_rename)\.h)|dnn-providers/miopen-provider/(\.clang-format|MiopenApiPrivateRename\.hpp))$
         pass_filenames: false
 
       # Rewrites those files. Manual only, so it never runs in CI; run it with
       #   pre-commit run --hook-stage manual miopen-wrapper-sources-regenerate --all-files
       # to get the pinned clang-format without installing it yourself.
       - id: miopen-wrapper-sources-regenerate
-        name: Regenerate MIOpen wrapper sources from miopen.h
+        name: Regenerate MIOpen wrapper sources from miopen.h and miopen_internal.h
         entry: python projects/miopen/script/generate_wrapper_sources.py
         language: python
         additional_dependencies: *miopen_clang_format
@@ -319,15 +323,16 @@ repos:
 
       # The checks above read C declarations with hand-rolled parsers rather
       # than a compiler. These are those parsers' own tests. They work on string
-      # fixtures, so they run here -- where pre-commit provides pytest in an
-      # isolated environment -- rather than in the MIOpen component CI job,
-      # which installs no Python packages.
+      # fixtures, apart from one test that compiles a small shared object with
+      # the C compiler (it is skipped where there is none), so they run here --
+      # where pre-commit provides pytest in an isolated environment -- rather
+      # than in the MIOpen component CI job, which installs no Python packages.
       - id: miopen-public-private-header-check-tests
         name: MIOpen public/private header check self-tests
-        entry: python -m pytest projects/miopen/script/test_check_public_abi.py projects/miopen/script/test_generate_wrapper_sources.py -q
+        entry: python -m pytest projects/miopen/script/test_check_public_abi.py projects/miopen/script/test_check_plugin_reentry.py projects/miopen/script/test_generate_wrapper_sources.py -q
         language: python
         additional_dependencies: ["pytest==8.4.2"]
-        files: ^projects/miopen/script/(check_public_abi|test_check_public_abi|generate_wrapper_sources|test_generate_wrapper_sources)\.py$
+        files: ^projects/miopen/script/(check_public_abi|test_check_public_abi|check_plugin_reentry|test_check_plugin_reentry|generate_wrapper_sources|test_generate_wrapper_sources)\.py$
         pass_filenames: false
 
       - id: kpack-pin-sync
@@ -389,6 +394,15 @@ repos:
         files: ^projects/hipsparse/scripts/(test_)?(sync_group_docs|audit_doc_attachment)\.py$
         pass_filenames: false
 
+      # String fixtures, so this runs in pre-commit rather than after an
+      # instrumented coverage build. A failure there would skip the upload.
+      - id: rocsparse-coverage-merge-tests
+        name: rocSPARSE coverage merge self-tests
+        entry: python -m unittest discover -s projects/rocsparse/scripts -p test_merge_coverage_info.py
+        language: python
+        files: ^projects/rocsparse/scripts/(merge_coverage_info|test_merge_coverage_info)\.py$
+        pass_filenames: false
+
       # rocKE layering ratchet: platform's imports of the library packages
       # (kernels, builders, dispatch, benchmarks) may only shrink. It audits
       # the source tree, so the installed rocke_pytest CTest skips it; this
@@ -411,6 +425,7 @@ repos:
           (?x)
           projects/hipblaslt/.*|
           projects/hipsparse/.*|
+          projects/rocsparse/.*|
           shared/tensile/.*|
           # MIOpen CMake files have not been audited for cmake-lint compliance yet.
           ^projects/miopen/.*

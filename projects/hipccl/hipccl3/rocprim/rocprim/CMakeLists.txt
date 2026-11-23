@@ -22,6 +22,9 @@
 
 # rocPRIM header-only library
 
+# Expose the HIPCCL_USE_LEGACY_API option to the configured version header
+set(ROCPRIM_USE_LEGACY_API ${HIPCCL_USE_LEGACY_API})
+
 # Configure a header file to pass the rocPRIM version
 configure_file(
   "${CMAKE_CURRENT_SOURCE_DIR}/include/rocprim/rocprim_version.hpp.in"

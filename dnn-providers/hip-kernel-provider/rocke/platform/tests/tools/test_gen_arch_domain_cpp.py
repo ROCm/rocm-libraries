@@ -14,6 +14,7 @@ target can build, which is the failure one table exists to rule out.
 from __future__ import annotations
 
 import importlib.util
+import json
 import re
 import shutil
 import subprocess
@@ -186,6 +187,38 @@ def test_a_column_whose_answer_is_not_a_boolean_stops_generation(gen) -> None:
     )
     with pytest.raises(ValueError, match=r"records processor 'gfx1154' as"):
         gen.render(fake)
+
+
+@pytest.mark.parametrize("flavor", arch_domain.committed_flavors())
+def test_comparison_contract_metadata_does_not_change_runtime_answers(
+    gen, flavor
+) -> None:
+    doc = json.loads(arch_domain._column_path(flavor).read_text())
+    assert doc[
+        "probe_contracts"
+    ], "no comparison metadata; compatibility check is vacuous"
+    enriched = arch_domain.ArchDomain(flavor, doc)
+    del doc["probe_contracts"]
+    legacy = arch_domain.ArchDomain(flavor, doc)
+    assert enriched.keys() == legacy.keys()
+    for key in legacy.keys():
+        assert enriched.arches(key) == legacy.arches(key)
+        for arch in legacy.arches(key):
+            assert enriched.lookup(key, arch) == legacy.lookup(key, arch)
+    assert enriched.processors() == legacy.processors()
+    for arch in legacy.processors():
+        assert enriched.accepts_processor(arch) == legacy.accepts_processor(arch)
+
+    def view(table):
+        return SimpleNamespace(
+            committed_flavors=lambda: (flavor,),
+            load=lambda lane: table,
+            is_negative=arch_domain.is_negative,
+            is_waived=arch_domain.is_waived,
+            DEFAULT_MODE=arch_domain.DEFAULT_MODE,
+        )
+
+    assert gen.render(view(enriched)) == gen.render(view(legacy))
 
 
 def test_generation_is_deterministic(gen) -> None:

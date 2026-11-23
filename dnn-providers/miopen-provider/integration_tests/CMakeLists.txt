@@ -17,12 +17,14 @@ add_executable(
     miopen_plugin_integration_tests
     main.cpp
     IntegrationGpuBatchnormUnsupportedDataTypes.cpp
+    IntegrationGpuBatchnormSavedStatsNotRequested.cpp
     IntegrationGpuBatchnormTrainingUnhappySpatial.cpp
     IntegrationGpuBatchnormUnhappyActivation.cpp
     IntegrationGpuBatchnormUnhappyLayouts.cpp
     IntegrationGpuBenchmarkingKnob.cpp
     IntegrationGpuDeterministic.cpp
     IntegrationGpuPassByValue.cpp
+    IntegrationGpuReductionUnhappy.cpp
 )
 
 # Superbuild: the hipDNN option; standalone: the installed frontend's cudnn_compatibility component.

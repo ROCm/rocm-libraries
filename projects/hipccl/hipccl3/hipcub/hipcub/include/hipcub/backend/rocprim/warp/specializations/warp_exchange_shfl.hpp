@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -62,11 +62,11 @@ public:
     }
 
     template<typename OffsetT>
-    HIPCUB_DEVICE __forceinline__ void ScatterToStriped(InputT (&items)[ITEMS_PER_THREAD],
-                                                        OffsetT (&ranks)[ITEMS_PER_THREAD])
+    HIPCUB_DEVICE __forceinline__ void
+        ScatterToStriped([[maybe_unused]] InputT (&items)[ITEMS_PER_THREAD],
+                         [[maybe_unused]]
+                         OffsetT (&ranks)[ITEMS_PER_THREAD])
     {
-        (void)items;
-        (void)ranks;
         // Always false
         static_assert(sizeof(OffsetT) == 0,
                       "Shuffle specialization of warp exchange does not support\n"
@@ -76,14 +76,11 @@ public:
     }
 
     template<typename OutputT, typename OffsetT>
-    HIPCUB_DEVICE __forceinline__ void
-        ScatterToStriped(const InputT (&input_items)[ITEMS_PER_THREAD],
-                         OutputT (&output_items)[ITEMS_PER_THREAD],
-                         OffsetT (&ranks)[ITEMS_PER_THREAD])
+    HIPCUB_DEVICE __forceinline__
+    void ScatterToStriped([[maybe_unused]] const InputT (&input_items)[ITEMS_PER_THREAD],
+                          [[maybe_unused]] OutputT (&output_items)[ITEMS_PER_THREAD],
+                          [[maybe_unused]] OffsetT (&ranks)[ITEMS_PER_THREAD])
     {
-        (void)input_items;
-        (void)output_items;
-        (void)ranks;
         // Always false
         static_assert(sizeof(OffsetT) == 0,
                       "Shuffle specialization of warp exchange does not support\n"

@@ -46,6 +46,7 @@ def _writer(useBias=DataDirection.NONE, needBiasType=False, bpeCinternal=4,
         bpeCinternal=bpeCinternal, useBias=useBias, needBiasType=needBiasType,
         useGateResidual=False,
         numActivationArgSize=numActivationArgSize, kernelName="tensile_kernel",
+        asmCaps={"v_prng_b32": True},
     )
     return ns(states=states, debugConfig=ns(debugKernel=debugKernel), kernelArgDefs=[])
 
@@ -57,6 +58,7 @@ def _kernel(**over):
         "ActivationType": ActivationType("none"), "OutputAmaxD": False, "OutputPeerD": False,
         "UseBias": 0,
         "GroupedGemm": False, "FusedA2A": "Disabled",
+        "StochasticRounding": False,
     }
     problem_type.update(over.pop("ProblemType", {}))
     kernel = {
@@ -308,3 +310,15 @@ def test_fused_a2a_appends_one_segment_entry(mode):
     plain = _sems(_writer(), _kernel())
     fused = _sems(_writer(), _kernel(ProblemType={"FusedA2A": mode}))
     assert fused == plain + ["FusedA2ASegment"]
+
+
+def test_stochastic_rounding_without_prng_appends_rndseed_after_fused_a2a():
+    writer = _writer()
+    writer.states.asmCaps = {"v_prng_b32": False}
+    sems = _sems(writer, _kernel(ProblemType={"StochasticRounding": True, "FusedA2A": "GemmA2A"}))
+    assert sems[-2:] == ["FusedA2ASegment", "RNDSeed"]
+
+
+def test_stochastic_rounding_with_prng_omits_rndseed():
+    sems = _sems(_writer(), _kernel(ProblemType={"StochasticRounding": True}))
+    assert "RNDSeed" not in sems

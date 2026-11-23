@@ -66,7 +66,8 @@ inline int split_pieces(const Config& cfg, const ConvParams& par, int cu_count)
     const int taps = filter_taps(par);
     int best       = 1;
     int best_steps = taps * chunks;
-    for(int pieces = 2; pieces <= chunks && tiles * pieces <= cu_count; ++pieces)
+    for(int pieces = 2; pieces <= chunks && static_cast<int64_t>(tiles) * pieces <= cu_count;
+        ++pieces)
     {
         const int steps = split_steps(cfg, taps, chunks, pieces);
         if(chunks % pieces == 0 && steps < best_steps)

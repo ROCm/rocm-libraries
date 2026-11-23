@@ -9,10 +9,7 @@
 
 #include <gtest/gtest.h>
 
-#include <nlohmann/json.hpp>
-
 #include "OperationsDir.hpp"
-#include <fstream>
 #include <string>
 #include <vector>
 
@@ -32,15 +29,7 @@ namespace sdk = hipdnn_flatbuffers_sdk::utilities;
 /// One real graph built through the shipped declaration, as the tool builds them.
 std::vector<uint8_t> someGraph()
 {
-    const std::string path = hipdnn_corpus_gen::test::operationsDir() + "/sdpa_fwd.opmeta.json";
-    std::ifstream file(path);
-    EXPECT_TRUE(file.is_open()) << path;
-    const auto parsed = parseOperationMetadata(nlohmann::json::parse(file));
-    EXPECT_TRUE(parsed.ok()) << (parsed.errors.empty() ? "" : parsed.errors.front());
-    if(!parsed.ok())
-    {
-        return {};
-    }
+    const auto metadata = test::shippedOperation("sdpa_fwd");
 
     const ProblemPoint point{{"batch", int64_t{1}},
                              {"heads", int64_t{32}},
@@ -51,9 +40,10 @@ std::vector<uint8_t> someGraph()
                              {"is_causal", true},
                              {"alignment", std::string("top_left")},
                              {"generate_stats", false},
+                             {"form", std::string("plain")},
                              {"dtype", std::string("bf16")}};
 
-    const auto built = buildGraphFor(*parsed.metadata, point);
+    const auto built = buildGraphFor(metadata, point);
     EXPECT_TRUE(built.ok()) << built.error;
     return built.bytes;
 }
@@ -151,10 +141,7 @@ TEST(TestGraphIdentity, DifferentGraphsGetDifferentContentKeys)
     auto other = someGraph();
     const auto original = stampGraphIdentity(other, "a_graph");
     // Another shape through the same declaration.
-    const std::string path = hipdnn_corpus_gen::test::operationsDir() + "/sdpa_fwd.opmeta.json";
-    std::ifstream file(path);
-    const auto parsed = parseOperationMetadata(nlohmann::json::parse(file));
-    ASSERT_TRUE(parsed.ok());
+    const auto metadata = test::shippedOperation("sdpa_fwd");
     const ProblemPoint point{{"batch", int64_t{2}},
                              {"heads", int64_t{32}},
                              {"heads_kv", int64_t{32}},
@@ -164,8 +151,9 @@ TEST(TestGraphIdentity, DifferentGraphsGetDifferentContentKeys)
                              {"is_causal", true},
                              {"alignment", std::string("top_left")},
                              {"generate_stats", false},
+                             {"form", std::string("plain")},
                              {"dtype", std::string("bf16")}};
-    const auto built = buildGraphFor(*parsed.metadata, point);
+    const auto built = buildGraphFor(metadata, point);
     ASSERT_TRUE(built.ok()) << built.error;
     EXPECT_NE(stampGraphIdentity(built.bytes, "a_graph").key, original.key);
 }

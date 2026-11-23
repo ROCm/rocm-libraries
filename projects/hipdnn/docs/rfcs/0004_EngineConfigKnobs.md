@@ -482,7 +482,7 @@ public:
     // Existing methods...
 
     Error get_ranked_engine_ids(std::vector<int64_t>& rankedEngineIds,
-                                const std::vector<HeuristicMode>& modes = {HeuristicMode::FALLBACK});
+                                const std::vector<HeuristicMode>& modes = {HeuristicMode::A});
 
     Error get_knobs_for_engine(int64_t engineId, std::vector<Knob>& knobs) const;
     Error get_knob_lookup_for_engine(int64_t engineId,

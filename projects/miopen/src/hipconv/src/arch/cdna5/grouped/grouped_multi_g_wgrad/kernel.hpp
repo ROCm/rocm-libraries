@@ -46,6 +46,7 @@
 #include "launch_params.h"
 #include "hipconv/conv_params.hpp"
 #include "detail.h"
+#include "grid_limits.h"
 #include "hip_util.h"
 
 #include <hip/hip_bf16.h>
@@ -530,7 +531,13 @@ public:
         // handle any group count, so no waves divisibility requirement.
         if(par.channels_per_group() != cfg_.group_size)
             return false;
-        return get_launch_params(dev, par).dynamic_shared_bytes <= kMaxDynamicLds;
+        // The kernel stores dW at a 32-bit offset, and split_k's reduction launches one work item
+        // per dW element, rounded up to 256, in x.
+        const uint64_t dw_elems = uint64_t(par.k) * par.kh * par.kw * par.channels_per_group();
+        if(dw_elems > (cfg_.split_k ? UINT32_MAX - 255 : UINT32_MAX))
+            return false;
+        const LaunchParams launch = get_launch_params(dev, par);
+        return launch.dynamic_shared_bytes <= kMaxDynamicLds && grid_fits(launch);
     }
 
     size_t get_workspace_size(const Device& /*dev*/, const ConvParams& par) const override

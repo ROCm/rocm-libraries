@@ -12,6 +12,7 @@
 #include <miopen/filesystem.hpp>
 
 #include <cstdint>
+#include <cstddef>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -116,6 +117,13 @@ private:
     mutable std::mutex mutex;
     mutable std::unordered_map<std::string, SolverModel> cache;
 };
+
+// Test seam: parse one solver section from an in-memory buffer through the same
+// path Find() uses on the bundle (header schema, forest, catalog), so gtest can
+// feed malformed sections. Returns false when the section is rejected; `out` is
+// then unspecified.
+MIOPEN_INTERNALS_EXPORT bool
+ParseSolverSectionForTest(const char* data, std::size_t size, SolverModel& out);
 
 } // namespace pcfg
 } // namespace lgbm

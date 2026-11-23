@@ -25,27 +25,42 @@ SOFTWARE.
 #include "host_tensor_executors.hpp"
 #include "rpp_cpu_simd_math.hpp"
 
-alignas(64) const Rpp32f sch_mat[16] = {0.701f,  -0.299f, -0.300f, 0.0f,    -0.587f, 0.413f,
-                                        -0.588f, 0.0f,    -0.114f, -0.114f, 0.886f,  0.0f,
-                                        0.0f,    0.0f,    0.0f,    0.0f};
-alignas(64) const Rpp32f ssh_mat[16] = {0.168f,  -0.328f, 1.250f,  0.0f,   0.330f,  0.035f,
-                                        -1.050f, 0.0f,    -0.497f, 0.292f, -0.203f, 0.0f,
-                                        0.0f,    0.0f,    0.0f,    0.0f};
+// Hue/saturation basis, row-major (row c produces output channel c): saturation scales I - L,
+// where every row of L is the Rec.601 luma weights, and hue adds Haeberli's rotation generator.
+alignas(64) const Rpp32f sch_mat[16] = {1.0f - RGB_TO_GREY_WEIGHT_RED,
+                                        -RGB_TO_GREY_WEIGHT_GREEN,
+                                        -RGB_TO_GREY_WEIGHT_BLUE,
+                                        0.0f,
+                                        -RGB_TO_GREY_WEIGHT_RED,
+                                        1.0f - RGB_TO_GREY_WEIGHT_GREEN,
+                                        -RGB_TO_GREY_WEIGHT_BLUE,
+                                        0.0f,
+                                        -RGB_TO_GREY_WEIGHT_RED,
+                                        -RGB_TO_GREY_WEIGHT_GREEN,
+                                        1.0f - RGB_TO_GREY_WEIGHT_BLUE,
+                                        0.0f,
+                                        0.0f,
+                                        0.0f,
+                                        0.0f,
+                                        0.0f};
+alignas(64) const Rpp32f ssh_mat[16] = {0.168f, 0.330f, -0.497f, 0.0f,    -0.328f, 0.035f,
+                                        0.292f, 0.0f,   1.250f,  -1.050f, -0.203f, 0.0f,
+                                        0.0f,   0.0f,   0.0f,    0.0f};
 
 inline void compute_color_jitter_ctm_host(Rpp32f brightnessParam, Rpp32f contrastParam,
                                           Rpp32f hueParam, Rpp32f saturationParam, Rpp32f* ctm) {
     contrastParam += 1.0f;
 
     alignas(64) Rpp32f hue_saturation_matrix[16] = {RGB_TO_GREY_WEIGHT_RED,
-                                                    RGB_TO_GREY_WEIGHT_RED,
-                                                    RGB_TO_GREY_WEIGHT_RED,
-                                                    0.0f,
                                                     RGB_TO_GREY_WEIGHT_GREEN,
-                                                    RGB_TO_GREY_WEIGHT_GREEN,
-                                                    RGB_TO_GREY_WEIGHT_GREEN,
-                                                    0.0f,
                                                     RGB_TO_GREY_WEIGHT_BLUE,
+                                                    0.0f,
+                                                    RGB_TO_GREY_WEIGHT_RED,
+                                                    RGB_TO_GREY_WEIGHT_GREEN,
                                                     RGB_TO_GREY_WEIGHT_BLUE,
+                                                    0.0f,
+                                                    RGB_TO_GREY_WEIGHT_RED,
+                                                    RGB_TO_GREY_WEIGHT_GREEN,
                                                     RGB_TO_GREY_WEIGHT_BLUE,
                                                     0.0f,
                                                     0.0f,
