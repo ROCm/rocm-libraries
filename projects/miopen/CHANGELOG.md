@@ -6,6 +6,10 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 ## MIOpen 3.6.3 for ROCm 10.3.0
 
 ### Resolved Issues
+* [Db] Fixed "Cannot open database file" on Windows when the kernel cache or user database
+  directory (by default under the user profile) has non-ASCII characters: SQLite databases are now
+  opened with a UTF-8 path. Characters outside the system ANSI code page are not supported yet in
+  these directories (environment variables, lock files).
 * [Conv] Fixed an out-of-bounds shared-memory read in the CK depthwise forward and backward-data
   solvers (`ConvDepthwiseFwd2D`, `ConvDepthwiseBwdData2D`); LDS grows by up to 640 B for some instances.
 * [MultiMarginLoss] Fixed incorrect results and HIP kernel launch failures on Windows caused by

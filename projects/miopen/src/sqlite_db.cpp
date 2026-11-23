@@ -46,6 +46,7 @@
 #include <mutex>
 #include <shared_mutex>
 #include <string>
+#include <string_view>
 #include <thread>
 
 extern "C" {
@@ -53,14 +54,36 @@ int miopen_sqlite3_memvfs_init(sqlite3* db, char** pzErrMsg, const sqlite3_api_r
 }
 namespace miopen {
 
+namespace {
+// SQLite takes and returns file names in UTF-8. On Windows fs::path::string() and
+// fs::path(const char*) use the ANSI code page instead, which breaks paths with non-ASCII
+// characters.
+std::string PathToUtf8(const fs::path& path)
+{
+    const auto u8 = path.u8string();
+    return {u8.begin(), u8.end()};
+}
+
+fs::path PathFromUtf8(const char* utf8)
+{
+    if(utf8 == nullptr)
+        return {};
+#if MIOPEN_HAS_FILESYSTEM
+    const std::string_view s{utf8};
+    return fs::path{std::u8string{s.begin(), s.end()}};
+#else
+    return fs::u8path(utf8);
+#endif
+}
+} // namespace
+
 class SQLite::impl
 {
     struct SQLiteCloser
     {
         void operator()(sqlite3* ptr)
         {
-            const auto c_filename = sqlite3_db_filename(ptr, "main");
-            fs::path filename_((c_filename == nullptr) ? "" : c_filename);
+            const auto filename_ = PathFromUtf8(sqlite3_db_filename(ptr, "main"));
             SQLite::Retry([&]() { return sqlite3_close(ptr); }, filename_);
             // Future: Sync the file back to disk, unless disk I/O is disabled
             // Get the page_count: pragma page_count;
@@ -157,12 +180,12 @@ class SQLite::impl
             else
             {
                 rc = sqlite3_open_v2(
-                    filepath.string().c_str(), &ptr_tmp, SQLITE_OPEN_READONLY, nullptr);
+                    PathToUtf8(filepath).c_str(), &ptr_tmp, SQLITE_OPEN_READONLY, nullptr);
             }
         }
         else
         {
-            rc = sqlite3_open_v2(filepath.string().c_str(),
+            rc = sqlite3_open_v2(PathToUtf8(filepath).c_str(),
                                  &ptr_tmp,
                                  SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE,
                                  nullptr);
@@ -267,7 +290,7 @@ int SQLite::Retry(std::function<int()> f, [[maybe_unused]] fs::path filename)
 
 int SQLite::Retry(std::function<int()> f) const
 {
-    fs::path filename(sqlite3_db_filename(pImpl->ptrDb.get(), "main"));
+    const auto filename = PathFromUtf8(sqlite3_db_filename(pImpl->ptrDb.get(), "main"));
     return SQLite::Retry(f, filename);
 }
 
