@@ -242,13 +242,13 @@ namespace
         constexpr size_t n   = 4;
         constexpr auto   f64 = rocsparse_datatype_f64_r;
         constexpr auto   c32 = rocsparse_datatype_f32_c, c64 = rocsparse_datatype_f64_c;
+        constexpr auto   f16 = rocsparse_datatype_f16_r, bf16 = rocsparse_datatype_bf16_r;
         using cf = rocsparse_float_complex;
         using cd = rocsparse_double_complex;
-        Silence        silence;
-        constexpr auto f16 = rocsparse_datatype_f16_r, bf16 = rocsparse_datatype_bf16_r;
-        // {target, source}. Besides the pairs of #14487, the exact widenings: f16 and bf16
-        // into f32, f64, f32_c and f64_c, and f32 and f64 into f64_c (complex targets get
-        // an imaginary part of zero). Here c64 is f64_c and c32 is f32_c.
+        Silence silence;
+        // {target, source}: every pair of different types with a conversion kernel. f64 into
+        // f32 and c32, and c64 into c32, round. The others are exact widenings (complex
+        // targets get an imaginary part of zero).
         const std::pair<rocsparse_datatype, rocsparse_datatype> converted[] = {{f64, f32},
                                                                                {f32, f64},
                                                                                {c32, f32},
@@ -273,7 +273,8 @@ namespace
                 DevBuf<char> src(iota_bytes(s, n)), dst(std::vector<char>(want.size(), -1));
                 const rocsparse_status st
                     = rocsparse::convert_array(handle, n, t, dst.get(), s, src.get());
-                // The type check runs before the zero-item return, so an unsupported pair fails at zero items too.
+                // The type check runs before the zero-item return, so an unsupported pair
+                // fails at zero items too.
                 EXPECT_EQ(rocsparse::convert_array(handle, 0, t, dst.get(), s, src.get()), st);
                 EXPECT_EQ(rocsparse::convert_array_supported(t, s), st);
                 const bool must_convert
@@ -1461,13 +1462,13 @@ namespace
         }
     }
 
-    // S values into targets with T values, a supported pair. The values are converted and
+    // S values into targets with D values, a supported pair. The values are converted and
     // the indices match the target format, for the same format (BSR with 2 x 2 blocks),
     // cross-format COO, COO AoS and CSR conversions, and the permissive CSC, ELL and BSR to
     // COO (and CSC to COO AoS) conversions through an intermediate CSR matrix (not for f16
     // and bf16 values). The target values start at fill.
-    template <typename S, typename T>
-    void mixed_datatypes_convert(rocsparse_handle handle, T fill)
+    template <typename D, typename S>
+    void mixed_datatypes_convert(rocsparse_handle handle, D fill)
     {
         struct Case
         {
@@ -1495,7 +1496,7 @@ namespace
         {
             SCOPED_TRACE(testing::Message() << "source " << c.sf << " target " << c.tf);
             S2sMat<S>        source(c.sf, dt_of<S>(), false, c.block_dim);
-            S2sMat<T>        target(c.tf, dt_of<T>(), true, c.block_dim, fill);
+            S2sMat<D>        target(c.tf, dt_of<D>(), true, c.block_dim, fill);
             const S2sArrays& want = target.host;
             // The permissive routes start with a CSC, ELL or BSR -> CSR conversion in the
             // source data type, which has no f16 or bf16 kernel. The buffer size query of
@@ -1510,13 +1511,13 @@ namespace
                 EXPECT_EQ(failed_call, "rocsparse_sparse_to_sparse_buffer_size(analysis)");
                 EXPECT_EQ(target.read_a(), std::vector<int32_t>(target.host.a.size(), -7));
                 EXPECT_EQ(target.read_b(), std::vector<int32_t>(target.host.b.size(), -7));
-                EXPECT_EQ(target.read_val(), std::vector<T>(want.val.size(), fill));
+                EXPECT_EQ(target.read_val(), std::vector<D>(want.val.size(), fill));
                 continue;
             }
             ASSERT_EQ(sparse_to_sparse(handle, source.descr, target.descr, c.permissive), st_ok);
             EXPECT_EQ(target.read_a(), want.a);
             EXPECT_EQ(target.read_b(), want.b);
-            EXPECT_EQ(target.read_val(), std::vector<T>(want.val.begin(), want.val.end()));
+            EXPECT_EQ(target.read_val(), std::vector<D>(want.val.begin(), want.val.end()));
         }
     }
 
@@ -1528,23 +1529,23 @@ namespace
         using cd = rocsparse_double_complex;
         {
             SCOPED_TRACE("f32 -> f64");
-            mixed_datatypes_convert<float, double>(handle, -7.0);
+            mixed_datatypes_convert<double, float>(handle, -7.0);
         }
         {
             SCOPED_TRACE("f32 -> f64_c");
-            mixed_datatypes_convert<float, cd>(handle, cd(91.0, 17.0));
+            mixed_datatypes_convert<cd, float>(handle, cd(91.0, 17.0));
         }
         {
             SCOPED_TRACE("f64 -> f64_c");
-            mixed_datatypes_convert<double, cd>(handle, cd(91.0, 17.0));
+            mixed_datatypes_convert<cd, double>(handle, cd(91.0, 17.0));
         }
         {
             SCOPED_TRACE("f16 -> f32_c");
-            mixed_datatypes_convert<_Float16, cf>(handle, cf(91.0f, 17.0f));
+            mixed_datatypes_convert<cf, _Float16>(handle, cf(91.0f, 17.0f));
         }
         {
             SCOPED_TRACE("bf16 -> f64_c");
-            mixed_datatypes_convert<rocsparse_bfloat16, cd>(handle, cd(91.0, 17.0));
+            mixed_datatypes_convert<cd, rocsparse_bfloat16>(handle, cd(91.0, 17.0));
         }
     }
 
