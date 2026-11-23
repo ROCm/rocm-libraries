@@ -35,15 +35,43 @@ _LOGIC_FILES = [
     for chip in _CHIP_DIRS
     for name, fmt in _TILED_B_FILES
 ]
-# Each kernel runs 12 * L + 8 K tiles of 128: L iterations of a 12-tile main loop and a
-# fixed 8-tile tail. Only these K have a kernel (L = 42 and L = 85).
+# The 4096x4096 kernels at these K run 12 * L + 8 K tiles of 128 (L = 42 and L = 85).
 _KS = (65536, 131584)
-# B in HIPBLASLT_ORDER_COL: one E2M3 kernel that runs 24 * L + 8 K tiles, L = 21.
-_CANONICAL_B_FILE = "gfx950_Cijk_Alik_Bljk_F6BS_MXAE8B32_MXBE8B32_STA_H_UserArgs.yaml"
-_CANONICAL_B_KERNEL = (
-    "rocke_gemm_mx_e2m3_e2m3_e8m0b32_f32acc_bf16_rcr_256x256x128_w2x2_16x16x128_s3"
-    "_4096x4096x65536_c0c1_Acanonical_k21f5fa872a"
-)
+# Shape-specialized kernels. Their K loop is compiled for that K, not for 12 * L + 8.
+_SHAPE_SUFFIX = {
+    (4096, 4096, 2048): "kbd6c3ec4bc",
+    (4096, 4096, 6144): "ke767b25fce",
+    (32768, 4096, 2048): "kd369500cb3",
+    (32768, 4096, 6144): "k3063b64df0",
+}
+# B in HIPBLASLT_ORDER_COL. The 4096x4096x65536 E2M3 kernel runs 24 * L + 8 K tiles,
+# L = 21. The other kernels are compiled for that K, not for 24 * L + 8.
+_CANONICAL_B_FILES = [
+    ("gfx950_Cijk_Alik_Bljk_F6BS_MXAE8B32_MXBE8B32_STA_H_UserArgs.yaml", "e2m3"),
+    ("gfx950_Cijk_Alik_Bljk_B6BS_MXAE8B32_MXBE8B32_STA_H_UserArgs.yaml", "e3m2"),
+]
+# Suffix after the shared tile prefix. 32768x4096x2048 is schedule s3; the other new
+# shapes are s2. There is no E3M2 kernel at 4096x4096x65536.
+_CANONICAL_B_SUFFIX = {
+    "e2m3": {
+        (4096, 4096, 65536): "s3_4096x4096x65536_c0c1_Acanonical_k21f5fa872a",
+        (4096, 4096, 2048): "s2_4096x4096x2048_c0c1_Acanonical_kc922a7f4be",
+        (4096, 4096, 6144): "s2_4096x4096x6144_c0c1_Acanonical_kb952f38bb6",
+        (32768, 4096, 2048): "s3_32768x4096x2048_c0c1_Acanonical_k20ef87951c",
+        (32768, 4096, 6144): "s2_32768x4096x6144_c0c1_Acanonical_kc908ab1de2",
+    },
+    "e3m2": {
+        (4096, 4096, 2048): "s2_4096x4096x2048_c0c1_Acanonical_kc922a7f4be",
+        (4096, 4096, 6144): "s2_4096x4096x6144_c0c1_Acanonical_kb952f38bb6",
+        (32768, 4096, 2048): "s3_32768x4096x2048_c0c1_Acanonical_k20ef87951c",
+        (32768, 4096, 6144): "s2_32768x4096x6144_c0c1_Acanonical_kc908ab1de2",
+    },
+}
+_CANONICAL_B_LOGIC = [
+    pytest.param(f"{_CHIP_DIRS[chip]}/{name}", fmt, chip, id=f"{fmt}-sta-{chip}")
+    for chip in _CHIP_DIRS
+    for name, fmt in _CANONICAL_B_FILES
+]
 _FIXTURES = Path(__file__).resolve().parent / "logic_yaml" / "mx_scale_format"
 # A generated MX GEMM and a non-MX GEMM, one solution each.
 _GENERATED_MX_LOGIC = _FIXTURES / (
@@ -58,6 +86,28 @@ def _kernel_name(fmt, k):
         f"_4096x4096x{k}_c0c1"
     )
     return name + "_k4b371438f4" if k == 65536 else name
+
+
+def _tiled_shapes():
+    shapes = [(4096, 4096, k) for k in _KS]
+    shapes.extend(_SHAPE_SUFFIX)
+    return shapes
+
+
+def _tiled_kernel_name(fmt, m, n, k):
+    if (m, n, k) in _SHAPE_SUFFIX:
+        return (
+            f"rocke_gemm_mx_{fmt}_{fmt}_e8m0b32_f32acc_bf16_rcr_256x256x128_w2x2_16x16x128_s3"
+            f"_{m}x{n}x{k}_c0c1_{_SHAPE_SUFFIX[(m, n, k)]}"
+        )
+    return _kernel_name(fmt, k)
+
+
+def _canonical_b_kernel(fmt, m, n, k):
+    return (
+        f"rocke_gemm_mx_{fmt}_{fmt}_e8m0b32_f32acc_bf16_rcr_256x256x128_w2x2_16x16x128_"
+        f"{_CANONICAL_B_SUFFIX[fmt][(m, n, k)]}"
+    )
 
 
 def _flatten(predicate):
@@ -207,7 +257,9 @@ def test_custom_kernel_config_keeps_host_pre_swizzle_128x4(tmp_path):
 
 
 @needs_logic_corpus
-@pytest.mark.parametrize("name", [name for name, _ in _TILED_B_FILES] + [_CANONICAL_B_FILE])
+@pytest.mark.parametrize(
+    "name", [name for name, _ in _TILED_B_FILES] + [name for name, _ in _CANONICAL_B_FILES]
+)
 def test_logic_files_match_across_chips(name):
     """The 0x75a0 file is the 0x75a3 file with only its device changed."""
     mi355 = require_logic_file(f"{_CHIP_DIRS['75a3']}/{name}").read_text()
@@ -222,12 +274,13 @@ def test_logic_file_predicates(rel, fmt, chip, assembler, gfx950_iim):
     logic = require_logic_file(rel)
     assert L.readYAML(str(logic))["DeviceNames"] == [f"Device {chip}"]
     library = L.parseLibraryLogicFile(str(logic), assembler, False, False, False, gfx950_iim, False)
-    assert len(library.solutions) == len(_KS)
+    shapes = _tiled_shapes()
+    assert len(library.solutions) == len(shapes)
     rows = {tuple(key): index for key, (index, _) in library.exactLogic}
-    assert set(rows) == {(4096, 4096, 1, k) for k in _KS}
-    for k in _KS:
-        struct = library.solutions[rows[(4096, 4096, 1, k)]]
-        assert struct["CustomKernelName"] == _kernel_name(fmt, k)
+    assert set(rows) == {(m, n, 1, k) for m, n, k in shapes}
+    for m, n, k in shapes:
+        struct = library.solutions[rows[(m, n, 1, k)]]
+        assert struct["CustomKernelName"] == _tiled_kernel_name(fmt, m, n, k)
         solution = C.Solution.FromSolutionStruct(struct, False, False, False, assembler, gfx950_iim)
         preds = {}
         for p in _flatten(solution.problemPredicate):
@@ -240,41 +293,43 @@ def test_logic_file_predicates(rel, fmt, chip, assembler, gfx950_iim):
         assert values("AlphaValue") == {(None, "1")}
         assert values("SwizzleTensorA") == {(None, True)}
         assert values("SwizzleTensorB") == {(None, True)}
-        assert values("SizeEqual") == {(0, 4096), (1, 4096), (2, 1), (3, k)}
+        assert values("SizeEqual") == {(0, m), (1, n), (2, 1), (3, k)}
         assert values("StrideAEqual") == {(1, k)}
         assert values("StrideBEqual") == {(1, k)}
-        assert values("StrideDEqual") == {(1, 4096)}
+        assert values("StrideDEqual") == {(1, m)}
         assert solution.problemType.mxScaleFormat == 3
         assert not solution.problemType.useBeta
 
 
 @needs_logic_corpus
-@pytest.mark.parametrize("chip", _CHIP_DIRS)
-def test_canonical_b_logic_file_predicates(chip, assembler, gfx950_iim):
-    logic = require_logic_file(f"{_CHIP_DIRS[chip]}/{_CANONICAL_B_FILE}")
+@pytest.mark.parametrize("rel, fmt, chip", _CANONICAL_B_LOGIC)
+def test_canonical_b_logic_file_predicates(rel, fmt, chip, assembler, gfx950_iim):
+    logic = require_logic_file(rel)
     assert L.readYAML(str(logic))["DeviceNames"] == [f"Device {chip}"]
     library = L.parseLibraryLogicFile(str(logic), assembler, False, False, False, gfx950_iim, False)
-    assert len(library.solutions) == 1
+    shapes = _CANONICAL_B_SUFFIX[fmt]
+    assert len(library.solutions) == len(shapes)
     rows = {tuple(key): index for key, (index, _) in library.exactLogic}
-    assert rows == {(4096, 4096, 1, 65536): 0}
-    struct = library.solutions[0]
-    assert struct["CustomKernelName"] == _CANONICAL_B_KERNEL
-    solution = C.Solution.FromSolutionStruct(struct, False, False, False, assembler, gfx950_iim)
-    preds = {}
-    for p in _flatten(solution.problemPredicate):
-        preds.setdefault(p.tag, []).append((p.index, p.value))
+    assert set(rows) == {(m, n, 1, k) for m, n, k in shapes}
+    for m, n, k in shapes:
+        struct = library.solutions[rows[(m, n, 1, k)]]
+        assert struct["CustomKernelName"] == _canonical_b_kernel(fmt, m, n, k)
+        solution = C.Solution.FromSolutionStruct(struct, False, False, False, assembler, gfx950_iim)
+        preds = {}
+        for p in _flatten(solution.problemPredicate):
+            preds.setdefault(p.tag, []).append((p.index, p.value))
 
-    def values(tag):
-        return set(preds[tag])
+        def values(tag):
+            return set(preds[tag])
 
-    assert values("MXScaleFormatEquals") == {(None, 3)}
-    assert values("AlphaValue") == {(None, "1")}
-    assert values("SwizzleTensorA") == {(None, True)}
-    assert values("SwizzleTensorB") == {(None, False)}
-    assert not solution.problemType.swizzleTensorB
-    assert values("SizeEqual") == {(0, 4096), (1, 4096), (2, 1), (3, 65536)}
-    assert values("StrideAEqual") == {(1, 65536)}
-    assert values("StrideBEqual") == {(1, 65536)}
-    assert values("StrideDEqual") == {(1, 4096)}
-    assert solution.problemType.mxScaleFormat == 3
-    assert not solution.problemType.useBeta
+        assert values("MXScaleFormatEquals") == {(None, 3)}
+        assert values("AlphaValue") == {(None, "1")}
+        assert values("SwizzleTensorA") == {(None, True)}
+        assert values("SwizzleTensorB") == {(None, False)}
+        assert not solution.problemType.swizzleTensorB
+        assert values("SizeEqual") == {(0, m), (1, n), (2, 1), (3, k)}
+        assert values("StrideAEqual") == {(1, k)}
+        assert values("StrideBEqual") == {(1, k)}
+        assert values("StrideDEqual") == {(1, m)}
+        assert solution.problemType.mxScaleFormat == 3
+        assert not solution.problemType.useBeta
