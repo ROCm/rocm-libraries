@@ -4,6 +4,7 @@
 #pragma once
 
 #include "ck_tile/ops/fmha/block/block_masking.hpp"
+#include "ck_tile/ops/fmha/detail/fmha_batch_prefill_page_tile.hpp"
 #include "ck_tile/ops/fmha/pipeline/block_fmha_pipeline_qr_ks_vs_tdm_sched_policy.hpp"
 
 namespace ck_tile {
@@ -450,24 +451,48 @@ using FmhaBatchPrefillPageTileGeometryFor =
 //    without them; clamp 1 recovers 3 %). Not for P64 D64 M64, where the earlier TDM issue showed a
 //    stale-fragment event (see kDrainLdsBeforeTdmIssue), nor for D128 M64 (about 1 %);
 //  - none of the four for every other problem, which keeps their code unchanged, including the
-//    KV-split partial outputs (the split routes were measured without them).
+//    KV-split partial outputs (the split routes were measured without them);
+//  - the guard's own full drains and RAW fences only when the compiler does not protect the hazard
+//    itself (kFmhaBatchPrefillPageTileGuardWaits); with clang 24 the guarded P64 D64 tiles took
+//    3 % less kernel time without them, M128 and M64. The spilling D128 M128 tiles
+//    (fmha_page_tile_d128_m128_spills_v) keep them with every compiler: with clang 24 the relaunch
+//    determinism check of the P128 D128 causal sink tile failed in each of 4 runs without them, in
+//    2 of 6 with them (kFmhaBatchPrefillPageTileGuardWaitsFor).
+template <typename Problem, typename Geometry>
+inline constexpr bool kFmhaBatchPrefillPageTileGuardWaitsFor =
+    kFmhaBatchPrefillPageTileGuardWaits ||
+    detail::fmha_page_tile_d128_m128_spills_v<Problem, Geometry>;
+
 template <typename Problem, typename Geometry = FmhaBatchPrefillPageTileGeometryFor<Problem>>
 using FmhaBatchPrefillPageTileOptionsFor = std::conditional_t<
     !detail::fmha_tdm_is_vectorized_kv<Problem>::value,
     FmhaTdmSchedTuningOptions<false, false, false, 0, false, true>,
     std::conditional_t<
         !detail::fmha_tdm_is_split_partial_v<Problem> && Geometry::kM == 128,
-        FmhaTdmSchedTuningOptions<true, true, true, 1, true>,
+        FmhaTdmSchedTuningOptions<true,
+                                  true,
+                                  true,
+                                  1,
+                                  true,
+                                  false,
+                                  kFmhaBatchPrefillPageTileGuardWaitsFor<Problem, Geometry>>,
         std::conditional_t<
             !detail::fmha_tdm_is_split_partial_v<Problem> && Geometry::kM == 64 &&
                 Geometry::kHeadDimQK == 64 && Problem::kPageBlockSize == 128,
-            FmhaTdmSchedTuningOptions<false, false, true, 2, true, true>,
+            FmhaTdmSchedTuningOptions<false,
+                                      false,
+                                      true,
+                                      2,
+                                      true,
+                                      true,
+                                      kFmhaBatchPrefillPageTileGuardWaitsFor<Problem, Geometry>>,
             FmhaTdmSchedTuningOptions<false,
                                       false,
                                       false,
                                       0,
                                       true,
-                                      Geometry::kM == 64 && Geometry::kHeadDimQK == 64>>>>;
+                                      Geometry::kM == 64 && Geometry::kHeadDimQK == 64,
+                                      kFmhaBatchPrefillPageTileGuardWaitsFor<Problem, Geometry>>>>>;
 
 // Scheduled-TDM tuning of a page-tile problem: the default tuning of its geometry, with the
 // page-tile code-generation options (read through FmhaTdmSchedTuningOptionsOf).

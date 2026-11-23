@@ -1129,18 +1129,20 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedFp8PageTilePolicy
     // each stage's last row.
     //
     // The M128 tile keeps the grouped-drain placement and the keep-alive uses but issues neither
-    // the full drains nor the RAW fences (kGuardWaits). A static scan of its ISA for refills (a
-    // ds_load that overwrites a WMMA source before the WMMA is known to have read it) finds none
-    // without them, with clang 23 and clang 24, causal and dense, under both models: WMMAs retire
-    // in issue order (va_vdst(n) covers all but the n newest), and the hazard note's model (only
-    // va_vdst(0) or a read of the WMMA's own result proves it complete). Measured on gfx1250
-    // (FP8 M128, causal, the batch-prefill chunk set as sglang dispatches it): about 3.5 % less
-    // kernel time. The M64 tile keeps the waits: the same scan finds refills there without them.
+    // the full drains nor the RAW fences (kGuardWaits, from the options). A static scan of its ISA
+    // for refills (a ds_load that overwrites a WMMA source before the WMMA is known to have read
+    // it) finds none without them, with clang 23 and clang 24, causal and dense, under both models:
+    // WMMAs retire in issue order (va_vdst(n) covers all but the n newest), and the hazard note's
+    // model (only va_vdst(0) or a read of the WMMA's own result proves it complete). Measured on
+    // gfx1250 (FP8 M128, causal, the batch-prefill chunk set as sglang dispatches it): about 3.5 %
+    // less kernel time. The M64 tile keeps the waits unless the compiler protects the hazard itself
+    // (kFmhaBatchPrefillPageTileGuardWaits): without them the same scan finds refills with clang
+    // 23, none with clang 24 under the in-order model; with clang 24 it took about 4.5 % less time.
 
     static constexpr bool kWmmaOperandGuard = Options::kWmmaOperandGuard;
 
-    // Explicit waits of the guard (full drains, RAW fences): the M64 tile only (see above).
-    static constexpr bool kGuardWaits = kWmmaOperandGuard && Geometry::kM == 64;
+    // Explicit waits of the guard (full drains, RAW fences), per the options (see above).
+    static constexpr bool kGuardWaits = kWmmaOperandGuard && Options::kWmmaOperandGuardWaits;
 
     // RAW fence: waits until the WMMA that produced c has completed, and so has read its A/B
     // operands. Reading the result makes the compiler insert the WMMA result wait before the
@@ -1495,18 +1497,26 @@ using FmhaBatchPrefillFp8PageTileGeometryFor =
     FmhaTdmSchedGeometryFor<Problem, kFmhaBatchPrefillFp8PageTileQkSuColumnsFor<Problem>>;
 
 // Code-generation options of the FP8 M128 page tile: the M128 page tile's scalar row clamp 1 and
-// the WMMA operand guard (the vectorized KV layout requires it); the LDS drain before the TDM issue
-// stays off as in the BF16 M128 tile (the FP8 race screen found no whole-tile event with it off).
-// QkKOuter, KReadKMajor and RowMaxMaximum have no FP8 implementation.
+// the WMMA operand guard (the vectorized KV layout requires it) without its own waits (see the
+// guard section of the policy); the LDS drain before the TDM issue stays off as in the BF16 M128
+// tile (the FP8 race screen found no whole-tile event with it off). QkKOuter, KReadKMajor and
+// RowMaxMaximum have no FP8 implementation.
 using FmhaBatchPrefillFp8PageTileOptions =
-    FmhaTdmSchedTuningOptions<false, false, false, 1, true, false>;
+    FmhaTdmSchedTuningOptions<false, false, false, 1, true, false, false>;
 
 // Code-generation options of the FP8 M64 page tile: those of the BF16 P64 D64 M64 page tile, the
 // WMMA operand guard with scalar row clamp 0, and the LDS drain before every K / V TDM issue, which
 // every 16-bit D64 M64 tile runs (kDrainLdsBeforeTdmIssue of the scheduled-TDM policy: a
-// stale-fragment event at P64 without it).
+// stale-fragment event at P64 without it); the guard's own waits only when the compiler does not
+// protect the hazard (kFmhaBatchPrefillPageTileGuardWaits).
 using FmhaBatchPrefillFp8PageTileM64Options =
-    FmhaTdmSchedTuningOptions<false, false, false, 0, true, true>;
+    FmhaTdmSchedTuningOptions<false,
+                              false,
+                              false,
+                              0,
+                              true,
+                              true,
+                              kFmhaBatchPrefillPageTileGuardWaits>;
 
 template <typename Problem, typename Geometry = FmhaBatchPrefillFp8PageTileGeometryFor<Problem>>
 using FmhaBatchPrefillFp8PageTileOptionsFor =

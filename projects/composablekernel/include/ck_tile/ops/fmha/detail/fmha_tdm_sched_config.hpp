@@ -285,9 +285,10 @@ struct FmhaTdmSchedLayout
     static constexpr index_t kVPadInterval = integer_log2_floor(Geometry::kDv / 2) - 1;
 };
 
-// Code-generation options of one kernel family. All off by default, so a tuning that does not
-// name them keeps its code. The first four change the instruction order or selection, not the
-// result (scores are finite or -inf, so maximum and maxnum agree):
+// Code-generation options of one kernel family. All off by default except WmmaOperandGuardWaits
+// (which only matters with WmmaOperandGuard), so a tuning that does not name them keeps its code.
+// The first four change the instruction order or selection, not the result (scores are finite or
+// -inf, so maximum and maxnum agree):
 //   QkKOuter:       QK WMMAs in (k, n, m) order instead of (n, k, m): each accumulator is reused
 //                   every 2 * NIter WMMAs instead of every 2, which hides the WMMA result latency.
 //   KReadKMajor:    K reads of a stage issued k-major (the slices the k-outer QK needs first).
@@ -302,12 +303,17 @@ struct FmhaTdmSchedLayout
 //                   block_fmha_pipeline_qr_ks_vs_tdm_sched_policy.hpp).
 //   DrainLdsBeforeTdmIssue: the wave's own LDS reads complete before every K/V TDM issue (the
 //                   stale-fragment workaround, kDrainLdsBeforeTdmIssue of the same file).
+//   WmmaOperandGuardWaits: with WmmaOperandGuard, the guard's own full drains and RAW fences.
+//                   Off, the guard keeps only its register allocation (the grouped-drain placement
+//                   and the keep-alive uses) and leaves the waits to a compiler that protects the
+//                   hazard itself.
 template <bool QkKOuter               = false,
           bool KReadKMajor            = false,
           bool RowMaxMaximum          = false,
           index_t ScalarRowClamp      = 0,
           bool WmmaOperandGuard       = false,
-          bool DrainLdsBeforeTdmIssue = false>
+          bool DrainLdsBeforeTdmIssue = false,
+          bool WmmaOperandGuardWaits  = true>
 struct FmhaTdmSchedTuningOptions
 {
     static_assert(ScalarRowClamp >= 0 && ScalarRowClamp <= 2);
@@ -317,6 +323,7 @@ struct FmhaTdmSchedTuningOptions
     static constexpr index_t kScalarRowClamp      = ScalarRowClamp;
     static constexpr bool kWmmaOperandGuard       = WmmaOperandGuard;
     static constexpr bool kDrainLdsBeforeTdmIssue = DrainLdsBeforeTdmIssue;
+    static constexpr bool kWmmaOperandGuardWaits  = WmmaOperandGuardWaits;
 };
 
 // Code-generation options of a tuning: its Options when it names them (a tuning derived for one

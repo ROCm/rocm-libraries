@@ -74,7 +74,11 @@ struct fmha_tdm_is_vectorized_kv<Problem, std::void_t<decltype(Problem::kKVMemor
 // events (see kDrainLdsBeforeTdmIssue) came at the rate of the guarded vectorized tile. After a
 // change of their schedule or register allocation, re-run the relaunch race screen.
 //
-// Once the compiler tracks this hazard, the explicit drains and keep-alive uses can go.
+// A compiler that protects this hazard itself (clang 24 in expert scheduling mode, which places a
+// va_vdst wait before every refill of a WMMA source in flight) needs only the guard's register
+// allocation: with Options::kWmmaOperandGuardWaits off the grouped-drain placement and the
+// keep-alive uses stay, and the full drains and RAW fences go (kGuardWaits). The batch-prefill page
+// tiles turn them off with such a compiler (CK_TILE_FMHA_PAGE_TILE_COMPILER_GUARDS_WMMA_OPERANDS).
 
 template <typename Geometry_,
           typename Tuning_,
@@ -479,15 +483,15 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
                 __builtin_amdgcn_sched_barrier(0x0002 | 0x0400);
         };
 
-        // With the WMMA operand guard, the last M iteration's WMMAs keep the RAW fence: with
-        // grouped waits only on the stage's last row, otherwise on every m1.
+        // With the WMMA operand guard's waits, the last M iteration's WMMAs keep the RAW fence:
+        // with grouped waits only on the stage's last row, otherwise on every m1.
         auto emit_wmma = [&](auto, auto wmma) {
             constexpr index_t kOrd  = decltype(wmma)::value;
             constexpr bool kLastRow = kOrd == Geometry::kQkWmmasPerStage - 1;
             RunQkSuWmma<kOrd, BlockGemm>(c_block_tensor,
                                          a_block_tensor,
                                          b_block_tensor,
-                                         bool_constant < kWmmaOperandGuard &&
+                                         bool_constant < kGuardWaits &&
                                              (kLastRow || !GroupedWait<Mode>()) > {});
         };
         Executor::template ExecuteQkStage<Stage>(emit_wmma, emit_token, emit_point);
@@ -602,8 +606,9 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
                 // Grouped drains (FmhaTdmSchedGroupedDrainPlacement): the WMMA emitter keeps the
                 // operands of the drained rows allocated until the next row (PvKeptRows).
                 __builtin_amdgcn_sched_barrier(0);
-                // Full drain only: a counted va_vdst(k >= 1) does not cover the WAR.
-                asm volatile("s_wait_alu depctr_va_vdst(0)" ::: "memory");
+                // Full drain only (kGuardWaits): a counted va_vdst(k >= 1) does not cover the WAR.
+                if constexpr(kGuardWaits)
+                    asm volatile("s_wait_alu depctr_va_vdst(0)" ::: "memory");
                 __builtin_amdgcn_sched_barrier(0);
             }
             else
@@ -631,6 +636,9 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
     // for the vectorized-KV page tile only; the linear page tile and the forward kernels keep their
     // unguarded refills (see the scope paragraph there).
     static constexpr bool kWmmaOperandGuard = Options::kWmmaOperandGuard;
+    // The guard's own full drains and RAW fences (Options::kWmmaOperandGuardWaits, see the hazard
+    // note); without them it keeps only its register allocation.
+    static constexpr bool kGuardWaits = kWmmaOperandGuard && Options::kWmmaOperandGuardWaits;
 
     // Empty use: keeps an operand's registers live so no later load is allocated onto them. The
     // asm operand is allocated in v0-v255.
@@ -647,15 +655,15 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
     }
 
     // The Drain or KeepPending point of QK row Row of a grouped-drain schedule: the full drain
-    // (Drain only), then the keep-alive of the last-M K slices of the pairs it covers. A function
-    // of its own, so only grouped-drain schedules instantiate it.
+    // (Drain only, kGuardWaits), then the keep-alive of the last-M K slices of the pairs it covers.
+    // A function of its own, so only grouped-drain schedules instantiate it.
     template <typename Placement, typename BlockGemm, index_t Row, bool Drain, typename KeepPair>
     CK_TILE_DEVICE static void EmitQkGroupedDrain(KeepPair& keep_k_of_pair)
     {
         static_assert(Placement::kQkMIter == BlockGemm::MIterPerWarp);
         constexpr auto kPairs = Placement::QkKeptPairs(Row, Drain);
         __builtin_amdgcn_sched_barrier(0);
-        if constexpr(Drain)
+        if constexpr(Drain && kGuardWaits)
             // Full drain only: a counted va_vdst(k >= 1) does not cover the WAR.
             asm volatile("s_wait_alu depctr_va_vdst(0)" ::: "memory");
         static_for<kPairs.begin, kPairs.end, 1>{}([&](auto q) { keep_k_of_pair(q); });
@@ -679,12 +687,12 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
     static constexpr index_t kPvLastMRow = kFmhaTdmSchedPvLastMRow<Geometry>;
 
     // The PV WMMAs are issued by the pipeline's WMMA emitter, which guards PV row r as follows.
-    // RAW fence after its WMMA: the last M iteration's rows, with grouped waits only the stage's
-    // last row.
+    // RAW fence after its WMMA (kGuardWaits): the last M iteration's rows, with grouped waits only
+    // the stage's last row.
     template <typename Mode>
     CK_TILE_HOST_DEVICE static constexpr bool PvRawFence(index_t r)
     {
-        return kWmmaOperandGuard && r >= kPvLastMRow &&
+        return kGuardWaits && r >= kPvLastMRow &&
                (!GroupedWait<Mode>() || r == Geometry::kPvWmmasPerStage - 1);
     }
     // Rows [begin, end) whose operands stay allocated (KeepOperandLive) at row r: with grouped

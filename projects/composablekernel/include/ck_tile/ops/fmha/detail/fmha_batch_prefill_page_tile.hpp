@@ -17,6 +17,23 @@
 #define CK_TILE_FMHA_PAGE_TILE_EXPERT_SCHEDULING 0
 #endif
 
+// 1 when the compiler protects the WMMA operand WAR of the scheduled-TDM hazard note
+// (block_fmha_pipeline_qr_ks_vs_tdm_sched_policy.hpp) itself in expert scheduling mode: it places a
+// va_vdst wait before every load that overwrites a source of a WMMA still in flight. Clang 24 does,
+// clang 23 does not. The page tiles then keep the guard's register allocation (the grouped-drain
+// placement and the keep-alive uses) but not its own full drains and RAW fences
+// (kFmhaBatchPrefillPageTileGuardWaits). The compiler's waits count on WMMAs completing in issue
+// order, which a gfx1250 probe agrees with: every older WMMA result was written once va_vdst(n)
+// covered it, while a read with no wait saw the old register; and no WMMA read a source that a
+// later LDS load overwrote, even with no wait between them.
+#ifndef CK_TILE_FMHA_PAGE_TILE_COMPILER_GUARDS_WMMA_OPERANDS
+#if __clang_major__ >= 24
+#define CK_TILE_FMHA_PAGE_TILE_COMPILER_GUARDS_WMMA_OPERANDS 1
+#else
+#define CK_TILE_FMHA_PAGE_TILE_COMPILER_GUARDS_WMMA_OPERANDS 0
+#endif
+#endif
+
 namespace ck_tile {
 
 // Waits until every asynchronous global-to-LDS load of the wave has completed, marked or not. The
@@ -34,6 +51,12 @@ CK_TILE_DEVICE void fmha_page_tile_wait_page_id_dma()
     s_wait_asynccnt<0>();
 #endif
 }
+
+// Whether the page tiles issue the WMMA operand guard's own waits (full drains, RAW fences): only
+// when the compiler does not protect the hazard
+// (CK_TILE_FMHA_PAGE_TILE_COMPILER_GUARDS_WMMA_OPERANDS).
+inline constexpr bool kFmhaBatchPrefillPageTileGuardWaits =
+    !CK_TILE_FMHA_PAGE_TILE_COMPILER_GUARDS_WMMA_OPERANDS;
 
 // Independent page-size / tile-size geometry for gfx1250 batch prefill.
 //
