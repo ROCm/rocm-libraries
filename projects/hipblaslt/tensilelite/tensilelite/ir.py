@@ -179,6 +179,11 @@ def sched_is_waitcnt(item):
   return isinstance(item, _rocisa_instruction.SWaitCnt)
 
 
+def sched_is_nop(item):
+  """True for an s_nop instruction."""
+  return isinstance(item, _rocisa_instruction.SNop)
+
+
 class _LogicalBackend:
   """Construction backend that builds StinkyTofu logical IR instead of rocisa.
 

@@ -46,6 +46,7 @@ from .ir import BranchInstruction, BufferLoadB128, BufferLoadB192, BufferLoadB32
   SLongBranchPositive, VFmaMixF32, VMadMixF32, VMovB32, VAndB32, VCmpEQU32, VCndMaskB32, VMovB64, VNop, VReadfirstlaneB32, TensorLoadToLds, SCMovB32, SCMovB64, t16
 from .ir import sched_is_mfma, sched_is_smfma, sched_is_mxmfma, sched_is_tensor_load_to_lds
 from .ir import sched_is_ds_load, sched_is_ds_load_b128, sched_is_ds_store, sched_is_waitcnt
+from .ir import sched_is_nop
 from .ir import SSchedulingFence
 from .ir import set_active_version as _set_active_ir_version
 from rocisa.register import RegisterPool
@@ -1106,7 +1107,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
             # if nop, pop
             if srcPackItems:
               item = srcPackItems.pop(0)
-              if isinstance(item, SNop):
+              if sched_is_nop(item):
                 # add nop. Do not count nop
                 dstPackItems.append(item)
               else:
@@ -1498,7 +1499,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
 
       macIterItems = macIterCode.flatitems()
       # pop the first code which is s_nop 1 for packing
-      item = macIterItems.pop(0) if isinstance(macIterItems[0], SNop) else None
+      item = macIterItems.pop(0) if sched_is_nop(macIterItems[0]) else None
 
       numMfmaPerIter = self.states.numMfmaPerIter
       curPackIdx = 0
@@ -1976,7 +1977,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       # remove s_nop for packing
       # we will add s_nop if needed
       if macIterItems:
-        if isinstance(macIterItems[0], SNop):
+        if sched_is_nop(macIterItems[0]):
           macIterItems.pop(0)
 
       ####
@@ -2546,7 +2547,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
                       instPerPackA -= num
                   firstDone = True
                   for n in tmp:
-                    isLastNop = isinstance(n, SNop)
+                    isLastNop = sched_is_nop(n)
                     iterCode.add(n)
               else:
                 # we put 2 pack in each mfma
@@ -2582,7 +2583,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
                         instPerPackB -= num
                     firstDone = True
                     for n in tmp:
-                      isLastNop = isinstance(n, SNop)
+                      isLastNop = sched_is_nop(n)
                       iterCode.add(n)
                 else:
                   for j in range(instPerPackB):
