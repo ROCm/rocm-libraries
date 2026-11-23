@@ -189,7 +189,8 @@ double sytf2_sytrf_residual(const rocblas_fill uplo,
             return 1;
         const rocblas_int kx = upper ? kb : kb + s - 1;
         const rocblas_int kp = (two ? -ipiv[k] : ipiv[k]) - 1;
-        if(kp < 0 || kp >= n)
+        // the interchange is within the rows not yet factored: kp <= kx (upper), kp >= kx (lower)
+        if(kp < 0 || kp >= n || (upper ? kp > kx : kp < kx))
             return 1;
 
         // X = X P(k)
