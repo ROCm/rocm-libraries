@@ -138,6 +138,14 @@ its `hiprtcCompileProgram` export, not by the imported function's address in
 the test executable. No environment override is needed when the headers are
 installed alongside hiprtc in the usual ROCm layout.
 
+On Windows, environment lookups use the Win32 environment, matching the test
+SDK's setters rather than the C runtime's potentially stale environment copy.
+Module snapshots retry transient `ERROR_BAD_LENGTH` failures up to 10 attempts.
+Module paths use the shared library-origin helper. HIPRTC include options still
+use the native narrow encoding, so non-ANSI Windows install paths are not covered
+by this fix. Multiple loaded modules exporting `hiprtcCompileProgram` remain an
+error rather than selecting an arbitrary SDK.
+
 The quick-tier regression
 `TestGpuRefKernelCompiler.CompilesLowPrecisionKernelWithoutEnvironmentPaths`
 unsets both variables and compiles an uncached block-scale kernel. To run it

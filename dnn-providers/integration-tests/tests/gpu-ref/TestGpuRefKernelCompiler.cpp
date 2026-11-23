@@ -36,6 +36,8 @@ TEST(TestGpuRefKernelCompiler, CompilesLowPrecisionKernelWithoutEnvironmentPaths
     const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter rocmPath("ROCM_PATH");
     hipdnn_data_sdk::utilities::unsetEnv("HIP_PATH");
     hipdnn_data_sdk::utilities::unsetEnv("ROCM_PATH");
+    ASSERT_TRUE(hipdnn_data_sdk::utilities::getEnv("HIP_PATH").empty());
+    ASSERT_TRUE(hipdnn_data_sdk::utilities::getEnv("ROCM_PATH").empty());
 
     // Bypass the singleton cache so an earlier block-scale test cannot hide a broken lookup.
     const detail::CompiledKernel kernel("GpuRefBlockScaleQuantize.cpp",

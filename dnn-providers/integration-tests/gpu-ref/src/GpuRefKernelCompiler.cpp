@@ -5,11 +5,11 @@
 
 #include "GpuRefKernelSources.hpp"
 #include <algorithm>
-#include <array>
 #include <cstdlib>
 #include <filesystem>
 #include <hip/hiprtc.h>
 #include <hipdnn-gpu-ref/detail/GpuRefHipError.hpp>
+#include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <memory>
 #include <optional>
 #include <stdexcept>
@@ -49,14 +49,8 @@ bool hasLowPrecisionHeaders(const std::filesystem::path& includeDir)
 std::optional<std::filesystem::path> environmentPath(const char* variable)
 {
 #if defined(_WIN32)
-    char* value = nullptr;
-    size_t length = 0;
-    if(_dupenv_s(&value, &length, variable) != 0)
-    {
-        throw std::runtime_error(std::string("Failed to read environment variable ") + variable);
-    }
-    const std::unique_ptr<char, decltype(&std::free)> ownedValue(value, &std::free);
-    if(value == nullptr)
+    const auto value = hipdnn_data_sdk::utilities::getEnv(variable);
+    if(value.empty())
     {
         return std::nullopt;
     }
@@ -85,14 +79,26 @@ std::filesystem::path hipIncludeDir()
     }
 
 #if defined(_WIN32)
-    const auto snapshotHandle = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE, 0);
-    if(snapshotHandle == INVALID_HANDLE_VALUE)
+    std::unique_ptr<void, decltype(&CloseHandle)> snapshot(nullptr, &CloseHandle);
+    constexpr int MAX_SNAPSHOT_ATTEMPTS = 10;
+    for(int attempt = 0; attempt < MAX_SNAPSHOT_ATTEMPTS; ++attempt)
     {
-        throw std::system_error(static_cast<int>(GetLastError()),
+        const auto snapshotHandle = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE, 0);
+        if(snapshotHandle != INVALID_HANDLE_VALUE)
+        {
+            snapshot.reset(snapshotHandle);
+            break;
+        }
+        const auto error = GetLastError();
+        // The module list can change while the snapshot is being captured.
+        if(error == ERROR_BAD_LENGTH && attempt + 1 < MAX_SNAPSHOT_ATTEMPTS)
+        {
+            continue;
+        }
+        throw std::system_error(static_cast<int>(error),
                                 std::system_category(),
                                 "Failed to enumerate loaded modules for hiprtc");
     }
-    const std::unique_ptr<void, decltype(&CloseHandle)> snapshot(snapshotHandle, &CloseHandle);
     MODULEENTRY32W entry{};
     entry.dwSize = static_cast<DWORD>(sizeof(entry));
     if(Module32FirstW(snapshot.get(), &entry) == 0)
@@ -128,20 +134,8 @@ std::filesystem::path hipIncludeDir()
         throw std::runtime_error("No loaded module exports hiprtcCompileProgram.");
     }
 
-    std::array<wchar_t, 32768> libraryPath{};
-    const auto length
-        = GetModuleFileNameW(module, libraryPath.data(), static_cast<DWORD>(libraryPath.size()));
-    if(length == 0 || length >= libraryPath.size())
-    {
-        throw std::system_error(static_cast<int>(GetLastError()),
-                                std::system_category(),
-                                "Failed to get hiprtc module path");
-    }
     auto includeDir
-        = std::filesystem::path(std::wstring(libraryPath.data(), static_cast<size_t>(length)))
-              .parent_path()
-              .parent_path()
-          / "include";
+        = hipdnn_data_sdk::utilities::getLoadedLibraryOrigin(module).parent_path() / "include";
     if(hasLowPrecisionHeaders(includeDir))
     {
         return includeDir;
