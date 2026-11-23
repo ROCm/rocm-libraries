@@ -470,7 +470,8 @@ Operands operandsOf(const fb::Graph& graph)
 
 /// What a form changes about the plain graph's node, and how many tensors its graph holds
 /// (statistics included for the forward; the backward's nine roles always). A direction that
-/// does not build the form has 0 tensors.
+/// does not build the form has 0 tensors. The backward-only roles and scalars are added on top of
+/// the shared ones for the backward (its ragged form carries the lengths the forward's does not).
 struct FormExpectation
 {
     std::string form;
@@ -479,6 +480,8 @@ struct FormExpectation
     std::set<std::string> removedScalars;
     size_t forwardTensors;
     size_t backwardTensors;
+    std::set<std::string> backwardAddedRoles = {};
+    std::set<std::string> backwardAddedScalars = {};
 };
 
 std::vector<FormExpectation> formExpectations()
@@ -489,8 +492,8 @@ std::vector<FormExpectation> formExpectations()
         {"scale_tensor", {"scale"}, {}, {"attn_scale_value"}, 6, 10},
         {"dropout", {"seed", "offset"}, {"dropout_probability"}, {}, 7, 11},
         {"padded", {"seq_len_q", "seq_len_kv"}, {"padding_mask"}, {}, 7, 11},
-        // The offsets go on the tensors, not the node.
-        {"ragged", {}, {}, {}, 7, 0},
+        // The offsets go on the tensors, not the node; the backward also binds the lengths.
+        {"ragged", {}, {}, {}, 7, 13, {"seq_len_q", "seq_len_kv"}, {"padding_mask"}},
         {"bias", {"attn_mask"}, {}, {}, 6, 10},
         {"sink", {"sink_token"}, {}, {}, 6, 0},
     };
@@ -579,6 +582,12 @@ void expectEveryFormBindsExactlyItsOptionalFields(const std::string& operation,
             scalars.erase(name);
         }
         scalars.insert(expected.addedScalars.begin(), expected.addedScalars.end());
+        if(backward)
+        {
+            roles.insert(expected.backwardAddedRoles.begin(), expected.backwardAddedRoles.end());
+            scalars.insert(expected.backwardAddedScalars.begin(),
+                           expected.backwardAddedScalars.end());
+        }
 
         EXPECT_EQ(bound.roles(), roles) << operation << " " << expected.form;
         EXPECT_EQ(bound.scalars, scalars) << operation << " " << expected.form;
@@ -596,7 +605,7 @@ TEST(TestSdpaForms, EveryForwardFormBindsExactlyItsOptionalFields)
 
 TEST(TestSdpaForms, EveryBackwardFormBindsExactlyItsOptionalFields)
 {
-    // The backward schema has no sink token, and no ragged form is built for it.
+    // The backward schema has no sink token.
     expectEveryFormBindsExactlyItsOptionalFields(
         "sdpa_bwd", {"q", "k", "v", "o", "do", "stats", "dq", "dk", "dv"});
 }
@@ -788,9 +797,76 @@ TEST(TestSdpaForms, RaggedPacksQOAndStatsThroughOneOffsetAndKVThroughAnother)
     }
 }
 
+TEST(TestSdpaForms, BackwardRaggedPacksTheQuerySideThroughOneOffsetAndTheKeySideThroughAnother)
+{
+    // cuDNN's THD backward: Q, O, dO, dQ and the statistics through one offset tensor, K, V, dK
+    // and dV through another, with the per-batch lengths and the padding mask beside them.
+    const auto built = buildForm(test::shippedOperation("sdpa_bwd"), "ragged");
+    ASSERT_TRUE(built.ok()) << built.error;
+    const auto* graph = asGraph(built.bytes);
+    const auto* attributes = graph->nodes()->Get(0)->attributes_as_SdpaBackwardAttributes();
+    ASSERT_NE(attributes, nullptr);
+
+    EXPECT_TRUE(attributes->padding_mask());
+    for(const auto uid : {attributes->seq_len_q_tensor_uid(), attributes->seq_len_kv_tensor_uid()})
+    {
+        const auto* lengths = tensorWithUid(*graph, uid);
+        ASSERT_NE(lengths, nullptr);
+        EXPECT_EQ(dimsOf(lengths), (Ints{BATCH, 1, 1, 1}));
+        EXPECT_EQ(lengths->data_type(), fb::DataType::INT32);
+    }
+
+    const std::map<std::string, const fb::TensorAttributes*> query{
+        {"q", tensorWithUid(*graph, attributes->q_tensor_uid())},
+        {"o", tensorWithUid(*graph, attributes->o_tensor_uid())},
+        {"dO", tensorWithUid(*graph, attributes->do_tensor_uid())},
+        {"dq", tensorWithUid(*graph, attributes->dq_tensor_uid())},
+        {"stats", tensorWithUid(*graph, attributes->stats_tensor_uid())}};
+    const std::map<std::string, const fb::TensorAttributes*> key{
+        {"k", tensorWithUid(*graph, attributes->k_tensor_uid())},
+        {"v", tensorWithUid(*graph, attributes->v_tensor_uid())},
+        {"dk", tensorWithUid(*graph, attributes->dk_tensor_uid())},
+        {"dv", tensorWithUid(*graph, attributes->dv_tensor_uid())}};
+    const auto offsetOf = [](const fb::TensorAttributes* tensor) {
+        return tensor == nullptr ? std::nullopt : tensor->ragged_offset_tensor_uid();
+    };
+    const auto queryOffsets = offsetOf(query.at("q"));
+    const auto keyOffsets = offsetOf(key.at("k"));
+    ASSERT_TRUE(queryOffsets.has_value());
+    ASSERT_TRUE(keyOffsets.has_value());
+    EXPECT_NE(*queryOffsets, *keyOffsets);
+    for(const auto& [name, tensor] : query)
+    {
+        EXPECT_EQ(offsetOf(tensor), queryOffsets) << name;
+    }
+    for(const auto& [name, tensor] : key)
+    {
+        EXPECT_EQ(offsetOf(tensor), keyOffsets) << name;
+    }
+    for(const auto uid : {*queryOffsets, *keyOffsets})
+    {
+        const auto* offsets = tensorWithUid(*graph, uid);
+        ASSERT_NE(offsets, nullptr);
+        EXPECT_EQ(dimsOf(offsets), (Ints{BATCH + 1, 1, 1, 1}));
+        EXPECT_EQ(offsets->data_type(), fb::DataType::INT32);
+    }
+
+    // Elements per token: each tensor's token stride, the statistics packed token-major.
+    for(const auto* name : {"q", "o", "dO", "dq"})
+    {
+        EXPECT_EQ(query.at(name)->ragged_offset_multiplier(), HEADS * HEAD_DIM) << name;
+    }
+    EXPECT_EQ(query.at("stats")->ragged_offset_multiplier(), HEADS);
+    for(const auto* name : {"k", "v", "dk", "dv"})
+    {
+        EXPECT_EQ(key.at(name)->ragged_offset_multiplier(), HEADS_KV * HEAD_DIM) << name;
+    }
+    EXPECT_EQ(graph->tensors()->size(), 13U);
+}
+
 TEST(TestSdpaForms, AFormTheDirectionDoesNotBuildIsRefusedByName)
 {
-    for(const auto* form : {"ragged", "sink", "paged"})
+    for(const auto* form : {"sink", "paged"})
     {
         const auto built = buildForm(test::shippedOperation("sdpa_bwd"), form);
         EXPECT_FALSE(built.ok()) << form;
@@ -866,6 +942,8 @@ TEST(TestSdpaForms, AFormWhoseOperandIsNotDeclaredIsRefusedByFormAndArgument)
         {"sdpa_bwd", "dropout", "seedStrides"},
         {"sdpa_bwd", "padded", "seqLenDataType"},
         {"sdpa_bwd", "bias", "biasStrides"},
+        {"sdpa_bwd", "ragged", "offsetsStrides"},
+        {"sdpa_bwd", "ragged", "seqLenDataType"},
     };
     for(const auto& missing : cases)
     {
@@ -898,12 +976,15 @@ TEST(TestSdpaForms, AScaleTensorWithNoStatedScaleToDefaultToIsRefused)
 TEST(TestSdpaForms, ARaggedFormOverTokensWithNoPositiveStrideIsRefused)
 {
     // The stride is the offsets' elements per token; zero would pack every token onto one.
-    const auto built = buildForm(
-        withConstantArgument(test::shippedOperation("sdpa_fwd"), "qStrides", Ints{0, 0, 0, 1}),
-        "ragged");
-    EXPECT_FALSE(built.ok());
-    EXPECT_NE(built.error.find("ragged"), std::string::npos) << built.error;
-    EXPECT_NE(built.error.find("qStrides"), std::string::npos) << built.error;
+    for(const std::string operation : {"sdpa_fwd", "sdpa_bwd"})
+    {
+        const auto built = buildForm(
+            withConstantArgument(test::shippedOperation(operation), "qStrides", Ints{0, 0, 0, 1}),
+            "ragged");
+        EXPECT_FALSE(built.ok()) << operation;
+        EXPECT_NE(built.error.find("ragged"), std::string::npos) << built.error;
+        EXPECT_NE(built.error.find("qStrides"), std::string::npos) << built.error;
+    }
 }
 
 } // namespace hipdnn_corpus_gen

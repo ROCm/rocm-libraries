@@ -435,8 +435,13 @@ TEST_P(TestShippedSdpaRealism, CorpusCoversHeadDimsLayoutsAndSequenceRelationsAM
         if(q > k)
         {
             ++cross;
-            EXPECT_FALSE(std::get<bool>(point.at("is_causal")))
-                << "a causal mask with more queries than keys";
+            // A causal mask over more queries than keys is anchored top-left, where every
+            // query row keeps a key.
+            if(std::get<bool>(point.at("is_causal")))
+            {
+                EXPECT_EQ(std::get<std::string>(point.at("alignment")), "top_left")
+                    << "a bottom-right causal mask with more queries than keys";
+            }
         }
         layouts.insert(std::get<std::string>(point.at("layout")));
     }
@@ -456,7 +461,7 @@ TEST_P(TestShippedSdpaRealism, CorpusCoversHeadDimsLayoutsAndSequenceRelationsAM
     EXPECT_GT(share(wide), SDPA_WIDE_SHARE) << "most rows should be heads of D >= 32";
     EXPECT_GT(share(square), SDPA_SQUARE_SHARE) << "prefill is the dominant case";
     EXPECT_GT(cross, 0U) << "no cross attention";
-    EXPECT_EQ(layouts, (std::set<std::string>{"bhsd", "bshd", "kv_bhsd"}));
+    EXPECT_EQ(layouts, (std::set<std::string>{"bhsd", "bshd", "kv_bhsd", "qkv_packed", "sbhd"}));
 }
 
 TEST_P(TestShippedSdpaRealism, ArchetypesAnchorCrossAttentionAndTheHeadWidthsOfRealModels)

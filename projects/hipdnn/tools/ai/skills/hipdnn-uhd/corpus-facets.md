@@ -42,18 +42,23 @@ parameter repeated widens it. Examples:
   `--keep q.dtype=bf16 --keep q.head_dim=128 --keep q.is_causal=false`
   (`dtype` values are `fp16`, `bf16`, `fp32`; `is_causal` is a bool).
 - SDPA also varies `form` (which optional attributes and tensors the graph binds: `plain`,
-  `scale_unset`, `scale_tensor`, `dropout`, `padded`, `bias`, and on `sdpa_fwd` `ragged` and
-  `sink`), `layout` (`bshd`, `bhsd`, `kv_bhsd`: the strides), `scale` (`inv_sqrt_d`, `unit`,
-  `jitter`) and, on `sdpa_fwd`, `window` (`none`, `local_128`, `local_1024`, `local_4096`). An
-  engine that serves only plain BSHD keeps `--keep q.form=plain --keep q.layout=bshd`;
-  otherwise leave them free, since a set with one form, layout or scale teaches a model nothing
-  about the others. Not every pairing is declared, so a `--keep` on one facet can pin another:
+  `scale_unset`, `scale_tensor`, `dropout`, `padded`, `ragged`, `bias`, and on `sdpa_fwd`
+  `sink`), `layout` (the strides: `bshd`, `bhsd`, `kv_bhsd`, `sbhd`, and `qkv_packed`, Q, K and
+  V as views of one fused projection), `scale` (`inv_sqrt_d`, `unit`, `jitter`), `window`
+  (`none`, `local_128`, `local_1024`, `local_4096`) and `value_head_dim` (`same`, or `mla`: V
+  and O 64 narrower than Q and K, as in DeepSeek's 192/128). An engine that serves only plain
+  BSHD keeps `--keep q.form=plain --keep q.layout=bshd --keep q.value_head_dim=same`; otherwise
+  leave them free, since a set with one form, layout or scale teaches a model nothing about the
+  others. Not every pairing is declared, so a `--keep` on one facet can pin another:
   `scale_unset` and `scale_tensor` take `scale=inv_sqrt_d` only (they state no scale value, or
-  pass it as a tensor, so the facet would list one graph under three scales), and `ragged`
-  takes `layout=bshd` only (it packs tokens through offset tensors, so it needs token-major
-  strides). A window needs seqlen_q <= seqlen_k whatever the form. Every other pairing, dropout,
-  sink, bias and padded included with any window and layout, is declared: whether an engine
-  serves it is the engine oracle's decision, not the declaration's.
+  pass it as a tensor, so the facet would list one graph under three scales), `ragged` takes the
+  token-major `bshd` and `qkv_packed` only (it packs tokens through offset tensors), `qkv_packed`
+  needs `seqlen_q == seqlen_k` (one projection is self-attention), `sbhd` needs a batch and a
+  sequence above 1 (otherwise it aliases `bshd`), and `mla` needs `head_dim >= 128`. A window
+  needs seqlen_q <= seqlen_k whatever the form. More queries than keys (cross attention) is
+  declared causal or not, its diagonal anchored top-left. Every other pairing, dropout, sink,
+  bias and padded included with any window and layout, is declared: whether an engine serves it
+  is the engine oracle's decision, not the declaration's.
 - `pointwise` for an fp16 ADD kernel: `--keep q.dtype=fp16 --keep q.mode=ADD`
   (`mode` uses the FlatBuffers enumerator names ADD, MUL, SUB, DIV, MAX_OP, MIN_OP).
 
@@ -72,9 +77,10 @@ no causal top-left graph), equal shares would leave some combination with almost
 parameter is kept as the first pass left it, the run says so on stderr, and every combination
 keeps its place in the cut. A declaration that weights
 nothing is cut in proportion to what its first pass holds. The SDPA files weight `layout`,
-`scale` and, on `sdpa_fwd`, `window`, keeping the common configuration (BSHD, `1/sqrt(head_dim)`,
-no window) at about half of each facet of the sweep from about `--count 300` up; a shorter cut
-cannot place a share that fine (no window is 0.42 of `sdpa_fwd` at `--count 100`). The weights
+`scale`, `window` and `value_head_dim`, keeping the common configuration (BSHD,
+`1/sqrt(head_dim)`, no window, V as wide as Q) at about half of each facet of the sweep (three
+quarters of `value_head_dim`) from about `--count 300` up; a shorter cut cannot place a share
+that fine. The weights
 shape the sweep and its cut only: recorded model shapes (`--model-shapes`) and kernel-catalog
 entries (`--kdp-root`) are kept as recorded. Each is a real configuration whose facets are what
 they are (a pack's from its `kernel_catalog.constants`, a shape file's from its columns or the
@@ -86,28 +92,30 @@ The SDPA files do not weight `form`, so each form is a stratum of its own and co
 first pass's budget like `dtype` does. That budget is `--per-combination` (default 50) for each
 live combination of the unweighted parameters (`is_causal`, `alignment`, `dtype`, `form`, and on
 `sdpa_fwd` `generate_stats`), not of the weighted ones: without `--count`, `sdpa_fwd` is about
-8,900 problems and `sdpa_bwd` about 2,700. That is the default corpus cost: an engine-backed
+8,600 problems and `sdpa_bwd` about 3,900. That is the default corpus cost: an engine-backed
 default `sdpa_fwd` run issues about four times the engine queries of the declaration without the
 SDPA facets (1.03 million against 0.26 million, 1,600 s against 470 s, for one RDNA engine at
-`--count 300`), and a lower `--per-combination` shortens it in proportion. The pipeline passes
-`--count 2000` per operation.
+`--count 300`, measured before the `sbhd`, `qkv_packed` and `mla` facets), and a lower
+`--per-combination` shortens it in proportion. The pipeline passes `--count 2000` per operation.
 
 Without `--count` the forms come out in proportion to the combinations that can hold them:
-`sdpa_fwd` holds about 1,400 graphs each of `plain`, `dropout`, `padded`, `bias` and `sink`,
-about 650 each of `scale_tensor` and `ragged` and about 560 of `scale_unset`, because those
-forms are declared with one scale (`scale_unset`, `scale_tensor`: `inv_sqrt_d` only) or one
-layout (`ragged`: `bshd` only), so fewer combinations can hold a problem. With `--count` the cut
-takes each form evenly, as far as the first pass holds it: `sdpa_fwd` at `--count 2000` comes
-out at about an eighth each, while `sdpa_bwd` holds only about 220 rows each of `scale_unset`
-and `scale_tensor`, all of which a 2000 cut takes (about 11% each, against about 19.5% for each
-of the other four forms). Those two forms state only `1/sqrt(head_dim)`, so with them used up
-its share of `sdpa_bwd` at `--count 2000` is about 0.44. `--form-floor` tops each form up to its
-count regardless.
+`sdpa_fwd` holds about 1,300-1,500 graphs each of `plain`, `dropout`, `padded`, `bias` and
+`sink`, about 630 of `ragged`, 570 of `scale_tensor` and 440 of `scale_unset`; `sdpa_bwd` about
+700-790 each of its four unconstrained forms, 350 of `ragged`, 290 of `scale_unset` and 210 of
+`scale_tensor`. Those forms are declared with one scale (`inv_sqrt_d`) or two layouts (`ragged`),
+so fewer combinations can hold a problem. With `--count` the cut takes each form evenly, as far
+as the first pass holds it: `sdpa_fwd` at `--count 2000` comes out at an eighth each (245-256
+rows), while `sdpa_bwd` holds 187 of `scale_tensor`, 253 of `scale_unset` and 278 of `ragged`
+against about 320 each of the other four. `--form-floor` tops each form up to its count
+regardless.
 
-Because the product of sdpa_fwd's facets (6912 combinations) is past the 1024 bound, the forward
-explores a scattered sample of the combinations that can hold a problem, every declared value
-present. A `--keep` on an enum or bool facet narrows the combinations before that bound applies,
-so the sample is of the combinations the keep admits (a keep that leaves 8 of the 6912 explores
+Both SDPA declarations are past the 1024 bound (`sdpa_fwd` 23040 combinations, 16380 of them able
+to hold a problem; `sdpa_bwd` 10080, of them 6840), so each explores a sample of the
+combinations that can hold a problem, every declared value present. The sample walks the product
+in a keyed pseudo-random order (a Feistel permutation), not a stride: a stride ties digits of
+the product together and starved whole forms (`scale_unset` held 1 of the 56 combinations it was
+due). A `--keep` on an enum or bool facet narrows the combinations before that bound applies, so
+the sample is of the combinations the keep admits (a keep that leaves 8 of the 23040 explores
 all 8). `manifest.json` reports the combinations under
 `reports.categorical_combinations.<operation>`: `total` is the product the keeps admit,
 `constraint_empty` how many of them the declaration's constraints leave unable to hold a problem

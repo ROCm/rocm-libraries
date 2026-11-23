@@ -503,13 +503,37 @@ inline std::optional<builders::TensorSpec> sdpaOperand(const ArgumentResolution&
     return tensorFrom(uid, name, *d, *st, *type);
 }
 
-/// @brief Applies the declared `form` of an attention graph that both directions have: which
-/// optional attributes and tensors it binds, everything else as the plain graph has it.
+/// @brief Binds the per-batch valid lengths, INT32 [B, 1, 1, 1] seq_len_q and seq_len_kv, with
+/// the padding mask that reads them. Returns the reason it cannot, empty on success.
+inline std::string applySdpaLengths(const ArgumentResolution& resolved,
+                                    const std::string& builder,
+                                    const std::string& form,
+                                    builders::SdpaOptions& options,
+                                    builders::SdpaOperands& operands)
+{
+    std::string error;
+    auto seqLenQ
+        = sdpaOperand(resolved, builder, form, SDPA_SEQ_LEN_Q_UID, "seqLenQ", "seqLen", error);
+    auto seqLenKv
+        = sdpaOperand(resolved, builder, form, SDPA_SEQ_LEN_KV_UID, "seqLenKv", "seqLen", error);
+    if(!seqLenQ.has_value() || !seqLenKv.has_value())
+    {
+        return error;
+    }
+    options.paddingMask = true;
+    operands.seqLenQ = std::move(seqLenQ);
+    operands.seqLenKv = std::move(seqLenKv);
+    return {};
+}
+
+/// @brief Applies the declared `form` of an attention graph that both directions build the same
+/// way: which optional attributes and tensors it binds, everything else as the plain graph has
+/// it.
 ///
 /// Absent or `plain` binds none, so a declaration without a form builds the graph it always did.
-/// Returns the reason a form cannot be built, empty on success. The forms only the forward
-/// carries (`sink`, `ragged`) are the forward adapter's; here they are unknown, which is what
-/// the backward adapter reports.
+/// Returns the reason a form cannot be built, empty on success. `sink` (forward only) and
+/// `ragged` (built differently per direction) are the adapters' own; here they are unknown,
+/// which is what an adapter that does not build them reports.
 inline std::string applySdpaCommonForm(const ArgumentResolution& resolved,
                                        const std::string& builder,
                                        const std::string& form,
@@ -562,18 +586,7 @@ inline std::string applySdpaCommonForm(const ArgumentResolution& resolved,
     }
     if(form == "padded")
     {
-        auto seqLenQ
-            = sdpaOperand(resolved, builder, form, SDPA_SEQ_LEN_Q_UID, "seqLenQ", "seqLen", error);
-        auto seqLenKv = sdpaOperand(
-            resolved, builder, form, SDPA_SEQ_LEN_KV_UID, "seqLenKv", "seqLen", error);
-        if(!seqLenQ.has_value() || !seqLenKv.has_value())
-        {
-            return error;
-        }
-        options.paddingMask = true;
-        operands.seqLenQ = std::move(seqLenQ);
-        operands.seqLenKv = std::move(seqLenKv);
-        return {};
+        return applySdpaLengths(resolved, builder, form, options, operands);
     }
     if(form == "bias")
     {
@@ -588,25 +601,24 @@ inline std::string applySdpaCommonForm(const ArgumentResolution& resolved,
     return builder + ": form '" + form + "' is not one it builds";
 }
 
-/// @brief Packs the forward's operands into the compact THD form: one offset tensor for Q, O and
-/// the statistics, one for K and V, no sequence-length tensors (as the test SDK's vLLM-form
-/// graph with a ragged Q and KV). Each tensor's elements per token is its token stride, so
-/// the strides must lay the tokens out contiguously. Returns the reason it cannot, empty on
-/// success.
-inline std::string applySdpaRaggedForm(const ArgumentResolution& resolved,
-                                       const std::string& form,
-                                       builders::TensorSpec& q,
-                                       builders::TensorSpec& k,
-                                       builders::TensorSpec& v,
-                                       builders::TensorSpec& o,
-                                       std::optional<builders::TensorSpec>& stats,
-                                       builders::SdpaForwardOperands& operands)
+/// @brief Packs @p querySide through one INT32 [B + 1, 1, 1, 1] offset tensor and @p keySide
+/// through another, each tensor's elements per token being its token stride (so the strides
+/// must lay the tokens out contiguously). The forward's ragged form is the test SDK's
+/// vLLM-form compact THD (Q, O and the statistics, then K and V; no length tensors); the
+/// backward's packs Q, O, dO, dQ and the statistics, then K, V, dK and dV, and adds the
+/// lengths (applySdpaLengths). Returns the reason it cannot, empty on success.
+inline std::string applySdpaRaggedOffsets(const ArgumentResolution& resolved,
+                                          const std::string& builder,
+                                          const std::string& form,
+                                          const std::vector<builders::TensorSpec*>& querySide,
+                                          const std::vector<builders::TensorSpec*>& keySide,
+                                          builders::SdpaOperands& operands)
 {
     std::string error;
-    auto qOffsets = sdpaOperand(
-        resolved, "sdpaForward", form, SDPA_Q_OFFSETS_UID, "qOffsets", "offsets", error);
-    auto kvOffsets = sdpaOperand(
-        resolved, "sdpaForward", form, SDPA_KV_OFFSETS_UID, "kvOffsets", "offsets", error);
+    auto qOffsets
+        = sdpaOperand(resolved, builder, form, SDPA_Q_OFFSETS_UID, "qOffsets", "offsets", error);
+    auto kvOffsets
+        = sdpaOperand(resolved, builder, form, SDPA_KV_OFFSETS_UID, "kvOffsets", "offsets", error);
     if(!qOffsets.has_value() || !kvOffsets.has_value())
     {
         return error;
@@ -616,20 +628,20 @@ inline std::string applySdpaRaggedForm(const ArgumentResolution& resolved,
     const auto pack = [&](builders::TensorSpec& tensor, const builders::TensorSpec& offsets) {
         if(tensor.strides.size() <= TOKEN_AXIS || tensor.strides[TOKEN_AXIS] < 1)
         {
-            error = "sdpaForward: form '" + form + "' needs " + tensor.name
+            error = builder + ": form '" + form + "' needs " + tensor.name
                     + "Strides with a positive token stride at axis 2";
             return;
         }
         tensor.raggedOffsetUid = offsets.uid;
         tensor.raggedOffsetMultiplier = tensor.strides[TOKEN_AXIS];
     };
-    pack(q, *qOffsets);
-    pack(o, *qOffsets);
-    pack(k, *kvOffsets);
-    pack(v, *kvOffsets);
-    if(stats.has_value())
+    for(auto* tensor : querySide)
     {
-        pack(*stats, *qOffsets);
+        pack(*tensor, *qOffsets);
+    }
+    for(auto* tensor : keySide)
+    {
+        pack(*tensor, *kvOffsets);
     }
     if(!error.empty())
     {
@@ -789,8 +801,13 @@ inline const std::map<std::string, BuilderAdapter>& builderRegistry()
              }
              else if(form == "ragged")
              {
-                 error = detail::applySdpaRaggedForm(
-                     resolved, form, qTensor, kTensor, vTensor, oTensor, stats, operands);
+                 std::vector<builders::TensorSpec*> querySide{&qTensor, &oTensor};
+                 if(stats.has_value())
+                 {
+                     querySide.push_back(&*stats);
+                 }
+                 error = detail::applySdpaRaggedOffsets(
+                     resolved, "sdpaForward", form, querySide, {&kTensor, &vTensor}, operands);
              }
              else
              {
@@ -978,9 +995,33 @@ inline const std::map<std::string, BuilderAdapter>& builderRegistry()
              }
              options.diagonalAlignment = *alignment;
 
+             // t holds q, k, v, o, dO, stats, dq, dk, dv in that order.
+             const auto form = detail::enumName(resolved, "form");
              builders::SdpaOperands operands;
-             const auto error = detail::applySdpaCommonForm(
-                 resolved, "sdpaBackward", detail::enumName(resolved, "form"), options, operands);
+             std::string error;
+             if(form == "ragged")
+             {
+                 // cuDNN's THD backward: the offsets locate each sequence and the lengths
+                 // bound it, so the lengths and the padding mask come with the offsets (the
+                 // forward's compact THD form has neither). A ragged backward without them is
+                 // one no engine serves: FlyDSL's matcher declines it (checkVarlen).
+                 error
+                     = detail::applySdpaLengths(resolved, "sdpaBackward", form, options, operands);
+                 if(error.empty())
+                 {
+                     error = detail::applySdpaRaggedOffsets(resolved,
+                                                            "sdpaBackward",
+                                                            form,
+                                                            {&t[0], &t[3], &t[4], &t[5], &t[6]},
+                                                            {&t[1], &t[2], &t[7], &t[8]},
+                                                            operands);
+                 }
+             }
+             else
+             {
+                 error = detail::applySdpaCommonForm(
+                     resolved, "sdpaBackward", form, options, operands);
+             }
              if(!error.empty())
              {
                  return {{}, error};
