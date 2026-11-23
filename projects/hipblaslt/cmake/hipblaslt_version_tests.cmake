@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 
 # Tests hipblaslt_version.cmake. Run as
-#   cmake -DWORK_DIR=<dir> -P hipblaslt_version_tests.cmake
+#   cmake -P hipblaslt_version_tests.cmake
 # Each case runs this script again with -DCASE=... in a child process, so a case
 # that must stop configuration with FATAL_ERROR can be checked too.
 
@@ -12,40 +12,13 @@ include("${CMAKE_CURRENT_LIST_DIR}/hipblaslt_version.cmake")
 
 if(DEFINED CASE)
     if(CASE STREQUAL "project")
-        hipblaslt_resolve_project_version("${EXPLICIT}" "${ROCM}" "${ROOT}" _result)
+        hipblaslt_resolve_project_version("${EXPLICIT}" "${ROCM}" "${REQUIRE}" _result)
     else()
         hipblaslt_build_version("${PROJECT}" "${PACKAGE}" "${REVISION}" _result)
     endif()
     message(STATUS "RESULT=[${_result}]")
     return()
 endif()
-
-if(NOT DEFINED WORK_DIR)
-    message(FATAL_ERROR "hipblaslt_version_tests: WORK_DIR is not set")
-endif()
-file(REMOVE_RECURSE "${WORK_DIR}")
-
-# Creates a fake ROCm root <name> with an optional manifest identity and
-# .info/version line ("-" for none).
-function(make_root name manifest info)
-    set(_root "${WORK_DIR}/${name}")
-    file(MAKE_DIRECTORY "${_root}")
-    if(NOT manifest STREQUAL "-")
-        file(WRITE "${_root}/share/therock/therock_manifest.json"
-            "{\"rocm_package_version\": \"${manifest}\", \"rocm_version\": \"ignored\"}\n")
-    endif()
-    if(NOT info STREQUAL "-")
-        file(WRITE "${_root}/.info/version" "${info}\n")
-    endif()
-endfunction()
-
-make_root(manifest_only "10.3.0a20261116" "-")
-make_root(info_only "-" "10.2.1-123")
-make_root(local_manifest "git" "10.3.0")
-make_root(both_agree "10.3.0rc1" "10.3.0")
-make_root(disagree "10.3.0rc1" "10.2.0")
-make_root(garbage "not-a-version" "nope")
-make_root(empty "-" "-")
 
 set(_failures 0)
 
@@ -86,19 +59,16 @@ function(check name expected expect_warning)
 endfunction()
 
 set(P -DCASE=project)
-check(explicit_wins 1.2.3 FALSE ${P} -DEXPLICIT=1.2.3 -DROCM=10.3.0 "-DROOT=${WORK_DIR}/manifest_only")
-check(rocm_version_beats_root 10.3.0 FALSE ${P} -DEXPLICIT= -DROCM=10.3.0 "-DROOT=${WORK_DIR}/info_only")
-check(manifest_only 10.3.0 FALSE ${P} -DEXPLICIT= -DROCM= "-DROOT=${WORK_DIR}/manifest_only")
-check(info_only 10.2.1 FALSE ${P} -DEXPLICIT= -DROCM= "-DROOT=${WORK_DIR}/info_only")
-check(local_manifest_uses_info 10.3.0 FALSE ${P} -DEXPLICIT= -DROCM= "-DROOT=${WORK_DIR}/local_manifest")
-check(both_agree 10.3.0 FALSE ${P} -DEXPLICIT= -DROCM= "-DROOT=${WORK_DIR}/both_agree")
-check(disagree_falls_back 0.0.0 TRUE ${P} -DEXPLICIT= -DROCM= "-DROOT=${WORK_DIR}/disagree")
-check(garbage_falls_back 0.0.0 TRUE ${P} -DEXPLICIT= -DROCM= "-DROOT=${WORK_DIR}/garbage")
-check(empty_root_falls_back 0.0.0 TRUE ${P} -DEXPLICIT= -DROCM= "-DROOT=${WORK_DIR}/empty")
-check(missing_root_falls_back 0.0.0 TRUE ${P} -DEXPLICIT= -DROCM= "-DROOT=${WORK_DIR}/missing")
-check(two_parts_is_fatal FATAL FALSE ${P} -DEXPLICIT=10.3 -DROCM= "-DROOT=${WORK_DIR}/empty")
-check(part_above_999_is_fatal FATAL FALSE ${P} -DEXPLICIT= -DROCM=10.1000.0 "-DROOT=${WORK_DIR}/empty")
-check(part_999_is_allowed 999.999.999 FALSE ${P} -DEXPLICIT=999.999.999 -DROCM= "-DROOT=${WORK_DIR}/empty")
+check(explicit_wins 1.2.3 FALSE ${P} -DEXPLICIT=1.2.3 -DROCM=10.3.0 -DREQUIRE=OFF)
+check(rocm_version_used 10.3.0 FALSE ${P} -DEXPLICIT= -DROCM=10.3.0 -DREQUIRE=OFF)
+check(standalone_default 1.5.0 FALSE ${P} -DEXPLICIT= -DROCM= -DREQUIRE=OFF)
+check(explicit_zero_is_allowed 0.0.0 FALSE ${P} -DEXPLICIT=0.0.0 -DROCM= -DREQUIRE=OFF)
+check(therock_rocm_version_used 10.3.0 FALSE ${P} -DEXPLICIT= -DROCM=10.3.0 -DREQUIRE=ON)
+check(therock_explicit_wins 1.2.3 FALSE ${P} -DEXPLICIT=1.2.3 -DROCM= -DREQUIRE=ON)
+check(therock_without_rocm_version_is_fatal FATAL FALSE ${P} -DEXPLICIT= -DROCM= -DREQUIRE=ON)
+check(two_parts_is_fatal FATAL FALSE ${P} -DEXPLICIT=10.3 -DROCM= -DREQUIRE=OFF)
+check(part_above_999_is_fatal FATAL FALSE ${P} -DEXPLICIT= -DROCM=10.1000.0 -DREQUIRE=OFF)
+check(part_999_is_allowed 999.999.999 FALSE ${P} -DEXPLICIT=999.999.999 -DROCM= -DREQUIRE=OFF)
 
 set(B -DCASE=build -DPROJECT=10.3.0 -DREVISION=f4e24d58b)
 check(release "10.3.0 (git f4e24d58b)" FALSE ${B} -DPACKAGE=10.3.0)

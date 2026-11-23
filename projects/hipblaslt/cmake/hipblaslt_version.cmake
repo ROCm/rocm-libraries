@@ -12,61 +12,31 @@ set(HIPBLASLT_ROCM_IDENTITY_REGEX
 # hipblasLtGetBuildVersion callers may size their buffer to this.
 set(HIPBLASLT_BUILD_VERSION_MAX_LENGTH 256)
 
-# Sets <output> to the X.Y.Z of the ROCm installed at <root>, or to "" when the
-# root records none or its two records disagree.
-function(hipblaslt_rocm_root_version root output)
-    set(_manifest "")
-    set(_manifest_file "${root}/share/therock/therock_manifest.json")
-    if(EXISTS "${_manifest_file}")
-        file(READ "${_manifest_file}" _json)
-        string(JSON _identity ERROR_VARIABLE _error GET "${_json}" rocm_package_version)
-        if(NOT _error AND _identity MATCHES "${HIPBLASLT_ROCM_IDENTITY_REGEX}")
-            set(_manifest "${CMAKE_MATCH_1}")
-        endif()
-    endif()
-
-    set(_info "")
-    set(_info_file "${root}/.info/version")
-    if(EXISTS "${_info_file}")
-        file(STRINGS "${_info_file}" _line LIMIT_COUNT 1)
-        if(_line MATCHES "^([0-9]+\\.[0-9]+\\.[0-9]+)")
-            set(_info "${CMAKE_MATCH_1}")
-        endif()
-    endif()
-
-    if(_manifest AND _info AND NOT _manifest STREQUAL _info)
-        message(WARNING "Inconsistent ROCm installation at ${root}: ${_manifest_file} says "
-            "${_manifest} but ${_info_file} says ${_info}; not using either.")
-        set(${output} "" PARENT_SCOPE)
-    elseif(_manifest)
-        set(${output} "${_manifest}" PARENT_SCOPE)
-    else()
-        set(${output} "${_info}" PARENT_SCOPE)
-    endif()
-endfunction()
+# Builds outside TheRock that set neither HIPBLASLT_PROJECT_VERSION nor
+# ROCM_VERSION report this. It is not bumped; their build version carries
+# ".dev0" and the git revision, so it never names a release.
+set(HIPBLASLT_STANDALONE_VERSION "1.5.0")
 
 # Sets <output> to the hipBLASLt product version, X.Y.Z, taken from the first of:
 # <explicit> (HIPBLASLT_PROJECT_VERSION), <rocm_version> (ROCM_VERSION from a
-# superproject such as TheRock), the ROCm installed at <rocm_root>, or 0.0.0.
+# superproject such as TheRock), or HIPBLASLT_STANDALONE_VERSION. When
+# <require_rocm_version> is true (a TheRock build), a missing <rocm_version> is
+# fatal instead, so a broken superproject never ships the stale fallback.
 # Consumers pack each part into three decimal digits (MIOpen's
 # MIOPEN_HIPBLASLT_VERSION_FLAT), so no part may exceed 999.
-function(hipblaslt_resolve_project_version explicit rocm_version rocm_root output)
+function(hipblaslt_resolve_project_version explicit rocm_version require_rocm_version output)
     if(NOT explicit STREQUAL "")
         set(_version "${explicit}")
         set(_source "HIPBLASLT_PROJECT_VERSION")
     elseif(NOT rocm_version STREQUAL "")
         set(_version "${rocm_version}")
         set(_source "ROCM_VERSION")
+    elseif(require_rocm_version)
+        message(FATAL_ERROR "A TheRock build of hipBLASLt needs -DROCM_VERSION=X.Y.Z "
+            "(TheRock's version.json) or -DHIPBLASLT_PROJECT_VERSION=X.Y.Z.")
     else()
-        hipblaslt_rocm_root_version("${rocm_root}" _version)
-        set(_source "the ROCm installation at ${rocm_root}")
-        if(_version STREQUAL "")
-            message(WARNING "No ROCm version found (set ROCM_VERSION or "
-                "HIPBLASLT_PROJECT_VERSION, or build against a ROCm installation with "
-                ".info/version); hipBLASLt reports version 0.0.0.")
-            set(_version "0.0.0")
-            set(_source "the fallback")
-        endif()
+        set(_version "${HIPBLASLT_STANDALONE_VERSION}")
+        set(_source "the default for builds outside TheRock")
     endif()
 
     if(NOT _version MATCHES "^([0-9]+)\\.([0-9]+)\\.([0-9]+)$")

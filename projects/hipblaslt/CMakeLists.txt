@@ -35,19 +35,12 @@ include(tensilelite_supported_architectures)
 include(hipblaslt_version)
 
 set(HIPBLASLT_PROJECT_VERSION "" CACHE STRING
-    "Override the hipBLASLt version (X.Y.Z); empty takes ROCM_VERSION or the build's ROCm version.")
+    "Override the hipBLASLt version (X.Y.Z); empty takes ROCM_VERSION, else ${HIPBLASLT_STANDALONE_VERSION}.")
 set(THEROCK_PACKAGE_VERSION "" CACHE STRING
     "ROCm package identity for the build version, e.g. 10.3.0a20261103 (from TheRock).")
 
-# TheRock's toolchain root records no ROCm version, so without ROCM_VERSION a
-# TheRock build would report 0.0.0 and fail rocBLAS's find_package(hipblaslt 1.2.2).
-if(HIPBLASLT_ENABLE_THEROCK AND HIPBLASLT_PROJECT_VERSION STREQUAL "" AND "${ROCM_VERSION}" STREQUAL "")
-    message(FATAL_ERROR "A TheRock build of hipBLASLt needs -DROCM_VERSION=X.Y.Z "
-        "(TheRock's version.json) or -DHIPBLASLT_PROJECT_VERSION.")
-endif()
-hipblaslt_resolve_build_rocm_root(_hipblaslt_version_rocm_root)
 hipblaslt_resolve_project_version("${HIPBLASLT_PROJECT_VERSION}" "${ROCM_VERSION}"
-    "${_hipblaslt_version_rocm_root}" PROJECT_VERSION)
+    "${HIPBLASLT_ENABLE_THEROCK}" PROJECT_VERSION)
 string(REPLACE "." ";" VERSION_LIST ${PROJECT_VERSION})
 list(GET VERSION_LIST 0 PROJECT_VERSION_MAJOR)
 list(GET VERSION_LIST 1 PROJECT_VERSION_MINOR)
@@ -689,7 +682,6 @@ if(HIPBLASLT_BUILD_TESTING OR BUILD_TESTING)
     add_test(
         NAME hipblaslt.version-resolution
         COMMAND "${CMAKE_COMMAND}"
-            "-DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/version-resolution"
             -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/hipblaslt_version_tests.cmake"
     )
 endif()
