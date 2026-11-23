@@ -317,6 +317,24 @@ if(BUILD_TESTING)
                  rocke_qk_scale_spec_validate)
   endif()
 
+  # The attention capability table in the C++ engine: the values and Python
+  # messages tests/helpers/test_attention_arch_caps.py pins.
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/test_attention_arch_caps.cpp")
+    add_executable(rocke_attention_arch_caps core/test_attention_arch_caps.cpp)
+    target_link_libraries(rocke_attention_arch_caps PRIVATE rocke_core)
+    add_test(NAME rocke_attention_arch_caps
+             COMMAND rocke_attention_arch_caps)
+    set_tests_properties(rocke_attention_arch_caps
+                         PROPERTIES LABELS "ckc;unit;host")
+    rocke_cxx_test_installed_name(_rocke_installed_name rocke_attention_arch_caps)
+    set_target_properties(rocke_attention_arch_caps
+                          PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+    install(TARGETS rocke_attention_arch_caps
+            RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+    set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
+                 rocke_attention_arch_caps)
+  endif()
+
   # The buffer address space of the C++ tensor view: the Python error kind and
   # message for each refused call (tests/core/test_tensor_view_buffer_errors.py
   # pins the Python side).

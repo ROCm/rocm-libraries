@@ -32,13 +32,12 @@
  *
  * ARCH GATE NOTE (validate_tiled_attention_arch). The Python validator
  * (instances/common/attention_arch.py) admits two families: the gfx950 wide-K +
- * ds_read_tr path and the gfx942 narrow 16x16x16 strided-V path. The C arch
- * surface (rocke/helper_rocke.core.arch.h) exposes op_for_shape but not the
- * memory.has_ds_read_tr predicate, so the wide-K admission is reproduced via the
- * catalogued 16x16x32 f16 atom only (the canonical wide-K marker). On gfx942 the
- * relevant branch is the narrow path (gfx942 in {_NARROW_TILED_2D_ARCHES} AND
- * the 16x16x16 f16+bf16 atoms present), which IS fully reproducible here. The
- * fallback reason strings mirror the Python text byte-for-byte.
+ * ds_read_tr path and the gfx942 narrow 16x16x16 strided-V path. The wide-K
+ * admission here requires both the catalogued 16x16x32 f16 atom and
+ * memory.has_ds_read_tr, as the Python does. On gfx942 the relevant branch is
+ * the narrow path (gfx942 in {_NARROW_TILED_2D_ARCHES} AND the 16x16x16
+ * f16+bf16 atoms present). The fallback reason strings mirror the Python text
+ * byte-for-byte.
  */
 #include <math.h>
 #include <stdio.h>
@@ -49,6 +48,7 @@
 #include "rocke/error_boundary.hpp" /* ckc::guard_builder boundary shim */
 #include "rocke/helper_rocke.core.arch.h" /* rocke_archtarget_from_gfx, op_for_shape */
 #include "rocke/helper_rocke.helpers.atoms.h" /* rocke_mfma_atom, make_c_warp_dstr_encoding */
+#include "rocke/helper_rocke.helpers.attention_arch_caps.h"
 #include "rocke/helper_rocke.helpers.distribution.h" /* make_static_tile_distribution */
 #include "rocke/helper_rocke.helpers.spec.h" /* rocke_kernel_name_join */
 #include "rocke/helper_rocke.instances.common._fmha_common.h" /* rocke_attention_check_head_counts */
@@ -497,10 +497,9 @@ bool rocke_gfx942_attention_tiled_3d_supports(int head_size,
         return false;
     }
     arch_ok = false;
-    if(rocke_attn3d_wide_k_available(target))
+    if(rocke_attn3d_wide_k_available(target) && target->memory.has_ds_read_tr)
     {
-        /* gfx950 wide-K + ds_read_tr path (ds_read_tr not queryable in C; the
-         * wide-K marker is taken as admission, see ARCH GATE NOTE). */
+        /* gfx950 wide-K + ds_read_tr path (validate_tiled_attention_arch). */
         arch_ok = true;
     }
     else if(rocke_attn3d_streq(eff_arch, "gfx942") && rocke_attn3d_narrow_k_available(target))
@@ -701,7 +700,7 @@ bool rocke_gfx942_attn_tiled_3d_config_from_spec(
     }
 
     /* ---- async / wide / fp8 KV feed geometry (lines 549-667) ---- */
-    out->ASYNC_LDS_DWORDS = 1;
+    out->ASYNC_LDS_DWORDS = rocke_attn_max_lds_dma_dwords("gfx942");
     out->HALVES_PER_LANE = out->ASYNC_LDS_DWORDS * 2;
     out->KV_HALVES_PER_CALL = out->THREADS * out->HALVES_PER_LANE;
 

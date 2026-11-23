@@ -99,6 +99,7 @@ from rocke.helpers.attention import (
     pv32_v_load_paired,
     dequant_fp8x8_to_dtype,
 )
+from rocke.helpers.attention_arch_caps import attn_arch_caps
 from rocke.helpers.schedule import MFMA, VALU, TRANS, DS_READ
 from rocke.helpers.spec import align_up as _align_up
 from kernels.common.attention_dense_spec import (
@@ -171,6 +172,19 @@ LOG2E = 1.4426950408889634
 GFX950_DENSE_LAYOUTS = MappingProxyType(
     {"default": MappingProxyType({"lds_v_row_pad": 32})}
 )
+# LDS-DMA widths of the K / V feeds, from the attention capability table: the
+# default path issues the narrowest gfx950 width (1 dword), the wide_lds_dma
+# path the widest (4 dwords, dwordx4).
+_DMA_DWORDS = min(attn_arch_caps("gfx950").lds_dma_dwords)
+_WIDE_DMA_DWORDS = attn_arch_caps("gfx950").max_lds_dma_dwords
+# The per-lane LDS addresses below are written for these two widths (lane * 2
+# halves on the default path, 8-half d_buckets on the wide path).
+if (_DMA_DWORDS, _WIDE_DMA_DWORDS) != (1, 4):
+    raise RuntimeError(
+        "gfx950 dense attention lane addressing assumes LDS-DMA widths (1, 4); "
+        f"the capability table gives ({_DMA_DWORDS}, {_WIDE_DMA_DWORDS})"
+    )
+
 _DEFAULT_GFX950_LAYOUT = GFX950_DENSE_LAYOUTS["default"]
 
 # Shipped defaults of the performance knobs on Gfx950AttentionDenseSpec.
@@ -966,12 +980,12 @@ def build_attention_dense(
     gqa = Hq // Hkv
     stride_q_tok = Hq * D
     stride_k_tok = Hkv * D
-    # DMA row packing: one async_buffer_load_lds instr moves 64 lanes x 2 bf16 =
-    # 128 elems. D==128 => 1 row/instr (the padded fast path, byte-identical).
+    # DMA row packing: one async_buffer_load_lds instr moves 64 lanes x 2 bf16
+    # (_DMA_DWORDS) = 128 elems. D==128 => 1 row/instr (the padded fast path).
     # D<128 => pack 128//D rows/instr into one contiguous LDS group; K places
     # those groups at a padded pitch, V at the plain packed pitch. Reads get the
     # correct pitch from their LDS tensor shape either way.
-    ROWS_PER_INSTR = 128 // D
+    ROWS_PER_INSTR = (64 * _DMA_DWORDS * 2) // D
 
     b = IRBuilder(spec.kernel_name())
     b.kernel.attrs["max_workgroup_size"] = WAVES * 64
@@ -1366,7 +1380,7 @@ def build_attention_dense(
                     kv_row = gkey
                 voff = b.add(b.add(k_base, b.mul(kv_row, _stride_k())), gcol)
                 b.async_buffer_load_lds_addr(
-                    rsrc, row_base, b.mul(voff, b.const_i32(2)), zero_soff, 1
+                    rsrc, row_base, b.mul(voff, b.const_i32(2)), zero_soff, _DMA_DWORDS
                 )
         else:
             lanes_per_row = D // 2
@@ -1390,7 +1404,7 @@ def build_attention_dense(
                     gkey = paged_kv_row(b, _wphys_base, gkey, spec.block_size)
                 voff = b.add(b.add(k_base, b.mul(gkey, _stride_k())), col)
                 b.async_buffer_load_lds_addr(
-                    rsrc, row_base, b.mul(voff, b.const_i32(2)), zero_soff, 1
+                    rsrc, row_base, b.mul(voff, b.const_i32(2)), zero_soff, _DMA_DWORDS
                 )
 
     def async_load_k(lds_base, buf_val, tile_key0):
@@ -2231,7 +2245,7 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
     # DMA row packing (see default builder): 1 row/instr for D==128 (padded fast
     # path), else pack 128//D rows/instr into one contiguous LDS group, with K's
     # groups at a padded pitch and V's at the plain packed pitch.
-    ROWS_PER_INSTR = 128 // D
+    ROWS_PER_INSTR = (64 * _DMA_DWORDS * 2) // D
     RAGGED = spec.ragged
     # ragged: ceil both the KV tiles and the query-block count so the partial
     # last block/tile is covered (padded rows/keys are handled on-chip).
@@ -2534,7 +2548,11 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
                         row_base = b.smem_ptr_add(lds_base, row_lds_off)
                         voff = b.add(lane_off, row_u)
                         b.async_buffer_load_lds_addr(
-                            rsrc, row_base, b.mul(voff, b.const_i32(2)), zero_soff, 1
+                            rsrc,
+                            row_base,
+                            b.mul(voff, b.const_i32(2)),
+                            zero_soff,
+                            _DMA_DWORDS,
                         )
                         if r + 1 < ROWS_PER_WAVE:
                             row_lds_off = b.add(row_lds_off, b.const_i64(group_bytes))
@@ -2550,7 +2568,11 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
                     for r in range(ROWS_PER_WAVE):
                         row_base = b.smem_ptr_add(lds_base, row_lds_off)
                         b.async_buffer_load_lds_addr(
-                            rsrc, row_base, b.mul(voff, b.const_i32(2)), zero_soff, 1
+                            rsrc,
+                            row_base,
+                            b.mul(voff, b.const_i32(2)),
+                            zero_soff,
+                            _DMA_DWORDS,
                         )
                         if r + 1 < ROWS_PER_WAVE:
                             row_lds_off = b.add(row_lds_off, b.const_i64(group_bytes))
@@ -2575,7 +2597,11 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
                     gkey = b.add(b.add(tile_key0, row0), sub_row)
                     voff = b.add(b.add(k_base, b.mul(gkey, _stride_k())), col)
                     b.async_buffer_load_lds_addr(
-                        rsrc, row_base, b.mul(voff, b.const_i32(2)), zero_soff, 1
+                        rsrc,
+                        row_base,
+                        b.mul(voff, b.const_i32(2)),
+                        zero_soff,
+                        _DMA_DWORDS,
                     )
 
         def _wide_src(row, tile_key0, n_in_wave, line_id, d_bucket):
@@ -2628,7 +2654,7 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
                         row_base,
                         b.mul(voff, b.const_i32(2)),
                         zero_soff,
-                        4,
+                        _WIDE_DMA_DWORDS,
                     )
 
         def _async_load_v_wide(lds_base, buf_val, tile_key0):
@@ -2661,7 +2687,7 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
                         row_base,
                         b.mul(voff, b.const_i32(2)),
                         zero_soff,
-                        4,
+                        _WIDE_DMA_DWORDS,
                     )
 
         def async_load_k(lds_base, buf_val, tile_key0):
