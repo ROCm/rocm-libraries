@@ -391,6 +391,16 @@ rocsparse_status rocsparse::csrgemm_symbolic_calc_template(rocsparse_handle     
     rocsparse_index_base base_D
         = info_C->csrgemm_info->add ? descr_D->base : rocsparse_index_base_zero;
 
+    // Matrices B and D must be sorted for the rows of group 10. Checked before
+    // any group writes C, which may be D.
+    if(h_group_size[10] > 0
+       && (descr_B->storage_mode == rocsparse_storage_mode_unsorted
+           || (info_C->csrgemm_info->add ? descr_D->storage_mode == rocsparse_storage_mode_unsorted
+                                         : false)))
+    {
+        return rocsparse_status_requires_sorted_storage;
+    }
+
 #define CSRGEMM_SYMBOLIC_FILL_WF_PER_ROW_IMPL(                                                     \
     GROUP_ID, CSRGEMM_DIM, CSRGEMM_SUB, CSRGEMM_HASHSIZE, GS)                                      \
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                                            \
@@ -676,14 +686,6 @@ rocsparse_status rocsparse::csrgemm_symbolic_calc_template(rocsparse_handle     
     // Group 10: more than 65536 non-zeros per row or exceeding shared memory
     if(h_group_size[10] > 0)
     {
-        // Matrices B and D must be sorted in order to run this path
-        if(descr_B->storage_mode == rocsparse_storage_mode_unsorted
-           || (info_C->csrgemm_info->add ? descr_D->storage_mode == rocsparse_storage_mode_unsorted
-                                         : false))
-        {
-            return rocsparse_status_requires_sorted_storage;
-        }
-
         rocsparse::csrgemm_bitmap_workspace<I, J> workspace(handle);
 
         RETURN_IF_ROCSPARSE_ERROR(

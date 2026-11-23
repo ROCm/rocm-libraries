@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -116,6 +116,16 @@ rocsparse_status rocsparse::csrgemm_symbolic_multadd_core(rocsparse_handle      
                 rocsparse_status_not_implemented,
                 "failed condition: (trans_A == rocsparse_operation_none "
                 "&& trans_B == rocsparse_operation_none)");
+        }
+
+        // The sorted columns of C would overwrite those of D, while the values
+        // of D, which the numeric stage pairs with them, keep their order.
+        if(nnz_D != 0 && csr_col_ind_C == csr_col_ind_D
+           && descr_D->storage_mode == rocsparse_storage_mode_unsorted)
+        {
+            RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(
+                rocsparse_status_requires_sorted_storage,
+                "C and D share their column indices but D is unsorted");
         }
 
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrgemm_symbolic_calc_preprocess_template(

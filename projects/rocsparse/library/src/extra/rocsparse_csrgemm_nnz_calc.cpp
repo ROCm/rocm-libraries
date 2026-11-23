@@ -760,18 +760,17 @@ rocsparse_status rocsparse::csrgemm_nnz_calc(rocsparse_handle          handle,
     {
         // Every row of C contains the row of D, so both have the same pattern
         // exactly when they have the same number of non-zeros (D without
-        // duplicate entries).
+        // duplicate entries). The shared row pointer holds one index base only.
         I nnz_CD;
         RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
             &nnz_CD, row_nnz + m, sizeof(I), hipMemcpyDeviceToHost, stream));
         RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(stream));
 
-        if(nnz_CD - static_cast<I>(descr_C->base) != nnz_D)
+        if(base_D != descr_C->base || nnz_CD - static_cast<I>(descr_C->base) != nnz_D)
         {
             RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(
                 rocsparse_status_invalid_value,
-                "C and D share their row pointer but the sparsity pattern of C differs "
-                "from the sparsity pattern of D");
+                "C and D share their row pointer but differ in sparsity pattern or index base");
         }
 
         RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
