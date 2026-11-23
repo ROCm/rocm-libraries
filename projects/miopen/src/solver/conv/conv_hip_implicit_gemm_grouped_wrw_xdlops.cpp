@@ -558,7 +558,6 @@ ConvSolution ConvHipImplicitGemmGroupWrwXdlops::GetSolution(
     return loader.GetSolutionTf32Aware(CKSolverType::GrpConvWrw, ctx, problem, config.kernel_id);
 }
 
-
 MIOPEN_INTERNALS_EXPORT const miopen::solver::conv::SolverHeuristicConfig&
 GetWrw2DSolverHeuristicConfig()
 {
