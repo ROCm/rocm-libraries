@@ -153,7 +153,8 @@ field-policy reference.
 fields) and attributes, which the UHD heuristics publish as `graph.nodes[i].*` features.
 Annotate a `(cache_uid)` field `work_data_dependent` when the tensor's contents, not its
 shape, decide how much work the node does (valid lengths, page tables, routing offsets). The
-`node-operands-hipdnn` pre-commit hook regenerates the header. See
+`node-operands-hipdnn` pre-commit hook regenerates both headers (the visitor header and the
+tools' operand table `node_operand_table_generated.h`). See
 [Operand Features](./AddingNewOperations.md#operand-features).
 
 ### Environment Variables and Logging

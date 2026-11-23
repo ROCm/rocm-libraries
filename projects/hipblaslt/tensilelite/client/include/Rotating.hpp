@@ -46,11 +46,12 @@ namespace TensileLite
     class RotatingMemory
     {
     public:
-        explicit RotatingMemory(size_t num) : m_rotatingBufferNum(num) {}
+        explicit RotatingMemory(size_t num) : m_rotatingBufferNum(num), m_originalSizes(num, 0) {}
         ~RotatingMemory() {}
         void addRotatingSize(std::vector<size_t> sizes);
+        void raiseOriginalSizes(std::vector<size_t> const& sizes);
         void createRotatingMemory(int32_t mode, size_t rotatingSize);
-        std::vector<std::vector<RotatingMemoryUnit>> getRotatingMemory() const;
+        std::vector<std::vector<RotatingMemoryUnit>> const& getRotatingMemory() const;
         std::shared_ptr<void> getData() const;
         size_t getDataSize() const;
         size_t getDataLargestUnitSize() const;
@@ -58,6 +59,7 @@ namespace TensileLite
         size_t m_rotatingBufferNum;
         size_t m_rotatingSize;
         std::vector<RotatingUnitInfo> m_rotatingInfo;
+        std::vector<size_t> m_originalSizes;
         std::vector<std::vector<RotatingMemoryUnit>> m_rotatingMemory;
         std::shared_ptr<void> m_data;
         size_t m_size;

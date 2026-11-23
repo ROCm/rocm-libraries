@@ -423,7 +423,7 @@ struct MIOpenBatchNormBwdSpatialHIPImpl<1, FpType, FpPrecType, FpAccumType>
         if constexpr(!mio_config::layout_nhwc && mio_bn_config::hw >= 4096)
         {
             fp_prec_read_vec_type read4;
-            for(unsigned int k = lid << 2; k < less4; k += grprd)
+            for(unsigned int k = lid * read_size; k < less4; k += grprd)
             {
                 read4 = cast<fp_prec_read_vec_type>(
                     *(reinterpret_cast<const fp_read_vec_type*>(x_in + getTensorIndex(k))));
@@ -435,7 +435,7 @@ struct MIOpenBatchNormBwdSpatialHIPImpl<1, FpType, FpPrecType, FpAccumType>
             {
                 if(lid < rem4)
                 {
-                    unsigned int index = getTensorIndex((lid << 2) + less4);
+                    unsigned int index = getTensorIndex((lid * read_size) + less4);
                     if(index + read_size - 1 < mio_bn_config::nchw)
                     {
                         read4 = cast<fp_prec_read_vec_type>(

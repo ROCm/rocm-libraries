@@ -46,6 +46,7 @@ add_executable(hipdnn_integration_tests_unit_tests
     TestGpuReferenceGraphExecutor.cpp
     TestGpuBatchnormBwdPlan.cpp
     TestGpuBatchnormBwdSignatureKey.cpp
+    TestGpuBlockScalePlan.cpp
     TestGpuBatchnormFwdTrainPlan.cpp
     TestGpuBatchnormFwdTrainSignatureKey.cpp
     TestGpuConvolutionBwdPlan.cpp
@@ -82,6 +83,8 @@ add_executable(hipdnn_integration_tests_unit_tests
     TestGpuBatchnormFwdInfVarianceSignatureKey.cpp
     TestGpuBatchnormFwdInfVariancePlan.cpp
     TestGpuPlanRegistrySignatureKey.cpp
+    TestGpuPointwiseSignatureKey.cpp
+    TestGpuFusedOperationsGraphExecutor.cpp
     TestReferenceGraphExecutorFactory.cpp
     TestBundleDiscovery.cpp
     TestGTestFilter.cpp
@@ -93,6 +96,8 @@ add_executable(hipdnn_integration_tests_unit_tests
     TestInputFillRecipes.cpp
     TestFillInputs.cpp
     TestToleranceResolver.cpp
+    TestConvFwdDynamicTolerance.cpp
+    TestConvFwdToleranceGrading.cpp
     TestVerificationModePaths.cpp
     TestVerifierTally.cpp
     TestExpectedRejection.cpp
@@ -152,6 +157,7 @@ add_unit_test_target(hipdnn_integration_tests_unit_tests ${CMAKE_CURRENT_BINARY_
 
 add_executable(hipdnn_gpu_ref_tests
     gpu-ref/main.cpp
+    gpu-ref/TestGpuFpReferenceBlockScale.cpp
     gpu-ref/TestGpuFpReferencePointwise.cpp
     gpu-ref/TestGpuFpReferenceConvolution.cpp
     gpu-ref/TestGpuFpReferenceSdpa.cpp
