@@ -867,6 +867,17 @@ TEST(TestMiopenResampleFwdChecks, IsSupportedFalseForVolumetricFloatTileOverLimi
                    TILE_LIMIT_REASON);
 }
 
+TEST(TestMiopenResampleFwdChecks, IsSupportedTrueForVolumetric16BitTileAtLimit)
+{
+    // Tiles 5 x 5 x (3 + 2618): 2 * 5 * 5 * 2621 = 131050, rounded to 131056, exactly the limit.
+    expectAccepted(tileSpec({1, 2, 1, 1, 1},
+                            {2, 2, 2618},
+                            {1, 1, 1},
+                            true,
+                            DataType::HALF,
+                            std::vector<int64_t>{1, 1, 1309}));
+}
+
 TEST(TestMiopenResampleFwdChecks, IsSupportedTrueForChannelsLastGlobalPoolingThanksToNormalization)
 {
     // Unnormalized, stride 64 would need 4 * (15 * 64 + 64) * 64 = 262144 bytes; normalized to 1,
