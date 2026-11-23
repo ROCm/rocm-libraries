@@ -116,8 +116,8 @@ namespace rocsparse
 
         if(trans == rocsparse_operation_transpose)
         {
-            // nnzb * block_dim * block_dim is the BSR value count. Form it in
-            // 64 bit so a wide index type does not wrap the buffer adjustment.
+            // The transposed values take the BSR value count
+            // nnzb * block_dim * block_dim, not the nnzb the CSR query sized.
             const size_t nnz_blocks = static_cast<size_t>(nnzb);
             const size_t bdim       = static_cast<size_t>(block_dim);
             *buffer_size -= ((sizeof(T) * nnz_blocks - 1) / 256 + 1) * 256;

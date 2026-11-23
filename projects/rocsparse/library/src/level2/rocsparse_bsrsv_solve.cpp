@@ -564,9 +564,8 @@ namespace rocsparse
         }
     }
 
-    // Solve core. The analysis object and the zero-pivot pointer are arguments,
-    // so a caller that owns the analysis (the legacy mat_info path, and later
-    // rocsparse_sptrsv) does not have to read them back out of rocsparse_mat_info.
+    // Solve core. The caller supplies the analysis and its zero pivot; both must
+    // have been built for I and J.
     template <typename T, typename I, typename J>
     rocsparse_status bsrsv_solve_core(rocsparse_handle          handle,
                                       rocsparse_direction       dir,
@@ -592,14 +591,14 @@ namespace rocsparse
         constexpr bool bsrsv_legacy_indices
             = std::is_same<I, rocsparse_int>::value && std::is_same<J, rocsparse_int>::value;
 
-        // Validate before any device memory is touched. A future rocsparse_sptrsv
-        // caller reaches this core with other index types, so the analysis must have
-        // been built with the same row-pointer and column-index types.
+        // Validate before any device memory is touched.
         if(trm_info == nullptr || temp_buffer == nullptr || zero_pivot == nullptr)
         {
             RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_pointer);
         }
 
+        // The analysis must have been built with the row-pointer and column-index
+        // types I and J.
         if(!trm_info->has_indextypes(rocsparse::get_indextype<I>(), rocsparse::get_indextype<J>()))
         {
             RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);

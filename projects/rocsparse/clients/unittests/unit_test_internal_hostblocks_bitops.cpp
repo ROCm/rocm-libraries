@@ -24,8 +24,9 @@
 
 //
 // Unit tests for rocSPARSE internal host bit-twiddling helpers: clz
-// (count-leading-zeros / MSB position) and fnp2 (next power of two). Split out
-// of unit_test_internal_hostblocks.cpp by topic.
+// (count-leading-zeros / MSB position), radix_end_bit (clz capped at the key
+// width) and fnp2 (next power of two). Split out of
+// unit_test_internal_hostblocks.cpp by topic.
 //
 // NOTE ON TARGET: these are pure *host* helpers, but their headers pull in
 // rocsparse_common.hpp, which uses HIP device intrinsics that only compile
@@ -36,7 +37,7 @@
 #include "unit_test_utils.hpp"
 
 #include "rocsparse_common.hpp" // fnp2
-#include "rocsparse_utility.hpp" // clz
+#include "rocsparse_utility.hpp" // clz, radix_end_bit
 
 #include <gtest/gtest.h>
 #include <limits>

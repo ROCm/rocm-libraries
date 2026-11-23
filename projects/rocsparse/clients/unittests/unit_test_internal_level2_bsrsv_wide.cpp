@@ -1166,8 +1166,8 @@ namespace
             }
         }
 
-        // Lower solve through bsrsv_solve_core, the entry rocsparse_sptrsv is going
-        // to use, with the analysis and pivot given explicitly. y is reset first.
+        // Lower solve through bsrsv_solve_core, with the analysis and pivot given
+        // explicitly. y is reset first.
         template <typename I, typename J>
         rocsparse_status solve_core(rocsparse::trm_info_t* trm,
                                     rocsparse_indextype    pivot_type,
