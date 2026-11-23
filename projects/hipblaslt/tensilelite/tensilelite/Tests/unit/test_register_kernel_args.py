@@ -46,6 +46,7 @@ def _writer(useBias=DataDirection.NONE, needBiasType=False, bpeCinternal=4,
         bpeCinternal=bpeCinternal, useBias=useBias, needBiasType=needBiasType,
         useGateResidual=False,
         numActivationArgSize=numActivationArgSize, kernelName="tensile_kernel",
+        asmCaps={"v_prng_b32": True},
     )
     return ns(states=states, debugConfig=ns(debugKernel=debugKernel), kernelArgDefs=[])
 
@@ -57,6 +58,7 @@ def _kernel(**over):
         "ActivationType": ActivationType("none"), "OutputAmaxD": False, "OutputPeerD": False,
         "UseBias": 0,
         "GroupedGemm": False, "FusedA2A": "Disabled",
+        "StochasticRounding": False,
     }
     problem_type.update(over.pop("ProblemType", {}))
     kernel = {
@@ -65,6 +67,7 @@ def _kernel(**over):
         "TileProcessingStrategy": "None", "WorkAssignment": "StaticGrid", "StreamKAtomic": 0,
         "PackedC0IdxChars": ["I"], "PackedC0IndicesX": [0],
         "PackedC1IdxChars": ["J"], "PackedC1IndicesX": [1],
+        "MagicDivAlg": 2,
         "GlobalSplitUAlgorithm": "SingleBuffer", "AdaptiveGemmGSUA": 0,
         "ActivationFused": False,
     }
@@ -128,12 +131,17 @@ def test_sparse_adds_metadata_address_and_strides():
     assert "StrideMetadata0" in sems
 
 
+_MAGIC_SEMANTICS = {
+    "MagicNumberSizeAlg1", "MagicShiftSizeAlg1", "MagicNumberSizeAlg2", "MagicShiftSizeAlg2",
+}
+
+
 def test_packed_magic_divisors_carry_index():
     kernel = _kernel(PackedC0IdxChars=["I", "J"], PackedC0IndicesX=[2, 3])
     defs = _register(_writer(), kernel)
-    magics = [a for a in defs if a["semantic"] in ("MagicNumberSize", "MagicShiftSize")]
+    magics = [a for a in defs if a["semantic"] in _MAGIC_SEMANTICS]
     # one (number, shift) pair for the (n-1) leading packed chars
-    assert [a["semantic"] for a in magics] == ["MagicNumberSize", "MagicShiftSize"]
+    assert [a["semantic"] for a in magics] == ["MagicNumberSizeAlg2", "MagicShiftSizeAlg2"]
     assert all(a["index"] == 2 for a in magics)
 
 
@@ -141,9 +149,16 @@ def test_packed_c1_magic_divisors():
     # The PackedC1 loop is independent of PackedC0; exercise it directly.
     kernel = _kernel(PackedC1IdxChars=["J", "K"], PackedC1IndicesX=[4, 5])
     defs = _register(_writer(), kernel)
-    magics = [a for a in defs if a["semantic"] in ("MagicNumberSize", "MagicShiftSize")]
-    assert [a["semantic"] for a in magics] == ["MagicNumberSize", "MagicShiftSize"]
+    magics = [a for a in defs if a["semantic"] in _MAGIC_SEMANTICS]
+    assert [a["semantic"] for a in magics] == ["MagicNumberSizeAlg2", "MagicShiftSizeAlg2"]
     assert all(a["index"] == 4 for a in magics)
+
+
+@pytest.mark.parametrize("alg, suffix", [(1, "Alg1"), (2, "Alg2")])
+def test_packed_magic_divisors_follow_kernel_magic_div_alg(alg, suffix):
+    kernel = _kernel(MagicDivAlg=alg, PackedC0IdxChars=["I", "J"], PackedC0IndicesX=[2, 3])
+    magics = [a["semantic"] for a in _register(_writer(), kernel) if a["semantic"] in _MAGIC_SEMANTICS]
+    assert magics == ["MagicNumberSize" + suffix, "MagicShiftSize" + suffix]
 
 
 # --------------------------------------------------------------------------- #
@@ -295,3 +310,15 @@ def test_fused_a2a_appends_one_segment_entry(mode):
     plain = _sems(_writer(), _kernel())
     fused = _sems(_writer(), _kernel(ProblemType={"FusedA2A": mode}))
     assert fused == plain + ["FusedA2ASegment"]
+
+
+def test_stochastic_rounding_without_prng_appends_rndseed_after_fused_a2a():
+    writer = _writer()
+    writer.states.asmCaps = {"v_prng_b32": False}
+    sems = _sems(writer, _kernel(ProblemType={"StochasticRounding": True, "FusedA2A": "GemmA2A"}))
+    assert sems[-2:] == ["FusedA2ASegment", "RNDSeed"]
+
+
+def test_stochastic_rounding_with_prng_omits_rndseed():
+    sems = _sems(_writer(), _kernel(ProblemType={"StochasticRounding": True}))
+    assert "RNDSeed" not in sems

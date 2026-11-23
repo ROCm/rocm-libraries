@@ -32,8 +32,8 @@
 # CTest runs. The tier rule gives a category whose name is not a tier only its
 # own name as a label. Thus python-standard lists the standard, comprehensive
 # and full labels itself. The pytest-scaling runner and counted-sync entries
-# start at comprehensive so nightly/full runs own them without adding work to
-# quick/standard pre-merge and post-merge runs.
+# start at comprehensive so they add no work to quick/standard pre-merge and
+# post-merge runs.
 #
 # The pinned GPU reference entries are regex patterns, unlike most
 # entries here: rocke/platform/CMakeLists.txt registers
@@ -60,10 +60,10 @@
 # part gets the same labels, including the quick, standard and ffm-quick
 # tiers.
 #
-# The comprehensive tier holds tests run only by scheduled CI: its entries
-# get only the comprehensive and full labels, so a `ctest -L '^quick$'` or
-# `-L '^standard$'` run (pull-request and push CI) skips them and the
-# scheduled (nightly) run, which selects `-L '^comprehensive$'`, runs them.
+# The comprehensive tier holds tests for scheduled CI only: its entries get
+# only the comprehensive and full labels, so a `ctest -L '^quick$'` or
+# `-L '^standard$'` run (TheRock pull-request and push CI) skips them. Which CI job
+# runs them is in rocke/TESTING.md section 5.0.2.
 test_categories:
   quick:
     description: "rocKE pre-registered smoke/golden/unit checks (C++ + Python)"
@@ -87,6 +87,8 @@ test_categories:
       - "rocke_conv_direct_dw_dgrad_host"
       - "rocke_conv_direct_dgrad_pp_mfma_host"
       - "rocke_conv_implicit_gemm_spec_guards"
+      - "rocke_conv_direct_fwd_pp_mfma_host"
+      - "rocke_conv_direct_fwd_flex_mfma_host"
       - "rocke_conv_direct_wgrad_refusals_host"
       - "rocke_mx_gemm_host"
       - "rocke_wmma_fmha_decode_host"
@@ -121,6 +123,7 @@ test_categories:
       - "rocke_attention_dense_spec"
       - "rocke_yield_rules"
       - "rocke_tiled_attention_2d_reentrancy"
+      - "rocke_tiled_attention_2d_gfx950_fp8_k_read"
       - "rocke_tiled_attention_entry_guards"
       - "rocke_unified_attention_scalar_lower_to_llvm"
       # Registered only in the build tree: they read engine sources the
@@ -134,7 +137,6 @@ test_categories:
       - "rocke_differential_golden_canonical"
       - "rocke_oracle_free_pytest"
       - "rocke_library_conv_pytest"
-      - "rocke_library_conv_fwd_aot_packaging_pytest"
       - "rocke_library_conv_ir_pytest"
       - "rocke_library_conv_tf32_pytest"
       # Not registered on Windows (see rocke/library/tests/ctest_lists.cmake); the
@@ -181,6 +183,8 @@ test_categories:
       - "rocke_conv_direct_dw_dgrad_host"
       - "rocke_conv_direct_dgrad_pp_mfma_host"
       - "rocke_conv_implicit_gemm_spec_guards"
+      - "rocke_conv_direct_fwd_pp_mfma_host"
+      - "rocke_conv_direct_fwd_flex_mfma_host"
       - "rocke_conv_direct_wgrad_refusals_host"
       - "rocke_mx_gemm_host"
       - "rocke_wmma_fmha_decode_host"
@@ -215,6 +219,7 @@ test_categories:
       - "rocke_attention_dense_spec"
       - "rocke_yield_rules"
       - "rocke_tiled_attention_2d_reentrancy"
+      - "rocke_tiled_attention_2d_gfx950_fp8_k_read"
       - "rocke_tiled_attention_entry_guards"
       - "rocke_unified_attention_scalar_lower_to_llvm"
       # Registered only in the build tree: they read engine sources the
@@ -272,6 +277,8 @@ test_categories:
       # Not registered on Windows (see rocke/library/tests/ctest_lists.cmake); the
       # parser ignores a listed name that has no registered test.
       - "rocke_library_gdn_pytest"
+      # Its host tests are too slow for the single-shard quick tier.
+      - "rocke_library_conv_fwd_aot_packaging_pytest"
     labels:
       - "standard"
       - "comprehensive"

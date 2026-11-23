@@ -1,6 +1,7 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include <algorithm>
 #include <string>
 
 #include <hipdnn_plugin_sdk/PluginException.hpp>
@@ -159,27 +160,31 @@ void checkTensorVirtuality1Node(
             "Batchnorm training tensors must be non-virtual for 1-node graph");
     }
 
-    // Optional mean/variance tensors must be non-virtual if present
-    if(bnAttr.mean_tensor_uid().has_value())
+    // Optional mean/variance tensors must be non-virtual if present, unless both are virtual and
+    // nothing consumes them (saved statistics not requested).
+    if(!hasUnrequestedSavedPair(bnAttr, tensorMap))
     {
-        const auto& bnTensorMean
-            = miopen_utils::findTensorAttributes(tensorMap, bnAttr.mean_tensor_uid().value());
-        if(bnTensorMean.virtual_())
+        if(bnAttr.mean_tensor_uid().has_value())
         {
-            throw hipdnn_plugin_sdk::HipdnnPluginException(
-                HIPDNN_PLUGIN_STATUS_BAD_PARAM, "Batchnorm mean tensor must be non-virtual");
+            const auto& bnTensorMean
+                = miopen_utils::findTensorAttributes(tensorMap, bnAttr.mean_tensor_uid().value());
+            if(bnTensorMean.virtual_())
+            {
+                throw hipdnn_plugin_sdk::HipdnnPluginException(
+                    HIPDNN_PLUGIN_STATUS_BAD_PARAM, "Batchnorm mean tensor must be non-virtual");
+            }
         }
-    }
 
-    if(bnAttr.inv_variance_tensor_uid().has_value())
-    {
-        const auto& bnTensorInvVar = miopen_utils::findTensorAttributes(
-            tensorMap, bnAttr.inv_variance_tensor_uid().value());
-        if(bnTensorInvVar.virtual_())
+        if(bnAttr.inv_variance_tensor_uid().has_value())
         {
-            throw hipdnn_plugin_sdk::HipdnnPluginException(
-                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                "Batchnorm inv_variance tensor must be non-virtual");
+            const auto& bnTensorInvVar = miopen_utils::findTensorAttributes(
+                tensorMap, bnAttr.inv_variance_tensor_uid().value());
+            if(bnTensorInvVar.virtual_())
+            {
+                throw hipdnn_plugin_sdk::HipdnnPluginException(
+                    HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                    "Batchnorm inv_variance tensor must be non-virtual");
+            }
         }
     }
 
@@ -254,6 +259,12 @@ bool MiopenBatchnormFwdTrainingPlanBuilder::isApplicable(
     [[maybe_unused]] const HipdnnMiopenHandle& handle,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
+    return isGraphApplicable(opGraph);
+}
+
+bool MiopenBatchnormFwdTrainingPlanBuilder::isGraphApplicable(
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph)
+{
     // Execute-time override shapes can diverge from the compile-time dims this
     // builder matched exactly; the plan bakes those dims into the MIOpen
     // descriptors it builds, so decline rather than risk a mismatch (RFC 0008 §4.6).
@@ -273,6 +284,7 @@ bool MiopenBatchnormFwdTrainingPlanBuilder::isApplicable(
     {
         // Common batchnorm validation
         const auto& bnAttr = checkBatchnormNode(opGraph.getNodeWrapper(0));
+        checkBatchnormFwdTrainingStatisticsSupported(bnAttr, opGraph.nodeCount() == 2);
 
         auto hasFloatComputeDataType = [](const auto& node) {
             return node->computeDataType() == hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT;
