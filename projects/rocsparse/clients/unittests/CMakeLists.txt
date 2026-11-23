@@ -349,12 +349,13 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   unit_test_internal_conversion_grid_clamp.cpp
   # Default CSR SpMV algorithm selection (adaptive vs nnz-split).
   unit_test_internal_level2_csrmv_default_dispatch.cpp
-  # --- bsrsv 64-bit solve kernels and clamped launch grid [ROCM-28980] ----
-  # Distinct anchor at the end of the list. Launches the wide kernels in
-  # bsrsv_device_large.h directly and drives rocsparse_sbsrsv_solve with
-  # maxGridSize[0] shrunk. The mixed-width host path calls the bsrsv
-  # templates, which stay hidden in librocsparse and are compiled in below.
+  # --- bsrsv 64-bit solve kernels and analysis reuse [ROCM-28980] ---------
+  # Distinct anchor at the end of the list. The wide test launches the
+  # kernels in bsrsv_device_large.h directly. The analysis reuse test calls
+  # the bsrsv templates, which stay hidden in librocsparse and are compiled
+  # in below.
   unit_test_internal_level2_bsrsv_wide.cpp
+  unit_test_internal_level2_bsrsv_analysis_reuse.cpp
 )
 
 if(BUILD_WITH_SPSORT)
@@ -490,7 +491,7 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_LIB_SOURCES
   # (AISPARSE-921).
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/conversion/rocsparse_internal_spmat_print.cpp
   # bsrsv analysis, buffer-size and solve templates are hidden in librocsparse.
-  # The mixed-width test calls the float instantiations, so these TUs are
+  # The analysis reuse test and L2DeviceBsrsv call them, so these TUs are
   # compiled into the test instead of exporting the symbols. Their hidden
   # callees (csrsv analysis and the gather / csr2coo helpers it uses) come
   # along with them.
