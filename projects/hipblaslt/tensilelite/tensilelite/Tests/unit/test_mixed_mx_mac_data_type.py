@@ -67,6 +67,19 @@ def test_mixed_mx_mac_follows_operand_type(config, expectedMac):
     assert pt["isMixMode"]
 
 
+_MX_TYPES = ["F8", "B8", "F6", "B6", "F4"]
+
+
+@pytest.mark.parametrize("destDataType", ["s", "b", "h"])
+@pytest.mark.parametrize(
+    "typeA, typeB",
+    [(a, b) for a in _MX_TYPES for b in _MX_TYPES if a != b],
+)
+def test_every_mixed_mx_pair_is_a_valid_gemm_type(typeA, typeB, destDataType):
+    pt = _problemType(DataType=typeA, DataTypeB=typeB, DestDataType=destDataType)
+    assert _chars(pt, "MacDataTypeA", "MacDataTypeB") == (typeA, typeB)
+
+
 def test_mixed_mx_name_has_no_conversion_suffix():
     implicit = _problemType(DataType="F4", DataTypeB="F8")
     explicit = _problemType(DataType="F4", DataTypeB="F8", MacDataTypeB="F8")
