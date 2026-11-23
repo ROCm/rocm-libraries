@@ -2,25 +2,21 @@
 # SPDX-License-Identifier: MIT
 """Behavioral tests for the DisableXdlArbStall derivation.
 
-DisableXdlArbStall makes the kernel set SCHED_MODE.DISABLE_XDL_ARB_STALL at
-entry, so WMMAs issue back to back. It is evaluated in assignDerivedParameters:
-on for every dense kernel, persistent (StreamK, persistent DataParallel) or
-not, and off for sparse kernels. Persistent kernels used to derive False.
+DisableXdlArbStall makes the kernel set SCHED_MODE.DISABLE_XDL_ARB_STALL at entry
+so WMMAs issue back to back. It is derived in assignDerivedParameters as on for
+every dense kernel, including persistent (StreamK and persistent DataParallel)
+ones, and off for sparse kernels. Persistent kernels used to derive False.
 
-These tests execute the derivation (config -> BenchmarkProcess -> Solution ->
-assignDerivedParameters -> the closure) rather than reading the source. The
-emitter side is test_disableWmmaArbStall.py.
-
-An arch whose toolchain is unavailable skips. A new arch adds rows to CONFIGS.
+These tests execute the derivation rather than reading the source. The emitter
+side is test_disableWmmaArbStall.py. An arch whose toolchain is unavailable skips.
 """
 
 import os
 
 import pytest
 
-from tensilelite.Common.Architectures import gfxToIsa
-from tensilelite.Common.Capabilities import makeIsaInfoMap
-from tensilelite.ExecutionPolicy import isPersistent, isPersistentDataParallel, isStreamK
+from tensilelite.ExecutionPolicy import isPersistentDataParallel, isStreamK
+from toolchain_test_helpers import shared_isa_info_map_or_skip
 
 pytestmark = pytest.mark.unit
 
@@ -29,56 +25,43 @@ _DESIGNED = os.path.join(_UNIT, "characterization", "_codegen", "data", "test_da
 _COMMON = os.path.join(_UNIT, os.pardir, "common")
 
 _KEY = "DisableXdlArbStall"
-
-# (arch, config, kind). kind names the property the config is chosen for, and
-# the test checks the derived states really have it before checking the flag.
-CONFIGS = [
-    ("gfx1250", os.path.join(_DESIGNED, "gfx1250", "streamk.yaml"), "streamk"),
-    (
-        "gfx1250",
-        os.path.join(_COMMON, "streamk", "gfx1250", "data_parallel_cluster_multicast_boundaries.yaml"),
-        "persistent_dp",
-    ),
-    ("gfx1250", os.path.join(_COMMON, "sparse", "gfx1250", "spmm_f16.yaml"), "sparse"),
-]
+_ARCH = "gfx1250"
+_STREAMK = os.path.join(_DESIGNED, _ARCH, "streamk.yaml")
+_PERSISTENT_DP = os.path.join(_COMMON, "streamk", _ARCH, "data_parallel_cluster_multicast_boundaries.yaml")
+_SPARSE = os.path.join(_COMMON, "sparse", _ARCH, "spmm_f16.yaml")
 
 _STATES = {}
 
 
-def _require_toolchain(arch):
-    from tensilelite.Toolchain.Validators import validateToolchain
-
-    try:
-        cxx = validateToolchain("amdclang++")
-    except (ValueError, FileNotFoundError) as e:
-        pytest.skip(f"amdclang++ is unavailable: {e}")
-
-    isa = gfxToIsa(arch)
-    if not makeIsaInfoMap([isa], cxx)[isa].asmCaps["SupportedISA"]:
-        pytest.skip(f"amdclang++ in this environment does not support {arch}")
-
-
-def _states(arch, cfg_path):
-    key = (arch, cfg_path)
-    if key not in _STATES:
-        _require_toolchain(arch)
+def _states(cfg_path):
+    """Derived solution states for one config, cached per config."""
+    if cfg_path not in _STATES:
+        shared_isa_info_map_or_skip(_ARCH, toolchainRequired=False)
         from config_harness import derive_states
 
-        _STATES[key] = derive_states(cfg_path, arch=arch, limit_solutions=4)
-    return _STATES[key]
+        _STATES[cfg_path] = derive_states(cfg_path, arch=_ARCH, limit_solutions=4)
+    return _STATES[cfg_path]
 
 
-@pytest.mark.parametrize("arch, cfg, kind", CONFIGS, ids=[f"{a}-{k}" for a, _, k in CONFIGS])
-def test_derivation(arch, cfg, kind):
-    states = _states(arch, cfg)
-    assert states, f"expected >=1 derived solution from {cfg}"
+def test_enabled_for_streamk():
+    states = _states(_STREAMK)
+    assert states
     for st in states:
-        if kind == "streamk":
-            assert not st["ProblemType"]["Sparse"] and isStreamK(st)
-            assert st[_KEY] is True
-        elif kind == "persistent_dp":
-            assert not st["ProblemType"]["Sparse"] and isPersistentDataParallel(st)
-            assert st[_KEY] is True
-        else:
-            assert st["ProblemType"]["Sparse"]
-            assert st[_KEY] is False
+        assert not st["ProblemType"]["Sparse"] and isStreamK(st)
+        assert st[_KEY] is True
+
+
+def test_enabled_for_persistent_data_parallel():
+    states = _states(_PERSISTENT_DP)
+    assert states
+    for st in states:
+        assert not st["ProblemType"]["Sparse"] and isPersistentDataParallel(st)
+        assert st[_KEY] is True
+
+
+def test_disabled_for_sparse():
+    states = _states(_SPARSE)
+    assert states
+    for st in states:
+        assert st["ProblemType"]["Sparse"]
+        assert st[_KEY] is False
