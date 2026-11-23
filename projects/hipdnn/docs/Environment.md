@@ -107,7 +107,7 @@ export HIPDNN_HEURISTIC_PLUGIN_DIR=/opt/rocm/lib/hipdnn/plugins/heuristics
 
 ### Kernel Ingestor Descriptors
 
-Providers built with `HIPDNN_ENABLE_KERNEL_INGESTOR` read descriptor trees: JSON descriptors and the model artifacts they name. The hip-kernel-provider builds engines from them. Each process reads these variables once, the first time the provider discovers its descriptors. The provider loads its own tree first and then any additional roots, in the order listed below. Within one root, two files that define the same descriptor id with different contents are both ignored. An additional root cannot replace what an earlier root defined: a file redefining an id already loaded is ignored with an error, and the earlier definition stands.
+Providers built with `HIPDNN_ENABLE_KERNEL_INGESTOR` read descriptor trees: JSON descriptors and the model artifacts they name. The hip-kernel-provider builds engines from them. Each process reads these variables once, the first time the provider discovers its descriptors; `HIPDNN_UHD_SELECTOR_DUMP_DIR` is the exception, read each time the provider builds an engine. The provider loads its own tree first and then any additional roots, in the order listed below. Within one root, two files that define the same descriptor id with different contents are both ignored. An additional root cannot replace what an earlier root defined: a file redefining an id already loaded is ignored with an error, and the earlier definition stands.
 
 #### HIPDNN_DESCRIPTOR_DIR
 
@@ -157,7 +157,7 @@ The ASM SDPA engine does not read this variable: its selector is fixed at config
 | (unset)    | Nothing is written |
 | `<path>`   | Writes one file per engine here; the directory is created if needed |
 
-An engine-prediction (L1) model records the selector revision it was trained against, and the provider refuses one whose revision differs from the engine's; the refusal is logged at `ERROR` with a pointer to this variable. Write the selector of the build that trained the model and of the build that refused it, and compare the two files to see which kernel, ranker or descriptor changed. `uhd_gen restamp` reads the same files (`--selector-before`, `--selector-after`). A failed write is logged at `WARN` and does not affect the engine.
+An engine-prediction (L1) model records the selector revision it was trained against, and the provider refuses one whose revision differs from the engine's. A descriptor-backed engine logs the refusal at `ERROR` with a pointer to this variable; the ASM SDPA engine's refusal is logged at `ERROR` without it, and its selector is the configure-time file named above. Write the selector of the build that trained the model and of the build that refused it, and compare the two files to see which kernel, ranker or descriptor changed. `uhd_gen restamp` reads the same files (`--selector-before`, `--selector-after`). A failed write is logged at `WARN` and does not affect the engine.
 
 ```bash
 export HIPDNN_UHD_SELECTOR_DUMP_DIR=/tmp/hipdnn-selectors
