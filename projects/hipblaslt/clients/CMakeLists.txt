@@ -5,13 +5,15 @@ add_executable(hipblaslt-bench)
 add_library(hipblaslt-clients-common STATIC)
 
 target_include_directories(hipblaslt-clients-common
+    PRIVATE
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../tensilelite/client>
+)
+
+target_include_directories(hipblaslt-clients-common
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/common/include>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../tensilelite/include>
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../tensilelite>
         $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/library/src/amd_detail/include>
-    PRIVATE
-        "${CMAKE_CURRENT_SOURCE_DIR}/../../tensilelite"
 )
 
 if(HIPBLASLT_ENABLE_COVERAGE)
@@ -90,9 +92,11 @@ if(CMAKE_Fortran_COMPILER_ID MATCHES "Flang")
     unset(_hipblaslt_fortran_search_dirs)
 endif()
 
+# The experimental target: testing_matmul.hpp runs --partitions through the experimental
+# PartitionedGemm, so the bench and the tests opt in.
 target_link_libraries(hipblaslt-clients-common
     PUBLIC
-        roc::hipblaslt
+        roc::hipblaslt_experimental
         hipblaslt-benchmark
         OpenMP::OpenMP_CXX
         ${LAPACK_LIBRARIES}

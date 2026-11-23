@@ -40,6 +40,26 @@ std::map<std::string, int64_t> regimeCounts(const std::vector<PoolEntry>& entrie
     return counts;
 }
 
+/// What one call of `select` returned and reported.
+struct Selection
+{
+    std::vector<PoolEntry> entries;
+    std::map<std::string, int64_t> allocation;
+    std::map<std::string, RegimeQuotaOutcome> outcome;
+};
+
+Selection selectWith(const SourcePools& pools,
+                     int64_t count,
+                     const std::map<std::string, int64_t>& quotas,
+                     const std::set<std::string>& reserved = {},
+                     const std::map<std::string, double>& shares = defaultShares())
+{
+    Selection result;
+    result.entries
+        = select(pools, count, shares, result.allocation, quotas, result.outcome, reserved);
+    return result;
+}
+
 } // namespace
 
 TEST(TestPoolAssembly, ASourceThatCannotFillItsShareHandsTheRestBack)
@@ -249,16 +269,13 @@ TEST(TestPoolAssembly, ARegimeQuotaIsFilledBeforeTheProportionalCut)
         pool.push_back(entryAt("sweep", index, index < 90 ? "common" : "rare"));
     }
 
-    std::map<std::string, int64_t> allocation;
-    std::map<std::string, RegimeQuotaOutcome> outcome;
-    const auto selected
-        = select({{"sweep", pool}}, 20, defaultShares(), allocation, {{"rare", 6}}, outcome);
+    const auto result = selectWith({{"sweep", pool}}, 20, {{"rare", 6}});
 
     const std::map<std::string, int64_t> expected{{"common", 14}, {"rare", 6}};
-    EXPECT_EQ(regimeCounts(selected), expected);
-    EXPECT_EQ(outcome.at("rare").asked, 6);
-    EXPECT_EQ(outcome.at("rare").taken, 6);
-    EXPECT_EQ(allocation.at("sweep"), 20);
+    EXPECT_EQ(regimeCounts(result.entries), expected);
+    EXPECT_EQ(result.outcome.at("rare").asked, 6);
+    EXPECT_EQ(result.outcome.at("rare").taken, 6);
+    EXPECT_EQ(result.allocation.at("sweep"), 20);
 }
 
 TEST(TestPoolAssembly, ACountBelowTheQuotasDoesNotTrimThem)
@@ -270,31 +287,58 @@ TEST(TestPoolAssembly, ACountBelowTheQuotasDoesNotTrimThem)
         pool.push_back(entryAt("sweep", index, index % 2 == 0 ? "a" : "b"));
     }
 
-    std::map<std::string, int64_t> allocation;
-    std::map<std::string, RegimeQuotaOutcome> outcome;
-    const auto selected
-        = select({{"sweep", pool}}, 5, defaultShares(), allocation, {{"a", 8}, {"b", 7}}, outcome);
+    const auto result = selectWith({{"sweep", pool}}, 5, {{"a", 8}, {"b", 7}});
 
     const std::map<std::string, int64_t> expected{{"a", 8}, {"b", 7}};
-    EXPECT_EQ(regimeCounts(selected), expected);
+    EXPECT_EQ(regimeCounts(result.entries), expected);
 }
 
 TEST(TestPoolAssembly, AQuotaThePoolsCannotFillSaysHowShortItIs)
 {
     // Reported, never padded from another regime.
-    std::map<std::string, int64_t> allocation;
-    std::map<std::string, RegimeQuotaOutcome> outcome;
-    const auto selected
-        = select({{"sweep", {entryAt("sweep", 1, "rare"), entryAt("sweep", 2, "x")}}},
-                 0,
-                 defaultShares(),
-                 allocation,
-                 {{"rare", 5}},
-                 outcome);
+    const auto result = selectWith(
+        {{"sweep", {entryAt("sweep", 1, "rare"), entryAt("sweep", 2, "x")}}}, 0, {{"rare", 5}});
 
-    EXPECT_EQ(outcome.at("rare").taken, 1);
-    ASSERT_EQ(selected.size(), 1u);
-    EXPECT_EQ(selected.front().regime, "rare");
+    EXPECT_EQ(result.outcome.at("rare").taken, 1);
+    ASSERT_EQ(result.entries.size(), 1u);
+    EXPECT_EQ(result.entries.front().regime, "rare");
+}
+
+TEST(TestPoolAssembly, OneEntryFillsBothItsRegimesQuotaAndItsFormsQuota)
+{
+    // The pick for whichever quota is served first also counts for the other, so the corpus
+    // holds one graph, not one per quota. The regime names sort before and after the form key,
+    // so both orders in which the quotas are served are covered.
+    for(const char* regime : {"alpha", "zulu"})
+    {
+        auto carrier = entryAt("sweep", 1, regime);
+        carrier.forms = {"form:padded"};
+        const auto sameRegime = entryAt("sweep", 2, regime);
+        auto sameForm = entryAt("sweep", 3, "other");
+        sameForm.forms = {"form:padded"};
+
+        const auto result = selectWith(
+            {{"sweep", {carrier, sameRegime, sameForm}}}, 0, {{regime, 1}, {"form:padded", 1}});
+
+        ASSERT_EQ(result.entries.size(), 1u) << regime;
+        EXPECT_EQ(result.entries.front().origin, carrier.origin) << regime;
+        EXPECT_EQ(result.outcome.at(regime).taken, 1) << regime;
+        EXPECT_EQ(result.outcome.at("form:padded").taken, 1) << regime;
+    }
+}
+
+TEST(TestPoolAssembly, AFormQuotaNoEntryCarriesIsReportedShortRatherThanFailing)
+{
+    auto padded = entryAt("sweep", 1, "r");
+    padded.forms = {"form:padded"};
+
+    const auto result = selectWith(
+        {{"sweep", {padded, entryAt("sweep", 2, "r")}}}, 0, {{"form:padded", 1}, {"form:sink", 1}});
+
+    ASSERT_EQ(result.entries.size(), 1u);
+    EXPECT_EQ(result.outcome.at("form:padded").taken, 1);
+    EXPECT_EQ(result.outcome.at("form:sink").asked, 1);
+    EXPECT_EQ(result.outcome.at("form:sink").taken, 0);
 }
 
 TEST(TestPoolAssembly, AQuotaTakesARecordedShapeBeforeASample)
@@ -304,15 +348,13 @@ TEST(TestPoolAssembly, AQuotaTakesARecordedShapeBeforeASample)
     pools["model"] = {entryAt("model", 1, "rare")};
     pools["sweep"] = {entryAt("sweep", 2, "rare"), entryAt("sweep", 3, "rare")};
 
-    std::map<std::string, int64_t> allocation;
-    std::map<std::string, RegimeQuotaOutcome> outcome;
-    const auto selected = select(pools, 0, defaultShares(), allocation, {{"rare", 2}}, outcome);
+    const auto result = selectWith(pools, 0, {{"rare", 2}});
 
-    ASSERT_EQ(selected.size(), 2u);
-    EXPECT_EQ(selected[0].source, "model");
-    EXPECT_EQ(selected[1].source, "sweep");
-    EXPECT_EQ(allocation.at("model"), 1);
-    EXPECT_EQ(allocation.at("sweep"), 1);
+    ASSERT_EQ(result.entries.size(), 2u);
+    EXPECT_EQ(result.entries[0].source, "model");
+    EXPECT_EQ(result.entries[1].source, "sweep");
+    EXPECT_EQ(result.allocation.at("model"), 1);
+    EXPECT_EQ(result.allocation.at("sweep"), 1);
 }
 
 TEST(TestPoolAssembly, ReservedPointsAreTakenFirstAndCountAgainstTheTotal)
@@ -328,14 +370,11 @@ TEST(TestPoolAssembly, ReservedPointsAreTakenFirstAndCountAgainstTheTotal)
     const std::set<std::string> reserved{detail::describe(pool[89].point),
                                          detail::describe(pool[99].point)};
 
-    std::map<std::string, int64_t> allocation;
-    std::map<std::string, RegimeQuotaOutcome> outcome;
-    const auto selected = select(
-        {{"sweep", pool}}, 10, defaultShares(), allocation, {{"rare", 3}}, outcome, reserved);
+    const auto result = selectWith({{"sweep", pool}}, 10, {{"rare", 3}}, reserved);
 
-    EXPECT_EQ(selected.size(), 10U);
+    EXPECT_EQ(result.entries.size(), 10U);
     std::set<std::string> taken;
-    for(const auto& entry : selected)
+    for(const auto& entry : result.entries)
     {
         taken.insert(detail::describe(entry.point));
     }
@@ -343,9 +382,10 @@ TEST(TestPoolAssembly, ReservedPointsAreTakenFirstAndCountAgainstTheTotal)
     {
         EXPECT_EQ(taken.count(key), 1U) << key;
     }
-    EXPECT_EQ(outcome.at("rare").taken, 3) << "the reserved rare point is one of the three";
-    EXPECT_EQ(regimeCounts(selected), (std::map<std::string, int64_t>{{"common", 7}, {"rare", 3}}));
-    EXPECT_EQ(allocation.at("sweep"), 10);
+    EXPECT_EQ(result.outcome.at("rare").taken, 3) << "the reserved rare point is one of the three";
+    EXPECT_EQ(regimeCounts(result.entries),
+              (std::map<std::string, int64_t>{{"common", 7}, {"rare", 3}}));
+    EXPECT_EQ(result.allocation.at("sweep"), 10);
 }
 
 TEST(TestPoolAssembly, AQuotaIsFilledFromASourceWithNoShare)
@@ -362,19 +402,17 @@ TEST(TestPoolAssembly, AQuotaIsFilledFromASourceWithNoShare)
 
     std::map<std::string, int64_t> dropped;
     const auto unique = deduplicate(pools, noSweep, dropped);
-    std::map<std::string, int64_t> allocation;
-    std::map<std::string, RegimeQuotaOutcome> outcome;
-    const auto selected = select(
-        unique, 0, noSweep, allocation, {{"rare", 1}}, outcome, {detail::describe(edge.point)});
+    const auto result
+        = selectWith(unique, 0, {{"rare", 1}}, {detail::describe(edge.point)}, noSweep);
 
-    EXPECT_EQ(outcome.at("rare").taken, 1);
+    EXPECT_EQ(result.outcome.at("rare").taken, 1);
     std::set<int64_t> batches;
-    for(const auto& entry : selected)
+    for(const auto& entry : result.entries)
     {
         batches.insert(std::get<int64_t>(entry.point.at("batch")));
     }
     EXPECT_EQ(batches, (std::set<int64_t>{1, 2})) << "the unowed sample stays out";
-    EXPECT_EQ(allocation.at("sweep"), 2);
+    EXPECT_EQ(result.allocation.at("sweep"), 2);
 }
 
 TEST(TestPoolAssembly, AnOwedPointStillLosesToAnEarlierSourceHoldingIt)
