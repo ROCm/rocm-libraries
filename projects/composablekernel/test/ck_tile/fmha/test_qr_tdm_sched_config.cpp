@@ -41,6 +41,10 @@ struct OutputRescalePolicy : Policy
 
 using Configs = ::testing::Types<Config<bf16_t, 64, 64, 64>,
                                  Config<half_t, 64, 64, 64>,
+                                 Config<bf16_t, 64, 128, 64>,
+                                 Config<half_t, 64, 128, 64>,
+                                 Config<bf16_t, 64, 128, 64, 64>,
+                                 Config<half_t, 64, 128, 64, 64>,
                                  Config<bf16_t, 128, 128, 128>,
                                  Config<half_t, 128, 128, 128>,
                                  Config<bf16_t, 128, 128, 128, 64>,
@@ -63,7 +67,7 @@ TYPED_TEST(QrTdmSchedConfig, GeometryAndDerivedTails)
     using T = typename P::Tuning;
     EXPECT_EQ(G::kWaves, 4);
     EXPECT_EQ(G::kWaveSize, 32);
-    // M128: two 16-row WMMA row tiles per wave; M64 (D128 here): one.
+    // M128: two 16-row WMMA row tiles per wave; M64: one.
     EXPECT_EQ(G::kQueryRowsPerWave, G::kM == 64 ? 16 : 32);
     EXPECT_EQ(G::kQkMIter, G::kM == 64 ? 1 : 2);
     EXPECT_EQ(G::kPvMIter, G::kM == 64 ? 1 : 2);
@@ -79,7 +83,10 @@ TYPED_TEST(QrTdmSchedConfig, GeometryAndDerivedTails)
     EXPECT_EQ(T::kKWait, 1);
     EXPECT_EQ(T::kVWait, 1);
     EXPECT_TRUE(T::kTailDrain);
-    EXPECT_EQ(T::kBlockPerCu, G::kN == 128 ? 1 : G::kHeadDimQK == 64 ? 3 : 2);
+    EXPECT_EQ(T::kBlockPerCu,
+              G::kHeadDimQK == 64                   ? 3
+              : G::kHeadDimQK == 192 && G::kN == 64 ? 2
+                                                    : 1);
     static_for<0, G::kQkStages, 1>{}([&](auto stage) {
         constexpr int s = decltype(stage)::value;
         EXPECT_EQ(T::template GetQkTailDsCount<s>(),
@@ -145,12 +152,13 @@ TYPED_TEST(QrTdmSchedConfig, WmmaSourceKeepDepth)
 {
     using G = typename TypeParam::Geometry;
     using P = typename TypeParam::Policy;
-    // The D64 N64 and D192 N128 tiles keep no WMMA source alive; D128 N128 (M128 and M64) and
-    // D192 N64 keep the last three. (D64 M64 tiles, not listed here, keep two.) Pin the shipped
-    // values.
+    // The D64 N64 and D192 N128 tiles keep no WMMA source alive, the D64 M64 tiles keep the last
+    // two, and D64 M128xN128, D128 N128 (M128 and M64) and D192 N64 keep the last three. Pin the
+    // shipped values.
     constexpr bool keep_none =
         (G::kHeadDimQK == 64 && G::kN == 64) || (G::kHeadDimQK == 192 && G::kN == 128);
-    EXPECT_EQ(P::kWmmaSourceKeepDepth, keep_none ? 0 : 3);
+    constexpr bool keep_two = G::kHeadDimQK == 64 && G::kM == 64;
+    EXPECT_EQ(P::kWmmaSourceKeepDepth, keep_none ? 0 : keep_two ? 2 : 3);
 }
 
 TYPED_TEST(QrTdmSchedConfig, OutputRescaleModesRejectConflictingOwners)

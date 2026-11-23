@@ -223,8 +223,10 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
     // kWmmaSourceKeepDepth WMMAs of the stage alive until the next WMMA makes the allocator give
     // the reads other VGPRs, so the reused registers belong to WMMAs that have long completed.
     // Depths as measured on gfx1250 (clang 23 and 24): 2 for D64 M64 tiles, 3 for D64 M128xN128,
-    // D128 and D192 N64 tiles, none for D64 N64 tiles (no such waits to remove; the FP16 batch
-    // tile would cross 256 VGPRs) and D192 N128 tiles (the FP16 tile would cross 512 VGPRs).
+    // D128 (M128 and M64) and D192 N64 tiles, none for D64 N64 tiles (no such waits to remove; the
+    // FP16 batch tile would cross 256 VGPRs) and D192 N128 tiles (the FP16 tile would cross 512
+    // VGPRs). For D128 M64 with clang 24, depths 2 and 1 were 0.7 % and 0.9 % slower than 3 and
+    // depth 0 was 23 % slower; with clang 23 all four were within 0.2 %.
     static constexpr index_t kWmmaSourceKeepDepth =
         (Geometry::kHeadDimQK == 64 && Geometry::kN == 64) ||
                 (Geometry::kHeadDimQK == 192 && Geometry::kN == 128)
