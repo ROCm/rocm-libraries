@@ -19,10 +19,18 @@ gets from dispatch -- then:
   (:func:`benchmark_implicit_gemm_conv.stage2_policy`); a run with a
   ``ROCKE_WGRAD_S2_*`` / ``ROCKE_PBD_S2_*`` override set is refused unless
   ``--allow-stage2-env``.
+* ``--ref-routes``: the reference table's route of the case is bound on the same
+  operands and verified against the same f32 reference (``ref_verify``; implies
+  ``--verify``). ``--ref-torchws`` / ``--ref-dropin`` bindings must reproduce the
+  routed output bitwise. A case whose routed or reference call fails is not timed.
 * ``--rounds R``: staged per-call timing (``time_launches_staged``, median of
   ``--iters``) of the whole routed call, R interleaved rounds over the cases. With
   ``--parts`` the route's steps are also timed alone (pad copy, pinned kernel,
   Winograd launches).
+* Every result row carries its provenance (:func:`_provenance`): the device's
+  gfx target, the cache's target (they must match, or the run is refused), the
+  LLVM flavor and COMGR the process compiles with, the table's and the pinned
+  kernel's flavor, the harness and its arguments, and the timing method.
 
 Usage::
 
@@ -60,6 +68,77 @@ def _ref(direction, problem, A, Bt, torch):
     return torch.nn.grad.conv3d_weight(x, wshape, dy, padding=pad).permute(
         0, 2, 3, 4, 1
     )
+
+
+def _check(out, ref, torch) -> dict:
+    """Accuracy of one call's output ``out`` against the f32 reference ``ref``."""
+    out = out.float()
+    err = (out - ref).abs()
+    nan = int(torch.isnan(out).sum().item())
+    rel = err.max().item() / max(ref.abs().max().item(), 1.0)
+    rnd = (ref.to(torch.bfloat16).float() - ref).abs()
+    return dict(
+        verify="PASS" if (rel < 5e-2 and nan == 0) else "FAIL",
+        rel_err=rel,
+        nan=nan,
+        mean_rel=err.mean().item() / ref.abs().mean().item(),
+        max_rel_scale_free=err.max().item() / ref.abs().max().item(),
+        bf16_floor_mean_rel=rnd.mean().item() / ref.abs().mean().item(),
+    )
+
+
+def _sha(D, torch) -> str:
+    return hashlib.sha256(D.view(torch.int16).cpu().numpy().tobytes()).hexdigest()[:16]
+
+
+def _kernel_flavor(plan, KernelIdentity):
+    """LLVM flavor the plan's pinned kernel was built for (``None``: no pinned kernel)."""
+    if plan.kernel is None:
+        return None
+    return KernelIdentity.from_label(plan.kernel.spec.name).llvm_flavor
+
+
+def _provenance(a, argv, device_target, routes) -> dict:
+    """What a result row was measured with: run target (the device), compile
+    target (the cache), toolchain, harness and timing method."""
+    import os
+    import subprocess
+
+    from benchmarks.common.kernel_cache import current_comgr_id, current_llvm_flavor
+
+    try:
+        rev = subprocess.run(
+            ["git", "-C", os.path.dirname(os.path.abspath(__file__))]
+            + ["rev-parse", "--short=12", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        ).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        rev = ""
+    timing = None
+    if a.rounds > 0:
+        timing = {
+            "method": "staged",
+            "timer": "rocke.runtime.stall_gate.time_launches_staged",
+            "stat": "median of iters, median of rounds",
+            "warmup": a.warmup,
+            "iters": a.iters,
+            "rounds": a.rounds,
+            "interleaved": True,
+        }
+    return {
+        "gfx_target": device_target.split(":")[0],
+        "device_target_id": device_target,
+        "cache_arch": a.arch,
+        "llvm_flavor": current_llvm_flavor(),
+        "table_llvm_flavor": routes.llvm_flavor,
+        "comgr": current_comgr_id(),
+        "harness": "benchmarks/common/conv_route_check.py",
+        "harness_rev": rev or None,
+        "argv": list(argv),
+        "timing": timing,
+    }
 
 
 def _operands(direction, p, torch, seed):
@@ -118,8 +197,8 @@ def main(argv=None) -> int:
         "--ref-routes",
         default=None,
         metavar="ROUTE_TABLE[#MODE]",
-        help="also time this table's route of every case on the same buffers, interleaved with the "
-        "routed call (same-session A/B; e.g. a table of direct pins)",
+        help="also verify (implies --verify) and time this table's route of every case on the same "
+        "buffers, interleaved with the routed call (same-session A/B; e.g. a table of direct pins)",
     )
     ap.add_argument(
         "--ref-dropin",
@@ -147,7 +226,10 @@ def main(argv=None) -> int:
         help="run although ROCKE_WGRAD_S2_* / ROCKE_PBD_S2_* Stage-2 overrides are set "
         "(the routes are then checked with a Stage 2 other than the canonical one)",
     )
+    argv = sys.argv[1:] if argv is None else list(argv)
     a = ap.parse_args(argv)
+    # An A/B against a reference route gates both routes on the f32 reference.
+    a.verify = a.verify or bool(a.ref_routes)
 
     import os
 
@@ -155,14 +237,14 @@ def main(argv=None) -> int:
 
     from benchmarks.common import benchmark_implicit_gemm_conv as B
     from benchmarks.common.conv_route_exec import RouteBinding
-    from benchmarks.common.kernel_cache import KernelCache
+    from benchmarks.common.kernel_cache import KernelCache, KernelIdentity
     from dispatch.conv_pins import load_conv_pins
     from dispatch.conv_routes import (
         dispatch_conv_route,
         load_conv_routes,
         request_for_route,
     )
-    from rocke.runtime.hip_module import Runtime
+    from rocke.runtime.hip_module import Runtime, get_device_target_id
     from rocke.runtime.stall_gate import time_launches_staged
     from pathlib import Path
 
@@ -200,6 +282,17 @@ def main(argv=None) -> int:
     rt = Runtime()
     cache = KernelCache(Path(a.cache), a.arch)
     gpu = os.environ.get("HIP_VISIBLE_DEVICES", "?")
+    # Run target vs compile target: binaries built for another gfx target
+    # would run (or fail) on the device, not give a result for --arch.
+    device_target = get_device_target_id(torch.cuda.current_device()) or "?"
+    if device_target.split(":")[0] != a.arch:
+        print(
+            f"error: the device is {device_target}, the cache and routes are for "
+            f"{a.arch} (--arch)",
+            file=sys.stderr,
+        )
+        return 2
+    prov = _provenance(a, argv, device_target, routes)
     stage2 = {}
     rows, bound = {}, {}
     rc = 0
@@ -233,53 +326,10 @@ def main(argv=None) -> int:
             "bind_s": round(time.time() - t0, 2),
             "routes": a.routes,
             "cache": a.cache,
+            **prov,
+            "kernel_llvm_flavor": _kernel_flavor(plan, KernelIdentity),
         }
-        if a.verify or a.det_runs:
-            D.view(torch.int16).fill_(
-                -1
-            )  # poison (bf16 NaN): every output element must be written
-            rb.run()
-            torch.cuda.synchronize()
-            first = D.clone()
-            row["sha256"] = hashlib.sha256(
-                first.view(torch.int16).cpu().numpy().tobytes()
-            ).hexdigest()[:16]
-            if a.verify:
-                ref = _ref(plan.direction, p, A, Bt, torch)
-                out = first.float()
-                err = (out - ref).abs()
-                nan = int(torch.isnan(out).sum().item())
-                rel = err.max().item() / max(ref.abs().max().item(), 1.0)
-                rnd = (ref.to(torch.bfloat16).float() - ref).abs()
-                row.update(
-                    verify="PASS" if (rel < 5e-2 and nan == 0) else "FAIL",
-                    rel_err=rel,
-                    nan=nan,
-                    mean_rel=err.mean().item() / ref.abs().mean().item(),
-                    max_rel_scale_free=err.max().item() / ref.abs().max().item(),
-                    bf16_floor_mean_rel=rnd.mean().item() / ref.abs().mean().item(),
-                )
-                del ref, out, err, rnd
-                if row["verify"] != "PASS":
-                    rc = 1
-            if a.det_runs:
-                diff = 0
-                for _ in range(a.det_runs):
-                    D.view(torch.int16).fill_(-1)
-                    rb.run()
-                    torch.cuda.synchronize()
-                    diff += int(
-                        not torch.equal(D.view(torch.int16), first.view(torch.int16))
-                    )
-                row["det_runs"] = a.det_runs
-                row["det_identical"] = diff == 0
-                if diff:
-                    rc = 1
-            if case in against:
-                row["against_identical"] = against[case] == row["sha256"]
-                if not row["against_identical"]:
-                    rc = 1
-            del first
+        failed = False
         rbr = None
         if ref_routes is not None and ref_routes.lookup(req) is not None:
             rplan = dispatch_conv_route(req, ref_routes, pins)
@@ -294,6 +344,49 @@ def main(argv=None) -> int:
                 B=B,
             )
             row["ref_route"], row["ref_kernel"] = rplan.route, rplan.kernel_label
+            row["ref_routes"] = a.ref_routes
+            row["ref_table_llvm_flavor"] = ref_routes.llvm_flavor
+            row["ref_kernel_llvm_flavor"] = _kernel_flavor(rplan, KernelIdentity)
+        if a.verify or a.det_runs:
+            D.view(torch.int16).fill_(
+                -1
+            )  # poison (bf16 NaN): every output element must be written
+            rb.run()
+            torch.cuda.synchronize()
+            first = D.clone()
+            row["sha256"] = _sha(first, torch)
+            if a.verify:
+                ref = _ref(plan.direction, p, A, Bt, torch)
+                row.update(_check(first, ref, torch))
+                failed |= row["verify"] != "PASS"
+                if rbr is not None:
+                    # The reference route on the same operands, against the
+                    # same f32 reference: an A/B is reported only when both pass.
+                    D.view(torch.int16).fill_(-1)
+                    rbr.run()
+                    torch.cuda.synchronize()
+                    row["ref_sha256"] = _sha(D, torch)
+                    row.update(
+                        {f"ref_{k}": v for k, v in _check(D, ref, torch).items()}
+                    )
+                    failed |= row["ref_verify"] != "PASS"
+                del ref
+            if a.det_runs:
+                diff = 0
+                for _ in range(a.det_runs):
+                    D.view(torch.int16).fill_(-1)
+                    rb.run()
+                    torch.cuda.synchronize()
+                    diff += int(
+                        not torch.equal(D.view(torch.int16), first.view(torch.int16))
+                    )
+                row["det_runs"] = a.det_runs
+                row["det_identical"] = diff == 0
+                failed |= diff != 0
+            if case in against:
+                row["against_identical"] = against[case] == row["sha256"]
+                failed |= not row["against_identical"]
+            del first
         drop = None
         if a.ref_dropin and plan.route == "winograd":
             from types import SimpleNamespace
@@ -309,12 +402,9 @@ def main(argv=None) -> int:
                 D.view(torch.int16).fill_(-1)
                 drop.run()
                 torch.cuda.synchronize()
-                row["dropin_sha256"] = hashlib.sha256(
-                    D.view(torch.int16).cpu().numpy().tobytes()
-                ).hexdigest()[:16]
+                row["dropin_sha256"] = _sha(D, torch)
                 row["dropin_identical"] = row["dropin_sha256"] == row["sha256"]
-                if not row["dropin_identical"]:
-                    rc = 1
+                failed |= not row["dropin_identical"]
         rtw = None
         if a.ref_torchws and plan.workspaces:
 
@@ -333,23 +423,39 @@ def main(argv=None) -> int:
                 B=B,
                 alloc=_talloc,
             )
+            if "sha256" in row:
+                D.view(torch.int16).fill_(-1)
+                rtw.run()
+                torch.cuda.synchronize()
+                row["torchws_identical"] = _sha(D, torch) == row["sha256"]
+                failed |= not row["torchws_identical"]
         rows[case] = row
+        if failed:
+            rc = 1
+            if a.rounds > 0:
+                row["timing_skipped"] = "a routed or reference call failed its check"
         bound[case] = (rb, A, Bt, D, rbr, drop, rtw)
         print(
             f"[route] {case}: {plan.route} {row.get('verify', '')} det={row.get('det_identical', '')} "
-            f"sha={row.get('sha256', '')} ws={plan.workspace_bytes / 2**20:.1f}MB"
+            + (
+                f"ref={row['ref_route']} {row.get('ref_verify', '')} "
+                if "ref_route" in row
+                else ""
+            )
+            + f"sha={row.get('sha256', '')} ws={plan.workspace_bytes / 2**20:.1f}MB"
             + (
                 f" dropin_identical={row['dropin_identical']}"
                 if "dropin_identical" in row
                 else ""
-            ),
+            )
+            + (" NOT TIMED (check failed)" if "timing_skipped" in row else ""),
             flush=True,
         )
-        if a.rounds <= 0:
+        if a.rounds <= 0 or failed:
             torch.cuda.synchronize()
-            rb.free(B)
-            if rbr is not None:
-                rbr.free(B)
+            for b in (rb, rbr, rtw):
+                if b is not None:
+                    b.free(B)
             del bound[case]
             torch.cuda.empty_cache()
     if a.rounds > 0:

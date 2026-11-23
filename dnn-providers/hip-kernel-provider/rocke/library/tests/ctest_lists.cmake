@@ -205,6 +205,7 @@ set(_ROCKE_LIBRARY_CONV3D_TEST_RELPATHS
     "tests/library/tests/test_conv_fwd_split_det.py"
     "tests/library/tests/test_conv_fwd_split_store.py"
     "tests/library/tests/test_conv_m_band.py"
+    "tests/library/tests/test_conv_route_check.py"
     "tests/library/tests/test_conv_route_exec_workspaces.py"
     "tests/library/tests/test_conv_shipped_tables_gpu.py"
     "tests/library/tests/test_conv_small_grid_knobs.py"
