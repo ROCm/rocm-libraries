@@ -142,60 +142,84 @@ void CheckNonDeterministicVisitsMultipleValues(const Problem& problem)
 
 } // namespace
 
-TEST(CPU_PerfConfigGroupBwdDeterministic_NONE, HangRegressionSingleKernel)
+using CPU_PerfConfigGroupBwdDeterministic_NONE = testing::TestWithParam<int>;
+
+TEST_P(CPU_PerfConfigGroupBwdDeterministic_NONE, HangRegressionSingleKernel)
 {
     const auto problem = MakeProblem(miopen::conv::Direction::BackwardData, /*deterministic=*/true);
     CheckHangRegressionSingleKernel<BwdConfig>(problem);
 }
 
-TEST(CPU_PerfConfigGroupBwdDeterministic_NONE, UnderTuningThreeKernels)
+TEST_P(CPU_PerfConfigGroupBwdDeterministic_NONE, UnderTuningThreeKernels)
 {
     const auto problem = MakeProblem(miopen::conv::Direction::BackwardData, /*deterministic=*/true);
     CheckUnderTuningThreeKernels<BwdConfig>(problem);
 }
 
-TEST(CPU_PerfConfigGroupWrwDeterministic_NONE, HangRegressionSingleKernel)
+INSTANTIATE_TEST_SUITE_P(Quick, CPU_PerfConfigGroupBwdDeterministic_NONE, testing::Values(0));
+
+using CPU_PerfConfigGroupWrwDeterministic_NONE = testing::TestWithParam<int>;
+
+TEST_P(CPU_PerfConfigGroupWrwDeterministic_NONE, HangRegressionSingleKernel)
 {
     const auto problem =
         MakeProblem(miopen::conv::Direction::BackwardWeights, /*deterministic=*/true);
     CheckHangRegressionSingleKernel<WrwConfig>(problem);
 }
 
-TEST(CPU_PerfConfigGroupWrwDeterministic_NONE, UnderTuningThreeKernels)
+TEST_P(CPU_PerfConfigGroupWrwDeterministic_NONE, UnderTuningThreeKernels)
 {
     const auto problem =
         MakeProblem(miopen::conv::Direction::BackwardWeights, /*deterministic=*/true);
     CheckUnderTuningThreeKernels<WrwConfig>(problem);
 }
 
-TEST(CPU_PerfConfigGroupBwdNonDeterministic_NONE, VisitsMultipleIndicesAndSplitKs)
+INSTANTIATE_TEST_SUITE_P(Quick, CPU_PerfConfigGroupWrwDeterministic_NONE, testing::Values(0));
+
+using CPU_PerfConfigGroupBwdNonDeterministic_NONE = testing::TestWithParam<int>;
+
+TEST_P(CPU_PerfConfigGroupBwdNonDeterministic_NONE, VisitsMultipleIndicesAndSplitKs)
 {
     const auto problem =
         MakeProblem(miopen::conv::Direction::BackwardData, /*deterministic=*/false);
     CheckNonDeterministicVisitsMultipleValues<BwdConfig>(problem);
 }
 
-TEST(CPU_PerfConfigGroupWrwNonDeterministic_NONE, VisitsMultipleIndicesAndSplitKs)
+INSTANTIATE_TEST_SUITE_P(Quick, CPU_PerfConfigGroupBwdNonDeterministic_NONE, testing::Values(0));
+
+using CPU_PerfConfigGroupWrwNonDeterministic_NONE = testing::TestWithParam<int>;
+
+TEST_P(CPU_PerfConfigGroupWrwNonDeterministic_NONE, VisitsMultipleIndicesAndSplitKs)
 {
     const auto problem =
         MakeProblem(miopen::conv::Direction::BackwardWeights, /*deterministic=*/false);
     CheckNonDeterministicVisitsMultipleValues<WrwConfig>(problem);
 }
 
-TEST(CPU_PerfConfigGroup3DWrwDeterministic_NONE, HangRegressionSingleKernel)
+INSTANTIATE_TEST_SUITE_P(Quick, CPU_PerfConfigGroupWrwNonDeterministic_NONE, testing::Values(0));
+
+using CPU_PerfConfigGroup3DWrwDeterministic_NONE = testing::TestWithParam<int>;
+
+TEST_P(CPU_PerfConfigGroup3DWrwDeterministic_NONE, HangRegressionSingleKernel)
 {
     const auto problem = MakeProblem3DWrw(/*deterministic=*/true);
     CheckHangRegressionSingleKernel<Wrw3DConfig>(problem);
 }
 
-TEST(CPU_PerfConfigGroup3DWrwDeterministic_NONE, UnderTuningThreeKernels)
+TEST_P(CPU_PerfConfigGroup3DWrwDeterministic_NONE, UnderTuningThreeKernels)
 {
     const auto problem = MakeProblem3DWrw(/*deterministic=*/true);
     CheckUnderTuningThreeKernels<Wrw3DConfig>(problem);
 }
 
-TEST(CPU_PerfConfigGroup3DWrwNonDeterministic_NONE, VisitsMultipleIndicesAndSplitKs)
+INSTANTIATE_TEST_SUITE_P(Quick, CPU_PerfConfigGroup3DWrwDeterministic_NONE, testing::Values(0));
+
+using CPU_PerfConfigGroup3DWrwNonDeterministic_NONE = testing::TestWithParam<int>;
+
+TEST_P(CPU_PerfConfigGroup3DWrwNonDeterministic_NONE, VisitsMultipleIndicesAndSplitKs)
 {
     const auto problem = MakeProblem3DWrw(/*deterministic=*/false);
     CheckNonDeterministicVisitsMultipleValues<Wrw3DConfig>(problem);
 }
+
+INSTANTIATE_TEST_SUITE_P(Quick, CPU_PerfConfigGroup3DWrwNonDeterministic_NONE, testing::Values(0));
