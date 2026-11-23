@@ -508,6 +508,11 @@ void testing_spmm_bsr_extra(const Arguments& arg)
                         int32_t                   batch_count_C,
                         rocsparse_status          expected_status,
                         const host_vector<float>& hC_expected) {
+#ifdef GOOGLE_TEST
+        SCOPED_TRACE(::testing::Message()
+                     << "block_dim=" << block_dim << " batch_count(A,B,C)=(" << batch_count_A << ","
+                     << batch_count_B << "," << batch_count_C << ")");
+#endif
         const int32_t mb   = 2 / block_dim;
         const int32_t nnzb = mb;
 
@@ -580,8 +585,7 @@ void testing_spmm_bsr_extra(const Arguments& arg)
                                                nullptr),
                                 expected_status);
 
-        void* dbuffer = nullptr;
-        CHECK_HIP_ERROR(rocsparse_hipMalloc(&dbuffer, buffer_size > 0 ? buffer_size : 1));
+        device_vector<char> dbuffer(buffer_size > 0 ? buffer_size : 1);
 
         EXPECT_ROCSPARSE_STATUS(rocsparse_spmm(handle,
                                                rocsparse_operation_none,
@@ -615,7 +619,6 @@ void testing_spmm_bsr_extra(const Arguments& arg)
 
         host_vector<float> hC(size);
         CHECK_HIP_ERROR(hipMemcpy(hC.data(), dC, sizeof(float) * size, hipMemcpyDeviceToHost));
-        CHECK_HIP_ERROR(rocsparse_hipFree(dbuffer));
 
         unit_check_general<float>(1, size, hC_expected.data(), 1, hC.data(), 1);
     };
