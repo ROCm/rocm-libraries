@@ -35,7 +35,10 @@ Supported MX input element types are **FP8 OCP** (`FP8_E4M3` / `FP8_E5M2`), **OC
 > **Build-time feature flag.** This path is gated behind the CMake option
 > `HIPBLASLTPROVIDER_ENABLE_MX_GEMM`, which defaults to **OFF**; when OFF the plugin
 > reports these graphs as unsupported. Build with
-> `-DHIPBLASLTPROVIDER_ENABLE_MX_GEMM=ON` to enable it.
+> `-DHIPBLASLTPROVIDER_ENABLE_MX_GEMM=ON` to enable it. With the flag ON the plugin
+> needs HIPRTC (`hiprtc`) to build and links it: it compiles its scale relayout kernel
+> at run time, for the device in use, when the first plan that needs swizzled scales is
+> built.
 
 **Graph topology:**
 ```
