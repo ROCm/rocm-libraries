@@ -2,7 +2,7 @@
 
 Full documentation for rocALUTION is available at [https://rocm.docs.amd.com/projects/rocALUTION/en/latest/](https://rocm.docs.amd.com/projects/rocALUTION/en/latest/).
 
-## (Unreleased) rocALUTION
+## (Unreleased) rocALUTION 5.0.0
 
 ### Added
 * Added the generic `amdgcnspirv` SPIR-V target to the default list of GPU architectures.
@@ -15,7 +15,7 @@ Full documentation for rocALUTION is available at [https://rocm.docs.amd.com/pro
 * The `cg-rsamg_mpi`, `cg-saamg_mpi` and `cg-uaamg_mpi` samples now print the total runtime, as the non-MPI samples do.
 * ROCmCMakeBuildTools 0.11.0 or later is now required. By default, CMake configuration fails when it isn't found instead of downloading rocm-cmake from GitHub. Configure with `-DALLOW_FETCH_DEPS=ON` to download rocm-cmake 0.14.0 from ROCm 7.2.4 instead. The deprecated `ROCM` package fallback was removed.
 * GoogleTest must be installed before building the tests. Alternatively, set `FETCHCONTENT_SOURCE_DIR_GOOGLETEST` to a googletest source tree, or configure with `-DALLOW_FETCH_DEPS=ON` to download GoogleTest 1.15.2. Both build GoogleTest statically and don't install it.
-* CMake 3.21 or later is now required to build rocALUTION (previously 3.5).
+* CMake 3.21 or later is now required to build rocALUTION (previously 3.19).
 * `LocalMatrix::ConvertTo()`, `LocalMatrix::ConvertToBCSR()` and the `GlobalMatrix` functions of the same names now convert a BCSR matrix to the requested block dimension instead of keeping its own. A matrix whose sizes are not a multiple of it falls back to CSR, also a matrix without entries, which was padded to whole blocks before. With a block dimension of 1 or less, such as the default of `ConvertTo()`, a BCSR matrix still keeps its own. `LocalMatrix::ReadFileRSIO()` and `GlobalMatrix::ReadFileRSIO()` with `maintain_initial_format` now also convert a BCSR file to the block dimension the matrix had before the read.
 * Converting a matrix that is not BCSR to BCSR now requires a block dimension greater than 1, also on the accelerator and for a matrix without entries, which got block dimension 2 before. So `ConvertTo(BCSR)` without a block dimension, and `SetPrecondMatrixFormat()` of the AI, MultiColored and MultiElimination preconditioners or `BaseAMG::SetOperatorFormat()` with `BCSR` and a block dimension of 1 or less, now end the process for such a matrix.
 * `LocalMatrix::ConnectivityOrder()` now returns the new position of each row, the inverse of the permutation it returned before. Pass it to `Permute()` directly. Code that inverted it before `Permute()` must drop the inversion, and code that applied it with `PermuteBackward()` and undid it with `Permute()` must swap the two calls.
@@ -122,8 +122,9 @@ Full documentation for rocALUTION is available at [https://rocm.docs.amd.com/pro
 * Fixed `LocalMatrix::CreateFromMap()` doing nothing when the matrix has no entries yet, and losing entries and leaving values at zero for maps with unassigned nodes, which also affected the restriction of `PairwiseAMG`.
 * Fixed `LocalMatrix::Transpose()` of a matrix without entries not swapping the sizes, and leaving the output matrix unchanged when it transposes into another matrix. `LocalMatrix::Transpose()` into a matrix that is not in CSR format no longer aborts, which made FSAI abort when it was built again with a preconditioner matrix format other than CSR. The output matrix gets the format of the transposed matrix, or CSR if the conversion to that format fails.
 * Fixed `LocalStencil::ApplyAdd()` overwriting the output instead of adding to it, and the Laplace stencil on the host ignoring the scalar.
+* Fixed a crash or out-of-bounds access in the SA-AMG, UA-AMG and Ruge-Stueben AMG setup with MPI when a process sets only the local part of a `GlobalMatrix` with `SetLocalDataPtrCSR()` or `SetLocalDataPtrCOO()` and its neighbors reference its columns. Such a matrix now has an empty ghost part with one row per local row.
 
-## (Unreleased) rocALUTION 4.1.1
+## rocALUTION 4.1.1 for ROCm 10.2
 
 ### Added
 * Added support for the `gfx1250-strict` architecture.
@@ -149,7 +150,6 @@ Full documentation for rocALUTION is available at [https://rocm.docs.amd.com/pro
 * Fixed the Smoothed-Aggregation AMG preconditioner not falling back to the host when the prolongation fill failed on the accelerator or in a non-CSR format.
 * Fixed the FCG and QMRCGStab solvers returning NaN when the initial residual is already below the absolute tolerance, for example a zero right-hand side on the coarsest AMG level.
 * Fixed `init_rocalution()` reporting the HIP backend as available when creating the rocBLAS or rocSPARSE handle failed on a device selected with `set_device_rocalution()`, which caused `info_rocalution()` to crash. rocALUTION now falls back to the host backend in this case.
-* Fixed a crash or out-of-bounds access in the SA-AMG, UA-AMG and Ruge-Stueben AMG setup with MPI when a process sets only the local part of a `GlobalMatrix` with `SetLocalDataPtrCSR()` or `SetLocalDataPtrCOO()` and its neighbors reference its columns. Such a matrix now has an empty ghost part with one row per local row.
 
 ## rocALUTION 4.1.0 for ROCm 7.2.0
 
