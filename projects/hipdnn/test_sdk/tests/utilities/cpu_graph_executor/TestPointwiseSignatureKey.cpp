@@ -682,26 +682,19 @@ TEST(TestPointwiseSignatureKey, PlanBuildersRegisteredForImplementedBinaryModes)
     }
 }
 
-TEST(TestPointwiseSignatureKeyFp32, PlanBuildersRegisteredWithHalfOperandWrittenAsHalf)
+TEST(TestPointwiseSignatureKeyFp32, PlanBuildersRegisteredForFusedBiasWithHalfOperand)
 {
     const auto planBuilders = PointwiseSignatureKey::getPlanBuilders();
 
-    // An fp32 operand with an fp16 or bf16 operand, computed in fp32 and written as fp16 or bf16:
-    // a fused bias or residual add whose other operand is a virtual fp32 tensor. The key order is
-    // mode, input0, compute, output, input1, so the compute type is fp32 and the output is the
-    // narrow type.
+    // A convolution with a bias add: the convolution output is a virtual fp32 tensor, the bias is
+    // fp16 or bf16 and the add computes in the bias type. The key order is mode, input0, compute,
+    // output, input1.
     for(auto mode : {PointwiseMode::ADD, PointwiseMode::SUB, PointwiseMode::MUL})
     {
         for(auto narrow : {DataType::HALF, DataType::BFLOAT16})
         {
-            const PointwiseSignatureKey registered{
-                mode, DataType::FLOAT, DataType::FLOAT, narrow, narrow};
-            EXPECT_EQ(planBuilders.count(registered), 1u) << registered;
-
-            // The compute and output types swapped is not a registered combination
-            const PointwiseSignatureKey swapped{
-                mode, DataType::FLOAT, narrow, DataType::FLOAT, narrow};
-            EXPECT_EQ(planBuilders.count(swapped), 0u) << swapped;
+            const PointwiseSignatureKey key{mode, DataType::FLOAT, narrow, DataType::FLOAT, narrow};
+            EXPECT_EQ(planBuilders.count(key), 1u) << key;
         }
     }
 }

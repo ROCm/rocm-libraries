@@ -243,7 +243,9 @@ BFP16 (the CPU reference mixes them only in `CMP_GT`). See the
 other direction.
 
 **Compute datatype.** The kernels compute in the node's compute type, which has to match a tuple: FP32, or
-the operand's own type for the FP16 and BFP16 tuples above. The CPU reference also registers FP64 compute.
+the operand's own type for the FP16 and BFP16 tuples above. The CPU reference also registers FP64 compute and an
+FP32 operand beside a 16-bit one computed in the 16-bit type and written as FP32, which a convolution with a bias
+add produces. A graph with such a node runs on the CPU reference.
 
 **Parameters.** `relu_lower_clip`, `relu_upper_clip` and `relu_lower_clip_slope` apply to `RELU_FWD` and
 `RELU_BWD`, `swish_beta` to `SWISH_FWD`, `elu_alpha` to `ELU_FWD` and `softplus_beta` to `SOFTPLUS_FWD`. A

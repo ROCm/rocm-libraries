@@ -371,6 +371,12 @@ const std::vector<Gap>& knownGaps()
         {Reference::GPU, {PointwiseMode::ELU_BWD}},
         {Reference::GPU, {PointwiseMode::SOFTPLUS_BWD}},
 
+        // CPU only: an FP32 operand beside a 16-bit one, computed in the 16-bit type and written as
+        // FP32. A convolution with a bias add produces it: the convolution output is a virtual FP32
+        // tensor and the bias is FP16 or BFP16.
+        {Reference::GPU, binarySignature(K_FP32, K_FP16, K_FP32, K_FP16)},
+        {Reference::GPU, binarySignature(K_FP32, K_BFP16, K_FP32, K_BFP16)},
+
         // CPU only: FP64, FP8 and INT32 tensors, which the GPU key has no entry for. Modes only the
         // CPU has are listed above whatever their datatypes.
         {Reference::GPU, unarySignature(K_FP64, K_FP64, K_FP64)},
@@ -394,6 +400,11 @@ const std::vector<Gap>& knownGaps()
         {Reference::GPU, ternarySignature(K_FP8_E4M3, K_FP8_E4M3, K_BOOLEAN, K_FP8_E4M3, K_FP32)},
         {Reference::GPU, ternarySignature(K_FP8_E5M2, K_FP8_E5M2, K_BOOLEAN, K_FP8_E5M2, K_FP32)},
         {Reference::GPU, ternarySignature(K_BOOLEAN, K_BOOLEAN, K_BOOLEAN, K_BOOLEAN, K_FP32)},
+
+        // GPU only: an FP32 operand beside a 16-bit one, computed in FP32 and written in the 16-bit
+        // type.
+        {Reference::CPU, binarySignature(K_FP32, K_FP16, K_FP16, K_FP32)},
+        {Reference::CPU, binarySignature(K_FP32, K_BFP16, K_BFP16, K_FP32)},
 
         // GPU only: the CPU narrows an FP32 input but never widens a 16-bit one, and mixes FP16
         // with BFP16 only in CMP_GT.
