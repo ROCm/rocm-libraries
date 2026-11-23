@@ -1398,7 +1398,7 @@ with its reason, owner and expiry. It holds three kinds of record:
 
 | Kind | Records | Expired entry |
 |---|---|---|
-| `PendingTest` | a test file waiting for a lane CI does not run yet (a scheduled run, a gfx950 or gfx90a runner, an unlanded PR); the file is not known to be broken | warns, and fails only a change that touches the registry or that file (every scheduled run under `--strict-expiry`) |
+| `PendingTest` | a test file waiting for a lane CI does not run yet (a scheduled run, a gfx950 or gfx90a runner, an unlanded PR); the file is not known to be broken. A file whose cases wait for several things CI lacks (two runners) has one entry per lane; a file under a lane that waits for torch imports torch | warns, and fails only a change that touches the registry or that file (every scheduled run under `--strict-expiry`) |
 | `MeasuredBudget` | the scratch bytes one test allows one kernel on one compiler while its retune is decided | as `PendingTest` |
 | `QuarantinedTest` | one test known to fail (a flake, or a defect that turns develop red), by item id `<file>::<node name>`; a name without parameters covers all of them. Needs an issue (`AICK-1234`, `ROCm/<repo>#<n>`, or `none filed yet`); may name the GPU arches it fails on, to be held out there only; at most `QUARANTINE_CAP` (10) at once | always fails |
 

@@ -16,7 +16,9 @@ filters and a file whose every case skips in CI are not seen here, so
 Every other test file must be listed in ``rocke.tests.pending_lanes``, and every
 listed entry must be current: its file present and its lane's kind still
 true of the file (a file waiting for a new lane is in no CI-run entry; a
-file waiting for something CI lacks is in one). An expired entry fails only a
+file waiting for something CI lacks is in one), and a file waiting for torch
+imports it. A file is listed once per lane, and under several lanes only when
+each waits for something CI lacks. An expired entry fails only a
 change that touches the registry or its file, and every run under
 ``--strict-expiry``; otherwise it is reported as a warning. The registry's
 measured budgets are held to the same rules: each names a present test file, is
@@ -52,12 +54,16 @@ from rocke.runtime.comgr import CompilerInfo
 from rocke.tests import in_tree_suites
 from rocke.tests.ctest_listing import configure_installed_ctest, list_ctest_entries
 from rocke.tests.pending_lanes import (
+    GFX950_RUNNER,
     LANES,
     MEASURED_BUDGETS,
+    NIGHTLY_SOURCE,
     NO_ISSUE_FILED,
     PENDING,
     QUARANTINE_CAP,
     QUARANTINED,
+    TORCH_IN_CI,
+    Lane,
     MeasuredBudget,
     PendingTest,
     QuarantinedTest,
@@ -462,13 +468,64 @@ def audit(
     test_files: set[str], in_ci: set[str], pending: Iterable[PendingTest]
 ) -> tuple[list[str], list[str]]:
     """(files in limbo, stale pending entries): the test files neither in CI
-    nor listed, and the listed files whose lane's kind does not fit them."""
-    listed = {entry.path: entry for entry in pending}
-    in_limbo = sorted(test_files - in_ci - listed.keys())
+    nor listed, and the listed files a lane's kind does not fit."""
+    pending = list(pending)
+    in_limbo = sorted(test_files - in_ci - {entry.path for entry in pending})
     stale = sorted(
-        path for path, entry in listed.items() if (path in in_ci) != entry.lane.enrolled
+        {
+            entry.path
+            for entry in pending
+            if (entry.path in in_ci) != entry.lane.enrolled
+        }
     )
     return in_limbo, stale
+
+
+def listing_breaches(pending: Iterable[PendingTest]) -> list[str]:
+    """The files listed twice under one lane, or under several lanes when one
+    of them is a lane that does not exist yet (its files are in no CI entry)."""
+    lanes_of: dict[str, list[Lane]] = {}
+    for entry in pending:
+        lanes_of.setdefault(entry.path, []).append(entry.lane)
+    breaches = []
+    for path, lanes in sorted(lanes_of.items()):
+        names = [lane.name for lane in lanes]
+        if len(set(names)) < len(names):
+            breaches.append(f"listed twice under one lane: {path}")
+        elif len(lanes) > 1 and not all(lane.enrolled for lane in lanes):
+            breaches.append(
+                f"listed under several lanes, one of which no CI entry runs yet: "
+                f"{path} ({', '.join(names)})"
+            )
+    return breaches
+
+
+def imports_torch(test_file: Path) -> bool:
+    """Whether a test module imports torch anywhere, a function body included:
+    an ``import torch[.x]`` or ``from torch[.x] import`` statement, or a call of
+    ``importorskip`` or ``import_module`` with ``"torch"``."""
+    tree = ast.parse(test_file.read_text(encoding="utf-8"))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            modules = [alias.name for alias in node.names]
+        elif isinstance(node, ast.ImportFrom) and node.level == 0:
+            modules = [node.module or ""]
+        elif isinstance(node, ast.Call):
+            function = node.func
+            name = function.attr if isinstance(function, ast.Attribute) else None
+            if isinstance(function, ast.Name):
+                name = function.id
+            first = node.args[0] if node.args else None
+            if name not in ("importorskip", "import_module") or not (
+                isinstance(first, ast.Constant) and isinstance(first.value, str)
+            ):
+                continue
+            modules = [first.value]
+        else:
+            continue
+        if any(module.partition(".")[0] == "torch" for module in modules):
+            return True
+    return False
 
 
 def test_audit_finds_files_in_limbo_and_stale_entries():
@@ -492,6 +549,58 @@ def test_audit_finds_files_in_limbo_and_stale_entries():
         ["a/test_limbo.py"],
         ["a/test_new_lane.py", "a/test_skips.py"],
     )
+
+
+def test_a_file_may_wait_for_several_things_ci_lacks_but_one_new_lane():
+    def entry(lane):
+        return PendingTest("a/test_x.py", lane, "why", "owner", "2027-01-31")
+
+    gfx1250_runner = next(
+        lane for lane in LANES if lane.enrolled and lane is not GFX950_RUNNER
+    )
+    assert listing_breaches([entry(GFX950_RUNNER), entry(gfx1250_runner)]) == []
+    assert listing_breaches([entry(GFX950_RUNNER), entry(GFX950_RUNNER)]) == [
+        "listed twice under one lane: a/test_x.py"
+    ]
+    assert listing_breaches([entry(GFX950_RUNNER), entry(NIGHTLY_SOURCE)]) == [
+        (
+            "listed under several lanes, one of which no CI entry runs yet: "
+            "a/test_x.py (gfx950-runner, nightly-source)"
+        )
+    ]
+    # Each of a file's entries must fit it: in CI for both enrolled lanes.
+    entries = [entry(GFX950_RUNNER), entry(gfx1250_runner)]
+    assert audit({"a/test_x.py"}, {"a/test_x.py"}, entries) == ([], [])
+    assert audit({"a/test_x.py"}, set(), entries) == ([], ["a/test_x.py"])
+
+
+def test_a_torch_import_is_found_wherever_the_module_makes_it(tmp_path):
+    sources = {
+        "test_module_level.py": "import torch\n",
+        "test_submodule.py": "import numpy as np\nfrom torch.nn import functional\n",
+        "test_in_a_function.py": "def test_x():\n    import torch.cuda\n",
+        "test_importorskip.py": (
+            "import pytest\n"
+            "def test_x():\n"
+            "    torch = pytest.importorskip('torch', reason='graphs')\n"
+        ),
+        "test_import_module.py": (
+            "import importlib\ntorch = importlib.import_module('torch')\n"
+        ),
+    }
+    for name, source in sources.items():
+        (tmp_path / name).write_text(source)
+        assert imports_torch(tmp_path / name), name
+    torch_free = {
+        "test_numpy.py": "import numpy as np\n",
+        "test_lookalike.py": "import torchvision\nfrom torchaudio import io\n",
+        "test_relative.py": "from .torch import helper\n",
+        "test_mention.py": "# torch is not needed: a numpy reference\nNAME = 'torch'\n",
+        "test_other_skip.py": "import pytest\nyaml = pytest.importorskip('yaml')\n",
+    }
+    for name, source in torch_free.items():
+        (tmp_path / name).write_text(source)
+        assert not imports_torch(tmp_path / name), name
 
 
 def test_paths_keep_their_root_when_normalized():
@@ -642,18 +751,17 @@ def _utc_today() -> datetime.date:
 
 
 def test_every_pending_entry_is_current(request):
-    paths = [pending.path for pending in PENDING]
-    duplicates = sorted({path for path in paths if paths.count(path) > 1})
-    assert not duplicates, f"listed more than once: {duplicates}"
-    missing = [
-        pending.path for pending in PENDING if not (ROCKE / pending.path).is_file()
-    ]
+    breaches = listing_breaches(PENDING)
+    assert not breaches, breaches
+    missing = sorted(
+        {pending.path for pending in PENDING if not (ROCKE / pending.path).is_file()}
+    )
     assert not missing, f"listed but gone: {missing}"
     today = _utc_today()
     _fail_or_report_expired(
         request,
         "pending_lanes",
-        {p.path: p.path for p in PENDING if p.expiry_date < today},
+        {f"{p.path} ({p.lane.name})": p.path for p in PENDING if p.expiry_date < today},
     )
 
 
@@ -881,6 +989,19 @@ def test_a_quarantine_fails_when_expired_listed_twice_or_over_the_cap():
             f"{QUARANTINE_CAP}; fix one before quarantining another"
         )
     ]
+
+
+def test_every_file_waiting_for_torch_imports_it():
+    assert TORCH_IN_CI.waits_for_torch
+    torchless = sorted(
+        f"{pending.path} ({pending.lane.name})"
+        for pending in PENDING
+        if pending.lane.waits_for_torch and not imports_torch(ROCKE / pending.path)
+    )
+    assert not torchless, (
+        "listed under a lane that waits for torch, but they do not import it "
+        f"(move them to the lane they wait for, or drop them): {torchless}"
+    )
 
 
 def test_every_quarantined_test_is_current():

@@ -25,8 +25,11 @@ There are two kinds of lane. A lane with ``enrolled=False`` does not exist yet
 (a scheduled run, a pull request that has not landed, a registration not yet
 applied): its files are in no CI-run entry. A lane with ``enrolled=True`` is
 something the CI-run entries lack (torch in the test environment, a gfx950 or
-gfx90a runner): its files are selected by a CI-run entry, but their cases that
-need it skip there.
+gfx1250 runner): its files are selected by a CI-run entry, but their cases that
+need it skip there. A file whose cases lack several such things (a gfx950 case
+and a gfx1250 case) has one entry per lane; a file waiting for a lane that does
+not exist yet has exactly one entry. A file listed under a lane that waits for
+torch must import torch.
 
     PendingTest(
         path="library/tests/test_example.py",  # relative to the rocke directory
@@ -92,6 +95,8 @@ __all__ = [
     "ENROLMENT",
     "GFX90A_RUNNER",
     "GFX950_RUNNER",
+    "GFX1151_GFX1201_RUNNER",
+    "GFX1250_RUNNER",
     "LANES",
     "MEASURED_BUDGETS",
     "NIGHTLY_GPU",
@@ -105,7 +110,6 @@ __all__ = [
     "QUARANTINE_TREES",
     "TORCH_IN_CI",
     "WEEKLY_EXHAUSTIVE",
-    "WEEKLY_TORCH_GPU",
     "Lane",
     "MeasuredBudget",
     "PendingTest",
@@ -126,6 +130,9 @@ class Lane:
     # wait for something that entry lacks; False when no CI-run entry selects
     # them.
     enrolled: bool
+    # True when what the lane waits for is torch: each of its files imports
+    # torch (``platform/tests/tools/test_pending_lanes.py`` checks it).
+    waits_for_torch: bool = False
 
 
 PR_16482 = Lane(
@@ -156,11 +163,6 @@ NIGHTLY_GPU = Lane(
     "a scheduled GPU stage on gfx942 and gfx950, which does not exist yet",
     enrolled=False,
 )
-WEEKLY_TORCH_GPU = Lane(
-    "weekly-torch-gpu",
-    "a scheduled GPU stage with torch installed, which does not exist yet",
-    enrolled=False,
-)
 BINDING_LANE = Lane(
     "binding-lane",
     "the C++ engine's Python modules in the CI test tree: the file is in a CI-run "
@@ -177,6 +179,7 @@ TORCH_IN_CI = Lane(
     "torch in the CI test environment: the file is in a CI-run entry, but its "
     "torch-checked cases skip there",
     enrolled=True,
+    waits_for_torch=True,
 )
 GFX950_RUNNER = Lane(
     "gfx950-runner",
@@ -190,6 +193,19 @@ GFX90A_RUNNER = Lane(
     "skip on the gfx942 and gfx110X runners",
     enrolled=True,
 )
+GFX1250_RUNNER = Lane(
+    "gfx1250-runner",
+    "a CI GPU stage on gfx1250: the file is in a CI-run entry, but its gfx1250 "
+    "cases skip on the gfx942 and gfx110X runners, and they have not run on "
+    "gfx1250 hardware",
+    enrolled=True,
+)
+GFX1151_GFX1201_RUNNER = Lane(
+    "gfx1151-gfx1201-runner",
+    "a CI GPU stage on gfx1151 or gfx1201: the file is in a CI-run entry, but its "
+    "cases for those arches skip on the gfx942 and gfx110X runners",
+    enrolled=True,
+)
 
 LANES: tuple[Lane, ...] = (
     PR_16482,
@@ -197,12 +213,13 @@ LANES: tuple[Lane, ...] = (
     NIGHTLY_SOURCE,
     WEEKLY_EXHAUSTIVE,
     NIGHTLY_GPU,
-    WEEKLY_TORCH_GPU,
     BINDING_LANE,
     OWNER_DECISION,
     TORCH_IN_CI,
     GFX950_RUNNER,
     GFX90A_RUNNER,
+    GFX1250_RUNNER,
+    GFX1151_GFX1201_RUNNER,
 )
 
 
@@ -509,15 +526,30 @@ PENDING: tuple[PendingTest, ...] = (
         "library/tests/test_attention_bwd_valu_numeric.py",
     ),
     *_waiting(
-        WEEKLY_TORCH_GPU,
-        "device numerics that need torch, which the CI test environment lacks, "
-        "and gfx950 or gfx942 hardware",
-        "rocKE library attention; torch-free rewrite: issue AICK-3334",
-        "2027-01-31",
-        "library/tests/test_attention_dense_prefill_builder_gfx950.py",
+        ENROLMENT,
+        "device numerics that run without torch now; never registered: they wait "
+        "for a GPU entry, where their gfx950 cases then wait for a gfx950 runner",
+        "rocKE library attention; issue AICK-3334",
+        "2026-12-31",
         "library/tests/test_attention_unified_mask_gfx950_numeric.py",
         "library/tests/test_attention_unified_swa_sink_gfx950_numeric.py",
+    ),
+    *_waiting(
+        ENROLMENT,
+        "strided-decode numerics on rocke device arrays (torch only for the "
+        "graph and stream cases); never registered: they wait for the gfx942 GPU "
+        "entry",
+        "rocKE library attention; issue AICK-3334",
+        "2026-12-31",
         "library/tests/test_strided_kv_decode_numeric.py",
+    ),
+    *_waiting(
+        ENROLMENT,
+        "CPU checks of the gfx950 dense prefill builder's spec construction (no "
+        "torch, no GPU); never registered: they wait for a CPU entry",
+        "rocKE library attention; issue: none filed yet",
+        "2026-12-31",
+        "library/tests/test_attention_dense_prefill_builder_gfx950.py",
     ),
     *_waiting(
         BINDING_LANE,
@@ -605,47 +637,127 @@ PENDING: tuple[PendingTest, ...] = (
         "2027-01-31",
         "library/tests/sdpa/test_dense_sdpa_numeric.py",
         "library/tests/sdpa/test_unified_sdpa_numeric.py",
-        "library/tests/test_attention_additive_bias_gfx950_numeric.py",
-        "library/tests/test_attention_dense_gfx942_numeric.py",
-        "library/tests/test_attention_dense_gfx950_numeric.py",
-        "library/tests/test_attention_gfx942_kv_pages.py",
-        "library/tests/test_attention_tiled_3d_kv_lds_swizzle.py",
-        "library/tests/test_attention_tiled_3d_wave_page_id_load.py",
-        "library/tests/test_attention_unified_lse_numeric.py",
-        "library/tests/test_attn_bf16_d128_ring.py",
-        "library/tests/test_conv_dgrad_correctness.py",
-        "library/tests/test_conv_fwd_correctness.py",
-        "library/tests/test_conv_wgrad_correctness.py",
-        "library/tests/test_conv_wgrad_streamk_gpu.py",
-        "library/tests/test_conv_winograd_dispatch_gpu.py",
-        "library/tests/test_conv_winograd_fwd_gpu.py",
-        "library/tests/test_conv_winograd_fwd_rt_gpu.py",
-        "library/tests/test_conv_winograd_gen_gpu.py",
-        "library/tests/test_direct_conv_correctness.py",
         "library/tests/test_gdn_decode_fused_gfx950_numeric.py",
         "library/tests/test_gdn_decode_gfx950_numeric.py",
         "library/tests/test_gdn_decode_knobs_gfx950_numeric.py",
         "library/tests/test_gdn_decode_prepare.py",
         "library/tests/test_gdn_prefill_decay_guard.py",
-        "library/tests/test_gfx942_4wgqa_bounds_numeric.py",
-        "library/tests/test_gfx942_cfvst_i64_kv_addr_numeric.py",
-        "library/tests/test_gfx942_gqa_head_fold_numeric.py",
         "library/tests/test_kda_chunkwise_gfx942_numeric.py",
         "library/tests/test_kda_chunkwise_gfx950_numeric.py",
         "library/tests/test_kda_decode_gfx950_numeric.py",
         "library/tests/test_kda_decode_reference.py",
+        "library/tests/test_kda_gdn_gfx950_numeric.py",
         "library/tests/test_mla_prefill_gfx942_numeric.py",
+    ),
+    *_waiting(
+        TORCH_IN_CI,
+        "its graph-replay case captures through torch; without torch in the CI "
+        "test environment that case skips",
+        "rocKE library attention",
+        "2027-01-31",
+        "library/tests/test_attention_unified_lse_numeric.py",
     ),
     *_waiting(
         GFX950_RUNNER,
         "its device cases need gfx950, which no CI GPU stage has",
         "rocKE library; issue: none filed yet",
         "2027-01-31",
+        "library/tests/test_attention_dense_gfx950_numeric.py",
+        "library/tests/test_attention_tiled_2d_gfx950_biased_numeric.py",
+        "library/tests/test_attention_tiled_3d_kv_lds_swizzle.py",
+        "library/tests/test_attention_tiled_3d_wave_page_id_load.py",
+        "library/tests/test_attention_unified_lse_numeric.py",
         "library/tests/test_attn_tiled_2d_gfx950_fp8_k_lds_numeric.py",
+        "library/tests/test_conv_dgrad_4c.py",
+        "library/tests/test_conv_dgrad_correctness.py",
         "library/tests/test_conv_dgrad_depthwise_windowed.py",
+        "library/tests/test_conv_fwd_split_k.py",
+        "library/tests/test_conv_wgrad_correctness.py",
+        "library/tests/test_convolution_forward_aot_numeric.py",
+        "library/tests/test_direct_conv_correctness.py",
+        "library/tests/test_direct_dgrad_pp_mfma.py",
+        "library/tests/test_direct_fwd_flex_mfma.py",
+        "library/tests/test_direct_fwd_pp_mfma.py",
         "library/tests/test_dsa_indexer_numeric.py",
         "library/tests/test_extended_parity_attention.py",
+        "library/tests/test_fwd_small_mfma.py",
+        "library/tests/test_gdn_decode_fused_gfx950_numeric.py",
+        "library/tests/test_gdn_decode_gfx950_numeric.py",
+        "library/tests/test_gdn_decode_knobs_gfx950_numeric.py",
+        "library/tests/test_kda_chunkwise_gfx950_numeric.py",
+        "library/tests/test_kda_decode_gfx950_numeric.py",
+        "library/tests/test_kda_gdn_gfx950_numeric.py",
         "platform/python/rocke/tests/helpers/tiling/mma/test_mma_k_coupling.py",
+    ),
+    *_waiting(
+        GFX950_RUNNER,
+        "its device cases need gfx950, which no CI GPU stage has. Known defect: "
+        "four test_additive_bias_with_features_matches_reference cases "
+        "(tiled_window_1seq, bf16) fail on gfx950, with torch and without: the "
+        "selector routes them to transposed32 where the route pin expects 16x16; "
+        "the selector owner decides which is right",
+        "rocKE library attention selector; issue: none filed yet",
+        "2026-12-15",
+        "library/tests/test_attention_additive_bias_gfx950_numeric.py",
+    ),
+    *_waiting(
+        GFX950_RUNNER,
+        "its device cases need gfx950 (the multi-GPU sweep, two of them), which no "
+        "CI GPU stage has",
+        "rocKE platform; issue: none filed yet",
+        "2027-01-31",
+        "platform/python/rocke/benchmark/gemm/tests/test_fp16_rcr_multigpu.py",
+        "platform/tests/core/test_f8f6f4_16x16x128.py",
+        "platform/tests/core/test_xf32_bf16x3_device.py",
+        "platform/tests/instances/test_gfx950_mixed_scaled_gemm_numeric.py",
+        "platform/tests/instances/test_gfx950_mxfp4_numeric.py",
+        "platform/tests/instances/test_gfx950_mxfp6_numeric.py",
+        "platform/tests/instances/test_gfx950_mxfp8_numeric.py",
+    ),
+    *_waiting(
+        GFX1250_RUNNER,
+        "its device cases need gfx1250, which no CI GPU stage has",
+        "rocKE library; issue: none filed yet",
+        "2027-01-31",
+        "library/tests/test_conv_dgrad_correctness.py",
+        "library/tests/test_conv_dgrad_depthwise_windowed.py",
+        "library/tests/test_conv_fwd_split_k.py",
+        "library/tests/test_conv_wgrad_correctness.py",
+        "library/tests/test_conv_winograd_dispatch_gpu.py",
+        "library/tests/test_conv_winograd_fwd_gpu.py",
+        "library/tests/test_conv_winograd_fwd_rt_gpu.py",
+        "library/tests/test_conv_winograd_gemm_wmma.py",
+        "library/tests/test_conv_winograd_gen_gpu.py",
+        "library/tests/test_dgrad_stem_wmma.py",
+        "library/tests/test_direct_conv_correctness.py",
+        "library/tests/test_direct_depthwise_fwd_cpl.py",
+        "library/tests/test_direct_dgrad_wmma.py",
+        "library/tests/test_direct_dw_fwd_wmma.py",
+        "library/tests/test_direct_fwd_gstream_wmma.py",
+        "library/tests/test_direct_fwd_tapouter_wmma.py",
+        "library/tests/test_direct_fwd_wmma.py",
+        "library/tests/test_fwd_small_wmma.py",
+        "library/tests/test_gfx1250_attention.py",
+    ),
+    *_waiting(
+        GFX1250_RUNNER,
+        "its device cases need gfx1250, which no CI GPU stage has",
+        "rocKE platform; issue: none filed yet",
+        "2027-01-31",
+        "platform/tests/instances/test_gfx1250_mixed_scaled_gemm_numeric.py",
+        "platform/tests/instances/test_gfx1250_mxfp4_numeric.py",
+        "platform/tests/instances/test_gfx1250_mxfp6_numeric.py",
+        "platform/tests/instances/test_gfx1250_mxfp8_numeric.py",
+        "platform/tests/instances/test_gfx1250_mxfp_examples.py",
+        "platform/tests/instances/test_gfx1250_nvfp4_numeric.py",
+        "platform/tests/instances/test_gfx1250_scale_formats_numeric.py",
+    ),
+    *_waiting(
+        GFX1151_GFX1201_RUNNER,
+        "its device case runs on gfx1151 or gfx1201 only, which no CI GPU stage has",
+        "rocKE platform; issue: none filed yet",
+        "2027-01-31",
+        "platform/tests/instances/test_matmul_nbits_numeric.py",
     ),
     *_waiting(
         GFX90A_RUNNER,
@@ -658,6 +770,14 @@ PENDING: tuple[PendingTest, ...] = (
         "platform/python/rocke/tests/helpers/tiling/test_fragment_storage.py",
         "platform/python/rocke/tests/helpers/tiling/test_lds_descriptor_addressing.py",
         "platform/python/rocke/tests/helpers/tiling/test_leading_axes.py",
+    ),
+    *_waiting(
+        GFX90A_RUNNER,
+        "its GPU case checks gfx90a instructions on gfx90a only",
+        "rocKE platform; issue: none filed yet",
+        "2027-01-31",
+        "platform/tests/core/test_u8_arith.py",
+        "platform/tests/numeric/test_gfx90a_mfma_ops.py",
     ),
 )
 
