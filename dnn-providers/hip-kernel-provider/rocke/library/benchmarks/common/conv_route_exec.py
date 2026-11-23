@@ -12,7 +12,9 @@ bound with ``KernelLauncher.bind``. Workspaces are allocated once per binding (o
 through ``workspaces=``, a :class:`SharedWorkspaces`) and the ``zero_once`` ones zeroed
 at allocation. A shared workspace is reused only by a plan that declares it the same
 way (same size and ``zero_once``; a ``zero_once`` one only by the same route): anything
-else is refused, never bound to a buffer it would overrun or find dirty.
+else is refused, never bound to a buffer it would overrun or find dirty. The caller's
+operand sizes must be the plan's tensor sizes exactly (:func:`operand_nbytes`): they
+become the launches' buffer extents, so a mismatch is refused before anything is bound.
 
 Usage::
 
@@ -63,6 +65,54 @@ def pinned_launch(plan, cache, B):
     return ident, meta, launcher, split_k
 
 
+_ELEM_BYTES = {"fp16": 2, "bf16": 2, "f16": 2, "fp32": 4, "f32": 4}
+
+
+def operand_nbytes(plan) -> tuple:
+    """Byte sizes of the call's (A, B, D) tensors -- fwd (X, W, Y), dgrad
+    (dY, W, dX), wgrad (dY, X, dW) -- from ``plan.problem`` (the request's
+    problem: a halo-form kernel reads the pad copy, a workspace, not X) and
+    the request's dtype. NDHWC activations, W [K, Z, Y, X, C / groups]."""
+    p = plan.problem
+    dtype = str(plan.request.dtype).lower()
+    elem = _ELEM_BYTES.get(dtype)
+    if elem is None:
+        raise ValueError(f"{plan.case}: no element size for dtype {dtype!r}")
+    sp_in = (p.Di, p.Hi, p.Wi) if p.Di is not None else (p.Hi, p.Wi)
+    sp_out = (p.Do, p.Ho, p.Wo) if p.Di is not None else (p.Ho, p.Wo)
+    taps = (p.Z, p.Y, p.X) if p.Z is not None else (p.Y, p.X)
+
+    def nb(*dims):
+        n = elem
+        for d in dims:
+            n *= int(d)
+        return n
+
+    x, y, w = nb(p.N, *sp_in, p.C), nb(p.N, *sp_out, p.K), nb(p.K, *taps, p.cpg)
+    return {"fwd": (x, w, y), "dgrad": (y, w, x), "wgrad": (y, x, w)}[plan.direction]
+
+
+def check_operand_sizes(plan, sizes) -> None:
+    """Raise ``ValueError`` unless ``sizes`` are the plan's (A, B, D) byte sizes."""
+    want = operand_nbytes(plan)
+    if len(sizes) != 3:
+        raise ValueError(f"{plan.case}: sizes takes the (A, B, D) byte sizes")
+    names = {
+        "fwd": ("X", "W", "Y"),
+        "dgrad": ("dY", "W", "dX"),
+        "wgrad": ("dY", "X", "dW"),
+    }[plan.direction]
+    bad = [
+        f"{n} ({k}) is {int(got)} B, the problem's is {exp} B"
+        for n, k, got, exp in zip("ABD", names, sizes, want)
+        if int(got) != exp
+    ]
+    if bad:
+        raise ValueError(
+            f"{plan.case}: {plan.direction} operand size mismatch: " + "; ".join(bad)
+        )
+
+
 def _route_key(plan) -> tuple:
     """What a ``zero_once`` workspace's never-written part depends on: the
     route's launches and kernels (its layout), not only its size."""
@@ -104,7 +154,8 @@ class SharedWorkspaces(dict):
 
 class RouteBinding:
     """One call of a routed case bound to buffers ``ptrs`` = (A, B, D): fwd (X, W, Y),
-    dgrad (dY, W, dX), wgrad (dY, X, dW); ``sizes`` their byte sizes.
+    dgrad (dY, W, dX), wgrad (dY, X, dW); ``sizes`` their byte sizes, which must be
+    the plan's (:func:`operand_nbytes`; anything else raises ``ValueError``).
 
     ``cfg_cls``: the ``LaunchConfig`` class to launch with (a stream-binding wrapper
     for multi-stream replays). ``workspaces``: a :class:`SharedWorkspaces` to share
@@ -133,7 +184,12 @@ class RouteBinding:
         if B is None:
             from benchmarks.common import benchmark_implicit_gemm_conv as B
         self.plan, self.rt = plan, rt
-        self.ptrs, self.sizes = tuple(ptrs), tuple(sizes)
+        self.ptrs, self.sizes = tuple(ptrs), tuple(int(n) for n in sizes)
+        if len(self.ptrs) != 3:
+            raise ValueError(f"{plan.case}: ptrs takes the (A, B, D) buffers")
+        # The sizes become the launches' buffer extents: check them against
+        # the problem before anything is allocated or bound.
+        check_operand_sizes(plan, self.sizes)
         cfg_cls = cfg_cls or LaunchConfig
         self.live_extras = live_extras if live_extras is not None else []
         self._owned = []

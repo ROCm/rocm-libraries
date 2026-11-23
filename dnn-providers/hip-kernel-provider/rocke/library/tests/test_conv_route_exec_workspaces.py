@@ -2,17 +2,31 @@
 # SPDX-License-Identifier: MIT
 #
 # benchmarks/common/conv_route_exec.py: route workspaces shared between
-# bindings are reused only by plans they fit. Host-only (a recording runtime
-# stands in for the device; the plans have no launch steps).
+# bindings are reused only by plans they fit, and the caller's operand sizes
+# must be the problem's. Host-only (a recording runtime stands in for the
+# device; the plans have no launch steps).
 
 from __future__ import annotations
 
+import re
 from types import SimpleNamespace
 
 import pytest
 
-from benchmarks.common.conv_route_exec import RouteBinding, SharedWorkspaces
+from benchmarks.common.conv_route_exec import (
+    RouteBinding,
+    SharedWorkspaces,
+    operand_nbytes,
+)
 from dispatch.conv_routes import RouteWorkspace
+from kernels.common._conv_implicit_gemm_common import ConvProblem
+
+# 3-D, 3x3x3, pad 1, stride 1: X [1, 4, 6, 8, 16], W [32, 3, 3, 3, 16],
+# Y [1, 4, 6, 8, 32] (bf16).
+_PROBLEM = ConvProblem(
+    N=1, Hi=6, Wi=8, C=16, K=32, Y=3, X=3, pH=1, pW=1, Di=4, Z=3, sD=1, pD=1, dD=1
+)
+_X, _W, _Y = 2 * 4 * 6 * 8 * 16, 2 * 32 * 27 * 16, 2 * 4 * 6 * 8 * 32
 
 
 class _Rt:
@@ -32,10 +46,13 @@ class _Rt:
         pass
 
 
-def _plan(*ws, route="winograd", label=""):
+def _plan(*ws, route="winograd", label="", direction="fwd", problem=_PROBLEM):
     return SimpleNamespace(
         case="fwd_s8",
         route=route,
+        direction=direction,
+        problem=problem,
+        request=SimpleNamespace(dtype="bf16"),
         kernel_label=label,
         launches=("relayout", "main", "reduce"),
         pad_copy=None,
@@ -45,9 +62,16 @@ def _plan(*ws, route="winograd", label=""):
     )
 
 
-def _bind(plan, rt, shared):
+def _bind(plan, rt, shared, sizes=None):
     return RouteBinding(
-        plan, None, rt, "gfx942", (1, 2, 3), (16, 16, 16), workspaces=shared, B=object()
+        plan,
+        None,
+        rt,
+        "gfx942",
+        (1, 2, 3),
+        operand_nbytes(plan) if sizes is None else sizes,
+        workspaces=shared,
+        B=object(),
     )
 
 
@@ -142,6 +166,53 @@ def test_shipped_route_with_deeper_split_gets_its_own_workspaces(tmp_path):
     assert not shared.compatible(dp0)
     with pytest.raises(ValueError, match="route workspace"):
         _bind(dp0, rt, shared)
+    # The shipped problem's own operand sizes: NDHWC bf16 X / Y, W [K, 3, 3, 3, C].
+    p = bp.problem
+    x, y = 2 * p.N * p.Di * p.Hi * p.Wi * p.C, 2 * p.N * p.Do * p.Ho * p.Wo * p.K
+    assert operand_nbytes(bp) == (x, 2 * p.K * 27 * p.C, y)
+    with pytest.raises(ValueError, match="operand size mismatch"):
+        _bind(bp0, rt, SharedWorkspaces(), sizes=(x, 2 * p.K * 27 * p.C, y - 2))
     # The same route resolved again (another load of the table) is shareable.
     again = load_route_cases(f"{path}#deterministic@pad1", "gfx942")["fwd_s8"]
     assert shared.compatible(dataclasses.replace(again["route_plan"], steps=()))
+
+
+@pytest.mark.parametrize(
+    "direction, sizes",
+    [("fwd", (_X, _W, _Y)), ("dgrad", (_Y, _W, _X)), ("wgrad", (_Y, _X, _W))],
+)
+def test_operand_sizes_follow_the_direction(direction, sizes):
+    assert operand_nbytes(_plan(direction=direction)) == sizes
+
+
+def test_grouped_weight_is_per_group_channels():
+    import dataclasses
+
+    g = dataclasses.replace(_PROBLEM, groups=4)
+    assert operand_nbytes(_plan(problem=g))[1] == _W // 4
+
+
+@pytest.mark.parametrize(
+    "direction, sizes, operand",
+    [
+        ("fwd", (_X - 2, _W, _Y), "A (X)"),  # undersized input
+        ("fwd", (_X, _W, _Y // 2), "D (Y)"),  # undersized output
+        ("fwd", (_X, _W + 2, _Y), "B (W)"),  # oversized weight
+        ("dgrad", (_X, _W, _Y), "A (dY)"),  # fwd sizes for a dgrad call
+        ("wgrad", (_Y, _X, _Y), "D (dW)"),  # output of another tensor
+    ],
+)
+def test_mismatched_operand_size_is_refused_before_binding(direction, sizes, operand):
+    rt = _Rt()
+    plan = _plan(RouteWorkspace("P", 64, zero_once=True), direction=direction)
+    with pytest.raises(
+        ValueError, match=rf"operand size mismatch: .*{re.escape(operand)} is"
+    ):
+        _bind(plan, rt, SharedWorkspaces(), sizes=sizes)
+    # Refused before any workspace is allocated or zeroed.
+    assert rt.allocs == [] and rt.memsets == []
+
+
+def test_operand_sizes_must_be_three():
+    with pytest.raises(ValueError, match="sizes takes"):
+        _bind(_plan(), _Rt(), SharedWorkspaces(), sizes=(_X, _W))

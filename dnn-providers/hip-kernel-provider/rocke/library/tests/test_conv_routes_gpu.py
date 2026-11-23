@@ -153,7 +153,9 @@ def test_winograd_route_matches_dropin_and_reference(case):
 
 def test_pad_copy_step():
     # the pinned halo-form step needs an AOT cache; bind the pad copy alone
-    pc = cr.PadCopySpec(D=34, H=16, W=16, C=64, halo=(0, 1, 1))
+    base = cr.dispatch_conv_route(_req("fwd_pad1"), ROUTES)
+    p = base.problem
+    pc = cr.PadCopySpec(D=p.Di, H=p.Hi, W=p.Wi, C=p.C, halo=(0, 1, 1))
     step = cr.RouteStep(
         "pad_copy",
         "kernel",
@@ -164,14 +166,20 @@ def test_pad_copy_step():
         block=pc.block,
     )
     plan = dataclasses.replace(
-        cr.dispatch_conv_route(_req("fwd_pad1"), ROUTES),
+        base,
         steps=(step,),
         workspaces=(cr.RouteWorkspace("Xp", pc.out_bytes, zero_once=True),),
     )
-    X = torch.randn(34, 16, 16, 64, device="cuda").to(torch.bfloat16)
-    rb = _bind(plan, X, X, X)
+    X = torch.randn(p.Di, p.Hi, p.Wi, p.C, device="cuda").to(torch.bfloat16)
+    W = torch.empty(p.K, 3, 3, 3, p.C, device="cuda", dtype=torch.bfloat16)
+    Y = torch.empty(p.Do, p.Ho, p.Wo, p.K, device="cuda", dtype=torch.bfloat16)
+    rb = _bind(plan, X, W, Y)
     for _ in range(2):  # the halo stays zero call after call
         rb.run()
     torch.cuda.synchronize()
-    Xp = rb.rt.keep[rb.workspaces["Xp"]].view(torch.bfloat16).view(34, 18, 18, 64)
+    Xp = (
+        rb.rt.keep[rb.workspaces["Xp"]]
+        .view(torch.bfloat16)
+        .view(p.Di, p.Hi + 2, p.Wi + 2, p.C)
+    )
     assert torch.equal(Xp, torch.nn.functional.pad(X, (0, 0, 1, 1, 1, 1, 0, 0)))
