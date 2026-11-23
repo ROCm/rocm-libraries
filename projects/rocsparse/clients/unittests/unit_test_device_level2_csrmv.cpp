@@ -32,6 +32,7 @@
 #include "unit_test_device_level2_common.hpp"
 
 #include <algorithm>
+#include <limits>
 
 using namespace level2;
 
@@ -42,6 +43,8 @@ namespace
         rocsparse_spmv_alg  alg    = rocsparse_spmv_alg_default;
         rocsparse_operation trans  = rocsparse_operation_none;
         bool                device = false;
+        // beta == 0 with y starting as NaN; y is write-only then.
+        bool beta_zero_nan_y = false;
     };
 
     template <typename T>
@@ -55,11 +58,14 @@ namespace
         const size_t ys = trans_size(c.trans, A.m, A.n, false);
 
         const T alpha = rocsparse_ut::scalar<T>(1.5f);
-        const T beta  = rocsparse_ut::scalar<T>(-0.5f);
+        const T beta  = rocsparse_ut::scalar<T>(c.beta_zero_nan_y ? 0.0f : -0.5f);
 
         const std::vector<T> x    = make_vector<T>(xs, 2);
-        const std::vector<T> y0   = make_vector<T>(ys, 9);
-        const std::vector<T> want = csr_gemv(A, c.trans, alpha, x, beta, y0);
+        const std::vector<T> y0   = c.beta_zero_nan_y
+                                        ? std::vector<T>(ys, std::numeric_limits<T>::quiet_NaN())
+                                        : make_vector<T>(ys, 9);
+        const std::vector<T> want = csr_gemv(
+            A, c.trans, alpha, x, beta, c.beta_zero_nan_y ? std::vector<T>(ys, T(0)) : y0);
 
         device_csr<T, int32_t, int32_t> dA(A);
         device_vector<T>                dx(x), dy(y0), dalpha(std::vector<T>(1, alpha)),
@@ -170,6 +176,30 @@ namespace
         sweep(make_csr_by_length<float>(
                   3000, 6007, 1, [](int32_t i) { return (i % 100) < 12 ? 4500 : 1 + (i % 4); }),
               false);
+    }
+
+    TEST_F(L2DeviceCsrmvRows, beta_zero_ignores_nan_in_y)
+    {
+        // With beta == 0, y is write-only. The rows of 10000 entries are shared by several
+        // workgroups in the adaptive and LRB algorithms, which add their parts to y atomically;
+        // the NaN y starts with must not end up in them.
+        const auto A = make_csr_by_length<float>(
+            2000, 12007, 0, [](int32_t i) { return (i % 250) == 7 ? 10000 : 1 + (i % 4); });
+        for(const auto alg : {rocsparse_spmv_alg_default,
+                              rocsparse_spmv_alg_csr_rowsplit,
+                              rocsparse_spmv_alg_csr_adaptive,
+                              rocsparse_spmv_alg_csr_lrb,
+                              rocsparse_spmv_alg_csr_nnzsplit})
+            for(const bool device : {false, true})
+            {
+                csr_case c;
+                c.alg             = alg;
+                c.device          = device;
+                c.beta_zero_nan_y = true;
+                run_csr<float>(handle, A, c);
+                if(HasFailure())
+                    return;
+            }
     }
 
     TEST_F(L2DeviceCsrmvRows, mixed_lengths_with_empty_rows)
