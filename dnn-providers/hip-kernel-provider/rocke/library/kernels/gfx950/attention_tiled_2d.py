@@ -85,6 +85,7 @@ from rocke.helpers.attention import (
     warp_xor_reduce_sum,
     warp_xor_reduce_sum_32lane,
 )
+from rocke.helpers.attention_arch_caps import attn_arch_caps
 from rocke.helpers.distribution import make_static_tile_distribution
 from rocke.helpers.layouts import TransposeLdsReader
 from rocke.helpers.transforms import (
@@ -99,8 +100,9 @@ from rocke.helpers.transforms import (
 MFMA_M = 16
 MFMA_N = 16
 
-# Bytes one wave writes per async-DMA LDS copy: 64 lanes x 16 B.
-_ASYNC_DMA_WAVE_SLAB_BYTES = 64 * 16
+# Bytes one wave writes per async-DMA LDS copy: 64 lanes x the widest gfx950
+# LDS-DMA width from the attention capability table (4 dwords = 16 B).
+_ASYNC_DMA_WAVE_SLAB_BYTES = 64 * attn_arch_caps("gfx950").max_lds_dma_dwords * 4
 # bf16 elements in one wave's async-DMA K slab (2 B per element). The KQ LDS
 # pad goes between these slabs, so a padded K row never straddles one.
 _KQ_PAD_SLAB_HALVES = _ASYNC_DMA_WAVE_SLAB_BYTES // 2
@@ -2083,11 +2085,19 @@ def build_unified_attention_2d_tiled(
     key_rsrc = b.buffer_rsrc(key, big_bytes)
     value_rsrc = b.buffer_rsrc(value, big_bytes)
 
-    # Async load contract (bf16 K/V path): dwords=4 means each lane writes
-    # 16 bytes lane-contiguous in LDS. One call writes 64 * 8 halfs = 512
-    # halfs = 1024 bytes, i.e. a contiguous slice of the natural [T, HD] tile.
-    # This works for HD=128 and HD=256 without changing the LDS layout.
-    KV_HALVES_PER_CALL = THREADS * 8
+    # Async load contract (bf16 K/V path): each lane copies the widest gfx950
+    # LDS-DMA width (from the attention capability table: 4 dwords), i.e.
+    # writes 16 bytes lane-contiguous in LDS. One call writes 64 * 8 halfs =
+    # 512 halfs = 1024 bytes, i.e. a contiguous slice of the natural [T, HD]
+    # tile. This works for HD=128 and HD=256 without changing the LDS layout.
+    KV_DMA_DWORDS = attn_arch_caps("gfx950").max_lds_dma_dwords
+    # lane_half_base (tid * 8 halves) below is written for 4-dword lanes.
+    if KV_DMA_DWORDS != 4:
+        raise RuntimeError(
+            "gfx950 tiled 2D attention lane addressing assumes a 4-dword LDS-DMA "
+            f"width; the capability table gives {KV_DMA_DWORDS}"
+        )
+    KV_HALVES_PER_CALL = THREADS * KV_DMA_DWORDS * 2
     assert (T * HD) % KV_HALVES_PER_CALL == 0
     kv_calls_per_tile = (T * HD) // KV_HALVES_PER_CALL
     bytes_per_call = KV_HALVES_PER_CALL * 2
@@ -2106,7 +2116,8 @@ def build_unified_attention_2d_tiled(
         # nw=4 -> 2048 bytes/tile vs 4096 bytes/full-call), drop to a
         # narrower per-lane payload so the loader still tiles cleanly.
         tile_bytes = T * HD  # 1 byte per fp8 element
-        for dwords_try, bytes_per_lane in [(4, 16), (3, 12), (1, 4)]:
+        for dwords_try in sorted(attn_arch_caps("gfx950").lds_dma_dwords, reverse=True):
+            bytes_per_lane = dwords_try * 4
             payload = THREADS * bytes_per_lane
             if tile_bytes >= payload and tile_bytes % payload == 0:
                 K_FP8_DWORDS = dwords_try
@@ -2121,8 +2132,8 @@ def build_unified_attention_2d_tiled(
         K_BYTES_PER_CALL = K_ELEMS_PER_CALL  # 1 byte per fp8 element
         k_fp8_calls_per_tile = tile_bytes // K_ELEMS_PER_CALL
     else:
-        K_FP8_DWORDS = 4
-        K_BYTES_PER_LANE = 16
+        K_FP8_DWORDS = KV_DMA_DWORDS
+        K_BYTES_PER_LANE = KV_DMA_DWORDS * 4
         k_fp8_calls_per_tile = 0  # unused
     # Byte strides for the paged-KV cache. ``KV_BYTES`` is 2 for bf16, 1
     # for fp8e4m3. The async DMA reads bytes verbatim (no implicit cast),
@@ -2480,7 +2491,7 @@ def build_unified_attention_2d_tiled(
             # ``dsl_docs/primitives/intrinsics_and_primitives.md`` as the
             # right hint for K-loop streaming tile loads.
             b.async_buffer_load_lds_addr(
-                k_rsrc, k_dst, voff, soff, 4, coherency=CACHE_STREAM
+                k_rsrc, k_dst, voff, soff, KV_DMA_DWORDS, coherency=CACHE_STREAM
             )
 
     def _issue_v_load_runtime(kv_tile_idx: Value, buf_idx: Value) -> None:
@@ -2543,7 +2554,7 @@ def build_unified_attention_2d_tiled(
             # re-read within this kernel; see _issue_k_load_runtime for
             # the rationale.
             b.async_buffer_load_lds_addr(
-                v_rsrc, v_dst, voff, soff, 4, coherency=CACHE_STREAM
+                v_rsrc, v_dst, voff, soff, KV_DMA_DWORDS, coherency=CACHE_STREAM
             )
 
     # ---------------- FP8 K/V cache: async DMA loader (round 2) ----------------

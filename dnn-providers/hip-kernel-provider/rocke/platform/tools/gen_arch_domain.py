@@ -361,6 +361,32 @@ def _probe_spec(key: str, decl: str) -> ProbeSpec:
     )
 
 
+def _probe_decl(declared: str, resolved: str) -> str:
+    """The declare a probe is built from: `opt`'s resolution, unless AutoUpgrade
+    rewrote the signature.
+
+    The resolved declare is preferred because it carries this LLVM's `immarg`
+    (generator 5). AutoUpgrade can also change a legacy intrinsic's operand
+    list and upgrade old calls in place: llvm #220442 gave
+    `llvm.amdgcn.asyncmark` an `i32 immarg` stage mask and upgrades `()` to
+    `(i32 0)`. Probing the resolved form then asks a different question on each
+    side of the upgrade, so the same column cannot pass a compiler from before
+    and one from after it, although rocke emits the same IR to both. Probe
+    rocke's own declare instead: that is the IR rocke emits, and an `ok` proves
+    this LLVM still accepts and lowers it.
+    """
+    if not resolved:
+        return declared
+    before, _ = _probe_plan(declared)
+    after, _ = _probe_plan(resolved)
+    if before is None or after is None:
+        return resolved
+    signature = (before.ret, [operand.ty for operand in before.operands])
+    if signature == (after.ret, [operand.ty for operand in after.operands]):
+        return resolved
+    return declared
+
+
 class _ProbeOperand(NamedTuple):
     ty: str
     source: str
@@ -2151,12 +2177,17 @@ def main() -> int:
     # every arch rather than a crash mid-sweep.
     #
     # Use `opt`'s resolved declare where stage A produced one; the
-    # hand-written row covers the two cases that have none (no `opt` on this
-    # host, and a declare AutoUpgrade consumed entirely).
+    # hand-written row covers the cases that have none (no `opt` on this
+    # host, and a declare AutoUpgrade consumed entirely) and a declare whose
+    # signature AutoUpgrade rewrote (`_probe_decl`).
     modules: dict[str, tuple[Path | None, str]] = {}
     specs: dict[str, ProbeSpec] = {}
+    upgraded: dict[str, str] = {}
     for key in keys:
-        spec = _probe_spec(key, resolved.get(key, decls[key]))
+        decl = _probe_decl(decls[key], resolved.get(key, ""))
+        if key in resolved and decl != resolved[key]:
+            upgraded[key] = resolved[key]
+        spec = _probe_spec(key, decl)
         specs[key] = spec
         stem = re.sub(r"[^A-Za-z0-9_.-]", "_", key)
         text, why = _probe_module(
@@ -2171,6 +2202,15 @@ def main() -> int:
         path = ir_dir / f"{stem}.ll"
         path.write_text(text)
         modules[key] = (path, "")
+    if upgraded:
+        # An observation, not a failure: rocke's IR keeps working through the
+        # upgrade, but the new signature is the one to adopt eventually.
+        print(
+            f"   UPGRADED: {len(upgraded)} declare(s) AutoUpgrade rewrites to a "
+            "new signature; probed in rocke's own form"
+        )
+        for key, decl in sorted(upgraded.items()):
+            print(f"     {key:44s} {decls[key].strip()}  ->  {decl}")
 
     # Stage B -- the arch axis, only for names that exist. A key stage A could
     # not measure is held out too: its probe would have to be built from the

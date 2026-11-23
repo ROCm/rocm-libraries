@@ -44,7 +44,7 @@ from kernels.common._lse_store import emit_lse_field, reduce_lse_store
 from kernels.common._spec_checks import require_bool
 from kernels.common.attention_split_kv_reduce import (
     split_kv_reduce_spec,
-    tiled_reduce_unsupported_reason,
+    supports_split_kv_reduce,
 )
 
 from rocke.core.ir import (
@@ -73,6 +73,7 @@ from rocke.helpers.attention import (
     wave64_reduce_max as _wave64_reduce_max,
     wave64_reduce_sum as _wave64_reduce_sum,
 )
+from rocke.helpers.attention_arch_caps import attn_arch_caps
 from rocke.helpers.distribution import make_static_tile_distribution
 from rocke.helpers.transforms import (
     DynamicTensorDescriptor,
@@ -708,8 +709,9 @@ def build_unified_attention_3d_tiled(
     # to 2 halves/lane (1 dword) and issue 4x as many calls to move the same
     # bytes. The LDS deposit stays lane-contiguous, so the [2, T, HD] K/V_lds
     # layout and the strided-V B-operand math are unchanged. See
-    # attention_tiled_2d.py ASYNC_LDS_MAX_DWORDS for the same clamp.
-    ASYNC_LDS_DWORDS = 1
+    # attention_tiled_2d.py ASYNC_LDS_MAX_DWORDS for the same clamp. The width
+    # comes from the attention capability table.
+    ASYNC_LDS_DWORDS = attn_arch_caps("gfx942").max_lds_dma_dwords
     HALVES_PER_LANE = ASYNC_LDS_DWORDS * 2  # 4 bytes / 2 bytes-per-half
     big_bytes = b.const_i32(0x7FFF0000)
     if spec.kv_layout == "strided":
@@ -1535,17 +1537,16 @@ def build_unified_attention_reduce_tiled(
 def supports_tiled_reduce_spec(
     spec: UnifiedAttentionReduceTiledSpec, *, arch: str = "gfx942"
 ) -> Tuple[bool, str]:
-    """Spec-first predicate for the split-KV reduce kernel (functional limits only).
+    """Spec-first predicate for the split-KV reduce kernel.
 
-    Applies the one copy of the reduce rules in
-    ``kernels.common.attention_split_kv_reduce.tiled_reduce_unsupported_reason``
-    (wave64 arch, fp16/bf16, ``head_size`` a positive multiple of 64, segment-factor
-    cache fits LDS); the gfx950 module adds a head-grouping check on top, this one
-    has none. Typed with this module's reduce spec class, which ``hkp_pack`` matches
+    The name ``hkp_pack``'s predicate alias for the reduce builder expects; the rules
+    are :func:`kernels.common.attention_split_kv_reduce.supports_split_kv_reduce`,
+    shared with every arch's reduce (wave64 arch, fp16/bf16, ``head_size`` a positive
+    multiple of 64, the head-grouping check, and the segment-factor cache fitting
+    LDS). Typed with this module's reduce spec class, which ``hkp_pack`` matches
     predicates by.
     """
-    reason = tiled_reduce_unsupported_reason(spec, arch=arch)
-    return (False, reason) if reason is not None else (True, "supported")
+    return supports_split_kv_reduce(spec, arch=arch)
 
 
 def supports_tiled_3d_spec(

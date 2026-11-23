@@ -44,9 +44,8 @@ from kernels.common._lse_store import emit_lse_field, reduce_lse_store
 from kernels.common._spec_checks import require_bool
 from kernels.common.attention_mask_type import band_mask_type
 from kernels.common.attention_split_kv_reduce import (
-    split_kv_reduce_max_segments,
     split_kv_reduce_spec,
-    tiled_reduce_unsupported_reason,
+    supports_split_kv_reduce,
 )
 
 from rocke.core.ir import (
@@ -75,6 +74,7 @@ from rocke.helpers.attention import (
     wave64_reduce_max as _wave64_reduce_max,
     wave64_reduce_sum as _wave64_reduce_sum,
 )
+from rocke.helpers.attention_arch_caps import attn_arch_caps
 from rocke.helpers.distribution import make_static_tile_distribution
 from rocke.helpers.layouts import TransposeLdsReader
 from rocke.helpers.transforms import DynamicTensorDescriptor, indirect, unmerge
@@ -82,11 +82,20 @@ from rocke.helpers.transforms import DynamicTensorDescriptor, indirect, unmerge
 MFMA_M = 16
 MFMA_N = 16
 # Async K/V feed: the segment kernel is one wave64 CTA, and each lane's
-# buffer_load ... lds moves 4 DWORDs (8 halves), so one async call stages
-# 64 * 8 halves. Every call is one outstanding vmcnt event; the gfx950
-# s_waitcnt vmcnt field is 6 bits.
+# buffer_load ... lds moves the widest gfx950 LDS-DMA width (from the attention
+# capability table: 4 DWORDs, 8 halves), so one async call stages 64 * 8
+# halves. Every call is one outstanding vmcnt event; the gfx950 s_waitcnt
+# vmcnt field is 6 bits.
 SEGMENT_THREADS = 64
-KV_HALVES_PER_LANE = 8
+KV_DMA_DWORDS = attn_arch_caps("gfx950").max_lds_dma_dwords
+# The KV swizzle (one lane payload = one 16-byte chunk, tid * 8 halves) is
+# written for 4-dword lanes.
+if KV_DMA_DWORDS != 4:
+    raise RuntimeError(
+        "gfx950 tiled 3D attention lane addressing assumes a 4-dword LDS-DMA "
+        f"width; the capability table gives {KV_DMA_DWORDS}"
+    )
+KV_HALVES_PER_LANE = KV_DMA_DWORDS * 2
 KV_HALVES_PER_CALL = SEGMENT_THREADS * KV_HALVES_PER_LANE
 MAX_VMCNT = (1 << 6) - 1
 
@@ -1012,7 +1021,7 @@ def build_unified_attention_3d_tiled(
                 soff = b.mul(page_ids[blk], kv_stride_blk_b)
             dst = b.smem_ptr_add(buf_base, b.const_i64(call * bytes_per_call))
             b.async_buffer_load_lds_addr(
-                call_rsrc, dst, voff, soff, 4, coherency=KV_CACHE_BITS
+                call_rsrc, dst, voff, soff, KV_DMA_DWORDS, coherency=KV_CACHE_BITS
             )
 
     def _issue_strided_tile(
@@ -1028,7 +1037,7 @@ def build_unified_attention_3d_tiled(
             )
             dst = b.smem_ptr_add(buf_base, b.const_i64(call * bytes_per_call))
             b.async_buffer_load_lds_addr(
-                src_rsrc, dst, voff, zero_soff, 4, coherency=KV_CACHE_BITS
+                src_rsrc, dst, voff, zero_soff, KV_DMA_DWORDS, coherency=KV_CACHE_BITS
             )
 
     # FP8 K/V cache: sync dequant loader. See attention_tiled_2d.py for the
@@ -1739,36 +1748,16 @@ def supports_tiled_3d_spec(
     )
 
 
-def reduce_max_segments(arch: str) -> int:
-    """The most segments whose factor cache fits ``arch``'s LDS
-    (``ArchTarget.lds_capacity_bytes``). The C++ host mirrors gfx950's as
-    ``GFX950_UNIFIED_3D_MAX_SEGMENTS``."""
-    from rocke.core.arch.target import ArchTarget
-
-    return split_kv_reduce_max_segments(ArchTarget.from_gfx(arch).lds_capacity_bytes)
-
-
 def supports_tiled_reduce_spec(
     spec: UnifiedAttentionReduceTiledSpec, *, arch: str = "gfx950"
 ) -> Tuple[bool, str]:
     """Spec-first predicate for ``build_unified_attention_reduce_tiled``.
 
-    The reduce kernel has no dispatcher gate of its own: it is only ever built beside the
-    3D segment kernel, whose ``supports_tiled_3d`` decides routing. This predicate lets
-    ``hkp_pack`` validate it as a companion at pack time, and states what the builder
-    otherwise assumes: ``head_size`` splits evenly across the 64 lanes, the heads group
-    evenly, and the segment-factor cache fits in LDS. The kernel is one 64-thread CTA
-    whose ``wave64_reduce_max/sum`` butterfly assumes a single wave64, so ``arch`` is
-    gated like the segment kernel's: ``validate_tiled_attention_arch`` admits only the
-    wave64 gfx950 and gfx942 targets and refuses wave32 RDNA.
+    The name ``hkp_pack``'s predicate alias for the reduce builder expects; the rules are
+    :func:`kernels.common.attention_split_kv_reduce.supports_split_kv_reduce`, shared with
+    every arch's reduce.
     """
-    reason = tiled_reduce_unsupported_reason(spec, arch=arch)
-    if reason is not None:
-        return False, reason
-    ok, reason = check_head_counts(spec.num_query_heads, spec.num_kv_heads)
-    if not ok:
-        return False, f"tiled reduce kernel: {reason}"
-    return True, "supported"
+    return supports_split_kv_reduce(spec, arch=arch)
 
 
 def reduce_spec_for(

@@ -166,6 +166,7 @@ def test_embedded_build_stages_available_assets(rocke: Path, tmp_path: Path) -> 
     assert "tests/library/tests/hkp_packs" in install_text
     ctest_text = _generated_text(build, "CTestTestfile.cmake.install")
     assert "--rocke-require-hipdnn-assets" in ctest_text
+    assert "--rocke-require-hkp-pack-headers" in ctest_text
 
 
 def test_source_relative_fallback_stages_available_headers(
@@ -182,6 +183,8 @@ def test_source_relative_fallback_stages_available_headers(
         "Gfx950AttentionUnified3DGeometry.hpp",
     ):
         assert name in install_text
+    ctest_text = _generated_text(build, "CTestTestfile.cmake.install")
+    assert "--rocke-require-hkp-pack-headers" in ctest_text
 
 
 def test_embedded_build_without_assets_remains_optional(
@@ -194,5 +197,10 @@ def test_embedded_build_without_assets_remains_optional(
     result = _configure_embedded(rocke, build, repository)
 
     assert result.returncode == 0, result.stdout + result.stderr
+    install_text = _generated_text(build, "cmake_install.cmake")
+    assert "tests/library/tests/hkp_packs" not in install_text
     ctest_text = _generated_text(build, "CTestTestfile.cmake.install")
     assert "--rocke-require-hipdnn-assets" not in ctest_text
+    # Without the pack headers, the flag would fail every installed run of
+    # rocke_library_attention_cpu_pytest on the missing copy.
+    assert "--rocke-require-hkp-pack-headers" not in ctest_text

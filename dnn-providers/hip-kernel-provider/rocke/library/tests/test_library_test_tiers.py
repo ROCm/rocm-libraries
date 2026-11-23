@@ -46,6 +46,18 @@ _EXPECTED_GATES = {
 }
 
 
+@pytest.fixture(autouse=True)
+def _no_installed_asset_copies(monkeypatch):
+    """Pin ``run_all.main()``'s asset detection to "absent" so this file's
+    exact-argument assertions hold in an installed tree too. Installed trees
+    make ``main()`` append ``--rocke-require-*`` flags; that path has its own
+    ``main()`` cases in ``test_run_all_asset_require_flags.py``."""
+    monkeypatch.setattr(run_all.hipdnn_assets, "installed_copy_present", lambda: False)
+    monkeypatch.setattr(
+        run_all.hkp_pack_headers, "installed_copy_present", lambda: False
+    )
+
+
 def _process_is_dead(pid: int) -> bool:
     try:
         return Path(f"/proc/{pid}/stat").read_text().split()[2] == "Z"

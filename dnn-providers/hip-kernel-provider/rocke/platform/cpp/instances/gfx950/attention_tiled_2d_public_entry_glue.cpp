@@ -39,6 +39,7 @@
  * C port: build/lower route errors through the sticky-error IRBuilder; the
  * supports gate returns a bool + reason string.
  */
+#include "rocke/helper_rocke.helpers.attention_arch_caps.h"
 #include "rocke/instance_gfx950_attention_tiled_2d.h"
 #include "rocke/instance_gfx950_attention_tiled_2d_internal.h"
 
@@ -657,11 +658,22 @@ static bool rocke_gfx950_attn2d_build_ctx_init(rocke_gfx950_attn2d_build_ctx_t* 
     ctx->WAVE = WAVE;
     ctx->THREADS = THREADS;
 
-    /* gfx950 async-DMA (raw.ptr.buffer.load.lds) supports dwords in {1,3,4}
-     * (Python line 1426); the fp8 loader picks the widest of [(4,16),(3,12),
-     * (1,4)] the tile bytes allow, so the clamp is the 4-dword max. */
-    ctx->ASYNC_LDS_MAX_DWORDS = 4;
-    ctx->ASYNC_LDS_MAX_BYTES_PER_LANE = 16;
+    /* gfx950 async-DMA (raw.ptr.buffer.load.lds) widths come from the attention
+     * capability table, dwords {1,3,4}; the fp8 loader picks the widest of
+     * them the tile bytes allow, so the clamp is the max. */
+    ctx->ASYNC_LDS_MAX_DWORDS = rocke_attn_max_lds_dma_dwords("gfx950");
+    ctx->ASYNC_LDS_MAX_BYTES_PER_LANE = ctx->ASYNC_LDS_MAX_DWORDS * 4;
+    /* lane_half_base (tid * 8 halves) is written for 4-dword lanes. */
+    if(ctx->ASYNC_LDS_MAX_DWORDS != 4)
+    {
+        char msg[160];
+        snprintf(msg,
+                 sizeof msg,
+                 "gfx950 tiled 2D attention lane addressing assumes a 4-dword LDS-DMA "
+                 "width; the capability table gives %d",
+                 ctx->ASYNC_LDS_MAX_DWORDS);
+        rocke_g950_fail(b, ROCKE_ERR_VALUE, msg);
+    }
 
     const int BLOCK_M_PER_WARP = spec->block_m_per_warp;
     const int M_ATOMS_PER_WARP = BLOCK_M_PER_WARP / ROCKE_ATTN_TILED_2D_MFMA_M; /* /16 */

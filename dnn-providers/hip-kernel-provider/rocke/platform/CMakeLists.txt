@@ -624,11 +624,13 @@ if(ROCKE_INSTALL_TESTS)
            "${_rocke_barrier_parity_entries}")
 
     # Compiler tool locations for Python entries that compile and disassemble
-    # kernels: hipcc in ROCm's bin/, llvm-objdump and llvm-readelf in its
-    # lib/llvm/bin/ (neither is on the CI image's PATH), and the device-library
-    # bitcode. CTest resolves these lists at test time; they stay empty off Linux
-    # or without ROCM_PATH. Tool discovery is separate from enforcement policy:
-    # only entries whose compiler checks must run append the requirement list.
+    # kernels: hipcc in ROCm's bin/, llvm-objdump and llvm-readelf in llvm/bin/ or
+    # lib/llvm/bin/ (ROCm's installer has used either layout; neither is on the CI
+    # image's PATH, and rocke.tests.llc's own discovery tries llvm/bin first), and
+    # the device-library bitcode. CTest resolves these lists at test time; they
+    # stay empty off Linux or without ROCM_PATH. Tool discovery is separate from
+    # enforcement policy: only entries whose compiler checks must run append the
+    # requirement list.
     # Contract: tests/test_engine_linkage.py::
     # test_installed_ctest_entries_get_scoped_environment_contracts.
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
@@ -636,7 +638,7 @@ if(ROCKE_INSTALL_TESTS)
            "set(_rocke_compiler_requirement_environment)\n"
            "if(CMAKE_HOST_SYSTEM_NAME STREQUAL \"Linux\" AND NOT \"\$ENV{ROCM_PATH}\" STREQUAL \"\")\n"
            "  list(APPEND _rocke_compiler_tool_environment\n"
-           "       \"PATH=\$ENV{ROCM_PATH}/bin:\$ENV{ROCM_PATH}/lib/llvm/bin:\$ENV{PATH}\"\n"
+           "       \"PATH=\$ENV{ROCM_PATH}/bin:\$ENV{ROCM_PATH}/llvm/bin:\$ENV{ROCM_PATH}/lib/llvm/bin:\$ENV{PATH}\"\n"
            "       \"HIP_DEVICE_LIB_PATH=\$ENV{ROCM_PATH}/lib/llvm/amdgcn/bitcode\")\n"
            "  list(APPEND _rocke_compiler_requirement_environment\n"
            "       \"ROCKE_REQUIRE_COMPILER_TOOLS=1\")\n"

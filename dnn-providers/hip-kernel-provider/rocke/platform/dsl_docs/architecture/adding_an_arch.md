@@ -245,6 +245,14 @@ Where a kernel lives is decided by the algorithm, not by the target:
   knob is a field on the spec, never a third parameter — and every new spec field
   is defaulted.
 
+Attention kernels, forward and backward, never hard-code a per-arch fact
+(LDS-DMA width, transpose-read width, asm-MFMA `s_nop` floor). They query the
+capability table `rocke.helpers.attention_arch_caps` (C++ twin
+`helper_rocke.helpers.attention_arch_caps.h`). The architectural rows derive
+from the arch data above, so a new arch gets them for free; add the arch to
+`ATTN_CAPS_ARCHES` (and its C++ mirror) and to the expected table in
+`tests/helpers/test_attention_arch_caps.py`.
+
 Divergent work also owes evidence: a verify/tune harness under
 `<library_root>/builders/gfxNNNN/<family>/` and a replayable case study under
 `examples/gfxNNNN/<workload>/`.
