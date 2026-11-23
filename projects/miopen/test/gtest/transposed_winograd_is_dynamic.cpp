@@ -21,7 +21,9 @@ void ExpectSameDynamism()
 
 } // namespace
 
-TEST(CPU_TransposedWinogradIsDynamic_NONE, MatchesInnerSolver)
+using CPU_TransposedWinogradIsDynamic_NONE = testing::TestWithParam<int>;
+
+TEST_P(CPU_TransposedWinogradIsDynamic_NONE, MatchesInnerSolver)
 {
     namespace conv = miopen::solver::conv;
 
@@ -43,7 +45,7 @@ TEST(CPU_TransposedWinogradIsDynamic_NONE, MatchesInnerSolver)
 
 // Guards the premise of the test above: these inner solvers are dynamic, so their wrappers must
 // be as well.
-TEST(CPU_TransposedWinogradIsDynamic_NONE, DynamicInnerSolversGiveDynamicWrappers)
+TEST_P(CPU_TransposedWinogradIsDynamic_NONE, DynamicInnerSolversGiveDynamicWrappers)
 {
     namespace conv = miopen::solver::conv;
 
@@ -51,3 +53,5 @@ TEST(CPU_TransposedWinogradIsDynamic_NONE, DynamicInnerSolversGiveDynamicWrapper
     EXPECT_TRUE((conv::TransposedConvWinoRageRxS<2, 3>{}.IsDynamic()));
     EXPECT_TRUE((conv::TransposedConvBinWinoRxS<3, 2>{}.IsDynamic()));
 }
+
+INSTANTIATE_TEST_SUITE_P(Smoke, CPU_TransposedWinogradIsDynamic_NONE, testing::Values(0));
