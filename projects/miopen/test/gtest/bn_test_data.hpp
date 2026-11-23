@@ -51,7 +51,7 @@ struct BN2DTestCase
     {
         return ss << "(N: " << tc.N << " C:" << tc.C << " H:" << tc.H << " W:" << tc.W
                   << " Direction: " << static_cast<int>(tc.Direction) << " save: " << tc.save
-                  << " keepRunning: " << tc.keepRunning;
+                  << " keepRunning: " << tc.keepRunning << ")";
     }
     std::vector<size_t> GetInput() const { return {N, C, H, W}; }
 };
@@ -71,7 +71,7 @@ struct BN3DTestCase
     {
         return ss << "(N: " << tc.N << " C:" << tc.C << " D:" << tc.D << " H:" << tc.H
                   << " W:" << tc.W << " Direction: " << static_cast<int>(tc.Direction)
-                  << " save: " << tc.save << " keepRunning: " << tc.keepRunning;
+                  << " save: " << tc.save << " keepRunning: " << tc.keepRunning << ")";
     }
     std::vector<size_t> GetInput() const { return {N, C, D, H, W}; }
 };
