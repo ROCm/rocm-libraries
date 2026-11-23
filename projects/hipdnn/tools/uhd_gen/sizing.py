@@ -21,10 +21,10 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
+from .corpus_io import write_json
 from .dataset import store
 from .dataset.training_table import measurement_key
 from .generate import (
-    _write_json,
     best_measurements,
     dataset_contributions,
     dataset_measurements,
@@ -425,7 +425,7 @@ def run_size(args: argparse.Namespace) -> int:
                 ),
             }
             test_path.parent.mkdir(parents=True, exist_ok=True)
-            _write_json(test_path, test_set)
+            write_json(test_path, test_set)
         else:
             raise ValueError(
                 f"{test_path} does not exist; pass --create-test-set to pin one"
@@ -449,7 +449,7 @@ def run_size(args: argparse.Namespace) -> int:
         work = Path(tempfile.mkdtemp(prefix=".uhd-size-", dir=output.parent))
         try:
             test_corpus = work / "test.json"
-            _write_json(test_corpus, [usable[key] for key in test_keys])
+            write_json(test_corpus, [usable[key] for key in test_keys])
             sizes = sorted(set(args.sizes)) if args.sizes else default_sizes(len(pool))
             # The whole pool is always trained: its misses set the quotas, and it is the
             # model the report calls "now", however the curve is sampled below it.
@@ -752,8 +752,8 @@ def run_size(args: argparse.Namespace) -> int:
             "per_regime": table,
             "previous": checked,
         }
-        _write_json(output / "sizing_report.json", report)
-        _write_json(output / "regime_quotas.json", corpus_quotas)
+        write_json(output / "sizing_report.json", report)
+        write_json(output / "regime_quotas.json", corpus_quotas)
         with (output / "curve.csv").open("w", newline="", encoding="utf-8") as handle:
             writer = csv.DictWriter(handle, fieldnames=list(curve[0]))
             writer.writeheader()
