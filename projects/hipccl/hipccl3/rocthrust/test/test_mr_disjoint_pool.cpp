@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -27,7 +27,7 @@ struct alloc_id
   std::size_t id;
   std::size_t size;
   std::size_t alignment;
-  std::size_t offset;
+  std::size_t offset{};
 
   __host__ __device__ bool operator==(const alloc_id& other) const
   {
@@ -64,20 +64,43 @@ struct thrust::detail::pointer_traits<alloc_id>
 class dummy_resource final : public thrust::mr::memory_resource<alloc_id>
 {
 public:
-  dummy_resource()
-      : id_to_allocate(0)
-      , id_to_deallocate(0)
-  {}
+  dummy_resource() = default;
 
   ~dummy_resource()
   {
     EXPECT_EQ(id_to_allocate, 0u);
     EXPECT_EQ(id_to_deallocate, 0u);
+    EXPECT_EQ(used_bytes, 0u);
+    EXPECT_EQ(allocation_ids.size(), 0u);
+  }
+
+  void assert_empty_and_reset()
+  {
+    ASSERT_EQ(used_bytes, 0u);
+    ASSERT_EQ(allocation_ids.size(), 0u);
+
+    free_bytes       = 1ull << 63;
+    id_to_allocate   = 0;
+    id_to_deallocate = 0;
   }
 
   virtual alloc_id do_allocate(std::size_t bytes, std::size_t alignment) override
   {
-    EXPECT_EQ(static_cast<bool>(id_to_allocate), true);
+    if (bytes > free_bytes)
+    {
+      throw thrust::system::detail::bad_alloc("Dummy allocation failed: insufficient free bytes.");
+    }
+
+    // id_to_allocate must not be zero
+    EXPECT_NE(id_to_allocate, 0u);
+
+    // id_to_allocate must not already exist in allocation_ids
+    auto it = std::find(allocation_ids.begin(), allocation_ids.end(), id_to_allocate);
+    EXPECT_EQ(it, allocation_ids.end()) << "Allocation ID already exists";
+
+    free_bytes -= bytes;
+    used_bytes += bytes;
+    allocation_ids.push_back(id_to_allocate);
 
     alloc_id ret;
     ret.id        = id_to_allocate;
@@ -93,6 +116,13 @@ public:
   {
     ASSERT_EQ(p.size, bytes);
     ASSERT_EQ(p.alignment, alignment);
+    ASSERT_LE(bytes, used_bytes);
+    // Check that the id has been previously allocated
+    ASSERT_NE(find(allocation_ids.begin(), allocation_ids.end(), p.id), allocation_ids.end());
+
+    free_bytes += bytes;
+    used_bytes -= bytes;
+    allocation_ids.erase(find(allocation_ids.begin(), allocation_ids.end(), p.id));
 
     if (id_to_deallocate != 0)
     {
@@ -101,8 +131,12 @@ public:
     }
   }
 
-  std::size_t id_to_allocate;
-  std::size_t id_to_deallocate;
+  std::size_t free_bytes{1ull << 63};
+  std::size_t used_bytes{0};
+  std::vector<std::size_t> allocation_ids;
+
+  std::size_t id_to_allocate{};
+  std::size_t id_to_deallocate{};
 };
 
 template <template <typename, typename> class PoolTemplate>
@@ -296,4 +330,219 @@ TEST(MrDisjointPoolTests, TestSynchronizedDisjointGlobalPool)
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
   TestDisjointGlobalPool<thrust::mr::disjoint_synchronized_pool_resource>();
+}
+
+template <template <typename, typename> class PoolTemplate>
+void TestDisjointPoolSqueeze()
+{
+  dummy_resource upstream;
+  thrust::mr::new_delete_resource bookkeeper;
+
+  using Pool = PoolTemplate<dummy_resource, thrust::mr::new_delete_resource>;
+
+  thrust::mr::pool_options opts = Pool::get_default_options();
+  opts.cache_oversized          = true;
+
+  const std::size_t not_enough_bytes      = 3u; // free bytes that should trigger OOM
+  const std::size_t small_block           = opts.min_bytes_per_chunk / 8u - 3u;
+  const std::size_t medium_block          = opts.min_bytes_per_chunk + 3u;
+  const std::size_t large_block           = opts.min_bytes_per_chunk * 8u - 3u;
+  const std::size_t extra_large_block     = opts.largest_block_size - 3u;
+  const std::size_t oversized_block       = opts.largest_block_size + 1u;
+  const std::size_t many_chunks_of_blocks = 2048;
+
+  // avoid having the destructor run when an assertion failure is raised
+  // (the destructor will try to release, which in turn calls do_deallocate,
+  // which may fail with an assertion failure exception...)
+  Pool* pool = new Pool(&upstream, &bookkeeper, opts);
+
+  // Test that OOM throws bad_alloc
+  {
+    upstream.free_bytes = not_enough_bytes;
+
+    ASSERT_THROW(
+      [&] {
+        return pool->do_allocate(small_block);
+      }(),
+      thrust::system::detail::bad_alloc);
+    ASSERT_EQ(upstream.free_bytes, not_enough_bytes);
+    upstream.assert_empty_and_reset();
+  }
+
+  {
+    // Allocate several blocks from different pools + oversized:
+    upstream.id_to_allocate = 1u;
+    alloc_id a1             = pool->do_allocate(small_block);
+    ASSERT_EQ(a1.id, 1u);
+    ASSERT_EQ(upstream.id_to_allocate, 0u);
+
+    upstream.id_to_allocate = 2u;
+    alloc_id a2             = pool->do_allocate(large_block);
+    ASSERT_EQ(a2.id, 2u);
+    ASSERT_EQ(upstream.id_to_allocate, 0u);
+
+    upstream.id_to_allocate = 3u;
+    alloc_id a3             = pool->do_allocate(oversized_block);
+    ASSERT_EQ(a3.id, 3u);
+    ASSERT_EQ(upstream.id_to_allocate, 0u);
+
+    // Simulate OOM, ensure that the allocations are still in place:
+    std::size_t old_free_bytes = upstream.free_bytes;
+    upstream.free_bytes        = not_enough_bytes;
+
+    ASSERT_THROW(
+      [&] {
+        return pool->do_allocate(medium_block);
+      }(),
+      thrust::system::detail::bad_alloc);
+
+    ASSERT_THROW(
+      [&] {
+        return pool->do_allocate(oversized_block);
+      }(),
+      thrust::system::detail::bad_alloc);
+
+    ASSERT_EQ(upstream.free_bytes, not_enough_bytes);
+    ASSERT_EQ(upstream.allocation_ids.size(), 3u);
+    ASSERT_EQ(upstream.allocation_ids[0], 1u);
+    ASSERT_EQ(upstream.allocation_ids[1], 2u);
+    ASSERT_EQ(upstream.allocation_ids[2], 3u);
+
+    upstream.free_bytes = old_free_bytes;
+
+    // Allocate enough blocks to create a few more chunks and then
+    // immediately deallocate them to generate a few unused chunk
+    // allocations:
+    std::vector<alloc_id> small_alloc_ids;
+    std::vector<alloc_id> medium_alloc_ids;
+    std::vector<alloc_id> large_alloc_ids;
+    std::vector<alloc_id> oversized_alloc_ids;
+    small_alloc_ids.reserve(many_chunks_of_blocks);
+    medium_alloc_ids.reserve(many_chunks_of_blocks);
+    large_alloc_ids.reserve(many_chunks_of_blocks);
+    oversized_alloc_ids.reserve(many_chunks_of_blocks);
+    for (std::size_t i = 0; i < many_chunks_of_blocks; ++i)
+    {
+      upstream.id_to_allocate = 100000u + i;
+      small_alloc_ids.push_back(pool->do_allocate(small_block));
+      upstream.id_to_allocate = 200000u + i;
+      medium_alloc_ids.push_back(pool->do_allocate(medium_block));
+      upstream.id_to_allocate = 300000u + i;
+      large_alloc_ids.push_back(pool->do_allocate(large_block));
+      upstream.id_to_allocate = 400000u + i;
+      oversized_alloc_ids.push_back(pool->do_allocate(oversized_block));
+    }
+    for (const auto& alloc_id : small_alloc_ids)
+    {
+      pool->do_deallocate(alloc_id, small_block, alloc_id.alignment);
+    }
+    for (const auto& alloc_id : medium_alloc_ids)
+    {
+      pool->do_deallocate(alloc_id, medium_block, alloc_id.alignment);
+    }
+    for (const auto& alloc_id : large_alloc_ids)
+    {
+      pool->do_deallocate(alloc_id, large_block, alloc_id.alignment);
+    }
+    for (const auto& alloc_id : oversized_alloc_ids)
+    {
+      pool->do_deallocate(alloc_id, oversized_block, alloc_id.alignment);
+    }
+    small_alloc_ids.clear();
+    medium_alloc_ids.clear();
+    large_alloc_ids.clear();
+    oversized_alloc_ids.clear();
+
+    // Request a new allocation that exceeds the upstream free bytes.
+    // Ensure that the allocation is successful and only the remaining
+    // in-use allocations exist:
+    upstream.free_bytes     = not_enough_bytes;
+    upstream.id_to_allocate = 4u;
+    alloc_id a4             = pool->do_allocate(extra_large_block);
+    ASSERT_EQ(a4.id, 4u);
+    ASSERT_EQ(upstream.id_to_allocate, 0u);
+    ASSERT_EQ(upstream.allocation_ids.size(), 4u);
+    ASSERT_EQ(upstream.allocation_ids[0], 1u);
+    ASSERT_EQ(upstream.allocation_ids[1], 2u);
+    ASSERT_EQ(upstream.allocation_ids[2], 3u);
+    ASSERT_EQ(upstream.allocation_ids[3], 4u);
+
+    pool->release();
+    upstream.assert_empty_and_reset();
+  }
+
+  {
+    // Allocate many chunks worth of blocks from different pools and oversized,
+    // then immediately deallocate so that no chunks remain in-use.
+    std::vector<alloc_id> small_alloc_ids;
+    std::vector<alloc_id> medium_alloc_ids;
+    std::vector<alloc_id> large_alloc_ids;
+    std::vector<alloc_id> oversized_alloc_ids;
+    small_alloc_ids.reserve(many_chunks_of_blocks);
+    medium_alloc_ids.reserve(many_chunks_of_blocks);
+    large_alloc_ids.reserve(many_chunks_of_blocks);
+    oversized_alloc_ids.reserve(many_chunks_of_blocks);
+    for (std::size_t i = 0; i < many_chunks_of_blocks; ++i)
+    {
+      upstream.id_to_allocate = 100000u + i;
+      small_alloc_ids.push_back(pool->do_allocate(small_block));
+      upstream.id_to_allocate = 200000u + i;
+      medium_alloc_ids.push_back(pool->do_allocate(medium_block));
+      upstream.id_to_allocate = 300000u + i;
+      large_alloc_ids.push_back(pool->do_allocate(large_block));
+      upstream.id_to_allocate = 400000u + i;
+      oversized_alloc_ids.push_back(pool->do_allocate(oversized_block));
+    }
+    for (const auto& alloc_id : small_alloc_ids)
+    {
+      pool->do_deallocate(alloc_id, small_block, alloc_id.alignment);
+    }
+    for (const auto& alloc_id : medium_alloc_ids)
+    {
+      pool->do_deallocate(alloc_id, medium_block, alloc_id.alignment);
+    }
+    for (const auto& alloc_id : large_alloc_ids)
+    {
+      pool->do_deallocate(alloc_id, large_block, alloc_id.alignment);
+    }
+    for (const auto& alloc_id : oversized_alloc_ids)
+    {
+      pool->do_deallocate(alloc_id, oversized_block, alloc_id.alignment);
+    }
+    small_alloc_ids.clear();
+    medium_alloc_ids.clear();
+    large_alloc_ids.clear();
+    oversized_alloc_ids.clear();
+
+    // Request a new allocation that exceeds the upstream free bytes.
+    // Ensure that the allocation is successful and only the remaining
+    // in-use allocation exist:
+    upstream.free_bytes     = not_enough_bytes;
+    upstream.id_to_allocate = 1u;
+    alloc_id a5             = pool->do_allocate(extra_large_block);
+    ASSERT_EQ(a5.id, 1u);
+    ASSERT_EQ(upstream.id_to_allocate, 0u);
+    ASSERT_EQ(upstream.allocation_ids.size(), 1u);
+    ASSERT_EQ(upstream.allocation_ids[0], 1u);
+
+    pool->release();
+    upstream.assert_empty_and_reset();
+  }
+
+  // actually destroy the pool; reasons why RAII is not used outlined at the beginning
+  // of this function
+  delete pool;
+  ASSERT_EQ(upstream.id_to_deallocate, 0u);
+}
+
+TEST(MrDisjointPoolTests, TestDisjointUnsynchronizedPoolSqueeze)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  TestDisjointPoolSqueeze<thrust::mr::disjoint_unsynchronized_pool_resource>();
+}
+
+TEST(MrDisjointPoolTests, TestDisjointSynchronizedPoolSqueeze)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  TestDisjointPoolSqueeze<thrust::mr::disjoint_synchronized_pool_resource>();
 }

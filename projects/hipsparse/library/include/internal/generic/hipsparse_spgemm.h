@@ -72,13 +72,13 @@ hipsparseStatus_t hipsparseSpGEMM_destroyDescr(hipsparseSpGEMMDescr_t descr);
 *  @param[in]
 *  opB              sparse matrix \f$B\f$ operation type.
 *  @param[in]
-*  alpha            scalar \f$\alpha\f$.
+*  alpha            scalar \f$\alpha\f$, which can be in host or device memory.
 *  @param[in]
 *  matA             sparse matrix \f$A\f$ descriptor.
 *  @param[in]
 *  matB             sparse matrix \f$B\f$ descriptor.
 *  @param[in]
-*  beta             scalar \f$\beta\f$.
+*  beta             scalar \f$\beta\f$, which can be in host or device memory.
 *  @param[out]
 *  matC             sparse matrix \f$C\f$ descriptor.
 *  @param[in]
@@ -89,6 +89,7 @@ hipsparseStatus_t hipsparseSpGEMM_destroyDescr(hipsparseSpGEMMDescr_t descr);
 *  spgemmDescr      SpGEMM descriptor.
 *  @param[out]
 *  bufferSize1      number of bytes of the temporary storage buffer.
+*                   \p bufferSize1 is always a host variable, regardless of the pointer mode.
 *  @param[in]
 *  externalBuffer1  temporary storage buffer allocated by the user.
 *
@@ -177,13 +178,13 @@ hipsparseStatus_t hipsparseSpGEMM_workEstimation(hipsparseHandle_t      handle,
 *  @param[in]
 *  opB              sparse matrix \f$B\f$ operation type.
 *  @param[in]
-*  alpha            scalar \f$\alpha\f$.
+*  alpha            scalar \f$\alpha\f$, which can be in host or device memory.
 *  @param[in]
 *  matA             sparse matrix \f$A\f$ descriptor.
 *  @param[in]
 *  matB             sparse matrix \f$B\f$ descriptor.
 *  @param[in]
-*  beta             scalar \f$\beta\f$.
+*  beta             scalar \f$\beta\f$, which can be in host or device memory.
 *  @param[out]
 *  matC             sparse matrix \f$C\f$ descriptor.
 *  @param[in]
@@ -194,6 +195,7 @@ hipsparseStatus_t hipsparseSpGEMM_workEstimation(hipsparseHandle_t      handle,
 *  spgemmDescr      SpGEMM descriptor.
 *  @param[out]
 *  bufferSize2      number of bytes of the temporary storage buffer.
+*                   \p bufferSize2 is always a host variable, regardless of the pointer mode.
 *  @param[in]
 *  externalBuffer2  temporary storage buffer allocated by the user.
 *
@@ -296,13 +298,13 @@ hipsparseStatus_t hipsparseSpGEMM_compute(hipsparseHandle_t      handle,
 *  @param[in]
 *  opB              sparse matrix \f$B\f$ operation type.
 *  @param[in]
-*  alpha            scalar \f$\alpha\f$.
+*  alpha            scalar \f$\alpha\f$, which can be in host or device memory.
 *  @param[in]
 *  matA             sparse matrix \f$A\f$ descriptor.
 *  @param[in]
 *  matB             sparse matrix \f$B\f$ descriptor.
 *  @param[in]
-*  beta             scalar \f$\beta\f$.
+*  beta             scalar \f$\beta\f$, which can be in host or device memory.
 *  @param[out]
 *  matC             sparse matrix \f$C\f$ descriptor.
 *  @param[in]

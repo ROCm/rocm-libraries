@@ -31,6 +31,7 @@
 
 #include "test_utils_custom_test_types.hpp"
 #include "test_utils_data_generation.hpp"
+#include "test_utils_memory_check.hpp"
 #include "test_utils_sort_comparator.hpp"
 
 #include <cstddef>
@@ -268,7 +269,7 @@ void sort_keys()
             std::vector<key_type> expected;
             try
             {
-                expected.assign(keys_input.begin(), keys_input.end());
+                expected = keys_input;
             }
             catch(const std::bad_alloc& e)
             {
@@ -827,7 +828,7 @@ void sort_keys_double_buffer()
             std::vector<key_type> expected;
             try
             {
-                expected.assign(keys_input.begin(), keys_input.end());
+                expected = keys_input;
             }
             catch(const std::bad_alloc& e)
             {
@@ -1238,7 +1239,15 @@ inline void sort_keys_over_4g()
                   "total_bytes must be divisible by sizeof(key_type)");
 
     constexpr size_t size                    = total_bytes / sizeof(key_type);
-    constexpr size_t number_of_possible_keys = 1ull << (8ull * sizeof(key_type));
+    // Limit the number of distinct keys so the host histogram doesn't need 2^32 counters
+    // (32 GiB). Each value is spread over all key bits so that every radix pass sees
+    // non-zero digits: the value goes in the high bits and its low bits are repeated in
+    // the low bits, which keeps the keys in the same order as the values.
+    constexpr size_t value_bits              = std::min(24ull, 8ull * sizeof(key_type));
+    constexpr size_t key_shift               = 8ull * sizeof(key_type) - value_bits;
+    constexpr size_t number_of_possible_keys = 1ull << value_bits;
+    const auto       value_to_key            = [](const size_t value)
+    { return static_cast<key_type>((value << key_shift) | (value & ((1ull << key_shift) - 1))); };
     assert(std::is_unsigned<key_type>::value);
     hipDeviceProp_t dev_prop;
     HIP_CHECK(hipGetDeviceProperties(&dev_prop, device_id));
@@ -1255,6 +1264,14 @@ inline void sort_keys_over_4g()
         GTEST_SKIP() << "insufficient global memory";
     }
 
+    // Host and device memory are shared on APUs, so each buffer is checked right before
+    // it is allocated so that the next check sees it as used.
+    test_utils::MemCheck memcheck;
+    if(!memcheck.alloc_host<size_t>(number_of_possible_keys))
+    {
+        GTEST_SKIP() << "insufficient host memory";
+    }
+
     std::vector<size_t> histogram;
     try
     {
@@ -1267,15 +1284,30 @@ inline void sort_keys_over_4g()
     const int seed_value = rand();
     SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
+    if(!memcheck.alloc_host<key_type>(size))
+    {
+        GTEST_SKIP() << "insufficient host memory";
+    }
+    // keys_input initially holds values in [0, number_of_possible_keys), not keys. They are
+    // converted to keys with value_to_key below.
     std::vector<key_type> keys_input
         = test_utils::get_random_data<key_type>(size,
-                                                _HIPCUB_STD::numeric_limits<key_type>::min(),
-                                                _HIPCUB_STD::numeric_limits<key_type>::max(),
+                                                key_type{0},
+                                                key_type{number_of_possible_keys - 1},
                                                 seed_value);
 
-    //generate histogram of the randomly generated values
-    std::for_each(keys_input.begin(), keys_input.end(), [&](const key_type& a) { histogram[a]++; });
+    // Generate a histogram of the randomly generated values, then replace each value with
+    // its key. The histogram is indexed by value and is used to check the sorted keys.
+    for(key_type& key : keys_input)
+    {
+        histogram[key]++;
+        key = value_to_key(key);
+    }
 
+    if(!memcheck.alloc_device<key_type>(size))
+    {
+        GTEST_SKIP() << "insufficient device memory";
+    }
     key_type* d_keys_input_output{};
     HIP_CHECK(test_common_utils::hipMallocHelper(&d_keys_input_output, size * sizeof(key_type)));
     HIP_CHECK(hipMemcpy(d_keys_input_output,
@@ -1294,6 +1326,11 @@ inline void sort_keys_over_4g()
                                                 stream));
 
     ASSERT_GT(temporary_storage_bytes, 0);
+    if(!memcheck.alloc_device_bytes(temporary_storage_bytes))
+    {
+        HIP_CHECK(hipFree(d_keys_input_output));
+        GTEST_SKIP() << "insufficient device memory";
+    }
     void* d_temporary_storage;
     HIP_CHECK(test_common_utils::hipMallocHelper(&d_temporary_storage, temporary_storage_bytes));
 
@@ -1306,36 +1343,25 @@ inline void sort_keys_over_4g()
                                                 end_bit,
                                                 stream));
 
-    std::vector<key_type> output;
-    try
-    {
-        output.resize(keys_input.size());
-    }
-    catch(const std::bad_alloc& e)
-    {
-
-        HIP_CHECK(hipFree(d_keys_input_output));
-        HIP_CHECK(hipFree(d_temporary_storage));
-        GTEST_SKIP() << "insufficient memory";
-    }
-    HIP_CHECK(hipMemcpy(output.data(),
+    // The histogram holds the expected result, so the output is copied back over the input
+    HIP_CHECK(hipMemcpy(keys_input.data(),
                         d_keys_input_output,
                         size * sizeof(key_type),
                         hipMemcpyDeviceToHost));
 
+    HIP_CHECK(hipFree(d_keys_input_output));
+    HIP_CHECK(hipFree(d_temporary_storage));
+
     size_t counter = 0;
-    for(size_t i = 0; i <= _HIPCUB_STD::numeric_limits<key_type>::max(); ++i)
+    for(size_t i = 0; i < number_of_possible_keys; ++i)
     {
         for(size_t j = 0; j < histogram[i]; ++j)
         {
-            ASSERT_EQ(static_cast<size_t>(output[counter]), i);
+            ASSERT_EQ(keys_input[counter], value_to_key(i));
             ++counter;
         }
     }
     ASSERT_EQ(counter, size);
-
-    HIP_CHECK(hipFree(d_keys_input_output));
-    HIP_CHECK(hipFree(d_temporary_storage));
 }
 
 inline void sort_keys_large_sizes()

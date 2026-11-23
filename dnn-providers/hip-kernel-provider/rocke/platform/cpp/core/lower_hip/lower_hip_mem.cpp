@@ -587,10 +587,7 @@ static rocke_status_t _op_memref_global_load_vN(rocke_h_lowerer_t* lw, const roc
     prefix = rocke_h_vec_prefix_checked(lw, elem_name, /*full_map=*/true, "global_load_vN");
     res = rocke_h_name(lw, op->results[0]);
     const int64_t byte_count = vec * (rocke_dtype_info(elem_name)->encoded_bits / 8);
-    const int64_t align = mem_attr_int(op, "align", vec * 2);
-    if(align <= 0 || (align & (align - 1)))
-        return rocke_h_fail(
-            lw, ROCKE_ERR_VALUE, "global_load_vN: alignment must be a positive power of two");
+    const int64_t align = rocke_i_claimed_align(op, vec, rocke_i_elem_of(op->results[0]->type));
     const int nontemporal = mem_nontemporal(op);
     if(nontemporal < 0)
         return rocke_h_fail(
@@ -700,10 +697,7 @@ static rocke_status_t _op_memref_global_store_vN(rocke_h_lowerer_t* lw, const ro
     elem_name = mem_attr_str(op, "elem_type", "f16");
     prefix = rocke_h_vec_prefix_checked(lw, elem_name, /*full_map=*/true, "global_store_vN");
     const int64_t byte_count = n * (rocke_dtype_info(elem_name)->encoded_bits / 8);
-    const int64_t align = mem_attr_int(op, "align", byte_count);
-    if(align <= 0 || (align & (align - 1)))
-        return rocke_h_fail(
-            lw, ROCKE_ERR_VALUE, "global_store_vN: alignment must be a positive power of two");
+    const int64_t align = rocke_i_claimed_align(op, n, rocke_i_elem_of(val->type));
     const int nontemporal = mem_nontemporal(op);
     if(nontemporal < 0)
         return rocke_h_fail(
