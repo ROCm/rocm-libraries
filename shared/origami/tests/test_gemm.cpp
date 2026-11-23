@@ -961,10 +961,20 @@ TEST_CASE("GEMM: occupancy only helps when the grid fills it", "[gemm][occupancy
         auto config = make_config(128, 128, 64, 16, 16, 16, false, 1, occupancy, 0, 0, 0);
         return origami::gemm::compute_total_latency(make_problem(m, n, 4096), hardware, config);
       };
-      // Four tiles: no CU gets a second WG, whatever the kernel's occupancy allows.
-      REQUIRE(latency(256, 256, 2) == latency(256, 256, 1));
-      // Thousands of tiles: a second resident WG hides cross-WG stalls.
-      REQUIRE(latency(8192, 8192, 2) < latency(8192, 8192, 1));
+      // Four tiles: no CU gets a second WG, whatever the kernel's occupancy allows.  gfx1250 kernels built
+      // for a higher occupancy carry a measured per-kernel cost per doubling of it.
+      if (hardware.is_cdna5())
+        REQUIRE(latency(256, 256, 2) - latency(256, 256, 1) ==
+                Approx(origami::heuristic_defaults_t::GFX1250_KERNEL_FIXED_CLK_PER_LOG2_OCC));
+      else
+        REQUIRE(latency(256, 256, 2) == latency(256, 256, 1));
+      // Thousands of tiles: a second resident WG hides cross-WG stalls.  gfx1250 has no measured
+      // co-residency gain, so its tile time does not depend on occupancy.
+      if (hardware.is_cdna5())
+        REQUIRE(latency(8192, 8192, 2) - latency(8192, 8192, 1) ==
+                Approx(origami::heuristic_defaults_t::GFX1250_KERNEL_FIXED_CLK_PER_LOG2_OCC));
+      else
+        REQUIRE(latency(8192, 8192, 2) < latency(8192, 8192, 1));
     }
   }
 }
@@ -2393,6 +2403,8 @@ TEST_CASE("GEMM: SourceSwap changes only epilogue store traffic", "[gemm][source
       }
     }
 
+    // gfx1250's store curve was measured for M-contiguous lane stores only.
+    if (!hw.is_cdna5())
     DYNAMIC_SECTION("gfx" << gpu_arch << " - scattered non-SourceSwap stores cost more traffic") {
       auto c   = make_config(128, 128, 64, 16, 16, 16, false, 1, 1, 0, 0, 0);
       c.gwvw_d = 4;
@@ -2415,6 +2427,7 @@ TEST_CASE("GEMM: epilogue store issue follows gwvw_d", "[gemm][sourceswap]") {
       //              hints_a, hints_b, stream_k
       auto c   = make_config(256, 256, 32, 16, 16, 16, false, 1, 2, 0, 0, 0);
       c.gwvw_d = svw;
+      c.tensile().source_swap = true;
       origami::gemm::context_t ctx(p, hw, c);
       return origami::gemm::compute_epilogue_latency(p, hw, c, ctx);
     };
@@ -2432,7 +2445,11 @@ TEST_CASE("GEMM: epilogue store issue follows gwvw_d", "[gemm][sourceswap]") {
       auto p = make_problem(4096, 4096, 128);
       set_problem_dtypes(p, origami::data_type_t::Float);
       INFO("svw4=" << lat_epi(p, 4) << " svw8=" << lat_epi(p, 8));
-      REQUIRE(lat_epi(p, 8) > lat_epi(p, 4));
+      // gfx1250 issues the split as 16 B stores at the measured per-instruction rate.
+      if (hw.is_cdna5())
+        REQUIRE(lat_epi(p, 8) == Approx(lat_epi(p, 4)));
+      else
+        REQUIRE(lat_epi(p, 8) > lat_epi(p, 4));
     }
   }
 }
@@ -2634,6 +2651,7 @@ origami::config_t gfx1250_config(size_t mt_m, size_t mt_n, size_t mt_k, int stre
   auto c               = make_config(mt_m, mt_n, mt_k, 16, 16, 32, false, 1, 1, 0, 0, stream_k);
   c.tensile().tdm_inst = 3;
   c.tensile().prefetch_global_read = 2;
+  c.tensile().source_swap = true;
   return c;
 }
 
@@ -2657,17 +2675,12 @@ TEST_CASE("GEMM: gfx1250 hardware describes per-AID L2 domains", "[gemm][gfx1250
   REQUIRE(gfx950.l2_domain_capacity() == gfx950.L2_capacity);
 }
 
-TEST_CASE("GEMM: tensor-DMA TemporalHint (1,1) scales by footprint", "[gemm][gfx1250][cache-hints]") {
+TEST_CASE("GEMM: tensor-DMA TemporalHint (1,1) refetches narrow rows", "[gemm][gfx1250][cache-hints]") {
   const auto hw = make_hardware(1250);
 
   auto tdm          = gfx1250_config(256, 256, 64);
   tdm.cache_hints_a = 4;
   tdm.cache_hints_b = 4;
-  auto one_wave                      = tdm;
-  one_wave.tensile().wave_group_m    = 1;
-  one_wave.tensile().wave_group_n    = 1;
-  auto subtile                       = tdm;
-  subtile.subtile                    = true;
   auto ratio = [&](const origami::problem_t& p, const origami::config_t& c) {
     auto temporal          = c;
     temporal.cache_hints_a = 0;
@@ -2676,23 +2689,20 @@ TEST_CASE("GEMM: tensor-DMA TemporalHint (1,1) scales by footprint", "[gemm][gfx
            origami::gemm::compute_total_latency(p, hw, temporal);
   };
 
-  // A+B+D bf16 footprint vs the 2 x 96 MiB of L2: 96 MiB, 384 MiB, 640 MiB, 1.5 GiB; and the
-  // measured shapes closest to the band edges, (755776,48,48) at 138 MiB, (5120,5120,5120) at
-  // 150 MiB, (1,7632,36352) at 529 MiB and (1,615664,928) at 1091 MiB.
+  // Compute-bound shapes do not see the DRAM bytes the hint adds.
   const auto small = make_problem(4096, 4096, 4096);
   const auto below = make_problem(8192, 8192, 8192);
   const auto mid   = make_problem(8192, 8192, 16384);
   const auto above = make_problem(16384, 16384, 16384);
-  for (const auto& c : {tdm, one_wave, subtile}) {
-    REQUIRE(ratio(small, c) == Approx(1.0));
-    REQUIRE(ratio(below, c) == Approx(1.0 / 1.117));
-    REQUIRE(ratio(mid, c) == Approx(1.0));
-    REQUIRE(ratio(above, c) == Approx(1.0 / 0.896));
-  }
-  REQUIRE(ratio(make_problem(755776, 48, 48), tdm) == Approx(1.0));
-  REQUIRE(ratio(make_problem(5120, 5120, 5120), tdm) == Approx(1.0 / 1.117));
-  REQUIRE(ratio(make_problem(1, 7632, 36352), tdm) == Approx(1.0 / 1.117));
-  REQUIRE(ratio(make_problem(1, 615664, 928), tdm) == Approx(1.0));
+  for (const auto& p : {small, below, mid, above}) REQUIRE(ratio(p, tdm) == Approx(1.0));
+
+  // Streaming A of a GEMV-like shape: 128 B rows refetch the rest of their 256 B block, 512 B rows do not.
+  const auto gemv = make_problem(32768, 16, 65536);
+  auto narrow     = gfx1250_config(256, 16, 64);
+  auto wide       = gfx1250_config(256, 16, 256);
+  for (auto* c : {&narrow, &wide}) c->cache_hints_a = c->cache_hints_b = 4;
+  REQUIRE(ratio(gemv, narrow) > 1.01);
+  REQUIRE(ratio(gemv, wide) == Approx(1.0));
 
   // A hint on one operand only costs the same as none (a shared A+B load drops it; separate
   // descriptors were not measured).
@@ -2810,9 +2820,141 @@ TEST_CASE("GEMM: the cluster barrier hides behind long iterations", "[gemm][gfx1
           origami::gemm::compute_total_latency(problem, hw, without_mc));
 }
 
-TEST_CASE("GEMM: AdaptiveGemm only helps with an M remainder", "[gemm][gfx1250][adaptive]") {
+TEST_CASE("GEMM: multicast delivery gains little when memory-bound", "[gemm][gfx1250][cluster]") {
+  const auto hw      = gfx1250_hardware();
+  const auto problem = make_problem(8192, 8192, 8192);
+  // A 64x64 tile is memory-bound: the 4x4 cluster cuts its requests to a quarter, but the bytes
+  // landing in LDS rise by at most GFX1250_MULTICAST_L2_GAIN, and the peers' measured lockstep can
+  // cost more than that.
+  auto with_mc                   = gfx1250_config(64, 64, 64, 3);
+  with_mc.cluster_dim            = {4, 4, 1};
+  with_mc.tensile().multicast    = true;
+  auto without_mc                = with_mc;
+  without_mc.tensile().multicast = false;
+  const double ratio = origami::gemm::compute_total_latency(problem, hw, with_mc) /
+                       origami::gemm::compute_total_latency(problem, hw, without_mc);
+  REQUIRE(ratio >= 1.0 / origami::heuristic_defaults_t::GFX1250_MULTICAST_L2_GAIN - 1e-9);
+}
+
+TEST_CASE("GEMM: gfx1250 multicast cuts the L2 requests of a 256x256 K-loop",
+          "[gemm][gfx1250][cluster]") {
+  const auto hw      = gfx1250_hardware();
+  const auto problem = make_problem(4096, 4096, 16384);
+  // Cutting the L2 requests by multicast saves time; measured 4x4 / 1x1 0.78 on this shape
+  // (cluster_wgm_issue, MT 256x256x64).
+  auto with_mc                   = gfx1250_config(256, 256, 64, 3);
+  with_mc.cluster_dim            = {4, 4, 1};
+  with_mc.tensile().multicast    = true;
+  auto without_mc                = with_mc;
+  without_mc.tensile().multicast = false;
+  const double ratio = origami::gemm::compute_total_latency(problem, hw, with_mc) /
+                       origami::gemm::compute_total_latency(problem, hw, without_mc);
+  REQUIRE(ratio < 0.99);
+  REQUIRE(ratio > 0.70);
+}
+
+TEST_CASE("GEMM: co-resident BF16 WMMA workgroups share only LDS and the matrix pipes",
+          "[gemm][gfx1250][occupancy]") {
+  const auto hw = gfx1250_hardware();
+  auto one      = gfx1250_config(128, 128, 64, 3);
+  auto two      = one;
+  two.occupancy = 2;
+  // Thousands of tiles: two resident workgroups per WGP hide each other's waits.
+  const auto big = make_problem(8192, 8192, 4096);
+  REQUIRE(origami::gemm::compute_total_latency(big, hw, two) <
+          origami::gemm::compute_total_latency(big, hw, one));
+  // One wave of tiles: no WGP holds a second workgroup; only the per-kernel occupancy cost differs.
+  const auto one_wave = make_problem(2048, 2048, 4096);
+  REQUIRE(origami::gemm::compute_total_latency(one_wave, hw, two) - origami::gemm::compute_total_latency(one_wave, hw, one) ==
+          Approx(origami::heuristic_defaults_t::GFX1250_KERNEL_FIXED_CLK_PER_LOG2_OCC));
+}
+
+TEST_CASE("GEMM: gfx1250 cluster lockstep, tail loop and odd K", "[gemm][gfx1250][cluster]") {
+  const auto hw = gfx1250_hardware();
+  auto lat = [&](const origami::problem_t& p, const origami::config_t& c) {
+    return origami::gemm::compute_total_latency(p, hw, c);
+  };
+  // Lockstep grows with the peers along the cluster's larger axis.
+  const auto big = make_problem(8192, 8192, 16384);
+  auto c2 = gfx1250_config(256, 256, 64, 3), c8 = c2;
+  c2.cluster_dim = {2, 1, 1};
+  c8.cluster_dim = {8, 1, 1};
+  c2.tensile().multicast = c8.tensile().multicast = true;
+  REQUIRE(lat(big, c8) > lat(big, c2));
+  // A K tail costs its DepthU window; an odd K (rows not 4 B aligned) costs much more.
+  const auto one = gfx1250_config(256, 256, 64, 3);
+  const double full = lat(make_problem(4096, 4096, 128), one);
+  const double tail = lat(make_problem(4096, 4096, 160), one);
+  const double odd  = lat(make_problem(4096, 4096, 129), one);
+  REQUIRE(tail > full);
+  REQUIRE(odd > tail);
+}
+
+TEST_CASE("GEMM: gfx1250 edge-tile store widths follow TensileLite's store paths", "[gemm][gfx1250][adaptive]") {
   const auto hw = gfx1250_hardware();
   auto plain    = gfx1250_config(256, 256, 64, 3);
+  plain.gwvw_d  = 8;
+  auto adaptive = plain;
+  adaptive.tensile().adaptive_gemm = 1;
+  auto epi = [&](const origami::problem_t& p, const origami::config_t& c) {
+    origami::gemm::context_t ctx(p, hw, c);
+    return origami::gemm::compute_epilogue_latency(p, hw, c, ctx);
+  };
+  // N-only edge tiles store at full width with or without AdaptiveGemm; only an M remainder narrows them.
+  const auto n_edge = make_problem(4096, 4000, 256);
+  const auto m_edge = make_problem(4000 + 4, 4096, 256);
+  REQUIRE(epi(n_edge, adaptive) == Approx(epi(n_edge, plain)));
+  REQUIRE(epi(m_edge, plain) > epi(n_edge, plain));
+  // M = 4004: AdaptiveGemm stores the M-edge tiles at width 4; with LocalSplitU the ladder is full or 1 only.
+  REQUIRE(epi(m_edge, adaptive) < epi(m_edge, plain));
+  auto lsu_plain    = plain;
+  lsu_plain.tensile().local_split_u = 2;
+  auto lsu_adaptive = adaptive;
+  lsu_adaptive.tensile().local_split_u = 2;
+  REQUIRE(epi(m_edge, lsu_adaptive) == Approx(epi(m_edge, lsu_plain)));
+}
+
+TEST_CASE("GEMM: gfx1250 non-SourceSwap D stores and per-round fixed cost", "[gemm][gfx1250][sourceswap]") {
+  const auto hw = gfx1250_hardware();
+  auto swap     = gfx1250_config(256, 256, 64, 3);
+  swap.gwvw_d   = 8;
+  auto nonswap  = swap;
+  nonswap.tensile().source_swap = false;
+  auto epi = [&](const origami::problem_t& p, const origami::config_t& c) {
+    origami::gemm::context_t ctx(p, hw, c);
+    return origami::gemm::compute_epilogue_latency(p, hw, c, ctx);
+  };
+  const auto p = make_problem(8192, 8192, 1);
+  // 32 B into each of 16 columns per instruction: slower, and slower again with a non-temporal D.
+  REQUIRE(epi(p, nonswap) > 2.0 * epi(p, swap));
+  auto nonswap_nt = nonswap;
+  nonswap_nt.cache_hints_d = 4;
+  REQUIRE(epi(p, nonswap_nt) > 2.0 * epi(p, nonswap));
+  // A config without TensileLite parameters keeps the SourceSwap store.
+  auto bare = make_config(256, 256, 64, 16, 16, 32, false, 1, 1, 0, 0, 3);
+  bare.gwvw_d = 8;
+  REQUIRE(!bare.has_tensile_params());
+  REQUIRE(epi(p, bare) < epi(p, nonswap));
+  // Columns of 208 rows (416 B) span 4 lines for 3.25 lines of data.
+  auto ns208 = gfx1250_config(208, 256, 64, 3);
+  ns208.gwvw_d = 8;
+  ns208.tensile().source_swap = false;
+  const auto p208 = make_problem(208 * 64, 8192, 1), p256 = make_problem(256 * 64, 8192, 1);
+  REQUIRE(epi(p208, ns208) / (208.0 * 64) > 1.15 * epi(p256, nonswap) / (256.0 * 64));
+  // Every tile round repeats a fixed cost that grows with the output tile: 16 rounds cost more than 16x the
+  // per-round tile model alone would add.
+  const auto one = make_problem(256 * 16, 256 * 16, 64), sixteen = make_problem(256 * 16 * 16, 256 * 16, 64);
+  const double per_round = (origami::gemm::compute_total_latency(sixteen, hw, swap) -
+                            origami::gemm::compute_total_latency(one, hw, swap)) / 15.0;
+  const double d_kib = 256.0 * 256.0 * 2.0 / 1024.0, op_kib = (256.0 + 256.0) * 64.0 * 2.0 / 1024.0;
+  REQUIRE(per_round > (origami::heuristic_defaults_t::GFX1250_TILE_FIXED_CLK_PER_KIB_D * d_kib +
+                       origami::heuristic_defaults_t::GFX1250_TILE_FIXED_CLK_PER_KIB_OP * op_kib));
+}
+
+TEST_CASE("GEMM: AdaptiveGemm widens the edge-tile stores", "[gemm][gfx1250][adaptive]") {
+  const auto hw = gfx1250_hardware();
+  auto plain    = gfx1250_config(256, 256, 64, 3);
+  plain.gwvw_d  = 8;
   auto adaptive = plain;
   adaptive.tensile().adaptive_gemm = 1;
   auto ratio = [&](size_t m, size_t k) {
@@ -2820,10 +2962,14 @@ TEST_CASE("GEMM: AdaptiveGemm only helps with an M remainder", "[gemm][gfx1250][
     return origami::gemm::compute_total_latency(p, hw, adaptive) /
            origami::gemm::compute_total_latency(p, hw, plain);
   };
+  // No M remainder, or one no vector width divides: both store the edge tiles the same way.
   REQUIRE(ratio(4096, 4096) == 1.0);
-  REQUIRE(ratio(4000, 256) < 0.92);
+  REQUIRE(ratio(4001, 256) == 1.0);
+  // M = 4000: the edge tiles store 8 elements per lane instead of 1; a single wave of tiles
+  // finishes with its slowest tile.
+  REQUIRE(ratio(4000, 256) < 1.0);
   REQUIRE(ratio(4000, 256) < ratio(4000, 65536));
-  REQUIRE(ratio(4000, 65536) < 1.0);
+  REQUIRE(ratio(4000, 65536) <= 1.0);
 }
 
 TEST_CASE("GEMM: PrefetchLocalRead and HalfPLR expose LDS latency on small wave tiles",
@@ -2973,13 +3119,17 @@ TEST_CASE("GEMM: gfx1250 DRAM occupancy curve scales with the part's CUs", "[gem
         origami::hardware_t::architecture_t::gfx1250, n_cu, 327680, 512 * 1024, 4 << 20, 2400000);
   };
   const auto full = part(256);
+  const auto p128 = part(128);
   const auto p96  = part(96);
   const auto p192 = part(192);
   using origami::gemm::compute_mem_bw_from_occupancy;
-  REQUIRE(compute_mem_bw_from_occupancy(p96, 96) == compute_mem_bw_from_occupancy(full, 256));
-  REQUIRE(compute_mem_bw_from_occupancy(p96, 48) == compute_mem_bw_from_occupancy(full, 128));
-  REQUIRE(compute_mem_bw_from_occupancy(p192, 192) == compute_mem_bw_from_occupancy(full, 256));
+  // An 8-XCD partition reaches the same fraction at the same fraction of its CUs.
+  REQUIRE(compute_mem_bw_from_occupancy(p128, 64) == compute_mem_bw_from_occupancy(full, 128));
   REQUIRE(compute_mem_bw_from_occupancy(full, 256) > 0.95);
+  // The 6-XCD part has its own curve (measured on 96 WGPs), the same for its whole part.
+  REQUIRE(compute_mem_bw_from_occupancy(p96, 48) == compute_mem_bw_from_occupancy(p192, 96));
+  REQUIRE(compute_mem_bw_from_occupancy(p96, 96) == 1.0);
+  REQUIRE(compute_mem_bw_from_occupancy(p96, 48) == Approx(0.745).margin(0.01));
   REQUIRE(compute_mem_bw_from_occupancy(p96, 97) == 1.0);
 }
 
