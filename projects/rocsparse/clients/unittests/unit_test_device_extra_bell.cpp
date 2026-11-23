@@ -25,9 +25,13 @@
 //
 // Generic spmm with a blocked ELL matrix that has no stored blocks (the
 // product is zero, so C = beta * C), with a blocked ELL matrix built by
-// dense_to_sparse, and with formats spmm does not support.
+// dense_to_sparse, and with formats spmm does not support. dense_to_sparse
+// into a blocked ELL matrix for block dimensions on both sides of the 256
+// threads of its analysis kernel.
 //
 #include "unit_test_extra_common.hpp"
+
+#include <limits>
 
 using namespace extra_ut;
 
@@ -323,4 +327,303 @@ TEST_F(ExtraBell, unsupported_formats_are_rejected)
                              &bsz,
                              nullptr),
               rocsparse_status_success);
+}
+
+namespace
+{
+    // A dense m x n matrix given by its non-zero entries (row, column, value), converted with
+    // block dimension bd.
+    struct DenseToBellCase
+    {
+        int64_t                                        m;
+        int64_t                                        n;
+        int64_t                                        bd;
+        std::vector<std::tuple<int64_t, int64_t, int>> nonzeros;
+        // Block width of the descriptor the conversion writes into, if it is not the one the
+        // analysis returns (a hand-set ell_cols).
+        int64_t ell_block_width = -1;
+        // The output of the conversion would not fit in memory; only the analysis runs.
+        bool analysis_only = false;
+    };
+
+    int64_t ceil_div(int64_t count, int64_t block_size)
+    {
+        return (count > 0) ? (count - 1) / block_size + 1 : 0;
+    }
+
+    // Block columns of each block row that hold a non-zero, in increasing order.
+    std::vector<std::vector<int64_t>> nonzero_blocks(const DenseToBellCase& c)
+    {
+        std::vector<std::set<int64_t>> blocks(ceil_div(c.m, c.bd));
+        for(const auto& [row, col, value] : c.nonzeros)
+            if(value != 0)
+                blocks[row / c.bd].insert(col / c.bd);
+        std::vector<std::vector<int64_t>> result;
+        for(const auto& b : blocks)
+            result.emplace_back(b.begin(), b.end());
+        return result;
+    }
+
+    // Converts one case and checks it against the closed form of the blocked ELL format:
+    //   ell_cols = bd * max_ib K_ib, K_ib the number of non-zero blocks of block row ib,
+    //   ell_col_ind[ib * W + s] = J_ib[s] + base, padded with base - 1,
+    //   ell_val[r * ell_cols + s * bd + c] = A(r, J_ib[s] * bd + c), zero elsewhere.
+    // All of them are integers or copies of small integers, so they have to match exactly.
+    template <typename T, typename I>
+    void run_dense_to_bell_case(rocsparse_handle       handle,
+                                const DenseToBellCase& c,
+                                rocsparse_index_base   base,
+                                rocsparse_order        order)
+    {
+        SCOPED_TRACE("m=" + std::to_string(c.m) + " n=" + std::to_string(c.n) + " bd="
+                     + std::to_string(c.bd) + " base=" + std::to_string(static_cast<int>(base))
+                     + " order=" + std::to_string(static_cast<int>(order))
+                     + " index bytes=" + std::to_string(sizeof(I)));
+        const rocsparse_datatype  dt  = rocsparse_ut::dt_of<T>();
+        const rocsparse_indextype it  = rocsparse_ut::it_of<I>();
+        const auto                alg = rocsparse_dense_to_sparse_alg_default;
+        const int64_t             m = c.m, n = c.n, bd = c.bd, mb = ceil_div(m, bd);
+
+        const std::vector<std::vector<int64_t>> blocks     = nonzero_blocks(c);
+        int64_t                                 max_blocks = 0;
+        for(const auto& b : blocks)
+            max_blocks = std::max<int64_t>(max_blocks, b.size());
+
+        Dense A(m, n);
+        for(const auto& [row, col, value] : c.nonzeros)
+            A.at(row, col) = cplx(value, 0.0);
+        // The padding of each row or column holds a non-zero, so that reading it changes the
+        // result.
+        const int64_t ld = (order == rocsparse_order_row ? n : m) + 3;
+        DevBuf<T>     dA = up_raw<T>(store_dense<T>(A, order, ld, cplx(99.0, 0.0)));
+        ASSERT_TRUE(dA.ptr);
+        DnmatH mA;
+        ASSERT_EQ(rocsparse_create_dnmat_descr(&mA.p, m, n, ld, dA.ptr, dt, order),
+                  rocsparse_status_success);
+        SpmatH sp;
+        ASSERT_EQ(rocsparse_create_bell_descr(
+                      &sp.p, m, n, rocsparse_direction_row, bd, 0, nullptr, nullptr, it, base, dt),
+                  rocsparse_status_success);
+
+        size_t bsz = 0;
+        ASSERT_EQ(rocsparse_dense_to_sparse(handle, mA.p, sp.p, alg, &bsz, nullptr),
+                  rocsparse_status_success);
+        EXPECT_EQ(bsz, sizeof(int64_t) * mb);
+        DevBuf<int64_t> buffer(static_cast<size_t>(mb));
+        ASSERT_TRUE(buffer.ptr);
+        ASSERT_EQ(rocsparse_dense_to_sparse(handle, mA.p, sp.p, alg, nullptr, buffer.ptr),
+                  rocsparse_status_success);
+        // Without ROCSPARSE_DEBUG_KERNEL_LAUNCH a failed launch still returns success.
+        UT_CHECK_HIP(hipGetLastError());
+
+        int64_t              rows = 0, cols = 0, block_dim = 0, ell_cols = -1;
+        rocsparse_direction  dir;
+        void*                pind = nullptr;
+        void*                pval = nullptr;
+        rocsparse_indextype  got_it;
+        rocsparse_index_base got_base;
+        rocsparse_datatype   got_dt;
+        ASSERT_EQ(rocsparse_bell_get(sp.p,
+                                     &rows,
+                                     &cols,
+                                     &dir,
+                                     &block_dim,
+                                     &ell_cols,
+                                     &pind,
+                                     &pval,
+                                     &got_it,
+                                     &got_base,
+                                     &got_dt),
+                  rocsparse_status_success);
+        ASSERT_EQ(ell_cols, bd * max_blocks);
+        if(c.analysis_only)
+            return;
+
+        const int64_t width    = (c.ell_block_width < 0) ? max_blocks : c.ell_block_width;
+        const int64_t cols_out = width * bd;
+
+        // Guard entries after both arrays catch a write past their ends.
+        constexpr int64_t    guard     = 64;
+        const int64_t        ind_count = mb * width, val_count = m * cols_out;
+        const cplx           poison(-77.0, 0.0);
+        std::vector<int64_t> want_ind(ind_count + guard, -77);
+        std::vector<cplx>    want_val(val_count + guard, poison);
+        for(int64_t ib = 0; ib < mb; ++ib)
+            for(int64_t s = 0; s < width; ++s)
+                want_ind[ib * width + s]
+                    = (s < int64_t(blocks[ib].size())) ? blocks[ib][s] + base : base - 1;
+        std::fill(want_val.begin(), want_val.begin() + val_count, cplx(0.0, 0.0));
+        for(const auto& [row, col, value] : c.nonzeros)
+        {
+            const auto&   b    = blocks[row / bd];
+            const int64_t slot = std::find(b.begin(), b.end(), col / bd) - b.begin();
+            if(slot < width)
+                want_val[row * cols_out + slot * bd + col % bd] = cplx(value, 0.0);
+        }
+
+        DevBuf<I> ind = up_idx<I>(std::vector<int64_t>(ind_count + guard, -77));
+        DevBuf<T> val = up_val<T>(std::vector<cplx>(val_count + guard, poison));
+        ASSERT_TRUE(ind.ptr && val.ptr);
+        SpmatH hand;
+        if(c.ell_block_width < 0)
+        {
+            ASSERT_EQ(rocsparse_bell_set_pointers(sp.p, ind.ptr, val.ptr),
+                      rocsparse_status_success);
+            ASSERT_EQ(rocsparse_dense_to_sparse(handle, mA.p, sp.p, alg, &bsz, buffer.ptr),
+                      rocsparse_status_success);
+        }
+        else
+        {
+            ASSERT_EQ(rocsparse_create_bell_descr(&hand.p,
+                                                  m,
+                                                  n,
+                                                  rocsparse_direction_row,
+                                                  bd,
+                                                  cols_out,
+                                                  ind.ptr,
+                                                  val.ptr,
+                                                  it,
+                                                  base,
+                                                  dt),
+                      rocsparse_status_success);
+            ASSERT_EQ(rocsparse_dense_to_sparse(handle, mA.p, hand.p, alg, &bsz, buffer.ptr),
+                      rocsparse_status_success);
+        }
+        UT_CHECK_HIP(hipGetLastError());
+        UT_CHECK_HIP(hipDeviceSynchronize());
+        expect_idx_equal<I>(ind.host(), want_ind, 0, "ell_col_ind");
+        expect_vec_equal<T>(val.host(), want_val, "ell_val");
+    }
+
+    template <typename T, typename I>
+    void run_dense_to_bell_cases(rocsparse_handle handle, const std::vector<DenseToBellCase>& cases)
+    {
+        for(const auto& c : cases)
+            for(rocsparse_index_base base : {rocsparse_index_base_zero, rocsparse_index_base_one})
+                for(rocsparse_order order : {rocsparse_order_row, rocsparse_order_column})
+                {
+                    run_dense_to_bell_case<T, I>(handle, c, base, order);
+                    if(::testing::Test::HasFatalFailure())
+                        return;
+                }
+    }
+
+    void run_dense_to_bell_all_types(rocsparse_handle                    handle,
+                                     const std::vector<DenseToBellCase>& cases)
+    {
+        run_dense_to_bell_cases<float, int32_t>(handle, cases);
+        run_dense_to_bell_cases<double, int64_t>(handle, cases);
+        run_dense_to_bell_cases<rocsparse_float_complex, int64_t>(handle, cases);
+    }
+
+    // A 1 x 2bd row whose entries are all non-zero: two full block columns.
+    DenseToBellCase full_row(int64_t bd)
+    {
+        DenseToBellCase c{1, 2 * bd, bd, {}};
+        for(int64_t j = 0; j < 2 * bd; ++j)
+            c.nonzeros.emplace_back(0, j, 1 + j % 7);
+        return c;
+    }
+}
+
+// Each window of the analysis kernel holds one or more whole block columns.
+TEST_F(ExtraBell, dense_to_sparse_block_dim_up_to_256)
+{
+    std::vector<DenseToBellCase> cases;
+    for(int64_t bd : {1, 2, 3, 128, 255, 256})
+        cases.push_back({1, 1, bd, {{0, 0, 3}}});
+    cases.push_back(full_row(256));
+    // Row and column offset 255 inside a block, partial last block row and block column,
+    // and a padded slot.
+    cases.push_back({300, 600, 256, {{255, 511, 7}, {0, 599, 3}, {299, 0, 5}}});
+    cases.push_back({300, 600, 256, {}});
+    run_dense_to_bell_all_types(handle, cases);
+}
+
+TEST_F(ExtraBell, dense_to_sparse_empty_matrix)
+{
+    run_dense_to_bell_all_types(handle,
+                                {{0, 5, 2, {}}, {5, 0, 2, {}}, {0, 5, 257, {}}, {5, 0, 257, {}}});
+}
+
+// A descriptor with one slot per block row for a block row with two non-zero blocks: the
+// conversion keeps the first block and writes nothing past the arrays.
+TEST_F(ExtraBell, dense_to_sparse_narrow_descriptor)
+{
+    DenseToBellCase narrow{2, 4, 2, {{0, 0, 1}, {0, 3, 2}}};
+    narrow.ell_block_width = 1;
+    run_dense_to_bell_all_types(handle, {narrow});
+}
+
+// The analysis kernel used to advance by (256 / bd) * bd = 0 columns for these block
+// dimensions and never return (issue 15902). A regression hangs here until the ctest TIMEOUT
+// of rocsparse-unit-test-device.
+TEST_F(ExtraBell, dense_to_sparse_block_dim_above_256)
+{
+    std::vector<DenseToBellCase> cases;
+    for(int64_t bd : {257, 300, 512})
+        cases.push_back({1, 1, bd, {{0, 0, 3}}});
+    // The only non-zero lies past the first 256 columns of the block.
+    for(int64_t bd : {257, 300})
+        cases.push_back({1, bd, bd, {{0, bd - 1, 5}}});
+    for(int64_t bd : {257, 300})
+        cases.push_back(full_row(bd));
+    // ell_cols = 514: block row 0 holds block columns 1 and 2, block row 1 block column 0.
+    cases.push_back({300, 600, 257, {{256, 513, 7}, {0, 599, 3}, {299, 0, 5}}});
+    cases.push_back({1, 1, 257, {}});
+    cases.push_back({300, 600, 257, {}});
+    // ell_cols = 2^32 is too large to convert, but the analysis must count it.
+    DenseToBellCase wide{1, 1, int64_t(1) << 32, {{0, 0, 3}}};
+    wide.analysis_only = true;
+    cases.push_back(wide);
+    run_dense_to_bell_all_types(handle, cases);
+}
+
+// n + bd - 1 does not fit in int64_t: the analysis rejects the block dimension and leaves
+// ell_cols alone.
+TEST_F(ExtraBell, dense_to_sparse_block_dim_overflow_is_invalid_size)
+{
+    const int64_t m = 1, n = 2, ld = 2, bd = std::numeric_limits<int64_t>::max();
+    DevBuf<float> dA(static_cast<size_t>(n));
+    ASSERT_TRUE(dA.ptr);
+    DnmatH mA;
+    ASSERT_EQ(rocsparse_create_dnmat_descr(
+                  &mA.p, m, n, ld, dA.ptr, rocsparse_datatype_f32_r, rocsparse_order_row),
+              rocsparse_status_success);
+    SpmatH sp;
+    ASSERT_EQ(rocsparse_create_bell_descr(&sp.p,
+                                          m,
+                                          n,
+                                          rocsparse_direction_row,
+                                          bd,
+                                          0,
+                                          nullptr,
+                                          nullptr,
+                                          rocsparse_indextype_i32,
+                                          rocsparse_index_base_zero,
+                                          rocsparse_datatype_f32_r),
+              rocsparse_status_success);
+
+    const auto alg = rocsparse_dense_to_sparse_alg_default;
+    size_t     bsz = 0;
+    ASSERT_EQ(rocsparse_dense_to_sparse(handle, mA.p, sp.p, alg, &bsz, nullptr),
+              rocsparse_status_success);
+    EXPECT_EQ(bsz, sizeof(int64_t));
+    DevBuf<int64_t> buffer(size_t{1});
+    ASSERT_TRUE(buffer.ptr);
+    EXPECT_EQ(rocsparse_dense_to_sparse(handle, mA.p, sp.p, alg, nullptr, buffer.ptr),
+              rocsparse_status_invalid_size);
+
+    int64_t              rows = 0, cols = 0, block_dim = 0, ell_cols = -1;
+    rocsparse_direction  dir;
+    void*                pind = nullptr;
+    void*                pval = nullptr;
+    rocsparse_indextype  it;
+    rocsparse_index_base got_base;
+    rocsparse_datatype   got_dt;
+    ASSERT_EQ(
+        rocsparse_bell_get(
+            sp.p, &rows, &cols, &dir, &block_dim, &ell_cols, &pind, &pval, &it, &got_base, &got_dt),
+        rocsparse_status_success);
+    EXPECT_EQ(ell_cols, 0);
 }

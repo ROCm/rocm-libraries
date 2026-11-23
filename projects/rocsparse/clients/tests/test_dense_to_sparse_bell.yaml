@@ -100,19 +100,6 @@ Tests:
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
   order: [rocsparse_order_row, rocsparse_order_column]
 
-# Constructed matrices checked against the closed form of the blocked ELL format.
-- name: dense_to_sparse_bell_extra_block_dim
-  category: quick
-  function: dense_to_sparse_bell_extra
-  indextype: *i32
-  precision: *single_only_precisions
-
-- name: dense_to_sparse_bell_extra_block_dim_above_256
-  category: quick
-  function: dense_to_sparse_bell_extra
-  indextype: *i32
-  precision: *single_only_precisions
-
 # Pre-checkin
 - name: dense_to_sparse_bell_bad_arg
   category: pre_checkin

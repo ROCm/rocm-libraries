@@ -589,7 +589,11 @@ rocsparse_install_unit_test(rocsparse-unit-test-device)
 set(ROCSPARSE_UNIT_TEST_CI_LABELS quick standard comprehensive full)
 
 set_tests_properties(rocsparse-unit-test PROPERTIES LABELS "${ROCSPARSE_UNIT_TEST_CI_LABELS}")
-set_tests_properties(rocsparse-unit-test-device PROPERTIES LABELS "gpu;${ROCSPARSE_UNIT_TEST_CI_LABELS}")
+# A hanging kernel would hold up every device unit test after it. The binary
+# runs in under 30 s in CI; keep TIMEOUT in step with the installed entries below.
+set_tests_properties(rocsparse-unit-test-device PROPERTIES
+  LABELS "gpu;${ROCSPARSE_UNIT_TEST_CI_LABELS}"
+  TIMEOUT 600)
 
 if(ROCSPARSE_CTEST_INSTALL_FILE)
   file(APPEND "${ROCSPARSE_CTEST_INSTALL_FILE}" [=[
@@ -614,10 +618,10 @@ set_tests_properties(rocsparse-unit-test_gfx1151 PROPERTIES LABELS "quick;standa
   if(NOT WIN32)
     file(APPEND "${ROCSPARSE_CTEST_INSTALL_FILE}" [=[
 add_test(rocsparse-unit-test-device "./rocsparse-unit-test-device")
-set_tests_properties(rocsparse-unit-test-device PROPERTIES LABELS "gpu;quick;standard;comprehensive;full")
+set_tests_properties(rocsparse-unit-test-device PROPERTIES LABELS "gpu;quick;standard;comprehensive;full" TIMEOUT 600)
 
 add_test(rocsparse-unit-test-device_gfx1151 "./rocsparse-unit-test-device")
-set_tests_properties(rocsparse-unit-test-device_gfx1151 PROPERTIES LABELS "gpu;quick;standard;comprehensive;full;ex_gpu_gfx1151")
+set_tests_properties(rocsparse-unit-test-device_gfx1151 PROPERTIES LABELS "gpu;quick;standard;comprehensive;full;ex_gpu_gfx1151" TIMEOUT 600)
 
 ]=])
   else()
