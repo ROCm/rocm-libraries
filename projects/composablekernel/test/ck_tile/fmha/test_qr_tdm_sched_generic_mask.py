@@ -5,7 +5,8 @@
 
 The default codegen emits SimplifiedGenericAttentionMask kernels; generate.py -m generic
 emits the same pipelines with GenericAttentionMask. The dedicated generic-forward suites
-numerically check D64 N128 causal instances; this test also checks template compatibility
+numerically check the D64 M128xN128 causal instances and the group-mode M64 instances;
+this test also checks template compatibility
 across the remaining generic pipeline paths. It generates the -m generic
 qr_tdm_sched blobs and runs device-side semantic analysis (-fsyntax-only, so every template
 is instantiated but no code is generated) on one blob per pipeline path. No GPU work is
@@ -23,10 +24,11 @@ import unittest
 from pathlib import Path
 
 # One blob per pipeline path that reaches the generic-mask predicate: the countdown loop
-# (D64, D128, D192 N64), the index loop (D192 N128), K-padding, group mode and fp16. The
-# value is (file name pattern, FmhaMasks alias of the blob): "mc" blobs use the causal form
-# and "mg" blobs the windowed form of GenericAttentionMask.
-# Pin both D64 tile widths so filename ordering cannot replace N64 causal coverage with N128.
+# (D64, D128, D192 N64), the index loop (D192 N128), K-padding, group mode, the group-mode
+# M64 tiles and fp16. The value is (file name pattern, FmhaMasks alias of the blob): "mc"
+# blobs use the causal form and "mg" blobs the windowed form of GenericAttentionMask.
+# Pin both D64 tile widths so filename ordering cannot replace N64 causal coverage with N128,
+# and the group tile heights so "b128x" sorting before "b64x" cannot hide the M64 tiles.
 _SELECTED_BLOBS = {
     "d64_countdown_window": (
         r"^fmha_fwd_d64_bf16_batch_b128x64x.*_npad_.*_nbias_mg_lse_",
@@ -44,7 +46,18 @@ _SELECTED_BLOBS = {
         r"^fmha_fwd_d128_bf16_batch_.*_nbias_mg_lse_",
         "GenericMask",
     ),
-    "d128_group_causal": (r"^fmha_fwd_d128_bf16_group_.*_nbias_mc_lse_", "CausalMask"),
+    "d128_group_causal": (
+        r"^fmha_fwd_d128_bf16_group_b128x128x.*_nbias_mc_lse_",
+        "CausalMask",
+    ),
+    "d128_m64_window": (
+        r"^fmha_fwd_d128_bf16_group_b64x128x.*_nbias_mg_lse_",
+        "GenericMask",
+    ),
+    "d64_m64_causal": (
+        r"^fmha_fwd_d64_bf16_group_b64x128x.*_nbias_mc_lse_",
+        "CausalMask",
+    ),
     "d192_n64_countdown_window": (
         r"^fmha_fwd_d192_bf16_batch_b128x64x.*_nbias_mg_lse_",
         "GenericMask",
@@ -172,6 +185,12 @@ class TestQrTdmSchedGenericMask(unittest.TestCase):
 
     def test_d128_group_causal(self):
         self.check("d128_group_causal")
+
+    def test_d128_m64_window(self):
+        self.check("d128_m64_window")
+
+    def test_d64_m64_causal(self):
+        self.check("d64_m64_causal")
 
     def test_d192_n64_countdown_window(self):
         self.check("d192_n64_countdown_window")
