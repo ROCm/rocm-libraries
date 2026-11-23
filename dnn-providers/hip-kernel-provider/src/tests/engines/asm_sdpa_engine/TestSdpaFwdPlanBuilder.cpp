@@ -262,7 +262,6 @@ const fmha_v3_fwdConfig* findGfx942Fp8Hd128BatchRow(plan_utils::MaskType mask)
     return key.empty() ? nullptr : &cfg_fmha_fwd.at(key);
 }
 
-TEST_F(TestSdpaFwdPlanBuilder, IsApplicableSdpaVariations)
 TEST_P(TestSdpaFwdPlanBuilderOnArch, IsApplicableSdpaVariations)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
