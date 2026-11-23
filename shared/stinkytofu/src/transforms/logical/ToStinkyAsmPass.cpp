@@ -440,6 +440,9 @@ StinkyInstruction* createAsmFromIR(LogicalInstruction* irInst, GfxArchID arch) {
             asmInst->addModifier<LabelData>(LabelData{target.getLiteralString()});
         }
     }
+    if (irInst->giraction.has_value()) {
+        asmInst->addModifier<GirActionData>(irInst->giraction.value());
+    }
     if (irInst->swaitcnt.has_value()) {
         // {vlcnt, vscnt, dlcnt, dscnt, kmcnt, maxLgkmcnt, maxVmcnt}. The rocisa
         // path attaches the same SWaitCntData so legalizeWaitCnt can split a

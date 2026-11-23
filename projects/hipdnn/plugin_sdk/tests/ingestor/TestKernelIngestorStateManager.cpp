@@ -2347,7 +2347,7 @@ INSTANTIATE_TEST_SUITE_P(
                     makeTestDispatches(),
                     std::vector<KernelDescriptorPack>{pack},
                     std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
-                    "test.graph");
+                    NativeGraphMatch{"test.graph"});
             }},
         // The tuple is the completed one: a kernel leaving BLOCK_SIZE to its default of 64
         // is kernel_64_half under another spelling.

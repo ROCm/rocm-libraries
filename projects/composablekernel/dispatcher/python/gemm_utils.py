@@ -36,7 +36,7 @@ import multiprocessing
 import subprocess
 import tempfile
 from concurrent.futures import ProcessPoolExecutor, as_completed
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
@@ -361,11 +361,13 @@ class GemmKernelConfig:
     vector_size_a: int = 0
     vector_size_b: int = 0
     vector_size_c: int = 0
-    # comp_tdm_pc ring (NumSlots, PublishLag); num_slots=0 is the policy
-    # default <4, 0>. Sweep configs spell a non-default ring as the pipeline
-    # "comp_tdm_pc_s{S}l{L}" (codegen_common.split_pipeline_ring).
+    # comp_tdm_pc ring (NumSlots, PublishLag) or comp_tdm_ra ring (NumSlots,
+    # RunAhead); num_slots=0 is the policy default (<4, 0> / <4, 3>). Sweep
+    # configs spell a non-default ring as the pipeline "comp_tdm_pc_s{S}l{L}" /
+    # "comp_tdm_ra_s{S}r{R}" (codegen_common.split_pipeline_ring).
     num_slots: int = 0
     publish_lag: int = 0
+    run_ahead: int = 0
 
     # No silent default: the arch must be resolved (rocminfo-detected or passed
     # explicitly) before this config feeds the compiler. expand_sweep /
@@ -424,10 +426,12 @@ class GemmKernelConfig:
     def codegen_layout(self) -> str:
         """Layout string passed to unified_gemm_codegen.py --layout.
 
-        Multi-D takes a 4-char layout (A,B,C + D); the codegen splits off the
-        4th char as the D-tensor layout. Every other variant uses the 3-char
-        A,B,C layout.
+        Multi-D takes a 4-char layout (A,B,C + D) and multi-ABD the 4-char
+        (A,B,E,D) one; the codegen splits off the 4th char as the D-tensor
+        layout. Every other variant uses the 3-char A,B,C layout.
         """
+        if self.variant == "multi_abd":
+            return self.layout4
         if self.variant == "multi_d":
             return self.layout + _LAYOUT_CHAR[self.d_layout]
         return self.layout
@@ -450,8 +454,18 @@ class GemmKernelConfig:
 
     @property
     def ring_suffix(self) -> str:
-        """ "_s{S}l{L}" for a non-default comp_tdm_pc ring, else ""."""
-        return _codegen_common().pipeline_ring_suffix(self.num_slots, self.publish_lag)
+        """ "_s{S}l{L}" / "_s{S}r{R}" for a non-default comp_tdm_pc / comp_tdm_ra
+        ring, else ""."""
+        return _codegen_common().pipeline_ring_suffix(
+            self.pipeline, self.num_slots, self.ring_param
+        )
+
+    @property
+    def ring_param(self) -> int:
+        """The ring parameter of the pipeline's policy (PublishLag / RunAhead)."""
+        return _codegen_common().pipeline_ring_param(
+            self.pipeline, self.publish_lag, self.run_ahead
+        )
 
     def _vector_args(self) -> Dict[str, Any]:
         return dict(
@@ -652,7 +666,8 @@ class GemmKernelConfig:
             "pad": [self.pad_m, self.pad_n, self.pad_k],
             "persistent": self.persistent,
             "vector_sizes": list(self.vector_sizes),
-            "ring": [self.num_slots, self.publish_lag],
+            # (num_slots, PublishLag / RunAhead), as split_pipeline_ring.
+            "ring": [self.num_slots, self.ring_param],
             "gfx_arch": self.gfx_arch,
             "variant": self.variant,
             "name": self.name,
@@ -2438,6 +2453,12 @@ def _build_compile_jobs(
         # (UniversalGemmKernel::MaxOccupancyGridSize = #CUs x occupancy), so a
         # mismatch shows up as large perf gaps vs Tile Engine on persistent tiles.
         *variant_flags,
+        # Pipeline-specific flags go last so they override the ones above (e.g.
+        # comp_tdm_v3 turns the post-RA machine scheduler back on, as the Tile
+        # Engine gemm_universal build does for it).
+        *_codegen_common().PIPELINE_EXTRA_COMPILE_FLAGS.get(
+            getattr(config, "pipeline", ""), ()
+        ),
         "-Wno-undefined-func-template",
         "-Wno-float-equal",
         str(ctypes_source),
@@ -2612,9 +2633,6 @@ def setup_multiple_gemm_dispatchers(
                 "output_dir": str(output_dir),
                 "dtype": c.dtype_a,
                 "layout": c.codegen_layout,
-                # Multi-ABD codegen expects the 4-char (A,B,E,D) layout so it can
-                # split off the D layout; every other variant uses 3-char.
-                "layout": c.layout4 if c.variant == "multi_abd" else c.layout,
                 "gpu_target": c.gfx_arch,
                 "tile_config_json": c.to_codegen_json(),
                 "hpp_glob_pattern": f"{c.name}.hpp",
@@ -2739,10 +2757,6 @@ def _expand_values(entry: Optional[Dict[str, Any]], default: List[Any]) -> List[
     return list(entry.get("values", default))
 
 
-def _is_power_of_two(x: int) -> bool:
-    return x > 0 and (x & (x - 1)) == 0
-
-
 def _cshuffle_store_ok(
     m_repeat: int, n_repeat: int, warp_tile_m: int, warp_tile_n: int
 ) -> bool:
@@ -2795,18 +2809,22 @@ def _warp_supported_table():
         return _WARP_SUPPORTED_COMBINATIONS_FALLBACK
 
 
-def _warp_config_supported(wave_m: int, wave_n: int, wave_k: int, arch: str) -> bool:
+def _warp_config_supported(
+    wave_m: int, wave_n: int, wave_k: int, arch: str, pipeline: str = ""
+) -> bool:
     """True iff [wave_m, wave_n, wave_k] is an allowed warps-per-block triple
-    for ``arch`` (mirrors Old-TE validate_warp_configuration). Unknown arch =>
-    permissive (matches Old-TE's log-and-allow behavior)."""
+    for ``arch`` and ``pipeline`` (mirrors Old-TE validate_warp_configuration,
+    including the pipeline's own extra maps). Unknown arch => permissive
+    (matches Old-TE's log-and-allow behavior)."""
     allowed = _warp_supported_table().get(arch)
     if not allowed:
         return True
+    allowed = _codegen_common().pipeline_warp_combos(pipeline, arch, allowed)
     return [wave_m, wave_n, wave_k] in allowed
 
 
 # --- gfx1250 pipeline gate (parity with unified_gemm_codegen) --------------
-# Non-MX comp_async / comp_tdm / comp_tdm_v2 / comp_tdm_pc are only generated
+# Non-MX comp_async / comp_tdm / comp_tdm_v2 / comp_tdm_pc / comp_tdm_ra are only generated
 # for gfx1250 by unified_gemm_codegen. expand_sweep must drop the same combinations up front,
 # otherwise it hands back configs whose header is never emitted. The rules live
 # in codegen_common.gfx1250_pipeline_reject_reason (single source of truth
@@ -2848,17 +2866,21 @@ def _gfx1250_pipeline_supported(
     warp_tile_m: int = 0,
     warp_tile_n: int = 0,
     tile_mn: Optional[Tuple[int, int]] = None,
+    tile_k: Optional[int] = None,
     ring: Tuple[int, int] = (0, 0),
 ) -> bool:
     """False iff the (pipeline, epilogue) pair is a gfx1250 combination that
     the codegen would reject for this arch/variant/trait.
 
     ``layout`` is the A/B/C layout code (e.g. ``rcr``); empty skips the
-    comp_async layout rule. ``dtype``/``warp_tile_k`` feed the comp_async
+    comp_async layout and tdmstaged row-major C rules. ``dtype``/``warp_tile_k``
+    feed the comp_async
     8-bit warp_tile_k rule; an empty dtype skips it. ``warp_tile_m``/
     ``warp_tile_n`` feed the comp_async 8-bit warp_tile_m/n rule; 0 skips it.
-    ``tile_mn`` feeds the comp_tdm_pc accumulator rule; None skips it.
-    ``ring`` is the comp_tdm_pc (num_slots, publish_lag); (0, 0) is the default."""
+    ``tile_mn`` feeds the comp_tdm_pc accumulator rule and ``tile_k`` the
+    comp_tdm_v3 K-tile rule; None skips them. ``ring`` is the (num_slots,
+    ring_param) of split_pipeline_ring: the comp_tdm_pc PublishLag or the
+    comp_tdm_ra RunAhead; (0, 0) is the default."""
     reason = _codegen_common().gfx1250_pipeline_reject_reason(
         arch,
         pipeline,
@@ -2879,6 +2901,8 @@ def _gfx1250_pipeline_supported(
         tile_mn=tile_mn,
         warp_k=wave_k,
         streamk=variant == "stream_k",
+        waves=(wave_m, wave_n, wave_k),
+        tile_k=tile_k,
         ring=ring,
     )
     return not reason
@@ -2905,6 +2929,7 @@ def _arch_filter_accepts(
     epilogue: str,
     scheduler: str,
     num_slots: int = 0,
+    ring_param: int = 0,
 ) -> bool:
     """Mirror of unified_gemm_codegen's _is_tile_arch_valid ArchFilter call
     (LDS capacity, warp and trait rules), so expand_sweep drops every config
@@ -2942,6 +2967,7 @@ def _arch_filter_accepts(
         layout=layout[:3],
         operator=operator,
         num_slots=num_slots,
+        ring_param=ring_param,
     )
 
 
@@ -2958,6 +2984,18 @@ def unique_by_name(configs: List[GemmKernelConfig]) -> List[GemmKernelConfig]:
     for c in configs:
         first.setdefault(c.name, c)
     return list(first.values())
+
+
+def parse_streamk_budgets(text) -> List[int]:
+    """A ``--budget-pct`` comma list: distinct percents in 1..100, in order.
+    Raises ValueError otherwise."""
+    try:
+        pcts = [int(p) for p in str(text).split(",") if p.strip()]
+    except ValueError:
+        pcts = []
+    if not pcts or any(not 0 < p <= 100 for p in pcts) or len(set(pcts)) < len(pcts):
+        raise ValueError(f"--budget-pct {text!r}: expected distinct values in 1..100")
+    return pcts
 
 
 def expand_sweep(
@@ -3225,8 +3263,11 @@ def expand_sweep(
         persistents,
         reductions,
     ):
-        # "comp_tdm_pc_s{S}l{L}" names a non-default producer/consumer ring.
-        pipe, num_slots, publish_lag = _codegen_common().split_pipeline_ring(pipe)
+        # "comp_tdm_pc_s{S}l{L}" / "comp_tdm_ra_s{S}r{R}" name a non-default ring.
+        pipe, num_slots, ring_param = _codegen_common().split_pipeline_ring(pipe)
+        ring_fields = _codegen_common().pipeline_ring_fields(
+            pipe, num_slots, ring_param
+        )
         # Tile/CShuffle correctness gate. A block tile must split evenly across
         # its waves -- tile % (wave * warp_tile) == 0 -- else the kernel is
         # genuinely invalid.
@@ -3247,7 +3288,7 @@ def expand_sweep(
             continue
         # Parity gate: only emit warps-per-block triples Old-TE allows
         # (WARP_SUPPORTED_COMBINATIONS[arch]); see _warp_config_supported.
-        if not _warp_config_supported(wm, wn, wk, arch):
+        if not _warp_config_supported(wm, wn, wk, arch, pipe):
             continue
         if _codegen_common().gfx1250_fp32_tile_reject_reason(
             arch, dtype, tm, tn, wm * wn * wk
@@ -3272,7 +3313,8 @@ def expand_sweep(
             warp_tile_m=wtm,
             warp_tile_n=wtn,
             tile_mn=(tm, tn),
-            ring=(num_slots, publish_lag),
+            tile_k=tk,
+            ring=(num_slots, ring_param),
         ):
             continue
         if epi == "cshuffle" and not _cshuffle_store_ok(
@@ -3315,8 +3357,7 @@ def expand_sweep(
                     pad_n=bool(pn),
                     pad_k=bool(pk),
                     persistent=bool(persist),
-                    num_slots=num_slots,
-                    publish_lag=publish_lag,
+                    **ring_fields,
                     gfx_arch=arch,
                     variant=variant,
                     reduction_strategy=red,
@@ -3374,6 +3415,7 @@ def expand_sweep(
                             epi,
                             sched,
                             num_slots,
+                            ring_param,
                         )
                     if not val:
                         # Keep counting the later widths' rejects, as the codegen does.

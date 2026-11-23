@@ -602,13 +602,13 @@ namespace detail
 
 /// The GraphMatch a native symbol spells: std::monostate for an empty symbol, otherwise the
 /// `native` arm. Backs the overloads that take the symbol as a string.
-inline GraphMatch graphMatchFromNativeSymbol(const std::string& symbol)
+inline GraphMatch graphMatchFromNativeSymbol(std::string symbol)
 {
     if(symbol.empty())
     {
         return std::monostate{};
     }
-    return NativeGraphMatch{symbol};
+    return NativeGraphMatch{std::move(symbol)};
 }
 
 } // namespace detail

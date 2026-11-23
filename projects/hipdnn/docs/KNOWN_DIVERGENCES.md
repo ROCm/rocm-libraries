@@ -116,7 +116,7 @@ hipDNN knob IDs are matched to `KnobType_t` by their last dot-separated segment,
 | Mixed per-side form (`cu_seq_len_*` on one side, `seq_len_*` on the other) | Rejected by cudnn-frontend v1.25.0 and v1.26.0; accepted from v1.27.0 | Accepted (`SdpaFwdNode` Rule 6c) |
 | `padding_mask` | Must be `true` whenever any length tensor (`seq_len_*` or `cu_seq_len_*`) is set | Required for `cu_seq_len_*` only; `seq_len_*` with `padding_mask=false` still validates |
 | Paged K/V with `cu_seq_len_*` | Accepted by cudnn-frontend v1.25.0 | Rejected: `SdpaFwdNode::validatePagedKv` requires `seq_len_q` and `seq_len_kv` for paged K/V |
-| Engine support | Unified SDPA engine on cuDNN 9.24+ (mixed per-side forms: 9.25+) | Only an engine plugin reporting API version 1.6.0 or newer; no in-tree engine or reference implements them yet |
+| Engine support | Unified SDPA engine on cuDNN 9.24+ (mixed per-side forms: 9.25+) | Only an engine plugin reporting API version 1.6.0 or newer. The hip-kernel-provider ASM SDPA engine serves `cu_seq_len_q` and `cu_seq_len_kv` together on ragged Q, K, V and O (gfx942, gfx950); no other in-tree engine or reference implements them yet |
 
 ## Build and execute
 
@@ -130,6 +130,7 @@ hipDNN knob IDs are matched to `KnobType_t` by their last dot-separated segment,
 - `print()` on a graph whose operation graph is not built prints an empty object.
 - `deserialize` ignores `enforce_precompiled`.
 - A built or deserialized plan executes only on handles whose stream is on the device it was built or deserialized for; `execute` with a handle on another device fails, even when the devices have the same properties. cuDNN allows the same finalized plan on another GPU. To use a plan on another device, `serialize` it and `deserialize` it with a handle on that device. See [backend architecture](./user-guides/conceptual/backend-architecture.rst).
+- `validate()` and `build_operation_graph()` reject a tensor, or its attached ragged-offset tensor, with a negative stride on any axis with `INVALID_VALUE`; cuDNN frontend v1.24.0 accepts one.
 
 ## SDPA dropout random stream
 

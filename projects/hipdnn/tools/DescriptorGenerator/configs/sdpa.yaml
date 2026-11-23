@@ -320,6 +320,7 @@ operation:
 
     - name: "cu_seq_len_q"
       fbs_field: "cu_seq_len_q_tensor_uid"
+      direction: "input"
       attr_suffix: "CU_SEQ_LEN_QDESC"
       required: false
       frontend_getter: "get_cu_seq_len_q()"
@@ -327,6 +328,7 @@ operation:
 
     - name: "cu_seq_len_kv"
       fbs_field: "cu_seq_len_kv_tensor_uid"
+      direction: "input"
       attr_suffix: "CU_SEQ_LEN_KVDESC"
       required: false
       frontend_getter: "get_cu_seq_len_kv()"
