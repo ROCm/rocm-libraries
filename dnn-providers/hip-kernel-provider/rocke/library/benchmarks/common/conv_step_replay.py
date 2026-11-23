@@ -690,10 +690,6 @@ def main(argv=None) -> int:
     from rocke.runtime.launcher import no_fence
     from rocke.runtime.stall_gate import time_launches_staged
 
-    if args.sched < 0:
-        from benchmarks.common.batched_timing import apply_hip_device_flags
-
-        apply_hip_device_flags()  # ROCKE_HIP_DEVICE_FLAGS, as the sweeps honour it
     if args.sched >= 0:
         import ctypes
 

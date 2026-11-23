@@ -1332,7 +1332,6 @@ def _run_ckprofiler(
 
 
 def main() -> int:
-    batched_timing.apply_hip_device_flags()
     parser = argparse.ArgumentParser(
         description="Tile/pipeline sweep benchmark for implicit-GEMM conv (fwd + wgrad)"
     )
@@ -1366,6 +1365,7 @@ def main() -> int:
     )
     add_early_stop_arg(parser)
     batched_timing.add_timing_arg(parser)
+    batched_timing.add_hip_device_flags_arg(parser)
     parser.add_argument(
         "--iters", type=int, default=10, help="timed iterations (default: 10)"
     )
@@ -1971,6 +1971,8 @@ def main() -> int:
         "lists (a label without its fwd-/dgrad-/wgrad- prefix names every direction)",
     )
     args = parser.parse_args()
+    # Before anything creates the HIP context.
+    batched_timing.apply_hip_device_flags(args.hip_device_flags)
     conv_fill.set_mode(args.fill)
     if args.skip_measured and not args.run_from_cache:
         print(

@@ -411,3 +411,24 @@ def test_balanced_orders_are_williams_designs(n):
 
 def test_balanced_orders_keep_ab_ba_for_two():
     assert batched_timing.balanced_orders(2) == [[0, 1], [1, 0]]
+
+
+def test_hip_device_flags_is_a_cli_setting(monkeypatch):
+    # The flags come from the command line (decimal or 0x hex); unset leaves
+    # HIP's default and never reaches the HIP runtime. No environment read.
+    import argparse
+
+    p = argparse.ArgumentParser()
+    batched_timing.add_hip_device_flags_arg(p)
+    assert p.parse_args([]).hip_device_flags is None
+    assert p.parse_args(["--hip-device-flags", "4"]).hip_device_flags == 4
+    assert p.parse_args(["--hip-device-flags", "0x4"]).hip_device_flags == 4
+
+    from rocke.runtime import hip_module
+
+    def _no_hip():
+        raise AssertionError("apply_hip_device_flags(None) touched HIP")
+
+    monkeypatch.setattr(hip_module, "_resolve_hip", _no_hip)
+    monkeypatch.setenv("ROCKE_HIP_DEVICE_FLAGS", "4")
+    batched_timing.apply_hip_device_flags(None)

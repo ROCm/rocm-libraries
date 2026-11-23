@@ -295,6 +295,8 @@ def _build_implicit_only_args(args) -> list[str]:
         a += ["--split-k", str(args.split_k)]
     if args.split_k_degrees is not None:
         a += ["--split-k-degrees", args.split_k_degrees]
+    if args.hip_device_flags is not None:
+        a += ["--hip-device-flags", str(args.hip_device_flags)]
     if args.deterministic:
         a += ["--deterministic", args.deterministic]
     if args.split_k_prune is not None:
@@ -755,6 +757,7 @@ def main() -> int:
         "Implicit-GEMM options",
         "Flags forwarded only to benchmark_implicit_gemm_conv.py.",
     )
+    batched_timing.add_hip_device_flags_arg(implicit_grp)
     implicit_grp.add_argument(
         "--sample",
         type=float,

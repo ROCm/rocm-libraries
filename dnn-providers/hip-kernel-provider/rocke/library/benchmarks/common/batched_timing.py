@@ -104,27 +104,39 @@ DEFAULT_TIMING = "staged"
 BLOCK_TIMING = "block"
 
 
-def apply_hip_device_flags() -> None:
-    """``ROCKE_HIP_DEVICE_FLAGS=<n>`` (opt-in): ``hipSetDeviceFlags(n)`` before
-    the process creates its HIP context (1 spin, 2 yield, 4 blocking sync).
+def apply_hip_device_flags(flags: Optional[int]) -> None:
+    """``hipSetDeviceFlags(flags)`` before the process creates its HIP context
+    (1 spin, 2 yield, 4 blocking sync); ``None`` leaves HIP's default.
 
     HIP's default host wait spins a CPU core; on a device whose CPU and GPU
     share one power budget, that spin takes power the GPU clock does not get.
     Staged timing waits on the host after every sample, so it pays it on every
-    call. A harness setting -- compare only with timings taken under the same
-    flags (other libraries re-timed with them).
+    call. A harness setting of the benchmark process, not a kernel knob: it is
+    taken from the command line (:func:`add_hip_device_flags_arg`), and timings
+    compare only with timings taken under the same flags.
     """
-    import os
-
-    v = os.environ.get("ROCKE_HIP_DEVICE_FLAGS", "")
-    if not v:
+    if flags is None:
         return
     import ctypes
 
     from rocke.runtime import hip_module
 
-    rc = hip_module._resolve_hip().hipSetDeviceFlags(ctypes.c_uint(int(v, 0)))
-    print(f"[timing] hipSetDeviceFlags({v}) -> {rc}", flush=True)
+    rc = hip_module._resolve_hip().hipSetDeviceFlags(ctypes.c_uint(flags))
+    print(f"[timing] hipSetDeviceFlags({flags}) -> {rc}", flush=True)
+
+
+def add_hip_device_flags_arg(parser) -> None:
+    """Add ``--hip-device-flags N`` (read by :func:`apply_hip_device_flags`)."""
+    parser.add_argument(
+        "--hip-device-flags",
+        type=lambda v: int(v, 0),
+        default=None,
+        metavar="N",
+        help="hipSetDeviceFlags(N) before the HIP context is created: 1 spin, "
+        "2 yield, 4 blocking sync (default: HIP's own, a spin-wait that keeps a "
+        "CPU core busy). Compare timings only with timings taken under the "
+        "same flags",
+    )
 
 
 def add_timing_arg(parser) -> None:
