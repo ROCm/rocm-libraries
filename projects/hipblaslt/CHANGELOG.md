@@ -6,6 +6,9 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
 
 ### Added
 
+* `hipblaslt-bench --partitions N --split_dim M|N|B`, which runs `testing_matmul` through the
+  experimental `PartitionedGemm` (see Experimental) with the same data, reference and verification,
+  and `samples/31_hipblaslt_gemm_partitioned_ext`.
 * Device scalar alpha on gfx1250 through
   `HIPBLASLT_POINTER_MODE_ALPHA_DEVICE_SCALAR_BETA_HOST_EXT`, Extension API
   `GemmInputs::setScaleAlphaScalar()` / `getScaleAlphaScalar()`, and
@@ -14,7 +17,8 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
   `scaleType = HIP_R_32F`; algorithm selection requires a scalar-alpha-capable kernel.
 * `HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT` scale mode (`1018`, `--scaleA`/`--scaleB` in `hipblaslt-bench`) and `HIPBLASLT_ORDER_COL256_R128_EXT` matrix order (`104`) for MXFP6 (`HIP_R_6F_E2M3`, `HIP_R_6F_E3M2`) GEMMs whose A, and optionally B, is pre-tiled and whose E8M0 scales are shuffled in tiles of 128 rows by 4 K blocks. Both scale modes are set together with the order on A, with `opA = T` and `opB = N`; B uses the same order or `HIPBLASLT_ORDER_COL`.
 * rocKE MXFP6 GEMM kernels for that scale mode and order, registered for gfx950 PCI chip IDs `0x75a0` and `0x75a3`: E2M3 and E3M2, TN, `m = n = 4096` with `K = 65536` or `131584`, bf16 C and D, alpha `1` and beta `0`; with B in `HIPBLASLT_ORDER_COL`, E2M3 at `K = 65536` only. `hipblasLtMatmulAlgoGetHeuristic` does not return them; the extension API's heuristic does, and `hipblasLtMatmul` runs the algo it returns.
-* `A2AGemm` mode for the `FusedA2A` TensileLite problem-type parameter (TensileLite only, bf16 B): gathers B's K shards from the peers inside the GEMM kernel, and the `A2ASubRounds` solution parameter (`1`, `2` or `4`) splits each shard into sub-rounds. Validated on gfx950 only.
+* `A2AGemm` mode for the `FusedA2A` TensileLite problem-type parameter (bf16 B): gathers B's K shards from the peers inside the GEMM kernel, and the `A2ASubRounds` solution parameter (`1`, `2` or `4`) splits each shard into sub-rounds. Validated on gfx950 only.
+* Fused all-to-all prologue, in builds with `HIPBLASLT_ENABLE_GEMM_A2A_FUSION`: `hipblasLtFusionAddPrologue` with `HIPBLASLT_FUSEABLE_PROLOGUE_A2A_PREFIX`, attached through `HIPBLASLT_MATMUL_DESC_FUSED_PROLOGUE`, gathers B across the registered ranks before the GEMM (`FusedA2A: A2AGemm`), with the peer-B and gather-buffer attributes `HIPBLASLT_FUSION_A2A_PEER_B_PTRS` and `HIPBLASLT_FUSION_A2A_GATHER_BUFFER`; tuned for gfx950 bf16. Prologue stage values start at 64, disjoint from the epilogue stages. `hipblaslt-bench-a2a` gains `--a2a_mode a2a-gemm`.
 * `HIPBLASLT_TUNING_MODE=tune` for the runtime tuning cache. With `HIPBLASLT_TUNING_CACHE_PATH=<file>`, the library benchmarks candidate kernels for an unseen problem at its first `hipblasLtMatmul`, records the winner in the file, and replays it afterwards. `tune` measures candidates the way `hipblaslt-bench` does (warm-up and timed launches over rotating buffers, with an instruction-cache flush), serialises tuning within a process, and bounds each shape's search to five minutes by default (`HIPBLASLT_TUNING_BUDGET_MS_PER_SHAPE`). A search the budget stops records its best candidate as incomplete, which is never slower than the untuned kernel because that kernel is measured first, and tune mode revisits it when a later run can finish or widen the search. Tune mode reports each tuned shape's start and result without needing a log level, and a process in a secure execution context ignores every tuning variable.
 
 ### Changed
@@ -23,11 +27,18 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
 * `tensilelite-client` now moves each remote peer's SDMA queue off KFD's recommended engine by default (`--fused-a2a-sdma-rotate`, default `-1`), in both fused modes. Remote peer queues need an even xGMI SDMA engine from KFD, and a nonzero rotation also needs 14 xGMI SDMA engines; on other nodes pass `--fused-a2a-sdma-rotate=0`.
 * `hipblaslt.h` no longer includes `<regex>`, which none of the hipBLASLt headers use. Code that uses `std::regex` must include `<regex>` itself.
 
+### Changed
+
+* Public functions whose C++ exceptions reach the shared exception handler now log
+  the function name and exception message at `HIPBLASLT_LOG_LEVEL=1` (error).
+  The returned status is unchanged.
+
 ### Resolved issues
 
 * Fixed `hipblaslt-bench` and `hipblaslt-test` rejecting a compute-input type override for A alone and accepting an unsupported override for B alone.
 * Fixed `hipblasLtMatmul` and `hipblaslt_ext::Gemm::initialize` accepting an algo for a grouped GEMM solution, and `hipblaslt_ext::GroupedGemm::initialize` accepting one for a non-grouped solution. They now return `HIPBLAS_STATUS_INVALID_VALUE`.
 * Fixed `hipblaslt_ext::GroupedGemm::initialize` with `useUserArgs = false` accepting an algo for a hand-written kernel (gfx942 only) whose problem predicates a GEMM of the group fails. It now returns `HIPBLAS_STATUS_INVALID_VALUE`, as `hipblaslt_ext::Gemm::initialize` does. With `useUserArgs = true` the sizes come from device memory and are not checked.
+* Fixed `hipblasLtMatrixLayoutSetAttribute` accepting a `HIPBLASLT_MATRIX_LAYOUT_BATCH_MODE` value that is not a `hipblasLtBatchMode_t`. A matmul with such a layout ran its main kernel in strided mode, but the GSU output-conversion kernel read C and D as pointer arrays. It now returns `HIPBLAS_STATUS_INVALID_VALUE`.
 * Fixed the extension API examples that passed `stream` as the `useUserArgs` argument of `initialize`, and the device user arguments examples that ran with an undefined buffer.
 * Fixed `hipblaslt.h`, `hipblaslt-ext-op.h`, and `hipblaslt-local-kernel.h` failing to compile in a C translation unit. The C++ standard library includes, the default member initializers in `hipblasLtMatmulHeuristicResult_t`, the `static_cast` in the `*_INVALID` macros, and the C++-only `hipblaslt_e8.h` and `hipblaslt_e5m3.h` types now apply only to C++. In C, the `HIP_R_*_EXT` type ids are enumeration constants, so two C files that include the headers no longer fail to link with duplicate symbols. C++ consumers see no change.
 
@@ -132,6 +143,14 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
 * Complex CGEMM/ZGEMM support for gfx1250.
 * `TENSILE_FIXED_WGMXCCSPLITK` environment variable to override the split-K work-group XCC mapping factor for StreamK GEMMs.
 * `HIPBLASLT_MATRIX_LAYOUT_OFFSET` matrix-layout attribute for 64-bit element offsets into sub-matrices in General Batched GEMM (`batch_mode=1`), along with `hipblaslt-bench` `batch_offset_a/b/c/d` arguments; nonzero offsets require `HIPBLASLT_BATCH_MODE_POINTER_ARRAY` and are rejected for sub-byte MX types (`HIP_R_6F_E2M3`, `HIP_R_6F_E3M2`, `HIP_R_4F_E2M1`) with `HIPBLAS_STATUS_NOT_SUPPORTED`.
+
+### Experimental
+
+* Experimental API tier in the new `hipblaslt/hipblaslt-experimental.h` header. The header is installed but not included by `hipblaslt.h`, and declares nothing unless the consumer defines the ROCm-wide `ROCM_ENABLE_EXPERIMENTAL_APIS` switch. Each feature defines a revision macro, `HIPBLASLT_EXPERIMENTAL_<FEATURE>`, and `hipblasLtExperimentalGetFeatureRevision` returns the loaded library's revision of a feature (0 if absent), so consumers can fall back on a mismatch. Reserves `HIPBLASLT_EXPERIMENTAL_ENUM_BIT` for experimental values of stable enums; experimental enumerator values are never reused. Experimental APIs can change or be removed in any ROCm release.
+* Experimental API lifecycle enforcement: each feature is registered in `library/experimental/features.cmake` with a deadline of four ROCm releases, and configure fails once a feature is past it; `tools/scripts/check_experimental_api.py` fails a PR that changes a function, type or enumerator in place, or breaks a feature or its contract tests without bumping that feature's revision.
+* CMake target `roc::hipblaslt_experimental`: `roc::hipblaslt` plus `ROCM_ENABLE_EXPERIMENTAL_APIS=1`, exported with the hipBLASLt package but not listed in `hipblaslt_LIBRARIES`.
+* `check_experimental_api.py` checks C++ features: functions and methods are compared by scope, name and parameter types, so a new method or overload is an addition, a removed one needs a revision bump, and a changed return type, default argument or qualifier is never allowed. A class's bases, data members and virtual functions are its layout, which never changes under the same name. Scoped enums follow the enumerator rules, and templates are rejected. Contract headers (`contract_<feature>*.hpp`) count as contract tests.
+* Experimental feature PARTITIONED_GEMM, revision 1, in `hipblaslt/hipblaslt-experimental-partitioned-gemm.h` (C++ only): `hipblaslt_experimental::PartitionedGemm` runs one GEMM as slices on the devices of a partitioned GPU (for example, a device in DPX mode; gfx1250 only, `setProblem` returns `HIPBLAS_STATUS_NOT_SUPPORTED` elsewhere), with one handle, stream, and workspace per partition, `hipblaslt_experimental::SplitDim::M`, `N` or `Batch`, and one pointer per partition for each matrix (the same pointer shares a matrix, different pointers replicate it). hipBLASLt allocates and copies nothing and does not enable peer access: every partition's slices must be accessible from its device, otherwise the run faults like any GEMM given an inaccessible pointer. Only plain GEMM is supported; the device user arguments overloads return `HIPBLAS_STATUS_NOT_SUPPORTED`. Contract tests: `pre_checkin_partitioned_gemm_contract` in `hipblaslt-test`.
 
 ### Changed
 

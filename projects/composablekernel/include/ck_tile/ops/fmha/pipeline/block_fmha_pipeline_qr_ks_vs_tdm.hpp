@@ -6,6 +6,7 @@
 #include "ck_tile/core.hpp"
 #include "ck_tile/ops/fmha/block/block_attention_bias_enum.hpp"
 #include "ck_tile/ops/fmha/block/block_attention_quant_scale_enum.hpp"
+#include "ck_tile/ops/fmha/block/block_masking.hpp"
 #include "ck_tile/ops/fmha/block/cast_tile_mx.hpp"
 #include "ck_tile/ops/fmha/pipeline/block_fmha_pipeline_qr_ks_vs_tdm_policy.hpp"
 #include "ck_tile/ops/reduce/block/block_reduce.hpp"
@@ -408,6 +409,21 @@ struct BlockFmhaPipelineQRKSVSTdm
         constexpr index_t begin = 2 * (NIter - 1);
         k_lds_read_window.template load_access_range<begin, begin + 4>(k_tile);
         __builtin_amdgcn_sched_barrier(kProgressiveDsLoadSchedMask);
+    }
+
+    // see IsEdgeTileForValidRows: the O and LSE stores must stay bounded by seqlen_q
+    CK_TILE_DEVICE static bool
+    NeedPerPixelMask(const FmhaMask& mask, index_t i_tile_top, index_t i_tile_left)
+    {
+        if constexpr(std::is_same_v<FmhaMask, SimplifiedGenericAttentionMask<true>>)
+        {
+            return mask.IsEdgeTileForValidRows(
+                i_tile_top, i_tile_left, number<kM0>{}, number<kN0>{});
+        }
+        else
+        {
+            return mask.IsEdgeTile(i_tile_top, i_tile_left, number<kM0>{}, number<kN0>{});
+        }
     }
 
     CK_TILE_HOST_DEVICE static constexpr ck_tile::index_t GetSmemSize()
@@ -1015,7 +1031,10 @@ struct BlockFmhaPipelineQRKSVSTdm
             {
                 // Pre-scale s_acc by scale_s before adding bias
                 tile_elementwise_inout([&scale_s](auto& x) { x = x * scale_s; }, s_acc);
-                const auto bias_tile = load_tile(bias_dram_window);
+                // No per-element OOB branch: padded scores are masked to -inf, padded rows are not
+                // stored, and the buffer range check returns 0 past the end.
+                const auto bias_tile =
+                    load_tile(bias_dram_window, number<-1>{}, bool_constant<false>{});
                 tile_elementwise_inout(
                     [](auto& x, const auto& y) {
 #if !CK_TILE_FMHA_FWD_FAST_EXP2
@@ -1067,8 +1086,7 @@ struct BlockFmhaPipelineQRKSVSTdm
 
             if constexpr(kPadSeqLenK || FmhaMask::IsMasking)
             {
-                bool need_perpixel_check =
-                    mask.IsEdgeTile(q_origin.at(I0), k_origin.at(I0), number<kM0>{}, number<kN0>{});
+                bool need_perpixel_check = NeedPerPixelMask(mask, q_origin.at(I0), k_origin.at(I0));
                 if(need_perpixel_check)
                 {
                     set_tile_if(
@@ -1919,7 +1937,10 @@ struct BlockFmhaPipelineQRKSVSTdm
             if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS)
             {
                 tile_elementwise_inout([&scale_s](auto& x) { x = x * scale_s; }, s_acc);
-                const auto bias_tile = load_tile(bias_dram_window);
+                // No per-element OOB branch: padded scores are masked to -inf, padded rows are not
+                // stored, and the buffer range check returns 0 past the end.
+                const auto bias_tile =
+                    load_tile(bias_dram_window, number<-1>{}, bool_constant<false>{});
                 tile_elementwise_inout(
                     [](auto& x, const auto& y) {
 #if !CK_TILE_FMHA_FWD_FAST_EXP2
@@ -1983,8 +2004,7 @@ struct BlockFmhaPipelineQRKSVSTdm
 
             if constexpr(kPadSeqLenK || FmhaMask::IsMasking)
             {
-                bool need_perpixel_check =
-                    mask.IsEdgeTile(q_origin.at(I0), k_origin.at(I0), number<kM0>{}, number<kN0>{});
+                bool need_perpixel_check = NeedPerPixelMask(mask, q_origin.at(I0), k_origin.at(I0));
                 if(need_perpixel_check)
                 {
                     set_tile_if(

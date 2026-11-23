@@ -64,14 +64,14 @@ struct FrontendDropout
     bool withRngDump = true;
 };
 
-/// Where a case pinned to an engine (FrontendSdpaSpec::engine on engineArch) runs. The standard
-/// tier runs it on engineArch, the architecture it exists for (pinnedCasesOnTheirArch); a
-/// Comprehensive* instantiation runs it everywhere else (pinnedCasesElsewhere).
+/// Where a case pinned to an engine (FrontendSdpaSpec::engine on engineArch) runs. A Standard*
+/// instantiation runs it on engineArch, the architecture it exists for
+/// (pinnedCasesOnTheirArch); a Comprehensive* instantiation runs its own cases everywhere,
+/// the first-ranked FlyDSL engine serving them off engineArch.
 enum class PinnedArchRun
 {
     EVERY_ARCH,
     ENGINE_ARCH_ONLY,
-    OTHER_ARCHS_ONLY,
 };
 
 /// One SDPA forward graph: BSHD Q/K/V/O, an optional LSE (FLOAT [B, Hq, Sq, 1]), an optional
@@ -620,8 +620,8 @@ inline bool pinsAnEngine(const FrontendSdpaSpec& spec)
     return spec.engine.has_value() && !spec.engineArch.empty();
 }
 
-/// The standard-tier copy of @p cases: each case that pins an engine runs on its engineArch
-/// only, the rest everywhere.
+/// The Standard* copy of @p cases: each case that pins an engine runs on its engineArch only, the
+/// rest everywhere.
 template <typename CaseType>
 std::vector<CaseType> pinnedCasesOnTheirArch(std::vector<CaseType> cases)
 {
@@ -635,21 +635,29 @@ std::vector<CaseType> pinnedCasesOnTheirArch(std::vector<CaseType> cases)
     return cases;
 }
 
-/// The Comprehensive* copy of @p cases: only the cases that pin an engine, on every architecture
-/// but their engineArch, where the first-ranked FlyDSL engine serves them.
+/// The cases of @p cases that run in a Standard* instantiation: all but those flagged
+/// comprehensiveOnly.
 template <typename CaseType>
-std::vector<CaseType> pinnedCasesElsewhere(const std::vector<CaseType>& cases)
+std::vector<CaseType> standardTierCases(std::vector<CaseType> cases)
 {
-    std::vector<CaseType> elsewhere;
-    for(auto testCase : cases)
-    {
-        if(pinsAnEngine(testCase.spec))
-        {
-            testCase.spec.pinnedArchRun = PinnedArchRun::OTHER_ARCHS_ONLY;
-            elsewhere.push_back(testCase);
-        }
-    }
-    return elsewhere;
+    cases.erase(std::remove_if(cases.begin(),
+                               cases.end(),
+                               [](const CaseType& testCase) { return testCase.comprehensiveOnly; }),
+                cases.end());
+    return cases;
+}
+
+/// The cases of @p cases that run in a Comprehensive* instantiation: those flagged
+/// comprehensiveOnly.
+template <typename CaseType>
+std::vector<CaseType> comprehensiveTierCases(std::vector<CaseType> cases)
+{
+    cases.erase(
+        std::remove_if(cases.begin(),
+                       cases.end(),
+                       [](const CaseType& testCase) { return !testCase.comprehensiveOnly; }),
+        cases.end());
+    return cases;
 }
 
 /// The lane's fixture: skips where no FlyDSL SDPA objects ship, seeds each tensor apart, and
@@ -858,11 +866,7 @@ protected:
             if(sdpa.spec.pinnedArchRun == PinnedArchRun::ENGINE_ARCH_ONLY && !onEngineArch)
             {
                 GTEST_SKIP() << "pinned to " << sdpa.spec.engineArch
-                             << "; its Comprehensive* copy runs it on " << _arch;
-            }
-            if(sdpa.spec.pinnedArchRun == PinnedArchRun::OTHER_ARCHS_ONLY && onEngineArch)
-            {
-                GTEST_SKIP() << "the standard-tier copy runs it on " << _arch;
+                             << "; the Comprehensive* instantiation runs it on " << _arch;
             }
         }
         auto result = sdpa.graph->validate();

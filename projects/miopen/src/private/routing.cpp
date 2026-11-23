@@ -88,7 +88,16 @@ const char* ModeName(ForwardingMode mode)
     return mode == ForwardingMode::Enabled ? "enabled" : "disabled";
 }
 
-const char* RouteName(Route route) { return route == Route::Hipdnn ? "hipdnn" : "miopen"; }
+const char* RouteName(Route route)
+{
+    switch(route)
+    {
+    case Route::Miopen: return "miopen";
+    case Route::Hipdnn: return "hipdnn";
+    case Route::Rejected: return "rejected";
+    }
+    return "unknown";
+}
 
 const char* ReasonName(RouteReason reason)
 {
@@ -99,6 +108,7 @@ const char* ReasonName(RouteReason reason)
     case RouteReason::DisabledByEnv: return "disabled-by-env";
     case RouteReason::HipdnnUnavailable: return "hipdnn-unavailable";
     case RouteReason::InForwardingSet: return "in-forwarding-set";
+    case RouteReason::ReentrantFromHipdnn: return "reentrant-from-hipdnn";
     }
     return "unknown";
 }
