@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2020-2023 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -150,13 +150,14 @@ void testing_spmat_descr_bad_arg(const Arguments& arg)
                                                             data_type),
                                 rocsparse_status_invalid_size);
 
-        // ell_cols > cols
+        // ell_cols past cols rounded up to a whole block. It is a whole number of blocks,
+        // so only the width limit rejects it.
         EXPECT_ROCSPARSE_STATUS(rocsparse_create_bell_descr(descr,
                                                             rows,
                                                             cols,
                                                             ell_block_dir,
                                                             ell_block_dim,
-                                                            (cols + 1),
+                                                            (2 * ell_block_dim),
                                                             ell_col_ind,
                                                             ell_val,
                                                             idx_type,
