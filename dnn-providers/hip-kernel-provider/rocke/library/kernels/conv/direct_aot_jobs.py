@@ -178,6 +178,11 @@ DW_TILED_DGRAD_BLOCK_W = (4, 8, 16, 32)
 DW_TILED_DGRAD_BLOCK_H = (1, 2, 3, 4, 7)
 DW_TILED_DGRAD_BLOCK_WAVES = (1,)
 DW_BLOCK_WAVES = (1, 2, 4)
+# Row blocks of the small-group spatial kernel (block_h output rows per block,
+# grid y): a few-image launch of whole-image blocks leaves most SIMDs idle
+# (C=3 640-wide, N7: 112 blocks); the KH - stride halo rows each block
+# re-reads cost ~(KH - 1) / block_h more input traffic.
+DW_SPATIAL_BLOCK_H = (8, 16, 32, 64, 96, 128, 160, 240)
 # Output-stationary depthwise forward. Widths and heights of 7 and 14 tile the
 # 7/14/28/56-wide feature maps of the common CNN stages without a ragged edge;
 # the spec validator drops the tiles that overflow the register budget and the
@@ -197,6 +202,17 @@ DW_FWD_CPL_GRID = (
     (4, (4,), (1, 2)),
 )
 DW_TILED_CPL = 2
+# Packed row-streaming forward with stride_skip (stride > 1 only): output-row
+# accumulators only, so the wider tiles that cut the column halo re-read fit.
+DW_FWD_SS_GRID = (
+    (2, (2, 4, 7, 8, 14, 16), (1, 2, 4)),
+    (4, (4, 7), (1, 2)),
+)
+# Packed row-streaming forward in row blocks (cpl 2; stride_skip at stride >
+# 1): (block_h values, block_w values, block_waves values). Few-image or
+# short-map launches of whole-image blocks hide too little of the row
+# stream's latency.
+DW_FWD_ROWBLOCK_GRID = ((4, 7, 14), (2, 4, 8), (1, 2, 4))
 
 # Column-streamed depthwise forward. It keeps only ``block_h*block_w + KH`` f32
 # live per lane instead of ``KH*KW + KH*block_w``, so its sweet spot sits at far
@@ -2179,9 +2195,20 @@ def _knob_grid(
             for cpl, bws, waves_list in DW_FWD_CPL_GRID:
                 for bw, waves in itertools.product(bws, waves_list):
                     yield dict(block_w=bw, block_waves=waves, cpl=cpl)
+            if caps is None or caps.stride > 1:
+                for cpl, bws, waves_list in DW_FWD_SS_GRID:
+                    for bw, waves in itertools.product(bws, waves_list):
+                        yield dict(
+                            block_w=bw, block_waves=waves, cpl=cpl, stride_skip=True
+                        )
+            ss = {} if caps is not None and caps.stride == 1 else {"stride_skip": True}
+            for bh, bw, waves in itertools.product(*DW_FWD_ROWBLOCK_GRID):
+                yield dict(block_w=bw, block_waves=waves, cpl=2, block_h=bh, **ss)
     elif variant in ("direct_depthwise_spatial", _DW_SPATIAL_DGRAD):
         for waves in DW_BLOCK_WAVES:
             yield dict(block_waves=waves)
+        for bh, waves in itertools.product(DW_SPATIAL_BLOCK_H, DW_BLOCK_WAVES):
+            yield dict(block_waves=waves, block_h=bh)
     elif variant == "direct_depthwise_tiled":
         for bw, bh, waves, unroll in itertools.product(
             DW_TILED_BLOCK_W, DW_TILED_BLOCK_H, DW_TILED_BLOCK_WAVES, DW_TILED_UNROLL
