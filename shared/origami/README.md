@@ -4,6 +4,9 @@ Origami predicts GEMM kernel performance and ranks candidate configurations.
 The native library builds independently of Python. Its Python bindings live in
 [bindings/python/rocm-origami](../../bindings/python/rocm-origami).
 
+Native headers, implementation, and tests remain in `include/`, `src/`, and
+`tests/` under this directory.
+
 ## Build and test
 
 Use an installed ROCm development environment through `CMAKE_PREFIX_PATH`:
