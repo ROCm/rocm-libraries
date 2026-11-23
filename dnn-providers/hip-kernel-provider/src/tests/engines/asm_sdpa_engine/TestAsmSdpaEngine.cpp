@@ -7,10 +7,13 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <filesystem>
+#include <iostream>
 #include <optional>
 #include <set>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <utility>
 #include <vector>
 
@@ -45,6 +48,7 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 #include "AsmSdpaShippedModels.hpp"
+#include "TestDescriptorRoot.hpp"
 #include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
 
 #include <hipdnn_plugin_sdk/heuristics/EngineFeatures.hpp>
@@ -503,6 +507,26 @@ double denseBf16PeakTflops(const std::string& arch)
     return arch == "gfx942" ? 1307.4 : 2516.6;
 }
 
+/// The architectures this install carries production content for: the shard directories
+/// (arch_content/hip-kernel-provider/<arch>/) beside asm_sdpa/. TheRock splits the provider's
+/// per-arch content into one artifact per GPU family, so a gfx950 job holds gfx950's model
+/// and not gfx942's. Empty where production packaging is dormant: the provider then copies
+/// every model itself, so each must be there.
+std::set<std::string> installedShardArches(const std::filesystem::path& productRoot)
+{
+    std::set<std::string> arches;
+    std::error_code error;
+    for(const auto& entry : std::filesystem::directory_iterator(productRoot, error))
+    {
+        const auto name = entry.path().filename().string();
+        if(name.rfind("gfx", 0) == 0 && entry.is_directory(error))
+        {
+            arches.insert(name);
+        }
+    }
+    return arches;
+}
+
 /// Every declared model must ship for its architecture, survive the loader and answer:
 /// the engine itself gives an AVAILABLE `tflops` estimate for forward and backward graphs in
 /// both the token-major (BSHD) and head-major (BHSD) layouts, equal to that architecture's
@@ -510,7 +534,8 @@ double denseBf16PeakTflops(const std::string& arch)
 /// a host, so a model that never binds (an id typo, an unstaged file, a binding or
 /// architecture lookup that drifted) would otherwise leave the engine unranked while every
 /// test passed. The plan builder is mocked to serve each graph: which graphs the real
-/// builders serve depends on the device, and is theirs to test.
+/// builders serve depends on the device, and is theirs to test. A model may be absent only
+/// where this install carries no content for its architecture at all (installedShardArches).
 TEST_F(TestAsmSdpaEngine, EachDeclaredModelEstimatesOnItsArchitecture)
 {
     namespace ingestor = hipdnn_plugin_sdk::ingestor;
@@ -535,11 +560,24 @@ TEST_F(TestAsmSdpaEngine, EachDeclaredModelEstimatesOnItsArchitecture)
                 dims, strides, dims, strides, dims, strides, dims, strides, DataType::BFLOAT16));
     }
     const EngineConfigWrapper config(nullptr, 0);
+    const auto modelsRoot = hip_kernel_provider::testing::descriptorSetRoot(
+        HIPKERNELPROVIDER_ASM_SDPA_DESCRIPTOR_RELDIR);
+    const auto shards = installedShardArches(modelsRoot.parent_path());
+    size_t checked = 0;
 
     for(const auto& [arch, id] : AsmSdpaEngine::L1_MODEL_IDS)
     {
         const std::string archName(arch);
         SCOPED_TRACE(archName);
+        const bool carried = shards.empty() || shards.count(archName) != 0;
+        if(!carried && !std::filesystem::exists(modelsRoot / "predict_engine" / archName))
+        {
+            std::cout << "[ NOTE     ] this install carries no " << archName
+                      << " content (its GPU family is packaged separately), so the " << archName
+                      << " ASM SDPA model is not checked here\n";
+            continue;
+        }
+        ++checked;
 
         // The declared model alone, resolved from the catalog the engine binds from.
         const auto resolved = ingestor::resolveDeclaredEnginePredictions(
@@ -598,6 +636,11 @@ TEST_F(TestAsmSdpaEngine, EachDeclaredModelEstimatesOnItsArchitecture)
             EXPECT_LT(estimate.value, denseBf16PeakTflops(archName))
                 << "an estimate above the device's dense bf16 peak";
         }
+    }
+    if(checked == 0)
+    {
+        GTEST_SKIP() << "this install carries content for neither architecture the ASM SDPA "
+                        "models are declared for";
     }
 }
 #endif // HIPKERNELPROVIDER_ASM_SDPA_DESCRIPTOR_RELDIR
