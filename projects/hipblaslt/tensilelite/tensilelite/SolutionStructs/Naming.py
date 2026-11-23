@@ -338,6 +338,11 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
     else:
       requiredParametersTemp.discard("LDSSegmentBRotate")
 
+    if state.get("WaveTileContiguousA", False):
+      requiredParametersTemp.add("WaveTileContiguousA")
+    else:
+      requiredParametersTemp.discard("WaveTileContiguousA")
+
     # ClusterAIDMapping=-1 (disabled) is the default; naming it would rename every kernel.
     if state.get("ClusterAIDMapping", -1) != -1:
       requiredParametersTemp.add("ClusterAIDMapping")
