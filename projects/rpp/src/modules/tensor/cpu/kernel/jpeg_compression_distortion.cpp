@@ -58,6 +58,10 @@ const __m256 pCoeffGCr = _mm256_set1_ps(-0.714136f);
 
 const __m256 pCoeffBCb = _mm256_set1_ps(1.772f);
 
+// 8-bit range of the level-shifted chroma
+const __m256 pChromaMin = _mm256_set1_ps(-128.0f);
+const __m256 pChromaMax = _mm256_set1_ps(127.0f);
+
 const __m256i pxMask = _mm256_setr_epi32(0, 1, 4, 5, 2, 3, 6, 7);
 const __m256 pQuarterFactor = _mm256_set1_ps(0.25f);
 
@@ -387,8 +391,9 @@ inline void ycbcr_to_rgb_generic(T* dstPtr, Rpp32s rowLimit, Rpp32s colLimit, Rp
             // Get chroma values for this 2x2 block
             Rpp32s cbcrIdx = blockRowOffset + col;
             Rpp32s colIdx = col << 1;
-            Rpp32f currCb = cb[cbcrIdx];
-            Rpp32f currCr = cr[cbcrIdx];
+            // Clamp the reconstructed planes to the 8-bit range before converting
+            Rpp32f currCb = clamp(cb[cbcrIdx], -128.0f, 127.0f);
+            Rpp32f currCr = clamp(cr[cbcrIdx], -128.0f, 127.0f);
 
             // Process 2x2 Y pixels for each Cb/Cr pair
             for (Rpp32s subRow = 0; subRow < 2; subRow++) {
@@ -401,7 +406,7 @@ inline void ycbcr_to_rgb_generic(T* dstPtr, Rpp32s rowLimit, Rpp32s colLimit, Rp
                     if ((rowIdx + subRow) >= colLimit || (colIdx + subCol) >= rowLimit) continue;
 
                     // Convert YCbCr to RGB
-                    Rpp32f yVal = y[yIdx] + 128.0f;
+                    Rpp32f yVal = clamp(y[yIdx] + 128.0f, 0.0f, 255.0f);
                     Rpp32f r = yVal + 1.402f * currCr;
                     Rpp32f g = yVal - 0.344136f * currCb - 0.714136f * currCr;
                     Rpp32f b = yVal + 1.772f * currCb;
@@ -586,6 +591,9 @@ inline void rgb_to_ycbcr_subsampled(__m256* pRgb, __m256* pY, __m256* pCb, __m25
 // convert ycbcr buffer to rgb buffer
 inline void ycbcr_to_rgb_subsampled(__m256* pY, __m256* pCb, __m256* pCr, __m256* pRgb) {
     for (Rpp32s i = 0; i < 8; i++) {
+        // Clamp the reconstructed chroma to the 8-bit range, as for Y below
+        pCb[i] = _mm256_min_ps(_mm256_max_ps(pCb[i], pChromaMin), pChromaMax);
+        pCr[i] = _mm256_min_ps(_mm256_max_ps(pCr[i], pChromaMin), pChromaMax);
         __m256 cb[2];
         upsample_avx2(pCb[i], &cb[0]);
         __m256 cr[2];
