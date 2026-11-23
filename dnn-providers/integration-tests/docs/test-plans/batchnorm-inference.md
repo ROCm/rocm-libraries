@@ -50,9 +50,10 @@ Audit of `develop` at `1207c1ecfbc` (`sweep.json` counted directly):
 - **Leaky ReLU fills full with skips.** 40 full Pointwise cases set `relu_lower_clip_slope = 0.01`; neither engine claims them.
 - **Re-tiering left uneven tiers.** Fused comprehensive holds 17 cases, fused full holds 135, most of them clip products.
 - **Quick is over its likely budget.** The largest quick case is `1 × 16 × 112 × 112` (200,704 elements): three fused clip cases, two of them with an upcast twin.
-- **One element per channel is engine-split.** `1 × 256 × 1 × 1` has 10 cases per directory in `standard`, claimed by `HIP_MLOPS_ENGINE` only; MIOpen declines `N × spatial ≤ 1` (`validateSpatialDimensions`).
+- **Every engine difference is upcast.** In every directory and level, `MIOPEN_ENGINE` claims exactly the cases that are neither upcast nor leaky, and `HIP_MLOPS_ENGINE` claims every case that is not leaky. That includes one element per channel: of the 10 `1 × 256 × 1 × 1` cases per directory in `standard`, `HIP_MLOPS_ENGINE` claims 10 and `MIOPEN_ENGINE` the 6 that are not upcast. MIOpen's `N × spatial > 1` check (`validateSpatialDimensions`) runs for training only.
 - **The Jira's first-pass numbers do not match the tree.** The ticket says 108 and 168 cases, 24 leaky cases, three 602k-element quick cases, no upcast bundle and no 1D cases on `HIP_MLOPS_ENGINE`; the tree has none of those.
 - **Claims** cover, for `HIP_MLOPS_ENGINE`: gfx1100, gfx1150, gfx1200, gfx90a, gfx942, gfx950 on Linux, gfx1101 on Windows, gfx1151 on both. For `MIOPEN_ENGINE`: gfx1101, gfx1150, gfx1201, gfx90a, gfx942, gfx950 on Linux, gfx1030 on Windows, gfx1151 on both. A Linux gfx1030 machine has no applicable claim.
+- **Measured baseline: green and exactly as claimed.** TheRock's nightly test run on gfx94X of 2026-11-19 ([rockrel run 44450853090](https://github.com/ROCm/rockrel/actions/runs/44450853090), quick through comprehensive) ran all 276 cases of the three directories below full. `HIP_MLOPS_ENGINE` passed 276. `MIOPEN_ENGINE` passed 168 and skipped 108, each skip a case it does not claim. No case failed, no claim broke, and no case reported `unclaimed_support`. A dispatched multi-arch run on gfx950 matched at quick. The 195 full cases have no measured run; they are claimed only. The gaps above are therefore gaps in what is tested, not failures of what is tested.
 
 ## 3. Scope
 
@@ -433,7 +434,7 @@ Cost estimates:
 No engine is named in the plan. What the engines accept, read from source and not yet measured, is an input to the claim harvest only:
 
 - Both engines require packed tensors with one layout, fp32 statistics and affine tensors, and fp32 intermediates, and both decline leaky and `relu_lo0p1`.
-- MIOpen also requires x and y in the same type (no upcast), rank ≥ 3, and `N × spatial > 1`.
+- MIOpen also requires x and y in the same type (no upcast), and statistic and affine tensors of the same rank as x (`getDerivedShape`), so it declines F12. Its rank ≥ 3 and `N × spatial > 1` checks (`validateSpatialDimensions`) run for training only, so the rank-2 probes (F1) decide what it does with `[N, C]`.
 - On a slope of exactly 0, MIOpen treats it as no leaky ramp (`MiopenUtils.hpp`); `HIP_MLOPS_ENGINE` declines any graph whose slope is set (`BatchnormApplicabilityChecks.cpp`).
 
 Those limits show up as skips and harvested claims, not as plan edits.
@@ -482,7 +483,7 @@ Trims run after case ids are assigned, so a trim renames no case, and no trim re
 | Id | RFC rule | This plan | Why |
 |---|---|---|---|
 | D1 | §6: each rejection an engine can see is an `expected_rejection` bundle | The invalid problems of section 6.8 are frontend unit tests. The harness never calls the frontend's `validate()`, so an engine that accepts an illegal graph (for example `HIP_MLOPS_ENGINE` with bare `[C]` scale and bias) is not caught by a bundle. | Same gap as the convolution plan's D1 (ALMIOPEN-3232). |
-| D2 | §9 (as applied by the convolution plan): hazard shapes are probes | H shapes, S8, S9 and X1, X2 and X4 are claims. | The op is elementwise: an engine that accepts the op is expected to run any legal shape, and today's `support.json` already claims `1 × 256 × 1 × 1` for `HIP_MLOPS_ENGINE`. |
+| D2 | §9 (as applied by the convolution plan): hazard shapes are probes | H shapes, S8, S9 and X1, X2 and X4 are claims. | The op is elementwise: an engine that accepts the op is expected to run any legal shape, and today's `support.json` already claims `1 × 256 × 1 × 1` for both engines. |
 
 ## 11. Oracles and Reference Prerequisites
 
@@ -513,7 +514,7 @@ Gaps and fixes. The generator emits these cases now; they are unclaimed until th
 | F18 NaN / Inf | The fill recipes cannot place special values, and the default comparison treats NaN as a mismatch. | I4, plus `allclose_matching_infinities` on those cases. | I4 |
 | F10 alignment | The harness passes allocator pointers aligned to at least 256 bytes. | Exact-alignment and offset placement. | I3 |
 | F19, section 6.7 | Bundles run one execution. | Repeat-and-compare on bundles. Until then, C++ tests. | I5 |
-| Golden | No golden generator for the sweep; the existing helper's variance conversion fails for large inv_variance (section 12). | `generate_batchnorm_inference_golden.py`. | I7 |
+| Golden | No golden generator for the sweep; the existing helper's variance conversion is lossy for fp16 and bf16 statistics with large inv_variance (section 12). | `generate_batchnorm_inference_golden.py`. | I7 |
 | `purpose` | The harness ignores the tag, and `--write-support-claims` records every accepted case, probes included. | A harvester filter in the repository. | I2 |
 
 ## 12. Golden Tests
@@ -540,7 +541,7 @@ Policy: baseline, not exhaustive. Golden cases are chosen by the criteria in [RF
 
 Fifteen cases, inside the 6–20 range of RFC 0022 §12.2.
 
-- **Generator.** `generate_batchnorm_inference_golden.py` computes the bundle inputs with `torch.nn.functional.batch_norm(x, mean, running_var, scale, bias, training=False, eps=0)` on CPU, with `running_var = inv_variance ** -2`, then applies the ReLU variant for the fused cases. It must not reuse the conversion in [utilities/batchnorm_inference.py](../../reference-data-scripts/utilities/batchnorm_inference.py), which computes `1 / inv_variance² − 1e-5`: that is negative for inv_variance above about 316 and gives NaN on G13.
+- **Generator.** `generate_batchnorm_inference_golden.py` computes the bundle inputs with `torch.nn.functional.batch_norm(x, mean, running_var, scale, bias, training=False, eps=0)` on CPU, with `running_var = inv_variance ** -2`, then applies the ReLU variant for the fused cases. It does not reuse the conversion in [utilities/batchnorm_inference.py](../../reference-data-scripts/utilities/batchnorm_inference.py), which computes `1 / inv_variance² − 1e-5` in the statistics' own type and relies on `batch_norm`'s default `eps = 1e-5` to add it back. With fp32 statistics that round trip is accurate (relative error about 1e-7, so G13 is safe either way). With fp16 statistics `inv_variance²` overflows from about 256, `variance + eps` becomes 0 and the recovered inv_variance is infinite; with bf16 statistics the error reaches about 0.7 %. Converting in fp64 with `eps = 0` avoids both, which matters once F15 cases get golden data.
 - **Precision strategy.** Precision uplift (fp64, rounded once to the output type), the RFC 0022 §12.3 default. With no accumulation, matched precision would differ by at most one rounding, so the plan does not deviate. Pin the PyTorch version and seed in `meta.json`.
 - **Confirmation.** `hipdnn_golden_data_tests --reference both` passes for every case, and an independent NumPy fp64 evaluation of the formula in section 6.1 matches the PyTorch output before commit. Never regenerate from a hipDNN reference.
 - **Storage.** `golden/<case-id>/tensors.dvc` beside the sweep, on the `golden-data` DVC remote.
