@@ -2057,11 +2057,11 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       def hasDependency(lr: DSLoadInstruction, inst: Instruction) -> bool:
         lrDataReg = lr.dst
 
-        if isinstance(inst, MFMAInstruction):
+        if sched_is_mfma(inst):
           srcRegs = [inst.a, inst.b,]
-        elif isinstance(inst, SMFMAInstruction):
+        elif sched_is_smfma(inst):
           srcRegs = [inst.a, inst.b, inst.metadata]
-        elif isinstance(inst, MXMFMAInstruction):
+        elif sched_is_mxmfma(inst):
           srcRegs = [inst.a, inst.b, inst.mxsa, inst.mxsb,]
         else:
           if hasattr(inst, 'srcs'):
@@ -2425,7 +2425,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
           numInst = numPackPreInstPerMfma + adjust
           while packPreItems and count < numInst:
             inst = packPreItems.pop(0)
-            if isinstance(inst, MFMAInstruction):
+            if sched_is_mfma(inst):
               mfmaCount += 1
             else:
               mfmaCount = 0
@@ -2435,7 +2435,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
               #  case 2: numInst == 1, add all continuous mfma + 1 inst
               if mfmaCount == 0 and packPreItems:
                 instNext = packPreItems.pop(0)
-                if isinstance(instNext, MFMAInstruction):
+                if sched_is_mfma(instNext):
                   if numInst > 1:
                     # push back next
                     packPreItems.insert(0, instNext)
@@ -2457,7 +2457,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
               while mfmaCount > 0:
                 iterCode.add(inst)
                 inst = packPreItems.pop(0)
-                if isinstance(inst, MFMAInstruction):
+                if sched_is_mfma(inst):
                   mfmaCount += 1
                 else:
                   # pop 1 more
