@@ -142,8 +142,14 @@ extern "C" {
  *     field.
  * 22: rocke_hip_arch_t lost has_wmma and family, which changes its size (it is
  *     returned by value from rocke_hip_arch_from_gfx); rocke_hip_waitcnt_family_t
- *     gained ROCKE_HIP_WAITCNT_NONE at its end. */
-#define ROCKE_ABI_VERSION 22
+ *     gained ROCKE_HIP_WAITCNT_NONE at its end.
+ * 23: rocke_img2col_spec_t holds the conv family's rocke_conv_problem_t, whose
+ *     groups field sits in the spec's old padding after problem: size and
+ *     offsets unchanged, but an old caller leaves groups unset. The
+ *     rocke_img2col_conv_problem_* functions are removed (the conv
+ *     rocke_conv_problem_* ones replace them), and the tensor_view descriptor
+ *     type and its functions are renamed rocke_tv_tensor_descriptor*. */
+#define ROCKE_ABI_VERSION 23
 
 /* Wire ABI: the CBOR recipe/bundle/guard vocabulary this engine understands.
  * 2: list-tagged ("l") kernel attrs such as cluster_dims; level-1 engines drop them.
