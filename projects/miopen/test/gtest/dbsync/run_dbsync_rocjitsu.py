@@ -59,8 +59,9 @@ ROCJITSU_REF = "26a2330c02ea5f1191e67d877fe5761c040040fd"  # 2026-10-08
 # so we derive one from the same-generation sibling that does exist (gfx1100_w7900.json for RDNA3,
 # gfx1201_r9700.json for RDNA4) by rewriting gfx_target_version. Each pair shares family_id, wave
 # size and LDS size, and HIP only needs the target version to pick the right code object. Without
-# the rewrite the device reports the sibling arch and every param skips, which
-# check_one_param_ran turns into a failure.
+# the rewrite the device reports the sibling arch and the run fails. For gfx1200 every param skips,
+# which check_one_param_ran turns into a failure. For gfx1101 the gfx1100 param runs at 54 CU and
+# fails on the missing gfx110036 DB.
 FAMILY_MAP = {
     "gfx94X-dcgpu": [
         {"arch": "gfx942", "rj_config": "gfx942_cdna3_kmd.json", "cus": [304, 228]},
