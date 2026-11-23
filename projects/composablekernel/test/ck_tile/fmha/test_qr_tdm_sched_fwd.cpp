@@ -1198,14 +1198,15 @@ std::string ExpectedKernel(const ForwardCase& c,
     const int n               = c.virtual_sink ? 64 : c.expected_n;
     // Finite virtual sinks use the qr_tdm fallback; sched is specialized for null sink.
     const bool use_scheduled = c.scheduled && !c.virtual_sink;
-    // D64 and D128 scheduled N128 take the M64 tile when the M128 grid leaves CUs idle, or fills
-    // each CU once with at least 2048 query rows; for D128 the latter only without a sliding
-    // window (GFX125_D64_SCHED_M64_CONSTRAINT and GFX125_D128_SCHED_M64_CONSTRAINT in the codegen).
+    // Group-mode D64 and D128 scheduled N128 take the M64 tile when the M128 grid leaves CUs idle,
+    // or fills each CU once with at least 2048 query rows; for D128 the latter only without a
+    // sliding window (GFX125_D64_SCHED_M64_CONSTRAINT and GFX125_D128_SCHED_M64_CONSTRAINT in the
+    // codegen). Batch mode has no M64 sched tile.
     const std::size_t cus = static_cast<std::size_t>(num_cus);
     const bool fill_once =
         m128_blocks <= cus && max_seqlen_q >= 2048 && (c.dimension == 64 || c.window_size_left < 0);
-    const bool sched_m64 = use_scheduled && (c.dimension == 64 || c.dimension == 128) && n == 128 &&
-                           (m128_blocks < cus || fill_once);
+    const bool sched_m64 = use_scheduled && group && (c.dimension == 64 || c.dimension == 128) &&
+                           n == 128 && (m128_blocks < cus || fill_once);
     const int m      = c.scheduled && !sched_m64 ? 128 : 64;
     std::string name = "fmha_fwd_d" + std::to_string(c.dimension) + "_" + kDataType +
                        (group ? "_group_b" : "_batch_b") + std::to_string(m) + "x" +

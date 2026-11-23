@@ -2044,7 +2044,8 @@ GFX125_D64_N128_CONSTRAINT = CppConstraint(
 
 # D64 scheduled M64 doubles the workgroup count of M128. Measured on D64 group-mode prefill (16
 # query heads, 2026-11-17): it wins when the M128 grid leaves CUs idle, or fills each CU once
-# with K loops of at least 2048 rows; with shorter loops the per-workgroup prologue dominates.
+# with at least 2048 query rows; with fewer rows the per-workgroup prologue dominates. The M64
+# tiles are emitted for group mode only (see check_qr_tdm_sched_codegen_compatibility).
 GFX125_D64_SCHED_M64_CONSTRAINT = CppConstraint(
     "get_num_blocks(128) < num_cus"
     " || (get_num_blocks(128) <= num_cus && a.max_seqlen_q >= 2048)"
@@ -2053,7 +2054,9 @@ GFX125_D64_SCHED_M64_CONSTRAINT = CppConstraint(
 # D128 scheduled M64: the D64 grid rule, except that the one-block-per-CU case with long queries
 # excludes sliding windows. There every Q tile has the same windowed K range, so M64 balances
 # nothing and costs more K/V loads per row (measured 6-9 % slower than M128 for window 2047,
-# while causal attention with short or no prefix gains 3-9 %).
+# while causal attention with short or no prefix gains 3-9 %). Measured on group-mode BF16
+# prefill built with clang 24; with clang 23 the long-prefix causal cases of that branch run
+# 5-8 % slower on M64. Group mode only, like the D64 tile.
 GFX125_D128_SCHED_M64_CONSTRAINT = CppConstraint(
     "get_num_blocks(128) < num_cus"
     " || (get_num_blocks(128) <= num_cus && a.max_seqlen_q >= 2048 && a.window_size_left < 0)"
@@ -2374,6 +2377,11 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
                 kernel_ctx.tile, problem_ctx.hdim
             )
             if not is_qr_tdm_sched_tile:
+                return False
+
+            # The M64 tiles were measured on group-mode prefill only. Batch mode keeps the
+            # M128 tiles, including the batch-mode XCD causal tile order, which needs kM0 == 128.
+            if kernel_ctx.tile.F_bm0 == 64 and problem_ctx.mode != "group":
                 return False
 
             if problem_ctx.hdim == 64:
