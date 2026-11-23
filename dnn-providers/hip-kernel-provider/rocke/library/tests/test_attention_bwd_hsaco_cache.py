@@ -682,22 +682,63 @@ def test_prebuild_needs_the_cache_variable(monkeypatch):
 
 
 # --------------------------------------------------------------------------- shards
-def test_shard_parse_and_partition(monkeypatch):
+_SHARDED_MODULE = (
+    textwrap.dedent(
+        """
+    import pytest
+
+    @pytest.mark.parametrize("case", range(40))
+    def test_a(case):
+        pass
+
+    @pytest.mark.parametrize("case", range(40))
+    def test_b(case):
+        pass
+    """
+    )
+    + "".join(f"\n\ndef test_plain{index}():\n    pass\n" for index in range(10))
+)
+
+
+def _collected_items(tmp_path: Path, source: str) -> list[pytest.Item]:
+    """The pytest items of a test module holding ``source``, collected
+    in-process, so a shard selection sees the items pytest hands a plugin."""
+
+    class _KeepItems:
+        def __init__(self) -> None:
+            self.items: list[pytest.Item] = []
+
+        def pytest_collection_finish(self, session: pytest.Session) -> None:
+            self.items = list(session.items)
+
+    (tmp_path / "test_x.py").write_text(source)
+    (tmp_path / "pytest.ini").write_text("[pytest]\n")
+    keep = _KeepItems()
+    exit_code = pytest.main(
+        [
+            str(tmp_path),
+            "--collect-only",
+            "-q",
+            "-p",
+            "no:cacheprovider",
+            "-c",
+            str(tmp_path / "pytest.ini"),
+        ],
+        plugins=[keep],
+    )
+    assert exit_code == pytest.ExitCode.OK
+    return keep.items
+
+
+def test_shard_parse_and_partition(monkeypatch, tmp_path):
     assert rds.parse_shard("3/8") == (frozenset({3}), 8)
     assert rds.parse_shard("0,2/4") == (frozenset({0, 2}), 4)
     for bad in ("3", "8/8", "-1/4", "/4", "1/0"):
         with pytest.raises(ValueError):
             rds.parse_shard(bad)
 
-    def item(fn, pid):
-        cs = types.SimpleNamespace(id=pid) if pid else None
-        nodeid = f"tests/test_x.py::{fn}" + (f"[{pid}]" if pid else "")
-        return types.SimpleNamespace(
-            nodeid=nodeid, callspec=cs, get_closest_marker=lambda name: None
-        )
-
-    items = [item(f, f"c{i}-debug") for i in range(40) for f in ("t_a", "t_b")]
-    items += [item(f"t_plain{i}", None) for i in range(10)]
+    items = _collected_items(tmp_path, _SHARDED_MODULE)
+    assert len(items) == 90
     dropped = []
     config = types.SimpleNamespace(
         hook=types.SimpleNamespace(
@@ -712,8 +753,8 @@ def test_shard_parse_and_partition(monkeypatch):
         ids = {x.nodeid for x in sel}
         seen.append(ids)
         for x in sel:  # both tests of one parameter set land in one shard
-            if "::t_a[" in x.nodeid:
-                assert x.nodeid.replace("::t_a[", "::t_b[") in ids
+            if "::test_a[" in x.nodeid:
+                assert x.nodeid.replace("::test_a[", "::test_b[") in ids
     assert sum(len(s) for s in seen) == len(items)
     assert set().union(*seen) == {x.nodeid for x in items}
     assert all(seen) and len(dropped) == (n - 1) * len(items)
