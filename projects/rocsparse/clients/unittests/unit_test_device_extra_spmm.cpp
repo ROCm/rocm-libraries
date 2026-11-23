@@ -580,13 +580,14 @@ TEST_F(ExtraSpmm, legacy_csrmm_values_and_errors)
     // scale a non-empty C, so a missing C is rejected even though the sparse
     // matrix is never touched. beta == 1 on purpose: for a library that skips
     // the check the scale is then a no-op that reports success (a clean wrong
-    // status) instead of a kernel launch on a null C. The null-beta half of
-    // the check is not probed here for the same reason: the host would
-    // dereference the null scalar.
+    // status) instead of a kernel launch on a null C. A null beta with a valid C
+    // is rejected by the same check; a library that skipped it would dereference
+    // the null host scalar.
     EXPECT_EQ(call.set<K>(0).set<NNZ>(0).set<C>(nullptr).set<BETA>(&one)(),
               rocsparse_status_invalid_pointer);
     EXPECT_EQ(call.set<OP_A>(T_).set<M>(0).set<NNZ>(0).set<C>(nullptr).set<BETA>(&one)(),
               rocsparse_status_invalid_pointer);
+    EXPECT_EQ(call.set<K>(0).set<NNZ>(0).set<BETA>(nullptr)(), rocsparse_status_invalid_pointer);
 }
 
 // ---------------------------------------------------------------------------
